@@ -1,0 +1,82 @@
+use core.data.runtime.kernel_lazy_table_plan.[JetTablePlanId, JetTableTypeId, JetTableColumn, JetTableSchema, JetTableSchemaError, JetTableEstimate, JetTableEstimateError]
+use core.data.runtime.kernel_lazy_table_plan.[JetTableStreamMode, JetTableStreamError, JetTableSource, JetTablePlan, JetTableNode, JetTableNodeId, JetTableOperation, JetTablePlanError, jet_table_derive_facts, jet_table_plan_from_descriptors]
+
+// Behavioral control for Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:68
+#Test("table_identity_validation_preserves_error_precedence") {
+    empty :: JetTablePlanId.try_new("\n").expect_err("trimmed empty identity is rejected first")
+    assert_eq(empty.kind, "plan")
+    assert_eq(empty.value, "\n")
+    assert_eq(empty.reason, "must not be empty")
+    control :: JetTablePlanId.try_new("p\n").expect_err("control character is rejected")
+    assert_eq(control.reason, "must not contain control characters")
+    assert_eq(JetTablePlanId.try_new(" p ").expect("nonempty whitespace-wrapped id is allowed").as_str(), " p ")
+}
+
+// Behavioral control for Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:392
+#Test("table_schema_duplicate_name_precedes_duplicate_identity") {
+    left :: JetTableColumn.new("x", JetTableTypeId.integer())
+    schema :: JetTableSchema.new(JetTableTypeId.new("Row"), [left.clone(), left.clone()])
+    error :: schema.validate().expect_err("duplicate column is rejected")
+    assert_eq(error, JetTableSchemaError.DuplicateColumnName("x"))
+}
+
+// Behavioral control for Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:445-488
+#Test("table_estimate_unknown_is_not_zero_and_needs_reason") {
+    exact :: JetTableEstimate<U128>.exact(U128{0})
+    assert(exact.is_exact())
+    assert_eq(exact.exact_value(), Some(U128{0}))
+    unavailable :: JetTableEstimate<U128>.unavailable("not measured")
+    assert(!unavailable.is_exact())
+    assert_eq(unavailable.exact_value(), None)
+    assert_eq(unavailable.unavailable_reason(), Some("not measured"))
+    _ :: unavailable.validate().expect("reason is present")
+    bad :: JetTableEstimate<U128>.unavailable(" \t ")
+    assert_eq(bad.validate().expect_err("reason must be nonempty"), JetTableEstimateError.MissingReason)
+}
+
+// Behavioral controls for Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:919-967
+#Test("table_stream_bounds_and_materialization_reason") {
+    assert_eq(JetTableStreamMode.bounded(Some(U128{0})).expect_err("zero bound rejected"), JetTableStreamError.ZeroBatchRows)
+    assert_eq(JetTableStreamMode.materialized(" \t ").expect_err("empty reason rejected"), JetTableStreamError.MissingMaterializationReason)
+    host :: JetTableStreamMode.bounded(None).expect("host-selected bound allowed")
+    assert(host.is_streaming())
+    assert_eq(host.canonical_key(), "bounded:host")
+    assert_eq(host.text(), "bounded(batch_rows=host)")
+    sort :: JetTableOperation.Sort.default_stream()
+    assert(!sort.is_streaming())
+    assert_eq(sort.text(), "materialized(reason=sort requires a complete ordering)")
+}
+
+// Behavioral controls for Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:1299-1469
+#Test("table_descriptors_and_limit_facts_preserve_exactness") {
+    assert_eq(jet_table_plan_from_descriptors("Row", ["x"], U128{5}).expect_err("odd descriptors rejected"),
+        "table column metadata must contain alternating name/type pairs")
+    plan :: jet_table_plan_from_descriptors("Row", ["x", "Int"], U128{5}).expect("paired descriptors accepted")
+    assert_eq(plan.id.as_str(), "data.query::<Row>")
+    assert_eq(plan.source.id.as_str(), "data.query.source::<Row>")
+    assert_eq(plan.nodes[0].facts.cardinality.output_rows.exact_value(), Some(U128{5}))
+    limited :: jet_table_derive_facts(JetTableOperation.Limit, [&plan.nodes[0]], Some(U128{2}))
+    assert_eq(limited.cardinality.output_rows.exact_value(), Some(U128{2}))
+    assert_eq(limited.cardinality.rows_read.exact_value(), Some(U128{2}))
+    assert_eq(limited.cardinality.rows_written.exact_value(), Some(U128{2}))
+    assert_eq(limited.cost.work_units.exact_value(), Some(U128{2}))
+    filtered :: jet_table_derive_facts(JetTableOperation.Filter, [&plan.nodes[0]], None)
+    assert_eq(filtered.cardinality.output_rows.unavailable_reason(), Some("filter selectivity unavailable"))
+    assert_eq(filtered.cardinality.rows_read.exact_value(), Some(U128{5}))
+}
+
+// Behavioral controls for Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:1709-1803
+#Test("table_append_failure_rolls_back_graph_and_output") {
+    plan := jet_table_plan_from_descriptors("Row", ["x", "Int"], U128{5}).expect("source plan")
+    schema :: plan.source.schema.clone()
+    invalid :: JetTableNode.new(JetTableNodeId.new(1), JetTableOperation.Map, [JetTableNodeId.new(0)], schema.clone())
+    assert_eq(plan.append_node(^invalid).expect_err("map needs callable"), JetTablePlanError.MissingCallable(JetTableNodeId.new(1)))
+    assert_eq(plan.nodes.len(), 1)
+    assert_eq(plan.output, JetTableNodeId.new(0))
+    other :: JetTableSource.new("right", schema.clone()).with_rows(U128{3})
+    assert_eq(plan.append_source(^other).expect("second scan accepted"), JetTableNodeId.new(1))
+    assert_eq(plan.output, JetTableNodeId.new(0))
+    selected :: plan.append_unary(JetTableOperation.Select, ^schema, None).expect("identity select")
+    assert_eq(selected, JetTableNodeId.new(2))
+    assert_eq(plan.nodes[2].inputs, [JetTableNodeId.new(0)])
+}

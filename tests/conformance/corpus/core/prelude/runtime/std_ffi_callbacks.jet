@@ -1,0 +1,57 @@
+use core.prelude.runtime.std_ffi_callbacks.[JetFfiCallbackContract, JetFfiCallbackThreadAffinity, JetFfiRuntimeAttachment, jet_ffi_with_callback_attachment, jet_ffi_callback_event_stop, jet_ffi_callback_registration_invoke_i64, jet_ffi_callback_stop_task_join, jet_ffi_callback_registration_phase, JET_FFI_CALLBACK_REQUIRED_FLAGS, JET_FFI_CALLBACK_FLAG_REENTRANT]
+use std.ffi.c_void
+use core.ptr
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:66,84
+#Test("ffi_callback_contract_rejects_missing_retention_and_effect_facts") {
+    contract := JetFfiCallbackContract.managed("callback", "plan")
+    assert(contract.thread_affinity == .AttachedForeign)
+    assert(contract.reentrant)
+    assert(contract.validate(true).is_ok())
+    assert(contract.validate(false) == Err("retained native callback access has no release hook"))
+    contract.callback_identity = " \t"
+    assert(contract.validate(true) == Err("callback identity is empty"))
+    contract.callback_identity = "callback"
+    contract.plan_digest = ""
+    assert(contract.validate(true) == Err("callback plan digest is empty"))
+    contract.plan_digest = "plan"
+    contract.capture_lifetime = false
+    assert(contract.validate(true) == Err("callback capture lifetime is not retained through shutdown"))
+    contract.capture_lifetime = true
+    contract.registration_ownership = false
+    assert(contract.validate(true) == Err("callback registration has no consuming owner"))
+    contract.registration_ownership = true
+    contract.completion = false
+    assert(contract.validate(true) == Err("callback registration has no completion acknowledgement"))
+    contract.completion = true
+    contract.authority_scope = false
+    assert(contract.validate(true) == Err("callback authority scope does not cover registration and cleanup"))
+    contract.authority_scope = true
+    contract.effects = "IO.Write"
+    assert(contract.validate(true) == Err("callback effects omit FFI.C"))
+    contract.effects = "FFI.C"
+    assert(contract.validate(true) == Err("callback effects omit IO.Write"))
+    contract.effects = " IO.Write + FFI.C "
+    assert(contract.validate(true).is_ok())
+    assert(JET_FFI_CALLBACK_REQUIRED_FLAGS & JET_FFI_CALLBACK_FLAG_REENTRANT == U32{0})
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:161,170,175,180
+#Test("ffi_callback_attachment_restores_nested_thread_state") {
+    previous :: JetFfiRuntimeAttachment.is_attached()
+    jet_ffi_with_callback_attachment(fn() {
+        assert(JetFfiRuntimeAttachment.is_attached())
+        jet_ffi_with_callback_attachment(fn() { assert(JetFfiRuntimeAttachment.is_attached()) })
+        assert(JetFfiRuntimeAttachment.is_attached())
+    })
+    assert(JetFfiRuntimeAttachment.is_attached() == previous)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:860,968,1035,1062
+#Test("ffi_callback_raw_absence_keeps_distinct_statuses") {
+    // GATE #4565: kernel primitive
+    #Unsafe("null-handle controls never dereference native memory or invoke a callback") {
+        assert(jet_ffi_callback_event_stop() == I32{-1})
+        assert(jet_ffi_callback_registration_invoke_i64(ptr.null_mut<c_void>(), I64{1}) == I32{1})
+        assert(jet_ffi_callback_stop_task_join(ptr.null_mut<c_void>()) == I32{7})
+        assert(jet_ffi_callback_registration_phase(ptr.null_mut<c_void>()) == I32{3})
+    }
+}

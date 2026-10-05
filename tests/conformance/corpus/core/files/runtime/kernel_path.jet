@@ -1,0 +1,15 @@
+use core.files.runtime.kernel_path as path
+
+// Rust: crates/jet-codegen/src/Prelude/Core/Path.rs:21-119 (behavioral controls; no inline tests)
+#Test("lexical paths normalize both slash spellings") {
+    assert(path.jet_std_path_parent_opt("a\\b.txt") == Val("a"))
+    assert(path.jet_std_path_extension_opt("a\\b.txt") == Val("txt"))
+    assert(path.jet_std_path_stem_opt("a\\b.txt") == Val("b"))
+    assert(path.jet_std_path_extension_opt(".hidden") == None)
+    assert(path.jet_std_path_normalize("a/../b") == "b")
+    assert(path.jet_std_path_is_within("a\\b/../c", "a"))
+    assert(not path.jet_std_path_is_within("ab", "a"))
+    assert(not path.jet_std_path_is_within("../outside", "."))
+    assert(path.jet_std_path_is_within("a/b", "."))
+    assert(not path.jet_std_path_is_within("/a", "a"))
+}

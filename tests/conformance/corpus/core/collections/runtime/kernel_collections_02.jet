@@ -1,0 +1,55 @@
+use core.collections.runtime.kernel_collections.*
+use core.collections.runtime.kernel_collections_02.*
+
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:2045
+#Test("lazy_split_empty_and_scalar_separators") {
+    assert(jet_iter_string_split("é🙂", "").to_list() == ["", "é", "🙂", ""])
+    assert(jet_iter_string_split("", "").to_list() == ["", ""])
+    assert(jet_iter_string_split("a::b::", "::").to_list() == ["a", "b", ""])
+    assert(jet_iter_string_split("a\nb\n", "\n").to_list() == ["a", "b", ""])
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:2135,2163,2189
+#Test("lazy_dedup_chunks_and_windows") {
+    assert(jet_iter_dedup(jet_iter_from_vec([1, 1, 2, 1])).to_list() == [1, 2, 1])
+    assert(jet_iter_chunks(jet_iter_from_vec([1, 2, 3]), 2).to_list() == [[1, 2], [3]])
+    assert(jet_iter_windows(jet_iter_from_vec([1, 2, 3]), 2).to_list() == [[1, 2], [2, 3]])
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:2764,2892,2983
+#Test("collections_empty_average_difference_and_unordered_tag") {
+    assert(jet_average_of_sum(0.0, 0) == 0.0)
+    assert(jet_list_difference(&[1, 1, 2], &[2]) == [1, 1])
+    assert(jet_list_order(&[F64.NAN], &[1.0]) == 3)
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:3196,3268
+#Test("counter_zero_removal_negative_counts_and_stable_ties") {
+    counter :: jet_coll_counter_from(&["a", "b", "a", "b"])
+    common :: jet_coll_counter_most_common(&counter, 2)
+    assert(common.keys == ["a", "b"])
+    assert(common.counts == [2, 2])
+    removed :: jet_coll_counter_add(&counter, "a", -2)
+    assert(removed.keys == ["b"])
+    negative :: jet_coll_counter_set_count(&removed, "c", -3)
+    assert(jet_coll_counter_get(&negative, "c") == -3)
+    assert(jet_coll_counter_elements(&negative) == ["b", "b"])
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:3336,3393,3407
+#Test("ordered_map_updates_in_place_and_chain_shadows") {
+    first :: jet_coll_map_set(&jet_coll_ordered_map(), "a", "old")
+    second :: jet_coll_map_set(&first, "b", "b-value")
+    updated :: jet_coll_map_set(&second, "a", "new")
+    assert(updated.keys == ["a", "b"])
+    assert(updated.values == ["new", "b-value"])
+    base :: jet_coll_chain_push(&jet_coll_chain(), &["a"], &["old"])
+    top :: jet_coll_chain_push(&base, &["a"], &["new"])
+    assert(jet_coll_chain_get(&top, "a") == .Val("new"))
+    assert(jet_coll_chain_get(&top, "missing") == .None)
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:3426,3479,3512
+#Test("string_set_has_first_occurrence_order") {
+    left :: jet_coll_set_from_list(&["b", "a", "b"])
+    right :: jet_coll_set_from_list(&["a", "c"])
+    assert(left.items == ["b", "a"])
+    assert(jet_coll_set_union(&left, &right).items == ["b", "a", "c"])
+    assert(jet_coll_set_symmetric_difference(&left, &right).items == ["b", "c"])
+    assert(jet_coll_set_remove(&left, "missing") == .None)
+}

@@ -1,0 +1,18 @@
+use core.net.runtime.kernel_net_pure as net
+
+// Rust: crates/jet-codegen/src/Prelude/Core/NetPure.rs:3
+// Behavioral controls; the source range has no inline Rust tests.
+#Test("net_pure_address_values_preserve_strict_parse_and_format") {
+    ip :: net.jet_net_pure_parse_ip("127.0.0.1").expect("IPv4")
+    assert(net.jet_net_pure_ip_is_ipv4(ip))
+    assert(net.jet_net_pure_parse_ip("127.00.0.1").is_err())
+    assert(net.jet_net_pure_parse_ip("hostname").is_err())
+    ipv6 :: net.jet_net_pure_parse_ip("::1").expect("IPv6")
+    assert(not net.jet_net_pure_ip_is_ipv4(ipv6))
+    socket :: net.jet_net_pure_parse_socket_addr("[::1]:443").expect("socket address")
+    assert(net.jet_net_pure_socket_host(socket) == "::1")
+    assert(net.jet_net_pure_socket_port(socket) == I64{443})
+    assert(net.jet_net_pure_socket_to_string(socket) == "[::1]:443")
+    assert(net.jet_net_pure_parse_socket_addr("::1:443").is_err())
+    assert(net.jet_net_pure_parse_socket_addr("127.0.0.1:65536").is_err())
+}

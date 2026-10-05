@@ -1,240 +1,152 @@
-// PORT-PENDING 0145 crates-jet-codegen-src-prelude-core-devtoolspanel-module-group: crates/jet-codegen/src/Prelude/Core/Codec.rs:1-236
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS // D-SERDE2 / R12: named temporal and Decimal wire semantics live here once.
-//RS // AOT, JIT, and the interpreter pass their own value handles' components to
-//RS // these adapters; none of those tiers re-implement parsing or canonical
-//RS // formatting.
-//RS 
-//RS fn jet_codec_is_leap(year: i64) -> bool {
-//RS     (year % 4 == 0 && year % 100 != 0) || year % 400 == 0
-//RS }
-//RS 
-//RS fn jet_codec_days_in_month(year: i64, month: i64) -> i64 {
-//RS     match month {
-//RS         1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
-//RS         4 | 6 | 9 | 11 => 30,
-//RS         2 if jet_codec_is_leap(year) => 29,
-//RS         2 => 28,
-//RS         _ => 30,
-//RS     }
-//RS }
-//RS 
-//RS fn jet_codec_date_day_number(year: i64, month: i64, day: i64) -> i64 {
-//RS     let prior_year = year - 1;
-//RS     365 * prior_year
-//RS         + prior_year / 4
-//RS         - prior_year / 100
-//RS         + prior_year / 400
-//RS         + [0i64, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334][(month - 1) as usize]
-//RS         + if month > 2 && jet_codec_is_leap(year) { 1 } else { 0 }
-//RS         + day
-//RS         - 1
-//RS }
-//RS 
-//RS fn jet_codec_date_from_day_number(mut day_number: i64) -> (i64, i64, i64) {
-//RS     let mut year = day_number / 365 + 1;
-//RS     loop {
-//RS         let start = jet_codec_date_day_number(year, 1, 1);
-//RS         let next = jet_codec_date_day_number(year + 1, 1, 1);
-//RS         if day_number >= start && day_number < next {
-//RS             break;
-//RS         }
-//RS         if day_number < start {
-//RS             year -= 1;
-//RS         } else {
-//RS             year += 1;
-//RS         }
-//RS     }
-//RS     day_number -= jet_codec_date_day_number(year, 1, 1);
-//RS     let mut month = 1i64;
-//RS     while month < 12 && day_number >= jet_codec_days_in_month(year, month) {
-//RS         day_number -= jet_codec_days_in_month(year, month);
-//RS         month += 1;
-//RS     }
-//RS     (year, month, day_number + 1)
-//RS }
-//RS 
-//RS fn jet_codec_date_components(year: i64, month: i64, day: i64) -> (i64, i64, i64) {
-//RS     let month = month.clamp(1, 12);
-//RS     (year, month, day.clamp(1, jet_codec_days_in_month(year, month)))
-//RS }
-//RS 
-//RS pub(crate) fn jet_codec_date_encode(year: i64, month: i64, day: i64) -> String {
-//RS     let (year, month, day) = jet_codec_date_components(year, month, day);
-//RS     format!("{year:04}-{month:02}-{day:02}")
-//RS }
-//RS 
-//RS pub(crate) fn jet_codec_date_decode(value: &str) -> Result<(i64, i64, i64), String> {
-//RS     let parts: Vec<&str> = value.splitn(3, '-').collect();
-//RS     if parts.len() != 3 {
-//RS         return Err(format!("invalid date: {value}"));
-//RS     }
-//RS     let year = parts[0]
-//RS         .parse::<i64>()
-//RS         .map_err(|_| format!("bad year: {}", parts[0]))?;
-//RS     let month = parts[1]
-//RS         .parse::<i64>()
-//RS         .map_err(|_| format!("bad month: {}", parts[1]))?;
-//RS     let day = parts[2]
-//RS         .parse::<i64>()
-//RS         .map_err(|_| format!("bad day: {}", parts[2]))?;
-//RS     if month < 1 || month > 12 || day < 1 || day > jet_codec_days_in_month(year, month) {
-//RS         return Err(format!("date out of range: {value}"));
-//RS     }
-//RS     Ok((year, month, day))
-//RS }
-//RS 
-//RS pub(crate) fn jet_codec_local_time_encode(hour: i64, minute: i64, second: i64) -> String {
-//RS     let hour = hour.clamp(0, 23);
-//RS     let minute = minute.clamp(0, 59);
-//RS     let second = second.clamp(0, 59);
-//RS     format!("{hour:02}:{minute:02}:{second:02}")
-//RS }
-//RS fn jet_codec_datetime_time_encode(hour: i64, minute: i64, second: i64) -> String {
-//RS     let hour = hour.clamp(0, 23);
-//RS     let minute = minute.clamp(0, 59);
-//RS     let second = second.clamp(0, 60);
-//RS     format!("{hour:02}:{minute:02}:{second:02}")
-//RS }
-//RS 
-//RS 
-//RS fn jet_codec_local_time_decode_parts(
-//RS     value: &str,
-//RS     allow_leap: bool,
-//RS ) -> Result<(i64, i64, i64, bool), String> {
-//RS     let parts: Vec<&str> = value.splitn(3, ':').collect();
-//RS     if parts.len() != 3 {
-//RS         return Err(format!("invalid time: {value}"));
-//RS     }
-//RS     let hour = parts[0]
-//RS         .parse::<i64>()
-//RS         .map_err(|_| format!("bad hour: {}", parts[0]))?;
-//RS     let minute = parts[1]
-//RS         .parse::<i64>()
-//RS         .map_err(|_| format!("bad minute: {}", parts[1]))?;
-//RS     let second = parts[2]
-//RS         .parse::<i64>()
-//RS         .map_err(|_| format!("bad second: {}", parts[2]))?;
-//RS     let leap_second = second == 60;
-//RS     if hour < 0
-//RS         || hour > 23
-//RS         || minute < 0
-//RS         || minute > 59
-//RS         || second < 0
-//RS         || second > if allow_leap { 60 } else { 59 }
-//RS         || (leap_second && (hour != 23 || minute != 59))
-//RS     {
-//RS         return Err(format!("time out of range: {value}"));
-//RS     }
-//RS     Ok((hour, minute, if leap_second { 59 } else { second }, leap_second))
-//RS }
-//RS 
-//RS pub(crate) fn jet_codec_local_time_decode(value: &str) -> Result<(i64, i64, i64), String> {
-//RS     let (hour, minute, second, _) = jet_codec_local_time_decode_parts(value, false)?;
-//RS     Ok((hour, minute, second))
-//RS }
-//RS 
-//RS pub(crate) fn jet_codec_datetime_encode(secs: i64, nanos: u32, leap_second: bool) -> String {
-//RS     let secs = secs.saturating_add((nanos / 1_000_000_000) as i64);
-//RS     let nanos = nanos % 1_000_000_000;
-//RS     let epoch = jet_codec_date_day_number(1970, 1, 1);
-//RS     let (year, month, day) = jet_codec_date_from_day_number(epoch + secs.div_euclid(86400));
-//RS     let day_seconds = secs.rem_euclid(86400);
-//RS     let date = jet_codec_date_encode(year, month, day);
-//RS     let time = jet_codec_datetime_time_encode(
-//RS         day_seconds / 3600,
-//RS         (day_seconds / 60) % 60,
-//RS         day_seconds % 60 + i64::from(leap_second),
-//RS     );
-//RS     if nanos == 0 {
-//RS         format!("{date}T{time}Z")
-//RS     } else {
-//RS         format!("{date}T{time}.{nanos:09}Z")
-//RS     }
-//RS }
-//RS 
-//RS pub(crate) fn jet_codec_datetime_decode(value: &str) -> Result<(i64, u32, bool), String> {
-//RS     let (date_part, rest) = value
-//RS         .split_once('T')
-//RS         .ok_or_else(|| format!("invalid RFC3339 datetime: {value}"))?;
-//RS     let (year, month, day) = jet_codec_date_decode(date_part)?;
-//RS     let zone_pos = rest
-//RS         .find('Z')
-//RS         .or_else(|| rest.rfind('+'))
-//RS         .or_else(|| rest.get(1..).and_then(|tail| tail.rfind('-').map(|i| i + 1)))
-//RS         .ok_or_else(|| format!("RFC3339 datetime needs Z or an offset: {value}"))?;
-//RS     let (time_part, zone_part) = rest.split_at(zone_pos);
-//RS     let (clean_time, frac) = match time_part.split_once('.') {
-//RS         Some((time, fraction)) => (time, Some(fraction)),
-//RS         None => (time_part, None),
-//RS     };
-//RS     let (hour, minute, second, leap_second) =
-//RS         jet_codec_local_time_decode_parts(clean_time, true)?;
-//RS     let mut nanos = 0u32;
-//RS     if let Some(fraction) = frac {
-//RS         let digits: String = fraction
-//RS             .chars()
-//RS             .take(9)
-//RS             .filter(|ch| ch.is_ascii_digit())
-//RS             .collect();
-//RS         if !digits.is_empty() {
-//RS             let padded = format!("{digits:0<9}");
-//RS             nanos = padded.parse::<u32>().unwrap_or(0);
-//RS         }
-//RS     }
-//RS     let offset = if zone_part == "Z" {
-//RS         0
-//RS     } else {
-//RS         let sign = if zone_part.starts_with('-') { -1 } else { 1 };
-//RS         let zone = &zone_part[1..];
-//RS         let (zone_hour, zone_minute) = zone
-//RS             .split_once(':')
-//RS             .ok_or_else(|| format!("bad RFC3339 offset: {zone_part}"))?;
-//RS         let zone_hour = zone_hour
-//RS             .parse::<i64>()
-//RS             .map_err(|_| format!("bad RFC3339 offset hour: {zone_hour}"))?;
-//RS         let zone_minute = zone_minute
-//RS             .parse::<i64>()
-//RS             .map_err(|_| format!("bad RFC3339 offset minute: {zone_minute}"))?;
-//RS         sign * (zone_hour * 3600 + zone_minute * 60)
-//RS     };
-//RS     if leap_second && offset != 0 {
-//RS         return Err(format!("time out of range: {clean_time}"));
-//RS     }
-//RS     let epoch = jet_codec_date_day_number(1970, 1, 1);
-//RS     let secs = (jet_codec_date_day_number(year, month, day) - epoch)
-//RS         .saturating_mul(86400)
-//RS         .saturating_add(hour * 3600 + minute * 60 + second)
-//RS         .saturating_sub(offset);
-//RS     Ok((secs, nanos, leap_second))
-//RS }
-//RS 
-//RS 
-//RS pub(crate) fn jet_codec_duration_encode(ns: i64) -> i64 {
-//RS     ns
-//RS }
-//RS 
-//RS pub(crate) fn jet_codec_duration_decode(ns: i64) -> i64 {
-//RS     ns
-//RS }
-//RS 
-//RS pub(crate) fn jet_codec_decimal_encode(value: &jet_std::JetDecimal) -> String {
-//RS     value.to_string_rep()
-//RS }
-//RS 
-//RS pub(crate) fn jet_codec_decimal_decode_text(
-//RS     value: &str,
-//RS ) -> Result<jet_std::JetDecimal, String> {
-//RS     jet_std::JetDecimal::from_str(value)
-//RS }
-//RS 
-//RS pub(crate) fn jet_codec_decimal_decode_int(
-//RS     value: i64,
-//RS ) -> Result<jet_std::JetDecimal, String> {
-//RS     // `from_str` is the one constructor spelled identically by the AOT
-//RS     // `JetDecimal` and the in-process `CtDecimal` carrier; an integer's
-//RS     // decimal text decodes to the same exact value as a direct `from_int`.
-//RS     jet_std::JetDecimal::from_str(&value.to_string())
-//RS }
-// END-PORT-PENDING 0145 crates/jet-codegen/src/Prelude/Core/Codec.rs:1-236
+use jet_std.[JetDecimal]
+
+// D-SERDE2 / R12: one canonical temporal and Decimal wire meaning.
+// Rust: crates/jet-codegen/src/Prelude/Core/Codec.rs:6
+fn jet_codec_is_leap(year: I64) -> Bool { (year % 4 == 0 && year % 100 != 0) || year % 400 == 0 }
+// Rust: crates/jet-codegen/src/Prelude/Core/Codec.rs:10
+fn jet_codec_days_in_month(year: I64, month: I64) -> I64 {
+    match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 -> 31,
+        4 | 6 | 9 | 11 -> 30,
+        2 if jet_codec_is_leap(year) -> 29,
+        2 -> 28,
+        _ -> 30,
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Codec.rs:20
+fn jet_codec_date_day_number(year: I64, month: I64, day: I64) -> I64 {
+    prior_year :: year - 1
+    365 * prior_year + prior_year / 4 - prior_year / 100 + prior_year / 400
+        + [I64{0}, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334][(month - 1) as USize]
+        + (if month > 2 && jet_codec_is_leap(year) { 1 } else { 0 }) + day - 1
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Codec.rs:32
+fn jet_codec_date_from_day_number(day_number: I64) -> (I64, I64, I64) {
+    year := day_number / 365 + 1
+    loop {
+        start :: jet_codec_date_day_number(year, 1, 1)
+        next :: jet_codec_date_day_number(year + 1, 1, 1)
+        if day_number >= start && day_number < next -> break
+        if day_number < start { year -= 1 } else { year += 1 }
+    }
+    day_number -= jet_codec_date_day_number(year, 1, 1)
+    month := I64{1}
+    while month < 12 && day_number >= jet_codec_days_in_month(year, month) {
+        day_number -= jet_codec_days_in_month(year, month)
+        month += 1
+    }
+    (year, month, day_number + 1)
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Codec.rs:55
+fn jet_codec_date_components(year: I64, month: I64, day: I64) -> (I64, I64, I64) {
+    clamped_month :: month.clamp(1, 12)
+    (year, clamped_month, day.clamp(1, jet_codec_days_in_month(year, clamped_month)))
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Codec.rs:60
+pub fn jet_codec_date_encode(year: I64, month: I64, day: I64) -> String {
+    (y, m, d) :: jet_codec_date_components(year, month, day)
+    format!("{y:04}-{m:02}-{d:02}")
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Codec.rs:65
+pub fn jet_codec_date_decode(value: String) -> (I64, I64, I64) Err! {
+    parts :: value.splitn(3, '-').collect<[View<Char>]>()
+    if parts.len() != 3 -> return Err(format!("invalid date: {value}"))
+    year :: parts[0].parse<I64>().map_err(fn(_) { format!("bad year: {}", parts[0]) })?
+    month :: parts[1].parse<I64>().map_err(fn(_) { format!("bad month: {}", parts[1]) })?
+    day :: parts[2].parse<I64>().map_err(fn(_) { format!("bad day: {}", parts[2]) })?
+    if month < 1 || month > 12 || day < 1 || day > jet_codec_days_in_month(year, month) {
+        return Err(format!("date out of range: {value}"))
+    }
+    Ok((year, month, day))
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Codec.rs:85
+pub fn jet_codec_local_time_encode(hour: I64, minute: I64, second: I64) -> String {
+    h :: hour.clamp(0, 23); m :: minute.clamp(0, 59); s :: second.clamp(0, 59)
+    format!("{h:02}:{m:02}:{s:02}")
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Codec.rs:91
+fn jet_codec_datetime_time_encode(hour: I64, minute: I64, second: I64) -> String {
+    h :: hour.clamp(0, 23); m :: minute.clamp(0, 59); s :: second.clamp(0, 60)
+    format!("{h:02}:{m:02}:{s:02}")
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Codec.rs:99
+fn jet_codec_local_time_decode_parts(value: String, allow_leap: Bool) -> (I64, I64, I64, Bool) Err! {
+    parts :: value.splitn(3, ':').collect<[View<Char>]>()
+    if parts.len() != 3 -> return Err(format!("invalid time: {value}"))
+    hour :: parts[0].parse<I64>().map_err(fn(_) { format!("bad hour: {}", parts[0]) })?
+    minute :: parts[1].parse<I64>().map_err(fn(_) { format!("bad minute: {}", parts[1]) })?
+    second :: parts[2].parse<I64>().map_err(fn(_) { format!("bad second: {}", parts[2]) })?
+    leap_second :: second == 60
+    if hour < 0 || hour > 23 || minute < 0 || minute > 59 || second < 0
+        || second > (if allow_leap { 60 } else { 59 })
+        || (leap_second && (hour != 23 || minute != 59)) {
+        return Err(format!("time out of range: {value}"))
+    }
+    Ok((hour, minute, if leap_second { 59 } else { second }, leap_second))
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Codec.rs:130
+pub fn jet_codec_local_time_decode(value: String) -> (I64, I64, I64) Err! {
+    (hour, minute, second, _) :: jet_codec_local_time_decode_parts(value, false)?
+    Ok((hour, minute, second))
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Codec.rs:135
+pub fn jet_codec_datetime_encode(secs: I64, nanos: U32, leap_second: Bool) -> String {
+    seconds :: secs.saturating_add((nanos / 1000000000) as I64)
+    fraction :: nanos % 1000000000
+    epoch :: jet_codec_date_day_number(1970, 1, 1)
+    (year, month, day) :: jet_codec_date_from_day_number(epoch + seconds.div_euclid(86400))
+    day_seconds :: seconds.rem_euclid(86400)
+    date :: jet_codec_date_encode(year, month, day)
+    time :: jet_codec_datetime_time_encode(day_seconds / 3600, (day_seconds / 60) % 60,
+        day_seconds % 60 + if leap_second { I64{1} } else { I64{0} })
+    if fraction == 0 { format!("{date}T{time}Z") } else { format!("{date}T{time}.{fraction:09}Z") }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Codec.rs:154
+pub fn jet_codec_datetime_decode(value: String) -> (I64, U32, Bool) Err! {
+    (date_part, rest) := value.split_once('T').ok_or_else(fn() { format!("invalid RFC3339 datetime: {value}") })?
+    (year, month, day) :: jet_codec_date_decode(date_part)?
+    zone_pos :: rest.find('Z').or_else(fn() { rest.rfind('+') })
+        .or_else(fn() { rest.get(1..).and_then(fn(tail) { tail.rfind('-').map(fn(i) { i + 1 }) }) })
+        .ok_or_else(fn() { format!("RFC3339 datetime needs Z or an offset: {value}") })?
+    (time_part, zone_part) := rest.split_at(zone_pos)
+    (clean_time, frac) := match time_part.split_once('.') {
+        Val((time, fraction)) -> (time, Val(fraction)),
+        None -> (time_part, None),
+    }
+    (hour, minute, second, leap_second) :: jet_codec_local_time_decode_parts(clean_time, true)?
+    nanos := U32{0}
+    if frac is Val(fraction) {
+        digits :: fraction.chars().take(9).filter(fn(ch) { ch.is_ascii_digit() }).collect<String>()
+        if !digits.is_empty() {
+            padded :: format!("{digits:0<9}")
+            nanos = padded.parse<U32>().unwrap_or(0)
+        }
+    }
+    offset :: if zone_part == "Z" { I64{0} } else {
+        sign :: if zone_part.starts_with('-') { I64{-1} } else { I64{1} }
+        zone := zone_part[1..]
+        (zone_hour, zone_minute) := zone.split_once(':').ok_or_else(fn() { format!("bad RFC3339 offset: {zone_part}") })?
+        zh :: zone_hour.parse<I64>().map_err(fn(_) { format!("bad RFC3339 offset hour: {zone_hour}") })?
+        zm :: zone_minute.parse<I64>().map_err(fn(_) { format!("bad RFC3339 offset minute: {zone_minute}") })?
+        sign * (zh * 3600 + zm * 60)
+    }
+    if leap_second && offset != 0 -> return Err(format!("time out of range: {clean_time}"))
+    epoch :: jet_codec_date_day_number(1970, 1, 1)
+    secs :: (jet_codec_date_day_number(year, month, day) - epoch).saturating_mul(86400)
+        .saturating_add(hour * 3600 + minute * 60 + second).saturating_sub(offset)
+    Ok((secs, nanos, leap_second))
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Codec.rs:211
+pub fn jet_codec_duration_encode(ns: I64) -> I64 { ns }
+// Rust: crates/jet-codegen/src/Prelude/Core/Codec.rs:215
+pub fn jet_codec_duration_decode(ns: I64) -> I64 { ns }
+// Rust: crates/jet-codegen/src/Prelude/Core/Codec.rs:219
+pub fn jet_codec_decimal_encode(value: &JetDecimal) -> String { value.to_string_rep() }
+// Rust: crates/jet-codegen/src/Prelude/Core/Codec.rs:223
+pub fn jet_codec_decimal_decode_text(value: String) -> JetDecimal Err! { JetDecimal.from_str(value) }
+// Rust: crates/jet-codegen/src/Prelude/Core/Codec.rs:229
+pub fn jet_codec_decimal_decode_int(value: I64) -> JetDecimal Err! {
+    // One exact decimal text constructor for every tier.
+    JetDecimal.from_str(&value.to_string())
+}
 

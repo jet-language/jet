@@ -1,0 +1,18 @@
+use Jetpack.Foundation.Source.DevelopmentReceipt as receipt
+
+// Rust: crates/jet-codegen/src/Prelude/DevelopmentReceipt.rs:34,61,273 (behavioral controls; no inline tests)
+#Test("receipt bytes and identity use sorted inputs") {
+    input_a :: receipt.JetDevelopmentReceiptInput{name: "a", digest: "1"}
+    input_b :: receipt.JetDevelopmentReceiptInput{name: "b", digest: "2"}
+    record := receipt.JetDevelopmentReceipt{act: "build", locked_closure: "c", inputs: [input_b, input_a],
+        planned_action: "p", outputs: [], activation_proof: "", parent_generation: "", witness: "w", outcome: "ok", failure_path: None}
+    rendered :: receipt.jet_development_receipt_render(record)
+    assert(rendered == "jet-development-receipt-v1\nact\t\t6275696c64\nclosure\t\t63\ninput\t61\t31\ninput\t62\t32\naction\t706c616e6e6564\t70\nactivation-proof\t\t\nparent-generation\t\t\nwitness\t\t77\noutcome\t\t6f6b\n")
+    identity :: record.identity_bytes()
+    record.inputs = [input_a, input_b]
+    record.witness = "other witness"
+    record.outcome = "failed"
+    assert(record.identity_bytes() == identity)
+    assert(not receipt.jet_receipt_is_content_address("sha256-ABC"))
+    assert(receipt.jet_receipt_is_content_address("sha256-" + "0".repeat(64)))
+}

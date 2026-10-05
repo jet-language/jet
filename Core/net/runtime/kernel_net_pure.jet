@@ -1,33 +1,16 @@
-// PORT-PENDING 0153 crates-jet-codegen-src-prelude-core-neterror-module-group: crates/jet-codegen/src/Prelude/Core/NetPure.rs:1-29
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS // D-NETSOCKET1=A: pure address value rules shared by NetHTTP and comptime.
-//RS 
-//RS pub(crate) fn jet_net_pure_parse_ip(
-//RS     text: &String,
-//RS ) -> Result<std::net::IpAddr, std::net::AddrParseError> {
-//RS     text.parse()
-//RS }
-//RS 
-//RS pub(crate) fn jet_net_pure_parse_socket_addr(
-//RS     text: &String,
-//RS ) -> Result<std::net::SocketAddr, std::net::AddrParseError> {
-//RS     text.parse()
-//RS }
-//RS 
-//RS pub(crate) fn jet_net_pure_ip_is_ipv4(address: &std::net::IpAddr) -> bool {
-//RS     address.is_ipv4()
-//RS }
-//RS 
-//RS pub(crate) fn jet_net_pure_socket_host(address: &std::net::SocketAddr) -> String {
-//RS     address.ip().to_string()
-//RS }
-//RS 
-//RS pub(crate) fn jet_net_pure_socket_port(address: &std::net::SocketAddr) -> i64 {
-//RS     i64::from(address.port())
-//RS }
-//RS 
-//RS pub(crate) fn jet_net_pure_socket_to_string(address: &std::net::SocketAddr) -> String {
-//RS     address.to_string()
-//RS }
-// END-PORT-PENDING 0153 crates/jet-codegen/src/Prelude/Core/NetPure.rs:1-29
+// D-NETSOCKET1=A: pure address value rules shared by NetHTTP and comptime.
+use std.net.[IpAddr, SocketAddr, AddrParseError]
+
+// Rust: crates/jet-codegen/src/Prelude/Core/NetPure.rs:3
+pub fn jet_net_pure_parse_ip(text: String) -> IpAddr AddrParseError! { text.parse<IpAddr>() }
+// Rust: crates/jet-codegen/src/Prelude/Core/NetPure.rs:9
+pub fn jet_net_pure_parse_socket_addr(text: String) -> SocketAddr AddrParseError! { text.parse<SocketAddr>() }
+// Rust: crates/jet-codegen/src/Prelude/Core/NetPure.rs:15
+pub fn jet_net_pure_ip_is_ipv4(address: IpAddr) -> Bool Never! { address.is_ipv4() }
+// Rust: crates/jet-codegen/src/Prelude/Core/NetPure.rs:19
+pub fn jet_net_pure_socket_host(address: SocketAddr) -> String Never! { address.ip().to_string() }
+// Rust: crates/jet-codegen/src/Prelude/Core/NetPure.rs:23
+pub fn jet_net_pure_socket_port(address: SocketAddr) -> I64 Never! { I64{address.port()} }
+// Rust: crates/jet-codegen/src/Prelude/Core/NetPure.rs:27
+pub fn jet_net_pure_socket_to_string(address: SocketAddr) -> String Never! { address.to_string() }
 

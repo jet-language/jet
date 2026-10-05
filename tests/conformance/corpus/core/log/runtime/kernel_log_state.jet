@@ -1,0 +1,14 @@
+use core.log.runtime.kernel_log_state as log
+
+// Rust: crates/jet-codegen/src/Prelude/Core/LogState.rs:11 (behavioral control; no inline Rust tests)
+#Test("trace setter replaces the shared thread-local carrier") {
+    log.jet_ring_log_set_trace_id("first")
+    // GATE #4565: kernel primitive — real same-thread state observation.
+    #Unsafe("read the same trace cell used by native log adapters") {
+        assert(log.JET_LOG_TRACE_ID.with(fn(trace) { trace.borrow().to_string() }) == "first")
+        log.jet_ring_log_set_trace_id("second")
+        assert(log.JET_LOG_TRACE_ID.with(fn(trace) { trace.borrow().to_string() }) == "second")
+        log.jet_ring_log_set_trace_id("")
+        assert(log.JET_LOG_TRACE_ID.with(fn(trace) { trace.borrow().is_empty() }))
+    }
+}

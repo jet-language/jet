@@ -1,0 +1,14 @@
+use core.time.runtime.kernel_time_monotonic.[jet_time_monotonic_provider_set, jet_time_monotonic_now_ns]
+
+fn controlled_clock_a() -> I64? { Val(I64{123456789}) }
+fn controlled_clock_b() -> I64? { Val(I64{-7}) }
+// Rust: crates/jet-codegen/src/Prelude/Core/TimeMonotonic.rs:15
+// Behavioral controls: exercise the real thread-local provider boundary.
+#Test("monotonic_provider_precedes_host_and_replacement_returns_previous") {
+    saved :: jet_time_monotonic_provider_set(Val(controlled_clock_a))
+    assert(jet_time_monotonic_now_ns() == I64{123456789})
+    previous :: jet_time_monotonic_provider_set(Val(controlled_clock_b))
+    assert(previous.unwrap()() == Val(I64{123456789}))
+    assert(jet_time_monotonic_now_ns() == I64{-7})
+    _ :: jet_time_monotonic_provider_set(saved)
+}

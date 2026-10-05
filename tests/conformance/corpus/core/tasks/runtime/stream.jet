@@ -1,0 +1,77 @@
+use core.tasks.runtime.task_group.[jet_task_select, jet_task_wait_policy, JetTaskDecision,
+    JetTaskGroupRuntime, JetTaskSelectMode, JetTaskSelectPolicy, JetTaskWaitInterrupt]
+use std.sync.[Arc, Mutex]
+
+// Rust: crates/jet-codegen/src/Prelude/TaskGroup.rs:515
+#Test("close_joins_all_without_cancelling") {
+    group :: JetTaskGroupRuntime<Int>.new()
+    group.register(1)
+    group.register(2)
+    group.register(3)
+    // GATE #4565: kernel primitive
+    #Unsafe("test shares an event log through the same synchronized handles as lexical join callbacks") {
+        events :: Arc.new(Mutex.new([]))
+        join_events :: events.clone()
+        group.close_with(fn(child) { join_events.lock().unwrap().push("join {child}") })
+        assert(*events.lock().unwrap() == ["join 1", "join 2", "join 3"])
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/TaskGroup.rs:532
+#Test("shared_selection_policy_preserves_all_order_and_race_any_laws") {
+    all := JetTaskSelectPolicy<Int, String>.new(JetTaskSelectMode.All, 2)
+    assert((&all.settle(1, 1, Ok(20))) is JetTaskDecision.Wait)
+    match &all.settle(2, 0, Ok(10)) {
+        JetTaskDecision.Finish(Ok(values)) -> assert(values == [10, 20])
+        _ -> panic("all did not finish in input order")
+    }
+    race := JetTaskSelectPolicy<Int, String>.new(JetTaskSelectMode.Race, 2)
+    assert((&race.settle(1, 0, Err("first failed"))) is JetTaskDecision.Wait)
+    match &race.settle(2, 1, Ok(22)) {
+        JetTaskDecision.Finish(Ok(values)) -> assert(values == [22])
+        _ -> panic("race did not select its first success")
+    }
+    any := JetTaskSelectPolicy<Int, String>.new(JetTaskSelectMode.Any, 2)
+    match &any.settle(1, 1, Err("first failed")) {
+        JetTaskDecision.Finish(Err(error)) -> assert(error == "first failed")
+        _ -> panic("any did not expose its first completion")
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/TaskGroup.rs:558
+#Test("equal_completion_sequences_use_source_order") {
+    race := JetTaskSelectPolicy<Int, String>.new(JetTaskSelectMode.Race, 2)
+    assert((&race.settle(9, 1, Err("higher source"))) is JetTaskDecision.Wait)
+    match &race.settle(9, 0, Err("lower source")) {
+        JetTaskDecision.Finish(Err(error)) -> assert(error == "lower source")
+        _ -> panic("equal completion sequence did not use source order")
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/TaskGroup.rs:572
+struct Task {
+    id: Int
+    order: U128
+    result: Result<Int, String>?
+}
+// Rust: crates/jet-codegen/src/Prelude/TaskGroup.rs:571
+#Test("shared_wait_loop_cancels_and_drains_after_an_error") {
+    // GATE #4565: kernel primitive
+    #Unsafe("test cancellation and draining log events through shared synchronized handles") {
+        events :: Arc.new(Mutex.new([]))
+        cancel_events :: events.clone()
+        drain_events :: events.clone()
+        result :: jet_task_select(
+            [Task{id: 1, order: 0, result: Val(Err("failed"))},
+             Task{id: 2, order: 1, result: Val(Ok(2))}],
+            JetTaskSelectMode.All, fn() { Ok(()) }, fn(task) { Val(task.order) },
+            fn(task) { task.result.take() },
+            fn(task) { cancel_events.lock().unwrap().push(("cancel", task.id)) },
+            fn(task) { drain_events.lock().unwrap().push(("drain", task.id)) })
+        assert(result == Err("failed"))
+        assert(*events.lock().unwrap() == [("cancel", 2), ("drain", 2)])
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/TaskGroup.rs:605
+#Test("parent_wait_policy_defers_a_shield_and_prefers_a_deadline") {
+    assert(jet_task_wait_policy(Val("deadline"), true, false) == Err(JetTaskWaitInterrupt.Deadline("deadline")))
+    assert(jet_task_wait_policy<String>(None, true, false) == Err(JetTaskWaitInterrupt.Cancelled))
+    assert(jet_task_wait_policy(Val("deadline"), true, true) == Ok(()))
+}

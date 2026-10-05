@@ -1,0 +1,30 @@
+use core.ui.runtime.ui_02.[JetUiAriaRole, JetUiNodeKind, JetTuiEvent, JetSize, jet_ui_text_input, jet_ui_node_accessibility]
+use jet_ui_host.[JetUiImeMode, JetUiAccessibility]
+
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:49
+#Test("ui_interactive_roles_are_only_button_and_text_input") {
+    assert(JetUiAriaRole.Button.is_interactive())
+    assert(JetUiAriaRole.TextInput.is_interactive())
+    assert(!JetUiAriaRole.Label.is_interactive())
+    assert(!JetUiAriaRole.Container.is_interactive())
+}
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:302-328
+#Test("ui_text_input_retains_canonical_node_and_accessibility_metadata") {
+    node :: jet_ui_text_input("é𐐀", JetUiImeMode.Disabled)
+    assert(node.label == "é𐐀" && node.width == 2.0 && node.height == 1.0)
+    assert(node.role == Val(JetUiAriaRole.TextInput))
+    assert(node.kind == JetUiNodeKind.TextInput && node.ime == Val(JetUiImeMode.Disabled))
+    metadata :: JetUiAccessibility{name: Val("editable title"), description: Val("two scalars"), states: []}
+    decorated :: jet_ui_node_accessibility(^node, metadata.clone())
+    assert(decorated.accessibility == Val(metadata))
+    assert(decorated.label == "é𐐀" && decorated.children.is_empty())
+}
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:366-404
+#Test("tui_event_constructors_preserve_typed_payloads") {
+    assert(JetTuiEvent.key("Enter") == JetTuiEvent.Key(code: "Enter", modifiers: 0))
+    assert(JetTuiEvent.key_with_modifiers("x", 3) == JetTuiEvent.Key(code: "x", modifiers: 3))
+    assert(JetTuiEvent.resize(80.0, 24.0) == JetTuiEvent.Resize(size: JetSize{width: 80.0, height: 24.0}))
+    assert(JetTuiEvent.timer("tick", -1) == JetTuiEvent.Timer(id: "tick", elapsed_ms: -1))
+    assert(JetTuiEvent.io("socket", [0, 255]) == JetTuiEvent.IO(channel: "socket", payload: [0, 255]))
+    assert(JetTuiEvent.focus(false) == JetTuiEvent.Focus(focused: false))
+}

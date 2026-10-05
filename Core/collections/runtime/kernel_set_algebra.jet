@@ -1,259 +1,92 @@
-// PORT-PENDING 0144 crates-jet-codegen-src-prelude-core-collections-module-group-slice-1797: crates/jet-codegen/src/Prelude/Core/SetAlgebra.rs:1-255
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS // Shared Set and Rank algebra.
-//RS //
-//RS // AOT emission and the JIT host both marshal to these functions.  Keep the
-//RS // operation laws here so an execution tier cannot quietly grow a second set
-//RS // implementation.
-//RS 
-//RS // Tier-0/comptime values cannot implement `Hash`/`Ord` as a whole because
-//RS // they also carry closures and diagnostics.  Keep the same six laws available
-//RS // over their equality/comparison adapter instead of reimplementing them in
-//RS // the evaluator.
-//RS pub(crate) fn jet_set_union_by<T: Clone, F: Fn(&T, &T) -> bool>(
-//RS     left: &[T],
-//RS     right: &[T],
-//RS     equal: F,
-//RS ) -> Vec<T> {
-//RS     let mut out = left.to_vec();
-//RS     for value in right {
-//RS         if !out.iter().any(|candidate| equal(candidate, value)) {
-//RS             out.push(value.clone());
-//RS         }
-//RS     }
-//RS     out
-//RS }
-//RS 
-//RS pub(crate) fn jet_set_intersection_by<T: Clone, F: Fn(&T, &T) -> bool>(
-//RS     left: &[T],
-//RS     right: &[T],
-//RS     equal: F,
-//RS ) -> Vec<T> {
-//RS     left.iter()
-//RS         .filter(|value| right.iter().any(|candidate| equal(value, candidate)))
-//RS         .cloned()
-//RS         .collect()
-//RS }
-//RS 
-//RS pub(crate) fn jet_set_difference_by<T: Clone, F: Fn(&T, &T) -> bool>(
-//RS     left: &[T],
-//RS     right: &[T],
-//RS     equal: F,
-//RS ) -> Vec<T> {
-//RS     left.iter()
-//RS         .filter(|value| !right.iter().any(|candidate| equal(value, candidate)))
-//RS         .cloned()
-//RS         .collect()
-//RS }
-//RS 
-//RS pub(crate) fn jet_set_symmetric_difference_by<T: Clone, F: Fn(&T, &T) -> bool>(
-//RS     left: &[T],
-//RS     right: &[T],
-//RS     equal: F,
-//RS ) -> Vec<T> {
-//RS     let mut out = jet_set_difference_by(left, right, &equal);
-//RS     out.extend(jet_set_difference_by(right, left, equal));
-//RS     out
-//RS }
-//RS 
-//RS pub(crate) fn jet_set_is_subset_by<T, F: Fn(&T, &T) -> bool>(
-//RS     left: &[T],
-//RS     right: &[T],
-//RS     equal: F,
-//RS ) -> bool {
-//RS     left.iter()
-//RS         .all(|value| right.iter().any(|candidate| equal(value, candidate)))
-//RS }
-//RS 
-//RS pub(crate) fn jet_set_is_superset_by<T, F: Fn(&T, &T) -> bool>(
-//RS     left: &[T],
-//RS     right: &[T],
-//RS     equal: F,
-//RS ) -> bool {
-//RS     jet_set_is_subset_by(right, left, equal)
-//RS }
-//RS 
-//RS pub(crate) fn jet_set_is_disjoint_by<T, F: Fn(&T, &T) -> bool>(
-//RS     left: &[T],
-//RS     right: &[T],
-//RS     equal: F,
-//RS ) -> bool {
-//RS     left.iter()
-//RS         .all(|value| !right.iter().any(|candidate| equal(value, candidate)))
-//RS }
-//RS 
-//RS /// `Set.add`: true when `value` was not already present (the checked
-//RS /// `CollectionResult.Bool` of the canonical Foundation row).
-//RS pub(crate) fn jet_set_insert<T: Eq + std::hash::Hash>(
-//RS     set: &mut std::collections::HashSet<T>,
-//RS     value: T,
-//RS ) -> bool {
-//RS     set.insert(value)
-//RS }
-//RS 
-//RS pub(crate) fn jet_set_remove<T: Eq + std::hash::Hash>(
-//RS     set: &mut std::collections::HashSet<T>,
-//RS     value: T,
-//RS ) {
-//RS     set.remove(&value);
-//RS }
-//RS 
-//RS /// D-COLLBREADTH1=A: `Rank<T>.add(v)` / `.remove(v)` on the ordered carrier.
-//RS pub(crate) fn jet_sorted_set_insert<T: Ord>(set: &mut std::collections::BTreeSet<T>, value: T) {
-//RS     set.insert(value);
-//RS }
-//RS 
-//RS pub(crate) fn jet_sorted_set_remove<T: Ord>(set: &mut std::collections::BTreeSet<T>, value: T) {
-//RS     set.remove(&value);
-//RS }
-//RS 
-//RS /// D-TAG1: `Tally<T>.add(v)` — one more occurrence of `v`.
-//RS pub(crate) fn jet_bag_add<T: Eq + std::hash::Hash>(
-//RS     bag: &mut std::collections::HashMap<T, usize>,
-//RS     value: T,
-//RS ) {
-//RS     *bag.entry(value).or_insert(0) += 1;
-//RS }
-//RS 
-//RS /// D-TAG1: `Tally<T>.remove(v)` — one fewer occurrence of `v`. Removing an
-//RS /// absent member is a no-op: the count never underflows and no member is
-//RS /// fabricated.
-//RS pub(crate) fn jet_bag_remove<T: Eq + std::hash::Hash>(
-//RS     bag: &mut std::collections::HashMap<T, usize>,
-//RS     value: T,
-//RS ) {
-//RS     if let Some(count) = bag.get_mut(&value) {
-//RS         if *count > 1 {
-//RS             *count -= 1;
-//RS         } else {
-//RS             bag.remove(&value);
-//RS         }
-//RS     }
-//RS }
-//RS pub(crate) fn jet_set_update<T: Eq + std::hash::Hash + Clone>(
-//RS     left: &mut std::collections::HashSet<T>,
-//RS     right: &std::collections::HashSet<T>,
-//RS ) {
-//RS     left.extend(right.iter().cloned());
-//RS }
-//RS pub(crate) fn jet_set_difference_update<T: Eq + std::hash::Hash>(
-//RS     left: &mut std::collections::HashSet<T>,
-//RS     right: &std::collections::HashSet<T>,
-//RS ) {
-//RS     left.retain(|value| !right.contains(value));
-//RS }
-//RS 
-//RS pub(crate) fn jet_set_intersection_update<T: Eq + std::hash::Hash>(
-//RS     left: &mut std::collections::HashSet<T>,
-//RS     right: &std::collections::HashSet<T>,
-//RS ) {
-//RS     left.retain(|value| right.contains(value));
-//RS }
-//RS 
-//RS pub(crate) fn jet_set_symmetric_difference_update<T: Eq + std::hash::Hash + Clone>(
-//RS     left: &mut std::collections::HashSet<T>,
-//RS     right: &std::collections::HashSet<T>,
-//RS ) {
-//RS     let next = left.symmetric_difference(right).cloned().collect();
-//RS     *left = next;
-//RS }
-//RS 
-//RS pub(crate) fn jet_set_union<T: Eq + std::hash::Hash + Clone>(
-//RS     left: &std::collections::HashSet<T>,
-//RS     right: &std::collections::HashSet<T>,
-//RS ) -> std::collections::HashSet<T> {
-//RS     left.union(right).cloned().collect()
-//RS }
-//RS 
-//RS pub(crate) fn jet_set_intersection<T: Eq + std::hash::Hash + Clone>(
-//RS     left: &std::collections::HashSet<T>,
-//RS     right: &std::collections::HashSet<T>,
-//RS ) -> std::collections::HashSet<T> {
-//RS     left.intersection(right).cloned().collect()
-//RS }
-//RS 
-//RS pub(crate) fn jet_set_difference<T: Eq + std::hash::Hash + Clone>(
-//RS     left: &std::collections::HashSet<T>,
-//RS     right: &std::collections::HashSet<T>,
-//RS ) -> std::collections::HashSet<T> {
-//RS     left.difference(right).cloned().collect()
-//RS }
-//RS 
-//RS pub(crate) fn jet_set_symmetric_difference<T: Eq + std::hash::Hash + Clone>(
-//RS     left: &std::collections::HashSet<T>,
-//RS     right: &std::collections::HashSet<T>,
-//RS ) -> std::collections::HashSet<T> {
-//RS     left.symmetric_difference(right).cloned().collect()
-//RS }
-//RS 
-//RS pub(crate) fn jet_set_is_subset<T: Eq + std::hash::Hash>(
-//RS     left: &std::collections::HashSet<T>,
-//RS     right: &std::collections::HashSet<T>,
-//RS ) -> bool {
-//RS     left.is_subset(right)
-//RS }
-//RS 
-//RS pub(crate) fn jet_set_is_superset<T: Eq + std::hash::Hash>(
-//RS     left: &std::collections::HashSet<T>,
-//RS     right: &std::collections::HashSet<T>,
-//RS ) -> bool {
-//RS     left.is_superset(right)
-//RS }
-//RS 
-//RS pub(crate) fn jet_set_is_disjoint<T: Eq + std::hash::Hash>(
-//RS     left: &std::collections::HashSet<T>,
-//RS     right: &std::collections::HashSet<T>,
-//RS ) -> bool {
-//RS     left.is_disjoint(right)
-//RS }
-//RS 
-//RS pub(crate) fn jet_sorted_set_union<T: Ord + Clone>(
-//RS     left: &std::collections::BTreeSet<T>,
-//RS     right: &std::collections::BTreeSet<T>,
-//RS ) -> std::collections::BTreeSet<T> {
-//RS     left.union(right).cloned().collect()
-//RS }
-//RS 
-//RS pub(crate) fn jet_sorted_set_intersection<T: Ord + Clone>(
-//RS     left: &std::collections::BTreeSet<T>,
-//RS     right: &std::collections::BTreeSet<T>,
-//RS ) -> std::collections::BTreeSet<T> {
-//RS     left.intersection(right).cloned().collect()
-//RS }
-//RS 
-//RS pub(crate) fn jet_sorted_set_difference<T: Ord + Clone>(
-//RS     left: &std::collections::BTreeSet<T>,
-//RS     right: &std::collections::BTreeSet<T>,
-//RS ) -> std::collections::BTreeSet<T> {
-//RS     left.difference(right).cloned().collect()
-//RS }
-//RS 
-//RS pub(crate) fn jet_sorted_set_symmetric_difference<T: Ord + Clone>(
-//RS     left: &std::collections::BTreeSet<T>,
-//RS     right: &std::collections::BTreeSet<T>,
-//RS ) -> std::collections::BTreeSet<T> {
-//RS     left.symmetric_difference(right).cloned().collect()
-//RS }
-//RS 
-//RS pub(crate) fn jet_sorted_set_is_subset<T: Ord>(
-//RS     left: &std::collections::BTreeSet<T>,
-//RS     right: &std::collections::BTreeSet<T>,
-//RS ) -> bool {
-//RS     left.is_subset(right)
-//RS }
-//RS 
-//RS pub(crate) fn jet_sorted_set_is_superset<T: Ord>(
-//RS     left: &std::collections::BTreeSet<T>,
-//RS     right: &std::collections::BTreeSet<T>,
-//RS ) -> bool {
-//RS     left.is_superset(right)
-//RS }
-//RS 
-//RS pub(crate) fn jet_sorted_set_is_disjoint<T: Ord>(
-//RS     left: &std::collections::BTreeSet<T>,
-//RS     right: &std::collections::BTreeSet<T>,
-//RS ) -> bool {
-//RS     left.is_disjoint(right)
-//RS }
-// END-PORT-PENDING 0144 crates/jet-codegen/src/Prelude/Core/SetAlgebra.rs:1-255
+// Shared Set/Rank laws; equality-adapter carriers also serve tier-0 values.
+use std.collections.[HashSet, BTreeSet]
+use std.hash.[Hash]
 
+// Rust: crates/jet-codegen/src/Prelude/Core/SetAlgebra.rs:11
+pub fn jet_set_union_by<T: Clone>(left: &[T], right: &[T], equal: fn(&T, &T) -> Bool) -> [T] {
+    out := left.to_vec()
+    for value in right {
+        if !out.iter().any(fn(candidate) { equal(candidate, value) }) -> out.push(value.clone())
+    }
+    ^out
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/SetAlgebra.rs:25
+pub fn jet_set_intersection_by<T: Clone>(left: &[T], right: &[T], equal: fn(&T, &T) -> Bool) -> [T] {
+    left.iter().filter(fn(value) { right.iter().any(fn(candidate) { equal(value, candidate) }) }).cloned().collect()
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/SetAlgebra.rs:36
+pub fn jet_set_difference_by<T: Clone>(left: &[T], right: &[T], equal: fn(&T, &T) -> Bool) -> [T] {
+    left.iter().filter(fn(value) { !right.iter().any(fn(candidate) { equal(value, candidate) }) }).cloned().collect()
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/SetAlgebra.rs:47
+pub fn jet_set_symmetric_difference_by<T: Clone>(left: &[T], right: &[T], equal: fn(&T, &T) -> Bool) -> [T] {
+    out := jet_set_difference_by(left, right, equal)
+    out.extend(jet_set_difference_by(right, left, equal))
+    ^out
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/SetAlgebra.rs:57
+pub fn jet_set_is_subset_by<T>(left: &[T], right: &[T], equal: fn(&T, &T) -> Bool) -> Bool {
+    left.iter().all(fn(value) { right.iter().any(fn(candidate) { equal(value, candidate) }) })
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/SetAlgebra.rs:66
+pub fn jet_set_is_superset_by<T>(left: &[T], right: &[T], equal: fn(&T, &T) -> Bool) -> Bool { jet_set_is_subset_by(right, left, equal) }
+// Rust: crates/jet-codegen/src/Prelude/Core/SetAlgebra.rs:74
+pub fn jet_set_is_disjoint_by<T>(left: &[T], right: &[T], equal: fn(&T, &T) -> Bool) -> Bool {
+    left.iter().all(fn(value) { !right.iter().any(fn(candidate) { equal(value, candidate) }) })
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/SetAlgebra.rs:85
+pub fn jet_set_insert<T: Eq + Hash>(set: &HashSet<T>, value: T) -> Bool { set.insert(^value) }
+// Rust: crates/jet-codegen/src/Prelude/Core/SetAlgebra.rs:92
+pub fn jet_set_remove<T: Eq + Hash>(set: &HashSet<T>, value: T) -> Unit { _ :: set.remove(&value) }
+// Rust: crates/jet-codegen/src/Prelude/Core/SetAlgebra.rs:100
+pub fn jet_sorted_set_insert<T: Ord>(set: &BTreeSet<T>, value: T) -> Unit { _ :: set.insert(^value) }
+// Rust: crates/jet-codegen/src/Prelude/Core/SetAlgebra.rs:104
+pub fn jet_sorted_set_remove<T: Ord>(set: &BTreeSet<T>, value: T) -> Unit { _ :: set.remove(&value) }
+// Rust: crates/jet-codegen/src/Prelude/Core/SetAlgebra.rs:109
+pub fn jet_bag_add<T: Eq + Hash>(bag: &[T:Usize], value: T) -> Unit { bag.entry(^value).or_insert(0).value += 1 }
+// Rust: crates/jet-codegen/src/Prelude/Core/SetAlgebra.rs:119
+pub fn jet_bag_remove<T: Eq + Hash>(bag: &[T:Usize], value: T) -> Unit {
+    if bag.get_mut(&value) == .Val(count) {
+        if count > 1 -> count -= 1
+        else -> _ :: bag.remove(&value)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/SetAlgebra.rs:131
+pub fn jet_set_update<T: Eq + Hash + Clone>(left: &HashSet<T>, right: &HashSet<T>) -> Unit { left.extend(right.iter().cloned()) }
+// Rust: crates/jet-codegen/src/Prelude/Core/SetAlgebra.rs:137
+pub fn jet_set_difference_update<T: Eq + Hash>(left: &HashSet<T>, right: &HashSet<T>) -> Unit { left.retain(fn(value) { !right.contains(value) }) }
+// Rust: crates/jet-codegen/src/Prelude/Core/SetAlgebra.rs:144
+pub fn jet_set_intersection_update<T: Eq + Hash>(left: &HashSet<T>, right: &HashSet<T>) -> Unit { left.retain(fn(value) { right.contains(value) }) }
+// Rust: crates/jet-codegen/src/Prelude/Core/SetAlgebra.rs:151
+pub fn jet_set_symmetric_difference_update<T: Eq + Hash + Clone>(left: &HashSet<T>, right: &HashSet<T>) -> Unit {
+    next :: left.symmetric_difference(right).cloned().collect()
+    left = ^next
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/SetAlgebra.rs:159
+pub fn jet_set_union<T: Eq + Hash + Clone>(left: &HashSet<T>, right: &HashSet<T>) -> HashSet<T> { left.union(right).cloned().collect() }
+// Rust: crates/jet-codegen/src/Prelude/Core/SetAlgebra.rs:166
+pub fn jet_set_intersection<T: Eq + Hash + Clone>(left: &HashSet<T>, right: &HashSet<T>) -> HashSet<T> { left.intersection(right).cloned().collect() }
+// Rust: crates/jet-codegen/src/Prelude/Core/SetAlgebra.rs:173
+pub fn jet_set_difference<T: Eq + Hash + Clone>(left: &HashSet<T>, right: &HashSet<T>) -> HashSet<T> { left.difference(right).cloned().collect() }
+// Rust: crates/jet-codegen/src/Prelude/Core/SetAlgebra.rs:180
+pub fn jet_set_symmetric_difference<T: Eq + Hash + Clone>(left: &HashSet<T>, right: &HashSet<T>) -> HashSet<T> { left.symmetric_difference(right).cloned().collect() }
+// Rust: crates/jet-codegen/src/Prelude/Core/SetAlgebra.rs:187
+pub fn jet_set_is_subset<T: Eq + Hash>(left: &HashSet<T>, right: &HashSet<T>) -> Bool { left.is_subset(right) }
+// Rust: crates/jet-codegen/src/Prelude/Core/SetAlgebra.rs:194
+pub fn jet_set_is_superset<T: Eq + Hash>(left: &HashSet<T>, right: &HashSet<T>) -> Bool { left.is_superset(right) }
+// Rust: crates/jet-codegen/src/Prelude/Core/SetAlgebra.rs:201
+pub fn jet_set_is_disjoint<T: Eq + Hash>(left: &HashSet<T>, right: &HashSet<T>) -> Bool { left.is_disjoint(right) }
+// Rust: crates/jet-codegen/src/Prelude/Core/SetAlgebra.rs:208
+pub fn jet_sorted_set_union<T: Ord + Clone>(left: &BTreeSet<T>, right: &BTreeSet<T>) -> BTreeSet<T> { left.union(right).cloned().collect() }
+// Rust: crates/jet-codegen/src/Prelude/Core/SetAlgebra.rs:215
+pub fn jet_sorted_set_intersection<T: Ord + Clone>(left: &BTreeSet<T>, right: &BTreeSet<T>) -> BTreeSet<T> { left.intersection(right).cloned().collect() }
+// Rust: crates/jet-codegen/src/Prelude/Core/SetAlgebra.rs:222
+pub fn jet_sorted_set_difference<T: Ord + Clone>(left: &BTreeSet<T>, right: &BTreeSet<T>) -> BTreeSet<T> { left.difference(right).cloned().collect() }
+// Rust: crates/jet-codegen/src/Prelude/Core/SetAlgebra.rs:229
+pub fn jet_sorted_set_symmetric_difference<T: Ord + Clone>(left: &BTreeSet<T>, right: &BTreeSet<T>) -> BTreeSet<T> { left.symmetric_difference(right).cloned().collect() }
+// Rust: crates/jet-codegen/src/Prelude/Core/SetAlgebra.rs:236
+pub fn jet_sorted_set_is_subset<T: Ord>(left: &BTreeSet<T>, right: &BTreeSet<T>) -> Bool { left.is_subset(right) }
+// Rust: crates/jet-codegen/src/Prelude/Core/SetAlgebra.rs:243
+pub fn jet_sorted_set_is_superset<T: Ord>(left: &BTreeSet<T>, right: &BTreeSet<T>) -> Bool { left.is_superset(right) }
+// Rust: crates/jet-codegen/src/Prelude/Core/SetAlgebra.rs:250
+pub fn jet_sorted_set_is_disjoint<T: Ord>(left: &BTreeSet<T>, right: &BTreeSet<T>) -> Bool { left.is_disjoint(right) }

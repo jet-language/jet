@@ -1,13 +1,7 @@
-// PORT-PENDING 0142 crates-jet-codegen-src-prelude-core-collectionfailure-module-group: crates/jet-codegen/src/Prelude/Core/InlineRange.rs:1-9
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS /// D-TYPE2-SPELL1: the shared check-and-convert kernel for an inline integer
-//RS /// refinement. The carrier stays `i64`; only the interval fact is checked.
-//RS pub(crate) fn jet_inline_range_from_int(value: i64, lo: i64, hi: i64) -> Result<i64, String> {
-//RS     if value >= lo && value <= hi {
-//RS         Ok(value)
-//RS     } else {
-//RS         Err(format!("value is outside Int({lo}..{hi})"))
-//RS     }
-//RS }
-// END-PORT-PENDING 0142 crates/jet-codegen/src/Prelude/Core/InlineRange.rs:1-9
+// D-TYPE2-SPELL1: preserve the i64 carrier, check only the interval fact.
+// Rust: crates/jet-codegen/src/Prelude/Core/InlineRange.rs:3
+pub fn jet_inline_range_from_int(value: I64, lo: I64, hi: I64) -> I64 Err! {
+    if value >= lo && value <= hi -> Ok(value)
+    else -> Err("value is outside Int({lo}..{hi})")
+}
 

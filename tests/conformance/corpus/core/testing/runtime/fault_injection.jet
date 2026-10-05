@@ -1,0 +1,31 @@
+use core.testing.runtime.fault_injection as fault
+
+// Rust: crates/jet-codegen/src/Prelude/FaultInjection.rs:53,78,102,222 (behavioral controls; no inline tests)
+#Test("fault scheduler visits descendant effects and allocation and clears") {
+    runs := 0
+    body := fn() -> Unit Err! {
+        runs += 1
+        if fault.jet_fault_should_fail("IO.read.file") -> return Err("injected IO")
+        if fault.jet_fault_should_fail_allocation() -> return Err("injected allocation")
+        Ok(())
+    }
+    assert(fault.jet_fault_test_loop(["IO.read"], &body) == Ok(()))
+    assert(runs == 3)
+    assert(not fault.jet_fault_should_fail("IO.read.file"))
+    assert(not fault.jet_fault_should_fail_allocation())
+}
+#Test("fault scheduler does not cover sibling paths") {
+    runs := 0
+    body := fn() -> Unit Err! {
+        runs += 1
+        assert(not fault.jet_fault_should_fail("IO.reader"))
+        Ok(())
+    }
+    assert(fault.jet_fault_test_loop(["IO.read"], &body) == Ok(()))
+    assert(runs == 1)
+}
+#Test("fault clean pass error uses ordinary error rail") {
+    body := fn() -> Unit Err! { Err("ordinary failure") }
+    assert(fault.jet_fault_test_loop(["IO"], &body) == Err("ordinary failure"))
+    assert(not fault.jet_fault_should_fail("IO.read"))
+}

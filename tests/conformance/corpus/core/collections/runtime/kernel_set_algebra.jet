@@ -1,0 +1,27 @@
+use core.collections.runtime.kernel_set_algebra.*
+
+// Rust: crates/jet-codegen/src/Prelude/Core/SetAlgebra.rs:11-81
+#Test("set_adapter_seven_laws_preserve_left_order") {
+    left :: [3, 1]
+    right :: [1, 2]
+    equal :: fn(a, b) { a == b }
+    assert(jet_set_union_by(&left, &right, equal) == [3, 1, 2])
+    assert(jet_set_intersection_by(&left, &right, equal) == [1])
+    assert(jet_set_difference_by(&left, &right, equal) == [3])
+    assert(jet_set_symmetric_difference_by(&left, &right, equal) == [3, 2])
+    assert(jet_set_is_subset_by(&[1], &right, equal))
+    assert(jet_set_is_superset_by(&right, &[1], equal))
+    assert(jet_set_is_disjoint_by(&[3], &right, equal))
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/SetAlgebra.rs:109,119
+#Test("bag_remove_never_fabricates_or_underflows") {
+    bag: [String:Usize] := [:]
+    jet_bag_remove(&bag, "a")
+    assert(bag.is_empty())
+    jet_bag_add(&bag, "a")
+    jet_bag_add(&bag, "a")
+    jet_bag_remove(&bag, "a")
+    assert(bag.get("a") == .Val(1))
+    jet_bag_remove(&bag, "a")
+    assert(bag.is_empty())
+}

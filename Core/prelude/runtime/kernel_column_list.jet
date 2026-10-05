@@ -1,287 +1,129 @@
-// PORT-PENDING 0142 crates-jet-codegen-src-prelude-core-collectionfailure-module-group: crates/jet-codegen/src/Prelude/Core/ColumnList.rs:1-283
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS /// D-SOA-TIER1=A: the AOT marshalling adapter for one `#Layout(columnar)`
-//RS /// record.
-//RS ///
-//RS /// Codegen emits ONE of these per columnar struct and nothing else: a cell
-//RS /// vocabulary for the record's fields plus the split/join that moves a record
-//RS /// in and out of cells. The storage, the row bookkeeping, the bounds policy and
-//RS /// the gather read all live in the shared `JetColumns` store, so the compiled
-//RS /// build no longer generates a private per-struct layout (I9: an engine
-//RS /// marshals, it does not re-encode policy).
-//RS pub trait JetRow: Sized {
-//RS     /// The generated cell vocabulary for this record's stored fields — one
-//RS     /// variant per column, carrying that field's own Rust type.
-//RS     type Cell: Clone;
-//RS 
-//RS     /// Stored-field count: how many columns the store needs (a computed field is
-//RS     /// never a column, D-FIELDPOL1).
-//RS     fn jet_row_width() -> usize;
-//RS 
-//RS     /// Split one record into its cells, in declaration order.
-//RS     fn jet_row_split(self) -> Vec<Self::Cell>;
-//RS 
-//RS     /// Join a record back from its cells, in declaration order.
-//RS     fn jet_row_join(cells: Vec<Self::Cell>) -> Self;
-//RS }
-//RS 
-//RS /// D-SOA1 / D-SOA-TIER1=A: a `[S]` of a `#Layout(columnar)` struct.
-//RS ///
-//RS /// This is the type generated Rust names for a columnar list, and it is Prelude
-//RS /// source rather than per-struct emitted code. It holds THE shared column store
-//RS /// and does nothing but marshal records into and out of it, so the whole list
-//RS /// surface (`len`, `is_empty`, `push`, index-read, field-read, iteration) and
-//RS /// the transparency of rendering and serialization are each defined once here
-//RS /// instead of re-emitted for every columnar struct.
-//RS pub struct JetColumnList<S: JetRow> {
-//RS     columns: JetColumns<S::Cell>,
-//RS }
-//RS 
-//RS pub struct JetColumnListIntoRows<C> {
-//RS     columns: Vec<std::vec::IntoIter<C>>,
-//RS     remaining: usize,
-//RS }
-//RS 
-//RS impl<C> Iterator for JetColumnListIntoRows<C> {
-//RS     type Item = Vec<C>;
-//RS 
-//RS     fn next(&mut self) -> Option<Self::Item> {
-//RS         if self.remaining == 0 {
-//RS             return None;
-//RS         }
-//RS         self.remaining -= 1;
-//RS         Some(
-//RS             self.columns
-//RS                 .iter_mut()
-//RS                 .map(|column| {
-//RS                     column
-//RS                         .next()
-//RS                         .expect("columnar store columns have inconsistent lengths")
-//RS                 })
-//RS                 .collect(),
-//RS         )
-//RS     }
-//RS }
-//RS 
-//RS 
-//RS impl<S: JetRow> JetColumnList<S> {
-//RS     /// An empty columnar list — one empty column per stored field.
-//RS     pub fn new() -> Self {
-//RS         Self {
-//RS             columns: JetColumns::new(S::jet_row_width()),
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn len(&self) -> usize {
-//RS         self.columns.len()
-//RS     }
-//RS 
-//RS     pub fn is_empty(&self) -> bool {
-//RS         self.columns.is_empty()
-//RS     }
-//RS 
-//RS     /// `xs.push(v)` — scatter one record across every column together.
-//RS     pub fn push(&mut self, value: S) {
-//RS         self.columns.push_row(value.jet_row_split());
-//RS     }
-//RS 
-//RS     /// `xs[i]` — gather the logical record at `i` through THE shared read, then
-//RS     /// join it back into `S`. The bounds stop is the shared list stop, so this
-//RS     /// reports identically to an array-of-structs `xs[i]`.
-//RS     #[inline(always)]
-//RS     pub fn gather_at(&self, index: i64, file: &str, line: u32) -> S {
-//RS         match self.columns.gather(index) {
-//RS             Ok(cells) => S::jet_row_join(cells),
-//RS             Err(error) => jet_arithmetic_stop(file, line, &error.message()),
-//RS         }
-//RS     }
-//RS 
-//RS     /// `xs[i].field` — the fused read, straight out of one column, with no
-//RS     /// whole-record gather. `field` is the column's declaration-order index.
-//RS     #[inline(always)]
-//RS     pub fn cell(&self, field: usize, index: i64, file: &str, line: u32) -> S::Cell {
-//RS         match self.columns.gather_cell(field, index) {
-//RS             Ok(cell) => cell,
-//RS             Err(error) => jet_arithmetic_stop(file, line, &error.message()),
-//RS         }
-//RS     }
-//RS 
-//RS     /// Borrow one stored column for a contiguous field scan. The caller must
-//RS     /// already have the canonical field index; `JetColumns` remains the one
-//RS     /// bounds/ownership boundary for storage.
-//RS     #[inline(always)]
-//RS     pub fn column(&self, field: usize) -> &[S::Cell] {
-//RS         self.columns.column(field)
-//RS     }
-//RS 
-//RS     /// Project one canonical field once for an eligible typed scan.  The
-//RS     /// closure unwraps the generated cell enum during this setup pass; callers
-//RS     /// index the returned contiguous typed storage inside the loop.
-//RS     #[inline]
-//RS     pub fn project_column<T, F>(&self, field: usize, project: F) -> Vec<T>
-//RS     where
-//RS         F: FnMut(&S::Cell) -> T,
-//RS     {
-//RS         self.columns.project(field, project)
-//RS     }
-//RS 
-//RS 
-//RS     /// Build the columns from records in order — what a columnar list literal
-//RS     /// lowers to.
-//RS     pub fn from_aos(values: Vec<S>) -> Self {
-//RS         let mut list = Self::new();
-//RS         for value in values {
-//RS             list.push(value);
-//RS         }
-//RS         list
-//RS     }
-//RS 
-//RS     /// The array-of-structs view. Iteration, rendering and serialization all go
-//RS     /// through this, which is what keeps the layout unobservable (D-SOA2D).
-//RS     pub fn to_aos(&self) -> Vec<S> {
-//RS         self.iter_aos().collect()
-//RS     }
-//RS 
-//RS     pub fn iter_aos(&self) -> impl Iterator<Item = S> + '_ {
-//RS         self.columns.rows().map(S::jet_row_join)
-//RS     }
-//RS }
-//RS 
-//RS impl<S: JetRow> IntoIterator for JetColumnList<S> {
-//RS     type Item = S;
-//RS     type IntoIter =
-//RS         std::iter::Map<JetColumnListIntoRows<S::Cell>, fn(Vec<S::Cell>) -> S>;
-//RS 
-//RS     fn into_iter(self) -> Self::IntoIter {
-//RS         let mut columns = self
-//RS             .columns
-//RS             .cols
-//RS             .into_iter()
-//RS             .map(Vec::into_iter)
-//RS             .collect::<Vec<_>>();
-//RS         let remaining = columns.first_mut().map_or(0, |column| column.len());
-//RS         JetColumnListIntoRows {
-//RS             columns,
-//RS             remaining,
-//RS         }
-//RS         .map(S::jet_row_join)
-//RS     }
-//RS }
-//RS 
-//RS 
-//RS impl<S: JetRow> Default for JetColumnList<S> {
-//RS     fn default() -> Self {
-//RS         Self::new()
-//RS     }
-//RS }
-//RS 
-//RS impl<S: JetRow> Clone for JetColumnList<S> {
-//RS     fn clone(&self) -> Self {
-//RS         Self {
-//RS             columns: self.columns.clone(),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS impl<S: JetRow> std::fmt::Debug for JetColumnList<S>
-//RS where
-//RS     S::Cell: std::fmt::Debug,
-//RS {
-//RS     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-//RS         f.debug_struct("JetColumnList")
-//RS             .field("columns", &self.columns)
-//RS             .finish()
-//RS     }
-//RS }
-//RS 
-//RS /// D-SOA2D: a columnar list renders exactly like the array-of-structs form, so
-//RS /// `print` output never reveals the layout. Proven once here instead of being
-//RS /// re-emitted per columnar struct.
-//RS impl<S: JetRow + JetShow> JetShow for JetColumnList<S> {
-//RS     fn jet_show(&self) -> String {
-//RS         self.to_aos().jet_show()
-//RS     }
-//RS }
-//RS impl<S: JetRow> JetListSurface for JetColumnList<S> {
-//RS     #[inline(always)]
-//RS     fn jet_len(&self) -> i64 {
-//RS         self.len() as i64
-//RS     }
-//RS 
-//RS     #[inline(always)]
-//RS     fn jet_is_empty(&self) -> bool {
-//RS         self.is_empty()
-//RS     }
-//RS }
-//RS impl<S: JetRow> JetListPushSurface for JetColumnList<S> {
-//RS     type Item = S;
-//RS 
-//RS     #[inline(always)]
-//RS     fn jet_push(&mut self, value: Self::Item) {
-//RS         self.push(value);
-//RS     }
-//RS }
-//RS impl<S> JetLoopSource for JetColumnList<S>
-//RS where
-//RS     S: JetRow + 'static,
-//RS     S::Cell: 'static,
-//RS {
-//RS     fn jet_loop_source(
-//RS         self,
-//RS         source_kind: JetLoopSourceKind,
-//RS         by_value: bool,
-//RS     ) -> Box<dyn Iterator<Item = JetLoopAny>> {
-//RS         match source_kind {
-//RS             JetLoopSourceKind::Plain => {
-//RS                 if !by_value {
-//RS                     jet_loop_source_error(source_kind);
-//RS                 }
-//RS                 Box::new(
-//RS                     self.into_iter()
-//RS                         .map(|value| Box::new(value) as JetLoopAny),
-//RS                 )
-//RS             }
-//RS             JetLoopSourceKind::Chars
-//RS             | JetLoopSourceKind::LinesFile
-//RS             | JetLoopSourceKind::LinesStdin
-//RS             | JetLoopSourceKind::LinesProcessStream
-//RS             | JetLoopSourceKind::ChannelReceiver
-//RS             | JetLoopSourceKind::EncodingReader { .. }
-//RS             | JetLoopSourceKind::Iterable { .. } => jet_loop_source_error(source_kind),
-//RS         }
-//RS     }
-//RS }
-//RS impl<S> JetLoopSource for &mut JetColumnList<S>
-//RS where
-//RS     S: JetRow + 'static,
-//RS     S::Cell: 'static,
-//RS {
-//RS     fn jet_loop_source(
-//RS         self,
-//RS         source_kind: JetLoopSourceKind,
-//RS         by_value: bool,
-//RS     ) -> Box<dyn Iterator<Item = JetLoopAny>> {
-//RS         match source_kind {
-//RS             JetLoopSourceKind::Plain => {
-//RS                 if by_value {
-//RS                     jet_loop_source_error(source_kind);
-//RS                 }
-//RS                 let values = (*self).clone();
-//RS                 Box::new(
-//RS                     values
-//RS                         .into_iter()
-//RS                         .map(|value| Box::new(value) as JetLoopAny),
-//RS                 )
-//RS             }
-//RS             JetLoopSourceKind::Chars
-//RS             | JetLoopSourceKind::LinesFile
-//RS             | JetLoopSourceKind::LinesStdin
-//RS             | JetLoopSourceKind::LinesProcessStream
-//RS             | JetLoopSourceKind::ChannelReceiver
-//RS             | JetLoopSourceKind::EncodingReader { .. }
-//RS             | JetLoopSourceKind::Iterable { .. } => jet_loop_source_error(source_kind),
-//RS         }
-//RS     }
-//RS }
-// END-PORT-PENDING 0142 crates/jet-codegen/src/Prelude/Core/ColumnList.rs:1-283
+use core.prelude.runtime.kernel_columns.JetColumns
+// D-SOA-TIER1=A: generated records supply cell vocabulary and split/join only.
+// Rust: crates/jet-codegen/src/Prelude/Core/ColumnList.rs:10
+pub trait JetRow {
+    type Cell: Clone
+    // Rust: crates/jet-codegen/src/Prelude/Core/ColumnList.rs:17
+    fn jet_row_width() -> USize
+    // Rust: crates/jet-codegen/src/Prelude/Core/ColumnList.rs:20
+    fn jet_row_split(self: ^Self) -> [Self.Cell]
+    // Rust: crates/jet-codegen/src/Prelude/Core/ColumnList.rs:23
+    fn jet_row_join(cells: [Self.Cell]) -> Self
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/ColumnList.rs:34
+pub struct JetColumnList<S: JetRow> { columns: JetColumns<S.Cell> }
+// Rust: crates/jet-codegen/src/Prelude/Core/ColumnList.rs:38
+pub struct JetColumnListIntoRows<C> { columns: [IntoIter<C>], remaining: USize }
+impl<C> Iterator<[C]> for JetColumnListIntoRows<C> {
+    // Rust: crates/jet-codegen/src/Prelude/Core/ColumnList.rs:46
+    fn next(self: &JetColumnListIntoRows<C>) -> [C]? {
+        if self.remaining == 0 -> return None
+        self.remaining -= 1
+        Some(self.columns.iter_mut().map((column) -> column.next().expect("columnar store columns have inconsistent lengths")).collect())
+    }
+}
+impl<S: JetRow> JetColumnList<S> {
+    // Rust: crates/jet-codegen/src/Prelude/Core/ColumnList.rs:67
+    pub fn new() -> JetColumnList<S> { JetColumnList<S>{columns: JetColumns<S.Cell>.new(S.jet_row_width())} }
+    // Rust: crates/jet-codegen/src/Prelude/Core/ColumnList.rs:73
+    pub fn len(self: JetColumnList<S>) -> USize { self.columns.len() }
+    // Rust: crates/jet-codegen/src/Prelude/Core/ColumnList.rs:77
+    pub fn is_empty(self: JetColumnList<S>) -> Bool { self.columns.is_empty() }
+    // Rust: crates/jet-codegen/src/Prelude/Core/ColumnList.rs:82
+    pub fn push(self: &JetColumnList<S>, value: S) -> () { self.columns.push_row(value.jet_row_split()) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/ColumnList.rs:90
+    #Inline(Always)
+    pub fn gather_at(self: JetColumnList<S>, index: I64, file: String, line: U32) -> S {
+        cells :: self.columns.gather(index) ?? return jet_arithmetic_stop(file, line, err.message())
+        S.jet_row_join(^cells)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/ColumnList.rs:100
+    #Inline(Always)
+    pub fn cell(self: JetColumnList<S>, field: USize, index: I64, file: String, line: U32) -> S.Cell {
+        self.columns.gather_cell(field, index) ?? return jet_arithmetic_stop(file, line, err.message())
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/ColumnList.rs:111
+    #Inline(Always)
+    pub fn column(self: JetColumnList<S>, field: USize) -> View<S.Cell> { self.columns.column(field) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/ColumnList.rs:119
+    #Inline
+    pub fn project_column<T>(self: JetColumnList<S>, field: USize, project: fn(S.Cell) -> T) -> [T] { self.columns.project(field, project) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/ColumnList.rs:129
+    pub fn from_aos(values: [S]) -> JetColumnList<S> {
+        list := JetColumnList<S>.new()
+        loop value in values { list.push(^value) }
+        ^list
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/ColumnList.rs:139
+    pub fn to_aos(self: JetColumnList<S>) -> [S] { self.iter_aos().collect() }
+    // Rust: crates/jet-codegen/src/Prelude/Core/ColumnList.rs:143
+    pub fn iter_aos(self: JetColumnList<S>) -> Iterator<S> { self.columns.rows().map(S.jet_row_join) }
+}
+impl<S: JetRow> IntoIterator<S> for JetColumnList<S> {
+    // Rust: crates/jet-codegen/src/Prelude/Core/ColumnList.rs:151
+    type IntoIter = Map<JetColumnListIntoRows<S.Cell>, fn([S.Cell]) -> S>
+    // Rust: crates/jet-codegen/src/Prelude/Core/ColumnList.rs:153
+    fn into_iter(self: ^JetColumnList<S>) -> Self.IntoIter {
+        columns := self.columns.cols.into_iter().map((column) -> column.into_iter()).collect()
+        remaining :: columns.first_mut().map_or(0, (column) -> column.len())
+        JetColumnListIntoRows<S.Cell>{columns: ^columns, remaining}.map(S.jet_row_join)
+    }
+}
+impl<S: JetRow> Default for JetColumnList<S> {
+    // Rust: crates/jet-codegen/src/Prelude/Core/ColumnList.rs:171
+    fn default() -> JetColumnList<S> { JetColumnList<S>.new() }
+}
+impl<S: JetRow> Clone for JetColumnList<S> {
+    // Rust: crates/jet-codegen/src/Prelude/Core/ColumnList.rs:177
+    fn clone(self: JetColumnList<S>) -> JetColumnList<S> { JetColumnList<S>{columns: self.columns.clone()} }
+}
+impl<S: JetRow> Debug for JetColumnList<S> where S.Cell: Debug {
+    // Rust: crates/jet-codegen/src/Prelude/Core/ColumnList.rs:188
+    fn fmt(self: JetColumnList<S>, f: &std.fmt.Formatter) -> () std.fmt.Error! {
+        f.debug_struct("JetColumnList").field("columns", self.columns).finish()
+    }
+}
+impl<S: JetRow + JetShow> JetShow for JetColumnList<S> {
+    // Rust: crates/jet-codegen/src/Prelude/Core/ColumnList.rs:199
+    fn jet_show(self: JetColumnList<S>) -> String { self.to_aos().jet_show() }
+}
+impl<S: JetRow> JetListSurface for JetColumnList<S> {
+    // Rust: crates/jet-codegen/src/Prelude/Core/ColumnList.rs:205
+    #Inline(Always)
+    fn jet_len(self: JetColumnList<S>) -> I64 { self.len() as I64 }
+    // Rust: crates/jet-codegen/src/Prelude/Core/ColumnList.rs:210
+    #Inline(Always)
+    fn jet_is_empty(self: JetColumnList<S>) -> Bool { self.is_empty() }
+}
+impl<S: JetRow> JetListPushSurface for JetColumnList<S> {
+    type Item = S
+    // Rust: crates/jet-codegen/src/Prelude/Core/ColumnList.rs:218
+    #Inline(Always)
+    fn jet_push(self: &JetColumnList<S>, value: S) -> () { self.push(^value) }
+}
+impl<S: JetRow> JetLoopSource for JetColumnList<S> {
+    // Rust: crates/jet-codegen/src/Prelude/Core/ColumnList.rs:227
+    fn jet_loop_source(self: ^JetColumnList<S>, source_kind: JetLoopSourceKind, by_value: Bool) -> Box<Iterator<JetLoopAny>> {
+        if source_kind == {
+            .Plain -> {
+                if !by_value -> jet_loop_source_error(source_kind)
+                Box.new(self.into_iter().map((value) -> Box.new(^value) as JetLoopAny))
+            }
+            .Chars, .LinesFile, .LinesStdin, .LinesProcessStream, .ChannelReceiver, .EncodingReader{..}, .Iterable{..} -> jet_loop_source_error(source_kind)
+        }
+    }
+}
+impl<S: JetRow> JetLoopSource for &JetColumnList<S> {
+    // Rust: crates/jet-codegen/src/Prelude/Core/ColumnList.rs:257
+    fn jet_loop_source(self: &JetColumnList<S>, source_kind: JetLoopSourceKind, by_value: Bool) -> Box<Iterator<JetLoopAny>> {
+        if source_kind == {
+            .Plain -> {
+                if by_value -> jet_loop_source_error(source_kind)
+                values :: self.clone()
+                Box.new(values.into_iter().map((value) -> Box.new(^value) as JetLoopAny))
+            }
+            .Chars, .LinesFile, .LinesStdin, .LinesProcessStream, .ChannelReceiver, .EncodingReader{..}, .Iterable{..} -> jet_loop_source_error(source_kind)
+        }
+    }
+}
 

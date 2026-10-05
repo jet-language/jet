@@ -1,1808 +1,1268 @@
-// PORT-PENDING 0184 crates-jet-codegen-src-prelude-scheduler-slice-1: crates/jet-codegen/src/Prelude/Scheduler.rs:1-1804
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS // D-ASYNCRT1=A (c126): M:N green-thread scheduler — work-stealing pool (M1) plus
-//RS // condvar park/wake substrate (M2): channel wake-on-send, timer sleep, IO poll
-//RS // hook, pause/cancel at yield points. std-only (I6).
-//RS 
-//RS use std::collections::{HashMap, HashSet, VecDeque};
-//RS use std::net::TcpStream;
-//RS use std::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering};
-//RS use std::sync::{Arc, Condvar, Mutex, OnceLock};
-//RS use std::thread;
-//RS use std::time::{Duration, Instant};
-//RS 
-//RS struct Job { run:Box<dyn FnOnce()+Send>,blocking:bool }
-//RS 
-//RS fn spawn_scheduler_worker(name: String, work: impl FnOnce() + Send + 'static) {
-//RS     thread::Builder::new()
-//RS         .name(name.clone())
-//RS         .stack_size(jet_foundation::CompilerStack::COMPILER_STACK_SIZE)
-//RS         .spawn(work)
-//RS         .unwrap_or_else(|error| {
-//RS             jet_scheduler_fatal(&format!("could not start {name}: {error}"))
-//RS         });
-//RS }
-//RS 
-//RS 
-//RS thread_local! {
-//RS     static JET_SCHEDULER_CATCHING_PANIC: std::cell::Cell<bool> =
-//RS         const { std::cell::Cell::new(false) };
-//RS     static JET_SCHEDULER_WAIT_BOUNDARY_DEPTH: std::cell::Cell<u32> =
-//RS         const { std::cell::Cell::new(0) };
-//RS     static JET_TYPED_DEADLINE_BOUNDARY_DEPTH: std::cell::Cell<u32> =
-//RS         const { std::cell::Cell::new(0) };
-//RS }
-//RS 
-//RS struct JetSchedulerWaitBoundary;
-//RS 
-//RS impl JetSchedulerWaitBoundary {
-//RS     fn enter() -> Self {
-//RS         JET_SCHEDULER_WAIT_BOUNDARY_DEPTH
-//RS             .with(|depth| depth.set(depth.get().saturating_add(1)));
-//RS         Self
-//RS     }
-//RS }
-//RS 
-//RS impl Drop for JetSchedulerWaitBoundary {
-//RS     fn drop(&mut self) {
-//RS         JET_SCHEDULER_WAIT_BOUNDARY_DEPTH
-//RS             .with(|depth| depth.set(depth.get().saturating_sub(1)));
-//RS     }
-//RS }
-//RS 
-//RS fn jet_scheduler_wait_boundary_should_unwind() -> bool {
-//RS     JET_SCHEDULER_WAIT_BOUNDARY_DEPTH.with(|depth| depth.get() != 0)
-//RS }
-//RS 
-//RS /// Entered by typed task operations (`JetTask::join` and friends in
-//RS /// `MathTaskMem.rs`) that convert an inherited deadline into their own typed
-//RS /// result. Public because hosts that compile the task kernel beside this
-//RS /// scheduler (the resident JIT) reach it across a module boundary.
-//RS pub struct JetTypedDeadlineBoundary;
-//RS 
-//RS impl JetTypedDeadlineBoundary {
-//RS     pub fn enter() -> Self {
-//RS         JET_TYPED_DEADLINE_BOUNDARY_DEPTH
-//RS             .with(|depth| depth.set(depth.get().saturating_add(1)));
-//RS         Self
-//RS     }
-//RS }
-//RS 
-//RS impl Drop for JetTypedDeadlineBoundary {
-//RS     fn drop(&mut self) {
-//RS         JET_TYPED_DEADLINE_BOUNDARY_DEPTH
-//RS             .with(|depth| depth.set(depth.get().saturating_sub(1)));
-//RS     }
-//RS }
-//RS 
-//RS fn jet_typed_deadline_boundary_should_unwind() -> bool {
-//RS     JET_TYPED_DEADLINE_BOUNDARY_DEPTH.with(|depth| depth.get() != 0)
-//RS }
-//RS 
-//RS /// Installed once per process, at the first scheduler catch frame. The wrapped
-//RS /// `previous` hook is captured here, so the initializer lives with the static.
-//RS static JET_SCHEDULER_PANIC_HOOK: std::sync::LazyLock<()> = std::sync::LazyLock::new(|| {
-//RS     let previous = std::panic::take_hook();
-//RS     std::panic::set_hook(Box::new(move |info| {
-//RS         if !jet_scheduler_suppress_panic_report(info.payload()) {
-//RS             previous(info);
-//RS         }
-//RS     }));
-//RS });
-//RS 
-//RS /// A Foundation-rendered report riding through a Rust panic payload. A boundary
-//RS /// that cannot carry a typed report panics with the report text itself
-//RS /// (`SchedulerHost.rs`'s `jet_runtime_diagnostic` and `jet_scheduler_runtime_stop`
-//RS /// for the JIT/interpreter tier), and the catching side republishes that text:
-//RS /// `jet_runtime_caught_stop` keys on this same `Stop [` header and
-//RS /// `jet_scheduler_panic_message` on this same `]: ` header. Foundation renders
-//RS /// exactly two headers — `Stop [<code>]: ` (`jet_render_runtime_stop`) and
-//RS /// `Error [<code>]: ` (`jet_render_err`, `JetTaskDeadline::render`).
-//RS fn jet_scheduler_transported_report(text: &str) -> bool {
-//RS     let head = text.lines().next().unwrap_or(text);
-//RS     (head.starts_with("Stop [") || head.starts_with("Error [")) && head.contains("]: ")
-//RS }
-//RS 
-//RS /// Private transport for a panic that did not originate in Jet runtime
-//RS /// semantics. The host turns this marker into its existing compiler-fault rail;
-//RS /// it must never be mistaken for a public task-failure row.
-//RS pub const JET_HOST_FAULT_PREFIX: &str = "__jet_host_fault__: ";
-//RS 
-//RS pub fn jet_scheduler_host_fault_reason(message: &str) -> Option<&str> {
-//RS     message.strip_prefix(JET_HOST_FAULT_PREFIX)
-//RS }
-//RS 
-//RS fn jet_scheduler_host_fault_message(message: &str) -> String {
-//RS     format!("{JET_HOST_FAULT_PREFIX}{message}")
-//RS }
-//RS 
-//RS /// The complete set of panic payloads a scheduler catch frame turns into a
-//RS /// status or republishes as a report: the two typed control transfers, a
-//RS /// transported report, and the one private foreign-boundary marker that
-//RS /// `Prelude/Core.rs`'s `jet_runtime_boundary` converts back into a user stop.
-//RS /// Anything else is a host/compiler fault that nothing downstream republishes.
-//RS fn jet_scheduler_converted_unwind(payload: &(dyn std::any::Any + Send)) -> bool {
-//RS     if jet_scheduler_is_cancel_unwind(payload) || payload.is::<JetDeadlineUnwind>() {
-//RS         return true;
-//RS     }
-//RS     let Some(text) = payload
-//RS         .downcast_ref::<String>()
-//RS         .map(String::as_str)
-//RS         .or_else(|| payload.downcast_ref::<&'static str>().copied())
-//RS     else {
-//RS         return false;
-//RS     };
-//RS     text.starts_with("__jet_ffi_runtime__: ")
-//RS         || text.starts_with(JET_HOST_FAULT_PREFIX)
-//RS         || jet_scheduler_transported_report(text)
-//RS }
-//RS 
-//RS /// Whether the hook must stay quiet for this panic. A live catch frame is only
-//RS /// half the answer: the flag says a frame exists, not that this panic reaches
-//RS /// it. A non-unwinding panic — `panic_cannot_unwind` at an `extern "C"` edge, a
-//RS /// panic in cleanup, a violated runtime precondition — runs the hook and then
-//RS /// aborts the process before unwinding starts, so no catch frame can ever
-//RS /// convert it and its hook line is the only evidence anyone gets. Std exposes
-//RS /// no stable `PanicHookInfo::can_unwind`, so the payload answers instead: quiet
-//RS /// for exactly the control transfers the frame converts, loud for the rest.
-//RS fn jet_scheduler_suppress_panic_report(payload: &(dyn std::any::Any + Send)) -> bool {
-//RS     JET_SCHEDULER_CATCHING_PANIC
-//RS         .try_with(|flag| flag.get())
-//RS         .unwrap_or(false)
-//RS         && jet_scheduler_converted_unwind(payload)
-//RS }
-//RS 
-//RS fn jet_scheduler_install_panic_hook() {
-//RS     std::sync::LazyLock::force(&JET_SCHEDULER_PANIC_HOOK);
-//RS }
-//RS 
-//RS pub(crate) fn jet_scheduler_catch_task_unwind<F, T>(f: F) -> std::thread::Result<T>
-//RS where
-//RS     F: FnOnce() -> T,
-//RS {
-//RS     jet_scheduler_install_panic_hook();
-//RS     JET_SCHEDULER_CATCHING_PANIC.with(|flag| {
-//RS         let previous = flag.replace(true);
-//RS         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-//RS             let _boundary = JetSchedulerWaitBoundary::enter();
-//RS             f()
-//RS         }));
-//RS         flag.set(previous);
-//RS         jet_std::jet_task_deadline_clear_pending();
-//RS         result
-//RS     })
-//RS }
-//RS 
-//RS #[cfg(all(test, target_os = "windows"))]
-//RS static TEST_IOCP_GQCS_FATAL: AtomicBool = AtomicBool::new(false);
-//RS 
-//RS fn jet_scheduler_fatal(msg: &str) -> ! {
-//RS     if JET_PARA_DEFER_FAILURE.with(|defer| defer.get()) {
-//RS         std::panic::resume_unwind(Box::new(JetParaRuntimeFailure::SchedulerFatal {
-//RS             msg: msg.to_string(),
-//RS         }));
-//RS     }
-//RS     jet_scheduler_runtime_stop(msg);
-//RS }
-//RS 
-//RS // ── D-CANCELMODEL1=C: preemptive cancellation at wait points ─────────────────
-//RS // One unwind mechanism, two triggers (deadline E3003, task cancel). A cancelled
-//RS // task unwinds at its next wait point by panicking with the `JetCancelUnwind`
-//RS // marker; the task runner maps that payload to a `Cancelled` result and every
-//RS // Drop-backed cleanup runs on the way out — the same shape a blown deadline
-//RS // already produces. A shielded region (SHIELD_DEPTH > 0) DEFERS the unwind: wait
-//RS // points inside it complete normally and the deferred cancel/deadline lands when
-//RS // the outermost region exits. D-SHIELDNAME1=A (ratified 2026-07-11) spells this
-//RS // region `#Shield { … }`; codegen lowers the block to
-//RS // `jet_scheduler_shield_enter`/`_leave` around the body (Codegen/TIR emit).
-//RS //
-//RS // Cleanup rule (#2007): a thread that is already unwinding is past the point
-//RS // where an interrupt can be delivered. Its Drop-backed cleanup is running and
-//RS // the frame it unwinds to is the one that reports the outcome, so a raise from
-//RS // drop glue is a double panic — which Rust turns into `panic in a destructor
-//RS // during cleanup` and a process abort, not an outcome. An in-flight unwind is
-//RS // therefore a critical section in exactly the D-CANCELMODEL1=C sense, and
-//RS // `jet_scheduler_shielded` reports it as one: wait points reached from cleanup
-//RS // complete normally, the interrupt stays recorded (a cancel on
-//RS // `JetTaskControl.cancelled`, a blown deadline on
-//RS // `jet_task_deadline_mark_pending`), and it lands on the in-flight unwind's own
-//RS // outcome instead of starting a second one.
-//RS struct JetCancelUnwind;
-//RS 
-//RS struct JetDeadlineUnwind {
-//RS     rendered: String,
-//RS }
-//RS 
-//RS /// Identify the one internal unwind used by D-CANCELMODEL1=C. Shared
-//RS /// lifecycle helpers use this predicate to keep cancellation out of the
-//RS /// ordinary producer-failure rail.
-//RS pub fn jet_scheduler_is_cancel_unwind(payload: &(dyn std::any::Any + Send)) -> bool {
-//RS     payload.is::<JetCancelUnwind>()
-//RS }
-//RS /// Identify the internal deadline unwind used by D-CANCELMODEL1=C. Shared
-//RS /// lifecycle helpers use this predicate to preserve deadline identity at
-//RS /// foreign boundaries instead of classifying it as an ordinary panic.
-//RS pub fn jet_scheduler_is_deadline_unwind(payload: &(dyn std::any::Any + Send)) -> bool {
-//RS     payload.is::<JetDeadlineUnwind>()
-//RS }
-//RS 
-//RS fn jet_scheduler_panic_message(payload: &(dyn std::any::Any + Send)) -> String {
-//RS     let message = payload
-//RS         .downcast_ref::<String>()
-//RS         .cloned()
-//RS         .or_else(|| payload.downcast_ref::<&'static str>().map(|s| (*s).to_string()))
-//RS         .unwrap_or_else(|| jet_scheduler_host_fault_message("task carried a non-Jet payload"));
-//RS     // A child runtime stop carries its complete report while it crosses the
-//RS     // Rust unwind boundary. The parent task must receive only the stop's
-//RS     // message; it renders the one report at the user-visible call site.
-//RS     let message = message
-//RS         .lines()
-//RS         .next()
-//RS         .and_then(|line| line.split_once("]: ").map(|(_, message)| message))
-//RS         .unwrap_or(&message)
-//RS         .strip_prefix("panic: ")
-//RS         .unwrap_or_else(|| message.lines().next().unwrap_or(&message))
-//RS         .to_string();
-//RS     // AOT's rich panic path includes its source location in the Rust unwind
-//RS     // payload. That location is an internal diagnostic detail, not the
-//RS     // TaskFailure reason; strip only the compiler-shaped suffix so AOT,
-//RS     // resident JIT, and the interpreter publish the same child value.
-//RS     message
-//RS         .rsplit_once(" (at ")
-//RS         .filter(|(_, location)| location.ends_with(')') && location[..location.len() - 1].contains(':'))
-//RS         .map(|(reason, _)| reason.to_string())
-//RS         .unwrap_or(message)
-//RS }
-//RS 
-//RS /// Report a payload this program caught and will not re-raise: a blown deadline
-//RS /// prints its rendered report, loose panic text republishes as a caught stop.
-//RS ///
-//RS /// One consumer, and it is not in this part: the AOT interrupt adapter — the
-//RS /// signal-dispatcher module in `Prelude/CoreLib/Top/FSIoEnvOsTesting.rs` — passes
-//RS /// this as the tail of `Prelude/Core.rs`'s `jet_interrupt_handler_unwind`,
-//RS /// which owns the payloads Core declares and names none of this part's. Do not
-//RS /// move this into Core: `JetDeadlineUnwind` is the scheduler's payload, and
-//RS /// `jet_codegen::scheduler` (the Cranelift/interpreter host, `lib.rs`) compiles
-//RS /// this file WITHOUT `Prelude/Core.rs`, so a Core home for either would need a
-//RS /// second declaration in `SchedulerHost.rs` (I8).
-//RS ///
-//RS /// That adapter is described, never SPELLED, here on purpose. This file ships
-//RS /// with every program that reaches the runtime, while the adapter ships only
-//RS /// when a program calls `core.sys.on_interrupt`, and the pay-for-what-you-call
-//RS /// guard for that gating is a plain text search of the emitted Rust
-//RS /// (`tests/corelib_parts/compile.rs`,
-//RS /// `core_os_interrupt_prelude_is_emitted_only_when_used`). Writing its `mod`
-//RS /// header in prose here put the searched-for text into every runtime-carrying
-//RS /// program and failed the guard with no FFI emitted at all — so name the file,
-//RS /// not the item, in any always-emitted part.
-//RS fn jet_report_caught_unwind(payload: Box<dyn std::any::Any + Send>) {
-//RS     if let Some(deadline) = payload.downcast_ref::<JetDeadlineUnwind>() {
-//RS         eprintln!("{}", deadline.rendered);
-//RS     } else if let Some(message) = payload.downcast_ref::<String>() {
-//RS         jet_runtime_caught_stop(message);
-//RS     } else if let Some(message) = payload.downcast_ref::<&'static str>() {
-//RS         jet_runtime_caught_stop(message);
-//RS     }
-//RS }
-//RS 
-//RS /// Result of calling a scheduler wait point from a native-code boundary that
-//RS /// cannot carry Rust unwinds (Cranelift, C, plugins). The boundary catches the
-//RS /// scheduler's internal control transfer before it reaches foreign frames.
-//RS pub enum JetSchedulerWait<T> {
-//RS     Ready(T),
-//RS     Cancelled,
-//RS     Deadline(String),
-//RS     Panicked(String),
-//RS }
-//RS 
-//RS /// Catch an unwind inside a frame that foreign code sits *below*.
-//RS ///
-//RS /// D-JITUNWIND1 (#1997): `cranelift-jit` registers no unwind information for
-//RS /// the code it emits, so a JIT frame carries no FDE and a Rust panic raised
-//RS /// above one can never be walked past — libgcc's phase 1 returns
-//RS /// `_URC_END_OF_STACK` and std rtaborts with `failed to initiate panic,
-//RS /// error 5` before any outer `catch_unwind` exists to see it. The answer is
-//RS /// conversion at the boundary: catch inside the host frame, hand back a
-//RS /// status, and let native code leave through its own control flow. This is the
-//RS /// catch half; [`jet_scheduler_classify_unwind`] is the conversion half.
-//RS ///
-//RS /// The catching flag is set for one reason only: the process panic hook must
-//RS /// stay quiet for a control transfer this frame converts
-//RS /// (`jet_scheduler_suppress_panic_report`). The wait-point bookkeeping that
-//RS /// [`jet_scheduler_wait_without_unwind`] adds is deliberately absent — an
-//RS /// ordinary host seam is not a wait point and must not make one look live.
-//RS pub fn jet_scheduler_catch_foreign_boundary<F, T>(
-//RS     f: F,
-//RS ) -> Result<T, Box<dyn std::any::Any + Send>>
-//RS where
-//RS     F: FnOnce() -> T,
-//RS {
-//RS     JET_SCHEDULER_CATCHING_PANIC.with(|catching| {
-//RS         let previous = catching.replace(true);
-//RS         // Install the hook inside the same catch frame as the foreign call.
-//RS         // Lazy initialization is process state too: if it panics, that panic
-//RS         // must not cross the extern-C seam that calls this helper.
-//RS         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-//RS             jet_scheduler_install_panic_hook();
-//RS             f()
-//RS         }));
-//RS         catching.set(previous);
-//RS         result
-//RS     })
-//RS }
-//RS 
-//RS /// Read a caught payload as one of the scheduler's own outcomes. I8: this is
-//RS /// the single place a payload becomes a status, so a wait point and a plain
-//RS /// host seam cannot disagree about what a cancel or a blown deadline means.
-//RS pub fn jet_scheduler_classify_unwind<T>(
-//RS     payload: Box<dyn std::any::Any + Send>,
-//RS ) -> JetSchedulerWait<T> {
-//RS     if payload.is::<JetCancelUnwind>() {
-//RS         return JetSchedulerWait::Cancelled;
-//RS     }
-//RS     if payload.is::<JetDeadlineUnwind>() {
-//RS         let deadline = payload
-//RS             .downcast::<JetDeadlineUnwind>()
-//RS             .expect("deadline payload type checked");
-//RS         return JetSchedulerWait::Deadline(deadline.rendered);
-//RS     }
-//RS     let message = payload
-//RS         .downcast_ref::<String>()
-//RS         .map(String::as_str)
-//RS         .or_else(|| payload.downcast_ref::<&str>().copied())
-//RS         .map(|message| {
-//RS             if message.starts_with("__jet_ffi_runtime__: ")
-//RS                 || message.starts_with(JET_HOST_FAULT_PREFIX)
-//RS                 || jet_scheduler_transported_report(message)
-//RS             {
-//RS                 message.to_string()
-//RS             } else {
-//RS                 jet_scheduler_host_fault_message(message)
-//RS             }
-//RS         })
-//RS         .unwrap_or_else(|| {
-//RS             jet_scheduler_host_fault_message("scheduler wait carried a non-Jet payload")
-//RS         });
-//RS     JetSchedulerWait::Panicked(message)
-//RS }
-//RS 
-//RS pub fn jet_scheduler_wait_without_unwind<F, T>(f: F) -> JetSchedulerWait<T>
-//RS where
-//RS     F: FnOnce() -> T,
-//RS {
-//RS     let result = JET_IN_SCHEDULER_TASK.with(|in_task| {
-//RS         let previous_task = in_task.replace(true);
-//RS         let result = {
-//RS             let _boundary = JetSchedulerWaitBoundary::enter();
-//RS             jet_scheduler_catch_foreign_boundary(f)
-//RS         };
-//RS         in_task.set(previous_task);
-//RS         result
-//RS     });
-//RS     match result {
-//RS         Ok(value) => JetSchedulerWait::Ready(value),
-//RS         Err(payload) => jet_scheduler_classify_unwind(payload),
-//RS     }
-//RS }
-//RS 
-//RS thread_local! {
-//RS     static SHIELD_DEPTH: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
-//RS }
-//RS 
-//RS /// Is an unwind already travelling through this thread? The one place the
-//RS /// cleanup rule above is spelled, so a wait point, a raise door, and the
-//RS /// `#Shield` guard cannot disagree about when an interrupt is deliverable.
-//RS fn jet_scheduler_unwind_in_flight() -> bool {
-//RS     std::thread::panicking()
-//RS }
-//RS 
-//RS /// Does this wait point defer its interrupt instead of unwinding here? True
-//RS /// inside a lexical `#Shield` region (SHIELD_DEPTH > 0) and true while an
-//RS /// unwind is already in flight — cleanup is the same kind of critical section,
-//RS /// and a second raise from drop glue aborts the process instead of reporting
-//RS /// an outcome (#2007, cleanup rule above). Both cases defer, never discard:
-//RS /// the cancel stays on `JetTaskControl.cancelled` and the deadline stays
-//RS /// pending, so the next deliverable wait point or the frame that catches the
-//RS /// in-flight unwind reports it.
-//RS pub fn jet_scheduler_shielded() -> bool {
-//RS     SHIELD_DEPTH.with(|d| d.get() > 0) || jet_scheduler_unwind_in_flight()
-//RS }
-//RS 
-//RS #[allow(dead_code)] // wired to the ratified `#Shield` lowering
-//RS pub fn jet_scheduler_shield_enter() {
-//RS     // Outside a scheduler task/catch frame, `#Shield` is a transparent block.
-//RS     if current_task_control().is_some() {
-//RS         SHIELD_DEPTH.with(|d| d.set(d.get().saturating_add(1)));
-//RS     }
-//RS }
-//RS 
-//RS #[allow(dead_code)] // wired to the ratified `#Shield` lowering
-//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-//RS pub enum JetShieldExit {
-//RS     None,
-//RS     Deadline,
-//RS     Cancelled,
-//RS }
-//RS 
-//RS /// Leave one shield depth without unwinding. JIT code uses this status form so
-//RS /// no Rust panic ever crosses a Cranelift frame; its Rust task wrapper delivers
-//RS /// the returned interrupt after native code has returned.
-//RS pub fn jet_scheduler_shield_leave_status() -> JetShieldExit {
-//RS     // Match `enter`: ambient deadlines must never begin unwinding merely because
-//RS     // ordinary non-task code crossed a lexical shield boundary.
-//RS     if current_task_control().is_none() {
-//RS         return JetShieldExit::None;
-//RS     }
-//RS     let landed = SHIELD_DEPTH.with(|d| {
-//RS         let n = d.get().saturating_sub(1);
-//RS         d.set(n);
-//RS         n == 0
-//RS     });
-//RS     // If the body is already unwinding, decrement the depth but do not start a
-//RS     // second cancellation/deadline unwind from this Drop guard. The original
-//RS     // unwind already exits the task and runs every remaining cleanup.
-//RS     if landed && !jet_scheduler_unwind_in_flight() {
-//RS         // A deadline that closed while shielded is program-level; raise it first.
-//RS         if matches!(jet_deadline_remaining_ms(), Some(ms) if ms <= 0) {
-//RS             return JetShieldExit::Deadline;
-//RS         }
-//RS         // A cancel that arrived while shielded now takes effect at region exit.
-//RS         if jet_scheduler_task_cancelled() {
-//RS             return JetShieldExit::Cancelled;
-//RS         }
-//RS     }
-//RS     JetShieldExit::None
-//RS }
-//RS 
-//RS pub fn jet_scheduler_deliver_shield_exit(exit: JetShieldExit) {
-//RS     match exit {
-//RS         JetShieldExit::None => {}
-//RS         JetShieldExit::Deadline => jet_deadline_exceeded("shield exit"),
-//RS         JetShieldExit::Cancelled => jet_task_unwind_cancel(),
-//RS     }
-//RS }
-//RS 
-//RS #[allow(dead_code)]
-//RS pub fn jet_scheduler_shield_leave() {
-//RS     jet_scheduler_deliver_shield_exit(jet_scheduler_shield_leave_status());
-//RS }
-//RS 
-//RS fn jet_task_unwind_cancel() -> ! {
-//RS     std::panic::panic_any(JetCancelUnwind);
-//RS }
-//RS 
-//RS /// A wait point observed cancellation on a non-shielded task: unwind now when we
-//RS /// are inside a scheduler task (a catch frame exists to turn the unwind into a
-//RS /// `Cancelled` result). Outside a task there is no catch frame, so return and let
-//RS /// the caller fall back to its cooperative sentinel (None/false/Closed).
-//RS ///
-//RS /// The one raise door for a cancel, so the cleanup rule holds for every caller —
-//RS /// wait points, the crypto/HTTP host seams that take this function as a pointer,
-//RS /// and the JIT. While an unwind is in flight this returns instead of raising:
-//RS /// the cancel stays recorded on `JetTaskControl.cancelled` and lands on that
-//RS /// unwind's outcome, because a second raise from drop glue aborts the process
-//RS /// (#2007) rather than cancelling anything.
-//RS pub fn jet_task_deliver_cancel() {
-//RS     if jet_scheduler_panic_should_unwind() && !jet_scheduler_unwind_in_flight() {
-//RS         jet_task_unwind_cancel();
-//RS     }
-//RS }
-//RS 
-//RS /// Cancel check for wait points with no sentinel to return (task join): a no-op
-//RS /// unless the running task is cancelled and unshielded, in which case it unwinds
-//RS /// (inside a task) exactly like every other wait point.
-//RS fn jet_task_wait_point_cancel_check() {
-//RS     jet_scheduler_wait_while_paused();
-//RS     if jet_scheduler_task_cancelled() && !jet_scheduler_shielded() {
-//RS         jet_task_deliver_cancel();
-//RS     }
-//RS }
-//RS 
-//RS // ── M2: park/wake handles ─────────────────────────────────────────────────────
-//RS 
-//RS pub struct ParkSlot {
-//RS     notified: AtomicBool,
-//RS     lock: Mutex<()>,
-//RS     cv: Condvar,
-//RS }
-//RS 
-//RS impl ParkSlot {
-//RS     pub fn new() -> Arc<Self> {
-//RS         Arc::new(ParkSlot {
-//RS             notified: AtomicBool::new(false),
-//RS             lock: Mutex::new(()),
-//RS             cv: Condvar::new(),
-//RS         })
-//RS     }
-//RS 
-//RS     pub fn park(&self, timeout: Option<Duration>) {
-//RS         if self.notified.swap(false, Ordering::Acquire) {
-//RS             return;
-//RS         }
-//RS         let mut guard = self.lock.lock().unwrap();
-//RS         if self.notified.swap(false, Ordering::Acquire) {
-//RS             return;
-//RS         }
-//RS         // Tower #126: count real condvar blocks so scale tests can prove tasks
-//RS         // park (bounded blocks) rather than busy-wait (zero blocks, hot spin).
-//RS         METRIC_PARK_BLOCKS.fetch_add(1, Ordering::Relaxed);
-//RS         match timeout {
-//RS             Some(timeout) => {
-//RS                 let deadline = Instant::now() + timeout;
-//RS                 loop {
-//RS                     let remaining = deadline.saturating_duration_since(Instant::now());
-//RS                     if remaining.is_zero() {
-//RS                         break;
-//RS                     }
-//RS                     let (next, result) = self.cv.wait_timeout(guard, remaining).unwrap();
-//RS                     guard = next;
-//RS                     if self.notified.swap(false, Ordering::Acquire) || result.timed_out() {
-//RS                         break;
-//RS                     }
-//RS                 }
-//RS             }
-//RS             None => loop {
-//RS                 guard = self.cv.wait(guard).unwrap();
-//RS                 if self.notified.swap(false, Ordering::Acquire) {
-//RS                     break;
-//RS                 }
-//RS             },
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn wake(&self) {
-//RS         // Hold the same mutex the parker checks its predicate under, so a wake
-//RS         // that lands between the parker's `notified` re-check and its `cv.wait`
-//RS         // cannot be lost (otherwise a `park(None)` sleeps forever). Textbook
-//RS         // condvar handoff; without it, capacity-1 channel backpressure deadlocks.
-//RS         let _guard = self.lock.lock().unwrap();
-//RS         self.notified.store(true, Ordering::Release);
-//RS         self.cv.notify_one();
-//RS     }
-//RS }
-//RS 
-//RS impl jet_std::JetTaskGroupWaiter for ParkSlot {
-//RS     fn wake(&self) {
-//RS         ParkSlot::wake(self);
-//RS     }
-//RS }
-//RS 
-//RS pub struct JetTaskCancelCallbackGuard {
-//RS     control: std::sync::Weak<JetTaskControl>,
-//RS     id: usize,
-//RS }
-//RS 
-//RS impl Drop for JetTaskCancelCallbackGuard {
-//RS     fn drop(&mut self) {
-//RS         if let Some(control) = self.control.upgrade() {
-//RS             control
-//RS                 .cancel_callbacks
-//RS                 .lock()
-//RS                 .unwrap_or_else(|poisoned| poisoned.into_inner())
-//RS                 .remove(&self.id);
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS pub struct JetTaskControl {
-//RS     pub paused: Arc<AtomicBool>,
-//RS     pub cancelled: Arc<AtomicBool>,
-//RS     /// D-TASK-PAUSE-TIER1=E: 0 = WaitPoints (default), 1 = CheckLoops.
-//RS     pub pause_mode: AtomicU8,
-//RS     observe_id: AtomicUsize,
-//RS     park: Arc<ParkSlot>,
-//RS     cancel_waiters: Mutex<Vec<std::sync::Weak<ParkSlot>>>,
-//RS     cancel_callbacks: Mutex<HashMap<usize, Arc<dyn Fn() + Send + Sync + 'static>>>,
-//RS     next_cancel_callback: AtomicUsize,
-//RS }
-//RS 
-//RS impl JetTaskControl {
-//RS     pub fn new() -> Arc<Self> {
-//RS         Arc::new(JetTaskControl {
-//RS             paused: Arc::new(AtomicBool::new(false)),
-//RS             cancelled: Arc::new(AtomicBool::new(false)),
-//RS             pause_mode: AtomicU8::new(0),
-//RS             observe_id: AtomicUsize::new(0),
-//RS             park: ParkSlot::new(),
-//RS             cancel_waiters: Mutex::new(Vec::new()),
-//RS             cancel_callbacks: Mutex::new(HashMap::new()),
-//RS             next_cancel_callback: AtomicUsize::new(0),
-//RS         })
-//RS     }
-//RS 
-//RS     /// Register a short-lived bridge for provider futures and other foreign
-//RS     /// waits.  Cancellation invokes the callback after releasing the registry
-//RS     /// lock, so the callback may wake or tear down its own wait state.
-//RS     pub fn register_cancel_callback(
-//RS         self: &Arc<Self>,
-//RS         callback: Arc<dyn Fn() + Send + Sync + 'static>,
-//RS     ) -> JetTaskCancelCallbackGuard {
-//RS         let id = self.next_cancel_callback.fetch_add(1, Ordering::Relaxed);
-//RS         let invoke_now = {
-//RS             let mut callbacks = self
-//RS                 .cancel_callbacks
-//RS                 .lock()
-//RS                 .unwrap_or_else(|poisoned| poisoned.into_inner());
-//RS             if self.cancelled.load(Ordering::Acquire) {
-//RS                 true
-//RS             } else {
-//RS                 callbacks.insert(id, callback.clone());
-//RS                 false
-//RS             }
-//RS         };
-//RS         if invoke_now {
-//RS             callback();
-//RS         }
-//RS         JetTaskCancelCallbackGuard {
-//RS             control: Arc::downgrade(self),
-//RS             id,
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn pause(&self) {
-//RS         self.pause_with_mode(0);
-//RS     }
-//RS 
-//RS     /// D-TASK-PAUSE-TIER1=E: `mode` 0 = WaitPoints, 1 = CheckLoops.
-//RS     pub fn pause_with_mode(&self, mode: u8) {
-//RS         self.pause_mode.store(mode, Ordering::Relaxed);
-//RS         self.paused.store(true, Ordering::Relaxed);
-//RS         if let Some(registry) = jet_observe_registry() {
-//RS             let id = self.observe_id.load(Ordering::Relaxed);
-//RS             if let Some(task) = registry.tasks.lock().unwrap().get_mut(&id) {
-//RS                 task.state = "paused";
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn resume(&self) {
-//RS         self.paused.store(false, Ordering::Relaxed);
-//RS         if let Some(registry) = jet_observe_registry() {
-//RS             let id = self.observe_id.load(Ordering::Relaxed);
-//RS             if let Some(task) = registry.tasks.lock().unwrap().get_mut(&id) {
-//RS                 task.state = "running";
-//RS             }
-//RS         }
-//RS         self.park.wake();
-//RS     }
-//RS 
-//RS     pub fn cancel(&self) {
-//RS         self.cancelled.store(true, Ordering::Release);
-//RS         if let Some(registry) = jet_observe_registry() {
-//RS             let id = self.observe_id.load(Ordering::Relaxed);
-//RS             if let Some(task) = registry.tasks.lock().unwrap().get_mut(&id) {
-//RS                 task.cancelled = true;
-//RS             }
-//RS         }
-//RS         self.park.wake();
-//RS         for waiter in self.cancel_waiters.lock().unwrap().drain(..) {
-//RS             if let Some(waiter) = waiter.upgrade() {
-//RS                 waiter.wake();
-//RS             }
-//RS         }
-//RS         let callbacks = std::mem::take(
-//RS             &mut *self
-//RS                 .cancel_callbacks
-//RS                 .lock()
-//RS                 .unwrap_or_else(|poisoned| poisoned.into_inner()),
-//RS         );
-//RS         for callback in callbacks.into_values() {
-//RS             callback();
-//RS         }
-//RS     }
-//RS 
-//RS     fn register_cancel_waiter(&self, slot: &Arc<ParkSlot>) {
-//RS         let mut waiters = self.cancel_waiters.lock().unwrap();
-//RS         if self.cancelled.load(Ordering::Relaxed) {
-//RS             slot.wake();
-//RS         } else {
-//RS             waiters.push(Arc::downgrade(slot));
-//RS         }
-//RS     }
-//RS 
-//RS     fn remove_cancel_waiter(&self, slot: &ParkSlot) {
-//RS         self.cancel_waiters.lock().unwrap().retain(|waiter| {
-//RS             waiter
-//RS                 .upgrade()
-//RS                 .is_some_and(|waiter| !std::ptr::eq(Arc::as_ptr(&waiter), std::ptr::from_ref(slot)))
-//RS         });
-//RS     }
-//RS 
-//RS     fn wait_while_paused(&self) {
-//RS         while self.paused.load(Ordering::Relaxed) && !self.cancelled.load(Ordering::Relaxed) {
-//RS             let shielded = jet_scheduler_shielded();
-//RS             if !shielded
-//RS                 && jet_std::jet_task_deadline_if_expired(
-//RS                     jet_deadline_remaining_ms(),
-//RS                     "task pause",
-//RS                 )
-//RS                 .is_some()
-//RS             {
-//RS                 jet_deadline_exceeded("task pause");
-//RS             }
-//RS             let timeout = if shielded {
-//RS                 None
-//RS             } else {
-//RS                 jet_deadline_remaining_ms()
-//RS                     .map(|remaining| {
-//RS                         Duration::from_millis(jet_task_delay_ms_defaulted(remaining))
-//RS                     })
-//RS             };
-//RS             self.park.park(timeout);
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS impl JetObserveControl for JetTaskControl {
-//RS     fn cancel(&self) {
-//RS         JetTaskControl::cancel(self);
-//RS     }
-//RS }
-//RS thread_local! {
-//RS     static TASK_CONTROL: std::cell::RefCell<Option<Arc<JetTaskControl>>> =
-//RS         const { std::cell::RefCell::new(None) };
-//RS     // Each task/helper completion boundary owns a nested frame. Child scopes
-//RS     // drain only their own callbacks and leave the parent frame untouched.
-//RS     static TASK_COMPLETION_FRAMES: std::cell::RefCell<Vec<Vec<Box<dyn FnOnce()>>>> =
-//RS         const { std::cell::RefCell::new(Vec::new()) };
-//RS }
-//RS 
-//RS pub fn jet_scheduler_set_task_control(c: Option<Arc<JetTaskControl>>) {
-//RS     TASK_CONTROL.with(|t| *t.borrow_mut() = c);
-//RS }
-//RS 
-//RS pub fn jet_scheduler_current_task_control() -> Option<Arc<JetTaskControl>> {
-//RS     current_task_control()
-//RS }
-//RS 
-//RS fn current_task_control() -> Option<Arc<JetTaskControl>> {
-//RS     TASK_CONTROL.with(|t| t.borrow().clone())
-//RS }
-//RS // D-TEST-WORLD1=A: scoped deterministic execution worlds share this Prelude
-//RS // scheduler. The world is an ordinary cloneable capability backed by isolated
-//RS // state; no process-global clock or second task engine is introduced.
-//RS const JET_WORLD_DEFAULT_BUDGET: usize = 100_000;
-//RS 
-//RS struct JetWorldTimer {
-//RS     deadline_ns: i64,
-//RS     sequence: u64,
-//RS     slot: Arc<ParkSlot>,
-//RS }
-//RS 
-//RS struct JetWorldState {
-//RS     monotonic_ns: i64,
-//RS     wall_origin_ms: i64,
-//RS     rng: u64,
-//RS     next_sequence: u64,
-//RS     live_tasks: usize,
-//RS     runnable_tasks: usize,
-//RS     budget: usize,
-//RS     timers: Vec<JetWorldTimer>,
-//RS     history: Vec<String>,
-//RS }
-//RS 
-//RS #[derive(Clone)]
-//RS pub struct JetDeterministicWorld {
-//RS     state: Arc<Mutex<JetWorldState>>,
-//RS     waiters: Arc<Condvar>,
-//RS }
-//RS 
-//RS impl JetDeterministicWorld {
-//RS     pub fn new() -> Self {
-//RS         Self {
-//RS             state: Arc::new(Mutex::new(JetWorldState {
-//RS                 monotonic_ns: 0,
-//RS                 // Unix epoch is a fixed origin. Monotonic advancement never
-//RS                 // changes the calendar/time-zone interpretation of the origin.
-//RS                 wall_origin_ms: 0,
-//RS                 rng: 0x4d595df4d0f33173,
-//RS                 next_sequence: 0,
-//RS                 live_tasks: 0,
-//RS                 runnable_tasks: 0,
-//RS                 budget: JET_WORLD_DEFAULT_BUDGET,
-//RS                 timers: Vec::new(),
-//RS                 history: Vec::new(),
-//RS             })),
-//RS             waiters: Arc::new(Condvar::new()),
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn now(&self) -> i64 {
-//RS         let state = self.state.lock().unwrap_or_else(|error| error.into_inner());
-//RS         state.wall_origin_ms.saturating_add(state.monotonic_ns / 1_000_000)
-//RS     }
-//RS 
-//RS     fn monotonic_ns(&self) -> i64 {
-//RS         self.state
-//RS             .lock()
-//RS             .unwrap_or_else(|error| error.into_inner())
-//RS             .monotonic_ns
-//RS     }
-//RS 
-//RS     pub fn advance_ns(&self, duration_ns: i64) -> i64 {
-//RS         if duration_ns < 0 {
-//RS             jet_scheduler_fatal(
-//RS                 "deterministic world cannot move time backwards; advance requires a non-negative duration",
-//RS             );
-//RS         }
-//RS         let target = {
-//RS             let state = self.state.lock().unwrap_or_else(|error| error.into_inner());
-//RS             state.monotonic_ns.checked_add(duration_ns).unwrap_or_else(|| {
-//RS                 jet_scheduler_fatal("deterministic world clock exhausted its supported range")
-//RS             })
-//RS         };
-//RS         // Spawned tasks register virtual timers only after they reach a wait
-//RS         // point. Wait until those tasks park (or finish) so `advance` cannot
-//RS         // skip timers and leave `join` waiting on a clock that already moved.
-//RS         self.wait_until_idle_or_timer();
-//RS         loop {
-//RS             let due = {
-//RS                 let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
-//RS                 let index = state
-//RS                     .timers
-//RS                     .iter()
-//RS                     .enumerate()
-//RS                     .filter(|(_, timer)| timer.deadline_ns <= target)
-//RS                     .min_by_key(|(_, timer)| (timer.deadline_ns, timer.sequence))
-//RS                     .map(|(index, _)| index);
-//RS                 let Some(index) = index else {
-//RS                     state.monotonic_ns = target;
-//RS                     state.history.push(format!("advance:{duration_ns}"));
-//RS                     break;
-//RS                 };
-//RS                 let timer = state.timers.swap_remove(index);
-//RS                 state.monotonic_ns = timer.deadline_ns;
-//RS                 state.runnable_tasks = state.runnable_tasks.saturating_add(1);
-//RS                 state.history.push(format!(
-//RS                     "timer:{}:{}",
-//RS                     timer.deadline_ns, timer.sequence
-//RS                 ));
-//RS                 timer.slot
-//RS             };
-//RS             due.wake();
-//RS             self.waiters.notify_all();
-//RS             // One due timer is released at a time. This is the stable
-//RS             // sequence tie-break even when the host has many workers.
-//RS             self.wait_idle();
-//RS         }
-//RS         self.now()
-//RS     }
-//RS 
-//RS     fn wait_until_idle_or_timer(&self) {
-//RS         let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
-//RS         let budget = state.budget;
-//RS         for _ in 0..budget {
-//RS             if state.runnable_tasks == 0 || !state.timers.is_empty() {
-//RS                 return;
-//RS             }
-//RS             let (next, _) = self
-//RS                 .waiters
-//RS                 .wait_timeout(state, Duration::from_micros(50))
-//RS                 .unwrap_or_else(|error| error.into_inner());
-//RS             state = next;
-//RS         }
-//RS     }
-//RS 
-//RS     fn wait_world_predicate(&self, ready: impl Fn(&JetWorldState) -> bool) {
-//RS         let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
-//RS         let budget = state.budget;
-//RS         for _ in 0..budget {
-//RS             if ready(&state) {
-//RS                 return;
-//RS             }
-//RS             let (next, _) = self
-//RS                 .waiters
-//RS                 .wait_timeout(state, Duration::from_micros(50))
-//RS                 .unwrap_or_else(|error| error.into_inner());
-//RS             state = next;
-//RS         }
-//RS         if ready(&state) {
-//RS             return;
-//RS         }
-//RS         jet_scheduler_fatal(
-//RS             "deterministic world execution budget exhausted while waiting for idle",
-//RS         );
-//RS     }
-//RS 
-//RS     pub fn wait_idle(&self) {
-//RS         self.wait_world_predicate(|state| state.runnable_tasks == 0);
-//RS     }
-//RS 
-//RS     pub fn ensure_closed(&self) {
-//RS         let live = self
-//RS             .state
-//RS             .lock()
-//RS             .unwrap_or_else(|error| error.into_inner())
-//RS             .live_tasks;
-//RS         if live != 0 {
-//RS             jet_scheduler_fatal(
-//RS                 "deterministic world scope exited with live descendants; cancel and join every task",
-//RS             );
-//RS         }
-//RS     }
-//RS 
-//RS     fn task_spawned(&self) {
-//RS         let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
-//RS         state.live_tasks = state.live_tasks.saturating_add(1);
-//RS         state.runnable_tasks = state.runnable_tasks.saturating_add(1);
-//RS         state.history.push("task:spawn".to_string());
-//RS         self.waiters.notify_all();
-//RS     }
-//RS 
-//RS     fn task_finished(&self, waiting: bool, slot: Option<&Arc<ParkSlot>>) {
-//RS         let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
-//RS         if waiting {
-//RS             let removed = slot.and_then(|slot| {
-//RS                 state
-//RS                     .timers
-//RS                     .iter()
-//RS                     .position(|timer| Arc::ptr_eq(&timer.slot, slot))
-//RS             });
-//RS             if let Some(index) = removed {
-//RS                 state.timers.swap_remove(index);
-//RS             } else {
-//RS                 // A due timer already incremented runnable_tasks before this
-//RS                 // task was cancelled or panicked.
-//RS                 state.runnable_tasks = state.runnable_tasks.saturating_sub(1);
-//RS             }
-//RS         } else {
-//RS             state.runnable_tasks = state.runnable_tasks.saturating_sub(1);
-//RS         }
-//RS         state.live_tasks = state.live_tasks.saturating_sub(1);
-//RS         state.history.push("task:finish".to_string());
-//RS         self.waiters.notify_all();
-//RS     }
-//RS 
-//RS     fn park(&self, duration_ns: i64, slot: Arc<ParkSlot>) {
-//RS         let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
-//RS         let deadline_ns = state
-//RS             .monotonic_ns
-//RS             .checked_add(duration_ns)
-//RS             .unwrap_or_else(|| jet_scheduler_fatal("deterministic world timer overflowed"));
-//RS         let sequence = state.next_sequence;
-//RS         state.next_sequence = sequence.wrapping_add(1);
-//RS         state.runnable_tasks = state.runnable_tasks.saturating_sub(1);
-//RS         state.timers.push(JetWorldTimer {
-//RS             deadline_ns,
-//RS             sequence,
-//RS             slot,
-//RS         });
-//RS         state.history.push(format!("timer:register:{deadline_ns}:{sequence}"));
-//RS         self.waiters.notify_all();
-//RS     }
-//RS 
-//RS     fn finish_park(&self, slot: &Arc<ParkSlot>) -> bool {
-//RS         let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
-//RS         let removed = state
-//RS             .timers
-//RS             .iter()
-//RS             .position(|timer| Arc::ptr_eq(&timer.slot, slot));
-//RS         if let Some(index) = removed {
-//RS             state.timers.swap_remove(index);
-//RS             state.runnable_tasks = state.runnable_tasks.saturating_add(1);
-//RS             self.waiters.notify_all();
-//RS             true
-//RS         } else {
-//RS             false
-//RS         }
-//RS     }
-//RS 
-//RS     fn rng_next(&self) -> u64 {
-//RS         let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
-//RS         let mut x = state.rng;
-//RS         x ^= x << 7;
-//RS         x ^= x >> 9;
-//RS         x = x.wrapping_mul(0x9e3779b97f4a7c15);
-//RS         state.rng = x;
-//RS         state.history.push(format!("rng:{x}"));
-//RS         x
-//RS     }
-//RS 
-//RS     fn rng_seed(&self, seed: i64) {
-//RS         let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
-//RS         state.rng = seed as u64;
-//RS         state.history.push(format!("rng:seed:{}", seed as u64));
-//RS     }
-//RS 
-//RS     pub fn history(&self) -> String {
-//RS         self.state
-//RS             .lock()
-//RS             .unwrap_or_else(|error| error.into_inner())
-//RS             .history
-//RS             .join("\n")
-//RS     }
-//RS }
-//RS 
-//RS thread_local! {
-//RS     static JET_ACTIVE_WORLD: std::cell::RefCell<Option<JetDeterministicWorld>> =
-//RS         const { std::cell::RefCell::new(None) };
-//RS     static JET_WORLD_TASK_ACTIVE: std::cell::Cell<bool> =
-//RS         const { std::cell::Cell::new(false) };
-//RS     static JET_WORLD_TASK_WAITING: std::cell::Cell<bool> =
-//RS         const { std::cell::Cell::new(false) };
-//RS     static JET_WORLD_TASK_SLOT: std::cell::RefCell<Option<Arc<ParkSlot>>> =
-//RS         const { std::cell::RefCell::new(None) };
-//RS }
-//RS 
-//RS pub fn jet_scheduler_current_world() -> Option<JetDeterministicWorld> {
-//RS     JET_ACTIVE_WORLD.with(|world| world.borrow().clone())
-//RS }
-//RS 
-//RS pub fn jet_scheduler_world_now_ms() -> Option<i64> {
-//RS     jet_scheduler_current_world().map(|world| world.now())
-//RS }
-//RS 
-//RS pub fn jet_scheduler_world_monotonic_now_ns() -> Option<i64> {
-//RS     jet_scheduler_current_world().map(|world| world.monotonic_ns())
-//RS }
-//RS 
-//RS 
-//RS /// Fail closed when a host boundary has no provider that can replay inside a
-//RS /// deterministic world. Time, seeded pseudo-randomness, and scheduler waits
-//RS /// use their dedicated seams; external effects must never silently use host
-//RS /// state from inside the world.
-//RS pub fn jet_scheduler_world_reject_uncontrolled(effect: &'static str) {
-//RS     if jet_scheduler_current_world().is_none() {
-//RS         return;
-//RS     }
-//RS     let message = match effect {
-//RS         "network" => "deterministic world has no controlled network provider",
-//RS         "foreign" => "deterministic world has no controlled foreign provider",
-//RS         "entropy" => "deterministic world has no controlled entropy provider",
-//RS         "clock" => "deterministic world has no controlled clock provider",
-//RS         _ => "deterministic world has no controlled external-effect provider",
-//RS     };
-//RS     jet_scheduler_fatal(message);
-//RS }
-//RS 
-//RS pub fn jet_scheduler_world_rng_next() -> Option<u64> {
-//RS     jet_scheduler_current_world().map(|world| world.rng_next())
-//RS }
-//RS 
-//RS pub fn jet_scheduler_world_rng_seed(seed: i64) -> bool {
-//RS     let Some(world) = jet_scheduler_current_world() else {
-//RS         return false;
-//RS     };
-//RS     world.rng_seed(seed);
-//RS     true
-//RS }
-//RS 
-//RS pub struct JetWorldScope {
-//RS     previous: Option<JetDeterministicWorld>,
-//RS     previous_provider: Option<JetMonotonicProvider>,
-//RS }
-//RS 
-//RS impl Drop for JetWorldScope {
-//RS     fn drop(&mut self) {
-//RS         jet_time_monotonic_provider_set(self.previous_provider.take());
-//RS         JET_ACTIVE_WORLD.with(|world| {
-//RS             *world.borrow_mut() = self.previous.take();
-//RS         });
-//RS     }
-//RS }
-//RS 
-//RS impl JetDeterministicWorld {
-//RS     pub fn enter(&self) -> JetWorldScope {
-//RS         let previous = JET_ACTIVE_WORLD.with(|world| {
-//RS             let mut world = world.borrow_mut();
-//RS             if world.is_some() {
-//RS                 jet_scheduler_fatal(
-//RS                     "deterministic world nesting is ambiguous; use the parent world explicitly",
-//RS                 );
-//RS             }
-//RS             world.replace(self.clone())
-//RS         });
-//RS         let previous_provider =
-//RS             jet_time_monotonic_provider_set(Some(jet_scheduler_world_monotonic_now_ns));
-//RS         JetWorldScope {
-//RS             previous,
-//RS             previous_provider,
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS struct JetWorldTaskScope {
-//RS     world: JetDeterministicWorld,
-//RS     previous: Option<JetDeterministicWorld>,
-//RS     previous_provider: Option<JetMonotonicProvider>,
-//RS }
-//RS 
-//RS impl Drop for JetWorldTaskScope {
-//RS     fn drop(&mut self) {
-//RS         let waiting = JET_WORLD_TASK_WAITING.with(|waiting| waiting.get());
-//RS         let slot = JET_WORLD_TASK_SLOT.with(|slot| slot.borrow().clone());
-//RS         self.world.task_finished(waiting, slot.as_ref());
-//RS         JET_WORLD_TASK_ACTIVE.with(|active| active.set(false));
-//RS         JET_WORLD_TASK_WAITING.with(|waiting| waiting.set(false));
-//RS         JET_WORLD_TASK_SLOT.with(|slot| *slot.borrow_mut() = None);
-//RS         jet_time_monotonic_provider_set(self.previous_provider.take());
-//RS         JET_ACTIVE_WORLD.with(|world| {
-//RS             *world.borrow_mut() = self.previous.take();
-//RS         });
-//RS     }
-//RS }
-//RS 
-//RS fn jet_scheduler_world_task_enter(
-//RS     world: Option<JetDeterministicWorld>,
-//RS ) -> Option<JetWorldTaskScope> {
-//RS     world.map(|world| {
-//RS         let previous = JET_ACTIVE_WORLD.with(|active| active.borrow_mut().replace(world.clone()));
-//RS         let previous_provider =
-//RS             jet_time_monotonic_provider_set(Some(jet_scheduler_world_monotonic_now_ns));
-//RS         JET_WORLD_TASK_ACTIVE.with(|active| active.set(true));
-//RS         JET_WORLD_TASK_WAITING.with(|waiting| waiting.set(false));
-//RS         JET_WORLD_TASK_SLOT.with(|slot| *slot.borrow_mut() = None);
-//RS         JetWorldTaskScope {
-//RS             world,
-//RS             previous,
-//RS             previous_provider,
-//RS         }
-//RS     })
-//RS }
-//RS 
-//RS fn jet_scheduler_world_park(world: &JetDeterministicWorld, duration: Duration, slot: Arc<ParkSlot>) {
-//RS     world.park(duration.as_nanos().min(i64::MAX as u128) as i64, slot.clone());
-//RS     JET_WORLD_TASK_WAITING.with(|waiting| waiting.set(true));
-//RS     JET_WORLD_TASK_SLOT.with(|current| *current.borrow_mut() = Some(slot));
-//RS }
-//RS fn jet_scheduler_world_begin_wait(world: &JetDeterministicWorld, slot: Arc<ParkSlot>) {
-//RS     let already_waiting = JET_WORLD_TASK_WAITING.with(|waiting| waiting.get());
-//RS     if already_waiting {
-//RS         return;
-//RS     }
-//RS     let mut state = world.state.lock().unwrap_or_else(|error| error.into_inner());
-//RS     state.runnable_tasks = state.runnable_tasks.saturating_sub(1);
-//RS     drop(state);
-//RS     world.waiters.notify_all();
-//RS     JET_WORLD_TASK_WAITING.with(|waiting| waiting.set(true));
-//RS     JET_WORLD_TASK_SLOT.with(|current| *current.borrow_mut() = Some(slot));
-//RS }
-//RS 
-//RS 
-//RS fn jet_scheduler_world_finish_park(world: &JetDeterministicWorld, slot: &Arc<ParkSlot>) {
-//RS     if JET_WORLD_TASK_WAITING.with(|waiting| waiting.get()) {
-//RS         world.finish_park(slot);
-//RS         JET_WORLD_TASK_WAITING.with(|waiting| waiting.set(false));
-//RS         JET_WORLD_TASK_SLOT.with(|current| *current.borrow_mut() = None);
-//RS     }
-//RS }
-//RS 
-//RS pub fn jet_testing_world<F, T>(callback: F) -> T
-//RS where
-//RS     F: FnOnce(JetDeterministicWorld) -> T,
-//RS {
-//RS     let world = JetDeterministicWorld::new();
-//RS     let _scope = world.enter();
-//RS     let value = callback(world.clone());
-//RS     world.wait_idle();
-//RS     world.ensure_closed();
-//RS     value
-//RS }
-//RS 
-//RS pub fn jet_world_now(world: &JetDeterministicWorld) -> i64 {
-//RS     world.now()
-//RS }
-//RS 
-//RS pub fn jet_world_advance(world: &JetDeterministicWorld, duration_ns: i64) -> i64 {
-//RS     world.advance_ns(duration_ns)
-//RS }
-//RS 
-//RS pub fn jet_world_wait_idle(world: &JetDeterministicWorld) {
-//RS     world.wait_idle();
-//RS }
-//RS 
-//RS pub fn jet_world_history(world: &JetDeterministicWorld) -> String {
-//RS     world.history()
-//RS }
-//RS 
-//RS 
-//RS // D-FOUND-LIFECYCLE1=A: the program root uses the same task-control carrier as
-//RS // spawned tasks. It is lazy so a program that never subscribes to a signal
-//RS // pays no setup cost, and replacement after cancellation keeps resident runs
-//RS // independent without introducing a second lifecycle object.
-//RS static JET_ROOT_TASK_CONTROL: std::sync::LazyLock<Mutex<Option<Arc<JetTaskControl>>>> =
-//RS     std::sync::LazyLock::new(|| Mutex::new(None));
-//RS 
-//RS pub fn jet_scheduler_root_task_control() -> Arc<JetTaskControl> {
-//RS     let mut root = JET_ROOT_TASK_CONTROL
-//RS         .lock()
-//RS         .unwrap_or_else(|error| error.into_inner());
-//RS     let replace = root
-//RS         .as_ref()
-//RS         .map_or(true, |control| control.cancelled.load(Ordering::Relaxed));
-//RS     if replace {
-//RS         *root = Some(JetTaskControl::new());
-//RS     }
-//RS     root.as_ref()
-//RS         .expect("root task control must be initialized")
-//RS         .clone()
-//RS }
-//RS 
-//RS struct JetRootTaskControlScope {
-//RS     previous: Option<Arc<JetTaskControl>>,
-//RS }
-//RS 
-//RS impl Drop for JetRootTaskControlScope {
-//RS     fn drop(&mut self) {
-//RS         TASK_CONTROL.with(|slot| {
-//RS             *slot.borrow_mut() = self.previous.take();
-//RS         });
-//RS     }
-//RS }
-//RS 
-//RS /// Run the program entry under the shared root task control. Engines use this
-//RS /// only to compose their entry boundary; cancellation and wait-point policy
-//RS /// remain in this Prelude scheduler.
-//RS pub fn jet_scheduler_with_root_control<F, T>(body: F) -> T
-//RS where
-//RS     F: FnOnce() -> T,
-//RS {
-//RS     if current_task_control().is_some() {
-//RS         return body();
-//RS     }
-//RS     let control = jet_scheduler_root_task_control();
-//RS     let previous = TASK_CONTROL.with(|slot| slot.replace(Some(control)));
-//RS     let _scope = JetRootTaskControlScope { previous };
-//RS     body()
-//RS }
-//RS 
-//RS 
-//RS #[must_use = "dropping the scope closes and drains its task-completion frame"]
-//RS pub struct JetSchedulerTaskCompletionScope {
-//RS     frame_index: usize,
-//RS }
-//RS 
-//RS impl JetSchedulerTaskCompletionScope {
-//RS     /// Run only this frame's registered callbacks in reverse registration order.
-//RS     /// Callbacks registered by a callback join this frame and drain before it ends.
-//RS     pub fn drain(&mut self) {
-//RS         let mut first_panic = None;
-//RS         loop {
-//RS             let cleanups = TASK_COMPLETION_FRAMES.with(|frames| {
-//RS                 let mut frames = frames.borrow_mut();
-//RS                 assert_eq!(
-//RS                     frames.len(),
-//RS                     self.frame_index + 1,
-//RS                     "task completion scopes must drain in nested order"
-//RS                 );
-//RS                 std::mem::take(
-//RS                     frames
-//RS                         .last_mut()
-//RS                         .expect("task completion frame is present"),
-//RS                 )
-//RS             });
-//RS             if cleanups.is_empty() {
-//RS                 break;
-//RS             }
-//RS             for cleanup in cleanups.into_iter().rev() {
-//RS                 if let Err(panic) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(cleanup))
-//RS                 {
-//RS                     if first_panic.is_none() {
-//RS                         first_panic = Some(panic);
-//RS                     }
-//RS                 }
-//RS             }
-//RS         }
-//RS         if let Some(panic) = first_panic {
-//RS             std::panic::resume_unwind(panic);
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS impl Drop for JetSchedulerTaskCompletionScope {
-//RS     fn drop(&mut self) {
-//RS         let cleanup = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.drain()));
-//RS         TASK_COMPLETION_FRAMES.with(|frames| {
-//RS             let mut frames = frames.borrow_mut();
-//RS             assert_eq!(
-//RS                 frames.len(),
-//RS                 self.frame_index + 1,
-//RS                 "task completion scopes must end in nested order"
-//RS             );
-//RS             frames.pop();
-//RS         });
-//RS         if let Err(panic) = cleanup {
-//RS             // Cleanup panics were already reported by the panic hook. Preserve
-//RS             // an active body unwind rather than triggering a double panic.
-//RS             if !std::thread::panicking() {
-//RS                 std::panic::resume_unwind(panic);
-//RS             }
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// Begin a nested task-completion cleanup frame. The returned scope drains and
-//RS /// removes exactly this frame on drop, including early returns and unwinding.
-//RS pub fn jet_scheduler_task_completion_begin() -> JetSchedulerTaskCompletionScope {
-//RS     let frame_index = TASK_COMPLETION_FRAMES.with(|frames| {
-//RS         let mut frames = frames.borrow_mut();
-//RS         let frame_index = frames.len();
-//RS         frames.push(Vec::new());
-//RS         frame_index
-//RS     });
-//RS     JetSchedulerTaskCompletionScope { frame_index }
-//RS }
-//RS 
-//RS pub fn jet_scheduler_task_completion_register<F>(cleanup: F)
-//RS where
-//RS     F: FnOnce() + 'static,
-//RS {
-//RS     TASK_COMPLETION_FRAMES.with(|frames| {
-//RS         if let Some(frame) = frames.borrow_mut().last_mut() {
-//RS             frame.push(Box::new(cleanup));
-//RS         }
-//RS     });
-//RS }
-//RS 
-//RS /// Apply the shared pause wait to the current task. The evaluator uses this
-//RS /// boundary instead of reimplementing the native control loop.
-//RS pub fn jet_scheduler_wait_while_paused() {
-//RS     if let Some(control) = current_task_control() {
-//RS         control.wait_while_paused();
-//RS     }
-//RS }
-//RS 
-//RS /// D-TASK-PAUSE-TIER1=E: strong pause (`CheckLoops`) honors pause at loop
-//RS /// back-edges on every engine. WaitPoints mode is a no-op here.
-//RS pub fn jet_scheduler_loop_pause_check() {
-//RS     let Some(ctrl) = current_task_control() else {
-//RS         return;
-//RS     };
-//RS     if ctrl.pause_mode.load(Ordering::Relaxed) != 1 {
-//RS         return;
-//RS     }
-//RS     if !ctrl.paused.load(Ordering::Relaxed) {
-//RS         return;
-//RS     }
-//RS     ctrl.wait_while_paused();
-//RS     if ctrl.cancelled.load(Ordering::Relaxed) && !jet_scheduler_shielded() {
-//RS         jet_task_deliver_cancel();
-//RS     }
-//RS }
-//RS 
-//RS pub fn jet_scheduler_yield(wait_kind: &str, slot: &Arc<ParkSlot>, timeout: Option<Duration>) {
-//RS     let active_world = jet_scheduler_current_world();
-//RS     if let Some(world) = active_world.as_ref() {
-//RS         if current_task_control().is_some() {
-//RS             jet_scheduler_world_begin_wait(world, slot.clone());
-//RS         }
-//RS     }
-//RS     let observe_task = current_task_control().is_some();
-//RS     if observe_task {
-//RS         jet_observe_task_update("blocked", wait_kind, jet_deadline_remaining_ms());
-//RS     }
-//RS     let ctrl = current_task_control();
-//RS     // D-CANCELMODEL1=C: inside a shielded region, cancel/deadline are deferred to
-//RS     // region exit — this wait point behaves as if the task were not cancelled, so
-//RS     // the critical section can complete. Outside a shield, cancel unwinds here.
-//RS     let shielded = jet_scheduler_shielded();
-//RS     if let Some(ctrl) = &ctrl {
-//RS         if !shielded {
-//RS             if ctrl.cancelled.load(Ordering::Relaxed) {
-//RS                 jet_task_deliver_cancel();
-//RS                 return;
-//RS             }
-//RS             ctrl.wait_while_paused();
-//RS             if ctrl.cancelled.load(Ordering::Relaxed) {
-//RS                 jet_task_deliver_cancel();
-//RS                 return;
-//RS             }
-//RS             // Make this park reachable by cancel(): a task blocked on a channel,
-//RS             // timer, or IO wait must actually unblock when its handle is cancelled
-//RS             // — not only when the awaited event arrives. If cancel already fired,
-//RS             // this wakes the slot immediately so the park below returns at once.
-//RS             ctrl.register_cancel_waiter(slot);
-//RS         } else {
-//RS             ctrl.wait_while_paused();
-//RS         }
-//RS     }
-//RS     let virtual_wait = JET_WORLD_TASK_WAITING.with(|waiting| waiting.get());
-//RS     if virtual_wait {
-//RS         // A controlled world has no wall-clock timeout. It wakes this slot only
-//RS         // when the world advances or another controlled event signals it. A
-//RS         // zero-duration cooperative yield remains an immediate scheduler yield.
-//RS         slot.park(if timeout.is_some_and(|duration| duration.is_zero()) {
-//RS             timeout
-//RS         } else {
-//RS             None
-//RS         });
-//RS     } else if shielded {
-//RS         // Shielded: ignore the deadline too; wait on the real event only.
-//RS         slot.park(timeout);
-//RS     } else if let Some(remaining) = jet_deadline_remaining_ms() {
-//RS         if remaining <= 0 {
-//RS             if let Some(ctrl) = &ctrl {
-//RS                 ctrl.remove_cancel_waiter(slot);
-//RS             }
-//RS             jet_deadline_exceeded(wait_kind);
-//RS         }
-//RS         let cap = Duration::from_millis(remaining as u64);
-//RS         let wait = timeout.map(|t| t.min(cap)).unwrap_or(cap);
-//RS         slot.park(Some(wait));
-//RS         if let Some(left) = jet_deadline_remaining_ms() {
-//RS             if left <= 0 {
-//RS                 if let Some(ctrl) = &ctrl {
-//RS                     ctrl.remove_cancel_waiter(slot);
-//RS                 }
-//RS                 jet_deadline_exceeded(wait_kind);
-//RS             }
-//RS         }
-//RS     } else {
-//RS         slot.park(timeout);
-//RS     }
-//RS     if let Some(ctrl) = &ctrl {
-//RS         if !shielded {
-//RS             ctrl.remove_cancel_waiter(slot);
-//RS             // Woken by cancel() while parked: unwind at this wait point rather than
-//RS             // returning to the task body (preemptive, D-CANCELMODEL1=C).
-//RS             if ctrl.cancelled.load(Ordering::Relaxed) {
-//RS                 jet_task_deliver_cancel();
-//RS                 return;
-//RS             }
-//RS         }
-//RS         ctrl.wait_while_paused();
-//RS     }
-//RS     if let Some(world) = active_world.as_ref() {
-//RS         jet_scheduler_world_finish_park(world, slot);
-//RS     }
-//RS     if observe_task {
-//RS         jet_observe_task_update("running", "", jet_deadline_remaining_ms());
-//RS     }
-//RS }
-//RS 
-//RS /// Shared bounded-task admission wait. The task-group Prelude owns the
-//RS /// deadline/cancellation ordering; this scheduler function only supplies the
-//RS /// ambient task control and park primitive to every engine.
-//RS pub fn jet_scheduler_task_group_wait(waiter: &Arc<ParkSlot>) {
-//RS     let deadline = jet_std::jet_task_deadline_if_expired(
-//RS         jet_deadline_remaining_ms(),
-//RS         "task admission",
-//RS     );
-//RS     match jet_std::jet_task_wait_policy(
-//RS         deadline,
-//RS         jet_scheduler_task_cancelled(),
-//RS         jet_scheduler_shielded(),
-//RS     ) {
-//RS         Ok(()) => jet_scheduler_yield("task admission", waiter, None),
-//RS         Err(jet_std::JetTaskWaitInterrupt::Deadline(_)) => {
-//RS             jet_deadline_exceeded("task admission")
-//RS         }
-//RS         Err(jet_std::JetTaskWaitInterrupt::Cancelled) => jet_task_deliver_cancel(),
-//RS     }
-//RS }
-//RS 
-//RS pub fn jet_scheduler_wake(slot: &ParkSlot) {
-//RS     slot.wake();
-//RS }
-//RS 
-//RS pub fn jet_scheduler_task_cancelled() -> bool {
-//RS     current_task_control()
-//RS         .map(|c| c.cancelled.load(Ordering::Relaxed))
-//RS         .unwrap_or(false)
-//RS }
-//RS 
-//RS pub fn jet_scheduler_wait_point_cancelled() -> bool {
-//RS     jet_scheduler_task_cancelled() && !jet_scheduler_shielded()
-//RS }
-//RS 
-//RS pub fn jet_scheduler_wait_point_interrupted() -> bool {
-//RS     jet_scheduler_wait_point_cancelled()
-//RS         || matches!(jet_deadline_remaining_ms(), Some(milliseconds) if milliseconds <= 0)
-//RS }
-//RS 
-//RS thread_local! {
-//RS     static JET_BLOCKING_WAIT_COMPENSATION: std::cell::RefCell<Vec<bool>> = const { std::cell::RefCell::new(Vec::new()) };
-//RS }
-//RS 
-//RS pub fn jet_scheduler_blocking_wait_enter() {
-//RS     let active=current_task_control().is_some();
-//RS     if active { scheduler().blocking_wait_enter(); }
-//RS     JET_BLOCKING_WAIT_COMPENSATION.with(|stack|stack.borrow_mut().push(active));
-//RS }
-//RS 
-//RS pub fn jet_scheduler_blocking_wait_leave() {
-//RS     if JET_BLOCKING_WAIT_COMPENSATION.with(|stack|stack.borrow_mut().pop())==Some(true) { scheduler().blocking_wait_leave(); }
-//RS }
-//RS 
-//RS pub fn jet_scheduler_blocking_wait_stats()->(usize,usize,usize) {
-//RS     let sched=scheduler();let state=sched.blocking_wait.lock().unwrap();(state.waits,state.threads,state.peak)
-//RS }
-//RS 
-//RS // ── M2: timer sleep (park/wake, not thread::sleep on pool workers) ───────────
-//RS 
-//RS struct TimerEntry {
-//RS     wake_at: Instant,
-//RS     slot: Arc<ParkSlot>,
-//RS }
-//RS 
-//RS struct TimerWheel {
-//RS     entries: Mutex<Vec<TimerEntry>>,
-//RS     notify: Condvar,
-//RS }
-//RS 
-//RS impl TimerWheel {
-//RS     fn schedule(&self, wake_at: Instant, slot: Arc<ParkSlot>) {
-//RS         self.entries.lock().unwrap().push(TimerEntry { wake_at, slot });
-//RS         self.notify.notify_one();
-//RS     }
-//RS 
-//RS     fn run(self: Arc<Self>) {
-//RS         loop {
-//RS             let now = Instant::now();
-//RS             let mut due = Vec::new();
-//RS             {
-//RS                 let mut entries = self.entries.lock().unwrap();
-//RS                 entries.retain(|e| {
-//RS                     if e.wake_at <= now {
-//RS                         due.push(e.slot.clone());
-//RS                         false
-//RS                     } else {
-//RS                         true
-//RS                     }
-//RS                 });
-//RS             }
-//RS             for slot in due {
-//RS                 slot.wake();
-//RS             }
-//RS             let sleep_for = {
-//RS                 let entries = self.entries.lock().unwrap();
-//RS                 entries
-//RS                     .iter()
-//RS                     .map(|e| e.wake_at.saturating_duration_since(now))
-//RS                     .min()
-//RS                     .unwrap_or(Duration::from_millis(50))
-//RS             };
-//RS             let g = self.entries.lock().unwrap();
-//RS             let _ = self
-//RS                 .notify
-//RS                 .wait_timeout(g, sleep_for.min(Duration::from_millis(50)))
-//RS                 .unwrap();
-//RS         }
-//RS     }
-//RS }
-//RS /// Owner-thread deadline queue used by evaluator-side callback pumps.
-//RS ///
-//RS /// The queue deliberately stores only absolute monotonic deadlines and opaque
-//RS /// task IDs. Callback values stay in the owner runtime, so scheduler policy
-//RS /// cannot accidentally acquire tier-specific value or closure semantics.
-//RS #[derive(Clone, Copy)]
-//RS struct OwnerDeadlineEntry {
-//RS     deadline_ns: i64,
-//RS     task_id: u64,
-//RS }
-//RS 
-//RS struct OwnerDeadlineQueue {
-//RS     next_id: u64,
-//RS     entries: Vec<OwnerDeadlineEntry>,
-//RS }
-//RS 
-//RS impl OwnerDeadlineQueue {
-//RS     const fn new() -> Self {
-//RS         Self {
-//RS             next_id: 1,
-//RS             entries: Vec::new(),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS thread_local! {
-//RS     static JET_OWNER_DEADLINE_QUEUE: std::cell::RefCell<OwnerDeadlineQueue> =
-//RS         const { std::cell::RefCell::new(OwnerDeadlineQueue::new()) };
-//RS }
-//RS 
-//RS /// Register one opaque owner-thread task at an absolute monotonic deadline.
-//RS pub fn jet_scheduler_owner_deadline_register(deadline_ns: i64) -> u64 {
-//RS     JET_OWNER_DEADLINE_QUEUE.with(|queue| {
-//RS         let mut queue = queue.borrow_mut();
-//RS         let task_id = queue.next_id;
-//RS         queue.next_id = task_id.checked_add(1).unwrap_or(1);
-//RS         queue.entries.push(OwnerDeadlineEntry {
-//RS             deadline_ns,
-//RS             task_id,
-//RS         });
-//RS         task_id
-//RS     })
-//RS }
-//RS 
-//RS /// Cancel an owner-thread task. Unknown IDs are already complete or canceled.
-//RS pub fn jet_scheduler_owner_deadline_cancel(task_id: u64) {
-//RS     JET_OWNER_DEADLINE_QUEUE.with(|queue| {
-//RS         queue
-//RS             .borrow_mut()
-//RS             .entries
-//RS             .retain(|entry| entry.task_id != task_id);
-//RS     });
-//RS }
-//RS 
-//RS /// Remove and return the earliest task whose deadline is due.
-//RS pub fn jet_scheduler_owner_deadline_pop_due(now_ns: i64) -> Option<u64> {
-//RS     JET_OWNER_DEADLINE_QUEUE.with(|queue| {
-//RS         let mut queue = queue.borrow_mut();
-//RS         let index = queue
-//RS             .entries
-//RS             .iter()
-//RS             .enumerate()
-//RS             .filter(|(_, entry)| entry.deadline_ns <= now_ns)
-//RS             .min_by_key(|(_, entry)| (entry.deadline_ns, entry.task_id))
-//RS             .map(|(index, _)| index)?;
-//RS         Some(queue.entries.swap_remove(index).task_id)
-//RS     })
-//RS }
-//RS 
-//RS static TIMER_WHEEL: OnceLock<Arc<TimerWheel>> = OnceLock::new();
-//RS 
-//RS fn timer_wheel() -> Arc<TimerWheel> {
-//RS     TIMER_WHEEL
-//RS         .get_or_init(|| {
-//RS             let wheel = Arc::new(TimerWheel {
-//RS                 entries: Mutex::new(Vec::new()),
-//RS                 notify: Condvar::new(),
-//RS             });
-//RS             let w = wheel.clone();
-//RS             jet_scheduler_spawn_detached_timer(move || w.run());
-//RS             wheel
-//RS         })
-//RS         .clone()
-//RS }
-//RS 
-//RS pub fn jet_scheduler_sleep_ms(millis: u64) {
-//RS     jet_scheduler_park_duration("time sleep", Duration::from_millis(millis));
-//RS }
-//RS 
-//RS /// Park for an exact nanosecond duration through the shared timer wheel.
-//RS pub fn jet_scheduler_park_duration(wait_kind: &'static str, duration: Duration) {
-//RS     if duration.is_zero() {
-//RS         return;
-//RS     }
-//RS     if let Some(world) = jet_scheduler_current_world() {
-//RS         if !JET_WORLD_TASK_ACTIVE.with(|active| active.get()) {
-//RS             jet_scheduler_fatal(
-//RS                 "deterministic world sleep requires a controlled scheduler task",
-//RS             );
-//RS         }
-//RS         let slot = ParkSlot::new();
-//RS         jet_scheduler_world_park(&world, duration, slot.clone());
-//RS         // The world wait path never supplies a real timeout. Its virtual
-//RS         // timer is released only by `world.advance(...)`.
-//RS         jet_scheduler_yield(wait_kind, &slot, None);
-//RS         return;
-//RS     }
-//RS     let slot = ParkSlot::new();
-//RS     timer_wheel().schedule(Instant::now() + duration, slot.clone());
-//RS     jet_scheduler_yield(wait_kind, &slot, Some(duration));
-//RS }
-//RS 
-//RS pub fn jet_scheduler_park_ms(wait_kind: &'static str, millis: u64) {
-//RS     jet_scheduler_park_duration(wait_kind, Duration::from_millis(millis));
-//RS }
-//RS 
-//RS /// Canonical default for a non-negative task delay. All execution tiers call
-//RS /// this before adapting a language-level millisecond value to `Duration`.
-//RS pub fn jet_task_delay_ms_defaulted(millis: i64) -> u64 {
-//RS     millis.max(0) as u64
-//RS }
-//RS 
-//RS /// Canonical default for an exact non-negative task delay.
-//RS pub fn jet_task_delay_duration_ns_defaulted(nanos: i64) -> Duration {
-//RS     Duration::from_nanos(nanos.max(0) as u64)
-//RS }
-//RS 
-//RS 
-//RS /// Canonical default for an interval period. Intervals make progress at least
-//RS /// once per millisecond instead of spinning on a zero or negative period.
-//RS pub fn jet_task_interval_ms_defaulted(millis: i64) -> u64 {
-//RS     millis.max(1) as u64
-//RS }
-//RS 
-//RS /// Canonical `core.time.sleep` wait. The delay default and deadline wait-point
-//RS /// policy live here; AOT, JIT, and the evaluator only marshal the call. Like
-//RS /// every other wait point, the deadline is deferred inside a shield and while an
-//RS /// unwind is in flight (#2007) — a `defer`red sleep finishes the cleanup instead
-//RS /// of raising a second time.
-//RS pub fn jet_task_sleep_ms_defaulted(millis: i64) {
-//RS     jet_task_sleep_duration_defaulted(Duration::from_millis(jet_task_delay_ms_defaulted(millis)));
-//RS }
-//RS 
-//RS pub fn jet_task_sleep_duration_ns_defaulted(nanos: i64) {
-//RS     jet_task_sleep_duration_defaulted(jet_task_delay_duration_ns_defaulted(nanos));
-//RS }
-//RS 
-//RS fn jet_task_sleep_duration_defaulted(duration: Duration) {
-//RS     if !jet_scheduler_shielded()
-//RS         && jet_std::jet_task_deadline_if_expired(jet_deadline_remaining_ms(), "time sleep").is_some()
-//RS     {
-//RS         jet_deadline_exceeded("time sleep");
-//RS     }
-//RS     jet_scheduler_park_duration("time sleep", duration);
-//RS     if !jet_scheduler_shielded()
-//RS         && jet_std::jet_task_deadline_if_expired(jet_deadline_remaining_ms(), "time sleep").is_some()
-//RS     {
-//RS         jet_deadline_exceeded("time sleep");
-//RS     }
-//RS }
-//RS 
-//RS 
-//RS pub fn jet_scheduler_yield_now() {
-//RS     let slot = ParkSlot::new();
-//RS     jet_scheduler_yield("task yield", &slot, Some(Duration::ZERO));
-//RS }
-//RS 
-//RS /// Control-plane trace for the TLS current task (idle defaults when none).
-//RS pub fn jet_scheduler_current_task_trace() -> String {
-//RS     match current_task_control() {
-//RS         Some(ctrl) => {
-//RS             let paused = ctrl.paused.load(std::sync::atomic::Ordering::Relaxed);
-//RS             let cancel = ctrl.cancelled.load(std::sync::atomic::Ordering::Relaxed);
-//RS             crate::jet_task_control_trace(paused, cancel)
-//RS         }
-//RS         None => crate::jet_task_control_trace(false, false),
-//RS     }
-//RS }
-//RS 
-//RS // ── M2: IO poll substrate (native epoll on Linux; portable fallback elsewhere) ─
-//RS 
-//RS struct IOInterest {
-//RS     stream_id: usize,
-//RS     slot: Arc<ParkSlot>,
-//RS     readable: bool,
-//RS     writable: bool,
-//RS }
-//RS 
-//RS #[allow(dead_code)]
-//RS #[derive(Clone)]
-//RS enum IOBackendState {
-//RS     Starting,
-//RS     Running,
-//RS     Failed(&'static str),
-//RS     Closed,
-//RS }
-//RS 
-//RS struct IOPoller {
-//RS     interests: Mutex<Vec<IOInterest>>,
-//RS     streams: Mutex<HashMap<usize, Arc<Mutex<TcpStream>>>>,
-//RS     retire_requested: Mutex<HashSet<usize>>,
-//RS     backend_state: Mutex<IOBackendState>,
-//RS     notify: Condvar,
-//RS     next_key: AtomicUsize,
-//RS     #[cfg(target_os = "windows")]
-//RS     iocp_port: AtomicUsize,
-//RS     #[cfg(target_os = "windows")]
-//RS     iocp_shutdown_done: AtomicBool,
-//RS }
-//RS 
-//RS // jet:scheduler-native-begin — vetted std-only OS FFI and poller dispatch.
-//RS #[allow(dead_code)]
-//RS impl IOPoller {
-//RS     fn register(
-//RS         self: &Arc<Self>,
-//RS         stream: Arc<Mutex<TcpStream>>,
-//RS         readable: bool,
-//RS         writable: bool,
-//RS     ) -> Result<(usize, Arc<ParkSlot>), &'static str> {
-//RS         let state = self.backend_state.lock().unwrap();
-//RS         if let IOBackendState::Failed(error) = &*state {
-//RS             return Err(*error);
-//RS         }
-//RS         if matches!(&*state, IOBackendState::Closed) {
-//RS             return Err("scheduler IO backend is closed");
-//RS         }
-//RS         let slot = ParkSlot::new();
-//RS         let mut streams = self.streams.lock().unwrap();
-//RS         let id = self.next_key.fetch_add(1, Ordering::Relaxed);
-//RS         streams.insert(id, stream);
-//RS         drop(streams);
-//RS         self.interests.lock().unwrap().push(IOInterest {
-//RS             stream_id: id,
-//RS             slot: slot.clone(),
-//RS             readable,
-//RS             writable,
-//RS         });
-//RS         self.notify.notify_one();
-//RS         #[cfg(target_os = "windows")]
-//RS         self.iocp_notify();
-//RS         drop(state);
-//RS         Ok((id, slot))
-//RS     }
-//RS 
-// END-PORT-PENDING 0184 crates/jet-codegen/src/Prelude/Scheduler.rs:1-1804
+use std.collections.[HashMap, HashSet, VecDeque]
+use std.net.TcpStream
+use std.sync.atomic.[AtomicBool, AtomicU8, AtomicUsize, Ordering]
+use std.sync.[Arc, Weak, Condvar, Mutex, OnceLock, LazyLock]
+use std.thread as thread
+use std.thread.ThreadLocal
+use std.time.[Duration, Instant]
+use std.cell.[Cell, RefCell]
+use std.any.Any
+use std.boxed.Box
+use std.panic as panic
+use core.mem as mem
+use core.ptr as ptr
+use std.io as io
+use core.marker.[Send, Sync]
+use core.prelude.runtime.core.[JET_PARA_DEFER_FAILURE, JetParaRuntimeFailure, jet_scheduler_runtime_stop, jet_runtime_caught_stop]
+use core.tasks.runtime.task_group.[JetTaskGroupWaiter, JetTaskWaitInterrupt, jet_task_wait_policy, jet_task_deadline_clear_pending, jet_task_deadline_if_expired]
+use core.time.runtime.top_math_random_time.jet_deadline_exceeded
+use core.time.runtime.deadline.jet_deadline_remaining_ms
+use core.time.runtime.kernel_time_monotonic.[JetMonotonicProvider, jet_time_monotonic_provider_set]
+use core.devtools.runtime.observe.[JetObserveControl, jet_observe_registry, jet_observe_task_update]
+use core.tasks.runtime.scheduler_02.[METRIC_PARK_BLOCKS, JET_IN_SCHEDULER_TASK, jet_scheduler_panic_should_unwind]
+use core.tasks.runtime.scheduler_03.[scheduler, jet_scheduler_spawn_detached_timer]
+use jet_codegen.jet_task_control_trace
+use core.sys.target as target
+use jet_foundation.CompilerStack.COMPILER_STACK_SIZE
+// D-ASYNCRT1=A: work-stealing pool and condvar park/wake substrate;
+// channel wake-on-send, timer sleep, IO poll, pause/cancel at yield points.
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:12
+struct Job { run: Box<fn() -> () + Send>, blocking: Bool }
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:14
+fn spawn_scheduler_worker(name: String, work: fn() -> () + Send) -> () {
+    // GATE #4565: kernel primitive
+    #Unsafe("native worker owns static Send closure and configured compiler stack") {
+        _ :: thread.Builder.new().name(name.clone()).stack_size(COMPILER_STACK_SIZE)
+            .spawn(^work).unwrap_or_else((error) -> jet_scheduler_fatal("could not start {name}: {error}"))
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:25
+// GATE #4565: kernel primitive
+static JET_SCHEDULER_CATCHING_PANIC: ThreadLocal<Cell<Bool>> = #Unsafe("per-thread catch-frame flag") { ThreadLocal.new(() -> Cell.new(false)) }
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:28
+// GATE #4565: kernel primitive
+static JET_SCHEDULER_WAIT_BOUNDARY_DEPTH: ThreadLocal<Cell<U32>> = #Unsafe("per-thread nested wait boundary depth") { ThreadLocal.new(() -> Cell.new(U32{0})) }
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:30
+// GATE #4565: kernel primitive
+static JET_TYPED_DEADLINE_BOUNDARY_DEPTH: ThreadLocal<Cell<U32>> = #Unsafe("per-thread typed deadline boundary depth") { ThreadLocal.new(() -> Cell.new(U32{0})) }
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:34
+struct JetSchedulerWaitBoundary {}
+impl JetSchedulerWaitBoundary {
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:37
+    fn enter() -> Self {
+        // GATE #4565: kernel primitive
+        #Unsafe("nested wait scope owns exactly one depth increment") {
+            JET_SCHEDULER_WAIT_BOUNDARY_DEPTH.with((depth) -> depth.set(depth.get().saturating_add(1)))
+        }
+        Self{}
+    }
+}
+impl Drop for JetSchedulerWaitBoundary {
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:45
+    fn drop(self: &Self) -> () {
+        // GATE #4565: kernel primitive
+        #Unsafe("scope exit balances this thread's wait-boundary depth") {
+            JET_SCHEDULER_WAIT_BOUNDARY_DEPTH.with((depth) -> depth.set(depth.get().saturating_sub(1)))
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:51
+fn jet_scheduler_wait_boundary_should_unwind() -> Bool {
+    // GATE #4565: kernel primitive
+    #Unsafe("query live catch-capable wait boundary on this thread") { JET_SCHEDULER_WAIT_BOUNDARY_DEPTH.with((depth) -> depth.get() != 0) }
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:59
+// Typed task operations convert inherited deadlines into their own typed result.
+pub struct JetTypedDeadlineBoundary {}
+impl JetTypedDeadlineBoundary {
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:62
+    pub fn enter() -> Self {
+        // GATE #4565: kernel primitive
+        #Unsafe("typed task boundary owns one nested deadline conversion scope") {
+            JET_TYPED_DEADLINE_BOUNDARY_DEPTH.with((depth) -> depth.set(depth.get().saturating_add(1)))
+        }
+        Self{}
+    }
+}
+impl Drop for JetTypedDeadlineBoundary {
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:70
+    fn drop(self: &Self) -> () {
+        // GATE #4565: kernel primitive
+        #Unsafe("typed task scope exit balances its deadline boundary depth") {
+            JET_TYPED_DEADLINE_BOUNDARY_DEPTH.with((depth) -> depth.set(depth.get().saturating_sub(1)))
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:76
+fn jet_typed_deadline_boundary_should_unwind() -> Bool {
+    // GATE #4565: kernel primitive
+    #Unsafe("query typed deadline boundary on this thread") { JET_TYPED_DEADLINE_BOUNDARY_DEPTH.with((depth) -> depth.get() != 0) }
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:82
+// GATE #4565: kernel primitive
+static JET_SCHEDULER_PANIC_HOOK: LazyLock<()> = #Unsafe("install one process hook preserving its predecessor for unconverted failures") {
+    LazyLock.new(() -> {
+        previous :: panic.take_hook()
+        panic.set_hook(Box.new((info) -> {
+            if !jet_scheduler_suppress_panic_report(info.payload()) { previous(info) }
+        }))
+    })
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:99
+// Foundation transports exactly Stop [code]: and Error [code]: reports.
+fn jet_scheduler_transported_report(text: &String) -> Bool {
+    head := text.lines().next().unwrap_or(text)
+    (head.starts_with("Stop [") || head.starts_with("Error [")) && head.contains("]: ")
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:107
+pub const JET_HOST_FAULT_PREFIX: String = "__jet_host_fault__: "
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:109
+pub fn jet_scheduler_host_fault_reason(message: &String) -> String? {
+    message.strip_prefix(JET_HOST_FAULT_PREFIX)
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:113
+fn jet_scheduler_host_fault_message(message: &String) -> String { "{JET_HOST_FAULT_PREFIX}{message}" }
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:122
+fn jet_scheduler_converted_unwind(payload: &(Any + Send)) -> Bool {
+    // GATE #4565: kernel primitive
+    #Unsafe("native unwind payload is borrowed while its exact dynamic type is inspected") {
+        if jet_scheduler_is_cancel_unwind(payload) || payload.is<JetDeadlineUnwind>() { return true }
+        text :: payload.downcast_ref<String>().map((text) -> text)
+            .or_else(() -> payload.downcast_ref<&String>().copied())
+        if text == Some(text) {
+            text.starts_with("__jet_ffi_runtime__: ") || text.starts_with(JET_HOST_FAULT_PREFIX) || jet_scheduler_transported_report(text)
+        } else { false }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:146
+// Non-unwinding native faults must remain loud even with a catch flag:
+// only exactly converted control transfers suppress the process panic hook.
+fn jet_scheduler_suppress_panic_report(payload: &(Any + Send)) -> Bool {
+    // GATE #4565: kernel primitive
+    #Unsafe("query catching flag without failing during TLS teardown") {
+        JET_SCHEDULER_CATCHING_PANIC.try_with((flag) -> flag.get()).unwrap_or(false) && jet_scheduler_converted_unwind(payload)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:153
+fn jet_scheduler_install_panic_hook() -> () {
+    // GATE #4565: kernel primitive
+    #Unsafe("force single lazy native hook initialization") { _ :: LazyLock.force(&JET_SCHEDULER_PANIC_HOOK) }
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:157
+pub fn jet_scheduler_catch_task_unwind<T>(f: fn() -> T) -> Result<T,Box<Any + Send>> {
+    jet_scheduler_install_panic_hook()
+    // GATE #4565: kernel primitive
+    #Unsafe("native catch frame encloses task callback and wait boundary; restore nested catching flag") {
+        JET_SCHEDULER_CATCHING_PANIC.with((flag) -> {
+            previous :: flag.replace(true)
+            result :: panic.catch_unwind(panic.AssertUnwindSafe(() -> {
+                boundary :: JetSchedulerWaitBoundary.enter()
+                f()
+            }))
+            flag.set(previous)
+            jet_task_deadline_clear_pending()
+            ^result
+        })
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:175
+// Test-only Windows fault injection; integration limits mutable seam to test fragments.
+// GATE #4565: kernel primitive
+static TEST_IOCP_GQCS_FATAL: AtomicBool = #Unsafe("fault injection starts false; production never consumes test mutation") { AtomicBool.new(false) }
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:177
+fn jet_scheduler_fatal(msg: &String) -> Never {
+    // GATE #4565: kernel primitive
+    #Unsafe("parallel deferred failures retain the fatal payload until owning join catches it") {
+        if JET_PARA_DEFER_FAILURE.with((defer) -> defer.get()) {
+            panic.resume_unwind(Box.new(JetParaRuntimeFailure.SchedulerFatal{msg: msg.to_string()}))
+        }
+    }
+    jet_scheduler_runtime_stop(msg)
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:208
+// D-CANCELMODEL1=C: wait-point cancellation unwinds once; lexical shields
+// and cleanup during an existing unwind defer, never discard, interrupts.
+struct JetCancelUnwind {}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:210
+struct JetDeadlineUnwind { rendered: String }
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:217
+pub fn jet_scheduler_is_cancel_unwind(payload: &(Any + Send)) -> Bool {
+    // GATE #4565: kernel primitive
+    #Unsafe("exact native marker type distinguishes cancel from producer failure") { payload.is<JetCancelUnwind>() }
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:223
+pub fn jet_scheduler_is_deadline_unwind(payload: &(Any + Send)) -> Bool {
+    // GATE #4565: kernel primitive
+    #Unsafe("exact native marker preserves deadline identity across foreign boundaries") { payload.is<JetDeadlineUnwind>() }
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:227
+fn jet_scheduler_panic_message(payload: &(Any + Send)) -> String {
+    // GATE #4565: kernel primitive
+    message :: #Unsafe("borrow native payload text or preserve private host-fault classification") {
+        payload.downcast_ref<String>().cloned()
+            .or_else(() -> payload.downcast_ref<&String>().map((s) -> (*s).to_string()))
+            .unwrap_or_else(() -> jet_scheduler_host_fault_message("task carried a non-Jet payload"))
+    }
+    first := message.lines().next().unwrap_or(&message)
+    split := message.lines().next().and_then((line) -> line.split_once("]: ").map((pair) -> pair.1)).unwrap_or(&message)
+    reason := split.strip_prefix("panic: ").unwrap_or(first)
+    message :: reason.to_string()
+    if message.rsplit_once(" (at ") == Some((reason, location)) {
+        if location.ends_with(')') && location[..location.len()-1].contains(':') { return reason.to_string() }
+    }
+    ^message
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:276
+// Owns scheduler payloads; interrupt adapter consumes this without duplicating them.
+fn jet_report_caught_unwind(payload: Box<Any + Send>) -> () {
+    // GATE #4565: kernel primitive
+    #Unsafe("report the real caught native payload without re-raising across the interrupt boundary") {
+        if payload.downcast_ref<JetDeadlineUnwind>() == Some(deadline) { io.eprintln(deadline.rendered) }
+        else if payload.downcast_ref<String>() == Some(message) { jet_runtime_caught_stop(message) }
+        else if payload.downcast_ref<&String>() == Some(message) { jet_runtime_caught_stop(message) }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:289
+// Catch inside the native host frame before returning to non-unwinding foreign frames.
+pub enum JetSchedulerWait<T> { Ready(T), Cancelled, Deadline(String), Panicked(String) }
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:312
+pub fn jet_scheduler_catch_foreign_boundary<T>(f: fn() -> T) -> Result<T,Box<Any + Send>> {
+    // GATE #4565: kernel primitive
+    #Unsafe("catch encloses lazy hook initialization too; no wait-point bookkeeping at an ordinary host seam") {
+        JET_SCHEDULER_CATCHING_PANIC.with((catching) -> {
+            previous :: catching.replace(true)
+            result :: panic.catch_unwind(panic.AssertUnwindSafe(() -> {
+                jet_scheduler_install_panic_hook()
+                f()
+            }))
+            catching.set(previous)
+            ^result
+        })
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:335
+pub fn jet_scheduler_classify_unwind<T>(payload: Box<Any + Send>) -> JetSchedulerWait<T> {
+    // GATE #4565: kernel primitive
+    #Unsafe("single conversion of owned native payload into scheduler status") {
+        if payload.is<JetCancelUnwind>() { return .Cancelled }
+        if payload.is<JetDeadlineUnwind>() {
+            deadline :: payload.downcast<JetDeadlineUnwind>().expect("deadline payload type checked")
+            return .Deadline(^deadline.rendered)
+        }
+        message :: payload.downcast_ref<String>().map((message) -> message)
+            .or_else(() -> payload.downcast_ref<&String>().copied())
+            .map((message) -> {
+                if message.starts_with("__jet_ffi_runtime__: ") || message.starts_with(JET_HOST_FAULT_PREFIX) || jet_scheduler_transported_report(message) {
+                    message.to_string()
+                } else { jet_scheduler_host_fault_message(message) }
+            }).unwrap_or_else(() -> jet_scheduler_host_fault_message("scheduler wait carried a non-Jet payload"))
+        .Panicked(^message)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:367
+pub fn jet_scheduler_wait_without_unwind<T>(f: fn() -> T) -> JetSchedulerWait<T> {
+    // GATE #4565: kernel primitive
+    result :: #Unsafe("temporarily install task and wait boundary only around a catch-capable wait point") {
+        JET_IN_SCHEDULER_TASK.with((in_task) -> {
+            previous_task :: in_task.replace(true)
+            result :: {
+                boundary :: JetSchedulerWaitBoundary.enter()
+                jet_scheduler_catch_foreign_boundary(^f)
+            }
+            in_task.set(previous_task)
+            ^result
+        })
+    }
+    if result == { Ok(value) -> .Ready(^value); Err(payload) -> jet_scheduler_classify_unwind<T>(^payload) }
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:387
+// GATE #4565: kernel primitive
+static SHIELD_DEPTH: ThreadLocal<Cell<U32>> = #Unsafe("per-thread lexical shield depth") { ThreadLocal.new(() -> Cell.new(U32{0})) }
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:393
+fn jet_scheduler_unwind_in_flight() -> Bool {
+    // GATE #4565: kernel primitive
+    #Unsafe("native unwinding status prevents a second interrupt from cleanup") { thread.panicking() }
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:405
+pub fn jet_scheduler_shielded() -> Bool {
+    // GATE #4565: kernel primitive
+    #Unsafe("lexical shield or in-flight unwind defers interrupt delivery") { SHIELD_DEPTH.with((d) -> d.get() > 0) || jet_scheduler_unwind_in_flight() }
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:410
+pub fn jet_scheduler_shield_enter() -> () {
+    if current_task_control().is_some() {
+        // GATE #4565: kernel primitive
+        #Unsafe("shield is transparent outside tasks; task scope increments local depth") { SHIELD_DEPTH.with((d) -> d.set(d.get().saturating_add(1))) }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:419
+#Derive(Clone, Copy, Debug, Eq, PartialEq)
+pub enum JetShieldExit { None, Deadline, Cancelled }
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:428
+pub fn jet_scheduler_shield_leave_status() -> JetShieldExit {
+    if current_task_control().is_none() { return .None }
+    // GATE #4565: kernel primitive
+    landed :: #Unsafe("balance local shield depth without raising during cleanup") {
+        SHIELD_DEPTH.with((d) -> { n :: d.get().saturating_sub(1); d.set(n); n == 0 })
+    }
+    if landed && !jet_scheduler_unwind_in_flight() {
+        if jet_deadline_remaining_ms() == Some(ms) { if ms <= 0 { return .Deadline } }
+        if jet_scheduler_task_cancelled() { return .Cancelled }
+    }
+    .None
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:455
+pub fn jet_scheduler_deliver_shield_exit(exit: JetShieldExit) -> () {
+    if exit == { .None -> {}; .Deadline -> jet_deadline_exceeded("shield exit"); .Cancelled -> jet_task_unwind_cancel() }
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:464
+pub fn jet_scheduler_shield_leave() -> () { jet_scheduler_deliver_shield_exit(jet_scheduler_shield_leave_status()) }
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:468
+fn jet_task_unwind_cancel() -> Never {
+    // GATE #4565: kernel primitive
+    #Unsafe("raise unique cancel marker only at a catch-capable deliverable wait point") { panic.panic_any(JetCancelUnwind{}) }
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:483
+pub fn jet_task_deliver_cancel() -> () {
+    if jet_scheduler_panic_should_unwind() && !jet_scheduler_unwind_in_flight() { jet_task_unwind_cancel() }
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:492
+fn jet_task_wait_point_cancel_check() -> () {
+    jet_scheduler_wait_while_paused()
+    if jet_scheduler_task_cancelled() && !jet_scheduler_shielded() { jet_task_deliver_cancel() }
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:501
+pub struct ParkSlot { notified: AtomicBool, lock: Mutex<()>, cv: Condvar }
+impl ParkSlot {
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:508
+    pub fn new() -> Arc<Self> {
+        // GATE #4565: kernel primitive
+        #Unsafe("one native condvar/mutex pair owns a coalescing wake token") {
+            Arc.new(ParkSlot{notified: AtomicBool.new(false), lock: Mutex.new(()), cv: Condvar.new()})
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:516
+    pub fn park(self: &Self, timeout: Duration?) -> () {
+        // GATE #4565: kernel primitive
+        #Unsafe("predicate recheck shares waker mutex; spurious wakes cannot lose notification or extend deadline") {
+            if self.notified.swap(false, Ordering.Acquire) { return }
+            guard := self.lock.lock().unwrap()
+            if self.notified.swap(false, Ordering.Acquire) { return }
+            _ :: METRIC_PARK_BLOCKS.fetch_add(1, Ordering.Relaxed)
+            if timeout == {
+                Some(timeout) -> {
+                    deadline :: Instant.now() + timeout
+                    loop {
+                        remaining :: deadline.saturating_duration_since(Instant.now())
+                        if remaining.is_zero() { break }
+                        (next, result) :: self.cv.wait_timeout(^guard, remaining).unwrap()
+                        guard = ^next
+                        if self.notified.swap(false, Ordering.Acquire) || result.timed_out() { break }
+                    }
+                }
+                None -> {
+                    loop {
+                        guard = self.cv.wait(^guard).unwrap()
+                        if self.notified.swap(false, Ordering.Acquire) { break }
+                    }
+                }
+            }
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:551
+    pub fn wake(self: &Self) -> () {
+        // GATE #4565: kernel primitive
+        #Unsafe("same predicate mutex prevents wake between recheck and condvar wait from being lost") {
+            guard :: self.lock.lock().unwrap()
+            self.notified.store(true, Ordering.Release)
+            self.cv.notify_one()
+        }
+    }
+}
+impl JetTaskGroupWaiter for ParkSlot {
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:563
+    fn wake(self: &Self) -> () { ParkSlot.wake(self) }
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:568
+pub struct JetTaskCancelCallbackGuard { control: Weak<JetTaskControl>, id: USize }
+impl Drop for JetTaskCancelCallbackGuard {
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:574
+    fn drop(self: &Self) -> () {
+        // GATE #4565: kernel primitive
+        #Unsafe("weak control upgrade permits removing this callback without retaining a task indefinitely") {
+            if self.control.upgrade() == Some(control) {
+                _ :: control.cancel_callbacks.lock().unwrap_or_else((poisoned) -> poisoned.into_inner()).remove(&self.id)
+            }
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:585
+pub struct JetTaskControl {
+    pub paused: Arc<AtomicBool>,
+    pub cancelled: Arc<AtomicBool>,
+    // D-TASK-PAUSE-TIER1=E: 0 WaitPoints (default), 1 CheckLoops.
+    pub pause_mode: AtomicU8,
+    observe_id: AtomicUsize,
+    park: Arc<ParkSlot>,
+    cancel_waiters: Mutex<[Weak<ParkSlot>]>,
+    cancel_callbacks: Mutex<[USize: Arc<fn() -> () + Send + Sync>]>,
+    next_cancel_callback: AtomicUsize
+}
+impl JetTaskControl {
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:598
+    pub fn new() -> Arc<Self> {
+        // GATE #4565: kernel primitive
+        #Unsafe("native task control starts running, uncancelled, with isolated waiter/callback registries") {
+            Arc.new(JetTaskControl{paused: Arc.new(AtomicBool.new(false)), cancelled: Arc.new(AtomicBool.new(false)),
+                pause_mode: AtomicU8.new(0), observe_id: AtomicUsize.new(0), park: ParkSlot.new(),
+                cancel_waiters: Mutex.new([]), cancel_callbacks: Mutex.new([:]), next_cancel_callback: AtomicUsize.new(0)})
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:614
+    // Invoke foreign-wait bridge only after releasing callback registry lock.
+    pub fn register_cancel_callback(self: &Arc<Self>, callback: Arc<fn() -> () + Send + Sync>) -> JetTaskCancelCallbackGuard {
+        // GATE #4565: kernel primitive
+        #Unsafe("cancellation and callback registration synchronize under one registry mutex") {
+            id :: self.next_cancel_callback.fetch_add(1, Ordering.Relaxed)
+            invoke_now :: {
+                callbacks := self.cancel_callbacks.lock().unwrap_or_else((poisoned) -> poisoned.into_inner())
+                if self.cancelled.load(Ordering.Acquire) { true }
+                else { _ :: callbacks.insert(id, callback.clone()); false }
+            }
+            if invoke_now { callback() }
+            JetTaskCancelCallbackGuard{control: Arc.downgrade(self), id: id}
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:640
+    pub fn pause(self: &Self) -> () { self.pause_with_mode(0) }
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:645
+    pub fn pause_with_mode(self: &Self, mode: U8) -> () {
+        // GATE #4565: kernel primitive
+        #Unsafe("publish pause state and update payload-free observation record") {
+            self.pause_mode.store(mode, Ordering.Relaxed)
+            self.paused.store(true, Ordering.Relaxed)
+            if jet_observe_registry() == Some(registry) {
+                id :: self.observe_id.load(Ordering.Relaxed)
+                if registry.tasks.lock().unwrap().get_mut(&id) == Some(task) { task.state = "paused" }
+            }
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:656
+    pub fn resume(self: &Self) -> () {
+        // GATE #4565: kernel primitive
+        #Unsafe("clear pause before waking blocked task and updating observation state") {
+            self.paused.store(false, Ordering.Relaxed)
+            if jet_observe_registry() == Some(registry) {
+                id :: self.observe_id.load(Ordering.Relaxed)
+                if registry.tasks.lock().unwrap().get_mut(&id) == Some(task) { task.state = "running" }
+            }
+            self.park.wake()
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:667
+    pub fn cancel(self: &Self) -> () {
+        // GATE #4565: kernel primitive
+        #Unsafe("record cancellation before waking all waiters; detach callback map before invoking foreign code") {
+            self.cancelled.store(true, Ordering.Release)
+            if jet_observe_registry() == Some(registry) {
+                id :: self.observe_id.load(Ordering.Relaxed)
+                if registry.tasks.lock().unwrap().get_mut(&id) == Some(task) { task.cancelled = true }
+            }
+            self.park.wake()
+            loop waiter in self.cancel_waiters.lock().unwrap().drain(..) {
+                if waiter.upgrade() == Some(waiter) { waiter.wake() }
+            }
+            callbacks :: mem.take(&*self.cancel_callbacks.lock().unwrap_or_else((poisoned) -> poisoned.into_inner()))
+            loop callback in callbacks.into_values() { callback() }
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:692
+    fn register_cancel_waiter(self: &Self, slot: &Arc<ParkSlot>) -> () {
+        // GATE #4565: kernel primitive
+        #Unsafe("register weak waiter or immediately wake it if cancellation already landed") {
+            waiters := self.cancel_waiters.lock().unwrap()
+            if self.cancelled.load(Ordering.Relaxed) { slot.wake() }
+            else { waiters.push(Arc.downgrade(slot)) }
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:701
+    fn remove_cancel_waiter(self: &Self, slot: &ParkSlot) -> () {
+        // GATE #4565: kernel primitive
+        #Unsafe("remove dead weak waiters and the precise completed waiter's allocation identity") {
+            self.cancel_waiters.lock().unwrap().retain((waiter) -> waiter.upgrade().is_some_and((waiter) -> !ptr.eq(Arc.as_ptr(&waiter), ptr.from_ref(slot))))
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:709
+    fn wait_while_paused(self: &Self) -> () {
+        // GATE #4565: kernel primitive
+        #Unsafe("native condvar pause observes cancellation and inherited deadline without busy waiting") {
+            loop self.paused.load(Ordering.Relaxed) && !self.cancelled.load(Ordering.Relaxed) {
+                shielded :: jet_scheduler_shielded()
+                if !shielded && jet_task_deadline_if_expired(jet_deadline_remaining_ms(), "task pause").is_some() { jet_deadline_exceeded("task pause") }
+                timeout :: if shielded { None }
+                    else { jet_deadline_remaining_ms().map((remaining) -> Duration.from_millis(jet_task_delay_ms_defaulted(remaining))) }
+                self.park.park(timeout)
+            }
+        }
+    }
+}
+impl JetObserveControl for JetTaskControl {
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:735
+    fn cancel(self: &Self) -> () { JetTaskControl.cancel(self) }
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:740
+// GATE #4565: kernel primitive
+static TASK_CONTROL: ThreadLocal<RefCell<Arc<JetTaskControl>?>> = #Unsafe("task control belongs to executing native worker") { ThreadLocal.new(() -> RefCell.new(None)) }
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:744
+// GATE #4565: kernel primitive
+static TASK_COMPLETION_FRAMES: ThreadLocal<RefCell<[[Box<fn() -> ()>]]>> = #Unsafe("nested helper scopes own isolated completion callback frames") { ThreadLocal.new(() -> RefCell.new([])) }
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:748
+pub fn jet_scheduler_set_task_control(c: Arc<JetTaskControl>?) -> () {
+    // GATE #4565: kernel primitive
+    #Unsafe("set only current thread task control") { TASK_CONTROL.with((t) -> { *t.borrow_mut() = ^c }) }
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:752
+pub fn jet_scheduler_current_task_control() -> Arc<JetTaskControl>? { current_task_control() }
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:756
+fn current_task_control() -> Arc<JetTaskControl>? {
+    // GATE #4565: kernel primitive
+    #Unsafe("clone current thread control capability without changing task state") { TASK_CONTROL.with((t) -> t.borrow().clone()) }
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:759
+// D-TEST-WORLD1=A: isolated world capability, same scheduler, no global clock.
+const JET_WORLD_DEFAULT_BUDGET: USize = 100_000
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:764
+struct JetWorldTimer { deadline_ns: I64, sequence: U64, slot: Arc<ParkSlot> }
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:770
+struct JetWorldState {
+    monotonic_ns: I64, wall_origin_ms: I64, rng: U64, next_sequence: U64,
+    live_tasks: USize, runnable_tasks: USize, budget: USize,
+    timers: [JetWorldTimer], history: [String]
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:783
+#Derive(Clone)
+pub struct JetDeterministicWorld { state: Arc<Mutex<JetWorldState>>, waiters: Arc<Condvar> }
+impl JetDeterministicWorld {
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:789
+    pub fn new() -> Self {
+        // GATE #4565: kernel primitive
+        #Unsafe("isolated world state and waiters share one synchronized capability") {
+            Self{state: Arc.new(Mutex.new(JetWorldState{
+                monotonic_ns: 0, wall_origin_ms: 0, rng: U64{0x4d595df4d0f33173}, next_sequence: 0,
+                live_tasks: 0, runnable_tasks: 0, budget: JET_WORLD_DEFAULT_BUDGET, timers: [], history: []
+            })), waiters: Arc.new(Condvar.new())}
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:808
+    pub fn now(self: &Self) -> I64 {
+        // GATE #4565: kernel primitive
+        #Unsafe("world mutex protects wall origin and monotonic clock snapshot") {
+            state :: self.state.lock().unwrap_or_else((error) -> error.into_inner())
+            state.wall_origin_ms.saturating_add(state.monotonic_ns / 1_000_000)
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:813
+    fn monotonic_ns(self: &Self) -> I64 {
+        // GATE #4565: kernel primitive
+        #Unsafe("read virtual monotonic clock under mutex") { self.state.lock().unwrap_or_else((error) -> error.into_inner()).monotonic_ns }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:820
+    pub fn advance_ns(self: &Self, duration_ns: I64) -> I64 {
+        if duration_ns < 0 { jet_scheduler_fatal("deterministic world cannot move time backwards; advance requires a non-negative duration") }
+        // GATE #4565: kernel primitive
+        #Unsafe("release due timers in stable deadline/sequence order and wait for idle between them") {
+            target :: {
+                state :: self.state.lock().unwrap_or_else((error) -> error.into_inner())
+                state.monotonic_ns.checked_add(duration_ns).unwrap_or_else(() -> jet_scheduler_fatal("deterministic world clock exhausted its supported range"))
+            }
+            // Tasks register virtual timers only after reaching a wait point.
+            self.wait_until_idle_or_timer()
+            loop {
+                due :: {
+                    state := self.state.lock().unwrap_or_else((error) -> error.into_inner())
+                    index :: state.timers.iter().enumerate().filter((pair) -> pair.1.deadline_ns <= target)
+                        .min_by_key((pair) -> (pair.1.deadline_ns, pair.1.sequence)).map((pair) -> pair.0)
+                    if index == Some(index) {
+                        timer :: state.timers.swap_remove(index)
+                        state.monotonic_ns = timer.deadline_ns
+                        state.runnable_tasks = state.runnable_tasks.saturating_add(1)
+                        state.history.push("timer:{timer.deadline_ns}:{timer.sequence}")
+                        ^timer.slot
+                    } else {
+                        state.monotonic_ns = target
+                        state.history.push("advance:{duration_ns}")
+                        break
+                    }
+                }
+                due.wake()
+                self.waiters.notify_all()
+                self.wait_idle()
+            }
+            self.now()
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:869
+    fn wait_until_idle_or_timer(self: &Self) -> () {
+        // GATE #4565: kernel primitive
+        #Unsafe("bounded condition waits allow tasks to park or register their virtual timers") {
+            state := self.state.lock().unwrap_or_else((error) -> error.into_inner())
+            budget :: state.budget
+            loop _ in 0..budget {
+                if state.runnable_tasks == 0 || !state.timers.is_empty() { return }
+                (next, _) :: self.waiters.wait_timeout(^state, Duration.from_micros(50)).unwrap_or_else((error) -> error.into_inner())
+                state = ^next
+            }
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:884
+    fn wait_world_predicate(self: &Self, ready: fn(&JetWorldState) -> Bool) -> () {
+        // GATE #4565: kernel primitive
+        #Unsafe("bounded condition waits recheck predicate and report real world budget exhaustion") {
+            state := self.state.lock().unwrap_or_else((error) -> error.into_inner())
+            budget :: state.budget
+            loop _ in 0..budget {
+                if ready(&state) { return }
+                (next, _) :: self.waiters.wait_timeout(^state, Duration.from_micros(50)).unwrap_or_else((error) -> error.into_inner())
+                state = ^next
+            }
+            if ready(&state) { return }
+            jet_scheduler_fatal("deterministic world execution budget exhausted while waiting for idle")
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:905
+    pub fn wait_idle(self: &Self) -> () { self.wait_world_predicate((state) -> state.runnable_tasks == 0) }
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:909
+    pub fn ensure_closed(self: &Self) -> () {
+        // GATE #4565: kernel primitive
+        live :: #Unsafe("read live descendant count under mutex") { self.state.lock().unwrap_or_else((error) -> error.into_inner()).live_tasks }
+        if live != 0 { jet_scheduler_fatal("deterministic world scope exited with live descendants; cancel and join every task") }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:922
+    fn task_spawned(self: &Self) -> () {
+        // GATE #4565: kernel primitive
+        #Unsafe("register live and runnable counts atomically before notification") {
+            state := self.state.lock().unwrap_or_else((error) -> error.into_inner())
+            state.live_tasks = state.live_tasks.saturating_add(1)
+            state.runnable_tasks = state.runnable_tasks.saturating_add(1)
+            state.history.push("task:spawn")
+            self.waiters.notify_all()
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:930
+    fn task_finished(self: &Self, waiting: Bool, slot: &Arc<ParkSlot>?) -> () {
+        // GATE #4565: kernel primitive
+        #Unsafe("remove pending timer or balance delivered timer runnable count before task retirement") {
+            state := self.state.lock().unwrap_or_else((error) -> error.into_inner())
+            if waiting {
+                removed :: slot.and_then((slot) -> state.timers.iter().position((timer) -> Arc.ptr_eq(&timer.slot, slot)))
+                if removed == Some(index) { _ :: state.timers.swap_remove(index) }
+                else { state.runnable_tasks = state.runnable_tasks.saturating_sub(1) }
+            } else { state.runnable_tasks = state.runnable_tasks.saturating_sub(1) }
+            state.live_tasks = state.live_tasks.saturating_sub(1)
+            state.history.push("task:finish")
+            self.waiters.notify_all()
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:954
+    fn park(self: &Self, duration_ns: I64, slot: Arc<ParkSlot>) -> () {
+        // GATE #4565: kernel primitive
+        #Unsafe("world mutex transitions task into registered virtual timer") {
+            state := self.state.lock().unwrap_or_else((error) -> error.into_inner())
+            deadline_ns :: state.monotonic_ns.checked_add(duration_ns).unwrap_or_else(() -> jet_scheduler_fatal("deterministic world timer overflowed"))
+            sequence :: state.next_sequence
+            state.next_sequence = sequence.wrapping_add(1)
+            state.runnable_tasks = state.runnable_tasks.saturating_sub(1)
+            state.timers.push(JetWorldTimer{deadline_ns: deadline_ns, sequence: sequence, slot: ^slot})
+            state.history.push("timer:register:{deadline_ns}:{sequence}")
+            self.waiters.notify_all()
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:972
+    fn finish_park(self: &Self, slot: &Arc<ParkSlot>) -> Bool {
+        // GATE #4565: kernel primitive
+        #Unsafe("early wake removes exact timer once and restores runnable count") {
+            state := self.state.lock().unwrap_or_else((error) -> error.into_inner())
+            removed :: state.timers.iter().position((timer) -> Arc.ptr_eq(&timer.slot, slot))
+            if removed == Some(index) {
+                _ :: state.timers.swap_remove(index)
+                state.runnable_tasks = state.runnable_tasks.saturating_add(1)
+                self.waiters.notify_all()
+                true
+            } else { false }
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:988
+    fn rng_next(self: &Self) -> U64 {
+        // GATE #4565: kernel primitive
+        #Unsafe("deterministic RNG and history advance together under world mutex") {
+            state := self.state.lock().unwrap_or_else((error) -> error.into_inner())
+            x := state.rng
+            x ^= x << 7
+            x ^= x >> 9
+            x = x.wrapping_mul(U64{0x9e3779b97f4a7c15})
+            state.rng = x
+            state.history.push("rng:{x}")
+            x
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:999
+    fn rng_seed(self: &Self, seed: I64) -> () {
+        // GATE #4565: kernel primitive
+        #Unsafe("seed world RNG without host entropy") {
+            state := self.state.lock().unwrap_or_else((error) -> error.into_inner())
+            state.rng = seed as U64
+            state.history.push("rng:seed:{seed as U64}")
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1005
+    pub fn history(self: &Self) -> String {
+        // GATE #4565: kernel primitive
+        #Unsafe("copy joined world history while holding mutex") { self.state.lock().unwrap_or_else((error) -> error.into_inner()).history.join("\n") }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1015
+// GATE #4565: kernel primitive
+static JET_ACTIVE_WORLD: ThreadLocal<RefCell<JetDeterministicWorld?>> = #Unsafe("current world thread capability") { ThreadLocal.new(() -> RefCell.new(None)) }
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1017
+// GATE #4565: kernel primitive
+static JET_WORLD_TASK_ACTIVE: ThreadLocal<Cell<Bool>> = #Unsafe("worker world-task flag") { ThreadLocal.new(() -> Cell.new(false)) }
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1019
+// GATE #4565: kernel primitive
+static JET_WORLD_TASK_WAITING: ThreadLocal<Cell<Bool>> = #Unsafe("worker virtual-wait flag") { ThreadLocal.new(() -> Cell.new(false)) }
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1021
+// GATE #4565: kernel primitive
+static JET_WORLD_TASK_SLOT: ThreadLocal<RefCell<Arc<ParkSlot>?>> = #Unsafe("current virtual waiter") { ThreadLocal.new(() -> RefCell.new(None)) }
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1025
+pub fn jet_scheduler_current_world() -> JetDeterministicWorld? {
+    // GATE #4565: kernel primitive
+    #Unsafe("clone current world capability") { JET_ACTIVE_WORLD.with((world) -> world.borrow().clone()) }
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1029
+pub fn jet_scheduler_world_now_ms() -> I64? { jet_scheduler_current_world().map((world) -> world.now()) }
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1033
+pub fn jet_scheduler_world_monotonic_now_ns() -> I64? { jet_scheduler_current_world().map((world) -> world.monotonic_ns()) }
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1042
+pub fn jet_scheduler_world_reject_uncontrolled(effect: String) -> () {
+    if jet_scheduler_current_world().is_none() { return }
+    message :: if effect == {
+        "network" -> "deterministic world has no controlled network provider"
+        "foreign" -> "deterministic world has no controlled foreign provider"
+        "entropy" -> "deterministic world has no controlled entropy provider"
+        "clock" -> "deterministic world has no controlled clock provider"
+        _ -> "deterministic world has no controlled external-effect provider"
+    }
+    jet_scheduler_fatal(message)
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1056
+pub fn jet_scheduler_world_rng_next() -> U64? { jet_scheduler_current_world().map((world) -> world.rng_next()) }
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1060
+pub fn jet_scheduler_world_rng_seed(seed: I64) -> Bool {
+    if jet_scheduler_current_world() == Some(world) { world.rng_seed(seed); true } else { false }
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1068
+pub struct JetWorldScope { previous: JetDeterministicWorld?, previous_provider: JetMonotonicProvider? }
+impl Drop for JetWorldScope {
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1074
+    fn drop(self: &Self) -> () {
+        _ :: jet_time_monotonic_provider_set(self.previous_provider.take())
+        // GATE #4565: kernel primitive
+        #Unsafe("world scope restores previous thread capability on exit or unwind") {
+            JET_ACTIVE_WORLD.with((world) -> { *world.borrow_mut() = self.previous.take() })
+        }
+    }
+}
+impl JetDeterministicWorld {
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1083
+    pub fn enter(self: &Self) -> JetWorldScope {
+        // GATE #4565: kernel primitive
+        previous :: #Unsafe("reject nested world instead of ambiguously replacing parent") {
+            JET_ACTIVE_WORLD.with((world) -> {
+                world := world.borrow_mut()
+                if world.is_some() { jet_scheduler_fatal("deterministic world nesting is ambiguous; use the parent world explicitly") }
+                world.replace(self.clone())
+            })
+        }
+        previous_provider :: jet_time_monotonic_provider_set(Some(jet_scheduler_world_monotonic_now_ns))
+        JetWorldScope{previous: ^previous, previous_provider: previous_provider}
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1102
+struct JetWorldTaskScope { world: JetDeterministicWorld, previous: JetDeterministicWorld?, previous_provider: JetMonotonicProvider? }
+impl Drop for JetWorldTaskScope {
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1109
+    fn drop(self: &Self) -> () {
+        // GATE #4565: kernel primitive
+        #Unsafe("balance task/timer counts and restore worker world/provider at completion") {
+            waiting :: JET_WORLD_TASK_WAITING.with((waiting) -> waiting.get())
+            slot :: JET_WORLD_TASK_SLOT.with((slot) -> slot.borrow().clone())
+            self.world.task_finished(waiting, slot.as_ref())
+            JET_WORLD_TASK_ACTIVE.with((active) -> active.set(false))
+            JET_WORLD_TASK_WAITING.with((waiting) -> waiting.set(false))
+            JET_WORLD_TASK_SLOT.with((slot) -> { *slot.borrow_mut() = None })
+            _ :: jet_time_monotonic_provider_set(self.previous_provider.take())
+            JET_ACTIVE_WORLD.with((world) -> { *world.borrow_mut() = self.previous.take() })
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1123
+fn jet_scheduler_world_task_enter(world: JetDeterministicWorld?) -> JetWorldTaskScope? {
+    // GATE #4565: kernel primitive
+    #Unsafe("worker owns world/provider TLS until completion scope drops") {
+        world.map((world) -> {
+            previous :: JET_ACTIVE_WORLD.with((active) -> active.borrow_mut().replace(world.clone()))
+            previous_provider :: jet_time_monotonic_provider_set(Some(jet_scheduler_world_monotonic_now_ns))
+            JET_WORLD_TASK_ACTIVE.with((active) -> active.set(true))
+            JET_WORLD_TASK_WAITING.with((waiting) -> waiting.set(false))
+            JET_WORLD_TASK_SLOT.with((slot) -> { *slot.borrow_mut() = None })
+            JetWorldTaskScope{world: ^world, previous: ^previous, previous_provider: previous_provider}
+        })
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1141
+fn jet_scheduler_world_park(world: &JetDeterministicWorld, duration: Duration, slot: Arc<ParkSlot>) -> () {
+    world.park(duration.as_nanos().min(I64.MAX as U128) as I64, slot.clone())
+    // GATE #4565: kernel primitive
+    #Unsafe("record task virtual timer for cancellation/completion balancing") {
+        JET_WORLD_TASK_WAITING.with((waiting) -> waiting.set(true))
+        JET_WORLD_TASK_SLOT.with((current) -> { *current.borrow_mut() = Some(^slot) })
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1146
+fn jet_scheduler_world_begin_wait(world: &JetDeterministicWorld, slot: Arc<ParkSlot>) -> () {
+    // GATE #4565: kernel primitive
+    #Unsafe("transition into non-timer wait once; release world lock before notification") {
+        if JET_WORLD_TASK_WAITING.with((waiting) -> waiting.get()) { return }
+        state := world.state.lock().unwrap_or_else((error) -> error.into_inner())
+        state.runnable_tasks = state.runnable_tasks.saturating_sub(1)
+        drop(^state)
+        world.waiters.notify_all()
+        JET_WORLD_TASK_WAITING.with((waiting) -> waiting.set(true))
+        JET_WORLD_TASK_SLOT.with((current) -> { *current.borrow_mut() = Some(^slot) })
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1160
+fn jet_scheduler_world_finish_park(world: &JetDeterministicWorld, slot: &Arc<ParkSlot>) -> () {
+    // GATE #4565: kernel primitive
+    #Unsafe("complete only task's active virtual wait") {
+        if JET_WORLD_TASK_WAITING.with((waiting) -> waiting.get()) {
+            _ :: world.finish_park(slot)
+            JET_WORLD_TASK_WAITING.with((waiting) -> waiting.set(false))
+            JET_WORLD_TASK_SLOT.with((current) -> { *current.borrow_mut() = None })
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1168
+pub fn jet_testing_world<T>(callback: fn(JetDeterministicWorld) -> T) -> T {
+    world :: JetDeterministicWorld.new()
+    scope :: world.enter()
+    value :: callback(world.clone())
+    world.wait_idle()
+    world.ensure_closed()
+    ^value
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1180
+pub fn jet_world_now(world: &JetDeterministicWorld) -> I64 { world.now() }
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1184
+pub fn jet_world_advance(world: &JetDeterministicWorld, duration_ns: I64) -> I64 { world.advance_ns(duration_ns) }
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1188
+pub fn jet_world_wait_idle(world: &JetDeterministicWorld) -> () { world.wait_idle() }
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1192
+pub fn jet_world_history(world: &JetDeterministicWorld) -> String { world.history() }
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1201
+// D-FOUND-LIFECYCLE1=A: lazy root uses the same control carrier; replace after cancellation.
+// GATE #4565: kernel primitive
+static JET_ROOT_TASK_CONTROL: LazyLock<Mutex<Arc<JetTaskControl>?>> = #Unsafe("one lazy synchronized program-root control slot") { LazyLock.new(() -> Mutex.new(None)) }
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1204
+pub fn jet_scheduler_root_task_control() -> Arc<JetTaskControl> {
+    // GATE #4565: kernel primitive
+    #Unsafe("replace cancelled root while retaining shared current root for the whole invocation") {
+        root := JET_ROOT_TASK_CONTROL.lock().unwrap_or_else((error) -> error.into_inner())
+        replace :: root.as_ref().map_or(true, (control) -> control.cancelled.load(Ordering.Relaxed))
+        if replace { *root = Some(JetTaskControl.new()) }
+        root.as_ref().expect("root task control must be initialized").clone()
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1219
+struct JetRootTaskControlScope { previous: Arc<JetTaskControl>? }
+impl Drop for JetRootTaskControlScope {
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1224
+    fn drop(self: &Self) -> () {
+        // GATE #4565: kernel primitive
+        #Unsafe("restore prior root control TLS on entry-scope exit or unwind") { TASK_CONTROL.with((slot) -> { *slot.borrow_mut() = self.previous.take() }) }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1234
+pub fn jet_scheduler_with_root_control<T>(body: fn() -> T) -> T {
+    if current_task_control().is_some() { return body() }
+    control :: jet_scheduler_root_task_control()
+    // GATE #4565: kernel primitive
+    previous :: #Unsafe("install canonical program-root capability on this thread") { TASK_CONTROL.with((slot) -> slot.replace(Some(^control))) }
+    scope :: JetRootTaskControlScope{previous: ^previous}
+    body()
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1249
+// Dropping the scope closes and drains its one nested completion frame.
+pub struct JetSchedulerTaskCompletionScope { frame_index: USize }
+impl JetSchedulerTaskCompletionScope {
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1256
+    // Reverse registration order; callbacks registering callbacks join this frame.
+    pub fn drain(self: &Self) -> () {
+        // GATE #4565: kernel primitive
+        #Unsafe("take cleanup batch outside TLS borrow; catch all failures then resume the first after all cleanup") {
+            first_panic := None as Box<Any + Send>?
+            loop {
+                cleanups :: TASK_COMPLETION_FRAMES.with((frames) -> {
+                    frames := frames.borrow_mut()
+                    assert_eq(frames.len(), self.frame_index + 1, "task completion scopes must drain in nested order")
+                    mem.take(frames.last_mut().expect("task completion frame is present"))
+                })
+                if cleanups.is_empty() { break }
+                loop cleanup in cleanups.into_iter().rev() {
+                    if panic.catch_unwind(panic.AssertUnwindSafe(^cleanup)) == Err(payload) {
+                        if first_panic.is_none() { first_panic = Some(^payload) }
+                    }
+                }
+            }
+            if first_panic == Some(payload) { panic.resume_unwind(^payload) }
+        }
+    }
+}
+impl Drop for JetSchedulerTaskCompletionScope {
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1291
+    fn drop(self: &Self) -> () {
+        // GATE #4565: kernel primitive
+        #Unsafe("drain/remove exact nested frame even when cleanup fails; never double-panic over body unwind") {
+            cleanup :: panic.catch_unwind(panic.AssertUnwindSafe(() -> self.drain()))
+            TASK_COMPLETION_FRAMES.with((frames) -> {
+                frames := frames.borrow_mut()
+                assert_eq(frames.len(), self.frame_index + 1, "task completion scopes must end in nested order")
+                _ :: frames.pop()
+            })
+            if cleanup == Err(payload) {
+                if !thread.panicking() { panic.resume_unwind(^payload) }
+            }
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1314
+pub fn jet_scheduler_task_completion_begin() -> JetSchedulerTaskCompletionScope {
+    // GATE #4565: kernel primitive
+    frame_index :: #Unsafe("append isolated nested cleanup frame to this task's TLS stack") {
+        TASK_COMPLETION_FRAMES.with((frames) -> {
+            frames := frames.borrow_mut()
+            index :: frames.len()
+            frames.push([])
+            index
+        })
+    }
+    JetSchedulerTaskCompletionScope{frame_index: frame_index}
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1324
+pub fn jet_scheduler_task_completion_register(cleanup: fn() -> ()) -> () {
+    // GATE #4565: kernel primitive
+    #Unsafe("register owned cleanup only into current frame; no frame means no retained callback") {
+        TASK_COMPLETION_FRAMES.with((frames) -> {
+            if frames.borrow_mut().last_mut() == Some(frame) { frame.push(Box.new(^cleanup)) }
+        })
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1337
+pub fn jet_scheduler_wait_while_paused() -> () {
+    if current_task_control() == Some(control) { control.wait_while_paused() }
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1345
+pub fn jet_scheduler_loop_pause_check() -> () {
+    if current_task_control() == Some(ctrl) {
+        // GATE #4565: kernel primitive
+        #Unsafe("CheckLoops mode alone honors pause at loop back-edge on every engine") {
+            if ctrl.pause_mode.load(Ordering.Relaxed) != 1 { return }
+            if !ctrl.paused.load(Ordering.Relaxed) { return }
+            ctrl.wait_while_paused()
+            if ctrl.cancelled.load(Ordering.Relaxed) && !jet_scheduler_shielded() { jet_task_deliver_cancel() }
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1361
+pub fn jet_scheduler_yield(wait_kind: &String, slot: &Arc<ParkSlot>, timeout: Duration?) -> () {
+    active_world :: jet_scheduler_current_world()
+    if active_world.as_ref() == Some(world) {
+        if current_task_control().is_some() { jet_scheduler_world_begin_wait(world, slot.clone()) }
+    }
+    observe_task :: current_task_control().is_some()
+    if observe_task { jet_observe_task_update("blocked", wait_kind, jet_deadline_remaining_ms()) }
+    ctrl :: current_task_control()
+    shielded :: jet_scheduler_shielded()
+    // GATE #4565: kernel primitive
+    #Unsafe("cancel registration makes every blocked event reachable; shield defers both cancellation and deadline") {
+        if ctrl.as_ref() == Some(ctrl) {
+            if !shielded {
+                if ctrl.cancelled.load(Ordering.Relaxed) { jet_task_deliver_cancel(); return }
+                ctrl.wait_while_paused()
+                if ctrl.cancelled.load(Ordering.Relaxed) { jet_task_deliver_cancel(); return }
+                ctrl.register_cancel_waiter(slot)
+            } else { ctrl.wait_while_paused() }
+        }
+        virtual_wait :: JET_WORLD_TASK_WAITING.with((waiting) -> waiting.get())
+        if virtual_wait {
+            // Virtual waits have no real timeout except immediate cooperative yield.
+            slot.park(if timeout.is_some_and((duration) -> duration.is_zero()) { timeout } else { None })
+        } else if shielded { slot.park(timeout) }
+        else if jet_deadline_remaining_ms() == Some(remaining) {
+            if remaining <= 0 {
+                if ctrl.as_ref() == Some(ctrl) { ctrl.remove_cancel_waiter(slot) }
+                jet_deadline_exceeded(wait_kind)
+            }
+            cap :: Duration.from_millis(remaining as U64)
+            wait :: timeout.map((t) -> t.min(cap)).unwrap_or(cap)
+            slot.park(Some(wait))
+            if jet_deadline_remaining_ms() == Some(left) {
+                if left <= 0 {
+                    if ctrl.as_ref() == Some(ctrl) { ctrl.remove_cancel_waiter(slot) }
+                    jet_deadline_exceeded(wait_kind)
+                }
+            }
+        } else { slot.park(timeout) }
+        if ctrl.as_ref() == Some(ctrl) {
+            if !shielded {
+                ctrl.remove_cancel_waiter(slot)
+                if ctrl.cancelled.load(Ordering.Relaxed) { jet_task_deliver_cancel(); return }
+            }
+            ctrl.wait_while_paused()
+        }
+    }
+    if active_world.as_ref() == Some(world) { jet_scheduler_world_finish_park(world, slot) }
+    if observe_task { jet_observe_task_update("running", "", jet_deadline_remaining_ms()) }
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1454
+pub fn jet_scheduler_task_group_wait(waiter: &Arc<ParkSlot>) -> () {
+    deadline :: jet_task_deadline_if_expired(jet_deadline_remaining_ms(), "task admission")
+    if jet_task_wait_policy(deadline, jet_scheduler_task_cancelled(), jet_scheduler_shielded()) == {
+        Ok(()) -> jet_scheduler_yield("task admission", waiter, None)
+        Err(JetTaskWaitInterrupt.Deadline(_)) -> jet_deadline_exceeded("task admission")
+        Err(JetTaskWaitInterrupt.Cancelled) -> jet_task_deliver_cancel()
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1472
+pub fn jet_scheduler_wake(slot: &ParkSlot) -> () { slot.wake() }
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1476
+pub fn jet_scheduler_task_cancelled() -> Bool {
+    // GATE #4565: kernel primitive
+    #Unsafe("query cancellation flag on current task, idle defaults false") {
+        current_task_control().map((c) -> c.cancelled.load(Ordering.Relaxed)).unwrap_or(false)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1482
+pub fn jet_scheduler_wait_point_cancelled() -> Bool { jet_scheduler_task_cancelled() && !jet_scheduler_shielded() }
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1486
+pub fn jet_scheduler_wait_point_interrupted() -> Bool {
+    jet_scheduler_wait_point_cancelled() || jet_deadline_remaining_ms().is_some_and((milliseconds) -> milliseconds <= 0)
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1492
+// GATE #4565: kernel primitive
+static JET_BLOCKING_WAIT_COMPENSATION: ThreadLocal<RefCell<[Bool]>> = #Unsafe("nested blocking compensation belongs to worker thread") { ThreadLocal.new(() -> RefCell.new([])) }
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1495
+pub fn jet_scheduler_blocking_wait_enter() -> () {
+    active :: current_task_control().is_some()
+    if active { scheduler().blocking_wait_enter() }
+    // GATE #4565: kernel primitive
+    #Unsafe("record exactly whether this nesting level entered worker compensation") { JET_BLOCKING_WAIT_COMPENSATION.with((stack) -> stack.borrow_mut().push(active)) }
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1501
+pub fn jet_scheduler_blocking_wait_leave() -> () {
+    // GATE #4565: kernel primitive
+    active :: #Unsafe("pop matching blocking compensation nesting level") { JET_BLOCKING_WAIT_COMPENSATION.with((stack) -> stack.borrow_mut().pop()) }
+    if active == Some(true) { scheduler().blocking_wait_leave() }
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1505
+pub fn jet_scheduler_blocking_wait_stats() -> (USize,USize,USize) {
+    // GATE #4565: kernel primitive
+    #Unsafe("read wait/thread/peak counters under scheduler's compensation mutex") {
+        sched :: scheduler()
+        state :: sched.blocking_wait.lock().unwrap()
+        (state.waits, state.threads, state.peak)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1511
+struct TimerEntry { wake_at: Instant, slot: Arc<ParkSlot> }
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1516
+struct TimerWheel { entries: Mutex<[TimerEntry]>, notify: Condvar }
+impl TimerWheel {
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1522
+    fn schedule(self: &Self, wake_at: Instant, slot: Arc<ParkSlot>) -> () {
+        // GATE #4565: kernel primitive
+        #Unsafe("append real timer entry before notifying retained timer worker") {
+            self.entries.lock().unwrap().push(TimerEntry{wake_at: wake_at, slot: ^slot})
+            self.notify.notify_one()
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1527
+    fn run(self: Arc<Self>) -> () {
+        // GATE #4565: kernel primitive
+        #Unsafe("real clock and condition waits drive due slots without blocking pool workers") {
+            loop {
+                now :: Instant.now()
+                due := [] as [Arc<ParkSlot>]
+                {
+                    entries := self.entries.lock().unwrap()
+                    entries.retain((e) -> {
+                        if e.wake_at <= now { due.push(e.slot.clone()); false } else { true }
+                    })
+                }
+                loop slot in due { slot.wake() }
+                sleep_for :: {
+                    entries :: self.entries.lock().unwrap()
+                    entries.iter().map((e) -> e.wake_at.saturating_duration_since(now)).min().unwrap_or(Duration.from_millis(50))
+                }
+                guard :: self.entries.lock().unwrap()
+                _ :: self.notify.wait_timeout(^guard, sleep_for.min(Duration.from_millis(50))).unwrap()
+            }
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1567
+// Owner thread stores only absolute deadlines/opaque IDs; callback values stay in owner runtime.
+#Derive(Clone, Copy)
+struct OwnerDeadlineEntry { deadline_ns: I64, task_id: U64 }
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1572
+struct OwnerDeadlineQueue { next_id: U64, entries: [OwnerDeadlineEntry] }
+impl OwnerDeadlineQueue {
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1578
+    fn new() -> Self { Self{next_id: 1, entries: []} }
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1587
+// GATE #4565: kernel primitive
+static JET_OWNER_DEADLINE_QUEUE: ThreadLocal<RefCell<OwnerDeadlineQueue>> = #Unsafe("owner callback deadline queue is thread-local") { ThreadLocal.new(() -> RefCell.new(OwnerDeadlineQueue.new())) }
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1592
+pub fn jet_scheduler_owner_deadline_register(deadline_ns: I64) -> U64 {
+    // GATE #4565: kernel primitive
+    #Unsafe("reserve next opaque owner ID and append its absolute deadline under one TLS borrow") {
+        JET_OWNER_DEADLINE_QUEUE.with((queue) -> {
+            queue := queue.borrow_mut()
+            task_id :: queue.next_id
+            queue.next_id = task_id.checked_add(1).unwrap_or(1)
+            queue.entries.push(OwnerDeadlineEntry{deadline_ns: deadline_ns, task_id: task_id})
+            task_id
+        })
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1606
+pub fn jet_scheduler_owner_deadline_cancel(task_id: U64) -> () {
+    // GATE #4565: kernel primitive
+    #Unsafe("unknown owner IDs are already completed/cancelled; remove only matching entries") {
+        JET_OWNER_DEADLINE_QUEUE.with((queue) -> queue.borrow_mut().entries.retain((entry) -> entry.task_id != task_id))
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1616
+pub fn jet_scheduler_owner_deadline_pop_due(now_ns: I64) -> U64? {
+    // GATE #4565: kernel primitive
+    #Unsafe("pop earliest due owner task with stable ID tie-break under one TLS borrow") {
+        JET_OWNER_DEADLINE_QUEUE.with((queue) -> {
+            queue := queue.borrow_mut()
+            index :: queue.entries.iter().enumerate().filter((pair) -> pair.1.deadline_ns <= now_ns)
+                .min_by_key((pair) -> (pair.1.deadline_ns, pair.1.task_id)).map((pair) -> pair.0)?
+            Some(queue.entries.swap_remove(index).task_id)
+        })
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1630
+// GATE #4565: kernel primitive
+static TIMER_WHEEL: OnceLock<Arc<TimerWheel>> = #Unsafe("process timer wheel initializes once only when used") { OnceLock.new() }
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1632
+fn timer_wheel() -> Arc<TimerWheel> {
+    // GATE #4565: kernel primitive
+    #Unsafe("retain one native timer worker and clone only its shared wheel capability") {
+        TIMER_WHEEL.get_or_init(() -> {
+            wheel :: Arc.new(TimerWheel{entries: Mutex.new([]), notify: Condvar.new()})
+            worker :: wheel.clone()
+            jet_scheduler_spawn_detached_timer(() -> worker.run())
+            ^wheel
+        }).clone()
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1646
+pub fn jet_scheduler_sleep_ms(millis: U64) -> () { jet_scheduler_park_duration("time sleep", Duration.from_millis(millis)) }
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1651
+pub fn jet_scheduler_park_duration(wait_kind: String, duration: Duration) -> () {
+    if duration.is_zero() { return }
+    if jet_scheduler_current_world() == Some(world) {
+        // GATE #4565: kernel primitive
+        active :: #Unsafe("virtual sleep requires a controlled worker task") { JET_WORLD_TASK_ACTIVE.with((active) -> active.get()) }
+        if !active { jet_scheduler_fatal("deterministic world sleep requires a controlled scheduler task") }
+        slot :: ParkSlot.new()
+        jet_scheduler_world_park(&world, duration, slot.clone())
+        jet_scheduler_yield(wait_kind, &slot, None)
+        return
+    }
+    slot :: ParkSlot.new()
+    // GATE #4565: kernel primitive
+    wake_at :: #Unsafe("schedule real monotonic deadline only outside controlled world") { Instant.now() + duration }
+    timer_wheel().schedule(wake_at, slot.clone())
+    jet_scheduler_yield(wait_kind, &slot, Some(duration))
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1673
+pub fn jet_scheduler_park_ms(wait_kind: String, millis: U64) -> () { jet_scheduler_park_duration(wait_kind, Duration.from_millis(millis)) }
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1679
+pub fn jet_task_delay_ms_defaulted(millis: I64) -> U64 { millis.max(0) as U64 }
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1684
+pub fn jet_task_delay_duration_ns_defaulted(nanos: I64) -> Duration { Duration.from_nanos(nanos.max(0) as U64) }
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1691
+pub fn jet_task_interval_ms_defaulted(millis: I64) -> U64 { millis.max(1) as U64 }
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1700
+pub fn jet_task_sleep_ms_defaulted(millis: I64) -> () { jet_task_sleep_duration_defaulted(Duration.from_millis(jet_task_delay_ms_defaulted(millis))) }
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1704
+pub fn jet_task_sleep_duration_ns_defaulted(nanos: I64) -> () { jet_task_sleep_duration_defaulted(jet_task_delay_duration_ns_defaulted(nanos)) }
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1708
+fn jet_task_sleep_duration_defaulted(duration: Duration) -> () {
+    if !jet_scheduler_shielded() && jet_task_deadline_if_expired(jet_deadline_remaining_ms(), "time sleep").is_some() { jet_deadline_exceeded("time sleep") }
+    jet_scheduler_park_duration("time sleep", duration)
+    if !jet_scheduler_shielded() && jet_task_deadline_if_expired(jet_deadline_remaining_ms(), "time sleep").is_some() { jet_deadline_exceeded("time sleep") }
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1723
+pub fn jet_scheduler_yield_now() -> () {
+    slot :: ParkSlot.new()
+    jet_scheduler_yield("task yield", &slot, Some(Duration.ZERO))
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1729
+pub fn jet_scheduler_current_task_trace() -> String {
+    // GATE #4565: kernel primitive
+    #Unsafe("copy current control-plane flags; idle trace has both false") {
+        if current_task_control() == Some(ctrl) {
+            jet_task_control_trace(ctrl.paused.load(Ordering.Relaxed), ctrl.cancelled.load(Ordering.Relaxed))
+        } else { jet_task_control_trace(false, false) }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1742
+struct IOInterest { stream_id: USize, slot: Arc<ParkSlot>, readable: Bool, writable: Bool }
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1751
+#Derive(Clone)
+enum IOBackendState { Starting, Running, Failed(String), Closed }
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1758
+struct IOPoller {
+    interests: Mutex<[IOInterest]>, streams: Mutex<[USize:Arc<Mutex<TcpStream>>]>,
+    retire_requested: Mutex<HashSet<USize>>, backend_state: Mutex<IOBackendState>,
+    notify: Condvar, next_key: AtomicUsize,
+    // Selected Windows arm alone initializes/uses these native fields.
+    iocp_port: AtomicUsize, iocp_shutdown_done: AtomicBool
+}
+impl IOPoller {
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1774
+    fn register(self: &Arc<Self>, stream: Arc<Mutex<TcpStream>>, readable: Bool, writable: Bool) -> (USize,Arc<ParkSlot>) Err! {
+        // GATE #4565: kernel primitive
+        #Unsafe("backend-state guard excludes shutdown while native stream ownership and interest are registered") {
+            state :: self.backend_state.lock().unwrap()
+            if *state == IOBackendState.Failed(error) { return Err(error) }
+            if *state == IOBackendState.Closed { return Err("scheduler IO backend is closed") }
+            slot :: ParkSlot.new()
+            streams := self.streams.lock().unwrap()
+            id :: self.next_key.fetch_add(1, Ordering.Relaxed)
+            _ :: streams.insert(id, ^stream)
+            drop(^streams)
+            self.interests.lock().unwrap().push(IOInterest{stream_id: id, slot: slot.clone(), readable: readable, writable: writable})
+            self.notify.notify_one()
+            if target.selected_os() == .Windows { self.iocp_notify() }
+            drop(^state)
+            Ok((id, ^slot))
+        }
+    }
+}
 

@@ -1,0 +1,82 @@
+use core.files.runtime.std_mapped_file.*
+use core.files.runtime.kernel_authority.[jet_mapped_path_is_live]
+use std.fs as fs
+use std.env as env
+use std.process as process
+use std.mem as mem
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MappedFile.rs:190,275,456,532,577,655
+#Test("mapped_file_checked_windows_lines_and_pinned_lease") {
+    // GATE #4565: kernel primitive — actual temporary file, not a mock mapping.
+    #Unsafe("create and remove an actual read-only mapping control file") {
+        path :: env.temp_dir().join(format("jet-mapped-file-control-{}.bin", process.id()))
+        text :: path.to_string_lossy().into_owned()
+        fs.write(&path, "a\r\nb\n\rc\r".as_bytes())?
+        map :: jet_std_files_map(&text)?
+        assert(map.len() == 8)
+        assert(!map.is_empty())
+        assert(jet_std_files_writer_refusal(&text).is_some())
+        assert(map.window(-1, 0).is_err())
+        assert(map.window(1, 0).is_err())
+        assert(map.window(0, 9).is_err())
+        assert(map.window_len(I64.MAX, 1).is_err())
+        assert(map.window_len_view(I64.MAX, 1).is_err())
+        assert(map.window_view(8, 8)?.is_empty())
+        lines :: map.lines_view()
+        assert(lines.next()?.to_vec() == [97])
+        assert(lines.next()?.to_vec() == [98])
+        // The reference trims a terminal CR even when there is no terminal LF.
+        assert(lines.next()?.to_vec() == [13, 99])
+        assert(lines.next() == .None)
+        owned_lines :: map.lines()
+        first :: owned_lines.next()?
+        assert(first.offset() == 0)
+        assert(first.to_vec() == [97])
+        view :: map.window(3, 5)?
+        assert(view.offset() == 3)
+        assert(view.len() == 2)
+        assert(view.get(0) == .Val(98))
+        assert(view.get(-1) == .None)
+        assert(view.get(2) == .None)
+        assert(view.window(0, 3).is_err())
+        nested :: view.window_len(1, 1)?
+        assert(nested.offset() == 4)
+        assert(nested.to_vec() == [10])
+        assert(map.source_identity() == view.source_identity())
+        mem.drop(lines)
+        mem.drop(owned_lines)
+        mem.drop(first)
+        mem.drop(map)
+        assert(view.to_vec() == [98, 10])
+        assert(jet_mapped_path_is_live(text))
+        mem.drop(nested)
+        mem.drop(view)
+        assert(!jet_mapped_path_is_live(text))
+        assert(jet_std_files_writer_refusal(&text) == .None)
+        fs.remove_file(&path)?
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MappedFile.rs:228,340,363,532
+#Test("mapped_empty_file_and_no_trailing_empty_line") {
+    // GATE #4565: kernel primitive — real empty and newline-terminated files.
+    #Unsafe("exercise the actual empty-map sentinel and native line extent") {
+        path :: env.temp_dir().join(format("jet-mapped-empty-control-{}.bin", process.id()))
+        text :: path.to_string_lossy().into_owned()
+        fs.write(&path, [])?
+        empty :: jet_std_files_map(&text)?
+        assert(empty.is_empty())
+        assert(empty.len() == 0)
+        assert(empty.window(0, 0)?.is_empty())
+        assert(empty.lines().next() == .None)
+        assert(empty.lines_view().next() == .None)
+        mem.drop(empty)
+        fs.write(&path, "\n".as_bytes())?
+        map :: jet_std_files_map(&text)?
+        lines :: map.lines()
+        assert(lines.next()?.is_empty())
+        assert(lines.next() == .None)
+        mem.drop(lines)
+        mem.drop(map)
+        fs.remove_file(&path)?
+    }
+}

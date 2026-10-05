@@ -1,880 +1,594 @@
-// PORT-PENDING 0170 crates-jet-codegen-src-prelude-corelib-jetstd-yaml: crates/jet-codegen/src/Prelude/CoreLib/JetStd/YAML.rs:1-876
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS     // ── core.encoding.yaml: full std-only YAML 1.2 core → DataTree (c152) ─────────
-//RS     // D-ENC-YAML1 = A: block mappings + sequences (indentation-driven), flow `{}`/`[]`,
-//RS     // core-schema typed scalars (null/~, bool, int, float, str), single/double-quoted
-//RS     // + plain + block scalars (`|` literal, `>` folded with chomping), comments,
-//RS     // `---`/`...` document markers, and anchors/aliases (`&a`/`*a`). Explicit/custom
-//RS     // tags (`!!str`, `!MyType`) are deferred to c153 (frozen). No external crates (I6).
-//RS     pub mod yaml {
-//RS         use super::DataTree;
-//RS 
-//RS         const MAX_YAML_DEPTH: usize = 64;
-//RS         const MAX_YAML_NODES: usize = 64 * 1024;
-//RS         const MAX_YAML_BYTES: usize = 64 * 1024 * 1024;
-//RS         const YAML_NODE_OVERHEAD: usize = 32;
-//RS         use std::collections::BTreeMap;
-//RS 
-//RS         #[derive(Clone, Debug, PartialEq, Eq)]
-//RS         pub struct ParseError {
-//RS             pub line: usize,
-//RS             pub message: String,
-//RS         }
-//RS 
-//RS         #[derive(Default)]
-//RS         struct YamlBudget {
-//RS             nodes: usize,
-//RS             bytes: usize,
-//RS         }
-//RS 
-//RS         impl YamlBudget {
-//RS             fn node(&mut self, payload: usize) -> Result<(), ()> {
-//RS                 let nodes = self.nodes.checked_add(1).ok_or(())?;
-//RS                 let cost = YAML_NODE_OVERHEAD.checked_add(payload).ok_or(())?;
-//RS                 let bytes = self.bytes.checked_add(cost).ok_or(())?;
-//RS                 if nodes > MAX_YAML_NODES || bytes > MAX_YAML_BYTES {
-//RS                     return Err(());
-//RS                 }
-//RS                 self.nodes = nodes;
-//RS                 self.bytes = bytes;
-//RS                 Ok(())
-//RS             }
-//RS 
-//RS             fn bytes(&mut self, amount: usize) -> Result<(), ()> {
-//RS                 let bytes = self.bytes.checked_add(amount).ok_or(())?;
-//RS                 if bytes > MAX_YAML_BYTES {
-//RS                     return Err(());
-//RS                 }
-//RS                 self.bytes = bytes;
-//RS                 Ok(())
-//RS             }
-//RS         }
-//RS 
-//RS         enum FlowError {
-//RS             Depth,
-//RS             Budget,
-//RS         }
-//RS 
-//RS         fn yaml_null(budget: &mut YamlBudget) -> Result<DataTree, ()> {
-//RS             budget.node(0)?;
-//RS             Ok(DataTree::Null)
-//RS         }
-//RS 
-//RS         fn yaml_scalar(s: &str, budget: &mut YamlBudget) -> Result<DataTree, ()> {
-//RS             let value = scalar_value(s);
-//RS             let payload = match &value {
-//RS                 DataTree::Number(text) | DataTree::TypedText(text) | DataTree::Text(text) => {
-//RS                     text.len()
-//RS                 }
-//RS                 DataTree::Bytes(bytes) => bytes.len(),
-//RS                 _ => 0,
-//RS             };
-//RS             budget.node(payload)?;
-//RS             Ok(value)
-//RS         }
-//RS 
-//RS         fn yaml_clone(value: &DataTree, budget: &mut YamlBudget) -> Result<DataTree, ()> {
-//RS             match value {
-//RS                 DataTree::Null | DataTree::Bool(_) | DataTree::Int(_) | DataTree::Float(_) => {
-//RS                     budget.node(0)?;
-//RS                 }
-//RS                 DataTree::Number(text) | DataTree::TypedText(text) | DataTree::Text(text) => {
-//RS                     budget.node(text.len())?;
-//RS                 }
-//RS                 DataTree::Bytes(bytes) => {
-//RS                     budget.node(bytes.len())?;
-//RS                 }
-//RS                 DataTree::Array(items) => {
-//RS                     budget.node(0)?;
-//RS                     for item in items {
-//RS                         yaml_clone(item, budget)?;
-//RS                     }
-//RS                 }
-//RS                 DataTree::Object(entries) => {
-//RS                     budget.node(0)?;
-//RS                     for (key, item) in entries {
-//RS                         budget.bytes(key.len())?;
-//RS                         yaml_clone(item, budget)?;
-//RS                     }
-//RS                 }
-//RS             }
-//RS             Ok(value.clone())
-//RS         }
-//RS 
-//RS         fn yaml_flow_message(error: FlowError) -> &'static str {
-//RS             match error {
-//RS                 FlowError::Depth => "YAML value is nested too deeply",
-//RS                 FlowError::Budget => "YAML value exceeds its node or byte budget",
-//RS             }
-//RS         }
-//RS 
-//RS         pub fn parse_to_tree(raw: &str) -> Result<DataTree, ParseError> {
-//RS             let line_count = raw
-//RS                 .as_bytes()
-//RS                 .iter()
-//RS                 .filter(|byte| **byte == b'\n')
-//RS                 .count()
-//RS                 .checked_add(1);
-//RS             if raw.len() > MAX_YAML_BYTES
-//RS                 || !line_count.is_some_and(|count| count <= MAX_YAML_NODES)
-//RS             {
-//RS                 return Err(ParseError {
-//RS                     line: 1,
-//RS                     message: "YAML input exceeds its byte or line budget".to_string(),
-//RS                 });
-//RS             }
-//RS             let lines: Vec<String> = raw
-//RS                 .split('\n')
-//RS                 .map(|l| l.trim_end_matches('\r').to_string())
-//RS                 .collect();
-//RS             let mut p = Parser {
-//RS                 lines,
-//RS                 pos: 0,
-//RS                 anchors: BTreeMap::new(),
-//RS                 budget: YamlBudget::default(),
-//RS             };
-//RS             p.skip_ignorable();
-//RS             // Leading document marker(s).
-//RS             while p.at_doc_marker() {
-//RS                 p.pos = p.pos.saturating_add(1);
-//RS                 p.skip_ignorable();
-//RS             }
-//RS             if p.pos >= p.lines.len() || p.at_doc_end() {
-//RS                 return p.null();
-//RS             }
-//RS             let base = p.indent(p.pos);
-//RS             let value = p.parse_node(base, 0)?;
-//RS             p.skip_ignorable();
-//RS             if p.pos < p.lines.len() && !p.at_doc_marker() && !p.at_doc_end() {
-//RS                 return Err(ParseError {
-//RS                     line: p.pos.saturating_add(1),
-//RS                     message: crate::jet_encoding_errors::YAML_EXPECTED_KEY_VALUE.into(),
-//RS                 });
-//RS             }
-//RS             Ok(value)
-//RS         }
-//RS 
-//RS         struct Parser {
-//RS             lines: Vec<String>,
-//RS             pos: usize,
-//RS             anchors: BTreeMap<String, DataTree>,
-//RS             budget: YamlBudget,
-//RS         }
-//RS 
-//RS         impl Parser {
-//RS             fn indent(&self, i: usize) -> usize {
-//RS                 self.lines[i].chars().take_while(|c| *c == ' ').count()
-//RS             }
-//RS             // The line's content with leading indent removed and any trailing comment
-//RS             // stripped (a ` #` outside quotes, or a leading `#`).
-//RS             fn content(&self, i: usize) -> String {
-//RS                 let after = &self.lines[i][self.indent(i)..];
-//RS                 strip_comment(after)
-//RS             }
-//RS             fn is_ignorable(&self, i: usize) -> bool {
-//RS                 let t = self.lines[i].trim();
-//RS                 t.is_empty() || t.starts_with('#')
-//RS             }
-//RS             fn skip_ignorable(&mut self) {
-//RS                 while self.pos < self.lines.len() && self.is_ignorable(self.pos) {
-//RS                     self.pos = self.pos.saturating_add(1);
-//RS                 }
-//RS             }
-//RS             fn at_doc_marker(&self) -> bool {
-//RS                 self.pos < self.lines.len() && self.lines[self.pos].trim_start().starts_with("---")
-//RS             }
-//RS             fn at_doc_end(&self) -> bool {
-//RS                 self.pos < self.lines.len() && self.lines[self.pos].trim() == "..."
-//RS             }
-//RS 
-//RS             fn limit_error(&self) -> ParseError {
-//RS                 ParseError {
-//RS                     line: self.pos.saturating_add(1),
-//RS                     message: "YAML value exceeds its node or byte budget".to_string(),
-//RS                 }
-//RS             }
-//RS 
-//RS             fn null(&mut self) -> Result<DataTree, ParseError> {
-//RS                 yaml_null(&mut self.budget).map_err(|_| self.limit_error())
-//RS             }
-//RS 
-//RS             fn scalar(&mut self, value: &str) -> Result<DataTree, ParseError> {
-//RS                 yaml_scalar(value, &mut self.budget).map_err(|_| self.limit_error())
-//RS             }
-//RS 
-//RS             fn array(&mut self, items: Vec<DataTree>) -> Result<DataTree, ParseError> {
-//RS                 self.budget.node(0).map_err(|_| self.limit_error())?;
-//RS                 Ok(DataTree::Array(items))
-//RS             }
-//RS 
-//RS             fn object(
-//RS                 &mut self,
-//RS                 entries: Vec<(String, DataTree)>,
-//RS             ) -> Result<DataTree, ParseError> {
-//RS                 for (key, _) in &entries {
-//RS                     self.budget.bytes(key.len()).map_err(|_| self.limit_error())?;
-//RS                 }
-//RS                 self.budget.node(0).map_err(|_| self.limit_error())?;
-//RS                 Ok(DataTree::Object(entries))
-//RS             }
-//RS 
-//RS             fn next_depth(&self, depth: usize) -> Result<usize, ParseError> {
-//RS                 depth.checked_add(1).ok_or_else(|| self.limit_error())
-//RS             }
-//RS 
-//RS             fn next_indent(&self, indent: usize) -> Result<usize, ParseError> {
-//RS                 indent.checked_add(1).ok_or_else(|| self.limit_error())
-//RS             }
-//RS 
-//RS             fn parse_node(&mut self, min_indent: usize, depth: usize) -> Result<DataTree, ParseError> {
-//RS                 self.skip_ignorable();
-//RS                 if self.pos >= self.lines.len() || self.at_doc_marker() || self.at_doc_end() {
-//RS                     return self.null();
-//RS                 }
-//RS                 if depth >= MAX_YAML_DEPTH {
-//RS                     return Err(ParseError {
-//RS                         line: self.pos.saturating_add(1),
-//RS                         message: "YAML value is nested too deeply".to_string(),
-//RS                     });
-//RS                 }
-//RS                 let ind = self.indent(self.pos);
-//RS                 if ind < min_indent {
-//RS                     return self.null();
-//RS                 }
-//RS                 let content = self.content(self.pos);
-//RS                 if content == "-" || content.starts_with("- ") {
-//RS                     self.parse_block_seq(ind, depth)
-//RS                 } else if is_map_entry(&content) {
-//RS                     self.parse_block_map(ind, depth)
-//RS                 } else {
-//RS                     // A bare scalar node (possibly anchored/aliased/flow/quoted).
-//RS                     self.pos = self.pos.saturating_add(1);
-//RS                     self.parse_inline_value(&content, depth)
-//RS                 }
-//RS             }
-//RS 
-//RS             fn parse_block_seq(&mut self, indent: usize, depth: usize) -> Result<DataTree, ParseError> {
-//RS                 let mut items = Vec::new();
-//RS                 loop {
-//RS                     self.skip_ignorable();
-//RS                     if self.pos >= self.lines.len() || self.at_doc_marker() || self.at_doc_end() {
-//RS                         break;
-//RS                     }
-//RS                     let ind = self.indent(self.pos);
-//RS                     if ind != indent {
-//RS                         break;
-//RS                     }
-//RS                     let content = self.content(self.pos);
-//RS                     if content != "-" && !content.starts_with("- ") {
-//RS                         break;
-//RS                     }
-//RS                     // Dash trick: blank out `-` so the item content aligns as a normal
-//RS                     // block at indent+1, then parse it uniformly (scalar/map/seq).
-//RS                     let line = &mut self.lines[self.pos];
-//RS                     let bytes: Vec<char> = line.chars().collect();
-//RS                     // The dash sits at char index == indent (indentation is spaces only).
-//RS                     let mut rebuilt: String = bytes
-//RS                         .iter()
-//RS                         .enumerate()
-//RS                         .map(|(i, c)| if i == indent { ' ' } else { *c })
-//RS                         .collect();
-//RS                     // If nothing follows the dash, leave a blank line.
-//RS                     if rebuilt.trim().is_empty() {
-//RS                         rebuilt = String::new();
-//RS                     }
-//RS                     *line = rebuilt;
-//RS                     let item = self.parse_node(self.next_indent(indent)?, self.next_depth(depth)?)?;
-//RS                     items.push(item);
-//RS                 }
-//RS                 self.array(items)
-//RS             }
-//RS 
-//RS             fn parse_block_map(&mut self, indent: usize, depth: usize) -> Result<DataTree, ParseError> {
-//RS                 let mut entries: Vec<(String, DataTree)> = Vec::new();
-//RS                 loop {
-//RS                     self.skip_ignorable();
-//RS                     if self.pos >= self.lines.len() || self.at_doc_marker() || self.at_doc_end() {
-//RS                         break;
-//RS                     }
-//RS                     let ind = self.indent(self.pos);
-//RS                     if ind != indent {
-//RS                         break;
-//RS                     }
-//RS                     let content = self.content(self.pos);
-//RS                     if content.starts_with("- ") || content == "-" || !is_map_entry(&content) {
-//RS                         break;
-//RS                     }
-//RS                     let line_no = self.pos.saturating_add(1);
-//RS                     let (key, rest) = split_key(&content).ok_or_else(|| ParseError {
-//RS                         line: line_no,
-//RS                         message: crate::jet_encoding_errors::YAML_EXPECTED_KEY_VALUE.into(),
-//RS                     })?;
-//RS                     self.pos = self.pos.saturating_add(1);
-//RS                     let rest = rest.trim();
-//RS                     let value = if rest.is_empty() {
-//RS                         // Nested block (deeper indent) or empty → Null.
-//RS                         self.skip_ignorable();
-//RS                         if self.pos < self.lines.len()
-//RS                             && self.indent(self.pos) > indent
-//RS                             && !self.at_doc_marker()
-//RS                             && !self.at_doc_end()
-//RS                         {
-//RS                             self.parse_node(self.next_indent(indent)?, self.next_depth(depth)?)?
-//RS                         } else {
-//RS                             self.null()?
-//RS                         }
-//RS                     } else if rest.starts_with('|') || rest.starts_with('>') {
-//RS                         self.parse_block_scalar(indent, rest)?
-//RS                     } else {
-//RS                         self.parse_inline_value(rest, self.next_depth(depth)?)?
-//RS                     };
-//RS                     entries.push((key, value));
-//RS                 }
-//RS                 self.object(entries)
-//RS             }
-//RS 
-//RS             // A `|`/`>` block scalar. Following lines more-indented than the key form the
-//RS             // body; dedent by the first body line's indent. `>` folds line breaks to spaces.
-//RS             fn parse_block_scalar(
-//RS                 &mut self,
-//RS                 parent_indent: usize,
-//RS                 header: &str,
-//RS             ) -> Result<DataTree, ParseError> {
-//RS                 let folded = header.starts_with('>');
-//RS                 let chomp = if header.contains('-') {
-//RS                     'S'
-//RS                 } else if header.contains('+') {
-//RS                     'K'
-//RS                 } else {
-//RS                     'C'
-//RS                 };
-//RS                 let mut body_lines: Vec<String> = Vec::new();
-//RS                 let mut block_indent: Option<usize> = None;
-//RS                 while self.pos < self.lines.len() {
-//RS                     let raw = &self.lines[self.pos];
-//RS                     if raw.trim().is_empty() {
-//RS                         body_lines.push(String::new());
-//RS                         self.pos = self.pos.saturating_add(1);
-//RS                         continue;
-//RS                     }
-//RS                     let ind = self.indent(self.pos);
-//RS                     if ind <= parent_indent {
-//RS                         break;
-//RS                     }
-//RS                     let bi = *block_indent.get_or_insert(ind);
-//RS                     let chars: Vec<char> = raw.chars().collect();
-//RS                     let start = bi.min(chars.len());
-//RS                     let dedented: String = chars[start..].iter().collect();
-//RS                     body_lines.push(dedented);
-//RS                     self.pos = self.pos.saturating_add(1);
-//RS                 }
-//RS                 // Drop trailing blank lines for chomping decisions.
-//RS                 let mut text = if folded {
-//RS                     fold_lines(&body_lines)
-//RS                 } else {
-//RS                     body_lines.join("\n")
-//RS                 };
-//RS                 let trimmed = text.trim_end_matches('\n').to_string();
-//RS                 text = match chomp {
-//RS                     'S' => trimmed,                                        // strip: no trailing newline
-//RS                     'K' => text.trim_end_matches('\n').to_string() + "\n", // keep (simplified to one)
-//RS                     _ => trimmed + "\n", // clip: single trailing newline
-//RS                 };
-//RS                 self.budget
-//RS                     .node(text.len())
-//RS                     .map_err(|_| self.limit_error())?;
-//RS                 Ok(DataTree::Text(text))
-//RS             }
-//RS 
-//RS             fn parse_inline_value(&mut self, s: &str, depth: usize) -> Result<DataTree, ParseError> {
-//RS                 let s = s.trim();
-//RS                 // Anchor: `&name <value?>` — register the parsed value under `name`.
-//RS                 if let Some(rest) = s.strip_prefix('&') {
-//RS                     let mut it = rest.splitn(2, char::is_whitespace);
-//RS                     let name = it.next().unwrap_or("").to_string();
-//RS                     self.budget
-//RS                         .bytes(name.len())
-//RS                         .map_err(|_| self.limit_error())?;
-//RS                     let val_str = it.next().unwrap_or("").trim();
-//RS                     let value = if val_str.is_empty() {
-//RS                         // The value is a nested block following this line.
-//RS                         self.parse_node(0, self.next_depth(depth)?)?
-//RS                     } else {
-//RS                         self.parse_inline_value(val_str, self.next_depth(depth)?)?
-//RS                     };
-//RS                     let stored = yaml_clone(&value, &mut self.budget)
-//RS                         .map_err(|_| self.limit_error())?;
-//RS                     self.anchors.insert(name, stored);
-//RS                     return Ok(value);
-//RS                 }
-//RS                 // Alias: `*name`.
-//RS                 if let Some(name) = s.strip_prefix('*') {
-//RS                     if let Some(value) = self.anchors.get(name.trim()) {
-//RS                         return yaml_clone(value, &mut self.budget)
-//RS                             .map_err(|_| self.limit_error());
-//RS                     }
-//RS                     return self.null();
-//RS                 }
-//RS                 if s.starts_with('[') {
-//RS                     return parse_flow(s, depth, &mut self.budget)
-//RS                         .map(|(value, _)| value)
-//RS                         .map_err(|error| ParseError {
-//RS                             line: self.pos.saturating_add(1),
-//RS                             message: yaml_flow_message(error).to_string(),
-//RS                         });
-//RS                 }
-//RS                 if s.starts_with('{') {
-//RS                     return parse_flow(s, depth, &mut self.budget)
-//RS                         .map(|(value, _)| value)
-//RS                         .map_err(|error| ParseError {
-//RS                             line: self.pos.saturating_add(1),
-//RS                             message: yaml_flow_message(error).to_string(),
-//RS                         });
-//RS                 }
-//RS                 self.scalar(s)
-//RS             }
-//RS         }
-//RS 
-//RS         // ── Flow `[...]` / `{...}` (single-line) ─────────────────────────────────
-//RS         fn parse_flow(
-//RS             s: &str,
-//RS             depth: usize,
-//RS             budget: &mut YamlBudget,
-//RS         ) -> Result<(DataTree, usize), FlowError> {
-//RS             let chars: Vec<char> = s.chars().collect();
-//RS             parse_flow_at(&chars, 0, depth, budget)
-//RS         }
-//RS         fn parse_flow_at(
-//RS             chars: &[char],
-//RS             mut i: usize,
-//RS             depth: usize,
-//RS             budget: &mut YamlBudget,
-//RS         ) -> Result<(DataTree, usize), FlowError> {
-//RS             while i < chars.len() && chars[i].is_whitespace() {
-//RS                 i = i.saturating_add(1);
-//RS             }
-//RS             if i >= chars.len() {
-//RS                 return Ok((yaml_null(budget).map_err(|_| FlowError::Budget)?, i));
-//RS             }
-//RS             match chars[i] {
-//RS                 '[' => {
-//RS                     if depth >= MAX_YAML_DEPTH {
-//RS                         return Err(FlowError::Depth);
-//RS                     }
-//RS                     i = i.saturating_add(1);
-//RS                     let mut items = Vec::new();
-//RS                     loop {
-//RS                         while i < chars.len() && (chars[i].is_whitespace() || chars[i] == ',') {
-//RS                             i = i.saturating_add(1);
-//RS                         }
-//RS                         if i >= chars.len() || chars[i] == ']' {
-//RS                             i = i.saturating_add(1);
-//RS                             break;
-//RS                         }
-//RS                         let next_depth = depth.checked_add(1).ok_or(FlowError::Depth)?;
-//RS                         let (v, ni) = parse_flow_at(chars, i, next_depth, budget)?;
-//RS                         items.push(v);
-//RS                         i = ni;
-//RS                         while i < chars.len() && chars[i].is_whitespace() {
-//RS                             i = i.saturating_add(1);
-//RS                         }
-//RS                         if i < chars.len() && chars[i] == ',' {
-//RS                             i = i.saturating_add(1);
-//RS                         } else if i < chars.len() && chars[i] == ']' {
-//RS                             i = i.saturating_add(1);
-//RS                             break;
-//RS                         }
-//RS                     }
-//RS                     budget.node(0).map_err(|_| FlowError::Budget)?;
-//RS                     Ok((DataTree::Array(items), i))
-//RS                 }
-//RS                 '{' => {
-//RS                     if depth >= MAX_YAML_DEPTH {
-//RS                         return Err(FlowError::Depth);
-//RS                     }
-//RS                     i = i.saturating_add(1);
-//RS                     let mut entries = Vec::new();
-//RS                     loop {
-//RS                         while i < chars.len() && (chars[i].is_whitespace() || chars[i] == ',') {
-//RS                             i = i.saturating_add(1);
-//RS                         }
-//RS                         if i >= chars.len() || chars[i] == '}' {
-//RS                             i = i.saturating_add(1);
-//RS                             break;
-//RS                         }
-//RS                         // key up to ':'
-//RS                         let (key, ni) = scan_flow_scalar(chars, i, true);
-//RS                         i = ni;
-//RS                         while i < chars.len() && chars[i].is_whitespace() {
-//RS                             i = i.saturating_add(1);
-//RS                         }
-//RS                         if i < chars.len() && chars[i] == ':' {
-//RS                             i = i.saturating_add(1);
-//RS                         }
-//RS                         let next_depth = depth.checked_add(1).ok_or(FlowError::Depth)?;
-//RS                         let (v, nj) = parse_flow_at(chars, i, next_depth, budget)?;
-//RS                         i = nj;
-//RS                         let key = key.trim().to_string();
-//RS                         budget
-//RS                             .bytes(key.len())
-//RS                             .map_err(|_| FlowError::Budget)?;
-//RS                         entries.push((key, v));
-//RS                         while i < chars.len() && chars[i].is_whitespace() {
-//RS                             i = i.saturating_add(1);
-//RS                         }
-//RS                         if i < chars.len() && chars[i] == ',' {
-//RS                             i = i.saturating_add(1);
-//RS                         } else if i < chars.len() && chars[i] == '}' {
-//RS                             i = i.saturating_add(1);
-//RS                             break;
-//RS                         }
-//RS                     }
-//RS                     budget.node(0).map_err(|_| FlowError::Budget)?;
-//RS                     Ok((DataTree::Object(entries), i))
-//RS                 }
-//RS                 _ => {
-//RS                     let (raw, ni) = scan_flow_scalar(chars, i, false);
-//RS                     Ok((yaml_scalar(raw.trim(), budget).map_err(|_| FlowError::Budget)?, ni))
-//RS                 }
-//RS             }
-//RS         }
-//RS         // Read a flow scalar (until `,`/`]`/`}`/`:` when key) honoring quotes.
-//RS         fn scan_flow_scalar(chars: &[char], mut i: usize, as_key: bool) -> (String, usize) {
-//RS             while i < chars.len() && chars[i].is_whitespace() {
-//RS                 i = i.saturating_add(1);
-//RS             }
-//RS             if i < chars.len() && (chars[i] == '"' || chars[i] == '\'') {
-//RS                 let q = chars[i];
-//RS                 let mut out = String::new();
-//RS                 i = i.saturating_add(1);
-//RS                 while i < chars.len() {
-//RS                     if chars[i] == q {
-//RS                         if q == '\''
-//RS                             && i
-//RS                                 .checked_add(1)
-//RS                                 .is_some_and(|next| next < chars.len() && chars[next] == '\'')
-//RS                         {
-//RS                             out.push('\'');
-//RS                             i = i.saturating_add(2);
-//RS                             continue;
-//RS                         }
-//RS                         i = i.saturating_add(1);
-//RS                         break;
-//RS                     }
-//RS                     if chars[i] == '\\' && q == '"' {
-//RS                         if let Some(next) = i.checked_add(1).filter(|next| *next < chars.len()) {
-//RS                             out.push(unescape(chars[next]));
-//RS                             i = i.saturating_add(2);
-//RS                             continue;
-//RS                         }
-//RS                     }
-//RS                     out.push(chars[i]);
-//RS                     i = i.saturating_add(1);
-//RS                 }
-//RS                 return (out, i);
-//RS             }
-//RS             let mut out = String::new();
-//RS             while i < chars.len() {
-//RS                 let c = chars[i];
-//RS                 if c == ',' || c == ']' || c == '}' {
-//RS                     break;
-//RS                 }
-//RS                 if as_key && c == ':' {
-//RS                     break;
-//RS                 }
-//RS                 out.push(c);
-//RS                 i = i.saturating_add(1);
-//RS             }
-//RS             (out, i)
-//RS         }
-//RS 
-//RS         fn fold_lines(lines: &[String]) -> String {
-//RS             // `>` folding: blank lines become newlines; consecutive non-blank lines join
-//RS             // with a single space.
-//RS             let mut out = String::new();
-//RS             let mut prev_blank = true;
-//RS             for l in lines {
-//RS                 if l.trim().is_empty() {
-//RS                     out.push('\n');
-//RS                     prev_blank = true;
-//RS                 } else {
-//RS                     if !prev_blank {
-//RS                         out.push(' ');
-//RS                     }
-//RS                     out.push_str(l);
-//RS                     prev_blank = false;
-//RS                 }
-//RS             }
-//RS             out
-//RS         }
-//RS 
-//RS         fn unescape(c: char) -> char {
-//RS             match c {
-//RS                 'n' => '\n',
-//RS                 't' => '\t',
-//RS                 'r' => '\r',
-//RS                 '0' => '\0',
-//RS                 '\\' => '\\',
-//RS                 '"' => '"',
-//RS                 _ => c,
-//RS             }
-//RS         }
-//RS 
-//RS         // Strip a trailing ` #...` comment that is outside quotes, or a leading `#`.
-//RS         fn strip_comment(s: &str) -> String {
-//RS             let chars: Vec<char> = s.chars().collect();
-//RS             let mut in_s = false;
-//RS             let mut in_d = false;
-//RS             let mut i = 0;
-//RS             while i < chars.len() {
-//RS                 let c = chars[i];
-//RS                 match c {
-//RS                     '\'' if !in_d => in_s = !in_s,
-//RS                     '"' if !in_s => in_d = !in_d,
-//RS                     '#' if !in_s
-//RS                         && !in_d
-//RS                         && (i == 0 || chars[i - 1] == ' ' || chars[i - 1] == '\t') =>
-//RS                     {
-//RS                         let kept: String = chars[..i].iter().collect();
-//RS                         return kept.trim_end().to_string();
-//RS                     }
-//RS                     _ => {}
-//RS                 }
-//RS                 i = i.saturating_add(1);
-//RS             }
-//RS             s.trim_end().to_string()
-//RS         }
-//RS 
-//RS         // Is this content a `key: value` mapping entry (top-level `:` outside flow/quotes)?
-//RS         fn is_map_entry(s: &str) -> bool {
-//RS             top_level_colon(s).is_some()
-//RS         }
-//RS         fn top_level_colon(s: &str) -> Option<usize> {
-//RS             let chars: Vec<char> = s.chars().collect();
-//RS             let mut in_s = false;
-//RS             let mut in_d = false;
-//RS             let mut depth = 0i32;
-//RS             let mut i = 0;
-//RS             while i < chars.len() {
-//RS                 let c = chars[i];
-//RS                 match c {
-//RS                     '\'' if !in_d => in_s = !in_s,
-//RS                     '"' if !in_s => in_d = !in_d,
-//RS                     '[' | '{' if !in_s && !in_d => depth = depth.saturating_add(1),
-//RS                     ']' | '}' if !in_s && !in_d => depth = depth.saturating_sub(1),
-//RS                     ':' if !in_s && !in_d && depth == 0 => {
-//RS                         // A mapping `:` must be followed by space or end-of-line.
-//RS                         if i
-//RS                             .checked_add(1)
-//RS                             .is_none_or(|next| next >= chars.len() || chars[next] == ' ')
-//RS                         {
-//RS                             return Some(i);
-//RS                         }
-//RS                     }
-//RS                     _ => {}
-//RS                 }
-//RS                 i = i.saturating_add(1);
-//RS             }
-//RS             None
-//RS         }
-//RS         fn split_key(s: &str) -> Option<(String, String)> {
-//RS             let idx = top_level_colon(s)?;
-//RS             let chars: Vec<char> = s.chars().collect();
-//RS             let key_raw: String = chars[..idx].iter().collect();
-//RS             let rest_start = idx.checked_add(1)?;
-//RS             let rest: String = chars[rest_start..].iter().collect();
-//RS             Some((unquote_key(key_raw.trim()), rest))
-//RS         }
-//RS         fn unquote_key(k: &str) -> String {
-//RS             if (k.starts_with('"') && k.ends_with('"') && k.len() >= 2)
-//RS                 || (k.starts_with('\'') && k.ends_with('\'') && k.len() >= 2)
-//RS             {
-//RS                 k[1..k.len() - 1].to_string()
-//RS             } else {
-//RS                 k.to_string()
-//RS             }
-//RS         }
-//RS 
-//RS         // Type a plain/quoted scalar by the YAML core schema.
-//RS         fn scalar_value(s: &str) -> DataTree {
-//RS             let s = s.trim();
-//RS             if s.is_empty() {
-//RS                 return DataTree::Null;
-//RS             }
-//RS             // Quoted strings are always text.
-//RS             if s.starts_with('"') && s.ends_with('"') && s.len() >= 2 {
-//RS                 let inner = &s[1..s.len() - 1];
-//RS                 let mut out = String::new();
-//RS                 let mut chars = inner.chars().peekable();
-//RS                 while let Some(c) = chars.next() {
-//RS                     if c == '\\' {
-//RS                         if let Some(n) = chars.next() {
-//RS                             out.push(unescape(n));
-//RS                         }
-//RS                     } else {
-//RS                         out.push(c);
-//RS                     }
-//RS                 }
-//RS                 return DataTree::Text(out);
-//RS             }
-//RS             if s.starts_with('\'') && s.ends_with('\'') && s.len() >= 2 {
-//RS                 return DataTree::Text(s[1..s.len() - 1].replace("''", "'"));
-//RS             }
-//RS             match s {
-//RS                 "null" | "Null" | "NULL" | "~" => return DataTree::Null,
-//RS                 "true" | "True" | "TRUE" => return DataTree::Bool(true),
-//RS                 "false" | "False" | "FALSE" => return DataTree::Bool(false),
-//RS                 ".inf" | ".Inf" | ".INF" => return DataTree::Float(f64::INFINITY),
-//RS                 "-.inf" | "-.Inf" => return DataTree::Float(f64::NEG_INFINITY),
-//RS                 ".nan" | ".NaN" | ".NAN" => return DataTree::Float(f64::NAN),
-//RS                 _ => {}
-//RS             }
-//RS             // Integer (decimal, with optional sign).
-//RS             if let Ok(n) = s.parse::<i64>() {
-//RS                 return DataTree::Int(n);
-//RS             }
-//RS             // Float: must contain a `.`, `e`/`E` and parse cleanly.
-//RS             if (s.contains('.') || s.contains('e') || s.contains('E'))
-//RS                 && s.chars()
-//RS                     .all(|c| c.is_ascii_digit() || matches!(c, '.' | 'e' | 'E' | '+' | '-'))
-//RS             {
-//RS                 if let Ok(f) = s.parse::<f64>() {
-//RS                     return DataTree::Float(f);
-//RS                 }
-//RS             }
-//RS             DataTree::Text(s.to_string())
-//RS         }
-//RS 
-//RS         // ── Render: a `DataTree` → block YAML text ───────────────────────────────
-//RS         pub fn render(t: &DataTree) -> String {
-//RS             let mut out = String::new();
-//RS             render_node(t, 0, &mut out);
-//RS             let s = out.trim_end().to_string();
-//RS             if s.is_empty() {
-//RS                 "{}".to_string()
-//RS             } else {
-//RS                 s
-//RS             }
-//RS         }
-//RS         fn render_node(t: &DataTree, indent: usize, out: &mut String) {
-//RS             let pad = " ".repeat(indent);
-//RS             match t {
-//RS                 DataTree::Object(entries) => {
-//RS                     if entries.is_empty() {
-//RS                         out.push_str(&format!("{}{{}}\n", pad));
-//RS                         return;
-//RS                     }
-//RS                     for (k, v) in entries {
-//RS                         match v {
-//RS                             DataTree::Object(e) if !e.is_empty() => {
-//RS                                 out.push_str(&format!("{}{}:\n", pad, render_key(k)));
-//RS                                 render_node(v, indent + 2, out);
-//RS                             }
-//RS                             DataTree::Array(a) if !a.is_empty() => {
-//RS                                 out.push_str(&format!("{}{}:\n", pad, render_key(k)));
-//RS                                 render_seq(a, indent, out);
-//RS                             }
-//RS                             _ => {
-//RS                                 out.push_str(&format!(
-//RS                                     "{}{}: {}\n",
-//RS                                     pad,
-//RS                                     render_key(k),
-//RS                                     render_scalar(v)
-//RS                                 ));
-//RS                             }
-//RS                         }
-//RS                     }
-//RS                 }
-//RS                 DataTree::Array(items) => render_seq(items, indent, out),
-//RS                 _ => out.push_str(&format!("{}{}\n", pad, render_scalar(t))),
-//RS             }
-//RS         }
-//RS         fn render_seq(items: &[DataTree], indent: usize, out: &mut String) {
-//RS             let pad = " ".repeat(indent);
-//RS             for item in items {
-//RS                 match item {
-//RS                     DataTree::Object(e) if !e.is_empty() => {
-//RS                         out.push_str(&format!("{}-\n", pad));
-//RS                         render_node(item, indent + 2, out);
-//RS                     }
-//RS                     DataTree::Array(a) if !a.is_empty() => {
-//RS                         out.push_str(&format!("{}-\n", pad));
-//RS                         render_seq(a, indent + 2, out);
-//RS                     }
-//RS                     _ => out.push_str(&format!("{}- {}\n", pad, render_scalar(item))),
-//RS                 }
-//RS             }
-//RS         }
-//RS         fn render_key(k: &str) -> String {
-//RS             if k.is_empty() || k.contains(':') || k.contains(' ') || k.contains('#') {
-//RS                 format!("{:?}", k)
-//RS             } else {
-//RS                 k.to_string()
-//RS             }
-//RS         }
-//RS         fn render_scalar(v: &DataTree) -> String {
-//RS             match v {
-//RS                 DataTree::Null => "null".to_string(),
-//RS                 DataTree::Bool(b) => b.to_string(),
-//RS                 DataTree::Int(n) => n.to_string(),
-//RS                 DataTree::Float(f) => format!("{:?}", f),
-//RS                 DataTree::Number(_) | DataTree::TypedText(_) => {
-//RS                     unreachable!("internal JSON carrier escaped typed decode")
-//RS                 }
-//RS                 DataTree::Text(s) => {
-//RS                     if needs_quote(s) {
-//RS                         format!("{:?}", s)
-//RS                     } else {
-//RS                         s.clone()
-//RS                     }
-//RS                 }
-//RS                 DataTree::Bytes(bs) => {
-//RS                     let parts: Vec<String> = bs.iter().map(|b| b.to_string()).collect();
-//RS                     format!("[{}]", parts.join(", "))
-//RS                 }
-//RS                 // An inline collection value renders in flow form.
-//RS                 DataTree::Array(items) => {
-//RS                     let parts: Vec<String> = items.iter().map(render_scalar).collect();
-//RS                     format!("[{}]", parts.join(", "))
-//RS                 }
-//RS                 DataTree::Object(entries) => {
-//RS                     let parts: Vec<String> = entries
-//RS                         .iter()
-//RS                         .map(|(k, val)| format!("{}: {}", render_key(k), render_scalar(val)))
-//RS                         .collect();
-//RS                     format!("{{{}}}", parts.join(", "))
-//RS                 }
-//RS             }
-//RS         }
-//RS         fn needs_quote(s: &str) -> bool {
-//RS             if s.is_empty() {
-//RS                 return true;
-//RS             }
-//RS             matches!(
-//RS                 s,
-//RS                 "null"
-//RS                     | "Null"
-//RS                     | "NULL"
-//RS                     | "~"
-//RS                     | "true"
-//RS                     | "True"
-//RS                     | "TRUE"
-//RS                     | "false"
-//RS                     | "False"
-//RS                     | "FALSE"
-//RS             ) || s.parse::<i64>().is_ok()
-//RS                 || s.parse::<f64>().is_ok()
-//RS                 || s.starts_with(' ')
-//RS                 || s.ends_with(' ')
-//RS                 || s.starts_with([
-//RS                     '-', '?', ':', '[', ']', '{', '}', '#', '&', '*', '!', '|', '>', '\'', '"',
-//RS                     '%', '@', '`',
-//RS                 ])
-//RS                 || s.contains(": ")
-//RS                 || s.contains(" #")
-//RS                 || s.contains('\n')
-//RS         }
-//RS     }
-//RS }
-// END-PORT-PENDING 0170 crates/jet-codegen/src/Prelude/CoreLib/JetStd/YAML.rs:1-876
+use core.encoding.runtime.std_data_tree.DataTree
+use jet_encoding_errors as errors
+use jet_foundation.Text.[TEXT_NUL]
+use core.fmt.[escape_debug]
 
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/YAML.rs:1
+// YAML 1.2 core schema: block/flow collections, scalars, anchors and aliases.
+// Explicit/custom tags remain outside the reference codec's accepted schema.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/YAML.rs:10
+const MAX_YAML_DEPTH: USize = 64
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/YAML.rs:11
+const MAX_YAML_NODES: USize = 64 * 1024
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/YAML.rs:12
+const MAX_YAML_BYTES: USize = 64 * 1024 * 1024
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/YAML.rs:13
+const YAML_NODE_OVERHEAD: USize = 32
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/YAML.rs:17
+#[Equatable, Error]
+pub struct ParseError { pub line: USize, pub message: String }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/YAML.rs:23
+struct YamlBudget { nodes: USize, bytes: USize }
+impl YamlBudget {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/YAML.rs:29
+    fn node(self: &Self, payload: USize) -> () Err! {
+        nodes :: self.nodes.checked_add(1) ?? return Err("YAML budget")
+        cost :: YAML_NODE_OVERHEAD.checked_add(payload) ?? return Err("YAML budget")
+        bytes :: self.bytes.checked_add(cost) ?? return Err("YAML budget")
+        if nodes > MAX_YAML_NODES || bytes > MAX_YAML_BYTES -> return Err("YAML budget")
+        self.nodes = nodes
+        self.bytes = bytes
+        Ok(())
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/YAML.rs:41
+    fn bytes(self: &Self, amount: USize) -> () Err! {
+        bytes :: self.bytes.checked_add(amount) ?? return Err("YAML budget")
+        if bytes > MAX_YAML_BYTES -> return Err("YAML budget")
+        self.bytes = bytes
+        Ok(())
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/YAML.rs:51
+#Error
+enum FlowError { Depth, Budget }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/YAML.rs:56
+fn yaml_null(budget: &YamlBudget) -> DataTree Err! {
+    budget.node(0)?
+    Ok(DataTree.Null)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/YAML.rs:61
+fn yaml_scalar(s: String, budget: &YamlBudget) -> DataTree Err! {
+    value :: scalar_value(s)
+    payload :: match value {
+        .Number(text), .TypedText(text), .Text(text) -> text.len()
+        .Bytes(bytes) -> bytes.len()
+        _ -> 0
+    }
+    budget.node(payload)?
+    Ok(^value)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/YAML.rs:74
+fn yaml_clone(value: &DataTree, budget: &YamlBudget) -> DataTree Err! {
+    match value {
+        .Null, .Bool(_), .Int(_), .Float(_) -> budget.node(0)?
+        .Number(text), .TypedText(text), .Text(text) -> budget.node(text.len())?
+        .Bytes(bytes) -> budget.node(bytes.len())?
+        .Array(items) -> {
+            budget.node(0)?
+            loop item in items -> _ :: yaml_clone(&item, budget)?
+        }
+        .Object(entries) -> {
+            budget.node(0)?
+            loop (key, item) in entries {
+                budget.bytes(key.len())?
+                _ :: yaml_clone(&item, budget)?
+            }
+        }
+    }
+    Ok(value.clone())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/YAML.rs:102
+fn yaml_flow_message(error: FlowError) -> String {
+    match error {
+        .Depth -> "YAML value is nested too deeply"
+        .Budget -> "YAML value exceeds its node or byte budget"
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/YAML.rs:109
+pub fn parse_to_tree(raw: String) -> DataTree ParseError! {
+    line_count :: raw.as_bytes().iter().filter(byte -> byte == (U8{10})).count().checked_add(1)
+    if raw.len() > MAX_YAML_BYTES || !line_count.is_some_and(count -> count <= MAX_YAML_NODES) {
+        return Err(ParseError{line: 1, message: "YAML input exceeds its byte or line budget"})
+    }
+    p := Parser{
+        lines: raw.split('\n').map(l -> l.trim_end_matches('\r').to_string()).collect(),
+        pos: 0, anchors: [String:DataTree]{}, budget: YamlBudget{nodes: 0, bytes: 0},
+    }
+    p.skip_ignorable()
+    loop p.at_doc_marker() {
+        p.pos = p.pos.saturating_add(1)
+        p.skip_ignorable()
+    }
+    if p.pos >= p.lines.len() || p.at_doc_end() -> return p.null()
+    base :: p.indent(p.pos)
+    value :: p.parse_node(base, 0)?
+    p.skip_ignorable()
+    if p.pos < p.lines.len() && !p.at_doc_marker() && !p.at_doc_end() {
+        return Err(ParseError{line: p.pos.saturating_add(1), message: errors.YAML_EXPECTED_KEY_VALUE})
+    }
+    Ok(^value)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/YAML.rs:155
+struct Parser {
+    lines: [String], pos: USize, anchors: [String:DataTree], budget: YamlBudget,
+}
+impl Parser {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/YAML.rs:163
+    fn indent(self: &Self, i: USize) -> USize {
+        self.lines[i].chars().take_while(c -> c == ' ').count()
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/YAML.rs:168
+    fn content(self: &Self, i: USize) -> String {
+        after := self.lines[i][self.indent(i)..] // #4303
+        strip_comment(after)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/YAML.rs:172
+    fn is_ignorable(self: &Self, i: USize) -> Bool {
+        t := self.lines[i].trim() // #4303
+        t.is_empty() || t.starts_with('#')
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/YAML.rs:176
+    fn skip_ignorable(self: &Self) -> {
+        loop self.pos < self.lines.len() && self.is_ignorable(self.pos) {
+            self.pos = self.pos.saturating_add(1)
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/YAML.rs:181
+    fn at_doc_marker(self: &Self) -> Bool {
+        self.pos < self.lines.len() && self.lines[self.pos].trim_start().starts_with("---")
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/YAML.rs:184
+    fn at_doc_end(self: &Self) -> Bool {
+        self.pos < self.lines.len() && self.lines[self.pos].trim() == "..."
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/YAML.rs:188
+    fn limit_error(self: &Self) -> ParseError {
+        ParseError{line: self.pos.saturating_add(1), message: "YAML value exceeds its node or byte budget"}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/YAML.rs:195
+    fn null(self: &Self) -> DataTree ParseError! {
+        yaml_null(&self.budget).map_err(_ -> self.limit_error())
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/YAML.rs:199
+    fn scalar(self: &Self, value: String) -> DataTree ParseError! {
+        yaml_scalar(value, &self.budget).map_err(_ -> self.limit_error())
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/YAML.rs:203
+    fn array(self: &Self, items: ^[DataTree]) -> DataTree ParseError! {
+        self.budget.node(0).map_err(_ -> self.limit_error())?
+        Ok(DataTree.Array(^items))
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/YAML.rs:208
+    fn object(self: &Self, entries: ^[(String, DataTree)]) -> DataTree ParseError! {
+        loop (key, _) in entries -> self.budget.bytes(key.len()).map_err(_ -> self.limit_error())?
+        self.budget.node(0).map_err(_ -> self.limit_error())?
+        Ok(DataTree.Object(^entries))
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/YAML.rs:219
+    fn next_depth(self: &Self, depth: USize) -> USize ParseError! {
+        depth.checked_add(1) ?? return Err(self.limit_error())
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/YAML.rs:223
+    fn next_indent(self: &Self, indent: USize) -> USize ParseError! {
+        indent.checked_add(1) ?? return Err(self.limit_error())
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/YAML.rs:227
+    fn parse_node(self: &Self, min_indent: USize, depth: USize) -> DataTree ParseError! {
+        self.skip_ignorable()
+        if self.pos >= self.lines.len() || self.at_doc_marker() || self.at_doc_end() -> return self.null()
+        if depth >= MAX_YAML_DEPTH {
+            return Err(ParseError{line: self.pos.saturating_add(1), message: "YAML value is nested too deeply"})
+        }
+        ind :: self.indent(self.pos)
+        if ind < min_indent -> return self.null()
+        content :: self.content(self.pos)
+        if content == "-" || content.starts_with("- ") -> return self.parse_block_seq(ind, depth)
+        if is_map_entry(content) -> return self.parse_block_map(ind, depth)
+        self.pos = self.pos.saturating_add(1)
+        self.parse_inline_value(content, depth)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/YAML.rs:254
+    fn parse_block_seq(self: &Self, indent: USize, depth: USize) -> DataTree ParseError! {
+        items := [DataTree]{}
+        loop {
+            self.skip_ignorable()
+            if self.pos >= self.lines.len() || self.at_doc_marker() || self.at_doc_end() -> break
+            ind :: self.indent(self.pos)
+            if ind != indent -> break
+            content :: self.content(self.pos)
+            if content != "-" && !content.starts_with("- ") -> break
+            chars :: self.lines[self.pos].chars().collect<[Char]>()
+            rebuilt := chars.iter().enumerate().map((i, c) -> if i == indent { ' ' } else { c }).collect<String>()
+            if rebuilt.trim().is_empty() -> rebuilt = ""
+            self.lines[self.pos] = ^rebuilt
+            item :: self.parse_node(self.next_indent(indent)?, self.next_depth(depth)?)?
+            items.push(^item)
+        }
+        self.array(^items)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/YAML.rs:290
+    fn parse_block_map(self: &Self, indent: USize, depth: USize) -> DataTree ParseError! {
+        entries := [(String, DataTree)]{}
+        loop {
+            self.skip_ignorable()
+            if self.pos >= self.lines.len() || self.at_doc_marker() || self.at_doc_end() -> break
+            if self.indent(self.pos) != indent -> break
+            content :: self.content(self.pos)
+            if content.starts_with("- ") || content == "-" || !is_map_entry(content) -> break
+            line_no :: self.pos.saturating_add(1)
+            (key, rest) :: split_key(content) ?? return Err(ParseError{line: line_no, message: errors.YAML_EXPECTED_KEY_VALUE})
+            self.pos = self.pos.saturating_add(1)
+            rest := rest.trim() // #4303
+            value :: if rest.is_empty() {
+                self.skip_ignorable()
+                if self.pos < self.lines.len() && self.indent(self.pos) > indent && !self.at_doc_marker() && !self.at_doc_end() {
+                    self.parse_node(self.next_indent(indent)?, self.next_depth(depth)?)?
+                } else { self.null()? }
+            } else if rest.starts_with('|') || rest.starts_with('>') {
+                self.parse_block_scalar(indent, rest)?
+            } else { self.parse_inline_value(rest, self.next_depth(depth)?)? }
+            entries.push((^key, ^value))
+        }
+        self.object(^entries)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/YAML.rs:336
+    fn parse_block_scalar(self: &Self, parent_indent: USize, header: String) -> DataTree ParseError! {
+        folded :: header.starts_with('>')
+        chomp :: if header.contains('-') { 'S' } else if header.contains('+') { 'K' } else { 'C' }
+        body_lines := [String]{}
+        block_indent := None<USize>
+        loop self.pos < self.lines.len() {
+            raw :: self.lines[self.pos]
+            if raw.trim().is_empty() {
+                body_lines.push("")
+                self.pos = self.pos.saturating_add(1)
+                next
+            }
+            ind :: self.indent(self.pos)
+            if ind <= parent_indent -> break
+            bi :: block_indent.get_or_insert(ind)
+            chars :: raw.chars().collect<[Char]>()
+            start :: bi.min(chars.len())
+            body_lines.push(chars[start..].iter().collect<String>())
+            self.pos = self.pos.saturating_add(1)
+        }
+        text := if folded { fold_lines(body_lines) } else { body_lines.join("\n") }
+        trimmed :: text.trim_end_matches('\n').to_string()
+        text = match chomp {
+            'S' -> trimmed
+            'K' -> text.trim_end_matches('\n').to_string() + "\n"
+            _ -> trimmed + "\n"
+        }
+        self.budget.node(text.len()).map_err(_ -> self.limit_error())?
+        Ok(DataTree.Text(^text))
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/YAML.rs:387
+    fn parse_inline_value(self: &Self, s: String, depth: USize) -> DataTree ParseError! {
+        s := s.trim() // #4303
+        if s.strip_prefix('&') is Val(rest) {
+            it := rest.splitn(2, c -> c.is_whitespace())
+            name :: it.next().unwrap_or("").to_string()
+            self.budget.bytes(name.len()).map_err(_ -> self.limit_error())?
+            val_str := it.next().unwrap_or("").trim() // #4303
+            value :: if val_str.is_empty() {
+                self.parse_node(0, self.next_depth(depth)?)?
+            } else { self.parse_inline_value(val_str, self.next_depth(depth)?)? }
+            stored :: yaml_clone(&value, &self.budget).map_err(_ -> self.limit_error())?
+            self.anchors.insert(^name, ^stored)
+            return Ok(^value)
+        }
+        if s.strip_prefix('*') is Val(name) {
+            if self.anchors.get(name.trim()) is Val(value) {
+                return yaml_clone(&value, &self.budget).map_err(_ -> self.limit_error())
+            }
+            return self.null()
+        }
+        if s.starts_with('[') || s.starts_with('{') {
+            return parse_flow(s, depth, &self.budget).map((value, _) -> value).map_err(error -> ParseError{
+                line: self.pos.saturating_add(1), message: yaml_flow_message(error),
+            })
+        }
+        self.scalar(s)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/YAML.rs:437
+fn parse_flow(s: String, depth: USize, budget: &YamlBudget) -> (DataTree, USize) FlowError! {
+    chars :: s.chars().collect<[Char]>()
+    parse_flow_at(chars, 0, depth, budget)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/YAML.rs:445
+fn parse_flow_at(chars: View<Char>, i: USize, depth: USize, budget: &YamlBudget) -> (DataTree, USize) FlowError! {
+    i := i
+    loop i < chars.len() && chars[i].is_whitespace() -> i = i.saturating_add(1)
+    if i >= chars.len() -> return Ok((yaml_null(budget).map_err(_ -> FlowError.Budget)?, i))
+    match chars[i] {
+        '[' -> {
+            if depth >= MAX_YAML_DEPTH -> return Err(FlowError.Depth)
+            i = i.saturating_add(1)
+            items := [DataTree]{}
+            loop {
+                loop i < chars.len() && (chars[i].is_whitespace() || chars[i] == ',') -> i = i.saturating_add(1)
+                if i >= chars.len() || chars[i] == ']' {
+                    i = i.saturating_add(1)
+                    break
+                }
+                next_depth :: depth.checked_add(1) ?? return Err(FlowError.Depth)
+                (v, ni) :: parse_flow_at(chars, i, next_depth, budget)?
+                items.push(^v)
+                i = ni
+                loop i < chars.len() && chars[i].is_whitespace() -> i = i.saturating_add(1)
+                if i < chars.len() && chars[i] == ',' { i = i.saturating_add(1) }
+                else if i < chars.len() && chars[i] == ']' { i = i.saturating_add(1); break }
+            }
+            budget.node(0).map_err(_ -> FlowError.Budget)?
+            Ok((DataTree.Array(^items), i))
+        }
+        '{' -> {
+            if depth >= MAX_YAML_DEPTH -> return Err(FlowError.Depth)
+            i = i.saturating_add(1)
+            entries := [(String, DataTree)]{}
+            loop {
+                loop i < chars.len() && (chars[i].is_whitespace() || chars[i] == ',') -> i = i.saturating_add(1)
+                if i >= chars.len() || chars[i] == '}' { i = i.saturating_add(1); break }
+                (key, ni) :: scan_flow_scalar(chars, i, true)
+                i = ni
+                loop i < chars.len() && chars[i].is_whitespace() -> i = i.saturating_add(1)
+                if i < chars.len() && chars[i] == ':' -> i = i.saturating_add(1)
+                next_depth :: depth.checked_add(1) ?? return Err(FlowError.Depth)
+                (v, nj) :: parse_flow_at(chars, i, next_depth, budget)?
+                i = nj
+                key := key.trim().to_string() // #4303
+                budget.bytes(key.len()).map_err(_ -> FlowError.Budget)?
+                entries.push((^key, ^v))
+                loop i < chars.len() && chars[i].is_whitespace() -> i = i.saturating_add(1)
+                if i < chars.len() && chars[i] == ',' { i = i.saturating_add(1) }
+                else if i < chars.len() && chars[i] == '}' { i = i.saturating_add(1); break }
+            }
+            budget.node(0).map_err(_ -> FlowError.Budget)?
+            Ok((DataTree.Object(^entries), i))
+        }
+        _ -> {
+            (raw, ni) :: scan_flow_scalar(chars, i, false)
+            trimmed := raw.trim() // #4303
+            Ok((yaml_scalar(trimmed, budget).map_err(_ -> FlowError.Budget)?, ni))
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/YAML.rs:540
+fn scan_flow_scalar(chars: View<Char>, i: USize, as_key: Bool) -> (String, USize) {
+    i := i
+    loop i < chars.len() && chars[i].is_whitespace() -> i = i.saturating_add(1)
+    if i < chars.len() && (chars[i] == '"' || chars[i] == '\'') {
+        q :: chars[i]
+        out := String.new()
+        i = i.saturating_add(1)
+        loop i < chars.len() {
+            if chars[i] == q {
+                if q == '\'' && i.checked_add(1).is_some_and(n -> n < chars.len() && chars[n] == '\'') {
+                    out.push('\'')
+                    i = i.saturating_add(2)
+                    next
+                }
+                i = i.saturating_add(1)
+                break
+            }
+            if chars[i] == '\\' && q == '"' {
+                if i.checked_add(1).filter(n -> n < chars.len()) is Val(n) {
+                    out.push(unescape(chars[n]))
+                    i = i.saturating_add(2)
+                    next
+                }
+            }
+            out.push(chars[i])
+            i = i.saturating_add(1)
+        }
+        return (^out, i)
+    }
+    out := String.new()
+    loop i < chars.len() {
+        c :: chars[i]
+        if c == ',' || c == ']' || c == '}' || (as_key && c == ':') -> break
+        out.push(c)
+        i = i.saturating_add(1)
+    }
+    (^out, i)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/YAML.rs:589
+fn fold_lines(lines: View<String>) -> String {
+    out := String.new()
+    prev_blank := true
+    loop l in lines {
+        if l.trim().is_empty() {
+            out.push('\n')
+            prev_blank = true
+        } else {
+            if !prev_blank -> out.push(' ')
+            out.push_str(l)
+            prev_blank = false
+        }
+    }
+    ^out
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/YAML.rs:609
+fn unescape(c: Char) -> Char {
+    match c {
+        'n' -> '\n', 't' -> '\t', 'r' -> '\r', '0' -> TEXT_NUL.chars().next().unwrap(),
+        '\\' -> '\\', '"' -> '"', _ -> c,
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/YAML.rs:622
+fn strip_comment(s: String) -> String {
+    chars :: s.chars().collect<[Char]>()
+    in_s := false
+    in_d := false
+    i := USize{0}
+    loop i < chars.len() {
+        c :: chars[i]
+        match c {
+            '\'' if !in_d -> in_s = !in_s
+            '"' if !in_s -> in_d = !in_d
+            '#' if !in_s && !in_d && (i == 0 || chars[i - 1] == ' ' || chars[i - 1] == '\t') -> {
+                kept :: chars[..i].iter().collect<String>()
+                return kept.trim_end().to_string()
+            }
+            _ -> {}
+        }
+        i = i.saturating_add(1)
+    }
+    s.trim_end().to_string()
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/YAML.rs:647
+fn is_map_entry(s: String) -> Bool { top_level_colon(s).is_some() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/YAML.rs:650
+fn top_level_colon(s: String) -> USize? {
+    chars :: s.chars().collect<[Char]>()
+    in_s := false
+    in_d := false
+    depth := I32{0}
+    i := USize{0}
+    loop i < chars.len() {
+        c :: chars[i]
+        match c {
+            '\'' if !in_d -> in_s = !in_s
+            '"' if !in_s -> in_d = !in_d
+            '[', '{' if !in_s && !in_d -> depth = depth.saturating_add(1)
+            ']', '}' if !in_s && !in_d -> depth = depth.saturating_sub(1)
+            ':' if !in_s && !in_d && depth == 0 -> {
+                if i.checked_add(1).is_none_or(n -> n >= chars.len() || chars[n] == ' ') -> return Val(i)
+            }
+            _ -> {}
+        }
+        i = i.saturating_add(1)
+    }
+    None
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/YAML.rs:678
+fn split_key(s: String) -> (String, String)? {
+    idx :: top_level_colon(s)?
+    chars :: s.chars().collect<[Char]>()
+    key_raw :: chars[..idx].iter().collect<String>()
+    rest_start :: idx.checked_add(1)?
+    rest :: chars[rest_start..].iter().collect<String>()
+    trimmed := key_raw.trim() // #4303
+    Val((unquote_key(trimmed), ^rest))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/YAML.rs:686
+fn unquote_key(k: String) -> String {
+    if ((k.starts_with('"') && k.ends_with('"')) || (k.starts_with('\'') && k.ends_with('\''))) && k.len() >= 2 {
+        k[1..<k.len() - 1].to_string()
+    } else { k.to_string() }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/YAML.rs:697
+fn scalar_value(s: String) -> DataTree {
+    s := s.trim() // #4303
+    if s.is_empty() -> return DataTree.Null
+    if s.starts_with('"') && s.ends_with('"') && s.len() >= 2 {
+        inner := s[1..<s.len() - 1] // #4303
+        out := String.new()
+        chars := inner.chars()
+        loop chars.next() is Val(c) {
+            if c == '\\' {
+                if chars.next() is Val(n) -> out.push(unescape(n))
+            } else { out.push(c) }
+        }
+        return DataTree.Text(^out)
+    }
+    if s.starts_with('\'') && s.ends_with('\'') && s.len() >= 2 {
+        return DataTree.Text(s[1..<s.len() - 1].replace("''", "'"))
+    }
+    match s {
+        "null", "Null", "NULL", "~" -> return DataTree.Null
+        "true", "True", "TRUE" -> return DataTree.Bool(true)
+        "false", "False", "FALSE" -> return DataTree.Bool(false)
+        ".inf", ".Inf", ".INF" -> return DataTree.Float(F64.INFINITY)
+        "-.inf", "-.Inf" -> return DataTree.Float(F64.NEG_INFINITY)
+        ".nan", ".NaN", ".NAN" -> return DataTree.Float(F64.NAN)
+        _ -> {}
+    }
+    if s.parse<I64>() is Ok(n) -> return DataTree.Int(n)
+    if (s.contains('.') || s.contains('e') || s.contains('E')) && s.chars().all(c -> c.is_ascii_digit() || c == '.' || c == 'e' || c == 'E' || c == '+' || c == '-') {
+        if s.parse<F64>() is Ok(f) -> return DataTree.Float(f)
+    }
+    DataTree.Text(s.to_string())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/YAML.rs:747
+pub fn render(t: &DataTree) -> String {
+    out := String.new()
+    render_node(t, 0, &out)
+    s :: out.trim_end().to_string()
+    if s.is_empty() { "{}" } else { ^s }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/YAML.rs:757
+fn render_node(t: &DataTree, indent: USize, out: &String) -> {
+    pad :: " ".repeat(indent)
+    match t {
+        .Object(entries) -> {
+            if entries.is_empty() { out.push_str("{pad}{{}}\n"); return }
+            loop (k, v) in entries {
+                match v {
+                    .Object(e) if !e.is_empty() -> {
+                        out.push_str("{pad}{render_key(k)}:\n")
+                        render_node(&v, indent + 2, out)
+                    }
+                    .Array(a) if !a.is_empty() -> {
+                        out.push_str("{pad}{render_key(k)}:\n")
+                        render_seq(a, indent, out)
+                    }
+                    _ -> out.push_str("{pad}{render_key(k)}: {render_scalar(&v)}\n")
+                }
+            }
+        }
+        .Array(items) -> render_seq(items, indent, out)
+        _ -> out.push_str("{pad}{render_scalar(t)}\n")
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/YAML.rs:790
+fn render_seq(items: View<DataTree>, indent: USize, out: &String) -> {
+    pad :: " ".repeat(indent)
+    loop item in items {
+        match item {
+            .Object(e) if !e.is_empty() -> {
+                out.push_str("{pad}-\n")
+                render_node(&item, indent + 2, out)
+            }
+            .Array(a) if !a.is_empty() -> {
+                out.push_str("{pad}-\n")
+                render_seq(a, indent + 2, out)
+            }
+            _ -> out.push_str("{pad}- {render_scalar(&item)}\n")
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/YAML.rs:806
+fn render_key(k: String) -> String {
+    if k.is_empty() || k.contains(':') || k.contains(' ') || k.contains('#') { escape_debug(k) }
+    else { k.to_string() }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/YAML.rs:813
+fn render_scalar(v: &DataTree) -> String {
+    match v {
+        .Null -> "null"
+        .Bool(b) -> b.to_string()
+        .Int(n) -> n.to_string()
+        .Float(f) -> "{f:?}"
+        .Number(_), .TypedText(_) -> panic("internal JSON carrier escaped typed decode")
+        .Text(s) -> if needs_quote(s) { escape_debug(s) } else { s.clone() }
+        .Bytes(bs) -> "[{bs.iter().map(b -> b.to_string()).collect<[String]>().join(", ")}]"
+        .Array(items) -> "[{items.iter().map(item -> render_scalar(&item)).collect<[String]>().join(", ")}]"
+        .Object(entries) -> {
+            parts :: entries.iter().map((k, val) -> "{render_key(k)}: {render_scalar(&val)}").collect<[String]>()
+            "{{{parts.join(", ")}}}"
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/YAML.rs:847
+fn needs_quote(s: String) -> Bool {
+    if s.is_empty() -> return true
+    match s {
+        "null", "Null", "NULL", "~", "true", "True", "TRUE", "false", "False", "FALSE" -> return true
+        _ -> {}
+    }
+    s.parse<I64>().is_ok() || s.parse<F64>().is_ok() || s.starts_with(' ') || s.ends_with(' ')
+        || s.starts_with(['-', '?', ':', '[', ']', '{', '}', '#', '&', '*', '!', '|', '>', '\'', '"', '%', '@', '`'])
+        || s.contains(": ") || s.contains(" #") || s.contains('\n')
+}

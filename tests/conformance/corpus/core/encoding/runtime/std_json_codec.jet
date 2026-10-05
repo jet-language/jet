@@ -1,0 +1,19 @@
+use core.encoding.runtime.std_json_codec.[parse_json, parse_json_strict, is_json_structural_whitespace]
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/JSONCodec.rs:2
+#Test("json_codec_entrypoints_share_duplicate_policy") {
+    text :: "{\"x\":1,\"x\":2}"
+    assert(parse_json(&text) == parse_json_strict(&text))
+    assert(parse_json(&text).is_ok())
+    invalid :: "["
+    assert(parse_json(&invalid).is_err())
+    assert(parse_json_strict(&invalid).is_err())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/JSONCodec.rs:22
+#Test("json_structural_whitespace_is_exact") {
+    assert(is_json_structural_whitespace(' '))
+    assert(is_json_structural_whitespace('\t'))
+    assert(is_json_structural_whitespace('\n'))
+    assert(is_json_structural_whitespace('\r'))
+    assert(!is_json_structural_whitespace('x'))
+    assert(!is_json_structural_whitespace('\u{00a0}'))
+}

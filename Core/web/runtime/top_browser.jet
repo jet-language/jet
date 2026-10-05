@@ -1,352 +1,197 @@
 // PORT-PENDING 0251 crates-jet-codegen-src-prelude-corelib-top-browser: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:1-2195
 // Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS // D-BROWSER-AUTO1=A: native std-only WebDriver BiDi protocol core.
-//RS //
-//RS // Profiles pin the wire contract. Contexts are isolated BiDi user contexts.
-//RS // Traces keep method/sequence facts only: endpoints, parameters, results, event
-//RS // payloads, and page data never enter the trace.
-//RS // #1192: CDP is a capability-checked expert supplement via protocol("cdp") only.
-//RS // #1193: cleanup, profile isolation, privacy facts, and redacted receipts.
-//RS 
-//RS const JET_BROWSER_TRACE_LIMIT_BYTES: usize = 8 * 1024;
-//RS const JET_BROWSER_EVENT_LIMIT: usize = 256;
-//RS const JET_BROWSER_ACTION_LIMIT: usize = 2_048;
-//RS const JET_BROWSER_ACTION_LIMIT_BYTES: usize = 16 * 1024;
-//RS 
-//RS type JetBrowserTestActionSink = std::rc::Rc<std::cell::RefCell<Vec<String>>>;
-//RS 
-//RS fn jet_browser_test_attach_actions(
-//RS     browser: &JetBrowser,
-//RS     actions: Option<JetBrowserTestActionSink>,
-//RS ) {
-//RS     browser.state.borrow_mut().test_actions = actions;
-//RS }
-//RS 
-//RS fn jet_browser_test_actions(browser: &JetBrowser) -> Vec<String> {
-//RS     browser
-//RS         .state
-//RS         .borrow()
-//RS         .test_actions
-//RS         .as_ref()
-//RS         .map_or_else(Vec::new, |actions| actions.borrow().clone())
-//RS }
-//RS 
-//RS fn jet_browser_record_action(browser: &JetBrowser, entry: String) {
-//RS     if entry.is_empty() || entry.len() > JET_BROWSER_ACTION_LIMIT_BYTES {
-//RS         return;
-//RS     }
-//RS     let actions = browser.state.borrow().test_actions.clone();
-//RS     let Some(actions) = actions else {
-//RS         return;
-//RS     };
-//RS     let mut actions = actions.borrow_mut();
-//RS     if actions.len() == JET_BROWSER_ACTION_LIMIT {
-//RS         actions.remove(0);
-//RS     }
-//RS     actions.push(entry);
-//RS }
-//RS 
-//RS #[derive(Clone, Debug, PartialEq, Eq)]
-//RS pub(crate) struct JetBrowserError {
-//RS     kind: &'static str,
-//RS }
-//RS 
-//RS impl JetBrowserError {
-//RS     fn new(kind: &'static str) -> Self {
-//RS         Self { kind }
-//RS     }
-//RS }
-//RS 
-//RS impl JetShow for JetBrowserError {
-//RS     fn jet_show(&self) -> String {
-//RS         match self.kind {
-//RS             "invalid profile" => "browser profile is not supported",
-//RS             "invalid timeout" => "browser timeout must be between 1 and 600000 milliseconds",
-//RS             "unsupported protocol" => "browser protocol is not available in this session",
-//RS             "timeout" => "browser operation timed out",
-//RS             "closed" => "browser session is closed",
-//RS             "transport" => "browser transport failed",
-//RS             "missing lock" => "no locked browser for this engine in .jet/lock",
-//RS             "unknown engine" => "browser engine is not supported",
-//RS             "missing binary" => "locked browser binary was not found",
-//RS             "size mismatch" => "locked browser binary size drifted",
-//RS             "invalid lock" => "browser lock entry is incomplete",
-//RS             _ => "browser protocol failed",
-//RS         }
-//RS         .to_string()
-//RS     }
-//RS }
-//RS 
-//RS impl JetDebug for JetBrowserError {
-//RS     fn jet_debug(&self) -> String {
-//RS         <Self as JetShow>::jet_show(self)
-//RS     }
-//RS }
-//RS 
-//RS // D-FAIL-CONV2=A: one display hook backs both the shipped impl BrowserError -> Err
-//RS // and user interpolation.
-//RS impl JetDisplay for JetBrowserError {
-//RS     fn jet_display(&self) -> String {
-//RS         <Self as JetShow>::jet_show(self)
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Clone, Debug, PartialEq, Eq)]
-//RS struct JetBrowserProfile {
-//RS     name: String,
-//RS     version: String,
-//RS }
-//RS 
-//RS /// D-BROWSER-AUTO1=A (#1187): project-locked browser binary for later launch.
-//RS #[derive(Clone, Debug, PartialEq, Eq)]
-//RS struct JetBrowserLocked {
-//RS     engine: String,
-//RS     version: String,
-//RS     binary: String,
-//RS     protocol: String,
-//RS     size: i64,
-//RS     output_hash: String,
-//RS }
-//RS 
-//RS #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-//RS struct JetBrowserTimeout {
-//RS     milliseconds: i64,
-//RS }
-//RS 
-//RS #[derive(Clone, Debug, PartialEq, Eq)]
-//RS struct JetBrowserAbilities {
-//RS     bidi: bool,
-//RS     cdp: bool,
-//RS     profile: String,
-//RS }
-//RS 
-//RS /// D-BROWSER-AUTO1=A (#1190/#1191): BiDi event with redacted network/download facts.
-//RS #[derive(Clone, Debug, PartialEq, Eq)]
-//RS struct JetBrowserEvent {
-//RS     method: String,
-//RS     request_id: String,
-//RS     request_method: String,
-//RS     url_hash: String,
-//RS     is_blocked: bool,
-//RS     status_code: i64,
-//RS     download_id: String,
-//RS     suggested_filename_hash: String,
-//RS }
-//RS 
-//RS /// D-BROWSER-AUTO1=A (#1190): network intercept handle (explicit remove).
-//RS #[derive(Clone)]
-//RS struct JetBrowserIntercept {
-//RS     state: std::rc::Rc<JetBrowserInterceptState>,
-//RS }
-//RS 
-//RS struct JetBrowserInterceptState {
-//RS     browser: JetBrowser,
-//RS     id: String,
-//RS     removed: std::cell::Cell<bool>,
-//RS }
-//RS 
-//RS #[derive(Clone, Debug, PartialEq, Eq)]
-//RS struct JetBrowserTrace {
-//RS     entries: Vec<String>,
-//RS }
-//RS 
-//RS /// D-BROWSER-AUTO1=A (#1193): session privacy defaults — isolated profiles and
-//RS /// redacted receipts are always on; shared profiles are always denied.
-//RS #[derive(Clone, Debug, PartialEq, Eq)]
-//RS struct JetBrowserPrivacy {
-//RS     isolated_profiles: bool,
-//RS     redact_receipts: bool,
-//RS     shared_profiles: bool,
-//RS }
-//RS 
-//RS /// D-BROWSER-AUTO1=A (#1193): normal audit receipt. Entries mirror the redacted
-//RS /// trace; secrets, endpoints, and page data never appear.
-//RS #[derive(Clone, Debug, PartialEq, Eq)]
-//RS struct JetBrowserReceipt {
-//RS     entries: Vec<String>,
-//RS     isolated: bool,
-//RS     cleaned: bool,
-//RS }
-//RS 
-//RS struct JetBrowserState {
-//RS     conn: JetWsConn,
-//RS     next_id: i64,
-//RS     closed: bool,
-//RS     session_started: bool,
-//RS     timeout_ms: i64,
-//RS     profile: String,
-//RS     cdp: bool,
-//RS     trace: Vec<String>,
-//RS     trace_bytes: usize,
-//RS     events: std::collections::VecDeque<JetBrowserEvent>,
-//RS     test_actions: Option<JetBrowserTestActionSink>,
-//RS }
-//RS 
-//RS #[derive(Clone)]
-//RS struct JetBrowser {
-//RS     state: std::rc::Rc<std::cell::RefCell<JetBrowserState>>,
-//RS }
-//RS 
-//RS #[derive(Clone)]
-//RS struct JetBrowserContext {
-//RS     state: std::rc::Rc<JetBrowserContextState>,
-//RS }
-//RS 
-//RS struct JetBrowserContextState {
-//RS     browser: JetBrowser,
-//RS     id: String,
-//RS     closed: std::cell::Cell<bool>,
-//RS }
-//RS 
-//RS #[derive(Clone)]
-//RS struct JetBrowserPage {
-//RS     state: std::rc::Rc<JetBrowserPageState>,
-//RS }
-//RS 
-//RS struct JetBrowserPageState {
-//RS     browser: JetBrowser,
-//RS     context: std::rc::Rc<JetBrowserContextState>,
-//RS     id: String,
-//RS     closed: std::cell::Cell<bool>,
-//RS }
-//RS 
-//RS /// D-BROWSER-AUTO1=A (#1188): browsing-context frame handle (main or child).
-//RS /// Explicit close only — listing frames must not close children on drop.
-//RS #[derive(Clone)]
-//RS struct JetBrowserFrame {
-//RS     state: std::rc::Rc<JetBrowserFrameState>,
-//RS }
-//RS 
-//RS struct JetBrowserFrameState {
-//RS     browser: JetBrowser,
-//RS     page: std::rc::Rc<JetBrowserPageState>,
-//RS     id: String,
-//RS     closed: std::cell::Cell<bool>,
-//RS }
-//RS 
-//RS /// D-BROWSER-AUTO1=A (#1189): semantic BiDi locator (accessibility / css / innerText).
-//RS #[derive(Clone)]
-//RS struct JetBrowserLocator {
-//RS     page: std::rc::Rc<JetBrowserPageState>,
-//RS     /// `accessibility`, `css`, or `innerText`.
-//RS     locator_type: String,
-//RS     role: String,
-//RS     name: String,
-//RS     value: String,
-//RS }
-//RS 
-//RS #[derive(Clone)]
-//RS struct JetBrowserProtocol {
-//RS     browser: JetBrowser,
-//RS     kind: String,
-//RS }
-//RS 
-//RS fn jet_browser_trace_push(state: &mut JetBrowserState, entry: String) {
-//RS     if entry.len() > JET_BROWSER_TRACE_LIMIT_BYTES {
-//RS         return;
-//RS     }
-//RS     while state.trace_bytes.saturating_add(entry.len()) > JET_BROWSER_TRACE_LIMIT_BYTES {
-//RS         if state.trace.is_empty() {
-//RS             break;
-//RS         }
-//RS         state.trace_bytes = state.trace_bytes.saturating_sub(state.trace.remove(0).len());
-//RS     }
-//RS     state.trace_bytes += entry.len();
-//RS     state.trace.push(entry);
-//RS }
-//RS 
-//RS fn jet_browser_fact_hash(value: &str) -> String {
-//RS     let mut hash = 0xcbf2_9ce4_8422_2325u64;
-//RS     for byte in value.as_bytes() {
-//RS         hash ^= u64::from(*byte);
-//RS         hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
-//RS     }
-//RS     format!("{hash:016x}")
-//RS }
-//RS 
-//RS fn jet_browser_object(entries: Vec<(&str, jet_std::DataTree)>) -> jet_std::DataTree {
-//RS     jet_std::DataTree::Object(
-//RS         entries
-//RS             .into_iter()
-//RS             .map(|(key, value)| (key.to_string(), value))
-//RS             .collect(),
-//RS     )
-//RS }
-//RS 
-//RS fn jet_browser_text(value: &str) -> jet_std::DataTree {
-//RS     jet_std::DataTree::Text(value.to_string())
-//RS }
-//RS 
-//RS fn jet_browser_get<'a>(
-//RS     value: &'a jet_std::DataTree,
-//RS     key: &str,
-//RS ) -> Option<&'a jet_std::DataTree> {
-//RS     match value {
-//RS         jet_std::DataTree::Object(fields) => fields
-//RS             .iter()
-//RS             .find_map(|(name, value)| (name == key).then_some(value)),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn jet_browser_string(
-//RS     value: &jet_std::DataTree,
-//RS     key: &str,
-//RS ) -> Result<String, JetBrowserError> {
-//RS     match jet_browser_get(value, key) {
-//RS         Some(jet_std::DataTree::Text(text) | jet_std::DataTree::TypedText(text)) => {
-//RS             Ok(text.clone())
-//RS         }
-//RS         _ => Err(JetBrowserError::new("protocol")),
-//RS     }
-//RS }
-//RS 
-//RS fn jet_browser_id(value: &jet_std::DataTree) -> Option<i64> {
-//RS     match jet_browser_get(value, "id") {
-//RS         Some(jet_std::DataTree::Int(value)) if *value >= 0 => Some(*value),
-//RS         Some(jet_std::DataTree::Float(value))
-//RS             if value.is_finite()
-//RS                 && value.fract() == 0.0
-//RS                 && *value >= 0.0
-//RS                 && *value <= i64::MAX as f64 =>
-//RS         {
-//RS             Some(*value as i64)
-//RS         }
-//RS         Some(jet_std::DataTree::Number(value)) => value.parse::<i64>().ok().filter(|value| *value >= 0),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn jet_browser_ws_error(error: JetWsError) -> JetBrowserError {
-//RS     match error {
-//RS         JetWsError::Timeout => JetBrowserError::new("timeout"),
-//RS         JetWsError::Closed => JetBrowserError::new("closed"),
-//RS         _ => JetBrowserError::new("transport"),
-//RS     }
-//RS }
-//RS 
-//RS impl JetWsConn {
-//RS     fn set_timeout(&self, milliseconds: i64) -> Result<(), JetWsError> {
-//RS         let duration = std::time::Duration::from_millis(
-//RS             u64::try_from(milliseconds).map_err(|_| JetWsError::IO {
-//RS                 operation: "set websocket timeout".to_string(),
-//RS             })?,
-//RS         );
-//RS         self.stream
-//RS             .borrow()
-//RS             .set_read_timeout(Some(duration))
-//RS             .map_err(|_| JetWsError::IO {
-//RS                 operation: "set websocket read timeout".to_string(),
-//RS             })?;
-//RS         self.stream
-//RS             .borrow()
-//RS             .set_write_timeout(Some(duration))
-//RS             .map_err(|_| JetWsError::IO {
-//RS                 operation: "set websocket write timeout".to_string(),
-//RS             })?;
-//RS         Ok(())
-//RS     }
-//RS }
+// Profiles pin native WebDriver BiDi wire contracts; contexts are isolated.
+// Traces retain method/sequence facts only, never endpoint/params/result/page data.
+// CDP is capability-checked protocol("cdp") expert supplement.
+use std.rc.[Rc]
+use std.cell.[Cell, RefCell]
+use std.collections.[VecDeque]
+use std.[time, fs, env]
+use core.encoding.runtime.std_data_tree.[DataTree]
+use core.net.runtime.top_ws_client.[JetWsConn, JetWsError, jet_ws_recv,
+    jet_ws_message_text, jet_ws_send_text]
+use core.prelude.runtime.kernel_values.[JetShow, JetDebug, JetDisplay]
+use jet_std.[parse_json_strict, render_json]
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:9
+const JET_BROWSER_TRACE_LIMIT_BYTES: USize = 8 * 1024
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:10
+const JET_BROWSER_EVENT_LIMIT: USize = 256
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:11
+const JET_BROWSER_ACTION_LIMIT: USize = 2048
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:12
+const JET_BROWSER_ACTION_LIMIT_BYTES: USize = 16 * 1024
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:14
+type JetBrowserTestActionSink = Rc<RefCell<[String]>>
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:16
+fn jet_browser_test_attach_actions(browser: &JetBrowser, actions: JetBrowserTestActionSink?) -> {
+    browser.state.borrow_mut().test_actions = ^actions
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:23
+fn jet_browser_test_actions(browser: &JetBrowser) -> [String] {
+    browser.state.borrow().test_actions.as_ref().map_or_else(fn() { [] }, fn(actions) { actions.borrow().clone() })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:32
+fn jet_browser_record_action(browser: &JetBrowser, entry: String) -> {
+    if entry.is_empty() || entry.len() > JET_BROWSER_ACTION_LIMIT_BYTES { return }
+    actions :: browser.state.borrow().test_actions.clone() ?? return
+    actions := actions.borrow_mut()
+    if actions.len() == JET_BROWSER_ACTION_LIMIT { _ :: actions.remove(0) }
+    actions.push(^entry)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:47
+#Error
+#Derive(Clone, Debug, PartialEq, Eq)
+struct JetBrowserError { kind: String }
+impl JetBrowserError {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:53
+    fn new(kind: String) -> Self { Self{kind: ^kind} }
+}
+impl JetBrowserError.JetShow {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:59
+    fn jet_show(self: &Self) -> String {
+        match self.kind {
+            "invalid profile" -> "browser profile is not supported"
+            "invalid timeout" -> "browser timeout must be between 1 and 600000 milliseconds"
+            "unsupported protocol" -> "browser protocol is not available in this session"
+            "timeout" -> "browser operation timed out"
+            "closed" -> "browser session is closed"
+            "transport" -> "browser transport failed"
+            "missing lock" -> "no locked browser for this engine in .jet/lock"
+            "unknown engine" -> "browser engine is not supported"
+            "missing binary" -> "locked browser binary was not found"
+            "size mismatch" -> "locked browser binary size drifted"
+            "invalid lock" -> "browser lock entry is incomplete"
+            _ -> "browser protocol failed"
+        }.to_string()
+    }
+}
+impl JetBrowserError.JetDebug {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:79
+    fn jet_debug(self: &Self) -> String { self.jet_show() }
+}
+impl JetBrowserError.JetDisplay {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:87
+    fn jet_display(self: &Self) -> String { self.jet_show() }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:92
+#Derive(Clone, Debug, PartialEq, Eq)
+struct JetBrowserProfile { name: String, version: String }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:99
+#Derive(Clone, Debug, PartialEq, Eq)
+struct JetBrowserLocked { engine: String, version: String, binary: String, protocol: String, size: I64, output_hash: String }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:109
+#Derive(Clone, Copy, Debug, PartialEq, Eq)
+struct JetBrowserTimeout { milliseconds: I64 }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:114
+#Derive(Clone, Debug, PartialEq, Eq)
+struct JetBrowserAbilities { bidi: Bool, cdp: Bool, profile: String }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:123
+#Derive(Clone, Debug, PartialEq, Eq)
+struct JetBrowserEvent {
+    method: String, request_id: String, request_method: String, url_hash: String, is_blocked: Bool,
+    status_code: I64, download_id: String, suggested_filename_hash: String
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:136
+#Derive(Clone)
+struct JetBrowserIntercept { state: Rc<JetBrowserInterceptState> }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:140
+struct JetBrowserInterceptState { browser: JetBrowser, id: String, removed: Cell<Bool> }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:146
+#Derive(Clone, Debug, PartialEq, Eq)
+struct JetBrowserTrace { entries: [String] }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:153
+#Derive(Clone, Debug, PartialEq, Eq)
+struct JetBrowserPrivacy { isolated_profiles: Bool, redact_receipts: Bool, shared_profiles: Bool }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:162
+#Derive(Clone, Debug, PartialEq, Eq)
+struct JetBrowserReceipt { entries: [String], isolated: Bool, cleaned: Bool }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:169
+struct JetBrowserState {
+    conn: JetWsConn, next_id: I64, closed: Bool, session_started: Bool, timeout_ms: I64, profile: String, cdp: Bool
+    trace: [String], trace_bytes: USize, events: VecDeque<JetBrowserEvent>, test_actions: JetBrowserTestActionSink?
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:183
+#Derive(Clone)
+struct JetBrowser { state: Rc<RefCell<JetBrowserState>> }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:188
+#Derive(Clone)
+struct JetBrowserContext { state: Rc<JetBrowserContextState> }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:193
+struct JetBrowserContextState { browser: JetBrowser, id: String, closed: Cell<Bool> }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:199
+#Derive(Clone)
+struct JetBrowserPage { state: Rc<JetBrowserPageState> }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:204
+struct JetBrowserPageState { browser: JetBrowser, context: Rc<JetBrowserContextState>, id: String, closed: Cell<Bool> }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:214
+#Derive(Clone)
+struct JetBrowserFrame { state: Rc<JetBrowserFrameState> }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:218
+struct JetBrowserFrameState { browser: JetBrowser, page: Rc<JetBrowserPageState>, id: String, closed: Cell<Bool> }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:227
+#Derive(Clone)
+struct JetBrowserLocator { page: Rc<JetBrowserPageState>, locator_type: String, role: String, name: String, value: String }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:237
+#Derive(Clone)
+struct JetBrowserProtocol { browser: JetBrowser, kind: String }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:242
+fn jet_browser_trace_push(state: &JetBrowserState, entry: String) -> {
+    if entry.len() > JET_BROWSER_TRACE_LIMIT_BYTES { return }
+    loop state.trace_bytes.saturating_add(entry.len()) > JET_BROWSER_TRACE_LIMIT_BYTES {
+        if state.trace.is_empty() { break }
+        state.trace_bytes = state.trace_bytes.saturating_sub(state.trace.remove(0).len())
+    }
+    state.trace_bytes += entry.len()
+    state.trace.push(^entry)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:256
+fn jet_browser_fact_hash(value: &String) -> String {
+    hash := U64{0xcbf2_9ce4_8422_2325}
+    for byte in value.as_bytes() { hash ^= U64.from(*byte); hash = hash.wrapping_mul(0x0000_0100_0000_01b3) }
+    "{hash:016x}"
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:265
+fn jet_browser_object(entries: [(String, DataTree)]) -> DataTree {
+    .Object(entries.into_iter().map(fn((key, value)) { (key.to_string(), ^value) }).collect())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:274
+fn jet_browser_text(value: &String) -> DataTree { .Text(value.to_string()) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:278
+fn jet_browser_get(value: &DataTree, key: &String) -> &DataTree? {
+    match value {
+        .Object(fields) -> fields.iter().find_map(fn((name, value)) { if name == key { Val(value) } else { None } })
+        _ -> None
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:290
+fn jet_browser_string(value: &DataTree, key: &String) -> String JetBrowserError! {
+    match jet_browser_get(value, key) { Val(.Text(text)) | Val(.TypedText(text)) -> Ok(text.clone()), _ -> Err(JetBrowserError.new("protocol")) }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:302
+fn jet_browser_id(value: &DataTree) -> I64? {
+    match jet_browser_get(value, "id") {
+        Val(.Int(value)) if *value >= 0 -> Val(*value as I64)
+        Val(.Float(value)) if value.is_finite() && value.fract() == 0.0 && *value >= 0.0 && *value <= I64.MAX as Float -> Val(*value as I64)
+        Val(.Number(value)) -> value.parse<I64>().ok().filter(fn(value) { *value >= 0 })
+        _ -> None
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:318
+fn jet_browser_ws_error(error: JetWsError) -> JetBrowserError {
+    match error { .Timeout -> JetBrowserError.new("timeout"), .Closed -> JetBrowserError.new("closed"), _ -> JetBrowserError.new("transport") }
+}
+impl JetWsConn {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:327
+    // GATE #4565: kernel primitive
+    #Unsafe("borrow actual retained websocket stream for read/write native timeouts")
+    fn set_timeout(self: &Self, milliseconds: I64) -> Unit JetWsError! {
+        duration :: time.Duration.from_millis(U64.try_from(milliseconds).map_err(fn(_) { JetWsError.IO(operation: "set websocket timeout") })?)
+        self.stream.borrow().set_read_timeout(Val(duration)).map_err(fn(_) { JetWsError.IO(operation: "set websocket read timeout") })?
+        self.stream.borrow().set_write_timeout(Val(duration)).map_err(fn(_) { JetWsError.IO(operation: "set websocket write timeout") })?
+        Ok(())
+    }
+}
 //RS fn jet_browser_parse_message(text: &str) -> Result<jet_std::DataTree, JetBrowserError> {
 //RS     let value =
 //RS         jet_std::parse_json_strict(text).map_err(|_| JetBrowserError::new("protocol"))?;

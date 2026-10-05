@@ -1,0 +1,29 @@
+use core.files.runtime.kernel_authority as authority
+
+// Rust: crates/jet-codegen/src/Prelude/Core/Authority.rs:69,110,164,188,202 (behavioral controls; no inline tests)
+#Test("authority rights are sorted deduplicated and only attenuated") {
+    value :: authority.JetAuthority.from_rights(["FS.Write:.jet/build", "FS.Read:repo", "FS.Read:repo"])
+    assert(authority.jet_authority_to_wire(value) == "FS.Read:repo\nFS.Write:.jet/build")
+    narrowed :: authority.jet_authority_with(value, "FS.Read:repo/subtree")
+    assert(authority.jet_authority_to_wire(narrowed) == "FS.Read:repo/subtree")
+    assert(authority.jet_authority_with_right(authority.jet_authority_workspace_rights(), "Net") == Err("E0712: authority cannot narrow to `Net` outside its held rights"))
+    assert(authority.jet_authority_to_wire(authority.jet_authority_without(value, "FS.Read")) == "FS.Write:.jet/build")
+    invalid :: authority.JetAuthority.from_rights(["FS.Read", "FS.Read:", "FS.Read:../outside"])
+    assert(authority.JetFileScope.from_authority(invalid).roots().is_empty())
+    roots :: authority.JetFileScope.from_authority(value).roots()
+    assert(roots.len() == 1)
+    assert(not roots[0].allow_absolute())
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Authority.rs:15-50
+#Test("mapped read registration retains all live owners") {
+    key :: authority.jet_mapped_path_key("jet-packet-0141-mapped-control")
+    authority.jet_mapped_register(key)
+    authority.jet_mapped_register(key)
+    assert(authority.jet_mapped_path_is_live(key))
+    assert(authority.jet_mapped_writer_refusal(key) is Val(_))
+    authority.jet_mapped_unregister(key)
+    assert(authority.jet_mapped_path_is_live(key))
+    authority.jet_mapped_unregister(key)
+    assert(not authority.jet_mapped_path_is_live(key))
+    authority.jet_mapped_unregister(key)
+}

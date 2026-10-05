@@ -1,0 +1,36 @@
+use core.rt.runtime.kernel_realtime.[JetRealtimeSampleRing, JetRealtimeReceipt, jet_rt_deadline_offset_ns]
+
+// Rust: crates/jet-codegen/src/Prelude/Core/Realtime.rs:182
+#Test("realtime_absolute_rational_deadlines") {
+    assert(jet_rt_deadline_offset_ns(48_000, 256, 1) == 5_333_333)
+    assert(jet_rt_deadline_offset_ns(48_000, 256, 2) == 10_666_666)
+    assert(jet_rt_deadline_offset_ns(48_000, 256, 3) == 16_000_000)
+    assert(jet_rt_deadline_offset_ns(0, 256, 1) == 0)
+    assert(jet_rt_deadline_offset_ns(48_000, 0, 1) == 0)
+    assert(jet_rt_deadline_offset_ns(1, I64.MAX, U128.MAX) == I64.MAX)
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Realtime.rs:28
+#Test("realtime_ring_bounded_bit_preserving_fifo") {
+    ring :: JetRealtimeSampleRing.new(2)
+    assert(ring.pop().is_none())
+    assert(!ring.publish(&[1.0]))
+    assert(ring.publish(&[1.25, -0.0]))
+    assert(ring.publish_zeroed())
+    assert(!ring.publish_zeroed())
+    first :: ring.pop().unwrap()
+    assert(first[0] == 1.25)
+    assert(first[1].to_bits() == (-0.0 as F64).to_bits())
+    assert(ring.publish(&[2.0, 3.0]))
+    assert(ring.pop().unwrap() == [0.0, 0.0])
+    assert(ring.pop().unwrap() == [2.0, 3.0])
+    assert(ring.pop().is_none())
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Realtime.rs:119
+#Test("realtime_receipt_rendering") {
+    receipt :: JetRealtimeReceipt{requested_rate_hz: 48000, requested_frames: 256,
+        completed_callbacks: 2, completed_frames: 512, missed: 1, max_lateness_ns: 9,
+        start_identity: 10, end_identity: 20}
+    assert(receipt.frames_per_buffer() == 256)
+    assert(receipt.render_json() == "{\"requested_rate_hz\":48000,\"requested_frames\":256,\"completed_callbacks\":2,\"completed_frames\":512,\"missed\":1,\"max_lateness_ns\":9,\"start_identity\":10,\"end_identity\":20}")
+    assert(receipt.render() == "RealtimeReceipt(rate_hz=48000, frames=256, callbacks=2, completed_frames=512, missed=1, max_lateness_ns=9, start_identity=10, end_identity=20)")
+}

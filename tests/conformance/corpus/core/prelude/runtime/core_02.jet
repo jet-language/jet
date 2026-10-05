@@ -1,0 +1,119 @@
+use core.prelude.runtime.core_02.[jet_string_after, jet_string_before, jet_string_split, jet_string_lines, jet_string_chars, jet_char_len, jet_list_concat, jet_fixed_list_concat, jet_ordering_then, jet_ordering_reverse, jet_fixed_option, JetStringCountBuilder]
+use core.prelude.runtime.kernel_fixed_arithmetic.[JetFixedArithmeticResult, JetFixedArithmeticError]
+use core.prelude.runtime.core_02.[jet_i8_trap_add, jet_i16_trap_sub, jet_i32_trap_mul, jet_i64_trap_div, jet_u8_trap_rem, jet_u16_trap_floor_div, jet_u32_trap_mod, jet_u64_trap_add, jet_i8_wrapping_add, jet_i16_wrapping_sub, jet_i32_wrapping_mul, jet_i64_wrapping_div, jet_i8_saturating_add, jet_i64_saturating_div, jet_u8_saturating_sub, jet_u64_saturating_mul, jet_i8_checked_add, jet_i16_checked_sub, jet_i32_checked_mul, jet_i64_checked_div, jet_i64_checked_rem, jet_u8_checked_add, jet_u16_checked_sub, jet_u32_checked_mul, jet_u64_checked_add, jet_u64_checked_div, jet_u64_checked_rem, jet_u64_checked_pow, jet_i8_trap_floor_div, jet_i8_trap_mod, jet_i8_trap_shl, jet_u64_trap_shr, jet_u64_trap_floor_div, jet_u64_trap_mod, jet_i8_rotate_left, jet_u8_rotate_right, jet_i8_checked_pow, jet_i8_wrapping_pow, jet_i8_saturating_pow, jet_u32_trap_pow]
+
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1686
+#Test("fixed_option_maps_values_and_discards_absent_or_trap") {
+    assert(jet_fixed_option(JetFixedArithmeticResult.Value(I64{4}), value -> value + I64{1}) == Val(I64{5}))
+    assert(jet_fixed_option(JetFixedArithmeticResult.Absent, value -> value) == None)
+    assert(jet_fixed_option(JetFixedArithmeticResult.Trap(JetFixedArithmeticError.DivideZero), value -> value) == None)
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:3352
+#Test("string_before_after_use_first_match_and_missing_is_identity") {
+    assert(jet_string_after("a:b:c", ":") == "b:c")
+    assert(jet_string_before("a:b:c", ":") == "a")
+    assert(jet_string_after("abc", ":") == "abc")
+    assert(jet_string_before("abc", ":") == "abc")
+    assert(jet_string_after("abc", "") == "abc")
+    assert(jet_string_before("abc", "") == "")
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:3341
+#Test("string_helpers_preserve_unicode_scalars_and_line_rules") {
+    assert(jet_char_len("é𐐀") == I64{2})
+    assert(jet_string_chars("é𐐀") == ['é', '𐐀'])
+    assert(jet_string_split("a::b", ":") == ["a", "", "b"])
+    assert(jet_string_lines("a\r\nb\n") == ["a", "b"])
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:3311
+#Test("list_concat_copies_in_left_then_right_order") {
+    assert(jet_list_concat([1, 2], [3]) == [1, 2, 3])
+    assert(jet_list_concat([], [1]) == [1])
+    assert(jet_fixed_list_concat<Int, 2, 1, 3>([1, 2], [3]) == [1, 2, 3])
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:3012
+#Test("short_count_keys_preserve_length_and_utf8_bytes") {
+    assert(JetStringCountBuilder.short_key("12345678".as_bytes()) == None)
+    loop text in ["", "a", "abcdef", "abcdefg", "é𐐀"] {
+        key :: JetStringCountBuilder.short_key(text.as_bytes()).unwrap()
+        assert(JetStringCountBuilder.short_string(key) == text)
+    }
+    assert(JetStringCountBuilder.short_key("a".as_bytes()) != JetStringCountBuilder.short_key("aa".as_bytes()))
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:3527
+#Test("ordering_then_and_reverse_are_exact") {
+    assert(jet_ordering_then(__jet_Ordering.__jet_Equal, __jet_Ordering.__jet_Greater) == .__jet_Greater)
+    assert(jet_ordering_then(__jet_Ordering.__jet_Less, __jet_Ordering.__jet_Greater) == .__jet_Less)
+    assert(jet_ordering_reverse(__jet_Ordering.__jet_Less) == .__jet_Greater)
+    assert(jet_ordering_reverse(__jet_Ordering.__jet_Greater) == .__jet_Less)
+    assert(jet_ordering_reverse(__jet_Ordering.__jet_Equal) == .__jet_Equal)
+}
+
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1958-2125
+#Test("fixed_routes_keep_all_eight_scalar_widths_concrete") {
+    assert(jet_i8_trap_add(I8{4}, I8{5}, "routes", U32{1}) == I8{9})
+    assert(jet_i16_trap_sub(I16{-4}, I16{5}, "routes", U32{1}) == I16{-9})
+    assert(jet_i32_trap_mul(I32{-4}, I32{5}, "routes", U32{1}) == I32{-20})
+    assert(jet_i64_trap_div(I64{-21}, I64{5}, "routes", U32{1}) == I64{-4})
+    assert(jet_u8_trap_rem(U8{21}, U8{5}, "routes", U32{1}) == U8{1})
+    assert(jet_u16_trap_floor_div(U16{21}, U16{5}, "routes", U32{1}) == U16{4})
+    assert(jet_u32_trap_mod(U32{21}, U32{5}, "routes", U32{1}) == U32{1})
+    assert(jet_u64_trap_add(U64{9223372036854775808}, U64{1}, "routes", U32{1}) == U64{9223372036854775809})
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1699
+#Test("fixed_routes_keep_wrapping_and_saturating_modes_distinct") {
+    assert(jet_i8_wrapping_add(I8{127}, I8{1}) == I8{-128})
+    assert(jet_i16_wrapping_sub(I16{-32768}, I16{1}) == I16{32767})
+    assert(jet_i32_wrapping_mul(I32{1073741824}, I32{4}) == I32{0})
+    min :: I64{-9223372036854775807} - I64{1}
+    assert(jet_i64_wrapping_div(min, I64{-1}, "routes", U32{1}) == min)
+    assert(jet_i8_saturating_add(I8{127}, I8{1}) == I8{127})
+    assert(jet_i64_saturating_div(min, I64{-1}, "routes", U32{1}) == I64{9223372036854775807})
+    assert(jet_u8_saturating_sub(U8{0}, U8{1}) == U8{0})
+    assert(jet_u64_saturating_mul(U64{18446744073709551615}, U64{2}) == U64{18446744073709551615})
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1699
+#Test("fixed_checked_routes_discard_overflow_and_invalid_operations") {
+    assert(jet_i8_checked_add(I8{127}, I8{1}) == None)
+    assert(jet_i16_checked_sub(I16{-32768}, I16{1}) == None)
+    assert(jet_i32_checked_mul(I32{1073741824}, I32{4}) == None)
+    min :: I64{-9223372036854775807} - I64{1}
+    assert(jet_i64_checked_div(min, I64{-1}) == None)
+    assert(jet_i64_checked_rem(min, I64{-1}) == None)
+    assert(jet_i64_checked_div(I64{1}, I64{0}) == None)
+    assert(jet_u8_checked_add(U8{255}, U8{1}) == None)
+    assert(jet_u16_checked_sub(U16{0}, U16{1}) == None)
+    assert(jet_u32_checked_mul(U32{2147483648}, U32{2}) == None)
+    assert(jet_u64_checked_add(U64{18446744073709551615}, U64{1}) == None)
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2105
+#Test("fixed_u64_routes_preserve_high_bit_payload_and_operand") {
+    max :: U64{18446744073709551615}
+    high :: U64{9223372036854775808}
+    assert(jet_u64_checked_add(high, U64{1}) == Val(U64{9223372036854775809}))
+    assert(jet_u64_checked_div(max, high) == Val(U64{1}))
+    assert(jet_u64_checked_rem(max, high) == Val(U64{9223372036854775807}))
+    assert(jet_u64_trap_floor_div(max, high, "routes", U32{1}) == U64{1})
+    assert(jet_u64_trap_mod(max, high, "routes", U32{1}) == U64{9223372036854775807})
+    assert(jet_u64_checked_pow(high, U64{1}) == Val(high))
+    assert(jet_u64_checked_pow(U64{1}, max) == None)
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1699
+#Test("fixed_routes_keep_floor_modulo_and_mixed_width_shift_counts") {
+    assert(jet_i8_trap_floor_div(I8{-7}, I8{3}, "routes", U32{1}) == I8{-3})
+    assert(jet_i8_trap_mod(I8{-7}, I8{3}, "routes", U32{1}) == I8{2})
+    assert(jet_i8_trap_floor_div(I8{7}, I8{-3}, "routes", U32{1}) == I8{-3})
+    assert(jet_i8_trap_mod(I8{7}, I8{-3}, "routes", U32{1}) == I8{-2})
+    assert(jet_i8_trap_shl(I8{1}, U64{6}, "routes", U32{1}) == I8{64})
+    assert(jet_u64_trap_shr(U64{9223372036854775808}, I8{63}, "routes", U32{1}) == U64{1})
+    assert(jet_i8_rotate_left(I8{-128}, I8{1}, "routes", U32{1}) == I8{1})
+    assert(jet_u8_rotate_right(U8{1}, U8{9}, "routes", U32{1}) == U8{128})
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1699
+#Test("fixed_power_routes_preserve_checked_wrapping_and_saturating_answers") {
+    assert(jet_i8_checked_pow(I8{2}, I8{7}) == None)
+    assert(jet_i8_checked_pow(I8{2}, I8{-1}) == None)
+    assert(jet_i8_checked_pow(I8{2}, I8{6}) == Val(I8{64}))
+    assert(jet_i8_wrapping_pow(I8{2}, I8{7}, "routes", U32{1}) == I8{-128})
+    assert(jet_i8_saturating_pow(I8{2}, I8{7}, "routes", U32{1}) == I8{127})
+    assert(jet_u32_trap_pow(U32{2}, U32{16}, "routes", U32{1}) == U32{65536})
+}

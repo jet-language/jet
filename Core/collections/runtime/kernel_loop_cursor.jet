@@ -1,205 +1,133 @@
-// PORT-PENDING 0144 crates-jet-codegen-src-prelude-core-collections-module-group-slice-1797: crates/jet-codegen/src/Prelude/Core/LoopCursor.rs:1-201
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS // D-TIER-ONEIR1=A: the one target-neutral iterator cursor kernel.
-//RS //
-//RS // Collections.rs supplies source-kind and JetLoopSource policy. This fragment
-//RS // owns only cursor state and stepping so native MIR adapters can retain typed
-//RS // iterators without changing the non-Send AOT/comptime carriers.
-//RS 
-//RS type JetLoopAny = Box<dyn std::any::Any>;
-//RS 
-//RS pub(crate) trait JetLoopItem {
-//RS     type Value;
-//RS     type Error: Clone;
-//RS 
-//RS     fn into_value(self) -> Result<Self::Value, Self::Error>;
-//RS     fn error(&self) -> Option<&Self::Error>;
-//RS     fn exhausted_error() -> Self::Error;
-//RS }
-//RS 
-//RS impl JetLoopItem for JetLoopAny {
-//RS     type Value = JetLoopAny;
-//RS     type Error = String;
-//RS 
-//RS     fn into_value(self) -> Result<Self::Value, Self::Error> {
-//RS         Ok(self)
-//RS     }
-//RS 
-//RS     fn error(&self) -> Option<&Self::Error> {
-//RS         None
-//RS     }
-//RS 
-//RS     fn exhausted_error() -> Self::Error {
-//RS         "iterator loop value requested after exhaustion".to_string()
-//RS     }
-//RS }
-//RS 
-//RS impl<T, E> JetLoopItem for Result<T, E>
-//RS where
-//RS     E: Clone + From<&'static str>,
-//RS {
-//RS     type Value = T;
-//RS     type Error = E;
-//RS 
-//RS     fn into_value(self) -> Result<Self::Value, Self::Error> {
-//RS         self
-//RS     }
-//RS 
-//RS     fn error(&self) -> Option<&Self::Error> {
-//RS         self.as_ref().err()
-//RS     }
-//RS 
-//RS     fn exhausted_error() -> Self::Error {
-//RS         E::from("iterator loop value requested after exhaustion")
-//RS     }
-//RS }
-//RS 
-//RS pub(crate) struct JetLoopIterCursor<
-//RS     T = JetLoopAny,
-//RS     I = Box<dyn Iterator<Item = T>>,
-//RS > {
-//RS     iter: I,
-//RS     current: Option<T>,
-//RS     step: usize,
-//RS     exhausted: bool,
-//RS }
-//RS 
-//RS fn jet_loop_iter_step(step_value: i64, has_step: bool) -> Result<usize, &'static str> {
-//RS     let step = if has_step { step_value } else { 1 };
-//RS     if step <= 0 {
-//RS         return Err("iterator loop stride must be positive");
-//RS     }
-//RS     usize::try_from(step).map_err(|_| "iterator loop stride is too large")
-//RS }
-//RS 
-//RS pub(crate) fn jet_loop_iter_init_typed<T, I>(
-//RS     mut iter: I,
-//RS     step_value: i64,
-//RS     has_step: bool,
-//RS ) -> Result<JetLoopIterCursor<T, I>, &'static str>
-//RS where
-//RS     T: JetLoopItem,
-//RS     I: Iterator<Item = T>,
-//RS {
-//RS     let step = jet_loop_iter_step(step_value, has_step)?;
-//RS     let current = iter.next();
-//RS     let exhausted = current.is_none();
-//RS     Ok(JetLoopIterCursor {
-//RS         iter,
-//RS         current,
-//RS         step,
-//RS         exhausted,
-//RS     })
-//RS }
-//RS 
-//RS pub(crate) fn jet_loop_iter_typed_has_next<T, I>(
-//RS     cursor: &JetLoopIterCursor<T, I>,
-//RS ) -> Result<bool, T::Error>
-//RS where
-//RS     T: JetLoopItem,
-//RS     I: Iterator<Item = T>,
-//RS {
-//RS     match cursor.current.as_ref() {
-//RS         Some(item) => match item.error() {
-//RS             Some(error) => Err(error.clone()),
-//RS             None => Ok(true),
-//RS         },
-//RS         None => Ok(false),
-//RS     }
-//RS }
-//RS 
-//RS pub(crate) fn jet_loop_iter_typed_value<T, I>(
-//RS     cursor: &mut JetLoopIterCursor<T, I>,
-//RS ) -> Result<<T as JetLoopItem>::Value, T::Error>
-//RS where
-//RS     T: JetLoopItem,
-//RS     I: Iterator<Item = T>,
-//RS {
-//RS     cursor
-//RS         .current
-//RS         .take()
-//RS         .ok_or_else(T::exhausted_error)?
-//RS         .into_value()
-//RS }
-//RS 
-//RS pub(crate) fn jet_loop_iter_typed_advance<T, I>(
-//RS     cursor: &mut JetLoopIterCursor<T, I>,
-//RS ) -> Result<(), T::Error>
-//RS where
-//RS     T: JetLoopItem,
-//RS     I: Iterator<Item = T>,
-//RS {
-//RS     if cursor.exhausted {
-//RS         return Ok(());
-//RS     }
-//RS     for _ in 1..cursor.step {
-//RS         let Some(item) = cursor.iter.next() else {
-//RS             cursor.current = None;
-//RS             cursor.exhausted = true;
-//RS             return Ok(());
-//RS         };
-//RS         if item.error().is_some() {
-//RS             cursor.current = None;
-//RS             cursor.exhausted = true;
-//RS             let Err(error) = item.into_value() else {
-//RS                 unreachable!("iterator item reported an error but yielded a value")
-//RS             };
-//RS             return Err(error);
-//RS         }
-//RS     }
-//RS     cursor.current = cursor.iter.next();
-//RS     cursor.exhausted = cursor.current.is_none();
-//RS     Ok(())
-//RS }
-//RS 
-//RS /// Lazy UTF-8 character source shared by the AOT and native MIR adapters.
-//RS pub(crate) struct JetStringChars {
-//RS     bytes: Vec<u8>,
-//RS     offset: usize,
-//RS }
-//RS 
-//RS impl JetStringChars {
-//RS     pub(crate) fn new(value: String) -> Self {
-//RS         Self {
-//RS             bytes: value.into_bytes(),
-//RS             offset: 0,
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS impl Iterator for JetStringChars {
-//RS     type Item = char;
-//RS 
-//RS     fn next(&mut self) -> Option<Self::Item> {
-//RS         let end = self.offset.saturating_add(4).min(self.bytes.len());
-//RS         let bytes = self.bytes.get(self.offset..end)?;
-//RS         let tail = match std::str::from_utf8(bytes) {
-//RS             Ok(tail) => tail,
-//RS             Err(error) => std::str::from_utf8(&bytes[..error.valid_up_to()]).ok()?,
-//RS         };
-//RS         let value = tail.chars().next()?;
-//RS         self.offset += value.len_utf8();
-//RS         Some(value)
-//RS     }
-//RS }
-//RS 
-//RS fn jet_loop_iter_has_next(cursor: &JetLoopIterCursor) -> bool {
-//RS     jet_loop_iter_typed_has_next(cursor)
-//RS         .unwrap_or_else(|message| jet_panic("<core.prelude>", 0, &message))
-//RS }
-//RS 
-//RS fn jet_loop_iter_value<T: 'static>(cursor: &mut JetLoopIterCursor) -> T {
-//RS     let value = jet_loop_iter_typed_value(cursor)
-//RS         .unwrap_or_else(|message| jet_panic("<core.prelude>", 0, &message));
-//RS     match value.downcast::<T>() {
-//RS         Ok(value) => *value,
-//RS         Err(_) => jet_panic("<core.prelude>", 0, "iterator loop item type does not match MIR"),
-//RS     }
-//RS }
-//RS 
-//RS fn jet_loop_iter_advance(cursor: &mut JetLoopIterCursor) {
-//RS     jet_loop_iter_typed_advance(cursor)
-//RS         .unwrap_or_else(|message| jet_panic("<core.prelude>", 0, &message));
-//RS }
-// END-PORT-PENDING 0144 crates/jet-codegen/src/Prelude/Core/LoopCursor.rs:1-201
+// D-TIER-ONEIR1=A: target-neutral iterator cursor state and stepping.
+use std.any.[Any]
+use std.str as str
+use std.iter.[Iterator]
+use core.mem.runtime.portable_core.[jet_panic]
 
+// Rust: crates/jet-codegen/src/Prelude/Core/LoopCursor.rs:7
+pub type JetLoopAny = Box<Any>
+// Rust: crates/jet-codegen/src/Prelude/Core/LoopCursor.rs:9
+pub trait JetLoopItem {
+    type Value
+    type Error: Clone
+    fn into_value(self) -> Self.Value Self.Error!
+    fn error(self: &Self) -> Self.Error?
+    fn exhausted_error() -> Self.Error
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/LoopCursor.rs:18
+impl JetLoopAny.JetLoopItem {
+    type Value = JetLoopAny
+    type Error = String
+    // Rust: crates/jet-codegen/src/Prelude/Core/LoopCursor.rs:22
+    fn into_value(self) -> JetLoopAny Err! { Ok(^self) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LoopCursor.rs:26
+    fn error(self: &JetLoopAny) -> String? { .None }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LoopCursor.rs:30
+    fn exhausted_error() -> String { "iterator loop value requested after exhaustion" }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/LoopCursor.rs:35
+impl<T, E: Clone + From<String>> (T E!).JetLoopItem {
+    type Value = T
+    type Error = E
+    // Rust: crates/jet-codegen/src/Prelude/Core/LoopCursor.rs:42
+    fn into_value(self) -> T E! { ^self }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LoopCursor.rs:46
+    fn error(self: &Self) -> E? { self.as_ref().err() }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LoopCursor.rs:50
+    fn exhausted_error() -> E { E.from("iterator loop value requested after exhaustion") }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/LoopCursor.rs:55
+pub struct JetLoopIterCursor<T = JetLoopAny, I = Box<Iterator<Item = T>>> {
+    iter: I
+    current: T?
+    step: Usize
+    exhausted: Bool
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/LoopCursor.rs:65
+fn jet_loop_iter_step(step_value: I64, has_step: Bool) -> Usize Err! {
+    step :: if has_step -> step_value else -> 1
+    if step <= 0 -> return Err("iterator loop stride must be positive")
+    Usize.try_from(step).map_err(fn(_) { "iterator loop stride is too large" })
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/LoopCursor.rs:73
+pub fn jet_loop_iter_init_typed<T: JetLoopItem, I: Iterator<Item = T>>(iter: I, step_value: I64,
+    has_step: Bool) -> JetLoopIterCursor<T, I> Err! {
+    step :: jet_loop_iter_step(step_value, has_step)?
+    current :: iter.next()
+    exhausted :: current.is_none()
+    Ok(JetLoopIterCursor { iter: ^iter, current: ^current, step, exhausted })
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/LoopCursor.rs:93
+pub fn jet_loop_iter_typed_has_next<T: JetLoopItem, I: Iterator<Item = T>>(cursor: &JetLoopIterCursor<T, I>) -> Bool T.Error! {
+    if cursor.current.as_ref() == .Val(item) {
+        if item.error() == .Val(error) -> return Err(error.clone())
+        return Ok(true)
+    }
+    Ok(false)
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/LoopCursor.rs:109
+pub fn jet_loop_iter_typed_value<T: JetLoopItem, I: Iterator<Item = T>>(cursor: &JetLoopIterCursor<T, I>) -> T.Value T.Error! {
+    cursor.current.take().ok_or_else(T.exhausted_error)?.into_value()
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/LoopCursor.rs:123
+pub fn jet_loop_iter_typed_advance<T: JetLoopItem, I: Iterator<Item = T>>(cursor: &JetLoopIterCursor<T, I>) -> Unit T.Error! {
+    if cursor.exhausted -> return Ok(())
+    for _ in 1..cursor.step {
+        item :: if cursor.iter.next() == {
+            .Val(item) -> item
+            .None -> {
+                cursor.current = .None
+                cursor.exhausted = true
+                return Ok(())
+            }
+        }
+        if item.error().is_some() {
+            cursor.current = .None
+            cursor.exhausted = true
+            if item.into_value() == {
+                .Err(error) -> return Err(error)
+                .Ok(_) -> panic("iterator item reported an error but yielded a value")
+            }
+        }
+    }
+    cursor.current = cursor.iter.next()
+    cursor.exhausted = cursor.current.is_none()
+    Ok(())
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/LoopCursor.rs:154
+pub struct JetStringChars { bytes: [U8], offset: Usize }
+impl JetStringChars {
+    // Rust: crates/jet-codegen/src/Prelude/Core/LoopCursor.rs:160
+    pub fn new(value: String) -> JetStringChars { JetStringChars { bytes: value.into_bytes(), offset: 0 } }
+}
+impl JetStringChars.Iterator {
+    type Item = Char
+    // Rust: crates/jet-codegen/src/Prelude/Core/LoopCursor.rs:171
+    fn next(self: &JetStringChars) -> Char? {
+        end :: self.offset.saturating_add(4).min(self.bytes.len())
+        bytes :: self.bytes.get(self.offset..end)?
+        tail :: if str.from_utf8(bytes) == {
+            .Ok(tail) -> tail
+            .Err(error) -> str.from_utf8(bytes[..error.valid_up_to()]).ok()?
+        }
+        value :: tail.chars().next()?
+        self.offset += value.len_utf8()
+        .Val(value)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/LoopCursor.rs:184
+fn jet_loop_iter_has_next(cursor: &JetLoopIterCursor) -> Bool {
+    jet_loop_iter_typed_has_next(cursor).unwrap_or_else(fn(message) { jet_panic("<core.prelude>", 0, message) })
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/LoopCursor.rs:189
+fn jet_loop_iter_value<T>(cursor: &JetLoopIterCursor) -> T {
+    value :: jet_loop_iter_typed_value(cursor).unwrap_or_else(fn(message) { jet_panic("<core.prelude>", 0, message) })
+    if value.downcast<T>() == {
+        .Ok(value) -> value.take()
+        .Err(_) -> jet_panic("<core.prelude>", 0, "iterator loop item type does not match MIR")
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/LoopCursor.rs:198
+fn jet_loop_iter_advance(cursor: &JetLoopIterCursor) -> Unit {
+    _ :: jet_loop_iter_typed_advance(cursor).unwrap_or_else(fn(message) { jet_panic("<core.prelude>", 0, message) })
+}

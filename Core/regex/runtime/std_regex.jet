@@ -1,2400 +1,1579 @@
-// PORT-PENDING 0167 crates-jet-codegen-src-prelude-corelib-jetstd-regex: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:1-2396
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS #[derive(Clone, Debug, PartialEq, Eq)]
-//RS pub struct RegexFlags {
-//RS     pub case_insensitive: bool,
-//RS     pub multiline: bool,
-//RS     pub dotall: bool,
-//RS }
-//RS 
-//RS #[derive(Clone, Debug)]
-//RS pub struct JetRegex {
-//RS     pattern: std::sync::Arc<str>,
-//RS     flags: RegexFlags,
-//RS     program: std::sync::Arc<RegexProgram>,
-//RS     group_names: std::sync::Arc<[Option<String>]>,
-//RS     groups: usize,
-//RS }
-//RS 
-//RS #[derive(Debug)]
-//RS pub struct JetRegexMatch {
-//RS     text: std::sync::Arc<str>,
-//RS     span: (usize, usize),
-//RS     program: std::sync::Arc<RegexProgram>,
-//RS     flags: RegexFlags,
-//RS     groups: usize,
-//RS     names: std::sync::Arc<[Option<String>]>,
-//RS     capture_cache: std::sync::OnceLock<Vec<Option<(usize, usize)>>>,
-//RS }
-//RS 
-//RS #[derive(Debug)]
-//RS struct RegexProgram {
-//RS     insts: Vec<RegexInst>,
-//RS     start: usize,
-//RS     anchored_start: bool,
-//RS     literal: Option<Vec<u8>>,
-//RS     required_literals: Vec<Vec<u8>>,
-//RS     prefix: Option<Vec<u8>>,
-//RS     // ponytail: one per-regex scratch lock; split per-worker scratch if concurrent matching contends.
-//RS     scratch: std::sync::Mutex<RegexScratch>,
-//RS }
-//RS 
-//RS #[derive(Clone, Debug)]
-//RS enum RegexInst {
-//RS     Consume(RegexMatcher, Option<usize>),
-//RS     Save(usize, Option<usize>),
-//RS     Split(usize, Option<usize>),
-//RS     AssertStart(Option<usize>),
-//RS     AssertEnd(Option<usize>),
-//RS     Match,
-//RS }
-//RS 
-//RS #[derive(Clone, Debug)]
-//RS enum RegexMatcher {
-//RS     Literal(char),
-//RS     Any,
-//RS     Class(RegexClass),
-//RS }
-//RS 
-//RS #[derive(Clone, Debug)]
-//RS struct RegexClass {
-//RS     negated: bool,
-//RS     items: Vec<RegexClassItem>,
-//RS     ascii: [u64; 2],
-//RS }
-//RS impl RegexClass {
-//RS     fn new(negated: bool, items: Vec<RegexClassItem>) -> Self {
-//RS         let mut ascii = [0u64; 2];
-//RS         for cp in 0u8..=127 {
-//RS             if items.iter().any(|item| regex_class_item_matches(item, cp as char, false)) {
-//RS                 ascii[(cp >> 6) as usize] |= 1u64 << (cp & 63);
-//RS             }
-//RS         }
-//RS         Self {
-//RS             negated,
-//RS             items,
-//RS             ascii,
-//RS         }
-//RS     }
-//RS 
-//RS     fn matches_ascii(&self, ch: u8) -> bool {
-//RS         let yes = self.ascii[(ch >> 6) as usize] & (1u64 << (ch & 63)) != 0;
-//RS         if self.negated { !yes } else { yes }
-//RS     }
-//RS }
-//RS 
-//RS 
-//RS #[derive(Clone, Debug)]
-//RS enum RegexClassItem {
-//RS     Char(char),
-//RS     Range(char, char),
-//RS     Digit,
-//RS     Word,
-//RS     Space,
-//RS     UnicodeLetter,
-//RS     UnicodeNumber,
-//RS     UnicodeAlphabetic,
-//RS     UnicodeWhitespace,
-//RS }
-//RS 
-//RS #[derive(Clone, Debug)]
-//RS enum RegexNode {
-//RS     Seq(Vec<RegexPiece>),
-//RS     Alt(Vec<RegexNode>),
-//RS }
-//RS 
-//RS #[derive(Clone, Debug)]
-//RS struct RegexPiece {
-//RS     atom: RegexAtom,
-//RS     quant: RegexQuant,
-//RS }
-//RS 
-//RS #[derive(Clone, Debug)]
-//RS enum RegexAtom {
-//RS     Literal(char),
-//RS     Any,
-//RS     Class(RegexClass),
-//RS     Group(usize, Box<RegexNode>),
-//RS     Start,
-//RS     End,
-//RS }
-//RS 
-//RS #[derive(Clone, Debug)]
-//RS enum RegexQuant {
-//RS     One,
-//RS     ZeroOrMore,
-//RS     OneOrMore,
-//RS     ZeroOrOne,
-//RS     Range { min: usize, max: Option<usize> },
-//RS }
-//RS 
-//RS #[derive(Clone, Copy)]
-//RS enum RegexPatch {
-//RS     Next(usize),
-//RS     SplitB(usize),
-//RS }
-//RS 
-//RS struct RegexFrag {
-//RS     start: usize,
-//RS     outs: Vec<RegexPatch>,
-//RS }
-//RS 
-//RS #[derive(Debug)]
-//RS struct RegexCaptureNode {
-//RS     slot: usize,
-//RS     pos: usize,
-//RS     previous: Option<usize>,
-//RS }
-//RS 
-//RS #[derive(Clone, Copy, Debug)]
-//RS struct RegexThread {
-//RS     pc: usize,
-//RS     start: usize,
-//RS     caps: Option<usize>,
-//RS }
-//RS 
-//RS #[derive(Debug)]
-//RS struct RegexState {
-//RS     threads: Vec<RegexThread>,
-//RS     seen: Vec<u32>,
-//RS     stack: Vec<RegexThread>,
-//RS     epoch: u32,
-//RS     min_start: Option<usize>,
-//RS     matched: Option<RegexThread>,
-//RS }
-//RS 
-//RS impl RegexState {
-//RS     fn new(inst_count: usize) -> Self {
-//RS         Self {
-//RS             threads: Vec::with_capacity(inst_count),
-//RS             seen: vec![0; inst_count],
-//RS             stack: Vec::with_capacity(inst_count),
-//RS             epoch: 0,
-//RS             min_start: None,
-//RS             matched: None,
-//RS         }
-//RS     }
-//RS 
-//RS     fn clear(&mut self) {
-//RS         self.threads.clear();
-//RS         self.epoch = self.epoch.wrapping_add(1);
-//RS         if self.epoch == 0 {
-//RS             self.seen.fill(0);
-//RS             self.epoch = 1;
-//RS         }
-//RS         self.min_start = None;
-//RS         self.matched = None;
-//RS     }
-//RS }
-//RS const REGEX_CACHE_LIMIT: usize = 32;
-//RS 
-//RS #[derive(Debug)]
-//RS struct RegexCache {
-//RS     // Eight flag combinations keep lookups borrowed (`&str`) and avoid
-//RS     // allocating a composite key on every compile call.
-//RS     entries: [std::collections::HashMap<std::sync::Arc<str>, JetRegex>; 8],
-//RS     order: std::collections::VecDeque<(usize, std::sync::Arc<str>)>,
-//RS }
-//RS 
-//RS impl RegexCache {
-//RS     fn new() -> Self {
-//RS         Self {
-//RS             entries: std::array::from_fn(|_| std::collections::HashMap::new()),
-//RS             order: std::collections::VecDeque::new(),
-//RS         }
-//RS     }
-//RS 
-//RS     fn bucket(flags: &RegexFlags) -> usize {
-//RS         usize::from(flags.case_insensitive)
-//RS             | (usize::from(flags.multiline) << 1)
-//RS             | (usize::from(flags.dotall) << 2)
-//RS     }
-//RS 
-//RS     fn get(&self, pattern: &str, flags: &RegexFlags) -> Option<JetRegex> {
-//RS         self.entries[Self::bucket(flags)].get(pattern).cloned()
-//RS     }
-//RS 
-//RS     fn insert(&mut self, regex: JetRegex) {
-//RS         let bucket = Self::bucket(&regex.flags);
-//RS         let pattern = std::sync::Arc::clone(&regex.pattern);
-//RS         if self.entries[bucket].contains_key(pattern.as_ref()) {
-//RS             return;
-//RS         }
-//RS         self.entries[bucket].insert(std::sync::Arc::clone(&pattern), regex);
-//RS         self.order.push_back((bucket, pattern));
-//RS         if self.order.len() > REGEX_CACHE_LIMIT {
-//RS             if let Some((old_bucket, old_pattern)) = self.order.pop_front() {
-//RS                 self.entries[old_bucket].remove(old_pattern.as_ref());
-//RS             }
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS // Cache key is the exact pattern plus every compilation flag. Split limits
-//RS // are execution arguments, not compiled-regex state, so they do not enter it.
-//RS static REGEX_CACHE: std::sync::LazyLock<std::sync::Mutex<RegexCache>> =
-//RS     std::sync::LazyLock::new(|| std::sync::Mutex::new(RegexCache::new()));
-//RS 
-//RS fn regex_cache() -> &'static std::sync::Mutex<RegexCache> {
-//RS     &REGEX_CACHE
-//RS }
-//RS 
-//RS 
-//RS #[derive(Debug)]
-//RS struct RegexScratch {
-//RS     current: RegexState,
-//RS     next: RegexState,
-//RS     capture_arena: Vec<RegexCaptureNode>,
-//RS }
-//RS 
-//RS 
-//RS fn regex_outcome<T>(value: Option<T>) -> JetOutcome<T, JetAbsent> {
-//RS     value.ok_or(JetAbsent)
-//RS }
-//RS 
-//RS fn regex_char_index(text: &str, byte: usize) -> Option<i64> {
-//RS     let prefix = text.get(..byte)?;
-//RS     i64::try_from(prefix.chars().count()).ok()
-//RS }
-//RS 
-//RS fn regex_rebase_span(
-//RS     text: &str,
-//RS     base: usize,
-//RS     span: (usize, usize),
-//RS ) -> Option<(usize, usize)> {
-//RS     let start = base.checked_add(span.0)?;
-//RS     let end = base.checked_add(span.1)?;
-//RS     text.get(start..end).map(|_| (start, end))
-//RS }
-//RS 
-//RS fn regex_simple_fold(cp: u32) -> u32 {
-//RS     char::from_u32(cp)
-//RS         .and_then(|ch| ch.to_lowercase().next())
-//RS         .map_or(cp, |ch| ch as u32)
-//RS }
-//RS 
-//RS impl RegexScratch {
-//RS     fn new(inst_count: usize) -> Self {
-//RS         Self {
-//RS             current: RegexState::new(inst_count),
-//RS             next: RegexState::new(inst_count),
-//RS             capture_arena: Vec::new(),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS impl Default for RegexFlags {
-//RS     fn default() -> Self {
-//RS         Self {
-//RS             case_insensitive: false,
-//RS             multiline: false,
-//RS             dotall: false,
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS impl crate::JetShow for RegexFlags {
-//RS     fn jet_show(&self) -> String {
-//RS         let mut s = String::new();
-//RS         if self.case_insensitive {
-//RS             s.push('i');
-//RS         }
-//RS         if self.multiline {
-//RS             s.push('m');
-//RS         }
-//RS         if self.dotall {
-//RS             s.push('s');
-//RS         }
-//RS         format!("RegexFlags({})", s)
-//RS     }
-//RS }
-//RS 
-//RS impl crate::JetShow for JetRegex {
-//RS     fn jet_show(&self) -> String {
-//RS         format!("Regex({})", self.pattern)
-//RS     }
-//RS }
-//RS 
-//RS impl crate::JetShow for JetRegexMatch {
-//RS     fn jet_show(&self) -> String {
-//RS         self.group(0).unwrap_or_default()
-//RS     }
-//RS }
-//RS impl Clone for JetRegexMatch {
-//RS     fn clone(&self) -> Self {
-//RS         // The capture cache is an execution hint, not observable state.
-//RS         // Cloning a match keeps the carrier allocation-free and lets the
-//RS         // clone materialize captures only if it is actually queried.
-//RS         Self {
-//RS             text: std::sync::Arc::clone(&self.text),
-//RS             span: self.span,
-//RS             program: std::sync::Arc::clone(&self.program),
-//RS             flags: self.flags.clone(),
-//RS             groups: self.groups,
-//RS             names: std::sync::Arc::clone(&self.names),
-//RS             capture_cache: std::sync::OnceLock::new(),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS 
-//RS impl JetRegexMatch {
-//RS     pub fn group(&self, n: i64) -> JetOutcome<String, JetAbsent> {
-//RS         let Ok(n) = usize::try_from(n) else { return Err(JetAbsent) };
-//RS         let span = if n == 0 {
-//RS             Some(self.span)
-//RS         } else if n > self.groups {
-//RS             None
-//RS         } else {
-//RS             self.capture_spans().get(n).copied().flatten()
-//RS         };
-//RS         let Some((start, end)) = span else { return Err(JetAbsent) };
-//RS         Ok(self.text[start..end].to_string())
-//RS     }
-//RS 
-//RS     pub fn name(&self, name: &str) -> JetOutcome<String, JetAbsent> {
-//RS         let Some(idx) = self
-//RS             .names
-//RS             .iter()
-//RS             .position(|n| n.as_deref() == Some(name))
-//RS         else {
-//RS             return Err(JetAbsent);
-//RS         };
-//RS         self.group(idx as i64)
-//RS     }
-//RS 
-//RS     /// Match spans use String character indices, not UTF-8 byte offsets, so
-//RS     /// they compose directly with Jet String indexing.
-//RS     pub fn start(&self) -> i64 {
-//RS         self.group_start(0).unwrap_or(-1)
-//RS     }
-//RS 
-//RS     pub fn end(&self) -> i64 {
-//RS         self.group_end(0).unwrap_or(-1)
-//RS     }
-//RS 
-//RS     pub fn group_start(&self, n: i64) -> JetOutcome<i64, JetAbsent> {
-//RS         let Ok(n) = usize::try_from(n) else { return Err(JetAbsent) };
-//RS         regex_outcome(self.span_for(n).and_then(|(start, _)| regex_char_index(&self.text, start)))
-//RS     }
-//RS 
-//RS     pub fn group_end(&self, n: i64) -> JetOutcome<i64, JetAbsent> {
-//RS         let Ok(n) = usize::try_from(n) else { return Err(JetAbsent) };
-//RS         regex_outcome(self.span_for(n).and_then(|(_, end)| regex_char_index(&self.text, end)))
-//RS     }
-//RS 
-//RS     pub fn group_count(&self) -> usize {
-//RS         self.groups
-//RS     }
-//RS 
-//RS     pub fn capture_names(&self) -> Vec<Option<String>> {
-//RS         self.names.as_ref().to_vec()
-//RS     }
-//RS 
-//RS     /// Named capture pairs as `[[name, value], …]` (unnamed groups omitted).
-//RS     pub fn named_captures(&self) -> Vec<Vec<String>> {
-//RS         if self.groups == 0 {
-//RS             return Vec::new();
-//RS         }
-//RS         let spans = self.capture_spans();
-//RS         self.names
-//RS             .iter()
-//RS             .enumerate()
-//RS             .filter_map(|(i, n)| {
-//RS                 let name = n.as_ref()?.clone();
-//RS                 let (start, end) = spans.get(i).copied().flatten()?;
-//RS                 let value = self.text[start..end].to_string();
-//RS                 Some(vec![name, value])
-//RS             })
-//RS             .collect()
-//RS     }
-//RS 
-//RS     fn span_for(&self, n: usize) -> Option<(usize, usize)> {
-//RS         if n == 0 {
-//RS             Some(self.span)
-//RS         } else if n > self.groups {
-//RS             None
-//RS         } else {
-//RS             self.capture_spans().get(n).copied().flatten()
-//RS         }
-//RS     }
-//RS 
-//RS     fn capture_spans(&self) -> &[Option<(usize, usize)>] {
-//RS         self.capture_cache
-//RS             .get_or_init(|| {
-//RS                 if self.groups == 0 {
-//RS                     return vec![Some(self.span)];
-//RS                 }
-//RS                 let base = self.span.0;
-//RS                 let window = &self.text[self.span.0..self.span.1];
-//RS                 regex_run(
-//RS                     &self.program,
-//RS                     &self.flags,
-//RS                     self.groups,
-//RS                     window,
-//RS                     0,
-//RS                     true,
-//RS                     true,
-//RS                 )
-//RS                 .and_then(|run| run.caps)
-//RS                 .map(|caps| regex_slots_to_spans(&caps))
-//RS                 .map(|spans| {
-//RS                     spans
-//RS                         .into_iter()
-//RS                         .map(|span| span.and_then(|span| regex_rebase_span(&self.text, base, span)))
-//RS                         .collect()
-//RS                 })
-//RS                 .unwrap_or_else(|| vec![Some(self.span)])
-//RS             })
-//RS             .as_slice()
-//RS     }
-//RS }
-//RS 
-//RS impl JetRegex {
-//RS     pub fn parse(pattern: &str) -> Result<Self, String> {
-//RS         jet_regex_compile_with(pattern, &RegexFlags::default())
-//RS     }
-//RS 
-//RS     pub fn pattern(&self) -> String {
-//RS         self.pattern.to_string()
-//RS     }
-//RS 
-//RS     pub fn source(&self) -> String {
-//RS         self.pattern.to_string()
-//RS     }
-//RS 
-//RS     pub fn flags(&self) -> String {
-//RS         let mut s = String::with_capacity(3);
-//RS         if self.flags.case_insensitive {
-//RS             s.push('i');
-//RS         }
-//RS         if self.flags.multiline {
-//RS             s.push('m');
-//RS         }
-//RS         if self.flags.dotall {
-//RS             s.push('s');
-//RS         }
-//RS         s
-//RS     }
-//RS 
-//RS     pub fn options(&self) -> String {
-//RS         self.flags()
-//RS     }
-//RS 
-//RS     pub fn names(&self) -> Vec<String> {
-//RS         self.group_names.iter().filter_map(|n| n.clone()).collect()
-//RS     }
-//RS 
-//RS     pub fn count(&self, text: &str) -> i64 {
-//RS         let mut count = 0usize;
-//RS         regex_scan(
-//RS             &self.program,
-//RS             &self.flags,
-//RS             self.groups,
-//RS             text,
-//RS             0,
-//RS             false,
-//RS             false,
-//RS             false,
-//RS             |_run| {
-//RS                 count += 1;
-//RS                 true
-//RS             },
-//RS         );
-//RS         count as i64
-//RS     }
-//RS 
-//RS     pub fn is_match(&self, text: &str) -> bool {
-//RS         regex_has_match(&self.program, &self.flags, self.groups, text)
-//RS     }
-//RS 
-//RS     pub fn full_match(&self, text: &str) -> bool {
-//RS         regex_run(&self.program, &self.flags, self.groups, text, 0, true, false)
-//RS             .is_some_and(|run| run.span == (0, text.len()))
-//RS     }
-//RS 
-//RS     pub fn match_value(&self, text: &str) -> JetOutcome<JetRegexMatch, JetAbsent> {
-//RS         regex_outcome(self.find_match(text))
-//RS     }
-//RS 
-//RS     pub fn find(&self, text: &str) -> JetOutcome<String, JetAbsent> {
-//RS         regex_outcome(self.find_span(text).map(|(start, end)| text[start..end].to_string()))
-//RS     }
-//RS 
-//RS     pub fn find_all(&self, text: &str) -> Vec<String> {
-//RS         let mut out = Vec::new();
-//RS         regex_scan(
-//RS             &self.program,
-//RS             &self.flags,
-//RS             self.groups,
-//RS             text,
-//RS             0,
-//RS             false,
-//RS             false,
-//RS             false,
-//RS             |run| {
-//RS                 let (start, end) = run.span;
-//RS                 out.push(text[start..end].to_string());
-//RS                 true
-//RS             },
-//RS         );
-//RS         out
-//RS     }
-//RS     fn find_span(&self, text: &str) -> Option<(usize, usize)> {
-//RS         regex_run(
-//RS             &self.program,
-//RS             &self.flags,
-//RS             self.groups,
-//RS             text,
-//RS             0,
-//RS             false,
-//RS             false,
-//RS         )
-//RS         .map(|run| run.span)
-//RS     }
-//RS 
-//RS     fn find_match(&self, text: &str) -> Option<JetRegexMatch> {
-//RS         let run = regex_run(
-//RS             &self.program,
-//RS             &self.flags,
-//RS             self.groups,
-//RS             text,
-//RS             0,
-//RS             false,
-//RS             true,
-//RS         )?;
-//RS         let text = std::sync::Arc::<str>::from(text);
-//RS         Some(self.make_match_with_captures(&text, run.span, run.caps))
-//RS     }
-//RS 
-//RS     pub fn matches(&self, text: &str) -> Vec<JetRegexMatch> {
-//RS         let shared = std::sync::Arc::<str>::from(text);
-//RS         let mut out = Vec::new();
-//RS         regex_scan(
-//RS             &self.program,
-//RS             &self.flags,
-//RS             self.groups,
-//RS             text,
-//RS             0,
-//RS             false,
-//RS             false,
-//RS             false,
-//RS             |run| {
-//RS                 out.push(self.make_match(&shared, run.span));
-//RS                 true
-//RS             },
-//RS         );
-//RS         out
-//RS     }
-//RS     /// Replace every non-overlapping match from left to right.
-//RS     pub fn replace(&self, text: &str, repl: &str) -> String {
-//RS         self.replace_impl(text, |m| expand_regex_replacement(repl, m), true)
-//RS     }
-//RS 
-//RS     /// Replace at most the first non-overlapping match.
-//RS     pub fn replace_first(&self, text: &str, repl: &str) -> String {
-//RS         self.replace_impl(text, |m| expand_regex_replacement(repl, m), false)
-//RS     }
-//RS 
-//RS     pub fn replace_all_with<F>(&self, text: &str, f: F) -> String
-//RS     where
-//RS         F: Fn(JetRegexMatch) -> String,
-//RS     {
-//RS         self.replace_all_with_result(text, |m| Ok::<_, ()>(f(m)))
-//RS             .expect("infallible regex replacement")
-//RS     }
-//RS 
-//RS     pub fn replace_all_with_result<E, F>(&self, text: &str, mut replace: F) -> Result<String, E>
-//RS     where
-//RS         F: FnMut(JetRegexMatch) -> Result<String, E>,
-//RS     {
-//RS         let shared = std::sync::Arc::<str>::from(text);
-//RS         let mut out = String::with_capacity(text.len());
-//RS         let mut pos = 0;
-//RS         let mut error = None;
-//RS         regex_scan(
-//RS             &self.program,
-//RS             &self.flags,
-//RS             self.groups,
-//RS             text,
-//RS             0,
-//RS             false,
-//RS             false,
-//RS             false,
-//RS             |run| {
-//RS                 let (start, end) = run.span;
-//RS                 out.push_str(&text[pos..start]);
-//RS                 let found = self.make_match_with_captures(&shared, run.span, run.caps);
-//RS                 match replace(found) {
-//RS                     Ok(value) => {
-//RS                         out.push_str(&value);
-//RS                         pos = end;
-//RS                         true
-//RS                     }
-//RS                     Err(value) => {
-//RS                         error = Some(value);
-//RS                         false
-//RS                     }
-//RS                 }
-//RS             },
-//RS         );
-//RS         if let Some(error) = error {
-//RS             return Err(error);
-//RS         }
-//RS         out.push_str(&text[pos.min(text.len())..]);
-//RS         Ok(out)
-//RS     }
-//RS 
-//RS     pub fn split(&self, text: &str) -> Vec<String> {
-//RS         self.split_limit(text, 0)
-//RS     }
-//RS 
-//RS     pub fn split_limit(&self, text: &str, limit: i64) -> Vec<String> {
-//RS         let mut out = Vec::new();
-//RS         let mut pos = 0;
-//RS         let mut splits = 0i64;
-//RS         if limit != 1 {
-//RS             regex_scan(
-//RS                 &self.program,
-//RS                 &self.flags,
-//RS                 self.groups,
-//RS                 text,
-//RS                 0,
-//RS                 false,
-//RS                 false,
-//RS                 false,
-//RS                 |run| {
-//RS                     if limit > 0 && splits >= limit - 1 {
-//RS                         return false;
-//RS                     }
-//RS                     let (start, end) = run.span;
-//RS                     out.push(text[pos..start].to_string());
-//RS                     // Advance at every match boundary. For a zero-width
-//RS                     // delimiter `end == start`, so the next boundary emits
-//RS                     // exactly the intervening character(s) once.
-//RS                     pos = end;
-//RS                     splits += 1;
-//RS                     true
-//RS                 },
-//RS             );
-//RS         }
-//RS         out.push(text[pos.min(text.len())..].to_string());
-//RS         out
-//RS     }
-//RS 
-//RS     fn replace_impl<F>(&self, text: &str, repl: F, all: bool) -> String
-//RS     where
-//RS         F: Fn(&JetRegexMatch) -> String,
-//RS     {
-//RS         let shared = std::sync::Arc::<str>::from(text);
-//RS         let mut out = String::with_capacity(text.len());
-//RS         let mut pos = 0;
-//RS         regex_scan(
-//RS             &self.program,
-//RS             &self.flags,
-//RS             self.groups,
-//RS             text,
-//RS             0,
-//RS             false,
-//RS             false,
-//RS             false,
-//RS             |run| {
-//RS                 let (start, end) = run.span;
-//RS                 out.push_str(&text[pos..start]);
-//RS                 let mat = self.make_match(&shared, run.span);
-//RS                 out.push_str(&repl(&mat));
-//RS                 pos = end;
-//RS                 all
-//RS             },
-//RS         );
-//RS         out.push_str(&text[pos.min(text.len())..]);
-//RS         out
-//RS     }
-//RS 
-//RS     fn make_match(
-//RS         &self,
-//RS         text: &std::sync::Arc<str>,
-//RS         span: (usize, usize),
-//RS     ) -> JetRegexMatch {
-//RS         self.make_match_with_captures(text, span, None)
-//RS     }
-//RS 
-//RS     fn make_match_with_captures(
-//RS         &self,
-//RS         text: &std::sync::Arc<str>,
-//RS         span: (usize, usize),
-//RS         caps: Option<Vec<Option<usize>>>,
-//RS     ) -> JetRegexMatch {
-//RS         let capture_cache = std::sync::OnceLock::new();
-//RS         if let Some(caps) = caps {
-//RS             let _ = capture_cache.set(regex_slots_to_spans(&caps));
-//RS         }
-//RS         JetRegexMatch {
-//RS             text: std::sync::Arc::clone(text),
-//RS             span,
-//RS             program: std::sync::Arc::clone(&self.program),
-//RS             flags: self.flags.clone(),
-//RS             groups: self.groups,
-//RS             names: std::sync::Arc::clone(&self.group_names),
-//RS             capture_cache,
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS pub fn jet_regex_flags(
-//RS     case_insensitive: bool,
-//RS     multiline: bool,
-//RS     dotall: bool,
-//RS ) -> RegexFlags {
-//RS     RegexFlags {
-//RS         case_insensitive,
-//RS         multiline,
-//RS         dotall,
-//RS     }
-//RS }
-//RS 
-//RS /// Escape regex metacharacters so `text` matches literally.
-//RS pub fn jet_regex_escape(text: &str) -> String {
-//RS     let mut out = String::with_capacity(text.len());
-//RS     for ch in text.chars() {
-//RS         if matches!(
-//RS             ch,
-//RS             '\\' | '.' | '+' | '*' | '?' | '(' | ')' | '[' | ']' | '{' | '}' | '^' | '$' | '|'
-//RS         ) {
-//RS             out.push('\\');
-//RS         }
-//RS         out.push(ch);
-//RS     }
-//RS     out
-//RS }
-//RS 
-//RS pub fn jet_regex_compile(pattern: &str) -> Result<JetRegex, String> {
-//RS     jet_regex_compile_with(pattern, &RegexFlags::default())
-//RS }
-//RS pub fn jet_string_matches(text: &str, pattern: &str) -> Result<bool, String> {
-//RS     let regex = jet_regex_compile(pattern)?;
-//RS     Ok(regex.is_match(text))
-//RS }
-//RS 
-//RS pub fn jet_string_match(
-//RS     text: &str,
-//RS     pattern: &str,
-//RS ) -> Result<JetOutcome<String, JetAbsent>, String> {
-//RS     let regex = jet_regex_compile(pattern)?;
-//RS     Ok(regex.find(text))
-//RS }
-//RS 
-//RS pub fn jet_regex_literal(pattern: &str) -> JetRegex {
-//RS     match jet_regex_compile(pattern) {
-//RS         Ok(regex) => regex,
-//RS         Err(error) => unreachable!("sema accepted an invalid Regex literal: {error}"),
-//RS     }
-//RS }
-//RS 
-//RS pub fn jet_regex_compile_with(pattern: &str, flags: &RegexFlags) -> Result<JetRegex, String> {
-//RS     if let Some(regex) = regex_cache()
-//RS         .lock()
-//RS         .unwrap_or_else(|poisoned| poisoned.into_inner())
-//RS         .get(pattern, flags)
-//RS     {
-//RS         return Ok(regex);
-//RS     }
-//RS     // Do not hold the global cache lock while parsing or compiling. A cache
-//RS     // miss is rare after warm-up; concurrent misses may compile independently,
-//RS     // then converge on the first result inserted for this key.
-//RS     let regex = jet_regex_compile_uncached(pattern, flags)?;
-//RS     let mut cache = regex_cache()
-//RS         .lock()
-//RS         .unwrap_or_else(|poisoned| poisoned.into_inner());
-//RS     if let Some(existing) = cache.get(pattern, flags) {
-//RS         return Ok(existing);
-//RS     }
-//RS     cache.insert(regex.clone());
-//RS     Ok(regex)
-//RS }
-//RS 
-//RS fn jet_regex_compile_uncached(pattern: &str, flags: &RegexFlags) -> Result<JetRegex, String> {
-//RS     super::jet_regex_syntax::validate(pattern).map_err(|error| {
-//RS         format!(
-//RS             "invalid regex `{pattern}` at position {}: {}",
-//RS             error.offset, error.reason
-//RS         )
-//RS     })?;
-//RS     let mut parser = RegexParser {
-//RS         chars: pattern.chars().collect(),
-//RS         pos: 0,
-//RS         groups: 0,
-//RS         names: vec![None],
-//RS     };
-//RS     let root = parser.parse_alt(None)?;
-//RS     if parser.pos != parser.chars.len() {
-//RS         return Err(format!("invalid regex `{}`: unexpected trailing input", pattern));
-//RS     }
-//RS     let mut compiler = RegexCompiler { insts: Vec::new() };
-//RS     let frag = compiler.compile_node(&root)?;
-//RS     let match_idx = compiler.push(RegexInst::Match);
-//RS     compiler.patch(&frag.outs, match_idx);
-//RS     let insts = compiler.insts;
-//RS     Ok(JetRegex {
-//RS         pattern: std::sync::Arc::<str>::from(pattern),
-//RS         flags: flags.clone(),
-//RS         program: std::sync::Arc::new(RegexProgram {
-//RS             anchored_start: matches!(&insts[frag.start], RegexInst::AssertStart(_)),
-//RS             scratch: std::sync::Mutex::new(RegexScratch::new(insts.len())),
-//RS             insts,
-//RS             start: frag.start,
-//RS             literal: regex_literal_candidate(&root),
-//RS             prefix: regex_prefix_literal(&root),
-//RS             required_literals: regex_required_literals(&root),
-//RS         }),
-//RS         group_names: std::sync::Arc::from(parser.names.into_boxed_slice()),
-//RS         groups: parser.groups,
-//RS     })
-//RS }
-//RS 
-//RS pub fn jet_regex_is_match(pattern: &JetRegex, text: &str) -> bool {
-//RS     pattern.is_match(text)
-//RS }
-//RS 
-//RS pub fn jet_regex_full_match(pattern: &JetRegex, text: &str) -> bool {
-//RS     pattern.full_match(text)
-//RS }
-//RS 
-//RS // Core answers the emit boundary with Rust plumbing; `jet_outcome_of` at the
-//RS // call site turns it into the carrier, exactly once.
-//RS pub fn jet_regex_match(pattern: &JetRegex, text: &str) -> Option<JetRegexMatch> {
-//RS     pattern.match_value(text).ok()
-//RS }
-//RS 
-//RS pub fn jet_regex_find(pattern: &JetRegex, text: &str) -> Option<String> {
-//RS     pattern.find(text).ok()
-//RS }
-//RS 
-//RS pub fn jet_regex_find_all(pattern: &JetRegex, text: &str) -> Vec<String> {
-//RS     pattern.find_all(text)
-//RS }
-//RS 
-//RS pub fn jet_regex_matches(pattern: &JetRegex, text: &str) -> Vec<JetRegexMatch> {
-//RS     pattern.matches(text)
-//RS }
-//RS 
-//RS pub fn jet_regex_replace(
-//RS     pattern: &JetRegex,
-//RS     repl: &str,
-//RS     text: &str,
-//RS ) -> String {
-//RS     pattern.replace(text, repl)
-//RS }
-//RS 
-//RS pub fn jet_regex_replace_first(pattern: &JetRegex, repl: &str, text: &str) -> String {
-//RS     pattern.replace_first(text, repl)
-//RS }
-//RS 
-//RS pub fn jet_regex_split(pattern: &JetRegex, text: &str) -> Vec<String> {
-//RS     pattern.split(text)
-//RS }
-//RS 
-//RS pub fn jet_regex_split_limit(
-//RS     pattern: &JetRegex,
-//RS     text: &str,
-//RS     limit: i64,
-//RS ) -> Vec<String> {
-//RS     pattern.split_limit(text, limit)
-//RS }
-//RS 
-//RS struct RegexParser {
-//RS     chars: Vec<char>,
-//RS     pos: usize,
-//RS     groups: usize,
-//RS     names: Vec<Option<String>>,
-//RS }
-//RS 
-//RS impl RegexParser {
-//RS     fn parse_alt(&mut self, terminator: Option<char>) -> Result<RegexNode, String> {
-//RS         let mut arms = vec![self.parse_seq(terminator)?];
-//RS         while self.peek() == Some('|') {
-//RS             self.pos += 1;
-//RS             arms.push(self.parse_seq(terminator)?);
-//RS         }
-//RS         if let Some(end) = terminator {
-//RS             if self.peek() != Some(end) {
-//RS                 return Err(format!("invalid regex: missing `{end}`"));
-//RS             }
-//RS             self.pos += 1;
-//RS         }
-//RS         if arms.len() == 1 {
-//RS             Ok(arms.remove(0))
-//RS         } else {
-//RS             Ok(RegexNode::Alt(arms))
-//RS         }
-//RS     }
-//RS 
-//RS     fn parse_seq(&mut self, terminator: Option<char>) -> Result<RegexNode, String> {
-//RS         let mut pieces = Vec::new();
-//RS         while let Some(ch) = self.peek() {
-//RS             if Some(ch) == terminator || ch == '|' {
-//RS                 break;
-//RS             }
-//RS             let atom = self.parse_atom()?;
-//RS             let quant = self.parse_quant()?;
-//RS             pieces.push(RegexPiece { atom, quant });
-//RS         }
-//RS         Ok(RegexNode::Seq(pieces))
-//RS     }
-//RS 
-//RS     fn parse_atom(&mut self) -> Result<RegexAtom, String> {
-//RS         let Some(ch) = self.bump() else {
-//RS             return Err("invalid regex: empty atom".to_string());
-//RS         };
-//RS         match ch {
-//RS             '.' => Ok(RegexAtom::Any),
-//RS             '^' => Ok(RegexAtom::Start),
-//RS             '$' => Ok(RegexAtom::End),
-//RS             '(' => self.parse_group(),
-//RS             ')' => Err("invalid regex: unmatched `)`".to_string()),
-//RS             '[' => Ok(RegexAtom::Class(self.parse_class()?)),
-//RS             '\\' => self.parse_escape_atom(),
-//RS             '*' | '+' | '?' => Err(format!("invalid regex: `{ch}` has nothing to repeat")),
-//RS             '{' => Err("invalid regex: `{n}` has nothing to repeat".to_string()),
-//RS             other => Ok(RegexAtom::Literal(other)),
-//RS         }
-//RS     }
-//RS 
-//RS     fn parse_group(&mut self) -> Result<RegexAtom, String> {
-//RS         if self.peek() == Some('?') {
-//RS             self.pos += 1;
-//RS             return match self.bump() {
-//RS                 Some(':') => Ok(RegexAtom::Group(0, Box::new(self.parse_alt(Some(')'))?))),
-//RS                 Some('<') => {
-//RS                     let name = self.parse_group_name()?;
-//RS                     self.groups += 1;
-//RS                     let idx = self.groups;
-//RS                     self.names.push(Some(name));
-//RS                     Ok(RegexAtom::Group(idx, Box::new(self.parse_alt(Some(')'))?)))
-//RS                 }
-//RS                 Some('=') | Some('!') => {
-//RS                     Err("invalid regex: lookaround is not supported; use a linear rewrite".to_string())
-//RS                 }
-//RS                 Some(other) => Err(format!("invalid regex: unsupported group `?{other}`")),
-//RS                 None => Err("invalid regex: missing group kind after `?`".to_string()),
-//RS             };
-//RS         }
-//RS         self.groups += 1;
-//RS         let idx = self.groups;
-//RS         self.names.push(None);
-//RS         Ok(RegexAtom::Group(idx, Box::new(self.parse_alt(Some(')'))?)))
-//RS     }
-//RS 
-//RS     fn parse_group_name(&mut self) -> Result<String, String> {
-//RS         let start = self.pos;
-//RS         while self.peek().is_some_and(|ch| ch != '>') {
-//RS             self.pos += 1;
-//RS         }
-//RS         if self.bump() != Some('>') {
-//RS             return Err("invalid regex: missing `>` in named group".to_string());
-//RS         }
-//RS         let name: String = self.chars[start..self.pos - 1].iter().collect();
-//RS         if name.is_empty()
-//RS             || !name
-//RS                 .chars()
-//RS                 .all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
-//RS         {
-//RS             return Err("invalid regex: named group needs an identifier".to_string());
-//RS         }
-//RS         Ok(name)
-//RS     }
-//RS 
-//RS     fn parse_quant(&mut self) -> Result<RegexQuant, String> {
-//RS         match self.peek() {
-//RS             Some('*') => {
-//RS                 self.pos += 1;
-//RS                 Ok(RegexQuant::ZeroOrMore)
-//RS             }
-//RS             Some('+') => {
-//RS                 self.pos += 1;
-//RS                 Ok(RegexQuant::OneOrMore)
-//RS             }
-//RS             Some('?') => {
-//RS                 self.pos += 1;
-//RS                 Ok(RegexQuant::ZeroOrOne)
-//RS             }
-//RS             Some('{') => {
-//RS                 self.pos += 1;
-//RS                 let min = self.parse_number()?;
-//RS                 let max = if self.peek() == Some(',') {
-//RS                     self.pos += 1;
-//RS                     if self.peek() == Some('}') {
-//RS                         None
-//RS                     } else {
-//RS                         Some(self.parse_number()?)
-//RS                     }
-//RS                 } else {
-//RS                     Some(min)
-//RS                 };
-//RS                 if self.bump() != Some('}') {
-//RS                     return Err("invalid regex: missing `}` in quantifier".to_string());
-//RS                 }
-//RS                 if max.is_some_and(|m| m < min) {
-//RS                     return Err("invalid regex: quantifier max is below min".to_string());
-//RS                 }
-//RS                 Ok(RegexQuant::Range { min, max })
-//RS             }
-//RS             _ => Ok(RegexQuant::One),
-//RS         }
-//RS     }
-//RS 
-//RS     fn parse_class(&mut self) -> Result<RegexClass, String> {
-//RS         let negated = if self.peek() == Some('^') {
-//RS             self.pos += 1;
-//RS             true
-//RS         } else {
-//RS             false
-//RS         };
-//RS         let mut items = Vec::new();
-//RS         while let Some(ch) = self.peek() {
-//RS             if ch == ']' && !items.is_empty() {
-//RS                 self.pos += 1;
-//RS                 return Ok(RegexClass::new(negated, items));
-//RS             }
-//RS             // Standard class grammar: `]` as the FIRST member (after the
-//RS             // optional `^`) is a literal — `[^]]+` matches any run of
-//RS             // non-`]` characters, it is not an empty negated class.
-//RS             let first = if ch == ']' {
-//RS                 self.pos += 1;
-//RS                 RegexClassItem::Char(']')
-//RS             } else {
-//RS                 self.parse_class_item()?
-//RS             };
-//RS             if self.peek() == Some('-') && self.peek_n(1) != Some(']') {
-//RS                 self.pos += 1;
-//RS                 let second = self.parse_class_char()?;
-//RS                 let RegexClassItem::Char(a) = first else {
-//RS                     return Err("invalid regex: class range needs literal endpoints".to_string());
-//RS                 };
-//RS                 items.push(RegexClassItem::Range(a, second));
-//RS             } else {
-//RS                 items.push(first);
-//RS             }
-//RS         }
-//RS         Err("invalid regex: missing `]`".to_string())
-//RS     }
-//RS 
-//RS     fn parse_class_item(&mut self) -> Result<RegexClassItem, String> {
-//RS         if self.peek() == Some('\\') {
-//RS             self.pos += 1;
-//RS             return match self.bump() {
-//RS                 Some('d') => Ok(RegexClassItem::Digit),
-//RS                 Some('w') => Ok(RegexClassItem::Word),
-//RS                 Some('s') => Ok(RegexClassItem::Space),
-//RS                 Some('p') => self.parse_unicode_class(false),
-//RS                 Some('P') => Err("invalid regex: negated Unicode classes belong outside `[]` today".to_string()),
-//RS                 Some(ch) => Ok(RegexClassItem::Char(regex_escaped_literal(ch))),
-//RS                 None => Err("invalid regex: missing escape".to_string()),
-//RS             };
-//RS         }
-//RS         self.parse_class_char().map(RegexClassItem::Char)
-//RS     }
-//RS 
-//RS     fn parse_class_char(&mut self) -> Result<char, String> {
-//RS         match self.bump() {
-//RS             Some(']') | None => Err("invalid regex: missing class character".to_string()),
-//RS             Some('\\') => self
-//RS                 .bump()
-//RS                 .map(regex_escaped_literal)
-//RS                 .ok_or_else(|| "invalid regex: missing escape".to_string()),
-//RS             Some(ch) => Ok(ch),
-//RS         }
-//RS     }
-//RS 
-//RS     fn parse_escape_atom(&mut self) -> Result<RegexAtom, String> {
-//RS         match self.bump() {
-//RS             Some('d') => Ok(RegexAtom::Class(RegexClass::new(
-//RS                 false,
-//RS                 vec![RegexClassItem::Digit],
-//RS             ))),
-//RS             Some('D') => Ok(RegexAtom::Class(RegexClass::new(
-//RS                 true,
-//RS                 vec![RegexClassItem::Digit],
-//RS             ))),
-//RS             Some('w') => Ok(RegexAtom::Class(RegexClass::new(
-//RS                 false,
-//RS                 vec![RegexClassItem::Word],
-//RS             ))),
-//RS             Some('W') => Ok(RegexAtom::Class(RegexClass::new(
-//RS                 true,
-//RS                 vec![RegexClassItem::Word],
-//RS             ))),
-//RS             Some('s') => Ok(RegexAtom::Class(RegexClass::new(
-//RS                 false,
-//RS                 vec![RegexClassItem::Space],
-//RS             ))),
-//RS             Some('S') => Ok(RegexAtom::Class(RegexClass::new(
-//RS                 true,
-//RS                 vec![RegexClassItem::Space],
-//RS             ))),
-//RS             Some('p') => Ok(RegexAtom::Class(RegexClass::new(
-//RS                 false,
-//RS                 vec![self.parse_unicode_class(false)?],
-//RS             ))),
-//RS             Some('P') => Ok(RegexAtom::Class(RegexClass::new(
-//RS                 true,
-//RS                 vec![self.parse_unicode_class(true)?],
-//RS             ))),
-//RS             Some(ch) if ch.is_ascii_digit() => {
-//RS                 Err("invalid regex: backreferences are not supported; captures stay linear".to_string())
-//RS             }
-//RS             Some(ch) => Ok(RegexAtom::Literal(regex_escaped_literal(ch))),
-//RS             None => Err("invalid regex: missing escape".to_string()),
-//RS         }
-//RS     }
-//RS 
-//RS     fn parse_unicode_class(&mut self, _negated: bool) -> Result<RegexClassItem, String> {
-//RS         if self.bump() != Some('{') {
-//RS             return Err("invalid regex: Unicode class needs `{...}`".to_string());
-//RS         }
-//RS         let start = self.pos;
-//RS         while self.peek().is_some_and(|ch| ch != '}') {
-//RS             self.pos += 1;
-//RS         }
-//RS         if self.bump() != Some('}') {
-//RS             return Err("invalid regex: missing `}` in Unicode class".to_string());
-//RS         }
-//RS         let name: String = self.chars[start..self.pos - 1].iter().collect();
-//RS         match name.as_str() {
-//RS             "L" | "Letter" => Ok(RegexClassItem::UnicodeLetter),
-//RS             "N" | "Number" => Ok(RegexClassItem::UnicodeNumber),
-//RS             "Alphabetic" => Ok(RegexClassItem::UnicodeAlphabetic),
-//RS             "White_Space" | "Whitespace" => Ok(RegexClassItem::UnicodeWhitespace),
-//RS             _ => Err(format!("invalid regex: unsupported Unicode class `{name}`")),
-//RS         }
-//RS     }
-//RS 
-//RS     fn parse_number(&mut self) -> Result<usize, String> {
-//RS         let start = self.pos;
-//RS         while self.peek().is_some_and(|ch| ch.is_ascii_digit()) {
-//RS             self.pos += 1;
-//RS         }
-//RS         if self.pos == start {
-//RS             return Err("invalid regex: quantifier needs a number".to_string());
-//RS         }
-//RS         self.chars[start..self.pos]
-//RS             .iter()
-//RS             .collect::<String>()
-//RS             .parse::<usize>()
-//RS             .map_err(|_| "invalid regex: quantifier is too large".to_string())
-//RS     }
-//RS 
-//RS     fn peek(&self) -> Option<char> {
-//RS         self.chars.get(self.pos).copied()
-//RS     }
-//RS 
-//RS     fn peek_n(&self, n: usize) -> Option<char> {
-//RS         self.chars.get(self.pos + n).copied()
-//RS     }
-//RS 
-//RS     fn bump(&mut self) -> Option<char> {
-//RS         let ch = self.peek()?;
-//RS         self.pos += 1;
-//RS         Some(ch)
-//RS     }
-//RS }
-//RS 
-//RS struct RegexCompiler {
-//RS     insts: Vec<RegexInst>,
-//RS }
-//RS 
-//RS impl RegexCompiler {
-//RS     fn push(&mut self, inst: RegexInst) -> usize {
-//RS         let idx = self.insts.len();
-//RS         self.insts.push(inst);
-//RS         idx
-//RS     }
-//RS 
-//RS     fn patch(&mut self, patches: &[RegexPatch], target: usize) {
-//RS         for patch in patches {
-//RS             match *patch {
-//RS                 RegexPatch::Next(idx) => match &mut self.insts[idx] {
-//RS                     RegexInst::Consume(_, next)
-//RS                     | RegexInst::Save(_, next)
-//RS                     | RegexInst::AssertStart(next)
-//RS                     | RegexInst::AssertEnd(next) => *next = Some(target),
-//RS                     _ => {}
-//RS                 },
-//RS                 RegexPatch::SplitB(idx) => {
-//RS                     if let RegexInst::Split(_, b) = &mut self.insts[idx] {
-//RS                         *b = Some(target);
-//RS                     }
-//RS                 }
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     fn compile_node(&mut self, node: &RegexNode) -> Result<RegexFrag, String> {
-//RS         match node {
-//RS             RegexNode::Seq(pieces) => self.compile_seq(pieces),
-//RS             RegexNode::Alt(arms) => self.compile_alt(arms),
-//RS         }
-//RS     }
-//RS 
-//RS     fn compile_seq(&mut self, pieces: &[RegexPiece]) -> Result<RegexFrag, String> {
-//RS         let mut iter = pieces.iter();
-//RS         let Some(first) = iter.next() else {
-//RS             let idx = self.push(RegexInst::Save(usize::MAX, None));
-//RS             return Ok(RegexFrag {
-//RS                 start: idx,
-//RS                 outs: vec![RegexPatch::Next(idx)],
-//RS             });
-//RS         };
-//RS         let mut frag = self.compile_piece(first)?;
-//RS         for piece in iter {
-//RS             let next = self.compile_piece(piece)?;
-//RS             self.patch(&frag.outs, next.start);
-//RS             frag = RegexFrag {
-//RS                 start: frag.start,
-//RS                 outs: next.outs,
-//RS             };
-//RS         }
-//RS         Ok(frag)
-//RS     }
-//RS 
-//RS     fn compile_alt(&mut self, arms: &[RegexNode]) -> Result<RegexFrag, String> {
-//RS         if arms.is_empty() {
-//RS             return self.compile_seq(&[]);
-//RS         }
-//RS         let mut compiled = Vec::new();
-//RS         for arm in arms {
-//RS             compiled.push(self.compile_node(arm)?);
-//RS         }
-//RS         let mut frag = compiled.pop().unwrap();
-//RS         while let Some(left) = compiled.pop() {
-//RS             let split = self.push(RegexInst::Split(left.start, Some(frag.start)));
-//RS             let mut outs = left.outs;
-//RS             outs.extend(frag.outs);
-//RS             frag = RegexFrag { start: split, outs };
-//RS         }
-//RS         Ok(frag)
-//RS     }
-//RS 
-//RS     fn compile_piece(&mut self, piece: &RegexPiece) -> Result<RegexFrag, String> {
-//RS         match piece.quant {
-//RS             RegexQuant::One => self.compile_atom(&piece.atom),
-//RS             RegexQuant::ZeroOrMore => {
-//RS                 let atom = self.compile_atom(&piece.atom)?;
-//RS                 let split = self.push(RegexInst::Split(atom.start, None));
-//RS                 self.patch(&atom.outs, split);
-//RS                 Ok(RegexFrag {
-//RS                     start: split,
-//RS                     outs: vec![RegexPatch::SplitB(split)],
-//RS                 })
-//RS             }
-//RS             RegexQuant::OneOrMore => {
-//RS                 let atom = self.compile_atom(&piece.atom)?;
-//RS                 let split = self.push(RegexInst::Split(atom.start, None));
-//RS                 self.patch(&atom.outs, split);
-//RS                 Ok(RegexFrag {
-//RS                     start: atom.start,
-//RS                     outs: vec![RegexPatch::SplitB(split)],
-//RS                 })
-//RS             }
-//RS             RegexQuant::ZeroOrOne => {
-//RS                 let atom = self.compile_atom(&piece.atom)?;
-//RS                 let split = self.push(RegexInst::Split(atom.start, None));
-//RS                 let mut outs = atom.outs;
-//RS                 outs.push(RegexPatch::SplitB(split));
-//RS                 Ok(RegexFrag { start: split, outs })
-//RS             }
-//RS             RegexQuant::Range { min, max } => self.compile_range(&piece.atom, min, max),
-//RS         }
-//RS     }
-//RS 
-//RS     fn compile_range(
-//RS         &mut self,
-//RS         atom: &RegexAtom,
-//RS         min: usize,
-//RS         max: Option<usize>,
-//RS     ) -> Result<RegexFrag, String> {
-//RS         let mut frag = None;
-//RS         for _ in 0..min {
-//RS             let next = self.compile_atom(atom)?;
-//RS             if let Some(prev) = frag.take() {
-//RS                 let prev: RegexFrag = prev;
-//RS                 self.patch(&prev.outs, next.start);
-//RS                 frag = Some(RegexFrag {
-//RS                     start: prev.start,
-//RS                     outs: next.outs,
-//RS                 });
-//RS             } else {
-//RS                 frag = Some(next);
-//RS             }
-//RS         }
-//RS         let mut base = frag.unwrap_or_else(|| {
-//RS             let idx = self.push(RegexInst::Save(usize::MAX, None));
-//RS             RegexFrag {
-//RS                 start: idx,
-//RS                 outs: vec![RegexPatch::Next(idx)],
-//RS             }
-//RS         });
-//RS         match max {
-//RS             Some(m) => {
-//RS                 for _ in min..m {
-//RS                     let opt_piece = RegexPiece {
-//RS                         atom: atom.clone(),
-//RS                         quant: RegexQuant::ZeroOrOne,
-//RS                     };
-//RS                     let opt = self.compile_piece(&opt_piece)?;
-//RS                     self.patch(&base.outs, opt.start);
-//RS                     base = RegexFrag {
-//RS                         start: base.start,
-//RS                         outs: opt.outs,
-//RS                     };
-//RS                 }
-//RS                 Ok(base)
-//RS             }
-//RS             None => {
-//RS                 let star_piece = RegexPiece {
-//RS                     atom: atom.clone(),
-//RS                     quant: RegexQuant::ZeroOrMore,
-//RS                 };
-//RS                 let star = self.compile_piece(&star_piece)?;
-//RS                 self.patch(&base.outs, star.start);
-//RS                 Ok(RegexFrag {
-//RS                     start: base.start,
-//RS                     outs: star.outs,
-//RS                 })
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     fn compile_atom(&mut self, atom: &RegexAtom) -> Result<RegexFrag, String> {
-//RS         match atom {
-//RS             RegexAtom::Literal(ch) => Ok(self.consume(RegexMatcher::Literal(*ch))),
-//RS             RegexAtom::Any => Ok(self.consume(RegexMatcher::Any)),
-//RS             RegexAtom::Class(class) => Ok(self.consume(RegexMatcher::Class(class.clone()))),
-//RS             RegexAtom::Start => {
-//RS                 let idx = self.push(RegexInst::AssertStart(None));
-//RS                 Ok(RegexFrag {
-//RS                     start: idx,
-//RS                     outs: vec![RegexPatch::Next(idx)],
-//RS                 })
-//RS             }
-//RS             RegexAtom::End => {
-//RS                 let idx = self.push(RegexInst::AssertEnd(None));
-//RS                 Ok(RegexFrag {
-//RS                     start: idx,
-//RS                     outs: vec![RegexPatch::Next(idx)],
-//RS                 })
-//RS             }
-//RS             RegexAtom::Group(0, node) => self.compile_node(node),
-//RS             RegexAtom::Group(idx, node) => {
-//RS                 let start_save = self.push(RegexInst::Save(idx * 2, None));
-//RS                 let inner = self.compile_node(node)?;
-//RS                 self.patch(&[RegexPatch::Next(start_save)], inner.start);
-//RS                 let end_save = self.push(RegexInst::Save(idx * 2 + 1, None));
-//RS                 self.patch(&inner.outs, end_save);
-//RS                 Ok(RegexFrag {
-//RS                     start: start_save,
-//RS                     outs: vec![RegexPatch::Next(end_save)],
-//RS                 })
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     fn consume(&mut self, matcher: RegexMatcher) -> RegexFrag {
-//RS         let idx = self.push(RegexInst::Consume(matcher, None));
-//RS         RegexFrag {
-//RS             start: idx,
-//RS             outs: vec![RegexPatch::Next(idx)],
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn regex_matcher_matches(matcher: &RegexMatcher, ch: char, flags: &RegexFlags) -> bool {
-//RS     match matcher {
-//RS         RegexMatcher::Literal(expected) => {
-//RS             if flags.case_insensitive {
-//RS                 regex_simple_fold(*expected as u32) == regex_simple_fold(ch as u32)
-//RS             } else {
-//RS                 *expected == ch
-//RS             }
-//RS         }
-//RS         RegexMatcher::Any => flags.dotall || ch != '\n',
-//RS         RegexMatcher::Class(class) => regex_class_matches(class, ch, flags),
-//RS     }
-//RS }
-//RS 
-//RS fn regex_class_item_matches(
-//RS     item: &RegexClassItem,
-//RS     ch: char,
-//RS     case_insensitive: bool,
-//RS ) -> bool {
-//RS     match item {
-//RS         RegexClassItem::Char(c) => {
-//RS             if case_insensitive {
-//RS                 regex_simple_fold(*c as u32) == regex_simple_fold(ch as u32)
-//RS             } else {
-//RS                 *c == ch
-//RS             }
-//RS         }
-//RS         RegexClassItem::Range(a, b) => {
-//RS             if case_insensitive {
-//RS                 let lc = char::from_u32(regex_simple_fold(ch as u32)).unwrap_or(ch);
-//RS                 let la = char::from_u32(regex_simple_fold(*a as u32)).unwrap_or(*a);
-//RS                 let lb = char::from_u32(regex_simple_fold(*b as u32)).unwrap_or(*b);
-//RS                 la <= lc && lc <= lb
-//RS             } else {
-//RS                 *a <= ch && ch <= *b
-//RS             }
-//RS         }
-//RS         RegexClassItem::Digit => ch.is_ascii_digit(),
-//RS         RegexClassItem::Word => ch == '_' || ch.is_ascii_alphanumeric(),
-//RS         RegexClassItem::Space => ch.is_whitespace(),
-//RS         RegexClassItem::UnicodeLetter => ch.is_alphabetic(),
-//RS         RegexClassItem::UnicodeNumber => ch.is_numeric(),
-//RS         RegexClassItem::UnicodeAlphabetic => ch.is_alphabetic(),
-//RS         RegexClassItem::UnicodeWhitespace => ch.is_whitespace(),
-//RS     }
-//RS }
-//RS 
-//RS fn regex_class_matches(class: &RegexClass, ch: char, flags: &RegexFlags) -> bool {
-//RS     if !flags.case_insensitive && ch.is_ascii() {
-//RS         return class.matches_ascii(ch as u8);
-//RS     }
-//RS     let yes = class
-//RS         .items
-//RS         .iter()
-//RS         .any(|item| regex_class_item_matches(item, ch, flags.case_insensitive));
-//RS     if class.negated { !yes } else { yes }
-//RS }
-//RS 
-//RS fn regex_escaped_literal(ch: char) -> char {
-//RS     match ch {
-//RS         'n' => '\n',
-//RS         'r' => '\r',
-//RS         't' => '\t',
-//RS         other => other,
-//RS     }
-//RS }
-//RS 
-//RS fn regex_slots_to_spans(slots: &[Option<usize>]) -> Vec<Option<(usize, usize)>> {
-//RS     slots
-//RS         .chunks(2)
-//RS         .map(|pair| match pair {
-//RS             [Some(start), Some(end)]
-//RS                 if *end != usize::MAX && *start <= *end =>
-//RS             {
-//RS                 Some((*start, *end))
-//RS             }
-//RS             _ => None,
-//RS         })
-//RS         .collect()
-//RS }
-//RS 
-//RS fn regex_capture_slots(
-//RS     mut head: Option<usize>,
-//RS     arena: &[RegexCaptureNode],
-//RS     len: usize,
-//RS ) -> Vec<Option<usize>> {
-//RS     let mut slots = vec![None; len];
-//RS     while let Some(index) = head {
-//RS         let Some(node) = arena.get(index) else { break };
-//RS         if node.slot < len && slots[node.slot].is_none() {
-//RS             slots[node.slot] = Some(node.pos);
-//RS         }
-//RS         head = node.previous;
-//RS     }
-//RS     slots
-//RS }
-//RS 
-//RS struct RegexRun {
-//RS     span: (usize, usize),
-//RS     caps: Option<Vec<Option<usize>>>,
-//RS }
-//RS 
-//RS fn regex_has_match(
-//RS     program: &RegexProgram,
-//RS     flags: &RegexFlags,
-//RS     groups: usize,
-//RS     text: &str,
-//RS ) -> bool {
-//RS     let mut found = false;
-//RS     regex_scan(
-//RS         program,
-//RS         flags,
-//RS         groups,
-//RS         text,
-//RS         0,
-//RS         false,
-//RS         false,
-//RS         true,
-//RS         |_run| {
-//RS             found = true;
-//RS             false
-//RS         },
-//RS     );
-//RS     found
-//RS }
-//RS 
-//RS fn regex_run(
-//RS     program: &RegexProgram,
-//RS     flags: &RegexFlags,
-//RS     groups: usize,
-//RS     text: &str,
-//RS     start: usize,
-//RS     anchored: bool,
-//RS     capture: bool,
-//RS ) -> Option<RegexRun> {
-//RS     let mut result = None;
-//RS     regex_scan(
-//RS         program,
-//RS         flags,
-//RS         groups,
-//RS         text,
-//RS         start,
-//RS         anchored,
-//RS         capture,
-//RS         false,
-//RS         |run| {
-//RS             result = Some(run);
-//RS             false
-//RS         },
-//RS     );
-//RS     result
-//RS }
-//RS 
-//RS // Unanchored Thompson/Pike scan. Start threads enter one shared VM at each
-//RS // UTF-8 boundary until the leftmost match begins; then no overlapping start
-//RS // can win, so the state resets at the non-overlap boundary. The VM never
-//RS // restarts from every candidate position. Thread lists and epsilon stacks
-//RS // stay instruction-sized and reusable.
-//RS fn regex_scan<F>(
-//RS     program: &RegexProgram,
-//RS     flags: &RegexFlags,
-//RS     groups: usize,
-//RS     text: &str,
-//RS     start: usize,
-//RS     anchored: bool,
-//RS     capture: bool,
-//RS     stop_on_match: bool,
-//RS     mut on_match: F,
-//RS ) where
-//RS     F: FnMut(RegexRun) -> bool,
-//RS {
-//RS     if start > text.len() {
-//RS         return;
-//RS     }
-//RS     if !anchored && !capture && !flags.case_insensitive && groups == 0 {
-//RS         if let Some(literal) = program.literal.as_deref() {
-//RS             regex_scan_literal(text, literal, start, &mut on_match);
-//RS             return;
-//RS         }
-//RS     }
-//RS     if !flags.case_insensitive
-//RS         && !program.required_literals.is_empty()
-//RS         && !program.required_literals.iter().all(|literal| {
-//RS             regex_find_literal(text.as_bytes(), literal, start).is_some()
-//RS         })
-//RS     {
-//RS         return;
-//RS     }
-//RS 
-//RS     let mut scratch = program.scratch.lock().unwrap();
-//RS     scratch.current.clear();
-//RS     scratch.next.clear();
-//RS     scratch.capture_arena.clear();
-//RS     let prefilter = if !anchored && !flags.case_insensitive {
-//RS         program.prefix.as_deref()
-//RS     } else {
-//RS         None
-//RS     };
-//RS     let mut prefilter_pos = start;
-//RS     let mut pos = start;
-//RS     let mut winner_start = None;
-//RS     let mut last_match = None;
-//RS     let single_start = anchored || (program.anchored_start && !flags.multiline);
-//RS     loop {
-//RS         if let Some(prefix) = prefilter {
-//RS             if scratch.current.threads.is_empty()
-//RS                 && winner_start.is_none()
-//RS                 && last_match.is_none()
-//RS             {
-//RS                 let Some(candidate) =
-//RS                     regex_find_literal_boundary(text, prefix, prefilter_pos)
-//RS                 else {
-//RS                     return;
-//RS                 };
-//RS                 pos = candidate;
-//RS                 prefilter_pos =
-//RS                     regex_next_search_pos(text, candidate, candidate + prefix.len());
-//RS             }
-//RS         }
-//RS 
-//RS         let can_start = !program.anchored_start
-//RS             || flags.multiline
-//RS             || pos == 0;
-//RS         if winner_start.is_none() && can_start && (!anchored || pos == start) {
-//RS             let scratch_ref = &mut *scratch;
-//RS             let (current, capture_arena) =
-//RS                 (&mut scratch_ref.current, &mut scratch_ref.capture_arena);
-//RS             regex_add_thread(
-//RS                 current,
-//RS                 program,
-//RS                 flags,
-//RS                 RegexThread {
-//RS                     pc: program.start,
-//RS                     start: pos,
-//RS                     caps: None,
-//RS                 },
-//RS                 pos,
-//RS                 text,
-//RS                 capture,
-//RS                 capture_arena,
-//RS             );
-//RS         }
-//RS         if stop_on_match {
-//RS             if let Some(found) = scratch.current.matched {
-//RS                 let run = RegexRun {
-//RS                     span: (found.start, pos),
-//RS                     caps: None,
-//RS                 };
-//RS                 drop(scratch);
-//RS                 let _ = on_match(run);
-//RS                 return;
-//RS             }
-//RS         }
-//RS         if scratch.current.threads.is_empty() && single_start {
-//RS             return;
-//RS         }
-//RS 
-//RS         let found = scratch.current.matched;
-//RS         if winner_start.is_none() {
-//RS             winner_start = found.map(|thread| thread.start);
-//RS         }
-//RS         if let Some(winner) = winner_start {
-//RS             if let Some(found) = found.filter(|thread| thread.start == winner) {
-//RS                 let caps = if capture {
-//RS                     found.caps.map(|head| {
-//RS                         let mut caps = regex_capture_slots(
-//RS                             Some(head),
-//RS                             &scratch.capture_arena,
-//RS                             (groups + 1) * 2,
-//RS                         );
-//RS                         caps[0] = Some(found.start);
-//RS                         caps[1] = Some(pos);
-//RS                         caps
-//RS                     })
-//RS                 } else {
-//RS                     None
-//RS                 };
-//RS                 last_match = Some(RegexRun {
-//RS                     span: (found.start, pos),
-//RS                     caps,
-//RS                 });
-//RS             }
-//RS         }
-//RS 
-//RS         if pos == text.len() {
-//RS             let Some(run) = last_match.take() else {
-//RS                 return;
-//RS             };
-//RS             let resume = regex_next_search_pos(text, run.span.0, run.span.1);
-//RS             drop(scratch);
-//RS             if !on_match(run) {
-//RS                 return;
-//RS             }
-//RS             if resume > text.len() {
-//RS                 return;
-//RS             }
-//RS             scratch = program.scratch.lock().unwrap();
-//RS             scratch.current.clear();
-//RS             winner_start = None;
-//RS             last_match = None;
-//RS             prefilter_pos = resume;
-//RS             pos = resume;
-//RS             continue;
-//RS         }
-//RS         let Some((ch, next_pos)) = regex_next_char(text, pos) else {
-//RS             return;
-//RS         };
-//RS         {
-//RS             let scratch_ref = &mut *scratch;
-//RS             let (current, next, capture_arena) = (
-//RS                 &mut scratch_ref.current,
-//RS                 &mut scratch_ref.next,
-//RS                 &mut scratch_ref.capture_arena,
-//RS             );
-//RS             next.clear();
-//RS             for thread in &current.threads {
-//RS                 let RegexInst::Consume(matcher, Some(target)) = &program.insts[thread.pc]
-//RS                 else { continue };
-//RS                 if !regex_matcher_matches(matcher, ch, flags) {
-//RS                     continue;
-//RS                 };
-//RS                 if capture {
-//RS                     regex_add_thread(
-//RS                         next,
-//RS                         program,
-//RS                         flags,
-//RS                         RegexThread {
-//RS                             pc: *target,
-//RS                             start: thread.start,
-//RS                             caps: thread.caps,
-//RS                         },
-//RS                         next_pos,
-//RS                         text,
-//RS                         capture,
-//RS                         capture_arena,
-//RS                     );
-//RS                 } else {
-//RS                     regex_add_thread(
-//RS                         next,
-//RS                         program,
-//RS                         flags,
-//RS                         RegexThread {
-//RS                             pc: *target,
-//RS                             start: thread.start,
-//RS                             caps: None,
-//RS                         },
-//RS                         next_pos,
-//RS                         text,
-//RS                         capture,
-//RS                         capture_arena,
-//RS                     );
-//RS                 }
-//RS             }
-//RS             std::mem::swap(current, next);
-//RS         }
-//RS         if stop_on_match {
-//RS             if let Some(found) = scratch.current.matched {
-//RS                 let run = RegexRun {
-//RS                     span: (found.start, next_pos),
-//RS                     caps: None,
-//RS                 };
-//RS                 drop(scratch);
-//RS                 let _ = on_match(run);
-//RS                 return;
-//RS             }
-//RS         }
-//RS         if let Some(winner) = winner_start {
-//RS             if scratch.current.min_start != Some(winner) {
-//RS                 let Some(run) = last_match.take() else { return };
-//RS                 let resume = regex_next_search_pos(text, run.span.0, run.span.1);
-//RS                 drop(scratch);
-//RS                 if !on_match(run) {
-//RS                     return;
-//RS                 }
-//RS                 if resume > text.len() {
-//RS                     return;
-//RS                 }
-//RS                 scratch = program.scratch.lock().unwrap();
-//RS                 scratch.current.clear();
-//RS                 winner_start = None;
-//RS                 last_match = None;
-//RS                 prefilter_pos = resume;
-//RS                 pos = resume;
-//RS                 continue;
-//RS             }
-//RS         }
-//RS         pos = next_pos;
-//RS     }
-//RS }
-//RS 
-//RS fn regex_add_thread(
-//RS     state: &mut RegexState,
-//RS     program: &RegexProgram,
-//RS     flags: &RegexFlags,
-//RS     thread: RegexThread,
-//RS     pos: usize,
-//RS     text: &str,
-//RS     capture: bool,
-//RS     capture_arena: &mut Vec<RegexCaptureNode>,
-//RS ) {
-//RS     state.stack.clear();
-//RS     state.stack.push(thread);
-//RS     while let Some(mut thread) = state.stack.pop() {
-//RS         if state.seen[thread.pc] == state.epoch {
-//RS             continue;
-//RS         }
-//RS         state.seen[thread.pc] = state.epoch;
-//RS         match &program.insts[thread.pc] {
-//RS             RegexInst::Save(slot, Some(next)) => {
-//RS                 if capture && *slot != usize::MAX {
-//RS                     let index = capture_arena.len();
-//RS                     capture_arena.push(RegexCaptureNode {
-//RS                         slot: *slot,
-//RS                         pos,
-//RS                         previous: thread.caps,
-//RS                     });
-//RS                     thread.caps = Some(index);
-//RS                 }
-//RS                 thread.pc = *next;
-//RS                 state.stack.push(thread);
-//RS             }
-//RS             RegexInst::Split(a, Some(b)) => {
-//RS                 let mut right = thread;
-//RS                 right.pc = *b;
-//RS                 state.stack.push(right);
-//RS                 thread.pc = *a;
-//RS                 state.stack.push(thread);
-//RS             }
-//RS             RegexInst::AssertStart(Some(next)) => {
-//RS                 if pos == 0
-//RS                     || (flags.multiline && text[..pos].ends_with('\n'))
-//RS                 {
-//RS                     thread.pc = *next;
-//RS                     state.stack.push(thread);
-//RS                 }
-//RS             }
-//RS             RegexInst::AssertEnd(Some(next)) => {
-//RS                 if pos == text.len() {
-//RS                     thread.pc = *next;
-//RS                     state.stack.push(thread);
-//RS                 }
-//RS             }
-//RS             RegexInst::Match => {
-//RS                 state.min_start = Some(
-//RS                     state
-//RS                         .min_start
-//RS                         .map_or(thread.start, |start| start.min(thread.start)),
-//RS                 );
-//RS                 if state
-//RS                     .matched
-//RS                     .map_or(true, |matched| thread.start < matched.start)
-//RS                 {
-//RS                     state.matched = Some(thread);
-//RS                 }
-//RS                 state.threads.push(thread);
-//RS             }
-//RS             RegexInst::Consume(_, _) => {
-//RS                 state.min_start = Some(
-//RS                     state
-//RS                         .min_start
-//RS                         .map_or(thread.start, |start| start.min(thread.start)),
-//RS                 );
-//RS                 state.threads.push(thread);
-//RS             }
-//RS             _ => {}
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn regex_prefix_literal(node: &RegexNode) -> Option<Vec<u8>> {
-//RS     match node {
-//RS         RegexNode::Seq(pieces) => {
-//RS             let mut prefix = Vec::new();
-//RS             for piece in pieces {
-//RS                 let required = match piece.quant {
-//RS                     RegexQuant::One
-//RS                     | RegexQuant::OneOrMore
-//RS                     | RegexQuant::Range { min: 1.., .. } => true,
-//RS                     RegexQuant::ZeroOrMore
-//RS                     | RegexQuant::ZeroOrOne
-//RS                     | RegexQuant::Range { min: 0, .. } => false,
-//RS                 };
-//RS                 if !required {
-//RS                     break;
-//RS                 }
-//RS                 match &piece.atom {
-//RS                     RegexAtom::Literal(ch) => {
-//RS                         let mut bytes = [0; 4];
-//RS                         prefix.extend_from_slice(ch.encode_utf8(&mut bytes).as_bytes());
-//RS                     }
-//RS                     RegexAtom::Group(_, inner) => {
-//RS                         let Some(inner_prefix) = regex_prefix_literal(inner) else {
-//RS                             break;
-//RS                         };
-//RS                         if inner_prefix.is_empty() {
-//RS                             break;
-//RS                         }
-//RS                         prefix.extend_from_slice(&inner_prefix);
-//RS                     }
-//RS                     RegexAtom::Start => {}
-//RS                     RegexAtom::Any
-//RS                     | RegexAtom::Class(_)
-//RS                     | RegexAtom::End => break,
-//RS                 }
-//RS             }
-//RS             (!prefix.is_empty()).then_some(prefix)
-//RS         }
-//RS         RegexNode::Alt(arms) => {
-//RS             let mut arms = arms.iter();
-//RS             let mut prefix = regex_prefix_literal(arms.next()?)?;
-//RS             for arm in arms {
-//RS                 let other = regex_prefix_literal(arm)?;
-//RS                 let common = prefix
-//RS                     .iter()
-//RS                     .zip(other.iter())
-//RS                     .take_while(|(left, right)| left == right)
-//RS                     .count();
-//RS                 prefix.truncate(common);
-//RS                 if prefix.is_empty() {
-//RS                     return None;
-//RS                 }
-//RS             }
-//RS             Some(prefix)
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn regex_literal_candidate(node: &RegexNode) -> Option<Vec<u8>> {
-//RS     let RegexNode::Seq(pieces) = node else { return None };
-//RS     let mut literal = Vec::new();
-//RS     for piece in pieces {
-//RS         if !matches!(&piece.quant, RegexQuant::One) {
-//RS             return None;
-//RS         }
-//RS         match &piece.atom {
-//RS             RegexAtom::Literal(ch) => {
-//RS                 let mut bytes = [0; 4];
-//RS                 literal.extend_from_slice(ch.encode_utf8(&mut bytes).as_bytes());
-//RS             }
-//RS             RegexAtom::Group(_, inner) => literal.extend(regex_literal_candidate(inner)?),
-//RS             _ => return None,
-//RS         }
-//RS     }
-//RS     (!literal.is_empty()).then_some(literal)
-//RS }
-//RS 
-//RS fn regex_required_literals(node: &RegexNode) -> Vec<Vec<u8>> {
-//RS     let mut candidates = match node {
-//RS         RegexNode::Seq(pieces) => {
-//RS             let mut candidates = Vec::new();
-//RS             let mut run = Vec::new();
-//RS             for piece in pieces {
-//RS                 if !regex_quant_required(&piece.quant) {
-//RS                     regex_push_required_literal(&mut candidates, std::mem::take(&mut run));
-//RS                     continue;
-//RS                 }
-//RS                 match (&piece.atom, &piece.quant) {
-//RS                     (RegexAtom::Literal(ch), RegexQuant::One) => {
-//RS                         let mut bytes = [0; 4];
-//RS                         run.extend(ch.encode_utf8(&mut bytes).as_bytes());
-//RS                     }
-//RS                     (RegexAtom::Literal(ch), _) => {
-//RS                         regex_push_required_literal(&mut candidates, std::mem::take(&mut run));
-//RS                         regex_push_required_literal(&mut candidates, ch.to_string().into_bytes());
-//RS                     }
-//RS                     _ => {
-//RS                         regex_push_required_literal(&mut candidates, std::mem::take(&mut run));
-//RS                         candidates.extend(regex_required_atom_literals(&piece.atom));
-//RS                     }
-//RS                 }
-//RS             }
-//RS             regex_push_required_literal(&mut candidates, run);
-//RS             candidates
-//RS         }
-//RS         RegexNode::Alt(arms) => {
-//RS             let Some(first) = arms.first() else {
-//RS                 return Vec::new();
-//RS             };
-//RS             let mut candidates = regex_required_literals(first);
-//RS             for arm in arms.iter().skip(1) {
-//RS                 let arm_candidates = regex_required_literals(arm);
-//RS                 candidates.retain(|candidate| {
-//RS                     arm_candidates.iter().any(|other| other == candidate)
-//RS                 });
-//RS             }
-//RS             candidates
-//RS         }
-//RS     };
-//RS     candidates.sort_by(|left, right| {
-//RS         regex_required_literal_score(right)
-//RS             .cmp(&regex_required_literal_score(left))
-//RS             .then_with(|| right.len().cmp(&left.len()))
-//RS     });
-//RS     let mut unique = Vec::with_capacity(candidates.len());
-//RS     for candidate in candidates.drain(..) {
-//RS         if !unique.iter().any(|existing| existing == &candidate) {
-//RS             unique.push(candidate);
-//RS         }
-//RS     }
-//RS     unique
-//RS }
-//RS 
-//RS fn regex_required_atom_literals(atom: &RegexAtom) -> Vec<Vec<u8>> {
-//RS     match atom {
-//RS         RegexAtom::Literal(ch) => vec![ch.to_string().into_bytes()],
-//RS         RegexAtom::Group(_, node) => regex_required_literals(node),
-//RS         RegexAtom::Any
-//RS         | RegexAtom::Class(_)
-//RS         | RegexAtom::Start
-//RS         | RegexAtom::End => Vec::new(),
-//RS     }
-//RS }
-//RS 
-//RS fn regex_push_required_literal(candidates: &mut Vec<Vec<u8>>, candidate: Vec<u8>) {
-//RS     if !candidate.is_empty() {
-//RS         candidates.push(candidate);
-//RS     }
-//RS }
-//RS 
-//RS fn regex_required_literal_score(literal: &[u8]) -> usize {
-//RS     literal
-//RS         .iter()
-//RS         .map(|byte| match byte {
-//RS             b'a'..=b'z' | b'A'..=b'Z' => 3,
-//RS             b'0'..=b'9' => 2,
-//RS             b' ' | b'\t' | b'\r' | b'\n' => 0,
-//RS             _ => 1,
-//RS         })
-//RS         .sum()
-//RS }
-//RS 
-//RS fn regex_quant_required(quant: &RegexQuant) -> bool {
-//RS     !matches!(quant, RegexQuant::ZeroOrMore | RegexQuant::ZeroOrOne)
-//RS         && !matches!(quant, RegexQuant::Range { min: 0, .. })
-//RS }
-//RS 
-//RS // Required-literal prefilter. It rejects haystacks that cannot match before
-//RS // entering the VM. The VM remains the authority for non-literal programs.
-//RS fn regex_find_literal(haystack: &[u8], needle: &[u8], start: usize) -> Option<usize> {
-//RS     if needle.is_empty() {
-//RS         return Some(start.min(haystack.len()));
-//RS     }
-//RS     let last = haystack.len().checked_sub(needle.len())?;
-//RS     let first = needle[0];
-//RS     let mut pos = start.min(haystack.len());
-//RS     while pos <= last {
-//RS         let candidate = regex_find_byte(haystack, first, pos)?;
-//RS         if candidate > last {
-//RS             return None;
-//RS         }
-//RS         pos = candidate;
-//RS         if haystack[pos..].starts_with(needle) {
-//RS             return Some(pos);
-//RS         }
-//RS         pos += 1;
-//RS     }
-//RS     None
-//RS }
-//RS 
-//RS fn regex_find_literal_boundary(text: &str, needle: &[u8], start: usize) -> Option<usize> {
-//RS     let mut pos = start.min(text.len());
-//RS     loop {
-//RS         let candidate = regex_find_literal(text.as_bytes(), needle, pos)?;
-//RS         if text.is_char_boundary(candidate) {
-//RS             return Some(candidate);
-//RS         }
-//RS         pos = candidate.saturating_add(1);
-//RS     }
-//RS }
-//RS 
-//RS 
-//RS fn regex_scan_literal<F>(
-//RS     text: &str,
-//RS     needle: &[u8],
-//RS     start: usize,
-//RS     mut on_match: F,
-//RS ) where
-//RS     F: FnMut(RegexRun) -> bool,
-//RS {
-//RS     // A compiled literal is always valid UTF-8. Delegate the hot search to
-//RS     // `str::find`, whose std implementation uses its optimized memmem path;
-//RS     // unlike the byte prefilter this also guarantees UTF-8 boundary spans.
-//RS     let Ok(needle) = std::str::from_utf8(needle) else {
-//RS         return;
-//RS     };
-//RS     let mut pos = start.min(text.len());
-//RS     while let Some(offset) = text.get(pos..).and_then(|rest| rest.find(needle)) {
-//RS         let candidate = pos + offset;
-//RS         let end = candidate + needle.len();
-//RS         if !on_match(RegexRun {
-//RS             span: (candidate, end),
-//RS             caps: None,
-//RS         }) {
-//RS             return;
-//RS         }
-//RS         pos = regex_next_search_pos(text, candidate, end);
-//RS         if pos > text.len() {
-//RS             return;
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS // I1: SIMD helpers are the same vetted std::arch carve-out used by
-//RS // core.compute. Runtime dispatch keeps unsupported CPUs on scalar code.
-//RS #[derive(Clone, Copy)]
-//RS enum RegexByteBackend {
-//RS     Scalar,
-//RS     #[cfg(target_arch = "x86_64")]
-//RS     Avx2,
-//RS     #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-//RS     Sse2,
-//RS }
-//RS 
-//RS static REGEX_BYTE_BACKEND: std::sync::LazyLock<RegexByteBackend> =
-//RS     std::sync::LazyLock::new(|| {
-//RS         // JET_VETTED_UNSAFE_BEGIN: jet_regex_cpu_simd_dispatch
-//RS         #[cfg(target_arch = "x86_64")]
-//RS         if is_x86_feature_detected!("avx2") {
-//RS             return RegexByteBackend::Avx2;
-//RS         }
-//RS         #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-//RS         if is_x86_feature_detected!("sse2") {
-//RS             return RegexByteBackend::Sse2;
-//RS         }
-//RS         // JET_VETTED_UNSAFE_END: jet_regex_cpu_simd_dispatch
-//RS         RegexByteBackend::Scalar
-//RS     });
-//RS 
-//RS fn regex_find_byte(haystack: &[u8], needle: u8, start: usize) -> Option<usize> {
-//RS     match *REGEX_BYTE_BACKEND {
-//RS         // JET_VETTED_UNSAFE_BEGIN: jet_regex_cpu_simd_dispatch
-//RS         #[cfg(target_arch = "x86_64")]
-//RS         RegexByteBackend::Avx2 => unsafe { regex_find_byte_avx2(haystack, needle, start) },
-//RS         #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-//RS         RegexByteBackend::Sse2 => unsafe { regex_find_byte_sse2(haystack, needle, start) },
-//RS         // JET_VETTED_UNSAFE_END: jet_regex_cpu_simd_dispatch
-//RS         RegexByteBackend::Scalar => regex_find_byte_scalar(haystack, needle, start),
-//RS     }
-//RS }
-//RS 
-//RS fn regex_find_byte_scalar(haystack: &[u8], needle: u8, start: usize) -> Option<usize> {
-//RS     let mut pos = start.min(haystack.len());
-//RS     while pos < haystack.len() && pos % 8 != 0 {
-//RS         if haystack[pos] == needle {
-//RS             return Some(pos);
-//RS         }
-//RS         pos += 1;
-//RS     }
-//RS     let repeated = u64::from_ne_bytes([needle; 8]);
-//RS     const LOW_BITS: u64 = 0x0101_0101_0101_0101;
-//RS     const HIGH_BITS: u64 = 0x8080_8080_8080_8080;
-//RS     while haystack.len().saturating_sub(pos) >= 8 {
-//RS         let mut bytes = [0u8; 8];
-//RS         bytes.copy_from_slice(&haystack[pos..pos + 8]);
-//RS         let different = u64::from_ne_bytes(bytes) ^ repeated;
-//RS         if different.wrapping_sub(LOW_BITS) & !different & HIGH_BITS != 0 {
-//RS             for offset in 0..8 {
-//RS                 if haystack[pos + offset] == needle {
-//RS                     return Some(pos + offset);
-//RS                 }
-//RS             }
-//RS         }
-//RS         pos += 8;
-//RS     }
-//RS     haystack
-//RS         .get(pos..)?
-//RS         .iter()
-//RS         .position(|byte| *byte == needle)
-//RS         .map(|offset| pos + offset)
-//RS }
-//RS 
-//RS // JET_VETTED_UNSAFE_BEGIN: jet_regex_cpu_simd
-//RS #[cfg(target_arch = "x86_64")]
-//RS #[target_feature(enable = "avx2")]
-//RS unsafe fn regex_find_byte_avx2(
-//RS     haystack: &[u8],
-//RS     needle: u8,
-//RS     start: usize,
-//RS ) -> Option<usize> {
-//RS     use std::arch::x86_64::{
-//RS         _mm256_cmpeq_epi8, _mm256_loadu_si256, _mm256_movemask_epi8, _mm256_set1_epi8,
-//RS     };
-//RS     let mut pos = start;
-//RS     let target = _mm256_set1_epi8(needle as i8);
-//RS     while pos <= haystack.len().saturating_sub(32) {
-//RS         let chunk = _mm256_loadu_si256(haystack.as_ptr().add(pos).cast());
-//RS         let mask = _mm256_movemask_epi8(_mm256_cmpeq_epi8(chunk, target)) as u32;
-//RS         if mask != 0 {
-//RS             return Some(pos + mask.trailing_zeros() as usize);
-//RS         }
-//RS         pos += 32;
-//RS     }
-//RS     haystack
-//RS         .get(pos..)?
-//RS         .iter()
-//RS         .position(|byte| *byte == needle)
-//RS         .map(|offset| pos + offset)
-//RS }
-//RS 
-//RS #[cfg(target_arch = "x86")]
-//RS #[target_feature(enable = "avx2")]
-//RS unsafe fn regex_find_byte_avx2(
-//RS     haystack: &[u8],
-//RS     needle: u8,
-//RS     start: usize,
-//RS ) -> Option<usize> {
-//RS     use std::arch::x86::{
-//RS         _mm256_cmpeq_epi8, _mm256_loadu_si256, _mm256_movemask_epi8, _mm256_set1_epi8,
-//RS     };
-//RS     let mut pos = start;
-//RS     let target = _mm256_set1_epi8(needle as i8);
-//RS     while pos <= haystack.len().saturating_sub(32) {
-//RS         let chunk = _mm256_loadu_si256(haystack.as_ptr().add(pos).cast());
-//RS         let mask = _mm256_movemask_epi8(_mm256_cmpeq_epi8(chunk, target)) as u32;
-//RS         if mask != 0 {
-//RS             return Some(pos + mask.trailing_zeros() as usize);
-//RS         }
-//RS         pos += 32;
-//RS     }
-//RS     haystack
-//RS         .get(pos..)?
-//RS         .iter()
-//RS         .position(|byte| *byte == needle)
-//RS         .map(|offset| pos + offset)
-//RS }
-//RS 
-//RS #[cfg(target_arch = "x86_64")]
-//RS #[target_feature(enable = "sse2")]
-//RS unsafe fn regex_find_byte_sse2(
-//RS     haystack: &[u8],
-//RS     needle: u8,
-//RS     start: usize,
-//RS ) -> Option<usize> {
-//RS     use std::arch::x86_64::{
-//RS         _mm_cmpeq_epi8, _mm_loadu_si128, _mm_movemask_epi8, _mm_set1_epi8,
-//RS     };
-//RS     let mut pos = start;
-//RS     let target = _mm_set1_epi8(needle as i8);
-//RS     while pos <= haystack.len().saturating_sub(16) {
-//RS         let chunk = _mm_loadu_si128(haystack.as_ptr().add(pos).cast());
-//RS         let mask = _mm_movemask_epi8(_mm_cmpeq_epi8(chunk, target)) as u32;
-//RS         if mask != 0 {
-//RS             return Some(pos + mask.trailing_zeros() as usize);
-//RS         }
-//RS         pos += 16;
-//RS     }
-//RS     haystack
-//RS         .get(pos..)?
-//RS         .iter()
-//RS         .position(|byte| *byte == needle)
-//RS         .map(|offset| pos + offset)
-//RS }
-//RS 
-//RS #[cfg(target_arch = "x86")]
-//RS #[target_feature(enable = "sse2")]
-//RS unsafe fn regex_find_byte_sse2(
-//RS     haystack: &[u8],
-//RS     needle: u8,
-//RS     start: usize,
-//RS ) -> Option<usize> {
-//RS     use std::arch::x86::{
-//RS         _mm_cmpeq_epi8, _mm_loadu_si128, _mm_movemask_epi8, _mm_set1_epi8,
-//RS     };
-//RS     let mut pos = start;
-//RS     let target = _mm_set1_epi8(needle as i8);
-//RS     while pos <= haystack.len().saturating_sub(16) {
-//RS         let chunk = _mm_loadu_si128(haystack.as_ptr().add(pos).cast());
-//RS         let mask = _mm_movemask_epi8(_mm_cmpeq_epi8(chunk, target)) as u32;
-//RS         if mask != 0 {
-//RS             return Some(pos + mask.trailing_zeros() as usize);
-//RS         }
-//RS         pos += 16;
-//RS     }
-//RS     haystack
-//RS         .get(pos..)?
-//RS         .iter()
-//RS         .position(|byte| *byte == needle)
-//RS         .map(|offset| pos + offset)
-//RS }
-//RS // JET_VETTED_UNSAFE_END: jet_regex_cpu_simd
-//RS 
-//RS fn regex_next_search_pos(text: &str, start: usize, end: usize) -> usize {
-//RS     if end > start {
-//RS         return end;
-//RS     }
-//RS     regex_next_char(text, end)
-//RS         .map(|(_, next)| next)
-//RS         .unwrap_or(text.len() + 1)
-//RS }
-//RS 
-//RS fn regex_next_char(text: &str, pos: usize) -> Option<(char, usize)> {
-//RS     let byte = *text.as_bytes().get(pos)?;
-//RS     if byte.is_ascii() {
-//RS         return Some((byte as char, pos + 1));
-//RS     }
-//RS     text[pos..]
-//RS         .chars()
-//RS         .next()
-//RS         .map(|ch| (ch, pos + ch.len_utf8()))
-//RS }
-//RS 
-//RS fn expand_regex_replacement(repl: &str, mat: &JetRegexMatch) -> String {
-//RS     let mut out = String::with_capacity(repl.len());
-//RS     let mut chars = repl.chars().peekable();
-//RS     while let Some(ch) = chars.next() {
-//RS         if ch != '$' {
-//RS             out.push(ch);
-//RS             continue;
-//RS         }
-//RS         match chars.peek().copied() {
-//RS             Some('$') => {
-//RS                 chars.next();
-//RS                 out.push('$');
-//RS             }
-//RS             Some('{') => {
-//RS                 chars.next();
-//RS                 let mut name = String::new();
-//RS                 while let Some(c) = chars.next() {
-//RS                     if c == '}' {
-//RS                         break;
-//RS                     }
-//RS                     name.push(c);
-//RS                 }
-//RS                 if let Ok(value) = mat.name(&name) {
-//RS                     out.push_str(&value);
-//RS                 }
-//RS             }
-//RS             Some(c) if c.is_ascii_digit() => {
-//RS                 let mut idx = 0i64;
-//RS                 let mut valid = true;
-//RS                 while chars.peek().is_some_and(|c| c.is_ascii_digit()) {
-//RS                     let digit = chars.next().unwrap() as i64 - '0' as i64;
-//RS                     if let Some(next) = idx.checked_mul(10).and_then(|n| n.checked_add(digit)) {
-//RS                         idx = next;
-//RS                     } else {
-//RS                         valid = false;
-//RS                     }
-//RS                 }
-//RS                 if valid {
-//RS                     if let Ok(value) = mat.group(idx) {
-//RS                         out.push_str(&value);
-//RS                     }
-//RS                 }
-//RS             }
-//RS             _ => out.push('$'),
-//RS         }
-//RS     }
-//RS     out
-//RS }
-//RS #[cfg(test)]
-//RS mod tests {
-//RS     use super::*;
-//RS 
-//RS     #[test]
-//RS     fn cache_reuses_compiled_program() {
-//RS         let first = jet_regex_compile("__regex_cache_probe__").unwrap();
-//RS         let second = jet_regex_compile("__regex_cache_probe__").unwrap();
-//RS         assert!(std::sync::Arc::ptr_eq(&first.program, &second.program));
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn match_and_replacement_preserve_captures() {
-//RS         let regex = JetRegex::parse(r"(?<word>[A-Za-z]+)_(\d+)").unwrap();
-//RS         let Some(matched) = regex.match_value("xx Jet_2026 yy").ok() else {
-//RS             panic!("expected regex match");
-//RS         };
-//RS         assert_eq!(matched.group(0).ok().as_deref(), Some("Jet_2026"));
-//RS         assert_eq!(matched.group(1).ok().as_deref(), Some("Jet"));
-//RS         assert_eq!(matched.group(2).ok().as_deref(), Some("2026"));
-//RS         assert_eq!(matched.name("word").ok().as_deref(), Some("Jet"));
-//RS         assert_eq!(matched.start(), 3);
-//RS         assert_eq!(matched.end(), 11);
-//RS         assert_eq!(
-//RS             regex.replace("Jet_2026 Rust_2025", "${word}:$2"),
-//RS             "Jet:2026 Rust:2025"
-//RS         );
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn ascii_class_bitmap_keeps_unicode_fallback() {
-//RS         let not_close = JetRegex::parse(r"[^]]+").unwrap();
-//RS         assert_eq!(not_close.find("abc]def").ok().as_deref(), Some("abc"));
-//RS         assert_eq!(not_close.find("éx]def").ok().as_deref(), Some("éx"));
-//RS 
-//RS         let alphabetic = JetRegex::parse(r"\p{Alphabetic}+").unwrap();
-//RS         assert_eq!(alphabetic.find("123λ!").ok().as_deref(), Some("λ"));
-//RS     }
-//RS }
-// END-PORT-PENDING 0167 crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:1-2396
+use std.sync.[Arc, Mutex, LazyLock, OnceLock]
+use std.collections.VecDeque
+use core.prelude.runtime.kernel_values.JetShow
+use core.mem.runtime.portable_core.JetAbsent
+use jet_regex_syntax
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:1
+#Clone
+#Debug
+#Equatable
+pub struct RegexFlags { pub case_insensitive: Bool, pub multiline: Bool, pub dotall: Bool }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:8
+#Clone
+#Debug
+pub struct JetRegex {
+    pattern: Arc<String>
+    flags: RegexFlags
+    program: Arc<RegexProgram>
+    group_names: Arc<[String?]>
+    groups: Usize
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:17
+#Debug
+pub struct JetRegexMatch {
+    text: Arc<String>
+    span: (Usize, Usize)
+    program: Arc<RegexProgram>
+    flags: RegexFlags
+    groups: Usize
+    names: Arc<[String?]>
+    capture_cache: OnceLock<[(Usize, Usize)?]>
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:28
+#Debug
+struct RegexProgram {
+    insts: [RegexInst]
+    start: Usize
+    anchored_start: Bool
+    literal: [U8]?
+    required_literals: [[U8]]
+    prefix: [U8]?
+    // One per-regex scratch lock, as in the reference engine.
+    scratch: Mutex<RegexScratch>
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:40
+#Clone
+#Debug
+enum RegexInst {
+    Consume(RegexMatcher, Usize?)
+    Save(Usize, Usize?)
+    Split(Usize, Usize?)
+    AssertStart(Usize?)
+    AssertEnd(Usize?)
+    Match
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:50
+#Clone
+#Debug
+enum RegexMatcher { Literal(Char), Any, Class(RegexClass) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:57
+#Clone
+#Debug
+struct RegexClass { negated: Bool, items: [RegexClassItem], ascii: [U64#2] }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:63
+impl RegexClass {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:64
+    fn new(negated: Bool, items: [RegexClassItem]) -> Self {
+        ascii := [U64#2]{0, 0}
+        loop cp in U8{0}..=U8{127} {
+            if items.iter().any(fn(item) { regex_class_item_matches(item, cp as Char, false) }) {
+                ascii[(cp >> 6) as Usize] |= U64{1} << (cp & 63)
+            }
+        }
+        Self{negated: negated, items: ^items, ascii: ascii}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:78
+    fn matches_ascii(self: &Self, ch: U8) -> Bool {
+        yes :: self.ascii[(ch >> 6) as Usize] & (U64{1} << (ch & 63)) != 0
+        if self.negated { !yes } else { yes }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:85
+#Clone
+#Debug
+enum RegexClassItem {
+    Char(Char), Range(Char, Char), Digit, Word, Space,
+    UnicodeLetter, UnicodeNumber, UnicodeAlphabetic, UnicodeWhitespace
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:98
+#Clone
+#Debug
+enum RegexNode { Seq([RegexPiece]), Alt([RegexNode]) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:104
+#Clone
+#Debug
+struct RegexPiece { atom: RegexAtom, quant: RegexQuant }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:110
+#Clone
+#Debug
+enum RegexAtom {
+    Literal(Char), Any, Class(RegexClass), Group(Usize, Box<RegexNode>), Start, End
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:120
+#Clone
+#Debug
+enum RegexQuant { One, ZeroOrMore, OneOrMore, ZeroOrOne, Range{min: Usize, max: Usize?} }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:129
+#Copy
+enum RegexPatch { Next(Usize), SplitB(Usize) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:135
+struct RegexFrag { start: Usize, outs: [RegexPatch] }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:140
+#Debug
+struct RegexCaptureNode { slot: Usize, pos: Usize, previous: Usize? }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:147
+#Copy
+#Debug
+struct RegexThread { pc: Usize, start: Usize, caps: Usize? }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:154
+#Debug
+struct RegexState {
+    threads: [RegexThread]
+    seen: [U32]
+    stack: [RegexThread]
+    epoch: U32
+    min_start: Usize?
+    matched: RegexThread?
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:164
+impl RegexState {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:165
+    fn new(inst_count: Usize) -> Self {
+        seen := [U32].with_capacity(inst_count)
+        loop _ in Usize{0}..inst_count -> seen.push(U32{0})
+        Self{
+            threads: [RegexThread].with_capacity(inst_count),
+            seen: ^seen,
+            stack: [RegexThread].with_capacity(inst_count),
+            epoch: 0, min_start: None, matched: None
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:176
+    fn clear(self: &Self) -> {
+        self.threads.clear()
+        self.epoch = self.epoch.wrapping_add(1)
+        if self.epoch == 0 {
+            self.seen.fill(0)
+            self.epoch = 1
+        }
+        self.min_start = None
+        self.matched = None
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:187
+const REGEX_CACHE_LIMIT: Usize = 32
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:189
+#Debug
+struct RegexCache {
+    // Borrowed pattern lookup avoids a composite-key allocation.
+    entries: [[Arc<String>:JetRegex]#8]
+    order: VecDeque<(Usize, Arc<String>)>
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:197
+impl RegexCache {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:198
+    fn new() -> Self {
+        Self{entries: core.array.from_fn(fn(_) { [Arc<String>:JetRegex]{} }), order: VecDeque.new()}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:205
+    fn bucket(flags: &RegexFlags) -> Usize {
+        (if flags.case_insensitive { Usize{1} } else { Usize{0} })
+        | ((if flags.multiline { Usize{1} } else { Usize{0} }) << 1)
+        | ((if flags.dotall { Usize{1} } else { Usize{0} }) << 2)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:211
+    fn get(self: &Self, pattern: &String, flags: &RegexFlags) -> JetRegex? {
+        self.entries[Self.bucket(flags)].get(pattern).cloned()
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:215
+    fn insert(self: &Self, regex: JetRegex) -> {
+        bucket :: Self.bucket(&regex.flags)
+        pattern :: Arc.clone(&regex.pattern)
+        if self.entries[bucket].contains_key(pattern.as_ref()) -> return
+        self.entries[bucket].insert(Arc.clone(&pattern), ^regex)
+        self.order.push_back((bucket, ^pattern))
+        if self.order.len() > REGEX_CACHE_LIMIT {
+            if self.order.pop_front() is Val((old_bucket, old_pattern)) {
+                self.entries[old_bucket].remove(old_pattern.as_ref())
+            }
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:231
+// Cache key includes every compilation flag; split limits are execution arguments.
+// GATE #4565: kernel primitive — audited native lazy initialization and mutex.
+#Unsafe("native lazy cache initializes once and guards all mutation with a mutex")
+static REGEX_CACHE: LazyLock<Mutex<RegexCache>> = LazyLock.new(fn() { Mutex.new(RegexCache.new()) })
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:236
+fn regex_cache() -> &Mutex<RegexCache> { &REGEX_CACHE }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:241
+#Debug
+struct RegexScratch { current: RegexState, next: RegexState, capture_arena: [RegexCaptureNode] }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:249
+fn regex_outcome<T>(value: T?) -> T JetAbsent! {
+    match value { Val(v) -> Ok(^v), None -> Err(JetAbsent{}) }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:253
+fn regex_char_index(text: &String, byte: Usize) -> I64? {
+    bytes :: text.as_bytes()
+    if byte > bytes.len() -> return None
+    if byte < bytes.len() && (bytes[byte] & U8{192}) == U8{128} -> return None
+    count := Usize{0}
+    loop i in Usize{0}..byte {
+        if (bytes[i] & U8{192}) != U8{128} -> count += 1
+    }
+    I64.try_from(count).ok()
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:258
+fn regex_rebase_span(text: &String, base: Usize, span: (Usize, Usize)) -> (Usize, Usize)? {
+    start :: base.checked_add(span.0) ?? return None
+    end :: base.checked_add(span.1) ?? return None
+    bytes :: text.as_bytes()
+    if start > end || end > bytes.len() -> return None
+    if start < bytes.len() && (bytes[start] & U8{192}) == U8{128} -> return None
+    if end < bytes.len() && (bytes[end] & U8{192}) == U8{128} -> return None
+    Val((start, end))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:268
+fn regex_simple_fold(cp: U32) -> U32 {
+    Char.from_u32(cp).and_then(fn(ch) { ch.to_lowercase().next() }).map_or(cp, fn(ch) { ch as U32 })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:274
+impl RegexScratch {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:275
+    fn new(inst_count: Usize) -> Self {
+        Self{current: RegexState.new(inst_count), next: RegexState.new(inst_count), capture_arena: [RegexCaptureNode]{}}
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:284
+impl Default for RegexFlags {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:285
+    fn default() -> Self { Self{case_insensitive: false, multiline: false, dotall: false} }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:294
+impl JetShow for RegexFlags {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:295
+    fn jet_show(self: &Self) -> String {
+        s := String.new()
+        if self.case_insensitive -> s.push('i')
+        if self.multiline -> s.push('m')
+        if self.dotall -> s.push('s')
+        "RegexFlags({s})"
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:310
+impl JetShow for JetRegex {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:311
+    fn jet_show(self: &Self) -> String { "Regex({self.pattern})" }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:316
+impl JetShow for JetRegexMatch {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:317
+    fn jet_show(self: &Self) -> String { self.group(0).unwrap_or_default() }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:321
+impl Clone for JetRegexMatch {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:322
+    fn clone(self: &Self) -> Self {
+        // Cache is a hint: cloning keeps shared carriers and rematerializes lazily.
+        Self{
+            text: Arc.clone(&self.text), span: self.span,
+            program: Arc.clone(&self.program), flags: self.flags.clone(),
+            groups: self.groups, names: Arc.clone(&self.names), capture_cache: OnceLock.new()
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:339
+impl JetRegexMatch {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:340
+    pub fn group(self: &Self, n: I64) -> String JetAbsent! {
+        n :: Usize.try_from(n).ok() ?? return Err(JetAbsent{})
+        span :: self.span_for(n)
+        (start, end) :: span ?? return Err(JetAbsent{})
+        Ok(String.from_bytes(self.text.as_bytes().slice(start, end).to_vec()).expect("regex span is valid UTF-8"))
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:353
+    pub fn name(self: &Self, name: &String) -> String JetAbsent! {
+        idx :: self.names.iter().position(fn(n) { n.as_ref() == Val(name) }) ?? return Err(JetAbsent{})
+        self.group(idx as I64)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:366
+    pub fn start(self: &Self) -> I64 { self.group_start(0).unwrap_or(-1) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:370
+    pub fn end(self: &Self) -> I64 { self.group_end(0).unwrap_or(-1) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:374
+    pub fn group_start(self: &Self, n: I64) -> I64 JetAbsent! {
+        n :: Usize.try_from(n).ok() ?? return Err(JetAbsent{})
+        regex_outcome(self.span_for(n).and_then(fn(span) { regex_char_index(self.text.as_ref(), span.0) }))
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:379
+    pub fn group_end(self: &Self, n: I64) -> I64 JetAbsent! {
+        n :: Usize.try_from(n).ok() ?? return Err(JetAbsent{})
+        regex_outcome(self.span_for(n).and_then(fn(span) { regex_char_index(self.text.as_ref(), span.1) }))
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:384
+    pub fn group_count(self: &Self) -> Usize { self.groups }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:388
+    pub fn capture_names(self: &Self) -> [String?] { self.names.as_ref().to_vec() }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:393
+    pub fn named_captures(self: &Self) -> [[String]] {
+        if self.groups == 0 -> return [[String]]{}
+        spans :: self.capture_spans()
+        self.names.iter().enumerate().filter_map(fn(pair) {
+            (i, n) :: pair
+            name :: n.as_ref().cloned() ?? return None
+            (start, end) :: spans.get(i).copied().flatten() ?? return None
+            value :: String.from_bytes(self.text.as_bytes().slice(start, end).to_vec()).expect("regex span is valid UTF-8")
+            Val([name, value])
+        }).collect()
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:410
+    fn span_for(self: &Self, n: Usize) -> (Usize, Usize)? {
+        if n == 0 { Val(self.span) }
+        else if n > self.groups { None }
+        else { self.capture_spans().get(n).copied().flatten() }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:420
+    // GATE #4565: kernel primitive — audited native once initialization.
+    #Unsafe("once-locked capture snapshot is initialized exactly once under shared match queries")
+    fn capture_spans(self: &Self) -> View<(Usize, Usize)?> {
+        self.capture_cache.get_or_init(fn() {
+            if self.groups == 0 -> return [Val(self.span)]
+            base :: self.span.0
+            window :: std.str.from_utf8(self.text.as_bytes().slice(self.span.0, self.span.1)).expect("regex span is valid UTF-8")
+            regex_run(&self.program, &self.flags, self.groups, window, 0, true, true)
+                .and_then(fn(run) { run.caps })
+                .map(fn(caps) { regex_slots_to_spans(&caps) })
+                .map(fn(spans) {
+                    spans.into_iter().map(fn(span) {
+                        span.and_then(fn(span) { regex_rebase_span(self.text.as_ref(), base, span) })
+                    }).collect()
+                })
+                .unwrap_or_else(fn() { [Val(self.span)] })
+        }).as_slice()
+    }
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:451
+impl JetRegex {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:452
+    pub fn parse(pattern: &String) -> Self Err! { jet_regex_compile_with(pattern, &RegexFlags.default()) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:456
+    pub fn pattern(self: &Self) -> String { self.pattern.to_string() }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:460
+    pub fn source(self: &Self) -> String { self.pattern.to_string() }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:464
+    pub fn flags(self: &Self) -> String {
+        s := String.with_capacity(3)
+        if self.flags.case_insensitive -> s.push('i')
+        if self.flags.multiline -> s.push('m')
+        if self.flags.dotall -> s.push('s')
+        s
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:478
+    pub fn options(self: &Self) -> String { self.flags() }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:482
+    pub fn names(self: &Self) -> [String] { self.group_names.iter().filter_map(fn(n) { n.clone() }).collect() }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:486
+    pub fn count(self: &Self, text: &String) -> I64 {
+        count := Usize{0}
+        regex_scan(&self.program, &self.flags, self.groups, text, 0, false, false, false,
+            fn(_run) { count += 1; true })
+        count as I64
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:505
+    pub fn is_match(self: &Self, text: &String) -> Bool {
+        regex_has_match(&self.program, &self.flags, self.groups, text)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:509
+    pub fn full_match(self: &Self, text: &String) -> Bool {
+        regex_run(&self.program, &self.flags, self.groups, text, 0, true, false)
+            .is_some_and(fn(run) { run.span == (Usize{0}, text.as_bytes().len()) })
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:514
+    pub fn match_value(self: &Self, text: &String) -> JetRegexMatch JetAbsent! { regex_outcome(self.find_match(text)) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:518
+    pub fn find(self: &Self, text: &String) -> String JetAbsent! {
+        regex_outcome(self.find_span(text).map(fn(span) {
+            String.from_bytes(text.as_bytes().slice(span.0, span.1).to_vec()).expect("regex span is valid UTF-8")
+        }))
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:522
+    pub fn find_all(self: &Self, text: &String) -> [String] {
+        out := [String]{}
+        regex_scan(&self.program, &self.flags, self.groups, text, 0, false, false, false,
+            fn(run) {
+                (start, end) :: run.span
+                out.push(String.from_bytes(text.as_bytes().slice(start, end).to_vec()).expect("regex span is valid UTF-8"))
+                true
+            })
+        out
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:541
+    fn find_span(self: &Self, text: &String) -> (Usize, Usize)? {
+        regex_run(&self.program, &self.flags, self.groups, text, 0, false, false).map(fn(run) { run.span })
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:554
+    fn find_match(self: &Self, text: &String) -> JetRegexMatch? {
+        run :: regex_run(&self.program, &self.flags, self.groups, text, 0, false, true) ?? return None
+        shared :: Arc.from(text)
+        Val(self.make_match_with_captures(&shared, run.span, ^run.caps))
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:568
+    pub fn matches(self: &Self, text: &String) -> [JetRegexMatch] {
+        shared :: Arc.from(text)
+        out := [JetRegexMatch]{}
+        regex_scan(&self.program, &self.flags, self.groups, text, 0, false, false, false,
+            fn(run) { out.push(self.make_match(&shared, run.span)); true })
+        out
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:588
+    pub fn replace(self: &Self, text: &String, repl: &String) -> String {
+        self.replace_impl(text, fn(m) { expand_regex_replacement(repl, m) }, true)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:593
+    pub fn replace_first(self: &Self, text: &String, repl: &String) -> String {
+        self.replace_impl(text, fn(m) { expand_regex_replacement(repl, m) }, false)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:597
+    pub fn replace_all_with(self: &Self, text: &String, f: fn(JetRegexMatch) -> String) -> String {
+        self.replace_all_with_result(text, fn(m) { Ok(f(^m)) }).expect("infallible regex replacement")
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:605
+    pub fn replace_all_with_result<E>(self: &Self, text: &String, replace: fn(JetRegexMatch) -> String E!) -> String E! {
+        shared :: Arc.from(text)
+        bytes :: text.as_bytes()
+        out := [U8].with_capacity(bytes.len())
+        pos := Usize{0}
+        error := None
+        regex_scan(&self.program, &self.flags, self.groups, text, 0, false, false, false,
+            fn(run) {
+                (start, end) :: run.span
+                out.extend_from_slice(bytes.slice(pos, start))
+                found :: self.make_match_with_captures(&shared, run.span, ^run.caps)
+                match replace(^found) {
+                    Ok(value) -> { out.extend_from_slice(value.as_bytes()); pos = end; true }
+                    Err(value) -> { error = Val(^value); false }
+                }
+            })
+        if error is Val(value) -> return Err(^value)
+        out.extend_from_slice(bytes.slice(pos.min(bytes.len()), bytes.len()))
+        Ok(String.from_bytes(^out).expect("regex replacement preserves UTF-8"))
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:646
+    pub fn split(self: &Self, text: &String) -> [String] { self.split_limit(text, 0) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:650
+    pub fn split_limit(self: &Self, text: &String, limit: I64) -> [String] {
+        out := [String]{}
+        bytes :: text.as_bytes()
+        pos := Usize{0}
+        splits := I64{0}
+        if limit != 1 {
+            regex_scan(&self.program, &self.flags, self.groups, text, 0, false, false, false,
+                fn(run) {
+                    if limit > 0 && splits >= limit - 1 -> return false
+                    (start, end) :: run.span
+                    out.push(String.from_bytes(bytes.slice(pos, start).to_vec()).expect("regex split preserves UTF-8"))
+                    // Zero-width delimiters retain each intervening character once.
+                    pos = end
+                    splits += 1
+                    true
+                })
+        }
+        out.push(String.from_bytes(bytes.slice(pos.min(bytes.len()), bytes.len()).to_vec()).expect("regex split preserves UTF-8"))
+        out
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:683
+    fn replace_impl(self: &Self, text: &String, repl: fn(&JetRegexMatch) -> String, all: Bool) -> String {
+        shared :: Arc.from(text)
+        bytes :: text.as_bytes()
+        out := [U8].with_capacity(bytes.len())
+        pos := Usize{0}
+        regex_scan(&self.program, &self.flags, self.groups, text, 0, false, false, false,
+            fn(run) {
+                (start, end) :: run.span
+                out.extend_from_slice(bytes.slice(pos, start))
+                mat :: self.make_match(&shared, run.span)
+                out.extend_from_slice(repl(&mat).as_bytes())
+                pos = end
+                all
+            })
+        out.extend_from_slice(bytes.slice(pos.min(bytes.len()), bytes.len()))
+        String.from_bytes(^out).expect("regex replacement preserves UTF-8")
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:712
+    fn make_match(self: &Self, text: &Arc<String>, span: (Usize, Usize)) -> JetRegexMatch {
+        self.make_match_with_captures(text, span, None)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:720
+    // GATE #4565: kernel primitive — audited native once initialization.
+    #Unsafe("initialize immutable capture cache before publishing shared match")
+    fn make_match_with_captures(self: &Self, text: &Arc<String>, span: (Usize, Usize), caps: [Usize?]?) -> JetRegexMatch {
+        capture_cache :: OnceLock.new()
+        if caps is Val(caps) { _ :: capture_cache.set(regex_slots_to_spans(&caps)) }
+        JetRegexMatch{
+            text: Arc.clone(text), span: span, program: Arc.clone(&self.program),
+            flags: self.flags.clone(), groups: self.groups,
+            names: Arc.clone(&self.group_names), capture_cache: ^capture_cache
+        }
+    }
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:742
+pub fn jet_regex_flags(case_insensitive: Bool, multiline: Bool, dotall: Bool) -> RegexFlags {
+    RegexFlags{case_insensitive: case_insensitive, multiline: multiline, dotall: dotall}
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:755
+pub fn jet_regex_escape(text: &String) -> String {
+    out := String.with_capacity(text.as_bytes().len())
+    loop ch in text.chars() {
+        match ch {
+            '\\' | '.' | '+' | '*' | '?' | '(' | ')' | '[' | ']' | '{' | '}' | '^' | '$' | '|' -> out.push('\\')
+            _ -> {}
+        }
+        out.push(ch)
+    }
+    out
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:769
+pub fn jet_regex_compile(pattern: &String) -> JetRegex Err! { jet_regex_compile_with(pattern, &RegexFlags.default()) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:772
+pub fn jet_string_matches(text: &String, pattern: &String) -> Bool Err! {
+    regex :: jet_regex_compile(pattern)?
+    Ok(regex.is_match(text))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:777
+pub fn jet_string_match(text: &String, pattern: &String) -> (String JetAbsent!) Err! {
+    regex :: jet_regex_compile(pattern)?
+    Ok(regex.find(text))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:785
+pub fn jet_regex_literal(pattern: &String) -> JetRegex {
+    match jet_regex_compile(pattern) {
+        Ok(regex) -> ^regex
+        Err(error) -> panic("sema accepted an invalid Regex literal: {error}")
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:792
+// GATE #4565: kernel primitive — audited native mutex and poison recovery.
+#Unsafe("cache locks are scoped and recovered from poison without losing compiled programs")
+pub fn jet_regex_compile_with(pattern: &String, flags: &RegexFlags) -> JetRegex Err! {
+    {
+        cache :: regex_cache().lock().unwrap_or_else(fn(poisoned) { poisoned.into_inner() })
+        if cache.get(pattern, flags) is Val(regex) -> return Ok(^regex)
+    }
+    // Do not hold the global lock while compiling. Concurrent misses converge
+    // on the first program published for the exact key.
+    regex :: jet_regex_compile_uncached(pattern, flags)?
+    cache := regex_cache().lock().unwrap_or_else(fn(poisoned) { poisoned.into_inner() })
+    if cache.get(pattern, flags) is Val(existing) -> return Ok(^existing)
+    cache.insert(regex.clone())
+    Ok(^regex)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:814
+// GATE #4565: kernel primitive — audited native program scratch mutex.
+#Unsafe("compile program with one native mutex protecting reusable scratch")
+fn jet_regex_compile_uncached(pattern: &String, flags: &RegexFlags) -> JetRegex Err! {
+    jet_regex_syntax.validate(pattern).map_err(fn(error) {
+        "invalid regex `{pattern}` at position {error.offset}: {error.reason}"
+    })?
+    parser := RegexParser{chars: pattern.chars().collect(), pos: 0, groups: 0, names: [None]}
+    root :: parser.parse_alt(None)?
+    if parser.pos != parser.chars.len() -> return Err("invalid regex `{pattern}`: unexpected trailing input")
+    compiler := RegexCompiler{insts: [RegexInst]{}}
+    frag :: compiler.compile_node(&root)?
+    match_idx :: compiler.push(.Match)
+    compiler.patch(&frag.outs, match_idx)
+    insts :: ^compiler.insts
+    Ok(JetRegex{
+        pattern: Arc.from(pattern), flags: flags.clone(),
+        program: Arc.new(RegexProgram{
+            anchored_start: insts[frag.start] is .AssertStart(_),
+            scratch: Mutex.new(RegexScratch.new(insts.len())),
+            insts: ^insts, start: frag.start,
+            literal: regex_literal_candidate(&root), prefix: regex_prefix_literal(&root),
+            required_literals: regex_required_literals(&root)
+        }),
+        group_names: Arc.from(parser.names.into_boxed_slice()), groups: parser.groups
+    })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:853
+pub fn jet_regex_is_match(pattern: &JetRegex, text: &String) -> Bool { pattern.is_match(text) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:857
+pub fn jet_regex_full_match(pattern: &JetRegex, text: &String) -> Bool { pattern.full_match(text) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:863
+pub fn jet_regex_match(pattern: &JetRegex, text: &String) -> JetRegexMatch? { pattern.match_value(text).ok() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:867
+pub fn jet_regex_find(pattern: &JetRegex, text: &String) -> String? { pattern.find(text).ok() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:871
+pub fn jet_regex_find_all(pattern: &JetRegex, text: &String) -> [String] { pattern.find_all(text) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:875
+pub fn jet_regex_matches(pattern: &JetRegex, text: &String) -> [JetRegexMatch] { pattern.matches(text) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:879
+pub fn jet_regex_replace(pattern: &JetRegex, repl: &String, text: &String) -> String { pattern.replace(text, repl) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:887
+pub fn jet_regex_replace_first(pattern: &JetRegex, repl: &String, text: &String) -> String { pattern.replace_first(text, repl) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:891
+pub fn jet_regex_split(pattern: &JetRegex, text: &String) -> [String] { pattern.split(text) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:895
+pub fn jet_regex_split_limit(pattern: &JetRegex, text: &String, limit: I64) -> [String] { pattern.split_limit(text, limit) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:903
+struct RegexParser { chars: [Char], pos: Usize, groups: Usize, names: [String?] }
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:910
+impl RegexParser {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:911
+    fn parse_alt(self: &Self, terminator: Char?) -> RegexNode Err! {
+        arms := [self.parse_seq(terminator)?]
+        loop self.peek() == Val('|') {
+            self.pos += 1
+            arms.push(self.parse_seq(terminator)?)
+        }
+        if terminator is Val(end) {
+            if self.peek() != Val(end) -> return Err("invalid regex: missing `{end}`")
+            self.pos += 1
+        }
+        if arms.len() == 1 { Ok(arms.remove(0)) } else { Ok(.Alt(^arms)) }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:930
+    fn parse_seq(self: &Self, terminator: Char?) -> RegexNode Err! {
+        pieces := [RegexPiece]{}
+        loop {
+            ch :: self.peek() ?? break
+            if Val(ch) == terminator || ch == '|' -> break
+            atom :: self.parse_atom()?
+            quant :: self.parse_quant()?
+            pieces.push(RegexPiece{atom: ^atom, quant: ^quant})
+        }
+        Ok(.Seq(^pieces))
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:943
+    fn parse_atom(self: &Self) -> RegexAtom Err! {
+        ch :: self.bump() ?? return Err("invalid regex: empty atom")
+        match ch {
+            '.' -> Ok(.Any)
+            '^' -> Ok(.Start)
+            '$' -> Ok(.End)
+            '(' -> self.parse_group()
+            ')' -> Err("invalid regex: unmatched `)`")
+            '[' -> Ok(.Class(self.parse_class()?))
+            '\\' -> self.parse_escape_atom()
+            '*' | '+' | '?' -> Err("invalid regex: `{ch}` has nothing to repeat")
+            '{' -> Err("invalid regex: `{{n}}` has nothing to repeat")
+            other -> Ok(.Literal(other))
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:961
+    fn parse_group(self: &Self) -> RegexAtom Err! {
+        if self.peek() == Val('?') {
+            self.pos += 1
+            return match self.bump() {
+                Val(':') -> Ok(.Group(0, Box.new(self.parse_alt(Val(')'))?)))
+                Val('<') -> {
+                    name :: self.parse_group_name()?
+                    self.groups += 1
+                    idx :: self.groups
+                    self.names.push(Val(^name))
+                    Ok(.Group(idx, Box.new(self.parse_alt(Val(')'))?)))
+                }
+                Val('=') | Val('!') -> Err("invalid regex: lookaround is not supported; use a linear rewrite")
+                Val(other) -> Err("invalid regex: unsupported group `?{other}`")
+                None -> Err("invalid regex: missing group kind after `?`")
+            }
+        }
+        self.groups += 1
+        idx :: self.groups
+        self.names.push(None)
+        Ok(.Group(idx, Box.new(self.parse_alt(Val(')'))?)))
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:986
+    fn parse_group_name(self: &Self) -> String Err! {
+        start :: self.pos
+        loop self.peek().is_some_and(fn(ch) { ch != '>' }) -> self.pos += 1
+        if self.bump() != Val('>') -> return Err("invalid regex: missing `>` in named group")
+        name: String :: self.chars.slice(start, self.pos - 1).iter().collect()
+        if name.is_empty() || !name.chars().all(fn(ch) { ch == '_' || ch.is_ascii_alphanumeric() }) {
+            return Err("invalid regex: named group needs an identifier")
+        }
+        Ok(^name)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:1005
+    fn parse_quant(self: &Self) -> RegexQuant Err! {
+        match self.peek() {
+            Val('*') -> { self.pos += 1; Ok(.ZeroOrMore) }
+            Val('+') -> { self.pos += 1; Ok(.OneOrMore) }
+            Val('?') -> { self.pos += 1; Ok(.ZeroOrOne) }
+            Val('{') -> {
+                self.pos += 1
+                min :: self.parse_number()?
+                max :: if self.peek() == Val(',') {
+                    self.pos += 1
+                    if self.peek() == Val('}') { None } else { Val(self.parse_number()?) }
+                } else { Val(min) }
+                if self.bump() != Val('}') -> return Err("invalid regex: missing `}}` in quantifier")
+                if max.is_some_and(fn(m) { m < min }) -> return Err("invalid regex: quantifier max is below min")
+                Ok(.Range{min: min, max: max})
+            }
+            _ -> Ok(.One)
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:1044
+    fn parse_class(self: &Self) -> RegexClass Err! {
+        negated :: if self.peek() == Val('^') { self.pos += 1; true } else { false }
+        items := [RegexClassItem]{}
+        loop {
+            ch :: self.peek() ?? break
+            if ch == ']' && !items.is_empty() {
+                self.pos += 1
+                return Ok(RegexClass.new(negated, ^items))
+            }
+            // A first closing bracket after optional ^ is a literal member.
+            first :: if ch == ']' { self.pos += 1; RegexClassItem.Char(']') } else { self.parse_class_item()? }
+            if self.peek() == Val('-') && self.peek_n(1) != Val(']') {
+                self.pos += 1
+                second :: self.parse_class_char()?
+                match first {
+                    .Char(a) -> items.push(.Range(a, second))
+                    _ -> return Err("invalid regex: class range needs literal endpoints")
+                }
+            } else { items.push(^first) }
+        }
+        Err("invalid regex: missing `]`")
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:1080
+    fn parse_class_item(self: &Self) -> RegexClassItem Err! {
+        if self.peek() == Val('\\') {
+            self.pos += 1
+            return match self.bump() {
+                Val('d') -> Ok(.Digit)
+                Val('w') -> Ok(.Word)
+                Val('s') -> Ok(.Space)
+                Val('p') -> self.parse_unicode_class(false)
+                Val('P') -> Err("invalid regex: negated Unicode classes belong outside `[]` today")
+                Val(ch) -> Ok(.Char(regex_escaped_literal(ch)))
+                None -> Err("invalid regex: missing escape")
+            }
+        }
+        self.parse_class_char().map(fn(ch) { RegexClassItem.Char(ch) })
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:1096
+    fn parse_class_char(self: &Self) -> Char Err! {
+        match self.bump() {
+            Val(']') | None -> Err("invalid regex: missing class character")
+            Val('\\') -> regex_outcome(self.bump().map(regex_escaped_literal)).map_err(fn(_) { "invalid regex: missing escape" })
+            Val(ch) -> Ok(ch)
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:1107
+    fn parse_escape_atom(self: &Self) -> RegexAtom Err! {
+        match self.bump() {
+            Val('d') -> Ok(.Class(RegexClass.new(false, [RegexClassItem.Digit])))
+            Val('D') -> Ok(.Class(RegexClass.new(true, [RegexClassItem.Digit])))
+            Val('w') -> Ok(.Class(RegexClass.new(false, [RegexClassItem.Word])))
+            Val('W') -> Ok(.Class(RegexClass.new(true, [RegexClassItem.Word])))
+            Val('s') -> Ok(.Class(RegexClass.new(false, [RegexClassItem.Space])))
+            Val('S') -> Ok(.Class(RegexClass.new(true, [RegexClassItem.Space])))
+            Val('p') -> Ok(.Class(RegexClass.new(false, [self.parse_unicode_class(false)?])))
+            Val('P') -> Ok(.Class(RegexClass.new(true, [self.parse_unicode_class(true)?])))
+            Val(ch) if ch.is_ascii_digit() -> Err("invalid regex: backreferences are not supported; captures stay linear")
+            Val(ch) -> Ok(.Literal(regex_escaped_literal(ch)))
+            None -> Err("invalid regex: missing escape")
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:1149
+    fn parse_unicode_class(self: &Self, _negated: Bool) -> RegexClassItem Err! {
+        if self.bump() != Val('{') -> return Err("invalid regex: Unicode class needs `{{...}}`")
+        start :: self.pos
+        loop self.peek().is_some_and(fn(ch) { ch != '}' }) -> self.pos += 1
+        if self.bump() != Val('}') -> return Err("invalid regex: missing `}}` in Unicode class")
+        name: String :: self.chars.slice(start, self.pos - 1).iter().collect()
+        match name {
+            "L" | "Letter" -> Ok(.UnicodeLetter)
+            "N" | "Number" -> Ok(.UnicodeNumber)
+            "Alphabetic" -> Ok(.UnicodeAlphabetic)
+            "White_Space" | "Whitespace" -> Ok(.UnicodeWhitespace)
+            _ -> Err("invalid regex: unsupported Unicode class `{name}`")
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:1170
+    fn parse_number(self: &Self) -> Usize Err! {
+        start :: self.pos
+        loop self.peek().is_some_and(fn(ch) { ch.is_ascii_digit() }) -> self.pos += 1
+        if self.pos == start -> return Err("invalid regex: quantifier needs a number")
+        text: String :: self.chars.slice(start, self.pos).iter().collect()
+        text.parse<Usize>().map_err(fn(_) { "invalid regex: quantifier is too large" })
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:1185
+    fn peek(self: &Self) -> Char? { self.chars.get(self.pos).copied() }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:1189
+    fn peek_n(self: &Self, n: Usize) -> Char? { self.chars.get(self.pos + n).copied() }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:1193
+    fn bump(self: &Self) -> Char? {
+        ch :: self.peek() ?? return None
+        self.pos += 1
+        Val(ch)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:1200
+struct RegexCompiler { insts: [RegexInst] }
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:1204
+impl RegexCompiler {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:1205
+    fn push(self: &Self, inst: RegexInst) -> Usize {
+        idx :: self.insts.len()
+        self.insts.push(^inst)
+        idx
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:1211
+    fn patch(self: &Self, patches: View<RegexPatch>, target: Usize) -> {
+        loop patch in patches {
+            match patch {
+                .Next(idx) -> {
+                    match &self.insts[idx] {
+                        .Consume(_, next) | .Save(_, next) | .AssertStart(next) | .AssertEnd(next) -> next = Val(target)
+                        _ -> {}
+                    }
+                }
+                .SplitB(idx) -> {
+                    if &self.insts[idx] is .Split(_, b) -> b = Val(target)
+                }
+            }
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:1230
+    fn compile_node(self: &Self, node: &RegexNode) -> RegexFrag Err! {
+        match node { .Seq(pieces) -> self.compile_seq(pieces), .Alt(arms) -> self.compile_alt(arms) }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:1237
+    fn compile_seq(self: &Self, pieces: View<RegexPiece>) -> RegexFrag Err! {
+        iter := pieces.iter()
+        first :: iter.next() ?? {
+            idx :: self.push(.Save(Usize.MAX, None))
+            return Ok(RegexFrag{start: idx, outs: [RegexPatch.Next(idx)]})
+        }
+        frag := self.compile_piece(first)?
+        loop piece in iter {
+            next :: self.compile_piece(piece)?
+            self.patch(&frag.outs, next.start)
+            frag = RegexFrag{start: frag.start, outs: ^next.outs}
+        }
+        Ok(^frag)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:1258
+    fn compile_alt(self: &Self, arms: View<RegexNode>) -> RegexFrag Err! {
+        if arms.is_empty() -> return self.compile_seq(&[RegexPiece]{})
+        compiled := [RegexFrag]{}
+        loop arm in arms -> compiled.push(self.compile_node(arm)?)
+        frag := compiled.pop().unwrap()
+        loop {
+            left :: compiled.pop() ?? break
+            split :: self.push(.Split(left.start, Val(frag.start)))
+            outs := ^left.outs
+            outs.extend(^frag.outs)
+            frag = RegexFrag{start: split, outs: ^outs}
+        }
+        Ok(^frag)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:1276
+    fn compile_piece(self: &Self, piece: &RegexPiece) -> RegexFrag Err! {
+        match piece.quant {
+            .One -> self.compile_atom(&piece.atom)
+            .ZeroOrMore -> {
+                atom :: self.compile_atom(&piece.atom)?
+                split :: self.push(.Split(atom.start, None))
+                self.patch(&atom.outs, split)
+                Ok(RegexFrag{start: split, outs: [RegexPatch.SplitB(split)]})
+            }
+            .OneOrMore -> {
+                atom :: self.compile_atom(&piece.atom)?
+                split :: self.push(.Split(atom.start, None))
+                self.patch(&atom.outs, split)
+                Ok(RegexFrag{start: atom.start, outs: [RegexPatch.SplitB(split)]})
+            }
+            .ZeroOrOne -> {
+                atom :: self.compile_atom(&piece.atom)?
+                split :: self.push(.Split(atom.start, None))
+                outs := ^atom.outs
+                outs.push(.SplitB(split))
+                Ok(RegexFrag{start: split, outs: ^outs})
+            }
+            .Range{min, max} -> self.compile_range(&piece.atom, min, max)
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:1308
+    fn compile_range(self: &Self, atom: &RegexAtom, min: Usize, max: Usize?) -> RegexFrag Err! {
+        frag := None
+        loop _ in Usize{0}..min {
+            next :: self.compile_atom(atom)?
+            if frag.take() is Val(prev) {
+                self.patch(&prev.outs, next.start)
+                frag = Val(RegexFrag{start: prev.start, outs: ^next.outs})
+            } else { frag = Val(^next) }
+        }
+        base := frag.unwrap_or_else(fn() {
+            idx :: self.push(.Save(Usize.MAX, None))
+            RegexFrag{start: idx, outs: [RegexPatch.Next(idx)]}
+        })
+        match max {
+            Val(m) -> {
+                loop _ in min..m {
+                    opt_piece :: RegexPiece{atom: atom.clone(), quant: .ZeroOrOne}
+                    opt :: self.compile_piece(&opt_piece)?
+                    self.patch(&base.outs, opt.start)
+                    base = RegexFrag{start: base.start, outs: ^opt.outs}
+                }
+                Ok(^base)
+            }
+            None -> {
+                star_piece :: RegexPiece{atom: atom.clone(), quant: .ZeroOrMore}
+                star :: self.compile_piece(&star_piece)?
+                self.patch(&base.outs, star.start)
+                Ok(RegexFrag{start: base.start, outs: ^star.outs})
+            }
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:1366
+    fn compile_atom(self: &Self, atom: &RegexAtom) -> RegexFrag Err! {
+        match atom {
+            .Literal(ch) -> Ok(self.consume(.Literal(ch)))
+            .Any -> Ok(self.consume(.Any))
+            .Class(class) -> Ok(self.consume(.Class(class.clone())))
+            .Start -> {
+                idx :: self.push(.AssertStart(None))
+                Ok(RegexFrag{start: idx, outs: [RegexPatch.Next(idx)]})
+            }
+            .End -> {
+                idx :: self.push(.AssertEnd(None))
+                Ok(RegexFrag{start: idx, outs: [RegexPatch.Next(idx)]})
+            }
+            .Group(0, node) -> self.compile_node(node)
+            .Group(idx, node) -> {
+                start_save :: self.push(.Save(idx * 2, None))
+                inner :: self.compile_node(node)?
+                self.patch(&[RegexPatch.Next(start_save)], inner.start)
+                end_save :: self.push(.Save(idx * 2 + 1, None))
+                self.patch(&inner.outs, end_save)
+                Ok(RegexFrag{start: start_save, outs: [RegexPatch.Next(end_save)]})
+            }
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:1400
+    fn consume(self: &Self, matcher: RegexMatcher) -> RegexFrag {
+        idx :: self.push(.Consume(^matcher, None))
+        RegexFrag{start: idx, outs: [RegexPatch.Next(idx)]}
+    }
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:1409
+fn regex_matcher_matches(matcher: &RegexMatcher, ch: Char, flags: &RegexFlags) -> Bool {
+    match matcher {
+        .Literal(expected) -> {
+            if flags.case_insensitive { regex_simple_fold(expected as U32) == regex_simple_fold(ch as U32) }
+            else { expected == ch }
+        }
+        .Any -> flags.dotall || ch != '\n'
+        .Class(class) -> regex_class_matches(class, ch, flags)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:1423
+fn regex_class_item_matches(item: &RegexClassItem, ch: Char, case_insensitive: Bool) -> Bool {
+    match item {
+        .Char(c) -> {
+            if case_insensitive { regex_simple_fold(c as U32) == regex_simple_fold(ch as U32) }
+            else { c == ch }
+        }
+        .Range(a, b) -> {
+            if case_insensitive {
+                lc :: Char.from_u32(regex_simple_fold(ch as U32)).unwrap_or(ch)
+                la :: Char.from_u32(regex_simple_fold(a as U32)).unwrap_or(a)
+                lb :: Char.from_u32(regex_simple_fold(b as U32)).unwrap_or(b)
+                la <= lc && lc <= lb
+            } else { a <= ch && ch <= b }
+        }
+        .Digit -> ch.is_ascii_digit()
+        .Word -> ch == '_' || ch.is_ascii_alphanumeric()
+        .Space -> ch.is_whitespace()
+        .UnicodeLetter -> ch.is_alphabetic()
+        .UnicodeNumber -> ch.is_numeric()
+        .UnicodeAlphabetic -> ch.is_alphabetic()
+        .UnicodeWhitespace -> ch.is_whitespace()
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:1456
+fn regex_class_matches(class: &RegexClass, ch: Char, flags: &RegexFlags) -> Bool {
+    if !flags.case_insensitive && ch.is_ascii() -> return class.matches_ascii(ch as U8)
+    yes :: class.items.iter().any(fn(item) { regex_class_item_matches(item, ch, flags.case_insensitive) })
+    if class.negated { !yes } else { yes }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:1467
+fn regex_escaped_literal(ch: Char) -> Char {
+    match ch { 'n' -> '\n', 'r' -> '\r', 't' -> '\t', other -> other }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:1476
+fn regex_slots_to_spans(slots: View<Usize?>) -> [(Usize, Usize)?] {
+    slots.chunks(2).map(fn(pair) {
+        match pair {
+            [Val(start), Val(end)] if end != Usize.MAX && start <= end -> Val((start, end))
+            _ -> None
+        }
+    }).collect()
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:1490
+fn regex_capture_slots(head: Usize?, arena: View<RegexCaptureNode>, len: Usize) -> [Usize?] {
+    slots := [Usize?].with_capacity(len)
+    loop _ in Usize{0}..len -> slots.push(None)
+    head := head
+    loop {
+        index :: head ?? break
+        node :: arena.get(index) ?? break
+        if node.slot < len && slots[node.slot].is_none() -> slots[node.slot] = Val(node.pos)
+        head = node.previous
+    }
+    slots
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:1506
+struct RegexRun { span: (Usize, Usize), caps: [Usize?]? }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:1511
+fn regex_has_match(program: &RegexProgram, flags: &RegexFlags, groups: Usize, text: &String) -> Bool {
+    found := false
+    regex_scan(program, flags, groups, text, 0, false, false, true,
+        fn(_run) { found = true; false })
+    found
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:1535
+fn regex_run(program: &RegexProgram, flags: &RegexFlags, groups: Usize, text: &String, start: Usize, anchored: Bool, capture: Bool) -> RegexRun? {
+    result := None
+    regex_scan(program, flags, groups, text, start, anchored, capture, false,
+        fn(run) { result = Val(^run); false })
+    result
+}
+
+// Unanchored Thompson/Pike scan: reusable instruction-sized thread lists,
+// one shared VM for all UTF-8 starts, resetting only at non-overlap boundaries.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:1567
+// GATE #4565: kernel primitive
+#Unsafe("scratch mutex guards the VM; release it before invoking callbacks and reacquire before reuse")
+fn regex_scan(program: &RegexProgram, flags: &RegexFlags, groups: Usize, text: &String, start: Usize, anchored: Bool, capture: Bool, stop_on_match: Bool, on_match: fn(RegexRun) -> Bool) -> {
+    if start > text.len() -> return
+    if !anchored && !capture && !flags.case_insensitive && groups == 0 {
+        if program.literal.as_deref() is Val(literal) {
+            regex_scan_literal(text, literal, start, on_match)
+            return
+        }
+    }
+    if !flags.case_insensitive && !program.required_literals.is_empty()
+        && !program.required_literals.iter().all(fn(literal) {
+            regex_find_literal(text.as_bytes(), literal, start).is_some()
+        }) -> return
+    scratch := program.scratch.lock().unwrap()
+    scratch.current.clear()
+    scratch.next.clear()
+    scratch.capture_arena.clear()
+    prefilter :: if !anchored && !flags.case_insensitive { program.prefix.as_deref() } else { None }
+    prefilter_pos := start
+    pos := start
+    winner_start: Usize? := None
+    last_match: RegexRun? := None
+    single_start :: anchored || (program.anchored_start && !flags.multiline)
+    loop {
+        if prefilter is Val(prefix) {
+            if scratch.current.threads.is_empty() && winner_start.is_none() && last_match.is_none() {
+                candidate :: regex_find_literal_boundary(text, prefix, prefilter_pos) ?? return
+                pos = candidate
+                prefilter_pos = regex_next_search_pos(text, candidate, candidate + prefix.len())
+            }
+        }
+        can_start :: !program.anchored_start || flags.multiline || pos == 0
+        if winner_start.is_none() && can_start && (!anchored || pos == start) {
+            regex_add_thread(&scratch.current, program, flags,
+                RegexThread{pc: program.start, start: pos, caps: None},
+                pos, text, capture, &scratch.capture_arena)
+        }
+        if stop_on_match {
+            if scratch.current.matched is Val(found) {
+                run :: RegexRun{span: (found.start, pos), caps: None}
+                drop(^scratch)
+                _ :: on_match(^run)
+                return
+            }
+        }
+        if scratch.current.threads.is_empty() && single_start -> return
+        found :: scratch.current.matched
+        if winner_start.is_none() -> winner_start = found.map(fn(thread) { thread.start })
+        if winner_start is Val(winner) {
+            if found.filter(fn(thread) { thread.start == winner }) is Val(found) {
+                caps :: if capture {
+                    found.caps.map(fn(head) {
+                        caps := regex_capture_slots(Val(head), &scratch.capture_arena, (groups + 1) * 2)
+                        caps[0] = Val(found.start)
+                        caps[1] = Val(pos)
+                        caps
+                    })
+                } else { None }
+                last_match = Val(RegexRun{span: (found.start, pos), caps: ^caps})
+            }
+        }
+        if pos == text.len() {
+            run :: last_match.take() ?? return
+            resume :: regex_next_search_pos(text, run.span.0, run.span.1)
+            drop(^scratch)
+            if !on_match(^run) -> return
+            if resume > text.len() -> return
+            scratch = program.scratch.lock().unwrap()
+            scratch.current.clear()
+            winner_start = None
+            last_match = None
+            prefilter_pos = resume
+            pos = resume
+            continue
+        }
+        (ch, next_pos) :: regex_next_char(text, pos) ?? return
+        {
+            current :: &scratch.current
+            next :: &scratch.next
+            capture_arena :: &scratch.capture_arena
+            next.clear()
+            loop thread in &current.threads {
+                match &program.insts[thread.pc] {
+                    .Consume(matcher, Val(target)) -> {
+                        if !regex_matcher_matches(matcher, ch, flags) -> continue
+                        if capture {
+                            regex_add_thread(next, program, flags,
+                                RegexThread{pc: target, start: thread.start, caps: thread.caps},
+                                next_pos, text, capture, capture_arena)
+                        } else {
+                            regex_add_thread(next, program, flags,
+                                RegexThread{pc: target, start: thread.start, caps: None},
+                                next_pos, text, capture, capture_arena)
+                        }
+                    }
+                    _ -> continue
+                }
+            }
+            std.mem.swap(current, next)
+        }
+        if stop_on_match {
+            if scratch.current.matched is Val(found) {
+                run :: RegexRun{span: (found.start, next_pos), caps: None}
+                drop(^scratch)
+                _ :: on_match(^run)
+                return
+            }
+        }
+        if winner_start is Val(winner) {
+            if scratch.current.min_start != Val(winner) {
+                run :: last_match.take() ?? return
+                resume :: regex_next_search_pos(text, run.span.0, run.span.1)
+                drop(^scratch)
+                if !on_match(^run) -> return
+                if resume > text.len() -> return
+                scratch = program.scratch.lock().unwrap()
+                scratch.current.clear()
+                winner_start = None
+                last_match = None
+                prefilter_pos = resume
+                pos = resume
+                continue
+            }
+        }
+        pos = next_pos
+    }
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:1799
+fn regex_add_thread(state: &RegexState, program: &RegexProgram, flags: &RegexFlags, thread: RegexThread, pos: Usize, text: &String, capture: Bool, capture_arena: &[RegexCaptureNode]) -> {
+    state.stack.clear()
+    state.stack.push(thread)
+    loop {
+        thread := state.stack.pop() ?? break
+        if state.seen[thread.pc] == state.epoch -> continue
+        state.seen[thread.pc] = state.epoch
+        match &program.insts[thread.pc] {
+            .Save(slot, Val(next)) -> {
+                if capture && slot != Usize.MAX {
+                    index :: capture_arena.len()
+                    capture_arena.push(RegexCaptureNode{slot: slot, pos: pos, previous: thread.caps})
+                    thread.caps = Val(index)
+                }
+                thread.pc = next
+                state.stack.push(thread)
+            }
+            .Split(a, Val(b)) -> {
+                right := thread
+                right.pc = b
+                state.stack.push(right)
+                thread.pc = a
+                state.stack.push(thread)
+            }
+            .AssertStart(Val(next)) -> {
+                if pos == 0 || (flags.multiline && text.slice(0, pos).ends_with('\n')) {
+                    thread.pc = next
+                    state.stack.push(thread)
+                }
+            }
+            .AssertEnd(Val(next)) -> {
+                if pos == text.len() {
+                    thread.pc = next
+                    state.stack.push(thread)
+                }
+            }
+            .Match -> {
+                state.min_start = Val(state.min_start.map_or(thread.start, fn(start) { start.min(thread.start) }))
+                if state.matched.map_or(true, fn(matched) { thread.start < matched.start }) {
+                    state.matched = Val(thread)
+                }
+                state.threads.push(thread)
+            }
+            .Consume(_, _) -> {
+                state.min_start = Val(state.min_start.map_or(thread.start, fn(start) { start.min(thread.start) }))
+                state.threads.push(thread)
+            }
+            _ -> {}
+        }
+    }
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:1878
+fn regex_prefix_literal(node: &RegexNode) -> [U8]? {
+    match node {
+        .Seq(pieces) -> {
+            prefix := [U8]{}
+            loop piece in pieces {
+                required :: match piece.quant {
+                    .One | .OneOrMore -> true
+                    .Range{min, max: _} -> min >= 1
+                    .ZeroOrMore | .ZeroOrOne -> false
+                }
+                if !required -> break
+                match &piece.atom {
+                    .Literal(ch) -> {
+                        bytes := [U8; 4].filled(0)
+                        prefix.extend_from_slice(ch.encode_utf8(&bytes).as_bytes())
+                    }
+                    .Group(_, inner) -> {
+                        inner_prefix :: regex_prefix_literal(inner) ?? break
+                        if inner_prefix.is_empty() -> break
+                        prefix.extend_from_slice(&inner_prefix)
+                    }
+                    .Start -> {}
+                    .Any | .Class(_) | .End -> break
+                }
+            }
+            if !prefix.is_empty() { Val(^prefix) } else { None }
+        }
+        .Alt(arms) -> {
+            arms := arms.iter()
+            first :: arms.next() ?? return None
+            prefix := regex_prefix_literal(first) ?? return None
+            loop arm in arms {
+                other :: regex_prefix_literal(arm) ?? return None
+                common :: prefix.iter().zip(other.iter()).take_while(fn(pair) { pair.0 == pair.1 }).count()
+                prefix.truncate(common)
+                if prefix.is_empty() -> return None
+            }
+            Val(^prefix)
+        }
+    }
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:1936
+fn regex_literal_candidate(node: &RegexNode) -> [U8]? {
+    match node {
+        .Seq(pieces) -> {
+            literal := [U8]{}
+            loop piece in pieces {
+                if !(piece.quant is .One) -> return None
+                match &piece.atom {
+                    .Literal(ch) -> {
+                        bytes := [U8; 4].filled(0)
+                        literal.extend_from_slice(ch.encode_utf8(&bytes).as_bytes())
+                    }
+                    .Group(_, inner) -> literal.extend(regex_literal_candidate(inner) ?? return None)
+                    _ -> return None
+                }
+            }
+            if !literal.is_empty() { Val(^literal) } else { None }
+        }
+        _ -> None
+    }
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:1955
+fn regex_required_literals(node: &RegexNode) -> [[U8]] {
+    candidates := match node {
+        .Seq(pieces) -> {
+            candidates := [[U8]]{}
+            run := [U8]{}
+            loop piece in pieces {
+                if !regex_quant_required(&piece.quant) {
+                    regex_push_required_literal(&candidates, std.mem.take(&run))
+                    continue
+                }
+                match (&piece.atom, &piece.quant) {
+                    (.Literal(ch), .One) -> {
+                        bytes := [U8; 4].filled(0)
+                        run.extend(ch.encode_utf8(&bytes).as_bytes())
+                    }
+                    (.Literal(ch), _) -> {
+                        regex_push_required_literal(&candidates, std.mem.take(&run))
+                        regex_push_required_literal(&candidates, ch.to_string().into_bytes())
+                    }
+                    _ -> {
+                        regex_push_required_literal(&candidates, std.mem.take(&run))
+                        candidates.extend(regex_required_atom_literals(&piece.atom))
+                    }
+                }
+            }
+            regex_push_required_literal(&candidates, ^run)
+            candidates
+        }
+        .Alt(arms) -> {
+            first :: arms.first() ?? return [[U8]]{}
+            candidates := regex_required_literals(first)
+            loop arm in arms.iter().skip(1) {
+                arm_candidates :: regex_required_literals(arm)
+                candidates.retain(fn(candidate) { arm_candidates.iter().any(fn(other) { other == candidate }) })
+            }
+            candidates
+        }
+    }
+    candidates.sort_by(fn(left, right) {
+        regex_required_literal_score(right).cmp(&regex_required_literal_score(left))
+            .then_with(fn() { right.len().cmp(&left.len()) })
+    })
+    unique := [[U8]].with_capacity(candidates.len())
+    loop candidate in candidates.drain(..) {
+        if !unique.iter().any(fn(existing) { existing == &candidate }) -> unique.push(^candidate)
+    }
+    unique
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:2011
+fn regex_required_atom_literals(atom: &RegexAtom) -> [[U8]] {
+    match atom {
+        .Literal(ch) -> [ch.to_string().into_bytes()]
+        .Group(_, node) -> regex_required_literals(node)
+        .Any | .Class(_) | .Start | .End -> [[U8]]{}
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:2022
+fn regex_push_required_literal(candidates: &[[U8]], candidate: [U8]) -> {
+    if !candidate.is_empty() -> candidates.push(^candidate)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:2028
+fn regex_required_literal_score(literal: View<U8>) -> Usize {
+    literal.iter().map(fn(byte) {
+        match byte {
+            b'a'..=b'z' | b'A'..=b'Z' -> Usize{3}
+            b'0'..=b'9' -> Usize{2}
+            b' ' | b'\t' | b'\r' | b'\n' -> Usize{0}
+            _ -> Usize{1}
+        }
+    }).sum()
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:2040
+fn regex_quant_required(quant: &RegexQuant) -> Bool {
+    match quant { .ZeroOrMore | .ZeroOrOne | .Range{min: 0, max: _} -> false, _ -> true }
+}
+
+// Required-literal prefilter; the VM remains authoritative for non-literals.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:2047
+fn regex_find_literal(haystack: View<U8>, needle: View<U8>, start: Usize) -> Usize? {
+    if needle.is_empty() -> return Val(start.min(haystack.len()))
+    last :: haystack.len().checked_sub(needle.len()) ?? return None
+    first :: needle[0]
+    pos := start.min(haystack.len())
+    loop pos <= last {
+        candidate :: regex_find_byte(haystack, first, pos) ?? return None
+        if candidate > last -> return None
+        pos = candidate
+        if haystack.slice(pos, haystack.len()).starts_with(needle) -> return Val(pos)
+        pos += 1
+    }
+    None
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:2068
+fn regex_find_literal_boundary(text: &String, needle: View<U8>, start: Usize) -> Usize? {
+    pos := start.min(text.len())
+    loop {
+        candidate :: regex_find_literal(text.as_bytes(), needle, pos) ?? return None
+        if text.is_char_boundary(candidate) -> return Val(candidate)
+        pos = candidate.saturating_add(1)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:2080
+fn regex_scan_literal(text: &String, needle: View<U8>, start: Usize, on_match: fn(RegexRun) -> Bool) -> {
+    // Borrow validated UTF-8; the native text search retains optimized memmem
+    // and produces UTF-8-boundary spans without allocating a needle String.
+    needle :: std.str.from_utf8(needle).ok() ?? return
+    pos := start.min(text.len())
+    loop {
+        offset :: text.get(pos..).and_then(fn(rest) { rest.find(needle) }) ?? break
+        candidate :: pos + offset
+        end :: candidate + needle.len()
+        if !on_match(RegexRun{span: (candidate, end), caps: None}) -> return
+        pos = regex_next_search_pos(text, candidate, end)
+        if pos > text.len() -> return
+    }
+}
+
+// Vetted SIMD carve-out shared with core.compute; unsupported CPUs stay scalar.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:2114
+enum RegexByteBackend { Scalar, Avx2, Sse2 }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:2122
+// GATE #4565: kernel primitive
+#Unsafe("native once initialization and CPUID feature detection select only instructions supported by the runtime CPU")
+static REGEX_BYTE_BACKEND: LazyLock<RegexByteBackend> = LazyLock.new(fn() {
+    arch :: core.sys.target.selected_arch()
+    if arch == "x86_64" && std.arch.is_x86_feature_detected("avx2") -> return RegexByteBackend.Avx2
+    if (arch == "x86" || arch == "x86_64") && std.arch.is_x86_feature_detected("sse2") -> return RegexByteBackend.Sse2
+    RegexByteBackend.Scalar
+})
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:2137
+// GATE #4565: kernel primitive
+#Unsafe("SIMD backend selected by CPUID; scalar path is used for other target architectures")
+fn regex_find_byte(haystack: View<U8>, needle: U8, start: Usize) -> Usize? {
+    match *REGEX_BYTE_BACKEND {
+        .Avx2 -> regex_find_byte_avx2(haystack, needle, start)
+        .Sse2 -> {
+            if core.sys.target.selected_arch() == "x86" {
+                regex_find_byte_sse2_x86(haystack, needle, start)
+            } else { regex_find_byte_sse2(haystack, needle, start) }
+        }
+        .Scalar -> regex_find_byte_scalar(haystack, needle, start)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:2149
+fn regex_find_byte_scalar(haystack: View<U8>, needle: U8, start: Usize) -> Usize? {
+    pos := start.min(haystack.len())
+    loop pos < haystack.len() && pos % 8 != 0 {
+        if haystack[pos] == needle -> return Val(pos)
+        pos += 1
+    }
+    repeated :: U64.from_ne_bytes([U8; 8].filled(needle))
+    LOW_BITS: U64 :: 0x0101_0101_0101_0101
+    HIGH_BITS: U64 :: 0x8080_8080_8080_8080
+    loop haystack.len().saturating_sub(pos) >= 8 {
+        bytes := [U8; 8].filled(0)
+        bytes.copy_from_slice(haystack.slice(pos, pos + 8))
+        different :: U64.from_ne_bytes(bytes) ^ repeated
+        if different.wrapping_sub(LOW_BITS) & !different & HIGH_BITS != 0 {
+            loop offset in Usize{0}..8 {
+                if haystack[pos + offset] == needle -> return Val(pos + offset)
+            }
+        }
+        pos += 8
+    }
+    rest :: haystack.get(pos..) ?? return None
+    rest.iter().position(fn(byte) { byte == needle }).map(fn(offset) { pos + offset })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:2183
+// GATE #4565: kernel primitive
+#Unsafe("x86_64 AVX2 byte-search intrinsics; caller dispatches only after AVX2 CPU detection")
+fn regex_find_byte_avx2(haystack: View<U8>, needle: U8, start: Usize) -> Usize? {
+    use std.arch.x86_64.[_mm256_cmpeq_epi8, _mm256_loadu_si256, _mm256_movemask_epi8, _mm256_set1_epi8]
+    pos := start
+    target :: _mm256_set1_epi8(needle as I8)
+    loop pos <= haystack.len().saturating_sub(32) {
+        chunk :: _mm256_loadu_si256(haystack.as_ptr().add(pos).cast())
+        mask :: _mm256_movemask_epi8(_mm256_cmpeq_epi8(chunk, target)) as U32
+        if mask != 0 -> return Val(pos + mask.trailing_zeros() as Usize)
+        pos += 32
+    }
+    rest :: haystack.get(pos..) ?? return None
+    rest.iter().position(fn(byte) { byte == needle }).map(fn(offset) { pos + offset })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:2210
+// GATE #4565: kernel primitive
+#Unsafe("x86 AVX2 byte-search intrinsics; retained target-specific body requires AVX2 CPU support")
+fn regex_find_byte_avx2_x86(haystack: View<U8>, needle: U8, start: Usize) -> Usize? {
+    use std.arch.x86.[_mm256_cmpeq_epi8, _mm256_loadu_si256, _mm256_movemask_epi8, _mm256_set1_epi8]
+    pos := start
+    target :: _mm256_set1_epi8(needle as I8)
+    loop pos <= haystack.len().saturating_sub(32) {
+        chunk :: _mm256_loadu_si256(haystack.as_ptr().add(pos).cast())
+        mask :: _mm256_movemask_epi8(_mm256_cmpeq_epi8(chunk, target)) as U32
+        if mask != 0 -> return Val(pos + mask.trailing_zeros() as Usize)
+        pos += 32
+    }
+    rest :: haystack.get(pos..) ?? return None
+    rest.iter().position(fn(byte) { byte == needle }).map(fn(offset) { pos + offset })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:2237
+// GATE #4565: kernel primitive
+#Unsafe("x86_64 SSE2 byte-search intrinsics; caller dispatches only after SSE2 CPU detection")
+fn regex_find_byte_sse2(haystack: View<U8>, needle: U8, start: Usize) -> Usize? {
+    use std.arch.x86_64.[_mm_cmpeq_epi8, _mm_loadu_si128, _mm_movemask_epi8, _mm_set1_epi8]
+    pos := start
+    target :: _mm_set1_epi8(needle as I8)
+    loop pos <= haystack.len().saturating_sub(16) {
+        chunk :: _mm_loadu_si128(haystack.as_ptr().add(pos).cast())
+        mask :: _mm_movemask_epi8(_mm_cmpeq_epi8(chunk, target)) as U32
+        if mask != 0 -> return Val(pos + mask.trailing_zeros() as Usize)
+        pos += 16
+    }
+    rest :: haystack.get(pos..) ?? return None
+    rest.iter().position(fn(byte) { byte == needle }).map(fn(offset) { pos + offset })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:2264
+// GATE #4565: kernel primitive
+#Unsafe("x86 SSE2 byte-search intrinsics; caller dispatches only after SSE2 CPU detection")
+fn regex_find_byte_sse2_x86(haystack: View<U8>, needle: U8, start: Usize) -> Usize? {
+    use std.arch.x86.[_mm_cmpeq_epi8, _mm_loadu_si128, _mm_movemask_epi8, _mm_set1_epi8]
+    pos := start
+    target :: _mm_set1_epi8(needle as I8)
+    loop pos <= haystack.len().saturating_sub(16) {
+        chunk :: _mm_loadu_si128(haystack.as_ptr().add(pos).cast())
+        mask :: _mm_movemask_epi8(_mm_cmpeq_epi8(chunk, target)) as U32
+        if mask != 0 -> return Val(pos + mask.trailing_zeros() as Usize)
+        pos += 16
+    }
+    rest :: haystack.get(pos..) ?? return None
+    rest.iter().position(fn(byte) { byte == needle }).map(fn(offset) { pos + offset })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:2290
+fn regex_next_search_pos(text: &String, start: Usize, end: Usize) -> Usize {
+    if end > start -> return end
+    regex_next_char(text, end).map(fn(pair) { pair.1 }).unwrap_or(text.len() + 1)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:2299
+fn regex_next_char(text: &String, pos: Usize) -> (Char, Usize)? {
+    byte :: text.as_bytes().get(pos).copied() ?? return None
+    if byte.is_ascii() -> return Val((byte as Char, pos + 1))
+    text.slice(pos, text.len()).chars().next().map(fn(ch) { (ch, pos + ch.len_utf8()) })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:2310
+fn expand_regex_replacement(repl: &String, mat: &JetRegexMatch) -> String {
+    out := String.with_capacity(repl.len())
+    chars := repl.chars().peekable()
+    loop {
+        ch :: chars.next() ?? break
+        if ch != '$' {
+            out.push(ch)
+            continue
+        }
+        match chars.peek().copied() {
+            Val('$') -> {
+                _ :: chars.next()
+                out.push('$')
+            }
+            Val('{') -> {
+                _ :: chars.next()
+                name := String.new()
+                loop {
+                    c :: chars.next() ?? break
+                    if c == '}' -> break
+                    name.push(c)
+                }
+                if mat.name(&name) is Ok(value) -> out.push_str(&value)
+            }
+            Val(c) if c.is_ascii_digit() -> {
+                idx := I64{0}
+                valid := true
+                loop chars.peek().is_some_and(fn(c) { c.is_ascii_digit() }) {
+                    digit :: chars.next().unwrap() as I64 - '0' as I64
+                    if idx.checked_mul(10).and_then(fn(n) { n.checked_add(digit) }) is Val(next) {
+                        idx = next
+                    } else { valid = false }
+                }
+                if valid {
+                    if mat.group(idx) is Ok(value) -> out.push_str(&value)
+                }
+            }
+            _ -> out.push('$')
+        }
+    }
+    out
+}
 

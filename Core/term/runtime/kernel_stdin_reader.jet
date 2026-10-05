@@ -1,53 +1,37 @@
-// PORT-PENDING 0156 crates-jet-codegen-src-prelude-core-progress-module-group: crates/jet-codegen/src/Prelude/Core/StdinReader.rs:1-49
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS // Shared streaming stdin reader for AOT, JIT, and interpreter hosts.
-//RS // The owner keeps std::io::Stdin alive across pulls so unread bytes are never
-//RS // discarded when a loop stops after a sentinel.  The surrounding host supplies
-//RS // `jet_std`, `jet_fault_should_fail`, and its canonical IOError carrier.
-//RS 
-//RS pub(crate) struct JetStdinReader {
-//RS     inner: std::io::Stdin,
-//RS }
-//RS 
-//RS pub(crate) fn jet_std_io_stdin() -> JetStdinReader {
-//RS     JetStdinReader {
-//RS         inner: std::io::stdin(),
-//RS     }
-//RS }
-//RS 
-//RS pub(crate) fn jet_std_io_read_line<R: std::io::BufRead>(
-//RS     reader: &mut R,
-//RS ) -> Result<Option<String>, jet_std::IOError> {
-//RS     if jet_fault_should_fail("IO.Read") {
-//RS         return Err(jet_std::IOError::other(
-//RS             jet_std::IOOperation::Read,
-//RS             Some("stdin".to_string()),
-//RS             "fault injected: IO.Read",
-//RS         ));
-//RS     }
-//RS     let mut line = String::new();
-//RS     match reader.read_line(&mut line) {
-//RS         Ok(0) => Ok(None),
-//RS         Ok(_) => {
-//RS             while line.ends_with('\n') || line.ends_with('\r') {
-//RS                 line.pop();
-//RS             }
-//RS             Ok(Some(line))
-//RS         }
-//RS         Err(error) => Err(jet_std::io_error_at(
-//RS             jet_std::IOOperation::Read,
-//RS             "stdin",
-//RS             error,
-//RS         )),
-//RS     }
-//RS }
-//RS 
-//RS pub(crate) fn jet_std_io_stdin_read_line(
-//RS     reader: &mut JetStdinReader,
-//RS ) -> Result<Option<String>, jet_std::IOError> {
-//RS     let mut lock = reader.inner.lock();
-//RS     jet_std_io_read_line(&mut lock)
-//RS }
-//RS 
-// END-PORT-PENDING 0156 crates/jet-codegen/src/Prelude/Core/StdinReader.rs:1-49
+use std.io.[Stdin, BufRead]
+use std.io as io
+use core.testing.runtime.fault_injection.[jet_fault_should_fail]
+use core.files.[IOError, IOOperation]
+use core.encoding.runtime.std_data_tree.[io_error_at]
 
+// Rust: crates/jet-codegen/src/Prelude/Core/StdinReader.rs:6
+// Keep the native stdin owner alive across pulls; stopping at a sentinel does
+// not discard the unread bytes held by the provider.
+pub struct JetStdinReader { inner: Stdin }
+// Rust: crates/jet-codegen/src/Prelude/Core/StdinReader.rs:10
+pub fn jet_std_io_stdin() -> JetStdinReader Never! {
+    // GATE #4565: kernel primitive
+    inner :: #Unsafe("acquire and retain the native process stdin owner across line pulls") { io.stdin() }
+    JetStdinReader{inner: ^inner}
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/StdinReader.rs:16
+pub fn jet_std_io_read_line<R: BufRead>(reader: &R) -> String? IOError! {
+    if jet_fault_should_fail("IO.Read") -> return Err(IOError.other(.Read, Val("stdin"), "fault injected: IO.Read"))
+    line := String.new()
+    // GATE #4565: kernel primitive
+    result :: #Unsafe("buffered native reader exclusively fills the retained owned line buffer") { reader.read_line(&line) }
+    match result {
+        Ok(0) -> Ok(None)
+        Ok(_) -> {
+            while line.ends_with('\n') or line.ends_with('\r') -> _ :: line.pop()
+            Ok(Val(^line))
+        }
+        Err(error) -> Err(io_error_at(.Read, "stdin", ^error))
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/StdinReader.rs:43
+pub fn jet_std_io_stdin_read_line(reader: &JetStdinReader) -> String? IOError! {
+    // GATE #4565: kernel primitive
+    lock := #Unsafe("hold the retained stdin provider lock until one buffered line pull completes") { reader.inner.lock() }
+    jet_std_io_read_line(&lock)
+}

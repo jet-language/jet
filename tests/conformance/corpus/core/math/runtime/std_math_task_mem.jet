@@ -1,0 +1,106 @@
+use core.array.Array
+use core.math.runtime.std_math_task_mem.[F32x4, U8x16, Vec3, Mat3, JetTask, JetTaskGroup, channel, Closed]
+use core.math.runtime.std_math_task_mem.[JetShared, JetSharedRevisionError]
+use core.math.runtime.std_math_task_mem_02.*
+
+// Behavioral control for Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:121-168
+#Test("simd_value_arithmetic_preserves_lane_width") {
+    left :: U8x16{value: Array<U8,16>.filled(U8{250})}
+    right :: U8x16{value: Array<U8,16>.filled(U8{10})}
+    result :: left + right
+    assert_eq(result.value[0], U8{4})
+    assert_eq(result.value[15], U8{4})
+    floats :: F32x4{value: Array<F32,4>.filled(F32{1.5})} * F32x4{value: Array<F32,4>.filled(F32{2.0})}
+    assert_eq(floats.value[0], F32{3.0})
+    assert_eq(floats.value[3], F32{3.0})
+}
+
+// Behavioral control for Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:257-374
+#Test("vector_multiply_is_hadamard_matrix_transform_is_column_major") {
+    vector := Vec3{value: Array<F64,3>.filled(0.0)}
+    vector.value[0] = 2.0
+    vector.value[1] = 3.0
+    vector.value[2] = 4.0
+    squared :: vector * vector
+    assert_eq(squared.value[0], 4.0)
+    assert_eq(squared.value[1], 9.0)
+    assert_eq(squared.value[2], 16.0)
+    matrix := Mat3{value: Array<F64,9>.filled(0.0)}
+    matrix.value[1] = 1.0
+    matrix.value[5] = 1.0
+    matrix.value[6] = 1.0
+    transformed :: matrix * vector
+    assert_eq(transformed.value[0], 4.0)
+    assert_eq(transformed.value[1], 2.0)
+    assert_eq(transformed.value[2], 3.0)
+    cube :: matrix * matrix * matrix
+    assert_eq(cube.value[0], 1.0)
+    assert_eq(cube.value[4], 1.0)
+    assert_eq(cube.value[8], 1.0)
+    assert_eq(cube.value[1], 0.0)
+}
+
+// Behavioral control for Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:549-748
+#Test("lexical_task_group_retains_typed_join_results") {
+    group :: JetTaskGroup.with_limit(1)
+    task :: group.spawn(() -> I64{42})
+    assert_eq(task.join().expect("real scheduler child completes"), I64{42})
+    group.close()
+    task :: JetTask<I64>.spawn(() -> I64{7})
+    assert_eq(task.join().expect("ungrouped real scheduler child completes"), I64{7})
+}
+
+// Behavioral control for Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:919-1067
+#Test("channel_receiver_clone_and_close_preserve_shared_endpoint") {
+    (tx, rx) :: channel<I64>()
+    copy :: rx.clone()
+    tx.send(I64{9})
+    assert_eq(copy.try_receive(), Ok(I64{9}))
+    tx.close()
+    assert_eq(rx.receive().err(), Some(Closed.Closed))
+}
+
+// Behavioral control for Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:1620-1741
+#Test("shared_revision_ticket_distinguishes_stale_from_wrong_owner") {
+    owner :: JetShared<I64>.new(10)
+    stale :: owner.capture()
+    winning :: owner.capture()
+    assert_eq(owner.try_replace(^winning, 11), Ok(true))
+    assert_eq(owner.try_replace(^stale, 12), Ok(false))
+    assert_eq(owner.get(), I64{11})
+    other :: JetShared<I64>.new(11)
+    wrong :: other.capture()
+    assert_eq(owner.try_replace(^wrong, 13), Err(JetSharedRevisionError.WrongOwner))
+    assert_eq(owner.get(), I64{11})
+}
+
+// Behavioral control for Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:1556-1794
+#Test("shared_structured_edit_replace_and_projection_publish_one_revision") {
+    owner :: JetShared<String>.new("before")
+    ticket :: owner.capture_with((value) -> value.len())
+    assert_eq(ticket.value(), USize{6})
+    owner.edit((value) -> { *value = "edited" })
+    assert_eq(owner.try_replace(^ticket, "stale"), Ok(false))
+    assert_eq(owner.replace("replacement"), "edited")
+    current :: owner.capture()
+    assert_eq(current.value(), "replacement")
+    assert_eq(owner.try_replace(^current, "winner"), Ok(true))
+    assert_eq(owner.get(), "winner")
+}
+
+// Behavioral control for Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:1108-1423
+#Test("shared_snapshot_retains_logical_owner_until_consumed") {
+    owner :: JetShared<I64>.new(-9)
+    assert_eq(owner.strong_count(), I64{1})
+    snapshot :: owner.capture()
+    assert_eq(snapshot.value(), I64{-9})
+    assert_eq(owner.strong_count(), I64{2})
+    alias :: owner.clone()
+    assert_eq(alias.physical_identity(), owner.physical_identity())
+    assert_eq(alias.physical_protocol_order_key(), owner.physical_protocol_order_key())
+    assert_eq(owner.strong_count(), I64{3})
+    drop(^alias)
+    assert_eq(owner.try_replace(^snapshot, -8), Ok(true))
+    assert_eq(owner.strong_count(), I64{1})
+    assert_eq(owner.get(), I64{-8})
+}

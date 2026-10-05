@@ -1,49 +1,31 @@
-// PORT-PENDING 0141 crates-jet-codegen-src-prelude-core-authority-module-group: crates/jet-codegen/src/Prelude/Core/FileHandleOwners.rs:1-45
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS #[derive(Clone, Debug)]
-//RS pub struct JetTempDirOwner {
-//RS     pub(crate) path: String,
-//RS     cleanup: std::rc::Rc<()>,
-//RS }
-//RS 
-//RS #[derive(Clone, Debug)]
-//RS pub struct JetTempFileOwner {
-//RS     pub(crate) path: String,
-//RS     cleanup: std::rc::Rc<()>,
-//RS }
-//RS 
-//RS #[derive(Clone, Debug)]
-//RS pub struct JetFileLockOwner {
-//RS     pub(crate) path: String,
-//RS     cleanup: std::rc::Rc<()>,
-//RS }
-//RS 
-//RS fn jet_fs_drop_owned_path(path: &str, cleanup: &std::rc::Rc<()>, is_dir: bool) {
-//RS     if std::rc::Rc::strong_count(cleanup) == 1 {
-//RS         if is_dir {
-//RS             let _ = std::fs::remove_dir_all(path);
-//RS         } else {
-//RS             let _ = std::fs::remove_file(path);
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS impl Drop for JetTempDirOwner {
-//RS     fn drop(&mut self) {
-//RS         jet_fs_drop_owned_path(&self.path, &self.cleanup, true);
-//RS     }
-//RS }
-//RS 
-//RS impl Drop for JetTempFileOwner {
-//RS     fn drop(&mut self) {
-//RS         jet_fs_drop_owned_path(&self.path, &self.cleanup, false);
-//RS     }
-//RS }
-//RS 
-//RS impl Drop for JetFileLockOwner {
-//RS     fn drop(&mut self) {
-//RS         jet_fs_drop_owned_path(&self.path, &self.cleanup, false);
-//RS     }
-//RS }
-// END-PORT-PENDING 0141 crates/jet-codegen/src/Prelude/Core/FileHandleOwners.rs:1-45
+use std.rc.[Rc]
+use std.fs as fs
 
+// Rust: crates/jet-codegen/src/Prelude/Core/FileHandleOwners.rs:2
+pub struct JetTempDirOwner { pub path: OSPath, cleanup: Rc<Unit> }
+// Rust: crates/jet-codegen/src/Prelude/Core/FileHandleOwners.rs:8
+pub struct JetTempFileOwner { pub path: OSPath, cleanup: Rc<Unit> }
+// Rust: crates/jet-codegen/src/Prelude/Core/FileHandleOwners.rs:14
+pub struct JetFileLockOwner { pub path: OSPath, cleanup: Rc<Unit> }
+// Rust: crates/jet-codegen/src/Prelude/Core/FileHandleOwners.rs:19
+fn jet_fs_drop_owned_path(path: OSPath, cleanup: Rc<Unit>, is_dir: Bool) Never! {
+    // GATE #4565: kernel primitive — last-owner detection and best-effort native deletion.
+    #Unsafe("only the last shared cleanup owner removes the native path") {
+        if Rc.strong_count(cleanup) == 1 {
+            if is_dir -> _ :: fs.remove_dir_all(path)
+            else -> _ :: fs.remove_file(path)
+        }
+    }
+}
+impl Drop for JetTempDirOwner {
+    // Rust: crates/jet-codegen/src/Prelude/Core/FileHandleOwners.rs:30
+    fn drop(self: &JetTempDirOwner) Never! { jet_fs_drop_owned_path(self.path, self.cleanup, true) }
+}
+impl Drop for JetTempFileOwner {
+    // Rust: crates/jet-codegen/src/Prelude/Core/FileHandleOwners.rs:36
+    fn drop(self: &JetTempFileOwner) Never! { jet_fs_drop_owned_path(self.path, self.cleanup, false) }
+}
+impl Drop for JetFileLockOwner {
+    // Rust: crates/jet-codegen/src/Prelude/Core/FileHandleOwners.rs:42
+    fn drop(self: &JetFileLockOwner) Never! { jet_fs_drop_owned_path(self.path, self.cleanup, false) }
+}

@@ -1,74 +1,61 @@
-// PORT-PENDING 0173 crates-jet-codegen-src-prelude-deadline-module-group: crates/jet-codegen/src/Prelude/Deadline.rs:1-70
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS // Card #1747: the `#Context(deadline: …)` clock and budget are the same
-//RS // plumbing on every tier — AOT embeds this file into the generated program
-//RS // and `jet_codegen::scheduler` compiles the same source for the Cranelift
-//RS // JIT host, so the two cannot drift. The E3003 raise stays local to each
-//RS // caller (`jet_deadline_exceeded` in `Prelude/CoreLib/Top/MathRandomTime.rs`
-//RS // and `SchedulerHost.rs`): the unwind boundary and process-exit path are
-//RS // real per-tier marshalling (AOT has an interrupt-handler frame and exits
-//RS // through the panic-based `jet_runtime_exit`; the JIT host has no
-//RS // interrupt-handler prelude and exits the resident process directly), but
-//RS // both render the same text through the one E3003 renderer in
-//RS // `Prelude/TaskGroup.rs`.
-//RS 
-//RS pub fn jet_std_time_now() -> i64 {
-//RS     // D-TEST-WORLD1=A: controlled wall time is selected at the shared
-//RS     // provider boundary; replay and host wall time are only fallbacks outside
-//RS     // a deterministic world.
-//RS     if let Some(now) = jet_scheduler_world_now_ms() {
-//RS         return now;
-//RS     }
-//RS     if let Ok(s) = std::env::var("JET_PROVE_REPLAY_TIME_MS") {
-//RS         if let Ok(n) = s.parse::<i64>() {
-//RS             return n;
-//RS         }
-//RS     }
-//RS     if let Ok(s) = std::env::var("LEX_TEST_EPOCH") {
-//RS         if let Ok(n) = s.parse::<i64>() {
-//RS             return n;
-//RS         }
-//RS     }
-//RS     std::time::SystemTime::now()
-//RS         .duration_since(std::time::UNIX_EPOCH)
-//RS         .unwrap_or_default()
-//RS         .as_millis() as i64
-//RS }
-//RS 
-//RS thread_local! {
-//RS     static JET_CTX_DEADLINE_MS: std::cell::Cell<Option<i64>> = const { std::cell::Cell::new(None) };
-//RS }
-//RS 
-//RS pub struct JetDeadlineGuard {
-//RS     saved: Option<i64>,
-//RS }
-//RS 
-//RS impl Drop for JetDeadlineGuard {
-//RS     fn drop(&mut self) {
-//RS         JET_CTX_DEADLINE_MS.with(|c| c.set(self.saved));
-//RS     }
-//RS }
-//RS 
-//RS /// Absolute deadline millis currently installed for this task/thread, if any.
-//RS pub fn jet_ctx_deadline_ms() -> Option<i64> {
-//RS     JET_CTX_DEADLINE_MS.with(|c| c.get())
-//RS }
-//RS 
-//RS /// Push a `#Context(deadline: …)` budget; drop restores the previous value.
-//RS pub fn jet_ctx_push_deadline(deadline_ms: i64) -> JetDeadlineGuard {
-//RS     let saved = JET_CTX_DEADLINE_MS.with(|c| c.replace(Some(deadline_ms)));
-//RS     JetDeadlineGuard { saved }
-//RS }
-//RS 
-//RS /// Tighten the current task deadline without replacing an earlier, shorter
-//RS /// budget. The task-timeout surface uses this Prelude boundary on every tier.
-//RS pub fn jet_ctx_set_deadline_min(deadline_ms: i64) {
-//RS     JET_CTX_DEADLINE_MS.with(|c| {
-//RS         let deadline = c
-//RS             .get()
-//RS             .map_or(deadline_ms, |current| current.min(deadline_ms));
-//RS         c.set(Some(deadline));
-//RS     });
-//RS }
-// END-PORT-PENDING 0173 crates/jet-codegen/src/Prelude/Deadline.rs:1-70
+// Card #1747: one clock and deadline budget for all execution tiers.
+use core.cell.[Cell, ThreadLocal]
+use std.env
+use std.time.[SystemTime, UNIX_EPOCH]
+use core.tasks.runtime.scheduler.[jet_scheduler_world_now_ms]
 
+// Rust: crates/jet-codegen/src/Prelude/Deadline.rs:13
+pub fn jet_std_time_now() -> I64 {
+    if Val(now) = jet_scheduler_world_now_ms() -> return now
+    // Controlled-world wall time precedes replay environment and the host clock.
+    // GATE #4565: kernel primitive
+    replay :: #Unsafe("read actual replay clock environment") { env.var("JET_PROVE_REPLAY_TIME_MS") }
+    if Ok(s) = replay { if Ok(n) = s.parse<I64>() -> return n }
+    // GATE #4565: kernel primitive
+    epoch :: #Unsafe("read actual test epoch environment") { env.var("LEX_TEST_EPOCH") }
+    if Ok(s) = epoch { if Ok(n) = s.parse<I64>() -> return n }
+    // GATE #4565: kernel primitive
+    #Unsafe("sample real wall clock with pre-epoch fallback to zero") {
+        SystemTime.now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as I64
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Deadline.rs:36
+// GATE #4565: kernel primitive
+JET_CTX_DEADLINE_MS :: #Unsafe("each executing thread owns its independent deadline cell") {
+    ThreadLocal.new(fn() { Cell.new(None as I64?) })
+}
+// Rust: crates/jet-codegen/src/Prelude/Deadline.rs:40
+pub struct JetDeadlineGuard { saved: I64? }
+// Rust: crates/jet-codegen/src/Prelude/Deadline.rs:44
+impl JetDeadlineGuard.Drop {
+    // Rust: crates/jet-codegen/src/Prelude/Deadline.rs:45
+    fn drop(self: &JetDeadlineGuard) -> Unit {
+        // GATE #4565: kernel primitive
+        #Unsafe("restore previous thread deadline when the scoped owner drops") {
+            JET_CTX_DEADLINE_MS.with(c -> c.set(self.saved))
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Deadline.rs:51
+pub fn jet_ctx_deadline_ms() -> I64? {
+    // GATE #4565: kernel primitive
+    #Unsafe("read current executing thread deadline cell") { JET_CTX_DEADLINE_MS.with(c -> c.get()) }
+}
+// Rust: crates/jet-codegen/src/Prelude/Deadline.rs:56
+pub fn jet_ctx_push_deadline(deadline_ms: I64) -> JetDeadlineGuard {
+    // GATE #4565: kernel primitive
+    saved :: #Unsafe("replace current thread deadline and retain its previous value for scoped restoration") {
+        JET_CTX_DEADLINE_MS.with(c -> c.replace(Val(deadline_ms)))
+    }
+    JetDeadlineGuard{saved}
+}
+// Rust: crates/jet-codegen/src/Prelude/Deadline.rs:63
+pub fn jet_ctx_set_deadline_min(deadline_ms: I64) -> Unit {
+    // GATE #4565: kernel primitive
+    #Unsafe("tighten only the current executing thread deadline") {
+        JET_CTX_DEADLINE_MS.with(c -> {
+            deadline :: c.get().map_or(deadline_ms, current -> current.min(deadline_ms))
+            c.set(Val(deadline))
+        })
+    }
+}

@@ -1,0 +1,19 @@
+use core.collections.runtime.kernel_parallel_kernel.*
+
+// Rust: crates/jet-codegen/src/Prelude/Core/ParallelKernel.rs:7
+#Test("parallel_serial_chunks_have_stable_boundaries") {
+    out :: jet_list_para_chunks_serial_kernel(130, fn(range) -> (Usize, Usize) Err! { Ok((range.start, range.end)) })
+    assert(out == [(0, Ok((0, 64))), (1, Ok((64, 128))), (2, Ok((128, 130)))])
+    assert(jet_list_para_chunks_serial_kernel(0, fn(range) -> Usize Err! { Ok(range.start) }).is_empty())
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/ParallelKernel.rs:25
+#Test("parallel_merge_tree_is_pairwise_with_odd_carry") {
+    merged :: jet_list_para_merge_tree(["a", "b", "c", "d", "e"], fn(a, b) -> String Err! { Ok("(" + a + b + ")") })
+    assert(merged == .Ok("(((ab)(cd))e)"))
+    assert(jet_list_para_merge_tree([1, 2], fn(a, b) -> I64 Err! { Err("merge failed") }) == .Err("merge failed"))
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/ParallelKernel.rs:99
+#Test("parallel_fixed_fold_empty_returns_seed") {
+    assert(jet_list_para_fold_add_fixed_f32([], 3.0) == 3.0)
+    assert(jet_list_para_fold_add_fixed_f64([], 4.0) == 4.0)
+}

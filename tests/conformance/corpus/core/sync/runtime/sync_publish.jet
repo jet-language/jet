@@ -1,0 +1,67 @@
+use core.sync.runtime.sync_publish.[JetSyncDocument, jet_app_sync, jet_sync_escape_display, jet_sync_unescape_display, jet_sync_split_display, jet_sync_split_display_once]
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/SyncPublish.rs:6-80
+#Test("sync_display_escape_and_split_keep_reference_backslash_behavior") {
+    text :: "é\\,=|:/"
+    assert(jet_sync_unescape_display(jet_sync_escape_display(text)) == Val(text))
+    assert(jet_sync_unescape_display("a,b") == None)
+    assert(jet_sync_unescape_display("a\\q") == None)
+    assert(jet_sync_unescape_display("a\\") == None)
+    assert(jet_sync_split_display_once("é=x=y", '=') == Val(("é", "x=y")))
+    assert(jet_sync_split_display("a\\,b,c", ',') == Val(["a\\\\,b", "c"]))
+    assert(jet_sync_split_display("a\\", ',') == None)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/SyncPublish.rs:172
+#Test("sync_document_parse_requires_canonical_sorted_and_unique_displays") {
+    assert(JetSyncDocument.parse("SyncMap(a=1,b=2)").is_some())
+    assert(JetSyncDocument.parse("SyncMap(b=2,a=1)") == None)
+    assert(JetSyncDocument.parse("SyncMap(a=1,a=1)") == None)
+    assert(JetSyncDocument.parse("SyncList(a:x,a:y)").is_some())
+    assert(JetSyncDocument.parse("SyncList(a:x,a:x)") == None)
+    assert(JetSyncDocument.parse("PNCounter(a=+01/-0)") == None)
+    assert(JetSyncDocument.parse(" SyncMap()") == None)
+    assert(JetSyncDocument.parse("SyncText(arbitrary opaque display)").is_some())
+    assert(JetSyncDocument.parse("SyncText(a\nb)") == None)
+    assert(JetSyncDocument.parse("Other()") == None)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/SyncPublish.rs:249
+#Test("sync_document_merge_unions_facts_but_denies_conflicting_or_opaque_values") {
+    a :: JetSyncDocument.parse("SyncMap(a=1)").unwrap()
+    b :: JetSyncDocument.parse("SyncMap(b=2)").unwrap()
+    merged :: a.merge(b).unwrap()
+    assert(merged.representation == "SyncMap(a=1,b=2)")
+    assert(a.merge(b) == b.merge(a))
+    assert(merged.merge(a) == Val(merged))
+    assert(a.merge(JetSyncDocument.parse("SyncMap(a=2)").unwrap()) == None)
+    list :: JetSyncDocument.parse("SyncList(a:x)").unwrap()
+    assert(list.merge(JetSyncDocument.parse("SyncList(b:y)").unwrap()).unwrap().representation == "SyncList(a:x|b:y)")
+    assert(a.merge(list) == None)
+    text :: JetSyncDocument.parse("SyncText(a)").unwrap()
+    assert(text.merge(text) == Val(text))
+    assert(text.merge(JetSyncDocument.parse("SyncText(b)").unwrap()) == None)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/SyncPublish.rs:134-169,307-337
+#Test("sync_counter_merge_uses_component_maxima_and_rechecks_signed_total") {
+    a :: JetSyncDocument.parse("PNCounter(a=+4/-1)").unwrap()
+    b :: JetSyncDocument.parse("PNCounter(a=+2/-3,b=+1/-0)").unwrap()
+    assert(a.merge(b).unwrap().representation == "PNCounter(a=+4/-3,b=+1/-0)")
+    assert(JetSyncDocument.parse("PNCounter(a=+18446744073709551615/-0)") == None)
+    assert(JetSyncDocument.parse("PNCounter(a=+18446744073709551615/-18446744073709551615)").is_some())
+    max :: JetSyncDocument.parse("PNCounter(a=+9223372036854775807/-0)").unwrap()
+    one :: JetSyncDocument.parse("PNCounter(b=+1/-0)").unwrap()
+    assert(max.merge(one) == None)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/SyncPublish.rs:375-439
+#Test("sync_publish_generations_are_idempotent_and_failed_merges_do_not_mutate") {
+    session :: "corpus-0172-publish-map"
+    first :: jet_app_sync("SyncMap(a=1)", session)
+    assert(first == "SyncOver(session={session}, generation=1, doc=SyncMap(a=1))")
+    assert(jet_app_sync("SyncMap(a=1)", session) == first)
+    second :: jet_app_sync("SyncMap(b=2)", session)
+    assert(second == "SyncOver(session={session}, generation=2, doc=SyncMap(a=1,b=2))")
+    assert(jet_app_sync("SyncMap(a=1)", session) == second)
+    assert(jet_app_sync("SyncMap(a=9)", session) == "SyncError(document merge denied)")
+    assert(jet_app_sync("SyncMap(a=1,b=2)", session) == second)
+    assert(jet_app_sync("SyncMap()", "   ") == "SyncError(invalid session)")
+    assert(jet_app_sync("SyncMap(b=2,a=1)", "corpus-0172-bad-doc") == "SyncError(document is not a canonical CRDT value)")
+}

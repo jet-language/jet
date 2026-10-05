@@ -1,32 +1,29 @@
-// PORT-PENDING 0178 crates-jet-codegen-src-prelude-job-module-group: crates/jet-codegen/src/Prelude/JobQueueTypes.rs:1-28
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS /// Opaque typed queue payload. The queue policy and validation live in the
-//RS /// optional service-authority Prelude; this carrier is shared by JobSpec and
-//RS /// every execution tier without importing a service backend.
-//RS #[derive(Clone, Debug, PartialEq, Eq)]
-//RS pub struct JetJobPayload {
-//RS     pub type_id: String,
-//RS     pub bytes: Vec<u8>,
-//RS     pub publish: bool,
-//RS }
-//RS 
-//RS /// Typed queue completion payload shared by generated adapters and the queue
-//RS /// authority. Its constructor and validation are supplied by ServiceAuthority.
-//RS #[derive(Clone, Debug, PartialEq, Eq)]
-//RS pub struct JetJobResult {
-//RS     pub type_id: String,
-//RS     pub bytes: Vec<u8>,
-//RS     pub publish: bool,
-//RS }
-//RS 
-//RS /// Typed queue failure shared by generated adapters and the queue authority.
-//RS /// Its constructor and validation are supplied by ServiceAuthority.
-//RS #[derive(Clone, Debug, PartialEq, Eq)]
-//RS pub struct JetJobError {
-//RS     pub type_id: String,
-//RS     /// Stable machine-readable reason. Human detail is separate and bounded.
-//RS     pub reason: String,
-//RS     pub detail: Option<String>,
-//RS }
-// END-PORT-PENDING 0178 crates/jet-codegen/src/Prelude/JobQueueTypes.rs:1-28
-
+// Rust: crates/jet-codegen/src/Prelude/JobQueueTypes.rs:1
+// Opaque typed payload; policy and validation belong to service authority.
+#Clone
+#Debug
+#Comparable
+pub struct JetJobPayload {
+    pub type_id: String,
+    pub bytes: [U8],
+    pub publish: Bool,
+}
+// Rust: crates/jet-codegen/src/Prelude/JobQueueTypes.rs:11
+#Clone
+#Debug
+#Comparable
+pub struct JetJobResult {
+    pub type_id: String,
+    pub bytes: [U8],
+    pub publish: Bool,
+}
+// Rust: crates/jet-codegen/src/Prelude/JobQueueTypes.rs:20
+#Clone
+#Debug
+#Comparable
+pub struct JetJobError {
+    pub type_id: String,
+    // Stable machine-readable reason; human detail is separate and bounded.
+    pub reason: String,
+    pub detail: String?,
+}

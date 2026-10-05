@@ -1,0 +1,68 @@
+use core.tasks.runtime.kernel_stream.[JetStreamEvent, JetEventTimeState, JetLateEventDisposition, JetStreamEventDisposition, jet_stream_with_event_time_i64]
+use core.tasks.runtime.stream.[jet_stream_task]
+use core.time.runtime.kernel_time.[CivilDateTime]
+
+// Rust: crates/jet-codegen/src/Prelude/Core/Stream.rs:191
+// Behavioral controls: the Rust range contains no inline tests.
+#Test("event_time_configuration_preserves_validation_order") {
+    assert(JetEventTimeState<String, Int>.new(0, -1, .Drop).err() == Val("stream window duration must be positive"))
+    assert(JetEventTimeState<String, Int>.new(1, -1, .Drop).err() == Val("stream allowed lateness must be nonnegative"))
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Stream.rs:218
+#Test("event_time_watermark_boundary_ready_windows_and_side_output") {
+    state := JetEventTimeState<String, Int>.new(10000000000, 3000000000, .SideOutput).expect("state")
+    assert(&state.ingest("b", JetStreamEvent.new(2, CivilDateTime.from_timestamp(2))) == JetStreamEventDisposition.Accepted)
+    assert(&state.ingest("a", JetStreamEvent.new(12, CivilDateTime.from_timestamp(12))) == JetStreamEventDisposition.Accepted)
+    assert(state.watermark().unwrap().to_timestamp() == 9)
+    assert(&state.ingest("b", JetStreamEvent.new(9, CivilDateTime.from_timestamp(9))) == JetStreamEventDisposition.Accepted)
+    assert(&state.ingest("b", JetStreamEvent.new(8, CivilDateTime.from_timestamp(8))) == JetStreamEventDisposition.SideOutput)
+    assert(state.side_output().len() == 1)
+    assert((&state.take_side_output())[0].value == 8)
+    assert(state.side_output().is_empty())
+    _ :: &state.ingest("a", JetStreamEvent.new(20, CivilDateTime.from_timestamp(20)))
+    ready :: &state.take_ready_windows()
+    assert(ready.len() == 1)
+    assert(ready[0].key == "b")
+    assert(ready[0].start.to_timestamp() == 0)
+    assert(ready[0].end.to_timestamp() == 10)
+    assert(ready[0].events.iter().map(event -> event.value).collect<[Int]>() == [2, 9])
+    assert(state.key_order() == ["b", "a"])
+    remaining :: &state.finish()
+    assert(remaining.len() == 2)
+    assert(remaining[0].start.to_timestamp() == 10)
+    assert(remaining[1].start.to_timestamp() == 20)
+    assert(state.watermark().unwrap().to_timestamp() == 17)
+    assert((&state.finish()).is_empty())
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Stream.rs:577
+#Test("event_time_negative_windows_use_euclidean_floor_and_drop_late_events") {
+    state := JetEventTimeState<String, Int>.new(10000000000, 100000000000, .Drop).expect("state")
+    _ :: &state.ingest("k", JetStreamEvent.new(-1, CivilDateTime.from_timestamp(-1)))
+    _ :: &state.ingest("k", JetStreamEvent.new(-11, CivilDateTime.from_timestamp(-11)))
+    assert(&state.ingest("k", JetStreamEvent.new(-200, CivilDateTime.from_timestamp(-200))) == JetStreamEventDisposition.Dropped)
+    windows :: &state.finish()
+    assert(windows.len() == 2)
+    assert(windows[0].start.to_timestamp() == -20)
+    assert(windows[0].end.to_timestamp() == -10)
+    assert(windows[1].start.to_timestamp() == -10)
+    assert(windows[1].end.to_timestamp() == 0)
+    assert(state.side_output().is_empty())
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Stream.rs:449
+#Test("scheduler_stream_keyed_window_view_flushes_source_exactly_once") {
+    source :: jet_stream_task(fn(sender) {
+        loop value in [I64]{1, 2, 12} {
+            if !sender.send_stream(value) -> return
+        }
+    })
+    stamped :: jet_stream_with_event_time_i64(^source, value -> ~value)
+    keyed :: stamped.key_by(_ -> "key")
+    windows := keyed.window(10000000000, 0, .Drop).expect("windows")
+    first :: (&windows.pull_window()).expect("first window")
+    assert(first.events.iter().map(event -> event.value).collect<[I64]>() == [I64]{1, 2})
+    second :: (&windows.pull_window()).expect("last window")
+    assert(second.events.len() == 1)
+    assert(second.events[0].value == I64{12})
+    assert((&windows.pull_window()).is_none())
+    assert((&windows.pull_window()).is_none())
+}

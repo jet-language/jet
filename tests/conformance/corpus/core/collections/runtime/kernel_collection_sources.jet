@@ -1,0 +1,24 @@
+use core.collections.runtime.kernel_collections.[JetLoopSource, JetLoopSourceKind]
+use core.collections.runtime.kernel_collection_sources
+use core.math.runtime.std_math_task_mem.[channel_bounded]
+
+// Rust: crates/jet-codegen/src/Prelude/Core/CollectionSources.rs:7
+#Test("channel_collection_owned_iterator_stops_at_provider_close") {
+    (sender, receiver) :: channel_bounded<I64>(2)
+    sender.send(7)
+    sender.send(9)
+    sender.close()
+    iterator := receiver.jet_loop_source(JetLoopSourceKind.ChannelReceiver, true)
+    assert(iterator.next().unwrap().downcast<I64>().unwrap() == 7)
+    assert(iterator.next().unwrap().downcast<I64>().unwrap() == 9)
+    assert(iterator.next().is_none())
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/CollectionSources.rs:32
+#Test("channel_collection_borrowed_iterator_retains_receiver_handle") {
+    (sender, receiver) :: channel_bounded<I64>(1)
+    sender.send(5)
+    sender.close()
+    iterator := (&receiver).jet_loop_source(JetLoopSourceKind.ChannelReceiver, false)
+    assert(iterator.next().unwrap().downcast<I64>().unwrap() == 5)
+    assert(iterator.next().is_none())
+}

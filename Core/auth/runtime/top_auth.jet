@@ -1,698 +1,349 @@
-// PORT-PENDING 0249 crates-jet-codegen-src-prelude-corelib-top-auth: crates/jet-codegen/src/Prelude/CoreLib/Top/Auth.rs:1-694
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS // D-AUTH2=A / D-AUTH-TOKENPOLICY1=A: strict standalone token verification.
-//RS // JSON goes through Jet's one RFC 8259 parser; Ed25519 goes through the vetted
-//RS // crypto bridge. No token-controlled algorithm or purpose is ever dispatched.
-//RS 
-//RS // D-FAIL-CARRIER1=A: sema declares `Claims.subject`/`.issuer` an
-//RS // `Option<Text>` and `.not_before`/`.issued_at` an `Option<Int>`
-//RS // (jet-sema CheckerCoreLib/core_types.rs), and all four are readable core
-//RS // fields (Codegen/TIR/lower/fields.rs). The one Rust spelling of a Jet `?T`
-//RS // is `JetOutcome<T, JetAbsent>`, so a raw `Option` here would hand rustc a
-//RS // `.Val`/`.None` match whose arms are `Ok`/`Err` — an I2 internal compiler
-//RS // error, the same one `ProcessResult.signal` produced.
-//RS #[derive(Debug, Clone)]
-//RS pub struct JetAuthClaims {
-//RS     pub subject: JetOutcome<String, JetAbsent>,
-//RS     pub audience: String,
-//RS     pub issuer: JetOutcome<String, JetAbsent>,
-//RS     pub expires_at: i64,
-//RS     pub not_before: JetOutcome<i64, JetAbsent>,
-//RS     pub issued_at: JetOutcome<i64, JetAbsent>,
-//RS }
-//RS 
-//RS #[derive(Debug, Clone)]
-//RS pub enum JetAuthError {
-//RS     MalformedToken(String),
-//RS     UnsupportedToken(String),
-//RS     InvalidSignature,
-//RS     WeakKey,
-//RS     MissingClaim(String),
-//RS     WrongAudience { expected: String, actual: String },
-//RS     // Sema declares `AuthError.WrongIssuer.actual` an `Option<Text>`
-//RS     // (core_types.rs), so the payload is the carrier, not a Rust `Option`.
-//RS     WrongIssuer { expected: String, actual: JetOutcome<String, JetAbsent> },
-//RS     TokenExpired,
-//RS     DecodeError(String),
-//RS     TokenNotYetValid,
-//RS }
-//RS 
-//RS // Claims are decoded directly into the canonical ordered DataTree.
-//RS fn jet_auth_get<'a>(
-//RS     fields: &'a [(String, jet_std::DataTree)],
-//RS     name: &str,
-//RS ) -> Option<&'a jet_std::DataTree> {
-//RS     fields
-//RS         .iter()
-//RS         .find_map(|(key, value)| (key == name).then_some(value))
-//RS }
-//RS 
-//RS fn jet_auth_b64_decode_inner(s: &str) -> Result<Vec<u8>, String> {
-//RS     let mut out = Vec::with_capacity(s.len().saturating_mul(3) / 4);
-//RS     let mut buf = 0u32;
-//RS     let mut bits = 0u8;
-//RS     let mut padding = false;
-//RS     for b in s.bytes() {
-//RS         if b == b'=' {
-//RS             padding = true;
-//RS             continue;
-//RS         }
-//RS         if padding {
-//RS             return Err("base64 padding must be final".to_string());
-//RS         }
-//RS         let v = match b {
-//RS             b'A'..=b'Z' => b - b'A',
-//RS             b'a'..=b'z' => b - b'a' + 26,
-//RS             b'0'..=b'9' => b - b'0' + 52,
-//RS             b'+' => 62,
-//RS             b'/' => 63,
-//RS             _ => return Err("invalid base64 character".to_string()),
-//RS         };
-//RS         // At most seven residual bits survive each byte emission. Keeping a
-//RS         // bounded accumulator prevents long attacker-controlled input from
-//RS         // overflowing before malformed input is rejected.
-//RS         buf = ((buf << 6) | v as u32) & 0x00ff_ffff;
-//RS         bits += 6;
-//RS         if bits >= 8 {
-//RS             bits -= 8;
-//RS             out.push((buf >> bits) as u8);
-//RS         }
-//RS     }
-//RS     if bits != 0 && buf & ((1u32 << bits) - 1) != 0 {
-//RS         return Err("non-canonical base64 trailing bits".to_string());
-//RS     }
-//RS     Ok(out)
-//RS }
-//RS 
-//RS fn jet_auth_b64url_decode(text: &str) -> Result<Vec<u8>, String> {
-//RS     if text.bytes().any(|b| {
-//RS         !matches!(b, b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_')
-//RS     }) {
-//RS         return Err("invalid base64url character".to_string());
-//RS     }
-//RS     let mut s = text.replace('-', "+").replace('_', "/");
-//RS     if s.len() % 4 == 1 {
-//RS         return Err("invalid base64url length".to_string());
-//RS     }
-//RS     while s.len() % 4 != 0 {
-//RS         s.push('=');
-//RS     }
-//RS     jet_auth_b64_decode_inner(&s)
-//RS }
-//RS 
-//RS fn jet_auth_object(text: &str) -> Result<Vec<(String, jet_std::DataTree)>, JetAuthError> {
-//RS     match jet_std::parse_json_strict(text) {
-//RS         Ok(jet_std::DataTree::Object(fields)) => Ok(fields),
-//RS         Ok(_) => Err(JetAuthError::MalformedToken("token JSON must be an object".to_string())),
-//RS         Err(error) => Err(JetAuthError::DecodeError(error.reason)),
-//RS     }
-//RS }
-//RS 
-//RS fn jet_auth_json_hex4(chars: &[char], pos: &mut usize) -> Option<u32> {
-//RS     let mut value = 0u32;
-//RS     for _ in 0..4 {
-//RS         let digit = chars.get(*pos)?.to_digit(16)?;
-//RS         *pos += 1;
-//RS         value = value * 16 + digit;
-//RS     }
-//RS     Some(value)
-//RS }
-//RS 
-//RS fn jet_auth_json_string(chars: &[char], pos: &mut usize) -> Option<String> {
-//RS     if chars.get(*pos) != Some(&'"') {
-//RS         return None;
-//RS     }
-//RS     *pos += 1;
-//RS     let mut out = String::new();
-//RS     while let Some(character) = chars.get(*pos).copied() {
-//RS         *pos += 1;
-//RS         match character {
-//RS             '"' => return Some(out),
-//RS             '\\' => {
-//RS                 let escaped = chars.get(*pos).copied()?;
-//RS                 *pos += 1;
-//RS                 match escaped {
-//RS                     '"' => out.push('"'),
-//RS                     '\\' => out.push('\\'),
-//RS                     '/' => out.push('/'),
-//RS                     'b' => out.push('\u{0008}'),
-//RS                     'f' => out.push('\u{000c}'),
-//RS                     'n' => out.push('\n'),
-//RS                     'r' => out.push('\r'),
-//RS                     't' => out.push('\t'),
-//RS                     'u' => {
-//RS                         let high = jet_auth_json_hex4(chars, pos)?;
-//RS                         if (0xD800..=0xDBFF).contains(&high) {
-//RS                             if chars.get(*pos) != Some(&'\\') {
-//RS                                 return None;
-//RS                             }
-//RS                             *pos += 1;
-//RS                             if chars.get(*pos) != Some(&'u') {
-//RS                                 return None;
-//RS                             }
-//RS                             *pos += 1;
-//RS                             let low = jet_auth_json_hex4(chars, pos)?;
-//RS                             if !(0xDC00..=0xDFFF).contains(&low) {
-//RS                                 return None;
-//RS                             }
-//RS                             let combined = 0x10000 + ((high - 0xD800) << 10) + (low - 0xDC00);
-//RS                             out.push(char::from_u32(combined)?);
-//RS                         } else if (0xDC00..=0xDFFF).contains(&high) {
-//RS                             return None;
-//RS                         } else {
-//RS                             out.push(char::from_u32(high)?);
-//RS                         }
-//RS                     }
-//RS                     _ => return None,
-//RS                 }
-//RS             }
-//RS             character if (character as u32) < 0x20 => return None,
-//RS             _ => out.push(character),
-//RS         }
-//RS     }
-//RS     None
-//RS }
-//RS 
-//RS fn jet_auth_json_skip_value(chars: &[char], pos: &mut usize) {
-//RS     let Some(first) = chars.get(*pos).copied() else {
-//RS         return;
-//RS     };
-//RS     if first == '"' {
-//RS         let _ = jet_auth_json_string(chars, pos);
-//RS         return;
-//RS     }
-//RS     if first == '{' || first == '[' {
-//RS         let mut closers = vec![if first == '{' { '}' } else { ']' }];
-//RS         *pos += 1;
-//RS         while let Some(character) = chars.get(*pos).copied() {
-//RS             if character == '"' {
-//RS                 let _ = jet_auth_json_string(chars, pos);
-//RS                 continue;
-//RS             }
-//RS             *pos += 1;
-//RS             match character {
-//RS                 '{' => closers.push('}'),
-//RS                 '[' => closers.push(']'),
-//RS                 '}' | ']' if closers.last() == Some(&character) => {
-//RS                     closers.pop();
-//RS                     if closers.is_empty() {
-//RS                         return;
-//RS                     }
-//RS                 }
-//RS                 _ => {}
-//RS             }
-//RS         }
-//RS         return;
-//RS     }
-//RS     while chars
-//RS         .get(*pos)
-//RS         .is_some_and(|character| {
-//RS             !jet_std::is_json_structural_whitespace(*character)
-//RS                 && *character != ','
-//RS                 && *character != '}'
-//RS                 && *character != ']'
-//RS         })
-//RS     {
-//RS         *pos += 1;
-//RS     }
-//RS }
-//RS 
-//RS // NumericDate claims are checked against their source lexeme so exact Int
-//RS // values never cross a binary64 rounding boundary.
-//RS fn jet_auth_number_lexeme(text: &str, name: &str) -> Option<String> {
-//RS     let chars: Vec<char> = text.chars().collect();
-//RS     let mut pos = 0usize;
-//RS     while chars
-//RS         .get(pos)
-//RS         .is_some_and(|character| jet_std::is_json_structural_whitespace(*character))
-//RS     {
-//RS         pos += 1;
-//RS     }
-//RS     if chars.get(pos) != Some(&'{') {
-//RS         return None;
-//RS     }
-//RS     pos += 1;
-//RS     loop {
-//RS         while chars
-//RS             .get(pos)
-//RS             .is_some_and(|character| jet_std::is_json_structural_whitespace(*character))
-//RS         {
-//RS             pos += 1;
-//RS         }
-//RS         if chars.get(pos) == Some(&'}') {
-//RS             return None;
-//RS         }
-//RS         let key = jet_auth_json_string(&chars, &mut pos)?;
-//RS         while chars
-//RS             .get(pos)
-//RS             .is_some_and(|character| jet_std::is_json_structural_whitespace(*character))
-//RS         {
-//RS             pos += 1;
-//RS         }
-//RS         if chars.get(pos) != Some(&':') {
-//RS             return None;
-//RS         }
-//RS         pos += 1;
-//RS         while chars
-//RS             .get(pos)
-//RS             .is_some_and(|character| jet_std::is_json_structural_whitespace(*character))
-//RS         {
-//RS             pos += 1;
-//RS         }
-//RS         let value_start = pos;
-//RS         let is_number = chars
-//RS             .get(pos)
-//RS             .is_some_and(|character| *character == '-' || character.is_ascii_digit());
-//RS         if is_number {
-//RS             while chars.get(pos).is_some_and(|character| {
-//RS                 !jet_std::is_json_structural_whitespace(*character)
-//RS                     && *character != ','
-//RS                     && *character != '}'
-//RS             }) {
-//RS                 pos += 1;
-//RS             }
-//RS             if key == name {
-//RS                 return Some(chars[value_start..pos].iter().copied().collect());
-//RS             }
-//RS         } else {
-//RS             jet_auth_json_skip_value(&chars, &mut pos);
-//RS         }
-//RS         while chars
-//RS             .get(pos)
-//RS             .is_some_and(|character| jet_std::is_json_structural_whitespace(*character))
-//RS         {
-//RS             pos += 1;
-//RS         }
-//RS         match chars.get(pos).copied() {
-//RS             Some(',') => pos += 1,
-//RS             Some('}') | None => return None,
-//RS             _ => return None,
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn jet_auth_parse_i64_decimal(lexeme: &str) -> Option<i64> {
-//RS     let (negative, digits) = lexeme
-//RS         .strip_prefix('-')
-//RS         .map_or((false, lexeme), |digits| (true, digits));
-//RS     if digits.is_empty() || !digits.bytes().all(|byte| byte.is_ascii_digit()) {
-//RS         return None;
-//RS     }
-//RS     if negative && digits == "0" {
-//RS         return None;
-//RS     }
-//RS     let limit = if negative { 1u64 << 63 } else { i64::MAX as u64 };
-//RS     let magnitude = digits.bytes().try_fold(0u64, |value, byte| {
-//RS         let value = value
-//RS             .checked_mul(10)?
-//RS             .checked_add(u64::from(byte - b'0'))?;
-//RS         (value <= limit).then_some(value)
-//RS     })?;
-//RS     if negative {
-//RS         if magnitude == 1u64 << 63 {
-//RS             Some(i64::MIN)
-//RS         } else {
-//RS             i64::try_from(magnitude).ok()?.checked_neg()
-//RS         }
-//RS     } else {
-//RS         i64::try_from(magnitude).ok()
-//RS     }
-//RS }
-//RS 
-//RS fn jet_auth_optional_text(
-//RS     fields: &[(String, jet_std::DataTree)],
-//RS     name: &str,
-//RS ) -> Result<Option<String>, JetAuthError> {
-//RS     match jet_auth_get(fields, name) {
-//RS         None => Ok(None),
-//RS         Some(jet_std::DataTree::Text(value) | jet_std::DataTree::TypedText(value)) => {
-//RS             Ok(Some(value.clone()))
-//RS         }
-//RS         Some(_) => Err(JetAuthError::MalformedToken(format!("claim `{name}` must be text"))),
-//RS     }
-//RS }
-//RS 
-//RS fn jet_auth_i64_claim(
-//RS     fields: &[(String, jet_std::DataTree)],
-//RS     text: &str,
-//RS     name: &str,
-//RS ) -> Result<Option<i64>, JetAuthError> {
-//RS     match jet_auth_get(fields, name) {
-//RS         None => Ok(None),
-//RS         Some(jet_std::DataTree::Int(_) | jet_std::DataTree::Number(_)) => {
-//RS             let lexeme = jet_auth_number_lexeme(text, name).ok_or_else(|| {
-//RS                 JetAuthError::MalformedToken(format!("claim `{name}` must be an exact integer"))
-//RS             })?;
-//RS             let value = jet_auth_parse_i64_decimal(&lexeme).ok_or_else(|| {
-//RS                 JetAuthError::MalformedToken(format!("claim `{name}` must be an exact integer"))
-//RS             })?;
-//RS             Ok(Some(value))
-//RS         }
-//RS         Some(_) => Err(JetAuthError::MalformedToken(format!("claim `{name}` must be an integer"))),
-//RS     }
-//RS }
-//RS 
-//RS fn jet_auth_required_i64(
-//RS     fields: &[(String, jet_std::DataTree)],
-//RS     text: &str,
-//RS     name: &str,
-//RS ) -> Result<i64, JetAuthError> {
-//RS     jet_auth_i64_claim(fields, text, name)?.ok_or_else(|| JetAuthError::MissingClaim(name.to_string()))
-//RS }
-//RS 
-//RS fn jet_auth_optional_i64(
-//RS     fields: &[(String, jet_std::DataTree)],
-//RS     text: &str,
-//RS     name: &str,
-//RS ) -> Result<Option<i64>, JetAuthError> {
-//RS     jet_auth_i64_claim(fields, text, name)
-//RS }
-//RS 
-//RS fn jet_auth_audience_values(value: &jet_std::DataTree) -> Result<Vec<String>, JetAuthError> {
-//RS     match value {
-//RS         jet_std::DataTree::Text(value) | jet_std::DataTree::TypedText(value) => {
-//RS             Ok(vec![value.clone()])
-//RS         }
-//RS         jet_std::DataTree::Array(values) if values.is_empty() => {
-//RS             Err(JetAuthError::MalformedToken(
-//RS                 "claim `aud` must contain at least one text".to_string(),
-//RS             ))
-//RS         }
-//RS         jet_std::DataTree::Array(values) => values
-//RS             .iter()
-//RS             .map(|value| match value {
-//RS                 jet_std::DataTree::Text(value) | jet_std::DataTree::TypedText(value) => {
-//RS                     Ok(value.clone())
-//RS                 }
-//RS                 _ => Err(JetAuthError::MalformedToken(
-//RS                     "claim `aud` must contain only text".to_string(),
-//RS                 )),
-//RS             })
-//RS             .collect(),
-//RS         _ => Err(JetAuthError::MalformedToken(
-//RS             "claim `aud` must be text or a text list".to_string(),
-//RS         )),
-//RS     }
-//RS }
-//RS 
-//RS fn jet_auth_audience(
-//RS     fields: &[(String, jet_std::DataTree)],
-//RS     expected: &str,
-//RS ) -> Result<String, JetAuthError> {
-//RS     let value = jet_auth_get(fields, "aud")
-//RS         .ok_or_else(|| JetAuthError::MissingClaim("aud".to_string()))?;
-//RS     let values = jet_auth_audience_values(value)?;
-//RS     if values.iter().any(|value| value == expected) {
-//RS         Ok(expected.to_string())
-//RS     } else {
-//RS         Err(JetAuthError::WrongAudience {
-//RS             expected: expected.to_string(),
-//RS             actual: values.join(","),
-//RS         })
-//RS     }
-//RS }
-//RS 
-//RS const JET_AUTH_NANOS_PER_SECOND: i64 = 1_000_000_000;
-//RS 
-//RS fn jet_auth_clock_skew_ns(clock_skew_ns: Option<i64>) -> i64 {
-//RS     clock_skew_ns.unwrap_or(0)
-//RS }
-//RS 
-//RS fn jet_auth_timestamp_ns(
-//RS     timestamp: i64,
-//RS     name: &str,
-//RS ) -> Result<i128, JetAuthError> {
-//RS     i128::from(timestamp)
-//RS         .checked_mul(i128::from(JET_AUTH_NANOS_PER_SECOND))
-//RS         .ok_or_else(|| {
-//RS             JetAuthError::MalformedToken(format!(
-//RS                 "claim `{name}` is outside the supported nanosecond range"
-//RS             ))
-//RS         })
-//RS }
-//RS 
-//RS fn jet_auth_expiry_deadline_ns(
-//RS     expires_at: i64,
-//RS     clock_skew_ns: i64,
-//RS ) -> Result<i128, JetAuthError> {
-//RS     let expires_at_ns = jet_auth_timestamp_ns(expires_at, "exp")?;
-//RS     // Keep signed sub-millisecond skew exact in the i128 comparison.
-//RS     expires_at_ns
-//RS         .checked_add(i128::from(clock_skew_ns))
-//RS         .ok_or_else(|| JetAuthError::MalformedToken("clock_skew overflows the token expiry".to_string()))
-//RS }
-//RS 
-//RS fn jet_auth_not_before_threshold_ns(
-//RS     not_before: i64,
-//RS     clock_skew_ns: i64,
-//RS ) -> Result<i128, JetAuthError> {
-//RS     jet_auth_timestamp_ns(not_before, "nbf")?
-//RS         .checked_sub(i128::from(clock_skew_ns))
-//RS         .ok_or_else(|| JetAuthError::MalformedToken("clock_skew underflows the token not-before".to_string()))
-//RS }
-//RS 
-//RS fn jet_auth_now_ns() -> i128 {
-//RS     std::time::SystemTime::now()
-//RS         .duration_since(std::time::UNIX_EPOCH)
-//RS         .ok()
-//RS         .and_then(|duration| i128::try_from(duration.as_nanos()).ok())
-//RS         .unwrap_or(i128::MAX)
-//RS }
-//RS 
-//RS fn jet_auth_claims_at(
-//RS     payload: &[u8],
-//RS     audience: &str,
-//RS     issuer: Option<&str>,
-//RS     clock_skew_ns: i64,
-//RS     now_ns: i128,
-//RS ) -> Result<JetAuthClaims, JetAuthError> {
-//RS     let text = std::str::from_utf8(payload)
-//RS         .map_err(|_| JetAuthError::MalformedToken("claims are not valid UTF-8".to_string()))?;
-//RS     let fields = jet_auth_object(text)?;
-//RS     let expires_at = jet_auth_required_i64(&fields, text, "exp")?;
-//RS     let subject = jet_auth_optional_text(&fields, "sub")?;
-//RS     let expected_audience = jet_auth_audience(&fields, audience)?;
-//RS     let actual_issuer = jet_auth_optional_text(&fields, "iss")?;
-//RS     let not_before = jet_auth_optional_i64(&fields, text, "nbf")?;
-//RS     let issued_at = jet_auth_optional_i64(&fields, text, "iat")?;
-//RS     if let Some(expected) = issuer {
-//RS         if actual_issuer.as_deref() != Some(expected) {
-//RS             return Err(JetAuthError::WrongIssuer {
-//RS                 expected: expected.to_string(),
-//RS                 actual: jet_outcome_of(actual_issuer),
-//RS             });
-//RS         }
-//RS     }
-//RS     let expiry_deadline_ns = jet_auth_expiry_deadline_ns(expires_at, clock_skew_ns)?;
-//RS     if now_ns >= expiry_deadline_ns {
-//RS         return Err(JetAuthError::TokenExpired);
-//RS     }
-//RS     if let Some(not_before) = not_before {
-//RS         let valid_from_ns = jet_auth_not_before_threshold_ns(not_before, clock_skew_ns)?;
-//RS         if now_ns < valid_from_ns {
-//RS             return Err(JetAuthError::TokenNotYetValid);
-//RS         }
-//RS     }
-//RS     // Decoding keeps Rust plumbing (`Option`) so every claim reads the same;
-//RS     // the carrier starts here, once, exactly like `IOContext::new`.
-//RS     Ok(JetAuthClaims {
-//RS         subject: jet_outcome_of(subject),
-//RS         audience: expected_audience,
-//RS         issuer: jet_outcome_of(actual_issuer),
-//RS         expires_at,
-//RS         not_before: jet_outcome_of(not_before),
-//RS         issued_at: jet_outcome_of(issued_at),
-//RS     })
-//RS }
-//RS 
-//RS fn jet_auth_claims(
-//RS     payload: &[u8],
-//RS     audience: &str,
-//RS     issuer: Option<&str>,
-//RS     clock_skew_ns: i64,
-//RS ) -> Result<JetAuthClaims, JetAuthError> {
-//RS     jet_auth_claims_at(
-//RS         payload,
-//RS         audience,
-//RS         issuer,
-//RS         clock_skew_ns,
-//RS         jet_auth_now_ns(),
-//RS     )
-//RS }
-//RS 
-//RS fn jet_auth_verify_jwt_impl(
-//RS     token: &String,
-//RS     key: &Vec<u8>,
-//RS     audience: &String,
-//RS     issuer: Option<&String>,
-//RS     clock_skew_ns: i64,
-//RS ) -> Result<JetAuthClaims, JetAuthError> {
-//RS     if key.len() < 32 {
-//RS         return Err(JetAuthError::WeakKey);
-//RS     }
-//RS     let parts = token.split('.').collect::<Vec<_>>();
-//RS     if parts.len() != 3 || parts.iter().any(|part| part.is_empty()) {
-//RS         return Err(JetAuthError::MalformedToken(
-//RS             "JWT must have exactly three non-empty parts".to_string(),
-//RS         ));
-//RS     }
-//RS     let header = jet_auth_b64url_decode(parts[0]).map_err(JetAuthError::DecodeError)?;
-//RS     let header = std::str::from_utf8(&header)
-//RS         .map_err(|_| JetAuthError::MalformedToken("JWT header is not valid UTF-8".to_string()))?;
-//RS     let header = jet_auth_object(header)?;
-//RS     match jet_auth_get(&header, "alg") {
-//RS         Some(jet_std::DataTree::Text(algorithm) | jet_std::DataTree::TypedText(algorithm))
-//RS             if algorithm == "HS256" => {}
-//RS         Some(jet_std::DataTree::Text(algorithm) | jet_std::DataTree::TypedText(algorithm)) => {
-//RS             return Err(JetAuthError::UnsupportedToken(format!(
-//RS                 "unsupported JWT algorithm `{algorithm}`"
-//RS             )));
-//RS         }
-//RS         _ => {
-//RS             return Err(JetAuthError::MalformedToken(
-//RS                 "JWT header requires text `alg`".to_string(),
-//RS             ))
-//RS         }
-//RS     }
-//RS     let signature = jet_auth_b64url_decode(parts[2]).map_err(|_| JetAuthError::InvalidSignature)?;
-//RS     let expected = jet_hmac_sha256(key, format!("{}.{}", parts[0], parts[1]).as_bytes());
-//RS     if !jet_ct_eq(&expected, &signature) {
-//RS         return Err(JetAuthError::InvalidSignature);
-//RS     }
-//RS     let payload = jet_auth_b64url_decode(parts[1]).map_err(JetAuthError::DecodeError)?;
-//RS     jet_auth_claims(&payload, audience, issuer.map(String::as_str), clock_skew_ns)
-//RS }
-//RS 
-//RS fn jet_auth_verify_jwt_defaulted(
-//RS     token: &String,
-//RS     key: &Vec<u8>,
-//RS     audience: &String,
-//RS     issuer: Option<&String>,
-//RS     clock_skew_ns: Option<i64>,
-//RS ) -> Result<JetAuthClaims, JetAuthError> {
-//RS     let clock_skew_ns = jet_auth_clock_skew_ns(clock_skew_ns);
-//RS     jet_auth_verify_jwt_impl(
-//RS         token,
-//RS         key,
-//RS         audience,
-//RS         issuer,
-//RS         clock_skew_ns,
-//RS     )
-//RS }
-//RS 
-//RS fn jet_auth_pae(pieces: &[&[u8]]) -> Vec<u8> {
-//RS     let capacity = 8 + pieces.iter().map(|piece| 8 + piece.len()).sum::<usize>();
-//RS     let mut out = Vec::with_capacity(capacity);
-//RS     out.extend_from_slice(&(pieces.len() as u64).to_le_bytes());
-//RS     for piece in pieces {
-//RS         out.extend_from_slice(&(piece.len() as u64).to_le_bytes());
-//RS         out.extend_from_slice(piece);
-//RS     }
-//RS     out
-//RS }
-//RS 
-//RS fn jet_auth_verify_paseto_impl<F, E>(
-//RS     token: &String,
-//RS     key: &Vec<u8>,
-//RS     audience: &String,
-//RS     issuer: Option<&String>,
-//RS     clock_skew_ns: i64,
-//RS     footer: &Vec<u8>,
-//RS     implicit: &Vec<u8>,
-//RS     verify: F,
-//RS ) -> Result<JetAuthClaims, JetAuthError>
-//RS where
-//RS     F: Fn(&Vec<u8>, &Vec<u8>, &Vec<u8>) -> Result<bool, E>,
-//RS {
-//RS     if key.len() != 32 { return Err(JetAuthError::WeakKey); }
-//RS     let parts = token.split('.').collect::<Vec<_>>();
-//RS     if parts.len() < 3 || parts.len() > 4 || parts[0] != "v4" || parts[1] != "public" {
-//RS         return Err(JetAuthError::UnsupportedToken("only PASETO v4.public is supported".to_string()));
-//RS     }
-//RS     let body = jet_auth_b64url_decode(parts[2]).map_err(JetAuthError::DecodeError)?;
-//RS     if body.len() < 64 { return Err(JetAuthError::MalformedToken("PASETO body is shorter than its signature".to_string())); }
-//RS     let token_footer = if let Some(encoded) = parts.get(3) {
-//RS         jet_auth_b64url_decode(encoded).map_err(JetAuthError::DecodeError)?
-//RS     } else { Vec::new() };
-//RS     if !jet_ct_eq(&token_footer, footer) { return Err(JetAuthError::InvalidSignature); }
-//RS     let split = body.len() - 64;
-//RS     let message = body[..split].to_vec();
-//RS     let signature = body[split..].to_vec();
-//RS     let signed = jet_auth_pae(&[b"v4.public.", &message, footer, implicit]);
-//RS     if !verify(key, &signed, &signature).unwrap_or(false) {
-//RS         return Err(JetAuthError::InvalidSignature);
-//RS     }
-//RS     jet_auth_claims(&message, audience, issuer.map(String::as_str), clock_skew_ns)
-//RS }
-//RS 
-//RS fn jet_auth_verify_paseto_defaulted<F, E>(
-//RS     token: &String,
-//RS     key: &Vec<u8>,
-//RS     audience: &String,
-//RS     issuer: Option<&String>,
-//RS     clock_skew_ns: Option<i64>,
-//RS     footer: Option<&Vec<u8>>,
-//RS     implicit: Option<&Vec<u8>>,
-//RS     verify: F,
-//RS ) -> Result<JetAuthClaims, JetAuthError>
-//RS where
-//RS     F: Fn(&Vec<u8>, &Vec<u8>, &Vec<u8>) -> Result<bool, E>,
-//RS {
-//RS     let empty_footer = Vec::new();
-//RS     let empty_implicit = Vec::new();
-//RS     let clock_skew_ns = jet_auth_clock_skew_ns(clock_skew_ns);
-//RS     jet_auth_verify_paseto_impl(
-//RS         token,
-//RS         key,
-//RS         audience,
-//RS         issuer,
-//RS         clock_skew_ns,
-//RS         footer.unwrap_or(&empty_footer),
-//RS         implicit.unwrap_or(&empty_implicit),
-//RS         verify,
-//RS     )
-//RS }
-//RS 
-//RS #[cfg(test)]
-//RS mod auth_tests {
-//RS     use super::*;
-//RS 
-//RS     #[test]
-//RS     fn numeric_date_boundaries_keep_nanoseconds() {
-//RS         let expiry = br#"{"aud":"gateway","exp":10}"#;
-//RS         let expiry_ns = 10_i128 * i128::from(JET_AUTH_NANOS_PER_SECOND);
-//RS         let skew = 7_i64;
-//RS         let deadline = expiry_ns + i128::from(skew);
-//RS         assert!(matches!(
-//RS             jet_auth_claims_at(expiry, "gateway", None, skew, deadline - 1),
-//RS             Ok(_)
-//RS         ));
-//RS         assert!(matches!(
-//RS             jet_auth_claims_at(expiry, "gateway", None, skew, deadline),
-//RS             Err(JetAuthError::TokenExpired)
-//RS         ));
-//RS         assert!(matches!(
-//RS             jet_auth_claims_at(expiry, "gateway", None, skew, deadline + 1),
-//RS             Err(JetAuthError::TokenExpired)
-//RS         ));
-//RS 
-//RS         let not_before = br#"{"aud":"gateway","exp":30,"nbf":20,"iat":-9223372036854775808}"#;
-//RS         let not_before_ns = 20_i128 * i128::from(JET_AUTH_NANOS_PER_SECOND);
-//RS         let threshold = not_before_ns - i128::from(skew);
-//RS         assert!(matches!(
-//RS             jet_auth_claims_at(not_before, "gateway", None, skew, threshold - 1),
-//RS             Err(JetAuthError::TokenNotYetValid)
-//RS         ));
-//RS         let claims = jet_auth_claims_at(not_before, "gateway", None, skew, threshold)
-//RS             .expect("not-before boundary should be accepted");
-//RS         assert_eq!(claims.not_before, Ok(20));
-//RS         assert_eq!(claims.issued_at, Ok(i64::MIN));
-//RS 
-//RS         let maximum = br#"{"aud":"gateway","exp":30,"iat":9223372036854775807}"#;
-//RS         let claims = jet_auth_claims_at(maximum, "gateway", None, 0, 0)
-//RS             .expect("maximum issued-at should remain representable");
-//RS         assert_eq!(claims.issued_at, Ok(i64::MAX));
-//RS     }
-//RS }
-// END-PORT-PENDING 0249 crates/jet-codegen/src/Prelude/CoreLib/Top/Auth.rs:1-694
+use core.encoding.DataTree
+use core.encoding.runtime.std_json_codec.[parse_json_strict, is_json_structural_whitespace]
+use core.crypto.runtime.top_sha256_raw.[jet_hmac_sha256, jet_ct_eq]
+use std.time.[SystemTime, UNIX_EPOCH]
 
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Auth.rs:1
+// Strict standalone verification: canonical RFC8259 JSON, fixed token algorithms.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Auth.rs:13
+pub struct JetAuthClaims {
+    pub subject: String?
+    pub audience: String
+    pub issuer: String?
+    pub expires_at: I64
+    pub not_before: I64?
+    pub issued_at: I64?
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Auth.rs:23
+#Error
+pub enum JetAuthError {
+    MalformedToken(String)
+    UnsupportedToken(String)
+    InvalidSignature
+    WeakKey
+    MissingClaim(String)
+    WrongAudience { expected: String, actual: String }
+    WrongIssuer { expected: String, actual: String? }
+    TokenExpired
+    DecodeError(String)
+    TokenNotYetValid
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Auth.rs:39
+fn jet_auth_get(fields: [(String, DataTree)], name: String) -> DataTree? {
+    fields.iter().find_map(pair -> (pair.0 == name).then_some(pair.1))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Auth.rs:48
+fn jet_auth_b64_decode_inner(s: String) -> [U8] Err! {
+    out := [U8].with_capacity(s.len().saturating_mul(3) / 4)
+    buf := U32{0}
+    bits := U8{0}
+    padding := false
+    for b in s.bytes() {
+        if b == U8{61} { padding = true; continue }
+        if padding -> return Err("base64 padding must be final")
+        v :: match b {
+            U8{65}..=U8{90} -> b - 65
+            U8{97}..=U8{122} -> b - 97 + 26
+            U8{48}..=U8{57} -> b - 48 + 52
+            U8{43} -> U8{62}
+            U8{47} -> U8{63}
+            _ -> return Err("invalid base64 character")
+        }
+        buf = ((buf << 6) | U32{v}) & U32{0x00ffffff}
+        bits += 6
+        if bits >= 8 { bits -= 8; out.push(U8{buf >> bits}) }
+    }
+    if bits != 0 && buf & ((U32{1} << bits) - 1) != 0 -> return Err("non-canonical base64 trailing bits")
+    Ok(^out)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Auth.rs:85
+fn jet_auth_b64url_decode(text: String) -> [U8] Err! {
+    if text.bytes().any(b -> !matches(b, U8{65}..=U8{90} | U8{97}..=U8{122} | U8{48}..=U8{57} | U8{45} | U8{95})) {
+        return Err("invalid base64url character")
+    }
+    s := text.replace('-', "+").replace('_', "/")
+    if s.len() % 4 == 1 -> return Err("invalid base64url length")
+    while s.len() % 4 != 0 -> s.push('=')
+    jet_auth_b64_decode_inner(s)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Auth.rs:101
+fn jet_auth_object(text: String) -> [(String, DataTree)] JetAuthError! {
+    match parse_json_strict(text) {
+        Ok(DataTree.Object(fields)) -> Ok(^fields)
+        Ok(_) -> Err(JetAuthError.MalformedToken("token JSON must be an object"))
+        Err(error) -> Err(JetAuthError.DecodeError(error.reason))
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Auth.rs:109
+fn jet_auth_json_hex4(chars: [Char], pos: &USize) -> U32? {
+    value := U32{0}
+    for _ in 0..4 {
+        digit :: chars.get(pos)?.to_digit(16)?
+        pos += 1
+        value = value * 16 + digit
+    }
+    Val(value)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Auth.rs:119
+fn jet_auth_json_string(chars: [Char], pos: &USize) -> String? {
+    if chars.get(pos) != Val('"') -> return None
+    pos += 1
+    out := String.new()
+    while chars.get(pos) is Val(character) {
+        pos += 1
+        match character {
+            '"' -> return Val(^out)
+            '\\' -> {
+                escaped :: chars.get(pos)?
+                pos += 1
+                match escaped {
+                    '"' -> out.push('"')
+                    '\\' -> out.push('\\')
+                    '/' -> out.push('/')
+                    'b' -> out.push('\u{0008}')
+                    'f' -> out.push('\u{000c}')
+                    'n' -> out.push('\n')
+                    'r' -> out.push('\r')
+                    't' -> out.push('\t')
+                    'u' -> {
+                        high :: jet_auth_json_hex4(chars, &pos)?
+                        if (U32{0xD800}..=U32{0xDBFF}).contains(high) {
+                            if chars.get(pos) != Val('\\') -> return None
+                            pos += 1
+                            if chars.get(pos) != Val('u') -> return None
+                            pos += 1
+                            low :: jet_auth_json_hex4(chars, &pos)?
+                            if !(U32{0xDC00}..=U32{0xDFFF}).contains(low) -> return None
+                            combined :: U32{0x10000} + ((high - U32{0xD800}) << 10) + (low - U32{0xDC00})
+                            out.push(Char.from_u32(combined)?)
+                        } else if (U32{0xDC00}..=U32{0xDFFF}).contains(high) {
+                            return None
+                        } else { out.push(Char.from_u32(high)?) }
+                    }
+                    _ -> return None
+                }
+            }
+            character if U32{character} < U32{0x20} -> return None
+            _ -> out.push(character)
+        }
+    }
+    None
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Auth.rs:174
+fn jet_auth_json_skip_value(chars: [Char], pos: &USize) -> {
+    first :: match chars.get(pos) { Val(first) -> first, None -> return }
+    if first == '"' { _ :: jet_auth_json_string(chars, &pos); return }
+    if first == '{' || first == '[' {
+        closers := [if first == '{' { '}' } else { ']' }]
+        pos += 1
+        while chars.get(pos) is Val(character) {
+            if character == '"' { _ :: jet_auth_json_string(chars, &pos); continue }
+            pos += 1
+            match character {
+                '{' -> closers.push('}')
+                '[' -> closers.push(']')
+                '}' | ']' if closers.last() == Val(character) -> {
+                    _ :: closers.pop()
+                    if closers.is_empty() -> return
+                }
+                _ -> {}
+            }
+        }
+        return
+    }
+    while chars.get(pos).is_some_and(character -> !is_json_structural_whitespace(character) && character != ',' && character != '}' && character != ']') -> pos += 1
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Auth.rs:220
+// Check NumericDate against source lexemes; do not pass exact Int through binary64.
+fn jet_auth_number_lexeme(text: String, name: String) -> String? {
+    chars :: text.chars().collect::<[Char]>()
+    pos := USize{0}
+    while chars.get(pos).is_some_and(is_json_structural_whitespace) -> pos += 1
+    if chars.get(pos) != Val('{') -> return None
+    pos += 1
+    loop {
+        while chars.get(pos).is_some_and(is_json_structural_whitespace) -> pos += 1
+        if chars.get(pos) == Val('}') -> return None
+        key :: jet_auth_json_string(chars, &pos)?
+        while chars.get(pos).is_some_and(is_json_structural_whitespace) -> pos += 1
+        if chars.get(pos) != Val(':') -> return None
+        pos += 1
+        while chars.get(pos).is_some_and(is_json_structural_whitespace) -> pos += 1
+        value_start :: pos
+        is_number :: chars.get(pos).is_some_and(character -> character == '-' || character.is_ascii_digit())
+        if is_number {
+            while chars.get(pos).is_some_and(character -> !is_json_structural_whitespace(character) && character != ',' && character != '}') -> pos += 1
+            if key == name -> return Val(chars[value_start..pos].iter().copied().collect())
+        } else { jet_auth_json_skip_value(chars, &pos) }
+        while chars.get(pos).is_some_and(is_json_structural_whitespace) -> pos += 1
+        match chars.get(pos) {
+            Val(',') -> pos += 1
+            Val('}') | None -> return None
+            _ -> return None
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Auth.rs:292
+fn jet_auth_parse_i64_decimal(lexeme: String) -> I64? {
+    (negative, digits) :: lexeme.strip_prefix('-').map_or((false, lexeme), digits -> (true, digits))
+    if digits.is_empty() || !digits.bytes().all(byte -> byte.is_ascii_digit()) -> return None
+    if negative && digits == "0" -> return None
+    limit :: if negative { U64{1} << 63 } else { U64{I64.MAX} }
+    magnitude :: digits.bytes().try_fold(U64{0}, fn(value, byte) -> U64? {
+        value :: value.checked_mul(10)?.checked_add(U64{byte - 48})?
+        (value <= limit).then_some(value)
+    })?
+    if negative {
+        if magnitude == U64{1} << 63 { Val(I64.MIN) } else { I64.try_from(magnitude).ok()?.checked_neg() }
+    } else { I64.try_from(magnitude).ok() }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Auth.rs:320
+fn jet_auth_optional_text(fields: [(String, DataTree)], name: String) -> String? JetAuthError! {
+    match jet_auth_get(fields, name) {
+        None -> Ok(None)
+        Val(DataTree.Text(value) | DataTree.TypedText(value)) -> Ok(Val(value.clone()))
+        Val(_) -> Err(JetAuthError.MalformedToken("claim `{name}` must be text"))
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Auth.rs:333
+fn jet_auth_i64_claim(fields: [(String, DataTree)], text: String, name: String) -> I64? JetAuthError! {
+    match jet_auth_get(fields, name) {
+        None -> Ok(None)
+        Val(DataTree.Int(_) | DataTree.Number(_)) -> {
+            lexeme :: jet_auth_number_lexeme(text, name).ok_or_else(fn() { JetAuthError.MalformedToken("claim `{name}` must be an exact integer") })?
+            value :: jet_auth_parse_i64_decimal(lexeme).ok_or_else(fn() { JetAuthError.MalformedToken("claim `{name}` must be an exact integer") })?
+            Ok(Val(value))
+        }
+        Val(_) -> Err(JetAuthError.MalformedToken("claim `{name}` must be an integer"))
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Auth.rs:353
+fn jet_auth_required_i64(fields: [(String, DataTree)], text: String, name: String) -> I64 JetAuthError! {
+    jet_auth_i64_claim(fields, text, name)?.ok_or_else(fn() { JetAuthError.MissingClaim(name.to_string()) })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Auth.rs:361
+fn jet_auth_optional_i64(fields: [(String, DataTree)], text: String, name: String) -> I64? JetAuthError! { jet_auth_i64_claim(fields, text, name) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Auth.rs:369
+fn jet_auth_audience_values(value: DataTree) -> [String] JetAuthError! {
+    match value {
+        DataTree.Text(value) | DataTree.TypedText(value) -> Ok([value.clone()])
+        DataTree.Array(values) if values.is_empty() -> Err(JetAuthError.MalformedToken("claim `aud` must contain at least one text"))
+        DataTree.Array(values) -> values.iter().map(fn(value) -> String JetAuthError! {
+            match value {
+                DataTree.Text(value) | DataTree.TypedText(value) -> Ok(value.clone())
+                _ -> Err(JetAuthError.MalformedToken("claim `aud` must contain only text"))
+            }
+        }).collect()
+        _ -> Err(JetAuthError.MalformedToken("claim `aud` must be text or a text list"))
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Auth.rs:396
+fn jet_auth_audience(fields: [(String, DataTree)], expected: String) -> String JetAuthError! {
+    value :: jet_auth_get(fields, "aud").ok_or_else(fn() { JetAuthError.MissingClaim("aud") })?
+    values :: jet_auth_audience_values(value)?
+    if values.iter().any(value -> value == expected) { Ok(expected.to_string()) }
+    else { Err(JetAuthError.WrongAudience{expected: expected.to_string(), actual: values.join(",")}) }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Auth.rs:413
+JET_AUTH_NANOS_PER_SECOND :: I64{1000000000}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Auth.rs:415
+fn jet_auth_clock_skew_ns(clock_skew_ns: I64?) -> I64 { clock_skew_ns.unwrap_or(I64{0}) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Auth.rs:419
+fn jet_auth_timestamp_ns(timestamp: I64, name: String) -> I128 JetAuthError! {
+    I128.from(timestamp).checked_mul(I128.from(JET_AUTH_NANOS_PER_SECOND)).ok_or_else(fn() { JetAuthError.MalformedToken("claim `{name}` is outside the supported nanosecond range") })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Auth.rs:432
+fn jet_auth_expiry_deadline_ns(expires_at: I64, clock_skew_ns: I64) -> I128 JetAuthError! {
+    jet_auth_timestamp_ns(expires_at, "exp")?.checked_add(I128.from(clock_skew_ns)).ok_or_else(fn() { JetAuthError.MalformedToken("clock_skew overflows the token expiry") })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Auth.rs:443
+fn jet_auth_not_before_threshold_ns(not_before: I64, clock_skew_ns: I64) -> I128 JetAuthError! {
+    jet_auth_timestamp_ns(not_before, "nbf")?.checked_sub(I128.from(clock_skew_ns)).ok_or_else(fn() { JetAuthError.MalformedToken("clock_skew underflows the token not-before") })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Auth.rs:452
+// GATE #4565: kernel primitive
+#Unsafe("read the real wall clock; retain MAX rejection sentinel on pre-epoch or unrepresentable time")
+fn jet_auth_now_ns() -> I128 {
+    SystemTime.now().duration_since(UNIX_EPOCH).ok().and_then(duration -> I128.try_from(duration.as_nanos()).ok()).unwrap_or(I128.MAX)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Auth.rs:460
+fn jet_auth_claims_at(payload: [U8], audience: String, issuer: String?, clock_skew_ns: I64, now_ns: I128) -> JetAuthClaims JetAuthError! {
+    text :: std.str.from_utf8(payload).map_err(_ -> JetAuthError.MalformedToken("claims are not valid UTF-8"))?
+    fields :: jet_auth_object(text)?
+    expires_at :: jet_auth_required_i64(fields, text, "exp")?
+    subject :: jet_auth_optional_text(fields, "sub")?
+    expected_audience :: jet_auth_audience(fields, audience)?
+    actual_issuer :: jet_auth_optional_text(fields, "iss")?
+    not_before :: jet_auth_optional_i64(fields, text, "nbf")?
+    issued_at :: jet_auth_optional_i64(fields, text, "iat")?
+    if issuer is Val(expected) {
+        if actual_issuer.as_deref() != Val(expected) -> return Err(JetAuthError.WrongIssuer{expected: expected.to_string(), actual: ^actual_issuer})
+    }
+    expiry_deadline_ns :: jet_auth_expiry_deadline_ns(expires_at, clock_skew_ns)?
+    if now_ns >= expiry_deadline_ns -> return Err(JetAuthError.TokenExpired)
+    if not_before is Val(not_before) {
+        valid_from_ns :: jet_auth_not_before_threshold_ns(not_before, clock_skew_ns)?
+        if now_ns < valid_from_ns -> return Err(JetAuthError.TokenNotYetValid)
+    }
+    Ok(JetAuthClaims{subject: ^subject, audience: ^expected_audience, issuer: ^actual_issuer, expires_at, not_before, issued_at})
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Auth.rs:506
+fn jet_auth_claims(payload: [U8], audience: String, issuer: String?, clock_skew_ns: I64) -> JetAuthClaims JetAuthError! {
+    jet_auth_claims_at(payload, audience, issuer, clock_skew_ns, jet_auth_now_ns())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Auth.rs:521
+pub fn jet_auth_verify_jwt_impl(token: String, key: [U8], audience: String, issuer: String?, clock_skew_ns: I64) -> JetAuthClaims JetAuthError! {
+    if key.len() < 32 -> return Err(JetAuthError.WeakKey)
+    parts :: token.split('.').collect::<[String]>()
+    if parts.len() != 3 || parts.iter().any(part -> part.is_empty()) -> return Err(JetAuthError.MalformedToken("JWT must have exactly three non-empty parts"))
+    header :: jet_auth_b64url_decode(parts[0]).map_err(JetAuthError.DecodeError)?
+    header :: std.str.from_utf8(header).map_err(_ -> JetAuthError.MalformedToken("JWT header is not valid UTF-8"))?
+    header :: jet_auth_object(header)?
+    match jet_auth_get(header, "alg") {
+        Val(DataTree.Text(algorithm) | DataTree.TypedText(algorithm)) if algorithm == "HS256" -> {}
+        Val(DataTree.Text(algorithm) | DataTree.TypedText(algorithm)) -> return Err(JetAuthError.UnsupportedToken("unsupported JWT algorithm `{algorithm}`"))
+        _ -> return Err(JetAuthError.MalformedToken("JWT header requires text `alg`"))
+    }
+    signature :: jet_auth_b64url_decode(parts[2]).map_err(_ -> JetAuthError.InvalidSignature)?
+    expected :: jet_hmac_sha256(key, "{parts[0]}.{parts[1]}".as_bytes())
+    if !jet_ct_eq(expected, signature) -> return Err(JetAuthError.InvalidSignature)
+    payload :: jet_auth_b64url_decode(parts[1]).map_err(JetAuthError.DecodeError)?
+    jet_auth_claims(payload, audience, issuer.map(value -> value.as_str()), clock_skew_ns)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Auth.rs:564
+pub fn jet_auth_verify_jwt_defaulted(token: String, key: [U8], audience: String, issuer: String?, clock_skew_ns: I64?) -> JetAuthClaims JetAuthError! {
+    jet_auth_verify_jwt_impl(token, key, audience, issuer, jet_auth_clock_skew_ns(clock_skew_ns))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Auth.rs:581
+fn jet_auth_pae(pieces: [[U8]]) -> [U8] {
+    capacity :: 8 + pieces.iter().map(piece -> 8 + piece.len()).sum::<USize>()
+    out := [U8].with_capacity(capacity)
+    out.extend_from_slice(U64{pieces.len()}.to_le_bytes())
+    for piece in pieces {
+        out.extend_from_slice(U64{piece.len()}.to_le_bytes())
+        out.extend_from_slice(piece)
+    }
+    ^out
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Auth.rs:592
+pub fn jet_auth_verify_paseto_impl<E>(token: String, key: [U8], audience: String, issuer: String?, clock_skew_ns: I64, footer: [U8], implicit: [U8], verify: fn([U8], [U8], [U8]) -> Bool E!) -> JetAuthClaims JetAuthError! {
+    if key.len() != 32 -> return Err(JetAuthError.WeakKey)
+    parts :: token.split('.').collect::<[String]>()
+    if parts.len() < 3 || parts.len() > 4 || parts[0] != "v4" || parts[1] != "public" -> return Err(JetAuthError.UnsupportedToken("only PASETO v4.public is supported"))
+    body :: jet_auth_b64url_decode(parts[2]).map_err(JetAuthError.DecodeError)?
+    if body.len() < 64 -> return Err(JetAuthError.MalformedToken("PASETO body is shorter than its signature"))
+    token_footer :: if parts.get(3) is Val(encoded) { jet_auth_b64url_decode(encoded).map_err(JetAuthError.DecodeError)? } else { [U8]{} }
+    if !jet_ct_eq(token_footer, footer) -> return Err(JetAuthError.InvalidSignature)
+    split :: body.len() - 64
+    message :: body[..split].to_vec()
+    signature :: body[split..].to_vec()
+    signed :: jet_auth_pae(["v4.public.".as_bytes(), message, footer, implicit])
+    if !verify(key, signed, signature).unwrap_or(false) -> return Err(JetAuthError.InvalidSignature)
+    jet_auth_claims(message, audience, issuer.map(value -> value.as_str()), clock_skew_ns)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Auth.rs:626
+pub fn jet_auth_verify_paseto_defaulted<E>(token: String, key: [U8], audience: String, issuer: String?, clock_skew_ns: I64?, footer: [U8]?, implicit: [U8]?, verify: fn([U8], [U8], [U8]) -> Bool E!) -> JetAuthClaims JetAuthError! {
+    empty_footer :: [U8]{}
+    empty_implicit :: [U8]{}
+    jet_auth_verify_paseto_impl(token, key, audience, issuer, jet_auth_clock_skew_ns(clock_skew_ns), footer.unwrap_or(empty_footer), implicit.unwrap_or(empty_implicit), verify)
+}

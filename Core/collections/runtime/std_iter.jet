@@ -1,175 +1,80 @@
-// PORT-PENDING 0182 crates-jet-codegen-src-prelude-memo-module-group: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Iter.rs:1-171
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS /// Shared zip-family policy. Engines only marshal values into this policy;
-//RS /// length selection, strict mismatch, and padding indexes stay identical.
-//RS fn jet_sequence_argument_message(method: &str, value: i64) -> Option<&'static str> {
-//RS     match method {
-//RS         "take" | "skip" if value < 0 => Some("sequence count must be nonnegative"),
-//RS         "step_by" if value <= 0 => Some("step_by requires a positive step"),
-//RS         "chunks" if value <= 0 => Some("chunks requires a positive size"),
-//RS         "windows" if value <= 0 => Some("windows requires a positive size"),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn jet_zip_row_count(lengths: &[usize], mode: u8) -> Option<usize> {
-//RS     if lengths.is_empty() {
-//RS         return Some(0);
-//RS     }
-//RS     if mode == 1 && lengths.iter().any(|length| *length != lengths[0]) {
-//RS         return None;
-//RS     }
-//RS     Some(match mode {
-//RS         2 => lengths.iter().copied().max().unwrap_or(0),
-//RS         _ => lengths.iter().copied().min().unwrap_or(0),
-//RS     })
-//RS }
-//RS 
-//RS fn jet_zip_column_index(row: usize, length: usize) -> Option<usize> {
-//RS     (row < length).then_some(row)
-//RS }
-//RS 
-//RS fn jet_zip_fill_at<T: Clone>(
-//RS     fill_mode: u8,
-//RS     common_fills: &[T],
-//RS     column_fills: &[T],
-//RS     default: T,
-//RS     column: usize,
-//RS ) -> T {
-//RS     match fill_mode {
-//RS         1 => common_fills.get(column).cloned().unwrap_or(default),
-//RS         2 => column_fills.get(column).cloned().unwrap_or(default),
-//RS         _ => default,
-//RS     }
-//RS }
-//RS 
-//RS fn jet_zip_rows<T: Clone, Read, Fill>(
-//RS     lengths: &[usize],
-//RS     mode: u8,
-//RS     mut read: Read,
-//RS     mut fill: Fill,
-//RS ) -> Option<Vec<Vec<T>>>
-//RS where
-//RS     Read: FnMut(usize, usize) -> Option<T>,
-//RS     Fill: FnMut(usize) -> T,
-//RS {
-//RS     let row_count = jet_zip_row_count(lengths, mode)?;
-//RS     Some(
-//RS         (0..row_count)
-//RS             .map(|row| {
-//RS                 lengths
-//RS                     .iter()
-//RS                     .enumerate()
-//RS                     .map(|(column, length)| {
-//RS                         jet_zip_column_index(row, *length)
-//RS                             .and_then(|index| read(column, index))
-//RS                             .unwrap_or_else(|| fill(column))
-//RS                     })
-//RS                     .collect()
-//RS             })
-//RS             .collect(),
-//RS     )
-//RS }
-//RS 
-//RS pub fn jet_zip_strict_step<A, B>(left: Option<A>, right: Option<B>) -> Result<Option<(A, B)>, ()> {
-//RS     match (left, right) {
-//RS         (Some(left), Some(right)) => Ok(Some((left, right))),
-//RS         (None, None) => Ok(None),
-//RS         (None, Some(_)) | (Some(_), None) => Err(()),
-//RS     }
-//RS }
-//RS 
-//RS pub fn jet_zip_short_step<A, B>(
-//RS     left: Option<A>,
-//RS     right: impl FnOnce() -> Option<B>,
-//RS ) -> Option<(A, B)> {
-//RS     match left {
-//RS         Some(left) => right().map(|right| (left, right)),
-//RS         None => None,
-//RS     }
-//RS }
-//RS 
-//RS pub fn jet_zip_pad_step<A: Clone, B: Clone>(
-//RS     left: Option<A>,
-//RS     right: Option<B>,
-//RS     left_fill: A,
-//RS     right_fill: B,
-//RS ) -> Option<(A, B)> {
-//RS     match (left, right) {
-//RS         (Some(left), Some(right)) => Some((left, right)),
-//RS         (Some(left), None) => Some((left, right_fill)),
-//RS         (None, Some(right)) => Some((left_fill, right)),
-//RS         (None, None) => None,
-//RS     }
-//RS }
-//RS 
-//RS 
-//RS /// Shared predicate count kernel for eager List adapters.
-//RS fn jet_list_count_where_kernel<T, F>(xs: &[T], mut predicate: F) -> i64
-//RS where
-//RS     F: FnMut(&T) -> bool,
-//RS {
-//RS     let mut count = 0_i64;
-//RS     for item in xs {
-//RS         if predicate(item) {
-//RS             count += 1;
-//RS         }
-//RS     }
-//RS     count
-//RS }
-//RS 
-//RS /// Shared first-match replacement kernel for eager List adapters.
-//RS fn jet_list_update_first_kernel<T, F>(
-//RS     xs: &mut Vec<T>,
-//RS     mut predicate: F,
-//RS     replacement: T,
-//RS ) -> bool
-//RS where
-//RS     F: FnMut(&T) -> bool,
-//RS {
-//RS     for index in 0..xs.len() {
-//RS         if predicate(&xs[index]) {
-//RS             xs[index] = replacement;
-//RS             return true;
-//RS         }
-//RS     }
-//RS     false
-//RS }
-//RS 
-//RS /// Error-propagating form used by the reference evaluator's callback ABI.
-//RS pub(crate) fn jet_list_count_where_result_kernel<T, E, F>(
-//RS     xs: &[T],
-//RS     mut predicate: F,
-//RS ) -> Result<i64, E>
-//RS where
-//RS     F: FnMut(&T) -> Result<bool, E>,
-//RS {
-//RS     let mut count = 0_i64;
-//RS     for item in xs {
-//RS         if predicate(item)? {
-//RS             count += 1;
-//RS         }
-//RS     }
-//RS     Ok(count)
-//RS }
-//RS 
-//RS /// Error-propagating first-match replacement kernel for the reference
-//RS /// evaluator. Replacement is moved only after a successful predicate.
-//RS pub(crate) fn jet_list_update_first_result_kernel<T, E, F>(
-//RS     xs: &mut Vec<T>,
-//RS     mut predicate: F,
-//RS     replacement: T,
-//RS ) -> Result<bool, E>
-//RS where
-//RS     F: FnMut(&T) -> Result<bool, E>,
-//RS {
-//RS     for index in 0..xs.len() {
-//RS         if predicate(&xs[index])? {
-//RS             xs[index] = replacement;
-//RS             return Ok(true);
-//RS         }
-//RS     }
-//RS     Ok(false)
-//RS }
-// END-PORT-PENDING 0182 crates/jet-codegen/src/Prelude/CoreLib/JetStd/Iter.rs:1-171
+// Shared zip-family policy: hosts only marshal values into this owner.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Iter.rs:3
+fn jet_sequence_argument_message(method: &String, value: I64) -> String? {
+    match method {
+        "take" | "skip" if value < 0 -> Val("sequence count must be nonnegative"),
+        "step_by" if value <= 0 -> Val("step_by requires a positive step"),
+        "chunks" if value <= 0 -> Val("chunks requires a positive size"),
+        "windows" if value <= 0 -> Val("windows requires a positive size"),
+        _ -> None,
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Iter.rs:13
+fn jet_zip_row_count(lengths: &[Usize], mode: U8) -> Usize? {
+    if lengths.is_empty() { return Val(0) }
+    if mode == 1 && lengths.iter().any(fn(length) { *length != lengths[0] }) { return None }
+    Val(match mode { 2 -> lengths.iter().copied().max().unwrap_or(0), _ -> lengths.iter().copied().min().unwrap_or(0) })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Iter.rs:26
+fn jet_zip_column_index(row: Usize, length: Usize) -> Usize? { (row < length).then_some(row) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Iter.rs:30
+fn jet_zip_fill_at<T: Clone>(fill_mode: U8, common_fills: &[T], column_fills: &[T], default: T, column: Usize) -> T {
+    match fill_mode { 1 -> common_fills.get(column).cloned().unwrap_or(^default), 2 -> column_fills.get(column).cloned().unwrap_or(^default), _ -> ^default }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Iter.rs:44
+fn jet_zip_rows<T: Clone>(lengths: &[Usize], mode: U8, read: fn(Usize, Usize) -> T?, fill: fn(Usize) -> T) -> [[T]]? {
+    row_count :: jet_zip_row_count(lengths, mode)?
+    Val((0..row_count).map(fn(row) {
+        lengths.iter().enumerate().map(fn((column, length)) {
+            jet_zip_column_index(row, *length).and_then(fn(index) { read(column, index) }).unwrap_or_else(fn() { fill(column) })
+        }).collect<[T]>()
+    }).collect<[[T]]>())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Iter.rs:72
+pub fn jet_zip_strict_step<A, B>(left: A?, right: B?) -> (A, B)? ()! {
+    match (left, right) {
+        (Val(left), Val(right)) -> Ok(Val((^left, ^right))),
+        (None, None) -> Ok(None),
+        (None, Val(_)) | (Val(_), None) -> Err(()),
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Iter.rs:80
+pub fn jet_zip_short_step<A, B>(left: A?, right: fn() -> B?) -> (A, B)? {
+    match left { Val(left) -> right().map(fn(right) { (^left, ^right) }), None -> None }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Iter.rs:90
+pub fn jet_zip_pad_step<A: Clone, B: Clone>(left: A?, right: B?, left_fill: A, right_fill: B) -> (A, B)? {
+    match (left, right) {
+        (Val(left), Val(right)) -> Val((^left, ^right)),
+        (Val(left), None) -> Val((^left, ^right_fill)),
+        (None, Val(right)) -> Val((^left_fill, ^right)),
+        (None, None) -> None,
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Iter.rs:106
+fn jet_list_count_where_kernel<T>(xs: &[T], predicate: fn(&T) -> Bool) -> I64 {
+    count: I64 := 0
+    for item in xs { if predicate(item) { count += 1 } }
+    count
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Iter.rs:120
+fn jet_list_update_first_kernel<T>(xs: &[T], predicate: fn(&T) -> Bool, replacement: T) -> Bool {
+    for index in 0..xs.len() {
+        if predicate(&xs[index]) { xs[index] = ^replacement; return true }
+    }
+    false
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Iter.rs:138
+pub fn jet_list_count_where_result_kernel<T, E>(xs: &[T], predicate: fn(&T) -> Bool E!) -> I64 E! {
+    count: I64 := 0
+    for item in xs { if predicate(item)? { count += 1 } }
+    Ok(count)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Iter.rs:156
+pub fn jet_list_update_first_result_kernel<T, E>(xs: &[T], predicate: fn(&T) -> Bool E!, replacement: T) -> Bool E! {
+    for index in 0..xs.len() {
+        if predicate(&xs[index])? { xs[index] = ^replacement; return Ok(true) }
+    }
+    Ok(false)
+}
 

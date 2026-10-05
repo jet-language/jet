@@ -1,0 +1,50 @@
+use core.prelude.runtime.kernel_values.[JetShow, JetDisplay, JetDebug, JetRange, JetExpiring, JetDeferredClose, jet_loadable_loaded, jet_loadable_failed]
+use core.mem.runtime.portable_core.[JetOutcome, JetAbsent]
+
+// Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:271
+#Test("text display is bare while developer debug quotes") {
+    assert("hello".jet_show() == "hello")
+    assert("hello".jet_display() == "hello")
+    assert("hello".jet_debug() == "\"hello\"")
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:456
+#Test("optional clean carrier prints payload bare and absence null") {
+    present: JetOutcome<I64, JetAbsent> = Ok(I64{3})
+    absent: JetOutcome<I64, JetAbsent> = Err(JetAbsent{})
+    told: JetOutcome<I64, String> = Err("bad")
+    assert(present.jet_show() == "3")
+    assert(absent.jet_show() == "null")
+    assert(told.jet_show() == "Err(bad)")
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:489
+#Test("loadable value remains distinct from loading and failed") {
+    loaded :: jet_loadable_loaded("value")
+    assert(loaded.is_loaded())
+    assert(loaded.loaded().unwrap() == "value")
+    assert(loaded.or_else("default") == "value")
+    failed :: jet_loadable_failed("bad")
+    assert(failed.is_failed())
+    assert(not failed.is_loaded())
+    assert(failed.loaded().is_err())
+    assert(failed.jet_show() == "Failed(bad)")
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:554
+#Test("expiring value is valid at deadline and invalid strictly after") {
+    ttl :: JetExpiring.new("payload", I64{10})
+    assert(ttl.is_valid(I64{10}))
+    assert(ttl.get(I64{10})? == "payload")
+    assert(not ttl.is_valid(I64{11}))
+    assert(ttl.get(I64{11}).is_err())
+    assert(ttl.jet_show() == "Expiring(deadline=10)")
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:200
+#Test("deferred close consumes exactly once") {
+    calls := 0
+    {
+        close := JetDeferredClose.new(fn() { calls += 1 })
+        close.run()
+        close.run()
+        assert(calls == 1)
+    }
+    assert(calls == 1)
+}

@@ -1,0 +1,29 @@
+use core.collections.runtime.kernel_loop_cursor.*
+
+// Rust: crates/jet-codegen/src/Prelude/Core/LoopCursor.rs:65
+#Test("loop_cursor_stride_validation") {
+    assert(jet_loop_iter_step(0, false) == .Ok(1))
+    assert(jet_loop_iter_step(0, true) == .Err("iterator loop stride must be positive"))
+    assert(jet_loop_iter_step(-1, true).is_err())
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/LoopCursor.rs:171
+#Test("loop_cursor_lazy_utf8_characters") {
+    chars :: JetStringChars.new("aé🙂z")
+    assert(chars.next() == .Val('a'))
+    assert(chars.next() == .Val('é'))
+    assert(chars.next() == .Val('🙂'))
+    assert(chars.next() == .Val('z'))
+    assert(chars.next() == .None)
+    assert(chars.next() == .None)
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/LoopCursor.rs:73,93,109,123
+#Test("loop_cursor_skipped_item_error_is_not_lost") {
+    items: [I64 Err!] :: [Ok(1), Err("skipped error"), Ok(3)]
+    cursor :: jet_loop_iter_init_typed(items.into_iter(), 2, true)?
+    assert(jet_loop_iter_typed_has_next(&cursor) == .Ok(true))
+    assert(jet_loop_iter_typed_value(&cursor) == .Ok(1))
+    assert(jet_loop_iter_typed_advance(&cursor) == .Err("skipped error"))
+    assert(jet_loop_iter_typed_has_next(&cursor) == .Ok(false))
+    assert(jet_loop_iter_typed_advance(&cursor) == .Ok(()))
+    assert(jet_loop_iter_typed_value(&cursor) == .Err("iterator loop value requested after exhaustion"))
+}

@@ -1,1132 +1,761 @@
-// PORT-PENDING 0161 crates-jet-codegen-src-prelude-corelib-jetstd-fficallbacks-module-group: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:1-1128
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS     // D-FFI-CALLBACK2=A: a foreign callback is a managed registration, not a
-//RS     // bare function pointer. Admission, in-flight accounting, native shutdown
-//RS     // acknowledgement, and retained-state release live in this one runtime.
-//RS     // The generated facade supplies the contract and the native stop/release
-//RS     // hooks; no adapter may invent a second lifecycle protocol.
-//RS     use std::ffi::{c_char, c_void, CStr};
-//RS     use std::sync::atomic::{AtomicU8, AtomicUsize};
-//RS     use std::sync::Condvar;
-//RS 
-//RS     // `RefCell`, `AtomicU64`, `Ordering`, `Arc`, and `Mutex` are imported by
-//RS     // the preceding JetStd fragments. Keep this fragment's imports disjoint:
-//RS     // CoreLib splices every fragment into one `jet_std` module.
-//RS 
-//RS     const JET_FFI_CALLBACK_ACTIVE: u8 = 0;
-//RS     const JET_FFI_CALLBACK_STOPPING: u8 = 1;
-//RS     const JET_FFI_CALLBACK_STOPPED: u8 = 2;
-//RS     const JET_FFI_CALLBACK_QUARANTINED: u8 = 3;
-//RS 
-//RS     /// Native callback registration flags used by the generated C ABI glue.
-//RS     /// The bits are deliberately closed: an unknown or incomplete contract is
-//RS     /// rejected before the callback is made visible to a Jet program.
-//RS     pub const JET_FFI_CALLBACK_FLAG_CAPTURE_RETAINED: u32 = 1 << 0;
-//RS     pub const JET_FFI_CALLBACK_FLAG_THREAD_ATTACHED: u32 = 1 << 1;
-//RS     pub const JET_FFI_CALLBACK_FLAG_REENTRANT: u32 = 1 << 2;
-//RS     pub const JET_FFI_CALLBACK_FLAG_REGISTRATION_OWNED: u32 = 1 << 3;
-//RS     pub const JET_FFI_CALLBACK_FLAG_COMPLETION_ACK: u32 = 1 << 4;
-//RS     pub const JET_FFI_CALLBACK_FLAG_NATIVE_RETAINED: u32 = 1 << 5;
-//RS     pub const JET_FFI_CALLBACK_FLAG_FFI_C_EFFECT: u32 = 1 << 6;
-//RS     pub const JET_FFI_CALLBACK_FLAG_IO_WRITE_EFFECT: u32 = 1 << 7;
-//RS     pub const JET_FFI_CALLBACK_REQUIRED_FLAGS: u32 = JET_FFI_CALLBACK_FLAG_CAPTURE_RETAINED
-//RS         | JET_FFI_CALLBACK_FLAG_THREAD_ATTACHED
-//RS         | JET_FFI_CALLBACK_FLAG_REGISTRATION_OWNED
-//RS         | JET_FFI_CALLBACK_FLAG_COMPLETION_ACK
-//RS         | JET_FFI_CALLBACK_FLAG_NATIVE_RETAINED
-//RS         | JET_FFI_CALLBACK_FLAG_FFI_C_EFFECT
-//RS         | JET_FFI_CALLBACK_FLAG_IO_WRITE_EFFECT;
-//RS 
-//RS     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-//RS     pub enum JetFfiCallbackThreadAffinity {
-//RS         Any,
-//RS         Main,
-//RS         AttachedForeign,
-//RS     }
-//RS 
-//RS     #[derive(Clone, Debug, PartialEq, Eq)]
-//RS     pub struct JetFfiCallbackContract {
-//RS         /// The callback closure's captures stay live until native shutdown ACK
-//RS         /// and every admitted invocation has left the trampoline.
-//RS         pub capture_lifetime: bool,
-//RS         /// `AttachedForeign` requires the vetted attachment guard on every
-//RS         /// foreign-thread entry. `Main` pins registration and invocation to one
-//RS         /// thread. `Any` is reserved for adapters that prove a stronger policy.
-//RS         pub thread_affinity: JetFfiCallbackThreadAffinity,
-//RS         pub reentrant: bool,
-//RS         pub registration_ownership: bool,
-//RS         pub completion: bool,
-//RS         pub retained_native_access: bool,
-//RS         pub authority_scope: bool,
-//RS         /// Canonical effect names, normally `FFI.C + IO.Write`.
-//RS         pub effects: String,
-//RS         pub callback_identity: String,
-//RS         pub plan_digest: String,
-//RS     }
-//RS 
-//RS     impl JetFfiCallbackContract {
-//RS         pub fn managed(identity: impl Into<String>, plan_digest: impl Into<String>) -> Self {
-//RS             Self {
-//RS                 capture_lifetime: true,
-//RS                 thread_affinity: JetFfiCallbackThreadAffinity::AttachedForeign,
-//RS                 reentrant: true,
-//RS                 registration_ownership: true,
-//RS                 completion: true,
-//RS                 retained_native_access: true,
-//RS                 authority_scope: true,
-//RS                 effects: "FFI.C + IO.Write".to_string(),
-//RS                 callback_identity: identity.into(),
-//RS                 plan_digest: plan_digest.into(),
-//RS             }
-//RS         }
-//RS 
-//RS         /// Validate every fact required before exposing a safe callback facade.
-//RS         /// This runs before registration, rather than discovering a missing
-//RS         /// lifetime or shutdown fact after native code has retained a pointer.
-//RS         pub fn validate(&self, has_release: bool) -> Result<(), String> {
-//RS             if self.callback_identity.trim().is_empty() {
-//RS                 return Err("callback identity is empty".to_string());
-//RS             }
-//RS             if self.plan_digest.trim().is_empty() {
-//RS                 return Err("callback plan digest is empty".to_string());
-//RS             }
-//RS             if !self.capture_lifetime {
-//RS                 return Err("callback capture lifetime is not retained through shutdown".to_string());
-//RS             }
-//RS             if !self.registration_ownership {
-//RS                 return Err("callback registration has no consuming owner".to_string());
-//RS             }
-//RS             if !self.completion {
-//RS                 return Err("callback registration has no completion acknowledgement".to_string());
-//RS             }
-//RS             if !self.authority_scope {
-//RS                 return Err("callback authority scope does not cover registration and cleanup".to_string());
-//RS             }
-//RS             if self.retained_native_access && !has_release {
-//RS                 return Err("retained native callback access has no release hook".to_string());
-//RS             }
-//RS             if self.effects.split('+').map(str::trim).all(|part| part != "FFI.C") {
-//RS                 return Err("callback effects omit FFI.C".to_string());
-//RS             }
-//RS             if self.effects.split('+').map(str::trim).all(|part| part != "IO.Write") {
-//RS                 return Err("callback effects omit IO.Write".to_string());
-//RS             }
-//RS             Ok(())
-//RS         }
-//RS     }
-//RS 
-//RS     fn jet_ffi_callback_plan_digest(identity: &str) -> String {
-//RS         let input = format!("jet-ffi-callback-plan-v1\0{identity}");
-//RS         let mut digest = String::with_capacity(64);
-//RS         for byte in jet_sha256_raw(input.as_bytes()) {
-//RS             use std::fmt::Write;
-//RS             let _ = write!(digest, "{byte:02x}");
-//RS         }
-//RS         digest
-//RS     }
-//RS 
-//RS     #[derive(Clone, Debug, PartialEq, Eq)]
-//RS     pub enum JetFfiCallbackDispatch {
-//RS         Accepted,
-//RS         RejectedStopped,
-//RS         RejectedReentrant,
-//RS         RejectedThread,
-//RS         RejectedQuarantined,
-//RS         Failed(String),
-//RS     }
-//RS 
-//RS     #[derive(Clone, Debug, PartialEq, Eq)]
-//RS     pub enum JetFfiStopResult {
-//RS         Stopped,
-//RS         CallbackFailed(String),
-//RS         NativeBoundaryFailed(String),
-//RS         Quarantined(String),
-//RS     }
-//RS 
-//RS     thread_local! {
-//RS         static JET_FFI_CALLBACK_STACK: RefCell<Vec<u64>> = const { RefCell::new(Vec::new()) };
-//RS         static JET_FFI_RUNTIME_ATTACHED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-//RS         static JET_FFI_CURRENT_EVENT_STOP: RefCell<Vec<std::sync::Arc<std::sync::Mutex<Option<std::sync::Arc<dyn Fn() + Send + Sync>>>>>> =
-//RS             const { RefCell::new(Vec::new()) };
-//RS     }
-//RS 
-//RS     static JET_FFI_NEXT_CALLBACK_ID: AtomicU64 = AtomicU64::new(1);
-//RS 
-//RS     /// Guard proving that a foreign callback thread entered the Jet runtime.
-//RS     /// Generated trampolines create this guard before dispatch; a raw direct
-//RS     /// call without the guard is rejected and initiates registration shutdown.
-//RS     pub struct JetFfiRuntimeAttachment {
-//RS         previous: bool,
-//RS     }
-//RS 
-//RS     impl JetFfiRuntimeAttachment {
-//RS         pub fn enter() -> Self {
-//RS             let previous = JET_FFI_RUNTIME_ATTACHED.with(|attached| {
-//RS                 let previous = attached.get();
-//RS                 attached.set(true);
-//RS                 previous
-//RS             });
-//RS             Self { previous }
-//RS         }
-//RS 
-//RS         pub fn is_attached() -> bool {
-//RS             JET_FFI_RUNTIME_ATTACHED.with(std::cell::Cell::get)
-//RS         }
-//RS     }
-//RS     impl Drop for JetFfiRuntimeAttachment {
-//RS         fn drop(&mut self) {
-//RS             JET_FFI_RUNTIME_ATTACHED.with(|attached| attached.set(self.previous));
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn jet_ffi_with_callback_attachment<F, R>(run: F) -> R
-//RS     where
-//RS         F: FnOnce() -> R,
-//RS     {
-//RS         let _attachment = JetFfiRuntimeAttachment::enter();
-//RS         run()
-//RS     }
-//RS 
-//RS     type JetFfiCallbackHandler<T: Send + Sync + 'static> = std::sync::Arc<
-//RS         dyn for<'a> Fn(JetFfiCallbackEvent<'a, T>) -> Result<(), String> + Send + Sync,
-//RS     >;
-//RS 
-//RS     struct JetFfiCallbackState<T: Send + Sync + 'static> {
-//RS         id: u64,
-//RS         contract: JetFfiCallbackContract,
-//RS         owner_thread: std::thread::ThreadId,
-//RS         phase: AtomicU8,
-//RS         in_flight: AtomicUsize,
-//RS         shutdown_started: AtomicU8,
-//RS         native_ack: AtomicU8,
-//RS         callback: Mutex<Option<JetFfiCallbackHandler<T>>>,
-//RS         native_stop: std::sync::Arc<dyn Fn() -> Result<(), String> + Send + Sync>,
-//RS         native_release: Mutex<Option<std::sync::Arc<dyn Fn() + Send + Sync>>>,
-//RS         callback_failure: Mutex<Option<String>>,
-//RS         native_failure: Mutex<Option<String>>,
-//RS         wait_lock: Mutex<()>,
-//RS         wake: Condvar,
-//RS     }
-//RS 
-//RS     impl<T: Send + Sync + 'static> JetFfiCallbackState<T> {
-//RS         fn new(
-//RS             contract: JetFfiCallbackContract,
-//RS             callback: JetFfiCallbackHandler<T>,
-//RS             native_stop: std::sync::Arc<dyn Fn() -> Result<(), String> + Send + Sync>,
-//RS             native_release: Option<std::sync::Arc<dyn Fn() + Send + Sync>>,
-//RS         ) -> Result<std::sync::Arc<Self>, String> {
-//RS             contract.validate(native_release.is_some())?;
-//RS             Ok(std::sync::Arc::new(Self {
-//RS                 id: JET_FFI_NEXT_CALLBACK_ID.fetch_add(1, Ordering::Relaxed),
-//RS                 contract,
-//RS                 owner_thread: std::thread::current().id(),
-//RS                 phase: AtomicU8::new(JET_FFI_CALLBACK_ACTIVE),
-//RS                 in_flight: AtomicUsize::new(0),
-//RS                 shutdown_started: AtomicU8::new(0),
-//RS                 native_ack: AtomicU8::new(0),
-//RS                 callback: Mutex::new(Some(callback)),
-//RS                 native_stop,
-//RS                 native_release: Mutex::new(native_release),
-//RS                 callback_failure: Mutex::new(None),
-//RS                 native_failure: Mutex::new(None),
-//RS                 wait_lock: Mutex::new(()),
-//RS                 wake: Condvar::new(),
-//RS             }))
-//RS         }
-//RS 
-//RS         fn request_stop(&self) {
-//RS             let _ = self.phase.compare_exchange(
-//RS                 JET_FFI_CALLBACK_ACTIVE,
-//RS                 JET_FFI_CALLBACK_STOPPING,
-//RS                 Ordering::AcqRel,
-//RS                 Ordering::Acquire,
-//RS             );
-//RS             self.wake.notify_all();
-//RS         }
-//RS 
-//RS         fn phase(&self) -> u8 {
-//RS             self.phase.load(Ordering::Acquire)
-//RS         }
-//RS 
-//RS         fn record_callback_failure(&self, message: String) {
-//RS             let mut failure = self
-//RS                 .callback_failure
-//RS                 .lock()
-//RS                 .unwrap_or_else(|poisoned| poisoned.into_inner());
-//RS             if failure.is_none() {
-//RS                 *failure = Some(message);
-//RS             }
-//RS             self.request_stop();
-//RS         }
-//RS 
-//RS         fn record_native_failure(&self, message: String) {
-//RS             let mut failure = self
-//RS                 .native_failure
-//RS                 .lock()
-//RS                 .unwrap_or_else(|poisoned| poisoned.into_inner());
-//RS             if failure.is_none() {
-//RS                 *failure = Some(message);
-//RS             }
-//RS             self.phase
-//RS                 .store(JET_FFI_CALLBACK_QUARANTINED, Ordering::Release);
-//RS             self.wake.notify_all();
-//RS         }
-//RS 
-//RS         fn check_thread(&self) -> Result<(), JetFfiCallbackDispatch> {
-//RS             match self.contract.thread_affinity {
-//RS                 JetFfiCallbackThreadAffinity::Any => Ok(()),
-//RS                 JetFfiCallbackThreadAffinity::Main
-//RS                     if std::thread::current().id() == self.owner_thread => Ok(()),
-//RS                 JetFfiCallbackThreadAffinity::AttachedForeign
-//RS                     if JetFfiRuntimeAttachment::is_attached() => Ok(()),
-//RS                 JetFfiCallbackThreadAffinity::Main => Err(JetFfiCallbackDispatch::RejectedThread),
-//RS                 JetFfiCallbackThreadAffinity::AttachedForeign => {
-//RS                     Err(JetFfiCallbackDispatch::RejectedThread)
-//RS                 }
-//RS             }
-//RS         }
-//RS 
-//RS         fn enter(self: &std::sync::Arc<Self>) -> Result<JetFfiInFlight<T>, JetFfiCallbackDispatch> {
-//RS             if let Err(error) = self.check_thread() {
-//RS                 self.record_callback_failure("callback entered without its vetted thread attachment".to_string());
-//RS                 return Err(error);
-//RS             }
-//RS             match self.phase() {
-//RS                 JET_FFI_CALLBACK_ACTIVE => {}
-//RS                 JET_FFI_CALLBACK_QUARANTINED => {
-//RS                     return Err(JetFfiCallbackDispatch::RejectedQuarantined);
-//RS                 }
-//RS                 _ => return Err(JetFfiCallbackDispatch::RejectedStopped),
-//RS             }
-//RS             let reentrant = JET_FFI_CALLBACK_STACK.with(|stack| {
-//RS                 stack.borrow().iter().any(|id| *id == self.id)
-//RS             });
-//RS             if reentrant && !self.contract.reentrant {
-//RS                 self.record_callback_failure("reentrant callback rejected by registration contract".to_string());
-//RS                 return Err(JetFfiCallbackDispatch::RejectedReentrant);
-//RS             }
-//RS             self.in_flight.fetch_add(1, Ordering::AcqRel);
-//RS             if self.phase() != JET_FFI_CALLBACK_ACTIVE {
-//RS                 self.leave();
-//RS                 return Err(JetFfiCallbackDispatch::RejectedStopped);
-//RS             }
-//RS             JET_FFI_CALLBACK_STACK.with(|stack| stack.borrow_mut().push(self.id));
-//RS             Ok(JetFfiInFlight {
-//RS                 state: self.clone(),
-//RS                 active: true,
-//RS                 _marker: std::marker::PhantomData,
-//RS             })
-//RS         }
-//RS 
-//RS         fn leave(&self) {
-//RS             if self.in_flight.fetch_sub(1, Ordering::AcqRel) == 1 {
-//RS                 self.wake.notify_all();
-//RS             }
-//RS         }
-//RS 
-//RS         fn dispatch(self: &std::sync::Arc<Self>, value: T) -> JetFfiCallbackDispatch {
-//RS             let guard = match self.enter() {
-//RS                 Ok(guard) => guard,
-//RS                 Err(error) => {
-//RS                     if matches!(
-//RS                         error,
-//RS                         JetFfiCallbackDispatch::RejectedThread
-//RS                             | JetFfiCallbackDispatch::RejectedReentrant
-//RS                     ) {
-//RS                         self.spawn_stop().detach();
-//RS                     }
-//RS                     return error;
-//RS                 }
-//RS             };
-//RS             let stop_state = self.clone();
-//RS             let stop_slot: std::sync::Arc<
-//RS                 std::sync::Mutex<Option<std::sync::Arc<dyn Fn() + Send + Sync>>>,
-//RS             > = std::sync::Arc::new(std::sync::Mutex::new(Some(
-//RS                 std::sync::Arc::new(move || {
-//RS                     stop_state.request_stop();
-//RS                     stop_state.spawn_stop().detach();
-//RS                 }),
-//RS             )));
-//RS             JET_FFI_CURRENT_EVENT_STOP.with(|stack| stack.borrow_mut().push(stop_slot));
-//RS             let callback = self
-//RS                 .callback
-//RS                 .lock()
-//RS                 .unwrap_or_else(|poisoned| poisoned.into_inner())
-//RS                 .clone();
-//RS             let result = match callback {
-//RS                 Some(callback) => std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-//RS                     callback(JetFfiCallbackEvent {
-//RS                         value: &value,
-//RS                         state: self.clone(),
-//RS                     })
-//RS                 }))
-//RS                 .map_err(|_| "callback panicked across the foreign boundary".to_string())
-//RS                 .and_then(|result| result),
-//RS                 None => Err("callback handler was released before admission completed".to_string()),
-//RS             };
-//RS             JET_FFI_CURRENT_EVENT_STOP.with(|stack| {
-//RS                 let _ = stack.borrow_mut().pop();
-//RS             });
-//RS             JET_FFI_CALLBACK_STACK.with(|stack| {
-//RS                 let _ = stack.borrow_mut().pop();
-//RS             });
-//RS             drop(guard);
-//RS             match result {
-//RS                 Ok(()) => JetFfiCallbackDispatch::Accepted,
-//RS                 Err(message) => {
-//RS                     self.record_callback_failure(message.clone());
-//RS                     self.spawn_stop().detach();
-//RS                     JetFfiCallbackDispatch::Failed(message)
-//RS                 }
-//RS             }
-//RS         }
-//RS 
-//RS         fn spawn_stop(self: &std::sync::Arc<Self>) -> JetTask<JetFfiStopResult> {
-//RS             let state = self.clone();
-//RS             JetTask::spawn(move || state.finish_stop())
-//RS         }
-//RS 
-//RS         fn finish_stop(self: &std::sync::Arc<Self>) -> JetFfiStopResult {
-//RS             self.request_stop();
-//RS             let leader = self
-//RS                 .shutdown_started
-//RS                 .compare_exchange(0, 1, Ordering::AcqRel, Ordering::Acquire)
-//RS                 .is_ok();
-//RS             if leader {
-//RS                 let native_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-//RS                     (self.native_stop)()
-//RS                 }))
-//RS                 .map_err(|_| "native shutdown hook panicked".to_string())
-//RS                 .and_then(|result| result);
-//RS                 if let Err(message) = native_result {
-//RS                     self.record_native_failure(message);
-//RS                     return self.stop_result();
-//RS                 }
-//RS                 self.native_ack.store(1, Ordering::Release);
-//RS                 let mut wait = self
-//RS                     .wait_lock
-//RS                     .lock()
-//RS                     .unwrap_or_else(|poisoned| poisoned.into_inner());
-//RS                 while self.in_flight.load(Ordering::Acquire) != 0 {
-//RS                     wait = self
-//RS                         .wake
-//RS                         .wait(wait)
-//RS                         .unwrap_or_else(|poisoned| poisoned.into_inner());
-//RS                 }
-//RS                 self.phase.store(JET_FFI_CALLBACK_STOPPED, Ordering::Release);
-//RS                 let release = self
-//RS                     .native_release
-//RS                     .lock()
-//RS                     .unwrap_or_else(|poisoned| poisoned.into_inner())
-//RS                     .take();
-//RS                 let callback = self
-//RS                     .callback
-//RS                     .lock()
-//RS                     .unwrap_or_else(|poisoned| poisoned.into_inner())
-//RS                     .take();
-//RS                 drop(wait);
-//RS                 drop(callback);
-//RS                 if let Some(release) = release {
-//RS                     let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| release()));
-//RS                 }
-//RS                 self.wake.notify_all();
-//RS             } else {
-//RS                 let mut wait = self
-//RS                     .wait_lock
-//RS                     .lock()
-//RS                     .unwrap_or_else(|poisoned| poisoned.into_inner());
-//RS                 while matches!(self.phase(), JET_FFI_CALLBACK_STOPPING)
-//RS                     || self.in_flight.load(Ordering::Acquire) != 0
-//RS                 {
-//RS                     wait = self
-//RS                         .wake
-//RS                         .wait(wait)
-//RS                         .unwrap_or_else(|poisoned| poisoned.into_inner());
-//RS                 }
-//RS             }
-//RS             self.stop_result()
-//RS         }
-//RS 
-//RS         fn stop_result(&self) -> JetFfiStopResult {
-//RS             if let Some(message) = self
-//RS                 .native_failure
-//RS                 .lock()
-//RS                 .unwrap_or_else(|poisoned| poisoned.into_inner())
-//RS                 .clone()
-//RS             {
-//RS                 return JetFfiStopResult::Quarantined(message);
-//RS             }
-//RS             if let Some(message) = self
-//RS                 .callback_failure
-//RS                 .lock()
-//RS                 .unwrap_or_else(|poisoned| poisoned.into_inner())
-//RS                 .clone()
-//RS             {
-//RS                 return JetFfiStopResult::CallbackFailed(message);
-//RS             }
-//RS             if self.phase() == JET_FFI_CALLBACK_STOPPED {
-//RS                 JetFfiStopResult::Stopped
-//RS             } else {
-//RS                 JetFfiStopResult::NativeBoundaryFailed(
-//RS                     "callback shutdown did not reach a terminal acknowledgement".to_string(),
-//RS                 )
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     struct JetFfiInFlight<T: Send + Sync + 'static> {
-//RS         state: std::sync::Arc<JetFfiCallbackState<T>>,
-//RS         active: bool,
-//RS         _marker: std::marker::PhantomData<T>,
-//RS     }
-//RS 
-//RS     impl<T: Send + Sync + 'static> Drop for JetFfiInFlight<T> {
-//RS         fn drop(&mut self) {
-//RS             if self.active {
-//RS                 self.active = false;
-//RS                 self.state.leave();
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     pub struct JetFfiCallbackEvent<'a, T: Send + Sync + 'static> {
-//RS         value: &'a T,
-//RS         state: std::sync::Arc<JetFfiCallbackState<T>>,
-//RS     }
-//RS 
-//RS     impl<'a, T: Send + Sync + 'static> JetFfiCallbackEvent<'a, T> {
-//RS         pub fn value(&self) -> &'a T {
-//RS             self.value
-//RS         }
-//RS 
-//RS         /// Nonblocking self-stop. It only closes admission and schedules the
-//RS         /// native shutdown worker; it never waits for the current invocation.
-//RS         pub fn stop(&self) {
-//RS             self.state.request_stop();
-//RS             self.state.spawn_stop().detach();
-//RS         }
-//RS 
-//RS         pub fn callback_identity(&self) -> &str {
-//RS             &self.state.contract.callback_identity
-//RS         }
-//RS 
-//RS         pub fn plan_digest(&self) -> &str {
-//RS             &self.state.contract.plan_digest
-//RS         }
-//RS     }
-//RS  
-//RS     /// Owned event value passed to a generated managed callback target. The
-//RS     /// value is copied out of the native invocation before user code runs;
-//RS     /// `stop()` still addresses the active registration through the vetted
-//RS     /// callback-entry TLS slot.
-//RS     #[derive(Clone, Debug)]
-//RS     pub struct JetFfiCallbackEventValue<T: Send + Sync + 'static> {
-//RS         pub value: T,
-//RS     }
-//RS 
-//RS     impl<T: Send + Sync + 'static> JetFfiCallbackEventValue<T> {
-//RS         pub fn new(value: T) -> Self {
-//RS             Self { value }
-//RS         }
-//RS 
-//RS         pub fn value(&self) -> &T {
-//RS             &self.value
-//RS         }
-//RS 
-//RS         pub fn stop(&self) {
-//RS             // The raw event-stop operation is intentionally nonblocking. It
-//RS             // requests native shutdown but never joins from callback code.
-//RS             unsafe {
-//RS                 let _ = jet_ffi_callback_event_stop();
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     pub struct JetFfiCallbackRegistration<T: Send + Sync + 'static> {
-//RS         state: std::sync::Arc<JetFfiCallbackState<T>>,
-//RS         owner_consumed: bool,
-//RS     }
-//RS 
-//RS     impl<T: Send + Sync + 'static> JetFfiCallbackRegistration<T> {
-//RS         pub fn new(
-//RS             contract: JetFfiCallbackContract,
-//RS             callback: JetFfiCallbackHandler<T>,
-//RS             native_stop: std::sync::Arc<dyn Fn() -> Result<(), String> + Send + Sync>,
-//RS             native_release: Option<std::sync::Arc<dyn Fn() + Send + Sync>>,
-//RS         ) -> Result<Self, String> {
-//RS             Ok(Self {
-//RS                 state: JetFfiCallbackState::new(
-//RS                     contract,
-//RS                     callback,
-//RS                     native_stop,
-//RS                     native_release,
-//RS                 )?,
-//RS                 owner_consumed: false,
-//RS             })
-//RS         }
-//RS 
-//RS         pub fn dispatch(&self, value: T) -> JetFfiCallbackDispatch {
-//RS             self.state.dispatch(value)
-//RS         }
-//RS 
-//RS         pub fn stop(&self) {
-//RS             self.state.request_stop();
-//RS             self.state.spawn_stop().detach();
-//RS         }
-//RS 
-//RS         /// Consume the registration owner. The returned task completes only
-//RS         /// after native shutdown ACK and all admitted callbacks finish.
-//RS         pub fn unsubscribe(mut self) -> JetTask<JetFfiStopResult> {
-//RS             self.owner_consumed = true;
-//RS             self.state.request_stop();
-//RS             self.state.spawn_stop()
-//RS         }
-//RS 
-//RS         pub fn phase(&self) -> JetFfiCallbackPhase {
-//RS             JetFfiCallbackPhase::from_raw(self.state.phase())
-//RS         }
-//RS 
-//RS         pub fn contract(&self) -> &JetFfiCallbackContract {
-//RS             &self.state.contract
-//RS         }
-//RS     }
-//RS 
-//RS     impl<T: Send + Sync + 'static> Drop for JetFfiCallbackRegistration<T> {
-//RS         fn drop(&mut self) {
-//RS             if !self.owner_consumed {
-//RS                 // A generated owner must normally consume `unsubscribe`; a
-//RS                 // dropped owner still closes admission so native code cannot
-//RS                 // continue calling a released closure. The detached task keeps
-//RS                 // state and native context retained until ACK or quarantine.
-//RS                 self.state.request_stop();
-//RS                 self.state.spawn_stop().detach();
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-//RS     pub enum JetFfiCallbackPhase {
-//RS         Active,
-//RS         Stopping,
-//RS         Stopped,
-//RS         Quarantined,
-//RS     }
-//RS 
-//RS     impl JetFfiCallbackPhase {
-//RS         fn from_raw(raw: u8) -> Self {
-//RS             match raw {
-//RS                 JET_FFI_CALLBACK_ACTIVE => Self::Active,
-//RS                 JET_FFI_CALLBACK_STOPPING => Self::Stopping,
-//RS                 JET_FFI_CALLBACK_STOPPED => Self::Stopped,
-//RS                 _ => Self::Quarantined,
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     // ── C ABI glue ──────────────────────────────────────────────────────────
-//RS     // The C side receives one opaque handle. It may invoke concurrently, ask
-//RS     // for a nonblocking stop, and consume the handle through unsubscribe. The
-//RS     // handle remains allocated in the stop task until ACK/quiescence, closing
-//RS     // the late-callback use-after-free window.
-//RS     pub type JetFfiRawInvoke = unsafe extern "C" fn(*mut c_void, i64);
-//RS     pub type JetFfiRawStop = unsafe extern "C" fn(*mut c_void) -> i32;
-//RS     pub type JetFfiRawRelease = unsafe extern "C" fn(*mut c_void);
-//RS 
-//RS     struct JetFfiRawRegistration {
-//RS         registration: Mutex<Option<JetFfiCallbackRegistration<i64>>>,
-//RS         event_stop: std::sync::Arc<Mutex<Option<std::sync::Arc<dyn Fn() + Send + Sync>>>>,
-//RS     }
-//RS  
-//RS     /// Source-facing owner for a native callback registration. Moving this
-//RS     /// handle into `unsubscribe` consumes the only owner; dropping it starts
-//RS     /// the same asynchronous shutdown path and keeps the raw allocation alive
-//RS     /// until the stop task drains.
-//RS     #[repr(transparent)]
-//RS     #[derive(Debug)]
-//RS     pub struct JetFfiCallbackRegistrationHandle {
-//RS         raw: *mut c_void,
-//RS     }
-//RS 
-//RS     // The pointed-to raw registration is synchronized internally. The handle
-//RS     // may therefore cross a task boundary even though its owner operation is
-//RS     // consuming.
-//RS     unsafe impl Send for JetFfiCallbackRegistrationHandle {}
-//RS     unsafe impl Sync for JetFfiCallbackRegistrationHandle {}
-//RS 
-//RS     impl JetFfiCallbackRegistrationHandle {
-//RS         pub fn from_raw(raw: *mut c_void) -> Self {
-//RS             assert!(!raw.is_null(), "managed callback registration returned a null handle");
-//RS             Self { raw }
-//RS         }
-//RS 
-//RS         pub fn as_raw(&self) -> *mut c_void {
-//RS             self.raw
-//RS         }
-//RS 
-//RS         pub fn into_raw(mut self) -> *mut c_void {
-//RS             let raw = self.raw;
-//RS             self.raw = std::ptr::null_mut();
-//RS             raw
-//RS         }
-//RS     }
-//RS 
-//RS     impl Drop for JetFfiCallbackRegistrationHandle {
-//RS         fn drop(&mut self) {
-//RS             if self.raw.is_null() {
-//RS                 return;
-//RS             }
-//RS             // Drop is not a join point. The detached task owns the raw
-//RS             // registration box until native ACK and in-flight drain.
-//RS             unsafe {
-//RS                 let stop_task = jet_ffi_callback_registration_unsubscribe(self.raw);
-//RS                 if !stop_task.is_null() {
-//RS                     jet_ffi_callback_stop_task_detach(stop_task);
-//RS                 }
-//RS             }
-//RS             self.raw = std::ptr::null_mut();
-//RS         }
-//RS     }
-//RS 
-//RS     /// Build a managed registration around a generated native start function.
-//RS     /// The start closure receives the callback trampoline and the freshly
-//RS     /// allocated registration context. Native code must retain that context
-//RS     /// until its stop function returns the shutdown acknowledgement.
-//RS     pub fn jet_ffi_callback_registration_start_i64<Start, Stop, Release>(
-//RS         callback: Option<JetFfiRawInvoke>,
-//RS         native_start: Start,
-//RS         native_stop: Stop,
-//RS         native_release: Release,
-//RS         handler: JetFfiCallbackHandler<i64>,
-//RS         callback_identity: &str,
-//RS         plan_digest: &str,
-//RS     ) -> *mut c_void
-//RS     where
-//RS         Start: Fn(Option<JetFfiRawInvoke>, *mut c_void) -> *mut c_void + Send + Sync + 'static,
-//RS         Stop: Fn(*mut c_void) -> i32 + Send + Sync + 'static,
-//RS         Release: Fn(*mut c_void) + Send + Sync + 'static,
-//RS     {
-//RS         let native_token_slot = std::sync::Arc::new(std::sync::Mutex::new(None::<usize>));
-//RS         // Native start is allowed to deliver a callback before it returns its
-//RS         // token. A stop requested by that synchronous callback must wait for
-//RS         // the start call to publish the token instead of racing it into a
-//RS         // false "no native token" quarantine.
-//RS         let start_gate = std::sync::Arc::new((std::sync::Mutex::new(false), Condvar::new()));
-//RS         let stop_gate = start_gate.clone();
-//RS         let stop_context = native_token_slot.clone();
-//RS         let native_stop: std::sync::Arc<dyn Fn() -> Result<(), String> + Send + Sync> =
-//RS             std::sync::Arc::new(move || {
-//RS                 let (complete, wake) = &*stop_gate;
-//RS                 let mut complete = complete
-//RS                     .lock()
-//RS                     .unwrap_or_else(|poisoned| poisoned.into_inner());
-//RS                 while !*complete {
-//RS                     complete = wake
-//RS                         .wait(complete)
-//RS                         .unwrap_or_else(|poisoned| poisoned.into_inner());
-//RS                 }
-//RS                 drop(complete);
-//RS                 let token = *stop_context
-//RS                     .lock()
-//RS                     .unwrap_or_else(|poisoned| poisoned.into_inner());
-//RS                 let Some(token) = token else {
-//RS                     return Err("managed callback has no native token".to_string());
-//RS                 };
-//RS                 let status = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-//RS                     native_stop(token as *mut c_void)
-//RS                 }))
-//RS                 .map_err(|_| "native callback shutdown panicked".to_string())?;
-//RS                 if status == 0 {
-//RS                     Ok(())
-//RS                 } else {
-//RS                     Err(format!("native callback shutdown returned status {status}"))
-//RS                 }
-//RS             });
-//RS         let release_context = native_token_slot.clone();
-//RS         let native_release: std::sync::Arc<dyn Fn() + Send + Sync> =
-//RS             std::sync::Arc::new(move || {
-//RS                 let token = *release_context
-//RS                     .lock()
-//RS                     .unwrap_or_else(|poisoned| poisoned.into_inner());
-//RS                 if let Some(token) = token {
-//RS                     let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-//RS                         native_release(token as *mut c_void)
-//RS                     }));
-//RS                 }
-//RS             });
-//RS         if callback_identity.trim().is_empty()
-//RS             || plan_digest.trim().is_empty()
-//RS             || plan_digest != jet_ffi_callback_plan_digest(callback_identity)
-//RS         {
-//RS             return std::ptr::null_mut();
-//RS         }
-//RS         let contract =
-//RS             JetFfiCallbackContract::managed(callback_identity.to_string(), plan_digest.to_string());
-//RS         let registration = match JetFfiCallbackRegistration::new(
-//RS             contract,
-//RS             handler,
-//RS             native_stop,
-//RS             Some(native_release),
-//RS         ) {
-//RS             Ok(registration) => registration,
-//RS             Err(_) => return std::ptr::null_mut(),
-//RS         };
-//RS         let event_stop: std::sync::Arc<
-//RS             std::sync::Mutex<Option<std::sync::Arc<dyn Fn() + Send + Sync>>>,
-//RS         > = std::sync::Arc::new(std::sync::Mutex::new(None));
-//RS         let state = registration.state.clone();
-//RS         *event_stop
-//RS             .lock()
-//RS             .unwrap_or_else(|poisoned| poisoned.into_inner()) =
-//RS             Some(std::sync::Arc::new(move || {
-//RS                 state.request_stop();
-//RS                 state.spawn_stop().detach();
-//RS             }));
-//RS         let raw = Box::new(JetFfiRawRegistration {
-//RS             registration: Mutex::new(Some(registration)),
-//RS             event_stop,
-//RS         });
-//RS         let raw = Box::into_raw(raw);
-//RS         let started = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-//RS             native_start(callback, raw.cast())
-//RS         }))
-//RS         .ok()
-//RS         .filter(|token| !token.is_null())
-//RS         .map(|token| {
-//RS             *native_token_slot
-//RS                 .lock()
-//RS                 .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(token as usize);
-//RS             true
-//RS         })
-//RS         .unwrap_or(false);
-//RS         let (complete, wake) = &*start_gate;
-//RS         *complete
-//RS             .lock()
-//RS             .unwrap_or_else(|poisoned| poisoned.into_inner()) = true;
-//RS         wake.notify_all();
-//RS         if !started {
-//RS             unsafe {
-//RS                 let stop_task = jet_ffi_callback_registration_unsubscribe(raw.cast());
-//RS                 if !stop_task.is_null() {
-//RS                     jet_ffi_callback_stop_task_detach(stop_task);
-//RS                 }
-//RS             }
-//RS             return std::ptr::null_mut();
-//RS         }
-//RS         raw.cast()
-//RS     }
-//RS     struct JetFfiRawStopTask {
-//RS         task: Option<JetTask<JetFfiStopResult>>,
-//RS         // Keep the opaque registration address valid until the caller joins
-//RS         // the completion task. Native code can therefore deliver a late call;
-//RS         // it sees the consumed slot and executes no user callback.
-//RS         registration: Option<Box<JetFfiRawRegistration>>,
-//RS         // A failed ACK is quarantined, not freed. This Arc keeps the state,
-//RS         // failure evidence, and retained captures alive with the leaked holder.
-//RS         retained_state: Option<std::sync::Arc<JetFfiCallbackState<i64>>>,
-//RS     }
-//RS 
-//RS     fn raw_text(ptr: *const c_char) -> String {
-//RS         if ptr.is_null() {
-//RS             return String::new();
-//RS         }
-//RS         // SAFETY: the generated facade passes NUL-terminated identity strings;
-//RS         // invalid UTF-8 is retained lossily rather than invoking undefined
-//RS         // behavior or inventing a replacement identity.
-//RS         unsafe { CStr::from_ptr(ptr).to_string_lossy().into_owned() }
-//RS     }
-//RS 
-//RS     fn raw_status(outcome: JetFfiCallbackDispatch) -> i32 {
-//RS         match outcome {
-//RS             JetFfiCallbackDispatch::Accepted => 0,
-//RS             JetFfiCallbackDispatch::RejectedStopped => 1,
-//RS             JetFfiCallbackDispatch::RejectedReentrant => 2,
-//RS             JetFfiCallbackDispatch::RejectedThread => 3,
-//RS             JetFfiCallbackDispatch::RejectedQuarantined => 4,
-//RS             JetFfiCallbackDispatch::Failed(_) => 5,
-//RS         }
-//RS     }
-//RS 
-//RS     fn raw_stop_status(result: Result<JetFfiStopResult, JetTaskFailure>) -> i32 {
-//RS         match result {
-//RS             Ok(JetFfiStopResult::Stopped) => 0,
-//RS             Ok(JetFfiStopResult::CallbackFailed(_)) => 2,
-//RS             Ok(JetFfiStopResult::NativeBoundaryFailed(_)) => 3,
-//RS             Ok(JetFfiStopResult::Quarantined(_)) => 4,
-//RS             Err(JetTaskFailure::Cancelled) => 5,
-//RS             Err(JetTaskFailure::DeadlineBlown) => 6,
-//RS             Err(JetTaskFailure::Panicked(_)) => 7,
-//RS         }
-//RS     }
-//RS 
-//RS     #[no_mangle]
-//RS     pub unsafe extern "C" fn jet_ffi_callback_event_stop() -> i32 {
-//RS         let stop = JET_FFI_CURRENT_EVENT_STOP.with(|stack| stack.borrow().last().cloned());
-//RS         let Some(stop) = stop else {
-//RS             return -1;
-//RS         };
-//RS         let Some(stop) = stop.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clone() else {
-//RS             return -1;
-//RS         };
-//RS         stop();
-//RS         0
-//RS     }
-//RS  
-//RS     /// Unit-returning route used by `event.stop()` in generated callbacks.
-//RS     /// It deliberately discards the status because admission closure is
-//RS     /// asynchronous; the consuming owner reports native failures on join.
-//RS     pub fn jet_ffi_callback_event_stop_unit() {
-//RS         unsafe {
-//RS             let _ = jet_ffi_callback_event_stop();
-//RS         }
-//RS     }
-//RS 
-//RS     #[no_mangle]
-//RS     pub unsafe extern "C" fn jet_ffi_callback_registration_new_i64(
-//RS         invoke: Option<JetFfiRawInvoke>,
-//RS         stop: Option<JetFfiRawStop>,
-//RS         release: Option<JetFfiRawRelease>,
-//RS         ctx: *mut c_void,
-//RS         callback_identity: *const c_char,
-//RS         plan_digest: *const c_char,
-//RS         flags: u32,
-//RS     ) -> *mut c_void {
-//RS         let (Some(invoke), Some(stop), Some(release)) = (invoke, stop, release) else {
-//RS             return std::ptr::null_mut();
-//RS         };
-//RS         if flags & JET_FFI_CALLBACK_REQUIRED_FLAGS != JET_FFI_CALLBACK_REQUIRED_FLAGS
-//RS             || flags & !(JET_FFI_CALLBACK_REQUIRED_FLAGS | JET_FFI_CALLBACK_FLAG_REENTRANT) != 0
-//RS         {
-//RS             return std::ptr::null_mut();
-//RS         }
-//RS         let callback_identity = raw_text(callback_identity);
-//RS         let plan_digest = raw_text(plan_digest);
-//RS         if callback_identity.trim().is_empty()
-//RS             || plan_digest.trim().is_empty()
-//RS             || plan_digest != jet_ffi_callback_plan_digest(&callback_identity)
-//RS         {
-//RS             return std::ptr::null_mut();
-//RS         }
-//RS         let mut contract = JetFfiCallbackContract::managed(callback_identity, plan_digest);
-//RS         contract.reentrant = flags & JET_FFI_CALLBACK_FLAG_REENTRANT != 0;
-//RS         let event_stop: std::sync::Arc<
-//RS             Mutex<Option<std::sync::Arc<dyn Fn() + Send + Sync>>>,
-//RS         > = std::sync::Arc::new(Mutex::new(None));
-//RS         let callback_ctx = ctx as usize;
-//RS         let stop_slot = event_stop.clone();
-//RS         let callback: JetFfiCallbackHandler<i64> = std::sync::Arc::new(move |event| {
-//RS             JET_FFI_CURRENT_EVENT_STOP.with(|stack| stack.borrow_mut().push(stop_slot.clone()));
-//RS             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| unsafe {
-//RS                 invoke(callback_ctx as *mut c_void, *event.value());
-//RS             }))
-//RS             .map_err(|_| "native callback trampoline panicked".to_string());
-//RS             JET_FFI_CURRENT_EVENT_STOP.with(|stack| {
-//RS                 let _ = stack.borrow_mut().pop();
-//RS             });
-//RS             result
-//RS         });
-//RS         let stop_ctx = ctx as usize;
-//RS         let native_stop: std::sync::Arc<dyn Fn() -> Result<(), String> + Send + Sync> =
-//RS             std::sync::Arc::new(move || {
-//RS                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| unsafe {
-//RS                     stop(stop_ctx as *mut c_void)
-//RS                 }))
-//RS                 .map_err(|_| "native callback shutdown panicked".to_string())?;
-//RS                 if result == 0 {
-//RS                     Ok(())
-//RS                 } else {
-//RS                     Err(format!("native callback shutdown returned status {result}"))
-//RS                 }
-//RS             });
-//RS         let release_ctx = ctx as usize;
-//RS         let native_release: std::sync::Arc<dyn Fn() + Send + Sync> = std::sync::Arc::new(move || {
-//RS             let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| unsafe {
-//RS                 release(release_ctx as *mut c_void)
-//RS             }));
-//RS         });
-//RS         let registration = match JetFfiCallbackRegistration::new(
-//RS             contract,
-//RS             callback,
-//RS             native_stop,
-//RS             Some(native_release),
-//RS         ) {
-//RS             Ok(registration) => registration,
-//RS             Err(_) => return std::ptr::null_mut(),
-//RS         };
-//RS         let state = registration.state.clone();
-//RS         *event_stop
-//RS             .lock()
-//RS             .unwrap_or_else(|poisoned| poisoned.into_inner()) =
-//RS             Some(std::sync::Arc::new(move || {
-//RS                 state.request_stop();
-//RS                 state.spawn_stop().detach();
-//RS             }));
-//RS         let raw = Box::new(JetFfiRawRegistration {
-//RS             registration: Mutex::new(Some(registration)),
-//RS             event_stop,
-//RS         });
-//RS         Box::into_raw(raw).cast()
-//RS     }
-//RS 
-//RS     pub unsafe extern "C" fn jet_ffi_callback_registration_invoke_i64(
-//RS         handle: *mut c_void,
-//RS         value: i64,
-//RS     ) -> i32 {
-//RS         if handle.is_null() {
-//RS             return 1;
-//RS         }
-//RS         let raw = &*(handle.cast::<JetFfiRawRegistration>());
-//RS         let state = raw
-//RS             .registration
-//RS             .lock()
-//RS             .unwrap_or_else(|poisoned| poisoned.into_inner())
-//RS             .as_ref()
-//RS             .map(|registration| registration.state.clone());
-//RS         let Some(state) = state else {
-//RS             return 1;
-//RS         };
-//RS         // Do not hold the owner mutex while dispatching: a reentrant callback
-//RS         // may enter this trampoline again before the outer invocation leaves.
-//RS         jet_ffi_with_callback_attachment(|| raw_status(state.dispatch(value)))
-//RS     }
-//RS 
-//RS     #[no_mangle]
-//RS     pub unsafe extern "C" fn jet_ffi_callback_registration_stop(handle: *mut c_void) -> i32 {
-//RS         if handle.is_null() {
-//RS             return 1;
-//RS         }
-//RS         let raw = &*(handle.cast::<JetFfiRawRegistration>());
-//RS         let registration = raw
-//RS             .registration
-//RS             .lock()
-//RS             .unwrap_or_else(|poisoned| poisoned.into_inner());
-//RS         let Some(registration) = registration.as_ref() else {
-//RS             return 1;
-//RS         };
-//RS         registration.stop();
-//RS         0
-//RS     }
-//RS 
-//RS     #[no_mangle]
-//RS     pub unsafe extern "C" fn jet_ffi_callback_registration_unsubscribe(
-//RS         handle: *mut c_void,
-//RS     ) -> *mut c_void {
-//RS         if handle.is_null() {
-//RS             return std::ptr::null_mut();
-//RS         }
-//RS         let raw = Box::from_raw(handle.cast::<JetFfiRawRegistration>());
-//RS         let registration = raw
-//RS             .registration
-//RS             .lock()
-//RS             .unwrap_or_else(|poisoned| poisoned.into_inner())
-//RS             .take();
-//RS         let Some(registration) = registration else {
-//RS             std::mem::forget(raw);
-//RS             return std::ptr::null_mut();
-//RS         };
-//RS         let retained_state = registration.state.clone();
-//RS         let task = registration.unsubscribe();
-//RS         let stop_task = Box::new(JetFfiRawStopTask {
-//RS             task: Some(task),
-//RS             registration: Some(raw),
-//RS             retained_state: Some(retained_state),
-//RS         });
-//RS         Box::into_raw(stop_task).cast()
-//RS     }
-//RS 
-//RS     #[no_mangle]
-//RS     pub unsafe extern "C" fn jet_ffi_callback_stop_task_join(handle: *mut c_void) -> i32 {
-//RS         if handle.is_null() {
-//RS             return 7;
-//RS         }
-//RS         let mut task = Box::from_raw(handle.cast::<JetFfiRawStopTask>());
-//RS         let result = task
-//RS             .task
-//RS             .take()
-//RS             .map(|task| task.join())
-//RS             .unwrap_or(Err(JetTaskFailure::Panicked(
-//RS                 "callback stop task was already joined".to_string(),
-//RS             )));
-//RS         let status = raw_stop_status(result);
-//RS         let stopped = task
-//RS             .retained_state
-//RS             .as_ref()
-//RS             .is_some_and(|state| state.phase() == JET_FFI_CALLBACK_STOPPED);
-//RS         if status != 0 && !stopped {
-//RS             // A failed native ACK or callback drain is a quarantine outcome.
-//RS             // Retain the wrapper and its native context instead of dropping
-//RS             // memory while foreign code may still hold the opaque handle.
-//RS             std::mem::forget(task);
-//RS         }
-//RS         status
-//RS     }
-//RS 
-//RS     #[no_mangle]
-//RS     pub unsafe extern "C" fn jet_ffi_callback_registration_phase(handle: *mut c_void) -> i32 {
-//RS         if handle.is_null() {
-//RS             return JET_FFI_CALLBACK_QUARANTINED as i32;
-//RS         }
-//RS         let raw = &*(handle.cast::<JetFfiRawRegistration>());
-//RS         let registration = raw
-//RS             .registration
-//RS             .lock()
-//RS             .unwrap_or_else(|poisoned| poisoned.into_inner());
-//RS         registration
-//RS             .as_ref()
-//RS             .map(|registration| registration.phase() as i32)
-//RS             .unwrap_or(JET_FFI_CALLBACK_STOPPED as i32)
-//RS     }
-//RS  
-//RS     /// Detach a stop task while preserving its registration on any failed
-//RS     /// shutdown. Successful completion drops the holder after ACK and drain;
-//RS     /// failure intentionally leaks the holder as a quarantined live state.
-//RS     #[no_mangle]
-//RS     pub unsafe extern "C" fn jet_ffi_callback_stop_task_detach(handle: *mut c_void) {
-//RS         if handle.is_null() {
-//RS             return;
-//RS         }
-//RS         let mut holder = Box::from_raw(handle.cast::<JetFfiRawStopTask>());
-//RS         JetTask::spawn(move || {
-//RS             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-//RS                 holder
-//RS                     .task
-//RS                     .take()
-//RS                     .map(|task| task.join())
-//RS                     .unwrap_or(Err(JetTaskFailure::Panicked(
-//RS                         "callback stop task was already joined".to_string(),
-//RS                     )))
-//RS             }));
-//RS             let status = result.map(raw_stop_status).unwrap_or(7);
-//RS             let stopped = holder
-//RS                 .retained_state
-//RS                 .as_ref()
-//RS                 .is_some_and(|state| state.phase() == JET_FFI_CALLBACK_STOPPED);
-//RS             if status == 0 || stopped {
-//RS                 drop(holder);
-//RS             } else {
-//RS                 std::mem::forget(holder);
-//RS             }
-//RS         })
-//RS         .detach();
-//RS     }
-//RS 
-//RS     /// Consuming source-facing unsubscribe. The task's `Ok` value is produced
-//RS     /// only after native ACK, callback drain, and capture/trampoline release.
-//RS     pub fn jet_ffi_callback_registration_unsubscribe_result(
-//RS         handle: *mut c_void,
-//RS     ) -> JetTask<JetOutcome<(), String>> {
-//RS         let stop_task = unsafe { jet_ffi_callback_registration_unsubscribe(handle) };
-//RS         if stop_task.is_null() {
-//RS             return JetTask::spawn(|| Err("callback registration was already consumed".to_string()));
-//RS         }
-//RS         let stop_task_addr = stop_task as usize;
-//RS         JetTask::spawn(move || {
-//RS             let status = unsafe { jet_ffi_callback_stop_task_join(stop_task_addr as *mut c_void) };
-//RS             if status == 0 {
-//RS                 Ok(())
-//RS             } else {
-//RS                 Err(format!("callback unsubscribe failed with status {status}"))
-//RS             }
-//RS         })
-//RS     }
-// END-PORT-PENDING 0161 crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:1-1128
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:1
+// D-FFI-CALLBACK2=A: one managed registration owns admission, in-flight
+// accounting, native shutdown acknowledgement and retained-state release.
+use core.cell.[RefCell, Cell, ThreadLocal]
+use core.marker.PhantomData
+use core.mem
+use core.ptr
+use std.sync.[Arc, Mutex, Condvar]
+use std.sync.atomic.[AtomicU8, AtomicUsize, AtomicU64, Ordering]
+use std.thread
+use std.panic.[catch_unwind, AssertUnwindSafe]
+use std.ffi.[c_char, c_void, CStr]
+use core.math.runtime.std_math_task_mem.[JetTask]
+use jet_std.[JetTaskFailure]
+use core.crypto.runtime.top_sha256_raw.[jet_sha256_raw]
+use jet_foundation.Syntax.[TEXT_NUL]
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:14
+const JET_FFI_CALLBACK_ACTIVE: U8 = 0
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:15
+const JET_FFI_CALLBACK_STOPPING: U8 = 1
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:16
+const JET_FFI_CALLBACK_STOPPED: U8 = 2
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:17
+const JET_FFI_CALLBACK_QUARANTINED: U8 = 3
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:22
+pub const JET_FFI_CALLBACK_FLAG_CAPTURE_RETAINED: U32 = 1 << 0
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:23
+pub const JET_FFI_CALLBACK_FLAG_THREAD_ATTACHED: U32 = 1 << 1
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:24
+pub const JET_FFI_CALLBACK_FLAG_REENTRANT: U32 = 1 << 2
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:25
+pub const JET_FFI_CALLBACK_FLAG_REGISTRATION_OWNED: U32 = 1 << 3
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:26
+pub const JET_FFI_CALLBACK_FLAG_COMPLETION_ACK: U32 = 1 << 4
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:27
+pub const JET_FFI_CALLBACK_FLAG_NATIVE_RETAINED: U32 = 1 << 5
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:28
+pub const JET_FFI_CALLBACK_FLAG_FFI_C_EFFECT: U32 = 1 << 6
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:29
+pub const JET_FFI_CALLBACK_FLAG_IO_WRITE_EFFECT: U32 = 1 << 7
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:30
+pub const JET_FFI_CALLBACK_REQUIRED_FLAGS: U32 = JET_FFI_CALLBACK_FLAG_CAPTURE_RETAINED
+    | JET_FFI_CALLBACK_FLAG_THREAD_ATTACHED | JET_FFI_CALLBACK_FLAG_REGISTRATION_OWNED
+    | JET_FFI_CALLBACK_FLAG_COMPLETION_ACK | JET_FFI_CALLBACK_FLAG_NATIVE_RETAINED
+    | JET_FFI_CALLBACK_FLAG_FFI_C_EFFECT | JET_FFI_CALLBACK_FLAG_IO_WRITE_EFFECT
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:39
+#Copy
+#Equatable
+pub enum JetFfiCallbackThreadAffinity { Any, Main, AttachedForeign }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:46
+#Equatable
+pub struct JetFfiCallbackContract {
+    pub capture_lifetime: Bool
+    pub thread_affinity: JetFfiCallbackThreadAffinity
+    pub reentrant: Bool
+    pub registration_ownership: Bool
+    pub completion: Bool
+    pub retained_native_access: Bool
+    pub authority_scope: Bool
+    pub effects: String
+    pub callback_identity: String
+    pub plan_digest: String
+}
+impl JetFfiCallbackContract {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:66
+    pub fn managed(identity: String, plan_digest: String) -> Self {
+        Self{capture_lifetime: true, thread_affinity: .AttachedForeign, reentrant: true,
+            registration_ownership: true, completion: true, retained_native_access: true,
+            authority_scope: true, effects: "FFI.C + IO.Write",
+            callback_identity: ^identity, plan_digest: ^plan_digest}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:84
+    pub fn validate(self: &Self, has_release: Bool) -> Err! {
+        identity := self.callback_identity.trim() // #4303
+        if identity.is_empty() -> return Err("callback identity is empty")
+        digest := self.plan_digest.trim() // #4303
+        if digest.is_empty() -> return Err("callback plan digest is empty")
+        if not self.capture_lifetime -> return Err("callback capture lifetime is not retained through shutdown")
+        if not self.registration_ownership -> return Err("callback registration has no consuming owner")
+        if not self.completion -> return Err("callback registration has no completion acknowledgement")
+        if not self.authority_scope -> return Err("callback authority scope does not cover registration and cleanup")
+        if self.retained_native_access && not has_release -> return Err("retained native callback access has no release hook")
+        if self.effects.split('+').map(fn(part) { part.trim() }).all(fn(part) { part != "FFI.C" }) {
+            return Err("callback effects omit FFI.C")
+        }
+        if self.effects.split('+').map(fn(part) { part.trim() }).all(fn(part) { part != "IO.Write" }) {
+            return Err("callback effects omit IO.Write")
+        }
+        Ok(())
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:116
+fn jet_ffi_callback_plan_digest(identity: &String) -> String {
+    input :: "jet-ffi-callback-plan-v1{TEXT_NUL}{identity}"
+    digest := String.with_capacity(64)
+    loop byte in jet_sha256_raw(input.as_bytes()) -> digest.push_str("{byte:02x}")
+    digest
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:127
+#Equatable
+#Error
+pub enum JetFfiCallbackDispatch {
+    Accepted, RejectedStopped, RejectedReentrant, RejectedThread, RejectedQuarantined, Failed(String)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:137
+#Equatable
+pub enum JetFfiStopResult { Stopped, CallbackFailed(String), NativeBoundaryFailed(String), Quarantined(String) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:145
+// GATE #4565: kernel primitive
+JET_FFI_CALLBACK_STACK :: #Unsafe("each callback thread owns its registration admission stack") {
+    ThreadLocal.new(fn() { RefCell.new([U64]{}) })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:146
+// GATE #4565: kernel primitive
+JET_FFI_RUNTIME_ATTACHED :: #Unsafe("runtime attachment is a per-thread scoped fact") {
+    ThreadLocal.new(fn() { Cell.new(false) })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:147
+// GATE #4565: kernel primitive
+JET_FFI_CURRENT_EVENT_STOP :: #Unsafe("callback stop slots form a per-thread stack with shared owned stop closures") {
+    ThreadLocal.new(fn() { RefCell.new([Arc<Mutex<Arc<fn()>?>>]{}) })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:151
+// GATE #4565: kernel primitive
+JET_FFI_NEXT_CALLBACK_ID :: #Unsafe("one process-wide atomic assigns callback registration identity") { AtomicU64.new(1) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:156
+pub struct JetFfiRuntimeAttachment { previous: Bool }
+impl JetFfiRuntimeAttachment {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:161
+    pub fn enter() -> Self {
+        // GATE #4565: kernel primitive
+        previous :: #Unsafe("vetted callback entry attaches this thread and retains its preceding attachment") {
+            JET_FFI_RUNTIME_ATTACHED.with(fn(attached) {
+                previous :: attached.get()
+                attached.set(true)
+                previous
+            })
+        }
+        Self{previous: previous}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:170
+    pub fn is_attached() -> Bool {
+        // GATE #4565: kernel primitive
+        #Unsafe("read only this thread's runtime attachment") { JET_FFI_RUNTIME_ATTACHED.with(fn(attached) { attached.get() }) }
+    }
+}
+impl Drop for JetFfiRuntimeAttachment {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:175
+    fn drop(self: &Self) -> {
+        // GATE #4565: kernel primitive
+        #Unsafe("restore the prior same-thread attachment including unwind") {
+            JET_FFI_RUNTIME_ATTACHED.with(fn(attached) { attached.set(self.previous) })
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:180
+pub fn jet_ffi_with_callback_attachment<R>(run: fn() -> R) -> R {
+    _attachment :: JetFfiRuntimeAttachment.enter()
+    run()
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:188
+type JetFfiCallbackHandler<T: Send + Sync> = Arc<fn(JetFfiCallbackEvent<T>) -> Err!>
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:192
+struct JetFfiCallbackState<T: Send + Sync> {
+    id: U64
+    contract: JetFfiCallbackContract
+    owner_thread: thread.ThreadId
+    phase: AtomicU8
+    in_flight: AtomicUsize
+    shutdown_started: AtomicU8
+    native_ack: AtomicU8
+    callback: Mutex<JetFfiCallbackHandler<T>?>
+    native_stop: Arc<fn() -> Err!>
+    native_release: Mutex<Arc<fn()>?>
+    callback_failure: Mutex<String?>
+    native_failure: Mutex<String?>
+    wait_lock: Mutex<()>
+    wake: Condvar
+}
+impl<T: Send + Sync> JetFfiCallbackState<T> {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:210
+    fn new(contract: JetFfiCallbackContract, callback: JetFfiCallbackHandler<T>,
+        native_stop: Arc<fn() -> Err!>, native_release: Arc<fn()>?) -> Arc<Self> Err! {
+        contract.validate(native_release.is_some())?
+        // GATE #4565: kernel primitive
+        #Unsafe("owned-static Send+Sync handlers and native hooks outlive all admitted callbacks") {
+            Ok(Arc.new(Self{id: JET_FFI_NEXT_CALLBACK_ID.fetch_add(1, Ordering.Relaxed),
+                contract: ^contract, owner_thread: thread.current().id(),
+                phase: AtomicU8.new(JET_FFI_CALLBACK_ACTIVE), in_flight: AtomicUsize.new(0),
+                shutdown_started: AtomicU8.new(0), native_ack: AtomicU8.new(0),
+                callback: Mutex.new(Val(^callback)), native_stop: ^native_stop,
+                native_release: Mutex.new(^native_release), callback_failure: Mutex.new(None),
+                native_failure: Mutex.new(None), wait_lock: Mutex.new(()), wake: Condvar.new()}))
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:235
+    fn request_stop(self: &Self) -> {
+        // GATE #4565: kernel primitive
+        #Unsafe("close admission atomically, preserving a prior terminal state") {
+            _ :: self.phase.compare_exchange(JET_FFI_CALLBACK_ACTIVE, JET_FFI_CALLBACK_STOPPING, Ordering.AcqRel, Ordering.Acquire)
+            self.wake.notify_all()
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:245
+    fn phase(self: &Self) -> U8 {
+        // GATE #4565: kernel primitive
+        #Unsafe("acquire callback lifecycle phase") { self.phase.load(Ordering.Acquire) }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:249
+    fn record_callback_failure(self: &Self, message: String) -> {
+        // GATE #4565: kernel primitive
+        #Unsafe("mutex retains the first callback failure, including poisoned state") {
+            failure := self.callback_failure.lock().unwrap_or_else(fn(poisoned) { poisoned.into_inner() })
+            if failure.is_none() -> *failure = Val(^message)
+            self.request_stop()
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:260
+    fn record_native_failure(self: &Self, message: String) -> {
+        // GATE #4565: kernel primitive
+        #Unsafe("retain native failure and quarantine access rather than fake shutdown acknowledgement") {
+            failure := self.native_failure.lock().unwrap_or_else(fn(poisoned) { poisoned.into_inner() })
+            if failure.is_none() -> *failure = Val(^message)
+            self.phase.store(JET_FFI_CALLBACK_QUARANTINED, Ordering.Release)
+            self.wake.notify_all()
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:273
+    fn check_thread(self: &Self) -> JetFfiCallbackDispatch! {
+        // GATE #4565: kernel primitive
+        #Unsafe("validate same-thread identity or vetted foreign-thread attachment") {
+            match self.contract.thread_affinity {
+                .Any -> Ok(())
+                .Main -> if thread.current().id() == self.owner_thread { Ok(()) } else { Err(.RejectedThread) }
+                .AttachedForeign -> if JetFfiRuntimeAttachment.is_attached() { Ok(()) } else { Err(.RejectedThread) }
+            }
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:287
+    fn enter(self: &Arc<Self>) -> JetFfiInFlight<T> JetFfiCallbackDispatch! {
+        if self.check_thread() is Err(error) {
+            self.record_callback_failure("callback entered without its vetted thread attachment")
+            return Err(^error)
+        }
+        match self.phase() {
+            JET_FFI_CALLBACK_ACTIVE -> {}
+            JET_FFI_CALLBACK_QUARANTINED -> return Err(.RejectedQuarantined)
+            _ -> return Err(.RejectedStopped)
+        }
+        // GATE #4565: kernel primitive
+        #Unsafe("admission stack and atomic count retain state across a race with shutdown") {
+            reentrant :: JET_FFI_CALLBACK_STACK.with(fn(stack) { stack.borrow().iter().any(fn(id) { *id == self.id }) })
+            if reentrant && not self.contract.reentrant {
+                self.record_callback_failure("reentrant callback rejected by registration contract")
+                return Err(.RejectedReentrant)
+            }
+            self.in_flight.fetch_add(1, Ordering.AcqRel)
+            if self.phase() != JET_FFI_CALLBACK_ACTIVE {
+                self.leave()
+                return Err(.RejectedStopped)
+            }
+            JET_FFI_CALLBACK_STACK.with(fn(stack) { stack.borrow_mut().push(self.id) })
+            Ok(JetFfiInFlight{state: self.clone(), active: true, marker: PhantomData})
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:319
+    fn leave(self: &Self) -> {
+        // GATE #4565: kernel primitive
+        #Unsafe("release one admitted invocation and wake shutdown on the final departure") {
+            if self.in_flight.fetch_sub(1, Ordering.AcqRel) == 1 -> self.wake.notify_all()
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:325
+    fn dispatch(self: &Arc<Self>, value: T) -> JetFfiCallbackDispatch {
+        guard :: match self.enter() {
+            Ok(guard) -> ^guard
+            Err(error) -> {
+                if error is .RejectedThread || error is .RejectedReentrant -> self.spawn_stop().detach()
+                return ^error
+            }
+        }
+        // GATE #4565: kernel primitive
+        #Unsafe("retain the callback and stop slot through invocation; catch unwind at the foreign boundary") {
+            stop_state :: self.clone()
+            stop_slot :: Arc.new(Mutex.new(Val(Arc.new(fn() {
+                stop_state.request_stop()
+                stop_state.spawn_stop().detach()
+            }))))
+            JET_FFI_CURRENT_EVENT_STOP.with(fn(stack) { stack.borrow_mut().push(^stop_slot) })
+            callback :: self.callback.lock().unwrap_or_else(fn(poisoned) { poisoned.into_inner() }).clone()
+            result :: match callback {
+                Val(callback) -> catch_unwind(AssertUnwindSafe(fn() {
+                    callback(JetFfiCallbackEvent{value: &value, state: self.clone()})
+                })).map_err(fn(_) { "callback panicked across the foreign boundary" }).and_then(fn(result) { ^result })
+                None -> Err("callback handler was released before admission completed")
+            }
+            JET_FFI_CURRENT_EVENT_STOP.with(fn(stack) { _ :: stack.borrow_mut().pop() })
+            JET_FFI_CALLBACK_STACK.with(fn(stack) { _ :: stack.borrow_mut().pop() })
+            drop(^guard)
+            match result {
+                Ok(()) -> .Accepted
+                Err(message) -> {
+                    self.record_callback_failure(message.clone())
+                    self.spawn_stop().detach()
+                    .Failed(^message)
+                }
+            }
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:382
+    fn spawn_stop(self: &Arc<Self>) -> JetTask<JetFfiStopResult> {
+        state :: self.clone()
+        // GATE #4565: kernel primitive
+        #Unsafe("shutdown worker retains registration state until native acknowledgement and quiescence") {
+            JetTask.spawn(fn() { state.finish_stop() })
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:387
+    fn finish_stop(self: &Arc<Self>) -> JetFfiStopResult {
+        self.request_stop()
+        // GATE #4565: kernel primitive
+        #Unsafe("one shutdown leader runs native stop; all workers wait for callback quiescence") {
+            leader :: self.shutdown_started.compare_exchange(0, 1, Ordering.AcqRel, Ordering.Acquire).is_ok()
+            if leader {
+                native_result :: catch_unwind(AssertUnwindSafe(fn() { (self.native_stop)() }))
+                    .map_err(fn(_) { "native shutdown hook panicked" }).and_then(fn(result) { ^result })
+                if native_result is Err(message) {
+                    self.record_native_failure(^message)
+                    return self.stop_result()
+                }
+                self.native_ack.store(1, Ordering.Release)
+                wait := self.wait_lock.lock().unwrap_or_else(fn(poisoned) { poisoned.into_inner() })
+                while self.in_flight.load(Ordering.Acquire) != 0 {
+                    wait = self.wake.wait(^wait).unwrap_or_else(fn(poisoned) { poisoned.into_inner() })
+                }
+                self.phase.store(JET_FFI_CALLBACK_STOPPED, Ordering.Release)
+                release :: self.native_release.lock().unwrap_or_else(fn(poisoned) { poisoned.into_inner() }).take()
+                callback :: self.callback.lock().unwrap_or_else(fn(poisoned) { poisoned.into_inner() }).take()
+                drop(^wait)
+                drop(^callback)
+                if release is Val(release) -> _ :: catch_unwind(AssertUnwindSafe(fn() { release() }))
+                self.wake.notify_all()
+            } else {
+                wait := self.wait_lock.lock().unwrap_or_else(fn(poisoned) { poisoned.into_inner() })
+                while self.phase() == JET_FFI_CALLBACK_STOPPING || self.in_flight.load(Ordering.Acquire) != 0 {
+                    wait = self.wake.wait(^wait).unwrap_or_else(fn(poisoned) { poisoned.into_inner() })
+                }
+            }
+            self.stop_result()
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:448
+    fn stop_result(self: &Self) -> JetFfiStopResult {
+        // GATE #4565: kernel primitive
+        #Unsafe("snapshot retained shutdown errors under their mutexes") {
+            if self.native_failure.lock().unwrap_or_else(fn(poisoned) { poisoned.into_inner() }).clone() is Val(message) {
+                return .Quarantined(^message)
+            }
+            if self.callback_failure.lock().unwrap_or_else(fn(poisoned) { poisoned.into_inner() }).clone() is Val(message) {
+                return .CallbackFailed(^message)
+            }
+            if self.phase() == JET_FFI_CALLBACK_STOPPED { .Stopped }
+            else { .NativeBoundaryFailed("callback shutdown did not reach a terminal acknowledgement") }
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:475
+struct JetFfiInFlight<T: Send + Sync> { state: Arc<JetFfiCallbackState<T>>, active: Bool, marker: PhantomData<T> }
+impl<T: Send + Sync> Drop for JetFfiInFlight<T> {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:482
+    fn drop(self: &Self) -> {
+        if self.active { self.active = false; self.state.leave() }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:490
+pub struct JetFfiCallbackEvent<T: Send + Sync> { value: &T, state: Arc<JetFfiCallbackState<T>> }
+impl<T: Send + Sync> JetFfiCallbackEvent<T> {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:496
+    pub fn value(self: &Self) -> &T { self.value }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:502
+    pub fn stop(self: &Self) -> { self.state.request_stop(); self.state.spawn_stop().detach() }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:507
+    pub fn callback_identity(self: &Self) -> &String { &self.state.contract.callback_identity }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:511
+    pub fn plan_digest(self: &Self) -> &String { &self.state.contract.plan_digest }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:521
+pub struct JetFfiCallbackEventValue<T: Send + Sync> { pub value: T }
+impl<T: Send + Sync> JetFfiCallbackEventValue<T> {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:526
+    pub fn new(value: T) -> Self { Self{value: ^value} }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:530
+    pub fn value(self: &Self) -> &T { &self.value }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:534
+    pub fn stop(self: &Self) -> {
+        // GATE #4565: kernel primitive
+        #Unsafe("current event stop requests asynchronous shutdown and never joins callback code") { _ :: jet_ffi_callback_event_stop() }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:543
+pub struct JetFfiCallbackRegistration<T: Send + Sync> { state: Arc<JetFfiCallbackState<T>>, owner_consumed: Bool }
+impl<T: Send + Sync> JetFfiCallbackRegistration<T> {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:549
+    pub fn new(contract: JetFfiCallbackContract, callback: JetFfiCallbackHandler<T>,
+        native_stop: Arc<fn() -> Err!>, native_release: Arc<fn()>?) -> Self Err! {
+        Ok(Self{state: JetFfiCallbackState.new(^contract, ^callback, ^native_stop, ^native_release)?, owner_consumed: false})
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:566
+    pub fn dispatch(self: &Self, value: T) -> JetFfiCallbackDispatch { self.state.dispatch(^value) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:570
+    pub fn stop(self: &Self) -> { self.state.request_stop(); self.state.spawn_stop().detach() }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:577
+    pub fn unsubscribe(self: ^Self) -> JetTask<JetFfiStopResult> {
+        owned := ^self
+        owned.owner_consumed = true
+        owned.state.request_stop()
+        owned.state.spawn_stop()
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:583
+    pub fn phase(self: &Self) -> JetFfiCallbackPhase { JetFfiCallbackPhase.from_raw(self.state.phase()) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:587
+    pub fn contract(self: &Self) -> &JetFfiCallbackContract { &self.state.contract }
+}
+impl<T: Send + Sync> Drop for JetFfiCallbackRegistration<T> {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:593
+    fn drop(self: &Self) -> {
+        if not self.owner_consumed {
+            // Drop is not a join point; the shutdown task retains state through ACK or quarantine.
+            self.state.request_stop()
+            self.state.spawn_stop().detach()
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:606
+#Copy
+#Equatable
+pub enum JetFfiCallbackPhase { Active, Stopping, Stopped, Quarantined }
+impl JetFfiCallbackPhase {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:614
+    fn from_raw(raw: U8) -> Self {
+        match raw {
+            JET_FFI_CALLBACK_ACTIVE -> .Active
+            JET_FFI_CALLBACK_STOPPING -> .Stopping
+            JET_FFI_CALLBACK_STOPPED -> .Stopped
+            _ -> .Quarantined
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:629
+// GATE #4565: kernel primitive — these raw function carriers have native C ABI.
+pub type JetFfiRawInvoke = fn(*c_void, I64)
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:630
+pub type JetFfiRawStop = fn(*c_void) -> I32
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:631
+pub type JetFfiRawRelease = fn(*c_void)
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:633
+struct JetFfiRawRegistration {
+    registration: Mutex<JetFfiCallbackRegistration<I64>?>
+    event_stop: Arc<Mutex<Arc<fn()>?>>
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:644
+pub struct JetFfiCallbackRegistrationHandle { raw: *c_void }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:651
+// GATE #4565: kernel primitive
+// Audited native trait witness: internally synchronized registration, sole consuming owner.
+impl Send for JetFfiCallbackRegistrationHandle {}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:652
+// GATE #4565: kernel primitive
+// Audited native trait witness: shared loans cannot consume the internally synchronized owner.
+impl Sync for JetFfiCallbackRegistrationHandle {}
+impl JetFfiCallbackRegistrationHandle {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:655
+    pub fn from_raw(raw: *c_void) -> Self {
+        assert(not raw.is_null(), "managed callback registration returned a null handle")
+        Self{raw: raw}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:660
+    pub fn as_raw(self: &Self) -> *c_void { self.raw }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:664
+    pub fn into_raw(self: ^Self) -> *c_void {
+        owned := ^self
+        raw :: owned.raw
+        owned.raw = ptr.null_mut<c_void>()
+        raw
+    }
+}
+impl Drop for JetFfiCallbackRegistrationHandle {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:672
+    fn drop(self: &Self) -> {
+        if self.raw.is_null() -> return
+        // GATE #4565: kernel primitive
+        #Unsafe("detached stop task owns the opaque registration until native ACK and in-flight drain") {
+            stop_task :: jet_ffi_callback_registration_unsubscribe(self.raw)
+            if not stop_task.is_null() -> jet_ffi_callback_stop_task_detach(stop_task)
+        }
+        self.raw = ptr.null_mut<c_void>()
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:692
+pub fn jet_ffi_callback_registration_start_i64(
+    callback: JetFfiRawInvoke?, native_start: fn(JetFfiRawInvoke?, *c_void) -> *c_void,
+    native_stop: fn(*c_void) -> I32, native_release: fn(*c_void),
+    handler: JetFfiCallbackHandler<I64>, callback_identity: &String, plan_digest: &String) -> *c_void {
+    // GATE #4565: kernel primitive
+    #Unsafe("owned-static Send+Sync native closures and context remain retained through shutdown") {
+        native_token_slot :: Arc.new(Mutex.new(None as USize?))
+        // Synchronous start callbacks may request stop before native_start returns its token.
+        start_gate :: Arc.new((Mutex.new(false), Condvar.new()))
+        stop_gate :: start_gate.clone()
+        stop_context :: native_token_slot.clone()
+        stop_hook :: Arc.new(fn() -> Err! {
+            complete := stop_gate.0.lock().unwrap_or_else(fn(poisoned) { poisoned.into_inner() })
+            while not *complete {
+                complete = stop_gate.1.wait(^complete).unwrap_or_else(fn(poisoned) { poisoned.into_inner() })
+            }
+            drop(^complete)
+            token :: *stop_context.lock().unwrap_or_else(fn(poisoned) { poisoned.into_inner() })
+                ?? return Err("managed callback has no native token")
+            status :: catch_unwind(AssertUnwindSafe(fn() { native_stop(ptr.from_addr<c_void>(token)) }))
+                .map_err(fn(_) { "native callback shutdown panicked" })?
+            if status == 0 { Ok(()) } else { Err("native callback shutdown returned status {status}") }
+        })
+        release_context :: native_token_slot.clone()
+        release_hook :: Arc.new(fn() {
+            token :: *release_context.lock().unwrap_or_else(fn(poisoned) { poisoned.into_inner() })
+            if token is Val(token) {
+                _ :: catch_unwind(AssertUnwindSafe(fn() { native_release(ptr.from_addr<c_void>(token)) }))
+            }
+        })
+        identity := callback_identity.trim() // #4303
+        digest := plan_digest.trim() // #4303
+        if identity.is_empty() || digest.is_empty() || plan_digest != jet_ffi_callback_plan_digest(callback_identity) {
+            return ptr.null_mut<c_void>()
+        }
+        contract :: JetFfiCallbackContract.managed(callback_identity.to_string(), plan_digest.to_string())
+        registration :: JetFfiCallbackRegistration.new(^contract, ^handler, ^stop_hook, Val(^release_hook)).ok()
+            ?? return ptr.null_mut<c_void>()
+        event_stop :: Arc.new(Mutex.new(None as Arc<fn()>?))
+        state :: registration.state.clone()
+        *event_stop.lock().unwrap_or_else(fn(poisoned) { poisoned.into_inner() }) = Val(Arc.new(fn() {
+            state.request_stop()
+            state.spawn_stop().detach()
+        }))
+        raw :: Box.into_raw(Box.new(JetFfiRawRegistration{registration: Mutex.new(Val(^registration)), event_stop: ^event_stop}))
+        started :: catch_unwind(AssertUnwindSafe(fn() { native_start(callback, raw.cast<c_void>()) }))
+            .ok().filter(fn(token) { not token.is_null() }).map(fn(token) {
+                *native_token_slot.lock().unwrap_or_else(fn(poisoned) { poisoned.into_inner() }) = Val(token.addr())
+                true
+            }) ?? false
+        *start_gate.0.lock().unwrap_or_else(fn(poisoned) { poisoned.into_inner() }) = true
+        start_gate.1.notify_all()
+        if not started {
+            stop_task :: jet_ffi_callback_registration_unsubscribe(raw.cast<c_void>())
+            if not stop_task.is_null() -> jet_ffi_callback_stop_task_detach(stop_task)
+            return ptr.null_mut<c_void>()
+        }
+        raw.cast<c_void>()
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:815
+struct JetFfiRawStopTask {
+    task: JetTask<JetFfiStopResult>?
+    // Opaque registration survives late calls until join; failed ACK retains
+    // the holder and its state as quarantine, never frees live native context.
+    registration: Box<JetFfiRawRegistration>?
+    retained_state: Arc<JetFfiCallbackState<I64>>?
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:826
+fn raw_text(pointer: *c_char) -> String {
+    if pointer.is_null() -> return String.new()
+    // GATE #4565: kernel primitive
+    #Unsafe("generated facade supplies a live NUL-terminated identity; invalid UTF8 is decoded lossily") {
+        CStr.from_ptr(pointer).to_string_lossy().into_owned()
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:836
+fn raw_status(outcome: JetFfiCallbackDispatch) -> I32 {
+    match outcome {
+        .Accepted -> 0, .RejectedStopped -> 1, .RejectedReentrant -> 2,
+        .RejectedThread -> 3, .RejectedQuarantined -> 4, .Failed(_) -> 5
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:847
+fn raw_stop_status(result: JetFfiStopResult JetTaskFailure!) -> I32 {
+    match result {
+        Ok(.Stopped) -> 0, Ok(.CallbackFailed(_)) -> 2, Ok(.NativeBoundaryFailed(_)) -> 3,
+        Ok(.Quarantined(_)) -> 4, Err(.Cancelled) -> 5, Err(.DeadlineBlown) -> 6, Err(.Panicked(_)) -> 7
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:860
+#FFI(c)
+pub fn jet_ffi_callback_event_stop() -> I32 {
+    // GATE #4565: kernel primitive
+    #Unsafe("read the active same-thread callback stop slot and request nonblocking shutdown") {
+        stop :: JET_FFI_CURRENT_EVENT_STOP.with(fn(stack) { stack.borrow().last().cloned() }) ?? return -1
+        stop :: stop.lock().unwrap_or_else(fn(poisoned) { poisoned.into_inner() }).clone() ?? return -1
+        stop()
+        0
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:875
+pub fn jet_ffi_callback_event_stop_unit() -> {
+    // GATE #4565: kernel primitive
+    #Unsafe("event stop is asynchronous; the consuming owner reports its failures on join") { _ :: jet_ffi_callback_event_stop() }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:882
+#FFI(c)
+pub fn jet_ffi_callback_registration_new_i64(invoke: JetFfiRawInvoke?, stop: JetFfiRawStop?,
+    release: JetFfiRawRelease?, ctx: *c_void, callback_identity: *c_char, plan_digest: *c_char, flags: U32) -> *c_void {
+    invoke :: invoke ?? return ptr.null_mut<c_void>()
+    stop :: stop ?? return ptr.null_mut<c_void>()
+    release :: release ?? return ptr.null_mut<c_void>()
+    if flags & JET_FFI_CALLBACK_REQUIRED_FLAGS != JET_FFI_CALLBACK_REQUIRED_FLAGS
+        || flags & ~(JET_FFI_CALLBACK_REQUIRED_FLAGS | JET_FFI_CALLBACK_FLAG_REENTRANT) != 0 {
+        return ptr.null_mut<c_void>()
+    }
+    callback_identity :: raw_text(callback_identity)
+    plan_digest :: raw_text(plan_digest)
+    identity := callback_identity.trim() // #4303
+    digest := plan_digest.trim() // #4303
+    if identity.is_empty() || digest.is_empty() || plan_digest != jet_ffi_callback_plan_digest(&callback_identity) {
+        return ptr.null_mut<c_void>()
+    }
+    contract := JetFfiCallbackContract.managed(^callback_identity, ^plan_digest)
+    contract.reentrant = flags & JET_FFI_CALLBACK_FLAG_REENTRANT != 0
+    // GATE #4565: kernel primitive
+    #Unsafe("native context and checked C-ABI hooks stay retained in Send+Sync closures until ACK and quiescence") {
+        event_stop :: Arc.new(Mutex.new(None as Arc<fn()>?))
+        callback_ctx :: ctx.addr()
+        stop_slot :: event_stop.clone()
+        callback :: Arc.new(fn(event: JetFfiCallbackEvent<I64>) -> Err! {
+            JET_FFI_CURRENT_EVENT_STOP.with(fn(stack) { stack.borrow_mut().push(stop_slot.clone()) })
+            result :: catch_unwind(AssertUnwindSafe(fn() { invoke(ptr.from_addr<c_void>(callback_ctx), *event.value()) }))
+                .map_err(fn(_) { "native callback trampoline panicked" })
+            JET_FFI_CURRENT_EVENT_STOP.with(fn(stack) { _ :: stack.borrow_mut().pop() })
+            ^result
+        })
+        stop_ctx :: ctx.addr()
+        native_stop :: Arc.new(fn() -> Err! {
+            result :: catch_unwind(AssertUnwindSafe(fn() { stop(ptr.from_addr<c_void>(stop_ctx)) }))
+                .map_err(fn(_) { "native callback shutdown panicked" })?
+            if result == 0 { Ok(()) } else { Err("native callback shutdown returned status {result}") }
+        })
+        release_ctx :: ctx.addr()
+        native_release :: Arc.new(fn() {
+            _ :: catch_unwind(AssertUnwindSafe(fn() { release(ptr.from_addr<c_void>(release_ctx)) }))
+        })
+        registration :: JetFfiCallbackRegistration.new(^contract, ^callback, ^native_stop, Val(^native_release)).ok()
+            ?? return ptr.null_mut<c_void>()
+        state :: registration.state.clone()
+        *event_stop.lock().unwrap_or_else(fn(poisoned) { poisoned.into_inner() }) = Val(Arc.new(fn() {
+            state.request_stop()
+            state.spawn_stop().detach()
+        }))
+        Box.into_raw(Box.new(JetFfiRawRegistration{
+            registration: Mutex.new(Val(^registration)), event_stop: ^event_stop})).cast<c_void>()
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:968
+#FFI(c)
+pub fn jet_ffi_callback_registration_invoke_i64(handle: *c_void, value: I64) -> I32 {
+    if handle.is_null() -> return 1
+    // GATE #4565: kernel primitive
+    #Unsafe("live opaque handle is retained until stop task drain; release owner mutex before user dispatch") {
+        raw :: handle.cast<JetFfiRawRegistration>().as_ref()
+        state :: raw.registration.lock().unwrap_or_else(fn(poisoned) { poisoned.into_inner() })
+            .as_ref().map(fn(registration) { registration.state.clone() }) ?? return 1
+        jet_ffi_with_callback_attachment(fn() { raw_status(state.dispatch(value)) })
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:991
+#FFI(c)
+pub fn jet_ffi_callback_registration_stop(handle: *c_void) -> I32 {
+    if handle.is_null() -> return 1
+    // GATE #4565: kernel primitive
+    #Unsafe("live synchronized opaque handle may request nonblocking shutdown") {
+        raw :: handle.cast<JetFfiRawRegistration>().as_ref()
+        owner :: raw.registration.lock().unwrap_or_else(fn(poisoned) { poisoned.into_inner() })
+        registration :: owner.as_ref() ?? return 1
+        registration.stop()
+        0
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:1008
+#FFI(c)
+pub fn jet_ffi_callback_registration_unsubscribe(handle: *c_void) -> *c_void {
+    if handle.is_null() -> return ptr.null_mut<c_void>()
+    // GATE #4565: kernel primitive
+    #Unsafe("consume the one registration allocation, transferring it to stop-task ownership until drain") {
+        raw :: Box.from_raw(handle.cast<JetFfiRawRegistration>())
+        registration :: raw.registration.lock().unwrap_or_else(fn(poisoned) { poisoned.into_inner() }).take()
+        if registration is None {
+            mem.forget(^raw)
+            return ptr.null_mut<c_void>()
+        }
+        registration :: registration.unwrap()
+        retained_state :: registration.state.clone()
+        task :: registration.unsubscribe()
+        Box.into_raw(Box.new(JetFfiRawStopTask{task: Val(^task),
+            registration: Val(^raw), retained_state: Val(^retained_state)})).cast<c_void>()
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:1035
+#FFI(c)
+pub fn jet_ffi_callback_stop_task_join(handle: *c_void) -> I32 {
+    if handle.is_null() -> return 7
+    // GATE #4565: kernel primitive
+    #Unsafe("consume stop task once; quarantine its retained native context unless shutdown reached stopped") {
+        task := Box.from_raw(handle.cast<JetFfiRawStopTask>())
+        result :: task.task.take().map(fn(task) { task.join() })
+            ?? Err(JetTaskFailure.Panicked("callback stop task was already joined"))
+        status :: raw_stop_status(^result)
+        stopped :: task.retained_state.as_ref().is_some_and(fn(state) { state.phase() == JET_FFI_CALLBACK_STOPPED })
+        if status != 0 && not stopped -> mem.forget(^task)
+        status
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:1062
+#FFI(c)
+pub fn jet_ffi_callback_registration_phase(handle: *c_void) -> I32 {
+    if handle.is_null() -> return JET_FFI_CALLBACK_QUARANTINED as I32
+    // GATE #4565: kernel primitive
+    #Unsafe("read synchronized lifecycle of a retained opaque registration") {
+        raw :: handle.cast<JetFfiRawRegistration>().as_ref()
+        registration :: raw.registration.lock().unwrap_or_else(fn(poisoned) { poisoned.into_inner() })
+        registration.as_ref().map(fn(registration) { registration.phase() as I32 }) ?? (JET_FFI_CALLBACK_STOPPED as I32)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:1081
+#FFI(c)
+pub fn jet_ffi_callback_stop_task_detach(handle: *c_void) -> {
+    if handle.is_null() -> return
+    // GATE #4565: kernel primitive
+    #Unsafe("detached worker owns stop holder; failed ACK intentionally retains quarantined live native state") {
+        holder := Box.from_raw(handle.cast<JetFfiRawStopTask>())
+        JetTask.spawn(fn() {
+            result :: catch_unwind(AssertUnwindSafe(fn() {
+                holder.task.take().map(fn(task) { task.join() })
+                    ?? Err(JetTaskFailure.Panicked("callback stop task was already joined"))
+            }))
+            status :: result.map(fn(result) { raw_stop_status(^result) }) ?? 7
+            stopped :: holder.retained_state.as_ref().is_some_and(fn(state) { state.phase() == JET_FFI_CALLBACK_STOPPED })
+            if status == 0 || stopped { drop(^holder) } else { mem.forget(^holder) }
+        }).detach()
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:1112
+pub fn jet_ffi_callback_registration_unsubscribe_result(handle: *c_void) -> JetTask<() Err!> {
+    // GATE #4565: kernel primitive
+    #Unsafe("consuming owner task returns success only after native ACK, callback drain and retained-state release") {
+        stop_task :: jet_ffi_callback_registration_unsubscribe(handle)
+        if stop_task.is_null() -> return JetTask.spawn(fn() { Err("callback registration was already consumed") })
+        stop_task_addr :: stop_task.addr()
+        JetTask.spawn(fn() {
+            status :: jet_ffi_callback_stop_task_join(ptr.from_addr<c_void>(stop_task_addr))
+            if status == 0 { Ok(()) } else { Err("callback unsubscribe failed with status {status}") }
+        })
+    }
+}
 

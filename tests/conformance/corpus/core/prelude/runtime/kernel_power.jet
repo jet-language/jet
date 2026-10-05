@@ -1,0 +1,17 @@
+use core.prelude.runtime.kernel_power.[JetPow, JetPowFloat]
+use core.prelude.runtime.core.[JetShiftCount]
+
+// Rust: crates/jet-codegen/src/Prelude/Core/Power.rs:33
+#Test("power fixed widths preserve trap wrapping and saturation modes") {
+    assert(I8{-2}.jet_pow(U8{3}.jet_shift_count(), "", U32{0}) == I8{-8})
+    assert(I16{12}.jet_pow(U8{3}.jet_shift_count(), "", U32{0}) == I16{1728})
+    assert(U8{20}.jet_wrapping_pow(U8{2}.jet_shift_count(), "", U32{0}) == U8{144})
+    assert(U8{20}.jet_saturating_pow(U8{2}.jet_shift_count(), "", U32{0}) == U8{255})
+    assert(U64{2}.jet_pow(U8{63}.jet_shift_count(), "", U32{0}) == U64{9223372036854775808})
+    assert(I64{0}.jet_pow(U8{0}.jet_shift_count(), "", U32{0}) == I64{1})
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Power.rs:77
+#Test("floating power allows fractional exponent") {
+    assert(F64{4.0}.jet_pow(F64{0.5}) == F64{2.0})
+    assert(F32{2.0}.jet_pow(F32{3.0}) == F32{8.0})
+}

@@ -1,0 +1,37 @@
+use core.sys.runtime.kernel_env_config_04.[jet_env_config_file_is_project_relative]
+use core.sys.runtime.kernel_env_config.[jet_env_config_entries, jet_env_config_error_reason, JetEnvConfigVar, JetEnvConfigOrigin]
+use core.sys.target as target
+
+// Rust: crates/jet-codegen/src/Prelude/Core/EnvConfig.rs:13
+#Test("env_config_paths_use_selected_native_components") {
+    assert(jet_env_config_file_is_project_relative(""))
+    assert(jet_env_config_file_is_project_relative("./config/.env"))
+    assert(!jet_env_config_file_is_project_relative("config/../.env"))
+    if target.selected_family() == "windows" {
+        assert(!jet_env_config_file_is_project_relative("C:\\config\\.env"))
+        assert(!jet_env_config_file_is_project_relative("config\\..\\.env"))
+        assert(jet_env_config_file_is_project_relative("C:config\\.env"))
+    } else if target.selected_family() == "unix" {
+        assert(!jet_env_config_file_is_project_relative("/config/.env"))
+        assert(jet_env_config_file_is_project_relative("config\\..\\.env"))
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/EnvConfig.rs:28
+#Test("env_config_reuses_source_precedence_quotes_and_field_folding") {
+    entries :: jet_env_config_entries("APP_", Val("export app_PORT = '100 # literal'\nAPP_DB__HOST = local # trailing"), [], [
+        JetEnvConfigVar{name: "APP_PORT", value: "200"},
+    ]).unwrap()
+    assert(entries.len() == 2)
+    // Lookups avoid relying on the canonical owner's map iteration ordering.
+    db :: entries.iter().find(e -> e.name == "APP_DB__HOST").unwrap()
+    assert(db.value == "local" && db.segments == ["db", "host"])
+    port :: entries.iter().find(e -> e.name == "APP_PORT").unwrap()
+    assert(port.value == "200" && port.segments == ["port"])
+    assert(jet_env_config_entries("APP_", Val("broken"), [], []).is_err())
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/EnvConfig.rs:100
+#Test("env_config_reuses_first_origin_and_exact_secret_segments") {
+    origins :: [JetEnvConfigOrigin{name: "APP_PASSWORD", path: "db.password"}, JetEnvConfigOrigin{name: "LATER", path: "DB.PASSWORD"}]
+    assert(jet_env_config_error_reason("DB.PASSWORD", "leaked", origins) == "E2416: env var APP_PASSWORD -> DB.PASSWORD: secret value rejected")
+    assert(jet_env_config_error_reason("db.password_hint", "expected text", []) == "E2416: config field db.password_hint: expected text")
+}

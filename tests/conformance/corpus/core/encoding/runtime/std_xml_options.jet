@@ -1,0 +1,20 @@
+use core.encoding.runtime.std_xml_options.[XMLLimits, XMLEntityPolicy, XMLParseOptions, XMLRenderOptions, XMLEncoding, XMLLexicalPolicy]
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/XmlOptions.rs:16
+#Test("xml_safe_limits_and_policies") {
+    limits :: XMLLimits.safe()
+    assert(limits.max_depth == 256)
+    assert(limits.max_nodes == 1_000_000)
+    assert(limits.max_attributes_per_element == 1024)
+    assert(limits.max_name_bytes == 4096)
+    assert(limits.max_text_bytes == 16_777_216)
+    assert(limits.max_entity_declarations == 1024)
+    assert(limits.max_entity_depth == 32)
+    assert(limits.max_entity_replacement_bytes == 8_388_608)
+    parsed :: XMLParseOptions.safe()
+    assert(parsed.entities == XMLEntityPolicy.Preserve)
+    assert(parsed.limits == limits)
+    rendered :: XMLRenderOptions.safe()
+    assert(rendered.encoding == XMLEncoding.UTF8)
+    assert(rendered.lexical == XMLLexicalPolicy.PreserveValid)
+    assert(XMLEntityPolicy.Resolve(["x":"y"]) == XMLEntityPolicy.Resolve(["x":"y"]))
+}

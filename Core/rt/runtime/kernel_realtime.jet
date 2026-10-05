@@ -1,513 +1,308 @@
-// PORT-PENDING 0158 crates-jet-codegen-src-prelude-core-realtime: crates/jet-codegen/src/Prelude/Core/Realtime.rs:1-509
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS // D-FOUND-REALTIME1=A: one fixed-rate callback clock for every native tier.
-//RS //
-//RS // The callback owns one reusable sample buffer.  Deadlines are absolute points
-//RS // on the monotonic Instant clock, not `now + period` sleeps, so fractional
-//RS // nanosecond periods do not accumulate drift.  The worker records bounded
-//RS // scalar facts only; it never allocates or writes output on the callback path.
-//RS 
-//RS const JET_REALTIME_NANOS_PER_SECOND: u128 = 1_000_000_000;
-//RS 
-//RS /// A bounded single-producer/single-consumer sample carrier for adapters whose
-//RS /// callback boundary must not allocate. Writers publish fixed f64 bit cells;
-//RS /// the owner drains a slot into an ordinary Vec after dequeue.
-//RS const JET_REALTIME_SAMPLE_RING_SLOTS: usize = 2;
-//RS 
-//RS #[derive(Debug)]
-//RS struct JetRealtimeSampleSlot {
-//RS     values: Box<[std::sync::atomic::AtomicU64]>,
-//RS }
-//RS 
-//RS #[derive(Debug)]
-//RS pub struct JetRealtimeSampleRing {
-//RS     slots: Box<[JetRealtimeSampleSlot]>,
-//RS     read_sequence: std::sync::atomic::AtomicU64,
-//RS     write_sequence: std::sync::atomic::AtomicU64,
-//RS }
-//RS 
-//RS impl JetRealtimeSampleRing {
-//RS     pub fn new(frame_count: usize) -> Self {
-//RS         assert!(frame_count > 0, "real-time sample ring needs a positive frame count");
-//RS         let slots = (0..JET_REALTIME_SAMPLE_RING_SLOTS)
-//RS             .map(|_| JetRealtimeSampleSlot {
-//RS                 values: (0..frame_count)
-//RS                     .map(|_| std::sync::atomic::AtomicU64::new(0))
-//RS                     .collect::<Vec<_>>()
-//RS                     .into_boxed_slice(),
-//RS             })
-//RS             .collect::<Vec<_>>()
-//RS             .into_boxed_slice();
-//RS         Self {
-//RS             slots,
-//RS             read_sequence: std::sync::atomic::AtomicU64::new(0),
-//RS             write_sequence: std::sync::atomic::AtomicU64::new(0),
-//RS         }
-//RS     }
-//RS 
-//RS     /// Publish a fixed zero-filled sample slot without allocation or blocking.
-//RS     pub fn publish_zeroed(&self) -> bool {
-//RS         let sequence = self.write_sequence.load(std::sync::atomic::Ordering::Relaxed);
-//RS         let read = self.read_sequence.load(std::sync::atomic::Ordering::Acquire);
-//RS         if sequence.wrapping_sub(read) >= self.slots.len() as u64 {
-//RS             return false;
-//RS         }
-//RS         let slot = &self.slots[(sequence % self.slots.len() as u64) as usize];
-//RS         for value in &slot.values {
-//RS             value.store(0, std::sync::atomic::Ordering::Relaxed);
-//RS         }
-//RS         self.write_sequence
-//RS             .store(sequence.wrapping_add(1), std::sync::atomic::Ordering::Release);
-//RS         true
-//RS     }
-//RS 
-//RS     /// Publish samples into a preallocated slot without allocation or blocking.
-//RS     pub fn publish(&self, samples: &[f64]) -> bool {
-//RS         let sequence = self.write_sequence.load(std::sync::atomic::Ordering::Relaxed);
-//RS         let read = self.read_sequence.load(std::sync::atomic::Ordering::Acquire);
-//RS         if sequence.wrapping_sub(read) >= self.slots.len() as u64 {
-//RS             return false;
-//RS         }
-//RS         let slot = &self.slots[(sequence % self.slots.len() as u64) as usize];
-//RS         if slot.values.len() != samples.len() {
-//RS             return false;
-//RS         }
-//RS         for (cell, &sample) in slot.values.iter().zip(samples) {
-//RS             cell.store(sample.to_bits(), std::sync::atomic::Ordering::Relaxed);
-//RS         }
-//RS         self.write_sequence
-//RS             .store(sequence.wrapping_add(1), std::sync::atomic::Ordering::Release);
-//RS         true
-//RS     }
-//RS 
-//RS     /// Drain one published slot. Allocation is deliberately owner-side.
-//RS     pub fn pop(&self) -> Option<Vec<f64>> {
-//RS         let sequence = self.read_sequence.load(std::sync::atomic::Ordering::Relaxed);
-//RS         let write = self.write_sequence.load(std::sync::atomic::Ordering::Acquire);
-//RS         if sequence == write {
-//RS             return None;
-//RS         }
-//RS         let slot = &self.slots[(sequence % self.slots.len() as u64) as usize];
-//RS         let values = slot
-//RS             .values
-//RS             .iter()
-//RS             .map(|value| f64::from_bits(value.load(std::sync::atomic::Ordering::Relaxed)))
-//RS             .collect();
-//RS         self.read_sequence
-//RS             .store(sequence.wrapping_add(1), std::sync::atomic::Ordering::Release);
-//RS         Some(values)
-//RS     }
-//RS }
-//RS 
-//RS /// The bounded facts emitted by one real-time callback stream.
-//RS ///
-//RS /// `start_identity` and `end_identity` are monotonic nanoseconds from the
-//RS /// Prelude clock.  `end_identity == 0` means that a live stream has not yet
-//RS /// reached its cancellation boundary.  No callback history is retained: each
-//RS /// fact is a saturating scalar, so receipt size is independent of run length.
-//RS #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-//RS pub struct JetRealtimeReceipt {
-//RS     pub requested_rate_hz: i64,
-//RS     pub requested_frames: i64,
-//RS     pub completed_callbacks: i64,
-//RS     pub completed_frames: i64,
-//RS     pub missed: i64,
-//RS     pub max_lateness_ns: i64,
-//RS     pub start_identity: i64,
-//RS     pub end_identity: i64,
-//RS }
-//RS 
-//RS impl JetRealtimeReceipt {
-//RS     pub fn render_json(&self) -> String {
-//RS         format!(
-//RS             "{{\"requested_rate_hz\":{},\"requested_frames\":{},\"completed_callbacks\":{},\"completed_frames\":{},\"missed\":{},\"max_lateness_ns\":{},\"start_identity\":{},\"end_identity\":{}}}",
-//RS             self.requested_rate_hz,
-//RS             self.requested_frames,
-//RS             self.completed_callbacks,
-//RS             self.completed_frames,
-//RS             self.missed,
-//RS             self.max_lateness_ns,
-//RS             self.start_identity,
-//RS             self.end_identity,
-//RS         )
-//RS     }
-//RS 
-//RS     pub fn render(&self) -> String {
-//RS         format!(
-//RS             "RealtimeReceipt(rate_hz={}, frames={}, callbacks={}, completed_frames={}, missed={}, max_lateness_ns={}, start_identity={}, end_identity={})",
-//RS             self.requested_rate_hz,
-//RS             self.requested_frames,
-//RS             self.completed_callbacks,
-//RS             self.completed_frames,
-//RS             self.missed,
-//RS             self.max_lateness_ns,
-//RS             self.start_identity,
-//RS             self.end_identity,
-//RS         )
-//RS     }
-//RS 
-//RS     pub fn frames_per_buffer(&self) -> i64 {
-//RS         self.requested_frames
-//RS     }
-//RS }
-//RS 
-//RS struct JetRealtimeShared {
-//RS     requested_rate_hz: i64,
-//RS     requested_frames: i64,
-//RS     start: JetInstant,
-//RS     start_identity: i64,
-//RS     next_callback: std::sync::atomic::AtomicU64,
-//RS     next_deadline_identity: std::sync::atomic::AtomicI64,
-//RS     completed_callbacks: std::sync::atomic::AtomicI64,
-//RS     completed_frames: std::sync::atomic::AtomicI64,
-//RS     missed: std::sync::atomic::AtomicI64,
-//RS     max_lateness_ns: std::sync::atomic::AtomicI64,
-//RS     end_identity: std::sync::atomic::AtomicI64,
-//RS     cancelled: std::sync::atomic::AtomicBool,
-//RS     callback_skipped: std::sync::Arc<std::sync::atomic::AtomicBool>,
-//RS }
-//RS 
-//RS /// A running fixed-rate callback.  Dropping or cancelling it stops the worker
-//RS /// and joins it before the stream becomes unreachable, so callback state and
-//RS /// the reusable buffer cannot outlive the returned value.
-//RS #[derive(Clone)]
-//RS pub struct JetRealtimeStream {
-//RS     shared: std::sync::Arc<JetRealtimeShared>,
-//RS     worker: std::sync::Arc<std::sync::Mutex<Option<std::thread::JoinHandle<()>>>>,
-//RS }
-//RS 
-//RS /// Return the absolute nanosecond offset of callback `index` from stream start.
-//RS ///
-//RS /// The rational period is retained until the final division.  For example,
-//RS /// 256 frames at 48 kHz alternate 5,333,333 and 5,333,334 ns intervals rather
-//RS /// than truncating every interval and drifting over the run.
-//RS pub fn jet_rt_deadline_offset_ns(rate_hz: i64, frames_per_buffer: i64, index: u128) -> i64 {
-//RS     if rate_hz <= 0 || frames_per_buffer <= 0 {
-//RS         return 0;
-//RS     }
-//RS     let frame_numerator = (frames_per_buffer as u128).saturating_mul(JET_REALTIME_NANOS_PER_SECOND);
-//RS     let numerator = frame_numerator.saturating_mul(index);
-//RS     numerator
-//RS         .checked_div(rate_hz as u128)
-//RS         .unwrap_or(u128::MAX)
-//RS         .min(i64::MAX as u128) as i64
-//RS }
-//RS 
-//RS fn jet_rt_deadline(
-//RS     start: JetInstant,
-//RS     start_identity: i64,
-//RS     rate_hz: i64,
-//RS     frames_per_buffer: i64,
-//RS     index: u128,
-//RS ) -> (JetInstant, i64) {
-//RS     let offset = jet_rt_deadline_offset_ns(rate_hz, frames_per_buffer, index);
-//RS     (
-//RS         start.plus_duration_ns(offset),
-//RS         start_identity.saturating_add(offset),
-//RS     )
-//RS }
-//RS 
-//RS fn jet_rt_atomic_saturating_add(
-//RS     value: &std::sync::atomic::AtomicI64,
-//RS     increment: i64,
-//RS ) {
-//RS     let _ = value.fetch_update(
-//RS         std::sync::atomic::Ordering::AcqRel,
-//RS         std::sync::atomic::Ordering::Acquire,
-//RS         |current| Some(current.saturating_add(increment)),
-//RS     );
-//RS }
-//RS 
-//RS fn jet_rt_atomic_max(value: &std::sync::atomic::AtomicI64, candidate: i64) {
-//RS     let mut current = value.load(std::sync::atomic::Ordering::Acquire);
-//RS     while current < candidate {
-//RS         match value.compare_exchange_weak(
-//RS             current,
-//RS             candidate,
-//RS             std::sync::atomic::Ordering::AcqRel,
-//RS             std::sync::atomic::Ordering::Acquire,
-//RS         ) {
-//RS             Ok(_) => return,
-//RS             Err(observed) => current = observed,
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn jet_rt_run<F>(
-//RS     shared: std::sync::Arc<JetRealtimeShared>,
-//RS     mut callback: F,
-//RS     buffer: Vec<f64>,
-//RS ) where
-//RS     F: FnMut(&Vec<f64>) + Send + 'static,
-//RS {
-//RS     // The schedule keeps the value form for the native Instant API while the
-//RS     // atomics publish only bounded scalar identities to readers.
-//RS     let (first_deadline, _) = jet_rt_deadline(
-//RS         shared.start,
-//RS         shared.start_identity,
-//RS         shared.requested_rate_hz,
-//RS         shared.requested_frames,
-//RS         1,
-//RS     );
-//RS     let mut schedule = JetRealtimeSchedule {
-//RS         start: shared.start,
-//RS         next_deadline: first_deadline,
-//RS         end: None,
-//RS     };
-//RS     let mut callback_index = 1u128;
-//RS 
-//RS     while !shared
-//RS         .cancelled
-//RS         .load(std::sync::atomic::Ordering::Acquire)
-//RS     {
-//RS         let deadline_identity = shared
-//RS             .next_deadline_identity
-//RS             .load(std::sync::atomic::Ordering::Acquire);
-//RS         jet_time_sleep_until(&schedule.next_deadline);
-//RS         if shared
-//RS             .cancelled
-//RS             .load(std::sync::atomic::Ordering::Acquire)
-//RS         {
-//RS             break;
-//RS         }
-//RS 
-//RS         let started_identity = jet_time_monotonic_now_ns();
-//RS         let lateness = started_identity
-//RS             .saturating_sub(deadline_identity)
-//RS             .max(0);
-//RS         // `missed` counts deadline misses and callbacks skipped by a
-//RS         // nonblocking adapter boundary.
-//RS         if lateness > 0 {
-//RS             jet_rt_atomic_saturating_add(&shared.missed, 1);
-//RS             jet_rt_atomic_max(&shared.max_lateness_ns, lateness);
-//RS         }
-//RS 
-//RS         // The buffer is allocated before the worker starts and is reused for
-//RS         // every invocation.  No receipt collection, channel send, or output
-//RS         // operation is performed here.
-//RS         let callback_ok = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-//RS             callback(&buffer);
-//RS         }))
-//RS             .is_ok();
-//RS         if !callback_ok {
-//RS             shared
-//RS                 .cancelled
-//RS                 .store(true, std::sync::atomic::Ordering::Release);
-//RS             break;
-//RS         }
-//RS 
-//RS         let callback_skipped = shared
-//RS             .callback_skipped
-//RS             .swap(false, std::sync::atomic::Ordering::AcqRel);
-//RS         if callback_skipped {
-//RS             if lateness == 0 {
-//RS                 jet_rt_atomic_saturating_add(&shared.missed, 1);
-//RS             }
-//RS         } else {
-//RS             jet_rt_atomic_saturating_add(&shared.completed_callbacks, 1);
-//RS             jet_rt_atomic_saturating_add(&shared.completed_frames, shared.requested_frames);
-//RS         }
-//RS 
-//RS         callback_index = callback_index.saturating_add(1);
-//RS         let next_index = callback_index.min(u64::MAX as u128) as u64;
-//RS         shared
-//RS             .next_callback
-//RS             .store(next_index, std::sync::atomic::Ordering::Release);
-//RS         let (next_deadline, next_identity) = jet_rt_deadline(
-//RS             schedule.start,
-//RS             shared.start_identity,
-//RS             shared.requested_rate_hz,
-//RS             shared.requested_frames,
-//RS             callback_index,
-//RS         );
-//RS         schedule.next_deadline = next_deadline;
-//RS         shared
-//RS             .next_deadline_identity
-//RS             .store(next_identity, std::sync::atomic::Ordering::Release);
-//RS     }
-//RS 
-//RS     schedule.end = Some(JetInstant::now());
-//RS     if schedule.end.is_some() {
-//RS         let end_identity = jet_time_monotonic_now_ns();
-//RS         shared
-//RS             .end_identity
-//RS             .store(end_identity, std::sync::atomic::Ordering::Release);
-//RS     }
-//RS }
-//RS 
-//RS /// The worker's value-form clock.  `JetInstant` remains the scheduling source;
-//RS /// atomics above are only the cross-thread observation rail.
-//RS struct JetRealtimeSchedule {
-//RS     start: JetInstant,
-//RS     next_deadline: JetInstant,
-//RS     end: Option<JetInstant>,
-//RS }
-//RS 
-//RS /// Start a callback that receives one reusable `frames_per_buffer` sample
-//RS /// buffer on every absolute deadline.  The worker continues until `cancel` or
-//RS /// drop; the callback itself owns no timer, counter, or output allocation.
-//RS pub fn jet_rt_callback<F>(
-//RS     rate_hz: i64,
-//RS     frames_per_buffer: i64,
-//RS     callback: F,
-//RS ) -> JetRealtimeStream
-//RS where
-//RS     F: FnMut(&Vec<f64>) + Send + 'static,
-//RS {
-//RS     jet_rt_callback_with_skip(
-//RS         rate_hz,
-//RS         frames_per_buffer,
-//RS         callback,
-//RS         std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
-//RS     )
-//RS }
-//RS 
-//RS /// Start a callback with a caller-owned signal for nonblocking adapter skips.
-//RS pub fn jet_rt_callback_with_skip<F>(
-//RS     rate_hz: i64,
-//RS     frames_per_buffer: i64,
-//RS     callback: F,
-//RS     callback_skipped: std::sync::Arc<std::sync::atomic::AtomicBool>,
-//RS ) -> JetRealtimeStream
-//RS where
-//RS     F: FnMut(&Vec<f64>) + Send + 'static,
-//RS {
-//RS     assert!(rate_hz > 0, "real-time callback rate must be positive");
-//RS     jet_scheduler_world_reject_uncontrolled("foreign");
-//RS     assert!(frames_per_buffer > 0, "real-time callback frame count must be positive");
-//RS     let frame_count = usize::try_from(frames_per_buffer)
-//RS         .expect("real-time callback frame count is outside the platform range");
-//RS     let buffer = vec![0.0_f64; frame_count];
-//RS     let start = JetInstant::now();
-//RS     let start_identity = jet_time_monotonic_now_ns();
-//RS     let (_, first_deadline_identity) = jet_rt_deadline(
-//RS         start,
-//RS         start_identity,
-//RS         rate_hz,
-//RS         frames_per_buffer,
-//RS         1,
-//RS     );
-//RS     callback_skipped.store(false, std::sync::atomic::Ordering::Release);
-//RS     let shared = std::sync::Arc::new(JetRealtimeShared {
-//RS         requested_rate_hz: rate_hz,
-//RS         requested_frames: frames_per_buffer,
-//RS         start,
-//RS         start_identity,
-//RS         next_callback: std::sync::atomic::AtomicU64::new(1),
-//RS         next_deadline_identity: std::sync::atomic::AtomicI64::new(first_deadline_identity),
-//RS         completed_callbacks: std::sync::atomic::AtomicI64::new(0),
-//RS         completed_frames: std::sync::atomic::AtomicI64::new(0),
-//RS         missed: std::sync::atomic::AtomicI64::new(0),
-//RS         max_lateness_ns: std::sync::atomic::AtomicI64::new(0),
-//RS         end_identity: std::sync::atomic::AtomicI64::new(0),
-//RS         cancelled: std::sync::atomic::AtomicBool::new(false),
-//RS         callback_skipped,
-//RS     });
-//RS     let worker_shared = shared.clone();
-//RS     let worker = std::thread::spawn(move || jet_rt_run(worker_shared, callback, buffer));
-//RS     JetRealtimeStream {
-//RS         shared,
-//RS         worker: std::sync::Arc::new(std::sync::Mutex::new(Some(worker))),
-//RS     }
-//RS }
-//RS 
-//RS impl JetRealtimeStream {
-//RS     /// Return the next absolute monotonic callback deadline.
-//RS     pub(crate) fn next_deadline(&self) -> JetInstant {
-//RS         let index = self
-//RS             .shared
-//RS             .next_callback
-//RS             .load(std::sync::atomic::Ordering::Acquire) as u128;
-//RS         jet_rt_deadline(
-//RS             self.shared.start,
-//RS             self.shared.start_identity,
-//RS             self.shared.requested_rate_hz,
-//RS             self.shared.requested_frames,
-//RS             index,
-//RS         )
-//RS         .0
-//RS     }
-//RS 
-//RS     /// Snapshot bounded callback facts without waiting for the worker.
-//RS     pub fn receipt(&self) -> JetRealtimeReceipt {
-//RS         JetRealtimeReceipt {
-//RS             requested_rate_hz: self.shared.requested_rate_hz,
-//RS             requested_frames: self.shared.requested_frames,
-//RS             completed_callbacks: self
-//RS                 .shared
-//RS                 .completed_callbacks
-//RS                 .load(std::sync::atomic::Ordering::Acquire),
-//RS             completed_frames: self
-//RS                 .shared
-//RS                 .completed_frames
-//RS                 .load(std::sync::atomic::Ordering::Acquire),
-//RS             missed: self
-//RS                 .shared
-//RS                 .missed
-//RS                 .load(std::sync::atomic::Ordering::Acquire),
-//RS             max_lateness_ns: self
-//RS                 .shared
-//RS                 .max_lateness_ns
-//RS                 .load(std::sync::atomic::Ordering::Acquire),
-//RS             start_identity: self.shared.start_identity,
-//RS             end_identity: self
-//RS                 .shared
-//RS                 .end_identity
-//RS                 .load(std::sync::atomic::Ordering::Acquire),
-//RS         }
-//RS     }
-//RS 
-//RS     /// Request cancellation and wait for the callback boundary to finish.
-//RS     pub fn cancel(&mut self) {
-//RS         self.shared
-//RS             .cancelled
-//RS             .store(true, std::sync::atomic::Ordering::Release);
-//RS         self.join_worker();
-//RS     }
-//RS 
-//RS     pub fn is_cancelled(&self) -> bool {
-//RS         self.shared
-//RS             .cancelled
-//RS             .load(std::sync::atomic::Ordering::Acquire)
-//RS     }
-//RS 
-//RS     fn join_worker(&self) {
-//RS         let mut worker_slot = match self.worker.lock() {
-//RS             Ok(slot) => slot,
-//RS             Err(poisoned) => poisoned.into_inner(),
-//RS         };
-//RS         if let Some(worker) = worker_slot.take() {
-//RS             let _ = worker.join();
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// Borrowing adapters keep observation methods from consuming the running stream.
-//RS pub fn jet_rt_next_deadline(stream: &JetRealtimeStream) -> JetInstant {
-//RS     stream.next_deadline()
-//RS }
-//RS 
-//RS pub fn jet_rt_receipt(stream: &JetRealtimeStream) -> JetRealtimeReceipt {
-//RS     stream.receipt()
-//RS }
-//RS 
-//RS pub fn jet_rt_cancel(mut stream: JetRealtimeStream) {
-//RS     stream.cancel();
-//RS }
-//RS 
-//RS pub fn jet_rt_is_cancelled(stream: &JetRealtimeStream) -> bool {
-//RS     stream.is_cancelled()
-//RS }
-//RS 
-//RS impl Drop for JetRealtimeStream {
-//RS     fn drop(&mut self) {
-//RS         if std::sync::Arc::strong_count(&self.worker) == 1 {
-//RS             self.shared
-//RS                 .cancelled
-//RS                 .store(true, std::sync::atomic::Ordering::Release);
-//RS             self.join_worker();
-//RS         }
-//RS     }
-//RS }
-// END-PORT-PENDING 0158 crates/jet-codegen/src/Prelude/Core/Realtime.rs:1-509
+use std.sync.[Arc, Mutex]
+use std.sync.atomic.[AtomicU64, AtomicI64, AtomicBool, Ordering]
+use std.thread.[JoinHandle]
+use std.thread as thread
+use std.panic as native_panic
+use core.time.runtime.kernel_time_instant.[JetInstant, jet_time_sleep_until]
+use core.time.runtime.kernel_time_monotonic.[jet_time_monotonic_now_ns]
+use core.tasks.runtime.scheduler.[jet_scheduler_world_reject_uncontrolled]
 
+// D-FOUND-REALTIME1=A: one fixed-rate callback clock for every native tier.
+// Absolute rational deadlines avoid drift; callback storage is allocated once.
+// Rust: crates/jet-codegen/src/Prelude/Core/Realtime.rs:8
+JET_REALTIME_NANOS_PER_SECOND :: U128{1_000_000_000}
+// Rust: crates/jet-codegen/src/Prelude/Core/Realtime.rs:13
+JET_REALTIME_SAMPLE_RING_SLOTS :: Usize{2}
+// Rust: crates/jet-codegen/src/Prelude/Core/Realtime.rs:16
+#Derive(Debug)
+struct JetRealtimeSampleSlot { values: [AtomicU64] }
+// Rust: crates/jet-codegen/src/Prelude/Core/Realtime.rs:21
+#Derive(Debug)
+pub struct JetRealtimeSampleRing {
+    slots: [JetRealtimeSampleSlot],
+    read_sequence: AtomicU64,
+    write_sequence: AtomicU64,
+}
+impl JetRealtimeSampleRing {
+    // Rust: crates/jet-codegen/src/Prelude/Core/Realtime.rs:28
+    pub fn new(frame_count: Usize) -> Self {
+        assert(frame_count > 0, "real-time sample ring needs a positive frame count")
+        // GATE #4565: kernel primitive
+        #Unsafe("initialize fixed SPSC atomic cells before either endpoint can publish") {
+            slots :: (0..JET_REALTIME_SAMPLE_RING_SLOTS).map(fn(_) {
+                JetRealtimeSampleSlot{values: (0..frame_count).map(fn(_) { AtomicU64.new(0) }).collect()}
+            }).collect()
+            Self{slots: ^slots, read_sequence: AtomicU64.new(0), write_sequence: AtomicU64.new(0)}
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Realtime.rs:47
+    pub fn publish_zeroed(self: &Self) -> Bool {
+        // GATE #4565: kernel primitive
+        #Unsafe("SPSC producer releases initialized cells only after the consumer frees a slot") {
+            sequence :: self.write_sequence.load(Ordering.Relaxed)
+            read :: self.read_sequence.load(Ordering.Acquire)
+            if sequence.wrapping_sub(read) >= self.slots.len() as U64 -> return false
+            slot :: &self.slots[(sequence % self.slots.len() as U64) as Usize]
+            for value in &slot.values { value.store(0, Ordering.Relaxed) }
+            self.write_sequence.store(sequence.wrapping_add(1), Ordering.Release)
+            true
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Realtime.rs:63
+    pub fn publish(self: &Self, samples: &[F64]) -> Bool {
+        // GATE #4565: kernel primitive
+        #Unsafe("SPSC producer writes fixed f64 bit cells without allocation or blocking") {
+            sequence :: self.write_sequence.load(Ordering.Relaxed)
+            read :: self.read_sequence.load(Ordering.Acquire)
+            if sequence.wrapping_sub(read) >= self.slots.len() as U64 -> return false
+            slot :: &self.slots[(sequence % self.slots.len() as U64) as Usize]
+            if slot.values.len() != samples.len() -> return false
+            for (cell, sample) in slot.values.iter().zip(samples) {
+                cell.store(sample.to_bits(), Ordering.Relaxed)
+            }
+            self.write_sequence.store(sequence.wrapping_add(1), Ordering.Release)
+            true
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Realtime.rs:82
+    pub fn pop(self: &Self) -> [F64]? {
+        // GATE #4565: kernel primitive
+        #Unsafe("consumer acquires published cells and releases slot only after owner-side collection") {
+            sequence :: self.read_sequence.load(Ordering.Relaxed)
+            write :: self.write_sequence.load(Ordering.Acquire)
+            if sequence == write -> return None
+            slot :: &self.slots[(sequence % self.slots.len() as U64) as Usize]
+            values :: slot.values.iter().map(fn(value) { F64.from_bits(value.load(Ordering.Relaxed)) }).collect()
+            self.read_sequence.store(sequence.wrapping_add(1), Ordering.Release)
+            Val(^values)
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Realtime.rs:107
+// End identity zero means a live stream has not reached cancellation yet.
+#Derive(Clone, Copy, Debug, PartialEq, Eq)
+pub struct JetRealtimeReceipt {
+    requested_rate_hz: I64,
+    requested_frames: I64,
+    completed_callbacks: I64,
+    completed_frames: I64,
+    missed: I64,
+    max_lateness_ns: I64,
+    start_identity: I64,
+    end_identity: I64,
+}
+impl JetRealtimeReceipt {
+    // Rust: crates/jet-codegen/src/Prelude/Core/Realtime.rs:119
+    pub fn render_json(self: &Self) -> String {
+        "{\"requested_rate_hz\":{self.requested_rate_hz},\"requested_frames\":{self.requested_frames},\"completed_callbacks\":{self.completed_callbacks},\"completed_frames\":{self.completed_frames},\"missed\":{self.missed},\"max_lateness_ns\":{self.max_lateness_ns},\"start_identity\":{self.start_identity},\"end_identity\":{self.end_identity}}"
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Realtime.rs:133
+    pub fn render(self: &Self) -> String {
+        "RealtimeReceipt(rate_hz={self.requested_rate_hz}, frames={self.requested_frames}, callbacks={self.completed_callbacks}, completed_frames={self.completed_frames}, missed={self.missed}, max_lateness_ns={self.max_lateness_ns}, start_identity={self.start_identity}, end_identity={self.end_identity})"
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Realtime.rs:147
+    pub fn frames_per_buffer(self: &Self) -> I64 { self.requested_frames }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Realtime.rs:152
+struct JetRealtimeShared {
+    requested_rate_hz: I64,
+    requested_frames: I64,
+    start: JetInstant,
+    start_identity: I64,
+    next_callback: AtomicU64,
+    next_deadline_identity: AtomicI64,
+    completed_callbacks: AtomicI64,
+    completed_frames: AtomicI64,
+    missed: AtomicI64,
+    max_lateness_ns: AtomicI64,
+    end_identity: AtomicI64,
+    cancelled: AtomicBool,
+    callback_skipped: Arc<AtomicBool>,
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Realtime.rs:172
+#Derive(Clone)
+pub struct JetRealtimeStream {
+    shared: Arc<JetRealtimeShared>,
+    worker: Arc<Mutex<JoinHandle<()>?>>,
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Realtime.rs:182
+pub fn jet_rt_deadline_offset_ns(rate_hz: I64, frames_per_buffer: I64, index: U128) -> I64 {
+    if rate_hz <= 0 || frames_per_buffer <= 0 -> return 0
+    frame_numerator :: (frames_per_buffer as U128).saturating_mul(JET_REALTIME_NANOS_PER_SECOND)
+    numerator :: frame_numerator.saturating_mul(index)
+    numerator.checked_div(rate_hz as U128).unwrap_or(U128.MAX).min(I64.MAX as U128) as I64
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Realtime.rs:194
+fn jet_rt_deadline(start: JetInstant, start_identity: I64, rate_hz: I64,
+    frames_per_buffer: I64, index: U128) -> (JetInstant, I64) {
+    offset :: jet_rt_deadline_offset_ns(rate_hz, frames_per_buffer, index)
+    (start.plus_duration_ns(offset), start_identity.saturating_add(offset))
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Realtime.rs:208
+fn jet_rt_atomic_saturating_add(value: &AtomicI64, increment: I64) -> {
+    // GATE #4565: kernel primitive
+    #Unsafe("CAS update preserves saturation without lost concurrent increments") {
+        _ :: value.fetch_update(Ordering.AcqRel, Ordering.Acquire, fn(current) { Val(current.saturating_add(increment)) })
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Realtime.rs:219
+fn jet_rt_atomic_max(value: &AtomicI64, candidate: I64) -> {
+    // GATE #4565: kernel primitive
+    #Unsafe("weak CAS retries observed value until scalar maximum is published") {
+        current := value.load(Ordering.Acquire)
+        while current < candidate {
+            match value.compare_exchange_weak(current, candidate, Ordering.AcqRel, Ordering.Acquire) {
+                Ok(_) -> return,
+                Err(observed) -> current = observed,
+            }
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Realtime.rs:234
+fn jet_rt_run(shared: Arc<JetRealtimeShared>, callback: (fn(&[F64]) -> ()) + Send, buffer: [F64]) -> {
+    (first_deadline, _) :: jet_rt_deadline(shared.start, shared.start_identity,
+        shared.requested_rate_hz, shared.requested_frames, 1)
+    schedule := JetRealtimeSchedule{start: shared.start, next_deadline: first_deadline, end: None}
+    callback_index := U128{1}
+    // GATE #4565: kernel primitive
+    #Unsafe("worker retains callback and reusable buffer; release/acquire publishes bounded facts; unwind cancels") {
+        while !shared.cancelled.load(Ordering.Acquire) {
+            deadline_identity :: shared.next_deadline_identity.load(Ordering.Acquire)
+            jet_time_sleep_until(&schedule.next_deadline)
+            if shared.cancelled.load(Ordering.Acquire) -> break
+            started_identity :: jet_time_monotonic_now_ns()
+            lateness :: started_identity.saturating_sub(deadline_identity).max(0)
+            if lateness > 0 {
+                jet_rt_atomic_saturating_add(&shared.missed, 1)
+                jet_rt_atomic_max(&shared.max_lateness_ns, lateness)
+            }
+            callback_ok :: native_panic.catch_unwind(native_panic.AssertUnwindSafe(fn() { callback(&buffer) })).is_ok()
+            if !callback_ok {
+                shared.cancelled.store(true, Ordering.Release)
+                break
+            }
+            callback_skipped :: shared.callback_skipped.swap(false, Ordering.AcqRel)
+            if callback_skipped {
+                if lateness == 0 { jet_rt_atomic_saturating_add(&shared.missed, 1) }
+            } else {
+                jet_rt_atomic_saturating_add(&shared.completed_callbacks, 1)
+                jet_rt_atomic_saturating_add(&shared.completed_frames, shared.requested_frames)
+            }
+            callback_index = callback_index.saturating_add(1)
+            next_index :: callback_index.min(U64.MAX as U128) as U64
+            shared.next_callback.store(next_index, Ordering.Release)
+            (next_deadline, next_identity) :: jet_rt_deadline(schedule.start, shared.start_identity,
+                shared.requested_rate_hz, shared.requested_frames, callback_index)
+            schedule.next_deadline = next_deadline
+            shared.next_deadline_identity.store(next_identity, Ordering.Release)
+        }
+        schedule.end = Val(JetInstant.now())
+        if schedule.end.is_some() {
+            end_identity :: jet_time_monotonic_now_ns()
+            shared.end_identity.store(end_identity, Ordering.Release)
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Realtime.rs:338
+struct JetRealtimeSchedule { start: JetInstant, next_deadline: JetInstant, end: JetInstant? }
+// Rust: crates/jet-codegen/src/Prelude/Core/Realtime.rs:347
+pub fn jet_rt_callback(rate_hz: I64, frames_per_buffer: I64,
+    callback: (fn(&[F64]) -> ()) + Send) -> JetRealtimeStream {
+    // GATE #4565: kernel primitive
+    skipped :: #Unsafe("own shared nonblocking skip signal before worker starts") { Arc.new(AtomicBool.new(false)) }
+    jet_rt_callback_with_skip(rate_hz, frames_per_buffer, ^callback, ^skipped)
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Realtime.rs:364
+pub fn jet_rt_callback_with_skip(rate_hz: I64, frames_per_buffer: I64,
+    callback: (fn(&[F64]) -> ()) + Send, callback_skipped: Arc<AtomicBool>) -> JetRealtimeStream {
+    assert(rate_hz > 0, "real-time callback rate must be positive")
+    jet_scheduler_world_reject_uncontrolled("foreign")
+    assert(frames_per_buffer > 0, "real-time callback frame count must be positive")
+    frame_count :: Usize.try_from(frames_per_buffer).expect("real-time callback frame count is outside the platform range")
+    buffer :: [F64].filled(frame_count, 0.0)
+    start :: JetInstant.now()
+    start_identity :: jet_time_monotonic_now_ns()
+    (_, first_deadline_identity) :: jet_rt_deadline(start, start_identity, rate_hz, frames_per_buffer, 1)
+    // GATE #4565: kernel primitive
+    #Unsafe("owned worker captures shared state, callback and buffer; mutex serializes the one join handle") {
+        callback_skipped.store(false, Ordering.Release)
+        shared :: Arc.new(JetRealtimeShared{
+            requested_rate_hz: rate_hz, requested_frames: frames_per_buffer, start: start,
+            start_identity: start_identity, next_callback: AtomicU64.new(1),
+            next_deadline_identity: AtomicI64.new(first_deadline_identity),
+            completed_callbacks: AtomicI64.new(0), completed_frames: AtomicI64.new(0),
+            missed: AtomicI64.new(0), max_lateness_ns: AtomicI64.new(0), end_identity: AtomicI64.new(0),
+            cancelled: AtomicBool.new(false), callback_skipped: ^callback_skipped,
+        })
+        worker_shared :: shared.clone()
+        worker :: thread.spawn(fn() { jet_rt_run(^worker_shared, ^callback, ^buffer) })
+        JetRealtimeStream{shared: ^shared, worker: Arc.new(Mutex.new(Val(^worker)))}
+    }
+}
+impl JetRealtimeStream {
+    // Rust: crates/jet-codegen/src/Prelude/Core/Realtime.rs:414
+    fn next_deadline(self: &Self) -> JetInstant {
+        // GATE #4565: kernel primitive
+        index :: #Unsafe("acquire published callback index before reconstructing absolute deadline") {
+            self.shared.next_callback.load(Ordering.Acquire) as U128
+        }
+        jet_rt_deadline(self.shared.start, self.shared.start_identity,
+            self.shared.requested_rate_hz, self.shared.requested_frames, index).0
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Realtime.rs:430
+    pub fn receipt(self: &Self) -> JetRealtimeReceipt {
+        // GATE #4565: kernel primitive
+        #Unsafe("snapshot individually acquired bounded counters without waiting for callback") {
+            JetRealtimeReceipt{requested_rate_hz: self.shared.requested_rate_hz,
+                requested_frames: self.shared.requested_frames,
+                completed_callbacks: self.shared.completed_callbacks.load(Ordering.Acquire),
+                completed_frames: self.shared.completed_frames.load(Ordering.Acquire),
+                missed: self.shared.missed.load(Ordering.Acquire),
+                max_lateness_ns: self.shared.max_lateness_ns.load(Ordering.Acquire),
+                start_identity: self.shared.start_identity,
+                end_identity: self.shared.end_identity.load(Ordering.Acquire)}
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Realtime.rs:459
+    pub fn cancel(self: &Self) -> {
+        // GATE #4565: kernel primitive
+        #Unsafe("release cancellation request before joining callback boundary") { self.shared.cancelled.store(true, Ordering.Release) }
+        self.join_worker()
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Realtime.rs:466
+    pub fn is_cancelled(self: &Self) -> Bool {
+        // GATE #4565: kernel primitive
+        #Unsafe("acquire worker cancellation state") { self.shared.cancelled.load(Ordering.Acquire) }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Realtime.rs:472
+    fn join_worker(self: &Self) -> {
+        // GATE #4565: kernel primitive
+        #Unsafe("take unique join handle under mutex; recover poison and join before releasing worker storage") {
+            worker_slot := match self.worker.lock() {
+                Ok(slot) -> slot,
+                Err(poisoned) -> poisoned.into_inner(),
+            }
+            if worker_slot.take() is Val(worker) { _ :: worker.join() }
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Realtime.rs:484
+pub fn jet_rt_next_deadline(stream: &JetRealtimeStream) -> JetInstant { stream.next_deadline() }
+// Rust: crates/jet-codegen/src/Prelude/Core/Realtime.rs:488
+pub fn jet_rt_receipt(stream: &JetRealtimeStream) -> JetRealtimeReceipt { stream.receipt() }
+// Rust: crates/jet-codegen/src/Prelude/Core/Realtime.rs:492
+pub fn jet_rt_cancel(stream: JetRealtimeStream) -> { stream.cancel() }
+// Rust: crates/jet-codegen/src/Prelude/Core/Realtime.rs:496
+pub fn jet_rt_is_cancelled(stream: &JetRealtimeStream) -> Bool { stream.is_cancelled() }
+impl Drop for JetRealtimeStream {
+    // Rust: crates/jet-codegen/src/Prelude/Core/Realtime.rs:501
+    fn drop(self: &Self) -> {
+        // GATE #4565: kernel primitive
+        #Unsafe("only final stream owner cancels and joins so callback storage cannot outlive stream") {
+            if Arc.strong_count(&self.worker) == 1 {
+                self.shared.cancelled.store(true, Ordering.Release)
+                self.join_worker()
+            }
+        }
+    }
+}

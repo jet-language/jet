@@ -1,91 +1,45 @@
-// PORT-PENDING 0154 crates-jet-codegen-src-prelude-core-option-module-group: crates/jet-codegen/src/Prelude/Core/Option.rs:1-87
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS /// One option-lift operation for every execution tier (I9).
-//RS ///
-//RS /// The carrier is an adapter. It lets the TIR evaluator and the resident JIT
-//RS /// pass their own representations through this same operation while the
-//RS /// emitted native and wasm programs use `JetOutcome` directly. The callable
-//RS /// factory is deliberately called only after both carriers report presence.
-//RS pub trait JetOptionValue {
-//RS     type Item;
-//RS 
-//RS     fn jet_option_is_present(&self) -> bool;
-//RS     fn jet_option_into_item(self) -> Self::Item;
-//RS }
-//RS 
-//RS impl<T> JetOptionValue for JetOutcome<T, JetAbsent> {
-//RS     type Item = T;
-//RS 
-//RS     fn jet_option_is_present(&self) -> bool {
-//RS         self.is_ok()
-//RS     }
-//RS 
-//RS     fn jet_option_into_item(self) -> Self::Item {
-//RS         match self {
-//RS             Ok(value) => value,
-//RS             Err(JetAbsent) => unreachable!("option payload requested from absence"),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// A scalar/handle carrier used by execution adapters whose option payload is
-//RS /// already packed into one machine word. The adapter supplies the payload
-//RS /// bits; this type does not decide presence or invoke the callable.
-//RS #[derive(Clone, Copy)]
-//RS pub struct JetOptionPacked<T> {
-//RS     pub present: bool,
-//RS     pub value: T,
-//RS }
-//RS 
-//RS impl<T> JetOptionValue for JetOptionPacked<T> {
-//RS     type Item = T;
-//RS 
-//RS     fn jet_option_is_present(&self) -> bool {
-//RS         self.present
-//RS     }
-//RS 
-//RS     fn jet_option_into_item(self) -> Self::Item {
-//RS         debug_assert!(self.present, "option payload requested from absence");
-//RS         self.value
-//RS     }
-//RS }
-//RS 
-//RS /// Pack a scalar/handle option result into the resident word ABI.
-//RS ///
-//RS /// The execution adapter owns only representation. Presence selection and
-//RS /// lazy callable evaluation remain in `jet_option_lift2`; every packed host
-//RS /// boundary uses this helper for the same `None = 0`, `Some(value) = value + 1`
-//RS /// representation.
-//RS pub fn jet_option_pack_i64(present: bool, value: i64) -> i64 {
-//RS     if present {
-//RS         value.wrapping_add(1)
-//RS     } else {
-//RS         0
-//RS     }
-//RS }
-//RS 
-//RS pub fn jet_option_lift2<A, B, F, R, O, Absent, Present, MakeF>(
-//RS     a: A,
-//RS     b: B,
-//RS     absent: Absent,
-//RS     present: Present,
-//RS     make_f: MakeF,
-//RS ) -> O
-//RS where
-//RS     A: JetOptionValue,
-//RS     B: JetOptionValue,
-//RS     F: FnOnce(A::Item, B::Item) -> R,
-//RS     Absent: FnOnce() -> O,
-//RS     Present: FnOnce(R) -> O,
-//RS     MakeF: FnOnce() -> F,
-//RS {
-//RS     if !a.jet_option_is_present() || !b.jet_option_is_present() {
-//RS         return absent();
-//RS     }
-//RS     let f = make_f();
-//RS     let left = a.jet_option_into_item();
-//RS     let right = b.jet_option_into_item();
-//RS     present(f(left, right))
-//RS }
-// END-PORT-PENDING 0154 crates/jet-codegen/src/Prelude/Core/Option.rs:1-87
+use core.mem.runtime.portable_core.[JetOutcome, JetAbsent]
 
+// One lazy option lift for all execution carriers; presence precedes factory evaluation.
+// Rust: crates/jet-codegen/src/Prelude/Core/Option.rs:7
+pub trait JetOptionValue {
+    type Item
+    fn jet_option_is_present(self) -> Bool
+    fn jet_option_into_item(self) -> Self.Item
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Option.rs:14
+impl<T> JetOptionValue for JetOutcome<T, JetAbsent> {
+    type Item = T
+    // Rust: crates/jet-codegen/src/Prelude/Core/Option.rs:17
+    fn jet_option_is_present(self) -> Bool { self.is_ok() }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Option.rs:21
+    fn jet_option_into_item(self) -> T {
+        match self { Ok(value) -> value, Err(_) -> unreachable("option payload requested from absence") }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Option.rs:33
+pub struct JetOptionPacked<T> { pub present: Bool, pub value: T }
+// Rust: crates/jet-codegen/src/Prelude/Core/Option.rs:38
+impl<T> JetOptionValue for JetOptionPacked<T> {
+    type Item = T
+    // Rust: crates/jet-codegen/src/Prelude/Core/Option.rs:41
+    fn jet_option_is_present(self) -> Bool { self.present }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Option.rs:45
+    fn jet_option_into_item(self) -> T {
+        debug_assert(self.present, "option payload requested from absence")
+        self.value
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Option.rs:57
+pub fn jet_option_pack_i64(present: Bool, value: I64) -> I64 {
+    if present { value.wrapping_add(I64{1}) } else { I64{0} }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Option.rs:65
+pub fn jet_option_lift2<A: JetOptionValue, B: JetOptionValue, R, O>(a: A, b: B,
+    absent: fn() -> O, present: fn(R) -> O, make_f: fn() -> (fn(A.Item, B.Item) -> R)) -> O {
+    if not a.jet_option_is_present() or not b.jet_option_is_present() -> return absent()
+    f :: make_f()
+    left :: a.jet_option_into_item()
+    right :: b.jet_option_into_item()
+    present(f(^left, ^right))
+}

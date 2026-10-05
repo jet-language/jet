@@ -1,0 +1,8 @@
+use core.encoding.runtime.kernel_encoding_error as encoding
+
+// Rust: crates/jet-codegen/src/Prelude/Core/EncodingError.rs:8 (behavioral controls; no inline Rust tests)
+#Test("encoding error location ladder") {
+    assert(encoding.jet_encoding_error_kernel_show("JSON", "InvalidData", I64{7}, None, None, "", "bad token") == "JSON InvalidData at byte 7: bad token")
+    assert(encoding.jet_encoding_error_kernel_show("JSON", "InvalidData", I64{7}, Val(I64{2}), Val(I64{4}), "$.item", "bad token") == "JSON InvalidData at byte 7, line 2, column 4, path $.item: bad token")
+    assert(encoding.jet_encoding_error_kernel_show("JSON", "InvalidData", I64{7}, None, Val(I64{4}), "", "bad token") == "JSON InvalidData at byte 7, column 4: bad token")
+}

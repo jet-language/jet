@@ -1,0 +1,97 @@
+use core.ui.runtime.ui.[jet_ui_node, jet_ui_node_role, jet_ui_constraint, jet_ui_rect, jet_ui_key_event, jet_ui_button, jet_ui_button_on_click, jet_ui_box, jet_ui_dispatch]
+use core.ui.runtime.ui_02.[JetNullBackend, JetTuiBackend, JetUiAriaRole, JetEventResult, DEFAULT_MOUNT_COLS, DEFAULT_MOUNT_ROWS]
+use jet_ui_host.[JetUiNodeId, JetUiAccessibility, JetUiAccessibilityState, jet_ui_accessibility_project]
+use core.mem.runtime.portable_core.[JetAbsent]
+use core.sync.atomic.[AtomicUsize, Ordering]
+
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:2482
+#Test("null_backend_measure_layout_paint_roundtrip") {
+    backend :: JetNullBackend.new()
+    node :: jet_ui_node("hello", 100.0, 20.0)
+    constraint :: jet_ui_constraint(0.0, 0.0, 200.0, 100.0)
+    size :: backend.measure_node(node.clone(), constraint)
+    assert(size.width == 100.0)
+    assert(size.height == 20.0)
+    frame :: jet_ui_rect(0.0, 0.0, size.width, size.height)
+    backend.layout_node(node.clone(), frame)
+    backend.paint_node(node)
+    cmds :: backend.paint_commands()
+    assert(cmds.len() == 2)
+    assert(cmds[0].starts_with("fill("))
+    assert(cmds[1].contains("hello"))
+    key :: jet_ui_key_event("enter")
+    assert(backend.dispatch_event(key) == JetEventResult.Handled)
+    bad :: jet_ui_key_event("")
+    assert(backend.dispatch_event(bad) == JetEventResult.Ignored)
+}
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:2506
+#Test("tui_backend_reactive_paint_is_deterministic") {
+    backend :: JetTuiBackend.new()
+    node :: jet_ui_node("hi", 2.0, 1.0)
+    constraint :: jet_ui_constraint(0.0, 0.0, DEFAULT_MOUNT_COLS, DEFAULT_MOUNT_ROWS)
+    size :: backend.measure_node(node.clone(), constraint)
+    frame :: jet_ui_rect(0.0, 0.0, size.width, size.height)
+    backend.layout_node(node.clone(), frame)
+    backend.paint_node(node)
+    assert(backend.render_count() == 1)
+    assert(backend.frame_lines() == ["hi"])
+}
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:2520
+#Test("focus_group_tab_cycles_and_wraps") {
+    backend :: JetNullBackend.new()
+    save :: jet_ui_node_role("Save", 40.0, 10.0, .Button)
+    cancel :: jet_ui_node_role("Cancel", 40.0, 10.0, .Button)
+    assert(backend.focused_label() == "")
+    backend.set_focus_group([save, cancel])
+    assert(backend.focused_label() == "Save")
+    tab :: jet_ui_key_event("Tab")
+    assert(backend.dispatch_event(tab.clone()) == JetEventResult.Handled)
+    assert(backend.focused_label() == "Cancel")
+    assert(backend.dispatch_event(tab.clone()) == JetEventResult.Handled)
+    assert(backend.focused_label() == "Save")
+    enter :: jet_ui_key_event("enter")
+    assert(backend.dispatch_event(enter) == JetEventResult.Handled)
+    assert(backend.focused_label() == "Save")
+}
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:2543
+#Test("aria_role_button_is_interactive_label_is_not") {
+    assert(JetUiAriaRole.Button.is_interactive())
+    assert(JetUiAriaRole.TextInput.is_interactive())
+    assert(not JetUiAriaRole.Label.is_interactive())
+    assert(not JetUiAriaRole.Container.is_interactive())
+}
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:2552
+#Test("portable_button_on_click_dispatches_after_paint") {
+    // GATE #4565: kernel primitive — real atomic callback counter.
+    #Unsafe("static atomic counter is shared by the registered process-lifetime callback") {
+        static HITS: AtomicUsize = AtomicUsize.new(0)
+        HITS.store(0, .SeqCst)
+        backend :: JetNullBackend.new()
+        button :: jet_ui_button_on_click("Go", Err(JetAbsent), Err(JetAbsent), fn() {
+            _ :: HITS.fetch_add(1, .SeqCst)
+        })
+        tree :: jet_ui_box([button])
+        backend.mount_node(tree, jet_ui_constraint(0.0, 0.0, DEFAULT_MOUNT_COLS, DEFAULT_MOUNT_ROWS))
+        button_id :: JetUiNodeId.new("null#0/0").unwrap()
+        jet_ui_dispatch(&button_id)
+        assert(HITS.load(.SeqCst) == 1)
+        missing_id :: JetUiNodeId.new("missing").unwrap()
+        jet_ui_dispatch(&missing_id)
+        assert(HITS.load(.SeqCst) == 1)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:2575
+#Test("accessibility_attachment_projects_by_stable_identity") {
+    node := jet_ui_button("Save")
+    assert(node.accessibility == None)
+    assert(node.role == Val(JetUiAriaRole.Button))
+    metadata :: JetUiAccessibility.new(Val("Save note"), Val("Writes the current note"))
+        .unwrap().with_state(JetUiAccessibilityState.Disabled)
+    node.attach_jet_ui_accessibility(metadata.clone()).unwrap()
+    node_id :: JetUiNodeId.new("key:save").unwrap()
+    first :: jet_ui_accessibility_project(&node, node_id.clone()).unwrap()
+    second :: jet_ui_accessibility_project(&node, node_id.clone()).unwrap()
+    assert(first == second)
+    assert(first.node() == &node_id)
+    assert(first.metadata() == &metadata)
+}

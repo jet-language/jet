@@ -1,243 +1,125 @@
-// PORT-PENDING 0156 crates-jet-codegen-src-prelude-core-progress-module-group: crates/jet-codegen/src/Prelude/Core/TermKey.rs:1-239
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS // ── D-TERM1 (ratified 2026-06-22): terminal direct-input primitives ───────────
-//RS // The ONE terminal key kernel. AOT embeds this source into the generated
-//RS // program; the canonical TIR evaluator (`Codegen/TIR/eval/mod.rs`
-//RS // The in-process TIR evaluator and resident Cranelift host call the one
-//RS // `jet-codegen::terminal_runtime` instance. AOT embeds this source into its
-//RS // generated program. Every execution tier therefore decodes the same bytes
-//RS // into the same `Key` and enters/restores the same terminal mode (I9). An
-//RS // engine marshals arguments and results; it never re-encodes the decode table
-//RS // or raw-mode entry policy.
-//RS //
-//RS // `live { … }` blocks in Jet source emit:
-//RS //   jet_term_enter();
-//RS //   let _live_guard = jet_scope_guard(|| { jet_term_leave(); });
-//RS //   <body>
-//RS //
-//RS // `term.read_key()` emits `jet_term_read_key()`.
-//RS //
-//RS // The raw-mode kernel itself (`jet_term_mode_enter` / `jet_term_mode_leave`)
-//RS // lives in `Prelude/Term.rs` beside the rest of the terminal device surface;
-//RS // each in-process owner includes both files in one module before this source.
-//RS //
-//RS // I6: zero external crates. Platform-specific setup uses inline `extern "C"` /
-//RS // `extern "system"` declarations — standard Rust FFI, not the `libc` crate.
-//RS // ──────────────────────────────────────────────────────────────────────────────
-//RS 
-//RS /// The key-event type returned by `term.read_key()` (D-TERM1).
-//RS ///
-//RS /// `impl JetShow for JetKey` stays in `Prelude/Core/RuntimeControl.rs`: the
-//RS /// `JetShow` trait is an AOT-only rendering seam, and the in-process engines
-//RS /// project a key into their own value carrier instead.
-//RS #[derive(Clone, Debug, PartialEq)]
-//RS pub enum JetKey {
-//RS     /// A printable character.
-//RS     Char(char),
-//RS     /// Enter / Return.
-//RS     Enter,
-//RS     /// Escape.
-//RS     Escape,
-//RS     /// Backspace.
-//RS     Backspace,
-//RS     /// Tab.
-//RS     Tab,
-//RS     /// Delete (forward delete).
-//RS     Delete,
-//RS     /// Arrow up.
-//RS     Up,
-//RS     /// Arrow down.
-//RS     Down,
-//RS     /// Arrow left.
-//RS     Left,
-//RS     /// Arrow right.
-//RS     Right,
-//RS     /// Function key F1–F12.
-//RS     F(i64),
-//RS     /// Ctrl + a printable character (e.g. Ctrl-C = Char('\x03')).
-//RS     Ctrl(char),
-//RS     /// Anything else (bytes we could not parse into a known sequence).
-//RS     Unknown,
-//RS }
-//RS impl JetKey {
-//RS     /// Stable spelling shared by TUI bindings and every terminal host.
-//RS     pub fn code(&self) -> String {
-//RS         match self {
-//RS             Self::Char(ch) => ch.to_string(),
-//RS             Self::Enter => "enter".to_string(),
-//RS             Self::Escape => "escape".to_string(),
-//RS             Self::Backspace => "backspace".to_string(),
-//RS             Self::Tab => "tab".to_string(),
-//RS             Self::Delete => "delete".to_string(),
-//RS             Self::Up => "up".to_string(),
-//RS             Self::Down => "down".to_string(),
-//RS             Self::Left => "left".to_string(),
-//RS             Self::Right => "right".to_string(),
-//RS             Self::F(number) => format!("f{number}"),
-//RS             Self::Ctrl(ch) => ch.to_string(),
-//RS             Self::Unknown => "unknown".to_string(),
-//RS         }
-//RS     }
-//RS 
-//RS     pub const fn modifier_bits(&self) -> u8 {
-//RS         match self {
-//RS             Self::Ctrl(_) => 1,
-//RS             _ => 0,
-//RS         }
-//RS     }
-//RS 
-//RS     pub const fn is_interrupt(&self) -> bool {
-//RS         matches!(self, Self::Ctrl('c'))
-//RS     }
-//RS }
-//RS 
-//RS pub fn jet_term_key_code(key: &JetKey) -> String {
-//RS     key.code()
-//RS }
-//RS 
-//RS pub const fn jet_term_key_modifier_bits(key: &JetKey) -> u8 {
-//RS     key.modifier_bits()
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS mod jet_term_unix {
-//RS     use std::io::Read;
-//RS 
-//RS     pub fn read_key() -> super::JetKey {
-//RS         use super::JetKey;
-//RS         let mut buf = [0u8; 6];
-//RS         let stdin = std::io::stdin();
-//RS         let n = stdin.lock().read(&mut buf).unwrap_or(0);
-//RS         if n == 0 {
-//RS             return JetKey::Unknown;
-//RS         }
-//RS         match &buf[..n] {
-//RS             [0x0d] | [0x0a] => JetKey::Enter,
-//RS             [0x1b] if n == 1 => JetKey::Escape,
-//RS             [0x7f] | [0x08] => JetKey::Backspace,
-//RS             [0x09] => JetKey::Tab,
-//RS             // CSI sequences: ESC [ …
-//RS             [0x1b, 0x5b, rest @ ..] => parse_csi(rest),
-//RS             // Ctrl + letter: bytes 0x01–0x1a (A–Z).
-//RS             [b] if *b >= 1 && *b <= 26 => JetKey::Ctrl((b'a' - 1 + *b) as char),
-//RS             [b] if *b < 0x80 => JetKey::Char(*b as char),
-//RS             // Multi-byte UTF-8 character.
-//RS             bytes => {
-//RS                 if let Ok(s) = std::str::from_utf8(bytes) {
-//RS                     if let Some(c) = s.chars().next() {
-//RS                         return JetKey::Char(c);
-//RS                     }
-//RS                 }
-//RS                 JetKey::Unknown
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     fn parse_csi(rest: &[u8]) -> super::JetKey {
-//RS         use super::JetKey;
-//RS         match rest {
-//RS             [0x41] => JetKey::Up,
-//RS             [0x42] => JetKey::Down,
-//RS             [0x43] => JetKey::Right,
-//RS             [0x44] => JetKey::Left,
-//RS             [0x33, 0x7e] => JetKey::Delete,
-//RS             // F1–F4: ESC O P/Q/R/S (VT100) — handled as CSI variant here.
-//RS             // F1–F12 numeric: ESC [ 1 1 ~ through ESC [ 2 4 ~
-//RS             bytes => {
-//RS                 // Try numeric Pn ~ form: digits followed by ~.
-//RS                 if let Some((&0x7e, digits)) = bytes.split_last() {
-//RS                     if let Ok(s) = std::str::from_utf8(digits) {
-//RS                         if let Ok(n) = s.parse::<i64>() {
-//RS                             let fkey = match n {
-//RS                                 11 => 1,
-//RS                                 12 => 2,
-//RS                                 13 => 3,
-//RS                                 14 => 4,
-//RS                                 15 => 5,
-//RS                                 17 => 6,
-//RS                                 18 => 7,
-//RS                                 19 => 8,
-//RS                                 20 => 9,
-//RS                                 21 => 10,
-//RS                                 23 => 11,
-//RS                                 24 => 12,
-//RS                                 _ => return JetKey::Unknown,
-//RS                             };
-//RS                             return JetKey::F(fkey);
-//RS                         }
-//RS                     }
-//RS                 }
-//RS                 JetKey::Unknown
-//RS             }
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS #[cfg(windows)]
-//RS mod jet_term_windows {
-//RS     use std::io::Read;
-//RS 
-//RS     pub fn read_key() -> super::JetKey {
-//RS         use super::JetKey;
-//RS         let mut buf = [0u8; 6];
-//RS         let n = std::io::stdin().lock().read(&mut buf).unwrap_or(0);
-//RS         if n == 0 {
-//RS             return JetKey::Unknown;
-//RS         }
-//RS         match &buf[..n] {
-//RS             [0x0d] | [0x0a] => JetKey::Enter,
-//RS             [0x1b] => JetKey::Escape,
-//RS             [0x7f] | [0x08] => JetKey::Backspace,
-//RS             [0x09] => JetKey::Tab,
-//RS             [0x1b, 0x5b, rest @ ..] => match rest {
-//RS                 [0x41] => JetKey::Up,
-//RS                 [0x42] => JetKey::Down,
-//RS                 [0x43] => JetKey::Right,
-//RS                 [0x44] => JetKey::Left,
-//RS                 _ => JetKey::Unknown,
-//RS             },
-//RS             [b] if *b >= 1 && *b <= 26 => JetKey::Ctrl((b'a' - 1 + *b) as char),
-//RS             [b] if *b < 0x80 => JetKey::Char(*b as char),
-//RS             bytes => {
-//RS                 if let Ok(s) = std::str::from_utf8(bytes) {
-//RS                     if let Some(c) = s.chars().next() {
-//RS                         return JetKey::Char(c);
-//RS                     }
-//RS                 }
-//RS                 JetKey::Unknown
-//RS             }
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS // ── Platform-dispatched entry points ────────────────────────────────────────
-//RS 
-//RS /// Enter un-buffered, no-echo terminal input mode.
-//RS /// Called at the top of every `live { … }` block.
-//RS pub fn jet_term_enter() {
-//RS     let _ = jet_term_mode_enter(true);
-//RS }
-//RS 
-//RS /// Disable terminal echo but keep canonical line editing for secret input.
-//RS pub fn jet_term_enter_secret() -> bool {
-//RS     jet_term_mode_enter(false)
-//RS }
-//RS 
-//RS /// Restore the terminal to the state captured by the most recent `jet_term_enter`.
-//RS /// Called by the scope guard that `live { … }` installs.
-//RS pub fn jet_term_leave() {
-//RS     jet_term_mode_leave();
-//RS }
-//RS 
-//RS /// Read one key event from stdin (blocking).
-//RS /// Used by `term.read_key()`.
-//RS pub fn jet_term_read_key() -> JetKey {
-//RS     #[cfg(unix)]
-//RS     return jet_term_unix::read_key();
-//RS     #[cfg(windows)]
-//RS     return jet_term_windows::read_key();
-//RS     #[cfg(not(any(unix, windows)))]
-//RS     return JetKey::Unknown;
-//RS }
-// END-PORT-PENDING 0156 crates/jet-codegen/src/Prelude/Core/TermKey.rs:1-239
+use std.io as io
+use std.str as str
+use core.sys.target as target
+use core.term.runtime.term.[jet_term_mode_enter, jet_term_mode_leave]
 
+// Rust: crates/jet-codegen/src/Prelude/Core/TermKey.rs:31
+#Derive(Clone, Debug, PartialEq)
+pub enum JetKey {
+    Char(Char), Enter, Escape, Backspace, Tab, Delete, Up, Down, Left, Right
+    F(I64), Ctrl(Char), Unknown
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/TermKey.rs:60
+impl JetKey {
+    // Rust: crates/jet-codegen/src/Prelude/Core/TermKey.rs:62
+    pub fn code(self) -> String Never! {
+        match self {
+            .Char(ch) -> ch.to_string(), .Enter -> "enter", .Escape -> "escape"
+            .Backspace -> "backspace", .Tab -> "tab", .Delete -> "delete"
+            .Up -> "up", .Down -> "down", .Left -> "left", .Right -> "right"
+            .F(number) -> "f{number}", .Ctrl(ch) -> ch.to_string(), .Unknown -> "unknown"
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/TermKey.rs:80
+    pub fn modifier_bits(self) -> U8 Never! { match self { .Ctrl(_) -> U8{1}, _ -> U8{0} } }
+    // Rust: crates/jet-codegen/src/Prelude/Core/TermKey.rs:87
+    pub fn is_interrupt(self) -> Bool Never! { self == .Ctrl('c') }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/TermKey.rs:92
+pub fn jet_term_key_code(key: JetKey) -> String Never! { key.code() }
+// Rust: crates/jet-codegen/src/Prelude/Core/TermKey.rs:96
+pub fn jet_term_key_modifier_bits(key: JetKey) -> U8 Never! { key.modifier_bits() }
+
+// Rust: crates/jet-codegen/src/Prelude/Core/TermKey.rs:100
+mod jet_term_unix {
+    use std.io as io
+    use std.str as str
+    use core.term.runtime.kernel_term_key.JetKey
+    // Rust: crates/jet-codegen/src/Prelude/Core/TermKey.rs:104
+    pub fn read_key() -> JetKey Never! {
+        buf := [U8#6].filled(U8{0})
+        // GATE #4565: kernel primitive
+        stdin :: #Unsafe("retain process stdin owner during one native terminal-key pull") { io.stdin() }
+        // GATE #4565: kernel primitive
+        n :: #Unsafe("native stdin lock reads at most the six-byte initialized key buffer") { stdin.lock().read(&buf).unwrap_or(0) }
+        if n == 0 -> return .Unknown
+        bytes :: buf[0..<n]
+        match bytes {
+            [0x0d] | [0x0a] -> .Enter
+            [0x1b] if n == 1 -> .Escape
+            [0x7f] | [0x08] -> .Backspace
+            [0x09] -> .Tab
+            [0x1b, 0x5b, rest @ ..] -> parse_csi(rest)
+            [b] if b >= 1 and b <= 26 -> .Ctrl((96 + b) as Char)
+            [b] if b < 0x80 -> .Char(b as Char)
+            bytes -> {
+                if str.from_utf8(bytes) is Ok(s) {
+                    if s.chars().next() is Val(c) -> return .Char(c)
+                }
+                .Unknown
+            }
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/TermKey.rs:134
+    fn parse_csi(rest: View<U8>) -> JetKey Never! {
+        match rest {
+            [0x41] -> .Up, [0x42] -> .Down, [0x43] -> .Right, [0x44] -> .Left
+            [0x33,0x7e] -> .Delete
+            bytes -> {
+                if bytes.split_last() is Val((0x7e,digits)) {
+                    if str.from_utf8(digits) is Ok(s) {
+                        if s.parse<I64>() is Ok(n) {
+                            fkey :: match n {
+                                11 -> 1, 12 -> 2, 13 -> 3, 14 -> 4, 15 -> 5, 17 -> 6
+                                18 -> 7, 19 -> 8, 20 -> 9, 21 -> 10, 23 -> 11, 24 -> 12
+                                _ -> return .Unknown
+                            }
+                            return .F(fkey)
+                        }
+                    }
+                }
+                .Unknown
+            }
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/TermKey.rs:174
+mod jet_term_windows {
+    use std.io as io
+    use std.str as str
+    use core.term.runtime.kernel_term_key.JetKey
+    // Rust: crates/jet-codegen/src/Prelude/Core/TermKey.rs:178
+    pub fn read_key() -> JetKey Never! {
+        buf := [U8#6].filled(U8{0})
+        // GATE #4565: kernel primitive
+        n :: #Unsafe("native process stdin lock reads at most six initialized bytes for a Windows key") { io.stdin().lock().read(&buf).unwrap_or(0) }
+        if n == 0 -> return .Unknown
+        match buf[0..<n] {
+            [0x0d] | [0x0a] -> .Enter
+            [0x1b] -> .Escape
+            [0x7f] | [0x08] -> .Backspace
+            [0x09] -> .Tab
+            [0x1b,0x5b,rest @ ..] -> match rest { [0x41] -> .Up, [0x42] -> .Down, [0x43] -> .Right, [0x44] -> .Left, _ -> .Unknown }
+            [b] if b >= 1 and b <= 26 -> .Ctrl((96 + b) as Char)
+            [b] if b < 0x80 -> .Char(b as Char)
+            bytes -> {
+                if str.from_utf8(bytes) is Ok(s) {
+                    if s.chars().next() is Val(c) -> return .Char(c)
+                }
+                .Unknown
+            }
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/TermKey.rs:215
+pub fn jet_term_enter() -> Never! { _ :: jet_term_mode_enter(true) }
+// Rust: crates/jet-codegen/src/Prelude/Core/TermKey.rs:220
+pub fn jet_term_enter_secret() -> Bool Never! { jet_term_mode_enter(false) }
+// Rust: crates/jet-codegen/src/Prelude/Core/TermKey.rs:226
+pub fn jet_term_leave() -> Never! { jet_term_mode_leave() }
+// Rust: crates/jet-codegen/src/Prelude/Core/TermKey.rs:232
+pub fn jet_term_read_key() -> JetKey Never! {
+    if target.selected_family() == .Unix -> return jet_term_unix.read_key()
+    if target.selected_os() == .Windows -> return jet_term_windows.read_key()
+    .Unknown
+}

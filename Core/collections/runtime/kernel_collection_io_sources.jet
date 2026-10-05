@@ -1,167 +1,104 @@
-// PORT-PENDING 0182 crates-jet-codegen-src-prelude-memo-module-group: crates/jet-codegen/src/Prelude/Core/CollectionIoSources.rs:1-163
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS // Native file, stdin, and process collection-source adapters.
-//RS //
-//RS // Collections.rs owns target-neutral loop state and collection semantics. This
-//RS // fragment is emitted only after the filesystem/process runtime carriers and
-//RS // line-reading helpers are present.
-//RS impl JetLoopSource for JetFileReader {
-//RS     fn jet_loop_source(
-//RS         mut self,
-//RS         source_kind: JetLoopSourceKind,
-//RS         by_value: bool,
-//RS     ) -> Box<dyn Iterator<Item = JetLoopAny>> {
-//RS         match source_kind {
-//RS             JetLoopSourceKind::LinesFile => {
-//RS                 if !by_value {
-//RS                     jet_loop_source_error(source_kind);
-//RS                 }
-//RS                 Box::new(std::iter::from_fn(move || {
-//RS                     match jet_std_file_reader_read_line(&mut self) {
-//RS                         Ok(value) => value.map(|value| Box::new(value) as JetLoopAny),
-//RS                         Err(error) => jet_panic("<core.prelude>", 0, &error.jet_show()),
-//RS                     }
-//RS                 }))
-//RS             }
-//RS             JetLoopSourceKind::Plain
-//RS             | JetLoopSourceKind::Chars
-//RS             | JetLoopSourceKind::LinesStdin
-//RS             | JetLoopSourceKind::LinesProcessStream
-//RS             | JetLoopSourceKind::ChannelReceiver
-//RS             | JetLoopSourceKind::EncodingReader { .. }
-//RS             | JetLoopSourceKind::Iterable { .. } => jet_loop_source_error(source_kind),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS impl JetLoopSource for &mut JetFileReader {
-//RS     fn jet_loop_source(
-//RS         self,
-//RS         source_kind: JetLoopSourceKind,
-//RS         by_value: bool,
-//RS     ) -> Box<dyn Iterator<Item = JetLoopAny>> {
-//RS         match source_kind {
-//RS             JetLoopSourceKind::LinesFile => {
-//RS                 if by_value {
-//RS                     jet_loop_source_error(source_kind);
-//RS                 }
-//RS                 let mut values = Vec::new();
-//RS                 loop {
-//RS                     match jet_std_file_reader_read_line(self) {
-//RS                         Ok(Some(value)) => values.push(value),
-//RS                         Ok(None) => break,
-//RS                         Err(error) => jet_panic("<core.prelude>", 0, &error.jet_show()),
-//RS                     }
-//RS                 }
-//RS                 Box::new(
-//RS                     values
-//RS                         .into_iter()
-//RS                         .map(|value| Box::new(value) as JetLoopAny),
-//RS                 )
-//RS             }
-//RS             JetLoopSourceKind::Plain
-//RS             | JetLoopSourceKind::Chars
-//RS             | JetLoopSourceKind::LinesStdin
-//RS             | JetLoopSourceKind::LinesProcessStream
-//RS             | JetLoopSourceKind::ChannelReceiver
-//RS             | JetLoopSourceKind::EncodingReader { .. }
-//RS             | JetLoopSourceKind::Iterable { .. } => jet_loop_source_error(source_kind),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS impl JetLoopSource for JetStdinReader {
-//RS     fn jet_loop_source(
-//RS         mut self,
-//RS         source_kind: JetLoopSourceKind,
-//RS         by_value: bool,
-//RS     ) -> Box<dyn Iterator<Item = JetLoopAny>> {
-//RS         match source_kind {
-//RS             JetLoopSourceKind::LinesStdin => {
-//RS                 if !by_value {
-//RS                     jet_loop_source_error(source_kind);
-//RS                 }
-//RS                 Box::new(std::iter::from_fn(move || {
-//RS                     match jet_std_io_stdin_read_line(&mut self) {
-//RS                         Ok(value) => value.map(|value| Box::new(value) as JetLoopAny),
-//RS                         Err(error) => jet_panic("<core.prelude>", 0, &error.jet_show()),
-//RS                     }
-//RS                 }))
-//RS             }
-//RS             JetLoopSourceKind::Plain
-//RS             | JetLoopSourceKind::Chars
-//RS             | JetLoopSourceKind::LinesFile
-//RS             | JetLoopSourceKind::LinesProcessStream
-//RS             | JetLoopSourceKind::ChannelReceiver
-//RS             | JetLoopSourceKind::EncodingReader { .. }
-//RS             | JetLoopSourceKind::Iterable { .. } => jet_loop_source_error(source_kind),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS impl JetLoopSource for &mut JetStdinReader {
-//RS     fn jet_loop_source(
-//RS         self,
-//RS         source_kind: JetLoopSourceKind,
-//RS         by_value: bool,
-//RS     ) -> Box<dyn Iterator<Item = JetLoopAny>> {
-//RS         match source_kind {
-//RS             JetLoopSourceKind::LinesStdin => {
-//RS                 if by_value {
-//RS                     jet_loop_source_error(source_kind);
-//RS                 }
-//RS                 let mut values = Vec::new();
-//RS                 loop {
-//RS                     match jet_std_io_stdin_read_line(self) {
-//RS                         Ok(Some(value)) => values.push(value),
-//RS                         Ok(None) => break,
-//RS                         Err(error) => jet_panic("<core.prelude>", 0, &error.jet_show()),
-//RS                     }
-//RS                 }
-//RS                 Box::new(
-//RS                     values
-//RS                         .into_iter()
-//RS                         .map(|value| Box::new(value) as JetLoopAny),
-//RS                 )
-//RS             }
-//RS             JetLoopSourceKind::Plain
-//RS             | JetLoopSourceKind::Chars
-//RS             | JetLoopSourceKind::LinesFile
-//RS             | JetLoopSourceKind::LinesProcessStream
-//RS             | JetLoopSourceKind::ChannelReceiver
-//RS             | JetLoopSourceKind::EncodingReader { .. }
-//RS             | JetLoopSourceKind::Iterable { .. } => jet_loop_source_error(source_kind),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS impl<R: std::io::Read + 'static> JetLoopSource
-//RS     for std::rc::Rc<std::cell::RefCell<Option<std::io::BufReader<R>>>>
-//RS {
-//RS     fn jet_loop_source(
-//RS         self,
-//RS         source_kind: JetLoopSourceKind,
-//RS         _by_value: bool,
-//RS     ) -> Box<dyn Iterator<Item = JetLoopAny>> {
-//RS         match source_kind {
-//RS             JetLoopSourceKind::LinesProcessStream => {
-//RS                 let handle = std::rc::Rc::clone(&self);
-//RS                 Box::new(std::iter::from_fn(move || {
-//RS                     match jet_process_stream_next_line(&handle) {
-//RS                         Ok(value) => value.map(|value| Box::new(value) as JetLoopAny),
-//RS                         Err(error) => jet_panic("<core.prelude>", 0, &error.jet_show()),
-//RS                     }
-//RS                 }))
-//RS             }
-//RS             JetLoopSourceKind::Plain
-//RS             | JetLoopSourceKind::Chars
-//RS             | JetLoopSourceKind::LinesFile
-//RS             | JetLoopSourceKind::LinesStdin
-//RS             | JetLoopSourceKind::ChannelReceiver
-//RS             | JetLoopSourceKind::EncodingReader { .. }
-//RS             | JetLoopSourceKind::Iterable { .. } => jet_loop_source_error(source_kind),
-//RS         }
-//RS     }
-//RS }
-// END-PORT-PENDING 0182 crates/jet-codegen/src/Prelude/Core/CollectionIoSources.rs:1-163
+use core.collections.runtime.kernel_collections.[JetLoopSource, JetLoopSourceKind, JetLoopAny, jet_loop_source_error]
+use core.encoding.runtime.kernel_mod.[JetFileReader]
+use core.files.runtime.top_file_stream.[jet_std_file_reader_read_line]
+use core.term.runtime.kernel_stdin_reader.[JetStdinReader, jet_std_io_stdin_read_line]
+use core.process.runtime.top_process_02.[jet_process_stream_next_line]
+use core.mem.runtime.portable_core.[jet_panic]
+use std.rc.[Rc]
+use std.cell.[RefCell]
+use std.io.[Read, BufReader]
+use std.iter
+// Native file, stdin and process source adapters; collection semantics stay in Collections.
+impl JetLoopSource for JetFileReader {
+    // Rust: crates/jet-codegen/src/Prelude/Core/CollectionIoSources.rs:7
+    fn jet_loop_source(^self, source_kind: JetLoopSourceKind, by_value: Bool) -> Box<Iterator<Item=JetLoopAny>> {
+        match source_kind {
+            .LinesFile -> {
+                if !by_value { jet_loop_source_error(source_kind) }
+                Box.new(std.iter.from_fn(fn() {
+                    match jet_std_file_reader_read_line(&self) {
+                        Ok(value) -> value.map(fn(value) { Box.new(^value) as JetLoopAny }),
+                        Err(error) -> jet_panic("<core.prelude>", 0, &error.jet_show()),
+                    }
+                }))
+            },
+            _ -> jet_loop_source_error(source_kind),
+        }
+    }
+}
+impl JetLoopSource for &JetFileReader {
+    // Rust: crates/jet-codegen/src/Prelude/Core/CollectionIoSources.rs:36
+    fn jet_loop_source(^self, source_kind: JetLoopSourceKind, by_value: Bool) -> Box<Iterator<Item=JetLoopAny>> {
+        match source_kind {
+            .LinesFile -> {
+                if by_value { jet_loop_source_error(source_kind) }
+                values := [String].new()
+                loop {
+                    match jet_std_file_reader_read_line(self) {
+                        Ok(Val(value)) -> values.push(^value),
+                        Ok(None) -> break,
+                        Err(error) -> jet_panic("<core.prelude>", 0, &error.jet_show()),
+                    }
+                }
+                Box.new(values.into_iter().map(fn(value) { Box.new(^value) as JetLoopAny }))
+            },
+            _ -> jet_loop_source_error(source_kind),
+        }
+    }
+}
+impl JetLoopSource for JetStdinReader {
+    // Rust: crates/jet-codegen/src/Prelude/Core/CollectionIoSources.rs:72
+    fn jet_loop_source(^self, source_kind: JetLoopSourceKind, by_value: Bool) -> Box<Iterator<Item=JetLoopAny>> {
+        match source_kind {
+            .LinesStdin -> {
+                if !by_value { jet_loop_source_error(source_kind) }
+                Box.new(std.iter.from_fn(fn() {
+                    match jet_std_io_stdin_read_line(&self) {
+                        Ok(value) -> value.map(fn(value) { Box.new(^value) as JetLoopAny }),
+                        Err(error) -> jet_panic("<core.prelude>", 0, &error.jet_show()),
+                    }
+                }))
+            },
+            _ -> jet_loop_source_error(source_kind),
+        }
+    }
+}
+impl JetLoopSource for &JetStdinReader {
+    // Rust: crates/jet-codegen/src/Prelude/Core/CollectionIoSources.rs:101
+    fn jet_loop_source(^self, source_kind: JetLoopSourceKind, by_value: Bool) -> Box<Iterator<Item=JetLoopAny>> {
+        match source_kind {
+            .LinesStdin -> {
+                if by_value { jet_loop_source_error(source_kind) }
+                values := [String].new()
+                loop {
+                    match jet_std_io_stdin_read_line(self) {
+                        Ok(Val(value)) -> values.push(^value),
+                        Ok(None) -> break,
+                        Err(error) -> jet_panic("<core.prelude>", 0, &error.jet_show()),
+                    }
+                }
+                Box.new(values.into_iter().map(fn(value) { Box.new(^value) as JetLoopAny }))
+            },
+            _ -> jet_loop_source_error(source_kind),
+        }
+    }
+}
+impl<R: Read> JetLoopSource for Rc<RefCell<BufReader<R>?>> {
+    // Rust: crates/jet-codegen/src/Prelude/Core/CollectionIoSources.rs:139
+    fn jet_loop_source(^self, source_kind: JetLoopSourceKind, _by_value: Bool) -> Box<Iterator<Item=JetLoopAny>> {
+        match source_kind {
+            .LinesProcessStream -> {
+                // GATE #4565: kernel primitive
+                handle :: #Unsafe("retain the process stream Rc provider for the escaping owned iterator") { Rc.clone(&self) }
+                Box.new(std.iter.from_fn(fn() {
+                    match jet_process_stream_next_line(&handle) {
+                        Ok(value) -> value.map(fn(value) { Box.new(^value) as JetLoopAny }),
+                        Err(error) -> jet_panic("<core.prelude>", 0, &error.jet_show()),
+                    }
+                }))
+            },
+            _ -> jet_loop_source_error(source_kind),
+        }
+    }
+}
 

@@ -1,90 +1,80 @@
-// PORT-PENDING 0154 crates-jet-codegen-src-prelude-core-option-module-group: crates/jet-codegen/src/Prelude/Core/Power.rs:1-86
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS // D-EXPOP1=A / D-EXPSEM1=A: the one power surface for `^` and `^=`.
-//RS //
-//RS // Every tier that runs generated Rust — the native build and the wasm module —
-//RS // includes this same file, so a power means the same thing everywhere. The
-//RS // the Prelude's shared arithmetic stop carries the report code and wording.
-//RS //
-//RS // `^` on whole numbers is exact. A result outside the type's range traps the
-//RS // way a multiplication does. A written negative exponent is lowered to the
-//RS // exact Fraction carrier before this helper; a dynamic negative exponent has
-//RS // no whole-number answer and traps. `^` on floats is the ordinary
-//RS // floating-point power.
-//RS //
-//RS // The exponent arrives as an `i128` so an exponent of any integer width,
-//RS // signed or unsigned, reaches here losslessly.
-//RS trait JetPow: Copy {
-//RS     fn jet_pow(self, exponent: i128, file: &str, line: u32) -> Self;
-//RS     fn jet_wrapping_pow(self, exponent: i128, file: &str, line: u32) -> Self;
-//RS     fn jet_saturating_pow(self, exponent: i128, file: &str, line: u32) -> Self;
-//RS }
-//RS 
-//RS fn jet_power_fixed_value(result: JetFixedArithmeticResult, file: &str, line: u32) -> i64 {
-//RS     match result {
-//RS         JetFixedArithmeticResult::Value(value) => value,
-//RS         JetFixedArithmeticResult::Absent => jet_arithmetic_stop(
-//RS             file,
-//RS             line,
-//RS             "This checked fixed-width operation has no result",
-//RS         ),
-//RS         JetFixedArithmeticResult::Trap(error) => jet_fixed_error_stop(error, file, line),
-//RS     }
-//RS }
-//RS 
-//RS macro_rules! jet_pow_impl {
-//RS     ($($t:ty),*) => { $(
-//RS         impl JetPow for $t {
-//RS             fn jet_pow(self, exponent: i128, file: &str, line: u32) -> Self {
-//RS                 jet_power_fixed_value(jet_fixed_arithmetic(
-//RS                     self as i64,
-//RS                     exponent,
-//RS                     JET_FIXED_OP_POW,
-//RS                     JET_FIXED_MODE_TRAP,
-//RS                     <$t>::MIN < 0,
-//RS                     <$t>::BITS as u8,
-//RS                     true,
-//RS                 ), file, line) as $t
-//RS             }
-//RS             fn jet_wrapping_pow(self, exponent: i128, file: &str, line: u32) -> Self {
-//RS                 jet_power_fixed_value(jet_fixed_arithmetic(
-//RS                     self as i64,
-//RS                     exponent,
-//RS                     JET_FIXED_OP_POW,
-//RS                     JET_FIXED_MODE_WRAPPING,
-//RS                     <$t>::MIN < 0,
-//RS                     <$t>::BITS as u8,
-//RS                     true,
-//RS                 ), file, line) as $t
-//RS             }
-//RS             fn jet_saturating_pow(self, exponent: i128, file: &str, line: u32) -> Self {
-//RS                 jet_power_fixed_value(jet_fixed_arithmetic(
-//RS                     self as i64,
-//RS                     exponent,
-//RS                     JET_FIXED_OP_POW,
-//RS                     JET_FIXED_MODE_SATURATING,
-//RS                     <$t>::MIN < 0,
-//RS                     <$t>::BITS as u8,
-//RS                     true,
-//RS                 ), file, line) as $t
-//RS             }
-//RS         }
-//RS     )* };
-//RS }
-//RS jet_pow_impl!(i8, i16, i32, i64, u8, u16, u32, u64);
-//RS 
-//RS trait JetPowFloat: Copy {
-//RS     fn jet_pow(self, exponent: Self) -> Self;
-//RS }
-//RS impl JetPowFloat for f64 {
-//RS     fn jet_pow(self, exponent: f64) -> f64 {
-//RS         self.powf(exponent)
-//RS     }
-//RS }
-//RS impl JetPowFloat for f32 {
-//RS     fn jet_pow(self, exponent: f32) -> f32 {
-//RS         self.powf(exponent)
-//RS     }
-//RS }
-// END-PORT-PENDING 0154 crates/jet-codegen/src/Prelude/Core/Power.rs:1-86
+use core.prelude.runtime.core.[jet_arithmetic_stop, jet_fixed_error_stop]
+use core.prelude.runtime.kernel_fixed_arithmetic.[JetFixedArithmeticResult, JetFixedWide, jet_fixed_arithmetic, JET_FIXED_OP_POW, JET_FIXED_MODE_TRAP, JET_FIXED_MODE_WRAPPING, JET_FIXED_MODE_SATURATING]
 
+// D-EXPOP1=A / D-EXPSEM1=A: dynamic whole-number exponents stay signed i128,
+// marshalled through the canonical two-word carrier. Negative exponents trap.
+// Rust: crates/jet-codegen/src/Prelude/Core/Power.rs:15
+trait JetPow: Copy {
+    fn jet_pow(self, exponent: JetFixedWide, file: &String, line: U32) -> Self
+    fn jet_wrapping_pow(self, exponent: JetFixedWide, file: &String, line: U32) -> Self
+    fn jet_saturating_pow(self, exponent: JetFixedWide, file: &String, line: U32) -> Self
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Power.rs:21
+fn jet_power_fixed_value(result: JetFixedArithmeticResult, file: &String, line: U32) -> I64 {
+    match result {
+        .Value(value) -> value
+        .Absent -> jet_arithmetic_stop(file, line, "This checked fixed-width operation has no result")
+        .Trap(error) -> jet_fixed_error_stop(error, file, line)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Power.rs:33
+impl JetPow for I8 {
+    // Rust: crates/jet-codegen/src/Prelude/Core/Power.rs:36
+    fn jet_pow(self, exponent: JetFixedWide, file: &String, line: U32) -> Self { I8{jet_power_fixed_value(jet_fixed_arithmetic(I64{self}, exponent, JET_FIXED_OP_POW, JET_FIXED_MODE_TRAP, true, 8, true), file, line)} }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Power.rs:47
+    fn jet_wrapping_pow(self, exponent: JetFixedWide, file: &String, line: U32) -> Self { I8{jet_power_fixed_value(jet_fixed_arithmetic(I64{self}, exponent, JET_FIXED_OP_POW, JET_FIXED_MODE_WRAPPING, true, 8, true), file, line)} }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Power.rs:58
+    fn jet_saturating_pow(self, exponent: JetFixedWide, file: &String, line: U32) -> Self { I8{jet_power_fixed_value(jet_fixed_arithmetic(I64{self}, exponent, JET_FIXED_OP_POW, JET_FIXED_MODE_SATURATING, true, 8, true), file, line)} }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Power.rs:33
+impl JetPow for I16 {
+    fn jet_pow(self, exponent: JetFixedWide, file: &String, line: U32) -> Self { I16{jet_power_fixed_value(jet_fixed_arithmetic(I64{self}, exponent, JET_FIXED_OP_POW, JET_FIXED_MODE_TRAP, true, 16, true), file, line)} }
+    fn jet_wrapping_pow(self, exponent: JetFixedWide, file: &String, line: U32) -> Self { I16{jet_power_fixed_value(jet_fixed_arithmetic(I64{self}, exponent, JET_FIXED_OP_POW, JET_FIXED_MODE_WRAPPING, true, 16, true), file, line)} }
+    fn jet_saturating_pow(self, exponent: JetFixedWide, file: &String, line: U32) -> Self { I16{jet_power_fixed_value(jet_fixed_arithmetic(I64{self}, exponent, JET_FIXED_OP_POW, JET_FIXED_MODE_SATURATING, true, 16, true), file, line)} }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Power.rs:33
+impl JetPow for I32 {
+    fn jet_pow(self, exponent: JetFixedWide, file: &String, line: U32) -> Self { I32{jet_power_fixed_value(jet_fixed_arithmetic(I64{self}, exponent, JET_FIXED_OP_POW, JET_FIXED_MODE_TRAP, true, 32, true), file, line)} }
+    fn jet_wrapping_pow(self, exponent: JetFixedWide, file: &String, line: U32) -> Self { I32{jet_power_fixed_value(jet_fixed_arithmetic(I64{self}, exponent, JET_FIXED_OP_POW, JET_FIXED_MODE_WRAPPING, true, 32, true), file, line)} }
+    fn jet_saturating_pow(self, exponent: JetFixedWide, file: &String, line: U32) -> Self { I32{jet_power_fixed_value(jet_fixed_arithmetic(I64{self}, exponent, JET_FIXED_OP_POW, JET_FIXED_MODE_SATURATING, true, 32, true), file, line)} }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Power.rs:33
+impl JetPow for I64 {
+    fn jet_pow(self, exponent: JetFixedWide, file: &String, line: U32) -> Self { jet_power_fixed_value(jet_fixed_arithmetic(self, exponent, JET_FIXED_OP_POW, JET_FIXED_MODE_TRAP, true, 64, true), file, line) }
+    fn jet_wrapping_pow(self, exponent: JetFixedWide, file: &String, line: U32) -> Self { jet_power_fixed_value(jet_fixed_arithmetic(self, exponent, JET_FIXED_OP_POW, JET_FIXED_MODE_WRAPPING, true, 64, true), file, line) }
+    fn jet_saturating_pow(self, exponent: JetFixedWide, file: &String, line: U32) -> Self { jet_power_fixed_value(jet_fixed_arithmetic(self, exponent, JET_FIXED_OP_POW, JET_FIXED_MODE_SATURATING, true, 64, true), file, line) }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Power.rs:33
+impl JetPow for U8 {
+    fn jet_pow(self, exponent: JetFixedWide, file: &String, line: U32) -> Self { U8{jet_power_fixed_value(jet_fixed_arithmetic(I64{self}, exponent, JET_FIXED_OP_POW, JET_FIXED_MODE_TRAP, false, 8, true), file, line)} }
+    fn jet_wrapping_pow(self, exponent: JetFixedWide, file: &String, line: U32) -> Self { U8{jet_power_fixed_value(jet_fixed_arithmetic(I64{self}, exponent, JET_FIXED_OP_POW, JET_FIXED_MODE_WRAPPING, false, 8, true), file, line)} }
+    fn jet_saturating_pow(self, exponent: JetFixedWide, file: &String, line: U32) -> Self { U8{jet_power_fixed_value(jet_fixed_arithmetic(I64{self}, exponent, JET_FIXED_OP_POW, JET_FIXED_MODE_SATURATING, false, 8, true), file, line)} }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Power.rs:33
+impl JetPow for U16 {
+    fn jet_pow(self, exponent: JetFixedWide, file: &String, line: U32) -> Self { U16{jet_power_fixed_value(jet_fixed_arithmetic(I64{self}, exponent, JET_FIXED_OP_POW, JET_FIXED_MODE_TRAP, false, 16, true), file, line)} }
+    fn jet_wrapping_pow(self, exponent: JetFixedWide, file: &String, line: U32) -> Self { U16{jet_power_fixed_value(jet_fixed_arithmetic(I64{self}, exponent, JET_FIXED_OP_POW, JET_FIXED_MODE_WRAPPING, false, 16, true), file, line)} }
+    fn jet_saturating_pow(self, exponent: JetFixedWide, file: &String, line: U32) -> Self { U16{jet_power_fixed_value(jet_fixed_arithmetic(I64{self}, exponent, JET_FIXED_OP_POW, JET_FIXED_MODE_SATURATING, false, 16, true), file, line)} }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Power.rs:33
+impl JetPow for U32 {
+    fn jet_pow(self, exponent: JetFixedWide, file: &String, line: U32) -> Self { U32{jet_power_fixed_value(jet_fixed_arithmetic(I64{self}, exponent, JET_FIXED_OP_POW, JET_FIXED_MODE_TRAP, false, 32, true), file, line)} }
+    fn jet_wrapping_pow(self, exponent: JetFixedWide, file: &String, line: U32) -> Self { U32{jet_power_fixed_value(jet_fixed_arithmetic(I64{self}, exponent, JET_FIXED_OP_POW, JET_FIXED_MODE_WRAPPING, false, 32, true), file, line)} }
+    fn jet_saturating_pow(self, exponent: JetFixedWide, file: &String, line: U32) -> Self { U32{jet_power_fixed_value(jet_fixed_arithmetic(I64{self}, exponent, JET_FIXED_OP_POW, JET_FIXED_MODE_SATURATING, false, 32, true), file, line)} }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Power.rs:33
+impl JetPow for U64 {
+    // GATE #4565: kernel primitive — bit reinterpretation of inline unsigned operands/results.
+    #Unsafe("marshal U64 payload bits into the canonical I64 fixed-operation carrier")
+    fn jet_pow(self, exponent: JetFixedWide, file: &String, line: U32) -> Self { std.mem.transmute<I64, U64>(jet_power_fixed_value(jet_fixed_arithmetic(std.mem.transmute<U64, I64>(self), exponent, JET_FIXED_OP_POW, JET_FIXED_MODE_TRAP, false, 64, true), file, line)) }
+    #Unsafe("marshal U64 payload bits into the canonical I64 fixed-operation carrier")
+    fn jet_wrapping_pow(self, exponent: JetFixedWide, file: &String, line: U32) -> Self { std.mem.transmute<I64, U64>(jet_power_fixed_value(jet_fixed_arithmetic(std.mem.transmute<U64, I64>(self), exponent, JET_FIXED_OP_POW, JET_FIXED_MODE_WRAPPING, false, 64, true), file, line)) }
+    #Unsafe("marshal U64 payload bits into the canonical I64 fixed-operation carrier")
+    fn jet_saturating_pow(self, exponent: JetFixedWide, file: &String, line: U32) -> Self { std.mem.transmute<I64, U64>(jet_power_fixed_value(jet_fixed_arithmetic(std.mem.transmute<U64, I64>(self), exponent, JET_FIXED_OP_POW, JET_FIXED_MODE_SATURATING, false, 64, true), file, line)) }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Power.rs:74
+trait JetPowFloat: Copy { fn jet_pow(self, exponent: Self) -> Self }
+// Rust: crates/jet-codegen/src/Prelude/Core/Power.rs:77
+impl JetPowFloat for F64 { fn jet_pow(self, exponent: F64) -> F64 { self.powf(exponent) } }
+// Rust: crates/jet-codegen/src/Prelude/Core/Power.rs:82
+impl JetPowFloat for F32 { fn jet_pow(self, exponent: F32) -> F32 { self.powf(exponent) } }

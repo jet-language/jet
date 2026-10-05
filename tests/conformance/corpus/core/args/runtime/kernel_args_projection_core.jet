@@ -1,0 +1,32 @@
+use core.args.runtime.top_args.[JetArgsSpec, JetParsedArgs, JetArgKind]
+use core.args.runtime.kernel_args_projection_core.[JetArgsShapeValue, jet_args_shape_tree_values]
+
+// Rust: crates/jet-codegen/src/Prelude/Core/ArgsProjectionCore.rs:29
+#Test("argument_shape_projection_maps_names_and_missing_flags") {
+    spec :: JetArgsSpec{entries: [JetArgKind.Flag("verbose", None, "")], inherited_entries: [],
+        prog: "app", description: None, version: None, inherited_version: false}
+    parsed :: JetParsedArgs{flags: [:], options: [:], positionals: [], subcommand: None,
+        explicit_flags: Set<String>.new(), explicit_options: Set<String>.new()}
+    names :: [("verbose", "logging")]
+    fields :: jet_args_shape_tree_values(&spec, &parsed, names.view()).unwrap()
+    assert(fields.len() == 1)
+    assert(fields[0].0 == "logging")
+    assert(fields[0].1 is .Bool(false))
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/ArgsProjectionCore.rs:40
+#Test("argument_shape_projection_rejects_duplicate_output_field") {
+    spec :: JetArgsSpec{entries: [JetArgKind.Flag("first", None, ""), JetArgKind.Flag("second", None, "")],
+        inherited_entries: [], prog: "app", description: None, version: None, inherited_version: false}
+    parsed :: JetParsedArgs{flags: [:], options: [:], positionals: [], subcommand: None,
+        explicit_flags: Set<String>.new(), explicit_options: Set<String>.new()}
+    names :: [("first", "same"), ("second", "same")]
+    result :: jet_args_shape_tree_values(&spec, &parsed, names.view())
+    match result {
+        Err(errors) -> {
+            assert(errors.len() == 1)
+            assert(errors[0].path == "same")
+            assert(errors[0].reason == "ambiguous duplicate argument shape field")
+        }
+        Ok(_) -> assert(false, "duplicate argument projection must fail")
+    }
+}

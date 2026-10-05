@@ -1,42 +1,39 @@
-// PORT-PENDING 0173 crates-jet-codegen-src-prelude-deadline-module-group: crates/jet-codegen/src/Prelude/Core/TimeMonotonic.rs:1-38
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS /// Monotonic scalar used by the shared Instant carrier. AOT stores the scalar
-//RS /// in the Prelude value; JIT keeps its handle opaque; TIR deopt stores the same
-//RS /// Prelude clock sample.
-//RS ///
-//RS /// Foundation compiles this carrier without the scheduler. The provider hook
-//RS /// keeps that build independent while letting the one Prelude scheduler install
-//RS /// its controlled-world clock at the execution boundary.
-//RS pub type JetMonotonicProvider = fn() -> Option<i64>;
-//RS 
-//RS thread_local! {
-//RS     static JET_MONOTONIC_PROVIDER: std::cell::Cell<Option<JetMonotonicProvider>> =
-//RS         const { std::cell::Cell::new(None) };
-//RS }
-//RS 
-//RS pub fn jet_time_monotonic_provider_set(
-//RS     provider: Option<JetMonotonicProvider>,
-//RS ) -> Option<JetMonotonicProvider> {
-//RS     JET_MONOTONIC_PROVIDER.with(|current| current.replace(provider))
-//RS }
-//RS 
-//RS fn jet_time_monotonic_controlled_now_ns() -> Option<i64> {
-//RS     JET_MONOTONIC_PROVIDER.with(|provider| provider.get().and_then(|provider| provider()))
-//RS }
-//RS 
-//RS pub fn jet_time_monotonic_now_ns() -> i64 {
-//RS     if let Some(now) = jet_time_monotonic_controlled_now_ns() {
-//RS         return now;
-//RS     }
-//RS     if let Some(now) = jet_scheduler_world_monotonic_now_ns() {
-//RS         return now;
-//RS     }
-//RS     static EPOCH: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
-//RS     EPOCH
-//RS         .get_or_init(std::time::Instant::now)
-//RS         .elapsed()
-//RS         .as_nanos()
-//RS         .min(i64::MAX as u128) as i64
-//RS }
-// END-PORT-PENDING 0173 crates/jet-codegen/src/Prelude/Core/TimeMonotonic.rs:1-38
+// One monotonic scalar and controlled provider shared by execution tiers.
+use core.cell.[Cell, ThreadLocal]
+use std.sync.[OnceLock]
+use std.time.[Instant]
+use core.tasks.runtime.scheduler.[jet_scheduler_world_monotonic_now_ns]
 
+// Rust: crates/jet-codegen/src/Prelude/Core/TimeMonotonic.rs:8
+pub type JetMonotonicProvider = fn() -> I64?
+// Rust: crates/jet-codegen/src/Prelude/Core/TimeMonotonic.rs:10
+// GATE #4565: kernel primitive
+JET_MONOTONIC_PROVIDER :: #Unsafe("thread-local function provider is installed only for the executing thread") {
+    ThreadLocal.new(fn() { Cell.new(None as JetMonotonicProvider?) })
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/TimeMonotonic.rs:15
+pub fn jet_time_monotonic_provider_set(provider: JetMonotonicProvider?) -> JetMonotonicProvider? {
+    // GATE #4565: kernel primitive
+    #Unsafe("replace executing thread clock hook while returning its previous provider") {
+        JET_MONOTONIC_PROVIDER.with(current -> current.replace(provider))
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/TimeMonotonic.rs:21
+fn jet_time_monotonic_controlled_now_ns() -> I64? {
+    // GATE #4565: kernel primitive
+    #Unsafe("read thread-local controlled clock hook and invoke the installed provider") {
+        JET_MONOTONIC_PROVIDER.with(provider -> provider.get().and_then(provider -> provider()))
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/TimeMonotonic.rs:25
+pub fn jet_time_monotonic_now_ns() -> I64 {
+    if Val(now) = jet_time_monotonic_controlled_now_ns() -> return now
+    if Val(now) = jet_scheduler_world_monotonic_now_ns() -> return now
+    // Rust: crates/jet-codegen/src/Prelude/Core/TimeMonotonic.rs:32
+    // GATE #4565: kernel primitive
+    static EPOCH: OnceLock<Instant> = OnceLock.new()
+    // GATE #4565: kernel primitive
+    #Unsafe("initialize process monotonic epoch once and sample real elapsed time, saturating to I64") {
+        EPOCH.get_or_init(() -> Instant.now()).elapsed().as_nanos().min(I64.MAX as U128) as I64
+    }
+}

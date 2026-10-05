@@ -1,0 +1,22 @@
+use core.time.runtime.deadline.[jet_ctx_deadline_ms, jet_ctx_push_deadline, jet_ctx_set_deadline_min]
+
+// Rust: crates/jet-codegen/src/Prelude/Deadline.rs:51
+// Behavioral controls: the Rust range contains no inline tests.
+#Test("deadline_guard_restores_nested_budgets_and_min_only_tightens") {
+    original :: jet_ctx_deadline_ms()
+    {
+        outer :: jet_ctx_push_deadline(100)
+        assert(jet_ctx_deadline_ms() == Val(I64{100}))
+        jet_ctx_set_deadline_min(200)
+        assert(jet_ctx_deadline_ms() == Val(I64{100}))
+        {
+            inner :: jet_ctx_push_deadline(80)
+            jet_ctx_set_deadline_min(50)
+            assert(jet_ctx_deadline_ms() == Val(I64{50}))
+        }
+        assert(jet_ctx_deadline_ms() == Val(I64{100}))
+        jet_ctx_set_deadline_min(20)
+        assert(jet_ctx_deadline_ms() == Val(I64{20}))
+    }
+    assert(jet_ctx_deadline_ms() == original)
+}

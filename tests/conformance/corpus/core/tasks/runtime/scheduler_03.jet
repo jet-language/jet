@@ -1,0 +1,367 @@
+use core.tasks.runtime.scheduler_03.[jet_scheduler_io_backend, JetSchedulerResult]
+use core.sys.target
+use jet_foundation.BuildConfig.[jet_native_io]
+use core.tasks.runtime.scheduler.[JetTaskControl, JetCancelUnwind, JetDeadlineUnwind, JetSchedulerWait,
+    jet_scheduler_task_completion_begin, jet_scheduler_task_completion_register,
+    jet_scheduler_set_task_control, jet_scheduler_catch_task_unwind,
+    jet_scheduler_suppress_panic_report, jet_task_unwind_cancel, jet_scheduler_fatal,
+    jet_scheduler_classify_unwind, jet_scheduler_host_fault_reason]
+use core.tasks.runtime.scheduler_02.[JetSchedulerChannel, JetSchedulerSendPrepareError, JetSelectOutcome,
+    jet_scheduler_select]
+use core.prelude.runtime.core.[jet_scheduler_task_panic_enter, jet_scheduler_task_panic_leave]
+use core.time.runtime.top_time_sleep.TEST_DEADLINE_EXCEEDED
+use std.sync.[Arc, Mutex]
+use std.sync.atomic.[AtomicUsize, Ordering]
+use std.sync.mpsc.sync_channel
+use std.time.[Instant, Duration]
+use std.thread as thread
+use std.panic as panic
+use std.boxed.Box
+use std.any.Any
+use core.marker.Send
+
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:3616
+#Test("scheduler_backend_uses_selected_target_and_native_io_feature") {
+    backend :: jet_scheduler_io_backend()
+    expected :: if not jet_native_io { "portable-poll" } else {
+        match target.selected_os() {
+            .Linux -> "epoll"
+            .MacOS | .IOS | .TvOS | .WatchOS | .FreeBSD | .NetBSD | .OpenBSD -> "kqueue"
+            .Windows -> "iocp"
+            _ -> "portable-poll"
+        }
+    }
+    assert(backend == expected)
+    assert(jet_scheduler_io_backend() == backend)
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:3812
+#Test("scheduler_result_keeps_value_panic_cancel_and_deadline_distinct") {
+    value :: JetSchedulerResult<I64>.Value(I64{17})
+    match value { .Value(number) -> assert(number == I64{17}), _ -> assert(false) }
+    panic :: JetSchedulerResult<I64>.Panicked("child panic")
+    match panic { .Panicked(message) -> assert(message == "child panic"), _ -> assert(false) }
+    cancelled :: JetSchedulerResult<I64>.Cancelled
+    match cancelled { .Cancelled -> {}, _ -> assert(false) }
+    deadline :: JetSchedulerResult<I64>.Deadline("rendered deadline")
+    match deadline { .Deadline(message) -> assert(message == "rendered deadline"), _ -> assert(false) }
+}
+
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:4457
+fn register_record(trace: Arc<Mutex<[&String]>>, event: &String) -> {
+    jet_scheduler_task_completion_register(fn() {
+        // GATE #4565: kernel primitive
+        #Unsafe("record completion cleanup order under the shared trace mutex") { trace.lock().unwrap().push(event) }
+    })
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:4467
+#Test("nested_task_completion_drains_only_its_frame_in_lifo_order") {
+    // GATE #4565: kernel primitive
+    #Unsafe("shared trace witnesses nested cleanup order and cleanup registered during drain") {
+        trace :: Arc.new(Mutex.new([&String].new()))
+        outer := jet_scheduler_task_completion_begin()
+        register_record(trace.clone(), "outer-first")
+        register_record(trace.clone(), "outer-second")
+        {
+            inner := jet_scheduler_task_completion_begin()
+            inner_trace :: trace.clone()
+            late_trace :: trace.clone()
+            jet_scheduler_task_completion_register(fn() {
+                inner_trace.lock().unwrap().push("inner-first")
+                register_record(late_trace.clone(), "inner-late")
+            })
+            register_record(trace.clone(), "inner-second")
+            inner.drain()
+            assert(*trace.lock().unwrap() == ["inner-second", "inner-first", "inner-late"])
+        }
+        assert(*trace.lock().unwrap() == ["inner-second", "inner-first", "inner-late"])
+        outer.drain()
+        assert(*trace.lock().unwrap() == ["inner-second", "inner-first", "inner-late", "outer-second", "outer-first"])
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:4506
+fn nested_task_completion_failure(trace: Arc<Mutex<[&String]>>) -> () Err! {
+    _inner :: jet_scheduler_task_completion_begin()
+    register_record(^trace, "failed-child")
+    result: () Err! = Err("child failed")
+    result?
+    ()
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:4517
+#Test("nested_task_completion_restores_parent_on_failure_and_unwind") {
+    // GATE #4565: kernel primitive
+    #Unsafe("real native unwind and ordinary failure both drain the child and restore parent frame") {
+        trace :: Arc.new(Mutex.new([&String].new()))
+        outer := jet_scheduler_task_completion_begin()
+        register_record(trace.clone(), "outer-first")
+        assert(nested_task_completion_failure(trace.clone()) == Err("child failed"))
+        assert(*trace.lock().unwrap() == ["failed-child"])
+        panic_trace :: trace.clone()
+        result :: panic.catch_unwind(panic.AssertUnwindSafe(fn() {
+            _inner :: jet_scheduler_task_completion_begin()
+            register_record(^panic_trace, "panicked-child")
+            panic("nested task failed")
+        }))
+        assert(result.is_err())
+        assert(*trace.lock().unwrap() == ["failed-child", "panicked-child"])
+        register_record(trace.clone(), "outer-late")
+        outer.drain()
+        assert(*trace.lock().unwrap() == ["failed-child", "panicked-child", "outer-late", "outer-first"])
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:4553
+#Test("bounded_reservations_serialize_capacity_until_commit_or_drop") {
+    // GATE #4565: kernel primitive
+    #Unsafe("real competing sender waits for bounded capacity until held reservation is dropped") {
+        channel :: JetSchedulerChannel<I64>.bounded(1)
+        sender :: channel.sender()
+        reservation :: sender.reserve_send().expect("reserve bounded capacity")
+        assert(channel.inner.state.lock().unwrap().reserved_sends == 1)
+        worker_sender :: sender.clone()
+        (tx, rx) :: sync_channel<Bool>(1)
+        worker :: thread.spawn(fn() {
+            reservation :: worker_sender.reserve_send().expect("reserve after capacity is released")
+            tx.send(reservation.commit(22).is_ok()).expect("report committed send")
+        })
+        deadline :: Instant.now() + Duration.from_secs(1)
+        loop {
+            if channel.inner.state.lock().unwrap().send_waiters.len() == 1 -> break
+            assert(Instant.now() < deadline, "second sender did not wait for capacity")
+            thread.yield_now()
+        }
+        assert(channel.inner.state.lock().unwrap().reserved_sends == 1)
+        drop(^reservation)
+        assert(rx.recv_timeout(Duration.from_secs(1)).expect("released reservation wakes waiting sender"))
+        worker.join().expect("sender worker completed")
+        assert(channel.try_receive() == Val(22))
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:4587
+#Test("prepared_send_publishes_receipt_and_skips_prepare_after_close") {
+    // GATE #4565: kernel primitive
+    #Unsafe("reservation publishes prepared value and receipt, and closed channel skips callback") {
+        channel :: JetSchedulerChannel<I64>.bounded(1)
+        sender :: channel.sender()
+        reservation :: sender.reserve_send().expect("reserve bounded capacity")
+        receipt :: reservation.commit_prepared(fn() -> Result<(I64, &String), ()> { Ok((17, "receipt")) })
+            .expect("prepare and publish")
+        assert(receipt == "receipt")
+        assert(channel.try_receive() == Val(17))
+        reservation :: sender.reserve_send().expect("reserve second capacity")
+        channel.close()
+        prepared :: AtomicUsize.new(0)
+        result :: reservation.commit_prepared(fn() -> Result<(I64, ()), ()> {
+            _ :: prepared.fetch_add(1, Ordering.SeqCst)
+            Ok((19, ()))
+        })
+        assert(result is Err(JetSchedulerSendPrepareError.Closed))
+        assert(prepared.load(Ordering.SeqCst) == 0)
+        assert(channel.try_receive() == None)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:4612
+#Test("non_owning_select_view_does_not_delay_receiver_close") {
+    // GATE #4565: kernel primitive
+    #Unsafe("select view retains state but not receiver ownership") {
+        channel :: JetSchedulerChannel<I64>.new()
+        view :: channel.select_view()
+        drop(^channel)
+        state :: view.inner.state.lock().unwrap()
+        assert(state.receiver_count == 0)
+        assert(state.closed)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:4628
+fn select_with_timeout(channels: [JetSchedulerChannel<I64>], timers: [U64]) -> JetSelectOutcome<I64> {
+    // GATE #4565: kernel primitive
+    #Unsafe("real selecting thread reports within the original close-wakeup timeout") {
+        (tx, rx) :: sync_channel<JetSelectOutcome<I64>>(1)
+        _ :: thread.spawn(fn() {
+            inners :: channels.into_iter().map(fn(channel) { channel.select_inner() }).collect()
+            _ :: tx.send(jet_scheduler_select(^inners, ^timers))
+        })
+        rx.recv_timeout(Duration.from_millis(250)).expect("select did not wake after every channel closed")
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:4642
+#Test("closed_select_failure_unwinds_inside_runtime_boundary") {
+    jet_scheduler_task_panic_enter()
+    // GATE #4565: kernel primitive
+    result :: #Unsafe("catch real closed-select runtime failure inside the live boundary") {
+        panic.catch_unwind(fn() { jet_scheduler_fatal("select closed") })
+    }
+    jet_scheduler_task_panic_leave()
+    assert(result.is_err())
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:4650
+#Test("select_returns_closed_when_one_channel_is_closed_and_empty") {
+    channel :: JetSchedulerChannel<I64>.new()
+    channel.close()
+    assert(select_with_timeout([^channel], []) is .Closed)
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:4660
+#Test("select_returns_closed_only_when_all_channels_are_closed_and_empty") {
+    first :: JetSchedulerChannel<I64>.new()
+    second :: JetSchedulerChannel<I64>.new()
+    first.close()
+    second.close()
+    assert(select_with_timeout([^first, ^second], []) is .Closed)
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:4672
+#Test("select_wakes_when_last_open_channel_closes_after_park") {
+    channel :: JetSchedulerChannel<I64>.new()
+    closer :: channel.clone()
+    // GATE #4565: kernel primitive
+    #Unsafe("close the last open receiver from a real delayed thread") {
+        _ :: thread.spawn(fn() { thread.sleep(Duration.from_millis(10)); closer.close() })
+    }
+    assert(select_with_timeout([^channel], []) is .Closed)
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:4686
+#Test("select_ready_value_and_timer_keep_precedence_over_closed") {
+    valued :: JetSchedulerChannel<I64>.new()
+    sender :: valued.sender()
+    assert(sender.send(7))
+    drop(^sender)
+    assert(select_with_timeout([^valued], []) is .Recv(_, 7))
+    closed :: JetSchedulerChannel<I64>.new()
+    closed.close()
+    assert(select_with_timeout([^closed], [0]) is .After(0))
+    closed :: JetSchedulerChannel<I64>.new()
+    closed.close()
+    assert(select_with_timeout([^closed], [10]) is .After(0))
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:4712
+#Test("select_cancellation_keeps_precedence_over_waiting") {
+    control :: JetTaskControl.new()
+    control.cancel()
+    jet_scheduler_set_task_control(Val(^control))
+    channel :: JetSchedulerChannel<I64>.new()
+    outcome :: jet_scheduler_select([channel.select_inner()], [])
+    jet_scheduler_set_task_control(None)
+    assert(outcome is .Closed)
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:4723
+#Test("select_cancellation_after_park_wakes_and_cleans_waiters") {
+    // GATE #4565: kernel primitive
+    #Unsafe("wait for actual channel and cancellation registration before cancelling the parked selector") {
+        control :: JetTaskControl.new()
+        channel :: JetSchedulerChannel<I64>.new()
+        inner :: channel.select_inner()
+        selected_inner :: inner.clone()
+        selected_control :: control.clone()
+        (tx, rx) :: sync_channel<JetSelectOutcome<I64>>(1)
+        _ :: thread.spawn(fn() {
+            jet_scheduler_set_task_control(Val(^selected_control))
+            outcome :: jet_scheduler_select([^selected_inner], [])
+            jet_scheduler_set_task_control(None)
+            _ :: tx.send(^outcome)
+        })
+        deadline :: Instant.now() + Duration.from_millis(250)
+        loop {
+            channel_registered :: not inner.state.lock().unwrap().recv_waiters.is_empty()
+            cancel_registered :: not control.cancel_waiters.lock().unwrap().is_empty()
+            if channel_registered && cancel_registered -> break
+            assert(Instant.now() < deadline, "select did not park")
+            thread.yield_now()
+        }
+        control.cancel()
+        assert(rx.recv_timeout(Duration.from_millis(250)).expect("cancelled select did not wake") is .Closed)
+        assert(inner.state.lock().unwrap().recv_waiters.is_empty())
+        assert(control.cancel_waiters.lock().unwrap().is_empty())
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:4759
+#Test("select_deadline_unwind_cleans_all_waiters") {
+    // GATE #4565: kernel primitive
+    #Unsafe("force original thread-local deadline condition and catch the real scheduler unwind") {
+        control :: JetTaskControl.new()
+        channel :: JetSchedulerChannel<I64>.new()
+        inner :: channel.select_inner()
+        jet_scheduler_set_task_control(Val(control.clone()))
+        jet_scheduler_task_panic_enter()
+        result :: {
+            TEST_DEADLINE_EXCEEDED.with(fn(deadline) { deadline.set(true) })
+            panic.catch_unwind(panic.AssertUnwindSafe(fn() { jet_scheduler_select([inner.clone()], []) }))
+        }
+        TEST_DEADLINE_EXCEEDED.with(fn(deadline) { deadline.set(false) })
+        jet_scheduler_task_panic_leave()
+        jet_scheduler_set_task_control(None)
+        assert(result.is_err())
+        assert(inner.state.lock().unwrap().recv_waiters.is_empty())
+        assert(control.cancel_waiters.lock().unwrap().is_empty())
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:4784
+fn converted_payloads() -> [(&String, Box<Any + Send>)] {
+    // GATE #4565: kernel primitive
+    #Unsafe("build the exact native payload types used at the scheduler raise sites") {
+        [("cancel", Box.new(JetCancelUnwind{})),
+         ("deadline", Box.new(JetDeadlineUnwind{rendered: "Error [E3003]: Deadline exceeded while waiting in task join"})),
+         ("stop report", Box.new("Stop [E3001]: select closed\n  --> a.jet:3:1\n".to_string())),
+         ("deadline report", Box.new("Error [E3003]: Deadline exceeded while waiting in task join".to_string())),
+         ("foreign boundary", Box.new("__jet_ffi_runtime__: os entropy: closed".to_string()))]
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:4813
+// Native nounwind/cleanup hook messages cannot be converted by any catch frame.
+fn escaping_payloads() -> [(&String, Box<Any + Send>)] {
+    // GATE #4565: kernel primitive
+    #Unsafe("retain native borrowed and owned panic payload distinctions") {
+        [("nounwind", Box.new("panic in a function that cannot unwind")),
+         ("cleanup", Box.new("panic in a destructor during cleanup")),
+         ("host defect", Box.new("called `Option::unwrap()` on a `None` value".to_string()))]
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:4825
+#Test("panic_hook_prints_an_escaping_task_panic_and_hides_a_converted_one") {
+    // GATE #4565: kernel primitive
+    decisions :: #Unsafe("probe native hook decisions inside a live real catch frame without assertions there") {
+        jet_scheduler_catch_task_unwind(fn() {
+            decisions := [(&String, Bool)].new()
+            loop (label, payload) in converted_payloads().into_iter().chain(escaping_payloads()) {
+                decisions.push((label, jet_scheduler_suppress_panic_report(&*payload)))
+            }
+            defect :: panic.catch_unwind(fn() { panic("interpreter defect") })
+                .expect_err("the task-body panic must be captured")
+            decisions.push(("raised defect", jet_scheduler_suppress_panic_report(&*defect)))
+            cancel :: panic.catch_unwind(fn() { jet_task_unwind_cancel() })
+                .expect_err("the cancel unwind must be captured")
+            decisions.push(("raised cancel", jet_scheduler_suppress_panic_report(&*cancel)))
+            ^decisions
+        }).expect("the probe frame must not panic")
+    }
+    assert(decisions == [("cancel", true), ("deadline", true), ("stop report", true),
+        ("deadline report", true), ("foreign boundary", true), ("nounwind", false),
+        ("cleanup", false), ("host defect", false), ("raised defect", false), ("raised cancel", true)])
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:4870
+#Test("panic_hook_prints_every_payload_with_no_catch_frame_live") {
+    loop (label, payload) in converted_payloads().into_iter().chain(escaping_payloads()) {
+        assert(not jet_scheduler_suppress_panic_report(&*payload), "{label} must keep its message when no catch frame is live")
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:4883
+#Test("arbitrary_wait_payload_is_host_fault_not_jet_runtime_failure") {
+    // GATE #4565: kernel primitive
+    #Unsafe("classify real arbitrary native text and non-text payloads, never as Jet runtime reports") {
+        match jet_scheduler_classify_unwind<()>(Box.new("host helper failed".to_string())) {
+            .Panicked(message) -> assert(jet_scheduler_host_fault_reason(&message) == Val("host helper failed"))
+            _ -> panic("arbitrary string payload must remain a panic status")
+        }
+        match jet_scheduler_classify_unwind<()>(Box.new(U8{7})) {
+            .Panicked(message) -> assert(jet_scheduler_host_fault_reason(&message) == Val("scheduler wait carried a non-Jet payload"))
+            _ -> panic("arbitrary payload must remain a panic status")
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:4906
+#Test("transported_runtime_report_is_not_reclassified_as_host_fault") {
+    report :: "Stop [E3014]: foreign function failed\n  --> ffi.jet:7:1\n"
+    // GATE #4565: kernel primitive
+    #Unsafe("transported native report retains its diagnostic text and classification") {
+        match jet_scheduler_classify_unwind<()>(Box.new(report.to_string())) {
+            .Panicked(message) -> { assert(message == report); assert(jet_scheduler_host_fault_reason(&message).is_none()) }
+            _ -> panic("transported runtime report must remain a panic status")
+        }
+    }
+}

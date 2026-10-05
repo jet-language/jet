@@ -1,0 +1,38 @@
+use core.auth.runtime.top_auth.[jet_auth_claims_at, JetAuthError, JET_AUTH_NANOS_PER_SECOND, jet_auth_parse_i64_decimal, jet_auth_b64url_decode]
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Auth.rs:659
+#Test("numeric_date_boundaries_keep_nanoseconds") {
+    expiry :: "{\"aud\":\"gateway\",\"exp\":10}".as_bytes()
+    expiry_ns :: I128{10} * I128.from(JET_AUTH_NANOS_PER_SECOND)
+    skew :: I64{7}
+    deadline :: expiry_ns + I128.from(skew)
+    assert(matches(jet_auth_claims_at(expiry, "gateway", None, skew, deadline - 1), Ok(_)))
+    assert(matches(jet_auth_claims_at(expiry, "gateway", None, skew, deadline), Err(JetAuthError.TokenExpired)))
+    assert(matches(jet_auth_claims_at(expiry, "gateway", None, skew, deadline + 1), Err(JetAuthError.TokenExpired)))
+    not_before :: "{\"aud\":\"gateway\",\"exp\":30,\"nbf\":20,\"iat\":-9223372036854775808}".as_bytes()
+    not_before_ns :: I128{20} * I128.from(JET_AUTH_NANOS_PER_SECOND)
+    threshold :: not_before_ns - I128.from(skew)
+    assert(matches(jet_auth_claims_at(not_before, "gateway", None, skew, threshold - 1), Err(JetAuthError.TokenNotYetValid)))
+    claims :: jet_auth_claims_at(not_before, "gateway", None, skew, threshold).expect("not-before boundary should be accepted")
+    assert(claims.not_before == Val(I64{20}))
+    assert(claims.issued_at == Val(I64.MIN))
+    maximum :: "{\"aud\":\"gateway\",\"exp\":30,\"iat\":9223372036854775807}".as_bytes()
+    claims :: jet_auth_claims_at(maximum, "gateway", None, I64{0}, I128{0}).expect("maximum issued-at should remain representable")
+    assert(claims.issued_at == Val(I64.MAX))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Auth.rs:292
+#Test("numeric_date_rejects_rounding_negative_zero_and_overflow") {
+    assert(jet_auth_parse_i64_decimal("9007199254740993") == Val(I64{9007199254740993}))
+    assert(jet_auth_parse_i64_decimal("-0") == None)
+    assert(jet_auth_parse_i64_decimal("1.0") == None)
+    assert(jet_auth_parse_i64_decimal("1e0") == None)
+    assert(jet_auth_parse_i64_decimal("9223372036854775808") == None)
+    assert(jet_auth_parse_i64_decimal("-9223372036854775809") == None)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Auth.rs:85
+#Test("auth_base64url_rejects_padding_and_noncanonical_tail") {
+    assert(jet_auth_b64url_decode("Zg").unwrap() == "f".as_bytes())
+    assert(jet_auth_b64url_decode("Zh").is_err())
+    assert(jet_auth_b64url_decode("Zg==").is_err())
+    assert(jet_auth_b64url_decode("A").is_err())
+}

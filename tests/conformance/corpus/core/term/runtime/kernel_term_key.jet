@@ -1,0 +1,26 @@
+use core.term.runtime.kernel_term_key.[JetKey, jet_term_key_code, jet_term_key_modifier_bits]
+
+// Behavioral controls for crates/jet-codegen/src/Prelude/Core/TermKey.rs:62-99.
+#Test("terminal_key_stable_codes") {
+    assert(jet_term_key_code(JetKey.Char('x')) == "x")
+    assert(jet_term_key_code(JetKey.Enter) == "enter")
+    assert(jet_term_key_code(JetKey.Escape) == "escape")
+    assert(jet_term_key_code(JetKey.Backspace) == "backspace")
+    assert(jet_term_key_code(JetKey.Tab) == "tab")
+    assert(jet_term_key_code(JetKey.Delete) == "delete")
+    assert(jet_term_key_code(JetKey.Up) == "up")
+    assert(jet_term_key_code(JetKey.Down) == "down")
+    assert(jet_term_key_code(JetKey.Left) == "left")
+    assert(jet_term_key_code(JetKey.Right) == "right")
+    assert(jet_term_key_code(JetKey.F(12)) == "f12")
+    assert(jet_term_key_code(JetKey.Ctrl('c')) == "c")
+    assert(jet_term_key_code(JetKey.Unknown) == "unknown")
+}
+#Test("terminal_key_modifier_and_interrupt_policy") {
+    assert(jet_term_key_modifier_bits(JetKey.Char('c')) == U8{0})
+    assert(jet_term_key_modifier_bits(JetKey.Ctrl('c')) == U8{1})
+    assert(jet_term_key_modifier_bits(JetKey.F(1)) == U8{0})
+    assert(JetKey.Ctrl('c').is_interrupt())
+    assert(not JetKey.Char('c').is_interrupt())
+    assert(not JetKey.Ctrl('d').is_interrupt())
+}

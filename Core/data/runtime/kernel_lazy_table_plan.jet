@@ -1,1808 +1,1044 @@
-// PORT-PENDING 0150 crates-jet-codegen-src-prelude-core-lazytableplan-slice-1: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:1-1804
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS // D-DATAFLOW1 / card #2447: backend-neutral typed query-plan facts.
-//RS //
-//RS // This fragment is deliberately a semantic kernel, not a query engine. It
-//RS // owns typed identities, schemas, logical operations, validation, deterministic
-//RS // inspection, exact integer estimates, and the control state around bounded
-//RS // batches. It never owns rows, a source handle, a predicate, or an execution
-//RS // operator. Query adapters create these facts; the MIR adapter copies them
-//RS // without re-inferring meaning; each backend owns its own storage and operator
-//RS // implementation.
-//RS //
-//RS // Integration points (kept here as a reminder for the later assembly):
-//RS // * Query adapters: `Prelude/CoreLib/Top/Compute.rs` and
-//RS //   `Prelude/CoreLib/JetStd/CommonTypes.rs` marshal typed source/schema facts
-//RS //   into `JetTableSource` and `JetTablePlan`.
-//RS // * MIR: `Codegen/TIR/data_plan.rs` projects a validated plan into its MIR
-//RS //   carrier. MIR must consume `inspect()`/`facts()` and must not rebuild a
-//RS //   graph or choose a backend operator.
-//RS // * AOT/JIT/interpreter/web: consume the same plan and `JetTableBatchState`;
-//RS //   this file contains no target conditional and no second storage table.
-//RS 
-//RS use std::collections::VecDeque;
-//RS use std::fmt;
-//RS 
-//RS /// Version of this semantic fact shape.  A consumer should reject an unknown
-//RS /// version rather than silently guessing at a changed operation or estimate.
-//RS pub const JET_LAZY_TABLE_PLAN_SCHEMA_VERSION: u32 = 1;
-//RS 
-//RS /// A stable identity may be displayed in diagnostics, but it is not a path,
-//RS /// pointer, address, or backend handle.  The value is intentionally opaque to
-//RS /// this kernel and is only required to be non-empty and control-free.
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub struct JetTableIdentityError {
-//RS     pub kind: &'static str,
-//RS     pub value: String,
-//RS     pub reason: &'static str,
-//RS }
-//RS 
-//RS impl JetTableIdentityError {
-//RS     fn empty(kind: &'static str, value: String) -> Self {
-//RS         Self {
-//RS             kind,
-//RS             value,
-//RS             reason: "must not be empty",
-//RS         }
-//RS     }
-//RS 
-//RS     fn control(kind: &'static str, value: String) -> Self {
-//RS         Self {
-//RS             kind,
-//RS             value,
-//RS             reason: "must not contain control characters",
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS impl fmt::Display for JetTableIdentityError {
-//RS     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-//RS         write!(
-//RS             formatter,
-//RS             "table {} identity {:?} {}",
-//RS             self.kind, self.value, self.reason
-//RS         )
-//RS     }
-//RS }
-//RS 
-//RS impl std::error::Error for JetTableIdentityError {}
-//RS 
-//RS fn jet_table_validate_identity(
-//RS     value: &str,
-//RS     kind: &'static str,
-//RS ) -> Result<(), JetTableIdentityError> {
-//RS     if value.trim().is_empty() {
-//RS         return Err(JetTableIdentityError::empty(kind, value.to_string()));
-//RS     }
-//RS     if value.chars().any(char::is_control) {
-//RS         return Err(JetTableIdentityError::control(kind, value.to_string()));
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS macro_rules! jet_table_string_identity {
-//RS     ($name:ident, $kind:literal) => {
-//RS         #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-//RS         pub struct $name(String);
-//RS 
-//RS         impl $name {
-//RS             pub fn new(value: impl Into<String>) -> Self {
-//RS                 Self(value.into())
-//RS             }
-//RS 
-//RS             pub fn try_new(value: impl Into<String>) -> Result<Self, JetTableIdentityError> {
-//RS                 let value = value.into();
-//RS                 jet_table_validate_identity(&value, $kind)?;
-//RS                 Ok(Self(value))
-//RS             }
-//RS 
-//RS             pub fn from_name(value: impl Into<String>) -> Self {
-//RS                 Self::new(value)
-//RS             }
-//RS 
-//RS             pub fn as_str(&self) -> &str {
-//RS                 &self.0
-//RS             }
-//RS 
-//RS             pub fn into_string(self) -> String {
-//RS                 self.0
-//RS             }
-//RS 
-//RS             pub fn validate(&self) -> Result<(), JetTableIdentityError> {
-//RS                 jet_table_validate_identity(&self.0, $kind)
-//RS             }
-//RS         }
-//RS 
-//RS         impl From<&str> for $name {
-//RS             fn from(value: &str) -> Self {
-//RS                 Self::new(value)
-//RS             }
-//RS         }
-//RS 
-//RS         impl From<String> for $name {
-//RS             fn from(value: String) -> Self {
-//RS                 Self::new(value)
-//RS             }
-//RS         }
-//RS 
-//RS         impl fmt::Display for $name {
-//RS             fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-//RS                 formatter.write_str(&self.0)
-//RS             }
-//RS         }
-//RS     };
-//RS }
-//RS 
-//RS jet_table_string_identity!(JetTablePlanId, "plan");
-//RS jet_table_string_identity!(JetTableSchemaId, "schema");
-//RS jet_table_string_identity!(JetTableColumnId, "column");
-//RS jet_table_string_identity!(JetTableSourceId, "source");
-//RS jet_table_string_identity!(JetTableTypeId, "type");
-//RS 
-//RS impl JetTableTypeId {
-//RS     pub fn boolean() -> Self {
-//RS         Self::new("Bool")
-//RS     }
-//RS 
-//RS     pub fn string() -> Self {
-//RS         Self::new("String")
-//RS     }
-//RS 
-//RS     pub fn integer() -> Self {
-//RS         Self::new("Int")
-//RS     }
-//RS 
-//RS     pub fn float() -> Self {
-//RS         Self::new("Float")
-//RS     }
-//RS 
-//RS     pub fn any() -> Self {
-//RS         Self::new("Any")
-//RS     }
-//RS }
-//RS 
-//RS impl JetTableColumnId {
-//RS     /// Derive a stable column identity from its name and type.  The identity
-//RS     /// bytes and representation are owned by the Foundation data-flow kernel.
-//RS     pub fn derived(name: &str, ty: &JetTableTypeId) -> Self {
-//RS         Self::new(jet_foundation::PreludeDataFlow::column_identity(
-//RS             name,
-//RS             ty.as_str(),
-//RS         ))
-//RS     }
-//RS }
-//RS 
-//RS /// Node identity is an insertion index, not a pointer or a hash-map key.  A
-//RS /// plan's validation requires IDs to match graph order, which makes a graph
-//RS /// inspectable without an unstable map iteration order.
-//RS #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-//RS pub struct JetTableNodeId(pub usize);
-//RS 
-//RS impl JetTableNodeId {
-//RS     pub const fn new(index: usize) -> Self {
-//RS         Self(index)
-//RS     }
-//RS 
-//RS     pub const fn index(self) -> usize {
-//RS         self.0
-//RS     }
-//RS }
-//RS 
-//RS impl From<usize> for JetTableNodeId {
-//RS     fn from(value: usize) -> Self {
-//RS         Self::new(value)
-//RS     }
-//RS }
-//RS 
-//RS impl fmt::Display for JetTableNodeId {
-//RS     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-//RS         write!(formatter, "node:{}", self.0)
-//RS     }
-//RS }
-//RS 
-//RS fn jet_table_fnv1a64(bytes: &[u8]) -> u64 {
-//RS     let mut hash = 0xcbf29ce484222325_u64;
-//RS     for byte in bytes {
-//RS         hash ^= u64::from(*byte);
-//RS         hash = hash.wrapping_mul(0x100000001b3_u64);
-//RS     }
-//RS     hash
-//RS }
-//RS 
-//RS fn jet_table_escape(value: &str) -> String {
-//RS     let mut escaped = String::with_capacity(value.len());
-//RS     for character in value.chars() {
-//RS         match character {
-//RS             '\\' => escaped.push_str("\\\\"),
-//RS             '|' => escaped.push_str("\\|"),
-//RS             ';' => escaped.push_str("\\;"),
-//RS             '=' => escaped.push_str("\\="),
-//RS             ':' => escaped.push_str("\\:"),
-//RS             '\n' => escaped.push_str("\\n"),
-//RS             '\r' => escaped.push_str("\\r"),
-//RS             '\t' => escaped.push_str("\\t"),
-//RS             other => escaped.push(other),
-//RS         }
-//RS     }
-//RS     escaped
-//RS }
-//RS 
-//RS fn jet_table_json_string(value: &str) -> String {
-//RS     let mut escaped = String::with_capacity(value.len().saturating_add(2));
-//RS     escaped.push('"');
-//RS     for character in value.chars() {
-//RS         match character {
-//RS             '"' => escaped.push_str("\\\""),
-//RS             '\\' => escaped.push_str("\\\\"),
-//RS             '\n' => escaped.push_str("\\n"),
-//RS             '\r' => escaped.push_str("\\r"),
-//RS             '\t' => escaped.push_str("\\t"),
-//RS             '\u{08}' => escaped.push_str("\\b"),
-//RS             '\u{0c}' => escaped.push_str("\\f"),
-//RS             character if character.is_control() => {
-//RS                 escaped.push_str(&format!("\\u{:04x}", character as u32));
-//RS             }
-//RS             other => escaped.push(other),
-//RS         }
-//RS     }
-//RS     escaped.push('"');
-//RS     escaped
-//RS }
-//RS 
-//RS /// A typed field in a row schema.  This is metadata only; it contains no row
-//RS /// value and no storage offset.
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub struct JetTableColumn {
-//RS     pub id: JetTableColumnId,
-//RS     pub name: String,
-//RS     pub ty: JetTableTypeId,
-//RS }
-//RS 
-//RS impl JetTableColumn {
-//RS     pub fn new(name: impl Into<String>, ty: JetTableTypeId) -> Self {
-//RS         let name = name.into();
-//RS         let id = JetTableColumnId::derived(&name, &ty);
-//RS         Self { id, name, ty }
-//RS     }
-//RS 
-//RS     pub fn with_id(
-//RS         id: impl Into<JetTableColumnId>,
-//RS         name: impl Into<String>,
-//RS         ty: JetTableTypeId,
-//RS     ) -> Self {
-//RS         Self {
-//RS             id: id.into(),
-//RS             name: name.into(),
-//RS             ty,
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn validate(&self) -> Result<(), JetTableSchemaError> {
-//RS         self.id
-//RS             .validate()
-//RS             .map_err(JetTableSchemaError::Identity)?;
-//RS         if self.name.trim().is_empty() {
-//RS             return Err(JetTableSchemaError::EmptyColumnName);
-//RS         }
-//RS         if self.name.chars().any(char::is_control) {
-//RS             return Err(JetTableSchemaError::InvalidColumnName(self.name.clone()));
-//RS         }
-//RS         self.ty
-//RS             .validate()
-//RS             .map_err(JetTableSchemaError::Identity)
-//RS     }
-//RS 
-//RS     fn canonical_key(&self) -> String {
-//RS         format!(
-//RS             "{}:{}:{}",
-//RS             jet_table_escape(self.id.as_str()),
-//RS             jet_table_escape(&self.name),
-//RS             jet_table_escape(self.ty.as_str())
-//RS         )
-//RS     }
-//RS }
-//RS 
-//RS /// Schema errors are raised before a node can be admitted to a plan.
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub enum JetTableSchemaError {
-//RS     Identity(JetTableIdentityError),
-//RS     EmptyColumnName,
-//RS     InvalidColumnName(String),
-//RS     DuplicateColumnName(String),
-//RS     DuplicateColumnId(JetTableColumnId),
-//RS }
-//RS 
-//RS impl fmt::Display for JetTableSchemaError {
-//RS     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-//RS         match self {
-//RS             Self::Identity(error) => error.fmt(formatter),
-//RS             Self::EmptyColumnName => formatter.write_str("table column name must not be empty"),
-//RS             Self::InvalidColumnName(name) => {
-//RS                 write!(formatter, "table column name {:?} contains a control character", name)
-//RS             }
-//RS             Self::DuplicateColumnName(name) => {
-//RS                 write!(formatter, "table schema repeats column name `{name}`")
-//RS             }
-//RS             Self::DuplicateColumnId(id) => {
-//RS                 write!(formatter, "table schema repeats column identity `{id}`")
-//RS             }
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS impl std::error::Error for JetTableSchemaError {}
-//RS 
-//RS /// Ordered, typed row schema.  Column order is semantic and is retained by
-//RS /// inspection; no map is used for field storage or serialization.
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub struct JetTableSchema {
-//RS     pub id: JetTableSchemaId,
-//RS     pub row_type: JetTableTypeId,
-//RS     pub columns: Vec<JetTableColumn>,
-//RS }
-//RS 
-//RS impl JetTableSchema {
-//RS     pub fn new(row_type: JetTableTypeId, columns: Vec<JetTableColumn>) -> Self {
-//RS         let id = Self::derived_id(&row_type, &columns);
-//RS         Self {
-//RS             id,
-//RS             row_type,
-//RS             columns,
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn with_id(
-//RS         id: impl Into<JetTableSchemaId>,
-//RS         row_type: JetTableTypeId,
-//RS         columns: Vec<JetTableColumn>,
-//RS     ) -> Self {
-//RS         Self {
-//RS             id: id.into(),
-//RS             row_type,
-//RS             columns,
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn derived_id(row_type: &JetTableTypeId, columns: &[JetTableColumn]) -> JetTableSchemaId {
-//RS         let key = format!(
-//RS             "row={};columns={}",
-//RS             jet_table_escape(row_type.as_str()),
-//RS             columns
-//RS                 .iter()
-//RS                 .map(JetTableColumn::canonical_key)
-//RS                 .collect::<Vec<_>>()
-//RS                 .join(";")
-//RS         );
-//RS         JetTableSchemaId::new(format!(
-//RS             "schema-{:016x}",
-//RS             jet_table_fnv1a64(key.as_bytes())
-//RS         ))
-//RS     }
-//RS 
-//RS     pub fn column(&self, id: &JetTableColumnId) -> Option<&JetTableColumn> {
-//RS         self.columns.iter().find(|column| &column.id == id)
-//RS     }
-//RS 
-//RS     pub fn column_named(&self, name: &str) -> Option<&JetTableColumn> {
-//RS         self.columns.iter().find(|column| column.name == name)
-//RS     }
-//RS 
-//RS     pub fn column_index(&self, id: &JetTableColumnId) -> Option<usize> {
-//RS         self.columns.iter().position(|column| &column.id == id)
-//RS     }
-//RS 
-//RS     pub fn validate(&self) -> Result<(), JetTableSchemaError> {
-//RS         self.id
-//RS             .validate()
-//RS             .map_err(JetTableSchemaError::Identity)?;
-//RS         self.row_type
-//RS             .validate()
-//RS             .map_err(JetTableSchemaError::Identity)?;
-//RS         for (index, column) in self.columns.iter().enumerate() {
-//RS             column.validate()?;
-//RS             if self
-//RS                 .columns
-//RS                 .iter()
-//RS                 .take(index)
-//RS                 .any(|previous| previous.name == column.name)
-//RS             {
-//RS                 return Err(JetTableSchemaError::DuplicateColumnName(column.name.clone()));
-//RS             }
-//RS             if self
-//RS                 .columns
-//RS                 .iter()
-//RS                 .take(index)
-//RS                 .any(|previous| previous.id == column.id)
-//RS             {
-//RS                 return Err(JetTableSchemaError::DuplicateColumnId(column.id.clone()));
-//RS             }
-//RS         }
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     pub fn canonical_key(&self) -> String {
-//RS         format!(
-//RS             "schema={}:row={}:columns=[{}]",
-//RS             jet_table_escape(self.id.as_str()),
-//RS             jet_table_escape(self.row_type.as_str()),
-//RS             self.columns
-//RS                 .iter()
-//RS                 .map(JetTableColumn::canonical_key)
-//RS                 .collect::<Vec<_>>()
-//RS                 .join(",")
-//RS         )
-//RS     }
-//RS }
-//RS 
-//RS /// Explicit estimates never use `None` for an unknown fact.  A reason travels
-//RS /// with an unavailable estimate so an inspector can distinguish "not measured"
-//RS /// from zero and a backend cannot silently substitute a guess.
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub enum JetTableEstimate<T> {
-//RS     Exact(T),
-//RS     Unavailable { reason: String },
-//RS }
-//RS 
-//RS impl<T> JetTableEstimate<T> {
-//RS     pub fn exact(value: T) -> Self {
-//RS         Self::Exact(value)
-//RS     }
-//RS 
-//RS     pub fn unavailable(reason: impl Into<String>) -> Self {
-//RS         Self::Unavailable {
-//RS             reason: reason.into(),
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn is_exact(&self) -> bool {
-//RS         matches!(self, Self::Exact(_))
-//RS     }
-//RS 
-//RS     pub fn exact_value(&self) -> Option<&T> {
-//RS         match self {
-//RS             Self::Exact(value) => Some(value),
-//RS             Self::Unavailable { .. } => None,
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn unavailable_reason(&self) -> Option<&str> {
-//RS         match self {
-//RS             Self::Exact(_) => None,
-//RS             Self::Unavailable { reason } => Some(reason),
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn map<U>(self, map: impl FnOnce(T) -> U) -> JetTableEstimate<U> {
-//RS         match self {
-//RS             Self::Exact(value) => JetTableEstimate::Exact(map(value)),
-//RS             Self::Unavailable { reason } => JetTableEstimate::Unavailable { reason },
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn validate(&self) -> Result<(), JetTableEstimateError> {
-//RS         if let Self::Unavailable { reason } = self {
-//RS             if reason.trim().is_empty() {
-//RS                 return Err(JetTableEstimateError::MissingReason);
-//RS             }
-//RS         }
-//RS         Ok(())
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub enum JetTableEstimateError {
-//RS     MissingReason,
-//RS }
-//RS 
-//RS impl fmt::Display for JetTableEstimateError {
-//RS     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-//RS         match self {
-//RS             Self::MissingReason => formatter.write_str("unavailable estimate needs a reason"),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS impl std::error::Error for JetTableEstimateError {}
-//RS 
-//RS impl<T: fmt::Display> JetTableEstimate<T> {
-//RS     fn canonical_key(&self) -> String {
-//RS         match self {
-//RS             Self::Exact(value) => format!("exact:{value}"),
-//RS             Self::Unavailable { reason } => {
-//RS                 format!("unavailable:{}", jet_table_escape(reason))
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     fn text(&self) -> String {
-//RS         match self {
-//RS             Self::Exact(value) => format!("exact({value})"),
-//RS             Self::Unavailable { reason } => {
-//RS                 format!("unavailable({})", jet_table_escape(reason))
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     fn json(&self) -> String {
-//RS         match self {
-//RS             Self::Exact(value) => format!("{{\"status\":\"exact\",\"value\":{value}}}"),
-//RS             Self::Unavailable { reason } => format!(
-//RS                 "{{\"status\":\"unavailable\",\"reason\":{}}}",
-//RS                 jet_table_json_string(reason)
-//RS             ),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn jet_table_estimate_add(
-//RS     left: &JetTableEstimate<u128>,
-//RS     right: &JetTableEstimate<u128>,
-//RS     reason: &str,
-//RS ) -> JetTableEstimate<u128> {
-//RS     match (left, right) {
-//RS         (JetTableEstimate::Exact(left), JetTableEstimate::Exact(right)) => left
-//RS             .checked_add(*right)
-//RS             .map(JetTableEstimate::Exact)
-//RS             .unwrap_or_else(|| JetTableEstimate::unavailable("integer overflow")),
-//RS         _ => JetTableEstimate::unavailable(reason),
-//RS     }
-//RS }
-//RS 
-//RS fn jet_table_estimate_mul(
-//RS     left: &JetTableEstimate<u128>,
-//RS     right: &JetTableEstimate<u128>,
-//RS     reason: &str,
-//RS ) -> JetTableEstimate<u128> {
-//RS     match (left, right) {
-//RS         (JetTableEstimate::Exact(left), JetTableEstimate::Exact(right)) => left
-//RS             .checked_mul(*right)
-//RS             .map(JetTableEstimate::Exact)
-//RS             .unwrap_or_else(|| JetTableEstimate::unavailable("integer overflow")),
-//RS         _ => JetTableEstimate::unavailable(reason),
-//RS     }
-//RS }
-//RS 
-//RS fn jet_table_estimate_min(
-//RS     left: &JetTableEstimate<u128>,
-//RS     right: u128,
-//RS     reason: &str,
-//RS ) -> JetTableEstimate<u128> {
-//RS     match left {
-//RS         JetTableEstimate::Exact(left) => JetTableEstimate::Exact((*left).min(right)),
-//RS         JetTableEstimate::Unavailable { .. } => JetTableEstimate::unavailable(reason),
-//RS     }
-//RS }
-//RS 
-//RS /// Exact row/cardinality facts for one node.  `input_rows` follows the node's
-//RS /// input identity order; no source row is materialized to obtain these facts.
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub struct JetTableCardinalityFacts {
-//RS     pub input_rows: Vec<JetTableEstimate<u128>>,
-//RS     pub output_rows: JetTableEstimate<u128>,
-//RS     pub rows_read: JetTableEstimate<u128>,
-//RS     pub rows_written: JetTableEstimate<u128>,
-//RS }
-//RS 
-//RS impl JetTableCardinalityFacts {
-//RS     pub fn unknown(input_count: usize) -> Self {
-//RS         Self {
-//RS             input_rows: (0..input_count)
-//RS                 .map(|_| JetTableEstimate::unavailable("input cardinality unavailable"))
-//RS                 .collect(),
-//RS             output_rows: JetTableEstimate::unavailable("output cardinality unavailable"),
-//RS             rows_read: JetTableEstimate::unavailable("rows read unavailable"),
-//RS             rows_written: JetTableEstimate::unavailable("rows written unavailable"),
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn validate(&self, input_count: usize) -> Result<(), JetTableFactsError> {
-//RS         if self.input_rows.len() != input_count {
-//RS             return Err(JetTableFactsError::InputFactCount {
-//RS                 expected: input_count,
-//RS                 actual: self.input_rows.len(),
-//RS             });
-//RS         }
-//RS         for estimate in &self.input_rows {
-//RS             estimate.validate()?;
-//RS         }
-//RS         self.output_rows.validate()?;
-//RS         self.rows_read.validate()?;
-//RS         self.rows_written.validate()?;
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     fn canonical_key(&self) -> String {
-//RS         format!(
-//RS             "in=[{}];out={};read={};written={}",
-//RS             self.input_rows
-//RS                 .iter()
-//RS                 .map(JetTableEstimate::canonical_key)
-//RS                 .collect::<Vec<_>>()
-//RS                 .join(","),
-//RS             self.output_rows.canonical_key(),
-//RS             self.rows_read.canonical_key(),
-//RS             self.rows_written.canonical_key()
-//RS         )
-//RS     }
-//RS 
-//RS     fn text(&self) -> String {
-//RS         format!(
-//RS             "input=[{}], output={}, read={}, written={}",
-//RS             self.input_rows
-//RS                 .iter()
-//RS                 .map(JetTableEstimate::text)
-//RS                 .collect::<Vec<_>>()
-//RS                 .join(","),
-//RS             self.output_rows.text(),
-//RS             self.rows_read.text(),
-//RS             self.rows_written.text()
-//RS         )
-//RS     }
-//RS 
-//RS     fn json(&self) -> String {
-//RS         format!(
-//RS             "{{\"input_rows\":[{}],\"output_rows\":{},\"rows_read\":{},\"rows_written\":{}}}",
-//RS             self.input_rows
-//RS                 .iter()
-//RS                 .map(JetTableEstimate::json)
-//RS                 .collect::<Vec<_>>()
-//RS                 .join(","),
-//RS             self.output_rows.json(),
-//RS             self.rows_read.json(),
-//RS             self.rows_written.json()
-//RS         )
-//RS     }
-//RS }
-//RS 
-//RS /// Exact integer cost facts.  These are semantic work units, not wall-clock
-//RS /// predictions.  Unknown costs remain explicitly unavailable.
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub struct JetTableCostFacts {
-//RS     pub work_units: JetTableEstimate<u128>,
-//RS     pub memory_bytes: JetTableEstimate<u128>,
-//RS     pub output_bytes: JetTableEstimate<u128>,
-//RS }
-//RS 
-//RS impl JetTableCostFacts {
-//RS     pub fn unknown() -> Self {
-//RS         Self {
-//RS             work_units: JetTableEstimate::unavailable("work cost unavailable"),
-//RS             memory_bytes: JetTableEstimate::unavailable("memory cost unavailable"),
-//RS             output_bytes: JetTableEstimate::unavailable("output byte cost unavailable"),
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn validate(&self) -> Result<(), JetTableFactsError> {
-//RS         self.work_units.validate()?;
-//RS         self.memory_bytes.validate()?;
-//RS         self.output_bytes.validate()?;
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     fn canonical_key(&self) -> String {
-//RS         format!(
-//RS             "work={};memory={};output={}",
-//RS             self.work_units.canonical_key(),
-//RS             self.memory_bytes.canonical_key(),
-//RS             self.output_bytes.canonical_key()
-//RS         )
-//RS     }
-//RS 
-//RS     fn text(&self) -> String {
-//RS         format!(
-//RS             "work={}, memory={}, output={}",
-//RS             self.work_units.text(),
-//RS             self.memory_bytes.text(),
-//RS             self.output_bytes.text()
-//RS         )
-//RS     }
-//RS 
-//RS     fn json(&self) -> String {
-//RS         format!(
-//RS             "{{\"work_units\":{},\"memory_bytes\":{},\"output_bytes\":{}}}",
-//RS             self.work_units.json(),
-//RS             self.memory_bytes.json(),
-//RS             self.output_bytes.json()
-//RS         )
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub struct JetTableFacts {
-//RS     pub cardinality: JetTableCardinalityFacts,
-//RS     pub cost: JetTableCostFacts,
-//RS }
-//RS 
-//RS impl JetTableFacts {
-//RS     pub fn unknown(input_count: usize) -> Self {
-//RS         Self {
-//RS             cardinality: JetTableCardinalityFacts::unknown(input_count),
-//RS             cost: JetTableCostFacts::unknown(),
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn validate(&self, input_count: usize) -> Result<(), JetTableFactsError> {
-//RS         self.cardinality.validate(input_count)?;
-//RS         self.cost.validate()
-//RS     }
-//RS 
-//RS     fn canonical_key(&self) -> String {
-//RS         format!(
-//RS             "cardinality{{{}}};cost{{{}}}",
-//RS             self.cardinality.canonical_key(),
-//RS             self.cost.canonical_key()
-//RS         )
-//RS     }
-//RS 
-//RS     fn text(&self) -> String {
-//RS         format!(
-//RS             "cardinality {{{}}}; cost {{{}}}",
-//RS             self.cardinality.text(),
-//RS             self.cost.text()
-//RS         )
-//RS     }
-//RS 
-//RS     fn json(&self) -> String {
-//RS         format!(
-//RS             "{{\"cardinality\":{},\"cost\":{}}}",
-//RS             self.cardinality.json(),
-//RS             self.cost.json()
-//RS         )
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub enum JetTableFactsError {
-//RS     InputFactCount { expected: usize, actual: usize },
-//RS     Estimate(JetTableEstimateError),
-//RS }
-//RS 
-//RS impl From<JetTableEstimateError> for JetTableFactsError {
-//RS     fn from(error: JetTableEstimateError) -> Self {
-//RS         Self::Estimate(error)
-//RS     }
-//RS }
-//RS 
-//RS impl fmt::Display for JetTableFactsError {
-//RS     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-//RS         match self {
-//RS             Self::InputFactCount { expected, actual } => write!(
-//RS                 formatter,
-//RS                 "table node has {actual} input facts; expected {expected}"
-//RS             ),
-//RS             Self::Estimate(error) => error.fmt(formatter),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS impl std::error::Error for JetTableFactsError {}
-//RS 
-//RS /// A callable's identity and checked type shape.  The callable itself lives in
-//RS /// sema/backend code; only this immutable fact crosses the plan boundary.
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub struct JetTableCallable {
-//RS     pub id: String,
-//RS     pub parameter: JetTableTypeId,
-//RS     pub result: JetTableTypeId,
-//RS }
-//RS 
-//RS impl JetTableCallable {
-//RS     pub fn new(
-//RS         id: impl Into<String>,
-//RS         parameter: JetTableTypeId,
-//RS         result: JetTableTypeId,
-//RS     ) -> Self {
-//RS         Self {
-//RS             id: id.into(),
-//RS             parameter,
-//RS             result,
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn validate(&self) -> Result<(), JetTablePlanError> {
-//RS         if self.id.trim().is_empty() {
-//RS             return Err(JetTablePlanError::MissingCallableIdentity);
-//RS         }
-//RS         if self.id.chars().any(char::is_control) {
-//RS             return Err(JetTablePlanError::InvalidCallableIdentity(self.id.clone()));
-//RS         }
-//RS         self.parameter
-//RS             .validate()
-//RS             .map_err(JetTablePlanError::Identity)?;
-//RS         self.result
-//RS             .validate()
-//RS             .map_err(JetTablePlanError::Identity)
-//RS     }
-//RS 
-//RS     fn canonical_key(&self) -> String {
-//RS         format!(
-//RS             "{}:{}:{}",
-//RS             jet_table_escape(&self.id),
-//RS             jet_table_escape(self.parameter.as_str()),
-//RS             jet_table_escape(self.result.as_str())
-//RS         )
-//RS     }
-//RS }
-//RS 
-//RS /// Logical operation vocabulary.  Payloads such as a limit or join kind stay
-//RS /// on the node so this enum remains one canonical operation discriminant.
-//RS #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-//RS pub enum JetTableOperation {
-//RS     Scan,
-//RS     Select,
-//RS     Filter,
-//RS     Map,
-//RS     Sort,
-//RS     Group,
-//RS     Join,
-//RS     Limit,
-//RS }
-//RS 
-//RS impl JetTableOperation {
-//RS     pub const fn as_str(self) -> &'static str {
-//RS         match self {
-//RS             Self::Scan => "scan",
-//RS             Self::Select => "select",
-//RS             Self::Filter => "filter",
-//RS             Self::Map => "map",
-//RS             Self::Sort => "sort",
-//RS             Self::Group => "group",
-//RS             Self::Join => "join",
-//RS             Self::Limit => "limit",
-//RS         }
-//RS     }
-//RS 
-//RS     pub const fn input_arity(self) -> Option<usize> {
-//RS         match self {
-//RS             Self::Scan => Some(0),
-//RS             Self::Join => Some(2),
-//RS             Self::Select
-//RS             | Self::Filter
-//RS             | Self::Map
-//RS             | Self::Sort
-//RS             | Self::Group
-//RS             | Self::Limit => Some(1),
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn default_stream(self) -> JetTableStreamMode {
-//RS         match self {
-//RS             Self::Sort => JetTableStreamMode::Materialized {
-//RS                 reason: "sort requires a complete ordering".to_string(),
-//RS             },
-//RS             Self::Group => JetTableStreamMode::Materialized {
-//RS                 reason: "group requires aggregate state".to_string(),
-//RS             },
-//RS             Self::Join => JetTableStreamMode::Materialized {
-//RS                 reason: "join requires both input sides".to_string(),
-//RS             },
-//RS             Self::Scan | Self::Select | Self::Filter | Self::Map | Self::Limit => {
-//RS                 JetTableStreamMode::Bounded { batch_rows: None }
-//RS             }
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS impl fmt::Display for JetTableOperation {
-//RS     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-//RS         formatter.write_str(self.as_str())
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-//RS pub enum JetTableJoinKind {
-//RS     Inner,
-//RS     Left,
-//RS }
-//RS 
-//RS impl JetTableJoinKind {
-//RS     pub const fn as_str(self) -> &'static str {
-//RS         match self {
-//RS             Self::Inner => "inner",
-//RS             Self::Left => "left",
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS impl fmt::Display for JetTableJoinKind {
-//RS     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-//RS         formatter.write_str(self.as_str())
-//RS     }
-//RS }
-//RS 
-//RS /// Streaming mode is a fact, not an instruction to an adapter to materialize.
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub enum JetTableStreamMode {
-//RS     Bounded { batch_rows: Option<u128> },
-//RS     Materialized { reason: String },
-//RS }
-//RS 
-//RS impl JetTableStreamMode {
-//RS     pub fn bounded(batch_rows: Option<u128>) -> Result<Self, JetTableStreamError> {
-//RS         if batch_rows == Some(0) {
-//RS             return Err(JetTableStreamError::ZeroBatchRows);
-//RS         }
-//RS         Ok(Self::Bounded { batch_rows })
-//RS     }
-//RS 
-//RS     pub fn materialized(reason: impl Into<String>) -> Result<Self, JetTableStreamError> {
-//RS         let reason = reason.into();
-//RS         if reason.trim().is_empty() {
-//RS             return Err(JetTableStreamError::MissingMaterializationReason);
-//RS         }
-//RS         Ok(Self::Materialized { reason })
-//RS     }
-//RS 
-//RS     pub const fn is_streaming(&self) -> bool {
-//RS         matches!(self, Self::Bounded { .. })
-//RS     }
-//RS 
-//RS     pub fn canonical_key(&self) -> String {
-//RS         match self {
-//RS             Self::Bounded { batch_rows: Some(rows) } => format!("bounded:{rows}"),
-//RS             Self::Bounded { batch_rows: None } => "bounded:host".to_string(),
-//RS             Self::Materialized { reason } => {
-//RS                 format!("materialized:{}", jet_table_escape(reason))
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn text(&self) -> String {
-//RS         match self {
-//RS             Self::Bounded { batch_rows: Some(rows) } => format!("bounded(batch_rows={rows})"),
-//RS             Self::Bounded { batch_rows: None } => "bounded(batch_rows=host)".to_string(),
-//RS             Self::Materialized { reason } => {
-//RS                 format!("materialized(reason={})", jet_table_escape(reason))
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn validate(&self) -> Result<(), JetTableStreamError> {
-//RS         match self {
-//RS             Self::Bounded { batch_rows: Some(0) } => Err(JetTableStreamError::ZeroBatchRows),
-//RS             Self::Bounded { .. } => Ok(()),
-//RS             Self::Materialized { reason } if reason.trim().is_empty() => {
-//RS                 Err(JetTableStreamError::MissingMaterializationReason)
-//RS             }
-//RS             Self::Materialized { .. } => Ok(()),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub enum JetTableStreamError {
-//RS     ZeroBatchRows,
-//RS     MissingMaterializationReason,
-//RS }
-//RS 
-//RS impl fmt::Display for JetTableStreamError {
-//RS     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-//RS         match self {
-//RS             Self::ZeroBatchRows => formatter.write_str("table batch row bound must be greater than zero"),
-//RS             Self::MissingMaterializationReason => {
-//RS                 formatter.write_str("table materialization needs a reason")
-//RS             }
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS impl std::error::Error for JetTableStreamError {}
-//RS 
-//RS /// One logical plan node.  `facts` and all fields are metadata; no callback,
-//RS /// table row, reader, or physical operator is stored here.
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub struct JetTableNode {
-//RS     pub id: JetTableNodeId,
-//RS     pub operation: JetTableOperation,
-//RS     pub inputs: Vec<JetTableNodeId>,
-//RS     pub source: Option<JetTableSourceId>,
-//RS     pub schema: JetTableSchema,
-//RS     pub callable: Option<JetTableCallable>,
-//RS     pub stream: JetTableStreamMode,
-//RS     pub join_kind: Option<JetTableJoinKind>,
-//RS     pub join_keys: Vec<(JetTableColumnId, JetTableColumnId)>,
-//RS     pub limit: Option<u128>,
-//RS     pub selected_columns: Option<Vec<JetTableColumnId>>,
-//RS     pub facts: JetTableFacts,
-//RS     pub note: String,
-//RS }
-//RS 
-//RS impl JetTableNode {
-//RS     pub fn new(
-//RS         id: JetTableNodeId,
-//RS         operation: JetTableOperation,
-//RS         inputs: Vec<JetTableNodeId>,
-//RS         schema: JetTableSchema,
-//RS     ) -> Self {
-//RS         let stream = operation.default_stream();
-//RS         let facts = JetTableFacts::unknown(inputs.len());
-//RS         Self {
-//RS             id,
-//RS             operation,
-//RS             inputs,
-//RS             source: None,
-//RS             schema,
-//RS             callable: None,
-//RS             stream,
-//RS             join_kind: None,
-//RS             join_keys: Vec::new(),
-//RS             limit: None,
-//RS             selected_columns: None,
-//RS             facts,
-//RS             note: String::new(),
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn scan(
-//RS         id: JetTableNodeId,
-//RS         source: JetTableSourceId,
-//RS         schema: JetTableSchema,
-//RS         facts: JetTableFacts,
-//RS     ) -> Self {
-//RS         let mut node = Self::new(id, JetTableOperation::Scan, Vec::new(), schema);
-//RS         node.source = Some(source);
-//RS         node.facts = facts;
-//RS         node
-//RS     }
-//RS 
-//RS     pub fn with_stream(mut self, stream: JetTableStreamMode) -> Self {
-//RS         self.stream = stream;
-//RS         self
-//RS     }
-//RS 
-//RS     pub fn with_join_kind(mut self, kind: JetTableJoinKind) -> Self {
-//RS         self.join_kind = Some(kind);
-//RS         self
-//RS     }
-//RS 
-//RS     pub fn with_join_keys(
-//RS         mut self,
-//RS         keys: Vec<(JetTableColumnId, JetTableColumnId)>,
-//RS     ) -> Self {
-//RS         self.join_keys = keys;
-//RS         self
-//RS     }
-//RS 
-//RS     pub fn with_limit(mut self, limit: u128) -> Self {
-//RS         self.limit = Some(limit);
-//RS         self
-//RS     }
-//RS 
-//RS     pub fn with_selected_columns(mut self, columns: Vec<JetTableColumnId>) -> Self {
-//RS         self.selected_columns = Some(columns);
-//RS         self
-//RS     }
-//RS 
-//RS     pub fn with_facts(mut self, facts: JetTableFacts) -> Self {
-//RS         self.facts = facts;
-//RS         self
-//RS     }
-//RS 
-//RS     fn operation_key(&self) -> String {
-//RS         let join = self
-//RS             .join_kind
-//RS             .map(|kind| kind.as_str().to_string())
-//RS             .unwrap_or_else(|| "none".to_string());
-//RS         let keys = self
-//RS             .join_keys
-//RS             .iter()
-//RS             .map(|(left, right)| {
-//RS                 format!(
-//RS                     "{}~{}",
-//RS                     jet_table_escape(left.as_str()),
-//RS                     jet_table_escape(right.as_str())
-//RS                 )
-//RS             })
-//RS             .collect::<Vec<_>>()
-//RS             .join(",");
-//RS         let limit = self
-//RS             .limit
-//RS             .map(|limit| limit.to_string())
-//RS             .unwrap_or_else(|| "none".to_string());
-//RS         let selected = self
-//RS             .selected_columns
-//RS             .as_ref()
-//RS             .map(|columns| {
-//RS                 columns
-//RS                     .iter()
-//RS                     .map(|column| jet_table_escape(column.as_str()))
-//RS                     .collect::<Vec<_>>()
-//RS                     .join(",")
-//RS             })
-//RS             .unwrap_or_else(|| "none".to_string());
-//RS         format!(
-//RS             "{}:join={}:keys=[{}]:limit={}:select=[{}]",
-//RS             self.operation.as_str(), join, keys, limit, selected
-//RS         )
-//RS     }
-//RS 
-//RS     fn canonical_key(&self) -> String {
-//RS         format!(
-//RS             "id={}:op={}:inputs=[{}]:source={}:{}:callable={}:stream={}:facts={}:note={}",
-//RS             self.id.index(),
-//RS             self.operation_key(),
-//RS             self.inputs
-//RS                 .iter()
-//RS                 .map(|input| input.index().to_string())
-//RS                 .collect::<Vec<_>>()
-//RS                 .join(","),
-//RS             self.source
-//RS                 .as_ref()
-//RS                 .map(|source| jet_table_escape(source.as_str()))
-//RS                 .unwrap_or_else(|| "none".to_string()),
-//RS             self.schema.canonical_key(),
-//RS             self.callable
-//RS                 .as_ref()
-//RS                 .map(JetTableCallable::canonical_key)
-//RS                 .unwrap_or_else(|| "none".to_string()),
-//RS             self.stream.canonical_key(),
-//RS             self.facts.canonical_key(),
-//RS             jet_table_escape(&self.note)
-//RS         )
-//RS     }
-//RS 
-//RS     fn text(&self) -> String {
-//RS         format!(
-//RS             "node {} op={} inputs=[{}] source={} schema={} callable={} stream={} {} facts={} note={}",
-//RS             self.id.index(),
-//RS             self.operation_key(),
-//RS             self.inputs
-//RS                 .iter()
-//RS                 .map(|input| input.index().to_string())
-//RS                 .collect::<Vec<_>>()
-//RS                 .join(","),
-//RS             self.source
-//RS                 .as_ref()
-//RS                 .map(|source| jet_table_escape(source.as_str()))
-//RS                 .unwrap_or_else(|| "none".to_string()),
-//RS             self.schema.canonical_key(),
-//RS             self.callable
-//RS                 .as_ref()
-//RS                 .map(JetTableCallable::canonical_key)
-//RS                 .unwrap_or_else(|| "none".to_string()),
-//RS             self.stream.text(),
-//RS             if self.stream.is_streaming() {
-//RS                 "fallback=none"
-//RS             } else {
-//RS                 "fallback=materialized"
-//RS             },
-//RS             self.facts.text(),
-//RS             jet_table_escape(&self.note)
-//RS         )
-//RS     }
-//RS 
-//RS     fn json(&self) -> String {
-//RS         let inputs = self
-//RS             .inputs
-//RS             .iter()
-//RS             .map(|input| input.index().to_string())
-//RS             .collect::<Vec<_>>()
-//RS             .join(",");
-//RS         let source = self
-//RS             .source
-//RS             .as_ref()
-//RS             .map(|source| jet_table_json_string(source.as_str()))
-//RS             .unwrap_or_else(|| "null".to_string());
-//RS         let callable = self
-//RS             .callable
-//RS             .as_ref()
-//RS             .map(|callable| {
-//RS                 format!(
-//RS                     "{{\"id\":{},\"parameter\":{},\"result\":{}}}",
-//RS                     jet_table_json_string(&callable.id),
-//RS                     jet_table_json_string(callable.parameter.as_str()),
-//RS                     jet_table_json_string(callable.result.as_str())
-//RS                 )
-//RS             })
-//RS             .unwrap_or_else(|| "null".to_string());
-//RS         let selected = self
-//RS             .selected_columns
-//RS             .as_ref()
-//RS             .map(|columns| {
-//RS                 format!(
-//RS                     "[{}]",
-//RS                     columns
-//RS                         .iter()
-//RS                         .map(|column| jet_table_json_string(column.as_str()))
-//RS                         .collect::<Vec<_>>()
-//RS                         .join(",")
-//RS                 )
-//RS             })
-//RS             .unwrap_or_else(|| "null".to_string());
-//RS         let join_kind = self
-//RS             .join_kind
-//RS             .map(|kind| jet_table_json_string(kind.as_str()))
-//RS             .unwrap_or_else(|| "null".to_string());
-//RS         let join_keys = self
-//RS             .join_keys
-//RS             .iter()
-//RS             .map(|(left, right)| {
-//RS                 format!(
-//RS                     "[{},{}]",
-//RS                     jet_table_json_string(left.as_str()),
-//RS                     jet_table_json_string(right.as_str())
-//RS                 )
-//RS             })
-//RS             .collect::<Vec<_>>()
-//RS             .join(",");
-//RS         let limit = self
-//RS             .limit
-//RS             .map(|limit| limit.to_string())
-//RS             .unwrap_or_else(|| "null".to_string());
-//RS         format!(
-//RS             "{{\"id\":{},\"operation\":{},\"inputs\":[{}],\"source\":{},\"schema\":{},\"callable\":{},\"stream\":{},\"join_kind\":{},\"join_keys\":[{}],\"limit\":{},\"selected_columns\":{},\"facts\":{},\"note\":{}}}",
-//RS             self.id.index(),
-//RS             jet_table_json_string(self.operation.as_str()),
-//RS             inputs,
-//RS             source,
-//RS             jet_table_json_string(&self.schema.canonical_key()),
-//RS             callable,
-//RS             jet_table_json_string(&self.stream.text()),
-//RS             join_kind,
-//RS             join_keys,
-//RS             limit,
-//RS             selected,
-//RS             self.facts.json(),
-//RS             jet_table_json_string(&self.note)
-//RS         )
-//RS     }
-//RS }
-//RS 
-//RS /// Source metadata is the only source-side fact held by this kernel.  A source
-//RS /// adapter may fill exact rows/width, but it never passes its storage handle.
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub struct JetTableSource {
-//RS     pub id: JetTableSourceId,
-//RS     pub schema: JetTableSchema,
-//RS     pub rows: JetTableEstimate<u128>,
-//RS     pub row_width_bytes: JetTableEstimate<u128>,
-//RS }
-//RS 
-//RS impl JetTableSource {
-//RS     pub fn new(id: impl Into<JetTableSourceId>, schema: JetTableSchema) -> Self {
-//RS         Self {
-//RS             id: id.into(),
-//RS             schema,
-//RS             rows: JetTableEstimate::unavailable("source cardinality unavailable"),
-//RS             row_width_bytes: JetTableEstimate::unavailable("source row width unavailable"),
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn with_rows(mut self, rows: u128) -> Self {
-//RS         self.rows = JetTableEstimate::exact(rows);
-//RS         self
-//RS     }
-//RS 
-//RS     pub fn validate(&self) -> Result<(), JetTablePlanError> {
-//RS         self.id.validate().map_err(JetTablePlanError::Identity)?;
-//RS         self.schema
-//RS             .validate()
-//RS             .map_err(JetTablePlanError::Schema)?;
-//RS         self.rows.validate().map_err(JetTablePlanError::Estimate)?;
-//RS         self.row_width_bytes
-//RS             .validate()
-//RS             .map_err(JetTablePlanError::Estimate)
-//RS     }
-//RS 
-//RS     fn canonical_key(&self) -> String {
-//RS         format!(
-//RS             "source={}:{}:rows={}:width={}",
-//RS             jet_table_escape(self.id.as_str()),
-//RS             self.schema.canonical_key(),
-//RS             self.rows.canonical_key(),
-//RS             self.row_width_bytes.canonical_key()
-//RS         )
-//RS     }
-//RS }
-//RS /// Build the canonical one-step query plan shared by native and JIT list
-//RS /// constructors. The descriptor order is the checked declaration order; the
-//RS /// helper deliberately owns all query identity derivation so adapters cannot
-//RS /// create incompatible schema, column, source, or plan identities.
-//RS pub(crate) fn jet_table_plan_from_descriptors(
-//RS     row_type: &str,
-//RS     columns: &[String],
-//RS     rows: u128,
-//RS ) -> Result<JetTablePlan, String> {
-//RS     let mut pairs = columns.chunks_exact(2);
-//RS     let columns = pairs
-//RS         .by_ref()
-//RS         .map(|pair| {
-//RS             JetTableColumn::new(
-//RS                 pair[0].clone(),
-//RS                 JetTableTypeId::new(pair[1].clone()),
-//RS             )
-//RS         })
-//RS         .collect();
-//RS     if !pairs.remainder().is_empty() {
-//RS         return Err("table column metadata must contain alternating name/type pairs".to_string());
-//RS     }
-//RS     let row_type_id = JetTableTypeId::new(row_type);
-//RS     let schema = JetTableSchema::new(row_type_id, columns);
-//RS     let source = JetTableSource::new(
-//RS         format!("data.query.source::<{row_type}>"),
-//RS         schema,
-//RS     )
-//RS     .with_rows(rows);
-//RS     Ok(JetTablePlan::from_source(
-//RS         format!("data.query::<{row_type}>"),
-//RS         source,
-//RS     ))
-//RS }
-//RS 
-//RS fn jet_table_scan_facts(source: &JetTableSource) -> JetTableFacts {
-//RS     let output_bytes = jet_table_estimate_mul(
-//RS         &source.rows,
-//RS         &source.row_width_bytes,
-//RS         "source output bytes unavailable",
-//RS     );
-//RS     JetTableFacts {
-//RS         cardinality: JetTableCardinalityFacts {
-//RS             input_rows: Vec::new(),
-//RS             output_rows: source.rows.clone(),
-//RS             rows_read: source.rows.clone(),
-//RS             rows_written: JetTableEstimate::exact(0),
-//RS         },
-//RS         cost: JetTableCostFacts {
-//RS             work_units: source.rows.clone(),
-//RS             memory_bytes: JetTableEstimate::exact(0),
-//RS             output_bytes,
-//RS         },
-//RS     }
-//RS }
-//RS 
-//RS fn jet_table_derive_facts(
-//RS     operation: JetTableOperation,
-//RS     inputs: &[&JetTableNode],
-//RS     limit: Option<u128>,
-//RS ) -> JetTableFacts {
-//RS     let input_rows = inputs
-//RS         .iter()
-//RS         .map(|node| node.facts.cardinality.output_rows.clone())
-//RS         .collect::<Vec<_>>();
-//RS     let unknown = |reason: &str| JetTableEstimate::unavailable(reason);
-//RS     let (output_rows, rows_read, rows_written, work_units, memory_bytes) = match operation {
-//RS         JetTableOperation::Scan => (
-//RS             unknown("scan facts require a source"),
-//RS             unknown("scan facts require a source"),
-//RS             JetTableEstimate::exact(0),
-//RS             unknown("scan facts require a source"),
-//RS             JetTableEstimate::exact(0),
-//RS         ),
-//RS         JetTableOperation::Select | JetTableOperation::Map => {
-//RS             let input = input_rows
-//RS                 .first()
-//RS                 .cloned()
-//RS                 .unwrap_or_else(|| unknown("unary input cardinality unavailable"));
-//RS             (
-//RS                 input.clone(),
-//RS                 input.clone(),
-//RS                 input.clone(),
-//RS                 input,
-//RS                 JetTableEstimate::exact(0),
-//RS             )
-//RS         }
-//RS         JetTableOperation::Filter => {
-//RS             let input = input_rows
-//RS                 .first()
-//RS                 .cloned()
-//RS                 .unwrap_or_else(|| unknown("filter input cardinality unavailable"));
-//RS             (
-//RS                 unknown("filter selectivity unavailable"),
-//RS                 input.clone(),
-//RS                 unknown("filter output cardinality unavailable"),
-//RS                 input,
-//RS                 JetTableEstimate::exact(0),
-//RS             )
-//RS         }
-//RS         JetTableOperation::Sort => {
-//RS             let input = input_rows
-//RS                 .first()
-//RS                 .cloned()
-//RS                 .unwrap_or_else(|| unknown("sort input cardinality unavailable"));
-//RS             (
-//RS                 input.clone(),
-//RS                 input.clone(),
-//RS                 input.clone(),
-//RS                 unknown("sort comparison cost unavailable"),
-//RS                 unknown("sort working memory unavailable"),
-//RS             )
-//RS         }
-//RS         JetTableOperation::Group => {
-//RS             let input = input_rows
-//RS                 .first()
-//RS                 .cloned()
-//RS                 .unwrap_or_else(|| unknown("group input cardinality unavailable"));
-//RS             (
-//RS                 unknown("group cardinality unavailable"),
-//RS                 input,
-//RS                 unknown("group output cardinality unavailable"),
-//RS                 unknown("group aggregation cost unavailable"),
-//RS                 unknown("group working memory unavailable"),
-//RS             )
-//RS         }
-//RS         JetTableOperation::Join => {
-//RS             let rows_read = match (input_rows.first(), input_rows.get(1)) {
-//RS                 (Some(left), Some(right)) => {
-//RS                     jet_table_estimate_add(left, right, "join input cardinality unavailable")
-//RS                 }
-//RS                 _ => unknown("join input cardinality unavailable"),
-//RS             };
-//RS             (
-//RS                 unknown("join cardinality unavailable"),
-//RS                 rows_read,
-//RS                 unknown("join output cardinality unavailable"),
-//RS                 unknown("join matching cost unavailable"),
-//RS                 unknown("join working memory unavailable"),
-//RS             )
-//RS         }
-//RS         JetTableOperation::Limit => {
-//RS             let input = input_rows
-//RS                 .first()
-//RS                 .cloned()
-//RS                 .unwrap_or_else(|| unknown("limit input cardinality unavailable"));
-//RS             let limit = limit.unwrap_or(0);
-//RS             let output = jet_table_estimate_min(
-//RS                 &input,
-//RS                 limit,
-//RS                 "limit output cardinality unavailable",
-//RS             );
-//RS             (
-//RS                 output.clone(),
-//RS                 output.clone(),
-//RS                 output.clone(),
-//RS                 output,
-//RS                 JetTableEstimate::exact(0),
-//RS             )
-//RS         }
-//RS     };
-//RS     JetTableFacts {
-//RS         cardinality: JetTableCardinalityFacts {
-//RS             input_rows,
-//RS             output_rows,
-//RS             rows_read,
-//RS             rows_written,
-//RS         },
-//RS         cost: JetTableCostFacts {
-//RS             work_units,
-//RS             memory_bytes,
-//RS             output_bytes: unknown("output bytes unavailable without a row width"),
-//RS         },
-//RS     }
-//RS }
-//RS 
-//RS /// Plan validation errors are structured so a caller can report the operation,
-//RS /// node, input, schema, or identity that failed without parsing display text.
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub enum JetTablePlanError {
-//RS     Identity(JetTableIdentityError),
-//RS     Schema(JetTableSchemaError),
-//RS     Estimate(JetTableEstimateError),
-//RS     Facts(JetTableFactsError),
-//RS     Stream(JetTableStreamError),
-//RS     Batch(JetTableBatchError),
-//RS     EmptyPlan,
-//RS     MissingScan,
-//RS     InvalidOutput(JetTableNodeId),
-//RS     NodeIdMismatch { expected: usize, actual: JetTableNodeId },
-//RS     UnknownInput { node: JetTableNodeId, input: JetTableNodeId },
-//RS     InputNotEarlier { node: JetTableNodeId, input: JetTableNodeId },
-//RS     Cycle(JetTableNodeId),
-//RS     WrongInputArity {
-//RS         node: JetTableNodeId,
-//RS         operation: JetTableOperation,
-//RS         expected: usize,
-//RS         actual: usize,
-//RS     },
-//RS     MissingSource(JetTableNodeId),
-//RS     UnexpectedSource(JetTableNodeId),
-//RS     UnexpectedCallable(JetTableNodeId),
-//RS     UnexpectedJoinMetadata(JetTableNodeId),
-//RS     SourceMismatch,
-//RS     SchemaMismatch {
-//RS         node: JetTableNodeId,
-//RS         input: JetTableNodeId,
-//RS     },
-//RS     SelectionSchemaMismatch(JetTableNodeId),
-//RS     MissingCallable(JetTableNodeId),
-//RS     MissingCallableIdentity,
-//RS     InvalidCallableIdentity(String),
-//RS     CallableParameterMismatch {
-//RS         node: JetTableNodeId,
-//RS         expected: JetTableTypeId,
-//RS         actual: JetTableTypeId,
-//RS     },
-//RS     CallableResultMismatch {
-//RS         node: JetTableNodeId,
-//RS         expected: JetTableTypeId,
-//RS         actual: JetTableTypeId,
-//RS     },
-//RS     MissingJoinKind(JetTableNodeId),
-//RS     InvalidJoinKey {
-//RS         node: JetTableNodeId,
-//RS         left: JetTableColumnId,
-//RS         right: JetTableColumnId,
-//RS     },
-//RS     MissingLimit(JetTableNodeId),
-//RS     UnexpectedLimit(JetTableNodeId),
-//RS     UnexpectedSelection(JetTableNodeId),
-//RS     UnknownSelectedColumn {
-//RS         node: JetTableNodeId,
-//RS         column: JetTableColumnId,
-//RS     },
-//RS     InvalidNote(JetTableNodeId),
-//RS     NotStreaming(JetTableNodeId),
-//RS }
-//RS impl fmt::Display for JetTablePlanError {
-//RS     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-//RS         match self {
-//RS             Self::Identity(error) => error.fmt(formatter),
-//RS             Self::Schema(error) => error.fmt(formatter),
-//RS             Self::Estimate(error) => error.fmt(formatter),
-//RS             Self::Facts(error) => error.fmt(formatter),
-//RS             Self::Stream(error) => error.fmt(formatter),
-//RS             Self::Batch(error) => error.fmt(formatter),
-//RS             Self::EmptyPlan => formatter.write_str("table plan has no nodes"),
-//RS             Self::MissingScan => formatter.write_str("table plan must start with a source scan"),
-//RS             Self::InvalidOutput(id) => {
-//RS                 write!(formatter, "table plan output node {} is missing", id.index())
-//RS             }
-//RS             Self::NodeIdMismatch { expected, actual } => write!(
-//RS                 formatter,
-//RS                 "table node id {} does not match graph position {expected}",
-//RS                 actual.index()
-//RS             ),
-//RS             Self::UnknownInput { node, input } => write!(
-//RS                 formatter,
-//RS                 "table node {} references unknown input {}",
-//RS                 node.index(),
-//RS                 input.index()
-//RS             ),
-//RS             Self::InputNotEarlier { node, input } => write!(
-//RS                 formatter,
-//RS                 "table node {} references non-previous input {}",
-//RS                 node.index(),
-//RS                 input.index()
-//RS             ),
-//RS             Self::Cycle(node) => {
-//RS                 write!(formatter, "table plan contains a cycle at node {}", node.index())
-//RS             }
-//RS             Self::WrongInputArity {
-//RS                 node,
-//RS                 operation,
-//RS                 expected,
-//RS                 actual,
-//RS             } => write!(
-//RS                 formatter,
-//RS                 "table node {} operation `{operation}` needs {expected} inputs, got {actual}",
-//RS                 node.index()
-//RS             ),
-//RS             Self::MissingSource(node) => {
-//RS                 write!(formatter, "table scan node {} has no source", node.index())
-//RS             }
-//RS             Self::UnexpectedSource(node) => {
-//RS                 write!(formatter, "non-scan table node {} carries a source", node.index())
-//RS             }
-//RS             Self::UnexpectedCallable(node) => {
-//RS                 write!(formatter, "non-transform table node {} carries a callable", node.index())
-//RS             }
-//RS             Self::UnexpectedJoinMetadata(node) => {
-//RS                 write!(formatter, "non-join table node {} carries join metadata", node.index())
-//RS             }
-//RS             Self::SourceMismatch => {
-//RS                 formatter.write_str("table scan source or schema differs from plan source")
-//RS             }
-//RS             Self::SchemaMismatch { node, input } => write!(
-//RS                 formatter,
-//RS                 "table node {} schema does not preserve input node {} schema",
-//RS                 node.index(),
-//RS                 input.index()
-//RS             ),
-//RS             Self::SelectionSchemaMismatch(node) => write!(
-//RS                 formatter,
-//RS                 "table select node {} schema does not match selected columns",
-//RS                 node.index()
-//RS             ),
-//RS             Self::MissingCallable(node) => {
-//RS                 write!(formatter, "table node {} needs a checked callable", node.index())
-//RS             }
-//RS             Self::MissingCallableIdentity => {
-//RS                 formatter.write_str("table callable identity must not be empty")
-//RS             }
-//RS             Self::InvalidCallableIdentity(id) => {
-//RS                 write!(formatter, "table callable identity {:?} contains a control character", id)
-//RS             }
-//RS             Self::CallableParameterMismatch {
-//RS                 node,
-//RS                 expected,
-//RS                 actual,
-//RS             } => write!(
-//RS                 formatter,
-//RS                 "table node {} callable takes {}, expected {}",
-//RS                 node.index(),
-//RS                 actual,
-//RS                 expected
-//RS             ),
-//RS             Self::CallableResultMismatch {
-//RS                 node,
-//RS                 expected,
-//RS                 actual,
-//RS             } => write!(
-//RS                 formatter,
-//RS                 "table node {} callable returns {}, expected {}",
-//RS                 node.index(),
-//RS                 actual,
-//RS                 expected
-//RS             ),
-//RS             Self::MissingJoinKind(node) => {
-//RS                 write!(formatter, "table join node {} has no join kind", node.index())
-//RS             }
-//RS             Self::InvalidJoinKey { node, left, right } => write!(
-//RS                 formatter,
-//RS                 "table join node {} has incompatible key pair {} / {}",
-//RS                 node.index(),
-//RS                 left,
-//RS                 right
-//RS             ),
-//RS             Self::MissingLimit(node) => {
-//RS                 write!(formatter, "table limit node {} has no row bound", node.index())
-//RS             }
-//RS             Self::UnexpectedLimit(node) => {
-//RS                 write!(formatter, "non-limit table node {} carries a row bound", node.index())
-//RS             }
-//RS             Self::UnexpectedSelection(node) => {
-//RS                 write!(formatter, "non-select table node {} carries selected columns", node.index())
-//RS             }
-//RS             Self::UnknownSelectedColumn { node, column } => write!(
-//RS                 formatter,
-//RS                 "table select node {} references unknown column {}",
-//RS                 node.index(),
-//RS                 column
-//RS             ),
-//RS             Self::InvalidNote(node) => {
-//RS                 write!(formatter, "table node {} note contains a control character", node.index())
-//RS             }
-//RS             Self::NotStreaming(node) => {
-//RS                 write!(formatter, "table node {} is explicitly materialized", node.index())
-//RS             }
-//RS         }
-//RS     }
-//RS }
-//RS impl std::error::Error for JetTablePlanError {}
-//RS 
-//RS /// A typed lazy plan.  The only owned collection is the bounded metadata graph
-//RS /// itself; rows remain with source/table adapters.
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub struct JetTablePlan {
-//RS     pub id: JetTablePlanId,
-//RS     pub source: JetTableSource,
-//RS     pub nodes: Vec<JetTableNode>,
-//RS     pub output: JetTableNodeId,
-//RS }
-//RS 
-//RS impl JetTablePlan {
-//RS     pub fn new(
-//RS         id: impl Into<JetTablePlanId>,
-//RS         source: impl Into<JetTableSourceId>,
-//RS         schema: JetTableSchema,
-//RS     ) -> Self {
-//RS         Self::from_source(id, JetTableSource::new(source, schema))
-//RS     }
-//RS 
-//RS     pub fn from_source(id: impl Into<JetTablePlanId>, source: JetTableSource) -> Self {
-//RS         let id = id.into();
-//RS         let scan = JetTableNode::scan(
-//RS             JetTableNodeId::new(0),
-//RS             source.id.clone(),
-//RS             source.schema.clone(),
-//RS             jet_table_scan_facts(&source),
-//RS         );
-//RS         Self {
-//RS             id,
-//RS             source,
-//RS             nodes: vec![scan],
-//RS             output: JetTableNodeId::new(0),
-//RS         }
-//RS     }
-//RS     /// Append a second source scan without changing the current output node.
-//RS     ///
-//RS     /// Join plans use this to retain distinct left/right scan identities. The
-//RS     /// source schema and bounded cardinality facts remain on the scan node;
-//RS     /// rows and source handles stay with the adapter.
-//RS     pub fn append_source(
-//RS         &mut self,
-//RS         source: JetTableSource,
-//RS     ) -> Result<JetTableNodeId, JetTablePlanError> {
-//RS         self.validate()?;
-//RS         let id = JetTableNodeId::new(self.nodes.len());
-//RS         let node = JetTableNode::scan(
-//RS             id,
-//RS             source.id.clone(),
-//RS             source.schema.clone(),
-//RS             jet_table_scan_facts(&source),
-//RS         );
-//RS         let output = self.output;
-//RS         let node_id = self.append_node(node)?;
-//RS         self.output = output;
-//RS         Ok(node_id)
-//RS     }
-//RS 
-//RS 
-//RS     /// Construct a potentially invalid graph for a parser/MIR boundary test;
-//RS     /// callers must call `validate` before inspection or execution.
-//RS     pub fn from_parts(
-//RS         id: impl Into<JetTablePlanId>,
-//RS         source: JetTableSource,
-//RS         nodes: Vec<JetTableNode>,
-//RS         output: JetTableNodeId,
-//RS     ) -> Self {
-//RS         Self {
-//RS             id: id.into(),
-//RS             source,
-//RS             nodes,
-//RS             output,
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn output_node(&self) -> Option<&JetTableNode> {
-//RS         self.nodes.get(self.output.index())
-//RS     }
-//RS 
-//RS     pub fn output_schema(&self) -> Option<&JetTableSchema> {
-//RS         self.output_node().map(|node| &node.schema)
-//RS     }
-//RS 
-//RS     pub fn append_node(&mut self, node: JetTableNode) -> Result<JetTableNodeId, JetTablePlanError> {
-//RS         let expected = self.nodes.len();
-//RS         if node.id.index() != expected {
-//RS             return Err(JetTablePlanError::NodeIdMismatch {
-//RS                 expected,
-//RS                 actual: node.id,
-//RS             });
-//RS         }
-//RS         let id = node.id;
-//RS         let old_output = self.output;
-//RS         self.nodes.push(node);
-//RS         self.output = id;
-//RS         if let Err(error) = self.validate() {
-//RS             self.nodes.pop();
-//RS             self.output = old_output;
-//RS             return Err(error);
-//RS         }
-//RS         Ok(id)
-//RS     }
-//RS 
-//RS     pub fn append(
-//RS         &mut self,
-//RS         operation: JetTableOperation,
-//RS         inputs: Vec<JetTableNodeId>,
-//RS         schema: JetTableSchema,
-//RS         callable: Option<JetTableCallable>,
-//RS     ) -> Result<JetTableNodeId, JetTablePlanError> {
-//RS         let id = JetTableNodeId::new(self.nodes.len());
-//RS         let mut node = JetTableNode::new(id, operation, inputs, schema);
-//RS         node.callable = callable;
-//RS         if operation != JetTableOperation::Scan {
-//RS             let input_nodes = node
-//RS                 .inputs
-//RS                 .iter()
-//RS                 .filter_map(|input| self.nodes.get(input.index()))
-//RS                 .collect::<Vec<_>>();
-//RS             if input_nodes.len() == node.inputs.len() {
-//RS                 node.facts = jet_table_derive_facts(operation, &input_nodes, node.limit);
-//RS             }
-//RS         }
-//RS         self.append_node(node)
-//RS     }
-//RS 
-//RS     pub fn append_unary(
-//RS         &mut self,
-//RS         operation: JetTableOperation,
-//RS         schema: JetTableSchema,
-//RS         callable: Option<JetTableCallable>,
-//RS     ) -> Result<JetTableNodeId, JetTablePlanError> {
-//RS         let input = self.output;
-//RS         self.append(operation, vec![input], schema, callable)
-//RS     }
-//RS 
-// END-PORT-PENDING 0150 crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:1-1804
+use std.fmt.[Display, Formatter]
+use jet_foundation.PreludeDataFlow
+use core.data.runtime.kernel_lazy_table_plan_02.JetTableBatchError
+// D-DATAFLOW1: backend-neutral facts only; no rows, handles or query operators.
+// Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:26
+pub const JET_LAZY_TABLE_PLAN_SCHEMA_VERSION: U32 = 1
+// Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:32
+#Derive(Clone, Debug, Eq, PartialEq)
+#Error
+pub struct JetTableIdentityError { pub kind: String, pub value: String, pub reason: String }
+impl JetTableIdentityError {
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:39
+    fn empty(kind: String, value: String) -> JetTableIdentityError {
+        JetTableIdentityError{kind, value: ^value, reason: "must not be empty"}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:47
+    fn control(kind: String, value: String) -> JetTableIdentityError {
+        JetTableIdentityError{kind, value: ^value, reason: "must not contain control characters"}
+    }
+}
+impl Display for JetTableIdentityError {
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:57
+    fn fmt(self: JetTableIdentityError, formatter: &Formatter) -> () std.fmt.Error! {
+        formatter.write_fmt("table {self.kind} identity {self.value.debug()} {self.reason}")
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:68
+fn jet_table_validate_identity(value: String, kind: String) -> () JetTableIdentityError! {
+    trimmed := value.trim() // #4303
+    if trimmed.is_empty() -> return Err(JetTableIdentityError.empty(kind, value.to_string()))
+    if value.chars().any((c) -> c.is_control()) -> return Err(JetTableIdentityError.control(kind, value.to_string()))
+    Ok(())
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:83 (macro, plan expansion135)
+#Derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)
+pub struct JetTablePlanId { value: String }
+impl JetTablePlanId {
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:87
+    pub fn new<V: Into<String>>(value: V) -> JetTablePlanId { JetTablePlanId{value: value.into()} }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:91
+    pub fn try_new<V: Into<String>>(value: V) -> JetTablePlanId JetTableIdentityError! {
+        text :: value.into()
+        _ :: jet_table_validate_identity(text, "plan") ?? return Err(^err)
+        Ok(JetTablePlanId{value: ^text})
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:97
+    pub fn from_name<V: Into<String>>(value: V) -> JetTablePlanId { JetTablePlanId.new(^value) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:101
+    pub fn as_str(self: JetTablePlanId) -> String { self.value }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:105
+    pub fn into_string(self: ^JetTablePlanId) -> String { ^self.value }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:109
+    pub fn validate(self: JetTablePlanId) -> () JetTableIdentityError! { jet_table_validate_identity(self.value, "plan") }
+}
+impl From<String> for JetTablePlanId {
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:115
+    fn from(value: String) -> JetTablePlanId { JetTablePlanId.new(value) }
+}
+impl From<^String> for JetTablePlanId {
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:121
+    fn from(value: ^String) -> JetTablePlanId { JetTablePlanId.new(^value) }
+}
+impl Display for JetTablePlanId {
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:127
+    fn fmt(self: JetTablePlanId, formatter: &Formatter) -> () std.fmt.Error! { formatter.write_str(self.value) }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:83 (schema expansion136)
+#Derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)
+pub struct JetTableSchemaId { value: String }
+impl JetTableSchemaId {
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:87
+    pub fn new<V: Into<String>>(value: V) -> JetTableSchemaId { JetTableSchemaId{value: value.into()} }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:91
+    pub fn try_new<V: Into<String>>(value: V) -> JetTableSchemaId JetTableIdentityError! {
+        text :: value.into()
+        _ :: jet_table_validate_identity(text, "schema") ?? return Err(^err)
+        Ok(JetTableSchemaId{value: ^text})
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:97
+    pub fn from_name<V: Into<String>>(value: V) -> JetTableSchemaId { JetTableSchemaId.new(^value) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:101
+    pub fn as_str(self: JetTableSchemaId) -> String { self.value }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:105
+    pub fn into_string(self: ^JetTableSchemaId) -> String { ^self.value }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:109
+    pub fn validate(self: JetTableSchemaId) -> () JetTableIdentityError! { jet_table_validate_identity(self.value, "schema") }
+}
+impl From<String> for JetTableSchemaId {
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:115
+    fn from(value: String) -> JetTableSchemaId { JetTableSchemaId.new(value) }
+}
+impl From<^String> for JetTableSchemaId {
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:121
+    fn from(value: ^String) -> JetTableSchemaId { JetTableSchemaId.new(^value) }
+}
+impl Display for JetTableSchemaId {
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:127
+    fn fmt(self: JetTableSchemaId, formatter: &Formatter) -> () std.fmt.Error! { formatter.write_str(self.value) }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:83 (column expansion137)
+#Derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)
+pub struct JetTableColumnId { value: String }
+impl JetTableColumnId {
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:87
+    pub fn new<V: Into<String>>(value: V) -> JetTableColumnId { JetTableColumnId{value: value.into()} }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:91
+    pub fn try_new<V: Into<String>>(value: V) -> JetTableColumnId JetTableIdentityError! {
+        text :: value.into()
+        _ :: jet_table_validate_identity(text, "column") ?? return Err(^err)
+        Ok(JetTableColumnId{value: ^text})
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:97
+    pub fn from_name<V: Into<String>>(value: V) -> JetTableColumnId { JetTableColumnId.new(^value) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:101
+    pub fn as_str(self: JetTableColumnId) -> String { self.value }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:105
+    pub fn into_string(self: ^JetTableColumnId) -> String { ^self.value }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:109
+    pub fn validate(self: JetTableColumnId) -> () JetTableIdentityError! { jet_table_validate_identity(self.value, "column") }
+}
+impl From<String> for JetTableColumnId {
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:115
+    fn from(value: String) -> JetTableColumnId { JetTableColumnId.new(value) }
+}
+impl From<^String> for JetTableColumnId {
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:121
+    fn from(value: ^String) -> JetTableColumnId { JetTableColumnId.new(^value) }
+}
+impl Display for JetTableColumnId {
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:127
+    fn fmt(self: JetTableColumnId, formatter: &Formatter) -> () std.fmt.Error! { formatter.write_str(self.value) }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:83 (source expansion138)
+#Derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)
+pub struct JetTableSourceId { value: String }
+impl JetTableSourceId {
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:87
+    pub fn new<V: Into<String>>(value: V) -> JetTableSourceId { JetTableSourceId{value: value.into()} }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:91
+    pub fn try_new<V: Into<String>>(value: V) -> JetTableSourceId JetTableIdentityError! {
+        text :: value.into()
+        _ :: jet_table_validate_identity(text, "source") ?? return Err(^err)
+        Ok(JetTableSourceId{value: ^text})
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:97
+    pub fn from_name<V: Into<String>>(value: V) -> JetTableSourceId { JetTableSourceId.new(^value) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:101
+    pub fn as_str(self: JetTableSourceId) -> String { self.value }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:105
+    pub fn into_string(self: ^JetTableSourceId) -> String { ^self.value }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:109
+    pub fn validate(self: JetTableSourceId) -> () JetTableIdentityError! { jet_table_validate_identity(self.value, "source") }
+}
+impl From<String> for JetTableSourceId {
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:115
+    fn from(value: String) -> JetTableSourceId { JetTableSourceId.new(value) }
+}
+impl From<^String> for JetTableSourceId {
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:121
+    fn from(value: ^String) -> JetTableSourceId { JetTableSourceId.new(^value) }
+}
+impl Display for JetTableSourceId {
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:127
+    fn fmt(self: JetTableSourceId, formatter: &Formatter) -> () std.fmt.Error! { formatter.write_str(self.value) }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:83 (type expansion139)
+#Derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)
+pub struct JetTableTypeId { value: String }
+impl JetTableTypeId {
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:87
+    pub fn new<V: Into<String>>(value: V) -> JetTableTypeId { JetTableTypeId{value: value.into()} }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:91
+    pub fn try_new<V: Into<String>>(value: V) -> JetTableTypeId JetTableIdentityError! {
+        text :: value.into()
+        _ :: jet_table_validate_identity(text, "type") ?? return Err(^err)
+        Ok(JetTableTypeId{value: ^text})
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:97
+    pub fn from_name<V: Into<String>>(value: V) -> JetTableTypeId { JetTableTypeId.new(^value) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:101
+    pub fn as_str(self: JetTableTypeId) -> String { self.value }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:105
+    pub fn into_string(self: ^JetTableTypeId) -> String { ^self.value }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:109
+    pub fn validate(self: JetTableTypeId) -> () JetTableIdentityError! { jet_table_validate_identity(self.value, "type") }
+}
+impl From<String> for JetTableTypeId {
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:115
+    fn from(value: String) -> JetTableTypeId { JetTableTypeId.new(value) }
+}
+impl From<^String> for JetTableTypeId {
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:121
+    fn from(value: ^String) -> JetTableTypeId { JetTableTypeId.new(^value) }
+}
+impl Display for JetTableTypeId {
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:127
+    fn fmt(self: JetTableTypeId, formatter: &Formatter) -> () std.fmt.Error! { formatter.write_str(self.value) }
+}
+impl JetTableTypeId {
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:141
+    pub fn boolean() -> JetTableTypeId { JetTableTypeId.new("Bool") }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:145
+    pub fn string() -> JetTableTypeId { JetTableTypeId.new("String") }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:149
+    pub fn integer() -> JetTableTypeId { JetTableTypeId.new("Int") }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:153
+    pub fn float() -> JetTableTypeId { JetTableTypeId.new("Float") }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:157
+    pub fn any() -> JetTableTypeId { JetTableTypeId.new("Any") }
+}
+impl JetTableColumnId {
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:165
+    pub fn derived(name: String, ty: JetTableTypeId) -> JetTableColumnId {
+        JetTableColumnId.new(PreludeDataFlow.column_identity(name, ty.as_str()))
+    }
+}
+// Node identity is graph insertion order, never an address.
+// Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:177
+#Derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)
+pub struct JetTableNodeId { pub value: USize }
+impl JetTableNodeId {
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:180
+    pub fn new(index: USize) -> JetTableNodeId { JetTableNodeId{value: index} }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:184
+    pub fn index(self: JetTableNodeId) -> USize { self.value }
+}
+impl From<USize> for JetTableNodeId {
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:190
+    fn from(value: USize) -> JetTableNodeId { JetTableNodeId.new(value) }
+}
+impl Display for JetTableNodeId {
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:196
+    fn fmt(self: JetTableNodeId, formatter: &Formatter) -> () std.fmt.Error! { formatter.write_fmt("node:{self.value}") }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:201
+fn jet_table_fnv1a64(bytes: View<U8>) -> U64 {
+    hash := U64{0xcbf29ce484222325}
+    loop byte in bytes {
+        hash = hash ^ U64.from_u8(byte)
+        hash = hash.wrapping_mul(U64{0x100000001b3})
+    }
+    hash
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:210
+fn jet_table_escape(value: String) -> String {
+    escaped := String.with_capacity(value.len())
+    loop character in value.chars() {
+        if character == {
+            '\\' -> escaped.push_str("\\\\")
+            '|' -> escaped.push_str("\\|")
+            ';' -> escaped.push_str("\\;")
+            '=' -> escaped.push_str("\\=")
+            ':' -> escaped.push_str("\\:")
+            '\n' -> escaped.push_str("\\n")
+            '\r' -> escaped.push_str("\\r")
+            '\t' -> escaped.push_str("\\t")
+            else -> escaped.push(character)
+        }
+    }
+    ^escaped
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:228
+fn jet_table_json_string(value: String) -> String {
+    escaped := String.with_capacity(value.len().saturating_add(2))
+    escaped.push('"')
+    loop character in value.chars() {
+        if character == {
+            '"' -> escaped.push_str("\\\"")
+            '\\' -> escaped.push_str("\\\\")
+            '\n' -> escaped.push_str("\\n")
+            '\r' -> escaped.push_str("\\r")
+            '\t' -> escaped.push_str("\\t")
+            '\u{08}' -> escaped.push_str("\\b")
+            '\u{0c}' -> escaped.push_str("\\f")
+            else -> {
+                if character.is_control() -> escaped.push_str("\\u{(character as U32).hex(4)}")
+                else -> escaped.push(character)
+            }
+        }
+    }
+    escaped.push('"')
+    ^escaped
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:253
+#Derive(Clone, Debug, Eq, PartialEq)
+pub struct JetTableColumn { pub id: JetTableColumnId, pub name: String, pub ty: JetTableTypeId }
+impl JetTableColumn {
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:260
+    pub fn new<V: Into<String>>(name: V, ty: JetTableTypeId) -> JetTableColumn {
+        text :: name.into()
+        id :: JetTableColumnId.derived(text, ty)
+        JetTableColumn{id: ^id, name: ^text, ty: ^ty}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:266
+    pub fn with_id<I: Into<JetTableColumnId>, V: Into<String>>(id: I, name: V, ty: JetTableTypeId) -> JetTableColumn {
+        JetTableColumn{id: id.into(), name: name.into(), ty: ^ty}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:278
+    pub fn validate(self: JetTableColumn) -> () JetTableSchemaError! {
+        _ :: self.id.validate() ?? return Err(.Identity(^err))
+        trimmed := self.name.trim() // #4303
+        if trimmed.is_empty() -> return Err(.EmptyColumnName)
+        if self.name.chars().any((c) -> c.is_control()) -> return Err(.InvalidColumnName(self.name.clone()))
+        _ :: self.ty.validate() ?? return Err(.Identity(^err))
+        Ok(())
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:293
+    fn canonical_key(self: JetTableColumn) -> String {
+        "{jet_table_escape(self.id.as_str())}:{jet_table_escape(self.name)}:{jet_table_escape(self.ty.as_str())}"
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:305
+#Derive(Clone, Debug, Eq, PartialEq)
+#Error
+pub enum JetTableSchemaError {
+    Identity(JetTableIdentityError)
+    EmptyColumnName
+    InvalidColumnName(String)
+    DuplicateColumnName(String)
+    DuplicateColumnId(JetTableColumnId)
+}
+impl Display for JetTableSchemaError {
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:314
+    fn fmt(self: JetTableSchemaError, formatter: &Formatter) -> () std.fmt.Error! {
+        if self == {
+            .Identity(error) -> error.fmt(formatter)
+            .EmptyColumnName -> formatter.write_str("table column name must not be empty")
+            .InvalidColumnName(name) -> formatter.write_fmt("table column name {name.debug()} contains a control character")
+            .DuplicateColumnName(name) -> formatter.write_fmt("table schema repeats column name `{name}`")
+            .DuplicateColumnId(id) -> formatter.write_fmt("table schema repeats column identity `{id}`")
+        }
+    }
+}
+// Ordered typed metadata; field order is semantic.
+// Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:335
+#Derive(Clone, Debug, Eq, PartialEq)
+pub struct JetTableSchema { pub id: JetTableSchemaId, pub row_type: JetTableTypeId, pub columns: [JetTableColumn] }
+impl JetTableSchema {
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:343
+    pub fn new(row_type: JetTableTypeId, columns: [JetTableColumn]) -> JetTableSchema {
+        id :: JetTableSchema.derived_id(row_type, columns)
+        JetTableSchema{id: ^id, row_type: ^row_type, columns: ^columns}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:352
+    pub fn with_id<I: Into<JetTableSchemaId>>(id: I, row_type: JetTableTypeId, columns: [JetTableColumn]) -> JetTableSchema {
+        JetTableSchema{id: id.into(), row_type: ^row_type, columns: ^columns}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:364
+    pub fn derived_id(row_type: JetTableTypeId, columns: View<JetTableColumn>) -> JetTableSchemaId {
+        joined :: columns.iter().map((column) -> column.canonical_key()).collect<[String]>().join(";")
+        key :: "row={jet_table_escape(row_type.as_str())};columns={joined}"
+        JetTableSchemaId.new("schema-{jet_table_fnv1a64(key.as_bytes()).hex(16)}")
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:380
+    pub fn column(self: JetTableSchema, id: JetTableColumnId) -> JetTableColumn? { self.columns.iter().find((column) -> column.id == id) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:384
+    pub fn column_named(self: JetTableSchema, name: String) -> JetTableColumn? { self.columns.iter().find((column) -> column.name == name) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:388
+    pub fn column_index(self: JetTableSchema, id: JetTableColumnId) -> USize? { self.columns.iter().position((column) -> column.id == id) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:392
+    pub fn validate(self: JetTableSchema) -> () JetTableSchemaError! {
+        _ :: self.id.validate() ?? return Err(.Identity(^err))
+        _ :: self.row_type.validate() ?? return Err(.Identity(^err))
+        loop (index, column) in self.columns.iter().enumerate() {
+            _ :: column.validate() ?? return Err(^err)
+            if self.columns.iter().take(index).any((previous) -> previous.name == column.name) -> return Err(.DuplicateColumnName(column.name.clone()))
+            if self.columns.iter().take(index).any((previous) -> previous.id == column.id) -> return Err(.DuplicateColumnId(column.id.clone()))
+        }
+        Ok(())
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:421
+    pub fn canonical_key(self: JetTableSchema) -> String {
+        joined :: self.columns.iter().map((column) -> column.canonical_key()).collect<[String]>().join(",")
+        "schema={jet_table_escape(self.id.as_str())}:row={jet_table_escape(self.row_type.as_str())}:columns=[{joined}]"
+    }
+}
+// Unavailable facts always carry a reason, and are never silently zero.
+// Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:439
+#Derive(Clone, Debug, Eq, PartialEq)
+pub enum JetTableEstimate<T> { Exact(T), Unavailable { reason: String } }
+impl<T> JetTableEstimate<T> {
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:445
+    pub fn exact(value: T) -> JetTableEstimate<T> { .Exact(^value) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:449
+    pub fn unavailable<V: Into<String>>(reason: V) -> JetTableEstimate<T> { .Unavailable{reason: reason.into()} }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:455
+    pub fn is_exact(self: JetTableEstimate<T>) -> Bool { if self == .Exact(_) -> true else -> false }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:459
+    pub fn exact_value(self: JetTableEstimate<T>) -> T? { if self == .Exact(value) -> Some(value) else -> None }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:466
+    pub fn unavailable_reason(self: JetTableEstimate<T>) -> String? { if self == .Unavailable{reason} -> Some(reason) else -> None }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:473
+    pub fn map<U>(self: ^JetTableEstimate<T>, map: fn(T) -> U) -> JetTableEstimate<U> {
+        if self == { .Exact(value) -> .Exact(map(^value)); .Unavailable{reason} -> .Unavailable{reason: ^reason} }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:480
+    pub fn validate(self: JetTableEstimate<T>) -> () JetTableEstimateError! {
+        if self == .Unavailable{reason} {
+            trimmed := reason.trim() // #4303
+            if trimmed.is_empty() -> return Err(.MissingReason)
+        }
+        Ok(())
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:491
+#Derive(Clone, Debug, Eq, PartialEq)
+#Error
+pub enum JetTableEstimateError { MissingReason }
+impl Display for JetTableEstimateError {
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:496
+    fn fmt(self: JetTableEstimateError, formatter: &Formatter) -> () std.fmt.Error! {
+        if self == .MissingReason -> formatter.write_str("unavailable estimate needs a reason")
+    }
+}
+impl<T: Display> JetTableEstimate<T> {
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:506
+    fn canonical_key(self: JetTableEstimate<T>) -> String {
+        if self == { .Exact(value) -> "exact:{value}"; .Unavailable{reason} -> "unavailable:{jet_table_escape(reason)}" }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:515
+    fn text(self: JetTableEstimate<T>) -> String {
+        if self == { .Exact(value) -> "exact({value})"; .Unavailable{reason} -> "unavailable({jet_table_escape(reason)})" }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:524
+    fn json(self: JetTableEstimate<T>) -> String {
+        if self == {
+            .Exact(value) -> "{\"status\":\"exact\",\"value\":{value}}"
+            .Unavailable{reason} -> "{\"status\":\"unavailable\",\"reason\":{jet_table_json_string(reason)}}"
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:535
+fn jet_table_estimate_add(left: JetTableEstimate<U128>, right: JetTableEstimate<U128>, reason: String) -> JetTableEstimate<U128> {
+    if (left, right) == (.Exact(l), .Exact(r)) {
+        if l.checked_add(r) == Some(sum) -> .Exact(sum)
+        else -> JetTableEstimate<U128>.unavailable("integer overflow")
+    } else -> JetTableEstimate<U128>.unavailable(reason)
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:549
+fn jet_table_estimate_mul(left: JetTableEstimate<U128>, right: JetTableEstimate<U128>, reason: String) -> JetTableEstimate<U128> {
+    if (left, right) == (.Exact(l), .Exact(r)) {
+        if l.checked_mul(r) == Some(product) -> .Exact(product)
+        else -> JetTableEstimate<U128>.unavailable("integer overflow")
+    } else -> JetTableEstimate<U128>.unavailable(reason)
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:563
+fn jet_table_estimate_min(left: JetTableEstimate<U128>, right: U128, reason: String) -> JetTableEstimate<U128> {
+    if left == .Exact(l) -> .Exact(l.min(right))
+    else -> JetTableEstimate<U128>.unavailable(reason)
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:577
+// Exact metadata only; no source rows are materialized.
+#Derive(Clone, Debug, Eq, PartialEq)
+pub struct JetTableCardinalityFacts {
+    pub input_rows: [JetTableEstimate<U128>]
+    pub output_rows: JetTableEstimate<U128>
+    pub rows_read: JetTableEstimate<U128>
+    pub rows_written: JetTableEstimate<U128>
+}
+impl JetTableCardinalityFacts {
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:586
+    pub fn unknown(input_count: USize) -> JetTableCardinalityFacts {
+        JetTableCardinalityFacts{
+            input_rows: (0..<input_count).map(_ -> JetTableEstimate.unavailable("input cardinality unavailable")).collect(),
+            output_rows: JetTableEstimate.unavailable("output cardinality unavailable"),
+            rows_read: JetTableEstimate.unavailable("rows read unavailable"),
+            rows_written: JetTableEstimate.unavailable("rows written unavailable")}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:597
+    pub fn validate(self: JetTableCardinalityFacts, input_count: USize) -> () JetTableFactsError! {
+        if self.input_rows.len() != input_count {
+            return Err(.InputFactCount{expected: input_count, actual: USize{self.input_rows.len()}})
+        }
+        loop estimate in self.input_rows -> estimate.validate().map_err(JetTableFactsError.from)?
+        self.output_rows.validate().map_err(JetTableFactsError.from)?
+        self.rows_read.validate().map_err(JetTableFactsError.from)?
+        self.rows_written.validate().map_err(JetTableFactsError.from)?
+        Ok(())
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:613
+    fn canonical_key(self: JetTableCardinalityFacts) -> String {
+        inputs :: self.input_rows.iter().map(estimate -> estimate.canonical_key()).collect<[String]>().join(",")
+        "in=[{inputs}];out={self.output_rows.canonical_key()};read={self.rows_read.canonical_key()};written={self.rows_written.canonical_key()}"
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:627
+    fn text(self: JetTableCardinalityFacts) -> String {
+        inputs :: self.input_rows.iter().map(estimate -> estimate.text()).collect<[String]>().join(",")
+        "input=[{inputs}], output={self.output_rows.text()}, read={self.rows_read.text()}, written={self.rows_written.text()}"
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:641
+    fn json(self: JetTableCardinalityFacts) -> String {
+        inputs :: self.input_rows.iter().map(estimate -> estimate.json()).collect<[String]>().join(",")
+        "{\"input_rows\":[" + inputs + "],\"output_rows\":" + self.output_rows.json() +
+            ",\"rows_read\":" + self.rows_read.json() + ",\"rows_written\":" + self.rows_written.json() + "}"
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:658
+// Integer semantic work units, not wall-clock predictions.
+#Derive(Clone, Debug, Eq, PartialEq)
+pub struct JetTableCostFacts {
+    pub work_units: JetTableEstimate<U128>
+    pub memory_bytes: JetTableEstimate<U128>
+    pub output_bytes: JetTableEstimate<U128>
+}
+impl JetTableCostFacts {
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:666
+    pub fn unknown() -> JetTableCostFacts {
+        JetTableCostFacts{work_units: JetTableEstimate.unavailable("work cost unavailable"),
+            memory_bytes: JetTableEstimate.unavailable("memory cost unavailable"),
+            output_bytes: JetTableEstimate.unavailable("output byte cost unavailable")}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:674
+    pub fn validate(self: JetTableCostFacts) -> () JetTableFactsError! {
+        self.work_units.validate().map_err(JetTableFactsError.from)?
+        self.memory_bytes.validate().map_err(JetTableFactsError.from)?
+        self.output_bytes.validate().map_err(JetTableFactsError.from)?
+        Ok(())
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:681
+    fn canonical_key(self: JetTableCostFacts) -> String {
+        "work={self.work_units.canonical_key()};memory={self.memory_bytes.canonical_key()};output={self.output_bytes.canonical_key()}"
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:690
+    fn text(self: JetTableCostFacts) -> String {
+        "work={self.work_units.text()}, memory={self.memory_bytes.text()}, output={self.output_bytes.text()}"
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:699
+    fn json(self: JetTableCostFacts) -> String {
+        "{\"work_units\":" + self.work_units.json() + ",\"memory_bytes\":" + self.memory_bytes.json() +
+            ",\"output_bytes\":" + self.output_bytes.json() + "}"
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:709
+#Derive(Clone, Debug, Eq, PartialEq)
+pub struct JetTableFacts { pub cardinality: JetTableCardinalityFacts, pub cost: JetTableCostFacts }
+impl JetTableFacts {
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:716
+    pub fn unknown(input_count: USize) -> JetTableFacts {
+        JetTableFacts{cardinality: JetTableCardinalityFacts.unknown(input_count), cost: JetTableCostFacts.unknown()}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:723
+    pub fn validate(self: JetTableFacts, input_count: USize) -> () JetTableFactsError! {
+        self.cardinality.validate(input_count)?
+        self.cost.validate()
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:728
+    fn canonical_key(self: JetTableFacts) -> String {
+        "cardinality{" + self.cardinality.canonical_key() + "};cost{" + self.cost.canonical_key() + "}"
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:736
+    fn text(self: JetTableFacts) -> String {
+        "cardinality {" + self.cardinality.text() + "}; cost {" + self.cost.text() + "}"
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:744
+    fn json(self: JetTableFacts) -> String {
+        "{\"cardinality\":" + self.cardinality.json() + ",\"cost\":" + self.cost.json() + "}"
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:753
+#Derive(Clone, Debug, Eq, PartialEq)
+#Error
+pub enum JetTableFactsError { InputFactCount{expected: USize, actual: USize}, Estimate(JetTableEstimateError) }
+// Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:759
+impl From<JetTableEstimateError> for JetTableFactsError {
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:760
+    fn from(error: JetTableEstimateError) -> JetTableFactsError { .Estimate(error) }
+}
+impl Display for JetTableFactsError {
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:766
+    fn fmt(self: JetTableFactsError, formatter: &Formatter) -> () std.fmt.Error! {
+        match self {
+            .InputFactCount{expected, actual} -> formatter.write_fmt("table node has {actual} input facts; expected {expected}")
+            .Estimate(error) -> error.fmt(formatter)
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:781
+// Immutable checked identity/type metadata, never the callable itself.
+#Derive(Clone, Debug, Eq, PartialEq)
+pub struct JetTableCallable { pub id: String, pub parameter: JetTableTypeId, pub result: JetTableTypeId }
+impl JetTableCallable {
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:789
+    pub fn new<I: Into<String>>(id: I, parameter: JetTableTypeId, result: JetTableTypeId) -> JetTableCallable {
+        JetTableCallable{id: id.into(), parameter, result}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:801
+    pub fn validate(self: JetTableCallable) -> () JetTablePlanError! {
+        trimmed := self.id.trim() // #4303
+        if trimmed.is_empty() -> return Err(.MissingCallableIdentity)
+        if self.id.chars().any(character -> character.is_control()) -> return Err(.InvalidCallableIdentity(~self.id))
+        self.parameter.validate().map_err(JetTablePlanError.Identity)?
+        self.result.validate().map_err(JetTablePlanError.Identity)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:816
+    fn canonical_key(self: JetTableCallable) -> String {
+        "{jet_table_escape(self.id)}:{jet_table_escape(self.parameter.as_str())}:{jet_table_escape(self.result.as_str())}"
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:828
+#Derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)
+pub enum JetTableOperation { Scan, Select, Filter, Map, Sort, Group, Join, Limit }
+impl JetTableOperation {
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:841
+    pub fn as_str(self: JetTableOperation) -> String {
+        match self {
+            .Scan -> "scan", .Select -> "select", .Filter -> "filter", .Map -> "map"
+            .Sort -> "sort", .Group -> "group", .Join -> "join", .Limit -> "limit"
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:854
+    pub fn input_arity(self: JetTableOperation) -> USize? {
+        match self {
+            .Scan -> Val(USize{0}), .Join -> Val(USize{2})
+            .Select | .Filter | .Map | .Sort | .Group | .Limit -> Val(USize{1})
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:867
+    pub fn default_stream(self: JetTableOperation) -> JetTableStreamMode {
+        match self {
+            .Sort -> .Materialized{reason: "sort requires a complete ordering"}
+            .Group -> .Materialized{reason: "group requires aggregate state"}
+            .Join -> .Materialized{reason: "join requires both input sides"}
+            .Scan | .Select | .Filter | .Map | .Limit -> .Bounded{batch_rows: None}
+        }
+    }
+}
+impl Display for JetTableOperation {
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:886
+    fn fmt(self: JetTableOperation, formatter: &Formatter) -> () std.fmt.Error! { formatter.write_str(self.as_str()) }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:891
+#Derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)
+pub enum JetTableJoinKind { Inner, Left }
+impl JetTableJoinKind {
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:898
+    pub fn as_str(self: JetTableJoinKind) -> String { match self { .Inner -> "inner", .Left -> "left" } }
+}
+impl Display for JetTableJoinKind {
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:907
+    fn fmt(self: JetTableJoinKind, formatter: &Formatter) -> () std.fmt.Error! { formatter.write_str(self.as_str()) }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:912
+// Streaming mode is a fact, not an instruction to materialize.
+#Derive(Clone, Debug, Eq, PartialEq)
+pub enum JetTableStreamMode {
+    Bounded { batch_rows: U128? }
+    Materialized { reason: String }
+}
+impl JetTableStreamMode {
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:919
+    pub fn bounded(batch_rows: U128?) -> JetTableStreamMode JetTableStreamError! {
+        if batch_rows == Some(0) -> return Err(.ZeroBatchRows)
+        Ok(.Bounded{batch_rows})
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:926
+    pub fn materialized<R: Into<String>>(reason: R) -> JetTableStreamMode JetTableStreamError! {
+        text :: reason.into()
+        trimmed := text.trim() // #4303
+        if trimmed.is_empty() -> return Err(.MissingMaterializationReason)
+        Ok(.Materialized{reason: ^text})
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:934
+    pub fn is_streaming(self: JetTableStreamMode) -> Bool { if self == .Bounded{..} -> true else -> false }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:938
+    pub fn canonical_key(self: JetTableStreamMode) -> String {
+        if self == {
+            .Bounded{batch_rows: Some(rows)} -> "bounded:{rows}"
+            .Bounded{batch_rows: None} -> "bounded:host"
+            .Materialized{reason} -> "materialized:{jet_table_escape(reason)}"
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:948
+    pub fn text(self: JetTableStreamMode) -> String {
+        if self == {
+            .Bounded{batch_rows: Some(rows)} -> "bounded(batch_rows={rows})"
+            .Bounded{batch_rows: None} -> "bounded(batch_rows=host)"
+            .Materialized{reason} -> "materialized(reason={jet_table_escape(reason)})"
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:958
+    pub fn validate(self: JetTableStreamMode) -> () JetTableStreamError! {
+        if self == {
+            .Bounded{batch_rows: Some(0)} -> Err(.ZeroBatchRows)
+            .Bounded{..} -> Ok(())
+            .Materialized{reason} -> {
+                trimmed := reason.trim() // #4303
+                if trimmed.is_empty() -> Err(.MissingMaterializationReason) else -> Ok(())
+            }
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:970
+#Derive(Clone, Debug, Eq, PartialEq)
+#Error
+pub enum JetTableStreamError { ZeroBatchRows, MissingMaterializationReason }
+impl Display for JetTableStreamError {
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:977
+    fn fmt(self: JetTableStreamError, formatter: &Formatter) -> () std.fmt.Error! {
+        if self == {
+            .ZeroBatchRows -> formatter.write_str("table batch row bound must be greater than zero")
+            .MissingMaterializationReason -> formatter.write_str("table materialization needs a reason")
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:989
+// Plan nodes hold metadata, never rows, readers or physical operators.
+#Derive(Clone, Debug, Eq, PartialEq)
+pub struct JetTableNode {
+    pub id: JetTableNodeId
+    pub operation: JetTableOperation
+    pub inputs: [JetTableNodeId]
+    pub source: JetTableSourceId?
+    pub schema: JetTableSchema
+    pub callable: JetTableCallable?
+    pub stream: JetTableStreamMode
+    pub join_kind: JetTableJoinKind?
+    pub join_keys: [(JetTableColumnId, JetTableColumnId)]
+    pub limit: U128?
+    pub selected_columns: [JetTableColumnId]?
+    pub facts: JetTableFacts
+    pub note: String
+}
+impl JetTableNode {
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:1009
+    pub fn new(id: JetTableNodeId, operation: JetTableOperation, inputs: [JetTableNodeId], schema: JetTableSchema) -> JetTableNode {
+        stream :: operation.default_stream()
+        facts :: JetTableFacts.unknown(inputs.len())
+        JetTableNode{id, operation, inputs: ^inputs, source: None, schema: ^schema, callable: None, stream: ^stream,
+            join_kind: None, join_keys: [], limit: None, selected_columns: None, facts: ^facts, note: ""}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:1034
+    pub fn scan(id: JetTableNodeId, source: JetTableSourceId, schema: JetTableSchema, facts: JetTableFacts) -> JetTableNode {
+        node := JetTableNode.new(id, .Scan, [], ^schema)
+        node.source = Some(^source)
+        node.facts = ^facts
+        ^node
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:1046
+    pub fn with_stream(self: ^JetTableNode, stream: JetTableStreamMode) -> JetTableNode { self.stream = ^stream; ^self }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:1051
+    pub fn with_join_kind(self: ^JetTableNode, kind: JetTableJoinKind) -> JetTableNode { self.join_kind = Some(kind); ^self }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:1056
+    pub fn with_join_keys(self: ^JetTableNode, keys: [(JetTableColumnId, JetTableColumnId)]) -> JetTableNode { self.join_keys = ^keys; ^self }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:1064
+    pub fn with_limit(self: ^JetTableNode, limit: U128) -> JetTableNode { self.limit = Some(limit); ^self }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:1069
+    pub fn with_selected_columns(self: ^JetTableNode, columns: [JetTableColumnId]) -> JetTableNode { self.selected_columns = Some(^columns); ^self }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:1074
+    pub fn with_facts(self: ^JetTableNode, facts: JetTableFacts) -> JetTableNode { self.facts = ^facts; ^self }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:1079
+    fn operation_key(self: JetTableNode) -> String {
+        join :: self.join_kind.map((kind) -> kind.as_str().to_string()).unwrap_or_else(() -> "none")
+        keys :: self.join_keys.iter().map(((left, right)) -> "{jet_table_escape(left.as_str())}~{jet_table_escape(right.as_str())}").collect<[String]>().join(",")
+        limit :: self.limit.map((value) -> value.to_string()).unwrap_or_else(() -> "none")
+        selected :: self.selected_columns.as_ref().map((columns) ->
+            columns.iter().map((column) -> jet_table_escape(column.as_str())).collect<[String]>().join(",")).unwrap_or_else(() -> "none")
+        "{self.operation.as_str()}:join={join}:keys=[{keys}]:limit={limit}:select=[{selected}]"
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:1117
+    fn canonical_key(self: JetTableNode) -> String {
+        inputs :: self.inputs.iter().map((input) -> input.index().to_string()).collect<[String]>().join(",")
+        source :: self.source.as_ref().map((value) -> jet_table_escape(value.as_str())).unwrap_or_else(() -> "none")
+        callable :: self.callable.as_ref().map((value) -> value.canonical_key()).unwrap_or_else(() -> "none")
+        "id={self.id.index()}:op={self.operation_key()}:inputs=[{inputs}]:source={source}:{self.schema.canonical_key()}:callable={callable}:stream={self.stream.canonical_key()}:facts={self.facts.canonical_key()}:note={jet_table_escape(self.note)}"
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:1142
+    fn text(self: JetTableNode) -> String {
+        inputs :: self.inputs.iter().map((input) -> input.index().to_string()).collect<[String]>().join(",")
+        source :: self.source.as_ref().map((value) -> jet_table_escape(value.as_str())).unwrap_or_else(() -> "none")
+        callable :: self.callable.as_ref().map((value) -> value.canonical_key()).unwrap_or_else(() -> "none")
+        fallback :: if self.stream.is_streaming() -> "fallback=none" else -> "fallback=materialized"
+        "node {self.id.index()} op={self.operation_key()} inputs=[{inputs}] source={source} schema={self.schema.canonical_key()} callable={callable} stream={self.stream.text()} {fallback} facts={self.facts.text()} note={jet_table_escape(self.note)}"
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:1172
+    fn json(self: JetTableNode) -> String {
+        inputs :: self.inputs.iter().map((input) -> input.index().to_string()).collect<[String]>().join(",")
+        source :: self.source.as_ref().map((value) -> jet_table_json_string(value.as_str())).unwrap_or_else(() -> "null")
+        callable :: self.callable.as_ref().map((value) ->
+            "{\"id\":{jet_table_json_string(value.id)},\"parameter\":{jet_table_json_string(value.parameter.as_str())},\"result\":{jet_table_json_string(value.result.as_str())}}").unwrap_or_else(() -> "null")
+        selected :: self.selected_columns.as_ref().map((columns) -> {
+            values :: columns.iter().map((column) -> jet_table_json_string(column.as_str())).collect<[String]>().join(",")
+            "[{values}]"
+        }).unwrap_or_else(() -> "null")
+        join_kind :: self.join_kind.map((kind) -> jet_table_json_string(kind.as_str())).unwrap_or_else(() -> "null")
+        join_keys :: self.join_keys.iter().map(((left, right)) ->
+            "[{jet_table_json_string(left.as_str())},{jet_table_json_string(right.as_str())}]").collect<[String]>().join(",")
+        limit :: self.limit.map((value) -> value.to_string()).unwrap_or_else(() -> "null")
+        "{\"id\":{self.id.index()},\"operation\":{jet_table_json_string(self.operation.as_str())},\"inputs\":[{inputs}],\"source\":{source},\"schema\":{jet_table_json_string(self.schema.canonical_key())},\"callable\":{callable},\"stream\":{jet_table_json_string(self.stream.text())},\"join_kind\":{join_kind},\"join_keys\":[{join_keys}],\"limit\":{limit},\"selected_columns\":{selected},\"facts\":{self.facts.json()},\"note\":{jet_table_json_string(self.note)}}"
+    }
+}
+
+// Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:1249
+// Source metadata never carries its adapter's storage handle.
+#Derive(Clone, Debug, Eq, PartialEq)
+pub struct JetTableSource {
+    pub id: JetTableSourceId
+    pub schema: JetTableSchema
+    pub rows: JetTableEstimate<U128>
+    pub row_width_bytes: JetTableEstimate<U128>
+}
+impl JetTableSource {
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:1260
+    pub fn new<I: Into<JetTableSourceId>>(id: I, schema: JetTableSchema) -> JetTableSource {
+        JetTableSource{id: id.into(), schema: ^schema, rows: .unavailable("source cardinality unavailable"),
+            row_width_bytes: .unavailable("source row width unavailable")}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:1269
+    pub fn with_rows(self: ^JetTableSource, rows: U128) -> JetTableSource { self.rows = .exact(rows); ^self }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:1274
+    pub fn validate(self: JetTableSource) -> () JetTablePlanError! {
+        _ :: self.id.validate().map_err((error) -> JetTablePlanError.Identity(^error)) ?? return Err(^err)
+        _ :: self.schema.validate().map_err((error) -> JetTablePlanError.Schema(^error)) ?? return Err(^err)
+        _ :: self.rows.validate().map_err((error) -> JetTablePlanError.Estimate(^error)) ?? return Err(^err)
+        self.row_width_bytes.validate().map_err((error) -> JetTablePlanError.Estimate(^error))
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:1285
+    fn canonical_key(self: JetTableSource) -> String {
+        "source={jet_table_escape(self.id.as_str())}:{self.schema.canonical_key()}:rows={self.rows.canonical_key()}:width={self.row_width_bytes.canonical_key()}"
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:1299
+// Preserve checked descriptor order and shared query identity derivation.
+pub fn jet_table_plan_from_descriptors(row_type: String, columns: [String], rows: U128) -> JetTablePlan Err! {
+    pairs := columns.chunks_exact(2)
+    descriptors :: pairs.by_ref().map((pair) ->
+        JetTableColumn.new(pair[0].clone(), JetTableTypeId.new(pair[1].clone()))).collect<[JetTableColumn]>()
+    if !pairs.remainder().is_empty() -> return Err("table column metadata must contain alternating name/type pairs")
+    row_type_id :: JetTableTypeId.new(row_type)
+    schema :: JetTableSchema.new(^row_type_id, ^descriptors)
+    source :: JetTableSource.new("data.query.source::<{row_type}>", ^schema).with_rows(rows)
+    Ok(JetTablePlan.from_source("data.query::<{row_type}>", ^source))
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:1330
+fn jet_table_scan_facts(source: JetTableSource) -> JetTableFacts {
+    output_bytes :: jet_table_estimate_mul(source.rows, source.row_width_bytes, "source output bytes unavailable")
+    JetTableFacts{
+        cardinality: JetTableCardinalityFacts{input_rows: [], output_rows: source.rows.clone(),
+            rows_read: source.rows.clone(), rows_written: .exact(0)},
+        cost: JetTableCostFacts{work_units: source.rows.clone(), memory_bytes: .exact(0), output_bytes: ^output_bytes}
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:1351
+pub fn jet_table_derive_facts(operation: JetTableOperation, inputs: [&JetTableNode], limit: U128?) -> JetTableFacts {
+    input_rows :: inputs.iter().map((node) -> node.facts.cardinality.output_rows.clone()).collect<[JetTableEstimate<U128>]>()
+    unknown :: (reason: String) -> JetTableEstimate<U128>.unavailable(reason)
+    (output_rows, rows_read, rows_written, work_units, memory_bytes) :: if operation == {
+        .Scan -> (unknown("scan facts require a source"), unknown("scan facts require a source"), JetTableEstimate<U128>.exact(0),
+            unknown("scan facts require a source"), JetTableEstimate<U128>.exact(0))
+        .Select | .Map -> {
+            input :: input_rows.first().cloned().unwrap_or_else(() -> unknown("unary input cardinality unavailable"))
+            (input.clone(), input.clone(), input.clone(), ^input, JetTableEstimate<U128>.exact(0))
+        }
+        .Filter -> {
+            input :: input_rows.first().cloned().unwrap_or_else(() -> unknown("filter input cardinality unavailable"))
+            (unknown("filter selectivity unavailable"), input.clone(), unknown("filter output cardinality unavailable"),
+                ^input, JetTableEstimate<U128>.exact(0))
+        }
+        .Sort -> {
+            input :: input_rows.first().cloned().unwrap_or_else(() -> unknown("sort input cardinality unavailable"))
+            (input.clone(), input.clone(), input.clone(), unknown("sort comparison cost unavailable"), unknown("sort working memory unavailable"))
+        }
+        .Group -> {
+            input :: input_rows.first().cloned().unwrap_or_else(() -> unknown("group input cardinality unavailable"))
+            (unknown("group cardinality unavailable"), ^input, unknown("group output cardinality unavailable"),
+                unknown("group aggregation cost unavailable"), unknown("group working memory unavailable"))
+        }
+        .Join -> {
+            read :: if (input_rows.first(), input_rows.get(1)) == {
+                (Some(left), Some(right)) -> jet_table_estimate_add(left, right, "join input cardinality unavailable")
+                _ -> unknown("join input cardinality unavailable")
+            }
+            (unknown("join cardinality unavailable"), ^read, unknown("join output cardinality unavailable"),
+                unknown("join matching cost unavailable"), unknown("join working memory unavailable"))
+        }
+        .Limit -> {
+            input :: input_rows.first().cloned().unwrap_or_else(() -> unknown("limit input cardinality unavailable"))
+            bound :: limit.unwrap_or(0)
+            output :: jet_table_estimate_min(input, bound, "limit output cardinality unavailable")
+            (output.clone(), output.clone(), output.clone(), ^output, JetTableEstimate<U128>.exact(0))
+        }
+    }
+    JetTableFacts{
+        cardinality: JetTableCardinalityFacts{input_rows: ^input_rows, output_rows: ^output_rows, rows_read: ^rows_read, rows_written: ^rows_written},
+        cost: JetTableCostFacts{work_units: ^work_units, memory_bytes: ^memory_bytes,
+            output_bytes: unknown("output bytes unavailable without a row width")}
+    }
+}
+
+// Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:1471
+// Structured validation failures retain the failing identity and operation.
+#Derive(Clone, Debug, Eq, PartialEq)
+#Error
+pub enum JetTablePlanError {
+    Identity(JetTableIdentityError)
+    Schema(JetTableSchemaError)
+    Estimate(JetTableEstimateError)
+    Facts(JetTableFactsError)
+    Stream(JetTableStreamError)
+    Batch(JetTableBatchError)
+    EmptyPlan
+    MissingScan
+    InvalidOutput(JetTableNodeId)
+    NodeIdMismatch { expected: Usize, actual: JetTableNodeId }
+    UnknownInput { node: JetTableNodeId, input: JetTableNodeId }
+    InputNotEarlier { node: JetTableNodeId, input: JetTableNodeId }
+    Cycle(JetTableNodeId)
+    WrongInputArity { node: JetTableNodeId, operation: JetTableOperation, expected: Usize, actual: Usize }
+    MissingSource(JetTableNodeId)
+    UnexpectedSource(JetTableNodeId)
+    UnexpectedCallable(JetTableNodeId)
+    UnexpectedJoinMetadata(JetTableNodeId)
+    SourceMismatch
+    SchemaMismatch { node: JetTableNodeId, input: JetTableNodeId }
+    SelectionSchemaMismatch(JetTableNodeId)
+    MissingCallable(JetTableNodeId)
+    MissingCallableIdentity
+    InvalidCallableIdentity(String)
+    CallableParameterMismatch { node: JetTableNodeId, expected: JetTableTypeId, actual: JetTableTypeId }
+    CallableResultMismatch { node: JetTableNodeId, expected: JetTableTypeId, actual: JetTableTypeId }
+    MissingJoinKind(JetTableNodeId)
+    InvalidJoinKey { node: JetTableNodeId, left: JetTableColumnId, right: JetTableColumnId }
+    MissingLimit(JetTableNodeId)
+    UnexpectedLimit(JetTableNodeId)
+    UnexpectedSelection(JetTableNodeId)
+    UnknownSelectedColumn { node: JetTableNodeId, column: JetTableColumnId }
+    InvalidNote(JetTableNodeId)
+    NotStreaming(JetTableNodeId)
+}
+impl Display for JetTablePlanError {
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:1534
+    fn fmt(self: JetTablePlanError, formatter: &Formatter) -> () std.fmt.Error! {
+        if self == {
+            .Identity(error) -> error.fmt(formatter)
+            .Schema(error) -> error.fmt(formatter)
+            .Estimate(error) -> error.fmt(formatter)
+            .Facts(error) -> error.fmt(formatter)
+            .Stream(error) -> error.fmt(formatter)
+            .Batch(error) -> error.fmt(formatter)
+            .EmptyPlan -> formatter.write_str("table plan has no nodes")
+            .MissingScan -> formatter.write_str("table plan must start with a source scan")
+            .InvalidOutput(id) -> formatter.write_fmt("table plan output node {id.index()} is missing")
+            .NodeIdMismatch{expected, actual} -> formatter.write_fmt("table node id {actual.index()} does not match graph position {expected}")
+            .UnknownInput{node, input} -> formatter.write_fmt("table node {node.index()} references unknown input {input.index()}")
+            .InputNotEarlier{node, input} -> formatter.write_fmt("table node {node.index()} references non-previous input {input.index()}")
+            .Cycle(node) -> formatter.write_fmt("table plan contains a cycle at node {node.index()}")
+            .WrongInputArity{node, operation, expected, actual} -> formatter.write_fmt("table node {node.index()} operation `{operation}` needs {expected} inputs, got {actual}")
+            .MissingSource(node) -> formatter.write_fmt("table scan node {node.index()} has no source")
+            .UnexpectedSource(node) -> formatter.write_fmt("non-scan table node {node.index()} carries a source")
+            .UnexpectedCallable(node) -> formatter.write_fmt("non-transform table node {node.index()} carries a callable")
+            .UnexpectedJoinMetadata(node) -> formatter.write_fmt("non-join table node {node.index()} carries join metadata")
+            .SourceMismatch -> formatter.write_str("table scan source or schema differs from plan source")
+            .SchemaMismatch{node, input} -> formatter.write_fmt("table node {node.index()} schema does not preserve input node {input.index()} schema")
+            .SelectionSchemaMismatch(node) -> formatter.write_fmt("table select node {node.index()} schema does not match selected columns")
+            .MissingCallable(node) -> formatter.write_fmt("table node {node.index()} needs a checked callable")
+            .MissingCallableIdentity -> formatter.write_str("table callable identity must not be empty")
+            .InvalidCallableIdentity(id) -> formatter.write_fmt("table callable identity {id.debug()} contains a control character")
+            .CallableParameterMismatch{node, expected, actual} -> formatter.write_fmt("table node {node.index()} callable takes {actual}, expected {expected}")
+            .CallableResultMismatch{node, expected, actual} -> formatter.write_fmt("table node {node.index()} callable returns {actual}, expected {expected}")
+            .MissingJoinKind(node) -> formatter.write_fmt("table join node {node.index()} has no join kind")
+            .InvalidJoinKey{node, left, right} -> formatter.write_fmt("table join node {node.index()} has incompatible key pair {left} / {right}")
+            .MissingLimit(node) -> formatter.write_fmt("table limit node {node.index()} has no row bound")
+            .UnexpectedLimit(node) -> formatter.write_fmt("non-limit table node {node.index()} carries a row bound")
+            .UnexpectedSelection(node) -> formatter.write_fmt("non-select table node {node.index()} carries selected columns")
+            .UnknownSelectedColumn{node, column} -> formatter.write_fmt("table select node {node.index()} references unknown column {column}")
+            .InvalidNote(node) -> formatter.write_fmt("table node {node.index()} note contains a control character")
+            .NotStreaming(node) -> formatter.write_fmt("table node {node.index()} is explicitly materialized")
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:1670
+// The bounded graph owns metadata only; rows remain with source adapters.
+#Derive(Clone, Debug, Eq, PartialEq)
+pub struct JetTablePlan {
+    pub id: JetTablePlanId
+    pub source: JetTableSource
+    pub nodes: [JetTableNode]
+    pub output: JetTableNodeId
+}
+impl JetTablePlan {
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:1681
+    pub fn new<I: Into<JetTablePlanId>, S: Into<JetTableSourceId>>(id: I, source: S, schema: JetTableSchema) -> JetTablePlan {
+        JetTablePlan.from_source(^id, JetTableSource.new(^source, ^schema))
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:1689
+    pub fn from_source<I: Into<JetTablePlanId>>(id: I, source: JetTableSource) -> JetTablePlan {
+        identity :: id.into()
+        scan :: JetTableNode.scan(JetTableNodeId.new(0), source.id.clone(), source.schema.clone(), jet_table_scan_facts(source))
+        JetTablePlan{id: ^identity, source: ^source, nodes: [^scan], output: JetTableNodeId.new(0)}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:1709
+    // Append the right-side scan without changing the current output.
+    pub fn append_source(self: &JetTablePlan, source: JetTableSource) -> JetTableNodeId JetTablePlanError! {
+        _ :: self.validate() ?? return Err(^err)
+        id :: JetTableNodeId.new(self.nodes.len())
+        node :: JetTableNode.scan(id, source.id.clone(), source.schema.clone(), jet_table_scan_facts(source))
+        output :: self.output
+        node_id :: self.append_node(^node) ?? return Err(^err)
+        self.output = output
+        Ok(node_id)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:1730
+    // Parser/MIR construction permits invalid graphs; validate before use.
+    pub fn from_parts<I: Into<JetTablePlanId>>(id: I, source: JetTableSource, nodes: [JetTableNode], output: JetTableNodeId) -> JetTablePlan {
+        JetTablePlan{id: id.into(), source: ^source, nodes: ^nodes, output}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:1744
+    pub fn output_node(self: JetTablePlan) -> &JetTableNode? { self.nodes.get(self.output.index()) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:1748
+    pub fn output_schema(self: JetTablePlan) -> &JetTableSchema? { self.output_node().map((node) -> &node.schema) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:1752
+    pub fn append_node(self: &JetTablePlan, node: JetTableNode) -> JetTableNodeId JetTablePlanError! {
+        expected :: self.nodes.len()
+        if node.id.index() != expected -> return Err(.NodeIdMismatch{expected, actual: node.id})
+        id :: node.id
+        old_output :: self.output
+        self.nodes.push(^node)
+        self.output = id
+        if self.validate() == Err(error) {
+            _ :: self.nodes.pop()
+            self.output = old_output
+            return Err(^error)
+        }
+        Ok(id)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:1772
+    pub fn append(self: &JetTablePlan, operation: JetTableOperation, inputs: [JetTableNodeId], schema: JetTableSchema, callable: JetTableCallable?) -> JetTableNodeId JetTablePlanError! {
+        id :: JetTableNodeId.new(self.nodes.len())
+        node := JetTableNode.new(id, operation, ^inputs, ^schema)
+        node.callable = ^callable
+        if operation != .Scan {
+            input_nodes :: node.inputs.iter().filter_map((input) -> self.nodes.get(input.index())).collect<[&JetTableNode]>()
+            if input_nodes.len() == node.inputs.len() {
+                node.facts = jet_table_derive_facts(operation, input_nodes, node.limit)
+            }
+        }
+        self.append_node(^node)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:1795
+    pub fn append_unary(self: &JetTablePlan, operation: JetTableOperation, schema: JetTableSchema, callable: JetTableCallable?) -> JetTableNodeId JetTablePlanError! {
+        input :: self.output
+        self.append(operation, [input], ^schema, ^callable)
+    }
+}
 

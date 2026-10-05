@@ -1,317 +1,143 @@
-// PORT-PENDING 0137 crates-jet-codegen-src-prelude-commandsuite-module-group: crates/jet-codegen/src/Prelude/DevelopmentReceipt.rs:1-313
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS // D-DEVR-LAW1=A / D-ECO-RECEIPT2=A: one connected record for every
-//RS // development act. This source is compiled into AOT programs and included by
-//RS // resident engines; hosts only marshal the record to durable storage.
-//RS 
-//RS #[derive(Clone, Debug, PartialEq, Eq)]
-//RS pub struct JetDevelopmentReceiptInput {
-//RS     pub name: String,
-//RS     pub digest: String,
-//RS }
-//RS 
-//RS #[derive(Clone, Debug, PartialEq, Eq)]
-//RS pub struct JetDevelopmentReceiptPath {
-//RS     pub code: String,
-//RS     pub file: String,
-//RS     pub line: u32,
-//RS     pub function: String,
-//RS }
-//RS 
-//RS #[derive(Clone, Debug, PartialEq, Eq)]
-//RS pub struct JetDevelopmentReceipt {
-//RS     pub act: String,
-//RS     pub locked_closure: String,
-//RS     pub inputs: Vec<JetDevelopmentReceiptInput>,
-//RS     pub planned_action: String,
-//RS     pub outputs: Vec<JetDevelopmentReceiptInput>,
-//RS     pub activation_proof: String,
-//RS     pub parent_generation: String,
-//RS     pub witness: String,
-//RS     pub outcome: String,
-//RS     pub failure_path: Option<JetDevelopmentReceiptPath>,
-//RS }
-//RS 
-//RS impl JetDevelopmentReceipt {
-//RS     pub fn render(&self) -> String {
-//RS         let mut out = String::from("jet-development-receipt-v1\n");
-//RS         receipt_line(&mut out, "act", "", &self.act);
-//RS         receipt_line(&mut out, "closure", "", &self.locked_closure);
-//RS         for input in sorted_pairs(&self.inputs) {
-//RS             receipt_line(&mut out, "input", &input.name, &input.digest);
-//RS         }
-//RS         receipt_line(&mut out, "action", "planned", &self.planned_action);
-//RS         for output in sorted_pairs(&self.outputs) {
-//RS             receipt_line(&mut out, "output", &output.name, &output.digest);
-//RS         }
-//RS         receipt_line(&mut out, "activation-proof", "", &self.activation_proof);
-//RS         receipt_line(&mut out, "parent-generation", "", &self.parent_generation);
-//RS         receipt_line(&mut out, "witness", "", &self.witness);
-//RS         if let Some(path) = &self.failure_path {
-//RS             receipt_line(&mut out, "failure-path", "code", &path.code);
-//RS             receipt_line(&mut out, "failure-path", "file", &path.file);
-//RS             receipt_line(&mut out, "failure-path", "line", &path.line.to_string());
-//RS             receipt_line(&mut out, "failure-path", "function", &path.function);
-//RS         }
-//RS         receipt_line(&mut out, "outcome", "", &self.outcome);
-//RS         out
-//RS     }
-//RS 
-//RS     /// The stable identity of an act, independent of its witness and result.
-//RS     /// Inputs are sorted so callers cannot manufacture a second identity by
-//RS     /// presenting the same locked closure in a different order.
-//RS     pub fn identity_bytes(&self) -> Vec<u8> {
-//RS         let mut out = b"jet-development-act-v1\0".to_vec();
-//RS         frame(&mut out, &self.act);
-//RS         frame(&mut out, &self.locked_closure);
-//RS         for input in sorted_pairs(&self.inputs) {
-//RS             frame(&mut out, &input.name);
-//RS             frame(&mut out, &input.digest);
-//RS         }
-//RS         frame(&mut out, &self.planned_action);
-//RS         out
-//RS     }
-//RS }
-//RS 
-//RS /// The shared symbol used by hosts to serialize a receipt. The host owns the
-//RS /// filesystem transaction; this Prelude function owns the record bytes.
-//RS pub fn jet_development_receipt_render(receipt: &JetDevelopmentReceipt) -> String {
-//RS     receipt.render()
-//RS }
-//RS 
-//RS pub const JET_DEVELOPMENT_RECEIPT_DIRECTORY_ENV: &str = "JET_DEVELOPMENT_RECEIPT_DIRECTORY";
-//RS pub const JET_DEVELOPMENT_RECEIPT_ENTRY_ENV: &str = "JET_DEVELOPMENT_RECEIPT_ENTRY";
-//RS pub const JET_DEVELOPMENT_RECEIPT_SOURCE_DIGEST_ENV: &str = "JET_DEVELOPMENT_RECEIPT_SOURCE_DIGEST";
-//RS pub const JET_DEVELOPMENT_RECEIPT_CLOSURE_DIGEST_ENV: &str =
-//RS     "JET_DEVELOPMENT_RECEIPT_CLOSURE_DIGEST";
-//RS pub const JET_DEVELOPMENT_RECEIPT_INPUT_DIGEST_ENV: &str = "JET_DEVELOPMENT_RECEIPT_INPUT_DIGEST";
-//RS pub const JET_DEVELOPMENT_RECEIPT_INPUT_COUNT_ENV: &str = "JET_DEVELOPMENT_RECEIPT_INPUT_COUNT";
-//RS pub const JET_DEVELOPMENT_RECEIPT_INPUT_COUNT_DIGEST_ENV: &str =
-//RS     "JET_DEVELOPMENT_RECEIPT_INPUT_COUNT_DIGEST";
-//RS pub const JET_DEVELOPMENT_RECEIPT_TARGET_ENV: &str = "JET_DEVELOPMENT_RECEIPT_TARGET";
-//RS pub const JET_DEVELOPMENT_RECEIPT_TARGET_DIGEST_ENV: &str = "JET_DEVELOPMENT_RECEIPT_TARGET_DIGEST";
-//RS 
-//RS /// Write one production failure through the canonical development receipt
-//RS /// serializer. Only digests, a project-relative entry, and a redacted failure
-//RS /// path reach the receipt; runtime message, source text, locals, argv values,
-//RS /// and environment values never do.
-//RS pub fn jet_production_failure_receipt_write(
-//RS     code: &str,
-//RS     file: &str,
-//RS     line: u32,
-//RS     function: &str,
-//RS ) -> Option<String> {
-//RS     #[cfg(target_arch = "wasm32")]
-//RS     {
-//RS         let _ = (code, file, line, function);
-//RS         None
-//RS     }
-//RS     #[cfg(not(target_arch = "wasm32"))]
-//RS     {
-//RS         let directory = std::env::var(JET_DEVELOPMENT_RECEIPT_DIRECTORY_ENV).ok()?;
-//RS         let entry = std::env::var(JET_DEVELOPMENT_RECEIPT_ENTRY_ENV).ok()?;
-//RS         let source_digest = std::env::var(JET_DEVELOPMENT_RECEIPT_SOURCE_DIGEST_ENV).ok()?;
-//RS         let closure_digest = std::env::var(JET_DEVELOPMENT_RECEIPT_CLOSURE_DIGEST_ENV).ok()?;
-//RS         let input_digest = std::env::var(JET_DEVELOPMENT_RECEIPT_INPUT_DIGEST_ENV).ok()?;
-//RS         let input_count = std::env::var(JET_DEVELOPMENT_RECEIPT_INPUT_COUNT_ENV)
-//RS             .ok()?
-//RS             .parse::<usize>()
-//RS             .ok()?;
-//RS         let input_count_digest =
-//RS             std::env::var(JET_DEVELOPMENT_RECEIPT_INPUT_COUNT_DIGEST_ENV).ok()?;
-//RS         let target = std::env::var(JET_DEVELOPMENT_RECEIPT_TARGET_ENV).ok()?;
-//RS         let target_digest = std::env::var(JET_DEVELOPMENT_RECEIPT_TARGET_DIGEST_ENV).ok()?;
-//RS         let failure_file = receipt_path(file, &entry);
-//RS         let receipt = JetDevelopmentReceipt {
-//RS             act: "production-failure".into(),
-//RS             locked_closure: closure_digest,
-//RS             inputs: vec![
-//RS                 receipt_input("entry", &source_digest),
-//RS                 receipt_input("argv", &input_digest),
-//RS                 receipt_input("argv-count", &input_count_digest),
-//RS                 receipt_input("target", &target_digest),
-//RS             ],
-//RS             planned_action:
-//RS                 "sha256-2baa4c66edeaf54e166ff66bdd4c914c3076a7621a98c90f9a577c9b825be3b3".into(),
-//RS             outputs: Vec::new(),
-//RS             activation_proof:
-//RS                 "sha256-b8846cc6a6dfb698b445cafa1f316a814f70d56520598e8efcdbd42970999378".into(),
-//RS             parent_generation: String::new(),
-//RS             witness: format!(
-//RS                 "jet-runtime;target={target};argv-count={input_count};redaction=by-construction"
-//RS             ),
-//RS             outcome: "failed".into(),
-//RS             failure_path: Some(JetDevelopmentReceiptPath {
-//RS                 code: code.to_owned(),
-//RS                 file: failure_file,
-//RS                 line,
-//RS                 function: if function.is_empty() {
-//RS                     "<unknown>".into()
-//RS                 } else {
-//RS                     function.to_owned()
-//RS                 },
-//RS             }),
-//RS         };
-//RS         let bytes = jet_development_receipt_render(&receipt).into_bytes();
-//RS         let directory = std::path::Path::new(&directory);
-//RS         if !ensure_receipt_directory(directory) {
-//RS             return None;
-//RS         }
-//RS         let path = directory.join("receipt");
-//RS         match std::fs::symlink_metadata(&path) {
-//RS             Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => {
-//RS                 return None;
-//RS             }
-//RS             Ok(_) => return Some(path.to_string_lossy().into_owned()),
-//RS             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-//RS             Err(_) => return None,
-//RS         }
-//RS         let mut options = std::fs::OpenOptions::new();
-//RS         options.write(true).create_new(true);
-//RS         #[cfg(unix)]
-//RS         {
-//RS             use std::os::unix::fs::OpenOptionsExt;
-//RS             options.mode(0o600);
-//RS         }
-//RS         let mut output = match options.open(&path) {
-//RS             Ok(output) => output,
-//RS             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
-//RS                 return Some(path.to_string_lossy().into_owned());
-//RS             }
-//RS             Err(_) => return None,
-//RS         };
-//RS         if std::io::Write::write_all(&mut output, &bytes).is_err() {
-//RS             return None;
-//RS         }
-//RS         #[cfg(unix)]
-//RS         {
-//RS             use std::os::unix::fs::PermissionsExt;
-//RS             if std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).is_err() {
-//RS                 return None;
-//RS             }
-//RS         }
-//RS         Some(path.to_string_lossy().into_owned())
-//RS     }
-//RS }
-//RS 
-//RS #[cfg(not(target_arch = "wasm32"))]
-//RS fn receipt_input(name: &str, value: &str) -> JetDevelopmentReceiptInput {
-//RS     JetDevelopmentReceiptInput {
-//RS         name: name.into(),
-//RS         digest: value.into(),
-//RS     }
-//RS }
-//RS 
-//RS #[cfg(not(target_arch = "wasm32"))]
-//RS pub fn ensure_receipt_directory(path: &std::path::Path) -> bool {
-//RS     let mut current = std::path::PathBuf::new();
-//RS     for component in path.components() {
-//RS         current.push(component.as_os_str());
-//RS         loop {
-//RS             match std::fs::symlink_metadata(&current) {
-//RS                 Ok(metadata) => {
-//RS                     if metadata.file_type().is_symlink() || !metadata.is_dir() {
-//RS                         return false;
-//RS                     }
-//RS                     break;
-//RS                 }
-//RS                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-//RS                     let mut builder = std::fs::DirBuilder::new();
-//RS                     #[cfg(unix)]
-//RS                     {
-//RS                         use std::os::unix::fs::DirBuilderExt;
-//RS                         builder.mode(0o700);
-//RS                     }
-//RS                     match builder.create(&current) {
-//RS                         Ok(()) => {}
-//RS                         Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
-//RS                             continue;
-//RS                         }
-//RS                         Err(_) => return false,
-//RS                     }
-//RS                 }
-//RS                 Err(_) => return false,
-//RS             }
-//RS         }
-//RS     }
-//RS     true
-//RS }
-//RS 
-//RS #[cfg(not(target_arch = "wasm32"))]
-//RS fn receipt_path(file: &str, entry: &str) -> String {
-//RS     let raw = if file.is_empty() { entry } else { file };
-//RS     if raw.is_empty() || raw.starts_with('<') {
-//RS         return if raw.is_empty() {
-//RS             "<unknown>".into()
-//RS         } else {
-//RS             raw.into()
-//RS         };
-//RS     }
-//RS     let path = std::path::Path::new(raw);
-//RS     let relative = if path.is_absolute() {
-//RS         let Ok(cwd) = std::env::current_dir() else {
-//RS             return "<external>".into();
-//RS         };
-//RS         let Ok(relative) = path.strip_prefix(cwd) else {
-//RS             return "<external>".into();
-//RS         };
-//RS         relative.to_string_lossy().into_owned()
-//RS     } else {
-//RS         raw.into()
-//RS     };
-//RS     let relative = relative.replace('\\', "/");
-//RS     if relative.is_empty()
-//RS         || relative == "."
-//RS         || relative == ".."
-//RS         || relative.starts_with("../")
-//RS         || relative.starts_with('/')
-//RS     {
-//RS         "<external>".into()
-//RS     } else {
-//RS         relative
-//RS     }
-//RS }
-//RS 
-//RS pub fn is_content_address(value: &str) -> bool {
-//RS     let Some(hex) = value.strip_prefix("sha256-") else {
-//RS         return false;
-//RS     };
-//RS     hex.len() == 64
-//RS         && hex
-//RS             .bytes()
-//RS             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-//RS }
-//RS 
-//RS fn sorted_pairs(values: &[JetDevelopmentReceiptInput]) -> Vec<JetDevelopmentReceiptInput> {
-//RS     let mut sorted = values.to_vec();
-//RS     sorted.sort_by(|left, right| {
-//RS         left.name
-//RS             .cmp(&right.name)
-//RS             .then_with(|| left.digest.cmp(&right.digest))
-//RS     });
-//RS     sorted
-//RS }
-//RS 
-//RS fn receipt_line(out: &mut String, kind: &str, name: &str, value: &str) {
-//RS     out.push_str(kind);
-//RS     out.push('\t');
-//RS     out.push_str(&hex(name));
-//RS     out.push('\t');
-//RS     out.push_str(&hex(value));
-//RS     out.push('\n');
-//RS }
-//RS 
-//RS fn hex(value: &str) -> String {
-//RS     value
-//RS         .as_bytes()
-//RS         .iter()
-//RS         .map(|byte| format!("{byte:02x}"))
-//RS         .collect()
-//RS }
-//RS 
-//RS fn frame(out: &mut Vec<u8>, value: &str) {
-//RS     out.extend_from_slice(&(value.len() as u64).to_be_bytes());
-//RS     out.extend_from_slice(value.as_bytes());
-//RS }
-// END-PORT-PENDING 0137 crates/jet-codegen/src/Prelude/DevelopmentReceipt.rs:1-313
+// D-DEVR-LAW1=A / D-ECO-RECEIPT2=A: connected receipt bytes have one owner.
+use Jetpack.Foundation.Source.DevelopmentReceipt as receipt
+use core.sys.target as target
+use std.env as env
+use std.fs as fs
 
+// Rust: crates/jet-codegen/src/Prelude/DevelopmentReceipt.rs:5 -> receipt.JetDevelopmentReceiptInput
+// Rust: crates/jet-codegen/src/Prelude/DevelopmentReceipt.rs:11 -> receipt.JetDevelopmentReceiptPath
+// Rust: crates/jet-codegen/src/Prelude/DevelopmentReceipt.rs:19 -> receipt.JetDevelopmentReceipt
+// Rust: crates/jet-codegen/src/Prelude/DevelopmentReceipt.rs:34 -> receipt.JetDevelopmentReceipt.render
+// Rust: crates/jet-codegen/src/Prelude/DevelopmentReceipt.rs:61 -> receipt.JetDevelopmentReceipt.identity_bytes
+// Rust: crates/jet-codegen/src/Prelude/DevelopmentReceipt.rs:76 -> receipt.jet_development_receipt_render
+// Rust: crates/jet-codegen/src/Prelude/DevelopmentReceipt.rs:80
+pub const JET_DEVELOPMENT_RECEIPT_DIRECTORY_ENV: String = "JET_DEVELOPMENT_RECEIPT_DIRECTORY"
+// Rust: crates/jet-codegen/src/Prelude/DevelopmentReceipt.rs:81
+pub const JET_DEVELOPMENT_RECEIPT_ENTRY_ENV: String = "JET_DEVELOPMENT_RECEIPT_ENTRY"
+// Rust: crates/jet-codegen/src/Prelude/DevelopmentReceipt.rs:82
+pub const JET_DEVELOPMENT_RECEIPT_SOURCE_DIGEST_ENV: String = "JET_DEVELOPMENT_RECEIPT_SOURCE_DIGEST"
+// Rust: crates/jet-codegen/src/Prelude/DevelopmentReceipt.rs:83
+pub const JET_DEVELOPMENT_RECEIPT_CLOSURE_DIGEST_ENV: String = "JET_DEVELOPMENT_RECEIPT_CLOSURE_DIGEST"
+// Rust: crates/jet-codegen/src/Prelude/DevelopmentReceipt.rs:85
+pub const JET_DEVELOPMENT_RECEIPT_INPUT_DIGEST_ENV: String = "JET_DEVELOPMENT_RECEIPT_INPUT_DIGEST"
+// Rust: crates/jet-codegen/src/Prelude/DevelopmentReceipt.rs:86
+pub const JET_DEVELOPMENT_RECEIPT_INPUT_COUNT_ENV: String = "JET_DEVELOPMENT_RECEIPT_INPUT_COUNT"
+// Rust: crates/jet-codegen/src/Prelude/DevelopmentReceipt.rs:87
+pub const JET_DEVELOPMENT_RECEIPT_INPUT_COUNT_DIGEST_ENV: String = "JET_DEVELOPMENT_RECEIPT_INPUT_COUNT_DIGEST"
+// Rust: crates/jet-codegen/src/Prelude/DevelopmentReceipt.rs:89
+pub const JET_DEVELOPMENT_RECEIPT_TARGET_ENV: String = "JET_DEVELOPMENT_RECEIPT_TARGET"
+// Rust: crates/jet-codegen/src/Prelude/DevelopmentReceipt.rs:90
+pub const JET_DEVELOPMENT_RECEIPT_TARGET_DIGEST_ENV: String = "JET_DEVELOPMENT_RECEIPT_TARGET_DIGEST"
+
+// Rust: crates/jet-codegen/src/Prelude/DevelopmentReceipt.rs:96
+pub fn jet_production_failure_receipt_write(code: String, file: String, line: U32, function: String) -> String? Never! {
+    // GATE #4483: dispatch on the compilation target, not the host.
+    if target.selected_arch() == "wasm32" -> return None
+    // GATE #4565: kernel primitive — environment, native paths and filesystem transaction.
+    #Unsafe("read receipt configuration and create the redacted receipt with native filesystem semantics") {
+        directory_text :: env.var(JET_DEVELOPMENT_RECEIPT_DIRECTORY_ENV) ?? return None
+        entry :: env.var(JET_DEVELOPMENT_RECEIPT_ENTRY_ENV) ?? return None
+        source_digest :: env.var(JET_DEVELOPMENT_RECEIPT_SOURCE_DIGEST_ENV) ?? return None
+        closure_digest :: env.var(JET_DEVELOPMENT_RECEIPT_CLOSURE_DIGEST_ENV) ?? return None
+        input_digest :: env.var(JET_DEVELOPMENT_RECEIPT_INPUT_DIGEST_ENV) ?? return None
+        input_count_text :: env.var(JET_DEVELOPMENT_RECEIPT_INPUT_COUNT_ENV) ?? return None
+        input_count :: USize.parse(input_count_text) ?? return None
+        input_count_digest :: env.var(JET_DEVELOPMENT_RECEIPT_INPUT_COUNT_DIGEST_ENV) ?? return None
+        target_name :: env.var(JET_DEVELOPMENT_RECEIPT_TARGET_ENV) ?? return None
+        target_digest :: env.var(JET_DEVELOPMENT_RECEIPT_TARGET_DIGEST_ENV) ?? return None
+        failure_file :: receipt_path(file, entry)
+        record :: receipt.JetDevelopmentReceipt{
+            act: "production-failure", locked_closure: closure_digest,
+            inputs: [receipt_input("entry", source_digest), receipt_input("argv", input_digest),
+                receipt_input("argv-count", input_count_digest), receipt_input("target", target_digest)],
+            planned_action: "sha256-2baa4c66edeaf54e166ff66bdd4c914c3076a7621a98c90f9a577c9b825be3b3",
+            outputs: [], activation_proof: "sha256-b8846cc6a6dfb698b445cafa1f316a814f70d56520598e8efcdbd42970999378",
+            parent_generation: "", witness: "jet-runtime;target={target_name};argv-count={input_count};redaction=by-construction",
+            outcome: "failed", failure_path: Val(receipt.JetDevelopmentReceiptPath{
+                code: code, file: failure_file, line: Int.from_u32(line),
+                function: if function.is_empty() -> "<unknown>" else -> function})}
+        bytes :: receipt.jet_development_receipt_render(record).bytes()
+        directory :: OSPath.from(directory_text)
+        if not ensure_receipt_directory(directory) -> return None
+        path :: directory.join("receipt")
+        if fs.symlink_metadata(path) == {
+            Ok(metadata) -> {
+                if metadata.file_type().is_symlink() || not metadata.is_file() -> return None
+                return Val(path.to_string_lossy().to_string())
+            }
+            Err(error) -> if error.kind() != .NotFound -> return None
+        }
+        options := fs.OpenOptions.new()
+        &options.write(true).create_new(true)
+        if target.selected_family() == "unix" -> &options.mode(0o600)
+        output := if options.open(path) == {
+            Ok(output) -> output
+            Err(error) -> {
+                if error.kind() == .AlreadyExists -> return Val(path.to_string_lossy().to_string())
+                return None
+            }
+        }
+        if output.write_all(bytes) is Err(_) -> return None
+        if target.selected_family() == "unix" {
+            if fs.set_permissions(path, fs.Permissions.from_mode(0o600)) is Err(_) -> return None
+        }
+        Val(path.to_string_lossy().to_string())
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/DevelopmentReceipt.rs:196
+fn receipt_input(name: String, value: String) -> receipt.JetDevelopmentReceiptInput Never! {
+    receipt.JetDevelopmentReceiptInput{name: name, digest: value}
+}
+// Rust: crates/jet-codegen/src/Prelude/DevelopmentReceipt.rs:204
+pub fn ensure_receipt_directory(path: OSPath) -> Bool Never! {
+    // GATE #4565: kernel primitive — no-follow component checks and permission-controlled mkdir.
+    #Unsafe("native path components and filesystem metadata stay native and preserve original error kinds") {
+        current := OSPath.new()
+        loop component in path.components() {
+            &current.push(component.as_os_str())
+            loop {
+                if fs.symlink_metadata(current) == {
+                    Ok(metadata) -> {
+                        if metadata.file_type().is_symlink() || not metadata.is_dir() -> return false
+                        break
+                    }
+                    Err(error) -> {
+                        if error.kind() != .NotFound -> return false
+                        builder := fs.DirBuilder.new()
+                        if target.selected_family() == "unix" -> &builder.mode(0o700)
+                        if builder.create(current) == {
+                            Ok(_) -> {}
+                            Err(error) -> {
+                                if error.kind() == .AlreadyExists -> continue
+                                return false
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        true
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/DevelopmentReceipt.rs:239
+fn receipt_path(file: String, entry: String) -> String Never! {
+    raw :: if file.is_empty() -> entry else -> file
+    if raw.is_empty() || raw.starts_with('<') -> return if raw.is_empty() -> "<unknown>" else -> raw
+    // GATE #4565: kernel primitive — cwd and OSPath prefix semantics.
+    relative := #Unsafe("redact absolute source paths outside the actual current directory") {
+        path :: OSPath.from(raw)
+        if path.is_absolute() {
+            cwd :: env.current_dir() ?? return "<external>"
+            relative :: path.strip_prefix(cwd) ?? return "<external>"
+            relative.to_string_lossy().to_string()
+        } else -> raw
+    }
+    relative = relative.replace('\\', "/")
+    if relative.is_empty() || relative == "." || relative == ".." || relative.starts_with("../") || relative.starts_with('/') -> return "<external>"
+    relative
+}
+// Rust: crates/jet-codegen/src/Prelude/DevelopmentReceipt.rs:273 -> receipt.jet_receipt_is_content_address
+// Rust: crates/jet-codegen/src/Prelude/DevelopmentReceipt.rs:283 -> receipt.jet_receipt_sorted_pairs
+// Rust: crates/jet-codegen/src/Prelude/DevelopmentReceipt.rs:293 -> receipt.jet_receipt_line
+// Rust: crates/jet-codegen/src/Prelude/DevelopmentReceipt.rs:302 -> receipt.jet_receipt_hex
+// Rust: crates/jet-codegen/src/Prelude/DevelopmentReceipt.rs:310 -> receipt.jet_receipt_frame

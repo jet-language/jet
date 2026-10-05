@@ -1,0 +1,16 @@
+use core.testing.runtime.std_testing_comparison.[JetTestComparison]
+use core.encoding.runtime.std_data_tree.[DataTree]
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/TestingComparison.rs:3
+// Behavioral control for the carrier shape; no inline Rust tests exist.
+#Test("testing_comparison_preserves_evidence_fields") {
+    comparison :: JetTestComparison{status: "different", relation: "equal", source: "source", tool: "tool", target: "native",
+        seed: Val(I64{17}), case_ids: ["case"], inputs: [DataTree.Text("input")], reference: [DataTree.Text("expected")],
+        candidate: [DataTree.Text("actual")], first_difference: I64{0}, reason: "unequal values", universal_proof: false}
+    assert(comparison.seed == Val(I64{17}))
+    assert(comparison.case_ids == ["case"])
+    assert(comparison.reference == [DataTree.Text("expected")])
+    assert(comparison.candidate == [DataTree.Text("actual")])
+    assert(comparison.first_difference == I64{0})
+    assert(not comparison.universal_proof)
+}

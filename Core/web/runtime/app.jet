@@ -1,2084 +1,1146 @@
-// PORT-PENDING 0019 crates-jet-codegen-src-prelude-app: crates/jet-codegen/src/Prelude/App.rs:1-2080
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS // D-WEBAPP1=D / D-WEBAUTHOR1=D / D-DX-ROUTER1=A: `core.web.app` — statically
-//RS // known application builder value. Sema owns the typed graph; this runtime
-//RS // handle records the same edges and feeds them, once, into the canonical
-//RS // WebRouter navigation kernel and the typed server-function boundary.
-//RS // Std-only (I6).
-//RS 
-//RS mod jet_app_impl {
-//RS     use std::any::type_name;
-//RS     use std::collections::HashMap;
-//RS     use std::sync::{Arc, LazyLock, Mutex};
-//RS     use super::jet_std;
-//RS 
-//RS     /// One checked page handler: typed route inputs come from the router's
-//RS     /// navigation and the route's loader data.
-//RS     type PageHandler = Arc<
-//RS         dyn Fn(&super::JetWebNavigation, &str) -> Result<JetWebPage, String> + Send + Sync,
-//RS     >;
-//RS     /// One checked route boundary (`pending`/`not_found`/`error`).
-//RS     type BoundaryHandler = Arc<dyn Fn() -> Result<JetWebPage, String> + Send + Sync>;
-//RS     /// One checked loader: typed route inputs in, encoded route data out.
-//RS     type LoaderHandler =
-//RS         Arc<dyn Fn(&super::JetWebNavigation) -> Result<String, String> + Send + Sync>;
-//RS     type ActionHandler = Option<super::JetWebServerFunction>;
-//RS     type MountHandler = Arc<dyn Fn(&String) + Send + Sync>;
-//RS 
-//RS     /// The one wire rendering of a checked handler failure.  The default
-//RS     /// callable carrier (`Err`) renders its report; every Codable domain is
-//RS     /// JSON; a proven-unreachable domain has no values.
-//RS     pub trait JetAppFailure {
-//RS         fn into_app_failure(self) -> String;
-//RS     }
-//RS 
-//RS     impl<E: super::__jet_Encode> JetAppFailure for E {
-//RS         fn into_app_failure(self) -> String {
-//RS             super::jet_enc_json_to_string(&self)
-//RS         }
-//RS     }
-//RS 
-//RS     impl JetAppFailure for super::JetErr {
-//RS         fn into_app_failure(self) -> String {
-//RS             self.to_string()
-//RS         }
-//RS     }
-//RS 
-//RS     impl JetAppFailure for std::convert::Infallible {
-//RS         fn into_app_failure(self) -> String {
-//RS             match self {}
-//RS         }
-//RS     }
-//RS 
-//RS     fn jet_app_invalid(message: String) -> ! {
-//RS         super::jet_runtime_stop("E3001", "", 0, &message)
-//RS     }
-//RS 
-//RS     fn jet_app_server_function<I, O, E, F>(
-//RS         name: String,
-//RS         source_id: String,
-//RS         handler: F,
-//RS     ) -> super::JetWebServerFunction
-//RS     where
-//RS         I: super::__jet_Decode + 'static,
-//RS         O: super::__jet_Encode + 'static,
-//RS         E: JetAppFailure + 'static,
-//RS         F: Fn(I) -> Result<O, E> + Send + Sync + 'static,
-//RS     {
-//RS         let input_type = type_name::<I>().to_string();
-//RS         let output_type = type_name::<O>().to_string();
-//RS         let error_type = type_name::<E>().to_string();
-//RS         let dispatch: super::JetWebServerFnHandler = Arc::new(move |_context, body| {
-//RS             let body = body.to_string();
-//RS             let input = super::jet_enc_json_decode::<I>(&body).map_err(|errors| {
-//RS                 super::JetWebServerFnError::InvalidInput(format!("{errors:?}"))
-//RS             })?;
-//RS             match handler(input) {
-//RS                 Ok(output) => Ok(super::jet_enc_json_to_string(&output)),
-//RS                 Err(error) => Err(super::JetWebServerFnError::Handler {
-//RS                     code: "application_error".to_string(),
-//RS                     message: error.into_app_failure(),
-//RS                 }),
-//RS             }
-//RS         });
-//RS         super::jet_web_server_fn_typed(
-//RS             name,
-//RS             source_id,
-//RS             "POST".to_string(),
-//RS             input_type,
-//RS             output_type,
-//RS             error_type,
-//RS             dispatch,
-//RS         )
-//RS         .unwrap_or_else(|error| jet_app_invalid(format!("invalid app server function: {error:?}")))
-//RS     }
-//RS 
-//RS     fn jet_app_unit_server_function<O, E, F>(
-//RS         name: String,
-//RS         source_id: String,
-//RS         handler: F,
-//RS     ) -> super::JetWebServerFunction
-//RS     where
-//RS         O: super::__jet_Encode + 'static,
-//RS         E: JetAppFailure + 'static,
-//RS         F: Fn() -> Result<O, E> + Send + Sync + 'static,
-//RS     {
-//RS         let output_type = type_name::<O>().to_string();
-//RS         let error_type = type_name::<E>().to_string();
-//RS         let dispatch: super::JetWebServerFnHandler = Arc::new(move |_context, _body| {
-//RS             match handler() {
-//RS                 Ok(output) => Ok(super::jet_enc_json_to_string(&output)),
-//RS                 Err(error) => Err(super::JetWebServerFnError::Handler {
-//RS                     code: "application_error".to_string(),
-//RS                     message: error.into_app_failure(),
-//RS                 }),
-//RS             }
-//RS         });
-//RS         super::jet_web_server_fn_typed(
-//RS             name,
-//RS             source_id,
-//RS             "POST".to_string(),
-//RS             "Unit".to_string(),
-//RS             output_type,
-//RS             error_type,
-//RS             dispatch,
-//RS         )
-//RS         .unwrap_or_else(|error| jet_app_invalid(format!("invalid app server function: {error:?}")))
-//RS     }
-//RS 
-//RS 
-//RS     /// A checked `action`/`form`/`data` handler.  The compiler hands every
-//RS     /// handler over as the send-safe borrow callback, so the typed input is
-//RS     /// decoded here once from the shared JSON wire and borrowed by the user
-//RS     /// function.
-//RS     pub trait JetAppActionHandler {
-//RS         fn into_server_function(self, name: String) -> super::JetWebServerFunction;
-//RS     }
-//RS 
-//RS     impl<I, O, E> JetAppActionHandler for Arc<dyn Fn(&I) -> Result<O, E> + Send + Sync + 'static>
-//RS     where
-//RS         I: super::__jet_Decode + 'static,
-//RS         O: super::__jet_Encode + 'static,
-//RS         E: JetAppFailure + 'static,
-//RS     {
-//RS         fn into_server_function(self, name: String) -> super::JetWebServerFunction {
-//RS             jet_app_server_function::<I, O, E, _>(
-//RS                 name.clone(),
-//RS                 name,
-//RS                 move |input| self(&input),
-//RS             )
-//RS         }
-//RS     }
-//RS 
-//RS     impl<O, E> JetAppActionHandler for Arc<dyn Fn() -> Result<O, E> + Send + Sync + 'static>
-//RS     where
-//RS         O: super::__jet_Encode + 'static,
-//RS         E: JetAppFailure + 'static,
-//RS     {
-//RS         fn into_server_function(self, name: String) -> super::JetWebServerFunction {
-//RS             jet_app_unit_server_function::<O, E, _>(
-//RS                 name.clone(),
-//RS                 name,
-//RS                 move || self(),
-//RS             )
-//RS         }
-//RS     }
-//RS 
-//RS     #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-//RS     pub enum JetAppRenderMode {
-//RS         #[default]
-//RS         Csr,
-//RS         Ssr,
-//RS         Ssg,
-//RS         Stream,
-//RS         Island,
-//RS     }
-//RS 
-//RS     impl JetAppRenderMode {
-//RS         pub const fn as_str(self) -> &'static str {
-//RS             match self {
-//RS                 Self::Csr => "csr",
-//RS                 Self::Ssr => "ssr",
-//RS                 Self::Ssg => "ssg",
-//RS                 Self::Stream => "stream",
-//RS                 Self::Island => "island",
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-//RS     pub enum JetAppHydrationTrigger {
-//RS         Immediate,
-//RS         ClientLoad,
-//RS         ClientIdle,
-//RS         ClientVisible,
-//RS         Manual,
-//RS     }
-//RS 
-//RS     impl JetAppHydrationTrigger {
-//RS         pub const fn as_str(self) -> &'static str {
-//RS             match self {
-//RS                 Self::Immediate => "immediate",
-//RS                 Self::ClientLoad => "client-load",
-//RS                 Self::ClientIdle => "client-idle",
-//RS                 Self::ClientVisible => "client-visible",
-//RS                 Self::Manual => "manual",
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     /// Compiler-derived facts carried by one runtime route registration.
-//RS     ///
-//RS     /// The route owns this value.  A later route cannot inherit a mutable
-//RS     /// application-wide render choice, and hosts only project these facts.
-//RS     #[derive(Clone, Debug, Default, Eq, PartialEq)]
-//RS     pub struct JetAppRouteField {
-//RS         pub name: String,
-//RS         pub ty: String,
-//RS         pub codec: String,
-//RS         pub required: bool,
-//RS         pub default: Option<String>,
-//RS     }
-//RS 
-//RS     #[derive(Clone, Debug, Default, Eq, PartialEq)]
-//RS     pub struct JetAppLoaderFacts {
-//RS         pub handler: String,
-//RS         pub data_type: String,
-//RS         pub dependency: String,
-//RS         pub preload: bool,
-//RS         pub cache_identity: String,
-//RS     }
-//RS 
-//RS     #[derive(Clone, Debug, Default, Eq, PartialEq)]
-//RS     pub struct JetAppRouteFacts {
-//RS         pub route_identity: String,
-//RS         pub path_params: Vec<JetAppRouteField>,
-//RS         pub search_params: Vec<JetAppRouteField>,
-//RS         pub search_codec: String,
-//RS         pub loader_contract: Option<JetAppLoaderFacts>,
-//RS         pub pending_boundary: Option<String>,
-//RS         pub not_found_boundary: Option<String>,
-//RS         pub error_boundary: Option<String>,
-//RS         pub mode: JetAppRenderMode,
-//RS         pub reason: Vec<String>,
-//RS         pub effects: Vec<String>,
-//RS         pub interactive: bool,
-//RS         pub loader: Option<String>,
-//RS         pub form: Option<String>,
-//RS         pub cache: String,
-//RS         pub override_mode: Option<JetAppRenderMode>,
-//RS         pub pending_boundary_id: Option<u64>,
-//RS         pub island_identity: Option<String>,
-//RS         pub hydration_trigger: Option<JetAppHydrationTrigger>,
-//RS     }
-//RS 
-//RS     impl JetAppRouteFacts {
-//RS         pub fn with_mode(mode: JetAppRenderMode) -> Self {
-//RS             Self {
-//RS                 mode,
-//RS                 reason: vec![format!("explicit render mode `{}`", mode.as_str())],
-//RS                 override_mode: Some(mode),
-//RS                 ..Self::default()
-//RS             }
-//RS         }
-//RS 
-//RS         fn json(&self) -> String {
-//RS             let reason = self
-//RS                 .reason
-//RS                 .iter()
-//RS                 .map(|value| jet_app_json_string(value))
-//RS                 .collect::<Vec<_>>()
-//RS                 .join(",");
-//RS             let effects = self
-//RS                 .effects
-//RS                 .iter()
-//RS                 .map(|value| jet_app_json_string(value))
-//RS                 .collect::<Vec<_>>()
-//RS                 .join(",");
-//RS             let path_params = self
-//RS                 .path_params
-//RS                 .iter()
-//RS                 .map(jet_app_route_field_json)
-//RS                 .collect::<Vec<_>>()
-//RS                 .join(",");
-//RS             let search_params = self
-//RS                 .search_params
-//RS                 .iter()
-//RS                 .map(jet_app_route_field_json)
-//RS                 .collect::<Vec<_>>()
-//RS                 .join(",");
-//RS             let loader = self
-//RS                 .loader
-//RS                 .as_deref()
-//RS                 .map(jet_app_json_string)
-//RS                 .unwrap_or_else(|| "null".to_string());
-//RS             let loader_contract = self
-//RS                 .loader_contract
-//RS                 .as_ref()
-//RS                 .map(jet_app_loader_facts_json)
-//RS                 .unwrap_or_else(|| "null".to_string());
-//RS             let form = self
-//RS                 .form
-//RS                 .as_deref()
-//RS                 .map(jet_app_json_string)
-//RS                 .unwrap_or_else(|| "null".to_string());
-//RS             let override_mode = self
-//RS                 .override_mode
-//RS                 .map(|mode| jet_app_json_string(mode.as_str()))
-//RS                 .unwrap_or_else(|| "null".to_string());
-//RS             let pending_boundary_id = self
-//RS                 .pending_boundary_id
-//RS                 .map(|id| id.to_string())
-//RS                 .unwrap_or_else(|| "null".to_string());
-//RS             let pending = self
-//RS                 .pending_boundary
-//RS                 .as_deref()
-//RS                 .map(jet_app_json_string)
-//RS                 .unwrap_or_else(|| "null".to_string());
-//RS             let not_found = self
-//RS                 .not_found_boundary
-//RS                 .as_deref()
-//RS                 .map(jet_app_json_string)
-//RS                 .unwrap_or_else(|| "null".to_string());
-//RS             let error = self
-//RS                 .error_boundary
-//RS                 .as_deref()
-//RS                 .map(jet_app_json_string)
-//RS                 .unwrap_or_else(|| "null".to_string());
-//RS             let island = self
-//RS                 .island_identity
-//RS                 .as_deref()
-//RS                 .map(|identity| {
-//RS                     let trigger = self
-//RS                         .hydration_trigger
-//RS                         .unwrap_or(JetAppHydrationTrigger::Immediate);
-//RS                     format!(
-//RS                         "{{\"identity\":{},\"hydration_trigger\":{},\"resume_payload\":{{\"captures\":[],\"serializable\":false}}}}",
-//RS                         jet_app_json_string(identity),
-//RS                         jet_app_json_string(trigger.as_str()),
-//RS                     )
-//RS                 })
-//RS                 .unwrap_or_else(|| "null".to_string());
-//RS             format!(
-//RS                 "{{\"route_identity\":{},\"path_params\":[{}],\"search_params\":[{}],\"search_codec\":{},\"loader_contract\":{},\"pending_boundary\":{},\"not_found_boundary\":{},\"error_boundary\":{},\"mode\":{},\"reason\":[{}],\"effects\":[{}],\"interactive\":{},\"loader\":{},\"form\":{},\"cache\":{},\"override_mode\":{},\"pending_boundary_id\":{},\"island\":{}}}",
-//RS                 jet_app_json_string(&self.route_identity),
-//RS                 path_params,
-//RS                 search_params,
-//RS                 jet_app_json_string(if self.search_codec.is_empty() { "query" } else { &self.search_codec }),
-//RS                 loader_contract,
-//RS                 pending,
-//RS                 not_found,
-//RS                 error,
-//RS                 jet_app_json_string(self.mode.as_str()),
-//RS                 reason,
-//RS                 effects,
-//RS                 self.interactive,
-//RS                 loader,
-//RS                 form,
-//RS                 jet_app_json_string(if self.cache.is_empty() { "unspecified" } else { &self.cache }),
-//RS                 override_mode,
-//RS                 pending_boundary_id,
-//RS                 island,
-//RS             )
-//RS         }
-//RS     }
-//RS 
-//RS     fn jet_app_route_field_json(field: &JetAppRouteField) -> String {
-//RS         let default = field
-//RS             .default
-//RS             .as_deref()
-//RS             .map(jet_app_json_string)
-//RS             .unwrap_or_else(|| "null".to_string());
-//RS         format!(
-//RS             "{{\"name\":{},\"ty\":{},\"codec\":{},\"required\":{},\"default\":{}}}",
-//RS             jet_app_json_string(&field.name),
-//RS             jet_app_json_string(&field.ty),
-//RS             jet_app_json_string(&field.codec),
-//RS             field.required,
-//RS             default,
-//RS         )
-//RS     }
-//RS 
-//RS     fn jet_app_loader_facts_json(loader: &JetAppLoaderFacts) -> String {
-//RS         format!(
-//RS             "{{\"handler\":{},\"data_type\":{},\"dependency\":{},\"preload\":{},\"cache_identity\":{}}}",
-//RS             jet_app_json_string(&loader.handler),
-//RS             jet_app_json_string(&loader.data_type),
-//RS             jet_app_json_string(&loader.dependency),
-//RS             loader.preload,
-//RS             jet_app_json_string(&loader.cache_identity),
-//RS         )
-//RS     }
-//RS 
-//RS     fn jet_app_route_identity(path: &str) -> String {
-//RS         let mut hash = 0xcbf29ce484222325u64;
-//RS         for byte in path.as_bytes() {
-//RS             hash ^= u64::from(*byte);
-//RS             hash = hash.wrapping_mul(0x100000001b3);
-//RS         }
-//RS         format!("route-{hash:016x}")
-//RS     }
-//RS 
-//RS     fn jet_app_json_string(value: &str) -> String {
-//RS         let mut out = String::with_capacity(value.len() + 2);
-//RS         out.push('"');
-//RS         for character in value.chars() {
-//RS             match character {
-//RS                 '"' => out.push_str("\\\""),
-//RS                 '\\' => out.push_str("\\\\"),
-//RS                 '\n' => out.push_str("\\n"),
-//RS                 '\r' => out.push_str("\\r"),
-//RS                 '\t' => out.push_str("\\t"),
-//RS                 character if (character as u32) < 0x20 => {
-//RS                     out.push_str(&format!("\\u{:04x}", character as u32));
-//RS                 }
-//RS                 character => out.push(character),
-//RS             }
-//RS         }
-//RS         out.push('"');
-//RS         out
-//RS     }
-//RS 
-//RS     fn jet_app_html_attr(value: &str) -> String {
-//RS         let mut out = String::with_capacity(value.len());
-//RS         for character in value.chars() {
-//RS             match character {
-//RS                 '&' => out.push_str("&amp;"),
-//RS                 '<' => out.push_str("&lt;"),
-//RS                 '>' => out.push_str("&gt;"),
-//RS                 '"' => out.push_str("&quot;"),
-//RS                 character => out.push(character),
-//RS             }
-//RS         }
-//RS         out
-//RS     }
-//RS 
-//RS     // ── Typed route inputs ──────────────────────────────────────────────
-//RS     //
-//RS     // Sema binds every handler parameter to one route input: a path
-//RS     // parameter by name, the one search record (or a scalar search field),
-//RS     // or the route's loader data.  The compiler serializes that binding next
-//RS     // to the handler so the runtime decodes each position from the checked
-//RS     // navigation, never from a positional guess.
-//RS 
-//RS     #[derive(Clone, Debug, Eq, PartialEq)]
-//RS     pub struct JetAppSearchField {
-//RS         pub name: String,
-//RS         pub ty: String,
-//RS         pub required: bool,
-//RS     }
-//RS 
-//RS     #[derive(Clone, Debug, Eq, PartialEq)]
-//RS     pub enum JetAppRouteBinding {
-//RS         /// `p:<name>=<Type>` — one dynamic path segment.
-//RS         Path { name: String, ty: String },
-//RS         /// `s=<codec>:<name>=<Type>,…` — the search record (`json`) or one
-//RS         /// scalar search field (`query`).
-//RS         Search {
-//RS             codec: String,
-//RS             fields: Vec<JetAppSearchField>,
-//RS             scalar: Option<String>,
-//RS         },
-//RS         /// `d` — the route's loader data.
-//RS         Data,
-//RS     }
-//RS 
-//RS     impl JetAppRouteBinding {
-//RS         fn label(&self) -> String {
-//RS             match self {
-//RS                 Self::Path { name, .. } => format!("path parameter `{name}`"),
-//RS                 Self::Search { scalar: Some(name), .. } => format!("search field `{name}`"),
-//RS                 Self::Search { .. } => "search record".to_string(),
-//RS                 Self::Data => "loader data".to_string(),
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     fn jet_app_router_value_type(ty: &str) -> super::JetWebRouterValueType {
-//RS         match ty {
-//RS             "Int" => super::JetWebRouterValueType::Int,
-//RS             "Bool" => super::JetWebRouterValueType::Bool,
-//RS             "Float" => super::JetWebRouterValueType::Float,
-//RS             "String" | "Text" => super::JetWebRouterValueType::String,
-//RS             _ => super::JetWebRouterValueType::Json,
-//RS         }
-//RS     }
-//RS 
-//RS     fn jet_app_search_field(item: &str) -> Result<JetAppSearchField, String> {
-//RS         let (name, ty) = item
-//RS             .split_once('=')
-//RS             .ok_or_else(|| format!("invalid search field binding `{item}`"))?;
-//RS         let (ty, required) = match ty.strip_suffix('?') {
-//RS             Some(ty) => (ty, false),
-//RS             None => (ty, true),
-//RS         };
-//RS         if name.is_empty() || ty.is_empty() {
-//RS             return Err(format!("invalid search field binding `{item}`"));
-//RS         }
-//RS         Ok(JetAppSearchField {
-//RS             name: name.to_string(),
-//RS             ty: ty.to_string(),
-//RS             required,
-//RS         })
-//RS     }
-//RS 
-//RS     /// Parse the compiler-serialized binding.  The grammar is owned by the
-//RS     /// TIR App lowering; a mismatch is a compiler invariant failure.
-//RS     pub fn jet_app_route_binding(spec: &str) -> Vec<JetAppRouteBinding> {
-//RS         spec.split(';')
-//RS             .filter(|item| !item.is_empty())
-//RS             .map(|item| -> Result<JetAppRouteBinding, String> {
-//RS                 if item == "d" {
-//RS                     return Ok(JetAppRouteBinding::Data);
-//RS                 }
-//RS                 if let Some(rest) = item.strip_prefix("p:") {
-//RS                     let (name, ty) = rest
-//RS                         .split_once('=')
-//RS                         .ok_or_else(|| format!("invalid path binding `{item}`"))?;
-//RS                     if name.is_empty() || ty.is_empty() {
-//RS                         return Err(format!("invalid path binding `{item}`"));
-//RS                     }
-//RS                     return Ok(JetAppRouteBinding::Path {
-//RS                         name: name.to_string(),
-//RS                         ty: ty.to_string(),
-//RS                     });
-//RS                 }
-//RS                 if let Some(rest) = item.strip_prefix("s=") {
-//RS                     let (codec, fields) = rest
-//RS                         .split_once(':')
-//RS                         .ok_or_else(|| format!("invalid search binding `{item}`"))?;
-//RS                     let fields = fields
-//RS                         .split(',')
-//RS                         .filter(|field| !field.is_empty())
-//RS                         .map(jet_app_search_field)
-//RS                         .collect::<Result<Vec<_>, _>>()?;
-//RS                     let scalar = match codec {
-//RS                         "json" => None,
-//RS                         "query" if fields.len() == 1 => Some(fields[0].name.clone()),
-//RS                         _ => return Err(format!("invalid search binding `{item}`")),
-//RS                     };
-//RS                     return Ok(JetAppRouteBinding::Search {
-//RS                         codec: codec.to_string(),
-//RS                         fields,
-//RS                         scalar,
-//RS                     });
-//RS                 }
-//RS                 Err(format!("invalid route input binding `{item}`"))
-//RS             })
-//RS             .collect::<Result<Vec<_>, _>>()
-//RS             .unwrap_or_else(|error| jet_app_invalid(format!("invalid app route binding: {error}")))
-//RS     }
-//RS 
-//RS     /// One scalar search field as its wire tree.  A field the binding marks
-//RS     /// optional (`T?`) is `Null` when the URL omits it, so the typed decoder
-//RS     /// yields the absent value; a required field must be present.
-//RS     fn jet_app_scalar_search_tree(
-//RS         navigation: &super::JetWebNavigation,
-//RS         name: &str,
-//RS         fields: &[JetAppSearchField],
-//RS     ) -> Result<jet_std::DataTree, String> {
-//RS         match navigation.search.get(name) {
-//RS             Some(value) => Ok(jet_std::DataTree::Text(value.clone())),
-//RS             None if fields.iter().any(|field| field.name == name && !field.required) => {
-//RS                 Ok(jet_std::DataTree::Null)
-//RS             }
-//RS             None => Err(format!(
-//RS                 "route `{}` has no search field `{name}`",
-//RS                 navigation.route
-//RS             )),
-//RS         }
-//RS     }
-//RS 
-//RS     /// The decoded navigation one handler invocation reads from.
-//RS     pub struct JetAppRouteInputs<'a> {
-//RS         binding: &'a [JetAppRouteBinding],
-//RS         navigation: &'a super::JetWebNavigation,
-//RS         data: &'a str,
-//RS     }
-//RS 
-//RS     impl JetAppRouteInputs<'_> {
-//RS         /// The checked wire value for one bound input, before typed decoding.
-//RS         /// Resident tiers (JIT/interpreter) marshal this tree into their own
-//RS         /// runtime values with the same typed decoder they use for JSON.
-//RS         pub fn tree(&self, index: usize) -> Result<jet_std::DataTree, String> {
-//RS             let route = &self.navigation.route;
-//RS             let Some(binding) = self.binding.get(index) else {
-//RS                 return Err(format!("route `{route}` input {index} has no checked binding"));
-//RS             };
-//RS             Ok(match binding {
-//RS                 JetAppRouteBinding::Path { name, .. } => jet_std::DataTree::Text(
-//RS                     self.navigation
-//RS                         .params
-//RS                         .get(name)
-//RS                         .cloned()
-//RS                         .ok_or_else(|| format!("route `{route}` has no path parameter `{name}`"))?,
-//RS                 ),
-//RS                 JetAppRouteBinding::Search {
-//RS                     scalar: Some(name),
-//RS                     fields,
-//RS                     ..
-//RS                 } => jet_app_scalar_search_tree(&self.navigation, name, fields)?,
-//RS                 JetAppRouteBinding::Search { .. } => jet_std::DataTree::Object(
-//RS                     self.navigation
-//RS                         .search
-//RS                         .iter()
-//RS                         .map(|(name, value)| (name.clone(), jet_std::DataTree::Text(value.clone())))
-//RS                         .collect(),
-//RS                 ),
-//RS                 // Loader data is JSON text; the tier's JSON decoder owns it.
-//RS                 JetAppRouteBinding::Data => jet_std::DataTree::TypedText(self.data.to_string()),
-//RS             })
-//RS         }
-//RS 
-//RS         pub fn arity(&self) -> usize {
-//RS             self.binding.len()
-//RS         }
-//RS 
-//RS         pub fn decode<T: super::__jet_Decode>(&self, index: usize) -> Result<T, String> {
-//RS             let route = &self.navigation.route;
-//RS             let Some(binding) = self.binding.get(index) else {
-//RS                 return Err(format!("route `{route}` input {index} has no checked binding"));
-//RS             };
-//RS             let tree = match binding {
-//RS                 JetAppRouteBinding::Path { name, .. } => jet_std::DataTree::Text(
-//RS                     self.navigation
-//RS                         .params
-//RS                         .get(name)
-//RS                         .cloned()
-//RS                         .ok_or_else(|| format!("route `{route}` has no path parameter `{name}`"))?,
-//RS                 ),
-//RS                 JetAppRouteBinding::Search {
-//RS                     scalar: Some(name),
-//RS                     fields,
-//RS                     ..
-//RS                 } => jet_app_scalar_search_tree(&self.navigation, name, fields)?,
-//RS                 JetAppRouteBinding::Search { .. } => jet_std::DataTree::Object(
-//RS                     self.navigation
-//RS                         .search
-//RS                         .iter()
-//RS                         .map(|(name, value)| (name.clone(), jet_std::DataTree::Text(value.clone())))
-//RS                         .collect(),
-//RS                 ),
-//RS                 JetAppRouteBinding::Data => {
-//RS                     // Loader data crosses the one JSON wire; the shared
-//RS                     // decoder owns parse-error rendering on every tier.
-//RS                     return super::jet_enc_json_decode::<T>(&self.data.to_string()).map_err(
-//RS                         |errors| format!("route `{route}` loader data: {errors:?}"),
-//RS                     );
-//RS                 }
-//RS             };
-//RS             T::jet_decode(&tree)
-//RS                 .map_err(|errors| format!("route `{route}` {}: {errors:?}", binding.label()))
-//RS         }
-//RS     }
-//RS 
-//RS     /// A checked route callback (page handler, boundary, or loader).  The
-//RS     /// compiler hands every handler over as the send-safe borrow callback, so
-//RS     /// one impl per arity covers every scalar/record parameter shape.
-//RS     pub trait JetAppRouteCallback<R>: Send + Sync + 'static {
-//RS         fn arity(&self) -> usize;
-//RS         fn call_route(&self, inputs: &JetAppRouteInputs<'_>) -> Result<R, String>;
-//RS     }
-//RS 
-//RS     /// The one bridge for resident tiers whose user values are runtime
-//RS     /// handles: the App supplies each bound input as its checked wire tree
-//RS     /// (`JetAppRouteInputs::tree`) and the tier marshals it with its own
-//RS     /// typed decoder before invoking the user callable.
-//RS     pub struct JetAppTreeRouteCallback<R> {
-//RS         arity: usize,
-//RS         call: Arc<dyn Fn(&[jet_std::DataTree]) -> Result<R, String> + Send + Sync + 'static>,
-//RS     }
-//RS 
-//RS     impl<R> JetAppTreeRouteCallback<R> {
-//RS         pub fn new(
-//RS             arity: usize,
-//RS             call: Arc<dyn Fn(&[jet_std::DataTree]) -> Result<R, String> + Send + Sync + 'static>,
-//RS         ) -> Self {
-//RS             Self { arity, call }
-//RS         }
-//RS     }
-//RS 
-//RS     impl<R: 'static> JetAppRouteCallback<R> for JetAppTreeRouteCallback<R> {
-//RS         fn arity(&self) -> usize {
-//RS             self.arity
-//RS         }
-//RS         fn call_route(&self, inputs: &JetAppRouteInputs<'_>) -> Result<R, String> {
-//RS             let trees = (0..self.arity)
-//RS                 .map(|index| inputs.tree(index))
-//RS                 .collect::<Result<Vec<_>, _>>()?;
-//RS             (self.call)(&trees)
-//RS         }
-//RS     }
-//RS 
-//RS     impl<R: 'static> JetAppRouteCallback<R> for Arc<dyn Fn() -> R + Send + Sync + 'static> {
-//RS         fn arity(&self) -> usize {
-//RS             0
-//RS         }
-//RS         fn call_route(&self, _inputs: &JetAppRouteInputs<'_>) -> Result<R, String> {
-//RS             Ok(self())
-//RS         }
-//RS     }
-//RS 
-//RS     impl<A, R> JetAppRouteCallback<R> for Arc<dyn Fn(&A) -> R + Send + Sync + 'static>
-//RS     where
-//RS         A: super::__jet_Decode + 'static,
-//RS         R: 'static,
-//RS     {
-//RS         fn arity(&self) -> usize {
-//RS             1
-//RS         }
-//RS         fn call_route(&self, inputs: &JetAppRouteInputs<'_>) -> Result<R, String> {
-//RS             let a = inputs.decode::<A>(0)?;
-//RS             Ok(self(&a))
-//RS         }
-//RS     }
-//RS 
-//RS     impl<A, B, R> JetAppRouteCallback<R> for Arc<dyn Fn(&A, &B) -> R + Send + Sync + 'static>
-//RS     where
-//RS         A: super::__jet_Decode + 'static,
-//RS         B: super::__jet_Decode + 'static,
-//RS         R: 'static,
-//RS     {
-//RS         fn arity(&self) -> usize {
-//RS             2
-//RS         }
-//RS         fn call_route(&self, inputs: &JetAppRouteInputs<'_>) -> Result<R, String> {
-//RS             let a = inputs.decode::<A>(0)?;
-//RS             let b = inputs.decode::<B>(1)?;
-//RS             Ok(self(&a, &b))
-//RS         }
-//RS     }
-//RS 
-//RS     impl<A, B, C, R> JetAppRouteCallback<R>
-//RS         for Arc<dyn Fn(&A, &B, &C) -> R + Send + Sync + 'static>
-//RS     where
-//RS         A: super::__jet_Decode + 'static,
-//RS         B: super::__jet_Decode + 'static,
-//RS         C: super::__jet_Decode + 'static,
-//RS         R: 'static,
-//RS     {
-//RS         fn arity(&self) -> usize {
-//RS             3
-//RS         }
-//RS         fn call_route(&self, inputs: &JetAppRouteInputs<'_>) -> Result<R, String> {
-//RS             let a = inputs.decode::<A>(0)?;
-//RS             let b = inputs.decode::<B>(1)?;
-//RS             let c = inputs.decode::<C>(2)?;
-//RS             Ok(self(&a, &b, &c))
-//RS         }
-//RS     }
-//RS 
-//RS     /// A page handler result: the page itself or its declared failure.
-//RS     pub trait JetAppPageOutput {
-//RS         fn into_page(self) -> Result<JetWebPage, String>;
-//RS     }
-//RS 
-//RS     impl JetAppPageOutput for JetWebPage {
-//RS         fn into_page(self) -> Result<JetWebPage, String> {
-//RS             Ok(self)
-//RS         }
-//RS     }
-//RS 
-//RS     impl<E: JetAppFailure> JetAppPageOutput for Result<JetWebPage, E> {
-//RS         fn into_page(self) -> Result<JetWebPage, String> {
-//RS             self.map_err(JetAppFailure::into_app_failure)
-//RS         }
-//RS     }
-//RS 
-//RS     fn jet_app_page_handler<F, R>(handler: F, binding: Vec<JetAppRouteBinding>) -> PageHandler
-//RS     where
-//RS         F: JetAppRouteCallback<R>,
-//RS         R: JetAppPageOutput,
-//RS     {
-//RS         if binding.len() != handler.arity() {
-//RS             jet_app_invalid(format!(
-//RS                 "app route handler `{}` takes {} inputs but the checked binding has {}",
-//RS                 type_name::<F>(),
-//RS                 handler.arity(),
-//RS                 binding.len()
-//RS             ));
-//RS         }
-//RS         Arc::new(move |navigation, data| {
-//RS             let inputs = JetAppRouteInputs {
-//RS                 binding: &binding,
-//RS                 navigation,
-//RS                 data,
-//RS             };
-//RS             handler.call_route(&inputs)?.into_page()
-//RS         })
-//RS     }
-//RS 
-//RS     fn jet_app_boundary_handler<F, R>(handler: F) -> BoundaryHandler
-//RS     where
-//RS         F: JetAppRouteCallback<R>,
-//RS         R: JetAppPageOutput,
-//RS     {
-//RS         if handler.arity() != 0 {
-//RS             jet_app_invalid(format!(
-//RS                 "app boundary handler `{}` must take no inputs",
-//RS                 type_name::<F>()
-//RS             ));
-//RS         }
-//RS         let navigation = super::JetWebNavigation {
-//RS             url: String::new(),
-//RS             route: String::new(),
-//RS             params: Default::default(),
-//RS             search: Default::default(),
-//RS         };
-//RS         Arc::new(move || {
-//RS             let inputs = JetAppRouteInputs {
-//RS                 binding: &[],
-//RS                 navigation: &navigation,
-//RS                 data: "",
-//RS             };
-//RS             handler.call_route(&inputs)?.into_page()
-//RS         })
-//RS     }
-//RS 
-//RS     fn jet_app_loader_binding_check(identity: &str, arity: usize, binding: &[JetAppRouteBinding]) {
-//RS         if binding.len() != arity {
-//RS             jet_app_invalid(format!(
-//RS                 "app loader `{identity}` takes {arity} inputs but the checked binding has {}",
-//RS                 binding.len()
-//RS             ));
-//RS         }
-//RS         if binding.iter().any(|binding| matches!(binding, JetAppRouteBinding::Data)) {
-//RS             jet_app_invalid(format!("app loader `{identity}` cannot consume its own route data"));
-//RS         }
-//RS     }
-//RS 
-//RS     fn jet_app_loader_handler<L, V, E>(
-//RS         loader: L,
-//RS         binding: Vec<JetAppRouteBinding>,
-//RS     ) -> LoaderHandler
-//RS     where
-//RS         L: JetAppRouteCallback<Result<V, E>>,
-//RS         V: super::__jet_Encode + 'static,
-//RS         E: JetAppFailure + 'static,
-//RS     {
-//RS         jet_app_loader_binding_check(type_name::<L>(), loader.arity(), &binding);
-//RS         Arc::new(move |navigation| {
-//RS             let inputs = JetAppRouteInputs {
-//RS                 binding: &binding,
-//RS                 navigation,
-//RS                 data: "",
-//RS             };
-//RS             match loader.call_route(&inputs)? {
-//RS                 Ok(value) => Ok(super::jet_enc_json_to_string(&value)),
-//RS                 Err(error) => Err(error.into_app_failure()),
-//RS             }
-//RS         })
-//RS     }
-//RS 
-//RS     /// Resident tiers encode the loader value with their own typed encoder;
-//RS     /// the App stores that JSON text unchanged as the route data.
-//RS     fn jet_app_encoded_loader_handler<L>(
-//RS         loader: L,
-//RS         binding: Vec<JetAppRouteBinding>,
-//RS     ) -> LoaderHandler
-//RS     where
-//RS         L: JetAppRouteCallback<Result<String, String>>,
-//RS     {
-//RS         jet_app_loader_binding_check(type_name::<L>(), loader.arity(), &binding);
-//RS         Arc::new(move |navigation| {
-//RS             let inputs = JetAppRouteInputs {
-//RS                 binding: &binding,
-//RS                 navigation,
-//RS                 data: "",
-//RS             };
-//RS             loader.call_route(&inputs)?
-//RS         })
-//RS     }
-//RS 
-//RS     fn jet_app_binding_facts(
-//RS         binding: &[JetAppRouteBinding],
-//RS     ) -> (Vec<JetAppRouteField>, Vec<JetAppRouteField>, String) {
-//RS         let mut path_params = Vec::new();
-//RS         let mut search_params = Vec::new();
-//RS         let mut search_codec = "query".to_string();
-//RS         for entry in binding {
-//RS             match entry {
-//RS                 JetAppRouteBinding::Path { name, ty } => path_params.push(JetAppRouteField {
-//RS                     name: name.clone(),
-//RS                     ty: ty.clone(),
-//RS                     codec: "path".to_string(),
-//RS                     required: true,
-//RS                     default: None,
-//RS                 }),
-//RS                 JetAppRouteBinding::Search { codec, fields, .. } => {
-//RS                     search_codec = codec.clone();
-//RS                     search_params.extend(fields.iter().map(|field| JetAppRouteField {
-//RS                         name: field.name.clone(),
-//RS                         ty: field.ty.clone(),
-//RS                         codec: codec.clone(),
-//RS                         required: field.required,
-//RS                         default: None,
-//RS                     }));
-//RS                 }
-//RS                 JetAppRouteBinding::Data => {}
-//RS             }
-//RS         }
-//RS         (path_params, search_params, search_codec)
-//RS     }
-//RS 
-//RS     #[derive(Clone)]
-//RS     struct JetAppRoute {
-//RS         path: String,
-//RS         handler: PageHandler,
-//RS         handler_identity: String,
-//RS         binding: Vec<JetAppRouteBinding>,
-//RS         facts: JetAppRouteFacts,
-//RS         loader: Option<LoaderHandler>,
-//RS         pending: Option<BoundaryHandler>,
-//RS         error: Option<BoundaryHandler>,
-//RS     }
-//RS 
-//RS     #[derive(Default)]
-//RS     struct JetAppState {
-//RS         routes: Vec<JetAppRoute>,
-//RS         actions: Vec<(String, ActionHandler, String, bool)>,
-//RS         mounts: Vec<(String, MountHandler, Vec<String>, Vec<String>)>,
-//RS         routes_from: Vec<String>,
-//RS         not_found: Option<BoundaryHandler>,
-//RS         security: Vec<String>,
-//RS         assets: Vec<String>,
-//RS         split: Vec<String>,
-//RS         cache: Vec<String>,
-//RS         a11y: Vec<String>,
-//RS         adapters: Vec<String>,
-//RS         hydration: String,
-//RS         /// The one navigation kernel built from the routes above.  Any later
-//RS         /// registration rebuilds it, so the router never diverges from the
-//RS         /// graph.
-//RS         router: Option<super::JetWebRouter>,
-//RS     }
-//RS 
-//RS     #[derive(Clone)]
-//RS     pub struct JetApp {
-//RS         state: Arc<Mutex<JetAppState>>,
-//RS         route_facts: Arc<Mutex<JetAppRouteFacts>>,
-//RS     }
-//RS 
-//RS     pub fn jet_app() -> JetApp {
-//RS         JetApp {
-//RS             state: Arc::new(Mutex::new(JetAppState {
-//RS                 hydration: "dev-overlay".to_string(),
-//RS                 ..JetAppState::default()
-//RS             })),
-//RS             route_facts: Arc::new(Mutex::new(JetAppRouteFacts::default())),
-//RS         }
-//RS     }
-//RS 
-//RS     #[derive(Clone, Default)]
-//RS     pub struct JetWebPage {
-//RS         pub title: String,
-//RS         pub body: String,
-//RS     }
-//RS 
-//RS     pub fn jet_web_page(title: String, body: String) -> JetWebPage {
-//RS         JetWebPage { title, body }
-//RS     }
-//RS 
-//RS     /// One served page: the HTTP status and the page after the route's
-//RS     /// navigation, loader, and boundaries ran.
-//RS     #[derive(Clone)]
-//RS     pub struct JetAppResponse {
-//RS         pub status: i64,
-//RS         pub page: JetWebPage,
-//RS         pub navigation: super::JetWebNavigationState,
-//RS     }
-//RS 
-//RS     impl JetApp {
-//RS         fn lock(&self) -> std::sync::MutexGuard<'_, JetAppState> {
-//RS             self.state.lock().unwrap_or_else(|error| error.into_inner())
-//RS         }
-//RS 
-//RS         fn register_route<F, R>(
-//RS             &self,
-//RS             path: String,
-//RS             handler: F,
-//RS             binding: Vec<JetAppRouteBinding>,
-//RS         ) -> JetApp
-//RS         where
-//RS             F: JetAppRouteCallback<R>,
-//RS             R: JetAppPageOutput,
-//RS         {
-//RS             let handler_identity = type_name::<F>().to_string();
-//RS             let handler = jet_app_page_handler(handler, binding.clone());
-//RS             let mut facts = self
-//RS                 .route_facts
-//RS                 .lock()
-//RS                 .unwrap_or_else(|error| error.into_inner())
-//RS                 .clone();
-//RS             if facts.route_identity.is_empty() {
-//RS                 facts.route_identity =
-//RS                     jet_app_route_identity(&format!("{path}\0{handler_identity}"));
-//RS             }
-//RS             let (path_params, search_params, search_codec) = jet_app_binding_facts(&binding);
-//RS             facts.path_params = path_params;
-//RS             facts.search_params = search_params;
-//RS             facts.search_codec = search_codec;
-//RS             let mut state = self.lock();
-//RS             state.routes.push(JetAppRoute {
-//RS                 path,
-//RS                 handler,
-//RS                 handler_identity,
-//RS                 binding,
-//RS                 facts,
-//RS                 loader: None,
-//RS                 pending: None,
-//RS                 error: None,
-//RS             });
-//RS             state.router = None;
-//RS             drop(state);
-//RS             self.clone()
-//RS         }
-//RS 
-//RS         pub fn route<F, R>(
-//RS             &self,
-//RS             path: String,
-//RS             handler: F,
-//RS             binding: Vec<JetAppRouteBinding>,
-//RS         ) -> JetApp
-//RS         where
-//RS             F: JetAppRouteCallback<R>,
-//RS             R: JetAppPageOutput,
-//RS         {
-//RS             self.register_route(path, handler, binding)
-//RS         }
-//RS 
-//RS         pub fn page<F, R>(
-//RS             &self,
-//RS             path: String,
-//RS             handler: F,
-//RS             binding: Vec<JetAppRouteBinding>,
-//RS         ) -> JetApp
-//RS         where
-//RS             F: JetAppRouteCallback<R>,
-//RS             R: JetAppPageOutput,
-//RS         {
-//RS             self.register_route(path, handler, binding)
-//RS         }
-//RS 
-//RS         pub fn layout<F, R>(
-//RS             &self,
-//RS             path: String,
-//RS             handler: F,
-//RS             binding: Vec<JetAppRouteBinding>,
-//RS         ) -> JetApp
-//RS         where
-//RS             F: JetAppRouteCallback<R>,
-//RS             R: JetAppPageOutput,
-//RS         {
-//RS             self.register_route(path, handler, binding)
-//RS         }
-//RS 
-//RS         /// Attach a boundary to the route registered immediately before it.
-//RS         /// Sema diagnoses a boundary with no preceding route (E2810); the
-//RS         /// runtime graph keeps the same attachment rule.
-//RS         fn attach_boundary(
-//RS             &self,
-//RS             handler: BoundaryHandler,
-//RS             identity: String,
-//RS             attach: impl FnOnce(&mut JetAppRoute, BoundaryHandler, String),
-//RS         ) -> JetApp {
-//RS             let mut state = self.lock();
-//RS             let Some(route) = state.routes.last_mut() else {
-//RS                 jet_app_invalid(format!(
-//RS                     "app boundary `{identity}` has no preceding route"
-//RS                 ));
-//RS             };
-//RS             attach(route, handler, identity);
-//RS             state.router = None;
-//RS             drop(state);
-//RS             self.clone()
-//RS         }
-//RS 
-//RS         pub fn pending<F, R>(&self, handler: F) -> JetApp
-//RS         where
-//RS             F: JetAppRouteCallback<R>,
-//RS             R: JetAppPageOutput,
-//RS         {
-//RS             let identity = type_name::<F>().to_string();
-//RS             self.attach_boundary(
-//RS                 jet_app_boundary_handler(handler),
-//RS                 identity,
-//RS                 |route, handler, identity| {
-//RS                     route.pending = Some(handler);
-//RS                     route.facts.pending_boundary = Some(identity);
-//RS                 },
-//RS             )
-//RS         }
-//RS 
-//RS         pub fn error<F, R>(&self, handler: F) -> JetApp
-//RS         where
-//RS             F: JetAppRouteCallback<R>,
-//RS             R: JetAppPageOutput,
-//RS         {
-//RS             let identity = type_name::<F>().to_string();
-//RS             self.attach_boundary(
-//RS                 jet_app_boundary_handler(handler),
-//RS                 identity,
-//RS                 |route, handler, identity| {
-//RS                     route.error = Some(handler);
-//RS                     route.facts.error_boundary = Some(identity);
-//RS                 },
-//RS             )
-//RS         }
-//RS 
-//RS         /// The not-found boundary answers every unmatched navigation, so it is
-//RS         /// one application-wide projection; the route it follows records the
-//RS         /// boundary identity in its facts.
-//RS 
-//RS         pub fn not_found<F, R>(&self, handler: F) -> JetApp
-//RS         where
-//RS             F: JetAppRouteCallback<R>,
-//RS             R: JetAppPageOutput,
-//RS         {
-//RS             let mut state = self.lock();
-//RS             state.not_found = Some(jet_app_boundary_handler(handler));
-//RS             drop(state);
-//RS             self.clone()
-//RS         }
-//RS 
-//RS         fn register_action<F>(
-//RS             &self,
-//RS             name: String,
-//RS             handler: F,
-//RS             kind: &str,
-//RS             binding: Option<String>,
-//RS         ) -> JetApp
-//RS         where
-//RS             F: JetAppActionHandler,
-//RS         {
-//RS             let function = handler.into_server_function(name.clone());
-//RS             let function = if let Some(binding) = binding {
-//RS                 function.with_form_binding(binding)
-//RS             } else {
-//RS                 function
-//RS             };
-//RS             let mut state = self.lock();
-//RS             if let Some(route) = state.routes.last_mut() {
-//RS                 if matches!(kind, "form" | "action") && route.facts.form.is_none() {
-//RS                     route.facts.form = Some(name.clone());
-//RS                 }
-//RS             }
-//RS             state
-//RS                 .actions
-//RS                 .push((name, Some(function), kind.to_string(), false));
-//RS             drop(state);
-//RS             self.clone()
-//RS         }
-//RS         pub fn action<F>(&self, name: String, handler: F) -> JetApp
-//RS         where
-//RS             F: JetAppActionHandler,
-//RS         {
-//RS             self.register_action(name, handler, "action", None)
-//RS         }
-//RS 
-//RS         pub fn form<F>(&self, name: String, handler: F, binding: String) -> JetApp
-//RS         where
-//RS             F: JetAppActionHandler,
-//RS         {
-//RS             self.register_action(name, handler, "form", Some(binding))
-//RS         }
-//RS 
-//RS         pub fn data<F>(&self, name: String, handler: F) -> JetApp
-//RS         where
-//RS             F: JetAppActionHandler,
-//RS         {
-//RS             self.register_action(name, handler, "data", None)
-//RS         }
-//RS 
-//RS         /// Attach a loader to the route registered immediately before it.
-//RS         /// Sema checks that the named route handler is that route's handler
-//RS         /// and that the loader inputs are the route's typed inputs; the
-//RS         /// runtime graph keeps the same attachment rule.
-//RS         pub fn loader<L, V, E>(
-//RS             &self,
-//RS             loader: L,
-//RS             binding: Vec<JetAppRouteBinding>,
-//RS             preload: bool,
-//RS         ) -> JetApp
-//RS         where
-//RS             L: JetAppRouteCallback<Result<V, E>>,
-//RS             V: super::__jet_Encode + 'static,
-//RS             E: JetAppFailure + 'static,
-//RS         {
-//RS             let loader_identity = type_name::<L>().to_string();
-//RS             let data_type = type_name::<V>().to_string();
-//RS             let loader = jet_app_loader_handler(loader, binding);
-//RS             self.attach_loader(loader, loader_identity, data_type, preload)
-//RS         }
-//RS 
-//RS         /// Attach a loader whose callback already produced the encoded JSON
-//RS         /// route data (resident JIT/interpreter tiers).
-//RS         pub fn loader_encoded<L>(
-//RS             &self,
-//RS             loader: L,
-//RS             binding: Vec<JetAppRouteBinding>,
-//RS             data_type: String,
-//RS             preload: bool,
-//RS         ) -> JetApp
-//RS         where
-//RS             L: JetAppRouteCallback<Result<String, String>>,
-//RS         {
-//RS             let loader_identity = type_name::<L>().to_string();
-//RS             let loader = jet_app_encoded_loader_handler(loader, binding);
-//RS             self.attach_loader(loader, loader_identity, data_type, preload)
-//RS         }
-//RS 
-//RS         fn attach_loader(
-//RS             &self,
-//RS             loader: LoaderHandler,
-//RS             loader_identity: String,
-//RS             data_type: String,
-//RS             preload: bool,
-//RS         ) -> JetApp {
-//RS             let mut state = self.lock();
-//RS             let Some(route) = state.routes.last_mut() else {
-//RS                 jet_app_invalid(format!("app loader `{loader_identity}` has no preceding route"));
-//RS             };
-//RS             let cache_identity = route.facts.route_identity.clone();
-//RS             let dependency = route.handler_identity.clone();
-//RS             route.facts.loader = Some(loader_identity.clone());
-//RS             route.facts.loader_contract = Some(JetAppLoaderFacts {
-//RS                 handler: loader_identity,
-//RS                 data_type,
-//RS                 dependency: dependency.clone(),
-//RS                 preload,
-//RS                 cache_identity,
-//RS             });
-//RS             route.loader = Some(loader);
-//RS             state
-//RS                 .actions
-//RS                 .push((dependency, None, "loader".to_string(), preload));
-//RS             state.router = None;
-//RS             drop(state);
-//RS             self.clone()
-//RS         }
-//RS 
-//RS         fn register_mount<F, R>(
-//RS             &self,
-//RS             prefix: String,
-//RS             handler: F,
-//RS             effects: Vec<String>,
-//RS             security: Vec<String>,
-//RS         ) -> JetApp
-//RS         where
-//RS             F: Fn(&String) -> R + Send + Sync + 'static,
-//RS             R: 'static,
-//RS         {
-//RS             let handler: MountHandler = Arc::new(move |path| {
-//RS                 let _ = handler(path);
-//RS             });
-//RS             self.lock().mounts.push((prefix, handler, effects, security));
-//RS             self.clone()
-//RS         }
-//RS 
-//RS         pub fn mount<F, R>(&self, prefix: String, handler: F) -> JetApp
-//RS         where
-//RS             F: Fn(&String) -> R + Send + Sync + 'static,
-//RS             R: 'static,
-//RS         {
-//RS             self.register_mount(prefix, handler, Vec::new(), Vec::new())
-//RS         }
-//RS 
-//RS         pub fn mount_with_effect<F, R>(
-//RS             &self,
-//RS             prefix: String,
-//RS             handler: F,
-//RS             effect: String,
-//RS         ) -> JetApp
-//RS         where
-//RS             F: Fn(&String) -> R + Send + Sync + 'static,
-//RS             R: 'static,
-//RS         {
-//RS             self.register_mount(prefix, handler, vec![effect], Vec::new())
-//RS         }
-//RS 
-//RS         pub fn mount_with_policy<F, R>(
-//RS             &self,
-//RS             prefix: String,
-//RS             handler: F,
-//RS             effect: String,
-//RS             policy: String,
-//RS         ) -> JetApp
-//RS         where
-//RS             F: Fn(&String) -> R + Send + Sync + 'static,
-//RS             R: 'static,
-//RS         {
-//RS             self.register_mount(prefix, handler, vec![effect], vec![policy])
-//RS         }
-//RS 
-//RS         pub fn routes(&self, root: String) -> JetApp {
-//RS             self.lock().routes_from.push(root);
-//RS             self.clone()
-//RS         }
-//RS 
-//RS         fn set_route_mode(&self, mode: JetAppRenderMode) -> JetApp {
-//RS             let mut facts = self
-//RS                 .route_facts
-//RS                 .lock()
-//RS                 .unwrap_or_else(|error| error.into_inner());
-//RS             facts.mode = mode;
-//RS             facts.reason = vec![format!("explicit render mode `{}`", mode.as_str())];
-//RS             facts.override_mode = Some(mode);
-//RS             self.clone()
-//RS         }
-//RS 
-//RS         pub fn csr(&self) -> JetApp {
-//RS             self.set_route_mode(JetAppRenderMode::Csr)
-//RS         }
-//RS         pub fn ssr(&self) -> JetApp {
-//RS             self.set_route_mode(JetAppRenderMode::Ssr)
-//RS         }
-//RS         pub fn ssg(&self) -> JetApp {
-//RS             self.set_route_mode(JetAppRenderMode::Ssg)
-//RS         }
-//RS         pub fn stream(&self) -> JetApp {
-//RS             self.set_route_mode(JetAppRenderMode::Stream)
-//RS         }
-//RS         pub fn streaming(&self) -> JetApp {
-//RS             self.stream()
-//RS         }
-//RS         pub fn island(&self) -> JetApp {
-//RS             self.set_route_mode(JetAppRenderMode::Island)
-//RS         }
-//RS         pub fn hydration_dev(&self) -> JetApp {
-//RS             self.lock().hydration = "dev-overlay".to_string();
-//RS             self.clone()
-//RS         }
-//RS         pub fn hydration_release(&self) -> JetApp {
-//RS             self.lock().hydration = "release-keep-server".to_string();
-//RS             self.clone()
-//RS         }
-//RS         pub fn security(&self, policy: String) -> JetApp {
-//RS             self.lock().security.push(policy);
-//RS             self.clone()
-//RS         }
-//RS         pub fn assets(&self, path: String) -> JetApp {
-//RS             self.lock().assets.push(path);
-//RS             self.clone()
-//RS         }
-//RS         pub fn split(&self, name: String) -> JetApp {
-//RS             self.lock().split.push(name);
-//RS             self.clone()
-//RS         }
-//RS         pub fn code_split(&self, name: String) -> JetApp {
-//RS             self.split(name)
-//RS         }
-//RS         pub fn cache(&self, policy: String) -> JetApp {
-//RS             self.lock().cache.push(policy);
-//RS             self.clone()
-//RS         }
-//RS         pub fn a11y(&self, policy: String) -> JetApp {
-//RS             self.lock().a11y.push(policy);
-//RS             self.clone()
-//RS         }
-//RS         pub fn adapter(&self, name: String) -> JetApp {
-//RS             self.lock().adapters.push(name);
-//RS             self.clone()
-//RS         }
-//RS 
-//RS         pub fn facts_json(&self) -> String {
-//RS             let s = self.lock();
-//RS             let mut out = String::from("{\n");
-//RS             out.push_str(&format!(
-//RS                 "  \"hydration\": {},\n",
-//RS                 jet_app_json_string(&s.hydration)
-//RS             ));
-//RS             out.push_str("  \"shared_tir\": true,\n");
-//RS             out.push_str("  \"routes\": [\n");
-//RS             for (i, route) in s.routes.iter().enumerate() {
-//RS                 out.push_str(&format!(
-//RS                     "    {{\"path\": {}, \"handler\": {}, \"provenance\": \"runtime\", \"render_facts\": {}}}",
-//RS                     jet_app_json_string(&route.path),
-//RS                     jet_app_json_string(&route.handler_identity),
-//RS                     route.facts.json(),
-//RS                 ));
-//RS                 if i + 1 != s.routes.len() {
-//RS                     out.push(',');
-//RS                 }
-//RS                 out.push('\n');
-//RS             }
-//RS             out.push_str("  ],\n");
-//RS             out.push_str("  \"actions\": [\n");
-//RS             for (i, (name, function, kind, preload)) in s.actions.iter().enumerate() {
-//RS                 let server_facts = function
-//RS                     .as_ref()
-//RS                     .map(|_| {
-//RS                         let endpoint = format!("/actions/{name}");
-//RS                         let middleware = super::jet_app_middleware::APP_SERVER_FUNCTION_MIDDLEWARE
-//RS                             .iter()
-//RS                             .map(|kind| jet_app_json_string(kind.as_str()))
-//RS                             .collect::<Vec<_>>()
-//RS                             .join(",");
-//RS                         format!(
-//RS                             "{{\"name\":{},\"endpoint\":{},\"method\":\"POST\",\"csrf\":\"same-origin\",\"middleware\":[{}]}}",
-//RS                             jet_app_json_string(name),
-//RS                             jet_app_json_string(&endpoint),
-//RS                             middleware,
-//RS                         )
-//RS                     })
-//RS                     .unwrap_or_else(|| "null".to_string());
-//RS                 out.push_str(&format!(
-//RS                     "    {{\"name\": {}, \"handler\": \"callable\", \"kind\": {}, \"preload\": {}, \"server_function\": {}}}",
-//RS                     jet_app_json_string(name),
-//RS                     jet_app_json_string(kind),
-//RS                     preload,
-//RS                     server_facts,
-//RS                 ));
-//RS                 if i + 1 != s.actions.len() {
-//RS                     out.push(',');
-//RS                 }
-//RS                 out.push('\n');
-//RS             }
-//RS             out.push_str("  ],\n");
-//RS             out.push_str("  \"queries\": ");
-//RS             out.push_str(&super::jet_web_query_facts_json());
-//RS             out.push_str(",\n");
-//RS             out.push_str(&format!(
-//RS                 "  \"security\": {:?},\n  \"assets\": {:?},\n  \"split\": {:?},\n  \"cache\": {:?},\n  \"a11y\": {:?},\n  \"adapters\": {:?}\n",
-//RS                 s.security, s.assets, s.split, s.cache, s.a11y, s.adapters
-//RS             ));
-//RS             out.push('}');
-//RS             out
-//RS         }
-//RS 
-//RS         /// Build the canonical navigation kernel from the route graph.  Every
-//RS         /// route registers exactly once with its typed path/search fields,
-//RS         /// loader, and pending/error boundaries; the router owns matching,
-//RS         /// precedence, loader execution, caching, preload, and abort.
-//RS         fn build_router(state: &JetAppState) -> super::JetWebRouter {
-//RS             let mut router = super::JetWebRouter::new();
-//RS             for route in &state.routes {
-//RS                 let mut params = Vec::new();
-//RS                 let mut search = Vec::new();
-//RS                 let mut codec = super::JetWebRouterSearchCodec::Query;
-//RS                 for binding in &route.binding {
-//RS                     match binding {
-//RS                         JetAppRouteBinding::Path { name, ty } => params.push(
-//RS                             super::JetWebRouterField::new(
-//RS                                 name.clone(),
-//RS                                 jet_app_router_value_type(ty),
-//RS                             ),
-//RS                         ),
-//RS                         JetAppRouteBinding::Search {
-//RS                             codec: search_codec,
-//RS                             fields,
-//RS                             scalar,
-//RS                         } => {
-//RS                             if search_codec == "json" {
-//RS                                 codec = super::JetWebRouterSearchCodec::Json;
-//RS                             }
-//RS                             // The router validates declared names and value
-//RS                             // shapes; the typed decoder owns required fields
-//RS                             // and defaults of a search record.
-//RS                             search.extend(fields.iter().map(|field| {
-//RS                                 let router_field = super::JetWebRouterField::new(
-//RS                                     field.name.clone(),
-//RS                                     jet_app_router_value_type(&field.ty),
-//RS                                 );
-//RS                                 if scalar.is_some() && field.required {
-//RS                                     router_field
-//RS                                 } else {
-//RS                                     router_field.optional(None)
-//RS                                 }
-//RS                             }));
-//RS                         }
-//RS                         JetAppRouteBinding::Data => {}
-//RS                     }
-//RS                 }
-//RS                 let loader = route.loader.clone();
-//RS                 let loader = move |navigation: &super::JetWebNavigation| match &loader {
-//RS                     Some(loader) => loader(navigation),
-//RS                     None => Ok(String::new()),
-//RS                 };
-//RS                 let pending = route.pending.clone().map(|pending| {
-//RS                     move |_navigation: &super::JetWebNavigation| -> String {
-//RS                         pending().map(|page| page.body).unwrap_or_else(|error| error)
-//RS                     }
-//RS                 });
-//RS                 let error = route.error.clone().map(|error| {
-//RS                     move |_navigation: &super::JetWebNavigation, message: &str| -> String {
-//RS                         error()
-//RS                             .map(|page| page.body)
-//RS                             .unwrap_or_else(|_| message.to_string())
-//RS                     }
-//RS                 });
-//RS                 router = router
-//RS                     .route_with_facts_codec(
-//RS                         route.path.clone(),
-//RS                         params,
-//RS                         search,
-//RS                         codec,
-//RS                         loader,
-//RS                         pending,
-//RS                         error,
-//RS                         super::JetWebRouteBoundaries::default(),
-//RS                     )
-//RS                     .unwrap_or_else(|error| {
-//RS                         jet_app_invalid(format!(
-//RS                             "app route `{}` is not a valid router route: {error}",
-//RS                             route.path
-//RS                         ))
-//RS                     });
-//RS             }
-//RS             if let Some(not_found) = state.not_found.clone() {
-//RS                 router = router
-//RS                     .not_found(move |message: &str| {
-//RS                         not_found()
-//RS                             .map(|page| page.body)
-//RS                             .unwrap_or_else(|_| message.to_string())
-//RS                     })
-//RS                     .unwrap_or_else(|error| {
-//RS                         jet_app_invalid(format!("app not-found boundary is invalid: {error}"))
-//RS                     });
-//RS             }
-//RS             router
-//RS         }
-//RS 
-//RS         /// The application's navigation kernel.  Built once per graph state;
-//RS         /// preloaded and cached route data survive across navigations.
-//RS         pub fn router(&self) -> super::JetWebRouter {
-//RS             let mut state = self.lock();
-//RS             if state.router.is_none() {
-//RS                 let router = Self::build_router(&state);
-//RS                 state.router = Some(router);
-//RS             }
-//RS             state
-//RS                 .router
-//RS                 .clone()
-//RS                 .expect("app router is built above")
-//RS         }
-//RS 
-//RS         /// Serve one navigation through the route graph: resolve the route,
-//RS         /// run its loader (or reuse the router cache), decode the typed
-//RS         /// inputs, and render the page or the matching boundary.
-//RS         pub fn respond(&self, url: &str) -> JetAppResponse {
-//RS             let router = self.router();
-//RS             let route = router.navigate(url.to_string());
-//RS             let navigation = router.current();
-//RS             let (status, page) = match route {
-//RS                 Ok(current) => {
-//RS                     let handler = self
-//RS                         .lock()
-//RS                         .routes
-//RS                         .iter()
-//RS                         .find(|route| route.path == current.route)
-//RS                         .map(|route| (route.handler.clone(), route.error.clone()));
-//RS                     match handler {
-//RS                         Some((handler, error)) => match handler(&current, &navigation.data) {
-//RS                             Ok(page) => (200, page),
-//RS                             Err(message) => (
-//RS                                 500,
-//RS                                 Self::boundary_page(error.as_ref(), "Route error", message),
-//RS                             ),
-//RS                         },
-//RS                         None => (
-//RS                             500,
-//RS                             JetWebPage {
-//RS                                 title: "Route error".to_string(),
-//RS                                 body: format!(
-//RS                                     "route `{}` is not registered on the app graph",
-//RS                                     current.route
-//RS                                 ),
-//RS                             },
-//RS                         ),
-//RS                     }
-//RS                 }
-//RS                 Err(message) => {
-//RS                     let error_boundary = navigation.current.as_ref().and_then(|current| {
-//RS                         self.lock()
-//RS                             .routes
-//RS                             .iter()
-//RS                             .find(|route| route.path == current.route)
-//RS                             .and_then(|route| route.error.clone())
-//RS                     });
-//RS                     let status = if navigation.current.is_some() {
-//RS                         500
-//RS                     } else if message.starts_with("no web route matches") {
-//RS                         404
-//RS                     } else {
-//RS                         400
-//RS                     };
-//RS                     let page = if status == 404 {
-//RS                         let not_found = self.lock().not_found.clone();
-//RS                         Self::boundary_page(not_found.as_ref(), "Not found", message)
-//RS                     } else {
-//RS                         Self::boundary_page(error_boundary.as_ref(), "Route error", message)
-//RS                     };
-//RS                     (status, page)
-//RS                 }
-//RS             };
-//RS             JetAppResponse {
-//RS                 status,
-//RS                 page,
-//RS                 navigation,
-//RS             }
-//RS         }
-//RS 
-//RS         fn boundary_page(
-//RS             boundary: Option<&BoundaryHandler>,
-//RS             title: &str,
-//RS             message: String,
-//RS         ) -> JetWebPage {
-//RS             match boundary.map(|boundary| boundary()) {
-//RS                 Some(Ok(page)) => page,
-//RS                 Some(Err(boundary_error)) => JetWebPage {
-//RS                     title: title.to_string(),
-//RS                     body: format!("{message}\n{boundary_error}"),
-//RS                 },
-//RS                 None => JetWebPage {
-//RS                     title: title.to_string(),
-//RS                     body: message,
-//RS                 },
-//RS             }
-//RS         }
-//RS         /// Development-only server-function facts.  The projection is
-//RS         /// deliberately metadata-only: handler results, errors, auth values,
-//RS         /// and request payloads never enter the HTML document.
-//RS         fn server_function_dev_panel(&self) -> String {
-//RS             let state = self.lock();
-//RS             let mut rows = Vec::new();
-//RS             for (name, function, kind, _) in &state.actions {
-//RS                 if function.is_none() {
-//RS                     continue;
-//RS                 }
-//RS                 let endpoint = format!("/actions/{name}");
-//RS                 let middleware = super::jet_app_middleware::APP_SERVER_FUNCTION_MIDDLEWARE
-//RS                     .iter()
-//RS                     .map(|kind| jet_app_json_string(kind.as_str()))
-//RS                     .collect::<Vec<_>>()
-//RS                     .join(",");
-//RS                 let facts = format!(
-//RS                     "{{\"name\":{},\"endpoint\":{},\"method\":\"POST\",\"csrf\":\"same-origin\",\"middleware\":[{}]}}",
-//RS                     jet_app_json_string(name),
-//RS                     jet_app_json_string(&endpoint),
-//RS                     middleware,
-//RS                 )
-//RS                 .replace('<', "\\u003c");
-//RS                 rows.push(format!(
-//RS                     "<li data-jet-server-function=\"{}\" data-jet-kind=\"{}\"><code>{}</code><pre>{}</pre></li>",
-//RS                     jet_app_html_attr(name),
-//RS                     jet_app_html_attr(kind),
-//RS                     jet_app_html_attr(name),
-//RS                     facts,
-//RS                 ));
-//RS             }
-//RS             if rows.is_empty() {
-//RS                 return String::new();
-//RS             }
-//RS             format!(
-//RS                 "<aside id=\"jet-dev-server-functions\" data-jet-devtools=\"server-functions\"><h2>Server functions</h2><ul>{}</ul></aside>",
-//RS                 rows.join("")
-//RS             )
-//RS         }
-//RS 
-//RS         /// Development-only query lifecycle facts. The query prelude owns the
-//RS         /// registry so this panel can expose state without exposing payloads.
-//RS         fn query_dev_panel(&self) -> String {
-//RS             super::jet_web_query_dev_panel()
-//RS         }
-//RS 
-//RS         /// Development-only form values and validation lifecycle. The form
-//RS         /// runtime owns this projection; release responses never call it.
-//RS         fn form_dev_panel(&self) -> String {
-//RS             super::jet_web_form_dev_panel()
-//RS         }
-//RS 
-//RS 
-//RS         fn html(&self, response: &JetAppResponse, dev: bool) -> String {
-//RS             let reload = if dev {
-//RS                 r#"<script>
-//RS const source = new EventSource("/__jet/reload");
-//RS source.onmessage = () => location.reload();
-//RS </script>"#
-//RS             } else {
-//RS                 ""
-//RS             };
-//RS             // Every successful route publishes its identity and navigation
-//RS             // status; the body is the encoded loader data, or `null` when the
-//RS             // route declares no loader, so the browser adapter resumes the
-//RS             // same navigation state either way.
-//RS             let route_data = match &response.navigation.current {
-//RS                 Some(current) if response.status == 200 => {
-//RS                     let route_data_body = if response.navigation.data.is_empty() {
-//RS                         "null".to_string()
-//RS                     } else {
-//RS                         response.navigation.data.replace('<', "\\u003c")
-//RS                     };
-//RS                     format!(
-//RS                         "<script type=\"application/json\" id=\"jet-route-data\" data-route=\"{}\" data-url=\"{}\" data-status=\"{}\">{}</script>",
-//RS                         jet_app_html_attr(&current.route),
-//RS                         jet_app_html_attr(&current.url),
-//RS                         response.navigation.status.name(),
-//RS                         route_data_body,
-//RS                     )
-//RS                 }
-//RS                 _ => String::new(),
-//RS             };
-//RS             let server_functions = if dev {
-//RS                 self.server_function_dev_panel()
-//RS             } else {
-//RS                 String::new()
-//RS             };
-//RS             let queries = if dev {
-//RS                 self.query_dev_panel()
-//RS             } else {
-//RS                 String::new()
-//RS             };
-//RS             let forms = if dev {
-//RS                 self.form_dev_panel()
-//RS             } else {
-//RS                 String::new()
-//RS             };
-//RS             format!(
-//RS                 "<!doctype html><html><head><meta charset=\"utf-8\"><title>{}</title></head><body>{}{}{}{}{}{}</body></html>",
-//RS                 response.page.title,
-//RS                 response.page.body,
-//RS                 route_data,
-//RS                 reload,
-//RS                 server_functions,
-//RS                 queries,
-//RS                 forms,
-//RS             )
-//RS         }
-//RS 
-//RS         pub fn serve(&self) {
-//RS             let dev = std::env::var_os("JET_APP_DEV").is_some();
-//RS             let port = std::env::var("JET_APP_PORT")
-//RS                 .ok()
-//RS                 .and_then(|value| value.parse::<u16>().ok())
-//RS                 .unwrap_or(8080);
-//RS             self.serve_port(port, dev);
-//RS         }
-//RS 
-//RS         pub fn serve_on(&self, port: i64) {
-//RS             let dev = std::env::var_os("JET_APP_DEV").is_some();
-//RS             let port = u16::try_from(port)
-//RS                 .unwrap_or_else(|_| jet_app_invalid(format!("web app port {port} is out of range")));
-//RS             self.serve_port(port, dev);
-//RS         }
-//RS 
-//RS         fn http_mux(&self, dev: bool) -> super::JetHTTPMux {
-//RS             let mux = super::jet_app_http_mux_new();
-//RS             let state = self.lock();
-//RS             for route in &state.routes {
-//RS                 let app = self.clone();
-//RS                 super::jet_app_http_page_response(&mux, &route.path, move |request| {
-//RS                     let response = app.respond(&super::jet_app_http_request_url(request));
-//RS                     (response.status, app.html(&response, dev))
-//RS                 });
-//RS             }
-//RS             for (_, function, _, _) in &state.actions {
-//RS                 if let Some(function) = function {
-//RS                     super::jet_web_server_fn_register_http(&mux, function.clone());
-//RS                 }
-//RS             }
-//RS             for (prefix, handler, _, _) in &state.mounts {
-//RS                 let handler = handler.clone();
-//RS                 super::jet_app_http_mount(&mux, prefix, move |path| handler(path));
-//RS             }
-//RS             for root in &state.assets {
-//RS                 super::jet_app_http_assets(&mux, root);
-//RS             }
-//RS             if dev {
-//RS                 super::jet_app_http_reload(&mux);
-//RS             }
-//RS             drop(state);
-//RS             mux
-//RS         }
-//RS 
-//RS         pub(crate) fn console_http_mux(&self) -> super::JetHTTPMux {
-//RS             self.http_mux(false)
-//RS         }
-//RS 
-//RS         fn serve_port(&self, port: u16, dev: bool) {
-//RS             super::jet_app_http_serve(self.http_mux(dev), port, dev);
-//RS         }
-//RS     }
-//RS 
-//RS     static JET_WEB_LOCAL_STORAGE: LazyLock<Mutex<HashMap<String, String>>> =
-//RS         LazyLock::new(|| Mutex::new(HashMap::new()));
-//RS     static JET_WEB_SESSION_STORAGE: LazyLock<Mutex<HashMap<String, String>>> =
-//RS         LazyLock::new(|| Mutex::new(HashMap::new()));
-//RS 
-//RS     pub fn jet_web_storage_local_get(key: &String) -> Option<String> {
-//RS         JET_WEB_LOCAL_STORAGE
-//RS             .lock()
-//RS             .unwrap_or_else(|poisoned| poisoned.into_inner())
-//RS             .get(key)
-//RS             .cloned()
-//RS     }
-//RS 
-//RS     pub fn jet_web_storage_local_remove(key: &String) {
-//RS         JET_WEB_LOCAL_STORAGE
-//RS             .lock()
-//RS             .unwrap_or_else(|poisoned| poisoned.into_inner())
-//RS             .remove(key);
-//RS     }
-//RS 
-//RS     pub fn jet_web_storage_local_set(key: &String, value: &String) {
-//RS         JET_WEB_LOCAL_STORAGE
-//RS             .lock()
-//RS             .unwrap_or_else(|poisoned| poisoned.into_inner())
-//RS             .insert(key.clone(), value.clone());
-//RS     }
-//RS 
-//RS     pub fn jet_web_storage_local_clear() {
-//RS         JET_WEB_LOCAL_STORAGE
-//RS             .lock()
-//RS             .unwrap_or_else(|poisoned| poisoned.into_inner())
-//RS             .clear();
-//RS     }
-//RS 
-//RS     pub fn jet_web_storage_session_get(key: &String) -> Option<String> {
-//RS         JET_WEB_SESSION_STORAGE
-//RS             .lock()
-//RS             .unwrap_or_else(|poisoned| poisoned.into_inner())
-//RS             .get(key)
-//RS             .cloned()
-//RS     }
-//RS 
-//RS     pub fn jet_web_storage_session_remove(key: &String) {
-//RS         JET_WEB_SESSION_STORAGE
-//RS             .lock()
-//RS             .unwrap_or_else(|poisoned| poisoned.into_inner())
-//RS             .remove(key);
-//RS     }
-//RS 
-//RS     pub fn jet_web_storage_session_set(key: &String, value: &String) {
-//RS         JET_WEB_SESSION_STORAGE
-//RS             .lock()
-//RS             .unwrap_or_else(|poisoned| poisoned.into_inner())
-//RS             .insert(key.clone(), value.clone());
-//RS     }
-//RS 
-//RS     pub fn jet_web_storage_session_clear() {
-//RS         JET_WEB_SESSION_STORAGE
-//RS             .lock()
-//RS             .unwrap_or_else(|poisoned| poisoned.into_inner())
-//RS             .clear();
-//RS     }
-//RS 
-//RS     pub fn jet_app_route<F, R>(app: &JetApp, path: String, handler: F, binding: String) -> JetApp
-//RS     where
-//RS         F: JetAppRouteCallback<R>,
-//RS         R: JetAppPageOutput,
-//RS     {
-//RS         app.route(path, handler, jet_app_route_binding(&binding))
-//RS     }
-//RS 
-//RS     pub fn jet_app_page<F, R>(app: &JetApp, path: String, handler: F, binding: String) -> JetApp
-//RS     where
-//RS         F: JetAppRouteCallback<R>,
-//RS         R: JetAppPageOutput,
-//RS     {
-//RS         app.page(path, handler, jet_app_route_binding(&binding))
-//RS     }
-//RS 
-//RS     pub fn jet_app_layout<F, R>(app: &JetApp, path: String, handler: F, binding: String) -> JetApp
-//RS     where
-//RS         F: JetAppRouteCallback<R>,
-//RS         R: JetAppPageOutput,
-//RS     {
-//RS         app.layout(path, handler, jet_app_route_binding(&binding))
-//RS     }
-//RS 
-//RS     /// `.loader(route, loader)`: the route handler value only names the
-//RS     /// route in source; sema proves it is the handler of the route registered
-//RS     /// immediately before, which is where the loader attaches.
-//RS     pub fn jet_app_loader<T, L, V, E>(
-//RS         app: &JetApp,
-//RS         _route: T,
-//RS         loader: L,
-//RS         binding: String,
-//RS     ) -> JetApp
-//RS     where
-//RS         T: 'static,
-//RS         L: JetAppRouteCallback<Result<V, E>>,
-//RS         V: super::__jet_Encode + 'static,
-//RS         E: JetAppFailure + 'static,
-//RS     {
-//RS         app.loader(loader, jet_app_route_binding(&binding), false)
-//RS     }
-//RS 
-//RS     pub fn jet_app_loader_preload<T, L, V, E>(
-//RS         app: &JetApp,
-//RS         _route: T,
-//RS         loader: L,
-//RS         preload: bool,
-//RS         binding: String,
-//RS     ) -> JetApp
-//RS     where
-//RS         T: 'static,
-//RS         L: JetAppRouteCallback<Result<V, E>>,
-//RS         V: super::__jet_Encode + 'static,
-//RS         E: JetAppFailure + 'static,
-//RS     {
-//RS         app.loader(loader, jet_app_route_binding(&binding), preload)
-//RS     }
-//RS 
-//RS     pub fn jet_app_pending<F, R>(app: &JetApp, handler: F) -> JetApp
-//RS     where
-//RS         F: JetAppRouteCallback<R>,
-//RS         R: JetAppPageOutput,
-//RS     {
-//RS         app.pending(handler)
-//RS     }
-//RS 
-//RS     pub fn jet_app_not_found<F, R>(app: &JetApp, handler: F) -> JetApp
-//RS     where
-//RS         F: JetAppRouteCallback<R>,
-//RS         R: JetAppPageOutput,
-//RS     {
-//RS         app.not_found(handler)
-//RS     }
-//RS 
-//RS     pub fn jet_app_error<F, R>(app: &JetApp, handler: F) -> JetApp
-//RS     where
-//RS         F: JetAppRouteCallback<R>,
-//RS         R: JetAppPageOutput,
-//RS     {
-//RS         app.error(handler)
-//RS     }
-//RS 
-//RS     pub fn jet_app_action<F>(app: &JetApp, name: String, handler: F) -> JetApp
-//RS     where
-//RS         F: JetAppActionHandler,
-//RS     {
-//RS         app.action(name, handler)
-//RS     }
-//RS 
-//RS     pub fn jet_app_form<F>(
-//RS         app: &JetApp,
-//RS         name: String,
-//RS         handler: F,
-//RS         binding: String,
-//RS     ) -> JetApp
-//RS     where
-//RS         F: JetAppActionHandler,
-//RS     {
-//RS         app.form(name, handler, binding)
-//RS     }
-//RS 
-//RS     pub fn jet_app_data<F>(app: &JetApp, name: String, handler: F) -> JetApp
-//RS     where
-//RS         F: JetAppActionHandler,
-//RS     {
-//RS         app.data(name, handler)
-//RS     }
-//RS 
-//RS     pub fn jet_app_mount<F, R>(app: &JetApp, prefix: String, handler: F) -> JetApp
-//RS     where
-//RS         F: Fn(&String) -> R + Send + Sync + 'static,
-//RS         R: 'static,
-//RS     {
-//RS         app.mount(prefix, handler)
-//RS     }
-//RS 
-//RS     pub fn jet_app_mount_with_effect<F, R>(
-//RS         app: &JetApp,
-//RS         prefix: String,
-//RS         handler: F,
-//RS         effect: String,
-//RS     ) -> JetApp
-//RS     where
-//RS         F: Fn(&String) -> R + Send + Sync + 'static,
-//RS         R: 'static,
-//RS     {
-//RS         app.mount_with_effect(prefix, handler, effect)
-//RS     }
-//RS 
-//RS     pub fn jet_app_mount_with_policy<F, R>(
-//RS         app: &JetApp,
-//RS         prefix: String,
-//RS         handler: F,
-//RS         effect: String,
-//RS         policy: String,
-//RS     ) -> JetApp
-//RS     where
-//RS         F: Fn(&String) -> R + Send + Sync + 'static,
-//RS         R: 'static,
-//RS     {
-//RS         app.mount_with_policy(prefix, handler, effect, policy)
-//RS     }
-//RS 
-//RS     pub fn jet_app_routes(app: &JetApp, root: String) -> JetApp {
-//RS         app.routes(root)
-//RS     }
-//RS 
-//RS     pub fn jet_app_security(app: &JetApp, policy: String) -> JetApp {
-//RS         app.security(policy)
-//RS     }
-//RS 
-//RS     pub fn jet_app_assets(app: &JetApp, path: String) -> JetApp {
-//RS         app.assets(path)
-//RS     }
-//RS 
-//RS     pub fn jet_app_split(app: &JetApp, name: String) -> JetApp {
-//RS         app.split(name)
-//RS     }
-//RS 
-//RS     pub fn jet_app_code_split(app: &JetApp, name: String) -> JetApp {
-//RS         app.code_split(name)
-//RS     }
-//RS 
-//RS     pub fn jet_app_cache(app: &JetApp, policy: String) -> JetApp {
-//RS         app.cache(policy)
-//RS     }
-//RS 
-//RS     pub fn jet_app_a11y(app: &JetApp, policy: String) -> JetApp {
-//RS         app.a11y(policy)
-//RS     }
-//RS 
-//RS     pub fn jet_app_adapter(app: &JetApp, name: String) -> JetApp {
-//RS         app.adapter(name)
-//RS     }
-//RS 
-//RS     pub fn jet_app_csr(app: &JetApp) -> JetApp {
-//RS         app.csr()
-//RS     }
-//RS 
-//RS     pub fn jet_app_ssr(app: &JetApp) -> JetApp {
-//RS         app.ssr()
-//RS     }
-//RS 
-//RS     pub fn jet_app_ssg(app: &JetApp) -> JetApp {
-//RS         app.ssg()
-//RS     }
-//RS 
-//RS     pub fn jet_app_stream(app: &JetApp) -> JetApp {
-//RS         app.stream()
-//RS     }
-//RS 
-//RS     pub fn jet_app_streaming(app: &JetApp) -> JetApp {
-//RS         app.streaming()
-//RS     }
-//RS 
-//RS     pub fn jet_app_island(app: &JetApp) -> JetApp {
-//RS         app.island()
-//RS     }
-//RS 
-//RS     pub fn jet_app_hydration_dev(app: &JetApp) -> JetApp {
-//RS         app.hydration_dev()
-//RS     }
-//RS 
-//RS     pub fn jet_app_hydration_release(app: &JetApp) -> JetApp {
-//RS         app.hydration_release()
-//RS     }
-//RS 
-//RS     pub fn jet_app_facts_json(app: &JetApp) -> String {
-//RS         app.facts_json()
-//RS     }
-//RS 
-//RS     pub fn jet_app_serve(app: &JetApp) {
-//RS         app.serve()
-//RS     }
-//RS 
-//RS     pub fn jet_app_serve_with_port(app: &JetApp, port: i64) {
-//RS         app.serve_on(port)
-//RS     }
-//RS 
-//RS     pub fn jet_app_serve_on(app: &JetApp, port: i64) {
-//RS         app.serve_on(port)
-//RS     }
-//RS 
-//RS     pub fn jet_web_virtual_window_facts(window: &super::JetWebVirtualWindow) -> String {
-//RS         window.facts_json()
-//RS     }
-//RS 
-//RS }
-//RS pub use jet_app_impl::{
-//RS     jet_app, jet_app_a11y, jet_app_action, jet_app_adapter, jet_app_assets, jet_app_cache,
-//RS     jet_app_code_split, jet_app_csr, jet_app_data, jet_app_error, jet_app_facts_json,
-//RS     jet_app_form, jet_app_hydration_dev, jet_app_hydration_release, jet_app_island,
-//RS     jet_app_layout, jet_app_not_found, jet_app_page, jet_app_pending, jet_app_route,
-//RS     jet_app_route_binding, jet_app_routes, jet_app_security, jet_app_serve, jet_app_serve_on,
-//RS     jet_app_split, jet_app_ssg, jet_app_ssr, jet_app_stream, jet_app_streaming, jet_web_page,
-//RS     JetApp, JetAppRouteBinding, JetAppTreeRouteCallback, JetWebPage,
-//RS };
-// END-PORT-PENDING 0019 crates/jet-codegen/src/Prelude/App.rs:1-2080
+// D-WEBAPP1=D / D-WEBAUTHOR1=D / D-DX-ROUTER1=A: checked App graph,
+// projected once into the canonical router and typed server-function boundary.
+use std.sync.[Arc, LazyLock, Mutex, MutexGuard]
+use std.any.[type_name]
+use std.convert.[Infallible]
+use core.encoding.runtime.std_data_tree.[DataTree]
+use jet_codegen.[__jet_Encode, __jet_Decode, jet_enc_json_to_string, jet_enc_json_decode, JetErr, jet_runtime_stop]
+use jet_codegen.[JetWebNavigation, JetWebRouter, JetWebRouterValueType, JetWebServerFunction, JetWebServerFnHandler, JetWebServerFnError, jet_web_server_fn_typed]
+use jet_foundation.Text.[TEXT_NUL]
+use jet_codegen.[JetWebNavigationState, jet_web_query_facts_json]
+use core.web.runtime.app_middleware.[APP_SERVER_FUNCTION_MIDDLEWARE]
+use jet_codegen.[JetWebRouterSearchCodec, JetWebRouterField, JetWebRouteBoundaries]
+use jet_codegen.[jet_web_query_dev_panel, jet_web_form_dev_panel, JetHTTPMux, jet_web_server_fn_register_http]
+use jet_codegen.[jet_app_http_mux_new, jet_app_http_page_response, jet_app_http_request_url, jet_app_http_mount, jet_app_http_assets, jet_app_http_reload, jet_app_http_serve]
+use std.env as native_env
+
+// Rust: crates/jet-codegen/src/Prelude/App.rs:15
+type PageHandler = Arc<fn(JetWebNavigation, String) -> JetWebPage Err!>
+// Rust: crates/jet-codegen/src/Prelude/App.rs:20
+type BoundaryHandler = Arc<fn() -> JetWebPage Err!>
+// Rust: crates/jet-codegen/src/Prelude/App.rs:23
+type LoaderHandler = Arc<fn(JetWebNavigation) -> String Err!>
+// Rust: crates/jet-codegen/src/Prelude/App.rs:25
+type ActionHandler = JetWebServerFunction?
+// Rust: crates/jet-codegen/src/Prelude/App.rs:26
+type MountHandler = Arc<fn(String) Never!>
+
+// Rust: crates/jet-codegen/src/Prelude/App.rs:29
+pub trait JetAppFailure {
+    // Rust: crates/jet-codegen/src/Prelude/App.rs:30
+    fn into_app_failure(^self) -> String Never!
+}
+// Rust: crates/jet-codegen/src/Prelude/App.rs:33
+impl<E: __jet_Encode> JetAppFailure for E {
+    // Rust: crates/jet-codegen/src/Prelude/App.rs:34
+    fn into_app_failure(^self) -> String Never! { jet_enc_json_to_string(self) }
+}
+// Rust: crates/jet-codegen/src/Prelude/App.rs:39
+impl JetAppFailure for JetErr {
+    // Rust: crates/jet-codegen/src/Prelude/App.rs:40
+    fn into_app_failure(^self) -> String Never! { self.to_string() }
+}
+// Rust: crates/jet-codegen/src/Prelude/App.rs:45
+impl JetAppFailure for Infallible {
+    // Rust: crates/jet-codegen/src/Prelude/App.rs:46
+    fn into_app_failure(^self) -> String Never! { match self {} }
+}
+// Rust: crates/jet-codegen/src/Prelude/App.rs:51
+fn jet_app_invalid(message: String) -> Never {
+    jet_runtime_stop("E3001", "", 0, message)
+}
+// Rust: crates/jet-codegen/src/Prelude/App.rs:55
+fn jet_app_server_function<I: __jet_Decode, O: __jet_Encode, E: JetAppFailure, F: fn(I) -> O E!>(
+    name: String, source_id: String, handler: F) -> JetWebServerFunction Never! {
+    input_type :: type_name<I>().to_string()
+    output_type :: type_name<O>().to_string()
+    error_type :: type_name<E>().to_string()
+    dispatch: JetWebServerFnHandler :: Arc.new((_context, body) -> {
+        input :: jet_enc_json_decode<I>(body.to_string()).map_err(errors ->
+            JetWebServerFnError.InvalidInput("{errors:?}"))?
+        match handler(^input) {
+            Ok(output) -> Ok(jet_enc_json_to_string(output))
+            Err(error) -> Err(JetWebServerFnError.Handler{code: "application_error", message: error.into_app_failure()})
+        }
+    })
+    jet_web_server_fn_typed(name, source_id, "POST", input_type, output_type, error_type, dispatch)
+        .unwrap_or_else(error -> jet_app_invalid("invalid app server function: {error:?}"))
+}
+// Rust: crates/jet-codegen/src/Prelude/App.rs:94
+fn jet_app_unit_server_function<O: __jet_Encode, E: JetAppFailure, F: fn() -> O E!>(
+    name: String, source_id: String, handler: F) -> JetWebServerFunction Never! {
+    output_type :: type_name<O>().to_string()
+    error_type :: type_name<E>().to_string()
+    dispatch: JetWebServerFnHandler :: Arc.new((_context, _body) -> {
+        match handler() {
+            Ok(output) -> Ok(jet_enc_json_to_string(output))
+            Err(error) -> Err(JetWebServerFnError.Handler{code: "application_error", message: error.into_app_failure()})
+        }
+    })
+    jet_web_server_fn_typed(name, source_id, "POST", "Unit", output_type, error_type, dispatch)
+        .unwrap_or_else(error -> jet_app_invalid("invalid app server function: {error:?}"))
+}
+// Rust: crates/jet-codegen/src/Prelude/App.rs:132
+pub trait JetAppActionHandler {
+    // Rust: crates/jet-codegen/src/Prelude/App.rs:133
+    fn into_server_function(^self, name: String) -> JetWebServerFunction Never!
+}
+// Rust: crates/jet-codegen/src/Prelude/App.rs:136
+impl<I: __jet_Decode, O: __jet_Encode, E: JetAppFailure> JetAppActionHandler for Arc<fn(I) -> O E!> {
+    // Rust: crates/jet-codegen/src/Prelude/App.rs:142
+    fn into_server_function(^self, name: String) -> JetWebServerFunction Never! {
+        jet_app_server_function<I, O, E>(~name, name, input -> self(input))
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/App.rs:151
+impl<O: __jet_Encode, E: JetAppFailure> JetAppActionHandler for Arc<fn() -> O E!> {
+    // Rust: crates/jet-codegen/src/Prelude/App.rs:156
+    fn into_server_function(^self, name: String) -> JetWebServerFunction Never! {
+        jet_app_unit_server_function<O, E>(~name, name, () -> self())
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/App.rs:166
+#Derive(Clone, Copy, Debug, Default, Eq, PartialEq)
+pub enum JetAppRenderMode { Csr, Ssr, Ssg, Stream, Island }
+impl JetAppRenderMode {
+    // Rust: crates/jet-codegen/src/Prelude/App.rs:168
+    pub fn default() -> JetAppRenderMode Never! { .Csr }
+    // Rust: crates/jet-codegen/src/Prelude/App.rs:176
+    pub fn as_str(self) -> String Never! {
+        match self { .Csr -> "csr", .Ssr -> "ssr", .Ssg -> "ssg", .Stream -> "stream", .Island -> "island" }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/App.rs:188
+#Derive(Clone, Copy, Debug, Eq, PartialEq)
+pub enum JetAppHydrationTrigger { Immediate, ClientLoad, ClientIdle, ClientVisible, Manual }
+impl JetAppHydrationTrigger {
+    // Rust: crates/jet-codegen/src/Prelude/App.rs:197
+    pub fn as_str(self) -> String Never! {
+        match self {
+            .Immediate -> "immediate", .ClientLoad -> "client-load", .ClientIdle -> "client-idle"
+            .ClientVisible -> "client-visible", .Manual -> "manual"
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/App.rs:213
+#Derive(Clone, Debug, Default, Eq, PartialEq)
+pub struct JetAppRouteField { pub name: String, pub ty: String, pub codec: String, pub required: Bool, pub default: String? }
+// Rust: crates/jet-codegen/src/Prelude/App.rs:222
+#Derive(Clone, Debug, Default, Eq, PartialEq)
+pub struct JetAppLoaderFacts { pub handler: String, pub data_type: String, pub dependency: String, pub preload: Bool, pub cache_identity: String }
+// Rust: crates/jet-codegen/src/Prelude/App.rs:231
+#Derive(Clone, Debug, Default, Eq, PartialEq)
+pub struct JetAppRouteFacts {
+    pub route_identity: String
+    pub path_params: [JetAppRouteField]
+    pub search_params: [JetAppRouteField]
+    pub search_codec: String
+    pub loader_contract: JetAppLoaderFacts?
+    pub pending_boundary: String?
+    pub not_found_boundary: String?
+    pub error_boundary: String?
+    pub mode: JetAppRenderMode
+    pub reason: [String]
+    pub effects: [String]
+    pub interactive: Bool
+    pub loader: String?
+    pub form: String?
+    pub cache: String
+    pub override_mode: JetAppRenderMode?
+    pub pending_boundary_id: U64?
+    pub island_identity: String?
+    pub hydration_trigger: JetAppHydrationTrigger?
+}
+impl JetAppRouteFacts {
+    // Rust: crates/jet-codegen/src/Prelude/App.rs:254
+    pub fn with_mode(mode: JetAppRenderMode) -> JetAppRouteFacts Never! {
+        facts := JetAppRouteFacts.default()
+        facts.mode = mode
+        facts.reason = ["explicit render mode `{mode.as_str()}`"]
+        facts.override_mode = Val(mode)
+        ^facts
+    }
+    // Rust: crates/jet-codegen/src/Prelude/App.rs:263
+    fn json(self) -> String Never! {
+        reason :: self.reason.iter().map(value -> jet_app_json_string(value)).collect<[String]>().join(",")
+        effects :: self.effects.iter().map(value -> jet_app_json_string(value)).collect<[String]>().join(",")
+        path_params :: self.path_params.iter().map(jet_app_route_field_json).collect<[String]>().join(",")
+        search_params :: self.search_params.iter().map(jet_app_route_field_json).collect<[String]>().join(",")
+        loader :: self.loader.map(jet_app_json_string).unwrap_or("null")
+        loader_contract :: self.loader_contract.map(jet_app_loader_facts_json).unwrap_or("null")
+        form :: self.form.map(jet_app_json_string).unwrap_or("null")
+        override_mode :: self.override_mode.map(mode -> jet_app_json_string(mode.as_str())).unwrap_or("null")
+        pending_boundary_id :: self.pending_boundary_id.map(id -> id.to_string()).unwrap_or("null")
+        pending :: self.pending_boundary.map(jet_app_json_string).unwrap_or("null")
+        not_found :: self.not_found_boundary.map(jet_app_json_string).unwrap_or("null")
+        error :: self.error_boundary.map(jet_app_json_string).unwrap_or("null")
+        island :: self.island_identity.map(identity -> {
+            trigger :: self.hydration_trigger.unwrap_or(.Immediate)
+            "{\"identity\":" + jet_app_json_string(identity) + ",\"hydration_trigger\":" +
+                jet_app_json_string(trigger.as_str()) + ",\"resume_payload\":{\"captures\":[],\"serializable\":false}}"
+        }).unwrap_or("null")
+        search_codec :: if self.search_codec.is_empty() { "query" } else { self.search_codec }
+        cache :: if self.cache.is_empty() { "unspecified" } else { self.cache }
+        "{\"route_identity\":" + jet_app_json_string(self.route_identity) +
+            ",\"path_params\":[" + path_params + "],\"search_params\":[" + search_params +
+            "],\"search_codec\":" + jet_app_json_string(search_codec) +
+            ",\"loader_contract\":" + loader_contract + ",\"pending_boundary\":" + pending +
+            ",\"not_found_boundary\":" + not_found + ",\"error_boundary\":" + error +
+            ",\"mode\":" + jet_app_json_string(self.mode.as_str()) + ",\"reason\":[" + reason +
+            "],\"effects\":[" + effects + "],\"interactive\":" + self.interactive.to_string() +
+            ",\"loader\":" + loader + ",\"form\":" + form + ",\"cache\":" + jet_app_json_string(cache) +
+            ",\"override_mode\":" + override_mode + ",\"pending_boundary_id\":" + pending_boundary_id +
+            ",\"island\":" + island + "}"
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/App.rs:364
+fn jet_app_route_field_json(field: JetAppRouteField) -> String Never! {
+    default :: field.default.map(jet_app_json_string).unwrap_or("null")
+    "{\"name\":" + jet_app_json_string(field.name) + ",\"ty\":" + jet_app_json_string(field.ty) +
+        ",\"codec\":" + jet_app_json_string(field.codec) + ",\"required\":" + field.required.to_string() +
+        ",\"default\":" + default + "}"
+}
+// Rust: crates/jet-codegen/src/Prelude/App.rs:380
+fn jet_app_loader_facts_json(loader: JetAppLoaderFacts) -> String Never! {
+    "{\"handler\":" + jet_app_json_string(loader.handler) + ",\"data_type\":" + jet_app_json_string(loader.data_type) +
+        ",\"dependency\":" + jet_app_json_string(loader.dependency) + ",\"preload\":" + loader.preload.to_string() +
+        ",\"cache_identity\":" + jet_app_json_string(loader.cache_identity) + "}"
+}
+// Rust: crates/jet-codegen/src/Prelude/App.rs:391
+fn jet_app_route_identity(path: String) -> String Never! {
+    hash := U64{0xcbf29ce484222325}
+    loop byte in path.as_bytes() {
+        hash = hash ^ U64{byte}
+        hash = hash.wrapping_mul(U64{0x100000001b3})
+    }
+    "route-{hash:016x}"
+}
+// Rust: crates/jet-codegen/src/Prelude/App.rs:400
+fn jet_app_json_string(value: String) -> String Never! {
+    out := String.with_capacity(value.len() + 2)
+    &out.push('"')
+    loop character in value.chars() {
+        match character {
+            '"' -> &out.push_str("\\\"")
+            '\\' -> &out.push_str("\\\\")
+            '\n' -> &out.push_str("\\n")
+            '\r' -> &out.push_str("\\r")
+            '\t' -> &out.push_str("\\t")
+            character if U32{character} < U32{0x20} -> &out.push_str("\\u{U32{character}:04x}")
+            character -> &out.push(character)
+        }
+    }
+    &out.push('"')
+    ^out
+}
+// Rust: crates/jet-codegen/src/Prelude/App.rs:420
+fn jet_app_html_attr(value: String) -> String Never! {
+    out := String.with_capacity(value.len())
+    loop character in value.chars() {
+        match character {
+            '&' -> &out.push_str("&amp;"), '<' -> &out.push_str("&lt;")
+            '>' -> &out.push_str("&gt;"), '"' -> &out.push_str("&quot;")
+            character -> &out.push(character)
+        }
+    }
+    ^out
+}
+// Rust: crates/jet-codegen/src/Prelude/App.rs:443
+#Derive(Clone, Debug, Eq, PartialEq)
+pub struct JetAppSearchField { pub name: String, pub ty: String, pub required: Bool }
+// Rust: crates/jet-codegen/src/Prelude/App.rs:450
+#Derive(Clone, Debug, Eq, PartialEq)
+pub enum JetAppRouteBinding {
+    Path { name: String, ty: String }
+    Search { codec: String, fields: [JetAppSearchField], scalar: String? }
+    Data
+}
+impl JetAppRouteBinding {
+    // Rust: crates/jet-codegen/src/Prelude/App.rs:465
+    fn label(self) -> String Never! {
+        match self {
+            .Path{name, ..} -> "path parameter `{name}`"
+            .Search{scalar: Val(name), ..} -> "search field `{name}`"
+            .Search{..} -> "search record"
+            .Data -> "loader data"
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/App.rs:475
+fn jet_app_router_value_type(ty: String) -> JetWebRouterValueType Never! {
+    match ty {
+        "Int" -> .Int, "Bool" -> .Bool, "Float" -> .Float, "String" | "Text" -> .String, _ -> .Json
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/App.rs:485
+fn jet_app_search_field(item: String) -> JetAppSearchField Err! {
+    (name, raw_ty) :: item.split_once('=').ok_or_else(() -> "invalid search field binding `{item}`")?
+    (ty, required) :: match raw_ty.strip_suffix('?') {
+        Val(ty) -> (ty, false), None -> (raw_ty, true)
+    }
+    if name.is_empty() || ty.is_empty() -> return Err("invalid search field binding `{item}`")
+    Ok(JetAppSearchField{name: name.to_string(), ty: ty.to_string(), required})
+}
+// Rust: crates/jet-codegen/src/Prelude/App.rs:505
+pub fn jet_app_route_binding(spec: String) -> [JetAppRouteBinding] Never! {
+    spec.split(';').filter(item -> not item.is_empty()).map(item -> {
+        if item == "d" -> return Ok(JetAppRouteBinding.Data)
+        if item.strip_prefix("p:") is Val(rest) {
+            (name, ty) :: rest.split_once('=').ok_or_else(() -> "invalid path binding `{item}`")?
+            if name.is_empty() || ty.is_empty() -> return Err("invalid path binding `{item}`")
+            return Ok(JetAppRouteBinding.Path{name: name.to_string(), ty: ty.to_string()})
+        }
+        if item.strip_prefix("s=") is Val(rest) {
+            (codec, field_text) :: rest.split_once(':').ok_or_else(() -> "invalid search binding `{item}`")?
+            fields :: field_text.split(',').filter(field -> not field.is_empty()).map(jet_app_search_field)
+                .collect<[JetAppSearchField] Err!>()?
+            scalar :: match codec {
+                "json" -> None
+                "query" if fields.len() == 1 -> Val(~fields[0].name)
+                _ -> return Err("invalid search binding `{item}`")
+            }
+            return Ok(JetAppRouteBinding.Search{codec: codec.to_string(), fields: ^fields, scalar})
+        }
+        Err("invalid route input binding `{item}`")
+    }).collect<[JetAppRouteBinding] Err!>()
+        .unwrap_or_else(error -> jet_app_invalid("invalid app route binding: {error}"))
+}
+
+// Rust: crates/jet-codegen/src/Prelude/App.rs:553
+fn jet_app_scalar_search_tree(navigation: JetWebNavigation, name: String, fields: [JetAppSearchField]) -> DataTree Err! {
+    match navigation.search.get(name) {
+        Val(value) -> Ok(DataTree.Text(~value))
+        None if fields.iter().any(field -> field.name == name && not field.required) -> Ok(DataTree.Null)
+        None -> Err("route `{navigation.route}` has no search field `{name}`")
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/App.rs:571
+pub struct JetAppRouteInputs {
+    binding: View<JetAppRouteBinding>
+    navigation: @JetWebNavigation
+    data: @String
+}
+impl JetAppRouteInputs {
+    // Rust: crates/jet-codegen/src/Prelude/App.rs:581
+    pub fn tree(self, index: Int) -> DataTree Err! {
+        route :: self.navigation.route
+        binding :: self.binding.get(index).ok_or_else(() -> "route `{route}` input {index} has no checked binding")?
+        Ok(match binding {
+            .Path{name, ..} -> DataTree.Text(self.navigation.params.get(name)
+                .map(value -> ~value).ok_or_else(() -> "route `{route}` has no path parameter `{name}`")?)
+            .Search{scalar: Val(name), fields, ..} -> jet_app_scalar_search_tree(self.navigation, name, fields)?
+            .Search{..} -> DataTree.Object(self.navigation.search.iter()
+                .map((name, value) -> (~name, DataTree.Text(~value))).collect())
+            .Data -> DataTree.TypedText(self.data.to_string())
+        })
+    }
+    // Rust: crates/jet-codegen/src/Prelude/App.rs:611
+    pub fn arity(self) -> Int Never! { self.binding.len() }
+    // Rust: crates/jet-codegen/src/Prelude/App.rs:615
+    pub fn decode<T: __jet_Decode>(self, index: Int) -> T Err! {
+        route :: self.navigation.route
+        binding :: self.binding.get(index).ok_or_else(() -> "route `{route}` input {index} has no checked binding")?
+        tree :: match binding {
+            .Path{name, ..} -> DataTree.Text(self.navigation.params.get(name)
+                .map(value -> ~value).ok_or_else(() -> "route `{route}` has no path parameter `{name}`")?)
+            .Search{scalar: Val(name), fields, ..} -> jet_app_scalar_search_tree(self.navigation, name, fields)?
+            .Search{..} -> DataTree.Object(self.navigation.search.iter()
+                .map((name, value) -> (~name, DataTree.Text(~value))).collect())
+            .Data -> return jet_enc_json_decode<T>(self.data.to_string())
+                .map_err(errors -> "route `{route}` loader data: {errors:?}")
+        }
+        T.jet_decode(tree).map_err(errors -> "route `{route}` {binding.label()}: {errors:?}")
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/App.rs:656
+pub trait JetAppRouteCallback<R> {
+    // Rust: crates/jet-codegen/src/Prelude/App.rs:657
+    fn arity(self) -> Int Never!
+    // Rust: crates/jet-codegen/src/Prelude/App.rs:658
+    fn call_route(self, inputs: JetAppRouteInputs) -> R Err!
+}
+// Rust: crates/jet-codegen/src/Prelude/App.rs:665
+pub struct JetAppTreeRouteCallback<R> {
+    arity: Int
+    call: Arc<fn([DataTree]) -> R Err!>
+}
+impl<R> JetAppTreeRouteCallback<R> {
+    // Rust: crates/jet-codegen/src/Prelude/App.rs:671
+    pub fn new(arity: Int, call: Arc<fn([DataTree]) -> R Err!>) -> JetAppTreeRouteCallback<R> Never! {
+        JetAppTreeRouteCallback{arity, call}
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/App.rs:679
+impl<R> JetAppRouteCallback<R> for JetAppTreeRouteCallback<R> {
+    // Rust: crates/jet-codegen/src/Prelude/App.rs:680
+    fn arity(self) -> Int Never! { self.arity }
+    // Rust: crates/jet-codegen/src/Prelude/App.rs:683
+    fn call_route(self, inputs: JetAppRouteInputs) -> R Err! {
+        trees :: (0..<self.arity).map(index -> inputs.tree(index)).collect<[DataTree] Err!>()?
+        (self.call)(trees)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/App.rs:691
+impl<R> JetAppRouteCallback<R> for Arc<fn() -> R> {
+    // Rust: crates/jet-codegen/src/Prelude/App.rs:692
+    fn arity(self) -> Int Never! { 0 }
+    // Rust: crates/jet-codegen/src/Prelude/App.rs:695
+    fn call_route(self, _inputs: JetAppRouteInputs) -> R Err! { Ok(self()) }
+}
+// Rust: crates/jet-codegen/src/Prelude/App.rs:700
+impl<A: __jet_Decode, R> JetAppRouteCallback<R> for Arc<fn(A) -> R> {
+    // Rust: crates/jet-codegen/src/Prelude/App.rs:705
+    fn arity(self) -> Int Never! { 1 }
+    // Rust: crates/jet-codegen/src/Prelude/App.rs:708
+    fn call_route(self, inputs: JetAppRouteInputs) -> R Err! {
+        a :: inputs.decode<A>(0)?
+        Ok(self(a))
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/App.rs:714
+impl<A: __jet_Decode, B: __jet_Decode, R> JetAppRouteCallback<R> for Arc<fn(A, B) -> R> {
+    // Rust: crates/jet-codegen/src/Prelude/App.rs:720
+    fn arity(self) -> Int Never! { 2 }
+    // Rust: crates/jet-codegen/src/Prelude/App.rs:723
+    fn call_route(self, inputs: JetAppRouteInputs) -> R Err! {
+        a :: inputs.decode<A>(0)?
+        b :: inputs.decode<B>(1)?
+        Ok(self(a, b))
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/App.rs:730
+impl<A: __jet_Decode, B: __jet_Decode, C: __jet_Decode, R> JetAppRouteCallback<R> for Arc<fn(A, B, C) -> R> {
+    // Rust: crates/jet-codegen/src/Prelude/App.rs:738
+    fn arity(self) -> Int Never! { 3 }
+    // Rust: crates/jet-codegen/src/Prelude/App.rs:741
+    fn call_route(self, inputs: JetAppRouteInputs) -> R Err! {
+        a :: inputs.decode<A>(0)?
+        b :: inputs.decode<B>(1)?
+        c :: inputs.decode<C>(2)?
+        Ok(self(a, b, c))
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/App.rs:750
+pub trait JetAppPageOutput {
+    // Rust: crates/jet-codegen/src/Prelude/App.rs:751
+    fn into_page(^self) -> JetWebPage Err!
+}
+// Rust: crates/jet-codegen/src/Prelude/App.rs:754
+impl JetAppPageOutput for JetWebPage {
+    // Rust: crates/jet-codegen/src/Prelude/App.rs:755
+    fn into_page(^self) -> JetWebPage Err! { Ok(^self) }
+}
+// Rust: crates/jet-codegen/src/Prelude/App.rs:760
+impl<E: JetAppFailure> JetAppPageOutput for JetWebPage E! {
+    // Rust: crates/jet-codegen/src/Prelude/App.rs:761
+    fn into_page(^self) -> JetWebPage Err! { self.map_err(error -> error.into_app_failure()) }
+}
+// Rust: crates/jet-codegen/src/Prelude/App.rs:766
+fn jet_app_page_handler<F: JetAppRouteCallback<R>, R: JetAppPageOutput>(
+    handler: F, binding: [JetAppRouteBinding]) -> PageHandler Never! {
+    if binding.len() != handler.arity() {
+        jet_app_invalid("app route handler `{type_name<F>()}` takes {handler.arity()} inputs but the checked binding has {binding.len()}")
+    }
+    Arc.new((navigation, data) -> {
+        inputs :: JetAppRouteInputs{binding: binding[0..<binding.len()], navigation: @navigation, data: @data}
+        handler.call_route(inputs)?.into_page()
+    })
+}
+// Rust: crates/jet-codegen/src/Prelude/App.rs:789
+fn jet_app_boundary_handler<F: JetAppRouteCallback<R>, R: JetAppPageOutput>(handler: F) -> BoundaryHandler Never! {
+    if handler.arity() != 0 -> jet_app_invalid("app boundary handler `{type_name<F>()}` must take no inputs")
+    navigation :: JetWebNavigation{url: "", route: "", params: [:], search: [:]}
+    Arc.new(() -> {
+        inputs :: JetAppRouteInputs{binding: [], navigation: @navigation, data: @""}
+        handler.call_route(inputs)?.into_page()
+    })
+}
+// Rust: crates/jet-codegen/src/Prelude/App.rs:816
+fn jet_app_loader_binding_check(identity: String, arity: Int, binding: [JetAppRouteBinding]) -> Never! {
+    if binding.len() != arity {
+        jet_app_invalid("app loader `{identity}` takes {arity} inputs but the checked binding has {binding.len()}")
+    }
+    if binding.iter().any(binding -> binding is .Data) {
+        jet_app_invalid("app loader `{identity}` cannot consume its own route data")
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/App.rs:828
+fn jet_app_loader_handler<L: JetAppRouteCallback<V E!>, V: __jet_Encode, E: JetAppFailure>(
+    loader: L, binding: [JetAppRouteBinding]) -> LoaderHandler Never! {
+    jet_app_loader_binding_check(type_name<L>(), loader.arity(), binding)
+    Arc.new(navigation -> {
+        inputs :: JetAppRouteInputs{binding: binding[0..<binding.len()], navigation: @navigation, data: @""}
+        match loader.call_route(inputs)? {
+            Ok(value) -> Ok(jet_enc_json_to_string(value))
+            Err(error) -> Err(error.into_app_failure())
+        }
+    })
+}
+// Rust: crates/jet-codegen/src/Prelude/App.rs:853
+fn jet_app_encoded_loader_handler<L: JetAppRouteCallback<String Err!>>(
+    loader: L, binding: [JetAppRouteBinding]) -> LoaderHandler Never! {
+    jet_app_loader_binding_check(type_name<L>(), loader.arity(), binding)
+    Arc.new(navigation -> {
+        inputs :: JetAppRouteInputs{binding: binding[0..<binding.len()], navigation: @navigation, data: @""}
+        loader.call_route(inputs)?
+    })
+}
+// Rust: crates/jet-codegen/src/Prelude/App.rs:871
+fn jet_app_binding_facts(binding: [JetAppRouteBinding]) -> ([JetAppRouteField], [JetAppRouteField], String) Never! {
+    path_params := [JetAppRouteField]{}
+    search_params := [JetAppRouteField]{}
+    search_codec := "query"
+    loop entry in binding {
+        match entry {
+            .Path{name, ty} -> &path_params.push(JetAppRouteField{name: ~name, ty: ~ty, codec: "path", required: true, default: None})
+            .Search{codec, fields, ..} -> {
+                search_codec = ~codec
+                &search_params.extend(fields.iter().map(field ->
+                    JetAppRouteField{name: ~field.name, ty: ~field.ty, codec: ~codec, required: field.required, default: None}))
+            }
+            .Data -> {}
+        }
+    }
+    (^path_params, ^search_params, ^search_codec)
+}
+// Rust: crates/jet-codegen/src/Prelude/App.rs:903
+#Derive(Clone)
+struct JetAppRoute {
+    path: String
+    handler: PageHandler
+    handler_identity: String
+    binding: [JetAppRouteBinding]
+    facts: JetAppRouteFacts
+    loader: LoaderHandler?
+    pending: BoundaryHandler?
+    error: BoundaryHandler?
+}
+// Rust: crates/jet-codegen/src/Prelude/App.rs:915
+#Derive(Default)
+struct JetAppState {
+    routes: [JetAppRoute]
+    actions: [(String, ActionHandler, String, Bool)]
+    mounts: [(String, MountHandler, [String], [String])]
+    routes_from: [String]
+    not_found: BoundaryHandler?
+    security: [String]
+    assets: [String]
+    split: [String]
+    cache: [String]
+    a11y: [String]
+    adapters: [String]
+    hydration: String
+    router: JetWebRouter?
+}
+// Rust: crates/jet-codegen/src/Prelude/App.rs:935
+#Derive(Clone)
+pub struct JetApp {
+    state: Arc<Mutex<JetAppState>>
+    route_facts: Arc<Mutex<JetAppRouteFacts>>
+}
+// Rust: crates/jet-codegen/src/Prelude/App.rs:940
+pub fn jet_app() -> JetApp Never! {
+    state := JetAppState.default()
+    state.hydration = "dev-overlay"
+    JetApp{state: Arc.new(Mutex.new(^state)), route_facts: Arc.new(Mutex.new(JetAppRouteFacts.default()))}
+}
+// Rust: crates/jet-codegen/src/Prelude/App.rs:951
+#Derive(Clone, Default)
+pub struct JetWebPage { pub title: String, pub body: String }
+// Rust: crates/jet-codegen/src/Prelude/App.rs:956
+pub fn jet_web_page(title: String, body: String) -> JetWebPage Never! { JetWebPage{title, body} }
+
+// Rust: crates/jet-codegen/src/Prelude/App.rs:964
+#Derive(Clone)
+pub struct JetAppResponse {
+    pub status: I64
+    pub page: JetWebPage
+    pub navigation: JetWebNavigationState
+}
+impl JetApp {
+    // Rust: crates/jet-codegen/src/Prelude/App.rs:970
+    fn lock(self) -> MutexGuard<JetAppState> Never! {
+        // GATE #4565: kernel primitive
+        #Unsafe("native mutex serializes the shared App graph; recover the guarded state on poison") {
+            self.state.lock().unwrap_or_else(error -> error.into_inner())
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/App.rs:974
+    fn register_route<F: JetAppRouteCallback<R>, R: JetAppPageOutput>(
+        self, path: String, handler: F, binding: [JetAppRouteBinding]) -> JetApp Never! {
+        handler_identity :: type_name<F>().to_string()
+        page_handler :: jet_app_page_handler(handler, ~binding)
+        // GATE #4565: kernel primitive
+        facts := #Unsafe("clone route facts while their native mutex guard is live") {
+            ~self.route_facts.lock().unwrap_or_else(error -> error.into_inner())
+        }
+        if facts.route_identity.is_empty() {
+            facts.route_identity = jet_app_route_identity(path + TEXT_NUL + handler_identity)
+        }
+        (path_params, search_params, search_codec) :: jet_app_binding_facts(binding)
+        facts.path_params = ^path_params
+        facts.search_params = ^search_params
+        facts.search_codec = ^search_codec
+        state := self.lock()
+        &state.routes.push(JetAppRoute{path, handler: page_handler, handler_identity,
+            binding, facts: ^facts, loader: None, pending: None, error: None})
+        state.router = None
+        drop(^state)
+        ~self
+    }
+    // Rust: crates/jet-codegen/src/Prelude/App.rs:1015
+    pub fn route<F: JetAppRouteCallback<R>, R: JetAppPageOutput>(
+        self, path: String, handler: F, binding: [JetAppRouteBinding]) -> JetApp Never! {
+        self.register_route(path, handler, binding)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/App.rs:1028
+    pub fn page<F: JetAppRouteCallback<R>, R: JetAppPageOutput>(
+        self, path: String, handler: F, binding: [JetAppRouteBinding]) -> JetApp Never! {
+        self.register_route(path, handler, binding)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/App.rs:1041
+    pub fn layout<F: JetAppRouteCallback<R>, R: JetAppPageOutput>(
+        self, path: String, handler: F, binding: [JetAppRouteBinding]) -> JetApp Never! {
+        self.register_route(path, handler, binding)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/App.rs:1057
+    fn attach_boundary(self, handler: BoundaryHandler, identity: String,
+        attach: fn(&JetAppRoute, BoundaryHandler, String) Never!) -> JetApp Never! {
+        state := self.lock()
+        route :: &state.routes.last_mut().unwrap_or_else(() ->
+            jet_app_invalid("app boundary `{identity}` has no preceding route"))
+        attach(route, handler, identity)
+        state.router = None
+        drop(^state)
+        ~self
+    }
+    // Rust: crates/jet-codegen/src/Prelude/App.rs:1075
+    pub fn pending<F: JetAppRouteCallback<R>, R: JetAppPageOutput>(self, handler: F) -> JetApp Never! {
+        identity :: type_name<F>().to_string()
+        self.attach_boundary(jet_app_boundary_handler(handler), identity, (route, handler, identity) -> {
+            route.pending = Val(handler)
+            route.facts.pending_boundary = Val(identity)
+        })
+    }
+    // Rust: crates/jet-codegen/src/Prelude/App.rs:1091
+    pub fn error<F: JetAppRouteCallback<R>, R: JetAppPageOutput>(self, handler: F) -> JetApp Never! {
+        identity :: type_name<F>().to_string()
+        self.attach_boundary(jet_app_boundary_handler(handler), identity, (route, handler, identity) -> {
+            route.error = Val(handler)
+            route.facts.error_boundary = Val(identity)
+        })
+    }
+    // Rust: crates/jet-codegen/src/Prelude/App.rs:1111
+    pub fn not_found<F: JetAppRouteCallback<R>, R: JetAppPageOutput>(self, handler: F) -> JetApp Never! {
+        state := self.lock()
+        state.not_found = Val(jet_app_boundary_handler(handler))
+        drop(^state)
+        ~self
+    }
+    // Rust: crates/jet-codegen/src/Prelude/App.rs:1122
+    fn register_action<F: JetAppActionHandler>(self, name: String, handler: F,
+        kind: String, binding: String?) -> JetApp Never! {
+        function := handler.into_server_function(~name)
+        if binding is Val(value) -> function = function.with_form_binding(value)
+        state := self.lock()
+        if &state.routes.last_mut() is Val(route) {
+            if (kind == "form" || kind == "action") && route.facts.form.is_none() -> route.facts.form = Val(~name)
+        }
+        &state.actions.push((name, Val(^function), kind.to_string(), false))
+        drop(^state)
+        ~self
+    }
+    // Rust: crates/jet-codegen/src/Prelude/App.rs:1150
+    pub fn action<F: JetAppActionHandler>(self, name: String, handler: F) -> JetApp Never! {
+        self.register_action(name, handler, "action", None)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/App.rs:1157
+    pub fn form<F: JetAppActionHandler>(self, name: String, handler: F, binding: String) -> JetApp Never! {
+        self.register_action(name, handler, "form", Val(binding))
+    }
+    // Rust: crates/jet-codegen/src/Prelude/App.rs:1164
+    pub fn data<F: JetAppActionHandler>(self, name: String, handler: F) -> JetApp Never! {
+        self.register_action(name, handler, "data", None)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/App.rs:1175
+    pub fn loader<L: JetAppRouteCallback<V E!>, V: __jet_Encode, E: JetAppFailure>(
+        self, loader: L, binding: [JetAppRouteBinding], preload: Bool) -> JetApp Never! {
+        loader_identity :: type_name<L>().to_string()
+        data_type :: type_name<V>().to_string()
+        encoded :: jet_app_loader_handler(loader, binding)
+        self.attach_loader(encoded, loader_identity, data_type, preload)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/App.rs:1194
+    pub fn loader_encoded<L: JetAppRouteCallback<String Err!>>(
+        self, loader: L, binding: [JetAppRouteBinding], data_type: String, preload: Bool) -> JetApp Never! {
+        loader_identity :: type_name<L>().to_string()
+        encoded :: jet_app_encoded_loader_handler(loader, binding)
+        self.attach_loader(encoded, loader_identity, data_type, preload)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/App.rs:1209
+    fn attach_loader(self, loader: LoaderHandler, loader_identity: String, data_type: String, preload: Bool) -> JetApp Never! {
+        state := self.lock()
+        route :: &state.routes.last_mut().unwrap_or_else(() ->
+            jet_app_invalid("app loader `{loader_identity}` has no preceding route"))
+        cache_identity :: ~route.facts.route_identity
+        dependency :: ~route.handler_identity
+        route.facts.loader = Val(~loader_identity)
+        route.facts.loader_contract = Val(JetAppLoaderFacts{handler: loader_identity, data_type,
+            dependency: ~dependency, preload, cache_identity})
+        route.loader = Val(loader)
+        &state.actions.push((dependency, None, "loader", preload))
+        state.router = None
+        drop(^state)
+        ~self
+    }
+    // Rust: crates/jet-codegen/src/Prelude/App.rs:1239
+    fn register_mount<F: fn(String) -> R, R>(self, prefix: String, handler: F,
+        effects: [String], security: [String]) -> JetApp Never! {
+        erased: MountHandler :: Arc.new(path -> { _ :: handler(path) })
+        state := self.lock()
+        &state.mounts.push((prefix, erased, effects, security))
+        drop(^state)
+        ~self
+    }
+    // Rust: crates/jet-codegen/src/Prelude/App.rs:1257
+    pub fn mount<F: fn(String) -> R, R>(self, prefix: String, handler: F) -> JetApp Never! {
+        self.register_mount(prefix, handler, [], [])
+    }
+    // Rust: crates/jet-codegen/src/Prelude/App.rs:1265
+    pub fn mount_with_effect<F: fn(String) -> R, R>(self, prefix: String, handler: F, effect: String) -> JetApp Never! {
+        self.register_mount(prefix, handler, [effect], [])
+    }
+    // Rust: crates/jet-codegen/src/Prelude/App.rs:1278
+    pub fn mount_with_policy<F: fn(String) -> R, R>(self, prefix: String, handler: F, effect: String, policy: String) -> JetApp Never! {
+        self.register_mount(prefix, handler, [effect], [policy])
+    }
+    // Rust: crates/jet-codegen/src/Prelude/App.rs:1292
+    pub fn routes(self, root: String) -> JetApp Never! {
+        state := self.lock()
+        &state.routes_from.push(root)
+        drop(^state)
+        ~self
+    }
+    // Rust: crates/jet-codegen/src/Prelude/App.rs:1297
+    fn set_route_mode(self, mode: JetAppRenderMode) -> JetApp Never! {
+        // GATE #4565: kernel primitive
+        facts := #Unsafe("native mutex serializes updates to the route-local render defaults") {
+            self.route_facts.lock().unwrap_or_else(error -> error.into_inner())
+        }
+        facts.mode = mode
+        facts.reason = ["explicit render mode `{mode.as_str()}`"]
+        facts.override_mode = Val(mode)
+        ~self
+    }
+    // Rust: crates/jet-codegen/src/Prelude/App.rs:1308
+    pub fn csr(self) -> JetApp Never! { self.set_route_mode(.Csr) }
+    // Rust: crates/jet-codegen/src/Prelude/App.rs:1311
+    pub fn ssr(self) -> JetApp Never! { self.set_route_mode(.Ssr) }
+    // Rust: crates/jet-codegen/src/Prelude/App.rs:1314
+    pub fn ssg(self) -> JetApp Never! { self.set_route_mode(.Ssg) }
+    // Rust: crates/jet-codegen/src/Prelude/App.rs:1317
+    pub fn stream(self) -> JetApp Never! { self.set_route_mode(.Stream) }
+    // Rust: crates/jet-codegen/src/Prelude/App.rs:1320
+    pub fn streaming(self) -> JetApp Never! { self.stream() }
+    // Rust: crates/jet-codegen/src/Prelude/App.rs:1323
+    pub fn island(self) -> JetApp Never! { self.set_route_mode(.Island) }
+    // Rust: crates/jet-codegen/src/Prelude/App.rs:1326
+    pub fn hydration_dev(self) -> JetApp Never! { state := self.lock(); state.hydration = "dev-overlay"; drop(^state); ~self }
+    // Rust: crates/jet-codegen/src/Prelude/App.rs:1330
+    pub fn hydration_release(self) -> JetApp Never! { state := self.lock(); state.hydration = "release-keep-server"; drop(^state); ~self }
+    // Rust: crates/jet-codegen/src/Prelude/App.rs:1334
+    pub fn security(self, policy: String) -> JetApp Never! { state := self.lock(); &state.security.push(policy); drop(^state); ~self }
+    // Rust: crates/jet-codegen/src/Prelude/App.rs:1338
+    pub fn assets(self, path: String) -> JetApp Never! { state := self.lock(); &state.assets.push(path); drop(^state); ~self }
+    // Rust: crates/jet-codegen/src/Prelude/App.rs:1342
+    pub fn split(self, name: String) -> JetApp Never! { state := self.lock(); &state.split.push(name); drop(^state); ~self }
+    // Rust: crates/jet-codegen/src/Prelude/App.rs:1346
+    pub fn code_split(self, name: String) -> JetApp Never! { self.split(name) }
+    // Rust: crates/jet-codegen/src/Prelude/App.rs:1349
+    pub fn cache(self, policy: String) -> JetApp Never! { state := self.lock(); &state.cache.push(policy); drop(^state); ~self }
+    // Rust: crates/jet-codegen/src/Prelude/App.rs:1353
+    pub fn a11y(self, policy: String) -> JetApp Never! { state := self.lock(); &state.a11y.push(policy); drop(^state); ~self }
+    // Rust: crates/jet-codegen/src/Prelude/App.rs:1357
+    pub fn adapter(self, name: String) -> JetApp Never! { state := self.lock(); &state.adapters.push(name); drop(^state); ~self }
+    // Rust: crates/jet-codegen/src/Prelude/App.rs:1362
+    pub fn facts_json(self) -> String Never! {
+        s :: self.lock()
+        out := "{\n"
+        &out.push_str("  \"hydration\": " + jet_app_json_string(s.hydration) + ",\n")
+        &out.push_str("  \"shared_tir\": true,\n")
+        &out.push_str("  \"routes\": [\n")
+        loop (i, route) in s.routes.iter().enumerate() {
+            &out.push_str("    {\"path\": " + jet_app_json_string(route.path) +
+                ", \"handler\": " + jet_app_json_string(route.handler_identity) +
+                ", \"provenance\": \"runtime\", \"render_facts\": " + route.facts.json() + "}")
+            if i + 1 != s.routes.len() -> &out.push(',')
+            &out.push('\n')
+        }
+        &out.push_str("  ],\n")
+        &out.push_str("  \"actions\": [\n")
+        loop (i, (name, function, kind, preload)) in s.actions.iter().enumerate() {
+            server_facts :: function.map(_ -> {
+                endpoint :: "/actions/{name}"
+                middleware :: APP_SERVER_FUNCTION_MIDDLEWARE.iter().map(kind -> jet_app_json_string(kind.as_str()))
+                    .collect<[String]>().join(",")
+                "{\"name\":" + jet_app_json_string(name) + ",\"endpoint\":" + jet_app_json_string(endpoint) +
+                    ",\"method\":\"POST\",\"csrf\":\"same-origin\",\"middleware\":[" + middleware + "]}"
+            }).unwrap_or("null")
+            &out.push_str("    {\"name\": " + jet_app_json_string(name) + ", \"handler\": \"callable\", \"kind\": " +
+                jet_app_json_string(kind) + ", \"preload\": " + preload.to_string() + ", \"server_function\": " + server_facts + "}")
+            if i + 1 != s.actions.len() -> &out.push(',')
+            &out.push('\n')
+        }
+        &out.push_str("  ],\n")
+        &out.push_str("  \"queries\": ")
+        &out.push_str(jet_web_query_facts_json())
+        &out.push_str(",\n")
+        &out.push_str("  \"security\": {s.security:?},\n  \"assets\": {s.assets:?},\n  \"split\": {s.split:?},\n  \"cache\": {s.cache:?},\n  \"a11y\": {s.a11y:?},\n  \"adapters\": {s.adapters:?}\n")
+        &out.push('}')
+        ^out
+    }
+
+    // Rust: crates/jet-codegen/src/Prelude/App.rs:1431
+    fn build_router(state: JetAppState) -> JetWebRouter Never! {
+        router := JetWebRouter.new()
+        loop route in state.routes {
+            params := [JetWebRouterField]{}
+            search := [JetWebRouterField]{}
+            codec := JetWebRouterSearchCodec.Query
+            loop binding in route.binding {
+                match binding {
+                    .Path{name, ty} -> &params.push(JetWebRouterField.new(~name, jet_app_router_value_type(ty)))
+                    .Search{codec: search_codec, fields, scalar} -> {
+                        if search_codec == "json" -> codec = .Json
+                        // The typed decoder owns required fields and search-record defaults.
+                        &search.extend(fields.iter().map(field -> {
+                            router_field :: JetWebRouterField.new(~field.name, jet_app_router_value_type(field.ty))
+                            if scalar.is_some() && field.required { router_field } else { router_field.optional(None) }
+                        }))
+                    }
+                    .Data -> {}
+                }
+            }
+            route_loader :: ~route.loader
+            loader :: navigation -> match route_loader {
+                Val(loader) -> loader(navigation)
+                None -> Ok("")
+            }
+            pending :: route.pending.map(pending -> {
+                retained :: ~pending
+                _navigation -> retained().map(page -> page.body).unwrap_or_else(error -> error)
+            })
+            error :: route.error.map(error -> {
+                retained :: ~error
+                (_navigation, message) -> retained().map(page -> page.body).unwrap_or_else(_ -> message.to_string())
+            })
+            router = router.route_with_facts_codec(~route.path, ^params, ^search, codec, loader, pending, error,
+                JetWebRouteBoundaries.default()).unwrap_or_else(error ->
+                    jet_app_invalid("app route `{route.path}` is not a valid router route: {error}"))
+        }
+        if state.not_found is Val(not_found) {
+            retained :: ~not_found
+            router = router.not_found(message -> retained().map(page -> page.body).unwrap_or_else(_ -> message.to_string()))
+                .unwrap_or_else(error -> jet_app_invalid("app not-found boundary is invalid: {error}"))
+        }
+        ^router
+    }
+    // Rust: crates/jet-codegen/src/Prelude/App.rs:1522
+    pub fn router(self) -> JetWebRouter Never! {
+        state := self.lock()
+        if state.router.is_none() -> state.router = Val(JetApp.build_router(state))
+        state.router.map(router -> ~router).expect("app router is built above")
+    }
+    // Rust: crates/jet-codegen/src/Prelude/App.rs:1537
+    pub fn respond(self, url: String) -> JetAppResponse Never! {
+        router :: self.router()
+        route :: router.navigate(url.to_string())
+        navigation :: router.current()
+        (status, page) :: match route {
+            Ok(current) -> {
+                handler :: self.lock().routes.iter().find(route -> route.path == current.route)
+                    .map(route -> (~route.handler, ~route.error))
+                match handler {
+                    Val((handler, error)) -> match handler(current, navigation.data) {
+                        Ok(page) -> (I64{200}, page)
+                        Err(message) -> (I64{500}, JetApp.boundary_page(error, "Route error", message))
+                    }
+                    None -> (I64{500}, JetWebPage{title: "Route error",
+                        body: "route `{current.route}` is not registered on the app graph"})
+                }
+            }
+            Err(message) -> {
+                error_boundary :: navigation.current.and_then(current ->
+                    self.lock().routes.iter().find(route -> route.path == current.route).and_then(route -> ~route.error))
+                status :: if navigation.current.is_some() { I64{500} }
+                    else if message.starts_with("no web route matches") { I64{404} } else { I64{400} }
+                page :: if status == I64{404} {
+                    not_found :: ~self.lock().not_found
+                    JetApp.boundary_page(not_found, "Not found", message)
+                } else {
+                    JetApp.boundary_page(error_boundary, "Route error", message)
+                }
+                (status, page)
+            }
+        }
+        JetAppResponse{status, page, navigation}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/App.rs:1600
+    fn boundary_page(boundary: BoundaryHandler?, title: String, message: String) -> JetWebPage Never! {
+        match boundary.map(boundary -> boundary()) {
+            Val(Ok(page)) -> page
+            Val(Err(boundary_error)) -> JetWebPage{title: title.to_string(), body: "{message}\n{boundary_error}"}
+            None -> JetWebPage{title: title.to_string(), body: message}
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/App.rs:1620
+    fn server_function_dev_panel(self) -> String Never! {
+        state :: self.lock()
+        rows := [String]{}
+        loop (name, function, kind, _) in state.actions {
+            if function.is_none() -> continue
+            endpoint :: "/actions/{name}"
+            middleware :: APP_SERVER_FUNCTION_MIDDLEWARE.iter().map(kind -> jet_app_json_string(kind.as_str()))
+                .collect<[String]>().join(",")
+            facts :: ("{\"name\":" + jet_app_json_string(name) + ",\"endpoint\":" + jet_app_json_string(endpoint) +
+                ",\"method\":\"POST\",\"csrf\":\"same-origin\",\"middleware\":[" + middleware + "]}").replace('<', "\\u003c")
+            &rows.push("<li data-jet-server-function=\"" + jet_app_html_attr(name) + "\" data-jet-kind=\"" +
+                jet_app_html_attr(kind) + "\"><code>" + jet_app_html_attr(name) + "</code><pre>" + facts + "</pre></li>")
+        }
+        if rows.is_empty() -> return ""
+        "<aside id=\"jet-dev-server-functions\" data-jet-devtools=\"server-functions\"><h2>Server functions</h2><ul>" +
+            rows.join("") + "</ul></aside>"
+    }
+    // Rust: crates/jet-codegen/src/Prelude/App.rs:1659
+    fn query_dev_panel(self) -> String Never! { jet_web_query_dev_panel() }
+    // Rust: crates/jet-codegen/src/Prelude/App.rs:1665
+    fn form_dev_panel(self) -> String Never! { jet_web_form_dev_panel() }
+    // Rust: crates/jet-codegen/src/Prelude/App.rs:1670
+    fn html(self, response: JetAppResponse, dev: Bool) -> String Never! {
+        reload :: if dev {
+            "<script>\nconst source = new EventSource(\"/__jet/reload\");\nsource.onmessage = () => location.reload();\n</script>"
+        } else { "" }
+        route_data :: match response.navigation.current {
+            Val(current) if response.status == I64{200} -> {
+                route_data_body :: if response.navigation.data.is_empty() { "null" }
+                    else { response.navigation.data.replace('<', "\\u003c") }
+                "<script type=\"application/json\" id=\"jet-route-data\" data-route=\"" + jet_app_html_attr(current.route) +
+                    "\" data-url=\"" + jet_app_html_attr(current.url) + "\" data-status=\"" +
+                    response.navigation.status.name() + "\">" + route_data_body + "</script>"
+            }
+            _ -> ""
+        }
+        server_functions :: if dev { self.server_function_dev_panel() } else { "" }
+        queries :: if dev { self.query_dev_panel() } else { "" }
+        forms :: if dev { self.form_dev_panel() } else { "" }
+        "<!doctype html><html><head><meta charset=\"utf-8\"><title>" + response.page.title +
+            "</title></head><body>" + response.page.body + route_data + reload + server_functions + queries + forms + "</body></html>"
+    }
+    // Rust: crates/jet-codegen/src/Prelude/App.rs:1727
+    pub fn serve(self) -> Never! {
+        // GATE #4565: kernel primitive
+        (dev, port) :: #Unsafe("read process environment without modifying it; parse the optional port") {
+            dev :: native_env.var_os("JET_APP_DEV").is_some()
+            port :: native_env.var("JET_APP_PORT").ok().and_then(value -> value.parse<U16>().ok()).unwrap_or(U16{8080})
+            (dev, port)
+        }
+        self.serve_port(port, dev)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/App.rs:1736
+    pub fn serve_on(self, port: I64) -> Never! {
+        // GATE #4565: kernel primitive
+        dev :: #Unsafe("read process environment without modifying it") { native_env.var_os("JET_APP_DEV").is_some() }
+        checked_port :: U16.try_from(port).unwrap_or_else(_ -> jet_app_invalid("web app port {port} is out of range"))
+        self.serve_port(checked_port, dev)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/App.rs:1743
+    fn http_mux(self, dev: Bool) -> JetHTTPMux Never! {
+        mux :: jet_app_http_mux_new()
+        state :: self.lock()
+        loop route in state.routes {
+            app :: ~self
+            jet_app_http_page_response(mux, route.path, request -> {
+                response :: app.respond(jet_app_http_request_url(request))
+                (response.status, app.html(response, dev))
+            })
+        }
+        loop (_, function, _, _) in state.actions {
+            if function is Val(function) -> jet_web_server_fn_register_http(mux, ~function)
+        }
+        loop (prefix, handler, _, _) in state.mounts {
+            retained :: ~handler
+            jet_app_http_mount(mux, prefix, path -> retained(path))
+        }
+        loop root in state.assets -> jet_app_http_assets(mux, root)
+        if dev -> jet_app_http_reload(mux)
+        drop(^state)
+        mux
+    }
+    // Rust: crates/jet-codegen/src/Prelude/App.rs:1772
+    pub fn console_http_mux(self) -> JetHTTPMux Never! { self.http_mux(false) }
+    // Rust: crates/jet-codegen/src/Prelude/App.rs:1776
+    fn serve_port(self, port: U16, dev: Bool) -> Never! { jet_app_http_serve(self.http_mux(dev), port, dev) }
+}
+
+// Rust: crates/jet-codegen/src/Prelude/App.rs:1781
+// GATE #4565: kernel primitive
+JET_WEB_LOCAL_STORAGE :: #Unsafe("one lazy native mutex owns process-local browser storage") {
+    LazyLock.new(fn() -> Mutex<[String:String]> { Mutex.new([:]) })
+}
+// Rust: crates/jet-codegen/src/Prelude/App.rs:1783
+// GATE #4565: kernel primitive
+JET_WEB_SESSION_STORAGE :: #Unsafe("one lazy native mutex owns process-session browser storage") {
+    LazyLock.new(fn() -> Mutex<[String:String]> { Mutex.new([:]) })
+}
+// Rust: crates/jet-codegen/src/Prelude/App.rs:1786
+pub fn jet_web_storage_local_get(key: String) -> String? Never! {
+    // GATE #4565: kernel primitive
+    #Unsafe("clone stored value under its native mutex guard") {
+        JET_WEB_LOCAL_STORAGE.lock().unwrap_or_else(poisoned -> poisoned.into_inner()).get(key).map(value -> ~value)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/App.rs:1794
+pub fn jet_web_storage_local_remove(key: String) -> Never! {
+    // GATE #4565: kernel primitive
+    #Unsafe("remove stored value under its native mutex guard") {
+        storage := JET_WEB_LOCAL_STORAGE.lock().unwrap_or_else(poisoned -> poisoned.into_inner())
+        _ :: &storage.remove(key)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/App.rs:1801
+pub fn jet_web_storage_local_set(key: String, value: String) -> Never! {
+    // GATE #4565: kernel primitive
+    #Unsafe("replace stored value under its native mutex guard") {
+        storage := JET_WEB_LOCAL_STORAGE.lock().unwrap_or_else(poisoned -> poisoned.into_inner())
+        _ :: &storage.insert(~key, ~value)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/App.rs:1808
+pub fn jet_web_storage_local_clear() -> Never! {
+    // GATE #4565: kernel primitive
+    #Unsafe("clear process-local storage under its native mutex guard") {
+        storage := JET_WEB_LOCAL_STORAGE.lock().unwrap_or_else(poisoned -> poisoned.into_inner())
+        &storage.clear()
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/App.rs:1815
+pub fn jet_web_storage_session_get(key: String) -> String? Never! {
+    // GATE #4565: kernel primitive
+    #Unsafe("clone stored value under its native mutex guard") {
+        JET_WEB_SESSION_STORAGE.lock().unwrap_or_else(poisoned -> poisoned.into_inner()).get(key).map(value -> ~value)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/App.rs:1823
+pub fn jet_web_storage_session_remove(key: String) -> Never! {
+    // GATE #4565: kernel primitive
+    #Unsafe("remove stored value under its native mutex guard") {
+        storage := JET_WEB_SESSION_STORAGE.lock().unwrap_or_else(poisoned -> poisoned.into_inner())
+        _ :: &storage.remove(key)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/App.rs:1830
+pub fn jet_web_storage_session_set(key: String, value: String) -> Never! {
+    // GATE #4565: kernel primitive
+    #Unsafe("replace stored value under its native mutex guard") {
+        storage := JET_WEB_SESSION_STORAGE.lock().unwrap_or_else(poisoned -> poisoned.into_inner())
+        _ :: &storage.insert(~key, ~value)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/App.rs:1837
+pub fn jet_web_storage_session_clear() -> Never! {
+    // GATE #4565: kernel primitive
+    #Unsafe("clear process-session storage under its native mutex guard") {
+        storage := JET_WEB_SESSION_STORAGE.lock().unwrap_or_else(poisoned -> poisoned.into_inner())
+        &storage.clear()
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/App.rs:1844
+pub fn jet_app_route<F: JetAppRouteCallback<R>, R: JetAppPageOutput>(
+    app: JetApp, path: String, handler: F, binding: String) -> JetApp Never! {
+    app.route(path, handler, jet_app_route_binding(binding))
+}
+// Rust: crates/jet-codegen/src/Prelude/App.rs:1852
+pub fn jet_app_page<F: JetAppRouteCallback<R>, R: JetAppPageOutput>(
+    app: JetApp, path: String, handler: F, binding: String) -> JetApp Never! {
+    app.page(path, handler, jet_app_route_binding(binding))
+}
+// Rust: crates/jet-codegen/src/Prelude/App.rs:1860
+pub fn jet_app_layout<F: JetAppRouteCallback<R>, R: JetAppPageOutput>(
+    app: JetApp, path: String, handler: F, binding: String) -> JetApp Never! {
+    app.layout(path, handler, jet_app_route_binding(binding))
+}
+// Rust: crates/jet-codegen/src/Prelude/App.rs:1871
+pub fn jet_app_loader<T, L: JetAppRouteCallback<V E!>, V: __jet_Encode, E: JetAppFailure>(
+    app: JetApp, _route: T, loader: L, binding: String) -> JetApp Never! {
+    app.loader(loader, jet_app_route_binding(binding), false)
+}
+// Rust: crates/jet-codegen/src/Prelude/App.rs:1886
+pub fn jet_app_loader_preload<T, L: JetAppRouteCallback<V E!>, V: __jet_Encode, E: JetAppFailure>(
+    app: JetApp, _route: T, loader: L, preload: Bool, binding: String) -> JetApp Never! {
+    app.loader(loader, jet_app_route_binding(binding), preload)
+}
+// Rust: crates/jet-codegen/src/Prelude/App.rs:1902
+pub fn jet_app_pending<F: JetAppRouteCallback<R>, R: JetAppPageOutput>(app: JetApp, handler: F) -> JetApp Never! { app.pending(handler) }
+// Rust: crates/jet-codegen/src/Prelude/App.rs:1910
+pub fn jet_app_not_found<F: JetAppRouteCallback<R>, R: JetAppPageOutput>(app: JetApp, handler: F) -> JetApp Never! { app.not_found(handler) }
+// Rust: crates/jet-codegen/src/Prelude/App.rs:1918
+pub fn jet_app_error<F: JetAppRouteCallback<R>, R: JetAppPageOutput>(app: JetApp, handler: F) -> JetApp Never! { app.error(handler) }
+// Rust: crates/jet-codegen/src/Prelude/App.rs:1926
+pub fn jet_app_action<F: JetAppActionHandler>(app: JetApp, name: String, handler: F) -> JetApp Never! { app.action(name, handler) }
+// Rust: crates/jet-codegen/src/Prelude/App.rs:1933
+pub fn jet_app_form<F: JetAppActionHandler>(app: JetApp, name: String, handler: F, binding: String) -> JetApp Never! { app.form(name, handler, binding) }
+// Rust: crates/jet-codegen/src/Prelude/App.rs:1945
+pub fn jet_app_data<F: JetAppActionHandler>(app: JetApp, name: String, handler: F) -> JetApp Never! { app.data(name, handler) }
+// Rust: crates/jet-codegen/src/Prelude/App.rs:1952
+pub fn jet_app_mount<F: fn(String) -> R, R>(app: JetApp, prefix: String, handler: F) -> JetApp Never! { app.mount(prefix, handler) }
+// Rust: crates/jet-codegen/src/Prelude/App.rs:1960
+pub fn jet_app_mount_with_effect<F: fn(String) -> R, R>(app: JetApp, prefix: String, handler: F, effect: String) -> JetApp Never! {
+    app.mount_with_effect(prefix, handler, effect)
+}
+// Rust: crates/jet-codegen/src/Prelude/App.rs:1973
+pub fn jet_app_mount_with_policy<F: fn(String) -> R, R>(app: JetApp, prefix: String, handler: F, effect: String, policy: String) -> JetApp Never! {
+    app.mount_with_policy(prefix, handler, effect, policy)
+}
+// Rust: crates/jet-codegen/src/Prelude/App.rs:1987
+pub fn jet_app_routes(app: JetApp, root: String) -> JetApp Never! { app.routes(root) }
+// Rust: crates/jet-codegen/src/Prelude/App.rs:1991
+pub fn jet_app_security(app: JetApp, policy: String) -> JetApp Never! { app.security(policy) }
+// Rust: crates/jet-codegen/src/Prelude/App.rs:1995
+pub fn jet_app_assets(app: JetApp, path: String) -> JetApp Never! { app.assets(path) }
+// Rust: crates/jet-codegen/src/Prelude/App.rs:1999
+pub fn jet_app_split(app: JetApp, name: String) -> JetApp Never! { app.split(name) }
+// Rust: crates/jet-codegen/src/Prelude/App.rs:2003
+pub fn jet_app_code_split(app: JetApp, name: String) -> JetApp Never! { app.code_split(name) }
+// Rust: crates/jet-codegen/src/Prelude/App.rs:2007
+pub fn jet_app_cache(app: JetApp, policy: String) -> JetApp Never! { app.cache(policy) }
+// Rust: crates/jet-codegen/src/Prelude/App.rs:2011
+pub fn jet_app_a11y(app: JetApp, policy: String) -> JetApp Never! { app.a11y(policy) }
+// Rust: crates/jet-codegen/src/Prelude/App.rs:2015
+pub fn jet_app_adapter(app: JetApp, name: String) -> JetApp Never! { app.adapter(name) }
+// Rust: crates/jet-codegen/src/Prelude/App.rs:2019
+pub fn jet_app_csr(app: JetApp) -> JetApp Never! { app.csr() }
+// Rust: crates/jet-codegen/src/Prelude/App.rs:2023
+pub fn jet_app_ssr(app: JetApp) -> JetApp Never! { app.ssr() }
+// Rust: crates/jet-codegen/src/Prelude/App.rs:2027
+pub fn jet_app_ssg(app: JetApp) -> JetApp Never! { app.ssg() }
+// Rust: crates/jet-codegen/src/Prelude/App.rs:2031
+pub fn jet_app_stream(app: JetApp) -> JetApp Never! { app.stream() }
+// Rust: crates/jet-codegen/src/Prelude/App.rs:2035
+pub fn jet_app_streaming(app: JetApp) -> JetApp Never! { app.streaming() }
+// Rust: crates/jet-codegen/src/Prelude/App.rs:2039
+pub fn jet_app_island(app: JetApp) -> JetApp Never! { app.island() }
+// Rust: crates/jet-codegen/src/Prelude/App.rs:2043
+pub fn jet_app_hydration_dev(app: JetApp) -> JetApp Never! { app.hydration_dev() }
+// Rust: crates/jet-codegen/src/Prelude/App.rs:2047
+pub fn jet_app_hydration_release(app: JetApp) -> JetApp Never! { app.hydration_release() }
+// Rust: crates/jet-codegen/src/Prelude/App.rs:2051
+pub fn jet_app_facts_json(app: JetApp) -> String Never! { app.facts_json() }
+// Rust: crates/jet-codegen/src/Prelude/App.rs:2055
+pub fn jet_app_serve(app: JetApp) -> Never! { app.serve() }
+// Rust: crates/jet-codegen/src/Prelude/App.rs:2059
+pub fn jet_app_serve_with_port(app: JetApp, port: I64) -> Never! { app.serve_on(port) }
+// Rust: crates/jet-codegen/src/Prelude/App.rs:2063
+pub fn jet_app_serve_on(app: JetApp, port: I64) -> Never! { app.serve_on(port) }
+// Rust: crates/jet-codegen/src/Prelude/App.rs:2067
+pub fn jet_web_virtual_window_facts(window: jet_codegen.JetWebVirtualWindow) -> String Never! { window.facts_json() }
 

@@ -1,1859 +1,1345 @@
-// PORT-PENDING 0139 crates-jet-codegen-src-prelude-core-slice-1686: crates/jet-codegen/src/Prelude/Core.rs:1686-3540
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS fn jet_fixed_option<T>(
-//RS     result: JetFixedArithmeticResult,
-//RS     map: impl FnOnce(i64) -> T,
-//RS ) -> Option<T> {
-//RS     match result {
-//RS         JetFixedArithmeticResult::Value(value) => Some(map(value)),
-//RS         JetFixedArithmeticResult::Absent | JetFixedArithmeticResult::Trap(_) => None,
-//RS     }
-//RS }
-//RS 
-//RS // These wrappers are intentionally concrete at the Prelude boundary.  The
-//RS // operation, overflow mode, and fixed width are encoded by the function item,
-//RS // so MIR never passes a runtime operation or type descriptor to this kernel.
-//RS macro_rules! jet_fixed_route_kernels {
-//RS     (
-//RS         $t:ty, $signed:expr, $bits:expr;
-//RS         trap: {
-//RS             $trap_add:ident, $trap_sub:ident, $trap_mul:ident,
-//RS             $trap_div:ident, $trap_rem:ident, $trap_floor_div:ident,
-//RS             $trap_mod:ident, $trap_pow:ident, $trap_shl:ident, $trap_shr:ident
-//RS         };
-//RS         wrapping: {
-//RS             $wrapping_add:ident, $wrapping_sub:ident, $wrapping_mul:ident,
-//RS             $wrapping_div:ident, $wrapping_pow:ident
-//RS         };
-//RS         saturating: {
-//RS             $saturating_add:ident, $saturating_sub:ident, $saturating_mul:ident,
-//RS             $saturating_div:ident, $saturating_pow:ident
-//RS         };
-//RS         checked: {
-//RS             $checked_add:ident, $checked_sub:ident, $checked_mul:ident,
-//RS             $checked_div:ident, $checked_rem:ident, $checked_pow:ident
-//RS         };
-//RS         rotate: {
-//RS             $rotate_left:ident, $rotate_right:ident
-//RS         }
-//RS     ) => {
-//RS         #[inline(always)]
-//RS         pub(crate) fn $trap_add(left: $t, right: $t, file: &str, line: u32) -> $t {
-//RS             <$t as JetArith>::jet_add(left, right, file, line)
-//RS         }
-//RS         #[inline(always)]
-//RS         pub(crate) fn $trap_sub(left: $t, right: $t, file: &str, line: u32) -> $t {
-//RS             <$t as JetArith>::jet_sub(left, right, file, line)
-//RS         }
-//RS         #[inline(always)]
-//RS         pub(crate) fn $trap_mul(left: $t, right: $t, file: &str, line: u32) -> $t {
-//RS             <$t as JetArith>::jet_mul(left, right, file, line)
-//RS         }
-//RS         #[inline(always)]
-//RS         pub(crate) fn $trap_div(left: $t, right: $t, file: &str, line: u32) -> $t {
-//RS             <$t as JetArith>::jet_div(left, right, file, line)
-//RS         }
-//RS         #[inline(always)]
-//RS         pub(crate) fn $trap_rem(left: $t, right: $t, file: &str, line: u32) -> $t {
-//RS             <$t as JetArith>::jet_rem(left, right, file, line)
-//RS         }
-//RS         #[inline(always)]
-//RS         pub(crate) fn $trap_floor_div(left: $t, right: $t, file: &str, line: u32) -> $t {
-//RS             jet_fixed_value(
-//RS                 jet_fixed_arithmetic(
-//RS                     left as i64,
-//RS                     right as i128,
-//RS                     JET_FIXED_OP_FLOOR_DIV,
-//RS                     JET_FIXED_MODE_TRAP,
-//RS                     $signed,
-//RS                     $bits,
-//RS                     $signed,
-//RS                 ),
-//RS                 file,
-//RS                 line,
-//RS             ) as $t
-//RS         }
-//RS         #[inline(always)]
-//RS         pub(crate) fn $trap_mod(left: $t, right: $t, file: &str, line: u32) -> $t {
-//RS             jet_fixed_value(
-//RS                 jet_fixed_arithmetic(
-//RS                     left as i64,
-//RS                     right as i128,
-//RS                     JET_FIXED_OP_MOD,
-//RS                     JET_FIXED_MODE_TRAP,
-//RS                     $signed,
-//RS                     $bits,
-//RS                     $signed,
-//RS                 ),
-//RS                 file,
-//RS                 line,
-//RS             ) as $t
-//RS         }
-//RS         #[inline(always)]
-//RS         pub(crate) fn $trap_pow(left: $t, right: $t, file: &str, line: u32) -> $t {
-//RS             <$t as JetPow>::jet_pow(left, right as i128, file, line)
-//RS         }
-//RS         // D-NUMOPS1: only the value side carries `$t`; the count is any
-//RS         // integer width (`JetShiftCount`).
-//RS         #[inline(always)]
-//RS         pub(crate) fn $trap_shl<C: JetShiftCount>(left: $t, right: C, file: &str, line: u32) -> $t {
-//RS             <$t as JetArith>::jet_shl(left, right.jet_shift_count(), file, line)
-//RS         }
-//RS         #[inline(always)]
-//RS         pub(crate) fn $trap_shr<C: JetShiftCount>(left: $t, right: C, file: &str, line: u32) -> $t {
-//RS             <$t as JetArith>::jet_shr(left, right.jet_shift_count(), file, line)
-//RS         }
-//RS 
-//RS         #[inline(always)]
-//RS         pub(crate) fn $wrapping_add(left: $t, right: $t) -> $t {
-//RS             <$t as JetArith>::jet_wrapping_add(left, right)
-//RS         }
-//RS         #[inline(always)]
-//RS         pub(crate) fn $wrapping_sub(left: $t, right: $t) -> $t {
-//RS             <$t as JetArith>::jet_wrapping_sub(left, right)
-//RS         }
-//RS         #[inline(always)]
-//RS         pub(crate) fn $wrapping_mul(left: $t, right: $t) -> $t {
-//RS             <$t as JetArith>::jet_wrapping_mul(left, right)
-//RS         }
-//RS         #[inline(always)]
-//RS         pub(crate) fn $wrapping_div(left: $t, right: $t, file: &str, line: u32) -> $t {
-//RS             jet_fixed_value(
-//RS                 jet_fixed_arithmetic(
-//RS                     left as i64,
-//RS                     right as i128,
-//RS                     JET_FIXED_OP_DIV,
-//RS                     JET_FIXED_MODE_WRAPPING,
-//RS                     $signed,
-//RS                     $bits,
-//RS                     $signed,
-//RS                 ),
-//RS                 file,
-//RS                 line,
-//RS             ) as $t
-//RS         }
-//RS         #[inline(always)]
-//RS         pub(crate) fn $wrapping_pow(left: $t, right: $t, file: &str, line: u32) -> $t {
-//RS             <$t as JetPow>::jet_wrapping_pow(left, right as i128, file, line)
-//RS         }
-//RS 
-//RS         #[inline(always)]
-//RS         pub(crate) fn $saturating_add(left: $t, right: $t) -> $t {
-//RS             <$t as JetArith>::jet_saturating_add(left, right)
-//RS         }
-//RS         #[inline(always)]
-//RS         pub(crate) fn $saturating_sub(left: $t, right: $t) -> $t {
-//RS             <$t as JetArith>::jet_saturating_sub(left, right)
-//RS         }
-//RS         #[inline(always)]
-//RS         pub(crate) fn $saturating_mul(left: $t, right: $t) -> $t {
-//RS             <$t as JetArith>::jet_saturating_mul(left, right)
-//RS         }
-//RS         #[inline(always)]
-//RS         pub(crate) fn $saturating_div(left: $t, right: $t, file: &str, line: u32) -> $t {
-//RS             jet_fixed_value(
-//RS                 jet_fixed_arithmetic(
-//RS                     left as i64,
-//RS                     right as i128,
-//RS                     JET_FIXED_OP_DIV,
-//RS                     JET_FIXED_MODE_SATURATING,
-//RS                     $signed,
-//RS                     $bits,
-//RS                     $signed,
-//RS                 ),
-//RS                 file,
-//RS                 line,
-//RS             ) as $t
-//RS         }
-//RS         #[inline(always)]
-//RS         pub(crate) fn $saturating_pow(left: $t, right: $t, file: &str, line: u32) -> $t {
-//RS             <$t as JetPow>::jet_saturating_pow(left, right as i128, file, line)
-//RS         }
-//RS 
-//RS         #[inline(always)]
-//RS         pub(crate) fn $checked_add(left: $t, right: $t) -> Option<$t> {
-//RS             jet_fixed_option(
-//RS                 jet_fixed_arithmetic(
-//RS                     left as i64,
-//RS                     right as i128,
-//RS                     JET_FIXED_OP_ADD,
-//RS                     JET_FIXED_MODE_CHECKED,
-//RS                     $signed,
-//RS                     $bits,
-//RS                     $signed,
-//RS                 ),
-//RS                 |value| value as $t,
-//RS             )
-//RS         }
-//RS         #[inline(always)]
-//RS         pub(crate) fn $checked_sub(left: $t, right: $t) -> Option<$t> {
-//RS             jet_fixed_option(
-//RS                 jet_fixed_arithmetic(
-//RS                     left as i64,
-//RS                     right as i128,
-//RS                     JET_FIXED_OP_SUB,
-//RS                     JET_FIXED_MODE_CHECKED,
-//RS                     $signed,
-//RS                     $bits,
-//RS                     $signed,
-//RS                 ),
-//RS                 |value| value as $t,
-//RS             )
-//RS         }
-//RS         #[inline(always)]
-//RS         pub(crate) fn $checked_mul(left: $t, right: $t) -> Option<$t> {
-//RS             jet_fixed_option(
-//RS                 jet_fixed_arithmetic(
-//RS                     left as i64,
-//RS                     right as i128,
-//RS                     JET_FIXED_OP_MUL,
-//RS                     JET_FIXED_MODE_CHECKED,
-//RS                     $signed,
-//RS                     $bits,
-//RS                     $signed,
-//RS                 ),
-//RS                 |value| value as $t,
-//RS             )
-//RS         }
-//RS         #[inline(always)]
-//RS         pub(crate) fn $checked_div(left: $t, right: $t) -> Option<$t> {
-//RS             jet_fixed_option(
-//RS                 jet_fixed_arithmetic(
-//RS                     left as i64,
-//RS                     right as i128,
-//RS                     JET_FIXED_OP_DIV,
-//RS                     JET_FIXED_MODE_CHECKED,
-//RS                     $signed,
-//RS                     $bits,
-//RS                     $signed,
-//RS                 ),
-//RS                 |value| value as $t,
-//RS             )
-//RS         }
-//RS         #[inline(always)]
-//RS         pub(crate) fn $checked_rem(left: $t, right: $t) -> Option<$t> {
-//RS             jet_fixed_option(
-//RS                 jet_fixed_arithmetic(
-//RS                     left as i64,
-//RS                     right as i128,
-//RS                     JET_FIXED_OP_REM,
-//RS                     JET_FIXED_MODE_CHECKED,
-//RS                     $signed,
-//RS                     $bits,
-//RS                     $signed,
-//RS                 ),
-//RS                 |value| value as $t,
-//RS             )
-//RS         }
-//RS         #[inline(always)]
-//RS         pub(crate) fn $checked_pow(left: $t, right: $t) -> Option<$t> {
-//RS             jet_fixed_option(
-//RS                 jet_fixed_arithmetic(
-//RS                     left as i64,
-//RS                     right as i128,
-//RS                     JET_FIXED_OP_POW,
-//RS                     JET_FIXED_MODE_CHECKED,
-//RS                     $signed,
-//RS                     $bits,
-//RS                     $signed,
-//RS                 ),
-//RS                 |value| value as $t,
-//RS             )
-//RS         }
-//RS 
-//RS         #[inline(always)]
-//RS         pub(crate) fn $rotate_left(left: $t, right: $t, file: &str, line: u32) -> $t {
-//RS             <$t as JetArith>::jet_rotate_left(left, right as i128, file, line)
-//RS         }
-//RS         #[inline(always)]
-//RS         pub(crate) fn $rotate_right(left: $t, right: $t, file: &str, line: u32) -> $t {
-//RS             <$t as JetArith>::jet_rotate_right(left, right as i128, file, line)
-//RS         }
-//RS     };
-//RS }
-//RS 
-//RS jet_fixed_route_kernels!(
-//RS     i8, true, 8;
-//RS     trap: {
-//RS         jet_i8_trap_add, jet_i8_trap_sub, jet_i8_trap_mul, jet_i8_trap_div,
-//RS         jet_i8_trap_rem, jet_i8_trap_floor_div, jet_i8_trap_mod, jet_i8_trap_pow,
-//RS         jet_i8_trap_shl, jet_i8_trap_shr
-//RS     };
-//RS     wrapping: {
-//RS         jet_i8_wrapping_add, jet_i8_wrapping_sub, jet_i8_wrapping_mul,
-//RS         jet_i8_wrapping_div, jet_i8_wrapping_pow
-//RS     };
-//RS     saturating: {
-//RS         jet_i8_saturating_add, jet_i8_saturating_sub, jet_i8_saturating_mul,
-//RS         jet_i8_saturating_div, jet_i8_saturating_pow
-//RS     };
-//RS     checked: {
-//RS         jet_i8_checked_add, jet_i8_checked_sub, jet_i8_checked_mul,
-//RS         jet_i8_checked_div, jet_i8_checked_rem, jet_i8_checked_pow
-//RS     };
-//RS     rotate: { jet_i8_rotate_left, jet_i8_rotate_right }
-//RS );
-//RS jet_fixed_route_kernels!(
-//RS     i16, true, 16;
-//RS     trap: {
-//RS         jet_i16_trap_add, jet_i16_trap_sub, jet_i16_trap_mul, jet_i16_trap_div,
-//RS         jet_i16_trap_rem, jet_i16_trap_floor_div, jet_i16_trap_mod, jet_i16_trap_pow,
-//RS         jet_i16_trap_shl, jet_i16_trap_shr
-//RS     };
-//RS     wrapping: {
-//RS         jet_i16_wrapping_add, jet_i16_wrapping_sub, jet_i16_wrapping_mul,
-//RS         jet_i16_wrapping_div, jet_i16_wrapping_pow
-//RS     };
-//RS     saturating: {
-//RS         jet_i16_saturating_add, jet_i16_saturating_sub, jet_i16_saturating_mul,
-//RS         jet_i16_saturating_div, jet_i16_saturating_pow
-//RS     };
-//RS     checked: {
-//RS         jet_i16_checked_add, jet_i16_checked_sub, jet_i16_checked_mul,
-//RS         jet_i16_checked_div, jet_i16_checked_rem, jet_i16_checked_pow
-//RS     };
-//RS     rotate: { jet_i16_rotate_left, jet_i16_rotate_right }
-//RS );
-//RS jet_fixed_route_kernels!(
-//RS     i32, true, 32;
-//RS     trap: {
-//RS         jet_i32_trap_add, jet_i32_trap_sub, jet_i32_trap_mul, jet_i32_trap_div,
-//RS         jet_i32_trap_rem, jet_i32_trap_floor_div, jet_i32_trap_mod, jet_i32_trap_pow,
-//RS         jet_i32_trap_shl, jet_i32_trap_shr
-//RS     };
-//RS     wrapping: {
-//RS         jet_i32_wrapping_add, jet_i32_wrapping_sub, jet_i32_wrapping_mul,
-//RS         jet_i32_wrapping_div, jet_i32_wrapping_pow
-//RS     };
-//RS     saturating: {
-//RS         jet_i32_saturating_add, jet_i32_saturating_sub, jet_i32_saturating_mul,
-//RS         jet_i32_saturating_div, jet_i32_saturating_pow
-//RS     };
-//RS     checked: {
-//RS         jet_i32_checked_add, jet_i32_checked_sub, jet_i32_checked_mul,
-//RS         jet_i32_checked_div, jet_i32_checked_rem, jet_i32_checked_pow
-//RS     };
-//RS     rotate: { jet_i32_rotate_left, jet_i32_rotate_right }
-//RS );
-//RS jet_fixed_route_kernels!(
-//RS     i64, true, 64;
-//RS     trap: {
-//RS         jet_i64_trap_add, jet_i64_trap_sub, jet_i64_trap_mul, jet_i64_trap_div,
-//RS         jet_i64_trap_rem, jet_i64_trap_floor_div, jet_i64_trap_mod, jet_i64_trap_pow,
-//RS         jet_i64_trap_shl, jet_i64_trap_shr
-//RS     };
-//RS     wrapping: {
-//RS         jet_i64_wrapping_add, jet_i64_wrapping_sub, jet_i64_wrapping_mul,
-//RS         jet_i64_wrapping_div, jet_i64_wrapping_pow
-//RS     };
-//RS     saturating: {
-//RS         jet_i64_saturating_add, jet_i64_saturating_sub, jet_i64_saturating_mul,
-//RS         jet_i64_saturating_div, jet_i64_saturating_pow
-//RS     };
-//RS     checked: {
-//RS         jet_i64_checked_add, jet_i64_checked_sub, jet_i64_checked_mul,
-//RS         jet_i64_checked_div, jet_i64_checked_rem, jet_i64_checked_pow
-//RS     };
-//RS     rotate: { jet_i64_rotate_left, jet_i64_rotate_right }
-//RS );
-//RS jet_fixed_route_kernels!(
-//RS     u8, false, 8;
-//RS     trap: {
-//RS         jet_u8_trap_add, jet_u8_trap_sub, jet_u8_trap_mul, jet_u8_trap_div,
-//RS         jet_u8_trap_rem, jet_u8_trap_floor_div, jet_u8_trap_mod, jet_u8_trap_pow,
-//RS         jet_u8_trap_shl, jet_u8_trap_shr
-//RS     };
-//RS     wrapping: {
-//RS         jet_u8_wrapping_add, jet_u8_wrapping_sub, jet_u8_wrapping_mul,
-//RS         jet_u8_wrapping_div, jet_u8_wrapping_pow
-//RS     };
-//RS     saturating: {
-//RS         jet_u8_saturating_add, jet_u8_saturating_sub, jet_u8_saturating_mul,
-//RS         jet_u8_saturating_div, jet_u8_saturating_pow
-//RS     };
-//RS     checked: {
-//RS         jet_u8_checked_add, jet_u8_checked_sub, jet_u8_checked_mul,
-//RS         jet_u8_checked_div, jet_u8_checked_rem, jet_u8_checked_pow
-//RS     };
-//RS     rotate: { jet_u8_rotate_left, jet_u8_rotate_right }
-//RS );
-//RS jet_fixed_route_kernels!(
-//RS     u16, false, 16;
-//RS     trap: {
-//RS         jet_u16_trap_add, jet_u16_trap_sub, jet_u16_trap_mul, jet_u16_trap_div,
-//RS         jet_u16_trap_rem, jet_u16_trap_floor_div, jet_u16_trap_mod, jet_u16_trap_pow,
-//RS         jet_u16_trap_shl, jet_u16_trap_shr
-//RS     };
-//RS     wrapping: {
-//RS         jet_u16_wrapping_add, jet_u16_wrapping_sub, jet_u16_wrapping_mul,
-//RS         jet_u16_wrapping_div, jet_u16_wrapping_pow
-//RS     };
-//RS     saturating: {
-//RS         jet_u16_saturating_add, jet_u16_saturating_sub, jet_u16_saturating_mul,
-//RS         jet_u16_saturating_div, jet_u16_saturating_pow
-//RS     };
-//RS     checked: {
-//RS         jet_u16_checked_add, jet_u16_checked_sub, jet_u16_checked_mul,
-//RS         jet_u16_checked_div, jet_u16_checked_rem, jet_u16_checked_pow
-//RS     };
-//RS     rotate: { jet_u16_rotate_left, jet_u16_rotate_right }
-//RS );
-//RS jet_fixed_route_kernels!(
-//RS     u32, false, 32;
-//RS     trap: {
-//RS         jet_u32_trap_add, jet_u32_trap_sub, jet_u32_trap_mul, jet_u32_trap_div,
-//RS         jet_u32_trap_rem, jet_u32_trap_floor_div, jet_u32_trap_mod, jet_u32_trap_pow,
-//RS         jet_u32_trap_shl, jet_u32_trap_shr
-//RS     };
-//RS     wrapping: {
-//RS         jet_u32_wrapping_add, jet_u32_wrapping_sub, jet_u32_wrapping_mul,
-//RS         jet_u32_wrapping_div, jet_u32_wrapping_pow
-//RS     };
-//RS     saturating: {
-//RS         jet_u32_saturating_add, jet_u32_saturating_sub, jet_u32_saturating_mul,
-//RS         jet_u32_saturating_div, jet_u32_saturating_pow
-//RS     };
-//RS     checked: {
-//RS         jet_u32_checked_add, jet_u32_checked_sub, jet_u32_checked_mul,
-//RS         jet_u32_checked_div, jet_u32_checked_rem, jet_u32_checked_pow
-//RS     };
-//RS     rotate: { jet_u32_rotate_left, jet_u32_rotate_right }
-//RS );
-//RS jet_fixed_route_kernels!(
-//RS     u64, false, 64;
-//RS     trap: {
-//RS         jet_u64_trap_add, jet_u64_trap_sub, jet_u64_trap_mul, jet_u64_trap_div,
-//RS         jet_u64_trap_rem, jet_u64_trap_floor_div, jet_u64_trap_mod, jet_u64_trap_pow,
-//RS         jet_u64_trap_shl, jet_u64_trap_shr
-//RS     };
-//RS     wrapping: {
-//RS         jet_u64_wrapping_add, jet_u64_wrapping_sub, jet_u64_wrapping_mul,
-//RS         jet_u64_wrapping_div, jet_u64_wrapping_pow
-//RS     };
-//RS     saturating: {
-//RS         jet_u64_saturating_add, jet_u64_saturating_sub, jet_u64_saturating_mul,
-//RS         jet_u64_saturating_div, jet_u64_saturating_pow
-//RS     };
-//RS     checked: {
-//RS         jet_u64_checked_add, jet_u64_checked_sub, jet_u64_checked_mul,
-//RS         jet_u64_checked_div, jet_u64_checked_rem, jet_u64_checked_pow
-//RS     };
-//RS     rotate: { jet_u64_rotate_left, jet_u64_rotate_right }
-//RS );
-//RS /// Render a rich runtime stop with its registered code — including the function
-//RS /// name, source-line context box, and (in debug builds only) safe locals.
-//RS /// `col` is 1-based; `caret_len` covers the highlighted span in the source line.
-//RS fn jet_panic_rich_code(
-//RS     code: &'static str,
-//RS     file: &str,
-//RS     line: u32,
-//RS     fn_name: &str,
-//RS     src_line: &str,
-//RS     col: u32,
-//RS     caret_len: u32,
-//RS     msg: &str,
-//RS     locals: &str,
-//RS ) -> ! {
-//RS     jet_test_record_stop(code);
-//RS     if JET_PARA_DEFER_FAILURE.with(|defer| defer.get()) {
-//RS         std::panic::resume_unwind(Box::new(JetParaRuntimeFailure::Rich {
-//RS             code,
-//RS             file: file.to_string(),
-//RS             line,
-//RS             fn_name: fn_name.to_string(),
-//RS             src_line: src_line.to_string(),
-//RS             col,
-//RS             caret_len,
-//RS             msg: msg.to_string(),
-//RS             locals: locals.to_string(),
-//RS         }));
-//RS     }
-//RS     jet_proof_record(2, 1, code, msg, file, line);
-//RS     let _ = jet_production_failure_receipt_write(code, file, line, fn_name);
-//RS     let report = jet_runtime_stop_report(
-//RS         code, file, line, fn_name, src_line, col, caret_len, msg, locals,
-//RS     );
-//RS     if jet_runtime_should_unwind() {
-//RS         jet_stream_record_failure_report(report.rendered.clone());
-//RS     }
-//RS     jet_runtime_stop_unwind(report.rendered, report.exit_code, msg)
-//RS }
-//RS 
-//RS fn jet_panic_rich(
-//RS     file: &str,
-//RS     line: u32,
-//RS     fn_name: &str,
-//RS     src_line: &str,
-//RS     col: u32,
-//RS     caret_len: u32,
-//RS     msg: &str,
-//RS     locals: &str,
-//RS ) -> ! {
-//RS     jet_panic_rich_code(
-//RS         "E3001", file, line, fn_name, src_line, col, caret_len, msg, locals,
-//RS     )
-//RS }
-//RS /// Render a test assertion failure through the same rich diagnostic formatter
-//RS /// used by runtime stops. Test adapters and the generated harness call this
-//RS /// helper instead of maintaining a second report shape.
-//RS pub(crate) fn jet_test_failure_message(
-//RS     file: &str,
-//RS     line: u32,
-//RS     fn_name: &str,
-//RS     src_line: &str,
-//RS     col: u32,
-//RS     caret_len: u32,
-//RS     msg: &str,
-//RS     locals: &str,
-//RS ) -> String {
-//RS     if let Some(failure) = jet_testing_take_failure() {
-//RS         return jet_runtime_stop_report(
-//RS             "E3001",
-//RS             file,
-//RS             line,
-//RS             fn_name,
-//RS             src_line,
-//RS             col,
-//RS             caret_len,
-//RS             &failure.message,
-//RS             &failure.detail,
-//RS         )
-//RS         .rendered;
-//RS     }
-//RS     jet_runtime_stop_report(
-//RS         "E3001", file, line, fn_name, src_line, col, caret_len, msg, locals,
-//RS     )
-//RS     .rendered
-//RS }
-//RS 
-//RS 
-//RS /// Canonical checked equality condition used by semantic `require_eq`.
-//RS fn jet_eq<T: PartialEq>(left: &T, right: &T) -> bool {
-//RS     left == right
-//RS }
-//RS /// Rich source-context form of `#require`.
-//RS fn jet_require(
-//RS     condition: bool,
-//RS     msg: &str,
-//RS     file: &str,
-//RS     line: u32,
-//RS     fn_name: &str,
-//RS     src_line: &str,
-//RS     col: u32,
-//RS     caret_len: u32,
-//RS     locals: &str,
-//RS ) {
-//RS     if condition {
-//RS         jet_testing_clear_failure();
-//RS         return;
-//RS     }
-//RS     if let Some(failure) = jet_testing_take_failure() {
-//RS         jet_panic_rich(
-//RS             file,
-//RS             line,
-//RS             fn_name,
-//RS             src_line,
-//RS             col,
-//RS             caret_len,
-//RS             &failure.message,
-//RS             &failure.detail,
-//RS         );
-//RS     }
-//RS     jet_panic_rich(file, line, fn_name, src_line, col, caret_len, msg, locals);
-//RS }
-//RS 
-//RS /// Rich source-context form of `#require_eq`.
-//RS ///
-//RS /// Equality is evaluated by the checked binary `Eq` route. This formatter
-//RS /// consumes that condition plus adapter-produced canonical debug strings.
-//RS fn jet_require_eq(
-//RS     condition: bool,
-//RS     left_debug: &str,
-//RS     right_debug: &str,
-//RS     file: &str,
-//RS     line: u32,
-//RS     fn_name: &str,
-//RS     src_line: &str,
-//RS     col: u32,
-//RS     caret_len: u32,
-//RS     locals: &str,
-//RS ) {
-//RS     if condition {
-//RS         jet_testing_clear_failure();
-//RS         return;
-//RS     }
-//RS     if let Some(failure) = jet_testing_take_failure() {
-//RS         jet_panic_rich(
-//RS             file,
-//RS             line,
-//RS             fn_name,
-//RS             src_line,
-//RS             col,
-//RS             caret_len,
-//RS             &failure.message,
-//RS             &failure.detail,
-//RS         );
-//RS     }
-//RS     let msg =
-//RS         jet_foundation::Outcome::jet_require_eq_message(&left_debug, &right_debug).to_string();
-//RS     jet_panic_rich(
-//RS         file, line, fn_name, src_line, col, caret_len, &msg, locals,
-//RS     );
-//RS }
-//RS 
-//RS /// Non-panicking test carrier for rich source-context `#require`.
-//RS fn jet_test_require(
-//RS     condition: bool,
-//RS     msg: &str,
-//RS     file: &str,
-//RS     line: u32,
-//RS     fn_name: &str,
-//RS     src_line: &str,
-//RS     col: u32,
-//RS     caret_len: u32,
-//RS     locals: &str,
-//RS ) -> Result<(), String> {
-//RS     if condition {
-//RS         jet_testing_clear_failure();
-//RS         Ok(())
-//RS     } else {
-//RS         Err(jet_test_failure_message(
-//RS             file, line, fn_name, src_line, col, caret_len, msg, locals,
-//RS         ))
-//RS     }
-//RS }
-//RS 
-//RS /// Non-panicking test carrier for rich source-context `#require_eq`.
-//RS fn jet_test_require_eq(
-//RS     condition: bool,
-//RS     left_debug: &str,
-//RS     right_debug: &str,
-//RS     file: &str,
-//RS     line: u32,
-//RS     fn_name: &str,
-//RS     src_line: &str,
-//RS     col: u32,
-//RS     caret_len: u32,
-//RS     locals: &str,
-//RS ) -> Result<(), String> {
-//RS     if condition {
-//RS         jet_testing_clear_failure();
-//RS         Ok(())
-//RS     } else {
-//RS         let msg =
-//RS             jet_foundation::Outcome::jet_require_eq_message(&left_debug, &right_debug).to_string();
-//RS         Err(jet_test_failure_message(
-//RS             file, line, fn_name, src_line, col, caret_len, &msg, locals,
-//RS         ))
-//RS     }
-//RS }
-//RS 
-//RS 
-//RS 
-//RS 
-//RS /// E3002 / D-FAIL-CTX1: `?`-propagation trace.
-//RS ///
-//RS /// Consecutive identical frames (same fn + file + line) collapse — Go wrap-noise
-//RS /// lesson — while each distinct site keeps its identity (Elixir lesson).
-//RS fn jet_trace_err<T, E>(r: Result<T, E>, file: &str, line: u32, fn_name: &str) -> Result<T, E> {
-//RS     if r.is_err() {
-//RS         jet_journey_frame(file, line, 0, fn_name, || String::new());
-//RS     } else {
-//RS         jet_journey_reset();
-//RS     }
-//RS     r
-//RS }
-//RS 
-//RS // D-FIXARR1: index/unpack/slice helpers accept `&[T]` so that both growable
-//RS // `Vec<T>` and fixed-size `[T; N]` stack arrays coerce in without `.to_vec()`.
-//RS #[inline(always)]
-//RS fn jet_index_vec<T: Clone>(xs: &[T], i: i64, file: &str, line: u32) -> T {
-//RS     jet_index_vec_ref(xs, i, file, line).clone()
-//RS }
-//RS #[inline(always)]
-//RS fn jet_index_vec_ref<'a, T>(xs: &'a [T], i: i64, file: &str, line: u32) -> &'a T {
-//RS     jet_fixed_list_index(xs.len(), i, |index| &xs[index])
-//RS         .unwrap_or_else(|error| jet_arithmetic_stop(file, line, &error.message()))
-//RS }
-//RS #[inline(always)]
-//RS fn jet_index_vec_mut<'a, T>(
-//RS     xs: &'a mut [T],
-//RS     i: i64,
-//RS     file: &str,
-//RS     line: u32,
-//RS ) -> &'a mut T {
-//RS     jet_fixed_list_index(xs.len(), i, |index| &mut xs[index])
-//RS         .unwrap_or_else(|error| jet_arithmetic_stop(file, line, &error.message()))
-//RS }
-//RS #[inline(always)]
-//RS fn jet_index_vec_set<T>(xs: &mut [T], i: i64, value: T, file: &str, line: u32) {
-//RS     let index = jet_fixed_list_index(xs.len(), i, |index| index)
-//RS         .unwrap_or_else(|error| jet_arithmetic_stop(file, line, &error.message()));
-//RS     xs[index] = value;
-//RS }
-//RS 
-//RS fn jet_unpack_vec<T: Clone>(xs: &[T], want: usize, i: usize, file: &str, line: u32) -> T {
-//RS     if xs.len() != want {
-//RS         jet_panic(
-//RS             file,
-//RS             line,
-//RS             &format!(
-//RS                 "this pattern needs exactly {} item{}, but the list has {}",
-//RS                 want,
-//RS                 if want == 1 { "" } else { "s" },
-//RS                 xs.len()
-//RS             ),
-//RS         );
-//RS     }
-//RS     xs[i].clone()
-//RS }
-//RS fn jet_slice_vec<T: Clone>(xs: &[T], a: i64, b: i64, file: &str, line: u32) -> Vec<T> {
-//RS     let len = xs.len() as i64;
-//RS     if a < 0 || b < 0 || a > b || b >= len {
-//RS         jet_panic(
-//RS             file,
-//RS             line,
-//RS             &format!("can't slice {} items from {} to {} (inclusive)", len, a, b),
-//RS         );
-//RS     }
-//RS     xs[a as usize..=b as usize].to_vec()
-//RS }
-//RS fn jet_checked_range_bounds(
-//RS     len: i64,
-//RS     range: &JetRange,
-//RS     action: &str,
-//RS     file: &str,
-//RS     line: u32,
-//RS ) -> std::ops::Range<usize> {
-//RS     let Some((start, end)) =
-//RS         jet_range_bounds(range.start, range.end, range.exclusive, len)
-//RS     else {
-//RS         jet_panic(
-//RS             file,
-//RS             line,
-//RS             &format!(
-//RS                 "can't {} {} items from {} to {} ({})",
-//RS                 action,
-//RS                 len,
-//RS                 range.start,
-//RS                 range.end,
-//RS                 if range.exclusive { "exclusive" } else { "inclusive" }
-//RS             ),
-//RS         );
-//RS     };
-//RS     start as usize..end as usize
-//RS }
-//RS 
-//RS trait JetSliceRange {
-//RS     type Output;
-//RS 
-//RS     fn slice_range(&self, range: &JetRange, file: &str, line: u32) -> Self::Output;
-//RS }
-//RS 
-//RS fn jet_slice_vec_range<T: Clone>(
-//RS     xs: &[T],
-//RS     range: &JetRange,
-//RS     file: &str,
-//RS     line: u32,
-//RS ) -> Vec<T> {
-//RS     xs[jet_checked_range_bounds(xs.len() as i64, range, "slice", file, line)].to_vec()
-//RS }
-//RS 
-//RS impl<T: Clone> JetSliceRange for [T] {
-//RS     type Output = Vec<T>;
-//RS 
-//RS     fn slice_range(&self, range: &JetRange, file: &str, line: u32) -> Self::Output {
-//RS         jet_slice_vec_range(self, range, file, line)
-//RS     }
-//RS }
-//RS 
-//RS impl<T: Clone> JetSliceRange for Vec<T> {
-//RS     type Output = Vec<T>;
-//RS 
-//RS     fn slice_range(&self, range: &JetRange, file: &str, line: u32) -> Self::Output {
-//RS         jet_slice_vec_range(self, range, file, line)
-//RS     }
-//RS }
-//RS 
-//RS impl JetSliceRange for String {
-//RS     type Output = String;
-//RS 
-//RS     fn slice_range(&self, range: &JetRange, file: &str, line: u32) -> Self::Output {
-//RS         jet_string_slice_value(self, range.start, range.end, range.exclusive)
-//RS             .unwrap_or_else(|message| jet_panic(file, line, &message))
-//RS     }
-//RS }
-//RS 
-//RS fn jet_slice_range<T: JetSliceRange + ?Sized>(
-//RS     xs: &T,
-//RS     range: &JetRange,
-//RS     file: &str,
-//RS     line: u32,
-//RS ) -> T::Output {
-//RS     xs.slice_range(range, file, line)
-//RS }
-//RS // D-DYNARRAY1 / D-SHAPE-PLACE1: range places produce zero-copy windows.
-//RS // Their bounds share `jet_range_bounds` with owned slicing and every engine.
-//RS // The returned lifetime is tied to `xs`; sema proves the window cannot outlive
-//RS // the owner or survive a storage-changing mutation.
-//RS fn jet_checked_view_window(
-//RS     start: i64,
-//RS     end: i64,
-//RS     exclusive: bool,
-//RS     len: i64,
-//RS     file: &str,
-//RS     line: u32,
-//RS ) -> (i64, i64) {
-//RS     match jet_checked_view_bounds(start, end, exclusive, len) {
-//RS         Ok(bounds) => bounds,
-//RS         Err(message) => jet_panic(file, line, &message),
-//RS     }
-//RS }
-//RS 
-//RS fn jet_view_new<'a, T>(xs: &'a [T], a: i64, b: i64, file: &str, line: u32) -> &'a [T] {
-//RS     let (start, end) = jet_checked_view_window(a, b, false, xs.len() as i64, file, line);
-//RS     &xs[start as usize..end as usize]
-//RS }
-//RS fn jet_view_new_range<'a, T>(
-//RS     xs: &'a [T],
-//RS     range: &JetRange,
-//RS     file: &str,
-//RS     line: u32,
-//RS ) -> &'a [T] {
-//RS     let (start, end) = jet_checked_view_window(
-//RS         range.start,
-//RS         range.end,
-//RS         range.exclusive,
-//RS         xs.len() as i64,
-//RS         file,
-//RS         line,
-//RS     );
-//RS     &xs[start as usize..end as usize]
-//RS }
-//RS 
-//RS 
-//RS fn jet_view_mut_new<'a, T>(
-//RS     xs: &'a mut [T],
-//RS     a: i64,
-//RS     b: i64,
-//RS     file: &str,
-//RS     line: u32,
-//RS ) -> &'a mut [T] {
-//RS     let (start, end) = jet_checked_view_window(a, b, false, xs.len() as i64, file, line);
-//RS     &mut xs[start as usize..end as usize]
-//RS }
-//RS fn jet_view_mut_new_range<'a, T>(
-//RS     xs: &'a mut [T],
-//RS     range: &JetRange,
-//RS     file: &str,
-//RS     line: u32,
-//RS ) -> &'a mut [T] {
-//RS     let (start, end) = jet_checked_view_window(
-//RS         range.start,
-//RS         range.end,
-//RS         range.exclusive,
-//RS         xs.len() as i64,
-//RS         file,
-//RS         line,
-//RS     );
-//RS     &mut xs[start as usize..end as usize]
-//RS }
-//RS 
-//RS fn jet_views_mut_new<'a, T>(
-//RS     xs: &'a mut [T],
-//RS     ranges: &[(i64, i64, u32)],
-//RS     file: &str,
-//RS ) -> Vec<&'a mut [T]> {
-//RS     let len = xs.len() as i64;
-//RS     let mut ordered = Vec::with_capacity(ranges.len());
-//RS     for (index, &(start, end, line)) in ranges.iter().enumerate() {
-//RS         let (start, end) = jet_checked_view_window(start, end, false, len, file, line);
-//RS         ordered.push((start as usize, end as usize, index));
-//RS     }
-//RS     jet_views_mut_from_windows(xs, ordered, file)
-//RS }
-//RS 
-//RS fn jet_views_mut_from_windows<'a, T>(
-//RS     xs: &'a mut [T],
-//RS     mut ordered: Vec<(usize, usize, usize)>,
-//RS     file: &str,
-//RS ) -> Vec<&'a mut [T]> {
-//RS     ordered.sort_by_key(|&(start, end, _)| (start, end));
-//RS     if ordered.windows(2).any(|pair| pair[0].1 > pair[1].0) {
-//RS         jet_panic(file, 0, "mutable view ranges overlap");
-//RS     }
-//RS 
-//RS     let mut pieces = Vec::with_capacity(ordered.len());
-//RS     let mut tail = xs;
-//RS     let mut offset = 0usize;
-//RS     for (start, end, index) in ordered {
-//RS         let (_, from_start) = tail.split_at_mut(start - offset);
-//RS         let (selected, after) = from_start.split_at_mut(end - start);
-//RS         pieces.push((index, selected));
-//RS         tail = after;
-//RS         offset = end;
-//RS     }
-//RS     pieces.sort_by_key(|(index, _)| *index);
-//RS     pieces.into_iter().map(|(_, selected)| selected).collect()
-//RS }
-//RS 
-//RS // D-MEMDISJOINT1=A: runtime disjointness is proved once, before any mutable
-//RS // view exists. These helpers return the same Error family for bounds and
-//RS // overlap failures; engines only marshal their arguments and results.
-//RS fn jet_split_write<T>(
-//RS     xs: &mut [T],
-//RS     mid: i64,
-//RS ) -> Result<(&mut [T], &mut [T]), String> {
-//RS     jet_disjoint_split_bounds(xs.len(), mid)?;
-//RS     Ok(xs.split_at_mut(mid as usize))
-//RS }
-//RS 
-//RS fn jet_get_disjoint_write<'a, T>(
-//RS     xs: &'a mut [T],
-//RS     indices: &[i64],
-//RS ) -> Result<Vec<&'a mut [T]>, String> {
-//RS     let ordered = jet_disjoint_index_bounds(xs.len(), indices)?;
-//RS     let mut views = Vec::with_capacity(ordered.len());
-//RS     let mut tail = xs;
-//RS     let mut offset = 0usize;
-//RS     for (start, end, position) in ordered {
-//RS         let (_, from_index) = tail.split_at_mut(start - offset);
-//RS         let (selected, after) = from_index.split_at_mut(end - start);
-//RS         views.push((position, selected));
-//RS         tail = after;
-//RS         offset = end;
-//RS     }
-//RS     views.sort_by_key(|(position, _)| *position);
-//RS     Ok(views.into_iter().map(|(_, view)| view).collect())
-//RS }
-//RS 
-//RS fn jet_edit_disjoint<T, F>(xs: &mut [T], indices: &[i64], edit: F) -> Result<(), String>
-//RS where
-//RS     F: FnOnce(&mut [T], &mut [T]),
-//RS {
-//RS     if indices.len() != 2 {
-//RS         return Err("edit_disjoint needs exactly two indexes".to_string());
-//RS     }
-//RS     let mut views = jet_get_disjoint_write(xs, indices)?;
-//RS     let right = views.pop().expect("two disjoint views");
-//RS     let left = views.pop().expect("two disjoint views");
-//RS     edit(left, right);
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn jet_view_range_new<'a, T>(
-//RS     xs: &'a [T],
-//RS     range: &JetRange,
-//RS     file: &str,
-//RS     line: u32,
-//RS ) -> &'a [T] {
-//RS     let (start, end) = jet_checked_view_window(
-//RS         range.start,
-//RS         range.end,
-//RS         range.exclusive,
-//RS         xs.len() as i64,
-//RS         file,
-//RS         line,
-//RS     );
-//RS     &xs[start as usize..end as usize]
-//RS }
-//RS 
-//RS fn jet_view_mut_range_new<'a, T>(
-//RS     xs: &'a mut [T],
-//RS     range: &JetRange,
-//RS     file: &str,
-//RS     line: u32,
-//RS ) -> &'a mut [T] {
-//RS     let (start, end) = jet_checked_view_window(
-//RS         range.start,
-//RS         range.end,
-//RS         range.exclusive,
-//RS         xs.len() as i64,
-//RS         file,
-//RS         line,
-//RS     );
-//RS     &mut xs[start as usize..end as usize]
-//RS }
-//RS 
-//RS // D-DYNARRAY1: View<T> read-only closure surface. `xs` is already a borrow
-//RS // (never `.clone()`d to an owned `Vec` first, unlike the `jet_list_*` family
-//RS // above) — folding/mapping a view touches no allocation beyond the result.
-//RS fn jet_view_fold<T, U, F>(xs: &[T], init: U, mut f: F) -> U
-//RS where
-//RS     F: FnMut(&U, &T) -> U,
-//RS {
-//RS     let mut acc = init;
-//RS     for x in xs {
-//RS         acc = f(&acc, x);
-//RS     }
-//RS     acc
-//RS }
-//RS fn jet_view_map<T, U, F>(xs: &[T], f: F) -> Vec<U>
-//RS where
-//RS     F: FnMut(&T) -> U,
-//RS {
-//RS     xs.iter().map(f).collect()
-//RS }
-//RS #[derive(Clone, Debug, PartialEq, Eq)]
-//RS struct JetMap<K, V>(std::sync::Arc<std::collections::BTreeMap<K, V>>);
-//RS 
-//RS impl<K, V> JetMap<K, V> {
-//RS     fn new() -> Self {
-//RS         Self(std::sync::Arc::new(std::collections::BTreeMap::new()))
-//RS     }
-//RS }
-//RS impl<K: Ord, V> JetMap<K, V> {
-//RS     fn from_pairs(entries: Vec<(K, V)>) -> Self {
-//RS         entries.into_iter().collect()
-//RS     }
-//RS }
-//RS 
-//RS /// Build a typed Jet map from one already-lowered runtime entry vector.
-//RS ///
-//RS /// The checked TIR producer has already evaluated each key and value. This
-//RS /// kernel only commits those pairs to the canonical copy-on-write map.
-//RS #[inline(always)]
-//RS fn jet_data_entries_to_map<K: Ord, V>(entries: Vec<(K, V)>) -> JetMap<K, V> {
-//RS     JetMap::from_pairs(entries)
-//RS }
-//RS 
-//RS // Codegen lowers map construction from a sequence of pairs to
-//RS // `.into_iter().collect()`, so the map has to be buildable from its own pairs.
-//RS // Without this, decoding a table into a typed map emitted Rust that rustc
-//RS // rejected (I2).
-//RS impl<K: Ord, V> FromIterator<(K, V)> for JetMap<K, V> {
-//RS     fn from_iter<I: IntoIterator<Item = (K, V)>>(pairs: I) -> Self {
-//RS         Self(std::sync::Arc::new(
-//RS             pairs.into_iter().collect::<std::collections::BTreeMap<K, V>>(),
-//RS         ))
-//RS     }
-//RS }
-//RS 
-//RS impl<K, V> std::ops::Deref for JetMap<K, V> {
-//RS     type Target = std::collections::BTreeMap<K, V>;
-//RS 
-//RS     fn deref(&self) -> &Self::Target {
-//RS         &self.0
-//RS     }
-//RS }
-//RS 
-//RS impl<K: Ord + Clone, V: Clone> std::ops::DerefMut for JetMap<K, V> {
-//RS     fn deref_mut(&mut self) -> &mut Self::Target {
-//RS         std::sync::Arc::make_mut(&mut self.0)
-//RS     }
-//RS }
-//RS 
-//RS /// Borrow map storage once for a proven unique mutation region. The caller
-//RS /// keeps the returned borrow inside that region; ordinary `JetMap` mutation
-//RS /// retains copy-on-write semantics everywhere else.
-//RS #[inline(always)]
-//RS fn jet_map_make_mut<K: Ord + Clone, V: Clone>(
-//RS     m: &mut JetMap<K, V>,
-//RS ) -> &mut std::collections::BTreeMap<K, V> {
-//RS     std::sync::Arc::make_mut(&mut m.0)
-//RS }
-//RS 
-//RS impl<'a, K: Ord, V> IntoIterator for &'a JetMap<K, V> {
-//RS     type Item = (&'a K, &'a V);
-//RS     type IntoIter = std::collections::btree_map::Iter<'a, K, V>;
-//RS 
-//RS     fn into_iter(self) -> Self::IntoIter {
-//RS         self.iter()
-//RS     }
-//RS }
-//RS 
-//RS fn jet_map_into_entries<K: Ord + Clone, V: Clone>(m: JetMap<K, V>) -> Vec<(K, V)> {
-//RS     match std::sync::Arc::try_unwrap(m.0) {
-//RS         Ok(map) => {
-//RS             let mut entries = Vec::with_capacity(map.len());
-//RS             entries.extend(map);
-//RS             entries
-//RS         }
-//RS         Err(shared) => {
-//RS             let mut entries = Vec::with_capacity(shared.len());
-//RS             entries.extend(shared.iter().map(|(k, v)| (k.clone(), v.clone())));
-//RS             entries
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Clone, Copy, PartialEq, Eq)]
-//RS enum JetRemoveBy {
-//RS     Val,
-//RS     Slot,
-//RS }
-//RS 
-//RS fn jet_index_map<M, K: Ord + Clone + JetShow, V: Clone>(
-//RS     m: &M,
-//RS     k: &K,
-//RS     file: &str,
-//RS     line: u32,
-//RS     fn_name: &str,
-//RS     src_line: &str,
-//RS     col: u32,
-//RS     caret_len: u32,
-//RS ) -> V
-//RS where
-//RS     M: std::ops::Deref<Target = std::collections::BTreeMap<K, V>>,
-//RS {
-//RS     match m.get(k) {
-//RS         Some(v) => v.clone(),
-//RS         None => jet_panic_rich(
-//RS             file,
-//RS             line,
-//RS             fn_name,
-//RS             src_line,
-//RS             col,
-//RS             caret_len,
-//RS             &jet_missing_map_key_value(k.jet_show()),
-//RS             "",
-//RS         ),
-//RS     }
-//RS }
-//RS 
-//RS /// Borrow one map value without materializing a clone. This is the read-side
-//RS /// counterpart to `jet_index_map_mut`, used when a view receiver is a nested
-//RS /// map/list place whose storage must outlive the borrowed view.
-//RS fn jet_index_map_ref<'a, M, K: Ord + Clone + JetShow + 'a, V>(
-//RS     m: &'a M,
-//RS     k: &K,
-//RS     file: &str,
-//RS     line: u32,
-//RS     fn_name: &str,
-//RS     src_line: &str,
-//RS     col: u32,
-//RS     caret_len: u32,
-//RS ) -> &'a V
-//RS where
-//RS     M: std::ops::Deref<Target = std::collections::BTreeMap<K, V>>,
-//RS {
-//RS     match m.get(k) {
-//RS         Some(value) => value,
-//RS         None => jet_panic_rich(
-//RS             file,
-//RS             line,
-//RS             fn_name,
-//RS             src_line,
-//RS             col,
-//RS             caret_len,
-//RS             &jet_missing_map_key_value(k.jet_show()),
-//RS             "",
-//RS         ),
-//RS     }
-//RS }
-//RS 
-//RS fn jet_index_map_mut<'a, M, K: Ord + Clone + JetShow + 'a, V>(
-//RS     m: &'a mut M,
-//RS     k: K,
-//RS     file: &str,
-//RS     line: u32,
-//RS     fn_name: &str,
-//RS     src_line: &str,
-//RS     col: u32,
-//RS     caret_len: u32,
-//RS ) -> &'a mut V
-//RS where
-//RS     M: std::ops::DerefMut<Target = std::collections::BTreeMap<K, V>>,
-//RS {
-//RS     match m.get_mut(&k) {
-//RS         Some(value) => value,
-//RS         None => jet_panic_rich(
-//RS             file,
-//RS             line,
-//RS             fn_name,
-//RS             src_line,
-//RS             col,
-//RS             caret_len,
-//RS             &jet_missing_map_key_value(k.jet_show()),
-//RS             "",
-//RS         ),
-//RS     }
-//RS }
-//RS #[inline(always)]
-//RS fn jet_map_insert<M, K: Ord + Clone, V: Clone>(
-//RS     m: &mut M,
-//RS     k: K,
-//RS     v: V,
-//RS ) -> JetOutcome<V, JetAbsent>
-//RS where
-//RS     M: std::ops::DerefMut<Target = std::collections::BTreeMap<K, V>>,
-//RS {
-//RS     jet_outcome_of(m.insert(k, v))
-//RS }
-//RS 
-//RS #[inline(always)]
-//RS fn jet_map_add_new<M, K: Ord + Clone, V: Clone>(m: &mut M, k: K, v: V) -> bool
-//RS where
-//RS     M: std::ops::DerefMut<Target = std::collections::BTreeMap<K, V>>,
-//RS {
-//RS     if m.contains_key(&k) {
-//RS         return false;
-//RS     }
-//RS     m.insert(k, v);
-//RS     true
-//RS }
-//RS 
-//RS #[inline(always)]
-//RS fn jet_map_setdefault<M, K: Ord, V: Clone>(m: &mut M, k: K, v: V) -> V
-//RS where
-//RS     M: std::ops::DerefMut<Target = std::collections::BTreeMap<K, V>>,
-//RS {
-//RS     m.entry(k).or_insert(v).clone()
-//RS }
-//RS 
-//RS /// Update a text-keyed map without allocating a replacement key for an
-//RS /// existing entry. The ordinary update path owns its key before entering the
-//RS /// tree; this borrowed form keeps the same ordered-map semantics while making
-//RS /// the common read/compute/write loop pay for a key clone only on insertion.
-//RS #[inline(always)]
-//RS fn jet_map_update_string<V, F>(
-//RS     m: &mut std::collections::BTreeMap<String, V>,
-//RS     key: &String,
-//RS     f: F,
-//RS )
-//RS where
-//RS     F: FnOnce(Option<&V>) -> V,
-//RS {
-//RS     if let Some(existing) = m.get_mut(key) {
-//RS         let next = {
-//RS             let existing = &*existing;
-//RS             f(Some(existing))
-//RS         };
-//RS         *existing = next;
-//RS     } else {
-//RS         m.insert(key.clone(), f(None));
-//RS     }
-//RS }
-//RS 
-//RS trait JetStringBytesMap<V> {
-//RS     fn update_bytes<F>(&mut self, bytes: &[u8], f: F) -> Result<(), ()>
-//RS     where
-//RS         F: FnOnce(Option<&V>) -> V;
-//RS }
-//RS 
-//RS impl<V> JetStringBytesMap<V> for std::collections::BTreeMap<String, V> {
-//RS     #[inline(always)]
-//RS     fn update_bytes<F>(&mut self, bytes: &[u8], f: F) -> Result<(), ()>
-//RS     where
-//RS         F: FnOnce(Option<&V>) -> V,
-//RS     {
-//RS         let key = std::str::from_utf8(bytes).map_err(|_| ())?;
-//RS         if let Some(existing) = self.get_mut(key) {
-//RS             let next = f(Some(&*existing));
-//RS             *existing = next;
-//RS         } else {
-//RS             self.insert(key.to_owned(), f(None));
-//RS         }
-//RS         Ok(())
-//RS     }
-//RS }
-//RS 
-//RS impl<V: Clone> JetStringBytesMap<V> for JetMap<String, V> {
-//RS     #[inline(always)]
-//RS     fn update_bytes<F>(&mut self, bytes: &[u8], f: F) -> Result<(), ()>
-//RS     where
-//RS         F: FnOnce(Option<&V>) -> V,
-//RS     {
-//RS         std::sync::Arc::make_mut(&mut self.0).update_bytes(bytes, f)
-//RS     }
-//RS }
-//RS 
-//RS impl<V, M: JetStringBytesMap<V> + ?Sized> JetStringBytesMap<V> for &mut M {
-//RS     #[inline(always)]
-//RS     fn update_bytes<F>(&mut self, bytes: &[u8], f: F) -> Result<(), ()>
-//RS     where
-//RS         F: FnOnce(Option<&V>) -> V,
-//RS     {
-//RS         (**self).update_bytes(bytes, f)
-//RS     }
-//RS }
-//RS 
-//RS /// The count loop has already proved that its map owns the only backing
-//RS /// allocation. Use a fixed, non-cryptographic hasher only inside that sealed
-//RS /// region; the map is not an input-facing general-purpose hash table.
-//RS #[derive(Clone, Default)]
-//RS struct JetStringCountHasher {
-//RS     hash: u64,
-//RS }
-//RS 
-//RS impl JetStringCountHasher {
-//RS     #[inline(always)]
-//RS     fn add(&mut self, value: u64) {
-//RS         self.hash = self
-//RS             .hash
-//RS             .wrapping_add(value)
-//RS             .wrapping_mul(0xf1357aea2e62a9c5);
-//RS     }
-//RS }
-//RS 
-//RS impl std::hash::Hasher for JetStringCountHasher {
-//RS     #[inline(always)]
-//RS     fn finish(&self) -> u64 {
-//RS         self.hash.rotate_left(26)
-//RS     }
-//RS 
-//RS     #[inline(always)]
-//RS     fn write(&mut self, bytes: &[u8]) {
-//RS         let mut value = bytes.len() as u64;
-//RS         for &byte in bytes {
-//RS             value = value.rotate_left(5) ^ u64::from(byte);
-//RS         }
-//RS         self.add(value);
-//RS     }
-//RS 
-//RS     #[inline(always)]
-//RS     fn write_u8(&mut self, value: u8) {
-//RS         self.add(u64::from(value));
-//RS     }
-//RS 
-//RS     #[inline(always)]
-//RS     fn write_u64(&mut self, value: u64) {
-//RS         self.add(value);
-//RS     }
-//RS }
-//RS 
-//RS type JetStringCountBuildHasher = std::hash::BuildHasherDefault<JetStringCountHasher>;
-//RS 
-//RS /// A fresh, uniquely-owned ordered String:Int map can count through a hash
-//RS /// table while a loop has no other access to the map. Keys stay as validated
-//RS /// UTF-8 bytes during the loop; Drop restores the canonical sorted
-//RS /// representation before the map is visible again.
-//RS struct JetStringCountBuilder<'a> {
-//RS     target: &'a mut std::collections::BTreeMap<String, i64>,
-//RS     short_counts: std::collections::HashMap<u64, i64, JetStringCountBuildHasher>,
-//RS     long_counts: std::collections::HashMap<Vec<u8>, i64, JetStringCountBuildHasher>,
-//RS }
-//RS 
-//RS impl<'a> JetStringCountBuilder<'a> {
-//RS     #[inline(always)]
-//RS     fn short_key(bytes: &[u8]) -> Option<u64> {
-//RS         if bytes.len() > 7 {
-//RS             return None;
-//RS         }
-//RS         if bytes.len() == 6 {
-//RS             return Some(
-//RS                 (6u64 << 56)
-//RS                     | u64::from(bytes[0])
-//RS                     | (u64::from(bytes[1]) << 8)
-//RS                     | (u64::from(bytes[2]) << 16)
-//RS                     | (u64::from(bytes[3]) << 24)
-//RS                     | (u64::from(bytes[4]) << 32)
-//RS                     | (u64::from(bytes[5]) << 40),
-//RS             );
-//RS         }
-//RS         let mut key = (bytes.len() as u64) << 56;
-//RS         for (index, byte) in bytes.iter().enumerate() {
-//RS             key |= u64::from(*byte) << (index * 8);
-//RS         }
-//RS         Some(key)
-//RS     }
-//RS 
-//RS     fn short_string(key: u64) -> String {
-//RS         let len = (key >> 56) as usize;
-//RS         let bytes = (0..len)
-//RS             .map(|index| ((key >> (index * 8)) & 0xff) as u8)
-//RS             .collect();
-//RS         String::from_utf8(bytes).expect("JetStringCountBuilder stores only valid UTF-8 keys")
-//RS     }
-//RS 
-//RS     fn new(target: &'a mut std::collections::BTreeMap<String, i64>) -> Self {
-//RS         Self::with_source_capacity(target, 0)
-//RS     }
-//RS 
-//RS     fn with_source_capacity(
-//RS         target: &'a mut std::collections::BTreeMap<String, i64>,
-//RS         source_bytes: usize,
-//RS     ) -> Self {
-//RS         let estimated_distinct = (source_bytes / 64).min(16_384);
-//RS         let mut short_counts = std::collections::HashMap::with_capacity_and_hasher(
-//RS             estimated_distinct,
-//RS             JetStringCountBuildHasher::default(),
-//RS         );
-//RS         let mut long_counts = std::collections::HashMap::default();
-//RS         for (key, value) in std::mem::take(target) {
-//RS             let bytes = key.into_bytes();
-//RS             if let Some(short) = Self::short_key(&bytes) {
-//RS                 short_counts.insert(short, value);
-//RS             } else {
-//RS                 long_counts.insert(bytes, value);
-//RS             }
-//RS         }
-//RS         Self {
-//RS             target,
-//RS             short_counts,
-//RS             long_counts,
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS impl JetStringBytesMap<i64> for JetStringCountBuilder<'_> {
-//RS     #[inline(always)]
-//RS     fn update_bytes<F>(&mut self, bytes: &[u8], f: F) -> Result<(), ()>
-//RS     where
-//RS         F: FnOnce(Option<&i64>) -> i64,
-//RS     {
-//RS         if let Some(key) = Self::short_key(bytes) {
-//RS             if let Some(existing) = self.short_counts.get_mut(&key) {
-//RS                 *existing = f(Some(&*existing));
-//RS             } else {
-//RS                 std::str::from_utf8(bytes).map_err(|_| ())?;
-//RS                 self.short_counts.insert(key, f(None));
-//RS             }
-//RS         } else if let Some(existing) = self.long_counts.get_mut(bytes) {
-//RS             *existing = f(Some(&*existing));
-//RS         } else {
-//RS             std::str::from_utf8(bytes).map_err(|_| ())?;
-//RS             self.long_counts.insert(bytes.to_owned(), f(None));
-//RS         }
-//RS         Ok(())
-//RS     }
-//RS }
-//RS 
-//RS impl Drop for JetStringCountBuilder<'_> {
-//RS     fn drop(&mut self) {
-//RS         self.target.extend(
-//RS             std::mem::take(&mut self.short_counts)
-//RS                 .into_iter()
-//RS                 .map(|(key, value)| (Self::short_string(key), value)),
-//RS         );
-//RS         self.target.extend(
-//RS             std::mem::take(&mut self.long_counts)
-//RS                 .into_iter()
-//RS                 .map(|(bytes, value)| {
-//RS                     (
-//RS                         String::from_utf8(bytes)
-//RS                             .expect("JetStringCountBuilder stores only valid UTF-8 keys"),
-//RS                         value,
-//RS                     )
-//RS                 }),
-//RS         );
-//RS     }
-//RS }
-//RS 
-//RS /// Update a text-keyed map from a borrowed UTF-8 byte span. Strict decoding
-//RS /// happens before lookup; existing keys need no temporary String.
-//RS #[inline(always)]
-//RS fn jet_map_update_string_bytes<M, V, F>(m: &mut M, bytes: &[u8], f: F) -> Result<(), ()>
-//RS where
-//RS     M: JetStringBytesMap<V>,
-//RS     F: FnOnce(Option<&V>) -> V,
-//RS {
-//RS     m.update_bytes(bytes, f)
-//RS }
-//RS 
-//RS // BTreeMap has no stable fallible reservation API. Keep this representation
-//RS // step at the map seam; the shared Prelude owns the AllocError projection.
-//RS fn jet_map_try_insert_storage<K: Ord + Clone, V: Clone>(
-//RS     m: &mut JetMap<K, V>,
-//RS     k: K,
-//RS     v: V,
-//RS ) -> Result<Option<V>, ()> {
-//RS     Ok(m.insert(k, v))
-//RS }
-//RS 
-//RS /// D-MAP-MERGE1=E: merge `other` into a clone of `left`. Right wins on shared keys.
-//RS fn jet_map_merge<K: Ord + Clone, V: Clone>(
-//RS     left: &JetMap<K, V>,
-//RS     other: &JetMap<K, V>,
-//RS ) -> JetMap<K, V> {
-//RS     let mut out = left.clone();
-//RS     let storage = jet_map_make_mut(&mut out);
-//RS     for (k, v) in other {
-//RS         storage.insert(k.clone(), v.clone());
-//RS     }
-//RS     out
-//RS }
-//RS /// Mutate `left` with every entry from `other`; right wins on shared keys.
-//RS fn jet_map_update_all<K: Ord + Clone, V: Clone>(
-//RS     left: &mut JetMap<K, V>,
-//RS     other: &JetMap<K, V>,
-//RS ) {
-//RS     let storage = jet_map_make_mut(left);
-//RS     for (key, value) in other {
-//RS         storage.insert(key.clone(), value.clone());
-//RS     }
-//RS }
-//RS 
-//RS /// D-MAP-MERGE1=E: merge with an explicit conflict callback `(key, left, right) -> V`.
-//RS fn jet_map_merge_with<K: Ord + Clone, V: Clone, F>(
-//RS     left: &JetMap<K, V>,
-//RS     other: &JetMap<K, V>,
-//RS     conflict: F,
-//RS ) -> JetMap<K, V>
-//RS where
-//RS     F: Fn(&K, V, V) -> V,
-//RS {
-//RS     let mut out = left.clone();
-//RS     let storage = jet_map_make_mut(&mut out);
-//RS     for (k, right) in other {
-//RS         match storage.remove(k) {
-//RS             Some(left_v) => {
-//RS                 let resolved = conflict(k, left_v, right.clone());
-//RS                 storage.insert(k.clone(), resolved);
-//RS             }
-//RS             None => {
-//RS                 storage.insert(k.clone(), right.clone());
-//RS             }
-//RS         }
-//RS     }
-//RS     out
-//RS }
-//RS // D-LISTMAP1: the view owns the map's Arc and advances by key. This keeps the
-//RS // iterator `'static` without copying the BTreeMap (or borrowing through a
-//RS // short-lived local Arc). Each pull clones only the yielded item; the map stays
-//RS // shared and untouched until a mutation triggers Arc::make_mut.
-//RS struct JetMapKeys<K, V> {
-//RS     map: std::sync::Arc<std::collections::BTreeMap<K, V>>,
-//RS     last: Option<K>,
-//RS }
-//RS 
-//RS impl<K: Ord + Clone, V> Iterator for JetMapKeys<K, V> {
-//RS     type Item = K;
-//RS 
-//RS     fn next(&mut self) -> Option<Self::Item> {
-//RS         let next = match self.last.as_ref() {
-//RS             Some(last) => self
-//RS                 .map
-//RS                 .range((std::ops::Bound::Excluded(last), std::ops::Bound::Unbounded))
-//RS                 .next(),
-//RS             None => self.map.iter().next(),
-//RS         }?;
-//RS         let key = next.0.clone();
-//RS         self.last = Some(key.clone());
-//RS         Some(key)
-//RS     }
-//RS }
-//RS 
-//RS struct JetMapValues<K, V> {
-//RS     map: std::sync::Arc<std::collections::BTreeMap<K, V>>,
-//RS     last: Option<K>,
-//RS }
-//RS 
-//RS impl<K: Ord + Clone, V: Clone> Iterator for JetMapValues<K, V> {
-//RS     type Item = V;
-//RS 
-//RS     fn next(&mut self) -> Option<Self::Item> {
-//RS         let next = match self.last.as_ref() {
-//RS             Some(last) => self
-//RS                 .map
-//RS                 .range((std::ops::Bound::Excluded(last), std::ops::Bound::Unbounded))
-//RS                 .next(),
-//RS             None => self.map.iter().next(),
-//RS         }?;
-//RS         let key = next.0.clone();
-//RS         let value = next.1.clone();
-//RS         self.last = Some(key);
-//RS         Some(value)
-//RS     }
-//RS }
-//RS 
-//RS fn jet_map_keys<K: Ord + Clone + 'static, V: 'static>(m: &JetMap<K, V>) -> JetIter<K> {
-//RS     JetIter(Box::new(JetMapKeys {
-//RS         map: std::sync::Arc::clone(&m.0),
-//RS         last: None,
-//RS     }))
-//RS }
-//RS 
-//RS fn jet_map_values<K: Ord + Clone + 'static, V: Clone + 'static>(m: &JetMap<K, V>) -> JetIter<V> {
-//RS     JetIter(Box::new(JetMapValues {
-//RS         map: std::sync::Arc::clone(&m.0),
-//RS         last: None,
-//RS     }))
-//RS }
-//RS 
-//RS #[inline(always)]
-//RS fn jet_list_remove_value<T: Clone + PartialEq>(
-//RS     xs: &mut Vec<T>,
-//RS     value: T,
-//RS ) -> JetOutcome<T, JetAbsent> {
-//RS     jet_outcome_of(jet_list_remove_value_kernel(xs, value))
-//RS }
-//RS 
-//RS #[inline(always)]
-//RS fn jet_list_remove_slot<T: Clone>(
-//RS     xs: &mut Vec<T>,
-//RS     index: i64,
-//RS ) -> JetOutcome<T, JetAbsent> {
-//RS     match jet_list_remove_slot_kernel(xs, index) {
-//RS         Ok(value) => Ok(value),
-//RS         Err(message) => jet_arithmetic_stop("<core.collections>", 0, &message),
-//RS     }
-//RS }
-//RS 
-//RS #[inline(always)]
-//RS fn jet_list_insert<T>(xs: &mut Vec<T>, index: i64, value: T) {
-//RS     match jet_list_insert_kernel(xs, index, value) {
-//RS         Ok(()) => {}
-//RS         Err(error) => {
-//RS             let message = error.message();
-//RS             jet_runtime_stop(error.code(), "<core.collections>", 0, &message);
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS // D-LISTREMOVE1/F (criterion c6 on #1481): PriorityQueue.remove reuses List's
-//RS // exact value/slot selector shape. `BinaryHeap` has no native indexed or
-//RS // value-search removal, so both forms round-trip through an owned `Vec` —
-//RS // sorted highest-first, the same canonical order `peek`/`to_sorted_list`
-//RS // already publish (and the one the TIR-eval/comptime twin uses), so `.Slot`
-//RS // means the same position on every execution tier (I9).
-//RS fn jet_priority_queue_remove_value<T: Ord>(
-//RS     pq: &mut std::collections::BinaryHeap<T>,
-//RS     value: T,
-//RS ) -> JetOutcome<T, JetAbsent> {
-//RS     jet_priority_queue_remove_value_kernel(pq, value)
-//RS }
-//RS 
-//RS fn jet_list_count<T: PartialEq>(xs: &[T], value: &T) -> i64 {
-//RS     jet_list_count_kernel(xs, value)
-//RS }
-//RS fn jet_list_count_where<T, F>(xs: &[T], predicate: F) -> i64
-//RS where
-//RS     F: FnMut(&T) -> bool,
-//RS {
-//RS     jet_list_count_where_kernel(xs, predicate)
-//RS }
-//RS 
-//RS fn jet_list_update_first<T, F>(
-//RS     xs: &mut Vec<T>,
-//RS     predicate: F,
-//RS     replacement: T,
-//RS ) -> bool
-//RS where
-//RS     F: FnMut(&T) -> bool,
-//RS {
-//RS     jet_list_update_first_kernel(xs, predicate, replacement)
-//RS }
-//RS 
-//RS fn jet_list_concat<T: Clone>(left: &[T], right: &[T]) -> Vec<T> {
-//RS     let mut out = left.to_vec();
-//RS     out.extend(right.iter().cloned());
-//RS     out
-//RS }
-//RS fn jet_list_join<T: JetShow>(xs: &[T], separator: &String) -> String {
-//RS     xs.iter()
-//RS         .map(JetShow::jet_show)
-//RS         .collect::<Vec<_>>()
-//RS         .join(separator)
-//RS }
-//RS fn jet_fixed_list_concat<
-//RS     T: Clone,
-//RS     const LEFT: usize,
-//RS     const RIGHT: usize,
-//RS     const TOTAL: usize,
-//RS >(
-//RS     left: &[T; LEFT],
-//RS     right: &[T; RIGHT],
-//RS ) -> [T; TOTAL] {
-//RS     debug_assert_eq!(TOTAL, LEFT + RIGHT);
-//RS     std::array::from_fn(|index| {
-//RS         if index < LEFT {
-//RS             left[index].clone()
-//RS         } else {
-//RS             right[index - LEFT].clone()
-//RS         }
-//RS     })
-//RS }
-//RS 
-//RS fn jet_char_len(s: &String) -> i64 {
-//RS     s.chars().count() as i64
-//RS }
-//RS // Eager materialize of the same pieces as `jet_iter_string_split` (AOT `String.split`
-//RS // emits the lazy helper; this Vec form remains for hosts that need a list handle).
-//RS fn jet_string_split(s: &String, sep: &str) -> Vec<String> {
-//RS     s.split(sep).map(|x| x.to_string()).collect()
-//RS }
-//RS // D-STR-AFTER1: first-occurrence substring split. `sep` absent -> the whole
-//RS // original string (both sides agree, mirroring `.replace`'s no-match-is-identity
-//RS // convention — no `Option`/empty-string special case to unwrap).
-//RS fn jet_string_after(s: &str, sep: &str) -> String {
-//RS     match s.find(sep) {
-//RS         Some(i) => s[i + sep.len()..].to_string(),
-//RS         None => s.to_string(),
-//RS     }
-//RS }
-//RS fn jet_string_before(s: &str, sep: &str) -> String {
-//RS     match s.find(sep) {
-//RS         Some(i) => s[..i].to_string(),
-//RS         None => s.to_string(),
-//RS     }
-//RS }
-//RS // D-MEM1 stage S5 (2026-07-04): zero-copy siblings of `jet_string_after`/
-//RS // `_before`/(inline `.trim()`) — a genuine borrow into `s`'s own buffer, no
-//RS // allocation, instead of a fresh owned `String`. Used ONLY when sema proves
-//RS // (E2307, `Binding::string_view`) the resulting binding can't outlive `s`'s
-//RS // scope — the same D-DYNARRAY1 soundness proof `View<T>`/`jet_view_new`
-//RS // already uses, applied to strings. `s: &str` (not `&String`) so a call
-//RS // chain of these composes without a materialize step in between.
-//RS fn jet_string_after_view<'a>(s: &'a str, sep: &str) -> &'a str {
-//RS     match s.find(sep) {
-//RS         Some(i) => &s[i + sep.len()..],
-//RS         None => s,
-//RS     }
-//RS }
-//RS fn jet_string_before_view<'a>(s: &'a str, sep: &str) -> &'a str {
-//RS     match s.find(sep) {
-//RS         Some(i) => &s[..i],
-//RS         None => s,
-//RS     }
-//RS }
-//RS fn jet_string_trim_view(s: &str) -> &str {
-//RS     jet_unicode_trim_view(s)
-//RS }
-//RS fn jet_string_lines(s: &String) -> Vec<String> {
-//RS     s.lines().map(|x| x.to_string()).collect()
-//RS }
-//RS fn jet_string_chars(s: &String) -> Vec<char> {
-//RS     s.chars().collect()
-//RS }
-//RS // `s.slice(a, b)` excludes the end, like list and byte `.slice` and `a..<b`
-//RS // (owner ruling #4001).
-//RS fn jet_string_slice(s: &String, a: i64, b: i64, file: &str, line: u32) -> String {
-//RS     jet_string_slice_value(s, a, b, true)
-//RS         .unwrap_or_else(|message| jet_panic(file, line, &message))
-//RS }
-//RS fn jet_string_slice_builtin(s: &String, a: i64, b: i64) -> String {
-//RS     jet_string_slice_value(s, a, b, true)
-//RS         .unwrap_or_else(|message| jet_panic("<core.builtin>", 0, &message))
-//RS }
-//RS fn jet_list_each<T, F, I>(xs: I, f: F)
-//RS where
-//RS     I: IntoIterator<Item = T>,
-//RS     F: Fn(&T),
-//RS {
-//RS     for x in xs {
-//RS         f(&x);
-//RS     }
-//RS }
-//RS fn jet_list_each_mut<T, F, I>(xs: I, mut f: F)
-//RS where
-//RS     I: IntoIterator<Item = T>,
-//RS     F: FnMut(&T),
-//RS {
-//RS     for x in xs {
-//RS         f(&x);
-//RS     }
-//RS }
-//RS fn jet_list_find<T, F, I>(xs: I, mut f: F) -> JetOutcome<T, JetAbsent>
-//RS where
-//RS     I: IntoIterator<Item = T>,
-//RS     F: FnMut(&T) -> bool,
-//RS {
-//RS     jet_outcome_of(xs.into_iter().find(|x| f(x)))
-//RS }
-//RS fn jet_list_any<T, F, I>(xs: I, mut f: F) -> bool
-//RS where
-//RS     I: IntoIterator<Item = T>,
-//RS     F: FnMut(&T) -> bool,
-//RS {
-//RS     xs.into_iter().any(|x| f(&x))
-//RS }
-//RS fn jet_list_all<T, F, I>(xs: I, mut f: F) -> bool
-//RS where
-//RS     I: IntoIterator<Item = T>,
-//RS     F: FnMut(&T) -> bool,
-//RS {
-//RS     xs.into_iter().all(|x| f(&x))
-//RS }
-//RS fn jet_list_reduce<T, U, F, I>(xs: I, init: U, mut f: F) -> U
-//RS where
-//RS     I: IntoIterator<Item = T>,
-//RS     F: FnMut(&U, &T) -> U,
-//RS {
-//RS     xs.into_iter().fold(init, |acc, x| f(&acc, &x))
-//RS }
-//RS 
-//RS fn jet_list_sort_by_compare<T, F>(xs: &mut [T], mut f: F)
-//RS where
-//RS     F: FnMut(&T, &T) -> __jet_Ordering,
-//RS {
-//RS     jet_list_sort_by_compare_kernel(xs, |left, right| match f(left, right) {
-//RS         __jet_Ordering::__jet_Less => std::cmp::Ordering::Less,
-//RS         __jet_Ordering::__jet_Equal => std::cmp::Ordering::Equal,
-//RS         __jet_Ordering::__jet_Greater => std::cmp::Ordering::Greater,
-//RS     });
-//RS }
-//RS fn jet_map_each<K: Ord, V, F>(m: JetMap<K, V>, mut f: F)
-//RS where
-//RS     F: FnMut(&K, &V),
-//RS {
-//RS     for (k, v) in &m {
-//RS         f(k, v);
-//RS     }
-//RS }
-//RS 
-//RS fn jet_map_equal<K: Ord + PartialEq, V: PartialEq>(a: &JetMap<K, V>, b: &JetMap<K, V>) -> bool { jet_map_equal_kernel(a, b) }
-//RS fn jet_map_first_key<K: Ord + Clone, V>(m: &JetMap<K, V>) -> JetOutcome<K, JetAbsent> { jet_map_first_key_kernel(m) }
-//RS fn jet_map_to_list<K: Ord + Clone, V: Clone, R>(m: &JetMap<K, V>, build: impl Fn(K, V) -> R) -> Vec<R> {
-//RS     jet_map_entries_kernel(m).into_iter().map(|(k, v)| build(k, v)).collect()
-//RS }
-//RS fn jet_map_any<K: Ord, V, F>(m: JetMap<K, V>, mut f: F) -> bool where F: FnMut(&K, &V) -> bool {
-//RS     m.iter().any(|(k, v)| f(k, v))
-//RS }
-//RS fn jet_map_all<K: Ord, V, F>(m: JetMap<K, V>, mut f: F) -> bool where F: FnMut(&K, &V) -> bool {
-//RS     m.iter().all(|(k, v)| f(k, v))
-//RS }
-//RS fn jet_map_filter<K: Ord + Clone, V: Clone, F>(m: JetMap<K, V>, mut f: F) -> JetMap<K, V>
-//RS where F: FnMut(&K, &V) -> bool {
-//RS     JetMap(std::sync::Arc::new(m.iter().filter(|(k,v)| f(k,v)).map(|(k,v)|(k.clone(),v.clone())).collect()))
-//RS }
-//RS fn jet_map_map_values<K: Ord + Clone, V, U, F>(m: JetMap<K, V>, mut f: F) -> JetMap<K, U>
-//RS where F: FnMut(&K, &V) -> U {
-//RS     JetMap(std::sync::Arc::new(m.iter().map(|(k,v)|(k.clone(), f(k,v))).collect()))
-//RS }
-//RS fn jet_map_fold<K: Ord, V, U, F>(m: JetMap<K, V>, init: U, mut f: F) -> U
-//RS where F: FnMut(&U, &K, &V) -> U {
-//RS     let mut acc = init;
-//RS     for (k, v) in &m {
-//RS         acc = f(&acc, k, v);
-//RS     }
-//RS     acc
-//RS }
-//RS fn jet_map_flat_map<K: Ord + Clone, V: Clone, F>(m: JetMap<K, V>, mut f: F) -> JetMap<K, V>
-//RS where F: FnMut(&K, &V) -> JetMap<K, V> {
-//RS     let mut out = JetMap::new();
-//RS     let storage = jet_map_make_mut(&mut out);
-//RS     for (k, v) in &m {
-//RS         for (ik, iv) in f(k, v).iter() {
-//RS             storage.insert(ik.clone(), iv.clone());
-//RS         }
-//RS     }
-//RS     out
-//RS }
-//RS fn jet_map_intersection<K: Ord + Clone, V: Clone>(left: &JetMap<K, V>, right: &JetMap<K, V>) -> JetMap<K, V> {
-//RS     jet_map_intersection_kernel(left, right)
-//RS }
-//RS fn jet_map_from_keys_int<V: Clone>(
-//RS     keys: Vec<jet_foundation::Numeric::JetInt>,
-//RS     default: V,
-//RS ) -> JetMap<jet_foundation::Numeric::JetInt, V> {
-//RS     jet_map_from_keys_kernel(keys, default)
-//RS }
-//RS fn jet_map_from_keys_composite<K: Ord + Clone, V: Clone>(
-//RS     keys: Vec<K>,
-//RS     default: V,
-//RS ) -> JetMap<K, V> {
-//RS     jet_map_from_keys_kernel(keys, default)
-//RS }
-//RS fn jet_map_contains_value<K: Ord, V: PartialEq>(m: &JetMap<K, V>, needle: &V) -> bool {
-//RS     jet_map_contains_value_kernel(m, needle)
-//RS }
-//RS fn jet_map_pop_first<K: Ord + Clone, V: Clone>(m: &mut JetMap<K, V>) -> JetOutcome<V, JetAbsent> {
-//RS     jet_map_pop_first_kernel(m)
-//RS }
-//RS fn jet_ordering_then(first: &__jet_Ordering, second: &__jet_Ordering) -> __jet_Ordering {
-//RS     match first {
-//RS         __jet_Ordering::__jet_Equal => *second,
-//RS         _ => *first,
-//RS     }
-//RS }
-//RS 
-//RS fn jet_ordering_reverse(value: &__jet_Ordering) -> __jet_Ordering {
-//RS     match value {
-//RS         __jet_Ordering::__jet_Less => __jet_Ordering::__jet_Greater,
-//RS         __jet_Ordering::__jet_Greater => __jet_Ordering::__jet_Less,
-//RS         __jet_Ordering::__jet_Equal => __jet_Ordering::__jet_Equal,
-//RS     }
-//RS }
-// END-PORT-PENDING 0139 crates/jet-codegen/src/Prelude/Core.rs:1686-3540
+use core.prelude.runtime.core.[JET_PARA_DEFER_FAILURE, JetParaRuntimeFailure, JetShiftCount, JetArith, jet_fixed_value, jet_panic, jet_arithmetic_stop, jet_runtime_stop, jet_test_record_stop, jet_testing_take_failure, jet_testing_clear_failure, jet_runtime_should_unwind, jet_runtime_stop_unwind]
+use core.prelude.runtime.kernel_power.JetPow
+use core.prelude.runtime.kernel_fixed_arithmetic.[JetFixedArithmeticResult, JetFixedWide, jet_fixed_arithmetic, JET_FIXED_OP_ADD, JET_FIXED_OP_SUB, JET_FIXED_OP_MUL, JET_FIXED_OP_DIV, JET_FIXED_OP_REM, JET_FIXED_OP_FLOOR_DIV, JET_FIXED_OP_MOD, JET_FIXED_OP_POW, JET_FIXED_MODE_TRAP, JET_FIXED_MODE_WRAPPING, JET_FIXED_MODE_SATURATING, JET_FIXED_MODE_CHECKED]
+use core.prelude.runtime.kernel_fixed_list.jet_fixed_list_index
+use core.prelude.runtime.kernel_range_bounds.[jet_range_bounds, jet_checked_view_bounds]
+use core.prelude.runtime.kernel_disjoint.[jet_disjoint_split_bounds, jet_disjoint_index_bounds]
+use core.prelude.runtime.kernel_values.[JetRange, JetShow]
+use core.mem.runtime.portable_core.[JetAbsent, JetOutcome]
+use core.mem.runtime.portable_alloc.jet_outcome_of
+use core.prelude.runtime.kernel_contracts.jet_runtime_stop_report
+use core.prelude.runtime.kernel_receipt.jet_production_failure_receipt_write
+use core.collections.runtime.kernel_collections.[JetIter, jet_list_remove_value_kernel, jet_list_remove_slot_kernel, jet_list_insert_kernel, jet_priority_queue_remove_value_kernel, jet_list_count_kernel, jet_list_count_where_kernel, jet_list_update_first_kernel, jet_list_sort_by_compare_kernel, jet_map_equal_kernel, jet_map_first_key_kernel, jet_map_entries_kernel, jet_map_intersection_kernel, jet_map_from_keys_kernel, jet_map_contains_value_kernel, jet_map_pop_first_kernel]
+use jet_foundation.Outcome.jet_require_eq_message
+use jet_foundation.Numeric.JetInt
+use jet_foundation.[jet_journey_frame, jet_journey_reset, jet_proof_record, jet_stream_record_failure_report, jet_missing_map_key_value, jet_unicode_trim_view, jet_string_slice_value]
+use std.sync.Arc
+use std.ops.[Range, Bound, Deref, DerefMut]
+use std.hash.[Hasher, BuildHasherDefault]
+use std.collections.BinaryHeap
+use std.[panic, mem, str, array]
+
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1686
+fn jet_fixed_option<T>(result: JetFixedArithmeticResult, map: fn(I64) -> T) -> T? {
+    match result { .Value(value) -> Val(map(value)), .Absent | .Trap(_) -> None }
+}
+
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1699
+// Expanded fixed-route macro: concrete function items retain operation, mode,
+// signedness and width as compile-time constants at the Prelude boundary.
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1958
+#Inline(Always)
+pub fn jet_i8_trap_add(left: I8, right: I8, file: &String, line: U32) -> I8 { left.jet_add(right, file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1958
+#Inline(Always)
+pub fn jet_i8_trap_sub(left: I8, right: I8, file: &String, line: U32) -> I8 { left.jet_sub(right, file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1958
+#Inline(Always)
+pub fn jet_i8_trap_mul(left: I8, right: I8, file: &String, line: U32) -> I8 { left.jet_mul(right, file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1958
+#Inline(Always)
+pub fn jet_i8_trap_div(left: I8, right: I8, file: &String, line: U32) -> I8 { left.jet_div(right, file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1958
+#Inline(Always)
+pub fn jet_i8_trap_rem(left: I8, right: I8, file: &String, line: U32) -> I8 { left.jet_rem(right, file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1958
+#Inline(Always)
+pub fn jet_i8_trap_floor_div(left: I8, right: I8, file: &String, line: U32) -> I8 { I8{jet_fixed_value(jet_fixed_arithmetic(I64{left}, right.jet_shift_count(), JET_FIXED_OP_FLOOR_DIV, JET_FIXED_MODE_TRAP, true, 8, true), file, line)} }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1958
+#Inline(Always)
+pub fn jet_i8_trap_mod(left: I8, right: I8, file: &String, line: U32) -> I8 { I8{jet_fixed_value(jet_fixed_arithmetic(I64{left}, right.jet_shift_count(), JET_FIXED_OP_MOD, JET_FIXED_MODE_TRAP, true, 8, true), file, line)} }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1958
+#Inline(Always)
+pub fn jet_i8_trap_pow(left: I8, right: I8, file: &String, line: U32) -> I8 { left.jet_pow(right.jet_shift_count(), file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1958
+#Inline(Always)
+pub fn jet_i8_trap_shl<C: JetShiftCount>(left: I8, right: C, file: &String, line: U32) -> I8 { left.jet_shl(right.jet_shift_count(), file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1958
+#Inline(Always)
+pub fn jet_i8_trap_shr<C: JetShiftCount>(left: I8, right: C, file: &String, line: U32) -> I8 { left.jet_shr(right.jet_shift_count(), file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1958
+#Inline(Always)
+pub fn jet_i8_wrapping_add(left: I8, right: I8) -> I8 { left.jet_wrapping_add(right) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1958
+#Inline(Always)
+pub fn jet_i8_wrapping_sub(left: I8, right: I8) -> I8 { left.jet_wrapping_sub(right) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1958
+#Inline(Always)
+pub fn jet_i8_wrapping_mul(left: I8, right: I8) -> I8 { left.jet_wrapping_mul(right) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1958
+#Inline(Always)
+pub fn jet_i8_wrapping_div(left: I8, right: I8, file: &String, line: U32) -> I8 { I8{jet_fixed_value(jet_fixed_arithmetic(I64{left}, right.jet_shift_count(), JET_FIXED_OP_DIV, JET_FIXED_MODE_WRAPPING, true, 8, true), file, line)} }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1958
+#Inline(Always)
+pub fn jet_i8_wrapping_pow(left: I8, right: I8, file: &String, line: U32) -> I8 { left.jet_wrapping_pow(right.jet_shift_count(), file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1958
+#Inline(Always)
+pub fn jet_i8_saturating_add(left: I8, right: I8) -> I8 { left.jet_saturating_add(right) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1958
+#Inline(Always)
+pub fn jet_i8_saturating_sub(left: I8, right: I8) -> I8 { left.jet_saturating_sub(right) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1958
+#Inline(Always)
+pub fn jet_i8_saturating_mul(left: I8, right: I8) -> I8 { left.jet_saturating_mul(right) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1958
+#Inline(Always)
+pub fn jet_i8_saturating_div(left: I8, right: I8, file: &String, line: U32) -> I8 { I8{jet_fixed_value(jet_fixed_arithmetic(I64{left}, right.jet_shift_count(), JET_FIXED_OP_DIV, JET_FIXED_MODE_SATURATING, true, 8, true), file, line)} }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1958
+#Inline(Always)
+pub fn jet_i8_saturating_pow(left: I8, right: I8, file: &String, line: U32) -> I8 { left.jet_saturating_pow(right.jet_shift_count(), file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1958
+#Inline(Always)
+pub fn jet_i8_checked_add(left: I8, right: I8) -> I8? { jet_fixed_option(jet_fixed_arithmetic(I64{left}, right.jet_shift_count(), JET_FIXED_OP_ADD, JET_FIXED_MODE_CHECKED, true, 8, true), value -> I8{value}) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1958
+#Inline(Always)
+pub fn jet_i8_checked_sub(left: I8, right: I8) -> I8? { jet_fixed_option(jet_fixed_arithmetic(I64{left}, right.jet_shift_count(), JET_FIXED_OP_SUB, JET_FIXED_MODE_CHECKED, true, 8, true), value -> I8{value}) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1958
+#Inline(Always)
+pub fn jet_i8_checked_mul(left: I8, right: I8) -> I8? { jet_fixed_option(jet_fixed_arithmetic(I64{left}, right.jet_shift_count(), JET_FIXED_OP_MUL, JET_FIXED_MODE_CHECKED, true, 8, true), value -> I8{value}) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1958
+#Inline(Always)
+pub fn jet_i8_checked_div(left: I8, right: I8) -> I8? { jet_fixed_option(jet_fixed_arithmetic(I64{left}, right.jet_shift_count(), JET_FIXED_OP_DIV, JET_FIXED_MODE_CHECKED, true, 8, true), value -> I8{value}) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1958
+#Inline(Always)
+pub fn jet_i8_checked_rem(left: I8, right: I8) -> I8? { jet_fixed_option(jet_fixed_arithmetic(I64{left}, right.jet_shift_count(), JET_FIXED_OP_REM, JET_FIXED_MODE_CHECKED, true, 8, true), value -> I8{value}) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1958
+#Inline(Always)
+pub fn jet_i8_checked_pow(left: I8, right: I8) -> I8? { jet_fixed_option(jet_fixed_arithmetic(I64{left}, right.jet_shift_count(), JET_FIXED_OP_POW, JET_FIXED_MODE_CHECKED, true, 8, true), value -> I8{value}) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1958
+#Inline(Always)
+pub fn jet_i8_rotate_left(left: I8, right: I8, file: &String, line: U32) -> I8 { left.jet_rotate_left(right.jet_shift_count(), file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1958
+#Inline(Always)
+pub fn jet_i8_rotate_right(left: I8, right: I8, file: &String, line: U32) -> I8 { left.jet_rotate_right(right.jet_shift_count(), file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1979
+#Inline(Always)
+pub fn jet_i16_trap_add(left: I16, right: I16, file: &String, line: U32) -> I16 { left.jet_add(right, file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1979
+#Inline(Always)
+pub fn jet_i16_trap_sub(left: I16, right: I16, file: &String, line: U32) -> I16 { left.jet_sub(right, file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1979
+#Inline(Always)
+pub fn jet_i16_trap_mul(left: I16, right: I16, file: &String, line: U32) -> I16 { left.jet_mul(right, file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1979
+#Inline(Always)
+pub fn jet_i16_trap_div(left: I16, right: I16, file: &String, line: U32) -> I16 { left.jet_div(right, file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1979
+#Inline(Always)
+pub fn jet_i16_trap_rem(left: I16, right: I16, file: &String, line: U32) -> I16 { left.jet_rem(right, file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1979
+#Inline(Always)
+pub fn jet_i16_trap_floor_div(left: I16, right: I16, file: &String, line: U32) -> I16 { I16{jet_fixed_value(jet_fixed_arithmetic(I64{left}, right.jet_shift_count(), JET_FIXED_OP_FLOOR_DIV, JET_FIXED_MODE_TRAP, true, 16, true), file, line)} }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1979
+#Inline(Always)
+pub fn jet_i16_trap_mod(left: I16, right: I16, file: &String, line: U32) -> I16 { I16{jet_fixed_value(jet_fixed_arithmetic(I64{left}, right.jet_shift_count(), JET_FIXED_OP_MOD, JET_FIXED_MODE_TRAP, true, 16, true), file, line)} }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1979
+#Inline(Always)
+pub fn jet_i16_trap_pow(left: I16, right: I16, file: &String, line: U32) -> I16 { left.jet_pow(right.jet_shift_count(), file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1979
+#Inline(Always)
+pub fn jet_i16_trap_shl<C: JetShiftCount>(left: I16, right: C, file: &String, line: U32) -> I16 { left.jet_shl(right.jet_shift_count(), file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1979
+#Inline(Always)
+pub fn jet_i16_trap_shr<C: JetShiftCount>(left: I16, right: C, file: &String, line: U32) -> I16 { left.jet_shr(right.jet_shift_count(), file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1979
+#Inline(Always)
+pub fn jet_i16_wrapping_add(left: I16, right: I16) -> I16 { left.jet_wrapping_add(right) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1979
+#Inline(Always)
+pub fn jet_i16_wrapping_sub(left: I16, right: I16) -> I16 { left.jet_wrapping_sub(right) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1979
+#Inline(Always)
+pub fn jet_i16_wrapping_mul(left: I16, right: I16) -> I16 { left.jet_wrapping_mul(right) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1979
+#Inline(Always)
+pub fn jet_i16_wrapping_div(left: I16, right: I16, file: &String, line: U32) -> I16 { I16{jet_fixed_value(jet_fixed_arithmetic(I64{left}, right.jet_shift_count(), JET_FIXED_OP_DIV, JET_FIXED_MODE_WRAPPING, true, 16, true), file, line)} }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1979
+#Inline(Always)
+pub fn jet_i16_wrapping_pow(left: I16, right: I16, file: &String, line: U32) -> I16 { left.jet_wrapping_pow(right.jet_shift_count(), file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1979
+#Inline(Always)
+pub fn jet_i16_saturating_add(left: I16, right: I16) -> I16 { left.jet_saturating_add(right) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1979
+#Inline(Always)
+pub fn jet_i16_saturating_sub(left: I16, right: I16) -> I16 { left.jet_saturating_sub(right) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1979
+#Inline(Always)
+pub fn jet_i16_saturating_mul(left: I16, right: I16) -> I16 { left.jet_saturating_mul(right) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1979
+#Inline(Always)
+pub fn jet_i16_saturating_div(left: I16, right: I16, file: &String, line: U32) -> I16 { I16{jet_fixed_value(jet_fixed_arithmetic(I64{left}, right.jet_shift_count(), JET_FIXED_OP_DIV, JET_FIXED_MODE_SATURATING, true, 16, true), file, line)} }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1979
+#Inline(Always)
+pub fn jet_i16_saturating_pow(left: I16, right: I16, file: &String, line: U32) -> I16 { left.jet_saturating_pow(right.jet_shift_count(), file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1979
+#Inline(Always)
+pub fn jet_i16_checked_add(left: I16, right: I16) -> I16? { jet_fixed_option(jet_fixed_arithmetic(I64{left}, right.jet_shift_count(), JET_FIXED_OP_ADD, JET_FIXED_MODE_CHECKED, true, 16, true), value -> I16{value}) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1979
+#Inline(Always)
+pub fn jet_i16_checked_sub(left: I16, right: I16) -> I16? { jet_fixed_option(jet_fixed_arithmetic(I64{left}, right.jet_shift_count(), JET_FIXED_OP_SUB, JET_FIXED_MODE_CHECKED, true, 16, true), value -> I16{value}) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1979
+#Inline(Always)
+pub fn jet_i16_checked_mul(left: I16, right: I16) -> I16? { jet_fixed_option(jet_fixed_arithmetic(I64{left}, right.jet_shift_count(), JET_FIXED_OP_MUL, JET_FIXED_MODE_CHECKED, true, 16, true), value -> I16{value}) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1979
+#Inline(Always)
+pub fn jet_i16_checked_div(left: I16, right: I16) -> I16? { jet_fixed_option(jet_fixed_arithmetic(I64{left}, right.jet_shift_count(), JET_FIXED_OP_DIV, JET_FIXED_MODE_CHECKED, true, 16, true), value -> I16{value}) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1979
+#Inline(Always)
+pub fn jet_i16_checked_rem(left: I16, right: I16) -> I16? { jet_fixed_option(jet_fixed_arithmetic(I64{left}, right.jet_shift_count(), JET_FIXED_OP_REM, JET_FIXED_MODE_CHECKED, true, 16, true), value -> I16{value}) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1979
+#Inline(Always)
+pub fn jet_i16_checked_pow(left: I16, right: I16) -> I16? { jet_fixed_option(jet_fixed_arithmetic(I64{left}, right.jet_shift_count(), JET_FIXED_OP_POW, JET_FIXED_MODE_CHECKED, true, 16, true), value -> I16{value}) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1979
+#Inline(Always)
+pub fn jet_i16_rotate_left(left: I16, right: I16, file: &String, line: U32) -> I16 { left.jet_rotate_left(right.jet_shift_count(), file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1979
+#Inline(Always)
+pub fn jet_i16_rotate_right(left: I16, right: I16, file: &String, line: U32) -> I16 { left.jet_rotate_right(right.jet_shift_count(), file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2000
+#Inline(Always)
+pub fn jet_i32_trap_add(left: I32, right: I32, file: &String, line: U32) -> I32 { left.jet_add(right, file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2000
+#Inline(Always)
+pub fn jet_i32_trap_sub(left: I32, right: I32, file: &String, line: U32) -> I32 { left.jet_sub(right, file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2000
+#Inline(Always)
+pub fn jet_i32_trap_mul(left: I32, right: I32, file: &String, line: U32) -> I32 { left.jet_mul(right, file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2000
+#Inline(Always)
+pub fn jet_i32_trap_div(left: I32, right: I32, file: &String, line: U32) -> I32 { left.jet_div(right, file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2000
+#Inline(Always)
+pub fn jet_i32_trap_rem(left: I32, right: I32, file: &String, line: U32) -> I32 { left.jet_rem(right, file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2000
+#Inline(Always)
+pub fn jet_i32_trap_floor_div(left: I32, right: I32, file: &String, line: U32) -> I32 { I32{jet_fixed_value(jet_fixed_arithmetic(I64{left}, right.jet_shift_count(), JET_FIXED_OP_FLOOR_DIV, JET_FIXED_MODE_TRAP, true, 32, true), file, line)} }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2000
+#Inline(Always)
+pub fn jet_i32_trap_mod(left: I32, right: I32, file: &String, line: U32) -> I32 { I32{jet_fixed_value(jet_fixed_arithmetic(I64{left}, right.jet_shift_count(), JET_FIXED_OP_MOD, JET_FIXED_MODE_TRAP, true, 32, true), file, line)} }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2000
+#Inline(Always)
+pub fn jet_i32_trap_pow(left: I32, right: I32, file: &String, line: U32) -> I32 { left.jet_pow(right.jet_shift_count(), file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2000
+#Inline(Always)
+pub fn jet_i32_trap_shl<C: JetShiftCount>(left: I32, right: C, file: &String, line: U32) -> I32 { left.jet_shl(right.jet_shift_count(), file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2000
+#Inline(Always)
+pub fn jet_i32_trap_shr<C: JetShiftCount>(left: I32, right: C, file: &String, line: U32) -> I32 { left.jet_shr(right.jet_shift_count(), file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2000
+#Inline(Always)
+pub fn jet_i32_wrapping_add(left: I32, right: I32) -> I32 { left.jet_wrapping_add(right) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2000
+#Inline(Always)
+pub fn jet_i32_wrapping_sub(left: I32, right: I32) -> I32 { left.jet_wrapping_sub(right) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2000
+#Inline(Always)
+pub fn jet_i32_wrapping_mul(left: I32, right: I32) -> I32 { left.jet_wrapping_mul(right) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2000
+#Inline(Always)
+pub fn jet_i32_wrapping_div(left: I32, right: I32, file: &String, line: U32) -> I32 { I32{jet_fixed_value(jet_fixed_arithmetic(I64{left}, right.jet_shift_count(), JET_FIXED_OP_DIV, JET_FIXED_MODE_WRAPPING, true, 32, true), file, line)} }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2000
+#Inline(Always)
+pub fn jet_i32_wrapping_pow(left: I32, right: I32, file: &String, line: U32) -> I32 { left.jet_wrapping_pow(right.jet_shift_count(), file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2000
+#Inline(Always)
+pub fn jet_i32_saturating_add(left: I32, right: I32) -> I32 { left.jet_saturating_add(right) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2000
+#Inline(Always)
+pub fn jet_i32_saturating_sub(left: I32, right: I32) -> I32 { left.jet_saturating_sub(right) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2000
+#Inline(Always)
+pub fn jet_i32_saturating_mul(left: I32, right: I32) -> I32 { left.jet_saturating_mul(right) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2000
+#Inline(Always)
+pub fn jet_i32_saturating_div(left: I32, right: I32, file: &String, line: U32) -> I32 { I32{jet_fixed_value(jet_fixed_arithmetic(I64{left}, right.jet_shift_count(), JET_FIXED_OP_DIV, JET_FIXED_MODE_SATURATING, true, 32, true), file, line)} }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2000
+#Inline(Always)
+pub fn jet_i32_saturating_pow(left: I32, right: I32, file: &String, line: U32) -> I32 { left.jet_saturating_pow(right.jet_shift_count(), file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2000
+#Inline(Always)
+pub fn jet_i32_checked_add(left: I32, right: I32) -> I32? { jet_fixed_option(jet_fixed_arithmetic(I64{left}, right.jet_shift_count(), JET_FIXED_OP_ADD, JET_FIXED_MODE_CHECKED, true, 32, true), value -> I32{value}) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2000
+#Inline(Always)
+pub fn jet_i32_checked_sub(left: I32, right: I32) -> I32? { jet_fixed_option(jet_fixed_arithmetic(I64{left}, right.jet_shift_count(), JET_FIXED_OP_SUB, JET_FIXED_MODE_CHECKED, true, 32, true), value -> I32{value}) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2000
+#Inline(Always)
+pub fn jet_i32_checked_mul(left: I32, right: I32) -> I32? { jet_fixed_option(jet_fixed_arithmetic(I64{left}, right.jet_shift_count(), JET_FIXED_OP_MUL, JET_FIXED_MODE_CHECKED, true, 32, true), value -> I32{value}) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2000
+#Inline(Always)
+pub fn jet_i32_checked_div(left: I32, right: I32) -> I32? { jet_fixed_option(jet_fixed_arithmetic(I64{left}, right.jet_shift_count(), JET_FIXED_OP_DIV, JET_FIXED_MODE_CHECKED, true, 32, true), value -> I32{value}) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2000
+#Inline(Always)
+pub fn jet_i32_checked_rem(left: I32, right: I32) -> I32? { jet_fixed_option(jet_fixed_arithmetic(I64{left}, right.jet_shift_count(), JET_FIXED_OP_REM, JET_FIXED_MODE_CHECKED, true, 32, true), value -> I32{value}) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2000
+#Inline(Always)
+pub fn jet_i32_checked_pow(left: I32, right: I32) -> I32? { jet_fixed_option(jet_fixed_arithmetic(I64{left}, right.jet_shift_count(), JET_FIXED_OP_POW, JET_FIXED_MODE_CHECKED, true, 32, true), value -> I32{value}) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2000
+#Inline(Always)
+pub fn jet_i32_rotate_left(left: I32, right: I32, file: &String, line: U32) -> I32 { left.jet_rotate_left(right.jet_shift_count(), file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2000
+#Inline(Always)
+pub fn jet_i32_rotate_right(left: I32, right: I32, file: &String, line: U32) -> I32 { left.jet_rotate_right(right.jet_shift_count(), file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2021
+#Inline(Always)
+pub fn jet_i64_trap_add(left: I64, right: I64, file: &String, line: U32) -> I64 { left.jet_add(right, file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2021
+#Inline(Always)
+pub fn jet_i64_trap_sub(left: I64, right: I64, file: &String, line: U32) -> I64 { left.jet_sub(right, file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2021
+#Inline(Always)
+pub fn jet_i64_trap_mul(left: I64, right: I64, file: &String, line: U32) -> I64 { left.jet_mul(right, file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2021
+#Inline(Always)
+pub fn jet_i64_trap_div(left: I64, right: I64, file: &String, line: U32) -> I64 { left.jet_div(right, file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2021
+#Inline(Always)
+pub fn jet_i64_trap_rem(left: I64, right: I64, file: &String, line: U32) -> I64 { left.jet_rem(right, file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2021
+#Inline(Always)
+pub fn jet_i64_trap_floor_div(left: I64, right: I64, file: &String, line: U32) -> I64 { jet_fixed_value(jet_fixed_arithmetic(left, right.jet_shift_count(), JET_FIXED_OP_FLOOR_DIV, JET_FIXED_MODE_TRAP, true, 64, true), file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2021
+#Inline(Always)
+pub fn jet_i64_trap_mod(left: I64, right: I64, file: &String, line: U32) -> I64 { jet_fixed_value(jet_fixed_arithmetic(left, right.jet_shift_count(), JET_FIXED_OP_MOD, JET_FIXED_MODE_TRAP, true, 64, true), file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2021
+#Inline(Always)
+pub fn jet_i64_trap_pow(left: I64, right: I64, file: &String, line: U32) -> I64 { left.jet_pow(right.jet_shift_count(), file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2021
+#Inline(Always)
+pub fn jet_i64_trap_shl<C: JetShiftCount>(left: I64, right: C, file: &String, line: U32) -> I64 { left.jet_shl(right.jet_shift_count(), file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2021
+#Inline(Always)
+pub fn jet_i64_trap_shr<C: JetShiftCount>(left: I64, right: C, file: &String, line: U32) -> I64 { left.jet_shr(right.jet_shift_count(), file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2021
+#Inline(Always)
+pub fn jet_i64_wrapping_add(left: I64, right: I64) -> I64 { left.jet_wrapping_add(right) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2021
+#Inline(Always)
+pub fn jet_i64_wrapping_sub(left: I64, right: I64) -> I64 { left.jet_wrapping_sub(right) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2021
+#Inline(Always)
+pub fn jet_i64_wrapping_mul(left: I64, right: I64) -> I64 { left.jet_wrapping_mul(right) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2021
+#Inline(Always)
+pub fn jet_i64_wrapping_div(left: I64, right: I64, file: &String, line: U32) -> I64 { jet_fixed_value(jet_fixed_arithmetic(left, right.jet_shift_count(), JET_FIXED_OP_DIV, JET_FIXED_MODE_WRAPPING, true, 64, true), file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2021
+#Inline(Always)
+pub fn jet_i64_wrapping_pow(left: I64, right: I64, file: &String, line: U32) -> I64 { left.jet_wrapping_pow(right.jet_shift_count(), file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2021
+#Inline(Always)
+pub fn jet_i64_saturating_add(left: I64, right: I64) -> I64 { left.jet_saturating_add(right) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2021
+#Inline(Always)
+pub fn jet_i64_saturating_sub(left: I64, right: I64) -> I64 { left.jet_saturating_sub(right) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2021
+#Inline(Always)
+pub fn jet_i64_saturating_mul(left: I64, right: I64) -> I64 { left.jet_saturating_mul(right) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2021
+#Inline(Always)
+pub fn jet_i64_saturating_div(left: I64, right: I64, file: &String, line: U32) -> I64 { jet_fixed_value(jet_fixed_arithmetic(left, right.jet_shift_count(), JET_FIXED_OP_DIV, JET_FIXED_MODE_SATURATING, true, 64, true), file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2021
+#Inline(Always)
+pub fn jet_i64_saturating_pow(left: I64, right: I64, file: &String, line: U32) -> I64 { left.jet_saturating_pow(right.jet_shift_count(), file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2021
+#Inline(Always)
+pub fn jet_i64_checked_add(left: I64, right: I64) -> I64? { jet_fixed_option(jet_fixed_arithmetic(left, right.jet_shift_count(), JET_FIXED_OP_ADD, JET_FIXED_MODE_CHECKED, true, 64, true), value -> value) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2021
+#Inline(Always)
+pub fn jet_i64_checked_sub(left: I64, right: I64) -> I64? { jet_fixed_option(jet_fixed_arithmetic(left, right.jet_shift_count(), JET_FIXED_OP_SUB, JET_FIXED_MODE_CHECKED, true, 64, true), value -> value) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2021
+#Inline(Always)
+pub fn jet_i64_checked_mul(left: I64, right: I64) -> I64? { jet_fixed_option(jet_fixed_arithmetic(left, right.jet_shift_count(), JET_FIXED_OP_MUL, JET_FIXED_MODE_CHECKED, true, 64, true), value -> value) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2021
+#Inline(Always)
+pub fn jet_i64_checked_div(left: I64, right: I64) -> I64? { jet_fixed_option(jet_fixed_arithmetic(left, right.jet_shift_count(), JET_FIXED_OP_DIV, JET_FIXED_MODE_CHECKED, true, 64, true), value -> value) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2021
+#Inline(Always)
+pub fn jet_i64_checked_rem(left: I64, right: I64) -> I64? { jet_fixed_option(jet_fixed_arithmetic(left, right.jet_shift_count(), JET_FIXED_OP_REM, JET_FIXED_MODE_CHECKED, true, 64, true), value -> value) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2021
+#Inline(Always)
+pub fn jet_i64_checked_pow(left: I64, right: I64) -> I64? { jet_fixed_option(jet_fixed_arithmetic(left, right.jet_shift_count(), JET_FIXED_OP_POW, JET_FIXED_MODE_CHECKED, true, 64, true), value -> value) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2021
+#Inline(Always)
+pub fn jet_i64_rotate_left(left: I64, right: I64, file: &String, line: U32) -> I64 { left.jet_rotate_left(right.jet_shift_count(), file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2021
+#Inline(Always)
+pub fn jet_i64_rotate_right(left: I64, right: I64, file: &String, line: U32) -> I64 { left.jet_rotate_right(right.jet_shift_count(), file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2042
+#Inline(Always)
+pub fn jet_u8_trap_add(left: U8, right: U8, file: &String, line: U32) -> U8 { left.jet_add(right, file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2042
+#Inline(Always)
+pub fn jet_u8_trap_sub(left: U8, right: U8, file: &String, line: U32) -> U8 { left.jet_sub(right, file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2042
+#Inline(Always)
+pub fn jet_u8_trap_mul(left: U8, right: U8, file: &String, line: U32) -> U8 { left.jet_mul(right, file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2042
+#Inline(Always)
+pub fn jet_u8_trap_div(left: U8, right: U8, file: &String, line: U32) -> U8 { left.jet_div(right, file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2042
+#Inline(Always)
+pub fn jet_u8_trap_rem(left: U8, right: U8, file: &String, line: U32) -> U8 { left.jet_rem(right, file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2042
+#Inline(Always)
+pub fn jet_u8_trap_floor_div(left: U8, right: U8, file: &String, line: U32) -> U8 { U8{jet_fixed_value(jet_fixed_arithmetic(I64{left}, right.jet_shift_count(), JET_FIXED_OP_FLOOR_DIV, JET_FIXED_MODE_TRAP, false, 8, false), file, line)} }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2042
+#Inline(Always)
+pub fn jet_u8_trap_mod(left: U8, right: U8, file: &String, line: U32) -> U8 { U8{jet_fixed_value(jet_fixed_arithmetic(I64{left}, right.jet_shift_count(), JET_FIXED_OP_MOD, JET_FIXED_MODE_TRAP, false, 8, false), file, line)} }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2042
+#Inline(Always)
+pub fn jet_u8_trap_pow(left: U8, right: U8, file: &String, line: U32) -> U8 { left.jet_pow(right.jet_shift_count(), file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2042
+#Inline(Always)
+pub fn jet_u8_trap_shl<C: JetShiftCount>(left: U8, right: C, file: &String, line: U32) -> U8 { left.jet_shl(right.jet_shift_count(), file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2042
+#Inline(Always)
+pub fn jet_u8_trap_shr<C: JetShiftCount>(left: U8, right: C, file: &String, line: U32) -> U8 { left.jet_shr(right.jet_shift_count(), file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2042
+#Inline(Always)
+pub fn jet_u8_wrapping_add(left: U8, right: U8) -> U8 { left.jet_wrapping_add(right) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2042
+#Inline(Always)
+pub fn jet_u8_wrapping_sub(left: U8, right: U8) -> U8 { left.jet_wrapping_sub(right) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2042
+#Inline(Always)
+pub fn jet_u8_wrapping_mul(left: U8, right: U8) -> U8 { left.jet_wrapping_mul(right) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2042
+#Inline(Always)
+pub fn jet_u8_wrapping_div(left: U8, right: U8, file: &String, line: U32) -> U8 { U8{jet_fixed_value(jet_fixed_arithmetic(I64{left}, right.jet_shift_count(), JET_FIXED_OP_DIV, JET_FIXED_MODE_WRAPPING, false, 8, false), file, line)} }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2042
+#Inline(Always)
+pub fn jet_u8_wrapping_pow(left: U8, right: U8, file: &String, line: U32) -> U8 { left.jet_wrapping_pow(right.jet_shift_count(), file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2042
+#Inline(Always)
+pub fn jet_u8_saturating_add(left: U8, right: U8) -> U8 { left.jet_saturating_add(right) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2042
+#Inline(Always)
+pub fn jet_u8_saturating_sub(left: U8, right: U8) -> U8 { left.jet_saturating_sub(right) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2042
+#Inline(Always)
+pub fn jet_u8_saturating_mul(left: U8, right: U8) -> U8 { left.jet_saturating_mul(right) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2042
+#Inline(Always)
+pub fn jet_u8_saturating_div(left: U8, right: U8, file: &String, line: U32) -> U8 { U8{jet_fixed_value(jet_fixed_arithmetic(I64{left}, right.jet_shift_count(), JET_FIXED_OP_DIV, JET_FIXED_MODE_SATURATING, false, 8, false), file, line)} }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2042
+#Inline(Always)
+pub fn jet_u8_saturating_pow(left: U8, right: U8, file: &String, line: U32) -> U8 { left.jet_saturating_pow(right.jet_shift_count(), file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2042
+#Inline(Always)
+pub fn jet_u8_checked_add(left: U8, right: U8) -> U8? { jet_fixed_option(jet_fixed_arithmetic(I64{left}, right.jet_shift_count(), JET_FIXED_OP_ADD, JET_FIXED_MODE_CHECKED, false, 8, false), value -> U8{value}) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2042
+#Inline(Always)
+pub fn jet_u8_checked_sub(left: U8, right: U8) -> U8? { jet_fixed_option(jet_fixed_arithmetic(I64{left}, right.jet_shift_count(), JET_FIXED_OP_SUB, JET_FIXED_MODE_CHECKED, false, 8, false), value -> U8{value}) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2042
+#Inline(Always)
+pub fn jet_u8_checked_mul(left: U8, right: U8) -> U8? { jet_fixed_option(jet_fixed_arithmetic(I64{left}, right.jet_shift_count(), JET_FIXED_OP_MUL, JET_FIXED_MODE_CHECKED, false, 8, false), value -> U8{value}) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2042
+#Inline(Always)
+pub fn jet_u8_checked_div(left: U8, right: U8) -> U8? { jet_fixed_option(jet_fixed_arithmetic(I64{left}, right.jet_shift_count(), JET_FIXED_OP_DIV, JET_FIXED_MODE_CHECKED, false, 8, false), value -> U8{value}) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2042
+#Inline(Always)
+pub fn jet_u8_checked_rem(left: U8, right: U8) -> U8? { jet_fixed_option(jet_fixed_arithmetic(I64{left}, right.jet_shift_count(), JET_FIXED_OP_REM, JET_FIXED_MODE_CHECKED, false, 8, false), value -> U8{value}) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2042
+#Inline(Always)
+pub fn jet_u8_checked_pow(left: U8, right: U8) -> U8? { jet_fixed_option(jet_fixed_arithmetic(I64{left}, right.jet_shift_count(), JET_FIXED_OP_POW, JET_FIXED_MODE_CHECKED, false, 8, false), value -> U8{value}) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2042
+#Inline(Always)
+pub fn jet_u8_rotate_left(left: U8, right: U8, file: &String, line: U32) -> U8 { left.jet_rotate_left(right.jet_shift_count(), file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2042
+#Inline(Always)
+pub fn jet_u8_rotate_right(left: U8, right: U8, file: &String, line: U32) -> U8 { left.jet_rotate_right(right.jet_shift_count(), file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2063
+#Inline(Always)
+pub fn jet_u16_trap_add(left: U16, right: U16, file: &String, line: U32) -> U16 { left.jet_add(right, file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2063
+#Inline(Always)
+pub fn jet_u16_trap_sub(left: U16, right: U16, file: &String, line: U32) -> U16 { left.jet_sub(right, file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2063
+#Inline(Always)
+pub fn jet_u16_trap_mul(left: U16, right: U16, file: &String, line: U32) -> U16 { left.jet_mul(right, file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2063
+#Inline(Always)
+pub fn jet_u16_trap_div(left: U16, right: U16, file: &String, line: U32) -> U16 { left.jet_div(right, file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2063
+#Inline(Always)
+pub fn jet_u16_trap_rem(left: U16, right: U16, file: &String, line: U32) -> U16 { left.jet_rem(right, file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2063
+#Inline(Always)
+pub fn jet_u16_trap_floor_div(left: U16, right: U16, file: &String, line: U32) -> U16 { U16{jet_fixed_value(jet_fixed_arithmetic(I64{left}, right.jet_shift_count(), JET_FIXED_OP_FLOOR_DIV, JET_FIXED_MODE_TRAP, false, 16, false), file, line)} }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2063
+#Inline(Always)
+pub fn jet_u16_trap_mod(left: U16, right: U16, file: &String, line: U32) -> U16 { U16{jet_fixed_value(jet_fixed_arithmetic(I64{left}, right.jet_shift_count(), JET_FIXED_OP_MOD, JET_FIXED_MODE_TRAP, false, 16, false), file, line)} }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2063
+#Inline(Always)
+pub fn jet_u16_trap_pow(left: U16, right: U16, file: &String, line: U32) -> U16 { left.jet_pow(right.jet_shift_count(), file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2063
+#Inline(Always)
+pub fn jet_u16_trap_shl<C: JetShiftCount>(left: U16, right: C, file: &String, line: U32) -> U16 { left.jet_shl(right.jet_shift_count(), file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2063
+#Inline(Always)
+pub fn jet_u16_trap_shr<C: JetShiftCount>(left: U16, right: C, file: &String, line: U32) -> U16 { left.jet_shr(right.jet_shift_count(), file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2063
+#Inline(Always)
+pub fn jet_u16_wrapping_add(left: U16, right: U16) -> U16 { left.jet_wrapping_add(right) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2063
+#Inline(Always)
+pub fn jet_u16_wrapping_sub(left: U16, right: U16) -> U16 { left.jet_wrapping_sub(right) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2063
+#Inline(Always)
+pub fn jet_u16_wrapping_mul(left: U16, right: U16) -> U16 { left.jet_wrapping_mul(right) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2063
+#Inline(Always)
+pub fn jet_u16_wrapping_div(left: U16, right: U16, file: &String, line: U32) -> U16 { U16{jet_fixed_value(jet_fixed_arithmetic(I64{left}, right.jet_shift_count(), JET_FIXED_OP_DIV, JET_FIXED_MODE_WRAPPING, false, 16, false), file, line)} }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2063
+#Inline(Always)
+pub fn jet_u16_wrapping_pow(left: U16, right: U16, file: &String, line: U32) -> U16 { left.jet_wrapping_pow(right.jet_shift_count(), file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2063
+#Inline(Always)
+pub fn jet_u16_saturating_add(left: U16, right: U16) -> U16 { left.jet_saturating_add(right) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2063
+#Inline(Always)
+pub fn jet_u16_saturating_sub(left: U16, right: U16) -> U16 { left.jet_saturating_sub(right) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2063
+#Inline(Always)
+pub fn jet_u16_saturating_mul(left: U16, right: U16) -> U16 { left.jet_saturating_mul(right) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2063
+#Inline(Always)
+pub fn jet_u16_saturating_div(left: U16, right: U16, file: &String, line: U32) -> U16 { U16{jet_fixed_value(jet_fixed_arithmetic(I64{left}, right.jet_shift_count(), JET_FIXED_OP_DIV, JET_FIXED_MODE_SATURATING, false, 16, false), file, line)} }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2063
+#Inline(Always)
+pub fn jet_u16_saturating_pow(left: U16, right: U16, file: &String, line: U32) -> U16 { left.jet_saturating_pow(right.jet_shift_count(), file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2063
+#Inline(Always)
+pub fn jet_u16_checked_add(left: U16, right: U16) -> U16? { jet_fixed_option(jet_fixed_arithmetic(I64{left}, right.jet_shift_count(), JET_FIXED_OP_ADD, JET_FIXED_MODE_CHECKED, false, 16, false), value -> U16{value}) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2063
+#Inline(Always)
+pub fn jet_u16_checked_sub(left: U16, right: U16) -> U16? { jet_fixed_option(jet_fixed_arithmetic(I64{left}, right.jet_shift_count(), JET_FIXED_OP_SUB, JET_FIXED_MODE_CHECKED, false, 16, false), value -> U16{value}) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2063
+#Inline(Always)
+pub fn jet_u16_checked_mul(left: U16, right: U16) -> U16? { jet_fixed_option(jet_fixed_arithmetic(I64{left}, right.jet_shift_count(), JET_FIXED_OP_MUL, JET_FIXED_MODE_CHECKED, false, 16, false), value -> U16{value}) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2063
+#Inline(Always)
+pub fn jet_u16_checked_div(left: U16, right: U16) -> U16? { jet_fixed_option(jet_fixed_arithmetic(I64{left}, right.jet_shift_count(), JET_FIXED_OP_DIV, JET_FIXED_MODE_CHECKED, false, 16, false), value -> U16{value}) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2063
+#Inline(Always)
+pub fn jet_u16_checked_rem(left: U16, right: U16) -> U16? { jet_fixed_option(jet_fixed_arithmetic(I64{left}, right.jet_shift_count(), JET_FIXED_OP_REM, JET_FIXED_MODE_CHECKED, false, 16, false), value -> U16{value}) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2063
+#Inline(Always)
+pub fn jet_u16_checked_pow(left: U16, right: U16) -> U16? { jet_fixed_option(jet_fixed_arithmetic(I64{left}, right.jet_shift_count(), JET_FIXED_OP_POW, JET_FIXED_MODE_CHECKED, false, 16, false), value -> U16{value}) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2063
+#Inline(Always)
+pub fn jet_u16_rotate_left(left: U16, right: U16, file: &String, line: U32) -> U16 { left.jet_rotate_left(right.jet_shift_count(), file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2063
+#Inline(Always)
+pub fn jet_u16_rotate_right(left: U16, right: U16, file: &String, line: U32) -> U16 { left.jet_rotate_right(right.jet_shift_count(), file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2084
+#Inline(Always)
+pub fn jet_u32_trap_add(left: U32, right: U32, file: &String, line: U32) -> U32 { left.jet_add(right, file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2084
+#Inline(Always)
+pub fn jet_u32_trap_sub(left: U32, right: U32, file: &String, line: U32) -> U32 { left.jet_sub(right, file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2084
+#Inline(Always)
+pub fn jet_u32_trap_mul(left: U32, right: U32, file: &String, line: U32) -> U32 { left.jet_mul(right, file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2084
+#Inline(Always)
+pub fn jet_u32_trap_div(left: U32, right: U32, file: &String, line: U32) -> U32 { left.jet_div(right, file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2084
+#Inline(Always)
+pub fn jet_u32_trap_rem(left: U32, right: U32, file: &String, line: U32) -> U32 { left.jet_rem(right, file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2084
+#Inline(Always)
+pub fn jet_u32_trap_floor_div(left: U32, right: U32, file: &String, line: U32) -> U32 { U32{jet_fixed_value(jet_fixed_arithmetic(I64{left}, right.jet_shift_count(), JET_FIXED_OP_FLOOR_DIV, JET_FIXED_MODE_TRAP, false, 32, false), file, line)} }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2084
+#Inline(Always)
+pub fn jet_u32_trap_mod(left: U32, right: U32, file: &String, line: U32) -> U32 { U32{jet_fixed_value(jet_fixed_arithmetic(I64{left}, right.jet_shift_count(), JET_FIXED_OP_MOD, JET_FIXED_MODE_TRAP, false, 32, false), file, line)} }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2084
+#Inline(Always)
+pub fn jet_u32_trap_pow(left: U32, right: U32, file: &String, line: U32) -> U32 { left.jet_pow(right.jet_shift_count(), file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2084
+#Inline(Always)
+pub fn jet_u32_trap_shl<C: JetShiftCount>(left: U32, right: C, file: &String, line: U32) -> U32 { left.jet_shl(right.jet_shift_count(), file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2084
+#Inline(Always)
+pub fn jet_u32_trap_shr<C: JetShiftCount>(left: U32, right: C, file: &String, line: U32) -> U32 { left.jet_shr(right.jet_shift_count(), file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2084
+#Inline(Always)
+pub fn jet_u32_wrapping_add(left: U32, right: U32) -> U32 { left.jet_wrapping_add(right) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2084
+#Inline(Always)
+pub fn jet_u32_wrapping_sub(left: U32, right: U32) -> U32 { left.jet_wrapping_sub(right) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2084
+#Inline(Always)
+pub fn jet_u32_wrapping_mul(left: U32, right: U32) -> U32 { left.jet_wrapping_mul(right) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2084
+#Inline(Always)
+pub fn jet_u32_wrapping_div(left: U32, right: U32, file: &String, line: U32) -> U32 { U32{jet_fixed_value(jet_fixed_arithmetic(I64{left}, right.jet_shift_count(), JET_FIXED_OP_DIV, JET_FIXED_MODE_WRAPPING, false, 32, false), file, line)} }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2084
+#Inline(Always)
+pub fn jet_u32_wrapping_pow(left: U32, right: U32, file: &String, line: U32) -> U32 { left.jet_wrapping_pow(right.jet_shift_count(), file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2084
+#Inline(Always)
+pub fn jet_u32_saturating_add(left: U32, right: U32) -> U32 { left.jet_saturating_add(right) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2084
+#Inline(Always)
+pub fn jet_u32_saturating_sub(left: U32, right: U32) -> U32 { left.jet_saturating_sub(right) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2084
+#Inline(Always)
+pub fn jet_u32_saturating_mul(left: U32, right: U32) -> U32 { left.jet_saturating_mul(right) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2084
+#Inline(Always)
+pub fn jet_u32_saturating_div(left: U32, right: U32, file: &String, line: U32) -> U32 { U32{jet_fixed_value(jet_fixed_arithmetic(I64{left}, right.jet_shift_count(), JET_FIXED_OP_DIV, JET_FIXED_MODE_SATURATING, false, 32, false), file, line)} }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2084
+#Inline(Always)
+pub fn jet_u32_saturating_pow(left: U32, right: U32, file: &String, line: U32) -> U32 { left.jet_saturating_pow(right.jet_shift_count(), file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2084
+#Inline(Always)
+pub fn jet_u32_checked_add(left: U32, right: U32) -> U32? { jet_fixed_option(jet_fixed_arithmetic(I64{left}, right.jet_shift_count(), JET_FIXED_OP_ADD, JET_FIXED_MODE_CHECKED, false, 32, false), value -> U32{value}) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2084
+#Inline(Always)
+pub fn jet_u32_checked_sub(left: U32, right: U32) -> U32? { jet_fixed_option(jet_fixed_arithmetic(I64{left}, right.jet_shift_count(), JET_FIXED_OP_SUB, JET_FIXED_MODE_CHECKED, false, 32, false), value -> U32{value}) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2084
+#Inline(Always)
+pub fn jet_u32_checked_mul(left: U32, right: U32) -> U32? { jet_fixed_option(jet_fixed_arithmetic(I64{left}, right.jet_shift_count(), JET_FIXED_OP_MUL, JET_FIXED_MODE_CHECKED, false, 32, false), value -> U32{value}) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2084
+#Inline(Always)
+pub fn jet_u32_checked_div(left: U32, right: U32) -> U32? { jet_fixed_option(jet_fixed_arithmetic(I64{left}, right.jet_shift_count(), JET_FIXED_OP_DIV, JET_FIXED_MODE_CHECKED, false, 32, false), value -> U32{value}) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2084
+#Inline(Always)
+pub fn jet_u32_checked_rem(left: U32, right: U32) -> U32? { jet_fixed_option(jet_fixed_arithmetic(I64{left}, right.jet_shift_count(), JET_FIXED_OP_REM, JET_FIXED_MODE_CHECKED, false, 32, false), value -> U32{value}) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2084
+#Inline(Always)
+pub fn jet_u32_checked_pow(left: U32, right: U32) -> U32? { jet_fixed_option(jet_fixed_arithmetic(I64{left}, right.jet_shift_count(), JET_FIXED_OP_POW, JET_FIXED_MODE_CHECKED, false, 32, false), value -> U32{value}) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2084
+#Inline(Always)
+pub fn jet_u32_rotate_left(left: U32, right: U32, file: &String, line: U32) -> U32 { left.jet_rotate_left(right.jet_shift_count(), file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2084
+#Inline(Always)
+pub fn jet_u32_rotate_right(left: U32, right: U32, file: &String, line: U32) -> U32 { left.jet_rotate_right(right.jet_shift_count(), file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2105
+#Inline(Always)
+pub fn jet_u64_trap_add(left: U64, right: U64, file: &String, line: U32) -> U64 { left.jet_add(right, file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2105
+#Inline(Always)
+pub fn jet_u64_trap_sub(left: U64, right: U64, file: &String, line: U32) -> U64 { left.jet_sub(right, file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2105
+#Inline(Always)
+pub fn jet_u64_trap_mul(left: U64, right: U64, file: &String, line: U32) -> U64 { left.jet_mul(right, file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2105
+#Inline(Always)
+pub fn jet_u64_trap_div(left: U64, right: U64, file: &String, line: U32) -> U64 { left.jet_div(right, file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2105
+#Inline(Always)
+pub fn jet_u64_trap_rem(left: U64, right: U64, file: &String, line: U32) -> U64 { left.jet_rem(right, file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2105
+// GATE #4565: kernel primitive
+#Unsafe("reinterpret only inline 64-bit words for the shared unsigned arithmetic ABI")
+#Inline(Always)
+pub fn jet_u64_trap_floor_div(left: U64, right: U64, file: &String, line: U32) -> U64 { std.mem.transmute<I64, U64>(jet_fixed_value(jet_fixed_arithmetic(std.mem.transmute<U64, I64>(left), right.jet_shift_count(), JET_FIXED_OP_FLOOR_DIV, JET_FIXED_MODE_TRAP, false, 64, false), file, line)) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2105
+// GATE #4565: kernel primitive
+#Unsafe("reinterpret only inline 64-bit words for the shared unsigned arithmetic ABI")
+#Inline(Always)
+pub fn jet_u64_trap_mod(left: U64, right: U64, file: &String, line: U32) -> U64 { std.mem.transmute<I64, U64>(jet_fixed_value(jet_fixed_arithmetic(std.mem.transmute<U64, I64>(left), right.jet_shift_count(), JET_FIXED_OP_MOD, JET_FIXED_MODE_TRAP, false, 64, false), file, line)) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2105
+#Inline(Always)
+pub fn jet_u64_trap_pow(left: U64, right: U64, file: &String, line: U32) -> U64 { left.jet_pow(right.jet_shift_count(), file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2105
+#Inline(Always)
+pub fn jet_u64_trap_shl<C: JetShiftCount>(left: U64, right: C, file: &String, line: U32) -> U64 { left.jet_shl(right.jet_shift_count(), file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2105
+#Inline(Always)
+pub fn jet_u64_trap_shr<C: JetShiftCount>(left: U64, right: C, file: &String, line: U32) -> U64 { left.jet_shr(right.jet_shift_count(), file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2105
+#Inline(Always)
+pub fn jet_u64_wrapping_add(left: U64, right: U64) -> U64 { left.jet_wrapping_add(right) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2105
+#Inline(Always)
+pub fn jet_u64_wrapping_sub(left: U64, right: U64) -> U64 { left.jet_wrapping_sub(right) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2105
+#Inline(Always)
+pub fn jet_u64_wrapping_mul(left: U64, right: U64) -> U64 { left.jet_wrapping_mul(right) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2105
+// GATE #4565: kernel primitive
+#Unsafe("reinterpret only inline 64-bit words for the shared unsigned arithmetic ABI")
+#Inline(Always)
+pub fn jet_u64_wrapping_div(left: U64, right: U64, file: &String, line: U32) -> U64 { std.mem.transmute<I64, U64>(jet_fixed_value(jet_fixed_arithmetic(std.mem.transmute<U64, I64>(left), right.jet_shift_count(), JET_FIXED_OP_DIV, JET_FIXED_MODE_WRAPPING, false, 64, false), file, line)) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2105
+#Inline(Always)
+pub fn jet_u64_wrapping_pow(left: U64, right: U64, file: &String, line: U32) -> U64 { left.jet_wrapping_pow(right.jet_shift_count(), file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2105
+#Inline(Always)
+pub fn jet_u64_saturating_add(left: U64, right: U64) -> U64 { left.jet_saturating_add(right) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2105
+#Inline(Always)
+pub fn jet_u64_saturating_sub(left: U64, right: U64) -> U64 { left.jet_saturating_sub(right) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2105
+#Inline(Always)
+pub fn jet_u64_saturating_mul(left: U64, right: U64) -> U64 { left.jet_saturating_mul(right) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2105
+// GATE #4565: kernel primitive
+#Unsafe("reinterpret only inline 64-bit words for the shared unsigned arithmetic ABI")
+#Inline(Always)
+pub fn jet_u64_saturating_div(left: U64, right: U64, file: &String, line: U32) -> U64 { std.mem.transmute<I64, U64>(jet_fixed_value(jet_fixed_arithmetic(std.mem.transmute<U64, I64>(left), right.jet_shift_count(), JET_FIXED_OP_DIV, JET_FIXED_MODE_SATURATING, false, 64, false), file, line)) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2105
+#Inline(Always)
+pub fn jet_u64_saturating_pow(left: U64, right: U64, file: &String, line: U32) -> U64 { left.jet_saturating_pow(right.jet_shift_count(), file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2105
+// GATE #4565: kernel primitive
+#Unsafe("reinterpret only inline 64-bit words for the shared unsigned arithmetic ABI")
+#Inline(Always)
+pub fn jet_u64_checked_add(left: U64, right: U64) -> U64? { jet_fixed_option(jet_fixed_arithmetic(std.mem.transmute<U64, I64>(left), right.jet_shift_count(), JET_FIXED_OP_ADD, JET_FIXED_MODE_CHECKED, false, 64, false), value -> std.mem.transmute<I64, U64>(value)) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2105
+// GATE #4565: kernel primitive
+#Unsafe("reinterpret only inline 64-bit words for the shared unsigned arithmetic ABI")
+#Inline(Always)
+pub fn jet_u64_checked_sub(left: U64, right: U64) -> U64? { jet_fixed_option(jet_fixed_arithmetic(std.mem.transmute<U64, I64>(left), right.jet_shift_count(), JET_FIXED_OP_SUB, JET_FIXED_MODE_CHECKED, false, 64, false), value -> std.mem.transmute<I64, U64>(value)) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2105
+// GATE #4565: kernel primitive
+#Unsafe("reinterpret only inline 64-bit words for the shared unsigned arithmetic ABI")
+#Inline(Always)
+pub fn jet_u64_checked_mul(left: U64, right: U64) -> U64? { jet_fixed_option(jet_fixed_arithmetic(std.mem.transmute<U64, I64>(left), right.jet_shift_count(), JET_FIXED_OP_MUL, JET_FIXED_MODE_CHECKED, false, 64, false), value -> std.mem.transmute<I64, U64>(value)) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2105
+// GATE #4565: kernel primitive
+#Unsafe("reinterpret only inline 64-bit words for the shared unsigned arithmetic ABI")
+#Inline(Always)
+pub fn jet_u64_checked_div(left: U64, right: U64) -> U64? { jet_fixed_option(jet_fixed_arithmetic(std.mem.transmute<U64, I64>(left), right.jet_shift_count(), JET_FIXED_OP_DIV, JET_FIXED_MODE_CHECKED, false, 64, false), value -> std.mem.transmute<I64, U64>(value)) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2105
+// GATE #4565: kernel primitive
+#Unsafe("reinterpret only inline 64-bit words for the shared unsigned arithmetic ABI")
+#Inline(Always)
+pub fn jet_u64_checked_rem(left: U64, right: U64) -> U64? { jet_fixed_option(jet_fixed_arithmetic(std.mem.transmute<U64, I64>(left), right.jet_shift_count(), JET_FIXED_OP_REM, JET_FIXED_MODE_CHECKED, false, 64, false), value -> std.mem.transmute<I64, U64>(value)) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2105
+// GATE #4565: kernel primitive
+#Unsafe("reinterpret only inline 64-bit words for the shared unsigned arithmetic ABI")
+#Inline(Always)
+pub fn jet_u64_checked_pow(left: U64, right: U64) -> U64? { jet_fixed_option(jet_fixed_arithmetic(std.mem.transmute<U64, I64>(left), right.jet_shift_count(), JET_FIXED_OP_POW, JET_FIXED_MODE_CHECKED, false, 64, false), value -> std.mem.transmute<I64, U64>(value)) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2105
+#Inline(Always)
+pub fn jet_u64_rotate_left(left: U64, right: U64, file: &String, line: U32) -> U64 { left.jet_rotate_left(right.jet_shift_count(), file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2105
+#Inline(Always)
+pub fn jet_u64_rotate_right(left: U64, right: U64, file: &String, line: U32) -> U64 { left.jet_rotate_right(right.jet_shift_count(), file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2126
+// Rich stops share one report shape with the generated harness.
+fn jet_panic_rich_code(code: String, file: String, line: U32, fn_name: String, src_line: String, col: U32, caret_len: U32, msg: String, locals: String) -> Never {
+    jet_test_record_stop(code)
+    // GATE #4565: kernel primitive
+    if #Unsafe("read current parallel worker's deferred-failure flag") { JET_PARA_DEFER_FAILURE.with(defer -> defer.get()) } {
+        // GATE #4565: kernel primitive
+        #Unsafe("resume native unwind carrying complete rich failure into parallel join") {
+            panic.resume_unwind(Box.new(JetParaRuntimeFailure.Rich{code: code, file: file.to_string(), line: line, fn_name: fn_name.to_string(), src_line: src_line.to_string(), col: col, caret_len: caret_len, msg: msg.to_string(), locals: locals.to_string()}))
+        }
+    }
+    jet_proof_record(2, 1, code, msg, file, line)
+    _ :: jet_production_failure_receipt_write(code, file, line, fn_name)
+    report :: jet_runtime_stop_report(code, file, line, fn_name, src_line, col, caret_len, msg, locals)
+    if jet_runtime_should_unwind() -> jet_stream_record_failure_report(~report.rendered)
+    jet_runtime_stop_unwind(^report.rendered, report.exit_code, msg)
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2165
+fn jet_panic_rich(file: String, line: U32, fn_name: String, src_line: String, col: U32, caret_len: U32, msg: String, locals: String) -> Never {
+    jet_panic_rich_code("E3001", file, line, fn_name, src_line, col, caret_len, msg, locals)
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2182
+pub fn jet_test_failure_message(file: String, line: U32, fn_name: String, src_line: String, col: U32, caret_len: U32, msg: String, locals: String) -> String {
+    if jet_testing_take_failure() is Val(failure) -> return jet_runtime_stop_report("E3001", file, line, fn_name, src_line, col, caret_len, failure.message, failure.detail).rendered
+    jet_runtime_stop_report("E3001", file, line, fn_name, src_line, col, caret_len, msg, locals).rendered
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2214
+fn jet_eq<T: PartialEq>(left: T, right: T) -> Bool { left == right }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2218
+fn jet_require(condition: Bool, msg: String, file: String, line: U32, fn_name: String, src_line: String, col: U32, caret_len: U32, locals: String) -> {
+    if condition { jet_testing_clear_failure(); return }
+    if jet_testing_take_failure() is Val(failure) -> jet_panic_rich(file, line, fn_name, src_line, col, caret_len, failure.message, failure.detail)
+    jet_panic_rich(file, line, fn_name, src_line, col, caret_len, msg, locals)
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2252
+fn jet_require_eq(condition: Bool, left_debug: String, right_debug: String, file: String, line: U32, fn_name: String, src_line: String, col: U32, caret_len: U32, locals: String) -> {
+    if condition { jet_testing_clear_failure(); return }
+    if jet_testing_take_failure() is Val(failure) -> jet_panic_rich(file, line, fn_name, src_line, col, caret_len, failure.message, failure.detail)
+    msg :: jet_require_eq_message(left_debug, right_debug).to_string()
+    jet_panic_rich(file, line, fn_name, src_line, col, caret_len, msg, locals)
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2288
+fn jet_test_require(condition: Bool, msg: String, file: String, line: U32, fn_name: String, src_line: String, col: U32, caret_len: U32, locals: String) -> () Err! {
+    if condition { jet_testing_clear_failure(); Ok(()) }
+    else { Err(jet_test_failure_message(file, line, fn_name, src_line, col, caret_len, msg, locals)) }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2310
+fn jet_test_require_eq(condition: Bool, left_debug: String, right_debug: String, file: String, line: U32, fn_name: String, src_line: String, col: U32, caret_len: U32, locals: String) -> () Err! {
+    if condition { jet_testing_clear_failure(); Ok(()) }
+    else {
+        msg :: jet_require_eq_message(left_debug, right_debug).to_string()
+        Err(jet_test_failure_message(file, line, fn_name, src_line, col, caret_len, msg, locals))
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2341
+// E3002: journey owner collapses consecutive identical propagation frames.
+fn jet_trace_err<T, E>(r: T E!, file: String, line: U32, fn_name: String) -> T E! {
+    if r.is_err() { jet_journey_frame(file, line, 0, fn_name, fn() -> String.new()) }
+    else { jet_journey_reset() }
+    ^r
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2353
+fn jet_index_vec<T: Clone>(xs: View<T>, i: I64, file: String, line: U32) -> T { jet_index_vec_ref(xs, i, file, line).clone() }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2357
+fn jet_index_vec_ref<T>(xs: View<T>, i: I64, file: String, line: U32) -> @T from xs {
+    jet_fixed_list_index(xs.len(), i, index -> @xs[index]).unwrap_or_else(error -> jet_arithmetic_stop(file, line, error.message()))
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2362
+fn jet_index_vec_mut<T>(xs: &ViewMut<T>, i: I64, file: String, line: U32) -> &T from xs {
+    jet_fixed_list_index(xs.len(), i, index -> &xs[index]).unwrap_or_else(error -> jet_arithmetic_stop(file, line, error.message()))
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2372
+fn jet_index_vec_set<T>(xs: &ViewMut<T>, i: I64, value: ^T, file: String, line: U32) -> {
+    index :: jet_fixed_list_index(xs.len(), i, index -> index).unwrap_or_else(error -> jet_arithmetic_stop(file, line, error.message()))
+    xs[index] = ^value
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2378
+fn jet_unpack_vec<T: Clone>(xs: View<T>, want: Int, i: Int, file: String, line: U32) -> T {
+    if xs.len() != want {
+        suffix :: if want == 1 { "" } else { "s" }
+        jet_panic(file, line, "this pattern needs exactly {want} item{suffix}, but the list has {xs.len()}")
+    }
+    xs[i].clone()
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2393
+fn jet_slice_vec<T: Clone>(xs: View<T>, a: I64, b: I64, file: String, line: U32) -> [T] {
+    len :: xs.len() as I64
+    if a < I64{0} || b < I64{0} || a > b || b >= len -> jet_panic(file, line, "can't slice {len} items from {a} to {b} (inclusive)")
+    xs[a as Int..=b as Int].to_vec()
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2404
+fn jet_checked_range_bounds(len: I64, range: JetRange, action: String, file: String, line: U32) -> Range<Int> {
+    bounds :: jet_range_bounds(range.start, range.end, range.exclusive, len)
+    if bounds is None {
+        kind :: if range.exclusive { "exclusive" } else { "inclusive" }
+        jet_panic(file, line, "can't {action} {len} items from {range.start} to {range.end} ({kind})")
+    }
+    (start, end) :: bounds.unwrap()
+    start as Int..<end as Int
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2430
+trait JetSliceRange {
+    type Output
+    // Rust: crates/jet-codegen/src/Prelude/Core.rs:2433
+    fn slice_range(self, range: JetRange, file: String, line: U32) -> Self.Output
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2436
+fn jet_slice_vec_range<T: Clone>(xs: View<T>, range: JetRange, file: String, line: U32) -> [T] {
+    xs[jet_checked_range_bounds(xs.len() as I64, range, "slice", file, line)].to_vec()
+}
+impl<T: Clone> JetSliceRange for View<T> {
+    type Output = [T]
+    // Rust: crates/jet-codegen/src/Prelude/Core.rs:2448
+    fn slice_range(self, range: JetRange, file: String, line: U32) -> [T] { jet_slice_vec_range(self, range, file, line) }
+}
+impl<T: Clone> JetSliceRange for [T] {
+    type Output = [T]
+    // Rust: crates/jet-codegen/src/Prelude/Core.rs:2456
+    fn slice_range(self, range: JetRange, file: String, line: U32) -> [T] { jet_slice_vec_range(self, range, file, line) }
+}
+impl JetSliceRange for String {
+    type Output = String
+    // Rust: crates/jet-codegen/src/Prelude/Core.rs:2464
+    fn slice_range(self, range: JetRange, file: String, line: U32) -> String {
+        jet_string_slice_value(self, range.start, range.end, range.exclusive).unwrap_or_else(message -> jet_panic(file, line, message))
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2470
+fn jet_slice_range<T: JetSliceRange>(xs: T, range: JetRange, file: String, line: U32) -> T.Output { xs.slice_range(range, file, line) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2482
+fn jet_checked_view_window(start: I64, end: I64, exclusive: Bool, len: I64, file: String, line: U32) -> (I64, I64) {
+    match jet_checked_view_bounds(start, end, exclusive, len) { .Ok(bounds) -> bounds, .Err(message) -> jet_panic(file, line, message) }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2496
+fn jet_view_new<T>(xs: View<T>, a: I64, b: I64, file: String, line: U32) -> View<T> from xs {
+    (start, end) :: jet_checked_view_window(a, b, false, xs.len() as I64, file, line)
+    xs[start as Int..<end as Int]
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2500
+fn jet_view_new_range<T>(xs: View<T>, range: JetRange, file: String, line: U32) -> View<T> from xs {
+    (start, end) :: jet_checked_view_window(range.start, range.end, range.exclusive, xs.len() as I64, file, line)
+    xs[start as Int..<end as Int]
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2518
+fn jet_view_mut_new<T>(xs: &ViewMut<T>, a: I64, b: I64, file: String, line: U32) -> ViewMut<T> from xs {
+    (start, end) :: jet_checked_view_window(a, b, false, xs.len() as I64, file, line)
+    &xs[start as Int..<end as Int]
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2528
+fn jet_view_mut_new_range<T>(xs: &ViewMut<T>, range: JetRange, file: String, line: U32) -> ViewMut<T> from xs {
+    (start, end) :: jet_checked_view_window(range.start, range.end, range.exclusive, xs.len() as I64, file, line)
+    &xs[start as Int..<end as Int]
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2545
+fn jet_views_mut_new<T>(xs: &ViewMut<T>, ranges: View<(I64, I64, U32)>, file: String) -> [ViewMut<T>] from xs {
+    len :: xs.len() as I64
+    ordered := [(Int, Int, Int)].with_capacity(ranges.len())
+    loop (index, (start, end, line)) in ranges.iter().enumerate() {
+        (a, b) :: jet_checked_view_window(start, end, false, len, file, line)
+        &ordered.push((a as Int, b as Int, index))
+    }
+    jet_views_mut_from_windows(&xs, ^ordered, file)
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2559
+fn jet_views_mut_from_windows<T>(xs: &ViewMut<T>, ordered: ^[(Int, Int, Int)], file: String) -> [ViewMut<T>] from xs {
+    &ordered.sort_by_key((start, end, _) -> (start, end))
+    if ordered.windows(2).any(pair -> pair[0].1 > pair[1].0) -> jet_panic(file, 0, "mutable view ranges overlap")
+    pieces := [(Int, ViewMut<T>)].with_capacity(ordered.len())
+    tail := &xs
+    offset := 0
+    loop (start, end, index) in ordered {
+        (_, from_start) :: tail.split_at_mut(start - offset)
+        (selected, after) :: from_start.split_at_mut(end - start)
+        &pieces.push((index, ^selected))
+        tail = ^after
+        offset = end
+    }
+    &pieces.sort_by_key((index, _) -> index)
+    pieces.into_iter().map((_, selected) -> ^selected).collect()
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2586
+fn jet_split_write<T>(xs: &ViewMut<T>, mid: I64) -> (ViewMut<T>, ViewMut<T>) Err! from xs {
+    jet_disjoint_split_bounds(xs.len(), mid)?
+    Ok(xs.split_at_mut(mid as Int))
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2594
+fn jet_get_disjoint_write<T>(xs: &ViewMut<T>, indices: View<I64>) -> [ViewMut<T>] Err! from xs {
+    ordered :: jet_disjoint_index_bounds(xs.len(), indices)?
+    views := [(Int, ViewMut<T>)].with_capacity(ordered.len())
+    tail := &xs
+    offset := 0
+    loop (start, end, position) in ordered {
+        (_, from_index) :: tail.split_at_mut(start - offset)
+        (selected, after) :: from_index.split_at_mut(end - start)
+        &views.push((position, ^selected))
+        tail = ^after
+        offset = end
+    }
+    &views.sort_by_key((position, _) -> position)
+    Ok(views.into_iter().map((_, view) -> ^view).collect())
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2613
+fn jet_edit_disjoint<T>(xs: &ViewMut<T>, indices: View<I64>, edit: fn(ViewMut<T>, ViewMut<T>) -> ()) -> () Err! {
+    if indices.len() != 2 -> return Err("edit_disjoint needs exactly two indexes")
+    views := jet_get_disjoint_write(&xs, indices)?
+    right :: views.pop().expect("two disjoint views")
+    left :: views.pop().expect("two disjoint views")
+    edit(^left, ^right)
+    Ok(())
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2627
+fn jet_view_range_new<T>(xs: View<T>, range: JetRange, file: String, line: U32) -> View<T> from xs {
+    (start, end) :: jet_checked_view_window(range.start, range.end, range.exclusive, xs.len() as I64, file, line)
+    xs[start as Int..<end as Int]
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2644
+fn jet_view_mut_range_new<T>(xs: &ViewMut<T>, range: JetRange, file: String, line: U32) -> ViewMut<T> from xs {
+    (start, end) :: jet_checked_view_window(range.start, range.end, range.exclusive, xs.len() as I64, file, line)
+    &xs[start as Int..<end as Int]
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2664
+fn jet_view_fold<T, U>(xs: View<T>, init: ^U, f: fn(U, T) -> U) -> U {
+    acc := ^init
+    loop x in xs -> acc = f(acc, x)
+    ^acc
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2674
+fn jet_view_map<T, U>(xs: View<T>, f: fn(T) -> U) -> [U] { xs.iter().map(f).collect() }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2680
+#Clone
+#Debug
+#Comparable
+struct JetMap<K, V> { storage: Arc<[K:V]> }
+impl<K, V> JetMap<K, V> {
+    // Rust: crates/jet-codegen/src/Prelude/Core.rs:2684
+    fn new() -> JetMap<K, V> { JetMap{storage: Arc.new([K:V]{})} }
+}
+impl<K: Ord, V> JetMap<K, V> {
+    // Rust: crates/jet-codegen/src/Prelude/Core.rs:2689
+    fn from_pairs(entries: ^[(K, V)]) -> JetMap<K, V> { JetMap.from_iter(entries) }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2699
+fn jet_data_entries_to_map<K: Ord, V>(entries: ^[(K, V)]) -> JetMap<K, V> { JetMap.from_pairs(^entries) }
+impl<K: Ord, V> FromIterator<(K, V)> for JetMap<K, V> {
+    // Rust: crates/jet-codegen/src/Prelude/Core.rs:2708
+    fn from_iter<I: IntoIterator<(K, V)>>(pairs: ^I) -> JetMap<K, V> { JetMap{storage: Arc.new(pairs.into_iter().collect())} }
+}
+impl<K, V> Deref for JetMap<K, V> {
+    type Target = [K:V]
+    // Rust: crates/jet-codegen/src/Prelude/Core.rs:2718
+    fn deref(self) -> @[K:V] from self { @self.storage }
+}
+impl<K: Ord + Clone, V: Clone> DerefMut for JetMap<K, V> {
+    // Rust: crates/jet-codegen/src/Prelude/Core.rs:2724
+    fn deref_mut(self: &JetMap<K, V>) -> &[K:V] from self { Arc.make_mut(&self.storage) }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2733
+fn jet_map_make_mut<K: Ord + Clone, V: Clone>(m: &JetMap<K, V>) -> &[K:V] from m { Arc.make_mut(&m.storage) }
+impl<K: Ord, V> IntoIterator for @JetMap<K, V> {
+    type Item = (@K, @V)
+    type IntoIter = std.collections.btree_map.Iter<K, V>
+    // Rust: crates/jet-codegen/src/Prelude/Core.rs:2743
+    // The ordered map storage cursor lends pairs, without cloning keys or values.
+    fn into_iter(self) -> Self.IntoIter from self { self.range((Bound.Unbounded, Bound.Unbounded)) }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2748
+fn jet_map_into_entries<K: Ord + Clone, V: Clone>(m: ^JetMap<K, V>) -> [(K, V)] {
+    match Arc.try_unwrap(^m.storage) {
+        .Ok(map) -> {
+            entries := [(K, V)].with_capacity(map.len())
+            &entries.extend(map.into_iter())
+            ^entries
+        },
+        .Err(shared) -> {
+            entries := [(K, V)].with_capacity(shared.len())
+            // Ordered borrowed cursor avoids materializing a second key vector.
+            loop (key, value) in shared.range((Bound.Unbounded, Bound.Unbounded)) -> &entries.push((~key, ~value))
+            ^entries
+        },
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2763
+#Clone
+#Comparable
+enum JetRemoveBy { Val, Slot }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2769
+fn jet_index_map<M: Deref<[K:V]>, K: Ord + Clone + JetShow, V: Clone>(m: M, k: K, file: String, line: U32, fn_name: String, src_line: String, col: U32, caret_len: U32) -> V {
+    match m.get(k) { .Val(v) -> ~v, .None -> jet_panic_rich(file, line, fn_name, src_line, col, caret_len, jet_missing_map_key_value(k.jet_show()), "") }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2800
+fn jet_index_map_ref<M: Deref<[K:V]>, K: Ord + Clone + JetShow, V>(m: M, k: K, file: String, line: U32, fn_name: String, src_line: String, col: U32, caret_len: U32) -> @V from m {
+    match m.get(k) { .Val(value) -> @value, .None -> jet_panic_rich(file, line, fn_name, src_line, col, caret_len, jet_missing_map_key_value(k.jet_show()), "") }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2828
+fn jet_index_map_mut<M: DerefMut<[K:V]>, K: Ord + Clone + JetShow, V>(m: &M, k: ^K, file: String, line: U32, fn_name: String, src_line: String, col: U32, caret_len: U32) -> &V from m {
+    match m.get_mut(k) { .Val(value) -> &value, .None -> jet_panic_rich(file, line, fn_name, src_line, col, caret_len, jet_missing_map_key_value(k.jet_show()), "") }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2856
+fn jet_map_insert<M: DerefMut<[K:V]>, K: Ord + Clone, V: Clone>(m: &M, k: ^K, v: ^V) -> V JetAbsent! { jet_outcome_of(m.insert(^k, ^v)) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2868
+fn jet_map_add_new<M: DerefMut<[K:V]>, K: Ord + Clone, V: Clone>(m: &M, k: ^K, v: ^V) -> Bool {
+    if m.contains_key(k) -> return false
+    _ :: m.insert(^k, ^v)
+    true
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2880
+fn jet_map_setdefault<M: DerefMut<[K:V]>, K: Ord, V: Clone>(m: &M, k: ^K, v: ^V) -> V { m.entry(^k).or_insert(^v).clone() }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2892
+fn jet_map_update_string<V>(m: &[String:V], key: String, f: fn(V?) -> V) -> {
+    if m.get_mut(key) is Val(existing) { next :: f(Val(@existing)); existing = ^next }
+    else { _ :: m.insert(~key, f(None)) }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2911
+trait JetStringBytesMap<V> {
+    // Rust: crates/jet-codegen/src/Prelude/Core.rs:2912
+    fn update_bytes(self: &Self, bytes: View<U8>, f: fn((@V)?) -> V) -> () ()!
+}
+impl<V> JetStringBytesMap<V> for [String:V] {
+    // Rust: crates/jet-codegen/src/Prelude/Core.rs:2919
+    fn update_bytes(self: &[String:V], bytes: View<U8>, f: fn((@V)?) -> V) -> () ()! {
+        key := str.from_utf8(bytes).map_err(_ -> ())? // #4303 borrowed strict UTF-8 key
+        if self.get_mut(key) is Val(existing) -> existing = f(Val(@existing))
+        else -> _ :: self.insert(key.to_owned(), f(None))
+        Ok(())
+    }
+}
+impl<V: Clone> JetStringBytesMap<V> for JetMap<String, V> {
+    // Rust: crates/jet-codegen/src/Prelude/Core.rs:2936
+    fn update_bytes(self: &JetMap<String, V>, bytes: View<U8>, f: fn((@V)?) -> V) -> () ()! { Arc.make_mut(&self.storage).update_bytes(bytes, f) }
+}
+impl<V, M: JetStringBytesMap<V>> JetStringBytesMap<V> for &M {
+    // Rust: crates/jet-codegen/src/Prelude/Core.rs:2946
+    fn update_bytes(self: &&M, bytes: View<U8>, f: fn((@V)?) -> V) -> () ()! { self.deref_mut().deref_mut().update_bytes(bytes, f) }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2957
+#Clone
+struct JetStringCountHasher { hash: U64 }
+impl JetStringCountHasher {
+    fn default() -> JetStringCountHasher { JetStringCountHasher{hash: U64{0}} }
+    // Rust: crates/jet-codegen/src/Prelude/Core.rs:2964
+    fn add(self: &JetStringCountHasher, value: U64) -> { self.hash = self.hash.wrapping_add(value).wrapping_mul(U64{0xf1357aea2e62a9c5}) }
+}
+impl Hasher for JetStringCountHasher {
+    // Rust: crates/jet-codegen/src/Prelude/Core.rs:2974
+    fn finish(self) -> U64 { self.hash.rotate_left(26) }
+    // Rust: crates/jet-codegen/src/Prelude/Core.rs:2979
+    fn write(self: &JetStringCountHasher, bytes: View<U8>) -> {
+        value := bytes.len() as U64
+        loop byte in bytes -> value = value.rotate_left(5) ^ byte as U64
+        self.add(value)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core.rs:2988
+    fn write_u8(self: &JetStringCountHasher, value: U8) -> { self.add(value as U64) }
+    // Rust: crates/jet-codegen/src/Prelude/Core.rs:2993
+    fn write_u64(self: &JetStringCountHasher, value: U64) -> { self.add(value) }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:2998
+type JetStringCountBuildHasher = BuildHasherDefault<JetStringCountHasher>
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:3004
+// Sealed uniquely-owned counting region; Drop restores canonical sorted storage.
+struct JetStringCountBuilder {
+    target: &[String:I64],
+    short_counts: [U64:I64],
+    long_counts: [[U8]:I64],
+}
+impl JetStringCountBuilder {
+    // Rust: crates/jet-codegen/src/Prelude/Core.rs:3012
+    fn short_key(bytes: View<U8>) -> U64? {
+        if bytes.len() > 7 -> return None
+        if bytes.len() == 6 -> return Val((U64{6} << 56) | bytes[0] as U64 | (bytes[1] as U64 << 8) | (bytes[2] as U64 << 16) | (bytes[3] as U64 << 24) | (bytes[4] as U64 << 32) | (bytes[5] as U64 << 40))
+        key := bytes.len() as U64 << 56
+        loop (index, byte) in bytes.iter().enumerate() -> key = key | (byte as U64 << (index * 8))
+        Val(key)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core.rs:3034
+    fn short_string(key: U64) -> String {
+        len :: (key >> 56) as Int
+        bytes :: (0..<len).map(index -> ((key >> (index * 8)) & U64{0xff}) as U8).collect()
+        String.from_utf8(bytes).expect("JetStringCountBuilder stores only valid UTF-8 keys")
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core.rs:3042
+    fn new(target: &[String:I64]) -> JetStringCountBuilder from target { JetStringCountBuilder.with_source_capacity(&target, 0) }
+    // Rust: crates/jet-codegen/src/Prelude/Core.rs:3046
+    fn with_source_capacity(target: &[String:I64], source_bytes: Int) -> JetStringCountBuilder from target {
+        estimated_distinct :: (source_bytes / 64).min(16384)
+        short_counts := [U64:I64].with_capacity_and_hasher(estimated_distinct, JetStringCountBuildHasher.default())
+        long_counts := [[U8]:I64].with_hasher(JetStringCountBuildHasher.default())
+        source :: mem.take(&target)
+        loop (key, value) in source.into_iter() {
+            bytes :: key.into_bytes()
+            if JetStringCountBuilder.short_key(bytes) is Val(short) -> _ :: short_counts.insert(short, value)
+            else -> _ :: long_counts.insert(^bytes, value)
+        }
+        JetStringCountBuilder{target: &target, short_counts: ^short_counts, long_counts: ^long_counts}
+    }
+}
+impl JetStringBytesMap<I64> for JetStringCountBuilder {
+    // Rust: crates/jet-codegen/src/Prelude/Core.rs:3074
+    fn update_bytes(self: &JetStringCountBuilder, bytes: View<U8>, f: fn((@I64)?) -> I64) -> () ()! {
+        if JetStringCountBuilder.short_key(bytes) is Val(key) {
+            if self.short_counts.get_mut(key) is Val(existing) -> existing = f(Val(@existing))
+            else {
+                _ :: str.from_utf8(bytes).map_err(_ -> ())?
+                _ :: self.short_counts.insert(key, f(None))
+            }
+        } else if self.long_counts.get_mut(bytes) is Val(existing) -> existing = f(Val(@existing))
+        else {
+            _ :: str.from_utf8(bytes).map_err(_ -> ())?
+            _ :: self.long_counts.insert(bytes.to_owned(), f(None))
+        }
+        Ok(())
+    }
+}
+impl Drop for JetStringCountBuilder {
+    // Rust: crates/jet-codegen/src/Prelude/Core.rs:3096
+    fn drop(self: &JetStringCountBuilder) -> {
+        // Hash entries are committed to the canonical ordered map, not observed in hash order.
+        self.target.extend(mem.take(&self.short_counts).into_iter().map((key, value) -> (JetStringCountBuilder.short_string(key), value)))
+        self.target.extend(mem.take(&self.long_counts).into_iter().map((bytes, value) -> (String.from_utf8(^bytes).expect("JetStringCountBuilder stores only valid UTF-8 keys"), value)))
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:3119
+fn jet_map_update_string_bytes<M: JetStringBytesMap<V>, V>(m: &M, bytes: View<U8>, f: fn((@V)?) -> V) -> () ()! { m.update_bytes(bytes, f) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:3129
+fn jet_map_try_insert_storage<K: Ord + Clone, V: Clone>(m: &JetMap<K, V>, k: ^K, v: ^V) -> V? ()! { Ok(m.insert(^k, ^v)) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:3138
+fn jet_map_merge<K: Ord + Clone, V: Clone>(left: JetMap<K, V>, other: JetMap<K, V>) -> JetMap<K, V> {
+    out := left.clone()
+    storage := jet_map_make_mut(&out)
+    loop (k, v) in other.range((Bound.Unbounded, Bound.Unbounded)) -> _ :: storage.insert(~k, ~v)
+    ^out
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:3150
+fn jet_map_update_all<K: Ord + Clone, V: Clone>(left: &JetMap<K, V>, other: JetMap<K, V>) -> {
+    storage := jet_map_make_mut(&left)
+    loop (key, value) in other.range((Bound.Unbounded, Bound.Unbounded)) -> _ :: storage.insert(~key, ~value)
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:3161
+fn jet_map_merge_with<K: Ord + Clone, V: Clone>(left: JetMap<K, V>, other: JetMap<K, V>, conflict: fn(K, ^V, ^V) -> V) -> JetMap<K, V> {
+    out := left.clone()
+    storage := jet_map_make_mut(&out)
+    loop (k, right) in other.range((Bound.Unbounded, Bound.Unbounded)) {
+        match storage.remove(k) {
+            .Val(left_v) -> { resolved :: conflict(k, ^left_v, ~right); _ :: storage.insert(~k, ^resolved) },
+            .None -> _ :: storage.insert(~k, ~right),
+        }
+    }
+    ^out
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:3188
+// Arc keeps the original map alive; successor lookup clones only each yielded key.
+struct JetMapKeys<K, V> { map: Arc<[K:V]>, last: K? }
+impl<K: Ord + Clone, V> Iterator for JetMapKeys<K, V> {
+    type Item = K
+    // Rust: crates/jet-codegen/src/Prelude/Core.rs:3196
+    fn next(self: &JetMapKeys<K, V>) -> K? {
+        next :: match self.last {
+            .Val(last) -> self.map.range((Bound.Excluded(@last), Bound.Unbounded)).next(),
+            .None -> self.map.range((Bound.Unbounded, Bound.Unbounded)).next(),
+        } ?? return None
+        key :: next.0.clone()
+        self.last = Val(~key)
+        Val(^key)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:3210
+struct JetMapValues<K, V> { map: Arc<[K:V]>, last: K? }
+impl<K: Ord + Clone, V: Clone> Iterator for JetMapValues<K, V> {
+    type Item = V
+    // Rust: crates/jet-codegen/src/Prelude/Core.rs:3218
+    fn next(self: &JetMapValues<K, V>) -> V? {
+        next :: match self.last {
+            .Val(last) -> self.map.range((Bound.Excluded(@last), Bound.Unbounded)).next(),
+            .None -> self.map.range((Bound.Unbounded, Bound.Unbounded)).next(),
+        } ?? return None
+        key :: next.0.clone()
+        value :: next.1.clone()
+        self.last = Val(^key)
+        Val(^value)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:3233
+fn jet_map_keys<K: Ord + Clone, V>(m: JetMap<K, V>) -> JetIter<K> { JetIter{iter: Box.new(JetMapKeys{map: Arc.clone(m.storage), last: None})} }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:3240
+fn jet_map_values<K: Ord + Clone, V: Clone>(m: JetMap<K, V>) -> JetIter<V> { JetIter{iter: Box.new(JetMapValues{map: Arc.clone(m.storage), last: None})} }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:3248
+fn jet_list_remove_value<T: Clone + PartialEq>(xs: &[T], value: ^T) -> T JetAbsent! { jet_outcome_of(jet_list_remove_value_kernel(&xs, ^value)) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:3256
+fn jet_list_remove_slot<T: Clone>(xs: &[T], index: I64) -> T JetAbsent! {
+    match jet_list_remove_slot_kernel(&xs, index) { .Ok(value) -> Ok(^value), .Err(message) -> jet_arithmetic_stop("<core.collections>", 0, message) }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:3267
+fn jet_list_insert<T>(xs: &[T], index: I64, value: ^T) -> {
+    match jet_list_insert_kernel(&xs, index, ^value) {
+        .Ok(_) -> {},
+        .Err(error) -> { message :: error.message(); jet_runtime_stop(error.code(), "<core.collections>", 0, message) },
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:3283
+fn jet_priority_queue_remove_value<T: Ord>(pq: &BinaryHeap<T>, value: ^T) -> T JetAbsent! { jet_priority_queue_remove_value_kernel(&pq, ^value) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:3290
+fn jet_list_count<T: PartialEq>(xs: View<T>, value: T) -> I64 { jet_list_count_kernel(xs, value) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:3293
+fn jet_list_count_where<T>(xs: View<T>, predicate: fn(T) -> Bool) -> I64 { jet_list_count_where_kernel(xs, predicate) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:3300
+fn jet_list_update_first<T>(xs: &[T], predicate: fn(T) -> Bool, replacement: ^T) -> Bool { jet_list_update_first_kernel(&xs, predicate, ^replacement) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:3311
+fn jet_list_concat<T: Clone>(left: View<T>, right: View<T>) -> [T] {
+    out := left.to_vec()
+    &out.extend(right.iter().cloned())
+    ^out
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:3316
+fn jet_list_join<T: JetShow>(xs: View<T>, separator: String) -> String { xs.iter().map(x -> x.jet_show()).collect().join(separator) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:3322
+fn jet_fixed_list_concat<T: Clone, LEFT: Int, RIGHT: Int, TOTAL: Int>(left: @[T#LEFT], right: @[T#RIGHT]) -> [T#TOTAL] {
+    debug_assert(TOTAL == LEFT + RIGHT)
+    array.from_fn<T, TOTAL>(index -> if index < LEFT { left[index].clone() } else { right[index - LEFT].clone() })
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:3341
+fn jet_char_len(s: String) -> I64 { s.chars().count() as I64 }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:3346
+fn jet_string_split(s: String, sep: String) -> [String] { s.split(sep).map(x -> x.to_string()).collect() }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:3352
+fn jet_string_after(s: String, sep: String) -> String {
+    match s.find(sep) { .Val(i) -> s[i + sep.len()..].to_string(), .None -> s.to_string() }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:3358
+fn jet_string_before(s: String, sep: String) -> String {
+    match s.find(sep) { .Val(i) -> s[..i].to_string(), .None -> s.to_string() }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:3371
+fn jet_string_after_view(s: View<str>, sep: View<str>) -> View<str> from s {
+    match s.find(sep) { .Val(i) -> s[i + sep.len()..], .None -> s }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:3377
+fn jet_string_before_view(s: View<str>, sep: View<str>) -> View<str> from s {
+    match s.find(sep) { .Val(i) -> s[..i], .None -> s }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:3383
+fn jet_string_trim_view(s: View<str>) -> View<str> from s { jet_unicode_trim_view(s) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:3386
+fn jet_string_lines(s: String) -> [String] { s.lines().map(x -> x.to_string()).collect() }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:3389
+fn jet_string_chars(s: String) -> [Char] { s.chars().collect() }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:3394
+fn jet_string_slice(s: String, a: I64, b: I64, file: String, line: U32) -> String {
+    jet_string_slice_value(s, a, b, true).unwrap_or_else(message -> jet_panic(file, line, message))
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:3398
+fn jet_string_slice_builtin(s: String, a: I64, b: I64) -> String {
+    jet_string_slice_value(s, a, b, true).unwrap_or_else(message -> jet_panic("<core.builtin>", 0, message))
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:3402
+fn jet_list_each<T, I: IntoIterator<T>>(xs: ^I, f: fn(T) -> ()) -> { loop x in xs -> f(x) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:3411
+fn jet_list_each_mut<T, I: IntoIterator<T>>(xs: ^I, f: fn(T) -> ()) -> { loop x in xs -> f(x) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:3420
+fn jet_list_find<T, I: IntoIterator<T>>(xs: ^I, f: fn(T) -> Bool) -> T JetAbsent! { jet_outcome_of(xs.into_iter().find(x -> f(x))) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:3427
+fn jet_list_any<T, I: IntoIterator<T>>(xs: ^I, f: fn(T) -> Bool) -> Bool { xs.into_iter().any(x -> f(x)) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:3434
+fn jet_list_all<T, I: IntoIterator<T>>(xs: ^I, f: fn(T) -> Bool) -> Bool { xs.into_iter().all(x -> f(x)) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:3441
+fn jet_list_reduce<T, U, I: IntoIterator<T>>(xs: ^I, init: ^U, f: fn(U, T) -> U) -> U { xs.into_iter().fold(^init, (acc, x) -> f(acc, x)) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:3449
+fn jet_list_sort_by_compare<T>(xs: &ViewMut<T>, f: fn(T, T) -> __jet_Ordering) -> {
+    jet_list_sort_by_compare_kernel(&xs, (left, right) -> match f(left, right) {
+        .__jet_Less -> Ordering.Less, .__jet_Equal -> Ordering.Equal, .__jet_Greater -> Ordering.Greater,
+    })
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:3459
+fn jet_map_each<K: Ord, V>(m: ^JetMap<K, V>, f: fn(K, V) -> ()) -> {
+    loop (k, v) in m.range((Bound.Unbounded, Bound.Unbounded)) -> f(k, v)
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:3468
+fn jet_map_equal<K: Ord + PartialEq, V: PartialEq>(a: JetMap<K, V>, b: JetMap<K, V>) -> Bool { jet_map_equal_kernel(a, b) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:3469
+fn jet_map_first_key<K: Ord + Clone, V>(m: JetMap<K, V>) -> K JetAbsent! { jet_map_first_key_kernel(m) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:3470
+fn jet_map_to_list<K: Ord + Clone, V: Clone, R>(m: JetMap<K, V>, build: fn(^K, ^V) -> R) -> [R] { jet_map_entries_kernel(m).into_iter().map((k, v) -> build(^k, ^v)).collect() }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:3473
+fn jet_map_any<K: Ord, V>(m: ^JetMap<K, V>, f: fn(K, V) -> Bool) -> Bool { m.range((Bound.Unbounded, Bound.Unbounded)).any((k, v) -> f(k, v)) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:3476
+fn jet_map_all<K: Ord, V>(m: ^JetMap<K, V>, f: fn(K, V) -> Bool) -> Bool { m.range((Bound.Unbounded, Bound.Unbounded)).all((k, v) -> f(k, v)) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:3479
+fn jet_map_filter<K: Ord + Clone, V: Clone>(m: ^JetMap<K, V>, f: fn(K, V) -> Bool) -> JetMap<K, V> {
+    JetMap{storage: Arc.new(m.range((Bound.Unbounded, Bound.Unbounded)).filter((k, v) -> f(k, v)).map((k, v) -> (~k, ~v)).collect())}
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:3483
+fn jet_map_map_values<K: Ord + Clone, V, U>(m: ^JetMap<K, V>, f: fn(K, V) -> U) -> JetMap<K, U> {
+    JetMap{storage: Arc.new(m.range((Bound.Unbounded, Bound.Unbounded)).map((k, v) -> (~k, f(k, v))).collect())}
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:3487
+fn jet_map_fold<K: Ord, V, U>(m: ^JetMap<K, V>, init: ^U, f: fn(U, K, V) -> U) -> U {
+    acc := ^init
+    loop (k, v) in m.range((Bound.Unbounded, Bound.Unbounded)) -> acc = f(acc, k, v)
+    ^acc
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:3495
+fn jet_map_flat_map<K: Ord + Clone, V: Clone>(m: ^JetMap<K, V>, f: fn(K, V) -> JetMap<K, V>) -> JetMap<K, V> {
+    out := JetMap.new<K, V>()
+    storage := jet_map_make_mut(&out)
+    loop (k, v) in m.range((Bound.Unbounded, Bound.Unbounded)) {
+        nested :: f(k, v)
+        loop (ik, iv) in nested.range((Bound.Unbounded, Bound.Unbounded)) -> _ :: storage.insert(~ik, ~iv)
+    }
+    ^out
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:3506
+fn jet_map_intersection<K: Ord + Clone, V: Clone>(left: JetMap<K, V>, right: JetMap<K, V>) -> JetMap<K, V> { jet_map_intersection_kernel(left, right) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:3509
+fn jet_map_from_keys_int<V: Clone>(keys: ^[JetInt], default: ^V) -> JetMap<JetInt, V> { jet_map_from_keys_kernel(^keys, ^default) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:3515
+fn jet_map_from_keys_composite<K: Ord + Clone, V: Clone>(keys: ^[K], default: ^V) -> JetMap<K, V> { jet_map_from_keys_kernel(^keys, ^default) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:3521
+fn jet_map_contains_value<K: Ord, V: PartialEq>(m: JetMap<K, V>, needle: V) -> Bool { jet_map_contains_value_kernel(m, needle) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:3524
+fn jet_map_pop_first<K: Ord + Clone, V: Clone>(m: &JetMap<K, V>) -> V JetAbsent! { jet_map_pop_first_kernel(&m) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:3527
+fn jet_ordering_then(first: __jet_Ordering, second: __jet_Ordering) -> __jet_Ordering { match first { .__jet_Equal -> second, _ -> first } }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:3534
+fn jet_ordering_reverse(value: __jet_Ordering) -> __jet_Ordering { match value { .__jet_Less -> .__jet_Greater, .__jet_Greater -> .__jet_Less, .__jet_Equal -> .__jet_Equal } }
 

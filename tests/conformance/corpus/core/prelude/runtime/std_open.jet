@@ -1,0 +1,32 @@
+use core.prelude.runtime.std_open.[IOContext, IOOperation, IOError, ProcessResourceLimit, TextWidth, TextWidthAmbiguous, TextWidthControls]
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Open.rs:42
+#Test("io_context_keeps_one_optional_context_carrier") {
+    context :: IOContext.new(.Read, Val("resource"), Val(I64{13}), None)
+    assert(context.operation == .Read)
+    assert(context.resource == Val("resource"))
+    assert(context.os_code == Val(I64{13}))
+    assert(context.cause == None)
+    empty :: IOContext.new(.Close, None, None, None)
+    assert(empty.resource == None && empty.os_code == None && empty.cause == None)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Open.rs:53,66
+#Test("io_error_other_retains_operation_resource_and_cause") {
+    error :: IOError.other(.Resolve, Val("host"), "resolver failed")
+    match error {
+        .Other(context) -> {
+            assert(context.operation == .Resolve)
+            assert(context.resource == Val("host"))
+            assert(context.os_code == None)
+            assert(context.cause == Val("resolver failed"))
+        }
+        _ -> assert(false)
+    }
+    assert(IOError.ResourceLimit(.CpuTime) != IOError.ResourceLimit(.WallTime))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Open.rs:89,94,99
+#Test("text_width_policy_retains_explicit_ambiguous_and_control_choices") {
+    policy :: TextWidth{ambiguous: .Wide, controls: .Reject}
+    assert(policy.ambiguous == TextWidthAmbiguous.Wide)
+    assert(policy.controls == TextWidthControls.Reject)
+}

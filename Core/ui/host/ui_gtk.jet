@@ -1,428 +1,406 @@
-// PORT-PENDING 0193 crates-jet-codegen-src-prelude-uigtk: crates/jet-codegen/src/Prelude/UiGtk.rs:1-2048
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS // D-UIDEVSHELL1=A (c134 Phase 8): native Linux GTK4 backend. A real
-//RS // `JetBackend` over libgtk-4, emitted only when a Linux build constructs
-//RS // `core.ui.gtk_backend()`. All detail lives inside the module below. (Kept token
-//RS // clean above the module: the golden I1 scan matches the module by name and its
-//RS // own doc lines are stripped with it — see the comment inside.)
-//RS mod jet_gtk {
-//RS     // I1 containment: every raw C-ABI call in this module is the vetted
-//RS     // platform-FFI boundary, audited here and confined here. `tests/golden.rs`
-//RS     // strips this whole `mod jet_gtk { … }` before asserting generated Rust is
-//RS     // free of the low-level tier keyword — the same treatment the S58 C-FFI
-//RS     // wrapper modules (`user___c_*`), `jet_mem`, and the POSIX term shims get.
-//RS     // The loader below uses `dlopen`/`dlsym`, so ordinary programs do not
-//RS     // link-load GTK. Native GTK is opened only when this backend is used and
-//RS     // the display path is initialized.
-//RS     //
-//RS     // Retained-mode widget model: canonical `JetUiNode` trees reconcile by stable
-//RS     // path into real GtkBox/GtkLabel/GtkButton/GtkEntry widgets. Repaint updates
-//RS     // those widgets in place and removes stale children. The existing handle event
-//RS     // methods bind those reconciled widgets rather than creating a second tree.
-//RS     //
-//RS     // Headless safety: with `JET_UI_HEADLESS=1` or no display, `gtk_init_check`
-//RS     // is false, no widgets are created, and every op is a safe no-op — the
-//RS     // program still runs (signals update, terminal output prints) and
-//RS     // terminates, so tests are deterministic and a display-less CI never hangs.
-//RS     use super::{
-//RS         jet_font_shape_with_fallback, jet_font_vetted_bytes, jet_ui_accessibility_attach,
-//RS         jet_ui_accessibility_project, jet_ui_advance_focus, jet_ui_bind_tree_clicks,
-//RS         jet_ui_constraint, jet_ui_dispatch, jet_ui_measure_tree, jet_ui_node_id,
-//RS         jet_ui_paint_tree, jet_ui_rect, JetUiAriaRole,
-//RS         JetBackend, JetEventResult, JetFontFace, JetGlyphRun, JetInputEvent, JetPaintCmd, JetRect,
-//RS         JetShow, JetSize, JetSizeConstraint, JetUiAccessibility, JetUiAccessibilityProjection,
-//RS         JetUiAccessibilityTarget, JetUiCapability, JetUiCapabilityFacts, JetUiCancellation,
-//RS         JetUiClipboardText, JetUiClipboardWrite, JetUiDragEvent, JetUiDragOperation,
-//RS         JetUiDragPhase, JetUiDropItem, JetUiFileDialogKind, JetUiFileDialogRequest,
-//RS         JetUiFileDialogSelection, JetUiFsAccess, JetUiHost, JetUiHostError, JetUiImeComposition,
-//RS         JetUiImeEvent, JetUiImeMode, JetUiImePhase, JetUiNode, JetUiNodeId, JetUiNodeKind,
-//RS         JetUiServiceResult,
-//RS         JetUiShortcut, JetUiShortcutBinding, JetUiShortcutDispatch, JetUiShortcutRegistry,
-//RS         JetUiTextRange,
-//RS     };
-//RS     use std::ffi::{CStr, CString};
-//RS     use std::os::raw::{c_char, c_double, c_int, c_void};
-//RS     use std::sync::{Arc, LazyLock, Mutex};
-//RS 
-//RS     #[allow(non_camel_case_types)]
-//RS     type gboolean = c_int;
-//RS     #[allow(non_camel_case_types)]
-//RS     type gpointer = *mut c_void;
-//RS     type GtkWidget = c_void;
-//RS     type GtkCssProvider = c_void;
-//RS     type GtkEventController = c_void;
-//RS     type GtkDropTarget = c_void;
-//RS     type GtkAccessible = c_void;
-//RS     type GdkDisplay = c_void;
-//RS     type GdkClipboard = c_void;
-//RS     type GtkFileDialog = c_void;
-//RS     type GtkFileFilter = c_void;
-//RS     type GListStore = c_void;
-//RS     type GListModel = c_void;
-//RS     type GFile = c_void;
-//RS     type GValue = c_void;
-//RS     type GAsyncResult = c_void;
-//RS     type GError = c_void;
-//RS     type GMainLoop = c_void;
-//RS     type GClosure = c_void;
-//RS     type GType = usize;
-//RS     #[repr(C)]
-//RS     struct NativeGError {
-//RS         domain: u32,
-//RS         code: c_int,
-//RS         message: *mut c_char,
-//RS     }
-//RS 
-//RS     const G_IO_ERROR_CANCELLED: c_int = 19;
-//RS     const G_IO_ERROR_QUARK: &[u8] = b"g-io-error-quark\0";
-//RS     const GTK_ORIENTATION_VERTICAL: c_int = 1;
-//RS     const GTK_STYLE_PROVIDER_PRIORITY_APPLICATION: c_int = 600;
-//RS     // GtkAccessibleProperty values are ABI-stable enum entries in GTK4:
-//RS     // DESCRIPTION is 1 and LABEL is 4 (gtk/gtkenums.h).
-//RS     const GTK_ACCESSIBLE_PROPERTY_DESCRIPTION: c_int = 1;
-//RS     const GTK_ACCESSIBLE_PROPERTY_LABEL: c_int = 4;
-//RS 
-//RS     // GCallbacks are ABI-polymorphic in GLib; each signal below passes its
-//RS     // typed trampoline through the opaque `gpointer` slot.
-//RS     type AsyncReadyCallback = extern "C" fn(gpointer, *mut GAsyncResult, gpointer);
-//RS     type DestroyCallback = extern "C" fn(gpointer, *mut GClosure);
-//RS 
-//RS     type GtkAccessibleUpdateProperty =
-//RS         unsafe extern "C" fn(*mut GtkAccessible, c_int, *const c_char, c_int);
-//RS 
-//RS     struct Api {
-//RS         _handle: *mut c_void,
-//RS         gtk_init_check: unsafe extern "C" fn() -> gboolean,
-//RS         gtk_window_new: unsafe extern "C" fn() -> *mut GtkWidget,
-//RS         gtk_window_set_title: unsafe extern "C" fn(*mut GtkWidget, *const c_char),
-//RS         gtk_window_set_default_size: unsafe extern "C" fn(*mut GtkWidget, c_int, c_int),
-//RS         gtk_window_set_child: unsafe extern "C" fn(*mut GtkWidget, *mut GtkWidget),
-//RS         gtk_window_present: unsafe extern "C" fn(*mut GtkWidget),
-//RS         gtk_box_new: unsafe extern "C" fn(c_int, c_int) -> *mut GtkWidget,
-//RS         gtk_box_append: unsafe extern "C" fn(*mut GtkWidget, *mut GtkWidget),
-//RS         gtk_box_remove: unsafe extern "C" fn(*mut GtkWidget, *mut GtkWidget),
-//RS         gtk_label_new: unsafe extern "C" fn(*const c_char) -> *mut GtkWidget,
-//RS         gtk_label_set_text: unsafe extern "C" fn(*mut GtkWidget, *const c_char),
-//RS         gtk_button_new_with_label: unsafe extern "C" fn(*const c_char) -> *mut GtkWidget,
-//RS         gtk_button_set_label: unsafe extern "C" fn(*mut GtkWidget, *const c_char),
-//RS         gtk_entry_new: unsafe extern "C" fn() -> *mut GtkWidget,
-//RS         gtk_editable_set_text: unsafe extern "C" fn(*mut GtkWidget, *const c_char),
-//RS         gtk_widget_set_size_request: unsafe extern "C" fn(*mut GtkWidget, c_int, c_int),
-//RS         gtk_widget_add_css_class: unsafe extern "C" fn(*mut GtkWidget, *const c_char),
-//RS         gtk_widget_remove_css_class: unsafe extern "C" fn(*mut GtkWidget, *const c_char),
-//RS         gtk_widget_grab_focus: unsafe extern "C" fn(*mut GtkWidget) -> gboolean,
-//RS         gtk_css_provider_new: unsafe extern "C" fn() -> *mut GtkCssProvider,
-//RS         gtk_css_provider_load_from_string:
-//RS             unsafe extern "C" fn(*mut GtkCssProvider, *const c_char),
-//RS         gtk_style_context_add_provider_for_display:
-//RS             unsafe extern "C" fn(*mut GdkDisplay, *mut GtkCssProvider, c_int),
-//RS         gdk_display_get_default: unsafe extern "C" fn() -> *mut GdkDisplay,
-//RS         gdk_display_get_clipboard:
-//RS             unsafe extern "C" fn(*mut GdkDisplay) -> *mut GdkClipboard,
-//RS         gdk_clipboard_set_text: unsafe extern "C" fn(*mut GdkClipboard, *const c_char),
-//RS         gdk_clipboard_read_text_async:
-//RS             unsafe extern "C" fn(*mut GdkClipboard, gpointer, AsyncReadyCallback, gpointer),
-//RS         gdk_clipboard_read_text_finish: unsafe extern "C" fn(
-//RS             *mut GdkClipboard,
-//RS             *mut GAsyncResult,
-//RS             *mut *mut GError,
-//RS         ) -> *mut c_char,
-//RS         g_main_context_iteration: unsafe extern "C" fn(gpointer, gboolean) -> gboolean,
-//RS         g_free: unsafe extern "C" fn(gpointer),
-//RS         g_signal_connect_data: unsafe extern "C" fn(
-//RS             gpointer,
-//RS             *const c_char,
-//RS             gpointer,
-//RS             gpointer,
-//RS             Option<DestroyCallback>,
-//RS             c_int,
-//RS         ) -> u64,
-//RS         gtk_file_dialog_new: unsafe extern "C" fn() -> *mut GtkFileDialog,
-//RS         gtk_file_dialog_set_title:
-//RS             unsafe extern "C" fn(*mut GtkFileDialog, *const c_char),
-//RS         gtk_file_dialog_set_modal: unsafe extern "C" fn(*mut GtkFileDialog, gboolean),
-//RS         gtk_file_dialog_set_initial_folder:
-//RS             unsafe extern "C" fn(*mut GtkFileDialog, *mut GFile),
-//RS         gtk_file_dialog_set_filters:
-//RS             unsafe extern "C" fn(*mut GtkFileDialog, *mut GListModel),
-//RS         gtk_file_dialog_open: unsafe extern "C" fn(
-//RS             *mut GtkFileDialog,
-//RS             *mut GtkWidget,
-//RS             gpointer,
-//RS             AsyncReadyCallback,
-//RS             gpointer,
-//RS         ),
-//RS         gtk_file_dialog_open_multiple: unsafe extern "C" fn(
-//RS             *mut GtkFileDialog,
-//RS             *mut GtkWidget,
-//RS             gpointer,
-//RS             AsyncReadyCallback,
-//RS             gpointer,
-//RS         ),
-//RS         gtk_file_dialog_save: unsafe extern "C" fn(
-//RS             *mut GtkFileDialog,
-//RS             *mut GtkWidget,
-//RS             gpointer,
-//RS             AsyncReadyCallback,
-//RS             gpointer,
-//RS         ),
-//RS         gtk_file_dialog_open_finish:
-//RS             unsafe extern "C" fn(*mut GtkFileDialog, *mut GAsyncResult, *mut *mut GError)
-//RS                 -> *mut GFile,
-//RS         gtk_file_dialog_open_multiple_finish:
-//RS             unsafe extern "C" fn(*mut GtkFileDialog, *mut GAsyncResult, *mut *mut GError)
-//RS                 -> *mut GListModel,
-//RS         gtk_file_dialog_save_finish:
-//RS             unsafe extern "C" fn(*mut GtkFileDialog, *mut GAsyncResult, *mut *mut GError)
-//RS                 -> *mut GFile,
-//RS         gtk_file_filter_new: unsafe extern "C" fn() -> *mut GtkFileFilter,
-//RS         gtk_file_filter_get_type: unsafe extern "C" fn() -> GType,
-//RS         gtk_file_filter_set_name:
-//RS             unsafe extern "C" fn(*mut GtkFileFilter, *const c_char),
-//RS         gtk_file_filter_add_pattern:
-//RS             unsafe extern "C" fn(*mut GtkFileFilter, *const c_char),
-//RS         gtk_file_filter_add_mime_type:
-//RS             unsafe extern "C" fn(*mut GtkFileFilter, *const c_char),
-//RS         g_type_from_name: unsafe extern "C" fn(*const c_char) -> GType,
-//RS         g_list_store_new: unsafe extern "C" fn(GType) -> *mut GListStore,
-//RS         g_list_store_append: unsafe extern "C" fn(*mut GListStore, gpointer),
-//RS         g_list_model_get_n_items: unsafe extern "C" fn(*mut GListModel) -> u32,
-//RS         g_list_model_get_item: unsafe extern "C" fn(*mut GListModel, u32) -> gpointer,
-//RS         g_file_new_for_path: unsafe extern "C" fn(*const c_char) -> *mut GFile,
-//RS         g_file_get_path: unsafe extern "C" fn(*mut GFile) -> *mut c_char,
-//RS         g_error_free: unsafe extern "C" fn(*mut GError),
-//RS         g_quark_from_static_string: unsafe extern "C" fn(*const c_char) -> u32,
-//RS         g_error_matches: unsafe extern "C" fn(*const GError, u32, c_int) -> gboolean,
-//RS         g_main_loop_new: unsafe extern "C" fn(gpointer, gboolean) -> *mut GMainLoop,
-//RS         g_main_loop_run: unsafe extern "C" fn(*mut GMainLoop),
-//RS         g_main_loop_unref: unsafe extern "C" fn(*mut GMainLoop),
-//RS         g_object_unref: unsafe extern "C" fn(gpointer),
-//RS         gtk_accessible_update_property: GtkAccessibleUpdateProperty,
-//RS         gtk_event_controller_key_new: unsafe extern "C" fn() -> *mut GtkEventController,
-//RS         gtk_drop_target_new:
-//RS             unsafe extern "C" fn(GType, u32) -> *mut GtkDropTarget,
-//RS         gtk_widget_add_controller:
-//RS             unsafe extern "C" fn(*mut GtkWidget, *mut GtkEventController),
-//RS         gdk_keyval_name: unsafe extern "C" fn(u32) -> *const c_char,
-//RS         g_value_get_string: unsafe extern "C" fn(*const GValue) -> *const c_char,
-//RS     }
-//RS 
-//RS     // The handle and function pointers refer to one process-global, immutable
-//RS     // loader result. Keeping the library open is required for every pointer.
-//RS     unsafe impl Send for Api {}
-//RS     unsafe impl Sync for Api {}
-//RS 
-//RS     #[cfg(any(target_os = "linux", target_os = "android"))]
-//RS     #[link(name = "dl")]
-//RS     unsafe extern "C" {}
-//RS 
-//RS     #[cfg(unix)]
-//RS     unsafe extern "C" {
-//RS         fn dlopen(filename: *const c_char, flags: c_int) -> *mut c_void;
-//RS         fn dlsym(handle: *mut c_void, symbol: *const c_char) -> *mut c_void;
-//RS     }
-//RS 
-//RS     #[cfg(unix)]
-//RS     const RTLD_NOW: c_int = 2;
-//RS 
-//RS     #[cfg(unix)]
-//RS     unsafe fn symbol<T: Copy>(handle: *mut c_void, name: &'static CStr) -> Option<T> {
-//RS         let address = dlsym(handle, name.as_ptr());
-//RS         (!address.is_null()).then(|| std::mem::transmute_copy(&address))
-//RS     }
-//RS 
-//RS     #[cfg(unix)]
-//RS     fn load() -> Option<Api> {
-//RS         const LIBRARIES: [&[u8]; 4] = [
-//RS             b"libgtk-4.so.1\0",
-//RS             b"libgtk-4.so\0",
-//RS             b"libgtk-4.1.dylib\0",
-//RS             b"libgtk-4.dylib\0",
-//RS         ];
-//RS         for library in LIBRARIES {
-//RS             // SAFETY: the name is a static NUL-terminated string and the
-//RS             // returned handle remains open for the lifetime of the process.
-//RS             let handle = unsafe { dlopen(library.as_ptr().cast(), RTLD_NOW) };
-//RS             if handle.is_null() {
-//RS                 continue;
-//RS             }
-//RS             macro_rules! load_symbol {
-//RS                 ($name:literal) => {
-//RS                     unsafe {
-//RS                         symbol(
-//RS                             handle,
-//RS                             CStr::from_bytes_with_nul_unchecked(
-//RS                                 concat!($name, "\0").as_bytes(),
-//RS                             ),
-//RS                         )?
-//RS                     }
-//RS                 };
-//RS             }
-//RS             return Some(Api {
-//RS                 _handle: handle,
-//RS                 gtk_init_check: load_symbol!("gtk_init_check"),
-//RS                 gtk_window_new: load_symbol!("gtk_window_new"),
-//RS                 gtk_window_set_title: load_symbol!("gtk_window_set_title"),
-//RS                 gtk_window_set_default_size: load_symbol!("gtk_window_set_default_size"),
-//RS                 gtk_window_set_child: load_symbol!("gtk_window_set_child"),
-//RS                 gtk_window_present: load_symbol!("gtk_window_present"),
-//RS                 gtk_box_new: load_symbol!("gtk_box_new"),
-//RS                 gtk_box_append: load_symbol!("gtk_box_append"),
-//RS                 gtk_box_remove: load_symbol!("gtk_box_remove"),
-//RS                 gtk_label_new: load_symbol!("gtk_label_new"),
-//RS                 gtk_label_set_text: load_symbol!("gtk_label_set_text"),
-//RS                 gtk_button_new_with_label: load_symbol!("gtk_button_new_with_label"),
-//RS                 gtk_button_set_label: load_symbol!("gtk_button_set_label"),
-//RS                 gtk_entry_new: load_symbol!("gtk_entry_new"),
-//RS                 gtk_editable_set_text: load_symbol!("gtk_editable_set_text"),
-//RS                 gtk_widget_set_size_request: load_symbol!("gtk_widget_set_size_request"),
-//RS                 gtk_widget_add_css_class: load_symbol!("gtk_widget_add_css_class"),
-//RS                 gtk_widget_remove_css_class: load_symbol!("gtk_widget_remove_css_class"),
-//RS                 gtk_widget_grab_focus: load_symbol!("gtk_widget_grab_focus"),
-//RS                 gtk_css_provider_new: load_symbol!("gtk_css_provider_new"),
-//RS                 gtk_css_provider_load_from_string:
-//RS                     load_symbol!("gtk_css_provider_load_from_string"),
-//RS                 gtk_style_context_add_provider_for_display:
-//RS                     load_symbol!("gtk_style_context_add_provider_for_display"),
-//RS                 gdk_display_get_default: load_symbol!("gdk_display_get_default"),
-//RS                 gdk_display_get_clipboard: load_symbol!("gdk_display_get_clipboard"),
-//RS                 gdk_clipboard_set_text: load_symbol!("gdk_clipboard_set_text"),
-//RS                 gdk_clipboard_read_text_async: load_symbol!("gdk_clipboard_read_text_async"),
-//RS                 gdk_clipboard_read_text_finish: load_symbol!("gdk_clipboard_read_text_finish"),
-//RS                 g_main_context_iteration: load_symbol!("g_main_context_iteration"),
-//RS                 g_free: load_symbol!("g_free"),
-//RS                 g_signal_connect_data: load_symbol!("g_signal_connect_data"),
-//RS                 gtk_file_dialog_new: load_symbol!("gtk_file_dialog_new"),
-//RS                 gtk_file_dialog_set_title: load_symbol!("gtk_file_dialog_set_title"),
-//RS                 gtk_file_dialog_set_modal: load_symbol!("gtk_file_dialog_set_modal"),
-//RS                 gtk_file_dialog_set_initial_folder:
-//RS                     load_symbol!("gtk_file_dialog_set_initial_folder"),
-//RS                 gtk_file_dialog_set_filters: load_symbol!("gtk_file_dialog_set_filters"),
-//RS                 gtk_file_dialog_open: load_symbol!("gtk_file_dialog_open"),
-//RS                 gtk_file_dialog_open_multiple: load_symbol!("gtk_file_dialog_open_multiple"),
-//RS                 gtk_file_dialog_save: load_symbol!("gtk_file_dialog_save"),
-//RS                 gtk_file_dialog_open_finish: load_symbol!("gtk_file_dialog_open_finish"),
-//RS                 gtk_file_dialog_open_multiple_finish:
-//RS                     load_symbol!("gtk_file_dialog_open_multiple_finish"),
-//RS                 gtk_file_dialog_save_finish: load_symbol!("gtk_file_dialog_save_finish"),
-//RS                 gtk_file_filter_new: load_symbol!("gtk_file_filter_new"),
-//RS                 gtk_file_filter_get_type: load_symbol!("gtk_file_filter_get_type"),
-//RS                 gtk_file_filter_set_name: load_symbol!("gtk_file_filter_set_name"),
-//RS                 gtk_file_filter_add_pattern: load_symbol!("gtk_file_filter_add_pattern"),
-//RS                 gtk_file_filter_add_mime_type: load_symbol!("gtk_file_filter_add_mime_type"),
-//RS                 g_type_from_name: load_symbol!("g_type_from_name"),
-//RS                 g_list_store_new: load_symbol!("g_list_store_new"),
-//RS                 g_list_store_append: load_symbol!("g_list_store_append"),
-//RS                 g_list_model_get_n_items: load_symbol!("g_list_model_get_n_items"),
-//RS                 g_list_model_get_item: load_symbol!("g_list_model_get_item"),
-//RS                 g_file_new_for_path: load_symbol!("g_file_new_for_path"),
-//RS                 g_file_get_path: load_symbol!("g_file_get_path"),
-//RS                 g_error_free: load_symbol!("g_error_free"),
-//RS                 g_quark_from_static_string: load_symbol!("g_quark_from_static_string"),
-//RS                 g_error_matches: load_symbol!("g_error_matches"),
-//RS                 g_main_loop_new: load_symbol!("g_main_loop_new"),
-//RS                 g_main_loop_run: load_symbol!("g_main_loop_run"),
-//RS                 g_main_loop_unref: load_symbol!("g_main_loop_unref"),
-//RS                 g_object_unref: load_symbol!("g_object_unref"),
-//RS                 gtk_accessible_update_property: load_symbol!("gtk_accessible_update_property"),
-//RS                 gtk_event_controller_key_new: load_symbol!("gtk_event_controller_key_new"),
-//RS                 gtk_drop_target_new: load_symbol!("gtk_drop_target_new"),
-//RS                 gtk_widget_add_controller: load_symbol!("gtk_widget_add_controller"),
-//RS                 gdk_keyval_name: load_symbol!("gdk_keyval_name"),
-//RS                 g_value_get_string: load_symbol!("g_value_get_string"),
-//RS             });
-//RS         }
-//RS         None
-//RS     }
-//RS 
-//RS     #[cfg(not(unix))]
-//RS     fn load() -> Option<Api> {
-//RS         None
-//RS     }
-//RS 
-//RS     fn gtk_api() -> Option<&'static Api> {
-//RS         static API: LazyLock<Option<Api>> = LazyLock::new(load);
-//RS         API.as_ref()
-//RS     }
-//RS 
-//RS     macro_rules! gtk_api_wrapper {
-//RS         ($name:ident($($arg:ident: $ty:ty),* $(,)?) -> $ret:ty = $default:expr) => {
-//RS             fn $name($($arg: $ty),*) -> $ret {
-//RS                 let Some(api) = gtk_api() else {
-//RS                     return $default;
-//RS                 };
-//RS                 // SAFETY: `api` contains the symbol with the exact declared GTK ABI.
-//RS                 unsafe { (api.$name)($($arg),*) }
-//RS             }
-//RS         };
-//RS     }
-//RS 
-//RS     gtk_api_wrapper!(gtk_init_check() -> gboolean = 0);
-//RS     gtk_api_wrapper!(gtk_window_new() -> *mut GtkWidget = std::ptr::null_mut());
-//RS     gtk_api_wrapper!(gtk_window_set_title(window: *mut GtkWidget, title: *const c_char) -> () = ());
-//RS     gtk_api_wrapper!(gtk_window_set_default_size(window: *mut GtkWidget, width: c_int, height: c_int) -> () = ());
-//RS     gtk_api_wrapper!(gtk_window_set_child(window: *mut GtkWidget, child: *mut GtkWidget) -> () = ());
-//RS     gtk_api_wrapper!(gtk_window_present(window: *mut GtkWidget) -> () = ());
-//RS     gtk_api_wrapper!(gtk_box_new(orientation: c_int, spacing: c_int) -> *mut GtkWidget = std::ptr::null_mut());
-//RS     gtk_api_wrapper!(gtk_box_append(box_: *mut GtkWidget, child: *mut GtkWidget) -> () = ());
-//RS     gtk_api_wrapper!(gtk_box_remove(box_: *mut GtkWidget, child: *mut GtkWidget) -> () = ());
-//RS     gtk_api_wrapper!(gtk_label_new(text: *const c_char) -> *mut GtkWidget = std::ptr::null_mut());
-//RS     gtk_api_wrapper!(gtk_label_set_text(label: *mut GtkWidget, text: *const c_char) -> () = ());
-//RS     gtk_api_wrapper!(gtk_button_new_with_label(label: *const c_char) -> *mut GtkWidget = std::ptr::null_mut());
-//RS     gtk_api_wrapper!(gtk_button_set_label(button: *mut GtkWidget, label: *const c_char) -> () = ());
-//RS     gtk_api_wrapper!(gtk_entry_new() -> *mut GtkWidget = std::ptr::null_mut());
-//RS     gtk_api_wrapper!(gtk_editable_set_text(editable: *mut GtkWidget, text: *const c_char) -> () = ());
-//RS     gtk_api_wrapper!(gtk_widget_set_size_request(widget: *mut GtkWidget, width: c_int, height: c_int) -> () = ());
-//RS     gtk_api_wrapper!(gtk_widget_add_css_class(widget: *mut GtkWidget, css_class: *const c_char) -> () = ());
-//RS     gtk_api_wrapper!(gtk_widget_remove_css_class(widget: *mut GtkWidget, css_class: *const c_char) -> () = ());
-//RS     gtk_api_wrapper!(gtk_widget_grab_focus(widget: *mut GtkWidget) -> gboolean = 0);
-//RS     gtk_api_wrapper!(gtk_css_provider_new() -> *mut GtkCssProvider = std::ptr::null_mut());
-//RS     gtk_api_wrapper!(gtk_css_provider_load_from_string(provider: *mut GtkCssProvider, string: *const c_char) -> () = ());
-//RS     gtk_api_wrapper!(gtk_style_context_add_provider_for_display(display: *mut GdkDisplay, provider: *mut GtkCssProvider, priority: c_int) -> () = ());
-//RS     gtk_api_wrapper!(gdk_display_get_default() -> *mut GdkDisplay = std::ptr::null_mut());
-//RS     gtk_api_wrapper!(gdk_display_get_clipboard(display: *mut GdkDisplay) -> *mut GdkClipboard = std::ptr::null_mut());
-//RS     gtk_api_wrapper!(gdk_clipboard_set_text(clipboard: *mut GdkClipboard, text: *const c_char) -> () = ());
-//RS     gtk_api_wrapper!(gdk_clipboard_read_text_async(clipboard: *mut GdkClipboard, cancellable: gpointer, callback: AsyncReadyCallback, user_data: gpointer) -> () = ());
-//RS     gtk_api_wrapper!(gdk_clipboard_read_text_finish(clipboard: *mut GdkClipboard, result: *mut GAsyncResult, error: *mut *mut GError) -> *mut c_char = std::ptr::null_mut());
-//RS     gtk_api_wrapper!(g_main_context_iteration(context: gpointer, may_block: gboolean) -> gboolean = 0);
-//RS     gtk_api_wrapper!(g_free(pointer: gpointer) -> () = ());
-//RS     gtk_api_wrapper!(g_signal_connect_data(instance: gpointer, detailed_signal: *const c_char, c_handler: gpointer, data: gpointer, destroy_data: Option<DestroyCallback>, connect_flags: c_int) -> u64 = 0);
-//RS     gtk_api_wrapper!(gtk_file_dialog_new() -> *mut GtkFileDialog = std::ptr::null_mut());
-//RS     gtk_api_wrapper!(gtk_file_dialog_set_title(dialog: *mut GtkFileDialog, title: *const c_char) -> () = ());
-//RS     gtk_api_wrapper!(gtk_file_dialog_set_modal(dialog: *mut GtkFileDialog, modal: gboolean) -> () = ());
-//RS     gtk_api_wrapper!(gtk_file_dialog_set_initial_folder(dialog: *mut GtkFileDialog, folder: *mut GFile) -> () = ());
-//RS     gtk_api_wrapper!(gtk_file_dialog_set_filters(dialog: *mut GtkFileDialog, filters: *mut GListModel) -> () = ());
-//RS     gtk_api_wrapper!(gtk_file_dialog_open(dialog: *mut GtkFileDialog, parent: *mut GtkWidget, cancellable: gpointer, callback: AsyncReadyCallback, user_data: gpointer) -> () = ());
-//RS     gtk_api_wrapper!(gtk_file_dialog_open_multiple(dialog: *mut GtkFileDialog, parent: *mut GtkWidget, cancellable: gpointer, callback: AsyncReadyCallback, user_data: gpointer) -> () = ());
-//RS     gtk_api_wrapper!(gtk_file_dialog_save(dialog: *mut GtkFileDialog, parent: *mut GtkWidget, cancellable: gpointer, callback: AsyncReadyCallback, user_data: gpointer) -> () = ());
-//RS     gtk_api_wrapper!(gtk_file_dialog_open_finish(dialog: *mut GtkFileDialog, result: *mut GAsyncResult, error: *mut *mut GError) -> *mut GFile = std::ptr::null_mut());
-//RS     gtk_api_wrapper!(gtk_file_dialog_open_multiple_finish(dialog: *mut GtkFileDialog, result: *mut GAsyncResult, error: *mut *mut GError) -> *mut GListModel = std::ptr::null_mut());
-//RS     gtk_api_wrapper!(gtk_file_dialog_save_finish(dialog: *mut GtkFileDialog, result: *mut GAsyncResult, error: *mut *mut GError) -> *mut GFile = std::ptr::null_mut());
-//RS     gtk_api_wrapper!(gtk_file_filter_new() -> *mut GtkFileFilter = std::ptr::null_mut());
-//RS     gtk_api_wrapper!(gtk_file_filter_get_type() -> GType = 0);
-//RS     gtk_api_wrapper!(gtk_file_filter_set_name(filter: *mut GtkFileFilter, name: *const c_char) -> () = ());
-//RS     gtk_api_wrapper!(gtk_file_filter_add_pattern(filter: *mut GtkFileFilter, pattern: *const c_char) -> () = ());
-//RS     gtk_api_wrapper!(gtk_file_filter_add_mime_type(filter: *mut GtkFileFilter, mime: *const c_char) -> () = ());
-//RS     gtk_api_wrapper!(g_type_from_name(name: *const c_char) -> GType = 0);
-//RS     gtk_api_wrapper!(g_list_store_new(item_type: GType) -> *mut GListStore = std::ptr::null_mut());
-//RS     gtk_api_wrapper!(g_list_store_append(store: *mut GListStore, item: gpointer) -> () = ());
-//RS     gtk_api_wrapper!(g_list_model_get_n_items(model: *mut GListModel) -> u32 = 0);
-//RS     gtk_api_wrapper!(g_list_model_get_item(model: *mut GListModel, position: u32) -> gpointer = std::ptr::null_mut());
-//RS     gtk_api_wrapper!(g_file_new_for_path(path: *const c_char) -> *mut GFile = std::ptr::null_mut());
-//RS     gtk_api_wrapper!(g_file_get_path(file: *mut GFile) -> *mut c_char = std::ptr::null_mut());
-//RS     gtk_api_wrapper!(g_error_free(error: *mut GError) -> () = ());
-//RS     gtk_api_wrapper!(g_quark_from_static_string(string: *const c_char) -> u32 = 0);
-//RS     gtk_api_wrapper!(g_error_matches(error: *const GError, domain: u32, code: c_int) -> gboolean = 0);
-//RS     gtk_api_wrapper!(g_main_loop_new(context: gpointer, is_running: gboolean) -> *mut GMainLoop = std::ptr::null_mut());
-//RS     gtk_api_wrapper!(g_main_loop_run(loop_: *mut GMainLoop) -> () = ());
-//RS     gtk_api_wrapper!(g_main_loop_unref(loop_: *mut GMainLoop) -> () = ());
-//RS     gtk_api_wrapper!(g_object_unref(object: gpointer) -> () = ());
-//RS     gtk_api_wrapper!(gtk_event_controller_key_new() -> *mut GtkEventController = std::ptr::null_mut());
-//RS     gtk_api_wrapper!(gtk_drop_target_new(value_type: GType, actions: u32) -> *mut GtkDropTarget = std::ptr::null_mut());
-//RS     gtk_api_wrapper!(gtk_widget_add_controller(widget: *mut GtkWidget, controller: *mut GtkEventController) -> () = ());
-//RS     gtk_api_wrapper!(gdk_keyval_name(keyval: u32) -> *const c_char = std::ptr::null());
-//RS     gtk_api_wrapper!(g_value_get_string(value: *const GValue) -> *const c_char = std::ptr::null());
-//RS 
+use core.ui.runtime.ui.[jet_ui_bind_tree_clicks, jet_ui_node_id, JetPaintCmd, jet_ui_paint_tree]
+use core.ui.runtime.ui_02.[JetBackend, JetEventResult, JetInputEvent, JetRect, JetSize, JetSizeConstraint, JetUiNode, JetUiNodeKind, JetUiAriaRole, jet_ui_advance_focus, jet_ui_constraint, jet_ui_dispatch, jet_ui_measure_tree, jet_ui_rect]
+use jet_ui_host.[jet_ui_accessibility_attach, jet_ui_accessibility_project, JetUiAccessibility, JetUiAccessibilityProjection, JetUiAccessibilityTarget, JetUiCapability, JetUiCapabilityFacts, JetUiCancellation, JetUiClipboardText, JetUiClipboardWrite, JetUiDragEvent, JetUiDragOperation, JetUiDragPhase, JetUiDropItem, JetUiFileDialogKind, JetUiFileDialogRequest, JetUiFileDialogSelection, JetUiFsAccess, JetUiHost, JetUiHostError, JetUiImeComposition, JetUiImeEvent, JetUiImeMode, JetUiImePhase, JetUiNodeId, JetUiServiceResult, JetUiShortcut, JetUiShortcutBinding, JetUiShortcutDispatch, JetUiShortcutRegistry, JetUiTextRange]
+use jet_font.[jet_font_shape_with_fallback, jet_font_vetted_bytes, JetFontFace, JetGlyphRun]
+use core.fmt.[JetShow]
+use core.ffi.[CStr, CString, c_void]
+use core.mem.[Ptr]
+use core.mem as memory
+use core.sync.[Arc, LazyLock, Mutex]
+use core.sys.target.[selected_os, selected_family]
+use jet_foundation.[TEXT_NUL]
+
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:1
+// Native GTK4 retained tree. The process keeps the dynamically opened library
+// alive for every symbol, callback and widget. No link-load occurs until use.
+// All C calls, borrowed C strings and callback pointer admissions below are
+// confined to this audited native boundary.
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:46
+type gboolean = I32
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:48
+type gpointer = Ptr<c_void>
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:49
+type GtkWidget = c_void
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:50
+type GtkCssProvider = c_void
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:51
+type GtkEventController = c_void
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:52
+type GtkDropTarget = c_void
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:53
+type GtkAccessible = c_void
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:54
+type GdkDisplay = c_void
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:55
+type GdkClipboard = c_void
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:56
+type GtkFileDialog = c_void
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:57
+type GtkFileFilter = c_void
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:58
+type GListStore = c_void
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:59
+type GListModel = c_void
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:60
+type GFile = c_void
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:61
+type GValue = c_void
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:62
+type GAsyncResult = c_void
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:63
+type GError = c_void
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:64
+type GMainLoop = c_void
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:65
+type GClosure = c_void
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:66
+type GType = USize
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:67
+#Layout(c)
+struct NativeGError {
+    domain: U32
+    code: I32
+    message: Ptr<I8>
+}
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:74
+const G_IO_ERROR_CANCELLED: I32 = 19
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:75
+const G_IO_ERROR_QUARK: String = "g-io-error-quark" + TEXT_NUL
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:76
+const GTK_ORIENTATION_VERTICAL: I32 = 1
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:77
+const GTK_STYLE_PROVIDER_PRIORITY_APPLICATION: I32 = 600
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:80
+const GTK_ACCESSIBLE_PROPERTY_DESCRIPTION: I32 = 1
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:81
+const GTK_ACCESSIBLE_PROPERTY_LABEL: I32 = 4
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:85
+type AsyncReadyCallback = fn(gpointer, Ptr<GAsyncResult>, gpointer) -> ()
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:86
+type DestroyCallback = fn(gpointer, Ptr<GClosure>) -> ()
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:88
+type GtkAccessibleUpdateProperty = fn(Ptr<GtkAccessible>, I32, Ptr<I8>, I32) -> ()
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:91
+// GATE #4565: kernel primitive — these are native C function pointers, not Jet
+// closures; admission/call lowering must preserve the declared C signatures.
+struct Api {
+    _handle: Ptr<c_void>
+    gtk_init_check: fn() -> gboolean
+    gtk_window_new: fn() -> Ptr<GtkWidget>
+    gtk_window_set_title: fn(Ptr<GtkWidget>, Ptr<I8>) -> ()
+    gtk_window_set_default_size: fn(Ptr<GtkWidget>, I32, I32) -> ()
+    gtk_window_set_child: fn(Ptr<GtkWidget>, Ptr<GtkWidget>) -> ()
+    gtk_window_present: fn(Ptr<GtkWidget>) -> ()
+    gtk_box_new: fn(I32, I32) -> Ptr<GtkWidget>
+    gtk_box_append: fn(Ptr<GtkWidget>, Ptr<GtkWidget>) -> ()
+    gtk_box_remove: fn(Ptr<GtkWidget>, Ptr<GtkWidget>) -> ()
+    gtk_label_new: fn(Ptr<I8>) -> Ptr<GtkWidget>
+    gtk_label_set_text: fn(Ptr<GtkWidget>, Ptr<I8>) -> ()
+    gtk_button_new_with_label: fn(Ptr<I8>) -> Ptr<GtkWidget>
+    gtk_button_set_label: fn(Ptr<GtkWidget>, Ptr<I8>) -> ()
+    gtk_entry_new: fn() -> Ptr<GtkWidget>
+    gtk_editable_set_text: fn(Ptr<GtkWidget>, Ptr<I8>) -> ()
+    gtk_widget_set_size_request: fn(Ptr<GtkWidget>, I32, I32) -> ()
+    gtk_widget_add_css_class: fn(Ptr<GtkWidget>, Ptr<I8>) -> ()
+    gtk_widget_remove_css_class: fn(Ptr<GtkWidget>, Ptr<I8>) -> ()
+    gtk_widget_grab_focus: fn(Ptr<GtkWidget>) -> gboolean
+    gtk_css_provider_new: fn() -> Ptr<GtkCssProvider>
+    gtk_css_provider_load_from_string: fn(Ptr<GtkCssProvider>, Ptr<I8>) -> ()
+    gtk_style_context_add_provider_for_display: fn(Ptr<GdkDisplay>, Ptr<GtkCssProvider>, I32) -> ()
+    gdk_display_get_default: fn() -> Ptr<GdkDisplay>
+    gdk_display_get_clipboard: fn(Ptr<GdkDisplay>) -> Ptr<GdkClipboard>
+    gdk_clipboard_set_text: fn(Ptr<GdkClipboard>, Ptr<I8>) -> ()
+    gdk_clipboard_read_text_async: fn(Ptr<GdkClipboard>, gpointer, AsyncReadyCallback, gpointer) -> ()
+    gdk_clipboard_read_text_finish: fn(Ptr<GdkClipboard>, Ptr<GAsyncResult>, Ptr<Ptr<GError>>) -> Ptr<I8>
+    g_main_context_iteration: fn(gpointer, gboolean) -> gboolean
+    g_free: fn(gpointer) -> ()
+    g_signal_connect_data: fn(gpointer, Ptr<I8>, gpointer, gpointer, DestroyCallback?, I32) -> U64
+    gtk_file_dialog_new: fn() -> Ptr<GtkFileDialog>
+    gtk_file_dialog_set_title: fn(Ptr<GtkFileDialog>, Ptr<I8>) -> ()
+    gtk_file_dialog_set_modal: fn(Ptr<GtkFileDialog>, gboolean) -> ()
+    gtk_file_dialog_set_initial_folder: fn(Ptr<GtkFileDialog>, Ptr<GFile>) -> ()
+    gtk_file_dialog_set_filters: fn(Ptr<GtkFileDialog>, Ptr<GListModel>) -> ()
+    gtk_file_dialog_open: fn(Ptr<GtkFileDialog>, Ptr<GtkWidget>, gpointer, AsyncReadyCallback, gpointer) -> ()
+    gtk_file_dialog_open_multiple: fn(Ptr<GtkFileDialog>, Ptr<GtkWidget>, gpointer, AsyncReadyCallback, gpointer) -> ()
+    gtk_file_dialog_save: fn(Ptr<GtkFileDialog>, Ptr<GtkWidget>, gpointer, AsyncReadyCallback, gpointer) -> ()
+    gtk_file_dialog_open_finish: fn(Ptr<GtkFileDialog>, Ptr<GAsyncResult>, Ptr<Ptr<GError>>) -> Ptr<GFile>
+    gtk_file_dialog_open_multiple_finish: fn(Ptr<GtkFileDialog>, Ptr<GAsyncResult>, Ptr<Ptr<GError>>) -> Ptr<GListModel>
+    gtk_file_dialog_save_finish: fn(Ptr<GtkFileDialog>, Ptr<GAsyncResult>, Ptr<Ptr<GError>>) -> Ptr<GFile>
+    gtk_file_filter_new: fn() -> Ptr<GtkFileFilter>
+    gtk_file_filter_get_type: fn() -> GType
+    gtk_file_filter_set_name: fn(Ptr<GtkFileFilter>, Ptr<I8>) -> ()
+    gtk_file_filter_add_pattern: fn(Ptr<GtkFileFilter>, Ptr<I8>) -> ()
+    gtk_file_filter_add_mime_type: fn(Ptr<GtkFileFilter>, Ptr<I8>) -> ()
+    g_type_from_name: fn(Ptr<I8>) -> GType
+    g_list_store_new: fn(GType) -> Ptr<GListStore>
+    g_list_store_append: fn(Ptr<GListStore>, gpointer) -> ()
+    g_list_model_get_n_items: fn(Ptr<GListModel>) -> U32
+    g_list_model_get_item: fn(Ptr<GListModel>, U32) -> gpointer
+    g_file_new_for_path: fn(Ptr<I8>) -> Ptr<GFile>
+    g_file_get_path: fn(Ptr<GFile>) -> Ptr<I8>
+    g_error_free: fn(Ptr<GError>) -> ()
+    g_quark_from_static_string: fn(Ptr<I8>) -> U32
+    g_error_matches: fn(Ptr<GError>, U32, I32) -> gboolean
+    g_main_loop_new: fn(gpointer, gboolean) -> Ptr<GMainLoop>
+    g_main_loop_run: fn(Ptr<GMainLoop>) -> ()
+    g_main_loop_unref: fn(Ptr<GMainLoop>) -> ()
+    g_object_unref: fn(gpointer) -> ()
+    gtk_accessible_update_property: GtkAccessibleUpdateProperty
+    gtk_event_controller_key_new: fn() -> Ptr<GtkEventController>
+    gtk_drop_target_new: fn(GType, U32) -> Ptr<GtkDropTarget>
+    gtk_widget_add_controller: fn(Ptr<GtkWidget>, Ptr<GtkEventController>) -> ()
+    gdk_keyval_name: fn(U32) -> Ptr<I8>
+    g_value_get_string: fn(Ptr<GValue>) -> Ptr<I8>
+}
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:210
+// Api is immutable and process-global; its library handle is intentionally
+// never closed. Kernel Send/Sync admission follows that ownership invariant.
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:219
+// GATE #4565: kernel primitive
+#FFI(c)
+fn dlopen(filename: Ptr<I8>, flags: I32) -> Ptr<c_void>
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:220
+#FFI(c)
+fn dlsym(handle: Ptr<c_void>, symbol_name: Ptr<I8>) -> Ptr<c_void>
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:224
+const RTLD_NOW: I32 = 2
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:227
+fn symbol<T: Copy>(handle: Ptr<c_void>, name: String) -> T? {
+    // GATE #4565: kernel primitive
+    #Unsafe("static NUL-terminated name and exact GTK C function pointer signature") {
+        address :: dlsym(handle, name.as_ptr().cast<I8>())
+        if address.is_null() -> return None
+        Val(memory.transmute_copy<T>(&address))
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:233
+fn load() -> Api? {
+    if selected_family() != "unix" -> return None // Rust:337 non-Unix arm.
+    // Constant text retains static NUL-terminated bytes; never a temporary C loan.
+    const LIBRARIES: [String] = ["libgtk-4.so.1" + TEXT_NUL, "libgtk-4.so" + TEXT_NUL, "libgtk-4.1.dylib" + TEXT_NUL, "libgtk-4.dylib" + TEXT_NUL]
+    for library in LIBRARIES {
+        // GATE #4565: kernel primitive
+        handle :: #Unsafe("static library name; retain returned loader handle for the process") {
+            dlopen(library.as_ptr().cast<I8>(), RTLD_NOW)
+        }
+        if handle.is_null() -> continue
+        // A missing symbol returns None immediately, as the Rust ? macro does.
+        return Val(Api{
+            _handle: handle,
+            gtk_init_check: symbol(handle, "gtk_init_check" + TEXT_NUL)?,
+            gtk_window_new: symbol(handle, "gtk_window_new" + TEXT_NUL)?,
+            gtk_window_set_title: symbol(handle, "gtk_window_set_title" + TEXT_NUL)?,
+            gtk_window_set_default_size: symbol(handle, "gtk_window_set_default_size" + TEXT_NUL)?,
+            gtk_window_set_child: symbol(handle, "gtk_window_set_child" + TEXT_NUL)?,
+            gtk_window_present: symbol(handle, "gtk_window_present" + TEXT_NUL)?,
+            gtk_box_new: symbol(handle, "gtk_box_new" + TEXT_NUL)?,
+            gtk_box_append: symbol(handle, "gtk_box_append" + TEXT_NUL)?,
+            gtk_box_remove: symbol(handle, "gtk_box_remove" + TEXT_NUL)?,
+            gtk_label_new: symbol(handle, "gtk_label_new" + TEXT_NUL)?,
+            gtk_label_set_text: symbol(handle, "gtk_label_set_text" + TEXT_NUL)?,
+            gtk_button_new_with_label: symbol(handle, "gtk_button_new_with_label" + TEXT_NUL)?,
+            gtk_button_set_label: symbol(handle, "gtk_button_set_label" + TEXT_NUL)?,
+            gtk_entry_new: symbol(handle, "gtk_entry_new" + TEXT_NUL)?,
+            gtk_editable_set_text: symbol(handle, "gtk_editable_set_text" + TEXT_NUL)?,
+            gtk_widget_set_size_request: symbol(handle, "gtk_widget_set_size_request" + TEXT_NUL)?,
+            gtk_widget_add_css_class: symbol(handle, "gtk_widget_add_css_class" + TEXT_NUL)?,
+            gtk_widget_remove_css_class: symbol(handle, "gtk_widget_remove_css_class" + TEXT_NUL)?,
+            gtk_widget_grab_focus: symbol(handle, "gtk_widget_grab_focus" + TEXT_NUL)?,
+            gtk_css_provider_new: symbol(handle, "gtk_css_provider_new" + TEXT_NUL)?,
+            gtk_css_provider_load_from_string: symbol(handle, "gtk_css_provider_load_from_string" + TEXT_NUL)?,
+            gtk_style_context_add_provider_for_display: symbol(handle, "gtk_style_context_add_provider_for_display" + TEXT_NUL)?,
+            gdk_display_get_default: symbol(handle, "gdk_display_get_default" + TEXT_NUL)?,
+            gdk_display_get_clipboard: symbol(handle, "gdk_display_get_clipboard" + TEXT_NUL)?,
+            gdk_clipboard_set_text: symbol(handle, "gdk_clipboard_set_text" + TEXT_NUL)?,
+            gdk_clipboard_read_text_async: symbol(handle, "gdk_clipboard_read_text_async" + TEXT_NUL)?,
+            gdk_clipboard_read_text_finish: symbol(handle, "gdk_clipboard_read_text_finish" + TEXT_NUL)?,
+            g_main_context_iteration: symbol(handle, "g_main_context_iteration" + TEXT_NUL)?,
+            g_free: symbol(handle, "g_free" + TEXT_NUL)?,
+            g_signal_connect_data: symbol(handle, "g_signal_connect_data" + TEXT_NUL)?,
+            gtk_file_dialog_new: symbol(handle, "gtk_file_dialog_new" + TEXT_NUL)?,
+            gtk_file_dialog_set_title: symbol(handle, "gtk_file_dialog_set_title" + TEXT_NUL)?,
+            gtk_file_dialog_set_modal: symbol(handle, "gtk_file_dialog_set_modal" + TEXT_NUL)?,
+            gtk_file_dialog_set_initial_folder: symbol(handle, "gtk_file_dialog_set_initial_folder" + TEXT_NUL)?,
+            gtk_file_dialog_set_filters: symbol(handle, "gtk_file_dialog_set_filters" + TEXT_NUL)?,
+            gtk_file_dialog_open: symbol(handle, "gtk_file_dialog_open" + TEXT_NUL)?,
+            gtk_file_dialog_open_multiple: symbol(handle, "gtk_file_dialog_open_multiple" + TEXT_NUL)?,
+            gtk_file_dialog_save: symbol(handle, "gtk_file_dialog_save" + TEXT_NUL)?,
+            gtk_file_dialog_open_finish: symbol(handle, "gtk_file_dialog_open_finish" + TEXT_NUL)?,
+            gtk_file_dialog_open_multiple_finish: symbol(handle, "gtk_file_dialog_open_multiple_finish" + TEXT_NUL)?,
+            gtk_file_dialog_save_finish: symbol(handle, "gtk_file_dialog_save_finish" + TEXT_NUL)?,
+            gtk_file_filter_new: symbol(handle, "gtk_file_filter_new" + TEXT_NUL)?,
+            gtk_file_filter_get_type: symbol(handle, "gtk_file_filter_get_type" + TEXT_NUL)?,
+            gtk_file_filter_set_name: symbol(handle, "gtk_file_filter_set_name" + TEXT_NUL)?,
+            gtk_file_filter_add_pattern: symbol(handle, "gtk_file_filter_add_pattern" + TEXT_NUL)?,
+            gtk_file_filter_add_mime_type: symbol(handle, "gtk_file_filter_add_mime_type" + TEXT_NUL)?,
+            g_type_from_name: symbol(handle, "g_type_from_name" + TEXT_NUL)?,
+            g_list_store_new: symbol(handle, "g_list_store_new" + TEXT_NUL)?,
+            g_list_store_append: symbol(handle, "g_list_store_append" + TEXT_NUL)?,
+            g_list_model_get_n_items: symbol(handle, "g_list_model_get_n_items" + TEXT_NUL)?,
+            g_list_model_get_item: symbol(handle, "g_list_model_get_item" + TEXT_NUL)?,
+            g_file_new_for_path: symbol(handle, "g_file_new_for_path" + TEXT_NUL)?,
+            g_file_get_path: symbol(handle, "g_file_get_path" + TEXT_NUL)?,
+            g_error_free: symbol(handle, "g_error_free" + TEXT_NUL)?,
+            g_quark_from_static_string: symbol(handle, "g_quark_from_static_string" + TEXT_NUL)?,
+            g_error_matches: symbol(handle, "g_error_matches" + TEXT_NUL)?,
+            g_main_loop_new: symbol(handle, "g_main_loop_new" + TEXT_NUL)?,
+            g_main_loop_run: symbol(handle, "g_main_loop_run" + TEXT_NUL)?,
+            g_main_loop_unref: symbol(handle, "g_main_loop_unref" + TEXT_NUL)?,
+            g_object_unref: symbol(handle, "g_object_unref" + TEXT_NUL)?,
+            gtk_accessible_update_property: symbol(handle, "gtk_accessible_update_property" + TEXT_NUL)?,
+            gtk_event_controller_key_new: symbol(handle, "gtk_event_controller_key_new" + TEXT_NUL)?,
+            gtk_drop_target_new: symbol(handle, "gtk_drop_target_new" + TEXT_NUL)?,
+            gtk_widget_add_controller: symbol(handle, "gtk_widget_add_controller" + TEXT_NUL)?,
+            gdk_keyval_name: symbol(handle, "gdk_keyval_name" + TEXT_NUL)?,
+            g_value_get_string: symbol(handle, "g_value_get_string" + TEXT_NUL)?
+        })
+    }
+    None
+}
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:341
+fn gtk_api() -> &Api? {
+    // GATE #4565: kernel primitive
+    #Unsafe("one immutable loader result; its native pointers remain process-live") {
+        static API: LazyLock<Api?> = LazyLock.new(load)
+        API.as_ref()
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:346
+// Macro wrappers expand below. Defaults are only the original missing-library
+// branches. Native calls always use the loaded exact symbol, never a provider mock.
+// GATE #4565: kernel primitive — audited C-ABI symbol calls.
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:358
+fn gtk_init_check() -> gboolean { if gtk_api() is Val(api) { return #Unsafe("GTK init C ABI") { api.gtk_init_check() } }; 0 }
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:359
+fn gtk_window_new() -> Ptr<GtkWidget> { if gtk_api() is Val(api) { return #Unsafe("GTK window C ABI") { api.gtk_window_new() } }; Ptr.null() }
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:360
+fn gtk_window_set_title(window: Ptr<GtkWidget>, title: Ptr<I8>) -> { if gtk_api() is Val(api) { #Unsafe("GTK window title C ABI") { api.gtk_window_set_title(window, title) } } }
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:361
+fn gtk_window_set_default_size(window: Ptr<GtkWidget>, width: I32, height: I32) -> { if gtk_api() is Val(api) { #Unsafe("GTK window size C ABI") { api.gtk_window_set_default_size(window, width, height) } } }
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:362
+fn gtk_window_set_child(window: Ptr<GtkWidget>, child: Ptr<GtkWidget>) -> { if gtk_api() is Val(api) { #Unsafe("GTK child C ABI") { api.gtk_window_set_child(window, child) } } }
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:363
+fn gtk_window_present(window: Ptr<GtkWidget>) -> { if gtk_api() is Val(api) { #Unsafe("GTK present C ABI") { api.gtk_window_present(window) } } }
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:364
+fn gtk_box_new(orientation: I32, spacing: I32) -> Ptr<GtkWidget> { if gtk_api() is Val(api) { return #Unsafe("GTK box C ABI") { api.gtk_box_new(orientation, spacing) } }; Ptr.null() }
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:365
+fn gtk_box_append(box_: Ptr<GtkWidget>, child: Ptr<GtkWidget>) -> { if gtk_api() is Val(api) { #Unsafe("GTK append C ABI") { api.gtk_box_append(box_, child) } } }
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:366
+fn gtk_box_remove(box_: Ptr<GtkWidget>, child: Ptr<GtkWidget>) -> { if gtk_api() is Val(api) { #Unsafe("GTK remove C ABI") { api.gtk_box_remove(box_, child) } } }
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:367
+fn gtk_label_new(text: Ptr<I8>) -> Ptr<GtkWidget> { if gtk_api() is Val(api) { return #Unsafe("GTK label C ABI") { api.gtk_label_new(text) } }; Ptr.null() }
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:368
+fn gtk_label_set_text(label: Ptr<GtkWidget>, text: Ptr<I8>) -> { if gtk_api() is Val(api) { #Unsafe("GTK label text C ABI") { api.gtk_label_set_text(label, text) } } }
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:369
+fn gtk_button_new_with_label(label: Ptr<I8>) -> Ptr<GtkWidget> { if gtk_api() is Val(api) { return #Unsafe("GTK button C ABI") { api.gtk_button_new_with_label(label) } }; Ptr.null() }
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:370
+fn gtk_button_set_label(button: Ptr<GtkWidget>, label: Ptr<I8>) -> { if gtk_api() is Val(api) { #Unsafe("GTK button label C ABI") { api.gtk_button_set_label(button, label) } } }
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:371
+fn gtk_entry_new() -> Ptr<GtkWidget> { if gtk_api() is Val(api) { return #Unsafe("GTK entry C ABI") { api.gtk_entry_new() } }; Ptr.null() }
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:372
+fn gtk_editable_set_text(editable: Ptr<GtkWidget>, text: Ptr<I8>) -> { if gtk_api() is Val(api) { #Unsafe("GTK editable C ABI") { api.gtk_editable_set_text(editable, text) } } }
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:373
+fn gtk_widget_set_size_request(widget: Ptr<GtkWidget>, width: I32, height: I32) -> { if gtk_api() is Val(api) { #Unsafe("GTK widget size C ABI") { api.gtk_widget_set_size_request(widget, width, height) } } }
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:374
+fn gtk_widget_add_css_class(widget: Ptr<GtkWidget>, css_class: Ptr<I8>) -> { if gtk_api() is Val(api) { #Unsafe("GTK add CSS C ABI") { api.gtk_widget_add_css_class(widget, css_class) } } }
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:375
+fn gtk_widget_remove_css_class(widget: Ptr<GtkWidget>, css_class: Ptr<I8>) -> { if gtk_api() is Val(api) { #Unsafe("GTK remove CSS C ABI") { api.gtk_widget_remove_css_class(widget, css_class) } } }
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:376
+fn gtk_widget_grab_focus(widget: Ptr<GtkWidget>) -> gboolean { if gtk_api() is Val(api) { return #Unsafe("GTK focus C ABI") { api.gtk_widget_grab_focus(widget) } }; 0 }
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:377
+fn gtk_css_provider_new() -> Ptr<GtkCssProvider> { if gtk_api() is Val(api) { return #Unsafe("GTK CSS provider C ABI") { api.gtk_css_provider_new() } }; Ptr.null() }
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:378
+fn gtk_css_provider_load_from_string(provider: Ptr<GtkCssProvider>, string: Ptr<I8>) -> { if gtk_api() is Val(api) { #Unsafe("GTK CSS load C ABI") { api.gtk_css_provider_load_from_string(provider, string) } } }
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:379
+fn gtk_style_context_add_provider_for_display(display: Ptr<GdkDisplay>, provider: Ptr<GtkCssProvider>, priority: I32) -> { if gtk_api() is Val(api) { #Unsafe("GTK CSS install C ABI") { api.gtk_style_context_add_provider_for_display(display, provider, priority) } } }
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:380
+fn gdk_display_get_default() -> Ptr<GdkDisplay> { if gtk_api() is Val(api) { return #Unsafe("GDK display C ABI") { api.gdk_display_get_default() } }; Ptr.null() }
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:381
+fn gdk_display_get_clipboard(display: Ptr<GdkDisplay>) -> Ptr<GdkClipboard> { if gtk_api() is Val(api) { return #Unsafe("GDK clipboard C ABI") { api.gdk_display_get_clipboard(display) } }; Ptr.null() }
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:382
+fn gdk_clipboard_set_text(clipboard: Ptr<GdkClipboard>, text: Ptr<I8>) -> { if gtk_api() is Val(api) { #Unsafe("GDK clipboard write C ABI") { api.gdk_clipboard_set_text(clipboard, text) } } }
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:383
+fn gdk_clipboard_read_text_async(clipboard: Ptr<GdkClipboard>, cancellable: gpointer, callback: AsyncReadyCallback, user_data: gpointer) -> { if gtk_api() is Val(api) { #Unsafe("GDK clipboard async C ABI") { api.gdk_clipboard_read_text_async(clipboard, cancellable, callback, user_data) } } }
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:384
+fn gdk_clipboard_read_text_finish(clipboard: Ptr<GdkClipboard>, result: Ptr<GAsyncResult>, error: Ptr<Ptr<GError>>) -> Ptr<I8> { if gtk_api() is Val(api) { return #Unsafe("GDK clipboard finish C ABI") { api.gdk_clipboard_read_text_finish(clipboard, result, error) } }; Ptr.null() }
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:385
+fn g_main_context_iteration(context: gpointer, may_block: gboolean) -> gboolean { if gtk_api() is Val(api) { return #Unsafe("GLib context C ABI") { api.g_main_context_iteration(context, may_block) } }; 0 }
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:386
+fn g_free(pointer: gpointer) -> { if gtk_api() is Val(api) { #Unsafe("GLib allocator C ABI") { api.g_free(pointer) } } }
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:387
+fn g_signal_connect_data(instance: gpointer, detailed_signal: Ptr<I8>, c_handler: gpointer, data: gpointer, destroy_data: DestroyCallback?, connect_flags: I32) -> U64 { if gtk_api() is Val(api) { return #Unsafe("GLib signal C ABI and owned callback") { api.g_signal_connect_data(instance, detailed_signal, c_handler, data, destroy_data, connect_flags) } }; 0 }
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:388
+fn gtk_file_dialog_new() -> Ptr<GtkFileDialog> { if gtk_api() is Val(api) { return #Unsafe("GTK file dialog C ABI") { api.gtk_file_dialog_new() } }; Ptr.null() }
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:389
+fn gtk_file_dialog_set_title(dialog: Ptr<GtkFileDialog>, title: Ptr<I8>) -> { if gtk_api() is Val(api) { #Unsafe("GTK dialog title C ABI") { api.gtk_file_dialog_set_title(dialog, title) } } }
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:390
+fn gtk_file_dialog_set_modal(dialog: Ptr<GtkFileDialog>, modal: gboolean) -> { if gtk_api() is Val(api) { #Unsafe("GTK dialog modal C ABI") { api.gtk_file_dialog_set_modal(dialog, modal) } } }
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:391
+fn gtk_file_dialog_set_initial_folder(dialog: Ptr<GtkFileDialog>, folder: Ptr<GFile>) -> { if gtk_api() is Val(api) { #Unsafe("GTK dialog folder C ABI") { api.gtk_file_dialog_set_initial_folder(dialog, folder) } } }
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:392
+fn gtk_file_dialog_set_filters(dialog: Ptr<GtkFileDialog>, filters: Ptr<GListModel>) -> { if gtk_api() is Val(api) { #Unsafe("GTK dialog filters C ABI") { api.gtk_file_dialog_set_filters(dialog, filters) } } }
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:393
+fn gtk_file_dialog_open(dialog: Ptr<GtkFileDialog>, parent: Ptr<GtkWidget>, cancellable: gpointer, callback: AsyncReadyCallback, user_data: gpointer) -> { if gtk_api() is Val(api) { #Unsafe("GTK dialog open C ABI") { api.gtk_file_dialog_open(dialog, parent, cancellable, callback, user_data) } } }
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:394
+fn gtk_file_dialog_open_multiple(dialog: Ptr<GtkFileDialog>, parent: Ptr<GtkWidget>, cancellable: gpointer, callback: AsyncReadyCallback, user_data: gpointer) -> { if gtk_api() is Val(api) { #Unsafe("GTK dialog multi-open C ABI") { api.gtk_file_dialog_open_multiple(dialog, parent, cancellable, callback, user_data) } } }
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:395
+fn gtk_file_dialog_save(dialog: Ptr<GtkFileDialog>, parent: Ptr<GtkWidget>, cancellable: gpointer, callback: AsyncReadyCallback, user_data: gpointer) -> { if gtk_api() is Val(api) { #Unsafe("GTK dialog save C ABI") { api.gtk_file_dialog_save(dialog, parent, cancellable, callback, user_data) } } }
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:396
+fn gtk_file_dialog_open_finish(dialog: Ptr<GtkFileDialog>, result: Ptr<GAsyncResult>, error: Ptr<Ptr<GError>>) -> Ptr<GFile> { if gtk_api() is Val(api) { return #Unsafe("GTK dialog open finish C ABI") { api.gtk_file_dialog_open_finish(dialog, result, error) } }; Ptr.null() }
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:397
+fn gtk_file_dialog_open_multiple_finish(dialog: Ptr<GtkFileDialog>, result: Ptr<GAsyncResult>, error: Ptr<Ptr<GError>>) -> Ptr<GListModel> { if gtk_api() is Val(api) { return #Unsafe("GTK dialog multi finish C ABI") { api.gtk_file_dialog_open_multiple_finish(dialog, result, error) } }; Ptr.null() }
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:398
+fn gtk_file_dialog_save_finish(dialog: Ptr<GtkFileDialog>, result: Ptr<GAsyncResult>, error: Ptr<Ptr<GError>>) -> Ptr<GFile> { if gtk_api() is Val(api) { return #Unsafe("GTK dialog save finish C ABI") { api.gtk_file_dialog_save_finish(dialog, result, error) } }; Ptr.null() }
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:399
+fn gtk_file_filter_new() -> Ptr<GtkFileFilter> { if gtk_api() is Val(api) { return #Unsafe("GTK filter C ABI") { api.gtk_file_filter_new() } }; Ptr.null() }
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:400
+fn gtk_file_filter_get_type() -> GType { if gtk_api() is Val(api) { return #Unsafe("GTK filter type C ABI") { api.gtk_file_filter_get_type() } }; 0 }
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:401
+fn gtk_file_filter_set_name(filter: Ptr<GtkFileFilter>, name: Ptr<I8>) -> { if gtk_api() is Val(api) { #Unsafe("GTK filter name C ABI") { api.gtk_file_filter_set_name(filter, name) } } }
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:402
+fn gtk_file_filter_add_pattern(filter: Ptr<GtkFileFilter>, pattern: Ptr<I8>) -> { if gtk_api() is Val(api) { #Unsafe("GTK filter pattern C ABI") { api.gtk_file_filter_add_pattern(filter, pattern) } } }
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:403
+fn gtk_file_filter_add_mime_type(filter: Ptr<GtkFileFilter>, mime: Ptr<I8>) -> { if gtk_api() is Val(api) { #Unsafe("GTK MIME filter C ABI") { api.gtk_file_filter_add_mime_type(filter, mime) } } }
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:404
+fn g_type_from_name(name: Ptr<I8>) -> GType { if gtk_api() is Val(api) { return #Unsafe("GLib type C ABI") { api.g_type_from_name(name) } }; 0 }
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:405
+fn g_list_store_new(item_type: GType) -> Ptr<GListStore> { if gtk_api() is Val(api) { return #Unsafe("GLib store C ABI") { api.g_list_store_new(item_type) } }; Ptr.null() }
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:406
+fn g_list_store_append(store: Ptr<GListStore>, item: gpointer) -> { if gtk_api() is Val(api) { #Unsafe("GLib append C ABI") { api.g_list_store_append(store, item) } } }
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:407
+fn g_list_model_get_n_items(model: Ptr<GListModel>) -> U32 { if gtk_api() is Val(api) { return #Unsafe("GLib model count C ABI") { api.g_list_model_get_n_items(model) } }; 0 }
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:408
+fn g_list_model_get_item(model: Ptr<GListModel>, position: U32) -> gpointer { if gtk_api() is Val(api) { return #Unsafe("GLib model item C ABI") { api.g_list_model_get_item(model, position) } }; Ptr.null() }
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:409
+fn g_file_new_for_path(path: Ptr<I8>) -> Ptr<GFile> { if gtk_api() is Val(api) { return #Unsafe("GIO file C ABI") { api.g_file_new_for_path(path) } }; Ptr.null() }
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:410
+fn g_file_get_path(file: Ptr<GFile>) -> Ptr<I8> { if gtk_api() is Val(api) { return #Unsafe("GIO path C ABI") { api.g_file_get_path(file) } }; Ptr.null() }
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:411
+fn g_error_free(error: Ptr<GError>) -> { if gtk_api() is Val(api) { #Unsafe("GLib error free C ABI") { api.g_error_free(error) } } }
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:412
+fn g_quark_from_static_string(text: Ptr<I8>) -> U32 { if gtk_api() is Val(api) { return #Unsafe("GLib static quark C ABI") { api.g_quark_from_static_string(text) } }; 0 }
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:413
+fn g_error_matches(error: Ptr<GError>, domain: U32, code: I32) -> gboolean { if gtk_api() is Val(api) { return #Unsafe("GLib error match C ABI") { api.g_error_matches(error, domain, code) } }; 0 }
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:414
+fn g_main_loop_new(context: gpointer, is_running: gboolean) -> Ptr<GMainLoop> { if gtk_api() is Val(api) { return #Unsafe("GLib loop C ABI") { api.g_main_loop_new(context, is_running) } }; Ptr.null() }
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:415
+fn g_main_loop_run(loop_: Ptr<GMainLoop>) -> { if gtk_api() is Val(api) { #Unsafe("GLib loop run C ABI") { api.g_main_loop_run(loop_) } } }
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:416
+fn g_main_loop_unref(loop_: Ptr<GMainLoop>) -> { if gtk_api() is Val(api) { #Unsafe("GLib loop release C ABI") { api.g_main_loop_unref(loop_) } } }
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:417
+fn g_object_unref(object: gpointer) -> { if gtk_api() is Val(api) { #Unsafe("GLib object release C ABI") { api.g_object_unref(object) } } }
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:418
+fn gtk_event_controller_key_new() -> Ptr<GtkEventController> { if gtk_api() is Val(api) { return #Unsafe("GTK key controller C ABI") { api.gtk_event_controller_key_new() } }; Ptr.null() }
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:419
+fn gtk_drop_target_new(value_type: GType, actions: U32) -> Ptr<GtkDropTarget> { if gtk_api() is Val(api) { return #Unsafe("GTK drop target C ABI") { api.gtk_drop_target_new(value_type, actions) } }; Ptr.null() }
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:420
+fn gtk_widget_add_controller(widget: Ptr<GtkWidget>, controller: Ptr<GtkEventController>) -> { if gtk_api() is Val(api) { #Unsafe("GTK attach controller C ABI") { api.gtk_widget_add_controller(widget, controller) } } }
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:421
+fn gdk_keyval_name(keyval: U32) -> Ptr<I8> { if gtk_api() is Val(api) { return #Unsafe("GDK key name C ABI") { api.gdk_keyval_name(keyval) } }; Ptr.null() }
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:422
+fn g_value_get_string(value: Ptr<GValue>) -> Ptr<I8> { if gtk_api() is Val(api) { return #Unsafe("GLib value string C ABI") { api.g_value_get_string(value) } }; Ptr.null() }
+
+// PORT-PENDING 0193 crates-jet-codegen-src-prelude-uigtk: crates/jet-codegen/src/Prelude/UiGtk.rs:424-2048
 //RS     /// Trampoline for a GTK "clicked" signal. Each connection owns one boxed
 //RS     /// `Arc<dyn Fn() + Send + Sync>`; the registry retains another `Arc` for path recreation.
 //RS     extern "C" fn jet_gtk_click_trampoline(_widget: *mut GtkWidget, data: gpointer) {

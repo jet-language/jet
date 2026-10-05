@@ -1,0 +1,29 @@
+use core.encoding.runtime.kernel_codec.[jet_codec_date_encode, jet_codec_date_decode, jet_codec_local_time_encode, jet_codec_local_time_decode, jet_codec_datetime_encode, jet_codec_datetime_decode, jet_codec_duration_encode, jet_codec_duration_decode, jet_codec_decimal_encode, jet_codec_decimal_decode_int]
+
+// Rust: crates/jet-codegen/src/Prelude/Core/Codec.rs:60
+#Test("codec_calendar_clamping_and_leap_year") {
+    assert(jet_codec_date_encode(2000, 2, 31) == "2000-02-29")
+    assert(jet_codec_date_encode(1900, 2, 31) == "1900-02-28")
+    assert(jet_codec_date_decode("2000-02-29") == Ok((2000, 2, 29)))
+    assert(jet_codec_date_decode("1900-02-29") == Err("date out of range: 1900-02-29"))
+    assert(jet_codec_date_decode("bad-02-29") == Err("bad year: bad"))
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Codec.rs:85
+#Test("codec_local_time_has_no_leap_second") {
+    assert(jet_codec_local_time_encode(-1, 99, 60) == "00:59:59")
+    assert(jet_codec_local_time_decode("23:59:60") == Err("time out of range: 23:59:60"))
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Codec.rs:154
+#Test("codec_datetime_epoch_offset_and_leap") {
+    assert(jet_codec_datetime_decode("1970-01-01T01:00:00+01:00") == Ok((0, U32{0}, false)))
+    assert(jet_codec_datetime_encode(-1, U32{0}, false) == "1969-12-31T23:59:59Z")
+    assert(jet_codec_datetime_decode("1970-01-01T23:59:60Z") == Ok((86399, U32{0}, true)))
+    assert(jet_codec_datetime_decode("1970-01-01T23:59:60+01:00") == Err("time out of range: 23:59:60"))
+    assert(jet_codec_datetime_encode(0, U32{1000000001}, false) == "1970-01-01T00:00:01.000000001Z")
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Codec.rs:211
+#Test("codec_duration_and_decimal_exact") {
+    assert(jet_codec_duration_decode(jet_codec_duration_encode(I64{-17})) == I64{-17})
+    value :: jet_codec_decimal_decode_int(I64{9007199254740993}).unwrap()
+    assert(jet_codec_decimal_encode(&value) == "9007199254740993")
+}

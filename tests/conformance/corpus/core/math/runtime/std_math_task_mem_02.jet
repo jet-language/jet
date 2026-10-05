@@ -1,0 +1,149 @@
+use core.math.runtime.std_math_task_mem.JetShared
+use core.math.runtime.std_math_task_mem_02.*
+use core.mem.runtime.shared_protocol.[JetSharedPhysicalOwnerApi, JetSharedPhysicalFinalizerBinding]
+use std.sync.[Arc, Mutex]
+use std.sync.atomic.[AtomicUsize, Ordering]
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:3363
+#Test("physical_owner_capability_does_not_retain_or_count_the_shared_root") {
+    shared :: JetShared.new("payload")
+    identity :: shared.physical_identity()
+    order_key :: shared.physical_protocol_order_key()
+    owner :: shared.physical_owner()
+    assert_eq(shared.strong_count(), 1)
+    assert_eq(owner.strong_count(), 1)
+    assert_eq(owner.physical_identity(), identity)
+    assert_eq(owner.protocol_order_key(), order_key)
+    drop(^shared)
+    assert_eq(owner.strong_count(), 0)
+    assert(owner.upgrade().is_none())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:3378
+#Test("payload_finalizer_completion_follows_last_explicit_owner_and_borrow_release") {
+    // GATE #4565: kernel primitive
+    #Unsafe("test retains synchronized finalizer and delivery counters through the last physical borrow") {
+        shared :: JetShared.new("payload")
+        owner :: shared.physical_owner()
+        alias :: owner.reserve_logical_alias().unwrap().unwrap()
+        borrow :: owner.upgrade().unwrap()
+        finalized :: Arc.new(AtomicUsize.new(0))
+        finalizer_count :: finalized.clone()
+        delivered :: Arc.new(AtomicUsize.new(0))
+        delivery_count :: delivered.clone()
+        finalizer := Val(JetSharedPhysicalFinalizerBinding.new(
+            Box.new(fn(payload: String) {
+                assert_eq(payload, "payload")
+                _ :: finalizer_count.fetch_add(1, Ordering.SeqCst)
+                Box.new("source completion")
+            }), Arc.new(fn(completion) {
+                _ :: delivery_count.fetch_add(1, Ordering.SeqCst)
+                drop(^completion)
+            })))
+        owner.install_payload_finalizer(&finalizer).unwrap()
+        assert(finalizer.is_none(), "successful installation transfers the candidate")
+        drop(^shared)
+        alias_release :: owner.release_owner_alias(^alias)
+        alias_release.result.unwrap()
+        assert(alias_release.completion.is_none())
+        assert_eq(finalized.load(Ordering.SeqCst), 0)
+        borrow_release :: owner.release_physical_borrow(^borrow)
+        borrow_release.result.unwrap()
+        assert_eq(finalized.load(Ordering.SeqCst), 1)
+        assert_eq(*borrow_release.completion.unwrap().downcast<String>().unwrap(), "source completion")
+        assert_eq(delivered.load(Ordering.SeqCst), 0)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:3423
+#Test("payload_finalizer_rust_drop_delivers_through_its_paired_consumer") {
+    // GATE #4565: kernel primitive
+    #Unsafe("paired completion consumer retains synchronized output until implicit owner release") {
+        shared :: JetShared.new("payload")
+        owner :: shared.physical_owner()
+        alias :: owner.reserve_logical_alias().unwrap().unwrap()
+        finalized :: Arc.new(AtomicUsize.new(0))
+        finalizer_count :: finalized.clone()
+        delivered :: Arc.new(Mutex.new([String]{}))
+        delivery_results :: delivered.clone()
+        finalizer := Val(JetSharedPhysicalFinalizerBinding.new(
+            Box.new(fn(payload: String) {
+                assert_eq(payload, "payload")
+                _ :: finalizer_count.fetch_add(1, Ordering.SeqCst)
+                Box.new("drop completion")
+            }), Arc.new(fn(completion) {
+                completion :: completion.downcast<String>().unwrap_or_else(fn(_) {
+                    panic("drop delivery received a different completion type")
+                })
+                delivery_results.lock().unwrap().push(*completion)
+            })))
+        owner.install_payload_finalizer(&finalizer).unwrap()
+        drop(^shared)
+        drop(^alias)
+        assert_eq(finalized.load(Ordering.SeqCst), 1)
+        assert_eq(delivered.lock().unwrap().as_slice(), &["drop completion"])
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:3456
+#Test("payload_finalizer_install_rejection_preserves_the_candidate") {
+    // GATE #4565: kernel primitive
+    #Unsafe("test finalizer counters remain live while rejected bindings preserve their owned callbacks") {
+        shared :: JetShared.new("payload")
+        owner :: shared.physical_owner()
+        installed := Val(JetSharedPhysicalFinalizerBinding.new(Box.new(fn(_) { Box.new(()) }), Arc.new(drop)))
+        owner.install_payload_finalizer(&installed).unwrap()
+        assert(installed.is_none())
+        rejected_calls :: Arc.new(AtomicUsize.new(0))
+        rejected_count :: rejected_calls.clone()
+        duplicate := Val(JetSharedPhysicalFinalizerBinding.new(
+            Box.new(fn(payload: String) {
+                assert_eq(payload, "rejected")
+                _ :: rejected_count.fetch_add(1, Ordering.SeqCst)
+                Box.new("rejected completion")
+            }), Arc.new(drop)))
+        assert(owner.install_payload_finalizer(&duplicate).is_err())
+        assert(duplicate.is_some())
+        assert_eq(*duplicate.take().unwrap().finish("rejected").downcast<String>().unwrap(), "rejected completion")
+        assert_eq(rejected_calls.load(Ordering.SeqCst), 1)
+        alias :: owner.reserve_logical_alias().unwrap().unwrap()
+        drop(^shared)
+        finalization :: owner.release_owner_alias(^alias)
+        finalization.result.unwrap()
+        assert(finalization.completion.unwrap().downcast<()>().is_ok())
+        retired_owner :: {
+            shared :: JetShared.new("retired")
+            owner :: shared.physical_owner()
+            drop(^shared)
+            ^owner
+        }
+        retired := Val(JetSharedPhysicalFinalizerBinding.new(Box.new(fn(_) { Box.new(()) }), Arc.new(drop)))
+        assert(retired_owner.install_payload_finalizer(&retired).is_err())
+        assert(retired.is_some())
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:3511
+#Test("transport_failure_does_not_publish_a_partial_physical_edit") {
+    shared :: JetShared.new("before")
+    revision :: shared.revision()
+    result: () Err! :: shared.try_edit_with(fn(_) { Err("invalid payload") })
+    assert_eq(result, Err("invalid payload"))
+    assert_eq(shared.revision(), revision)
+    assert_eq(shared.read(String.clone), "before")
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:3522
+#Test("semantic_callback_error_can_follow_a_committed_valid_edit") {
+    shared :: JetShared.new("before")
+    revision :: shared.revision()
+    result :: shared.try_edit_with(fn(current) { Ok(("{current}-edited", Err("callback failed"))) })
+    assert_eq(result, Ok(Err("callback failed")))
+    assert_eq(shared.revision(), revision + 1)
+    assert_eq(shared.read(String.clone), "before-edited")
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:3535
+#Test("conditional_replace_publishes_once_and_stale_revision_leaves_value_unchanged") {
+    shared :: JetShared.new("before")
+    snapshot :: shared.capture_with(String.clone)
+    revision :: snapshot.revision()
+    assert_eq(shared.try_replace_if_revision(revision, "after"), Ok((true, revision + 1)))
+    assert_eq(shared.try_replace_if_revision(revision, "stale"), Ok((false, revision + 1)))
+    assert_eq(shared.revision(), revision + 1)
+    assert_eq(shared.read(String.clone), "after")
+}

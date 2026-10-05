@@ -1,0 +1,18 @@
+use core.jobs.runtime.job_queue_types.[JetJobPayload, JetJobResult, JetJobError]
+// Rust: crates/jet-codegen/src/Prelude/JobQueueTypes.rs:1
+#Test("job_queue_payload_and_completion_retain_typed_carriers") {
+    payload :: JetJobPayload{type_id: "schema", bytes: [U8{0}, U8{255}], publish: true}
+    assert(payload.clone() == payload)
+    assert(payload != JetJobPayload{type_id: "other", bytes: [U8{0}, U8{255}], publish: true})
+    result :: JetJobResult{type_id: "schema", bytes: [U8{1}], publish: false}
+    assert(result.clone() == result)
+    assert(!result.publish)
+}
+// Rust: crates/jet-codegen/src/Prelude/JobQueueTypes.rs:20
+#Test("job_queue_failure_keeps_machine_reason_and_optional_detail_separate") {
+    failure :: JetJobError{type_id: "schema", reason: "rejected", detail: None}
+    detailed :: JetJobError{type_id: "schema", reason: "rejected", detail: Val("human detail")}
+    assert(failure.clone() == failure)
+    assert(failure != detailed)
+    assert(detailed.reason == "rejected")
+}

@@ -1,1439 +1,875 @@
-// PORT-PENDING 0171 crates-jet-codegen-src-prelude-corelib-processpty: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:1-1435
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! Native PTY/ConPTY support shared by the emitted Core process prelude and the
-//RS //! JIT host.
-//RS //!
-//RS //! The module deliberately uses the small POSIX interface directly. Jet's
-//RS //! compiler seams do not take a new native dependency for one OS primitive.
-//RS 
-//RS use std::fs::File;
-//RS use std::io;
-//RS use std::process::Command;
-//RS 
-//RS #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-//RS pub struct PtyConfig {
-//RS     pub cols: i64,
-//RS     pub rows: i64,
-//RS     pub raw: bool,
-//RS }
-//RS 
-//RS impl Default for PtyConfig {
-//RS     // Card #1751: reads the one 80x24 terminal default instead of hand-typing
-//RS     // it, the same fact CommonTypes.rs's `TerminalPolicy::default` reads.
-//RS     fn default() -> Self {
-//RS         Self {
-//RS             cols: super::terminal_default::JET_TERMINAL_DEFAULT_COLS,
-//RS             rows: super::terminal_default::JET_TERMINAL_DEFAULT_ROWS,
-//RS             raw: false,
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS pub struct PtyPair {
-//RS     pub master: File,
-//RS     pub slave: File,
-//RS }
-//RS 
-//RS /// D-PROCESS-RESOURCE1=A: native child controls are carried through the one
-//RS /// process-launch seam. Empty fields preserve the existing process behavior.
-//RS #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-//RS pub struct ResourceLimits {
-//RS     pub cpu_time_ms: Option<i64>,
-//RS     pub memory_bytes: Option<i64>,
-//RS     pub open_files: Option<i64>,
-//RS }
-//RS 
-//RS #[cfg(windows)]
-//RS #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-//RS pub enum ResourceLimitKind {
-//RS     CpuTime,
-//RS     Memory,
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS mod unix {
-//RS     use super::{File, PtyConfig, PtyPair, ResourceLimits};
-//RS     use std::ffi::{CStr, OsStr};
-//RS     use std::io;
-//RS     use std::os::fd::{AsRawFd, FromRawFd};
-//RS     use std::os::raw::{c_char, c_void};
-//RS     use std::os::unix::ffi::OsStrExt;
-//RS     use std::process::Command;
-//RS     use std::sync::Mutex;
-//RS 
-//RS     // `ptsname` returns libc-owned static storage. Serialize only that lookup
-//RS     // and copy the name before another PTY can replace it.
-//RS     static PTY_NAME_LOCK: Mutex<()> = Mutex::new(());
-//RS 
-//RS     #[repr(C)]
-//RS     struct WinSize {
-//RS         rows: u16,
-//RS         cols: u16,
-//RS         xpixel: u16,
-//RS         ypixel: u16,
-//RS     }
-//RS 
-//RS     #[cfg(target_os = "linux")]
-//RS     const PTY_OPEN_FLAGS: i32 = 0x0002 | 0x0100 | 0x80000; // O_RDWR|O_NOCTTY|O_CLOEXEC
-//RS     #[cfg(not(target_os = "linux"))]
-//RS     const PTY_OPEN_FLAGS: i32 = 0x0002 | 0x20000 | 0x01000000; // Darwin/BSD values
-//RS 
-//RS     #[cfg(target_os = "linux")]
-//RS     const TIOCSCTTY: u64 = 0x540e;
-//RS     #[cfg(not(target_os = "linux"))]
-//RS     const TIOCSCTTY: u64 = 0x20007461;
-//RS 
-//RS     #[cfg(target_os = "linux")]
-//RS     const TIOCSWINSZ: u64 = 0x5414;
-//RS     #[cfg(not(target_os = "linux"))]
-//RS     const TIOCSWINSZ: u64 = 0x80087467;
-//RS 
-//RS     const EIO: i32 = 5;
-//RS     const ESRCH: i32 = 3;
-//RS 
-//RS     #[link(name = "c")]
-//RS     extern "C" {
-//RS         fn posix_openpt(flags: i32) -> i32;
-//RS         fn grantpt(fd: i32) -> i32;
-//RS         fn unlockpt(fd: i32) -> i32;
-//RS         fn ptsname(fd: i32) -> *mut c_char;
-//RS         fn ioctl(fd: i32, request: u64, arg: *const c_void) -> i32;
-//RS         fn fcntl(fd: i32, command: i32, ...) -> i32;
-//RS         fn setsid() -> i32;
-//RS         fn setrlimit(resource: i32, limit: *const RLimit) -> i32;
-//RS         fn kill(pid: i32, signal: i32) -> i32;
-//RS     }
-//RS 
-//RS     #[repr(C)]
-//RS     struct RLimit {
-//RS         current: u64,
-//RS         maximum: u64,
-//RS     }
-//RS 
-//RS     #[cfg(target_os = "linux")]
-//RS     const RLIMIT_CPU: i32 = 0;
-//RS     #[cfg(target_os = "linux")]
-//RS     const RLIMIT_MEMORY: i32 = 9; // RLIMIT_AS
-//RS     #[cfg(target_os = "linux")]
-//RS     const RLIMIT_NOFILE: i32 = 7;
-//RS     #[cfg(target_os = "macos")]
-//RS     const RLIMIT_CPU: i32 = 0;
-//RS     #[cfg(target_os = "macos")]
-//RS     const RLIMIT_MEMORY: i32 = 5; // RLIMIT_RSS
-//RS     #[cfg(target_os = "macos")]
-//RS     const RLIMIT_NOFILE: i32 = 8;
-//RS 
-//RS     #[cfg(any(target_os = "linux", target_os = "macos"))]
-//RS     fn apply_limits(limits: ResourceLimits) -> io::Result<()> {
-//RS         let set = |resource, current, maximum| {
-//RS             let limit = RLimit { current, maximum };
-//RS             // SAFETY: `limit` is a live kernel-shaped value for this call.
-//RS             if unsafe { setrlimit(resource, &limit) } != 0 {
-//RS                 return Err(io::Error::last_os_error());
-//RS             }
-//RS             Ok(())
-//RS         };
-//RS         if let Some(milliseconds) = limits.cpu_time_ms {
-//RS             // POSIX CPU rlimits are whole seconds. Round up so unit conversion
-//RS             // never makes the requested budget stricter.
-//RS             let seconds = milliseconds.max(0).saturating_add(999) / 1000;
-//RS             // Keep the hard ceiling one second above the soft ceiling. Equal
-//RS             // ceilings let Linux jump straight to SIGKILL, which loses the
-//RS             // typed SIGXCPU classification in the parent.
-//RS             set(RLIMIT_CPU, seconds as u64, seconds.saturating_add(1) as u64)?;
-//RS         }
-//RS         if let Some(bytes) = limits.memory_bytes {
-//RS             let bytes = bytes.max(0) as u64;
-//RS             set(RLIMIT_MEMORY, bytes, bytes)?;
-//RS         }
-//RS         if let Some(files) = limits.open_files {
-//RS             let files = files.max(0) as u64;
-//RS             set(RLIMIT_NOFILE, files, files)?;
-//RS         }
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     #[cfg(not(any(target_os = "linux", target_os = "macos")))]
-//RS     fn apply_limits(_limits: ResourceLimits) -> io::Result<()> {
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     fn invalid(message: impl Into<String>) -> io::Error {
-//RS         io::Error::new(io::ErrorKind::InvalidInput, message.into())
-//RS     }
-//RS 
-//RS     fn last_os_error(operation: &str) -> io::Error {
-//RS         let error = io::Error::last_os_error();
-//RS         io::Error::new(error.kind(), format!("{operation}: {error}"))
-//RS     }
-//RS 
-//RS     fn ioctl_error(operation: &str) -> io::Error {
-//RS         last_os_error(operation)
-//RS     }
-//RS 
-//RS     fn validate_size(config: PtyConfig) -> io::Result<(u16, u16)> {
-//RS         if !(1..=u16::MAX as i64).contains(&config.cols)
-//RS             || !(1..=u16::MAX as i64).contains(&config.rows)
-//RS         {
-//RS             return Err(invalid(format!(
-//RS                 "terminal size must be between 1 and {}, got {}x{}",
-//RS                 u16::MAX,
-//RS                 config.cols,
-//RS                 config.rows
-//RS             )));
-//RS         }
-//RS         Ok((config.cols as u16, config.rows as u16))
-//RS     }
-//RS 
-//RS     pub(super) fn open(config: PtyConfig) -> io::Result<PtyPair> {
-//RS         let (cols, rows) = validate_size(config)?;
-//RS         // SAFETY: `posix_openpt` returns a new owned descriptor or -1. The
-//RS         // successful descriptor is immediately wrapped by `File` exactly once.
-//RS         let master_fd = unsafe { posix_openpt(PTY_OPEN_FLAGS) };
-//RS         if master_fd < 0 {
-//RS             return Err(last_os_error("posix_openpt"));
-//RS         }
-//RS         // SAFETY: `master_fd` is the one descriptor returned above and is now
-//RS         // owned by this File. All error paths drop it.
-//RS         let master = unsafe { File::from_raw_fd(master_fd) };
-//RS         // SAFETY: the calls operate on the valid PTY master descriptor.
-//RS         if unsafe { grantpt(master_fd) } != 0 {
-//RS             return Err(last_os_error("grantpt"));
-//RS         }
-//RS         // SAFETY: see `grantpt` above.
-//RS         if unsafe { unlockpt(master_fd) } != 0 {
-//RS             return Err(last_os_error("unlockpt"));
-//RS         }
-//RS         // SAFETY: `ptsname` returns a pointer owned by the C library and valid
-//RS         // until the next PTY-name operation in this process. Copy the bytes
-//RS         // before opening the slave.
-//RS         let slave_path = {
-//RS             let _name_guard = PTY_NAME_LOCK
-//RS                 .lock()
-//RS                 .map_err(|_| io::Error::new(io::ErrorKind::Other, "PTY name lock poisoned"))?;
-//RS             let name = unsafe { ptsname(master_fd) };
-//RS             if name.is_null() {
-//RS                 return Err(last_os_error("ptsname"));
-//RS             }
-//RS             unsafe { CStr::from_ptr(name) }.to_bytes().to_vec()
-//RS         };
-//RS         // The slave is an extra descriptor in the parent while Command builds
-//RS         // the child stdio. Keep that one close-on-exec so descendants cannot
-//RS         // keep the PTY open after the intended child exits.
-//RS         mark_close_on_exec(&master)?;
-//RS         let slave = std::fs::OpenOptions::new()
-//RS             .read(true)
-//RS             .write(true)
-//RS             .open(OsStr::from_bytes(&slave_path))?;
-//RS         mark_close_on_exec(&slave)?;
-//RS         configure(&slave, cols, rows, config.raw)?;
-//RS         Ok(PtyPair { master, slave })
-//RS     }
-//RS 
-//RS     fn mark_close_on_exec(file: &File) -> io::Result<()> {
-//RS         const F_SETFD: i32 = 2;
-//RS         const FD_CLOEXEC: i32 = 1;
-//RS         // SAFETY: `file` owns a live descriptor and fcntl only updates its
-//RS         // descriptor flags.
-//RS         if unsafe { fcntl(file.as_raw_fd(), F_SETFD, FD_CLOEXEC) } != 0 {
-//RS             return Err(last_os_error("fcntl(FD_CLOEXEC)"));
-//RS         }
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     fn configure(slave: &File, cols: u16, rows: u16, raw: bool) -> io::Result<()> {
-//RS         let size = WinSize {
-//RS             rows,
-//RS             cols,
-//RS             xpixel: 0,
-//RS             ypixel: 0,
-//RS         };
-//RS         // SAFETY: `slave` is a live PTY descriptor and `size` is a valid
-//RS         // kernel-sized winsize object for TIOCSWINSZ.
-//RS         if unsafe {
-//RS             ioctl(
-//RS                 slave.as_raw_fd(),
-//RS                 TIOCSWINSZ,
-//RS                 (&size as *const WinSize).cast::<c_void>(),
-//RS             )
-//RS         } != 0
-//RS         {
-//RS             return Err(ioctl_error("TIOCSWINSZ"));
-//RS         }
-//RS         super::super::jet_term_configure_fd(slave.as_raw_fd(), raw)?;
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     pub(super) fn attach_command(command: &mut Command, limits: ResourceLimits) -> io::Result<()> {
-//RS         use std::os::unix::process::CommandExt;
-//RS         // SAFETY: `pre_exec` is the standard Rust boundary for the small set of
-//RS         // async-signal-safe session and resource calls required between fork
-//RS         // and exec. The captured value is a plain Copy struct.
-//RS         unsafe {
-//RS             command.pre_exec(move || {
-//RS                 apply_limits(limits)?;
-//RS                 if setsid() < 0 {
-//RS                     return Err(io::Error::last_os_error());
-//RS                 }
-//RS                 if ioctl(0, TIOCSCTTY, std::ptr::null()) != 0 {
-//RS                     return Err(io::Error::last_os_error());
-//RS                 }
-//RS                 Ok(())
-//RS             });
-//RS         }
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     pub(super) fn attach_process_group(
-//RS         command: &mut Command,
-//RS         limits: ResourceLimits,
-//RS     ) -> io::Result<()> {
-//RS         use std::os::unix::process::CommandExt;
-//RS         // SAFETY: `pre_exec` installs the session and resource boundary using
-//RS         // async-signal-safe calls. The captured value is a plain Copy struct.
-//RS         unsafe {
-//RS             command.pre_exec(move || {
-//RS                 apply_limits(limits)?;
-//RS                 if setsid() < 0 {
-//RS                     return Err(io::Error::last_os_error());
-//RS                 }
-//RS                 Ok(())
-//RS             });
-//RS         }
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     pub(super) fn resize(master: &File, config: PtyConfig) -> io::Result<()> {
-//RS         let (cols, rows) = validate_size(config)?;
-//RS         let size = WinSize {
-//RS             rows,
-//RS             cols,
-//RS             xpixel: 0,
-//RS             ypixel: 0,
-//RS         };
-//RS         // SAFETY: `master` is a live PTY master and `size` is a valid winsize.
-//RS         if unsafe {
-//RS             ioctl(
-//RS                 master.as_raw_fd(),
-//RS                 TIOCSWINSZ,
-//RS                 (&size as *const WinSize).cast::<c_void>(),
-//RS             )
-//RS         } != 0
-//RS         {
-//RS             return Err(ioctl_error("TIOCSWINSZ"));
-//RS         }
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     pub(super) fn signal_group(pid: u32, signal: i32) -> io::Result<()> {
-//RS         let pid = i32::try_from(pid).map_err(|_| invalid("process id is out of range"))?;
-//RS         // A negative pid targets the PTY session's process group. This keeps a
-//RS         // shell and its descendants under one kill/terminate/interrupt action.
-//RS         // SAFETY: `kill` receives a valid negative process-group id and signal.
-//RS         if unsafe { kill(-pid, signal) } != 0 {
-//RS             // The child may have exited after wait observed it and before the
-//RS             // final group sweep. ESRCH means the requested tree is already
-//RS             // gone, so cleanup has succeeded.
-//RS             if io::Error::last_os_error().raw_os_error() == Some(ESRCH) {
-//RS                 return Ok(());
-//RS             }
-//RS             return Err(last_os_error("kill process group"));
-//RS         }
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     pub(super) fn is_terminal_eof(error: &io::Error) -> bool {
-//RS         error.raw_os_error() == Some(EIO)
-//RS     }
-//RS 
-//RS     pub(super) fn supported() -> bool {
-//RS         true
-//RS     }
-//RS 
-//RS     pub(super) const SIGINT: i32 = 2;
-//RS     pub(super) const SIGTERM: i32 = 15;
-//RS     pub(super) const SIGKILL: i32 = 9;
-//RS }
-//RS 
-//RS #[cfg(windows)]
-//RS mod windows {
-//RS     use super::{File, PtyConfig, ResourceLimits};
-//RS     use std::ffi::c_void;
-//RS     use std::io::{self, Write};
-//RS     use std::os::windows::ffi::OsStrExt;
-//RS     use std::os::windows::io::{AsRawHandle, FromRawHandle, RawHandle};
-//RS 
-//RS     type Handle = RawHandle;
-//RS 
-//RS     const CREATE_SUSPENDED: u32 = 0x0000_0004;
-//RS     const CREATE_UNICODE_ENVIRONMENT: u32 = 0x0000_0400;
-//RS     const EXTENDED_STARTUPINFO_PRESENT: u32 = 0x0008_0000;
-//RS     const PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE: usize = 0x0002_0016;
-//RS     const JOB_OBJECT_EXTENDED_LIMIT_INFORMATION: u32 = 9;
-//RS     const JOB_OBJECT_BASIC_ACCOUNTING_INFORMATION: u32 = 1;
-//RS     const JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE: u32 = 0x0000_2000;
-//RS     const JOB_OBJECT_LIMIT_PROCESS_TIME: u32 = 0x0000_0002;
-//RS     const JOB_OBJECT_LIMIT_PROCESS_MEMORY: u32 = 0x0000_0100;
-//RS     const WAIT_OBJECT_0: u32 = 0;
-//RS     const WAIT_TIMEOUT: u32 = 258;
-//RS     const WAIT_FAILED: u32 = 0xffff_ffff;
-//RS     const INFINITE: u32 = 0xffff_ffff;
-//RS     const STILL_ACTIVE: u32 = 259;
-//RS     const INVALID_THREAD_RESUME: u32 = 0xffff_ffff;
-//RS     const HANDLE_FLAG_INHERIT: u32 = 1;
-//RS 
-//RS     #[repr(C)]
-//RS     struct Coord {
-//RS         x: i16,
-//RS         y: i16,
-//RS     }
-//RS 
-//RS     #[repr(C)]
-//RS     struct SecurityAttributes {
-//RS         length: u32,
-//RS         descriptor: *mut c_void,
-//RS         inherit: i32,
-//RS     }
-//RS 
-//RS     #[repr(C)]
-//RS     struct StartupInfoW {
-//RS         cb: u32,
-//RS         reserved: *mut u16,
-//RS         desktop: *mut u16,
-//RS         title: *mut u16,
-//RS         x: u32,
-//RS         y: u32,
-//RS         x_size: u32,
-//RS         y_size: u32,
-//RS         x_count_chars: u32,
-//RS         y_count_chars: u32,
-//RS         fill_attribute: u32,
-//RS         flags: u32,
-//RS         show_window: u16,
-//RS         reserved2: u16,
-//RS         reserved2_ptr: *mut u8,
-//RS         std_input: Handle,
-//RS         std_output: Handle,
-//RS         std_error: Handle,
-//RS     }
-//RS 
-//RS     #[repr(C)]
-//RS     struct StartupInfoExW {
-//RS         startup_info: StartupInfoW,
-//RS         attribute_list: *mut c_void,
-//RS     }
-//RS 
-//RS     #[repr(C)]
-//RS     struct ProcessInformation {
-//RS         process: Handle,
-//RS         thread: Handle,
-//RS         process_id: u32,
-//RS         thread_id: u32,
-//RS     }
-//RS 
-//RS     #[repr(C)]
-//RS     struct BasicLimitInformation {
-//RS         per_process_user_time_limit: i64,
-//RS         per_job_user_time_limit: i64,
-//RS         limit_flags: u32,
-//RS         minimum_working_set_size: usize,
-//RS         maximum_working_set_size: usize,
-//RS         active_process_limit: u32,
-//RS         affinity: usize,
-//RS         priority_class: u32,
-//RS         scheduling_class: u32,
-//RS     }
-//RS 
-//RS     #[repr(C)]
-//RS     struct IoCounters {
-//RS         read_operations: u64,
-//RS         write_operations: u64,
-//RS         other_operations: u64,
-//RS         read_bytes: u64,
-//RS         write_bytes: u64,
-//RS         other_bytes: u64,
-//RS     }
-//RS 
-//RS     #[repr(C)]
-//RS     struct ExtendedLimitInformation {
-//RS         basic: BasicLimitInformation,
-//RS         io: IoCounters,
-//RS         process_memory_limit: usize,
-//RS         job_memory_limit: usize,
-//RS         peak_process_memory_used: usize,
-//RS         peak_job_memory_used: usize,
-//RS     }
-//RS 
-//RS     #[repr(C)]
-//RS     struct BasicAccountingInformation {
-//RS         total_user_time: i64,
-//RS         total_kernel_time: i64,
-//RS         this_period_total_user_time: i64,
-//RS         this_period_total_kernel_time: i64,
-//RS         total_processes: u32,
-//RS         active_processes: u32,
-//RS         terminated_processes: u32,
-//RS     }
-//RS 
-//RS     #[link(name = "kernel32")]
-//RS     unsafe extern "system" {
-//RS         fn AssignProcessToJobObject(job: Handle, process: Handle) -> i32;
-//RS         fn CloseHandle(handle: Handle) -> i32;
-//RS         fn CreateJobObjectW(attributes: *mut c_void, name: *const u16) -> Handle;
-//RS         fn CreatePipe(
-//RS             read_pipe: *mut Handle,
-//RS             write_pipe: *mut Handle,
-//RS             attributes: *mut SecurityAttributes,
-//RS             size: u32,
-//RS         ) -> i32;
-//RS         fn CreateProcessW(
-//RS             application_name: *const u16,
-//RS             command_line: *mut u16,
-//RS             process_attributes: *mut c_void,
-//RS             thread_attributes: *mut c_void,
-//RS             inherit_handles: i32,
-//RS             creation_flags: u32,
-//RS             environment: *mut c_void,
-//RS             current_directory: *const u16,
-//RS             startup_info: *mut StartupInfoW,
-//RS             process_information: *mut ProcessInformation,
-//RS         ) -> i32;
-//RS         fn CreatePseudoConsole(
-//RS             size: Coord,
-//RS             input: Handle,
-//RS             output: Handle,
-//RS             flags: u32,
-//RS             console: *mut Handle,
-//RS         ) -> i32;
-//RS         fn CompareStringOrdinal(
-//RS             string1: *const u16,
-//RS             count1: i32,
-//RS             string2: *const u16,
-//RS             count2: i32,
-//RS             ignore_case: i32,
-//RS         ) -> i32;
-//RS         fn DeleteProcThreadAttributeList(attribute_list: *mut c_void);
-//RS         fn GetExitCodeProcess(process: Handle, exit_code: *mut u32) -> i32;
-//RS         fn InitializeProcThreadAttributeList(
-//RS             attribute_list: *mut c_void,
-//RS             attribute_count: u32,
-//RS             flags: u32,
-//RS             size: *mut usize,
-//RS         ) -> i32;
-//RS         fn ResizePseudoConsole(console: Handle, size: Coord) -> i32;
-//RS         fn ResumeThread(thread: Handle) -> u32;
-//RS         fn SetHandleInformation(handle: Handle, mask: u32, flags: u32) -> i32;
-//RS         fn SetInformationJobObject(
-//RS             job: Handle,
-//RS             information_class: u32,
-//RS             information: *mut c_void,
-//RS             length: u32,
-//RS         ) -> i32;
-//RS         fn QueryInformationJobObject(
-//RS             job: Handle,
-//RS             information_class: u32,
-//RS             information: *mut c_void,
-//RS             length: u32,
-//RS             return_length: *mut u32,
-//RS         ) -> i32;
-//RS         fn TerminateJobObject(job: Handle, exit_code: u32) -> i32;
-//RS         fn TerminateProcess(process: Handle, exit_code: u32) -> i32;
-//RS         fn UpdateProcThreadAttribute(
-//RS             attribute_list: *mut c_void,
-//RS             flags: u32,
-//RS             attribute: usize,
-//RS             value: *const c_void,
-//RS             size: usize,
-//RS             previous_value: *mut c_void,
-//RS             return_size: *mut usize,
-//RS         ) -> i32;
-//RS         fn WaitForSingleObject(handle: Handle, milliseconds: u32) -> u32;
-//RS         fn ClosePseudoConsole(console: Handle);
-//RS     }
-//RS 
-//RS     fn null_handle() -> Handle {
-//RS         std::ptr::null_mut()
-//RS     }
-//RS 
-//RS     fn invalid_handle(handle: Handle) -> bool {
-//RS         handle.is_null() || handle == (-1isize as Handle)
-//RS     }
-//RS 
-//RS     fn error(operation: &str) -> io::Error {
-//RS         let cause = io::Error::last_os_error();
-//RS         io::Error::new(cause.kind(), format!("{operation}: {cause}"))
-//RS     }
-//RS 
-//RS     fn hresult_error(operation: &str, status: i32) -> io::Error {
-//RS         io::Error::new(
-//RS             io::ErrorKind::Other,
-//RS             format!("{operation} failed with HRESULT 0x{:08x}", status as u32),
-//RS         )
-//RS     }
-//RS 
-//RS     fn validate_size(config: PtyConfig) -> io::Result<Coord> {
-//RS         if !(1..=i16::MAX as i64).contains(&config.cols)
-//RS             || !(1..=i16::MAX as i64).contains(&config.rows)
-//RS         {
-//RS             return Err(io::Error::new(
-//RS                 io::ErrorKind::InvalidInput,
-//RS                 format!(
-//RS                     "terminal size must be between 1 and {}, got {}x{}",
-//RS                     i16::MAX,
-//RS                     config.cols,
-//RS                     config.rows
-//RS                 ),
-//RS             ));
-//RS         }
-//RS         Ok(Coord {
-//RS             x: config.cols as i16,
-//RS             y: config.rows as i16,
-//RS         })
-//RS     }
-//RS 
-//RS     struct HandleGuard(Handle);
-//RS 
-//RS     impl HandleGuard {
-//RS         fn new(handle: Handle) -> io::Result<Self> {
-//RS             if invalid_handle(handle) {
-//RS                 Err(error("invalid Windows handle"))
-//RS             } else {
-//RS                 Ok(Self(handle))
-//RS             }
-//RS         }
-//RS 
-//RS         fn raw(&self) -> Handle {
-//RS             self.0
-//RS         }
-//RS 
-//RS         fn into_file(mut self) -> File {
-//RS             let handle = self.0;
-//RS             self.0 = null_handle();
-//RS             // SAFETY: ownership moves from this guard to exactly one File.
-//RS             unsafe { File::from_raw_handle(handle) }
-//RS         }
-//RS     }
-//RS 
-//RS     impl Drop for HandleGuard {
-//RS         fn drop(&mut self) {
-//RS             if !invalid_handle(self.0) {
-//RS                 // SAFETY: this guard owns the live handle and closes it once.
-//RS                 unsafe { CloseHandle(self.0) };
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     struct ConsoleGuard(Handle);
-//RS 
-//RS     impl ConsoleGuard {
-//RS         fn create(config: PtyConfig, input: Handle, output: Handle) -> io::Result<Self> {
-//RS             let size = validate_size(config)?;
-//RS             let mut console = null_handle();
-//RS             // SAFETY: pipe handles and output storage remain live through the
-//RS             // documented CreatePseudoConsole call.
-//RS             let status = unsafe { CreatePseudoConsole(size, input, output, 0, &mut console) };
-//RS             if status != 0 {
-//RS                 return Err(hresult_error("CreatePseudoConsole", status));
-//RS             }
-//RS             if invalid_handle(console) {
-//RS                 return Err(io::Error::new(
-//RS                     io::ErrorKind::Other,
-//RS                     "CreatePseudoConsole returned no console handle",
-//RS                 ));
-//RS             }
-//RS             Ok(Self(console))
-//RS         }
-//RS 
-//RS         fn raw(&self) -> Handle {
-//RS             self.0
-//RS         }
-//RS 
-//RS         fn into_raw(mut self) -> usize {
-//RS             let handle = self.0 as usize;
-//RS             self.0 = null_handle();
-//RS             handle
-//RS         }
-//RS     }
-//RS 
-//RS     impl Drop for ConsoleGuard {
-//RS         fn drop(&mut self) {
-//RS             if !invalid_handle(self.0) {
-//RS                 // SAFETY: this guard owns the live HPCON and closes it once.
-//RS                 unsafe { ClosePseudoConsole(self.0) };
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     struct AttributeList {
-//RS         list: *mut c_void,
-//RS         // PROC_THREAD_ATTRIBUTE_LIST is pointer-aligned even though the API
-//RS         // reports its storage size in bytes.
-//RS         storage: Vec<usize>,
-//RS     }
-//RS 
-//RS     impl AttributeList {
-//RS         fn create() -> io::Result<Self> {
-//RS             let mut size = 0;
-//RS             // SAFETY: documented size probe; Windows writes only `size`.
-//RS             unsafe {
-//RS                 InitializeProcThreadAttributeList(std::ptr::null_mut(), 1, 0, &mut size);
-//RS             }
-//RS             if size == 0 {
-//RS                 return Err(error("InitializeProcThreadAttributeList size probe"));
-//RS             }
-//RS             let words = size
-//RS                 .checked_add(std::mem::size_of::<usize>() - 1)
-//RS                 .ok_or_else(|| {
-//RS                     io::Error::new(
-//RS                         io::ErrorKind::InvalidData,
-//RS                         "InitializeProcThreadAttributeList size overflows",
-//RS                     )
-//RS                 })?
-//RS                 / std::mem::size_of::<usize>();
-//RS             let mut storage = vec![0_usize; words];
-//RS             let list = storage.as_mut_ptr().cast::<c_void>();
-//RS             // SAFETY: storage has at least the probed size and remains live.
-//RS             if unsafe { InitializeProcThreadAttributeList(list, 1, 0, &mut size) } == 0 {
-//RS                 return Err(error("InitializeProcThreadAttributeList"));
-//RS             }
-//RS             Ok(Self { list, storage })
-//RS         }
-//RS 
-//RS         fn update(
-//RS             &mut self,
-//RS             attribute: usize,
-//RS             value: *const c_void,
-//RS             size: usize,
-//RS         ) -> io::Result<()> {
-//RS             // SAFETY: `value` points to a live attribute value for this call.
-//RS             if unsafe {
-//RS                 UpdateProcThreadAttribute(
-//RS                     self.list,
-//RS                     0,
-//RS                     attribute,
-//RS                     value,
-//RS                     size,
-//RS                     std::ptr::null_mut(),
-//RS                     std::ptr::null_mut(),
-//RS                 )
-//RS             } == 0
-//RS             {
-//RS                 return Err(error("UpdateProcThreadAttribute"));
-//RS             }
-//RS             Ok(())
-//RS         }
-//RS     }
-//RS 
-//RS     impl Drop for AttributeList {
-//RS         fn drop(&mut self) {
-//RS             // SAFETY: the list was initialized and storage remains live.
-//RS             unsafe { DeleteProcThreadAttributeList(self.list) };
-//RS             let _ = &self.storage;
-//RS         }
-//RS     }
-//RS 
-//RS     struct Job(HandleGuard);
-//RS 
-//RS     impl Job {
-//RS         fn create(resource_limits: ResourceLimits) -> io::Result<Self> {
-//RS             // SAFETY: null attributes/name request one private unnamed job.
-//RS             let handle = unsafe { CreateJobObjectW(std::ptr::null_mut(), std::ptr::null()) };
-//RS             let guard = HandleGuard::new(handle)?;
-//RS             let mut limits = ExtendedLimitInformation {
-//RS                 basic: BasicLimitInformation {
-//RS                     per_process_user_time_limit: resource_limits
-//RS                         .cpu_time_ms
-//RS                         .map(|milliseconds| milliseconds.max(0).saturating_mul(10_000))
-//RS                         .unwrap_or(0),
-//RS                     per_job_user_time_limit: 0,
-//RS                     limit_flags: JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
-//RS                         | if resource_limits.cpu_time_ms.is_some() {
-//RS                             JOB_OBJECT_LIMIT_PROCESS_TIME
-//RS                         } else {
-//RS                             0
-//RS                         }
-//RS                         | if resource_limits.memory_bytes.is_some() {
-//RS                             JOB_OBJECT_LIMIT_PROCESS_MEMORY
-//RS                         } else {
-//RS                             0
-//RS                         },
-//RS                     minimum_working_set_size: 0,
-//RS                     maximum_working_set_size: 0,
-//RS                     active_process_limit: 0,
-//RS                     affinity: 0,
-//RS                     priority_class: 0,
-//RS                     scheduling_class: 0,
-//RS                 },
-//RS                 io: IoCounters {
-//RS                     read_operations: 0,
-//RS                     write_operations: 0,
-//RS                     other_operations: 0,
-//RS                     read_bytes: 0,
-//RS                     write_bytes: 0,
-//RS                     other_bytes: 0,
-//RS                 },
-//RS                 process_memory_limit: resource_limits
-//RS                     .memory_bytes
-//RS                     .map(|bytes| bytes.max(0) as usize)
-//RS                     .unwrap_or(0),
-//RS                 job_memory_limit: 0,
-//RS                 peak_process_memory_used: 0,
-//RS                 peak_job_memory_used: 0,
-//RS             };
-//RS             // SAFETY: structure and size match the documented information class.
-//RS             if unsafe {
-//RS                 SetInformationJobObject(
-//RS                     guard.raw(),
-//RS                     JOB_OBJECT_EXTENDED_LIMIT_INFORMATION,
-//RS                     (&mut limits as *mut ExtendedLimitInformation).cast(),
-//RS                     std::mem::size_of::<ExtendedLimitInformation>() as u32,
-//RS                 )
-//RS             } == 0
-//RS             {
-//RS                 return Err(error("SetInformationJobObject"));
-//RS             }
-//RS             Ok(Self(guard))
-//RS         }
-//RS 
-//RS         fn assign(&self, process: Handle) -> io::Result<()> {
-//RS             // SAFETY: both handles remain live through the call.
-//RS             if unsafe { AssignProcessToJobObject(self.0.raw(), process) } == 0 {
-//RS                 return Err(error("AssignProcessToJobObject"));
-//RS             }
-//RS             Ok(())
-//RS         }
-//RS 
-//RS         fn into_file(self) -> File {
-//RS             self.0.into_file()
-//RS         }
-//RS     }
-//RS 
-//RS     fn create_pipe() -> io::Result<(HandleGuard, HandleGuard)> {
-//RS         let mut read = null_handle();
-//RS         let mut write = null_handle();
-//RS         let mut attributes = SecurityAttributes {
-//RS             length: std::mem::size_of::<SecurityAttributes>() as u32,
-//RS             descriptor: std::ptr::null_mut(),
-//RS             inherit: 1,
-//RS         };
-//RS         // SAFETY: output handles and security attributes are valid for the call.
-//RS         if unsafe { CreatePipe(&mut read, &mut write, &mut attributes, 0) } == 0 {
-//RS             return Err(error("CreatePipe"));
-//RS         }
-//RS         let read = HandleGuard::new(read)?;
-//RS         let write = match HandleGuard::new(write) {
-//RS             Ok(write) => write,
-//RS             Err(error) => return Err(error),
-//RS         };
-//RS         Ok((read, write))
-//RS     }
-//RS 
-//RS     fn make_wide(value: &str) -> io::Result<Vec<u16>> {
-//RS         if value.contains('\0') {
-//RS             return Err(io::Error::new(
-//RS                 io::ErrorKind::InvalidInput,
-//RS                 "Windows process value contains NUL",
-//RS             ));
-//RS         }
-//RS         Ok(value.encode_utf16().chain(std::iter::once(0)).collect())
-//RS     }
-//RS 
-//RS     fn quote_arg(value: &str) -> io::Result<Vec<u16>> {
-//RS         if value.contains('\0') {
-//RS             return Err(io::Error::new(
-//RS                 io::ErrorKind::InvalidInput,
-//RS                 "Windows process argument contains NUL",
-//RS             ));
-//RS         }
-//RS         let quoted =
-//RS             value.is_empty() || value.chars().any(char::is_whitespace) || value.contains('"');
-//RS         let mut output = String::new();
-//RS         if quoted {
-//RS             output.push('"');
-//RS         }
-//RS         let mut slashes = 0;
-//RS         for character in value.chars() {
-//RS             if character == '\\' {
-//RS                 slashes += 1;
-//RS                 continue;
-//RS             }
-//RS             if character == '"' {
-//RS                 output.extend(std::iter::repeat_n('\\', slashes * 2 + 1));
-//RS             } else {
-//RS                 output.extend(std::iter::repeat_n('\\', slashes));
-//RS             }
-//RS             output.push(character);
-//RS             slashes = 0;
-//RS         }
-//RS         if quoted {
-//RS             output.extend(std::iter::repeat_n('\\', slashes * 2));
-//RS             output.push('"');
-//RS         } else {
-//RS             output.extend(std::iter::repeat_n('\\', slashes));
-//RS         }
-//RS         make_wide(&output)
-//RS     }
-//RS 
-//RS     fn command_line(executable: &str, args: &[String]) -> io::Result<Vec<u16>> {
-//RS         let mut output = quote_arg(executable)?;
-//RS         output.pop();
-//RS         for arg in args {
-//RS             output.push(' ' as u16);
-//RS             let mut quoted = quote_arg(arg)?;
-//RS             quoted.pop();
-//RS             output.extend(quoted);
-//RS         }
-//RS         output.push(0);
-//RS         Ok(output)
-//RS     }
-//RS 
-//RS     fn compare_environment_names(left: &[u16], right: &[u16]) -> std::cmp::Ordering {
-//RS         let Some(left_len) = i32::try_from(left.len()).ok() else {
-//RS             return left.cmp(right);
-//RS         };
-//RS         let Some(right_len) = i32::try_from(right.len()).ok() else {
-//RS             return left.cmp(right);
-//RS         };
-//RS         // SAFETY: both pointers are valid for the explicit UTF-16 lengths.
-//RS         match unsafe {
-//RS             CompareStringOrdinal(left.as_ptr(), left_len, right.as_ptr(), right_len, 1)
-//RS         } {
-//RS             1 => std::cmp::Ordering::Less,
-//RS             2 => std::cmp::Ordering::Equal,
-//RS             3 => std::cmp::Ordering::Greater,
-//RS             _ => left.cmp(right),
-//RS         }
-//RS     }
-//RS 
-//RS     fn environment_block(
-//RS         env: &[(std::ffi::OsString, std::ffi::OsString)],
-//RS     ) -> io::Result<Vec<u16>> {
-//RS         let mut entries = Vec::with_capacity(env.len());
-//RS         for (name, value) in env {
-//RS             let name: Vec<u16> = name.encode_wide().collect();
-//RS             let value: Vec<u16> = value.encode_wide().collect();
-//RS             if name.contains(&0) || value.contains(&0) {
-//RS                 return Err(io::Error::new(
-//RS                     io::ErrorKind::InvalidInput,
-//RS                     "Windows process environment contains NUL",
-//RS                 ));
-//RS             }
-//RS             entries.push((name, value));
-//RS         }
-//RS         entries.sort_by(|(left, _), (right, _)| compare_environment_names(left, right));
-//RS 
-//RS         let mut block = Vec::new();
-//RS         for (name, value) in entries {
-//RS             block.extend(name);
-//RS             block.push('=' as u16);
-//RS             block.extend(value);
-//RS             block.push(0);
-//RS         }
-//RS         if block.is_empty() {
-//RS             block.push(0);
-//RS         }
-//RS         block.push(0);
-//RS         Ok(block)
-//RS     }
-//RS 
-//RS     pub struct WindowsPtyProcess {
-//RS         pub process: File,
-//RS         pub job: File,
-//RS         pub pid: u32,
-//RS         pub input: File,
-//RS         pub output: File,
-//RS         pub console: usize,
-//RS     }
-//RS 
-//RS     pub fn spawn(
-//RS         config: PtyConfig,
-//RS         executable: &str,
-//RS         args: &[String],
-//RS         cwd: Option<&str>,
-//RS         env: &[(std::ffi::OsString, std::ffi::OsString)],
-//RS         limits: ResourceLimits,
-//RS     ) -> io::Result<WindowsPtyProcess> {
-//RS         let (input_read, input_write) = create_pipe()?;
-//RS         let (output_read, output_write) = create_pipe()?;
-//RS         // The parent ends never belong in a child handle table.
-//RS         if unsafe { SetHandleInformation(input_write.raw(), HANDLE_FLAG_INHERIT, 0) } == 0 {
-//RS             return Err(error("SetHandleInformation(input)"));
-//RS         }
-//RS         if unsafe { SetHandleInformation(output_read.raw(), HANDLE_FLAG_INHERIT, 0) } == 0 {
-//RS             return Err(error("SetHandleInformation(output)"));
-//RS         }
-//RS         // ConPTY owns the two opposite pipe ends after creation. `raw` is
-//RS         // consumed by the child console's own mode; the pipe remains binary.
-//RS         let console = ConsoleGuard::create(config, input_read.raw(), output_write.raw())?;
-//RS 
-//RS         let job = Job::create(limits)?;
-//RS         let application = make_wide(executable)?;
-//RS         let mut command = command_line(executable, args)?;
-//RS         let current_directory = cwd.map(make_wide).transpose()?;
-//RS         let mut environment = environment_block(env)?;
-//RS         let mut attributes = AttributeList::create()?;
-//RS         let console_handle = console.raw();
-//RS         attributes.update(
-//RS             PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE,
-//RS             (&console_handle as *const Handle).cast(),
-//RS             std::mem::size_of::<Handle>(),
-//RS         )?;
-//RS         let mut startup = StartupInfoExW {
-//RS             startup_info: StartupInfoW {
-//RS                 cb: std::mem::size_of::<StartupInfoExW>() as u32,
-//RS                 reserved: std::ptr::null_mut(),
-//RS                 desktop: std::ptr::null_mut(),
-//RS                 title: std::ptr::null_mut(),
-//RS                 x: 0,
-//RS                 y: 0,
-//RS                 x_size: 0,
-//RS                 y_size: 0,
-//RS                 x_count_chars: 0,
-//RS                 y_count_chars: 0,
-//RS                 fill_attribute: 0,
-//RS                 flags: 0,
-//RS                 show_window: 0,
-//RS                 reserved2: 0,
-//RS                 reserved2_ptr: std::ptr::null_mut(),
-//RS                 std_input: null_handle(),
-//RS                 std_output: null_handle(),
-//RS                 std_error: null_handle(),
-//RS             },
-//RS             attribute_list: attributes.list,
-//RS         };
-//RS         let mut information = ProcessInformation {
-//RS             process: null_handle(),
-//RS             thread: null_handle(),
-//RS             process_id: 0,
-//RS             thread_id: 0,
-//RS         };
-//RS         // Keep the hosted process in the pseudoconsole's console group. A
-//RS         // separate group disables Ctrl+C, so an ETX byte written to the
-//RS         // ConPTY input would not reach the child's default handler.
-//RS         // SAFETY: every pointer stays live until CreateProcessW returns; the
-//RS         // child is suspended until its Job Object boundary is installed.
-//RS         if unsafe {
-//RS             CreateProcessW(
-//RS                 application.as_ptr(),
-//RS                 command.as_mut_ptr(),
-//RS                 std::ptr::null_mut(),
-//RS                 std::ptr::null_mut(),
-//RS                 0,
-//RS                 EXTENDED_STARTUPINFO_PRESENT | CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT,
-//RS                 environment.as_mut_ptr().cast(),
-//RS                 current_directory
-//RS                     .as_ref()
-//RS                     .map_or(std::ptr::null(), Vec::as_ptr),
-//RS                 &mut startup.startup_info,
-//RS                 &mut information,
-//RS             )
-//RS         } == 0
-//RS         {
-//RS             return Err(error("CreateProcessW(ConPTY)"));
-//RS         }
-//RS         // Microsoft requires these handles to stay open through
-//RS         // CreateProcessW. Closing the host copies now lets the pseudoconsole
-//RS         // observe a broken channel once the child/session closes its copies.
-//RS         drop(input_read);
-//RS         drop(output_write);
-//RS         let process = HandleGuard::new(information.process)?;
-//RS         let thread = match HandleGuard::new(information.thread) {
-//RS             Ok(thread) => thread,
-//RS             Err(error) => {
-//RS                 // SAFETY: the process handle is live and the suspended child is
-//RS                 // terminated before the guard closes it.
-//RS                 unsafe {
-//RS                     TerminateProcess(process.raw(), 1);
-//RS                     WaitForSingleObject(process.raw(), INFINITE);
-//RS                 }
-//RS                 return Err(error);
-//RS             }
-//RS         };
-//RS         if let Err(error) = job.assign(process.raw()) {
-//RS             // SAFETY: the suspended process is still owned by `process`.
-//RS             unsafe {
-//RS                 TerminateProcess(process.raw(), 1);
-//RS                 WaitForSingleObject(process.raw(), INFINITE);
-//RS             }
-//RS             return Err(error);
-//RS         }
-//RS         // SAFETY: the primary thread is live and suspended by CreateProcessW.
-//RS         if unsafe { ResumeThread(thread.raw()) } == INVALID_THREAD_RESUME {
-//RS             unsafe {
-//RS                 TerminateProcess(process.raw(), 1);
-//RS                 WaitForSingleObject(process.raw(), INFINITE);
-//RS             }
-//RS             return Err(error("ResumeThread(ConPTY)"));
-//RS         }
-//RS 
-//RS         Ok(WindowsPtyProcess {
-//RS             process: process.into_file(),
-//RS             job: job.into_file(),
-//RS             pid: information.process_id,
-//RS             input: input_write.into_file(),
-//RS             output: output_read.into_file(),
-//RS             console: console.into_raw(),
-//RS         })
-//RS     }
-//RS 
-//RS     pub fn attach_job(process: RawHandle, limits: ResourceLimits) -> io::Result<File> {
-//RS         let job = Job::create(limits)?;
-//RS         job.assign(process)?;
-//RS         Ok(job.into_file())
-//RS     }
-//RS 
-//RS     pub fn try_wait(process: &File) -> io::Result<Option<u32>> {
-//RS         // SAFETY: the process handle is owned by the caller and remains live.
-//RS         let result = unsafe { WaitForSingleObject(process.as_raw_handle(), 0) };
-//RS         match result {
-//RS             WAIT_OBJECT_0 => exit_code(process).map(Some),
-//RS             WAIT_TIMEOUT => Ok(None),
-//RS             WAIT_FAILED => Err(error("WaitForSingleObject")),
-//RS             other => Err(io::Error::new(
-//RS                 io::ErrorKind::Other,
-//RS                 format!("WaitForSingleObject returned {other}"),
-//RS             )),
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn wait(process: &File) -> io::Result<u32> {
-//RS         // SAFETY: the process handle is owned by the caller and remains live.
-//RS         if unsafe { WaitForSingleObject(process.as_raw_handle(), INFINITE) } != WAIT_OBJECT_0 {
-//RS             return Err(error("WaitForSingleObject"));
-//RS         }
-//RS         exit_code(process)
-//RS     }
-//RS 
-//RS     fn exit_code(process: &File) -> io::Result<u32> {
-//RS         let mut code = STILL_ACTIVE;
-//RS         // SAFETY: Windows writes one exit-code value to live storage.
-//RS         if unsafe { GetExitCodeProcess(process.as_raw_handle(), &mut code) } == 0 {
-//RS             return Err(error("GetExitCodeProcess"));
-//RS         }
-//RS         Ok(code)
-//RS     }
-//RS 
-//RS     pub fn resource_limit_hit(
-//RS         job: &File,
-//RS         limits: ResourceLimits,
-//RS     ) -> io::Result<Option<super::ResourceLimitKind>> {
-//RS         if limits.cpu_time_ms.is_some() {
-//RS             let mut accounting = BasicAccountingInformation {
-//RS                 total_user_time: 0,
-//RS                 total_kernel_time: 0,
-//RS                 this_period_total_user_time: 0,
-//RS                 this_period_total_kernel_time: 0,
-//RS                 total_processes: 0,
-//RS                 active_processes: 0,
-//RS                 terminated_processes: 0,
-//RS             };
-//RS             let mut returned = 0;
-//RS             // SAFETY: Windows fills the documented accounting structure only.
-//RS             if unsafe {
-//RS                 QueryInformationJobObject(
-//RS                     job.as_raw_handle(),
-//RS                     JOB_OBJECT_BASIC_ACCOUNTING_INFORMATION,
-//RS                     (&mut accounting as *mut BasicAccountingInformation).cast(),
-//RS                     std::mem::size_of::<BasicAccountingInformation>() as u32,
-//RS                     &mut returned,
-//RS                 )
-//RS             } == 0
-//RS             {
-//RS                 return Err(error("QueryInformationJobObject(accounting)"));
-//RS             }
-//RS             let limit = limits.cpu_time_ms.unwrap_or(0).max(0) as i64;
-//RS             let cpu_time = accounting
-//RS                 .total_user_time
-//RS                 .max(0)
-//RS                 .saturating_add(accounting.total_kernel_time.max(0));
-//RS             if cpu_time >= limit.saturating_mul(10_000) {
-//RS                 return Ok(Some(super::ResourceLimitKind::CpuTime));
-//RS             }
-//RS         }
-//RS         if limits.memory_bytes.is_some() {
-//RS             let mut information = ExtendedLimitInformation {
-//RS                 basic: BasicLimitInformation {
-//RS                     per_process_user_time_limit: 0,
-//RS                     per_job_user_time_limit: 0,
-//RS                     limit_flags: 0,
-//RS                     minimum_working_set_size: 0,
-//RS                     maximum_working_set_size: 0,
-//RS                     active_process_limit: 0,
-//RS                     affinity: 0,
-//RS                     priority_class: 0,
-//RS                     scheduling_class: 0,
-//RS                 },
-//RS                 io: IoCounters {
-//RS                     read_operations: 0,
-//RS                     write_operations: 0,
-//RS                     other_operations: 0,
-//RS                     read_bytes: 0,
-//RS                     write_bytes: 0,
-//RS                     other_bytes: 0,
-//RS                 },
-//RS                 process_memory_limit: 0,
-//RS                 job_memory_limit: 0,
-//RS                 peak_process_memory_used: 0,
-//RS                 peak_job_memory_used: 0,
-//RS             };
-//RS             let mut returned = 0;
-//RS             // SAFETY: Windows fills the documented extended-limit structure only.
-//RS             if unsafe {
-//RS                 QueryInformationJobObject(
-//RS                     job.as_raw_handle(),
-//RS                     JOB_OBJECT_EXTENDED_LIMIT_INFORMATION,
-//RS                     (&mut information as *mut ExtendedLimitInformation).cast(),
-//RS                     std::mem::size_of::<ExtendedLimitInformation>() as u32,
-//RS                     &mut returned,
-//RS                 )
-//RS             } == 0
-//RS             {
-//RS                 return Err(error("QueryInformationJobObject(memory)"));
-//RS             }
-//RS             let limit = limits.memory_bytes.unwrap_or(0).max(0) as usize;
-//RS             if information.peak_process_memory_used >= limit {
-//RS                 return Ok(Some(super::ResourceLimitKind::Memory));
-//RS             }
-//RS         }
-//RS         Ok(None)
-//RS     }
-//RS 
-//RS     pub fn terminate(job: &File) -> io::Result<()> {
-//RS         // SAFETY: the caller owns a live Job Object handle.
-//RS         if unsafe { TerminateJobObject(job.as_raw_handle(), 1) } == 0 {
-//RS             return Err(error("TerminateJobObject"));
-//RS         }
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     pub fn interrupt(_pid: u32, job: &File, input: Option<&File>) -> io::Result<()> {
-//RS         // The Win32 console-event API targets groups that share the caller's
-//RS         // console. A ConPTY child instead belongs to the pseudoconsole
-//RS         // represented by these pipes, so deliver Ctrl-C through the same byte
-//RS         // stream as terminal keyboard input. ConPTY translates ETX into the
-//RS         // console control event for the child and its descendants.
-//RS         if let Some(input) = input {
-//RS             let mut input = input.try_clone()?;
-//RS             match input.write_all(&[3]) {
-//RS                 Ok(()) => return Ok(()),
-//RS                 Err(error) if is_terminal_eof(&error) => {}
-//RS                 Err(error) => return Err(error),
-//RS             }
-//RS         }
-//RS         terminate(job)
-//RS     }
-//RS 
-//RS     pub fn resize(console: usize, config: PtyConfig) -> io::Result<()> {
-//RS         if console == 0 {
-//RS             return Err(io::Error::new(
-//RS                 io::ErrorKind::BrokenPipe,
-//RS                 "ConPTY session is closed",
-//RS             ));
-//RS         }
-//RS         let size = validate_size(config)?;
-//RS         // SAFETY: the HPCON is owned by TerminalSession and remains live.
-//RS         let status = unsafe { ResizePseudoConsole(console as Handle, size) };
-//RS         if status != 0 {
-//RS             return Err(hresult_error("ResizePseudoConsole", status));
-//RS         }
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     pub fn is_terminal_eof(error: &io::Error) -> bool {
-//RS         matches!(
-//RS             error.kind(),
-//RS             io::ErrorKind::BrokenPipe | io::ErrorKind::UnexpectedEof
-//RS         )
-//RS     }
-//RS 
-//RS     pub fn supported() -> bool {
-//RS         true
-//RS     }
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS pub fn supported() -> bool {
-//RS     unix::supported()
-//RS }
-//RS 
-//RS #[cfg(windows)]
-//RS pub use windows::WindowsPtyProcess;
-//RS 
-//RS #[cfg(windows)]
-//RS pub fn supported() -> bool {
-//RS     windows::supported()
-//RS }
-//RS 
-//RS #[cfg(not(any(unix, windows)))]
-//RS pub fn supported() -> bool {
-//RS     false
-//RS }
-//RS 
-//RS pub fn open(config: PtyConfig) -> io::Result<PtyPair> {
-//RS     #[cfg(unix)]
-//RS     {
-//RS         return unix::open(config);
-//RS     }
-//RS     #[cfg(not(unix))]
-//RS     {
-//RS         let _ = config;
-//RS         Err(io::Error::new(
-//RS             io::ErrorKind::Unsupported,
-//RS             "Unix PTY backend is unavailable on this target",
-//RS         ))
-//RS     }
-//RS }
-//RS 
-//RS pub fn attach_command(command: &mut Command, limits: ResourceLimits) -> io::Result<()> {
-//RS     #[cfg(unix)]
-//RS     {
-//RS         return unix::attach_command(command, limits);
-//RS     }
-//RS     #[cfg(not(unix))]
-//RS     {
-//RS         let _ = (command, limits);
-//RS         Ok(())
-//RS     }
-//RS }
-//RS 
-//RS pub fn attach_process_group(command: &mut Command, limits: ResourceLimits) -> io::Result<()> {
-//RS     #[cfg(unix)]
-//RS     {
-//RS         return unix::attach_process_group(command, limits);
-//RS     }
-//RS     #[cfg(not(unix))]
-//RS     {
-//RS         let _ = (command, limits);
-//RS         Ok(())
-//RS     }
-//RS }
-//RS 
-//RS pub fn resize(master: &File, config: PtyConfig) -> io::Result<()> {
-//RS     #[cfg(unix)]
-//RS     {
-//RS         return unix::resize(master, config);
-//RS     }
-//RS     #[cfg(not(unix))]
-//RS     {
-//RS         let _ = (master, config);
-//RS         Err(io::Error::new(
-//RS             io::ErrorKind::Unsupported,
-//RS             "Unix PTY backend is unavailable on this target",
-//RS         ))
-//RS     }
-//RS }
-//RS 
-//RS #[cfg(windows)]
-//RS pub fn spawn(
-//RS     config: PtyConfig,
-//RS     executable: &str,
-//RS     args: &[String],
-//RS     cwd: Option<&str>,
-//RS     env: &[(std::ffi::OsString, std::ffi::OsString)],
-//RS     limits: ResourceLimits,
-//RS ) -> io::Result<WindowsPtyProcess> {
-//RS     windows::spawn(config, executable, args, cwd, env, limits)
-//RS }
-//RS 
-//RS #[cfg(windows)]
-//RS pub fn attach_job(
-//RS     process: std::os::windows::io::RawHandle,
-//RS     limits: ResourceLimits,
-//RS ) -> io::Result<File> {
-//RS     windows::attach_job(process, limits)
-//RS }
-//RS 
-//RS #[cfg(windows)]
-//RS pub fn wait(process: &File) -> io::Result<u32> {
-//RS     windows::wait(process)
-//RS }
-//RS 
-//RS #[cfg(windows)]
-//RS pub fn try_wait(process: &File) -> io::Result<Option<u32>> {
-//RS     windows::try_wait(process)
-//RS }
-//RS 
-//RS #[cfg(windows)]
-//RS pub fn terminate(job: &File) -> io::Result<()> {
-//RS     windows::terminate(job)
-//RS }
-//RS 
-//RS #[cfg(windows)]
-//RS pub fn resource_limit_hit(
-//RS     job: &File,
-//RS     limits: ResourceLimits,
-//RS ) -> io::Result<Option<ResourceLimitKind>> {
-//RS     windows::resource_limit_hit(job, limits)
-//RS }
-//RS 
-//RS #[cfg(windows)]
-//RS pub fn interrupt(pid: u32, job: &File, input: Option<&File>) -> io::Result<()> {
-//RS     windows::interrupt(pid, job, input)
-//RS }
-//RS 
-//RS #[cfg(windows)]
-//RS pub fn resize_console(console: usize, config: PtyConfig) -> io::Result<()> {
-//RS     windows::resize(console, config)
-//RS }
-//RS 
-//RS pub fn signal_group(pid: u32, signal: i32) -> io::Result<()> {
-//RS     #[cfg(unix)]
-//RS     {
-//RS         return unix::signal_group(pid, signal);
-//RS     }
-//RS     #[cfg(not(any(unix, windows)))]
-//RS     {
-//RS         let _ = (pid, signal);
-//RS         Err(io::Error::new(
-//RS             io::ErrorKind::Unsupported,
-//RS             "process groups are unavailable on this target",
-//RS         ))
-//RS     }
-//RS     #[cfg(windows)]
-//RS     {
-//RS         let _ = (pid, signal);
-//RS         Err(io::Error::new(
-//RS             io::ErrorKind::Unsupported,
-//RS             "POSIX process groups are unavailable on Windows",
-//RS         ))
-//RS     }
-//RS }
-//RS 
-//RS pub fn is_terminal_eof(error: &io::Error) -> bool {
-//RS     #[cfg(unix)]
-//RS     {
-//RS         return unix::is_terminal_eof(error);
-//RS     }
-//RS     #[cfg(not(any(unix, windows)))]
-//RS     {
-//RS         let _ = error;
-//RS         false
-//RS     }
-//RS     #[cfg(windows)]
-//RS     {
-//RS         windows::is_terminal_eof(error)
-//RS     }
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS pub const SIGINT: i32 = unix::SIGINT;
-//RS #[cfg(unix)]
-//RS pub const SIGTERM: i32 = unix::SIGTERM;
-//RS #[cfg(unix)]
-//RS pub const SIGKILL: i32 = unix::SIGKILL;
-//RS 
-//RS #[cfg(windows)]
-//RS pub const SIGINT: i32 = 2;
-//RS #[cfg(windows)]
-//RS pub const SIGTERM: i32 = 15;
-//RS #[cfg(windows)]
-//RS pub const SIGKILL: i32 = 9;
-//RS 
-//RS #[cfg(not(any(unix, windows)))]
-//RS pub const SIGINT: i32 = 2;
-//RS #[cfg(not(any(unix, windows)))]
-//RS pub const SIGTERM: i32 = 15;
-//RS #[cfg(not(any(unix, windows)))]
-//RS pub const SIGKILL: i32 = 9;
-// END-PORT-PENDING 0171 crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:1-1435
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:1
+// Native PTY/ConPTY support uses the existing audited OS kernel boundary.
+use std.fs.[File, OpenOptions]
+use std.io as io
+use std.process.Command
+use std.ffi.[CStr, OsStr, c_void]
+use core.files.OSPath
+use core.sys.target
+use core.mem
+use core.ptr
+use core.term.runtime.terminal_default.[JET_TERMINAL_DEFAULT_COLS, JET_TERMINAL_DEFAULT_ROWS]
+use core.term.runtime.term.[jet_term_configure_fd]
+use jet_foundation.Syntax.TEXT_NUL
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:12
+#Copy
+#Equatable
+pub struct PtyConfig { pub cols: I64, pub rows: I64, pub raw: Bool }
+impl Default for PtyConfig {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:21
+    fn default() -> Self { Self{cols: JET_TERMINAL_DEFAULT_COLS, rows: JET_TERMINAL_DEFAULT_ROWS, raw: false} }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:30
+pub struct PtyPair { pub master: File, pub slave: File }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:38
+#Copy
+#Equatable
+pub struct ResourceLimits { pub cpu_time_ms: I64?, pub memory_bytes: I64?, pub open_files: I64? }
+impl Default for ResourceLimits {
+    fn default() -> Self { Self{cpu_time_ms: None, memory_bytes: None, open_files: None} }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:46
+#Copy
+#Equatable
+pub enum ResourceLimitKind { CpuTime, Memory }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:52
+module unix {
+    use c.c as os
+    use core.sys.host.[unix_fd, process_control]
+    use std.sync.Mutex
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:64
+    // GATE #4565: kernel primitive
+    PTY_NAME_LOCK :: #Unsafe("serialize libc-owned ptsname static storage until copied") { Mutex.new(()) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:67
+    #Layout(c)
+    struct WinSize { rows: U16, cols: U16, xpixel: U16, ypixel: U16 }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:75
+    const PTY_OPEN_FLAGS: I32 = if target.selected_os() == .Linux { 0x0002 | 0x0100 | 0x80000 } else { 0x0002 | 0x20000 | 0x01000000 }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:80
+    const TIOCSCTTY: U64 = if target.selected_os() == .Linux { 0x540e } else { 0x20007461 }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:85
+    const TIOCSWINSZ: U64 = if target.selected_os() == .Linux { 0x5414 } else { 0x80087467 }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:89
+    const EIO: I32 = 5
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:90
+    const ESRCH: I32 = 3
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:106
+    #Layout(c)
+    struct RLimit { current: U64, maximum: U64 }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:94
+    // GATE #4565: kernel primitive — libc native imports selected only for Unix.
+    #Import module c.c {
+        fn posix_openpt(flags: I32) -> I32 = "posix_openpt"
+        // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:95
+        fn grantpt(fd: I32) -> I32 = "grantpt"
+        // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:96
+        fn unlockpt(fd: I32) -> I32 = "unlockpt"
+        // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:97
+        fn ptsname(fd: I32) -> *I8 = "ptsname"
+        // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:98
+        fn ioctl(fd: I32, request: U64, arg: *c_void) -> I32 = "ioctl"
+        // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:101
+        fn setrlimit(resource: I32, limit: *RLimit) -> I32 = "setrlimit"
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:99,100,102
+    // fcntl/setsid/kill reuse canonical unix_fd/process_control imports.
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:112
+    const RLIMIT_CPU: I32 = 0
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:114
+    const RLIMIT_MEMORY: I32 = if target.selected_os() == .Linux { 9 } else { 5 }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:116
+    const RLIMIT_NOFILE: I32 = if target.selected_os() == .Linux { 7 } else { 8 }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:125,155
+    fn apply_limits(limits: ResourceLimits) -> io.Error! {
+        if target.selected_os() != .Linux && target.selected_os() != .MacOS -> return Ok(())
+        // GATE #4565: kernel primitive
+        set :: fn(resource: I32, current: U64, maximum: U64) -> io.Error! {
+            limit :: RLimit{current: current, maximum: maximum}
+            #Unsafe("rlimit is live and kernel-shaped for this async-signal-safe pre-exec call") {
+                if os.setrlimit(resource, ptr.from_ref(&limit)) != 0 -> return Err(io.Error.last_os_error())
+            }
+            Ok(())
+        }
+        if limits.cpu_time_ms is Val(milliseconds) {
+            seconds :: milliseconds.max(0).saturating_add(999) / 1000
+            set(RLIMIT_CPU, seconds as U64, seconds.saturating_add(1) as U64)?
+        }
+        if limits.memory_bytes is Val(bytes) { bytes :: bytes.max(0) as U64; set(RLIMIT_MEMORY, bytes, bytes)? }
+        if limits.open_files is Val(files) { files :: files.max(0) as U64; set(RLIMIT_NOFILE, files, files)? }
+        Ok(())
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:159
+    fn invalid(message: String) -> io.Error { io.Error.new(io.ErrorKind.InvalidInput, ^message) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:163
+    fn last_os_error(operation: &String) -> io.Error {
+        // GATE #4565: kernel primitive
+        error :: #Unsafe("capture errno immediately and retain its exact native error kind") { io.Error.last_os_error() }
+        io.Error.new(error.kind(), "{operation}: {error}")
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:168
+    fn ioctl_error(operation: &String) -> io.Error { last_os_error(operation) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:172
+    fn validate_size(config: PtyConfig) -> (U16, U16) io.Error! {
+        if config.cols < 1 || config.cols > U16.MAX as I64 || config.rows < 1 || config.rows > U16.MAX as I64 {
+            return Err(invalid("terminal size must be between 1 and {U16.MAX}, got {config.cols}x{config.rows}"))
+        }
+        Ok((config.cols as U16, config.rows as U16))
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:186
+    pub fn open(config: PtyConfig) -> PtyPair io.Error! {
+        (cols, rows) :: validate_size(config)?
+        // GATE #4565: kernel primitive
+        #Unsafe("wrap the sole returned master descriptor once; every failure drops its owner") {
+            master_fd :: os.posix_openpt(PTY_OPEN_FLAGS)
+            if master_fd < 0 -> return Err(last_os_error(&"posix_openpt"))
+            master :: File.from_raw_fd(master_fd)
+            if os.grantpt(master_fd) != 0 -> return Err(last_os_error(&"grantpt"))
+            if os.unlockpt(master_fd) != 0 -> return Err(last_os_error(&"unlockpt"))
+            slave_path :: {
+                _name_guard :: PTY_NAME_LOCK.lock().map_err(fn(_) { io.Error.new(io.ErrorKind.Other, "PTY name lock poisoned") })?
+                name :: os.ptsname(master_fd)
+                if name.is_null() -> return Err(last_os_error(&"ptsname"))
+                CStr.from_ptr(name).to_bytes().to_vec()
+            }
+            mark_close_on_exec(&master)?
+            slave :: OpenOptions.new().read(true).write(true).open(OSPath.from_bytes(&slave_path))?
+            mark_close_on_exec(&slave)?
+            configure(&slave, cols, rows, config.raw)?
+            Ok(PtyPair{master: ^master, slave: ^slave})
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:231
+    fn mark_close_on_exec(file: &File) -> io.Error! {
+        const F_SETFD: I32 = 2
+        const FD_CLOEXEC: I32 = 1
+        // GATE #4565: kernel primitive
+        #Unsafe("file owns a live descriptor; fcntl changes only its descriptor flags") {
+            if os.fcntl(file.as_raw_fd(), F_SETFD, FD_CLOEXEC) != 0 -> return Err(last_os_error(&"fcntl(FD_CLOEXEC)"))
+        }
+        Ok(())
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:242
+    fn configure(slave: &File, cols: U16, rows: U16, raw: Bool) -> io.Error! {
+        size :: WinSize{rows: rows, cols: cols, xpixel: 0, ypixel: 0}
+        // GATE #4565: kernel primitive
+        #Unsafe("slave descriptor and kernel-shaped winsize remain live through ioctl") {
+            if os.ioctl(slave.as_raw_fd(), TIOCSWINSZ, ptr.from_ref(&size).cast<c_void>()) != 0 -> return Err(ioctl_error(&"TIOCSWINSZ"))
+            jet_term_configure_fd(slave.as_raw_fd(), raw)?
+        }
+        Ok(())
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:265
+    pub fn attach_command(command: &Command, limits: ResourceLimits) -> io.Error! {
+        // GATE #4565: kernel primitive
+        #Unsafe("pre-exec closure captures only Copy facts and performs async-signal-safe session/resource syscalls") {
+            command.pre_exec(fn() -> io.Error! {
+                apply_limits(limits)?
+                if os.setsid() < 0 -> return Err(io.Error.last_os_error())
+                if os.ioctl(0, TIOCSCTTY, ptr.null<c_void>()) != 0 -> return Err(io.Error.last_os_error())
+                Ok(())
+            })
+        }
+        Ok(())
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:285
+    pub fn attach_process_group(command: &Command, limits: ResourceLimits) -> io.Error! {
+        // GATE #4565: kernel primitive
+        #Unsafe("pre-exec captures Copy limits and makes only async-signal-safe resource/session calls") {
+            command.pre_exec(fn() -> io.Error! {
+                apply_limits(limits)?
+                if os.setsid() < 0 -> return Err(io.Error.last_os_error())
+                Ok(())
+            })
+        }
+        Ok(())
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:304
+    pub fn resize(master: &File, config: PtyConfig) -> io.Error! {
+        (cols, rows) :: validate_size(config)?
+        size :: WinSize{rows: rows, cols: cols, xpixel: 0, ypixel: 0}
+        // GATE #4565: kernel primitive
+        #Unsafe("master and initialized kernel winsize stay live for the resize ioctl") {
+            if os.ioctl(master.as_raw_fd(), TIOCSWINSZ, ptr.from_ref(&size).cast<c_void>()) != 0 -> return Err(ioctl_error(&"TIOCSWINSZ"))
+        }
+        Ok(())
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:326
+    pub fn signal_group(pid: U32, signal: I32) -> io.Error! {
+        pid :: I32.try_from(pid).map_err(fn(_) { invalid("process id is out of range") })?
+        // GATE #4565: kernel primitive
+        #Unsafe("negative checked pid addresses the entire PTY process group; ESRCH means cleanup already succeeded") {
+            if os.kill(-pid, signal) != 0 {
+                if io.Error.last_os_error().raw_os_error() == Val(ESRCH) -> return Ok(())
+                return Err(last_os_error(&"kill process group"))
+            }
+        }
+        Ok(())
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:343
+    pub fn is_terminal_eof(error: &io.Error) -> Bool { error.raw_os_error() == Val(EIO) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:347
+    pub fn supported() -> Bool { true }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:351
+    pub const SIGINT: I32 = 2
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:352
+    pub const SIGTERM: I32 = 15
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:353
+    pub const SIGKILL: I32 = 9
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:357
+module windows {
+    use c.kernel32 as os
+    use core.sys.host.windows_file
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:364
+    type Handle = *U8
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:366
+    const CREATE_SUSPENDED: U32 = 0x0000_0004
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:367
+    const CREATE_UNICODE_ENVIRONMENT: U32 = 0x0000_0400
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:368
+    const EXTENDED_STARTUPINFO_PRESENT: U32 = 0x0008_0000
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:369
+    const PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE: USize = 0x0002_0016
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:370
+    const JOB_OBJECT_EXTENDED_LIMIT_INFORMATION: U32 = 9
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:371
+    const JOB_OBJECT_BASIC_ACCOUNTING_INFORMATION: U32 = 1
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:372
+    const JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE: U32 = 0x0000_2000
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:373
+    const JOB_OBJECT_LIMIT_PROCESS_TIME: U32 = 0x0000_0002
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:374
+    const JOB_OBJECT_LIMIT_PROCESS_MEMORY: U32 = 0x0000_0100
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:375
+    const WAIT_OBJECT_0: U32 = 0
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:376
+    const WAIT_TIMEOUT: U32 = 258
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:377
+    const WAIT_FAILED: U32 = 0xffff_ffff
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:378
+    const INFINITE: U32 = 0xffff_ffff
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:379
+    const STILL_ACTIVE: U32 = 259
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:380
+    const INVALID_THREAD_RESUME: U32 = 0xffff_ffff
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:381
+    const HANDLE_FLAG_INHERIT: U32 = 1
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:384
+    #Layout(c)
+    struct Coord { x: I16, y: I16 }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:390
+    #Layout(c)
+    struct SecurityAttributes { length: U32, descriptor: *c_void, inherit: I32 }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:397
+    #Layout(c)
+    struct StartupInfoW {
+        cb: U32
+        reserved: *U16
+        desktop: *U16
+        title: *U16
+        x: U32
+        y: U32
+        x_size: U32
+        y_size: U32
+        x_count_chars: U32
+        y_count_chars: U32
+        fill_attribute: U32
+        flags: U32
+        show_window: U16
+        reserved2: U16
+        reserved2_ptr: *U8
+        std_input: Handle
+        std_output: Handle
+        std_error: Handle
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:419
+    #Layout(c)
+    struct StartupInfoExW { startup_info: StartupInfoW, attribute_list: *c_void }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:425
+    #Layout(c)
+    struct ProcessInformation { process: Handle, thread: Handle, process_id: U32, thread_id: U32 }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:433
+    #Layout(c)
+    struct BasicLimitInformation {
+        per_process_user_time_limit: I64
+        per_job_user_time_limit: I64
+        limit_flags: U32
+        minimum_working_set_size: USize
+        maximum_working_set_size: USize
+        active_process_limit: U32
+        affinity: USize
+        priority_class: U32
+        scheduling_class: U32
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:446
+    #Layout(c)
+    struct IoCounters { read_operations: U64, write_operations: U64, other_operations: U64, read_bytes: U64, write_bytes: U64, other_bytes: U64 }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:456
+    #Layout(c)
+    struct ExtendedLimitInformation {
+        basic: BasicLimitInformation
+        io: IoCounters
+        process_memory_limit: USize
+        job_memory_limit: USize
+        peak_process_memory_used: USize
+        peak_job_memory_used: USize
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:466
+    #Layout(c)
+    struct BasicAccountingInformation {
+        total_user_time: I64
+        total_kernel_time: I64
+        this_period_total_user_time: I64
+        this_period_total_kernel_time: I64
+        total_processes: U32
+        active_processes: U32
+        terminated_processes: U32
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:478
+    // GATE #4565: kernel primitive — Windows-only publication of system ABI imports.
+    #Import module c.kernel32 {
+        #ABI(system)
+        fn AssignProcessToJobObject(job: Handle, process: Handle) -> I32 = "AssignProcessToJobObject"
+        // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:480
+        #ABI(system)
+        fn CreateJobObjectW(attributes: *c_void, name: *U16) -> Handle = "CreateJobObjectW"
+        // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:481
+        #ABI(system)
+        fn CreatePipe(read_pipe: *Handle, write_pipe: *Handle, attributes: *SecurityAttributes, size: U32) -> I32 = "CreatePipe"
+        // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:487
+        #ABI(system)
+        fn CreateProcessW(application_name: *U16, command_line: *U16, process_attributes: *c_void,
+            thread_attributes: *c_void, inherit_handles: I32, creation_flags: U32, environment: *c_void,
+            current_directory: *U16, startup_info: *StartupInfoW, process_information: *ProcessInformation) -> I32 = "CreateProcessW"
+        // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:499
+        #ABI(system)
+        fn CreatePseudoConsole(size: Coord, input: Handle, output: Handle, flags: U32, console: *Handle) -> I32 = "CreatePseudoConsole"
+        // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:506
+        #ABI(system)
+        fn CompareStringOrdinal(string1: *U16, count1: I32, string2: *U16, count2: I32, ignore_case: I32) -> I32 = "CompareStringOrdinal"
+        // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:513
+        #ABI(system)
+        fn DeleteProcThreadAttributeList(attribute_list: *c_void) = "DeleteProcThreadAttributeList"
+        // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:514
+        #ABI(system)
+        fn GetExitCodeProcess(process: Handle, exit_code: *U32) -> I32 = "GetExitCodeProcess"
+        // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:515
+        #ABI(system)
+        fn InitializeProcThreadAttributeList(attribute_list: *c_void, attribute_count: U32, flags: U32, size: *USize) -> I32 = "InitializeProcThreadAttributeList"
+        // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:521
+        #ABI(system)
+        fn ResizePseudoConsole(console: Handle, size: Coord) -> I32 = "ResizePseudoConsole"
+        // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:522
+        #ABI(system)
+        fn ResumeThread(thread: Handle) -> U32 = "ResumeThread"
+        // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:523
+        #ABI(system)
+        fn SetHandleInformation(handle: Handle, mask: U32, flags: U32) -> I32 = "SetHandleInformation"
+        // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:524
+        #ABI(system)
+        fn SetInformationJobObject(job: Handle, information_class: U32, information: *c_void, length: U32) -> I32 = "SetInformationJobObject"
+        // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:530
+        #ABI(system)
+        fn QueryInformationJobObject(job: Handle, information_class: U32, information: *c_void, length: U32, return_length: *U32) -> I32 = "QueryInformationJobObject"
+        // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:537
+        #ABI(system)
+        fn TerminateJobObject(job: Handle, exit_code: U32) -> I32 = "TerminateJobObject"
+        // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:538
+        #ABI(system)
+        fn TerminateProcess(process: Handle, exit_code: U32) -> I32 = "TerminateProcess"
+        // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:539
+        #ABI(system)
+        fn UpdateProcThreadAttribute(attribute_list: *c_void, flags: U32, attribute: USize, value: *c_void,
+            size: USize, previous_value: *c_void, return_size: *USize) -> I32 = "UpdateProcThreadAttribute"
+        // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:548
+        #ABI(system)
+        fn WaitForSingleObject(handle: Handle, milliseconds: U32) -> U32 = "WaitForSingleObject"
+        // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:549
+        #ABI(system)
+        fn ClosePseudoConsole(console: Handle) = "ClosePseudoConsole"
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:479
+    // CloseHandle reuses the canonical windows_file.close_handle native import.
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:552
+    fn null_handle() -> Handle { ptr.null_mut<U8>() }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:556
+    fn invalid_handle(handle: Handle) -> Bool { handle.is_null() || handle.addr() == USize.MAX }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:560
+    fn error(operation: &String) -> io.Error {
+        // GATE #4565: kernel primitive
+        cause :: #Unsafe("capture immediate Windows OS failure and retain its exact native kind") { io.Error.last_os_error() }
+        io.Error.new(cause.kind(), "{operation}: {cause}")
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:565
+    fn hresult_error(operation: &String, status: I32) -> io.Error {
+        io.Error.new(io.ErrorKind.Other, "{operation} failed with HRESULT 0x{status as U32:08x}")
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:572
+    fn validate_size(config: PtyConfig) -> Coord io.Error! {
+        if config.cols < 1 || config.cols > I16.MAX as I64 || config.rows < 1 || config.rows > I16.MAX as I64 {
+            return Err(io.Error.new(io.ErrorKind.InvalidInput,
+                "terminal size must be between 1 and {I16.MAX}, got {config.cols}x{config.rows}"))
+        }
+        Ok(Coord{x: config.cols as I16, y: config.rows as I16})
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:592
+    struct HandleGuard { handle: Handle }
+    impl HandleGuard {
+        // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:595
+        fn new(handle: Handle) -> Self io.Error! {
+            if invalid_handle(handle) { Err(error(&"invalid Windows handle")) } else { Ok(Self{handle: handle}) }
+        }
+        // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:603
+        fn raw(self: &Self) -> Handle { self.handle }
+        // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:607
+        fn into_file(self: ^Self) -> File {
+            owned := ^self
+            handle :: owned.handle
+            owned.handle = null_handle()
+            // GATE #4565: kernel primitive
+            #Unsafe("move the guard's sole live HANDLE into exactly one File") { File.from_raw_handle(handle) }
+        }
+    }
+    impl Drop for HandleGuard {
+        // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:616
+        fn drop(self: &Self) -> {
+            // GATE #4565: kernel primitive
+            #Unsafe("this guard owns the live HANDLE and closes it only once") {
+                if not invalid_handle(self.handle) -> _ :: os.close_handle(self.handle)
+            }
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:624
+    struct ConsoleGuard { handle: Handle }
+    impl ConsoleGuard {
+        // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:627
+        fn create(config: PtyConfig, input: Handle, output: Handle) -> Self io.Error! {
+            size :: validate_size(config)?
+            console := null_handle()
+            // GATE #4565: kernel primitive
+            status :: #Unsafe("pipe handles and output storage remain live for CreatePseudoConsole") {
+                os.CreatePseudoConsole(size, input, output, 0, &console)
+            }
+            if status != 0 -> return Err(hresult_error(&"CreatePseudoConsole", status))
+            if invalid_handle(console) -> return Err(io.Error.new(io.ErrorKind.Other, "CreatePseudoConsole returned no console handle"))
+            Ok(Self{handle: console})
+        }
+        // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:645
+        fn raw(self: &Self) -> Handle { self.handle }
+        // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:649
+        fn into_raw(self: ^Self) -> USize {
+            owned := ^self
+            handle :: owned.handle.addr()
+            owned.handle = null_handle()
+            handle
+        }
+    }
+    impl Drop for ConsoleGuard {
+        // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:657
+        fn drop(self: &Self) -> {
+            // GATE #4565: kernel primitive
+            #Unsafe("guard owns the sole live HPCON and closes it once") {
+                if not invalid_handle(self.handle) -> os.ClosePseudoConsole(self.handle)
+            }
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:665
+    struct AttributeList { list: *c_void, storage: [USize] }
+    impl AttributeList {
+        // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:673
+        fn create() -> Self io.Error! {
+            size := USize{0}
+            // GATE #4565: kernel primitive
+            #Unsafe("documented size probe; storage is pointer-aligned and remains live through list deletion") {
+                _ :: os.InitializeProcThreadAttributeList(ptr.null_mut<c_void>(), 1, 0, &size)
+                if size == 0 -> return Err(error(&"InitializeProcThreadAttributeList size probe"))
+                words :: size.checked_add(mem.size_of<USize>() - 1)
+                    .ok_or_else(fn() { io.Error.new(io.ErrorKind.InvalidData, "InitializeProcThreadAttributeList size overflows") })?
+                    / mem.size_of<USize>()
+                storage := [USize].repeat(0, words)
+                list :: storage.as_mut_ptr().cast<c_void>()
+                if os.InitializeProcThreadAttributeList(list, 1, 0, &size) == 0 -> return Err(error(&"InitializeProcThreadAttributeList"))
+                Ok(Self{list: list, storage: ^storage})
+            }
+        }
+        // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:700
+        fn update(self: &Self, attribute: USize, value: *c_void, size: USize) -> io.Error! {
+            // GATE #4565: kernel primitive
+            #Unsafe("attribute value points at initialized live native storage for this call") {
+                if os.UpdateProcThreadAttribute(self.list, 0, attribute, value, size, ptr.null_mut<c_void>(), ptr.null_mut<USize>()) == 0 {
+                    return Err(error(&"UpdateProcThreadAttribute"))
+                }
+            }
+            Ok(())
+        }
+    }
+    impl Drop for AttributeList {
+        // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:726
+        fn drop(self: &Self) -> {
+            // GATE #4565: kernel primitive
+            #Unsafe("initialized native attribute list borrows this still-live pointer-aligned storage") {
+                os.DeleteProcThreadAttributeList(self.list)
+                _ :: &self.storage
+            }
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:733
+    struct Job { guard: HandleGuard }
+    impl Job {
+        // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:736
+        fn create(resource_limits: ResourceLimits) -> Self io.Error! {
+            // GATE #4565: kernel primitive
+            #Unsafe("create a private unnamed job; install the exact documented native limit structure") {
+                handle :: os.CreateJobObjectW(ptr.null_mut<c_void>(), ptr.null<U16>())
+                guard :: HandleGuard.new(handle)?
+                limits := ExtendedLimitInformation{
+                    basic: BasicLimitInformation{
+                        per_process_user_time_limit: resource_limits.cpu_time_ms.map(fn(ms) { ms.max(0).saturating_mul(10000) }) ?? 0,
+                        per_job_user_time_limit: 0,
+                        limit_flags: JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+                            | (if resource_limits.cpu_time_ms.is_some() { JOB_OBJECT_LIMIT_PROCESS_TIME } else { 0 })
+                            | (if resource_limits.memory_bytes.is_some() { JOB_OBJECT_LIMIT_PROCESS_MEMORY } else { 0 }),
+                        minimum_working_set_size: 0, maximum_working_set_size: 0, active_process_limit: 0,
+                        affinity: 0, priority_class: 0, scheduling_class: 0},
+                    io: IoCounters{read_operations: 0, write_operations: 0, other_operations: 0,
+                        read_bytes: 0, write_bytes: 0, other_bytes: 0},
+                    process_memory_limit: resource_limits.memory_bytes.map(fn(bytes) { bytes.max(0) as USize }) ?? 0,
+                    job_memory_limit: 0, peak_process_memory_used: 0, peak_job_memory_used: 0}
+                if os.SetInformationJobObject(guard.raw(), JOB_OBJECT_EXTENDED_LIMIT_INFORMATION,
+                    ptr.from_mut(&limits).cast<c_void>(), mem.size_of<ExtendedLimitInformation>() as U32) == 0 {
+                    return Err(error(&"SetInformationJobObject"))
+                }
+                Ok(Self{guard: ^guard})
+            }
+        }
+        // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:796
+        fn assign(self: &Self, process: Handle) -> io.Error! {
+            // GATE #4565: kernel primitive
+            #Unsafe("job and process HANDLEs remain live until assignment completes") {
+                if os.AssignProcessToJobObject(self.guard.raw(), process) == 0 -> return Err(error(&"AssignProcessToJobObject"))
+            }
+            Ok(())
+        }
+        // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:804
+        fn into_file(self: ^Self) -> File { self.guard.into_file() }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:809
+    fn create_pipe() -> (HandleGuard, HandleGuard) io.Error! {
+        read := null_handle()
+        write := null_handle()
+        attributes := SecurityAttributes{length: mem.size_of<SecurityAttributes>() as U32, descriptor: ptr.null_mut<c_void>(), inherit: 1}
+        // GATE #4565: kernel primitive
+        #Unsafe("native pipe outputs and initialized security attributes are live") {
+            if os.CreatePipe(&read, &write, &attributes, 0) == 0 -> return Err(error(&"CreatePipe"))
+        }
+        read :: HandleGuard.new(read)?
+        write :: HandleGuard.new(write)?
+        Ok((^read, ^write))
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:829
+    fn make_wide(value: &String) -> [U16] io.Error! {
+        if value.contains(TEXT_NUL) -> return Err(io.Error.new(io.ErrorKind.InvalidInput, "Windows process value contains NUL"))
+        Ok(value.encode_utf16().chain(std.iter.once(U16{0})).collect<[U16]>())
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:839
+    fn quote_arg(value: &String) -> [U16] io.Error! {
+        if value.contains(TEXT_NUL) -> return Err(io.Error.new(io.ErrorKind.InvalidInput, "Windows process argument contains NUL"))
+        quoted :: value.is_empty() || value.chars().any(fn(character) { character.is_whitespace() }) || value.contains('"')
+        output := String.new()
+        if quoted -> output.push('"')
+        slashes := 0
+        loop character in value.chars() {
+            if character == '\\' { slashes += 1; continue }
+            if character == '"' {
+                output.extend(std.iter.repeat_n('\\', slashes * 2 + 1))
+            } else { output.extend(std.iter.repeat_n('\\', slashes)) }
+            output.push(character)
+            slashes = 0
+        }
+        if quoted {
+            output.extend(std.iter.repeat_n('\\', slashes * 2))
+            output.push('"')
+        } else { output.extend(std.iter.repeat_n('\\', slashes)) }
+        make_wide(&output)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:875
+    fn command_line(executable: &String, args: View<String>) -> [U16] io.Error! {
+        output := quote_arg(executable)?
+        _ :: output.pop()
+        loop arg in args {
+            output.push(U16{32})
+            quoted := quote_arg(&arg)?
+            _ :: quoted.pop()
+            output.extend(^quoted)
+        }
+        output.push(0)
+        Ok(^output)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:888
+    fn compare_environment_names(left: View<U16>, right: View<U16>) -> std.cmp.Ordering {
+        left_len :: I32.try_from(left.len()).ok() ?? return left.cmp(right)
+        right_len :: I32.try_from(right.len()).ok() ?? return left.cmp(right)
+        // GATE #4565: kernel primitive
+        #Unsafe("both UTF16 pointers remain valid for the exact explicit lengths") {
+            match os.CompareStringOrdinal(left.as_ptr(), left_len, right.as_ptr(), right_len, 1) {
+                1 -> .Less, 2 -> .Equal, 3 -> .Greater, _ -> left.cmp(right)
+            }
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:906
+    fn environment_block(env: View<(OSPath, OSPath)>) -> [U16] io.Error! {
+        entries := [(name: [U16], value: [U16])].with_capacity(env.len())
+        loop (name, value) in env {
+            name :: name.encode_wide().collect<[U16]>()
+            value :: value.encode_wide().collect<[U16]>()
+            if name.contains(&U16{0}) || value.contains(&U16{0}) -> return Err(io.Error.new(io.ErrorKind.InvalidInput, "Windows process environment contains NUL"))
+            entries.push((name: ^name, value: ^value))
+        }
+        entries.sort_by(fn(left, right) { compare_environment_names(left.name.view(), right.name.view()) })
+        block := [U16]{}
+        loop entry in entries {
+            block.extend(^entry.name)
+            block.push(U16{61})
+            block.extend(^entry.value)
+            block.push(0)
+        }
+        if block.is_empty() -> block.push(0)
+        block.push(0)
+        Ok(^block)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:937
+    pub struct WindowsPtyProcess { pub process: File, pub job: File, pub pid: U32, pub input: File, pub output: File, pub console: USize }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:946
+    pub fn spawn(config: PtyConfig, executable: &String, args: View<String>, cwd: (&String)?,
+        env: View<(OSPath, OSPath)>, limits: ResourceLimits) -> WindowsPtyProcess io.Error! {
+        (input_read, input_write) :: create_pipe()?
+        (output_read, output_write) :: create_pipe()?
+        // GATE #4565: kernel primitive
+        #Unsafe("all native storage/handles stay live; create suspended, assign job, then resume only after the boundary is ready") {
+            if os.SetHandleInformation(input_write.raw(), HANDLE_FLAG_INHERIT, 0) == 0 -> return Err(error(&"SetHandleInformation(input)"))
+            if os.SetHandleInformation(output_read.raw(), HANDLE_FLAG_INHERIT, 0) == 0 -> return Err(error(&"SetHandleInformation(output)"))
+            console :: ConsoleGuard.create(config, input_read.raw(), output_write.raw())?
+            job :: Job.create(limits)?
+            application :: make_wide(executable)?
+            command := command_line(executable, args)?
+            current_directory :: cwd.map(fn(path) { make_wide(path) }).transpose()?
+            environment := environment_block(env)?
+            attributes := AttributeList.create()?
+            console_handle :: console.raw()
+            attributes.update(PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE,
+                ptr.from_ref(&console_handle).cast<c_void>(), mem.size_of<Handle>())?
+            startup := StartupInfoExW{startup_info: StartupInfoW{
+                cb: mem.size_of<StartupInfoExW>() as U32, reserved: ptr.null_mut<U16>(),
+                desktop: ptr.null_mut<U16>(), title: ptr.null_mut<U16>(), x: 0, y: 0,
+                x_size: 0, y_size: 0, x_count_chars: 0, y_count_chars: 0,
+                fill_attribute: 0, flags: 0, show_window: 0, reserved2: 0,
+                reserved2_ptr: ptr.null_mut<U8>(), std_input: null_handle(),
+                std_output: null_handle(), std_error: null_handle()}, attribute_list: attributes.list}
+            information := ProcessInformation{process: null_handle(), thread: null_handle(), process_id: 0, thread_id: 0}
+            // No separate console group: ETX must reach the child's default handler.
+            if os.CreateProcessW(application.as_ptr(), command.as_mut_ptr(), ptr.null_mut<c_void>(),
+                ptr.null_mut<c_void>(), 0, EXTENDED_STARTUPINFO_PRESENT | CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT,
+                environment.as_mut_ptr().cast<c_void>(),
+                current_directory.as_ref().map_or(ptr.null<U16>(), fn(path) { path.as_ptr() }),
+                &startup.startup_info, &information) == 0 -> return Err(error(&"CreateProcessW(ConPTY)"))
+            // Keep ConPTY pipe ends open through CreateProcessW, then close host copies.
+            drop(^input_read)
+            drop(^output_write)
+            process :: HandleGuard.new(information.process)?
+            thread :: match HandleGuard.new(information.thread) {
+                Ok(thread) -> ^thread
+                Err(error) -> {
+                    _ :: os.TerminateProcess(process.raw(), 1)
+                    _ :: os.WaitForSingleObject(process.raw(), INFINITE)
+                    return Err(^error)
+                }
+            }
+            if job.assign(process.raw()) is Err(error) {
+                _ :: os.TerminateProcess(process.raw(), 1)
+                _ :: os.WaitForSingleObject(process.raw(), INFINITE)
+                return Err(^error)
+            }
+            if os.ResumeThread(thread.raw()) == INVALID_THREAD_RESUME {
+                _ :: os.TerminateProcess(process.raw(), 1)
+                _ :: os.WaitForSingleObject(process.raw(), INFINITE)
+                return Err(error(&"ResumeThread(ConPTY)"))
+            }
+            Ok(WindowsPtyProcess{process: process.into_file(), job: job.into_file(), pid: information.process_id,
+                input: input_write.into_file(), output: output_read.into_file(), console: console.into_raw()})
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:1077
+    pub fn attach_job(process: Handle, limits: ResourceLimits) -> File io.Error! {
+        job :: Job.create(limits)?
+        job.assign(process)?
+        Ok(job.into_file())
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:1083
+    pub fn try_wait(process: &File) -> U32? io.Error! {
+        // GATE #4565: kernel primitive
+        result :: #Unsafe("caller's process handle stays live through nonblocking wait") { os.WaitForSingleObject(process.as_raw_handle(), 0) }
+        match result {
+            WAIT_OBJECT_0 -> exit_code(process).map(fn(code) { Val(code) })
+            WAIT_TIMEOUT -> Ok(None)
+            WAIT_FAILED -> Err(error(&"WaitForSingleObject"))
+            other -> Err(io.Error.new(io.ErrorKind.Other, "WaitForSingleObject returned {other}"))
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:1097
+    pub fn wait(process: &File) -> U32 io.Error! {
+        // GATE #4565: kernel primitive
+        #Unsafe("caller's process handle stays live until the blocking wait finishes") {
+            if os.WaitForSingleObject(process.as_raw_handle(), INFINITE) != WAIT_OBJECT_0 -> return Err(error(&"WaitForSingleObject"))
+        }
+        exit_code(process)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:1105
+    fn exit_code(process: &File) -> U32 io.Error! {
+        code := STILL_ACTIVE
+        // GATE #4565: kernel primitive
+        #Unsafe("Windows fills one initialized live exit-code slot") {
+            if os.GetExitCodeProcess(process.as_raw_handle(), &code) == 0 -> return Err(error(&"GetExitCodeProcess"))
+        }
+        Ok(code)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:1114
+    pub fn resource_limit_hit(job: &File, limits: ResourceLimits) -> ResourceLimitKind? io.Error! {
+        // GATE #4565: kernel primitive
+        #Unsafe("job handle and exact documented accounting/limit structure slots remain live") {
+            if limits.cpu_time_ms.is_some() {
+                accounting := BasicAccountingInformation{total_user_time: 0, total_kernel_time: 0,
+                    this_period_total_user_time: 0, this_period_total_kernel_time: 0,
+                    total_processes: 0, active_processes: 0, terminated_processes: 0}
+                returned := U32{0}
+                if os.QueryInformationJobObject(job.as_raw_handle(), JOB_OBJECT_BASIC_ACCOUNTING_INFORMATION,
+                    ptr.from_mut(&accounting).cast<c_void>(), mem.size_of<BasicAccountingInformation>() as U32, &returned) == 0 {
+                    return Err(error(&"QueryInformationJobObject(accounting)"))
+                }
+                limit :: (limits.cpu_time_ms ?? 0).max(0)
+                cpu_time :: accounting.total_user_time.max(0).saturating_add(accounting.total_kernel_time.max(0))
+                if cpu_time >= limit.saturating_mul(10000) -> return Ok(Val(ResourceLimitKind.CpuTime))
+            }
+            if limits.memory_bytes.is_some() {
+                information := ExtendedLimitInformation{
+                    basic: BasicLimitInformation{per_process_user_time_limit: 0, per_job_user_time_limit: 0,
+                        limit_flags: 0, minimum_working_set_size: 0, maximum_working_set_size: 0,
+                        active_process_limit: 0, affinity: 0, priority_class: 0, scheduling_class: 0},
+                    io: IoCounters{read_operations: 0, write_operations: 0, other_operations: 0,
+                        read_bytes: 0, write_bytes: 0, other_bytes: 0},
+                    process_memory_limit: 0, job_memory_limit: 0, peak_process_memory_used: 0, peak_job_memory_used: 0}
+                returned := U32{0}
+                if os.QueryInformationJobObject(job.as_raw_handle(), JOB_OBJECT_EXTENDED_LIMIT_INFORMATION,
+                    ptr.from_mut(&information).cast<c_void>(), mem.size_of<ExtendedLimitInformation>() as U32, &returned) == 0 {
+                    return Err(error(&"QueryInformationJobObject(memory)"))
+                }
+                limit :: (limits.memory_bytes ?? 0).max(0) as USize
+                if information.peak_process_memory_used >= limit -> return Ok(Val(ResourceLimitKind.Memory))
+            }
+            Ok(None)
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:1199
+    pub fn terminate(job: &File) -> io.Error! {
+        // GATE #4565: kernel primitive
+        #Unsafe("caller owns the live Job Object; termination covers the descendant tree") {
+            if os.TerminateJobObject(job.as_raw_handle(), 1) == 0 -> return Err(error(&"TerminateJobObject"))
+        }
+        Ok(())
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:1207
+    pub fn interrupt(_pid: U32, job: &File, input: (&File)?) -> io.Error! {
+        if input is Val(input) {
+            // GATE #4565: kernel primitive
+            #Unsafe("clone the owned ConPTY input and send ETX through the terminal keyboard byte stream") {
+                input := input.try_clone()?
+                match input.write_all(&[U8{3}]) {
+                    Ok(()) -> return Ok(())
+                    Err(error) -> if not is_terminal_eof(&error) -> return Err(^error)
+                }
+            }
+        }
+        terminate(job)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:1224
+    pub fn resize(console: USize, config: PtyConfig) -> io.Error! {
+        if console == 0 -> return Err(io.Error.new(io.ErrorKind.BrokenPipe, "ConPTY session is closed"))
+        size :: validate_size(config)?
+        // GATE #4565: kernel primitive
+        status :: #Unsafe("TerminalSession owns this live HPCON") { os.ResizePseudoConsole(ptr.from_addr<U8>(console), size) }
+        if status != 0 -> return Err(hresult_error(&"ResizePseudoConsole", status))
+        Ok(())
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:1240
+    pub fn is_terminal_eof(error: &io.Error) -> Bool {
+        error.kind() == io.ErrorKind.BrokenPipe || error.kind() == io.ErrorKind.UnexpectedEof
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:1247
+    pub fn supported() -> Bool { true }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:1253,1261,1266
+pub fn supported() -> Bool {
+    match target.selected_family() { .Unix -> unix.supported(), .Windows -> windows.supported(), _ -> false }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:1258
+// WindowsPtyProcess stays at its canonical windows owner, without a re-export.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:1270
+pub fn open(config: PtyConfig) -> PtyPair io.Error! {
+    if target.selected_family() == .Unix -> return unix.open(config)
+    Err(io.Error.new(io.ErrorKind.Unsupported, "Unix PTY backend is unavailable on this target"))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:1285
+pub fn attach_command(command: &Command, limits: ResourceLimits) -> io.Error! {
+    if target.selected_family() == .Unix -> return unix.attach_command(command, limits)
+    // Original non-Unix arm deliberately installs no Unix pre-exec hook.
+    Ok(())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:1297
+pub fn attach_process_group(command: &Command, limits: ResourceLimits) -> io.Error! {
+    if target.selected_family() == .Unix -> return unix.attach_process_group(command, limits)
+    Ok(())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:1309
+pub fn resize(master: &File, config: PtyConfig) -> io.Error! {
+    if target.selected_family() == .Unix -> return unix.resize(master, config)
+    Err(io.Error.new(io.ErrorKind.Unsupported, "Unix PTY backend is unavailable on this target"))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:1325
+// The following original Windows-only routes are published only for selected_family Windows.
+pub fn spawn(config: PtyConfig, executable: &String, args: View<String>, cwd: (&String)?,
+    env: View<(OSPath, OSPath)>, limits: ResourceLimits) -> windows.WindowsPtyProcess io.Error! {
+    windows.spawn(config, executable, args, cwd, env, limits)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:1337
+pub fn attach_job(process: *U8, limits: ResourceLimits) -> File io.Error! { windows.attach_job(process, limits) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:1345
+pub fn wait(process: &File) -> U32 io.Error! { windows.wait(process) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:1350
+pub fn try_wait(process: &File) -> U32? io.Error! { windows.try_wait(process) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:1355
+pub fn terminate(job: &File) -> io.Error! { windows.terminate(job) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:1360
+pub fn resource_limit_hit(job: &File, limits: ResourceLimits) -> ResourceLimitKind? io.Error! { windows.resource_limit_hit(job, limits) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:1368
+pub fn interrupt(pid: U32, job: &File, input: (&File)?) -> io.Error! { windows.interrupt(pid, job, input) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:1373
+pub fn resize_console(console: USize, config: PtyConfig) -> io.Error! { windows.resize(console, config) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:1377
+pub fn signal_group(pid: U32, signal: I32) -> io.Error! {
+    match target.selected_family() {
+        .Unix -> unix.signal_group(pid, signal)
+        .Windows -> Err(io.Error.new(io.ErrorKind.Unsupported, "POSIX process groups are unavailable on Windows"))
+        _ -> Err(io.Error.new(io.ErrorKind.Unsupported, "process groups are unavailable on this target"))
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:1400
+pub fn is_terminal_eof(error: &io.Error) -> Bool {
+    match target.selected_family() { .Unix -> unix.is_terminal_eof(error), .Windows -> windows.is_terminal_eof(error), _ -> false }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:1417,1424,1431
+pub const SIGINT: I32 = if target.selected_family() == .Unix { unix.SIGINT } else { 2 }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:1419,1426,1433
+pub const SIGTERM: I32 = if target.selected_family() == .Unix { unix.SIGTERM } else { 15 }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:1421,1428,1435
+pub const SIGKILL: I32 = if target.selected_family() == .Unix { unix.SIGKILL } else { 9 }
 

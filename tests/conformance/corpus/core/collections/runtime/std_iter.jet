@@ -1,0 +1,29 @@
+use core.collections.runtime.std_iter.[jet_sequence_argument_message, jet_zip_row_count, jet_zip_rows, jet_zip_strict_step, jet_zip_short_step, jet_zip_pad_step, jet_list_count_where_result_kernel, jet_list_update_first_result_kernel]
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Iter.rs:13
+#Test("zip_modes_lengths_padding_and_strict_mismatch") {
+    assert(jet_zip_row_count(&[], 1) == Val(0))
+    assert(jet_zip_row_count(&[2, 3], 0) == Val(2))
+    assert(jet_zip_row_count(&[2, 3], 1) == None)
+    assert(jet_zip_row_count(&[2, 3], 2) == Val(3))
+    assert(jet_zip_rows(&[1, 2], 2, fn(column, index) { Val((column * 10 + index) as I64) }, fn(column) { -(column as I64) - 1 }) == Val([[0, 10], [-1, 11]]))
+    assert(jet_zip_strict_step(Val(1), Val(2)) == Ok(Val((1, 2))))
+    absent: I64? :: None
+    assert(jet_zip_strict_step(Val(1), absent) == Err(()))
+    assert(jet_zip_pad_step(absent, Val(2), 8, 9) == Val((8, 2)))
+    pulled := false
+    assert(jet_zip_short_step(absent, fn() { pulled = true; Val(2) }) == None && !pulled)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Iter.rs:3
+#Test("sequence_argument_boundaries_and_result_predicate_short_circuit") {
+    assert(jet_sequence_argument_message("take", -1) == Val("sequence count must be nonnegative"))
+    assert(jet_sequence_argument_message("take", 0) == None)
+    assert(jet_sequence_argument_message("windows", 0) == Val("windows requires a positive size"))
+    visits := 0
+    assert(jet_list_count_where_result_kernel(&[1, 2, 3], fn(value) -> Bool Err! { visits += 1; if *value == 2 { Err("stop") } else { Ok(true) } }) == Err("stop") && visits == 2)
+    xs := [1, 2, 3]
+    assert(jet_list_update_first_result_kernel(&xs, fn(value) -> Bool Err! { if *value == 2 { Err("stop") } else { Ok(false) } }, 9) == Err("stop"))
+    assert(xs == [1, 2, 3])
+    assert(jet_list_update_first_result_kernel(&xs, fn(value) -> Bool Err! { Ok(*value > 1) }, 9) == Ok(true))
+    assert(xs == [1, 9, 3])
+}

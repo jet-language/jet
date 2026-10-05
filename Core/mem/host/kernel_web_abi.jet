@@ -1,397 +1,364 @@
-// PORT-PENDING 0190 crates-jet-codegen-src-prelude-targetadapters-module-group: crates/jet-codegen/src/Prelude/Core/WebAbi.rs:1-393
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS // D-FAIL-EDGE1: preserve the Prelude error report across the Wasm host boundary.
-//RS thread_local! {
-//RS     static JET_WASM_ERROR: std::cell::RefCell<Option<String>> =
-//RS         const { std::cell::RefCell::new(None) };
-//RS }
-//RS 
-//RS fn jet_wasm_store_error(error: &JetErr) {
-//RS     let report = jet_error_report(error);
-//RS     JET_WASM_ERROR.with(|slot| {
-//RS         *slot.borrow_mut() = Some(format!(
-//RS             "{{\"tag\":\"Err\",\"error\":{}}}",
-//RS             report.to_json(),
-//RS         ));
-//RS     });
-//RS }
-//RS 
-//RS fn jet_wasm_store_absent() {
-//RS     JET_WASM_ERROR.with(|slot| {
-//RS         *slot.borrow_mut() = Some("{\"tag\":\"Err\",\"error\":{\"tag\":\"Absent\",\"values\":[]}}".to_string());
-//RS     });
-//RS }
-//RS 
-//RS #[no_mangle]
-//RS pub extern "C" fn jet_wasm_error_len() -> u32 {
-//RS     JET_WASM_ERROR.with(|slot| slot.borrow().as_ref().map_or(0, |json| json.len() as u32))
-//RS }
-//RS 
-//RS #[no_mangle]
-//RS pub extern "C" fn jet_wasm_error_ptr() -> u32 {
-//RS     JET_WASM_ERROR.with(|slot| slot.borrow().as_ref().map_or(0, |json| json.as_ptr() as u32))
-//RS }
-//RS 
-//RS #[no_mangle]
-//RS pub extern "C" fn jet_wasm_error_status() -> i32 {
-//RS     JET_WASM_ERROR.with(|slot| i32::from(slot.borrow().is_some()))
-//RS }
-//RS 
-//RS #[no_mangle]
-//RS pub extern "C" fn jet_wasm_error_clear() {
-//RS     JET_WASM_ERROR.with(|slot| *slot.borrow_mut() = None);
-//RS }
-//RS 
-//RS // D-JSBIND1: only registered allocations may cross the Wasm ownership boundary.
-//RS // Scalar Int and integer collections keep exact decimal text on the existing JS rail.
-//RS const JET_ABI_STRING_KIND: u8 = 1;
-//RS const JET_ABI_LIST_I64_KIND: u8 = 2;
-//RS const JET_ABI_LIST_INT_KIND: u8 = 3;
-//RS const JET_ABI_LIST_STRING_KIND: u8 = 4;
-//RS const JET_ABI_MAP_STRING_INT_KIND: u8 = 5;
-//RS 
-//RS static JET_ABI_ALLOCATIONS: std::sync::Mutex<Vec<(u8, u32, u32)>> =
-//RS     std::sync::Mutex::new(Vec::new());
-//RS 
-//RS fn jet_abi_register(kind: u8, ptr: u32, byte_len: u32) {
-//RS     assert!(ptr != 0 && byte_len != 0, "invalid Wasm ABI allocation");
-//RS     let mut allocations = JET_ABI_ALLOCATIONS.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-//RS     assert!(
-//RS         !allocations.iter().any(|&(known_kind, known_ptr, _)| known_kind == kind && known_ptr == ptr),
-//RS         "duplicate Wasm ABI allocation"
-//RS     );
-//RS     allocations.push((kind, ptr, byte_len));
-//RS }
-//RS 
-//RS fn jet_abi_take(kind: u8, ptr: u32, byte_len: u32) -> bool {
-//RS     let mut allocations = JET_ABI_ALLOCATIONS.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-//RS     let Some(index) = allocations.iter().position(|&(known_kind, known_ptr, known_len)| {
-//RS         known_kind == kind && known_ptr == ptr && known_len == byte_len
-//RS     }) else {
-//RS         return false;
-//RS     };
-//RS     allocations.swap_remove(index);
-//RS     true
-//RS }
-//RS 
-//RS fn jet_abi_require(kind: u8, ptr: u32, byte_len: u32) {
-//RS     assert!(
-//RS         ptr != 0 && byte_len != 0 && jet_abi_take(kind, ptr, byte_len),
-//RS         "untrusted or already-consumed Wasm ABI allocation"
-//RS     );
-//RS }
-//RS 
-//RS fn jet_abi_string_ret(s: String) -> u64 {
-//RS     if s.is_empty() { return 0; }
-//RS     let boxed = s.into_bytes().into_boxed_slice();
-//RS     let len = boxed.len() as u32;
-//RS     let ptr = Box::into_raw(boxed) as *mut u8 as u32;
-//RS     jet_abi_register(JET_ABI_STRING_KIND, ptr, len);
-//RS     ((ptr as u64) << 32) | (len as u64)
-//RS }
-//RS 
-//RS fn jet_abi_string_arg(packed: u64) -> String {
-//RS     let ptr = (packed >> 32) as u32;
-//RS     let len = (packed & 0xffff_ffff) as u32;
-//RS     if len == 0 {
-//RS         assert_eq!(ptr, 0, "non-null empty Wasm string allocation");
-//RS         return String::new();
-//RS     }
-//RS     jet_abi_require(JET_ABI_STRING_KIND, ptr, len);
-//RS     unsafe {
-//RS         let boxed = Box::from_raw(std::ptr::slice_from_raw_parts_mut(ptr as *mut u8, len as usize));
-//RS         String::from_utf8(boxed.into_vec()).expect("JS TextEncoder UTF-8")
-//RS     }
-//RS }
-//RS 
-//RS #[no_mangle]
-//RS pub extern "C" fn jet_abi_string_alloc(len: u32) -> u32 {
-//RS     if len == 0 { return 0; }
-//RS     let boxed = vec![0u8; len as usize].into_boxed_slice();
-//RS     let ptr = Box::into_raw(boxed) as *mut u8 as u32;
-//RS     jet_abi_register(JET_ABI_STRING_KIND, ptr, len);
-//RS     ptr
-//RS }
-//RS 
-//RS #[no_mangle]
-//RS pub extern "C" fn jet_abi_string_free(ptr: u32, len: u32) {
-//RS     if ptr == 0 { assert_eq!(len, 0, "null Wasm string allocation with length"); return; }
-//RS     jet_abi_require(JET_ABI_STRING_KIND, ptr, len);
-//RS     unsafe {
-//RS         let _ = Box::from_raw(std::ptr::slice_from_raw_parts_mut(ptr as *mut u8, len as usize));
-//RS     }
-//RS }
-//RS 
-//RS 
-//RS fn jet_abi_list_i64_ret(v: Vec<i64>) -> u64 {
-//RS     if v.is_empty() { return 0; }
-//RS     let boxed = v.into_boxed_slice();
-//RS     let len = boxed.len() as u32;
-//RS     let byte_len = len.checked_mul(std::mem::size_of::<i64>() as u32).expect("list-i64 byte length overflow");
-//RS     let ptr = Box::into_raw(boxed) as *mut i64 as u32;
-//RS     jet_abi_register(JET_ABI_LIST_I64_KIND, ptr, byte_len);
-//RS     ((ptr as u64) << 32) | (len as u64)
-//RS }
-//RS 
-//RS fn jet_abi_list_i64_arg(packed: u64) -> Vec<i64> {
-//RS     let ptr = (packed >> 32) as u32;
-//RS     let len = (packed & 0xffff_ffff) as u32;
-//RS     if len == 0 {
-//RS         assert_eq!(ptr, 0, "non-null empty Wasm list-i64 allocation");
-//RS         return Vec::new();
-//RS     }
-//RS     let byte_len = len.checked_mul(std::mem::size_of::<i64>() as u32).expect("list-i64 byte length overflow");
-//RS     jet_abi_require(JET_ABI_LIST_I64_KIND, ptr, byte_len);
-//RS     unsafe {
-//RS         let boxed = Box::from_raw(std::ptr::slice_from_raw_parts_mut(ptr as *mut i64, len as usize));
-//RS         boxed.into_vec()
-//RS     }
-//RS }
-//RS 
-//RS #[no_mangle]
-//RS pub extern "C" fn jet_abi_list_i64_alloc(len: u32) -> u32 {
-//RS     if len == 0 { return 0; }
-//RS     let boxed = vec![0i64; len as usize].into_boxed_slice();
-//RS     let ptr = Box::into_raw(boxed) as *mut i64 as u32;
-//RS     let byte_len = len.checked_mul(std::mem::size_of::<i64>() as u32).expect("list-i64 byte length overflow");
-//RS     jet_abi_register(JET_ABI_LIST_I64_KIND, ptr, byte_len);
-//RS     ptr
-//RS }
-//RS 
-//RS #[no_mangle]
-//RS pub extern "C" fn jet_abi_list_i64_free(ptr: u32, len: u32) {
-//RS     if ptr == 0 { assert_eq!(len, 0, "null Wasm list-i64 allocation with length"); return; }
-//RS     let byte_len = len.checked_mul(std::mem::size_of::<i64>() as u32).expect("list-i64 byte length overflow");
-//RS     jet_abi_require(JET_ABI_LIST_I64_KIND, ptr, byte_len);
-//RS     unsafe {
-//RS         let _ = Box::from_raw(std::ptr::slice_from_raw_parts_mut(ptr as *mut i64, len as usize));
-//RS     }
-//RS }
-//RS 
-//RS 
-//RS fn jet_abi_list_int_ret(v: Vec<jet_foundation::Numeric::JetInt>) -> u64 {
-//RS     if v.is_empty() { return 0; }
-//RS     let mut buf = Vec::new();
-//RS     buf.extend_from_slice(&(v.len() as u32).to_le_bytes());
-//RS     for value in v {
-//RS         let bytes = value.to_string().into_bytes();
-//RS         buf.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
-//RS         buf.extend_from_slice(&bytes);
-//RS     }
-//RS     let boxed = buf.into_boxed_slice();
-//RS     let len = boxed.len() as u32;
-//RS     let ptr = Box::into_raw(boxed) as *mut u8 as u32;
-//RS     jet_abi_register(JET_ABI_LIST_INT_KIND, ptr, len);
-//RS     ((ptr as u64) << 32) | len as u64
-//RS }
-//RS 
-//RS fn jet_abi_list_int_arg(packed: u64) -> Vec<jet_foundation::Numeric::JetInt> {
-//RS     let ptr = (packed >> 32) as u32;
-//RS     let len = (packed & 0xffff_ffff) as u32;
-//RS     if len == 0 {
-//RS         assert_eq!(ptr, 0, "non-null empty Wasm list-int allocation");
-//RS         return Vec::new();
-//RS     }
-//RS     jet_abi_require(JET_ABI_LIST_INT_KIND, ptr, len);
-//RS     unsafe {
-//RS         let boxed = Box::from_raw(std::ptr::slice_from_raw_parts_mut(ptr as *mut u8, len as usize));
-//RS         let bytes = boxed.into_vec();
-//RS         assert!(bytes.len() >= 4, "list-int header");
-//RS         let count = u32::from_le_bytes(bytes[0..4].try_into().unwrap()) as usize;
-//RS         assert!(count <= (bytes.len() - 4) / 4, "list-int count");
-//RS         let mut offset = 4usize;
-//RS         let mut values = Vec::with_capacity(count);
-//RS         for _ in 0..count {
-//RS             assert!(offset + 4 <= bytes.len(), "list-int length");
-//RS             let end = offset + 4;
-//RS             let value_len = u32::from_le_bytes(bytes[offset..end].try_into().unwrap()) as usize;
-//RS             offset = end;
-//RS             let end = offset.checked_add(value_len).expect("list-int value overflow");
-//RS             assert!(end <= bytes.len(), "list-int value");
-//RS             let text = std::str::from_utf8(&bytes[offset..end]).expect("JS UTF-8");
-//RS             values.push(jet_std::jet_int_owned_parse(text).expect("JS exact integer"));
-//RS             offset = end;
-//RS         }
-//RS         assert_eq!(offset, bytes.len(), "list-int trailing bytes");
-//RS         values
-//RS     }
-//RS }
-//RS 
-//RS #[no_mangle]
-//RS pub extern "C" fn jet_abi_list_int_alloc(byte_len: u32) -> u32 {
-//RS     if byte_len == 0 { return 0; }
-//RS     let boxed = vec![0u8; byte_len as usize].into_boxed_slice();
-//RS     let ptr = Box::into_raw(boxed) as *mut u8 as u32;
-//RS     jet_abi_register(JET_ABI_LIST_INT_KIND, ptr, byte_len);
-//RS     ptr
-//RS }
-//RS 
-//RS #[no_mangle]
-//RS pub extern "C" fn jet_abi_list_int_free(ptr: u32, byte_len: u32) {
-//RS     if ptr == 0 { assert_eq!(byte_len, 0, "null Wasm list-int allocation with length"); return; }
-//RS     jet_abi_require(JET_ABI_LIST_INT_KIND, ptr, byte_len);
-//RS     unsafe { let _ = Box::from_raw(std::ptr::slice_from_raw_parts_mut(ptr as *mut u8, byte_len as usize)); }
-//RS }
-//RS 
-//RS 
-//RS fn jet_abi_list_string_ret(v: Vec<String>) -> u64 {
-//RS     if v.is_empty() {
-//RS         return 0;
-//RS     }
-//RS     let mut buf: Vec<u8> = Vec::new();
-//RS     let count = v.len() as u32;
-//RS     buf.extend_from_slice(&count.to_le_bytes());
-//RS     for s in &v {
-//RS         let bytes = s.as_bytes();
-//RS         let len = bytes.len() as u32;
-//RS         buf.extend_from_slice(&len.to_le_bytes());
-//RS         buf.extend_from_slice(bytes);
-//RS     }
-//RS     let boxed = buf.into_boxed_slice();
-//RS     let byte_len = boxed.len() as u32;
-//RS     let ptr = Box::into_raw(boxed) as *mut u8 as u32;
-//RS     jet_abi_register(JET_ABI_LIST_STRING_KIND, ptr, byte_len);
-//RS     ((ptr as u64) << 32) | (byte_len as u64)
-//RS }
-//RS 
-//RS fn jet_abi_list_string_arg(packed: u64) -> Vec<String> {
-//RS     let ptr = (packed >> 32) as u32;
-//RS     let byte_len = (packed & 0xffff_ffff) as u32;
-//RS     if byte_len == 0 {
-//RS         assert_eq!(ptr, 0, "non-null empty Wasm list-string allocation");
-//RS         return Vec::new();
-//RS     }
-//RS     jet_abi_require(JET_ABI_LIST_STRING_KIND, ptr, byte_len);
-//RS     unsafe {
-//RS         let boxed = Box::from_raw(std::ptr::slice_from_raw_parts_mut(ptr as *mut u8, byte_len as usize));
-//RS         let buf = boxed.into_vec();
-//RS         let mut i = 0usize;
-//RS         assert!(buf.len() >= 4, "list-string header");
-//RS         let count = u32::from_le_bytes(buf[0..4].try_into().unwrap()) as usize;
-//RS         assert!(count <= (buf.len() - 4) / 4, "list-string count");
-//RS         i = 4;
-//RS         let mut out = Vec::with_capacity(count);
-//RS         for _ in 0..count {
-//RS             assert!(i + 4 <= buf.len(), "list-string len");
-//RS             let len = u32::from_le_bytes(buf[i..i + 4].try_into().unwrap()) as usize;
-//RS             i += 4;
-//RS             let end = i.checked_add(len).expect("list-string byte length overflow");
-//RS             assert!(end <= buf.len(), "list-string bytes");
-//RS             out.push(String::from_utf8(buf[i..end].to_vec()).expect("JS UTF-8"));
-//RS             i = end;
-//RS         }
-//RS         assert_eq!(i, buf.len(), "list-string trailing bytes");
-//RS         out
-//RS     }
-//RS }
-//RS 
-//RS #[no_mangle]
-//RS pub extern "C" fn jet_abi_list_string_alloc(byte_len: u32) -> u32 {
-//RS     if byte_len == 0 { return 0; }
-//RS     let boxed = vec![0u8; byte_len as usize].into_boxed_slice();
-//RS     let ptr = Box::into_raw(boxed) as *mut u8 as u32;
-//RS     jet_abi_register(JET_ABI_LIST_STRING_KIND, ptr, byte_len);
-//RS     ptr
-//RS }
-//RS 
-//RS #[no_mangle]
-//RS pub extern "C" fn jet_abi_list_string_free(ptr: u32, byte_len: u32) {
-//RS     if ptr == 0 { assert_eq!(byte_len, 0, "null Wasm list-string allocation with length"); return; }
-//RS     jet_abi_require(JET_ABI_LIST_STRING_KIND, ptr, byte_len);
-//RS     unsafe {
-//RS         let _ = Box::from_raw(std::ptr::slice_from_raw_parts_mut(ptr as *mut u8, byte_len as usize));
-//RS     }
-//RS }
-//RS 
-//RS 
-//RS fn jet_abi_map_string_int_ret(m: JetMap<String, jet_foundation::Numeric::JetInt>) -> u64 {
-//RS     if m.is_empty() {
-//RS         return 0;
-//RS     }
-//RS     let mut buf: Vec<u8> = Vec::new();
-//RS     let count = m.len() as u32;
-//RS     buf.extend_from_slice(&count.to_le_bytes());
-//RS     for (k, v) in &*m {
-//RS         let bytes = k.as_bytes();
-//RS         let len = bytes.len() as u32;
-//RS         buf.extend_from_slice(&len.to_le_bytes());
-//RS         buf.extend_from_slice(bytes);
-//RS         let value = v.to_string();
-//RS         let value_bytes = value.as_bytes();
-//RS         buf.extend_from_slice(&(value_bytes.len() as u32).to_le_bytes());
-//RS         buf.extend_from_slice(value_bytes);
-//RS     }
-//RS     let boxed = buf.into_boxed_slice();
-//RS     let byte_len = boxed.len() as u32;
-//RS     let ptr = Box::into_raw(boxed) as *mut u8 as u32;
-//RS     jet_abi_register(JET_ABI_MAP_STRING_INT_KIND, ptr, byte_len);
-//RS     ((ptr as u64) << 32) | (byte_len as u64)
-//RS }
-//RS 
-//RS fn jet_abi_map_string_int_arg(packed: u64) -> JetMap<String, jet_foundation::Numeric::JetInt> {
-//RS     let ptr = (packed >> 32) as u32;
-//RS     let byte_len = (packed & 0xffff_ffff) as u32;
-//RS     if byte_len == 0 {
-//RS         assert_eq!(ptr, 0, "non-null empty Wasm map-string-int allocation");
-//RS         return JetMap::new();
-//RS     }
-//RS     jet_abi_require(JET_ABI_MAP_STRING_INT_KIND, ptr, byte_len);
-//RS     unsafe {
-//RS         let boxed = Box::from_raw(std::ptr::slice_from_raw_parts_mut(ptr as *mut u8, byte_len as usize));
-//RS         let buf = boxed.into_vec();
-//RS         let mut i = 0usize;
-//RS         assert!(buf.len() >= 4, "map-string-int header");
-//RS         let count = u32::from_le_bytes(buf[0..4].try_into().unwrap()) as usize;
-//RS         assert!(count <= (buf.len() - 4) / 8, "map-string-int count");
-//RS         i = 4;
-//RS         let mut out = JetMap::new();
-//RS         for _ in 0..count {
-//RS             let len_end = i.checked_add(4).expect("map-string-int key len overflow");
-//RS             assert!(len_end <= buf.len(), "map-string-int key len");
-//RS             let len = u32::from_le_bytes(buf[i..len_end].try_into().unwrap()) as usize;
-//RS             i = len_end;
-//RS             let key_end = i.checked_add(len).expect("map-string-int key overflow");
-//RS             let value_len_end = key_end.checked_add(4).expect("map-string-int value length overflow");
-//RS             assert!(value_len_end <= buf.len(), "map-string-int value length");
-//RS             let value_len = u32::from_le_bytes(buf[key_end..value_len_end].try_into().unwrap()) as usize;
-//RS             let value_end = value_len_end.checked_add(value_len).expect("map-string-int value overflow");
-//RS             assert!(value_end <= buf.len(), "map-string-int entry");
-//RS             let key = String::from_utf8(buf[i..key_end].to_vec()).expect("JS UTF-8");
-//RS             let text = std::str::from_utf8(&buf[value_len_end..value_end]).expect("JS UTF-8");
-//RS             let val = jet_std::jet_int_owned_parse(text).expect("JS exact integer");
-//RS             i = value_end;
-//RS             out.insert(key, val);
-//RS         }
-//RS         assert_eq!(i, buf.len(), "map-string-int trailing bytes");
-//RS         out
-//RS     }
-//RS }
-//RS 
-//RS #[no_mangle]
-//RS pub extern "C" fn jet_abi_map_string_int_alloc(byte_len: u32) -> u32 {
-//RS     if byte_len == 0 { return 0; }
-//RS     let boxed = vec![0u8; byte_len as usize].into_boxed_slice();
-//RS     let ptr = Box::into_raw(boxed) as *mut u8 as u32;
-//RS     jet_abi_register(JET_ABI_MAP_STRING_INT_KIND, ptr, byte_len);
-//RS     ptr
-//RS }
-//RS 
-//RS #[no_mangle]
-//RS pub extern "C" fn jet_abi_map_string_int_free(ptr: u32, byte_len: u32) {
-//RS     if ptr == 0 { assert_eq!(byte_len, 0, "null Wasm map-string-int allocation with length"); return; }
-//RS     jet_abi_require(JET_ABI_MAP_STRING_INT_KIND, ptr, byte_len);
-//RS     unsafe {
-//RS         let _ = Box::from_raw(std::ptr::slice_from_raw_parts_mut(ptr as *mut u8, byte_len as usize));
-//RS     }
-//RS }
-//RS 
-//RS 
-//RS fn jet_abi_int_ret(value: jet_foundation::Numeric::JetInt) -> u64 {
-//RS     jet_abi_string_ret(value.to_string())
-//RS }
-//RS 
-//RS fn jet_abi_int_arg(packed: u64) -> jet_foundation::Numeric::JetInt {
-//RS     jet_std::jet_int_owned_parse(&jet_abi_string_arg(packed)).expect("JS exact integer")
-//RS }
-// END-PORT-PENDING 0190 crates/jet-codegen/src/Prelude/Core/WebAbi.rs:1-393
+use core.mem.[Box, ptr, size_of]
+use core.cell.RefCell
+use core.sync.Mutex
+use core.sys.kernel.ThreadLocal
+use jet_foundation.Numeric.JetInt
+use jet_std.[JetErr, JetMap, jet_error_report, jet_int_owned_parse]
 
+// Rust: crates/jet-codegen/src/Prelude/Core/WebAbi.rs:2
+// D-FAIL-EDGE1: preserve the error report across the Wasm host boundary.
+// GATE #4565: kernel primitive
+static JET_WASM_ERROR: ThreadLocal<RefCell<String?>> = #Unsafe("one error slot per Wasm execution thread") { ThreadLocal.new(fn() -> RefCell.new(None)) }
+// Rust: crates/jet-codegen/src/Prelude/Core/WebAbi.rs:7
+fn jet_wasm_store_error(error: JetErr) -> {
+    report :: jet_error_report(error)
+    JET_WASM_ERROR.with(fn(slot) {
+        *slot.borrow_mut() = Val("{{\"tag\":\"Err\",\"error\":{report.to_json()}}}")
+    })
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/WebAbi.rs:17
+fn jet_wasm_store_absent() -> {
+    JET_WASM_ERROR.with(fn(slot) { *slot.borrow_mut() = Val("{\"tag\":\"Err\",\"error\":{\"tag\":\"Absent\",\"values\":[]}}") })
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/WebAbi.rs:24
+#FFI(c)
+pub fn jet_wasm_error_len() -> U32 {
+    JET_WASM_ERROR.with(fn(slot) -> slot.borrow().as_ref().map_or(U32{0}, fn(json) -> json.len() as U32))
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/WebAbi.rs:29
+#FFI(c)
+pub fn jet_wasm_error_ptr() -> U32 {
+    // GATE #4565: kernel primitive
+    JET_WASM_ERROR.with(fn(slot) -> slot.borrow().as_ref().map_or(U32{0}, fn(json) -> #Unsafe("host borrows UTF-8 error bytes until the slot changes") { json.as_ptr().addr() as U32 }))
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/WebAbi.rs:34
+#FFI(c)
+pub fn jet_wasm_error_status() -> I32 { JET_WASM_ERROR.with(fn(slot) -> I32.from(slot.borrow().is_some())) }
+// Rust: crates/jet-codegen/src/Prelude/Core/WebAbi.rs:39
+#FFI(c)
+pub fn jet_wasm_error_clear() -> { JET_WASM_ERROR.with(fn(slot) { *slot.borrow_mut() = None }) }
+
+// Rust: crates/jet-codegen/src/Prelude/Core/WebAbi.rs:45
+const JET_ABI_STRING_KIND: U8 = 1
+// Rust: crates/jet-codegen/src/Prelude/Core/WebAbi.rs:46
+const JET_ABI_LIST_I64_KIND: U8 = 2
+// Rust: crates/jet-codegen/src/Prelude/Core/WebAbi.rs:47
+const JET_ABI_LIST_INT_KIND: U8 = 3
+// Rust: crates/jet-codegen/src/Prelude/Core/WebAbi.rs:48
+const JET_ABI_LIST_STRING_KIND: U8 = 4
+// Rust: crates/jet-codegen/src/Prelude/Core/WebAbi.rs:49
+const JET_ABI_MAP_STRING_INT_KIND: U8 = 5
+// Rust: crates/jet-codegen/src/Prelude/Core/WebAbi.rs:51
+// D-JSBIND1: only registered allocations cross the Wasm ownership boundary.
+// GATE #4565: kernel primitive
+static JET_ABI_ALLOCATIONS: Mutex<[(U8, U32, U32)]> = #Unsafe("serialize the live Wasm allocation ownership registry") { Mutex.new([]) }
+// Rust: crates/jet-codegen/src/Prelude/Core/WebAbi.rs:54
+fn jet_abi_register(kind: U8, ptr: U32, byte_len: U32) -> {
+    assert(ptr != 0 && byte_len != 0, "invalid Wasm ABI allocation")
+    allocations := JET_ABI_ALLOCATIONS.lock().unwrap_or_else(fn(poisoned) -> poisoned.into_inner())
+    assert(not allocations.iter().any(fn(entry) -> entry.0 == kind && entry.1 == ptr), "duplicate Wasm ABI allocation")
+    allocations.push((kind, ptr, byte_len))
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/WebAbi.rs:64
+fn jet_abi_take(kind: U8, ptr: U32, byte_len: U32) -> Bool {
+    allocations := JET_ABI_ALLOCATIONS.lock().unwrap_or_else(fn(poisoned) -> poisoned.into_inner())
+    index :: allocations.iter().position(fn(entry) -> entry.0 == kind && entry.1 == ptr && entry.2 == byte_len) ?? return false
+    _ :: allocations.swap_remove(index)
+    true
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/WebAbi.rs:75
+fn jet_abi_require(kind: U8, ptr: U32, byte_len: U32) -> {
+    assert(ptr != 0 && byte_len != 0 && jet_abi_take(kind, ptr, byte_len), "untrusted or already-consumed Wasm ABI allocation")
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/WebAbi.rs:82
+fn jet_abi_string_ret(s: String) -> U64 {
+    if s.is_empty() -> return 0
+    boxed :: s.into_bytes().into_boxed_slice()
+    len :: boxed.len() as U32
+    // GATE #4565: kernel primitive
+    pointer :: #Unsafe("transfer exact-sized UTF-8 allocation to the registered Wasm host owner") { Box.into_raw(^boxed).addr() as U32 }
+    jet_abi_register(JET_ABI_STRING_KIND, pointer, len)
+    ((pointer as U64) << 32) | (len as U64)
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/WebAbi.rs:91
+fn jet_abi_string_arg(packed: U64) -> String {
+    pointer :: (packed >> 32) as U32
+    len :: (packed & 0xffff_ffff) as U32
+    if len == 0 {
+        assert(pointer == 0, "non-null empty Wasm string allocation")
+        return String.new()
+    }
+    jet_abi_require(JET_ABI_STRING_KIND, pointer, len)
+    // GATE #4565: kernel primitive
+    #Unsafe("registry consumption transfers this exact live byte span back exactly once") {
+        boxed :: Box.from_raw(ptr.slice_from_raw_parts_mut(ptr.from_addr<U8>(pointer as USize), len as USize))
+        String.from_utf8(boxed.into_vec()).expect("JS TextEncoder UTF-8")
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/WebAbi.rs:106
+#FFI(c)
+pub fn jet_abi_string_alloc(len: U32) -> U32 {
+    if len == 0 -> return 0
+    boxed :: [U8].filled(len as USize, 0).into_boxed_slice()
+    // GATE #4565: kernel primitive
+    pointer :: #Unsafe("host receives ownership of this exact zero-filled UTF-8 buffer") { Box.into_raw(^boxed).addr() as U32 }
+    jet_abi_register(JET_ABI_STRING_KIND, pointer, len)
+    pointer
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/WebAbi.rs:115
+#FFI(c)
+pub fn jet_abi_string_free(pointer: U32, len: U32) -> {
+    if pointer == 0 { assert(len == 0, "null Wasm string allocation with length"); return }
+    jet_abi_require(JET_ABI_STRING_KIND, pointer, len)
+    // GATE #4565: kernel primitive
+    #Unsafe("registry consumption permits one final drop of the original exact byte span") { _ :: Box.from_raw(ptr.slice_from_raw_parts_mut(ptr.from_addr<U8>(pointer as USize), len as USize)) }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/WebAbi.rs:124
+fn jet_abi_list_i64_ret(v: [I64]) -> U64 {
+    if v.is_empty() -> return 0
+    boxed :: v.into_boxed_slice()
+    len :: boxed.len() as U32
+    byte_len :: len.checked_mul(size_of<I64>() as U32).expect("list-i64 byte length overflow")
+    // GATE #4565: kernel primitive
+    pointer :: #Unsafe("host receives an exact aligned i64 allocation") { Box.into_raw(^boxed).addr() as U32 }
+    jet_abi_register(JET_ABI_LIST_I64_KIND, pointer, byte_len)
+    ((pointer as U64) << 32) | (len as U64)
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/WebAbi.rs:134
+fn jet_abi_list_i64_arg(packed: U64) -> [I64] {
+    pointer :: (packed >> 32) as U32
+    len :: (packed & 0xffff_ffff) as U32
+    if len == 0 { assert(pointer == 0, "non-null empty Wasm list-i64 allocation"); return [] }
+    byte_len :: len.checked_mul(size_of<I64>() as U32).expect("list-i64 byte length overflow")
+    jet_abi_require(JET_ABI_LIST_I64_KIND, pointer, byte_len)
+    // GATE #4565: kernel primitive
+    #Unsafe("registry matches the original aligned i64 span and transfers ownership once") {
+        boxed :: Box.from_raw(ptr.slice_from_raw_parts_mut(ptr.from_addr<I64>(pointer as USize), len as USize))
+        boxed.into_vec()
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/WebAbi.rs:150
+#FFI(c)
+pub fn jet_abi_list_i64_alloc(len: U32) -> U32 {
+    if len == 0 -> return 0
+    boxed :: [I64].filled(len as USize, 0).into_boxed_slice()
+    // GATE #4565: kernel primitive
+    pointer :: #Unsafe("host receives the aligned zero-filled i64 span") { Box.into_raw(^boxed).addr() as U32 }
+    byte_len :: len.checked_mul(size_of<I64>() as U32).expect("list-i64 byte length overflow")
+    jet_abi_register(JET_ABI_LIST_I64_KIND, pointer, byte_len)
+    pointer
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/WebAbi.rs:160
+#FFI(c)
+pub fn jet_abi_list_i64_free(pointer: U32, len: U32) -> {
+    if pointer == 0 { assert(len == 0, "null Wasm list-i64 allocation with length"); return }
+    byte_len :: len.checked_mul(size_of<I64>() as U32).expect("list-i64 byte length overflow")
+    jet_abi_require(JET_ABI_LIST_I64_KIND, pointer, byte_len)
+    // GATE #4565: kernel primitive
+    #Unsafe("registry consumed the exact original aligned span before its final drop") { _ :: Box.from_raw(ptr.slice_from_raw_parts_mut(ptr.from_addr<I64>(pointer as USize), len as USize)) }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/WebAbi.rs:170
+fn jet_abi_list_int_ret(v: [JetInt]) -> U64 {
+    if v.is_empty() -> return 0
+    buf := [U8].new()
+    buf.extend_from_slice((v.len() as U32).to_le_bytes())
+    for value in ^v {
+        bytes :: value.to_string().into_bytes()
+        buf.extend_from_slice((bytes.len() as U32).to_le_bytes())
+        buf.extend_from_slice(bytes)
+    }
+    boxed :: buf.into_boxed_slice()
+    len :: boxed.len() as U32
+    // GATE #4565: kernel primitive
+    pointer :: #Unsafe("transfer exact decimal-text list bytes to the registered host owner") { Box.into_raw(^boxed).addr() as U32 }
+    jet_abi_register(JET_ABI_LIST_INT_KIND, pointer, len)
+    ((pointer as U64) << 32) | (len as U64)
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/WebAbi.rs:186
+fn jet_abi_list_int_arg(packed: U64) -> [JetInt] {
+    pointer :: (packed >> 32) as U32
+    len :: (packed & 0xffff_ffff) as U32
+    if len == 0 { assert(pointer == 0, "non-null empty Wasm list-int allocation"); return [] }
+    jet_abi_require(JET_ABI_LIST_INT_KIND, pointer, len)
+    // GATE #4565: kernel primitive
+    boxed :: #Unsafe("consume the registered exact byte allocation once before parsing") { Box.from_raw(ptr.slice_from_raw_parts_mut(ptr.from_addr<U8>(pointer as USize), len as USize)) }
+    bytes :: boxed.into_vec()
+    assert(bytes.len() >= 4, "list-int header")
+    count :: U32.from_le_bytes(bytes[0..4].try_into().unwrap()) as USize
+    assert(count <= (bytes.len() - 4) / 4, "list-int count")
+    offset := USize{4}
+    values := [JetInt].with_capacity(count)
+    for _ in 0..count {
+        assert(offset + 4 <= bytes.len(), "list-int length")
+        end :: offset + 4
+        value_len :: U32.from_le_bytes(bytes[offset..end].try_into().unwrap()) as USize
+        offset = end
+        value_end :: offset.checked_add(value_len).expect("list-int value overflow")
+        assert(value_end <= bytes.len(), "list-int value")
+        text :: core.str.from_utf8(bytes[offset..value_end]).expect("JS UTF-8")
+        values.push(jet_int_owned_parse(text).expect("JS exact integer"))
+        offset = value_end
+    }
+    assert(offset == bytes.len(), "list-int trailing bytes")
+    values
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/WebAbi.rs:219
+#FFI(c)
+pub fn jet_abi_list_int_alloc(byte_len: U32) -> U32 {
+    if byte_len == 0 -> return 0
+    boxed :: [U8].filled(byte_len as USize, 0).into_boxed_slice()
+    // GATE #4565: kernel primitive
+    pointer :: #Unsafe("host receives a registered zero-filled exact decimal-list byte span") { Box.into_raw(^boxed).addr() as U32 }
+    jet_abi_register(JET_ABI_LIST_INT_KIND, pointer, byte_len)
+    pointer
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/WebAbi.rs:228
+#FFI(c)
+pub fn jet_abi_list_int_free(pointer: U32, byte_len: U32) -> {
+    if pointer == 0 { assert(byte_len == 0, "null Wasm list-int allocation with length"); return }
+    jet_abi_require(JET_ABI_LIST_INT_KIND, pointer, byte_len)
+    // GATE #4565: kernel primitive
+    #Unsafe("consume registered decimal-list bytes before exactly one final drop") { _ :: Box.from_raw(ptr.slice_from_raw_parts_mut(ptr.from_addr<U8>(pointer as USize), byte_len as USize)) }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/WebAbi.rs:235
+fn jet_abi_list_string_ret(v: [String]) -> U64 {
+    if v.is_empty() -> return 0
+    buf := [U8].new()
+    count :: v.len() as U32
+    buf.extend_from_slice(count.to_le_bytes())
+    for s in v {
+        bytes :: s.as_bytes()
+        len :: bytes.len() as U32
+        buf.extend_from_slice(len.to_le_bytes())
+        buf.extend_from_slice(bytes)
+    }
+    boxed :: buf.into_boxed_slice()
+    byte_len :: boxed.len() as U32
+    // GATE #4565: kernel primitive
+    pointer :: #Unsafe("transfer registered exact UTF-8 list bytes to the host") { Box.into_raw(^boxed).addr() as U32 }
+    jet_abi_register(JET_ABI_LIST_STRING_KIND, pointer, byte_len)
+    ((pointer as U64) << 32) | (byte_len as U64)
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/WebAbi.rs:255
+fn jet_abi_list_string_arg(packed: U64) -> [String] {
+    pointer :: (packed >> 32) as U32
+    byte_len :: (packed & 0xffff_ffff) as U32
+    if byte_len == 0 { assert(pointer == 0, "non-null empty Wasm list-string allocation"); return [] }
+    jet_abi_require(JET_ABI_LIST_STRING_KIND, pointer, byte_len)
+    // GATE #4565: kernel primitive
+    boxed :: #Unsafe("consume the registered UTF-8 list allocation once") { Box.from_raw(ptr.slice_from_raw_parts_mut(ptr.from_addr<U8>(pointer as USize), byte_len as USize)) }
+    buf :: boxed.into_vec()
+    assert(buf.len() >= 4, "list-string header")
+    count :: U32.from_le_bytes(buf[0..4].try_into().unwrap()) as USize
+    assert(count <= (buf.len() - 4) / 4, "list-string count")
+    i := USize{4}
+    out := [String].with_capacity(count)
+    for _ in 0..count {
+        assert(i + 4 <= buf.len(), "list-string len")
+        len :: U32.from_le_bytes(buf[i..i + 4].try_into().unwrap()) as USize
+        i += 4
+        end :: i.checked_add(len).expect("list-string byte length overflow")
+        assert(end <= buf.len(), "list-string bytes")
+        out.push(String.from_utf8(buf[i..end].to_vec()).expect("JS UTF-8"))
+        i = end
+    }
+    assert(i == buf.len(), "list-string trailing bytes")
+    out
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/WebAbi.rs:287
+#FFI(c)
+pub fn jet_abi_list_string_alloc(byte_len: U32) -> U32 {
+    if byte_len == 0 -> return 0
+    boxed :: [U8].filled(byte_len as USize, 0).into_boxed_slice()
+    // GATE #4565: kernel primitive
+    pointer :: #Unsafe("host receives registered zero-filled list-string bytes") { Box.into_raw(^boxed).addr() as U32 }
+    jet_abi_register(JET_ABI_LIST_STRING_KIND, pointer, byte_len)
+    pointer
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/WebAbi.rs:296
+#FFI(c)
+pub fn jet_abi_list_string_free(pointer: U32, byte_len: U32) -> {
+    if pointer == 0 { assert(byte_len == 0, "null Wasm list-string allocation with length"); return }
+    jet_abi_require(JET_ABI_LIST_STRING_KIND, pointer, byte_len)
+    // GATE #4565: kernel primitive
+    #Unsafe("registry consumption permits exactly one final drop of list-string bytes") { _ :: Box.from_raw(ptr.slice_from_raw_parts_mut(ptr.from_addr<U8>(pointer as USize), byte_len as USize)) }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/WebAbi.rs:305
+fn jet_abi_map_string_int_ret(m: JetMap<String, JetInt>) -> U64 {
+    if m.is_empty() -> return 0
+    buf := [U8].new()
+    count :: m.len() as U32
+    buf.extend_from_slice(count.to_le_bytes())
+    for (k, v) in m {
+        bytes :: k.as_bytes()
+        len :: bytes.len() as U32
+        buf.extend_from_slice(len.to_le_bytes())
+        buf.extend_from_slice(bytes)
+        value :: v.to_string()
+        value_bytes :: value.as_bytes()
+        buf.extend_from_slice((value_bytes.len() as U32).to_le_bytes())
+        buf.extend_from_slice(value_bytes)
+    }
+    boxed :: buf.into_boxed_slice()
+    byte_len :: boxed.len() as U32
+    // GATE #4565: kernel primitive
+    pointer :: #Unsafe("host receives exact registered map UTF-8/decimal bytes") { Box.into_raw(^boxed).addr() as U32 }
+    jet_abi_register(JET_ABI_MAP_STRING_INT_KIND, pointer, byte_len)
+    ((pointer as U64) << 32) | (byte_len as U64)
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/WebAbi.rs:329
+fn jet_abi_map_string_int_arg(packed: U64) -> JetMap<String, JetInt> {
+    pointer :: (packed >> 32) as U32
+    byte_len :: (packed & 0xffff_ffff) as U32
+    if byte_len == 0 { assert(pointer == 0, "non-null empty Wasm map-string-int allocation"); return JetMap.new() }
+    jet_abi_require(JET_ABI_MAP_STRING_INT_KIND, pointer, byte_len)
+    // GATE #4565: kernel primitive
+    boxed :: #Unsafe("consume exact registered map byte span once before parsing") { Box.from_raw(ptr.slice_from_raw_parts_mut(ptr.from_addr<U8>(pointer as USize), byte_len as USize)) }
+    buf :: boxed.into_vec()
+    assert(buf.len() >= 4, "map-string-int header")
+    count :: U32.from_le_bytes(buf[0..4].try_into().unwrap()) as USize
+    assert(count <= (buf.len() - 4) / 8, "map-string-int count")
+    i := USize{4}
+    out := JetMap<String, JetInt>.new()
+    for _ in 0..count {
+        len_end :: i.checked_add(4).expect("map-string-int key len overflow")
+        assert(len_end <= buf.len(), "map-string-int key len")
+        len :: U32.from_le_bytes(buf[i..len_end].try_into().unwrap()) as USize
+        i = len_end
+        key_end :: i.checked_add(len).expect("map-string-int key overflow")
+        value_len_end :: key_end.checked_add(4).expect("map-string-int value length overflow")
+        assert(value_len_end <= buf.len(), "map-string-int value length")
+        value_len :: U32.from_le_bytes(buf[key_end..value_len_end].try_into().unwrap()) as USize
+        value_end :: value_len_end.checked_add(value_len).expect("map-string-int value overflow")
+        assert(value_end <= buf.len(), "map-string-int entry")
+        key :: String.from_utf8(buf[i..key_end].to_vec()).expect("JS UTF-8")
+        text :: core.str.from_utf8(buf[value_len_end..value_end]).expect("JS UTF-8")
+        val :: jet_int_owned_parse(text).expect("JS exact integer")
+        i = value_end
+        _ :: out.insert(^key, ^val)
+    }
+    assert(i == buf.len(), "map-string-int trailing bytes")
+    out
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/WebAbi.rs:369
+#FFI(c)
+pub fn jet_abi_map_string_int_alloc(byte_len: U32) -> U32 {
+    if byte_len == 0 -> return 0
+    boxed :: [U8].filled(byte_len as USize, 0).into_boxed_slice()
+    // GATE #4565: kernel primitive
+    pointer :: #Unsafe("host receives registered zero-filled map bytes") { Box.into_raw(^boxed).addr() as U32 }
+    jet_abi_register(JET_ABI_MAP_STRING_INT_KIND, pointer, byte_len)
+    pointer
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/WebAbi.rs:378
+#FFI(c)
+pub fn jet_abi_map_string_int_free(pointer: U32, byte_len: U32) -> {
+    if pointer == 0 { assert(byte_len == 0, "null Wasm map-string-int allocation with length"); return }
+    jet_abi_require(JET_ABI_MAP_STRING_INT_KIND, pointer, byte_len)
+    // GATE #4565: kernel primitive
+    #Unsafe("registry consumption permits exactly one final drop of map bytes") { _ :: Box.from_raw(ptr.slice_from_raw_parts_mut(ptr.from_addr<U8>(pointer as USize), byte_len as USize)) }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/WebAbi.rs:387
+fn jet_abi_int_ret(value: JetInt) -> U64 { jet_abi_string_ret(value.to_string()) }
+// Rust: crates/jet-codegen/src/Prelude/Core/WebAbi.rs:391
+fn jet_abi_int_arg(packed: U64) -> JetInt { jet_int_owned_parse(jet_abi_string_arg(packed)).expect("JS exact integer") }

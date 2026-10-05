@@ -1,251 +1,149 @@
-// PORT-PENDING 0182 crates-jet-codegen-src-prelude-memo-module-group: crates/jet-codegen/src/Prelude/Memo.rs:1-247
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS // D-MEMO1=A / D-FIELDMEMO1=A: one Prelude cache substrate shared by pure
-//RS // function results and retained computed-field results. Function entries use
-//RS // an argument key and the ratified bound; field entries use one reserved slot.
-//RS // Engines only marshal keys, results, bounds, and invalidation calls here.
-//RS use std::collections::HashMap as JetMemoHashMap;
-//RS use std::hash::{Hash as JetMemoHash, Hasher as JetMemoHasher};
-//RS use std::sync::{LazyLock as JetMemoLazyLock, Mutex as JetMemoMutex};
-//RS 
-//RS #[derive(Clone)]
-//RS struct JetLru<K, V> {
-//RS     bound: Option<usize>,
-//RS     entries: Vec<(K, V)>,
-//RS }
-//RS 
-//RS impl<K, V> JetLru<K, V> {
-//RS     fn new(bound: Option<usize>) -> Self {
-//RS         Self {
-//RS             bound,
-//RS             entries: Vec::new(),
-//RS         }
-//RS     }
-//RS 
-//RS     fn len(&self) -> usize {
-//RS         self.entries.len()
-//RS     }
-//RS }
-//RS 
-//RS impl<K: PartialEq + Clone, V: Clone> JetLru<K, V> {
-//RS     fn put(&mut self, key: K, value: V) -> Option<V> {
-//RS         if self.bound == Some(0) {
-//RS             return None;
-//RS         }
-//RS         let displaced = self
-//RS             .entries
-//RS             .iter()
-//RS             .position(|(stored, _)| stored == &key)
-//RS             .map(|index| self.entries.remove(index).1);
-//RS         self.entries.insert(0, (key, value));
-//RS         if self
-//RS             .bound
-//RS             .is_some_and(|bound| self.entries.len() > bound)
-//RS         {
-//RS             self.entries.pop();
-//RS         }
-//RS         displaced
-//RS     }
-//RS 
-//RS     fn get(&mut self, key: &K) -> Option<V> {
-//RS         let index = self.entries.iter().position(|(stored, _)| stored == key)?;
-//RS         let (stored, value) = self.entries.remove(index);
-//RS         let out = value.clone();
-//RS         self.entries.insert(0, (stored, value));
-//RS         Some(out)
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Clone)]
-//RS struct JetMemoState<K, V> {
-//RS     cache: JetLru<Option<K>, V>,
-//RS     hits: i64,
-//RS     misses: i64,
-//RS }
-//RS 
-//RS impl<K, V> JetMemoState<K, V> {
-//RS     fn new(bound: Option<usize>) -> Self {
-//RS         Self {
-//RS             cache: JetLru::new(bound),
-//RS             hits: 0,
-//RS             misses: 0,
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Clone)]
-//RS pub struct JetMemoStats {
-//RS     pub hits: i64,
-//RS     pub misses: i64,
-//RS     pub size: i64,
-//RS     pub bound: String,
-//RS }
-//RS 
-//RS pub struct JetMemo<K, V = K> {
-//RS     state: JetMemoMutex<JetMemoState<K, V>>,
-//RS }
-//RS 
-//RS static JET_MEMO_STATS: JetMemoLazyLock<JetMemoMutex<JetMemoHashMap<String, JetMemo<Vec<i64>, i64>>>> =
-//RS     JetMemoLazyLock::new(|| JetMemoMutex::new(JetMemoHashMap::new()));
-//RS 
-//RS impl<K, V> JetMemo<K, V> {
-//RS     pub fn new() -> Self {
-//RS         Self {
-//RS             state: JetMemoMutex::new(JetMemoState::new(None)),
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn with_bound(bound: Option<usize>) -> Self {
-//RS         Self {
-//RS             state: JetMemoMutex::new(JetMemoState::new(bound)),
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn get_or_insert_with(&self, build: impl FnOnce() -> V) -> V
-//RS     where
-//RS         V: Clone,
-//RS     {
-//RS         let mut state = self
-//RS             .state
-//RS             .lock()
-//RS             .unwrap_or_else(|poisoned| poisoned.into_inner());
-//RS         if let Some((_, value)) = state
-//RS             .cache
-//RS             .entries
-//RS             .iter()
-//RS             .find(|(key, _)| key.is_none())
-//RS         {
-//RS             return value.clone();
-//RS         }
-//RS         let value = build();
-//RS         state.cache.entries.insert(0, (None, value.clone()));
-//RS         value
-//RS     }
-//RS 
-//RS     pub fn invalidate(&self) {
-//RS         self.state
-//RS             .lock()
-//RS             .unwrap_or_else(|poisoned| poisoned.into_inner())
-//RS             .cache
-//RS             .entries
-//RS             .retain(|(key, _)| key.is_some());
-//RS     }
-//RS }
-//RS 
-//RS impl<K: PartialEq + Clone, V: Clone> JetMemo<K, V> {
-//RS     pub fn get(&self, key: &K) -> Option<V> {
-//RS         let mut state = self
-//RS             .state
-//RS             .lock()
-//RS             .unwrap_or_else(|poisoned| poisoned.into_inner());
-//RS         let Some(value) = state.cache.get(&Some(key.clone())) else {
-//RS             state.misses += 1;
-//RS             return None;
-//RS         };
-//RS         state.hits += 1;
-//RS         Some(value)
-//RS     }
-//RS 
-//RS     pub fn put(&self, key: K, value: V) {
-//RS         let mut state = self
-//RS             .state
-//RS             .lock()
-//RS             .unwrap_or_else(|poisoned| poisoned.into_inner());
-//RS         state.cache.put(Some(key), value);
-//RS     }
-//RS 
-//RS     pub fn stats(&self) -> JetMemoStats {
-//RS         let state = self
-//RS             .state
-//RS             .lock()
-//RS             .unwrap_or_else(|poisoned| poisoned.into_inner());
-//RS         JetMemoStats {
-//RS             hits: state.hits,
-//RS             misses: state.misses,
-//RS             size: state.cache.len() as i64,
-//RS             bound: state
-//RS                 .cache
-//RS                 .bound
-//RS                 .map(|bound| bound.to_string())
-//RS                 .unwrap_or_else(|| "none".to_string()),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// Return process-local statistics for a named top-level memo.
-//RS ///
-//RS /// AOT memo call sites and the resident JIT use the same named store contract;
-//RS /// a store is created lazily when a statistics projection is reached.
-//RS pub fn jet_memo_stats(name: String, bound: i64) -> JetMemoStats {
-//RS     let bound = usize::try_from(bound).ok();
-//RS     JET_MEMO_STATS
-//RS         .lock()
-//RS         .unwrap_or_else(|poisoned| poisoned.into_inner())
-//RS         .entry(name)
-//RS         .or_insert_with(|| JetMemo::with_bound(bound))
-//RS         .stats()
-//RS }
-//RS 
-//RS impl<K, V> Default for JetMemo<K, V> {
-//RS     fn default() -> Self {
-//RS         Self::new()
-//RS     }
-//RS }
-//RS 
-//RS impl<K: Clone, V: Clone> Clone for JetMemo<K, V> {
-//RS     fn clone(&self) -> Self {
-//RS         Self {
-//RS             state: JetMemoMutex::new(
-//RS                 self.state
-//RS                     .lock()
-//RS                     .unwrap_or_else(|poisoned| poisoned.into_inner())
-//RS                     .clone(),
-//RS             ),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS impl<K, V> std::fmt::Debug for JetMemo<K, V> {
-//RS     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-//RS         formatter.write_str("<memo>")
-//RS     }
-//RS }
-//RS 
-//RS impl<K, V> PartialEq for JetMemo<K, V> {
-//RS     fn eq(&self, _other: &Self) -> bool {
-//RS         true
-//RS     }
-//RS }
-//RS 
-//RS impl<K, V> Eq for JetMemo<K, V> {}
-//RS 
-//RS impl<K, V> JetMemoHash for JetMemo<K, V> {
-//RS     fn hash<H: JetMemoHasher>(&self, _state: &mut H) {}
-//RS }
-//RS 
-//RS pub fn jet_memo_call<K, V, F>(
-//RS     store: &std::sync::Mutex<JetMemo<K, V>>,
-//RS     key: K,
-//RS     compute: F,
-//RS ) -> V
-//RS where
-//RS     K: PartialEq + Clone,
-//RS     V: Clone,
-//RS     F: FnOnce() -> V,
-//RS {
-//RS     if let Some(value) = store
-//RS         .lock()
-//RS         .unwrap_or_else(|error| error.into_inner())
-//RS         .get(&key)
-//RS     {
-//RS         return value;
-//RS     }
-//RS     let value = compute();
-//RS     store
-//RS         .lock()
-//RS         .unwrap_or_else(|error| error.into_inner())
-//RS         .put(key, value.clone());
-//RS     value
-//RS }
-// END-PORT-PENDING 0182 crates/jet-codegen/src/Prelude/Memo.rs:1-247
+use std.hash.[Hash, Hasher]
+use std.sync.[Mutex, LazyLock]
+use core.prelude.runtime.kernel_values.[JetDebug]
+// D-MEMO1=A / D-FIELDMEMO1=A: function keys and reserved field slot share one cache.
+// Rust: crates/jet-codegen/src/Prelude/Memo.rs:10
+#Clone
+struct JetLru<K, V> { bound: Usize?, entries: [(K, V)] }
+impl<K, V> JetLru<K, V> {
+    // Rust: crates/jet-codegen/src/Prelude/Memo.rs:16
+    fn new(bound: Usize?) -> Self { Self{bound: bound, entries: []} }
+    // Rust: crates/jet-codegen/src/Prelude/Memo.rs:23
+    fn len(self: &Self) -> Usize { self.entries.len() }
+}
+impl<K: PartialEq + Clone, V: Clone> JetLru<K, V> {
+    // Rust: crates/jet-codegen/src/Prelude/Memo.rs:29
+    fn put(self: &Self, key: K, value: V) -> V? {
+        if self.bound == Val(0) { return None }
+        displaced :: self.entries.iter().position(fn((stored, _)) { stored == &key }).map(fn(index) { self.entries.remove(index).1 })
+        self.entries.insert(0, (^key, ^value))
+        if self.bound.is_some_and(fn(bound) { self.entries.len() > bound }) { _ :: self.entries.pop() }
+        ^displaced
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Memo.rs:48
+    fn get(self: &Self, key: &K) -> V? {
+        index :: self.entries.iter().position(fn((stored, _)) { stored == key })?
+        (stored, value) :: self.entries.remove(index)
+        out :: value.clone()
+        self.entries.insert(0, (^stored, ^value))
+        Val(^out)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Memo.rs:57
+#Clone
+struct JetMemoState<K, V> { cache: JetLru<K?, V>, hits: I64, misses: I64 }
+impl<K, V> JetMemoState<K, V> {
+    // Rust: crates/jet-codegen/src/Prelude/Memo.rs:65
+    fn new(bound: Usize?) -> Self { Self{cache: JetLru.new(bound), hits: 0, misses: 0} }
+}
+// Rust: crates/jet-codegen/src/Prelude/Memo.rs:74
+#Clone
+pub struct JetMemoStats { pub hits: I64, pub misses: I64, pub size: I64, pub bound: String }
+// Rust: crates/jet-codegen/src/Prelude/Memo.rs:82
+pub struct JetMemo<K, V = K> { state: Mutex<JetMemoState<K, V>> }
+// Rust: crates/jet-codegen/src/Prelude/Memo.rs:86
+// GATE #4565: kernel primitive
+static JET_MEMO_STATS: LazyLock<Mutex<[String:JetMemo<[I64], I64>]>> =
+    #Unsafe("initialize a process-lifetime lazy mutex registry; preserve native map keys") {
+        LazyLock.new(fn() { Mutex.new([String:JetMemo<[I64], I64>]{}) })
+    }
+impl<K, V> JetMemo<K, V> {
+    // Rust: crates/jet-codegen/src/Prelude/Memo.rs:90
+    pub fn new() -> Self {
+        // GATE #4565: kernel primitive
+        Self{state: #Unsafe("initialize retained mutex-owned memo state") { Mutex.new(JetMemoState.new(None)) }}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Memo.rs:96
+    pub fn with_bound(bound: Usize?) -> Self {
+        // GATE #4565: kernel primitive
+        Self{state: #Unsafe("initialize retained mutex-owned bounded memo state") { Mutex.new(JetMemoState.new(bound)) }}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Memo.rs:102
+    pub fn get_or_insert_with(self: &Self, build: fn() -> V) -> V where V: Clone {
+        // GATE #4565: kernel primitive
+        state := #Unsafe("hold memo mutex across field construction and insertion; recover poisoned state") { self.state.lock().unwrap_or_else(fn(poisoned) { poisoned.into_inner() }) }
+        if Val((_, value)) :: state.cache.entries.iter().find(fn((key, _)) { key.is_none() }) { return value.clone() }
+        value :: build()
+        state.cache.entries.insert(0, (None, value.clone()))
+        ^value
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Memo.rs:123
+    pub fn invalidate(self: &Self) -> {
+        // GATE #4565: kernel primitive
+        state := #Unsafe("hold memo mutex through reserved-field invalidation; recover poisoned state") { self.state.lock().unwrap_or_else(fn(poisoned) { poisoned.into_inner() }) }
+        state.cache.entries.retain(fn((key, _)) { key.is_some() })
+    }
+}
+impl<K: PartialEq + Clone, V: Clone> JetMemo<K, V> {
+    // Rust: crates/jet-codegen/src/Prelude/Memo.rs:134
+    pub fn get(self: &Self, key: &K) -> V? {
+        // GATE #4565: kernel primitive
+        state := #Unsafe("hold memo mutex across LRU promotion and statistics; recover poison") { self.state.lock().unwrap_or_else(fn(poisoned) { poisoned.into_inner() }) }
+        value :: match state.cache.get(&Val(key.clone())) { Val(value) -> value, None -> { state.misses += 1; return None } }
+        state.hits += 1
+        Val(^value)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Memo.rs:147
+    pub fn put(self: &Self, key: K, value: V) -> {
+        // GATE #4565: kernel primitive
+        state := #Unsafe("hold memo mutex across LRU insertion; recover poisoned state") { self.state.lock().unwrap_or_else(fn(poisoned) { poisoned.into_inner() }) }
+        _ :: state.cache.put(Val(^key), ^value)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Memo.rs:155
+    pub fn stats(self: &Self) -> JetMemoStats {
+        // GATE #4565: kernel primitive
+        state :: #Unsafe("read memo statistics under mutex; recover poisoned state") { self.state.lock().unwrap_or_else(fn(poisoned) { poisoned.into_inner() }) }
+        JetMemoStats{hits: state.hits, misses: state.misses, size: state.cache.len() as I64,
+            bound: state.cache.bound.map(fn(bound) { bound.to_string() }).unwrap_or_else(fn() { "none".to_string() })}
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Memo.rs:177
+pub fn jet_memo_stats(name: String, bound: I64) -> JetMemoStats {
+    bound :: Usize.try_from(bound).ok()
+    // GATE #4565: kernel primitive
+    stores := #Unsafe("hold named memo registry lock through lazy store lookup; recover poisoned state") { JET_MEMO_STATS.lock().unwrap_or_else(fn(poisoned) { poisoned.into_inner() }) }
+    stores.entry(^name).or_insert_with(fn() { JetMemo.with_bound(bound) }).stats()
+}
+impl<K, V> Default for JetMemo<K, V> {
+    // Rust: crates/jet-codegen/src/Prelude/Memo.rs:188
+    fn default() -> Self { Self.new() }
+}
+impl<K: Clone, V: Clone> Clone for JetMemo<K, V> {
+    // Rust: crates/jet-codegen/src/Prelude/Memo.rs:194
+    fn clone(self: &Self) -> Self {
+        // GATE #4565: kernel primitive
+        Self{state: #Unsafe("clone memo state under original lock into independent retained mutex; recover poison") {
+            Mutex.new(self.state.lock().unwrap_or_else(fn(poisoned) { poisoned.into_inner() }).clone())
+        }}
+    }
+}
+impl<K, V> JetDebug for JetMemo<K, V> {
+    // Rust: crates/jet-codegen/src/Prelude/Memo.rs:207
+    fn jet_debug(self: &Self) -> String { "<memo>" }
+}
+impl<K, V> PartialEq for JetMemo<K, V> {
+    // Rust: crates/jet-codegen/src/Prelude/Memo.rs:213
+    fn eq(self: &Self, _other: &Self) -> Bool { true }
+}
+// Rust: crates/jet-codegen/src/Prelude/Memo.rs:218
+impl<K, V> Eq for JetMemo<K, V> {}
+impl<K, V> Hash for JetMemo<K, V> {
+    // Rust: crates/jet-codegen/src/Prelude/Memo.rs:221
+    // Memo state is deliberately excluded from enclosing value hash identity.
+    fn hash<H: Hasher>(self: &Self, _state: &H) -> {}
+}
+// Rust: crates/jet-codegen/src/Prelude/Memo.rs:224
+pub fn jet_memo_call<K: PartialEq + Clone, V: Clone>(store: &Mutex<JetMemo<K, V>>, key: K, compute: fn() -> V) -> V {
+    // GATE #4565: kernel primitive
+    cached :: #Unsafe("hold outer store mutex only for lookup; release before user computation; recover poison") {
+        store.lock().unwrap_or_else(fn(error) { error.into_inner() }).get(&key)
+    }
+    if Val(value) :: cached { return ^value }
+    value :: compute()
+    // GATE #4565: kernel primitive
+    #Unsafe("hold outer store mutex only for insertion after user computation; recover poison") {
+        store.lock().unwrap_or_else(fn(error) { error.into_inner() }).put(^key, value.clone())
+    }
+    ^value
+}
 

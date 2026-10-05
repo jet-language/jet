@@ -1,1800 +1,1037 @@
-// PORT-PENDING 0143 crates-jet-codegen-src-prelude-core-collections-slice-1: crates/jet-codegen/src/Prelude/Core/Collections.rs:1-1796
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS // ── D-ITERTOOLS1=A: expanded collection/runtime handles ─────────────────────
-//RS impl<K: PartialEq + Clone, V: Clone> JetLru<K, V> {
-//RS     fn add_new(&mut self, key: K, value: V) -> bool {
-//RS         if self.bound == Some(0) || self.entries.iter().any(|(stored, _)| stored == &key) {
-//RS             return false;
-//RS         }
-//RS         self.put(key, value);
-//RS         true
-//RS     }
-//RS 
-//RS     fn remove(&mut self, key: &K) -> Option<V> {
-//RS         let index = self.entries.iter().position(|(stored, _)| stored == key)?;
-//RS         Some(self.entries.remove(index).1)
-//RS     }
-//RS 
-//RS     fn contains_key(&self, key: &K) -> bool {
-//RS         self.entries.iter().any(|(stored, _)| stored == key)
-//RS     }
-//RS 
-//RS     fn keys(&self) -> Vec<K> {
-//RS         self.entries.iter().map(|(key, _)| key.clone()).collect()
-//RS     }
-//RS 
-//RS     fn is_empty(&self) -> bool {
-//RS         self.entries.is_empty()
-//RS     }
-//RS 
-//RS     fn capacity(&self) -> i64 {
-//RS         self.bound.map(|bound| bound as i64).unwrap_or(i64::MAX)
-//RS     }
-//RS 
-//RS     fn clear(&mut self) {
-//RS         self.entries.clear();
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Clone)]
-//RS struct JetCache<K, V> {
-//RS     lru: JetLru<K, V>,
-//RS }
-//RS 
-//RS impl<K: Eq + Clone, V: Clone> JetCache<K, V> {
-//RS     fn new(capacity: i64) -> Self {
-//RS         Self {
-//RS             lru: JetLru::new(Some(capacity.max(0) as usize)),
-//RS         }
-//RS     }
-//RS     fn put(&mut self, key: K, value: V) -> Option<V> {
-//RS         self.lru.put(key, value)
-//RS     }
-//RS     fn add_new(&mut self, key: K, value: V) -> bool {
-//RS         self.lru.add_new(key, value)
-//RS     }
-//RS     fn get(&mut self, key: &K) -> Option<V> {
-//RS         self.lru.get(key)
-//RS     }
-//RS     fn remove(&mut self, key: &K) -> Option<V> {
-//RS         self.lru.remove(key)
-//RS     }
-//RS     fn contains_key(&self, key: &K) -> bool {
-//RS         self.lru.contains_key(key)
-//RS     }
-//RS     fn keys(&self) -> Vec<K> {
-//RS         self.lru.keys()
-//RS     }
-//RS     fn len(&self) -> usize {
-//RS         self.lru.len()
-//RS     }
-//RS     fn is_empty(&self) -> bool {
-//RS         self.lru.is_empty()
-//RS     }
-//RS     fn capacity(&self) -> i64 {
-//RS         self.lru.capacity()
-//RS     }
-//RS     fn clear(&mut self) {
-//RS         self.lru.clear();
-//RS     }
-//RS }
-//RS 
-//RS impl<K: JetShow, V: JetShow> JetShow for JetCache<K, V> {
-//RS     fn jet_show(&self) -> String {
-//RS         let parts: Vec<String> = self
-//RS             .lru
-//RS             .entries
-//RS             .iter()
-//RS             .map(|(k, v)| format!("{}: {}", k.jet_show(), v.jet_show()))
-//RS             .collect();
-//RS         format!("[:{}]", parts.join(", "))
-//RS     }
-//RS }
-//RS impl<K: JetDisplay, V: JetDisplay> JetDisplay for JetCache<K, V> {
-//RS     fn jet_display(&self) -> String {
-//RS         let parts: Vec<String> = self
-//RS             .lru
-//RS             .entries
-//RS             .iter()
-//RS             .map(|(k, v)| format!("{}: {}", k.jet_display(), v.jet_display()))
-//RS             .collect();
-//RS         format!("[:{}]", parts.join(", "))
-//RS     }
-//RS }
-//RS impl<K: JetDebug, V: JetDebug> JetDebug for JetCache<K, V> {
-//RS     fn jet_debug(&self) -> String {
-//RS         let parts: Vec<String> = self
-//RS             .lru
-//RS             .entries
-//RS             .iter()
-//RS             .map(|(k, v)| format!("{}: {}", k.jet_debug(), v.jet_debug()))
-//RS             .collect();
-//RS         format!("[:{}]", parts.join(", "))
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Clone)]
-//RS struct JetBitSet {
-//RS     bits: std::collections::BTreeSet<i64>,
-//RS }
-//RS impl JetBitSet {
-//RS     fn new() -> Self {
-//RS         Self {
-//RS             bits: std::collections::BTreeSet::new(),
-//RS         }
-//RS     }
-//RS     fn add(&mut self, bit: i64) -> bool {
-//RS         if bit >= 0 {
-//RS             self.bits.insert(bit)
-//RS         } else {
-//RS             false
-//RS         }
-//RS     }
-//RS     fn remove(&mut self, bit: &i64) {
-//RS         self.bits.remove(bit);
-//RS     }
-//RS     fn contains(&self, bit: &i64) -> bool {
-//RS         jet_bits_has_kernel(&self.bits, *bit)
-//RS     }
-//RS     fn count(&self) -> i64 {
-//RS         self.bits.len() as i64
-//RS     }
-//RS     fn len(&self) -> i64 {
-//RS         self.bits.iter().next_back().map(|v| v + 1).unwrap_or(0)
-//RS     }
-//RS     fn is_empty(&self) -> bool {
-//RS         self.bits.is_empty()
-//RS     }
-//RS     fn clear(&mut self) {
-//RS         self.bits.clear();
-//RS     }
-//RS     fn to_list(&self) -> Vec<i64> {
-//RS         self.bits.iter().copied().collect()
-//RS     }
-//RS }
-//RS 
-//RS fn jet_bits_copy(bits: &JetBitSet) -> JetBitSet {
-//RS     bits.clone()
-//RS }
-//RS 
-//RS /// One `Bits` membership definition for every execution tier: AOT reaches it
-//RS /// through `JetBitSet::contains`, and the Cranelift host reaches it directly on
-//RS /// the resident bit set, so neither tier re-encodes the test (I9).
-//RS fn jet_bits_has_kernel(bits: &std::collections::BTreeSet<i64>, bit: i64) -> bool {
-//RS     bits.contains(&bit)
-//RS }
-//RS 
-//RS impl JetShow for JetBitSet {
-//RS     fn jet_show(&self) -> String {
-//RS         self.to_list().jet_show()
-//RS     }
-//RS }
-//RS impl JetDisplay for JetBitSet {
-//RS     fn jet_display(&self) -> String {
-//RS         self.to_list().jet_display()
-//RS     }
-//RS }
-//RS impl JetDebug for JetBitSet {
-//RS     fn jet_debug(&self) -> String {
-//RS         self.to_list().jet_debug()
-//RS     }
-//RS }
-//RS 
-//RS impl JetShow for JetByteBuffer {
-//RS     fn jet_show(&self) -> String {
-//RS         self.bytes.jet_show()
-//RS     }
-//RS }
-//RS impl JetDisplay for JetByteBuffer {
-//RS     fn jet_display(&self) -> String {
-//RS         self.bytes.jet_display()
-//RS     }
-//RS }
-//RS impl JetDebug for JetByteBuffer {
-//RS     fn jet_debug(&self) -> String {
-//RS         self.bytes.jet_debug()
-//RS     }
-//RS }
-//RS 
-//RS fn jet_list_sum<T, I>(xs: I) -> T
-//RS where
-//RS     I: IntoIterator<Item = T>,
-//RS     T: std::iter::Sum<T>,
-//RS {
-//RS     xs.into_iter().sum()
-//RS }
-//RS 
-//RS /// D-FRED1=A: Float collection reductions use the shared eight-lane Prelude
-//RS /// tree; the generic `sum` helper remains the left-to-right standard fold for
-//RS /// element types without this ratified fixed-order rule.
-//RS #[inline(always)]
-//RS fn jet_list_sum_fixed_f32<I: IntoIterator<Item = f32>>(xs: I) -> f32 {
-//RS     jet_simd_reduce_fixed_iter(xs, 0.0)
-//RS }
-//RS 
-//RS #[inline(always)]
-//RS fn jet_list_sum_fixed_f64<I: IntoIterator<Item = f64>>(xs: I) -> f64 {
-//RS     jet_simd_reduce_fixed_iter(xs, 0.0)
-//RS }
-//RS 
-//RS /// D-FRED1=A: Float `fold` with scalar addition uses the same fixed seed
-//RS /// placement and lane tree as `sum`.
-//RS #[inline(always)]
-//RS fn jet_list_fold_add_fixed_f32<I: IntoIterator<Item = f32>>(xs: I, init: f32) -> f32 {
-//RS     jet_simd_reduce_fixed_iter(xs, init)
-//RS }
-//RS 
-//RS #[inline(always)]
-//RS fn jet_list_fold_add_fixed_f64<I: IntoIterator<Item = f64>>(xs: I, init: f64) -> f64 {
-//RS     jet_simd_reduce_fixed_iter(xs, init)
-//RS }
-//RS 
-//RS /// Apply one selected D-ACCEL1 column-copy pass over bounded cache blocks.
-//RS /// Callers that already ran a serial probe can prepend that probe's typed
-//RS /// result and invoke this helper only for the remaining range.
-//RS #[inline(always)]
-//RS fn jet_list_accel_column_copy_range_map<U, R, P, C>(
-//RS     range: std::ops::Range<usize>,
-//RS     project: P,
-//RS     copied_kernel: C,
-//RS ) -> Vec<R>
-//RS where
-//RS     P: Fn(usize) -> U,
-//RS     C: Fn(&[U], std::ops::Range<usize>) -> Vec<R>,
-//RS {
-//RS     let start = range.start;
-//RS     let end = range.end;
-//RS     let element_bytes = std::mem::size_of::<U>().max(1);
-//RS     let block_items = (JET_LIST_ACCEL_CACHE_BLOCK_BYTES / element_bytes).max(1);
-//RS     let mut result = Vec::new();
-//RS     let mut block_start = start;
-//RS     while block_start < end {
-//RS         let block_end = block_start.saturating_add(block_items).min(end);
-//RS         let column = (block_start..block_end).map(&project).collect::<Vec<_>>();
-//RS         result.extend(copied_kernel(&column, block_start..block_end));
-//RS         block_start = block_end;
-//RS     }
-//RS     result
-//RS }
-//RS 
-//RS const JET_LIST_ACCEL_CACHE_BLOCK_BYTES: usize = 64 * 1024;
-//RS 
-//RS fn jet_list_product<T, I>(xs: I) -> T
-//RS where
-//RS     I: IntoIterator<Item = T>,
-//RS     T: std::iter::Product<T>,
-//RS {
-//RS     xs.into_iter().product()
-//RS }
-//RS fn jet_list_copy<T: Clone>(xs: &[T]) -> Vec<T> {
-//RS     xs.to_vec()
-//RS }
-//RS 
-//RS fn jet_list_sort_by<T, K: Ord, F>(xs: &mut [T], mut f: F)
-//RS where
-//RS     F: FnMut(&T) -> K,
-//RS {
-//RS     jet_list_try_sort_by_key_kernel(
-//RS         xs,
-//RS         |item| Ok::<_, std::convert::Infallible>(f(item)),
-//RS         Ord::cmp,
-//RS     )
-//RS     .unwrap_or_else(|never| match never {});
-//RS }
-//RS 
-//RS fn jet_list_sort_desc<T: Ord>(xs: &mut [T]) {
-//RS     xs.sort_by(|left, right| right.cmp(left));
-//RS }
-//RS 
-//RS trait JetListSurface {
-//RS     fn jet_len(&self) -> i64;
-//RS     fn jet_is_empty(&self) -> bool;
-//RS }
-//RS 
-//RS impl<T> JetListSurface for Vec<T> {
-//RS     #[inline(always)]
-//RS     fn jet_len(&self) -> i64 {
-//RS         self.len() as i64
-//RS     }
-//RS 
-//RS     #[inline(always)]
-//RS     fn jet_is_empty(&self) -> bool {
-//RS         self.is_empty()
-//RS     }
-//RS }
-//RS 
-//RS impl<T> JetListSurface for [T] {
-//RS     #[inline(always)]
-//RS     fn jet_len(&self) -> i64 {
-//RS         self.len() as i64
-//RS     }
-//RS 
-//RS     #[inline(always)]
-//RS     fn jet_is_empty(&self) -> bool {
-//RS         self.is_empty()
-//RS     }
-//RS }
-//RS 
-//RS impl<T, const N: usize> JetListSurface for [T; N] {
-//RS     #[inline(always)]
-//RS     fn jet_len(&self) -> i64 {
-//RS         N as i64
-//RS     }
-//RS 
-//RS     #[inline(always)]
-//RS     fn jet_is_empty(&self) -> bool {
-//RS         N == 0
-//RS     }
-//RS }
-//RS 
-//RS 
-//RS trait JetListPushSurface {
-//RS     type Item;
-//RS 
-//RS     fn jet_push(&mut self, value: Self::Item);
-//RS }
-//RS 
-//RS impl<T> JetListPushSurface for Vec<T> {
-//RS     type Item = T;
-//RS 
-//RS     #[inline(always)]
-//RS     fn jet_push(&mut self, value: Self::Item) {
-//RS         self.push(value);
-//RS     }
-//RS }
-//RS 
-//RS 
-//RS #[inline(always)]
-//RS fn jet_list_push<C: JetListPushSurface>(xs: &mut C, value: C::Item) {
-//RS     xs.jet_push(value);
-//RS }
-//RS 
-//RS 
-//RS #[inline(always)]
-//RS fn jet_list_extend<T>(xs: &mut Vec<T>, other: Vec<T>) {
-//RS     xs.extend(other);
-//RS }
-//RS 
-//RS #[inline(always)]
-//RS fn jet_list_reverse<T>(xs: &mut [T]) {
-//RS     xs.reverse();
-//RS }
-//RS 
-//RS #[inline(always)]
-//RS fn jet_list_sort<T: Ord>(xs: &mut [T]) {
-//RS     xs.sort();
-//RS }
-//RS 
-//RS trait JetCollectionClear {
-//RS     fn jet_clear(&mut self);
-//RS }
-//RS 
-//RS impl<T> JetCollectionClear for Vec<T> {
-//RS     #[inline(always)]
-//RS     fn jet_clear(&mut self) {
-//RS         self.clear();
-//RS     }
-//RS }
-//RS 
-//RS impl<K: Ord + Clone, V: Clone> JetCollectionClear for JetMap<K, V> {
-//RS     #[inline(always)]
-//RS     fn jet_clear(&mut self) {
-//RS         self.clear();
-//RS     }
-//RS }
-//RS 
-//RS #[inline(always)]
-//RS fn jet_list_clear<C: JetCollectionClear>(collection: &mut C) {
-//RS     collection.jet_clear();
-//RS }
-//RS 
-//RS fn jet_list_sort_by_desc<T, K: Ord, F>(xs: &mut [T], mut f: F)
-//RS where
-//RS     F: FnMut(&T) -> K,
-//RS {
-//RS     jet_list_try_sort_by_key_kernel(
-//RS         xs,
-//RS         |item| Ok::<_, std::convert::Infallible>(f(item)),
-//RS         |left, right| right.cmp(left),
-//RS     )
-//RS     .unwrap_or_else(|never| match never {});
-//RS }
-//RS 
-//RS fn jet_list_try_sort_by<T, K: Ord, E, F>(xs: &mut [T], f: F) -> Result<(), E>
-//RS where
-//RS     F: FnMut(&T) -> Result<K, E>,
-//RS {
-//RS     jet_list_try_sort_by_key_kernel(xs, f, Ord::cmp)
-//RS }
-//RS 
-//RS fn jet_list_try_sort_by_desc<T, K: Ord, E, F>(xs: &mut [T], f: F) -> Result<(), E>
-//RS where
-//RS     F: FnMut(&T) -> Result<K, E>,
-//RS {
-//RS     jet_list_try_sort_by_key_kernel(xs, f, |left, right| right.cmp(left))
-//RS }
-//RS 
-//RS #[inline(always)]
-//RS fn jet_list_len<C: JetListSurface + ?Sized>(xs: &C) -> i64 {
-//RS     xs.jet_len()
-//RS }
-//RS 
-//RS #[inline(always)]
-//RS fn jet_list_is_empty<C: JetListSurface + ?Sized>(xs: &C) -> bool {
-//RS     xs.jet_is_empty()
-//RS }
-//RS 
-//RS #[inline(always)]
-//RS pub(crate) fn jet_list_contains<T: PartialEq>(xs: &[T], needle: &T) -> bool {
-//RS     xs.contains(needle)
-//RS }
-//RS #[inline(always)]
-//RS fn jet_list_index_of<T: PartialEq>(xs: &[T], needle: &T) -> JetOutcome<i64, JetAbsent> {
-//RS     jet_outcome_of(xs.iter().position(|item| item == needle).map(|index| index as i64))
-//RS }
-//RS 
-//RS #[inline(always)]
-//RS fn jet_list_get_opt<T: Clone>(xs: &[T], index: i64) -> JetOutcome<T, JetAbsent> {
-//RS     usize::try_from(index)
-//RS         .ok()
-//RS         .and_then(|index| xs.get(index).cloned())
-//RS         .ok_or(JetAbsent)
-//RS }
-//RS 
-//RS #[inline(always)]
-//RS fn jet_list_first<T: Clone>(xs: &[T]) -> JetOutcome<T, JetAbsent> {
-//RS     jet_outcome_of(xs.first().cloned())
-//RS }
-//RS 
-//RS #[inline(always)]
-//RS fn jet_list_last<T: Clone>(xs: &[T]) -> JetOutcome<T, JetAbsent> {
-//RS     jet_outcome_of(xs.last().cloned())
-//RS }
-//RS 
-//RS #[inline(always)]
-//RS fn jet_map_len<K: Ord, V>(map: &JetMap<K, V>) -> i64 {
-//RS     map.len() as i64
-//RS }
-//RS 
-//RS #[inline(always)]
-//RS fn jet_map_is_empty<K: Ord, V>(map: &JetMap<K, V>) -> bool {
-//RS     map.is_empty()
-//RS }
-//RS 
-//RS #[inline(always)]
-//RS fn jet_map_get_opt<K: Ord, V: Clone>(
-//RS     map: &JetMap<K, V>,
-//RS     key: &K,
-//RS ) -> JetOutcome<V, JetAbsent> {
-//RS     jet_outcome_of(map.get(key).cloned())
-//RS }
-//RS #[inline(always)]
-//RS fn jet_map_has_key<K: Ord, V>(map: &JetMap<K, V>, key: &K) -> bool {
-//RS     map.contains_key(key)
-//RS }
-//RS 
-//RS #[inline(always)]
-//RS fn jet_bag_has<T: Eq + std::hash::Hash>(
-//RS     bag: &std::collections::HashMap<T, usize>,
-//RS     value: &T,
-//RS ) -> bool {
-//RS     bag.get(value).copied().unwrap_or(0) > 0
-//RS }
-//RS 
-//RS fn jet_bag_count<T: Eq + std::hash::Hash>(
-//RS     bag: &std::collections::HashMap<T, usize>,
-//RS     value: &T,
-//RS ) -> i64 {
-//RS     bag.get(value).copied().unwrap_or(0) as i64
-//RS }
-//RS 
-//RS #[inline(always)]
-//RS fn jet_set_len<T>(set: &std::collections::HashSet<T>) -> i64 {
-//RS     set.len() as i64
-//RS }
-//RS 
-//RS #[inline(always)]
-//RS fn jet_set_capacity<T>(set: &std::collections::HashSet<T>) -> i64 {
-//RS     set.capacity() as i64
-//RS }
-//RS 
-//RS #[inline(always)]
-//RS fn jet_set_is_empty<T>(set: &std::collections::HashSet<T>) -> bool {
-//RS     set.is_empty()
-//RS }
-//RS #[inline(always)]
-//RS fn jet_set_has<T: Eq + std::hash::Hash>(
-//RS     set: &std::collections::HashSet<T>,
-//RS     value: &T,
-//RS ) -> bool {
-//RS     set.contains(value)
-//RS }
-//RS 
-//RS #[inline(always)]
-//RS fn jet_set_to_list<T: Clone>(set: &std::collections::HashSet<T>) -> Vec<T> {
-//RS     set.iter().cloned().collect()
-//RS }
-//RS #[inline(always)]
-//RS fn jet_set_values<T: 'static + Clone>(
-//RS     set: &std::collections::HashSet<T>,
-//RS ) -> JetIter<T> {
-//RS     jet_iter_from_vec(jet_set_to_list(set))
-//RS }
-//RS 
-//RS 
-//RS #[inline(always)]
-//RS fn jet_set_max<T: Ord + Clone>(
-//RS     set: &std::collections::HashSet<T>,
-//RS ) -> JetOutcome<T, JetAbsent> {
-//RS     jet_outcome_of(set.iter().cloned().max())
-//RS }
-//RS 
-//RS #[inline(always)]
-//RS fn jet_set_sort<T: Ord + Clone>(set: &std::collections::HashSet<T>) -> Vec<T> {
-//RS     let mut values = jet_set_to_list(set);
-//RS     jet_list_sort(&mut values);
-//RS     values
-//RS }
-//RS 
-//RS #[inline(always)]
-//RS fn jet_set_shuffle<T: 'static + Clone>(set: &std::collections::HashSet<T>) -> Vec<T> {
-//RS     jet_iter_shuffle(jet_iter_from_vec(jet_set_to_list(set))).to_list()
-//RS }
-//RS 
-//RS #[inline(always)]
-//RS fn jet_set_equal<T: Eq + std::hash::Hash>(
-//RS     left: &std::collections::HashSet<T>,
-//RS     right: &std::collections::HashSet<T>,
-//RS ) -> bool {
-//RS     left == right
-//RS }
-//RS 
-//RS #[inline(always)]
-//RS fn jet_set_first<T: Clone>(set: &std::collections::HashSet<T>) -> JetOutcome<T, JetAbsent> {
-//RS     jet_outcome_of(set.iter().next().cloned())
-//RS }
-//RS 
-//RS #[inline(always)]
-//RS fn jet_sorted_set_len<T>(set: &std::collections::BTreeSet<T>) -> i64 {
-//RS     set.len() as i64
-//RS }
-//RS 
-//RS #[inline(always)]
-//RS fn jet_sorted_set_is_empty<T>(set: &std::collections::BTreeSet<T>) -> bool {
-//RS     set.is_empty()
-//RS }
-//RS 
-//RS #[inline(always)]
-//RS fn jet_sorted_set_first<T: Ord + Clone>(
-//RS     set: &std::collections::BTreeSet<T>,
-//RS ) -> JetOutcome<T, JetAbsent> {
-//RS     jet_outcome_of(set.first().cloned())
-//RS }
-//RS 
-//RS #[inline(always)]
-//RS fn jet_sorted_set_last<T: Ord + Clone>(
-//RS     set: &std::collections::BTreeSet<T>,
-//RS ) -> JetOutcome<T, JetAbsent> {
-//RS     jet_outcome_of(set.last().cloned())
-//RS }
-//RS 
-//RS #[inline(always)]
-//RS fn jet_priority_queue_from<T: Ord>(values: Vec<T>) -> std::collections::BinaryHeap<T> {
-//RS     values.into_iter().collect()
-//RS }
-//RS 
-//RS fn jet_priority_queue_len<T>(queue: &std::collections::BinaryHeap<T>) -> i64 {
-//RS     queue.len() as i64
-//RS }
-//RS 
-//RS #[inline(always)]
-//RS fn jet_priority_queue_is_empty<T>(queue: &std::collections::BinaryHeap<T>) -> bool {
-//RS     queue.is_empty()
-//RS }
-//RS #[inline(always)]
-//RS fn jet_priority_queue_peek<T: Ord + Clone>(
-//RS     queue: &std::collections::BinaryHeap<T>,
-//RS ) -> JetOutcome<T, JetAbsent> {
-//RS     jet_outcome_of(queue.peek().cloned())
-//RS }
-//RS #[inline(always)]
-//RS fn jet_priority_queue_to_sorted_list<T: Ord + Clone>(
-//RS     queue: &std::collections::BinaryHeap<T>,
-//RS ) -> Vec<T> {
-//RS     let mut values = queue.clone().into_sorted_vec();
-//RS     values.reverse();
-//RS     values
-//RS }
-//RS 
-//RS #[inline(always)]
-//RS fn jet_lru_len<K: Eq + Clone, V: Clone>(cache: &JetCache<K, V>) -> i64 {
-//RS     cache.len() as i64
-//RS }
-//RS 
-//RS #[inline(always)]
-//RS fn jet_lru_is_empty<K: Eq + Clone, V: Clone>(cache: &JetCache<K, V>) -> bool {
-//RS     cache.is_empty()
-//RS }
-//RS #[inline(always)]
-//RS fn jet_lru_has<K: Eq + Clone, V: Clone>(cache: &JetCache<K, V>, key: &K) -> bool {
-//RS     cache.contains_key(key)
-//RS }
-//RS #[inline(always)]
-//RS fn jet_lru_keys<K: Eq + Clone, V: Clone>(cache: &JetCache<K, V>) -> Vec<K> {
-//RS     cache.keys()
-//RS }
-//RS 
-//RS #[inline(always)]
-//RS fn jet_bag_len<T>(bag: &std::collections::HashMap<T, usize>) -> i64 {
-//RS     bag.values().sum::<usize>() as i64
-//RS }
-//RS 
-//RS #[inline(always)]
-//RS fn jet_bag_is_empty<T>(bag: &std::collections::HashMap<T, usize>) -> bool {
-//RS     bag.is_empty()
-//RS }
-//RS 
-//RS #[inline(always)]
-//RS fn jet_bit_set_len(bits: &JetBitSet) -> i64 {
-//RS     bits.len()
-//RS }
-//RS 
-//RS #[inline(always)]
-//RS fn jet_bit_set_is_empty(bits: &JetBitSet) -> bool {
-//RS     bits.is_empty()
-//RS }
-//RS #[inline(always)]
-//RS fn jet_bit_set_has(bits: &JetBitSet, bit: i64) -> bool {
-//RS     bits.contains(&bit)
-//RS }
-//RS #[inline(always)]
-//RS fn jet_bit_set_to_list(bits: &JetBitSet) -> Vec<i64> {
-//RS     bits.to_list()
-//RS }
-//RS #[inline(always)]
-//RS fn jet_bit_set_count(bits: &JetBitSet) -> i64 {
-//RS     bits.count()
-//RS }
-//RS #[inline(always)]
-//RS fn jet_deque_len<T>(queue: &std::collections::VecDeque<T>) -> i64 {
-//RS     queue.len() as i64
-//RS }
-//RS 
-//RS #[inline(always)]
-//RS fn jet_deque_capacity<T>(queue: &std::collections::VecDeque<T>) -> i64 {
-//RS     queue.capacity() as i64
-//RS }
-//RS #[inline(always)]
-//RS fn jet_deque_peek_front<T: Clone>(
-//RS     queue: &std::collections::VecDeque<T>,
-//RS ) -> JetOutcome<T, JetAbsent> {
-//RS     jet_outcome_of(queue.front().cloned())
-//RS }
-//RS 
-//RS #[inline(always)]
-//RS fn jet_deque_peek_back<T: Clone>(
-//RS     queue: &std::collections::VecDeque<T>,
-//RS ) -> JetOutcome<T, JetAbsent> {
-//RS     jet_outcome_of(queue.back().cloned())
-//RS }
-//RS 
-//RS #[inline(always)]
-//RS fn jet_deque_contains<T: PartialEq>(
-//RS     queue: &std::collections::VecDeque<T>,
-//RS     value: &T,
-//RS ) -> bool {
-//RS     queue.contains(value)
-//RS }
-//RS 
-//RS #[inline(always)]
-//RS fn jet_string_starts_with(text: &String, prefix: &String) -> bool {
-//RS     text.starts_with(prefix)
-//RS }
-//RS 
-//RS #[inline(always)]
-//RS fn jet_string_copy(text: &String) -> String {
-//RS     text.clone()
-//RS }
-//RS 
-//RS #[inline(always)]
-//RS fn jet_string_ends_with(text: &String, suffix: &String) -> bool {
-//RS     text.ends_with(suffix)
-//RS }
-//RS #[inline(always)]
-//RS fn jet_string_replace(text: &String, from: &String, to: &String) -> String {
-//RS     text.replace(from, to)
-//RS }
-//RS 
-//RS #[inline(always)]
-//RS fn jet_deque_get<T: Clone>(
-//RS     queue: &std::collections::VecDeque<T>,
-//RS     index: i64,
-//RS ) -> JetOutcome<T, JetAbsent> {
-//RS     jet_outcome_of(usize::try_from(index).ok().and_then(|index| queue.get(index).cloned()))
-//RS }
-//RS 
-//RS #[inline(always)]
-//RS fn jet_deque_to_list<T: Clone>(queue: &std::collections::VecDeque<T>) -> Vec<T> {
-//RS     queue.iter().cloned().collect()
-//RS }
-//RS 
-//RS #[inline(always)]
-//RS fn jet_deque_join<T: JetShow>(
-//RS     queue: &std::collections::VecDeque<T>,
-//RS     separator: &String,
-//RS ) -> String {
-//RS     queue
-//RS         .iter()
-//RS         .map(|value| value.jet_show())
-//RS         .collect::<Vec<_>>()
-//RS         .join(separator)
-//RS }
-//RS 
-//RS #[inline(always)]
-//RS fn jet_deque_from<T>(values: Vec<T>) -> std::collections::VecDeque<T> {
-//RS     values.into_iter().collect()
-//RS }
-//RS 
-//RS #[inline(always)]
-//RS fn jet_deque_push_front<T>(queue: &mut std::collections::VecDeque<T>, value: T) {
-//RS     queue.push_front(value);
-//RS }
-//RS 
-//RS #[inline(always)]
-//RS fn jet_deque_push_back<T>(queue: &mut std::collections::VecDeque<T>, value: T) {
-//RS     queue.push_back(value);
-//RS }
-//RS 
-//RS /// Remove the first element equal to `value`; a missing value is a no-op.
-//RS #[inline(always)]
-//RS fn jet_deque_delete<T: PartialEq>(queue: &mut std::collections::VecDeque<T>, value: T) {
-//RS     if let Some(index) = queue.iter().position(|candidate| *candidate == value) {
-//RS         queue.remove(index);
-//RS     }
-//RS }
-//RS 
-//RS #[inline(always)]
-//RS fn jet_deque_reverse<T>(queue: &mut std::collections::VecDeque<T>) {
-//RS     queue.make_contiguous().reverse();
-//RS }
-//RS 
-//RS /// Keep `[0, index)` in `queue` and return the tail; the index clamps to the
-//RS /// queue bounds.
-//RS #[inline(always)]
-//RS fn jet_deque_split<T>(
-//RS     queue: &mut std::collections::VecDeque<T>,
-//RS     index: i64,
-//RS ) -> std::collections::VecDeque<T> {
-//RS     let at = usize::try_from(index).unwrap_or(0).min(queue.len());
-//RS     queue.split_off(at)
-//RS }
-//RS 
-//RS #[inline(always)]
-//RS fn jet_deque_is_empty<T>(queue: &std::collections::VecDeque<T>) -> bool {
-//RS     queue.is_empty()
-//RS }
-//RS 
-//RS #[inline(always)]
-//RS fn jet_string_is_empty(text: &String) -> bool {
-//RS     text.is_empty()
-//RS }
-//RS 
-//RS #[inline(always)]
-//RS pub(crate) fn jet_string_contains(text: &str, needle: &str) -> bool {
-//RS     text.contains(needle)
-//RS }
-//RS #[inline(always)]
-//RS fn jet_string_repeat(text: &String, count: i64) -> String {
-//RS     text.repeat(count.max(0) as usize)
-//RS }
-//RS 
-//RS 
-//RS #[inline(always)]
-//RS fn jet_string_count_bytes(text: &String) -> i64 {
-//RS     text.len() as i64
-//RS }
-//RS 
-//RS // D-ALLOCFAIL1=A: collection fallibility is one Prelude path. Native
-//RS // reservations stay here; map storage insertion is a representation hook.
-//RS // AOT, JIT, and TIR-eval marshal these functions.
-//RS fn jet_list_try_new<T>() -> JetOutcome<Vec<T>, AllocError> {
-//RS     if jet_fault_should_fail_allocation() {
-//RS         return Err(jet_alloc_error(0, "List"));
-//RS     }
-//RS     Ok(Vec::new())
-//RS }
-//RS 
-//RS fn jet_list_try_with_capacity_defaulted<T>(
-//RS     capacity: i64,
-//RS     program_allocator_reserve: impl FnOnce(usize) -> bool,
-//RS     program_allocator_cancel: impl FnOnce(usize),
-//RS ) -> JetOutcome<Vec<T>, AllocError> {
-//RS     if capacity < 0 {
-//RS         return Err(jet_alloc_error(0, "List"));
-//RS     }
-//RS     let capacity = usize::try_from(capacity).map_err(|_| jet_alloc_error(0, "List"))?;
-//RS     let requested = capacity.saturating_mul(std::mem::size_of::<T>().max(1));
-//RS     if jet_fault_should_fail_allocation() || !program_allocator_reserve(requested) {
-//RS         return Err(jet_alloc_error(requested, "List"));
-//RS     }
-//RS     let mut list = Vec::new();
-//RS     if list.try_reserve_exact(capacity).is_err() {
-//RS         program_allocator_cancel(requested);
-//RS         return Err(jet_alloc_error(requested, "List"));
-//RS     }
-//RS     Ok(list)
-//RS }
-//RS 
-//RS fn jet_list_try_with_capacity<T>(capacity: i64) -> JetOutcome<Vec<T>, AllocError> {
-//RS     jet_list_try_with_capacity_defaulted(capacity, |_| true, |_| {})
-//RS }
-//RS 
-//RS fn jet_list_try_push<T>(xs: &mut Vec<T>, value: T) -> JetOutcome<(), AllocError> {
-//RS     let requested = std::mem::size_of::<T>().max(1);
-//RS     if jet_fault_should_fail_allocation() {
-//RS         return Err(jet_alloc_error(requested, "List"));
-//RS     }
-//RS     xs.try_reserve(1)
-//RS         .map_err(|_| jet_alloc_error(requested, "List"))?;
-//RS     xs.push(value);
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn jet_list_try_reserve<T>(xs: &mut Vec<T>, additional: i64) -> JetOutcome<(), AllocError> {
-//RS     if additional < 0 {
-//RS         return Err(jet_alloc_error(0, "List"));
-//RS     }
-//RS     let additional = usize::try_from(additional).map_err(|_| jet_alloc_error(0, "List"))?;
-//RS     let requested = additional.saturating_mul(std::mem::size_of::<T>().max(1));
-//RS     if jet_fault_should_fail_allocation() {
-//RS         return Err(jet_alloc_error(requested, "List"));
-//RS     }
-//RS     xs.try_reserve(additional)
-//RS         .map_err(|_| jet_alloc_error(requested, "List"))?;
-//RS     Ok(())
-//RS }
-//RS 
-//RS #[inline(always)]
-//RS fn jet_map_try_insert<M, K: Ord + Clone, V: Clone>(
-//RS     map: &mut M,
-//RS     key: K,
-//RS     value: V,
-//RS ) -> JetOutcome<Option<V>, AllocError>
-//RS where
-//RS     M: std::ops::DerefMut<Target = std::collections::BTreeMap<K, V>>,
-//RS {
-//RS     if map.contains_key(&key) {
-//RS         return Ok(map.insert(key, value));
-//RS     }
-//RS     let requested = std::mem::size_of::<(K, V)>().max(1);
-//RS     if jet_fault_should_fail_allocation() {
-//RS         return Err(jet_alloc_error(requested, "Map"));
-//RS     }
-//RS     Ok(map.insert(key, value))
-//RS }
-//RS 
-//RS fn jet_string_try_push(text: &mut String, addition: &str) -> JetOutcome<(), AllocError> {
-//RS     let requested = addition.len();
-//RS     if jet_fault_should_fail_allocation() {
-//RS         return Err(jet_alloc_error(requested, "String"));
-//RS     }
-//RS     text.try_reserve(requested)
-//RS         .map_err(|_| jet_alloc_error(requested, "String"))?;
-//RS     text.push_str(addition);
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn jet_list_min<T: Ord, I>(xs: I) -> JetOutcome<T, JetAbsent>
-//RS where
-//RS     I: IntoIterator<Item = T>,
-//RS {
-//RS     jet_outcome_of(xs.into_iter().min())
-//RS }
-//RS fn jet_list_max<T: Ord, I>(xs: I) -> JetOutcome<T, JetAbsent>
-//RS where
-//RS     I: IntoIterator<Item = T>,
-//RS {
-//RS     jet_outcome_of(xs.into_iter().max())
-//RS }
-//RS /// D-FLOATSORT1: Float extrema follow the collection sort order, so NaN is the
-//RS /// greatest item. Ties keep the first minimum and the last maximum, the same
-//RS /// choice the interpreter's list reducer makes.
-//RS fn jet_list_min_float<T: Copy + Into<f64>, I>(xs: I) -> JetOutcome<T, JetAbsent>
-//RS where
-//RS     I: IntoIterator<Item = T>,
-//RS {
-//RS     jet_outcome_of(xs.into_iter().reduce(|best, item| {
-//RS         if jet_collection_float_sort_cmp(best.into(), item.into()) == std::cmp::Ordering::Greater {
-//RS             item
-//RS         } else {
-//RS             best
-//RS         }
-//RS     }))
-//RS }
-//RS fn jet_list_max_float<T: Copy + Into<f64>, I>(xs: I) -> JetOutcome<T, JetAbsent>
-//RS where
-//RS     I: IntoIterator<Item = T>,
-//RS {
-//RS     jet_outcome_of(xs.into_iter().reduce(|best, item| {
-//RS         if jet_collection_float_sort_cmp(best.into(), item.into()) == std::cmp::Ordering::Greater {
-//RS             best
-//RS         } else {
-//RS             item
-//RS         }
-//RS     }))
-//RS }
-//RS fn jet_list_flatten<T>(xs: Vec<Vec<T>>) -> Vec<T> {
-//RS     xs.into_iter().flatten().collect()
-//RS }
-//RS fn jet_list_intersperse<T: Clone>(xs: Vec<T>, sep: T) -> Vec<T> {
-//RS     let mut out = Vec::new();
-//RS     for (i, x) in xs.into_iter().enumerate() {
-//RS         if i > 0 {
-//RS             out.push(sep.clone());
-//RS         }
-//RS         out.push(x);
-//RS     }
-//RS     out
-//RS }
-//RS fn jet_list_count_by<T, K: Ord + Clone, F, I>(xs: I, mut f: F) -> JetMap<K, i64>
-//RS where
-//RS     I: IntoIterator<Item = T>,
-//RS     F: FnMut(&T) -> K,
-//RS {
-//RS     let mut m: JetMap<K, i64> = JetMap::new();
-//RS     let storage = std::ops::DerefMut::deref_mut(&mut m);
-//RS     for x in xs {
-//RS         let k = f(&x);
-//RS         *storage.entry(k).or_insert(0) += 1;
-//RS     }
-//RS     m
-//RS }
-//RS fn jet_bag_any<K, F>(bag: &std::collections::HashMap<K, usize>, mut f: F) -> bool
-//RS where
-//RS     F: FnMut(&K) -> bool,
-//RS {
-//RS     bag.iter().any(|(key, count)| *count != 0 && f(key))
-//RS }
-//RS 
-//RS fn jet_option_map_ref<T, U, F>(value: &JetOutcome<T, JetAbsent>, f: F) -> JetOutcome<U, JetAbsent>
-//RS where
-//RS     F: FnOnce(&T) -> U,
-//RS {
-//RS     value.as_ref().map(f).map_err(|_| JetAbsent)
-//RS }
-//RS 
-//RS 
-//RS /// Count each item directly. `count_by(x -> x)` is the same operation with
-//RS /// the identity projection, but this named kernel keeps the common path terse.
-//RS fn jet_list_counts<T: Ord + Clone, I: IntoIterator<Item = T>>(xs: I) -> JetMap<T, i64> {
-//RS     let mut m: JetMap<T, i64> = JetMap::new();
-//RS     let storage = std::ops::DerefMut::deref_mut(&mut m);
-//RS     for item in xs {
-//RS         *storage.entry(item).or_insert(0) += 1;
-//RS     }
-//RS     m
-//RS }
-//RS 
-//RS fn jet_map_copy_kernel<K: Ord + Clone, V: Clone>(m: &JetMap<K, V>) -> JetMap<K, V> {
-//RS     m.clone()
-//RS }
-//RS 
-//RS fn jet_map_equal_kernel<K: Ord + PartialEq, V: PartialEq>(
-//RS     left: &JetMap<K, V>,
-//RS     right: &JetMap<K, V>,
-//RS ) -> bool {
-//RS     left == right
-//RS }
-//RS 
-//RS fn jet_map_first_key_kernel<K: Ord + Clone, V>(m: &JetMap<K, V>) -> JetOutcome<K, JetAbsent> {
-//RS     jet_outcome_of(m.keys().next().cloned())
-//RS }
-//RS 
-//RS fn jet_map_entries_kernel<K: Ord + Clone, V: Clone>(m: &JetMap<K, V>) -> Vec<(K, V)> {
-//RS     m.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
-//RS }
-//RS 
-//RS /// Return at most `n` map entries by descending value, with ascending keys as
-//RS /// the deterministic tie break. Negative limits select no entries.
-//RS fn jet_map_top_n<K: Ord + Clone, V: Ord + Clone>(m: &JetMap<K, V>, n: i64) -> Vec<(K, V)> {
-//RS     let limit = usize::try_from(n.max(0)).unwrap_or(usize::MAX).min(m.len());
-//RS     if limit == 0 {
-//RS         return Vec::new();
-//RS     }
-//RS 
-//RS     let rank = |(left_key, left_value): &(K, V), (right_key, right_value): &(K, V)| {
-//RS         right_value
-//RS             .cmp(left_value)
-//RS             .then_with(|| left_key.cmp(right_key))
-//RS     };
-//RS     let mut best = Vec::with_capacity(limit);
-//RS     for (key, value) in m.iter() {
-//RS         if best.len() < limit {
-//RS             best.push((key.clone(), value.clone()));
-//RS             if best.len() == limit {
-//RS                 best.sort_by(&rank);
-//RS             }
-//RS             continue;
-//RS         }
-//RS         let worst = best.len() - 1;
-//RS         let better = value > &best[worst].1
-//RS             || (value == &best[worst].1 && key < &best[worst].0);
-//RS         if !better {
-//RS             continue;
-//RS         }
-//RS         best[worst] = (key.clone(), value.clone());
-//RS         let mut inserted = worst;
-//RS         while inserted > 0 && rank(&best[inserted], &best[inserted - 1]).is_lt() {
-//RS             best.swap(inserted, inserted - 1);
-//RS             inserted -= 1;
-//RS         }
-//RS     }
-//RS     best
-//RS }
-//RS 
-//RS fn jet_map_min_value_kernel<K: Ord, V: Ord + Clone>(m: &JetMap<K, V>) -> JetOutcome<V, JetAbsent> {
-//RS     jet_outcome_of(m.values().min().cloned())
-//RS }
-//RS 
-//RS fn jet_map_max_value_kernel<K: Ord, V: Ord + Clone>(m: &JetMap<K, V>) -> JetOutcome<V, JetAbsent> {
-//RS     jet_outcome_of(m.values().max().cloned())
-//RS }
-//RS 
-//RS fn jet_map_intersection_kernel<K: Ord + Clone, V: Clone>(
-//RS     left: &JetMap<K, V>,
-//RS     right: &JetMap<K, V>,
-//RS ) -> JetMap<K, V> {
-//RS     left.iter()
-//RS         .filter(|(key, _)| right.contains_key(key))
-//RS         .map(|(key, value)| (key.clone(), value.clone()))
-//RS         .collect()
-//RS }
-//RS 
-//RS fn jet_map_slice_keys_kernel<K: Ord + Clone, V: Clone>(
-//RS     m: &JetMap<K, V>,
-//RS     keys: Vec<K>,
-//RS ) -> JetMap<K, V> {
-//RS     keys.into_iter()
-//RS         .filter_map(|key| m.get(&key).cloned().map(|value| (key, value)))
-//RS         .collect()
-//RS }
-//RS 
-//RS fn jet_map_from_keys_kernel<K: Ord + Clone, V: Clone>(keys: Vec<K>, default: V) -> JetMap<K, V> {
-//RS     keys.into_iter().map(|key| (key, default.clone())).collect()
-//RS }
-//RS 
-//RS fn jet_map_contains_value_kernel<K: Ord, V: PartialEq>(m: &JetMap<K, V>, needle: &V) -> bool {
-//RS     m.values().any(|value| value == needle)
-//RS }
-//RS 
-//RS fn jet_map_pop_kernel<M, K: Ord + Clone, V: Clone>(m: &mut M, key: &K) -> JetOutcome<V, JetAbsent>
-//RS where
-//RS     M: std::ops::DerefMut<Target = std::collections::BTreeMap<K, V>>,
-//RS {
-//RS     jet_outcome_of(m.remove(key))
-//RS }
-//RS 
-//RS fn jet_list_pop_kernel<T>(xs: &mut Vec<T>) -> JetOutcome<T, JetAbsent> {
-//RS     jet_outcome_of(xs.pop())
-//RS }
-//RS 
-//RS fn jet_list_remove_value_kernel<T: Clone + PartialEq>(xs: &mut Vec<T>, value: T) -> Option<T> {
-//RS     xs.iter()
-//RS         .position(|item| *item == value)
-//RS         .map(|index| xs.remove(index))
-//RS }
-//RS 
-//RS fn jet_list_remove_slot_kernel<T: Clone>(xs: &mut Vec<T>, index: i64) -> Result<T, String> {
-//RS     let len = xs.len() as i64;
-//RS     if index < 0 || index >= len {
-//RS         return Err(jet_list_bounds_message(len, index));
-//RS     }
-//RS     Ok(xs.remove(index as usize))
-//RS }
-//RS 
-//RS #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-//RS pub(crate) enum JetListInsertError {
-//RS     IndexOutOfBounds { len: usize, index: i64 },
-//RS }
-//RS 
-//RS impl JetListInsertError {
-//RS     pub(crate) fn code(self) -> &'static str {
-//RS         "E3010"
-//RS     }
-//RS 
-//RS     pub(crate) fn message(self) -> String {
-//RS         match self {
-//RS             Self::IndexOutOfBounds { len, index } => jet_list_bounds_message(len, index),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn jet_list_insert_kernel<T>(
-//RS     xs: &mut Vec<T>,
-//RS     index: i64,
-//RS     value: T,
-//RS ) -> Result<(), JetListInsertError> {
-//RS     let position = match usize::try_from(index) {
-//RS         Ok(position) if position <= xs.len() => position,
-//RS         _ => {
-//RS             return Err(JetListInsertError::IndexOutOfBounds {
-//RS                 len: xs.len(),
-//RS                 index,
-//RS             })
-//RS         }
-//RS     };
-//RS     xs.insert(position, value);
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn jet_list_count_kernel<T: PartialEq>(xs: &[T], value: &T) -> i64 {
-//RS     jet_count_to_int(xs.iter().filter(|item| *item == value).count())
-//RS }
-//RS 
-//RS /// A host `usize` count crosses into Jet's `Int` without truncation: a count
-//RS /// the one-word carrier cannot hold stops instead of wrapping negative.
-//RS fn jet_count_to_int(count: usize) -> i64 {
-//RS     i64::try_from(count).unwrap_or_else(|_| {
-//RS         jet_panic("<core.collections>", 0, "sequence count exceeds the Int carrier")
-//RS     })
-//RS }
-//RS 
-//RS /// A checked nonnegative Jet count selects at most `usize::MAX` host items,
-//RS /// so saturating keeps `take`/`skip`/`step_by` exact on every pointer width.
-//RS fn jet_sequence_count(n: i64) -> usize {
-//RS     usize::try_from(n).unwrap_or(usize::MAX)
-//RS }
-//RS 
-//RS trait JetSetPopKernel {
-//RS     type Item;
-//RS 
-//RS     fn pop_value(&mut self, value: &Self::Item) -> Option<Self::Item>;
-//RS }
-//RS 
-//RS impl<T: Eq + std::hash::Hash> JetSetPopKernel for std::collections::HashSet<T> {
-//RS     type Item = T;
-//RS 
-//RS     fn pop_value(&mut self, value: &Self::Item) -> Option<Self::Item> {
-//RS         self.take(value)
-//RS     }
-//RS }
-//RS 
-//RS impl<T: PartialEq> JetSetPopKernel for Vec<T> {
-//RS     type Item = T;
-//RS 
-//RS     fn pop_value(&mut self, value: &Self::Item) -> Option<Self::Item> {
-//RS         self.iter()
-//RS             .position(|item| item == value)
-//RS             .map(|index| self.remove(index))
-//RS     }
-//RS }
-//RS 
-//RS fn jet_set_pop_kernel<C: JetSetPopKernel>(
-//RS     set: &mut C,
-//RS     value: &C::Item,
-//RS ) -> JetOutcome<C::Item, JetAbsent> {
-//RS     jet_outcome_of(set.pop_value(value))
-//RS }
-//RS 
-//RS trait JetSetReplaceKernel {
-//RS     type Item;
-//RS 
-//RS     fn replace_value(&mut self, value: Self::Item) -> Option<Self::Item>;
-//RS }
-//RS 
-//RS impl<T: Eq + std::hash::Hash> JetSetReplaceKernel for std::collections::HashSet<T> {
-//RS     type Item = T;
-//RS 
-//RS     fn replace_value(&mut self, value: Self::Item) -> Option<Self::Item> {
-//RS         self.replace(value)
-//RS     }
-//RS }
-//RS 
-//RS impl<T: PartialEq> JetSetReplaceKernel for Vec<T> {
-//RS     type Item = T;
-//RS 
-//RS     fn replace_value(&mut self, value: Self::Item) -> Option<Self::Item> {
-//RS         if let Some(index) = self.iter().position(|item| *item == value) {
-//RS             Some(std::mem::replace(&mut self[index], value))
-//RS         } else {
-//RS             self.push(value);
-//RS             None
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn jet_set_replace_kernel<C: JetSetReplaceKernel>(
-//RS     set: &mut C,
-//RS     value: C::Item,
-//RS ) -> JetOutcome<C::Item, JetAbsent> {
-//RS     jet_outcome_of(set.replace_value(value))
-//RS }
-//RS 
-//RS trait JetDequePopFrontKernel {
-//RS     type Item;
-//RS 
-//RS     fn pop_front_value(&mut self) -> Option<Self::Item>;
-//RS }
-//RS 
-//RS impl<T> JetDequePopFrontKernel for std::collections::VecDeque<T> {
-//RS     type Item = T;
-//RS 
-//RS     fn pop_front_value(&mut self) -> Option<Self::Item> {
-//RS         self.pop_front()
-//RS     }
-//RS }
-//RS 
-//RS impl<T> JetDequePopFrontKernel for Vec<T> {
-//RS     type Item = T;
-//RS 
-//RS     fn pop_front_value(&mut self) -> Option<Self::Item> {
-//RS         (!self.is_empty()).then(|| self.remove(0))
-//RS     }
-//RS }
-//RS 
-//RS fn jet_deque_pop_front_kernel<C: JetDequePopFrontKernel>(
-//RS     deque: &mut C,
-//RS ) -> JetOutcome<C::Item, JetAbsent> {
-//RS     jet_outcome_of(deque.pop_front_value())
-//RS }
-//RS 
-//RS trait JetDequePopBackKernel {
-//RS     type Item;
-//RS 
-//RS     fn pop_back_value(&mut self) -> Option<Self::Item>;
-//RS }
-//RS 
-//RS impl<T> JetDequePopBackKernel for std::collections::VecDeque<T> {
-//RS     type Item = T;
-//RS 
-//RS     fn pop_back_value(&mut self) -> Option<Self::Item> {
-//RS         self.pop_back()
-//RS     }
-//RS }
-//RS 
-//RS impl<T> JetDequePopBackKernel for Vec<T> {
-//RS     type Item = T;
-//RS 
-//RS     fn pop_back_value(&mut self) -> Option<Self::Item> {
-//RS         self.pop()
-//RS     }
-//RS }
-//RS 
-//RS fn jet_deque_pop_back_kernel<C: JetDequePopBackKernel>(
-//RS     deque: &mut C,
-//RS ) -> JetOutcome<C::Item, JetAbsent> {
-//RS     jet_outcome_of(deque.pop_back_value())
-//RS }
-//RS 
-//RS trait JetPriorityQueuePopKernel {
-//RS     type Item;
-//RS 
-//RS     fn pop_priority_value(&mut self) -> Option<Self::Item>;
-//RS }
-//RS 
-//RS impl<T: Ord> JetPriorityQueuePopKernel for std::collections::BinaryHeap<T> {
-//RS     type Item = T;
-//RS 
-//RS     fn pop_priority_value(&mut self) -> Option<Self::Item> {
-//RS         self.pop()
-//RS     }
-//RS }
-//RS 
-//RS impl<T> JetPriorityQueuePopKernel for Vec<T> {
-//RS     type Item = T;
-//RS 
-//RS     fn pop_priority_value(&mut self) -> Option<Self::Item> {
-//RS         (!self.is_empty()).then(|| self.remove(0))
-//RS     }
-//RS }
-//RS 
-//RS fn jet_priority_queue_pop_kernel<C: JetPriorityQueuePopKernel>(
-//RS     queue: &mut C,
-//RS ) -> JetOutcome<C::Item, JetAbsent> {
-//RS     jet_outcome_of(queue.pop_priority_value())
-//RS }
-//RS 
-//RS fn jet_map_pop_first_kernel<K: Ord + Clone, V: Clone>(
-//RS     m: &mut JetMap<K, V>,
-//RS ) -> JetOutcome<V, JetAbsent> {
-//RS     let Some(key) = m.keys().next().cloned() else {
-//RS         return Err(JetAbsent);
-//RS     };
-//RS     jet_outcome_of(m.remove(&key))
-//RS }
-//RS 
-//RS // ── D-ITER1 / D-ITERTOOLS1=A: true lazy iterator fusion ──────────────────────
-//RS // Adapters return `JetIter<T>` = boxed `dyn Iterator`. No intermediate Vec until
-//RS // `to_list` / `collect` / a terminal reducer. Closures are `'static` (Jet emits
-//RS // `move` lambdas / capture prep for escaping adapter callbacks).
-//RS struct JetIter<T>(Box<dyn Iterator<Item = T>>);
-//RS 
-//RS impl<T: 'static> JetIter<T> {
-//RS     fn to_list(self) -> Vec<T> {
-//RS         self.0.collect()
-//RS     }
-//RS     fn collect(self) -> Vec<T> {
-//RS         self.0.collect()
-//RS     }
-//RS     fn len(self) -> i64 {
-//RS         jet_count_to_int(self.0.count())
-//RS     }
-//RS     fn is_empty(mut self) -> bool {
-//RS         self.0.next().is_none()
-//RS     }
-//RS }
-//RS 
-//RS // Iterator terminals are free-function spellings so every target can route
-//RS // the checked BuiltinMethod without reaching into this private carrier.
-//RS fn jet_iter_to_list<T: 'static>(it: JetIter<T>) -> Vec<T> {
-//RS     it.to_list()
-//RS }
-//RS 
-//RS fn jet_iter_collect<T: 'static>(it: JetIter<T>) -> Vec<T> {
-//RS     it.collect()
-//RS }
-//RS 
-//RS impl<T> IntoIterator for JetIter<T> {
-//RS     type Item = T;
-//RS     type IntoIter = Box<dyn Iterator<Item = T>>;
-//RS     fn into_iter(self) -> Self::IntoIter {
-//RS         self.0
-//RS     }
-//RS }
-//RS 
-//RS fn jet_iter_from_vec<T: 'static>(xs: Vec<T>) -> JetIter<T> {
-//RS     JetIter(Box::new(xs.into_iter()))
-//RS }
-//RS 
-//RS fn jet_iter_first<T: 'static>(it: JetIter<T>) -> JetOutcome<T, JetAbsent> {
-//RS     jet_outcome_of(it.into_iter().next())
-//RS }
-//RS 
-//RS // D-ITER-RESUME1=A: the one partial pull. It advances the same boxed source
-//RS // through an exclusive receiver, so the caller keeps the exact remainder.
-//RS fn jet_iter_next<T: 'static>(it: &mut JetIter<T>) -> JetOutcome<T, JetAbsent> {
-//RS     jet_outcome_of(it.0.next())
-//RS }
-//RS fn jet_iter_len<T: 'static>(it: JetIter<T>) -> i64 {
-//RS     it.len()
-//RS }
-//RS 
-//RS fn jet_iter_is_empty<T: 'static>(it: JetIter<T>) -> bool {
-//RS     it.is_empty()
-//RS }
-//RS 
-//RS 
-//RS // D-TIER-ONEIR1=A: one target-neutral loop cursor protocol. The MIR adapter
-//RS // only marshals values into these calls; source-kind identity and iteration
-//RS // semantics stay here, beside the existing lazy iterator carrier.
-//RS #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-//RS enum JetLoopSourceKind {
-//RS     Plain,
-//RS     Chars,
-//RS     LinesFile,
-//RS     LinesStdin,
-//RS     LinesProcessStream,
-//RS     ChannelReceiver,
-//RS     EncodingReader { reader_type: &'static str },
-//RS     Iterable {
-//RS         coll_type: &'static str,
-//RS         iter_type: &'static str,
-//RS         iter_symbol: &'static str,
-//RS         next_symbol: &'static str,
-//RS     },
-//RS }
-//RS 
-//RS impl JetLoopSourceKind {
-//RS     fn from_wire(wire: &'static str) -> Option<Self> {
-//RS         fn take(input: &'static str) -> Option<(&'static str, &'static str)> {
-//RS             let separator = input.find(':')?;
-//RS             let length = input.get(..separator)?.parse::<usize>().ok()?;
-//RS             let payload_start = separator.checked_add(1)?;
-//RS             let payload_end = payload_start.checked_add(length)?;
-//RS             let payload = input.get(payload_start..payload_end)?;
-//RS             let rest = input.get(payload_end..)?;
-//RS             Some((payload, rest))
-//RS         }
-//RS 
-//RS         match wire {
-//RS             "plain" => Some(Self::Plain),
-//RS             "chars" => Some(Self::Chars),
-//RS             "lines:file" => Some(Self::LinesFile),
-//RS             "lines:stdin" => Some(Self::LinesStdin),
-//RS             "lines:process" => Some(Self::LinesProcessStream),
-//RS             "channel" => Some(Self::ChannelReceiver),
-//RS             _ => {
-//RS                 if let Some(payload) = wire.strip_prefix("encoding:") {
-//RS                     let (reader_type, rest) = take(payload)?;
-//RS                     if reader_type.is_empty() || !rest.is_empty() {
-//RS                         return None;
-//RS                     }
-//RS                     return Some(Self::EncodingReader { reader_type });
-//RS                 }
-//RS                 let payload = wire.strip_prefix("iterable:")?;
-//RS                 let (coll_type, rest) = take(payload)?;
-//RS                 let rest = rest.strip_prefix(':')?;
-//RS                 let (iter_type, rest) = take(rest)?;
-//RS                 let rest = rest.strip_prefix(':')?;
-//RS                 let (iter_symbol, rest) = take(rest)?;
-//RS                 let rest = rest.strip_prefix(':')?;
-//RS                 let (next_symbol, rest) = take(rest)?;
-//RS                 if coll_type.is_empty()
-//RS                     || iter_type.is_empty()
-//RS                     || iter_symbol.is_empty()
-//RS                     || next_symbol.is_empty()
-//RS                     || !rest.is_empty()
-//RS                 {
-//RS                     return None;
-//RS                 }
-//RS                 Some(Self::Iterable {
-//RS                     coll_type,
-//RS                     iter_type,
-//RS                     iter_symbol,
-//RS                     next_symbol,
-//RS                 })
-//RS             }
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS // Flattened into the generated crate root: `pub(super)` has no parent there.
-//RS #[derive(Clone, Debug)]
-//RS pub(crate) struct JetLoopRangeCursor {
-//RS     current: i64,
-//RS     end: i64,
-//RS     step: i64,
-//RS     exclusive: bool,
-//RS     done: bool,
-//RS }
-//RS 
-//RS pub(crate) fn jet_loop_range_init(
-//RS     start: i64,
-//RS     end: i64,
-//RS     step_value: i64,
-//RS     has_step: bool,
-//RS     exclusive: bool,
-//RS ) -> JetLoopRangeCursor {
-//RS     jet_loop_range_init_checked(start, end, step_value, has_step, exclusive)
-//RS         .unwrap_or_else(|message| jet_panic("<core.prelude>", 0, message))
-//RS }
-//RS 
-//RS pub(crate) fn jet_loop_range_init_checked(
-//RS     start: i64,
-//RS     end: i64,
-//RS     step_value: i64,
-//RS     has_step: bool,
-//RS     exclusive: bool,
-//RS ) -> Result<JetLoopRangeCursor, &'static str> {
-//RS     let step = if has_step { step_value } else { 1 };
-//RS     if step == 0 {
-//RS         return Err("range loop stride must not be zero");
-//RS     }
-//RS     Ok(JetLoopRangeCursor {
-//RS         current: start,
-//RS         end,
-//RS         step,
-//RS         exclusive,
-//RS         done: false,
-//RS     })
-//RS }
-//RS 
-//RS pub(crate) fn jet_loop_range_has_next(cursor: &JetLoopRangeCursor) -> bool {
-//RS     !cursor.done && if cursor.step > 0 {
-//RS         if cursor.exclusive { cursor.current < cursor.end } else { cursor.current <= cursor.end }
-//RS     } else {
-//RS         if cursor.exclusive { cursor.current > cursor.end } else { cursor.current >= cursor.end }
-//RS     }
-//RS }
-//RS 
-//RS pub(crate) fn jet_loop_range_value(cursor: &JetLoopRangeCursor) -> i64 {
-//RS     if !jet_loop_range_has_next(cursor) {
-//RS         jet_panic("<core.prelude>", 0, "range loop value requested after exhaustion");
-//RS     }
-//RS     cursor.current
-//RS }
-//RS 
-//RS pub(crate) fn jet_loop_range_advance(cursor: &mut JetLoopRangeCursor) {
-//RS     if cursor.done {
-//RS         return;
-//RS     }
-//RS     cursor.current = match cursor.current.checked_add(cursor.step) {
-//RS         Some(value) => value,
-//RS         None => {
-//RS             cursor.done = true;
-//RS             return;
-//RS         }
-//RS     };
-//RS     cursor.done = !jet_loop_range_has_next(cursor);
-//RS }
-//RS 
-//RS include!("LoopCursor.rs");
-//RS fn jet_loop_iter_init<C: JetLoopSource>(
-//RS     collection: C,
-//RS     step_value: i64,
-//RS     has_step: bool,
-//RS     by_value: bool,
-//RS     source_kind: JetLoopSourceKind,
-//RS ) -> JetLoopIterCursor {
-//RS     jet_loop_iter_init_checked(collection, step_value, has_step, by_value, source_kind)
-//RS         .unwrap_or_else(|message| jet_panic("<core.prelude>", 0, message))
-//RS }
-//RS 
-//RS fn jet_loop_iter_init_checked<C: JetLoopSource>(
-//RS     collection: C,
-//RS     step_value: i64,
-//RS     has_step: bool,
-//RS     by_value: bool,
-//RS     source_kind: JetLoopSourceKind,
-//RS ) -> Result<JetLoopIterCursor, &'static str> {
-//RS     let iter = collection.jet_loop_source(source_kind, by_value);
-//RS     jet_loop_iter_init_typed(iter, step_value, has_step)
-//RS }
-//RS 
-//RS /// Byte-slice fast path for `loop b in bytes`. MIR emits it for the
-//RS /// `ByteIterCursor` nominal, so a byte loop steps a slice iterator without
-//RS /// boxing each element.
-//RS struct JetByteLoopIterCursor<'a> {
-//RS     iter: std::slice::Iter<'a, u8>,
-//RS     current: Option<u8>,
-//RS     step: usize,
-//RS     exhausted: bool,
-//RS }
-//RS 
-//RS #[inline(always)]
-//RS fn jet_loop_iter_bytes_init<'a>(
-//RS     bytes: &'a [u8],
-//RS     step_value: i64,
-//RS     has_step: bool,
-//RS ) -> JetByteLoopIterCursor<'a> {
-//RS     let step = jet_loop_iter_step(step_value, has_step)
-//RS         .unwrap_or_else(|message| jet_panic("<core.prelude>", 0, message));
-//RS     let mut iter = bytes.iter();
-//RS     let current = iter.next().copied();
-//RS     let exhausted = current.is_none();
-//RS     JetByteLoopIterCursor {
-//RS         iter,
-//RS         current,
-//RS         step,
-//RS         exhausted,
-//RS     }
-//RS }
-//RS 
-//RS #[inline(always)]
-//RS fn jet_loop_iter_bytes_has_next(cursor: &JetByteLoopIterCursor<'_>) -> bool {
-//RS     cursor.current.is_some()
-//RS }
-//RS 
-//RS #[inline(always)]
-//RS fn jet_loop_iter_bytes_value(cursor: &mut JetByteLoopIterCursor<'_>) -> u8 {
-//RS     cursor.current.take().unwrap_or_else(|| {
-//RS         jet_panic("<core.prelude>", 0, "iterator loop value requested after exhaustion")
-//RS     })
-//RS }
-//RS 
-//RS #[inline(always)]
-//RS fn jet_loop_iter_bytes_advance(cursor: &mut JetByteLoopIterCursor<'_>) {
-//RS     if cursor.exhausted {
-//RS         return;
-//RS     }
-//RS     for _ in 1..cursor.step {
-//RS         if cursor.iter.next().is_none() {
-//RS             cursor.current = None;
-//RS             cursor.exhausted = true;
-//RS             return;
-//RS         }
-//RS     }
-//RS     cursor.current = cursor.iter.next().copied();
-//RS     cursor.exhausted = cursor.current.is_none();
-//RS }
-//RS 
-//RS fn jet_loop_source_kind_name(kind: JetLoopSourceKind) -> String {
-//RS     match kind {
-//RS         JetLoopSourceKind::Plain => "Plain".to_string(),
-//RS         JetLoopSourceKind::Chars => "Chars".to_string(),
-//RS         JetLoopSourceKind::LinesFile => "LinesFile".to_string(),
-//RS         JetLoopSourceKind::LinesStdin => "LinesStdin".to_string(),
-//RS         JetLoopSourceKind::LinesProcessStream => "LinesProcessStream".to_string(),
-//RS         JetLoopSourceKind::ChannelReceiver => "ChannelReceiver".to_string(),
-//RS         JetLoopSourceKind::EncodingReader { reader_type } => {
-//RS             format!("EncodingReader({reader_type})")
-//RS         }
-//RS         JetLoopSourceKind::Iterable { coll_type, iter_type, .. } => {
-//RS             format!("Iterable({coll_type}::{iter_type})")
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn jet_loop_source_error(kind: JetLoopSourceKind) -> ! {
-//RS     jet_panic(
-//RS         "<core.prelude>",
-//RS         0,
-//RS         &format!(
-//RS             "loop source kind {} is not supported by this collection carrier",
-//RS             jet_loop_source_kind_name(kind)
-//RS         ),
-//RS     )
-//RS }
-//RS 
-//RS trait JetLoopSource {
-//RS     fn jet_loop_source(
-//RS         self,
-//RS         source_kind: JetLoopSourceKind,
-//RS         by_value: bool,
-//RS     ) -> Box<dyn Iterator<Item = JetLoopAny>>;
-//RS }
-//RS 
-//RS impl<T: 'static> JetLoopSource for Vec<T> {
-//RS     fn jet_loop_source(
-//RS         self,
-//RS         source_kind: JetLoopSourceKind,
-//RS         by_value: bool,
-//RS     ) -> Box<dyn Iterator<Item = JetLoopAny>> {
-//RS         match source_kind {
-//RS             JetLoopSourceKind::Plain => {
-//RS                 if !by_value {
-//RS                     jet_loop_source_error(source_kind);
-//RS                 }
-//RS                 Box::new(
-//RS                     self.into_iter()
-//RS                         .map(|value| Box::new(value) as JetLoopAny),
-//RS                 )
-//RS             }
-//RS             JetLoopSourceKind::Chars
-//RS             | JetLoopSourceKind::LinesFile
-//RS             | JetLoopSourceKind::LinesStdin
-//RS             | JetLoopSourceKind::LinesProcessStream
-//RS             | JetLoopSourceKind::ChannelReceiver
-//RS             | JetLoopSourceKind::EncodingReader { .. }
-//RS             | JetLoopSourceKind::Iterable { .. } => jet_loop_source_error(source_kind),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS 
-//RS 
-//RS 
-//RS impl<T: Clone + 'static> JetLoopSource for &mut Vec<T> {
-//RS     fn jet_loop_source(
-//RS         self,
-//RS         source_kind: JetLoopSourceKind,
-//RS         by_value: bool,
-//RS     ) -> Box<dyn Iterator<Item = JetLoopAny>> {
-//RS         match source_kind {
-//RS             JetLoopSourceKind::Plain => {
-//RS                 if by_value {
-//RS                     jet_loop_source_error(source_kind);
-//RS                 }
-//RS                 let values = self.clone();
-//RS                 Box::new(
-//RS                     values
-//RS                         .into_iter()
-//RS                         .map(|value| Box::new(value) as JetLoopAny),
-//RS                 )
-//RS             }
-//RS             JetLoopSourceKind::Chars
-//RS             | JetLoopSourceKind::LinesFile
-//RS             | JetLoopSourceKind::LinesStdin
-//RS             | JetLoopSourceKind::LinesProcessStream
-//RS             | JetLoopSourceKind::ChannelReceiver
-//RS             | JetLoopSourceKind::EncodingReader { .. }
-//RS             | JetLoopSourceKind::Iterable { .. } => jet_loop_source_error(source_kind),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS impl<T: 'static, const N: usize> JetLoopSource for [T; N] {
-//RS     fn jet_loop_source(
-//RS         self,
-//RS         source_kind: JetLoopSourceKind,
-//RS         by_value: bool,
-//RS     ) -> Box<dyn Iterator<Item = JetLoopAny>> {
-//RS         match source_kind {
-//RS             JetLoopSourceKind::Plain => {
-//RS                 if !by_value {
-//RS                     jet_loop_source_error(source_kind);
-//RS                 }
-//RS                 Box::new(
-//RS                     self.into_iter()
-//RS                         .map(|value| Box::new(value) as JetLoopAny),
-//RS                 )
-//RS             }
-//RS             JetLoopSourceKind::Chars
-//RS             | JetLoopSourceKind::LinesFile
-//RS             | JetLoopSourceKind::LinesStdin
-//RS             | JetLoopSourceKind::LinesProcessStream
-//RS             | JetLoopSourceKind::ChannelReceiver
-//RS             | JetLoopSourceKind::EncodingReader { .. }
-//RS             | JetLoopSourceKind::Iterable { .. } => jet_loop_source_error(source_kind),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS impl<T: Clone + 'static, const N: usize> JetLoopSource for &mut [T; N] {
-//RS     fn jet_loop_source(
-//RS         self,
-//RS         source_kind: JetLoopSourceKind,
-//RS         by_value: bool,
-//RS     ) -> Box<dyn Iterator<Item = JetLoopAny>> {
-//RS         match source_kind {
-//RS             JetLoopSourceKind::Plain => {
-//RS                 if by_value {
-//RS                     jet_loop_source_error(source_kind);
-//RS                 }
-//RS                 let values = self.to_vec();
-//RS                 Box::new(
-//RS                     values
-//RS                         .into_iter()
-//RS                         .map(|value| Box::new(value) as JetLoopAny),
-//RS                 )
-//RS             }
-//RS             JetLoopSourceKind::Chars
-//RS             | JetLoopSourceKind::LinesFile
-//RS             | JetLoopSourceKind::LinesStdin
-//RS             | JetLoopSourceKind::LinesProcessStream
-//RS             | JetLoopSourceKind::ChannelReceiver
-//RS             | JetLoopSourceKind::EncodingReader { .. }
-//RS             | JetLoopSourceKind::Iterable { .. } => jet_loop_source_error(source_kind),
-//RS         }
-//RS     }
-//RS }
-//RS impl<T: Clone + 'static> JetLoopSource for &mut &[T] {
-//RS     fn jet_loop_source(
-//RS         self,
-//RS         source_kind: JetLoopSourceKind,
-//RS         by_value: bool,
-//RS     ) -> Box<dyn Iterator<Item = JetLoopAny>> {
-//RS         match source_kind {
-//RS             JetLoopSourceKind::Plain => {
-//RS                 if by_value {
-//RS                     jet_loop_source_error(source_kind);
-//RS                 }
-//RS                 let values = self.to_vec();
-//RS                 Box::new(
-//RS                     values
-//RS                         .into_iter()
-//RS                         .map(|value| Box::new(value) as JetLoopAny),
-//RS                 )
-//RS             }
-//RS             JetLoopSourceKind::Chars
-//RS             | JetLoopSourceKind::LinesFile
-//RS             | JetLoopSourceKind::LinesStdin
-//RS             | JetLoopSourceKind::LinesProcessStream
-//RS             | JetLoopSourceKind::ChannelReceiver
-//RS             | JetLoopSourceKind::EncodingReader { .. }
-//RS             | JetLoopSourceKind::Iterable { .. } => jet_loop_source_error(source_kind),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS 
-//RS impl<K: Ord + Clone + 'static, V: Clone + 'static> JetLoopSource for JetMap<K, V> {
-//RS     fn jet_loop_source(
-//RS         self,
-//RS         source_kind: JetLoopSourceKind,
-//RS         by_value: bool,
-//RS     ) -> Box<dyn Iterator<Item = JetLoopAny>> {
-//RS         match source_kind {
-//RS             JetLoopSourceKind::Plain => {
-//RS                 if !by_value {
-//RS                     jet_loop_source_error(source_kind);
-//RS                 }
-//RS                 // Each host owns the map representation; `jet_map_into_entries`
-//RS                 // is its by-value take (AOT/JIT unwrap the shared handle).
-//RS                 let values = jet_map_into_entries(self).into_iter();
-//RS                 Box::new(values.map(|value| Box::new(value) as JetLoopAny))
-//RS             }
-//RS             JetLoopSourceKind::Chars
-//RS             | JetLoopSourceKind::LinesFile
-//RS             | JetLoopSourceKind::LinesStdin
-//RS             | JetLoopSourceKind::LinesProcessStream
-//RS             | JetLoopSourceKind::ChannelReceiver
-//RS             | JetLoopSourceKind::EncodingReader { .. }
-//RS             | JetLoopSourceKind::Iterable { .. } => jet_loop_source_error(source_kind),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS impl<K: Ord + Clone + 'static, V: Clone + 'static> JetLoopSource for &mut JetMap<K, V> {
-// END-PORT-PENDING 0143 crates/jet-codegen/src/Prelude/Core/Collections.rs:1-1796
+use core.prelude.runtime.*
+use core.collections.runtime.kernel_sort_kernel.*
+use core.collections.runtime.kernel_loop_cursor.*
+use core.math.runtime.kernel_simd_lanes.*
+use core.mem as mem
+use std.collections.[HashSet, BTreeSet, BinaryHeap, VecDeque]
+use std.iter.[Iterator, IntoIterator, Sum, Product]
+use std.hash.Hash
+
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:2
+impl<K: PartialEq + Clone, V: Clone> JetLru<K,V> {
+    // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:3
+    fn add_new(self: &Self, key: K, value: V) -> Bool Never! {
+        if self.bound == Val(0) or self.entries.iter().any(fn((stored,_)) -> stored == key) -> return false
+        _ :: self.put(^key,^value)
+        true
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:11
+    fn remove(self: &Self, key: K) -> V? Never! {
+        index :: self.entries.iter().position(fn((stored,_)) -> stored == key)?
+        Val(self.entries.remove(index).1)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:16
+    fn contains_key(self, key: K) -> Bool Never! { self.entries.iter().any(fn((stored,_)) -> stored == key) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:20
+    fn keys(self) -> [K] Never! { self.entries.iter().map(fn((key,_)) -> key.clone()).collect() }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:24
+    fn is_empty(self) -> Bool Never! { self.entries.is_empty() }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:28
+    fn capacity(self) -> I64 Never! { self.bound.map(fn(bound) -> bound as I64).unwrap_or(I64.MAX) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:32
+    fn clear(self: &Self) -> Never! { self.entries.clear() }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:37
+#Derive(Clone)
+struct JetCache<K,V> { lru: JetLru<K,V> }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:42
+impl<K: Eq + Clone, V: Clone> JetCache<K,V> {
+    // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:43
+    fn new(capacity: I64) -> Self Never! { Self{lru: JetLru.new(Val(capacity.max(0) as USize))} }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:48
+    fn put(self: &Self, key: K, value: V) -> V? Never! { self.lru.put(^key,^value) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:51
+    fn add_new(self: &Self, key: K, value: V) -> Bool Never! { self.lru.add_new(^key,^value) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:54
+    fn get(self: &Self, key: K) -> V? Never! { self.lru.get(key) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:57
+    fn remove(self: &Self, key: K) -> V? Never! { self.lru.remove(key) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:60
+    fn contains_key(self, key: K) -> Bool Never! { self.lru.contains_key(key) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:63
+    fn keys(self) -> [K] Never! { self.lru.keys() }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:66
+    fn len(self) -> USize Never! { self.lru.len() }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:69
+    fn is_empty(self) -> Bool Never! { self.lru.is_empty() }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:72
+    fn capacity(self) -> I64 Never! { self.lru.capacity() }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:75
+    fn clear(self: &Self) -> Never! { self.lru.clear() }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:80
+impl<K: JetShow,V: JetShow> JetShow for JetCache<K,V> {
+    // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:81
+    fn jet_show(self) -> String Never! {
+        parts :: self.lru.entries.iter().map(fn((k,v)) -> "{k.jet_show()}: {v.jet_show()}").collect<[String]>()
+        "[:{parts.join(", ")}]"
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:91
+impl<K: JetDisplay,V: JetDisplay> JetDisplay for JetCache<K,V> {
+    // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:92
+    fn jet_display(self) -> String Never! {
+        parts :: self.lru.entries.iter().map(fn((k,v)) -> "{k.jet_display()}: {v.jet_display()}").collect<[String]>()
+        "[:{parts.join(", ")}]"
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:102
+impl<K: JetDebug,V: JetDebug> JetDebug for JetCache<K,V> {
+    // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:103
+    fn jet_debug(self) -> String Never! {
+        parts :: self.lru.entries.iter().map(fn((k,v)) -> "{k.jet_debug()}: {v.jet_debug()}").collect<[String]>()
+        "[:{parts.join(", ")}]"
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:114
+#Derive(Clone)
+struct JetBitSet { bits: BTreeSet<I64> }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:118
+impl JetBitSet {
+    // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:119
+    fn new() -> Self Never! { Self{bits: BTreeSet.new()} }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:124
+    fn add(self: &Self, bit: I64) -> Bool Never! { if bit >= 0 -> self.bits.insert(bit) else -> false }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:131
+    fn remove(self: &Self, bit: I64) -> Never! { _ :: self.bits.remove(bit) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:134
+    fn contains(self, bit: I64) -> Bool Never! { jet_bits_has_kernel(self.bits,bit) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:137
+    fn count(self) -> I64 Never! { self.bits.len() as I64 }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:140
+    fn len(self) -> I64 Never! { self.bits.iter().next_back().map(fn(v) -> v + 1).unwrap_or(0) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:143
+    fn is_empty(self) -> Bool Never! { self.bits.is_empty() }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:146
+    fn clear(self: &Self) -> Never! { self.bits.clear() }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:149
+    fn to_list(self) -> [I64] Never! { self.bits.iter().copied().collect() }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:154
+fn jet_bits_copy(bits: JetBitSet) -> JetBitSet Never! { bits.clone() }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:161
+fn jet_bits_has_kernel(bits: BTreeSet<I64>, bit: I64) -> Bool Never! { bits.contains(bit) }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:165
+impl JetShow for JetBitSet {
+    // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:166
+    fn jet_show(self) -> String Never! { self.to_list().jet_show() }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:170
+impl JetDisplay for JetBitSet {
+    // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:171
+    fn jet_display(self) -> String Never! { self.to_list().jet_display() }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:175
+impl JetDebug for JetBitSet {
+    // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:176
+    fn jet_debug(self) -> String Never! { self.to_list().jet_debug() }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:181
+impl JetShow for JetByteBuffer {
+    // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:182
+    fn jet_show(self) -> String Never! { self.bytes.jet_show() }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:186
+impl JetDisplay for JetByteBuffer {
+    // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:187
+    fn jet_display(self) -> String Never! { self.bytes.jet_display() }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:191
+impl JetDebug for JetByteBuffer {
+    // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:192
+    fn jet_debug(self) -> String Never! { self.bytes.jet_debug() }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:197
+fn jet_list_sum<T,I: IntoIterator<Item=T>>(xs: I) -> T Never! where T: Sum<T> { xs.into_iter().sum() }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:209
+#Inline(Always)
+fn jet_list_sum_fixed_f32<I: IntoIterator<Item=F32>>(xs: I) -> F32 Never! { jet_simd_reduce_fixed_iter(^xs, F32{0.0}) }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:214
+#Inline(Always)
+fn jet_list_sum_fixed_f64<I: IntoIterator<Item=Float>>(xs: I) -> Float Never! { jet_simd_reduce_fixed_iter(^xs, 0.0) }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:221
+#Inline(Always)
+fn jet_list_fold_add_fixed_f32<I: IntoIterator<Item=F32>>(xs: I, init: F32) -> F32 Never! { jet_simd_reduce_fixed_iter(^xs,init) }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:226
+#Inline(Always)
+fn jet_list_fold_add_fixed_f64<I: IntoIterator<Item=Float>>(xs: I, init: Float) -> Float Never! { jet_simd_reduce_fixed_iter(^xs,init) }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:234
+#Inline(Always)
+fn jet_list_accel_column_copy_range_map<U,R>(range: Range<USize>, project: fn(USize) -> U Never!, copied_kernel: fn(View<U>,Range<USize>) -> [R] Never!) -> [R] Never! {
+    start :: range.start
+    end :: range.end
+    element_bytes :: mem.size_of<U>().max(1)
+    block_items :: (JET_LIST_ACCEL_CACHE_BLOCK_BYTES / element_bytes).max(1)
+    result := [R].new()
+    block_start := start
+    while block_start < end {
+        block_end :: block_start.saturating_add(block_items).min(end)
+        column :: (block_start..<block_end).map(project).collect<[U]>()
+        result.extend(copied_kernel(column,block_start..<block_end))
+        block_start = block_end
+    }
+    ^result
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:258
+const JET_LIST_ACCEL_CACHE_BLOCK_BYTES: USize = 64 * 1024
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:260
+fn jet_list_product<T,I: IntoIterator<Item=T>>(xs: I) -> T Never! where T: Product<T> { xs.into_iter().product() }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:267
+fn jet_list_copy<T: Clone>(xs: View<T>) -> [T] Never! { xs.to_vec() }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:271
+fn jet_list_sort_by<T,K: Ord>(xs: &ViewMut<T>, f: fn(T) -> K Never!) -> Never! {
+    _ :: jet_list_try_sort_by_key_kernel(&xs,fn(item) -> Ok(f(item)),Ord.cmp).unwrap_or_else(fn(never) -> match never {})
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:283
+fn jet_list_sort_desc<T: Ord>(xs: &ViewMut<T>) -> Never! { xs.sort_by(fn(left,right) -> right.cmp(left)) }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:287
+trait JetListSurface {
+    // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:288
+    fn jet_len(self) -> I64 Never!
+    // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:289
+    fn jet_is_empty(self) -> Bool Never!
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:292
+impl<T> JetListSurface for [T] {
+    // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:294
+    #Inline(Always)
+    fn jet_len(self) -> I64 Never! { self.len() as I64 }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:299
+    #Inline(Always)
+    fn jet_is_empty(self) -> Bool Never! { self.is_empty() }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:304
+impl<T> JetListSurface for View<T> {
+    // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:306
+    #Inline(Always)
+    fn jet_len(self) -> I64 Never! { self.len() as I64 }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:311
+    #Inline(Always)
+    fn jet_is_empty(self) -> Bool Never! { self.is_empty() }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:316
+impl<T,const N: Int> JetListSurface for [T#N] {
+    // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:318
+    #Inline(Always)
+    fn jet_len(self) -> I64 Never! { N as I64 }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:323
+    #Inline(Always)
+    fn jet_is_empty(self) -> Bool Never! { N == 0 }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:329
+trait JetListPushSurface {
+    type Item
+    // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:332
+    fn jet_push(self: &Self, value: Self.Item) -> Never!
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:335
+impl<T> JetListPushSurface for [T] {
+    type Item = T
+    // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:339
+    #Inline(Always)
+    fn jet_push(self: &Self, value: Self.Item) -> Never! { self.push(^value) }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:346
+#Inline(Always)
+fn jet_list_push<C: JetListPushSurface>(xs: &C,value: C.Item) -> Never! { xs.jet_push(^value) }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:352
+#Inline(Always)
+fn jet_list_extend<T>(xs: &[T],other: [T]) -> Never! { xs.extend(^other) }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:357
+#Inline(Always)
+fn jet_list_reverse<T>(xs: &ViewMut<T>) -> Never! { xs.reverse() }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:362
+#Inline(Always)
+fn jet_list_sort<T: Ord>(xs: &ViewMut<T>) -> Never! { xs.sort() }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:366
+trait JetCollectionClear {
+    // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:367
+    fn jet_clear(self: &Self) -> Never!
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:370
+impl<T> JetCollectionClear for [T] {
+    // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:372
+    #Inline(Always)
+    fn jet_clear(self: &Self) -> Never! { self.clear() }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:377
+impl<K: Ord + Clone,V: Clone> JetCollectionClear for [K:V] {
+    // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:379
+    #Inline(Always)
+    fn jet_clear(self: &Self) -> Never! { self.clear() }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:385
+#Inline(Always)
+fn jet_list_clear<C: JetCollectionClear>(collection: &C) -> Never! { collection.jet_clear() }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:389
+fn jet_list_sort_by_desc<T,K: Ord>(xs: &ViewMut<T>,f: fn(T) -> K Never!) -> Never! {
+    _ :: jet_list_try_sort_by_key_kernel(&xs,fn(item) -> Ok(f(item)),fn(left,right) -> right.cmp(left)).unwrap_or_else(fn(never) -> match never {})
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:401
+fn jet_list_try_sort_by<T,K: Ord,E>(xs: &ViewMut<T>,f: fn(T) -> K E!) -> E! { jet_list_try_sort_by_key_kernel(&xs,f,Ord.cmp) }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:408
+fn jet_list_try_sort_by_desc<T,K: Ord,E>(xs: &ViewMut<T>,f: fn(T) -> K E!) -> E! { jet_list_try_sort_by_key_kernel(&xs,f,fn(left,right) -> right.cmp(left)) }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:416
+#Inline(Always)
+fn jet_list_len<C: JetListSurface>(xs: C) -> I64 Never! { xs.jet_len() }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:421
+#Inline(Always)
+fn jet_list_is_empty<C: JetListSurface>(xs: C) -> Bool Never! { xs.jet_is_empty() }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:426
+#Inline(Always)
+pub fn jet_list_contains<T: PartialEq>(xs: View<T>,needle: T) -> Bool Never! { xs.contains(needle) }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:430
+#Inline(Always)
+fn jet_list_index_of<T: PartialEq>(xs: View<T>,needle: T) -> I64? Never! { xs.iter().position(fn(item) -> item == needle).map(fn(index) -> index as I64) }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:435
+#Inline(Always)
+fn jet_list_get_opt<T: Clone>(xs: View<T>,index: I64) -> T? Never! { USize.try_from(index).ok().and_then(fn(index) -> xs.get(index).cloned()) }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:443
+#Inline(Always)
+fn jet_list_first<T: Clone>(xs: View<T>) -> T? Never! { xs.first().cloned() }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:448
+#Inline(Always)
+fn jet_list_last<T: Clone>(xs: View<T>) -> T? Never! { xs.last().cloned() }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:453
+#Inline(Always)
+fn jet_map_len<K: Ord,V>(map: [K:V]) -> I64 Never! { map.len() as I64 }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:458
+#Inline(Always)
+fn jet_map_is_empty<K: Ord,V>(map: [K:V]) -> Bool Never! { map.is_empty() }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:463
+#Inline(Always)
+fn jet_map_get_opt<K: Ord,V: Clone>(map: [K:V],key: K) -> V? Never! { map.get(key).cloned() }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:470
+#Inline(Always)
+fn jet_map_has_key<K: Ord,V>(map: [K:V],key: K) -> Bool Never! { map.contains_key(key) }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:475
+#Inline(Always)
+fn jet_bag_has<T: Eq + Hash>(bag: [T:USize],value: T) -> Bool Never! { bag.get(value).copied().unwrap_or(0) > 0 }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:482
+fn jet_bag_count<T: Eq + Hash>(bag: [T:USize],value: T) -> I64 Never! { bag.get(value).copied().unwrap_or(0) as I64 }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:490
+#Inline(Always)
+fn jet_set_len<T>(set: HashSet<T>) -> I64 Never! { set.len() as I64 }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:495
+#Inline(Always)
+fn jet_set_capacity<T>(set: HashSet<T>) -> I64 Never! { set.capacity() as I64 }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:500
+#Inline(Always)
+fn jet_set_is_empty<T>(set: HashSet<T>) -> Bool Never! { set.is_empty() }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:504
+#Inline(Always)
+fn jet_set_has<T: Eq + Hash>(set: HashSet<T>,value: T) -> Bool Never! { set.contains(value) }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:512
+#Inline(Always)
+fn jet_set_to_list<T: Clone>(set: HashSet<T>) -> [T] Never! { set.iter().cloned().collect() }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:516
+#Inline(Always)
+fn jet_set_values<T: Clone>(set: HashSet<T>) -> JetIter<T> Never! { jet_iter_from_vec(jet_set_to_list(set)) }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:524
+#Inline(Always)
+fn jet_set_max<T: Ord + Clone>(set: HashSet<T>) -> T? Never! { set.iter().cloned().max() }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:531
+#Inline(Always)
+fn jet_set_sort<T: Ord + Clone>(set: HashSet<T>) -> [T] Never! {
+    values := jet_set_to_list(set)
+    jet_list_sort(&values)
+    ^values
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:538
+#Inline(Always)
+fn jet_set_shuffle<T: Clone>(set: HashSet<T>) -> [T] Never! { jet_iter_shuffle(jet_iter_from_vec(jet_set_to_list(set))).to_list() }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:543
+#Inline(Always)
+fn jet_set_equal<T: Eq + Hash>(left: HashSet<T>,right: HashSet<T>) -> Bool Never! { left == right }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:551
+#Inline(Always)
+fn jet_set_first<T: Clone>(set: HashSet<T>) -> T? Never! { set.iter().next().cloned() }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:556
+#Inline(Always)
+fn jet_sorted_set_len<T>(set: BTreeSet<T>) -> I64 Never! { set.len() as I64 }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:561
+#Inline(Always)
+fn jet_sorted_set_is_empty<T>(set: BTreeSet<T>) -> Bool Never! { set.is_empty() }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:566
+#Inline(Always)
+fn jet_sorted_set_first<T: Ord + Clone>(set: BTreeSet<T>) -> T? Never! { set.first().cloned() }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:573
+#Inline(Always)
+fn jet_sorted_set_last<T: Ord + Clone>(set: BTreeSet<T>) -> T? Never! { set.last().cloned() }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:580
+#Inline(Always)
+fn jet_priority_queue_from<T: Ord>(values: [T]) -> BinaryHeap<T> Never! { values.into_iter().collect() }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:584
+fn jet_priority_queue_len<T>(queue: BinaryHeap<T>) -> I64 Never! { queue.len() as I64 }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:589
+#Inline(Always)
+fn jet_priority_queue_is_empty<T>(queue: BinaryHeap<T>) -> Bool Never! { queue.is_empty() }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:593
+#Inline(Always)
+fn jet_priority_queue_peek<T: Ord + Clone>(queue: BinaryHeap<T>) -> T? Never! { queue.peek().cloned() }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:599
+#Inline(Always)
+fn jet_priority_queue_to_sorted_list<T: Ord + Clone>(queue: BinaryHeap<T>) -> [T] Never! {
+    values := queue.clone().into_sorted_vec()
+    values.reverse()
+    ^values
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:608
+#Inline(Always)
+fn jet_lru_len<K: Eq + Clone,V: Clone>(cache: JetCache<K,V>) -> I64 Never! { cache.len() as I64 }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:613
+#Inline(Always)
+fn jet_lru_is_empty<K: Eq + Clone,V: Clone>(cache: JetCache<K,V>) -> Bool Never! { cache.is_empty() }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:617
+#Inline(Always)
+fn jet_lru_has<K: Eq + Clone,V: Clone>(cache: JetCache<K,V>,key: K) -> Bool Never! { cache.contains_key(key) }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:621
+#Inline(Always)
+fn jet_lru_keys<K: Eq + Clone,V: Clone>(cache: JetCache<K,V>) -> [K] Never! { cache.keys() }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:626
+#Inline(Always)
+fn jet_bag_len<T>(bag: [T:USize]) -> I64 Never! { bag.values().sum<USize>() as I64 }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:631
+#Inline(Always)
+fn jet_bag_is_empty<T>(bag: [T:USize]) -> Bool Never! { bag.is_empty() }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:636
+#Inline(Always)
+fn jet_bit_set_len(bits: JetBitSet) -> I64 Never! { bits.len() }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:641
+#Inline(Always)
+fn jet_bit_set_is_empty(bits: JetBitSet) -> Bool Never! { bits.is_empty() }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:645
+#Inline(Always)
+fn jet_bit_set_has(bits: JetBitSet,bit: I64) -> Bool Never! { bits.contains(bit) }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:649
+#Inline(Always)
+fn jet_bit_set_to_list(bits: JetBitSet) -> [I64] Never! { bits.to_list() }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:653
+#Inline(Always)
+fn jet_bit_set_count(bits: JetBitSet) -> I64 Never! { bits.count() }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:657
+#Inline(Always)
+fn jet_deque_len<T>(queue: VecDeque<T>) -> I64 Never! { queue.len() as I64 }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:662
+#Inline(Always)
+fn jet_deque_capacity<T>(queue: VecDeque<T>) -> I64 Never! { queue.capacity() as I64 }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:666
+#Inline(Always)
+fn jet_deque_peek_front<T: Clone>(queue: VecDeque<T>) -> T? Never! { queue.front().cloned() }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:673
+#Inline(Always)
+fn jet_deque_peek_back<T: Clone>(queue: VecDeque<T>) -> T? Never! { queue.back().cloned() }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:680
+#Inline(Always)
+fn jet_deque_contains<T: PartialEq>(queue: VecDeque<T>,value: T) -> Bool Never! { queue.contains(value) }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:688
+#Inline(Always)
+fn jet_string_starts_with(text: String,prefix: String) -> Bool Never! { text.starts_with(prefix) }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:693
+#Inline(Always)
+fn jet_string_copy(text: String) -> String Never! { text.clone() }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:698
+#Inline(Always)
+fn jet_string_ends_with(text: String,suffix: String) -> Bool Never! { text.ends_with(suffix) }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:702
+#Inline(Always)
+fn jet_string_replace(text: String,from: String,to: String) -> String Never! { text.replace(from,to) }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:707
+#Inline(Always)
+fn jet_deque_get<T: Clone>(queue: VecDeque<T>,index: I64) -> T? Never! { USize.try_from(index).ok().and_then(fn(index) -> queue.get(index).cloned()) }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:715
+#Inline(Always)
+fn jet_deque_to_list<T: Clone>(queue: VecDeque<T>) -> [T] Never! { queue.iter().cloned().collect() }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:720
+#Inline(Always)
+fn jet_deque_join<T: JetShow>(queue: VecDeque<T>,separator: String) -> String Never! { queue.iter().map(fn(value) -> value.jet_show()).collect<[String]>().join(separator) }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:732
+#Inline(Always)
+fn jet_deque_from<T>(values: [T]) -> VecDeque<T> Never! { values.into_iter().collect() }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:737
+#Inline(Always)
+fn jet_deque_push_front<T>(queue: &VecDeque<T>,value: T) -> Never! { queue.push_front(^value) }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:742
+#Inline(Always)
+fn jet_deque_push_back<T>(queue: &VecDeque<T>,value: T) -> Never! { queue.push_back(^value) }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:748
+#Inline(Always)
+fn jet_deque_delete<T: PartialEq>(queue: &VecDeque<T>,value: T) -> Never! {
+    if queue.iter().position(fn(candidate) -> candidate == value) is Val(index) -> _ :: queue.remove(index)
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:755
+#Inline(Always)
+fn jet_deque_reverse<T>(queue: &VecDeque<T>) -> Never! { queue.make_contiguous().reverse() }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:762
+#Inline(Always)
+fn jet_deque_split<T>(queue: &VecDeque<T>,index: I64) -> VecDeque<T> Never! {
+    at :: USize.try_from(index).unwrap_or(0).min(queue.len())
+    queue.split_off(at)
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:771
+#Inline(Always)
+fn jet_deque_is_empty<T>(queue: VecDeque<T>) -> Bool Never! { queue.is_empty() }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:776
+#Inline(Always)
+fn jet_string_is_empty(text: String) -> Bool Never! { text.is_empty() }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:781
+#Inline(Always)
+pub fn jet_string_contains(text: String,needle: String) -> Bool Never! { text.contains(needle) }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:785
+#Inline(Always)
+fn jet_string_repeat(text: String,count: I64) -> String Never! { text.repeat(count.max(0) as USize) }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:791
+#Inline(Always)
+fn jet_string_count_bytes(text: String) -> I64 Never! { text.len() as I64 }
+
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:798
+fn jet_list_try_new<T>() -> [T] AllocError! {
+    if jet_fault_should_fail_allocation() -> return Err(jet_alloc_error(0,"List"))
+    Ok([T].new())
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:805
+fn jet_list_try_with_capacity_defaulted<T>(capacity: I64, program_allocator_reserve: fn(USize) -> Bool Never!, program_allocator_cancel: fn(USize) -> Never!) -> [T] AllocError! {
+    if capacity < 0 -> return Err(jet_alloc_error(0,"List"))
+    capacity :: USize.try_from(capacity).map_err(fn(_) -> jet_alloc_error(0,"List"))?
+    requested :: capacity.saturating_mul(mem.size_of<T>().max(1))
+    if jet_fault_should_fail_allocation() or not program_allocator_reserve(requested) -> return Err(jet_alloc_error(requested,"List"))
+    list := [T].new()
+    if list.try_reserve_exact(capacity).is_err() {
+        program_allocator_cancel(requested)
+        return Err(jet_alloc_error(requested,"List"))
+    }
+    Ok(^list)
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:826
+fn jet_list_try_with_capacity<T>(capacity: I64) -> [T] AllocError! { jet_list_try_with_capacity_defaulted(capacity,fn(_) -> true,fn(_) {}) }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:830
+fn jet_list_try_push<T>(xs: &[T],value: T) -> AllocError! {
+    requested :: mem.size_of<T>().max(1)
+    if jet_fault_should_fail_allocation() -> return Err(jet_alloc_error(requested,"List"))
+    xs.try_reserve(1).map_err(fn(_) -> jet_alloc_error(requested,"List"))?
+    xs.push(^value)
+    Ok(())
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:841
+fn jet_list_try_reserve<T>(xs: &[T],additional: I64) -> AllocError! {
+    if additional < 0 -> return Err(jet_alloc_error(0,"List"))
+    additional :: USize.try_from(additional).map_err(fn(_) -> jet_alloc_error(0,"List"))?
+    requested :: additional.saturating_mul(mem.size_of<T>().max(1))
+    if jet_fault_should_fail_allocation() -> return Err(jet_alloc_error(requested,"List"))
+    xs.try_reserve(additional).map_err(fn(_) -> jet_alloc_error(requested,"List"))?
+    Ok(())
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:856
+#Inline(Always)
+fn jet_map_try_insert<K: Ord + Clone,V: Clone>(map: &[K:V],key: K,value: V) -> V? AllocError! {
+    if map.contains_key(key) -> return Ok(map.insert(^key,^value))
+    requested :: mem.size_of<(K,V)>().max(1)
+    if jet_fault_should_fail_allocation() -> return Err(jet_alloc_error(requested,"Map"))
+    Ok(map.insert(^key,^value))
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:874
+fn jet_string_try_push(text: &String,addition: String) -> AllocError! {
+    requested :: addition.len()
+    if jet_fault_should_fail_allocation() -> return Err(jet_alloc_error(requested,"String"))
+    text.try_reserve(requested).map_err(fn(_) -> jet_alloc_error(requested,"String"))?
+    text.push_str(addition)
+    Ok(())
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:885
+fn jet_list_min<T: Ord,I: IntoIterator<Item=T>>(xs: I) -> T? Never! { xs.into_iter().min() }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:891
+fn jet_list_max<T: Ord,I: IntoIterator<Item=T>>(xs: I) -> T? Never! { xs.into_iter().max() }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:900
+fn jet_list_min_float<T: Copy + Into<Float>,I: IntoIterator<Item=T>>(xs: I) -> T? Never! {
+    xs.into_iter().reduce(fn(best,item) -> if jet_collection_float_sort_cmp(best.into(),item.into()) == .Greater -> item else -> best)
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:912
+fn jet_list_max_float<T: Copy + Into<Float>,I: IntoIterator<Item=T>>(xs: I) -> T? Never! {
+    xs.into_iter().reduce(fn(best,item) -> if jet_collection_float_sort_cmp(best.into(),item.into()) == .Greater -> best else -> item)
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:924
+fn jet_list_flatten<T>(xs: [[T]]) -> [T] Never! { xs.into_iter().flatten().collect() }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:927
+fn jet_list_intersperse<T: Clone>(xs: [T],sep: T) -> [T] Never! {
+    out := [T].new()
+    loop (i,x) in xs.into_iter().enumerate() {
+        if i > 0 -> out.push(sep.clone())
+        out.push(^x)
+    }
+    ^out
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:937
+fn jet_list_count_by<T,K: Ord + Clone,I: IntoIterator<Item=T>>(xs: I,f: fn(T) -> K Never!) -> [K:I64] Never! {
+    m := [K:I64].new()
+    loop x in xs {
+        k :: f(x)
+        m[k] = m.get(k).copied().unwrap_or(0) + 1
+    }
+    ^m
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:950
+fn jet_bag_any<K>(bag: [K:USize],f: fn(K) -> Bool Never!) -> Bool Never! { bag.iter().any(fn((key,count)) -> count != 0 and f(key)) }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:957
+fn jet_option_map_ref<T,U>(value: T?,f: fn(T) -> U Never!) -> U? Never! { value.as_ref().map(f) }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:967
+fn jet_list_counts<T: Ord + Clone,I: IntoIterator<Item=T>>(xs: I) -> [T:I64] Never! {
+    m := [T:I64].new()
+    loop item in xs -> m[item] = m.get(item).copied().unwrap_or(0) + 1
+    ^m
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:976
+fn jet_map_copy_kernel<K: Ord + Clone,V: Clone>(m: [K:V]) -> [K:V] Never! { m.clone() }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:980
+fn jet_map_equal_kernel<K: Ord + PartialEq,V: PartialEq>(left: [K:V],right: [K:V]) -> Bool Never! { left == right }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:987
+fn jet_map_first_key_kernel<K: Ord + Clone,V>(m: [K:V]) -> K? Never! { m.keys().min().cloned() }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:991
+fn jet_map_entries_kernel<K: Ord + Clone,V: Clone>(m: [K:V]) -> [(K,V)] Never! {
+    keys := m.keys().collect()
+    keys.sort()
+    keys.iter().map(fn(k) -> (k.clone(),m[k].clone())).collect()
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:997
+fn jet_map_top_n<K: Ord + Clone,V: Ord + Clone>(m: [K:V],n: I64) -> [(K,V)] Never! {
+    limit :: USize.try_from(n.max(0)).unwrap_or(USize.MAX).min(m.len())
+    if limit == 0 -> return []
+    rank :: fn((left_key,left_value),(right_key,right_value)) -> right_value.cmp(left_value).then_with(fn() -> left_key.cmp(right_key))
+    best := [(K,V)].with_capacity(limit)
+    loop (key,value) in m.iter() {
+        if best.len() < limit {
+            best.push((key.clone(),value.clone()))
+            if best.len() == limit -> best.sort_by(rank)
+            continue
+        }
+        worst :: best.len() - 1
+        better :: value > best[worst].1 or (value == best[worst].1 and key < best[worst].0)
+        if not better -> continue
+        best[worst] = (key.clone(),value.clone())
+        inserted := worst
+        while inserted > 0 and rank(best[inserted],best[inserted - 1]).is_lt() {
+            best.swap(inserted,inserted - 1)
+            inserted -= 1
+        }
+    }
+    ^best
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1033
+fn jet_map_min_value_kernel<K: Ord,V: Ord + Clone>(m: [K:V]) -> V? Never! { m.values().min().cloned() }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1037
+fn jet_map_max_value_kernel<K: Ord,V: Ord + Clone>(m: [K:V]) -> V? Never! { m.values().max().cloned() }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1041
+fn jet_map_intersection_kernel<K: Ord + Clone,V: Clone>(left: [K:V],right: [K:V]) -> [K:V] Never! {
+    left.iter().filter(fn((key,_)) -> right.contains_key(key)).map(fn((key,value)) -> (key.clone(),value.clone())).collect()
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1051
+fn jet_map_slice_keys_kernel<K: Ord + Clone,V: Clone>(m: [K:V],keys: [K]) -> [K:V] Never! {
+    keys.into_iter().filter_map(fn(key) -> m.get(key).cloned().map(fn(value) -> (^key,^value))).collect()
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1060
+fn jet_map_from_keys_kernel<K: Ord + Clone,V: Clone>(keys: [K],default: V) -> [K:V] Never! { keys.into_iter().map(fn(key) -> (^key,default.clone())).collect() }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1064
+fn jet_map_contains_value_kernel<K: Ord,V: PartialEq>(m: [K:V],needle: V) -> Bool Never! { m.values().any(fn(value) -> value == needle) }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1068
+fn jet_map_pop_kernel<K: Ord + Clone,V: Clone>(m: &[K:V],key: K) -> V? Never! { m.remove(key) }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1075
+fn jet_list_pop_kernel<T>(xs: &[T]) -> T? Never! { xs.pop() }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1079
+fn jet_list_remove_value_kernel<T: Clone + PartialEq>(xs: &[T],value: T) -> T? Never! { xs.iter().position(fn(item) -> item == value).map(fn(index) -> xs.remove(index)) }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1085
+fn jet_list_remove_slot_kernel<T: Clone>(xs: &[T],index: I64) -> T Err! {
+    len :: xs.len() as I64
+    if index < 0 or index >= len -> return Err(jet_list_bounds_message(len,index))
+    Ok(xs.remove(index as USize))
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1093
+#Error
+#Derive(Clone,Copy,Debug,PartialEq,Eq)
+pub enum JetListInsertError { IndexOutOfBounds{len: USize,index: I64} }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1098
+impl JetListInsertError {
+    // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1099
+    pub fn code(self) -> String Never! { "E3010" }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1103
+    pub fn message(self) -> String Never! { match self { .IndexOutOfBounds{len,index} -> jet_list_bounds_message(len,index) } }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1110
+fn jet_list_insert_kernel<T>(xs: &[T],index: I64,value: T) -> JetListInsertError! {
+    position :: match USize.try_from(index) {
+        Ok(position) if position <= xs.len() -> position
+        _ -> return Err(.IndexOutOfBounds{len: xs.len(),index: index})
+    }
+    xs.insert(position,^value)
+    Ok(())
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1128
+fn jet_list_count_kernel<T: PartialEq>(xs: View<T>,value: T) -> I64 Never! { jet_count_to_int(xs.iter().filter(fn(item) -> item == value).count()) }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1134
+fn jet_count_to_int(count: USize) -> I64 Never! {
+    I64.try_from(count).unwrap_or_else(fn(_) -> jet_panic("<core.collections>",0,"sequence count exceeds the Int carrier"))
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1142
+fn jet_sequence_count(n: I64) -> USize Never! { USize.try_from(n).unwrap_or(USize.MAX) }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1146
+trait JetSetPopKernel {
+    type Item
+    // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1149
+    fn pop_value(self: &Self,value: Self.Item) -> Self.Item? Never!
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1152
+impl<T: Eq + Hash> JetSetPopKernel for HashSet<T> {
+    type Item = T
+    // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1155
+    fn pop_value(self: &Self,value: Self.Item) -> Self.Item? Never! { self.take(value) }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1160
+impl<T: PartialEq> JetSetPopKernel for [T] {
+    type Item = T
+    // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1163
+    fn pop_value(self: &Self,value: Self.Item) -> Self.Item? Never! { self.iter().position(fn(item) -> item == value).map(fn(index) -> self.remove(index)) }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1170
+fn jet_set_pop_kernel<C: JetSetPopKernel>(set: &C,value: C.Item) -> C.Item? Never! { set.pop_value(value) }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1177
+trait JetSetReplaceKernel {
+    type Item
+    // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1180
+    fn replace_value(self: &Self,value: Self.Item) -> Self.Item? Never!
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1183
+impl<T: Eq + Hash> JetSetReplaceKernel for HashSet<T> {
+    type Item = T
+    // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1186
+    fn replace_value(self: &Self,value: Self.Item) -> Self.Item? Never! { self.replace(^value) }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1191
+impl<T: PartialEq> JetSetReplaceKernel for [T] {
+    type Item = T
+    // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1194
+    fn replace_value(self: &Self,value: Self.Item) -> Self.Item? Never! {
+        if self.iter().position(fn(item) -> item == value) is Val(index) -> Val(mem.replace(&self[index],^value))
+        else -> { self.push(^value); None }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1204
+fn jet_set_replace_kernel<C: JetSetReplaceKernel>(set: &C,value: C.Item) -> C.Item? Never! { set.replace_value(^value) }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1211
+trait JetDequePopFrontKernel {
+    type Item
+    // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1214
+    fn pop_front_value(self: &Self) -> Self.Item? Never!
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1217
+impl<T> JetDequePopFrontKernel for VecDeque<T> {
+    type Item = T
+    // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1220
+    fn pop_front_value(self: &Self) -> Self.Item? Never! { self.pop_front() }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1225
+impl<T> JetDequePopFrontKernel for [T] {
+    type Item = T
+    // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1228
+    fn pop_front_value(self: &Self) -> Self.Item? Never! { if not self.is_empty() -> Val(self.remove(0)) else -> None }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1233
+fn jet_deque_pop_front_kernel<C: JetDequePopFrontKernel>(deque: &C) -> C.Item? Never! { deque.pop_front_value() }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1239
+trait JetDequePopBackKernel {
+    type Item
+    // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1242
+    fn pop_back_value(self: &Self) -> Self.Item? Never!
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1245
+impl<T> JetDequePopBackKernel for VecDeque<T> {
+    type Item = T
+    // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1248
+    fn pop_back_value(self: &Self) -> Self.Item? Never! { self.pop_back() }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1253
+impl<T> JetDequePopBackKernel for [T] {
+    type Item = T
+    // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1256
+    fn pop_back_value(self: &Self) -> Self.Item? Never! { self.pop() }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1261
+fn jet_deque_pop_back_kernel<C: JetDequePopBackKernel>(deque: &C) -> C.Item? Never! { deque.pop_back_value() }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1267
+trait JetPriorityQueuePopKernel {
+    type Item
+    // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1270
+    fn pop_priority_value(self: &Self) -> Self.Item? Never!
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1273
+impl<T: Ord> JetPriorityQueuePopKernel for BinaryHeap<T> {
+    type Item = T
+    // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1276
+    fn pop_priority_value(self: &Self) -> Self.Item? Never! { self.pop() }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1281
+impl<T> JetPriorityQueuePopKernel for [T] {
+    type Item = T
+    // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1284
+    fn pop_priority_value(self: &Self) -> Self.Item? Never! { if not self.is_empty() -> Val(self.remove(0)) else -> None }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1289
+fn jet_priority_queue_pop_kernel<C: JetPriorityQueuePopKernel>(queue: &C) -> C.Item? Never! { queue.pop_priority_value() }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1295
+fn jet_map_pop_first_kernel<K: Ord + Clone,V: Clone>(m: &[K:V]) -> V? Never! {
+    key :: m.keys().min().cloned() ?? return None
+    m.remove(key)
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1308
+struct JetIter<T> { source: Box<Iterator<Item=T>> }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1310
+impl<T> JetIter<T> {
+    // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1311
+    fn to_list(^self) -> [T] Never! { self.source.collect() }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1314
+    fn collect(^self) -> [T] Never! { self.source.collect() }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1317
+    fn len(^self) -> I64 Never! { jet_count_to_int(self.source.count()) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1320
+    fn is_empty(^self) -> Bool Never! { self.source.next().is_none() }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1327
+fn jet_iter_to_list<T>(it: JetIter<T>) -> [T] Never! { it.to_list() }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1331
+fn jet_iter_collect<T>(it: JetIter<T>) -> [T] Never! { it.collect() }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1335
+impl<T> IntoIterator for JetIter<T> {
+    type Item = T
+    type IntoIter = Box<Iterator<Item=T>>
+    // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1338
+    fn into_iter(^self) -> Self.IntoIter Never! { ^self.source }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1343
+fn jet_iter_from_vec<T>(xs: [T]) -> JetIter<T> Never! { JetIter{source: Box.new(xs.into_iter())} }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1347
+fn jet_iter_first<T>(it: JetIter<T>) -> T? Never! { it.into_iter().next() }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1353
+fn jet_iter_next<T>(it: &JetIter<T>) -> T? Never! { it.source.next() }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1356
+fn jet_iter_len<T>(it: JetIter<T>) -> I64 Never! { it.len() }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1360
+fn jet_iter_is_empty<T>(it: JetIter<T>) -> Bool Never! { it.is_empty() }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1368
+#Derive(Clone,Copy,Debug,PartialEq,Eq)
+enum JetLoopSourceKind {
+    Plain, Chars, LinesFile, LinesStdin, LinesProcessStream, ChannelReceiver
+    EncodingReader{reader_type: String}
+    Iterable{coll_type: String,iter_type: String,iter_symbol: String,next_symbol: String}
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1385
+impl JetLoopSourceKind {
+    // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1386
+    fn from_wire(wire: String) -> Self? Never! {
+        // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1387
+        fn take(input: String) -> (String,String)? Never! {
+            separator :: input.find(':')?
+            length :: input.get(0..<separator)?.parse<USize>().ok()?
+            payload_start :: separator.checked_add(1)?
+            payload_end :: payload_start.checked_add(length)?
+            payload := input.get(payload_start..<payload_end)? // #4303
+            rest := input.get(payload_end..<input.len())? // #4303
+            Val((payload,rest))
+        }
+        match wire {
+            "plain" -> Val(.Plain), "chars" -> Val(.Chars), "lines:file" -> Val(.LinesFile)
+            "lines:stdin" -> Val(.LinesStdin), "lines:process" -> Val(.LinesProcessStream), "channel" -> Val(.ChannelReceiver)
+            _ -> {
+                if wire.strip_prefix("encoding:") is Val(payload) {
+                    (reader_type,rest) :: take(payload)?
+                    if reader_type.is_empty() or not rest.is_empty() -> return None
+                    return Val(.EncodingReader{reader_type: reader_type})
+                }
+                payload := wire.strip_prefix("iterable:")? // #4303
+                (coll_type,rest) :: take(payload)?
+                rest := rest.strip_prefix(':')? // #4303
+                (iter_type,rest) :: take(rest)?
+                rest := rest.strip_prefix(':')? // #4303
+                (iter_symbol,rest) :: take(rest)?
+                rest := rest.strip_prefix(':')? // #4303
+                (next_symbol,rest) :: take(rest)?
+                if coll_type.is_empty() or iter_type.is_empty() or iter_symbol.is_empty() or next_symbol.is_empty() or not rest.is_empty() -> return None
+                Val(.Iterable{coll_type: coll_type,iter_type: iter_type,iter_symbol: iter_symbol,next_symbol: next_symbol})
+            }
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1440
+#Derive(Clone,Debug)
+pub struct JetLoopRangeCursor { current: I64,end: I64,step: I64,exclusive: Bool,done: Bool }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1449
+pub fn jet_loop_range_init(start: I64,end: I64,step_value: I64,has_step: Bool,exclusive: Bool) -> JetLoopRangeCursor Never! {
+    jet_loop_range_init_checked(start,end,step_value,has_step,exclusive).unwrap_or_else(fn(message) -> jet_panic("<core.prelude>",0,message))
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1460
+pub fn jet_loop_range_init_checked(start: I64,end: I64,step_value: I64,has_step: Bool,exclusive: Bool) -> JetLoopRangeCursor Err! {
+    step :: if has_step -> step_value else -> 1
+    if step == 0 -> return Err("range loop stride must not be zero")
+    Ok(JetLoopRangeCursor{current: start,end: end,step: step,exclusive: exclusive,done: false})
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1480
+pub fn jet_loop_range_has_next(cursor: JetLoopRangeCursor) -> Bool Never! {
+    not cursor.done and (if cursor.step > 0 {
+        if cursor.exclusive -> cursor.current < cursor.end else -> cursor.current <= cursor.end
+    } else {
+        if cursor.exclusive -> cursor.current > cursor.end else -> cursor.current >= cursor.end
+    })
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1488
+pub fn jet_loop_range_value(cursor: JetLoopRangeCursor) -> I64 Never! {
+    if not jet_loop_range_has_next(cursor) -> jet_panic("<core.prelude>",0,"range loop value requested after exhaustion")
+    cursor.current
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1495
+pub fn jet_loop_range_advance(cursor: &JetLoopRangeCursor) -> Never! {
+    if cursor.done -> return
+    cursor.current = match cursor.current.checked_add(cursor.step) {
+        Val(value) -> value
+        None -> { cursor.done = true; return }
+    }
+    cursor.done = not jet_loop_range_has_next(cursor)
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1509
+// LoopCursor.rs is owned by kernel_loop_cursor, imported above.
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1510
+fn jet_loop_iter_init<C: JetLoopSource>(collection: C,step_value: I64,has_step: Bool,by_value: Bool,source_kind: JetLoopSourceKind) -> JetLoopIterCursor Never! {
+    jet_loop_iter_init_checked(^collection,step_value,has_step,by_value,source_kind).unwrap_or_else(fn(message) -> jet_panic("<core.prelude>",0,message))
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1521
+fn jet_loop_iter_init_checked<C: JetLoopSource>(collection: C,step_value: I64,has_step: Bool,by_value: Bool,source_kind: JetLoopSourceKind) -> JetLoopIterCursor Err! {
+    iter :: collection.jet_loop_source(source_kind,by_value)
+    jet_loop_iter_init_typed(^iter,step_value,has_step)
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1535
+struct JetByteLoopIterCursor { iter: std.slice.Iter<U8>,current: U8?,step: USize,exhausted: Bool }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1543
+#Inline(Always)
+fn jet_loop_iter_bytes_init(bytes: View<U8>,step_value: I64,has_step: Bool) -> JetByteLoopIterCursor Never! {
+    step :: jet_loop_iter_step(step_value,has_step).unwrap_or_else(fn(message) -> jet_panic("<core.prelude>",0,message))
+    iter := bytes.iter()
+    current :: iter.next().copied()
+    exhausted :: current.is_none()
+    JetByteLoopIterCursor{iter: ^iter,current: current,step: step,exhausted: exhausted}
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1562
+#Inline(Always)
+fn jet_loop_iter_bytes_has_next(cursor: JetByteLoopIterCursor) -> Bool Never! { cursor.current.is_some() }
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1567
+#Inline(Always)
+fn jet_loop_iter_bytes_value(cursor: &JetByteLoopIterCursor) -> U8 Never! {
+    cursor.current.take().unwrap_or_else(fn() -> jet_panic("<core.prelude>",0,"iterator loop value requested after exhaustion"))
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1574
+#Inline(Always)
+fn jet_loop_iter_bytes_advance(cursor: &JetByteLoopIterCursor) -> Never! {
+    if cursor.exhausted -> return
+    loop _ in 1..<cursor.step {
+        if cursor.iter.next().is_none() { cursor.current = None; cursor.exhausted = true; return }
+    }
+    cursor.current = cursor.iter.next().copied()
+    cursor.exhausted = cursor.current.is_none()
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1589
+fn jet_loop_source_kind_name(kind: JetLoopSourceKind) -> String Never! {
+    match kind {
+        .Plain -> "Plain", .Chars -> "Chars", .LinesFile -> "LinesFile", .LinesStdin -> "LinesStdin"
+        .LinesProcessStream -> "LinesProcessStream", .ChannelReceiver -> "ChannelReceiver"
+        .EncodingReader{reader_type} -> "EncodingReader({reader_type})"
+        .Iterable{coll_type,iter_type,..} -> "Iterable({coll_type}::{iter_type})"
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1606
+fn jet_loop_source_error(kind: JetLoopSourceKind) -> Never Never! {
+    jet_panic("<core.prelude>",0,"loop source kind {jet_loop_source_kind_name(kind)} is not supported by this collection carrier")
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1617
+trait JetLoopSource {
+    // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1618
+    fn jet_loop_source(^self,source_kind: JetLoopSourceKind,by_value: Bool) -> Box<Iterator<Item=JetLoopAny>> Never!
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1625
+impl<T> JetLoopSource for [T] {
+    // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1626
+    fn jet_loop_source(^self,source_kind: JetLoopSourceKind,by_value: Bool) -> Box<Iterator<Item=JetLoopAny>> Never! {
+        match source_kind {
+            .Plain -> {
+                if not by_value -> jet_loop_source_error(source_kind)
+                Box.new(self.into_iter().map(fn(value) -> Box.new(^value) as JetLoopAny))
+            }
+            _ -> jet_loop_source_error(source_kind)
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1655
+impl<T: Clone> JetLoopSource for &[T] {
+    // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1656
+    fn jet_loop_source(^self,source_kind: JetLoopSourceKind,by_value: Bool) -> Box<Iterator<Item=JetLoopAny>> Never! {
+        match source_kind {
+            .Plain -> {
+                if by_value -> jet_loop_source_error(source_kind)
+                values :: self.clone()
+                Box.new(values.into_iter().map(fn(value) -> Box.new(^value) as JetLoopAny))
+            }
+            _ -> jet_loop_source_error(source_kind)
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1684
+impl<T,const N: Int> JetLoopSource for [T#N] {
+    // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1685
+    fn jet_loop_source(^self,source_kind: JetLoopSourceKind,by_value: Bool) -> Box<Iterator<Item=JetLoopAny>> Never! {
+        match source_kind {
+            .Plain -> {
+                if not by_value -> jet_loop_source_error(source_kind)
+                Box.new(self.into_iter().map(fn(value) -> Box.new(^value) as JetLoopAny))
+            }
+            _ -> jet_loop_source_error(source_kind)
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1711
+impl<T: Clone,const N: Int> JetLoopSource for &[T#N] {
+    // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1712
+    fn jet_loop_source(^self,source_kind: JetLoopSourceKind,by_value: Bool) -> Box<Iterator<Item=JetLoopAny>> Never! {
+        match source_kind {
+            .Plain -> {
+                if by_value -> jet_loop_source_error(source_kind)
+                values :: self.to_vec()
+                Box.new(values.into_iter().map(fn(value) -> Box.new(^value) as JetLoopAny))
+            }
+            _ -> jet_loop_source_error(source_kind)
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1739
+impl<T: Clone> JetLoopSource for &View<T> {
+    // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1740
+    fn jet_loop_source(^self,source_kind: JetLoopSourceKind,by_value: Bool) -> Box<Iterator<Item=JetLoopAny>> Never! {
+        match source_kind {
+            .Plain -> {
+                if by_value -> jet_loop_source_error(source_kind)
+                values :: self.to_vec()
+                Box.new(values.into_iter().map(fn(value) -> Box.new(^value) as JetLoopAny))
+            }
+            _ -> jet_loop_source_error(source_kind)
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1769
+impl<K: Ord + Clone,V: Clone> JetLoopSource for [K:V] {
+    // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1770
+    fn jet_loop_source(^self,source_kind: JetLoopSourceKind,by_value: Bool) -> Box<Iterator<Item=JetLoopAny>> Never! {
+        match source_kind {
+            .Plain -> {
+                if not by_value -> jet_loop_source_error(source_kind)
+                values :: jet_map_into_entries(^self).into_iter()
+                Box.new(values.map(fn(value) -> Box.new(^value) as JetLoopAny))
+            }
+            _ -> jet_loop_source_error(source_kind)
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1796
+// Borrowed JetMap JetLoopSource impl continues in kernel_collections_02 (0144).
 

@@ -1,0 +1,59 @@
+use core.encoding.runtime.std_yaml.[parse_to_tree, render]
+use core.encoding.runtime.std_data_tree.DataTree
+use jet_foundation.Text.[TEXT_NUL]
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/YAML.rs:109-290
+#Test("yaml_document_markers_comments_and_dash_blocks") {
+    assert(parse_to_tree("# empty\n---\n...\n").unwrap() == DataTree.Null)
+    tree :: parse_to_tree("---\nitems:\n  - name: one\n    active: true # comment\n  - name: two\n...\nignored: tail").unwrap()
+    assert(tree == DataTree.Object([("items", DataTree.Array([
+        DataTree.Object([("name", DataTree.Text("one")), ("active", DataTree.Bool(true))]),
+        DataTree.Object([("name", DataTree.Text("two"))]),
+    ]))]))
+    assert(parse_to_tree("a: 1\na: 2").unwrap() == DataTree.Object([("a", DataTree.Int(1)), ("a", DataTree.Int(2))]))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/YAML.rs:336-435
+#Test("yaml_block_chomping_and_anchor_clone") {
+    assert(parse_to_tree("a: |-\n  hello\n  world\nb: >+\n  hello\n  world\n").unwrap() == DataTree.Object([
+        ("a", DataTree.Text("hello\nworld")), ("b", DataTree.Text("hello world\n")),
+    ]))
+    assert(parse_to_tree("a: &base {x: 1}\nb: *base\nc: *missing").unwrap() == DataTree.Object([
+        ("a", DataTree.Object([("x", DataTree.Int(1))])),
+        ("b", DataTree.Object([("x", DataTree.Int(1))])), ("c", DataTree.Null),
+    ]))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/YAML.rs:437-745
+#Test("yaml_flow_and_quoted_scalar_reference_semantics") {
+    assert(parse_to_tree("[1, true, {name: é}, null]").unwrap() == DataTree.Array([
+        DataTree.Int(1), DataTree.Bool(true), DataTree.Object([("name", DataTree.Text("é"))]), DataTree.Null,
+    ]))
+    assert(parse_to_tree("a: 'true'\nb: \"line\\n\\0\"\nc: 'it''s'\nd: url:part # trailing").unwrap() == DataTree.Object([
+        ("a", DataTree.Text("true")), ("b", DataTree.Text("line\n{TEXT_NUL}")),
+        ("c", DataTree.Text("it's")), ("d", DataTree.Text("url:part")),
+    ]))
+    // The reference flow scanner drops quote delimiters before core typing.
+    assert(parse_to_tree("['true', \"42\"]").unwrap() == DataTree.Array([DataTree.Bool(true), DataTree.Int(42)]))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/YAML.rs:109-153,445-538
+#Test("yaml_limits_and_error_lines") {
+    assert(parse_to_tree("[".repeat(64) + "0" + "]".repeat(64)).is_ok())
+    if parse_to_tree("[".repeat(65) + "0" + "]".repeat(65)) is Err(error) {
+        assert(error.message == "YAML value is nested too deeply")
+    } else { assert(false) }
+    assert(parse_to_tree("\n".repeat(65536)).is_err())
+    if parse_to_tree("a: 1\nnot a mapping") is Err(error) { assert(error.line == 2) } else { assert(false) }
+    // A collection of 65536 nulls plus its own node exceeds the node budget.
+    assert(parse_to_tree("[" + "~,".repeat(65536) + "]").is_err())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/YAML.rs:747-876
+#Test("yaml_render_order_indentless_sequences_and_quoting") {
+    tree :: DataTree.Object([
+        ("name", DataTree.Text("true")),
+        ("items", DataTree.Array([DataTree.Int(1), DataTree.Text("a # b")])),
+        ("nested", DataTree.Object([("x y", DataTree.Bool(false))])),
+        ("empty", DataTree.Array([])),
+    ])
+    assert(render(&tree) == "name: \"true\"\nitems:\n- 1\n- \"a # b\"\nnested:\n  \"x y\": false\nempty: []")
+    assert(render(&DataTree.Array([])) == "{}")
+    assert(render(&DataTree.Bytes([1, 255])) == "[1, 255]")
+}

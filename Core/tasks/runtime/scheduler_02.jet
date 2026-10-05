@@ -1,1804 +1,1174 @@
-// PORT-PENDING 0185 crates-jet-codegen-src-prelude-scheduler-slice-1805: crates/jet-codegen/src/Prelude/Scheduler.rs:1805-3604
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS     fn unregister(&self, id: usize) {
-//RS         self.interests.lock().unwrap().retain(|i| i.stream_id != id);
-//RS         self.retire_requested.lock().unwrap().insert(id);
-//RS         #[cfg(not(target_os = "windows"))]
-//RS         {
-//RS             self.streams.lock().unwrap().remove(&id);
-//RS             self.retire_requested.lock().unwrap().remove(&id);
-//RS         }
-//RS         #[cfg(target_os = "windows")]
-//RS         self.iocp_notify();
-//RS     }
-//RS 
-//RS     // jet:scheduler-native-notify-begin
-//RS     #[cfg(all(target_os = "windows", feature = "jet_native_io"))]
-//RS     fn iocp_notify(&self) {
-//RS         #[link(name = "kernel32")]
-//RS         extern "system" {
-//RS             fn PostQueuedCompletionStatus(port: usize, bytes: u32, key: usize, ov: *mut std::ffi::c_void) -> i32;
-//RS         }
-//RS         let port = self.iocp_port.load(Ordering::Acquire);
-//RS         if port != 0 {
-//RS             unsafe { PostQueuedCompletionStatus(port, 0, 0, std::ptr::null_mut()); }
-//RS         }
-//RS     }
-//RS     // jet:scheduler-native-notify-end
-//RS 
-//RS     #[cfg(all(target_os = "windows", not(feature = "jet_native_io")))]
-//RS     fn iocp_notify(&self) {
-//RS         self.notify.notify_one();
-//RS     }
-//RS 
-//RS     fn run(self: Arc<Self>) {
-//RS         #[cfg(all(target_os = "linux", feature = "jet_native_io"))]
-//RS         {
-//RS             self.run_linux_epoll();
-//RS         }
-//RS         #[cfg(all(
-//RS             any(
-//RS                 target_os = "macos",
-//RS                 target_os = "ios",
-//RS                 target_os = "tvos",
-//RS                 target_os = "watchos",
-//RS                 target_os = "freebsd",
-//RS                 target_os = "netbsd",
-//RS                 target_os = "openbsd"
-//RS             ),
-//RS             feature = "jet_native_io"
-//RS         ))]
-//RS         {
-//RS             self.run_kqueue();
-//RS         }
-//RS         #[cfg(all(target_os = "windows", feature = "jet_native_io"))]
-//RS         {
-//RS             self.run_iocp();
-//RS         }
-//RS         #[cfg(not(any(
-//RS             all(target_os = "linux", feature = "jet_native_io"),
-//RS             all(
-//RS                 any(
-//RS                     target_os = "macos",
-//RS                     target_os = "ios",
-//RS                     target_os = "tvos",
-//RS                     target_os = "watchos",
-//RS                     target_os = "freebsd",
-//RS                     target_os = "netbsd",
-//RS                     target_os = "openbsd"
-//RS                 ),
-//RS                 feature = "jet_native_io"
-//RS             ),
-//RS             all(target_os = "windows", feature = "jet_native_io")
-//RS         )))]
-//RS         {
-//RS             self.run_portable_poll();
-//RS         }
-//RS     }
-//RS 
-//RS     // jet:scheduler-native-epoll-begin
-//RS     #[cfg(all(target_os = "linux", feature = "jet_native_io"))]
-//RS     fn run_linux_epoll(self: Arc<Self>) {
-//RS         use std::collections::HashMap;
-//RS         use std::os::unix::io::AsRawFd;
-//RS 
-//RS         #[repr(C)]
-//RS         #[derive(Clone, Copy)]
-//RS         struct EpollEvent {
-//RS             events: u32,
-//RS             data: u64,
-//RS         }
-//RS 
-//RS         const EPOLLIN: u32 = 1;
-//RS         const EPOLLOUT: u32 = 4;
-//RS         const EPOLL_CTL_ADD: i32 = 1;
-//RS         const EPOLL_CTL_DEL: i32 = 2;
-//RS 
-//RS         #[link(name = "c")]
-//RS         extern "C" {
-//RS             fn epoll_create1(flags: i32) -> i32;
-//RS             fn epoll_ctl(epfd: i32, op: i32, fd: i32, event: *const EpollEvent) -> i32;
-//RS             fn epoll_wait(
-//RS                 epfd: i32,
-//RS                 events: *mut EpollEvent,
-//RS                 maxevents: i32,
-//RS                 timeout: i32,
-//RS             ) -> i32;
-//RS         }
-//RS 
-//RS         let epfd = unsafe { epoll_create1(0x80000) }; // CLOEXEC
-//RS         assert!(epfd >= 0, "epoll_create1 failed");
-//RS         let mut fd_slots: HashMap<i32, Arc<ParkSlot>> = HashMap::new();
-//RS 
-//RS         loop {
-//RS             // Register new interests with epoll.
-//RS             let pending: Vec<(i32, u32, Arc<ParkSlot>)> = {
-//RS                 let interests = self.interests.lock().unwrap();
-//RS                 let streams = self.streams.lock().unwrap();
-//RS                 let mut out = Vec::new();
-//RS                 for interest in interests.iter() {
-//RS                     let Some(stream) = streams.get(&interest.stream_id) else {
-//RS                         continue;
-//RS                     };
-//RS                     let fd = stream.lock().unwrap().as_raw_fd();
-//RS                     if fd_slots.contains_key(&fd) {
-//RS                         continue;
-//RS                     }
-//RS                     let mut events = 0u32;
-//RS                     if interest.readable {
-//RS                         events |= EPOLLIN;
-//RS                     }
-//RS                     if interest.writable {
-//RS                         events |= EPOLLOUT;
-//RS                     }
-//RS                     out.push((fd, events, interest.slot.clone()));
-//RS                 }
-//RS                 out
-//RS             };
-//RS             for (fd, events, slot) in pending {
-//RS                 let ev = EpollEvent {
-//RS                     events,
-//RS                     data: fd as u64,
-//RS                 };
-//RS                 let rc = unsafe { epoll_ctl(epfd, EPOLL_CTL_ADD, fd, &ev) };
-//RS                 if rc == 0 {
-//RS                     fd_slots.insert(fd, slot);
-//RS                 }
-//RS             }
-//RS 
-//RS             let mut events = [EpollEvent {
-//RS                 events: 0,
-//RS                 data: 0,
-//RS             }; 64];
-//RS             let n = unsafe { epoll_wait(epfd, events.as_mut_ptr(), 64, 50) };
-//RS             if n > 0 {
-//RS                 METRIC_POLLER_WAKE.fetch_add(n as usize, Ordering::Relaxed);
-//RS                 for ev in &events[..n as usize] {
-//RS                     let fd = ev.data as i32;
-//RS                     if let Some(slot) = fd_slots.remove(&fd) {
-//RS                         let _ = unsafe { epoll_ctl(epfd, EPOLL_CTL_DEL, fd, std::ptr::null()) };
-//RS                         let mut interests = self.interests.lock().unwrap();
-//RS                         interests.retain(|i| !Arc::ptr_eq(&i.slot, &slot));
-//RS                         slot.wake();
-//RS                     }
-//RS                 }
-//RS             }
-//RS         }
-//RS     }
-//RS     // jet:scheduler-native-epoll-end
-//RS 
-//RS     #[cfg(not(all(target_os = "linux", feature = "jet_native_io")))]
-//RS     fn run_linux_epoll(self: Arc<Self>) {
-//RS         self.run_portable_poll();
-//RS     }
-//RS 
-//RS     // jet:scheduler-native-kqueue-begin
-//RS     #[cfg(all(
-//RS         any(
-//RS             target_os = "macos",
-//RS             target_os = "ios",
-//RS             target_os = "tvos",
-//RS             target_os = "watchos",
-//RS             target_os = "freebsd",
-//RS             target_os = "netbsd",
-//RS             target_os = "openbsd"
-//RS         ),
-//RS         feature = "jet_native_io"
-//RS     ))]
-//RS     fn run_kqueue(self: Arc<Self>) {
-//RS         use std::collections::HashMap;
-//RS         use std::os::unix::io::AsRawFd;
-//RS 
-//RS         #[repr(C)]
-//RS         #[derive(Clone, Copy)]
-//RS         struct Kevent {
-//RS             ident: usize,
-//RS             filter: i16,
-//RS             flags: u16,
-//RS             fflags: u32,
-//RS             data: i64,
-//RS             udata: *mut std::ffi::c_void,
-//RS         }
-//RS 
-//RS         const EVFILT_READ: i16 = -1;
-//RS         const EVFILT_WRITE: i16 = -2;
-//RS         const EV_ADD: u16 = 0x0001;
-//RS         const EV_DELETE: u16 = 0x0002;
-//RS         const EV_ONESHOT: u16 = 0x0010;
-//RS 
-//RS         #[link(name = "c")]
-//RS         extern "C" {
-//RS             fn kqueue() -> i32;
-//RS             fn kevent(
-//RS                 kq: i32,
-//RS                 changelist: *const Kevent,
-//RS                 nchanges: i32,
-//RS                 eventlist: *mut Kevent,
-//RS                 nevents: i32,
-//RS                 timeout: *const libc_timespec,
-//RS             ) -> i32;
-//RS         }
-//RS 
-//RS         #[repr(C)]
-//RS         struct libc_timespec {
-//RS             tv_sec: i64,
-//RS             tv_nsec: i64,
-//RS         }
-//RS 
-//RS         let kq = unsafe { kqueue() };
-//RS         assert!(kq >= 0, "kqueue() failed");
-//RS         let mut fd_slots: HashMap<i32, Arc<ParkSlot>> = HashMap::new();
-//RS 
-//RS         loop {
-//RS             let pending: Vec<(i32, i16, Arc<ParkSlot>)> = {
-//RS                 let interests = self.interests.lock().unwrap();
-//RS                 let streams = self.streams.lock().unwrap();
-//RS                 let mut out = Vec::new();
-//RS                 for interest in interests.iter() {
-//RS                     let Some(stream) = streams.get(&interest.stream_id) else {
-//RS                         continue;
-//RS                     };
-//RS                     let fd = stream.lock().unwrap().as_raw_fd();
-//RS                     if fd_slots.contains_key(&fd) {
-//RS                         continue;
-//RS                     }
-//RS                     if interest.readable {
-//RS                         out.push((fd, EVFILT_READ, interest.slot.clone()));
-//RS                     }
-//RS                     if interest.writable {
-//RS                         out.push((fd, EVFILT_WRITE, interest.slot.clone()));
-//RS                     }
-//RS                 }
-//RS                 out
-//RS             };
-//RS             for (fd, filter, slot) in pending {
-//RS                 let ev = Kevent {
-//RS                     ident: fd as usize,
-//RS                     filter,
-//RS                     flags: EV_ADD | EV_ONESHOT,
-//RS                     fflags: 0,
-//RS                     data: 0,
-//RS                     udata: std::ptr::null_mut(),
-//RS                 };
-//RS                 let rc = unsafe { kevent(kq, &ev, 1, std::ptr::null_mut(), 0, std::ptr::null()) };
-//RS                 if rc == 0 {
-//RS                     fd_slots.insert(fd, slot);
-//RS                 }
-//RS             }
-//RS 
-//RS             let mut events = [Kevent {
-//RS                 ident: 0,
-//RS                 filter: 0,
-//RS                 flags: 0,
-//RS                 fflags: 0,
-//RS                 data: 0,
-//RS                 udata: std::ptr::null_mut(),
-//RS             }; 64];
-//RS             let timeout = libc_timespec {
-//RS                 tv_sec: 0,
-//RS                 tv_nsec: 50_000_000,
-//RS             };
-//RS             let n = unsafe {
-//RS                 kevent(
-//RS                     kq,
-//RS                     std::ptr::null(),
-//RS                     0,
-//RS                     events.as_mut_ptr(),
-//RS                     64,
-//RS                     &timeout,
-//RS                 )
-//RS             };
-//RS             if n > 0 {
-//RS                 METRIC_POLLER_WAKE.fetch_add(n as usize, Ordering::Relaxed);
-//RS                 for ev in &events[..n as usize] {
-//RS                     let fd = ev.ident as i32;
-//RS                     if let Some(slot) = fd_slots.remove(&fd) {
-//RS                         let del = Kevent {
-//RS                             ident: ev.ident,
-//RS                             filter: ev.filter,
-//RS                             flags: EV_DELETE,
-//RS                             fflags: 0,
-//RS                             data: 0,
-//RS                             udata: std::ptr::null_mut(),
-//RS                         };
-//RS                         let _ = unsafe { kevent(kq, &del, 1, std::ptr::null_mut(), 0, std::ptr::null()) };
-//RS                         let mut interests = self.interests.lock().unwrap();
-//RS                         interests.retain(|i| !Arc::ptr_eq(&i.slot, &slot));
-//RS                         slot.wake();
-//RS                     }
-//RS                 }
-//RS             }
-//RS         }
-//RS     }
-//RS     // jet:scheduler-native-kqueue-end
-//RS 
-//RS     #[cfg(not(all(
-//RS         any(
-//RS             target_os = "macos",
-//RS             target_os = "ios",
-//RS             target_os = "tvos",
-//RS             target_os = "watchos",
-//RS             target_os = "freebsd",
-//RS             target_os = "netbsd",
-//RS             target_os = "openbsd"
-//RS         ),
-//RS         feature = "jet_native_io"
-//RS     )))]
-//RS     fn run_kqueue(self: Arc<Self>) {
-//RS         self.run_portable_poll();
-//RS     }
-//RS 
-//RS     // jet:scheduler-native-iocp-begin
-//RS     #[cfg(all(target_os = "windows", feature = "jet_native_io"))]
-//RS     fn run_iocp(self: Arc<Self>) {
-//RS         use std::collections::HashMap;
-//RS         use std::os::windows::io::AsRawSocket;
-//RS         #[repr(C)]
-//RS         struct Overlapped { internal: usize, internal_high: usize, offset: u32, offset_high: u32, event: usize }
-//RS         #[repr(C)]
-//RS         struct WsaBuf { len: u32, buf: *mut u8 }
-//RS         struct Active {
-//RS             _stream: Arc<Mutex<TcpStream>>,
-//RS             socket: usize,
-//RS             operations: Vec<*mut Overlapped>,
-//RS             cancel_requested: bool,
-//RS         }
-//RS         const INVALID_HANDLE_VALUE: usize = usize::MAX;
-//RS         const WSA_IO_PENDING: i32 = 997;
-//RS         #[link(name = "kernel32")]
-//RS         extern "system" {
-//RS             fn CreateIoCompletionPort(file: usize, existing: usize, key: usize, threads: u32) -> usize;
-//RS             fn GetQueuedCompletionStatus(port: usize, bytes: *mut u32, key: *mut usize, ov: *mut *mut Overlapped, timeout_ms: u32) -> i32;
-//RS             fn CancelIoEx(file: usize, ov: *mut Overlapped) -> i32;
-//RS             fn GetLastError() -> u32;
-//RS             fn CloseHandle(handle: usize) -> i32;
-//RS         }
-//RS         #[link(name = "ws2_32")]
-//RS         extern "system" {
-//RS             fn WSARecv(socket: usize, buffers: *mut WsaBuf, count: u32, bytes: *mut u32, flags: *mut u32, ov: *mut Overlapped, completion: *mut std::ffi::c_void) -> i32;
-//RS             fn WSASend(socket: usize, buffers: *mut WsaBuf, count: u32, bytes: *mut u32, flags: u32, ov: *mut Overlapped, completion: *mut std::ffi::c_void) -> i32;
-//RS             fn WSAGetLastError() -> i32;
-//RS         }
-//RS 
-//RS         let port = unsafe { CreateIoCompletionPort(INVALID_HANDLE_VALUE, 0, 0, 1) };
-//RS         if port == 0 {
-//RS             METRIC_IO_FAILURES.fetch_add(1, Ordering::Relaxed);
-//RS             *self.backend_state.lock().unwrap() =
-//RS                 IOBackendState::Failed("internal scheduler IOCP creation failed");
-//RS             for interest in self.interests.lock().unwrap().drain(..) { interest.slot.wake(); }
-//RS             self.streams.lock().unwrap().clear();
-//RS             self.retire_requested.lock().unwrap().clear();
-//RS             self.iocp_shutdown_done.store(true, Ordering::Release);
-//RS             return;
-//RS         }
-//RS         self.iocp_port.store(port, Ordering::Release);
-//RS         self.iocp_shutdown_done.store(false, Ordering::Release);
-//RS         *self.backend_state.lock().unwrap() = IOBackendState::Running;
-//RS         let mut active: HashMap<usize, Active> = HashMap::new();
-//RS         loop {
-//RS             let pending: Vec<(usize, Arc<Mutex<TcpStream>>, usize, bool, bool)> = {
-//RS                 let interests = self.interests.lock().unwrap();
-//RS                 let streams = self.streams.lock().unwrap();
-//RS                 interests.iter()
-//RS                     .filter(|interest| !active.contains_key(&interest.stream_id))
-//RS                     .filter_map(|interest| streams.get(&interest.stream_id).map(|stream| (
-//RS                         interest.stream_id,
-//RS                         stream.clone(),
-//RS                         stream.lock().unwrap().as_raw_socket() as usize,
-//RS                         interest.readable,
-//RS                         interest.writable,
-//RS                     )))
-//RS                     .collect()
-//RS             };
-//RS             for (id, stream, socket, readable, writable) in pending {
-//RS                 let associated = unsafe { CreateIoCompletionPort(socket, port, id + 1, 0) };
-//RS                 if associated == 0 {
-//RS                     let _error = unsafe { GetLastError() };
-//RS                     METRIC_IO_FAILURES.fetch_add(1, Ordering::Relaxed);
-//RS                     if let Some(slot) = self.interests.lock().unwrap().iter()
-//RS                         .find(|interest| interest.stream_id == id).map(|interest| interest.slot.clone())
-//RS                     { slot.wake(); }
-//RS                     self.interests.lock().unwrap().retain(|interest| interest.stream_id != id);
-//RS                     self.streams.lock().unwrap().remove(&id);
-//RS                     continue;
-//RS                 }
-//RS                 let mut operations = Vec::new();
-//RS                 for read in [true, false] {
-//RS                     if (read && !readable) || (!read && !writable) { continue; }
-//RS                     let raw = Box::into_raw(Box::new(Overlapped {
-//RS                         internal: 0, internal_high: 0, offset: 0, offset_high: 0, event: 0,
-//RS                     }));
-//RS                     METRIC_IO_ALLOCATED.fetch_add(1, Ordering::Relaxed);
-//RS                     let mut buffer = WsaBuf { len: 0, buf: std::ptr::null_mut() };
-//RS                     let mut bytes = 0;
-//RS                     let rc = if read {
-//RS                         let mut flags = 0;
-//RS                         unsafe { WSARecv(socket, &mut buffer, 1, &mut bytes, &mut flags, raw, std::ptr::null_mut()) }
-//RS                     } else {
-//RS                         unsafe { WSASend(socket, &mut buffer, 1, &mut bytes, 0, raw, std::ptr::null_mut()) }
-//RS                     };
-//RS                     if rc == 0 || unsafe { WSAGetLastError() } == WSA_IO_PENDING {
-//RS                         operations.push(raw);
-//RS                     } else {
-//RS                         unsafe { drop(Box::from_raw(raw)); }
-//RS                         METRIC_IO_RETIRED.fetch_add(1, Ordering::Relaxed);
-//RS                     }
-//RS                 }
-//RS                 if operations.is_empty() {
-//RS                     if let Some(slot) = self.interests.lock().unwrap().iter()
-//RS                         .find(|interest| interest.stream_id == id).map(|interest| interest.slot.clone())
-//RS                     { slot.wake(); }
-//RS                 } else {
-//RS                     active.insert(id, Active { _stream: stream, socket, operations, cancel_requested: false });
-//RS                     METRIC_IO_ACTIVE.fetch_add(1, Ordering::Relaxed);
-//RS                 }
-//RS             }
-//RS 
-//RS             let retiring: Vec<usize> = self.retire_requested.lock().unwrap().iter().copied().collect();
-//RS             for id in retiring {
-//RS                 if let Some(entry) = active.get_mut(&id) {
-//RS                     if !entry.cancel_requested {
-//RS                         entry.cancel_requested = true;
-//RS                         for operation in &entry.operations { unsafe { CancelIoEx(entry.socket, *operation); } }
-//RS                     }
-//RS                 } else {
-//RS                     self.streams.lock().unwrap().remove(&id);
-//RS                     self.retire_requested.lock().unwrap().remove(&id);
-//RS                 }
-//RS             }
-//RS 
-//RS             for (id, entry) in active.iter_mut() {
-//RS                 if !self.interests.lock().unwrap().iter().any(|interest| interest.stream_id == *id)
-//RS                     && !entry.cancel_requested {
-//RS                     entry.cancel_requested = true;
-//RS                     for operation in &entry.operations { unsafe { CancelIoEx(entry.socket, *operation); } }
-//RS                 }
-//RS             }
-//RS 
-//RS             let (mut bytes, mut key, mut operation) = (0, 0usize, std::ptr::null_mut());
-//RS             #[cfg(test)]
-//RS             let inject_fatal = TEST_IOCP_GQCS_FATAL.swap(false, Ordering::AcqRel);
-//RS             #[cfg(not(test))]
-//RS             let inject_fatal = false;
-//RS             let ok = if inject_fatal {
-//RS                 0
-//RS             } else {
-//RS                 unsafe { GetQueuedCompletionStatus(port, &mut bytes, &mut key, &mut operation, u32::MAX) }
-//RS             };
-//RS             if operation.is_null() {
-//RS                 if ok == 0 {
-//RS                     METRIC_IO_FAILURES.fetch_add(1, Ordering::Relaxed);
-//RS                     *self.backend_state.lock().unwrap() =
-//RS                         IOBackendState::Failed("internal scheduler IOCP completion port failed");
-//RS                     for interest in self.interests.lock().unwrap().drain(..) { interest.slot.wake(); }
-//RS                     for entry in active.values_mut() {
-//RS                         if !entry.cancel_requested {
-//RS                             entry.cancel_requested = true;
-//RS                             for pending in &entry.operations {
-//RS                                 let cancelled = unsafe { CancelIoEx(entry.socket, *pending) };
-//RS                                 if cancelled == 0 {
-//RS                                     let error = unsafe { GetLastError() };
-//RS                                     if error != 1168 { // ERROR_NOT_FOUND: completion already queued.
-//RS                                         METRIC_IO_FAILURES.fetch_add(1, Ordering::Relaxed);
-//RS                                     }
-//RS                                 }
-//RS                             }
-//RS                         }
-//RS                     }
-//RS                     // CancelIoEx on an IOCP-associated socket queues one terminal
-//RS                     // completion per outstanding OVERLAPPED. Keep every Active
-//RS                     // socket owner and Box alive until those completions arrive.
-//RS                     let drain_deadline = Instant::now() + Duration::from_secs(5);
-//RS                     while !active.is_empty() && Instant::now() < drain_deadline {
-//RS                         let (mut drain_bytes, mut drain_key, mut drain_operation) =
-//RS                             (0, 0usize, std::ptr::null_mut());
-//RS                         unsafe {
-//RS                             GetQueuedCompletionStatus(
-//RS                                 port,
-//RS                                 &mut drain_bytes,
-//RS                                 &mut drain_key,
-//RS                                 &mut drain_operation,
-//RS                                 50,
-//RS                             );
-//RS                         }
-//RS                         if drain_operation.is_null() { continue; }
-//RS                         unsafe { drop(Box::from_raw(drain_operation)); }
-//RS                         METRIC_IO_RETIRED.fetch_add(1, Ordering::Relaxed);
-//RS                         let owner = active.iter().find_map(|(id, entry)|
-//RS                             entry.operations.contains(&drain_operation).then_some(*id));
-//RS                         if let Some(id) = owner {
-//RS                             let entry = active.get_mut(&id).unwrap();
-//RS                             entry.operations.retain(|candidate| *candidate != drain_operation);
-//RS                             if entry.operations.is_empty() {
-//RS                                 active.remove(&id);
-//RS                                 METRIC_IO_ACTIVE.fetch_sub(1, Ordering::Relaxed);
-//RS                                 self.streams.lock().unwrap().remove(&id);
-//RS                                 self.retire_requested.lock().unwrap().remove(&id);
-//RS                             }
-//RS                         } else {
-//RS                             METRIC_IO_STALE.fetch_add(1, Ordering::Relaxed);
-//RS                         }
-//RS                     }
-//RS                     self.iocp_port.store(0, Ordering::Release);
-//RS                     *self.backend_state.lock().unwrap() = IOBackendState::Closed;
-//RS                     if unsafe { CloseHandle(port) } != 0 {
-//RS                         METRIC_IO_PORT_CLOSED.fetch_add(1, Ordering::Relaxed);
-//RS                     } else {
-//RS                         METRIC_IO_FAILURES.fetch_add(1, Ordering::Relaxed);
-//RS                     }
-//RS                     if active.is_empty() {
-//RS                         self.streams.lock().unwrap().clear();
-//RS                         self.retire_requested.lock().unwrap().clear();
-//RS                     } else {
-//RS                         // Kernel did not return cancellation completions before
-//RS                         // bounded shutdown. Retain sockets and OVERLAPPED boxes
-//RS                         // permanently: truthful nonzero counters beat UAF.
-//RS                         std::mem::forget(active);
-//RS                     }
-//RS                     *self.backend_state.lock().unwrap() =
-//RS                         IOBackendState::Failed("internal scheduler IOCP completion port failed");
-//RS                     self.iocp_shutdown_done.store(true, Ordering::Release);
-//RS                     return;
-//RS                 }
-//RS                 if key != 0 { METRIC_IO_STALE.fetch_add(1, Ordering::Relaxed); }
-//RS                 continue;
-//RS             }
-//RS             if ok == 0 && unsafe { GetLastError() } != 995 {
-//RS                 METRIC_IO_FAILURES.fetch_add(1, Ordering::Relaxed);
-//RS             }
-//RS             unsafe { drop(Box::from_raw(operation)); }
-//RS             METRIC_IO_RETIRED.fetch_add(1, Ordering::Relaxed);
-//RS             let id = key.saturating_sub(1);
-//RS             let Some(entry) = active.get_mut(&id) else { continue; };
-//RS             entry.operations.retain(|candidate| *candidate != operation);
-//RS             let slot = {
-//RS                 let mut interests = self.interests.lock().unwrap();
-//RS                 let slot = interests.iter().find(|interest| interest.stream_id == id)
-//RS                     .map(|interest| interest.slot.clone());
-//RS                 interests.retain(|interest| interest.stream_id != id);
-//RS                 slot
-//RS             };
-//RS             if let Some(slot) = slot {
-//RS                 METRIC_POLLER_WAKE.fetch_add(1, Ordering::Relaxed);
-//RS                 for pending in &entry.operations { unsafe { CancelIoEx(entry.socket, *pending); } }
-//RS                 slot.wake();
-//RS             }
-//RS             if entry.operations.is_empty() {
-//RS                 active.remove(&id);
-//RS                 METRIC_IO_ACTIVE.fetch_sub(1, Ordering::Relaxed);
-//RS                 self.streams.lock().unwrap().remove(&id);
-//RS                 self.retire_requested.lock().unwrap().remove(&id);
-//RS             }
-//RS         }
-//RS     }
-//RS     // jet:scheduler-native-iocp-end
-//RS 
-//RS     #[cfg(not(all(target_os = "windows", feature = "jet_native_io")))]
-//RS     fn run_iocp(self: Arc<Self>) {
-//RS         self.run_portable_poll();
-//RS     }
-//RS 
-//RS     #[allow(dead_code)]
-//RS     fn run_portable_poll(self: Arc<Self>) {
-//RS         use std::io::Write;
-//RS         loop {
-//RS             let ready: Vec<Arc<ParkSlot>> = {
-//RS                 let interests = self.interests.lock().unwrap();
-//RS                 let streams = self.streams.lock().unwrap();
-//RS                 let mut slots = Vec::new();
-//RS                 for interest in interests.iter() {
-//RS                     let Some(stream) = streams.get(&interest.stream_id) else {
-//RS                         continue;
-//RS                     };
-//RS                     let mut s = stream.lock().unwrap();
-//RS                     let _ = s.set_nonblocking(true);
-//RS                     let mut buf = [0u8; 1];
-//RS                     if interest.readable {
-//RS                         match s.peek(&mut buf) {
-//RS                             Ok(0) | Ok(_) => slots.push(interest.slot.clone()),
-//RS                             Err(_) => {}
-//RS                         }
-//RS                     }
-//RS                     if interest.writable {
-//RS                         match s.write(&[]) {
-//RS                             Ok(_) => slots.push(interest.slot.clone()),
-//RS                             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {}
-//RS                             Err(_) => slots.push(interest.slot.clone()),
-//RS                         }
-//RS                     }
-//RS                 }
-//RS                 slots
-//RS             };
-//RS             if !ready.is_empty() {
-//RS                 let mut interests = self.interests.lock().unwrap();
-//RS                 for slot in &ready {
-//RS                     interests.retain(|i| !Arc::ptr_eq(&i.slot, slot));
-//RS                     slot.wake();
-//RS                 }
-//RS             }
-//RS             let g = self.interests.lock().unwrap();
-//RS             let _ = self
-//RS                 .notify
-//RS                 .wait_timeout(g, Duration::from_millis(5))
-//RS                 .unwrap();
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS // Unix-domain streams and UDP sockets cannot be represented as `TcpStream`,
-//RS // but they must park on the same task slots instead of blocking worker threads.
-//RS // One process-wide poller owns all raw-descriptor readiness registrations.
-//RS // The token is the logical handle identity. It carries the descriptor number,
-//RS // not a cloned OS handle, so close/cancel share one lifecycle.
-//RS #[cfg(unix)]
-//RS pub struct JetSchedulerRawIoHandle {
-//RS     fd: i32,
-//RS     closed: AtomicBool,
-//RS     registrations: Mutex<HashMap<usize, std::sync::Weak<JetRawIoRegistration>>>,
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS impl JetSchedulerRawIoHandle {
-//RS     pub fn new(fd: i32) -> Arc<Self> {
-//RS         Arc::new(Self {
-//RS             fd,
-//RS             closed: AtomicBool::new(false),
-//RS             registrations: Mutex::new(HashMap::new()),
-//RS         })
-//RS     }
-//RS 
-//RS     fn add_registration(&self, registration: &Arc<JetRawIoRegistration>) -> bool {
-//RS         let mut registrations = self.registrations.lock().unwrap();
-//RS         if self.closed.load(Ordering::Acquire)
-//RS             || !registration.active.load(Ordering::Acquire)
-//RS         {
-//RS             return false;
-//RS         }
-//RS         registrations.insert(registration.id, Arc::downgrade(registration));
-//RS         true
-//RS     }
-//RS 
-//RS     fn remove_registration(&self, id: usize) {
-//RS         self.registrations.lock().unwrap().remove(&id);
-//RS     }
-//RS 
-//RS     /// Close the logical handle once. Every live wait is woken and removed by
-//RS     /// its registration guard; repeated close calls are no-ops.
-//RS     pub fn close(&self) {
-//RS         if self.closed.swap(true, Ordering::AcqRel) {
-//RS             return;
-//RS         }
-//RS         let registrations = self
-//RS             .registrations
-//RS             .lock()
-//RS             .unwrap()
-//RS             .drain()
-//RS             .filter_map(|(_, registration)| registration.upgrade())
-//RS             .collect::<Vec<_>>();
-//RS         for registration in registrations {
-//RS             registration.close();
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS pub fn jet_scheduler_raw_io_handle(fd: i32) -> Arc<JetSchedulerRawIoHandle> {
-//RS     JetSchedulerRawIoHandle::new(fd)
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS struct JetRawIoRegistration {
-//RS     id: usize,
-//RS     handle: Arc<JetSchedulerRawIoHandle>,
-//RS     poller: std::sync::Weak<JetRawIoPoller>,
-//RS     slot: Arc<ParkSlot>,
-//RS     ready: Arc<Mutex<(bool, bool)>>,
-//RS     active: AtomicBool,
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS impl JetRawIoRegistration {
-//RS     fn close(&self) {
-//RS         if !self.active.swap(false, Ordering::AcqRel) {
-//RS             return;
-//RS         }
-//RS         self.handle.remove_registration(self.id);
-//RS         if let Some(poller) = self.poller.upgrade() {
-//RS             poller.unregister(self.id);
-//RS         }
-//RS         self.slot.wake();
-//RS     }
-//RS 
-//RS     fn complete(&self, observed: (bool, bool)) {
-//RS         if !self.active.swap(false, Ordering::AcqRel) {
-//RS             return;
-//RS         }
-//RS         self.handle.remove_registration(self.id);
-//RS         *self.ready.lock().unwrap() = observed;
-//RS         self.slot.wake();
-//RS     }
-//RS 
-//RS     fn deactivate(&self) {
-//RS         if self.active.swap(false, Ordering::AcqRel) {
-//RS             self.handle.remove_registration(self.id);
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS struct JetRawIoInterest {
-//RS     registration: Arc<JetRawIoRegistration>,
-//RS     readable: bool,
-//RS     writable: bool,
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS struct JetRawIoPoller {
-//RS     interests: Mutex<Vec<JetRawIoInterest>>,
-//RS     notify: Condvar,
-//RS     next_key: AtomicUsize,
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS impl JetRawIoPoller {
-//RS     fn register(
-//RS         self: &Arc<Self>,
-//RS         handle: Arc<JetSchedulerRawIoHandle>,
-//RS         readable: bool,
-//RS         writable: bool,
-//RS     ) -> Option<Arc<JetRawIoRegistration>> {
-//RS         let id = self.next_key.fetch_add(1, Ordering::Relaxed);
-//RS         let slot = ParkSlot::new();
-//RS         let ready = Arc::new(Mutex::new((false, false)));
-//RS         let registration = Arc::new(JetRawIoRegistration {
-//RS             id,
-//RS             handle: handle.clone(),
-//RS             poller: Arc::downgrade(self),
-//RS             slot: slot.clone(),
-//RS             ready: ready.clone(),
-//RS             active: AtomicBool::new(true),
-//RS         });
-//RS         self.interests.lock().unwrap().push(JetRawIoInterest {
-//RS             registration: registration.clone(),
-//RS             readable,
-//RS             writable,
-//RS         });
-//RS         if !handle.add_registration(&registration) {
-//RS             self.interests
-//RS                 .lock()
-//RS                 .unwrap()
-//RS                 .retain(|interest| interest.registration.id != id);
-//RS             registration.deactivate();
-//RS             self.notify.notify_one();
-//RS             return None;
-//RS         }
-//RS         self.notify.notify_one();
-//RS         Some(registration)
-//RS     }
-//RS 
-//RS     fn unregister(&self, id: usize) {
-//RS         self.interests
-//RS             .lock()
-//RS             .unwrap()
-//RS             .retain(|interest| interest.registration.id != id);
-//RS         self.notify.notify_one();
-//RS     }
-//RS 
-//RS     fn run(self: Arc<Self>) {
-//RS         #[repr(C)]
-//RS         struct PollFd {
-//RS             fd: i32,
-//RS             events: i16,
-//RS             revents: i16,
-//RS         }
-//RS         extern "C" {
-//RS             fn poll(fds: *mut PollFd, count: usize, timeout_ms: i32) -> i32;
-//RS         }
-//RS         const POLLIN: i16 = 0x0001;
-//RS         const POLLOUT: i16 = 0x0004;
-//RS         loop {
-//RS             let (mut descriptors, descriptor_ids) = {
-//RS                 let interests = self.interests.lock().unwrap();
-//RS                 if interests.is_empty() {
-//RS                     let _guard = self.notify.wait(interests).unwrap();
-//RS                     continue;
-//RS                 }
-//RS                 let descriptors = interests
-//RS                     .iter()
-//RS                     .map(|interest| PollFd {
-//RS                         fd: interest.registration.handle.fd,
-//RS                         events: (if interest.readable { POLLIN } else { 0 })
-//RS                             | (if interest.writable { POLLOUT } else { 0 }),
-//RS                         revents: 0,
-//RS                     })
-//RS                     .collect::<Vec<_>>();
-//RS                 let ids = interests
-//RS                     .iter()
-//RS                     .map(|interest| interest.registration.id)
-//RS                     .collect::<Vec<_>>();
-//RS                 (descriptors, ids)
-//RS             };
-//RS             let ready = unsafe { poll(descriptors.as_mut_ptr(), descriptors.len(), 50) };
-//RS             if ready <= 0 {
-//RS                 continue;
-//RS             }
-//RS             const POLLERR: i16 = 0x0008;
-//RS             const POLLHUP: i16 = 0x0010;
-//RS             const POLLNVAL: i16 = 0x0020;
-//RS             let ready_events = descriptors
-//RS                 .iter()
-//RS                 .enumerate()
-//RS                 .filter(|(_, descriptor)| descriptor.revents != 0)
-//RS                 .filter_map(|(index, descriptor)| descriptor_ids.get(index).copied().map(|id| {
-//RS                     let terminal = descriptor.revents & (POLLERR | POLLHUP | POLLNVAL) != 0;
-//RS                     (id, descriptor.revents & POLLIN != 0 || terminal, descriptor.revents & POLLOUT != 0 || terminal)
-//RS                 }))
-//RS                 .collect::<Vec<_>>();
-//RS             let ready_ids = ready_events.iter().map(|(id, _, _)| *id).collect::<HashSet<_>>();
-//RS             let ready = {
-//RS                 let mut interests = self.interests.lock().unwrap();
-//RS                 let ready = interests
-//RS                     .iter()
-//RS                     .filter_map(|interest| {
-//RS                         let (_, readable, writable) = ready_events
-//RS                             .iter()
-//RS                             .find(|(id, _, _)| *id == interest.registration.id)?;
-//RS                         Some((
-//RS                             interest.registration.clone(),
-//RS                             (
-//RS                                 interest.readable && *readable,
-//RS                                 interest.writable && *writable,
-//RS                             ),
-//RS                         ))
-//RS                     })
-//RS                     .collect::<Vec<_>>();
-//RS                 interests.retain(|interest| !ready_ids.contains(&interest.registration.id));
-//RS                 ready
-//RS             };
-//RS             METRIC_POLLER_WAKE.fetch_add(ready.len(), Ordering::Relaxed);
-//RS             for (registration, observed) in ready {
-//RS                 registration.complete(observed);
-//RS             }
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS fn jet_raw_io_poller() -> Arc<JetRawIoPoller> {
-//RS     static POLLER: OnceLock<Arc<JetRawIoPoller>> = OnceLock::new();
-//RS     POLLER
-//RS         .get_or_init(|| {
-//RS             let poller = Arc::new(JetRawIoPoller {
-//RS                 interests: Mutex::new(Vec::new()),
-//RS                 notify: Condvar::new(),
-//RS                 next_key: AtomicUsize::new(0),
-//RS             });
-//RS             let worker = poller.clone();
-//RS             thread::spawn(move || worker.run());
-//RS             poller
-//RS         })
-//RS         .clone()
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS fn jet_scheduler_raw_io_wait(
-//RS     handle: &Arc<JetSchedulerRawIoHandle>,
-//RS     readable: bool,
-//RS     writable: bool,
-//RS     wait_kind: &str,
-//RS ) -> (bool, bool) {
-//RS     jet_scheduler_world_reject_uncontrolled("network");
-//RS     let poller = jet_raw_io_poller();
-//RS     let Some(registration) = poller.register(handle.clone(), readable, writable) else {
-//RS         return (false, false);
-//RS     };
-//RS     struct Registration(Arc<JetRawIoRegistration>);
-//RS     impl Drop for Registration {
-//RS         fn drop(&mut self) {
-//RS             self.0.close();
-//RS         }
-//RS     }
-//RS     let _registration = Registration(registration.clone());
-//RS     jet_scheduler_yield(wait_kind, &registration.slot, None);
-//RS     let ready = *registration.ready.lock().unwrap();
-//RS     ready
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS pub fn jet_scheduler_unix_stream_io_wait(
-//RS     handle: &Arc<JetSchedulerRawIoHandle>,
-//RS     read: bool,
-//RS     write: bool,
-//RS     wait_kind: &str,
-//RS ) {
-//RS     let _ = jet_scheduler_raw_io_wait(handle, read, write, wait_kind);
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS pub fn jet_scheduler_unix_stream_ready_wait(
-//RS     handle: &Arc<JetSchedulerRawIoHandle>,
-//RS     read: bool,
-//RS     write: bool,
-//RS     wait_kind: &str,
-//RS ) -> (bool, bool) {
-//RS     jet_scheduler_raw_io_wait(handle, read, write, wait_kind)
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS pub fn jet_scheduler_tcp_stream_ready_wait(
-//RS     stream: &std::net::TcpStream,
-//RS     read: bool,
-//RS     write: bool,
-//RS     wait_kind: &str,
-//RS ) -> (bool, bool) {
-//RS     use std::os::fd::AsRawFd;
-//RS     let handle = JetSchedulerRawIoHandle::new(stream.as_raw_fd());
-//RS     jet_scheduler_raw_io_wait(&handle, read, write, wait_kind)
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS pub fn jet_scheduler_tcp_listener_io_wait(
-//RS     listener: &std::net::TcpListener,
-//RS     wait_kind: &str,
-//RS ) {
-//RS     use std::os::fd::AsRawFd;
-//RS     let handle = JetSchedulerRawIoHandle::new(listener.as_raw_fd());
-//RS     let _ = jet_scheduler_raw_io_wait(&handle, true, false, wait_kind);
-//RS }
-//RS 
-//RS #[cfg(not(unix))]
-//RS pub fn jet_scheduler_tcp_listener_io_wait(
-//RS     _listener: &std::net::TcpListener,
-//RS     _wait_kind: &str,
-//RS ) {
-//RS     jet_scheduler_park_ms("tcp accept readiness", 5);
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS pub fn jet_scheduler_unix_listener_io_wait(
-//RS     handle: &Arc<JetSchedulerRawIoHandle>,
-//RS     wait_kind: &str,
-//RS ) {
-//RS     let _ = jet_scheduler_raw_io_wait(handle, true, false, wait_kind);
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS pub fn jet_scheduler_udp_io_wait(
-//RS     handle: &Arc<JetSchedulerRawIoHandle>,
-//RS     read: bool,
-//RS     write: bool,
-//RS     wait_kind: &str,
-//RS ) {
-//RS     let _ = jet_scheduler_raw_io_wait(handle, read, write, wait_kind);
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS pub fn jet_scheduler_udp_ready_wait(
-//RS     handle: &Arc<JetSchedulerRawIoHandle>,
-//RS     read: bool,
-//RS     write: bool,
-//RS     wait_kind: &str,
-//RS ) -> (bool, bool) {
-//RS     jet_scheduler_raw_io_wait(handle, read, write, wait_kind)
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS pub fn jet_scheduler_raw_io_write_wait(
-//RS     handle: &Arc<JetSchedulerRawIoHandle>,
-//RS     wait_kind: &str,
-//RS ) {
-//RS     let _ = jet_scheduler_raw_io_wait(handle, false, true, wait_kind);
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS pub fn jet_scheduler_raw_io_set_nonblocking(fd: i32) -> Result<(), String> {
-//RS     extern "C" {
-//RS         fn fcntl(fd: i32, command: i32, ...) -> i32;
-//RS     }
-//RS     const F_GETFL: i32 = 3;
-//RS     const F_SETFL: i32 = 4;
-//RS     #[cfg(target_os = "linux")]
-//RS     const O_NONBLOCK: i32 = 0x800;
-//RS     #[cfg(not(target_os = "linux"))]
-//RS     const O_NONBLOCK: i32 = 0x4;
-//RS 
-//RS     let flags = unsafe { fcntl(fd, F_GETFL) };
-//RS     if flags < 0 {
-//RS         return Err(std::io::Error::last_os_error().to_string());
-//RS     }
-//RS     if flags & O_NONBLOCK == 0 && unsafe { fcntl(fd, F_SETFL, flags | O_NONBLOCK) } < 0 {
-//RS         return Err(std::io::Error::last_os_error().to_string());
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS // jet:scheduler-native-end
-//RS 
-//RS static IO_POLLER: OnceLock<Arc<IOPoller>> = OnceLock::new();
-//RS 
-//RS fn io_poller() -> Arc<IOPoller> {
-//RS     IO_POLLER
-//RS         .get_or_init(|| {
-//RS             let poller = Arc::new(IOPoller {
-//RS                 interests: Mutex::new(Vec::new()),
-//RS                 streams: Mutex::new(HashMap::new()),
-//RS                 retire_requested: Mutex::new(HashSet::new()),
-//RS                 backend_state: Mutex::new(if cfg!(target_os = "windows") {
-//RS                     IOBackendState::Starting
-//RS                 } else {
-//RS                     IOBackendState::Running
-//RS                 }),
-//RS                 notify: Condvar::new(),
-//RS                 next_key: AtomicUsize::new(0),
-//RS                 #[cfg(target_os = "windows")]
-//RS                 iocp_port: AtomicUsize::new(0),
-//RS                 #[cfg(target_os = "windows")]
-//RS                 iocp_shutdown_done: AtomicBool::new(false),
-//RS             });
-//RS             let p = poller.clone();
-//RS             thread::spawn(move || p.run());
-//RS             poller
-//RS         })
-//RS         .clone()
-//RS }
-//RS 
-//RS /// Park until `stream` looks readable or writable (non-blocking probe via poller).
-//RS pub fn jet_scheduler_io_wait(stream: &TcpStream, read: bool, write: bool, wait_kind: &str) {
-//RS     jet_scheduler_world_reject_uncontrolled("network");
-//RS     let shared = Arc::new(Mutex::new(stream.try_clone().expect("tcp clone")));
-//RS     let poller = io_poller();
-//RS     let (id, slot) = poller
-//RS         .register(shared, read, write)
-//RS         .unwrap_or_else(|error| jet_scheduler_fatal(error));
-//RS     struct Registration(Arc<IOPoller>, usize);
-//RS     impl Drop for Registration {
-//RS         fn drop(&mut self) { self.0.unregister(self.1); }
-//RS     }
-//RS     let _registration = Registration(poller, id);
-//RS     jet_scheduler_yield(wait_kind, &slot, None);
-//RS     if let IOBackendState::Failed(error) = &*io_poller().backend_state.lock().unwrap() {
-//RS         jet_scheduler_fatal(error);
-//RS     }
-//RS }
-//RS 
-//RS 
-//RS // ── M2: scheduler-integrated channel (wake-on-send) ────────────────────────────
-//RS 
-//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-//RS pub enum JetChannelKind {
-//RS     Channel,
-//RS     Timer,
-//RS     Interval,
-//RS }
-//RS 
-//RS struct ChannelState<T> {
-//RS     queue: VecDeque<T>,
-//RS     recv_waiters: Vec<Arc<ParkSlot>>,
-//RS     send_waiters: Vec<Arc<ParkSlot>>,
-//RS     reserved_sends: usize,
-//RS     closed: bool,
-//RS     cancelled: bool,
-//RS     capacity: Option<usize>,
-//RS     kind: JetChannelKind,
-//RS     delay_ms: i64,
-//RS     sender_count: usize,
-//RS     receiver_count: usize,
-//RS }
-//RS 
-//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-//RS pub enum JetSchedulerSendReserveError {
-//RS     Closed,
-//RS     Cancelled,
-//RS     ReservationCountExhausted,
-//RS     QueueAllocationFailed,
-//RS }
-//RS 
-//RS #[derive(Debug)]
-//RS pub enum JetSchedulerSendPrepareError<E> {
-//RS     Closed,
-//RS     Preparation(E),
-//RS }
-//RS 
-//RS pub struct JetSchedulerSendReservation<T> {
-//RS     inner: Arc<ChannelInner<T>>,
-//RS     active: bool,
-//RS }
-//RS 
-//RS pub(crate) struct ChannelInner<T> {
-//RS     state: Mutex<ChannelState<T>>,
-//RS     observe_id: usize,
-//RS }
-//RS 
-//RS 
-//RS impl<T> Drop for JetSchedulerSendReservation<T> {
-//RS     fn drop(&mut self) {
-//RS         if !self.active {
-//RS             return;
-//RS         }
-//RS         let waiter = {
-//RS             let mut state = self
-//RS                 .inner
-//RS                 .state
-//RS                 .lock()
-//RS                 .unwrap_or_else(|poisoned| poisoned.into_inner());
-//RS             state.reserved_sends -= 1;
-//RS             let waiter = state.send_waiters.pop();
-//RS             jet_observe_channel_update(self.inner.observe_id, &state);
-//RS             waiter
-//RS         };
-//RS         self.active = false;
-//RS         if let Some(waiter) = waiter {
-//RS             jet_scheduler_wake(&waiter);
-//RS         }
-//RS     }
-//RS }
-//RS fn jet_observe_channel_update<T>(id: usize, state: &ChannelState<T>) {
-//RS     let Some(registry) = jet_observe_registry() else { return };
-//RS     registry.channels.lock().unwrap().insert(
-//RS         id,
-//RS         JetObserveChannel {
-//RS             depth: state.queue.len(),
-//RS             capacity: state.capacity,
-//RS             send_waiters: state.send_waiters.len(),
-//RS             recv_waiters: state.recv_waiters.len(),
-//RS             closed: state.closed,
-//RS         },
-//RS     );
-//RS }
-//RS 
-//RS pub struct JetSchedulerChannel<T> {
-//RS     inner: Arc<ChannelInner<T>>,
-//RS }
-//RS 
-//RS // D-TUPLE-DESTRUCT1: hand-written, not `#[derive(Clone)]` — the derive adds a
-//RS // spurious `T: Clone` bound (it can't see that only the `Arc` is cloned, not a
-//RS // `T`); an `Arc` clone never needs its payload to be `Clone`. Same reasoning as
-//RS // `JetSchedulerSender`'s manual impl right below.
-//RS impl<T> Clone for JetSchedulerChannel<T> {
-//RS     fn clone(&self) -> Self {
-//RS         let mut state = self.inner.state.lock().unwrap();
-//RS         state.receiver_count += 1;
-//RS         jet_observe_channel_update(self.inner.observe_id, &state);
-//RS         drop(state);
-//RS         JetSchedulerChannel {
-//RS             inner: self.inner.clone(),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS impl<T> Drop for JetSchedulerChannel<T> {
-//RS     fn drop(&mut self) {
-//RS         let send_waiters = {
-//RS             let mut st = self.inner.state.lock().unwrap();
-//RS             st.receiver_count = st.receiver_count.saturating_sub(1);
-//RS             let waiters = if st.receiver_count == 0 {
-//RS                 st.closed = true;
-//RS                 std::mem::take(&mut st.send_waiters)
-//RS             } else {
-//RS                 Vec::new()
-//RS             };
-//RS             jet_observe_channel_update(self.inner.observe_id, &st);
-//RS             waiters
-//RS         };
-//RS         for slot in send_waiters {
-//RS             slot.wake();
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS impl<T: Send> JetSchedulerChannel<T> {
-//RS     pub fn new() -> Self {
-//RS         Self::with_capacity(None, JetChannelKind::Channel, 0)
-//RS     }
-//RS 
-//RS     pub fn bounded(capacity: i64) -> Self {
-//RS         Self::with_capacity(
-//RS             Some(capacity.max(1) as usize),
-//RS             JetChannelKind::Channel,
-//RS             0,
-//RS         )
-//RS     }
-//RS 
-//RS     pub fn timer(delay_ms: i64) -> Self {
-//RS         Self::with_capacity(None, JetChannelKind::Timer, delay_ms.max(0))
-//RS     }
-//RS 
-//RS     pub fn interval(delay_ms: i64) -> Self {
-//RS         Self::with_capacity(None, JetChannelKind::Interval, delay_ms.max(1))
-//RS     }
-//RS 
-//RS     fn with_capacity(
-//RS         capacity: Option<usize>,
-//RS         kind: JetChannelKind,
-//RS         delay_ms: i64,
-//RS     ) -> Self {
-//RS         let observe_id = jet_observe_registry()
-//RS             .map(|registry| registry.next_channel.fetch_add(1, Ordering::Relaxed))
-//RS             .unwrap_or(0);
-//RS         let channel = JetSchedulerChannel {
-//RS             inner: Arc::new(ChannelInner {
-//RS                 state: Mutex::new(ChannelState {
-//RS                     queue: VecDeque::new(),
-//RS                     recv_waiters: Vec::new(),
-//RS                     send_waiters: Vec::new(),
-//RS                     reserved_sends: 0,
-//RS                     closed: false,
-//RS                     cancelled: false,
-//RS                     capacity,
-//RS                     kind,
-//RS                     delay_ms,
-//RS                     sender_count: 0,
-//RS                     receiver_count: 1,
-//RS                 }),
-//RS                 observe_id,
-//RS             }),
-//RS         };
-//RS         if observe_id != 0 {
-//RS             let state = channel.inner.state.lock().unwrap();
-//RS             jet_observe_channel_update(observe_id, &state);
-//RS         }
-//RS         channel
-//RS     }
-//RS 
-//RS     pub fn sender(&self) -> JetSchedulerSender<T> {
-//RS         let mut state = self.inner.state.lock().unwrap();
-//RS         state.sender_count += 1;
-//RS         jet_observe_channel_update(self.inner.observe_id, &state);
-//RS         drop(state);
-//RS         JetSchedulerSender {
-//RS             inner: self.inner.clone(),
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn receive(&self) -> Option<T> {
-//RS         loop {
-//RS             // D-CANCELMODEL1=C: a cancelled recv unwinds at this wait point (inside
-//RS             // a task) instead of returning the cooperative `None` sentinel. Shielded
-//RS             // regions defer the unwind and receive normally.
-//RS             if jet_scheduler_task_cancelled() && !jet_scheduler_shielded() {
-//RS                 jet_task_deliver_cancel();
-//RS                 return None;
-//RS             }
-//RS             if let Some(ctrl) = current_task_control() {
-//RS                 ctrl.wait_while_paused();
-//RS             }
-//RS             let slot = ParkSlot::new();
-//RS             let parked = {
-//RS                 let mut st = self.inner.state.lock().unwrap();
-//RS                 if let Some(v) = st.queue.pop_front() {
-//RS                     if let Some(slot) = st.send_waiters.pop() {
-//RS                         slot.wake();
-//RS                     }
-//RS                     jet_observe_channel_update(self.inner.observe_id, &st);
-//RS                     return Some(v);
-//RS                 }
-//RS                 if st.closed {
-//RS                     jet_observe_channel_update(self.inner.observe_id, &st);
-//RS                     return None;
-//RS                 }
-//RS                 st.recv_waiters.push(slot.clone());
-//RS                 jet_observe_channel_update(self.inner.observe_id, &st);
-//RS                 true
-//RS             };
-//RS             if parked {
-//RS                 jet_scheduler_yield("channel receive", &slot, None);
-//RS                 let mut st = self.inner.state.lock().unwrap();
-//RS                 st.recv_waiters.retain(|w| !Arc::ptr_eq(w, &slot));
-//RS                 jet_observe_channel_update(self.inner.observe_id, &st);
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn try_receive(&self) -> Option<T> {
-//RS         let mut st = self.inner.state.lock().unwrap();
-//RS         let out = st.queue.pop_front();
-//RS         if out.is_some() {
-//RS             if let Some(slot) = st.send_waiters.pop() {
-//RS                 slot.wake();
-//RS             }
-//RS         }
-//RS         jet_observe_channel_update(self.inner.observe_id, &st);
-//RS         out
-//RS     }
-//RS 
-//RS     pub fn kind(&self) -> JetChannelKind {
-//RS         self.inner.state.lock().unwrap().kind
-//RS     }
-//RS 
-//RS     pub fn is_timer(&self) -> bool {
-//RS         self.kind() == JetChannelKind::Timer
-//RS     }
-//RS 
-//RS     pub fn is_interval(&self) -> bool {
-//RS         self.kind() == JetChannelKind::Interval
-//RS     }
-//RS 
-//RS     pub fn is_cancelled(&self) -> bool {
-//RS         self.inner.state.lock().unwrap().cancelled
-//RS     }
-//RS 
-//RS     pub fn is_ready(&self) -> bool {
-//RS         let state = self.inner.state.lock().unwrap();
-//RS         !state.queue.is_empty() || state.closed
-//RS     }
-//RS 
-//RS     pub fn delay_ms(&self) -> i64 {
-//RS         self.inner.state.lock().unwrap().delay_ms
-//RS     }
-//RS 
-//RS     pub fn close(&self) {
-//RS         self.close_inner(false);
-//RS     }
-//RS 
-//RS     pub fn cancel(&self) {
-//RS         self.close_inner(true);
-//RS     }
-//RS 
-//RS     fn close_inner(&self, cancelled: bool) {
-//RS         let (recv_waiters, send_waiters) = {
-//RS             let mut st = self.inner.state.lock().unwrap();
-//RS             st.closed = true;
-//RS             st.cancelled |= cancelled;
-//RS             let waiters = (
-//RS                 std::mem::take(&mut st.recv_waiters),
-//RS                 std::mem::take(&mut st.send_waiters),
-//RS             );
-//RS             jet_observe_channel_update(self.inner.observe_id, &st);
-//RS             waiters
-//RS         };
-//RS         for w in recv_waiters.into_iter().chain(send_waiters) {
-//RS             w.wake();
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS pub struct JetSchedulerSender<T> {
-//RS     inner: Arc<ChannelInner<T>>,
-//RS }
-//RS 
-//RS impl<T> Clone for JetSchedulerSender<T> {
-//RS     fn clone(&self) -> Self {
-//RS         let mut state = self.inner.state.lock().unwrap();
-//RS         state.sender_count += 1;
-//RS         jet_observe_channel_update(self.inner.observe_id, &state);
-//RS         drop(state);
-//RS         JetSchedulerSender {
-//RS             inner: self.inner.clone(),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS impl<T> Drop for JetSchedulerSender<T> {
-//RS     fn drop(&mut self) {
-//RS         let recv_waiters = {
-//RS             let mut st = self.inner.state.lock().unwrap();
-//RS             st.sender_count = st.sender_count.saturating_sub(1);
-//RS             let waiters = if st.sender_count == 0 {
-//RS                 st.closed = true;
-//RS                 std::mem::take(&mut st.recv_waiters)
-//RS             } else {
-//RS                 Vec::new()
-//RS             };
-//RS             jet_observe_channel_update(self.inner.observe_id, &st);
-//RS             waiters
-//RS         };
-//RS         for slot in recv_waiters {
-//RS             slot.wake();
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS impl<T: Send> JetSchedulerSender<T> {
-//RS     pub fn close(&self) {
-//RS         let (recv_waiters, send_waiters) = {
-//RS             let mut st = self.inner.state.lock().unwrap();
-//RS             st.closed = true;
-//RS             let waiters = (
-//RS                 std::mem::take(&mut st.recv_waiters),
-//RS                 std::mem::take(&mut st.send_waiters),
-//RS             );
-//RS             jet_observe_channel_update(self.inner.observe_id, &st);
-//RS             waiters
-//RS         };
-//RS         for w in recv_waiters.into_iter().chain(send_waiters) {
-//RS             w.wake();
-//RS         }
-//RS     }
-//RS 
-//RS     /// Reserve bounded capacity before preparing or extracting an owned
-//RS     /// payload. A returned reservation is honored against all later senders.
-//RS     pub fn reserve_send(
-//RS         &self,
-//RS     ) -> Result<JetSchedulerSendReservation<T>, JetSchedulerSendReserveError> {
-//RS         loop {
-//RS             if jet_scheduler_task_cancelled() && !jet_scheduler_shielded() {
-//RS                 jet_task_deliver_cancel();
-//RS                 return Err(JetSchedulerSendReserveError::Cancelled);
-//RS             }
-//RS             if let Some(ctrl) = current_task_control() {
-//RS                 ctrl.wait_while_paused();
-//RS             }
-//RS             let slot = ParkSlot::new();
-//RS             let reserved = {
-//RS                 let mut state = self.inner.state.lock().unwrap();
-//RS                 if state.closed || state.receiver_count == 0 {
-//RS                     jet_observe_channel_update(self.inner.observe_id, &state);
-//RS                     return Err(JetSchedulerSendReserveError::Closed);
-//RS                 }
-//RS                 let occupied = state
-//RS                     .queue
-//RS                     .len()
-//RS                     .checked_add(state.reserved_sends)
-//RS                     .ok_or(JetSchedulerSendReserveError::ReservationCountExhausted)?;
-//RS                 if state.capacity.is_some_and(|capacity| occupied >= capacity) {
-//RS                     state.send_waiters.push(slot.clone());
-//RS                     jet_observe_channel_update(self.inner.observe_id, &state);
-//RS                     false
-//RS                 } else {
-//RS                     let reserved_sends = state
-//RS                         .reserved_sends
-//RS                         .checked_add(1)
-//RS                         .ok_or(JetSchedulerSendReserveError::ReservationCountExhausted)?;
-//RS                     if state.queue.try_reserve(reserved_sends).is_err() {
-//RS                         jet_observe_channel_update(self.inner.observe_id, &state);
-//RS                         return Err(JetSchedulerSendReserveError::QueueAllocationFailed);
-//RS                     }
-//RS                     state.reserved_sends = reserved_sends;
-//RS                     jet_observe_channel_update(self.inner.observe_id, &state);
-//RS                     true
-//RS                 }
-//RS             };
-//RS             if reserved {
-//RS                 return Ok(JetSchedulerSendReservation {
-//RS                     inner: self.inner.clone(),
-//RS                     active: true,
-//RS                 });
-//RS             }
-//RS             jet_scheduler_yield("channel send capacity", &slot, None);
-//RS             let mut state = self.inner.state.lock().unwrap();
-//RS             state.send_waiters.retain(|waiter| !Arc::ptr_eq(waiter, &slot));
-//RS             jet_observe_channel_update(self.inner.observe_id, &state);
-//RS         }
-//RS     }
-//RS 
-//RS     /// Send an already-owned value while returning it exactly when acceptance
-//RS     /// fails. Transferable Source owners should reserve before extraction and
-//RS     /// use `commit_prepared` instead.
-//RS     pub fn send_owned(&self, value: T) -> Result<(), T> {
-//RS         match self.reserve_send() {
-//RS             Ok(reservation) => reservation.commit(value),
-//RS             Err(_) => Err(value),
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn send(&self, value: T) -> bool {
-//RS         self.send_owned(value).is_ok()
-//RS     }
-//RS }
-//RS 
-//RS impl<T: Send> JetSchedulerSendReservation<T> {
-//RS     /// Commit a value already owned by the caller. A rejected acceptance
-//RS     /// returns the exact value and releases this reservation.
-//RS     pub fn commit(mut self, value: T) -> Result<(), T> {
-//RS         let (result, waiter) = {
-//RS             let mut state = self
-//RS                 .inner
-//RS                 .state
-//RS                 .lock()
-//RS                 .unwrap_or_else(|poisoned| poisoned.into_inner());
-//RS             let (result, waiter) = if state.closed || state.receiver_count == 0 {
-//RS                 state.reserved_sends -= 1;
-//RS                 self.active = false;
-//RS                 (Err(value), state.send_waiters.pop())
-//RS             } else {
-//RS                 state.queue.push_back(value);
-//RS                 state.reserved_sends -= 1;
-//RS                 self.active = false;
-//RS                 (Ok(()), state.recv_waiters.pop())
-//RS             };
-//RS             jet_observe_channel_update(self.inner.observe_id, &state);
-//RS             (result, waiter)
-//RS         };
-//RS         if let Some(waiter) = waiter {
-//RS             jet_scheduler_wake(&waiter);
-//RS         }
-//RS         result
-//RS     }
-//RS 
-//RS     /// Atomically prepare an owned payload and publish it into capacity
-//RS     /// reserved by `reserve_send`. The closure runs only after the channel is
-//RS     /// accepted and while its queue lock excludes close/other senders. Queue
-//RS     /// storage is preallocated by the reservation, so after `Ok((value,
-//RS     /// receipt))` returns publication has no cancellation, allocation, or
-//RS     /// fallible step.
-//RS     pub fn commit_prepared<R, E>(
-//RS         mut self,
-//RS         prepare: impl FnOnce() -> Result<(T, R), E>,
-//RS     ) -> Result<R, JetSchedulerSendPrepareError<E>> {
-//RS         let mut prepare = Some(prepare);
-//RS         let (result, waiter) = {
-//RS             let mut state = self
-//RS                 .inner
-//RS                 .state
-//RS                 .lock()
-//RS                 .unwrap_or_else(|poisoned| poisoned.into_inner());
-//RS             let (result, waiter) = if state.closed || state.receiver_count == 0 {
-//RS                 state.reserved_sends -= 1;
-//RS                 self.active = false;
-//RS                 (
-//RS                     Err(JetSchedulerSendPrepareError::Closed),
-//RS                     state.send_waiters.pop(),
-//RS                 )
-//RS             } else {
-//RS                 match prepare.take().expect("prepared send closure missing")() {
-//RS                     Ok((value, receipt)) => {
-//RS                         state.queue.push_back(value);
-//RS                         state.reserved_sends -= 1;
-//RS                         self.active = false;
-//RS                         (Ok(receipt), state.recv_waiters.pop())
-//RS                     }
-//RS                     Err(error) => {
-//RS                         state.reserved_sends -= 1;
-//RS                         self.active = false;
-//RS                         (
-//RS                             Err(JetSchedulerSendPrepareError::Preparation(error)),
-//RS                             state.send_waiters.pop(),
-//RS                         )
-//RS                     }
-//RS                 }
-//RS             };
-//RS             jet_observe_channel_update(self.inner.observe_id, &state);
-//RS             (result, waiter)
-//RS         };
-//RS         drop(prepare);
-//RS         if let Some(waiter) = waiter {
-//RS             jet_scheduler_wake(&waiter);
-//RS         }
-//RS         result
-//RS     }
-//RS }
-//RS 
-//RS impl<T: Send> JetSchedulerChannel<T> {
-//RS     /// Close exactly this receiver endpoint and recover queued values only
-//RS     /// when it is the final physical receiver. Surviving receiver aliases
-//RS     /// retain the queue; concurrent senders observe the terminal receiver count
-//RS     /// under the same state lock and cannot enqueue after the drain.
-//RS     pub fn close_receiver_and_drain(&self) -> Vec<T> {
-//RS         let (queue, recv_waiters, send_waiters) = {
-//RS             let mut st = self.inner.state.lock().unwrap();
-//RS             if st.receiver_count > 1 {
-//RS                 return Vec::new();
-//RS             }
-//RS             st.receiver_count = 0;
-//RS             st.closed = true;
-//RS             let queue = std::mem::take(&mut st.queue);
-//RS             let recv_waiters = std::mem::take(&mut st.recv_waiters);
-//RS             let send_waiters = std::mem::take(&mut st.send_waiters);
-//RS             jet_observe_channel_update(self.inner.observe_id, &st);
-//RS             (queue, recv_waiters, send_waiters)
-//RS         };
-//RS         for waiter in recv_waiters.into_iter().chain(send_waiters) {
-//RS             waiter.wake();
-//RS         }
-//RS         queue.into_iter().collect()
-//RS     }
-//RS }
-//RS 
-//RS impl<T> JetSchedulerChannel<T> {
-//RS     #[allow(dead_code)]
-//RS     pub(crate) fn select_inner(&self) -> Arc<ChannelInner<T>> {
-//RS         self.inner.clone()
-//RS     }
-//RS }
-//RS /// A non-owning view used to keep a channel's physical queue state alive
-//RS /// during selection without retaining a logical receiver endpoint.
-//RS pub struct JetSchedulerChannelSelectView<T> {
-//RS     inner: Arc<ChannelInner<T>>,
-//RS }
-//RS 
-//RS impl<T> Clone for JetSchedulerChannelSelectView<T> {
-//RS     fn clone(&self) -> Self {
-//RS         Self {
-//RS             inner: self.inner.clone(),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS impl<T> JetSchedulerChannel<T> {
-//RS     /// Retain only the queue state for a blocking select. Dropping this view
-//RS     /// never changes receiver ownership or closes the channel.
-//RS     pub fn select_view(&self) -> JetSchedulerChannelSelectView<T> {
-//RS         JetSchedulerChannelSelectView {
-//RS             inner: self.inner.clone(),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS 
-//RS // ── D-CONCSELECT1=A: scoped select multiplex ─────────────────────────────────
-//RS 
-//RS pub enum JetSelectOutcome<T> {
-//RS     Recv { arm: usize, value: T },
-//RS     After { arm: usize },
-//RS     Closed,
-//RS }
-//RS 
-//RS #[allow(dead_code)]
-//RS impl<T> ChannelInner<T> {
-//RS     fn try_pop(&self) -> Option<T> {
-//RS         let mut st = self.state.lock().unwrap();
-//RS         let out = st.queue.pop_front();
-//RS         if out.is_some() {
-//RS             if let Some(slot) = st.send_waiters.pop() {
-//RS                 slot.wake();
-//RS             }
-//RS         }
-//RS         out
-//RS     }
-//RS 
-//RS     fn register_select_waiter(&self, slot: Arc<ParkSlot>) {
-//RS         self.state.lock().unwrap().recv_waiters.push(slot);
-//RS     }
-//RS 
-//RS     fn is_closed_and_empty(&self) -> bool {
-//RS         let state = self.state.lock().unwrap();
-//RS         state.closed && state.queue.is_empty()
-//RS     }
-//RS 
-//RS     fn remove_waiter(&self, slot: &ParkSlot) {
-//RS         self.state
-//RS             .lock()
-//RS             .unwrap()
-//RS             .recv_waiters
-//RS             .retain(|w| !std::ptr::eq(Arc::as_ptr(w), std::ptr::from_ref(slot)));
-//RS     }
-//RS }
-//RS 
-//RS struct SelectRegistration<T> {
-//RS     recvs: Vec<Arc<ChannelInner<T>>>,
-//RS     master: Arc<ParkSlot>,
-//RS     cancel_control: Option<Arc<JetTaskControl>>,
-//RS }
-//RS 
-//RS impl<T> SelectRegistration<T> {
-//RS     fn new(
-//RS         recvs: &[Arc<ChannelInner<T>>],
-//RS         master: Arc<ParkSlot>,
-//RS         cancel_control: Option<Arc<JetTaskControl>>,
-//RS     ) -> Self {
-//RS         for channel in recvs {
-//RS             channel.register_select_waiter(master.clone());
-//RS         }
-//RS         if let Some(control) = &cancel_control {
-//RS             control.register_cancel_waiter(&master);
-//RS         }
-//RS         Self {
-//RS             recvs: recvs.to_vec(),
-//RS             master,
-//RS             cancel_control,
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS impl<T> Drop for SelectRegistration<T> {
-//RS     fn drop(&mut self) {
-//RS         for channel in &self.recvs {
-//RS             channel.remove_waiter(&self.master);
-//RS         }
-//RS         if let Some(control) = &self.cancel_control {
-//RS             control.remove_cancel_waiter(&self.master);
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS #[allow(dead_code)] // generated `jet_std::jet_select_wait` and JIT hooks
-//RS pub(crate) fn jet_scheduler_select<T: Send>(
-//RS     recvs: Vec<Arc<ChannelInner<T>>>,
-//RS     after_ms: Vec<u64>,
-//RS ) -> JetSelectOutcome<T> {
-//RS     assert!(
-//RS         !recvs.is_empty() || !after_ms.is_empty(),
-//RS         "select: no arms registered"
-//RS     );
-//RS 
-//RS     for (i, ch) in recvs.iter().enumerate() {
-//RS         if let Some(v) = ch.try_pop() {
-//RS             return JetSelectOutcome::Recv { arm: i, value: v };
-//RS         }
-//RS     }
-//RS     if let Some((i, _)) = after_ms.iter().enumerate().find(|(_, ms)| **ms == 0) {
-//RS         return JetSelectOutcome::After { arm: i };
-//RS     }
-//RS     if after_ms.is_empty()
-//RS         && !recvs.is_empty()
-//RS         && recvs.iter().all(|ch| ch.is_closed_and_empty())
-//RS     {
-//RS         return JetSelectOutcome::Closed;
-//RS     }
-//RS 
-//RS     let master = ParkSlot::new();
-//RS     let cancel_control = current_task_control();
-//RS     let started = Instant::now();
-//RS     let _registration =
-//RS         SelectRegistration::new(&recvs, master.clone(), cancel_control.clone());
-//RS     // Close can race the first check and happen before waiter registration.
-//RS     // Recheck after registration so a lost close wake cannot park forever.
-//RS     if after_ms.is_empty()
-//RS         && !recvs.is_empty()
-//RS         && recvs.iter().all(|ch| ch.is_closed_and_empty())
-//RS     {
-//RS         return JetSelectOutcome::Closed;
-//RS     }
-//RS     for ms in &after_ms {
-//RS         timer_wheel().schedule(Instant::now() + Duration::from_millis(*ms), master.clone());
-//RS     }
-//RS 
-//RS     loop {
-//RS         // D-CANCELMODEL1=C: a cancelled select unwinds at this wait point (inside a
-//RS         // task) instead of returning the cooperative `Closed` sentinel. Shield defers.
-//RS         if jet_scheduler_task_cancelled() && !jet_scheduler_shielded() {
-//RS             jet_task_deliver_cancel();
-//RS             return JetSelectOutcome::Closed;
-//RS         }
-//RS         METRIC_PARKED.fetch_add(1, Ordering::Relaxed);
-//RS         jet_scheduler_yield("select wait", &master, None);
-//RS         METRIC_PARKED.fetch_sub(1, Ordering::Relaxed);
-//RS         for (i, ch) in recvs.iter().enumerate() {
-//RS             if let Some(v) = ch.try_pop() {
-//RS                 return JetSelectOutcome::Recv { arm: i, value: v };
-//RS             }
-//RS         }
-//RS         if let Some((i, _)) = after_ms
-//RS             .iter()
-//RS             .enumerate()
-//RS             .find(|(_, ms)| started.elapsed() >= Duration::from_millis(**ms))
-//RS         {
-//RS             return JetSelectOutcome::After { arm: i };
-//RS         }
-//RS         if after_ms.is_empty()
-//RS             && !recvs.is_empty()
-//RS             && recvs.iter().all(|ch| ch.is_closed_and_empty())
-//RS         {
-//RS             return JetSelectOutcome::Closed;
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// D-CONC-CHAN2=D: probe one readiness table without parking. `None` means no
-//RS /// receive or timer arm is ready yet; `Closed` remains explicit so a caller
-//RS /// with an `else` arm can treat a closed endpoint as non-ready without changing
-//RS /// the blocking select's close and cancellation behavior.
-//RS pub(crate) fn jet_scheduler_try_select<T: Send>(
-//RS     recvs: Vec<Arc<ChannelInner<T>>>,
-//RS     after_ms: Vec<u64>,
-//RS ) -> Option<JetSelectOutcome<T>> {
-//RS     assert!(
-//RS         !recvs.is_empty() || !after_ms.is_empty(),
-//RS         "select: no arms registered"
-//RS     );
-//RS 
-//RS     for (i, ch) in recvs.iter().enumerate() {
-//RS         if let Some(v) = ch.try_pop() {
-//RS             return Some(JetSelectOutcome::Recv { arm: i, value: v });
-//RS         }
-//RS     }
-//RS     if let Some((i, _)) = after_ms.iter().enumerate().find(|(_, ms)| **ms == 0) {
-//RS         return Some(JetSelectOutcome::After { arm: i });
-//RS     }
-//RS     if after_ms.is_empty()
-//RS         && !recvs.is_empty()
-//RS         && recvs.iter().all(|ch| ch.is_closed_and_empty())
-//RS     {
-//RS         return Some(JetSelectOutcome::Closed);
-//RS     }
-//RS     None
-//RS }
-//RS 
-//RS // ── Scheduler metrics (Tower #126 observability) ─────────────────────────────
-//RS 
-//RS static METRIC_PARKED: AtomicUsize = AtomicUsize::new(0);
-//RS static METRIC_POLLER_WAKE: AtomicUsize = AtomicUsize::new(0);
-//RS static METRIC_PARK_BLOCKS: AtomicUsize = AtomicUsize::new(0);
-//RS static METRIC_IO_ACTIVE: AtomicUsize = AtomicUsize::new(0);
-// END-PORT-PENDING 0185 crates/jet-codegen/src/Prelude/Scheduler.rs:1805-3604
+use core.tasks.runtime.scheduler.[IOPoller, IOBackendState, IOInterest, ParkSlot,
+    jet_scheduler_yield, current_task_control, TEST_IOCP_GQCS_FATAL, JetTaskControl, timer_wheel,
+    jet_scheduler_wake, jet_scheduler_task_cancelled, jet_scheduler_shielded, jet_task_deliver_cancel]
+use core.tasks.runtime.scheduler_03.[jet_scheduler_io_backend, METRIC_IO_ALLOCATED,
+    METRIC_IO_RETIRED, METRIC_IO_STALE, METRIC_IO_FAILURES, METRIC_IO_PORT_CLOSED]
+use core.sys.target as target
+use core.array.[Array]
+use std.sync.[Arc, Weak, Mutex, Condvar, OnceLock]
+use std.sync.atomic.[AtomicBool, AtomicUsize, Ordering]
+use std.net.[TcpStream, TcpListener, UdpSocket]
+use std.time.[Duration, Instant]
+use std.[mem, ptr, io, thread]
+
+impl IOPoller {
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1805
+    // GATE #4565: kernel primitive
+    #Unsafe("remove interest and logical stream owner under mutex; Windows retires outstanding kernel requests")
+    fn unregister(self: &Self, id: USize) -> {
+        self.interests.lock().unwrap().retain(fn(i) { i.stream_id != id })
+        _ :: self.retire_requested.lock().unwrap().insert(id)
+        if target.selected_os() != .Windows {
+            _ :: self.streams.lock().unwrap().remove(&id)
+            _ :: self.retire_requested.lock().unwrap().remove(&id)
+        } else { self.iocp_notify() }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1819
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1832
+    // GATE #4565: kernel primitive
+    #Unsafe("native completion-port notification borrows live port; portable mode uses condvar")
+    fn iocp_notify(self: &Self) -> {
+        if target.selected_os() == .Windows && jet_scheduler_io_backend() == "iocp" {
+            // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1822
+            #Import module c.kernel32 {
+                #ABI(system)
+                fn PostQueuedCompletionStatus(port: USize, bytes: U32, key: USize, ov: *U8) -> I32 = "PostQueuedCompletionStatus"
+            }
+            port :: self.iocp_port.load(Ordering.Acquire)
+            if port != 0 { _ :: PostQueuedCompletionStatus(port, 0, 0, ptr.null_mut()) }
+        } else { self.notify.notify_one() }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1836
+    fn run(self: Arc<Self>) -> {
+        backend :: jet_scheduler_io_backend()
+        if target.selected_os() == .Linux && backend == "epoll" { self.run_linux_epoll() }
+        else if backend == "kqueue" { self.run_kqueue() }
+        else if target.selected_os() == .Windows && backend == "iocp" { self.run_iocp() }
+        else { self.run_portable_poll() }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1883
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1973
+    // GATE #4565: kernel primitive
+    #Unsafe("epoll owns native registration set and initialized C-layout result buffer")
+    fn run_linux_epoll(self: Arc<Self>) -> {
+        if target.selected_os() != .Linux || jet_scheduler_io_backend() != "epoll" { self.run_portable_poll(); return }
+        // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1889
+        #Layout(c)
+        #Derive(Clone, Copy)
+        struct EpollEvent { events: U32, data: U64 }
+        // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1894
+        const EPOLLIN: U32 = 1
+        // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1895
+        const EPOLLOUT: U32 = 4
+        // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1896
+        const EPOLL_CTL_ADD: I32 = 1
+        // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1897
+        const EPOLL_CTL_DEL: I32 = 2
+        #Import module c.c {
+            // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1901
+            fn epoll_create1(flags: I32) -> I32 = "epoll_create1"
+            // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1902
+            fn epoll_ctl(epfd: I32, op: I32, fd: I32, event: *EpollEvent) -> I32 = "epoll_ctl"
+            // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1903
+            fn epoll_wait(epfd: I32, events: *EpollEvent, maxevents: I32, timeout: I32) -> I32 = "epoll_wait"
+        }
+        epfd :: epoll_create1(0x80000) // CLOEXEC
+        assert(epfd >= 0, "epoll_create1 failed")
+        fd_slots := [I32:Arc<ParkSlot>]{}
+        loop {
+            pending :: {
+                interests :: self.interests.lock().unwrap()
+                streams :: self.streams.lock().unwrap()
+                out := []
+                for interest in interests.iter() {
+                    stream :: streams.get(&interest.stream_id) ?? continue
+                    fd :: stream.lock().unwrap().as_raw_fd()
+                    if fd_slots.contains_key(&fd) { continue }
+                    events := U32{0}
+                    if interest.readable { events |= EPOLLIN }
+                    if interest.writable { events |= EPOLLOUT }
+                    out.push((fd, events, interest.slot.clone()))
+                }
+                ^out
+            }
+            for (fd, events, slot) in pending {
+                ev :: EpollEvent{events: events, data: fd as U64}
+                rc :: epoll_ctl(epfd, EPOLL_CTL_ADD, fd, &ev)
+                if rc == 0 { fd_slots[fd] = ^slot }
+            }
+            events := Array<EpollEvent,64>.filled(EpollEvent{events: 0, data: 0})
+            n :: epoll_wait(epfd, events.as_mut_ptr(), 64, 50)
+            if n > 0 {
+                _ :: METRIC_POLLER_WAKE.fetch_add(n as USize, Ordering.Relaxed)
+                for ev in &events[..n as USize] {
+                    fd :: ev.data as I32
+                    if fd_slots.remove(&fd) is Val(slot) {
+                        _ :: epoll_ctl(epfd, EPOLL_CTL_DEL, fd, ptr.null())
+                        interests := self.interests.lock().unwrap()
+                        interests.retain(fn(i) { not Arc.ptr_eq(&i.slot, &slot) })
+                        slot.wake()
+                    }
+                }
+            }
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1990
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:2129
+    // GATE #4565: kernel primitive
+    #Unsafe("kqueue owns one-shot native interests and bounded initialized event array")
+    fn run_kqueue(self: Arc<Self>) -> {
+        if jet_scheduler_io_backend() != "kqueue" { self.run_portable_poll(); return }
+        // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1996
+        #Layout(c)
+        #Derive(Clone, Copy)
+        struct Kevent { ident: USize, filter: I16, flags: U16, fflags: U32, data: I64, udata: *U8 }
+        // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:2005
+        const EVFILT_READ: I16 = -1
+        // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:2006
+        const EVFILT_WRITE: I16 = -2
+        // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:2007
+        const EV_ADD: U16 = 0x0001
+        // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:2008
+        const EV_DELETE: U16 = 0x0002
+        // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:2009
+        const EV_ONESHOT: U16 = 0x0010
+        #Import module c.c {
+            // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:2013
+            fn kqueue() -> I32 = "kqueue"
+            // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:2014
+            fn kevent(kq: I32, changelist: *Kevent, nchanges: I32, eventlist: *Kevent,
+                nevents: I32, timeout: *libc_timespec) -> I32 = "kevent"
+        }
+        // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:2025
+        #Layout(c)
+        struct libc_timespec { tv_sec: I64, tv_nsec: I64 }
+        kq :: kqueue()
+        assert(kq >= 0, "kqueue() failed")
+        fd_slots := [I32:Arc<ParkSlot>]{}
+        loop {
+            pending :: {
+                interests :: self.interests.lock().unwrap()
+                streams :: self.streams.lock().unwrap()
+                out := []
+                for interest in interests.iter() {
+                    stream :: streams.get(&interest.stream_id) ?? continue
+                    fd :: stream.lock().unwrap().as_raw_fd()
+                    if fd_slots.contains_key(&fd) { continue }
+                    if interest.readable { out.push((fd, EVFILT_READ, interest.slot.clone())) }
+                    if interest.writable { out.push((fd, EVFILT_WRITE, interest.slot.clone())) }
+                }
+                ^out
+            }
+            for (fd, filter, slot) in pending {
+                ev :: Kevent{ident: fd as USize, filter: filter, flags: EV_ADD | EV_ONESHOT, fflags: 0, data: 0, udata: ptr.null_mut()}
+                rc :: kevent(kq, &ev, 1, ptr.null_mut(), 0, ptr.null())
+                if rc == 0 { fd_slots[fd] = ^slot }
+            }
+            events := Array<Kevent,64>.filled(Kevent{ident: 0, filter: 0, flags: 0, fflags: 0, data: 0, udata: ptr.null_mut()})
+            timeout :: libc_timespec{tv_sec: 0, tv_nsec: 50_000_000}
+            n :: kevent(kq, ptr.null(), 0, events.as_mut_ptr(), 64, &timeout)
+            if n > 0 {
+                _ :: METRIC_POLLER_WAKE.fetch_add(n as USize, Ordering.Relaxed)
+                for ev in &events[..n as USize] {
+                    fd :: ev.ident as I32
+                    if fd_slots.remove(&fd) is Val(slot) {
+                        del :: Kevent{ident: ev.ident, filter: ev.filter, flags: EV_DELETE, fflags: 0, data: 0, udata: ptr.null_mut()}
+                        _ :: kevent(kq, &del, 1, ptr.null_mut(), 0, ptr.null())
+                        interests := self.interests.lock().unwrap()
+                        interests.retain(fn(i) { not Arc.ptr_eq(&i.slot, &slot) })
+                        slot.wake()
+                    }
+                }
+            }
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:2135
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:2379
+    // GATE #4565: kernel primitive
+    #Unsafe("IOCP owns retained socket and OVERLAPPED boxes until matching completion; bounded fatal drain retains unreturned kernel ownership")
+    fn run_iocp(self: Arc<Self>) -> {
+        if target.selected_os() != .Windows || jet_scheduler_io_backend() != "iocp" { self.run_portable_poll(); return }
+        // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:2139
+        #Layout(c)
+        struct Overlapped { internal: USize, internal_high: USize, offset: U32, offset_high: U32, event: USize }
+        // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:2141
+        #Layout(c)
+        struct WsaBuf { len: U32, buf: *U8 }
+        // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:2142
+        struct Active { _stream: Arc<Mutex<TcpStream>>, socket: USize, operations: [*Overlapped], cancel_requested: Bool }
+        // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:2148
+        const INVALID_HANDLE_VALUE: USize = USize.MAX
+        // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:2149
+        const WSA_IO_PENDING: I32 = 997
+        #Import module c.kernel32 {
+            // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:2152
+            #ABI(system)
+            fn CreateIoCompletionPort(file: USize, existing: USize, key: USize, threads: U32) -> USize = "CreateIoCompletionPort"
+            // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:2153
+            #ABI(system)
+            fn GetQueuedCompletionStatus(port: USize, bytes: *U32, key: *USize, ov: **Overlapped, timeout_ms: U32) -> I32 = "GetQueuedCompletionStatus"
+            // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:2154
+            #ABI(system)
+            fn CancelIoEx(file: USize, ov: *Overlapped) -> I32 = "CancelIoEx"
+            // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:2155
+            #ABI(system)
+            fn GetLastError() -> U32 = "GetLastError"
+            // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:2156
+            #ABI(system)
+            fn CloseHandle(handle: USize) -> I32 = "CloseHandle"
+        }
+        #Import module c.ws2_32 {
+            // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:2160
+            #ABI(system)
+            fn WSARecv(socket: USize, buffers: *WsaBuf, count: U32, bytes: *U32, flags: *U32, ov: *Overlapped, completion: *U8) -> I32 = "WSARecv"
+            // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:2161
+            #ABI(system)
+            fn WSASend(socket: USize, buffers: *WsaBuf, count: U32, bytes: *U32, flags: U32, ov: *Overlapped, completion: *U8) -> I32 = "WSASend"
+            // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:2162
+            #ABI(system)
+            fn WSAGetLastError() -> I32 = "WSAGetLastError"
+        }
+        port :: CreateIoCompletionPort(INVALID_HANDLE_VALUE, 0, 0, 1)
+        if port == 0 {
+            _ :: METRIC_IO_FAILURES.fetch_add(1, Ordering.Relaxed)
+            *self.backend_state.lock().unwrap() = .Failed("internal scheduler IOCP creation failed")
+            for interest in self.interests.lock().unwrap().drain(..) { interest.slot.wake() }
+            self.streams.lock().unwrap().clear()
+            self.retire_requested.lock().unwrap().clear()
+            self.iocp_shutdown_done.store(true, Ordering.Release)
+            return
+        }
+        self.iocp_port.store(port, Ordering.Release)
+        self.iocp_shutdown_done.store(false, Ordering.Release)
+        *self.backend_state.lock().unwrap() = .Running
+        active := [USize:Active]{}
+        loop {
+            pending :: {
+                interests :: self.interests.lock().unwrap()
+                streams :: self.streams.lock().unwrap()
+                interests.iter().filter(fn(interest) { not active.contains_key(&interest.stream_id) })
+                    .filter_map(fn(interest) { streams.get(&interest.stream_id).map(fn(stream) {
+                        (interest.stream_id, stream.clone(), stream.lock().unwrap().as_raw_socket() as USize, interest.readable, interest.writable)
+                    }) }).collect()
+            }
+            for (id, stream, socket, readable, writable) in pending {
+                associated :: CreateIoCompletionPort(socket, port, id + 1, 0)
+                if associated == 0 {
+                    _error :: GetLastError()
+                    _ :: METRIC_IO_FAILURES.fetch_add(1, Ordering.Relaxed)
+                    if self.interests.lock().unwrap().iter().find(fn(interest) { interest.stream_id == id }).map(fn(interest) { interest.slot.clone() }) is Val(slot) { slot.wake() }
+                    self.interests.lock().unwrap().retain(fn(interest) { interest.stream_id != id })
+                    _ :: self.streams.lock().unwrap().remove(&id)
+                    continue
+                }
+                operations := []
+                for read in [true, false] {
+                    if (read && not readable) || (not read && not writable) { continue }
+                    raw :: Box.into_raw(Box.new(Overlapped{internal: 0, internal_high: 0, offset: 0, offset_high: 0, event: 0}))
+                    _ :: METRIC_IO_ALLOCATED.fetch_add(1, Ordering.Relaxed)
+                    buffer := WsaBuf{len: 0, buf: ptr.null_mut()}
+                    bytes := U32{0}
+                    rc :: if read {
+                        flags := U32{0}
+                        WSARecv(socket, &buffer, 1, &bytes, &flags, raw, ptr.null_mut())
+                    } else { WSASend(socket, &buffer, 1, &bytes, 0, raw, ptr.null_mut()) }
+                    if rc == 0 || WSAGetLastError() == WSA_IO_PENDING { operations.push(raw) }
+                    else { drop(Box.from_raw(raw)); _ :: METRIC_IO_RETIRED.fetch_add(1, Ordering.Relaxed) }
+                }
+                if operations.is_empty() {
+                    if self.interests.lock().unwrap().iter().find(fn(interest) { interest.stream_id == id }).map(fn(interest) { interest.slot.clone() }) is Val(slot) { slot.wake() }
+                } else {
+                    active[id] = Active{_stream: ^stream, socket: socket, operations: ^operations, cancel_requested: false}
+                    _ :: METRIC_IO_ACTIVE.fetch_add(1, Ordering.Relaxed)
+                }
+            }
+            retiring :: self.retire_requested.lock().unwrap().iter().copied().collect()
+            for id in retiring {
+                if active.get_mut(&id) is Val(entry) {
+                    if not entry.cancel_requested {
+                        entry.cancel_requested = true
+                        for operation in &entry.operations { _ :: CancelIoEx(entry.socket, *operation) }
+                    }
+                } else {
+                    _ :: self.streams.lock().unwrap().remove(&id)
+                    _ :: self.retire_requested.lock().unwrap().remove(&id)
+                }
+            }
+            for (id, entry) in active.iter_mut() {
+                if not self.interests.lock().unwrap().iter().any(fn(interest) { interest.stream_id == *id }) && not entry.cancel_requested {
+                    entry.cancel_requested = true
+                    for operation in &entry.operations { _ :: CancelIoEx(entry.socket, *operation) }
+                }
+            }
+            bytes := U32{0}
+            key := USize{0}
+            operation := ptr.null_mut<Overlapped>()
+            // Rust: Scheduler.rs:2261-2264; test-only flag is inaccessible and false in production.
+            inject_fatal :: TEST_IOCP_GQCS_FATAL.swap(false, Ordering.AcqRel)
+            ok :: if inject_fatal { 0 } else { GetQueuedCompletionStatus(port, &bytes, &key, &operation, U32.MAX) }
+            if operation.is_null() {
+                if ok == 0 {
+                    _ :: METRIC_IO_FAILURES.fetch_add(1, Ordering.Relaxed)
+                    *self.backend_state.lock().unwrap() = .Failed("internal scheduler IOCP completion port failed")
+                    for interest in self.interests.lock().unwrap().drain(..) { interest.slot.wake() }
+                    for entry in active.values_mut() {
+                        if not entry.cancel_requested {
+                            entry.cancel_requested = true
+                            for pending in &entry.operations {
+                                cancelled :: CancelIoEx(entry.socket, *pending)
+                                if cancelled == 0 {
+                                    error :: GetLastError()
+                                    if error != 1168 { _ :: METRIC_IO_FAILURES.fetch_add(1, Ordering.Relaxed) } // ERROR_NOT_FOUND: already queued.
+                                }
+                            }
+                        }
+                    }
+                    // Keep every socket and OVERLAPPED until its terminal cancellation completion.
+                    drain_deadline :: Instant.now() + Duration.from_secs(5)
+                    loop not active.is_empty() && Instant.now() < drain_deadline {
+                        drain_bytes := U32{0}
+                        drain_key := USize{0}
+                        drain_operation := ptr.null_mut<Overlapped>()
+                        _ :: GetQueuedCompletionStatus(port, &drain_bytes, &drain_key, &drain_operation, 50)
+                        if drain_operation.is_null() { continue }
+                        drop(Box.from_raw(drain_operation))
+                        _ :: METRIC_IO_RETIRED.fetch_add(1, Ordering.Relaxed)
+                        owner :: active.iter().find_map(fn((id, entry)) { if entry.operations.contains(&drain_operation) { Val(*id) } else { None } })
+                        if owner is Val(id) {
+                            entry := active.get_mut(&id).unwrap()
+                            entry.operations.retain(fn(candidate) { *candidate != drain_operation })
+                            if entry.operations.is_empty() {
+                                _ :: active.remove(&id)
+                                _ :: METRIC_IO_ACTIVE.fetch_sub(1, Ordering.Relaxed)
+                                _ :: self.streams.lock().unwrap().remove(&id)
+                                _ :: self.retire_requested.lock().unwrap().remove(&id)
+                            }
+                        } else { _ :: METRIC_IO_STALE.fetch_add(1, Ordering.Relaxed) }
+                    }
+                    self.iocp_port.store(0, Ordering.Release)
+                    *self.backend_state.lock().unwrap() = .Closed
+                    if CloseHandle(port) != 0 { _ :: METRIC_IO_PORT_CLOSED.fetch_add(1, Ordering.Relaxed) }
+                    else { _ :: METRIC_IO_FAILURES.fetch_add(1, Ordering.Relaxed) }
+                    if active.is_empty() {
+                        self.streams.lock().unwrap().clear()
+                        self.retire_requested.lock().unwrap().clear()
+                    } else {
+                        // No completion before bounded shutdown: retain native ownership, never free live kernel boxes.
+                        mem.forget(^active)
+                    }
+                    *self.backend_state.lock().unwrap() = .Failed("internal scheduler IOCP completion port failed")
+                    self.iocp_shutdown_done.store(true, Ordering.Release)
+                    return
+                }
+                if key != 0 { _ :: METRIC_IO_STALE.fetch_add(1, Ordering.Relaxed) }
+                continue
+            }
+            if ok == 0 && GetLastError() != 995 { _ :: METRIC_IO_FAILURES.fetch_add(1, Ordering.Relaxed) }
+            drop(Box.from_raw(operation))
+            _ :: METRIC_IO_RETIRED.fetch_add(1, Ordering.Relaxed)
+            id :: key.saturating_sub(1)
+            entry := active.get_mut(&id) ?? continue
+            entry.operations.retain(fn(candidate) { *candidate != operation })
+            slot :: {
+                interests := self.interests.lock().unwrap()
+                slot :: interests.iter().find(fn(interest) { interest.stream_id == id }).map(fn(interest) { interest.slot.clone() })
+                interests.retain(fn(interest) { interest.stream_id != id })
+                ^slot
+            }
+            if slot is Val(wake) {
+                _ :: METRIC_POLLER_WAKE.fetch_add(1, Ordering.Relaxed)
+                for pending in &entry.operations { _ :: CancelIoEx(entry.socket, *pending) }
+                wake.wake()
+            }
+            if entry.operations.is_empty() {
+                _ :: active.remove(&id)
+                _ :: METRIC_IO_ACTIVE.fetch_sub(1, Ordering.Relaxed)
+                _ :: self.streams.lock().unwrap().remove(&id)
+                _ :: self.retire_requested.lock().unwrap().remove(&id)
+            }
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:2384
+    // GATE #4565: kernel primitive
+    #Unsafe("portable poll borrows locked real streams and sleeps on native condvar")
+    fn run_portable_poll(self: Arc<Self>) -> {
+        loop {
+            ready :: {
+                interests :: self.interests.lock().unwrap()
+                streams :: self.streams.lock().unwrap()
+                slots := []
+                for interest in interests.iter() {
+                    stream :: streams.get(&interest.stream_id) ?? continue
+                    s := stream.lock().unwrap()
+                    _ :: s.set_nonblocking(true)
+                    buf := Array<U8,1>.filled(0)
+                    if interest.readable {
+                        match s.peek(&buf) { Ok(_) -> slots.push(interest.slot.clone()), Err(_) -> {} }
+                    }
+                    if interest.writable {
+                        match s.write(&[]) {
+                            Ok(_) -> slots.push(interest.slot.clone())
+                            Err(e) if e.kind() == io.ErrorKind.WouldBlock -> {}
+                            Err(_) -> slots.push(interest.slot.clone())
+                        }
+                    }
+                }
+                ^slots
+            }
+            if not ready.is_empty() {
+                interests := self.interests.lock().unwrap()
+                for slot in &ready {
+                    interests.retain(fn(i) { not Arc.ptr_eq(&i.slot, slot) })
+                    slot.wake()
+                }
+            }
+            g :: self.interests.lock().unwrap()
+            _ :: self.notify.wait_timeout(g, Duration.from_millis(5)).unwrap()
+        }
+    }
+}
+
+use core.tasks.runtime.scheduler.[jet_scheduler_world_reject_uncontrolled, jet_scheduler_park_ms, jet_scheduler_fatal]
+use std.collections.[HashSet, VecDeque]
+
+// Unix-only descriptor registrations share task slots, not blocking worker threads.
+// Logical identity owns the descriptor number rather than a cloned OS handle.
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:2436
+pub struct JetSchedulerRawIoHandle {
+    fd: I32
+    closed: AtomicBool
+    registrations: Mutex<[USize:Weak<JetRawIoRegistration>]>
+}
+impl JetSchedulerRawIoHandle {
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:2444
+    // GATE #4565: kernel primitive
+    #Unsafe("logical raw descriptor handle owns synchronized closed/registration state")
+    pub fn new(fd: I32) -> Arc<Self> {
+        Arc.new(Self{fd: fd, closed: AtomicBool.new(false), registrations: Mutex.new([:])})
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:2452
+    // GATE #4565: kernel primitive
+    #Unsafe("registration admission checks both active states while holding handle mutex")
+    fn add_registration(self: &Self, registration: &Arc<JetRawIoRegistration>) -> Bool {
+        registrations := self.registrations.lock().unwrap()
+        if self.closed.load(Ordering.Acquire) || not registration.active.load(Ordering.Acquire) { return false }
+        registrations[registration.id] = Arc.downgrade(registration)
+        true
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:2463
+    // GATE #4565: kernel primitive
+    fn remove_registration(self: &Self, id: USize) -> {
+        #Unsafe("remove logical registration under handle mutex") { _ :: self.registrations.lock().unwrap().remove(&id) }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:2469
+    // GATE #4565: kernel primitive
+    #Unsafe("first close drains weak registrations and wakes them outside handle lock")
+    pub fn close(self: &Self) -> {
+        if self.closed.swap(true, Ordering.AcqRel) { return }
+        registrations :: self.registrations.lock().unwrap().drain().filter_map(fn((_, registration)) { registration.upgrade() }).collect()
+        for registration in registrations { registration.close() }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:2487
+pub fn jet_scheduler_raw_io_handle(fd: I32) -> Arc<JetSchedulerRawIoHandle> { JetSchedulerRawIoHandle.new(fd) }
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:2492
+struct JetRawIoRegistration {
+    id: USize, handle: Arc<JetSchedulerRawIoHandle>, poller: Weak<JetRawIoPoller>
+    slot: Arc<ParkSlot>, ready: Arc<Mutex<(Bool, Bool)>>, active: AtomicBool
+}
+impl JetRawIoRegistration {
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:2503
+    // GATE #4565: kernel primitive
+    #Unsafe("first close retires registration from both owners and wakes its park slot")
+    fn close(self: &Self) -> {
+        if not self.active.swap(false, Ordering.AcqRel) { return }
+        self.handle.remove_registration(self.id)
+        if self.poller.upgrade() is Val(poller) { poller.unregister(self.id) }
+        self.slot.wake()
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:2514
+    // GATE #4565: kernel primitive
+    #Unsafe("first readiness completion publishes observed flags before wake")
+    fn complete(self: &Self, observed: (Bool, Bool)) -> {
+        if not self.active.swap(false, Ordering.AcqRel) { return }
+        self.handle.remove_registration(self.id)
+        *self.ready.lock().unwrap() = observed
+        self.slot.wake()
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:2523
+    // GATE #4565: kernel primitive
+    fn deactivate(self: &Self) -> {
+        #Unsafe("deactivation removes handle registration once") {
+            if self.active.swap(false, Ordering.AcqRel) { self.handle.remove_registration(self.id) }
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:2532
+struct JetRawIoInterest { registration: Arc<JetRawIoRegistration>, readable: Bool, writable: Bool }
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:2539
+struct JetRawIoPoller { interests: Mutex<[JetRawIoInterest]>, notify: Condvar, next_key: AtomicUsize }
+impl JetRawIoPoller {
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:2546
+    // GATE #4565: kernel primitive
+    #Unsafe("shared registration owns readiness storage; failed handle admission removes poll interest")
+    fn register(self: &Arc<Self>, handle: Arc<JetSchedulerRawIoHandle>, readable: Bool, writable: Bool) -> Arc<JetRawIoRegistration>? {
+        id :: self.next_key.fetch_add(1, Ordering.Relaxed)
+        slot :: ParkSlot.new()
+        ready :: Arc.new(Mutex.new((false, false)))
+        registration :: Arc.new(JetRawIoRegistration{id: id, handle: handle.clone(), poller: Arc.downgrade(self),
+            slot: slot.clone(), ready: ready.clone(), active: AtomicBool.new(true)})
+        self.interests.lock().unwrap().push(JetRawIoInterest{registration: registration.clone(), readable: readable, writable: writable})
+        if not handle.add_registration(&registration) {
+            self.interests.lock().unwrap().retain(fn(interest) { interest.registration.id != id })
+            registration.deactivate()
+            self.notify.notify_one()
+            return None
+        }
+        self.notify.notify_one()
+        Val(^registration)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:2581
+    // GATE #4565: kernel primitive
+    fn unregister(self: &Self, id: USize) -> {
+        #Unsafe("remove raw poll interest and notify sleeping descriptor worker") {
+            self.interests.lock().unwrap().retain(fn(interest) { interest.registration.id != id })
+            self.notify.notify_one()
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:2589
+    // GATE #4565: kernel primitive
+    #Unsafe("native poll borrows initialized descriptor snapshots; completion uses logical registration id")
+    fn run(self: Arc<Self>) -> {
+        // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:2591
+        #Layout(c)
+        struct PollFd { fd: I32, events: I16, revents: I16 }
+        #Import module c.c {
+            // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:2597
+            fn poll(fds: *PollFd, count: USize, timeout_ms: I32) -> I32 = "poll"
+        }
+        // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:2599
+        const POLLIN: I16 = 0x0001
+        // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:2600
+        const POLLOUT: I16 = 0x0004
+        loop {
+            (descriptors, descriptor_ids) := {
+                interests :: self.interests.lock().unwrap()
+                if interests.is_empty() { _guard :: self.notify.wait(interests).unwrap(); continue }
+                descriptors :: interests.iter().map(fn(interest) {
+                    PollFd{fd: interest.registration.handle.fd,
+                        events: (if interest.readable { POLLIN } else { 0 }) | (if interest.writable { POLLOUT } else { 0 }), revents: 0}
+                }).collect()
+                ids :: interests.iter().map(fn(interest) { interest.registration.id }).collect()
+                (^descriptors, ^ids)
+            }
+            ready :: poll(descriptors.as_mut_ptr(), descriptors.len(), 50)
+            if ready <= 0 { continue }
+            // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:2627
+            const POLLERR: I16 = 0x0008
+            // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:2628
+            const POLLHUP: I16 = 0x0010
+            // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:2629
+            const POLLNVAL: I16 = 0x0020
+            ready_events :: descriptors.iter().enumerate().filter(fn((_, descriptor)) { descriptor.revents != 0 })
+                .filter_map(fn((index, descriptor)) { descriptor_ids.get(index).copied().map(fn(id) {
+                    terminal :: descriptor.revents & (POLLERR | POLLHUP | POLLNVAL) != 0
+                    (id, descriptor.revents & POLLIN != 0 || terminal, descriptor.revents & POLLOUT != 0 || terminal)
+                }) }).collect()
+            ready_ids :: ready_events.iter().map(fn((id, _, _)) { *id }).collect<HashSet<USize>>()
+            ready :: {
+                interests := self.interests.lock().unwrap()
+                ready :: interests.iter().filter_map(fn(interest) {
+                    (_, readable, writable) :: ready_events.iter().find(fn((id, _, _)) { *id == interest.registration.id }) ?? return None
+                    Val((interest.registration.clone(), (interest.readable && *readable, interest.writable && *writable)))
+                }).collect()
+                interests.retain(fn(interest) { not ready_ids.contains(&interest.registration.id) })
+                ^ready
+            }
+            _ :: METRIC_POLLER_WAKE.fetch_add(ready.len(), Ordering.Relaxed)
+            for (registration, observed) in ready { registration.complete(observed) }
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:2670
+// GATE #4565: kernel primitive
+POLLER :: #Unsafe("process-wide raw poller once cell, never recreated for each wait") { OnceLock<Arc<JetRawIoPoller>>.new() }
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:2669
+// GATE #4565: kernel primitive
+#Unsafe("once-initialized process-wide raw poller retains detached worker and synchronized interests")
+fn jet_raw_io_poller() -> Arc<JetRawIoPoller> {
+    POLLER.get_or_init(fn() {
+        poller :: Arc.new(JetRawIoPoller{interests: Mutex.new([]), notify: Condvar.new(), next_key: AtomicUsize.new(0)})
+        worker :: poller.clone()
+        _ :: thread.spawn(fn() { worker.run() })
+        ^poller
+    }).clone()
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:2686
+// GATE #4565: kernel primitive
+#Unsafe("RAII registration removes closed/cancelled wait and readiness lock outlives scheduler park")
+fn jet_scheduler_raw_io_wait(handle: &Arc<JetSchedulerRawIoHandle>, readable: Bool, writable: Bool, wait_kind: &String) -> (Bool, Bool) {
+    jet_scheduler_world_reject_uncontrolled("network")
+    poller :: jet_raw_io_poller()
+    registration :: poller.register(handle.clone(), readable, writable) ?? return (false, false)
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:2697
+    struct Registration { value: Arc<JetRawIoRegistration> }
+    impl Drop for Registration {
+        // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:2699
+        fn drop(self: &Self) -> { self.value.close() }
+    }
+    _registration :: Registration{value: registration.clone()}
+    jet_scheduler_yield(wait_kind, &registration.slot, None)
+    ready :: *registration.ready.lock().unwrap()
+    ready
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:2710
+pub fn jet_scheduler_unix_stream_io_wait(handle: &Arc<JetSchedulerRawIoHandle>, read: Bool, write: Bool, wait_kind: &String) -> {
+    _ :: jet_scheduler_raw_io_wait(handle, read, write, wait_kind)
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:2720
+pub fn jet_scheduler_unix_stream_ready_wait(handle: &Arc<JetSchedulerRawIoHandle>, read: Bool, write: Bool, wait_kind: &String) -> (Bool, Bool) {
+    jet_scheduler_raw_io_wait(handle, read, write, wait_kind)
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:2730
+// GATE #4565: kernel primitive
+pub fn jet_scheduler_tcp_stream_ready_wait(stream: &TcpStream, read: Bool, write: Bool, wait_kind: &String) -> (Bool, Bool) {
+    handle :: #Unsafe("borrow stream descriptor; logical handle does not clone or close OS ownership") { JetSchedulerRawIoHandle.new(stream.as_raw_fd()) }
+    jet_scheduler_raw_io_wait(&handle, read, write, wait_kind)
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:2742
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:2752
+// GATE #4565: kernel primitive
+pub fn jet_scheduler_tcp_listener_io_wait(listener: &TcpListener, wait_kind: &String) -> {
+    if target.selected_family() == .Unix {
+        handle :: #Unsafe("borrow selected native listener fd without cloning it") { JetSchedulerRawIoHandle.new(listener.as_raw_fd()) }
+        _ :: jet_scheduler_raw_io_wait(&handle, true, false, wait_kind)
+    } else { jet_scheduler_park_ms("tcp accept readiness", 5) }
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:2760
+pub fn jet_scheduler_unix_listener_io_wait(handle: &Arc<JetSchedulerRawIoHandle>, wait_kind: &String) -> {
+    _ :: jet_scheduler_raw_io_wait(handle, true, false, wait_kind)
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:2768
+pub fn jet_scheduler_udp_io_wait(handle: &Arc<JetSchedulerRawIoHandle>, read: Bool, write: Bool, wait_kind: &String) -> {
+    _ :: jet_scheduler_raw_io_wait(handle, read, write, wait_kind)
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:2778
+pub fn jet_scheduler_udp_ready_wait(handle: &Arc<JetSchedulerRawIoHandle>, read: Bool, write: Bool, wait_kind: &String) -> (Bool, Bool) {
+    jet_scheduler_raw_io_wait(handle, read, write, wait_kind)
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:2788
+pub fn jet_scheduler_raw_io_write_wait(handle: &Arc<JetSchedulerRawIoHandle>, wait_kind: &String) -> {
+    _ :: jet_scheduler_raw_io_wait(handle, false, true, wait_kind)
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:2796
+// GATE #4565: kernel primitive
+#Unsafe("native descriptor flags are read and updated; last errno is captured on failure")
+pub fn jet_scheduler_raw_io_set_nonblocking(fd: I32) -> Unit Err! {
+    #Import module c.c {
+        // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:2798
+        fn fcntl(fd: I32, command: I32, args: ...I32) -> I32 = "fcntl"
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:2800
+    const F_GETFL: I32 = 3
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:2801
+    const F_SETFL: I32 = 4
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:2803
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:2805
+    O_NONBLOCK :: if target.selected_os() == .Linux { I32{0x800} } else { I32{0x4} }
+    flags :: fcntl(fd, F_GETFL)
+    if flags < 0 { return Err(io.Error.last_os_error().to_string()) }
+    if flags & O_NONBLOCK == 0 && fcntl(fd, F_SETFL, flags | O_NONBLOCK) < 0 { return Err(io.Error.last_os_error().to_string()) }
+    Ok(())
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:2819
+// GATE #4565: kernel primitive
+IO_POLLER :: #Unsafe("process-wide shared TCP poller initializer") { OnceLock<Arc<IOPoller>>.new() }
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:2821
+// GATE #4565: kernel primitive
+#Unsafe("once initializer owns detached native IO worker and synchronization state")
+fn io_poller() -> Arc<IOPoller> {
+    IO_POLLER.get_or_init(fn() {
+        poller :: Arc.new(IOPoller{interests: Mutex.new([]), streams: Mutex.new([:]),
+            retire_requested: Mutex.new(HashSet.new()), backend_state: Mutex.new(if target.selected_os() == .Windows { .Starting } else { .Running }),
+            notify: Condvar.new(), next_key: AtomicUsize.new(0), iocp_port: AtomicUsize.new(0), iocp_shutdown_done: AtomicBool.new(false)})
+        p :: poller.clone()
+        _ :: thread.spawn(fn() { p.run() })
+        ^poller
+    }).clone()
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:2848
+// GATE #4565: kernel primitive
+#Unsafe("owned cloned TCP descriptor remains in poller until registration guard retires it")
+pub fn jet_scheduler_io_wait(stream: &TcpStream, read: Bool, write: Bool, wait_kind: &String) -> {
+    jet_scheduler_world_reject_uncontrolled("network")
+    shared :: Arc.new(Mutex.new(stream.try_clone().expect("tcp clone")))
+    poller :: io_poller()
+    (id, slot) :: poller.register(^shared, read, write).unwrap_or_else(fn(error) { jet_scheduler_fatal(error) })
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:2855
+    struct Registration { poller: Arc<IOPoller>, id: USize }
+    impl Drop for Registration {
+        // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:2857
+        fn drop(self: &Self) -> { self.poller.unregister(self.id) }
+    }
+    _registration :: Registration{poller: ^poller, id: id}
+    jet_scheduler_yield(wait_kind, &slot, None)
+    if *io_poller().backend_state.lock().unwrap() is IOBackendState.Failed(error) { jet_scheduler_fatal(error) }
+}
+
+use core.devtools.runtime.observe.[jet_observe_registry, JetObserveChannel]
+
+// Scheduler-integrated channels wake on send; clones retain endpoints, not payloads.
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:2869
+#Derive(Clone, Copy, Debug, Eq, PartialEq)
+pub enum JetChannelKind { Channel, Timer, Interval }
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:2876
+struct ChannelState<T> {
+    queue: VecDeque<T>
+    recv_waiters: [Arc<ParkSlot>]
+    send_waiters: [Arc<ParkSlot>]
+    reserved_sends: USize
+    closed: Bool, cancelled: Bool, capacity: USize?, kind: JetChannelKind, delay_ms: I64
+    sender_count: USize, receiver_count: USize
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:2891
+#Error
+#Derive(Clone, Copy, Debug, Eq, PartialEq)
+pub enum JetSchedulerSendReserveError { Closed, Cancelled, ReservationCountExhausted, QueueAllocationFailed }
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:2899
+#Error
+#Derive(Debug)
+pub enum JetSchedulerSendPrepareError<E> { Closed, Preparation(E) }
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:2904
+pub struct JetSchedulerSendReservation<T> { inner: Arc<ChannelInner<T>>, active: Bool }
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:2909
+struct ChannelInner<T> { state: Mutex<ChannelState<T>>, observe_id: USize }
+impl<T> Drop for JetSchedulerSendReservation<T> {
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:2916
+    // GATE #4565: kernel primitive
+    #Unsafe("unused reservation releases preallocated capacity and wakes sender after unlocking")
+    fn drop(self: &Self) -> {
+        if not self.active { return }
+        waiter :: {
+            state := self.inner.state.lock().unwrap_or_else(fn(poisoned) { poisoned.into_inner() })
+            state.reserved_sends -= 1
+            waiter :: state.send_waiters.pop()
+            jet_observe_channel_update(self.inner.observe_id, &state)
+            ^waiter
+        }
+        self.active = false
+        if waiter is Val(slot) { jet_scheduler_wake(&slot) }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:2937
+// GATE #4565: kernel primitive
+#Unsafe("observation registry snapshots channel facts under its own mutex")
+fn jet_observe_channel_update<T>(id: USize, state: &ChannelState<T>) -> {
+    registry :: jet_observe_registry() ?? return
+    registry.channels.lock().unwrap()[id] = JetObserveChannel{depth: state.queue.len(), capacity: state.capacity,
+        send_waiters: state.send_waiters.len(), recv_waiters: state.recv_waiters.len(), closed: state.closed}
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:2951
+pub struct JetSchedulerChannel<T> { inner: Arc<ChannelInner<T>> }
+impl<T> Clone for JetSchedulerChannel<T> {
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:2960
+    // GATE #4565: kernel primitive
+    #Unsafe("clone increments receiver ownership, never clones T")
+    fn clone(self: &Self) -> Self {
+        state := self.inner.state.lock().unwrap()
+        state.receiver_count += 1
+        jet_observe_channel_update(self.inner.observe_id, &state)
+        drop(^state)
+        JetSchedulerChannel{inner: self.inner.clone()}
+    }
+}
+impl<T> Drop for JetSchedulerChannel<T> {
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:2972
+    // GATE #4565: kernel primitive
+    #Unsafe("final receiver closes queue and wakes blocked senders outside state lock")
+    fn drop(self: &Self) -> {
+        send_waiters :: {
+            st := self.inner.state.lock().unwrap()
+            st.receiver_count = st.receiver_count.saturating_sub(1)
+            waiters :: if st.receiver_count == 0 { st.closed = true; mem.take(&st.send_waiters) } else { [] }
+            jet_observe_channel_update(self.inner.observe_id, &st)
+            ^waiters
+        }
+        for slot in send_waiters { slot.wake() }
+    }
+}
+impl<T: Send> JetSchedulerChannel<T> {
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:2992
+    pub fn new() -> Self { Self.with_capacity(None, .Channel, 0) }
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:2996
+    pub fn bounded(capacity: I64) -> Self { Self.with_capacity(Val(capacity.max(1) as USize), .Channel, 0) }
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:3004
+    pub fn timer(delay_ms: I64) -> Self { Self.with_capacity(None, .Timer, delay_ms.max(0)) }
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:3008
+    pub fn interval(delay_ms: I64) -> Self { Self.with_capacity(None, .Interval, delay_ms.max(1)) }
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:3012
+    // GATE #4565: kernel primitive
+    #Unsafe("synchronized queue owns endpoints and observation id")
+    fn with_capacity(capacity: USize?, kind: JetChannelKind, delay_ms: I64) -> Self {
+        observe_id :: jet_observe_registry().map(fn(registry) { registry.next_channel.fetch_add(1, Ordering.Relaxed) }).unwrap_or(0)
+        channel :: JetSchedulerChannel{inner: Arc.new(ChannelInner{state: Mutex.new(ChannelState{
+            queue: VecDeque.new(), recv_waiters: [], send_waiters: [], reserved_sends: 0, closed: false, cancelled: false,
+            capacity: capacity, kind: kind, delay_ms: delay_ms, sender_count: 0, receiver_count: 1}), observe_id: observe_id})}
+        if observe_id != 0 {
+            state :: channel.inner.state.lock().unwrap()
+            jet_observe_channel_update(observe_id, &state)
+        }
+        ^channel
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:3045
+    // GATE #4565: kernel primitive
+    #Unsafe("sender retains state and increments logical endpoint count under lock")
+    pub fn sender(self: &Self) -> JetSchedulerSender<T> {
+        state := self.inner.state.lock().unwrap()
+        state.sender_count += 1
+        jet_observe_channel_update(self.inner.observe_id, &state)
+        drop(^state)
+        JetSchedulerSender{inner: self.inner.clone()}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:3055
+    // GATE #4565: kernel primitive
+    #Unsafe("receive transfers queued value once, records wait slot under mutex and parks through scheduler")
+    pub fn receive(self: &Self) -> T? {
+        loop {
+            if jet_scheduler_task_cancelled() && not jet_scheduler_shielded() { jet_task_deliver_cancel(); return None }
+            if current_task_control() is Val(ctrl) { ctrl.wait_while_paused() }
+            slot :: ParkSlot.new()
+            parked :: {
+                st := self.inner.state.lock().unwrap()
+                if st.queue.pop_front() is Val(v) {
+                    if st.send_waiters.pop() is Val(wake) { wake.wake() }
+                    jet_observe_channel_update(self.inner.observe_id, &st)
+                    return Val(^v)
+                }
+                if st.closed { jet_observe_channel_update(self.inner.observe_id, &st); return None }
+                st.recv_waiters.push(slot.clone())
+                jet_observe_channel_update(self.inner.observe_id, &st)
+                true
+            }
+            if parked {
+                jet_scheduler_yield("channel receive", &slot, None)
+                st := self.inner.state.lock().unwrap()
+                st.recv_waiters.retain(fn(w) { not Arc.ptr_eq(w, &slot) })
+                jet_observe_channel_update(self.inner.observe_id, &st)
+            }
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:3094
+    // GATE #4565: kernel primitive
+    #Unsafe("nonblocking pop wakes one capacity waiter under state lock")
+    pub fn try_receive(self: &Self) -> T? {
+        st := self.inner.state.lock().unwrap()
+        out :: st.queue.pop_front()
+        if out.is_some() { if st.send_waiters.pop() is Val(slot) { slot.wake() } }
+        jet_observe_channel_update(self.inner.observe_id, &st)
+        ^out
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:3106
+    // GATE #4565: kernel primitive
+    pub fn kind(self: &Self) -> JetChannelKind { #Unsafe("read synchronized channel kind") { self.inner.state.lock().unwrap().kind } }
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:3110
+    pub fn is_timer(self: &Self) -> Bool { self.kind() == .Timer }
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:3114
+    pub fn is_interval(self: &Self) -> Bool { self.kind() == .Interval }
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:3118
+    // GATE #4565: kernel primitive
+    pub fn is_cancelled(self: &Self) -> Bool { #Unsafe("read synchronized cancellation flag") { self.inner.state.lock().unwrap().cancelled } }
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:3122
+    // GATE #4565: kernel primitive
+    pub fn is_ready(self: &Self) -> Bool {
+        #Unsafe("read queue readiness and closed under one lock") { state :: self.inner.state.lock().unwrap(); not state.queue.is_empty() || state.closed }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:3127
+    // GATE #4565: kernel primitive
+    pub fn delay_ms(self: &Self) -> I64 { #Unsafe("read synchronized channel delay") { self.inner.state.lock().unwrap().delay_ms } }
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:3131
+    pub fn close(self: &Self) -> { self.close_inner(false) }
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:3135
+    pub fn cancel(self: &Self) -> { self.close_inner(true) }
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:3139
+    // GATE #4565: kernel primitive
+    #Unsafe("close/cancel detaches both waiter lists and wakes after state unlock")
+    fn close_inner(self: &Self, cancelled: Bool) -> {
+        (recv_waiters, send_waiters) :: {
+            st := self.inner.state.lock().unwrap()
+            st.closed = true
+            st.cancelled |= cancelled
+            waiters :: (mem.take(&st.recv_waiters), mem.take(&st.send_waiters))
+            jet_observe_channel_update(self.inner.observe_id, &st)
+            ^waiters
+        }
+        for w in recv_waiters.into_iter().chain(send_waiters) { w.wake() }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:3157
+pub struct JetSchedulerSender<T> { inner: Arc<ChannelInner<T>> }
+impl<T> Clone for JetSchedulerSender<T> {
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:3162
+    // GATE #4565: kernel primitive
+    #Unsafe("clone increments logical sender count without cloning payload")
+    fn clone(self: &Self) -> Self {
+        state := self.inner.state.lock().unwrap()
+        state.sender_count += 1
+        jet_observe_channel_update(self.inner.observe_id, &state)
+        drop(^state)
+        JetSchedulerSender{inner: self.inner.clone()}
+    }
+}
+impl<T> Drop for JetSchedulerSender<T> {
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:3174
+    // GATE #4565: kernel primitive
+    #Unsafe("last sender closes channel and wakes receivers after unlocking")
+    fn drop(self: &Self) -> {
+        recv_waiters :: {
+            st := self.inner.state.lock().unwrap()
+            st.sender_count = st.sender_count.saturating_sub(1)
+            waiters :: if st.sender_count == 0 { st.closed = true; mem.take(&st.recv_waiters) } else { [] }
+            jet_observe_channel_update(self.inner.observe_id, &st)
+            ^waiters
+        }
+        for slot in recv_waiters { slot.wake() }
+    }
+}
+impl<T: Send> JetSchedulerSender<T> {
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:3194
+    // GATE #4565: kernel primitive
+    #Unsafe("close detaches sender/receiver waiters under state lock")
+    pub fn close(self: &Self) -> {
+        (recv_waiters, send_waiters) :: {
+            st := self.inner.state.lock().unwrap()
+            st.closed = true
+            waiters :: (mem.take(&st.recv_waiters), mem.take(&st.send_waiters))
+            jet_observe_channel_update(self.inner.observe_id, &st)
+            ^waiters
+        }
+        for w in recv_waiters.into_iter().chain(send_waiters) { w.wake() }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:3212
+    // GATE #4565: kernel primitive
+    #Unsafe("capacity reservation allocates before caller extracts ownership, honors existing reservations and parks without busy wait")
+    pub fn reserve_send(self: &Self) -> JetSchedulerSendReservation<T> JetSchedulerSendReserveError! {
+        loop {
+            if jet_scheduler_task_cancelled() && not jet_scheduler_shielded() { jet_task_deliver_cancel(); return Err(.Cancelled) }
+            if current_task_control() is Val(ctrl) { ctrl.wait_while_paused() }
+            slot :: ParkSlot.new()
+            reserved :: {
+                state := self.inner.state.lock().unwrap()
+                if state.closed || state.receiver_count == 0 { jet_observe_channel_update(self.inner.observe_id, &state); return Err(.Closed) }
+                occupied :: state.queue.len().checked_add(state.reserved_sends).ok_or(JetSchedulerSendReserveError.ReservationCountExhausted)?
+                if state.capacity.is_some_and(fn(capacity) { occupied >= capacity }) {
+                    state.send_waiters.push(slot.clone())
+                    jet_observe_channel_update(self.inner.observe_id, &state)
+                    false
+                } else {
+                    reserved_sends :: state.reserved_sends.checked_add(1).ok_or(JetSchedulerSendReserveError.ReservationCountExhausted)?
+                    if state.queue.try_reserve(reserved_sends).is_err() {
+                        jet_observe_channel_update(self.inner.observe_id, &state)
+                        return Err(.QueueAllocationFailed)
+                    }
+                    state.reserved_sends = reserved_sends
+                    jet_observe_channel_update(self.inner.observe_id, &state)
+                    true
+                }
+            }
+            if reserved { return Ok(JetSchedulerSendReservation{inner: self.inner.clone(), active: true}) }
+            jet_scheduler_yield("channel send capacity", &slot, None)
+            state := self.inner.state.lock().unwrap()
+            state.send_waiters.retain(fn(waiter) { not Arc.ptr_eq(waiter, &slot) })
+            jet_observe_channel_update(self.inner.observe_id, &state)
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:3269
+    pub fn send_owned(self: &Self, value: T) -> Unit T! {
+        match self.reserve_send() { Ok(reservation) -> reservation.commit(^value), Err(_) -> Err(^value) }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:3276
+    pub fn send(self: &Self, value: T) -> Bool { self.send_owned(^value).is_ok() }
+}
+impl<T: Send> JetSchedulerSendReservation<T> {
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:3284
+    // GATE #4565: kernel primitive
+    #Unsafe("reservation commit transfers exact value or returns it, releasing one reservation and waking outside lock")
+    pub fn commit(self: Self, value: T) -> Unit T! {
+        self := ^self
+        (result, waiter) :: {
+            state := self.inner.state.lock().unwrap_or_else(fn(poisoned) { poisoned.into_inner() })
+            (result, waiter) :: if state.closed || state.receiver_count == 0 {
+                state.reserved_sends -= 1
+                self.active = false
+                (Err(^value), state.send_waiters.pop())
+            } else {
+                state.queue.push_back(^value)
+                state.reserved_sends -= 1
+                self.active = false
+                (Ok(()), state.recv_waiters.pop())
+            }
+            jet_observe_channel_update(self.inner.observe_id, &state)
+            (^result, ^waiter)
+        }
+        if waiter is Val(slot) { jet_scheduler_wake(&slot) }
+        ^result
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:3316
+    // GATE #4565: kernel primitive
+    #Unsafe("prepare executes only after acceptance under queue lock; reserved storage makes subsequent publication infallible")
+    pub fn commit_prepared<R, E>(self: Self, prepare: fn() -> (T, R) E!) -> R JetSchedulerSendPrepareError<E>! {
+        self := ^self
+        prepare := Val(prepare)
+        (result, waiter) :: {
+            state := self.inner.state.lock().unwrap_or_else(fn(poisoned) { poisoned.into_inner() })
+            (result, waiter) :: if state.closed || state.receiver_count == 0 {
+                state.reserved_sends -= 1
+                self.active = false
+                (Err(JetSchedulerSendPrepareError.Closed), state.send_waiters.pop())
+            } else {
+                match prepare.take().expect("prepared send closure missing")() {
+                    Ok((value, receipt)) -> {
+                        state.queue.push_back(^value)
+                        state.reserved_sends -= 1
+                        self.active = false
+                        (Ok(^receipt), state.recv_waiters.pop())
+                    }
+                    Err(error) -> {
+                        state.reserved_sends -= 1
+                        self.active = false
+                        (Err(JetSchedulerSendPrepareError.Preparation(^error)), state.send_waiters.pop())
+                    }
+                }
+            }
+            jet_observe_channel_update(self.inner.observe_id, &state)
+            (^result, ^waiter)
+        }
+        drop(^prepare)
+        if waiter is Val(slot) { jet_scheduler_wake(&slot) }
+        ^result
+    }
+}
+impl<T: Send> JetSchedulerChannel<T> {
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:3368
+    // GATE #4565: kernel primitive
+    #Unsafe("final physical receiver closes and recovers queue under same mutex as send acceptance")
+    pub fn close_receiver_and_drain(self: &Self) -> [T] {
+        (queue, recv_waiters, send_waiters) :: {
+            st := self.inner.state.lock().unwrap()
+            if st.receiver_count > 1 { return [] }
+            st.receiver_count = 0
+            st.closed = true
+            queue :: mem.take(&st.queue)
+            recv_waiters :: mem.take(&st.recv_waiters)
+            send_waiters :: mem.take(&st.send_waiters)
+            jet_observe_channel_update(self.inner.observe_id, &st)
+            (^queue, ^recv_waiters, ^send_waiters)
+        }
+        for waiter in recv_waiters.into_iter().chain(send_waiters) { waiter.wake() }
+        queue.into_iter().collect()
+    }
+}
+impl<T> JetSchedulerChannel<T> {
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:3391
+    fn select_inner(self: &Self) -> Arc<ChannelInner<T>> { self.inner.clone() }
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:3397
+// Selection retains physical state, never logical receiver ownership.
+pub struct JetSchedulerChannelSelectView<T> { inner: Arc<ChannelInner<T>> }
+impl<T> Clone for JetSchedulerChannelSelectView<T> {
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:3402
+    fn clone(self: &Self) -> Self { Self{inner: self.inner.clone()} }
+}
+impl<T> JetSchedulerChannel<T> {
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:3412
+    pub fn select_view(self: &Self) -> JetSchedulerChannelSelectView<T> { JetSchedulerChannelSelectView{inner: self.inner.clone()} }
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:3422
+pub enum JetSelectOutcome<T> { Recv(arm: USize, value: T), After(arm: USize), Closed }
+impl<T> ChannelInner<T> {
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:3430
+    // GATE #4565: kernel primitive
+    #Unsafe("select pop transfers one value and wakes capacity waiter")
+    fn try_pop(self: &Self) -> T? {
+        st := self.state.lock().unwrap()
+        out :: st.queue.pop_front()
+        if out.is_some() { if st.send_waiters.pop() is Val(slot) { slot.wake() } }
+        ^out
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:3441
+    // GATE #4565: kernel primitive
+    fn register_select_waiter(self: &Self, slot: Arc<ParkSlot>) -> { #Unsafe("register shared select slot under queue lock") { self.state.lock().unwrap().recv_waiters.push(^slot) } }
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:3445
+    // GATE #4565: kernel primitive
+    fn is_closed_and_empty(self: &Self) -> Bool { #Unsafe("atomic closed/empty snapshot") { state :: self.state.lock().unwrap(); state.closed && state.queue.is_empty() } }
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:3450
+    // GATE #4565: kernel primitive
+    fn remove_waiter(self: &Self, slot: &ParkSlot) -> {
+        #Unsafe("remove borrowed select slot by native identity, not payload equality") {
+            self.state.lock().unwrap().recv_waiters.retain(fn(w) { not ptr.eq(Arc.as_ptr(w), ptr.from_ref(slot)) })
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:3459
+struct SelectRegistration<T> { recvs: [Arc<ChannelInner<T>>], master: Arc<ParkSlot>, cancel_control: Arc<JetTaskControl>? }
+impl<T> SelectRegistration<T> {
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:3466
+    fn new(recvs: &[Arc<ChannelInner<T>>], master: Arc<ParkSlot>, cancel_control: Arc<JetTaskControl>?) -> Self {
+        for channel in recvs { channel.register_select_waiter(master.clone()) }
+        if cancel_control.as_ref() is Val(control) { control.register_cancel_waiter(&master) }
+        Self{recvs: recvs.to_vec(), master: ^master, cancel_control: ^cancel_control}
+    }
+}
+impl<T> Drop for SelectRegistration<T> {
+    // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:3486
+    fn drop(self: &Self) -> {
+        for channel in &self.recvs { channel.remove_waiter(&self.master) }
+        if self.cancel_control.as_ref() is Val(control) { control.remove_cancel_waiter(&self.master) }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:3497
+// GATE #4565: kernel primitive
+#Unsafe("shared select slot registered with every channel and cancellation owner; native timers and metrics retain scope")
+fn jet_scheduler_select<T: Send>(recvs: [Arc<ChannelInner<T>>], after_ms: [U64]) -> JetSelectOutcome<T> {
+    assert(not recvs.is_empty() || not after_ms.is_empty(), "select: no arms registered")
+    for (i, ch) in recvs.iter().enumerate() { if ch.try_pop() is Val(v) { return .Recv(i, ^v) } }
+    if after_ms.iter().enumerate().find(fn((_, ms)) { **ms == 0 }) is Val((i, _)) { return .After(i) }
+    if after_ms.is_empty() && not recvs.is_empty() && recvs.iter().all(fn(ch) { ch.is_closed_and_empty() }) { return .Closed }
+    master :: ParkSlot.new()
+    cancel_control :: current_task_control()
+    started :: Instant.now()
+    _registration :: SelectRegistration.new(&recvs, master.clone(), cancel_control.clone())
+    // Close can race initial probe and registration; recheck to avoid a lost close wake.
+    if after_ms.is_empty() && not recvs.is_empty() && recvs.iter().all(fn(ch) { ch.is_closed_and_empty() }) { return .Closed }
+    for ms in &after_ms { timer_wheel().schedule(Instant.now() + Duration.from_millis(*ms), master.clone()) }
+    loop {
+        if jet_scheduler_task_cancelled() && not jet_scheduler_shielded() { jet_task_deliver_cancel(); return .Closed }
+        _ :: METRIC_PARKED.fetch_add(1, Ordering.Relaxed)
+        jet_scheduler_yield("select wait", &master, None)
+        _ :: METRIC_PARKED.fetch_sub(1, Ordering.Relaxed)
+        for (i, ch) in recvs.iter().enumerate() { if ch.try_pop() is Val(v) { return .Recv(i, ^v) } }
+        if after_ms.iter().enumerate().find(fn((_, ms)) { started.elapsed() >= Duration.from_millis(**ms) }) is Val((i, _)) { return .After(i) }
+        if after_ms.is_empty() && not recvs.is_empty() && recvs.iter().all(fn(ch) { ch.is_closed_and_empty() }) { return .Closed }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:3573
+// None means not ready; Closed remains distinct for caller's else-arm policy.
+fn jet_scheduler_try_select<T: Send>(recvs: [Arc<ChannelInner<T>>], after_ms: [U64]) -> JetSelectOutcome<T>? {
+    assert(not recvs.is_empty() || not after_ms.is_empty(), "select: no arms registered")
+    for (i, ch) in recvs.iter().enumerate() { if ch.try_pop() is Val(v) { return Val(.Recv(i, ^v)) } }
+    if after_ms.iter().enumerate().find(fn((_, ms)) { **ms == 0 }) is Val((i, _)) { return Val(.After(i)) }
+    if after_ms.is_empty() && not recvs.is_empty() && recvs.iter().all(fn(ch) { ch.is_closed_and_empty() }) { return Val(.Closed) }
+    None
+}
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:3601
+// GATE #4565: kernel primitive
+METRIC_PARKED :: #Unsafe("process-wide parked count") { AtomicUsize.new(0) }
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:3602
+// GATE #4565: kernel primitive
+METRIC_POLLER_WAKE :: #Unsafe("process-wide poller wake count") { AtomicUsize.new(0) }
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:3603
+// GATE #4565: kernel primitive
+METRIC_PARK_BLOCKS :: #Unsafe("process-wide actual park-block count") { AtomicUsize.new(0) }
+// Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:3604
+// GATE #4565: kernel primitive
+METRIC_IO_ACTIVE :: #Unsafe("process-wide outstanding native IO count") { AtomicUsize.new(0) }
 

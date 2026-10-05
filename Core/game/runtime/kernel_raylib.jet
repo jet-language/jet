@@ -1,188 +1,145 @@
-// PORT-PENDING 0157 crates-jet-codegen-src-prelude-core-raylib: crates/jet-codegen/src/Prelude/Core/Raylib.rs:1-184
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS // Shared core.game.raylib semantics used by AOT, JIT, and the interpreter.
-//RS // Tier adapters own only their handle/ABI carriers and native calls.
-//RS 
-//RS #[derive(Clone, Debug, PartialEq, Eq)]
-//RS pub(crate) struct JetRaylibAtlasRegion {
-//RS     pub(crate) name: String,
-//RS     pub(crate) x: i64,
-//RS     pub(crate) y: i64,
-//RS     pub(crate) width: i64,
-//RS     pub(crate) height: i64,
-//RS }
-//RS 
-//RS #[derive(Clone, Debug, PartialEq, Eq)]
-//RS pub(crate) struct JetRaylibAtlasSpec {
-//RS     pub(crate) path: String,
-//RS     pub(crate) name: String,
-//RS     pub(crate) texture_path: Option<String>,
-//RS     pub(crate) regions: Vec<JetRaylibAtlasRegion>,
-//RS }
-//RS 
-//RS #[derive(Clone, Debug, PartialEq, Eq)]
-//RS pub(crate) struct JetRaylibSpriteDrawCall {
-//RS     pub(crate) atlas: String,
-//RS     pub(crate) region: String,
-//RS     pub(crate) x: i64,
-//RS     pub(crate) y: i64,
-//RS     pub(crate) source_x: i64,
-//RS     pub(crate) source_y: i64,
-//RS     pub(crate) width: i64,
-//RS     pub(crate) height: i64,
-//RS }
-//RS 
-//RS thread_local! {
-//RS     static JET_RAYLIB_DRAW_CALLS: std::cell::RefCell<Vec<JetRaylibSpriteDrawCall>> =
-//RS         const { std::cell::RefCell::new(Vec::new()) };
-//RS }
-//RS 
-//RS pub(crate) fn jet_raylib_record_draw_call(call: JetRaylibSpriteDrawCall) {
-//RS     JET_RAYLIB_DRAW_CALLS.with(|calls| calls.borrow_mut().push(call));
-//RS }
-//RS 
-//RS #[allow(dead_code)]
-//RS pub(crate) fn jet_raylib_take_draw_calls() -> Vec<JetRaylibSpriteDrawCall> {
-//RS     JET_RAYLIB_DRAW_CALLS.with(|calls| std::mem::take(&mut *calls.borrow_mut()))
-//RS }
-//RS 
-//RS pub(crate) fn jet_raylib_sprite_draw_call(
-//RS     atlas_name: &str,
-//RS     regions: &[JetRaylibAtlasRegion],
-//RS     region: &str,
-//RS     x: i64,
-//RS     y: i64,
-//RS ) -> Option<JetRaylibSpriteDrawCall> {
-//RS     let region_data = regions.iter().find(|item| item.name == region)?;
-//RS     Some(JetRaylibSpriteDrawCall {
-//RS         atlas: atlas_name.to_string(),
-//RS         region: region.to_string(),
-//RS         x,
-//RS         y,
-//RS         source_x: region_data.x,
-//RS         source_y: region_data.y,
-//RS         width: region_data.width,
-//RS         height: region_data.height,
-//RS     })
-//RS }
-//RS 
-//RS pub(crate) fn jet_raylib_load_texture_atlas_spec(path: &str) -> JetRaylibAtlasSpec {
-//RS     let fallback_name = std::path::Path::new(path)
-//RS         .file_stem()
-//RS         .and_then(|name| name.to_str())
-//RS         .unwrap_or("atlas")
-//RS         .to_string();
-//RS     let text = std::fs::read_to_string(path).ok();
-//RS     jet_raylib_parse_texture_atlas(path, text.as_deref(), fallback_name)
-//RS }
-//RS 
-//RS fn jet_raylib_parse_texture_atlas(
-//RS     path: &str,
-//RS     text: Option<&str>,
-//RS     fallback_name: String,
-//RS ) -> JetRaylibAtlasSpec {
-//RS     let mut name = fallback_name;
-//RS     let mut texture_path = None;
-//RS     let mut regions = Vec::new();
-//RS     if let Some(text) = text {
-//RS         for line in text.lines().map(str::trim).filter(|line| !line.is_empty()) {
-//RS             if let Some(value) = line.strip_prefix("atlas:") {
-//RS                 if !value.trim().is_empty() {
-//RS                     name = value.trim().to_string();
-//RS                 }
-//RS             } else if let Some(value) = line.strip_prefix("texture:") {
-//RS                 if !value.trim().is_empty() {
-//RS                     texture_path = Some(jet_raylib_atlas_texture_path(path, value.trim()));
-//RS                 }
-//RS             } else if let Some(region) = jet_raylib_atlas_region(line) {
-//RS                 regions.push(region);
-//RS             }
-//RS         }
-//RS     }
-//RS     if texture_path.is_none() {
-//RS         texture_path = Some(
-//RS             std::path::Path::new(path)
-//RS                 .with_extension("png")
-//RS                 .to_string_lossy()
-//RS                 .into_owned(),
-//RS         );
-//RS     }
-//RS     JetRaylibAtlasSpec {
-//RS         path: path.to_string(),
-//RS         name,
-//RS         texture_path,
-//RS         regions,
-//RS     }
-//RS }
-//RS 
-//RS fn jet_raylib_atlas_region(line: &str) -> Option<JetRaylibAtlasRegion> {
-//RS     let rest = line
-//RS         .strip_prefix("region:")
-//RS         .or_else(|| line.strip_prefix("region "))?;
-//RS     let mut fields = rest.split_whitespace();
-//RS     let name = fields.next()?.to_string();
-//RS     let x = fields.next()?.parse().ok()?;
-//RS     let y = fields.next()?.parse().ok()?;
-//RS     let width = fields.next()?.parse().ok()?;
-//RS     let height = fields.next()?.parse().ok()?;
-//RS     Some(JetRaylibAtlasRegion {
-//RS         name,
-//RS         x,
-//RS         y,
-//RS         width,
-//RS         height,
-//RS     })
-//RS }
-//RS 
-//RS fn jet_raylib_atlas_texture_path(atlas_path: &str, texture: &str) -> String {
-//RS     let texture_path = std::path::Path::new(texture);
-//RS     if texture_path.is_absolute() {
-//RS         texture_path.to_string_lossy().into_owned()
-//RS     } else {
-//RS         std::path::Path::new(atlas_path)
-//RS             .parent()
-//RS             .unwrap_or_else(|| std::path::Path::new("."))
-//RS             .join(texture_path)
-//RS             .to_string_lossy()
-//RS             .into_owned()
-//RS     }
-//RS }
-//RS 
-//RS pub(crate) fn jet_raylib_button_code(name: &str) -> Option<i32> {
-//RS     match name {
-//RS         "A" | "a" | "South" | "south" | "RightFaceDown" | "right_face_down" => Some(7),
-//RS         "B" | "b" | "East" | "east" | "RightFaceRight" | "right_face_right" => Some(6),
-//RS         "X" | "x" | "West" | "west" | "RightFaceLeft" | "right_face_left" => Some(8),
-//RS         "Y" | "y" | "North" | "north" | "RightFaceUp" | "right_face_up" => Some(5),
-//RS         "DPadUp" | "dpad_up" | "LeftFaceUp" | "left_face_up" => Some(1),
-//RS         "DPadRight" | "dpad_right" | "LeftFaceRight" | "left_face_right" => Some(2),
-//RS         "DPadDown" | "dpad_down" | "LeftFaceDown" | "left_face_down" => Some(3),
-//RS         "DPadLeft" | "dpad_left" | "LeftFaceLeft" | "left_face_left" => Some(4),
-//RS         "LeftShoulder" | "left_shoulder" | "LeftTrigger1" | "left_trigger_1" => Some(9),
-//RS         "LeftTrigger" | "left_trigger" | "LeftTrigger2" | "left_trigger_2" => Some(10),
-//RS         "RightShoulder" | "right_shoulder" | "RightTrigger1" | "right_trigger_1" => Some(11),
-//RS         "RightTrigger" | "right_trigger" | "RightTrigger2" | "right_trigger_2" => Some(12),
-//RS         "Back" | "back" | "MiddleLeft" | "middle_left" => Some(13),
-//RS         "Start" | "start" | "Middle" | "middle" => Some(14),
-//RS         "Guide" | "guide" | "MiddleRight" | "middle_right" => Some(15),
-//RS         "LeftThumb" | "left_thumb" => Some(16),
-//RS         "RightThumb" | "right_thumb" => Some(17),
-//RS         "Left" | "left" => Some(18),
-//RS         "Right" | "right" => Some(19),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS pub(crate) fn jet_raylib_axis_code(name: &str) -> Option<i32> {
-//RS     match name {
-//RS         "LeftX" | "left_x" | "leftx" => Some(0),
-//RS         "LeftY" | "left_y" | "lefty" => Some(1),
-//RS         "RightX" | "right_x" | "rightx" => Some(2),
-//RS         "RightY" | "right_y" | "righty" => Some(3),
-//RS         "LeftTrigger" | "left_trigger" | "lefttrigger" => Some(4),
-//RS         "RightTrigger" | "right_trigger" | "righttrigger" => Some(5),
-//RS         _ => None,
-//RS     }
-//RS }
-// END-PORT-PENDING 0157 crates/jet-codegen/src/Prelude/Core/Raylib.rs:1-184
+use core.cell.[RefCell, ThreadLocal]
+use std.fs
 
+// Shared core.game.raylib semantics; tier adapters own native handle/ABI calls.
+// Rust: crates/jet-codegen/src/Prelude/Core/Raylib.rs:5
+#Equatable
+pub struct JetRaylibAtlasRegion {
+    pub name: String
+    pub x: I64
+    pub y: I64
+    pub width: I64
+    pub height: I64
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Raylib.rs:14
+#Equatable
+pub struct JetRaylibAtlasSpec {
+    pub path: String
+    pub name: String
+    pub texture_path: String?
+    pub regions: [JetRaylibAtlasRegion]
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Raylib.rs:22
+#Equatable
+pub struct JetRaylibSpriteDrawCall {
+    pub atlas: String
+    pub region: String
+    pub x: I64
+    pub y: I64
+    pub source_x: I64
+    pub source_y: I64
+    pub width: I64
+    pub height: I64
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Raylib.rs:33
+// GATE #4565: kernel primitive — per-thread draw-call record ownership.
+JET_RAYLIB_DRAW_CALLS :: ThreadLocal<RefCell<[JetRaylibSpriteDrawCall]>>.new(fn() { RefCell.new([]) })
+// Rust: crates/jet-codegen/src/Prelude/Core/Raylib.rs:38
+#Unsafe("append only to the calling thread's draw-call registry")
+pub fn jet_raylib_record_draw_call(call: JetRaylibSpriteDrawCall) -> {
+    JET_RAYLIB_DRAW_CALLS.with(calls -> calls.borrow_mut().push(^call))
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Raylib.rs:43
+#Unsafe("move the calling thread's draw calls out and replace with an empty registry")
+pub fn jet_raylib_take_draw_calls() -> [JetRaylibSpriteDrawCall] {
+    JET_RAYLIB_DRAW_CALLS.with(calls -> {
+        values := calls.borrow_mut()
+        std.mem.take(&values)
+    })
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Raylib.rs:47
+pub fn jet_raylib_sprite_draw_call(atlas_name: &String, regions: &[JetRaylibAtlasRegion], region: &String, x: I64, y: I64) -> JetRaylibSpriteDrawCall? {
+    region_data :: regions.iter().find(item -> item.name == region)?
+    Val(JetRaylibSpriteDrawCall{atlas: atlas_name.to_string(), region: region.to_string(), x: x, y: y,
+        source_x: region_data.x, source_y: region_data.y, width: region_data.width, height: region_data.height})
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Raylib.rs:67
+// GATE #4565: kernel primitive — native lexical path and actual UTF-8 file read.
+#Unsafe("read the atlas using selected native path semantics; failed read retains the original fallback behavior")
+pub fn jet_raylib_load_texture_atlas_spec(path: &String) -> JetRaylibAtlasSpec {
+    fallback_name :: OSPath.from(path).file_stem().and_then(name -> name.to_str()).unwrap_or("atlas").to_string()
+    text :: fs.read_to_string(OSPath.from(path)).ok()
+    jet_raylib_parse_texture_atlas(path, text.as_deref(), fallback_name)
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Raylib.rs:77
+fn jet_raylib_parse_texture_atlas(path: &String, text: String?, fallback_name: String) -> JetRaylibAtlasSpec {
+    name := fallback_name
+    texture_path: String? = None
+    regions := []
+    if text is Val(text) {
+        for raw in text.lines() {
+            line := raw.trim() // #4303
+            if line.is_empty() -> continue
+            if line.strip_prefix("atlas:") is Val(value) {
+                value := value.trim() // #4303
+                if not value.is_empty() { name = value.to_string() }
+            } else if line.strip_prefix("texture:") is Val(value) {
+                value := value.trim() // #4303
+                if not value.is_empty() { texture_path = Val(jet_raylib_atlas_texture_path(path, &value)) }
+            } else if jet_raylib_atlas_region(&line) is Val(region) { regions.push(^region) }
+        }
+    }
+    if texture_path.is_none() {
+        // GATE #4565: kernel primitive — selected-target lexical path extension.
+        texture_path = Val(#Unsafe("replace the atlas suffix without accessing the filesystem") {
+            OSPath.from(path).with_extension("png").to_string_lossy().to_string()
+        })
+    }
+    JetRaylibAtlasSpec{path: path.to_string(), name: name, texture_path: texture_path, regions: regions}
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Raylib.rs:116
+fn jet_raylib_atlas_region(line: &String) -> JetRaylibAtlasRegion? {
+    rest :: line.strip_prefix("region:").or_else(fn() { line.strip_prefix("region ") })?
+    fields := rest.split_whitespace()
+    name :: fields.next()?.to_string()
+    x :: fields.next()?.parse<I64>().ok()?
+    y :: fields.next()?.parse<I64>().ok()?
+    width :: fields.next()?.parse<I64>().ok()?
+    height :: fields.next()?.parse<I64>().ok()?
+    Val(JetRaylibAtlasRegion{name: name, x: x, y: y, width: width, height: height})
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Raylib.rs:135
+// GATE #4565: kernel primitive — selected-target native lexical path operations.
+#Unsafe("resolve a texture lexically relative to its atlas; no canonicalization or filesystem access")
+fn jet_raylib_atlas_texture_path(atlas_path: &String, texture: &String) -> String {
+    texture_path :: OSPath.from(texture)
+    if texture_path.is_absolute() { texture_path.to_string_lossy().to_string() }
+    else { OSPath.from(atlas_path).parent().unwrap_or_else(fn() { OSPath.from(".") }).join(texture_path).to_string_lossy().to_string() }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Raylib.rs:149
+pub fn jet_raylib_button_code(name: &String) -> I32? {
+    match name {
+        "A" | "a" | "South" | "south" | "RightFaceDown" | "right_face_down" -> Val(I32{7})
+        "B" | "b" | "East" | "east" | "RightFaceRight" | "right_face_right" -> Val(I32{6})
+        "X" | "x" | "West" | "west" | "RightFaceLeft" | "right_face_left" -> Val(I32{8})
+        "Y" | "y" | "North" | "north" | "RightFaceUp" | "right_face_up" -> Val(I32{5})
+        "DPadUp" | "dpad_up" | "LeftFaceUp" | "left_face_up" -> Val(I32{1})
+        "DPadRight" | "dpad_right" | "LeftFaceRight" | "left_face_right" -> Val(I32{2})
+        "DPadDown" | "dpad_down" | "LeftFaceDown" | "left_face_down" -> Val(I32{3})
+        "DPadLeft" | "dpad_left" | "LeftFaceLeft" | "left_face_left" -> Val(I32{4})
+        "LeftShoulder" | "left_shoulder" | "LeftTrigger1" | "left_trigger_1" -> Val(I32{9})
+        "LeftTrigger" | "left_trigger" | "LeftTrigger2" | "left_trigger_2" -> Val(I32{10})
+        "RightShoulder" | "right_shoulder" | "RightTrigger1" | "right_trigger_1" -> Val(I32{11})
+        "RightTrigger" | "right_trigger" | "RightTrigger2" | "right_trigger_2" -> Val(I32{12})
+        "Back" | "back" | "MiddleLeft" | "middle_left" -> Val(I32{13})
+        "Start" | "start" | "Middle" | "middle" -> Val(I32{14})
+        "Guide" | "guide" | "MiddleRight" | "middle_right" -> Val(I32{15})
+        "LeftThumb" | "left_thumb" -> Val(I32{16})
+        "RightThumb" | "right_thumb" -> Val(I32{17})
+        "Left" | "left" -> Val(I32{18})
+        "Right" | "right" -> Val(I32{19})
+        _ -> None
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Raylib.rs:174
+pub fn jet_raylib_axis_code(name: &String) -> I32? {
+    match name {
+        "LeftX" | "left_x" | "leftx" -> Val(I32{0})
+        "LeftY" | "left_y" | "lefty" -> Val(I32{1})
+        "RightX" | "right_x" | "rightx" -> Val(I32{2})
+        "RightY" | "right_y" | "righty" -> Val(I32{3})
+        "LeftTrigger" | "left_trigger" | "lefttrigger" -> Val(I32{4})
+        "RightTrigger" | "right_trigger" | "righttrigger" -> Val(I32{5})
+        _ -> None
+    }
+}

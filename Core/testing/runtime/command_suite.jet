@@ -1,54 +1,45 @@
-// PORT-PENDING 0137 crates-jet-codegen-src-prelude-commandsuite-module-group: crates/jet-codegen/src/Prelude/CommandSuite.rs:1-50
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS /// D-CMD-OVERRIDE1=C: the ordinary value handed to an expert command
-//RS /// override.  The callback is installed by the command harness; the value
-//RS /// itself stays a small, copyable snapshot so the same Prelude source works
-//RS /// in AOT, the resident JIT, and the TIR evaluator.
-//RS pub type JetSuiteRunner = fn() -> (i64, i64);
-//RS 
-//RS #[derive(Clone, Copy, Debug)]
-//RS pub struct JetTestSuite {
-//RS     pub iteration: i64,
-//RS     pub result: i64,
-//RS     pub runner: Option<JetSuiteRunner>,
-//RS }
-//RS 
-//RS thread_local! {
-//RS     static JET_TEST_RUNNER: std::cell::Cell<Option<JetSuiteRunner>> = const { std::cell::Cell::new(None) };
-//RS     static JET_TEST_ITERATION: std::cell::Cell<i64> = const { std::cell::Cell::new(0) };
-//RS     static JET_TEST_RESULT: std::cell::Cell<i64> = const { std::cell::Cell::new(0) };
-//RS }
-//RS 
-//RS pub fn jet_test_suite_install(runner: JetSuiteRunner) {
-//RS     JET_TEST_RUNNER.with(|slot| slot.set(Some(runner)));
-//RS     JET_TEST_ITERATION.with(|slot| slot.set(0));
-//RS     JET_TEST_RESULT.with(|slot| slot.set(0));
-//RS }
-//RS 
-//RS pub fn jet_test_suite_new() -> JetTestSuite {
-//RS     JetTestSuite {
-//RS         iteration: JET_TEST_ITERATION.with(std::cell::Cell::get),
-//RS         result: JET_TEST_RESULT.with(std::cell::Cell::get),
-//RS         runner: JET_TEST_RUNNER.with(std::cell::Cell::get),
-//RS     }
-//RS }
-//RS 
-//RS /// `suite.run()` reads its receiver (D-CMD-OVERRIDE1=C: `fn test(suite:
-//RS /// TestSuite) { suite.run() }` takes a read parameter). The run's outcome is
-//RS /// the returned status and the harness-owned counters; the caller's snapshot
-//RS /// value is not rewritten.
-//RS pub fn jet_test_suite_run(suite: &JetTestSuite) -> i64 {
-//RS     let Some(runner) = suite.runner else {
-//RS         return suite.result;
-//RS     };
-//RS     let (iteration, result) = runner();
-//RS     JET_TEST_ITERATION.with(|slot| slot.set(iteration));
-//RS     JET_TEST_RESULT.with(|slot| slot.set(result));
-//RS     result
-//RS }
-//RS 
-//RS pub fn jet_test_suite_status() -> i64 {
-//RS     JET_TEST_RESULT.with(std::cell::Cell::get)
-//RS }
-// END-PORT-PENDING 0137 crates/jet-codegen/src/Prelude/CommandSuite.rs:1-50
+use core.cell.[Cell, ThreadLocal]
 
+// Rust: crates/jet-codegen/src/Prelude/CommandSuite.rs:5
+pub type JetSuiteRunner = fn() -> (I64, I64)
+// Rust: crates/jet-codegen/src/Prelude/CommandSuite.rs:8
+pub struct JetTestSuite {
+    pub iteration: I64
+    pub result: I64
+    pub runner: JetSuiteRunner?
+}
+// Rust: crates/jet-codegen/src/Prelude/CommandSuite.rs:15-17
+// GATE #4565: kernel primitive — per-thread harness snapshot storage.
+const JET_TEST_RUNNER: ThreadLocal<Cell<JetSuiteRunner?>> = ThreadLocal.new(fn() { Cell.new(None) })
+const JET_TEST_ITERATION: ThreadLocal<Cell<I64>> = ThreadLocal.new(fn() { Cell.new(I64{0}) })
+const JET_TEST_RESULT: ThreadLocal<Cell<I64>> = ThreadLocal.new(fn() { Cell.new(I64{0}) })
+// Rust: crates/jet-codegen/src/Prelude/CommandSuite.rs:20
+pub fn jet_test_suite_install(runner: JetSuiteRunner) Never! {
+    #Unsafe("access harness TLS only on its owning thread") {
+        JET_TEST_RUNNER.with(fn(slot) { slot.set(Val(runner)) })
+        JET_TEST_ITERATION.with(fn(slot) { slot.set(I64{0}) })
+        JET_TEST_RESULT.with(fn(slot) { slot.set(I64{0}) })
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CommandSuite.rs:26
+pub fn jet_test_suite_new() -> JetTestSuite Never! {
+    #Unsafe("copy three same-thread harness snapshot cells") {
+        JetTestSuite{iteration: JET_TEST_ITERATION.with(fn(slot) { slot.get() }),
+            result: JET_TEST_RESULT.with(fn(slot) { slot.get() }),
+            runner: JET_TEST_RUNNER.with(fn(slot) { slot.get() })}
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CommandSuite.rs:38
+pub fn jet_test_suite_run(suite: JetTestSuite) -> I64 Never! {
+    runner :: suite.runner ?? return suite.result
+    (iteration, result) :: runner()
+    #Unsafe("write same-thread harness counters without changing caller snapshot") {
+        JET_TEST_ITERATION.with(fn(slot) { slot.set(iteration) })
+        JET_TEST_RESULT.with(fn(slot) { slot.set(result) })
+    }
+    result
+}
+// Rust: crates/jet-codegen/src/Prelude/CommandSuite.rs:48
+pub fn jet_test_suite_status() -> I64 Never! {
+    #Unsafe("read harness result on owning thread") { JET_TEST_RESULT.with(fn(slot) { slot.get() }) }
+}

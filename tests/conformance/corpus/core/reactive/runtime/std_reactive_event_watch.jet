@@ -1,0 +1,112 @@
+use core.reactive.runtime.std_reactive_event_watch.[JetSignal, JetDerived, jet_reactive_effect,
+    jet_reactive_transaction, JetEvent, JetEventScope, JetHook, JetDecisionHook,
+    JetHookPolicy, JetHookDecision, JetHookOutcome, JetAsyncEvent, JetAsyncPolicy,
+    JetEventOverflow, JetFailurePolicy, JetDispatchState, JetMeasurement]
+use std.sync.[Arc, Mutex]
+use std.rc.[Rc]
+use std.cell.[Cell]
+
+// Behavioral control for Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/ReactiveEventWatch.rs:242-328
+#Test("reactive_transaction_reads_one_staged_value_and_publishes_once") {
+    // GATE #4565: kernel primitive
+    #Unsafe("test observes real synchronized callbacks on this thread") {
+        signal :: JetSignal<I64>.new(1)
+        observed :: Arc.new(Mutex.new([]))
+        read_signal :: signal.clone()
+        recorded :: observed.clone()
+        effect :: jet_reactive_effect(fn() { recorded.lock().unwrap().push(read_signal.get()) })
+        read_signal :: signal.clone()
+        (after, during) :: jet_reactive_transaction(&signal, fn(value) {
+            *value = 7
+            assert_eq(read_signal.get(), I64{7})
+            *value = 9
+            read_signal.get()
+        })
+        assert_eq(after, I64{9})
+        assert_eq(during, I64{9})
+        assert_eq(*observed.lock().unwrap(), [I64{1}, I64{9}])
+        effect.unsubscribe()
+        signal.set(10)
+        assert_eq(*observed.lock().unwrap(), [I64{1}, I64{9}])
+        assert(not effect.active())
+    }
+}
+
+// Behavioral control for Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/ReactiveEventWatch.rs:352-429
+#Test("distinct_derived_notifies_only_changed_values") {
+    // GATE #4565: kernel primitive
+    #Unsafe("test counters and effects use actual shared synchronization") {
+        signal :: JetSignal<I64>.new(2)
+        input :: signal.clone()
+        derived :: JetDerived<I64>.new_distinct(fn() { input.get() % 2 })
+        count :: Arc.new(Mutex.new(I64{0}))
+        read :: derived.clone()
+        visits :: count.clone()
+        effect :: jet_reactive_effect(fn() { _ :: read.get(); *visits.lock().unwrap() += 1 })
+        signal.set(4)
+        assert_eq(*count.lock().unwrap(), I64{1})
+        signal.set(5)
+        assert_eq(*count.lock().unwrap(), I64{2})
+        effect.unsubscribe()
+    }
+}
+
+// Behavioral control for Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/ReactiveEventWatch.rs:689-793
+#Test("event_once_is_consumed_before_depth_first_nested_emit") {
+    scope :: JetEventScope.new()
+    event :: JetEvent<I64>.new()
+    hits :: Rc.new(Cell.new(I64{0}))
+    nested :: event.clone()
+    recorded :: hits.clone()
+    sub :: event.once(&scope, fn(value) { recorded.set(recorded.get() + 1); _ :: nested.emit(value + 1) })
+    trace :: event.emit(1)
+    assert_eq(trace.delivered(), I64{1})
+    assert_eq(hits.get(), I64{1})
+    assert(not sub.active())
+    assert_eq(event.listener_count(), I64{0})
+    scope.cancel()
+    assert_eq(scope.active_count(), I64{0})
+}
+
+// Behavioral control for Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/ReactiveEventWatch.rs:1682-1914
+#Test("hook_priority_transform_then_cancel_short_circuits") {
+    scope :: JetEventScope.new()
+    hook :: JetDecisionHook<I64, String>.new(JetHookPolicy.FirstCancelElseTransform)
+    _ :: hook.on_priority(&scope, 10, fn(value) { JetHookDecision.Transform(value + 3) })
+    _ :: hook.on_priority(&scope, 5, fn(value) { assert_eq(value, I64{5}); JetHookDecision.Cancel })
+    reached :: Rc.new(Cell.new(false))
+    later :: reached.clone()
+    _ :: hook.on(&scope, fn(_) { later.set(true); JetHookDecision.Continue })
+    match hook.run(2) { JetHookOutcome.Cancel -> {}, _ -> assert(false) }
+    assert(not reached.get())
+    ordinary :: JetHook<I64, I64>.new(-1)
+    assert_eq(ordinary.run(1, 99), I64{99})
+    _ :: ordinary.on(&scope, fn(value) { value * 2 })
+    assert_eq(ordinary.run(3, 99), I64{6})
+}
+
+// Behavioral control for Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/ReactiveEventWatch.rs:1044-1604
+#Test("async_event_delivers_and_closed_admission_is_terminal") {
+    event :: JetAsyncEvent<I64, String>.new(JetAsyncPolicy.new(1, JetEventOverflow.Block), JetFailurePolicy.Collect).expect("positive capacity")
+    scope :: JetEventScope.new()
+    _ :: event.once(&scope, fn(value) { assert_eq(value, I64{4}); Ok(()) })
+    report :: event.emit_async(4).join().expect("real scheduler dispatch completes")
+    assert(report.accepted())
+    assert_eq(report.state(), JetDispatchState.Delivered)
+    assert_eq(report.delivered_handlers(), I64{1})
+    assert_eq(event.listener_count(), I64{0})
+    event.close()
+    report :: event.emit_async(5).join().expect("closed dispatch completes with typed report")
+    assert(not report.accepted())
+    assert_eq(report.state(), JetDispatchState.Closed)
+}
+
+// Behavioral control for Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/ReactiveEventWatch.rs:2342-2399
+#Test("measurement_addition_propagates_standard_uncertainty") {
+    left :: JetMeasurement<Float>.new(10.0, -3.0)
+    right :: JetMeasurement<Float>.new(20.0, 4.0)
+    sum :: left.add(right)
+    assert_eq(sum.value(), 30.0)
+    assert_eq(sum.uncertainty(), 5.0)
+    assert_eq(JetMeasurement<Float>.from_relative(-10.0, -0.2).uncertainty(), 2.0)
+}

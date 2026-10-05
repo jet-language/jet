@@ -1,0 +1,114 @@
+use core.db.runtime.std_db_plugin_wire.[DBValue, DBError, JetDbQueryMetadata, JetDbTableFact, jet_db_row_int, jet_db_row_project, jet_db_validate_explain_sql, jet_db_write_set, jet_db_apply_policy, jet_db_apply_migration_policy, jet_db_encode_params]
+use core.db.runtime.std_db_plugin_wire.[jet_db_decode_query_result, jet_db_decode_execute_result, jet_db_decode_observed_query_result, jet_db_decode_observed_execute_result, jet_db_decode_explain_result, JetMigrationRequest, JetMigrationOperation, JetMigrationLock, jet_db_migration_checksum, jet_db_migration_request_checksum]
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/DBPluginWire.rs:54
+#Test("db_value_keeps_integer_precision_and_boolean_affinity") {
+    exact :: 9007199254740993 as I64
+    assert(DBValue.Int(exact).int() == Ok(exact))
+    assert(DBValue.Int(0).bool() == Ok(false) && DBValue.Int(1).bool() == Ok(true))
+    assert(DBValue.Bool(true).bool() == Ok(true))
+    assert(DBValue.Int(2).bool().is_err())
+    assert(DBValue.Blob([0, 128, 255]).blob() == Ok([0, 128, 255]))
+    assert(DBValue.Null.is_null() && DBValue.Null.int().is_err())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/DBPluginWire.rs:91
+#Test("db_row_projection_keeps_requested_order_and_skips_missing") {
+    row :: ["one": DBValue.Int(1), "two": DBValue.Int(2)]
+    assert(jet_db_row_int(&row, "one") == Ok(1))
+    assert(jet_db_row_int(&row, "absent") == Err(DBError{message: "missing column `absent`"}))
+    projected :: jet_db_row_project(&row, [("two", "second"), ("missing", "none"), ("one", "first")], fn(value) { value.int().unwrap() })
+    assert(projected == [("second", 2), ("first", 1)])
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/DBPluginWire.rs:258
+#Test("db_metadata_length_wire_and_error_precedence") {
+    wire :: "JDB1:1:f1:s1:01:11:q1:11:t1:11:0"
+    metadata :: JetDbQueryMetadata.from_wire(wire).unwrap()
+    assert(metadata.source_file == "f" && metadata.source_id == "s" && metadata.source_start == 0 && metadata.source_end == 1)
+    assert(metadata.statement_identity == "q" && metadata.table_facts == [JetDbTableFact{table_id: "t", read: true, write: false}])
+    assert(JetDbQueryMetadata.from_wire(wire + "x") == Err(DBError{message: "database metadata has trailing bytes"}))
+    assert(JetDbQueryMetadata.from_wire("JDB2:") == Err(DBError{message: "database metadata has an unknown version"}))
+    assert(JetDbQueryMetadata.from_wire("JDB1:1:f1:s1:21:11:q1:0") == Err(DBError{message: "database metadata source span is inverted"}))
+    assert(JetDbQueryMetadata.from_wire("JDB1:x:f") == Err(DBError{message: "database metadata length is not decimal"}))
+    assert(JetDbQueryMetadata.from_wire("JDB1:9:abc") == Err(DBError{message: "database metadata field is truncated"}))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/DBPluginWire.rs:358
+#Test("db_explain_rejects_comments_and_non_select") {
+    assert(jet_db_validate_explain_sql(&("SELECT '--' FROM items", [])) == Ok(()))
+    assert(jet_db_validate_explain_sql(&("SELECT * FROM items -- hidden", [])).is_err())
+    assert(jet_db_validate_explain_sql(&("SELECT * FROM items;", [])).is_err())
+    assert(jet_db_validate_explain_sql(&("WITH q AS (SELECT * FROM items) SELECT * FROM q", [])).is_err())
+    assert(jet_db_validate_explain_sql(&("DELETE FROM items", [])).is_err())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/DBPluginWire.rs:520
+#Test("db_write_set_sorted_deduplicated_relations") {
+    steps :: [("UPDATE z SET n = ?", [DBValue.Int(1)]), ("CREATE TABLE IF NOT EXISTS a(n int)", []),
+        ("DELETE FROM z", []), ("DROP TABLE IF EXISTS b", []), ("SELECT * FROM c", [])]
+    assert(jet_db_write_set(&steps) == "a,b,z")
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/DBPluginWire.rs:849
+#Test("db_owner_policy_rewrites_or_and_preserves_bind_order") {
+    sql :: ("SELECT * FROM items WHERE x = ? OR y = ? ORDER BY n LIMIT ?", [DBValue.Int(1), DBValue.Int(2), DBValue.Int(9)])
+    scoped :: jet_db_apply_policy(&sql, "items", "owner == user", "alice").unwrap()
+    assert(scoped.0 == "SELECT * FROM items WHERE (x = ? OR y = ?) AND owner = ? ORDER BY n LIMIT ?")
+    assert(scoped.1 == [DBValue.Int(1), DBValue.Int(2), DBValue.Text("alice"), DBValue.Int(9)])
+    literal :: ("SELECT '?' FROM items ORDER BY n LIMIT ?", [DBValue.Int(5)])
+    assert(jet_db_apply_policy(&literal, "items", "owner == user", "alice").unwrap().1 == [DBValue.Text("alice"), DBValue.Int(5)])
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/DBPluginWire.rs:948
+#Test("db_owner_policy_insert_and_closed_shapes") {
+    insert :: ("INSERT INTO items (id, owner) VALUES (?, ?)", [DBValue.Int(3), DBValue.Text("wrong")])
+    assert(jet_db_apply_policy(&insert, "items", "owner == user", "alice").unwrap().1 == [DBValue.Int(3), DBValue.Text("alice")])
+    assert(jet_db_apply_policy(&("UPDATE items SET owner = ?", [DBValue.Text("other")]), "items", "owner == user", "alice").is_err())
+    assert(jet_db_apply_policy(&("SELECT * FROM items i", []), "items", "owner == user", "alice").is_err())
+    assert(jet_db_apply_policy(&("SELECT * FROM items -- hidden", []), "items", "owner == user", "alice").is_err())
+    schema :: ("CREATE TABLE items(n int)", [])
+    assert(jet_db_apply_policy(&schema, "items", "true", "alice").is_err())
+    assert(jet_db_apply_migration_policy(&schema, "items", "true", "alice").unwrap() == schema)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/DBPluginWire.rs:1051
+#Test("db_params_wire_byte_lengths_and_exact_blob") {
+    assert(jet_db_encode_params(&[DBValue.Null, DBValue.Int(9007199254740993), DBValue.Text("é:;"), DBValue.Bool(true), DBValue.Blob([0, 255])]) ==
+        "5:N0:I16:9007199254740993T4:é:;B1:1X4:00ff")
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/DBPluginWire.rs:1447
+#Test("db_query_wire_exact_values_duplicate_and_trailing_rejection") {
+    rows :: jet_db_decode_query_result("O:1:3:C1:iI16:9007199254740993C1:bB1:1C1:xX4:00ff").unwrap()
+    assert(rows.len() == 1 && rows[0]["i"] == DBValue.Int(9007199254740993))
+    assert(rows[0]["b"] == DBValue.Bool(true) && rows[0]["x"] == DBValue.Blob([0, 255]))
+    assert(jet_db_decode_query_result("O:1:2:C1:iI1:1C1:iI1:2") == Err(DBError{message: "database row contains a duplicate column"}))
+    assert(jet_db_decode_query_result("O:0:x") == Err(DBError{message: "database result contains trailing wire bytes"}))
+    assert(jet_db_decode_query_result("O:1:1:C1:fF3:inf") == Err(DBError{message: "database float value is not finite"}))
+    assert(jet_db_decode_query_result("O:1:1:C1:xX1:f") == Err(DBError{message: "database blob value has odd hexadecimal length"}))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/DBPluginWire.rs:1200
+#Test("db_observed_envelopes_counts_flags_and_duplicate_fields") {
+    (rows, facts) :: jet_db_decode_observed_query_result("Q:R2:0:N1:0D1:7P2:0:").unwrap()
+    assert(rows.is_empty() && facts.rows_returned == Val(0) && facts.rows_affected == None && facts.elapsed_ms == 7 && facts.plan.is_empty())
+    assert(jet_db_decode_observed_query_result("Q:R2:0:N1:1D1:7P2:0:") == Err(DBError{message: "database observed query row count does not match its rows"}))
+    assert(jet_db_decode_observed_query_result("Q:R2:0:R2:0:") == Err(DBError{message: "database observed query has an invalid or duplicate field"}))
+    (affected, execution) :: jet_db_decode_observed_execute_result("X:A1:2D1:9P2:0:").unwrap()
+    assert(affected == 2 && execution.rows_affected == Val(2) && execution.rows_returned == None)
+    assert(jet_db_decode_observed_execute_result("X:A2:-1D1:0P2:0:") == Err(DBError{message: "database runtime affected row count is negative"}))
+    explain :: jet_db_decode_explain_result("Y:D1:3T1:0L1:1P2:0:").unwrap()
+    assert(explain.elapsed_ms == 3 && !explain.timed_out && explain.truncated && explain.plan.is_empty())
+    assert(jet_db_decode_explain_result("Y:T1:2") == Err(DBError{message: "database runtime timeout flag is invalid"}))
+    assert(jet_db_decode_execute_result("O:-1") == Err(DBError{message: "database affected-row count is negative"}))
+    assert(jet_db_decode_execute_result("E:") == Err(DBError{message: "database execute result has no error message"}))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/DBPluginWire.rs:1654
+#Test("db_direct_migration_checksum_compatibility_and_typed_identity") {
+    steps :: [("CREATE TABLE items(n int)", []), ("INSERT INTO items VALUES (?)", [DBValue.Int(7)])]
+    request := JetMigrationRequest.direct("items", steps.clone())
+    assert(request.steps[0].ordinal == 1 && request.steps[1].ordinal == 2)
+    assert(request.lock == JetMigrationLock.Exclusive && request.steps[0].inverse_sql == None)
+    assert(jet_db_migration_request_checksum(&request) == jet_db_migration_checksum(&steps))
+    request.operation = JetMigrationOperation.Apply
+    request.to_version = 1
+    first :: jet_db_migration_request_checksum(&request)
+    request.target_identity = "other"
+    assert(first != jet_db_migration_request_checksum(&request))
+    request.target_identity = "direct"
+    request.steps[0].inverse_sql = Val(("DROP TABLE items", []))
+    assert(first != jet_db_migration_request_checksum(&request))
+}

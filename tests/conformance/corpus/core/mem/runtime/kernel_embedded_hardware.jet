@@ -1,0 +1,93 @@
+use core.mem.runtime.kernel_embedded_hardware.[JetRegisterWidth, JetRegisterAccessMode, JetInterruptSpec, JetDmaChannelSpec, JetDmaOwnership, JetHardwareFacts]
+use core.mem.runtime.kernel_embedded_hardware.[JetHardwareInterruptHandler, JetHardwareInterruptRegistry, JetHardwareReplayHost, JetHardwareHost, JET_HARDWARE_UNAVAILABLE, jet_hardware_register_read_typed, jet_hardware_clear_pending, jet_hardware_enqueue_pending, jet_hardware_drain_pending, jet_hardware_has_pending]
+use core.sys.target
+
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:27
+#Test("embedded_register_widths_preserve_bits_and_bytes") {
+    assert(JetRegisterWidth.U8.bytes() == U64{1})
+    assert(JetRegisterWidth.U16.bytes() == U64{2})
+    assert(JetRegisterWidth.U32.bytes() == U64{4})
+    assert(JetRegisterWidth.U64.bytes() == U64{8})
+    assert(JetRegisterWidth.U8.bits() == U16{8})
+    assert(JetRegisterWidth.U16.bits() == U16{16})
+    assert(JetRegisterWidth.U32.bits() == U16{32})
+    assert(JetRegisterWidth.U64.bits() == U16{64})
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:49
+#Test("embedded_register_access_modes_are_not_interchangeable") {
+    assert(JetRegisterAccessMode.ReadOnly.can_read())
+    assert(not JetRegisterAccessMode.ReadOnly.can_write())
+    assert(not JetRegisterAccessMode.WriteOnly.can_read())
+    assert(JetRegisterAccessMode.WriteOnly.can_write())
+    assert(JetRegisterAccessMode.ReadWrite.can_read())
+    assert(JetRegisterAccessMode.ReadWrite.can_write())
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:253,355
+#Test("embedded_fact_lookup_matches_names_and_numeric_vectors") {
+    irq_name :: "timer"
+    dma_name :: "tx"
+    interrupts :: [JetInterruptSpec.new(&irq_name, U16{7}, true)]
+    channels :: [JetDmaChannelSpec.new(&dma_name, U16{3})]
+    facts :: JetHardwareFacts.new([], interrupts.view(), channels.view())
+    named :: facts.interrupt("timer").unwrap()
+    numeric :: facts.interrupt("7").unwrap()
+    assert(named.vector == numeric.vector)
+    assert(facts.interrupt_vector(U16{7}).unwrap().name == "timer")
+    assert(facts.interrupt("65536") == None)
+    assert(facts.interrupt("missing") == None)
+    channel :: facts.dma_channel("tx").unwrap()
+    assert(channel.transfer_width == JetRegisterWidth.U8)
+    assert(channel.ownership == JetDmaOwnership.Transfer)
+    assert(channel.max_transfer_bytes == None)
+}
+
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:811,1419
+#Test("embedded_interrupt_registry_preserves_target_capacity_and_duplicate_policy") {
+    registry := JetHardwareInterruptRegistry.new()
+    handler :: JetHardwareInterruptHandler{fn_ptr: 1, env: 0, has_env: false}
+    assert(registry.register(U16{3}, handler))
+    assert(not registry.register(U16{3}, handler))
+    registry.clear()
+    assert(registry.register(U16{3}, handler))
+    if target.selected_os() == .None {
+        loop vector in 4..<67 -> assert(registry.register(vector as U16, handler))
+        assert(not registry.register(U16{67}, handler))
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1151,1292,1330
+#Test("embedded_replay_dma_requires_setup_and_consumes_matching_tokens") {
+    profile :: "test-profile"
+    channel_name :: "tx"
+    channels :: [JetDmaChannelSpec.with_transfer(&channel_name, U16{3}, .U16, .Transfer, Val(U64{8}))]
+    facts :: JetHardwareFacts.with_profile(&profile, [], None, None, [], [], channels.view())
+    host := JetHardwareReplayHost.new(facts)
+    assert(host.dma_start(&profile, &channel_name, U64{4096}, U64{4}) == JET_HARDWARE_UNAVAILABLE)
+    assert(host.setup(&profile, &"dma-configure", &channel_name, I64{2}, &"borrowed") == JET_HARDWARE_UNAVAILABLE)
+    assert(host.setup(&profile, &"dma-configure", &channel_name, I64{2}, &"transfer") == I64{0})
+    assert(host.setup(&profile, &"dma-configure", &channel_name, I64{2}, &"transfer") == I64{0})
+    assert(host.dma_start(&"other", &channel_name, U64{4096}, U64{4}) == JET_HARDWARE_UNAVAILABLE)
+    assert(host.dma_start(&profile, &channel_name, U64{4097}, U64{4}) == JET_HARDWARE_UNAVAILABLE)
+    assert(host.dma_start(&profile, &channel_name, U64{4096}, U64{10}) == JET_HARDWARE_UNAVAILABLE)
+    token :: host.dma_start(&profile, &channel_name, U64{4096}, U64{4})
+    assert(token > I64{0})
+    assert(host.dma_wait(&profile, &"missing", token) == JET_HARDWARE_UNAVAILABLE)
+    assert(host.dma_wait(&profile, &channel_name, token) == I64{0})
+    assert(host.dma_wait(&profile, &channel_name, token) == JET_HARDWARE_UNAVAILABLE)
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1372,1380,1392
+#Test("embedded_hosted_interrupt_fifo_drain_resets_readiness") {
+    if target.selected_os() != .None {
+        jet_hardware_clear_pending()
+        assert(not jet_hardware_has_pending())
+        jet_hardware_enqueue_pending(U16{9})
+        jet_hardware_enqueue_pending(U16{2})
+        assert(jet_hardware_has_pending())
+        assert(jet_hardware_drain_pending() == [U16{9}, U16{2}])
+        assert(not jet_hardware_has_pending())
+        assert(jet_hardware_drain_pending().is_empty())
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1496,1673,1722
+#Test("embedded_missing_ambient_host_reports_unavailable") {
+    assert(jet_hardware_register_read_typed(&"profile", &"block", &"register", I64{4}) == JET_HARDWARE_UNAVAILABLE)
+}

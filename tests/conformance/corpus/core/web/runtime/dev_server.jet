@@ -1,0 +1,55 @@
+use core.web.runtime.dev_server.[jet_devserver_for_app, jet_devserver_source_stem, jet_devserver_spawn_output_reader]
+use std.io.Cursor
+use std.sync.Arc
+use std.sync.atomic.[AtomicUsize, AtomicBool, Ordering]
+
+// Rust: crates/jet-codegen/src/Prelude/DevServer.rs:90,138,146
+#Test("devserver_builders_share_the_same_state_and_retain_unresolved_path") {
+    server :: jet_devserver_for_app("corpus-0174-unresolved.jet")
+    chained :: server.html("preview.html").port(I64{9001})
+    assert(server.state.borrow().app_file == "corpus-0174-unresolved.jet")
+    assert(server.state.borrow().html_override == Val("preview.html"))
+    assert(chained.state.borrow().port == Val(U16{9001}))
+}
+// Rust: crates/jet-codegen/src/Prelude/DevServer.rs:550
+#Test("devserver_source_stem_preserves_reference_dot_replacement_and_fallback") {
+    assert(jet_devserver_source_stem(OSPath.from_text("sample.demo.jet")) == "sample_demo")
+    assert(jet_devserver_source_stem(OSPath.from_text("sample.jet")) == "sample")
+    assert(jet_devserver_source_stem(OSPath.from_text("/")) == "out")
+}
+// Rust: crates/jet-codegen/src/Prelude/DevServer.rs:507
+#Test("devserver_output_readers_share_one_aggregate_budget_and_allow_exact_limit") {
+    budget :: Arc.new(AtomicUsize.new(0))
+    exceeded :: Arc.new(AtomicBool.new(false))
+    read_failed :: Arc.new(AtomicBool.new(false))
+    first :: jet_devserver_spawn_output_reader(Cursor.new([U8{1}, U8{2}, U8{3}]), 4, Arc.clone(budget), Arc.clone(exceeded), Arc.clone(read_failed))
+    assert(first.join().unwrap().unwrap() == [U8{1}, U8{2}, U8{3}])
+    second :: jet_devserver_spawn_output_reader(Cursor.new([U8{4}]), 4, Arc.clone(budget), Arc.clone(exceeded), Arc.clone(read_failed))
+    assert(second.join().unwrap().unwrap() == [U8{4}])
+    assert(budget.load(Ordering.Acquire) == 4)
+    assert(!exceeded.load(Ordering.Acquire))
+    third :: jet_devserver_spawn_output_reader(Cursor.new([U8{5}]), 4, Arc.clone(budget), Arc.clone(exceeded), Arc.clone(read_failed))
+    assert(third.join().unwrap().unwrap() == [])
+    assert(exceeded.load(Ordering.Acquire))
+    assert(!read_failed.load(Ordering.Acquire))
+    assert(budget.load(Ordering.Acquire) == 4)
+}
+
+// Rust: crates/jet-codegen/src/Prelude/DevServer.rs:1440
+#Test("devserver_body_end_is_ascii_case_insensitive_and_returns_first_marker") {
+    assert(core.web.runtime.dev_server.jet_devserver_find_body_end("<BODY>x</BoDy></body>".as_bytes()) == Val(USize{7}))
+    assert(core.web.runtime.dev_server.jet_devserver_find_body_end("</bod>".as_bytes()) == None)
+    assert(core.web.runtime.dev_server.jet_devserver_find_body_end("".as_bytes()) == None)
+}
+// Rust: crates/jet-codegen/src/Prelude/DevServer.rs:1165
+#Test("devserver_line_budget_allows_exact_limit_and_rejects_one_more_byte") {
+    exact := Cursor.new("abc\n".as_bytes())
+    line := String.new()
+    assert(core.web.runtime.dev_server.jet_devserver_read_line_bounded(&exact, &line, USize{4}).unwrap() == USize{4})
+    assert(line == "abc\n")
+    over := Cursor.new("abcd\n".as_bytes())
+    line := String.new()
+    error :: core.web.runtime.dev_server.jet_devserver_read_line_bounded(&over, &line, USize{4}).unwrap_err()
+    assert(error.kind() == std.io.ErrorKind.InvalidData)
+    assert(error.to_string() == "devserver request line exceeds 8 KiB")
+}

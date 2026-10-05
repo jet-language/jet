@@ -1,0 +1,126 @@
+use core.mem.runtime.portable_core.[JetPortableError, jet_runtime_boundary]
+use core.mem.runtime.portable_core.[jet_i8_trap_floor_div, jet_i8_trap_mod, jet_i8_wrapping_add, jet_i8_saturating_add, jet_i8_checked_add, jet_i8_checked_div, jet_i8_checked_pow, jet_i8_rotate_left]
+use core.mem.runtime.portable_core.[jet_i16_trap_floor_div, jet_i16_trap_mod, jet_i16_wrapping_add, jet_i16_saturating_mul, jet_i16_checked_add, jet_i16_checked_div, jet_i16_checked_pow, jet_i16_rotate_left]
+use core.mem.runtime.portable_core.[jet_i32_trap_floor_div, jet_i32_trap_mod, jet_i32_wrapping_sub, jet_i32_saturating_add, jet_i32_checked_add, jet_i32_checked_pow, jet_i32_rotate_right]
+use core.mem.runtime.portable_core.[jet_i64_trap_floor_div, jet_i64_trap_mod, jet_i64_wrapping_add, jet_i64_saturating_add, jet_i64_checked_div, jet_i64_checked_rem, jet_i64_checked_pow, jet_i64_rotate_left]
+use core.mem.runtime.portable_core.[jet_u8_trap_floor_div, jet_u8_trap_mod, jet_u8_wrapping_add, jet_u8_saturating_sub, jet_u8_checked_sub, jet_u8_checked_pow, jet_u8_rotate_left]
+use core.mem.runtime.portable_core.[jet_u16_trap_floor_div, jet_u16_trap_mod, jet_u16_wrapping_mul, jet_u16_saturating_mul, jet_u16_checked_mul, jet_u16_checked_div, jet_u16_checked_pow, jet_u16_rotate_right]
+use core.mem.runtime.portable_core.[jet_u32_trap_floor_div, jet_u32_trap_mod, jet_u32_wrapping_add, jet_u32_saturating_add, jet_u32_checked_add, jet_u32_checked_pow, jet_u32_rotate_left]
+use core.mem.runtime.portable_core.[jet_u64_trap_floor_div, jet_u64_trap_mod, jet_u64_wrapping_add, jet_u64_saturating_add, jet_u64_checked_add, jet_u64_checked_div, jet_u64_checked_pow, jet_u64_rotate_right]
+
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:62
+#Test("portable runtime boundary returns the original result") {
+    calls := 0
+    result :: jet_runtime_boundary(fn() { calls += 1; I64{42} })
+    assert_eq(result, I64{42})
+    assert_eq(calls, 1)
+}
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:31
+#Test("portable error bytes preserve text without a hosted report") {
+    text :: "provider unavailable"
+    assert_eq(text.jet_error_bytes(), text.as_bytes())
+    assert_eq(text.jet_error_status(), I32{1})
+}
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:37
+#Test("portable byte error retains the borrowed carrier") {
+    bytes :: "native failure".as_bytes()
+    assert_eq(bytes.jet_error_bytes(), bytes)
+    assert_eq(bytes.jet_error_status(), I32{1})
+}
+
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:416
+#Test("portable i8 concrete routes retain overflow modes") {
+    assert_eq(jet_i8_wrapping_add(I8{127}, I8{1}), I8{-128})
+    assert_eq(jet_i8_saturating_add(I8{127}, I8{1}), I8{127})
+    assert_eq(jet_i8_checked_add(I8{127}, I8{1}), None)
+    assert_eq(jet_i8_checked_div(I8{-128}, I8{-1}), None)
+    assert_eq(jet_i8_checked_div(I8{7}, I8{0}), None)
+    assert_eq(jet_i8_checked_pow(I8{2}, I8{6}), Val(I8{64}))
+    assert_eq(jet_i8_checked_pow(I8{2}, I8{7}), None)
+    assert_eq(jet_i8_trap_floor_div(I8{-7}, I8{3}, "<route-test>", U32{1}), I8{-3})
+    assert_eq(jet_i8_trap_mod(I8{-7}, I8{3}, "<route-test>", U32{1}), I8{2})
+    assert_eq(jet_i8_rotate_left(I8{1}, I8{7}, "<route-test>", U32{1}), I8{-128})
+}
+
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:417
+#Test("portable i16 concrete routes retain signed floor and overflow modes") {
+    assert_eq(jet_i16_wrapping_add(I16{32767}, I16{1}), I16{-32768})
+    assert_eq(jet_i16_saturating_mul(I16{32767}, I16{2}), I16{32767})
+    assert_eq(jet_i16_checked_add(I16{32767}, I16{1}), None)
+    assert_eq(jet_i16_checked_div(I16{-32768}, I16{-1}), None)
+    assert_eq(jet_i16_checked_pow(I16{2}, I16{14}), Val(I16{16384}))
+    assert_eq(jet_i16_checked_pow(I16{2}, I16{15}), None)
+    assert_eq(jet_i16_trap_floor_div(I16{-7}, I16{3}, "<route-test>", U32{1}), I16{-3})
+    assert_eq(jet_i16_trap_mod(I16{-7}, I16{3}, "<route-test>", U32{1}), I16{2})
+    assert_eq(jet_i16_rotate_left(I16{1}, I16{15}, "<route-test>", U32{1}), I16{-32768})
+}
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:418
+#Test("portable i32 concrete routes retain signed operands") {
+    assert_eq(jet_i32_wrapping_sub(I32{-2147483648}, I32{1}), I32{2147483647})
+    assert_eq(jet_i32_saturating_add(I32{2147483647}, I32{1}), I32{2147483647})
+    assert_eq(jet_i32_checked_add(I32{2147483647}, I32{1}), None)
+    assert_eq(jet_i32_checked_pow(I32{2}, I32{30}), Val(I32{1073741824}))
+    assert_eq(jet_i32_checked_pow(I32{2}, I32{31}), None)
+    assert_eq(jet_i32_checked_pow(I32{2}, I32{-1}), None)
+    assert_eq(jet_i32_trap_floor_div(I32{7}, I32{-3}, "<route-test>", U32{1}), I32{-3})
+    assert_eq(jet_i32_trap_mod(I32{7}, I32{-3}, "<route-test>", U32{1}), I32{-2})
+    assert_eq(jet_i32_rotate_right(I32{1}, I32{1}, "<route-test>", U32{1}), I32{-2147483648})
+}
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:419
+#Test("portable i64 concrete routes retain full width") {
+    assert_eq(jet_i64_wrapping_add(I64{9223372036854775807}, I64{1}), I64{-9223372036854775808})
+    assert_eq(jet_i64_saturating_add(I64{9223372036854775807}, I64{1}), I64{9223372036854775807})
+    assert_eq(jet_i64_checked_div(I64{-9223372036854775808}, I64{-1}), None)
+    assert_eq(jet_i64_checked_rem(I64{-9223372036854775808}, I64{-1}), None)
+    assert_eq(jet_i64_checked_pow(I64{2}, I64{62}), Val(I64{4611686018427387904}))
+    assert_eq(jet_i64_checked_pow(I64{2}, I64{63}), None)
+    assert_eq(jet_i64_trap_floor_div(I64{-7}, I64{3}, "<route-test>", U32{1}), I64{-3})
+    assert_eq(jet_i64_trap_mod(I64{-7}, I64{3}, "<route-test>", U32{1}), I64{2})
+    assert_eq(jet_i64_rotate_left(I64{1}, I64{63}, "<route-test>", U32{1}), I64{-9223372036854775808})
+}
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:420
+#Test("portable u8 concrete routes retain unsigned arithmetic") {
+    assert_eq(jet_u8_wrapping_add(U8{255}, U8{1}), U8{0})
+    assert_eq(jet_u8_saturating_sub(U8{0}, U8{1}), U8{0})
+    assert_eq(jet_u8_checked_sub(U8{0}, U8{1}), None)
+    assert_eq(jet_u8_checked_pow(U8{2}, U8{7}), Val(U8{128}))
+    assert_eq(jet_u8_checked_pow(U8{2}, U8{8}), None)
+    assert_eq(jet_u8_trap_floor_div(U8{7}, U8{3}, "<route-test>", U32{1}), U8{2})
+    assert_eq(jet_u8_trap_mod(U8{7}, U8{3}, "<route-test>", U32{1}), U8{1})
+    assert_eq(jet_u8_rotate_left(U8{128}, U8{1}, "<route-test>", U32{1}), U8{1})
+}
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:421
+#Test("portable u16 concrete routes retain checked absence") {
+    assert_eq(jet_u16_wrapping_mul(U16{32768}, U16{2}), U16{0})
+    assert_eq(jet_u16_saturating_mul(U16{32768}, U16{2}), U16{65535})
+    assert_eq(jet_u16_checked_mul(U16{32768}, U16{2}), None)
+    assert_eq(jet_u16_checked_div(U16{7}, U16{0}), None)
+    assert_eq(jet_u16_checked_pow(U16{2}, U16{15}), Val(U16{32768}))
+    assert_eq(jet_u16_checked_pow(U16{2}, U16{16}), None)
+    assert_eq(jet_u16_trap_floor_div(U16{65535}, U16{256}, "<route-test>", U32{1}), U16{255})
+    assert_eq(jet_u16_trap_mod(U16{65535}, U16{256}, "<route-test>", U32{1}), U16{255})
+    assert_eq(jet_u16_rotate_right(U16{1}, U16{1}, "<route-test>", U32{1}), U16{32768})
+}
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:422
+#Test("portable u32 concrete routes retain high bit") {
+    assert_eq(jet_u32_wrapping_add(U32{4294967295}, U32{1}), U32{0})
+    assert_eq(jet_u32_saturating_add(U32{4294967295}, U32{1}), U32{4294967295})
+    assert_eq(jet_u32_checked_add(U32{4294967295}, U32{1}), None)
+    assert_eq(jet_u32_checked_pow(U32{2}, U32{31}), Val(U32{2147483648}))
+    assert_eq(jet_u32_checked_pow(U32{2}, U32{32}), None)
+    assert_eq(jet_u32_trap_floor_div(U32{4294967295}, U32{2}, "<route-test>", U32{1}), U32{2147483647})
+    assert_eq(jet_u32_trap_mod(U32{4294967295}, U32{2}, "<route-test>", U32{1}), U32{1})
+    assert_eq(jet_u32_rotate_left(U32{2147483648}, U32{1}, "<route-test>", U32{1}), U32{1})
+}
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:423
+#Test("portable u64 concrete routes preserve all sixty four bits") {
+    assert_eq(jet_u64_wrapping_add(U64{18446744073709551615}, U64{1}), U64{0})
+    assert_eq(jet_u64_saturating_add(U64{18446744073709551615}, U64{1}), U64{18446744073709551615})
+    assert_eq(jet_u64_checked_add(U64{18446744073709551615}, U64{1}), None)
+    assert_eq(jet_u64_checked_div(U64{18446744073709551615}, U64{1}), Val(U64{18446744073709551615}))
+    assert_eq(jet_u64_checked_pow(U64{2}, U64{63}), Val(U64{9223372036854775808}))
+    assert_eq(jet_u64_checked_pow(U64{2}, U64{64}), None)
+    assert_eq(jet_u64_trap_floor_div(U64{18446744073709551615}, U64{9223372036854775808}, "<route-test>", U32{1}), U64{1})
+    assert_eq(jet_u64_trap_mod(U64{18446744073709551615}, U64{9223372036854775808}, "<route-test>", U32{1}), U64{9223372036854775807})
+    assert_eq(jet_u64_rotate_right(U64{1}, U64{1}, "<route-test>", U32{1}), U64{9223372036854775808})
+}

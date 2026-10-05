@@ -1,0 +1,35 @@
+use core.mem.runtime.shared_protocol.[JetSharedAtomic, JetSharedScalarKind, jet_shared_scalar_kind, jet_shared_guard_validate_char, JET_SHARED_GUARD_CHARACTER_STORAGE_FAILED]
+
+// Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:20
+#Test("Shared character storage accepts scalars and rejects invalid code points") {
+    assert_eq(jet_shared_guard_validate_char(I32{0}).ok(), Val(Char.from_u32(0).unwrap()))
+    assert_eq(jet_shared_guard_validate_char(I32{0x10ffff}).ok(), Val(Char.from_u32(0x10ffff).unwrap()))
+    assert_eq(jet_shared_guard_validate_char(I32{0xd800}).err(), Val(JET_SHARED_GUARD_CHARACTER_STORAGE_FAILED))
+    assert_eq(jet_shared_guard_validate_char(I32{-1}).err(), Val(JET_SHARED_GUARD_CHARACTER_STORAGE_FAILED))
+    assert_eq(jet_shared_guard_validate_char(I32{0x110000}).err(), Val(JET_SHARED_GUARD_CHARACTER_STORAGE_FAILED))
+}
+// Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:55/67/73/79
+#Test("Shared scalar carrier preserves the complete atomic word") {
+    carrier :: JetSharedAtomic.new(JetSharedScalarKind.U64, U64.MAX)
+    assert_eq(carrier.kind(), JetSharedScalarKind.U64)
+    assert_eq(carrier.load(), U64.MAX)
+    carrier.store(U64{0x8000000000000000})
+    assert_eq(carrier.swap(U64{1}), U64{0x8000000000000000})
+    assert_eq(carrier.load(), U64{1})
+}
+// Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:89
+#Test("Shared scalar kind only recognizes exact native scalar types") {
+    assert_eq(jet_shared_scalar_kind<I8>(), Val(JetSharedScalarKind.I8))
+    assert_eq(jet_shared_scalar_kind<U8>(), Val(JetSharedScalarKind.U8))
+    assert_eq(jet_shared_scalar_kind<I16>(), Val(JetSharedScalarKind.I16))
+    assert_eq(jet_shared_scalar_kind<U16>(), Val(JetSharedScalarKind.U16))
+    assert_eq(jet_shared_scalar_kind<I32>(), Val(JetSharedScalarKind.I32))
+    assert_eq(jet_shared_scalar_kind<U32>(), Val(JetSharedScalarKind.U32))
+    assert_eq(jet_shared_scalar_kind<I64>(), Val(JetSharedScalarKind.I64))
+    assert_eq(jet_shared_scalar_kind<U64>(), Val(JetSharedScalarKind.U64))
+    assert_eq(jet_shared_scalar_kind<F32>(), Val(JetSharedScalarKind.F32))
+    assert_eq(jet_shared_scalar_kind<F64>(), Val(JetSharedScalarKind.F64))
+    assert_eq(jet_shared_scalar_kind<Bool>(), Val(JetSharedScalarKind.Bool))
+    assert_eq(jet_shared_scalar_kind<Char>(), Val(JetSharedScalarKind.Char))
+    assert_eq(jet_shared_scalar_kind<String>(), None)
+}

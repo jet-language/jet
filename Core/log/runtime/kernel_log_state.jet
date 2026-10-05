@@ -1,17 +1,12 @@
-// PORT-PENDING 0152 crates-jet-codegen-src-prelude-core-logstate-module-group: crates/jet-codegen/src/Prelude/Core/LogState.rs:1-13
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS // Shared core.log trace context state.
-//RS //
-//RS // The AOT prelude, resident host, and comptime evaluator include this same
-//RS // kernel so set_trace_id has one state carrier rather than tier-specific
-//RS // copies of the setter semantics.
-//RS thread_local! {
-//RS     pub(crate) static JET_LOG_TRACE_ID: std::cell::RefCell<String> =
-//RS         std::cell::RefCell::new(String::new());
-//RS }
-//RS 
-//RS pub(crate) fn jet_ring_log_set_trace_id(id: &str) {
-//RS     JET_LOG_TRACE_ID.with(|trace| *trace.borrow_mut() = id.to_string());
-//RS }
-// END-PORT-PENDING 0152 crates/jet-codegen/src/Prelude/Core/LogState.rs:1-13
+// Shared core.log trace context; adapters never own a second trace carrier.
+use core.cell.[RefCell, ThreadLocal]
 
+// Rust: crates/jet-codegen/src/Prelude/Core/LogState.rs:6
+// GATE #4565: kernel primitive — retained per-thread log context.
+pub const JET_LOG_TRACE_ID: ThreadLocal<RefCell<String>> = ThreadLocal.new(fn() { RefCell.new(String.new()) })
+// Rust: crates/jet-codegen/src/Prelude/Core/LogState.rs:11
+pub fn jet_ring_log_set_trace_id(id: String) Never! {
+    #Unsafe("replace only the owning thread's retained trace context") {
+        JET_LOG_TRACE_ID.with(fn(trace) { &trace.replace(id.to_string()) })
+    }
+}

@@ -1,1459 +1,806 @@
-// PORT-PENDING 0178 crates-jet-codegen-src-prelude-job-module-group: crates/jet-codegen/src/Prelude/Job.rs:1-1455
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS /// D-JOB-SUBCMD1=C: one job table and selector serve AOT binaries and the
-//RS /// generated argv boundary. Engines only marshal argv into this Prelude API.
-//RS #[derive(Clone, Copy, PartialEq, Eq)]
-//RS pub enum JetJobScope {
-//RS     Dev,
-//RS     Ship,
-//RS     Internal,
-//RS }
-//RS /// Reserved argv marker used by in-process devtools to dispatch an internal
-//RS /// job by name without exposing that name as a user-facing subcommand.
-//RS pub const JET_JOB_PRIVATE_DISPATCH_FLAG: &str = "--__jet-private-job";
-//RS 
-//RS 
-//RS /// D-SCHEDULE1: the checked `EverySchedule` value carried into the runtime.
-//RS /// The generated table stores this value instead of re-reading marker text;
-//RS /// every consumer uses the same resolved duration or wall-clock minute.
-//RS #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-//RS pub enum JetJobSchedule {
-//RS     Duration { nanos: i64 },
-//RS     WallClockTime { hour: u8, minute: u8 },
-//RS }
-//RS 
-//RS /// One shared due clock for dev and service lifecycle consumers. The timer
-//RS /// wake-up itself belongs to `Prelude/Scheduler.rs`; this value owns only the
-//RS /// schedule decision and last-fire facts.
-//RS pub struct JetJobClock {
-//RS     last_interval_run: std::collections::HashMap<String, std::time::Instant>,
-//RS     last_daily_run_day: std::collections::HashMap<String, u64>,
-//RS }
-//RS 
-//RS impl JetJobClock {
-//RS     pub fn new() -> Self {
-//RS         Self {
-//RS             last_interval_run: std::collections::HashMap::new(),
-//RS             last_daily_run_day: std::collections::HashMap::new(),
-//RS         }
-//RS     }
-//RS 
-//RS     /// Return the names due at the current wall time. A duration schedule fires
-//RS     /// immediately on its first check, then after its resolved interval.
-//RS     pub fn due(&mut self, jobs: &[(&str, JetJobSchedule)]) -> Vec<String> {
-//RS         let unix_secs = std::time::SystemTime::now()
-//RS             .duration_since(std::time::UNIX_EPOCH)
-//RS             .unwrap_or_default()
-//RS             .as_secs();
-//RS         self.due_at(jobs, unix_secs)
-//RS     }
-//RS 
-//RS     /// Testable due decision with the wall-clock seconds supplied by the
-//RS     /// caller. The monotonic instant still measures duration intervals.
-//RS     pub fn due_at(&mut self, jobs: &[(&str, JetJobSchedule)], unix_secs: u64) -> Vec<String> {
-//RS         let now = std::time::Instant::now();
-//RS         let day = unix_secs / 86_400;
-//RS         let secs_of_day = unix_secs % 86_400;
-//RS         let mut fired = Vec::new();
-//RS         for (name, schedule) in jobs {
-//RS             match *schedule {
-//RS                 JetJobSchedule::Duration { nanos } => {
-//RS                     let due = match self.last_interval_run.get(*name) {
-//RS                         None => true,
-//RS                         Some(last) => now.duration_since(*last).as_nanos() >= nanos.max(0) as u128,
-//RS                     };
-//RS                     if due {
-//RS                         self.last_interval_run.insert((*name).to_string(), now);
-//RS                         fired.push((*name).to_string());
-//RS                     }
-//RS                 }
-//RS                 JetJobSchedule::WallClockTime { hour, minute } => {
-//RS                     let target_secs = hour as u64 * 3600 + minute as u64 * 60;
-//RS                     let in_window =
-//RS                         secs_of_day >= target_secs && secs_of_day < target_secs + 60;
-//RS                     let already_ran_today = self.last_daily_run_day.get(*name) == Some(&day);
-//RS                     if in_window && !already_ran_today {
-//RS                         self.last_daily_run_day.insert((*name).to_string(), day);
-//RS                         fired.push((*name).to_string());
-//RS                     }
-//RS                 }
-//RS             }
-//RS         }
-//RS         fired
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Clone, Copy)]
-//RS pub struct JetJobEntry {
-//RS     pub name: &'static str,
-//RS     pub scope: JetJobScope,
-//RS     pub schedule: Option<JetJobSchedule>,
-//RS     pub invoke: fn(&str, &[String]),
-//RS }
-//RS 
-//RS /// Adapter emitted beside a checked `#Job` wrapper. The wrapper owns
-//RS /// canonical CBOR decoding and the typed call; the queue Prelude owns claim,
-//RS /// lease, and acknowledgement state.
-//RS pub type JetJobQueueInvoke =
-//RS     fn(&JetJobPayload) -> Result<JetJobResult, JetJobError>;
-//RS /// The checked dispatch strategy carried by a MIR job row.
-//RS #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-//RS pub enum JetJobDispatch {
-//RS     Direct,
-//RS     Spawn,
-//RS     Scheduled,
-//RS }
-//RS 
-//RS /// The checked cache policy carried by a MIR job row.
-//RS #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-//RS pub enum JetJobCachePolicy {
-//RS     Uncached,
-//RS     Local,
-//RS     Shared,
-//RS }
-//RS 
-//RS /// The checked skip rule carried by a MIR job row.
-//RS #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-//RS pub enum JetJobSkip {
-//RS     Always(&'static str),
-//RS     UnlessPlatform(&'static str),
-//RS }
-//RS 
-//RS /// Complete checked job metadata. The legacy `JetJobEntry` remains available
-//RS /// for the source emitter; MIR adapters use this typed envelope so runtime
-//RS /// dispatch cannot silently discard job policy.
-//RS #[derive(Clone, Copy)]
-//RS pub struct JetJobSpec {
-//RS     pub entry: JetJobEntry,
-//RS     /// The checked schema identity of the one queue payload parameter.  This
-//RS     /// is matched together with `entry.name`; payload type alone is not a job
-//RS     /// identity.
-//RS     pub payload_type: Option<&'static str>,
-//RS     pub queue_invoke: Option<JetJobQueueInvoke>,
-//RS     pub dispatch: JetJobDispatch,
-//RS     pub packages: &'static [&'static str],
-//RS     pub working_directory: Option<&'static str>,
-//RS     pub input_paths: &'static [&'static str],
-//RS     pub output_paths: &'static [&'static str],
-//RS     pub skip: Option<JetJobSkip>,
-//RS     pub cache: JetJobCachePolicy,
-//RS     pub limits: &'static [(&'static str, &'static str)],
-//RS     /// D-DX-JOBGRAPH1=A: checked predecessor names in the one source
-//RS     /// namespace. The scheduler resolves these before invoking any job.
-//RS     pub after: &'static [&'static str],
-//RS     /// D-DX-JOBGRAPH1=A: maximum number of independent jobs admitted by one
-//RS     /// graph run. The checked default is one.
-//RS     pub parallel: usize,
-//RS     /// Typed argv validation generated from the same MIR input rows as the
-//RS     /// invocation wrapper. `None` is retained only for legacy adapters.
-//RS     pub validate: Option<fn(&[String]) -> Result<(), String>>,
-//RS }
-//RS 
-//RS thread_local! {
-//RS     /// The one invocation-owned checked table.  It is a stack rather than a
-//RS     /// process-wide name map so nested test/host invocations restore the
-//RS     /// previous owner exactly.
-//RS     static JET_JOB_ACTIVE_SPECS: std::cell::RefCell<Vec<&'static [JetJobSpec]>> =
-//RS         const { std::cell::RefCell::new(Vec::new()) };
-//RS }
-//RS 
-//RS pub struct JetJobRegistryGuard;
-//RS 
-//RS impl Drop for JetJobRegistryGuard {
-//RS     fn drop(&mut self) {
-//RS         JET_JOB_ACTIVE_SPECS.with(|registry| {
-//RS             let _ = registry.borrow_mut().pop();
-//RS         });
-//RS     }
-//RS }
-//RS 
-//RS /// Register one generated table for the duration of its owning invocation.
-//RS /// The table is static in generated programs, so service lifecycle callbacks
-//RS /// may safely borrow it after the argv dispatch boundary.
-//RS pub fn jet_job_register_specs(jobs: &'static [JetJobSpec]) -> JetJobRegistryGuard {
-//RS     JET_JOB_ACTIVE_SPECS.with(|registry| registry.borrow_mut().push(jobs));
-//RS     JetJobRegistryGuard
-//RS }
-//RS 
-//RS pub fn jet_job_active_specs() -> Option<&'static [JetJobSpec]> {
-//RS     JET_JOB_ACTIVE_SPECS.with(|registry| registry.borrow().last().copied())
-//RS }
-//RS pub trait JetJobEventSink: Send + Sync {
-//RS     fn publish(&self, event: crate::JetDevtoolsEvent);
-//RS }
-//RS 
-//RS pub type JetJobEventSinkHandle = std::sync::Arc<dyn JetJobEventSink>;
-//RS 
-//RS /// Bounded in-process storage useful as the default sink and for embedders that
-//RS /// want to pull lifecycle facts after a run.
-//RS pub struct JetJobEventCollector {
-//RS     capacity: usize,
-//RS     events: std::sync::Mutex<std::collections::VecDeque<crate::JetDevtoolsEvent>>,
-//RS }
-//RS 
-//RS impl JetJobEventCollector {
-//RS     pub fn new() -> Self {
-//RS         Self::with_capacity(crate::JET_DEVTOOLS_MAX_HISTORY)
-//RS     }
-//RS 
-//RS     pub fn with_capacity(capacity: usize) -> Self {
-//RS         Self {
-//RS             capacity: capacity.clamp(1, crate::JET_DEVTOOLS_MAX_HISTORY),
-//RS             events: std::sync::Mutex::new(std::collections::VecDeque::new()),
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn snapshot(&self) -> Vec<crate::JetDevtoolsEvent> {
-//RS         self.events
-//RS             .lock()
-//RS             .expect("job event collector poisoned")
-//RS             .iter()
-//RS             .cloned()
-//RS             .collect()
-//RS     }
-//RS 
-//RS     pub fn take(&self) -> Vec<crate::JetDevtoolsEvent> {
-//RS         self.events
-//RS             .lock()
-//RS             .expect("job event collector poisoned")
-//RS             .drain(..)
-//RS             .collect()
-//RS     }
-//RS }
-//RS 
-//RS impl Default for JetJobEventCollector {
-//RS     fn default() -> Self {
-//RS         Self::new()
-//RS     }
-//RS }
-//RS 
-//RS impl JetJobEventSink for JetJobEventCollector {
-//RS     fn publish(&self, event: crate::JetDevtoolsEvent) {
-//RS         let mut events = self.events.lock().expect("job event collector poisoned");
-//RS         if events.len() == self.capacity {
-//RS             events.pop_front();
-//RS         }
-//RS         events.push_back(event);
-//RS     }
-//RS }
-//RS 
-//RS static JET_JOB_EVENT_COLLECTOR: std::sync::LazyLock<
-//RS     std::sync::Arc<JetJobEventCollector>,
-//RS > = std::sync::LazyLock::new(|| std::sync::Arc::new(JetJobEventCollector::new()));
-//RS static JET_JOB_EVENT_SINK: std::sync::LazyLock<
-//RS     std::sync::Mutex<Option<JetJobEventSinkHandle>>,
-//RS > = std::sync::LazyLock::new(|| std::sync::Mutex::new(None));
-//RS 
-//RS fn jet_job_event_sink() -> JetJobEventSinkHandle {
-//RS     JET_JOB_EVENT_SINK
-//RS         .lock()
-//RS         .expect("job event sink poisoned")
-//RS         .clone()
-//RS         .unwrap_or_else(|| JET_JOB_EVENT_COLLECTOR.clone())
-//RS }
-//RS 
-//RS 
-//RS /// Metadata visible to code executing through the shared job Prelude.
-//RS #[derive(Clone, Copy)]
-//RS pub struct JetJobContext {
-//RS     pub name: &'static str,
-//RS     pub dispatch: JetJobDispatch,
-//RS     pub packages: &'static [&'static str],
-//RS     pub working_directory: Option<&'static str>,
-//RS     pub input_paths: &'static [&'static str],
-//RS     pub output_paths: &'static [&'static str],
-//RS     pub skip: Option<JetJobSkip>,
-//RS     pub cache: JetJobCachePolicy,
-//RS     pub limits: &'static [(&'static str, &'static str)],
-//RS     pub after: &'static [&'static str],
-//RS     pub parallel: usize,
-//RS }
-//RS 
-//RS thread_local! {
-//RS     static JET_JOB_CONTEXT: std::cell::RefCell<Option<JetJobContext>> =
-//RS         const { std::cell::RefCell::new(None) };
-//RS }
-//RS 
-//RS pub fn jet_job_context() -> Option<JetJobContext> {
-//RS     JET_JOB_CONTEXT.with(|context| *context.borrow())
-//RS }
-//RS fn jet_job_no_scope() -> Result<Option<()>, String> {
-//RS     Ok(None)
-//RS }
-//RS 
-//RS // ponytail: the generated invocation ABI only accepts `(&str, &[String])`, so
-//RS // cwd cannot be passed as a per-call `Command` setting yet. Serialize the
-//RS // current-directory mutation across every in-process job invocation; the
-//RS // upgrade path is a cwd-aware invocation ABI or child process boundary.
-//RS static JET_JOB_CWD_LOCK: std::sync::LazyLock<std::sync::Mutex<()>> =
-//RS     std::sync::LazyLock::new(|| std::sync::Mutex::new(()));
-//RS 
-//RS struct JetJobDirectoryGuard {
-//RS     previous: Option<std::path::PathBuf>,
-//RS     lock: Option<std::sync::MutexGuard<'static, ()>>,
-//RS }
-//RS 
-//RS impl JetJobDirectoryGuard {
-//RS     fn enter(directory: Option<&str>) -> Self {
-//RS         let lock = JET_JOB_CWD_LOCK.lock().expect("job cwd lock poisoned");
-//RS         let previous = directory.and_then(|_| std::env::current_dir().ok());
-//RS         if let Some(directory) = directory {
-//RS             let _ = std::env::set_current_dir(directory);
-//RS         }
-//RS         Self {
-//RS             previous,
-//RS             lock: Some(lock),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS impl Drop for JetJobDirectoryGuard {
-//RS     fn drop(&mut self) {
-//RS         if let Some(previous) = self.previous.take() {
-//RS             let _ = std::env::set_current_dir(previous);
-//RS         }
-//RS         let _ = self.lock.take();
-//RS     }
-//RS }
-//RS 
-//RS 
-//RS fn jet_job_platform_matches(platform: &str) -> bool {
-//RS     match platform {
-//RS         "Linux" | "linux" => cfg!(target_os = "linux"),
-//RS         "MacOS" | "macOS" | "macos" => cfg!(target_os = "macos"),
-//RS         "Windows" | "windows" => cfg!(target_os = "windows"),
-//RS         "FreeBSD" | "freebsd" => cfg!(target_os = "freebsd"),
-//RS         _ => false,
-//RS     }
-//RS }
-//RS 
-//RS fn jet_job_is_skipped(job: &JetJobSpec) -> bool {
-//RS     match job.skip {
-//RS         None => false,
-//RS         Some(JetJobSkip::Always(_)) => true,
-//RS         Some(JetJobSkip::UnlessPlatform(platform)) => !jet_job_platform_matches(platform),
-//RS     }
-//RS }
-//RS 
-//RS /// A checked, explainable freshness observation for one typed job. The
-//RS /// fingerprint is deliberately independent of process identity so a cache
-//RS /// decision can be recorded by an embedding host.
-//RS #[derive(Clone, Debug, PartialEq, Eq)]
-//RS pub struct JetJobFreshness {
-//RS     pub fresh: bool,
-//RS     pub reason: String,
-//RS     pub fingerprint: u64,
-//RS }
-//RS 
-//RS fn jet_job_base_directory(job: &JetJobSpec) -> std::path::PathBuf {
-//RS     let current = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-//RS     match job.working_directory {
-//RS         Some(directory) => {
-//RS             let path = std::path::Path::new(directory);
-//RS             if path.is_absolute() {
-//RS                 path.to_path_buf()
-//RS             } else {
-//RS                 current.join(path)
-//RS             }
-//RS         }
-//RS         None => current,
-//RS     }
-//RS }
-//RS 
-//RS fn jet_job_glob_match(pattern: &str, value: &str) -> bool {
-//RS     let pattern = pattern.as_bytes();
-//RS     let value = value.as_bytes();
-//RS     let mut row = vec![false; value.len() + 1];
-//RS     row[0] = true;
-//RS     for &token in pattern {
-//RS         let mut next = vec![false; value.len() + 1];
-//RS         if token == b'*' {
-//RS             next[0] = row[0];
-//RS             for index in 1..=value.len() {
-//RS                 next[index] = row[index] || next[index - 1];
-//RS             }
-//RS         } else {
-//RS             for index in 1..=value.len() {
-//RS                 if token == b'?' || token == value[index - 1] {
-//RS                     next[index] = row[index - 1];
-//RS                 }
-//RS             }
-//RS         }
-//RS         row = next;
-//RS     }
-//RS     row[value.len()]
-//RS }
-//RS 
-//RS fn jet_job_declared_paths(job: &JetJobSpec, pattern: &str) -> Vec<std::path::PathBuf> {
-//RS     let base = jet_job_base_directory(job);
-//RS     let normalized = pattern.replace('\\', "/");
-//RS     if !normalized.contains('*') && !normalized.contains('?') {
-//RS         return vec![base.join(pattern)];
-//RS     }
-//RS     let mut pending = vec![base.clone()];
-//RS     let mut paths = Vec::new();
-//RS     while let Some(directory) = pending.pop() {
-//RS         let Ok(entries) = std::fs::read_dir(&directory) else { continue };
-//RS         let mut entries = entries.filter_map(Result::ok).collect::<Vec<_>>();
-//RS         entries.sort_by_key(|entry| entry.path());
-//RS         for entry in entries {
-//RS             let path = entry.path();
-//RS             if path.is_dir() {
-//RS                 pending.push(path.clone());
-//RS             }
-//RS             let Ok(relative) = path.strip_prefix(&base) else { continue };
-//RS             let relative = relative.to_string_lossy().replace('\\', "/");
-//RS             if jet_job_glob_match(&normalized, &relative) {
-//RS                 paths.push(path);
-//RS             }
-//RS         }
-//RS     }
-//RS     paths.sort();
-//RS     paths.dedup();
-//RS     paths
-//RS }
-//RS 
-//RS fn jet_job_latest_modified(path: &std::path::Path) -> Option<std::time::SystemTime> {
-//RS     let metadata = std::fs::symlink_metadata(path).ok()?;
-//RS     let mut latest = metadata.modified().ok();
-//RS     if metadata.is_dir() {
-//RS         let mut entries = std::fs::read_dir(path)
-//RS             .ok()?
-//RS             .filter_map(Result::ok)
-//RS             .map(|entry| entry.path())
-//RS             .collect::<Vec<_>>();
-//RS         entries.sort();
-//RS         for child in entries {
-//RS             if let Some(modified) = jet_job_latest_modified(&child) {
-//RS                 latest = Some(latest.map_or(modified, |current| current.max(modified)));
-//RS             }
-//RS         }
-//RS     }
-//RS     latest
-//RS }
-//RS 
-//RS fn jet_job_hash_bytes(hash: &mut u64, bytes: &[u8]) {
-//RS     for byte in bytes {
-//RS         *hash ^= u64::from(*byte);
-//RS         *hash = hash.wrapping_mul(1_099_511_628_211);
-//RS     }
-//RS }
-//RS 
-//RS fn jet_job_hash_path(path: &std::path::Path, hash: &mut u64) {
-//RS     let Ok(metadata) = std::fs::symlink_metadata(path) else {
-//RS         jet_job_hash_bytes(hash, b"<missing>");
-//RS         return;
-//RS     };
-//RS     if metadata.file_type().is_symlink() {
-//RS         jet_job_hash_bytes(hash, b"<symlink>");
-//RS         if let Ok(target) = std::fs::read_link(path) {
-//RS             jet_job_hash_bytes(hash, target.to_string_lossy().as_bytes());
-//RS         }
-//RS     } else if metadata.is_file() {
-//RS         if let Ok(bytes) = std::fs::read(path) {
-//RS             jet_job_hash_bytes(hash, &bytes);
-//RS         }
-//RS     } else if metadata.is_dir() {
-//RS         let mut entries = std::fs::read_dir(path)
-//RS             .ok()
-//RS             .into_iter()
-//RS             .flat_map(|entries| entries.filter_map(Result::ok).map(|entry| entry.path()))
-//RS             .collect::<Vec<_>>();
-//RS         entries.sort();
-//RS         for child in entries {
-//RS             jet_job_hash_path(&child, hash);
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// Explain the freshness decision without running the job.
-//RS pub fn jet_job_freshness(job: &JetJobSpec) -> JetJobFreshness {
-//RS     let mut fingerprint = 14_695_981_039_346_656_037u64;
-//RS     let mut input_paths = Vec::new();
-//RS     let mut output_paths = Vec::new();
-//RS     let mut missing_input = None;
-//RS     let mut missing_output = None;
-//RS     let mut newest_input: Option<std::time::SystemTime> = None;
-//RS     let mut newest_output: Option<std::time::SystemTime> = None;
-//RS 
-//RS     for pattern in job.input_paths {
-//RS         jet_job_hash_bytes(&mut fingerprint, pattern.as_bytes());
-//RS         let paths = jet_job_declared_paths(job, pattern);
-//RS         if paths.is_empty() {
-//RS             missing_input = Some((*pattern).to_string());
-//RS         }
-//RS         for path in paths {
-//RS             jet_job_hash_path(&path, &mut fingerprint);
-//RS             if !path.exists() {
-//RS                 missing_input = Some((*pattern).to_string());
-//RS             }
-//RS             if let Some(modified) = jet_job_latest_modified(&path) {
-//RS                 newest_input = Some(newest_input.map_or(modified, |current| current.max(modified)));
-//RS             }
-//RS             input_paths.push(path);
-//RS         }
-//RS     }
-//RS     for pattern in job.output_paths {
-//RS         jet_job_hash_bytes(&mut fingerprint, pattern.as_bytes());
-//RS         let paths = jet_job_declared_paths(job, pattern);
-//RS         if paths.is_empty() {
-//RS             missing_output = Some((*pattern).to_string());
-//RS         }
-//RS         for path in paths {
-//RS             jet_job_hash_path(&path, &mut fingerprint);
-//RS             if !path.exists() {
-//RS                 missing_output = Some((*pattern).to_string());
-//RS             }
-//RS             if let Some(modified) = jet_job_latest_modified(&path) {
-//RS                 newest_output = Some(newest_output.map_or(modified, |current| current.max(modified)));
-//RS             }
-//RS             output_paths.push(path);
-//RS         }
-//RS     }
-//RS     let (fresh, reason) = if job.cache == JetJobCachePolicy::Uncached {
-//RS         (false, "cache policy is uncached".to_string())
-//RS     } else if job.output_paths.is_empty() {
-//RS         (false, "no declared outputs".to_string())
-//RS     } else if let Some(path) = missing_output {
-//RS         (false, format!("output `{path}` is missing"))
-//RS     } else if let Some(path) = missing_input {
-//RS         (false, format!("input `{path}` is missing"))
-//RS     } else if newest_input > newest_output {
-//RS         (false, "an input is newer than the declared outputs".to_string())
-//RS     } else {
-//RS         (true, "all declared outputs are newer than declared inputs".to_string())
-//RS     };
-//RS     let _ = (input_paths, output_paths);
-//RS     JetJobFreshness {
-//RS         fresh,
-//RS         reason,
-//RS         fingerprint,
-//RS     }
-//RS }
-//RS 
-//RS fn jet_job_cache_claim(job: &JetJobSpec) -> bool {
-//RS     !jet_job_freshness(job).fresh
-//RS }
-//RS 
-//RS fn jet_job_timeout(job: &JetJobSpec) -> Option<std::time::Duration> {
-//RS     job.limits
-//RS         .iter()
-//RS         .find(|(name, _)| matches!(*name, "timeout" | "timeout_ms"))
-//RS         .and_then(|(_, value)| value.parse::<u64>().ok())
-//RS         .map(std::time::Duration::from_millis)
-//RS }
-//RS 
-//RS fn jet_job_limit<'a>(job: &'a JetJobSpec, wanted: &str) -> Option<&'a str> {
-//RS     job.limits
-//RS         .iter()
-//RS         .find(|(name, _)| *name == wanted)
-//RS         .map(|(_, value)| *value)
-//RS }
-//RS 
-//RS fn jet_job_retries(job: &JetJobSpec) -> u32 {
-//RS     jet_job_limit(job, "retry")
-//RS         .or_else(|| jet_job_limit(job, "retries"))
-//RS         .and_then(|value| value.parse::<u32>().ok())
-//RS         .unwrap_or(0)
-//RS         .min(16)
-//RS }
-//RS 
-//RS fn jet_job_now_ms() -> u64 {
-//RS     std::time::SystemTime::now()
-//RS         .duration_since(std::time::UNIX_EPOCH)
-//RS         .unwrap_or_default()
-//RS         .as_millis()
-//RS         .try_into()
-//RS         .unwrap_or(u64::MAX)
-//RS }
-//RS 
-//RS fn jet_job_json_string(value: &str) -> String {
-//RS     let mut output = String::with_capacity(value.len().saturating_add(2));
-//RS     output.push('"');
-//RS     for character in value.chars() {
-//RS         match character {
-//RS             '"' => output.push_str("\\\""),
-//RS             '\\' => output.push_str("\\\\"),
-//RS             '\u{08}' => output.push_str("\\b"),
-//RS             '\u{0c}' => output.push_str("\\f"),
-//RS             '\n' => output.push_str("\\n"),
-//RS             '\r' => output.push_str("\\r"),
-//RS             '\t' => output.push_str("\\t"),
-//RS             character if character.is_control() => {
-//RS                 output.push_str(&format!("\\u{:04x}", character as u32));
-//RS             }
-//RS             character => output.push(character),
-//RS         }
-//RS     }
-//RS     output.push('"');
-//RS     output
-//RS }
-//RS 
-//RS fn jet_job_emit(
-//RS     sink: &JetJobEventSinkHandle,
-//RS     timestamp_ms: u64,
-//RS     kind: &str,
-//RS     state: &str,
-//RS     job_id: &str,
-//RS     name: &str,
-//RS     queue: &str,
-//RS     attempts: u32,
-//RS     duration_ms: Option<u64>,
-//RS     worker: Option<&str>,
-//RS     request_id: Option<&str>,
-//RS     failure: Option<&str>,
-//RS ) {
-//RS     let duration = duration_ms
-//RS         .map(|value| value.to_string())
-//RS         .unwrap_or_else(|| "null".to_string());
-//RS     let worker = worker
-//RS         .map(jet_job_json_string)
-//RS         .unwrap_or_else(|| "null".to_string());
-//RS     let request_id = request_id
-//RS         .map(jet_job_json_string)
-//RS         .unwrap_or_else(|| "null".to_string());
-//RS     let failure = failure
-//RS         .map(jet_job_json_string)
-//RS         .unwrap_or_else(|| "null".to_string());
-//RS     let fields = format!(
-//RS         "{{\"event\":{},\"state\":{},\"job_id\":{},\"name\":{},\"queue\":{},\"attempts\":{},\"duration_ms\":{},\"worker\":{},\"request_id\":{},\"failure\":{}}}",
-//RS         jet_job_json_string(kind),
-//RS         jet_job_json_string(state),
-//RS         jet_job_json_string(job_id),
-//RS         jet_job_json_string(name),
-//RS         jet_job_json_string(queue),
-//RS         attempts,
-//RS         duration,
-//RS         worker,
-//RS         request_id,
-//RS         failure,
-//RS     );
-//RS     if let Ok(event) =
-//RS         crate::JetDevtoolsEvent::from_parts(timestamp_ms, "job-runtime", "Job", job_id, fields)
-//RS     {
-//RS         // The ordinary job sink remains available to embedders, while the
-//RS         // canonical devtools sink gives the live Jobs panel the same typed
-//RS         // observation without capturing a payload.
-//RS         sink.publish(event.clone());
-//RS         jet_foundation::Devtools::jet_devtools_publish_event(event);
-//RS     }
-//RS }
-//RS 
-//RS enum JetJobRunOutcome {
-//RS     Complete,
-//RS     Fresh(String),
-//RS     Skipped(String),
-//RS     TimedOut,
-//RS     Panic(Box<dyn std::any::Any + Send>),
-//RS }
-//RS 
-//RS static JET_JOB_NEXT_ID: std::sync::atomic::AtomicU64 =
-//RS     std::sync::atomic::AtomicU64::new(1);
-//RS 
-//RS fn jet_job_run_spec<F, G>(
-//RS     job: JetJobSpec,
-//RS     program: String,
-//RS     argv: Vec<String>,
-//RS     sink: JetJobEventSinkHandle,
-//RS     scope_enter: F,
-//RS ) -> JetJobRunOutcome
-//RS where
-//RS     F: Fn() -> Result<Option<G>, String> + Clone + Send + Sync + 'static,
-//RS     G: Send + 'static,
-//RS {
-//RS     let id = JET_JOB_NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-//RS     let job_id = format!("{}#{}", job.entry.name, id);
-//RS     let queue = jet_job_limit(&job, "queue")
-//RS         .unwrap_or(job.entry.name)
-//RS         .to_string();
-//RS     if jet_job_is_skipped(&job) {
-//RS         let reason = match job.skip {
-//RS             Some(JetJobSkip::Always(reason)) => reason.to_string(),
-//RS             Some(JetJobSkip::UnlessPlatform(platform)) => {
-//RS                 format!("host platform does not match {platform}")
-//RS             }
-//RS             None => "declared skip rule".to_string(),
-//RS         };
-//RS         jet_job_emit(
-//RS             &sink,
-//RS             jet_job_now_ms(),
-//RS             "skip",
-//RS             "skipped",
-//RS             &job_id,
-//RS             job.entry.name,
-//RS             &queue,
-//RS             0,
-//RS             None,
-//RS             None,
-//RS             None,
-//RS             Some(&reason),
-//RS         );
-//RS         return JetJobRunOutcome::Skipped(reason);
-//RS     }
-//RS     // Input/output patterns are relative to the declared job directory, so
-//RS     // enter it before cache freshness and invocation.
-//RS     let _directory = JetJobDirectoryGuard::enter(job.working_directory);
-//RS     let freshness = jet_job_freshness(&job);
-//RS     if freshness.fresh && !jet_job_cache_claim(&job) {
-//RS         jet_job_emit(
-//RS             &sink,
-//RS             jet_job_now_ms(),
-//RS             "fresh",
-//RS             "fresh",
-//RS             &job_id,
-//RS             job.entry.name,
-//RS             &queue,
-//RS             0,
-//RS             None,
-//RS             None,
-//RS             None,
-//RS             Some(&freshness.reason),
-//RS         );
-//RS         return JetJobRunOutcome::Fresh(freshness.reason);
-//RS     }
-//RS     jet_job_emit(
-//RS         &sink,
-//RS         jet_job_now_ms(),
-//RS         "enqueue",
-//RS         "enqueued",
-//RS         &job_id,
-//RS         job.entry.name,
-//RS         &queue,
-//RS         0,
-//RS         None,
-//RS         None,
-//RS         None,
-//RS         None,
-//RS     );
-//RS     let context = JetJobContext {
-//RS         name: job.entry.name,
-//RS         dispatch: job.dispatch,
-//RS         packages: job.packages,
-//RS         working_directory: job.working_directory,
-//RS         input_paths: job.input_paths,
-//RS         output_paths: job.output_paths,
-//RS         skip: job.skip,
-//RS         cache: job.cache,
-//RS         limits: job.limits,
-//RS         after: job.after,
-//RS         parallel: job.parallel,
-//RS     };
-//RS     let previous = JET_JOB_CONTEXT.with(|slot| slot.replace(Some(context)));
-//RS     let run_started = std::time::Instant::now();
-//RS     let outcome = (|| {
-//RS         let retries = jet_job_retries(&job);
-//RS         let mut attempts = 0u32;
-//RS         loop {
-//RS             attempts = attempts.saturating_add(1);
-//RS             jet_job_emit(
-//RS                 &sink,
-//RS                 jet_job_now_ms(),
-//RS                 "start",
-//RS                 "started",
-//RS                 &job_id,
-//RS                 job.entry.name,
-//RS                 &queue,
-//RS                 attempts,
-//RS                 None,
-//RS                 Some(&program),
-//RS                 None,
-//RS                 None,
-//RS             );
-//RS             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-//RS                 let _scope = scope_enter()
-//RS                     .unwrap_or_else(|error| panic!("job service scope rejected: {error}"));
-//RS                 (job.entry.invoke)(&program, &argv);
-//RS             }));
-//RS             let duration_ms = run_started
-//RS                 .elapsed()
-//RS                 .as_millis()
-//RS                 .try_into()
-//RS                 .unwrap_or(u64::MAX);
-//RS             let timed_out = jet_job_timeout(&job)
-//RS                 .is_some_and(|timeout| run_started.elapsed() > timeout);
-//RS             if timed_out {
-//RS                 jet_job_emit(
-//RS                     &sink,
-//RS                     jet_job_now_ms(),
-//RS                     "fail",
-//RS                     "failed",
-//RS                     &job_id,
-//RS                     job.entry.name,
-//RS                     &queue,
-//RS                     attempts,
-//RS                     Some(duration_ms),
-//RS                     Some(&program),
-//RS                     None,
-//RS                     Some("timed_out"),
-//RS                 );
-//RS                 eprintln!("job `{}` exceeded its configured timeout", job.entry.name);
-//RS                 return match result {
-//RS                     Ok(()) => JetJobRunOutcome::TimedOut,
-//RS                     Err(payload) => JetJobRunOutcome::Panic(payload),
-//RS                 };
-//RS             }
-//RS             match result {
-//RS                 Ok(()) => {
-//RS                     jet_job_emit(
-//RS                         &sink,
-//RS                         jet_job_now_ms(),
-//RS                         "complete",
-//RS                         "completed",
-//RS                         &job_id,
-//RS                         job.entry.name,
-//RS                         &queue,
-//RS                         attempts,
-//RS                         Some(duration_ms),
-//RS                         Some(&program),
-//RS                         None,
-//RS                         None,
-//RS                     );
-//RS                     return JetJobRunOutcome::Complete;
-//RS                 }
-//RS                 Err(_payload) if attempts <= retries => {
-//RS                     jet_job_emit(
-//RS                         &sink,
-//RS                         jet_job_now_ms(),
-//RS                         "retry",
-//RS                         "retrying",
-//RS                         &job_id,
-//RS                         job.entry.name,
-//RS                         &queue,
-//RS                         attempts,
-//RS                         Some(duration_ms),
-//RS                         Some(&program),
-//RS                         None,
-//RS                         Some("error"),
-//RS                     );
-//RS                 }
-//RS                 Err(payload) => {
-//RS                     jet_job_emit(
-//RS                         &sink,
-//RS                         jet_job_now_ms(),
-//RS                         "fail",
-//RS                         "failed",
-//RS                         &job_id,
-//RS                         job.entry.name,
-//RS                         &queue,
-//RS                         attempts,
-//RS                         Some(duration_ms),
-//RS                         Some(&program),
-//RS                         None,
-//RS                         Some("error"),
-//RS                     );
-//RS                     return JetJobRunOutcome::Panic(payload);
-//RS                 }
-//RS             }
-//RS         }
-//RS     })();
-//RS     JET_JOB_CONTEXT.with(|slot| {
-//RS         slot.replace(previous);
-//RS     });
-//RS     outcome
-//RS }
-//RS 
-//RS fn jet_job_dependency_indices(jobs: &[JetJobSpec], index: usize) -> Vec<usize> {
-//RS     jobs[index]
-//RS         .after
-//RS         .iter()
-//RS         .filter_map(|dependency| {
-//RS             jobs.iter()
-//RS                 .position(|job| job.entry.name == *dependency)
-//RS         })
-//RS         .collect()
-//RS }
-//RS 
-//RS fn jet_job_validate_graph(jobs: &[JetJobSpec]) -> Result<(), String> {
-//RS     let mut names = std::collections::BTreeMap::<String, Vec<usize>>::new();
-//RS     for (index, job) in jobs.iter().enumerate() {
-//RS         if job.parallel == 0 {
-//RS             return Err(format!("job `{}` declares a zero parallel bound", job.entry.name));
-//RS         }
-//RS         names
-//RS             .entry(job.entry.name.to_string())
-//RS             .or_default()
-//RS             .push(index);
-//RS     }
-//RS     for (index, job) in jobs.iter().enumerate() {
-//RS         for dependency in job.after {
-//RS             if dependency == &job.entry.name {
-//RS                 return Err(format!("job `{}` depends on itself", job.entry.name));
-//RS             }
-//RS             let Some(candidates) = names.get(*dependency) else {
-//RS                 return Err(format!(
-//RS                     "job `{}` depends on unknown job `{dependency}`",
-//RS                     job.entry.name
-//RS                 ));
-//RS             };
-//RS             if candidates.len() != 1 {
-//RS                 return Err(format!(
-//RS                     "job `{}` has an ambiguous prerequisite `{dependency}`",
-//RS                     job.entry.name
-//RS                 ));
-//RS             }
-//RS         }
-//RS         let _ = index;
-//RS     }
-//RS 
-//RS     fn visit(
-//RS         index: usize,
-//RS         jobs: &[JetJobSpec],
-//RS         names: &std::collections::BTreeMap<String, Vec<usize>>,
-//RS         state: &mut [u8],
-//RS         stack: &mut Vec<usize>,
-//RS     ) -> Result<(), String> {
-//RS         if state[index] == 2 {
-//RS             return Ok(());
-//RS         }
-//RS         if state[index] == 1 {
-//RS             let start = stack.iter().position(|candidate| *candidate == index).unwrap_or(0);
-//RS             let cycle = stack[start..]
-//RS                 .iter()
-//RS                 .map(|candidate| jobs[*candidate].entry.name)
-//RS                 .chain(std::iter::once(jobs[index].entry.name))
-//RS                 .collect::<Vec<_>>()
-//RS                 .join(" -> ");
-//RS             return Err(format!("job graph contains a cycle: {cycle}"));
-//RS         }
-//RS         state[index] = 1;
-//RS         stack.push(index);
-//RS         for dependency in jobs[index].after {
-//RS             if let Some(candidate) = names.get(*dependency).and_then(|indices| indices.first()) {
-//RS                 visit(*candidate, jobs, names, state, stack)?;
-//RS             }
-//RS         }
-//RS         stack.pop();
-//RS         state[index] = 2;
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     let mut state = vec![0u8; jobs.len()];
-//RS     let mut stack = Vec::new();
-//RS     for index in 0..jobs.len() {
-//RS         visit(index, jobs, &names, &mut state, &mut stack)?;
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn jet_job_graph_failure(reason: &str) -> ! {
-//RS     eprintln!("Error [E1331]: {reason}");
-//RS     eprintln!(
-//RS         " Why: job dependencies, authority, and arguments are checked before any job effect"
-//RS     );
-//RS     eprintln!(" Fix: correct the #Job metadata, then run the command again");
-//RS     std::process::exit(2)
-//RS }
-//RS 
-//RS fn jet_job_emit_cancelled(
-//RS     job: &JetJobSpec,
-//RS     sink: &JetJobEventSinkHandle,
-//RS     reason: &str,
-//RS ) {
-//RS     let id = JET_JOB_NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-//RS     let job_id = format!("{}#{}", job.entry.name, id);
-//RS     let queue = jet_job_limit(job, "queue")
-//RS         .unwrap_or(job.entry.name)
-//RS         .to_string();
-//RS     jet_job_emit(
-//RS         sink,
-//RS         jet_job_now_ms(),
-//RS         "cancel",
-//RS         "cancelled",
-//RS         &job_id,
-//RS         job.entry.name,
-//RS         &queue,
-//RS         0,
-//RS         None,
-//RS         None,
-//RS         None,
-//RS         Some(reason),
-//RS     );
-//RS }
-//RS 
-//RS fn jet_job_run_graph<F, G>(
-//RS     root: usize,
-//RS     jobs: &[JetJobSpec],
-//RS     program: String,
-//RS     root_args: Vec<String>,
-//RS     sink: JetJobEventSinkHandle,
-//RS     scope_enter: F,
-//RS )
-//RS where
-//RS     F: Fn() -> Result<Option<G>, String> + Clone + Send + Sync + 'static,
-//RS     G: Send + 'static,
-//RS {
-//RS     jet_job_run_graph_roots(
-//RS         std::slice::from_ref(&root),
-//RS         jobs,
-//RS         program,
-//RS         root_args,
-//RS         sink,
-//RS         scope_enter,
-//RS     );
-//RS }
-//RS 
-//RS /// Run several roots against one closure. A service tick uses this instead of
-//RS /// invoking the graph once per due root, so a shared predecessor is admitted
-//RS /// exactly once.
-//RS fn jet_job_run_graph_roots<F, G>(
-//RS     roots: &[usize],
-//RS     jobs: &[JetJobSpec],
-//RS     program: String,
-//RS     root_args: Vec<String>,
-//RS     sink: JetJobEventSinkHandle,
-//RS     scope_enter: F,
-//RS )
-//RS where
-//RS     F: Fn() -> Result<Option<G>, String> + Clone + Send + Sync + 'static,
-//RS     G: Send + 'static,
-//RS {
-//RS     let Some(primary_root) = roots.first().copied() else {
-//RS         return;
-//RS     };
-//RS     let mut closure = std::collections::BTreeSet::new();
-//RS     fn collect(
-//RS         index: usize,
-//RS         jobs: &[JetJobSpec],
-//RS         closure: &mut std::collections::BTreeSet<usize>,
-//RS     ) {
-//RS         if !closure.insert(index) {
-//RS             return;
-//RS         }
-//RS         for dependency in jet_job_dependency_indices(jobs, index) {
-//RS             collect(dependency, jobs, closure);
-//RS         }
-//RS     }
-//RS     for root in roots {
-//RS         collect(*root, jobs, &mut closure);
-//RS     }
-//RS     let mut pending = closure;
-//RS     let mut status = std::collections::BTreeMap::<usize, bool>::new();
-//RS     let limit = pending
-//RS         .iter()
-//RS         .map(|index| jobs[*index].parallel)
-//RS         .max()
-//RS         .unwrap_or(1)
-//RS         .max(1);
-//RS 
-//RS     while !pending.is_empty() {
-//RS         let pending_now = pending.iter().copied().collect::<Vec<_>>();
-//RS         for index in pending_now {
-//RS             let blocked = jet_job_dependency_indices(jobs, index)
-//RS                 .into_iter()
-//RS                 .any(|dependency| status.get(&dependency) == Some(&false));
-//RS             if blocked {
-//RS                 pending.remove(&index);
-//RS                 status.insert(index, false);
-//RS                 jet_job_emit_cancelled(
-//RS                     &jobs[index],
-//RS                     &sink,
-//RS                     "a prerequisite failed or was cancelled",
-//RS                 );
-//RS             }
-//RS         }
-//RS         let mut ready = pending
-//RS             .iter()
-//RS             .copied()
-//RS             .filter(|index| {
-//RS                 jet_job_dependency_indices(jobs, *index)
-//RS                     .into_iter()
-//RS                     .all(|dependency| status.get(&dependency) == Some(&true))
-//RS             })
-//RS             .collect::<Vec<_>>();
-//RS         ready.sort_by(|left, right| {
-//RS             jobs[*left]
-//RS                 .entry
-//RS                 .name
-//RS                 .cmp(jobs[*right].entry.name)
-//RS                 .then_with(|| left.cmp(right))
-//RS         });
-//RS         if ready.is_empty() {
-//RS             for index in pending.iter().copied().collect::<Vec<_>>() {
-//RS                 pending.remove(&index);
-//RS                 status.insert(index, false);
-//RS                 jet_job_emit_cancelled(&jobs[index], &sink, "job graph made no schedulable progress");
-//RS             }
-//RS             break;
-//RS         }
-//RS         ready.truncate(limit);
-//RS         for index in &ready {
-//RS             pending.remove(index);
-//RS         }
-//RS         let results = std::thread::scope(|scope| {
-//RS             let handles = ready
-//RS                 .iter()
-//RS                 .map(|index| {
-//RS                     let job = jobs[*index];
-//RS                     let program = program.clone();
-//RS                     let args = if *index == primary_root {
-//RS                         root_args.clone()
-//RS                     } else {
-//RS                         Vec::new()
-//RS                     };
-//RS                     let sink = sink.clone();
-//RS                     let scope_enter = scope_enter.clone();
-//RS                     scope.spawn(move || {
-//RS                         jet_job_run_spec(job, program, args, sink, scope_enter)
-//RS                     })
-//RS                 })
-//RS                 .collect::<Vec<_>>();
-//RS             handles
-//RS                 .into_iter()
-//RS                 .map(|handle| {
-//RS                     handle.join().unwrap_or_else(|_| {
-//RS                         JetJobRunOutcome::Panic(Box::new("job worker panicked"))
-//RS                     })
-//RS                 })
-//RS                 .collect::<Vec<_>>()
-//RS         });
-//RS         for (index, outcome) in ready.into_iter().zip(results) {
-//RS             let succeeded = matches!(
-//RS                 outcome,
-//RS                 JetJobRunOutcome::Complete
-//RS                     | JetJobRunOutcome::Fresh(_)
-//RS                     | JetJobRunOutcome::Skipped(_)
-//RS             );
-//RS             status.insert(index, succeeded);
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// Dispatch a typed MIR job table through the installed canonical sink.
-//RS pub fn jet_job_dispatch_specs<F, G>(
-//RS     argv: &[String],
-//RS     jobs: &[JetJobSpec],
-//RS     scope_enter: F,
-//RS ) -> bool
-//RS where
-//RS     F: Fn() -> Result<Option<G>, String> + Clone + Send + Sync + 'static,
-//RS     G: Send + 'static,
-//RS {
-//RS     jet_job_dispatch_specs_with_sink(argv, jobs, jet_job_event_sink(), scope_enter)
-//RS }
-//RS 
-//RS /// Dispatch a typed MIR job table with an explicit lifecycle sink.
-//RS pub fn jet_job_dispatch_specs_with_sink<F, G>(
-//RS     argv: &[String],
-//RS     jobs: &[JetJobSpec],
-//RS     sink: JetJobEventSinkHandle,
-//RS     scope_enter: F,
-//RS ) -> bool
-//RS where
-//RS     F: Fn() -> Result<Option<G>, String> + Clone + Send + Sync + 'static,
-//RS     G: Send + 'static,
-//RS {
-//RS     let specs = jobs
-//RS         .iter()
-//RS         .map(|job| (job.entry.name, job.entry.scope))
-//RS         .collect::<Vec<_>>();
-//RS     if specs.is_empty() {
-//RS         return false;
-//RS     }
-//RS     if argv.get(1).map(String::as_str) == Some(JET_JOB_PRIVATE_DISPATCH_FLAG) {
-//RS         let Some(name) = argv.get(2).map(String::as_str) else {
-//RS             jet_job_graph_failure("private job dispatch is missing a job name");
-//RS         };
-//RS         let Some(index) = jobs.iter().position(|job| job.entry.name == name) else {
-//RS             jet_job_graph_failure(&format!("private job dispatch names unknown job `{name}`"));
-//RS         };
-//RS         if let Err(reason) = jet_job_validate_graph(jobs) {
-//RS             jet_job_graph_failure(&reason);
-//RS         }
-//RS         let args = argv[3..].to_vec();
-//RS         if let Some(validate) = jobs[index].validate {
-//RS             if let Err(reason) = validate(&args) {
-//RS                 jet_job_graph_failure(&format!(
-//RS                     "job `{}` received invalid arguments: {reason}",
-//RS                     jobs[index].entry.name
-//RS                 ));
-//RS             }
-//RS         }
-//RS         jet_job_run_graph(
-//RS             index,
-//RS             jobs,
-//RS             argv.first().cloned().unwrap_or_else(|| "program".to_string()),
-//RS             args,
-//RS             sink,
-//RS             scope_enter.clone(),
-//RS         );
-//RS         return true;
-//RS     }
-//RS     if !jet_job_has_visible(&specs) {
-//RS         let Some(name) = argv.get(1).map(String::as_str) else {
-//RS             return false;
-//RS         };
-//RS         if name.starts_with('-') || !specs.iter().any(|(job_name, _)| *job_name == name) {
-//RS             return false;
-//RS         }
-//RS         jet_job_unknown(argv, &specs, name);
-//RS     }
-//RS     match jet_job_select(argv, &specs) {
-//RS         JetJobSelection::Ordinary => false,
-//RS         JetJobSelection::Help => {
-//RS             jet_job_help(argv, &specs);
-//RS             true
-//RS         }
-//RS         JetJobSelection::Job(index) => {
-//RS             if let Err(reason) = jet_job_validate_graph(jobs) {
-//RS                 jet_job_graph_failure(&reason);
-//RS             }
-//RS             // `argv` is `[program, job, job args…]`; the job's validator and
-//RS             // wrapper take only the job args, exactly as the private dispatch
-//RS             // path above hands them over.
-//RS             let args = argv[2..].to_vec();
-//RS             if let Some(validate) = jobs[index].validate {
-//RS                 if let Err(reason) = validate(&args) {
-//RS                     jet_job_graph_failure(&format!(
-//RS                         "job `{}` received invalid arguments: {reason}",
-//RS                         jobs[index].entry.name
-//RS                     ));
-//RS                 }
-//RS             }
-//RS             jet_job_run_graph(
-//RS                 index,
-//RS                 jobs,
-//RS                 argv.first().cloned().unwrap_or_else(|| "program".to_string()),
-//RS                 args,
-//RS                 sink,
-//RS                 scope_enter.clone(),
-//RS             );
-//RS             true
-//RS         }
-//RS         JetJobSelection::Unknown => {
-//RS             let name = argv.get(1).map(String::as_str).unwrap_or("");
-//RS             jet_job_unknown(argv, &specs, name);
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS static JET_JOB_SERVICE_CLOCKS: std::sync::LazyLock<
-//RS     std::sync::Mutex<std::collections::BTreeMap<String, JetJobClock>>,
-//RS > = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::BTreeMap::new()));
-//RS 
-//RS /// Keep one due clock per generated program. A fresh clock on every AOT or
-//RS /// resident-JIT tick makes every duration schedule due on every poll.
-//RS pub fn jet_job_service_tick_specs_retained<F, G>(
-//RS     jobs: &[JetJobSpec],
-//RS     program: &str,
-//RS     scope_enter: F,
-//RS )
-//RS where
-//RS     F: Fn() -> Result<Option<G>, String> + Clone + Send + Sync + 'static,
-//RS     G: Send + 'static,
-//RS {
-//RS     let mut clocks = JET_JOB_SERVICE_CLOCKS
-//RS         .lock()
-//RS         .expect("job service clocks poisoned");
-//RS     let clock = clocks
-//RS         .entry(program.to_string())
-//RS         .or_insert_with(JetJobClock::new);
-//RS     jet_job_service_tick_specs_with_sink(clock, jobs, program, jet_job_event_sink(), scope_enter);
-//RS }
-//RS 
-//RS pub fn jet_job_service_tick_specs_with_sink<F, G>(
-//RS     clock: &mut JetJobClock,
-//RS     jobs: &[JetJobSpec],
-//RS     program: &str,
-//RS     sink: JetJobEventSinkHandle,
-//RS     scope_enter: F,
-//RS )
-//RS where
-//RS     F: Fn() -> Result<Option<G>, String> + Clone + Send + Sync + 'static,
-//RS     G: Send + 'static,
-//RS {
-//RS     if let Err(reason) = jet_job_validate_graph(jobs) {
-//RS         eprintln!("Error [E1331]: {reason}");
-//RS         return;
-//RS     }
-//RS     let schedules = jobs
-//RS         .iter()
-//RS         .filter(|job| jet_job_schedule_enabled(job.entry.scope))
-//RS         .filter_map(|job| {
-//RS             job.entry
-//RS                 .schedule
-//RS                 .map(|schedule| (job.entry.name, schedule))
-//RS         })
-//RS         .collect::<Vec<_>>();
-//RS     let mut due_roots = Vec::new();
-//RS     for name in jet_job_schedule_due(clock, &schedules) {
-//RS         if let Some(index) = jobs.iter().position(|job| job.entry.name == name.as_str()) {
-//RS             let args = Vec::new();
-//RS             if let Some(validate) = jobs[index].validate {
-//RS                 if let Err(reason) = validate(&args) {
-//RS                     eprintln!(
-//RS                         "Error [E1331]: job `{}` received invalid scheduled arguments: {reason}",
-//RS                         jobs[index].entry.name
-//RS                     );
-//RS                     continue;
-//RS                 }
-//RS             }
-//RS             due_roots.push(index);
-//RS         }
-//RS     }
-//RS     jet_job_run_graph_roots(
-//RS         &due_roots,
-//RS         jobs,
-//RS         program.to_string(),
-//RS         Vec::new(),
-//RS         sink,
-//RS         scope_enter,
-//RS     );
-//RS }
-//RS 
-//RS /// Shared schedule decision used by AOT, the resident JIT adapter, the TIR
-//RS /// evaluator, and `jet dev`.
-//RS pub fn jet_job_schedule_due(
-//RS     clock: &mut JetJobClock,
-//RS     jobs: &[(&str, JetJobSchedule)],
-//RS ) -> Vec<String> {
-//RS     clock.due(jobs)
-//RS }
-//RS 
-//RS fn jet_job_schedule_enabled(scope: JetJobScope) -> bool {
-//RS     match scope {
-//RS         JetJobScope::Dev => !cfg!(jet_release),
-//RS         JetJobScope::Ship | JetJobScope::Internal => true,
-//RS     }
-//RS }
-//RS 
-//RS fn jet_args_program_name(prog: &str) -> String {
-//RS     if prog.is_empty() {
-//RS         return "program".to_string();
-//RS     }
-//RS     std::path::Path::new(prog)
-//RS         .file_name()
-//RS         .and_then(|name| name.to_str())
-//RS         .unwrap_or(prog)
-//RS         .to_string()
-//RS }
-//RS 
-//RS /// Normalize a source-file argv[0] to the name used by its built program.
-//RS pub(crate) fn jet_args_source_program_name(prog: &str) -> String {
-//RS     let (program, suffix) = prog.split_once(' ').unwrap_or((prog, ""));
-//RS     let name = jet_args_program_name(program);
-//RS     let source = name.strip_suffix(".jet").unwrap_or(&name);
-//RS     if suffix.is_empty() {
-//RS         source.to_string()
-//RS     } else {
-//RS         format!("{source} {suffix}")
-//RS     }
-//RS }
-//RS 
-//RS /// The one terminator for a banner a generated CLI writes to a stream: help,
-//RS /// usage and command errors. `JetArgsSpec::help()` renders the block, this
-//RS /// closes it with the single trailing newline `println!` would add. AOT emits
-//RS /// `print!`/`eprint!` around it, the Cranelift host and the interpreter push
-//RS /// the result into their own stdout/stderr buffers — no engine re-decides how
-//RS /// a banner ends.
-//RS #[allow(dead_code)]
-//RS pub(crate) fn jet_cli_banner(text: &str) -> String {
-//RS     format!("{text}\n")
-//RS }
-//RS 
-//RS #[derive(Clone, Copy, PartialEq, Eq)]
-//RS pub enum JetJobSelection {
-//RS     Ordinary,
-//RS     Help,
-//RS     Job(usize),
-//RS     Unknown,
-//RS }
-//RS 
-//RS fn jet_job_scope_visible(scope: JetJobScope) -> bool {
-//RS     match scope {
-//RS         JetJobScope::Dev => !cfg!(jet_release),
-//RS         JetJobScope::Ship => true,
-//RS         // Internal jobs remain callable by code and schedulers, never argv.
-//RS         JetJobScope::Internal => false,
-//RS     }
-//RS }
-//RS 
-//RS fn jet_job_scope_name(scope: JetJobScope) -> &'static str {
-//RS     match scope {
-//RS         JetJobScope::Dev => "dev",
-//RS         JetJobScope::Ship => "ship",
-//RS         JetJobScope::Internal => "internal",
-//RS     }
-//RS }
-//RS 
-//RS pub fn jet_job_has_visible(jobs: &[(&str, JetJobScope)]) -> bool {
-//RS     jobs.iter().any(|(_, scope)| jet_job_scope_visible(*scope))
-//RS }
-//RS 
-//RS pub fn jet_job_help_text(argv: &[String], jobs: &[(&str, JetJobScope)]) -> String {
-//RS     let program = jet_args_source_program_name(argv.first().map(String::as_str).unwrap_or(""));
-//RS     let mut text = format!("Usage: {program} <job> [options]\n\nJobs:");
-//RS     for (name, scope) in jobs {
-//RS         if jet_job_scope_visible(*scope) {
-//RS             text.push_str(&format!("\n  {:<20} {}", name, jet_job_scope_name(*scope)));
-//RS         }
-//RS     }
-//RS     text.push('\n');
-//RS     text
-//RS }
-//RS 
-//RS pub fn jet_job_help(argv: &[String], jobs: &[(&str, JetJobScope)]) {
-//RS     print!("{}", jet_job_help_text(argv, jobs));
-//RS }
-//RS 
-//RS /// I4: the one registered E1294 wording (the `E1294` row in
-//RS /// `Prelude/Diagnostics.jet`). The compiler tier renders it as a `Diagnostic`
-//RS /// and a built binary renders it to stderr through `jet_job_unknown` below —
-//RS /// one registered fact, two renderings, never two wordings.
-//RS #[allow(dead_code)]
-//RS pub const JET_JOB_UNKNOWN_WHY: &str =
-//RS     "The first program subcommand must name a function marked `#Job`.";
-//RS #[allow(dead_code)]
-//RS pub const JET_JOB_UNKNOWN_FIX: &str =
-//RS     "Mark a function `#Job`, or check the subcommand spelling.";
-//RS 
-//RS #[allow(dead_code)]
-//RS pub fn jet_job_unknown_what(name: &str) -> String {
-//RS     format!("No job named `{name}`")
-//RS }
-//RS 
-//RS /// The one label and separator a job refusal uses to advertise names. The
-//RS /// caller picks the list, because the honest list is tier-dependent: the
-//RS /// compiler tier names every declared job, while a built binary names only the
-//RS /// scopes it can still dispatch.
-//RS #[allow(dead_code)]
-//RS pub fn jet_job_declared_detail(names: &[&str]) -> String {
-//RS     format!("declared jobs: {}", names.join(", "))
-//RS }
-//RS 
-//RS fn jet_job_unknown(argv: &[String], jobs: &[(&str, JetJobScope)], name: &str) -> ! {
-//RS     let program = jet_args_source_program_name(argv.first().map(String::as_str).unwrap_or(""));
-//RS     let dispatchable = jobs
-//RS         .iter()
-//RS         .filter(|(_, scope)| jet_job_scope_visible(*scope))
-//RS         .map(|(name, _)| *name)
-//RS         .collect::<Vec<_>>();
-//RS     eprintln!("Error [E1294]: {}", jet_job_unknown_what(name));
-//RS     eprintln!(" Why: {JET_JOB_UNKNOWN_WHY}");
-//RS     eprintln!(" Fix: {JET_JOB_UNKNOWN_FIX}");
-//RS     eprintln!("More: jet-lang.dev/e/E1294");
-//RS     eprintln!("{}", jet_job_declared_detail(&dispatchable));
-//RS     eprintln!("\nUsage: {program} <job> [options]");
-//RS     std::process::exit(2)
-//RS }
-//RS 
-//RS /// Select the first argv word before any ordinary CLI parser sees it. This is
-//RS /// the shared decision kernel used by AOT and the JIT/interpreter adapters.
-//RS pub fn jet_job_select(argv: &[String], jobs: &[(&str, JetJobScope)]) -> JetJobSelection {
-//RS     let Some(name) = argv.get(1).map(String::as_str) else {
-//RS         return JetJobSelection::Ordinary;
-//RS     };
-//RS     if name == "--help" {
-//RS         return JetJobSelection::Help;
-//RS     }
-//RS     if name.starts_with('-') {
-//RS         return JetJobSelection::Ordinary;
-//RS     }
-//RS     for (index, (job_name, scope)) in jobs.iter().enumerate() {
-//RS         if *job_name == name && jet_job_scope_visible(*scope) {
-//RS             return JetJobSelection::Job(index);
-//RS         }
-//RS     }
-//RS     JetJobSelection::Unknown
-//RS }
-// END-PORT-PENDING 0178 crates/jet-codegen/src/Prelude/Job.rs:1-1455
+use core.jobs.runtime.job_queue_types.[JetJobPayload, JetJobResult, JetJobError]
+use jet_foundation.Devtools.[JetDevtoolsEvent, JET_DEVTOOLS_MAX_HISTORY, jet_devtools_publish_event]
+use std.time.[Instant, SystemTime, Duration, UNIX_EPOCH]
+use std.sync.[Arc, Mutex, MutexGuard, LazyLock, ThreadLocal]
+use std.sync.atomic.[AtomicU64, Ordering]
+use std.cell.RefCell
+use std.collections.VecDeque
+use std.[env, fs, thread, panic, process, any]
+use core.sys.target
 
+// Rust: crates/jet-codegen/src/Prelude/Job.rs:1
+// D-JOB-SUBCMD1=C: one job table and selector serve all argv boundaries.
+#Clone
+#Comparable
+pub enum JetJobScope { Dev, Ship, Internal }
+// Rust: crates/jet-codegen/src/Prelude/Job.rs:9
+pub const JET_JOB_PRIVATE_DISPATCH_FLAG: String = "--__jet-private-job"
+// Rust: crates/jet-codegen/src/Prelude/Job.rs:14
+#Clone
+#Debug
+#Comparable
+pub enum JetJobSchedule { Duration { nanos: I64 }, WallClockTime { hour: U8, minute: U8 } }
+// Rust: crates/jet-codegen/src/Prelude/Job.rs:23
+pub struct JetJobClock {
+    last_interval_run: [String:Instant],
+    last_daily_run_day: [String:U64],
+}
+impl JetJobClock {
+    // Rust: crates/jet-codegen/src/Prelude/Job.rs:32
+    pub fn new() -> JetJobClock { JetJobClock{last_interval_run: [:], last_daily_run_day: [:]} }
+    // Rust: crates/jet-codegen/src/Prelude/Job.rs:41
+    pub fn due(self: &JetJobClock, jobs: [(String, JetJobSchedule)]) -> [String] {
+        // GATE #4565: kernel primitive
+        unix_secs :: #Unsafe("read selected host wall clock") { SystemTime.now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs() }
+        self.due_at(jobs, unix_secs)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Job.rs:51
+    pub fn due_at(self: &JetJobClock, jobs: [(String, JetJobSchedule)], unix_secs: U64) -> [String] {
+        // GATE #4565: kernel primitive
+        now :: #Unsafe("read selected host monotonic clock") { Instant.now() }
+        day :: unix_secs / U64{86400}
+        secs_of_day :: unix_secs % U64{86400}
+        fired := [String]{}
+        loop (name, schedule) in jobs {
+            match schedule {
+                .Duration { nanos } -> {
+                    due :: match self.last_interval_run.get(name) {
+                        .None -> true,
+                        .Val(last) -> now.duration_since(last).as_nanos() >= nanos.max(I64{0}) as U128,
+                    }
+                    if due { &self.last_interval_run.insert(name, now); &fired.push(name) }
+                },
+                .WallClockTime { hour, minute } -> {
+                    target_secs :: hour as U64 * U64{3600} + minute as U64 * U64{60}
+                    in_window :: secs_of_day >= target_secs && secs_of_day < target_secs + U64{60}
+                    already_ran_today :: self.last_daily_run_day.get(name) == Val(day)
+                    if in_window && !already_ran_today { &self.last_daily_run_day.insert(name, day); &fired.push(name) }
+                },
+            }
+        }
+        ^fired
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Job.rs:84
+#Clone
+pub struct JetJobEntry {
+    pub name: String,
+    pub scope: JetJobScope,
+    pub schedule: JetJobSchedule?,
+    pub invoke: fn(String, [String]) -> (),
+}
+// Rust: crates/jet-codegen/src/Prelude/Job.rs:92
+pub type JetJobQueueInvoke = fn(JetJobPayload) -> JetJobResult JetJobError!
+// Rust: crates/jet-codegen/src/Prelude/Job.rs:97
+#Clone
+#Debug
+#Comparable
+pub enum JetJobDispatch { Direct, Spawn, Scheduled }
+// Rust: crates/jet-codegen/src/Prelude/Job.rs:105
+#Clone
+#Debug
+#Comparable
+pub enum JetJobCachePolicy { Uncached, Local, Shared }
+// Rust: crates/jet-codegen/src/Prelude/Job.rs:113
+#Clone
+#Debug
+#Comparable
+pub enum JetJobSkip { Always(String), UnlessPlatform(String) }
+// Rust: crates/jet-codegen/src/Prelude/Job.rs:120
+#Clone
+pub struct JetJobSpec {
+    pub entry: JetJobEntry,
+    pub payload_type: String?,
+    pub queue_invoke: JetJobQueueInvoke?,
+    pub dispatch: JetJobDispatch,
+    pub packages: [String],
+    pub working_directory: String?,
+    pub input_paths: [String],
+    pub output_paths: [String],
+    pub skip: JetJobSkip?,
+    pub cache: JetJobCachePolicy,
+    pub limits: [(String, String)],
+    pub after: [String],
+    pub parallel: Int,
+    pub validate: (fn([String]) -> () Err!)?,
+}
+// Rust: crates/jet-codegen/src/Prelude/Job.rs:150
+// Invocation-owned stack, not a process-wide name map. Generated tables outlive guards.
+// GATE #4565: kernel primitive
+JET_JOB_ACTIVE_SPECS :: #Unsafe("thread-local invocation registry initialized independently on each thread") {
+    ThreadLocal.new(fn() -> RefCell.new([[JetJobSpec]]{}))
+}
+// Rust: crates/jet-codegen/src/Prelude/Job.rs:158
+pub struct JetJobRegistryGuard {}
+impl Drop for JetJobRegistryGuard {
+    // Rust: crates/jet-codegen/src/Prelude/Job.rs:161
+    fn drop(self: &JetJobRegistryGuard) -> {
+        // GATE #4565: kernel primitive
+        #Unsafe("pop only the current thread's nested invocation registry") {
+            JET_JOB_ACTIVE_SPECS.with(registry -> { _ :: registry.borrow_mut().pop() })
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Job.rs:171
+pub fn jet_job_register_specs(jobs: [JetJobSpec]) -> JetJobRegistryGuard {
+    // GATE #4565: kernel primitive
+    #Unsafe("push generated invocation-owned table on current thread") { JET_JOB_ACTIVE_SPECS.with(registry -> registry.borrow_mut().push(jobs)) }
+    JetJobRegistryGuard{}
+}
+// Rust: crates/jet-codegen/src/Prelude/Job.rs:176
+pub fn jet_job_active_specs() -> [JetJobSpec]? {
+    // GATE #4565: kernel primitive
+    #Unsafe("borrow the current invocation table without changing registry ownership") { JET_JOB_ACTIVE_SPECS.with(registry -> registry.borrow().last().copied()) }
+}
+// Rust: crates/jet-codegen/src/Prelude/Job.rs:179
+pub trait JetJobEventSink: Send + Sync {
+    // Rust: crates/jet-codegen/src/Prelude/Job.rs:180
+    fn publish(self, event: ^JetDevtoolsEvent) -> ()
+}
+// Rust: crates/jet-codegen/src/Prelude/Job.rs:183
+pub type JetJobEventSinkHandle = Arc<JetJobEventSink>
+// Rust: crates/jet-codegen/src/Prelude/Job.rs:185
+pub struct JetJobEventCollector { capacity: Int, events: Mutex<VecDeque<JetDevtoolsEvent>> }
+impl JetJobEventCollector {
+    // Rust: crates/jet-codegen/src/Prelude/Job.rs:193
+    pub fn new() -> JetJobEventCollector { JetJobEventCollector.with_capacity(JET_DEVTOOLS_MAX_HISTORY) }
+    // Rust: crates/jet-codegen/src/Prelude/Job.rs:197
+    pub fn with_capacity(capacity: Int) -> JetJobEventCollector {
+        // GATE #4565: kernel primitive
+        JetJobEventCollector{capacity: capacity.clamp(1, JET_DEVTOOLS_MAX_HISTORY), events: #Unsafe("create mutex protecting bounded event deque") { Mutex.new(VecDeque.new<JetDevtoolsEvent>()) }}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Job.rs:204
+    pub fn snapshot(self) -> [JetDevtoolsEvent] {
+        // GATE #4565: kernel primitive
+        #Unsafe("hold event collector mutex through snapshot") { self.events.lock().expect("job event collector poisoned").iter().cloned().collect() }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Job.rs:213
+    pub fn take(self) -> [JetDevtoolsEvent] {
+        // GATE #4565: kernel primitive
+        #Unsafe("hold event collector mutex while draining all retained facts") { self.events.lock().expect("job event collector poisoned").drain(..).collect() }
+    }
+}
+impl Default for JetJobEventCollector {
+    // Rust: crates/jet-codegen/src/Prelude/Job.rs:223
+    pub fn default() -> JetJobEventCollector { JetJobEventCollector.new() }
+}
+impl JetJobEventSink for JetJobEventCollector {
+    // Rust: crates/jet-codegen/src/Prelude/Job.rs:229
+    pub fn publish(self, event: ^JetDevtoolsEvent) -> {
+        // GATE #4565: kernel primitive
+        #Unsafe("bounded FIFO mutation under event collector mutex") {
+            events := self.events.lock().expect("job event collector poisoned")
+            if events.len() == self.capacity -> _ :: events.pop_front()
+            events.push_back(^event)
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Job.rs:238
+// GATE #4565: kernel primitive
+JET_JOB_EVENT_COLLECTOR :: #Unsafe("one process-owned lazy shared collector") { LazyLock.new(fn() -> Arc.new(JetJobEventCollector.new())) }
+// Rust: crates/jet-codegen/src/Prelude/Job.rs:241
+// GATE #4565: kernel primitive
+JET_JOB_EVENT_SINK :: #Unsafe("one lazy mutex-protected optional sink") { LazyLock.new(fn() -> Mutex.new(None as JetJobEventSinkHandle?)) }
+// Rust: crates/jet-codegen/src/Prelude/Job.rs:245
+fn jet_job_event_sink() -> JetJobEventSinkHandle {
+    // GATE #4565: kernel primitive
+    #Unsafe("clone retained sink under mutex, falling back to real bounded collector") {
+        JET_JOB_EVENT_SINK.lock().expect("job event sink poisoned").clone().unwrap_or_else(fn() -> JET_JOB_EVENT_COLLECTOR.clone())
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Job.rs:254
+#Clone
+pub struct JetJobContext {
+    pub name: String,
+    pub dispatch: JetJobDispatch,
+    pub packages: [String],
+    pub working_directory: String?,
+    pub input_paths: [String],
+    pub output_paths: [String],
+    pub skip: JetJobSkip?,
+    pub cache: JetJobCachePolicy,
+    pub limits: [(String, String)],
+    pub after: [String],
+    pub parallel: Int,
+}
+// Rust: crates/jet-codegen/src/Prelude/Job.rs:270
+// GATE #4565: kernel primitive
+JET_JOB_CONTEXT :: #Unsafe("current job context belongs only to its executing thread") { ThreadLocal.new(fn() -> RefCell.new(None as JetJobContext?)) }
+// Rust: crates/jet-codegen/src/Prelude/Job.rs:275
+pub fn jet_job_context() -> JetJobContext? {
+    // GATE #4565: kernel primitive
+    #Unsafe("read current thread invocation context") { JET_JOB_CONTEXT.with(context -> context.borrow().copied()) }
+}
+// Rust: crates/jet-codegen/src/Prelude/Job.rs:278
+fn jet_job_no_scope() -> ()? Err! { Ok(None) }
+// Rust: crates/jet-codegen/src/Prelude/Job.rs:282
+// Invocation ABI cannot carry cwd yet: serialize all process cwd mutations.
+// GATE #4565: kernel primitive
+JET_JOB_CWD_LOCK :: #Unsafe("one shared mutex serializes process working-directory changes") { LazyLock.new(fn() -> Mutex.new(())) }
+// Rust: crates/jet-codegen/src/Prelude/Job.rs:289
+struct JetJobDirectoryGuard { previous: OSPath?, lock: MutexGuard<()>? }
+impl JetJobDirectoryGuard {
+    // Rust: crates/jet-codegen/src/Prelude/Job.rs:295
+    fn enter(directory: String?) -> JetJobDirectoryGuard {
+        // GATE #4565: kernel primitive
+        #Unsafe("hold cwd lock until guard restores the previous process directory") {
+            lock :: JET_JOB_CWD_LOCK.lock().expect("job cwd lock poisoned")
+            previous :: directory.and_then(_ -> env.current_dir().ok())
+            if directory is Val(path) -> _ :: env.set_current_dir(path)
+            JetJobDirectoryGuard{previous: previous, lock: Val(^lock)}
+        }
+    }
+}
+impl Drop for JetJobDirectoryGuard {
+    // Rust: crates/jet-codegen/src/Prelude/Job.rs:309
+    fn drop(self: &JetJobDirectoryGuard) -> {
+        // GATE #4565: kernel primitive
+        #Unsafe("restore saved directory before releasing process cwd mutex") {
+            if self.previous.take() is Val(previous) -> _ :: env.set_current_dir(previous)
+            _ :: self.lock.take()
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Job.rs:318
+fn jet_job_platform_matches(platform: String) -> Bool {
+    match platform {
+        "Linux" | "linux" -> target.selected_os() == .Linux,
+        "MacOS" | "macOS" | "macos" -> target.selected_os() == .MacOS,
+        "Windows" | "windows" -> target.selected_os() == .Windows,
+        "FreeBSD" | "freebsd" -> target.selected_os() == .FreeBSD,
+        _ -> false,
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Job.rs:328
+fn jet_job_is_skipped(job: JetJobSpec) -> Bool {
+    match job.skip { .None -> false, .Val(.Always(_)) -> true, .Val(.UnlessPlatform(platform)) -> !jet_job_platform_matches(platform) }
+}
+// Rust: crates/jet-codegen/src/Prelude/Job.rs:336
+#Clone
+#Debug
+#Comparable
+pub struct JetJobFreshness { pub fresh: Bool, pub reason: String, pub fingerprint: U64 }
+// Rust: crates/jet-codegen/src/Prelude/Job.rs:346
+fn jet_job_base_directory(job: JetJobSpec) -> OSPath {
+    // GATE #4565: kernel primitive
+    current :: #Unsafe("query selected host process directory") { env.current_dir().unwrap_or_else(_ -> OSPath.new(".")) }
+    match job.working_directory {
+        .Val(directory) -> { path :: OSPath.new(directory); if path.is_absolute() { ^path } else { current.join(path) } },
+        .None -> ^current,
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Job.rs:361
+fn jet_job_glob_match(pattern: String, value: String) -> Bool {
+    p :: pattern.as_bytes()
+    v :: value.as_bytes()
+    row := [Bool].filled(v.len() + 1, false)
+    row[0] = true
+    loop token in p {
+        next := [Bool].filled(v.len() + 1, false)
+        if token == U8{42} {
+            next[0] = row[0]
+            loop index in 1..=v.len() -> next[index] = row[index] || next[index - 1]
+        } else {
+            loop index in 1..=v.len() {
+                if token == U8{63} || token == v[index - 1] -> next[index] = row[index - 1]
+            }
+        }
+        row = ^next
+    }
+    row[v.len()]
+}
+// Rust: crates/jet-codegen/src/Prelude/Job.rs:385
+fn jet_job_declared_paths(job: JetJobSpec, pattern: String) -> [OSPath] {
+    base :: jet_job_base_directory(job)
+    normalized :: pattern.replace('\\', "/")
+    if !normalized.contains('*') && !normalized.contains('?') -> return [base.join(pattern)]
+    pending := [~base]
+    paths := [OSPath]{}
+    // GATE #4565: kernel primitive
+    #Unsafe("enumerate real selected host filesystem without fabricating missing entries") {
+        while pending.pop() is Val(directory) {
+            entries_result :: fs.read_dir(directory)
+            if entries_result is Err(_) -> continue
+            entries := entries_result.unwrap().filter_map(entry -> entry.ok()).collect()
+            &entries.sort_by_key(entry -> entry.path())
+            loop entry in entries {
+                path :: entry.path()
+                if path.is_dir() -> &pending.push(~path)
+                relative_result :: path.strip_prefix(base)
+                if relative_result is Err(_) -> continue
+                relative :: relative_result.unwrap().to_string_lossy().replace('\\', "/")
+                if jet_job_glob_match(normalized, relative) -> &paths.push(^path)
+            }
+        }
+    }
+    &paths.sort()
+    &paths.dedup()
+    ^paths
+}
+// Rust: crates/jet-codegen/src/Prelude/Job.rs:414
+fn jet_job_latest_modified(path: OSPath) -> SystemTime? {
+    // GATE #4565: kernel primitive
+    #Unsafe("read symlink metadata and recursively observe real child timestamps") {
+        metadata :: fs.symlink_metadata(path).ok() ?? return None
+        latest := metadata.modified().ok()
+        if metadata.is_dir() {
+            entries := fs.read_dir(path).ok() ?? return None
+            children := entries.filter_map(entry -> entry.ok()).map(entry -> entry.path()).collect()
+            &children.sort()
+            loop child in children {
+                if jet_job_latest_modified(child) is Val(modified) -> latest = Val(latest.map_or(modified, current -> current.max(modified)))
+            }
+        }
+        latest
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Job.rs:433
+fn jet_job_hash_bytes(hash: &U64, bytes: View<U8>) -> {
+    loop byte in bytes { hash = hash ^ byte as U64; hash = hash.wrapping_mul(U64{1099511628211}) }
+}
+// Rust: crates/jet-codegen/src/Prelude/Job.rs:440
+fn jet_job_hash_path(path: OSPath, hash: &U64) -> {
+    // GATE #4565: kernel primitive
+    #Unsafe("hash real symlink targets, file bytes and sorted directory children") {
+        result :: fs.symlink_metadata(path)
+        if result is Err(_) { jet_job_hash_bytes(&hash, "<missing>".as_bytes()); return }
+        metadata :: result.unwrap()
+        if metadata.file_type().is_symlink() {
+            jet_job_hash_bytes(&hash, "<symlink>".as_bytes())
+            if fs.read_link(path) is Ok(target_path) -> jet_job_hash_bytes(&hash, target_path.to_string_lossy().as_bytes())
+        } else if metadata.is_file() {
+            if fs.read(path) is Ok(bytes) -> jet_job_hash_bytes(&hash, bytes)
+        } else if metadata.is_dir() {
+            entries := fs.read_dir(path).ok().into_iter().flat_map(entries -> entries.filter_map(entry -> entry.ok()).map(entry -> entry.path())).collect()
+            &entries.sort()
+            loop child in entries -> jet_job_hash_path(child, &hash)
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Job.rs:468
+pub fn jet_job_freshness(job: JetJobSpec) -> JetJobFreshness {
+    fingerprint := U64{14695981039346656037}
+    input_paths := [OSPath]{}
+    output_paths := [OSPath]{}
+    missing_input := None as String?
+    missing_output := None as String?
+    newest_input := None as SystemTime?
+    newest_output := None as SystemTime?
+    loop pattern in job.input_paths {
+        jet_job_hash_bytes(&fingerprint, pattern.as_bytes())
+        paths :: jet_job_declared_paths(job, pattern)
+        if paths.is_empty() -> missing_input = Val(pattern)
+        loop path in paths {
+            jet_job_hash_path(path, &fingerprint)
+            // GATE #4565: kernel primitive
+            if #Unsafe("observe input existence on selected host") { !path.exists() } -> missing_input = Val(pattern)
+            if jet_job_latest_modified(path) is Val(modified) -> newest_input = Val(newest_input.map_or(modified, current -> current.max(modified)))
+            &input_paths.push(path)
+        }
+    }
+    loop pattern in job.output_paths {
+        jet_job_hash_bytes(&fingerprint, pattern.as_bytes())
+        paths :: jet_job_declared_paths(job, pattern)
+        if paths.is_empty() -> missing_output = Val(pattern)
+        loop path in paths {
+            jet_job_hash_path(path, &fingerprint)
+            // GATE #4565: kernel primitive
+            if #Unsafe("observe output existence on selected host") { !path.exists() } -> missing_output = Val(pattern)
+            if jet_job_latest_modified(path) is Val(modified) -> newest_output = Val(newest_output.map_or(modified, current -> current.max(modified)))
+            &output_paths.push(path)
+        }
+    }
+    (fresh, reason) :: if job.cache == .Uncached { (false, "cache policy is uncached") }
+        else if job.output_paths.is_empty() { (false, "no declared outputs") }
+        else if missing_output is Val(path) { (false, "output `{path}` is missing") }
+        else if missing_input is Val(path) { (false, "input `{path}` is missing") }
+        else if newest_input > newest_output { (false, "an input is newer than the declared outputs") }
+        else { (true, "all declared outputs are newer than declared inputs") }
+    _ :: (input_paths, output_paths)
+    JetJobFreshness{fresh: fresh, reason: reason, fingerprint: fingerprint}
+}
+// Rust: crates/jet-codegen/src/Prelude/Job.rs:532
+fn jet_job_cache_claim(job: JetJobSpec) -> Bool { !jet_job_freshness(job).fresh }
+// Rust: crates/jet-codegen/src/Prelude/Job.rs:536
+fn jet_job_timeout(job: JetJobSpec) -> Duration? {
+    job.limits.iter().find((name, _) -> name == "timeout" || name == "timeout_ms").and_then((_, value) -> value.parse<U64>().ok()).map(Duration.from_millis)
+}
+// Rust: crates/jet-codegen/src/Prelude/Job.rs:544
+fn jet_job_limit(job: JetJobSpec, wanted: String) -> String? { job.limits.iter().find((name, _) -> name == wanted).map((_, value) -> value) }
+// Rust: crates/jet-codegen/src/Prelude/Job.rs:551
+fn jet_job_retries(job: JetJobSpec) -> U32 {
+    jet_job_limit(job, "retry").or_else(fn() -> jet_job_limit(job, "retries")).and_then(value -> value.parse<U32>().ok()).unwrap_or(U32{0}).min(U32{16})
+}
+// Rust: crates/jet-codegen/src/Prelude/Job.rs:559
+fn jet_job_now_ms() -> U64 {
+    // GATE #4565: kernel primitive
+    #Unsafe("read selected wall clock and saturate only out-of-range millisecond conversion") { SystemTime.now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis().try_into().unwrap_or(U64.MAX) }
+}
+// Rust: crates/jet-codegen/src/Prelude/Job.rs:568
+fn jet_job_json_string(value: String) -> String {
+    output := String.with_capacity(value.len().saturating_add(2))
+    &output.push('"')
+    loop character in value.chars() {
+        match character {
+            '"' -> &output.push_str("\\\""),
+            '\\' -> &output.push_str("\\\\"),
+            '\u{08}' -> &output.push_str("\\b"),
+            '\u{0c}' -> &output.push_str("\\f"),
+            '\n' -> &output.push_str("\\n"),
+            '\r' -> &output.push_str("\\r"),
+            '\t' -> &output.push_str("\\t"),
+            c if c.is_control() -> &output.push_str("\\u{c as U32:04x}"),
+            c -> &output.push(c),
+        }
+    }
+    &output.push('"')
+    ^output
+}
+// Rust: crates/jet-codegen/src/Prelude/Job.rs:590
+fn jet_job_emit(sink: JetJobEventSinkHandle, timestamp_ms: U64, kind: String, state: String, job_id: String, name: String, queue: String, attempts: U32, duration_ms: U64?, worker: String?, request_id: String?, failure: String?) -> {
+    duration :: duration_ms.map(value -> value.to_string()).unwrap_or_else(fn() -> "null")
+    worker_json :: worker.map(jet_job_json_string).unwrap_or_else(fn() -> "null")
+    request_json :: request_id.map(jet_job_json_string).unwrap_or_else(fn() -> "null")
+    failure_json :: failure.map(jet_job_json_string).unwrap_or_else(fn() -> "null")
+    fields :: "{{\"event\":{jet_job_json_string(kind)},\"state\":{jet_job_json_string(state)},\"job_id\":{jet_job_json_string(job_id)},\"name\":{jet_job_json_string(name)},\"queue\":{jet_job_json_string(queue)},\"attempts\":{attempts},\"duration_ms\":{duration},\"worker\":{worker_json},\"request_id\":{request_json},\"failure\":{failure_json}}}"
+    if JetDevtoolsEvent.from_parts(timestamp_ms, "job-runtime", "Job", job_id, fields) is Ok(event) {
+        sink.publish(~event)
+        jet_devtools_publish_event(^event)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Job.rs:640
+enum JetJobRunOutcome { Complete, Fresh(String), Skipped(String), TimedOut, Panic(Box<any.Any + Send>) }
+// Rust: crates/jet-codegen/src/Prelude/Job.rs:648
+// GATE #4565: kernel primitive
+JET_JOB_NEXT_ID :: #Unsafe("shared atomic job identity counter") { AtomicU64.new(U64{1}) }
+// Rust: crates/jet-codegen/src/Prelude/Job.rs:651
+fn jet_job_run_spec<F: Clone + Send + Sync, G: Send>(job: JetJobSpec, program: String, argv: [String], sink: JetJobEventSinkHandle, scope_enter: F) -> JetJobRunOutcome
+where F: fn() -> G? Err! {
+    // GATE #4565: kernel primitive
+    id :: #Unsafe("allocate process-local unique job id atomically") { JET_JOB_NEXT_ID.fetch_add(U64{1}, Ordering.Relaxed) }
+    job_id :: "{job.entry.name}#{id}"
+    queue :: jet_job_limit(job, "queue").unwrap_or(job.entry.name)
+    if jet_job_is_skipped(job) {
+        reason :: match job.skip {
+            .Val(.Always(reason)) -> reason,
+            .Val(.UnlessPlatform(platform)) -> "host platform does not match {platform}",
+            .None -> "declared skip rule",
+        }
+        jet_job_emit(sink, jet_job_now_ms(), "skip", "skipped", job_id, job.entry.name, queue, U32{0}, None, None, None, Val(reason))
+        return .Skipped(reason)
+    }
+    // Enter declared cwd before cache freshness and invocation.
+    _directory :: JetJobDirectoryGuard.enter(job.working_directory)
+    freshness :: jet_job_freshness(job)
+    if freshness.fresh && !jet_job_cache_claim(job) {
+        jet_job_emit(sink, jet_job_now_ms(), "fresh", "fresh", job_id, job.entry.name, queue, U32{0}, None, None, None, Val(freshness.reason))
+        return .Fresh(freshness.reason)
+    }
+    jet_job_emit(sink, jet_job_now_ms(), "enqueue", "enqueued", job_id, job.entry.name, queue, U32{0}, None, None, None, None)
+    context :: JetJobContext{name: job.entry.name, dispatch: job.dispatch, packages: job.packages, working_directory: job.working_directory, input_paths: job.input_paths, output_paths: job.output_paths, skip: job.skip, cache: job.cache, limits: job.limits, after: job.after, parallel: job.parallel}
+    // GATE #4565: kernel primitive
+    previous :: #Unsafe("replace current thread context for nested invocation") { JET_JOB_CONTEXT.with(slot -> slot.replace(Val(context))) }
+    // GATE #4565: kernel primitive
+    run_started :: #Unsafe("start monotonic execution timer") { Instant.now() }
+    outcome :: (fn() -> JetJobRunOutcome {
+        retries :: jet_job_retries(job)
+        attempts := U32{0}
+        loop {
+            attempts = attempts.saturating_add(U32{1})
+            jet_job_emit(sink, jet_job_now_ms(), "start", "started", job_id, job.entry.name, queue, attempts, None, Val(program), None, None)
+            // GATE #4565: kernel primitive
+            result :: #Unsafe("catch native unwind without losing service scope destructor") {
+                panic.catch_unwind(panic.AssertUnwindSafe(fn() -> {
+                    _scope :: scope_enter().unwrap_or_else(error -> panic.panic("job service scope rejected: {error}"))
+                    (job.entry.invoke)(program, argv)
+                }))
+            }
+            // GATE #4565: kernel primitive
+            duration_ms :: #Unsafe("measure actual elapsed monotonic duration") { run_started.elapsed().as_millis().try_into().unwrap_or(U64.MAX) }
+            // GATE #4565: kernel primitive
+            timed_out :: #Unsafe("timeout is checked against the same run-start instant") { jet_job_timeout(job).is_some_and(timeout -> run_started.elapsed() > timeout) }
+            if timed_out {
+                jet_job_emit(sink, jet_job_now_ms(), "fail", "failed", job_id, job.entry.name, queue, attempts, Val(duration_ms), Val(program), None, Val("timed_out"))
+                // GATE #4565: kernel primitive
+                #Unsafe("write actual job timeout to stderr") { env.eprintln("job `{job.entry.name}` exceeded its configured timeout") }
+                return match result { .Ok(_) -> .TimedOut, .Err(payload) -> .Panic(^payload) }
+            }
+            match result {
+                .Ok(_) -> {
+                    jet_job_emit(sink, jet_job_now_ms(), "complete", "completed", job_id, job.entry.name, queue, attempts, Val(duration_ms), Val(program), None, None)
+                    return .Complete
+                },
+                .Err(_payload) if attempts <= retries -> jet_job_emit(sink, jet_job_now_ms(), "retry", "retrying", job_id, job.entry.name, queue, attempts, Val(duration_ms), Val(program), None, Val("error")),
+                .Err(payload) -> {
+                    jet_job_emit(sink, jet_job_now_ms(), "fail", "failed", job_id, job.entry.name, queue, attempts, Val(duration_ms), Val(program), None, Val("error"))
+                    return .Panic(^payload)
+                },
+            }
+        }
+    })()
+    // GATE #4565: kernel primitive
+    #Unsafe("restore previous thread context after every handled run outcome") { JET_JOB_CONTEXT.with(slot -> { _ :: slot.replace(previous) }) }
+    ^outcome
+}
+// Rust: crates/jet-codegen/src/Prelude/Job.rs:853
+fn jet_job_dependency_indices(jobs: [JetJobSpec], index: Int) -> [Int] {
+    jobs[index].after.iter().filter_map(dependency -> jobs.iter().position(job -> job.entry.name == dependency)).collect()
+}
+// Rust: crates/jet-codegen/src/Prelude/Job.rs:864
+fn jet_job_validate_graph(jobs: [JetJobSpec]) -> () Err! {
+    names := [String:[Int]]{}
+    loop (index, job) in jobs.iter().enumerate() {
+        if job.parallel == 0 -> return Err("job `{job.entry.name}` declares a zero parallel bound")
+        &names.entry(job.entry.name).or_default().push(index)
+    }
+    loop job in jobs {
+        loop dependency in job.after {
+            if dependency == job.entry.name -> return Err("job `{job.entry.name}` depends on itself")
+            candidates :: names.get(dependency) ?? return Err("job `{job.entry.name}` depends on unknown job `{dependency}`")
+            if candidates.len() != 1 -> return Err("job `{job.entry.name}` has an ambiguous prerequisite `{dependency}`")
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Job.rs:896
+    fn visit(index: Int, jobs: [JetJobSpec], names: [String:[Int]], state: &[U8], stack: &[Int]) -> () Err! {
+        if state[index] == U8{2} -> return Ok(())
+        if state[index] == U8{1} {
+            start :: stack.iter().position(candidate -> candidate == index).unwrap_or(0)
+            cycle :: stack[start..].iter().map(candidate -> jobs[candidate].entry.name).chain([jobs[index].entry.name]).collect().join(" -> ")
+            return Err("job graph contains a cycle: {cycle}")
+        }
+        state[index] = U8{1}
+        &stack.push(index)
+        loop dependency in jobs[index].after {
+            if names.get(dependency).and_then(indices -> indices.first()) is Val(candidate) -> visit(candidate, jobs, names, &state, &stack)?
+        }
+        _ :: stack.pop()
+        state[index] = U8{2}
+        Ok(())
+    }
+    state := [U8].filled(jobs.len(), U8{0})
+    stack := [Int]{}
+    loop index in 0..<jobs.len() -> visit(index, jobs, names, &state, &stack)?
+    Ok(())
+}
+// Rust: crates/jet-codegen/src/Prelude/Job.rs:936
+fn jet_job_graph_failure(reason: String) -> Never {
+    // GATE #4565: kernel primitive
+    #Unsafe("print registered graph failure then terminate selected host process with exit2") {
+        env.eprintln("Error [E1331]: {reason}")
+        env.eprintln(" Why: job dependencies, authority, and arguments are checked before any job effect")
+        env.eprintln(" Fix: correct the #Job metadata, then run the command again")
+        process.exit(2)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Job.rs:945
+fn jet_job_emit_cancelled(job: JetJobSpec, sink: JetJobEventSinkHandle, reason: String) -> {
+    // GATE #4565: kernel primitive
+    id :: #Unsafe("allocate cancellation identity atomically") { JET_JOB_NEXT_ID.fetch_add(U64{1}, Ordering.Relaxed) }
+    job_id :: "{job.entry.name}#{id}"
+    queue :: jet_job_limit(job, "queue").unwrap_or(job.entry.name)
+    jet_job_emit(sink, jet_job_now_ms(), "cancel", "cancelled", job_id, job.entry.name, queue, U32{0}, None, None, None, Val(reason))
+}
+// Rust: crates/jet-codegen/src/Prelude/Job.rs:971
+fn jet_job_run_graph<F: Clone + Send + Sync, G: Send>(root: Int, jobs: [JetJobSpec], program: String, root_args: [String], sink: JetJobEventSinkHandle, scope_enter: F) ->
+where F: fn() -> G? Err! {
+    jet_job_run_graph_roots([root], jobs, program, root_args, sink, scope_enter)
+}
+// Rust: crates/jet-codegen/src/Prelude/Job.rs:996
+// Several roots share one closure so each common predecessor is admitted once.
+fn jet_job_run_graph_roots<F: Clone + Send + Sync, G: Send>(roots: [Int], jobs: [JetJobSpec], program: String, root_args: [String], sink: JetJobEventSinkHandle, scope_enter: F) ->
+where F: fn() -> G? Err! {
+    primary_root :: roots.first().copied() ?? return
+    closure := [Int:Bool]{}
+    // Rust: crates/jet-codegen/src/Prelude/Job.rs:1012
+    fn collect(index: Int, jobs: [JetJobSpec], closure: &[Int:Bool]) -> {
+        if closure.contains_key(index) -> return
+        &closure.insert(index, true)
+        loop dependency in jet_job_dependency_indices(jobs, index) -> collect(dependency, jobs, &closure)
+    }
+    loop root in roots -> collect(root, jobs, &closure)
+    pending := ^closure
+    status := [Int:Bool]{}
+    limit :: pending.keys().map(index -> jobs[index].parallel).max().unwrap_or(1).max(1)
+    while !pending.is_empty() {
+        pending_now := pending.keys().copied().collect()
+        &pending_now.sort()
+        loop index in pending_now {
+            blocked :: jet_job_dependency_indices(jobs, index).iter().any(dependency -> status.get(dependency) == Val(false))
+            if blocked {
+                &pending.remove(index)
+                &status.insert(index, false)
+                jet_job_emit_cancelled(jobs[index], sink, "a prerequisite failed or was cancelled")
+            }
+        }
+        ready := pending.keys().copied().filter(index -> jet_job_dependency_indices(jobs, index).iter().all(dependency -> status.get(dependency) == Val(true))).collect()
+        &ready.sort_by((left, right) -> jobs[left].entry.name.cmp(jobs[right].entry.name).then_with(fn() -> left.cmp(right)))
+        if ready.is_empty() {
+            cancelled := pending.keys().copied().collect()
+            &cancelled.sort()
+            loop index in cancelled {
+                &pending.remove(index)
+                &status.insert(index, false)
+                jet_job_emit_cancelled(jobs[index], sink, "job graph made no schedulable progress")
+            }
+            break
+        }
+        &ready.truncate(limit)
+        loop index in ready -> &pending.remove(index)
+        // GATE #4565: kernel primitive
+        results :: #Unsafe("scoped workers retain program, args, sink and scope until joined") {
+            thread.scope(scope -> {
+                handles := ready.iter().map(index -> {
+                    job :: jobs[index]
+                    owned_program :: ~program
+                    args :: if index == primary_root { ~root_args } else { [String]{} }
+                    owned_sink :: sink.clone()
+                    enter :: scope_enter.clone()
+                    scope.spawn(fn() -> jet_job_run_spec(job, ^owned_program, ^args, ^owned_sink, ^enter))
+                }).collect()
+                handles.into_iter().map(handle -> handle.join().unwrap_or_else(_ -> JetJobRunOutcome.Panic(Box.new("job worker panicked")))).collect()
+            })
+        }
+        loop (index, outcome) in ready.into_iter().zip(results) {
+            succeeded :: match outcome { .Complete | .Fresh(_) | .Skipped(_) -> true, _ -> false }
+            &status.insert(index, succeeded)
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Job.rs:1120
+pub fn jet_job_dispatch_specs<F: Clone + Send + Sync, G: Send>(argv: [String], jobs: [JetJobSpec], scope_enter: F) -> Bool
+where F: fn() -> G? Err! { jet_job_dispatch_specs_with_sink(argv, jobs, jet_job_event_sink(), scope_enter) }
+// Rust: crates/jet-codegen/src/Prelude/Job.rs:1133
+pub fn jet_job_dispatch_specs_with_sink<F: Clone + Send + Sync, G: Send>(argv: [String], jobs: [JetJobSpec], sink: JetJobEventSinkHandle, scope_enter: F) -> Bool
+where F: fn() -> G? Err! {
+    specs :: jobs.iter().map(job -> (job.entry.name, job.entry.scope)).collect()
+    if specs.is_empty() -> return false
+    if argv.get(1) == Val(JET_JOB_PRIVATE_DISPATCH_FLAG) {
+        name :: argv.get(2) ?? jet_job_graph_failure("private job dispatch is missing a job name")
+        index :: jobs.iter().position(job -> job.entry.name == name) ?? jet_job_graph_failure("private job dispatch names unknown job `{name}`")
+        if jet_job_validate_graph(jobs) is Err(reason) -> jet_job_graph_failure(reason)
+        args :: argv[3..].to_vec()
+        if jobs[index].validate is Val(validate) {
+            if validate(args) is Err(reason) -> jet_job_graph_failure("job `{jobs[index].entry.name}` received invalid arguments: {reason}")
+        }
+        jet_job_run_graph(index, jobs, argv.first().cloned().unwrap_or_else(fn() -> "program"), args, sink, scope_enter.clone())
+        return true
+    }
+    if !jet_job_has_visible(specs) {
+        name :: argv.get(1) ?? return false
+        if name.starts_with('-') || !specs.iter().any((job_name, _) -> job_name == name) -> return false
+        jet_job_unknown(argv, specs, name)
+    }
+    match jet_job_select(argv, specs) {
+        .Ordinary -> false,
+        .Help -> { jet_job_help(argv, specs); true },
+        .Job(index) -> {
+            if jet_job_validate_graph(jobs) is Err(reason) -> jet_job_graph_failure(reason)
+            // Wrapper and validator both take job args only, excluding program/job.
+            args :: argv[2..].to_vec()
+            if jobs[index].validate is Val(validate) {
+                if validate(args) is Err(reason) -> jet_job_graph_failure("job `{jobs[index].entry.name}` received invalid arguments: {reason}")
+            }
+            jet_job_run_graph(index, jobs, argv.first().cloned().unwrap_or_else(fn() -> "program"), args, sink, scope_enter.clone())
+            true
+        },
+        .Unknown -> jet_job_unknown(argv, specs, argv.get(1).unwrap_or("")),
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Job.rs:1227
+// GATE #4565: kernel primitive
+JET_JOB_SERVICE_CLOCKS :: #Unsafe("retain one due clock per generated program behind process mutex") { LazyLock.new(fn() -> Mutex.new([String:JetJobClock]{})) }
+// Rust: crates/jet-codegen/src/Prelude/Job.rs:1233
+pub fn jet_job_service_tick_specs_retained<F: Clone + Send + Sync, G: Send>(jobs: [JetJobSpec], program: String, scope_enter: F) ->
+where F: fn() -> G? Err! {
+    // GATE #4565: kernel primitive
+    #Unsafe("retain clocks mutex through tick exactly as shared Rust authority") {
+        clocks := JET_JOB_SERVICE_CLOCKS.lock().expect("job service clocks poisoned")
+        clock := clocks.entry(program).or_insert_with(JetJobClock.new)
+        jet_job_service_tick_specs_with_sink(&clock, jobs, program, jet_job_event_sink(), scope_enter)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Job.rs:1251
+pub fn jet_job_service_tick_specs_with_sink<F: Clone + Send + Sync, G: Send>(clock: &JetJobClock, jobs: [JetJobSpec], program: String, sink: JetJobEventSinkHandle, scope_enter: F) ->
+where F: fn() -> G? Err! {
+    if jet_job_validate_graph(jobs) is Err(reason) {
+        // GATE #4565: kernel primitive
+        #Unsafe("report invalid scheduled graph on stderr without executing it") { env.eprintln("Error [E1331]: {reason}") }
+        return
+    }
+    schedules :: jobs.iter().filter(job -> jet_job_schedule_enabled(job.entry.scope)).filter_map(job -> job.entry.schedule.map(schedule -> (job.entry.name, schedule))).collect()
+    due_roots := [Int]{}
+    loop name in jet_job_schedule_due(&clock, schedules) {
+        if jobs.iter().position(job -> job.entry.name == name) is Val(index) {
+            args :: [String]{}
+            if jobs[index].validate is Val(validate) {
+                if validate(args) is Err(reason) {
+                    // GATE #4565: kernel primitive
+                    #Unsafe("report scheduled argument failure without invoking invalid job") { env.eprintln("Error [E1331]: job `{jobs[index].entry.name}` received invalid scheduled arguments: {reason}") }
+                    continue
+                }
+            }
+            &due_roots.push(index)
+        }
+    }
+    jet_job_run_graph_roots(due_roots, jobs, program, [String]{}, sink, scope_enter)
+}
+// Rust: crates/jet-codegen/src/Prelude/Job.rs:1303
+pub fn jet_job_schedule_due(clock: &JetJobClock, jobs: [(String, JetJobSchedule)]) -> [String] { clock.due(jobs) }
+// Rust: crates/jet-codegen/src/Prelude/Job.rs:1310
+fn jet_job_schedule_enabled(scope: JetJobScope) -> Bool {
+    match scope { .Dev -> !target.jet_release(), .Ship | .Internal -> true }
+}
+// Rust: crates/jet-codegen/src/Prelude/Job.rs:1317
+fn jet_args_program_name(prog: String) -> String {
+    if prog.is_empty() -> return "program"
+    OSPath.new(prog).file_name().and_then(name -> name.to_str()).unwrap_or(prog).to_string()
+}
+// Rust: crates/jet-codegen/src/Prelude/Job.rs:1329
+pub fn jet_args_source_program_name(prog: String) -> String {
+    (program, suffix) :: prog.split_once(' ').unwrap_or((prog, ""))
+    name :: jet_args_program_name(program)
+    source := name.strip_suffix(".jet").unwrap_or(name) // #4303
+    if suffix.is_empty() { source.to_string() } else { "{source} {suffix}" }
+}
+// Rust: crates/jet-codegen/src/Prelude/Job.rs:1347
+pub fn jet_cli_banner(text: String) -> String { "{text}\n" }
+// Rust: crates/jet-codegen/src/Prelude/Job.rs:1351
+#Clone
+#Comparable
+pub enum JetJobSelection { Ordinary, Help, Job(Int), Unknown }
+// Rust: crates/jet-codegen/src/Prelude/Job.rs:1359
+fn jet_job_scope_visible(scope: JetJobScope) -> Bool {
+    match scope { .Dev -> !target.jet_release(), .Ship -> true, .Internal -> false }
+}
+// Rust: crates/jet-codegen/src/Prelude/Job.rs:1368
+fn jet_job_scope_name(scope: JetJobScope) -> String { match scope { .Dev -> "dev", .Ship -> "ship", .Internal -> "internal" } }
+// Rust: crates/jet-codegen/src/Prelude/Job.rs:1376
+pub fn jet_job_has_visible(jobs: [(String, JetJobScope)]) -> Bool { jobs.iter().any((_, scope) -> jet_job_scope_visible(scope)) }
+// Rust: crates/jet-codegen/src/Prelude/Job.rs:1380
+pub fn jet_job_help_text(argv: [String], jobs: [(String, JetJobScope)]) -> String {
+    program :: jet_args_source_program_name(argv.first().unwrap_or(""))
+    text := "Usage: {program} <job> [options]\n\nJobs:"
+    loop (name, scope) in jobs {
+        if jet_job_scope_visible(scope) -> &text.push_str("\n  {name:<20} {jet_job_scope_name(scope)}")
+    }
+    &text.push('\n')
+    ^text
+}
+// Rust: crates/jet-codegen/src/Prelude/Job.rs:1392
+pub fn jet_job_help(argv: [String], jobs: [(String, JetJobScope)]) -> {
+    // GATE #4565: kernel primitive
+    #Unsafe("write exact help text to stdout without another newline") { env.print(jet_job_help_text(argv, jobs)) }
+}
+// Rust: crates/jet-codegen/src/Prelude/Job.rs:1401
+pub const JET_JOB_UNKNOWN_WHY: String = "The first program subcommand must name a function marked `#Job`."
+// Rust: crates/jet-codegen/src/Prelude/Job.rs:1404
+pub const JET_JOB_UNKNOWN_FIX: String = "Mark a function `#Job`, or check the subcommand spelling."
+// Rust: crates/jet-codegen/src/Prelude/Job.rs:1408
+pub fn jet_job_unknown_what(name: String) -> String { "No job named `{name}`" }
+// Rust: crates/jet-codegen/src/Prelude/Job.rs:1417
+pub fn jet_job_declared_detail(names: [String]) -> String { "declared jobs: {names.join(", ")}" }
+// Rust: crates/jet-codegen/src/Prelude/Job.rs:1421
+fn jet_job_unknown(argv: [String], jobs: [(String, JetJobScope)], name: String) -> Never {
+    program :: jet_args_source_program_name(argv.first().unwrap_or(""))
+    dispatchable :: jobs.iter().filter((_, scope) -> jet_job_scope_visible(scope)).map((name, _) -> name).collect()
+    // GATE #4565: kernel primitive
+    #Unsafe("print registered E1294 diagnostic and exit actual process with exit2") {
+        env.eprintln("Error [E1294]: {jet_job_unknown_what(name)}")
+        env.eprintln(" Why: {JET_JOB_UNKNOWN_WHY}")
+        env.eprintln(" Fix: {JET_JOB_UNKNOWN_FIX}")
+        env.eprintln("More: jet-lang.dev/e/E1294")
+        env.eprintln(jet_job_declared_detail(dispatchable))
+        env.eprintln("\nUsage: {program} <job> [options]")
+        process.exit(2)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Job.rs:1439
+pub fn jet_job_select(argv: [String], jobs: [(String, JetJobScope)]) -> JetJobSelection {
+    name :: argv.get(1) ?? return .Ordinary
+    if name == "--help" -> return .Help
+    if name.starts_with('-') -> return .Ordinary
+    loop (index, (job_name, scope)) in jobs.iter().enumerate() {
+        if job_name == name && jet_job_scope_visible(scope) -> return .Job(index)
+    }
+    .Unknown
+}

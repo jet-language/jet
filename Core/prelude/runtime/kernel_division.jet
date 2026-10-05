@@ -1,141 +1,164 @@
-// PORT-PENDING 0142 crates-jet-codegen-src-prelude-core-collectionfailure-module-group: crates/jet-codegen/src/Prelude/Core/Division.rs:1-137
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS // D-FLOORDIV1=A: the one floor-division surface for `/%` and `/%=`.
-//RS //
-//RS // Every tier that runs generated Rust — the native build and the wasm module —
-//RS // includes this same file, so `/%` means the same thing everywhere. The
-//RS // Prelude's shared arithmetic stop carries the report code and wording.
-//RS //
-//RS // `/%` rounds the answer down, toward negative infinity: `7 /% 2` is 3 and
-//RS // `-7 /% 2` is -4. Rust's `/` rounds toward zero instead, so a signed answer
-//RS // that came out one too high is corrected here. Dividing by zero traps, the
-//RS // same as `/` does. On floats `/%` is the ordinary division with the answer
-//RS // rounded down.
-//RS const JET_FLOORDIV_ZERO: &str = JET_ARITHMETIC_DIVIDE_ZERO;
-//RS const JET_FLOORDIV_OVERFLOW: &str = JET_ARITHMETIC_DIVIDE_OVERFLOW;
-//RS 
-//RS // Fixed-width `/` uses one policy for signed and unsigned values. The caller
-//RS // supplies the result range because the evaluator carries every IntN value in
-//RS // an i64, while AOT calls this with the concrete Rust width.
-//RS const JET_DIVIDE_ZERO: &str = JET_ARITHMETIC_DIVIDE_ZERO;
-//RS const JET_DIVIDE_OVERFLOW: &str = JET_ARITHMETIC_DIVIDE_OVERFLOW;
-//RS 
-//RS pub fn jet_division(
-//RS     left: i128,
-//RS     right: i128,
-//RS     minimum: i128,
-//RS     maximum: i128,
-//RS ) -> Result<i128, &'static str> {
-//RS     if right == 0 {
-//RS         return Err(JET_DIVIDE_ZERO);
-//RS     }
-//RS     let quotient = left.checked_div(right).ok_or(JET_DIVIDE_OVERFLOW)?;
-//RS     if (minimum..=maximum).contains(&quotient) {
-//RS         Ok(quotient)
-//RS     } else {
-//RS         Err(JET_DIVIDE_OVERFLOW)
-//RS     }
-//RS }
-//RS 
-//RS trait JetFloorDiv: Copy {
-//RS     fn jet_floordiv(self, rhs: Self, file: &str, line: u32) -> Self;
-//RS }
-//RS // Signed: the answer rounds toward zero, so subtract one whenever a non-zero
-//RS // remainder means the true answer sat below it.
-//RS macro_rules! jet_floordiv_signed {
-//RS     ($($t:ty),*) => { $(
-//RS         impl JetFloorDiv for $t {
-//RS             fn jet_floordiv(self, rhs: Self, file: &str, line: u32) -> Self {
-//RS                 if rhs == 0 {
-//RS                     jet_arithmetic_stop(file, line, JET_FLOORDIV_ZERO);
-//RS                 }
-//RS                 let quotient = match self.checked_div(rhs) {
-//RS                     Some(quotient) => quotient,
-//RS                     None => jet_arithmetic_stop(file, line, JET_FLOORDIV_OVERFLOW),
-//RS                 };
-//RS                 let remainder = self.wrapping_rem(rhs);
-//RS                 if remainder != 0 && (remainder < 0) != (rhs < 0) {
-//RS                     quotient - 1
-//RS                 } else {
-//RS                     quotient
-//RS                 }
-//RS             }
-//RS         }
-//RS     )* };
-//RS }
-//RS // Unsigned: nothing is ever below zero, so rounding down is plain division.
-//RS macro_rules! jet_floordiv_unsigned {
-//RS     ($($t:ty),*) => { $(
-//RS         impl JetFloorDiv for $t {
-//RS             fn jet_floordiv(self, rhs: Self, file: &str, line: u32) -> Self {
-//RS                 if rhs == 0 {
-//RS                     jet_arithmetic_stop(file, line, JET_FLOORDIV_ZERO);
-//RS                 }
-//RS                 self / rhs
-//RS             }
-//RS         }
-//RS     )* };
-//RS }
-//RS jet_floordiv_signed!(i8, i16, i32, i64);
-//RS jet_floordiv_unsigned!(u8, u16, u32, u64);
-//RS 
-//RS // D-MODSEM1=A: `%` is the floored modulo, the partner of `/%`. Its answer
-//RS // takes the divisor's sign, so `-7 % 2` is 1, and for every pair of whole
-//RS // numbers `a == b * (a /% b) + a % b`. Rust's `%` is the truncated remainder,
-//RS // which Jet spells `%%`, so the floored one is built here.
-//RS trait JetModulo: Copy {
-//RS     fn jet_mod(self, rhs: Self, file: &str, line: u32) -> Self;
-//RS }
-//RS // Signed: the remainder comes back with the dividend's sign, so add the
-//RS // divisor whenever the two signs disagree.
-//RS macro_rules! jet_mod_signed {
-//RS     ($($t:ty),*) => { $(
-//RS         impl JetModulo for $t {
-//RS             fn jet_mod(self, rhs: Self, file: &str, line: u32) -> Self {
-//RS                 if rhs == 0 {
-//RS                     jet_arithmetic_stop(file, line, JET_FLOORDIV_ZERO);
-//RS                 }
-//RS                 // `MIN % -1` is 0 and fits, so it must answer rather than trap —
-//RS                 // `%%` answers 0 there too, and D-MODSEM1 says the two agree
-//RS                 // whenever they can.
-//RS                 let remainder = self.wrapping_rem(rhs);
-//RS                 if remainder != 0 && (remainder < 0) != (rhs < 0) {
-//RS                     remainder.wrapping_add(rhs)
-//RS                 } else {
-//RS                     remainder
-//RS                 }
-//RS             }
-//RS         }
-//RS     )* };
-//RS }
-//RS // Unsigned: nothing is ever below zero, so the two remainders agree.
-//RS macro_rules! jet_mod_unsigned {
-//RS     ($($t:ty),*) => { $(
-//RS         impl JetModulo for $t {
-//RS             fn jet_mod(self, rhs: Self, file: &str, line: u32) -> Self {
-//RS                 if rhs == 0 {
-//RS                     jet_arithmetic_stop(file, line, JET_FLOORDIV_ZERO);
-//RS                 }
-//RS                 self % rhs
-//RS             }
-//RS         }
-//RS     )* };
-//RS }
-//RS jet_mod_signed!(i8, i16, i32, i64);
-//RS jet_mod_unsigned!(u8, u16, u32, u64);
-//RS 
-//RS trait JetFloorDivFloat: Copy {
-//RS     fn jet_floordiv(self, rhs: Self) -> Self;
-//RS }
-//RS impl JetFloorDivFloat for f64 {
-//RS     fn jet_floordiv(self, rhs: f64) -> f64 {
-//RS         (self / rhs).floor()
-//RS     }
-//RS }
-//RS impl JetFloorDivFloat for f32 {
-//RS     fn jet_floordiv(self, rhs: f32) -> f32 {
-//RS         (self / rhs).floor()
-//RS     }
-//RS }
-// END-PORT-PENDING 0142 crates/jet-codegen/src/Prelude/Core/Division.rs:1-137
+// D-FLOORDIV1=A: /% rounds down, % takes the divisor's sign; %% truncates.
+// Rust: crates/jet-codegen/src/Prelude/Core/Division.rs:12
+const JET_FLOORDIV_ZERO: String = JET_ARITHMETIC_DIVIDE_ZERO
+// Rust: crates/jet-codegen/src/Prelude/Core/Division.rs:13
+const JET_FLOORDIV_OVERFLOW: String = JET_ARITHMETIC_DIVIDE_OVERFLOW
+// Rust: crates/jet-codegen/src/Prelude/Core/Division.rs:18
+const JET_DIVIDE_ZERO: String = JET_ARITHMETIC_DIVIDE_ZERO
+// Rust: crates/jet-codegen/src/Prelude/Core/Division.rs:19
+const JET_DIVIDE_OVERFLOW: String = JET_ARITHMETIC_DIVIDE_OVERFLOW
+// Rust: crates/jet-codegen/src/Prelude/Core/Division.rs:21
+pub fn jet_division(left: I128, right: I128, minimum: I128, maximum: I128) -> I128 Err! {
+    if right == 0 -> return Err(JET_DIVIDE_ZERO)
+    quotient :: left.checked_div(right) ?? return Err(JET_DIVIDE_OVERFLOW)
+    if quotient >= minimum && quotient <= maximum -> Ok(quotient) else -> Err(JET_DIVIDE_OVERFLOW)
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Division.rs:38
+trait JetFloorDiv {
+    // Rust: crates/jet-codegen/src/Prelude/Core/Division.rs:39
+    fn jet_floordiv(self: Self, rhs: Self, file: String, line: U32) -> Self
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Division.rs:46 (signed expansion i8)
+impl JetFloorDiv for I8 {
+    fn jet_floordiv(self: I8, rhs: I8, file: String, line: U32) -> I8 {
+        if rhs == 0 -> jet_arithmetic_stop(file, line, JET_FLOORDIV_ZERO)
+        quotient :: self.checked_div(rhs) ?? return jet_arithmetic_stop(file, line, JET_FLOORDIV_OVERFLOW)
+        remainder :: self.wrapping_rem(rhs)
+        if remainder != 0 && (remainder < 0) != (rhs < 0) -> quotient - 1 else -> quotient
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Division.rs:46 (signed expansion i16)
+impl JetFloorDiv for I16 {
+    fn jet_floordiv(self: I16, rhs: I16, file: String, line: U32) -> I16 {
+        if rhs == 0 -> jet_arithmetic_stop(file, line, JET_FLOORDIV_ZERO)
+        quotient :: self.checked_div(rhs) ?? return jet_arithmetic_stop(file, line, JET_FLOORDIV_OVERFLOW)
+        remainder :: self.wrapping_rem(rhs)
+        if remainder != 0 && (remainder < 0) != (rhs < 0) -> quotient - 1 else -> quotient
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Division.rs:46 (signed expansion i32)
+impl JetFloorDiv for I32 {
+    fn jet_floordiv(self: I32, rhs: I32, file: String, line: U32) -> I32 {
+        if rhs == 0 -> jet_arithmetic_stop(file, line, JET_FLOORDIV_ZERO)
+        quotient :: self.checked_div(rhs) ?? return jet_arithmetic_stop(file, line, JET_FLOORDIV_OVERFLOW)
+        remainder :: self.wrapping_rem(rhs)
+        if remainder != 0 && (remainder < 0) != (rhs < 0) -> quotient - 1 else -> quotient
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Division.rs:46 (signed expansion i64)
+impl JetFloorDiv for I64 {
+    fn jet_floordiv(self: I64, rhs: I64, file: String, line: U32) -> I64 {
+        if rhs == 0 -> jet_arithmetic_stop(file, line, JET_FLOORDIV_ZERO)
+        quotient :: self.checked_div(rhs) ?? return jet_arithmetic_stop(file, line, JET_FLOORDIV_OVERFLOW)
+        remainder :: self.wrapping_rem(rhs)
+        if remainder != 0 && (remainder < 0) != (rhs < 0) -> quotient - 1 else -> quotient
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Division.rs:68 (unsigned expansion u8)
+impl JetFloorDiv for U8 {
+    fn jet_floordiv(self: U8, rhs: U8, file: String, line: U32) -> U8 {
+        if rhs == 0 -> jet_arithmetic_stop(file, line, JET_FLOORDIV_ZERO)
+        self / rhs
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Division.rs:68 (unsigned expansion u16)
+impl JetFloorDiv for U16 {
+    fn jet_floordiv(self: U16, rhs: U16, file: String, line: U32) -> U16 {
+        if rhs == 0 -> jet_arithmetic_stop(file, line, JET_FLOORDIV_ZERO)
+        self / rhs
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Division.rs:68 (unsigned expansion u32)
+impl JetFloorDiv for U32 {
+    fn jet_floordiv(self: U32, rhs: U32, file: String, line: U32) -> U32 {
+        if rhs == 0 -> jet_arithmetic_stop(file, line, JET_FLOORDIV_ZERO)
+        self / rhs
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Division.rs:68 (unsigned expansion u64)
+impl JetFloorDiv for U64 {
+    fn jet_floordiv(self: U64, rhs: U64, file: String, line: U32) -> U64 {
+        if rhs == 0 -> jet_arithmetic_stop(file, line, JET_FLOORDIV_ZERO)
+        self / rhs
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Division.rs:84
+trait JetModulo {
+    // Rust: crates/jet-codegen/src/Prelude/Core/Division.rs:85
+    fn jet_mod(self: Self, rhs: Self, file: String, line: U32) -> Self
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Division.rs:92 (signed expansion i8)
+impl JetModulo for I8 {
+    fn jet_mod(self: I8, rhs: I8, file: String, line: U32) -> I8 {
+        if rhs == 0 -> jet_arithmetic_stop(file, line, JET_FLOORDIV_ZERO)
+        // MIN %% -1 is zero, never a division-overflow trap.
+        remainder :: self.wrapping_rem(rhs)
+        if remainder != 0 && (remainder < 0) != (rhs < 0) -> remainder.wrapping_add(rhs) else -> remainder
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Division.rs:92 (signed expansion i16)
+impl JetModulo for I16 {
+    fn jet_mod(self: I16, rhs: I16, file: String, line: U32) -> I16 {
+        if rhs == 0 -> jet_arithmetic_stop(file, line, JET_FLOORDIV_ZERO)
+        remainder :: self.wrapping_rem(rhs)
+        if remainder != 0 && (remainder < 0) != (rhs < 0) -> remainder.wrapping_add(rhs) else -> remainder
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Division.rs:92 (signed expansion i32)
+impl JetModulo for I32 {
+    fn jet_mod(self: I32, rhs: I32, file: String, line: U32) -> I32 {
+        if rhs == 0 -> jet_arithmetic_stop(file, line, JET_FLOORDIV_ZERO)
+        remainder :: self.wrapping_rem(rhs)
+        if remainder != 0 && (remainder < 0) != (rhs < 0) -> remainder.wrapping_add(rhs) else -> remainder
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Division.rs:92 (signed expansion i64)
+impl JetModulo for I64 {
+    fn jet_mod(self: I64, rhs: I64, file: String, line: U32) -> I64 {
+        if rhs == 0 -> jet_arithmetic_stop(file, line, JET_FLOORDIV_ZERO)
+        remainder :: self.wrapping_rem(rhs)
+        if remainder != 0 && (remainder < 0) != (rhs < 0) -> remainder.wrapping_add(rhs) else -> remainder
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Division.rs:113 (unsigned expansion u8)
+impl JetModulo for U8 {
+    fn jet_mod(self: U8, rhs: U8, file: String, line: U32) -> U8 {
+        if rhs == 0 -> jet_arithmetic_stop(file, line, JET_FLOORDIV_ZERO)
+        self %% rhs
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Division.rs:113 (unsigned expansion u16)
+impl JetModulo for U16 {
+    fn jet_mod(self: U16, rhs: U16, file: String, line: U32) -> U16 {
+        if rhs == 0 -> jet_arithmetic_stop(file, line, JET_FLOORDIV_ZERO)
+        self %% rhs
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Division.rs:113 (unsigned expansion u32)
+impl JetModulo for U32 {
+    fn jet_mod(self: U32, rhs: U32, file: String, line: U32) -> U32 {
+        if rhs == 0 -> jet_arithmetic_stop(file, line, JET_FLOORDIV_ZERO)
+        self %% rhs
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Division.rs:113 (unsigned expansion u64)
+impl JetModulo for U64 {
+    fn jet_mod(self: U64, rhs: U64, file: String, line: U32) -> U64 {
+        if rhs == 0 -> jet_arithmetic_stop(file, line, JET_FLOORDIV_ZERO)
+        self %% rhs
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Division.rs:125
+trait JetFloorDivFloat {
+    // Rust: crates/jet-codegen/src/Prelude/Core/Division.rs:126
+    fn jet_floordiv(self: Self, rhs: Self) -> Self
+}
+impl JetFloorDivFloat for F64 {
+    // Rust: crates/jet-codegen/src/Prelude/Core/Division.rs:129
+    fn jet_floordiv(self: F64, rhs: F64) -> F64 { (self / rhs).floor() }
+}
+impl JetFloorDivFloat for F32 {
+    // Rust: crates/jet-codegen/src/Prelude/Core/Division.rs:134
+    fn jet_floordiv(self: F32, rhs: F32) -> F32 { (self / rhs).floor() }
+}
 

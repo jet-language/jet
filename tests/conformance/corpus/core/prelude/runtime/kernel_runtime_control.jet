@@ -1,0 +1,35 @@
+use core.prelude.runtime.kernel_runtime_control.[jet_transaction, jet_transaction_on_commit, jet_transaction_on_rollback, jet_transaction_commit, jet_scope_guard]
+use std.boxed.[Box]
+
+// Rust: crates/jet-codegen/src/Prelude/Core/RuntimeControl.rs:9
+#Test("scope guard consumes callback at lexical exit") {
+    calls := 0
+    { guard :: jet_scope_guard(fn() { calls += 1 }); assert(calls == 0) }
+    assert(calls == 1)
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/RuntimeControl.rs:78
+#Test("transaction commit executes commit hooks LIFO and drops rollback hooks") {
+    order := []
+    {
+        tx := jet_transaction()
+        jet_transaction_on_commit(&tx, Box.new(fn() { order.push(1) }))
+        jet_transaction_on_commit(&tx, Box.new(fn() { order.push(2) }))
+        jet_transaction_on_rollback(&tx, Box.new(fn() { order.push(9) }))
+        jet_transaction_commit(&tx)
+        assert(order.is_empty())
+    }
+    assert(order == [2, 1])
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/RuntimeControl.rs:78
+#Test("transaction rollback restores snapshots before rollback hooks LIFO") {
+    order := []
+    {
+        tx := jet_transaction()
+        tx.on_snapshot(Box.new(fn() { order.push(1) }))
+        tx.on_snapshot(Box.new(fn() { order.push(2) }))
+        jet_transaction_on_rollback(&tx, Box.new(fn() { order.push(3) }))
+        jet_transaction_on_rollback(&tx, Box.new(fn() { order.push(4) }))
+        jet_transaction_on_commit(&tx, Box.new(fn() { order.push(9) }))
+    }
+    assert(order == [2, 1, 4, 3])
+}

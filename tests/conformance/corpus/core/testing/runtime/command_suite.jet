@@ -1,0 +1,19 @@
+use core.testing.runtime.command_suite as suite
+
+// Rust: crates/jet-codegen/src/Prelude/CommandSuite.rs:20-50 (behavioral controls; no inline tests)
+fn suite_runner() -> (I64, I64) Never! { (I64{3}, I64{7}) }
+#Test("suite run leaves snapshot unchanged and updates harness status") {
+    suite.jet_test_suite_install(suite_runner)
+    before :: suite.jet_test_suite_new()
+    assert(before.iteration == I64{0})
+    assert(before.result == I64{0})
+    assert(suite.jet_test_suite_run(before) == I64{7})
+    assert(before.result == I64{0})
+    after :: suite.jet_test_suite_new()
+    assert(after.iteration == I64{3})
+    assert(after.result == I64{7})
+    assert(suite.jet_test_suite_status() == I64{7})
+    no_runner :: suite.JetTestSuite{iteration: I64{0}, result: I64{9}, runner: None}
+    assert(suite.jet_test_suite_run(no_runner) == I64{9})
+    assert(suite.jet_test_suite_status() == I64{7})
+}

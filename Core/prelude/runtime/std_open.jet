@@ -1,306 +1,178 @@
-// PORT-PENDING 0161 crates-jet-codegen-src-prelude-corelib-jetstd-fficallbacks-module-group: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Open.rs:1-302
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS mod jet_std {
-//RS     // The one outcome carrier: from the flat Prelude under AOT, from the host
-//RS     // module when another tier includes this file.
-//RS     #[allow(unused_imports)]
-//RS     use super::*;
-//RS     // D-IOERROR-TREE1=A: one public context shape for every byte-stream error.
-//RS     #[derive(Clone, Copy, Debug, PartialEq)]
-//RS     pub enum IOOperation {
-//RS         Read,
-//RS         Write,
-//RS         Flush,
-//RS         Connect,
-//RS         Accept,
-//RS         Close,
-//RS         Resolve,
-//RS         Codec,
-//RS     }
-//RS 
-//RS     #[derive(Clone, Debug, PartialEq)]
-//RS     pub struct IOContext {
-//RS         pub operation: IOOperation,
-//RS         pub resource: JetOutcome<String, JetAbsent>,
-//RS         pub os_code: JetOutcome<i64, JetAbsent>,
-//RS         pub cause: JetOutcome<String, JetAbsent>,
-//RS     }
-//RS 
-//RS     /// D-PROCESS-RESOURCE1=A: the limit that stopped a process session. A
-//RS     /// receipt keeps the typed wall-time fact; failed launches use the same
-//RS     /// enum in `IOError::ResourceLimit`.
-//RS     #[derive(Clone, Copy, Debug, PartialEq)]
-//RS     pub enum ProcessResourceLimit {
-//RS         WallTime,
-//RS         CpuTime,
-//RS         Memory,
-//RS         OpenFiles,
-//RS         Output,
-//RS     }
-//RS 
-//RS     impl IOContext {
-//RS         // The constructor still takes Rust plumbing so every host call site reads
-//RS         // the same; the carrier starts here, once.
-//RS         pub fn new(operation: IOOperation, resource: Option<String>, os_code: Option<i64>, cause: Option<String>) -> Self {
-//RS             Self {
-//RS                 operation,
-//RS                 resource: jet_outcome_of(resource),
-//RS                 os_code: jet_outcome_of(os_code),
-//RS                 cause: jet_outcome_of(cause),
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     #[derive(Clone, Debug, PartialEq)]
-//RS     pub enum IOError {
-//RS         InvalidInput(IOContext),
-//RS         NotFound(IOContext),
-//RS         PermissionDenied(IOContext),
-//RS         TimedOut(IOContext),
-//RS         Cancelled(IOContext),
-//RS         Closed(IOContext),
-//RS         Protocol(IOContext),
-//RS         Other(IOContext),
-//RS         ResourceLimit(ProcessResourceLimit),
-//RS     }
-//RS 
-//RS     impl IOError {
-//RS         pub fn other(operation: IOOperation, resource: Option<String>, cause: impl ToString) -> Self {
-//RS             Self::Other(IOContext::new(operation, resource, None, Some(cause.to_string())))
-//RS         }
-//RS     }
-//RS 
-//RS     // D-ENV-MUTATE1=A: failures never carry input or host-backend text.
-//RS     #[derive(Clone, Debug, PartialEq)]
-//RS     pub enum EnvError {
-//RS         InvalidName,
-//RS         InvalidValue,
-//RS         NonUnicode,
-//RS     }
-//RS 
-//RS     #[derive(Clone, Debug, PartialEq)]
-//RS     pub struct UTF8Error {
-//RS         pub message: String,
-//RS     }
-//RS 
-//RS     // D-TEXTWIDTH1=B: `TextWidth.{ ambiguous: .Wide, controls: .Reject }` —
-//RS     // the explicit-policy override for `core.text.display_width`. The
-//RS     // one-arg call uses the portable default (Narrow/Zero) directly and
-//RS     // never constructs this type.
-//RS     #[derive(Clone, Debug, PartialEq)]
-//RS     pub enum TextWidthAmbiguous {
-//RS         Narrow,
-//RS         Wide,
-//RS     }
-//RS     #[derive(Clone, Debug, PartialEq)]
-//RS     pub enum TextWidthControls {
-//RS         Zero,
-//RS         Reject,
-//RS     }
-//RS     #[derive(Clone, Debug, PartialEq)]
-//RS     pub struct TextWidth {
-//RS         pub ambiguous: TextWidthAmbiguous,
-//RS         pub controls: TextWidthControls,
-//RS     }
-//RS     #[derive(Clone, Debug, PartialEq)]
-//RS     pub struct TextError {
-//RS         pub message: String,
-//RS     }
-//RS 
-//RS     #[derive(Clone, Debug, PartialEq)]
-//RS     pub struct ProcessReceipt {
-//RS         // Exact Jet `Int` fields use the owned numeric representation so AOT
-//RS         // field lowering and the shared Prelude type agree on one ABI.
-//RS         pub code: jet_foundation::Numeric::JetInt,
-//RS         pub output: String,
-//RS         pub errors: String,
-//RS         pub success: bool,
-//RS         // D-FAIL-CARRIER1=A: sema declares `ProcessResult.signal` an
-//RS         // `Option<Int>`. The owned representation for `Int` is `JetInt`, and
-//RS         // the one Rust spelling of a Jet `?T` is
-//RS         // `JetOutcome<T, JetAbsent>`. A raw `Option<i64>` here was a SECOND
-//RS         // optional representation, so a `.Val`/`.None` pattern on the field
-//RS         // emitted the carrier's `Ok`/`Err` arms against a Rust `Option` and
-//RS         // rustc rejected generated code.
-//RS         pub signal: JetOutcome<jet_foundation::Numeric::JetInt, JetAbsent>,
-//RS         pub timed_out: bool,
-//RS         // D-AGENT-EXEC2: a receipt is the result plus the facts bound to the
-//RS         // launch transaction. These fields are deliberately ordinary data so
-//RS         // every engine can marshal the same record without reimplementing
-//RS         // policy semantics.
-//RS         pub executable_identity: String,
-//RS         pub argv: Vec<String>,
-//RS         pub input_digest: String,
-//RS         pub policy_digest: String,
-//RS         pub backend: String,
-//RS         pub authority: Vec<String>,
-//RS         pub descendants: String,
-//RS         pub limits: Vec<String>,
-//RS         pub outputs: Vec<String>,
-//RS         pub redacted: bool,
-//RS         pub pid: jet_foundation::Numeric::JetInt,
-//RS         pub limit_hit: JetOutcome<ProcessResourceLimit, JetAbsent>,
-//RS     }
-//RS 
-//RS     // The old internal spelling remains a Rust alias while the user-facing
-//RS     // execution result is the ratified ProcessReceipt type.
-//RS     pub type ProcessResult = ProcessReceipt;
-//RS 
-//RS     /// The `core.net.url.URL` carrier: exactly the field layout declared in
-//RS     /// `Core/net/url.jet`, so generated struct literals and field reads name
-//RS     /// the same Rust fields (`port` is the native Int slot, -1 when absent;
-//RS     /// `port_explicit` records an authority port written in the source text).
-//RS     #[derive(Clone, Debug, PartialEq)]
-//RS     pub struct JetURL {
-//RS         pub scheme: String,
-//RS         pub user_text: String,
-//RS         pub password_text: String,
-//RS         pub host: String,
-//RS         pub port: i64,
-//RS         pub port_explicit: bool,
-//RS         pub path: String,
-//RS         pub query: String,
-//RS         pub fragment: String,
-//RS         pub raw: String,
-//RS     }
-//RS 
-//RS     /// The Prelude URL kernel's working form (`UrlMime.rs`): optional
-//RS     /// components, decoded query pairs, and typed-literal hole boundaries.
-//RS     #[derive(Clone, Debug)]
-//RS     pub struct JetURLParts {
-//RS         pub scheme: String,
-//RS         pub username: Option<String>,
-//RS         pub password: Option<String>,
-//RS         pub host: Option<String>,
-//RS         pub port: Option<i64>,
-//RS         pub path: String,
-//RS         pub query: Vec<(String, String)>,
-//RS         pub fragment: Option<String>,
-//RS         pub typed_host: Option<Vec<(String, bool)>>,
-//RS         pub typed_path: Option<Vec<(String, bool)>>,
-//RS     }
-//RS 
-//RS     impl JetURL {
-//RS         /// Project kernel parts onto the Core layout (`JetURLParts::core_port`
-//RS         /// is the one projection every tier shares).
-//RS         pub fn from_url_parts(parts: JetURLParts) -> Self {
-//RS             let raw = parts.to_string_value();
-//RS             let (port, port_explicit) = parts.core_port();
-//RS             JetURL {
-//RS                 query: parts.query(),
-//RS                 scheme: parts.scheme,
-//RS                 user_text: parts.username.unwrap_or_default(),
-//RS                 password_text: parts.password.unwrap_or_default(),
-//RS                 host: parts.host.unwrap_or_default(),
-//RS                 port,
-//RS                 port_explicit,
-//RS                 path: parts.path,
-//RS                 fragment: parts.fragment.unwrap_or_default(),
-//RS                 raw,
-//RS             }
-//RS         }
-//RS 
-//RS         fn parts(&self) -> JetURLParts {
-//RS             JetURLParts::from_core_record(
-//RS                 &self.scheme,
-//RS                 &self.user_text,
-//RS                 &self.password_text,
-//RS                 &self.host,
-//RS                 self.port,
-//RS                 self.port_explicit,
-//RS                 &self.path,
-//RS                 &self.query,
-//RS                 &self.fragment,
-//RS             )
-//RS         }
-//RS 
-//RS         pub fn scheme(&self) -> String {
-//RS             self.scheme.clone()
-//RS         }
-//RS         pub fn username(&self) -> String {
-//RS             self.user_text.clone()
-//RS         }
-//RS         pub fn password(&self) -> String {
-//RS             self.password_text.clone()
-//RS         }
-//RS         pub fn userinfo(&self) -> String {
-//RS             self.parts().userinfo()
-//RS         }
-//RS         pub fn authority(&self) -> String {
-//RS             self.parts().authority()
-//RS         }
-//RS         pub fn host(&self) -> JetOutcome<String, JetAbsent> {
-//RS             self.parts().host()
-//RS         }
-//RS         pub fn port(&self) -> JetOutcome<i64, JetAbsent> {
-//RS             self.parts().port()
-//RS         }
-//RS         pub fn default_port(&self) -> JetOutcome<i64, JetAbsent> {
-//RS             self.parts().default_port()
-//RS         }
-//RS         pub fn path(&self) -> String {
-//RS             self.path.clone()
-//RS         }
-//RS         pub fn path_segments(&self) -> Vec<String> {
-//RS             self.parts().path_segments()
-//RS         }
-//RS         pub fn query(&self) -> String {
-//RS             self.query.clone()
-//RS         }
-//RS         pub fn query_pairs(&self) -> Vec<Vec<String>> {
-//RS             self.parts().query_pairs()
-//RS         }
-//RS         pub fn fragment(&self) -> JetOutcome<String, JetAbsent> {
-//RS             self.parts().fragment()
-//RS         }
-//RS         pub fn normalize(&self) -> Self {
-//RS             Self::from_url_parts(self.parts().normalize())
-//RS         }
-//RS         pub fn join(&self, rel: &String) -> Result<Self, String> {
-//RS             self.parts().join(rel).map(Self::from_url_parts)
-//RS         }
-//RS         pub fn set_query(&self, key: &String, value: &String) -> Self {
-//RS             Self::from_url_parts(self.parts().set_query(key, value))
-//RS         }
-//RS         pub fn add_query(&self, key: &String, value: &String) -> Self {
-//RS             Self::from_url_parts(self.parts().add_query(key, value))
-//RS         }
-//RS         pub fn to_string_value(&self) -> String {
-//RS             self.parts().to_string_value()
-//RS         }
-//RS     }
-//RS 
-//RS     impl crate::JetShow for JetURL {
-//RS         fn jet_show(&self) -> String {
-//RS             self.to_string_value()
-//RS         }
-//RS     }
-//RS 
-//RS     impl crate::JetDisplay for JetURL {
-//RS         fn jet_display(&self) -> String {
-//RS             self.to_string_value()
-//RS         }
-//RS     }
-//RS 
-//RS     impl crate::JetDebug for JetURL {
-//RS         fn jet_debug(&self) -> String {
-//RS             self.to_string_value()
-//RS         }
-//RS     }
-//RS 
-//RS     /// AOT typed `url"..."` heads build the Core carrier from the one kernel.
-//RS     pub fn jet_typed_url_literal(literals: &[&str], holes: Vec<String>) -> JetURL {
-//RS         JetURL::from_url_parts(jet_typed_url_parts_literal(literals, holes))
-//RS     }
-//RS 
-//RS     /// The `core.net.mime.MIME` carrier: exactly the field layout declared in
-//RS     /// `Core/net/mime.jet`, so generated struct literals and field reads name
-//RS     /// the same Rust fields (`parameters` holds lowercase `[name, value]` rows).
-//RS     #[derive(Clone, Debug, PartialEq)]
-//RS     pub struct JetMIME {
-//RS         pub top: String,
-//RS         pub sub: String,
-//RS         pub parameters: Vec<Vec<String>>,
-//RS     }
-// END-PORT-PENDING 0161 crates/jet-codegen/src/Prelude/CoreLib/JetStd/Open.rs:1-302
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Open.rs:1
+use core.net.url.[URL]
+use core.net.mime.[MIME]
+use core.net.runtime.std_url_mime.[jet_typed_url_parts_literal]
+use core.prelude.runtime.kernel_values.[JetShow, JetDisplay, JetDebug]
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Open.rs:8
+#Copy
+#Equatable
+pub enum IOOperation { Read, Write, Flush, Connect, Accept, Close, Resolve, Codec }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Open.rs:20
+#Equatable
+pub struct IOContext {
+    pub operation: IOOperation
+    pub resource: String?
+    pub os_code: I64?
+    pub cause: String?
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Open.rs:31
+#Copy
+#Equatable
+pub enum ProcessResourceLimit { WallTime, CpuTime, Memory, OpenFiles, Output }
+impl IOContext {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Open.rs:42
+    pub fn new(operation: IOOperation, resource: String?, os_code: I64?, cause: String?) -> Self {
+        Self{operation: operation, resource: ^resource, os_code: os_code, cause: ^cause}
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Open.rs:53
+#Equatable
+#Error
+pub enum IOError {
+    InvalidInput(IOContext), NotFound(IOContext), PermissionDenied(IOContext), TimedOut(IOContext),
+    Cancelled(IOContext), Closed(IOContext), Protocol(IOContext), Other(IOContext), ResourceLimit(ProcessResourceLimit)
+}
+impl IOError {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Open.rs:66
+    pub fn other<C: ToString>(operation: IOOperation, resource: String?, cause: C) -> Self {
+        .Other(IOContext.new(operation, ^resource, None, Val(cause.to_string())))
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Open.rs:73
+#Equatable
+#Error
+pub enum EnvError { InvalidName, InvalidValue, NonUnicode }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Open.rs:80
+#Equatable
+#Error
+pub struct UTF8Error { pub message: String }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Open.rs:89
+#Equatable
+pub enum TextWidthAmbiguous { Narrow, Wide }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Open.rs:94
+#Equatable
+pub enum TextWidthControls { Zero, Reject }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Open.rs:99
+#Equatable
+pub struct TextWidth { pub ambiguous: TextWidthAmbiguous, pub controls: TextWidthControls }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Open.rs:104
+#Equatable
+#Error
+pub struct TextError { pub message: String }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Open.rs:109
+#Equatable
+pub struct ProcessReceipt {
+    // Native Int is the one exact owned numeric representation at every tier.
+    pub code: Int
+    pub output: String
+    pub errors: String
+    pub success: Bool
+    pub signal: Int?
+    pub timed_out: Bool
+    pub executable_identity: String
+    pub argv: [String]
+    pub input_digest: String
+    pub policy_digest: String
+    pub backend: String
+    pub authority: [String]
+    pub descendants: String
+    pub limits: [String]
+    pub outputs: [String]
+    pub redacted: Bool
+    pub pid: Int
+    pub limit_hit: ProcessResourceLimit?
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Open.rs:145
+// ProcessResult's obsolete Rust alias is removed; callers use ProcessReceipt.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Open.rs:152
+// JetURL's carrier is the existing core.net.url.URL, not a second record.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Open.rs:168
+pub struct JetURLParts {
+    pub scheme: String
+    pub username: String?
+    pub password: String?
+    pub host: String?
+    pub port: I64?
+    pub path: String
+    pub query: [(String, String)]
+    pub fragment: String?
+    pub typed_host: [(String, Bool)]?
+    pub typed_path: [(String, Bool)]?
+}
+impl URL {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Open.rs:184
+    pub fn from_url_parts(parts: JetURLParts) -> Self {
+        raw :: parts.to_string_value()
+        (port, port_explicit) :: parts.core_port()
+        query :: parts.query()
+        Self{query: ^query, scheme: ^parts.scheme, user_text: parts.username.unwrap_or_default(),
+            password_text: parts.password.unwrap_or_default(), host: parts.host.unwrap_or_default(),
+            port: Int{port}, port_explicit: port_explicit, path: ^parts.path,
+            fragment: parts.fragment.unwrap_or_default(), raw: ^raw}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Open.rs:201
+    fn parts(self: &Self) -> JetURLParts {
+        JetURLParts.from_core_record(&self.scheme, &self.user_text, &self.password_text, &self.host,
+            self.port as I64, self.port_explicit, &self.path, &self.query, &self.fragment)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Open.rs:215
+    pub fn scheme(self: &Self) -> String { self.scheme.clone() }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Open.rs:218
+    // Existing core.net.url.URL.username owns this field-clone projection.
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Open.rs:221
+    // Existing core.net.url.URL.password owns this field-clone projection.
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Open.rs:224
+    // Existing core.net.url.URL.userinfo owns the same user/password composition.
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Open.rs:227
+    // Existing core.net.url.URL.authority owns host and explicit-port rendering.
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Open.rs:230
+    pub fn host(self: &Self) -> String? { self.parts().host() }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Open.rs:233
+    pub fn port(self: &Self) -> I64? { self.parts().port() }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Open.rs:236
+    // Existing core.net.url.URL.default_port owns scheme-default lookup.
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Open.rs:239
+    pub fn path(self: &Self) -> String { self.path.clone() }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Open.rs:242
+    // Existing core.net.url.URL.path_segments owns the decoded nonempty-segment projection.
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Open.rs:245
+    pub fn query(self: &Self) -> String { self.query.clone() }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Open.rs:248
+    // Existing core.net.url.URL.query_pairs owns the repeated decoded query projection.
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Open.rs:251
+    pub fn fragment(self: &Self) -> String? { self.parts().fragment() }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Open.rs:254
+    // Existing core.net.url.URL.normalize remains at the canonical public owner.
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Open.rs:257
+    // Existing core.net.url.URL.join remains at the canonical public owner.
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Open.rs:260
+    pub fn set_query(self: &Self, key: &String, value: &String) -> Self {
+        Self.from_url_parts(self.parts().set_query(key, value))
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Open.rs:263
+    pub fn add_query(self: &Self, key: &String, value: &String) -> Self {
+        Self.from_url_parts(self.parts().add_query(key, value))
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Open.rs:266
+    pub fn to_string_value(self: &Self) -> String { self.parts().to_string_value() }
+}
+impl JetShow for URL {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Open.rs:272
+    fn jet_show(self: &Self) -> String { self.to_string_value() }
+}
+impl JetDisplay for URL {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Open.rs:278
+    fn jet_display(self: &Self) -> String { self.to_string_value() }
+}
+impl JetDebug for URL {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Open.rs:284
+    fn jet_debug(self: &Self) -> String { self.to_string_value() }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Open.rs:290
+pub fn jet_typed_url_literal(literals: View<&String>, holes: [String]) -> URL {
+    URL.from_url_parts(jet_typed_url_parts_literal(literals, ^holes))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Open.rs:298
+// JetMIME maps to existing core.net.mime.MIME (top, sub, parameter rows).
 

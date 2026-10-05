@@ -1,1801 +1,1052 @@
-// PORT-PENDING 0174 crates-jet-codegen-src-prelude-devserver-slice-1: crates/jet-codegen/src/Prelude/DevServer.rs:1-1797
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS // c-devserver (owner-directed 2026-07-01): `core.web.devserver` — a `.jet` file's
-//RS // own `jet dev` behavior as ordinary Jet code, via a real configurable value
-//RS // (the same shape as `core.ui.null_backend()`, see Prelude/Ui.rs), instead of
-//RS // `--port=<N>`/`--target=web` CLI flags. Std-only (I6): `TcpListener`, manual
-//RS // HTTP/1.1 parsing, mtime-poll watch, `std::process::Command` to shell out to
-//RS // the real `jet` binary for each rebuild. This file is compiled INTO the
-//RS // standalone native binary produced for `fn dev()` — it never links against
-//RS // jet-parser/jet-sema/jet-codegen/jet-driver, so a rebuild always goes through
-//RS // `jet build --target=web <file>` as a subprocess, mirroring the design of
-//RS // Source/CmdDevWeb.rs's `run_dev_web` (mtime-poll watch, atomic staged
-//RS // rebuild, polling live-reload) without literally calling its internal
-//RS // functions.
-//RS //
-//RS // Everything lives inside a private module (matching Prelude/CoreLib.rs's own
-//RS // `mod jet_std { ... }` convention) because this fragment is concatenated
-//RS // into ONE Rust module with every other prelude fragment — top-level `use`
-//RS // here would collide with e.g. Prelude/Scheduler.rs's own
-//RS // `TcpStream`/`Ordering`/`Arc`/`Duration` imports.
-//RS mod jet_devserver_impl {
-//RS     use std::fs::File;
-//RS     use std::io::{BufRead, BufReader, Read, Write};
-//RS     use std::net::{TcpListener, TcpStream};
-//RS     use std::path::{Component, Path, PathBuf};
-//RS     use std::process::{Command, Output, Stdio};
-//RS     use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
-//RS     use std::sync::{Arc, Mutex};
-//RS     use std::thread;
-//RS     use std::time::{Duration, Instant};
-//RS 
-//RS     /// Ports tried, in order, before giving up when no explicit `.port(n)`
-//RS     /// was set — mirrors `Source/CmdDevWeb.rs`'s `PORT_RANGE`.
-//RS     const JET_DEVSERVER_PORT_RANGE: std::ops::RangeInclusive<u16> = 8080..=8089;
-//RS 
-//RS     /// Live-reload poll interval — mirrors `Source/CmdDevWeb.rs`'s
-//RS     /// `LIVE_RELOAD_POLL_MS`.
-//RS     const JET_DEVSERVER_LIVE_RELOAD_POLL_MS: u64 = 400;
-//RS     const JET_DEVSERVER_MAX_LINE_BYTES: usize = 8 * 1024;
-//RS     const JET_DEVSERVER_MAX_HEADER_BYTES: usize = 32 * 1024;
-//RS     const JET_DEVSERVER_MAX_HEADER_COUNT: usize = 100;
-//RS     const JET_DEVSERVER_MAX_CONNECTION_THREADS: usize = 64;
-//RS     const JET_DEVSERVER_MAX_REQUEST_BODY_BYTES: usize = 1024 * 1024;
-//RS     const JET_DEVSERVER_MAX_RESPONSE_BYTES: usize = 64 * 1024 * 1024;
-//RS     const JET_DEVSERVER_MAX_CHILD_OUTPUT_BYTES: usize = 8 * 1024 * 1024;
-//RS     const JET_DEVSERVER_REQUEST_DEADLINE: Duration = Duration::from_secs(10);
-//RS     static JET_DEVSERVER_STAGING_COUNTER: AtomicU64 = AtomicU64::new(0);
-//RS 
-//RS     struct JetDevServerState {
-//RS         app_file: String,
-//RS         html_override: Option<String>,
-//RS         port: Option<u16>,
-//RS     }
-//RS 
-//RS     struct JetDevServerOutputRoot {
-//RS         directory: File,
-//RS         publication_lock: Arc<Mutex<()>>,
-//RS     }
-//RS 
-//RS     struct JetDevServerStaging {
-//RS         path: PathBuf,
-//RS         name: String,
-//RS         source_stem: String,
-//RS         directory: File,
-//RS     }
-//RS 
-//RS     impl JetDevServerOutputRoot {
-//RS         fn new(directory: File) -> Self {
-//RS             Self {
-//RS                 directory,
-//RS                 publication_lock: Arc::new(Mutex::new(())),
-//RS             }
-//RS         }
-//RS 
-//RS         fn clone_directory(&self) -> std::io::Result<Self> {
-//RS             Ok(Self {
-//RS                 directory: self.directory.try_clone()?,
-//RS                 publication_lock: Arc::clone(&self.publication_lock),
-//RS             })
-//RS         }
-//RS     }
-//RS 
-//RS     /// The value `core.web.devserver.for_app(...)` returns. Cheap to clone (an
-//RS     /// `Rc` handle around shared state) so every builder method can take
-//RS     /// `&self` and still hand back a `DevServer` for chaining, exactly like
-//RS     /// `core.ui.null_backend()`'s `JetNullBackend` handle.
-//RS     #[derive(Clone)]
-//RS     pub struct JetDevServer {
-//RS         state: std::rc::Rc<std::cell::RefCell<JetDevServerState>>,
-//RS     }
-//RS 
-//RS     pub fn jet_devserver_for_app(file: &str) -> JetDevServer {
-//RS         // Relative or absolute both work: canonicalize against the process's
-//RS         // working directory (inherited from wherever `jet dev` was invoked)
-//RS         // up front, so every later use — the watch loop, `.html()` sibling
-//RS         // resolution, the rebuild subprocess — sees one absolute path and
-//RS         // is immune to any cwd changes after this point. A path that doesn't
-//RS         // resolve is kept verbatim; `serve()` reports it with the original
-//RS         // spelling the user wrote.
-//RS         let resolved = std::fs::canonicalize(file)
-//RS             .map(|p| p.display().to_string())
-//RS             .unwrap_or_else(|_| file.to_string());
-//RS         JetDevServer {
-//RS             state: std::rc::Rc::new(std::cell::RefCell::new(JetDevServerState {
-//RS                 app_file: resolved,
-//RS                 html_override: None,
-//RS                 port: None,
-//RS             })),
-//RS         }
-//RS     }
-//RS 
-//RS     /// `devserver.app()` — the file `jet dev` launched, no path spelled out.
-//RS     /// `jet dev <file>` passes the canonical absolute path of `<file>` to
-//RS     /// this program in the `JET_DEV_FILE` environment variable
-//RS     /// (Source/CmdCompile.rs `run_dev_entry`); since the watched file and
-//RS     /// the file defining `fn dev()` are almost always the same file, this is
-//RS     /// the form to reach for first — `for_app(path)` is for the rarer case
-//RS     /// of watching a *different* entry file than the one that owns `dev()`.
-//RS     pub fn jet_devserver_app() -> JetDevServer {
-//RS         match std::env::var("JET_DEV_FILE") {
-//RS             Ok(file) if !file.is_empty() => jet_devserver_for_app(&file),
-//RS             _ => {
-//RS                 eprintln!("error: `devserver.app()` only works under `jet dev`");
-//RS                 eprintln!(
-//RS                     " why: it watches \"the file jet dev launched\", which the `jet dev` command passes in as JET_DEV_FILE — running this binary directly leaves that unset"
-//RS                 );
-//RS                 eprintln!(
-//RS                     " fix: run `jet dev <file.jet>`, or name the file explicitly with `devserver.for_app(\"path/to/app.jet\")`"
-//RS                 );
-//RS                 std::process::exit(1);
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     impl JetDevServer {
-//RS         /// Set the companion HTML page — takes priority over the `.jet`
-//RS         /// file's own `#HTML(...)` marker / `<stem>.html` sibling convention
-//RS         /// (both still apply, inside the `jet build --target=web`
-//RS         /// subprocess, when `.html` was never called).
-//RS         pub fn html(&self, path: String) -> JetDevServer {
-//RS             self.state.borrow_mut().html_override = Some(path);
-//RS             self.clone()
-//RS         }
-//RS 
-//RS         /// Set the port to bind. Out-of-range values fail loud immediately
-//RS         /// (same validation as the CLI's own `--port=<N>`), rather than
-//RS         /// silently wrapping into a bogus port.
-//RS         pub fn port(&self, n: i64) -> JetDevServer {
-//RS             if !(1..=65535).contains(&n) {
-//RS                 eprintln!("error: `.port({})` isn't a valid port number", n);
-//RS                 eprintln!(" fix: use a number from 1 to 65535");
-//RS                 std::process::exit(1);
-//RS             }
-//RS             self.state.borrow_mut().port = Some(n as u16);
-//RS             self.clone()
-//RS         }
-//RS 
-//RS         /// Build once, serve `.jet/build/` with live-reload, then watch the app
-//RS         /// file and rebuild on every save. Blocks forever (Ctrl-C stops it)
-//RS         /// — the same contract as `jet dev <file> --target=web`.
-//RS         pub fn serve(&self) {
-//RS             let (app_file, html_override, port_pref) = {
-//RS                 let s = self.state.borrow();
-//RS                 (s.app_file.clone(), s.html_override.clone(), s.port)
-//RS             };
-//RS 
-//RS             if !Path::new(&app_file).exists() {
-//RS                 eprintln!("error: can't find the file `{}`", app_file);
-//RS                 eprintln!(" fix: check the path passed to `devserver.for_app(...)`");
-//RS                 std::process::exit(1);
-//RS             }
-//RS 
-//RS             let output_root =
-//RS                 match jet_devserver_rebuild(&app_file, html_override.as_deref(), false, None) {
-//RS                     Some(root) => Arc::new(root),
-//RS                     None => std::process::exit(1),
-//RS                 };
-//RS 
-//RS             let version = Arc::new(AtomicU64::new(1));
-//RS             let listener = jet_devserver_bind(port_pref);
-//RS             let bound_port = listener
-//RS                 .local_addr()
-//RS                 .map(|a| a.port())
-//RS                 .unwrap_or(*JET_DEVSERVER_PORT_RANGE.start());
-//RS 
-//RS             {
-//RS                 let version = Arc::clone(&version);
-//RS                 let output_root = Arc::clone(&output_root);
-//RS                 thread::spawn(move || jet_devserver_serve_forever(listener, version, output_root));
-//RS             }
-//RS 
-//RS             println!("App preview: http://127.0.0.1:{}/", bound_port);
-//RS             println!("watching {} … (Ctrl-C to stop)", app_file);
-//RS             let _ = std::io::stdout().flush();
-//RS 
-//RS             let mut last_mtime = jet_devserver_mtime(Path::new(&app_file));
-//RS             loop {
-//RS                 thread::sleep(Duration::from_millis(120));
-//RS                 let now = jet_devserver_mtime(Path::new(&app_file));
-//RS                 if now != last_mtime {
-//RS                     last_mtime = now;
-//RS                     thread::sleep(Duration::from_millis(30));
-//RS                     if jet_devserver_rebuild(
-//RS                         &app_file,
-//RS                         html_override.as_deref(),
-//RS                         true,
-//RS                         Some(&output_root),
-//RS                     )
-//RS                     .is_some()
-//RS                     {
-//RS                         version.fetch_add(1, Ordering::SeqCst);
-//RS                     }
-//RS                 }
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     fn jet_devserver_mtime(path: &Path) -> Option<std::time::SystemTime> {
-//RS         std::fs::metadata(path).and_then(|m| m.modified()).ok()
-//RS     }
-//RS 
-//RS     /// Bind the dev server's `TcpListener`. `Some(port)` binds that exact
-//RS     /// port and fails loud if it's taken; `None` scans
-//RS     /// `JET_DEVSERVER_PORT_RANGE`.
-//RS     fn jet_devserver_bind(port: Option<u16>) -> TcpListener {
-//RS         if let Some(port) = port {
-//RS             return match TcpListener::bind(("127.0.0.1", port)) {
-//RS                 Ok(listener) => listener,
-//RS                 Err(e) => {
-//RS                     eprintln!("error: couldn't bind to port {}: {}", port, e);
-//RS                     if e.kind() == std::io::ErrorKind::AddrInUse {
-//RS                         eprintln!(
-//RS                             " fix: stop whatever's using port {}, or pick another with `.port(n)`",
-//RS                             port
-//RS                         );
-//RS                     }
-//RS                     std::process::exit(1);
-//RS                 }
-//RS             };
-//RS         }
-//RS         for port in JET_DEVSERVER_PORT_RANGE {
-//RS             match TcpListener::bind(("127.0.0.1", port)) {
-//RS                 Ok(listener) => return listener,
-//RS                 Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => continue,
-//RS                 Err(e) => {
-//RS                     eprintln!("error: couldn't start the dev server: {}", e);
-//RS                     std::process::exit(1);
-//RS                 }
-//RS             }
-//RS         }
-//RS         eprintln!(
-//RS             "error: every port from {} to {} is already in use",
-//RS             JET_DEVSERVER_PORT_RANGE.start(),
-//RS             JET_DEVSERVER_PORT_RANGE.end()
-//RS         );
-//RS         eprintln!(" fix: free one of those ports, or pick one explicitly with `.port(n)`");
-//RS         std::process::exit(1);
-//RS     }
-//RS     /// Carry the host `jet dev` profile and CLI setting contributions into
-//RS     /// each web rebuild. The values arrive as indexed environment entries so
-//RS     /// arbitrary keys/values (including `=` and newlines) need no lossy
-//RS     /// delimiter encoding.
-//RS     fn jet_devserver_forward_build_profile_and_settings(command: &mut Command) {
-//RS         if let Ok(profile) = std::env::var("JET_DEV_PROFILE") {
-//RS             if !profile.is_empty() {
-//RS                 command.arg(format!("--profile={profile}"));
-//RS             }
-//RS         }
-//RS         if std::env::var_os("JET_DEV_SMALL").is_some() {
-//RS             command.arg("--small");
-//RS         }
-//RS         let count = std::env::var("JET_DEV_SETTING_COUNT")
-//RS             .ok()
-//RS             .and_then(|value| value.parse::<usize>().ok())
-//RS             .unwrap_or(0);
-//RS         for index in 0..count {
-//RS             let key = std::env::var(format!("JET_DEV_SETTING_{index}_KEY")).ok();
-//RS             let value = std::env::var(format!("JET_DEV_SETTING_{index}_VALUE")).ok();
-//RS             if let (Some(key), Some(value)) = (key, value) {
-//RS                 command.arg(format!("--set={key}={value}"));
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     /// Compile `app_file` for the web target by shelling out to the real
-//RS     /// `jet` binary, and on success atomically replace `.jet/build/*` with
-//RS     /// the new output.
-//RS     ///
-//RS     /// The subprocess runs with its OWN working directory pointed at a fresh
-//RS     /// staging root, passing `app_file` as an absolute path so it resolves the
-//RS     /// same regardless of that working directory. The subprocess therefore
-//RS     /// writes into `<staging>/.jet/build/*` — untouched by any previous good build.
-//RS     /// Only after the complete build succeeds do held directory authorities
-//RS     /// publish the expected files into the real `.jet/build/`.
-//RS     fn jet_devserver_rebuild(
-//RS         app_file: &str,
-//RS         html_override: Option<&str>,
-//RS         is_rebuild: bool,
-//RS         held_output_root: Option<&JetDevServerOutputRoot>,
-//RS     ) -> Option<JetDevServerOutputRoot> {
-//RS         let abs_file = match std::fs::canonicalize(app_file) {
-//RS             Ok(p) => p,
-//RS             Err(e) => {
-//RS                 eprintln!("error: couldn't resolve `{}`: {}", app_file, e);
-//RS                 return None;
-//RS             }
-//RS         };
-//RS         if let Err(e) = jet_devserver_validate_source(&abs_file) {
-//RS             eprintln!("error: source file is not safe to compile: {}", e);
-//RS             return None;
-//RS         }
-//RS         let out_dir = match jet_devserver_build_dir() {
-//RS             Ok(path) => path,
-//RS             Err(e) => {
-//RS                 eprintln!("error: web output directory is not safe: {}", e);
-//RS                 return None;
-//RS             }
-//RS         };
-//RS         let output_root = match held_output_root {
-//RS             Some(root) => match root.clone_directory() {
-//RS                 Ok(root) => root,
-//RS                 Err(e) => {
-//RS                     eprintln!("error: couldn't clone the held web output directory: {}", e);
-//RS                     return None;
-//RS                 }
-//RS             },
-//RS             None => match jet_devserver_open_output_root(&out_dir) {
-//RS                 Ok(root) => root,
-//RS                 Err(e) => {
-//RS                     eprintln!("error: web output directory is not safe: {}", e);
-//RS                     return None;
-//RS                 }
-//RS             },
-//RS         };
-//RS         let staging_name = format!(
-//RS             ".jet-devserver-staging-{}-{}",
-//RS             std::process::id(),
-//RS             JET_DEVSERVER_STAGING_COUNTER.fetch_add(1, Ordering::Relaxed)
-//RS         );
-//RS         let staging_root = out_dir.join(&staging_name);
-//RS         let source_stem = jet_devserver_source_stem(&abs_file);
-//RS         let staging = match jet_devserver_create_staging(&output_root, &staging_root, &source_stem)
-//RS         {
-//RS             Ok(staging) => staging,
-//RS             Err(e) => {
-//RS                 eprintln!(
-//RS                     "error: couldn't create a staging folder for the rebuild: {}",
-//RS                     e
-//RS                 );
-//RS                 return None;
-//RS             }
-//RS         };
-//RS 
-//RS         // Prefer the exact `jet` binary that launched this program (passed
-//RS         // in as JET_BIN by `jet dev`'s `run_dev_entry`) over a bare PATH
-//RS         // lookup: PATH could resolve to a different jet version, or to a
-//RS         // cwd-sensitive wrapper that breaks under the staging cwd below.
-//RS         let jet_bin = std::env::var("JET_BIN").unwrap_or_else(|_| "jet".to_string());
-//RS         let mut command = Command::new(&jet_bin);
-//RS         command.args(["build", "--target=web"]).arg(&abs_file);
-//RS         jet_devserver_forward_build_profile_and_settings(&mut command);
-//RS         let command_guard = match jet_devserver_prepare_build_command(&mut command, &staging) {
-//RS             Ok(guard) => guard,
-//RS             Err(e) => {
-//RS                 eprintln!("error: couldn't hold the build staging directory: {}", e);
-//RS                 let _ = jet_devserver_cleanup_staging(&output_root, &staging);
-//RS                 return None;
-//RS             }
-//RS         };
-//RS         let out = jet_devserver_command_output_bounded(
-//RS             &mut command,
-//RS             JET_DEVSERVER_MAX_CHILD_OUTPUT_BYTES,
-//RS         );
-//RS         drop(command_guard);
-//RS         let out = match out {
-//RS             Ok(o) => o,
-//RS             Err(e) => {
-//RS                 eprintln!(
-//RS                     "error: couldn't run `{} build --target=web`: {}",
-//RS                     jet_bin, e
-//RS                 );
-//RS                 eprintln!(" fix: make sure `jet` is on PATH, or run this program via `jet dev` (which passes its own path in JET_BIN)");
-//RS                 let _ = jet_devserver_cleanup_staging(&output_root, &staging);
-//RS                 return None;
-//RS             }
-//RS         };
-//RS         if !out.status.success() {
-//RS             if is_rebuild {
-//RS                 eprintln!("\n— {} changed —", app_file);
-//RS             }
-//RS             // `jet build` is the real front end — it already rendered its
-//RS             // own diagnostics (I2: an ICE banner, or a normal front-end
-//RS             // error). Relay them verbatim rather than re-interpreting them
-//RS             // here.
-//RS             let _ = std::io::stderr().write_all(&out.stdout);
-//RS             let _ = std::io::stderr().write_all(&out.stderr);
-//RS             let _ = jet_devserver_cleanup_staging(&output_root, &staging);
-//RS             return None;
-//RS         }
-//RS 
-//RS         let mut html_bytes = None;
-//RS         if let Some(html_path) = html_override {
-//RS             let source_dir = Path::new(app_file).parent().unwrap_or(Path::new("."));
-//RS             match jet_devserver_read_inside(source_dir, html_path) {
-//RS                 Ok(bytes) => {
-//RS                     html_bytes = Some(bytes);
-//RS                 }
-//RS                 Err(e) => {
-//RS                     eprintln!(
-//RS                         "error: `.html(\"{}\")` names a file that doesn't exist: {}",
-//RS                         html_path, e
-//RS                     );
-//RS                     let _ = jet_devserver_cleanup_staging(&output_root, &staging);
-//RS                     return None;
-//RS                 }
-//RS             }
-//RS         }
-//RS 
-//RS         if let Err(e) = jet_devserver_publish_build(&output_root, &staging, html_bytes.as_deref()) {
-//RS             eprintln!("error: couldn't finalize web build: {}", e);
-//RS             let _ = jet_devserver_cleanup_staging(&output_root, &staging);
-//RS             return None;
-//RS         }
-//RS         let _ = jet_devserver_cleanup_staging(&output_root, &staging);
-//RS 
-//RS         if is_rebuild {
-//RS             eprintln!("[dev] rebuilt after change to {}", app_file);
-//RS         }
-//RS         Some(output_root)
-//RS     }
-//RS 
-//RS     fn jet_devserver_command_output_bounded(
-//RS         command: &mut Command,
-//RS         limit: usize,
-//RS     ) -> std::io::Result<Output> {
-//RS         let mut child = command
-//RS             .stdout(Stdio::piped())
-//RS             .stderr(Stdio::piped())
-//RS             .spawn()?;
-//RS         let stdout = child.stdout.take().ok_or_else(|| {
-//RS             std::io::Error::new(
-//RS                 std::io::ErrorKind::Other,
-//RS                 "build stdout pipe was not available",
-//RS             )
-//RS         });
-//RS         let stderr = child.stderr.take().ok_or_else(|| {
-//RS             std::io::Error::new(
-//RS                 std::io::ErrorKind::Other,
-//RS                 "build stderr pipe was not available",
-//RS             )
-//RS         });
-//RS         let (stdout, stderr) = match (stdout, stderr) {
-//RS             (Ok(stdout), Ok(stderr)) => (stdout, stderr),
-//RS             (stdout, stderr) => {
-//RS                 let _ = child.kill();
-//RS                 let _ = child.wait();
-//RS                 return Err(stdout
-//RS                     .err()
-//RS                     .or_else(|| stderr.err())
-//RS                     .expect("missing build pipe error"));
-//RS             }
-//RS         };
-//RS         let budget = Arc::new(AtomicUsize::new(0));
-//RS         let exceeded = Arc::new(std::sync::atomic::AtomicBool::new(false));
-//RS         let read_failed = Arc::new(std::sync::atomic::AtomicBool::new(false));
-//RS         let stdout_join = jet_devserver_spawn_output_reader(
-//RS             stdout,
-//RS             limit,
-//RS             Arc::clone(&budget),
-//RS             Arc::clone(&exceeded),
-//RS             Arc::clone(&read_failed),
-//RS         );
-//RS         let stderr_join = jet_devserver_spawn_output_reader(
-//RS             stderr,
-//RS             limit,
-//RS             budget,
-//RS             Arc::clone(&exceeded),
-//RS             Arc::clone(&read_failed),
-//RS         );
-//RS         let status = loop {
-//RS             if exceeded.load(Ordering::Acquire) || read_failed.load(Ordering::Acquire) {
-//RS                 let _ = child.kill();
-//RS                 break child.wait()?;
-//RS             }
-//RS             match child.try_wait()? {
-//RS                 Some(status) => break status,
-//RS                 None => thread::sleep(Duration::from_millis(1)),
-//RS             }
-//RS         };
-//RS         let stdout = stdout_join.join().map_err(|_| {
-//RS             std::io::Error::new(std::io::ErrorKind::Other, "build stdout reader panicked")
-//RS         })??;
-//RS         let stderr = stderr_join.join().map_err(|_| {
-//RS             std::io::Error::new(std::io::ErrorKind::Other, "build stderr reader panicked")
-//RS         })??;
-//RS         if exceeded.load(Ordering::Acquire) {
-//RS             return Err(std::io::Error::new(
-//RS                 std::io::ErrorKind::InvalidData,
-//RS                 "build child output exceeds the aggregate output budget",
-//RS             ));
-//RS         }
-//RS         Ok(Output {
-//RS             status,
-//RS             stdout,
-//RS             stderr,
-//RS         })
-//RS     }
-//RS 
-//RS     fn jet_devserver_spawn_output_reader<R>(
-//RS         mut reader: R,
-//RS         limit: usize,
-//RS         budget: Arc<AtomicUsize>,
-//RS         exceeded: Arc<std::sync::atomic::AtomicBool>,
-//RS         read_failed: Arc<std::sync::atomic::AtomicBool>,
-//RS     ) -> thread::JoinHandle<std::io::Result<Vec<u8>>>
-//RS     where
-//RS         R: Read + Send + 'static,
-//RS     {
-//RS         thread::spawn(move || {
-//RS             let mut bytes = Vec::new();
-//RS             let mut chunk = [0u8; 8192];
-//RS             loop {
-//RS                 let count = match reader.read(&mut chunk) {
-//RS                     Ok(count) => count,
-//RS                     Err(error) => {
-//RS                         read_failed.store(true, Ordering::Release);
-//RS                         return Err(error);
-//RS                     }
-//RS                 };
-//RS                 if count == 0 {
-//RS                     return Ok(bytes);
-//RS                 }
-//RS                 let mut used = budget.load(Ordering::Acquire);
-//RS                 let kept = loop {
-//RS                     let available = limit.saturating_sub(used);
-//RS                     let kept = available.min(count);
-//RS                     let next = used.saturating_add(kept);
-//RS                     match budget.compare_exchange(used, next, Ordering::AcqRel, Ordering::Acquire) {
-//RS                         Ok(_) => break kept,
-//RS                         Err(next) => used = next,
-//RS                     }
-//RS                 };
-//RS                 if kept < count {
-//RS                     exceeded.store(true, Ordering::Release);
-//RS                     return Ok(bytes);
-//RS                 }
-//RS                 bytes.extend_from_slice(&chunk[..count]);
-//RS             }
-//RS         })
-//RS     }
-//RS 
-//RS     fn jet_devserver_source_stem(path: &Path) -> String {
-//RS         path.file_stem()
-//RS             .map(|name| name.to_string_lossy().into_owned())
-//RS             .unwrap_or_else(|| "out".to_string())
-//RS             .replace('.', "_")
-//RS     }
-//RS 
-//RS     fn jet_devserver_build_dir() -> Result<PathBuf, String> {
-//RS         let root = std::env::var_os("JET_PROJECT_ROOT")
-//RS             .map(PathBuf::from)
-//RS             .ok_or_else(|| "JET_PROJECT_ROOT is required under `jet dev`".to_string())?;
-//RS         if !root.is_absolute() {
-//RS             return Err("JET_PROJECT_ROOT must be absolute".to_string());
-//RS         }
-//RS         let root = std::fs::canonicalize(&root).map_err(|e| e.to_string())?;
-//RS         let build = root.join(".jet").join("build");
-//RS         jet_devserver_ensure_directory(&build).map_err(|e| e.to_string())?;
-//RS         let real = std::fs::canonicalize(&build).map_err(|e| e.to_string())?;
-//RS         if !real.starts_with(&root) {
-//RS             return Err("web output directory escapes the selected project root".to_string());
-//RS         }
-//RS         Ok(real)
-//RS     }
-//RS     fn jet_devserver_ensure_directory(path: &Path) -> std::io::Result<()> {
-//RS         match std::fs::symlink_metadata(path) {
-//RS             Ok(metadata) if metadata.file_type().is_symlink() => Err(std::io::Error::new(
-//RS                 std::io::ErrorKind::PermissionDenied,
-//RS                 "directory must not be a symlink",
-//RS             )),
-//RS             Ok(metadata) if metadata.is_dir() => Ok(()),
-//RS             Ok(_) => Err(std::io::Error::new(
-//RS                 std::io::ErrorKind::AlreadyExists,
-//RS                 "path is not a directory",
-//RS             )),
-//RS             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-//RS                 if let Some(parent) = path
-//RS                     .parent()
-//RS                     .filter(|parent| !parent.as_os_str().is_empty())
-//RS                 {
-//RS                     jet_devserver_ensure_directory(parent)?;
-//RS                 }
-//RS                 std::fs::create_dir(path)
-//RS             }
-//RS             Err(error) => Err(error),
-//RS         }
-//RS     }
-//RS 
-//RS     const JET_DEVSERVER_OUTPUT_FILES: [&str; 6] = [
-//RS         "web.manifest.json",
-//RS         "jet_dom_runtime.js",
-//RS         "app.js",
-//RS         "app_wasm.rs",
-//RS         "app.wasm",
-//RS         "index.html",
-//RS     ];
-//RS     const JET_DEVSERVER_STAGING_FILES: [&str; 8] = [
-//RS         "web.manifest.json",
-//RS         "jet_dom_runtime.js",
-//RS         "app.js",
-//RS         "app.js.map",
-//RS         "app_wasm.rs",
-//RS         "app.wasm",
-//RS         "app.wasm.map",
-//RS         "index.html",
-//RS     ];
-//RS 
-//RS     // JET_VETTED_UNSAFE_BEGIN: jet_devserver_unix_output
-//RS     #[cfg(unix)]
-//RS     mod jet_devserver_unix_output {
-//RS         use super::*;
-//RS         use std::ffi::{CString, OsStr};
-//RS         use std::os::fd::{AsRawFd, FromRawFd};
-//RS         use std::os::unix::ffi::OsStrExt;
-//RS         use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
-//RS 
-//RS         const O_RDONLY: i32 = 0;
-//RS         const O_WRONLY: i32 = 1;
-//RS         const O_CREAT: i32 = 0o100;
-//RS         const O_EXCL: i32 = 0o200;
-//RS         const O_CLOEXEC: i32 = if cfg!(any(target_os = "linux", target_os = "android")) {
-//RS             0o2000000
-//RS         } else {
-//RS             0x01000000
-//RS         };
-//RS         const O_DIRECTORY: i32 = if cfg!(any(target_os = "linux", target_os = "android")) {
-//RS             0o200000
-//RS         } else {
-//RS             0x00100000
-//RS         };
-//RS         const O_NOFOLLOW: i32 = if cfg!(any(target_os = "linux", target_os = "android")) {
-//RS             0o400000
-//RS         } else {
-//RS             0x0100
-//RS         };
-//RS         const O_NONBLOCK: i32 = if cfg!(any(target_os = "linux", target_os = "android")) {
-//RS             0o4000
-//RS         } else {
-//RS             0x0004
-//RS         };
-//RS         const AT_REMOVEDIR: i32 = 0x200;
-//RS 
-//RS         unsafe extern "C" {
-//RS             fn mkdirat(directory: i32, path: *const std::ffi::c_char, mode: u32) -> i32;
-//RS             fn openat(directory: i32, path: *const std::ffi::c_char, flags: i32, mode: u32) -> i32;
-//RS             fn renameat(
-//RS                 old_directory: i32,
-//RS                 old_path: *const std::ffi::c_char,
-//RS                 new_directory: i32,
-//RS                 new_path: *const std::ffi::c_char,
-//RS             ) -> i32;
-//RS             fn unlinkat(directory: i32, path: *const std::ffi::c_char, flags: i32) -> i32;
-//RS         }
-//RS 
-//RS         fn name(value: &OsStr) -> std::io::Result<CString> {
-//RS             CString::new(value.as_bytes()).map_err(|_| {
-//RS                 std::io::Error::new(
-//RS                     std::io::ErrorKind::InvalidInput,
-//RS                     "devserver path contains NUL",
-//RS                 )
-//RS             })
-//RS         }
-//RS 
-//RS         fn check_regular(file: &File) -> std::io::Result<(u64, u64)> {
-//RS             let metadata = file.metadata()?;
-//RS             if !metadata.is_file() || metadata.nlink() != 1 {
-//RS                 return Err(std::io::Error::new(
-//RS                     std::io::ErrorKind::PermissionDenied,
-//RS                     "devserver file is linked or not regular",
-//RS                 ));
-//RS             }
-//RS             Ok((metadata.dev(), metadata.ino()))
-//RS         }
-//RS 
-//RS         pub(super) fn check_opened_file(file: &File) -> std::io::Result<()> {
-//RS             check_regular(file).map(|_| ())
-//RS         }
-//RS 
-//RS         pub(super) fn validate_source(path: &Path) -> std::io::Result<()> {
-//RS             let file = std::fs::OpenOptions::new()
-//RS                 .read(true)
-//RS                 .custom_flags(O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK)
-//RS                 .open(path)?;
-//RS             check_regular(&file).map(|_| ())
-//RS         }
-//RS 
-//RS         pub(super) fn open_root(path: &Path) -> std::io::Result<JetDevServerOutputRoot> {
-//RS             let expected = std::fs::metadata(path)?;
-//RS             let directory = std::fs::OpenOptions::new()
-//RS                 .read(true)
-//RS                 .custom_flags(O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
-//RS                 .open(path)?;
-//RS             let actual = directory.metadata()?;
-//RS             if !expected.is_dir()
-//RS                 || actual.dev() != expected.dev()
-//RS                 || actual.ino() != expected.ino()
-//RS             {
-//RS                 return Err(std::io::Error::new(
-//RS                     std::io::ErrorKind::PermissionDenied,
-//RS                     "devserver output root changed during secure open",
-//RS                 ));
-//RS             }
-//RS             Ok(JetDevServerOutputRoot::new(directory))
-//RS         }
-//RS 
-//RS         pub(super) fn open_dir_at(parent: &File, value: &OsStr) -> std::io::Result<File> {
-//RS             let value = name(value)?;
-//RS             let fd = unsafe {
-//RS                 openat(
-//RS                     parent.as_raw_fd(),
-//RS                     value.as_ptr(),
-//RS                     O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC,
-//RS                     0,
-//RS                 )
-//RS             };
-//RS             if fd < 0 {
-//RS                 return Err(std::io::Error::last_os_error());
-//RS             }
-//RS             Ok(unsafe { File::from_raw_fd(fd) })
-//RS         }
-//RS 
-//RS         fn open_file_at(parent: &File, value: &OsStr, write: bool) -> std::io::Result<File> {
-//RS             let value = name(value)?;
-//RS             let flags = if write { O_WRONLY } else { O_RDONLY };
-//RS             let fd = unsafe {
-//RS                 openat(
-//RS                     parent.as_raw_fd(),
-//RS                     value.as_ptr(),
-//RS                     flags | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK,
-//RS                     0,
-//RS                 )
-//RS             };
-//RS             if fd < 0 {
-//RS                 return Err(std::io::Error::last_os_error());
-//RS             }
-//RS             Ok(unsafe { File::from_raw_fd(fd) })
-//RS         }
-//RS 
-//RS         fn unlink_at(parent: &File, value: &OsStr, flags: i32) -> std::io::Result<()> {
-//RS             let value = name(value)?;
-//RS             if unsafe { unlinkat(parent.as_raw_fd(), value.as_ptr(), flags) } != 0 {
-//RS                 return Err(std::io::Error::last_os_error());
-//RS             }
-//RS             Ok(())
-//RS         }
-//RS 
-//RS         fn check_existing(parent: &File, value: &OsStr) -> std::io::Result<bool> {
-//RS             match open_file_at(parent, value, false) {
-//RS                 Ok(file) => {
-//RS                     check_regular(&file)?;
-//RS                     Ok(true)
-//RS                 }
-//RS                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
-//RS                 Err(error) => Err(error),
-//RS             }
-//RS         }
-//RS 
-//RS         fn rename_at(
-//RS             old_parent: &File,
-//RS             old_name: &OsStr,
-//RS             new_parent: &File,
-//RS             new_name: &OsStr,
-//RS         ) -> std::io::Result<()> {
-//RS             let old_name = name(old_name)?;
-//RS             let new_name = name(new_name)?;
-//RS             if unsafe {
-//RS                 renameat(
-//RS                     old_parent.as_raw_fd(),
-//RS                     old_name.as_ptr(),
-//RS                     new_parent.as_raw_fd(),
-//RS                     new_name.as_ptr(),
-//RS                 )
-//RS             } != 0
-//RS             {
-//RS                 return Err(std::io::Error::last_os_error());
-//RS             }
-//RS             Ok(())
-//RS         }
-//RS 
-//RS         fn create_publication_journal(parent: &File) -> std::io::Result<(String, File)> {
-//RS             for _ in 0..100 {
-//RS                 let value = format!(
-//RS                     ".jet-devserver-publication-{}-{}",
-//RS                     std::process::id(),
-//RS                     JET_DEVSERVER_STAGING_COUNTER.fetch_add(1, Ordering::Relaxed)
-//RS                 );
-//RS                 let name = name(OsStr::new(&value))?;
-//RS                 if unsafe { mkdirat(parent.as_raw_fd(), name.as_ptr(), 0o700) } == 0 {
-//RS                     return match open_dir_at(parent, OsStr::new(&value)) {
-//RS                         Ok(directory) => Ok((value, directory)),
-//RS                         Err(error) => {
-//RS                             let _ = unlink_at(parent, OsStr::new(&value), AT_REMOVEDIR);
-//RS                             Err(error)
-//RS                         }
-//RS                     };
-//RS                 }
-//RS                 let error = std::io::Error::last_os_error();
-//RS                 if error.kind() != std::io::ErrorKind::AlreadyExists {
-//RS                     return Err(error);
-//RS                 }
-//RS             }
-//RS             Err(std::io::Error::new(
-//RS                 std::io::ErrorKind::AlreadyExists,
-//RS                 "could not allocate a devserver publication journal",
-//RS             ))
-//RS         }
-//RS 
-//RS         fn clear_publication_journal(
-//RS             parent: &File,
-//RS             journal: &File,
-//RS             journal_name: &str,
-//RS             names: &[&str],
-//RS         ) {
-//RS             for value in names {
-//RS                 let _ = unlink_at(journal, OsStr::new(value), 0);
-//RS             }
-//RS             let _ = unlink_at(parent, OsStr::new(journal_name), AT_REMOVEDIR);
-//RS         }
-//RS 
-//RS         fn rollback_publication(
-//RS             root: &File,
-//RS             journal: &File,
-//RS             backed_up: &[&str],
-//RS             published: &[&str],
-//RS         ) {
-//RS             for value in published.iter().rev() {
-//RS                 let _ = unlink_at(root, OsStr::new(value), 0);
-//RS             }
-//RS             for value in backed_up.iter().rev() {
-//RS                 let _ = rename_at(journal, OsStr::new(value), root, OsStr::new(value));
-//RS             }
-//RS         }
-//RS 
-//RS         fn replace_file_at(parent: &File, value: &OsStr, bytes: &[u8]) -> std::io::Result<()> {
-//RS             check_existing(parent, value)?;
-//RS             let final_name = name(value)?;
-//RS             let temporary = format!(
-//RS                 ".jet-devserver-output-{}-{}",
-//RS                 std::process::id(),
-//RS                 JET_DEVSERVER_STAGING_COUNTER.fetch_add(1, Ordering::Relaxed)
-//RS             );
-//RS             let temporary_name = name(OsStr::new(&temporary))?;
-//RS             let fd = unsafe {
-//RS                 openat(
-//RS                     parent.as_raw_fd(),
-//RS                     temporary_name.as_ptr(),
-//RS                     O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC,
-//RS                     0o600,
-//RS                 )
-//RS             };
-//RS             if fd < 0 {
-//RS                 return Err(std::io::Error::last_os_error());
-//RS             }
-//RS             let mut temporary_file = unsafe { File::from_raw_fd(fd) };
-//RS             if let Err(error) = (|| {
-//RS                 temporary_file.write_all(bytes)?;
-//RS                 temporary_file.sync_all()?;
-//RS                 let temporary_id = check_regular(&temporary_file)?;
-//RS                 if unsafe {
-//RS                     renameat(
-//RS                         parent.as_raw_fd(),
-//RS                         temporary_name.as_ptr(),
-//RS                         parent.as_raw_fd(),
-//RS                         final_name.as_ptr(),
-//RS                     )
-//RS                 } != 0
-//RS                 {
-//RS                     return Err(std::io::Error::last_os_error());
-//RS                 }
-//RS                 let published = open_file_at(parent, value, false)?;
-//RS                 if check_regular(&published)? != temporary_id {
-//RS                     return Err(std::io::Error::new(
-//RS                         std::io::ErrorKind::PermissionDenied,
-//RS                         "published devserver output identity changed",
-//RS                     ));
-//RS                 }
-//RS                 Ok::<(), std::io::Error>(())
-//RS             })() {
-//RS                 let _ = unlink_at(parent, OsStr::new(&temporary), 0);
-//RS                 return Err(error);
-//RS             }
-//RS             Ok(())
-//RS         }
-//RS 
-//RS         pub(super) fn create_staging(
-//RS             root: &JetDevServerOutputRoot,
-//RS             path: &Path,
-//RS             source_stem: &str,
-//RS         ) -> std::io::Result<JetDevServerStaging> {
-//RS             let name_value = path.file_name().ok_or_else(|| {
-//RS                 std::io::Error::new(std::io::ErrorKind::InvalidInput, "staging has no name")
-//RS             })?;
-//RS             let name = name(name_value)?;
-//RS             if unsafe { mkdirat(root.directory.as_raw_fd(), name.as_ptr(), 0o700) } != 0 {
-//RS                 return Err(std::io::Error::last_os_error());
-//RS             }
-//RS             let directory = open_dir_at(&root.directory, name_value)?;
-//RS             Ok(JetDevServerStaging {
-//RS                 path: path.to_path_buf(),
-//RS                 name: name_value.to_string_lossy().into_owned(),
-//RS                 source_stem: source_stem.to_string(),
-//RS                 directory,
-//RS             })
-//RS         }
-//RS 
-//RS         fn open_relative(mut current: File, relative: &Path) -> std::io::Result<File> {
-//RS             let components = relative.components().collect::<Vec<_>>();
-//RS             if components.is_empty() {
-//RS                 return Err(std::io::Error::new(
-//RS                     std::io::ErrorKind::InvalidInput,
-//RS                     "empty relative path",
-//RS                 ));
-//RS             }
-//RS             for component in &components[..components.len() - 1] {
-//RS                 let Component::Normal(value) = component else {
-//RS                     return Err(std::io::Error::new(
-//RS                         std::io::ErrorKind::InvalidInput,
-//RS                         "devserver path is not relative",
-//RS                     ));
-//RS                 };
-//RS                 current = open_dir_at(&current, value)?;
-//RS             }
-//RS             let Component::Normal(value) = components.last().unwrap() else {
-//RS                 return Err(std::io::Error::new(
-//RS                     std::io::ErrorKind::InvalidInput,
-//RS                     "devserver path is not relative",
-//RS                 ));
-//RS             };
-//RS             let file = open_file_at(&current, value, false)?;
-//RS             check_regular(&file)?;
-//RS             Ok(file)
-//RS         }
-//RS 
-//RS         pub(super) fn open_beneath(root: &Path, relative: &Path) -> std::io::Result<File> {
-//RS             open_relative(open_root(root)?.directory, relative)
-//RS         }
-//RS 
-//RS         pub(super) fn open_held_beneath(
-//RS             root: &JetDevServerOutputRoot,
-//RS             relative: &Path,
-//RS         ) -> std::io::Result<File> {
-//RS             open_relative(root.directory.try_clone()?, relative)
-//RS         }
-//RS 
-//RS         pub(super) fn publish_build(
-//RS             root: &JetDevServerOutputRoot,
-//RS             staging: &JetDevServerStaging,
-//RS             html: Option<&[u8]>,
-//RS         ) -> std::io::Result<()> {
-//RS             let build = open_dir_at(&staging.directory, OsStr::new("build"))?;
-//RS             if let Some(bytes) = html {
-//RS                 replace_file_at(&build, OsStr::new("index.html"), bytes)?;
-//RS             }
-//RS             for value in JET_DEVSERVER_OUTPUT_FILES {
-//RS                 let source = open_file_at(&build, OsStr::new(value), false)?;
-//RS                 check_regular(&source)?;
-//RS                 check_existing(&root.directory, OsStr::new(value))?;
-//RS             }
-//RS             let (journal_name, journal) = create_publication_journal(&root.directory)?;
-//RS             let mut backed_up = Vec::new();
-//RS             let mut published = Vec::new();
-//RS             let result = (|| {
-//RS                 for value in JET_DEVSERVER_OUTPUT_FILES {
-//RS                     if check_existing(&root.directory, OsStr::new(value))? {
-//RS                         rename_at(
-//RS                             &root.directory,
-//RS                             OsStr::new(value),
-//RS                             &journal,
-//RS                             OsStr::new(value),
-//RS                         )?;
-//RS                         backed_up.push(value);
-//RS                     }
-//RS                 }
-//RS                 for value in JET_DEVSERVER_OUTPUT_FILES {
-//RS                     let source = open_file_at(&build, OsStr::new(value), false)?;
-//RS                     let source_id = check_regular(&source)?;
-//RS                     rename_at(
-//RS                         &build,
-//RS                         OsStr::new(value),
-//RS                         &root.directory,
-//RS                         OsStr::new(value),
-//RS                     )?;
-//RS                     published.push(value);
-//RS                     let published_file = open_file_at(&root.directory, OsStr::new(value), false)?;
-//RS                     if check_regular(&published_file)? != source_id {
-//RS                         return Err(std::io::Error::new(
-//RS                             std::io::ErrorKind::PermissionDenied,
-//RS                             "published devserver output identity changed",
-//RS                         ));
-//RS                     }
-//RS                 }
-//RS                 root.directory.sync_all()
-//RS             })();
-//RS             if let Err(error) = result {
-//RS                 rollback_publication(&root.directory, &journal, &backed_up, &published);
-//RS                 clear_publication_journal(
-//RS                     &root.directory,
-//RS                     &journal,
-//RS                     &journal_name,
-//RS                     &JET_DEVSERVER_OUTPUT_FILES,
-//RS                 );
-//RS                 return Err(error);
-//RS             }
-//RS             clear_publication_journal(
-//RS                 &root.directory,
-//RS                 &journal,
-//RS                 &journal_name,
-//RS                 &JET_DEVSERVER_OUTPUT_FILES,
-//RS             );
-//RS             Ok(())
-//RS         }
-//RS 
-//RS         pub(super) fn cleanup(
-//RS             root: &JetDevServerOutputRoot,
-//RS             staging: &JetDevServerStaging,
-//RS         ) -> std::io::Result<()> {
-//RS             if let Ok(build) = open_dir_at(&staging.directory, OsStr::new("build")) {
-//RS                 for value in JET_DEVSERVER_STAGING_FILES {
-//RS                     let _ = unlink_at(&build, OsStr::new(value), 0);
-//RS                 }
-//RS                 let source = format!("{}.rs", staging.source_stem);
-//RS                 let _ = unlink_at(&build, OsStr::new(&source), 0);
-//RS                 let _ = unlink_at(&staging.directory, OsStr::new("build"), AT_REMOVEDIR);
-//RS             }
-//RS             unlink_at(&root.directory, OsStr::new(&staging.name), AT_REMOVEDIR)
-//RS         }
-//RS 
-//RS         pub(super) fn prepare_build_command(
-//RS             command: &mut Command,
-//RS             staging: &JetDevServerStaging,
-//RS         ) -> std::io::Result<Option<File>> {
-//RS             use std::os::unix::process::CommandExt;
-//RS 
-//RS             let directory = staging.directory.as_raw_fd();
-//RS             // SAFETY: `pre_exec` is the platform boundary for the child-only
-//RS             // directory change. The closure captures one live raw descriptor,
-//RS             // and calls only the async-signal-safe `fchdir` before exec.
-//RS             unsafe {
-//RS                 command.pre_exec(move || {
-//RS                     unsafe extern "C" {
-//RS                         fn fchdir(directory: i32) -> i32;
-//RS                     }
-//RS                     if fchdir(directory) == 0 {
-//RS                         Ok(())
-//RS                     } else {
-//RS                         Err(std::io::Error::last_os_error())
-//RS                     }
-//RS                 });
-//RS             }
-//RS             Ok(None)
-//RS         }
-//RS     }
-//RS     // JET_VETTED_UNSAFE_END: jet_devserver_unix_output
-//RS 
-//RS     fn jet_devserver_read_inside(root: &Path, relative: &str) -> std::io::Result<Vec<u8>> {
-//RS         let relative = Path::new(relative);
-//RS         if relative.is_absolute()
-//RS             || relative
-//RS                 .components()
-//RS                 .any(|component| !matches!(component, std::path::Component::Normal(_)))
-//RS             || !jet_devserver_windows_components_are_safe(relative)
-//RS         {
-//RS             return Err(std::io::Error::new(
-//RS                 std::io::ErrorKind::PermissionDenied,
-//RS                 "HTML path must stay inside the source directory",
-//RS             ));
-//RS         }
-//RS         let file = jet_devserver_open_beneath(root, relative)?;
-//RS         jet_devserver_read_bounded(file, JET_DEVSERVER_MAX_RESPONSE_BYTES)
-//RS     }
-//RS 
-//RS     fn jet_devserver_serve_forever(
-//RS         listener: TcpListener,
-//RS         version: Arc<AtomicU64>,
-//RS         output_root: Arc<JetDevServerOutputRoot>,
-//RS     ) {
-//RS         let active_connections = Arc::new(AtomicUsize::new(0));
-//RS         for stream in listener.incoming() {
-//RS             if let Ok(stream) = stream {
-//RS                 if !jet_devserver_try_acquire(&active_connections) {
-//RS                     drop(stream);
-//RS                     continue;
-//RS                 }
-//RS                 let version = Arc::clone(&version);
-//RS                 let output_root = Arc::clone(&output_root);
-//RS                 let active_connections = Arc::clone(&active_connections);
-//RS                 thread::spawn(move || {
-//RS                     let _ = jet_devserver_handle_connection(stream, &version, &output_root);
-//RS                     active_connections.fetch_sub(1, Ordering::AcqRel);
-//RS                 });
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     fn jet_devserver_try_acquire(active: &AtomicUsize) -> bool {
-//RS         let mut current = active.load(Ordering::Acquire);
-//RS         loop {
-//RS             if current >= JET_DEVSERVER_MAX_CONNECTION_THREADS {
-//RS                 return false;
-//RS             }
-//RS             match active.compare_exchange(current, current + 1, Ordering::AcqRel, Ordering::Acquire)
-//RS             {
-//RS                 Ok(_) => return true,
-//RS                 Err(next) => current = next,
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     struct JetDevServerDeadlineStream {
-//RS         stream: TcpStream,
-//RS         deadline: Instant,
-//RS     }
-//RS 
-//RS     impl JetDevServerDeadlineStream {
-//RS         fn new(stream: TcpStream, deadline: Instant) -> Self {
-//RS             Self { stream, deadline }
-//RS         }
-//RS 
-//RS         fn try_clone(&self) -> std::io::Result<Self> {
-//RS             Ok(Self::new(self.stream.try_clone()?, self.deadline))
-//RS         }
-//RS 
-//RS         fn remaining(&self) -> std::io::Result<Duration> {
-//RS             let remaining = self.deadline.saturating_duration_since(Instant::now());
-//RS             if remaining.is_zero() {
-//RS                 return Err(std::io::Error::new(
-//RS                     std::io::ErrorKind::TimedOut,
-//RS                     "devserver request deadline exceeded",
-//RS                 ));
-//RS             }
-//RS             Ok(remaining)
-//RS         }
-//RS     }
-//RS 
-//RS     impl Read for JetDevServerDeadlineStream {
-//RS         fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
-//RS             let remaining = self.remaining()?;
-//RS             self.stream.set_read_timeout(Some(remaining))?;
-//RS             self.stream.read(buffer)
-//RS         }
-//RS     }
-//RS 
-//RS     impl Write for JetDevServerDeadlineStream {
-//RS         fn write(&mut self, buffer: &[u8]) -> std::io::Result<usize> {
-//RS             let remaining = self.remaining()?;
-//RS             self.stream.set_write_timeout(Some(remaining))?;
-//RS             self.stream.write(buffer)
-//RS         }
-//RS 
-//RS         fn flush(&mut self) -> std::io::Result<()> {
-//RS             let remaining = self.remaining()?;
-//RS             self.stream.set_write_timeout(Some(remaining))?;
-//RS             self.stream.flush()
-//RS         }
-//RS     }
-//RS 
-//RS     fn jet_devserver_read_line_bounded(
-//RS         reader: &mut impl BufRead,
-//RS         line: &mut String,
-//RS         limit: usize,
-//RS     ) -> std::io::Result<usize> {
-//RS         let read = reader
-//RS             .take(limit.saturating_add(1) as u64)
-//RS             .read_line(line)?;
-//RS         if read > limit {
-//RS             return Err(std::io::Error::new(
-//RS                 std::io::ErrorKind::InvalidData,
-//RS                 "devserver request line exceeds 8 KiB",
-//RS             ));
-//RS         }
-//RS         Ok(read)
-//RS     }
-//RS 
-//RS     fn jet_devserver_handle_connection(
-//RS         stream: TcpStream,
-//RS         version: &AtomicU64,
-//RS         output_root: &JetDevServerOutputRoot,
-//RS     ) -> std::io::Result<()> {
-//RS         let deadline = Instant::now() + JET_DEVSERVER_REQUEST_DEADLINE;
-//RS         let mut stream = JetDevServerDeadlineStream::new(stream, deadline);
-//RS         let mut reader = BufReader::new(stream.try_clone()?);
-//RS         let mut request_line = String::new();
-//RS         if jet_devserver_read_line_bounded(
-//RS             &mut reader,
-//RS             &mut request_line,
-//RS             JET_DEVSERVER_MAX_LINE_BYTES,
-//RS         )? == 0
-//RS         {
-//RS             return Ok(());
-//RS         }
-//RS         let mut header_bytes = 0usize;
-//RS         let mut header_count = 0usize;
-//RS         let mut content_length = None;
-//RS         let mut saw_authorization = false;
-//RS         let mut saw_content_length = false;
-//RS         let mut saw_host = false;
-//RS         let mut saw_origin = false;
-//RS         let mut saw_transfer_encoding = false;
-//RS         loop {
-//RS             let mut line = String::new();
-//RS             let read = jet_devserver_read_line_bounded(
-//RS                 &mut reader,
-//RS                 &mut line,
-//RS                 JET_DEVSERVER_MAX_LINE_BYTES,
-//RS             )?;
-//RS             if read == 0 || line == "\r\n" || line == "\n" {
-//RS                 break;
-//RS             }
-//RS             header_count = header_count.checked_add(1).ok_or_else(|| {
-//RS                 std::io::Error::new(
-//RS                     std::io::ErrorKind::InvalidData,
-//RS                     "too many devserver headers",
-//RS                 )
-//RS             })?;
-//RS             header_bytes = header_bytes.checked_add(read).ok_or_else(|| {
-//RS                 std::io::Error::new(
-//RS                     std::io::ErrorKind::InvalidData,
-//RS                     "devserver headers exceed the request budget",
-//RS                 )
-//RS             })?;
-//RS             if header_count > JET_DEVSERVER_MAX_HEADER_COUNT
-//RS                 || header_bytes > JET_DEVSERVER_MAX_HEADER_BYTES
-//RS             {
-//RS                 return Err(std::io::Error::new(
-//RS                     std::io::ErrorKind::InvalidData,
-//RS                     "devserver headers exceed the request budget",
-//RS                 ));
-//RS             }
-//RS             let Some((name, value)) = line.trim_end_matches(['\r', '\n']).split_once(':') else {
-//RS                 return Err(std::io::Error::new(
-//RS                     std::io::ErrorKind::InvalidData,
-//RS                     "malformed devserver header",
-//RS                 ));
-//RS             };
-//RS             let name = name.trim().to_ascii_lowercase();
-//RS             let value = value.trim();
-//RS             if name.is_empty()
-//RS                 || name
-//RS                     .bytes()
-//RS                     .any(|byte| byte.is_ascii_whitespace() || byte.is_ascii_control())
-//RS             {
-//RS                 return Err(std::io::Error::new(
-//RS                     std::io::ErrorKind::InvalidData,
-//RS                     "malformed devserver header name",
-//RS                 ));
-//RS             }
-//RS             let duplicate = match name.as_str() {
-//RS                 "authorization" => {
-//RS                     let duplicate = saw_authorization;
-//RS                     saw_authorization = true;
-//RS                     duplicate
-//RS                 }
-//RS                 "content-length" => {
-//RS                     let duplicate = saw_content_length;
-//RS                     saw_content_length = true;
-//RS                     duplicate
-//RS                 }
-//RS                 "host" => {
-//RS                     let duplicate = saw_host;
-//RS                     saw_host = true;
-//RS                     duplicate
-//RS                 }
-//RS                 "origin" => {
-//RS                     let duplicate = saw_origin;
-//RS                     saw_origin = true;
-//RS                     duplicate
-//RS                 }
-//RS                 "transfer-encoding" => {
-//RS                     let duplicate = saw_transfer_encoding;
-//RS                     saw_transfer_encoding = true;
-//RS                     duplicate
-//RS                 }
-//RS                 _ => false,
-//RS             };
-//RS             if duplicate {
-//RS                 return Err(std::io::Error::new(
-//RS                     std::io::ErrorKind::InvalidData,
-//RS                     "duplicate devserver security header",
-//RS                 ));
-//RS             }
-//RS             if name == "transfer-encoding" {
-//RS                 return Err(std::io::Error::new(
-//RS                     std::io::ErrorKind::InvalidData,
-//RS                     "devserver does not accept transfer-encoded requests",
-//RS                 ));
-//RS             }
-//RS             if name == "content-length" {
-//RS                 content_length = Some(value.parse::<usize>().map_err(|_| {
-//RS                     std::io::Error::new(
-//RS                         std::io::ErrorKind::InvalidData,
-//RS                         "invalid devserver content length",
-//RS                     )
-//RS                 })?);
-//RS             }
-//RS         }
-//RS 
-//RS         let mut parts = request_line.split_whitespace();
-//RS         let method = parts.next().unwrap_or("");
-//RS         let target = parts.next().unwrap_or("");
-//RS         let request_version = parts.next().unwrap_or("");
-//RS         if method.is_empty()
-//RS             || target.is_empty()
-//RS             || request_version != "HTTP/1.1"
-//RS             || parts.next().is_some()
-//RS         {
-//RS             return Err(std::io::Error::new(
-//RS                 std::io::ErrorKind::InvalidData,
-//RS                 "malformed devserver request line",
-//RS             ));
-//RS         }
-//RS         let content_length = content_length.unwrap_or(0);
-//RS         if content_length > JET_DEVSERVER_MAX_REQUEST_BODY_BYTES {
-//RS             return Err(std::io::Error::new(
-//RS                 std::io::ErrorKind::InvalidData,
-//RS                 "devserver request body exceeds 1 MiB",
-//RS             ));
-//RS         }
-//RS         if content_length != 0 {
-//RS             return Err(std::io::Error::new(
-//RS                 std::io::ErrorKind::InvalidData,
-//RS                 "devserver GET requests must not contain a body",
-//RS             ));
-//RS         }
-//RS 
-//RS         if method != "GET" {
-//RS             return jet_devserver_write_response(
-//RS                 &mut stream,
-//RS                 "405 Method Not Allowed",
-//RS                 "text/plain; charset=utf-8",
-//RS                 b"jet dev's web server only handles GET",
-//RS             );
-//RS         }
-//RS 
-//RS         let path = target.split('?').next().unwrap_or("/");
-//RS         if path == "/__jet_dev_version" {
-//RS             let body = version.load(Ordering::SeqCst).to_string();
-//RS             return jet_devserver_write_response(
-//RS                 &mut stream,
-//RS                 "200 OK",
-//RS                 "text/plain; charset=utf-8",
-//RS                 body.as_bytes(),
-//RS             );
-//RS         }
-//RS         jet_devserver_serve_static(&mut stream, path, output_root)
-//RS     }
-//RS 
-//RS     fn jet_devserver_serve_static(
-//RS         stream: &mut impl Write,
-//RS         path: &str,
-//RS         output_root: &JetDevServerOutputRoot,
-//RS     ) -> std::io::Result<()> {
-//RS         let Some(rel) = jet_devserver_static_relative_path(path) else {
-//RS             return jet_devserver_write_response(
-//RS                 stream,
-//RS                 "400 Bad Request",
-//RS                 "text/plain; charset=utf-8",
-//RS                 b"bad path",
-//RS             );
-//RS         };
-//RS         let file_path = Path::new(rel);
-//RS         let is_index = file_path.file_name().and_then(|f| f.to_str()) == Some("index.html");
-//RS         let content_type = jet_devserver_content_type_for(&file_path);
-//RS         let script = is_index.then(jet_devserver_live_reload_script);
-//RS         let read_limit = script
-//RS             .as_ref()
-//RS             .map_or(JET_DEVSERVER_MAX_RESPONSE_BYTES, |script| {
-//RS                 JET_DEVSERVER_MAX_RESPONSE_BYTES
-//RS                     .checked_sub(script.len())
-//RS                     .unwrap_or(0)
-//RS             });
-//RS         let bytes = {
-//RS             let _publication = output_root.publication_lock.lock().map_err(|_| {
-//RS                 std::io::Error::new(
-//RS                     std::io::ErrorKind::Other,
-//RS                     "devserver publication lock poisoned",
-//RS                 )
-//RS             })?;
-//RS             let file = match jet_devserver_open_held_beneath(output_root, Path::new(rel)) {
-//RS                 Ok(file) => file,
-//RS                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-//RS                     let body = format!("not found: {}", path);
-//RS                     return jet_devserver_write_response(
-//RS                         stream,
-//RS                         "404 Not Found",
-//RS                         "text/plain; charset=utf-8",
-//RS                         body.as_bytes(),
-//RS                     );
-//RS                 }
-//RS                 Err(_) => {
-//RS                     return jet_devserver_write_response(
-//RS                         stream,
-//RS                         "400 Bad Request",
-//RS                         "text/plain; charset=utf-8",
-//RS                         b"bad path",
-//RS                     );
-//RS                 }
-//RS             };
-//RS             match jet_devserver_read_bounded(file, read_limit) {
-//RS                 Ok(bytes) => bytes,
-//RS                 Err(_) => {
-//RS                     let body = format!("not found: {}", path);
-//RS                     return jet_devserver_write_response(
-//RS                         stream,
-//RS                         "404 Not Found",
-//RS                         "text/plain; charset=utf-8",
-//RS                         body.as_bytes(),
-//RS                     );
-//RS                 }
-//RS             }
-//RS         };
-//RS 
-//RS         if let Some(script) = script {
-//RS             if std::str::from_utf8(&bytes).is_err() {
-//RS                 let body = format!("not found: {}", path);
-//RS                 return jet_devserver_write_response(
-//RS                     stream,
-//RS                     "404 Not Found",
-//RS                     "text/plain; charset=utf-8",
-//RS                     body.as_bytes(),
-//RS                 );
-//RS             }
-//RS             if let Some(index) = jet_devserver_find_body_end(&bytes) {
-//RS                 let parts = [&bytes[..index], script.as_bytes(), &bytes[index..]];
-//RS                 return jet_devserver_write_response_parts(stream, "200 OK", content_type, &parts);
-//RS             }
-//RS             let parts = [&bytes[..], script.as_bytes()];
-//RS             return jet_devserver_write_response_parts(stream, "200 OK", content_type, &parts);
-//RS         }
-//RS         jet_devserver_write_response(stream, "200 OK", content_type, &bytes)
-//RS     }
-//RS 
-//RS     fn jet_devserver_find_body_end(bytes: &[u8]) -> Option<usize> {
-//RS         const MARKER: &[u8] = b"</body>";
-//RS         bytes.windows(MARKER.len()).position(|window| {
-//RS             window
-//RS                 .iter()
-//RS                 .zip(MARKER)
-//RS                 .all(|(actual, expected)| actual.to_ascii_lowercase() == *expected)
-//RS         })
-//RS     }
-//RS 
-//RS     fn jet_devserver_read_bounded(file: File, limit: usize) -> std::io::Result<Vec<u8>> {
-//RS         jet_devserver_check_opened_file(&file)?;
-//RS         let metadata = file.metadata()?;
-//RS         let length_bytes = metadata.len();
-//RS         if length_bytes > limit as u64 {
-//RS             return Err(std::io::Error::new(
-//RS                 std::io::ErrorKind::InvalidData,
-//RS                 format!("devserver response exceeds {limit} bytes"),
-//RS             ));
-//RS         }
-//RS         let length = length_bytes as usize;
-//RS         let mut bytes = Vec::with_capacity(length);
-//RS         let mut reader = file.take(length as u64);
-//RS         reader.read_to_end(&mut bytes)?;
-//RS         let final_length = reader.get_ref().metadata()?.len();
-//RS         if final_length != length_bytes || bytes.len() != length {
-//RS             return Err(std::io::Error::new(
-//RS                 std::io::ErrorKind::Other,
-//RS                 "devserver file changed while it was being read",
-//RS             ));
-//RS         }
-//RS         jet_devserver_check_opened_file(reader.get_ref())?;
-//RS         Ok(bytes)
-//RS     }
-//RS 
-//RS     fn jet_devserver_validate_relative(relative: &Path) -> std::io::Result<()> {
-//RS         if relative
-//RS             .components()
-//RS             .any(|component| !matches!(component, Component::Normal(_)))
-//RS             || !jet_devserver_windows_components_are_safe(relative)
-//RS         {
-//RS             return Err(std::io::Error::new(
-//RS                 std::io::ErrorKind::InvalidInput,
-//RS                 "devserver path is not relative",
-//RS             ));
-//RS         }
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     // JET_VETTED_UNSAFE_BEGIN: jet_devserver_windows_output
-//RS     #[cfg(windows)]
-//RS     mod jet_devserver_windows_output {
-//RS         use super::*;
-//RS         use std::ffi::{c_void, OsStr};
-//RS         use std::os::windows::ffi::OsStrExt;
-//RS         use std::os::windows::fs::OpenOptionsExt;
-//RS         use std::os::windows::io::AsRawHandle;
-//RS 
-//RS         type Handle = *mut c_void;
-//RS 
-//RS         const GENERIC_READ: u32 = 0x8000_0000;
-//RS         const GENERIC_WRITE: u32 = 0x4000_0000;
-//RS         const DELETE: u32 = 0x0001_0000;
-//RS         const FILE_SHARE_READ: u32 = 0x0000_0001;
-//RS         const FILE_SHARE_WRITE: u32 = 0x0000_0002;
-//RS         const FILE_SHARE_ALL: u32 = 0x0000_0007;
-//RS         const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
-//RS         const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
-//RS         const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0000_0400;
-//RS         const FILE_ATTRIBUTE_TAG_INFO_CLASS: i32 = 9;
-//RS         const FILE_RENAME_INFO_CLASS: i32 = 3;
-//RS         const FILE_DISPOSITION_INFO_CLASS: i32 = 4;
-//RS 
-//RS         #[repr(C)]
-//RS         struct ByHandleFileInformation {
-//RS             attributes: u32,
-//RS             creation_low: u32,
-//RS             creation_high: u32,
-//RS             access_low: u32,
-//RS             access_high: u32,
-//RS             write_low: u32,
-//RS             write_high: u32,
-//RS             volume: u32,
-//RS             size_high: u32,
-//RS             size_low: u32,
-//RS             links: u32,
-//RS             index_high: u32,
-//RS             index_low: u32,
-//RS         }
-//RS 
-//RS         #[repr(C)]
-//RS         struct FileAttributeTagInfo {
-//RS             attributes: u32,
-//RS             reparse_tag: u32,
-//RS         }
-//RS 
-//RS         #[repr(C)]
-//RS         struct FileRenameInfo {
-//RS             replace_if_exists: i32,
-//RS             root_directory: Handle,
-//RS             file_name_length: u32,
-//RS             file_name: [u16; 1],
-//RS         }
-//RS 
-//RS         #[repr(C)]
-//RS         struct FileDispositionInfo {
-//RS             delete_file: u8,
-//RS         }
-//RS 
-//RS         unsafe extern "system" {
-//RS             fn GetFileAttributesW(name: *const u16) -> u32;
-//RS             fn GetFileInformationByHandle(file: Handle, info: *mut ByHandleFileInformation) -> i32;
-//RS             fn GetFileInformationByHandleEx(
-//RS                 file: Handle,
-//RS                 class: i32,
-//RS                 info: *mut c_void,
-//RS                 size: u32,
-//RS             ) -> i32;
-//RS             fn GetFinalPathNameByHandleW(
-//RS                 file: Handle,
-//RS                 path: *mut u16,
-//RS                 path_len: u32,
-//RS                 flags: u32,
-//RS             ) -> u32;
-//RS             fn SetFileInformationByHandle(
-//RS                 file: Handle,
-//RS                 class: i32,
-//RS                 info: *mut c_void,
-//RS                 size: u32,
-//RS             ) -> i32;
-//RS             fn FlushFileBuffers(file: Handle) -> i32;
-//RS         }
-//RS 
-//RS         fn wide(value: &OsStr) -> Vec<u16> {
-//RS             value.encode_wide().chain(std::iter::once(0)).collect()
-//RS         }
-//RS 
-//RS         fn normalize(path: String) -> String {
-//RS             let path = path.replace('/', "\\");
-//RS             let path = if let Some(path) = path.strip_prefix(r"\\?\UNC\") {
-//RS                 format!(r"\\{path}")
-//RS             } else {
-//RS                 path.strip_prefix(r"\\?\").unwrap_or(&path).to_string()
-//RS             };
-//RS             path.trim_end_matches(['\\', '/']).to_ascii_lowercase()
-//RS         }
-//RS 
-//RS         fn final_path(file: &File) -> std::io::Result<String> {
-//RS             let needed = unsafe {
-//RS                 GetFinalPathNameByHandleW(file.as_raw_handle(), std::ptr::null_mut(), 0, 0)
-//RS             };
-//RS             if needed == 0 {
-//RS                 return Err(std::io::Error::last_os_error());
-//RS             }
-//RS             let mut buffer = vec![0u16; needed as usize + 1];
-//RS             let written = unsafe {
-//RS                 GetFinalPathNameByHandleW(
-//RS                     file.as_raw_handle(),
-//RS                     buffer.as_mut_ptr(),
-//RS                     buffer.len() as u32,
-//RS                     0,
-//RS                 )
-//RS             };
-//RS             if written == 0 || written as usize >= buffer.len() {
-//RS                 return Err(std::io::Error::last_os_error());
-//RS             }
-//RS             buffer.truncate(written as usize);
-//RS             Ok(String::from_utf16_lossy(&buffer))
-//RS         }
-//RS 
-//RS         fn file_id(file: &File) -> std::io::Result<(u64, u64, u32)> {
-//RS             let mut info = ByHandleFileInformation {
-//RS                 attributes: 0,
-//RS                 creation_low: 0,
-//RS                 creation_high: 0,
-//RS                 access_low: 0,
-//RS                 access_high: 0,
-//RS                 write_low: 0,
-//RS                 write_high: 0,
-//RS                 volume: 0,
-//RS                 size_high: 0,
-//RS                 size_low: 0,
-//RS                 links: 0,
-//RS                 index_high: 0,
-//RS                 index_low: 0,
-//RS             };
-//RS             if unsafe { GetFileInformationByHandle(file.as_raw_handle(), &mut info) } == 0 {
-//RS                 return Err(std::io::Error::last_os_error());
-//RS             }
-//RS             Ok((
-//RS                 info.volume as u64,
-//RS                 ((info.index_high as u64) << 32) | info.index_low as u64,
-//RS                 info.links,
-//RS             ))
-//RS         }
-//RS 
-//RS         fn check_reparse_handle(file: &File) -> std::io::Result<()> {
-//RS             let mut info = FileAttributeTagInfo {
-//RS                 attributes: 0,
-//RS                 reparse_tag: 0,
-//RS             };
-//RS             if unsafe {
-//RS                 GetFileInformationByHandleEx(
-//RS                     file.as_raw_handle(),
-//RS                     FILE_ATTRIBUTE_TAG_INFO_CLASS,
-//RS                     (&mut info as *mut FileAttributeTagInfo).cast(),
-//RS                     std::mem::size_of::<FileAttributeTagInfo>() as u32,
-//RS                 )
-//RS             } == 0
-//RS             {
-//RS                 return Err(std::io::Error::last_os_error());
-//RS             }
-//RS             if info.attributes & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
-//RS                 return Err(std::io::Error::new(
-//RS                     std::io::ErrorKind::PermissionDenied,
-//RS                     "devserver path contains a Windows reparse point",
-//RS                 ));
-//RS             }
-//RS             Ok(())
-//RS         }
-//RS 
-//RS         fn check_regular(file: &File) -> std::io::Result<(u64, u64)> {
-//RS             check_reparse_handle(file)?;
-//RS             if !file.metadata()?.is_file() {
-//RS                 return Err(std::io::Error::new(
-//RS                     std::io::ErrorKind::PermissionDenied,
-//RS                     "devserver object is not a regular file",
-//RS                 ));
-//RS             }
-//RS             let (volume, index, links) = file_id(file)?;
-//RS             if links != 1 {
-//RS                 return Err(std::io::Error::new(
-//RS                     std::io::ErrorKind::PermissionDenied,
-//RS                     "devserver file has multiple hard links",
-//RS                 ));
-//RS             }
-//RS             Ok((volume, index))
-//RS         }
-//RS 
-//RS         pub(super) fn check_opened_file(file: &File) -> std::io::Result<()> {
-//RS             check_regular(file).map(|_| ())
-//RS         }
-//RS 
-//RS         pub(super) fn validate_source(path: &Path) -> std::io::Result<()> {
-//RS             reject_reparse_components(path)?;
-//RS             let file = open_existing(path, GENERIC_READ, false, false, false)?;
-//RS             check_regular(&file).map(|_| ())
-//RS         }
-//RS 
-//RS         fn check_directory(file: &File) -> std::io::Result<()> {
-//RS             check_reparse_handle(file)?;
-//RS             if !file.metadata()?.is_dir() {
-//RS                 return Err(std::io::Error::new(
-//RS                     std::io::ErrorKind::PermissionDenied,
-//RS                     "devserver object is not a real directory",
-//RS                 ));
-//RS             }
-//RS             Ok(())
-//RS         }
-//RS 
-//RS         fn is_reparse(path: &Path) -> std::io::Result<bool> {
-//RS             let value = wide(path.as_os_str());
-//RS             let attributes = unsafe { GetFileAttributesW(value.as_ptr()) };
-//RS             if attributes == u32::MAX {
-//RS                 return Err(std::io::Error::last_os_error());
-//RS             }
-//RS             Ok(attributes & FILE_ATTRIBUTE_REPARSE_POINT != 0)
-//RS         }
-//RS 
-//RS         fn reject_reparse_components(path: &Path) -> std::io::Result<()> {
-//RS             let normalized = path
-//RS                 .to_string_lossy()
-//RS                 .replace('/', "\\")
-//RS                 .to_ascii_lowercase();
-//RS             if normalized.starts_with("\\\\.\\")
-//RS                 || normalized.starts_with("\\\\?\\")
-//RS                 || normalized.starts_with("\\??\\")
-//RS                 || normalized.starts_with("\\device\\")
-//RS                 || normalized.starts_with("\\globalroot\\")
-//RS             {
-//RS                 return Err(std::io::Error::new(
-//RS                     std::io::ErrorKind::PermissionDenied,
-//RS                     "devserver path contains a Windows device namespace",
-//RS                 ));
-//RS             }
-//RS             let mut current = PathBuf::new();
-//RS             for component in path.components() {
-//RS                 match component {
-//RS                     Component::Prefix(_) | Component::RootDir => {
-//RS                         current.push(component.as_os_str());
-//RS                     }
-//RS                     Component::CurDir => {}
-//RS                     Component::Normal(value) => {
-//RS                         if !super::jet_devserver_windows_component_is_safe(value) {
-//RS                             return Err(std::io::Error::new(
-//RS                                 std::io::ErrorKind::PermissionDenied,
-//RS                                 "devserver path contains an ADS, reserved, or invalid Windows name",
-//RS                             ));
-//RS                         }
-//RS                         current.push(value);
-//RS                         if is_reparse(&current)? {
-//RS                             return Err(std::io::Error::new(
-//RS                                 std::io::ErrorKind::PermissionDenied,
-//RS                                 "devserver path contains a Windows reparse point",
-//RS                             ));
-//RS                         }
-//RS                     }
-//RS                     Component::ParentDir => {
-//RS                         return Err(std::io::Error::new(
-//RS                             std::io::ErrorKind::InvalidInput,
-//RS                             "devserver path contains parent traversal",
-//RS                         ));
-//RS                     }
-//RS                 }
-//RS             }
-//RS             Ok(())
-//RS         }
-//RS 
-//RS         fn open_existing_with_share(
-//RS             path: &Path,
-//RS             access: u32,
-//RS             write: bool,
-//RS             create_new: bool,
-//RS             directory: bool,
-//RS             share: u32,
-//RS         ) -> std::io::Result<File> {
-//RS             let mut options = std::fs::OpenOptions::new();
-//RS             options.read(true);
-//RS             if write {
-//RS                 options.write(true);
-//RS             }
-//RS             if create_new {
-//RS                 options.create_new(true);
-//RS             }
-//RS             options
-//RS                 .access_mode(access)
-//RS                 .share_mode(share)
-//RS                 .custom_flags(
-//RS                     FILE_FLAG_OPEN_REPARSE_POINT
-//RS                         | if directory {
-//RS                             FILE_FLAG_BACKUP_SEMANTICS
-//RS                         } else {
-//RS                             0
-//RS                         },
-//RS                 )
-//RS                 .open(path)
-//RS         }
-//RS 
-//RS         fn open_existing(
-//RS             path: &Path,
-//RS             access: u32,
-//RS             write: bool,
-//RS             create_new: bool,
-//RS             directory: bool,
-//RS         ) -> std::io::Result<File> {
-//RS             open_existing_with_share(path, access, write, create_new, directory, FILE_SHARE_ALL)
-//RS         }
-//RS 
-// END-PORT-PENDING 0174 crates/jet-codegen/src/Prelude/DevServer.rs:1-1797
+use std.fs.[File]
+use std.io.[BufRead, BufReader, Read, Write, Error, ErrorKind]
+use std.net.[TcpListener, TcpStream]
+use std.process.[Command, Output, Stdio]
+use std.sync.atomic.[AtomicBool, AtomicU64, AtomicUsize, Ordering]
+use std.sync.[Arc, Mutex]
+use std.rc.Rc
+use std.cell.RefCell
+use std.time.[Duration, Instant, SystemTime]
+use std.[fs, env, process, thread, io]
+use core.array.Array
+use core.web.runtime.dev_server_02.[jet_devserver_open_output_root, jet_devserver_create_staging, jet_devserver_publish_build, jet_devserver_cleanup_staging, jet_devserver_prepare_build_command, jet_devserver_open_beneath, jet_devserver_open_held_beneath, jet_devserver_validate_source, jet_devserver_check_opened_file, jet_devserver_static_relative_path, jet_devserver_windows_component_is_safe, jet_devserver_windows_components_are_safe, jet_devserver_content_type_for, jet_devserver_live_reload_script, jet_devserver_write_response, jet_devserver_write_response_parts]
+
+// Rust: crates/jet-codegen/src/Prelude/DevServer.rs:1
+// The standalone dev entry rebuilds through the real jet subprocess. Native
+// authority, sockets, pipes, threads and atomics stay at audited kernel leaves.
+// Rust: crates/jet-codegen/src/Prelude/DevServer.rs:32
+JET_DEVSERVER_PORT_RANGE :: U16{8080}..=U16{8089}
+// Rust: crates/jet-codegen/src/Prelude/DevServer.rs:36
+JET_DEVSERVER_LIVE_RELOAD_POLL_MS :: U64{400}
+// Rust: crates/jet-codegen/src/Prelude/DevServer.rs:37
+JET_DEVSERVER_MAX_LINE_BYTES :: 8 * 1024
+// Rust: crates/jet-codegen/src/Prelude/DevServer.rs:38
+JET_DEVSERVER_MAX_HEADER_BYTES :: 32 * 1024
+// Rust: crates/jet-codegen/src/Prelude/DevServer.rs:39
+JET_DEVSERVER_MAX_HEADER_COUNT :: 100
+// Rust: crates/jet-codegen/src/Prelude/DevServer.rs:40
+JET_DEVSERVER_MAX_CONNECTION_THREADS :: 64
+// Rust: crates/jet-codegen/src/Prelude/DevServer.rs:41
+JET_DEVSERVER_MAX_REQUEST_BODY_BYTES :: 1024 * 1024
+// Rust: crates/jet-codegen/src/Prelude/DevServer.rs:42
+JET_DEVSERVER_MAX_RESPONSE_BYTES :: 64 * 1024 * 1024
+// Rust: crates/jet-codegen/src/Prelude/DevServer.rs:43
+JET_DEVSERVER_MAX_CHILD_OUTPUT_BYTES :: 8 * 1024 * 1024
+// Rust: crates/jet-codegen/src/Prelude/DevServer.rs:44
+JET_DEVSERVER_REQUEST_DEADLINE :: Duration.from_secs(U64{10})
+// Rust: crates/jet-codegen/src/Prelude/DevServer.rs:45
+static JET_DEVSERVER_STAGING_COUNTER: AtomicU64 = AtomicU64.new(U64{0})
+// Rust: crates/jet-codegen/src/Prelude/DevServer.rs:47
+struct JetDevServerState { app_file: String, html_override: String?, port: U16? }
+// Rust: crates/jet-codegen/src/Prelude/DevServer.rs:53
+struct JetDevServerOutputRoot { directory: File, publication_lock: Arc<Mutex<()>> }
+// Rust: crates/jet-codegen/src/Prelude/DevServer.rs:58
+struct JetDevServerStaging { path: OSPath, name: String, source_stem: String, directory: File }
+impl JetDevServerOutputRoot {
+    // Rust: crates/jet-codegen/src/Prelude/DevServer.rs:66
+    // GATE #4565: kernel primitive
+    #Unsafe("each retained output root owns one shared publication mutex")
+    fn new(directory: ^File) -> JetDevServerOutputRoot { JetDevServerOutputRoot{directory: ^directory, publication_lock: Arc.new(Mutex.new(()))} }
+    // Rust: crates/jet-codegen/src/Prelude/DevServer.rs:73
+    // GATE #4565: kernel primitive
+    #Unsafe("duplicate the held directory descriptor while sharing the publication lock")
+    fn clone_directory(self) -> JetDevServerOutputRoot Error! {
+        Ok(JetDevServerOutputRoot{directory: self.directory.try_clone()?, publication_lock: Arc.clone(self.publication_lock)})
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/DevServer.rs:85
+pub struct JetDevServer { state: Rc<RefCell<JetDevServerState>> }
+// Rust: crates/jet-codegen/src/Prelude/DevServer.rs:90
+// GATE #4565: kernel primitive
+#Unsafe("resolve the watched path once against actual cwd; retain the original spelling on failure")
+pub fn jet_devserver_for_app(file: String) -> JetDevServer {
+    resolved :: fs.canonicalize(OSPath.from_text(file)).map(p -> p.display().to_string()).unwrap_or_else(_ -> file.to_string())
+    JetDevServer{state: Rc.new(RefCell.new(JetDevServerState{app_file: ^resolved, html_override: None, port: None}))}
+}
+// Rust: crates/jet-codegen/src/Prelude/DevServer.rs:117
+// GATE #4565: kernel primitive
+#Unsafe("read the dev launch environment; fail the actual process if the launch contract is absent")
+pub fn jet_devserver_app() -> JetDevServer {
+    match env.var("JET_DEV_FILE") {
+        Ok(file) if !file.is_empty() -> jet_devserver_for_app(file)
+        _ -> {
+            eprintln("error: `devserver.app()` only works under `jet dev`")
+            eprintln(" why: it watches \"the file jet dev launched\", which the `jet dev` command passes in as JET_DEV_FILE — running this binary directly leaves that unset")
+            eprintln(" fix: run `jet dev <file.jet>`, or name the file explicitly with `devserver.for_app(\"path/to/app.jet\")`")
+            process.exit(1)
+        }
+    }
+}
+impl JetDevServer {
+    // Rust: crates/jet-codegen/src/Prelude/DevServer.rs:138
+    pub fn html(self, path: ^String) -> JetDevServer {
+        self.state.borrow_mut().html_override = Val(^path)
+        self.clone()
+    }
+    // Rust: crates/jet-codegen/src/Prelude/DevServer.rs:146
+    // GATE #4565: kernel primitive
+    #Unsafe("invalid ports fail the actual dev process rather than narrowing into another port")
+    pub fn port(self, n: I64) -> JetDevServer {
+        if !(I64{1}..=I64{65535}).contains(n) {
+            eprintln("error: `.port({n})` isn't a valid port number")
+            eprintln(" fix: use a number from 1 to 65535")
+            process.exit(1)
+        }
+        self.state.borrow_mut().port = Val(U16{n})
+        self.clone()
+    }
+    // Rust: crates/jet-codegen/src/Prelude/DevServer.rs:159
+    // GATE #4565: kernel primitive
+    #Unsafe("serve held build authority on a real listener; watch actual mtimes and publish only successful rebuilds")
+    pub fn serve(self) -> {
+        (app_file, html_override, port_pref) :: {
+            s :: self.state.borrow()
+            (s.app_file.clone(), s.html_override.clone(), s.port)
+        }
+        app_path :: OSPath.from_text(app_file)
+        if !app_path.exists() {
+            eprintln("error: can't find the file `{app_file}`")
+            eprintln(" fix: check the path passed to `devserver.for_app(...)`")
+            process.exit(1)
+        }
+        output_root :: match jet_devserver_rebuild(app_file, html_override.as_deref(), false, None) {
+            Val(root) -> Arc.new(^root)
+            None -> process.exit(1)
+        }
+        version :: Arc.new(AtomicU64.new(U64{1}))
+        listener :: jet_devserver_bind(port_pref)
+        bound_port :: listener.local_addr().map(a -> a.port()).unwrap_or(U16{8080})
+        {
+            version :: Arc.clone(version)
+            output_root :: Arc.clone(output_root)
+            _ :: thread.spawn(fn() { jet_devserver_serve_forever(^listener, ^version, ^output_root) })
+        }
+        println("App preview: http://127.0.0.1:{bound_port}/")
+        println("watching {app_file} … (Ctrl-C to stop)")
+        _ :: io.stdout().flush()
+        last_mtime := jet_devserver_mtime(app_path)
+        loop {
+            thread.sleep(Duration.from_millis(U64{120}))
+            now :: jet_devserver_mtime(app_path)
+            if now != last_mtime {
+                last_mtime = now
+                thread.sleep(Duration.from_millis(U64{30}))
+                if jet_devserver_rebuild(app_file, html_override.as_deref(), true, Val(output_root)).is_some() {
+                    _ :: version.fetch_add(U64{1}, Ordering.SeqCst)
+                }
+            }
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/DevServer.rs:216
+// GATE #4565: kernel primitive
+#Unsafe("read actual source metadata and modification time without substituting a fake timestamp")
+fn jet_devserver_mtime(path: OSPath) -> SystemTime? { fs.metadata(path).and_then(m -> m.modified()).ok() }
+// Rust: crates/jet-codegen/src/Prelude/DevServer.rs:223
+// GATE #4565: kernel primitive
+#Unsafe("bind only loopback sockets; preserve address-in-use fallback and actual failure diagnostics")
+fn jet_devserver_bind(port: U16?) -> TcpListener {
+    if port is Val(port) {
+        return match TcpListener.bind(("127.0.0.1", port)) {
+            Ok(listener) -> ^listener
+            Err(e) -> {
+                eprintln("error: couldn't bind to port {port}: {e}")
+                if e.kind() == ErrorKind.AddrInUse -> eprintln(" fix: stop whatever's using port {port}, or pick another with `.port(n)`")
+                process.exit(1)
+            }
+        }
+    }
+    loop port in JET_DEVSERVER_PORT_RANGE {
+        match TcpListener.bind(("127.0.0.1", port)) {
+            Ok(listener) -> return ^listener
+            Err(e) if e.kind() == ErrorKind.AddrInUse -> next
+            Err(e) -> { eprintln("error: couldn't start the dev server: {e}"); process.exit(1) }
+        }
+    }
+    eprintln("error: every port from 8080 to 8089 is already in use")
+    eprintln(" fix: free one of those ports, or pick one explicitly with `.port(n)`")
+    process.exit(1)
+}
+// Rust: crates/jet-codegen/src/Prelude/DevServer.rs:261
+// GATE #4565: kernel primitive
+#Unsafe("forward exact indexed environment settings into the owned build command")
+fn jet_devserver_forward_build_profile_and_settings(command: &Command) -> {
+    if env.var("JET_DEV_PROFILE") is Ok(profile) {
+        if !profile.is_empty() -> _ :: command.arg("--profile={profile}")
+    }
+    if env.var_os("JET_DEV_SMALL").is_some() -> _ :: command.arg("--small")
+    count :: env.var("JET_DEV_SETTING_COUNT").ok().and_then(value -> value.parse<USize>().ok()).unwrap_or(0)
+    loop index in 0..<count {
+        key :: env.var("JET_DEV_SETTING_{index}_KEY").ok()
+        value :: env.var("JET_DEV_SETTING_{index}_VALUE").ok()
+        if (key, value) is (Val(key), Val(value)) -> _ :: command.arg("--set={key}={value}")
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/DevServer.rs:293
+// GATE #4565: kernel primitive
+#Unsafe("rebuild in fresh held staging authority, relay actual diagnostics and clean staging on every reported failure")
+fn jet_devserver_rebuild(app_file: String, html_override: String?, is_rebuild: Bool, held_output_root: JetDevServerOutputRoot?) -> JetDevServerOutputRoot? {
+    abs_file :: match fs.canonicalize(OSPath.from_text(app_file)) {
+        Ok(p) -> ^p
+        Err(e) -> { eprintln("error: couldn't resolve `{app_file}`: {e}"); return None }
+    }
+    if jet_devserver_validate_source(abs_file) is Err(e) {
+        eprintln("error: source file is not safe to compile: {e}")
+        return None
+    }
+    out_dir :: match jet_devserver_build_dir() {
+        Ok(path) -> ^path
+        Err(e) -> { eprintln("error: web output directory is not safe: {e}"); return None }
+    }
+    output_root :: match held_output_root {
+        Val(root) -> match root.clone_directory() {
+            Ok(root) -> ^root
+            Err(e) -> { eprintln("error: couldn't clone the held web output directory: {e}"); return None }
+        }
+        None -> match jet_devserver_open_output_root(out_dir) {
+            Ok(root) -> ^root
+            Err(e) -> { eprintln("error: web output directory is not safe: {e}"); return None }
+        }
+    }
+    staging_name :: ".jet-devserver-staging-{process.id()}-{JET_DEVSERVER_STAGING_COUNTER.fetch_add(U64{1}, Ordering.Relaxed)}"
+    staging_root :: out_dir.join(staging_name)
+    source_stem :: jet_devserver_source_stem(abs_file)
+    staging :: match jet_devserver_create_staging(output_root, staging_root, source_stem) {
+        Ok(staging) -> ^staging
+        Err(e) -> { eprintln("error: couldn't create a staging folder for the rebuild: {e}"); return None }
+    }
+    jet_bin :: env.var("JET_BIN").unwrap_or_else(_ -> "jet")
+    command := Command.new(jet_bin)
+    _ :: command.args(["build", "--target=web"]).arg(abs_file)
+    jet_devserver_forward_build_profile_and_settings(&command)
+    command_guard :: match jet_devserver_prepare_build_command(&command, staging) {
+        Ok(guard) -> ^guard
+        Err(e) -> {
+            eprintln("error: couldn't hold the build staging directory: {e}")
+            _ :: jet_devserver_cleanup_staging(output_root, staging)
+            return None
+        }
+    }
+    out :: jet_devserver_command_output_bounded(&command, JET_DEVSERVER_MAX_CHILD_OUTPUT_BYTES)
+    drop(^command_guard)
+    out :: match out {
+        Ok(o) -> ^o
+        Err(e) -> {
+            eprintln("error: couldn't run `{jet_bin} build --target=web`: {e}")
+            eprintln(" fix: make sure `jet` is on PATH, or run this program via `jet dev` (which passes its own path in JET_BIN)")
+            _ :: jet_devserver_cleanup_staging(output_root, staging)
+            return None
+        }
+    }
+    if !out.status.success() {
+        if is_rebuild -> eprintln("\n— {app_file} changed —")
+        _ :: io.stderr().write_all(out.stdout)
+        _ :: io.stderr().write_all(out.stderr)
+        _ :: jet_devserver_cleanup_staging(output_root, staging)
+        return None
+    }
+    html_bytes := None
+    if html_override is Val(html_path) {
+        source_dir :: OSPath.from_text(app_file).parent().unwrap_or(OSPath.from_text("."))
+        match jet_devserver_read_inside(source_dir, html_path) {
+            Ok(bytes) -> html_bytes = Val(^bytes)
+            Err(e) -> {
+                eprintln("error: `.html(\"{html_path}\")` names a file that doesn't exist: {e}")
+                _ :: jet_devserver_cleanup_staging(output_root, staging)
+                return None
+            }
+        }
+    }
+    if jet_devserver_publish_build(output_root, staging, html_bytes.as_deref()) is Err(e) {
+        eprintln("error: couldn't finalize web build: {e}")
+        _ :: jet_devserver_cleanup_staging(output_root, staging)
+        return None
+    }
+    _ :: jet_devserver_cleanup_staging(output_root, staging)
+    if is_rebuild -> eprintln("[dev] rebuilt after change to {app_file}")
+    Val(^output_root)
+}
+// Rust: crates/jet-codegen/src/Prelude/DevServer.rs:430
+// GATE #4565: kernel primitive
+#Unsafe("own the actual build child and both pipe-reader threads; kill and reap on shared budget or read failure")
+fn jet_devserver_command_output_bounded(command: &Command, limit: USize) -> Output Error! {
+    child := command.stdout(Stdio.piped()).stderr(Stdio.piped()).spawn()?
+    stdout :: child.stdout.take().ok_or_else(fn() { Error.new(ErrorKind.Other, "build stdout pipe was not available") })
+    stderr :: child.stderr.take().ok_or_else(fn() { Error.new(ErrorKind.Other, "build stderr pipe was not available") })
+    (stdout, stderr) :: match (stdout, stderr) {
+        (Ok(stdout), Ok(stderr)) -> (^stdout, ^stderr)
+        (stdout, stderr) -> {
+            _ :: child.kill()
+            _ :: child.wait()
+            return Err(stdout.err().or_else(fn() { stderr.err() }).expect("missing build pipe error"))
+        }
+    }
+    budget :: Arc.new(AtomicUsize.new(0))
+    exceeded :: Arc.new(AtomicBool.new(false))
+    read_failed :: Arc.new(AtomicBool.new(false))
+    stdout_join :: jet_devserver_spawn_output_reader(^stdout, limit, Arc.clone(budget), Arc.clone(exceeded), Arc.clone(read_failed))
+    stderr_join :: jet_devserver_spawn_output_reader(^stderr, limit, ^budget, Arc.clone(exceeded), Arc.clone(read_failed))
+    status :: loop {
+        if exceeded.load(Ordering.Acquire) || read_failed.load(Ordering.Acquire) {
+            _ :: child.kill()
+            break child.wait()?
+        }
+        match child.try_wait()? { Val(status) -> break status, None -> thread.sleep(Duration.from_millis(U64{1})) }
+    }
+    stdout :: stdout_join.join().map_err(_ -> Error.new(ErrorKind.Other, "build stdout reader panicked"))??
+    stderr :: stderr_join.join().map_err(_ -> Error.new(ErrorKind.Other, "build stderr reader panicked"))??
+    if exceeded.load(Ordering.Acquire) -> return Err(Error.new(ErrorKind.InvalidData, "build child output exceeds the aggregate output budget"))
+    Ok(Output{status: status, stdout: ^stdout, stderr: ^stderr})
+}
+// Rust: crates/jet-codegen/src/Prelude/DevServer.rs:507
+// GATE #4565: kernel primitive
+#Unsafe("transfer one real read pipe to its joined thread; reserve bounded aggregate bytes by compare-exchange")
+fn jet_devserver_spawn_output_reader<R: Read + Send>(reader: ^R, limit: USize, budget: ^Arc<AtomicUsize>, exceeded: ^Arc<AtomicBool>, read_failed: ^Arc<AtomicBool>) -> thread.JoinHandle<[U8] Error!> {
+    thread.spawn(fn() {
+        reader := ^reader
+        bytes := [U8]{}
+        chunk := Array<U8, 8192>.from_fn(_ -> U8{0})
+        loop {
+            count :: match reader.read(&chunk) {
+                Ok(count) -> count
+                Err(error) -> { read_failed.store(true, Ordering.Release); return Err(^error) }
+            }
+            if count == 0 -> return Ok(^bytes)
+            used := budget.load(Ordering.Acquire)
+            kept :: loop {
+                available :: limit.saturating_sub(used)
+                kept :: available.min(count)
+                next_used :: used.saturating_add(kept)
+                match budget.compare_exchange(used, next_used, Ordering.AcqRel, Ordering.Acquire) {
+                    Ok(_) -> break kept
+                    Err(next_used) -> used = next_used
+                }
+            }
+            if kept < count { exceeded.store(true, Ordering.Release); return Ok(^bytes) }
+            bytes.extend_from_slice(chunk[0..<count])
+        }
+    })
+}
+// Rust: crates/jet-codegen/src/Prelude/DevServer.rs:550
+fn jet_devserver_source_stem(path: OSPath) -> String {
+    path.file_stem().map(name -> name.to_string_lossy().into_owned()).unwrap_or_else(fn() { "out" }).replace('.', "_")
+}
+// Rust: crates/jet-codegen/src/Prelude/DevServer.rs:557
+// GATE #4565: kernel primitive
+#Unsafe("canonicalize selected project root and output, rejecting escape after real directory validation")
+fn jet_devserver_build_dir() -> OSPath Err! {
+    root :: env.var_os("JET_PROJECT_ROOT").map(OSPath.from).ok_or_else(fn() { "JET_PROJECT_ROOT is required under `jet dev`" })?
+    if !root.is_absolute() -> return Err("JET_PROJECT_ROOT must be absolute")
+    root :: fs.canonicalize(root).map_err(e -> e.to_string())?
+    build :: root.join(".jet").join("build")
+    jet_devserver_ensure_directory(build).map_err(e -> e.to_string())?
+    real :: fs.canonicalize(build).map_err(e -> e.to_string())?
+    if !real.starts_with(root) -> return Err("web output directory escapes the selected project root")
+    Ok(^real)
+}
+// Rust: crates/jet-codegen/src/Prelude/DevServer.rs:573
+// GATE #4565: kernel primitive
+#Unsafe("inspect symlink metadata before recursively creating directories; preserve native error kinds")
+fn jet_devserver_ensure_directory(path: OSPath) -> () Error! {
+    match fs.symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() -> Err(Error.new(ErrorKind.PermissionDenied, "directory must not be a symlink"))
+        Ok(metadata) if metadata.is_dir() -> Ok(())
+        Ok(_) -> Err(Error.new(ErrorKind.AlreadyExists, "path is not a directory"))
+        Err(error) if error.kind() == ErrorKind.NotFound -> {
+            if path.parent().filter(parent -> !parent.as_os_str().is_empty()) is Val(parent) -> jet_devserver_ensure_directory(parent)?
+            fs.create_dir(path)
+        }
+        Err(error) -> Err(^error)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/DevServer.rs:597
+JET_DEVSERVER_OUTPUT_FILES :: ["web.manifest.json", "jet_dom_runtime.js", "app.js", "app_wasm.rs", "app.wasm", "index.html"]
+// Rust: crates/jet-codegen/src/Prelude/DevServer.rs:605
+JET_DEVSERVER_STAGING_FILES :: ["web.manifest.json", "jet_dom_runtime.js", "app.js", "app.js.map", "app_wasm.rs", "app.wasm", "app.wasm.map", "index.html"]
+
+// Rust: crates/jet-codegen/src/Prelude/DevServer.rs:616
+// JET_VETTED_UNSAFE_BEGIN: jet_devserver_unix_output
+// Rust: crates/jet-codegen/src/Prelude/DevServer.rs:618
+module jet_devserver_unix_output {
+    use std.ffi.[CString, OsStr]
+    use std.os.fd.[AsRawFd, FromRawFd]
+    use std.os.unix.ffi.OsStrExt
+    use std.os.unix.fs.[MetadataExt, OpenOptionsExt]
+    use std.path.Component
+    use core.sys.target as target
+    // Rust: crates/jet-codegen/src/Prelude/DevServer.rs:652-660
+    // Canonical C declarations are owned by core.sys.host.unix_fd.
+    use c.c.[mkdirat, openat, renameat, unlinkat]
+    // Rust: crates/jet-codegen/src/Prelude/DevServer.rs:1049
+    #Import module c.c { fn fchdir(directory: I32) -> I32 = "fchdir" }
+    use c.c.fchdir
+
+    // Rust: crates/jet-codegen/src/Prelude/DevServer.rs:625
+    O_RDONLY :: I32{0}
+    // Rust: crates/jet-codegen/src/Prelude/DevServer.rs:626
+    O_WRONLY :: I32{1}
+    // Rust: crates/jet-codegen/src/Prelude/DevServer.rs:627
+    O_CREAT :: I32{0o100}
+    // Rust: crates/jet-codegen/src/Prelude/DevServer.rs:628
+    O_EXCL :: I32{0o200}
+    // Rust: crates/jet-codegen/src/Prelude/DevServer.rs:629
+    O_CLOEXEC :: if target.selected_os() == .Linux || target.selected_os() == .Android { I32{0o2000000} } else { I32{0x01000000} }
+    // Rust: crates/jet-codegen/src/Prelude/DevServer.rs:634
+    O_DIRECTORY :: if target.selected_os() == .Linux || target.selected_os() == .Android { I32{0o200000} } else { I32{0x00100000} }
+    // Rust: crates/jet-codegen/src/Prelude/DevServer.rs:639
+    O_NOFOLLOW :: if target.selected_os() == .Linux || target.selected_os() == .Android { I32{0o400000} } else { I32{0x0100} }
+    // Rust: crates/jet-codegen/src/Prelude/DevServer.rs:644
+    O_NONBLOCK :: if target.selected_os() == .Linux || target.selected_os() == .Android { I32{0o4000} } else { I32{0x0004} }
+    // Rust: crates/jet-codegen/src/Prelude/DevServer.rs:649
+    AT_REMOVEDIR :: I32{0x200}
+
+    // Rust: crates/jet-codegen/src/Prelude/DevServer.rs:663
+    fn name(value: OsStr) -> CString Error! {
+        CString.new(value.as_bytes()).map_err(_ -> Error.new(ErrorKind.InvalidInput, "devserver path contains NUL"))
+    }
+    // Rust: crates/jet-codegen/src/Prelude/DevServer.rs:672
+    // GATE #4565: kernel primitive
+    #Unsafe("read identity and link count from the held file, not from its pathname")
+    fn check_regular(file: File) -> (U64, U64) Error! {
+        metadata :: file.metadata()?
+        if !metadata.is_file() || metadata.nlink() != 1 {
+            return Err(Error.new(ErrorKind.PermissionDenied, "devserver file is linked or not regular"))
+        }
+        Ok((metadata.dev(), metadata.ino()))
+    }
+    // Rust: crates/jet-codegen/src/Prelude/DevServer.rs:683
+    pub fn check_opened_file(file: File) -> () Error! { check_regular(file).map(_ -> ()) }
+    // Rust: crates/jet-codegen/src/Prelude/DevServer.rs:687
+    // GATE #4565: kernel primitive
+    #Unsafe("open source without following symlinks or blocking on nonregular objects")
+    pub fn validate_source(path: OSPath) -> () Error! {
+        file :: fs.OpenOptions.new().read(true).custom_flags(O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK).open(path)?
+        check_regular(file).map(_ -> ())
+    }
+    // Rust: crates/jet-codegen/src/Prelude/DevServer.rs:695
+    // GATE #4565: kernel primitive
+    #Unsafe("retain no-follow directory authority and compare the opened identity against metadata")
+    pub fn open_root(path: OSPath) -> JetDevServerOutputRoot Error! {
+        expected :: fs.metadata(path)?
+        directory :: fs.OpenOptions.new().read(true).custom_flags(O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC).open(path)?
+        actual :: directory.metadata()?
+        if !expected.is_dir() || actual.dev() != expected.dev() || actual.ino() != expected.ino() {
+            return Err(Error.new(ErrorKind.PermissionDenied, "devserver output root changed during secure open"))
+        }
+        Ok(JetDevServerOutputRoot.new(^directory))
+    }
+    // Rust: crates/jet-codegen/src/Prelude/DevServer.rs:714
+    // GATE #4565: kernel primitive
+    #Unsafe("open one no-follow directory component relative to held parent authority; own returned fd")
+    pub fn open_dir_at(parent: File, value: OsStr) -> File Error! {
+        value :: name(value)?
+        fd :: openat(parent.as_raw_fd(), value.as_ptr(), O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC, U32{0})
+        if fd < 0 -> return Err(Error.last_os_error())
+        Ok(File.from_raw_fd(fd))
+    }
+    // Rust: crates/jet-codegen/src/Prelude/DevServer.rs:730
+    // GATE #4565: kernel primitive
+    #Unsafe("open one no-follow nonblocking file relative to held parent authority; own returned fd")
+    fn open_file_at(parent: File, value: OsStr, write: Bool) -> File Error! {
+        value :: name(value)?
+        flags :: if write { O_WRONLY } else { O_RDONLY }
+        fd :: openat(parent.as_raw_fd(), value.as_ptr(), flags | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK, U32{0})
+        if fd < 0 -> return Err(Error.last_os_error())
+        Ok(File.from_raw_fd(fd))
+    }
+    // Rust: crates/jet-codegen/src/Prelude/DevServer.rs:747
+    // GATE #4565: kernel primitive
+    #Unsafe("unlink only the named component beneath held parent authority")
+    fn unlink_at(parent: File, value: OsStr, flags: I32) -> () Error! {
+        value :: name(value)?
+        if unlinkat(parent.as_raw_fd(), value.as_ptr(), flags) != 0 -> return Err(Error.last_os_error())
+        Ok(())
+    }
+    // Rust: crates/jet-codegen/src/Prelude/DevServer.rs:755
+    fn check_existing(parent: File, value: OsStr) -> Bool Error! {
+        match open_file_at(parent, value, false) {
+            Ok(file) -> { _ :: check_regular(file)?; Ok(true) }
+            Err(error) if error.kind() == ErrorKind.NotFound -> Ok(false)
+            Err(error) -> Err(^error)
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/DevServer.rs:766
+    // GATE #4565: kernel primitive
+    #Unsafe("rename between held directory descriptors using checked NUL-free names")
+    fn rename_at(old_parent: File, old_name: OsStr, new_parent: File, new_name: OsStr) -> () Error! {
+        old_name :: name(old_name)?
+        new_name :: name(new_name)?
+        if renameat(old_parent.as_raw_fd(), old_name.as_ptr(), new_parent.as_raw_fd(), new_name.as_ptr()) != 0 {
+            return Err(Error.last_os_error())
+        }
+        Ok(())
+    }
+    // Rust: crates/jet-codegen/src/Prelude/DevServer.rs:788
+    // GATE #4565: kernel primitive
+    #Unsafe("allocate a private journal with exclusive mkdirat and remove it if secure open fails")
+    fn create_publication_journal(parent: File) -> (String, File) Error! {
+        for _ in 0..100 {
+            value :: ".jet-devserver-publication-{process.id()}-{JET_DEVSERVER_STAGING_COUNTER.fetch_add(U64{1}, Ordering.Relaxed)}"
+            cname :: name(OsStr.new(value))?
+            if mkdirat(parent.as_raw_fd(), cname.as_ptr(), U32{0o700}) == 0 {
+                return match open_dir_at(parent, OsStr.new(value)) {
+                    Ok(directory) -> Ok((^value, ^directory))
+                    Err(error) -> { _ :: unlink_at(parent, OsStr.new(value), AT_REMOVEDIR); Err(^error) }
+                }
+            }
+            error :: Error.last_os_error()
+            if error.kind() != ErrorKind.AlreadyExists -> return Err(^error)
+        }
+        Err(Error.new(ErrorKind.AlreadyExists, "could not allocate a devserver publication journal"))
+    }
+    // Rust: crates/jet-codegen/src/Prelude/DevServer.rs:816
+    fn clear_publication_journal(parent: File, journal: File, journal_name: String, names: [String]) -> {
+        for value in names -> _ :: unlink_at(journal, OsStr.new(value), I32{0})
+        _ :: unlink_at(parent, OsStr.new(journal_name), AT_REMOVEDIR)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/DevServer.rs:828
+    fn rollback_publication(root: File, journal: File, backed_up: [String], published: [String]) -> {
+        for value in published.iter().rev() -> _ :: unlink_at(root, OsStr.new(value), I32{0})
+        for value in backed_up.iter().rev() -> _ :: rename_at(journal, OsStr.new(value), root, OsStr.new(value))
+    }
+    // Rust: crates/jet-codegen/src/Prelude/DevServer.rs:842
+    // GATE #4565: kernel primitive
+    #Unsafe("write and fsync a private exclusive temporary then rename and check published identity")
+    fn replace_file_at(parent: File, value: OsStr, bytes: [U8]) -> () Error! {
+        _ :: check_existing(parent, value)?
+        final_name :: name(value)?
+        temporary :: ".jet-devserver-output-{process.id()}-{JET_DEVSERVER_STAGING_COUNTER.fetch_add(U64{1}, Ordering.Relaxed)}"
+        temporary_name :: name(OsStr.new(temporary))?
+        fd :: openat(parent.as_raw_fd(), temporary_name.as_ptr(), O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, U32{0o600})
+        if fd < 0 -> return Err(Error.last_os_error())
+        temporary_file := File.from_raw_fd(fd)
+        result :: (fn() -> () Error! {
+            temporary_file.write_all(bytes)?
+            temporary_file.sync_all()?
+            temporary_id :: check_regular(temporary_file)?
+            if renameat(parent.as_raw_fd(), temporary_name.as_ptr(), parent.as_raw_fd(), final_name.as_ptr()) != 0 {
+                return Err(Error.last_os_error())
+            }
+            published :: open_file_at(parent, value, false)?
+            if check_regular(published)? != temporary_id {
+                return Err(Error.new(ErrorKind.PermissionDenied, "published devserver output identity changed"))
+            }
+            Ok(())
+        })()
+        if result is Err(error) {
+            _ :: unlink_at(parent, OsStr.new(temporary), I32{0})
+            return Err(^error)
+        }
+        Ok(())
+    }
+    // Rust: crates/jet-codegen/src/Prelude/DevServer.rs:893
+    // GATE #4565: kernel primitive
+    #Unsafe("create private staging beneath the retained output directory then retain its descriptor")
+    pub fn create_staging(root: JetDevServerOutputRoot, path: OSPath, source_stem: String) -> JetDevServerStaging Error! {
+        name_value :: path.file_name().ok_or_else(fn() { Error.new(ErrorKind.InvalidInput, "staging has no name") })?
+        cname :: name(name_value)?
+        if mkdirat(root.directory.as_raw_fd(), cname.as_ptr(), U32{0o700}) != 0 -> return Err(Error.last_os_error())
+        directory :: open_dir_at(root.directory, name_value)?
+        Ok(JetDevServerStaging{path: path.to_path_buf(), name: name_value.to_string_lossy().into_owned(), source_stem: source_stem.to_string(), directory: ^directory})
+    }
+    // Rust: crates/jet-codegen/src/Prelude/DevServer.rs:914
+    fn open_relative(current: ^File, relative: OSPath) -> File Error! {
+        current := ^current
+        components :: relative.components().collect::<[_]>()
+        if components.is_empty() -> return Err(Error.new(ErrorKind.InvalidInput, "empty relative path"))
+        for component in components[..components.len() - 1] {
+            value :: match component {
+                Component.Normal(value) -> value
+                _ -> return Err(Error.new(ErrorKind.InvalidInput, "devserver path is not relative"))
+            }
+            current = open_dir_at(current, value)?
+        }
+        value :: match components.last().unwrap() {
+            Component.Normal(value) -> value
+            _ -> return Err(Error.new(ErrorKind.InvalidInput, "devserver path is not relative"))
+        }
+        file :: open_file_at(current, value, false)?
+        _ :: check_regular(file)?
+        Ok(^file)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/DevServer.rs:942
+    pub fn open_beneath(root: OSPath, relative: OSPath) -> File Error! { open_relative(^open_root(root)?.directory, relative) }
+    // Rust: crates/jet-codegen/src/Prelude/DevServer.rs:946
+    // GATE #4565: kernel primitive
+    #Unsafe("duplicate retained directory authority, never re-resolve its pathname")
+    pub fn open_held_beneath(root: JetDevServerOutputRoot, relative: OSPath) -> File Error! { open_relative(^root.directory.try_clone()?, relative) }
+    // Rust: crates/jet-codegen/src/Prelude/DevServer.rs:953
+    // GATE #4565: kernel primitive
+    #Unsafe("publish through descriptor-relative journaled renames and fsync; roll back every partial failure")
+    pub fn publish_build(root: JetDevServerOutputRoot, staging: JetDevServerStaging, html: [U8]?) -> () Error! {
+        build :: open_dir_at(staging.directory, OsStr.new("build"))?
+        if html is Val(bytes) -> replace_file_at(build, OsStr.new("index.html"), bytes)?
+        for value in JET_DEVSERVER_OUTPUT_FILES {
+            source :: open_file_at(build, OsStr.new(value), false)?
+            _ :: check_regular(source)?
+            _ :: check_existing(root.directory, OsStr.new(value))?
+        }
+        (journal_name, journal) :: create_publication_journal(root.directory)?
+        backed_up := []
+        published := []
+        result :: (fn() -> () Error! {
+            for value in JET_DEVSERVER_OUTPUT_FILES {
+                if check_existing(root.directory, OsStr.new(value))? {
+                    rename_at(root.directory, OsStr.new(value), journal, OsStr.new(value))?
+                    backed_up.push(value)
+                }
+            }
+            for value in JET_DEVSERVER_OUTPUT_FILES {
+                source :: open_file_at(build, OsStr.new(value), false)?
+                source_id :: check_regular(source)?
+                rename_at(build, OsStr.new(value), root.directory, OsStr.new(value))?
+                published.push(value)
+                published_file :: open_file_at(root.directory, OsStr.new(value), false)?
+                if check_regular(published_file)? != source_id {
+                    return Err(Error.new(ErrorKind.PermissionDenied, "published devserver output identity changed"))
+                }
+            }
+            root.directory.sync_all()
+        })()
+        if result is Err(error) {
+            rollback_publication(root.directory, journal, backed_up, published)
+            clear_publication_journal(root.directory, journal, journal_name, JET_DEVSERVER_OUTPUT_FILES)
+            return Err(^error)
+        }
+        clear_publication_journal(root.directory, journal, journal_name, JET_DEVSERVER_OUTPUT_FILES)
+        Ok(())
+    }
+    // Rust: crates/jet-codegen/src/Prelude/DevServer.rs:1021
+    pub fn cleanup(root: JetDevServerOutputRoot, staging: JetDevServerStaging) -> () Error! {
+        if open_dir_at(staging.directory, OsStr.new("build")) is Ok(build) {
+            for value in JET_DEVSERVER_STAGING_FILES -> _ :: unlink_at(build, OsStr.new(value), I32{0})
+            source :: "{staging.source_stem}.rs"
+            _ :: unlink_at(build, OsStr.new(source), I32{0})
+            _ :: unlink_at(staging.directory, OsStr.new("build"), AT_REMOVEDIR)
+        }
+        unlink_at(root.directory, OsStr.new(staging.name), AT_REMOVEDIR)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/DevServer.rs:1036
+    // GATE #4565: kernel primitive
+    #Unsafe("pre_exec captures one live staging descriptor and calls only async-signal-safe fchdir in the child")
+    pub fn prepare_build_command(command: &Command, staging: JetDevServerStaging) -> File? Error! {
+        directory :: staging.directory.as_raw_fd()
+        _ :: command.pre_exec(fn() -> () Error! {
+            if fchdir(directory) == 0 { Ok(()) } else { Err(Error.last_os_error()) }
+        })
+        Ok(None)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/DevServer.rs:1061
+// JET_VETTED_UNSAFE_END: jet_devserver_unix_output
+
+// Rust: crates/jet-codegen/src/Prelude/DevServer.rs:1063
+fn jet_devserver_read_inside(root: OSPath, relative: String) -> [U8] Error! {
+    relative :: OSPath.from_text(relative)
+    if relative.is_absolute() || relative.components().any(component -> !matches(component, std.path.Component.Normal(_))) || !jet_devserver_windows_components_are_safe(relative) {
+        return Err(Error.new(ErrorKind.PermissionDenied, "HTML path must stay inside the source directory"))
+    }
+    file :: jet_devserver_open_beneath(root, relative)?
+    jet_devserver_read_bounded(^file, JET_DEVSERVER_MAX_RESPONSE_BYTES)
+}
+// Rust: crates/jet-codegen/src/Prelude/DevServer.rs:1080
+// GATE #4565: kernel primitive
+#Unsafe("accept real sockets, limit connection threads and release their shared slot on return")
+fn jet_devserver_serve_forever(listener: ^TcpListener, version: ^Arc<AtomicU64>, output_root: ^Arc<JetDevServerOutputRoot>) -> {
+    active_connections :: Arc.new(AtomicUsize.new(USize{0}))
+    for stream in listener.incoming() {
+        if stream is Ok(stream) {
+            if !jet_devserver_try_acquire(active_connections) {
+                drop(^stream)
+                continue
+            }
+            version :: Arc.clone(version)
+            output_root :: Arc.clone(output_root)
+            active_connections :: Arc.clone(active_connections)
+            _ :: thread.spawn(fn() {
+                _ :: jet_devserver_handle_connection(^stream, version, output_root)
+                _ :: active_connections.fetch_sub(USize{1}, Ordering.AcqRel)
+            })
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/DevServer.rs:1103
+// GATE #4565: kernel primitive
+#Unsafe("reserve one bounded connection slot using acquire-release compare exchange")
+fn jet_devserver_try_acquire(active: AtomicUsize) -> Bool {
+    current := active.load(Ordering.Acquire)
+    loop {
+        if current >= JET_DEVSERVER_MAX_CONNECTION_THREADS -> return false
+        match active.compare_exchange(current, current + 1, Ordering.AcqRel, Ordering.Acquire) {
+            Ok(_) -> return true
+            Err(next) -> current = next
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/DevServer.rs:1117
+struct JetDevServerDeadlineStream { stream: TcpStream, deadline: Instant }
+impl JetDevServerDeadlineStream {
+    // Rust: crates/jet-codegen/src/Prelude/DevServer.rs:1123
+    fn new(stream: ^TcpStream, deadline: Instant) -> JetDevServerDeadlineStream { JetDevServerDeadlineStream{stream: ^stream, deadline} }
+    // Rust: crates/jet-codegen/src/Prelude/DevServer.rs:1127
+    // GATE #4565: kernel primitive
+    #Unsafe("duplicate the actual socket while retaining the same absolute request deadline")
+    fn try_clone(self) -> JetDevServerDeadlineStream Error! { Ok(JetDevServerDeadlineStream.new(^self.stream.try_clone()?, self.deadline)) }
+    // Rust: crates/jet-codegen/src/Prelude/DevServer.rs:1131
+    // GATE #4565: kernel primitive
+    #Unsafe("compare the absolute request deadline against the monotonic clock")
+    fn remaining(self) -> Duration Error! {
+        remaining :: self.deadline.saturating_duration_since(Instant.now())
+        if remaining.is_zero() -> return Err(Error.new(ErrorKind.TimedOut, "devserver request deadline exceeded"))
+        Ok(remaining)
+    }
+}
+impl Read for JetDevServerDeadlineStream {
+    // Rust: crates/jet-codegen/src/Prelude/DevServer.rs:1144
+    // GATE #4565: kernel primitive
+    #Unsafe("bound each socket read by the remaining shared absolute request deadline")
+    fn read(&self, buffer: &[U8]) -> USize Error! {
+        remaining :: self.remaining()?
+        self.stream.set_read_timeout(Val(remaining))?
+        self.stream.read(&buffer)
+    }
+}
+impl Write for JetDevServerDeadlineStream {
+    // Rust: crates/jet-codegen/src/Prelude/DevServer.rs:1152
+    // GATE #4565: kernel primitive
+    #Unsafe("bound each socket write by the remaining shared absolute request deadline")
+    fn write(&self, buffer: [U8]) -> USize Error! {
+        remaining :: self.remaining()?
+        self.stream.set_write_timeout(Val(remaining))?
+        self.stream.write(buffer)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/DevServer.rs:1158
+    // GATE #4565: kernel primitive
+    #Unsafe("bound socket flush by the remaining shared absolute request deadline")
+    fn flush(&self) -> () Error! {
+        remaining :: self.remaining()?
+        self.stream.set_write_timeout(Val(remaining))?
+        self.stream.flush()
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/DevServer.rs:1165
+fn jet_devserver_read_line_bounded<R: BufRead>(reader: &R, line: &String, limit: USize) -> USize Error! {
+    read :: reader.take(U64{limit.saturating_add(1)}).read_line(&line)?
+    if read > limit -> return Err(Error.new(ErrorKind.InvalidData, "devserver request line exceeds 8 KiB"))
+    Ok(read)
+}
+// Rust: crates/jet-codegen/src/Prelude/DevServer.rs:1182
+// GATE #4565: kernel primitive
+#Unsafe("handle one real socket using one absolute deadline and bounded HTTP request parsing")
+fn jet_devserver_handle_connection(stream: ^TcpStream, version: AtomicU64, output_root: JetDevServerOutputRoot) -> () Error! {
+    deadline :: Instant.now() + JET_DEVSERVER_REQUEST_DEADLINE
+    stream := JetDevServerDeadlineStream.new(^stream, deadline)
+    reader := BufReader.new(^stream.try_clone()?)
+    request_line := String.new()
+    if jet_devserver_read_line_bounded(&reader, &request_line, JET_DEVSERVER_MAX_LINE_BYTES)? == 0 -> return Ok(())
+    header_bytes := USize{0}
+    header_count := USize{0}
+    content_length: USize? := None
+    saw_authorization := false
+    saw_content_length := false
+    saw_host := false
+    saw_origin := false
+    saw_transfer_encoding := false
+    loop {
+        line := String.new()
+        read :: jet_devserver_read_line_bounded(&reader, &line, JET_DEVSERVER_MAX_LINE_BYTES)?
+        if read == 0 || line == "\r\n" || line == "\n" -> break
+        header_count = header_count.checked_add(1).ok_or_else(fn() { Error.new(ErrorKind.InvalidData, "too many devserver headers") })?
+        header_bytes = header_bytes.checked_add(read).ok_or_else(fn() { Error.new(ErrorKind.InvalidData, "devserver headers exceed the request budget") })?
+        if header_count > JET_DEVSERVER_MAX_HEADER_COUNT || header_bytes > JET_DEVSERVER_MAX_HEADER_BYTES {
+            return Err(Error.new(ErrorKind.InvalidData, "devserver headers exceed the request budget"))
+        }
+        (name, value) :: match line.trim_end_matches(['\r', '\n']).split_once(':') {
+            Val(pair) -> pair
+            None -> return Err(Error.new(ErrorKind.InvalidData, "malformed devserver header"))
+        }
+        name := name.trim().to_ascii_lowercase() // #4303
+        value := value.trim() // #4303
+        if name.is_empty() || name.bytes().any(byte -> byte.is_ascii_whitespace() || byte.is_ascii_control()) {
+            return Err(Error.new(ErrorKind.InvalidData, "malformed devserver header name"))
+        }
+        duplicate :: match name.as_str() {
+            "authorization" -> { duplicate :: saw_authorization; saw_authorization = true; duplicate }
+            "content-length" -> { duplicate :: saw_content_length; saw_content_length = true; duplicate }
+            "host" -> { duplicate :: saw_host; saw_host = true; duplicate }
+            "origin" -> { duplicate :: saw_origin; saw_origin = true; duplicate }
+            "transfer-encoding" -> { duplicate :: saw_transfer_encoding; saw_transfer_encoding = true; duplicate }
+            _ -> false
+        }
+        if duplicate -> return Err(Error.new(ErrorKind.InvalidData, "duplicate devserver security header"))
+        if name == "transfer-encoding" -> return Err(Error.new(ErrorKind.InvalidData, "devserver does not accept transfer-encoded requests"))
+        if name == "content-length" {
+            content_length = Val(value.parse::<USize>().map_err(_ -> Error.new(ErrorKind.InvalidData, "invalid devserver content length"))?)
+        }
+    }
+    parts := request_line.split_whitespace()
+    method :: parts.next().unwrap_or("")
+    target :: parts.next().unwrap_or("")
+    request_version :: parts.next().unwrap_or("")
+    if method.is_empty() || target.is_empty() || request_version != "HTTP/1.1" || parts.next().is_some() {
+        return Err(Error.new(ErrorKind.InvalidData, "malformed devserver request line"))
+    }
+    content_length :: content_length.unwrap_or(USize{0})
+    if content_length > JET_DEVSERVER_MAX_REQUEST_BODY_BYTES -> return Err(Error.new(ErrorKind.InvalidData, "devserver request body exceeds 1 MiB"))
+    if content_length != 0 -> return Err(Error.new(ErrorKind.InvalidData, "devserver GET requests must not contain a body"))
+    if method != "GET" {
+        return jet_devserver_write_response(&stream, "405 Method Not Allowed", "text/plain; charset=utf-8", "jet dev's web server only handles GET".as_bytes())
+    }
+    path :: target.split('?').next().unwrap_or("/")
+    if path == "/__jet_dev_version" {
+        body :: version.load(Ordering.SeqCst).to_string()
+        return jet_devserver_write_response(&stream, "200 OK", "text/plain; charset=utf-8", body.as_bytes())
+    }
+    jet_devserver_serve_static(&stream, path, output_root)
+}
+// Rust: crates/jet-codegen/src/Prelude/DevServer.rs:1355
+// GATE #4565: kernel primitive
+#Unsafe("hold the publication mutex for descriptor-relative reads of a consistent bounded response")
+fn jet_devserver_serve_static<W: Write>(stream: &W, path: String, output_root: JetDevServerOutputRoot) -> () Error! {
+    rel :: match jet_devserver_static_relative_path(path) {
+        Val(rel) -> rel
+        None -> return jet_devserver_write_response(&stream, "400 Bad Request", "text/plain; charset=utf-8", "bad path".as_bytes())
+    }
+    file_path :: OSPath.from_text(rel)
+    is_index :: file_path.file_name().and_then(f -> f.to_str()) == Val("index.html")
+    content_type :: jet_devserver_content_type_for(file_path)
+    script :: is_index.then(jet_devserver_live_reload_script)
+    read_limit :: script.as_ref().map_or(JET_DEVSERVER_MAX_RESPONSE_BYTES, script -> JET_DEVSERVER_MAX_RESPONSE_BYTES.checked_sub(script.len()).unwrap_or(0))
+    bytes :: {
+        _publication :: output_root.publication_lock.lock().map_err(_ -> Error.new(ErrorKind.Other, "devserver publication lock poisoned"))?
+        file :: match jet_devserver_open_held_beneath(output_root, OSPath.from_text(rel)) {
+            Ok(file) -> ^file
+            Err(error) if error.kind() == ErrorKind.NotFound -> {
+                body :: "not found: {path}"
+                return jet_devserver_write_response(&stream, "404 Not Found", "text/plain; charset=utf-8", body.as_bytes())
+            }
+            Err(_) -> return jet_devserver_write_response(&stream, "400 Bad Request", "text/plain; charset=utf-8", "bad path".as_bytes())
+        }
+        match jet_devserver_read_bounded(^file, read_limit) {
+            Ok(bytes) -> ^bytes
+            Err(_) -> {
+                body :: "not found: {path}"
+                return jet_devserver_write_response(&stream, "404 Not Found", "text/plain; charset=utf-8", body.as_bytes())
+            }
+        }
+    }
+    if script is Val(script) {
+        if std.str.from_utf8(bytes).is_err() {
+            body :: "not found: {path}"
+            return jet_devserver_write_response(&stream, "404 Not Found", "text/plain; charset=utf-8", body.as_bytes())
+        }
+        if jet_devserver_find_body_end(bytes) is Val(index) {
+            parts :: [bytes[..index], script.as_bytes(), bytes[index..]]
+            return jet_devserver_write_response_parts(&stream, "200 OK", content_type, parts)
+        }
+        parts :: [bytes[..], script.as_bytes()]
+        return jet_devserver_write_response_parts(&stream, "200 OK", content_type, parts)
+    }
+    jet_devserver_write_response(&stream, "200 OK", content_type, bytes)
+}
+// Rust: crates/jet-codegen/src/Prelude/DevServer.rs:1440
+fn jet_devserver_find_body_end(bytes: [U8]) -> USize? {
+    MARKER :: "</body>".as_bytes()
+    bytes.windows(MARKER.len()).position(window -> window.iter().zip(MARKER).all(pair -> pair.0.to_ascii_lowercase() == pair.1))
+}
+
+// Rust: crates/jet-codegen/src/Prelude/DevServer.rs:1450
+// GATE #4565: kernel primitive
+#Unsafe("read only the checked initial file length and reject identity, link or length changes")
+fn jet_devserver_read_bounded(file: ^File, limit: USize) -> [U8] Error! {
+    jet_devserver_check_opened_file(file)?
+    metadata :: file.metadata()?
+    length_bytes :: metadata.len()
+    if length_bytes > U64{limit} -> return Err(Error.new(ErrorKind.InvalidData, "devserver response exceeds {limit} bytes"))
+    length :: USize{length_bytes}
+    bytes := Array<U8>.with_capacity(length)
+    reader := file.take(U64{length})
+    _ :: reader.read_to_end(&bytes)?
+    final_length :: reader.get_ref().metadata()?.len()
+    if final_length != length_bytes || bytes.len() != length {
+        return Err(Error.new(ErrorKind.Other, "devserver file changed while it was being read"))
+    }
+    jet_devserver_check_opened_file(reader.get_ref())?
+    Ok(^bytes)
+}
+// Rust: crates/jet-codegen/src/Prelude/DevServer.rs:1475
+fn jet_devserver_validate_relative(relative: OSPath) -> () Error! {
+    if relative.components().any(component -> !matches(component, std.path.Component.Normal(_))) || !jet_devserver_windows_components_are_safe(relative) {
+        return Err(Error.new(ErrorKind.InvalidInput, "devserver path is not relative"))
+    }
+    Ok(())
+}
+// Rust: crates/jet-codegen/src/Prelude/DevServer.rs:1489
+// JET_VETTED_UNSAFE_BEGIN: jet_devserver_windows_output
+// Rust: crates/jet-codegen/src/Prelude/DevServer.rs:1491
+module jet_devserver_windows_output {
+    use std.ffi.OsStr
+    use std.os.windows.ffi.OsStrExt
+    use std.os.windows.fs.OpenOptionsExt
+    use std.os.windows.io.AsRawHandle
+    use std.path.Component
+    use std.ptr
+    use std.mem as mem
+    // Rust: crates/jet-codegen/src/Prelude/DevServer.rs:1498
+    type Handle = *U8
+    // Rust: crates/jet-codegen/src/Prelude/DevServer.rs:1500
+    pub GENERIC_READ :: U32{0x80000000}
+    // Rust: crates/jet-codegen/src/Prelude/DevServer.rs:1501
+    pub GENERIC_WRITE :: U32{0x40000000}
+    // Rust: crates/jet-codegen/src/Prelude/DevServer.rs:1502
+    pub DELETE :: U32{0x00010000}
+    // Rust: crates/jet-codegen/src/Prelude/DevServer.rs:1503
+    FILE_SHARE_READ :: U32{0x00000001}
+    // Rust: crates/jet-codegen/src/Prelude/DevServer.rs:1504
+    FILE_SHARE_WRITE :: U32{0x00000002}
+    // Rust: crates/jet-codegen/src/Prelude/DevServer.rs:1505
+    pub FILE_SHARE_ALL :: U32{0x00000007}
+    // Rust: crates/jet-codegen/src/Prelude/DevServer.rs:1506
+    FILE_FLAG_BACKUP_SEMANTICS :: U32{0x02000000}
+    // Rust: crates/jet-codegen/src/Prelude/DevServer.rs:1507
+    FILE_FLAG_OPEN_REPARSE_POINT :: U32{0x00200000}
+    // Rust: crates/jet-codegen/src/Prelude/DevServer.rs:1508
+    FILE_ATTRIBUTE_REPARSE_POINT :: U32{0x00000400}
+    // Rust: crates/jet-codegen/src/Prelude/DevServer.rs:1509
+    FILE_ATTRIBUTE_TAG_INFO_CLASS :: I32{9}
+    // Rust: crates/jet-codegen/src/Prelude/DevServer.rs:1510
+    pub FILE_RENAME_INFO_CLASS :: I32{3}
+    // Rust: crates/jet-codegen/src/Prelude/DevServer.rs:1511
+    pub FILE_DISPOSITION_INFO_CLASS :: I32{4}
+    // Rust: crates/jet-codegen/src/Prelude/DevServer.rs:1514,1531,1537,1545
+    // Reuse canonical C layouts, including the three inline WindowsFileTime words.
+    use core.sys.host.windows_file.[ByHandleFileInformation, WindowsFileTime, FileAttributeTagInfo, FileRenameInfo, FileDispositionInfo]
+    // Rust: crates/jet-codegen/src/Prelude/DevServer.rs:1550-1570
+    // System ABI declarations stay at their audited canonical native owner.
+    use c.kernel32.get_file_attributes_w as GetFileAttributesW
+    use c.kernel32.get_file_information_by_handle as GetFileInformationByHandle
+    use c.kernel32.get_file_information_by_handle_ex as GetFileInformationByHandleEx
+    use c.kernel32.get_final_path_name_by_handle_w as GetFinalPathNameByHandleW
+    use c.kernel32.set_file_information_by_handle as SetFileInformationByHandle
+    use c.kernel32.flush_file_buffers as FlushFileBuffers
+    // Rust: crates/jet-codegen/src/Prelude/DevServer.rs:1573
+    fn wide(value: OsStr) -> [U16] { value.encode_wide().chain(std.iter.once(U16{0})).collect() }
+    // Rust: crates/jet-codegen/src/Prelude/DevServer.rs:1577
+    pub fn normalize(path: String) -> String {
+        path :: path.replace('/', "\\")
+        path :: if path.strip_prefix("\\\\?\\UNC\\") is Val(tail) { "\\\\{tail}" } else { path.strip_prefix("\\\\?\\").unwrap_or(path).to_string() }
+        path.trim_end_matches(['\\', '/']).to_ascii_lowercase()
+    }
+    // Rust: crates/jet-codegen/src/Prelude/DevServer.rs:1587
+    // GATE #4565: kernel primitive
+    #Unsafe("query final path from the held native handle using an exactly bounded UTF16 buffer")
+    pub fn final_path(file: File) -> String Error! {
+        needed :: GetFinalPathNameByHandleW(file.as_raw_handle(), ptr.null_mut(), U32{0}, U32{0})
+        if needed == 0 -> return Err(Error.last_os_error())
+        buffer := [U16].filled(USize{needed} + 1, U16{0})
+        written :: GetFinalPathNameByHandleW(file.as_raw_handle(), buffer.as_mut_ptr(), U32{buffer.len()}, U32{0})
+        if written == 0 || USize{written} >= buffer.len() -> return Err(Error.last_os_error())
+        buffer.truncate(USize{written})
+        Ok(String.from_utf16_lossy(buffer))
+    }
+    // Rust: crates/jet-codegen/src/Prelude/DevServer.rs:1610
+    // GATE #4565: kernel primitive
+    #Unsafe("query native volume, file index and link count from the retained handle")
+    pub fn file_id(file: File) -> (U64, U64, U32) Error! {
+        info := ByHandleFileInformation{
+            attributes: U32{0}, creation: WindowsFileTime{low: U32{0}, high: U32{0}},
+            access: WindowsFileTime{low: U32{0}, high: U32{0}}, write: WindowsFileTime{low: U32{0}, high: U32{0}},
+            volume_serial: U32{0}, size_high: U32{0}, size_low: U32{0}, nlink: U32{0}, index_high: U32{0}, index_low: U32{0}
+        }
+        if GetFileInformationByHandle(file.as_raw_handle(), &info) == 0 -> return Err(Error.last_os_error())
+        Ok((U64{info.volume_serial}, (U64{info.index_high} << 32) | U64{info.index_low}, info.nlink))
+    }
+    // Rust: crates/jet-codegen/src/Prelude/DevServer.rs:1636
+    // GATE #4565: kernel primitive
+    #Unsafe("reject reparse attributes returned for the held handle, never substitute pathname metadata")
+    fn check_reparse_handle(file: File) -> () Error! {
+        info := FileAttributeTagInfo{attributes: U32{0}, reparse_tag: U32{0}}
+        if GetFileInformationByHandleEx(file.as_raw_handle(), FILE_ATTRIBUTE_TAG_INFO_CLASS, (&info as *FileAttributeTagInfo).cast(), U32{mem.size_of::<FileAttributeTagInfo>()}) == 0 {
+            return Err(Error.last_os_error())
+        }
+        if info.attributes & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+            return Err(Error.new(ErrorKind.PermissionDenied, "devserver path contains a Windows reparse point"))
+        }
+        Ok(())
+    }
+    // Rust: crates/jet-codegen/src/Prelude/DevServer.rs:1661
+    // GATE #4565: kernel primitive
+    #Unsafe("check held Windows file metadata and identity, allowing exactly one hard link")
+    pub fn check_regular(file: File) -> (U64, U64) Error! {
+        check_reparse_handle(file)?
+        if !file.metadata()?.is_file() -> return Err(Error.new(ErrorKind.PermissionDenied, "devserver object is not a regular file"))
+        (volume, index, links) :: file_id(file)?
+        if links != 1 -> return Err(Error.new(ErrorKind.PermissionDenied, "devserver file has multiple hard links"))
+        Ok((volume, index))
+    }
+    // Rust: crates/jet-codegen/src/Prelude/DevServer.rs:1679
+    pub fn check_opened_file(file: File) -> () Error! { check_regular(file).map(_ -> ()) }
+    // Rust: crates/jet-codegen/src/Prelude/DevServer.rs:1683
+    pub fn validate_source(path: OSPath) -> () Error! {
+        reject_reparse_components(path)?
+        file :: open_existing(path, GENERIC_READ, false, false, false)?
+        check_regular(file).map(_ -> ())
+    }
+    // Rust: crates/jet-codegen/src/Prelude/DevServer.rs:1689
+    // GATE #4565: kernel primitive
+    #Unsafe("confirm the retained non-reparse handle denotes a real directory")
+    pub fn check_directory(file: File) -> () Error! {
+        check_reparse_handle(file)?
+        if !file.metadata()?.is_dir() -> return Err(Error.new(ErrorKind.PermissionDenied, "devserver object is not a real directory"))
+        Ok(())
+    }
+    // Rust: crates/jet-codegen/src/Prelude/DevServer.rs:1700
+    // GATE #4565: kernel primitive
+    #Unsafe("inspect real Windows path attributes using a terminated native UTF16 name")
+    fn is_reparse(path: OSPath) -> Bool Error! {
+        value :: wide(path.as_os_str())
+        attributes :: GetFileAttributesW(value.as_ptr())
+        if attributes == U32.MAX -> return Err(Error.last_os_error())
+        Ok(attributes & FILE_ATTRIBUTE_REPARSE_POINT != 0)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/DevServer.rs:1709
+    pub fn reject_reparse_components(path: OSPath) -> () Error! {
+        normalized :: path.to_string_lossy().replace('/', "\\").to_ascii_lowercase()
+        if normalized.starts_with("\\\\.\\") || normalized.starts_with("\\\\?\\") || normalized.starts_with("\\??\\") || normalized.starts_with("\\device\\") || normalized.starts_with("\\globalroot\\") {
+            return Err(Error.new(ErrorKind.PermissionDenied, "devserver path contains a Windows device namespace"))
+        }
+        current := OSPath.new()
+        for component in path.components() {
+            match component {
+                Component.Prefix(_) | Component.RootDir -> current.push(component.as_os_str())
+                Component.CurDir -> {}
+                Component.Normal(value) -> {
+                    if !jet_devserver_windows_component_is_safe(value) {
+                        return Err(Error.new(ErrorKind.PermissionDenied, "devserver path contains an ADS, reserved, or invalid Windows name"))
+                    }
+                    current.push(value)
+                    if is_reparse(current)? {
+                        return Err(Error.new(ErrorKind.PermissionDenied, "devserver path contains a Windows reparse point"))
+                    }
+                }
+                Component.ParentDir -> return Err(Error.new(ErrorKind.InvalidInput, "devserver path contains parent traversal"))
+            }
+        }
+        Ok(())
+    }
+    // Rust: crates/jet-codegen/src/Prelude/DevServer.rs:1758
+    // GATE #4565: kernel primitive
+    #Unsafe("open with exact requested access/share and no-follow reparse semantics")
+    pub fn open_existing_with_share(path: OSPath, access: U32, write: Bool, create_new: Bool, directory: Bool, share: U32) -> File Error! {
+        options := fs.OpenOptions.new()
+        _ :: options.read(true)
+        if write -> _ :: options.write(true)
+        if create_new -> _ :: options.create_new(true)
+        options.access_mode(access).share_mode(share).custom_flags(FILE_FLAG_OPEN_REPARSE_POINT | if directory { FILE_FLAG_BACKUP_SEMANTICS } else { U32{0} }).open(path)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/DevServer.rs:1788
+    pub fn open_existing(path: OSPath, access: U32, write: Bool, create_new: Bool, directory: Bool) -> File Error! {
+        open_existing_with_share(path, access, write, create_new, directory, FILE_SHARE_ALL)
+    }
+}
 
