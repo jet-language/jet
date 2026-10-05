@@ -15,7 +15,7 @@ export function jetWriter(schema) {
       if (t.k === 'opt') body = `    if v == {\n        .None -> &out.push("0")\n        .Val(item) -> {\n            &out.push("1")\n            ${call(t.of, 'item')}\n        }\n    }`;
       else if (t.k === 'list') body = `    &out.push("{v.len()}")\n    loop item in v -> ${call(t.of, 'item')}`;
       else if (t.k === 'map') body = `    &out.push("{v.len()}")\n    loop (key, item) in v {\n        ${call(t.key, 'key')}\n        ${call(t.value, 'item')}\n    }`;
-      else if (t.name === 'String') body = '    text := "x"\n    digits :: "0123456789abcdef"\n    loop byte in v.bytes() {\n        code :: Int.from_u8(byte)\n        text = "{text}{digits.slice((code / 16)..<(code / 16 + 1))}{digits.slice((code % 16)..<(code % 16 + 1))}"\n    }\n    &out.push(text)';
+      else if (t.name === 'String') body = '    text := "x"\n    digits :: "0123456789abcdef"\n    loop byte in v.bytes() {\n        code :: Int.from_u8(byte)\n        text = "{text}{digits.slice((code // 16)..<(code // 16 + 1))}{digits.slice((code % 16)..<(code % 16 + 1))}"\n    }\n    &out.push(text)';
       else if (t.name === 'Bool') body = '    &out.push(if v -> "1" else -> "0")';
       else if (t.name === 'Float') body = '    &out.push("{math.to_bits(v)}")';
       else if (primitives.has(t.name)) body = '    &out.push("{v}")';

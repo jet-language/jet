@@ -123,7 +123,12 @@ if (options.bootstrap) {
   const clean = text => text.replace(imports, block => block.replace(/[^\n]/g, ' ')).replace(/^use core\.[^\[\n]*$/gm, line => { if (seenImports.has(line)) return line.replace(/[^\n]/g, ' '); seenImports.add(line); return line; });
   const sourcePaths = readFileSync(join(repo, 'Compiler/Bootstrap/sources.list'), 'utf8').split('\n').map(s => s.trim()).filter(s => s && !s.startsWith('#'));
   const sources = sourcePaths.map(path => clean(readFileSync(join(repo, path), 'utf8')));
-  const golden = readFileSync(join(repo, 'Compiler/JetBackend/Tests/GoldenLower.jet'), 'utf8').replace(/\nfn run\(\) \{[\s\S]*$/, '\n');
+  const golden = readFileSync(join(repo, 'Compiler/JetBackend/Tests/GoldenLower.jet'), 'utf8')
+    .replace(/\nfn run\(\) \{[\s\S]*$/, '\n')
+    .replace('use core.files as files', 'use core.files as gl_files')
+    .replace(/\bfiles\./g, 'gl_files.')
+    .replace('use core.time as time', 'use core.time as gl_time')
+    .replace(/\btime\./g, 'gl_time.');
   sources.push(clean(golden), jetDecoder(schema), jetWriter(schema), clean(readFileSync(join(repo, 'Compiler/JetBackend/Tests/FrontFeed.jet'), 'utf8')));
   writeFileSync(join(probeDir, 'unit.jet'), sources.join('\n\n'));
   writeFileSync(join(probeDir, 'package.jet'), 'name: "native_front_feed"\nversion: "0.0.1"\nedition: "2028"\n');
