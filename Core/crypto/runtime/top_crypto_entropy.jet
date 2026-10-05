@@ -187,7 +187,7 @@ fn jet_crypto_entropy_fill_native(out: &[U8]) -> () JetCryptoError! {
             #Unsafe("getrandom fills initialized borrowed suffix; capture errno immediately after failure") {
                 result :: getrandom(suffix.as_mut_ptr().cast<c_void>(), suffix.len(), 0)
                 if result > 0 { .Filled(result as USize) }
-                else if result < 0 && Error.last_os_error().raw_os_error() == Val(4) { .Interrupted }
+                else if result < 0 && Error.last_os_error().raw_os_error() == 4 { .Interrupted }
                 else { .Failed }
             }
         })

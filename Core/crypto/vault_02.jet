@@ -170,7 +170,7 @@ fn vault_linux_rename(dirfd: I32, old: String, new: String, flags: U32) -> () Je
     result :: #Unsafe("descriptor-relative renameat2 of validated vault entries") { syscall(VAULT_SYS_RENAMEAT2, dirfd, old_c.as_ptr(), dirfd, new_c.as_ptr(), flags) }
     if result < 0 {
         error :: Error.last_os_error()
-        if error.raw_os_error() == Val(38) || error.raw_os_error() == Val(22) -> return Err(JetVaultError.UnsupportedProvider)
+        if error.raw_os_error() == 38 || error.raw_os_error() == 22 -> return Err(JetVaultError.UnsupportedProvider)
         return Err(JetVaultError.IO{operation: "install", redacted_path: "<vault-store>"})
     }
     Ok()
@@ -189,7 +189,7 @@ fn vault_linux_link_file(file: File, dirfd: I32, name: String) -> () JetVaultErr
     result :: #Unsafe("link retained descriptor via proc fd into held vault directory") { linkat(VAULT_AT_FDCWD, source.as_ptr(), dirfd, name_c.as_ptr(), VAULT_AT_SYMLINK_FOLLOW) }
     if result != 0 {
         error :: Error.last_os_error()
-        if error.raw_os_error() == Val(38) || error.raw_os_error() == Val(22) -> return Err(JetVaultError.UnsupportedProvider)
+        if error.raw_os_error() == 38 || error.raw_os_error() == 22 -> return Err(JetVaultError.UnsupportedProvider)
         return Err(JetVaultError.Conflict)
     }
     Ok()
@@ -212,7 +212,7 @@ fn vault_read_file(file: File) -> [U8] JetVaultError! {
 fn vault_quarantine_exact(dir: File, name: String, held: File, quarantine: String) -> Bool JetVaultError! {
     dirfd :: dir.as_raw_fd()
     visible :: vault_linux_openat(dirfd, name, 0, 0) ?? {
-        if err.raw_os_error() == Val(2) -> return false
+        if err.raw_os_error() == 2 -> return false
         return Err(JetVaultError.Conflict)
     }
     if !vault_same_inode(visible, held) -> return false
@@ -290,8 +290,8 @@ fn vault_recover_stale_lock(root: OSPath, dir: File, expected_hash: [U8; 32], ex
         current_start != Val(start_value)
     } else {
         code :: Error.last_os_error().raw_os_error()
-        if code == Val(38) || code == Val(22) -> return Err(JetVaultError.UnsupportedProvider)
-        code == Val(3)
+        if code == 38 || code == 22 -> return Err(JetVaultError.UnsupportedProvider)
+        code == 3
     }
     if !dead -> return Err(JetVaultError.Conflict)
     current_matches :: vault_read_contents_unrecovered_at(root).is_ok_and((tuple) -> tuple.0.revision == expected_revision && tuple.1 == expected_hash)
@@ -306,12 +306,12 @@ fn vault_acquire_lock_mode(root: OSPath, repo_uuid: [U8; 16], revision: U64, sta
     dirfd :: dir.as_raw_fd()
     file :: vault_linux_openat(dirfd, ".secrets.age.lock", 1 | VAULT_O_CREAT | VAULT_O_EXCL, 0o600) ?? {
         code :: err.raw_os_error()
-        if code == Val(17) && recover_stale {
+        if code == 17 && recover_stale {
             vault_recover_stale_lock(root, dir, start_hash, revision, repo_uuid) ?? return Err(err)
             vault_recover_backup_at(root) ?? return Err(err)
             vault_linux_openat(dirfd, ".secrets.age.lock", 1 | VAULT_O_CREAT | VAULT_O_EXCL, 0o600) ?? return Err(JetVaultError.Conflict)
         } else {
-            if code == Val(38) || code == Val(22) -> return Err(JetVaultError.UnsupportedProvider)
+            if code == 38 || code == 22 -> return Err(JetVaultError.UnsupportedProvider)
             return Err(JetVaultError.Conflict)
         }
     }
@@ -405,7 +405,7 @@ fn vault_write_at(root: OSPath, store: JetVaultStore, start_hash: [U8; 32], prov
     ciphertext :: jet_vault_encrypt_impl(recipients, plaintext.0) ?? return Err(JetVaultError.Locked)
     temp :: vault_linux_openat(dirfd, ".", VAULT_O_RDWR | VAULT_O_TMPFILE, 0o600) ?? {
         code :: err.raw_os_error()
-        if code == Val(38) || code == Val(22) || code == Val(95) -> return Err(JetVaultError.UnsupportedProvider)
+        if code == 38 || code == 22 || code == 95 -> return Err(JetVaultError.UnsupportedProvider)
         return Err(JetVaultError.IO{operation: "create", redacted_path: "<vault-temp>"})
     }
     temp.write_all(ciphertext) ?? return Err(JetVaultError.IO{operation: "write", redacted_path: "<vault-store>"})
@@ -951,7 +951,7 @@ fn jvkw_open<T: JetVaultKey>(wrapped: JetWrappedVaultKey, unlock: JetVaultKeyUnl
                 return Err(JetVaultKeyWrapError.OpenFailed)
             }
         }
-        else -> return Err(JetVaultKeyWrapError.OpenFailed)
+        else -> { return Err(JetVaultKeyWrapError.OpenFailed) }
     }
     aad := "JVKW1 payload".into_bytes()
     &aad.extend_from_slice(wrapped.bytes[0..<parsed.header_end])
