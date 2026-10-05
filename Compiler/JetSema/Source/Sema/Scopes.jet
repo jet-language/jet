@@ -382,6 +382,8 @@ pub struct SemaScopeProbe {
     pub applied: Bool
     pub diagnostics: [Diagnostic]
     pub constants: [SemaScopeProbeConstant]
+    // The host callbacks the probe's checks reach (SemaHostHookAccess).
+    pub host_hooks: SemaHostHookAccess?{None}
 }
 
 // A module-scope binding whose symbol is a constant still waiting for its
@@ -500,6 +502,9 @@ pub struct SemaCheckContext {
     // does not handle yet or a lost compiler invariant. These reach the
     // driver's internal-problem report (I2), never the user's diagnostics.
     pub incomplete_reasons: [String]{[String]{}}
+    // The host callbacks this check may call (SemaHostHookAccess); every
+    // context derived from it reaches the same ones.
+    pub host_hooks: SemaHostHookAccess?{None}
 }
 
  
@@ -547,6 +552,10 @@ pub struct SemaScopeTable {
     // row here, so a rollback restores the table without a whole-table copy.
     pub binding_undo: [SemaScopeBindingUndo]{[SemaScopeBindingUndo]{}}
     pub open_marks: Int{0}
+    // The function a compiler thread is checking (sema_function_check_shared),
+    // which names its panic locations; None names the environment's
+    // `function_name`.
+    pub location_function: String?{None}
 }
 
 pub struct SemaScopeBindingUndo {
@@ -805,6 +814,7 @@ pub fn sema_check_context_snapshot(source: SemaCheckContext) -> SemaCheckContext
         source_nesting: source.source_nesting,
         implicit_loop_subject_depth: source.implicit_loop_subject_depth,
         subject_shorthand_depth: source.subject_shorthand_depth,
+        host_hooks: source.host_hooks,
     }
 }
 
@@ -1032,6 +1042,7 @@ pub fn sema_scope_snapshot(source: SemaScopeTable) -> SemaScopeTable Never! {
         copies_explicit: source.copies_explicit,
         binding_undo: ~source.binding_undo,
         open_marks: source.open_marks,
+        location_function: source.location_function,
     }
 }
 
