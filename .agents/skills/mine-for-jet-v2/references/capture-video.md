@@ -17,8 +17,8 @@ are not high-confidence technical evidence without corroboration. Cleanup is
 not verification. Missing captions need an available authorized transcription
 path or explicit gap; never infer thesis from title/description/popularity.
 
-Read **all transcript chunks**, recording ranges in the per-source segment/lane
-coverage table. Subtitle retrieval alone does not establish body review. Keep
+Read **all transcript chunks**, one ≤ 5-minute segment at a time, writing that
+segment's ledger while reading. Subtitle retrieval alone does not establish body review. Keep
 caption-only versus visually inspected claims distinct. Retrieve localized
 frames only when on-screen spelling, code, diagrams or results matter; record
 frame timestamp/OCR uncertainty, and verify exact code against linked primary

@@ -2,7 +2,7 @@
 
 Read static text first, browser only for inaccessible/dynamic content. Record
 canonical URL, edition/version/date, exact sections, appendices, artifact and
-evaluation reviewed or skipped. Map every substantial section through all lanes.
+evaluation reviewed or skipped. Map every section (≤ 1,500-word segments) through all lanes.
 Retain essential equations/code/results with exact locators and limitations;
 abstract/navigation is not mechanism review. A scanned unread paper stays unread.
 

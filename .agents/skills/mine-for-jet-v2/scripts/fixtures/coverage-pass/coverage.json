@@ -1,0 +1,103 @@
+{
+  "schema": "mine-for-jet-v2/coverage@1",
+  "run_id": "fixture-coverage-pass",
+  "note": "Synthetic fixture for check_coverage tests; example.org sources, no real Jet evidence.",
+  "sources": [
+    {
+      "source_id": "example-talk",
+      "kind": "video",
+      "title": "Arenas in a request parser",
+      "ref": "https://example.org/talks/arenas",
+      "duration_s": 420,
+      "lanes_not_run": {
+        "audience-corrections": "Audience comments were not requested for this fixture run and none were captured."
+      },
+      "segments": [
+        {
+          "id": "example-talk/01",
+          "title": "Per-request arena for parser allocations, bulk free, measured allocation counts and live allocator statistics",
+          "start": "00:00",
+          "end": "05:00",
+          "retrieval": "captured",
+          "body_review": "full",
+          "lanes": {
+            "mechanism-and-architecture": { "claims": ["C1"] },
+            "default-common-job": { "claims": ["C4"] },
+            "semantic-obligations": { "reason": "The arena walkthrough states no ownership or aliasing rule; pointer lifetime across await appears only in the failure story." },
+            "expert-descent": { "claims": ["C3"] },
+            "cost-and-measurement": { "claims": ["C2"] },
+            "proven-experience": { "reason": "No adoption, migration or post-mortem data accompanies the arena benchmark; the speaker's own failure story comes next." },
+            "interop-and-portability": { "reason": "The arena allocator is process-internal; the walkthrough shows no foreign lifetime, packaging or platform boundary." },
+            "reuse-and-anti-lessons": { "claims": ["C1"] }
+          }
+        },
+        {
+          "id": "example-talk/02",
+          "title": "Failure story: arena kept across an await caused use-after-free; fixed with scoped arena handles",
+          "start": "05:00",
+          "end": "07:00",
+          "retrieval": "captured",
+          "body_review": "full",
+          "lanes": {
+            "mechanism-and-architecture": { "reason": "The await failure concerns a scoped handle rule, not arena representation or phase ownership." },
+            "default-common-job": { "reason": "Ordinary request handling is unchanged by the await fix; only suspended handlers are affected." },
+            "semantic-obligations": { "claims": ["C5"] },
+            "expert-descent": { "claims": ["C6"] },
+            "cost-and-measurement": { "reason": "The use-after-free story gives no timing, byte or allocation measurement for the scoped arena handle." },
+            "proven-experience": { "reason": "The use-after-free incident is the speaker's own bug, with no wider adoption or migration evidence." },
+            "interop-and-portability": { "reason": "Await suspension and the arena reset both happen inside one runtime; no host or foreign boundary is involved." },
+            "reuse-and-anti-lessons": { "claims": ["C6"] }
+          }
+        }
+      ]
+    },
+    {
+      "source_id": "example-article",
+      "kind": "text",
+      "title": "Build cache keys that cannot go stale",
+      "ref": "https://example.org/posts/cache-keys",
+      "words": 1000,
+      "lanes_not_run": {
+        "audience-corrections": "The article has no comment thread and no audience corrections were requested for this fixture."
+      },
+      "segments": [
+        {
+          "id": "example-article/01",
+          "title": "Motivation: stale artifacts after a compiler flag change because the cache key omitted flags",
+          "section": "1 Motivation",
+          "words": 600,
+          "retrieval": "captured",
+          "body_review": "full",
+          "lanes": {
+            "mechanism-and-architecture": { "claims": ["C8"] },
+            "default-common-job": { "reason": "The motivation describes a release incident, not a first-run or ordinary build workflow change." },
+            "semantic-obligations": { "reason": "Stale cache artifacts are a build correctness failure with no ownership, cancellation or error-value semantics." },
+            "expert-descent": { "reason": "The motivation gives no expert control or opt-out for the cache key; flags are handled by the design." },
+            "cost-and-measurement": { "reason": "The two-day debugging cost is anecdotal effort, not a measured time or byte figure for the stale cache." },
+            "proven-experience": { "claims": ["C7"] },
+            "interop-and-portability": { "reason": "Compiler flag drift in the motivation is single-host; no cross-platform or foreign toolchain boundary is described." },
+            "reuse-and-anti-lessons": { "reason": "The keyed-on-every-input thesis is itself claim C8; the motivation discusses no rejected design." }
+          }
+        },
+        {
+          "id": "example-article/02",
+          "title": "Design: content-hash cache key over toolchain version, profile flags and an environment allowlist",
+          "section": "2 Design",
+          "words": 400,
+          "retrieval": "captured",
+          "body_review": "full",
+          "lanes": {
+            "mechanism-and-architecture": { "claims": ["C9"] },
+            "default-common-job": { "reason": "The hash key design is invisible in ordinary builds; users see only correct artifact reuse." },
+            "semantic-obligations": { "reason": "Hashing toolchain version and flags carries no ownership, concurrency or cleanup obligation for programs." },
+            "expert-descent": { "claims": ["C9"] },
+            "cost-and-measurement": { "claims": ["C10"] },
+            "proven-experience": { "reason": "The figure reports one project's hit rate only; no multi-team adoption or migration history is given." },
+            "interop-and-portability": { "reason": "The allowlist names environment variables, but the design gives no per-platform variable handling or refusal." },
+            "reuse-and-anti-lessons": { "reason": "Content hashing of toolchain inputs cites no failed alternative key design to learn from." }
+          }
+        }
+      ]
+    }
+  ]
+}

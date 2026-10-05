@@ -27,13 +27,24 @@ process. Classify each contribution as **adds-new, enhances-existing, fills-gap,
 fixes-issue-or-misalignment, confirms-choice, or refutes-choice**. A confirmation
 needs a concrete mechanism and witness, not praise.
 
-For each declared source, keep a coverage table accounting for **every
-segment/section**: mined, or not applicable with a concrete reason. A source is
-not done until **every extraction lane has been considered for every substantial
-segment**. Coverage records retrieval, body review, and extraction separately.
-Exhaustiveness covers the declared corpus, not an unbounded linked-source crawl.
-Do not silently narrow a broad request, hide findings behind a three-item cap,
-or stop at attractive language spellings.
+**Depth is enforced, not asserted** ([depth contract](references/depth.md)).
+Split every source into bounded segments (video/audio ≤ 5 min; text ≤ 1,500
+words within one section; repository = one module/directory). While reading each
+segment, write its **concept ledger**: every concept, technique, mechanism,
+claim, demo, measurement and caveat it presents. Map every ledger item to its own
+claim, or to already-covered (with the Jet ref) or out-of-scope (with a specific
+reason). Fill a segment × lane matrix with claim IDs or concrete
+segment-specific reasons. `scripts/check_coverage.mjs` validates all of it,
+reports ledger/claim densities, flags thin segments for written justification,
+and must exit 0 before hand-in. Exhaustiveness covers the declared corpus, not
+an unbounded linked-source crawl. Never silently narrow a broad request, hide
+findings behind a cap, or stop at attractive language spellings.
+
+**Orchestration:** legwork agents produce captures and segment indexes only;
+the thinking model reads every body and writes ledgers, claims, lane rows and
+alignment. Bound each miner's batch in hours of source it can read in full,
+ledger written while reading, within one working context; split by segment
+range rather than skim.
 
 **Ballot quality is non-negotiable:** before drafting, reconcile current, planned
 (including ratified-unbuilt), in-flight, and proposed Jet state via the digest.
@@ -117,15 +128,24 @@ reuse captures, and use repository scripts rather than per-run ad-hoc Python.
 
 ## Extract, align, review, publish
 
-1. Follow [review](references/review.md): extraction lanes per segment,
-   owner-question matrix, normalized claims, seven hard gates, dedupe and
-   value ranking. Relevant audience, live-probe and multi-source lanes remain
-   conditional; no mandatory real-user study.
+1. Follow [review](references/review.md) and [depth](references/depth.md):
+   segment ledgers and lane matrix, owner-question matrix, normalized claims,
+   seven hard gates, dedupe and value ranking. Relevant audience, live-probe and
+   multi-source lanes remain conditional; no mandatory real-user study. Hand in
+   only when the gate passes:
+
+   ```sh
+   Tools/agent/jet-env node .agents/skills/mine-for-jet-v2/scripts/check_coverage.mjs "$CAPTURE_ROOT"
+   ```
+
 2. Obtain the **required fresh-context reviewer** after extraction/dedupe and
-   before publishing any new recommendation/card/ballot. Use existing review
-   and tower-ballot skills as applicable, not another reviewer catalog. Return
-   a bounded review brief to the orchestrator if this host cannot delegate.
-   No fresh reviewer means publication is blocked, not waived.
+   before publishing any new recommendation/card/ballot. It first runs the
+   **recall audit** (re-mines a seeded sample of segments from the raw body; any
+   miss sends the batch back for re-mining) and `check_coverage.mjs --audit`
+   must exit 0. Use existing review and tower-ballot skills as applicable, not
+   another reviewer catalog. Return a bounded review brief to the orchestrator
+   if this host cannot delegate. No fresh reviewer means publication is
+   blocked, not waived.
 3. Resolve substantive reviewer findings; dispositions are keep,
    attach-existing, redesign, reject-conflict, evidence-gap, or undecided.
 4. Follow [output](references/output.md) for compact synthesis, retained exact
@@ -135,6 +155,7 @@ reuse captures, and use repository scripts rather than per-run ad-hoc Python.
    after that evidence is retained.
 
 Completion requires all declared sources, segments, lanes and owner questions
-accounted for, claims evidenced or explicitly unknown, quality gates and reviewer
-findings resolved, and authorized artifacts/payloads handed off. Review is not
+accounted for (gate and recall audit at exit 0), claims evidenced or explicitly
+unknown, quality gates and reviewer findings resolved, and authorized
+artifacts/payloads handed off. Review is not
 ratification or runtime verification. Do not begin unrelated implementation.

@@ -9,28 +9,26 @@ is not body review. Demos are primary surface evidence: retain essential exact
 commands, snippets, outputs and diagnostics with locators. Author commentary,
 quoted material, linked-source evidence and inference stay separate.
 
-For **each source**, retain this coverage matrix. Every substantial segment must
-consider every lane below; mark mined (with claim IDs or a concrete no-finding
-result) or not applicable with a reason. An unread or blocked body is a coverage
-gap, not “not applicable.” Do not call that source complete. Keep retrieval,
-body-review and technical extraction distinct, including transcript chunk ranges.
-
-| Source/version and segment locator | Retrieval | Body review | Lane | Mined / not applicable, reason | Claims / limits |
-| --- | --- | --- | --- | --- | --- |
+For **each source**, follow the [depth contract](depth.md): bounded segments,
+a concept ledger written while reading each segment and fully mapped, and a
+segment × lane matrix in which every row carries claim IDs or a concrete,
+segment-specific reason. An unread or blocked body is a coverage gap, not “not
+applicable”; do not call that source complete. Retrieval, body review and
+extraction stay distinct fields. `check_coverage.mjs` must exit 0 before hand-in.
 
 ## Extraction lanes: micro and macro
 
-| Lane | Inspect | Preferred consequence |
+| Lane (`slug`) | Inspect | Preferred consequence |
 | --- | --- | --- |
-| Mechanism and architecture | Fact ownership, representation, demand, phases, caching/invalidation, ABI, control flow; systems/subsystems and compiler/runtime/infrastructure | Sharpen existing owner/acceptance, not a second subsystem |
-| Default/common job | First run, complete ordinary tasks, invisible obligations, failure/recovery, build/packaging/deployment | Useful safe defaults and lower repeated reasoning cost |
-| Semantic obligations | Constructs, ownership/aliasing, cancellation, concurrency/ordering, cleanup, memory/IO, errors/absence, exact values | Law-preserving counterexample or completion |
-| Expert descent | Allocation/placement, target/profile, inspectable costs, debugging/observability, explicit opt-out/refusal | Expert control over the same mechanism |
-| Cost and measurement | Whole-job time/bytes/allocations, cold/warm, crossover/scaling, host/toolchain identity | Bounded hypothesis through the canonical proof gate |
-| Proven experience | Adoption/migration, ecosystem/process, support burden, post-mortems and corrected designs | Rule-9 evidence for the boundary |
-| Interop and portability | Host authority, packaging, foreign lifetimes, reproducible inputs, platform refusals | Complete boundary contracts, not happy-path adapters |
-| Audience corrections | Verified corrections, specific repeated pain, workarounds, unknown prevalence | Counterexamples/leads, not vote totals |
-| Reuse and anti-lessons | Existing law, structural immunity, mismatched jobs, rejected approaches; idioms/teaching and learning paths | Concrete confirmation/refutation or attach/no-action |
+| Mechanism and architecture (`mechanism-and-architecture`) | Fact ownership, representation, demand, phases, caching/invalidation, ABI, control flow; systems/subsystems and compiler/runtime/infrastructure | Sharpen existing owner/acceptance, not a second subsystem |
+| Default/common job (`default-common-job`) | First run, complete ordinary tasks, invisible obligations, failure/recovery, build/packaging/deployment | Useful safe defaults and lower repeated reasoning cost |
+| Semantic obligations (`semantic-obligations`) | Constructs, ownership/aliasing, cancellation, concurrency/ordering, cleanup, memory/IO, errors/absence, exact values | Law-preserving counterexample or completion |
+| Expert descent (`expert-descent`) | Allocation/placement, target/profile, inspectable costs, debugging/observability, explicit opt-out/refusal | Expert control over the same mechanism |
+| Cost and measurement (`cost-and-measurement`) | Whole-job time/bytes/allocations, cold/warm, crossover/scaling, host/toolchain identity | Bounded hypothesis through the canonical proof gate |
+| Proven experience (`proven-experience`) | Adoption/migration, ecosystem/process, support burden, post-mortems and corrected designs | Rule-9 evidence for the boundary |
+| Interop and portability (`interop-and-portability`) | Host authority, packaging, foreign lifetimes, reproducible inputs, platform refusals | Complete boundary contracts, not happy-path adapters |
+| Audience corrections (`audience-corrections`, conditional) | Verified corrections, specific repeated pain, workarounds, unknown prevalence | Counterexamples/leads, not vote totals |
+| Reuse and anti-lessons (`reuse-and-anti-lessons`) | Existing law, structural immunity, mismatched jobs, rejected approaches; idioms/teaching and learning paths | Concrete confirmation/refutation or attach/no-action |
 
 Account for features/APIs, diagnostics/tooling, learning paths and process as
 well as syntax, at the applicable micro and macro scales. Classify each
@@ -81,13 +79,17 @@ selector/revision/subresource, retrieval date, exact locator, claim, confidence
 (low/medium/high), stance (supports/disputes/neutral), correction and inference.
 Source kind: primary, audience, linked-source, local-evidence, or inference.
 
-Add `lane`, `workload`, `contribution`, coverage/measurement limits,
-`canonical_owner`, `jet_state` (digest identity and exact refs), independent
-`observed`, `intended`, `work` axes, reviewer disposition, and why the contribution
-is genuinely incremental. Example shape, not invented current Jet evidence:
+Add `segment` (coverage segment ID), `lane`, `scale` (micro/macro), `workload`,
+`contribution`, coverage/measurement limits, `canonical_owner`, `jet_state`
+(digest identity and exact refs), independent `observed`, `intended`, `work`
+axes, reviewer disposition, and why the contribution is genuinely incremental.
+Each distinct contribution is its own claim; several ledger items share a claim
+only when they witness the same mechanism, never to summarize a segment.
+Example shape, not invented current Jet evidence:
 
 ```json
 {
+  "id": "example-cache-03",
   "topic": "cache-input-identity",
   "claim": "The measured cache key includes profile inputs.",
   "source_id": "example.org/cache",
@@ -97,12 +99,14 @@ is genuinely incremental. Example shape, not invented current Jet evidence:
   "source_identity": "example.org/cache",
   "version": "edition=2",
   "locator": "section 3, table 2",
+  "segment": "example.org/cache/03",
   "retrieved_at": "DATE",
   "confidence": "medium",
   "stance": "supports",
   "correction": null,
   "inference": "Jet consequence needs focused source review",
   "lane": "mechanism-and-architecture",
+  "scale": "micro",
   "workload": "incremental builds",
   "contribution": "enhances-existing",
   "coverage_limits": "Cold builds not measured",
@@ -116,10 +120,14 @@ is genuinely incremental. Example shape, not invented current Jet evidence:
 }
 ```
 
-Observed: registry/code present, exercised-at-matching-identity, partial,
-contradictory, or unknown. Intended: ratified, undecided, rejected/conflicting,
-retired/superseded, or unknown. Work: planning, ready, building/verify, frozen,
-done, proposal-only, open/draft ballot, or unknown. Preserve raw Tower phase;
+Enums are exact slugs (put qualifications in `coverage_limits` or `inference`).
+Observed: `present` (registry/code present), `exercised` (at matching identity),
+`partial`, `contradictory`, `unknown`. Intended: `ratified`, `undecided`,
+`rejected-conflicting`, `retired-superseded`, `unknown`. Work: `none` (no record
+found by a working provider), `planning`, `ready`, `building-verify`, `frozen`,
+`done`, `proposal-only`, `open-ballot`, `draft-ballot`, `unknown`. Review
+disposition: `keep`, `attach-existing`, `redesign`, `reject-conflict`,
+`evidence-gap`, `undecided`. Preserve raw Tower phase in `jet_state.refs`;
 ratified-unbuilt is a planned consequence, not a new owner vote. Done can mean
 proposal-only; historical receipts do not prove today's dirty tree. These are
 dated evidence, never a mutable second work ledger.
@@ -188,12 +196,23 @@ clean cutovers. Evidence/research work does not imply implementation.
 
 ## Required fresh-context reviewer: before publication
 
-After extraction/dedupe, supply an independent reviewer with declared sources,
-segment/lane coverage, question matrix, direct authority and checkout/digest
-identities, claims, duplicate search, proposed dispositions, and short/technical
-payloads. Use existing review/tower-ballot skills as applicable; an orchestrator
-obtains the reviewer when workers cannot delegate. Without fresh review, do not
-publish new recommendations/cards/ballots.
+After extraction/dedupe and a passing `check_coverage.mjs`, supply an independent
+reviewer with declared sources, raw captures, the run directory (coverage,
+ledger, claims, checker output), question matrix, direct authority and
+checkout/digest identities, duplicate search, proposed dispositions, and
+short/technical payloads. Use existing review/tower-ballot skills as applicable;
+an orchestrator obtains the reviewer when workers cannot delegate. Without fresh
+review, do not publish new recommendations/cards/ballots.
+
+**Recall audit first.** The reviewer checks recall, not only ballot quality:
+it draws the seeded sample (at least 2 segments or 10% per source), re-mines
+each sampled segment from the raw transcript/body before reading the miner's
+ledger, and records the result in `recall-audit.json` per the
+[depth contract](depth.md#5-recall-audit-recall-auditjson). Any missed concept or
+disputed mapping fails the batch: it returns to the miner for re-mining of every
+segment, then a new audit with a new seed. `check_coverage.mjs RUN --audit` must
+exit 0 before ballot review continues; the report records every audit's seed,
+sample, misses and outcome.
 
 Combine two bounded lenses when appropriate:
 - Authority/mechanism: law/supersession, implementation/runtime identity, active
@@ -203,8 +222,9 @@ Combine two bounded lenses when appropriate:
   short surface alone, same-job idiomatic examples, first-use definitions, genuine
   mitigated losses, convincing useful recommendation.
 
-**Reject before posting**: thin surface mining; any substantial segment/lane
-unaccounted for; unanswered owner question; missing current/planned (including
+**Reject before posting**: thin surface mining; a failing coverage gate or recall
+audit; any segment/lane unaccounted for; unanswered owner question;
+missing current/planned (including
 ratified-unbuilt)/in-flight/proposed reconciliation; unsupported rule-9 claims;
 non-best-of-all-worlds recommendations that surrender governing outcomes;
 more than two residual losses or any unmitigated loss; weak/jargon-heavy short

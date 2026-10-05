@@ -25,6 +25,11 @@ frames only for load-bearing on-screen code/diagrams/results. Read in bounded
 chunks and reuse captures. No per-run ad-hoc Python; use reusable repository
 scripts (the source checker is the existing Python helper) or host read tools.
 
+Capture ends with a **segment index**: `coverage.json` listing each source's
+bounded segments (IDs, locators, provisional titles) per the
+[depth contract](depth.md). Legwork agents may produce captures and this index;
+reading, ledgers and claims belong to the thinking model.
+
 Bound linked-primary corroboration to load-bearing claims. A missing body,
 truncated page, API warning, count mismatch or inaccessible thread is an explicit
 coverage gap, not a reason to expand scope. Preserve enough exact evidence in

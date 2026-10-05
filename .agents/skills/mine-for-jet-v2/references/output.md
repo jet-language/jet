@@ -17,11 +17,14 @@ publication requires authorization; Markdown is default, HTML only on request.
 
 4. Short owner questions **only for genuine remaining choices**. Scratch READY
    and a reviewed payload are not approval or a posted/ratified decision.
-5. Coverage/confidence: per-source every-segment/every-lane table, versions read,
-   retrieval versus body review versus extraction, skipped bodies, contradictions,
-   binary/tree identity and whether examples were exercised. Keep the exact owner-
-   question matrix; no generic victory paragraph substitutes for an answer.
-6. Retained evidence: normalized claims/dispositions, essential exact snippets,
+5. Coverage/confidence: the `check_coverage.mjs` output (per-source and
+   per-segment ledger/claim densities, justified low-density segments), every
+   recall audit's seed, sample, misses and outcome, versions read, retrieval
+   versus body review versus extraction, contradictions, binary/tree identity
+   and whether examples were exercised. Keep the exact owner-question matrix;
+   no generic victory paragraph substitutes for an answer.
+6. Retained evidence: `coverage.json`, `ledger.json` and normalized
+   `claims.json` (plus recall audits), essential exact snippets,
    commands/oracles, primary locators, counterexamples, measurement limits,
    source independence, rule-9 evidence and owner-feedback corrections. Retain
    reviewer findings, resolution and identity; link large evidence rather than

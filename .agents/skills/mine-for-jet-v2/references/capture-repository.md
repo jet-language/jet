@@ -9,7 +9,7 @@ Tools/agent/jet-env git clone --depth 50 --filter=blob:none 'REPOSITORY_URL' "$C
 
 Pin commit/release and distinguish tagged behavior from current main. Record
 reviewed directory/file groups, tests, examples, design/RFC/ADR records, releases
-and failure history in the per-source segment/lane coverage matrix. README
+and failure history as one-module/directory segments with a `modules` inventory. README
 claims are not code proof. Extract actual authority/default/design consequences,
 complete common jobs, failure/recovery, portability and architectural obligations,
 not a README API inventory or star count.

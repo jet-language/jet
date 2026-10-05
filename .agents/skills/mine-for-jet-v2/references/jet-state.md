@@ -94,7 +94,9 @@ known tracking parameters. Approval applies to that exact content identity;
 unknown historical selectors do not silently cover a new edition. Keep pinned
 repository revision and subresource separately in capture evidence.
 
-Focused fixture checks: `Tools/agent/jet-env node --test Tools/agent/jet-state.test.mjs`.
-The v2 checker tests can separately be run with unittest discovery in its scripts
-directory by the verification owner when Python use is authorized. These are
-fixture proofs of projection/capture helpers, not compiler or mined-source proof.
+Focused fixture checks: `Tools/agent/jet-env node --test Tools/agent/jet-state.test.mjs`
+and `Tools/agent/jet-env node --test .agents/skills/mine-for-jet-v2/scripts/check_coverage.test.mjs`.
+The source-registry checker tests can separately be run with unittest discovery
+in its scripts directory by the verification owner when Python use is authorized.
+These are fixture proofs of projection/capture/coverage helpers, not compiler or
+mined-source proof.
