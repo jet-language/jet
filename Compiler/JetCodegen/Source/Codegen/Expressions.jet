@@ -3111,7 +3111,9 @@ fn jet_codegen_lower_core_closure_call(builder: &JetCodegenBuilder, expression: 
             &values.push(jet_codegen_emit_value(&builder, expression.span, Type.Int, MIROperation.Constant{value: MIRConstant.Int{value: spawn_site, width: None, spelling: None}}))
             label_text = label ?? ""
             &values.push(jet_codegen_emit_value(&builder, expression.span, Type.String, MIROperation.Constant{value: MIRConstant.String{value: label_text}}))
-            closure = Val(jet_codegen_lower_lambda(&builder, executable, false, "spawn").value)
+            spawned := jet_codegen_lower_lambda(&builder, executable, false, "spawn").value
+            jet_codegen_promote_spawn_closure_to_send(&builder, spawned, jet_codegen_lambda_function_type(executable))
+            closure = Val(spawned)
             mir_kind = MIRCoreClosureKind.Spawn
             grouped_spawn = group != None
         }

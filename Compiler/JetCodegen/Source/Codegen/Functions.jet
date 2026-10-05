@@ -1883,6 +1883,33 @@ fn jet_codegen_send_function_type(builder: JetCodegenBuilder, ty: Type) -> MIRTy
     }
 }
 
+// Rust mir.rs `promote_spawn_closure_to_send`: a spawned task body runs on a
+// worker thread, so the spawn retypes its closure value to SendFn (an `Arc`
+// closure in Rust AOT); the value keeps the ownership it was emitted with.
+fn jet_codegen_promote_spawn_closure_to_send(builder: &JetCodegenBuilder, closure: MIRValueID, closure_type: Type) Never! {
+    at :: builder.value_positions.get(closure.value) ?? panic("spawn closure has no MIR value type")
+    if builder.values[at].ty.kind == {
+        .SendFn(_, _, _) -> return
+        .Fn(_) -> {}
+        else -> panic("spawn closure is not callable")
+    }
+    target := jet_codegen_send_function_type(builder, closure_type)
+    builder.values[at].ty = target
+    // The closure is the instruction the spawn just lowered, in the current block.
+    position :: builder.block_positions.get(builder.current.value) ?? panic("spawn closure block is missing")
+    index := builder.blocks[position].instructions.len()
+    loop index > 0 {
+        index -= 1
+        if builder.blocks[position].instructions[index].result == .Val(result) {
+            if result == closure {
+                builder.blocks[position].instructions[index].ty = Val(target)
+                return
+            }
+        }
+    }
+    panic("spawn closure instruction is missing")
+}
+
 fn jet_codegen_emit_owned_value(builder: &JetCodegenBuilder, span: Span, ty: Type, operation: MIROperation) -> MIRValueID Never! {
     lowered_ty :: jet_codegen_lower_type_for_function(ty, builder)
     jet_codegen_emit_mir_type(&builder, span, lowered_ty, mir_owned_ownership(), operation)
