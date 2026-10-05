@@ -5683,6 +5683,12 @@ impl<'a> RustEmitter<'a> {
         if name.name == "ViewMut" && args.len() == 1 {
             return format!("&mut [{}]", self.rust_type(&args[0]));
         }
+        // D-PIN1=A: a checked `Pin<T>` is the tracked write window on the
+        // caller's place; Context::rust_type spells it `&mut T`, so the AOT
+        // projection is the same exclusive reference.
+        if name.name == jet_foundation::Syntax::TYPE_PIN && args.len() == 1 {
+            return format!("&mut {}", self.rust_type(&args[0]));
+        }
         if name.name == "Instant" {
             return self.rust_root_prelude_type("JetInstant", args);
         }

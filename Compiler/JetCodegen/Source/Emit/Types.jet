@@ -625,6 +625,9 @@ fn jet_rust_emit_apply_type(ctx: &JetRustEmitContext, name: MIRNominalRef, args:
         return "&[{jet_rust_emit_type(&ctx, inner)}]"
     }
     if name.name == "ViewMut" && args.len() == 1 -> return "&mut [{jet_rust_emit_type(&ctx, args[0])}]"
+    // D-PIN1=A: a checked `Pin<T>` is the caller's tracked write window, the
+    // same exclusive reference Context::rust_type spells.
+    if name.name == "Pin" && args.len() == 1 -> return "&mut {jet_rust_emit_type(&ctx, args[0])}"
     if name.name == "Set" && args.len() == 1 -> return "std::collections::HashSet<{jet_rust_emit_type(&ctx, args[0])}>"
     if name.name == "Rank" && args.len() == 1 -> return "std::collections::BTreeSet<{jet_rust_emit_type(&ctx, args[0])}>"
     if name.name == "PriorityQueue" && args.len() == 1 -> return "std::collections::BinaryHeap<{jet_rust_emit_type(&ctx, args[0])}>"

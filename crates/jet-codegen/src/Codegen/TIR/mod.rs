@@ -13626,6 +13626,7 @@ impl TBuiltinOp {
             | Self::DequeSplit
             | Self::SplitWrite { .. }
             | Self::GetDisjointWrite
+            | Self::ViewMutNew { .. }
             | Self::IterNext => true,
             Self::ByteBufferMethod { method } => matches!(
                 method.as_str(),

@@ -1169,11 +1169,36 @@ pub fn canonicalize_union(members: Vec<Type>) -> Type {
             unique.push(m);
         }
     }
-    unique.sort_by(|a, b| a.name().cmp(&b.name()));
+    unique.sort_by(|a, b| {
+        union_member_order_key(a)
+            .cmp(&union_member_order_key(b))
+            .then_with(|| a.name().cmp(&b.name()))
+    });
     match unique.len() {
         0 => Type::Named(crate::Syntax::INTERNAL_UNIT_TYPE.to_string()),
         1 => unique.pop().unwrap(),
         _ => Type::Union(unique),
+    }
+}
+
+/// D-UNIONTYPE1=A: the canonical member order reads each nominal head without
+/// its module qualifier, so resolving `HTTPError` to its declaration key
+/// (`<corelib>/Core/http::…::HTTPError`) never reorders a union whose carrier
+/// enum (`union_enum_name`) and variants were fixed from the written members.
+fn union_member_order_key(ty: &Type) -> String {
+    fn unqualified(name: &str) -> &str {
+        name.rsplit("::").next().unwrap_or(name)
+    }
+    match ty {
+        Type::Named(name) => unqualified(name).to_string(),
+        Type::Apply { name, .. } => {
+            let full = ty.name();
+            match full.strip_prefix(name.as_str()) {
+                Some(arguments) => format!("{}{arguments}", unqualified(name)),
+                None => full,
+            }
+        }
+        _ => ty.name(),
     }
 }
 
