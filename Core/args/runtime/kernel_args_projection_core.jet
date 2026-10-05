@@ -42,9 +42,9 @@ pub fn jet_args_shape_tree_values(spec: &JetArgsSpec, parsed: &JetParsedArgs, pr
                 if not seen.insert(output_name.clone()) {
                     return Err([JetArgsShapeError{path: output_name, reason: "ambiguous duplicate argument shape field"}])
                 }
-                raw_values :: parsed.options.get(name) ?? continue
+                raw_values :: parsed.options.get(name) ?? next
                 values := [JetArgsShapeValue].with_capacity(raw_values.len())
-                for raw in raw_values { values.push(jet_args_shape_value(value, raw, output_name)?) }
+                loop raw in raw_values { values.push(jet_args_shape_value(value, raw, output_name)?) }
                 projected :: if repeat { JetArgsShapeValue.Array(values) } else {
                     values.into_iter().last() ?? JetArgsShapeValue.Text("")
                 }
@@ -53,8 +53,8 @@ pub fn jet_args_shape_tree_values(spec: &JetArgsSpec, parsed: &JetParsedArgs, pr
             .Positional(name, ..) -> {
                 // Options and named positionals share one canonical field.
                 output_name :: jet_args_projection_name(projection, name)
-                if not seen.insert(output_name.clone()) -> continue
-                value :: parsed.options.get(name).and_then(fn(values) { values.last() }) ?? continue
+                if not seen.insert(output_name.clone()) -> next
+                value :: parsed.options.get(name).and_then(fn(values) { values.last() }) ?? next
                 fields.push((output_name, JetArgsShapeValue.Text(value.clone())))
             }
             .Subcommand(..) -> {} // Nested spec selection is not a decoded record field.
@@ -81,12 +81,12 @@ pub fn jet_args_merge_fields<T>(spec: &JetArgsSpec, argv: &[String], names: View
         [JetArgsShapeError{path: "", reason: message}]
     })?
     explicit := BTreeSet<String>.new()
-    for name in parsed.explicit_flags { explicit.insert(jet_args_projection_name(names, name)) }
-    for name in parsed.explicit_options { explicit.insert(jet_args_projection_name(names, name)) }
+    loop name in parsed.explicit_flags { explicit.insert(jet_args_projection_name(names, name)) }
+    loop name in parsed.explicit_options { explicit.insert(jet_args_projection_name(names, name)) }
     for (name, value) in flag_fields {
-        if not explicit.contains(name) -> continue
+        if not explicit.contains(name) -> next
         slot := None as Int?
-        for i in 0..<settings_fields.len() { if settings_fields[i].0 == name {
+        loop i in 0..<settings_fields.len() { if settings_fields[i].0 == name {
             slot = Val(i)
             break
         } }
