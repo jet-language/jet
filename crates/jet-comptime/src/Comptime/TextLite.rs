@@ -432,7 +432,7 @@ mod text_kernel {
         jet_std_fs_scope_read(&scope, &path.to_string())
     }
     pub(super) fn fs_read_bytes(path: &str) -> Result<Vec<u8>, jet_std::IOError> {
-        jet_std_fs_read_bytes(&path.to_string())
+        jet_std_fs_read_bytes(path)
     }
     pub(super) fn fs_write(path: &str, text: &str) -> Result<(), jet_std::IOError> {
         jet_std_fs_write(&path.to_string(), &text.to_string())
