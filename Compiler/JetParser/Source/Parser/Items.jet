@@ -999,7 +999,8 @@ fn parser_parse_function(state: &JetParserState, modifiers: ParsedItemModifiers,
         // D-SIG-AFTER1=A (card #4512): `-> T -[E]>` writes two arrows; the
         // result follows the one effect arrow instead (E0068).
         if signature.plain_arrow && parser_current_kind(&state) == TOKEN_MINUS && parser_kind_at(&state, 1) == TOKEN_LBRACKET {
-            parser_add_error_code(&state, "E0068", parser_current(&state).span, "this callable puts the return type before the arrow", "a return type follows the one arrow, and a named function body uses braces", "write `fn name(...) -> Type {{ … }}`")
+            arrow_span :: parser_current(&state).span
+            parser_add_error_code(&state, "E0068", arrow_span, "this callable puts the return type before the arrow", "a return type follows the one arrow, and a named function body uses braces", "write `fn name(...) -> Type {{ … }}`")
         }
         post_effect = true
         effects :: parser_parse_opt_func_effects(&state)
@@ -1051,7 +1052,10 @@ fn parser_parse_function(state: &JetParserState, modifiers: ParsedItemModifiers,
             parser_add_error_code(&state, "E0081", missing, "`fn {func_name}` has no body", "Jet functions are defined, not declared: a signature without `{{ … }}` is not a complete function. Host and FFI cells use `#Import` / `#FFI` with their required body form.", "Add a `{{ … }}` block.")
         } else {
             if arrow_marker -> parser_report_arrow_function_body(&state, marker_span)
-            if effect_body && teach_arrow_body -> parser_report_arrow_function_body(&state, parser_current(&state).span)
+            if effect_body && teach_arrow_body {
+                body_span :: parser_current(&state).span
+                parser_report_arrow_function_body(&state, body_span)
+            }
             value :: parser_parse_expression(&state, 1, 0)
             parser_finish_statement(&state)
             retired_body = Val(Stmt.Expr{expr: value.expr})
@@ -1446,7 +1450,10 @@ fn parser_parse_inline_foreign_body(state: &JetParserState, markers: [Marker]) -
         parser_add_fatal_code(&state, "E0930", ffi.span, "`#FFI` arguments do not match its registered signature", "marker arguments use the same call grammar and typed signature as function arguments", "match the registered marker signature")
         return None
     }
-    if parser_current_kind(&state) == TOKEN_UNIFIED_ARROW -> parser_report_arrow_function_body(&state, parser_bump(&state).span)
+    if parser_current_kind(&state) == TOKEN_UNIFIED_ARROW {
+        arrow_span :: parser_bump(&state).span
+        parser_report_arrow_function_body(&state, arrow_span)
+    }
     parser_expect(&state, TOKEN_LBRACE, "`{{` to open the `#FFI` foreign-source body")
     parser_skip_semicolons(&state)
     source :: parser_current(&state)

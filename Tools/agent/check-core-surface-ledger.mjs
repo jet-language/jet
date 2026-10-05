@@ -1669,10 +1669,16 @@ function translateCoreCallConstructor(name, args, context) {
 }
 
 function translateCoreCallMethod(record, name, args, context) {
-  if (name === "without_direct_aot" || name === "without_direct_jit" ||
-      name === "with_native_int_result") {
+  if (name === "without_direct_aot" || name === "without_direct_jit") {
     expectRustArgumentCount(name, args, 0, context);
     return "core_call_" + name + "(" + record + ")";
+  }
+  // The Rust row's raw-machine-word fact has no Jet twin: the Jet emitter
+  // widens every Core `Int` result by its declared Rust slot
+  // (`jet_int_owned_from_native_result`), so the Jet view drops it.
+  if (name === "with_native_int_result") {
+    expectRustArgumentCount(name, args, 0, context);
+    return record;
   }
   expectRustArgumentCount(name, args, 1, context);
   const argument = args[0];

@@ -271,8 +271,10 @@ pub fn diagnostic_render(diagnostic: Diagnostic, file: String, source: String, c
     diagnostic_push_text(&out, " {diagnostic_theme_bold(color, "Fix:")} {fix}\n")
     if diagnostic.detail == .Val(detail) {
         if !diagnostic_has_structured_detail_key(detail) {
-            loop (index, line) in detail.split("\n") {
-                if index != 0 -> diagnostic_push_text(&out, "\n")
+            first := true
+            loop line in detail.split("\n") {
+                if !first -> diagnostic_push_text(&out, "\n")
+                first = false
                 diagnostic_push_text(&out, diagnostic_escape_terminal_text(line))
             }
             if !detail.ends_with("\n") -> diagnostic_push_text(&out, "\n")

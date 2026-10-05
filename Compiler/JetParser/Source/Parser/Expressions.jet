@@ -1183,7 +1183,10 @@ fn parser_parse_lambda(state: &JetParserState, depth: Int, take_names: [NamedSpa
         }
     }
     close :: parser_expect(&state, TOKEN_RPAREN, "`)` after lambda parameters")
-    if !parser_func_effect_starts_here(&state) && !parser_at_unified_arrow(&state) -> parser_lambda_interface_error(&state, parser_current(&state).span)
+    if !parser_func_effect_starts_here(&state) && !parser_at_unified_arrow(&state) {
+        interface_span :: parser_current(&state).span
+        parser_lambda_interface_error(&state, interface_span)
+    }
     effects :: parser_parse_opt_func_effects(&state)
     if effects.via == .Val(via) {
         parser_add_fatal_code(&state, "E0119", via.span, "a lambda effect row cannot publish `via`", "a lambda stores a concrete effect row as part of its callable interface", "write the effects directly, for example `-[Net]>`")

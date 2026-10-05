@@ -925,7 +925,7 @@ fn jet_rust_emit_plugin_type(ctx: &JetRustEmitContext, source: MIRType) -> MIRTy
         }
         else -> {}
     }
-    source
+    ~source
 }
 
 fn jet_rust_emit_plugin_record_fields(ctx: &JetRustEmitContext, source: MIRType) -> [MIRField] Never! {
@@ -980,7 +980,8 @@ fn jet_rust_emit_plugin_encode(ctx: &JetRustEmitContext, descriptor: MIRComponen
             entries := [String]{}
             loop component_field in component_fields {
                 field :: jet_rust_emit_plugin_field(declared, component_field)
-                child :: jet_rust_emit_plugin_encode(&ctx, component_field.ty, field.ty, "{item}.{jet_rust_emit_field_name(&ctx, field.id)}", depth + 1)
+                field_name :: jet_rust_emit_field_name(&ctx, field.id)
+                child :: jet_rust_emit_plugin_encode(&ctx, component_field.ty, field.ty, "{item}.{field_name}", depth + 1)
                 &entries.push("({jet_rust_emit_quote(component_field.name)}.to_string(), {child})")
             }
             return "{{ let {item} = ({value}); {wire}::Record(vec![{entries.join(", ")}]) }}"
@@ -1047,9 +1048,14 @@ fn jet_rust_emit_plugin_invoke(ctx: &JetRustEmitContext, function: MIRFunction, 
     success :: if result_ty.kind == .Result(ok, _) -> ok else -> panic("checked plugin invocation is not a Result")
     wire :: "{ctx.config.root_prefix}jet_std::plugin_wire::"
     params := [String]{}
-    loop (index, arg) in args -> &params.push(jet_rust_emit_plugin_encode(&ctx, signature.params[index], jet_rust_emit_value_type(ctx, function, arg), jet_rust_emit_value_owned(ctx, function, arg), 0))
+    loop (index, arg) in args {
+        arg_ty :: jet_rust_emit_value_type(ctx, function, arg)
+        arg_value :: jet_rust_emit_value_owned(ctx, function, arg)
+        &params.push(jet_rust_emit_plugin_encode(&ctx, signature.params[index], arg_ty, arg_value, 0))
+    }
     name :: jet_rust_emit_quote(export_name)
-    emitted :: jet_rust_emit_prelude_args_exact(&ctx, function, call, [String]{"({jet_rust_emit_value_owned(ctx, function, handle)}).handle", name, "&__jet_plugin_params_wire"})
+    handle_value :: jet_rust_emit_value_owned(ctx, function, handle)
+    emitted :: jet_rust_emit_prelude_args_exact(&ctx, function, call, [String]{"({handle_value}).handle", name, "&__jet_plugin_params_wire"})
     decoded :: jet_rust_emit_plugin_decode(&ctx, signature.result, success, "__jet_plugin_value", 0)
     "{{ let __jet_plugin_params = vec![{params.join(", ")}]; let __jet_plugin_params_wire = {wire}plugin_encode_params(&__jet_plugin_params); let __jet_plugin_wire = {emitted}; match {wire}plugin_decode_result(&__jet_plugin_wire) {{ Ok(__jet_plugin_value) => (|__jet_plugin_value: {wire}PluginValue| -> Result<{jet_rust_emit_type(&ctx, success)}, String> {{ {decoded} }})(__jet_plugin_value).map_err(|message| {wire}PluginError::defect({name}, message)), Err(error) => Err(error) }} }}"
 }
