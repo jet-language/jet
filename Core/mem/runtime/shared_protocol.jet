@@ -297,7 +297,7 @@ pub fn jet_shared_acquire_ordered(protocols: [Arc<JetSharedProtocol>]) -> [Arc<J
     participants :: protocols.into_iter().enumerate().map(fn(pair) { (pair.0, pair.1, true) }).collect()
     rows :: jet_shared_acquire_ordered_by(^participants, fn(owner, editable) {
         owner.acquire(editable, fn() { false }).ok_or_else(fn() { "canonical Shared permit acquisition was cancelled" })
-    }).expect("uncancelled transaction lock acquisition succeeds")
+    }) ?? panic("uncancelled transaction lock acquisition succeeds")
     acquired := [Arc<JetSharedPermit>].with_capacity(rows.len())
     permits := [Arc<JetSharedPermit>]{}
     loop (_, _, permit) in rows {
@@ -333,7 +333,7 @@ impl<T: Clone> JetSharedTxnValue for JetSharedTxnValueImpl<T> {
     fn merge_into(self: &Self, parent: &JetSharedTxnValue) -> {
         // GATE #4565: kernel primitive
         #Unsafe("exact native erased type check and thread-local RefCell borrows preserve participant type and ownership") {
-            parent :: parent.as_any().downcast_ref<Self>().expect("Shared transaction participant type changed")
+            parent :: parent.as_any().downcast_ref<Self>() ?? panic("Shared transaction participant type changed")
             value :: self.value.borrow().clone()
             *parent.value.borrow_mut() = ^value
         }
@@ -443,7 +443,7 @@ fn jet_shared_transaction_part_mut(parts: &[JetSharedTransactionPart], protocol:
     }
     // GATE #4565: kernel primitive
     parts.push(JetSharedTransactionPart.new(#Unsafe("retain the canonical owner without duplicating physical ownership") { protocol.clone() }))
-    parts.last_mut().expect("new Shared transaction participant")
+    parts.last_mut() ?? panic("new Shared transaction participant")
 }
 // Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:618
 fn jet_shared_transaction_part(parts: &[JetSharedTransactionPart], protocol: &Arc<JetSharedCanonicalOwner>) -> (&JetSharedTransactionPart)? {
@@ -499,7 +499,7 @@ fn jet_shared_transaction_pop(state: &Rc<RefCell<JetSharedTransactionState>>) ->
 #Unsafe("merge thread-confined child working values and invalidate parent tickets with Release publication")
 fn jet_shared_transaction_merge_nested(parent: &Rc<RefCell<JetSharedTransactionState>>, child_parts: [JetSharedTransactionPart], child_rollbacks: [Box<fn() -> ()>]) -> {
     parent := parent.borrow_mut()
-    parts :: parent.parts.as_mut().expect("nested Shared transaction parent already committed")
+    parts :: parent.parts.as_mut() ?? panic("nested Shared transaction parent already committed")
     loop child in child_parts.drain(..) {
         parent_part :: jet_shared_transaction_part_mut(parts, &child.protocol)
         if child.writes {
@@ -540,7 +540,7 @@ impl JetSharedTransaction {
     #Unsafe("mutate only this thread's transaction participant list")
     pub fn touch(self: &Self, protocol: Arc<JetSharedCanonicalOwner>) -> {
         state := self.state.borrow_mut()
-        parts :: state.parts.as_mut().expect("Shared transaction touch after commit")
+        parts :: state.parts.as_mut() ?? panic("Shared transaction touch after commit")
         _ :: jet_shared_transaction_part_mut(parts, &protocol)
     }
     // Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:763
@@ -560,7 +560,7 @@ impl JetSharedTransaction {
         value :: self.staged_value<T>(&protocol).map(fn(staged) { staged.borrow().clone() }).unwrap_or_else(initial)
         staged :: Rc.new(RefCell.new(^value))
         state := self.state.borrow_mut()
-        parts :: state.parts.as_mut().expect("Shared transaction stage after commit")
+        parts :: state.parts.as_mut() ?? panic("Shared transaction stage after commit")
         part :: jet_shared_transaction_part_mut(parts, &protocol)
         part.staged = Val(Box.new(JetSharedTxnValueImpl{value: staged.clone()}))
         staged
@@ -575,7 +575,7 @@ impl JetSharedTransaction {
     #Unsafe("invalidate the participant's native atomic snapshot tickets before publication")
     pub fn mark_write(self: &Self, protocol: Arc<JetSharedCanonicalOwner>) -> {
         state := self.state.borrow_mut()
-        parts :: state.parts.as_mut().expect("Shared transaction write after commit")
+        parts :: state.parts.as_mut() ?? panic("Shared transaction write after commit")
         part :: jet_shared_transaction_part_mut(parts, &protocol)
         part.writes = true
         loop snapshot in &part.snapshots { snapshot.store(false, Ordering.Release) }
@@ -593,7 +593,7 @@ impl JetSharedTransaction {
         self.touch(protocol.clone())
         {
             state := self.state.borrow_mut()
-            parts :: state.parts.as_mut().expect("Shared transaction snapshot after commit")
+            parts :: state.parts.as_mut() ?? panic("Shared transaction snapshot after commit")
             jet_shared_transaction_part_mut(parts, &protocol).snapshots.push(valid.clone())
         }
         self.record_rollback(Box.new(fn() { valid.store(false, Ordering.Release) }))
@@ -603,7 +603,7 @@ impl JetSharedTransaction {
     #Unsafe("record a consuming delta only in this thread's uncommitted state")
     pub fn record_edit(self: &Self, protocol: Arc<JetSharedCanonicalOwner>, delta: Box<fn() -> ()>) -> {
         state := self.state.borrow_mut()
-        parts :: state.parts.as_mut().expect("Shared transaction edit after commit")
+        parts :: state.parts.as_mut() ?? panic("Shared transaction edit after commit")
         jet_shared_transaction_part_mut(parts, &protocol).deltas.push(^delta)
     }
     // Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:878
@@ -617,7 +617,7 @@ impl JetSharedTransaction {
     #Unsafe("register consuming stage and publish closures only in the thread-local participant")
     pub fn record_edit_with_staged_commit(self: &Self, protocol: Arc<JetSharedCanonicalOwner>, delta: Box<fn() -> ()>, stage: Box<fn(&JetSharedCanonicalPermit) -> () Err!>, commit: Box<fn(&JetSharedCanonicalPermit) -> ()>) -> {
         state := self.state.borrow_mut()
-        parts :: state.parts.as_mut().expect("Shared transaction edit after commit")
+        parts :: state.parts.as_mut() ?? panic("Shared transaction edit after commit")
         part :: jet_shared_transaction_part_mut(parts, &protocol)
         part.deltas.push(^delta)
         if !part.has_commit_hook {
@@ -650,7 +650,7 @@ impl JetSharedTransaction {
         }
         jet_shared_transaction_pop(&state)
         if parts.is_none() -> return Ok(apply())
-        parts := parts.unwrap()
+        parts := parts ?? panic("unwrap failed")
         rollback_hooks := rollback_hooks.unwrap_or_default()
         if parent.and_then(fn(parent) { parent.upgrade() }) == .Val(parent) {
             jet_shared_transaction_merge_nested(&parent, ^parts, ^rollback_hooks)
@@ -670,7 +670,7 @@ impl JetSharedTransaction {
         loop part in &parts { loop delta in part.deltas.drain(..) { delta() } }
         stage_result :: (fn() -> () Err! {
             loop (index, part) in parts.iter_mut().enumerate() {
-                permit :: permits[index].as_ref().expect("ordered Shared acquisition omitted a participant")
+                permit :: permits[index].as_ref() ?? panic("ordered Shared acquisition omitted a participant")
                 loop stage in part.stage_hooks.drain(..) { stage(permit.as_ref())? }
             }
             Ok(())
@@ -689,7 +689,7 @@ impl JetSharedTransaction {
             return Err(^error)
         }
         loop (index, part) in parts.iter_mut().enumerate() {
-            permit :: permits[index].as_ref().expect("ordered Shared acquisition omitted a participant")
+            permit :: permits[index].as_ref() ?? panic("ordered Shared acquisition omitted a participant")
             loop commit in part.commit_hooks.drain(..) { commit(permit.as_ref()) }
         }
         drop(^permits)
@@ -834,7 +834,7 @@ impl Drop for JetSharedPermit {
 pub fn jet_shared_guard_acquire(protocol: &Arc<JetSharedProtocol>, editable: Bool, cancelled: fn() -> Bool) -> Arc<JetSharedGuardState>? {
     jet_shared_acquire(protocol, editable, ^cancelled).map(fn(permit) {
         permit :: permit as Arc<JetSharedCanonicalPermit>
-        jet_shared_guard_state_from_permit(^permit, editable).expect("new Shared guard permit is held with matching capability")
+        (jet_shared_guard_state_from_permit(^permit, editable) ?? panic("new Shared guard permit is held with matching capability"))
     })
 }
 // Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1222
@@ -845,7 +845,7 @@ pub fn jet_shared_guard_acquire_ordered(participants: [(Usize, Arc<JetSharedProt
     }).collect()
     jet_shared_acquire_ordered_owners(^owners).expect("uncancelled ordered Shared owner acquisition succeeds")
         .into_iter().map(fn((index, editable, permit)) {
-            (index, jet_shared_guard_state_from_permit(^permit, editable).expect("ordered Shared permit is held with matching capability"))
+            (index, jet_shared_guard_state_from_permit(^permit, editable) ?? panic("ordered Shared permit is held with matching capability"))
         }).collect()
 }
 // Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1248

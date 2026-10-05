@@ -161,7 +161,7 @@ module jet_c_abi {
     pub fn jet_rt_u64_to_string(value: U64) -> JetCString { guard(fn() { handle(value.to_string()) }) }
     // Rust: crates/jet-codegen/src/Prelude/Core/CAbi.rs:233
     #FFI(c)
-    pub fn jet_rt_char_to_string(value: I64) -> JetCString { guard(fn() { handle(Char.from_u32(c_abi_char_scalar(value)).unwrap().to_string()) }) }
+    pub fn jet_rt_char_to_string(value: I64) -> JetCString { guard(fn() { handle((Char.from_u32(c_abi_char_scalar(value)) ?? panic("unwrap failed")).to_string()) }) }
     // Rust: crates/jet-codegen/src/Prelude/Core/CAbi.rs:241
     #FFI(c)
     pub fn jet_rt_bool_to_string(value: U8) -> JetCString { guard(fn() { handle(c_abi_bool_input(value).to_string()) }) }

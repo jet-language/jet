@@ -92,7 +92,7 @@ fn jet_abi_string_arg(packed: U64) -> String {
     // GATE #4565: kernel primitive
     #Unsafe("registry consumption transfers this exact live byte span back exactly once") {
         boxed :: Box.from_raw(ptr.slice_from_raw_parts_mut(ptr.from_addr<U8>(pointer as USize), len as USize))
-        String.from_utf8(boxed.into_vec()).expect("JS TextEncoder UTF-8")
+        String.from_utf8(boxed.into_vec()) ?? panic("JS TextEncoder UTF-8")
     }
 }
 // Rust: crates/jet-codegen/src/Prelude/Core/WebAbi.rs:106
@@ -121,7 +121,7 @@ fn jet_abi_list_i64_ret(v: [I64]) -> U64 {
     if v.is_empty() -> return 0
     boxed :: v.into_boxed_slice()
     len :: boxed.len() as U32
-    byte_len :: len.checked_mul(size_of<I64>() as U32).expect("list-i64 byte length overflow")
+    byte_len :: len.checked_mul(size_of<I64>() as U32) ?? panic("list-i64 byte length overflow")
     // GATE #4565: kernel primitive
     pointer :: #Unsafe("host receives an exact aligned i64 allocation") { Box.into_raw(^boxed).addr() as U32 }
     jet_abi_register(JET_ABI_LIST_I64_KIND, pointer, byte_len)
@@ -135,7 +135,7 @@ fn jet_abi_list_i64_arg(packed: U64) -> [I64] {
         assert(pointer == 0, "non-null empty Wasm list-i64 allocation")
         return []
     }
-    byte_len :: len.checked_mul(size_of<I64>() as U32).expect("list-i64 byte length overflow")
+    byte_len :: len.checked_mul(size_of<I64>() as U32) ?? panic("list-i64 byte length overflow")
     jet_abi_require(JET_ABI_LIST_I64_KIND, pointer, byte_len)
     // GATE #4565: kernel primitive
     #Unsafe("registry matches the original aligned i64 span and transfers ownership once") {
@@ -150,7 +150,7 @@ pub fn jet_abi_list_i64_alloc(len: U32) -> U32 {
     boxed :: [I64].filled(len as USize, 0).into_boxed_slice()
     // GATE #4565: kernel primitive
     pointer :: #Unsafe("host receives the aligned zero-filled i64 span") { Box.into_raw(^boxed).addr() as U32 }
-    byte_len :: len.checked_mul(size_of<I64>() as U32).expect("list-i64 byte length overflow")
+    byte_len :: len.checked_mul(size_of<I64>() as U32) ?? panic("list-i64 byte length overflow")
     jet_abi_register(JET_ABI_LIST_I64_KIND, pointer, byte_len)
     pointer
 }
@@ -161,7 +161,7 @@ pub fn jet_abi_list_i64_free(pointer: U32, len: U32) -> {
         assert(len == 0, "null Wasm list-i64 allocation with length")
         return
     }
-    byte_len :: len.checked_mul(size_of<I64>() as U32).expect("list-i64 byte length overflow")
+    byte_len :: len.checked_mul(size_of<I64>() as U32) ?? panic("list-i64 byte length overflow")
     jet_abi_require(JET_ABI_LIST_I64_KIND, pointer, byte_len)
     // GATE #4565: kernel primitive
     #Unsafe("registry consumed the exact original aligned span before its final drop") { _ :: Box.from_raw(ptr.slice_from_raw_parts_mut(ptr.from_addr<I64>(pointer as USize), len as USize)) }
@@ -196,19 +196,19 @@ fn jet_abi_list_int_arg(packed: U64) -> [JetInt] {
     boxed :: #Unsafe("consume the registered exact byte allocation once before parsing") { Box.from_raw(ptr.slice_from_raw_parts_mut(ptr.from_addr<U8>(pointer as USize), len as USize)) }
     bytes :: boxed.into_vec()
     assert(bytes.len() >= 4, "list-int header")
-    count :: U32.from_le_bytes(bytes[0..<4].try_into().unwrap()) as USize
+    count :: U32.from_le_bytes(bytes[0..<4].try_into() ?? panic("unwrap failed")) as USize
     assert(count <= (bytes.len() - 4) / 4, "list-int count")
     offset := USize{4}
     values := [JetInt].with_capacity(count)
     loop _ in 0..<count {
         assert(offset + 4 <= bytes.len(), "list-int length")
         end :: offset + 4
-        value_len :: U32.from_le_bytes(bytes[offset..<end].try_into().unwrap()) as USize
+        value_len :: U32.from_le_bytes(bytes[offset..<end].try_into() ?? panic("unwrap failed")) as USize
         offset = end
-        value_end :: offset.checked_add(value_len).expect("list-int value overflow")
+        value_end :: offset.checked_add(value_len) ?? panic("list-int value overflow")
         assert(value_end <= bytes.len(), "list-int value")
-        text :: core.str.from_utf8(bytes[offset..<value_end]).expect("JS UTF-8")
-        values.push(jet_int_owned_parse(text).expect("JS exact integer"))
+        text :: core.str.from_utf8(bytes[offset..<value_end]) ?? panic("JS UTF-8")
+        values.push(jet_int_owned_parse(text) ?? panic("JS exact integer"))
         offset = value_end
     }
     assert(offset == bytes.len(), "list-int trailing bytes")
@@ -267,17 +267,17 @@ fn jet_abi_list_string_arg(packed: U64) -> [String] {
     boxed :: #Unsafe("consume the registered UTF-8 list allocation once") { Box.from_raw(ptr.slice_from_raw_parts_mut(ptr.from_addr<U8>(pointer as USize), byte_len as USize)) }
     buf :: boxed.into_vec()
     assert(buf.len() >= 4, "list-string header")
-    count :: U32.from_le_bytes(buf[0..<4].try_into().unwrap()) as USize
+    count :: U32.from_le_bytes(buf[0..<4].try_into() ?? panic("unwrap failed")) as USize
     assert(count <= (buf.len() - 4) / 4, "list-string count")
     i := USize{4}
     out := [String].with_capacity(count)
     loop _ in 0..<count {
         assert(i + 4 <= buf.len(), "list-string len")
-        len :: U32.from_le_bytes(buf[i..<i + 4].try_into().unwrap()) as USize
+        len :: U32.from_le_bytes(buf[i..<i + 4].try_into() ?? panic("unwrap failed")) as USize
         i += 4
-        end :: i.checked_add(len).expect("list-string byte length overflow")
+        end :: i.checked_add(len) ?? panic("list-string byte length overflow")
         assert(end <= buf.len(), "list-string bytes")
-        out.push(String.from_utf8(buf[i..<end].to_vec()).expect("JS UTF-8"))
+        out.push(String.from_utf8(buf[i..<end].to_vec()) ?? panic("JS UTF-8"))
         i = end
     }
     assert(i == buf.len(), "list-string trailing bytes")
@@ -340,24 +340,24 @@ fn jet_abi_map_string_int_arg(packed: U64) -> JetMap<String, JetInt> {
     boxed :: #Unsafe("consume exact registered map byte span once before parsing") { Box.from_raw(ptr.slice_from_raw_parts_mut(ptr.from_addr<U8>(pointer as USize), byte_len as USize)) }
     buf :: boxed.into_vec()
     assert(buf.len() >= 4, "map-string-int header")
-    count :: U32.from_le_bytes(buf[0..<4].try_into().unwrap()) as USize
+    count :: U32.from_le_bytes(buf[0..<4].try_into() ?? panic("unwrap failed")) as USize
     assert(count <= (buf.len() - 4) / 8, "map-string-int count")
     i := USize{4}
     out := JetMap<String, JetInt>.new()
     loop _ in 0..<count {
-        len_end :: i.checked_add(4).expect("map-string-int key len overflow")
+        len_end :: i.checked_add(4) ?? panic("map-string-int key len overflow")
         assert(len_end <= buf.len(), "map-string-int key len")
-        len :: U32.from_le_bytes(buf[i..<len_end].try_into().unwrap()) as USize
+        len :: U32.from_le_bytes(buf[i..<len_end].try_into() ?? panic("unwrap failed")) as USize
         i = len_end
-        key_end :: i.checked_add(len).expect("map-string-int key overflow")
-        value_len_end :: key_end.checked_add(4).expect("map-string-int value length overflow")
+        key_end :: i.checked_add(len) ?? panic("map-string-int key overflow")
+        value_len_end :: key_end.checked_add(4) ?? panic("map-string-int value length overflow")
         assert(value_len_end <= buf.len(), "map-string-int value length")
-        value_len :: U32.from_le_bytes(buf[key_end..<value_len_end].try_into().unwrap()) as USize
-        value_end :: value_len_end.checked_add(value_len).expect("map-string-int value overflow")
+        value_len :: U32.from_le_bytes(buf[key_end..<value_len_end].try_into() ?? panic("unwrap failed")) as USize
+        value_end :: value_len_end.checked_add(value_len) ?? panic("map-string-int value overflow")
         assert(value_end <= buf.len(), "map-string-int entry")
-        key :: String.from_utf8(buf[i..<key_end].to_vec()).expect("JS UTF-8")
-        text :: core.str.from_utf8(buf[value_len_end..<value_end]).expect("JS UTF-8")
-        val :: jet_int_owned_parse(text).expect("JS exact integer")
+        key :: String.from_utf8(buf[i..<key_end].to_vec()) ?? panic("JS UTF-8")
+        text :: core.str.from_utf8(buf[value_len_end..<value_end]) ?? panic("JS UTF-8")
+        val :: jet_int_owned_parse(text) ?? panic("JS exact integer")
         i = value_end
         _ :: out.insert(^key, ^val)
     }
@@ -388,4 +388,4 @@ pub fn jet_abi_map_string_int_free(pointer: U32, byte_len: U32) -> {
 // Rust: crates/jet-codegen/src/Prelude/Core/WebAbi.rs:387
 fn jet_abi_int_ret(value: JetInt) -> U64 { jet_abi_string_ret(value.to_string()) }
 // Rust: crates/jet-codegen/src/Prelude/Core/WebAbi.rs:391
-fn jet_abi_int_arg(packed: U64) -> JetInt { jet_int_owned_parse(jet_abi_string_arg(packed)).expect("JS exact integer") }
+fn jet_abi_int_arg(packed: U64) -> JetInt { jet_int_owned_parse(jet_abi_string_arg(packed)) ?? panic("JS exact integer") }

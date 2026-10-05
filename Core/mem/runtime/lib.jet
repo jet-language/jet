@@ -623,7 +623,7 @@ impl JetArena {
             Val(.IntList(values)) -> return values[USize{index}]
             Val(.List(values)) -> values[USize{index}]
             Val(.UninitList{values, initialized}) -> {
-                index :: uninit_semantics.jet_uninit_read(initialized, USize{index}).expect("proven fixed-list read of uninitialized slot")
+                index :: uninit_semantics.jet_uninit_read(initialized, USize{index}) ?? panic("proven fixed-list read of uninitialized slot")
                 values[index]
             }
             _ -> jet_foundation.ice(None, "proven fixed-list read of a non-list carrier")
@@ -678,7 +678,7 @@ impl JetArena {
         value :: match self.values.get(USize{list}) {
             Val(.List(values)) -> values[USize{index}]
             Val(.UninitList{values, initialized}) -> {
-                index :: uninit_semantics.jet_uninit_read(initialized, USize{index}).expect("proven fixed-list read of uninitialized slot")
+                index :: uninit_semantics.jet_uninit_read(initialized, USize{index}) ?? panic("proven fixed-list read of uninitialized slot")
                 values[index]
             }
             _ -> jet_foundation.ice(None, "proven fixed-list read of a non-list carrier")

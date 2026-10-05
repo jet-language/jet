@@ -164,7 +164,7 @@ impl RawBlock {
     fn new(bytes: USize, alignment: USize) -> RawBlock {
         size :: bytes.max(1)
         align :: alignment.max(1).next_power_of_two()
-        layout :: Layout.from_size_align(size, align).expect("allocator capacity/alignment overflow")
+        layout :: Layout.from_size_align(size, align) ?? panic("allocator capacity/alignment overflow")
         // GATE #4565: kernel primitive
         raw :: #Unsafe("allocate a nonzero valid layout; null follows the allocator failure rail") { backing.alloc(layout) }
         ptr :: NonNull.new(raw).unwrap_or_else(fn() { backing.handle_alloc_error(layout) })
@@ -278,7 +278,7 @@ impl JetArena {
         }
         state.current_block = selected
         // GATE #4565: kernel primitive
-        ptr :: #Unsafe("selected retained chunk fits this unique typed write until reset") { state.blocks[selected].write(^val).unwrap() }
+        ptr :: #Unsafe("selected retained chunk fits this unique typed write until reset") { state.blocks[selected].write(^val) ?? panic("unwrap failed") }
         record_drop(&state.drops, ptr)
         bytes :: observe_alloc<T>()
         state.live_allocations += 1
@@ -431,10 +431,10 @@ impl JetPool {
         slot := &state.slots[selected]
         replace :: slot.block.as_ref().map_or(true, block -> block.capacity() < bytes || block.layout.align() < align)
         if replace -> slot.block = Val(RawBlock.new(bytes, align))
-        block := slot.block.as_mut().unwrap()
+        block := slot.block.as_mut() ?? panic("unwrap failed")
         block.rewind()
         // GATE #4565: kernel primitive
-        ptr :: #Unsafe("unique retained slot class fits this typed value") { block.write(^val).unwrap() }
+        ptr :: #Unsafe("unique retained slot class fits this typed value") { block.write(^val) ?? panic("unwrap failed") }
         slot.occupied = true
         record_drop(&state.drops, ptr)
         live_bytes :: observe_alloc<T>()
@@ -456,7 +456,7 @@ impl JetPool {
         slot := &state.slots[selected]
         replace :: slot.block.as_ref().map_or(true, block -> block.capacity() < bytes || block.layout.align() < align)
         if replace -> slot.block = Val(RawBlock.try_new(bytes, align, "Pool")?)
-        block := slot.block.as_mut().expect("pool slot has a block")
+        block := slot.block.as_mut() ?? panic("pool slot has a block")
         block.rewind()
         // GATE #4565: kernel primitive
         ptr :: #Unsafe("unique retained slot and canonical allocation rail prove the typed write") { block.try_write(^val, "Pool")? }
