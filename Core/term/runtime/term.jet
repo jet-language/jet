@@ -210,7 +210,10 @@ pub fn jet_term_secret_preflight(stdin_is_terminal: Bool, stdout_is_terminal: Bo
 pub fn jet_term_input_secret(prompt: &String, write: fn(&String) -> () Err!, read: fn() -> JetTermRead Err!) -> String JetTermSecretError! {
     jet_term_secret_preflight(jet_term_stdin_is_terminal(), jet_term_stdout_is_terminal())?
     write(prompt).map_err(JetTermSecretError.Flush)?
-    if !jet_term_mode_enter(false) { _ :: write("\n"); return Err(JetTermSecretError.Echo) }
+    if !jet_term_mode_enter(false) {
+        _ :: write("\n")
+        return Err(JetTermSecretError.Echo)
+    }
     guard :: JetTermModeGuard{}
     secret :: read().map_err(JetTermSecretError.Read)
     drop(^guard)
@@ -380,7 +383,11 @@ module jet_term_mode {
             if tcgetattr(0, ptr.from_mut(&mode).cast<U8>()) != 0 { return false }
             saved_mode :: mode
             mode.c_lflag &= !ECHO
-            if raw { mode.c_lflag &= !ICANON; mode.c_cc[VMIN] = 1; mode.c_cc[VTIME] = 0 }
+            if raw {
+                mode.c_lflag &= !ICANON
+                mode.c_cc[VMIN] = 1
+                mode.c_cc[VTIME] = 0
+            }
             if tcsetattr(0, TCSANOW, ptr.from_ref(&mode).cast<U8>()) != 0 { return false }
             SAVED.with(fn(saved) { saved.borrow_mut().push(saved_mode) })
             true
@@ -392,7 +399,11 @@ module jet_term_mode {
         #Unsafe("configure caller-owned fd with selected exact C layout; preserve native errno") {
             mode := mem.zeroed<Termios>()
             if tcgetattr(fd, ptr.from_mut(&mode).cast<U8>()) != 0 { return Err(io.Error.last_os_error()) }
-            if raw { cfmakeraw(ptr.from_mut(&mode).cast<U8>()); mode.c_cc[VMIN] = 1; mode.c_cc[VTIME] = 0 }
+            if raw {
+                cfmakeraw(ptr.from_mut(&mode).cast<U8>())
+                mode.c_cc[VMIN] = 1
+                mode.c_cc[VTIME] = 0
+            }
             if tcsetattr(fd, TCSANOW, ptr.from_ref(&mode).cast<U8>()) != 0 { return Err(io.Error.last_os_error()) }
         }
         Ok(())

@@ -6,7 +6,7 @@ use std.io
 
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/IoLineStream.rs:6
 pub fn jet_std_io_input(prompt: String?) -> String IOError! {
-    if prompt is Val(p) {
+    if prompt == .Val(p) {
         if jet_fault_should_fail("IO.Write") -> return Err(IOError.other(.Write, Val("stdout"), "fault injected: IO.Write"))
         if jet_fault_should_fail("IO.Flush") -> return Err(IOError.other(.Flush, Val("stdout"), "fault injected: IO.Flush"))
         jet_term_write_stdout(p, true).map_err(e -> IOError.other(.Flush, None, e)) ?? return Err(err)
