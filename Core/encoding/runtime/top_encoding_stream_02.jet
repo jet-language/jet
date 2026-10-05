@@ -66,7 +66,7 @@ fn jet_json_fold_from_event(reader: &JSONReader, first: DataEvent, heap: &JetJso
                         key = Val(^value)
                         Ok(())
                     }
-                } else -> Err(jet_encoding_error(.State, reader.offset, reader.line, reader.column, "JSON event stream produced a key outside an object"))
+                } else { Err(jet_encoding_error(.State, reader.offset, reader.line, reader.column, "JSON event stream produced a key outside an object")) }
             }
             .ArrayEnd -> {
                 if frames.pop() == .Val(.Array(items)) -> jet_json_fold_push_value(reader, heap, &root, &frames, .Array(^items))
