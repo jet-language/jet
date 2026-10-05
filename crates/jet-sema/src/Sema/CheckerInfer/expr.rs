@@ -5523,6 +5523,12 @@ impl<'a> Checker<'a> {
                         }
                     }
                 }
+                // A source spelling and its canonical imported identity must
+                // produce one nominal instance, including method demands.
+                for arg in type_args.iter_mut() {
+                    let ty = std::mem::replace(arg, Type::Int);
+                    *arg = self.resolve_type(ty);
+                }
                 // Inline-module members are local nominals with a mangled
                 // semantic identity, not foreign imports. Resolve that identity
                 // here so every later tier sees a local struct literal and never
