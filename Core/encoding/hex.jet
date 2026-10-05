@@ -59,7 +59,14 @@ pub fn encode_upper(data: [U8]) -> String Never! {
 pub fn encode_prefixed(data: [U8]) -> String Never! { "0x{encode(data)}" }
 
 // Rust jet_std_hex_is_hex (:55): non-empty, even UTF-8 byte length, all digits.
-pub fn is_hex(text: String) -> Bool Never! { core.encoding.hex.is_hex(text) }
+pub fn is_hex(text: String) -> Bool Never! {
+    raw :: hex_unicode.utf8_bytes(text)
+    if raw.len() == 0 || raw.len() %% 2 != 0 -> return false
+    loop byte in raw {
+        if hex_encoding.hex_value(byte) == None -> return false
+    }
+    true
+}
 
 fn nibble_upper(n: Int) -> U8 {
     if n < 10 -> return (U8{48 + n})
@@ -78,7 +85,10 @@ pub fn a2b_hex(text: String) -> [U8] HexError! { decode(text) }
 
 /// Python `binascii.b2a_base64`: one unwrapped standard Base64 line. The
 /// canonical standard encoder owns the text; the newline is added here.
-pub fn b2a_base64(data: [U8]) -> String Never! { "{core.encoding.hex.b2a_base64(data)}\n" }
+pub fn b2a_base64(data: [U8]) -> String Never! {
+    view :: data[0..<data.len()]
+    "{hex_base_encode.encode64(view)}\n"
+}
 
 pub fn a2b_base64(text: String) -> [U8] HexError! {
     if core.encoding.hex.a2b_base64(text) == {
@@ -250,7 +260,19 @@ fn uu_value(byte: U8) -> Int {
 }
 
 // Rust jet_std_hex_encode_sep (:48): lowercase byte pairs joined by `sep`.
-pub fn encode_sep(data: [U8], sep: String) -> String Never! { core.encoding.hex.encode_sep(data, sep) }
+pub fn encode_sep(data: [U8], sep: String) -> String Never! {
+    separator :: hex_unicode.utf8_bytes(sep)
+    out := [U8]{}
+    loop index in 0..<data.len() {
+        if index > 0 {
+            loop byte in separator -> &out.push(byte)
+        }
+        n :: u8_int(data[index])
+        &out.push(hex_encoding.hex_nibble(n /% 16))
+        &out.push(hex_encoding.hex_nibble(n %% 16))
+    }
+    String.from_bytes(out) ?? panic("separated hex produced invalid UTF-8")
+}
 
 /// 16-byte rows of offset, hex, and ASCII. Unprintable bytes become `.`.
 // Rust jet_std_hex_dump (:58–86): "{offset:08x}  {hex}  {ascii}\n" per row;

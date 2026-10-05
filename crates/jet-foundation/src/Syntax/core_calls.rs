@@ -1478,7 +1478,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 436a2b6d875a646d7e0168d9b313448491cc1c7a947d90535a300eea31f220c6
+// Source SHA-256: a74ee40d9016b3227fc3d4013523565030b8baa38bf2dd6dca5670daacf96c92
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -2578,26 +2578,16 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.encoding.binary", "iter_unpack", "jet_std_binary_iter_unpack", true, &[true, true]) .with_jit_symbol("jet_jit_binary_iter_unpack") .with_native_int_result(),
     CoreCallRecord::new( "core.encoding.hex", "encode", "jet_std_hex_encode", true, &[true], ),
     CoreCallRecord::new( "core.encoding.hex", "encode_upper", "jet_std_hex_encode_upper", true, &[true], ) .with_jit_symbol("jet_jit_hex_encode_upper"),
-    CoreCallRecord::new( "core.encoding.hex", "is_hex", "jet_std_hex_is_hex", true, &[true], ) .with_jit_symbol("jet_jit_hex_is_hex"),
     CoreCallRecord::new( "core.encoding.hex", "decode", "jet_std_hex_decode", true, &[true], ),
     CoreCallRecord::new( "core.encoding.hex", "crc_hqx", "jet_std_crc_hqx", true, &[true, false], ) .with_jit_symbol("jet_jit_crc_hqx") .with_native_int_result(),
     CoreCallRecord::new( "core.encoding.hex", "crc32", "jet_std_crc32", true, &[true], ) .with_jit_symbol("jet_jit_crc32") .with_native_int_result(),
-    CoreCallRecord::new( "core.encoding.hex", "b2a_base64", "jet_std_b64_encode", true, &[true], ),
     CoreCallRecord::new( "core.encoding.hex", "a2b_base64", "jet_std_b64_decodebytes", true, &[true], ) .with_jit_symbol("jet_jit_b64_decodebytes"),
-    CoreCallRecord::new( "core.encoding.hex", "encode_sep", "jet_std_hex_encode_sep", true, &[true, true], ) .with_jit_symbol("jet_jit_hex_encode_sep"),
     CoreCallRecord::new( "core.encoding.hex", "dump", "jet_std_hex_dump", true, &[true], ) .with_jit_symbol("jet_jit_hex_dump"),
-    CoreCallRecord::new( "core.encoding.base64", "encode", "jet_std_b64_encode", true, &[true], ),
     CoreCallRecord::new( "core.encoding.base64", "decode", "jet_std_b64_decode", true, &[true], ),
     CoreCallRecord::new( "core.encoding.base64", "decode_url", "jet_std_b64url_decode", true, &[true], ) .with_jit_symbol("jet_jit_b64_decode_url"),
-    CoreCallRecord::new( "core.encoding.base64", "encode_url", "jet_std_b64url_encode", true, &[true], ) .with_jit_symbol("jet_jit_b64_encode_url"),
-    CoreCallRecord::new( "core.encoding.base64", "encode_url_padded", "jet_std_b64url_encode_padded", true, &[true], ) .with_jit_symbol("jet_jit_b64_encode_url_padded"),
-    CoreCallRecord::new( "core.encoding.base64", "pad", "jet_std_b64_pad", true, &[true], ) .with_jit_symbol("jet_jit_b64_pad"),
-    CoreCallRecord::new( "core.encoding.base64", "unpad", "jet_std_b64_unpad", true, &[true], ) .with_jit_symbol("jet_jit_b64_unpad"),
-    CoreCallRecord::new( "core.encoding.base64", "encodebytes", "jet_std_b64_encodebytes", true, &[true], ) .with_jit_symbol("jet_jit_b64_encodebytes"),
     CoreCallRecord::new( "core.encoding.base64", "decodebytes", "jet_std_b64_decodebytes", true, &[true], ) .with_jit_symbol("jet_jit_b64_decodebytes"),
     CoreCallRecord::new( "core.encoding.base32", "b32encode", "jet_std_base32_encode", true, &[true], ),
     CoreCallRecord::new( "core.encoding.base32", "b32decode", "jet_std_base32_decode", true, &[true], ),
-    CoreCallRecord::new( "core.encoding.base32", "b32hexencode", "jet_std_base32hex_encode", true, &[true], ) .with_jit_symbol("jet_jit_base32hex_encode"),
     CoreCallRecord::new( "core.encoding.base32", "b32hexdecode", "jet_std_base32hex_decode", true, &[true], ) .with_jit_symbol("jet_jit_base32hex_decode"),
     CoreCallRecord::new("core.files", "open", "jet_std_files_open", true, &[true]) .with_jit_symbol("jet_jit_fs_open").with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.files", "create", "jet_std_files_create", true, &[true], ) .with_jit_symbol("jet_jit_fs_create").with_interpreter_route(CoreCallInterpreterRoute::Ambient),
