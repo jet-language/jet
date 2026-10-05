@@ -4962,6 +4962,21 @@ impl JetIntBulk for Vec<jet_foundation::Numeric::JetInt> {
     }
 }
 
+/// #4566: `xs.clear()` on `[Int]` storage. One vectorised scan
+/// (`JetInt::all_inline`) finds whether any element owns a node; when none
+/// does, the elements are forgotten (they own nothing) and the buffer stays.
+/// Otherwise each element drops as usual, so the meaning never changes.
+#[inline]
+pub(crate) fn jet_int_list_clear(list: &mut Vec<jet_foundation::Numeric::JetInt>) {
+    if jet_foundation::Numeric::JetInt::all_inline(list) {
+        // SAFETY: length 0 is within capacity, and no element owns a node,
+        // so forgetting them leaks nothing.
+        unsafe { list.set_len(0) };
+    } else {
+        list.clear();
+    }
+}
+
 #[inline(always)]
 fn jet_int_owned_raw(value: &jet_foundation::Numeric::JetInt) -> i64 {
     value.to_raw()

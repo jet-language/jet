@@ -3357,8 +3357,23 @@ fn jet_fixed_list_concat<
     })
 }
 
+/// The scalar count of `s`: its bytes that start a scalar (every byte but a
+/// `0b10xx_xxxx` continuation byte). Each 64-byte block sums into one byte
+/// lane, a branch-free pass the host CPU's vector unit runs.
 fn jet_char_len(s: &String) -> i64 {
-    s.chars().count() as i64
+    let mut chunks = s.as_bytes().chunks_exact(64);
+    let mut count = 0_usize;
+    for chunk in &mut chunks {
+        let mut starts = 0_u8;
+        for &byte in chunk {
+            starts += u8::from((byte as i8) >= -0x40);
+        }
+        count += usize::from(starts);
+    }
+    for &byte in chunks.remainder() {
+        count += usize::from((byte as i8) >= -0x40);
+    }
+    count as i64
 }
 // Eager materialize of the same pieces as `jet_iter_string_split` (AOT `String.split`
 // emits the lazy helper; this Vec form remains for hosts that need a list handle).

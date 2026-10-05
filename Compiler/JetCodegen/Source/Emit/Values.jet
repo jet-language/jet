@@ -533,6 +533,11 @@ fn jet_rust_emit_local_is_allocator_view(function: MIRFunction, local: MIRLocalI
 
 // MIRRust local_storage: a shared-cell local is reached through its cell.
 fn jet_rust_emit_local_storage(ctx: &JetRustEmitContext, local: MIRLocalID) -> String Never! {
+    if ctx.body_index.function == .Val(function_id) {
+        if ctx.return_slots.get(function_id.value) == .Val(slot) {
+            if slot.exit == (Val(local)) -> return jet_rust_emit_local_slot(slot.local)
+        }
+    }
     if jet_rust_emit_local_is_shared(&ctx, local) -> return "(*{jet_rust_emit_local_slot(local)}.borrow_mut())"
     jet_rust_emit_local_slot(local)
 }

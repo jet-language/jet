@@ -2072,6 +2072,23 @@ fn sema_stmt_destructure_moves_field(ty: Type, pattern: BindPattern, environment
     false
 }
 
+// A destructure whose initializer is an owned temporary (a call result, a
+// literal, a take or an explicit copy) moves every field out of it, so
+// `(a, b) :: f()` never copies a field. Only a place initializer (a name,
+// field, index or view) keeps its value and copies fields out.
+// Rust: crates/jet-codegen/src/Codegen/TIR/lower/statements.rs::destructure_init_is_temporary
+fn sema_stmt_destructure_init_is_temporary(init: Expr) -> Bool Never! {
+    if init == {
+        .Paren(inner, _) -> sema_stmt_destructure_init_is_temporary(inner)
+        .Try(inner, _, _, _) -> sema_stmt_destructure_init_is_temporary(inner)
+        .OrFallback(inner, _, _, _) -> sema_stmt_destructure_init_is_temporary(inner)
+        .Call(_) | .CallValue(_, _, _) | .MethodCall(_, _, _, _, _, _, _, _, _, _) -> true
+        .TupleLit(_, _, _) | .StructLit(_, _, _, _, _, _, _) | .Copy(_, _) -> true
+        .Place(_, access, _) -> access == PlaceAccess.Take
+        else -> false
+    }
+}
+
 struct SemaRefutableFallbackCheck {
     pub tir: TOrFallback?
     pub statements: [TStmt]
@@ -2579,6 +2596,7 @@ fn sema_stmt_check_destructure(binding: Binding, pattern: BindPattern, environme
     names := sema_stmt_destructure_names(pattern)
     fields := [TypeTupleField]{}
     span := binding.name_span
+    plain_fields := true
     if pattern == {
         .Struct(written_type, type_span, selected, rest, pattern_span) -> {
             span = pattern_span
@@ -2596,6 +2614,7 @@ fn sema_stmt_check_destructure(binding: Binding, pattern: BindPattern, environme
             }
             nominal_row :: actual ?? return None
             nominal :: graph.modules[nominal_row.module_index].nominals[nominal_row.row]
+            plain_fields = sema_type_bound_satisfied_with_generics(graph, ty, "Close", environment.module_identity, context.generic_params) == Val(false)
             named :: sema_pattern_nominal_row(graph, environment.module_identity, Type.Named{name: written_type})
             named_matches :: if named == {
                 .Val(row) -> graph.modules[row.module_index].nominals[row.row].symbol.id.key == nominal.symbol.id.key
@@ -2614,6 +2633,7 @@ fn sema_stmt_check_destructure(binding: Binding, pattern: BindPattern, environme
                 field_type := Type?{None}
                 loop field in nominal.fields {
                     if field.symbol.name == selected_field.name {
+                        if field.computed -> plain_fields = false
                         if {
                             sema_registration_visible(field.symbol.visibility, environment.module_identity, environment.package_identity, nominal.symbol.module_name, owner_package) -> {
                                 field_type = Val(sema_inference_substitute_type(field.ty, generic_names, arguments))
@@ -2695,7 +2715,7 @@ fn sema_stmt_check_destructure(binding: Binding, pattern: BindPattern, environme
     }
     locals := [TLocal]{}
     binds := [TDestructureBinding]{}
-    move_fields := false
+    move_fields := plain_fields && sema_stmt_destructure_init_is_temporary(binding.init)
     loop (index, name) in names {
         if index >= fields.len() -> break
         field := fields[index]
@@ -2712,7 +2732,7 @@ fn sema_stmt_check_destructure(binding: Binding, pattern: BindPattern, environme
             else -> Expr.Field{base: binding.init, member: field.name, span: span}
         }
         if !sema_stmt_record_binding_views(projected_binding, field.ty, scopes, &state, &context, &diagnostics) -> return None
-        if sema_stmt_destructure_moves_field(field.ty, pattern, environment) -> move_fields = true
+        if plain_fields && sema_stmt_destructure_moves_field(field.ty, pattern, environment) -> move_fields = true
     }
     if binding.init == .Ident(name, _) {
         source :: sema_scope_resolve(scopes, name) ?? return None

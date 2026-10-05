@@ -1068,6 +1068,7 @@ fn lower_tuple_destructure(
             MirOperation::WritePlace { place, value },
         )?;
     }
+    ctx.finish_owned_destructure(temp_place, &init.ty, binds)?;
     Ok(())
 }
 
@@ -1079,7 +1080,34 @@ fn lower_struct_destructure(
     move_fields: bool,
     binds: &[(String, String)],
 ) -> Result<(), LowerError> {
-    let subject = if move_fields {
+    let keeps_close_owner = if move_fields {
+        false
+    } else {
+        let ty = ctx.mir_type(&init.ty)?;
+        ctx.scope_end_close(&ty).is_some()
+    };
+    let subject = if keeps_close_owner {
+        let place = if let Some(place) =
+            super::tir_to_mir_expr::lower_receiver_place(ctx, init, MirAccess::Read)?
+        {
+            place
+        } else {
+            let value = lower_expr(ctx, init)?;
+            let temp = TLocal::generated(tmp);
+            let place = ctx.bind_local(&temp, init.ty.clone(), true, false, false)?;
+            ctx.emit(
+                "stmt.struct.close-owner.write",
+                None,
+                MirOperation::WritePlace { place, value },
+            )?;
+            ctx.place_for_local(&temp, MirAccess::Read)?
+        };
+        ctx.emit(
+            "stmt.struct.close-owner.read",
+            Some(init.ty.clone()),
+            MirOperation::ReadPlace(place),
+        )?
+    } else if move_fields {
         if let Some(place) =
             super::tir_to_mir_expr::lower_receiver_place(ctx, init, MirAccess::Move)?
         {
@@ -1155,6 +1183,7 @@ fn lower_struct_destructure(
             MirOperation::WritePlace { place, value },
         )?;
     }
+    ctx.finish_owned_destructure(temp_place, &init.ty, binds)?;
     Ok(())
 }
 

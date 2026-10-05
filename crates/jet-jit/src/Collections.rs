@@ -1175,7 +1175,7 @@ pub(crate) mod collection_semantics {
 
         #[test]
         fn int_sum_walk_commits_exact_chunks_and_tail() {
-            for count in [0, 1, 8, 255, 256, 257, 600] {
+            for count in [32, 33, 255, 256, 257, 600] {
                 let values: Vec<_> = (0..count).map(|i| JetInt::from_i64(i % 21 - 10)).collect();
                 let expected = 19 + (0..count).map(|i| i % 21 - 10).sum::<i64>();
                 let mut acc = JetInt::from_i64(19);
@@ -1184,6 +1184,18 @@ pub(crate) mod collection_semantics {
                 assert_eq!(acc, JetInt::from_i64(expected));
                 assert_eq!(cursor.current, count);
                 assert!(!jet_loop_range_has_next(&cursor));
+            }
+        }
+
+        #[test]
+        fn int_sum_walk_leaves_short_walks_to_exact_loop() {
+            for count in [0, 1, 8, 31] {
+                let values = vec![JetInt::from_i64(2); count as usize];
+                let mut acc = JetInt::from_i64(19);
+                let mut cursor = jet_loop_range_init(0, count, 0, false, true);
+                jet_int_sum_walk(&mut cursor, &mut acc, &values);
+                assert_eq!(acc, JetInt::from_i64(19));
+                assert_eq!(cursor.current, 0);
             }
         }
 
@@ -1208,8 +1220,8 @@ pub(crate) mod collection_semantics {
 
         #[test]
         fn int_sum_walk_preserves_noncanonical_ranges_and_bad_index_boundary() {
-            let values = vec![JetInt::from_i64(3); 16];
-            for (start, end, step, exclusive) in [(0, 16, 2, true), (15, -1, -1, true), (-1, 16, 1, true), (0, 15, 1, false)] {
+            let values = vec![JetInt::from_i64(3); 40];
+            for (start, end, step, exclusive) in [(0, 40, 2, true), (39, -1, -1, true), (-1, 40, 1, true), (0, 39, 1, false)] {
                 let mut acc = JetInt::from_i64(7);
                 let mut cursor = jet_loop_range_init(start, end, step, true, exclusive);
                 jet_int_sum_walk(&mut cursor, &mut acc, &values);
@@ -1217,10 +1229,10 @@ pub(crate) mod collection_semantics {
                 assert_eq!(cursor.current, start);
             }
             let mut acc = JetInt::from_i64(7);
-            let mut cursor = jet_loop_range_init(0, 17, 0, false, true);
+            let mut cursor = jet_loop_range_init(0, 41, 0, false, true);
             jet_int_sum_walk(&mut cursor, &mut acc, &values);
-            assert_eq!(acc, JetInt::from_i64(55));
-            assert_eq!(jet_loop_range_value(&cursor), 16);
+            assert_eq!(acc, JetInt::from_i64(127));
+            assert_eq!(jet_loop_range_value(&cursor), 40);
         }
     }
 }

@@ -7538,6 +7538,77 @@ impl<'a> LowerCtx<'a> {
         Ok(())
     }
 
+    /// A destructured temporary is no longer a whole owner. Retire its
+    /// whole-value cleanup and keep cleanup only for fields the pattern omits.
+    /// Moving bound fields has already transferred their cleanup to the bindings.
+    pub(super) fn finish_owned_destructure(
+        &mut self,
+        place: MirPlaceId,
+        ty: &Type,
+        bound_fields: &[(String, String)],
+    ) -> Result<(), LowerError> {
+        let frame = self.defer_stack.last().expect("destructure has a cleanup frame");
+        let original = frame.actions.iter().position(|action| {
+            matches!(action, DeferredCleanup::DropPlace { place: owner, .. } if *owner == place)
+        });
+        let before = frame.actions.len();
+        if let Some(flag) = self.drop_live_places.get(&place).copied() {
+            let off = self.emit(
+                "destructure.live.clear",
+                Some(Type::Bool),
+                MirOperation::Constant(MirConstant::Bool(false)),
+            )?;
+            self.emit(
+                "destructure.live.write",
+                None,
+                MirOperation::WritePlace { place: flag, value: off },
+            )?;
+        }
+        let owner = field_owner_type(ty);
+        if let Type::Tuple(fields) = owner {
+            for (name, _) in fields.iter().rev() {
+                self.register_omitted_destructure_field(place, ty, name, bound_fields)?;
+            }
+        } else {
+            let id = self.field_owner_id_for_type(owner)?;
+            let definitions = self.type_defs;
+            let definition = definitions.iter().find(|definition| definition.id == id)
+                .ok_or_else(|| self.error(self.span(), "missing destructure owner"))?;
+            let MirTypeDefKind::Struct { fields, .. } = &definition.kind else {
+                return Err(self.error(self.span(), "destructure owner has no fields"));
+            };
+            for field in fields.iter().rev().filter(|field| !field.computed) {
+                self.register_omitted_destructure_field(place, ty, &field.name, bound_fields)?;
+            }
+        }
+        let frame = self.defer_stack.last_mut().expect("destructure has a cleanup frame");
+        let added = frame.actions.len() - before;
+        if let Some(position) = original {
+            // Keep this one owner's remainder at its original scope position.
+            // Cleanup is LIFO, so reversed registration preserves field order.
+            frame.actions[position..].rotate_right(added);
+            frame.actions.remove(position + added);
+        } else if added != 0 {
+            return Err(self.error(self.span(), "owned destructure has no original cleanup position"));
+        }
+        Ok(())
+    }
+
+    fn register_omitted_destructure_field(
+        &mut self,
+        place: MirPlaceId,
+        ty: &Type,
+        name: &str,
+        bound_fields: &[(String, String)],
+    ) -> Result<(), LowerError> {
+        if bound_fields.iter().any(|(_, field)| field == name) {
+            return Ok(());
+        }
+        let field_ty = self.checked_field_type(ty, name)?;
+        let field_place = self.project_field_place(place, name, field_ty.clone(), self.span())?;
+        self.register_owned_drop(field_place, &field_ty, self.ownership_for(&field_ty), true)
+    }
+
     pub(super) fn emit_file_owner_replacement(&mut self, place: MirPlaceId) -> Result<(), LowerError> {
         for (owner, live) in self.file_owner_leaves(place) {
             self.emit_file_owner_cleanup(owner, live)?;

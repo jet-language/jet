@@ -1537,6 +1537,9 @@ const JET_INT_SUM_ELEMENT_BITS: u32 = 52;
 /// A chunk is added only to a running total inside `[-2^61, 2^61)`, so the
 /// new total stays inside the inline range `[-2^62, 2^62)`.
 const JET_INT_SUM_TOTAL_BOUND: i64 = 1 << 61;
+/// Fewer elements than this are left to the exact loop: on so short a walk
+/// the chunk set-up costs more than the per-element checks it saves.
+const JET_INT_SUM_MIN_ELEMENTS: usize = 32;
 
 /// #4566: the native form of an exact `Int` range walk `loop i in a..<b ->
 /// acc += xs[i]` (MIRRust `int_sum_walk`), run just before that loop. It
@@ -1558,7 +1561,7 @@ pub(crate) fn jet_int_sum_walk(
     }
     let start = cursor.current as usize;
     let end = usize::try_from(cursor.end).map_or(0, |end| end.min(xs.len()));
-    if start >= end {
+    if end <= start || end - start < JET_INT_SUM_MIN_ELEMENTS {
         return;
     }
     let mut total = acc.to_raw();
@@ -2305,6 +2308,27 @@ fn jet_string_split_join(s: &str, sep: &str, joiner: &str) -> String {
         for (start, ch) in s.char_indices() {
             out.push_str(&s[start..start + ch.len_utf8()]);
             out.push_str(joiner);
+        }
+        return out;
+    }
+    if let ([sep_byte], [join_byte]) = (sep.as_bytes(), joiner.as_bytes()) {
+        // One-byte separator and joiner (both ASCII in UTF-8): every piece
+        // keeps its place, so the result is the source with each separator
+        // byte swapped, in one pass that vectorises. An ASCII byte never
+        // occurs inside a multi-byte scalar, so the swap keeps UTF-8.
+        let bytes: Vec<u8> = s.bytes().map(|byte| if byte == *sep_byte { *join_byte } else { byte }).collect();
+        return String::from_utf8(bytes).expect("an ASCII byte swap keeps UTF-8");
+    }
+    if let [sep_byte] = sep.as_bytes() {
+        // One-byte separator: the byte scan instead of the substring searcher.
+        let sep_char = char::from(*sep_byte);
+        let matches = s.bytes().filter(|byte| byte == sep_byte).count();
+        let mut out = String::with_capacity(s.len() - matches + matches * joiner.len());
+        for (index, piece) in s.split(sep_char).enumerate() {
+            if index > 0 {
+                out.push_str(joiner);
+            }
+            out.push_str(piece);
         }
         return out;
     }

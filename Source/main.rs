@@ -461,6 +461,9 @@ impl ProfileConfig {
     pub(crate) fn settings_tag(&self) -> String {
         let mut parts = vec![self.optimize.cache_tag().to_string()];
         parts.push(format!("inspect:{}", self.inspect.cfg_value()));
+        if matches!(self.optimize, OptimizeLevel::Full) && !self.small {
+            parts.push("loop-align=64".into());
+        }
         if self.debug_info {
             parts.push("dbg".into());
         }
@@ -553,6 +556,11 @@ impl ProfileConfig {
         }
         if native {
             args.extend(["-C".to_string(), "target-cpu=native".to_string()]);
+            if matches!(self.optimize, OptimizeLevel::Full) {
+                // Keep hot backedges independent of unrelated runtime layout.
+                // LLVM takes this alignment in bytes, not log2.
+                args.extend(["-C".to_string(), "llvm-args=-align-loops=64".to_string()]);
+            }
         }
         args
     }

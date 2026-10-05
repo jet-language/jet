@@ -291,7 +291,11 @@ fn jet_rust_emit_call_arg_with_borrow(ctx: &JetRustEmitContext, function: MIRFun
         borrowed && !has_coercion && arg.access == MIRAccess.Read -> {
             already_borrowed = true
             if arg.place == {
-                .Val(place) -> jet_rust_emit_place_reference(&ctx, function, place, MIRAccess.Read)
+                .Val(place) -> {
+                    if jet_rust_emit_native_int_local(&ctx, function, place) == .Val(local) {
+                        "&(jet_foundation::Numeric::JetInt::from_i64({jet_rust_emit_native_local_slot(local)}))"
+                    } else -> jet_rust_emit_place_reference(&ctx, function, place, MIRAccess.Read)
+                }
                 else -> {
                     // MIRRust call_arg_for_function: a borrowed value with no
                     // argument place borrows the place its definition reads.
@@ -5753,6 +5757,16 @@ fn jet_rust_emit_builtin_method_values(ctx: &JetRustEmitContext, function: MIRFu
         &rendered.push(jet_rust_emit_value_consume(ctx, function, receiver))
     }
     if view_new -> return jet_rust_emit_view_new(&ctx, function, call, row, rendered[0], args)
+    // MIRRust prelude_values_with_receiver (#4566): `[Int]` storage clears in
+    // bulk (`jet_int_list_clear`): one vectorised scan for an element that
+    // owns a node instead of a release test per element.
+    if mir_symbol_name(row.symbol) == "jet_list_clear" && args.len() == 0 {
+        receiver_ty := jet_rust_emit_value_type(ctx, function, receiver)
+        if receiver_place == .Val(place) {
+            if jet_rust_emit_append_place_row(ctx, function, place) == .Val(place_row) -> receiver_ty = place_row.ty
+        }
+        if jet_rust_emit_int_bulk_type(ctx, receiver_ty) -> return "{ctx.config.root_prefix}jet_std::jet_int_list_clear({rendered[0]})"
+    }
     routed := ""
     list_min_max :: row.module_name == "core.list" && row.member == "min_max"
     if row.abi == MIRPreludeABI.Aggregate && (list_min_max || (row.module_name == "core.map" && row.member == "to_list")) {
