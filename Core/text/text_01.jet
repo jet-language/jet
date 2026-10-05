@@ -71,7 +71,7 @@ pub fn jet_vault_nfc(input: String) -> String {
     loop character in input.chars() { jet_vault_decompose(U32{character}, &decomposed) }
     loop index in 1..<decomposed.len() {
         class :: jet_vault_ccc(decomposed[index])
-        if class == U8{0} -> continue
+        if class == U8{0} -> next
         cursor := index
         loop cursor > 0 and jet_vault_ccc(decomposed[cursor - 1]) > class {
             &decomposed.swap(cursor - 1, cursor)
@@ -87,7 +87,7 @@ pub fn jet_vault_nfc(input: String) -> String {
             if jet_vault_compose_pair(composed[starter_index], codepoint) == .Val(result) {
                 if last_class < class {
                     composed[starter_index] = result
-                    continue
+                    next
                 }
             }
         }
