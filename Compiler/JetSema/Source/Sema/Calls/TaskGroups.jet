@@ -785,14 +785,15 @@ fn sema_taskgroup_is_canonical_task(ty: Type, environment: SemaScopeEnvironment)
 
 // `Task<T>.join()` and `.detach()` consume the handle. D-CONC-FAIL1=A: a join
 // waits on the one fallible task rail, `T !TaskFailure`, and blocks
-// (`Time.Wait`); D-DETACH1: a detach returns nothing.
+// (`Time.Wait`); a fallible body's own failure joins that rail, as in the
+// combinators (`jet_task_join_result`). D-DETACH1: a detach returns nothing.
 pub fn sema_taskgroup_check_task_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     if (method != "join" && method != "detach") || args.len() != 0 -> return SemaMethodSpecialCheck{handled: false, value: None}
     payload :: sema_taskgroup_task_payload(receiver_value.ty) ?? return SemaMethodSpecialCheck{handled: false, value: None}
     if !sema_taskgroup_is_canonical_task(receiver_value.ty, environment) -> return SemaMethodSpecialCheck{handled: false, value: None}
     if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Move, scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     join := method == "join"
-    result_type := if join -> sema_taskgroup_failure_result(payload) else -> Type.Named{name: "Unit"}
+    result_type := if join -> sema_taskgroup_failure_result(sema_taskgroup_success_type(payload)) else -> Type.Named{name: "Unit"}
     operation := if join -> THandleOp.TaskJoin else -> THandleOp.TaskDetach
     value := sema_tir_expr(result_type, TExprKind.HandleMethod{receiver: receiver_value, operation: operation, args: [TExpr]{}}, span)
     checked :: sema_expression_call_expected(value, expected, environment, context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
