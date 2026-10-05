@@ -622,15 +622,15 @@ impl JetDevtoolsLogQuery {
     pub fn matches(self, record: JetDevtoolsLogRecord) -> Bool Never! {
         if self.minimum_level == .Val(level) { if record.level.rank() < level.rank() -> return false }
         if self.source_id == .Val(source) { if source != record.source_id() -> return false }
-        if self.trace_id == .Val(trace) { if record.identity.trace_id != Val(trace) -> return false }
-        if self.span_id == .Val(span) { if record.identity.span_id != Val(span) -> return false }
-        if self.request_id == .Val(request) { if record.identity.request_id != Val(request) -> return false }
+        if self.trace_id == .Val(trace) { if record.identity.trace_id != trace -> return false }
+        if self.span_id == .Val(span) { if record.identity.span_id != span -> return false }
+        if self.request_id == .Val(request) { if record.identity.request_id != request -> return false }
         if self.field_key == .Val(key) {
             found := false
             loop field in record.fields {
                 if field.key == key {
                     found = true
-                    if self.field_value == .Val(value) { if field.value != Val(value) -> return false }
+                    if self.field_value == .Val(value) { if field.value != value -> return false }
                     break
                 }
             }
