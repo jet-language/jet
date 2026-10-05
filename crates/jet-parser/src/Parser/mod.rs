@@ -2430,6 +2430,13 @@ fn notify(ready: Bool) -[Net]> {
             let diagnostics = parse(&tokens).expect_err("lambda annotations must teach");
             assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == "E0399"), "{diagnostics:?}");
         }
+        // Recovery skips the whole braced body, so the body's closing
+        // brace does not surface as a second, stray-`}` error.
+        let (tokens, _) =
+            lex("fn run() {\n    f :: (n: Int) -> Point {\n        total := n + 1\n        total\n    }\n}\n");
+        let diagnostics = parse(&tokens).expect_err("a statement body after a type must teach");
+        let codes: Vec<&str> = diagnostics.iter().map(|diagnostic| &diagnostic.code[..]).collect();
+        assert_eq!(codes, ["E0399"], "{diagnostics:?}");
         program("fn run() { f :: (x: Int) -> Point{x} }\n");
         program("fn run() { f :: (x: Int) -> Point{x: x} }\n");
         program("fn run() { f :: x -[]> Point{x} }\n");
