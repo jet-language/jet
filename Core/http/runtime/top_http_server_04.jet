@@ -1037,7 +1037,7 @@ fn jet_http_gzip_stored(input: &[U8]) -> [U8] {
         len :: chunk as U16
         out.extend_from_slice(&len.to_le_bytes())
         out.extend_from_slice(&(!len).to_le_bytes())
-        out.extend_from_slice(&input[pos..pos + chunk])
+        out.extend_from_slice(&input[pos..<pos + chunk])
         pos += chunk
     }
     out.extend_from_slice(&jet_http_crc32(input).to_le_bytes())

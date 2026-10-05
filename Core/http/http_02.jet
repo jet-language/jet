@@ -60,11 +60,11 @@ fn http_tls_pem_certificates(pem: [U8]) -> [[U8]] JetHTTPBridgeError! {
     rest := text
     out := [[U8]]{}
     loop rest.find(BEGIN) == .Val(start) {
-        prefix := rest[..<start].trim() // #4303
+        prefix := rest[0..<start].trim() // #4303
         if !prefix.is_empty() -> return Err(JetHTTPBridgeError.TLS)
         rest = rest[start + BEGIN.len()..]
         stop :: rest.find(END) ?? return Err(JetHTTPBridgeError.TLS)
-        &out.push(http_tls_pem_base64(rest[..<stop]) ?? return Err(err))
+        &out.push(http_tls_pem_base64(rest[0..<stop]) ?? return Err(err))
         rest = rest[stop + END.len()..]
     }
     tail := rest.trim() // #4303
@@ -77,13 +77,13 @@ fn http_tls_private_key(pem: [U8]) -> tls_native.PrivateKeyDer JetHTTPBridgeErro
     text :: String.from_utf8(pem) ?? return Err(JetHTTPBridgeError.TLS)
     parse :: (begin: String, end: String) -> [U8]? JetHTTPBridgeError! {
         start :: text.find(begin) ?? return None
-        prefix := text[..<start].trim() // #4303
+        prefix := text[0..<start].trim() // #4303
         if !prefix.is_empty() -> return Err(JetHTTPBridgeError.TLS)
         rest :: text[start + begin.len()..]
         stop :: rest.find(end) ?? return Err(JetHTTPBridgeError.TLS)
         tail := rest[stop + end.len()..].trim() // #4303
         if !tail.is_empty() -> return Err(JetHTTPBridgeError.TLS)
-        Val(http_tls_pem_base64(rest[..<stop]) ?? return Err(err))
+        Val(http_tls_pem_base64(rest[0..<stop]) ?? return Err(err))
     }
     if (parse("-----BEGIN PRIVATE KEY-----", "-----END PRIVATE KEY-----") ?? return Err(err)) == .Val(der) -> return tls_native.PrivateKeyDer.Pkcs8(tls_native.PrivatePkcs8KeyDer.from(^der))
     if (parse("-----BEGIN RSA PRIVATE KEY-----", "-----END RSA PRIVATE KEY-----") ?? return Err(err)) == .Val(der) -> return tls_native.PrivateKeyDer.Pkcs1(tls_native.PrivatePkcs1KeyDer.from(^der))
@@ -365,7 +365,7 @@ fn send_following_redirects_upload(pool: Arc<Mutex<ClientPool>>, namespace: I64,
     redirect_history := [String]{}
     started :: Instant.now()
     cookie_site :: schemeful_site(parse_url(original_url) ?? return Err(err))
-    loop followed in 0..=redirect_limit {
+    loop followed in 0..redirect_limit {
         if !&visited.insert(~url) -> return Err(JetHTTPBridgeError.Redirect)
         parsed :: parse_url(url) ?? return Err(err)
         proxy :: select_proxy(parsed, explicit_proxy) ?? return Err(err)

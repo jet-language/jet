@@ -127,7 +127,7 @@ fn read_head_bytes_after(stream: &Read, bytes: ^[U8]) -> ([U8], [U8], I64) JetHT
         read :: stream.read(&chunk) ?? return Err(if err.kind() == .TimedOut || err.kind() == .WouldBlock { JetHTTPBridgeError.Timeout } else { JetHTTPBridgeError.IO })
         if read == 0 -> return Err(JetHTTPBridgeError.IO)
         if first_byte_ms == None -> first_byte_ms = Val(elapsed_ms(started))
-        &bytes.extend_from_slice(chunk[..<read])
+        &bytes.extend_from_slice(chunk[0..<read])
     }
 }
 // Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:3819
@@ -307,7 +307,7 @@ impl H2BodyReader {
             if self.finished -> return 0
         }
         count :: out.len().min(self.pending.len() - self.cursor)
-        &out[..<count].copy_from_slice(self.pending[self.cursor..<self.cursor + count])
+        &out[0..<count].copy_from_slice(self.pending[self.cursor..<self.cursor + count])
         self.cursor += count
         if self.cursor == self.pending.len() {
             if !self.end_after_pending && self.connection == .Val(session) {
@@ -415,7 +415,7 @@ impl ResponseBodyReader {
     fn read_raw(self: &Self, out: &[U8]) -> USize Error! {
         if self.cursor < self.initial.len() {
             count :: out.len().min(self.initial.len() - self.cursor)
-            &out[..<count].copy_from_slice(self.initial[self.cursor..<self.cursor + count])
+            &out[0..<count].copy_from_slice(self.initial[self.cursor..<self.cursor + count])
             self.cursor += count
             if self.cursor == self.initial.len() {
                 &self.initial.clear()
@@ -469,7 +469,7 @@ impl ResponseBodyReader {
             }
             .Length(remaining) -> {
                 wanted :: remaining.min(out.len())
-                read :: self.read_raw(&out[..<wanted]) ?? return Err(err)
+                read :: self.read_raw(&out[0..<wanted]) ?? return Err(err)
                 if read == 0 -> return Err(Error.new(.UnexpectedEof, "truncated HTTP body"))
                 self.account_body_bytes(read) ?? return Err(err)
                 self.framing = .Length(remaining - read)
@@ -499,7 +499,7 @@ impl ResponseBodyReader {
                     }
                 }
                 wanted :: self.chunk_remaining.min(out.len())
-                read :: self.read_raw(&out[..<wanted]) ?? return Err(err)
+                read :: self.read_raw(&out[0..<wanted]) ?? return Err(err)
                 if read == 0 -> return Err(Error.new(.UnexpectedEof, "truncated chunk"))
                 self.account_body_bytes(read) ?? return Err(err)
                 self.chunk_remaining -= read
@@ -587,13 +587,13 @@ impl Huffman {
             if length != 0 -> counts[length as USize] += 1
         }
         left := I32{1}
-        loop bits in 1..=15 {
+        loop bits in 1..15 {
             left = left * 2 - counts[bits] as I32
             if left < 0 -> return Err(())
         }
         next := [U32; 16].filled(0)
         code := U32{0}
-        loop bits in 1..=15 {
+        loop bits in 1..15 {
             code = (code + counts[bits - 1]) << 1
             next[bits] = code
         }
@@ -609,7 +609,7 @@ impl Huffman {
     // Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:4688
     fn decode<R: Read>(self, bits: &GzipBits<R>) -> U16 Error! {
         code := U32{0}
-        loop length in 1..=self.max {
+        loop length in 1..self.max {
             code |= (bits.bits(1) ?? return Err(err)) << (length - 1)
             if self.symbols.iter().find((item) -> item.1 == length && item.0 == code) == .Val(item) -> return item.2
         }
@@ -619,7 +619,7 @@ impl Huffman {
 // Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:4704
 fn fixed_trees() -> (Huffman, Huffman) ()! {
     literals := [U8].repeat(0, 288)
-    &literals[..<144].fill(8)
+    &literals[0..<144].fill(8)
     &literals[144..<256].fill(9)
     &literals[256..<280].fill(7)
     &literals[280..].fill(8)
@@ -651,7 +651,7 @@ fn dynamic_trees<R: Read>(bits: &GzipBits<R>) -> (Huffman, Huffman) Error! {
         } else { return Err(invalid_gzip()) }
         if lengths.len() > literal_count + distance_count -> return Err(invalid_gzip())
     }
-    (Huffman.from_lengths(lengths[..<literal_count]) ?? return Err(invalid_gzip()), Huffman.from_lengths(lengths[literal_count..]) ?? return Err(invalid_gzip()))
+    (Huffman.from_lengths(lengths[0..<literal_count]) ?? return Err(invalid_gzip()), Huffman.from_lengths(lengths[literal_count..]) ?? return Err(invalid_gzip()))
 }
 // Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:4757
 LENGTH_BASE :: [USize]{3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51, 59, 67, 83, 99, 115, 131, 163, 195, 227, 258}
@@ -694,7 +694,7 @@ impl<R: Read> GzipReader<R> {
     fn read_gzip_header(self: &Self) -> () Error! {
         header := [U8; 10].filled(0)
         loop i in 0..<10 -> header[i] = self.bits.aligned_byte() ?? return Err(err)
-        if header[..<3] != [U8]{0x1f, 0x8b, 8} || header[3] & 0xe0 != 0 -> return Err(invalid_gzip())
+        if header[0..<3] != [U8]{0x1f, 0x8b, 8} || header[3] & 0xe0 != 0 -> return Err(invalid_gzip())
         flags :: header[3]
         if flags & 4 != 0 {
             length :: USize.from(U16.from_le_bytes([self.bits.aligned_byte() ?? return Err(err), self.bits.aligned_byte() ?? return Err(err)]))

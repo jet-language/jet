@@ -154,7 +154,7 @@ fn jet_http2_serve_inner(stream: &JetHTTP2Transport, mux: &JetHTTPMux, options: 
                 if request.inbound_closed { return Err("HTTP/2 DATA follows end of stream") }
                 (start, padding) :: if frame.flags & 0x8 != 0 { (1, USize{*frame.payload.first().ok_or_else(fn() { "HTTP/2 padded DATA is empty" })?}) } else { (0, 0) }
                 if start + padding > frame.payload.len() { return Err("HTTP/2 DATA padding is invalid") }
-                data :: &frame.payload[start..frame.payload.len() - padding]
+                data :: &frame.payload[start..<frame.payload.len() - padding]
                 flow_bytes :: frame.payload.len()
                 connection_receive_window -= flow_bytes as I64
                 receive_window := stream_receive_windows.entry(frame.stream).or_insert(65_535)
@@ -193,7 +193,7 @@ fn jet_http2_serve_inner(stream: &JetHTTP2Transport, mux: &JetHTTPMux, options: 
                 } else { 0 }
                 if frame.flags & 0x20 != 0 { offset += 5 }
                 if offset + padding > frame.payload.len() { return Err("HTTP/2 HEADERS padding is invalid") }
-                block := frame.payload[offset..frame.payload.len() - padding].to_vec()
+                block := frame.payload[offset..<frame.payload.len() - padding].to_vec()
                 if frame.flags & 0x4 == 0 {
                     stream.jet_http_set_read_timeout(Val(options.read_header_timeout))?
                     loop {
@@ -286,7 +286,7 @@ fn jet_http2_serve_inner(stream: &JetHTTP2Transport, mux: &JetHTTPMux, options: 
             }
             8 -> {
                 if frame.payload.len() != 4 { return Err("HTTP/2 WINDOW_UPDATE is malformed") }
-                increment :: U32.from_be_bytes(frame.payload[..4].try_into().unwrap()) & 0x7fff_ffff
+                increment :: U32.from_be_bytes(frame.payload[0..<4].try_into().unwrap()) & 0x7fff_ffff
                 if increment == 0 { return Err("HTTP/2 WINDOW_UPDATE is malformed") }
                 if frame.stream != 0 && !stream_windows.contains_key(&frame.stream) { continue }
                 window := if frame.stream == 0 { &connection_send_window } else { stream_windows.get_mut(&frame.stream).ok_or_else(fn() { "HTTP/2 WINDOW_UPDATE uses an idle stream" })? }
@@ -427,7 +427,7 @@ impl Read for JetHTTPChunkedSocketReader {
         wanted :: output.len().min(self.remaining)
         remaining :: jet_http_body_deadline_remaining(self.deadline)?
         self.stream.set_read_timeout(Val(remaining))?
-        read :: self.stream.read(&output[..wanted])?
+        read :: self.stream.read(&output[0..<wanted])?
         if read == 0 { return Err(Error.new(ErrorKind.UnexpectedEof, "chunk ended early")) }
         self.remaining -= read
         self.need_crlf = self.remaining == 0
@@ -456,7 +456,7 @@ fn jet_http_srv_read_streaming(stream: &TcpStream, options: &JetHTTPServerOption
             Ok(0) -> return Err(JetHTTPReadError{status: 400, message: "request headers ended early"})
             Ok(available) if available > header_len -> {
                 header_len = available
-                if Val(end) :: jet_http_header_end(&header[..header_len]) {
+                if Val(end) :: jet_http_header_end(&header[0..<header_len]) {
                     request_header_len :: end + 4
                     if request_header_len > MAX_HEADER_BYTES { return Err(JetHTTPReadError{status: 431, message: "request headers are too large"}) }
                     header_len = request_header_len
@@ -468,13 +468,13 @@ fn jet_http_srv_read_streaming(stream: &TcpStream, options: &JetHTTPServerOption
             Err(_) -> return Err(JetHTTPReadError{status: 400, message: "request read failed"})
         }
     }
-    if Err(error) :: stream.read_exact(&header[..header_len]) {
+    if Err(error) :: stream.read_exact(&header[0..<header_len]) {
         return Err(match error.kind() {
             ErrorKind.WouldBlock | ErrorKind.TimedOut -> JetHTTPReadError{status: 408, message: "request timed out"}
             _ -> JetHTTPReadError{status: 400, message: "request read failed"}
         })
     }
-    head :: jet_http_validate_headers(&header[..header_len - 4])?
+    head :: jet_http_validate_headers(&header[0..<header_len - 4])?
     body_already_arrived :: if head.expect_continue {
         stream.set_nonblocking(true).map_err(fn(_) { JetHTTPReadError{status: 400, message: "request read failed"} })?
         byte := [0u8; 1]
@@ -591,7 +591,7 @@ fn jet_http_srv_read_buffered(stream: &TcpStream, options: &JetHTTPServerOptions
     loop {
         if Val(header_end) :: jet_http_header_end(pending) {
             if header_end > MAX_HEADER_BYTES { return Err(JetHTTPReadError{status: 431, message: "request headers are too large"}) }
-            if parsed_head.is_none() { parsed_head = Val(jet_http_validate_headers(&pending[..header_end])?) }
+            if parsed_head.is_none() { parsed_head = Val(jet_http_validate_headers(&pending[0..<header_end])?) }
             head := parsed_head.as_mut().expect("validated HTTP request head")
             if !reading_body {
                 reading_body = true
@@ -607,7 +607,7 @@ fn jet_http_srv_read_buffered(stream: &TcpStream, options: &JetHTTPServerOptions
                 }
                 JetHTTPRequestFraming.Chunked -> chunked.get_or_insert_with(fn() { JetHTTPChunkState.new(options.max_body_bytes, std.mem.take(&head.trailer_names)) }).advance(&pending[body_start..])?.map(fn(body_end) { body_start + body_end })
             }
-            if Val(request_end) :: request_end { return Ok(Val(pending.drain(..request_end).collect())) }
+            if Val(request_end) :: request_end { return Ok(Val(pending.drain(0..<request_end).collect())) }
             if head.expect_continue && !continue_sent {
                 stream.write_all(b"HTTP/1.1 100 Continue\r\n\r\n").map_err(fn(_) { JetHTTPReadError{status: 400, message: "continue response write failed"} })?
                 continue_sent = true
@@ -637,7 +637,7 @@ fn jet_http_srv_read_buffered(stream: &TcpStream, options: &JetHTTPServerOptions
             if pending.is_empty() { return Ok(None) }
             return Err(JetHTTPReadError{status: 400, message: "request ended before its declared framing was complete"})
         }
-        pending.extend_from_slice(&buf[..n])
+        pending.extend_from_slice(&buf[0..<n])
         now :: Instant.now()
         if header_deadline.is_none() { header_deadline = Val(now + options.read_header_timeout) }
         idle_deadline = now + if reading_body { options.read_body_timeout.min(options.read_idle_timeout) } else { options.read_idle_timeout }
@@ -645,7 +645,7 @@ fn jet_http_srv_read_buffered(stream: &TcpStream, options: &JetHTTPServerOptions
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:4374
 fn jet_http_srv_request_version(raw: &[U8]) -> &String {
-    raw.windows(2).position(fn(bytes) { bytes == b"\r\n" }).and_then(fn(end) { str.from_utf8(&raw[..end]).ok() }).and_then(fn(line) { line.split(' ').nth(2) }).filter(fn(version) { version == "HTTP/1.0" || version == "HTTP/1.1" }).unwrap_or("HTTP/1.1")
+    raw.windows(2).position(fn(bytes) { bytes == b"\r\n" }).and_then(fn(end) { str.from_utf8(&raw[0..<end]).ok() }).and_then(fn(line) { line.split(' ').nth(2) }).filter(fn(version) { version == "HTTP/1.0" || version == "HTTP/1.1" }).unwrap_or("HTTP/1.1")
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:4383
 fn jet_http_connection_options(value: &String) -> Iterator<Item=&String> { value.split(',').map(jet_http_trim_ows).filter(fn(token) { !token.is_empty() }) }
@@ -811,11 +811,11 @@ fn jet_http_absolute_target(method: &String, target: &String, host: &JetHTTPAuth
     }
     path_query :: if target.starts_with('/') { target.to_string() } else {
         scheme_end :: target.find("://") ?? return Err(JetHTTPReadError{status: 400, message: "request target form is not supported"})
-        scheme :: &target[..scheme_end]
+        scheme :: &target[0..<scheme_end]
         match scheme.to_ascii_lowercase() { "http" | "https" -> {}, _ -> return Err(JetHTTPReadError{status: 400, message: "absolute request target is malformed"}) }
         remainder :: &target[scheme_end + 3..]
         authority_end :: remainder.find(['/', '?']).unwrap_or(remainder.len())
-        raw_authority :: &remainder[..authority_end]
+        raw_authority :: &remainder[0..<authority_end]
         if jet_http_trim_ows(raw_authority) != raw_authority { return Err(JetHTTPReadError{status: 400, message: "absolute request authority is malformed"}) }
         authority :: jet_http_parse_authority(raw_authority).ok_or(JetHTTPReadError{status: 400, message: "absolute request authority is malformed"})?
         default_port :: if scheme.eq_ignore_ascii_case("http") { 80 } else { 443 }
@@ -877,7 +877,7 @@ fn jet_http_chunk_size(line: &[U8]) -> USize JetHTTPReadError! {
     digits :: line.iter().take_while(fn(byte) { byte.is_ascii_hexdigit() }).count()
     if digits == 0 || !jet_http_chunk_extensions_valid(&line[digits..]) { return Err(JetHTTPReadError{status: 400, message: "chunk size is malformed"}) }
     size := 0
-    for byte in &line[..digits] {
+    for byte in &line[0..<digits] {
         digit :: (*byte as Char).to_digit(16).unwrap() as USize
         size = size.checked_mul(16).and_then(fn(value) { value.checked_add(digit) }).ok_or(JetHTTPReadError{status: 413, message: "request body is too large"})?
     }
@@ -889,7 +889,7 @@ fn jet_http_decode_chunked_body(body: &[U8], trailer_names: [String]) -> ([U8], 
     end :: state.advance(body)?.ok_or(JetHTTPReadError{status: 400, message: "request ended before its chunked framing was complete"})?
     if end != body.len() { return Err(JetHTTPReadError{status: 400, message: "request body exceeds its chunked framing"}) }
     decoded := [U8].with_capacity(state.decoded_len)
-    for (start, len) in state.chunks { decoded.extend_from_slice(&body[start..start + len]) }
+    for (start, len) in state.chunks { decoded.extend_from_slice(&body[start..<start + len]) }
     Ok((^decoded, ^state.trailers))
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:4858
@@ -1029,7 +1029,7 @@ where S: Fn(&String, &String, TcpStream, Box<fn(&[U8], Bool) -> ([U8], Bool) Err
 fn jet_http_srv_parse(raw: &[U8]) -> JetHTTPRequest JetHTTPReadError! {
     sep :: jet_http_header_end(raw).ok_or(JetHTTPReadError{status: 400, message: "request headers are incomplete"})?
     if sep > 32 * 1024 { return Err(JetHTTPReadError{status: 431, message: "request headers are too large"}) }
-    head := jet_http_validate_headers(&raw[..sep])?
+    head := jet_http_validate_headers(&raw[0..<sep])?
     encoded_body :: &raw[sep + 4..]
     (body, trailers) :: match head.framing {
         .ContentLength(content_length) -> {

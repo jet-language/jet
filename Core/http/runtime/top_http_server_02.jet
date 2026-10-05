@@ -197,7 +197,7 @@ fn jet_http_server_run_listener_inner(listener: TcpListener, mux: JetHTTPMux, op
         per_ip :: Arc.new(Mutex.new([IpAddr:Int].new()))
         drain_deadline_ms :: drain_deadline_ms.unwrap_or_else(() -> Arc.new(AtomicU64.new(U64{0})))
         workers := []
-        for _ in 0..options.workers.max(1) {
+        for _ in 0..<options.workers.max(1) {
             worker_rx :: rx.clone()
             worker_mux :: mux.clone()
             worker_options :: options.clone()
@@ -420,7 +420,7 @@ fn jet_http_server_handle_stream(stream: &TcpStream, mux: &JetHTTPMux, options: 
             _ :: stream.shutdown(Shutdown.Both)
             return
         }
-        for request_index in 0..JET_HTTP_MAX_REQUESTS_PER_CONNECTION {
+        for request_index in 0..<JET_HTTP_MAX_REQUESTS_PER_CONNECTION {
             if request_index > 0 && shutdown.load(Ordering.Acquire) { return }
             (request, request_version) :: match jet_http_srv_read_streaming(stream, options, request_index > 0, if request_index > 0 { Val(shutdown) } else { None }) {
                 .Ok(.Val(request)) -> request,
@@ -550,7 +550,7 @@ fn jet_http2_is_preface(stream: &TcpStream, timeout: Duration) -> Bool {
         while started.elapsed() < timeout {
             match stream.peek(&bytes) {
                 .Ok(read) if read > 0 -> {
-                    if bytes[..read] != JET_HTTP2_PREFACE[..read] { return false }
+                    if bytes[0..<read] != JET_HTTP2_PREFACE[0..<read] { return false }
                     if read == bytes.len() { return true }
                 },
                 .Ok(_) -> return false,
@@ -589,7 +589,7 @@ fn jet_http2_write_frame<W: Write>(writer: &W, kind: U8, flags: U8, stream: U32,
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:2698
 fn jet_http2_goaway_payload(last_stream: U32, error_code: U32) -> [U8; 8] {
     payload := [U8; 8].filled(U8{0})
-    payload[..4].copy_from_slice(&(last_stream & U32{0x7fffffff}).to_be_bytes())
+    payload[0..<4].copy_from_slice(&(last_stream & U32{0x7fffffff}).to_be_bytes())
     payload[4..].copy_from_slice(&error_code.to_be_bytes())
     payload
 }
@@ -616,7 +616,7 @@ fn jet_http2_huffman(input: &[U8]) -> String Err! {
     table :: #Unsafe("initialize and borrow immutable HPACK table through OnceLock") {
         JET_HTTP2_HUFFMAN.get_or_init(() -> {
             entries := [(U8, U32):U8].with_capacity(256)
-            symbols := (U16{0}..U16{256}).collect<[U16]>()
+            symbols := (U16{0}..<U16{256}).collect<[U16]>()
             symbols.sort_by_key(symbol -> (JET_HTTP2_HUFFMAN_LENGTHS[*symbol as USize], *symbol))
             code := U32{0}
             prior := U8{0}
@@ -634,7 +634,7 @@ fn jet_http2_huffman(input: &[U8]) -> String Err! {
     code := U32{0}
     length := U8{0}
     for byte in input {
-        for shift in (0..8).rev() {
+        for shift in (0..<8).rev() {
             code = (code << 1) | (((byte >> shift) & U8{1}) as U32)
             length += U8{1}
             if table.get(&(length, code)) == .Val(symbol) {
@@ -652,7 +652,7 @@ fn jet_http2_string(input: &[U8], cursor: &USize) -> String Err! {
     huffman :: input.get(*cursor).is_some_and(byte -> byte & U8{0x80} != U8{0})
     length :: jet_http2_integer(input, cursor, U8{7})?
     end :: cursor.checked_add(length).ok_or_else(() -> "HPACK string length overflow".to_string())?
-    bytes :: input.get(*cursor..end).ok_or_else(() -> "HPACK string ended early".to_string())?
+    bytes :: input.get(*cursor..<end).ok_or_else(() -> "HPACK string ended early".to_string())?
     *cursor = end
     if huffman { jet_http2_huffman(bytes) } else { std.str.from_utf8(bytes).map(value -> value.to_string()).map_err(_ -> "HPACK string is not UTF-8".to_string()) }
 }
@@ -676,7 +676,7 @@ fn jet_http2_static(index: USize) -> (String, String)? {
         8 -> Val((":status", "200")), 9 -> Val((":status", "204")), 10 -> Val((":status", "206")),
         11 -> Val((":status", "304")), 12 -> Val((":status", "400")), 13 -> Val((":status", "404")),
         14 -> Val((":status", "500")),
-        15..=61 -> Val((NAMES[index - 15], if index == 16 { "gzip, deflate" } else { "" })),
+        15..61 -> Val((NAMES[index - 15], if index == 16 { "gzip, deflate" } else { "" })),
         _ -> None,
     }
 }
@@ -1037,7 +1037,7 @@ fn jet_http2_write_header_block<W: Write>(stream: &W, stream_id: U32, flags: U8,
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:3224
 fn jet_http2_start_response<W: Write>(stream: &W, stream_id: U32, response: JetHTTPResponse, max_frame: USize) -> JetHTTP2Outgoing? Err! {
-    body_forbidden :: (100..200).contains(&response.status) || response.status == 204 || response.status == 304
+    body_forbidden :: (100..<200).contains(&response.status) || response.status == 204 || response.status == 304
     reset_content :: response.status == 205
     head :: response.head_content_length.is_some()
     trailer_block :: jet_http2_encode_trailers(&response.trailers)?
@@ -1145,7 +1145,7 @@ fn jet_http2_flush_body<W: Write>(stream: &W, stream_id: U32, outgoing: &JetHTTP
                 return Ok(true)
             }
             length :: (outgoing.chunk.len() - outgoing.offset).min(max_frame).min(*connection_window as USize).min(*stream_window as USize).min(remaining)
-            jet_http2_write_frame(stream, U8{0}, U8{0}, stream_id, &outgoing.chunk[outgoing.offset..outgoing.offset + length])?
+            jet_http2_write_frame(stream, U8{0}, U8{0}, stream_id, &outgoing.chunk[outgoing.offset..<outgoing.offset + length])?
             outgoing.offset += length
             outgoing.sent += length
             *connection_window -= length as I64

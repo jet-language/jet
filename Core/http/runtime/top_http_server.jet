@@ -88,7 +88,7 @@ impl JetHTTPDeflateBits {
     fn peek(self, count: Usize) -> U32 JetHTTPReadError! {
         if self.bit.saturating_add(count) > self.input.len().saturating_mul(8) -> return Err(jet_http_gzip_invalid())
         value: U32 := 0
-        loop offset in 0..count {
+        loop offset in 0..<count {
             bit :: self.bit + offset
             value |= ((self.input[bit / 8] >> (bit % 8)) & 1) as U32 << offset
         }
@@ -117,7 +117,7 @@ impl JetHTTPDeflateTable {
         if left > 0 && (require_complete || max_bits != 1) -> return Err(jet_http_gzip_invalid())
         next := [Usize{0}; 16]
         code: Usize := 0
-        loop bits in 1..=15 {
+        loop bits in 1..15 {
             code = (code + counts[bits - 1]) << 1
             next[bits] = code
         }
@@ -128,8 +128,8 @@ impl JetHTTPDeflateTable {
             canonical :: next[length]
             next[length] += 1
             reversed: Usize := 0
-            loop bit in 0..length -> reversed |= ((canonical >> bit) & 1) << (length - bit - 1)
-            loop suffix in 0..(Usize{1} << (max_bits - length)) {
+            loop bit in 0..<length -> reversed |= ((canonical >> bit) & 1) << (length - bit - 1)
+            loop suffix in 0..<(Usize{1} << (max_bits - length)) {
                 entry :: &entries[reversed | (suffix << length)]
                 if entry.1 != 0 -> return Err(jet_http_gzip_invalid())
                 *entry = (symbol as U16, length as U8)
@@ -158,9 +158,9 @@ fn jet_http_gzip_too_large() -> JetHTTPReadError { JetHTTPReadError{status: 413,
 fn jet_http_deflate_tables(bits: &JetHTTPDeflateBits, kind: U32) -> (JetHTTPDeflateTable, JetHTTPDeflateTable) JetHTTPReadError! {
     if kind == 1 {
         literals := [U8{0}; 288]
-        literals[..144].fill(8)
-        literals[144..256].fill(9)
-        literals[256..280].fill(7)
+        literals[0..<144].fill(8)
+        literals[144..<256].fill(9)
+        literals[256..<280].fill(7)
         literals[280..].fill(8)
         return Ok((JetHTTPDeflateTable.new(&literals, false)?, JetHTTPDeflateTable.new(&[U8{5}; 32], false)?))
     }
@@ -172,14 +172,14 @@ fn jet_http_deflate_tables(bits: &JetHTTPDeflateBits, kind: U32) -> (JetHTTPDefl
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:210
     const ORDER: [Usize; 19] = [16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15]
     code_lengths := [U8{0}; 19]
-    loop index in 0..code_count -> code_lengths[ORDER[index]] = bits.read(3)? as U8
+    loop index in 0..<code_count -> code_lengths[ORDER[index]] = bits.read(3)? as U8
     code_table :: JetHTTPDeflateTable.new(&code_lengths, true)?
     total :: literal_count + distance_count
     lengths := [U8].with_capacity(total)
     loop {
         if lengths.len() >= total -> break
         match code_table.symbol(bits)? {
-            length @ 0..=15 -> lengths.push(length as U8)
+            length @ 0..15 -> lengths.push(length as U8)
             16 -> {
                 previous :: *lengths.last().ok_or_else(jet_http_gzip_invalid)?
                 repeats :: bits.read(2)? as Usize + 3
@@ -200,7 +200,7 @@ fn jet_http_deflate_tables(bits: &JetHTTPDeflateBits, kind: U32) -> (JetHTTPDefl
         }
     }
     if lengths.get(256).copied().unwrap_or(0) == 0 -> return Err(jet_http_gzip_invalid())
-    Ok((JetHTTPDeflateTable.new(&lengths[..literal_count], false)?, JetHTTPDeflateTable.new(&lengths[literal_count..], false)?))
+    Ok((JetHTTPDeflateTable.new(&lengths[0..<literal_count], false)?, JetHTTPDeflateTable.new(&lengths[literal_count..], false)?))
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:255
 fn jet_http_deflate_decode(input: &[U8], output: &[U8], member_start: Usize, limit: Usize) -> Usize JetHTTPReadError! {
@@ -222,7 +222,7 @@ fn jet_http_deflate_decode(input: &[U8], output: &[U8], member_start: Usize, lim
             complement :: bits.read(16)? as U16
             if length as U16 != !complement -> return Err(jet_http_gzip_invalid())
             if output.len().saturating_add(length) > limit -> return Err(jet_http_gzip_too_large())
-            loop _ in 0..length -> output.push(bits.read(8)? as U8)
+            loop _ in 0..<length -> output.push(bits.read(8)? as U8)
         } else {
             (literals, distances) :: jet_http_deflate_tables(&bits, kind)?
             loop {
@@ -239,7 +239,7 @@ fn jet_http_deflate_decode(input: &[U8], output: &[U8], member_start: Usize, lim
                     distance :: DISTANCE_BASE[distance_symbol] + bits.read(DISTANCE_EXTRA[distance_symbol])? as Usize
                     if distance == 0 || distance > output.len().saturating_sub(member_start) -> return Err(jet_http_gzip_invalid())
                     if output.len().saturating_add(length) > limit -> return Err(jet_http_gzip_too_large())
-                    loop _ in 0..length -> output.push(output[output.len() - distance])
+                    loop _ in 0..<length -> output.push(output[output.len() - distance])
                 }
             }
         }
@@ -254,7 +254,7 @@ fn jet_http_crc32(bytes: &[U8]) -> U32 {
     crc: U32 := !U32{0}
     loop byte in bytes {
         crc ^= *byte as U32
-        loop _ in 0..8 -> crc = (crc >> 1) ^ (U32{0xedb8_8320} & U32{0}.wrapping_sub(crc & 1))
+        loop _ in 0..<8 -> crc = (crc >> 1) ^ (U32{0xedb8_8320} & U32{0}.wrapping_sub(crc & 1))
     }
     !crc
 }
@@ -265,12 +265,12 @@ fn jet_http_gzip_decode(input: &[U8], limit: Usize) -> [U8] JetHTTPReadError! {
     loop {
         if cursor >= input.len() -> break
         member :: cursor
-        header :: input.get(cursor..cursor + 10).ok_or_else(jet_http_gzip_invalid)?
-        if header[..3] != [U8{31}, U8{139}, U8{8}] || header[3] & 0xe0 != 0 -> return Err(jet_http_gzip_invalid())
+        header :: input.get(cursor..<cursor + 10).ok_or_else(jet_http_gzip_invalid)?
+        if header[0..<3] != [U8{31}, U8{139}, U8{8}] || header[3] & 0xe0 != 0 -> return Err(jet_http_gzip_invalid())
         flags :: header[3]
         cursor += 10
         if flags & 4 != 0 {
-            length :: input.get(cursor..cursor + 2).ok_or_else(jet_http_gzip_invalid)?
+            length :: input.get(cursor..<cursor + 2).ok_or_else(jet_http_gzip_invalid)?
             cursor += 2
             length :: U16.from_le_bytes([length[0], length[1]]) as Usize
             cursor = cursor.checked_add(length).filter(fn(end) { *end <= input.len() }).ok_or_else(jet_http_gzip_invalid)?
@@ -282,16 +282,16 @@ fn jet_http_gzip_decode(input: &[U8], limit: Usize) -> [U8] JetHTTPReadError! {
             }
         }
         if flags & 2 != 0 {
-            expected :: input.get(cursor..cursor + 2).ok_or_else(jet_http_gzip_invalid)?
+            expected :: input.get(cursor..<cursor + 2).ok_or_else(jet_http_gzip_invalid)?
             expected :: U16.from_le_bytes([expected[0], expected[1]])
-            if jet_http_crc32(&input[member..cursor]) as U16 != expected -> return Err(jet_http_gzip_invalid())
+            if jet_http_crc32(&input[member..<cursor]) as U16 != expected -> return Err(jet_http_gzip_invalid())
             cursor += 2
         }
         member_output :: output.len()
         compressed :: jet_http_deflate_decode(&input[cursor..], &output, member_output, limit)?
         cursor += compressed
-        trailer :: input.get(cursor..cursor + 8).ok_or_else(jet_http_gzip_invalid)?
-        crc :: U32.from_le_bytes(trailer[..4].try_into().map_err(fn(_) { jet_http_gzip_invalid() })?)
+        trailer :: input.get(cursor..<cursor + 8).ok_or_else(jet_http_gzip_invalid)?
+        crc :: U32.from_le_bytes(trailer[0..<4].try_into().map_err(fn(_) { jet_http_gzip_invalid() })?)
         size :: U32.from_le_bytes(trailer[4..].try_into().map_err(fn(_) { jet_http_gzip_invalid() })?)
         if jet_http_crc32(&output[member_output..]) != crc || output.len().saturating_sub(member_output) as U32 != size {
             return Err(jet_http_gzip_invalid())
@@ -306,7 +306,7 @@ fn jet_http_decode_request_bytes(bytes: [U8], layers: Usize, limit: Usize) -> [U
     bytes := ^bytes
     if layers == 0 -> return Ok(^bytes)
     if bytes.len() > limit -> return Err(jet_http_gzip_too_large())
-    loop _ in 0..layers -> bytes = jet_http_gzip_decode(&bytes, limit)?
+    loop _ in 0..<layers -> bytes = jet_http_gzip_decode(&bytes, limit)?
     Ok(^bytes)
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:415
@@ -363,7 +363,7 @@ impl JetHTTPChunkState {
                         }
                     }
                     line_end :: self.cursor + line_len
-                    size :: jet_http_chunk_size(&body[self.cursor..line_end])?
+                    size :: jet_http_chunk_size(&body[self.cursor..<line_end])?
                     self.add_framing(line_len + 2)?
                     self.cursor = line_end + 2
                     if size == 0 { self.phase = JetHTTPChunkPhase.Trailers }
@@ -386,7 +386,7 @@ impl JetHTTPChunkState {
                 }
                 .DataCrlf -> {
                     if body.len().saturating_sub(self.cursor) < 2 -> return Ok(None)
-                    if body[self.cursor..self.cursor + 2] != [U8{13}, U8{10}] {
+                    if body[self.cursor..<self.cursor + 2] != [U8{13}, U8{10}] {
                         return Err(JetHTTPReadError{status: 400, message: "chunk data is not followed by CRLF"})
                     }
                     self.cursor += 2
@@ -409,7 +409,7 @@ impl JetHTTPChunkState {
                         self.cursor += 2
                         return Ok(Val(self.cursor))
                     }
-                    jet_http_parse_trailer_line(&body[self.cursor..line_end], &self.trailer_names, &self.trailers)?
+                    jet_http_parse_trailer_line(&body[self.cursor..<line_end], &self.trailer_names, &self.trailers)?
                     self.cursor = line_end + 2
                 }
             }
@@ -807,7 +807,7 @@ fn jet_http_srv_response<S: JetHTTPStatusCode>(status: S, body: &String) -> JetH
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:1241
 fn jet_http_srv_response_owned(status: I64, body: String) -> JetHTTPResponse {
-    (status, body) :: if !(100..=599).contains(&status) { (I64{500}, "500 Internal Server Error") } else { (status, ^body) }
+    (status, body) :: if !(100..599).contains(&status) { (I64{500}, "500 Internal Server Error") } else { (status, ^body) }
     JetHTTPResponse{
         status: status, version: "HTTP/1.1", body: JetHTTPBody.from_text(^body),
         headers: JetHTTPHeaders.new(), trailers: JetHTTPHeaders.new(),
@@ -851,7 +851,7 @@ struct JetErrorPageProjection {
     correlation_links: [String]
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:1302
-fn jet_error_page_status(status: I64) -> I64 { if (100..=599).contains(&status) { status } else { 500 } }
+fn jet_error_page_status(status: I64) -> I64 { if (100..599).contains(&status) { status } else { 500 } }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:1306
 fn jet_error_page_bounded(value: String, limit: Usize) -> String {
     output := String.new()
@@ -997,8 +997,8 @@ fn jet_error_page_status_text(status: I64) -> String {
         502 -> "Bad Gateway"
         503 -> "Service Unavailable"
         504 -> "Gateway Timeout"
-        _ if (400..=499).contains(&status) -> "Client Error"
-        _ if (500..=599).contains(&status) -> "Server Error"
+        _ if (400..499).contains(&status) -> "Client Error"
+        _ if (500..599).contains(&status) -> "Server Error"
         _ -> "HTTP Error"
     }
 }
