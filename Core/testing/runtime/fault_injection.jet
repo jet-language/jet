@@ -119,7 +119,7 @@ fn jet_fault_run_once_with_cleanup(selectors: View<String>, active: Int?, fail_n
     loop selector in selectors -> &targets.push(.EffectPath(selector.to_string()))
     &targets.push(.Allocation)
     count :: targets.len()
-    if active is Val(index) -> if index >= count -> return Err("fault schedule selected an invalid target")
+    if active == .Val(index) -> if index >= count -> return Err("fault schedule selected an invalid target")
     // GATE #4565: kernel primitive — TLS and caught unwind retain ordinary cleanup paths.
     #Unsafe("install the actual thread-local schedule and catch native unwind without suppressing errors") {
         JET_FAULT_STATE.with(fn(cell) {
@@ -162,7 +162,7 @@ pub fn jet_fault_test_loop(selectors: View<String>, body: &fn() -> Unit Err!) Er
     count :: selectors.len() + 1
     clean :: jet_fault_run_once_with_cleanup(selectors, None, USize{0}, &body) ?? return Err(err)
     if not clean.scheduler_clean -> return Err("fault scheduler cleanup did not complete")
-    if clean.result is Err(error) -> return Err(error)
+    if clean.result == .Err(error) -> return Err(error)
     max_counts := ^clean.counts
     next := [USize].filled(count, USize{1})
     attempts := 0
@@ -176,7 +176,7 @@ pub fn jet_fault_test_loop(selectors: View<String>, body: &fn() -> Unit Err!) Er
                 attempts += 1
                 run :: jet_fault_run_once_with_cleanup(selectors, Val(index), nth, &body) ?? return Err(err)
                 if not run.scheduler_clean -> return Err("fault scheduler cleanup did not complete")
-                if not run.injected -> if run.result is Err(error) -> return Err(error)
+                if not run.injected -> if run.result == .Err(error) -> return Err(error)
                 if run.injected {
                     loop other in 0..<run.counts.len() {
                         if run.counts[other] > max_counts[other] {

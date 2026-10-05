@@ -518,16 +518,16 @@ module jet_testing_history_web {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:789
     fn integer(value: &Tree, name: String) -> I64 Err! {
         match value {
-            Tree.Int(value) -> Ok(*value)
-            Tree.Number(value) -> value.parse<I64>().map_err(fn(_) { "{name} must be an exact integer" })
+            .Int(value) -> Ok(*value)
+            .Number(value) -> value.parse<I64>().map_err(fn(_) { "{name} must be an exact integer" })
             _ -> Err("{name} must be an exact integer")
         }
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:799
     fn unsigned(value: &Tree, name: String) -> U64 Err! {
         match value {
-            Tree.Int(value) -> U64.try_from(*value).map_err(fn(_) { "{name} must be a non-negative exact integer" })
-            Tree.Number(value) -> value.parse<U64>().map_err(fn(_) { "{name} must be a non-negative exact integer" })
+            .Int(value) -> U64.try_from(*value).map_err(fn(_) { "{name} must be a non-negative exact integer" })
+            .Number(value) -> value.parse<U64>().map_err(fn(_) { "{name} must be a non-negative exact integer" })
             _ -> Err("{name} must be an exact integer")
         }
     }
@@ -536,7 +536,7 @@ module jet_testing_history_web {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:817
     fn required_text(root: &Tree, name: String) -> String Err! {
         match field(root, name) {
-            Val(Tree.Text(value) | Tree.TypedText(value)) -> Ok(value.clone())
+            Val(.Text(value) | .TypedText(value)) -> Ok(value.clone())
             Val(_) -> Err("{name} must be text")
             None -> Err("history wire field `{name}` is missing")
         }
@@ -561,21 +561,21 @@ module jet_testing_history_web {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:857
     fn history_value_tree(value: &HistoryValue) -> Tree {
         (tag, values) :: match value {
-            HistoryValue.Integer(value) -> ("Integer", [integer_tree(*value)])
-            HistoryValue.Boolean(value) -> ("Boolean", [Tree.Bool(*value)])
-            HistoryValue.Text(value) -> ("Text", [Tree.Text(value.clone())])
-            HistoryValue.Handle(value) -> ("Handle", [id_tree(value.value)])
-            HistoryValue.Redacted(value) -> ("Redacted", [Tree.Text(value.clone())])
+            .Integer(value) -> ("Integer", [integer_tree(*value)])
+            .Boolean(value) -> ("Boolean", [Tree.Bool(*value)])
+            .Text(value) -> ("Text", [Tree.Text(value.clone())])
+            .Handle(value) -> ("Handle", [id_tree(value.value)])
+            .Redacted(value) -> ("Redacted", [Tree.Text(value.clone())])
         }
         object([("tag", Tree.Text(tag)), ("values", Tree.Array(^values))])
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:868
     fn history_precondition_tree(value: &HistoryPrecondition) -> Tree {
         (tag, values) :: match value {
-            HistoryPrecondition.HandleLive(handle) -> ("HandleLive", [id_tree(handle.value)])
+            .HandleLive(handle) -> ("HandleLive", [id_tree(handle.value)])
             HistoryPrecondition.HandleState{handle, state} -> ("HandleState", [id_tree(handle.value), Tree.Text(state.clone())])
-            HistoryPrecondition.TaskCompleted(task) -> ("TaskCompleted", [id_tree(task.value)])
-            HistoryPrecondition.EventAvailable(event) -> ("EventAvailable", [id_tree(event.value)])
+            .TaskCompleted(task) -> ("TaskCompleted", [id_tree(task.value)])
+            .EventAvailable(event) -> ("EventAvailable", [id_tree(event.value)])
         }
         object([("tag", Tree.Text(tag)), ("values", Tree.Array(^values))])
     }
@@ -607,7 +607,7 @@ module jet_testing_history_web {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:957
     fn required_text_any(root: &Tree, names: &[String], label: String) -> String Err! {
         match required_any(root, names, label)? {
-            Tree.Text(value) | Tree.TypedText(value) -> Ok(value.clone())
+            .Text(value) | .TypedText(value) -> Ok(value.clone())
             _ -> Err("{label} must be text")
         }
     }
@@ -618,37 +618,37 @@ module jet_testing_history_web {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:973
     fn array_any(root: &Tree, names: &[String], label: String) -> &[Tree] Err! {
         match required_any(root, names, label)? {
-            Tree.Array(values) -> Ok(values)
+            .Array(values) -> Ok(values)
             _ -> Err("{label} must be an array")
         }
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:980
     fn history_id(value: &Tree, label: String) -> U32 Err! {
         match value {
-            Tree.Object(_) if field(value, "value").is_some() -> u32_any(value, &["value"], label)
+            .Object(_) if field(value, "value").is_some() -> u32_any(value, &["value"], label)
             _ -> U32.try_from(unsigned(value, label)?).map_err(fn(_) { "{label} is outside the u32 range" })
         }
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:988
     fn tagged(value: &Tree, label: String) -> (String, &[Tree]) Err! {
         tag :: match field(value, "tag") {
-            Val(Tree.Text(tag) | Tree.TypedText(tag)) -> tag.as_str()
+            Val(.Text(tag) | .TypedText(tag)) -> tag.as_str()
             _ -> return Err("{label}.tag must be text")
         }
         values :: match required_any(value, &["values"], label)? {
-            Tree.Array(values) -> values.as_slice()
+            .Array(values) -> values.as_slice()
             _ -> return Err("{label}.values must be an array")
         }
         Ok((tag, values))
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:1000
     fn history_value(value: &Tree, label: String) -> HistoryValue Err! {
-        if !(value is Tree.Object(_)) {
+        if !(value == .Object(_)) {
             return match value {
-                Tree.Int(value) -> Ok(HistoryValue.Integer(*value))
-                Tree.Number(value) -> value.parse<I64>().map(HistoryValue.Integer).map_err(fn(_) { "{label} integer is out of range" })
-                Tree.Bool(value) -> Ok(HistoryValue.Boolean(*value))
-                Tree.Text(value) | Tree.TypedText(value) -> Ok(HistoryValue.Text(value.clone()))
+                .Int(value) -> Ok(HistoryValue.Integer(*value))
+                .Number(value) -> value.parse<I64>().map(HistoryValue.Integer).map_err(fn(_) { "{label} integer is out of range" })
+                .Bool(value) -> Ok(HistoryValue.Boolean(*value))
+                .Text(value) | .TypedText(value) -> Ok(HistoryValue.Text(value.clone()))
                 _ -> Err("{label} is not a HistoryValue")
             }
         }
@@ -664,11 +664,11 @@ module jet_testing_history_web {
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:1026
     fn option_id(value: &Tree, label: String) -> U32? Err! {
-        if value is Tree.Null -> return Ok(None)
-        if value is Tree.Object(_) {
-            if field(value, "tag") == Val(Tree.Text(tag) | Tree.TypedText(tag)) {
+        if value == Tree.Null -> return Ok(None)
+        if value == .Object(_) {
+            if field(value, "tag") == Val(.Text(tag) | .TypedText(tag)) {
                 values :: match required_any(value, &["values"], label)? {
-                    Tree.Array(values) -> values
+                    .Array(values) -> values
                     _ -> return Err("{label}.values must be an array")
                 }
                 return match (tag.as_str(), values.as_slice()) {
@@ -682,8 +682,8 @@ module jet_testing_history_web {
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:1046
     fn history_precondition(value: &Tree, label: String) -> HistoryPrecondition Err! {
-        if value is Tree.Object(_) {
-            if field(value, "kind") == Val(Tree.Text(kind) | Tree.TypedText(kind)) {
+        if value == .Object(_) {
+            if field(value, "kind") == Val(.Text(kind) | .TypedText(kind)) {
                 return match kind.as_str() {
                     "handle_live" -> Ok(HistoryPrecondition.HandleLive(HandleId{value: u32_any(value, &["handle"], label)?}))
                     "handle_state" -> Ok(HistoryPrecondition.HandleState{handle: HandleId{value: u32_any(value, &["handle"], label)?}, state: required_text_any(value, &["state"], label)?})
@@ -738,11 +738,11 @@ module jet_testing_history_web {
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:1202
     fn optional_typed_history_case(value: &Tree, label: String) -> TypedHistoryCase<Tree>? Err! {
-        if value is Tree.Null -> return Ok(None)
-        if value is Tree.Object(_) {
-            if field(value, "tag") == Val(Tree.Text(tag) | Tree.TypedText(tag)) {
+        if value == Tree.Null -> return Ok(None)
+        if value == .Object(_) {
+            if field(value, "tag") == Val(.Text(tag) | .TypedText(tag)) {
                 values :: match required_any(value, &["values"], label)? {
-                    Tree.Array(values) -> values
+                    .Array(values) -> values
                     _ -> return Err("{label}.values must be an array")
                 }
                 return match (tag.as_str(), values.as_slice()) {
@@ -816,7 +816,7 @@ module jet_testing_history_web {
         // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:1342
         fn valid(self: &Self, case: &TypedHistoryCase<Tree>) -> Bool {
             response :: callback(self.valid, &typed_history_case_tree(case), "strategy.valid").ok()
-            response is Val(Tree.Bool(true))
+            response == .Val(Tree.Bool(true))
         }
         // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:1352
         fn commands_to_data_tree(self: &Self, commands: &[Tree]) -> Tree? { Val(Tree.Array(commands.to_vec())) }
@@ -884,13 +884,13 @@ module jet_testing_history_web {
         OUTPUT.with(fn(cell) { &cell.borrow_mut().clear() })
         parsed :: parsed.ok_or_else(fn() { "{role} callback returned invalid JSON" })?
         ok :: match field(&parsed, "ok") {
-            Val(Tree.Bool(value)) -> *value
+            Val(.Bool(value)) -> *value
             _ -> return Err("{role} callback returned an invalid response envelope")
         }
         if ok { field(&parsed, "value").cloned().ok_or_else(fn() { "{role} callback omitted its value" }) }
         else {
             match field(&parsed, "reason") {
-                Val(Tree.Text(reason) | Tree.TypedText(reason)) -> Err("{role} callback failed: {reason}")
+                Val(.Text(reason) | .TypedText(reason)) -> Err("{role} callback failed: {reason}")
                 _ -> Err("{role} callback failed without a reason")
             }
         }
@@ -898,10 +898,10 @@ module jet_testing_history_web {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:1495
     fn wire_provenance(root: &Tree) -> HistoryProvenance? Err! {
         value :: field(root, "provenance") ?? return Ok(None)
-        if value is Tree.Null -> return Ok(None)
+        if value == Tree.Null -> return Ok(None)
         base :: HistoryProvenance{source: required_text(value, "source")?, tool: required_text(value, "tool")?, target: required_text(value, "target")?}
         rows :: field(root, "callback_provenance").ok_or_else(fn() { "history callback provenance is missing" })?.as_array()?
-        explicit :: field(root, "strategy").is_some_and(fn(value) { !(value is Tree.Null) })
+        explicit :: field(root, "strategy").is_some_and(fn(value) { !(value == Tree.Null) })
         expected :: if explicit { ["model", "actual", "observe", "generate", "rebuild", "valid"] } else { ["model", "actual", "observe", "strategy"] }
         if rows.len() != expected.len() -> return Err("history callback provenance has an invalid role count")
         callbacks := [(String, String)].with_capacity(rows.len())
@@ -951,7 +951,7 @@ module jet_testing_history_web {
     fn run_wire(root: &Tree) -> JetTestComparison Err! {
         command_type :: required_text(root, "command_type")?
         if field(root, "strategy") == Val(strategy) {
-            if !(strategy is Tree.Null) {
+            if !(strategy == Tree.Null) {
                 strategy :: WebHistoryStrategy.from_wire(command_type.clone(), strategy)?
                 return run_wire_with_strategy<Tree, WebHistoryStrategy>(root, ^strategy)
             }

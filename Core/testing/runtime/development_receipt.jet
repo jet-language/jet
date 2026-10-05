@@ -77,9 +77,9 @@ pub fn jet_production_failure_receipt_write(code: String, file: String, line: U3
                 return None
             }
         }
-        if output.write_all(bytes) is Err(_) -> return None
+        if output.write_all(bytes) == .Err(_) -> return None
         if target.selected_family() == "unix" {
-            if fs.set_permissions(path, fs.Permissions.from_mode(0o600)) is Err(_) -> return None
+            if fs.set_permissions(path, fs.Permissions.from_mode(0o600)) == .Err(_) -> return None
         }
         Val(path.to_string_lossy().to_string())
     }

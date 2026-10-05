@@ -111,12 +111,12 @@ fn validate_test_records(report: EvidenceReport) -> TestEvidenceError! {
     evidence := [@String:@EvidenceRecord]{}
     loop record in report.records {
         validate_test_record(report, record)?
-        if outcomes.get(record.identity.claim_id) is Val(existing) {
+        if outcomes.get(record.identity.claim_id) == .Val(existing) {
             if existing != record.outcome {
                 return Err(.ContradictoryOutcome{claim_id: ~record.identity.claim_id, existing, found: record.outcome})
             }
         } else { _ :: &outcomes.insert(@record.identity.claim_id, record.outcome) }
-        if evidence.get(record.identity.evidence_id) is Val(existing) {
+        if evidence.get(record.identity.evidence_id) == .Val(existing) {
             if existing != record {
                 return Err(.Foundation(EvidenceMergeError.RecordConflict{evidence_id: ~record.identity.evidence_id}))
             }
@@ -129,7 +129,7 @@ fn validate_test_records(report: EvidenceReport) -> TestEvidenceError! {
 pub fn record_test_case(report: &EvidenceReport, record: ^EvidenceRecord) -> TestEvidenceError! {
     validate_test_report(report)?
     validate_test_record(report, record)?
-    if report.records.iter().find(existing -> existing.identity.claim_id == record.identity.claim_id) is Val(existing) {
+    if report.records.iter().find(existing -> existing.identity.claim_id == record.identity.claim_id) == .Val(existing) {
         if existing.outcome != record.outcome {
             return Err(.ContradictoryOutcome{claim_id: ~record.identity.claim_id, existing: existing.outcome, found: record.outcome})
         }

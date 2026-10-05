@@ -30,12 +30,18 @@ const JET_RECEIPT_SECTION_BYTES_TOTAL: U64 = U64{64 * 1024 * 1024}
 const JET_RECEIPT_SECTION_COUNT: USize = 256
 // Rust: crates/jet-codegen/src/Prelude/Core/Receipt.rs:19
 pub fn jet_receipt_attach<T: __jet_Encode>(value: T, section_name: String, type_name: String, schema_digest: String) -> Never! {
-    if target.selected_arch() == "wasm32" { _ :: (value, section_name, type_name, schema_digest); return }
+    if target.selected_arch() == "wasm32" {
+        _ :: (value, section_name, type_name, schema_digest)
+        return
+    }
     jet_receipt_attach_tree(value.jet_encode(), section_name, type_name, schema_digest)
 }
 // Rust: crates/jet-codegen/src/Prelude/Core/Receipt.rs:44
 pub fn jet_receipt_attach_encoded(payload: String, section_name: String, type_name: String, schema_digest: String) -> Never! {
-    if target.selected_arch() == "wasm32" { _ :: (payload, section_name, type_name, schema_digest); return }
+    if target.selected_arch() == "wasm32" {
+        _ :: (payload, section_name, type_name, schema_digest)
+        return
+    }
     tree :: parse_json_datatree(payload).unwrap_or_else(error -> {
         line :: error.line.ok().unwrap_or(0)
         panic("receipt section `{section_name}` is not valid canonical JSON (line {line}): {error.reason}")
@@ -58,7 +64,7 @@ fn jet_receipt_attach_tree(tree: DataTree, section_name: String, type_name: Stri
     jet_receipt_validate_name(type_name, 256, "section type name")
     jet_receipt_validate_digest(schema_digest, "schema")
     canonical :: jet_receipt_canonical_tree(tree)
-    if not (canonical is .Object(_)) -> panic("receipt section `{section_name}` must encode as an object")
+    if not (canonical == .Object(_)) -> panic("receipt section `{section_name}` must encode as an object")
     payload := render_datatree_json(canonical, false, 0).into_bytes()
     &payload.push(U8{10})
     if payload.len() > JET_RECEIPT_SECTION_BYTES {
