@@ -435,7 +435,7 @@ fn jet_url_apply_typed_holes(value: String, marker: String, holes: [String], hol
     loop {
         offset :: value[cursor..].find(marker)
         if offset.is_none() -> break
-        start :: cursor + offset.unwrap()
+        start :: cursor + (offset ?? panic("unwrap failed"))
         literal :: value[cursor..<start]
         if !literal.is_empty() || parts.is_empty() -> &parts.push((literal.to_string(), false))
         hole :: holes.get(hole_index).ok_or("typed URL holes do not match its literal skeleton")?.clone()
@@ -549,7 +549,7 @@ fn jet_url_typed_path_directory(parts: [(String, Bool)]) -> [(String, Bool)] {
     found :: parts.iter().enumerate().rev().find_map((index, (part, hole)) ->
         if !hole -> part.rfind('/').map(slash -> (index, slash)) else -> None)
     if found.is_none() -> return []
-    (last_index, slash) :: found.unwrap()
+    (last_index, slash) :: found ?? panic("unwrap failed")
     directory := parts[0..<last_index].to_vec()
     literal :: parts[last_index].0
     &directory.push((literal[0..slash].to_string(), false))

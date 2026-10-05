@@ -29,7 +29,7 @@ use std.str.from_utf8
 
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:1812
 fn jet_net_tls_peer_identity(stream: &JetTLSStream) -> JetTLSPeerIdentity {
-    stream.peer_identity.clone().expect("verified TLS stream always retains peer identity")
+    stream.peer_identity.clone() ?? panic("verified TLS stream always retains peer identity")
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:1819
 // GATE #4565: kernel primitive
@@ -199,7 +199,7 @@ fn jet_net_tcp_connect_happy(host: String, port: I64, ms: I64) -> JetTCPStream J
             Err(.Disconnected) -> panic("connect sender retained")
         }
         if next == ordered.len() && in_flight == 0 {
-            (addr, error) :: last.expect("at least one connection attempt completed")
+            (addr, error) :: last ?? panic("at least one connection attempt completed")
             return Err(jet_net_io_error("tcp connect", Val(addr.to_string()), ^error))
         }
         jet_net_scheduler_park("tcp connect", 5)?
@@ -578,7 +578,7 @@ fn jet_net_udp_local_addr(socket: &JetUDPSocket) -> JetSocketAddr JetNetError! {
 fn jet_net_udp_set_timeout(socket: &JetUDPSocket, ms: I64) -> Unit JetNetError! {
     jet_net_udp_open(socket, "set udp timeout")?
     _ :: jet_net_timeout(ms).map_err(fn(message) { JetNetError.InvalidInput(jet_net_detail("set udp timeout", None, None, ^message, None)) })?
-    guard := socket.timeout_ms.lock().unwrap()
+    guard := (socket.timeout_ms.lock() ?? panic("unwrap failed"))
     *guard = Val(ms)
     Ok(())
 }

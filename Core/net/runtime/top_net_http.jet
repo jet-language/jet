@@ -24,7 +24,7 @@ impl Clone for JetTCPListener {
     fn clone(self: &Self) -> Self {
         // GATE #4565: kernel primitive
         Self{inner: #Unsafe("duplicate the listener's owned OS socket for spawn capture") {
-            self.inner.try_clone().expect("TcpListener try_clone for spawn capture")
+            self.inner.try_clone() ?? panic("TcpListener try_clone for spawn capture")
         }}
     }
 }
