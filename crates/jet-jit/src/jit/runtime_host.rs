@@ -1146,6 +1146,16 @@ pub(crate) struct RuntimeTypeDescriptor {
     pub(crate) variants: Vec<RuntimeVariantDescriptor>,
 }
 
+impl RuntimeTypeDescriptor {
+    /// Map values of this type are raw words the arena must never retain as
+    /// exact `Int` pointers (#4576): floats (every positive `Float` >= 2.0
+    /// carries the pointer tag) and fixed-width 64-bit integers.
+    pub(crate) fn map_word_values(&self) -> bool {
+        matches!(self.abi, RuntimeValueAbi::Float | RuntimeValueAbi::Float32)
+            || self.integer_width.is_some_and(|width| width.bits == 64)
+    }
+}
+
 fn runtime_value_kind(ty: &MirTypeKind) -> RuntimeValueKind {
     match ty {
         MirTypeKind::Int | MirTypeKind::IntN { .. } | MirTypeKind::Measure(_) => {
@@ -6634,6 +6644,9 @@ fn persist_encode_map(
     let key_descriptor = persist_child_descriptor(rt, descriptor.key, descriptor, "key")?;
     let value_descriptor = persist_child_descriptor(rt, descriptor.value, descriptor, "value")?;
     let map = rt.heap.alloc_empty_map();
+    if value_descriptor.map_word_values() {
+        rt.heap.set_map_word_values(map);
+    }
     for (key, value) in values {
         let value = persist_encode_raw(rt, value, &value_descriptor, state, depth + 1)?;
         match (key, key_descriptor.kind) {
@@ -8666,6 +8679,8 @@ fn runtime_clone_map(
         .map_len(value)
         .ok_or_else(|| format!("JIT copy `{}` value is not a map", descriptor.name))?;
     let output = runtime.heap.alloc_empty_map();
+    // Same map type: keep the source's raw-word key and value cells (#4576).
+    runtime.heap.copy_map_cells(value, output);
     for index in 0..length {
         let key_value = runtime
             .heap
@@ -13320,6 +13335,9 @@ mod service_adapter {
                     return Err(format!("queued #Job `{}` expects a map", descriptor.name));
                 };
                 let map = rt.heap.alloc_empty_map();
+                if child.map_word_values() {
+                    rt.heap.set_map_word_values(map);
+                }
                 for (entry_key, entry_value) in values {
                     let raw = job_marshal_value(rt, entry_value, &child, depth + 1)?;
                     match (entry_key, super::persist_effective_kind(&key)) {

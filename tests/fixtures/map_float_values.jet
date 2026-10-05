@@ -1,0 +1,19 @@
+// A [String:Float] map stores its floats as raw words. Every positive Float
+// >= 2.0 has top bits 01, the exact-Int pointer tag: retained as an exact
+// carrier, its mantissa was dereferenced as a JetInt node and the JIT crashed
+// with SIGSEGV (multi-file scaling-data corpus, `sums[row.region] = ...`).
+fn run() {
+    sums := [String:Float]{}
+    sums["a"] = Float{2.5}
+    sums["a"] = (sums.get("a") ?? Float{0.0}) + Float{13.5}
+    &sums.add("b", Float{1000.125}).drop("fresh key")
+    print("index {sums["a"]} add {sums.get("b") ?? Float{0.0}}")
+    literal :: [String:Float]{"x": 2.5, "y": 3.75}
+    print("literal {literal.get("x") ?? Float{0.0}} {literal.get("y") ?? Float{0.0}}")
+    copied := sums.copy()
+    copied["c"] = Float{6.5}
+    print("copy {copied.len()} {copied.get("c") ?? Float{0.0}} source {sums.len()}")
+    big :: sums.filter((k: String, v: Float) -> v > 100.0)
+    print("filter {big.len()} {big.get("b") ?? Float{0.0}}")
+    loop (key, value) in sums -> print("{key} {value}")
+}
