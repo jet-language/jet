@@ -1128,8 +1128,8 @@ fn jet_rust_emit_structural_type_row(ctx: JetRustEmitContext, ty: MIRType) -> In
         .Apply(name, _) -> {
             identity :: ty.identity ?? name.id
             candidates :: [Int?]{
-                ctx.type_index_by_id.get(jet_rust_emit_id_key(identity.value)),
-                ctx.type_index_by_id.get(jet_rust_emit_id_key(name.id.value)),
+                ctx.type_index_by_id.get(identity.value),
+                ctx.type_index_by_id.get(name.id.value),
                 ctx.type_index_by_key.get(name.name),
                 ctx.type_index_by_name.get(name.name),
             }
@@ -1191,7 +1191,7 @@ fn jet_rust_emit_selected_user_capability_impl(ctx: &JetRustEmitContext, ty: MIR
     }
     nominal_id :: target_id ?? return false
     expected_trait_ref :: jet_rust_emit_capability_trait_ref(&ctx, trait_name) ?? return false
-    rows :: ~(ctx.impls_by_trait.get(jet_rust_emit_id_key(expected_trait_ref.id.value)) ?? [Int]{})
+    rows :: ~(ctx.impls_by_trait.get(expected_trait_ref.id.value) ?? [Int]{})
     // Rows are read in place; only a matching row is copied for the target check.
     loop row in rows {
         if ctx.program.impls[row].compiler_generated -> next
@@ -1359,7 +1359,7 @@ fn jet_rust_emit_type_derive_capability(ctx: &JetRustEmitContext, source: MIRTyp
         .Shared(_) | .Fn(_) | .SendFn(_, _, _) -> trait_name == "Clone"
         // Only Clone, through the clone-box supertrait every trait used as a
         // single-bound object gets (jet_rust_emit_trait_definition).
-        .TraitObject(bounds) -> trait_name == "Clone" && bounds.len() == 1 && ctx.dyn_clone_traits.get(jet_rust_emit_id_key(bounds[0].id.value)) != None
+        .TraitObject(bounds) -> trait_name == "Clone" && bounds.len() == 1 && ctx.dyn_clone_traits.get(bounds[0].id.value) != None
         .List(inner) | .Option(inner) | .FixedList(inner, _) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> jet_rust_emit_type_derive_capability(&ctx, inner, trait_name, &visiting, bindings, generic_params)
         .Tagged(marker, inner) -> {
             if marker == (MIRTagMarker.Internal{internal_tag: MIRInternalTag.CppCallbackABI}) -> return trait_name != "JetShow" && trait_name != "JetDebug"
@@ -1428,7 +1428,7 @@ fn jet_rust_emit_type_derive_capability(ctx: &JetRustEmitContext, source: MIRTyp
             // an incapable one drops them. Without this, every row of a
             // recursive type family re-expanded the whole family per query.
             cacheable :: args.len() == 0 && ctx.program.types[row].generic_params.len() == 0 && bindings.len() == 0 && generic_params.len() == 0
-            cache_key :: "{trait_name}:{jet_rust_emit_id_key(row_id.value)}"
+            cache_key :: "{trait_name}:{row_id.value}"
             if cacheable {
                 if ctx.derive_capability_cache.get(cache_key) == .Val(cached) -> return cached
             }
@@ -1679,7 +1679,7 @@ fn jet_rust_emit_validate_derived_trait(ctx: &JetRustEmitContext, definition: MI
     }
     implementation := MIRImplDef?{None}
     // Only the impls of this trait, in program order (first match wins as before).
-    rows :: ~(ctx.impls_by_trait.get(jet_rust_emit_id_key(trait_id.value)) ?? [Int]{})
+    rows :: ~(ctx.impls_by_trait.get(trait_id.value) ?? [Int]{})
     loop row in rows {
         candidate :: ~ctx.program.impls[row]
         if jet_rust_emit_derived_impl_matches_type(candidate, definition, trait_id, trait_key) && jet_rust_emit_impl_target_enabled(&ctx, candidate) {

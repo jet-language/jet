@@ -3004,7 +3004,7 @@ fn jet_rust_emit_place_reference(ctx: &JetRustEmitContext, function: MIRFunction
 
 fn jet_rust_emit_partial_fields(ctx: &JetRustEmitContext, owner: MIRTypeID) -> [MIRField] Never! {
     fields := [MIRField]{}
-    rows :: ctx.field_rows_by_owner.get(jet_rust_emit_id_key(owner.value)) ?? [Int]{}
+    rows :: ctx.field_rows_by_owner.get(owner.value) ?? [Int]{}
     loop row_index in rows {
         row :: ctx.program.fields[row_index]
         if !row.field.computed -> &fields.push(row.field)

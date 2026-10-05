@@ -813,7 +813,7 @@ fn jet_rust_emit_equality_type_def(ctx: &JetRustEmitContext, ty: MIRType) -> MIR
                 }
             }
             if identity == .Val(id) {
-                index :: ctx.type_index_by_id.get(jet_rust_emit_id_key(id.value)) ?? return None
+                index :: ctx.type_index_by_id.get(id.value) ?? return None
                 return Val(ctx.program.types[index])
             }
             loop definition in ctx.program.types {
@@ -2839,7 +2839,7 @@ fn jet_rust_emit_core_time_error_result(ctx: &JetRustEmitContext, expression: St
     if ty.kind == {
         .Result(_, err) -> {
             owner :: err.identity ?? return None
-            index :: ctx.type_index_by_id.get(jet_rust_emit_id_key(owner.value)) ?? return None
+            index :: ctx.type_index_by_id.get(owner.value) ?? return None
             if jet_rust_emit_core_native_probe_name(ctx.program.types[index].key) != "TimeError" -> return None
             loop row in ctx.program.fields {
                 if row.owner == owner && row.field.name == "reason" -> return Val("({expression}).map_err(|__jet_reason| {jet_rust_emit_type(&ctx, err)} {{ {jet_rust_emit_field_name(&ctx, row.id)}: __jet_reason }})")
@@ -3652,7 +3652,7 @@ fn jet_rust_emit_is_distinct_type(ctx: &JetRustEmitContext, source: MIRType) -> 
     }
     if ty.kind == {
         .Apply(name, _) -> {
-            index :: ctx.type_index_by_id.get(jet_rust_emit_id_key(name.id.value)) ?? return false
+            index :: ctx.type_index_by_id.get(name.id.value) ?? return false
             if ctx.program.types[index].kind == {
                 .Distinct(_, _) -> return true
                 else -> return false
