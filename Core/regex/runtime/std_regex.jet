@@ -66,7 +66,7 @@ impl RegexClass {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:64
     fn new(negated: Bool, items: [RegexClassItem]) -> Self {
         ascii := [U64#2]{0, 0}
-        loop cp in U8{0}..=U8{127} {
+        loop cp in U8{0}..U8{127} {
             if items.iter().any(fn(item) { regex_class_item_matches(item, cp as Char, false) }) {
                 ascii[(cp >> 6) as Usize] |= U64{1} << (cp & 63)
             }
@@ -210,7 +210,7 @@ fn regex_char_index(text: &String, byte: Usize) -> I64? {
     if byte > bytes.len() -> return None
     if byte < bytes.len() && (bytes[byte] & U8{192}) == U8{128} -> return None
     count := Usize{0}
-    loop i in Usize{0}..byte {
+    loop i in Usize{0}..<byte {
         if (bytes[i] & U8{192}) != U8{128} -> count += 1
     }
     I64.try_from(count).ok()
@@ -923,7 +923,7 @@ impl RegexCompiler {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:1308
     fn compile_range(self: &Self, atom: &RegexAtom, min: Usize, max: Usize?) -> RegexFrag Err! {
         frag := None
-        loop _ in Usize{0}..min {
+        loop _ in Usize{0}..<min {
             next :: self.compile_atom(atom)?
             if frag.take() == .Val(prev) {
                 self.patch(&prev.outs, next.start)
@@ -936,7 +936,7 @@ impl RegexCompiler {
         })
         match max {
             Val(m) -> {
-                loop _ in min..m {
+                loop _ in min..<m {
                     opt_piece :: RegexPiece{atom: atom.clone(), quant: .ZeroOrOne}
                     opt :: self.compile_piece(&opt_piece)?
                     self.patch(&base.outs, opt.start)
@@ -1389,8 +1389,8 @@ fn regex_push_required_literal(candidates: &[[U8]], candidate: [U8]) -> {
 fn regex_required_literal_score(literal: View<U8>) -> Usize {
     literal.iter().map(fn(byte) {
         match byte {
-            b'a'..=b'z' | b'A'..=b'Z' -> Usize{3}
-            b'0'..=b'9' -> Usize{2}
+            b'a'..b'z' | b'A'..b'Z' -> Usize{3}
+            b'0'..b'9' -> Usize{2}
             b' ' | b'\t' | b'\r' | b'\n' -> Usize{0}
             _ -> Usize{1}
         }
@@ -1483,7 +1483,7 @@ fn regex_find_byte_scalar(haystack: View<U8>, needle: U8, start: Usize) -> Usize
         bytes.copy_from_slice(haystack.slice(pos, pos + 8))
         different :: U64.from_ne_bytes(bytes) ^ repeated
         if different.wrapping_sub(LOW_BITS) & !different & HIGH_BITS != 0 {
-            loop offset in Usize{0}..8 {
+            loop offset in Usize{0}..<8 {
                 if haystack[pos + offset] == needle -> return Val(pos + offset)
             }
         }
