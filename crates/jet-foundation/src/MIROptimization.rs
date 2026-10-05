@@ -5531,7 +5531,7 @@ fn inline_call(
                     cloned_places.push(mapped);
                     continue;
                 }
-                MirPlaceBase::Parameter(inline_value(&ids, *value))
+                inline_argument_place_base(caller, inline_value(&ids, *value))
             }
             MirPlaceBase::Local(local) => MirPlaceBase::Local(inline_local(&ids, *local)),
             MirPlaceBase::Capture(value) => MirPlaceBase::Capture(inline_value(&ids, *value)),
@@ -5791,6 +5791,24 @@ fn inline_call(
     caller.drops.extend(drops);
     let _ = call_callee;
     true
+}
+
+/// A callee parameter place whose argument has no caller place is rebased on
+/// the caller's own definition of the argument value. Only a caller parameter
+/// or capture keeps that base; every other argument (a constant, a computed
+/// value, or an adapter copy/move) is an SSA temporary of the caller.
+fn inline_argument_place_base(caller: &MirFunction, value: MirValueId) -> MirPlaceBase {
+    let definition = caller
+        .blocks
+        .iter()
+        .flat_map(|block| &block.instructions)
+        .find(|instruction| instruction.result == Some(value))
+        .map(|instruction| &instruction.operation);
+    match definition {
+        Some(MirOperation::Parameter { .. }) => MirPlaceBase::Parameter(value),
+        Some(MirOperation::Capture { .. }) => MirPlaceBase::Capture(value),
+        _ => MirPlaceBase::Temporary(value),
+    }
 }
 
 fn inline_fresh_id(used: &mut HashSet<u64>, namespace: &str, identity: &str) -> u64 {
@@ -16321,5 +16339,113 @@ mod ownership_guard_tests {
             .drops
             .iter()
             .any(|drop| matches!(&drop.edge, MirDropEdge::Return)));
+    }
+
+    /// `contracts/inline_contracts`: `double(5)` passes a constant with no
+    /// caller place. The inlined parameter place must name the caller's SSA
+    /// temporary, never a `Parameter` base on a value no Parameter defines.
+    #[test]
+    fn inline_always_rebases_placeless_argument_parameter_place_on_a_temporary() {
+        let span = Span::new(0, 100);
+        let int = MirType::from_kind(MirTypeKind::Int);
+        let mut callee = inline_guard_function(
+            5,
+            "inline_double",
+            true,
+            vec![
+                instruction(
+                    1,
+                    MirOperation::Parameter { index: 0, name: "x".into() },
+                    Some(MirTypeKind::Int),
+                ),
+                instruction(2, MirOperation::ReadPlace(MirPlaceId(7)), Some(MirTypeKind::Int)),
+            ],
+        );
+        callee.blocks[0].terminator = MirTerminator::Return { value: Some(MirValueId(2)) };
+        callee.return_type = int.clone();
+        callee.params.push(crate::MIR::MirParam {
+            index: 0,
+            name: "x".into(),
+            span,
+            ty: int.clone(),
+            access: MirAccess::Read,
+            ownership: MirOwnership::copy(),
+            public_label: "x".into(),
+            variadic: false,
+            default_present: false,
+        });
+        callee.places.push(MirPlace {
+            id: MirPlaceId(7),
+            span,
+            ty: int.clone(),
+            base: MirPlaceBase::Parameter(MirValueId(1)),
+            projections: Vec::new(),
+            access: MirAccess::Read,
+            persist_key: None,
+        });
+        callee.values.extend([
+            (MirValueId(1), int.clone(), span, MirOwnership::copy()),
+            (MirValueId(2), int.clone(), span, MirOwnership::copy()),
+        ]);
+
+        let call = instruction(
+            11,
+            MirOperation::Call {
+                callee: MirCallee::User(callee.id),
+                args: vec![crate::MIR::MirCallArg {
+                    value: MirValueId(10),
+                    place: None,
+                    access: MirAccess::Read,
+                    span,
+                    label: None,
+                    source_index: Some(0),
+                    binder_slot: None,
+                    spread: false,
+                    implicit_clone: false,
+                    shared_auto_clone: false,
+                    owned_last_use: false,
+                    authority_boundary: false,
+                    fn_coercion: None,
+                    widen_fixed_to_list: false,
+                    widen_to_union: None,
+                    box_as_trait: None,
+                }],
+                type_args: Vec::new(),
+            },
+            Some(MirTypeKind::Int),
+        );
+        let constant = instruction(
+            10,
+            MirOperation::Constant(MirConstant::Int { value: 5, width: None, spelling: None }),
+            Some(MirTypeKind::Int),
+        );
+        let mut caller =
+            inline_guard_function(4, "inline_caller", false, vec![constant, call.clone()]);
+        caller.values.extend([
+            (MirValueId(10), int.clone(), span, MirOwnership::copy()),
+            (MirValueId(11), int, span, MirOwnership::copy()),
+        ]);
+
+        assert!(inline_call(&mut caller, &callee, 0, 1, &call));
+        let parameter_values = caller
+            .blocks
+            .iter()
+            .flat_map(|block| &block.instructions)
+            .filter(|instruction| matches!(instruction.operation, MirOperation::Parameter { .. }))
+            .filter_map(|instruction| instruction.result)
+            .collect::<HashSet<_>>();
+        for place in &caller.places {
+            if let MirPlaceBase::Parameter(value) = &place.base {
+                assert!(
+                    parameter_values.contains(value),
+                    "inlined place {:?} names Parameter({value:?}) with no Parameter definition",
+                    place.id,
+                );
+            }
+        }
+        assert!(caller
+            .places
+            .iter()
+            .any(|place| place.base == MirPlaceBase::Temporary(MirValueId(10))));
     }
 }
