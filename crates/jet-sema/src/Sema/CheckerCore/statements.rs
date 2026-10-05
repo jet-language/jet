@@ -451,6 +451,27 @@ impl<'a> Checker<'a> {
             }))
     }
 
+    /// Only concrete records need E0360 here. Distincts and closed numeric
+    /// families retain their own arithmetic rules; hooked places are rewritten
+    /// to the binary expression before assignment checking.
+    fn compound_missing_struct_hook(&self, op: crate::AST::BinOp, place: &Type) -> bool {
+        let trait_name = match op {
+            crate::AST::BinOp::Add => Syntax::TRAIT_ADD,
+            crate::AST::BinOp::Sub => Syntax::TRAIT_SUB,
+            crate::AST::BinOp::Mul => Syntax::TRAIT_MUL,
+            crate::AST::BinOp::Div => Syntax::TRAIT_DIV,
+            _ => return false,
+        };
+        let Type::Named(name) = place.without_user_tags() else {
+            return false;
+        };
+        let (import_ns, leaf) = self.struct_type_name_parts(name);
+        self.struct_owner_module(leaf, import_ns)
+            .and_then(|owner| self.struct_fields_of(owner, leaf))
+            .is_some()
+            && !self.type_implements_trait_for_name(name, trait_name)
+    }
+
     /// E0362: a compound update of a nested field whose type dispatches the
     /// operator through a hook trait. Builtin numerics update natively, so a
     /// nested numeric field (`guard.value.count += 1`) is never a hook place.
@@ -474,11 +495,14 @@ impl<'a> Checker<'a> {
     }
 
     /// True when compound assign on `target` is rejected (E0109 / E0164 /
-    /// E0362), so L0503 must not recommend it.
+    /// E0360 / E0362), so L0503 must not recommend it.
     fn compound_assign_rejected(&self, target: &LValue, op: crate::AST::BinOp) -> bool {
         if self
             .lvalue_type(target)
-            .is_some_and(|place| compound_operator_undefined(op, &place))
+            .is_some_and(|place| {
+                compound_operator_undefined(op, &place)
+                    || self.compound_missing_struct_hook(op, &place)
+            })
         {
             return true;
         }
@@ -1398,6 +1422,10 @@ impl<'a> Checker<'a> {
                 {
                     if compound_operator_undefined(*compound_op, place) {
                         self.op_mismatch(*compound_op, place, source, *op_span);
+                    } else if self.compound_missing_struct_hook(*compound_op, place) {
+                        if let Type::Named(name) = place.without_user_tags() {
+                            self.report_missing_operator_hook(*compound_op, name, *op_span);
+                        }
                     }
                 }
                 if !is_compound {
