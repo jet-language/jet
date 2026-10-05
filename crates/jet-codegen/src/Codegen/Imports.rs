@@ -1585,6 +1585,7 @@ pub(crate) struct NestedFileCall {
     function: String,
     params: Vec<(AccessConvention, Type)>,
     ret: Option<Type>,
+    generic: Option<ImportedGenericFunction>,
 }
 
 /// Resolve the dotted free calls `module_idx` actually makes. Only names that
@@ -1638,6 +1639,7 @@ pub(crate) fn nested_file_calls(bundle: &ProgramBundle, module_idx: usize) -> Ve
                 function: function.name.clone(),
                 params,
                 ret,
+                generic: imported_generic_function(bundle, target, function),
             });
         }
     }
@@ -1941,14 +1943,16 @@ pub(crate) fn import_sig_map(
         }
     }
     for call in nested {
-        map.insert(
-            (call.name.clone(), call.function.clone()),
-            call.params.clone(),
-        );
+        let key = (call.name.clone(), call.function.clone());
+        if let Some(generic) = &call.generic {
+            generics.insert(key.clone(), generic.clone());
+        }
+        map.insert(key, call.params.clone());
     }
     // D-MOD4: re-exported items (`pub use sub.Item`) must carry the *real*
     // function's parameter conventions under the re-exporting alias, or calls
     // through the re-export would pass by value where a borrow is expected.
+
     for ((alias, item), (real_mod, real_fn)) in reexport_call_map(bundle, module_idx) {
         let stem = crate::Syntax::generated_suffix(&real_mod);
         if let Some((real_idx, real)) = bundle
@@ -1962,6 +1966,9 @@ pub(crate) fn import_sig_map(
                     if f.name == real_fn
                         && bundle.name_ledger.visible(module_idx, real_idx, &f.name)
                     {
+                        if let Some(generic) = imported_generic_function(bundle, real_idx, f) {
+                            generics.insert((alias.clone(), item.clone()), generic);
+                        }
                         map.insert(
                             (alias.clone(), item.clone()),
                             f.params

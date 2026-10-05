@@ -2164,13 +2164,18 @@ impl<'a> Checker<'a> {
         let Some(owner) = self.struct_owner_module(leaf, import_ns) else {
             return self.trait_reg.implements_trait(type_name, trait_name);
         };
-        if owner == self.module_idx {
-            self.trait_reg.implements_trait(leaf, trait_name)
+        let state = self.modules.and_then(|modules| modules.get(owner));
+        let registry = if owner == self.module_idx {
+            self.trait_reg
+        } else if let Some(state) = state {
+            &state.trait_reg
         } else {
-            self.modules
-                .and_then(|modules| modules.get(owner))
-                .is_some_and(|module| module.trait_reg.implements_trait(leaf, trait_name))
-        }
+            return false;
+        };
+        registry.implements_trait(leaf, trait_name)
+            || (trait_name == crate::Syntax::TRAIT_CLOSE
+                && state.is_some_and(|state| state.module_path.starts_with("<corelib>/"))
+                && registry.synthetic_close_types.contains(leaf))
     }
 
     pub(crate) fn capability_type_context(
