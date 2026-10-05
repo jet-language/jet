@@ -305,7 +305,7 @@ impl<D: Send> JetDbPoolInner<D> {
                         if lifecycle != .Open -> return Err(Self.state_error(lifecycle))
                         if expired -> return Err(jet_db_pool_error("database pool acquisition deadline exceeded"))
                         state = self.lock_state()
-                        continue
+                        next
                     }
                     if state.reserved() < state.max {
                         if ticket.take() == Some(ticket) -> state.claim_waiter(ticket)
@@ -385,7 +385,7 @@ impl<D: Send> JetDbPoolInner<D> {
                         Err(poisoned) -> poisoned.into_inner()
                     }
                     drop(^state)
-                    continue
+                    next
                 }
                 drop(^state)
                 lease :: self.acquire(None)?
@@ -436,7 +436,7 @@ impl<D: Send> JetDbPoolInner<D> {
                             drop(^state)
                             loop driver in close_now -> self.close_driver(^driver)
                             self.wake.notify_all()
-                            continue
+                            next
                         }
                     }
                     None -> {
@@ -449,7 +449,7 @@ impl<D: Send> JetDbPoolInner<D> {
                             drop(^state)
                             loop driver in close_now -> self.close_driver(^driver)
                             self.wake.notify_all()
-                            continue
+                            next
                         }
                     }
                 }

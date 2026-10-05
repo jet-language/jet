@@ -503,7 +503,7 @@ fn jet_raylib_window_open(width: I64, height: I64, title: &String) -> RaylibWind
     // GATE #4565: kernel primitive
     #Unsafe("native raylib initialization uses a live C title buffer and publishes window state sequentially") {
         if jet_raylib_display_enabled() {
-            if Val(api) :: jet_raylib_api() {
+            if jet_raylib_api() == .Val(api) {
                 title_c :: jet_raylib_cstring(title)
                 (api.init_window)(width as I32, height as I32, title_c.as_ptr())
                 JET_RAYLIB_WINDOW_OPEN.store(true, Ordering.SeqCst)
@@ -521,7 +521,7 @@ fn jet_raylib_window_open(width: I64, height: I64, title: &String) -> RaylibWind
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:804
 fn jet_raylib_window_should_close(window: &RaylibWindow) -> Bool {
     if window.native {
-        if Val(api) :: jet_raylib_api() {
+        if jet_raylib_api() == .Val(api) {
             // GATE #4565: kernel primitive
             return #Unsafe("loaded raylib close predicate takes no arguments") { (api.window_should_close)() }
         }
@@ -533,14 +533,14 @@ fn jet_raylib_window_ready(window: &RaylibWindow) -> Bool { window.native }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:818
 fn jet_raylib_begin_drawing(window: &RaylibWindow) -> {
     if window.native {
-        if Val(api) :: jet_raylib_api() {
+        if jet_raylib_api() == .Val(api) {
             // GATE #4565: kernel primitive
             #Unsafe("bridge-owned window establishes drawing context and atomically increments frame identity") {
                 (api.begin_drawing)()
                 frame_index :: JET_RAYLIB_FRAME_INDEX.fetch_add(1, Ordering.SeqCst) + 1
                 width :: window.width.clamp(1, I32.MAX as I64) as U32
                 height :: window.height.clamp(1, I32.MAX as I64) as U32
-                for command in jet_devtools_native_frame_begin(frame_index, width, height) { jet_raylib_draw_native_command(&command) }
+                loop command in jet_devtools_native_frame_begin(frame_index, width, height) { jet_raylib_draw_native_command(&command) }
             }
         }
     }
@@ -550,7 +550,7 @@ fn jet_raylib_clear_background(color: &RaylibColor) -> {
     // GATE #4565: kernel primitive
     #Unsafe("live raylib window accepts the C color mirror") {
         if JET_RAYLIB_WINDOW_OPEN.load(Ordering.SeqCst) {
-            if Val(api) :: jet_raylib_api() -> (api.clear_background)(jet_raylib_c_color(color))
+            if jet_raylib_api() == .Val(api) -> (api.clear_background)(jet_raylib_c_color(color))
         }
     }
 }
@@ -559,7 +559,7 @@ fn jet_raylib_draw_text(text: &String, x: I64, y: I64, size: I64, color: &Raylib
     // GATE #4565: kernel primitive
     #Unsafe("record text then invoke raylib with a call-lifetime C string and C color") {
         if JET_RAYLIB_WINDOW_OPEN.load(Ordering.SeqCst) {
-            if Val(api) :: jet_raylib_api() {
+            if jet_raylib_api() == .Val(api) {
                 jet_devtools_native_draw(.Text{text: text.clone(), x: x as I32, y: y as I32, size: size as I32, color: jet_raylib_native_color(color)})
                 text_c :: jet_raylib_cstring(text)
                 (api.draw_text)(text_c.as_ptr(), x as I32, y as I32, size as I32, jet_raylib_c_color(color))
@@ -572,7 +572,7 @@ fn jet_raylib_draw_rectangle(x: I64, y: I64, width: I64, height: I64, color: &Ra
     // GATE #4565: kernel primitive
     #Unsafe("record rectangle then draw integer geometry with the C color mirror") {
         if JET_RAYLIB_WINDOW_OPEN.load(Ordering.SeqCst) {
-            if Val(api) :: jet_raylib_api() {
+            if jet_raylib_api() == .Val(api) {
                 jet_devtools_native_draw(.Rectangle{x: x as I32, y: y as I32, width: width as I32, height: height as I32, color: jet_raylib_native_color(color)})
                 (api.draw_rectangle)(x as I32, y as I32, width as I32, height as I32, jet_raylib_c_color(color))
             }
@@ -584,7 +584,7 @@ fn jet_raylib_end_drawing() -> {
     // GATE #4565: kernel primitive
     #Unsafe("end drawing only for the bridge-owned live raylib window") {
         if JET_RAYLIB_WINDOW_OPEN.load(Ordering.SeqCst) {
-            if Val(api) :: jet_raylib_api() {
+            if jet_raylib_api() == .Val(api) {
                 (api.end_drawing)()
                 jet_devtools_native_frame_end()
             }
@@ -594,7 +594,7 @@ fn jet_raylib_end_drawing() -> {
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:903
 fn jet_raylib_close_window(window: &RaylibWindow) -> {
     if window.native {
-        if Val(api) :: jet_raylib_api() {
+        if jet_raylib_api() == .Val(api) {
             // GATE #4565: kernel primitive
             #Unsafe("close bridge-owned raylib window and publish closed state before devtools notification") {
                 (api.close_window)()
@@ -624,7 +624,7 @@ fn jet_raylib_key_down(name: &String) -> Bool {
     // GATE #4565: kernel primitive
     #Unsafe("sample native key only for a live window; consumed debugger input is not gameplay input") {
         if JET_RAYLIB_WINDOW_OPEN.load(Ordering.SeqCst) {
-            if Val(api) :: jet_raylib_api() {
+            if jet_raylib_api() == .Val(api) {
                 pressed :: (api.is_key_down)(key)
                 if jet_devtools_native_input(.Key{code: name.clone(), pressed}) -> return false
                 return pressed
@@ -645,8 +645,8 @@ fn jet_raylib_gamepad_down(gamepad: I64, button: &String) -> Bool {
     // GATE #4565: kernel primitive
     #Unsafe("validated gamepad and button codes call the optional native function; debugger consumption wins") {
         if JET_RAYLIB_WINDOW_OPEN.load(Ordering.SeqCst) {
-            if Val(api) :: jet_raylib_api() {
-                if Val(is_gamepad_button_down) :: api.is_gamepad_button_down {
+            if jet_raylib_api() == .Val(api) {
+                if api.is_gamepad_button_down == .Val(is_gamepad_button_down) {
                     pressed :: is_gamepad_button_down(gamepad, button_code)
                     if jet_devtools_native_input(.Gamepad{gamepad: gamepad as I64, control: button.clone(), pressed}) -> return false
                     return pressed
@@ -664,8 +664,8 @@ fn jet_raylib_gamepad_axis(gamepad: I64, axis: &String) -> F64 {
     // GATE #4565: kernel primitive
     #Unsafe("validated gamepad and axis query the optional native axis function") {
         if JET_RAYLIB_WINDOW_OPEN.load(Ordering.SeqCst) {
-            if Val(api) :: jet_raylib_api() {
-                if Val(get_gamepad_axis_movement) :: api.get_gamepad_axis_movement -> return get_gamepad_axis_movement(gamepad, axis) as F64
+            if jet_raylib_api() == .Val(api) {
+                if api.get_gamepad_axis_movement == .Val(get_gamepad_axis_movement) -> return get_gamepad_axis_movement(gamepad, axis) as F64
             }
         }
     }
@@ -676,7 +676,7 @@ fn jet_raylib_set_target_fps(fps: I64) -> {
     // GATE #4565: kernel primitive
     #Unsafe("set bounded target FPS only on the live bridge-owned window") {
         if JET_RAYLIB_WINDOW_OPEN.load(Ordering.SeqCst) {
-            if Val(api) :: jet_raylib_api() {
+            if jet_raylib_api() == .Val(api) {
                 fps :: fps.clamp(1, 240) as I32
                 (api.set_target_fps)(fps)
             }

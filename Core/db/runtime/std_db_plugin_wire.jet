@@ -194,7 +194,7 @@ impl JetDbQueryMetadata {
         if source_end < source_start { return Err(DBError{message: "database metadata source span is inverted"}) }
         if table_count > DB_MAX_METADATA_TABLES { return Err(DBError{message: "database metadata table count exceeds the limit"}) }
         table_facts := [].with_capacity(table_count)
-        for i in 0..<table_count {
+        loop i in 0..<table_count {
             table_id :: db_read_metadata_field(bytes, &pos)?
             read :: match db_read_metadata_field(bytes, &pos)?.as_str() {
                 "1" -> true, "0" -> false, _ -> return Err(DBError{message: "database metadata read flag is invalid"}),
@@ -270,7 +270,7 @@ fn db_sql_tokens(sql: &String) -> [(Usize, Usize, String)] {
                     }
                 } else { i += 1 }
             }
-            continue
+            next
         }
         if bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_' {
             start :: i
@@ -303,7 +303,7 @@ fn db_sql_contains_comment(sql: &String) -> Bool {
                     }
                 } else { i += 1 }
             }
-            continue
+            next
         }
         if bytes.get(i..<i + 2) == Val(b"--") || bytes.get(i..<i + 2) == Val(b"/*") || bytes.get(i..<i + 2) == Val(b"*/") { return true }
         i += 1
@@ -324,10 +324,10 @@ fn db_sql_target_table(tokens: &[(Usize, Usize, String)], kind: &String) -> Stri
 // Deterministic relation footprint, shared with transaction invalidation.
 pub fn jet_db_write_set(steps: &[SQL]) -> String {
     tables := BTreeSet.new()
-    for sql in steps {
+    loop sql in steps {
         trimmed := sql.0.trim() // #4303
         tokens :: db_sql_tokens(trimmed)
-        kind :: match tokens.first() { Val(token) -> &token.2, None -> continue }
+        kind :: match tokens.first() { Val(token) -> &token.2, None -> next }
         table :: match kind.as_str() {
             "insert" -> db_sql_target_table(&tokens, kind),
             "update" -> db_sql_target_table(&tokens, kind),
@@ -348,7 +348,7 @@ pub fn jet_db_write_set(steps: &[SQL]) -> String {
             },
             _ -> None,
         }
-        if Val(table) :: table { _ :: tables.insert(^table) }
+        if table == .Val(table) { _ :: tables.insert(^table) }
     }
     tables.into_iter().collect().join(",")
 }
@@ -437,7 +437,7 @@ fn db_sql_placeholder_count(sql: &String) -> Usize {
                 None
             },
         }
-        quote :: match quote { Val(value) -> value, None -> continue }
+        quote :: match quote { Val(value) -> value, None -> next }
         i += 1
         loop {
             if i >= bytes.len() { break }
@@ -581,7 +581,7 @@ fn db_encode_tagged(tag: Char, payload: &String) -> String { "{tag}{payload.len(
 fn db_hex_encode(bytes: &[U8]) -> String {
     const HEX: [U8#16] = b"0123456789abcdef"
     out := String.with_capacity(bytes.len() * 2)
-    for byte in bytes {
+    loop byte in bytes {
         out.push(HEX[(byte >> 4) as Usize] as Char)
         out.push(HEX[(byte & 0x0f) as Usize] as Char)
     }
@@ -592,7 +592,7 @@ pub fn jet_db_encode_params(params: &[DBValue]) -> String {
     out := String.new()
     out.push_str(params.len().to_string())
     out.push(':')
-    for value in params {
+    loop value in params {
         out.push_str(match value {
             .Null -> db_encode_tagged('N', ""),
             .Int(n) -> db_encode_tagged('I', n.to_string()),
@@ -651,13 +651,13 @@ fn db_decode_plan(payload: &String) -> [JetDbQueryPlanFact] DBError! {
     if count > DB_MAX_PLAN_ROWS { return Err(DBError{message: "database runtime plan row count exceeds the limit"}) }
     pos := colon + 1
     plan := [JetDbQueryPlanFact].with_capacity(count)
-    for _ in 0..<count {
+    loop _ in 0..<count {
         ordinal := None
         parent := None
         operation := None
         relation := None
         index := None
-        for _ in 0..<5 {
+        loop _ in 0..<5 {
             (tag, value) :: db_read_tagged(bytes, &pos).map_err(fn(message) { DBError{message: ^message} })?
             match tag {
                 'I' if ordinal.is_none() -> { ordinal = Val(db_runtime_number(&value, "plan ordinal")?) },
@@ -685,7 +685,7 @@ fn db_observed_error(wire: &String) -> DBError? {
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/DBPluginWire.rs:1200
 pub fn jet_db_decode_observed_query_result(wire: &String) -> ([JetDBRow], JetDbQueryRuntimeFacts) DBError! {
     if wire.len() > DB_MAX_WIRE_BYTES { return Err(DBError{message: "database observed query exceeds the wire-size limit"}) }
-    if Val(error) :: db_observed_error(wire) { return Err(^error) }
+    if db_observed_error(wire) == .Val(error) { return Err(^error) }
     body :: wire.strip_prefix("Q:").ok_or_else(fn() { DBError{message: "database observed query has an unknown envelope"} })?
     bytes :: body.as_bytes()
     pos := 0
@@ -714,7 +714,7 @@ pub fn jet_db_decode_observed_query_result(wire: &String) -> ([JetDBRow], JetDbQ
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/DBPluginWire.rs:1272
 pub fn jet_db_decode_observed_execute_result(wire: &String) -> (I64, JetDbQueryRuntimeFacts) DBError! {
     if wire.len() > DB_MAX_WIRE_BYTES { return Err(DBError{message: "database observed execute exceeds the wire-size limit"}) }
-    if Val(error) :: db_observed_error(wire) { return Err(^error) }
+    if db_observed_error(wire) == .Val(error) { return Err(^error) }
     body :: wire.strip_prefix("X:").ok_or_else(fn() { DBError{message: "database observed execute has an unknown envelope"} })?
     bytes :: body.as_bytes()
     pos := 0
@@ -739,7 +739,7 @@ pub fn jet_db_decode_observed_execute_result(wire: &String) -> (I64, JetDbQueryR
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/DBPluginWire.rs:1337
 pub fn jet_db_decode_explain_result(wire: &String) -> JetDbExplainRuntimeFacts DBError! {
     if wire.len() > DB_MAX_WIRE_BYTES { return Err(DBError{message: "database EXPLAIN exceeds the wire-size limit"}) }
-    if Val(error) :: db_observed_error(wire) { return Err(^error) }
+    if db_observed_error(wire) == .Val(error) { return Err(^error) }
     body :: wire.strip_prefix("Y:").ok_or_else(fn() { DBError{message: "database EXPLAIN has an unknown envelope"} })?
     bytes :: body.as_bytes()
     pos := 0
@@ -805,7 +805,7 @@ pub fn jet_db_decode_query_result(wire: &String) -> [JetDBRow] DBError! {
     if row_count > DB_MAX_ROWS { return Err(DBError{message: "database row count exceeds the wire limit"}) }
     pos := colon + 1
     rows := [JetDBRow].with_capacity(row_count)
-    for _ in 0..<row_count {
+    loop _ in 0..<row_count {
         row_start :: pos
         col_colon :: bytes.get(pos..).and_then(fn(rest) { rest.iter().position(fn(byte) { *byte == b':' }) })
             .ok_or_else(fn() { DBError{message: "database row is missing its column-count delimiter"} })?
@@ -814,7 +814,7 @@ pub fn jet_db_decode_query_result(wire: &String) -> [JetDBRow] DBError! {
         if col_count > DB_MAX_COLUMNS { return Err(DBError{message: "database column count exceeds the wire limit"}) }
         pos += col_colon + 1
         row := JetDBRow.new()
-        for _ in 0..<col_count {
+        loop _ in 0..<col_count {
             (tag, name) :: db_read_tagged(bytes, &pos).map_err(fn(message) { DBError{message: ^message} })?
             if tag != 'C' { return Err(DBError{message: "database row column has an invalid tag"}) }
             (vtag, vpayload) :: db_read_tagged(bytes, &pos).map_err(fn(message) { DBError{message: ^message} })?
@@ -834,7 +834,7 @@ pub fn jet_db_first_row(rows: [JetDBRow]) -> JetOutcome<JetDBRow, JetAbsent> {
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/DBPluginWire.rs:1544
 pub fn jet_db_decode_execute_result(wire: &String) -> I64 DBError! {
     if wire.len() > DB_MAX_WIRE_BYTES { return Err(DBError{message: "database execute result exceeds the wire-size limit"}) }
-    if Val(n) :: wire.strip_prefix("O:") {
+    if wire.strip_prefix("O:") == .Val(n) {
         count :: n.parse<I64>().map_err(fn(error) { DBError{message: "database affected-row count is invalid"} })?
         if count < 0 { return Err(DBError{message: "database affected-row count is negative"}) }
         return Ok(count)
@@ -930,11 +930,11 @@ pub struct JetMigrationState {
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/DBPluginWire.rs:1728
 fn db_hash_field(hash: &U64, value: &String) -> {
-    for byte in (value.len() as U64).to_le_bytes() {
+    loop byte in (value.len() as U64).to_le_bytes() {
         *hash ^= byte as U64
         *hash = hash.wrapping_mul(0x100000001b3)
     }
-    for byte in value.as_bytes() {
+    loop byte in value.as_bytes() {
         *hash ^= *byte as U64
         *hash = hash.wrapping_mul(0x100000001b3)
     }
@@ -960,7 +960,7 @@ fn db_hash_value(hash: &U64, value: &DBValue) -> {
         .Bool(value) -> db_hash_field(hash, if *value { "B1" } else { "B0" }),
         .Blob(value) -> {
             db_hash_field(hash, "X")
-            for byte in value {
+            loop byte in value {
                 *hash ^= *byte as U64
                 *hash = hash.wrapping_mul(0x100000001b3)
             }
@@ -979,8 +979,8 @@ fn db_hash_sql(hash: &U64, sql: &SQL) -> {
 // D-TYPEDSQL-SINK1=A: preserve public db.migrate(name, steps) checksum identity.
 pub fn jet_db_migration_checksum(steps: &[SQL]) -> String {
     hash: U64 := 0xcbf29ce484222325
-    for sql in steps {
-        for b in sql.0.as_bytes() {
+    loop sql in steps {
+        loop b in sql.0.as_bytes() {
             hash ^= *b as U64
             hash = hash.wrapping_mul(0x100000001b3)
         }
@@ -992,7 +992,7 @@ pub fn jet_db_migration_checksum(steps: &[SQL]) -> String {
                 .Text(value) -> "T{value}", .Bool(value) -> "B{if *value { 1 } else { 0 }}",
                 .Blob(value) -> "X{db_hex_encode(value)}",
             }
-            for b in encoded.as_bytes() {
+            loop b in encoded.as_bytes() {
                 hash ^= *b as U64
                 hash = hash.wrapping_mul(0x100000001b3)
             }
@@ -1030,7 +1030,7 @@ pub fn jet_db_migration_request_checksum(request: &JetMigrationRequest) -> Strin
         db_hash_field(&hash, step.lock.as_str())
         db_hash_field(&hash, &step.risk)
         db_hash_sql(&hash, &step.sql)
-        if Val(inverse) :: &step.inverse_sql {
+        if (&step.inverse_sql) == .Val(inverse) {
             db_hash_field(&hash, "inverse")
             db_hash_sql(&hash, inverse)
         }
@@ -1164,42 +1164,42 @@ fn db_migration_state_from_rows(query: &JetMigrationStateRequest, rows: &[JetMig
     db_hash_field(&hash, &query.target_identity)
     db_hash_field(&hash, &query.database_identity)
     db_hash_field(&hash, &query.source_identity)
-    for row in rows {
+    loop row in rows {
         receipt :: &row.outcome
-        if receipt.target != query.target { continue }
+        if receipt.target != query.target { next }
         receipts.push(receipt.clone())
         db_hash_field(&hash, &row.transition_key)
         db_hash_field(&hash, &receipt.checksum)
         if receipt.target_identity != query.target_identity {
             drift.push("migration transition `{row.transition_key}` has a foreign target identity")
-            continue
+            next
         }
         if receipt.database_identity != query.database_identity {
             drift.push("migration transition `{row.transition_key}` has a foreign database identity")
-            continue
+            next
         }
         if receipt.source_identity != query.source_identity {
             drift.push("migration transition `{row.transition_key}` was created from a different migration catalog")
-            continue
+            next
         }
         if receipt.schema_identity != query.schema_identity {
             drift.push("migration transition `{row.transition_key}` has a mismatched schema identity")
-            continue
+            next
         }
         if receipt.step_count != receipt.step_ids.len() {
             drift.push("migration transition `{row.transition_key}` has an invalid step count")
-            continue
+            next
         }
         if receipt.status != "applied" {
             drift.push("migration transition `{row.transition_key}` has unresolved status `{receipt.status}`")
-            continue
+            next
         }
         match JetMigrationOperation.parse(&receipt.operation) {
             Ok(.Direct) -> {},
             Ok(.Apply | .Rollback) -> {
                 if receipt.from_version != current_version {
                     drift.push("migration transition `{row.transition_key}` starts at {receipt.from_version}, but canonical state is at {current_version}")
-                    continue
+                    next
                 }
                 current_version = receipt.to_version
             },
@@ -1283,7 +1283,7 @@ pub fn jet_db_migration_request<B: JetDBBackend>(backend: &B, request: &JetMigra
     }
     checksum :: jet_db_migration_request_checksum(request)
     latest :: rows.iter().filter(fn(row) { row.migration_key == request.migration_key && row.outcome.target == request.target }).next_back()
-    if Val(previous) :: latest {
+    if latest == .Val(previous) {
         if previous.outcome.status == "applied" && previous.outcome.operation == request.operation.as_str() {
             if previous.outcome.checksum == checksum {
                 if backend.commit() {
@@ -1352,7 +1352,7 @@ pub trait JetDBBackend {
 pub fn jet_db_transaction<B: JetDBBackend>(backend: &B, label: &String, steps: &[SQL]) -> I64 DBError! {
     if !backend.begin() { return Err(DBError{message: "could not begin transaction: {label}"}) }
     done: I64 := 0
-    for sql in steps {
+    loop sql in steps {
         match backend.execute(sql, false) {
             Ok(value) -> { done += 1 },
             Err(error) -> {
