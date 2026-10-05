@@ -128,7 +128,10 @@ fn jet_http2_serve_inner(stream: &JetHTTP2Transport, mux: &JetHTTPMux, options: 
             _ :: stream_receive_windows.remove(&id)
         }
         frame :: match jet_http2_read_frame(stream) {
-            Ok(frame) -> { last_activity = Instant.now(); ^frame }
+            Ok(frame) -> {
+                last_activity = Instant.now()
+                ^frame
+            }
             Err(error) if error == "HTTP/2 read timed out" -> {
                 now :: Instant.now()
                 if going_away { continue }
@@ -184,7 +187,10 @@ fn jet_http2_serve_inner(stream: &JetHTTP2Transport, mux: &JetHTTPMux, options: 
                     *last_stream = frame.stream
                 }
                 offset := 0
-                padding :: if frame.flags & 0x8 != 0 { offset = 1; USize{*frame.payload.first().ok_or_else(fn() { "HTTP/2 padded HEADERS is empty" })?} } else { 0 }
+                padding :: if frame.flags & 0x8 != 0 {
+                    offset = 1
+                    USize{*frame.payload.first().ok_or_else(fn() { "HTTP/2 padded HEADERS is empty" })?}
+                } else { 0 }
                 if frame.flags & 0x20 != 0 { offset += 5 }
                 if offset + padding > frame.payload.len() { return Err("HTTP/2 HEADERS padding is invalid") }
                 block := frame.payload[offset..frame.payload.len() - padding].to_vec()
@@ -326,7 +332,10 @@ impl<R: Read> Read for JetHTTPContinueReader<R> {
     fn read(self: &Self, output: &[U8]) -> USize Error! {
         remaining :: jet_http_body_deadline_remaining(self.deadline)?
         if Val(stream) :: self.timeout_stream.as_ref() { stream.set_read_timeout(Val(remaining))? }
-        if Val(stream) :: self.stream.take() { Write.write_all(&stream, b"HTTP/1.1 100 Continue\r\n\r\n")?; Write.flush(&stream)? }
+        if Val(stream) :: self.stream.take() {
+            Write.write_all(&stream, b"HTTP/1.1 100 Continue\r\n\r\n")?
+            Write.flush(&stream)?
+        }
         Read.read(&self.inner, output)
     }
 }
@@ -378,7 +387,10 @@ impl JetHTTPChunkedSocketReader {
                 byte := [0u8; 1]
                 self.read_exact_framing(&byte)?
                 line.push(byte[0])
-                if line.ends_with(b"\r\n") { line.truncate(line.len() - 2); break }
+                if line.ends_with(b"\r\n") {
+                    line.truncate(line.len() - 2)
+                    break
+                }
             }
             if line.is_empty() {
                 *self.trailers.lock().map_err(fn(_) { Self.invalid("request trailer lock failed") })? = ^trailers
@@ -406,7 +418,11 @@ impl Read for JetHTTPChunkedSocketReader {
             }
             self.remaining = self.next_size()?
             self.decoded = self.decoded.checked_add(self.remaining).filter(fn(decoded) { decoded <= self.limit }).ok_or_else(fn() { Error.new(ErrorKind.OutOfMemory, "request body is too large") })?
-            if self.remaining == 0 { self.read_trailers()?; self.done = true; return Ok(0) }
+            if self.remaining == 0 {
+                self.read_trailers()?
+                self.done = true
+                return Ok(0)
+            }
         }
         wanted :: output.len().min(self.remaining)
         remaining :: jet_http_body_deadline_remaining(self.deadline)?
@@ -481,7 +497,7 @@ fn jet_http_srv_read_streaming(stream: &TcpStream, options: &JetHTTPServerOption
     } else { None }
     trailers :: Arc.new(Mutex.new(JetHTTPHeaders.new()))
     body :: match framing {
-        JetHTTPRequestFraming.ContentLength(length) -> {
+        .ContentLength(length) -> {
             if length > options.max_body_bytes { return Err(JetHTTPReadError{status: 413, message: "request body is too large"}) }
             JetHTTPBody.reader(JetHTTPContinueReader{inner: body_stream.take(length as U64), stream: ^continue_stream, timeout_stream: Val(^timeout_stream), deadline: body_deadline}, Val(length))
         }
@@ -491,7 +507,10 @@ fn jet_http_srv_read_streaming(stream: &TcpStream, options: &JetHTTPServerOption
         }, None)
     }
     body :: jet_http_decode_request_body(^body, content_encoding_layers, options.max_body_bytes)?
-    if content_encoding_layers > 0 { headers.remove("content-encoding"); headers.remove("content-length") }
+    if content_encoding_layers > 0 {
+        headers.remove("content-encoding")
+        headers.remove("content-length")
+    }
     Ok(Val((JetHTTPRequest.server_body_with_trailers(&method, ^target, ^body, ^headers, ^trailers), ^version)))
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:4149
@@ -581,7 +600,7 @@ fn jet_http_srv_read_buffered(stream: &TcpStream, options: &JetHTTPServerOptions
             }
             body_start :: header_end + 4
             request_end :: match head.framing {
-                JetHTTPRequestFraming.ContentLength(content_len) -> {
+                .ContentLength(content_len) -> {
                     if content_len > options.max_body_bytes { return Err(JetHTTPReadError{status: 413, message: "request body is too large"}) }
                     request_end :: body_start + content_len
                     if pending.len() >= request_end { Val(request_end) } else { None }
@@ -646,7 +665,10 @@ fn jet_http_srv_request_keep_alive(version: &String, headers: &JetHTTPHeaders) -
     close := false
     keep_alive := false
     for value in headers.all("connection") {
-        for token in jet_http_connection_options(value) { close |= token.eq_ignore_ascii_case("close"); keep_alive |= token.eq_ignore_ascii_case("keep-alive") }
+        for token in jet_http_connection_options(value) {
+            close |= token.eq_ignore_ascii_case("close")
+            keep_alive |= token.eq_ignore_ascii_case("keep-alive")
+        }
     }
     !close && (version == "HTTP/1.1" || version == "HTTP/1.0" && keep_alive)
 }
@@ -723,7 +745,10 @@ fn jet_http_normalize_reg_name(host: &String) -> String {
             normalized.push((bytes[index + 1] as Char).to_ascii_uppercase())
             normalized.push((bytes[index + 2] as Char).to_ascii_uppercase())
             index += 3
-        } else { normalized.push((bytes[index] as Char).to_ascii_lowercase()); index += 1 }
+        } else {
+            normalized.push((bytes[index] as Char).to_ascii_lowercase())
+            index += 1
+        }
     }
     ^normalized
 }
@@ -760,7 +785,10 @@ fn jet_http_path_query_valid(target: &String) -> Bool {
             index += 3
             continue
         }
-        if byte == b'?' { index += 1; continue }
+        if byte == b'?' {
+            index += 1
+            continue
+        }
         allowed :: match byte { b'-' | b'.' | b'_' | b'~' | b'!' | b'$' | b'&' | b'\'' | b'(' | b')' | b'*' | b'+' | b',' | b';' | b'=' | b':' | b'@' | b'/' -> true, _ -> false }
         if !(byte.is_ascii_alphanumeric() || allowed) { return false }
         index += 1
@@ -825,7 +853,10 @@ fn jet_http_chunk_extensions_valid(input: &[U8]) -> Bool {
             loop {
                 (byte, rest) :: input.split_first() ?? break
                 input = rest
-                if *byte == b'"' { closed = true; break }
+                if *byte == b'"' {
+                    closed = true
+                    break
+                }
                 if *byte == b'\\' {
                     (escaped, rest) :: input.split_first() ?? return false
                     if !(*escaped == b'\t' || *escaped == b' ' || escaped.is_ascii_graphic()) { return false }
@@ -1001,7 +1032,7 @@ fn jet_http_srv_parse(raw: &[U8]) -> JetHTTPRequest JetHTTPReadError! {
     head := jet_http_validate_headers(&raw[..sep])?
     encoded_body :: &raw[sep + 4..]
     (body, trailers) :: match head.framing {
-        JetHTTPRequestFraming.ContentLength(content_length) -> {
+        .ContentLength(content_length) -> {
             if content_length > JET_HTTP_MAX_BODY_BYTES { return Err(JetHTTPReadError{status: 413, message: "request body is too large"}) }
             if encoded_body.len() != content_length { return Err(JetHTTPReadError{status: 400, message: "request body does not match content-length"}) }
             (encoded_body.to_vec(), JetHTTPHeaders.new())
@@ -1012,7 +1043,10 @@ fn jet_http_srv_parse(raw: &[U8]) -> JetHTTPRequest JetHTTPReadError! {
     method :: ^head.method
     path :: ^head.target
     headers := ^head.headers
-    if head.content_encoding_layers > 0 { headers.remove("content-encoding"); headers.remove("content-length") }
+    if head.content_encoding_layers > 0 {
+        headers.remove("content-encoding")
+        headers.remove("content-length")
+    }
     // GATE #4565: kernel primitive
     #Unsafe("allocate the sole shared trailer publication owner for this parsed request") {
         Ok(JetHTTPRequest.server_body_with_trailers(&method, ^path, JetHTTPBody.from_bytes(^body), ^headers, Arc.new(Mutex.new(^trailers))))

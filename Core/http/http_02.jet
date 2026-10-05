@@ -41,7 +41,10 @@ fn connect_plain(dns: Arc<Mutex<DNSCache>>, facts: Arc<ResponseFacts>, url: Pars
     connect_started :: Instant.now()
     loop address in addresses {
         if TcpStream.connect_timeout(address, timeout) == {
-            .Ok(stream) -> { set_timing(facts, 1, elapsed_ms(connect_started)); return stream }
+            .Ok(stream) -> {
+                set_timing(facts, 1, elapsed_ms(connect_started))
+                return stream
+            }
             .Err(error) -> { last = if error.kind() == .TimedOut { JetHTTPBridgeError.Timeout } else { JetHTTPBridgeError.Connect } }
         }
     }
@@ -104,7 +107,10 @@ fn http_tls_pem_base64(text: String) -> [U8] JetHTTPBridgeError! {
             else if byte >= 48 && byte <= 57 { vals[j] = byte - 48 + 52 }
             else if byte == 43 { vals[j] = 62 }
             else if byte == 47 { vals[j] = 63 }
-            else if byte == 61 { pad += 1; vals[j] = 0 }
+            else if byte == 61 {
+                pad += 1
+                vals[j] = 0
+            }
             else { return Err(JetHTTPBridgeError.TLS) }
             if byte == 61 && j < 2 -> return Err(JetHTTPBridgeError.TLS)
         }
@@ -202,7 +208,10 @@ pub fn jet_http_client_open_body_count_impl() -> USize {
 }
 // Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:2088
 fn validated_timeout(name: String, milliseconds: I64) -> Duration JetHTTPBridgeError! {
-    ms :: U64.try_from(milliseconds) ?? { _ :: name; return Err(JetHTTPBridgeError.Timeout) }
+    ms :: U64.try_from(milliseconds) ?? {
+        _ :: name
+        return Err(JetHTTPBridgeError.Timeout)
+    }
     Duration.from_millis(ms)
 }
 // Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:2096
@@ -297,7 +306,10 @@ HTTP_FORBIDDEN_REQUEST_HEADERS :: ["host", "content-length", "transfer-encoding"
 // Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:2544
 fn connection_close_value(value: String) -> Bool {
     trimmed := value.trim() // #4303
-    !trimmed.is_empty() && value.split(',').all((item) -> { part := item.trim(); part.eq_ignore_ascii_case("close") })
+    !trimmed.is_empty() && value.split(',').all((item) -> {
+        part := item.trim()
+        part.eq_ignore_ascii_case("close")
+    })
 }
 // Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:2552
 fn validate_request_header(name: String, value: String) -> () JetHTTPBridgeError! {
@@ -401,12 +413,18 @@ fn send_following_redirects_upload(pool: Arc<Mutex<ClientPool>>, namespace: I64,
         }
         cross_origin :: parsed.host != next_parsed.host || parsed.port != next_parsed.port || parsed.scheme != next_parsed.scheme
         if cross_origin || !same_origin_credentials {
-            &headers.retain((pair) -> { name :: pair.0.to_ascii_lowercase(); name != "authorization" && name != "proxy-authorization" && name != "cookie" })
+            &headers.retain((pair) -> {
+                name :: pair.0.to_ascii_lowercase()
+                name != "authorization" && name != "proxy-authorization" && name != "cookie"
+            })
         }
         if (response.status == 301 || response.status == 302 || response.status == 303) && method == "POST" {
             method = "GET"
             body = None
-            &headers.retain((pair) -> { name :: pair.0.to_ascii_lowercase(); name != "content-length" && name != "content-type" })
+            &headers.retain((pair) -> {
+                name :: pair.0.to_ascii_lowercase()
+                name != "content-length" && name != "content-type"
+            })
         } else if (response.status == 307 || response.status == 308) && body == None && redirect_may_replay_body(method) {
             jet_http_client_body_close_impl(response.body_handle)
             return Err(JetHTTPBridgeError.Redirect)
@@ -435,16 +453,25 @@ fn drain_redirect_body(handle: I64) -> {
         if jet_http_client_body_read_impl(handle, 64 * 1024) == {
             .Ok(.Val(bytes)) -> {
                 if total.saturating_add(bytes.len()) <= 1024 * 1024 { total += bytes.len() }
-                else { jet_http_client_body_close_impl(handle); return }
+                else {
+                    jet_http_client_body_close_impl(handle)
+                    return
+                }
             }
             .Ok(.None) -> return
-            else -> { jet_http_client_body_close_impl(handle); return }
+            else -> {
+                jet_http_client_body_close_impl(handle)
+                return
+            }
         }
     }
 }
 // Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:2989
 fn resolve_redirect(base: ParsedUrl, location: String) -> String JetHTTPBridgeError! {
-    if location.starts_with("http://") || location.starts_with("https://") { parse_url(location) ?? return Err(err); return ~location }
+    if location.starts_with("http://") || location.starts_with("https://") {
+        parse_url(location) ?? return Err(err)
+        return ~location
+    }
     if location.starts_with("//") -> return "{base.scheme}:{location}"
     authority :: if (base.scheme == "http" && base.port == 80) || (base.scheme == "https" && base.port == 443) { ~base.host } else { "{base.host}:{base.port}" }
     if location.starts_with('/') -> return "{base.scheme}://{authority}{location}"
@@ -474,7 +501,10 @@ fn no_proxy_matches(list: String, host: String, port: U16) -> Bool {
         name := entry
         entry_port := U16?{None}
         if entry.rsplit_once(':') == .Val(pair) {
-            if U16.parse(pair.1) == .Val(parsed_port) { name = pair.0; entry_port = Val(parsed_port) }
+            if U16.parse(pair.1) == .Val(parsed_port) {
+                name = pair.0
+                entry_port = Val(parsed_port)
+            }
         }
         if entry_port == .Val(expected) && expected != port -> next
         name = name.trim_start_matches('.')
@@ -619,7 +649,10 @@ fn send_once_upload(pool: Arc<Mutex<ClientPool>>, namespace: I64, dns: Arc<Mutex
             set_stream_timeouts(&locked.io, slice, write_timeout, total_deadline) ?? return Err(err)
             polled :: locked.poll_response_headers(stream_id) ?? return Err(err)
             drop(locked)
-            if polled != None { response_headers_result = ^polled; break }
+            if polled != None {
+                response_headers_result = ^polled
+                break
+            }
             thread.yield_now() // GATE #4494
         }
         (status, response_headers, end_stream) :: response_headers_result.unwrap()

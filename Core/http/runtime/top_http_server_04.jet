@@ -58,22 +58,22 @@ fn jet_http_devtools_error_code(error: &HTTPError) -> String {
         HTTPError.InvalidHeader -> "InvalidHeader"
         HTTPError.InvalidStatus -> "InvalidStatus"
         HTTPError.BodyConsumed -> "BodyConsumed"
-        HTTPError.BodyTooLarge(_) -> "BodyTooLarge"
+        .BodyTooLarge(_) -> "BodyTooLarge"
         HTTPError.InvalidFraming -> "InvalidFraming"
         HTTPError.UnsupportedEncoding -> "UnsupportedEncoding"
-        HTTPError.Resolve(_) -> "Resolve"
-        HTTPError.Connect(_) -> "Connect"
-        HTTPError.TLS(_) -> "TLS"
-        HTTPError.Timeout(_) -> "Timeout"
-        HTTPError.Proxy(_) -> "Proxy"
-        HTTPError.Redirect(_) -> "Redirect"
-        HTTPError.Protocol(_) -> "Protocol"
-        HTTPError.IO(_) -> "IO"
-        HTTPError.Policy(_) -> "Policy"
+        .Resolve(_) -> "Resolve"
+        .Connect(_) -> "Connect"
+        .TLS(_) -> "TLS"
+        .Timeout(_) -> "Timeout"
+        .Proxy(_) -> "Proxy"
+        .Redirect(_) -> "Redirect"
+        .Protocol(_) -> "Protocol"
+        .IO(_) -> "IO"
+        .Policy(_) -> "Policy"
         HTTPError.Cancelled -> "Cancelled"
-        HTTPError.ResourceUnavailable(_) -> "ResourceUnavailable"
-        HTTPError.UnsupportedTarget(_) -> "UnsupportedTarget"
-        HTTPError.Internal(_) -> "Internal"
+        .ResourceUnavailable(_) -> "ResourceUnavailable"
+        .UnsupportedTarget(_) -> "UnsupportedTarget"
+        .Internal(_) -> "Internal"
     }
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:5313
@@ -315,7 +315,7 @@ fn jet_http_srv_internal_response() -> JetHTTPResponse {
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:5648
 fn jet_http_srv_error_response(error: HTTPError) -> JetHTTPResponse {
     match error {
-        HTTPError.BodyTooLarge(_) -> jet_http_srv_empty_response(413)
+        .BodyTooLarge(_) -> jet_http_srv_empty_response(413)
         HTTPError.InvalidFraming -> jet_http_srv_empty_response(400)
         HTTPError.UnsupportedEncoding -> jet_http_srv_empty_response(415)
         _ -> jet_http_srv_internal_response()
@@ -372,8 +372,11 @@ fn jet_http_srv_write_bytes_response(writer: &impl Write, header: &String, body:
     state := body.state.lock().map_err(fn(_) { HTTPError.Internal("http-body-lock") })?
     source :: state.source.take() ?? return Ok(None)
     reader :: match source {
-        JetHTTPBodySource.Bytes(reader) -> ^reader
-        _ -> { state.source = Val(^source); return Ok(None) }
+        .Bytes(reader) -> ^reader
+        _ -> {
+            state.source = Val(^source)
+            return Ok(None)
+        }
     }
     position :: reader.position()
     bytes :: reader.into_inner()
@@ -891,7 +894,7 @@ fn jet_http_cors_policy_defaulted(origins: &JetHTTPCorsOrigins, methods: &[Strin
 fn jet_http_cors_allow_origin(policy: &JetHTTPCorsPolicy, origin: &String) -> String? {
     match &policy.origins {
         JetHTTPCorsOrigins.Any -> Val("*")
-        JetHTTPCorsOrigins.List(list) -> list.iter().any(fn(allowed) { allowed == origin }).then(fn() { origin.clone() })
+        .List(list) -> list.iter().any(fn(allowed) { allowed == origin }).then(fn() { origin.clone() })
     }
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:6428
@@ -924,14 +927,14 @@ fn jet_http_request_context_deadline(request: JetHTTPRequest, budget_ms: I64, ne
     loop {
         if Val(result) :: join.try_recv() {
             return match result {
-                JetSchedulerResult.Value(response) -> ^response
+                .Value(response) -> ^response
                 JetSchedulerResult.Cancelled -> Err(HTTPError.Cancelled)
-                JetSchedulerResult.Panicked(_) -> {
+                .Panicked(_) -> {
                     request_id :: jet_http_devtools_request_id(&request_for_error)
                     jet_http_devtools_publish_exception_code(&request_id, "panic")
                     Ok(jet_http_srv_internal_response())
                 }
-                JetSchedulerResult.Deadline(rendered) -> Ok(jet_http_request_deadline_response(&request_for_error, &rendered))
+                .Deadline(rendered) -> Ok(jet_http_request_deadline_response(&request_for_error, &rendered))
             }
         }
         if jet_scheduler_wait_point_cancelled() {
@@ -1233,7 +1236,10 @@ fn jet_http_serve<F: Fn(JetHTTPRequest) -> JetHTTPResponse + Send + Sync>(addr: 
     loop {
         (stream, _peer) := match listener.accept() {
             Ok(x) -> ^x
-            Err(e) -> { eprintln("E2801: Accept failed: {e}"); continue }
+            Err(e) -> {
+                eprintln("E2801: Accept failed: {e}")
+                continue
+            }
         }
         h :: handler.clone()
         std.thread.spawn(fn() {

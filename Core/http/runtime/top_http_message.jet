@@ -522,7 +522,10 @@ impl Iterator for JetHTTPBodyChunks {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:749
     #Unsafe("read owned native source and release-publish EOF drain state")
     fn next(self: &Self) -> Self.Item? {
-        if Val(error) :: self.initial_error.take() { self.done = true; return Val(Err(^error)) }
+        if Val(error) :: self.initial_error.take() {
+            self.done = true
+            return Val(Err(^error))
+        }
         if self.done -> return None
         bridge :: match &self.source { .Bridge{handle, read, ..} -> Val((*handle, *read)), _ -> None }
         if Val((handle, read)) :: bridge {
@@ -534,7 +537,10 @@ impl Iterator for JetHTTPBodyChunks {
                     self.drained.store(true, Ordering.Release)
                     None
                 }
-                Err(error) -> { self.done = true; Val(Err(^error)) }
+                Err(error) -> {
+                    self.done = true
+                    Val(Err(^error))
+                }
             }
         }
         chunk := [U8].repeat(0, self.max_chunk)
@@ -551,7 +557,10 @@ impl Iterator for JetHTTPBodyChunks {
                 self.drained.store(true, Ordering.Release)
                 None
             }
-            Ok(read) -> { chunk.truncate(read); Val(Ok(^chunk)) }
+            Ok(read) -> {
+                chunk.truncate(read)
+                Val(Ok(^chunk))
+            }
             Err(error) -> {
                 self.done = true
                 // GATE #4409: preserve exact native IO error-kind distinctions.

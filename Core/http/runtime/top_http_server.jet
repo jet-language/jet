@@ -243,7 +243,10 @@ fn jet_http_deflate_decode(input: &[U8], output: &[U8], member_start: Usize, lim
                 }
             }
         }
-        if final_block { bits.align(); return Ok(bits.bit / 8) }
+        if final_block {
+            bits.align()
+            return Ok(bits.bit / 8)
+        }
     }
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:335
@@ -351,7 +354,7 @@ impl JetHTTPChunkState {
             match self.phase {
                 .Size -> {
                     line_len :: match body[self.cursor..].windows(2).position(fn(bytes) { bytes == [U8{13}, U8{10}] }) {
-                        Some(line_len) -> line_len
+                        Val(line_len) -> line_len
                         None -> {
                             if body.len().saturating_sub(self.cursor) > JET_HTTP_MAX_CHUNK_FRAMING_BYTES.saturating_sub(self.framing_len) {
                                 return Err(JetHTTPReadError{status: 413, message: "chunked request framing is too large"})
@@ -392,7 +395,7 @@ impl JetHTTPChunkState {
                 }
                 .Trailers -> {
                     line_len :: match body[self.cursor..].windows(2).position(fn(bytes) { bytes == [U8{13}, U8{10}] }) {
-                        Some(line_len) -> line_len
+                        Val(line_len) -> line_len
                         None -> {
                             if body.len().saturating_sub(self.cursor) > JET_HTTP_MAX_CHUNK_FRAMING_BYTES.saturating_sub(self.framing_len) {
                                 return Err(JetHTTPReadError{status: 413, message: "chunked request framing is too large"})
@@ -402,7 +405,10 @@ impl JetHTTPChunkState {
                     }
                     line_end :: self.cursor + line_len
                     self.add_framing(line_len + 2)?
-                    if line_len == 0 { self.cursor += 2; return Ok(Some(self.cursor)) }
+                    if line_len == 0 {
+                        self.cursor += 2
+                        return Ok(Val(self.cursor))
+                    }
                     jet_http_parse_trailer_line(&body[self.cursor..line_end], &self.trailer_names, &self.trailers)?
                     self.cursor = line_end + 2
                 }
@@ -508,19 +514,19 @@ impl JetHTTPMux {
                         if validation_error.is_none() {
                             key :: (route.method.clone(), jet_http_route_shape(&pattern))
                             if !seen.insert(^key) {
-                                validation_error = Some("E2804: HTTP route conflict for {route.method} `{route.pattern}`")
+                                validation_error = Val("E2804: HTTP route conflict for {route.method} `{route.pattern}`")
                             }
                         }
-                        cached_routes.push(JetHTTPMuxRouteCacheEntry{route: route.clone(), pattern: Some(^pattern)})
+                        cached_routes.push(JetHTTPMuxRouteCacheEntry{route: route.clone(), pattern: Val(^pattern)})
                     }
                     Err(error) -> {
-                        if validation_error.is_none() -> validation_error = Some(^error)
+                        if validation_error.is_none() -> validation_error = Val(^error)
                         cached_routes.push(JetHTTPMuxRouteCacheEntry{route: route.clone(), pattern: None})
                     }
                 }
             }
             cache :: Arc.new(JetHTTPMuxRouteCache{routes: ^cached_routes, validation_error: ^validation_error})
-            *cached = Some(cache.clone())
+            *cached = Val(cache.clone())
             ^cache
         }
     }
@@ -585,30 +591,30 @@ fn jet_http_route_query_param(req: &JetHTTPRequest, name: String) -> String? ()!
         key :: jet_http_route_decode_path_segment(key).map_err(fn(_) { () })?.into_owned()
         if key != name -> continue
         value :: raw_value.replace('+', " ")
-        return Ok(Some(jet_http_route_decode_path_segment(value).map_err(fn(_) { () })?.into_owned()))
+        return Ok(Val(jet_http_route_decode_path_segment(value).map_err(fn(_) { () })?.into_owned()))
     }
     Ok(None)
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:828
 fn jet_http_route_raw(req: &JetHTTPRequest, name: String) -> String? ()! {
-    if Some(value) :: req.params.get(name) -> return Ok(Some(value.clone()))
+    if Val(value) :: req.params.get(name) -> return Ok(Val(value.clone()))
     jet_http_route_query_param(req, name)
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:834
 fn jet_http_route_param<T: __jet_Decode>(req: &JetHTTPRequest, name: String) -> T? ()! {
     raw :: match jet_http_route_raw(req, name)? {
-        Some(raw) -> raw
+        .Val(raw) -> raw
         None -> return Ok(None)
     }
     text :: DataTree.Text(raw.clone())
-    if Ok(value) :: T.jet_decode(&text) -> return Ok(Some(value))
+    if Ok(value) :: T.jet_decode(&text) -> return Ok(Val(value))
     tree :: parse_json_typed_datatree(raw).map_err(fn(_) { () })?
     T.jet_decode(&tree).map(Some).map_err(fn(_) { () })
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:849
 fn jet_http_route_optional<T: __jet_Decode>(req: &JetHTTPRequest, name: String) -> T ()! {
     raw :: match jet_http_route_raw(req, name)? {
-        Some(raw) -> raw
+        .Val(raw) -> raw
         None -> return T.jet_decode(&DataTree.Null).map_err(fn(_) { () })
     }
     text :: DataTree.Text(raw.clone())
@@ -619,7 +625,7 @@ fn jet_http_route_optional<T: __jet_Decode>(req: &JetHTTPRequest, name: String) 
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:864
 fn jet_http_contract_object(value: &DataTree) -> View<(String, DataTree)>? {
     match value {
-        DataTree.Object(entries) -> Some(entries.as_slice())
+        .Object(entries) -> Val(entries.as_slice())
         _ -> None
     }
 }
@@ -630,55 +636,55 @@ fn jet_http_contract_field(object: View<(String, DataTree)>, name: String) -> &D
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:880
 fn jet_http_contract_text(object: View<(String, DataTree)>, name: String) -> &String? {
     match jet_http_contract_field(object, name)? {
-        DataTree.Text(value) | DataTree.TypedText(value) -> Some(value)
+        .Text(value) | .TypedText(value) -> Val(value)
         _ -> None
     }
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:890
 fn jet_http_route_schema_matches(value: &DataTree, schema: &DataTree) -> Bool {
     schema_object :: jet_http_contract_object(schema) ?? return false
-    if Some(any_of) :: jet_http_contract_field(schema_object, "anyOf") {
+    if Val(any_of) :: jet_http_contract_field(schema_object, "anyOf") {
         return match any_of {
-            DataTree.Array(items) -> items.iter().any(fn(candidate) { jet_http_route_schema_matches(value, candidate) })
+            .Array(items) -> items.iter().any(fn(candidate) { jet_http_route_schema_matches(value, candidate) })
             _ -> false
         }
     }
-    if Some(one_of) :: jet_http_contract_field(schema_object, "oneOf") {
+    if Val(one_of) :: jet_http_contract_field(schema_object, "oneOf") {
         return match one_of {
-            DataTree.Array(items) -> items.iter().filter(fn(candidate) { jet_http_route_schema_matches(value, candidate) }).count() == 1
+            .Array(items) -> items.iter().filter(fn(candidate) { jet_http_route_schema_matches(value, candidate) }).count() == 1
             _ -> false
         }
     }
     kind :: jet_http_contract_text(schema_object, "type") ?? return true
     match kind {
         "null" -> match value { DataTree.Null -> true, _ -> false }
-        "boolean" -> match value { DataTree.Bool(_) -> true, _ -> false }
+        "boolean" -> match value { .Bool(_) -> true, _ -> false }
         "integer" -> match value {
-            DataTree.Int(_) -> true
-            DataTree.Number(number) -> number.parse<I64>().is_ok()
+            .Int(_) -> true
+            .Number(number) -> number.parse<I64>().is_ok()
             _ -> false
         }
-        "number" -> match value { DataTree.Int(_) | DataTree.Float(_) | DataTree.Number(_) -> true, _ -> false }
-        "string" -> match value { DataTree.Text(_) | DataTree.TypedText(_) -> true, _ -> false }
+        "number" -> match value { .Int(_) | .Float(_) | .Number(_) -> true, _ -> false }
+        "string" -> match value { .Text(_) | .TypedText(_) -> true, _ -> false }
         "array" -> {
-            items :: match value { DataTree.Array(items) -> items, _ -> return false }
+            items :: match value { .Array(items) -> items, _ -> return false }
             item_schema :: jet_http_contract_field(schema_object, "items") ?? return false
             items.iter().all(fn(item) { jet_http_route_schema_matches(item, item_schema) })
         }
         "object" -> {
-            fields :: match value { DataTree.Object(fields) -> fields, _ -> return false }
+            fields :: match value { .Object(fields) -> fields, _ -> return false }
             properties :: jet_http_contract_field(schema_object, "properties").and_then(jet_http_contract_object) ?? return false
             additional_properties :: match jet_http_contract_field(schema_object, "additionalProperties") {
-                Some(DataTree.Bool(value)) -> *value
+                .Val(.Bool(value)) -> *value
                 None -> true
                 _ -> false
             }
             required :: match jet_http_contract_field(schema_object, "required") {
                 None -> []
-                Some(DataTree.Array(names)) -> names.iter().filter_map(fn(name) {
-                    match name { DataTree.Text(name) | DataTree.TypedText(name) -> Some(name.as_str()), _ -> None }
+                .Val(.Array(names)) -> names.iter().filter_map(fn(name) {
+                    match name { .Text(name) | .TypedText(name) -> Val(name.as_str()), _ -> None }
                 }).collect<[String]>()
-                Some(_) -> return false
+                .Val(_) -> return false
             }
             if required.iter().any(fn(name) { !fields.iter().any(fn((field, _)) { field == *name }) }) -> return false
             fields.iter().all(fn((name, field_value)) {
@@ -703,7 +709,7 @@ fn jet_http_route_validate_body(request: JetHTTPRequest, contract_json: String) 
         value -> jet_http_contract_object(value).ok_or(())?
     }
     required :: match jet_http_contract_field(request_body_object, "required") {
-        Some(DataTree.Bool(value)) -> *value
+        .Val(.Bool(value)) -> *value
         _ -> return Err(())
     }
     schema :: jet_http_contract_field(request_body_object, "schema").ok_or(())?
@@ -737,31 +743,31 @@ fn jet_http_require_route_contract(method: String, pattern: String, contract_jso
         jet_panic(&file, line, &"E2805: route `{method} {pattern}` does not match its endpoint contract")
     }
     responses :: match jet_http_contract_field(contract_object, "responses") {
-        Some(DataTree.Array(responses)) -> responses
+        .Val(.Array(responses)) -> responses
         _ -> jet_panic(&file, line, &"E2805: route `{method} {pattern}` has invalid endpoint responses")
     }
     if responses.is_empty() && !allow_empty_responses {
         jet_panic(&file, line, &"E2805: route `{method} {pattern}` has no endpoint responses")
     }
     match jet_http_contract_field(contract_object, "parameters") {
-        Some(DataTree.Array(_)) -> {}
+        .Val(.Array(_)) -> {}
         _ -> jet_panic(&file, line, &"E2805: route `{method} {pattern}` has invalid endpoint parameters")
     }
     match jet_http_contract_field(contract_object, "security") {
-        Some(DataTree.Array(_)) -> {}
+        .Val(.Array(_)) -> {}
         _ -> jet_panic(&file, line, &"E2805: route `{method} {pattern}` has invalid endpoint security policy")
     }
     match jet_http_contract_field(contract_object, "request_body") {
-        Some(DataTree.Null) -> {}
-        Some(DataTree.Object(body)) -> {
-            valid_required :: match jet_http_contract_field(body.as_slice(), "required") { Some(DataTree.Bool(_)) -> true, _ -> false }
+        .Val(DataTree.Null) -> {}
+        .Val(.Object(body)) -> {
+            valid_required :: match jet_http_contract_field(body.as_slice(), "required") { .Val(.Bool(_)) -> true, _ -> false }
             valid_content_type :: jet_http_contract_text(body.as_slice(), "content_type").is_some_and(fn(value) { !value.is_empty() })
             valid_schema :: jet_http_contract_field(body.as_slice(), "schema").is_some_and(fn(schema) { jet_http_contract_object(schema).is_some() })
             if !(valid_required && valid_content_type && valid_schema) {
                 jet_panic(&file, line, &"E2805: route `{method} {pattern}` has an invalid endpoint request body")
             }
         }
-        Some(_) | None -> jet_panic(&file, line, &"E2805: route `{method} {pattern}` has an invalid endpoint request body")
+        .Val(_) | None -> jet_panic(&file, line, &"E2805: route `{method} {pattern}` has an invalid endpoint request body")
     }
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:1184
@@ -775,7 +781,7 @@ fn jet_http_mux_register(mux: &JetHTTPMux, method: String, pattern: String, hand
             .filter(fn(route) { route.method == method })
             .filter_map(fn(route) {
                 existing :: jet_http_router_parse_pattern(&route.pattern).ok()?
-                Some(jet_http_route_shape(&JetHTTPRoutePattern{segments: ^existing}))
+                Val(jet_http_route_shape(&JetHTTPRoutePattern{segments: ^existing}))
             }).any(fn(existing) { existing == shape })
     }
     if duplicate -> jet_panic(&file, line, &"E2804: duplicate route `{method} {pattern}`")
@@ -934,7 +940,7 @@ fn jet_error_page_link(value: String) -> String? {
         || lower.starts_with("vbscript:") || lower.starts_with("file:")
         || !(link.starts_with('/') || lower.starts_with("http://") || lower.starts_with("https://") || lower.starts_with("jet://")) {
         None
-    } else { Some(^link) }
+    } else { Val(^link) }
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:1469
 fn jet_error_page_json_quote(value: String) -> String {
@@ -1034,12 +1040,12 @@ impl JetErrorPageProjection {
         html.push_str("</code></dd></dl><h2>Message</h2><p>")
         html.push_str(jet_error_page_html_escape(self.message))
         html.push_str("</p>")
-        if Some(code) :: &self.code {
+        if Val(code) :: &self.code {
             html.push_str("<p><strong>Code:</strong> <code>")
             html.push_str(jet_error_page_html_escape(code))
             html.push_str("</code></p>")
         }
-        if Some(frame) :: &self.source_frame {
+        if Val(frame) :: &self.source_frame {
             html.push_str("<h2>Source frame</h2><p><code>")
             if !frame.fn_name.is_empty() {
                 html.push_str(jet_error_page_html_escape(frame.fn_name))
@@ -1111,7 +1117,7 @@ fn jet_error_page_projection(status: I64, failure_id: String, request_id: String
 fn jet_http_accept_quality(value: String) -> U16 {
     value := value.trim() // #4303
     if value == "1" -> return 1000
-    if Some(fraction) :: value.strip_prefix("1.") {
+    if Val(fraction) :: value.strip_prefix("1.") {
         return if !fraction.is_empty() && fraction.bytes().all(fn(byte) { byte == U8{48} }) { 1000 } else { 0 }
     }
     fraction :: value.strip_prefix("0.") ?? return 0
