@@ -557,8 +557,8 @@ impl JetGameWorldInspector {
             if target.source_id != self.frames[current].source_id -> return Err(JetGameWorldInspectorError.InvalidEdit("target source is not the current world source"))
             if target.revision != self.frames[current].revision -> return Err(JetGameWorldInspectorError.StaleRevision(~self.frames[current].revision, ~target.revision))
             if self.session_identity() == .Val(identity) {
-                if target.session_id != Val(identity.session_id) -> return Err(JetGameWorldInspectorError.StaleSession(~identity.session_id, world_optional_or_empty(target.session_id)))
-                if target.tier != Val(identity.tier) -> return Err(JetGameWorldInspectorError.StaleTier(~identity.tier, world_optional_or_empty(target.tier)))
+                if target.session_id != identity.session_id -> return Err(JetGameWorldInspectorError.StaleSession(~identity.session_id, world_optional_or_empty(target.session_id)))
+                if target.tier != identity.tier -> return Err(JetGameWorldInspectorError.StaleTier(~identity.tier, world_optional_or_empty(target.tier)))
             }
             if !indexed {
                 provenance = world_provenance_index(self.frames[current], request.field_patch.field)

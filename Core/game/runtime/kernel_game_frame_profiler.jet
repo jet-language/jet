@@ -990,7 +990,7 @@ pub fn crash_reporter_config_from_manifest(manifest: String, usize_max: U64) -> 
         "never" -> JetGameCrashUploadPolicy.Never
         "loopback-only" -> JetGameCrashUploadPolicy.LoopbackOnly
         "explicit" -> JetGameCrashUploadPolicy.Explicit(crash_manifest_string(runtime, "upload_endpoint") ?? return None)
-        else -> return None
+        else -> { return None }
     }
     retention_parts :: unicode.split_once(runtime, "\"retention\"") ?? return None
     retention := retention_parts.after // #4303

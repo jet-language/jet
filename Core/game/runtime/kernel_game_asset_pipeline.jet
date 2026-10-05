@@ -668,7 +668,7 @@ impl JetGameAssetRuntimeFact {
         outcome.validate_against(plan) ?? return Err(err)
         self.artifact.compatible_with(plan) ?? return Err(err)
         _ :: jet_game_asset_metadata(self.metadata) ?? return Err(err)
-        if outcome.artifact() != Val(self.artifact) -> return Err(.ArtifactMismatch("runtime fact"))
+        if outcome.artifact() != self.artifact -> return Err(.ArtifactMismatch("runtime fact"))
     }
     pub fn byte_len(self) -> U64 Never! { U64{self.bytes.len()} }
     pub fn render_json(self) -> String Never! {
