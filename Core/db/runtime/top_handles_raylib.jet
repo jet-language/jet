@@ -209,7 +209,10 @@ fn jet_db_pool_drain(pool: &JetDbPool<JetDbConnection>) -> JetDbPoolReceipt DBEr
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:300
 fn jet_db_pool_receipt(pool: &JetDbPool<JetDbConnection>) -> JetDbPoolReceipt { pool.receipt() }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:304
-fn jet_db_lease_close(lease: &JetDbLease<JetDbConnection>) -> () DBError! { lease.release(); Ok(()) }
+fn jet_db_lease_close(lease: &JetDbLease<JetDbConnection>) -> () DBError! {
+    lease.release()
+    Ok(())
+}
 
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:322
 #Derive(Clone, Copy, Debug)
@@ -581,7 +584,10 @@ fn jet_raylib_end_drawing() -> {
     // GATE #4565: kernel primitive
     #Unsafe("end drawing only for the bridge-owned live raylib window") {
         if JET_RAYLIB_WINDOW_OPEN.load(Ordering.SeqCst) {
-            if Val(api) :: jet_raylib_api() { (api.end_drawing)(); jet_devtools_native_frame_end() }
+            if Val(api) :: jet_raylib_api() {
+                (api.end_drawing)()
+                jet_devtools_native_frame_end()
+            }
         }
     }
 }
@@ -670,7 +676,10 @@ fn jet_raylib_set_target_fps(fps: I64) -> {
     // GATE #4565: kernel primitive
     #Unsafe("set bounded target FPS only on the live bridge-owned window") {
         if JET_RAYLIB_WINDOW_OPEN.load(Ordering.SeqCst) {
-            if Val(api) :: jet_raylib_api() { fps :: fps.clamp(1, 240) as I32; (api.set_target_fps)(fps) }
+            if Val(api) :: jet_raylib_api() {
+                fps :: fps.clamp(1, 240) as I32
+                (api.set_target_fps)(fps)
+            }
         }
     }
 }

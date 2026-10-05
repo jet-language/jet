@@ -113,7 +113,7 @@ impl<D> JetDbPoolState<D> {
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DbPool.rs:158
     fn remove_waiter(self: &Self, ticket: U64) -> {
-        if self.waiters.iter().position(fn(queued) { queued == ticket }) == Some(index) {
+        if self.waiters.iter().position(fn(queued) { queued == ticket }) == .Val(index) {
             _ :: self.waiters.remove(index)
         }
     }
@@ -174,7 +174,10 @@ impl<D: Send> JetDbLease<D> {
         match result {
             Ok(Ok(value)) -> Ok(^value)
             Ok(Err(error)) -> Err(^error)
-            Err(_) -> { self.mark_unhealthy(); Err(jet_db_pool_error("database driver operation panicked")) }
+            Err(_) -> {
+                self.mark_unhealthy()
+                Err(jet_db_pool_error("database driver operation panicked"))
+            }
         }
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DbPool.rs:260
@@ -268,7 +271,7 @@ impl<D: Send> JetDbPoolInner<D> {
                 }
                 can_claim :: ticket.map(fn(ticket) { state.waiter_is_turn(ticket) }).unwrap_or(state.waiters.is_empty())
                 if can_claim {
-                    if state.available.pop() == Some(driver) {
+                    if state.available.pop() == .Val(driver) {
                         driver := ^driver
                         if ticket.take() == Some(ticket) -> state.claim_waiter(ticket)
                         state.leased = state.leased.saturating_add(1)
@@ -281,7 +284,7 @@ impl<D: Send> JetDbPoolInner<D> {
                             if lifecycle == .Open {
                                 state.acquires = state.acquires.saturating_add(1)
                                 drop(^state)
-                                return Ok(JetDbLease{pool: self.clone(), driver: Mutex.new(Some(^driver)), healthy: true})
+                                return Ok(JetDbLease{pool: self.clone(), driver: Mutex.new(Val(^driver)), healthy: true})
                             }
                             state.leased = state.leased.saturating_sub(1)
                             state.mark_drained()
@@ -345,18 +348,18 @@ impl<D: Send> JetDbPoolInner<D> {
                         state.leased = state.leased.saturating_add(1)
                         state.acquires = state.acquires.saturating_add(1)
                         drop(^state)
-                        return Ok(JetDbLease{pool: self.clone(), driver: Mutex.new(Some(^driver)), healthy: true})
+                        return Ok(JetDbLease{pool: self.clone(), driver: Mutex.new(Val(^driver)), healthy: true})
                     }
                 }
-                if ticket.is_none() -> ticket = Some(state.enqueue_waiter())
+                if ticket.is_none() -> ticket = Val(state.enqueue_waiter())
                 match jet_db_pool_remaining(deadline) {
-                    Some(duration) if duration.is_zero() -> {
+                    .Val(duration) if duration.is_zero() -> {
                         if ticket.take() == Some(ticket) -> state.remove_waiter(ticket)
                         state.timeouts = state.timeouts.saturating_add(1)
                         self.wake.notify_all()
                         return Err(jet_db_pool_error("database pool acquisition deadline exceeded"))
                     }
-                    Some(duration) -> state = match self.wake.wait_timeout(^state, duration) {
+                    .Val(duration) -> state = match self.wake.wait_timeout(^state, duration) {
                         Ok((guard, _)) -> ^guard
                         Err(poisoned) -> ^poisoned.into_inner().0
                     }
@@ -416,14 +419,14 @@ impl<D: Send> JetDbPoolInner<D> {
                     return Ok(^receipt)
                 }
                 match jet_db_pool_remaining(deadline) {
-                    Some(duration) if duration.is_zero() -> {
+                    .Val(duration) if duration.is_zero() -> {
                         state.timeouts = state.timeouts.saturating_add(1)
                         self.wake.notify_all()
                         drop(^state)
                         loop driver in close_now -> self.close_driver(^driver)
                         return Err(jet_db_pool_error("database pool drain deadline exceeded"))
                     }
-                    Some(duration) -> {
+                    .Val(duration) -> {
                         if close_now.is_empty() {
                             state = match self.wake.wait_timeout(^state, duration) {
                                 Ok((guard, _)) -> ^guard
@@ -502,7 +505,7 @@ impl<D: Send> JetDbPoolInner<D> {
                 }
             }
             healthy :: self.health_driver(&driver)
-            driver := Some(^driver)
+            driver := Val(^driver)
             state := self.lock_state()
             state.opening = state.opening.saturating_sub(1)
             if not healthy {
@@ -560,10 +563,10 @@ fn jet_db_pool_effective_deadline(deadline: I64?) -> I64? {
     // GATE #4565: kernel primitive
     #Unsafe("use current context deadline and wall-clock millisecond primitive without resetting an explicit deadline") {
         match (deadline, jet_ctx_deadline_ms()) {
-            (Some(explicit), Some(context)) -> Some(explicit.min(context))
-            (Some(explicit), None) -> Some(explicit)
-            (None, Some(context)) -> Some(context)
-            (None, None) -> Some(jet_std_time_now().saturating_add(JET_DB_POOL_DEFAULT_TIMEOUT_MS))
+            (Val(explicit), Val(context)) -> Val(explicit.min(context))
+            (Val(explicit), None) -> Val(explicit)
+            (None, Val(context)) -> Val(context)
+            (None, None) -> Val(jet_std_time_now().saturating_add(JET_DB_POOL_DEFAULT_TIMEOUT_MS))
         }
     }
 }

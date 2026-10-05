@@ -264,7 +264,10 @@ fn db_sql_tokens(sql: &String) -> [(Usize, Usize, String)] {
                 if i >= bytes.len() { break }
                 if bytes[i] == b'\'' {
                     if bytes.get(i + 1) == Val(&b'\'') { i += 2 }
-                    else { i += 1; break }
+                    else {
+                        i += 1
+                        break
+                    }
                 } else { i += 1 }
             }
             continue
@@ -294,7 +297,10 @@ fn db_sql_contains_comment(sql: &String) -> Bool {
                 if i >= bytes.len() { break }
                 if bytes[i] == b'\'' {
                     if bytes.get(i + 1) == Val(&b'\'') { i += 2 }
-                    else { i += 1; break }
+                    else {
+                        i += 1
+                        break
+                    }
                 } else { i += 1 }
             }
             continue
@@ -414,12 +420,22 @@ fn db_sql_placeholder_count(sql: &String) -> Usize {
             b'\'', b'"', b'`' -> Val(bytes[i]),
             b'[' -> {
                 i += 1
-                loop { if i >= bytes.len() || bytes[i] == b']' { break }; i += 1 }
+                loop {
+                    if i >= bytes.len() || bytes[i] == b']' { break }
+                    i += 1
+                }
                 if i < bytes.len() { i += 1 }
                 None
             },
-            b'?' -> { count += 1; i += 1; None },
-            _ -> { i += 1; None },
+            b'?' -> {
+                count += 1
+                i += 1
+                None
+            },
+            _ -> {
+                i += 1
+                None
+            },
         }
         quote :: match quote { Val(value) -> value, None -> continue }
         i += 1
@@ -427,7 +443,10 @@ fn db_sql_placeholder_count(sql: &String) -> Usize {
             if i >= bytes.len() { break }
             if bytes[i] == quote {
                 if bytes.get(i + 1) == Val(&quote) { i += 2 }
-                else { i += 1; break }
+                else {
+                    i += 1
+                    break
+                }
             } else { i += 1 }
         }
     }
@@ -562,7 +581,10 @@ fn db_encode_tagged(tag: Char, payload: &String) -> String { "{tag}{payload.len(
 fn db_hex_encode(bytes: &[U8]) -> String {
     const HEX: [U8#16] = b"0123456789abcdef"
     out := String.with_capacity(bytes.len() * 2)
-    for byte in bytes { out.push(HEX[(byte >> 4) as Usize] as Char); out.push(HEX[(byte & 0x0f) as Usize] as Char) }
+    for byte in bytes {
+        out.push(HEX[(byte >> 4) as Usize] as Char)
+        out.push(HEX[(byte & 0x0f) as Usize] as Char)
+    }
     out
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/DBPluginWire.rs:1051
@@ -908,8 +930,14 @@ pub struct JetMigrationState {
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/DBPluginWire.rs:1728
 fn db_hash_field(hash: &U64, value: &String) -> {
-    for byte in (value.len() as U64).to_le_bytes() { *hash ^= byte as U64; *hash = hash.wrapping_mul(0x100000001b3) }
-    for byte in value.as_bytes() { *hash ^= *byte as U64; *hash = hash.wrapping_mul(0x100000001b3) }
+    for byte in (value.len() as U64).to_le_bytes() {
+        *hash ^= byte as U64
+        *hash = hash.wrapping_mul(0x100000001b3)
+    }
+    for byte in value.as_bytes() {
+        *hash ^= *byte as U64
+        *hash = hash.wrapping_mul(0x100000001b3)
+    }
     *hash ^= 0xff
     *hash = hash.wrapping_mul(0x100000001b3)
 }
@@ -917,13 +945,25 @@ fn db_hash_field(hash: &U64, value: &String) -> {
 fn db_hash_value(hash: &U64, value: &DBValue) -> {
     match value {
         .Null -> db_hash_field(hash, "N"),
-        .Int(value) -> { db_hash_field(hash, "I"); db_hash_field(hash, &value.to_string()) },
-        .Float(value) -> { db_hash_field(hash, "F"); db_hash_field(hash, &value.to_bits().to_string()) },
-        .Text(value) -> { db_hash_field(hash, "T"); db_hash_field(hash, value) },
+        .Int(value) -> {
+            db_hash_field(hash, "I")
+            db_hash_field(hash, &value.to_string())
+        },
+        .Float(value) -> {
+            db_hash_field(hash, "F")
+            db_hash_field(hash, &value.to_bits().to_string())
+        },
+        .Text(value) -> {
+            db_hash_field(hash, "T")
+            db_hash_field(hash, value)
+        },
         .Bool(value) -> db_hash_field(hash, if *value { "B1" } else { "B0" }),
         .Blob(value) -> {
             db_hash_field(hash, "X")
-            for byte in value { *hash ^= *byte as U64; *hash = hash.wrapping_mul(0x100000001b3) }
+            for byte in value {
+                *hash ^= *byte as U64
+                *hash = hash.wrapping_mul(0x100000001b3)
+            }
             *hash ^= 0xff
             *hash = hash.wrapping_mul(0x100000001b3)
         },
@@ -940,7 +980,10 @@ fn db_hash_sql(hash: &U64, sql: &SQL) -> {
 pub fn jet_db_migration_checksum(steps: &[SQL]) -> String {
     hash: U64 := 0xcbf29ce484222325
     for sql in steps {
-        for b in sql.0.as_bytes() { hash ^= *b as U64; hash = hash.wrapping_mul(0x100000001b3) }
+        for b in sql.0.as_bytes() {
+            hash ^= *b as U64
+            hash = hash.wrapping_mul(0x100000001b3)
+        }
         hash ^= 0xfe
         hash = hash.wrapping_mul(0x100000001b3)
         for param in &sql.1 {
@@ -949,7 +992,10 @@ pub fn jet_db_migration_checksum(steps: &[SQL]) -> String {
                 .Text(value) -> "T{value}", .Bool(value) -> "B{if *value { 1 } else { 0 }}",
                 .Blob(value) -> "X{db_hex_encode(value)}",
             }
-            for b in encoded.as_bytes() { hash ^= *b as U64; hash = hash.wrapping_mul(0x100000001b3) }
+            for b in encoded.as_bytes() {
+                hash ^= *b as U64
+                hash = hash.wrapping_mul(0x100000001b3)
+            }
             hash ^= 0xfd
             hash = hash.wrapping_mul(0x100000001b3)
         }
@@ -984,7 +1030,10 @@ pub fn jet_db_migration_request_checksum(request: &JetMigrationRequest) -> Strin
         db_hash_field(&hash, step.lock.as_str())
         db_hash_field(&hash, &step.risk)
         db_hash_sql(&hash, &step.sql)
-        if Val(inverse) :: &step.inverse_sql { db_hash_field(&hash, "inverse"); db_hash_sql(&hash, inverse) }
+        if Val(inverse) :: &step.inverse_sql {
+            db_hash_field(&hash, "inverse")
+            db_hash_sql(&hash, inverse)
+        }
         else { db_hash_field(&hash, "no-inverse") }
     }
     "migration-v2:{hash:016x}"
@@ -1190,23 +1239,44 @@ pub fn jet_db_migration_state<B: JetDBBackend>(backend: &B, query: &JetMigration
     }
     // Schema bootstrap writes the ledger: acquire SQLite's authoritative write lock.
     if !backend.begin_with_lock(JetMigrationLock.Exclusive) { return Err(db_migration_error("could not begin migration state read")) }
-    if Err(error) :: db_migration_ensure_schema(backend) { backend.rollback(); return Err(^error) }
-    rows :: match db_migration_rows(backend) { Ok(rows) -> rows, Err(error) -> { backend.rollback(); return Err(^error) } }
-    state :: match db_migration_state_from_rows(query, &rows) { Ok(state) -> state, Err(error) -> { backend.rollback(); return Err(^error) } }
+    if Err(error) :: db_migration_ensure_schema(backend) {
+        backend.rollback()
+        return Err(^error)
+    }
+    rows :: match db_migration_rows(backend) { Ok(rows) -> rows, Err(error) -> {
+        backend.rollback()
+        return Err(^error)
+    } }
+    state :: match db_migration_state_from_rows(query, &rows) { Ok(state) -> state, Err(error) -> {
+        backend.rollback()
+        return Err(^error)
+    } }
     if backend.commit() { Ok(^state) }
-    else { backend.rollback(); Err(db_migration_error("could not commit migration state read")) }
+    else {
+        backend.rollback()
+        Err(db_migration_error("could not commit migration state read"))
+    }
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/DBPluginWire.rs:2266
 pub fn jet_db_migration_request<B: JetDBBackend>(backend: &B, request: &JetMigrationRequest) -> JetMigrationOutcome DBError! {
     db_migration_validate_request(request)?
     if !backend.begin_with_lock(request.lock) { return Err(db_migration_error("could not begin migration `{request.migration_key}`")) }
-    if Err(error) :: db_migration_ensure_schema(backend) { backend.rollback(); return Err(^error) }
-    rows :: match db_migration_rows(backend) { Ok(rows) -> rows, Err(error) -> { backend.rollback(); return Err(^error) } }
+    if Err(error) :: db_migration_ensure_schema(backend) {
+        backend.rollback()
+        return Err(^error)
+    }
+    rows :: match db_migration_rows(backend) { Ok(rows) -> rows, Err(error) -> {
+        backend.rollback()
+        return Err(^error)
+    } }
     query :: JetMigrationStateRequest{
         target: request.target.clone(), target_identity: request.target_identity.clone(), database_identity: request.database_identity.clone(),
         source_identity: request.source_identity.clone(), schema_identity: request.schema_identity.clone(),
     }
-    state :: match db_migration_state_from_rows(&query, &rows) { Ok(state) -> state, Err(error) -> { backend.rollback(); return Err(^error) } }
+    state :: match db_migration_state_from_rows(&query, &rows) { Ok(state) -> state, Err(error) -> {
+        backend.rollback()
+        return Err(^error)
+    } }
     if state.drift.len() > 0 {
         backend.rollback()
         return Err(db_migration_error("migration target `{request.target}` has unreconciled state: {state.drift.join("; ")}"))
@@ -1238,7 +1308,10 @@ pub fn jet_db_migration_request<B: JetDBBackend>(backend: &B, request: &JetMigra
     transition_key :: db_migration_transition_key(request, &checksum, predecessor)
     started :: db_migration_now_ms()
     for step in &request.steps {
-        if Err(error) :: backend.execute(&step.sql, true) { backend.rollback(); return Err(^error) }
+        if Err(error) :: backend.execute(&step.sql, true) {
+            backend.rollback()
+            return Err(^error)
+        }
     }
     finished :: db_migration_now_ms()
     outcome :: JetMigrationOutcome{
@@ -1254,7 +1327,10 @@ pub fn jet_db_migration_request<B: JetDBBackend>(backend: &B, request: &JetMigra
         return Err(^error)
     }
     if backend.commit() { Ok(^outcome) }
-    else { backend.rollback(); Err(db_migration_error("could not commit migration `{request.migration_key}`")) }
+    else {
+        backend.rollback()
+        Err(db_migration_error("could not commit migration `{request.migration_key}`"))
+    }
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/DBPluginWire.rs:2396
 // One transaction state machine for ordinary db.transaction calls.
@@ -1279,11 +1355,17 @@ pub fn jet_db_transaction<B: JetDBBackend>(backend: &B, label: &String, steps: &
     for sql in steps {
         match backend.execute(sql, false) {
             Ok(value) -> { done += 1 },
-            Err(error) -> { backend.rollback(); return Err(^error) },
+            Err(error) -> {
+                backend.rollback()
+                return Err(^error)
+            },
         }
     }
     if backend.commit() { Ok(done) }
-    else { backend.rollback(); Err(DBError{message: "could not commit transaction"}) }
+    else {
+        backend.rollback()
+        Err(DBError{message: "could not commit transaction"})
+    }
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/DBPluginWire.rs:2441
 pub fn jet_db_migrate<B: JetDBBackend>(backend: &B, name: &String, steps: &[SQL]) -> I64 DBError! {
