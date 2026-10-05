@@ -1693,6 +1693,7 @@ fn value_kind(value: &Value) -> Option<ColumnKind> {
             .or(Some(ColumnKind::String)),
         Value::Text(_)
         | Value::Bytes(_)
+        | Value::DateTime(_)
         | Value::Array(_)
         | Value::Object(_) => Some(ColumnKind::String),
     }
@@ -1779,6 +1780,7 @@ fn value_text(value: &Value) -> String {
         Value::Float(value) => render_float(*value),
         Value::Number(value) => value.clone(),
         Value::Text(value) => value.clone(),
+        Value::DateTime(value) => value.to_rfc3339(),
         Value::Bytes(values) => format!(
             "[{}]",
             values
@@ -1810,6 +1812,7 @@ fn render_json_value(value: &Value) -> String {
         Value::Float(value) => render_float(*value),
         Value::Number(value) => value.clone(),
         Value::Text(value) => json_str(value),
+        Value::DateTime(value) => json_str(&value.to_rfc3339()),
         Value::Bytes(values) => format!(
             "[{}]",
             values.iter().map(ToString::to_string).collect::<Vec<_>>().join(",")
@@ -1903,7 +1906,10 @@ fn db_sql_value(value: &Value) -> sql_kernel::JetSqlValue {
     match value {
         Value::Null => sql_kernel::JetSqlValue::Null,
         Value::Bool(value) => sql_kernel::JetSqlValue::Bool(*value),
-        Value::Int(value) => sql_kernel::JetSqlValue::Int(*value),
+        Value::Int(value) => value
+            .to_i64()
+            .map(sql_kernel::JetSqlValue::Int)
+            .unwrap_or_else(|| sql_kernel::JetSqlValue::literal(&value.to_string())),
         Value::Float(value) => sql_kernel::JetSqlValue::Float(*value),
         Value::Number(value) => sql_kernel::JetSqlValue::literal(value),
         Value::Text(value) => sql_kernel::JetSqlValue::Text(value.clone()),
@@ -1915,7 +1921,7 @@ fn db_sql_json_value(value: sql_kernel::JetSqlValue) -> Value {
     match value {
         sql_kernel::JetSqlValue::Null => Value::Null,
         sql_kernel::JetSqlValue::Bool(value) => Value::Bool(value),
-        sql_kernel::JetSqlValue::Int(value) => Value::Int(value),
+        sql_kernel::JetSqlValue::Int(value) => Value::Int(value.into()),
         sql_kernel::JetSqlValue::Float(value) => Value::Float(value),
         sql_kernel::JetSqlValue::Text(value) => Value::Text(value),
     }
@@ -2492,13 +2498,17 @@ fn status_data_value(value: &Value) -> StatusValue {
     match value {
         Value::Null => StatusValue::Null,
         Value::Bool(value) => StatusValue::from(*value),
-        Value::Int(value) => StatusValue::from(*value),
+        Value::Int(value) => value
+            .to_i128()
+            .map(StatusValue::Integer)
+            .unwrap_or_else(|| StatusValue::Float(value.to_string())),
         Value::Float(value) => StatusValue::Float(value.to_string()),
         Value::Number(value) => value
             .parse::<i128>()
             .map(StatusValue::Integer)
             .unwrap_or_else(|_| StatusValue::Float(value.clone())),
         Value::Text(value) => StatusValue::from(value.as_str()),
+        Value::DateTime(value) => StatusValue::from(value.to_rfc3339()),
         Value::Bytes(values) => {
             StatusValue::array(values.iter().map(|value| StatusValue::from(*value as i128)))
         }
