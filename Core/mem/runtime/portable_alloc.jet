@@ -266,7 +266,7 @@ impl GlobalAlloc for JetHeapAllocator {
                 && record.base != 0 && record.span >= memory.size_of<JetHeapHeader>() && header >= record.base
                 && block_end.is_some_and(fn(end) { end <= heap_end })
                 && header_end.is_some_and(fn(end) { block_end.is_some_and(fn(block_limit) { end <= block_limit }) })
-                && header_end == Val(pointer.addr())
+                && header_end == pointer.addr()
             if valid {
                 base :: record.base
                 span :: record.span
@@ -308,7 +308,7 @@ impl GlobalAlloc for JetHeapAllocator {
                 && record.base != 0 && record.span >= memory.size_of<JetHeapHeader>() && header >= record.base
                 && block_end.is_some_and(fn(end) { end <= heap_end })
                 && header_end.is_some_and(fn(end) { block_end.is_some_and(fn(block_limit) { end <= block_limit }) })
-                && header_end == Val(pointer.addr()) {
+                && header_end == pointer.addr() {
                 previous_size :: record.size.max(1)
                 if new_size <= previous_size { record.size = new_size.max(1) }
                 old_size = Val(previous_size)

@@ -82,7 +82,7 @@ fn exact_int_map_key(raw: I64) -> JetMapKey {
     big := value.to_big()
     if big.try_i64() == .Val(small) -> return .Int(small)
     limbs := ^big.limbs
-    loop limbs.last() == Val(U32{0}) { _ :: &limbs.pop() }
+    loop limbs.last() == U32{0} { _ :: &limbs.pop() }
     .BigInt{negative: big.negative, limbs: ^limbs}
 }
 // Rust: crates/jet-rt/src/lib.rs:135
