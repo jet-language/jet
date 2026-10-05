@@ -1,7 +1,7 @@
 // D-TIME-INSTANT-SPLIT1=A: Instant traits remain beside the Core-owned carrier.
 use core.time.runtime.kernel_time_instant.[JetInstant]
 use core.time.runtime.top_time_sleep.[jet_std_time_duration_to_millis, jet_std_time_sleep_duration_ns]
-use core.time.runtime.kernel_duration.*
+use core.time.runtime.kernel_duration as duration_kernel
 use core.time.runtime.kernel_time.*
 use jet_std.[Clock, Rng, Stopwatch, Duration, DurationUnit, RangeError, TextError]
 use jet_std.[JetShow, JetDisplay, JetDebug, JetOutcome, JetAbsent, JetDeadlineUnwind]
@@ -106,17 +106,17 @@ fn jet_rng_sample<T: Clone>(r: &Rng, xs: &[T], k: I64) -> [T] { jet_seeded_rng_s
 fn jet_rng_shuffle<T>(r: &Rng, xs: &[T]) -> Unit { jet_seeded_rng_shuffle(&r.state, xs) }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:139
 fn jet_duration_from_int(n: JetInt, unit: DurationUnit) -> Duration RangeError! {
-    value :: jet_int_owned_to_i64(&n).map_err(_ -> RangeError{reason: jet_duration_kernel_int_error_reason()})?
-    jet_duration_kernel_from_int(value, unit.nanoseconds()).map(ns -> Duration{ns})
-        .ok_or_else(() -> RangeError{reason: jet_duration_kernel_int_error_reason()})
+    value :: jet_int_owned_to_i64(&n) ?? return Err(RangeError{reason: duration_kernel.INT_ERROR_REASON})
+    ns :: duration_kernel.scale(value, unit.nanoseconds()) ?? return Err(RangeError{reason: duration_kernel.INT_ERROR_REASON})
+    Ok(Duration{ns})
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:152
 fn jet_duration_from_float(n: F64, unit: DurationUnit) -> Duration RangeError! {
-    jet_duration_kernel_from_float(n, unit.nanoseconds()).map(ns -> Duration{ns})
-        .ok_or_else(() -> RangeError{reason: jet_duration_kernel_float_error_reason()})
+    ns :: duration_kernel.from_float(n, unit.nanoseconds()) ?? return Err(RangeError{reason: duration_kernel.FLOAT_ERROR_REASON})
+    Ok(Duration{ns})
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:162
-fn jet_duration_in(d: &Duration, unit: &DurationUnit) -> I64 RangeError! { Ok(jet_duration_kernel_in(d.ns, unit.nanoseconds())) }
+fn jet_duration_in(d: &Duration, unit: &DurationUnit) -> I64 RangeError! { Ok(duration_kernel.whole_units(d.ns, unit.nanoseconds())) }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:168
 fn jet_duration_ms_value(d: &Duration) -> I64 { d.as_millis() }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:171
@@ -124,43 +124,43 @@ fn jet_duration_ns_value(d: &Duration) -> I64 { d.ns }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:176
 fn jet_std_time_sleep_duration(duration: &Duration) -> Unit { jet_std_time_sleep_duration_ns(duration.ns) }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:179
-fn jet_duration_is_zero(d: &Duration) -> Bool { jet_duration_kernel_is_zero(d.ns) }
+fn jet_duration_is_zero(d: &Duration) -> Bool { duration_kernel.is_zero(d.ns) }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:182
-fn jet_duration_total_seconds(d: &Duration) -> I64 { jet_duration_kernel_total_seconds(d.ns) }
+fn jet_duration_total_seconds(d: &Duration) -> I64 { duration_kernel.total_seconds(d.ns) }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:185
-fn jet_duration_seconds_value(d: &Duration) -> F64 { jet_duration_kernel_seconds_value(d.ns) }
+fn jet_duration_seconds_value(d: &Duration) -> F64 { duration_kernel.seconds_value(d.ns) }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:188
-fn jet_duration_difference(a: &Duration, b: &Duration) -> Duration { Duration{ns: jet_duration_kernel_difference(a.ns, b.ns)} }
+fn jet_duration_difference(a: &Duration, b: &Duration) -> Duration { Duration{ns: duration_kernel.sub(a.ns, b.ns)} }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:193
-fn jet_duration_abs(d: &Duration) -> Duration { Duration{ns: jet_duration_kernel_abs(d.ns)} }
+fn jet_duration_abs(d: &Duration) -> Duration { Duration{ns: duration_kernel.abs(d.ns)} }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:198
-fn jet_duration_negated(d: &Duration) -> Duration { Duration{ns: jet_duration_kernel_negated(d.ns)} }
+fn jet_duration_negated(d: &Duration) -> Duration { Duration{ns: duration_kernel.negated(d.ns)} }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:203
-fn jet_duration_sign(d: &Duration) -> I64 { jet_duration_kernel_sign(d.ns) }
+fn jet_duration_sign(d: &Duration) -> I64 { duration_kernel.sign(d.ns) }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:206
-fn jet_duration_total_in(d: &Duration, unit: &String) -> F64 { jet_duration_kernel_total_in(d.ns, unit) }
+fn jet_duration_total_in(d: &Duration, unit: &String) -> F64 { duration_kernel.total_in(d.ns, unit) }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:209
+// HELD #4262: kernel_duration has no round until the native signed128 carrier lands.
 fn jet_duration_round(d: &Duration, unit: &String, increment: &I64, mode: &String) -> Duration {
-    ns :: jet_duration_kernel_round(d.ns, unit, increment, mode).unwrap_or(d.ns)
-    Duration{ns}
+    Duration{ns: duration_kernel.round(d.ns, unit, increment, mode) ?? d.ns}
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:218
 fn jet_duration_scale(d: &Duration, factor: &I64) -> Duration {
-    Duration{ns: jet_duration_kernel_scale(d.ns, factor).unwrap_or_else(() -> panic(jet_duration_kernel_scale_error_reason()))}
+    Duration{ns: duration_kernel.scale(d.ns, factor) ?? panic(duration_kernel.SCALE_ERROR_REASON)}
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:224
 fn jet_duration_divide(d: &Duration, factor: &I64) -> Duration {
-    Duration{ns: jet_duration_kernel_divide(d.ns, factor).unwrap_or_else(() -> panic(jet_duration_kernel_scale_error_reason()))}
+    Duration{ns: duration_kernel.divide(d.ns, factor) ?? panic(duration_kernel.SCALE_ERROR_REASON)}
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:231
 impl Duration.Add {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:234
-    fn add(self, rhs: Duration) -> Duration { Duration{ns: jet_duration_kernel_add(self.ns, rhs.ns)} }
+    fn add(self, rhs: Duration) -> Duration { Duration{ns: duration_kernel.add(self.ns, rhs.ns)} }
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:241
 impl Duration.Sub {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:244
-    fn sub(self, rhs: Duration) -> Duration { Duration{ns: jet_duration_kernel_sub(self.ns, rhs.ns)} }
+    fn sub(self, rhs: Duration) -> Duration { Duration{ns: duration_kernel.sub(self.ns, rhs.ns)} }
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:251
 impl JetInstant.Add<Duration> {

@@ -1,69 +1,53 @@
 // Prelude/Core/Time.rs:484–625. The private Period payload has the original
 // three I64 fields; CivilDate remains the sole Gregorian date owner.
 // Borrow receivers/arguments; no allocation or public alternate carrier.
-use core.time.runtime.kernel_civil as period_civil
-use core.time.runtime.kernel_duration as period_duration
+use core.time.runtime.kernel_civil as civil
+use core.time.runtime.kernel_duration as duration
 
 #Equatable
 pub struct CivilPeriod { years: I64, months: I64, days: I64 }
 
 impl CivilPeriod {
     // Rust JetPeriod::new (:491).
-    pub fn new(years: I64, months: I64, days: I64) -> CivilPeriod Never! {
-        CivilPeriod{years: years, months: months, days: days}
-    }
-    // Rust JetPeriod::days (:498).
-    pub fn from_days(n: I64) -> CivilPeriod Never! { CivilPeriod.new(I64{0}, I64{0}, n) }
-    // Rust JetPeriod::months (:501).
-    pub fn from_months(n: I64) -> CivilPeriod Never! { CivilPeriod.new(I64{0}, n, I64{0}) }
-    // Rust JetPeriod::years (:504).
-    pub fn from_years(n: I64) -> CivilPeriod Never! { CivilPeriod.new(n, I64{0}, I64{0}) }
-    // Rust JetPeriod::years_value (:507).
+    pub fn new(years: I64, months: I64, days: I64) -> CivilPeriod Never! { CivilPeriod{years, months, days} }
+    // Rust JetPeriod::{days,months,years} (:498–506).
+    pub fn from_days(days: I64) -> CivilPeriod Never! { CivilPeriod{years: 0, months: 0, days} }
+    pub fn from_months(months: I64) -> CivilPeriod Never! { CivilPeriod{years: 0, months, days: 0} }
+    pub fn from_years(years: I64) -> CivilPeriod Never! { CivilPeriod{years, months: 0, days: 0} }
+    // Rust JetPeriod::{years,months,days}_value (:507–515).
     pub fn years_value(self) -> I64 Never! { self.years }
-    // Rust JetPeriod::months_value (:510).
     pub fn months_value(self) -> I64 Never! { self.months }
-    // Rust JetPeriod::days_value (:513).
     pub fn days_value(self) -> I64 Never! { self.days }
     // Rust JetPeriod::sign (:516): first nonzero field, not a summed duration.
     pub fn sign(self) -> I64 Never! {
-        if self.years != (I64{0}) -> return period_duration.jet_duration_kernel_sign(self.years)
-        if self.months != (I64{0}) -> return period_duration.jet_duration_kernel_sign(self.months)
-        period_duration.jet_duration_kernel_sign(self.days)
+        if {
+            self.years != 0 -> duration.sign(self.years)
+            self.months != 0 -> duration.sign(self.months)
+            else -> duration.sign(self.days)
+        }
     }
     // Rust JetPeriod::is_zero (:525).
     pub fn is_zero(self) -> Bool Never! {
-        self.years == I64{0} && self.months == I64{0} && self.days == I64{0}
+        self.years == 0 && self.months == 0 && self.days == 0
     }
     // Rust JetPeriod::negated (:528), shared saturated I64 scalar policy.
     pub fn negated(self) -> CivilPeriod Never! {
-        CivilPeriod.new(
-            period_duration.jet_duration_kernel_negated(self.years),
-            period_duration.jet_duration_kernel_negated(self.months),
-            period_duration.jet_duration_kernel_negated(self.days),
-        )
+        CivilPeriod.new(duration.negated(self.years), duration.negated(self.months), duration.negated(self.days))
     }
     // Rust JetPeriod::abs (:535): independently abs each field, not sign-based.
     pub fn abs(self) -> CivilPeriod Never! {
-        CivilPeriod.new(
-            period_duration.jet_duration_kernel_abs(self.years),
-            period_duration.jet_duration_kernel_abs(self.months),
-            period_duration.jet_duration_kernel_abs(self.days),
-        )
+        CivilPeriod.new(duration.abs(self.years), duration.abs(self.months), duration.abs(self.days))
     }
     // Rust JetPeriod::add (:542).
     pub fn add(self, other: CivilPeriod) -> CivilPeriod Never! {
-        CivilPeriod.new(
-            self.years.saturating_add(other.years),
-            self.months.saturating_add(other.months),
-            self.days.saturating_add(other.days),
-        )
+        CivilPeriod.new(duration.add(self.years, other.years), duration.add(self.months, other.months), duration.add(self.days, other.days))
     }
     // Rust JetPeriod::sub (:549): MIN negates to MAX before the add. Direct
     // saturating_sub would change MIN - MIN from -1 to 0.
     pub fn sub(self, other: CivilPeriod) -> CivilPeriod Never! { self.add(other.negated()) }
     // Rust JetPeriod::total_in_date (:552), literal evaluation order even for
     // an unknown unit: end, month delta, calendar anchor, then residual days.
-    pub fn total_in_date(self, unit: String, anchor: period_civil.CivilDate) -> Float Never! {
+    pub fn total_in_date(self, unit: String, anchor: civil.CivilDate) -> Float Never! {
         end :: anchor.add_period(self.years, self.months, self.days)
         month_delta :: self.years.saturating_mul(I64{12}).saturating_add(self.months)
         calendar_anchor :: anchor.add_months(month_delta)

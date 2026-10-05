@@ -1,6 +1,6 @@
 // Prelude/Core/Time.rs:1–483. Private canonical civil payloads; no host policy.
 // I64 is the original field width. R0 lowers these operations to scalar leaves,
-// never back through Date/LocalTime builtins. #4391: spell MIN as subtraction.
+// never back through Date/LocalTime builtins.
 // Parsing retains source UTF-8 spans (#4318/#4392); no owned-span substitute.
 // Original parse/ISO parse/time components (:73–149,322–375) require the
 // canonical retained str-span/I64 parser, gated by #4318/#4392.
@@ -19,36 +19,20 @@ pub struct CivilDate { pub year: I64, pub month: I64, pub day: I64 }
 #Comparable
 pub struct CivilTime { pub hour: I64, pub minute: I64, pub second: I64, pub nanos: U32 }
 
-fn civil_min() -> I64 Never! { I64{-9223372036854775807} - I64{1} }
-fn civil_max() -> I64 Never! { I64{9223372036854775807} }
 // Rust rem_euclid for the positive calendar divisors. Fixed %% retains sign.
 fn civil_rem_euclid(n: I64, divisor: I64) -> I64 Never! {
     rem :: n %% divisor
-    if rem < (I64{0}) -> return rem + divisor
-    rem
+    if rem < 0 -> rem + divisor else -> rem
 }
 fn civil_clamp(n: I64, lo: I64, hi: I64) -> I64 Never! {
-    if n < lo -> return lo
-    if n > hi -> return hi
-    n
-}
-fn civil_sat_neg(n: I64) -> I64 Never! {
-    if n == civil_min() -> return civil_max()
-    I64{0} - n
-}
-fn civil_sat_add(a: I64, b: I64) -> I64 Never! {
-    if b > (I64{0}) && a > civil_max() - b -> return civil_max()
-    if b < (I64{0}) && a < civil_min() - b -> return civil_min()
-    a + b
-}
-fn civil_sat_months(years: I64, months: I64) -> I64 Never! {
-    scaled :: if {
-        years > civil_max() /% (I64{12}) -> civil_max()
-        years < (civil_min() /% I64{12} + I64{1}) -> civil_min()
-        else -> years * I64{12}
+    if {
+        n < lo -> lo
+        n > hi -> hi
+        else -> n
     }
-    civil_sat_add(scaled, months)
 }
+// Rust saturating negation: MIN negates to MAX.
+fn civil_sat_neg(n: I64) -> I64 Never! { I64{0}.saturating_sub(n) }
 
 impl CivilDate {
     // Rust JetDate::is_leap (:11).
@@ -57,10 +41,10 @@ impl CivilDate {
     }
     // Rust JetDate::days_in_month_of (:14), including invalid-month default 30.
     pub fn days_in_month_of(y: I64, m: I64) -> I64 Never! {
-        if {
-            m == (I64{1}) || m == (I64{3}) || m == (I64{5}) || m == (I64{7}) || m == (I64{8}) || m == (I64{10}) || m == (I64{12}) -> I64{31}
-            m == (I64{2}) -> if CivilDate.is_leap(y) -> I64{29} else -> I64{28}
-            else -> I64{30}
+        if m == {
+            1 | 3 | 5 | 7 | 8 | 10 | 12 -> 31
+            2 -> if CivilDate.is_leap(y) -> 29 else -> 28
+            else -> 30
         }
     }
     // Rust JetDate::new (:28).
@@ -71,21 +55,21 @@ impl CivilDate {
     // Rust JetDate::to_day_number (:38). No per-call prefix array allocation.
     pub fn to_day_number(self) -> I64 Never! {
         y :: self.year - I64{1}
-        prefix :: if {
-            self.month == (I64{1}) -> I64{0}
-            self.month == (I64{2}) -> I64{31}
-            self.month == (I64{3}) -> I64{59}
-            self.month == (I64{4}) -> I64{90}
-            self.month == (I64{5}) -> I64{120}
-            self.month == (I64{6}) -> I64{151}
-            self.month == (I64{7}) -> I64{181}
-            self.month == (I64{8}) -> I64{212}
-            self.month == (I64{9}) -> I64{243}
-            self.month == (I64{10}) -> I64{273}
-            self.month == (I64{11}) -> I64{304}
+        prefix :: if self.month == {
+            1 -> I64{0}
+            2 -> I64{31}
+            3 -> I64{59}
+            4 -> I64{90}
+            5 -> I64{120}
+            6 -> I64{151}
+            7 -> I64{181}
+            8 -> I64{212}
+            9 -> I64{243}
+            10 -> I64{273}
+            11 -> I64{304}
             else -> I64{334}
         }
-        leap :: if self.month > (I64{2}) && CivilDate.is_leap(self.year) -> I64{1} else -> I64{0}
+        leap :: if self.month > 2 && CivilDate.is_leap(self.year) -> I64{1} else -> I64{0}
         I64{365} * y + y /% I64{4} - y /% I64{100} + y /% I64{400} + prefix + leap + self.day - I64{1}
     }
     // Rust JetDate::from_day_number (:51), same estimate/correction order.
@@ -100,7 +84,7 @@ impl CivilDate {
         }
         n -= CivilDate.new(y, I64{1}, I64{1}).to_day_number()
         m := I64{1}
-        loop m < (I64{12}) && n >= CivilDate.days_in_month_of(y, m) {
+        loop m < 12 && n >= CivilDate.days_in_month_of(y, m) {
             n -= CivilDate.days_in_month_of(y, m)
             m += I64{1}
         }
@@ -141,11 +125,10 @@ impl CivilDate {
     pub fn iso_week_year(self) -> I64 Never! { self.add_days(I64{4} - self.iso_weekday()).year }
     // Rust JetDate::from_iso_week (:202): invalid week 53 is rejected after conversion.
     pub fn from_iso_week(year: I64, week: I64, weekday: I64) -> CivilDate? Never! {
-        if week < (I64{1}) || week > (I64{53}) || weekday < (I64{1}) || weekday > (I64{7}) -> return None
+        if week < 1 || week > 53 || weekday < 1 || weekday > 7 -> return None
         jan4 :: CivilDate.new(year, I64{1}, I64{4})
         date :: jan4.add_days(I64{1} - jan4.iso_weekday()).add_days((week - I64{1}) * I64{7} + weekday - I64{1})
-        if date.iso_week_year() == year && date.iso_week() == week -> return Val(date)
-        None
+        if date.iso_week_year() == year && date.iso_week() == week -> Val(date) else -> None
     }
     // Rust JetDate::truncate (:211).
     pub fn truncate(self, unit: String) -> CivilDate Never! {
@@ -157,8 +140,11 @@ impl CivilDate {
     }
     // Rust JetDate::replace (:218).
     pub fn replace(self, year: I64, month: I64, day: I64) -> CivilDate Never! { CivilDate.new(year, month, day) }
-    // Rust JetDate::add_period (:242). Period owner supplies its three I64 fields.
-    pub fn add_period(self, years: I64, months: I64, days: I64) -> CivilDate Never! { self.add_months(civil_sat_months(years, months)).add_days(days) }
+    // Rust JetDate::add_period (:242). Period owner supplies its three I64
+    // fields; years*12+months saturates before the month walk.
+    pub fn add_period(self, years: I64, months: I64, days: I64) -> CivilDate Never! {
+        self.add_months(years.saturating_mul(I64{12}).saturating_add(months)).add_days(days)
+    }
     // Rust JetDate::subtract_period (:246): negate each field saturating first.
     pub fn subtract_period(self, years: I64, months: I64, days: I64) -> CivilDate Never! { self.add_period(civil_sat_neg(years), civil_sat_neg(months), civil_sat_neg(days)) }
     // Rust JetDate::today_utc (:288–300), pure policy after native/world sample.

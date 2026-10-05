@@ -561,9 +561,9 @@ impl Duration {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2852
     pub fn as_nanos(self) -> I64 Never! { self.ns }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2861
-    fn jet_display(self) -> String Never! { jet_duration_kernel_show(self.ns) }
+    fn jet_display(self) -> String Never! { duration.show(self.ns) }
 }
-use core.prelude.runtime.kernel_duration.[jet_duration_kernel_show]
+use core.time.runtime.kernel_duration as duration
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2866
 #Clone
 #Debug
@@ -572,8 +572,14 @@ pub enum DurationUnit { Nanoseconds, Microseconds, Milliseconds, Seconds, Minute
 impl DurationUnit {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2877
     pub fn nanoseconds(self) -> I64 Never! {
-        match self { .Nanoseconds => 1, .Microseconds => 1_000, .Milliseconds => 1_000_000,
-            .Seconds => 1_000_000_000, .Minutes => 60_000_000_000, .Hours => 3_600_000_000_000 }
+        if self == {
+            .Nanoseconds -> 1
+            .Microseconds -> 1000
+            .Milliseconds -> 1000000
+            .Seconds -> 1000000000
+            .Minutes -> 60000000000
+            .Hours -> 3600000000000
+        }
     }
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2889
