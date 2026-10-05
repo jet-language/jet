@@ -549,8 +549,11 @@ normal and early-return cleanup against other aggregate owners and the retained
 field. Its expected trace is a proof obligation, not a claimed receipt.
 S63/D-SHAPE-RESOURCE1/2 (`syntax-decisions.md:2525`) ratifies scope cleanup;
 `spec.md:843` and `reference/core-library.md:1671` ratify the ordered explicit
-boundary. The field-order fold preserves the original aggregate operation
-rather than deriving a new field order from the order of pattern bindings.
+boundary. This candidate is order-neutral: omitted fields retain exactly the
+whole-value drop fold, rather than deriving order from the pattern bindings.
+The ratified D-FIELD-DROP-ORDER1=A reverse-order cutover is separate card #4617,
+covering all emitters, the native backend and partial destructures together;
+its implementation will flip this fixture's complete expected trace.
 Fresh-result field moves are restricted to plain aggregate owners and stored
 selected fields. A nominal `Close` implementation keeps whole-owner cleanup:
 fields are copied, and a fresh owner is retained in its generated local until
