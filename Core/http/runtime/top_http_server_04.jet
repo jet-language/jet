@@ -95,7 +95,7 @@ fn jet_http_devtools_publish_exception_report(request_id: &String, report: &JetE
     }).unwrap_or("HTTPError")
     fact := JetDevtoolsExceptionFact.new("{request_id}:exception:{code}", request_id, "HTTPError", code, jet_http_unix_now_ms())
     if report.origin.is_none() && report.source_journey.is_empty() {
-        if Val(frame) :: jet_error_page_source(report) {
+        if jet_error_page_source(report) == .Val(frame) {
             file :: jet_http_devtools_source_text(&frame.file, JET_ERROR_PAGE_MAX_SOURCE_BYTES)
             if !file.is_empty() {
                 fact = fact.with_source_frame(JetDevtoolsSourceFrame.new(
@@ -163,8 +163,8 @@ fn jet_http_mux_dispatch_cached(mux: &JetHTTPMux, req: JetHTTPRequest, route_cac
     selected := None
     selected_get := None
     for (order, route) in route_cache.routes.iter().enumerate() {
-        pattern := route.pattern.as_ref() ?? continue
-        if !jet_http_route_matches_path(pattern, route_path) { continue }
+        pattern := route.pattern.as_ref() ?? next
+        if !jet_http_route_matches_path(pattern, route_path) { next }
         path_match_count += 1
         has_head = has_head || route.route.method == "HEAD"
         if route.route.method == requested_method {
@@ -444,7 +444,7 @@ fn jet_http_srv_write_response(writer: &impl Write, resp: &JetHTTPResponse, vers
     if !body_forbidden {
         if reset_content { out.push_str("Content-Length: 0\r\n") }
         else if resp.suppress_body {
-            if Val(length) :: known_length { out.push_str("Content-Length: {length}\r\n") }
+            if known_length == .Val(length) { out.push_str("Content-Length: {length}\r\n") }
         } else if chunked {
             out.push_str("Transfer-Encoding: chunked\r\n")
             if !trailer_names.is_empty() {
@@ -758,7 +758,7 @@ fn jet_http_srv_static_files(req: &JetHTTPRequest, prefix: &String, root: &OSPat
     range :: req.headers.get("range").cloned().filter(fn(_) {
         req.headers.get("if-range").is_none_or(fn(value) { value == &etag || value == &last_modified })
     })
-    (status, start, length, content_range) :: if Val(range) :: range {
+    (status, start, length, content_range) :: if range == .Val(range) {
         (start, end) :: match jet_http_static_range(&range, file_len) {
             Val(range) -> range
             None -> {
@@ -776,7 +776,7 @@ fn jet_http_srv_static_files(req: &JetHTTPRequest, prefix: &String, root: &OSPat
     response.headers.append("accept-ranges", "bytes").expect("static header is valid")
     response.headers.append("etag", &etag).expect("generated ETag is valid")
     response.headers.append("last-modified", &last_modified).expect("generated date is valid")
-    if Val(content_range) :: content_range {
+    if content_range == .Val(content_range) {
         response.headers.append("content-range", &content_range).expect("generated range is valid")
     }
     Ok(^response)
@@ -925,7 +925,7 @@ fn jet_http_request_context_deadline(request: JetHTTPRequest, budget_ms: I64, ne
     }, control.clone())
     _wait :: JetHTTPSchedulerBlockingWait.enter()
     loop {
-        if Val(result) :: join.try_recv() {
+        if join.try_recv() == .Val(result) {
             return match result {
                 .Value(response) -> ^response
                 JetSchedulerResult.Cancelled -> Err(HTTPError.Cancelled)
@@ -1000,7 +1000,7 @@ fn jet_http_mw_cors(policy: &JetHTTPCorsPolicy, next: JetHTTPHandler) -> JetHTTP
         if preflight {
             response := jet_http_srv_empty_response(204)
             jet_http_cors_stamp_vary(&response.headers)
-            if Val(allow) :: allow {
+            if allow == .Val(allow) {
                 _ :: response.headers.set("access-control-allow-origin", &allow)
                 _ :: response.headers.set("access-control-allow-methods", &policy.allow_methods)
                 _ :: response.headers.set("access-control-allow-headers", &policy.allow_headers)
@@ -1010,7 +1010,7 @@ fn jet_http_mw_cors(policy: &JetHTTPCorsPolicy, next: JetHTTPHandler) -> JetHTTP
             return Ok(^response)
         }
         response := next.clone()(^req)?
-        if Val(allow) :: allow {
+        if allow == .Val(allow) {
             _ :: response.headers.set("access-control-allow-origin", &allow)
             jet_http_cors_stamp_vary(&response.headers)
             if policy.credentials { _ :: response.headers.set("access-control-allow-credentials", "true") }
@@ -1238,7 +1238,7 @@ fn jet_http_serve<F: Fn(JetHTTPRequest) -> JetHTTPResponse + Send + Sync>(addr: 
             Ok(x) -> ^x
             Err(e) -> {
                 eprintln("E2801: Accept failed: {e}")
-                continue
+                next
             }
         }
         h :: handler.clone()
@@ -1317,7 +1317,7 @@ fn jet_http_router_dispatch(router: &JetHTTPRouter, req: JetHTTPRequest) -> JetH
     candidates := [(USize, [String:String])]{}
     for (i, route) in router.routes.iter().enumerate() {
         pattern :: JetHTTPRoutePattern{segments:route.segments.clone()}
-        if Val(params) :: jet_http_route_match(&pattern, &path_segs) { candidates.push((i, ^params)) }
+        if jet_http_route_match(&pattern, &path_segs) == .Val(params) { candidates.push((i, ^params)) }
     }
     if candidates.is_empty() { return Ok(jet_http_srv_response_owned(404, "404 not found")) }
     method_match := candidates.iter().filter(fn((i, _)) { router.routes[*i].method == req.method })

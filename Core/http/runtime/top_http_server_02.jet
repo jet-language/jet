@@ -197,7 +197,7 @@ fn jet_http_server_run_listener_inner(listener: TcpListener, mux: JetHTTPMux, op
         per_ip :: Arc.new(Mutex.new([IpAddr:Int].new()))
         drain_deadline_ms :: drain_deadline_ms.unwrap_or_else(() -> Arc.new(AtomicU64.new(U64{0})))
         workers := []
-        for _ in 0..<options.workers.max(1) {
+        loop _ in 0..<options.workers.max(1) {
             worker_rx :: rx.clone()
             worker_mux :: mux.clone()
             worker_options :: options.clone()
@@ -268,7 +268,7 @@ fn jet_http_server_run_listener_inner(listener: TcpListener, mux: JetHTTPMux, op
                         _ :: stream.write_all(b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
                         _ :: stream.flush()
                         _ :: stream.shutdown(Shutdown.Write)
-                        continue
+                        next
                     }
                     connection_count.fetch_add(1, Ordering.AcqRel)
                     *per_ip.lock().unwrap().entry(peer_ip).or_insert(0) += 1
@@ -333,7 +333,7 @@ fn jet_http_server_run_listener_inner(listener: TcpListener, mux: JetHTTPMux, op
             force_cancel.store(true, Ordering.Release)
             for stream in active.lock().unwrap().iter() { _ :: stream.shutdown(Shutdown.Both) }
         }
-        for worker in workers { _ :: worker.join() }
+        loop worker in workers { _ :: worker.join() }
         if accept_error == .Val(error) { return Err(^error) }
         Ok(report)
     }
@@ -420,7 +420,7 @@ fn jet_http_server_handle_stream(stream: &TcpStream, mux: &JetHTTPMux, options: 
             _ :: stream.shutdown(Shutdown.Both)
             return
         }
-        for request_index in 0..<JET_HTTP_MAX_REQUESTS_PER_CONNECTION {
+        loop request_index in 0..<JET_HTTP_MAX_REQUESTS_PER_CONNECTION {
             if request_index > 0 && shutdown.load(Ordering.Acquire) { return }
             (request, request_version) :: match jet_http_srv_read_streaming(stream, options, request_index > 0, if request_index > 0 { Val(shutdown) } else { None }) {
                 .Ok(.Val(request)) -> request,
@@ -620,7 +620,7 @@ fn jet_http2_huffman(input: &[U8]) -> String Err! {
             symbols.sort_by_key(symbol -> (JET_HTTP2_HUFFMAN_LENGTHS[*symbol as USize], *symbol))
             code := U32{0}
             prior := U8{0}
-            for symbol in symbols {
+            loop symbol in symbols {
                 length :: JET_HTTP2_HUFFMAN_LENGTHS[symbol as USize]
                 code <<= (length - prior) as U32
                 entries.insert((length, code), symbol as U8)
@@ -633,7 +633,7 @@ fn jet_http2_huffman(input: &[U8]) -> String Err! {
     output := [U8].new()
     code := U32{0}
     length := U8{0}
-    for byte in input {
+    loop byte in input {
         for shift in (0..<8).rev() {
             code = (code << 1) | (((byte >> shift) & U8{1}) as U32)
             length += U8{1}
@@ -786,7 +786,7 @@ fn jet_http2_encode_response_headers(response: &JetHTTPResponse, length: USize?)
     connection_headers :: response.headers.all("connection").into_iter().flat_map(value -> value.split(',')).map(name -> name.trim()).filter(name -> !name.is_empty()).collect<[_]>() // #4303
     for (name, value) in &response.headers {
         lower :: name.to_ascii_lowercase()
-        if ["connection", "content-length", "keep-alive", "proxy-connection", "transfer-encoding", "upgrade"].contains(lower.as_str()) || connection_headers.iter().any(candidate -> name.eq_ignore_ascii_case(candidate)) { continue }
+        if ["connection", "content-length", "keep-alive", "proxy-connection", "transfer-encoding", "upgrade"].contains(lower.as_str()) || connection_headers.iter().any(candidate -> name.eq_ignore_ascii_case(candidate)) { next }
         jet_http2_encode_integer(&output, 0, U8{4}, U8{0})
         jet_http2_encode_string(&output, &lower)
         jet_http2_encode_string(&output, value)
@@ -866,7 +866,7 @@ fn jet_http2_request_with_trailers(headers: [(String, String)], body: JetHTTPBod
         path
     }
     content_length := None
-    for value in regular.all("content-length") { content_length = Val(jet_http_parse_content_length(value, content_length).map_err(error -> error.to_string())?) }
+    loop value in regular.all("content-length") { content_length = Val(jet_http_parse_content_length(value, content_length).map_err(error -> error.to_string())?) }
     // GATE #4565: kernel primitive
     #Unsafe("publish validated request framing and end-stream state through body mutex and release atomic") {
         if body.state.lock() == .Ok(state) {
@@ -1110,7 +1110,7 @@ fn jet_http2_flush_body<W: Write>(stream: &W, stream_id: U32, outgoing: &JetHTTP
                     .Ok(.Chunk(chunk)) -> {
                         outgoing.chunk = ^chunk
                         outgoing.offset = 0
-                        if outgoing.chunk.is_empty() { continue }
+                        if outgoing.chunk.is_empty() { next }
                     },
                     .Ok(JetHTTP2ResponsePart.Error) -> {
                         jet_http2_write_frame(stream, U8{3}, U8{0}, stream_id, &U32{2}.to_be_bytes())?

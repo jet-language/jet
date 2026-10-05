@@ -60,7 +60,7 @@ fn jet_http2_serve_inner(stream: &JetHTTP2Transport, mux: &JetHTTPMux, options: 
         if shutdown.load(Ordering.Acquire) && !going_away {
             going_away = true
             shared :: drain_deadline_ms.map(fn(value) { value.load(Ordering.Acquire) }).filter(fn(value) { value > 0 })
-            grace_deadline = Val(if Val(deadline_ms) :: shared { jet_http_instant_from_unix_ms(deadline_ms) } else {
+            grace_deadline = Val(if shared == .Val(deadline_ms) { jet_http_instant_from_unix_ms(deadline_ms) } else {
                 grace :: dynamic_grace_ms.map(fn(value) { Duration.from_millis(value.load(Ordering.Acquire)) }).unwrap_or(options.shutdown_grace)
                 Instant.now() + grace
             })
@@ -71,9 +71,9 @@ fn jet_http2_serve_inner(stream: &JetHTTP2Transport, mux: &JetHTTPMux, options: 
         if grace_deadline.is_some_and(fn(deadline) { Instant.now() >= deadline }) { break }
         loop {
             (stream_id, flow_bytes) :: match consumed_rx.try_recv() { Ok(value) -> ^value, Err(_) -> break }
-            request := requests.get_mut(&stream_id) ?? continue
+            request := requests.get_mut(&stream_id) ?? next
             increment :: flow_bytes.min(request.unconsumed_flow)
-            if increment == 0 { continue }
+            if increment == 0 { next }
             request.unconsumed_flow -= increment
             connection_receive_window += increment as I64
             *stream_receive_windows.entry(stream_id).or_insert(0) += increment as I64
@@ -84,24 +84,24 @@ fn jet_http2_serve_inner(stream: &JetHTTP2Transport, mux: &JetHTTPMux, options: 
         }
         loop {
             (stream_id, response) :: match completed_rx.try_recv() { Ok(value) -> ^value, Err(_) -> break }
-            request := requests.get_mut(&stream_id) ?? continue
+            request := requests.get_mut(&stream_id) ?? next
             request.control = None
             response :: response.unwrap_or_else(fn(_) { jet_http_srv_response_owned(500, "500 Internal Server Error") })
             request.response_done = jet_http2_queue_response(stream, stream_id, ^response, &outgoing, &stream_windows, &connection_send_window, initial_send_window, peer_max_frame)?
         }
         ids := outgoing.keys().copied().collect::<[U32]>()
         ids.sort()
-        for id in ids {
-            body := outgoing.remove(&id) ?? continue
+        loop id in ids {
+            body := outgoing.remove(&id) ?? next
             stream_window := stream_windows.get_mut(&id).ok_or_else(fn() { "HTTP/2 response stream lost its window" })?
             if jet_http2_flush_body(stream, id, &body, &connection_send_window, stream_window, peer_max_frame)? {
-                if Val(request) :: requests.get_mut(&id) { request.response_done = true }
+                if requests.get_mut(&id) == .Val(request) { request.response_done = true }
             } else { outgoing.insert(id, ^body) }
         }
         closed := requests.iter().filter_map(fn(entry) { if entry.1.inbound_closed && entry.1.response_done { Val(entry.0) } else { None } }).collect::<[U32]>()
         closed.sort()
-        for id in closed {
-            if Val(request) :: requests.remove(&id) {
+        loop id in closed {
+            if requests.remove(&id) == .Val(request) {
                 if request.unconsumed_flow > 0 {
                     connection_receive_window += request.unconsumed_flow as I64
                     jet_http2_write_frame(stream, 8, 0, 0, &(request.unconsumed_flow as U32).to_be_bytes())?
@@ -115,9 +115,9 @@ fn jet_http2_serve_inner(stream: &JetHTTP2Transport, mux: &JetHTTPMux, options: 
         now :: Instant.now()
         expired := requests.iter().filter_map(fn(entry) { if !entry.1.inbound_closed && now.duration_since(entry.1.body_started) >= options.read_body_timeout { Val(entry.0) } else { None } }).collect::<[U32]>()
         expired.sort()
-        for id in expired {
+        loop id in expired {
             jet_http2_write_frame(stream, 3, 0, id, &U32{8}.to_be_bytes())?
-            if Val(request) :: requests.remove(&id) {
+            if requests.remove(&id) == .Val(request) {
                 if request.unconsumed_flow > 0 {
                     connection_receive_window += request.unconsumed_flow as I64
                     jet_http2_write_frame(stream, 8, 0, 0, &(request.unconsumed_flow as U32).to_be_bytes())?
@@ -134,9 +134,9 @@ fn jet_http2_serve_inner(stream: &JetHTTP2Transport, mux: &JetHTTPMux, options: 
             }
             Err(error) if error == "HTTP/2 read timed out" -> {
                 now :: Instant.now()
-                if going_away { continue }
+                if going_away { next }
                 if now.duration_since(last_activity) >= options.read_idle_timeout { return Ok(()) }
-                continue
+                next
             }
             Err(error) if error.contains("ended early") -> return Ok(())
             Err(error) -> return Err(^error)
@@ -147,7 +147,7 @@ fn jet_http2_serve_inner(stream: &JetHTTP2Transport, mux: &JetHTTPMux, options: 
                 if frame.stream == 0 { return Err("HTTP/2 DATA uses stream zero") }
                 // RFC7540 6.8: discard unknown streams after GOAWAY without aborting drain.
                 if !requests.contains_key(&frame.stream) {
-                    if going_away { continue }
+                    if going_away { next }
                     return Err("HTTP/2 DATA has no open request")
                 }
                 request := requests.get_mut(&frame.stream).expect("checked above")
@@ -177,7 +177,7 @@ fn jet_http2_serve_inner(stream: &JetHTTP2Transport, mux: &JetHTTPMux, options: 
                     if going_away && frame.stream != 0 {
                         jet_http2_write_frame(stream, 3, 0, frame.stream, &U32{7}.to_be_bytes())?
                         stream.flush().map_err(fn(_) { "HTTP/2 RST write failed" })?
-                        continue
+                        next
                     }
                     return Err("HTTP/2 HEADERS stream id is invalid")
                 }
@@ -215,7 +215,7 @@ fn jet_http2_serve_inner(stream: &JetHTTP2Transport, mux: &JetHTTPMux, options: 
                     request.inbound_closed = true
                     request.pending.push_back(JetHTTP2BodyPart.End)
                     request.pump()
-                    continue
+                    next
                 }
                 stream_receive_windows.insert(frame.stream, 65_535)
                 stream_windows.insert(frame.stream, initial_send_window)
@@ -243,7 +243,7 @@ fn jet_http2_serve_inner(stream: &JetHTTP2Transport, mux: &JetHTTPMux, options: 
             }
             2 if frame.stream != 0 && frame.payload.len() == 5 -> {}
             3 if frame.stream != 0 && frame.payload.len() == 4 -> {
-                if Val(request) :: requests.remove(&frame.stream) {
+                if requests.remove(&frame.stream) == .Val(request) {
                     if request.unconsumed_flow > 0 {
                         connection_receive_window += request.unconsumed_flow as I64
                         jet_http2_write_frame(stream, 8, 0, 0, &(request.unconsumed_flow as U32).to_be_bytes())?
@@ -266,7 +266,7 @@ fn jet_http2_serve_inner(stream: &JetHTTP2Transport, mux: &JetHTTPMux, options: 
                             4 -> {
                                 change :: I64{value} - initial_send_window
                                 initial_send_window = I64{value}
-                                for window in stream_windows.values_mut() { *window += change }
+                                loop window in stream_windows.values_mut() { *window += change }
                             }
                             5 if value < 16_384 || value > 16_777_215 -> return Err("HTTP/2 maximum frame size is invalid")
                             5 -> peer_max_frame = value as USize
@@ -288,28 +288,28 @@ fn jet_http2_serve_inner(stream: &JetHTTP2Transport, mux: &JetHTTPMux, options: 
                 if frame.payload.len() != 4 { return Err("HTTP/2 WINDOW_UPDATE is malformed") }
                 increment :: U32.from_be_bytes(frame.payload[0..<4].try_into().unwrap()) & 0x7fff_ffff
                 if increment == 0 { return Err("HTTP/2 WINDOW_UPDATE is malformed") }
-                if frame.stream != 0 && !stream_windows.contains_key(&frame.stream) { continue }
+                if frame.stream != 0 && !stream_windows.contains_key(&frame.stream) { next }
                 window := if frame.stream == 0 { &connection_send_window } else { stream_windows.get_mut(&frame.stream).ok_or_else(fn() { "HTTP/2 WINDOW_UPDATE uses an idle stream" })? }
                 *window = window.checked_add(I64{increment}).filter(fn(value) { value <= 0x7fff_ffff }).ok_or_else(fn() { "HTTP/2 flow-control window overflow" })?
                 ids := if frame.stream == 0 { outgoing.keys().copied().collect::<[U32]>() } else { [frame.stream] }
                 ids.sort()
-                for id in ids {
-                    body := outgoing.remove(&id) ?? continue
+                loop id in ids {
+                    body := outgoing.remove(&id) ?? next
                     stream_window := stream_windows.get_mut(&id).ok_or_else(fn() { "HTTP/2 response stream lost its window" })?
                     if jet_http2_flush_body(stream, id, &body, &connection_send_window, stream_window, peer_max_frame)? {
-                        if Val(request) :: requests.get_mut(&id) { request.response_done = true }
+                        if requests.get_mut(&id) == .Val(request) { request.response_done = true }
                     } else { outgoing.insert(id, ^body) }
                 }
             }
             9 -> {
                 // Orphan CONTINUATION after GOAWAY is discarded, never a drain abort.
-                if going_away { continue }
+                if going_away { next }
                 return Err("HTTP/2 CONTINUATION has no open header block")
             }
             _ -> {}
         }
     }
-    for request in requests.values() { if Val(control) :: &request.control { control.cancel() } }
+    loop request in requests.values() { if (&request.control) == .Val(control) { control.cancel() } }
     drop(^requests)
     dispatch_tasks.drain()
     if !goaway_sent { jet_http2_write_frame(stream, 7, 0, 0, &jet_http2_goaway_payload(*last_stream, 0))? }
@@ -331,8 +331,8 @@ impl<R: Read> Read for JetHTTPContinueReader<R> {
     #Unsafe("set remaining socket timeout and send 100 Continue once before consuming body bytes")
     fn read(self: &Self, output: &[U8]) -> USize Error! {
         remaining :: jet_http_body_deadline_remaining(self.deadline)?
-        if Val(stream) :: self.timeout_stream.as_ref() { stream.set_read_timeout(Val(remaining))? }
-        if Val(stream) :: self.stream.take() {
+        if self.timeout_stream.as_ref() == .Val(stream) { stream.set_read_timeout(Val(remaining))? }
+        if self.stream.take() == .Val(stream) {
             Write.write_all(&stream, b"HTTP/1.1 100 Continue\r\n\r\n")?
             Write.flush(&stream)?
         }
@@ -352,7 +352,7 @@ impl JetHTTPChunkedSocketReader {
     // GATE #4565: kernel primitive
     #Unsafe("read framing bytewise under the fixed body deadline and bounded framing budget")
     fn read_exact_framing(self: &Self, bytes: &[U8]) -> () Error! {
-        for byte in bytes {
+        loop byte in bytes {
             remaining :: jet_http_body_deadline_remaining(self.deadline)?
             self.stream.set_read_timeout(Val(remaining))?
             Read.read_exact(&self.stream, slice.from_mut(byte))?
@@ -456,7 +456,7 @@ fn jet_http_srv_read_streaming(stream: &TcpStream, options: &JetHTTPServerOption
             Ok(0) -> return Err(JetHTTPReadError{status: 400, message: "request headers ended early"})
             Ok(available) if available > header_len -> {
                 header_len = available
-                if Val(end) :: jet_http_header_end(&header[0..<header_len]) {
+                if jet_http_header_end(&header[0..<header_len]) == .Val(end) {
                     request_header_len :: end + 4
                     if request_header_len > MAX_HEADER_BYTES { return Err(JetHTTPReadError{status: 431, message: "request headers are too large"}) }
                     header_len = request_header_len
@@ -530,7 +530,7 @@ fn jet_http_mux_serve_once(addr: &String, mux: JetHTTPMux) -> () HTTPError! {
 #Unsafe("accept/read/dispatch/write one owned connection under scheduler root cancellation control")
 fn jet_http_mux_serve_once_listener_raw(listener: &JetTCPListener, mux: &JetHTTPMux) -> () Err! {
     route_cache :: mux.route_cache()
-    if Val(error) :: route_cache.validation_error.clone() { return Err(^error) }
+    if route_cache.validation_error.clone() == .Val(error) { return Err(^error) }
     (stream, _peer) :: jet_http_accept_once(listener, Duration.from_secs(5))?
     (req, version) :: match jet_http_srv_read_streaming(&stream, jet_http_server_safe_options(), false, None) {
         Ok(Val(request)) -> ^request
@@ -589,7 +589,7 @@ fn jet_http_srv_read_buffered(stream: &TcpStream, options: &JetHTTPServerOptions
     idle_deadline := started + if header_deadline.is_some() { options.read_idle_timeout } else { JET_HTTP_KEEPALIVE_IDLE_TIMEOUT }
     parsed_head: JetHTTPRequestHead? := None
     loop {
-        if Val(header_end) :: jet_http_header_end(pending) {
+        if jet_http_header_end(pending) == .Val(header_end) {
             if header_end > MAX_HEADER_BYTES { return Err(JetHTTPReadError{status: 431, message: "request headers are too large"}) }
             if parsed_head.is_none() { parsed_head = Val(jet_http_validate_headers(&pending[0..<header_end])?) }
             head := parsed_head.as_mut().expect("validated HTTP request head")
@@ -607,14 +607,14 @@ fn jet_http_srv_read_buffered(stream: &TcpStream, options: &JetHTTPServerOptions
                 }
                 JetHTTPRequestFraming.Chunked -> chunked.get_or_insert_with(fn() { JetHTTPChunkState.new(options.max_body_bytes, std.mem.take(&head.trailer_names)) }).advance(&pending[body_start..])?.map(fn(body_end) { body_start + body_end })
             }
-            if Val(request_end) :: request_end { return Ok(Val(pending.drain(0..<request_end).collect())) }
+            if request_end == .Val(request_end) { return Ok(Val(pending.drain(0..<request_end).collect())) }
             if head.expect_continue && !continue_sent {
                 stream.write_all(b"HTTP/1.1 100 Continue\r\n\r\n").map_err(fn(_) { JetHTTPReadError{status: 400, message: "continue response write failed"} })?
                 continue_sent = true
             }
         } else if pending.len() > MAX_HEADER_BYTES { return Err(JetHTTPReadError{status: 431, message: "request headers are too large"}) }
         deadline :: if reading_body { body_deadline.unwrap_or(idle_deadline).min(idle_deadline) }
-            else if Val(deadline) :: header_deadline { deadline.min(idle_deadline) } else { idle_deadline }
+            else if header_deadline == .Val(deadline) { deadline.min(idle_deadline) } else { idle_deadline }
         timeout :: deadline.saturating_duration_since(Instant.now())
         if timeout.is_zero() {
             if keep_alive && pending.is_empty() && header_deadline.is_none() { return Ok(None) }
@@ -627,7 +627,7 @@ fn jet_http_srv_read_buffered(stream: &TcpStream, options: &JetHTTPServerOptions
             Err(error) if error.kind() == ErrorKind.WouldBlock || error.kind() == ErrorKind.TimedOut -> {
                 between_requests :: keep_alive && pending.is_empty() && header_deadline.is_none()
                 if between_requests && shutdown.is_some_and(fn(flag) { flag.load(Ordering.Acquire) }) { return Ok(None) }
-                if Instant.now() < deadline { continue }
+                if Instant.now() < deadline { next }
                 if between_requests { return Ok(None) }
                 return Err(JetHTTPReadError{status: 408, message: "request timed out"})
             }
@@ -664,8 +664,8 @@ fn jet_http_parse_content_length(value: &String, expected: USize?) -> USize JetH
 fn jet_http_srv_request_keep_alive(version: &String, headers: &JetHTTPHeaders) -> Bool {
     close := false
     keep_alive := false
-    for value in headers.all("connection") {
-        for token in jet_http_connection_options(value) {
+    loop value in headers.all("connection") {
+        loop token in jet_http_connection_options(value) {
             close |= token.eq_ignore_ascii_case("close")
             keep_alive |= token.eq_ignore_ascii_case("keep-alive")
         }
@@ -755,7 +755,7 @@ fn jet_http_normalize_reg_name(host: &String) -> String {
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:4575
 fn jet_http_parse_authority(value: &String) -> JetHTTPAuthority? {
     authority := jet_http_trim_ows(value) // #4303
-    if Val(bracketed) :: authority.strip_prefix('[') {
+    if authority.strip_prefix('[') == .Val(bracketed) {
         (host, suffix) :: bracketed.split_once(']')?
         host :: if Ok(address) :: host.parse<std.net.Ipv6Addr>() { address.to_string() }
             else if jet_http_ipv_future_valid(host) { host.to_ascii_lowercase() } else { return None }
@@ -783,11 +783,11 @@ fn jet_http_path_query_valid(target: &String) -> Bool {
         if byte == b'%' {
             if !bytes.get(index + 1).is_some_and(fn(byte) { byte.is_ascii_hexdigit() }) || !bytes.get(index + 2).is_some_and(fn(byte) { byte.is_ascii_hexdigit() }) { return false }
             index += 3
-            continue
+            next
         }
         if byte == b'?' {
             index += 1
-            continue
+            next
         }
         allowed :: match byte { b'-' | b'.' | b'_' | b'~' | b'!' | b'$' | b'&' | b'\'' | b'(' | b')' | b'*' | b'+' | b',' | b';' | b'=' | b':' | b'@' | b'/' -> true, _ -> false }
         if !(byte.is_ascii_alphanumeric() || allowed) { return false }
@@ -804,7 +804,7 @@ fn jet_http_absolute_target(method: &String, target: &String, host: &JetHTTPAuth
         if target.starts_with('/') || target.contains("://") { return Err(JetHTTPReadError{status: 400, message: "CONNECT requires authority-form request target"}) }
         if jet_http_trim_ows(target) != target { return Err(JetHTTPReadError{status: 400, message: "CONNECT authority is malformed"}) }
         authority :: jet_http_parse_authority(target).ok_or(JetHTTPReadError{status: 400, message: "CONNECT authority is malformed"})?
-        if Val(host) :: host {
+        if host == .Val(host) {
             if authority.host != host.host || authority.port != host.port { return Err(JetHTTPReadError{status: 400, message: "CONNECT authority does not match host"}) }
         } else if host_required { return Err(JetHTTPReadError{status: 400, message: "CONNECT request target requires a host header"}) }
         return Ok(jet_http_format_authority(&authority))
@@ -819,7 +819,7 @@ fn jet_http_absolute_target(method: &String, target: &String, host: &JetHTTPAuth
         if jet_http_trim_ows(raw_authority) != raw_authority { return Err(JetHTTPReadError{status: 400, message: "absolute request authority is malformed"}) }
         authority :: jet_http_parse_authority(raw_authority).ok_or(JetHTTPReadError{status: 400, message: "absolute request authority is malformed"})?
         default_port :: if scheme.eq_ignore_ascii_case("http") { 80 } else { 443 }
-        if Val(host) :: host {
+        if host == .Val(host) {
             if authority.host != host.host || authority.port.unwrap_or(default_port) != host.port.unwrap_or(default_port) { return Err(JetHTTPReadError{status: 400, message: "absolute request authority does not match host"}) }
         } else if host_required { return Err(JetHTTPReadError{status: 400, message: "absolute request target requires a host header"}) }
         suffix := &remainder[authority_end..] // #4303
@@ -844,7 +844,7 @@ fn jet_http_chunk_extensions_valid(input: &[U8]) -> Bool {
         if name_len == 0 { return false }
         input = &input[name_len..]
         loop while input.first().is_some_and(fn(byte) { byte == b' ' || byte == b'\t' }) { input = &input[1..] }
-        if input.first() != Val(&b'=') { continue }
+        if input.first() != Val(&b'=') { next }
         input = &input[1..]
         loop while input.first().is_some_and(fn(byte) { byte == b' ' || byte == b'\t' }) { input = &input[1..] }
         if input.first() == Val(&b'"') {
@@ -914,7 +914,7 @@ fn jet_http_validate_headers(header: &[U8]) -> JetHTTPRequestHead JetHTTPReadErr
     host := None
     trailer_values := [String]{}
     headers := JetHTTPHeaders.new()
-    for line in lines {
+    loop line in lines {
         count += 1
         if count > 100 { return Err(JetHTTPReadError{status: 431, message: "request has too many headers"}) }
         if line.starts_with(' ') || line.starts_with('\t') { return Err(JetHTTPReadError{status: 400, message: "folded request headers are not allowed"}) }
@@ -929,7 +929,7 @@ fn jet_http_validate_headers(header: &[U8]) -> JetHTTPRequestHead JetHTTPReadErr
         else if name.eq_ignore_ascii_case("transfer-encoding") {
             if transfer_encoding.replace(jet_http_trim_ows(value)).is_some() { return Err(JetHTTPReadError{status: 400, message: "multiple transfer-encoding headers are not allowed"}) }
         } else if name.eq_ignore_ascii_case("content-encoding") {
-            for coding in value.split(',') {
+            loop coding in value.split(',') {
                 coding := jet_http_trim_ows(coding) // #4303
                 if coding.is_empty() { return Err(JetHTTPReadError{status: 400, message: "content-encoding is malformed"}) }
                 if !coding.eq_ignore_ascii_case("gzip") { return Err(JetHTTPReadError{status: 415, message: "content encoding is not supported"}) }
@@ -952,7 +952,7 @@ fn jet_http_validate_headers(header: &[U8]) -> JetHTTPRequestHead JetHTTPReadErr
     }
     target :: jet_http_absolute_target(method, target, host.as_ref(), version == "HTTP/1.1")?
     if transfer_encoding.is_some() && content_length.is_some() { return Err(JetHTTPReadError{status: 400, message: "content-length and transfer-encoding cannot be combined"}) }
-    framing :: if Val(encoding) :: transfer_encoding {
+    framing :: if transfer_encoding == .Val(encoding) {
         if version != "HTTP/1.1" || !encoding.eq_ignore_ascii_case("chunked") { return Err(JetHTTPReadError{status: 400, message: "transfer-encoding is not supported"}) }
         JetHTTPRequestFraming.Chunked
     } else { JetHTTPRequestFraming.ContentLength(content_length.unwrap_or(0)) }

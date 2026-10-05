@@ -296,7 +296,7 @@ impl JetHTTPBodySource {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:368
     fn h2_cancellable(self: &Self) -> Bool { matches(self, .Bytes(_) | .File(_) | .Reader{closer: Val(_), ..}) }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:372
-    fn close(self: &Self) -> () { if Val(closer) :: self.closer() { closer.close() } }
+    fn close(self: &Self) -> () { if self.closer() == .Val(closer) { closer.close() } }
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:377
 #Derive(Clone, Copy, PartialEq, Eq)
@@ -308,7 +308,7 @@ struct JetHTTPBodyState {
 }
 impl Drop for JetHTTPBodyState {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:394
-    fn drop(self: &Self) -> () { if Val(source) :: self.source.take() { source.close() } }
+    fn drop(self: &Self) -> () { if self.source.take() == .Val(source) { source.close() } }
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:399
 #Derive(Clone)
@@ -362,8 +362,8 @@ impl JetHTTPBody {
         used := HashSet.new()
         loop text in (&values).into_iter().flat_map(fn(pair) { [pair.0.as_str(), pair.1.as_str()] }) {
             loop window in text.as_bytes().windows(LENGTH) {
-                suffix :: match window.strip_prefix(PREFIX.as_bytes()) { Val(suffix) -> suffix, None -> continue }
-                suffix :: match std.str.from_utf8(suffix) { Ok(suffix) -> suffix, Err(_) -> continue }
+                suffix :: match window.strip_prefix(PREFIX.as_bytes()) { Val(suffix) -> suffix, None -> next }
+                suffix :: match std.str.from_utf8(suffix) { Ok(suffix) -> suffix, Err(_) -> next }
                 if Ok(suffix) :: U64.from_str_radix(suffix, 16) { _ :: used.insert(suffix) }
             }
         }
@@ -522,7 +522,7 @@ impl Iterator for JetHTTPBodyChunks {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:749
     #Unsafe("read owned native source and release-publish EOF drain state")
     fn next(self: &Self) -> Self.Item? {
-        if Val(error) :: self.initial_error.take() {
+        if self.initial_error.take() == .Val(error) {
             self.done = true
             return Val(Err(^error))
         }

@@ -124,7 +124,7 @@ impl JetHTTPDeflateTable {
         entries := [(U16{0}, U8{0}); Usize{1} << max_bits]
         loop (symbol, length) in lengths.iter().enumerate() {
             length :: *length as Usize
-            if length == 0 -> continue
+            if length == 0 -> next
             canonical :: next[length]
             next[length] += 1
             reversed: Usize := 0
@@ -503,7 +503,7 @@ impl JetHTTPMux {
         // GATE #4565: kernel primitive
         #Unsafe("lock cache before routes consistently, retain the checked route cache under native shared ownership") {
             cached := self.2.lock().unwrap()
-            if Val(cache) :: cached.as_ref().cloned() -> return ^cache
+            if cached.as_ref().cloned() == .Val(cache) -> return ^cache
             routes :: self.0.lock().unwrap()
             seen := BTreeSet.new()
             validation_error := None
@@ -589,7 +589,7 @@ fn jet_http_route_query_param(req: &JetHTTPRequest, name: String) -> String? ()!
         (raw_key, raw_value) :: pair.split_once('=').unwrap_or((pair, ""))
         key :: raw_key.replace('+', " ")
         key :: jet_http_route_decode_path_segment(key).map_err(fn(_) { () })?.into_owned()
-        if key != name -> continue
+        if key != name -> next
         value :: raw_value.replace('+', " ")
         return Ok(Val(jet_http_route_decode_path_segment(value).map_err(fn(_) { () })?.into_owned()))
     }
@@ -597,7 +597,7 @@ fn jet_http_route_query_param(req: &JetHTTPRequest, name: String) -> String? ()!
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:828
 fn jet_http_route_raw(req: &JetHTTPRequest, name: String) -> String? ()! {
-    if Val(value) :: req.params.get(name) -> return Ok(Val(value.clone()))
+    if req.params.get(name) == .Val(value) -> return Ok(Val(value.clone()))
     jet_http_route_query_param(req, name)
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:834
@@ -643,13 +643,13 @@ fn jet_http_contract_text(object: View<(String, DataTree)>, name: String) -> &St
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:890
 fn jet_http_route_schema_matches(value: &DataTree, schema: &DataTree) -> Bool {
     schema_object :: jet_http_contract_object(schema) ?? return false
-    if Val(any_of) :: jet_http_contract_field(schema_object, "anyOf") {
+    if jet_http_contract_field(schema_object, "anyOf") == .Val(any_of) {
         return match any_of {
             .Array(items) -> items.iter().any(fn(candidate) { jet_http_route_schema_matches(value, candidate) })
             _ -> false
         }
     }
-    if Val(one_of) :: jet_http_contract_field(schema_object, "oneOf") {
+    if jet_http_contract_field(schema_object, "oneOf") == .Val(one_of) {
         return match one_of {
             .Array(items) -> items.iter().filter(fn(candidate) { jet_http_route_schema_matches(value, candidate) }).count() == 1
             _ -> false
@@ -1040,12 +1040,12 @@ impl JetErrorPageProjection {
         html.push_str("</code></dd></dl><h2>Message</h2><p>")
         html.push_str(jet_error_page_html_escape(self.message))
         html.push_str("</p>")
-        if Val(code) :: &self.code {
+        if (&self.code) == .Val(code) {
             html.push_str("<p><strong>Code:</strong> <code>")
             html.push_str(jet_error_page_html_escape(code))
             html.push_str("</code></p>")
         }
-        if Val(frame) :: &self.source_frame {
+        if (&self.source_frame) == .Val(frame) {
             html.push_str("<h2>Source frame</h2><p><code>")
             if !frame.fn_name.is_empty() {
                 html.push_str(jet_error_page_html_escape(frame.fn_name))
@@ -1117,7 +1117,7 @@ fn jet_error_page_projection(status: I64, failure_id: String, request_id: String
 fn jet_http_accept_quality(value: String) -> U16 {
     value := value.trim() // #4303
     if value == "1" -> return 1000
-    if Val(fraction) :: value.strip_prefix("1.") {
+    if value.strip_prefix("1.") == .Val(fraction) {
         return if !fraction.is_empty() && fraction.bytes().all(fn(byte) { byte == U8{48} }) { 1000 } else { 0 }
     }
     fraction :: value.strip_prefix("0.") ?? return 0
@@ -1139,7 +1139,7 @@ fn jet_http_error_page_accepts_json(accept: &String?) -> Bool {
         media :: parameters.next().unwrap_or("").trim().to_ascii_lowercase()
         quality: U16 := 1000
         loop parameter in parameters {
-            (name, value) :: parameter.trim().split_once('=') ?? continue
+            (name, value) :: parameter.trim().split_once('=') ?? next
             if name.trim().eq_ignore_ascii_case("q") -> quality = jet_http_accept_quality(value)
         }
         if quality == 0 -> continue
@@ -1151,7 +1151,7 @@ fn jet_http_error_page_accepts_json(accept: &String?) -> Bool {
             "*/*" -> (true, U8{0}, false)
             _ -> (false, U8{0}, false)
         }
-        if !supported -> continue
+        if !supported -> next
         if !found || quality > best_quality || (quality == best_quality && specificity > best_specificity) {
             found = true
             best_quality = quality

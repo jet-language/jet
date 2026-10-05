@@ -280,7 +280,7 @@ fn native_http_response(result: JetHTTPResponseParts JetHTTPBridgeError!) -> Jet
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPClient.rs:459
 fn native_http_request(req: JetHTTPRequest) -> JetHTTPResponse HTTPError! {
-    if Val(error) :: req.header_error.as_ref() -> return Err(error.clone())
+    if req.header_error.as_ref() == .Val(error) -> return Err(error.clone())
     JetHTTPRequest{method, url, headers, body, body_set, timeout_ms, connect_timeout_ms,
         read_timeout_ms, total_timeout_ms, dns_timeout_ms, tls_timeout_ms, write_timeout_ms,
         first_byte_timeout_ms, redirects, proxy, cookies, form, multipart, ..} :: ^req
