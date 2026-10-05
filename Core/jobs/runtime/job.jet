@@ -56,7 +56,7 @@ impl JetJobClock {
                 .WallClockTime { hour, minute } -> {
                     target_secs :: hour as U64 * U64{3600} + minute as U64 * U64{60}
                     in_window :: secs_of_day >= target_secs && secs_of_day < target_secs + U64{60}
-                    already_ran_today :: self.last_daily_run_day.get(name) == Val(day)
+                    already_ran_today :: self.last_daily_run_day.get(name) == day
                     if in_window && !already_ran_today {
                         &self.last_daily_run_day.insert(name, day)
                         &fired.push(name)
