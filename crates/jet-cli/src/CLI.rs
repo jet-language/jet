@@ -250,6 +250,7 @@ pub fn flag_takes_separate_value(argument: &str) -> bool {
             | "--verify"
             | "--template"
             | "--sort"
+            | "--threads"
     )
 }
 
@@ -909,6 +910,8 @@ const BASE_FLAGS: &[FlagSpec] = &[
     FlagSpec { long: "--profile", help: "With build/run/dev/jobs/package/test: How hard to optimize: release, debug, ci, hardened, or a named optimization bundle" },
     // D-CONF-KEY1=A: command-line contribution to one typed package setting.
     FlagSpec { long: "--set", help: "With build/run/dev/jobs/test: Set one declared package setting as key=value" },
+    // D-JOBS1=A: the compiler's thread cap; never the program's own threads.
+    FlagSpec { long: "--threads", help: "With build/run/check/test/dev/inspect: Use at most N compiler threads (1 = one thread); without it jet picks a safe number of compiler threads" },
     FlagSpec { long: "--builder", help: "With build/jobs: Select a previously bound remote builder" },
     // D-A11YGATE1=B (c134 Phase 6): accessibility is an opt-in lint category.
     FlagSpec { long: "--a11y", help: "With lint: Check roles, labels, and other accessibility basics" },

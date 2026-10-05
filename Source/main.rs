@@ -1255,6 +1255,61 @@ fn check_flags(raw: &[String], subcmd: &str) {
     }
 }
 
+/// D-JOBS1=A: the commands that compile, and so take `--threads N`.
+const THREADS_COMMANDS: &[&str] = &["build", "run", "check", "test", "dev", "inspect"];
+
+/// `--threads N` (or `--threads=N`) before `--`: `None` when absent, else the
+/// compiler's thread cap. A usage error names the flag and exits: a value
+/// below 1 or not a number, or the flag on a command that does not compile.
+/// `--jobs` and `-j`, the spelling other build tools use, are refused on the
+/// compiling commands with a pointer to `--threads`; `jet jobs` is unchanged.
+fn parse_compiler_threads(jet_argv: &[String], command: &str) -> Option<usize> {
+    let compiling = THREADS_COMMANDS.contains(&command);
+    for (index, argument) in jet_argv.iter().enumerate() {
+        let jobs_flag = argument == "--jobs"
+            || argument.starts_with("--jobs=")
+            || argument == "-j"
+            || (argument.starts_with("-j") && argument.len() > 2);
+        if compiling && jobs_flag {
+            let head = argument.split('=').next().unwrap_or(argument);
+            crate::cli_error!(
+                @full "E2102",
+                format!("`{head}` isn't a flag jet understands"),
+                "`jet jobs` runs your project's named jobs; the compiler's thread cap is `--threads`",
+                "write `--threads N` to cap the compiler at N threads"
+            );
+            exit(ExitCodes::USAGE);
+        }
+        let text = if let Some(value) = argument.strip_prefix("--threads=") {
+            value
+        } else if argument == "--threads" {
+            jet_argv.get(index + 1).map_or("", String::as_str)
+        } else {
+            continue;
+        };
+        if !compiling {
+            crate::cli_error!(
+                @fix "E2102",
+                "`--threads` is only valid with a command that compiles",
+                "use it with `jet build`, `run`, `check`, `test`, `dev`, or `inspect`"
+            );
+            exit(ExitCodes::USAGE);
+        }
+        return match text.parse::<i64>() {
+            Ok(count) if count >= 1 => Some(usize::try_from(count).unwrap_or(usize::MAX)),
+            _ => {
+                crate::cli_error!(
+                    @fix "E2104",
+                    format!("`--threads` needs a whole number of compiler threads, at least 1, not `{text}`"),
+                    "write `--threads 1` for one compiler thread, or leave the flag out to let jet choose"
+                );
+                exit(ExitCodes::USAGE);
+            }
+        };
+    }
+    None
+}
+
 fn reject_retired_gate_flags(argv: &[String], json: bool) {
     let Some(retirement) = jet::Syntax::retirement("allow-impure") else {
         return;
@@ -3080,6 +3135,9 @@ fn main() {
             {
                 continue;
             }
+            if a.starts_with("--threads=") {
+                continue;
+            }
             // Syntax tokens that begin with `-` (`->`, `-=`) are valid `jet
             // explain` queries; keep them positional rather than as flags.
             let explain_syntax_query = jet_argv.first().is_some_and(|arg| arg == "explain")
@@ -3172,6 +3230,15 @@ fn main() {
         if !output_allowed || output.is_empty() {
             crate::cli_error!(@fix "E2104", "`--output` needs a runnable Output address or `jet build --lib`", format!("write `jet run --output <address> <file.{}>`, or `jet build --lib --output <name> <file.{}>`", jet::Syntax::FILE_EXT, jet::Syntax::FILE_EXT));
             exit(ExitCodes::USAGE);
+        }
+    }
+
+    // D-JOBS1=A: the one compiler thread cap, installed before anything
+    // compiles. An unknown command or a help request reports first.
+    let compiles = top_job || jet::CLI::is_builtin(cmd) || looks_like_jet_source(cmd);
+    if compiles && !jet_argv.iter().any(|a| jet::CLI::is_help_flag(a)) {
+        if let Some(threads) = parse_compiler_threads(jet_argv, output_command) {
+            jet_foundation::CompilerThreads::set_cap(threads);
         }
     }
 

@@ -1753,8 +1753,8 @@ impl MainBodyPass<'_, '_> {
 /// Check every body of one module. Bodies are independent jobs checked on a
 /// bounded worker pool (see `Parallel`) against the module's final tables;
 /// their products are merged in source order, so the checked module,
-/// diagnostics and facts equal a serial run's. `JET_CHECK_THREADS=1` runs the
-/// same jobs one by one.
+/// diagnostics and facts equal a serial run's. `--threads 1` runs the same
+/// jobs one by one.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn check_module_bodies(
     module: &mut crate::AST::LoadedModule,

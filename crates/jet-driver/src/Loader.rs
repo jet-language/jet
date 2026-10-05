@@ -438,11 +438,10 @@ fn prepare_frontend_module(source: &str) -> PreparedFrontendModule {
     }
 }
 
+/// Lex/parse workers for `job_count` sources, admitted under the compiler's
+/// one thread cap (at most `MAX_FRONTEND_WORKERS` without `--threads`).
 fn frontend_worker_count(job_count: usize) -> usize {
-    let available = std::thread::available_parallelism()
-        .map(std::num::NonZeroUsize::get)
-        .unwrap_or(1);
-    job_count.min(available).min(MAX_FRONTEND_WORKERS).max(1)
+    jet_foundation::CompilerThreads::admit(job_count, MAX_FRONTEND_WORKERS)
 }
 
 /// Prepare staged source files concurrently, but cap the fan-out and publish

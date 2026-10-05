@@ -157,6 +157,13 @@ The options below are intentionally named exactly as in `target/debug/jet help`:
   control test or development execution; `--browser` selects browser engines.
 - `--explain-partition` is the web-target build option that shows JavaScript or
   WebAssembly assignment.
+- `--threads N` caps the compiler at N threads on `build`, `run`, `check`,
+  `test`, `dev`, and `inspect` (D-JOBS1=A); without it the compiler admits
+  threads automatically up to the reported cores. It never limits the threads
+  of the program jet builds or runs, every value gives the same diagnostics
+  and output bytes, and `build --verbose` reports the cap it used. No
+  environment variable sets it. `--jobs` and `-j` are usage errors (E2102)
+  that point to `--threads`, because `jobs` names project jobs.
 
 For C and C++, the driver-specific options are `--project-root`, `--build-root`,
 `-c`, `-o`, `-MMD`, `-MD`, `-MF`, `-MT`, reserved `--sysroot`, `-I`, `-D`, `-L`,
