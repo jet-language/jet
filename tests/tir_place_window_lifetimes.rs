@@ -187,6 +187,7 @@ fn run() {
     short :: [U8{9}]
     middle :: window(asset, 1, 2)
     print(middle.len())
+    print(window(asset, 1, 2).len())
     picked :: longer(short, asset, 1)
     print(picked[0])
 }
@@ -210,7 +211,7 @@ fn card_4392_returned_view_names_its_owner_lifetime() {
         rust.contains("-> &'__jet_view [u8] {"),
         "the returned view does not name its owners' lifetime:\n{rust}"
     );
-    assert_tiers_agree("tir_card_4392_view_return_runtime", CARD_4392_SOURCE, "2\n1\n");
+    assert_tiers_agree("tir_card_4392_view_return_runtime", CARD_4392_SOURCE, "2\n2\n1\n");
 }
 
 const CARD_4392_CARRIER_SOURCE: &str = r###"

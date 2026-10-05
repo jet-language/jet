@@ -565,6 +565,15 @@ fn jet_rust_emit_is_string_view_type(ty: MIRType) -> Bool Never! {
     }
 }
 
+// MIRRust is_view_type: a direct reference carrier, through tags.
+fn jet_rust_emit_is_view_type(ty: MIRType) -> Bool Never! {
+    if ty.kind == {
+        .Apply(name, _) -> name.name == "View" || name.name == "ViewMut"
+        .Tagged(_, inner) -> jet_rust_emit_is_view_type(inner)
+        else -> false
+    }
+}
+
 // MIRRust exact_int_binary's carrier test: exact Int, through refinements.
 fn jet_rust_emit_exact_int_carrier(ty: MIRType) -> Bool Never! {
     if ty.kind == {

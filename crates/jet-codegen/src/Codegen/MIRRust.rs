@@ -17326,7 +17326,17 @@ impl<'a> RustEmitter<'a> {
                     self.parameter_place(function, value, mutable)
                 )
             }
-            _ => self.value_slot_reference(value, mutable),
+            _ => {
+                let reference = self.value_slot_reference(value, mutable);
+                // A view slot contains a Rust reference already. Borrow its
+                // referent, not the reference carrier (e.g. &&[T] for len).
+                if is_view_type(self.value_type(function, value)) {
+                    let borrow = if mutable { "&mut " } else { "&" };
+                    format!("{borrow}**({reference})")
+                } else {
+                    reference
+                }
+            }
         }
     }
 
