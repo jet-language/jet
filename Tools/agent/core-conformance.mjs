@@ -439,6 +439,7 @@ const UNIT_RESULT_KEYS = new Set([
   "core.math.random.shuffle",
   "core.time.sleep",
   "core.sys.close_fd",
+  "core.sys.atexit",
   "core.sys.sync",
   "core.sys.set",
   "core.sys.stop",
