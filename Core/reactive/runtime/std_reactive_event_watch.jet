@@ -737,7 +737,7 @@ impl<T: Clone + Send, E: Clone + Send> JetAsyncEvent<T, E> {
             jet_event_observe("AsyncEvent", event_id, owner_id, id, 0, "Removed", -1, -1, -1, capacity, overflow, priority, "None", "None")
         })
         (queued, blocked, running) :: {
-            state :: self.state.lock().unwrap()
+            state :: self.state.lock() ?? panic("unwrap failed")
             (state.queued.len(), state.blocked.len(), state.running)
         }
         jet_event_observe("AsyncEvent", self.owner_id, scope.id, id, 0, "Subscribed",
@@ -764,7 +764,7 @@ impl<T: Clone + Send, E: Clone + Send> JetAsyncEvent<T, E> {
             phase: AtomicU8.new(JET_EVENT_PENDING), accepted: AtomicBool.new(false), payload: Mutex.new(Val(^payload)),
             terminal: Mutex.new(None), trace: Mutex.new([]), wake: ParkSlot.new(), control: control.clone()})
         {
-            state := self.state.lock().unwrap()
+            state := self.state.lock() ?? panic("unwrap failed")
             if state.closed { _ :: Self.complete_entry(&entry, JET_EVENT_PENDING, false, .Closed) }
             else if state.cancelled { _ :: Self.complete_entry(&entry, JET_EVENT_PENDING, false, .Cancelled) }
             else if state.queued.len() < self.policy.capacity as USize {
@@ -809,13 +809,13 @@ impl<T: Clone + Send, E: Clone + Send> JetAsyncEvent<T, E> {
     // GATE #4565: kernel primitive
     #Unsafe("absorbing terminal CAS publishes only the winner and drops its payload once")
     fn complete_entry(entry: &Arc<JetAsyncEntry<T, E>>, expected: U8, accepted: Bool, state: JetDispatchState) -> Bool {
-        terminal := entry.terminal.lock().unwrap()
+        terminal := entry.terminal.lock() ?? panic("unwrap failed")
         if expected == JET_EVENT_TERMINAL { return false }
         if entry.phase.compare_exchange(expected, JET_EVENT_TERMINAL, Ordering.AcqRel, Ordering.Acquire).is_err() { return false }
         entry.accepted.store(accepted, Ordering.Release)
-        trace :: entry.trace.lock().unwrap().clone()
+        trace :: (entry.trace.lock() ?? panic("unwrap failed")).clone()
         *terminal = Val(JetDispatchReport.terminal_with_trace(accepted, state, ^trace))
-        _ :: entry.payload.lock().unwrap().take()
+        _ :: (entry.payload.lock() ?? panic("unwrap failed")).take()
         jet_event_observe("AsyncEvent", entry.event_id, 0, 0, entry.id, "Terminal", -1, -1, -1,
             entry.capacity, entry.overflow.observation(), 0, "None", state.observation())
         entry.wake.wake()
@@ -825,14 +825,14 @@ impl<T: Clone + Send, E: Clone + Send> JetAsyncEvent<T, E> {
     // GATE #4565: kernel primitive
     #Unsafe("running-to-terminal winner owns report publication and payload release")
     fn complete_report(entry: &Arc<JetAsyncEntry<T, E>>, report: JetDispatchReport<E>) -> Bool {
-        terminal := entry.terminal.lock().unwrap()
+        terminal := entry.terminal.lock() ?? panic("unwrap failed")
         if entry.phase.compare_exchange(JET_EVENT_RUNNING, JET_EVENT_TERMINAL, Ordering.AcqRel, Ordering.Acquire).is_err() { return false }
         failure :: if report.failures.iter().any(fn(failure) { match failure { .Panic(_) -> true, _ -> false } }) { "Panic" }
             else if report.failures.is_empty() { "None" } else { "Handler" }
         jet_event_observe("AsyncEvent", entry.event_id, 0, 0, entry.id, "Terminal", -1, -1, -1,
             entry.capacity, entry.overflow.observation(), 0, failure, report.state.observation())
         *terminal = Val(^report)
-        _ :: entry.payload.lock().unwrap().take()
+        _ :: (entry.payload.lock() ?? panic("unwrap failed")).take()
         entry.wake.wake()
         true
     }
@@ -841,7 +841,7 @@ impl<T: Clone + Send, E: Clone + Send> JetAsyncEvent<T, E> {
     #Unsafe("detach queued and blocked entries before terminalizing; running task controls cancel cooperatively")
     fn hard_cancel_state(state: &Arc<Mutex<JetAsyncState<T, E>>>) -> {
         (queued, blocked, running) :: {
-            state := state.lock().unwrap()
+            state := state.lock() ?? panic("unwrap failed")
             if state.cancelled { return }
             state.cancelled = true
             (state.queued.drain(..).collect(), state.blocked.drain(..).collect(), state.running_entries.clone())
@@ -865,7 +865,7 @@ impl<T: Clone + Send, E: Clone + Send> JetAsyncEvent<T, E> {
                 _ :: Self.complete_entry(&entry, phase, accepted, .Cancelled)
                 self.remove_entry(&entry)
                 entry.terminal.lock().unwrap().clone().unwrap_or_else(fn() {
-                    JetDispatchReport.terminal_with_trace(accepted, .Cancelled, entry.trace.lock().unwrap().clone())
+                    JetDispatchReport.terminal_with_trace(accepted, .Cancelled, (entry.trace.lock() ?? panic("unwrap failed")).clone())
                 })
             }
             Err(payload) if jet_scheduler_is_deadline_unwind(payload.as_ref()) -> {
@@ -874,7 +874,7 @@ impl<T: Clone + Send, E: Clone + Send> JetAsyncEvent<T, E> {
                 _ :: Self.complete_entry(&entry, phase, accepted, .DeadlineExceeded)
                 self.remove_entry(&entry)
                 entry.terminal.lock().unwrap().clone().unwrap_or_else(fn() {
-                    JetDispatchReport.terminal_with_trace(accepted, .DeadlineExceeded, entry.trace.lock().unwrap().clone())
+                    JetDispatchReport.terminal_with_trace(accepted, .DeadlineExceeded, (entry.trace.lock() ?? panic("unwrap failed")).clone())
                 })
             }
             Err(payload) -> panic.resume_unwind(^payload)
@@ -885,25 +885,25 @@ impl<T: Clone + Send, E: Clone + Send> JetAsyncEvent<T, E> {
     #Unsafe("scheduler dispatch serializes queue admission, reserves once listeners atomically, and preserves typed unwind")
     fn run_entry_inner(self: &Self, entry: &Arc<JetAsyncEntry<T, E>>) -> JetDispatchReport<E> {
         loop {
-            if entry.terminal.lock().unwrap().clone() == .Val(report) { return ^report }
+            if (entry.terminal.lock() ?? panic("unwrap failed")).clone() == .Val(report) { return ^report }
             // Deadline competes with Queued -> Running; expired payload is never delivered.
             jet_deadline_check("async event dispatch")
             listeners :: {
-                state := self.state.lock().unwrap()
+                state := self.state.lock() ?? panic("unwrap failed")
                 if state.cancelled {
                     phase :: entry.phase.load(Ordering.Acquire)
                     accepted :: entry.accepted.load(Ordering.Acquire)
                     _ :: Self.complete_entry(entry, phase, accepted, .Cancelled)
-                    return entry.terminal.lock().unwrap().clone().unwrap_or_else(fn() {
-                        JetDispatchReport.terminal_with_trace(accepted, .Cancelled, entry.trace.lock().unwrap().clone())
+                    return (entry.terminal.lock() ?? panic("unwrap failed")).clone().unwrap_or_else(fn() {
+                        JetDispatchReport.terminal_with_trace(accepted, .Cancelled, (entry.trace.lock() ?? panic("unwrap failed")).clone())
                     })
                 }
                 if state.blocked.iter().position(fn(item) { item.id == entry.id }) == .Val(pos) {
                     if state.closed {
                         _ :: state.blocked.remove(pos)
                         _ :: Self.complete_entry(entry, JET_EVENT_PENDING, false, .Closed)
-                        return entry.terminal.lock().unwrap().clone().unwrap_or_else(fn() {
-                            JetDispatchReport.terminal_with_trace(false, .Closed, entry.trace.lock().unwrap().clone())
+                        return (entry.terminal.lock() ?? panic("unwrap failed")).clone().unwrap_or_else(fn() {
+                            JetDispatchReport.terminal_with_trace(false, .Closed, (entry.trace.lock() ?? panic("unwrap failed")).clone())
                         })
                     }
                     if state.queued.len() < self.policy.capacity as USize {
@@ -944,15 +944,15 @@ impl<T: Clone + Send, E: Clone + Send> JetAsyncEvent<T, E> {
                 } else { None }
             }
             if listeners == .Val(handlers) {
-                payload :: entry.payload.lock().unwrap().take() ?? {
+                payload :: (entry.payload.lock() ?? panic("unwrap failed")).take() ?? {
                     accepted :: entry.accepted.load(Ordering.Acquire)
                     _ :: Self.complete_entry(entry, JET_EVENT_RUNNING, accepted, .Cancelled)
                     self.remove_entry(entry)
-                    return entry.terminal.lock().unwrap().clone().unwrap_or_else(fn() {
-                        JetDispatchReport.terminal_with_trace(accepted, .Cancelled, entry.trace.lock().unwrap().clone())
+                    return (entry.terminal.lock() ?? panic("unwrap failed")).clone().unwrap_or_else(fn() {
+                        JetDispatchReport.terminal_with_trace(accepted, .Cancelled, (entry.trace.lock() ?? panic("unwrap failed")).clone())
                     })
                 }
-                report := JetDispatchReport{accepted: true, state: .Delivered, delivered_handlers: 0, failures: [], trace: entry.trace.lock().unwrap().clone()}
+                report := JetDispatchReport{accepted: true, state: .Delivered, delivered_handlers: 0, failures: [], trace: (entry.trace.lock() ?? panic("unwrap failed")).clone()}
                 for (handler_index, (priority, subscription_id, owner_id, once, active, handler)) in handlers.into_iter().enumerate() {
                     // Reserved once snapshot invokes despite clearing active; later snapshots cannot reserve it.
                     if not once && not active.load(Ordering.Acquire) { next }
@@ -1005,7 +1005,7 @@ impl<T: Clone + Send, E: Clone + Send> JetAsyncEvent<T, E> {
                 report.trace.push("terminal:{report.state.observation()}")
                 _ :: Self.complete_report(entry, report.clone())
                 wakes :: {
-                    state := self.state.lock().unwrap()
+                    state := self.state.lock() ?? panic("unwrap failed")
                     before :: state.running_entries.len()
                     state.running_entries.retain(fn(item) { item.id != entry.id })
                     if state.running_entries.len() != before { state.running = state.running.saturating_sub(1) }
@@ -1013,7 +1013,7 @@ impl<T: Clone + Send, E: Clone + Send> JetAsyncEvent<T, E> {
                     state.queued.front().into_iter().chain(state.blocked.iter()).map(fn(item) { item.wake.clone() }).collect()
                 }
                 loop wake in wakes { wake.wake() }
-                return entry.terminal.lock().unwrap().clone().unwrap_or(^report)
+                return (entry.terminal.lock() ?? panic("unwrap failed")).clone().unwrap_or(^report)
             }
             jet_scheduler_yield("async event dispatch", &entry.wake, None)
         }
@@ -1023,7 +1023,7 @@ impl<T: Clone + Send, E: Clone + Send> JetAsyncEvent<T, E> {
     #Unsafe("remove one dispatch from queue and running set; wake eligible waiters outside lock")
     fn remove_entry(self: &Self, entry: &Arc<JetAsyncEntry<T, E>>) -> {
         wakes :: {
-            state := self.state.lock().unwrap()
+            state := self.state.lock() ?? panic("unwrap failed")
             state.queued.retain(fn(item) { item.id != entry.id })
             state.blocked.retain(fn(item) { item.id != entry.id })
             before :: state.running_entries.len()
@@ -1038,7 +1038,7 @@ impl<T: Clone + Send, E: Clone + Send> JetAsyncEvent<T, E> {
     #Unsafe("close stops new admission and terminalizes blocked entries, preserving queued work")
     pub fn close(self: &Self) -> {
         blocked :: {
-            state := self.state.lock().unwrap()
+            state := self.state.lock() ?? panic("unwrap failed")
             if state.closed { return }
             state.closed = true
             state.blocked.drain(..).collect()
@@ -1085,7 +1085,7 @@ impl<T: Clone, R: Clone> JetHook<T, R> {
         id :: #Unsafe("unique hook listener id") { JET_EVENT_NEXT_ID.fetch_add(1, Ordering.Relaxed) }
         self.listeners.borrow_mut().push(JetHookListener{id: id, priority: priority, once: once, sub: sub.clone(), handler: Rc.new(handler)})
         listeners :: Rc.downgrade(&self.listeners)
-        id :: self.listeners.borrow().last().expect("hook listener").id
+        id :: (self.listeners.borrow().last() ?? panic("hook listener")).id
         sub.set_cleanup(fn() {
             if listeners.upgrade() == .Val(values) { values.borrow_mut().retain(fn(listener) { listener.id != id }) }
         })
