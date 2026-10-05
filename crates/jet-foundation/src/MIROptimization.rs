@@ -6371,9 +6371,10 @@ fn inline_operation(
         MirOperation::ScopeEnter { scope, test_member } => MirOperation::ScopeEnter {
             scope: inline_scope(ids, *scope),
             test_member: test_member.as_ref().map(|member| match member {
-                MirTestScopeMember::ExpectFail { expected_code } => {
+                MirTestScopeMember::ExpectFail { expected_code, expected_message } => {
                     MirTestScopeMember::ExpectFail {
                         expected_code: expected_code.clone(),
+                        expected_message: expected_message.clone(),
                     }
                 }
                 MirTestScopeMember::Timeout { duration } => MirTestScopeMember::Timeout {

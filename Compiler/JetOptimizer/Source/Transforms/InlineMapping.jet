@@ -876,7 +876,7 @@ fn mir_pass_inline_capture(capture: MIRCaptureOperand, maps: MIRInlineMaps) -> M
 
 fn mir_pass_inline_test_scope_member(member: MIRTestScopeMember, maps: MIRInlineMaps) -> MIRTestScopeMember Never! {
     if member == {
-        .ExpectFail(code) -> MIRTestScopeMember.ExpectFail{expected_code: code}
+        .ExpectFail(code, message) -> MIRTestScopeMember.ExpectFail{expected_code: code, expected_message: message}
         .Timeout(duration) -> MIRTestScopeMember.Timeout{duration: mir_pass_inline_value(maps, duration)}
         .Skip(whole_test) -> MIRTestScopeMember.Skip{whole_test: whole_test}
         .Measure -> MIRTestScopeMember.Measure

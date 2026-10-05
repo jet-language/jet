@@ -1124,6 +1124,45 @@ fn retired_emit_rust_flag_teaches_canonical_command() {
     assert!(stderr.contains("Fix: run `jet emit --rust <file.jet>`"));
 }
 
+/// D-JOBS1=A: `--threads N` caps the compiler on the compiling commands;
+/// `--jobs`/`-j` point to it, a value below 1 names the flag, and a command
+/// that does not compile refuses it. All are usage errors.
+#[test]
+fn threads_flag_is_the_compiler_thread_cap() {
+    let dir = isolated_cwd("threads_flag");
+    fs::write(dir.join("run.jet"), "fn run() { print(\"ok\") }\n").unwrap();
+    let run = |args: &[&str]| {
+        let output = Command::new(jet())
+            .args(args)
+            .current_dir(&dir)
+            .env("NO_COLOR", "1")
+            .output()
+            .unwrap();
+        (output.status.code(), String::from_utf8_lossy(&output.stdout).into_owned(), String::from_utf8_lossy(&output.stderr).into_owned())
+    };
+    for args in [&["check", "run.jet", "--threads", "1"][..], &["check", "run.jet", "--threads=2"]] {
+        let (code, _, stderr) = run(args);
+        assert_eq!(code, Some(0), "`jet {}`: {stderr}", args.join(" "));
+    }
+    let (code, stdout, stderr) = run(&["run", "run.jet", "--threads", "1"]);
+    assert_eq!(code, Some(0), "{stderr}");
+    assert_eq!(stdout, "ok\n");
+    for flag in ["--jobs", "-j"] {
+        let (code, _, stderr) = run(&["build", "run.jet", flag, "2"]);
+        assert_eq!(code, Some(2), "{stderr}");
+        assert!(stderr.contains(&format!("Error [E2102]: `{flag}` isn't a flag jet understands")), "{stderr}");
+        assert!(stderr.contains("Fix: Write `--threads N` to cap the compiler at N threads"), "{stderr}");
+    }
+    for value in ["0", "x"] {
+        let (code, _, stderr) = run(&["check", "run.jet", "--threads", value]);
+        assert_eq!(code, Some(2), "{stderr}");
+        assert!(stderr.contains(&format!("Error [E2104]: `--threads` needs a whole number of compiler threads, at least 1, not `{value}`")), "{stderr}");
+    }
+    let (code, _, stderr) = run(&["fmt", "run.jet", "--threads", "2"]);
+    assert_eq!(code, Some(2), "{stderr}");
+    assert!(stderr.contains("Error [E2102]: `--threads` is only valid with a command that compiles"), "{stderr}");
+}
+
 #[test]
 fn duplicate_authority_right_is_e2102() {
     let dir = isolated_cwd("authority_duplicate_right");

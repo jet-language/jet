@@ -296,6 +296,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         // error. Nameable so a query function can annotate its connection
         // parameter — the shape a `#(DB.Read)` live query (D-LIVEQUERY1) takes.
         | "DBConnection" | "DBScope" | "DBPool" | "DBLease" | "DBPoolReceipt" | "DBError"
+        | "PluginFrame" | "PluginFault" | "PluginLimit" | "PluginError"
         | "DBValue"
         // only constructable part of the host grant value.
         | "Mod" | "ModGrant"
@@ -3495,6 +3496,9 @@ pub fn core_handle_owns_method(handle_ty: &str, method: &str) -> bool {
 #[doc(hidden)]
 pub fn core_file_handle_dispatch_name(handle_ty: &str) -> Option<&'static str> {
     match handle_ty {
+        "FileScope" | "<corelib>/Core/files::Core/files/files.jet::FileScope" => {
+            Some("FileScope")
+        }
         "FileReader" | "<corelib>/Core/files::Core/files/files.jet::FileReader" => {
             Some("FileReader")
         }
@@ -3528,13 +3532,13 @@ pub fn file_handle_method_return(
             ("window" | "window_len", 2) => Some(Some(result_ty(
                 Type::Apply {
                     name: "View".to_string(),
-                    args: vec![Type::List(Box::new(u8_ty()))],
+                    args: vec![u8_ty()],
                 },
                 io.clone(),
             ))),
             ("lines", 0) => Some(Some(crate::Collections::view_iter_ty(Type::Apply {
                 name: "View".to_string(),
-                args: vec![Type::List(Box::new(u8_ty()))],
+                args: vec![u8_ty()],
             }))),
             ("len", 0) => Some(Some(Type::Int)),
             ("is_empty", 0) => Some(Some(Type::Bool)),
@@ -3748,6 +3752,16 @@ pub(crate) fn core_constructable_fields(type_name: &str) -> Option<Vec<(String, 
             "read".to_string(),
             Type::List(Box::new(Type::String)),
         )]),
+        "PluginFrame" => Some(vec![
+            ("function".to_string(), Type::String),
+            ("component".to_string(), Type::String),
+            ("offset".to_string(), Type::Int),
+        ]),
+        "PluginFault" => Some(vec![
+            ("export".to_string(), Type::String),
+            ("message".to_string(), Type::String),
+            ("frames".to_string(), Type::List(Box::new(Type::Named("PluginFrame".to_string())))),
+        ]),
         // D-PROCESS-SESSION1=A / D-PROCESS-SESSION2=D: explicit terminal
         // controls use named fields so misspellings fail in sema.
         "TerminalSize" => Some(vec![
@@ -4255,6 +4269,29 @@ pub(crate) fn core_generic_constructable_fields(
         }
         _ => None,
     }
+}
+
+pub(crate) fn core_plugin_variants(enum_name: &str) -> Option<std::collections::HashMap<String, (Span, VariantPayload)>> {
+    let span = Span::new(0, 0);
+    let mut variants = std::collections::HashMap::new();
+    match enum_name {
+        "PluginLimit" => {
+            for name in ["Fuel", "Memory", "Table", "Time", "Wire"] {
+                variants.insert(name.to_string(), (span, VariantPayload::Unit));
+            }
+        }
+        "PluginError" => {
+            for name in ["Guest", "Denied", "Defect"] {
+                variants.insert(name.to_string(), (span, VariantPayload::Single(Type::Named("PluginFault".to_string()), span)));
+            }
+            variants.insert("Budget".to_string(), (span, VariantPayload::Named(vec![
+                VariantField { name: "limit".to_string(), name_span: span, ty: Type::Named("PluginLimit".to_string()), ty_span: span },
+                VariantField { name: "fault".to_string(), name_span: span, ty: Type::Named("PluginFault".to_string()), ty_span: span },
+            ])));
+        }
+        _ => return None,
+    }
+    Some(variants)
 }
 
 /// D-EMAIL-SMTP-SURFACE1=A: closed ungated email policy and error enums.

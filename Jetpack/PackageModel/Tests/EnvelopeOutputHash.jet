@@ -351,7 +351,7 @@ fn pkg_test_reference_encode_node(path: String, rel: String, out: &[U8], links: 
     files.remove(marker).drop("a stale marker may be absent")
     hook := EnvelopeWalkHook{
         events: [EnvelopeWalkEvent]{},
-        react: (path: String, stage: EnvelopeWalkStage) Never! -[FS]> {
+        react: (path: String, stage: EnvelopeWalkStage) -[FS]> {
             if files.exists(marker) || path != dir || stage != EnvelopeWalkStage.DirectorySnapshotted -> return
             files.write(marker, "") ?? panic("marker")
             transient :: files.join(dir, "transient")
@@ -400,7 +400,7 @@ fn pkg_test_reference_encode_node(path: String, rel: String, out: &[U8], links: 
     files.write(payload, "bytes") ?? panic("write")
     hook := EnvelopeWalkHook{
         events: [EnvelopeWalkEvent]{},
-        react: (path: String, stage: EnvelopeWalkStage) Never! -[FS]> {
+        react: (path: String, stage: EnvelopeWalkStage) -[FS]> {
             if path != payload || stage != EnvelopeWalkStage.FileOpened || !files.exists(payload) -> return
             files.remove(payload) ?? panic("remove payload")
         }
@@ -422,7 +422,7 @@ fn pkg_test_reference_encode_node(path: String, rel: String, out: &[U8], links: 
     files.remove(marker).drop("a stale marker may be absent")
     hook := EnvelopeWalkHook{
         events: [EnvelopeWalkEvent]{},
-        react: (path: String, stage: EnvelopeWalkStage) Never! -[FS]> {
+        react: (path: String, stage: EnvelopeWalkStage) -[FS]> {
             if files.exists(marker) || path != file || stage != EnvelopeWalkStage.FileOpened -> return
             files.write(marker, "") ?? panic("marker")
             files.write(file, "BBBB") ?? panic("rewrite")

@@ -428,7 +428,7 @@ is spelled with the existing inline-assembly mechanism (D-FFI-ASM1,
 D-FFI-ASMOPS1) rather than a new builtin, so it adds no syntax and no ballot:
 
     #[Unsafe("calls machine code; …"), FFI(asm)]
-    fn os_call_address(address: Int, argument: Int) -> Int -> {
+    fn os_call_address(address: Int, argument: Int) -> Int {
         """
         mov rdi, {argument}
         call {address}

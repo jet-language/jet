@@ -11,6 +11,17 @@ pub enum PolicyKey {
     Unsafe,
     Impure,
     Nondeterministic,
+    DependencyGrant,
+    BuildFlag,
+    SessionFlag,
+    TrustGrant,
+    ForcePin,
+    TaintScrub,
+    DutyDrop,
+    StateTransition,
+    PrecisionDemotion,
+    Structure,
+    LintAllow,
     ScopedGc,
     ExplicitUnits,
     Copies,
@@ -23,6 +34,17 @@ impl PolicyKey {
             Self::Unsafe => "unsafe",
             Self::Impure => "impure",
             Self::Nondeterministic => "nondeterministic",
+            Self::DependencyGrant => "dependency_grant",
+            Self::BuildFlag => "build_flag",
+            Self::SessionFlag => "session_flag",
+            Self::TrustGrant => "trust_grant",
+            Self::ForcePin => "force_pin",
+            Self::TaintScrub => "taint_scrub",
+            Self::DutyDrop => "duty_drop",
+            Self::StateTransition => "state_transition",
+            Self::PrecisionDemotion => "precision_demotion",
+            Self::Structure => "structure",
+            Self::LintAllow => "lint_allow",
             Self::ScopedGc => "gc",
             Self::ExplicitUnits => "explicit_units",
             Self::Copies => "copies",
@@ -34,6 +56,17 @@ impl PolicyKey {
             "unsafe" => Some(Self::Unsafe),
             "impure" => Some(Self::Impure),
             "nondeterministic" => Some(Self::Nondeterministic),
+            "dependency_grant" => Some(Self::DependencyGrant),
+            "build_flag" => Some(Self::BuildFlag),
+            "session_flag" => Some(Self::SessionFlag),
+            "trust_grant" => Some(Self::TrustGrant),
+            "force_pin" => Some(Self::ForcePin),
+            "taint_scrub" => Some(Self::TaintScrub),
+            "duty_drop" => Some(Self::DutyDrop),
+            "state_transition" => Some(Self::StateTransition),
+            "precision_demotion" => Some(Self::PrecisionDemotion),
+            "structure" => Some(Self::Structure),
+            "lint_allow" => Some(Self::LintAllow),
             "gc" => Some(Self::ScopedGc),
             "explicit_units" => Some(Self::ExplicitUnits),
             "copies" => Some(Self::Copies),
@@ -42,7 +75,7 @@ impl PolicyKey {
         }
     }
     pub const fn is_audited_gate(self) -> bool {
-        matches!(self, Self::Unsafe | Self::Impure | Self::Nondeterministic)
+        !matches!(self, Self::ScopedGc | Self::ExplicitUnits | Self::Copies | Self::Sentries)
     }
 }
 
@@ -505,6 +538,17 @@ pub const POLICY_RULES: &[PolicyRule] = &[
         scopes: ALL_SCOPES,
         combine: PolicyCombine::Tighten,
     },
+    PolicyRule { key: PolicyKey::DependencyGrant, scopes: ALL_SCOPES, combine: PolicyCombine::Tighten },
+    PolicyRule { key: PolicyKey::BuildFlag, scopes: ALL_SCOPES, combine: PolicyCombine::Tighten },
+    PolicyRule { key: PolicyKey::SessionFlag, scopes: ALL_SCOPES, combine: PolicyCombine::Tighten },
+    PolicyRule { key: PolicyKey::TrustGrant, scopes: ALL_SCOPES, combine: PolicyCombine::Tighten },
+    PolicyRule { key: PolicyKey::ForcePin, scopes: ALL_SCOPES, combine: PolicyCombine::Tighten },
+    PolicyRule { key: PolicyKey::TaintScrub, scopes: ALL_SCOPES, combine: PolicyCombine::Tighten },
+    PolicyRule { key: PolicyKey::DutyDrop, scopes: ALL_SCOPES, combine: PolicyCombine::Tighten },
+    PolicyRule { key: PolicyKey::StateTransition, scopes: ALL_SCOPES, combine: PolicyCombine::Tighten },
+    PolicyRule { key: PolicyKey::PrecisionDemotion, scopes: ALL_SCOPES, combine: PolicyCombine::Tighten },
+    PolicyRule { key: PolicyKey::Structure, scopes: ALL_SCOPES, combine: PolicyCombine::Tighten },
+    PolicyRule { key: PolicyKey::LintAllow, scopes: ALL_SCOPES, combine: PolicyCombine::Tighten },
     PolicyRule {
         key: PolicyKey::ScopedGc,
         scopes: PACKAGE_SCOPES,
@@ -531,6 +575,17 @@ pub const AUDITED_GATE_KEYS: &[PolicyKey] = &[
     PolicyKey::Unsafe,
     PolicyKey::Impure,
     PolicyKey::Nondeterministic,
+    PolicyKey::DependencyGrant,
+    PolicyKey::BuildFlag,
+    PolicyKey::SessionFlag,
+    PolicyKey::TrustGrant,
+    PolicyKey::ForcePin,
+    PolicyKey::TaintScrub,
+    PolicyKey::DutyDrop,
+    PolicyKey::StateTransition,
+    PolicyKey::PrecisionDemotion,
+    PolicyKey::Structure,
+    PolicyKey::LintAllow,
 ];
 
 pub fn rule(key: PolicyKey) -> &'static PolicyRule {
@@ -624,11 +679,7 @@ fn resolve_policy(
                 (PolicyKey::Sentries, PolicyValue::On, PolicyValue::On | PolicyValue::Off) => false,
                 (PolicyKey::Sentries, PolicyValue::Off, PolicyValue::On) => true,
                 (PolicyKey::Sentries, PolicyValue::Off, PolicyValue::Off) => false,
-                (
-                    PolicyKey::Unsafe | PolicyKey::Impure | PolicyKey::Nondeterministic,
-                    outer,
-                    inner,
-                ) => gate_widens(outer, inner),
+                (key, outer, inner) if key.is_audited_gate() => gate_widens(outer, inner),
                 _ => true,
             };
             if rule(key).combine == PolicyCombine::Tighten && widens {
@@ -876,7 +927,7 @@ fn gate_widens(outer: PolicyValue, inner: PolicyValue) -> bool {
 pub fn default_gate_value(key: PolicyKey) -> PolicyValue {
     match key {
         PolicyKey::Unsafe => PolicyValue::Default,
-        PolicyKey::Impure | PolicyKey::Nondeterministic => PolicyValue::GateOnly,
+        key if key.is_audited_gate() => PolicyValue::GateOnly,
         PolicyKey::Sentries => PolicyValue::On,
         _ => PolicyValue::Enabled,
     }
@@ -895,6 +946,15 @@ pub fn parse_value(key: PolicyKey, raw: &str) -> Result<PolicyValue, String> {
             ".Off" => Ok(PolicyValue::Off),
             _ => Err("`sentries` must be `.On` or `.Off`".to_string()),
         },
+        key if key.is_audited_gate()
+            && !matches!(key, PolicyKey::Unsafe | PolicyKey::Impure | PolicyKey::Nondeterministic) =>
+        {
+            match raw {
+                ".Forbid" => Ok(PolicyValue::Forbid),
+                ".GateOnly" => Ok(PolicyValue::GateOnly),
+                _ => Err(format!("`{}` must be `.Forbid` or `.GateOnly`", key.name())),
+            }
+        }
         key if key.is_audited_gate() => match raw {
             ".Forbid" => Ok(PolicyValue::Forbid),
             ".Default" => Ok(PolicyValue::Default),
@@ -912,7 +972,7 @@ pub fn parse_value(key: PolicyKey, raw: &str) -> Result<PolicyValue, String> {
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct GateSet {
-    bits: u8,
+    bits: u16,
 }
 
 impl GateSet {
@@ -922,11 +982,22 @@ impl GateSet {
         gates
     }
 
-    fn bit(key: PolicyKey) -> u8 {
+    fn bit(key: PolicyKey) -> u16 {
         match key {
             PolicyKey::Unsafe => 1,
             PolicyKey::Impure => 2,
             PolicyKey::Nondeterministic => 4,
+            PolicyKey::DependencyGrant => 8,
+            PolicyKey::BuildFlag => 16,
+            PolicyKey::SessionFlag => 32,
+            PolicyKey::TrustGrant => 64,
+            PolicyKey::ForcePin => 128,
+            PolicyKey::TaintScrub => 256,
+            PolicyKey::DutyDrop => 512,
+            PolicyKey::StateTransition => 1024,
+            PolicyKey::PrecisionDemotion => 2048,
+            PolicyKey::Structure => 4096,
+            PolicyKey::LintAllow => 8192,
             _ => 0,
         }
     }
@@ -947,6 +1018,14 @@ impl GateSet {
     }
     pub fn is_empty(self) -> bool {
         self.bits == 0
+    }
+
+    pub fn record_invocation_flag(&mut self, session: bool) {
+        self.bits |= if session { 1 << 15 } else { 1 << 14 };
+    }
+
+    pub fn has_invocation_flag(self, session: bool) -> bool {
+        self.bits & (if session { 1 << 15 } else { 1 << 14 }) != 0
     }
 
     /// Parse one CLI `name=allow` entry. The synthetic declaration goes
@@ -1007,6 +1086,23 @@ pub fn resolve_with_gates(
         resolve(key, invocation_chain)?;
     }
     Ok(effective)
+}
+
+/// D-GATE-LAW1=A: the outer refusal survives inner widening attempts.
+pub fn gate_refusal(
+    key: PolicyKey,
+    site: &str,
+    span: Option<Span>,
+    declarations: &[PolicyDeclaration],
+) -> Option<crate::Diagnostics::Diagnostic> {
+    let declaration = declarations.iter()
+        .filter(|declaration| declaration.key == key && declaration.value == PolicyValue::Forbid)
+        .min_by_key(|declaration| declaration.scope)?;
+    Some(crate::Diagnostics::Diagnostic::from_row(
+        "E3415",
+        &[("gate", key.name()), ("site", site), ("policy", declaration.source.as_str())],
+        span,
+    ))
 }
 
 pub trait ExplainableResolution {

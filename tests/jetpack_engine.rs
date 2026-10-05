@@ -6323,7 +6323,7 @@ module env.full {
 "#,
     )
     .unwrap();
-    fs::write(project.join("run.jet"), "#Job\nfn lint() {}\n").unwrap();
+    fs::write(project.join("run.jet"), "#Job\nfn lint_all() {}\n").unwrap();
     let output = jetpack()
         .args(["env", "info", "--json", "--no-color"])
         .current_dir(&project.path)
@@ -6453,7 +6453,7 @@ fn env_info_json_discloses_reads_and_typed_service_facts_without_starting_proces
             data_dir: "state/fixture",
             watch: ["src"],
             after: ["database"],
-            before_start: ["lint"],
+            before_start: ["lint_all"],
             sockets: ["run/fixture.sock"]
         }
     }
@@ -6462,7 +6462,7 @@ fn env_info_json_discloses_reads_and_typed_service_facts_without_starting_proces
 "#,
     )
     .unwrap();
-    fs::write(project.join("run.jet"), "#Job\nfn lint() {}\n").unwrap();
+    fs::write(project.join("run.jet"), "#Job\nfn lint_all() {}\n").unwrap();
 
     let output = jetpack()
         .args(["env", "info", "--json", "--no-color"])
@@ -6506,7 +6506,7 @@ fn env_info_json_discloses_reads_and_typed_service_facts_without_starting_proces
         "stdout: {stdout}"
     );
     assert!(
-        stdout.contains("\"before_start\":[\"lint\"]"),
+        stdout.contains("\"before_start\":[\"lint_all\"]"),
         "stdout: {stdout}"
     );
     assert!(
@@ -6517,7 +6517,7 @@ fn env_info_json_discloses_reads_and_typed_service_facts_without_starting_proces
         stdout.contains("\"files\":[\"config/generated.txt\"]"),
         "stdout: {stdout}"
     );
-    assert!(stdout.contains("\"jobs\":[\"lint\"]"), "stdout: {stdout}");
+    assert!(stdout.contains("\"jobs\":[\"lint_all\"]"), "stdout: {stdout}");
     assert!(
         !project.join(".jet/services").exists(),
         "info must not start services"

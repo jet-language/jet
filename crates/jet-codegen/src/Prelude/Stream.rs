@@ -74,7 +74,7 @@ where
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum JetStreamCompletion {
     Completed,
-    Failed(Option<String>),
+    Failed(Option<JetStreamFailure>),
 }
 
 pub struct JetStream<T> {
@@ -83,7 +83,7 @@ pub struct JetStream<T> {
     completion: Option<JetSchedulerChannel<JetStreamCompletion>>,
     pending: bool,
     failed: bool,
-    failure_report: std::sync::Arc<std::sync::Mutex<Option<String>>>,
+    failure_report: std::sync::Arc<std::sync::Mutex<Option<JetStreamFailure>>>,
     producer_task: Option<JetStreamTask>,
 }
 
@@ -183,7 +183,7 @@ impl<T: Send> JetStream<T> {
         self.failed
     }
 
-    pub fn failure_report(&self) -> Option<String> {
+    pub fn failure_report(&self) -> Option<JetStreamFailure> {
         self.failure_report
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -257,7 +257,7 @@ pub struct JetStreamSender<T> {
     acknowledgements: JetSchedulerChannel<()>,
     completion: JetSchedulerSender<JetStreamCompletion>,
     failed: std::sync::atomic::AtomicBool,
-    failure_report: std::sync::Arc<std::sync::Mutex<Option<String>>>,
+    failure_report: std::sync::Arc<std::sync::Mutex<Option<JetStreamFailure>>>,
     cancel_shielded: std::sync::atomic::AtomicBool,
 }
 
@@ -316,7 +316,7 @@ impl<T: Send> JetStreamSender<T> {
             .store(true, std::sync::atomic::Ordering::Release);
     }
 
-    pub fn fail_with(&self, report: String) {
+    pub fn fail_with(&self, report: JetStreamFailure) {
         *self
             .failure_report
             .lock()

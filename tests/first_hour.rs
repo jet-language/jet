@@ -139,7 +139,7 @@ fn assert_file(project: &Path, relative: &str, owner: &str) {
     );
 }
 
-const SECOND_MODULE: &str = r#"pub fn message() -> String -> "second"
+const SECOND_MODULE: &str = r#"pub fn message() -> String { "second" }
 "#;
 
 const SECOND_MODULE_RUN: &str = r#"use second
@@ -149,7 +149,7 @@ struct GreetingArgs {
     #Doc("name to greet") name: String{"world"}
 }
 
-fn greeting(name: String) -> String -> "hello, {name}"
+fn greeting(name: String) -> String { "hello, {name}" }
 
 fn run(args: GreetingArgs) {
     print(greeting(args.name))
@@ -169,7 +169,7 @@ struct GreetingArgs {
     #Doc("name to greet") name: String{"world"}
 }
 
-fn greeting(name: String) -> String -> "hello, {name}"
+fn greeting(name: String) -> String { "hello, {name}" }
 
 fn run(args: GreetingArgs) {
     print(greeting(args.name))
@@ -207,7 +207,7 @@ fn comparable_max<T: Comparable>(left: T, right: T) -> T {
     left
 }
 
-fn greeting(name: String) -> String -> "hello, {name}"
+fn greeting(name: String) -> String { "hello, {name}" }
 
 fn run(args: GreetingArgs) {
     print(greeting(args.name))

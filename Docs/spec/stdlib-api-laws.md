@@ -262,7 +262,8 @@ The core-library slate ratifies these durable rules:
 - **D-CORE-PRELUDE1=A** — the seven criteria are law: measured frequency, total
   and safe behavior, names that never change semantics, no better home,
   first-hour coverage, one fixed set, and collision-conscious names. User
-  shadowing wins with a compiler warning. New names land only at epoch
+  shadowing wins with a compiler warning, including `assert_eq`; the intrinsic
+  comparison applies only when that prelude name is unshadowed. New names land only at epoch
   boundaries and use the L2001 migration lint for older packages. Every entry
   is total or returns a result; no implicit conversion enters the prelude.
   `Duration` and `Instant` are the Time-family quantities from

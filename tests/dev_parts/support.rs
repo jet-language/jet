@@ -4742,7 +4742,10 @@ fn parse_corpus_gate_manifest() -> Vec<CorpusGateRecord> {
 /// its row floor does: a hand-edit cannot green the ledger by deleting
 /// the row that fails. A row that LEAVES is either a deleted example — lower this
 /// in the same diff as the deletion — or the defect this pins.
-const CORPUS_GATE_ROW_FLOOR: usize = 496;
+/// The current 495-stem floor excludes the module package manifest and three
+/// flat programs migrated to package examples. Their discovery universe
+/// shrank; no extant program lost its tier classification.
+const CORPUS_GATE_ROW_FLOOR: usize = 495;
 
 /// How many examples the gate ledger is still allowed to say nothing about (#2013).
 ///

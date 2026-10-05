@@ -548,7 +548,8 @@ where
         let mut windows = match stream.window(window_ns, watermark_ns, late_disposition) {
             Ok(windows) => windows,
             Err(error) => {
-                sender.fail_with(error);
+                let report = jet_render_runtime_stop("E3001", "", 0, "", "", 1, 1, &error, "");
+                sender.fail_with(JetStreamFailure { code: "E3001".to_string(), message: error, rendered: report.rendered });
                 return;
             }
         };

@@ -92,11 +92,13 @@ use jet_foundation.[
     TNumericOp,
     TOrFallback,
     TPanicLoc,
+    TPreludeArg,
     TPattern,
     TPlace,
     TRangeArm,
     TRequireKind,
     TScopeMemberKind,
+    TStaticOwner,
     TStmt,
     TTraitMethod,
     TTransactionSnapshot,
@@ -327,8 +329,12 @@ fn jet_codegen_lower_task_group(builder: &JetCodegenBuilder, group: TLocal, limi
     place := jet_codegen_bind_local(&builder, group, group_ty, group.mutable, None, None, false)
     _ := jet_codegen_emit(&builder, span, None, MIROperation.WritePlace{place: place, value: value})
 
+    // Rust `TStmt::TaskGroup`: the group joins its children through the
+    // Prelude's borrowed `JetTaskGroup::close`, deferred to the scope's exit.
     resource := TExpr{ty: group_ty, kind: TExprKind.Local{local: group}, span: span, integer_bounds: None, cost: None}
-    close := TExpr{ty: Type.Named{name: "Unit"}, kind: TExprKind.Close{value: resource}, span: span, integer_bounds: None, cost: None}
+    close_method := TMethodRef{symbol: symbol_id(SymbolKind.Function, "", "jet_std::JetTaskGroup", "close"), name: "close", mangled: false, trait_owner: None, operator_identity: None}
+    close_arg := TCallArg{value: resource, template_items: [SymbolID]{}, borrow: true, mut_borrow: false, clone: false, arc_clone: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false}
+    close := TExpr{ty: Type.Named{name: "Unit"}, kind: TExprKind.StaticCall{owner: TStaticOwner.Prelude{rooted: true, path: "jet_std::JetTaskGroup", generics: [TPreludeArg]{}}, owner_type: None, method: close_method, type_args: [Type]{}, args: [TCallArg]{close_arg}}, span: span, integer_bounds: None, cost: None}
     group_symbol :: group.symbol_id ?? panic("checked task-group local has no symbol identity")
     thunk := jet_codegen_lower_defer_thunk(&builder, close, group_symbol, scope.value, span)
     jet_codegen_register_deferred_call(&builder, thunk)
@@ -337,9 +343,24 @@ fn jet_codegen_lower_task_group(builder: &JetCodegenBuilder, group: TLocal, limi
     jet_codegen_leave_scope(&builder, scope)
 }
 
-fn jet_codegen_lower_scope_member_body(builder: &JetCodegenBuilder, scope: MIRScopeID, body: [TStmt]) {
+fn jet_codegen_lower_scope_member_body(builder: &JetCodegenBuilder, scope: MIRScopeID, body: [TStmt], span: Span, expect_fail: Bool) {
     jet_codegen_lower_block(&builder, body)
+    exit := jet_codegen_new_block(&builder, span, "scope-member.exit")
+    join := jet_codegen_new_block(&builder, span, "scope-member.join")
+    // Rust lower_scope_member_body: an `.expect_fail` body that ends in an
+    // unconditional stop jumps to its exit after the stop. The stop never
+    // returns, so the jump never runs; it keeps the exit reachable, which is
+    // where a caught stop resumes and which gives the backend's catch match
+    // an arm for the scope.
+    ends_in_stop := false
+    if builder.block_positions.get(builder.current.value) == .Val(at) {
+        if builder.blocks[at].terminator == .Unreachable(reason) -> ends_in_stop = reason == "checked unconditional stop"
+    }
+    if jet_codegen_current_is_open(builder) || (expect_fail && ends_in_stop) -> jet_codegen_terminate(&builder, MIRTerminator.Jump{target: exit})
+    jet_codegen_switch_block(&builder, exit)
     jet_codegen_leave_scope(&builder, scope)
+    if jet_codegen_current_is_open(builder) -> jet_codegen_terminate(&builder, MIRTerminator.Jump{target: join})
+    jet_codegen_switch_block(&builder, join)
 }
 
 fn jet_codegen_lower_scope_member(builder: &JetCodegenBuilder, kind: TScopeMemberKind, body: [TStmt], span: Span) {
@@ -348,23 +369,23 @@ fn jet_codegen_lower_scope_member(builder: &JetCodegenBuilder, kind: TScopeMembe
             jet_codegen_lower_statements(&builder, body)
             return
         }
-        .ExpectFail(expected) -> {
+        .ExpectFail(expected, message) -> {
             scope := jet_codegen_enter_scope(&builder, MIRScopeKind.ScopeMember, span, expected)
-            jet_codegen_attach_scope_member(&builder, scope, MIRTestScopeMember.ExpectFail{expected_code: expected})
-            jet_codegen_lower_scope_member_body(&builder, scope, body)
+            jet_codegen_attach_scope_member(&builder, scope, MIRTestScopeMember.ExpectFail{expected_code: expected, expected_message: message})
+            jet_codegen_lower_scope_member_body(&builder, scope, body, span, true)
             return
         }
         .Timeout(duration) -> {
             value := jet_codegen_lower_expr(&builder, duration)
             scope := jet_codegen_enter_scope(&builder, MIRScopeKind.ScopeMember, span, Val("timeout"))
             jet_codegen_attach_scope_member(&builder, scope, MIRTestScopeMember.Timeout{duration: value})
-            jet_codegen_lower_scope_member_body(&builder, scope, body)
+            jet_codegen_lower_scope_member_body(&builder, scope, body, span, false)
             return
         }
         .Measure -> {
             scope := jet_codegen_enter_scope(&builder, MIRScopeKind.ScopeMember, span, Val("measure"))
             jet_codegen_attach_scope_member(&builder, scope, MIRTestScopeMember.Measure)
-            jet_codegen_lower_scope_member_body(&builder, scope, body)
+            jet_codegen_lower_scope_member_body(&builder, scope, body, span, false)
             return
         }
         .Skip -> {
@@ -2819,6 +2840,21 @@ fn jet_codegen_pattern_scan_route(builder: &JetCodegenBuilder, binary: Bool, res
     jet_codegen_intern_route(&builder, MIRPreludeFamily.StaticPrelude, "core.pattern", member, symbol, 2, [Bool]{true, false}, None, jet_codegen_failure_carrier_for_type(result_type), MIRPreludeABI.Value)
 }
 
+// Rust tir_to_mir_expr pattern_scan_captures: an IsSome probe reads no
+// capture, so its carrier keeps the empty tuple. An Unwrap probe reads every
+// hole, so its carrier holds each hole at its checked type, named by
+// position: the canonical capture tuple each PatternCapture indexes. AOT can
+// only read a capture the carrier's type keeps.
+fn jet_codegen_pattern_scan_result_type(expression: TExpr, probe: TMatchProbe) -> Type Never! {
+    fields := [TypeTupleField]{}
+    if probe == TMatchProbe.Unwrap {
+        if expression.ty == .Tuple(checked) {
+            loop (index, field) in checked -> &fields.push(TypeTupleField{name: "{index}", ty: field.ty})
+        }
+    }
+    Type.Option{inner: Type.Tuple{fields: fields}}
+}
+
 fn jet_codegen_lower_string_match_scan(builder: &JetCodegenBuilder, expression: TExpr, subject: TExpr, parts: [StrMatchPart], probe: TMatchProbe) -> MIRValueID {
     subject_value := jet_codegen_lower_expr(&builder, subject)
     pattern := [MIRTextPatternPart]{}
@@ -2831,7 +2867,7 @@ fn jet_codegen_lower_string_match_scan(builder: &JetCodegenBuilder, expression: 
             }
         }
     }
-    result_type := Type.Option{inner: Type.Tuple{fields: [TypeTupleField]{}}}
+    result_type := jet_codegen_pattern_scan_result_type(expression, probe)
     call := jet_codegen_pattern_scan_route(&builder, false, result_type)
     matched := jet_codegen_emit_value(&builder, expression.span, result_type, MIROperation.Semantic{operation: MIRSemanticOp.TextPatternMatch{call: call, subject: subject_value, parts: pattern}})
     jet_codegen_lower_pattern_probe(&builder, expression, matched, probe)
@@ -2852,7 +2888,7 @@ fn jet_codegen_lower_binary_match_scan(builder: &JetCodegenBuilder, expression: 
             }
         }
     }
-    result_type := Type.Option{inner: Type.Tuple{fields: [TypeTupleField]{}}}
+    result_type := jet_codegen_pattern_scan_result_type(expression, probe)
     call := jet_codegen_pattern_scan_route(&builder, true, result_type)
     matched := jet_codegen_emit_value(&builder, expression.span, result_type, MIROperation.Semantic{operation: MIRSemanticOp.BinaryPatternMatch{call: call, subject: subject_value, parts: pattern}})
     jet_codegen_lower_pattern_probe(&builder, expression, matched, probe)
@@ -3456,6 +3492,14 @@ fn jet_codegen_stability_access(access: AccessConvention) -> JetCodegenStability
     JetCodegenStabilityUse.Write
 }
 
+// How a place projection (index, slice) checked with `access` uses its base:
+// a write, move or write borrow of `a.b[i].c[j]` writes through every base
+// down to the root, whatever access the inner index was checked with.
+fn jet_codegen_stability_base(use_kind: JetCodegenStabilityUse, access: AccessConvention) -> JetCodegenStabilityUse Never! {
+    if use_kind == JetCodegenStabilityUse.Write -> return JetCodegenStabilityUse.Write
+    jet_codegen_stability_access(access)
+}
+
 fn jet_codegen_stability_expr(state: &JetCodegenLetStability, expression: TExpr, use_kind: JetCodegenStabilityUse) Never! {
     inspect :: JetCodegenStabilityUse.Inspect
     value :: JetCodegenStabilityUse.Value
@@ -3467,17 +3511,17 @@ fn jet_codegen_stability_expr(state: &JetCodegenLetStability, expression: TExpr,
         .Field(receiver, _) -> jet_codegen_stability_expr(&state, receiver, use_kind)
         .Index(base, index, _, access, _, _) -> {
             jet_codegen_stability_expr(&state, index, value)
-            jet_codegen_stability_expr(&state, base, jet_codegen_stability_access(access))
+            jet_codegen_stability_expr(&state, base, jet_codegen_stability_base(use_kind, access))
         }
         .IndexRead(base, index, _, _, _) -> {
             jet_codegen_stability_expr(&state, index, value)
-            jet_codegen_stability_expr(&state, base, inspect)
+            jet_codegen_stability_expr(&state, base, jet_codegen_stability_base(use_kind, AccessConvention.Read))
         }
         .Slice(base, start, end, range, _) | .SliceOwned(base, start, end, range, _) -> {
             jet_codegen_stability_expr(&state, start, value)
             jet_codegen_stability_expr(&state, end, value)
             if range == .Val(range_value) -> jet_codegen_stability_expr(&state, range_value, value)
-            jet_codegen_stability_expr(&state, base, inspect)
+            jet_codegen_stability_expr(&state, base, jet_codegen_stability_base(use_kind, AccessConvention.Read))
         }
         .Clone(copied, _) | .ExplicitCopy(copied) | .MaterializeView(copied) -> jet_codegen_stability_expr(&state, copied, inspect)
         .Borrow(place, access) -> jet_codegen_stability_expr(&state, place, jet_codegen_stability_access(access))

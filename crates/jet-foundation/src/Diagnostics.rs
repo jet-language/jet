@@ -966,8 +966,12 @@ impl Diagnostic {
         out.push_str(&format!(" {} {}\n", theme.bold("Fix:"), fix));
         if let Some(detail) = &self.detail {
             if !has_structured_detail_key(detail) {
-                let detail = escape_terminal_text(detail);
-                out.push_str(&detail);
+                for (index, line) in detail.split('\n').enumerate() {
+                    if index != 0 {
+                        out.push('\n');
+                    }
+                    out.push_str(&escape_terminal_text(line));
+                }
                 if !detail.ends_with('\n') {
                     out.push('\n');
                 }

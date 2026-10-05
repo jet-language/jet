@@ -19,6 +19,7 @@ use jet_foundation.[
     TGenericParam,
     TMethodRef,
     Type,
+    diagnostic_registry_row,
     type_name,
 ]
 
@@ -232,7 +233,7 @@ pub fn sema_call_infer_direct_target_from_types(target: SemaCallDirectTarget, pa
     sema_call_direct_target_with_inference(target, result)
 }
 
-pub fn sema_call_direct_target_from_registration(function: SemaRegistrationFunction, graph: SemaRegistrationGraph?, caller_module_identity: String, caller_package_identity: String, type_args: [Type], span: Span, diagnostics: &[Diagnostic]) -> SemaCallDirectTarget? {
+pub fn sema_call_direct_target_from_registration(function: SemaRegistrationFunction, graph: SemaRegistrationGraph?, caller_module_identity: String, caller_package_identity: String, lexical_generic_params: [TGenericParam], type_args: [Type], span: Span, diagnostics: &[Diagnostic]) -> SemaCallDirectTarget? {
     generic_params :: sema_inference_registration_params(function.generic_params)
     if generic_params.len() == 0 {
         if type_args.len() > 0 {
@@ -244,7 +245,7 @@ pub fn sema_call_direct_target_from_registration(function: SemaRegistrationFunct
     if type_args.len() == 0 {
         return SemaCallDirectTarget{symbol: function.symbol, signature: function.signature, type_args: [Type]{}, generic_params: generic_params, generic_substitutions: [SemaInferenceBinding]{}, generic_evidence: [SemaInferenceBoundEvidence]{}}
     }
-    context := sema_inference_context(caller_module_identity, caller_package_identity, generic_params, [TGenericParam]{}, None)
+    context := sema_inference_context(caller_module_identity, caller_package_identity, generic_params, lexical_generic_params, None)
     result :: sema_infer_validate_explicit(graph, &context, type_args, span, &diagnostics) ?? return None
     signature :: sema_inference_substitute_type_bindings(function.signature, result.substitutions)
     SemaCallDirectTarget{symbol: function.symbol, signature: signature, type_args: result.type_args, generic_params: generic_params, generic_substitutions: result.substitutions, generic_evidence: result.evidence}
@@ -310,6 +311,12 @@ fn sema_call_method_shape_matches(candidate: SemaCallMethodCandidate, method: St
     sema_call_bind_method(method, candidate.signature, candidate.receiver_offset, &probe, span, &probe_diagnostics) != None
 }
 
+fn sema_call_retired_raw_directory_error(receiver_type: Type, method: String, span: Span) -> Diagnostic? {
+    if receiver_type != Type.String || method != "read_dir" -> return None
+    row :: diagnostic_registry_row("E0340") ?? panic("E0340 must have a registry row")
+    Val(sema_error("E0340", span, row.what, row.why, row.fix))
+}
+
 pub fn sema_call_resolve_method(receiver_type: Type, method: String, args: [CallArg], span: Span, candidates: [SemaCallMethodCandidate], environment: SemaScopeEnvironment, diagnostics: &[Diagnostic]) -> SemaCallMethodCandidate? {
     receiver_matches := [SemaCallMethodCandidate]{}
     loop candidate in candidates {
@@ -321,6 +328,10 @@ pub fn sema_call_resolve_method(receiver_type: Type, method: String, args: [Call
         }
     }
     if receiver_matches.len() == 0 {
+        if sema_call_retired_raw_directory_error(receiver_type, method, span) == .Val(diagnostic) {
+            &diagnostics.push(diagnostic)
+            return None
+        }
         &diagnostics.push(sema_error("E0311", span, "`{method}` isn't a method on this value", "method resolution found no candidate with a compatible receiver", "use a registered method for this receiver type"))
         return None
     }

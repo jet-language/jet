@@ -995,7 +995,6 @@ pub(crate) fn lambda_body_ty_expecting_with_return(
         lam_env.fallback_subject = false;
         let callback_return = expected_return
             .cloned()
-            .or_else(|| crate::Codegen::TIR::lambda_explicit_failure_carrier(lam))
             .or_else(|| lam.meta.fallible_carrier.clone());
         lam_env.ret_ty = callback_return;
         for (i, p) in lam.params.iter().enumerate() {

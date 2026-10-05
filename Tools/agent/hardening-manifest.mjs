@@ -59,7 +59,7 @@ const CAPABILITY_PATHS = Object.freeze({
     "crates/jet-sema/src/Sema/CheckerCoreLib/module_items.rs",
     "crates/jet-sema/src/Sema/CheckerCoreLib/core_types.rs",
   ],
-  cli: ["crates/jet-cli/src/CLI.rs"],
+  cli: ["crates/jet-cli/src/CLI.rs", "crates/jet-foundation/src/CLICommands.rs"],
   editor: ["crates/jet-devserver/src/EditorHost.rs"],
   debugger: [
     "crates/jet-foundation/src/Syntax/package_files.rs",

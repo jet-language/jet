@@ -264,11 +264,10 @@ pub fn sema_call_try_knowledge_builtin(call: Call, expected: Type?, environment:
 // `print`, `input`, `panic`, `assert`, `assert_eq`), checked by one dispatcher
 // with the Rust checker's arity and argument rules
 // (CheckerInfer/calls/direct_calls.rs, CheckerItems.rs check_*_call). A user
-// function or local of the same name shadows every row except `assert_eq`,
-// which the Rust checker never lets a declaration shadow. `#NoPrelude`
+// function or local of the same name shadows every row. `#NoPrelude`
 // print/input refusal (E0429) runs before this dispatcher.
 pub fn sema_call_try_ambient_prelude(call: Call, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
-    if call.name != "assert_eq" && !sema_call_gate_is_unshadowed(call.name, scopes) -> return SemaDirectSpecialCheck{handled: false, value: None}
+    if !sema_call_gate_is_unshadowed(call.name, scopes) -> return SemaDirectSpecialCheck{handled: false, value: None}
     if call.name == {
         "print" -> sema_call_check_ambient_print(call, environment, &scopes, &state, &tail_store, &context, &diagnostics)
         "input" -> sema_call_check_ambient_input(call, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
@@ -915,8 +914,7 @@ fn sema_call_direct_checked_from_target(state: &SemaOwnershipState, target: Sema
         resolved_binding = resolved
     }
     abi :: sema_call_direct_target_abi(candidate, environment)
-    pins := [TStmt]{}
-    lowered := sema_call_check_bound_arguments_owned(&state, call.name, params, abi, true, resolved_binding, &args, environment, &scopes, &tail_store, &context, call.name_span, &pins, &diagnostics) ?? return None
+    (lowered, pins) := sema_call_check_bound_arguments_owned(&state, call.name, params, abi, true, resolved_binding, &args, environment, &scopes, &tail_store, &context, call.name_span, &diagnostics) ?? return None
     result_type_raw :: sema_call_signature_return(candidate.signature) ?? return None
     result_type :: sema_call_resolved_type(result_type_raw, environment)
     contract_bindings := [TStmt]{}

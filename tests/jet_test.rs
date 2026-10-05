@@ -89,7 +89,7 @@ fn jet_test_inline_c_comparison_preserves_checked_int_declaration() {
     let wrong = cwd.path.join("wrong_inline_c.jet");
     fs::write(
         &wrong,
-        r#"fn jet_add(n: Int) -> Int -> (n * 2)
+        r#"fn jet_add(n: Int) -> Int { (n * 2) }
 
 #[Unsafe("deliberately wrong scalar C result"), FFI(c)] fn c_wrong(n: Int) -> Int {
     """int64_t c_wrong(int64_t n) { return n * 2 + 1; }"""
@@ -377,6 +377,65 @@ fn jet_scope_expect_fail_asserts_runtime_code() {
         "missing passing test output: {}",
         String::from_utf8_lossy(&out.stdout)
     );
+}
+
+#[test]
+fn jet_scope_expect_fail_message_native_tiers_agree() {
+    if !have_rustc() { return; }
+    let source = include_str!("fixtures/scope_expect_fail_message.jet");
+    let cwd = isolated_test_package("jet_scope_expect_fail_message_tiers");
+    let entry = cwd.path.join("stop_message.jet");
+    fs::write(&entry, source).unwrap();
+    let mut reference = None;
+    for (level, profile) in [(0, "dev"), (1, "dev"), (2, "release")] {
+        let (rust, ffi, _) = jet::compile_tests_with_path_cov_and_profile(
+            source, entry.to_str().unwrap(), false, profile, &Default::default(),
+        ).unwrap_or_else(|diags| panic!("{}", jet::render_diagnostics(entry.to_str().unwrap(), source, &diags)));
+        let rs = cwd.path.join(format!("stop_message_{level}.rs"));
+        let bin = cwd.path.join(format!("stop_message_{level}"));
+        fs::write(&rs, rust).unwrap();
+        let mut compile = Command::new("rustc");
+        compile.args(["--edition=2021", "-C"]).arg(format!("opt-level={level}"))
+            .arg(&rs).arg("-o").arg(&bin);
+        if profile == "release" { compile.args(["--cfg", "jet_release"]); }
+        if let Some(link) = ffi {
+            compile.arg("--extern").arg(format!("{}={}", link.crate_name, link.rlib_path.display()));
+            for dir in link.dependency_dirs().filter(|dir| dir.is_dir()) {
+                compile.arg("-L").arg(format!("dependency={}", dir.display()));
+            }
+        }
+        let compiled = compile.output().unwrap();
+        assert!(compiled.status.success(), "I2: rustc rejected harness:\n{}", String::from_utf8_lossy(&compiled.stderr));
+        let run = Command::new(&bin).current_dir(&cwd.path).env("JET_TEST_CAPTURE", "all").output().unwrap();
+        assert!(!run.status.success(), "negative message claims must fail at O{level}");
+        let stdout = String::from_utf8(run.stdout).unwrap();
+        let stderr = String::from_utf8(run.stderr).unwrap();
+        for name in ["message substring matches", "code and message match"] {
+            assert!(stdout.contains(&format!("{name}: pass")), "{stdout}\n{stderr}");
+        }
+        for name in ["wrong message fails", "wrong code fails", "clean finish fails", "case sensitive message fails", "rendered prefix is not message", "collision mutation fails"] {
+            assert!(stdout.contains(&format!("{name}: FAIL")), "{stdout}\n{stderr}");
+        }
+        assert!(stderr.contains("expected a stop whose message contains \"fingerprint collision\", got E3001: assertion failed: modules.len() > 0"), "{stderr}");
+        assert!(stderr.contains("expected a stop with E3010 whose message contains \"fingerprint collision\", got E3001: fingerprint collision"), "{stderr}");
+        assert!(stderr.contains("but it passed"), "{stderr}");
+        assert!(stderr.contains("got E3001: internal compiler error: E0859 generic module instance digest conflict"), "{stderr}");
+        let result = (stdout, stderr);
+        if let Some(expected) = &reference { assert_eq!(&result, expected, "native O{level} receipt drift"); }
+        else { reference = Some(result); }
+    }
+}
+
+#[test]
+fn jet_scope_expect_fail_message_rejects_nonliteral_or_invalid_arguments() {
+    for args in ["message: \"\"", "message: \"{reason}\"", "message: reason", "message: \"a\", message: \"b\"", "reason: \"a\"", "E3999", "message: \"a\", E3001"] {
+        let cwd = isolated_test_package("jet_scope_expect_fail_message_args");
+        let entry = cwd.path.join("bad_message.jet");
+        let source = format!("#Test(\"bad message\") {{\n    .setup {{ reason :: \"reason\" }}\n    .expect_fail({args}) {{ assert(false) }}\n}}\n");
+        fs::write(&entry, &source).unwrap();
+        let errors = jet::compile_tests_with_path(&source, entry.to_str().unwrap()).unwrap_err();
+        assert!(errors.iter().any(|error| error.code == "E0617"), "{args}: {errors:?}");
+    }
 }
 
 #[test]
@@ -1496,7 +1555,7 @@ fn bare_jet_test_discovers_tests_in_every_package_module() {
     let dir = bare_package_project("bare_package", &jet);
     fs::write(
         dir.join("math.jet"),
-        "fn double(n: Int) -> Int -> (n * 2)\n\n#Test(\"double returns twice the input\") {\n    assert_eq(double(3), 6)\n}\n",
+        "fn double(n: Int) -> Int { (n * 2) }\n\n#Test(\"double returns twice the input\") {\n    assert_eq(double(3), 6)\n}\n",
     )
     .unwrap();
     let out = Command::new(&jet)
@@ -1526,7 +1585,7 @@ fn jet_test_package_directory_aggregates_mixed_modules() {
         return;
     }
     let dir = bare_package_project("package_directory", &jet);
-    fs::write(dir.join("helper.jet"), "fn helper() -> Int -> 1\n").unwrap();
+    fs::write(dir.join("helper.jet"), "fn helper() -> Int { 1 }\n").unwrap();
     fs::write(
         dir.join("math.jet"),
         "#Test(\"mixed package test\") {\n    assert(true)\n}\n",
@@ -1569,7 +1628,7 @@ fn jet_test_package_directory_reports_no_tests_once() {
         return;
     }
     let dir = bare_package_project("bare_testless", &jet);
-    fs::write(dir.join("math.jet"), "fn double(n: Int) -> Int -> (n * 2)\n").unwrap();
+    fs::write(dir.join("math.jet"), "fn double(n: Int) -> Int { (n * 2) }\n").unwrap();
     let out = Command::new(&jet)
         .args(["test", dir.to_str().unwrap()])
         .current_dir(&dir)

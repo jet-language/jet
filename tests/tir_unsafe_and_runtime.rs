@@ -1675,7 +1675,7 @@ fn boom() -> Int {
     return 0
 }
 
-fn joined(handle: ^Task<Int>) -> Int -> handle.join() ?? 91
+fn joined(handle: ^Task<Int>) -> Int { handle.join() ?? 91 }
 
 fn run() {
     task.group g {
@@ -1714,7 +1714,7 @@ fn spawned_diverging_callee_keeps_later_bindings_in_scope() {
         return;
     }
     let src = r#"
-fn value(n: Int) -> Int -> n
+fn value(n: Int) -> Int { n }
 fn boom() -> Int {
     panic("boom")
     return 0

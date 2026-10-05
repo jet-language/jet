@@ -97,12 +97,13 @@ fn lf_operation_typing(planted: Bool) -> MIRProgram Never! {
     lf_single(b)
 }
 
-// semantic.typing: checked arithmetic whose result is not an Optional.
+// semantic.typing: overflow arithmetic cannot yield a Bool. Integer results
+// are legal for the wrapping, saturating, trapping and rotate routes.
 fn lf_semantic_typing(planted: Bool) -> MIRProgram Never! {
     b := fx_builder()
     one :: fx_int_const(&b, 1)
     two :: fx_int_const(&b, 2)
-    result_type :: if planted -> fx_int() else -> mir_type_from_kind(MIRTypeKind.Option{inner: fx_int()})
+    result_type :: if planted -> fx_bool() else -> mir_type_from_kind(MIRTypeKind.Option{inner: fx_int()})
     _ := fx_owned(&b, result_type, MIROperation.Semantic{operation: MIRSemanticOp.OverflowOption{call: fx_prelude_id("core.numeric", "checked_add"), left: one, right: two, location: None}})
     fx_block(&b, 0, MIRTerminator.Return{value: None})
     lf_single(b)
@@ -182,7 +183,7 @@ fn lf_use_after_move(planted: Bool) -> MIRProgram Never! {
 
 // A second place over the same local storage as `root`.
 fn lf_alias_place(b: &FxBuilder, root: MIRPlaceID) -> MIRPlaceID Never! {
-    alias :: MIRPlaceID{value: 500 + b.places.len()}
+    alias :: MIRPlaceID{value: fx_word(U64{500}, b.places.len())}
     loop row in b.places {
         if row.id == root {
             &b.places.push(MIRPlace{id: alias, span: fx_span(), ty: row.ty, base: row.base, projections: [MIRProjection]{}, access: MIRAccess.Move, persist_key: None})

@@ -49,7 +49,7 @@ fn parse_codes(source: &str) -> Vec<String> {
 
 #[test]
 fn core_lang_marker_enums_accept_dot_literals_without_imports() {
-    let diagnostics = codes("#Inline(.Always)\nfn helper() -> Int -> 1\nfn run() {}");
+    let diagnostics = codes("#Inline(.Always)\nfn helper() -> Int { 1 }\nfn run() {}");
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
 }
 
@@ -84,15 +84,14 @@ fn run() {
 
 #[test]
 fn job_scope_and_reserved_names_use_the_job_diagnostic() {
-    // D-JOB-NAMES1=A: Jet command words such as `output`, `serve`, and `lint`
-    // are ordinary job names; only the lifecycle entries, `help`, and
-    // `version` are reserved.
+    // D-JET-VERBS1=A: every registered top-level command is reserved.
+    // Retired words and nested-only words are not reserved.
     let valid = codes(
-        "#Job(.Ship) fn ship() {}\n#Job(.Internal) fn inspect_job() {}\n#Job fn output() {}\n#Job fn serve() {}\n#Job fn lint() {}\nfn run() {}",
+        "#Job(.Ship) fn ship() {}\n#Job(.Internal) fn inspect_job() {}\n#Job fn output() {}\n#Job fn serve() {}\nfn run() {}",
     );
     assert!(valid.is_empty(), "{valid:?}");
 
-    for reserved in ["run", "dev", "build", "test", "help", "version"] {
+    for reserved in ["run", "dev", "build", "test", "help", "version", "lint", "fmt", "check", "clean", "inspect"] {
         let diagnostics = codes(&format!("#Job fn {reserved}() {{}}\nfn main() {{}}"));
         assert!(
             diagnostics.iter().any(|code| code == "E0928"),
@@ -212,8 +211,8 @@ fn run() {}
 fn parser_binds_the_authoritative_declaration_site_matrix() {
     let fixtures = [
         (
-            "#allow(float_money) price: Float",
-            "struct Money { #allow(float_money) price: Float }\nfn run() {}",
+            "#allow(float_money, \"deliberate floating-point field\") price: Float",
+            "struct Money { #allow(float_money, \"deliberate floating-point field\") price: Float }\nfn run() {}",
             jet::Policy::RuleSite::Field,
         ),
         (

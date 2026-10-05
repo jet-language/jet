@@ -84,7 +84,7 @@ fn run() {
 #[test]
 fn generic_clone_bound_is_usage_sensitive() {
     let src = r#"
-fn inspect<T>(value: T) -> Int -> 1
+fn inspect<T>(value: T) -> Int { 1 }
 fn duplicate<T>(value: T) -[..E]> T { return ~value }
 fn increment(value: Int) -[]> Int { return value + 1 }
 
@@ -3204,7 +3204,7 @@ struct Library {
     books: [Book]
 }
 
-fn book_at(lib: Library, i: Int) -> View<Book> -> lib.books[i..i]
+fn book_at(lib: Library, i: Int) -> View<Book> { lib.books[i..i] }
 
 fn edit_at(lib: &Library, i: Int) -[]> ViewMut<Book> {
     return &lib.books[i..i]
@@ -3268,7 +3268,7 @@ struct Library {
     books: [Book]
 }
 
-fn book_at(lib: Library, i: Int) -> View<Book> -> lib.books[i..i]
+fn book_at(lib: Library, i: Int) -> View<Book> { lib.books[i..i] }
 
 fn run() {
     lib := Library{
@@ -6677,7 +6677,7 @@ struct Packet {
 }
 
 impl Packet.Slice {
-    fn head(self) -> View<Int> from self -> self.data[0..1]
+    fn head(self) -> View<Int> from self { self.data[0..1] }
 }
 
 fn first(s: Slice) -[..E]> View<Int> from s {

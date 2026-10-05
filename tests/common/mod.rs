@@ -43,6 +43,57 @@ fn prepare_test_fixture_root(path: &Path) {
     }
 }
 
+/// One self-hosting parity unit: the `Compiler/` sources `include` selects,
+/// concatenated in `Compiler/Bootstrap/sources.list` order, each preceded by a
+/// `// [label: path]` marker line.
+pub fn compiler_parity_source(label: &str, include: impl Fn(&str) -> bool) -> String {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let manifest = fs::read_to_string(root.join("Compiler/Bootstrap/sources.list"))
+        .expect("Compiler/Bootstrap/sources.list");
+    let mut core_imports = std::collections::HashSet::new();
+    let mut source = String::new();
+    for row in manifest.lines() {
+        let path = row.trim();
+        if path.is_empty() || path.starts_with('#') || !include(path) {
+            continue;
+        }
+        let text = fs::read_to_string(root.join(path))
+            .unwrap_or_else(|error| panic!("read parity source `{path}`: {error}"));
+        source.push_str(&format!("// [{label}: {path}]\n"));
+        source.push_str(&without_package_imports(&text, &mut core_imports));
+        source.push('\n');
+    }
+    source
+}
+
+/// D-MOD-CYCLE1=A: Compiler/ files import their dependency packages with
+/// `use jet_<package>.[names]`; a concatenated parity source is one
+/// namespace, so those import blocks are dropped. Files may also repeat one
+/// single-line Core import (`use core.text as unicode`); inside one unit the
+/// repeat is a duplicate import name (E0105), so only the first is kept, as
+/// Compiler/Bootstrap/assemble.mjs does.
+fn without_package_imports(text: &str, core_imports: &mut std::collections::HashSet<String>) -> String {
+    let mut kept = String::with_capacity(text.len());
+    let mut in_import = false;
+    for line in text.split_inclusive('\n') {
+        if !in_import
+            && (line.starts_with("use jet_") || line.starts_with("use compiler_bootstrap"))
+            && line.contains(".[")
+        {
+            in_import = true;
+        }
+        if in_import {
+            in_import = !line.contains(']');
+            continue;
+        }
+        if line.starts_with("use core.") && !line.contains('[') && !core_imports.insert(line.trim_end().to_string()) {
+            continue;
+        }
+        kept.push_str(line);
+    }
+    kept
+}
+
 /// Lower a checked bundle through the canonical MIR/artifact seam used by
 /// resident JIT tests.  Keep the target and artifact identity together so
 /// callers cannot accidentally invoke a backend with a bundle or mismatched

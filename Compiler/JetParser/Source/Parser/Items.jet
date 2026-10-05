@@ -996,6 +996,12 @@ fn parser_parse_function(state: &JetParserState, modifiers: ParsedItemModifiers,
     declared_return_view :: parser_parse_opt_declared_view_from(&state, parser_view_owner_names(params))
     post_effect := false
     if declared_effects == None && effect_via == None && parser_func_effect_starts_here(&state) {
+        // D-SIG-AFTER1=A (card #4512): `-> T -[E]>` writes two arrows; the
+        // result follows the one effect arrow instead (E0068).
+        if signature.plain_arrow && parser_current_kind(&state) == TOKEN_MINUS && parser_kind_at(&state, 1) == TOKEN_LBRACKET {
+            arrow_span :: parser_current(&state).span
+            parser_add_error_code(&state, "E0068", arrow_span, "this callable puts the return type before the arrow", "a return type follows the one arrow, and a named function body uses braces", "write `fn name(...) -> Type {{ … }}`")
+        }
         post_effect = true
         effects :: parser_parse_opt_func_effects(&state)
         declared_effects = effects.effects
@@ -1021,23 +1027,35 @@ fn parser_parse_function(state: &JetParserState, modifiers: ParsedItemModifiers,
     is_ffi :: loop applied in modifiers.markers {
         if applied.name == "FFI" -> break true
     } ?? false
-    // D-SIG-SHAPE1=B: `->` (or the effect ceiling) starts a one-line body;
-    // the retired `::` / `=` markers stay readable for the migration. An
+    // D-SIG-AFTER1=A (card #4512): a named function has one arrow, before its
+    // result, and a braced body. A body `->` after the result, or an
+    // expression right after the arrow, is E0080 and recovers to the same
+    // body; the retired `=>` / `::` / `=` markers keep their own codes. An
     // `#FFI` function's body is its foreign source instead.
     marker_kind :: parser_current_kind(&state)
+    marker_span :: parser_current(&state).span
+    effect_body :: !is_ffi && effect_body_marker && marker_kind != TOKEN_UNIFIED_ARROW && marker_kind != TOKEN_LAMBDA_ARROW && marker_kind != TOKEN_COLON_COLON && marker_kind != TOKEN_EQ
+    teach_arrow_body :: !guest_import && !signature.retired_shape
+    arrow_marker :: !is_ffi && !effect_body && teach_arrow_body && marker_kind == TOKEN_UNIFIED_ARROW
     body_marker :: if {
         is_ffi -> false
-        effect_body_marker && marker_kind != TOKEN_UNIFIED_ARROW && marker_kind != TOKEN_LAMBDA_ARROW && marker_kind != TOKEN_COLON_COLON && marker_kind != TOKEN_EQ -> true
+        effect_body -> true
         else -> parser_parse_function_body_marker(&state, guest_import)
     }
     retired_body := Stmt?{None}
     value_body := false
+    if arrow_marker && parser_current_kind(&state) == TOKEN_LBRACE -> parser_report_arrow_function_body(&state, marker_span)
     if body_marker && parser_current_kind(&state) != TOKEN_LBRACE {
         value_body = true
         if parser_function_body_missing(&state) {
             missing :: parser_current(&state).span
             parser_add_error_code(&state, "E0081", missing, "`fn {func_name}` has no body", "Jet functions are defined, not declared: a signature without `{{ … }}` is not a complete function. Host and FFI cells use `#Import` / `#FFI` with their required body form.", "Add a `{{ … }}` block.")
         } else {
+            if arrow_marker -> parser_report_arrow_function_body(&state, marker_span)
+            if effect_body && teach_arrow_body {
+                body_span :: parser_current(&state).span
+                parser_report_arrow_function_body(&state, body_span)
+            }
             value :: parser_parse_expression(&state, 1, 0)
             parser_finish_statement(&state)
             retired_body = Val(Stmt.Expr{expr: value.expr})
@@ -1066,7 +1084,7 @@ fn parser_parse_function(state: &JetParserState, modifiers: ParsedItemModifiers,
     has_body := false
     if {
         is_ffi -> {
-            func.inline_foreign = parser_parse_inline_foreign_body(&state, modifiers.markers, parser_return_type_has_value(return_type))
+            func.inline_foreign = parser_parse_inline_foreign_body(&state, modifiers.markers)
             func.span = parser_cover(modifiers.start_span, parser_lookahead(&state, -1).span)
             has_body = true
         }
@@ -1138,6 +1156,11 @@ pub struct ParsedCallableResult {
     pub effects: [EffectRowEntry]?
     pub via: NamedSpan?
     pub prefix_effect: Bool
+    // A retired bare result before the arrow (E0068) already teaches the
+    // whole `-> Type { … }` shape; the arrow-body codes stay quiet then.
+    pub retired_shape: Bool
+    // The result follows a plain `->` (not an effect arrow or a bare `E!`).
+    pub plain_arrow: Bool
 }
 
 // The start of an effect arrow: canonical `-[`, or a retired `:[`, `=[`,
@@ -1311,7 +1334,9 @@ fn parser_result_type_follows_arrow(state: &JetParserState) -> Bool {
     failed :: parser_aborting(&state) && state.abort_mark > saved_diagnostics
     next :: parser_current(&state)
     kind :: next.kind
-    boundary :: kind == TOKEN_COLON_COLON || kind == TOKEN_EQ || kind == TOKEN_UNIFIED_ARROW || kind == TOKEN_LAMBDA_ARROW || kind == TOKEN_SEMI || kind == TOKEN_COMMA || kind == TOKEN_RPAREN || (kind == TOKEN_LBRACE && parsed.span.end < next.span.start) || (kind == TOKEN_IDENT && next.payload.decoded == "from")
+    // `-> T -[E]>` also ends the result: a second (effect) arrow, E0068 at the
+    // caller. A one-line trait slot ends at the enclosing `}`.
+    boundary :: kind == TOKEN_COLON_COLON || kind == TOKEN_EQ || kind == TOKEN_UNIFIED_ARROW || kind == TOKEN_LAMBDA_ARROW || kind == TOKEN_SEMI || kind == TOKEN_COMMA || kind == TOKEN_RPAREN || (kind == TOKEN_LBRACE && parsed.span.end < next.span.start) || (kind == TOKEN_IDENT && next.payload.decoded == "from") || (kind == TOKEN_MINUS && parser_kind_at(&state, 1) == TOKEN_LBRACKET) || kind == TOKEN_RBRACE
     parser_rewind(&state, saved_position, saved_diagnostics, saved_blocks, saved_else_arms)
     state.pending_type_gt = saved_type_gt
     state.pending_type_gt_span = saved_type_gt_span
@@ -1327,6 +1352,8 @@ fn parser_parse_callable_result(state: &JetParserState) -> ParsedCallableResult 
     prefix_effect :: parser_func_effect_starts_here(&state)
     effects :: parser_parse_opt_func_effects(&state)
     arrow_return := false
+    retired_shape := false
+    plain_arrow := false
     result := ParsedType?{None}
     if {
         effects.effects != None || effects.via != None -> {
@@ -1338,11 +1365,13 @@ fn parser_parse_callable_result(state: &JetParserState) -> ParsedCallableResult 
             parser_bump(&state)
             if parser_result_type_follows_arrow(&state) {
                 arrow_return = true
+                plain_arrow = true
                 result = Val(parser_parse_type(&state, 0))
             } else {
                 result = parser_parse_unit_fallible_return(&state)
                 if parser_has_type(result) {
                     arrow_return = true
+                    plain_arrow = true
                 } else {
                     state.position = before
                 }
@@ -1353,6 +1382,7 @@ fn parser_parse_callable_result(state: &JetParserState) -> ParsedCallableResult 
             if !parser_has_type(result) && parser_type_starts_here(&state) {
                 parsed :: parser_parse_type(&state, 0)
                 parser_add_error_code(&state, "E0068", parsed.span, "this callable puts the return type before the arrow", "a return type follows the one arrow, and a named function body uses braces", "write `fn name(...) -> Type {{ … }}`")
+                retired_shape = true
                 result = Val(parsed)
             }
         }
@@ -1366,13 +1396,13 @@ fn parser_parse_callable_result(state: &JetParserState) -> ParsedCallableResult 
             parser_add_error_code(&state, "E0003", parsed.span, "this unit-fallible signature uses the retired arrow-and-unit form", "a function that can fail but returns no value has no result payload for an arrow to introduce", "write `fn save(path: String) IOError!`, or omit the contract for implicit `Err`")
         }
     }
-    ParsedCallableResult{return_type: return_type, return_type_span: return_type_span, effects: effects.effects, via: effects.via, prefix_effect: prefix_effect}
+    ParsedCallableResult{return_type: return_type, return_type_span: return_type_span, effects: effects.effects, via: effects.via, prefix_effect: prefix_effect, retired_shape: retired_shape, plain_arrow: plain_arrow}
 }
 
-// D-SIG-SHAPE1=B: the marker that opens a one-line function body. `->` is
-// current; `=>` teaches `->` (E0070) and `::` / `=` teach braces (E0065),
-// except that an `#Import(c)` function binds its C symbol with `=`, where a
-// `->` is the wrong marker (E3261).
+// The marker that opens a recovered one-line function body. A `->` here is
+// E0080 at the caller (card #4512); `=>` teaches `->` (E0070) and `::` / `=`
+// teach braces (E0065), except that an `#Import(c)` function binds its C
+// symbol with `=`, where a `->` is the wrong marker (E3261).
 fn parser_parse_function_body_marker(state: &JetParserState, guest_import: Bool) -> Bool {
     token :: parser_current(&state)
     if token.kind == TOKEN_UNIFIED_ARROW {
@@ -1395,10 +1425,15 @@ fn parser_parse_function_body_marker(state: &JetParserState, guest_import: Bool)
     true
 }
 
+// D-SIG-AFTER1=A (card #4512): E0080 for a named function body after an arrow.
+fn parser_report_arrow_function_body(state: &JetParserState, span: Span) {
+    parser_add_error_code(&state, "E0080", span, "This named function body follows an arrow instead of braces.", "A named function has one arrow, `->` or `-[Effects]>`, followed by its optional return type; the body always sits in braces: `fn name(...) -> Type {{ … }}`.", "Replace `-> expr` with `{{ expr }}`; `jet fmt` applies this fix.")
+}
+
 // D-FFI-INLINE1=A (card #501): a `#FFI(<lang>) fn` body is exactly one
-// non-interpolated string of foreign source; anything else is E0064. A
-// value-returning signature reaches the body through the callable arrow.
-fn parser_parse_inline_foreign_body(state: &JetParserState, markers: [Marker], returns_value: Bool) -> InlineForeign? {
+// non-interpolated string of foreign source; anything else is E0064. The
+// braced body follows the one arrow and its result; a second `->` is E0080.
+fn parser_parse_inline_foreign_body(state: &JetParserState, markers: [Marker]) -> InlineForeign? {
     ffi := markers[0]
     loop applied in markers {
         if applied.name == "FFI" -> ffi = applied
@@ -1415,7 +1450,10 @@ fn parser_parse_inline_foreign_body(state: &JetParserState, markers: [Marker], r
         parser_add_fatal_code(&state, "E0930", ffi.span, "`#FFI` arguments do not match its registered signature", "marker arguments use the same call grammar and typed signature as function arguments", "match the registered marker signature")
         return None
     }
-    if returns_value -> parser_expect_unified_arrow(&state, "before the `#FFI` foreign-source body")
+    if parser_current_kind(&state) == TOKEN_UNIFIED_ARROW {
+        arrow_span :: parser_bump(&state).span
+        parser_report_arrow_function_body(&state, arrow_span)
+    }
     parser_expect(&state, TOKEN_LBRACE, "`{{` to open the `#FFI` foreign-source body")
     parser_skip_semicolons(&state)
     source :: parser_current(&state)

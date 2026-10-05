@@ -4,6 +4,7 @@
 // loader unit (Tests/LoadImages.jet) beside it.
 //
 // usage: node Compiler/JetBackend/Tests/run-lower-fixtures.mjs <outdir>
+// Append --abi to assemble just the ABI/alignment witnesses.
 // then:  cd <outdir> && jet run unit.jet        (writes <fixture>.elf files)
 // then:  node Compiler/JetBackend/Tests/check-native-fixtures.mjs <outdir>
 //        (with JET_RUNTIME_C_LIB, it also runs every image through load.jet)
@@ -59,18 +60,24 @@ function body(path) {
   return `// [unit source: ${path}]\n${kept.join("\n")}\n`;
 }
 
+const abiOnly = process.argv.includes("--abi");
 const parts = [
-  "// [unit source: Foundation items named by MIR.jet]",
-  item("Compiler/JetFoundation/Source/Diagnostics/Diagnostic.jet", "pub struct Span {"),
-  item("Compiler/JetFoundation/Source/Registry/CoreCalls.jet", "pub enum Effect "),
-  item("Compiler/JetFoundation/Source/Types/Types.jet", "pub enum ParamZone {"),
-  item("Compiler/JetFoundation/Source/Types/Types.jet", "pub fn param_zone_name("),
-  "",
-  body("Compiler/JetFoundation/Source/MIR/MIR.jet"),
+  ...(abiOnly ? [
+    item("Compiler/JetFoundation/Source/MIR/MIR.jet", "pub struct MIRTypeID "),
+  ] : [
+    "// [unit source: Foundation items named by MIR.jet]",
+    item("Compiler/JetFoundation/Source/Diagnostics/Diagnostic.jet", "pub struct Span {"),
+    item("Compiler/JetFoundation/Source/Registry/CoreCalls.jet", "pub enum Effect "),
+    item("Compiler/JetFoundation/Source/Types/Types.jet", "pub enum ParamZone {"),
+    item("Compiler/JetFoundation/Source/Types/Types.jet", "pub fn param_zone_name("),
+    body("Compiler/JetFoundation/Source/MIR/MIR.jet"),
+  ]),
   body("Compiler/JetBackend/Source/LIR/LIR.jet"),
   body("Compiler/JetBackend/Source/LIR/Lint.jet"),
-  body("Compiler/JetBackend/Source/LIR/Print.jet"),
-  body("Compiler/JetBackend/Source/Lower/Lower.jet"),
+  ...(!abiOnly ? [
+    body("Compiler/JetBackend/Source/LIR/Print.jet"),
+    body("Compiler/JetBackend/Source/Lower/Lower.jet"),
+  ] : []),
   body("Compiler/JetBackend/Source/X64/Encoder.jet"),
   body("Compiler/JetBackend/Source/X64/RegAlloc.jet"),
   body("Compiler/JetBackend/Source/X64/Select.jet"),
@@ -78,8 +85,9 @@ const parts = [
   body("Compiler/JetBackend/Source/Image/Runtime.jet"),
   body("Compiler/JetBackend/Source/Image/ELF.jet"),
   body("Compiler/JetBackend/Source/Image/Object.jet"),
-  body("Compiler/JetBackend/Source/Image/Memory.jet"),
-  body("Compiler/JetBackend/Tests/LowerFixtures.jet"),
+  ...(!abiOnly ? [body("Compiler/JetBackend/Source/Image/Memory.jet")] : []),
+  body("Compiler/JetBackend/Tests/AbiFixtures.jet"),
+  ...(abiOnly ? ["fn run() { abi_fixtures() }"] : [body("Compiler/JetBackend/Tests/LowerFixtures.jet")]),
 ];
 mkdirSync(outDir, { recursive: true });
 writeFileSync(`${outDir}/unit.jet`, [...coreUses, "", ...parts].join("\n"));

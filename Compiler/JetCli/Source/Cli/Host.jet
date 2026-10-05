@@ -46,9 +46,9 @@ fn jet_cli_errors(diagnostics: [Diagnostic]) -> [Diagnostic] Never! {
 
 // `jet check <file>`: compile through the Jet compiler, place each diagnostic
 // on the file that owns it, and report the outcome the Rust host prints.
-fn jet_cli_compile_check(file: String, source: String, color: Bool, quiet: Bool) -> JetDriverVerbOutput {
+fn jet_cli_compile_check(file: String, source: String, color: Bool, quiet: Bool, threads: Int?) -> JetDriverVerbOutput {
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
-    compiled :: jet_cli_compile_file(file, color)
+    compiled :: jet_cli_compile_file(file, color, threads)
     if compiled == {
         .Refused(refusal) -> output = ~refusal
         .Compiled(result, snapshot) -> {
@@ -171,9 +171,9 @@ fn jet_cli_build_result(file: String, source: String, color: Bool, release: Bool
     jet_cli_build_native(file, result, binary, color)
 }
 
-fn jet_cli_compile_build(file: String, source: String, color: Bool, release: Bool) -> JetDriverVerbOutput {
+fn jet_cli_compile_build(file: String, source: String, color: Bool, release: Bool, threads: Int?) -> JetDriverVerbOutput {
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
-    compiled :: jet_cli_compile_file(file, color)
+    compiled :: jet_cli_compile_file(file, color, threads)
     if compiled == {
         .Refused(refusal) -> output = ~refusal
         .Compiled(result, snapshot) -> output = jet_cli_build_result(file, source, color, release, result, snapshot)
@@ -187,8 +187,8 @@ pub fn jet_cli_main(args: [String]) -> Int {
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: 0}
     if plan == {
         .Done(done) -> output = ~done
-        .Check(file, source, color, quiet) -> output = jet_cli_compile_check(file, source, color, quiet)
-        .Build(file, source, color, release) -> output = jet_cli_compile_build(file, source, color, release)
+        .Check(file, source, color, quiet, threads) -> output = jet_cli_compile_check(file, source, color, quiet, threads)
+        .Build(file, source, color, release, threads) -> output = jet_cli_compile_build(file, source, color, release, threads)
     }
     if output.stdout.len() > 0 {
         out :: cli_term.stdout()

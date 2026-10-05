@@ -1470,7 +1470,7 @@ where
         // but do not let it classify those diagnostics as expected failures.
         Some("__jet_test_ordinary_failure__")
     };
-    jet_test_expect_fail_enter_scope(u64::MAX, expected_code);
+    jet_test_expect_fail_enter_scope(u64::MAX, expected_code, None);
     let result = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(run)) {
         Ok(result) => result,
         Err(payload) => {

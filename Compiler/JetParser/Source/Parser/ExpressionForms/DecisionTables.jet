@@ -34,6 +34,7 @@ use jet_lexer.[
     TOKEN_LPAREN,
     TOKEN_LT,
     TOKEN_NOT_EQ,
+    TOKEN_MINUS,
     TOKEN_OR_OR,
     TOKEN_PIPE,
     TOKEN_RBRACE,
@@ -93,7 +94,7 @@ fn parser_expression_form_if_ahead(state: &JetParserState) -> Bool Never! {
 // `->` introduces the body (`if ready -> stmt`), so `name ->` is no lambda.
 // `if` and `loop` reach `parser_parse_expression_form` from the prefix parser.
 pub fn parser_expression_form_ahead(state: &JetParserState, allow_bare_lambda: Bool) -> Bool Never! {
-    allow_bare_lambda && parser_current_kind(&state) == TOKEN_IDENT && (parser_kind_at(&state, 1) == TOKEN_UNIFIED_ARROW || parser_kind_at(&state, 1) == TOKEN_LAMBDA_ARROW)
+    allow_bare_lambda && parser_current_kind(&state) == TOKEN_IDENT && (parser_kind_at(&state, 1) == TOKEN_UNIFIED_ARROW || parser_kind_at(&state, 1) == TOKEN_LAMBDA_ARROW || (parser_kind_at(&state, 1) == TOKEN_MINUS && parser_kind_at(&state, 2) == TOKEN_LBRACKET))
 }
 
 pub fn parser_parse_expression_form(state: &JetParserState, depth: Int) -> ParsedExpr {
@@ -486,15 +487,15 @@ fn parser_expression_form_parse_if(state: &JetParserState, depth: Int, lint_styl
 // parameter type comes from the expected callable type.
 fn parser_expression_form_parse_bare_lambda(state: &JetParserState, depth: Int) -> ParsedExpr {
     name :: parser_expect_name(&state, "as a lambda parameter")
-    parser_expect_unified_arrow(&state, "after a bare lambda parameter")
+    effects :: parser_parse_opt_func_effects(&state)
+    if effects.via == .Val(via) -> parser_add_fatal_code(&state, "E0119", via.span, "a lambda effect row cannot publish `via`", "a lambda stores a concrete effect row as part of its callable interface", "write the effects directly, for example `-[Net]>`")
+    if effects.effects == None -> parser_expect_unified_arrow(&state, "after a bare lambda parameter")
     body :: parser_parse_lambda_arrow_body(&state, depth, name.span.end)
     span :: Span{start: name.span.start, end: body.end}
     lambda :: Lambda{
         take_names: [NamedSpan]{},
         params: [LambdaParam]{LambdaParam{name: name.payload.decoded, name_span: name.span, ty: None, ty_span: None}},
-        result_type: None,
-        error_type: None,
-        effects: None,
+        effects: effects.effects,
         body: body.body,
         span: span,
         meta: ast_empty_lambda_meta(),

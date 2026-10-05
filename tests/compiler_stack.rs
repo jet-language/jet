@@ -78,7 +78,7 @@ fn split_edit(cell: Cell<Pair>) {
 fn make_edit_guards(cell: Cell<Pair>) -> (
     first: CellEditGuard<Int>,
     second: CellEditGuard<Int>
-) -> {
+) {
     return cell.guard_edit().split(
         pair -> pair.left,
         pair -> pair.right

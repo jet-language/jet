@@ -196,7 +196,8 @@ fn flush<M: Module + ?Sized>(module: &mut M) -> Result<(), String> {
     Ok(())
 }
 
-/// Compile every queued function, on as many threads as the host offers.
+/// Compile every queued function, on as many threads as the compiler's one
+/// thread cap admits (`--threads N`; up to the reported cores without it).
 /// The first failure in queue order wins, so the reported error does not
 /// depend on thread timing.
 fn compile_all(
@@ -204,9 +205,7 @@ fn compile_all(
     pending: &mut [(FuncId, Context)],
     cache: Option<&BuildCache>,
 ) -> Result<(), String> {
-    let threads = std::thread::available_parallelism()
-        .map_or(1, std::num::NonZeroUsize::get)
-        .min(pending.len());
+    let threads = jet_foundation::CompilerThreads::admit(pending.len(), usize::MAX);
     let queue = Mutex::new(pending.iter_mut().enumerate());
     let drain = || {
         let mut failures = Vec::new();

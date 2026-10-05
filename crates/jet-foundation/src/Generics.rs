@@ -419,11 +419,10 @@ pub fn e0905(type_name: &str, trait_name: &str, span: Span, needs_derive: bool) 
     } else {
         format!("write `impl {type_name}.{trait_name} {{ … }}` with every required method")
     };
-    Diagnostic::error(
+    let why = format!("`{type_name}` would need to implement `{trait_name}` before it can be used here");
+    Diagnostic::from_row(
         "E0905",
-        format!("`{type_name}` isn't `{trait_name}`"),
-        format!("`{type_name}` would need to implement `{trait_name}` before it can be used here"),
-        fix,
+        &[("type", type_name), ("bound", trait_name), ("why", &why), ("fix", &fix)],
         Some(span),
     )
 }

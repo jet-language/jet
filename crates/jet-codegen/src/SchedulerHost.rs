@@ -58,8 +58,8 @@ fn jet_scheduler_runtime_stop(msg: &str) -> ! {
     jet_runtime_diagnostic(report.rendered);
 }
 
-pub fn jet_scheduler_runtime_stop_with_report(report: String) -> ! {
-    jet_runtime_diagnostic(report);
+pub fn jet_scheduler_runtime_stop_with_report(report: JetStreamFailure) -> ! {
+    jet_runtime_diagnostic(report.rendered);
 }
 
 fn jet_runtime_caught_stop(message: &str) {

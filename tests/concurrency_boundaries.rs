@@ -673,7 +673,7 @@ fn a_lent_owner_cannot_be_moved_before_the_group_joins() {
     // spawn, so the ordinary view rules end its borrow too early.
     let source = format!(
         r#"{PARTICLES}
-fn eat(ps: ^[Particle]) -> Int -> ps.len()
+fn eat(ps: ^[Particle]) -> Int {{ ps.len() }}
 fn run() {{
     particles := [Particle]{{ {{position: 10, velocity: 2}}, {{position: 20, velocity: 3}} }}
         task.group g {{
@@ -848,7 +848,7 @@ fn run() {
         (
             "safe kernel",
             r#"
-#Kernel(.parallel) fn add(left: Int, right: Int) -> Int -> left + right
+#Kernel(.parallel) fn add(left: Int, right: Int) -> Int { left + right }
 fn run() { print(add(20, 22)) }
 "#,
             None,
@@ -889,7 +889,7 @@ fn run() { print(noisy(1)) }
         (
             "kernel local cell",
             r#"
-#Kernel(.parallel) fn blocked(cell: Cell<Int>) -> Int -> 0
+#Kernel(.parallel) fn blocked(cell: Cell<Int>) -> Int { 0 }
 fn run() {}
 "#,
             Some("E1102"),

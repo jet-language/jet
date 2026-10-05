@@ -3985,7 +3985,7 @@ pub(crate) fn run_inspect(
             crate::CmdCompile::run_build_query("graph", &query_args, mode);
         }
         jet::CLI::InspectPlane::Gates => {
-            crate::CmdGates::run(&args, mode.json, mode.color_stderr(), gates, false);
+            crate::CmdGates::run(&args, mode.json, mode.color_stderr(), gates);
         }
     }
     let _ = (profile, no_os);

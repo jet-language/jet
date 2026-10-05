@@ -1773,7 +1773,13 @@ fn typed_decode_map(
     };
     let key = typed_child_descriptor(descriptor, descriptor.key, "key")?;
     let value = typed_child_descriptor(descriptor, descriptor.value, "value")?;
-    let map = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_empty_map());
+    let map = Concurrency::with_runtime_mut(|rt| {
+        let map = rt.heap.alloc_empty_map();
+        if value.map_word_values() {
+            rt.heap.set_map_word_values(map);
+        }
+        map
+    });
     let mut errors = Vec::new();
     for (name, tree) in entries {
         let key_slot = match key.kind {

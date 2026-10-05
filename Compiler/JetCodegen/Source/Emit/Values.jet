@@ -2749,6 +2749,14 @@ fn jet_rust_emit_place_read(ctx: &JetRustEmitContext, function: MIRFunction, id:
     // referent; the unique view is never cloned.
     loop row in function.places {
         if row.id != id -> next
+        if row.projections.len() > 0 {
+            if row.projections[row.projections.len() - 1] == .Field(field, _) {
+                if jet_rust_emit_default_err_cause_field(&ctx, field) {
+                    place :: jet_rust_emit_place(&ctx, function, id, false)
+                    return "{ctx.config.root_prefix}jet_err_cause_projection(&({place}))"
+                }
+            }
+        }
         if row.projections.len() == 0 {
             if row.base == .Local(local) {
                 if jet_rust_emit_local_is_allocator_view(function, local) -> return "&mut **{jet_rust_emit_local_storage(&ctx, local)}.as_mut().expect(\"MIR local\")"
@@ -2984,6 +2992,19 @@ fn jet_rust_emit_native_host_field(ctx: &JetRustEmitContext, field: MIRFieldID) 
             if ctx.program.types[definition_index].id == row.owner -> return jet_rust_emit_has_native_type_projection(ctx.program.types[definition_index].key)
         }
         return false
+    }
+    false
+}
+
+fn jet_rust_emit_default_err_cause_field(ctx: &JetRustEmitContext, field: MIRFieldID) -> Bool Never! {
+    loop row in jet_rust_emit_field_rows(ctx, field) {
+        if row.id != field || row.field.name != "cause" -> next
+        if jet_rust_emit_compiler_builtin_for_type(&ctx, row.owner) == .Val(builtin) {
+            if builtin == {
+                .DefaultErr -> return true
+                else -> {}
+            }
+        }
     }
     false
 }

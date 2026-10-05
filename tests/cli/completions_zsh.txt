@@ -13,7 +13,7 @@ commands=(
         'merge:Merge Jet programs without losing code structure'
         'review:Review meaning, authority, and proof changes'
         'run:Run a program or project'
-        'jobs:List, inspect, watch, or run named project jobs'
+        'jobs:List, inspect, or watch named project jobs'
         'generate:Run an explicit source generator with authority and a receipt'
         'check:Check code without creating a binary'
         'fill:Propose checked code for typed goals'
@@ -266,6 +266,7 @@ flags=(
         '--release[With build/run/dev/jobs/test\: Optimize for release]'
         '--profile[With build/run/dev/jobs/package/test\: How hard to optimize\: release, debug, ci, hardened, or a named optimization bundle]'
         '--set[With build/run/dev/jobs/test\: Set one declared package setting as key=value]'
+        '--threads[With build/run/check/test/dev/inspect\: Use at most N compiler threads (1 = one thread); without it jet picks a safe number of compiler threads]'
         '--builder[With build/jobs\: Select a previously bound remote builder]'
         '--a11y[With lint\: Check roles, labels, and other accessibility basics]'
         '--complexity[With lint\: Report per-function cognitive complexity]'
@@ -304,7 +305,6 @@ flags=(
     )
 if (( CURRENT == 2 )); then
 _describe -t commands 'command' commands
-elif (( CURRENT == 3 && $words[2] == jobs )); then
         local -a job_names
 job_names=("${(@f)$(jet --json jobs 2>/dev/null | sed -n 's/.*"name":"\([^"]*\)".*/\1/p')}")
 _describe -t job_names 'job' job_names

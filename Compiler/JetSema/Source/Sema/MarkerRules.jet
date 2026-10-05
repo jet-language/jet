@@ -1342,6 +1342,18 @@ fn sema_marker_rules_validate_vocabulary(registry: SemaScopeMembersMarkerRegistr
 fn sema_marker_rules_validate_sites(registry: SemaScopeMembersMarkerRegistry, program: Program, diagnostics: &[Diagnostic]) {
     applications := sema_marker_rules_applications(program)
     loop application in applications {
+        if application.marker.name == "allow" {
+            if application.marker.args.len() < 2 {
+                &diagnostics.push(diagnostic_from_registry("L3103", Val(application.marker.span), "This `#allow` has no reason.", "Every lint allowance records why the selected lint does not apply at this site.", "Add the reason slot: `#allow(lint_name, \"why this lint does not apply\")`."))
+            }
+            loop argument in application.marker.args {
+                if argument == .Expr(expr) {
+                    if expr == .Ident(name, span) && name == "allow_reason" {
+                        &diagnostics.push(sema_error("E0355", span, "`#allow` cannot suppress `allow_reason`", "the reason check audits the lint allowance itself and cannot be disabled by that allowance", "write the reason slot: `#allow(lint_name, \"why this lint does not apply\")`"))
+                    }
+                }
+            }
+        }
         site :: application.site ?? next
         builtin_index := sema_marker_rules_catalog_rule_index(registry.applied_rules, application.marker.name)
         if builtin_index != None {

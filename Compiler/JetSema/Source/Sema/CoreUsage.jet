@@ -1071,8 +1071,6 @@ fn sema_core_collect_expr(expr: Expr, imports: [SemaCoreImport], registered: [St
             loop parameter in lambda.params {
                 if parameter.ty != None -> sema_core_collect_type(parameter.ty ?? Type.Named{name: "Unit"}, registered, &used, &spans, parameter.ty_span)
             }
-            if lambda.result_type != None -> sema_core_collect_type(lambda.result_type ?? Type.Named{name: "Unit"}, registered, &used, &spans, Val(lambda.span))
-            if lambda.error_type != None -> sema_core_collect_type(lambda.error_type ?? Type.Named{name: "Unit"}, registered, &used, &spans, Val(lambda.span))
             if lambda.body == {
                 .Expr(value) -> sema_core_collect_expr(value, imports, registered, &used, &spans, &callbacks)
                 .Block(body) -> sema_core_collect_stmts(body, imports, registered, &used, &spans, &callbacks)

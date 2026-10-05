@@ -143,6 +143,18 @@ pub fn is_numeric(text: String) -> Bool Never! { core.text.is_numeric(text) }
 
 pub fn is_whitespace(text: String) -> Bool Never! { core.text.is_whitespace(text) }
 
+/// True iff any scalar is Unicode 17 Cc (D-TEXT-CONTROL1=A).
+/// Empty text is false. Scan UTF-8 bytes without per-scalar allocation.
+pub fn has_control(value: String) -> Bool Never! {
+    after_c2 := false
+    loop b in value.bytes() {
+        if b < (U8{32}) || b == (U8{127}) -> return true
+        if after_c2 && b >= (U8{128}) && b <= (U8{159}) -> return true
+        after_c2 = b == (U8{194})
+    }
+    false
+}
+
 pub fn trim(text: String) -> String Never! { core.text.trim(text) }
 
 pub fn trim_start(text: String) -> String Never! { core.text.trim_start(text) }

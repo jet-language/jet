@@ -2,16 +2,23 @@
 // The optimizer consumes the shared MIR schema and owns the one target-neutral
 // legality, transformation, proof-fact, and deterministic-order pipeline.
 use jet_foundation.[
+    CompilerThreads,
     MIRAccelerationFact,
     MIRBoundsFact,
     MIRDecisionRow,
+    MIRFunction,
     MIRFunctionID,
     MIRFusionFact,
     MIRLoopFact,
     MIROptimizationPassID,
+    MIRPreludeCall,
     MIRProgram,
     MIRVectorFact,
     Span,
+    compiler_threads_admit,
+    compiler_threads_failure_text,
+    compiler_threads_part_of,
+    compiler_threads_partition,
     mir_program_digest,
 ]
 
@@ -111,8 +118,10 @@ fn mir_optimizer_succeeded(report: MIROptimizationReport) -> MIROptimizationResu
 // enters; MIR Lint checks the result once. `full_verification` (tests and
 // `--verify`) also lints the input and re-verifies legality and lints the
 // program every pass produces; an ordinary compile trusts the passes after the
-// entry check (Rust MIROptimization `validate_after`).
-pub fn optimize_mir_program(program: &MIRProgram, full_verification: Bool) -> MIROptimizationResult {
+// entry check (Rust MIROptimization `validate_after`). The per-function
+// passes run in waves on up to `threads` compiler threads (mir_pass_wave);
+// the result is the same for every thread count.
+pub fn optimize_mir_program(program: &MIRProgram, full_verification: Bool, threads: CompilerThreads) -> MIROptimizationResult {
     report := mir_optimizer_empty_report()
     validation := mir_pass_check(program, .LegalityVerification, full_verification)
     if validation == .Val(error) -> return mir_optimizer_failed(error, report)
@@ -141,61 +150,39 @@ pub fn optimize_mir_program(program: &MIRProgram, full_verification: Bool) -> MI
     validation = mir_pass_validate_after(program, .LegalityVerification, full_verification)
     if validation == .Val(error) -> return mir_optimizer_failed(error, report)
 
-    before_blocks := mir_pass_block_count(&program)
-    mir_pass_eliminate_unreachable(&program)
-    report.reachable_blocks_removed += before_blocks - mir_pass_block_count(&program)
-    mir_pass_mark(&program, .UnreachableBlockElimination)
-    &report.completed.push(.UnreachableBlockElimination)
-    validation = mir_pass_validate_after(program, .UnreachableBlockElimination, full_verification)
-    if validation == .Val(error) -> return mir_optimizer_failed(error, report)
+    // A wave ends where the next step needs the whole program: after every
+    // step under full verification, else only at the two fixed-reduction
+    // barriers.
+    wave_ends :: if full_verification -> [Int]{1, 2, 3, 4, 5, 6, 7, 8, 9} else -> [Int]{6, 7, 9}
+    inputs := MIRPassWaveInputs{prelude_calls: program.prelude_calls, purity: mir_pass_prelude_purity(program.prelude_calls), cleanup: false}
+    first := MIR_PASS_STEP_UNREACHABLE
+    loop last in wave_ends {
+        counts :: mir_pass_wave(&program, first, last, inputs, threads)
+        report.reachable_blocks_removed += counts.blocks_removed
+        report.folded_values += counts.folded
+        report.dead_values_removed += counts.dead
+        report.fixed_reductions_normalized += counts.normalized
+        if first <= MIR_PASS_STEP_BOUNDS && MIR_PASS_STEP_BOUNDS <= last -> report.bounds_facts = counts.first_bounds
+        if first <= MIR_PASS_STEP_REDUCE && MIR_PASS_STEP_REDUCE <= last {
+            report.loop_facts = counts.first_loops
+            report.vector_facts = counts.first_vectors
+        }
+        if first <= MIR_PASS_STEP_REDUCE_AGAIN && MIR_PASS_STEP_REDUCE_AGAIN <= last {
+            report.loop_facts = counts.loops
+            report.vector_facts = counts.vectors
+        }
+        if first <= MIR_PASS_STEP_CANONICAL && MIR_PASS_STEP_CANONICAL <= last -> report.bounds_facts = counts.bounds
+        if first <= MIR_PASS_STEP_ACCELERATION && MIR_PASS_STEP_ACCELERATION <= last -> report.acceleration_facts = counts.acceleration
+        inputs.cleanup = counts.rewrote
+        loop step in first..<(last + 1) {
+            pass :: mir_pass_step_completes(step) ?? next
+            &report.completed.push(pass)
+            validation = mir_pass_validate_after(program, pass, full_verification)
+            if validation == .Val(error) -> return mir_optimizer_failed(error, report)
+        }
+        first = last + 1
+    }
 
-    before_blocks = mir_pass_block_count(&program)
-    mir_pass_simplify_cfg(&program)
-    report.reachable_blocks_removed += before_blocks - mir_pass_block_count(&program)
-    mir_pass_mark(&program, .CFGSimplification)
-    &report.completed.push(.CFGSimplification)
-    validation = mir_pass_validate_after(program, .CFGSimplification, full_verification)
-    if validation == .Val(error) -> return mir_optimizer_failed(error, report)
-
-    report.folded_values = mir_pass_fold_exact_constants(&program)
-    mir_pass_mark(&program, .ExactConstantFolding)
-    &report.completed.push(.ExactConstantFolding)
-    validation = mir_pass_validate_after(program, .ExactConstantFolding, full_verification)
-    if validation == .Val(error) -> return mir_optimizer_failed(error, report)
-
-    report.bounds_facts = mir_pass_derive_bounds(&program)
-    mir_pass_mark(&program, .BoundsCheckElimination)
-    &report.completed.push(.BoundsCheckElimination)
-    validation = mir_pass_validate_after(program, .BoundsCheckElimination, full_verification)
-    if validation == .Val(error) -> return mir_optimizer_failed(error, report)
-
-    report.dead_values_removed = mir_pass_eliminate_dead_pure(&program)
-    mir_pass_mark(&program, .DeadPureValueElimination)
-    &report.completed.push(.DeadPureValueElimination)
-    validation = mir_pass_validate_after(program, .DeadPureValueElimination, full_verification)
-    if validation == .Val(error) -> return mir_optimizer_failed(error, report)
-
-    loop_counts :: mir_pass_derive_loop_and_vector_facts(&program)
-    report.loop_facts = loop_counts.loops
-    report.vector_facts = loop_counts.vectors
-    reduction_counts := mir_pass_fixed_reduction_normalize(&program)
-    report.fixed_reductions_normalized += reduction_counts.normalized
-    report.reachable_blocks_removed += reduction_counts.blocks_removed
-    report.dead_values_removed += reduction_counts.dead_values_removed
-    post_reduction_counts :: mir_pass_derive_loop_and_vector_facts(&program)
-    report.loop_facts = post_reduction_counts.loops
-    report.vector_facts = post_reduction_counts.vectors
-    reduction_counts = mir_pass_fixed_reduction_normalize(&program)
-    report.fixed_reductions_normalized += reduction_counts.normalized
-    report.reachable_blocks_removed += reduction_counts.blocks_removed
-    report.dead_values_removed += reduction_counts.dead_values_removed
-    report.bounds_facts = mir_pass_derive_bounds(&program)
-    mir_pass_mark(&program, .CanonicalLoopFacts)
-    &report.completed.push(.CanonicalLoopFacts)
-    validation = mir_pass_validate_after(program, .CanonicalLoopFacts, full_verification)
-    if validation == .Val(error) -> return mir_optimizer_failed(error, report)
-
-    report.acceleration_facts = mir_pass_refresh_acceleration_facts(&program)
     mir_pass_canonicalize_program_order(&program)
     if full_verification {
         validation = mir_pass_validate_program(program, .CanonicalLoopFacts)
@@ -208,6 +195,238 @@ pub fn optimize_mir_program(program: &MIRProgram, full_verification: Bool) -> MI
     digest :: mir_program_digest(program)
     loop index in 0..<program.functions.len() -> program.functions[index].optimization.derived_from_digest = Val(digest)
     mir_optimizer_succeeded(report)
+}
+
+// The per-function passes of the production order after inline expansion,
+// as numbered steps. Each step reads one function and the prelude rows, so
+// every function can take its steps on any thread; only the waves' order is
+// program-wide.
+MIR_PASS_STEP_UNREACHABLE :: 1
+MIR_PASS_STEP_CFG :: 2
+MIR_PASS_STEP_FOLD :: 3
+MIR_PASS_STEP_BOUNDS :: 4
+MIR_PASS_STEP_DEAD :: 5
+// Loop and vector facts, then fixed-reduction normalization.
+MIR_PASS_STEP_REDUCE :: 6
+// The same again; first, when the previous normalization rewrote any
+// function, unreachable-block and dead-value elimination on every function.
+MIR_PASS_STEP_REDUCE_AGAIN :: 7
+// That cleanup after the second normalization, then the final bounds facts.
+MIR_PASS_STEP_CANONICAL :: 8
+MIR_PASS_STEP_ACCELERATION :: 9
+
+// The pass a step completes, marked on each function and validated under full
+// verification.
+fn mir_pass_step_completes(step: Int) -> MIROptimizationPassID? Never! {
+    if step == MIR_PASS_STEP_UNREACHABLE -> return Val(MIROptimizationPassID.UnreachableBlockElimination)
+    if step == MIR_PASS_STEP_CFG -> return Val(MIROptimizationPassID.CFGSimplification)
+    if step == MIR_PASS_STEP_FOLD -> return Val(MIROptimizationPassID.ExactConstantFolding)
+    if step == MIR_PASS_STEP_BOUNDS -> return Val(MIROptimizationPassID.BoundsCheckElimination)
+    if step == MIR_PASS_STEP_DEAD -> return Val(MIROptimizationPassID.DeadPureValueElimination)
+    if step == MIR_PASS_STEP_CANONICAL -> return Val(MIROptimizationPassID.CanonicalLoopFacts)
+    None
+}
+
+// The read-only rows every thread of a wave receives (a copy each; they are
+// small). `cleanup` says the previous fixed-reduction normalization rewrote
+// some function, which a wave starting at step 7 or 8 acts on.
+struct MIRPassWaveInputs {
+    pub prelude_calls: [MIRPreludeCall]
+    pub purity: [U64:Bool]
+    pub cleanup: Bool
+}
+
+// What a wave's steps did, summed over functions. `first_bounds`,
+// `first_loops`, and `first_vectors` count the facts the first bounds and
+// loop passes derived; `bounds`, `loops`, and `vectors` the final ones.
+struct MIRPassWaveCounts {
+    pub blocks_removed: Int
+    pub folded: Int
+    pub dead: Int
+    pub first_bounds: Int
+    pub bounds: Int
+    pub first_loops: Int
+    pub first_vectors: Int
+    pub loops: Int
+    pub vectors: Int
+    pub normalized: Int
+    pub acceleration: Int
+    pub rewrote: Bool
+}
+
+fn mir_pass_wave_counts() -> MIRPassWaveCounts Never! {
+    MIRPassWaveCounts{blocks_removed: 0, folded: 0, dead: 0, first_bounds: 0, bounds: 0, first_loops: 0, first_vectors: 0, loops: 0, vectors: 0, normalized: 0, acceleration: 0, rewrote: false}
+}
+
+fn mir_pass_wave_counts_add(total: &MIRPassWaveCounts, part: MIRPassWaveCounts) Never! {
+    total.blocks_removed += part.blocks_removed
+    total.folded += part.folded
+    total.dead += part.dead
+    total.first_bounds += part.first_bounds
+    total.bounds += part.bounds
+    total.first_loops += part.first_loops
+    total.first_vectors += part.first_vectors
+    total.loops += part.loops
+    total.vectors += part.vectors
+    total.normalized += part.normalized
+    total.acceleration += part.acceleration
+    total.rewrote = total.rewrote || part.rewrote
+}
+
+// Unreachable-block and dead-value elimination after a fixed-reduction
+// normalization that rewrote some function (any function of the program).
+fn mir_pass_reduction_cleanup(function: &MIRFunction, inputs: MIRPassWaveInputs, counts: &MIRPassWaveCounts) Never! {
+    before :: function.blocks.len()
+    mir_pass_eliminate_unreachable_function(&function)
+    counts.blocks_removed += before - function.blocks.len()
+    counts.dead += mir_pass_dead_pure_function(&function, inputs.purity)
+}
+
+// Steps `first` through `last` on one function, in order.
+fn mir_pass_function_steps(function: &MIRFunction, first: Int, last: Int, inputs: MIRPassWaveInputs, counts: &MIRPassWaveCounts) Never! {
+    loop step in first..<(last + 1) {
+        if step == MIR_PASS_STEP_UNREACHABLE {
+            before :: function.blocks.len()
+            mir_pass_eliminate_unreachable_function(&function)
+            counts.blocks_removed += before - function.blocks.len()
+        }
+        if step == MIR_PASS_STEP_CFG {
+            before :: function.blocks.len()
+            mir_pass_simplify_cfg_function(&function)
+            mir_pass_eliminate_unreachable_function(&function)
+            counts.blocks_removed += before - function.blocks.len()
+        }
+        if step == MIR_PASS_STEP_FOLD {
+            counts.folded += mir_pass_fold_function_constants(&function)
+            mir_pass_simplify_cfg_function(&function)
+            mir_pass_eliminate_unreachable_function(&function)
+        }
+        if step == MIR_PASS_STEP_BOUNDS {
+            facts :: mir_pass_function_bounds_facts(function)
+            counts.first_bounds += facts.len()
+            function.optimization.bounds_facts = facts
+        }
+        if step == MIR_PASS_STEP_DEAD -> counts.dead += mir_pass_dead_pure_function(&function, inputs.purity)
+        if step == MIR_PASS_STEP_REDUCE {
+            facts :: mir_pass_function_loop_and_vector_facts(&function, inputs.prelude_calls)
+            counts.first_loops += facts.loops
+            counts.first_vectors += facts.vectors
+            normalized :: mir_pass_fixed_reduction_normalize_function(&function, inputs.prelude_calls)
+            counts.normalized += normalized
+            if normalized > 0 -> counts.rewrote = true
+        }
+        if step == MIR_PASS_STEP_REDUCE_AGAIN {
+            if step == first && inputs.cleanup -> mir_pass_reduction_cleanup(&function, inputs, &counts)
+            facts :: mir_pass_function_loop_and_vector_facts(&function, inputs.prelude_calls)
+            counts.loops += facts.loops
+            counts.vectors += facts.vectors
+            normalized :: mir_pass_fixed_reduction_normalize_function(&function, inputs.prelude_calls)
+            counts.normalized += normalized
+            if normalized > 0 -> counts.rewrote = true
+        }
+        if step == MIR_PASS_STEP_CANONICAL {
+            if step == first && inputs.cleanup -> mir_pass_reduction_cleanup(&function, inputs, &counts)
+            facts :: mir_pass_function_bounds_facts(function)
+            counts.bounds += facts.len()
+            function.optimization.bounds_facts = facts
+        }
+        if step == MIR_PASS_STEP_ACCELERATION {
+            facts :: mir_pass_function_acceleration_facts(function)
+            counts.acceleration += facts.len()
+            function.optimization.acceleration_facts = facts
+        }
+        if mir_pass_step_completes(step) == .Val(pass) -> &function.optimization.pass_ids.push(pass)
+    }
+}
+
+// A thread is admitted for at least this many MIR instructions, so a small
+// program optimizes on the calling thread.
+MIR_PASS_MIN_INSTRUCTIONS_PER_THREAD :: 20000
+// Estimated bytes per MIR instruction of a function with its values, places,
+// and facts: a thread steps its own copy of each function, and a pass's
+// scratch grows with the largest function a thread holds.
+MIR_PASS_BYTES_PER_INSTRUCTION :: 512
+
+// Steps `first` through `last` on every function of `program`. One admitted
+// thread steps each function in place, in program order. More threads take
+// consecutive parts of the function list (moved out of the program), step
+// copies of their functions, and hand them back in part order, so the
+// program and the counts are the same either way.
+fn mir_pass_wave(program: &MIRProgram, first: Int, last: Int, inputs: MIRPassWaveInputs, threads: CompilerThreads) -> MIRPassWaveCounts {
+    counts := mir_pass_wave_counts()
+    weights := [Int]{}
+    total := 0
+    largest := 0
+    loop index in 0..<program.functions.len() {
+        size := 0
+        loop block_index in 0..<program.functions[index].blocks.len() -> size += program.functions[index].blocks[block_index].instructions.len()
+        &weights.push(size)
+        total += size
+        if size > largest -> largest = size
+    }
+    workers :: compiler_threads_admit(threads, program.functions.len(), total, MIR_PASS_MIN_INSTRUCTIONS_PER_THREAD, largest * MIR_PASS_BYTES_PER_INSTRUCTION, total * MIR_PASS_BYTES_PER_INSTRUCTION)
+    if workers <= 1 {
+        loop index in 0..<program.functions.len() {
+            function_window := &program.functions[index]
+            mir_pass_function_steps(&function_window, first, last, inputs, &counts)
+        }
+        return counts
+    }
+    bounds :: compiler_threads_partition(weights, workers)
+    parts := [[MIRFunction]]{}
+    loop _ in 0..<workers -> &parts.push([MIRFunction]{})
+    part := workers - 1
+    loop {
+        function :: &program.functions.pop() ?? break
+        part = compiler_threads_part_of(bounds, part, program.functions.len())
+        &parts[part].push(function)
+    }
+    &parts.reverse()
+    done := mir_pass_wave_parts(^parts, first, last, inputs)
+    loop {
+        finished := &done.pop() ?? break
+        mir_pass_wave_counts_add(&counts, finished.counts)
+        functions := ^finished.functions
+        &program.functions.extend(functions)
+    }
+    counts
+}
+
+// One thread's functions after its steps, with what the steps did.
+struct MIRPassWavePart {
+    pub functions: [MIRFunction]
+    pub counts: MIRPassWaveCounts
+}
+
+// One thread: its functions, held last-first, stepped and returned
+// first-first.
+fn mir_pass_wave_part(functions: [MIRFunction], first: Int, last: Int, inputs: MIRPassWaveInputs) -> MIRPassWavePart {
+    counts := mir_pass_wave_counts()
+    stepped := [MIRFunction]{}
+    index := functions.len()
+    loop index > 0 {
+        index -= 1
+        function := functions[index]
+        mir_pass_function_steps(&function, first, last, inputs, &counts)
+        &stepped.push(^function)
+    }
+    MIRPassWavePart{functions: ^stepped, counts: counts}
+}
+
+// Steps the parts popped from `parts` (first part on top), one task per part
+// and the last part on this thread. Returns the parts last part first, so
+// popping yields them in part order.
+fn mir_pass_wave_parts(parts: ^[[MIRFunction]], first: Int, last: Int, inputs: MIRPassWaveInputs) -> [MIRPassWavePart] {
+    remaining := ^parts
+    functions :: &remaining.pop() ?? return [MIRPassWavePart]{}
+    if remaining.len() == 0 -> return [MIRPassWavePart]{mir_pass_wave_part(functions, first, last, inputs)}
+    done := [MIRPassWavePart]{}
+    task.group optimizer_threads {
+        head :: task mir_pass_wave_part(functions, first, last, inputs)
+        done = mir_pass_wave_parts(^remaining, first, last, inputs)
+        &done.push(^^head.join() ?? panic(compiler_threads_failure_text(err)))
+    }
+    done
 }
 
 // Legality, then MIR Lint when `lint` is set: the entry check.

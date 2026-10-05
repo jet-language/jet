@@ -1478,7 +1478,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: f4de98b5b1707ad959ae9dfca07464ab89a0be507417a5dd0f3edf658616f75d
+// Source SHA-256: f7b896d43350c2f4509ff59f8dcb25da3ade5d8aa5609601e373c5363ba6563f
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -2135,6 +2135,7 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.math", "ln_1p", "jet_std_math_ln_1p", true, &[false]) .with_jit_symbol("jet_jit_math_ln_1p") .with_pure_route(CoreCallPureRoute::Math),
     CoreCallRecord::new("core.math", "log", "jet_std_math_log", true, &[false, false]) .with_jit_symbol("jet_jit_math_log") .with_pure_route(CoreCallPureRoute::Math),
     CoreCallRecord::new("core.math", "copysign", "jet_std_math_copysign", true, &[false, false]) .with_jit_symbol("jet_jit_math_copysign") .with_pure_route(CoreCallPureRoute::Math),
+    CoreCallRecord::new("core.math", "copy", "jet_std_math_copy", true, &[false]) .with_jit_symbol("jet_jit_math_copy") .with_pure_route(CoreCallPureRoute::Math),
     CoreCallRecord::new("core.math", "signum", "jet_std_math_signum", true, &[false]) .with_jit_symbol("jet_jit_math_signum") .with_pure_route(CoreCallPureRoute::Math),
     CoreCallRecord::new("core.math", "checked_add", "jet_std_math_checked_add", true, &[false, false]) .with_jit_symbol("jet_jit_math_checked_add") .with_native_int_result(),
     CoreCallRecord::new("core.math", "checked_sub", "jet_std_math_checked_sub", true, &[false, false]) .with_jit_symbol("jet_jit_math_checked_sub") .with_native_int_result(),
@@ -3066,7 +3067,7 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new( "core.ui.host", "accessibility", "jet_ui_host_accessibility", true, &[true, true], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .with_ui_capabilities(&["UI.Accessibility"]),
     CoreCallRecord::new( "core.ui.host.clipboard", "read_text", "jet_ui_host_clipboard_read_text", true, &[], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .with_ui_capabilities(&["UI.Clipboard"]),
     CoreCallRecord::new( "core.ui.host.clipboard", "write_text", "jet_ui_host_clipboard_write_text", true, &[true], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .with_ui_capabilities(&["UI.Clipboard"]),
-    CoreCallRecord::new("core.ui.host.ime", "poll", "jet_ui_host_ime_poll", true, &[]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .with_ui_capabilities(&["UI.Ime"]),
+    CoreCallRecord::new("core.ui.host.ime", "poll", "jet_ui_host_ime_poll", true, &[]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .with_ui_capabilities(&["UI.IME"]),
     CoreCallRecord::new("core.ui.host.drag_drop", "poll", "jet_ui_host_drag_poll", true, &[]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .with_ui_capabilities(&["UI.DragDrop"]),
     CoreCallRecord::new( "core.ui.host.shortcuts", "binding", "jet_ui_host_shortcut_binding", true, &[false, true], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .with_ui_capabilities(&["UI.Shortcuts"]),
     CoreCallRecord::new( "core.ui.host.shortcuts", "register", "jet_ui_host_shortcuts_register", true, &[false], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .with_ui_capabilities(&["UI.Shortcuts"]),

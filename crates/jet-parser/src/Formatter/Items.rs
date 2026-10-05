@@ -1425,40 +1425,6 @@ impl<'a> Fmt<'a> {
         }
         let saved_return_type =
             std::mem::replace(&mut self.expected_return_type, f.return_type.clone());
-        // D-SIG-AFTER1=A: named bodies always use braces. A recovered
-        // one-expression `-> expr` reprints as `{ expr }`.
-        let concise_body = if let [crate::AST::Stmt::Expr(expr)] = f.body.as_slice() {
-            self.source_toks
-                .iter()
-                .rev()
-                .find(|token| {
-                    token.span.end <= expr.span().start
-                        && !matches!(
-                            token.kind,
-                            TokKind::LineComment(_) | TokKind::BlockComment(_)
-                        )
-                })
-                .filter(|token| {
-                    matches!(
-                        token.kind,
-                        TokKind::UnifiedArrow
-                            | TokKind::LambdaArrow
-                            | TokKind::ColonColon
-                            | TokKind::Eq
-                    ) || (f.declared_effects.is_some() || f.effect_via.is_some() || f.is_pure)
-                        && matches!(token.kind, TokKind::Gt)
-                })
-                .map(|_| expr)
-        } else {
-            None
-        };
-        if let Some(expr) = concise_body {
-            self.write(" { ");
-            self.fmt_expr(expr, Prec::OrFallback);
-            self.write(" }");
-            self.expected_return_type = saved_return_type;
-            return;
-        }
         // D-FFI-INLINE1=A (card #501): an inline foreign fn's body is a single
         // foreign-source string. Reconstruct the string expression and reuse the
         // ordinary string formatter so the triple-quoted shape round-trips
@@ -1491,7 +1457,9 @@ impl<'a> Fmt<'a> {
             self.expected_return_type = saved_return_type;
             return;
         }
-        // D-FMT1: a one-line `fn` body the author wrote inline survives.
+        // D-FMT1: a one-line `fn` body the author wrote inline survives. A
+        // recovered `-> expr` body (E0080) takes the same braced path, so the
+        // fixed output is canonical and idempotent (D-SIG-AFTER1=A).
         self.fmt_body(&f.body);
         self.expected_return_type = saved_return_type;
     }

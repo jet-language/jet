@@ -1677,13 +1677,12 @@ fn run() {
         );
     }
 
-    /// `jet check` output for `target`, run from `dir` with `threads` body
-    /// checkers and a private store, so neither run reuses the other's work.
+    /// `jet check` output for `target`, run from `dir` with `--threads
+    /// threads` and a private store, so neither run reuses the other's work.
     fn check_output(dir: &Path, target: &str, threads: &str, store: &Path) -> (Vec<u8>, Vec<u8>) {
         let output = Command::new(jet())
-            .args(["check", target])
+            .args(["check", target, "--threads", threads])
             .current_dir(dir)
-            .env("JET_CHECK_THREADS", threads)
             .env("JET_RECEIPT_BYPASS", "1")
             .env("JET_STORE_DIR", store)
             .env("NO_COLOR", "1")

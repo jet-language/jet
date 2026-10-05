@@ -46,7 +46,7 @@ fn derive_template_bodies_round_trip_retired_signatures() {
     let source = include_str!("../Examples/features/reflection/derive_loop.jet");
     let formatted = jet::format_source(source).expect("derive template should format");
     assert!(
-        formatted.contains("fn $method(self) -> String -> field.$name"),
+        formatted.contains("fn $method(self) -> String { field.$name }"),
         "derive callable was not canonicalized:\n{formatted}"
     );
     assert_eq!(
@@ -60,7 +60,7 @@ fn marker_template_bodies_round_trip_retired_signatures() {
     let source = include_str!("../Examples/features/reflection/user_rule_body.jet");
     let formatted = jet::format_source(source).expect("marker template should format");
     assert!(
-        formatted.contains("fn greeting(self) -> String -> \"hello\""),
+        formatted.contains("fn greeting(self) -> String { \"hello\" }"),
         "marker callable was not canonicalized:\n{formatted}"
     );
     assert_eq!(
@@ -74,7 +74,7 @@ fn generic_module_and_library_bodies_round_trip_retired_signatures() {
     let generic = include_str!("../Examples/features/modules/generic_modules.jet");
     let formatted = jet::format_source(generic).expect("generic module should format");
     assert!(
-        formatted.contains("pub fn slot(k: K) -> Slot -> Slot.Value(k)"),
+        formatted.contains("pub fn slot(k: K) -> Slot { Slot.Value(k) }"),
         "generic module callable was not canonicalized:\n{formatted}"
     );
     assert_eq!(
@@ -119,7 +119,7 @@ fn generated_source_template_bodies_round_trip_retired_signatures() {
     );
     let formatted = jet::format_source(source).expect("generated source template should format");
     assert!(
-        formatted.contains("fn foundation_marker() -> String -> \"foundation\""),
+        formatted.contains("fn foundation_marker() -> String { \"foundation\" }"),
         "generated callable was not canonicalized:\n{formatted}"
     );
     assert_eq!(

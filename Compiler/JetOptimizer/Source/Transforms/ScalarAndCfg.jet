@@ -82,14 +82,6 @@ fn mir_pass_eliminate_unreachable_function(function: &MIRFunction) Never! {
     }
 }
 
-fn mir_pass_simplify_cfg(program: &MIRProgram) Never! {
-    loop function_index in 0..<program.functions.len() {
-        function_window := &program.functions[function_index]
-        mir_pass_simplify_cfg_function(&function_window)
-    }
-    mir_pass_eliminate_unreachable(&program)
-}
-
 fn mir_pass_simplify_cfg_function(function: &MIRFunction) Never! {
     constants :: mir_pass_collect_scalar_constants(function)
     loop block_index in 0..<function.blocks.len() {
@@ -324,16 +316,6 @@ fn mir_pass_simplified_terminator(terminator: MIRTerminator, constants: [U64:MIR
         }
         else -> None
     }
-}
-
-fn mir_pass_fold_exact_constants(program: &MIRProgram) -> Int Never! {
-    folded := 0
-    loop function_index in 0..<program.functions.len() {
-        function_window := &program.functions[function_index]
-        folded += mir_pass_fold_function_constants(&function_window)
-    }
-    mir_pass_simplify_cfg(&program)
-    folded
 }
 
 // Rust: crates/jet-foundation/src/MIROptimization.rs::fold_exact_constants

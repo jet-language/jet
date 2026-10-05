@@ -24,6 +24,18 @@ The generator refuses to overwrite source files; use a new output directory.
 one package of at least N code lines and prints its digest, golden stdout and
 shape as JSON (Tools/perf/throughput measures it).
 `trait-facts-fix.json` records the module allocation evidence and dual-compiler fix spec.
+The Rust ledger indexes declarations, aliases and checked reference sites by
+source module; package sibling iteration borrows the loader's sorted membership
+list. Structural auto-derive publication retains one shared canonical table of
+actual nominal declarations, while derive/codegen selections remain module-local.
+Empty marker-rule and non-App entry paths do not construct unused bundle contexts.
+Declaration/alias lookup uses borrowed keys in module-owned maps, and canonical
+module/declaration identities are cached. Structure observations retain source
+order with collision-checked hash buckets; import-edge presence uses a source/span
+index. Body snapshots borrow loader alias roots rather than cloning that set.
+Package item-reuse log rows aggregate all member files of the checked package.
+Focused reuse checks count unchanged bodies across that package and require
+warm-store diagnostics to match a fresh-store check byte for byte.
 Default ladders: 256/512/1024; modules 64/128/256 (8 GiB memory cap), depth
 16/32/64, match arms 48/96/192 (nesting limits), literal bytes 1/2/4 MiB.
 Check and build each measure N=1 plus their ladder, three fresh runs per point.
@@ -42,3 +54,6 @@ There are no built-in exemptions; every override requires a reason and bound.
 `JET_PHASE_COUNTERS {"phase":"parse","visits":42,"bytes_copied":64}` lines on
 stdout/stderr are summed by phase/key; nested numeric objects also work.
 Counter ratios gate independently; no counter lines means timing/RSS-only data.
+The self-hosted compiler (a jetc runner, via `--command`) writes them when run
+with both `JET_TRACE_FILE` and `JET_PHASE_COUNTERS=1`: per phase (`register`,
+`sema.check`), the registration graph's `module_lookups` and `name_lookups`.

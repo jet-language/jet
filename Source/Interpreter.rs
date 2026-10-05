@@ -1984,7 +1984,7 @@ mod tests {
 fn flatten_words(contents: String) -> [String] {
     return contents.lines().map((line: String) -> line.split(" ").to_list()).flatten()
 }
-fn first(values: [Float]) -> Float -> values.first() ?? 0.0
+fn first(values: [Float]) -> Float { values.first() ?? 0.0 }
 fn run() {
     words :: flatten_words("one two\nthree four")
     values :: [Float]{1.0, 2.0}

@@ -104,6 +104,10 @@ pub(super) fn check_bundle_opts_for_output_inner(
     // Rewrite inline-module sibling calls to their mangled names before any
     // registration/checking/codegen sees the bodies.
     mangle_inline_sibling_calls(bundle);
+    if super::super::GateLedger::GateLedger::has_new_refusal(bundle) {
+        let ledger = super::super::GateLedger::GateLedger::collect(bundle, gates);
+        diags.extend(ledger.policy_diagnostics(bundle));
+    }
     // D-UNSAFE-OBLIG1=A: run after compile-time branch selection and generic
     // module expansion, but before registration/TIR. Assertions are checked and
     // erased here so no generated or untaken body bypasses the policy.
@@ -585,7 +589,7 @@ pub(super) fn check_bundle_opts_for_output_inner(
     // type declared in another file of the same package.
     let mut namespace_type_owners: HashMap<String, Vec<usize>> = HashMap::new();
     for (idx, module) in bundle.modules.iter().enumerate() {
-        if name_ledger.namespace_siblings(idx).is_empty() {
+        if name_ledger.namespace_siblings(idx).next().is_none() {
             continue;
         }
         for item in &module.items {
@@ -939,8 +943,9 @@ pub(super) fn check_bundle_opts_for_output_inner(
                     .collect();
 
                 let mut new_items: Vec<Item> = Vec::new();
-                let checked_nominals =
-                    CheckerCore::checked_comptime_nominals_for_context(&states, idx, &name_ledger);
+                let checked_nominals = (!struct_infos.is_empty())
+                    .then(|| CheckerCore::checked_comptime_nominals_for_context(&states, idx, &name_ledger))
+                    .flatten();
                 st = &mut states[idx];
 
                 for s in &struct_infos {
@@ -1194,8 +1199,9 @@ pub(super) fn check_bundle_opts_for_output_inner(
                 .map(|(name, function)| (name.clone(), function))
                 .collect();
             let mut new_items = Vec::new();
-            let checked_nominals =
-                CheckerCore::checked_comptime_nominals_for_context(&states, idx, &name_ledger);
+            let checked_nominals = (!declared_targets.is_empty())
+                .then(|| CheckerCore::checked_comptime_nominals_for_context(&states, idx, &name_ledger))
+                .flatten();
             st = &mut states[idx];
 
             for (target, marker, declaration) in declared_targets {
@@ -2439,7 +2445,7 @@ fn comptime_module_order(
         if declared[idx].is_empty() {
             continue;
         }
-        let siblings = name_ledger.namespace_siblings(idx);
+        let siblings: Vec<_> = name_ledger.namespace_siblings(idx).collect();
         if siblings.is_empty() {
             continue;
         }

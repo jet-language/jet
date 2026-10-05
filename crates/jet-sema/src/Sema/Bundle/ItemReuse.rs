@@ -733,7 +733,6 @@ impl ItemState {
         }
         let mut uses = ledger
             .alias_uses()
-            .iter()
             .filter(|(alias_module, span)| !ledger.loader_alias_use(*alias_module, *span))
             .collect::<Vec<_>>();
         uses.sort_by_key(|(alias_module, span)| (*alias_module, span.start, span.end));

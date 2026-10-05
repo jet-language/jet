@@ -11638,14 +11638,17 @@ impl<'a> LowerCtx<'a> {
         Ok(MirForeignId(stable_id("mir-foreign", symbol)))
     }
 
+    /// `captures` is the scan carrier's payload tuple (see
+    /// `pattern_scan_captures`).
     pub(super) fn lower_pattern_match(
         &mut self,
         subject: MirValueId,
         shape: &MirPatternShape,
+        captures: Type,
     ) -> Result<MirValueId, LowerError> {
+        let ty = Type::Option(Box::new(captures));
         match shape {
             MirPatternShape::Text(parts, _) => {
-                let ty = Type::Option(Box::new(Type::Tuple(Vec::new())));
                 let carrier = TFailureCarrier::from_checked_type(&ty);
                 let call =
                     self.intern_prelude_route(super::pattern_match_route(false, &ty, &carrier)?)?;
@@ -11660,7 +11663,6 @@ impl<'a> LowerCtx<'a> {
                 )
             }
             MirPatternShape::Binary(parts, _) => {
-                let ty = Type::Option(Box::new(Type::Tuple(Vec::new())));
                 let carrier = TFailureCarrier::from_checked_type(&ty);
                 let call =
                     self.intern_prelude_route(super::pattern_match_route(true, &ty, &carrier)?)?;
