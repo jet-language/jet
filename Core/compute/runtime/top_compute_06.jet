@@ -712,7 +712,10 @@ fn jet_compute_to_sparse(tensor: &JetTensor) -> JetSparseCsr JetComputeError! {
     for r in 0..<rows {
         for c in 0..<cols {
             v :: jet_compute_get_raw(tensor, &[r, c])?
-            if v != F64{0.0} { col_idx.push(c); values.push(v) }
+            if v != F64{0.0} {
+                col_idx.push(c)
+                values.push(v)
+            }
         }
         row_ptr.push(I64.try_from(values.len()).map_err(_ -> JetComputeError.InvalidShape("sparse nnz is too large"))?)
     }
@@ -828,7 +831,10 @@ fn jet_compute_f32_dot_avx2(a: View<F32>, b: View<F32>) -> F32 {
     _mm256_storeu_ps(lanes.as_mut_ptr(), acc)
     sum := F32{0.0}
     for lane in lanes { sum += lane }
-    loop index < a.len() { sum += a[index] * b[index]; index += 1 }
+    loop index < a.len() {
+        sum += a[index] * b[index]
+        index += 1
+    }
     sum
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:10197
@@ -850,7 +856,10 @@ fn jet_compute_f32_dot_avx2_x86(a: View<F32>, b: View<F32>) -> F32 {
     _mm256_storeu_ps(lanes.as_mut_ptr(), acc)
     sum := F32{0.0}
     for lane in lanes { sum += lane }
-    loop index < a.len() { sum += a[index] * b[index]; index += 1 }
+    loop index < a.len() {
+        sum += a[index] * b[index]
+        index += 1
+    }
     sum
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:10226
@@ -871,7 +880,10 @@ fn jet_compute_f32_dot_sse2(a: View<F32>, b: View<F32>) -> F32 {
     _mm_storeu_ps(lanes.as_mut_ptr(), acc)
     sum := F32{0.0}
     for lane in lanes { sum += lane }
-    loop index < a.len() { sum += a[index] * b[index]; index += 1 }
+    loop index < a.len() {
+        sum += a[index] * b[index]
+        index += 1
+    }
     sum
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:10255
@@ -892,7 +904,10 @@ fn jet_compute_f32_dot_sse2_x86(a: View<F32>, b: View<F32>) -> F32 {
     _mm_storeu_ps(lanes.as_mut_ptr(), acc)
     sum := F32{0.0}
     for lane in lanes { sum += lane }
-    loop index < a.len() { sum += a[index] * b[index]; index += 1 }
+    loop index < a.len() {
+        sum += a[index] * b[index]
+        index += 1
+    }
     sum
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:10283

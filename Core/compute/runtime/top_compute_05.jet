@@ -111,7 +111,10 @@ fn jet_compute_contiguous_broadcast_layout(tensor: &JetTensor, output_shape: &[I
     rank_delta :: output_shape.len() - tensor.shape.len()
     effective_strides := [I64].with_capacity(output_shape.len())
     for axis in 0..output_shape.len() {
-        if axis < rank_delta { effective_strides.push(0); continue }
+        if axis < rank_delta {
+            effective_strides.push(0)
+            continue
+        }
         source_axis :: axis - rank_delta
         effective_strides.push(if tensor.shape[source_axis] == 1 { 0 } else { source_strides[source_axis] })
     }
@@ -124,7 +127,10 @@ fn jet_compute_broadcast_strided_layout(tensor: &JetTensor, output_shape: &[I64]
     rank_delta :: output_shape.len() - tensor.shape.len()
     effective_strides := [I64].with_capacity(output_shape.len())
     for axis in 0..output_shape.len() {
-        if axis < rank_delta { effective_strides.push(0); continue }
+        if axis < rank_delta {
+            effective_strides.push(0)
+            continue
+        }
         source_axis :: axis - rank_delta
         effective_strides.push(if tensor.shape[source_axis] == 1 { 0 } else { source_strides[source_axis] })
     }
@@ -399,9 +405,15 @@ fn jet_compute_fft_radix2_f64(values: [F64]) -> [F64] JetComputeError! {
         reversed := USize{0}
         for index in 1..n {
             bit := n >> 1
-            while reversed & bit != 0 { reversed ^= bit; bit >>= 1 }
+            while reversed & bit != 0 {
+                reversed ^= bit
+                bit >>= 1
+            }
             reversed ^= bit
-            if index < reversed { real.swap(index, reversed); imaginary.swap(index, reversed) }
+            if index < reversed {
+                real.swap(index, reversed)
+                imaginary.swap(index, reversed)
+            }
         }
         stage_length := USize{2}
         while stage_length <= n {
@@ -427,7 +439,10 @@ fn jet_compute_fft_radix2_f64(values: [F64]) -> [F64] JetComputeError! {
         }
         if inverse {
             scale :: F64{1.0} / F64{n}
-            for index in 0..n { real[index] *= scale; imaginary[index] *= scale }
+            for index in 0..n {
+                real[index] *= scale
+                imaginary[index] *= scale
+            }
         }
     }
     n :: values.len()
@@ -453,7 +468,10 @@ fn jet_compute_fft_radix2_f64(values: [F64]) -> [F64] JetComputeError! {
             imaginary[index] = -value * sin
             kernel_real[index] = cos
             kernel_imaginary[index] = sin
-            if index != 0 { kernel_real[padded - index] = cos; kernel_imaginary[padded - index] = sin }
+            if index != 0 {
+                kernel_real[padded - index] = cos
+                kernel_imaginary[padded - index] = sin
+            }
         }
         radix2(&real, &imaginary, false)
         radix2(&kernel_real, &kernel_imaginary, false)
@@ -473,7 +491,10 @@ fn jet_compute_fft_radix2_f64(values: [F64]) -> [F64] JetComputeError! {
         (^real, ^imaginary)
     }
     output := [F64].with_capacity(n * 2)
-    for (real, imaginary) in real.into_iter().zip(imaginary) { output.push(real); output.push(imaginary) }
+    for (real, imaginary) in real.into_iter().zip(imaginary) {
+        output.push(real)
+        output.push(imaginary)
+    }
     Ok(^output)
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:7981,8106
@@ -488,9 +509,15 @@ fn jet_compute_fft_radix2_f32(values: [F32]) -> [F64] JetComputeError! {
         reversed := USize{0}
         for index in 1..n {
             bit := n >> 1
-            while reversed & bit != 0 { reversed ^= bit; bit >>= 1 }
+            while reversed & bit != 0 {
+                reversed ^= bit
+                bit >>= 1
+            }
             reversed ^= bit
-            if index < reversed { real.swap(index, reversed); imaginary.swap(index, reversed) }
+            if index < reversed {
+                real.swap(index, reversed)
+                imaginary.swap(index, reversed)
+            }
         }
         stage_length := USize{2}
         while stage_length <= n {
@@ -516,7 +543,10 @@ fn jet_compute_fft_radix2_f32(values: [F32]) -> [F64] JetComputeError! {
         }
         if inverse {
             scale :: F32{1.0} / F32{n}
-            for index in 0..n { real[index] *= scale; imaginary[index] *= scale }
+            for index in 0..n {
+                real[index] *= scale
+                imaginary[index] *= scale
+            }
         }
     }
     n :: values.len()
@@ -541,7 +571,10 @@ fn jet_compute_fft_radix2_f32(values: [F32]) -> [F64] JetComputeError! {
             imaginary[index] = -value * sin
             kernel_real[index] = cos
             kernel_imaginary[index] = sin
-            if index != 0 { kernel_real[padded - index] = cos; kernel_imaginary[padded - index] = sin }
+            if index != 0 {
+                kernel_real[padded - index] = cos
+                kernel_imaginary[padded - index] = sin
+            }
         }
         radix2(&real, &imaginary, false)
         radix2(&kernel_real, &kernel_imaginary, false)
@@ -561,7 +594,10 @@ fn jet_compute_fft_radix2_f32(values: [F32]) -> [F64] JetComputeError! {
         (^real, ^imaginary)
     }
     output := [F64].with_capacity(n * 2)
-    for (real, imaginary) in real.into_iter().zip(imaginary) { output.push(F64{real}); output.push(F64{imaginary}) }
+    for (real, imaginary) in real.into_iter().zip(imaginary) {
+        output.push(F64{real})
+        output.push(F64{imaginary})
+    }
     Ok(^output)
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:8108
@@ -912,7 +948,7 @@ fn jet_compute_rule_gradients(rule: &JetComputeTapeRule, values: &[JetTensor], o
 //RS             )?;
 //RS             Ok(vec![parameter, gradient])
 //RS         }
-        JetComputeTapeRule.Unary(op) -> Ok([jet_compute_unary_vjp(op, &values[0], output, &cot)?])
+        .Unary(op) -> Ok([jet_compute_unary_vjp(op, &values[0], output, &cot)?])
         JetComputeTapeRule.Reshape{source_shape} -> Ok([jet_compute_reshape(&cot, &source_shape.clone())?])
         JetComputeTapeRule.Broadcast{source_shape} -> Ok([jet_compute_reduce_to_shape(&cot, source_shape)?])
         JetComputeTapeRule.ReduceToShape{source_shape} -> Ok([jet_compute_broadcast_to(&cot, source_shape)?])
@@ -1068,12 +1104,12 @@ fn jet_compute_jvp_rule(rule: &JetComputeTapeRule, values: &[JetTensor], output:
 //RS             &tangents[1],
 //RS             *learning_rate,
 //RS         ),
-        JetComputeTapeRule.Unary(op) -> jet_compute_unary_vjp(op, &values[0], output, &tangents[0])
-        JetComputeTapeRule.Reshape{..} -> jet_compute_reshape(&tangents[0], &output.shape)
-        JetComputeTapeRule.Broadcast{..} -> jet_compute_broadcast_to(&tangents[0], &output.shape)
-        JetComputeTapeRule.ReduceToShape{..} -> jet_compute_reduce_to_shape(&tangents[0], &output.shape)
+        .Unary(op) -> jet_compute_unary_vjp(op, &values[0], output, &tangents[0])
+        .Reshape{..} -> jet_compute_reshape(&tangents[0], &output.shape)
+        .Broadcast{..} -> jet_compute_broadcast_to(&tangents[0], &output.shape)
+        .ReduceToShape{..} -> jet_compute_reduce_to_shape(&tangents[0], &output.shape)
         JetComputeTapeRule.Transpose -> jet_compute_transpose(&tangents[0])
-        JetComputeTapeRule.SumAxis{axis, ..} -> jet_compute_sum_axis(&tangents[0], I64{*axis})
+        .SumAxis{axis, ..} -> jet_compute_sum_axis(&tangents[0], I64{*axis})
     }
 }
 
