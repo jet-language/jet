@@ -3012,6 +3012,7 @@ fn core_native_probe_name(name: &str) -> &str {
         || is_source_owned_core_compute_shape(name)
         || is_source_owned_core_net_shape(name)
         || is_source_owned_core_web_query_shape(name)
+        || crate::Codegen::core_source_record_owns_layout(name)
     {
         name
     } else if name.starts_with("<corelib>/") {
@@ -3025,6 +3026,7 @@ fn has_native_type_projection(name: &str) -> bool {
     if is_source_owned_core_compute_shape(name)
         || is_source_owned_core_net_shape(name)
         || is_source_owned_core_web_query_shape(name)
+        || crate::Codegen::core_source_record_owns_layout(name)
     {
         return false;
     }
@@ -3133,9 +3135,18 @@ mod core_native_projection_tests {
             "<corelib>/Core/web::Core/web/query.jet::WebQuery",
             "<corelib>/Core/web::Core/web/query.jet::WebQueryState",
             "<corelib>/Core/web::Core/web/query.jet::WebMutationState",
+            "<corelib>/Core/regex::Core/regex/regex.jet::Regex",
+            "<corelib>/Core/regex::Core/regex/regex.jet::Match",
+            "<corelib>/Core/regex::Core/regex/regex.jet::RegexFlags",
+            "<corelib>/Core/web::Core/web/table.jet::WebTable",
+            "<corelib>/Core/web::Core/web/table.jet::WebTableSort",
+            "<corelib>/Core/web::Core/web/table.jet::WebTableState",
         ] {
             assert_eq!(core_native_probe_name(source_record), source_record);
             assert!(!is_canonical_core_native_type(source_record));
+            if crate::Codegen::core_source_record_owns_layout(source_record) {
+                assert!(crate::Codegen::core_rust_type_name(source_record).is_none());
+            }
         }
         assert_eq!(
             crate::Codegen::root_prelude_rust_type_name("WebQuery"),

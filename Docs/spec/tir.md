@@ -83,6 +83,9 @@ its stored fields uses it. Such parameters are carried by a zero-sized
 `PhantomData` field, initialized by every record construction path; the marker
 is not a source field or a serialized/displayed value. Native/runtime-owned
 records retain their existing layouts rather than receiving emitter fields.
+Canonical source-owned regex and web-table records retain their declared field
+layouts and generated local traits. A same-leaf native carrier is not an ABI
+alias for such a record; all type projections use the source-owner decision.
 
 Shared collection kernels narrow owned exact `Int` arguments through
 Foundation's borrowed `JetInt::to_native_i64` ABI check on every host. The seam

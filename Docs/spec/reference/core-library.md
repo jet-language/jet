@@ -2720,6 +2720,9 @@ The budget is an execution bound, not a promise of linear-time matching. The
 engine does not expose named capture groups: `Match.groups` is a positional
 list. Use the compiled `Pattern`/`Regex` values when the same expression is
 used repeatedly, and call `escape` for literal user input.
+`Match.start` and `Match.end` are UTF-8 byte offsets, and `Match.text` contains
+the entire match. `Match.groups` contains the captured groups in positional
+order, excluding the whole match; use `expand` for numbered substitution.
 
 | Signature | Result | Description |
 |---|---|---|

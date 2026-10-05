@@ -766,10 +766,27 @@ pub(crate) fn core_source_type_leaf(name: &str) -> &str {
         .unwrap_or(name)
 }
 
+pub(crate) fn core_source_record_owns_layout(name: &str) -> bool {
+    let leaf = core_source_type_leaf(name);
+    (name.starts_with("<corelib>/Core/regex::")
+        && matches!(
+            leaf,
+            "Regex" | "Match" | "RegexFlags" | "RegexFlag" | "Pattern" | "Node"
+        ))
+        || (name.starts_with("<corelib>/Core/web::Core/web/table.jet::")
+            && matches!(
+                leaf,
+                "WebTable" | "WebTableSort" | "WebTableFilter" | "WebTableColumn"
+                    | "WebTableRow" | "WebTablePage" | "WebTableState"
+            ))
+}
+
 pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
     // core.sync's policy list is source-owned (`allow`/`deny`). The root
     // database row policy is a different native carrier (`table`/`expression`).
-    if name.starts_with("<corelib>/Core/sync::") && name.ends_with("::RowPolicy") {
+    if (name.starts_with("<corelib>/Core/sync::") && name.ends_with("::RowPolicy"))
+        || core_source_record_owns_layout(name)
+    {
         return None;
     }
     // Core source nominals have a canonical <corelib>/...::Leaf identity;
