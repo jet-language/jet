@@ -429,7 +429,7 @@ fn jet_rust_emit_program_items(ctx: &JetRustEmitContext, trace_sink: CompilerTra
     // Per-function trace spans time each function on this thread.
     workers :: if trace_functions -> 1 else -> jet_rust_emit_function_workers(ctx)
     if workers > 1 {
-        texts :: jet_rust_emit_functions_on_threads(&ctx, workers)
+        texts :: jet_rust_emit_functions_on_threads(&ctx, workers) ?? panic("the function printing threads failed")
         printed := 0
         loop position in 0..<ctx.program.functions.len() {
             if trace_sink == .Val(sink) -> sink.progress("emit", position, ctx.program.functions.len())

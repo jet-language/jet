@@ -226,7 +226,8 @@ fn jet_cli_meminfo_available() -[FS]> Int? Never! {
 // file is missing or holds `max` (no limit).
 fn jet_cli_cgroup_bytes(file: String) -[FS]> Int? Never! {
     text :: cli_files.read(file) ?? return None
-    Int.parse(text.trim())
+    bytes :: Int.parse(text.trim()) ?? return None
+    Val(bytes)
 }
 
 // Build the request for `file` (the entry as the user named it) and run the
