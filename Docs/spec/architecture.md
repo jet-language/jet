@@ -786,12 +786,13 @@ as user/guest failure, denied authority, budget exhaustion, or internal host
 defect from typed boundary state, not by parsing backend error text.
 D-PLUGIN-FAILURE1=A carries that cause as `core.plugin.PluginError`, with the
 export name, original display message, and up to 32 innermost-first Wasm frames.
-Budget failures name Fuel, Memory, Table, Time, or the 16 MiB Wire limit. Frames
-locate the function by name (empty without a name section), module and offset;
-debug-file/line loading is intentionally outside this transport. Failures before
-guest execution carry no frames. A failed load leaves a handle whose first call
-returns the load fault with export `load`, without stopping unrelated host work.
-The existing failure journey records the host call site when the caller uses `?`.
+Budget failures name Fuel, Memory, Table, Time, or the 16 MiB Wire limit. A
+`PluginFrame` locates the function by name (empty without a name section), the
+Wasm `component` it ran in, and the offset; debug-file/line loading is
+intentionally outside this transport. Failures before guest execution carry no
+frames. A failed load leaves a handle whose first call returns the load fault
+with export `load`, without stopping unrelated host work. A propagated failure
+records the host call site in the ordinary failure journey.
 
 Handles and Wasmtime stores are owner-thread state. Cross-thread use and
 unload of an active call are rejected by the existing handle boundary, and

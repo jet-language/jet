@@ -565,9 +565,9 @@ fn plugin_error(rt: &mut JitRuntime, error: plugin_wire::PluginError) -> i64 {
     };
     let frames = fault.frames.into_iter().map(|frame| {
         let function = rt.heap.alloc_string(frame.function);
-        let module = rt.heap.alloc_string(frame.module);
+        let component = rt.heap.alloc_string(frame.component);
         JetVal::RecordRef(rt.heap.alloc_record_values(vec![
-            JetVal::Int(function), JetVal::Int(module), JetVal::Int(frame.offset),
+            JetVal::Int(function), JetVal::Int(component), JetVal::Int(frame.offset),
         ]))
     }).collect();
     let frames = rt.heap.alloc_list_values(frames);
@@ -696,7 +696,7 @@ fn plugin_interpreter_error(error: plugin_wire::PluginError) -> Result<AmbientMi
                 type_name: "PluginFrame".to_string(),
                 fields: vec![
                     ("function".to_string(), MirRuntimeValue::String(frame.function)),
-                    ("module".to_string(), MirRuntimeValue::String(frame.module)),
+                    ("component".to_string(), MirRuntimeValue::String(frame.component)),
                     ("offset".to_string(), MirRuntimeValue::Int(frame.offset)),
                 ],
             }).collect())),
@@ -900,11 +900,11 @@ mod failure_tests {
         let handle: u64 = load.strip_prefix("O:").expect("load returns a handle").parse().unwrap();
         let trap = plugin_wire::plugin_decode_result(&runtime::jet_plugin_call(handle, "trap", "0:")).unwrap_err();
         let PluginError::Guest(fault) = trap else { panic!("expected Guest, got {trap:?}"); };
-        assert_eq!(fault.export, "trap");
+        assert_eq!(fault.export, "trap", "{}", fault.message);
         assert!(!fault.frames.is_empty());
         assert!(fault.frames.len() <= plugin_wire::PLUGIN_MAX_FRAMES);
         assert_eq!(fault.frames[0].function, "trap");
-        assert_eq!(fault.frames[0].module, "failure_guest");
+        assert_eq!(fault.frames[0].component, "failure_guest");
         assert!(fault.frames[0].offset > 0);
 
         assert!(runtime::jet_plugin_close(handle));

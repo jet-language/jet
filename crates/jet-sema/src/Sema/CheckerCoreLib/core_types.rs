@@ -3754,7 +3754,7 @@ pub(crate) fn core_constructable_fields(type_name: &str) -> Option<Vec<(String, 
         )]),
         "PluginFrame" => Some(vec![
             ("function".to_string(), Type::String),
-            ("module".to_string(), Type::String),
+            ("component".to_string(), Type::String),
             ("offset".to_string(), Type::Int),
         ]),
         "PluginFault" => Some(vec![

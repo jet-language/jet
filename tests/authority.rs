@@ -614,7 +614,7 @@ fn plugin_call_stops_a_non_terminating_component_on_all_hosted_tiers() {
 }
 
 #[test]
-fn plugin_failure_question_mark_records_the_host_call_line_on_all_tiers() {
+fn plugin_failure_propagation_records_the_host_call_line_on_all_tiers() {
     let stamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
     let root = std::path::PathBuf::from(std::env::var_os("HOME").unwrap())
         .join(".cache/jet-dev/scratch").join(format!("plugin-journey-{}-{stamp}", std::process::id()));

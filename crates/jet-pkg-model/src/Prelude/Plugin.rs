@@ -55,6 +55,11 @@ const PLUGIN_MAX_MEMORY_BYTES: usize = 16 * 1024 * 1024;
 const PLUGIN_MAX_TABLE_ELEMENTS: u32 = 10_000;
 const PLUGIN_MAX_WIRE_BYTES: usize = 16 * 1024 * 1024;
 const PLUGIN_MAX_VALUE_DEPTH: usize = 64;
+// A Component that lowers a host import taking a string or list needs a core
+// instance owning the memory the canonical ABI lowers into, beside the guest
+// itself; bindings generators add a shim and a fixup instance. The cap admits
+// that layout and nothing wider.
+const PLUGIN_MAX_CORE_INSTANCES: usize = 4;
 const PLUGIN_TIMEOUT_MS: u64 = 2_000;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum PluginBudgetKind {
@@ -109,7 +114,7 @@ impl PluginLimits {
         Self {
             memory_size: PLUGIN_MAX_MEMORY_BYTES,
             table_elements: PLUGIN_MAX_TABLE_ELEMENTS,
-            instances: 1,
+            instances: PLUGIN_MAX_CORE_INSTANCES,
             memories: 1,
             tables: 1,
             failure: Cell::new(None),
@@ -1532,7 +1537,7 @@ fn plugin_call_trap_error(
     let mut frames = error.downcast_ref::<WasmBacktrace>().map(|trace| {
         trace.frames().iter().take(PLUGIN_MAX_FRAMES).map(|frame| PluginFrame {
             function: frame.func_name().unwrap_or("").to_owned(),
-            module: frame.module().name().unwrap_or("").to_owned(),
+            component: frame.module().name().unwrap_or("").to_owned(),
             offset: frame.module_offset().unwrap_or(0) as i64,
         }).collect::<Vec<_>>()
     }).unwrap_or_default();

@@ -795,17 +795,24 @@ fn jet_rust_emit_job_queue_wrapper(ctx: &JetRustEmitContext, function: MIRFuncti
         &lines.push("    {name}({argument});")
         &lines.push("Ok({root}JetJobResult {{ type_id: \"Unit\".to_string(), bytes: Vec::new(), publish: false }})")
     }
+    // A fallible job settles its failure as a job error instead of encoding
+    // it; a Unit success carries no bytes, exactly as an infallible Unit job.
     if !mir_type_is_unit(function.return_type) && result_ok != None {
         ok :: result_ok
         &lines.push("    let __job_result = {name}({argument});")
         &lines.push("match __job_result {{")
-        &lines.push("Ok(__ok) => {{")
-        &lines.push("let __bytes = match {root}jet_enc_cbor_to_bytes_canonical(&__ok) {{")
-        &lines.push("Ok(__bytes) => __bytes,")
-        &lines.push(encode_error)
-        &lines.push("}};")
-        &lines.push("Ok({root}JetJobResult {{ type_id: {jet_rust_emit_quote(mir_type_display_name(ok) ?? "")}.to_string(), bytes: __bytes, publish: false }})")
-        &lines.push("}}")
+        if mir_type_is_unit(ok) {
+            &lines.push("Ok(()) => Ok({root}JetJobResult {{ type_id: \"Unit\".to_string(), bytes: Vec::new(), publish: false }}),")
+        } else {
+            &lines.push("Ok(__ok) => {{")
+            &lines.push("let __bytes = match {root}jet_enc_cbor_to_bytes_canonical(&__ok) {{")
+            &lines.push("Ok(__bytes) => __bytes,")
+            &lines.push(encode_error)
+            &lines.push("}};")
+            &lines.push("Ok({root}JetJobResult {{ type_id: {jet_rust_emit_quote(mir_type_display_name(ok) ?? "")}.to_string(), bytes: __bytes, publish: false }})")
+            &lines.push("}}")
+        }
+        &lines.push("Err(__error) => Err({root}JetJobError {{ type_id: __payload.type_id.clone(), reason: \"failed\".to_string(), detail: Some(format!(\"{{:?}}\", __error)) }}),")
         &lines.push("}}")
     }
     if !mir_type_is_unit(function.return_type) && result_ok == None {

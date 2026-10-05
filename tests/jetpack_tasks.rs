@@ -95,7 +95,7 @@ fn run() {}
     assert!(!bad.status.success());
     let stderr = String::from_utf8_lossy(&bad.stderr);
     assert!(stderr.contains("E2101"), "stderr: {stderr}");
-    assert!(stderr.contains("did you mean `jet seed_data`"), "stderr: {stderr}");
+    assert!(stderr.contains("Did you mean `jet seed_data`"), "stderr: {stderr}");
 }
 
 #[test]
@@ -442,8 +442,12 @@ fn jet_build_job_dispatch_matches_default_and_interpreter() {
 #[test]
 fn top_level_job_example_uses_one_argv_meaning() {
     let scratch = Scratch::new("top-level-job");
-    write_main(&scratch.path, include_str!("../Examples/features/script_job/top_level/run.jet"));
-    fs::rename(scratch.path.join("main.jet"), scratch.path.join("run.jet")).unwrap();
+    // The example carries its own inline package block and authority.
+    fs::write(
+        scratch.path.join("run.jet"),
+        include_str!("../Examples/features/script_job/top_level/run.jet"),
+    )
+    .unwrap();
     let expected = include_str!("../Examples/features/expected/script_job/top_level.out");
     for args in [
         &["deploy", "--region", "eu"][..],
@@ -463,7 +467,7 @@ fn top_level_job_example_uses_one_argv_meaning() {
     let retired = jet().args(["jobs", "deploy"]).current_dir(&scratch.path).output().unwrap();
     assert_eq!(retired.status.code(), Some(2));
     let report = String::from_utf8_lossy(&retired.stderr);
-    assert!(report.contains("E2101") && report.contains("run `jet deploy`"), "{report}");
+    assert!(report.contains("E2101") && report.contains("Run `jet deploy`"), "{report}");
 }
 
 #[cfg(unix)]
@@ -479,9 +483,17 @@ fn top_level_jobs_precede_retired_words_paths_and_path_plugins() {
 fn run() { print("entry") }
 "#);
     fs::rename(scratch.path.join("main.jet"), scratch.path.join("run.jet")).unwrap();
+    // Every root `.jet` file belongs to the package (one `fn run`, D-CMDOVERRIDE1),
+    // so `deploy.jet` is a plain member and the `deploy/` folder is its own
+    // package; a job still beats both names.
     fs::create_dir(scratch.path.join("deploy")).unwrap();
+    fs::write(
+        scratch.path.join("deploy/package.jet"),
+        "name: \"deploy-path\"\nversion: \"0.1.0\"\nauthority: {\n    holds: {\n        allow: [IO, Mem.Alloc]\n    }\n}\n",
+    )
+    .unwrap();
     fs::write(scratch.path.join("deploy/run.jet"), "fn run() { print(\"path\") }\n").unwrap();
-    fs::write(scratch.path.join("deploy.jet"), "fn run() { print(\"file\") }\n").unwrap();
+    fs::write(scratch.path.join("deploy.jet"), "fn deploy_note() -> String { \"file\" }\n").unwrap();
     let plugins = Scratch::new("job-plugins");
     let plugin = plugins.path.join("jet-deploy");
     fs::write(&plugin, "#!/bin/sh\nprintf 'plugin\\n'\n").unwrap();
@@ -493,12 +505,17 @@ fn run() { print("entry") }
         (&["serve"][..], "retired-word-job"),
         (&["output"][..], "moved-word-job"),
         (&["run", "deploy"][..], "path"),
-        (&["deploy.jet"][..], "file"),
     ] {
         let output = jet().args(args).current_dir(&scratch.path).env("PATH", &path).output().unwrap();
         assert!(output.status.success(), "{args:?}: {}", String::from_utf8_lossy(&output.stderr));
         assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), expected);
     }
+    // A word ending in `.jet` always names the file: it runs `deploy.jet`,
+    // which has no `fn run`, and never the job.
+    let file = jet().arg("deploy.jet").current_dir(&scratch.path).env("PATH", &path).output().unwrap();
+    assert!(!file.status.success());
+    assert!(String::from_utf8_lossy(&file.stderr).contains("E0101"), "{}", String::from_utf8_lossy(&file.stderr));
+    assert!(!String::from_utf8_lossy(&file.stdout).contains("job"));
     let internal = jet().arg("secret").current_dir(&scratch.path).env("PATH", &path).output().unwrap();
     assert_eq!(internal.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&internal.stderr).contains("E2101"));

@@ -4087,8 +4087,9 @@ clean `Err`, not a host crash. Guest-local `Mem` effects support Component text
 ABI values but do not grant host capabilities.
 Each export call returns `T PluginError!` (D-PLUGIN-FAILURE1=A). Match `Guest`,
 `Denied`, `Budget(limit, fault)`, or `Defect` rather than reading the display text.
-The `PluginFault` retains the export, message, and bounded guest frames; `?`
-retains the host call line through the ordinary failure journey. Loading a
+The `PluginFault` retains the export, message, and bounded guest frames, each a
+`PluginFrame { function, component, offset }`; a propagated failure retains the
+host call line through the ordinary failure journey. Loading a
 malformed Component does not stop the host: its first call reports `Guest` with
 export `load` and no frames.
 

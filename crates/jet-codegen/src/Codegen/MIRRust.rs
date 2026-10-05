@@ -12502,21 +12502,33 @@ impl<'a> RustEmitter<'a> {
                     )
                 } else {
                     match function.return_type.kind() {
+                        // A fallible job settles its failure as a job error
+                        // instead of encoding it; a Unit success carries no
+                        // bytes, exactly as an infallible Unit job does.
                         MirTypeKind::Result { ok, .. } => {
-                            let ok_type = ok.display_name();
-                            format!(
-                                "    let __job_result = {}({argument});\n\
-                                 match __job_result {{\n\
-                                     Ok(__ok) => {{\n\
+                            let ok_arm = if ok.is_unit() {
+                                format!(
+                                    "Ok(()) => Ok({root}JetJobResult {{ type_id: \"Unit\".to_string(), bytes: Vec::new(), publish: false }}),\n"
+                                )
+                            } else {
+                                format!(
+                                    "Ok(__ok) => {{\n\
                                          let __bytes = match {root}jet_enc_cbor_to_bytes_canonical(&__ok) {{\n\
                                              Ok(__bytes) => __bytes,\n\
                                              Err(__error) => return Err({root}JetJobError {{ type_id: __payload.type_id.clone(), reason: \"encode\".to_string(), detail: Some(format!(\"{{:?}}\", __error)) }}),\n\
                                          }};\n\
                                          Ok({root}JetJobResult {{ type_id: {:?}.to_string(), bytes: __bytes, publish: false }})\n\
-                                     }}\n\
+                                     }}\n",
+                                    ok.display_name()
+                                )
+                            };
+                            format!(
+                                "    let __job_result = {}({argument});\n\
+                                 match __job_result {{\n\
+                                     {ok_arm}\
+                                     Err(__error) => Err({root}JetJobError {{ type_id: __payload.type_id.clone(), reason: \"failed\".to_string(), detail: Some(format!(\"{{:?}}\", __error)) }}),\n\
                                  }}\n",
                                 self.function_name(function.id),
-                                ok_type
                             )
                         }
                         _ => {
