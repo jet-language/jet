@@ -1,8 +1,8 @@
-use core.encoding.runtime.std_data_tree.[DataTree, FieldError, EncodingLimits, EncodingError, EncodingFormat, EncodingErrorKind, jet_datatree_encode_i64, jet_datatree_encode_u64, jet_datatree_int, jet_datatree_int_payload, decode_int, decode_bool, decode_float, decode_string, jet_enc_csv_decode_rows, render_datatree_json, jet_std_json_coerce_walk]
+use core.encoding.runtime.std_data_tree.[DataTree, FieldError, JetDataTreeAccess, EncodingLimits, EncodingError, EncodingFormat, EncodingErrorKind, jet_datatree_encode_i64, jet_datatree_encode_u64, jet_datatree_int, jet_datatree_int_payload, decode_int, decode_bool, decode_float, decode_string, jet_enc_csv_decode_rows, render_datatree_json, jet_std_json_coerce_walk]
 
 // Behavioral controls for Rust: crates/jet-foundation/src/DataTree.rs:1-66
 #Test("ordered carrier first key lookup") {
-    tree :: DataTree.Object([("x", .Int(1)), ("x", .Int(2)), ("y", .Text("three"))])
+    tree :: DataTree.Object([(key: "x", value: .Int(1)), (key: "x", value: .Int(2)), (key: "y", value: .Text("three"))])
     assert(tree.get("x") == Ok(DataTree.Int(1)))
     assert(tree.get("absent") == Err("missing key `absent`"))
     assert(DataTree.TypedText("s").as_str() == Ok("s"))
@@ -24,10 +24,10 @@ use core.encoding.runtime.std_data_tree.[DataTree, FieldError, EncodingLimits, E
     assert(values.at(I64{-1}) == Ok(DataTree.Text("four")))
     assert(values.at(I64{-9223372036854775808}) == Err(FieldError.at("[-9223372036854775808]", "index -9223372036854775808 out of bounds (len 2)")))
     assert(DataTree.Int(3).text() == Err(FieldError.one("expected text, got 3")))
-    a :: DataTree.Object([("x", .Int(1)), ("x", .Int(2))])
-    b :: DataTree.Object([("x", .Int(2)), ("x", .Int(1))])
+    a :: DataTree.Object([(key: "x", value: .Int(1)), (key: "x", value: .Int(2))])
+    b :: DataTree.Object([(key: "x", value: .Int(2)), (key: "x", value: .Int(1))])
     assert(a.equal_unordered(b))
-    assert(!a.equal_unordered(DataTree.Object([("x", .Int(1)), ("x", .Int(1))])))
+    assert(!a.equal_unordered(DataTree.Object([(key: "x", value: .Int(1)), (key: "x", value: .Int(1))])))
     assert(!DataTree.Array([.Int(1), .Int(2)]).equal_unordered(DataTree.Array([.Int(2), .Int(1)])))
     assert(!DataTree.Text("a").equal_unordered(DataTree.TypedText("a")))
 }
@@ -48,15 +48,15 @@ use core.encoding.runtime.std_data_tree.[DataTree, FieldError, EncodingLimits, E
     limits :: EncodingLimits.safe()
     assert(limits.buffer_bytes == 65536 && limits.max_depth == 256 && limits.max_total_bytes == None)
     result :: jet_enc_csv_decode_rows<Int, DataTree, FieldError>([["x"], ["1"], ["bad"], ["worse"]],
-        (value: DataTree) -> Int [FieldError]! { decode_int(value.field("x")) },
-        (path: String, errors: ^[FieldError]) -> [FieldError] Never! { FieldError.under_errors(path, ^errors) },
-        (text: String) -> DataTree Never! { .Text(^text) },
-        (entries: ^[(String, DataTree)]) -> DataTree Never! { .Object(^entries) })
+        (value: DataTree) -> decode_int(value.field("x")),
+        (path: String, errors: [FieldError]) -> FieldError.under_errors(path, ~errors),
+        (text: String) -> DataTree.Text(text),
+        (entries: [(key: String, value: DataTree)]) -> DataTree.Object(~entries))
     assert(result == Err([FieldError{path: "row 2", reason: "expected Int, found text \"bad\""}, FieldError{path: "row 3", reason: "expected Int, found text \"worse\""}]))
 }
 // Behavioral controls for Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/JSONDataTree.rs:27-219
 #Test("JSON ordered rendering and lenient coercions") {
-    tree :: DataTree.Object([("z", .Number("10000000000000000001")), ("a", .Float(5.0))])
+    tree :: DataTree.Object([(key: "z", value: .Number("10000000000000000001")), (key: "a", value: .Float(5.0))])
     assert(render_datatree_json(tree, false, 0) == "{{\"z\":10000000000000000001,\"a\":5.0}}")
     assert(render_datatree_json(DataTree.Bytes([U8{1}, U8{255}]), true, 0) == "[1,255]")
     audit := [String]{}
