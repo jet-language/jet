@@ -49,7 +49,7 @@ fn jet_codegen_auto_derives_impl_selected(ctx: &JetRustEmitContext, definition: 
     expected_trait := mir_trait_id(trait_name)
     type_kind := MIRTypeKind.Apply{name: MIRNominalRef{id: definition.id, name: definition.key}, args: [MIRType]{}}
     declared_type := MIRType{kind: type_kind, identity: Val(definition.id), layout: mir_type_layout(type_kind)}
-    rows :: ~(ctx.impls_by_trait.get(jet_rust_emit_id_key(expected_trait.value)) ?? [Int]{})
+    rows :: ~(ctx.impls_by_trait.get(expected_trait.value) ?? [Int]{})
     loop row in rows {
         implementation :: ~ctx.program.impls[row]
         if !jet_rust_emit_impl_target_enabled(&ctx, implementation) -> next

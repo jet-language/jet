@@ -66,7 +66,7 @@ fn jet_rust_emit_foreign_target_enabled(ctx: &JetRustEmitContext, foreign: MIRFo
 
 // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::module_selected
 fn jet_rust_emit_module_selected(ctx: JetRustEmitContext, module_id: MIRModuleID) -> Bool Never! {
-    ctx.all_modules_selected || ctx.selected_modules.get(jet_rust_emit_id_key(module_id.value)) != None
+    ctx.all_modules_selected || ctx.selected_modules.get(module_id.value) != None
 }
 
 // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::impl_selected_for_target
@@ -337,7 +337,7 @@ fn jet_rust_emit_program_items(ctx: &JetRustEmitContext, trace_sink: CompilerTra
     artifact :: jet_rust_emit_selected_artifact(&ctx)
     if artifact == .Val(plan) {
         ctx.all_modules_selected = false
-        loop module_id in plan.modules -> ctx.selected_modules[jet_rust_emit_id_key(module_id.value)] = true
+        loop module_id in plan.modules -> ctx.selected_modules[module_id.value] = true
     }
     // MIRRust emit_mir_program_items order: types, traits and constants (all
     // under emit_types), link closure, C ABI records, foreign items, callback
@@ -407,11 +407,11 @@ fn jet_rust_emit_program_items(ctx: &JetRustEmitContext, trace_sink: CompilerTra
     codec_keep :: mir_demanded_codec_impls(ctx.program)
     loop (index, implementation) in ctx.program.impls {
         if !jet_rust_emit_module_selected(ctx, implementation.module_id) {
-            loop method_id in implementation.methods -> ctx.skipped_methods[jet_rust_emit_id_key(method_id.value)] = true
+            loop method_id in implementation.methods -> ctx.skipped_methods[method_id.value] = true
             next
         }
         if !codec_keep[index] {
-            loop method_id in implementation.methods -> ctx.skipped_methods[jet_rust_emit_id_key(method_id.value)] = true
+            loop method_id in implementation.methods -> ctx.skipped_methods[method_id.value] = true
             next
         }
         if jet_rust_emit_impl_target_enabled(&ctx, implementation) {
@@ -498,7 +498,7 @@ struct JetRustEmitPart {
 // MIRRust emit_mir_program_items: a function prints when its module is
 // selected, its target admits it, and no impl prints or drops it.
 fn jet_rust_emit_prints_function(ctx: JetRustEmitContext, function: MIRFunction) -> Bool Never! {
-    jet_rust_emit_module_selected(ctx, function.module_id) && jet_rust_emit_function_target_enabled(ctx.config, function) && ctx.skipped_methods.get(jet_rust_emit_id_key(function.id.value)) == None
+    jet_rust_emit_module_selected(ctx, function.module_id) && jet_rust_emit_function_target_enabled(ctx.config, function) && ctx.skipped_methods.get(function.id.value) == None
 }
 
 fn jet_rust_emit_function_instructions(function: MIRFunction) -> Int Never! {
@@ -750,7 +750,7 @@ fn jet_rust_emit_units_module_unit(units: JetRustEmitUnits, module_id: MIRModule
 fn jet_rust_emit_units_impl_unit(ctx: &JetRustEmitContext, units: JetRustEmitUnits, implementation: MIRImplDef) -> String Never! {
     if implementation.self_type.kind == .Apply(name, _) {
         index := -1
-        by_id :: ctx.type_index_by_id.get(jet_rust_emit_id_key(name.id.value)) ?? -1
+        by_id :: ctx.type_index_by_id.get(name.id.value) ?? -1
         by_key :: ctx.type_index_by_key.get(name.name) ?? -1
         by_name :: ctx.type_index_by_name.get(name.name) ?? -1
         candidates :: [Int]{by_id, by_key, by_name}

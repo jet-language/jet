@@ -1385,7 +1385,7 @@ fn jet_rust_emit_trait_definition(ctx: &JetRustEmitContext, definition: MIRTrait
     name :: jet_rust_emit_trait_name(&ctx, definition.id)
     // MIRRust emit_trait_def: a trait used as `Box<dyn T>` clones its boxed
     // value through a clone-box supertrait, so `Box<dyn T>` is Clone.
-    if ctx.dyn_clone_traits.get(jet_rust_emit_id_key(definition.id.value)) != None {
+    if ctx.dyn_clone_traits.get(definition.id.value) != None {
         &lines.push("{visibility}trait {name}__JetCloneBox {{ fn __jet_clone_box(&self) -> Box<dyn {name}>; }}")
         &lines.push("impl<JetSelf: {name} + Clone + 'static> {name}__JetCloneBox for JetSelf {{ fn __jet_clone_box(&self) -> Box<dyn {name}> {{ Box::new(self.clone()) }} }}")
         &lines.push("impl Clone for Box<dyn {name}> {{ fn clone(&self) -> Self {{ (**self).__jet_clone_box() }} }}")
@@ -1679,7 +1679,7 @@ fn jet_rust_emit_impl_definition(ctx: &JetRustEmitContext, implementation: MIRIm
                     previous_method_params := ctx.current_generic_params
                     ctx.current_generic_params = jet_rust_emit_merge_generic_params(impl_scope, function.generic_params)
                     if jet_rust_emit_native_derived_equal(&ctx, implementation, function, &lines) || jet_rust_emit_native_derived_compare(&ctx, implementation, function, &lines) || jet_rust_emit_native_derived_decode(&ctx, implementation, function, &lines) || jet_rust_emit_native_derived_encode(&ctx, implementation, function, &lines) {
-                        ctx.skipped_methods[jet_rust_emit_id_key(function.id.value)] = true
+                        ctx.skipped_methods[function.id.value] = true
                     } else {
                         jet_rust_emit_impl_method(&ctx, implementation, function, impl_scope, &lines)
                     }
@@ -1904,12 +1904,12 @@ fn jet_rust_emit_codec_call_allowed(ctx: &JetRustEmitContext, codec: MIRSerdeCod
 fn jet_rust_emit_codec_template(ctx: &JetRustEmitContext, function: MIRFunction) -> JetRustEmitCodecTemplate? {
     codec := MIRSerdeCodec?{None}
     if function.form == .TraitMethod(_, _, _, serde) -> codec = serde
-    texts_by_value := [String:String]{}
-    ints_by_value := [String:Int]{}
+    texts_by_value := [U64:String]{}
+    ints_by_value := [U64:Int]{}
     loop block in function.blocks {
         loop instruction in block.instructions {
             result :: instruction.result ?? next
-            key :: jet_rust_emit_id_key(result.value)
+            key :: result.value
             if instruction.operation == {
                 .Constant(value) -> {
                     if value == {
@@ -1939,7 +1939,7 @@ fn jet_rust_emit_codec_template(ctx: &JetRustEmitContext, function: MIRFunction)
     loop block in function.blocks {
         loop instruction in block.instructions {
             if instruction.result == .Val(result) {
-                if texts_by_value.get(jet_rust_emit_id_key(result.value)) == .Val(text) -> &texts.push(text)
+                if texts_by_value.get(result.value) == .Val(text) -> &texts.push(text)
             }
             if instruction.operation == {
                 .Call(callee, _, _) -> {
@@ -1951,7 +1951,7 @@ fn jet_rust_emit_codec_template(ctx: &JetRustEmitContext, function: MIRFunction)
                         .HandleMethod(call, _, args, _, _) -> {
                             if jet_rust_emit_prelude_symbol(&ctx, call).ends_with("jet_datatree_field") {
                                 if args.len() != 1 -> return None
-                                field_key :: texts_by_value.get(jet_rust_emit_id_key(args[0].value)) ?? return None
+                                field_key :: texts_by_value.get(args[0].value) ?? return None
                                 &field_keys.push(field_key)
                             }
                         }
@@ -1959,10 +1959,10 @@ fn jet_rust_emit_codec_template(ctx: &JetRustEmitContext, function: MIRFunction)
                             symbol :: jet_rust_emit_prelude_symbol(&ctx, call)
                             if symbol.ends_with("jet_journey_origin") {
                                 if args.len() != 4 -> return None
-                                file :: texts_by_value.get(jet_rust_emit_id_key(args[0].value.value)) ?? return None
-                                line :: ints_by_value.get(jet_rust_emit_id_key(args[1].value.value)) ?? return None
-                                column :: ints_by_value.get(jet_rust_emit_id_key(args[2].value.value)) ?? return None
-                                name :: texts_by_value.get(jet_rust_emit_id_key(args[3].value.value)) ?? return None
+                                file :: texts_by_value.get(args[0].value.value) ?? return None
+                                line :: ints_by_value.get(args[1].value.value) ?? return None
+                                column :: ints_by_value.get(args[2].value.value) ?? return None
+                                name :: texts_by_value.get(args[3].value.value) ?? return None
                                 site :: "{symbol}({jet_rust_emit_quote(file)}, {line}u32, {column}u32, {jet_rust_emit_quote(name)}); "
                                 if origin == .Val(previous) {
                                     if previous != site -> return None
