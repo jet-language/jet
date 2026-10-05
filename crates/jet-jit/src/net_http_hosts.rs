@@ -241,12 +241,15 @@ fn http_router(handle: i64) -> Option<Arc<Mutex<JetHTTPRouter>>> {
     })
 }
 fn jet_jit_http_openapi(router: i64) -> i64 {
+    if let Some(mux) = http_mux(router) {
+        return alloc_string(crate::Web::web_rt::jet_web_openapi(mux.as_ref()));
+    }
     let Some(router) = http_router(router) else {
-        Concurrency::with_runtime_mut(|runtime| runtime.set_trap("invalid HTTPRouter"));
+        Concurrency::with_runtime_mut(|runtime| runtime.set_trap("invalid HTTP route source"));
         return 0;
     };
-    let router = router.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clone();
-    alloc_string(crate::Web::web_rt::jet_web_openapi(&router))
+    let router = router.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    alloc_string(crate::Web::web_rt::jet_web_openapi(&*router))
 }
 fn jet_jit_http_reason_phrase(code: i64) -> i64 {
     alloc_string(jet_http_reason_phrase(code))

@@ -29,6 +29,7 @@ fn check(source: &str) -> Vec<Diagnostic> {
             items: std::mem::take(&mut program.items),
             script_body: std::mem::take(&mut program.script_body),
             source: source.into(),
+            frontend_source: None,
             block_spans: std::mem::take(&mut program.block_spans),
             web_target_ceiling: program.web_target_ceiling,
             pub_file: program.pub_file,

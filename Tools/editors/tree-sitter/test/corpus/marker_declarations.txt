@@ -21,3 +21,61 @@ marker Pattern(value: String, $sites: [], $repeatable: true)
         name: (marker_fact_name
           (identifier))
         (boolean_literal)))))
+
+====================
+Public fixed groups preserve members and import-local qualification
+====================
+
+pub marker Fast = #[library.Tag, Inline, Scalar]
+#library.Fast fn helper() {}
+
+---
+
+(source_file
+  (marker_decl
+    name: (marker_name)
+    (attribute_list
+      name: (marker_name)
+      name: (marker_name)
+      name: (marker_name)))
+  (function_def
+    (attribute
+      name: (marker_name))
+    name: (identifier)
+    (param_list)
+    (block)))
+
+====================
+Nested public marker groups
+====================
+
+pub module inner {
+    pub marker Tag($sites: [])
+    pub marker Pair = #[Tag, Inline]
+    #Pair fn helper() {}
+}
+
+---
+
+(source_file
+  (module_def
+    name: (module_path
+      (identifier))
+    (marker_decl
+      name: (marker_name)
+      (marker_decl_params
+        (marker_decl_param
+          name: (marker_fact_name
+            (identifier))
+          (list_literal))))
+    (marker_decl
+      name: (marker_name)
+      (attribute_list
+        name: (marker_name)
+        name: (marker_name)))
+    (function_def
+      (attribute
+        name: (marker_name))
+      name: (identifier)
+      (param_list)
+      (block))))

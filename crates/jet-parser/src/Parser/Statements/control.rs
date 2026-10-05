@@ -445,7 +445,7 @@ impl<'a> Parser<'a> {
         let TokKind::Ident(name) = &self.peek2().kind else {
             return false;
         };
-        if matches!(
+        if self.unqualified_marker_name_at(self.pos).is_some() && matches!(
             name.as_str(),
             Syntax::RETIRED_MARKER_KNOWN
                 | Syntax::KW_UNSAFE
@@ -511,6 +511,7 @@ impl<'a> Parser<'a> {
         let body = self.block_stmts();
         let end = self.toks[self.pos - 1].span.end;
         self.bind_rule_fact(
+            &marker.name,
             marker.name_span,
             Some(Span::new(start.start, end)),
             crate::Policy::RuleSite::Block,
@@ -932,7 +933,7 @@ impl<'a> Parser<'a> {
         } else {
             crate::Policy::RuleSite::Statement
         };
-        self.bind_rule_fact(switch.name_span, Some(span), site);
+        self.bind_rule_fact(&switch.name, switch.name_span, Some(span), site);
         Ok(Stmt::Switched {
             marker: switch,
             body,
@@ -1059,7 +1060,7 @@ impl<'a> Parser<'a> {
         let body = self.block_stmts();
         let end = self.toks[self.pos - 1].span.end;
         let span = Span::new(start.start, end);
-        self.bind_rule_fact(marker.name_span, Some(span), crate::Policy::RuleSite::Block);
+        self.bind_rule_fact(&marker.name, marker.name_span, Some(span), crate::Policy::RuleSite::Block);
         if let Some(value) = obligation_mode {
             self.policy_declarations
                 .push(crate::Policy::PolicyDeclaration {
@@ -1097,6 +1098,7 @@ impl<'a> Parser<'a> {
         let body = self.block_stmts();
         let end = self.toks[self.pos - 1].span.end;
         self.bind_rule_fact(
+            &marker.name,
             marker.name_span,
             Some(Span::new(marker.span.start, end)),
             crate::Policy::RuleSite::Block,
@@ -1117,7 +1119,7 @@ impl<'a> Parser<'a> {
         let body = self.block_stmts();
         let end = self.toks[self.pos - 1].span.end;
         let span = Span::new(marker.span.start, end);
-        self.bind_rule_fact(marker.name_span, Some(span), crate::Policy::RuleSite::Block);
+        self.bind_rule_fact(&marker.name, marker.name_span, Some(span), crate::Policy::RuleSite::Block);
         Ok(Stmt::Reactive { body, span })
     }
 
@@ -1142,7 +1144,7 @@ impl<'a> Parser<'a> {
         let body = self.block_stmts();
         let end = self.toks[self.pos - 1].span.end;
         let span = Span::new(marker.span.start, end);
-        self.bind_rule_fact(marker.name_span, Some(span), crate::Policy::RuleSite::Block);
+        self.bind_rule_fact(&marker.name, marker.name_span, Some(span), crate::Policy::RuleSite::Block);
         Ok(Stmt::Shield { body, span })
     }
 
@@ -1160,6 +1162,7 @@ impl<'a> Parser<'a> {
         let body = self.block_stmts();
         let end = self.toks[self.pos - 1].span.end;
         self.bind_rule_fact(
+            &marker.name,
             marker.name_span,
             Some(Span::new(marker.span.start, end)),
             crate::Policy::RuleSite::Block,
@@ -1179,7 +1182,7 @@ impl<'a> Parser<'a> {
         let body = self.block_stmts();
         let end = self.toks[self.pos - 1].span.end;
         let span = Span::new(marker.span.start, end);
-        self.bind_rule_fact(marker.name_span, Some(span), crate::Policy::RuleSite::Block);
+        self.bind_rule_fact(&marker.name, marker.name_span, Some(span), crate::Policy::RuleSite::Block);
         Ok(Stmt::Live { body, span })
     }
 
@@ -1202,6 +1205,7 @@ impl<'a> Parser<'a> {
         let body = self.block_stmts();
         let end = self.toks[self.pos - 1].span.end;
         self.bind_rule_fact(
+            &marker.name,
             marker.name_span,
             Some(Span::new(marker.span.start, end)),
             crate::Policy::RuleSite::Block,
@@ -1303,6 +1307,7 @@ impl<'a> Parser<'a> {
         let body = self.block_stmts();
         let end = self.toks[self.pos - 1].span.end;
         self.bind_rule_fact(
+            &marker.name,
             marker.name_span,
             Some(Span::new(marker.span.start, end)),
             crate::Policy::RuleSite::Block,
@@ -1355,6 +1360,7 @@ impl<'a> Parser<'a> {
                 crate::AST::Marker {
                     name_span: marker_name_span,
                     name: Syntax::KW_FX.to_string(),
+                    declaration: None,
                     negated: false,
                     args: marker_args,
                     arg_labels: vec![None; caps.len()],
@@ -1368,6 +1374,7 @@ impl<'a> Parser<'a> {
             let body = self.block_stmts();
             let end = self.toks[self.pos - 1].span.end;
             self.bind_rule_fact(
+                Syntax::KW_FX,
                 marker_name_span,
                 Some(Span::new(start.start, end)),
                 crate::Policy::RuleSite::Block,
@@ -1397,6 +1404,7 @@ impl<'a> Parser<'a> {
         let body = self.block_stmts();
         let end = self.toks[self.pos - 1].span.end;
         self.bind_rule_fact(
+            &marker.name,
             marker.name_span,
             Some(Span::new(marker.span.start, end)),
             crate::Policy::RuleSite::Block,
@@ -1454,6 +1462,7 @@ impl<'a> Parser<'a> {
                 crate::AST::Marker {
                     span: Span::new(start.start, self.toks[self.pos - 1].span.end),
                     name: Syntax::KW_TRANSACT.to_string(),
+                    declaration: None,
                     negated: false,
                     name_span: marker_name_span,
                     args: vec![crate::AST::MarkerCallArg::Expr(crate::AST::Expr::Ident(
@@ -1475,6 +1484,7 @@ impl<'a> Parser<'a> {
         let end = self.toks[self.pos - 1].span.end;
         if name.is_some() {
             self.bind_rule_fact(
+                Syntax::KW_TRANSACT,
                 marker_name_span,
                 Some(Span::new(start.start, end)),
                 crate::Policy::RuleSite::Block,
@@ -2315,7 +2325,7 @@ impl<'a> Parser<'a> {
             TokKind::Hash if self.at_declared_dsl_block() => self.at_declared_dsl_block_stmt(),
             // S43 (D-CASING1 follow-on): a `#Test "name" { … }` block in statement
             // position is misplaced — E0601 points at the top level.
-            TokKind::Hash if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_TEST) =>
+            TokKind::Hash if self.unqualified_marker_name_at(self.pos) == Some(Syntax::KW_TEST) =>
             {
                 let span = self.peek().span;
                 self.bump(); // `#`
@@ -2741,13 +2751,14 @@ impl<'a> Parser<'a> {
             // D-VERDICT-1455-1: a binding-level marker is read and retained, not
             // turned into a flag here. Sema and the formatter read the marker.
             TokKind::Hash
-                if matches!(&self.peek2().kind, TokKind::Ident(n) if matches!(n.as_str(),
+                if self.unqualified_marker_name_at(self.pos).is_some_and(|name| matches!(name,
                     Syntax::MARKER_TRACK | Syntax::MARKER_LOCAL | Syntax::MARKER_SHARED)) =>
             {
                 let marker =
                     self.parse_registered_marker_at_site(crate::Policy::RuleSite::Declaration)?;
                 let mut binding = self.sigil_binding()?;
                 self.bind_rule_fact(
+                    &marker.name,
                     marker.name_span,
                     Some(binding.name_span),
                     crate::Policy::RuleSite::Declaration,
@@ -2803,12 +2814,12 @@ impl<'a> Parser<'a> {
             }
             // D-UNINIT-SENTINEL1/2: `#Uninit name: Type` is retired — teaching
             // error E0426 points at `name := Type{ uninit }`.
-            TokKind::Hash if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::MARKER_UNINIT) =>
+            TokKind::Hash if self.unqualified_marker_name_at(self.pos) == Some(Syntax::MARKER_UNINIT) =>
             {
                 return self.retired_uninit_marker();
             }
             TokKind::Hash
-                if matches!(&self.peek2().kind, TokKind::Ident(n) if matches!(n.as_str(),
+                if self.unqualified_marker_name_at(self.pos).is_some_and(|name| matches!(name,
                     Syntax::MARKER_AUDIT
                     | Syntax::CTX_BLOCK
                     | Syntax::MARKER_REGION
@@ -2823,7 +2834,7 @@ impl<'a> Parser<'a> {
                     | Syntax::KW_REACTIVE
                     | Syntax::MARKER_OFF
                     | Syntax::MARKER_DEBUG_ONLY))
-                    || matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_UNSAFE) =>
+                    || self.unqualified_marker_name_at(self.pos) == Some(Syntax::KW_UNSAFE) =>
             {
                 if let TokKind::Ident(name) = &self.peek2().kind {
                     if crate::Policy::applied_rule(name).is_some_and(|rule| {
@@ -2905,7 +2916,7 @@ impl<'a> Parser<'a> {
                 let body = self.block_stmts();
                 let end = self.toks[self.pos.saturating_sub(1)].span.end;
                 let span = Span::new(marker.span.start, end);
-                self.bind_rule_fact(marker.name_span, Some(span), crate::Policy::RuleSite::Block);
+                self.bind_rule_fact(&marker.name, marker.name_span, Some(span), crate::Policy::RuleSite::Block);
                 let args = marker.expr_args_owned();
                 let args_span = (!args.is_empty()).then_some(marker.span);
                 Ok(Stmt::ScopeMember {
@@ -2923,7 +2934,7 @@ impl<'a> Parser<'a> {
             // is keyed by module + name, and a local has no stable identity
             // across a reload. Takes priority over the loop-label-typo arm
             // below for the same reason as the directive-marker guard.
-            TokKind::Hash if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::MARKER_PERSIST) =>
+            TokKind::Hash if self.unqualified_marker_name_at(self.pos) == Some(Syntax::MARKER_PERSIST) =>
             {
                 let head = self.read_marker_head()?;
                 Err(Diagnostic::error(
@@ -2945,6 +2956,7 @@ impl<'a> Parser<'a> {
                 let statement = self.stmt()?;
                 let target = statement.span();
                 self.bind_rule_fact(
+                    &marker.name,
                     marker.name_span,
                     Some(target),
                     crate::Policy::RuleSite::Statement,

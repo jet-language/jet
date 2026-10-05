@@ -10,12 +10,12 @@ const JET_HTTP_MAX_CHUNK_FRAMING_BYTES: usize = 32 * 1024;
 type JetHTTPMiddleware = std::sync::Arc<dyn Fn(JetHTTPHandler) -> JetHTTPHandler + Send + Sync>;
 
 #[derive(Clone)]
-struct JetHTTPMuxRoute {
-    method: String,
-    pattern: String,
+pub(crate) struct JetHTTPMuxRoute {
+    pub(crate) method: String,
+    pub(crate) pattern: String,
     handler: JetHTTPHandler,
     /// Checked endpoint contract carried through registration for inspection.
-    contract_json: String,
+    pub(crate) contract_json: String,
 }
 #[derive(Clone)]
 struct JetHTTPMuxRouteCacheEntry {
@@ -730,6 +730,10 @@ impl JetHTTPMux {
         cache
     }
 
+    pub(crate) fn checked_routes<R>(&self, inspect: impl FnOnce(&[JetHTTPMuxRoute]) -> R) -> R {
+        inspect(&self.0.lock().unwrap())
+    }
+
     fn add<F>(&self, method: &str, pattern: &str, f: F)
     where
         F: Fn(JetHTTPRequest) -> Result<JetHTTPResponse, JetHTTPError> + Send + Sync + 'static,
@@ -1181,6 +1185,67 @@ fn jet_http_require_route_contract(
     }
 }
 
+/// Complete a dynamic mux route's compiler-checked input descriptor once at
+/// registration. Static contracts are returned without parsing or copying.
+pub(crate) fn jet_http_route_complete_contract(
+    method: &str, pattern: &str, contract_json: String,
+) -> Result<String, String> {
+    if !contract_json.contains("\"pattern\":\"\"") {
+        return Ok(contract_json);
+    }
+    let parsed = jet_http_route_pattern(pattern)?;
+    let mut contract = jet_std::parse_json_strict(&contract_json)
+        .map_err(|_| "invalid checked HTTP route descriptor".to_string())?;
+    let jet_std::DataTree::Object(ref mut fields) = contract else {
+        return Err("checked HTTP route descriptor is not an object".to_string());
+    };
+    fn set(fields: &mut [(String, jet_std::DataTree)], name: &str, value: jet_std::DataTree) -> Result<(), String> {
+        let field = fields.iter_mut().find(|(key, _)| key == name)
+            .ok_or_else(|| format!("checked HTTP route descriptor has no `{name}`"))?;
+        field.1 = value;
+        Ok(())
+    }
+    let parameters = fields.iter_mut().find(|(key, _)| key == "parameters")
+        .ok_or_else(|| "checked HTTP route descriptor has no inputs".to_string())?;
+    let jet_std::DataTree::Array(ref mut parameters) = parameters.1 else {
+        return Err("checked HTTP route descriptor inputs are not an array".to_string());
+    };
+    for segment in &parsed.segments {
+        let name = match segment {
+            JetHTTPRouteSegment::Param(name) | JetHTTPRouteSegment::CatchAll(name) => name,
+            JetHTTPRouteSegment::Static(_) => continue,
+        };
+        if !parameters.iter().any(|parameter| {
+            jet_http_contract_object(parameter).and_then(|fields| jet_http_contract_text(fields, "name")) == Some(name.as_str())
+        }) {
+            return Err(format!("HTTP route `{pattern}` path field `{name}` has no typed handler input"));
+        }
+    }
+    for parameter in parameters {
+        let jet_std::DataTree::Object(ref mut fields) = parameter else {
+            return Err("checked HTTP route input is not an object".to_string());
+        };
+        let name = jet_http_contract_text(fields, "name")
+            .ok_or_else(|| "checked HTTP route input has no name".to_string())?;
+        let segment = parsed.segments.iter().find(|segment| match segment {
+            JetHTTPRouteSegment::Param(candidate) | JetHTTPRouteSegment::CatchAll(candidate) => candidate == name,
+            JetHTTPRouteSegment::Static(_) => false,
+        });
+        if let Some(segment) = segment {
+            set(fields, "in", jet_std::DataTree::Text("path".to_string()))?;
+            set(fields, "required", jet_std::DataTree::Bool(true))?;
+            set(fields, "catch_all", jet_std::DataTree::Bool(matches!(segment, JetHTTPRouteSegment::CatchAll(_))))?;
+        } else if !matches!(method, "GET" | "HEAD") {
+            return Err(format!("HTTP route `{pattern}` has unbound non-GET handler input `{name}`"));
+        }
+    }
+    set(fields, "pattern", jet_std::DataTree::Text(pattern.to_string()))?;
+    set(fields, "path", jet_std::DataTree::Text(jet_http_route_openapi_path(&parsed)))?;
+    set(fields, "operation_id", jet_std::DataTree::Text(String::new()))?;
+    Ok(jet_std::render_datatree_json(&contract, false, 0))
+}
+
+
 fn jet_http_mux_register(
     mux: &JetHTTPMux,
     method: String,
@@ -1190,6 +1255,8 @@ fn jet_http_mux_register(
     line: u32,
     contract_json: String,
 ) {
+    let contract_json = jet_http_route_complete_contract(&method, &pattern, contract_json)
+        .unwrap_or_else(|message| jet_panic(file, line, &message));
     jet_http_require_route_contract(&method, &pattern, &contract_json, file, line, true);
     let segments = match jet_http_router_parse_pattern(&pattern) {
         Ok(segments) => segments,

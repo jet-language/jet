@@ -7072,11 +7072,10 @@ fn compile_src_on_compiler_stack(
     generated: bool,
 ) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
     crate::boot_mir_eval();
-    let source_for_parse = if generated {
-        src.to_string()
+    let (source_for_parse, inline_package) = if generated {
+        (src.to_string(), None)
     } else {
         crate::Package::mask_inline_package_source(src)
-            .map(|(masked, _)| masked)
             .map_err(|error| vec![error.diagnostic()])?
     };
     let (toks, lex_diags) = if generated {
@@ -7100,6 +7099,7 @@ fn compile_src_on_compiler_stack(
             script_body: std::mem::take(&mut prog.script_body),
             block_spans: std::mem::take(&mut prog.block_spans),
             source: src.to_string(),
+            frontend_source: inline_package.map(|_| source_for_parse),
             web_target_ceiling: prog.web_target_ceiling,
             pub_file: prog.pub_file,
             no_prelude: prog.no_prelude,
@@ -8009,8 +8009,8 @@ fn check_eval_on_compiler_stack(
     Option<crate::AST::ProgramBundle>,
     crate::Sema::SemIndexEffectFacts,
 ) {
-    let source_for_parse = match crate::Package::mask_inline_package_source(src) {
-        Ok((masked, _)) => masked,
+    let (source_for_parse, inline_package) = match crate::Package::mask_inline_package_source(src) {
+        Ok(input) => input,
         Err(error) => {
             return (
                 vec![error.diagnostic()],
@@ -8043,6 +8043,7 @@ fn check_eval_on_compiler_stack(
             script_body: std::mem::take(&mut prog.script_body),
             block_spans: std::mem::take(&mut prog.block_spans),
             source: src.to_string(),
+            frontend_source: inline_package.map(|_| source_for_parse),
             web_target_ceiling: prog.web_target_ceiling,
             pub_file: prog.pub_file,
             no_prelude: prog.no_prelude,

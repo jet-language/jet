@@ -3174,8 +3174,10 @@ fn route_handler_contract(
     line: usize,
     is_mux: bool,
 ) -> Option<String> {
-    let pattern = route_static_string(path_expr, cx)?;
-    Syntax::validate_http_route_pattern(&pattern).ok()?;
+    let static_pattern = route_static_string(path_expr, cx);
+    let dynamic = static_pattern.is_none() && is_mux;
+    let pattern = if dynamic { String::new() } else { static_pattern? };
+    if !dynamic { Syntax::validate_http_route_pattern(&pattern).ok()?; }
     let mut path = String::new();
     let mut parameters = Vec::new();
     if pattern == "/" {
@@ -3219,9 +3221,13 @@ fn route_handler_contract(
                 .map(|param| param.ty.clone())
                 .collect::<Option<Vec<_>>>()?;
             (
-                match &lambda.body {
-                    LambdaBody::Expr(expr) => LambdaBody::Expr(expr.clone()),
-                    LambdaBody::Block(stmts) => LambdaBody::Block(stmts.clone()),
+                if let Some(source) = &lambda.meta.http_route_source {
+                    LambdaBody::Block(cx.fn_bodies.get(source)?.clone())
+                } else {
+                    match &lambda.body {
+                        LambdaBody::Expr(expr) => LambdaBody::Expr(expr.clone()),
+                        LambdaBody::Block(stmts) => LambdaBody::Block(stmts.clone()),
+                    }
                 },
                 params,
             )
@@ -3273,7 +3279,6 @@ fn route_handler_contract(
     {
         return None;
     }
-    if !is_mux {
         for parameter in &mut parameters {
             if parameter.location != jet_foundation::MIR::MirHttpParameterLocation::Path {
                 continue;
@@ -3291,7 +3296,6 @@ fn route_handler_contract(
             let mut active = HashSet::new();
             parameter.schema = route_schema_type(&matches[0].1, cx, &mut active)?;
         }
-    }
     let path_names = parameters
         .iter()
         .filter(|parameter| {
@@ -3302,7 +3306,7 @@ fn route_handler_contract(
     if matches!(
         method,
         jet_foundation::MIR::MirHttpMethod::Get | jet_foundation::MIR::MirHttpMethod::Head
-    ) {
+    ) || dynamic {
         for (name, ty) in &handler_param_names {
             if path_names.contains(name)
                 || matches!(ty, Type::Named(request) if request == "HTTPRequest")
@@ -3318,7 +3322,7 @@ fn route_handler_contract(
                 schema: route_schema_type(ty, cx, &mut active)?,
             });
         }
-    } else if handler_param_names.iter().any(|(name, ty)| {
+    } else if !dynamic && handler_param_names.iter().any(|(name, ty)| {
         !path_names.contains(name)
             && !matches!(ty, Type::Named(request) if request == "HTTPRequest")
     }) {

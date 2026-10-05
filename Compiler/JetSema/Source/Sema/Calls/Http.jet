@@ -921,8 +921,26 @@ fn sema_call_http_sync(record: CoreCallRecord, args: [CallArg], type_args: [Type
     SemaDirectSpecialCheck{handled: true, value: Val(value)}
 }
 
+fn sema_call_http_openapi(record: CoreCallRecord, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+    if args.len() != 1 {
+        &diagnostics.push(sema_call_arity_diagnostic("openapi", 1, args.len(), false, span))
+        return SemaDirectSpecialCheck{handled: true, value: None}
+    }
+    routes :: sema_check_expression(args[0].expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    generic := false
+    if routes.ty == .Named(name) -> loop parameter in context.generic_params { if parameter.name == name -> generic = true }
+    name :: sema_call_http_nominal_leaf(routes.ty)
+    if !generic && name != "HTTPRouter" && name != "HTTPMux" {
+        &diagnostics.push(sema_error("E0112", args[0].span, "web.openapi needs an HTTPRouter or HTTPMux, not `{type_name(routes.ty)}`", "OpenAPI reads the checked route facts of the value the program serves", "pass your router or mux to web.openapi"))
+        return SemaDirectSpecialCheck{handled: true, value: None}
+    }
+    value :: sema_call_core_tir(record, [TExpr]{routes}, span, [Type]{}, [Bool]{false}, None, Type.String, TFailureCarrier.Infallible, expected, environment, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    SemaDirectSpecialCheck{handled: true, value: Val(value)}
+}
+
 pub fn sema_call_try_http_core_call(record: CoreCallRecord, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck Never! {
     if (record.module_name == "app" || record.module_name == "core.web") && record.member == "sync" -> return sema_call_http_sync(record, args, type_args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     if record.module_name == "core.web" && record.member == "form" -> return sema_call_http_web_form(record, args, type_args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    if record.module_name == "core.web" && record.member == "openapi" -> return sema_call_http_openapi(record, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     SemaDirectSpecialCheck{handled: false, value: None}
 }

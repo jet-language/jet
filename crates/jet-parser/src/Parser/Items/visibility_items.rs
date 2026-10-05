@@ -5,7 +5,7 @@ const VISIBILITY_ITEM_FORMS: &str =
 
 impl<'a> Parser<'a> {
     /// D-VISDEFAULT2=A: parse one top-level item after a visibility qualifier.
-    pub(super) fn item_after_visibility(
+    pub(in crate::Parser) fn item_after_visibility(
         &mut self,
         is_pub: bool,
         is_package_pub: bool,
@@ -56,6 +56,12 @@ impl<'a> Parser<'a> {
             TokKind::Ident(ref n) if n.as_str() == Syntax::KW_ALIAS => self
                 .type_alias_def(is_pub, is_package_pub)
                 .map(Item::TypeAlias),
+            TokKind::Ident(ref n) if n.as_str() == Syntax::KW_MARKER && self.at_marker_decl() => {
+                let mut declaration = self.marker_decl()?;
+                declaration.is_pub = is_pub;
+                declaration.is_package_pub = is_package_pub;
+                Ok(Item::MarkerDecl(declaration))
+            }
             TokKind::Ident(_) if self.at_distinct_def() => self
                 .distinct_def(is_pub, is_package_pub)
                 .map(Item::Distinct),
@@ -67,7 +73,7 @@ impl<'a> Parser<'a> {
                     constant.is_package_pub = is_package_pub;
                     Item::Const(constant)
                 }),
-            TokKind::Hash if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::MARKER_UNIT_FAMILY) => {
+            TokKind::Hash if self.unqualified_marker_name_at(self.pos) == Some(Syntax::MARKER_UNIT_FAMILY) => {
                 self.unit_family_def(is_pub, is_package_pub)
                     .map(Item::UnitFamily)
             }

@@ -711,6 +711,9 @@ pub struct LoadedModule {
     /// Stable path string for diagnostics/codegen (e.g. `Examples/features/21_imports/main.jet`).
     pub display: String,
     pub source: String,
+    /// Parser input when the loader masked an inline package carrier. Byte
+    /// offsets still refer to `source`; semantic parser replay uses this text.
+    pub frontend_source: Option<String>,
     /// Namespace when this file is imported (`import … as alias`).
     pub alias: String,
     pub imports: Vec<ImportDecl>,

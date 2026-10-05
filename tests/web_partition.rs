@@ -188,6 +188,7 @@ fn dom_fn() {
             path: std::path::PathBuf::from("t.jet"),
             display: "t.jet".to_string(),
             source: src.to_string(),
+            frontend_source: None,
             alias: "main".to_string(),
             imports: std::mem::take(&mut prog.imports),
             items: std::mem::take(&mut prog.items),

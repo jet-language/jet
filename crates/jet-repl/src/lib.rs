@@ -2242,6 +2242,7 @@ fn program_bundle(src: &str, mut prog: crate::AST::Program) -> crate::AST::Progr
             path,
             display: "<repl>".to_string(),
             source: src.to_string(),
+            frontend_source: None,
             alias: "main".to_string(),
             imports: std::mem::take(&mut prog.imports),
             items: std::mem::take(&mut prog.items),
