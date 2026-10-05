@@ -227,6 +227,16 @@ struct LowerFunction {
 // Lowers the functions `entry` reaches (Mono.jet: generic functions and
 // methods of generic types once per concrete instance) plus their glue.
 pub fn lir_lower_entry(program: MIRProgram, entry: MIRFunctionID) -> LIRLowering Never! {
+    lower_selected(program, entry, true)
+}
+
+// A compiler call retains its return carrier; program entry normalization
+// would consume Option/Result success and turn failure into a process exit.
+pub fn lir_lower_callable(program: MIRProgram, entry: MIRFunctionID) -> LIRLowering Never! {
+    lower_selected(program, entry, false)
+}
+
+fn lower_selected(program: MIRProgram, entry: MIRFunctionID, wrap_entry: Bool) -> LIRLowering Never! {
     prepared :: lower_prepare_entry(program, entry)
     if prepared.issues.len() > 0 {
         return LIRLowering{lir: LIRModule{signatures: [LIRSignature]{}, functions: [LIRFunction]{}, data: [LIRData]{}}, issues: ~prepared.issues, entry: None}
@@ -266,11 +276,14 @@ pub fn lir_lower_entry(program: MIRProgram, entry: MIRFunctionID) -> LIRLowering
         function :: if descriptor.instance_row >= 0 -> lower_function(program, &m, prepared.instances[descriptor.instance_row], id, signature) else -> lower_function(program, &m, program.functions[descriptor.source_row], id, signature)
         &functions.push(function)
     }
-    // The function the executable starts (Entry.jet): the program's entry,
-    // or a generated one around it.
+    // Program entries normalize failure carriers. Compiler calls retain the
+    // checked signature, including any hidden output pointers.
     lowered_entry := LIRFunctionID?{None}
     if prepared.entry == .Val(id) {
-        if m.mir_rows.get(id.value) == .Val(row) -> lowered_entry = Val(lower_entry_id(program, &m, row))
+        if m.mir_rows.get(id.value) == .Val(row) {
+            lowered_entry = Val(if wrap_entry -> lower_entry_id(program, &m, row) else -> LIRFunctionID{value: row})
+            if !wrap_entry && m.static_fixups.len() > 0 -> lowered_entry = Val(lower_closure_helper_id(&m, "callable.init", row, lower_row_source(program, m, row)))
+        }
     }
     // Glue and helpers may register more, so the list grows while it is walked.
     cursor := 0
@@ -2783,6 +2796,7 @@ fn lower_helper_start(m: &LowerModule, glue: LowerGlue, params: [LIRLayout], res
 fn lower_helper_function(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
     if glue.helper == "closure.thunk" -> return lower_closure_thunk(&m, glue)
     if glue.helper == "entry" -> return lower_entry_function(p, &m, glue)
+    if glue.helper == "callable.init" -> return lower_callable_init(&m, glue)
     if glue.helper == "entry.err" -> return lower_entry_err_function(p, &m, glue)
     if glue.helper == "closure.release" -> return lower_closure_release(p, &m, glue)
     if glue.helper == "iter.release" -> return lower_helper_iter_typed(p, &m, glue, false)
