@@ -173,9 +173,11 @@ impl<K: PartialEq + Clone, V: Clone> JetMemo<K, V> {
 /// Return process-local statistics for a named top-level memo.
 ///
 /// AOT memo call sites and the resident JIT use the same named store contract;
-/// a store is created lazily when a statistics projection is reached.
-pub fn jet_memo_stats(name: String, bound: i64) -> JetMemoStats {
-    let bound = usize::try_from(bound).ok();
+/// a store is created lazily when a statistics projection is reached. `bound`
+/// is the owned Int the call site carries: a negative bound, or one past the
+/// machine word, leaves the lazily created store unbounded.
+pub fn jet_memo_stats(name: String, bound: jet_foundation::Numeric::JetInt) -> JetMemoStats {
+    let bound = bound.to_i64().and_then(|bound| usize::try_from(bound).ok());
     JET_MEMO_STATS
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())

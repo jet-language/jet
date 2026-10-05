@@ -26521,6 +26521,12 @@ impl<'a> RustEmitter<'a> {
         };
         let shutdown_report_field = symbol.rsplit("::").next().unwrap_or(symbol.as_str())
             == "jet_http_shutdown_report_field";
+        let fixed_integer_format = matches!(
+            symbol.rsplit("::").next(),
+            Some("jet_fmt_decimal_int" | "jet_fmt_grouped_int")
+        ) && args.first().is_some_and(|arg| {
+            matches!(self.value_type(function, arg.value).kind(), MirTypeKind::IntN { .. })
+        });
         let args = args
             .iter()
             .enumerate()
@@ -26530,7 +26536,15 @@ impl<'a> RustEmitter<'a> {
                     .copied()
                     .unwrap_or(false)
                     || forced_borrows.is_some_and(|positions| positions.contains(&index));
-                if shutdown_report_field && index == 1 {
+                if fixed_integer_format && index == 0 {
+                    let value = self.call_arg_for_function(function, arg, true);
+                    format!("&({value}).to_string()")
+                } else if fixed_integer_format && index == 1
+                    && matches!(self.value_type(function, arg.value).kind(), MirTypeKind::Int)
+                {
+                    let value = self.call_arg_for_function(function, arg, false);
+                    self.native_int_argument(value, None)
+                } else if shutdown_report_field && index == 1 {
                     let value = self.call_arg_for_function_with_literal(
                         function,
                         arg,
@@ -28399,6 +28413,14 @@ impl<'a> RustEmitter<'a> {
                     result,
                 );
                 let emitted = self.canonical_builtin_optional_result(*call, emitted);
+                // Generic constructors produce the checked element carrier.
+                // Let the destination pin T instead of mapping an unconstrained
+                // native-result trait over a newly allocated empty collection.
+                if matches!(self.prelude_row(*call).symbol.name(),
+                    "jet_list_try_new" | "jet_list_try_with_capacity")
+                {
+                    return emitted;
+                }
                 result
                     .and_then(|value| {
                         self.native_int_result(&emitted, self.value_type(function, value))
@@ -29728,6 +29750,18 @@ impl<'a> RustEmitter<'a> {
                 self.borrowed_value_reference(function, receiver_value, MirAccess::Read),
                 self.borrowed_value_reference(function, *radix, MirAccess::Read),
             );
+        }
+        if matches!(row.symbol.name(), "jet_list_sort" | "jet_list_sort_desc") {
+            let suffix = self.value_type(function, receiver_value).list_element().and_then(|element| {
+                match element.kind() {
+                    MirTypeKind::Float => Some("float"),
+                    MirTypeKind::Float32 => Some("float32"),
+                    _ => None,
+                }
+            });
+            if let Some(suffix) = suffix {
+                return format!("{}{}_{}({receiver})", self.config.root_prefix, row.symbol.name(), suffix);
+            }
         }
         let mut values = vec![receiver];
         values.extend(args.iter().enumerate().map(|(index, value_id)| {

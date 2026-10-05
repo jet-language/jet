@@ -1167,6 +1167,14 @@ fn jet_rust_emit_prelude_call(ctx: &JetRustEmitContext, function: MIRFunction, i
     exact :: jet_rust_emit_exact_adapter(&ctx, function, symbol, args)
     mask := route.signature.borrow_mask
     mask = jet_rust_emit_exact_adapter_mask(args, symbol, mask, exact)
+    if args.len() == 2 && (jet_rust_emit_adapter_symbol_is(symbol, ctx.config.root_prefix, "jet_fmt_decimal_int") || jet_rust_emit_adapter_symbol_is(symbol, ctx.config.root_prefix, "jet_fmt_grouped_int")) && jet_rust_emit_format_integer_kind(jet_rust_emit_value_type(ctx, function, args[0].value)) == 2 {
+        // Fixed-width words cross the decimal kernel as their exact text,
+        // not a borrowed primitive or a lossy floating-point conversion.
+        value :: jet_rust_emit_call_arg_with_borrow(&ctx, function, args[0], true)
+        precision := jet_rust_emit_call_arg_with_borrow(&ctx, function, args[1], false)
+        if jet_rust_emit_value_type(ctx, function, args[1].value).kind == .Int -> precision = jet_rust_emit_native_int_argument(&ctx, precision, None)
+        return "{symbol}(&({value}).to_string(), {precision})"
+    }
     // MIRRust prelude_host_call: the Shared callback kernels (`jet_shared_read<F: FnOnce(&T) -> R>`, `jet_shared_edit<F: FnOnce(&mut T) -> R>`,
     // their `_txn` forms and the capture projections) call a host closure, not the Rc callable carrier.
     shared_symbols :: [String]{"jet_shared_read", "jet_shared_edit", "jet_shared_read_txn", "jet_shared_edit_txn", "jet_shared_capture_with", "jet_shared_capture_txn"}
@@ -4701,6 +4709,14 @@ fn jet_rust_emit_builtin_method_values(ctx: &JetRustEmitContext, function: MIRFu
         &rendered.push(jet_rust_emit_value_consume(ctx, function, receiver))
     }
     if view_new -> return jet_rust_emit_view_new(&ctx, function, call, row, rendered[0], args)
+    if mir_symbol_name(row.symbol) == "jet_list_sort" || mir_symbol_name(row.symbol) == "jet_list_sort_desc" {
+        suffix := ""
+        if jet_rust_emit_value_type(ctx, function, receiver).kind == .List(element) {
+            if element.kind == .Float -> suffix = "float"
+            if element.kind == .Float32 -> suffix = "float32"
+        }
+        if suffix != "" -> return "{ctx.config.root_prefix}{mir_symbol_name(row.symbol)}_{suffix}({rendered[0]})"
+    }
     routed := ""
     list_min_max :: row.module_name == "core.list" && row.member == "min_max"
     if row.abi == MIRPreludeABI.Aggregate && (list_min_max || (row.module_name == "core.map" && row.member == "to_list")) {
@@ -4747,6 +4763,9 @@ fn jet_rust_emit_builtin_method_values(ctx: &JetRustEmitContext, function: MIRFu
         routed = "{exact_symbol}({rendered.join(", ")})"
     }
     emitted :: jet_rust_emit_builtin_optional_result(&ctx, row, ^routed)
+    // Generic constructors already produce the checked element carrier;
+    // the destination type pins it without a native-result collection map.
+    if mir_symbol_name(row.symbol) == "jet_list_try_new" || mir_symbol_name(row.symbol) == "jet_list_try_with_capacity" -> return emitted
     if result == .Val(value) {
         result_ty :: jet_rust_emit_value_type(ctx, function, value)
         if jet_rust_emit_native_int_result(&ctx, emitted, result_ty) == .Val(converted) -> return converted

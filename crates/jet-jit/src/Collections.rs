@@ -67,6 +67,7 @@ pub(crate) mod collection_semantics {
     use crate::fault_injection::jet_fault_should_fail_allocation;
     use crate::Encoding::json_rt::jet_int_to_string;
     use jet_foundation::Numeric::JetInt;
+    use super::float_ordering::jet_float_sort_cmp;
     pub use jet_foundation::Outcome::*;
 
     use jet_foundation::StructuralDebug::jet_debug_map;
@@ -242,6 +243,12 @@ pub(crate) mod collection_semantics {
     pub(super) fn list_sort_desc<T: Ord>(xs: &mut Vec<T>) {
         jet_list_sort_desc(xs);
     }
+    pub(super) fn list_sort_float(xs: &mut [f64]) {
+        jet_list_sort_float(xs);
+    }
+    pub(super) fn list_sort_desc_float(xs: &mut [f64]) {
+        jet_list_sort_desc_float(xs);
+    }
 
     pub(super) fn list_sort_by<T, K: Ord, F>(xs: &mut Vec<T>, f: F)
     where
@@ -260,7 +267,7 @@ pub(crate) mod collection_semantics {
     where
         F: FnMut(&i64) -> i64,
     {
-        jet_iter_is_sorted_by(jet_iter_from_vec(xs), f)
+        jet_iter_is_sorted_by(xs, f)
     }
     pub(super) fn iter_dedup_by_i64<F>(xs: Vec<i64>, f: F) -> Vec<i64>
     where
@@ -514,7 +521,7 @@ pub(crate) mod collection_semantics {
 
 
     pub(super) fn try_list_new<T>() -> JetOutcome<Vec<T>, AllocError> {
-        jet_list_try_new()
+        jet_list_try_new(())
     }
 
     pub(super) fn try_list_with_capacity<T>(
@@ -536,7 +543,7 @@ pub(crate) mod collection_semantics {
         values: &mut Vec<T>,
         additional: i64,
     ) -> JetOutcome<(), AllocError> {
-        jet_list_try_reserve(values, additional)
+        jet_list_try_reserve_native(values, additional)
     }
 
     pub(super) fn try_map_insert_i64(
@@ -811,8 +818,8 @@ pub(crate) mod collection_semantics {
         jet_iter_average_float(jet_iter_from_vec(xs))
     }
 
-    pub(super) fn iter_compare<T: 'static + Ord>(xs: Vec<T>, other: Vec<T>) -> i64 {
-        jet_iter_compare(jet_iter_from_vec(xs), other)
+    pub(super) fn iter_compare<T: Ord>(xs: Vec<T>, other: Vec<T>) -> i64 {
+        jet_iter_compare(xs, other)
     }
 
     pub(super) fn iter_split_i64(xs: Vec<i64>, n: i64) -> (Vec<i64>, Vec<i64>) {
@@ -1026,7 +1033,7 @@ pub(crate) mod collection_semantics {
         values: &mut std::collections::VecDeque<T>,
         index: i64,
     ) -> std::collections::VecDeque<T> {
-        jet_deque_split(values, index)
+        jet_deque_split_native(values, index)
     }
 
     pub(super) fn priority_queue_pop<T: Ord>(
@@ -4743,7 +4750,7 @@ fn jet_jit_list_order_f64(a: i64, b: i64) -> i8 {
 
 fn jet_jit_list_sort_f64(list: i64) {
     let mut values = clone_list_floats(list);
-    values.sort_by(|left, right| float_ordering::jet_float_sort_cmp(*left, *right));
+    collection_semantics::list_sort_float(&mut values);
     // A range window view writes back into its owner at the window offset.
     Concurrency::with_runtime_mut(|rt| {
         for (index, value) in values.into_iter().enumerate() {
@@ -4755,7 +4762,7 @@ fn jet_jit_list_sort_f64(list: i64) {
 
 fn jet_jit_list_sort_f64_desc(list: i64) {
     let mut values = clone_list_floats(list);
-    values.sort_by(|left, right| float_ordering::jet_float_sort_cmp(*right, *left));
+    collection_semantics::list_sort_desc_float(&mut values);
     Concurrency::with_runtime_mut(|rt| {
         for (index, value) in values.into_iter().enumerate() {
             crate::runtime_host::sequence_set_float(rt, list, index, value)
