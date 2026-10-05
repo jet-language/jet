@@ -219,13 +219,13 @@ fn progress_percent(count: Int, total: Int) -> String Never! {
         if remainder >= gap {
             remainder = remainder - gap
             quotient = quotient + U64{1}
-        } else -> remainder = remainder + remainder
+        } else { remainder = remainder + remainder }
         if ((100 >> bit) & 1) != 0 {
             gap :: d - n
             if remainder >= gap {
                 remainder = remainder - gap
                 quotient = quotient + U64{1}
-            } else -> remainder = remainder + n
+            } else { remainder = remainder + n }
         }
         bit -= 1
     }
@@ -255,7 +255,7 @@ pub struct JetOutputProgressTask {
                 self.count = total
                 self.state = .Complete
             } else if self.state == .Complete -> self.count = total
-        } else -> self.count = count
+        } else { self.count = count }
     }
     pub fn complete(&self) Never! {
         self.state = .Complete
@@ -695,7 +695,7 @@ pub fn jet_output_strip_ansi(text: String) -> String Never! {
             else if cp == 27 -> state = 4
         } else if state == 4 {
             state = if cp == 92 -> 0 else -> 3
-        } else -> state = 0
+        } else { state = 0 }
         at = end
     }
     finish(^out)
@@ -756,7 +756,7 @@ fn escape_into(out: &[U8], text: String) Never! {
                 &out.push(U8{if digit < 10 -> 48 + digit else -> 87 + digit})
                 shift -= 4
             }
-        } else -> append_span(&out, raw, at, end)
+        } else { append_span(&out, raw, at, end) }
         at = end
     }
 }
