@@ -294,3 +294,24 @@ test('identical committed worktree heads reuse one diff per invocation', t => {
   const digest = collectDigest({ root: f.root, subject: 'memory' });
   assert.equal(digest.consistent, true); assert.equal(committedDiffs.length, 1);
 });
+
+test('--root resolves a vendored board outside the tools own checkout, including linked checkout redirection', t => {
+  const f = fixture(t);
+  f.file('Tools/tower/.tower/tower.json', JSON.stringify(f.state));
+  rmSync(join(f.root, '.tower/tower.json'));
+  f.git('add', '.tower/tower.json', 'Tools/tower/.tower/tower.json');
+  f.git('commit', '-m', 'fixture vendored board');
+  const digest = collectDigest({ root: f.root, subject: 'memory model' });
+  assert.equal(digest.providers.tower.status, 'available');
+  assert.equal(digest.providers.tower.detail.path, 'Tools/tower/.tower/tower.json');
+  assert.equal(digest.providers.tower.detail.revision, 7);
+  const linked = join(f.root, '.agent-worktrees/linked');
+  f.git('worktree', 'add', '-b', 'fixture-linked', linked, 'master');
+  f.file('Tools/tower/.tower/tower.json', JSON.stringify({ ...f.state, meta: { ...f.state.meta, rev: 10 } }));
+  const linkedDigest = collectDigest({ root: linked, subject: 'memory model' });
+  assert.equal(linkedDigest.providers.tower.detail.revision, 10);
+  rmSync(join(f.root, 'Tools/tower/.tower/tower.json'));
+  const missing = collectDigest({ root: linked, subject: 'memory model' });
+  assert.equal(missing.providers.tower.status, 'unknown');
+  assert.deepEqual(missing.cards, []);
+});

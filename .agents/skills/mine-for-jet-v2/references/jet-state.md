@@ -15,7 +15,9 @@ the labeled broader term and exact-link leads remain in JSON. This is retrieval
 ordering, not recommendation value ranking or a semantic-equivalence verdict.
 
 The tool reads the canonical live main-worktree board via Tower's existing path
-resolver, never a stale tracked linked-board fallback. It reuses Tower's
+resolver, starting from `--root` and its vendored `Tools/tower` CLI home rather
+than assuming the tool module and selected checkout share a root. It never uses
+a stale tracked linked-board fallback. It reuses Tower's
 normalization/lane rules in memory, not openStore (which may repair on read).
 Pending pair transactions are unavailable/inconsistent; the tool never repairs.
 One board/history read and one indexed record projection per invocation, with

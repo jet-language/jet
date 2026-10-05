@@ -292,7 +292,10 @@ export function collectDigest({ root = ROOT, subject, devRef = 'dev', baseRef = 
   try { gitData = collectGit(root, devRef, baseRef, match); providers.git = provider('available'); }
   catch (error) { providers.git = provider('unknown', errorText(error)); }
   try {
-    const found = findDataDir(root); const dir = found && canonicalDataDir(found);
+    // findDataDir's vendored fallback is relative to its module checkout, not
+    // --root. Search the selected checkout's CLI home through the same resolver.
+    const found = findDataDir(root) ?? findDataDir(resolve(root, 'Tools/tower'));
+    const dir = found && canonicalDataDir(found);
     if (!dir) throw new Error('live canonical Tower board unavailable; no worktree-board fallback');
     boardDir = dir;
     boardPath = resolve(dir, basename(dataFile(found)));
