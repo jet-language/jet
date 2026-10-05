@@ -248,7 +248,7 @@ fn the_compiler_boundary_never_nests_a_second_worker() {
         (
             std::thread::current().id(),
             jet::run_compiler_work(|| std::thread::current().id()),
-            jet_jit::on_compiler_stack(|| std::thread::current().id()),
+            jet_evalhost::on_compiler_stack(|| std::thread::current().id()),
         )
     });
     assert_eq!(
@@ -260,7 +260,7 @@ fn the_compiler_boundary_never_nests_a_second_worker() {
         "a JIT entry inside a driver entry must reuse the active worker"
     );
 
-    let (worker, driver_inside_jit) = jet_jit::on_compiler_stack(|| {
+    let (worker, driver_inside_jit) = jet_evalhost::on_compiler_stack(|| {
         (
             std::thread::current().id(),
             jet::run_compiler_work(|| std::thread::current().id()),

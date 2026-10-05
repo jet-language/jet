@@ -183,10 +183,10 @@ pub fn run_interpreter_named_job(
         lower_interpreter_bundle(bundle).expect("checked bundle must lower to interpreter MIR");
     let args = vec![
         file.to_owned(),
-        jet_jit::Job::JET_JOB_PRIVATE_DISPATCH_FLAG.to_owned(),
+        jet_evalhost::Job::JET_JOB_PRIVATE_DISPATCH_FLAG.to_owned(),
         name.to_owned(),
     ];
-    jet_jit::with_program_args(&args, || {
+    jet_evalhost::with_program_args(&args, || {
         jet::Interpreter::dev_run_snapshot(
             &program,
             artifact,

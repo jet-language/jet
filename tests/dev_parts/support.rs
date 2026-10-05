@@ -143,7 +143,7 @@ where
     F: FnOnce() -> T + Send,
     T: Send,
 {
-    jet_jit::on_compiler_stack(f)
+    jet_evalhost::on_compiler_stack(f)
 }
 
 /// c77: the differential battery covers EVERY `Examples/features/*.jet`, not a
@@ -1900,7 +1900,7 @@ fn assert_tier_parity(file: &str, stem: &str) {
         use jet::JitBackend::{InterpreterBackend, JitBackend as _};
         let mut backend =
             InterpreterBackend::new(jet::Interpreter::InterpreterInvocation::DevInterpret);
-        match jet_jit::with_program_args(&program_args, || {
+        match jet_evalhost::with_program_args(&program_args, || {
             common::run_interpreter_bundle(
                 &mut backend,
                 &bundle,

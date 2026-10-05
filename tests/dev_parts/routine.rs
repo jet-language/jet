@@ -6083,10 +6083,10 @@ fn schedule_every_dev_loop_consumer() {
 /// window after a process-local restart.
 #[test]
 fn schedule_clock_records_window_and_missed_tick_behavior() {
-    let mut clock = jet_jit::Job::JetJobClock::new();
+    let mut clock = jet_evalhost::Job::JetJobClock::new();
     let interval = [(
         "interval",
-        jet_jit::Job::JetJobSchedule::Duration {
+        jet_evalhost::Job::JetJobSchedule::Duration {
             nanos: 5 * 60 * 1_000_000_000,
         },
     )];
@@ -6098,7 +6098,7 @@ fn schedule_clock_records_window_and_missed_tick_behavior() {
 
     let wall_clock = [(
         "cron",
-        jet_jit::Job::JetJobSchedule::WallClockTime { hour: 3, minute: 0 },
+        jet_evalhost::Job::JetJobSchedule::WallClockTime { hour: 3, minute: 0 },
     )];
     let missed_window = 3 * 3_600 + 61;
     assert!(

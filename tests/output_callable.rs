@@ -188,7 +188,7 @@ fn interpreter_runs_hot_swaps_and_reports_fallible_selected_entry() {
     // `run` then `hot_swap` is one dev session, and a session is scoped to its
     // thread (D-HOTSWAP1 / D-PERSIST1). Install the sized compiler stack once
     // around the whole session.
-    jet_jit::on_compiler_stack(interpreter_hot_swap_session);
+    jet_evalhost::on_compiler_stack(interpreter_hot_swap_session);
 }
 
 fn interpreter_hot_swap_session() {
