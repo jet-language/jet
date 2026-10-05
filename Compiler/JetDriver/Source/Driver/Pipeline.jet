@@ -2298,7 +2298,10 @@ fn jet_driver_comptime_flush(
         flushed.stop = Val(jet_driver_comptime_run_result(values, checked_functions, trace, false, false))
         return flushed
     }
-    machine := JetDriverComptimeMachine{program: ^built, session: None}
+    // One slot holds the machine between entries: a loop-carried local may
+    // not be moved inside the loop, so each entry pops it and pushes back the
+    // machine its result leaves.
+    machines := [JetDriverComptimeMachine]{JetDriverComptimeMachine{program: ^built, session: None}}
     evaluated_index := 0
     loop index in start..<batch.entries.len() {
         entry :: batch.entries[index]
@@ -2316,8 +2319,8 @@ fn jet_driver_comptime_flush(
             flushed.stop = Val(jet_driver_comptime_run_result(values, checked_functions, trace, false, false))
             return flushed
         }
+        machine := &machines.pop() ?? panic("a comptime flush lost its evaluator machine")
         eval_result := jet_driver_comptime_machine_eval(^machine, function_id, ^eval_config)
-        machine = JetDriverComptimeMachine{program: None, session: None}
         // Classify the evaluator's final, retired result: retirement still
         // records cleanup failures, internal problems and output.
         evaluated_value := TComptimeValue?{None}
@@ -2326,7 +2329,7 @@ fn jet_driver_comptime_flush(
         }
         // The retired session keeps the program for the next entry.
         _ := jet_eval_retire_in_place(&eval_result, comptime_request.span)
-        machine.session = ^eval_result.session
+        &machines.push(JetDriverComptimeMachine{program: None, session: ^eval_result.session})
         eval_result.session = None
         jet_driver_record_eval_result(&trace, eval_result)
         if eval_result.error != None || eval_result.internal_problem != None {
