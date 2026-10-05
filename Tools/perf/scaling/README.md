@@ -41,6 +41,9 @@ replaced job whose mtime must be retained. It writes three
 (`huge-fns`, `fan-in`, all domains at 125k/1M; serial, 20 s cap and 24G).
 The counter jobs share `scaling-gate.lock`; timing takes it exclusively.
 Each group has disjoint receipt/report paths, recorded in `queue-plan.json`.
+Jobs declare scheduler peaks of 18G (counter groups) and 25G (timing), and
+check a conservative 30 GiB of build-root disk headroom before compiling.
+Add active evidence/build roots to `disk-protect.txt` before admission.
 `report.mjs --plan PLAN.json --wait-proofq DONE_DIR --output FILE` waits for
 those jobs' completion events and merges their receipts. `--findings FILE`
 appends retained probe evidence. Missing/unfinished receipts and absent timing
