@@ -32,7 +32,7 @@ fn lower_route_carrier_of(p: MIRProgram, ty: MIRType) -> LowerRouteCarrier? {
         .FloatBits -> Val(LowerRouteCarrier.Float)
         .Handle(_, _) -> {
             if ty.kind == .Apply(name, args) {
-                if args.len() == 0 && lower_type_def(p, ty) == None {
+                if args.len() == 0 {
                     runtime :: lower_runtime_handle(name.name) ?? return None
                     return Val(LowerRouteCarrier.Handle{name: runtime.runtime})
                 }
@@ -45,6 +45,10 @@ fn lower_route_carrier_of(p: MIRProgram, ty: MIRType) -> LowerRouteCarrier? {
 
 fn lower_route_carrier_matches(p: MIRProgram, ty: MIRType, carrier: LowerRouteCarrier) -> Bool Never! {
     if carrier == .Tag(_, variants) -> return lower_route_tag_matches(p, ty, variants)
+    if carrier == .HandleMut(name) {
+        expected :: LowerRouteCarrier.Handle{name: name}
+        return lower_route_carrier_of(p, ty) == Val(expected)
+    }
     lower_route_carrier_of(p, ty) == .Val(carrier)
 }
 
@@ -66,7 +70,7 @@ fn lower_route_layout(carrier: LowerRouteCarrier) -> LIRLayout Never! {
     if carrier == {
         .Flag -> lir_layout_bool()
         .Float -> lir_layout_float()
-        .Text | .Handle(_) | .List(_) -> lir_layout_pointer()
+        .Text | .Handle(_) | .HandleMut(_) | .List(_) -> lir_layout_pointer()
         else -> lir_layout_word()
     }
 }
@@ -80,13 +84,23 @@ fn lower_route_drop(carrier: LowerRouteCarrier) -> LIRDrop Never! {
     }
 }
 
-// The values of call arguments a route adapter borrows; Write arguments
-// (which lend a place back) have no adapter carrier.
-fn lower_route_values(m: &LowerModule, f: &LowerFunction, args: [MIRCallArg], what: String) -> [MIRValueID]? {
+// Explicit MIR Write arguments must match an adapter lending the caller's
+// handle mutably. The pointer stays in the caller's place; no copy or write-back.
+fn lower_route_values(p: MIRProgram, m: &LowerModule, f: &LowerFunction, call: MIRPreludeCallID, args: [MIRCallArg], what: String) -> [MIRValueID]? {
+    row :: lower_prelude_row(p, call) ?? return None
+    route :: lower_runtime_route(lower_route_symbol(row)) ?? {
+        lower_fail(&m, &f, "{what} {row.module_name}.{row.member} has no runtime C-ABI route ({mir_symbol_name(row.symbol)})")
+        return None
+    }
+    if args.len() != route.params.len() {
+        lower_fail(&m, &f, "{what} {row.module_name}.{row.member} passes {args.len()} arguments; its runtime route takes {route.params.len()}")
+        return None
+    }
     values := [MIRValueID]{}
-    loop arg in args {
-        if arg.access == .Write {
-            lower_fail(&m, &f, "{what} Write arguments are not lowered at O0 yet")
+    loop (index, arg) in args {
+        mutable :: if route.params[index] == .HandleMut(_) -> true else -> false
+        if (arg.access == .Write) != mutable {
+            lower_fail(&m, &f, "{what} {row.module_name}.{row.member} argument {index} access does not match its runtime route")
             return None
         }
         &values.push(arg.value)
@@ -154,8 +168,7 @@ fn lower_route_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
             dst :: lower_result(p, c, &m, &f, instruction)
             if f.failed -> return
             list_payload :: if some == .List(_) -> true else -> false
-            out :: if list_payload -> lower_route_out_call(&m, &f, route.export, lowered, 2, true)
-                else -> lower_route_tagged_call(&m, &f, route.export, lowered, 1)
+            out :: if list_payload -> lower_route_out_call(&m, &f, route.export, lowered, 2, true) else -> lower_route_tagged_call(&m, &f, route.export, lowered, 1)
             zero :: lower_const(&f, 0)
             present :: lower_flag(&f)
             lower_emit(&f, LIRInst.Compare{dst: present, condition: LIRCondition.Ne, left: out.word, right: zero})
@@ -184,8 +197,7 @@ fn lower_route_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
             // Alternative success/error out pointers share the payload slot;
             // a List success has a separate second word for its length.
             list_payload :: if ok == .List(_) -> true else -> false
-            out :: if list_payload -> lower_route_out_call(&m, &f, route.export, lowered, 3, true)
-                else -> lower_route_tagged_call(&m, &f, route.export, lowered, if ok == .Unit -> 1 else -> 2)
+            out :: if list_payload -> lower_route_out_call(&m, &f, route.export, lowered, 3, true) else -> lower_route_tagged_call(&m, &f, route.export, lowered, if ok == .Unit -> 1 else -> 2)
             ok_ty :: if ty.kind == .Result(success, _) -> success else -> panic("checked Result route shape")
             err_ty :: if ty.kind == .Result(_, failure) -> failure else -> panic("checked Result route shape")
             box :: dst ?? lower_pointer(&f)
@@ -212,6 +224,29 @@ fn lower_route_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
                 lower_emit(&f, LIRInst.Store{base: box, offset: 8, value: payload})
             }
         }
+        .Tuple(items) -> {
+            ty :: result_ty ?? return lower_fail(&m, &f, "{what} {name} tuple result has no checked type")
+            if !lower_route_shape_matches(p, ty, route.result) -> return lower_fail(&m, &f, "{what} {name} result type {mir_type_display_name(ty)} does not match its runtime route")
+            dst :: lower_result(p, c, &m, &f, instruction)
+            if f.failed -> return
+            slot :: lower_pointer(&f)
+            lower_emit(&f, LIRInst.StackSlot{dst: slot, size: 8 * items.len(), align: 8})
+            zero :: lower_const(&f, 0)
+            call_args := [LIRValueID]{}
+            loop arg in lowered -> &call_args.push(arg)
+            loop index in 0..<items.len() {
+                lower_emit(&f, LIRInst.Store{base: slot, offset: 8 * index, value: zero})
+                &call_args.push(lower_address(&f, slot, 8 * index))
+            }
+            lower_call_runtime(&m, &f, route.export, call_args, None)
+            box :: dst ?? lower_pointer(&f)
+            lower_storage_into(p, &f, box, ty)
+            members :: lower_inline_members(p, ty)
+            loop (index, item) in items {
+                address :: lower_address(&f, slot, 8 * index)
+                lower_route_store_payload(p, &f, box, members[index].offset, members[index].ty, item, address)
+            }
+        }
     }
 }
 
@@ -225,6 +260,16 @@ fn lower_route_shape_matches(p: MIRProgram, ty: MIRType, result: LowerRouteResul
         }
         .Result(ok, err) -> if ty.kind == {
             .Result(ok_ty, err_ty) -> lower_route_carrier_matches(p, ok_ty, ok) && lower_route_carrier_matches(p, err_ty, err)
+            else -> false
+        }
+        .Tuple(items) -> if ty.kind == {
+            .Tuple(elems) -> {
+                if elems.len() != items.len() -> return false
+                loop (index, item) in items {
+                    if !lower_route_carrier_matches(p, elems[index].ty, item) -> return false
+                }
+                true
+            }
             else -> false
         }
     }

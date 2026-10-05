@@ -355,6 +355,11 @@ MIRRust. Each such type gets `jet_rt_handle_{drop,clone,display,show,debug,eq}_<
 adapters where the runtime type supports the operation. A `&mut T` kernel parameter
 takes the caller's handle as `HandleMut`, and the kernel mutates the value inside that
 box. A tuple result is written item by item through one out pointer per item.
+Explicit MIR Write arguments must match `HandleMut`; ordinary read and move arguments
+must not. Canonical Core identities override a source layout only when the generated-Rust
+name rules replace that exact identity; source-owned enums and records retain their
+native constructors and matches. Tuple adapters write zeroed word slots, and lowering
+copies each item into the tuple's naturally aligned native field offset.
 Linking: the runtime rlib plus a staticlib wrapper crate
 (`extern crate jet_runtime;`, `--crate-type staticlib`) gives
 `libjet_runtime_c.a`; link the object with it and `-lpthread -ldl -lm`.

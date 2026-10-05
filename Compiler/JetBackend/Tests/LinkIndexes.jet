@@ -16,14 +16,14 @@ fn run() {
     loop (k, index) in indexes {
         raw :: link_u16(c.bufs, 0, 24 * k + 6)
         expected_raw :: if index >= 0xff00 -> 0xffff else if index == LINK_ABS -> 0xfff1 else if index == LINK_COMMON -> 0xfff2 else -> index
-        require raw == expected_raw else "symbol {k}: raw section {raw}, expected {expected_raw}"
+        if raw != expected_raw -> panic("symbol {k}: raw section {raw}, expected {expected_raw}")
         extended :: link_u32(c.bufs, 0, xindex_at + 4 * k)
-        require extended == (if index >= 0xff00 -> index else -> 0) else "symbol {k}: wrong extended index"
+        if extended != (if index >= 0xff00 -> index else -> 0) -> panic("symbol {k}: wrong extended index")
         decoded :: link_sym_shndx(c, 0, k)
         expected :: if index == 0 -> LINK_UNDEF else if index < 0 -> index else -> 100 + index
-        require decoded == expected else "symbol {k}: decoded section {decoded}, expected {expected}"
+        if decoded != expected -> panic("symbol {k}: decoded section {decoded}, expected {expected}")
     }
     c.obj_shndx[0] = -1
-    require link_sym_shndx(c, 0, 3) == LINK_UNDEF else "missing extended table must not become a section"
+    if link_sym_shndx(c, 0, 3) != LINK_UNDEF -> panic("missing extended table must not become a section")
     print("link section indexes: pass")
 }

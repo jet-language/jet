@@ -179,7 +179,10 @@ fn lower_render_value(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty: MIR
 
 fn lower_render_handle_symbol(p: MIRProgram, ty: MIRType, mode: LowerRenderMode) -> String? {
     if ty.kind == .Apply(name, args) {
-        if args.len() > 0 || lower_type_def(p, ty) != None -> return None
+        if args.len() > 0 -> return None
+        if !name.name.starts_with("<corelib>/") {
+            if lower_type_def(p, ty) == .Val(_) -> return None
+        }
         runtime :: lower_runtime_handle(name.name) ?? return None
         if mode == .Show && runtime.show -> return Val("jet_rt_handle_show_{runtime.runtime}")
         if mode == .Display && runtime.display -> return Val("jet_rt_handle_display_{runtime.runtime}")

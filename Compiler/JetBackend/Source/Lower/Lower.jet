@@ -364,6 +364,14 @@ fn lower_repr(p: MIRProgram, ty: MIRType) -> LowerRepr Never! {
             if lower_is_iter_cursor(ty) -> return LowerRepr.Boxed{ty: ty}
             if lower_string_view(ty) -> return LowerRepr.Handle{drop: "jet_rt_string_drop", clone: "jet_rt_string_clone"}
             if lower_view_element(ty) == .Val(elem) -> return lower_list_repr(p, ty, elem)
+            // The canonical runtime name table excludes source-owned Core
+            // shapes. Only exact Core paths may override their MIR definition.
+            if args.len() == 0 && name.name.starts_with("<corelib>/") {
+                if lower_runtime_handle(name.name) == .Val(runtime) {
+                    clone :: if runtime.clone -> "jet_rt_handle_clone_{runtime.runtime}" else -> ""
+                    return LowerRepr.Handle{drop: "jet_rt_handle_drop_{runtime.runtime}", clone: clone}
+                }
+            }
             definition :: lower_type_def(p, ty) ?? {
                 // A Core type with no Jet definition is the runtime's own
                 // value behind an owned handle (RuntimeRoutes.jet).
@@ -1473,7 +1481,7 @@ fn lower_instruction(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
         .Semantic(semantic) -> lower_semantic(p, c, &m, &f, instruction, semantic)
         .CoreCall(_, route, args, type_args, _, _) -> {
             if type_args.len() > 0 -> return lower_fail(&m, &f, "generic CoreCall {lower_route_name(p, route)} is not lowered at O0 yet")
-            values :: lower_route_values(&m, &f, args, "CoreCall") ?? return
+            values :: lower_route_values(p, &m, &f, route, args, "CoreCall") ?? return
             lower_route_call(p, c, &m, &f, instruction, route, values, "CoreCall")
         }
         .LoopRangeInit(call, start, end, step, exclusive) -> {
@@ -2319,7 +2327,7 @@ fn lower_semantic(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunc
     if semantic == .StaticPreludeCall(call, args, owner_type_args, type_args) {
         if owner_type_args.len() > 0 || type_args.len() > 0 -> return lower_fail(&m, &f, "generic StaticPreludeCall {lower_route_name(p, call)} is not lowered at O0 yet")
         if lower_route_name(p, call) == "core.compare.eq" && args.len() == 2 -> return lower_core_equal(p, c, &m, &f, instruction, args[0].value, args[1].value)
-        values :: lower_route_values(&m, &f, args, "StaticPreludeCall") ?? return
+        values :: lower_route_values(p, &m, &f, call, args, "StaticPreludeCall") ?? return
         return lower_route_call(p, c, &m, &f, instruction, call, values, "StaticPreludeCall")
     }
     // MIRRust.rs semantic: both are a plain Prelude call with their values.

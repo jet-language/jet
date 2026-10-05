@@ -321,7 +321,8 @@ fn lower_slice_bounds(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lower
         }
         range :: lower_use(&m, &f, args[0]) ?? return None
         members :: lower_inline_members(p, range_ty)
-        loop name in [String]{"start", "end", "exclusive"} {
+        names :: [String]{"start", "end", "exclusive"}
+        loop name in names {
             found := -1
             loop (index, member) in members { if member.name == name -> found = index }
             if found < 0 {
@@ -357,7 +358,9 @@ fn lower_slice_bounds(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lower
             native :: lower_word(&f)
             lower_convert_exact(&m, &f, native, bound, "jet_int_owned_to_i64", false)
             &natives.push(native)
-        } else -> &natives.push(bound)
+        } else {
+            &natives.push(bound)
+        }
     }
     Val(LowerSliceBounds{start: natives[0], end: natives[1], exclusive: exclusive})
 }
@@ -385,8 +388,7 @@ fn lower_view_new(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunc
     ty :: lower_checked_type(c, instruction) ?? return lower_fail(&m, &f, "a view without a checked type is not lowered at O0 yet")
     if lower_view_element(ty) == None -> return lower_fail(&m, &f, "a view of type {mir_type_display_name(ty)} is not lowered at O0 yet")
     bounds :: lower_slice_bounds(p, c, &m, &f, args, false) ?? return
-    list :: if receiver_place != None -> lower_receiver_header(p, c, &m, &f, receiver_place, "View") ?? return
-        else -> lower_use(&m, &f, receiver) ?? return
+    list :: (if receiver_place != None -> lower_receiver_header(p, c, &m, &f, receiver_place, "View") else -> lower_use(&m, &f, receiver)) ?? return
     site :: MIRPanicLoc{file: c.mir.source_file, line: lower_source_line(p, &m, c.mir.source_file, c.mir.span.start), column: 0}
     dst :: lower_result(p, c, &m, &f, instruction) ?? return
     lower_storage_into(p, &f, dst, ty)
