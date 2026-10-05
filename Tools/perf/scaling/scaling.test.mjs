@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { SHAPES, corpus } from './corpora.mjs';
-import { floors, growth, judge, metricPhase, options, parseCounters, parseCompiler, resumeReceipt, run } from './harness.mjs';
+import { concurrent, floors, growth, judge, metricPhase, options, parseCounters, parseCompiler, resumeReceipt, run } from './harness.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { report } from './report.mjs';
+import { queuePlan } from './enqueue.mjs';
 
 test('every shape is deterministic and grows with N', () => {
   for (const [shape, entry] of Object.entries(SHAPES)) {
@@ -66,6 +67,58 @@ test('reports merge receipts and retain timeout phase attribution', () => {
     series: [{ shape: 'modules', layout: 'files', compiler, points: [], done: true, truncated: 'timed out',
       failures: [{ kind: 'timeout', phase: 'sema.bodies', text: 'timed out after 120 s in sema.bodies' }] }] });
   const text = report([{ file: 'a.json', receipt: receipt('a') }, { file: 'b.json', receipt: receipt('b') }]);
-  assert.ok(text.includes('modules | files | a | sema.bodies'));
-  assert.ok(text.includes('modules | files | b | sema.bodies'));
+  assert.ok(text.includes('modules | files | a | timing | sema.bodies'));
+  assert.ok(text.includes('modules | files | b | timing | sema.bodies'));
+});
+
+test('counter verdicts exclude contended wall/RSS metrics', () => {
+  const points = [100, 200, 400, 800].map(x => ({ x, ok: true,
+    metrics: { 'counter.sema.bodies.items_scanned': x, wall_seconds: x * x, peak_rss_kb: x * x * 1000 } }));
+  const timed = judge({ points });
+  assert.ok(timed.failures.some(failure => failure.metric === 'wall_seconds'));
+  const counted = judge({ points, mode: 'counters' });
+  assert.equal(counted.failures.length, 0);
+  assert.deepEqual(Object.keys(counted.metrics), ['counter.sema.bodies.items_scanned']);
+});
+
+test('counter rung concurrency is bounded and visits every input', async () => {
+  let active = 0;
+  let peak = 0;
+  const visited = [];
+  await concurrent([1, 2, 3, 4, 5], 2, async value => {
+    active += 1;
+    peak = Math.max(peak, active);
+    await new Promise(resolve => setImmediate(resolve));
+    visited.push(value);
+    active -= 1;
+  });
+  assert.equal(peak, 2);
+  assert.deepEqual(visited.sort(), [1, 2, 3, 4, 5]);
+});
+
+test('queue plan covers all ladders in three shareable groups and one timing sample', () => {
+  const plan = queuePlan(options(['--compiler', 'rust=jet:/compiler', '--work-dir', '/evidence']));
+  const counted = plan.filter(job => job.config.mode === 'counters');
+  assert.equal(counted.length, 3);
+  assert.deepEqual(counted.flatMap(job => job.config.shapes).sort(), Object.keys(SHAPES).sort());
+  assert.ok(counted.every(job => !job.name.startsWith('Perf') && job.shared && job.config.jobs === 2 && job.config.timeoutS === 25));
+  assert.equal(new Set(plan.map(job => job.config.workDir)).size, 4);
+  const timed = plan.filter(job => job.config.mode === 'timing');
+  assert.equal(timed.length, 1);
+  assert.equal(timed[0].name, 'PerfScalingGate-timing');
+  assert.equal(timed[0].shared, false);
+  assert.ok(timed[0].config.shapes.includes('fan-in'));
+  assert.deepEqual(timed[0].config.domainLadder, [125000, 1000000]);
+  assert.deepEqual(timed[0].config.shapes.filter(shape => SHAPES[shape].kind === 'domain').sort(),
+    Object.keys(SHAPES).filter(shape => SHAPES[shape].kind === 'domain').sort());
+});
+
+test('counter reports never present contended wall/RSS as timing evidence', () => {
+  const receipt = { mode: 'counters', startedAt: 'start', finishedAt: 'end', compilers: [{ label: 'rust', path: '/compiler' }], failures: [],
+    series: [{ shape: 'modules', layout: 'single', compiler: 'rust', mode: 'counters', done: true, failures: [],
+      points: [{ x: 1000, ok: true, metrics: { wall_seconds: 999996, peak_rss_kb: 999996 } }] }] };
+  const text = report([{ file: 'counter.json', receipt }]);
+  assert.ok(text.includes('modules | single | rust | counters | 1000 | - | -'));
+  assert.ok(text.includes('not in the timing sample'));
+  assert.ok(!text.includes('999996'));
 });

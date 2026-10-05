@@ -119,7 +119,8 @@ export function metricPhase(key) {
 export function judge(series, bounds = FAMILIES) {
   const points = series.points.filter(point => point.ok);
   const sizes = points.map(point => point.x);
-  const keys = new Set(points.flatMap(point => Object.keys(point.metrics)));
+  const keys = new Set(points.flatMap(point => Object.keys(point.metrics))
+    .filter(key => series.mode !== 'counters' || family(key) === 'counter'));
   const metrics = {};
   for (const key of [...keys].sort()) {
     const base = series.baseline?.ok ? (series.baseline.metrics[key] ?? 0) : 0;
@@ -304,7 +305,7 @@ export function resumeReceipt(config, limits, previous = null) {
     compilers: config.compilers, shapes: config.shapes, layouts: config.layouts,
     ladders: Object.fromEntries(config.shapes.map(shape => [shape, ladderFor(config, shape)])),
     seed: config.seed, memoryMax: config.memoryMax, timeoutS: config.timeoutS,
-    stopAfterS: config.stopAfterS, profileTop: config.profileTop, buildRoot: config.buildRoot, families: FAMILIES, floors: limits,
+    stopAfterS: config.stopAfterS, profileTop: config.profileTop, buildRoot: config.buildRoot, mode: config.mode, jobs: config.jobs, families: FAMILIES, floors: limits,
   });
   if (previous) {
     if (previous.invocation !== invocation) throw new Error('Receipt invocation differs; use a new --work-dir');
@@ -313,8 +314,19 @@ export function resumeReceipt(config, limits, previous = null) {
   return {
     schema: 'jet.scaling-gate/v3', invocation, startedAt: new Date().toISOString(), workDir: config.workDir, host: os.hostname(),
     compilers: config.compilers, families: FAMILIES, floors: limits, target: { lines: TARGET_LINES, seconds: TARGET_SECONDS },
-    memoryMax: config.memoryMax, timeoutS: config.timeoutS, stopAfterS: config.stopAfterS, buildRoot: config.buildRoot, series: [], failures: [],
+    memoryMax: config.memoryMax, timeoutS: config.timeoutS, stopAfterS: config.stopAfterS, buildRoot: config.buildRoot, mode: config.mode, jobs: config.jobs, series: [], failures: [],
   };
+}
+
+// Bounded parallelism for counter-only compiles. Wall-clock verdicts remain serial.
+export async function concurrent(values, jobs, visit) {
+  let position = 0;
+  await Promise.all(Array.from({ length: Math.min(jobs, values.length) }, async () => {
+    while (position < values.length) {
+      const value = values[position++];
+      await visit(value);
+    }
+  }));
 }
 
 export async function run(config) {
@@ -335,10 +347,23 @@ export async function run(config) {
       let series = receipt.series.find(s => s.shape === shape && s.compiler === compiler.label && s.layout === layout);
       if (series?.done) continue;
       if (!series) {
-        series = { shape, layout, compiler: compiler.label, kind: SHAPES[shape].kind, dimension: SHAPES[shape].dimension, ladder, baseline: null, points: [], truncated: null };
+        series = { shape, layout, compiler: compiler.label, mode: config.mode, kind: SHAPES[shape].kind, dimension: SHAPES[shape].dimension, ladder, baseline: null, points: [], truncated: null };
         receipt.series.push(series);
       }
       const where = n => path.join(config.workDir, compiler.label, `${shape}-${layout}`, String(n));
+      if (config.mode === 'counters') {
+        await concurrent([1, ...ladder], config.jobs, async n => {
+          if (n === 1 ? series.baseline : series.points.some(point => point.n === n)) return;
+          const point = await measure(config, compiler, corpus(shape, n, config.seed, layout), where(n));
+          if (n === 1) series.baseline = point;
+          else {
+            series.points.push(point);
+            series.points.sort((a, b) => ladder.indexOf(a.n) - ladder.indexOf(b.n));
+          }
+          save();
+          log(config, `${label} N=${n} ${summary(point)} (counter-only; time/RSS not gated)`);
+        });
+      } else {
       if (!series.baseline) {
         series.baseline = await measure(config, compiler, corpus(shape, 1, config.seed, layout), where(1));
         save();
@@ -362,12 +387,13 @@ export async function run(config) {
           break;
         }
       }
+      }
       const judged = judge(series);
       series.metrics = judged.metrics;
       series.failures = judged.failures;
       if (!series.baseline.ok) series.failures.push({ kind: 'compile', phase: series.baseline.timeout_phase, text: `baseline: ${series.baseline.problems.join('; ')}` });
       const ok = series.points.filter(point => point.ok);
-      if (ok.length) {
+      if (config.mode !== 'counters' && ok.length) {
         const checked = checkFloors(ok[ok.length - 1], limits);
         series.floors = checked.rows;
         series.failures.push(...checked.failures);
@@ -377,9 +403,15 @@ export async function run(config) {
         series.failures.push({ kind: failed?.timeout_phase ? 'timeout' : series.truncated.startsWith('stopped') ? 'truncated' : 'compile',
           phase: failed?.timeout_phase ?? null, text: series.truncated });
       }
-      if (SHAPES[shape].kind === 'domain') series.projection = project(series, judged);
+      if (config.mode === 'counters') {
+        for (const failed of series.points.filter(point => !point.ok)) {
+          series.failures.push({ kind: failed.timeout_phase ? 'timeout' : 'compile', phase: failed.timeout_phase,
+            text: `N=${failed.n}: ${failed.problems.join('; ')}` });
+        }
+      }
+      if (config.mode !== 'counters' && SHAPES[shape].kind === 'domain') series.projection = project(series, judged);
       save();
-      if (config.profileTop && series.failures.some(failure => failure.kind === 'growth') && ok.length && !series.profile) {
+      if (config.mode !== 'counters' && config.profileTop && series.failures.some(failure => failure.kind === 'growth') && ok.length && !series.profile) {
         series.profile = await profileTop(config, compiler, shape, layout, ok[ok.length - 1], series, save);
       }
       series.done = true;
@@ -431,13 +463,15 @@ const USAGE = `Usage: node harness.mjs --compiler LABEL=KIND:PATH [--compiler ..
   --layout files|single  repeatable; default both (a multi-file failure is a gate failure)
   --work-dir DIR  --receipt FILE  --seed S
   --build-root DIR       projects/stores/compiler outputs/perf.data (default /mnt/jetscratch/scaling-gate)
+  --mode timing|counters counter-only mode gates deterministic work, not time/RSS/floors
+  --jobs N              parallel counter-mode compiles (default 1); timing stays serial
 Receipts checkpoint every baseline, rung and profile compile; rerunning the same
 invocation resumes without retrying completed compiles, including timeouts.
 Exit 0 pass, 1 any growth/floor/compile failure, 2 invalid invocation.`;
 
 export function options(args) {
   const config = { compilers: [], shapes: [], bases: {}, ladders: {}, steps: 4, domainLadder: [...DOMAIN_LADDER], memoryMax: '20G', timeoutS: 1800,
-    stopAfterS: Infinity, jetCommand: 'build', seed: 1, profileTop: false, layouts: [], buildRoot: '/mnt/jetscratch/scaling-gate',
+    stopAfterS: Infinity, jetCommand: 'build', seed: 1, profileTop: false, layouts: [], buildRoot: '/mnt/jetscratch/scaling-gate', mode: 'timing', jobs: 1,
     workDir: path.join(os.homedir(), '.cache/jet-dev/scratch/scaling-gate', new Date().toISOString().replace(/[:.]/g, '-')) };
   for (let i = 0; i < args.length; i++) {
     const flag = args[i];
@@ -464,6 +498,8 @@ export function options(args) {
       case '--receipt': config.receipt = path.resolve(value); break;
       case '--layout': if (!LAYOUTS.includes(value)) throw new Error(`--layout is ${LAYOUTS.join(' or ')}`); config.layouts.push(value); break;
       case '--seed': config.seed = Number(value); break;
+      case '--mode': if (!['timing', 'counters'].includes(value)) throw new Error('--mode is timing or counters'); config.mode = value; break;
+      case '--jobs': config.jobs = Number(value); if (!Number.isSafeInteger(config.jobs) || config.jobs < 1) throw new Error('--jobs must be a positive integer'); break;
       default: throw new Error(`Unknown option: ${flag}`);
     }
   }
