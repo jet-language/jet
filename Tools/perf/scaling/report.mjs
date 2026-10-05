@@ -8,6 +8,7 @@
 // node report.mjs RECEIPT.json... > SCALING-REPORT.md
 
 import fs from 'node:fs';
+import { SHAPES } from './corpora.mjs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -73,11 +74,53 @@ export function readReceipts(args) {
   return [...new Set(files)].map(file => ({ file, receipt: JSON.parse(fs.readFileSync(file, 'utf8')) }));
 }
 
+// Wait on completion events, not a polling loop or a second measurement run.
+async function waitForJobs(doneDir) {
+  const jobs = Object.entries(SHAPES).map(([shape, entry]) => `PerfScalingGate-${entry.kind}-${shape}.rc`);
+  await new Promise((resolve, reject) => {
+    const watcher = fs.watch(doneDir, (_event, file) => {
+      if (file?.startsWith('PerfScalingGate-') && file.endsWith('.rc')) check();
+    });
+    watcher.on('error', error => { watcher.close(); reject(error); });
+    function check() {
+      if (jobs.every(job => fs.existsSync(path.join(doneDir, job)))) {
+        watcher.close();
+        resolve();
+      }
+    }
+    check();
+  });
+}
+
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const receipts = readReceipts(process.argv.slice(2));
+  const inputs = [];
+  let output = null;
+  let findings = null;
+  let doneDir = null;
+  for (let i = 2; i < process.argv.length; i++) {
+    const arg = process.argv[i];
+    if (arg === '--output') output = process.argv[++i];
+    else if (arg === '--findings') findings = process.argv[++i];
+    else if (arg === '--wait-proofq') doneDir = process.argv[++i];
+    else inputs.push(arg);
+  }
+  if (doneDir) await waitForJobs(doneDir);
+  const receipts = readReceipts(inputs);
   if (!receipts.length) {
-    console.error('Usage: node report.mjs RECEIPT.json... | --runs-dir DIR');
+    console.error('Usage: node report.mjs RECEIPT.json... | --runs-dir DIR [--output FILE] [--findings FILE] [--wait-proofq DONE_DIR]');
     process.exit(2);
   }
-  process.stdout.write(report(receipts));
+  let text = report(receipts);
+  if (doneDir) {
+    const missing = Object.keys(SHAPES).filter(shape => !receipts.some(({ receipt }) => receipt.finishedAt && receipt.series.some(series => series.shape === shape)));
+    if (missing.length) {
+      text += `\n## Missing or unfinished receipts\n\nThe proofq jobs ended without complete receipts for: ${missing.join(', ')}. These cells are not covered.\n`;
+      process.exitCode = 2;
+    }
+  }
+  if (findings) text += `\n${fs.readFileSync(findings, 'utf8')}`;
+  if (output) {
+    fs.writeFileSync(output, text);
+    console.log(`Report: ${output}; ${receipts.length} receipts, ${receipts.reduce((sum, { receipt }) => sum + receipt.series.length, 0)} series, ${receipts.reduce((sum, { receipt }) => sum + receipt.failures.length, 0)} gate failures`);
+  } else process.stdout.write(text);
 }

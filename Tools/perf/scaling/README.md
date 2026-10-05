@@ -31,6 +31,10 @@ To queue bounded jobs, run `enqueue.mjs` with the same options and
 `JET_SCALING_QUEUE_STAMP` naming the replaced job whose mtime must be retained.
 It writes one `PerfScalingGate-<kind>-<shape>.sh` per shape; all hold the same
 `scaling-gate.lock`, so only one scaling compile runs at a time.
+`report.mjs --runs-dir DIR --output FILE` merges the receipts without shell
+redirection. `--findings FILE` appends retained probe evidence, and
+`--wait-proofq DONE_DIR` waits for all shape jobs' completion events before
+rendering; absent or unfinished receipts are explicitly reported as uncovered.
 
 Shapes (`corpora.mjs`, `domains.mjs`, helpers in `package.mjs`): stress shapes
 grow one dimension with N (files, small functions, statements per function,
@@ -52,7 +56,7 @@ scope lookups, item/impl scans, whole-program copies, functions lowered and
 emitted, allocations), drained at every phase end by `jet_driver::Trace`.
 The Jet half counts module item scans, ordinary and return-view-summary body
 checks, method jobs and impl-row scans in sema; function rows in lowering;
-global-instruction scans, impls, top-level functions and output lines in emit.
+global-instruction scans, impls, top-level functions and item-output lines in emit.
 Counters are deltas per loop invocation, so repeated module passes sum rather
 than overwrite one another. They add no traversal or per-item sink calls.
 Series are baseline-subtracted (an N=1 rung), judged between the first and
