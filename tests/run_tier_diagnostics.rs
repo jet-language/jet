@@ -446,7 +446,12 @@ fn pattern_hole_reuse_reports_and_repairs_match_run_tiers() {
                     assert!(edit.new_text.starts_with('(') && edit.new_text.ends_with(')'));
                     let mut fixed = source.clone();
                     fixed.replace_range(edit.span.start..edit.span.end, &edit.new_text);
-                    jet::compile_with_path(&fixed, &path)
+                    // `compile_with_path` checks the file on disk, so the repair
+                    // must be written out to be the source that is compiled.
+                    let repaired = common::Scratch::new("pattern_hole_repair");
+                    let fixed_file = repaired.join(&format!("pattern_hole_reuse_{position}.jet"));
+                    fs::write(&fixed_file, &fixed).unwrap();
+                    jet::compile_with_path(&fixed, &fixed_file.to_string_lossy())
                         .unwrap_or_else(|diags| panic!("{position} comparison repair failed: {diags:?}"));
                 }
                 let report_path = jet::Diagnostics::ReportPath::from_path(&file);

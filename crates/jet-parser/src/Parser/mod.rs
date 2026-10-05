@@ -2424,7 +2424,7 @@ fn notify(ready: Bool) -[Net]> {
             "fn run() { f :: (n: Int) Never! -[]> n }\n",
             "fn run() { f :: (n: Int) -> Point MyError! { n } }\n",
             "fn run() { f :: (n: Int) -> Point !Error { n } }\n",
-            "fn run() { f :: (n: Int) -> Point { n + 1 } }\n",
+            "fn run() { f :: (n: Int) -> Point { total := n + 1\n total } }\n",
         ] {
             let (tokens, _) = lex(source);
             let diagnostics = parse(&tokens).expect_err("lambda annotations must teach");
@@ -2434,6 +2434,9 @@ fn notify(ready: Bool) -[Net]> {
         program("fn run() { f :: (x: Int) -> Point{x: x} }\n");
         program("fn run() { f :: x -[]> Point{x} }\n");
         program("fn run() { f :: (x: Int) -[]> Point{x: x} }\n");
+        // `Type{value}` is a one-value construction (`Meters{n + 1}`), so a
+        // braced value after the arrow is a body, never a return type.
+        program("fn run() { f :: (n: Int) -> Point { n + 1 } }\n");
     }
 
     #[test]

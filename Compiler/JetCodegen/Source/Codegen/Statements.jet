@@ -2831,6 +2831,21 @@ fn jet_codegen_pattern_scan_route(builder: &JetCodegenBuilder, binary: Bool, res
     jet_codegen_intern_route(&builder, MIRPreludeFamily.StaticPrelude, "core.pattern", member, symbol, 2, [Bool]{true, false}, None, jet_codegen_failure_carrier_for_type(result_type), MIRPreludeABI.Value)
 }
 
+// Rust tir_to_mir_expr pattern_scan_captures: an IsSome probe reads no
+// capture, so its carrier keeps the empty tuple. An Unwrap probe reads every
+// hole, so its carrier holds each hole at its checked type, named by
+// position: the canonical capture tuple each PatternCapture indexes. AOT can
+// only read a capture the carrier's type keeps.
+fn jet_codegen_pattern_scan_result_type(expression: TExpr, probe: TMatchProbe) -> Type Never! {
+    fields := [TypeTupleField]{}
+    if probe == TMatchProbe.Unwrap {
+        if expression.ty == .Tuple(checked) {
+            loop (index, field) in checked -> &fields.push(TypeTupleField{name: "{index}", ty: field.ty})
+        }
+    }
+    Type.Option{inner: Type.Tuple{fields: fields}}
+}
+
 fn jet_codegen_lower_string_match_scan(builder: &JetCodegenBuilder, expression: TExpr, subject: TExpr, parts: [StrMatchPart], probe: TMatchProbe) -> MIRValueID {
     subject_value := jet_codegen_lower_expr(&builder, subject)
     pattern := [MIRTextPatternPart]{}
@@ -2843,7 +2858,7 @@ fn jet_codegen_lower_string_match_scan(builder: &JetCodegenBuilder, expression: 
             }
         }
     }
-    result_type := Type.Option{inner: Type.Tuple{fields: [TypeTupleField]{}}}
+    result_type := jet_codegen_pattern_scan_result_type(expression, probe)
     call := jet_codegen_pattern_scan_route(&builder, false, result_type)
     matched := jet_codegen_emit_value(&builder, expression.span, result_type, MIROperation.Semantic{operation: MIRSemanticOp.TextPatternMatch{call: call, subject: subject_value, parts: pattern}})
     jet_codegen_lower_pattern_probe(&builder, expression, matched, probe)
@@ -2864,7 +2879,7 @@ fn jet_codegen_lower_binary_match_scan(builder: &JetCodegenBuilder, expression: 
             }
         }
     }
-    result_type := Type.Option{inner: Type.Tuple{fields: [TypeTupleField]{}}}
+    result_type := jet_codegen_pattern_scan_result_type(expression, probe)
     call := jet_codegen_pattern_scan_route(&builder, true, result_type)
     matched := jet_codegen_emit_value(&builder, expression.span, result_type, MIROperation.Semantic{operation: MIRSemanticOp.BinaryPatternMatch{call: call, subject: subject_value, parts: pattern}})
     jet_codegen_lower_pattern_probe(&builder, expression, matched, probe)

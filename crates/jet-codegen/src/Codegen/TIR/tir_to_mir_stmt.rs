@@ -2816,13 +2816,14 @@ fn lower_scope_member_body(
     let body_block_start = ctx.blocks.len();
     lower_stmts(ctx, body)?;
     emit_scope_exits_on_early_paths(ctx, scope, body_entry, body_block_start)?;
-    if ctx.is_terminated() {
-        ctx.exit_scope(scope)?;
-        return Ok(());
-    }
+    // The exit and join exist even when the body diverges (`panic(…)` in an
+    // `.expect_fail` region): a caught stop resumes at the exit, and the
+    // statements after the region run from the join.
     let exit = ctx.new_block(ctx.span(), "scope-member.exit")?;
     let join = ctx.new_block(ctx.span(), "scope-member.join")?;
-    ctx.terminate(MirTerminator::Jump { target: exit });
+    if !ctx.is_terminated() {
+        ctx.terminate(MirTerminator::Jump { target: exit });
+    }
     ctx.switch_to(exit);
     ctx.exit_scope(scope)?;
     if !ctx.is_terminated() {

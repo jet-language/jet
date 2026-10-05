@@ -30730,9 +30730,9 @@ fn pattern_match_carrier(
         )
     })?;
     match captures {
-        // TIR's scan emits the untyped `Option<()>` carrier and each
-        // `PatternCapture` reads one position at its own checked type, so
-        // that carrier keeps every capture in scan order.
+        // An `IsSome` scan keeps the untyped `Option<()>` carrier; it keeps
+        // every capture in scan order. An `Unwrap` scan's carrier names each
+        // capture by position at its checked type (the branch below).
         Some(captures) if tuple_fields.is_empty() => Ok(RuntimeValue::Data(MirEvalValue::Present(
             Box::new(MirEvalValue::Struct {
                 type_name: tuple_ty.display_name(),
