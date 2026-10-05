@@ -184,7 +184,7 @@ impl RegexCache {
         self.entries[bucket].insert(Arc.clone(&pattern), ^regex)
         self.order.push_back((bucket, ^pattern))
         if self.order.len() > REGEX_CACHE_LIMIT {
-            if self.order.pop_front() is Val((old_bucket, old_pattern)) {
+            if self.order.pop_front() == .Val((old_bucket, old_pattern)) {
                 self.entries[old_bucket].remove(old_pattern.as_ref())
             }
         }
@@ -369,7 +369,10 @@ impl JetRegex {
     pub fn count(self: &Self, text: &String) -> I64 {
         count := Usize{0}
         regex_scan(&self.program, &self.flags, self.groups, text, 0, false, false, false,
-            fn(_run) { count += 1; true })
+            fn(_run) {
+                count += 1
+                true
+            })
         count as I64
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:505
@@ -415,7 +418,10 @@ impl JetRegex {
         shared :: Arc.from(text)
         out := [JetRegexMatch]{}
         regex_scan(&self.program, &self.flags, self.groups, text, 0, false, false, false,
-            fn(run) { out.push(self.make_match(&shared, run.span)); true })
+            fn(run) {
+                out.push(self.make_match(&shared, run.span))
+                true
+            })
         out
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:588
@@ -443,11 +449,18 @@ impl JetRegex {
                 out.extend_from_slice(bytes.slice(pos, start))
                 found :: self.make_match_with_captures(&shared, run.span, ^run.caps)
                 match replace(^found) {
-                    Ok(value) -> { out.extend_from_slice(value.as_bytes()); pos = end; true }
-                    Err(value) -> { error = Val(^value); false }
+                    Ok(value) -> {
+                        out.extend_from_slice(value.as_bytes())
+                        pos = end
+                        true
+                    }
+                    Err(value) -> {
+                        error = Val(^value)
+                        false
+                    }
                 }
             })
-        if error is Val(value) -> return Err(^value)
+        if error == .Val(value) -> return Err(^value)
         out.extend_from_slice(bytes.slice(pos.min(bytes.len()), bytes.len()))
         Ok(String.from_bytes(^out).expect("regex replacement preserves UTF-8"))
     }
@@ -501,7 +514,7 @@ impl JetRegex {
     #Unsafe("initialize immutable capture cache before publishing shared match")
     fn make_match_with_captures(self: &Self, text: &Arc<String>, span: (Usize, Usize), caps: [Usize?]?) -> JetRegexMatch {
         capture_cache :: OnceLock.new()
-        if caps is Val(caps) { _ :: capture_cache.set(regex_slots_to_spans(&caps)) }
+        if caps == .Val(caps) { _ :: capture_cache.set(regex_slots_to_spans(&caps)) }
         JetRegexMatch{
             text: Arc.clone(text), span: span, program: Arc.clone(&self.program),
             flags: self.flags.clone(), groups: self.groups,
@@ -551,13 +564,13 @@ pub fn jet_regex_literal(pattern: &String) -> JetRegex {
 pub fn jet_regex_compile_with(pattern: &String, flags: &RegexFlags) -> JetRegex Err! {
     {
         cache :: regex_cache().lock().unwrap_or_else(fn(poisoned) { poisoned.into_inner() })
-        if cache.get(pattern, flags) is Val(regex) -> return Ok(^regex)
+        if cache.get(pattern, flags) == .Val(regex) -> return Ok(^regex)
     }
     // Do not hold the global lock while compiling. Concurrent misses converge
     // on the first program published for the exact key.
     regex :: jet_regex_compile_uncached(pattern, flags)?
     cache := regex_cache().lock().unwrap_or_else(fn(poisoned) { poisoned.into_inner() })
-    if cache.get(pattern, flags) is Val(existing) -> return Ok(^existing)
+    if cache.get(pattern, flags) == .Val(existing) -> return Ok(^existing)
     cache.insert(regex.clone())
     Ok(^regex)
 }
@@ -579,7 +592,7 @@ fn jet_regex_compile_uncached(pattern: &String, flags: &RegexFlags) -> JetRegex 
     Ok(JetRegex{
         pattern: Arc.from(pattern), flags: flags.clone(),
         program: Arc.new(RegexProgram{
-            anchored_start: insts[frag.start] is .AssertStart(_),
+            anchored_start: insts[frag.start] == .AssertStart(_),
             scratch: Mutex.new(RegexScratch.new(insts.len())),
             insts: ^insts, start: frag.start,
             literal: regex_literal_candidate(&root), prefix: regex_prefix_literal(&root),
@@ -620,7 +633,7 @@ impl RegexParser {
             self.pos += 1
             arms.push(self.parse_seq(terminator)?)
         }
-        if terminator is Val(end) {
+        if terminator == .Val(end) {
             if self.peek() != Val(end) -> return Err("invalid regex: missing `{end}`")
             self.pos += 1
         }
@@ -691,9 +704,18 @@ impl RegexParser {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:1005
     fn parse_quant(self: &Self) -> RegexQuant Err! {
         match self.peek() {
-            Val('*') -> { self.pos += 1; Ok(.ZeroOrMore) }
-            Val('+') -> { self.pos += 1; Ok(.OneOrMore) }
-            Val('?') -> { self.pos += 1; Ok(.ZeroOrOne) }
+            Val('*') -> {
+                self.pos += 1
+                Ok(.ZeroOrMore)
+            }
+            Val('+') -> {
+                self.pos += 1
+                Ok(.OneOrMore)
+            }
+            Val('?') -> {
+                self.pos += 1
+                Ok(.ZeroOrOne)
+            }
             Val('{') -> {
                 self.pos += 1
                 min :: self.parse_number()?
@@ -710,7 +732,10 @@ impl RegexParser {
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:1044
     fn parse_class(self: &Self) -> RegexClass Err! {
-        negated :: if self.peek() == Val('^') { self.pos += 1; true } else { false }
+        negated :: if self.peek() == Val('^') {
+            self.pos += 1
+            true
+        } else { false }
         items := [RegexClassItem]{}
         loop {
             ch :: self.peek() ?? break
@@ -719,7 +744,10 @@ impl RegexParser {
                 return Ok(RegexClass.new(negated, ^items))
             }
             // A first closing bracket after optional ^ is a literal member.
-            first :: if ch == ']' { self.pos += 1; RegexClassItem.Char(']') } else { self.parse_class_item()? }
+            first :: if ch == ']' {
+                self.pos += 1
+                RegexClassItem.Char(']')
+            } else { self.parse_class_item()? }
             if self.peek() == Val('-') && self.peek_n(1) != Val(']') {
                 self.pos += 1
                 second :: self.parse_class_char()?
@@ -827,7 +855,7 @@ impl RegexCompiler {
                     }
                 }
                 .SplitB(idx) -> {
-                    if &self.insts[idx] is .Split(_, b) -> b = Val(target)
+                    if &self.insts[idx] == .Split(_, b) -> b = Val(target)
                 }
             }
         }
@@ -897,7 +925,7 @@ impl RegexCompiler {
         frag := None
         loop _ in Usize{0}..min {
             next :: self.compile_atom(atom)?
-            if frag.take() is Val(prev) {
+            if frag.take() == .Val(prev) {
                 self.patch(&prev.outs, next.start)
                 frag = Val(RegexFrag{start: prev.start, outs: ^next.outs})
             } else { frag = Val(^next) }
@@ -1029,14 +1057,20 @@ struct RegexRun { span: (Usize, Usize), caps: [Usize?]? }
 fn regex_has_match(program: &RegexProgram, flags: &RegexFlags, groups: Usize, text: &String) -> Bool {
     found := false
     regex_scan(program, flags, groups, text, 0, false, false, true,
-        fn(_run) { found = true; false })
+        fn(_run) {
+            found = true
+            false
+        })
     found
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs:1535
 fn regex_run(program: &RegexProgram, flags: &RegexFlags, groups: Usize, text: &String, start: Usize, anchored: Bool, capture: Bool) -> RegexRun? {
     result := None
     regex_scan(program, flags, groups, text, start, anchored, capture, false,
-        fn(run) { result = Val(^run); false })
+        fn(run) {
+            result = Val(^run)
+            false
+        })
     result
 }
 
@@ -1048,7 +1082,7 @@ fn regex_run(program: &RegexProgram, flags: &RegexFlags, groups: Usize, text: &S
 fn regex_scan(program: &RegexProgram, flags: &RegexFlags, groups: Usize, text: &String, start: Usize, anchored: Bool, capture: Bool, stop_on_match: Bool, on_match: fn(RegexRun) -> Bool) -> {
     if start > text.len() -> return
     if !anchored && !capture && !flags.case_insensitive && groups == 0 {
-        if program.literal.as_deref() is Val(literal) {
+        if program.literal.as_deref() == .Val(literal) {
             regex_scan_literal(text, literal, start, on_match)
             return
         }
@@ -1068,7 +1102,7 @@ fn regex_scan(program: &RegexProgram, flags: &RegexFlags, groups: Usize, text: &
     last_match: RegexRun? := None
     single_start :: anchored || (program.anchored_start && !flags.multiline)
     loop {
-        if prefilter is Val(prefix) {
+        if prefilter == .Val(prefix) {
             if scratch.current.threads.is_empty() && winner_start.is_none() && last_match.is_none() {
                 candidate :: regex_find_literal_boundary(text, prefix, prefilter_pos) ?? return
                 pos = candidate
@@ -1082,7 +1116,7 @@ fn regex_scan(program: &RegexProgram, flags: &RegexFlags, groups: Usize, text: &
                 pos, text, capture, &scratch.capture_arena)
         }
         if stop_on_match {
-            if scratch.current.matched is Val(found) {
+            if scratch.current.matched == .Val(found) {
                 run :: RegexRun{span: (found.start, pos), caps: None}
                 drop(^scratch)
                 _ :: on_match(^run)
@@ -1092,8 +1126,8 @@ fn regex_scan(program: &RegexProgram, flags: &RegexFlags, groups: Usize, text: &
         if scratch.current.threads.is_empty() && single_start -> return
         found :: scratch.current.matched
         if winner_start.is_none() -> winner_start = found.map(fn(thread) { thread.start })
-        if winner_start is Val(winner) {
-            if found.filter(fn(thread) { thread.start == winner }) is Val(found) {
+        if winner_start == .Val(winner) {
+            if found.filter(fn(thread) { thread.start == winner }) == .Val(found) {
                 caps :: if capture {
                     found.caps.map(fn(head) {
                         caps := regex_capture_slots(Val(head), &scratch.capture_arena, (groups + 1) * 2)
@@ -1145,14 +1179,14 @@ fn regex_scan(program: &RegexProgram, flags: &RegexFlags, groups: Usize, text: &
             std.mem.swap(current, next)
         }
         if stop_on_match {
-            if scratch.current.matched is Val(found) {
+            if scratch.current.matched == .Val(found) {
                 run :: RegexRun{span: (found.start, next_pos), caps: None}
                 drop(^scratch)
                 _ :: on_match(^run)
                 return
             }
         }
-        if winner_start is Val(winner) {
+        if winner_start == .Val(winner) {
             if scratch.current.min_start != Val(winner) {
                 run :: last_match.take() ?? return
                 resume :: regex_next_search_pos(text, run.span.0, run.span.1)
@@ -1274,7 +1308,7 @@ fn regex_literal_candidate(node: &RegexNode) -> [U8]? {
         .Seq(pieces) -> {
             literal := [U8]{}
             loop piece in pieces {
-                if !(piece.quant is .One) -> return None
+                if !(piece.quant == .One) -> return None
                 match &piece.atom {
                     .Literal(ch) -> {
                         bytes := [U8; 4].filled(0)
@@ -1556,19 +1590,19 @@ fn expand_regex_replacement(repl: &String, mat: &JetRegexMatch) -> String {
                     if c == '}' -> break
                     name.push(c)
                 }
-                if mat.name(&name) is Ok(value) -> out.push_str(&value)
+                if mat.name(&name) == .Ok(value) -> out.push_str(&value)
             }
             Val(c) if c.is_ascii_digit() -> {
                 idx := I64{0}
                 valid := true
                 loop chars.peek().is_some_and(fn(c) { c.is_ascii_digit() }) {
                     digit :: chars.next().unwrap() as I64 - '0' as I64
-                    if idx.checked_mul(10).and_then(fn(n) { n.checked_add(digit) }) is Val(next) {
+                    if idx.checked_mul(10).and_then(fn(n) { n.checked_add(digit) }) == .Val(next) {
                         idx = next
                     } else { valid = false }
                 }
                 if valid {
-                    if mat.group(idx) is Ok(value) -> out.push_str(&value)
+                    if mat.group(idx) == .Ok(value) -> out.push_str(&value)
                 }
             }
             _ -> out.push('$')
