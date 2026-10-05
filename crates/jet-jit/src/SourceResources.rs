@@ -5687,7 +5687,7 @@ fn encoding_next(
 
 pub(crate) fn dyn_datetime_payload(value: jet_foundation::Dyn::DynDateTime) -> MirRuntimeValue {
     jet_codegen::Comptime::MirBridge::ct_to_mir_value(
-        &jet_codegen::Comptime::dyn_datetime_value(value),
+        jet_codegen::Comptime::dyn_datetime_value(value),
         jet_foundation::Diagnostics::Span::new(0, 0),
     )
     .expect("Dyn DateTime payload contains only canonical scalar fields")
