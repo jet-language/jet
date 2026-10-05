@@ -43,10 +43,14 @@ pub fn pkg_bridge_foreign_host_target() -[Env]> String Never! {
     "{sys.arch()}-{sys.name()}"
 }
 
-// Append one `name=value` line; line breaks and `=` in names are refused.
+// Append one `name=value` row. The reader splits each row at its first `=`,
+// so a name cannot hold `=` while a value may: handle facts and descriptor
+// stamps are themselves `key=value;...` records. A field with several values
+// is written as repeated rows, never as one value that holds line breaks.
 fn pkg_bridge_append_line(text: &String, name: String, value: String) ForeignBridgeError! {
     carriage_return :: String.from_bytes([U8]{U8{13}}) ?? ""
-    if name == "" || value == "" || name.contains("\n") || name.contains(carriage_return) || name.contains("=") || value.contains("\n") || value.contains(carriage_return) -> return Err(pkg_bridge_error("bridge provenance fields cannot contain line breaks or `=`"))
+    if name == "" || name.contains("\n") || name.contains(carriage_return) || name.contains("=") -> return Err(pkg_bridge_error("bridge provenance field names must be non-empty and hold no line break or `=`"))
+    if value == "" || value.contains("\n") || value.contains(carriage_return) -> return Err(pkg_bridge_error("bridge provenance field `{name}` must have a non-empty, single-line value; write one `{name}` row per value"))
     text = "{text}{name}={value}\n"
 }
 
