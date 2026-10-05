@@ -1,0 +1,458 @@
+use Jetpack.CLI.Tests.Integration.JetpackNixClosureReplay.*
+use nix_index_cache_server.[NixIndexCacheServer, REVISION, RUNTIME_PATH]
+use common.[Scratch, jetpack_bin]
+use Jetpack.[Store, Lock, Envelope, RefSpec, Provider]
+use JetEnvModel.ModuleEval.[AdapterPlan, AdapterRecipe]
+use JetEnvModel.Merge.Pkg
+use JetPkgModel.Recipe.[BuildRecipe, BuildStep]
+use std.[fs, Command, Permissions, OpenOptions, IOErrorKind]
+use core.sys
+// GATE #4494: native loopback server, process, filesystem, permissions and symlinks.
+// GATE #4483: Linux and Unix branches dispatch on selected target.
+// GATE #4409: preserve PermissionDenied at Store replay boundary.
+
+// Rust: tests/jetpack_nix_closure_replay.rs:16
+#Test("local_index_lock_preserves_admission_and_rejects_trust_tampering") {
+    if sys.target.selected_os() == "linux" {
+        project :: Scratch.new("local-index-lock-project")
+        root :: Scratch.new("local-index-lock-hangar")
+        replay :: Scratch.new("local-index-replay-hangar")
+        catalog :: Scratch.new("local-index-catalog")
+        replacement :: Scratch.new("local-index-replacement")
+        home :: Scratch.new("local-index-lock-home")
+        nested_project :: Scratch.new("local-index-nested-project")
+        source :: nested_project.join("source")
+        fs.create_dir_all(source) ?? panic("create source")
+        fs.write(source.join("payload"), "isolated adapter output\n".as_bytes()) ?? panic("write source")
+        plan :: AdapterPlan{name: "local-tool-consumer", source: source.to_string_lossy().to_string(),
+            deps: [Pkg{source: "jetpack", name: "ripgrep"}],
+            recipe: AdapterRecipe.Build(BuildRecipe{steps: [BuildStep.Install{src: "payload", dest: "payload"}]})}
+        temporary :: home.join("tmp")
+        fs.create_dir_all(temporary) ?? panic("create tmp")
+        server := NixIndexCacheServer.start_ripgrep(&project.path)
+        server.install(&root.path)
+        fs.remove_file(root.join("trust/nix-index-v1.ed25519.pub")) ?? panic("remove trust key")
+        suffix :: server.signed_index.target_url.strip_prefix(server.index_endpoint) ?? panic("index prefix")
+        index_path :: catalog.join(suffix.trim_start_matches('/'))
+        fs.create_dir_all(index_path.parent() ?? panic("index parent")) ?? panic("create catalog")
+        fs.write(index_path, server.signed_index.index_bytes) ?? panic("write index")
+        filename :: (index_path.file_name() ?? panic("index filename")).to_str() ?? panic("index filename utf8")
+        index_authority :: (filename.strip_suffix(".json.zst") ?? panic("index suffix")).to_string()
+        fs.create_dir_all(project.join(".jet")) ?? panic("create .jet")
+        // Declare the adapter before Nix admission binds the complete lock digest.
+        expected_adapter :: Scratch.new("local-index-expected-adapter")
+        expected_tree :: expected_adapter.join("output")
+        fs.create_dir(expected_tree) ?? panic("create expected tree")
+        fs.write(expected_tree.join("payload"), "isolated adapter output\n".as_bytes()) ?? panic("write expected tree")
+        fs.set_permissions(expected_tree, Permissions.from_mode(0o700)) ?? panic("chmod tree")
+        Store.seal_local_output(expected_tree) ?? panic("seal output")
+        source_hash :: Envelope.try_output_hash_of(plan.source) ?? panic("source hash")
+        adapter_reference :: "adapt:{plan.name}:{plan.source}"
+        expected_output :: Envelope.try_output_hash_of(expected_tree.to_string_lossy()) ?? panic("output hash")
+        initial_lock := Lock.parse("version = 1\n\n[[source_channel]]\nname = \"jetpack\"\nchannel = \"nixpkgs-unstable\"\nexact = \"github:NixOS/nixpkgs#{REVISION}\"\n\n[root]\ndependencies = []\n") ?? panic("initial lock")
+        &initial_lock.packages.push(Lock.LockedPackage{
+            name: plan.name.clone(), version: "", source: Lock.LockSource.Path(adapter_reference), nix_closure: nil,
+            locked: nil, fingerprint: source_hash.clone(), content_hash: Val(source_hash), dependencies: ["ripgrep"],
+            layer: nil, inferred_layer: nil, effects: [], effect_grants: [], required_effects: [], granted_effects: [],
+            denied_effects: [], effect_authority: nil,
+            envelope: Val(Lock.LockEnvelope{output_hash: expected_output, platform: Envelope.host_platform(), ..Lock.LockEnvelope.default()}),
+            receipt: nil, provenance: nil
+        })
+        fs.write(project.join(".jet/lock"), Lock.write(&initial_lock)) ?? panic("write initial lock")
+        prepare :: (hangar: &OSPath, selected_catalog: &OSPath, offline: Bool) -> {
+            command := Command.new(jetpack_bin())
+            &command.args(["env", "--env", "dev", "--prep", "--trust", "--no-color", "--yes", "--local-nix-catalog"])
+                .arg(selected_catalog).current_dir(&project.path).env_clear().env("PATH", "").env("HOME", &home.path)
+                .env("XDG_DATA_HOME", home.join("data")).env("XDG_STATE_HOME", home.join("state"))
+                .env("XDG_CACHE_HOME", home.join("cache")).env("XDG_CONFIG_HOME", home.join("config"))
+                .env("XDG_RUNTIME_DIR", home.join("run")).env("TMPDIR", temporary).env("TMP", temporary).env("TEMP", temporary)
+                .env("JETPACK_SHARED_CAS", hangar.join("hangar/cas")).env("JETPACK_ROOT", hangar).env("JETPACK_NIX_FALLBACK_POLICY", "deny")
+            if offline { &command.arg("--offline") }
+            &command.output() ?? panic("prepare")
+        }
+        assert_success :: output -> {
+            assert(output.status.success(), "stdout: {String.from_utf8_lossy(output.stdout)}\nstderr: {String.from_utf8_lossy(output.stderr)}")
+        }
+        // Invocation-only trust is confined to this loopback fixture.
+        env_command :: (local: Bool) -> {
+            command := Command.new(jetpack_bin())
+            &command.args(["env", "--env", "dev", "--offline", "--trust", "--no-color"]).current_dir(&project.path)
+                .env_clear().env("PATH", "").env("HOME", &home.path).env("XDG_DATA_HOME", home.join("data"))
+                .env("XDG_STATE_HOME", home.join("state")).env("XDG_CACHE_HOME", home.join("cache"))
+                .env("XDG_CONFIG_HOME", home.join("config")).env("XDG_RUNTIME_DIR", home.join("run"))
+                .env("TMPDIR", temporary).env("TMP", temporary).env("TEMP", temporary)
+                .env("JETPACK_SHARED_CAS", root.join("hangar/cas")).env("JETPACK_ROOT", &root.path).env("JETPACK_NIX_FALLBACK_POLICY", "deny")
+            if local { &command.arg("--local-nix-catalog").arg(&replacement.path) }
+            command
+        }
+        prepare_env :: (local: Bool) -> { env_command(local).arg("--prep").output() ?? panic("prepare env") }
+        fs.write(project.join("env.jet"), "module env.dev {\n    sources: { jetpack: NixOS/nixpkgs/nixpkgs-unstable@github }\n    packages: [jetpack.ripgrep]\n}\n") ?? panic("write env")
+        assert_success(prepare(&root.path, &catalog.path, false))
+        (closure, envelope) :: (Lock.nix_realization_strict(&project.path, "ripgrep@jetpack") ?? panic("strict realization")) ?? panic("realization exists")
+        assert_eq(closure.index_authority, index_authority)
+        assert_eq(envelope.catalog_tier, "local-unofficial")
+        assert_eq(envelope.catalog_trust, "unverified")
+        original_lock :: fs.read(project.join(".jet/lock")) ?? panic("read lock")
+        entries :: Store.list_checked(&Store.Roots.at(root.path.clone())) ?? panic("list store")
+        original :: (entries.iter().find(entry -> entry.reference == "ripgrep@jetpack") ?? panic("original entry")).clone()
+        producer :: Store.ProducerRecord.decode(original.producer_record) ?? panic("decode producer")
+        assert_eq(producer.facts["nix.index.target.sha256"], index_authority)
+        assert_eq(producer.facts["nix.index.manifest.sha256"], "")
+        assert_eq(producer.facts["nix.project-cas-bundle"], closure.project_cas_bundle)
+        original_graph :: Store.closure_graph(&Store.Roots.at(root.path.clone())) ?? panic("closure graph")
+        original_closure :: original_graph.closure(closure.output)
+        &server.reset_counts()
+        &server.stop_network()
+        bundle :: project.join(".jet/nix-cas").join(closure.project_cas_bundle)
+        saved_bundle :: project.join("saved-bundle")
+        fs.rename(bundle, saved_bundle) ?? panic("save bundle")
+        assert_success(prepare(&root.path, &replacement.path, true))
+        assert_eq(fs.read(project.join(".jet/lock")) ?? panic("read lock"), original_lock)
+        env_receipt :: project.join(".jet/receipts/env-entry")
+        fs.remove_file(env_receipt) ?? panic("remove receipt")
+        unapproved :: prepare_env(false)
+        assert_eq(unapproved.status.code(), Val(1))
+        assert(!env_receipt.exists(), "unapproved local admission created an environment receipt")
+        assert_eq(fs.read(project.join(".jet/lock")) ?? panic("read lock"), original_lock)
+        assert_success(prepare_env(true))
+        fs.remove_file(env_receipt) ?? panic("remove receipt")
+        assert_success(prepare_env(true))
+        allowed_command :: env_command(true).args(["--", "/bin/sh", "-c", "printf allowed"]).output() ?? panic("allowed command")
+        assert(allowed_command.status.success(), String.from_utf8_lossy(allowed_command.stderr))
+        assert_eq(allowed_command.stdout, "allowed".as_bytes())
+        intact_receipt :: fs.read(env_receipt) ?? panic("read receipt")
+        unapproved_command :: env_command(false).args(["--", "/bin/sh", "-c", "printf forbidden"]).output() ?? panic("unapproved command")
+        assert_eq(unapproved_command.status.code(), Val(1))
+        assert(unapproved_command.stdout.is_empty(), "unapproved command ran")
+        assert(String.from_utf8_lossy(unapproved_command.stderr).contains("--local-nix-catalog"))
+        assert_eq(fs.read(env_receipt) ?? panic("read receipt"), intact_receipt)
+        assert_eq(fs.read(project.join(".jet/lock")) ?? panic("read lock"), original_lock)
+        exported :: env_command(true).args(["export", "bash"]).output() ?? panic("export")
+        assert(exported.status.success(), String.from_utf8_lossy(exported.stderr))
+        assert(String.from_utf8_lossy(exported.stdout).contains("export PATH="))
+        export_receipt :: fs.read(env_receipt) ?? panic("read receipt")
+        unapproved_export :: env_command(false).args(["export", "bash"]).output() ?? panic("unapproved export")
+        assert(unapproved_export.status.success())
+        assert(unapproved_export.stdout.is_empty(), "unapproved export emitted activation")
+        assert_eq(fs.read(env_receipt) ?? panic("read receipt"), export_receipt)
+        assert_eq(fs.read(project.join(".jet/lock")) ?? panic("read lock"), original_lock)
+        (env_closure, env_envelope) :: (Lock.nix_realization_strict(&project.path, "ripgrep@jetpack") ?? panic("strict realization")) ?? panic("realization exists")
+        assert_eq(env_closure, closure)
+        assert_eq(env_envelope, envelope)
+        warm_lock :: fs.read(project.join(".jet/lock")) ?? panic("read lock")
+        warm_entries :: Store.list_checked(&Store.Roots.at(root.path.clone())) ?? panic("list warm")
+        warm :: warm_entries.iter().find(entry -> entry.reference == "ripgrep@jetpack") ?? panic("warm entry")
+        warm_producer :: Store.ProducerRecord.decode(warm.producer_record) ?? panic("decode warm")
+        assert_eq(warm_producer.facts["nix.output.out"], server.root_store_path)
+        assert_eq(warm.producer_record, original.producer_record)
+        assert_eq(warm.named_outputs, original.named_outputs)
+        assert_eq((Store.closure_graph(&Store.Roots.at(root.path.clone())) ?? panic("graph")).closure(closure.output), original_closure)
+        roots :: Store.Roots.at(root.path.clone())
+        assert_eq(roots.shared_cas_dir(), root.join("hangar/cas"))
+        store_dir :: roots.hangar_dir()
+        spec :: RefSpec.classify("ripgrep@jetpack") ?? panic("classify")
+        table :: RefSpec.SourceTable.empty()
+        ctx := Provider.Ctx{fixtures: nil, store_dir: &store_dir, offline: true, project_dir: Val(&project.path),
+            nix_index: nil, nix_roots: Val(&roots), allow_local_nix_catalog: false}
+        denied :: Store.realize_verified(&roots, &ctx, Store.RealizeRequest.Package{spec: &spec, table: &table})
+        match denied {
+            Err(Store.RealizeError.LockedNix(error)) -> {
+                assert_eq(error.kind(), IOErrorKind.PermissionDenied)
+                assert(error.to_string().contains("--local-nix-catalog"))
+            }
+            Err(error) -> panic("unexpected replay error: {error}")
+            Ok(_) -> panic("Store reused a local admission without invocation permission")
+        }
+        assert_eq(fs.read(project.join(".jet/lock")) ?? panic("read lock"), warm_lock)
+        ctx.allow_local_nix_catalog = true
+        allowed :: Store.realize_verified(&roots, &ctx, Store.RealizeRequest.Package{spec: &spec, table: &table}) ?? panic("allowed replay")
+        assert_eq(allowed.metadata().producer_record, original.producer_record)
+        assert_eq(allowed.metadata().envelope, original.envelope)
+        assert_eq(allowed.metadata().named_outputs, original.named_outputs)
+        drop(^allowed)
+        assert_eq(fs.read(project.join(".jet/lock")) ?? panic("read lock"), warm_lock)
+        fs.create_dir_all(nested_project.join(".jet")) ?? panic("create nested .jet")
+        fs.write(nested_project.join(".jet/lock"), warm_lock) ?? panic("write nested lock")
+        nested_ctx := Provider.Ctx{project_dir: Val(&nested_project.path), allow_local_nix_catalog: false, ..ctx}
+        expectation :: Provider.adapter_cache_expectation(&plan, &table, &nested_ctx) ?? panic("adapter expectation")
+        nested_denied :: Store.realize_verified(&roots, &nested_ctx, Store.RealizeRequest.Adapter{plan: &plan, table: &table, expectation: &expectation})
+        match nested_denied {
+            Err(Store.RealizeError.LockedNix(error)) -> { assert_eq(error.kind(), IOErrorKind.PermissionDenied) }
+            Err(error) -> panic("unexpected nested replay error: {error}")
+            Ok(_) -> panic("adapter reused a local dependency without invocation permission")
+        }
+        assert(!(Store.list_checked(&roots) ?? panic("list store")).iter().any(entry -> entry.name == plan.name))
+        assert_eq(fs.read(nested_project.join(".jet/lock")) ?? panic("read nested lock"), warm_lock)
+        nested_ctx.allow_local_nix_catalog = true
+        adapted :: Store.realize_verified(&roots, &nested_ctx, Store.RealizeRequest.Adapter{plan: &plan, table: &table, expectation: &expectation}) ?? panic("adapted")
+        adapted_entry :: adapted.metadata()
+        assert(adapted_entry.version.is_empty(), "unversioned adapter acquired an invented version")
+        nested_lock :: Lock.load(&nested_project.path) ?? panic("load nested lock")
+        locked_adapter :: nested_lock.packages.iter().find(package -> package.name == plan.name) ?? panic("locked adapter")
+        assert_eq(locked_adapter.receipt, Val(adapted_entry.receipt))
+        assert_eq(fs.read(OSPath.from(adapted_entry.out).join("payload")) ?? panic("read adapter output"), "isolated adapter output\n".as_bytes())
+        assert(Store.verify_cache_entry(&roots, adapted_entry, adapted_entry.reference, &expectation).trusted())
+        adapted_producer :: Store.ProducerRecord.decode(adapted_entry.producer_record) ?? panic("decode adapter")
+        assert_eq(adapted_producer.facts["build.dependencies"], "ripgrep@jetpack")
+        assert_eq(adapted_producer.facts["build.sandbox"], "non-executing")
+        assert_eq(adapted_producer.facts["build.sandbox_policy"], "no child launched")
+        assert(adapted_entry.references.is_empty(), "build-only tool became a dangling runtime reference")
+        warm_adapter :: Store.realize_verified(&roots, &nested_ctx, Store.RealizeRequest.Adapter{plan: &plan, table: &table, expectation: &expectation}) ?? panic("warm adapter")
+        assert_eq(warm_adapter.source_state(), Provider.SourceState.Cached)
+        assert_eq(warm_adapter.metadata().producer_record, adapted_entry.producer_record)
+        assert_eq(fs.read(warm_adapter.original_output().join("payload")) ?? panic("warm payload"), "isolated adapter output\n".as_bytes())
+        drop(^warm_adapter)
+        drop(^adapted)
+        after_entries :: Store.list_checked(&roots) ?? panic("list after nested")
+        after_nested :: after_entries.iter().find(entry -> entry.reference == original.reference) ?? panic("after nested")
+        assert_eq(after_nested.producer_record, original.producer_record)
+        assert_eq(after_nested.envelope, original.envelope)
+        assert_eq(after_nested.named_outputs, original.named_outputs)
+        assert_eq((Store.closure_graph(&roots) ?? panic("graph")).closure(closure.output), original_closure)
+        assert_eq(fs.read(project.join(".jet/lock")) ?? panic("read lock"), warm_lock)
+        fs.rename(saved_bundle, bundle) ?? panic("restore bundle")
+        assert_success(prepare(&replay.path, &replacement.path, true))
+        (replayed_closure, replayed_envelope) :: (Lock.nix_realization_strict(&project.path, "ripgrep@jetpack") ?? panic("strict realization")) ?? panic("realization exists")
+        assert_eq(replayed_closure, closure)
+        assert_eq(replayed_envelope, envelope)
+        replay_entries :: Store.list_checked(&Store.Roots.at(replay.path.clone())) ?? panic("list replay")
+        replayed :: replay_entries.iter().find(entry -> entry.reference == "ripgrep@jetpack") ?? panic("replayed entry")
+        assert_eq(replayed.envelope.output_hash, closure.output)
+        assert_eq(replayed.references, closure.references)
+        replay_producer :: Store.ProducerRecord.decode(replayed.producer_record) ?? panic("decode replay")
+        assert_eq(replay_producer.facts["nix.index.target.sha256"], index_authority)
+        assert_eq(replay_producer.facts["nix.index.tier"], "local-unofficial")
+        assert_eq(replay_producer.facts["nix.index.trust"], "unverified")
+        assert(!replay_producer.facts.contains_key("nix.index.manifest.sha256"))
+        assert_eq(server.object_request_count(server.root_store_path), 0)
+        for path in server.transitive_store_paths { assert_eq(server.object_request_count(path), 0) }
+        baseline :: Lock.parse(String.from_utf8(original_lock.clone()) ?? panic("lock utf8")) ?? panic("parse baseline")
+        promoted := baseline.clone()
+        promoted_package := &promoted.packages.iter_mut().find(package -> package.nix_closure.is_some()) ?? panic("promoted package")
+        promoted_envelope := &promoted_package.envelope.as_mut() ?? panic("promoted envelope")
+        promoted_envelope.catalog_tier = "official-signed"
+        promoted_envelope.catalog_trust = "verified"
+        fs.write(project.join(".jet/lock"), Lock.write(&promoted)) ?? panic("write promoted")
+        assert(!prepare(&root.path, &replacement.path, true).status.success())
+        assert(!prepare_env(true).status.success())
+        empty :: Scratch.new("local-index-forged-official-cold")
+        assert(!prepare(&empty.path, &replacement.path, true).status.success())
+        assert((Store.list_checked(&Store.Roots.at(empty.path.clone())) ?? panic("list empty")).is_empty())
+        for change_authority in [true, false] {
+            tampered := baseline.clone()
+            record := &tampered.packages.iter_mut().find_map(package -> &package.nix_closure.as_mut()) ?? panic("tampered closure")
+            if change_authority { record.index_authority = "d".repeat(64) }
+            else { record.project_cas_bundle = "sha256-" + "d".repeat(64) }
+            fs.write(project.join(".jet/lock"), Lock.write(&tampered)) ?? panic("write tampered")
+            assert(!prepare(&root.path, &replacement.path, true).status.success())
+        }
+        after_rejections :: Store.list_checked(&Store.Roots.at(root.path.clone())) ?? panic("list after rejections")
+        unchanged :: after_rejections.iter().find(entry -> entry.reference == "ripgrep@jetpack") ?? panic("unchanged entry")
+        assert_eq(unchanged.producer_record, warm.producer_record)
+        assert_eq(unchanged.receipt, warm.receipt)
+        fs.write(project.join(".jet/lock"), original_lock) ?? panic("restore lock")
+        runtime :: after_rejections.iter().find(entry -> {
+            if record :: Store.ProducerRecord.decode(entry.producer_record).ok() {
+                record.facts.get("nix.store-path") == Val(RUNTIME_PATH)
+            } else { false }
+        }) ?? panic("runtime entry")
+        marker :: OSPath.from(runtime.out).join("share/marker")
+        marker_parent :: marker.parent() ?? panic("marker parent")
+        parent_permissions :: (fs.metadata(marker_parent) ?? panic("parent metadata")).permissions()
+        fs.set_permissions(marker_parent, Permissions.from_mode(parent_permissions.mode() | 0o200)) ?? panic("chmod parent")
+        replacement_marker :: marker_parent.join("replacement-marker")
+        file := OpenOptions.new().write(true).create_new(true).open(replacement_marker) ?? panic("create replacement marker")
+        &file.write_all("corrupted runtime".as_bytes()) ?? panic("write corruption")
+        drop(^file)
+        fs.rename(replacement_marker, marker) ?? panic("replace marker")
+        fs.set_permissions(marker_parent, parent_permissions) ?? panic("restore permissions")
+        assert(!prepare(&root.path, &replacement.path, true).status.success())
+        assert(!prepare_env(true).status.success())
+        assert_eq(fs.read(marker) ?? panic("read corruption"), "corrupted runtime".as_bytes())
+    }
+}
+
+// Rust: tests/jetpack_nix_closure_replay.rs:445
+#Test("malformed_present_lock_is_a_trust_error_not_a_cache_miss") {
+    project :: Scratch.new("nix-lock-malformed")
+    lock_path :: project.join(".jet/lock")
+    fs.create_dir_all(lock_path.parent() ?? panic("lock parent")) ?? panic("create .jet")
+    fs.write(lock_path, "version = [\n") ?? panic("write malformed lock")
+    error :: Lock.load_strict(&project.path).unwrap_err()
+    assert(!error.is_empty(), "malformed present lock must be rejected")
+    lookup_error :: Lock.nix_realization_strict(&project.path, "pkg@jetpack").unwrap_err()
+    assert(!lookup_error.is_empty(), "Nix lookup must not downgrade malformed lock state")
+}
+
+// Rust: tests/jetpack_nix_closure_replay.rs:459
+#Test("nix_lock_rejects_platform_and_envelope_mismatch") {
+    project :: Scratch.new("nix-lock-platform")
+    output :: cas_digest('1')
+    closure :: valid_nix_closure(output)
+    platform :: Envelope.host_platform()
+    mismatch :: if platform == "aarch64-linux" -> "x86_64-linux" else -> "aarch64-linux"
+    error :: Lock.record_nix_realization(&project.path, "pkg", "1.0.0", "pkg@jetpack", output, closure.clone(), lock_envelope(output, mismatch)).unwrap_err()
+    assert(error.contains("system does not match"), error)
+    assert(!project.join(".jet/lock").exists(), "rejected identity must not publish a project lock")
+    Lock.record_nix_realization(&project.path, "pkg", "1.0.0", "pkg@jetpack", output, closure, lock_envelope(output, platform)) ?? panic("record realization")
+    lock_path :: project.join(".jet/lock")
+    lock := Lock.parse(fs.read_to_string(lock_path) ?? panic("read lock")) ?? panic("parse lock")
+    envelope := &lock.packages[0].envelope.as_mut() ?? panic("envelope")
+    envelope.platform = "aarch64-linux"
+    fs.write(lock_path, Lock.write(&lock)) ?? panic("write mismatch")
+    lookup_error :: Lock.nix_realization_strict(&project.path, "pkg@jetpack").unwrap_err()
+    assert(lookup_error.contains("envelope identity"), lookup_error)
+}
+
+// Rust: tests/jetpack_nix_closure_replay.rs:507
+#Test("nix_lock_receipt_follows_complete_closure_identity") {
+    project :: Scratch.new("nix-lock-identity")
+    output :: cas_digest('2')
+    closure := valid_nix_closure(output)
+    envelope :: lock_envelope(output, "x86_64-linux")
+    reference :: "pkg@jetpack"
+    Lock.record_nix_realization(&project.path, "pkg", "1.0.0", reference, output, closure.clone(), envelope.clone()) ?? panic("record realization")
+    lock_path :: project.join(".jet/lock")
+    lock := Lock.parse(fs.read_to_string(lock_path) ?? panic("read lock")) ?? panic("parse lock")
+    receipt :: cas_digest('9')
+    lock.packages[0].receipt = Val(receipt.clone())
+    fs.write(lock_path, Lock.write(&lock)) ?? panic("write receipt")
+    Lock.record_nix_realization(&project.path, "pkg", "1.0.0", reference, output, closure.clone(), envelope.clone()) ?? panic("repeat realization")
+    repeated :: Lock.parse(fs.read_to_string(lock_path) ?? panic("read lock")) ?? panic("parse lock")
+    assert_eq(repeated.packages[0].receipt, Val(receipt))
+    closure.index_authority = "d".repeat(64)
+    Lock.record_nix_realization(&project.path, "pkg", "1.0.0", reference, output, closure, envelope) ?? panic("changed realization")
+    changed :: Lock.parse(fs.read_to_string(lock_path) ?? panic("read lock")) ?? panic("parse lock")
+    assert_eq(changed.packages[0].receipt, nil)
+}
+
+// Rust: tests/jetpack_nix_closure_replay.rs:559
+#Test("locked_nix_missing_bundle_reports_registered_diagnostic_before_store_mutation") {
+    project :: Scratch.new("nix-lock-missing-bundle-project")
+    root :: Scratch.new("nix-lock-missing-bundle-root")
+    fs.write(project.join("env.jet"), "module dev {\n    sources: { default: NixOS/nixpkgs/nixpkgs-unstable@github }\n    env.dev: Env{ packages: [default.pkg] }\n}\n") ?? panic("write env")
+    output :: cas_digest('6')
+    closure :: valid_nix_closure(output)
+    envelope :: lock_envelope(output, Envelope.host_platform())
+    Lock.record_nix_realization(&project.path, "pkg", "1.0.0", "pkg@default", output, closure, envelope) ?? panic("record realization")
+    home :: Scratch.new("nix-lock-missing-bundle-home")
+    command :: Command.new(jetpack_bin()).args(["env", "--offline", "--no-color", "--trust", "--", "true"]).current_dir(&project.path).env_clear().env("PATH", "/usr/bin").env("HOME", &home.path).env("JETPACK_ROOT", &root.path).output() ?? panic("env")
+    stderr :: String.from_utf8_lossy(command.stderr)
+    assert(!command.status.success(), "missing lock bytes must fail")
+    assert(stderr.contains("E1350"), "stderr: {stderr}")
+    assert(stderr.contains("project Nix CAS bundle") || stderr.contains("locked Nix"), "stderr must name the lock-bound replay: {stderr}")
+    assert(!root.join("hangar/objects").exists(), "missing lock bytes must fail before Hangar mutation")
+}
+
+// Rust: tests/jetpack_nix_closure_replay.rs:913
+#Test("nix_cas_build_and_import_preserve_absolute_links_but_generic_paths_reject_them") {
+    if sys.target.selected_family() == "unix" {
+        source_root :: Scratch.new("nix-cas-source-root")
+        source :: Scratch.new("nix-cas-source")
+        absolute_target :: "/nix/store/jet-closure-target"
+        relative_target :: "x".repeat(absolute_target.len())
+        entry :: relative_link_entry(&source_root, &source, relative_target)
+        roots :: Store.Roots{root: source_root.path.clone(), dev_mode: false}
+        generic_archive :: Store.export_unsigned_archive(&roots, entry.reference, true) ?? panic("generic export")
+        generic_output :: read_generic_output(generic_archive, entry.envelope.output_hash)
+        platform :: Envelope.host_platform()
+        revision :: "a".repeat(40)
+        cache_key :: "f".repeat(64)
+        bundle :: encode_nix_bundle(entry.envelope.output_hash, &generic_output, platform, revision, cache_key)
+        absolute_source :: Scratch.new("nix-cas-absolute-digest")
+        absolute_tree :: absolute_source.join("tree")
+        copy_tree_nofollow(&source.path, &absolute_tree)
+        fs.remove_file(absolute_tree.join("link")) ?? panic("remove relative link")
+        fs.symlink(absolute_target, absolute_tree.join("link")) ?? panic("absolute link")
+        fs.set_permissions(absolute_tree, Permissions.from_mode(generic_output.root_mode)) ?? panic("chmod root")
+        for node in generic_output.nodes {
+            if node.kind != 2 {
+                path :: absolute_tree.join(String.from_utf8(node.path.clone()) ?? panic("node path utf8"))
+                fs.set_permissions(path, Permissions.from_mode(node.mode)) ?? panic("chmod node")
+            }
+        }
+        new_output :: Envelope.try_output_hash_of_in_hangar(absolute_tree.to_string_lossy(), roots.hangar_dir(), false) ?? panic("absolute digest")
+        assert_ne(new_output, entry.envelope.output_hash)
+        (absolute_bundle, replaced_digests) := replace_all(bundle, entry.envelope.output_hash.as_bytes(), new_output.as_bytes())
+        assert(replaced_digests >= 2, "root and output digest must be rewritten")
+        absolute_bundle = replace_link_target(absolute_bundle, relative_target.as_bytes(), absolute_target.as_bytes())
+        project :: Scratch.new("nix-cas-project")
+        bundle_dir :: project.join(".jet/nix-cas")
+        fs.create_dir_all(bundle_dir) ?? panic("create bundle directory")
+        bundle_digest :: cas_digest_from_bytes(absolute_bundle)
+        fs.write(bundle_dir.join(bundle_digest), absolute_bundle) ?? panic("write bundle")
+        destination :: Scratch.new("nix-cas-destination")
+        destination_roots :: Store.Roots{root: destination.path.clone(), dev_mode: false}
+        (report, digests) :: Store.import_nix_cas_bundle(&project.path, &destination_roots, bundle_digest) ?? panic("import Nix bundle")
+        assert_eq(report.objects, 1)
+        assert_eq(digests, [new_output.clone()])
+        imported_link :: destination_roots.hangar_dir().join("objects").join(new_output).join("link")
+        assert_eq(fs.read_link(imported_link) ?? panic("read imported link"), OSPath.from(absolute_target))
+        closure := valid_nix_closure(new_output)
+        closure.project_cas_bundle = bundle_digest.clone()
+        replay_envelope :: lock_envelope(new_output, platform)
+        Lock.record_nix_realization(&project.path, "link-fixture", "1.0.0", "link-fixture@jetpack", new_output, closure, replay_envelope) ?? panic("record realization")
+        spec :: RefSpec.classify("link-fixture@jetpack") ?? panic("classify")
+        table :: RefSpec.SourceTable.empty()
+        replayed :: Store.realize_verified(&destination_roots,
+            &Provider.Ctx{fixtures: nil, store_dir: &destination.path, offline: true, project_dir: Val(&project.path),
+                nix_index: nil, nix_roots: Val(&destination_roots), allow_local_nix_catalog: true},
+            Store.RealizeRequest.Package{spec: &spec, table: &table}) ?? panic("replay")
+        nix_entry :: replayed.metadata().clone()
+        warm :: Store.realize_verified(&destination_roots,
+            &Provider.Ctx{fixtures: nil, store_dir: &destination.path, offline: true, project_dir: Val(&project.path),
+                nix_index: nil, nix_roots: Val(&destination_roots), allow_local_nix_catalog: true},
+            Store.RealizeRequest.Package{spec: &spec, table: &table}) ?? panic("warm replay")
+        expected_entry := nix_entry.clone()
+        expected_entry.realized_at = 0
+        expected_entry.last_used_at = 0
+        warm_entry := warm.metadata().clone()
+        warm_entry.realized_at = 0
+        warm_entry.last_used_at = 0
+        assert_eq(warm_entry, expected_entry, "warm replay changed lock identity")
+        copied_project :: Scratch.new("nix-cas-copied-project")
+        copied_bundle_dir :: copied_project.join(".jet/nix-cas")
+        fs.create_dir_all(copied_bundle_dir) ?? panic("create copied bundle directory")
+        _ :: fs.copy(project.join(".jet/lock"), copied_project.join(".jet/lock")) ?? panic("copy lock")
+        _ :: fs.copy(bundle_dir.join(bundle_digest), copied_bundle_dir.join(bundle_digest)) ?? panic("copy bundle")
+        copied_destination :: Scratch.new("nix-cas-copied-destination")
+        copied_roots :: Store.Roots{root: copied_destination.path.clone(), dev_mode: false}
+        copied_replayed :: Store.realize_verified(&copied_roots,
+            &Provider.Ctx{fixtures: nil, store_dir: &copied_destination.path, offline: true, project_dir: Val(&copied_project.path),
+                nix_index: nil, nix_roots: Val(&copied_roots), allow_local_nix_catalog: true},
+            Store.RealizeRequest.Package{spec: &spec, table: &table}) ?? panic("copied replay")
+        copied_identity := copied_replayed.metadata().clone()
+        &copied_identity.out.clear()
+        &copied_identity.bin.clear()
+        &copied_identity.rlib.clear()
+        expected_identity := expected_entry.clone()
+        &expected_identity.out.clear()
+        &expected_identity.bin.clear()
+        &expected_identity.rlib.clear()
+        assert_eq(copied_identity, expected_identity, "copied repository changed locked replay identity")
+        (exported, _) :: Store.export_nix_cas_bundle(&destination_roots, nix_entry.reference) ?? panic("Nix export")
+        assert(exported.windows(absolute_target.len()).any(window -> window == absolute_target.as_bytes()), "Nix CAS export must retain the absolute target as link data")
+        generic_export :: Store.export_unsigned_archive(&destination_roots, nix_entry.reference, false).unwrap_err()
+        assert(generic_export.to_string().contains("absolute symlinks are not portable Hangar archive nodes"), generic_export.to_string())
+        generic_absolute_root :: Scratch.new("nix-cas-generic-absolute")
+        generic_absolute_roots :: Store.Roots{root: generic_absolute_root.path.clone(), dev_mode: false}
+        error :: Store.import_archive(&generic_absolute_roots, absolute_bundle, nil, true).unwrap_err()
+        assert(error.to_string().contains("archive link target is absolute"), error.to_string())
+        escape_target :: "../" + "x".repeat(relative_target.len() - 3)
+        control_target := [U8].repeat('x' as U8, relative_target.len())
+        control_target[relative_target.len() / 2] = 1
+        backslash_target := [U8].repeat('x' as U8, relative_target.len())
+        backslash_target[relative_target.len() / 2] = '\\' as U8
+        for (tag, target, message) in [
+            ("escape", escape_target.into_bytes(), "archive link target escapes its output root"),
+            ("control", control_target, "archive link target is not portable"),
+            ("backslash", backslash_target, "archive link target is not portable")
+        ] {
+            hostile_bundle :: replace_link_target(bundle, relative_target.as_bytes(), target)
+            hostile_root :: Scratch.new("nix-cas-generic-{tag}")
+            hostile_roots :: Store.Roots{root: hostile_root.path.clone(), dev_mode: false}
+            hostile_error :: Store.import_archive(&hostile_roots, hostile_bundle, nil, true).unwrap_err()
+            assert(hostile_error.to_string().contains(message), hostile_error.to_string())
+        }
+    }
+}

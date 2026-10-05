@@ -1,1185 +1,245 @@
-// PORT-PENDING 1095 tests-jetpack-nix-closure-replay: tests/jetpack_nix_closure_replay.rs:1-1181
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! Focused witnesses for locked Nix closure identity and CAS archive policy.
-//RS 
-//RS use std::collections::BTreeMap;
-//RS use std::fs;
-//RS use std::path::{Path, PathBuf};
-//RS use std::process::Command;
-//RS 
-//RS mod common;
-//RS use common::Scratch;
-//RS 
-//RS #[path = "support/nix_index_cache_server.rs"]
-//RS mod nix_index_cache_server;
-//RS 
-//RS #[cfg(target_os = "linux")]
-//RS #[test]
-//RS fn local_index_lock_preserves_admission_and_rejects_trust_tampering() {
-//RS     use jetpack::Store::{self, ProducerRecord, Roots};
-//RS     use nix_index_cache_server::NixIndexCacheServer;
-//RS 
-//RS     let project = Scratch::new("local-index-lock-project");
-//RS     let root = Scratch::new("local-index-lock-hangar");
-//RS     let replay = Scratch::new("local-index-replay-hangar");
-//RS     let catalog = Scratch::new("local-index-catalog");
-//RS     let replacement = Scratch::new("local-index-replacement");
-//RS     let home = Scratch::new("local-index-lock-home");
-//RS     let nested_project = Scratch::new("local-index-nested-project");
-//RS     let source = nested_project.join("source");
-//RS     fs::create_dir_all(&source).unwrap();
-//RS     fs::write(source.join("payload"), b"isolated adapter output\n").unwrap();
-//RS     let plan = jet_env_model::ModuleEval::AdapterPlan {
-//RS         name: "local-tool-consumer".into(),
-//RS         source: source.to_string_lossy().into_owned(),
-//RS         deps: vec![jet_env_model::Merge::Pkg { source: "jetpack".into(), name: "ripgrep".into() }],
-//RS         recipe: jet_env_model::ModuleEval::AdapterRecipe::Build(jet_pkg_model::Recipe::BuildRecipe {
-//RS             steps: vec![jet_pkg_model::Recipe::BuildStep::Install {
-//RS                 src: "payload".into(),
-//RS                 dest: "payload".into(),
-//RS             }],
-//RS         }),
-//RS     };
-//RS     let temporary = home.join("tmp");
-//RS     fs::create_dir_all(&temporary).unwrap();
-//RS     let server = NixIndexCacheServer::start_ripgrep(&project.path);
-//RS     server.install(&root.path);
-//RS     fs::remove_file(root.join("trust/nix-index-v1.ed25519.pub")).unwrap();
-//RS     let index_path = catalog.join(
-//RS         server.signed_index.target_url
-//RS             .strip_prefix(&server.index_endpoint).unwrap().trim_start_matches('/'),
-//RS     );
-//RS     fs::create_dir_all(index_path.parent().unwrap()).unwrap();
-//RS     fs::write(&index_path, &server.signed_index.index_bytes).unwrap();
-//RS     let index_authority = index_path.file_name().unwrap().to_str().unwrap()
-//RS         .strip_suffix(".json.zst").unwrap().to_string();
-//RS     fs::create_dir_all(project.join(".jet")).unwrap();
-//RS     // Declare the adapter before Nix admission binds the complete lock digest.
-//RS     // The nested project receives this same declaration, not an after-the-fact
-//RS     // lock change that would refresh the original Nix producer's authority.
-//RS     let expected_adapter = Scratch::new("local-index-expected-adapter");
-//RS     // Scratch's own package.jet is fixture authority, not an installed output.
-//RS     let expected_tree = expected_adapter.join("output");
-//RS     fs::create_dir(&expected_tree).unwrap();
-//RS     fs::write(expected_tree.join("payload"), b"isolated adapter output\n").unwrap();
-//RS     // Recipe publishes an owner-only private output directory.
-//RS     fs::set_permissions(&expected_tree, fs::Permissions::from_mode(0o700)).unwrap();
-//RS     Store::seal_local_output(&expected_tree).unwrap();
-//RS     let source_hash = jetpack::Envelope::try_output_hash_of(&plan.source).unwrap();
-//RS     let adapter_reference = format!("adapt:{}:{}", plan.name, plan.source);
-//RS     let expected_output = jetpack::Envelope::try_output_hash_of(
-//RS         &expected_tree.to_string_lossy(),
-//RS     ).unwrap();
-//RS     let mut initial_lock = jetpack::Lock::parse(&format!(
-//RS         "version = 1\n\n[[source_channel]]\nname = \"jetpack\"\nchannel = \"nixpkgs-unstable\"\nexact = \"github:NixOS/nixpkgs#{}\"\n\n[root]\ndependencies = []\n",
-//RS         nix_index_cache_server::REVISION,
-//RS     )).unwrap();
-//RS     initial_lock.packages.push(jetpack::Lock::LockedPackage {
-//RS         name: plan.name.clone(),
-//RS         version: String::new(),
-//RS         source: jetpack::Lock::LockSource::Path(adapter_reference),
-//RS         nix_closure: None,
-//RS         locked: None,
-//RS         fingerprint: source_hash.clone(),
-//RS         content_hash: Some(source_hash),
-//RS         dependencies: vec!["ripgrep".into()],
-//RS         layer: None,
-//RS         inferred_layer: None,
-//RS         effects: Vec::new(),
-//RS         effect_grants: Vec::new(),
-//RS         required_effects: Vec::new(),
-//RS         granted_effects: Vec::new(),
-//RS         denied_effects: Vec::new(),
-//RS         effect_authority: None,
-//RS         envelope: Some(jetpack::Lock::LockEnvelope {
-//RS             output_hash: expected_output,
-//RS             platform: jetpack::Envelope::host_platform(),
-//RS             ..Default::default()
-//RS         }),
-//RS         receipt: None,
-//RS         provenance: None,
-//RS     });
-//RS     fs::write(project.join(".jet/lock"), jetpack::Lock::write(&initial_lock)).unwrap();
-//RS     let prepare = |hangar: &Path, selected_catalog: &Path, offline: bool| {
-//RS         let mut command = Command::new(common::jetpack_bin());
-//RS         command.args(["env", "--env", "dev", "--prep", "--trust", "--no-color", "--yes", "--local-nix-catalog"])
-//RS             .arg(selected_catalog)
-//RS             .current_dir(&project.path)
-//RS             .env_clear()
-//RS             .env("PATH", "")
-//RS             .env("HOME", &home.path)
-//RS             .env("XDG_DATA_HOME", home.join("data"))
-//RS             .env("XDG_STATE_HOME", home.join("state"))
-//RS             .env("XDG_CACHE_HOME", home.join("cache"))
-//RS             .env("XDG_CONFIG_HOME", home.join("config"))
-//RS             .env("XDG_RUNTIME_DIR", home.join("run"))
-//RS             .env("TMPDIR", &temporary)
-//RS             .env("TMP", &temporary)
-//RS             .env("TEMP", &temporary)
-//RS             .env("JETPACK_SHARED_CAS", hangar.join("hangar/cas"))
-//RS             .env("JETPACK_ROOT", hangar)
-//RS             .env("JETPACK_NIX_FALLBACK_POLICY", "deny");
-//RS         if offline {
-//RS             command.arg("--offline");
-//RS         }
-//RS         command.output().unwrap()
-//RS     };
-//RS     let assert_success = |output: std::process::Output| {
-//RS         assert!(
-//RS             output.status.success(),
-//RS             "stdout: {}\nstderr: {}",
-//RS             String::from_utf8_lossy(&output.stdout),
-//RS             String::from_utf8_lossy(&output.stderr),
-//RS         );
-//RS     };
-//RS     // Invocation-only trust is confined to this loopback fixture. No live
-//RS     // provider approval, real installation, or persistent grant is authorized.
-//RS     let env_command = |local: bool| {
-//RS         let mut command = Command::new(common::jetpack_bin());
-//RS         command.args(["env", "--env", "dev", "--offline", "--trust", "--no-color"])
-//RS             .current_dir(&project.path)
-//RS             .env_clear()
-//RS             .env("PATH", "")
-//RS             .env("HOME", &home.path)
-//RS             .env("XDG_DATA_HOME", home.join("data"))
-//RS             .env("XDG_STATE_HOME", home.join("state"))
-//RS             .env("XDG_CACHE_HOME", home.join("cache"))
-//RS             .env("XDG_CONFIG_HOME", home.join("config"))
-//RS             .env("XDG_RUNTIME_DIR", home.join("run"))
-//RS             .env("TMPDIR", &temporary)
-//RS             .env("TMP", &temporary)
-//RS             .env("TEMP", &temporary)
-//RS             .env("JETPACK_SHARED_CAS", root.join("hangar/cas"))
-//RS             .env("JETPACK_ROOT", &root.path)
-//RS             .env("JETPACK_NIX_FALLBACK_POLICY", "deny");
-//RS         if local {
-//RS             command.arg("--local-nix-catalog").arg(&replacement.path);
-//RS         }
-//RS         command
-//RS     };
-//RS     let prepare_env = |local: bool| env_command(local).arg("--prep").output().unwrap();
-//RS     fs::write(
-//RS         project.join("env.jet"),
-//RS         "module env.dev {\n    sources: { jetpack: NixOS/nixpkgs/nixpkgs-unstable@github }\n    packages: [jetpack.ripgrep]\n}\n",
-//RS     ).unwrap();
-//RS     assert_success(prepare(&root.path, &catalog.path, false));
-//RS     let (closure, envelope) =
-//RS         jetpack::Lock::nix_realization_strict(&project.path, "ripgrep@jetpack")
-//RS             .unwrap().unwrap();
-//RS     assert_eq!(closure.index_authority, index_authority);
-//RS     assert_eq!(envelope.catalog_tier, "local-unofficial");
-//RS     assert_eq!(envelope.catalog_trust, "unverified");
-//RS     let original_lock = fs::read(project.join(".jet/lock")).unwrap();
-//RS     let entries = Store::list_checked(&Roots::at(root.path.clone())).unwrap();
-//RS     let original = entries.iter().find(|entry| entry.reference == "ripgrep@jetpack").unwrap().clone();
-//RS     let producer = ProducerRecord::decode(&original.producer_record).unwrap();
-//RS     assert_eq!(producer.facts["nix.index.target.sha256"], index_authority);
-//RS     assert_eq!(producer.facts["nix.index.manifest.sha256"], "");
-//RS     assert_eq!(producer.facts["nix.project-cas-bundle"], closure.project_cas_bundle);
-//RS     let original_graph = Store::closure_graph(&Roots::at(root.path.clone())).unwrap();
-//RS     let original_closure = original_graph.closure(&closure.output);
-//RS 
-//RS     server.reset_counts();
-//RS     server.stop_network();
-//RS     let bundle = project.join(".jet/nix-cas").join(&closure.project_cas_bundle);
-//RS     let saved_bundle = project.join("saved-bundle");
-//RS     fs::rename(&bundle, &saved_bundle).unwrap();
-//RS     assert_success(prepare(&root.path, &replacement.path, true));
-//RS     assert_eq!(fs::read(project.join(".jet/lock")).unwrap(), original_lock);
-//RS     let env_receipt = project.join(".jet/receipts/env-entry");
-//RS     fs::remove_file(&env_receipt).unwrap();
-//RS     let unapproved = prepare_env(false);
-//RS     assert_eq!(unapproved.status.code(), Some(1));
-//RS     assert!(!env_receipt.exists(), "unapproved local admission created an environment receipt");
-//RS     assert_eq!(fs::read(project.join(".jet/lock")).unwrap(), original_lock);
-//RS     assert_success(prepare_env(true));
-//RS     fs::remove_file(&env_receipt).unwrap();
-//RS     assert_success(prepare_env(true));
-//RS     // An intact warm environment receipt is not an invocation permission grant.
-//RS     let allowed = env_command(true).args(["--", "/bin/sh", "-c", "printf allowed"])
-//RS         .output().unwrap();
-//RS     assert!(allowed.status.success(), "{}", String::from_utf8_lossy(&allowed.stderr));
-//RS     assert_eq!(allowed.stdout, b"allowed");
-//RS     let intact_receipt = fs::read(&env_receipt).unwrap();
-//RS     let unapproved = env_command(false).args(["--", "/bin/sh", "-c", "printf forbidden"])
-//RS         .output().unwrap();
-//RS     assert_eq!(unapproved.status.code(), Some(1));
-//RS     assert!(unapproved.stdout.is_empty(), "unapproved command ran");
-//RS     assert!(String::from_utf8_lossy(&unapproved.stderr).contains("--local-nix-catalog"));
-//RS     assert_eq!(fs::read(&env_receipt).unwrap(), intact_receipt);
-//RS     assert_eq!(fs::read(project.join(".jet/lock")).unwrap(), original_lock);
-//RS     let exported = env_command(true).args(["export", "bash"]).output().unwrap();
-//RS     assert!(exported.status.success(), "{}", String::from_utf8_lossy(&exported.stderr));
-//RS     assert!(String::from_utf8_lossy(&exported.stdout).contains("export PATH="));
-//RS     let intact_receipt = fs::read(&env_receipt).unwrap();
-//RS     let unapproved = env_command(false).args(["export", "bash"]).output().unwrap();
-//RS     // Export's quiet refusal must preserve the caller's existing activation.
-//RS     assert!(unapproved.status.success());
-//RS     assert!(unapproved.stdout.is_empty(), "unapproved export emitted activation");
-//RS     assert_eq!(fs::read(&env_receipt).unwrap(), intact_receipt);
-//RS     assert_eq!(fs::read(project.join(".jet/lock")).unwrap(), original_lock);
-//RS     let (env_closure, env_envelope) =
-//RS         jetpack::Lock::nix_realization_strict(&project.path, "ripgrep@jetpack")
-//RS             .unwrap().unwrap();
-//RS     assert_eq!(env_closure, closure);
-//RS     assert_eq!(env_envelope, envelope);
-//RS     let original_lock = fs::read(project.join(".jet/lock")).unwrap();
-//RS     let warm_entries = Store::list_checked(&Roots::at(root.path.clone())).unwrap();
-//RS     let warm = warm_entries.iter().find(|entry| entry.reference == "ripgrep@jetpack").unwrap();
-//RS     let warm_producer = ProducerRecord::decode(&warm.producer_record).unwrap();
-//RS     assert_eq!(warm_producer.facts["nix.output.out"], server.root_store_path);
-//RS     assert_eq!(warm.producer_record, original.producer_record);
-//RS     assert_eq!(warm.named_outputs, original.named_outputs);
-//RS     assert_eq!(
-//RS         Store::closure_graph(&Roots::at(root.path.clone())).unwrap().closure(&closure.output),
-//RS         original_closure,
-//RS     );
-//RS     // JetOS and other non-CLI consumers cross this same Store boundary.
-//RS     let roots = Roots::at(root.path.clone());
-//RS     assert_eq!(roots.shared_cas_dir(), root.join("hangar/cas"));
-//RS     let store_dir = roots.hangar_dir();
-//RS     let spec = jetpack::RefSpec::classify("ripgrep@jetpack").unwrap();
-//RS     let table = jetpack::RefSpec::SourceTable::empty();
-//RS     let mut ctx = jetpack::Provider::Ctx {
-//RS         fixtures: None,
-//RS         store_dir: &store_dir,
-//RS         offline: true,
-//RS         project_dir: Some(&project.path),
-//RS         nix_index: None,
-//RS         nix_roots: Some(&roots),
-//RS         allow_local_nix_catalog: false,
-//RS     };
-//RS     let denied = Store::realize_verified(
-//RS         &roots, &ctx, Store::RealizeRequest::Package { spec: &spec, table: &table },
-//RS     );
-//RS     match denied {
-//RS         Err(Store::RealizeError::LockedNix(error)) => {
-//RS             assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
-//RS             assert!(error.to_string().contains("--local-nix-catalog"));
-//RS         }
-//RS         Err(error) => panic!("unexpected replay error: {error:?}"),
-//RS         Ok(_) => panic!("Store reused a local admission without invocation permission"),
-//RS     }
-//RS     assert_eq!(fs::read(project.join(".jet/lock")).unwrap(), original_lock);
-//RS     ctx.allow_local_nix_catalog = true;
-//RS     let allowed = Store::realize_verified(
-//RS         &roots, &ctx, Store::RealizeRequest::Package { spec: &spec, table: &table },
-//RS     ).unwrap();
-//RS     assert_eq!(allowed.metadata().producer_record, original.producer_record);
-//RS     assert_eq!(allowed.metadata().envelope, original.envelope);
-//RS     assert_eq!(allowed.metadata().named_outputs, original.named_outputs);
-//RS     drop(allowed);
-//RS     assert_eq!(fs::read(project.join(".jet/lock")).unwrap(), original_lock);
-//RS     // An adapter's private build roots must inherit denial, and an allowed
-//RS     // dependency must retain its original verified native-Hangar admission.
-//RS     fs::create_dir_all(nested_project.join(".jet")).unwrap();
-//RS     fs::write(nested_project.join(".jet/lock"), &original_lock).unwrap();
-//RS     let mut nested_ctx = jetpack::Provider::Ctx {
-//RS         project_dir: Some(&nested_project.path),
-//RS         allow_local_nix_catalog: false,
-//RS         ..ctx
-//RS     };
-//RS     let expectation = jetpack::Provider::adapter_cache_expectation(&plan, &table, &nested_ctx).unwrap();
-//RS     let denied = Store::realize_verified(
-//RS         &roots, &nested_ctx,
-//RS         Store::RealizeRequest::Adapter { plan: &plan, table: &table, expectation: &expectation },
-//RS     );
-//RS     match denied {
-//RS         Err(Store::RealizeError::LockedNix(error)) => {
-//RS             assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
-//RS         }
-//RS         Err(error) => panic!("unexpected nested replay error: {error:?}"),
-//RS         Ok(_) => panic!("adapter reused a local dependency without invocation permission"),
-//RS     }
-//RS     assert!(!Store::list_checked(&roots).unwrap().iter().any(|entry| entry.name == plan.name));
-//RS     assert_eq!(fs::read(nested_project.join(".jet/lock")).unwrap(), original_lock);
-//RS     nested_ctx.allow_local_nix_catalog = true;
-//RS     let adapted = Store::realize_verified(
-//RS         &roots, &nested_ctx,
-//RS         Store::RealizeRequest::Adapter { plan: &plan, table: &table, expectation: &expectation },
-//RS     ).unwrap();
-//RS     let adapted_entry = adapted.metadata();
-//RS     assert!(adapted_entry.version.is_empty(), "unversioned adapter acquired an invented version");
-//RS     let nested_lock = jetpack::Lock::load(&nested_project.path).unwrap();
-//RS     let locked_adapter = nested_lock.packages.iter().find(|package| package.name == plan.name).unwrap();
-//RS     assert_eq!(locked_adapter.receipt.as_deref(), Some(adapted_entry.receipt.as_str()));
-//RS     assert_eq!(fs::read(Path::new(&adapted_entry.out).join("payload")).unwrap(), b"isolated adapter output\n");
-//RS     assert!(Store::verify_cache_entry(
-//RS         &roots, adapted_entry, &adapted_entry.reference, &expectation,
-//RS     ).trusted());
-//RS     let adapted_producer = ProducerRecord::decode(&adapted_entry.producer_record).unwrap();
-//RS     assert_eq!(adapted_producer.facts["build.dependencies"], "ripgrep@jetpack");
-//RS     assert_eq!(adapted_producer.facts["build.sandbox"], "non-executing");
-//RS     assert_eq!(adapted_producer.facts["build.sandbox_policy"], "no child launched");
-//RS     assert!(adapted_entry.references.is_empty(), "build-only tool became a dangling runtime reference");
-//RS     let warm_adapter = Store::realize_verified(
-//RS         &roots, &nested_ctx,
-//RS         Store::RealizeRequest::Adapter { plan: &plan, table: &table, expectation: &expectation },
-//RS     ).unwrap();
-//RS     assert_eq!(warm_adapter.source_state(), jetpack::Provider::SourceState::Cached);
-//RS     assert_eq!(warm_adapter.metadata().producer_record, adapted_entry.producer_record);
-//RS     assert_eq!(fs::read(warm_adapter.original_output().join("payload")).unwrap(), b"isolated adapter output\n");
-//RS     drop(warm_adapter);
-//RS     drop(adapted);
-//RS     let entries = Store::list_checked(&roots).unwrap();
-//RS     let after_nested = entries.iter().find(|entry| entry.reference == original.reference).unwrap();
-//RS     assert_eq!(after_nested.producer_record, original.producer_record);
-//RS     assert_eq!(after_nested.envelope, original.envelope);
-//RS     assert_eq!(after_nested.named_outputs, original.named_outputs);
-//RS     assert_eq!(Store::closure_graph(&roots).unwrap().closure(&closure.output), original_closure);
-//RS     assert_eq!(fs::read(project.join(".jet/lock")).unwrap(), original_lock);
-//RS     fs::rename(&saved_bundle, &bundle).unwrap();
-//RS     assert_success(prepare(&replay.path, &replacement.path, true));
-//RS     let (replayed_closure, replayed_envelope) =
-//RS         jetpack::Lock::nix_realization_strict(&project.path, "ripgrep@jetpack")
-//RS             .unwrap().unwrap();
-//RS     assert_eq!(replayed_closure, closure);
-//RS     assert_eq!(replayed_envelope, envelope);
-//RS     let entries = Store::list_checked(&Roots::at(replay.path.clone())).unwrap();
-//RS     let replayed = entries.iter().find(|entry| entry.reference == "ripgrep@jetpack").unwrap();
-//RS     assert_eq!(replayed.envelope.output_hash, closure.output);
-//RS     assert_eq!(replayed.references, closure.references);
-//RS     let producer = ProducerRecord::decode(&replayed.producer_record).unwrap();
-//RS     assert_eq!(producer.facts["nix.index.target.sha256"], index_authority);
-//RS     assert_eq!(producer.facts["nix.index.tier"], "local-unofficial");
-//RS     assert_eq!(producer.facts["nix.index.trust"], "unverified");
-//RS     assert!(!producer.facts.contains_key("nix.index.manifest.sha256"));
-//RS     assert_eq!(server.object_request_count(&server.root_store_path), 0);
-//RS     for path in &server.transitive_store_paths {
-//RS         assert_eq!(server.object_request_count(path), 0);
-//RS     }
-//RS 
-//RS     let baseline = jetpack::Lock::parse(std::str::from_utf8(&original_lock).unwrap()).unwrap();
-//RS     let mut promoted = baseline.clone();
-//RS     let promoted_envelope = promoted.packages.iter_mut()
-//RS         .find(|package| package.nix_closure.is_some()).unwrap().envelope.as_mut().unwrap();
-//RS     promoted_envelope.catalog_tier = "official-signed".into();
-//RS     promoted_envelope.catalog_trust = "verified".into();
-//RS     fs::write(project.join(".jet/lock"), jetpack::Lock::write(&promoted)).unwrap();
-//RS     assert!(!prepare(&root.path, &replacement.path, true).status.success());
-//RS     assert!(!prepare_env(true).status.success());
-//RS     let empty = Scratch::new("local-index-forged-official-cold");
-//RS     assert!(!prepare(&empty.path, &replacement.path, true).status.success());
-//RS     assert!(Store::list_checked(&Roots::at(empty.path.clone())).unwrap().is_empty());
-//RS 
-//RS     for change_authority in [true, false] {
-//RS         let mut tampered = baseline.clone();
-//RS         let record = tampered.packages.iter_mut()
-//RS             .find_map(|package| package.nix_closure.as_mut()).unwrap();
-//RS         if change_authority {
-//RS             record.index_authority = "d".repeat(64);
-//RS         } else {
-//RS             record.project_cas_bundle = format!("sha256-{}", "d".repeat(64));
-//RS         }
-//RS         fs::write(project.join(".jet/lock"), jetpack::Lock::write(&tampered)).unwrap();
-//RS         assert!(!prepare(&root.path, &replacement.path, true).status.success());
-//RS     }
-//RS     let after_rejections = Store::list_checked(&Roots::at(root.path.clone())).unwrap();
-//RS     let unchanged = after_rejections.iter()
-//RS         .find(|entry| entry.reference == "ripgrep@jetpack").unwrap();
-//RS     assert_eq!(unchanged.producer_record, warm.producer_record);
-//RS     assert_eq!(unchanged.receipt, warm.receipt);
-//RS     fs::write(project.join(".jet/lock"), &original_lock).unwrap();
-//RS 
-//RS     let runtime = after_rejections.iter().find(|entry| {
-//RS         ProducerRecord::decode(&entry.producer_record).ok().is_some_and(|record| {
-//RS             record.facts.get("nix.store-path").map(String::as_str)
-//RS                 == Some(nix_index_cache_server::RUNTIME_PATH)
-//RS         })
-//RS     }).unwrap();
-//RS     let marker = Path::new(&runtime.out).join("share/marker");
-//RS     use std::os::unix::fs::PermissionsExt as _;
-//RS     let marker_parent = marker.parent().unwrap();
-//RS     let parent_permissions = fs::metadata(marker_parent).unwrap().permissions();
-//RS     fs::set_permissions(marker_parent, fs::Permissions::from_mode(
-//RS         parent_permissions.mode() | 0o200,
-//RS     )).unwrap();
-//RS     let replacement_marker = marker_parent.join("replacement-marker");
-//RS     use std::io::Write as _;
-//RS     fs::OpenOptions::new().write(true).create_new(true)
-//RS         .open(&replacement_marker).unwrap()
-//RS         .write_all(b"corrupted runtime").unwrap();
-//RS     fs::rename(&replacement_marker, &marker).unwrap();
-//RS     fs::set_permissions(marker_parent, parent_permissions).unwrap();
-//RS     assert!(!prepare(&root.path, &replacement.path, true).status.success());
-//RS     assert!(!prepare_env(true).status.success());
-//RS     assert_eq!(fs::read(&marker).unwrap(), b"corrupted runtime");
-//RS }
-//RS 
-//RS fn hex_digest(prefix: &str, fill: char) -> String {
-//RS     format!("{prefix}{}", fill.to_string().repeat(64))
-//RS }
-//RS 
-//RS fn cas_digest(fill: char) -> String {
-//RS     hex_digest("sha256-", fill)
-//RS }
-//RS 
-//RS fn valid_nix_closure(output: &str) -> jetpack::Lock::NixClosureRecord {
-//RS     jetpack::Lock::NixClosureRecord {
-//RS         channel: "nixpkgs-unstable".into(),
-//RS         revision: "a".repeat(40),
-//RS         system: jetpack::Envelope::host_platform(),
-//RS         index_authority: "b".repeat(64),
-//RS         derivation: "c".repeat(64),
-//RS         output: output.into(),
-//RS         nar_hash: format!("sha256:{}", "d".repeat(64)),
-//RS         size: 1,
-//RS         compression: "none".into(),
-//RS         references: Vec::new(),
-//RS         upstream_proof: cas_digest('e'),
-//RS         cache_key: "f".repeat(64),
-//RS         project_cas_bundle: cas_digest('0'),
-//RS     }
-//RS }
-//RS 
-//RS fn lock_envelope(output: &str, platform: &str) -> jetpack::Lock::LockEnvelope {
-//RS     jetpack::Lock::LockEnvelope {
-//RS         output_hash: output.into(),
-//RS         platform: platform.into(),
-//RS         provenance: "integration-test".into(),
-//RS         catalog_tier: "local-unofficial".into(),
-//RS         catalog_trust: "unverified".into(),
-//RS         ..Default::default()
-//RS     }
-//RS }
-//RS 
-//RS #[test]
-//RS fn malformed_present_lock_is_a_trust_error_not_a_cache_miss() {
-//RS     let project = Scratch::new("nix-lock-malformed");
-//RS     let lock_path = project.join(".jet/lock");
-//RS     fs::create_dir_all(lock_path.parent().unwrap()).unwrap();
-//RS     fs::write(&lock_path, "version = [\n").unwrap();
-//RS 
-//RS     let error = jetpack::Lock::load_strict(&project.path).unwrap_err();
-//RS     assert!(!error.is_empty(), "malformed present lock must be rejected");
-//RS     let error =
-//RS         jetpack::Lock::nix_realization_strict(&project.path, "pkg@jetpack").unwrap_err();
-//RS     assert!(!error.is_empty(), "Nix lookup must not downgrade malformed lock state");
-//RS }
-//RS 
-//RS #[test]
-//RS fn nix_lock_rejects_platform_and_envelope_mismatch() {
-//RS     let project = Scratch::new("nix-lock-platform");
-//RS     let output = cas_digest('1');
-//RS     let closure = valid_nix_closure(&output);
-//RS     let platform = jetpack::Envelope::host_platform();
-//RS     let mismatch = if platform == "aarch64-linux" {
-//RS         "x86_64-linux"
-//RS     } else {
-//RS         "aarch64-linux"
-//RS     };
-//RS 
-//RS     let error = jetpack::Lock::record_nix_realization(
-//RS         &project.path,
-//RS         "pkg",
-//RS         "1.0.0",
-//RS         "pkg@jetpack",
-//RS         &output,
-//RS         closure.clone(),
-//RS         lock_envelope(&output, &mismatch),
-//RS     )
-//RS     .unwrap_err();
-//RS     assert!(error.contains("system does not match"), "{error}");
-//RS     assert!(
-//RS         !project.join(".jet/lock").exists(),
-//RS         "rejected identity must not publish a project lock"
-//RS     );
-//RS 
-//RS     jetpack::Lock::record_nix_realization(
-//RS         &project.path,
-//RS         "pkg",
-//RS         "1.0.0",
-//RS         "pkg@jetpack",
-//RS         &output,
-//RS         closure,
-//RS         lock_envelope(&output, &platform),
-//RS     )
-//RS     .unwrap();
-//RS     let lock_path = project.join(".jet/lock");
-//RS     let mut lock = jetpack::Lock::parse(&fs::read_to_string(&lock_path).unwrap()).unwrap();
-//RS     lock.packages[0].envelope.as_mut().unwrap().platform = "aarch64-linux".into();
-//RS     fs::write(&lock_path, jetpack::Lock::write(&lock)).unwrap();
-//RS 
-//RS     let error =
-//RS         jetpack::Lock::nix_realization_strict(&project.path, "pkg@jetpack").unwrap_err();
-//RS     assert!(error.contains("envelope identity"), "{error}");
-//RS }
-//RS 
-//RS #[test]
-//RS fn nix_lock_receipt_follows_complete_closure_identity() {
-//RS     let project = Scratch::new("nix-lock-identity");
-//RS     let output = cas_digest('2');
-//RS     let mut closure = valid_nix_closure(&output);
-//RS     let envelope = lock_envelope(&output, "x86_64-linux");
-//RS     let reference = "pkg@jetpack";
-//RS 
-//RS     jetpack::Lock::record_nix_realization(
-//RS         &project.path,
-//RS         "pkg",
-//RS         "1.0.0",
-//RS         reference,
-//RS         &output,
-//RS         closure.clone(),
-//RS         envelope.clone(),
-//RS     )
-//RS     .unwrap();
-//RS     let lock_path = project.join(".jet/lock");
-//RS     let mut lock = jetpack::Lock::parse(&fs::read_to_string(&lock_path).unwrap()).unwrap();
-//RS     let receipt = cas_digest('9');
-//RS     lock.packages[0].receipt = Some(receipt.clone());
-//RS     fs::write(&lock_path, jetpack::Lock::write(&lock)).unwrap();
-//RS 
-//RS     jetpack::Lock::record_nix_realization(
-//RS         &project.path,
-//RS         "pkg",
-//RS         "1.0.0",
-//RS         reference,
-//RS         &output,
-//RS         closure.clone(),
-//RS         envelope.clone(),
-//RS     )
-//RS     .unwrap();
-//RS     let lock = jetpack::Lock::parse(&fs::read_to_string(&lock_path).unwrap()).unwrap();
-//RS     assert_eq!(lock.packages[0].receipt.as_deref(), Some(receipt.as_str()));
-//RS 
-//RS     closure.index_authority = "d".repeat(64);
-//RS     jetpack::Lock::record_nix_realization(
-//RS         &project.path,
-//RS         "pkg",
-//RS         "1.0.0",
-//RS         reference,
-//RS         &output,
-//RS         closure,
-//RS         envelope,
-//RS     )
-//RS     .unwrap();
-//RS     let lock = jetpack::Lock::parse(&fs::read_to_string(&lock_path).unwrap()).unwrap();
-//RS     assert_eq!(lock.packages[0].receipt, None);
-//RS }
-//RS 
-//RS #[test]
-//RS fn locked_nix_missing_bundle_reports_registered_diagnostic_before_store_mutation() {
-//RS     let project = Scratch::new("nix-lock-missing-bundle-project");
-//RS     let root = Scratch::new("nix-lock-missing-bundle-root");
-//RS     fs::write(
-//RS         project.join("env.jet"),
-//RS         "module dev {\n    sources: { default: NixOS/nixpkgs/nixpkgs-unstable@github }\n    env.dev: Env{ packages: [default.pkg] }\n}\n",
-//RS     )
-//RS     .unwrap();
-//RS 
-//RS     let output = cas_digest('6');
-//RS     let closure = valid_nix_closure(&output);
-//RS     let envelope = lock_envelope(&output, &jetpack::Envelope::host_platform());
-//RS     jetpack::Lock::record_nix_realization(
-//RS         &project.path,
-//RS         "pkg",
-//RS         "1.0.0",
-//RS         "pkg@default",
-//RS         &output,
-//RS         closure,
-//RS         envelope,
-//RS     )
-//RS     .unwrap();
-//RS 
-//RS     let home = Scratch::new("nix-lock-missing-bundle-home");
-//RS     let command = Command::new(common::jetpack_bin())
-//RS         .args(["env", "--offline", "--no-color", "--trust", "--", "true"])
-//RS         .current_dir(&project.path)
-//RS         .env_clear()
-//RS         .env("PATH", "/usr/bin")
-//RS         .env("HOME", &home.path)
-//RS         .env("JETPACK_ROOT", &root.path)
-//RS         .output()
-//RS         .unwrap();
-//RS     let stderr = String::from_utf8_lossy(&command.stderr);
-//RS     assert!(!command.status.success(), "missing lock bytes must fail");
-//RS     assert!(stderr.contains("E1350"), "stderr: {stderr}");
-//RS     assert!(
-//RS         stderr.contains("project Nix CAS bundle") || stderr.contains("locked Nix"),
-//RS         "stderr must name the lock-bound replay: {stderr}"
-//RS     );
-//RS     assert!(
-//RS         !root.join("hangar/objects").exists(),
-//RS         "missing lock bytes must fail before Hangar mutation"
-//RS     );
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS fn copy_tree_nofollow(source: &Path, destination: &Path) {
-//RS     use std::os::unix::fs::PermissionsExt as _;
-//RS 
-//RS     let metadata = fs::symlink_metadata(source).unwrap();
-//RS     if metadata.file_type().is_symlink() {
-//RS         std::os::unix::fs::symlink(fs::read_link(source).unwrap(), destination).unwrap();
-//RS     } else if metadata.is_dir() {
-//RS         fs::create_dir(destination).unwrap();
-//RS         for entry in fs::read_dir(source).unwrap() {
-//RS             let entry = entry.unwrap();
-//RS             copy_tree_nofollow(&entry.path(), &destination.join(entry.file_name()));
-//RS         }
-//RS         fs::set_permissions(
-//RS             destination,
-//RS             fs::Permissions::from_mode(metadata.permissions().mode()),
-//RS         )
-//RS         .unwrap();
-//RS     } else {
-//RS         fs::copy(source, destination).unwrap();
-//RS         fs::set_permissions(
-//RS             destination,
-//RS             fs::Permissions::from_mode(metadata.permissions().mode()),
-//RS         )
-//RS         .unwrap();
-//RS     }
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS fn relative_link_entry(
-//RS     root: &Scratch,
-//RS     source: &Scratch,
-//RS     target: &str,
-//RS ) -> jetpack::Store::StoreEntry {
-//RS     fs::write(source.path.join(target), b"link target payload\n").unwrap();
-//RS     std::os::unix::fs::symlink(target, source.join("link")).unwrap();
-//RS 
-//RS     let roots = jetpack::Store::Roots {
-//RS         root: root.path.clone(),
-//RS         dev_mode: false,
-//RS     };
-//RS     let request = jetpack::Store::IngestRequest {
-//RS         name: "link-fixture".into(),
-//RS         version: "1.0.0".into(),
-//RS         reference: "link-fixture@fixture".into(),
-//RS         cache_identity: jetpack::Store::CacheIdentity {
-//RS             source_fingerprint: "source-fingerprint".into(),
-//RS             recipe_fingerprint: "recipe-fingerprint".into(),
-//RS             policy_fingerprint: "policy-fingerprint".into(),
-//RS             platform: "x86_64-linux".into(),
-//RS         },
-//RS         references: Vec::new(),
-//RS         outputs: BTreeMap::from([(String::from("out"), source.path.clone())]),
-//RS         signature: String::new(),
-//RS         provenance: "integration-test".into(),
-//RS         platform_artifact_kind: String::new(),
-//RS     };
-//RS     jetpack::Store::ingest_tree(&roots, &request).unwrap().entry
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS fn read_u32(bytes: &[u8], at: &mut usize) -> u32 {
-//RS     let end = *at + 4;
-//RS     let value = u32::from_le_bytes(bytes[*at..end].try_into().unwrap());
-//RS     *at = end;
-//RS     value
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS fn read_u64(bytes: &[u8], at: &mut usize) -> u64 {
-//RS     let end = *at + 8;
-//RS     let value = u64::from_le_bytes(bytes[*at..end].try_into().unwrap());
-//RS     *at = end;
-//RS     value
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS fn skip_string(bytes: &[u8], at: &mut usize) {
-//RS     let length = read_u32(bytes, at) as usize;
-//RS     *at += length;
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS fn read_bytes(bytes: &[u8], at: &mut usize) -> Vec<u8> {
-//RS     let length = read_u32(bytes, at) as usize;
-//RS     let end = *at + length;
-//RS     let value = bytes[*at..end].to_vec();
-//RS     *at = end;
-//RS     value
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS #[derive(Clone)]
-//RS struct RawArchiveNode {
-//RS     kind: u8,
-//RS     path: Vec<u8>,
-//RS     mode: u32,
-//RS     bytes: Vec<u8>,
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS #[derive(Clone)]
-//RS struct RawArchiveOutput {
-//RS     root_mode: u32,
-//RS     nodes: Vec<RawArchiveNode>,
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS fn read_generic_output(bytes: &[u8], expected: &str) -> RawArchiveOutput {
-//RS     let magic = b"jet-hangar-archive-v1\0";
-//RS     let mut at = magic.len();
-//RS     skip_string(bytes, &mut at);
-//RS     let object_count = read_u32(bytes, &mut at) as usize;
-//RS     let mut output = None;
-//RS     for _ in 0..object_count {
-//RS         let _id = read_bytes(bytes, &mut at);
-//RS         let digest = read_bytes(bytes, &mut at);
-//RS         let meta = read_bytes(bytes, &mut at);
-//RS         let root_mode = read_u32(bytes, &mut at);
-//RS         let node_count = read_u32(bytes, &mut at) as usize;
-//RS         let mut nodes = Vec::with_capacity(node_count);
-//RS         for _ in 0..node_count {
-//RS             let kind = bytes[at];
-//RS             at += 1;
-//RS             let path = read_bytes(bytes, &mut at);
-//RS             let mode = read_u32(bytes, &mut at);
-//RS             let size = read_u64(bytes, &mut at) as usize;
-//RS             let end = at + size;
-//RS             let payload = bytes[at..end].to_vec();
-//RS             at = end;
-//RS             nodes.push(RawArchiveNode {
-//RS                 kind,
-//RS                 path,
-//RS                 mode,
-//RS                 bytes: payload,
-//RS             });
-//RS         }
-//RS         if meta.is_empty() && digest == expected.as_bytes() {
-//RS             output = Some(RawArchiveOutput { root_mode, nodes });
-//RS         }
-//RS     }
-//RS     output.expect("generic archive must contain the requested output")
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS fn put_bytes(out: &mut Vec<u8>, bytes: &[u8]) {
-//RS     out.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
-//RS     out.extend_from_slice(bytes);
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS fn put_raw_u64(out: &mut Vec<u8>, value: u64) {
-//RS     out.extend_from_slice(&value.to_le_bytes());
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS fn encode_nix_bundle(
-//RS     output: &str,
-//RS     source: &RawArchiveOutput,
-//RS     platform: &str,
-//RS     revision: &str,
-//RS     cache_key: &str,
-//RS ) -> Vec<u8> {
-//RS     let mut canonical = Vec::new();
-//RS     canonical.extend_from_slice(&source.root_mode.to_le_bytes());
-//RS     for node in &source.nodes {
-//RS         canonical.push(node.kind);
-//RS         put_bytes(&mut canonical, &node.path);
-//RS         canonical.extend_from_slice(&node.mode.to_le_bytes());
-//RS         put_raw_u64(&mut canonical, node.bytes.len() as u64);
-//RS         canonical.extend_from_slice(&node.bytes);
-//RS     }
-//RS     let member_hash = format!("sha256-{}", jetpack::SHA256::sha256_hex(&canonical));
-//RS 
-//RS     let mut out = Vec::new();
-//RS     out.extend_from_slice(b"jet-hangar-archive-v1\0");
-//RS     put_bytes(&mut out, output.as_bytes());
-//RS     out.extend_from_slice(&1u32.to_le_bytes());
-//RS     put_bytes(&mut out, output.as_bytes());
-//RS     put_bytes(&mut out, output.as_bytes());
-//RS     put_bytes(&mut out, &[]);
-//RS     out.extend_from_slice(&source.root_mode.to_le_bytes());
-//RS     out.extend_from_slice(&(source.nodes.len() as u32).to_le_bytes());
-//RS     for node in &source.nodes {
-//RS         out.push(node.kind);
-//RS         put_bytes(&mut out, &node.path);
-//RS         out.extend_from_slice(&node.mode.to_le_bytes());
-//RS         put_raw_u64(&mut out, node.bytes.len() as u64);
-//RS         out.extend_from_slice(&node.bytes);
-//RS     }
-//RS     out.push(2);
-//RS     put_bytes(&mut out, output.as_bytes());
-//RS     put_bytes(&mut out, platform.as_bytes());
-//RS     put_bytes(&mut out, revision.as_bytes());
-//RS     put_bytes(&mut out, cache_key.as_bytes());
-//RS     out.extend_from_slice(&1u32.to_le_bytes());
-//RS     put_bytes(&mut out, output.as_bytes());
-//RS     put_bytes(&mut out, member_hash.as_bytes());
-//RS     put_raw_u64(&mut out, canonical.len() as u64);
-//RS     out.extend_from_slice(&0u32.to_le_bytes());
-//RS     out.push(0);
-//RS     out
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS fn replace_link_target(bytes: &[u8], old: &[u8], replacement: &[u8]) -> Vec<u8> {
-//RS     assert!(!old.is_empty());
-//RS     assert_eq!(old.len(), replacement.len());
-//RS     let magic = b"jet-hangar-archive-v1\0";
-//RS     assert!(bytes.starts_with(magic));
-//RS     let mut at = magic.len();
-//RS     skip_string(bytes, &mut at);
-//RS     let object_count = read_u32(bytes, &mut at) as usize;
-//RS     assert_eq!(object_count, 1, "fixture must contain one output object");
-//RS     let mut object_digest = None;
-//RS     let mut object = None;
-//RS     for _ in 0..object_count {
-//RS         let _id = read_bytes(bytes, &mut at);
-//RS         let digest = read_bytes(bytes, &mut at);
-//RS         let meta = read_bytes(bytes, &mut at);
-//RS         let root_mode = read_u32(bytes, &mut at);
-//RS         let node_count = read_u32(bytes, &mut at) as usize;
-//RS         let mut nodes = Vec::with_capacity(node_count);
-//RS         for _ in 0..node_count {
-//RS             let kind = bytes[at];
-//RS             at += 1;
-//RS             let path = read_bytes(bytes, &mut at);
-//RS             let mode = read_u32(bytes, &mut at);
-//RS             let size = read_u64(bytes, &mut at) as usize;
-//RS             let end = at + size;
-//RS             nodes.push(RawArchiveNode {
-//RS                 kind,
-//RS                 path,
-//RS                 mode,
-//RS                 bytes: bytes[at..end].to_vec(),
-//RS             });
-//RS             at = end;
-//RS         }
-//RS         if meta.is_empty() {
-//RS             object_digest = Some(digest);
-//RS             object = Some(RawArchiveOutput { root_mode, nodes });
-//RS         }
-//RS     }
-//RS 
-//RS     assert_eq!(bytes[at], 2, "fixture must carry a Nix manifest");
-//RS     at += 1;
-//RS     let manifest_output = read_bytes(bytes, &mut at);
-//RS     let platform = read_bytes(bytes, &mut at);
-//RS     let revision = read_bytes(bytes, &mut at);
-//RS     let cache_key = read_bytes(bytes, &mut at);
-//RS     let member_count = read_u32(bytes, &mut at) as usize;
-//RS     for _ in 0..member_count {
-//RS         skip_string(bytes, &mut at);
-//RS         skip_string(bytes, &mut at);
-//RS         read_u64(bytes, &mut at);
-//RS         let reference_count = read_u32(bytes, &mut at) as usize;
-//RS         for _ in 0..reference_count {
-//RS             skip_string(bytes, &mut at);
-//RS         }
-//RS     }
-//RS     let object_digest = object_digest.expect("fixture must carry an output object");
-//RS     assert_eq!(object_digest, manifest_output);
-//RS     let mut object = object.expect("fixture must carry an output object");
-//RS     let mut matches = 0;
-//RS     for node in &mut object.nodes {
-//RS         if node.kind == 2 && node.bytes == old {
-//RS             node.bytes = replacement.to_vec();
-//RS             matches += 1;
-//RS         }
-//RS     }
-//RS     assert_eq!(matches, 1, "archive must contain one symlink target");
-//RS     encode_nix_bundle(
-//RS         &String::from_utf8(manifest_output).unwrap(),
-//RS         &object,
-//RS         &String::from_utf8(platform).unwrap(),
-//RS         &String::from_utf8(revision).unwrap(),
-//RS         &String::from_utf8(cache_key).unwrap(),
-//RS     )
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS fn replace_all(bytes: &[u8], old: &[u8], replacement: &[u8]) -> (Vec<u8>, usize) {
-//RS     assert!(!old.is_empty());
-//RS     assert_eq!(old.len(), replacement.len());
-//RS     let mut result = Vec::with_capacity(bytes.len());
-//RS     let mut cursor = 0;
-//RS     let mut count = 0;
-//RS     while let Some(relative) = bytes[cursor..]
-//RS         .windows(old.len())
-//RS         .position(|window| window == old)
-//RS     {
-//RS         let offset = cursor + relative;
-//RS         result.extend_from_slice(&bytes[cursor..offset]);
-//RS         result.extend_from_slice(replacement);
-//RS         cursor = offset + old.len();
-//RS         count += 1;
-//RS     }
-//RS     result.extend_from_slice(&bytes[cursor..]);
-//RS     (result, count)
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS fn cas_digest_from_bytes(bytes: &[u8]) -> String {
-//RS     format!("sha256-{}", jetpack::SHA256::sha256_hex(bytes))
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS #[test]
-//RS fn nix_cas_build_and_import_preserve_absolute_links_but_generic_paths_reject_them() {
-//RS     let source_root = Scratch::new("nix-cas-source-root");
-//RS     let source = Scratch::new("nix-cas-source");
-//RS     let absolute_target = "/nix/store/jet-closure-target";
-//RS     let relative_target = "x".repeat(absolute_target.len());
-//RS     let entry = relative_link_entry(&source_root, &source, &relative_target);
-//RS     let roots = jetpack::Store::Roots {
-//RS         root: source_root.path.clone(),
-//RS         dev_mode: false,
-//RS     };
-//RS     let generic_archive =
-//RS         jetpack::Store::export_unsigned_archive(&roots, &entry.reference, true).unwrap();
-//RS     let generic_output = read_generic_output(&generic_archive, &entry.envelope.output_hash);
-//RS     let platform = jetpack::Envelope::host_platform();
-//RS     let revision = "a".repeat(40);
-//RS     let cache_key = "f".repeat(64);
-//RS     let bundle = encode_nix_bundle(
-//RS         &entry.envelope.output_hash,
-//RS         &generic_output,
-//RS         &platform,
-//RS         &revision,
-//RS         &cache_key,
-//RS     );
-//RS     let absolute_source = Scratch::new("nix-cas-absolute-digest");
-//RS     let absolute_tree = absolute_source.join("tree");
-//RS     copy_tree_nofollow(&source.path, &absolute_tree);
-//RS     fs::remove_file(absolute_tree.join("link")).unwrap();
-//RS     std::os::unix::fs::symlink(absolute_target, absolute_tree.join("link")).unwrap();
-//RS     use std::os::unix::fs::PermissionsExt as _;
-//RS     fs::set_permissions(
-//RS         &absolute_tree,
-//RS         fs::Permissions::from_mode(generic_output.root_mode),
-//RS     )
-//RS     .unwrap();
-//RS     for node in &generic_output.nodes {
-//RS         if node.kind != 2 {
-//RS             let path = absolute_tree.join(String::from_utf8(node.path.clone()).unwrap());
-//RS             fs::set_permissions(path, fs::Permissions::from_mode(node.mode)).unwrap();
-//RS         }
-//RS     }
-//RS     let new_output = jetpack::Envelope::try_output_hash_of_in_hangar(
-//RS         &absolute_tree.to_string_lossy(),
-//RS         &roots.hangar_dir(),
-//RS         false,
-//RS     )
-//RS     .unwrap();
-//RS     assert_ne!(new_output, entry.envelope.output_hash);
-//RS 
-//RS     let (mut absolute_bundle, replaced_digests) = replace_all(
-//RS         &bundle,
-//RS         entry.envelope.output_hash.as_bytes(),
-//RS         new_output.as_bytes(),
-//RS     );
-//RS     assert!(replaced_digests >= 2, "root and output digest must be rewritten");
-//RS     absolute_bundle = replace_link_target(
-//RS         &absolute_bundle,
-//RS         relative_target.as_bytes(),
-//RS         absolute_target.as_bytes(),
-//RS     );
-//RS 
-//RS     let project = Scratch::new("nix-cas-project");
-//RS     let bundle_dir = project.join(".jet/nix-cas");
-//RS     fs::create_dir_all(&bundle_dir).unwrap();
-//RS     let bundle_digest = cas_digest_from_bytes(&absolute_bundle);
-//RS     fs::write(bundle_dir.join(&bundle_digest), &absolute_bundle).unwrap();
-//RS 
-//RS     let destination = Scratch::new("nix-cas-destination");
-//RS     let destination_roots = jetpack::Store::Roots {
-//RS         root: destination.path.clone(),
-//RS         dev_mode: false,
-//RS     };
-//RS     let (report, digests) = jetpack::Store::import_nix_cas_bundle(
-//RS         &project.path,
-//RS         &destination_roots,
-//RS         &bundle_digest,
-//RS     )
-//RS     .unwrap();
-//RS     assert_eq!(report.objects, 1);
-//RS     assert_eq!(digests, vec![new_output.clone()]);
-//RS     let imported_link = destination_roots
-//RS         .hangar_dir()
-//RS         .join("objects")
-//RS         .join(&new_output)
-//RS         .join("link");
-//RS     assert_eq!(
-//RS         fs::read_link(imported_link).unwrap(),
-//RS         PathBuf::from(absolute_target)
-//RS     );
-//RS 
-//RS     let mut closure = valid_nix_closure(&new_output);
-//RS     closure.project_cas_bundle = bundle_digest.clone();
-//RS     let replay_envelope = lock_envelope(&new_output, &platform);
-//RS     jetpack::Lock::record_nix_realization(
-//RS         &project.path,
-//RS         "link-fixture",
-//RS         "1.0.0",
-//RS         "link-fixture@jetpack",
-//RS         &new_output,
-//RS         closure,
-//RS         replay_envelope,
-//RS     )
-//RS     .unwrap();
-//RS     let spec = jetpack::RefSpec::classify("link-fixture@jetpack").unwrap();
-//RS     let table = jetpack::RefSpec::SourceTable::empty();
-//RS     let replayed = jetpack::Store::realize_verified(
-//RS         &destination_roots,
-//RS         &jetpack::Provider::Ctx {
-//RS             fixtures: None,
-//RS             store_dir: &destination.path,
-//RS             offline: true,
-//RS             project_dir: Some(&project.path),
-//RS             nix_index: None,
-//RS             nix_roots: Some(&destination_roots),
-//RS             allow_local_nix_catalog: true,
-//RS         },
-//RS         jetpack::Store::RealizeRequest::Package {
-//RS             spec: &spec,
-//RS             table: &table,
-//RS         },
-//RS     )
-//RS     .unwrap();
-//RS     let nix_entry = replayed.metadata().clone();
-//RS     let warm = jetpack::Store::realize_verified(
-//RS         &destination_roots,
-//RS         &jetpack::Provider::Ctx {
-//RS             fixtures: None,
-//RS             store_dir: &destination.path,
-//RS             offline: true,
-//RS             project_dir: Some(&project.path),
-//RS             nix_index: None,
-//RS             nix_roots: Some(&destination_roots),
-//RS             allow_local_nix_catalog: true,
-//RS         },
-//RS         jetpack::Store::RealizeRequest::Package {
-//RS             spec: &spec,
-//RS             table: &table,
-//RS         },
-//RS     )
-//RS     .unwrap();
-//RS     let mut expected_entry = nix_entry.clone();
-//RS     expected_entry.realized_at = 0;
-//RS     expected_entry.last_used_at = 0;
-//RS     let mut warm_entry = warm.metadata().clone();
-//RS     warm_entry.realized_at = 0;
-//RS     warm_entry.last_used_at = 0;
-//RS     assert_eq!(warm_entry, expected_entry, "warm replay changed lock identity");
-//RS 
-//RS     let copied_project = Scratch::new("nix-cas-copied-project");
-//RS     let copied_bundle_dir = copied_project.join(".jet/nix-cas");
-//RS     fs::create_dir_all(&copied_bundle_dir).unwrap();
-//RS     fs::copy(
-//RS         project.join(".jet/lock"),
-//RS         copied_project.join(".jet/lock"),
-//RS     )
-//RS     .unwrap();
-//RS     fs::copy(
-//RS         bundle_dir.join(&bundle_digest),
-//RS         copied_bundle_dir.join(&bundle_digest),
-//RS     )
-//RS     .unwrap();
-//RS     let copied_destination = Scratch::new("nix-cas-copied-destination");
-//RS     let copied_roots = jetpack::Store::Roots {
-//RS         root: copied_destination.path.clone(),
-//RS         dev_mode: false,
-//RS     };
-//RS     let copied_replayed = jetpack::Store::realize_verified(
-//RS         &copied_roots,
-//RS         &jetpack::Provider::Ctx {
-//RS             fixtures: None,
-//RS             store_dir: &copied_destination.path,
-//RS             offline: true,
-//RS             project_dir: Some(&copied_project.path),
-//RS             nix_index: None,
-//RS             nix_roots: Some(&copied_roots),
-//RS             allow_local_nix_catalog: true,
-//RS         },
-//RS         jetpack::Store::RealizeRequest::Package {
-//RS             spec: &spec,
-//RS             table: &table,
-//RS         },
-//RS     )
-//RS     .unwrap();
-//RS     let mut copied_identity = copied_replayed.metadata().clone();
-//RS     copied_identity.out.clear();
-//RS     copied_identity.bin.clear();
-//RS     copied_identity.rlib.clear();
-//RS     let mut expected_identity = expected_entry.clone();
-//RS     expected_identity.out.clear();
-//RS     expected_identity.bin.clear();
-//RS     expected_identity.rlib.clear();
-//RS     // Hangar paths are intentionally root-local; every identity field must
-//RS     // remain equal when the lock and project CAS bundle move together.
-//RS     assert_eq!(
-//RS         copied_identity, expected_identity,
-//RS         "copied repository changed locked replay identity"
-//RS     );
-//RS 
-//RS 
-//RS     let (exported, _) =
-//RS         jetpack::Store::export_nix_cas_bundle(&destination_roots, &nix_entry.reference).unwrap();
-//RS     assert!(
-//RS         exported
-//RS             .windows(absolute_target.len())
-//RS             .any(|window| window == absolute_target.as_bytes()),
-//RS         "Nix CAS export must retain the absolute target as link data"
-//RS     );
-//RS     let generic_export =
-//RS         jetpack::Store::export_unsigned_archive(&destination_roots, &nix_entry.reference, false)
-//RS             .unwrap_err();
-//RS     assert!(
-//RS         generic_export
-//RS             .to_string()
-//RS             .contains("absolute symlinks are not portable Hangar archive nodes"),
-//RS         "{generic_export}"
-//RS     );
-//RS 
-//RS     let generic_absolute_root = Scratch::new("nix-cas-generic-absolute");
-//RS     let generic_absolute_roots = jetpack::Store::Roots {
-//RS         root: generic_absolute_root.path.clone(),
-//RS         dev_mode: false,
-//RS     };
-//RS     let error = jetpack::Store::import_archive(
-//RS         &generic_absolute_roots,
-//RS         &absolute_bundle,
-//RS         None,
-//RS         true,
-//RS     )
-//RS     .unwrap_err();
-//RS     assert!(error.to_string().contains("archive link target is absolute"), "{error}");
-//RS 
-//RS     let escape_target = format!("../{}", "x".repeat(relative_target.len() - 3));
-//RS     let control_target = {
-//RS         let mut target = vec![b'x'; relative_target.len()];
-//RS         target[relative_target.len() / 2] = 1;
-//RS         target
-//RS     };
-//RS     let backslash_target = {
-//RS         let mut target = vec![b'x'; relative_target.len()];
-//RS         target[relative_target.len() / 2] = b'\\';
-//RS         target
-//RS     };
-//RS     for (tag, target, message) in [
-//RS         (
-//RS             "escape",
-//RS             escape_target.into_bytes(),
-//RS             "archive link target escapes its output root",
-//RS         ),
-//RS         (
-//RS             "control",
-//RS             control_target,
-//RS             "archive link target is not portable",
-//RS         ),
-//RS         (
-//RS             "backslash",
-//RS             backslash_target,
-//RS             "archive link target is not portable",
-//RS         ),
-//RS     ] {
-//RS         let hostile_bundle = replace_link_target(&bundle, relative_target.as_bytes(), &target);
-//RS         let hostile_root = Scratch::new(&format!("nix-cas-generic-{tag}"));
-//RS         let hostile_roots = jetpack::Store::Roots {
-//RS             root: hostile_root.path.clone(),
-//RS             dev_mode: false,
-//RS         };
-//RS         let error = jetpack::Store::import_archive(&hostile_roots, &hostile_bundle, None, true)
-//RS             .unwrap_err();
-//RS         assert!(error.to_string().contains(message), "{error}");
-//RS     }
-//RS }
-// END-PORT-PENDING 1095 tests/jetpack_nix_closure_replay.rs:1-1181
+// Rust: tests/jetpack_nix_closure_replay.rs:1
+use std.[fs, Permissions]
+use common.Scratch
+use Jetpack.[Lock, Store, Envelope, SHA256]
+use Foundation.TEXT_NUL
+// GATE #4494: real filesystem/symlink operations. Unix-only callers dispatch on selected family.
 
+// Rust: tests/jetpack_nix_closure_replay.rs:407
+fn hex_digest(prefix: &String, fill: Char) -> String { "{prefix}{fill.to_string().repeat(64)}" }
+// Rust: tests/jetpack_nix_closure_replay.rs:411
+fn cas_digest(fill: Char) -> String { hex_digest("sha256-", fill) }
+// Rust: tests/jetpack_nix_closure_replay.rs:415
+fn valid_nix_closure(output: &String) -> Lock.NixClosureRecord {
+    Lock.NixClosureRecord{
+        channel: "nixpkgs-unstable", revision: "a".repeat(40), system: Envelope.host_platform(),
+        index_authority: "b".repeat(64), derivation: "c".repeat(64), output: output.to_string(),
+        nar_hash: "sha256:{'d'.to_string().repeat(64)}", size: 1, compression: "none",
+        references: [], upstream_proof: cas_digest('e'), cache_key: "f".repeat(64), project_cas_bundle: cas_digest('0')
+    }
+}
+// Rust: tests/jetpack_nix_closure_replay.rs:433
+fn lock_envelope(output: &String, platform: &String) -> Lock.LockEnvelope {
+    Lock.LockEnvelope{output_hash: output.to_string(), platform: platform.to_string(), provenance: "integration-test",
+        catalog_tier: "local-unofficial", catalog_trust: "unverified", ..Lock.LockEnvelope.default()}
+}
+// Rust: tests/jetpack_nix_closure_replay.rs:606
+fn copy_tree_nofollow(source: &OSPath, destination: &OSPath) -> {
+    metadata :: fs.symlink_metadata(source) ?? panic("source metadata")
+    if metadata.file_type().is_symlink() {
+        fs.symlink(fs.read_link(source) ?? panic("read link"), destination) ?? panic("copy link")
+    } else if metadata.is_dir() {
+        fs.create_dir(destination) ?? panic("create directory")
+        for result in fs.read_dir(source) ?? panic("read directory") {
+            entry :: result ?? panic("entry")
+            copy_tree_nofollow(&entry.path(), &destination.join(entry.file_name()))
+        }
+        fs.set_permissions(destination, Permissions.from_mode(metadata.permissions().mode())) ?? panic("chmod directory")
+    } else {
+        _ :: fs.copy(source, destination) ?? panic("copy file")
+        fs.set_permissions(destination, Permissions.from_mode(metadata.permissions().mode())) ?? panic("chmod file")
+    }
+}
+// Rust: tests/jetpack_nix_closure_replay.rs:634
+fn relative_link_entry(root: &Scratch, source: &Scratch, target: &String) -> Store.StoreEntry {
+    fs.write(source.path.join(target), "link target payload\n".as_bytes()) ?? panic("write link payload")
+    fs.symlink(target, source.join("link")) ?? panic("create link")
+    roots :: Store.Roots{root: root.path.clone(), dev_mode: false}
+    request :: Store.IngestRequest{
+        name: "link-fixture", version: "1.0.0", reference: "link-fixture@fixture",
+        cache_identity: Store.CacheIdentity{source_fingerprint: "source-fingerprint", recipe_fingerprint: "recipe-fingerprint",
+            policy_fingerprint: "policy-fingerprint", platform: "x86_64-linux"},
+        references: [], outputs: [String: OSPath]{"out": source.path.clone()}, signature: "",
+        provenance: "integration-test", platform_artifact_kind: ""
+    }
+    (Store.ingest_tree(&roots, &request) ?? panic("ingest link")).entry
+}
+// Rust: tests/jetpack_nix_closure_replay.rs:666
+fn read_u32(bytes: &[U8], at: &mut USize) -> U32 {
+    end :: at + 4
+    value :: U32.from_le_bytes(bytes[at..end].try_into() ?? panic("u32 bytes"))
+    at = end
+    value
+}
+// Rust: tests/jetpack_nix_closure_replay.rs:674
+fn read_u64(bytes: &[U8], at: &mut USize) -> U64 {
+    end :: at + 8
+    value :: U64.from_le_bytes(bytes[at..end].try_into() ?? panic("u64 bytes"))
+    at = end
+    value
+}
+// Rust: tests/jetpack_nix_closure_replay.rs:682
+fn skip_string(bytes: &[U8], at: &mut USize) -> {
+    length :: read_u32(bytes, &at) as USize
+    at += length
+}
+// Rust: tests/jetpack_nix_closure_replay.rs:688
+fn read_bytes(bytes: &[U8], at: &mut USize) -> [U8] {
+    length :: read_u32(bytes, &at) as USize
+    end :: at + length
+    value :: bytes[at..end].to_vec()
+    at = end
+    value
+}
+// Rust: tests/jetpack_nix_closure_replay.rs:698
+struct RawArchiveNode { kind: U8, path: [U8], mode: U32, bytes: [U8] }
+// Rust: tests/jetpack_nix_closure_replay.rs:707
+struct RawArchiveOutput { root_mode: U32, nodes: [RawArchiveNode] }
+// Rust: tests/jetpack_nix_closure_replay.rs:713
+fn read_generic_output(bytes: &[U8], expected: &String) -> RawArchiveOutput {
+    magic :: "jet-hangar-archive-v1{TEXT_NUL}".as_bytes()
+    at := magic.len()
+    skip_string(bytes, &at)
+    object_count :: read_u32(bytes, &at) as USize
+    output := nil as RawArchiveOutput?
+    for _ in 0..object_count {
+        _id :: read_bytes(bytes, &at)
+        digest :: read_bytes(bytes, &at)
+        meta :: read_bytes(bytes, &at)
+        root_mode :: read_u32(bytes, &at)
+        node_count :: read_u32(bytes, &at) as USize
+        nodes := [RawArchiveNode].with_capacity(node_count)
+        for _ in 0..node_count {
+            kind :: bytes[at]
+            at += 1
+            path :: read_bytes(bytes, &at)
+            mode :: read_u32(bytes, &at)
+            size :: read_u64(bytes, &at) as USize
+            end :: at + size
+            payload :: bytes[at..end].to_vec()
+            at = end
+            &nodes.push(RawArchiveNode{kind: kind, path: path, mode: mode, bytes: payload})
+        }
+        if meta.is_empty() && digest == expected.as_bytes() { output = Val(RawArchiveOutput{root_mode: root_mode, nodes: nodes}) }
+    }
+    output ?? panic("generic archive must contain the requested output")
+}
+// Rust: tests/jetpack_nix_closure_replay.rs:750
+fn put_bytes(out: &mut [U8], bytes: &[U8]) -> {
+    &out.extend_from_slice((bytes.len() as U32).to_le_bytes())
+    &out.extend_from_slice(bytes)
+}
+// Rust: tests/jetpack_nix_closure_replay.rs:756
+fn put_raw_u64(out: &mut [U8], value: U64) -> { &out.extend_from_slice(value.to_le_bytes()) }
+// Rust: tests/jetpack_nix_closure_replay.rs:761
+fn encode_nix_bundle(output: &String, source: &RawArchiveOutput, platform: &String, revision: &String, cache_key: &String) -> [U8] {
+    canonical := [U8]{}
+    &canonical.extend_from_slice(source.root_mode.to_le_bytes())
+    for node in source.nodes {
+        &canonical.push(node.kind)
+        put_bytes(&canonical, node.path)
+        &canonical.extend_from_slice(node.mode.to_le_bytes())
+        put_raw_u64(&canonical, node.bytes.len() as U64)
+        &canonical.extend_from_slice(node.bytes)
+    }
+    member_hash :: "sha256-{SHA256.sha256_hex(canonical)}"
+    out := [U8]{}
+    &out.extend_from_slice("jet-hangar-archive-v1{TEXT_NUL}".as_bytes())
+    put_bytes(&out, output.as_bytes())
+    &out.extend_from_slice((1 as U32).to_le_bytes())
+    put_bytes(&out, output.as_bytes())
+    put_bytes(&out, output.as_bytes())
+    put_bytes(&out, [])
+    &out.extend_from_slice(source.root_mode.to_le_bytes())
+    &out.extend_from_slice((source.nodes.len() as U32).to_le_bytes())
+    for node in source.nodes {
+        &out.push(node.kind)
+        put_bytes(&out, node.path)
+        &out.extend_from_slice(node.mode.to_le_bytes())
+        put_raw_u64(&out, node.bytes.len() as U64)
+        &out.extend_from_slice(node.bytes)
+    }
+    &out.push(2)
+    put_bytes(&out, output.as_bytes())
+    put_bytes(&out, platform.as_bytes())
+    put_bytes(&out, revision.as_bytes())
+    put_bytes(&out, cache_key.as_bytes())
+    &out.extend_from_slice((1 as U32).to_le_bytes())
+    put_bytes(&out, output.as_bytes())
+    put_bytes(&out, member_hash.as_bytes())
+    put_raw_u64(&out, canonical.len() as U64)
+    &out.extend_from_slice((0 as U32).to_le_bytes())
+    &out.push(0)
+    out
+}
+// Rust: tests/jetpack_nix_closure_replay.rs:810
+fn replace_link_target(bytes: &[U8], old: &[U8], replacement: &[U8]) -> [U8] {
+    assert(!old.is_empty())
+    assert_eq(old.len(), replacement.len())
+    magic :: "jet-hangar-archive-v1{TEXT_NUL}".as_bytes()
+    assert(bytes.starts_with(magic))
+    at := magic.len()
+    skip_string(bytes, &at)
+    object_count :: read_u32(bytes, &at) as USize
+    assert_eq(object_count, 1, "fixture must contain one output object")
+    object_digest := nil as [U8]?
+    object := nil as RawArchiveOutput?
+    for _ in 0..object_count {
+        _id :: read_bytes(bytes, &at)
+        digest :: read_bytes(bytes, &at)
+        meta :: read_bytes(bytes, &at)
+        root_mode :: read_u32(bytes, &at)
+        node_count :: read_u32(bytes, &at) as USize
+        nodes := [RawArchiveNode].with_capacity(node_count)
+        for _ in 0..node_count {
+            kind :: bytes[at]
+            at += 1
+            path :: read_bytes(bytes, &at)
+            mode :: read_u32(bytes, &at)
+            size :: read_u64(bytes, &at) as USize
+            end :: at + size
+            &nodes.push(RawArchiveNode{kind: kind, path: path, mode: mode, bytes: bytes[at..end].to_vec()})
+            at = end
+        }
+        if meta.is_empty() {
+            object_digest = Val(digest)
+            object = Val(RawArchiveOutput{root_mode: root_mode, nodes: nodes})
+        }
+    }
+    assert_eq(bytes[at], 2, "fixture must carry a Nix manifest")
+    at += 1
+    manifest_output :: read_bytes(bytes, &at)
+    platform :: read_bytes(bytes, &at)
+    revision :: read_bytes(bytes, &at)
+    cache_key :: read_bytes(bytes, &at)
+    member_count :: read_u32(bytes, &at) as USize
+    for _ in 0..member_count {
+        skip_string(bytes, &at)
+        skip_string(bytes, &at)
+        _ :: read_u64(bytes, &at)
+        reference_count :: read_u32(bytes, &at) as USize
+        for _ in 0..reference_count { skip_string(bytes, &at) }
+    }
+    digest :: object_digest ?? panic("fixture must carry an output object")
+    assert_eq(digest, manifest_output)
+    decoded := object ?? panic("fixture must carry an output object")
+    matches := 0
+    for node in &decoded.nodes {
+        if node.kind == 2 && node.bytes == old { node.bytes = replacement.to_vec(); matches += 1 }
+    }
+    assert_eq(matches, 1, "archive must contain one symlink target")
+    encode_nix_bundle(String.from_utf8(manifest_output) ?? panic("output utf8"), &decoded,
+        String.from_utf8(platform) ?? panic("platform utf8"), String.from_utf8(revision) ?? panic("revision utf8"), String.from_utf8(cache_key) ?? panic("cache key utf8"))
+}
+// Rust: tests/jetpack_nix_closure_replay.rs:886
+fn replace_all(bytes: &[U8], old: &[U8], replacement: &[U8]) -> ([U8], USize) {
+    assert(!old.is_empty())
+    assert_eq(old.len(), replacement.len())
+    result := [U8].with_capacity(bytes.len())
+    cursor := 0
+    count := 0
+    loop {
+        relative :: bytes[cursor..].windows(old.len()).position(window -> window == old)
+        if offset_in_tail :: relative {
+            offset :: cursor + offset_in_tail
+            &result.extend_from_slice(bytes[cursor..offset])
+            &result.extend_from_slice(replacement)
+            cursor = offset + old.len()
+            count += 1
+        } else { break }
+    }
+    &result.extend_from_slice(bytes[cursor..])
+    (result, count)
+}
+// Rust: tests/jetpack_nix_closure_replay.rs:907
+fn cas_digest_from_bytes(bytes: &[U8]) -> String { "sha256-{SHA256.sha256_hex(bytes)}" }

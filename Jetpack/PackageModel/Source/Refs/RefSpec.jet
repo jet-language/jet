@@ -1,1670 +1,263 @@
-// PORT-PENDING 2106 crates-jet-pkg-model-src-refspec: crates/jet-pkg-model/src/RefSpec.rs:1-1666
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! Jetpack ref classifier: `name['@'source]['#'selector]` or
-//RS //! `source.package` (D-JPK-REF1=A, D-MONOREF1=A).
-//RS //!
-//RS //! A ref reads like an address: the package, its source, then its version or
-//RS //! channel. Bare `./`, `../`, and `/` paths need no provider word.
-//RS //! Examples:
-//RS //!   `fastfetch@nixpkgs`
-//RS //!   `halcyonomega/my-fastfetch-jet-config@github`
-//RS //!   `./my-env`
-//RS 
-//RS use crate::Syntax;
-//RS use std::collections::BTreeMap;
-//RS 
-//RS /// Where a ref is resolved from. The three built-in sources need no
-//RS /// declaration; `Named` is a source declared in an `env.jet` (D-JPK17) that
-//RS /// resolves to an upstream/pin via a `SourceTable`.
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub enum Source {
-//RS     /// The canonical Jetpack package catalog (D-JPK-SNIXREUSE1).
-//RS     Jetpack,
-//RS     /// The nixpkgs collection, realized through the Nix provider.
-//RS     ///
-//RS     /// Retained as an internal migration alias; its locked identity is
-//RS     /// canonicalized to `jetpack`.
-//RS     Nixpkgs,
-//RS     /// A GitHub repo holding an `env.jet` (or a translatable `flake.nix`).
-//RS     Github,
-//RS     /// A local directory holding a pack file or used as a flake fallback.
-//RS     Path,
-//RS     /// A package from the CRAN R package registry (D-FFI-R1).
-//RS     Cran,
-//RS     /// A package from the LuaRocks registry (D-FFI-LUA1).
-//RS     LuaRocks,
-//RS     /// A package from RubyGems (D-FFI-RUBY1).
-//RS     RubyGems,
-//RS     /// A distribution from CPAN (D-FFI-PERL1).
-//RS     Cpan,
-//RS     /// A package from Packagist (D-FFI-PHP1).
-//RS     Packagist,
-//RS     /// A package from Jet's first-party registry (D-JPK-REGISTRY1).
-//RS     JetRegistry,
-//RS     /// A package from npm (D-JPK-PROVIDERS2).
-//RS     Npm,
-//RS     /// A package from Cargo (D-JPK-PROVIDERS2).
-//RS     Cargo,
-//RS     /// A distribution from PyPI (D-JPK-EXTPROV1).
-//RS     PyPI,
-//RS     /// A package from Swift Package Manager (D-JPK-EXTPROV1).
-//RS     SwiftPM,
-//RS     /// A verified release artifact admitted directly by Jetpack (card #2166).
-//RS     Releases,
-//RS     /// A pack-declared named source, e.g. `stable` → a pinned nixpkgs (D-JPK17).
-//RS     Named(String),
-//RS }
-//RS 
-//RS impl Source {
-//RS     /// The source token as written after the `@` in a ref.
-//RS     pub fn label(&self) -> &str {
-//RS         match self {
-//RS             Source::Jetpack => Syntax::REF_SOURCE_JETPACK,
-//RS             Source::Nixpkgs => Syntax::REF_SOURCE_NIXPKGS,
-//RS             Source::Github => Syntax::REF_SOURCE_GITHUB,
-//RS             Source::Path => Syntax::REF_SOURCE_PATH,
-//RS             Source::Cran => Syntax::REF_SOURCE_CRAN,
-//RS             Source::LuaRocks => Syntax::REF_SOURCE_LUAROCKS,
-//RS             Source::RubyGems => Syntax::REF_SOURCE_RUBY,
-//RS             Source::Cpan => Syntax::REF_SOURCE_PERL,
-//RS             Source::Packagist => Syntax::REF_SOURCE_PHP,
-//RS             Source::JetRegistry => Syntax::REF_SOURCE_JET_REGISTRY,
-//RS             Source::Npm => Syntax::REF_SOURCE_NPM,
-//RS             Source::Cargo => Syntax::REF_SOURCE_CARGO,
-//RS             Source::PyPI => Syntax::REF_SOURCE_PYPI,
-//RS             Source::SwiftPM => Syntax::REF_SOURCE_SWIFTPM,
-//RS             Source::Releases => Syntax::REF_SOURCE_RELEASES,
-//RS             Source::Named(name) => name,
-//RS         }
-//RS     }
-//RS 
-//RS     /// Whether `name` is one of the built-in source keywords. Reads
-//RS     /// `Syntax::REF_SOURCE_PROVIDERS`, the one home for this set — never
-//RS     /// hand-copy the list here.
-//RS     pub fn is_builtin(name: &str) -> bool {
-//RS         Syntax::REF_SOURCE_PROVIDERS.contains(&name)
-//RS     }
-//RS 
-//RS     fn builtin(name: &str) -> Option<Source> {
-//RS         match name {
-//RS             n if n == Syntax::REF_SOURCE_JETPACK => Some(Source::Jetpack),
-//RS             n if n == Syntax::REF_SOURCE_NIXPKGS => Some(Source::Nixpkgs),
-//RS             n if n == Syntax::REF_SOURCE_GITHUB => Some(Source::Github),
-//RS             n if n == Syntax::REF_SOURCE_PATH => Some(Source::Path),
-//RS             n if n == Syntax::REF_SOURCE_CRAN => Some(Source::Cran),
-//RS             n if n == Syntax::REF_SOURCE_LUAROCKS => Some(Source::LuaRocks),
-//RS             n if n == Syntax::REF_SOURCE_RUBY => Some(Source::RubyGems),
-//RS             n if n == Syntax::REF_SOURCE_PERL => Some(Source::Cpan),
-//RS             n if n == Syntax::REF_SOURCE_PHP => Some(Source::Packagist),
-//RS             n if n == Syntax::REF_SOURCE_JET_REGISTRY => Some(Source::JetRegistry),
-//RS             n if n == Syntax::REF_SOURCE_NPM => Some(Source::Npm),
-//RS             n if n == Syntax::REF_SOURCE_CARGO => Some(Source::Cargo),
-//RS             n if n == Syntax::REF_SOURCE_PYPI => Some(Source::PyPI),
-//RS             n if n == Syntax::REF_SOURCE_SWIFTPM => Some(Source::SwiftPM),
-//RS             n if n == Syntax::REF_SOURCE_RELEASES => Some(Source::Releases),
-//RS             _ => None,
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// Which backend realizes a source: the `nix` compatibility provider, the
-//RS /// first-party `core` provider, or an explicit external provider boundary.
-//RS /// Unknown named-source declarations still default to `nix` (R1 behavior),
-//RS /// while direct external roots retain their concrete kind for fail-closed
-//RS /// dispatch.
-//RS ///
-//RS /// `Infer` is a third, *unresolved* state used by the typed surface (U9): a
-//RS /// `…@github` source's kind can't be known during pure `evaluate_env`
-//RS /// evaluation — it depends on whether the remote repo carries a `package.jet`,
-//RS /// which only a realize-time probe (with the offline flag + source cache) can
-//RS /// answer. `Provider::resolve_kind` turns `Infer` into a concrete `Nix`/`Core`
-//RS /// when realization runs; it never reaches a provider.
-//RS #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-//RS pub enum ProviderKind {
-//RS     #[default]
-//RS     Nix,
-//RS     Core,
-//RS     Cran,
-//RS     LuaRocks,
-//RS     RubyGems,
-//RS     Cpan,
-//RS     Packagist,
-//RS     JetRegistry,
-//RS     Npm,
-//RS     Cargo,
-//RS     PyPI,
-//RS     SwiftPM,
-//RS     /// A native Jetpack release-artifact recipe.
-//RS     JetPackage,
-//RS     /// Decide `Nix` vs `Core` at realize time by peeking the source's
-//RS     /// `package.jet` (U9). Only the typed `…@github` surface produces this.
-//RS     Infer,
-//RS }
-//RS 
-//RS impl ProviderKind {
-//RS     /// Parse a provider name from a source declaration's third argument.
-//RS     /// Recognized direct ecosystem roots retain their concrete kind; unknown
-//RS     /// names remain the default `nix` for named-source inference.
-//RS     pub fn parse(s: &str) -> ProviderKind {
-//RS         match s {
-//RS             "core" => ProviderKind::Core,
-//RS             "cran" => ProviderKind::Cran,
-//RS             "luarocks" => ProviderKind::LuaRocks,
-//RS             "ruby" => ProviderKind::RubyGems,
-//RS             "perl" => ProviderKind::Cpan,
-//RS             "php" => ProviderKind::Packagist,
-//RS             "jet-registry" => ProviderKind::JetRegistry,
-//RS             "npm" => ProviderKind::Npm,
-//RS             "cargo" => ProviderKind::Cargo,
-//RS             "pypi" => ProviderKind::PyPI,
-//RS             "swiftpm" => ProviderKind::SwiftPM,
-//RS             "jetpackage" => ProviderKind::JetPackage,
-//RS             _ => ProviderKind::Nix,
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn label(self) -> &'static str {
-//RS         match self {
-//RS             ProviderKind::Nix => "nix",
-//RS             ProviderKind::Core => "core",
-//RS             ProviderKind::Cran => "cran",
-//RS             ProviderKind::LuaRocks => "luarocks",
-//RS             ProviderKind::RubyGems => "ruby",
-//RS             ProviderKind::Cpan => "perl",
-//RS             ProviderKind::Packagist => "php",
-//RS             ProviderKind::JetRegistry => "jet-registry",
-//RS             ProviderKind::Npm => "npm",
-//RS             ProviderKind::Cargo => "cargo",
-//RS             ProviderKind::PyPI => "pypi",
-//RS             ProviderKind::SwiftPM => "swiftpm",
-//RS             ProviderKind::JetPackage => "jetpackage",
-//RS             // Never user-shown: resolved before any listing/diagnostic.
-//RS             ProviderKind::Infer => "infer",
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Debug, Clone)]
-//RS struct SourceEntry {
-//RS     upstream: String,
-//RS     via: ProviderKind,
-//RS     policy: ChannelPolicy,
-//RS     raw: String,
-//RS }
-//RS 
-//RS /// D-CHANNEL-AUTO1=A: who is allowed to move a source pin.
-//RS #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-//RS pub enum ChannelPolicy {
-//RS     /// No channel marker: the declaration never moves.
-//RS     #[default]
-//RS     Pinned,
-//RS     /// Existing channel declarations move only through `jetpack update`.
-//RS     Manual,
-//RS     /// `#auto`: realization refreshes the channel and writes the exact pin back.
-//RS     Automatic,
-//RS }
-//RS 
-//RS impl ChannelPolicy {
-//RS     pub fn as_str(self) -> &'static str {
-//RS         match self {
-//RS             Self::Pinned => "pinned",
-//RS             Self::Manual => "manual",
-//RS             Self::Automatic => "automatic",
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn moves(self) -> bool {
-//RS         !matches!(self, Self::Pinned)
-//RS     }
-//RS }
-//RS 
-//RS /// The named sources an `env.jet` declares (D-JPK17): name → upstream/pin and
-//RS /// the provider that realizes it. Built-in sources are always resolvable and
-//RS /// are not stored here.
-//RS #[derive(Debug, Clone, Default)]
-//RS pub struct SourceTable {
-//RS     named: BTreeMap<String, SourceEntry>,
-//RS }
-//RS 
-//RS impl SourceTable {
-//RS     /// A table with no declared sources — only the built-ins resolve. This is
-//RS     /// the table for direct CLI refs (`jetpack use fastfetch@nixpkgs`).
-//RS     pub fn empty() -> SourceTable {
-//RS         SourceTable::default()
-//RS     }
-//RS 
-//RS     /// Build from `(name, upstream, provider)` declarations.
-//RS     pub fn from_decls<I>(decls: I) -> SourceTable
-//RS     where
-//RS         I: IntoIterator<Item = (String, String, ProviderKind)>,
-//RS     {
-//RS         SourceTable {
-//RS             named: decls
-//RS                 .into_iter()
-//RS                 .map(|(name, upstream, via)| {
-//RS                     let policy = policy_for_upstream(&upstream);
-//RS                     let raw = upstream.clone();
-//RS                     (
-//RS                         name,
-//RS                         SourceEntry {
-//RS                             upstream,
-//RS                             via,
-//RS                             policy,
-//RS                             raw,
-//RS                         },
-//RS                     )
-//RS                 })
-//RS                 .collect(),
-//RS         }
-//RS     }
-//RS 
-//RS     /// Add a source declaration when a CLI surface supplies a built-in native
-//RS     /// catalog entry alongside project declarations.
-//RS     pub fn ensure_decl(
-//RS         &mut self,
-//RS         name: impl Into<String>,
-//RS         upstream: impl Into<String>,
-//RS         via: ProviderKind,
-//RS     ) {
-//RS         let name = name.into();
-//RS         self.named.entry(name).or_insert_with(|| {
-//RS             let upstream = upstream.into();
-//RS             SourceEntry {
-//RS                 policy: policy_for_upstream(&upstream),
-//RS                 raw: upstream.clone(),
-//RS                 upstream,
-//RS                 via,
-//RS             }
-//RS         });
-//RS     }
-//RS 
-//RS     /// Set the authoring policy and raw source spelling for a declaration.
-//RS     /// `SourceTable::from_decls` remains the compatibility constructor for
-//RS     /// callers that only have the resolved upstream form.
-//RS     pub fn set_channel_metadata(
-//RS         &mut self,
-//RS         name: &str,
-//RS         policy: ChannelPolicy,
-//RS         raw: impl Into<String>,
-//RS     ) {
-//RS         if let Some(entry) = self.named.get_mut(name) {
-//RS             entry.policy = policy;
-//RS             entry.raw = raw.into();
-//RS         }
-//RS     }
-//RS 
-//RS     /// The upstream/pin a declared name resolves to, if any.
-//RS     pub fn upstream(&self, name: &str) -> Option<&str> {
-//RS         self.named.get(name).map(|e| e.upstream.as_str())
-//RS     }
-//RS 
-//RS     /// The provider a declared name uses (defaults to `nix` if undeclared).
-//RS     pub fn provider(&self, name: &str) -> ProviderKind {
-//RS         self.named.get(name).map(|e| e.via).unwrap_or_default()
-//RS     }
-//RS 
-//RS     /// The source's movement policy. Undeclared names are pinned.
-//RS     pub fn channel_policy(&self, name: &str) -> ChannelPolicy {
-//RS         self.named.get(name).map(|e| e.policy).unwrap_or_default()
-//RS     }
-//RS 
-//RS     /// The original source spelling used for manifest writeback.
-//RS     pub fn source_ref(&self, name: &str) -> Option<&str> {
-//RS         self.named.get(name).map(|e| e.raw.as_str())
-//RS     }
-//RS 
-//RS     /// Declared names, sorted — used to make "unknown source" errors helpful.
-//RS     pub fn declared_names(&self) -> Vec<String> {
-//RS         self.named.keys().cloned().collect()
-//RS     }
-//RS 
-//RS     /// Declared source records, sorted by name. Used by channel-locking verbs
-//RS     /// to walk source refs without exposing the map itself.
-//RS     pub fn declarations(&self) -> Vec<(String, String, ProviderKind)> {
-//RS         self.named
-//RS             .iter()
-//RS             .map(|(name, e)| (name.clone(), e.upstream.clone(), e.via))
-//RS             .collect()
-//RS     }
-//RS 
-//RS     /// Replace one declared source's upstream after reading an exact lock entry.
-//RS     pub fn set_upstream(&mut self, name: &str, upstream: String) {
-//RS         if let Some(entry) = self.named.get_mut(name) {
-//RS             entry.upstream = upstream;
-//RS         }
-//RS     }
-//RS 
-//RS     /// One `name=upstream@provider` line per declared source, in name order
-//RS     /// (the `BTreeMap` is already sorted). U19: folded into the trust-gate's
-//RS     /// env-definition hash, so re-pointing a named source (even with an
-//RS     /// unchanged package list) counts as a change and re-prompts.
-//RS     pub fn trust_lines(&self) -> Vec<String> {
-//RS         self.named
-//RS             .iter()
-//RS             .map(|(name, e)| format!("{name}={}@{:?}", e.upstream, e.via))
-//RS             .collect()
-//RS     }
-//RS }
-//RS 
-//RS /// A classified ref. `package` is the target before the final `@` — an attr
-//RS /// name for nixpkgs or an `owner/repo[/subpath]` for GitHub.
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct RefSpec {
-//RS     pub source: Source,
-//RS     pub package: String,
-//RS     pub raw: String,
-//RS }
-//RS 
-//RS impl RefSpec {
-//RS     /// A short, human display name for the package (last path segment).
-//RS     pub fn short_name(&self) -> &str {
-//RS         let package = self
-//RS             .package
-//RS             .split_once(Syntax::REF_CHANNEL_MARKER)
-//RS             .map(|(name, _)| name)
-//RS             .unwrap_or(&self.package);
-//RS         package.rsplit('/').next().unwrap_or(package)
-//RS     }
-//RS }
-//RS 
-//RS /// Why a ref string could not be classified. Each variant maps to a friendly
-//RS /// diagnostic (see `Output::ref_error`).
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub enum RefError {
-//RS     /// No `@` separator at all, e.g. `fastfetch`.
-//RS     MissingSeparator(String),
-//RS     /// An empty source or package half, e.g. `@nixpkgs` or `fastfetch@`.
-//RS     EmptyHalf(String),
-//RS     /// A retired provider-first ref that must be flipped, never reinterpreted.
-//RS     ProviderFirst { raw: String, replacement: String },
-//RS     /// A package ref uses one of the retired selector positions.
-//RS     NonCanonical { raw: String, replacement: String },
-//RS     /// The public `nixpkgs` source spelling retired; use `jetpack` exactly.
-//RS     RetiredNixpkgs { raw: String, replacement: String },
-//RS     /// The `path` provider word retired; local paths are bare.
-//RS     PathProviderRetired { raw: String, path: String },
-//RS     /// The source suffix is neither a built-in nor a declared named source.
-//RS     /// `declared` lists the pack's named sources so the message can help.
-//RS     UnknownSource {
-//RS         source: String,
-//RS         raw: String,
-//RS         declared: Vec<String>,
-//RS     },
-//RS     /// D-MONOREF1=A: bare name with no source suffix, and no workspace member
-//RS     /// matches, or the match was ambiguous.
-//RS     AmbiguousBare(String),
-//RS     /// E1230 (D-MONOREF1=A): a bare or path-form ref matched more than one
-//RS     /// workspace member. `candidates` are the members' relative paths, so the
-//RS     /// message can point at the exact addresses to disambiguate.
-//RS     AmbiguousMember {
-//RS         query: String,
-//RS         candidates: Vec<String>,
-//RS     },
-//RS     /// E1231 (D-MONOREF1=A): a bare or path-form ref matched no workspace
-//RS     /// member. `suggestions` are the closest member names/paths, for a
-//RS     /// did-you-mean.
-//RS     UnknownMember {
-//RS         query: String,
-//RS         suggestions: Vec<String>,
-//RS     },
-//RS }
-//RS 
-//RS impl RefError {
-//RS     /// The registered diagnostic code for the errors that carry one.
-//RS     pub fn code(&self) -> Option<&'static str> {
-//RS         match self {
-//RS             RefError::ProviderFirst { .. }
-//RS             | RefError::NonCanonical { .. }
-//RS             | RefError::RetiredNixpkgs { .. }
-//RS             | RefError::PathProviderRetired { .. } => Some("E1317"),
-//RS             RefError::AmbiguousMember { .. } => Some("E1230"),
-//RS             RefError::UnknownMember { .. } => Some("E1231"),
-//RS             _ => None,
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// A queryable index of the current workspace's members (Slice B). Built once
-//RS /// from a `WorkspacePlan` (or the `.jet/lock` mirror) and consulted by
-//RS /// `classify_with_workspace` to resolve path-form (`infra/logging`) and
-//RS /// bare-form (`logging`) addressing — the forms that have no `source:` prefix.
-//RS #[derive(Debug, Clone, Default)]
-//RS pub struct WorkspaceIndex {
-//RS     /// `(member name, normalized relative path)`, in workspace source order.
-//RS     members: Vec<(String, String)>,
-//RS }
-//RS 
-//RS impl WorkspaceIndex {
-//RS     /// An index with no members — path refs remain unresolved, while bare
-//RS     /// package refs fall through to the Jetpack catalog.
-//RS     pub fn empty() -> WorkspaceIndex {
-//RS         WorkspaceIndex::default()
-//RS     }
-//RS 
-//RS     /// Build from `(name, path)` pairs (a `WorkspacePlan`'s members). Paths are
-//RS     /// normalized (leading `./` and trailing `/` trimmed) so a query and a
-//RS     /// stored path compare byte-for-byte regardless of how each was spelled.
-//RS     pub fn from_members<I>(members: I) -> WorkspaceIndex
-//RS     where
-//RS         I: IntoIterator<Item = (String, String)>,
-//RS     {
-//RS         WorkspaceIndex {
-//RS             members: members
-//RS                 .into_iter()
-//RS                 .map(|(name, path)| (name, normalize_member_path(&path)))
-//RS                 .collect(),
-//RS         }
-//RS     }
-//RS 
-//RS     /// True when the index has no members (no workspace, or an empty one).
-//RS     pub fn is_empty(&self) -> bool {
-//RS         self.members.is_empty()
-//RS     }
-//RS 
-//RS     /// Labels for did-you-mean suggestions in the same address space as the
-//RS     /// query: bare names for bare refs, normalized paths for path refs.
-//RS     fn candidate_labels(&self, path_form: bool) -> Vec<String> {
-//RS         self.members
-//RS             .iter()
-//RS             .map(|(name, path)| if path_form { path } else { name })
-//RS             .cloned()
-//RS             .collect()
-//RS     }
-//RS 
-//RS     /// Resolve a path-form ref (`infra/logging`) to the matching member path.
-//RS     fn by_path(&self, query: &str) -> Vec<&str> {
-//RS         let q = normalize_member_path(query);
-//RS         self.members
-//RS             .iter()
-//RS             .filter(|(_, path)| *path == q)
-//RS             .map(|(_, path)| path.as_str())
-//RS             .collect()
-//RS     }
-//RS 
-//RS     /// Resolve a bare-form ref (`logging`) against member names.
-//RS     fn by_name(&self, query: &str) -> Vec<&str> {
-//RS         self.members
-//RS             .iter()
-//RS             .filter(|(name, _)| name == query)
-//RS             .map(|(_, path)| path.as_str())
-//RS             .collect()
-//RS     }
-//RS }
-//RS 
-//RS /// Normalize a workspace member path: trim a leading `./` and any trailing `/`,
-//RS /// and collapse `\` to `/` so Windows-spelled paths compare equal to POSIX ones.
-//RS fn normalize_member_path(p: &str) -> String {
-//RS     let p = p.trim().replace('\\', "/");
-//RS     let p = p.strip_prefix("./").unwrap_or(&p);
-//RS     p.trim_end_matches('/').to_string()
-//RS }
-//RS 
-//RS /// True for D-JPK-REF1 bare local-path refs.
-//RS pub fn is_bare_path(raw: &str) -> bool {
-//RS     raw.starts_with("./") || raw.starts_with("../") || raw.starts_with('/')
-//RS }
-//RS 
-//RS /// Attach canonical built-in package source to a bare package ref. Workspace
-//RS /// member/path refs stay untouched and are resolved by the caller's index.
-//RS pub fn with_default_source(raw: &str) -> String {
-//RS     let raw = raw.trim();
-//RS     if raw.contains(Syntax::REF_PROVIDER_AT) || is_bare_path(raw) {
-//RS         return raw.to_string();
-//RS     }
-//RS     match raw.split_once(Syntax::REF_CHANNEL_MARKER) {
-//RS         Some((package, selector)) if !package.is_empty() && !selector.is_empty() => format!(
-//RS             "{package}{at}{source}{marker}{selector}",
-//RS             at = Syntax::REF_PROVIDER_AT,
-//RS             source = Syntax::REF_SOURCE_JETPACK,
-//RS             marker = Syntax::REF_CHANNEL_MARKER,
-//RS         ),
-//RS         _ => format!(
-//RS             "{raw}{at}{source}",
-//RS             at = Syntax::REF_PROVIDER_AT,
-//RS             source = Syntax::REF_SOURCE_JETPACK,
-//RS         ),
-//RS     }
-//RS }
-//RS 
-//RS fn provider_first(provider: &str, target: &str, raw: &str) -> RefError {
-//RS     let replacement = if provider == Syntax::REF_SOURCE_PATH {
-//RS         target.to_string()
-//RS     } else {
-//RS         format!("{target}{}{provider}", Syntax::REF_PROVIDER_AT)
-//RS     };
-//RS     RefError::ProviderFirst {
-//RS         raw: raw.to_string(),
-//RS         replacement,
-//RS     }
-//RS }
-//RS 
-//RS /// Classify a `name['#'selector]['@'source]` ref against built-in sources.
-//RS /// This is the strict path for direct CLI refs. A declared monorepo source also
-//RS /// accepts D-MONOREF1's `source.package` form.
-//RS pub fn classify(raw: &str) -> Result<RefSpec, RefError> {
-//RS     classify_in(raw, &SourceTable::empty())
-//RS }
-//RS 
-//RS /// Classify a ref, accepting built-in sources plus any named source declared in
-//RS /// `table` (D-JPK17). D-JPK-REF1=A puts the package before `@`; a local path is
-//RS /// bare. A provider word before `@` is a teaching error only when the suffix is
-//RS /// not a source; a valid source suffix makes the left half a package name.
-//RS pub fn classify_in(raw: &str, table: &SourceTable) -> Result<RefSpec, RefError> {
-//RS     let raw = raw.trim();
-//RS 
-//RS     if let Some(error) = noncanonical_input_error(raw) {
-//RS         return Err(error);
-//RS     }
-//RS 
-//RS     if is_bare_path(raw) && !raw.contains(Syntax::REF_PROVIDER_AT) {
-//RS         return Ok(RefSpec {
-//RS             source: Source::Path,
-//RS             package: raw.to_string(),
-//RS             raw: raw.to_string(),
-//RS         });
-//RS     }
-//RS 
-//RS     if let Some((package, source_with_selector)) = raw.rsplit_once(Syntax::REF_PROVIDER_AT) {
-//RS         if source_with_selector.is_empty() || package.is_empty() {
-//RS             return Err(RefError::EmptyHalf(raw.to_string()));
-//RS         }
-//RS         let (source, selector) = match source_with_selector
-//RS             .split_once(Syntax::REF_CHANNEL_MARKER)
-//RS         {
-//RS             Some((source, selector)) if !source.is_empty() && !selector.is_empty() => {
-//RS                 (source, Some(selector))
-//RS             }
-//RS             Some(_) => return Err(RefError::EmptyHalf(raw.to_string())),
-//RS             None => (source_with_selector, None),
-//RS         };
-//RS         let src = match Source::builtin(source) {
-//RS             Some(Source::Path) => {
-//RS                 return Err(RefError::PathProviderRetired {
-//RS                     raw: raw.to_string(),
-//RS                     path: package.to_string(),
-//RS                 })
-//RS             }
-//RS             Some(b) => b,
-//RS             None if table.upstream(source).is_some() => Source::Named(source.to_string()),
-//RS             None if Source::is_builtin(package) => {
-//RS                 return Err(provider_first(package, source, raw))
-//RS             }
-//RS             None => {
-//RS                 return Err(RefError::UnknownSource {
-//RS                     source: source.to_string(),
-//RS                     raw: raw.to_string(),
-//RS                     declared: table.declared_names(),
-//RS                 })
-//RS             }
-//RS         };
-//RS         let package = selector.map_or_else(
-//RS             || package.to_string(),
-//RS             |selector| format!("{package}{}{selector}", Syntax::REF_CHANNEL_MARKER),
-//RS         );
-//RS         return Ok(RefSpec {
-//RS             source: src,
-//RS             package,
-//RS             raw: raw.to_string(),
-//RS         });
-//RS     }
-//RS 
-//RS     if let Some((source, package)) = raw.split_once('.') {
-//RS         if !source.is_empty() && !package.is_empty() && table.upstream(source).is_some() {
-//RS             return Ok(RefSpec {
-//RS                 source: Source::Named(source.to_string()),
-//RS                 package: package.to_string(),
-//RS                 raw: raw.to_string(),
-//RS             });
-//RS         }
-//RS     }
-//RS 
-//RS     // D-JPK-SNIXREUSE1=A: a bare package is the Jetpack catalog spelling.
-//RS     // Workspace-aware callers probe their member index before reaching this
-//RS     // branch; a direct classifier has no workspace to consult.
-//RS     if !raw.is_empty() && !raw.contains('/') {
-//RS         return classify_in(&with_default_source(raw), table);
-//RS     }
-//RS 
-//RS     Err(RefError::MissingSeparator(raw.to_string()))
-//RS }
-//RS 
-//RS /// Classify a ref with workspace-member awareness (Slice B, D-MONOREF1=A).
-//RS ///
-//RS /// Resolution order, first match wins:
-//RS ///   1. source forms `package@source` and `source.package` — via `classify_in`
-//RS ///   2. local form  `./package` — via `classify_in`
-//RS ///   3. path form   `infra/logging` — exact relative-path match in the index
-//RS ///   4. bare form   `logging` — exact member-name match in the index
-//RS ///
-//RS /// The source form is tried first so an explicit source suffix always wins
-//RS /// over an accidental index collision. Only a ref with no source suffix (what
-//RS /// `classify_in` reports as `MissingSeparator`) falls through to the index. A
-//RS /// path/bare ref that matches no member is `UnknownMember` (E1231); one that
-//RS /// matches more than one is `AmbiguousMember` (E1230).
-//RS pub fn classify_with_workspace(
-//RS     raw: &str,
-//RS     table: &SourceTable,
-//RS     index: &WorkspaceIndex,
-//RS ) -> Result<RefSpec, RefError> {
-//RS     let raw = raw.trim();
-//RS     if !raw.contains(Syntax::REF_PROVIDER_AT) && !is_bare_path(raw) && !index.is_empty() {
-//RS         // Preserve an explicitly declared `source.package` form before the
-//RS         // source-less workspace lookup. A bare package's Jetpack default is
-//RS         // deliberately deferred here so an unknown workspace member remains
-//RS         // E1231; CLI callers can apply the default after this diagnostic path.
-//RS         match classify_in(raw, table) {
-//RS             Ok(spec) if !matches!(spec.source, Source::Jetpack) => return Ok(spec),
-//RS             Err(error) if !matches!(error, RefError::MissingSeparator(_)) => {
-//RS                 return Err(error)
-//RS             }
-//RS             _ => {}
-//RS         }
-//RS         return resolve_in_index(raw, index);
-//RS     }
-//RS     match classify_in(raw, table) {
-//RS         Ok(spec) => Ok(spec),
-//RS         // No source suffix. Consult the workspace index only when a workspace
-//RS         // actually exists — outside a monorepo a path ref is still a
-//RS         // missing-source error, while a bare package uses Jetpack.
-//RS         Err(RefError::MissingSeparator(raw_owned)) => {
-//RS             if index.is_empty() {
-//RS                 Err(RefError::MissingSeparator(raw_owned))
-//RS             } else {
-//RS                 resolve_in_index(raw, index)
-//RS             }
-//RS         }
-//RS         Err(other) => Err(other),
-//RS     }
-//RS }
-//RS 
-//RS /// Resolve a source-prefix-less ref against the workspace index. `raw` with a
-//RS /// `/` is path form; otherwise bare form.
-//RS fn resolve_in_index(raw: &str, index: &WorkspaceIndex) -> Result<RefSpec, RefError> {
-//RS     let raw = raw.trim();
-//RS     let query = raw;
-//RS     let matches = if raw.contains('/') {
-//RS         index.by_path(query)
-//RS     } else {
-//RS         index.by_name(query)
-//RS     };
-//RS     match matches.len() {
-//RS         1 => Ok(RefSpec {
-//RS             // A workspace member is a local package directory: it realizes
-//RS             // through the `path` source at its relative path.
-//RS             source: Source::Path,
-//RS             package: matches[0].to_string(),
-//RS             raw: raw.to_string(),
-//RS         }),
-//RS         0 => Err(RefError::UnknownMember {
-//RS             query: raw.to_string(),
-//RS             suggestions: nearest(
-//RS                 query,
-//RS                 &index.candidate_labels(query.contains('/')),
-//RS             ),
-//RS         }),
-//RS         _ => Err(RefError::AmbiguousMember {
-//RS             query: raw.to_string(),
-//RS             candidates: matches.iter().map(|s| s.to_string()).collect(),
-//RS         }),
-//RS     }
-//RS }
-//RS 
-//RS /// Up to three closest labels to `query` by a cheap prefix/substring/edit
-//RS /// heuristic, for a did-you-mean list. Deterministic (stable sort).
-//RS fn nearest(query: &str, labels: &[String]) -> Vec<String> {
-//RS     let mut scored: Vec<(usize, &String)> = labels
-//RS         .iter()
-//RS         .map(|l| (edit_distance(query, l), l))
-//RS         .collect();
-//RS     scored.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(b.1)));
-//RS     scored
-//RS         .into_iter()
-//RS         .filter(|(d, l)| *d <= query.len().max(l.len()) / 2 + 1)
-//RS         .take(3)
-//RS         .map(|(_, l)| l.clone())
-//RS         .collect()
-//RS }
-//RS 
-//RS /// Classic Levenshtein distance (std-only, I6). Small inputs (ref names), so the
-//RS /// simple two-row DP is more than fast enough.
-//RS fn edit_distance(a: &str, b: &str) -> usize {
-//RS     let a: Vec<char> = a.chars().collect();
-//RS     let b: Vec<char> = b.chars().collect();
-//RS     let mut prev: Vec<usize> = (0..=b.len()).collect();
-//RS     let mut cur = vec![0usize; b.len() + 1];
-//RS     for i in 1..=a.len() {
-//RS         cur[0] = i;
-//RS         for j in 1..=b.len() {
-//RS             let cost = usize::from(a[i - 1] != b[j - 1]);
-//RS             cur[j] = (prev[j] + 1).min(cur[j - 1] + 1).min(prev[j - 1] + cost);
-//RS         }
-//RS         std::mem::swap(&mut prev, &mut cur);
-//RS     }
-//RS     prev[b.len()]
-//RS }
-//RS 
-//RS // ──────────────────────────────────────────────
-//RS // `target@provider` source refs (D-JPK-REF1=A; amends U6).
-//RS //
-//RS // The typed authoring surface (env.jet/package.jet `sources:`/`packages:`) writes source
-//RS // refs as `target@provider` — `owner/repo/rev@github`, `channel@nixpkgs`.
-//RS // Local paths are bare (`./local`, `../local`, `/opt/local`).
-//RS //
-//RS // This is the foundational classifier (JPK-0 / Chunk 1). Pack-file parsing and
-//RS // the user-facing diagnostics that render these errors land with the manifest
-//RS // reshape + module surface chunks; until then the typed `RefError` is internal.
-//RS // ──────────────────────────────────────────────
-//RS 
-//RS /// A classified `target@provider` source ref. `provider` is a built-in source
-//RS /// (github / nixpkgs, or path for a bare path); `target` is the upstream locator
-//RS /// understands (a repo+rev, a local path, a channel/pin).
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct ProviderRef {
-//RS     pub provider: Source,
-//RS     pub target: String,
-//RS     pub channel: Option<ChannelRef>,
-//RS     pub policy: ChannelPolicy,
-//RS     pub raw: String,
-//RS }
-//RS 
-//RS impl ProviderRef {
-//RS     /// Reconstruct the provider-first upstream form without dropping a
-//RS     /// channel selector. The source table uses this form for lock/update
-//RS     /// resolution, so channel intent must survive the typed lowering pass.
-//RS     pub fn upstream(&self) -> String {
-//RS         let channel = self
-//RS             .channel
-//RS             .as_ref()
-//RS             .map(|channel| format!("{}{}", Syntax::REF_CHANNEL_MARKER, channel.as_str()))
-//RS             .unwrap_or_default();
-//RS         format!(
-//RS             "{}{}{}{}",
-//RS             self.provider.label(),
-//RS             Syntax::REF_SEPARATOR,
-//RS             self.target,
-//RS             channel
-//RS         )
-//RS     }
-//RS }
-//RS 
-//RS /// D-JPK-CHANNEL1=A: a source ref tracking intent, resolved only by update
-//RS /// verbs and stored exact in `.jet/lock`.
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub enum ChannelRef {
-//RS     Latest,
-//RS     Main,
-//RS     SemverMask(String),
-//RS }
-//RS 
-//RS impl ChannelRef {
-//RS     pub fn parse_selector(selector: &str) -> Option<ChannelRef> {
-//RS         match selector {
-//RS             Syntax::REF_CHANNEL_LATEST => Some(ChannelRef::Latest),
-//RS             Syntax::REF_CHANNEL_MAIN => Some(ChannelRef::Main),
-//RS             s if is_semver_mask(s) => Some(ChannelRef::SemverMask(s.to_string())),
-//RS             _ => None,
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn as_str(&self) -> &str {
-//RS         match self {
-//RS             ChannelRef::Latest => Syntax::REF_CHANNEL_LATEST,
-//RS             ChannelRef::Main => Syntax::REF_CHANNEL_MAIN,
-//RS             ChannelRef::SemverMask(s) => s,
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn is_semver_mask(s: &str) -> bool {
-//RS     let Some(rest) = s.strip_prefix('v') else {
-//RS         return false;
-//RS     };
-//RS     let Some(series) = rest.strip_suffix(".x") else {
-//RS         return false;
-//RS     };
-//RS     !series.is_empty() && series.chars().all(|c| c.is_ascii_digit())
-//RS }
-//RS 
-//RS /// The canonical form of a ref read from a persisted manifest or lock.
-//RS ///
-//RS /// This is the one disk migration seam. User input never calls it to accept a
-//RS /// retired spelling; the classifiers compare its result with the input and
-//RS /// report the canonical replacement instead.
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct MigratedRef {
-//RS     pub canonical: String,
-//RS     pub policy: ChannelPolicy,
-//RS }
-//RS 
-//RS fn legacy_policy_prefix(s: &str) -> (Option<ChannelPolicy>, &str) {
-//RS     for (marker, policy) in [
-//RS         (Syntax::REF_CHANNEL_AUTO, ChannelPolicy::Automatic),
-//RS         (Syntax::REF_CHANNEL_LATEST, ChannelPolicy::Manual),
-//RS     ] {
-//RS         let prefix = format!("{}{marker}", Syntax::REF_CHANNEL_MARKER);
-//RS         if let Some(rest) = s.strip_prefix(&prefix) {
-//RS             if rest.chars().next().is_some_and(char::is_whitespace) {
-//RS                 return (Some(policy), rest.trim_start());
-//RS             }
-//RS         }
-//RS     }
-//RS     (None, s)
-//RS }
-//RS 
-//RS fn policy_for_selector(selector: &str) -> Option<ChannelPolicy> {
-//RS     match selector {
-//RS         Syntax::REF_CHANNEL_AUTO => Some(ChannelPolicy::Automatic),
-//RS         Syntax::REF_CHANNEL_LATEST => Some(ChannelPolicy::Manual),
-//RS         _ if ChannelRef::parse_selector(selector).is_some() => Some(ChannelPolicy::Manual),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn valid_source_token(source: &str) -> bool {
-//RS     !source.is_empty()
-//RS         && source
-//RS             .bytes()
-//RS             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
-//RS }
-//RS 
-//RS /// Migrate one persisted ref from the retired selector positions.
-//RS pub fn migrate_persisted_ref(raw: &str) -> MigratedRef {
-//RS     let raw = raw.trim();
-//RS     let (legacy_policy, raw_ref) = legacy_policy_prefix(raw);
-//RS     let Some((left, source_with_selector)) = raw_ref.rsplit_once(Syntax::REF_PROVIDER_AT) else {
-//RS         return MigratedRef {
-//RS             canonical: raw.to_string(),
-//RS             policy: legacy_policy.unwrap_or_default(),
-//RS         };
-//RS     };
-//RS     if left.is_empty() || source_with_selector.is_empty() {
-//RS         return MigratedRef {
-//RS             canonical: raw.to_string(),
-//RS             policy: legacy_policy.unwrap_or_default(),
-//RS         };
-//RS     }
-//RS     let (source, source_selector) = match source_with_selector.split_once(Syntax::REF_CHANNEL_MARKER)
-//RS     {
-//RS         Some((source, selector)) if valid_source_token(source) && !selector.is_empty() => {
-//RS             (source, Some(selector))
-//RS         }
-//RS         Some(_) => {
-//RS             return MigratedRef {
-//RS                 canonical: raw.to_string(),
-//RS                 policy: legacy_policy.unwrap_or_default(),
-//RS             }
-//RS         }
-//RS         None if valid_source_token(source_with_selector) => (source_with_selector, None),
-//RS         None => {
-//RS             return MigratedRef {
-//RS                 canonical: raw.to_string(),
-//RS                 policy: legacy_policy.unwrap_or_default(),
-//RS             }
-//RS         }
-//RS     };
-//RS     let (package, target_selector) = match left.rsplit_once(Syntax::REF_CHANNEL_MARKER) {
-//RS         Some((package, selector)) if !package.is_empty() && !selector.is_empty() => {
-//RS             (package, Some(selector))
-//RS         }
-//RS         Some(_) => {
-//RS             return MigratedRef {
-//RS                 canonical: raw.to_string(),
-//RS                 policy: legacy_policy.unwrap_or_default(),
-//RS             }
-//RS         }
-//RS         None => (left, None),
-//RS     };
-//RS     let selector = source_selector.or(target_selector).or_else(|| {
-//RS         legacy_policy.map(|policy| match policy {
-//RS             ChannelPolicy::Automatic => Syntax::REF_CHANNEL_AUTO,
-//RS             ChannelPolicy::Manual => Syntax::REF_CHANNEL_LATEST,
-//RS             ChannelPolicy::Pinned => "",
-//RS         })
-//RS     });
-//RS     let canonical = match selector {
-//RS         Some(selector) if !selector.is_empty() => format!(
-//RS             "{package}{}{source}{}{selector}",
-//RS             Syntax::REF_PROVIDER_AT,
-//RS             Syntax::REF_CHANNEL_MARKER
-//RS         ),
-//RS         _ => format!("{package}{}{source}", Syntax::REF_PROVIDER_AT),
-//RS     };
-//RS     MigratedRef {
-//RS         canonical,
-//RS         policy: legacy_policy
-//RS             .or_else(|| selector.and_then(policy_for_selector))
-//RS             .unwrap_or_default(),
-//RS     }
-//RS }
-//RS 
-//RS /// Migrate public package/source input without changing the persisted spelling.
-//RS ///
-//RS /// `nixpkgs` is retained by [`migrate_persisted_ref`] so locks and receipts can
-//RS /// show the upstream provenance. Public refs get the exact `@jetpack` spelling
-//RS /// instead; classifiers use the difference between these two migrations to
-//RS /// issue the teaching diagnostic.
-//RS pub fn migrate_public_ref(raw: &str) -> MigratedRef {
-//RS     let persisted = migrate_persisted_ref(raw);
-//RS     let canonical = rewrite_public_nixpkgs(&persisted.canonical)
-//RS         .unwrap_or_else(|| persisted.canonical.clone());
-//RS     MigratedRef {
-//RS         canonical,
-//RS         policy: persisted.policy,
-//RS     }
-//RS }
-//RS 
-//RS /// Return the user-facing error for a retired source spelling without routing
-//RS /// canonical input through the persisted-data migrator.
-//RS fn noncanonical_input_error(raw: &str) -> Option<RefError> {
-//RS     let retired = retired_selector_replacement(raw);
-//RS     let canonical = retired.as_deref().unwrap_or(raw);
-//RS     if let Some(replacement) = rewrite_public_nixpkgs(canonical) {
-//RS         return Some(RefError::RetiredNixpkgs {
-//RS             raw: raw.to_string(),
-//RS             replacement,
-//RS         });
-//RS     }
-//RS     retired.map(|replacement| RefError::NonCanonical {
-//RS         raw: raw.to_string(),
-//RS         replacement,
-//RS     })
-//RS }
-//RS 
-//RS /// Rewrite only the deleted selector positions for a diagnostic. This is not
-//RS /// a parser and is never used to classify or accept user input.
-//RS fn retired_selector_replacement(raw: &str) -> Option<String> {
-//RS     let raw = raw.trim();
-//RS     let (legacy_policy, raw_ref) = legacy_policy_prefix(raw);
-//RS     let (left, source_with_selector) = raw_ref.rsplit_once(Syntax::REF_PROVIDER_AT)?;
-//RS     if left.is_empty() || source_with_selector.is_empty() {
-//RS         return None;
-//RS     }
-//RS     let (source, source_selector) = source_with_selector
-//RS         .split_once(Syntax::REF_CHANNEL_MARKER)
-//RS         .map_or((source_with_selector, None), |(source, selector)| {
-//RS             (source, Some(selector))
-//RS         });
-//RS     let (package, target_selector) = left
-//RS         .rsplit_once(Syntax::REF_CHANNEL_MARKER)
-//RS         .map_or((left, None), |(package, selector)| {
-//RS             (package, Some(selector))
-//RS         });
-//RS     if target_selector.is_none() && legacy_policy.is_none() {
-//RS         return None;
-//RS     }
-//RS     let selector = source_selector.or(target_selector).or_else(|| {
-//RS         legacy_policy.map(|policy| match policy {
-//RS             ChannelPolicy::Automatic => Syntax::REF_CHANNEL_AUTO,
-//RS             ChannelPolicy::Manual => Syntax::REF_CHANNEL_LATEST,
-//RS             ChannelPolicy::Pinned => "",
-//RS         })
-//RS     })?;
-//RS     if package.is_empty() || selector.is_empty() {
-//RS         return None;
-//RS     }
-//RS     Some(format!(
-//RS         "{package}{}{source}{}{selector}",
-//RS         Syntax::REF_PROVIDER_AT,
-//RS         Syntax::REF_CHANNEL_MARKER
-//RS     ))
-//RS }
-//RS 
-//RS fn rewrite_public_nixpkgs(raw: &str) -> Option<String> {
-//RS     let (package, source_with_selector) = raw.rsplit_once(Syntax::REF_PROVIDER_AT)?;
-//RS     if package.is_empty() || source_with_selector.is_empty() {
-//RS         return None;
-//RS     }
-//RS     let (source, selector) = source_with_selector
-//RS         .split_once(Syntax::REF_CHANNEL_MARKER)
-//RS         .map_or((source_with_selector, None), |(source, selector)| {
-//RS             (source, Some(selector))
-//RS         });
-//RS     if source != Syntax::REF_SOURCE_NIXPKGS || selector.is_some_and(str::is_empty) {
-//RS         return None;
-//RS     }
-//RS     Some(match selector {
-//RS         Some(selector) => format!(
-//RS             "{package}{}{jetpack}{}{selector}",
-//RS             Syntax::REF_PROVIDER_AT,
-//RS             Syntax::REF_CHANNEL_MARKER,
-//RS             jetpack = Syntax::REF_SOURCE_JETPACK,
-//RS         ),
-//RS         None => format!(
-//RS             "{package}{}{jetpack}",
-//RS             Syntax::REF_PROVIDER_AT,
-//RS             jetpack = Syntax::REF_SOURCE_JETPACK,
-//RS         ),
-//RS     })
-//RS }
-//RS 
-//RS /// Canonical ref used in lock and receipt identity. Public nixpkgs spelling
-//RS /// remains classifiable during migration, but cannot create a second lock key.
-//RS pub fn canonical_locked_ref(raw: &str) -> String {
-//RS     let canonical = migrate_persisted_ref(raw).canonical;
-//RS     let Some((package, source_with_selector)) = canonical.rsplit_once(Syntax::REF_PROVIDER_AT)
-//RS     else {
-//RS         return canonical;
-//RS     };
-//RS     let (source, selector) = source_with_selector
-//RS         .split_once(Syntax::REF_CHANNEL_MARKER)
-//RS         .map_or((source_with_selector, None), |(source, selector)| {
-//RS             (source, Some(selector))
-//RS         });
-//RS     if source != Syntax::REF_SOURCE_NIXPKGS && source != Syntax::REF_SOURCE_JETPACK {
-//RS         return canonical;
-//RS     }
-//RS     let suffix = selector
-//RS         .map(|selector| format!("{}{}", Syntax::REF_CHANNEL_MARKER, selector))
-//RS         .unwrap_or_default();
-//RS     format!(
-//RS         "{package}{at}{source}{suffix}",
-//RS         at = Syntax::REF_PROVIDER_AT,
-//RS         source = Syntax::REF_SOURCE_JETPACK,
-//RS     )
-//RS }
-//RS 
-//RS /// Return policy encoded in a canonical user ref. Retired prefix input is not
-//RS /// accepted here and therefore returns the pinned default.
-//RS pub fn policy_for_ref(raw: &str) -> ChannelPolicy {
-//RS     raw.trim()
-//RS         .rsplit_once(Syntax::REF_PROVIDER_AT)
-//RS         .and_then(|(_, source)| source.rsplit_once(Syntax::REF_CHANNEL_MARKER))
-//RS         .and_then(|(_, selector)| policy_for_selector(selector))
-//RS         .unwrap_or_default()
-//RS }
-//RS 
-//RS /// Split an internal provider-first target at `#` when that selector is a channel.
-//RS /// Exact selectors such as `#v1.2.3` are left untouched.
-//RS pub fn split_channel_ref(s: &str) -> (&str, Option<ChannelRef>) {
-//RS     match s.rsplit_once('#') {
-//RS         Some((base, selector)) => match ChannelRef::parse_selector(selector) {
-//RS             Some(ch) => (base, Some(ch)),
-//RS             None => (s, None),
-//RS         },
-//RS         None => (s, None),
-//RS     }
-//RS }
-//RS 
-//RS fn policy_for_upstream(upstream: &str) -> ChannelPolicy {
-//RS     split_channel_ref(upstream)
-//RS         .1
-//RS         .map_or(ChannelPolicy::Pinned, |_| ChannelPolicy::Manual)
-//RS }
-//RS 
-//RS /// Classify a `target@provider[#selector]` source ref or a bare local path.
-//RS pub fn classify_provider_ref(raw: &str) -> Result<ProviderRef, RefError> {
-//RS     let raw = raw.trim();
-//RS     if let Some(error) = noncanonical_input_error(raw) {
-//RS         return Err(error);
-//RS     }
-//RS     if is_bare_path(raw) && !raw.contains(Syntax::REF_PROVIDER_AT) {
-//RS         return Ok(ProviderRef {
-//RS             provider: Source::Path,
-//RS             target: raw.to_string(),
-//RS             channel: None,
-//RS             policy: ChannelPolicy::Pinned,
-//RS             raw: raw.to_string(),
-//RS         });
-//RS     }
-//RS     let (target, provider_with_selector) = match raw.rsplit_once(Syntax::REF_PROVIDER_AT) {
-//RS         Some(parts) => parts,
-//RS         None => return Err(RefError::MissingSeparator(raw.to_string())),
-//RS     };
-//RS     if provider_with_selector.is_empty() || target.is_empty() {
-//RS         return Err(RefError::EmptyHalf(raw.to_string()));
-//RS     }
-//RS     if Source::is_builtin(target) {
-//RS         return Err(provider_first(target, provider_with_selector, raw));
-//RS     }
-//RS     let (provider, selector) = match provider_with_selector.split_once(Syntax::REF_CHANNEL_MARKER) {
-//RS         Some((provider, selector)) if !provider.is_empty() && !selector.is_empty() => {
-//RS             (provider, Some(selector))
-//RS         }
-//RS         Some(_) => return Err(RefError::EmptyHalf(raw.to_string())),
-//RS         None => (provider_with_selector, None),
-//RS     };
-//RS     let provider = match Source::builtin(provider) {
-//RS         Some(Source::Path) => {
-//RS             return Err(RefError::PathProviderRetired {
-//RS                 raw: raw.to_string(),
-//RS                 path: target.to_string(),
-//RS             })
-//RS         }
-//RS         Some(b) => b,
-//RS         None => {
-//RS             return Err(RefError::UnknownSource {
-//RS                 source: provider.to_string(),
-//RS                 raw: raw.to_string(),
-//RS                 declared: Vec::new(),
-//RS             })
-//RS         }
-//RS     };
-//RS     let (target, channel, policy) = match selector {
-//RS         Some(Syntax::REF_CHANNEL_AUTO) => (
-//RS             target.to_string(),
-//RS             Some(ChannelRef::Latest),
-//RS             ChannelPolicy::Automatic,
-//RS         ),
-//RS         Some(Syntax::REF_CHANNEL_LATEST) => (
-//RS             target.to_string(),
-//RS             Some(ChannelRef::Latest),
-//RS             ChannelPolicy::Manual,
-//RS         ),
-//RS         Some(selector) => match ChannelRef::parse_selector(selector) {
-//RS             Some(channel) => (target.to_string(), Some(channel), ChannelPolicy::Manual),
-//RS             None => (
-//RS                 format!("{target}{}{selector}", Syntax::REF_CHANNEL_MARKER),
-//RS                 None,
-//RS                 ChannelPolicy::Pinned,
-//RS             ),
-//RS         },
-//RS         None => (target.to_string(), None, ChannelPolicy::Pinned),
-//RS     };
-//RS     Ok(ProviderRef {
-//RS         provider,
-//RS         target,
-//RS         channel,
-//RS         policy,
-//RS         raw: raw.to_string(),
-//RS     })
-//RS }
-//RS 
-//RS #[cfg(test)]
-//RS mod tests {
-//RS     use super::*;
-//RS 
-//RS     #[test]
-//RS     fn retires_nixpkgs_public_spelling_but_preserves_persisted_provenance() {
-//RS         for (raw, replacement, persisted) in [
-//RS             (
-//RS                 "ripgrep@nixpkgs",
-//RS                 "ripgrep@jetpack",
-//RS                 "ripgrep@nixpkgs",
-//RS             ),
-//RS             (
-//RS                 "ripgrep@nixpkgs#auto",
-//RS                 "ripgrep@jetpack#auto",
-//RS                 "ripgrep@nixpkgs#auto",
-//RS             ),
-//RS             (
-//RS                 "ripgrep#version=15.2.0@nixpkgs",
-//RS                 "ripgrep@jetpack#version=15.2.0",
-//RS                 "ripgrep@nixpkgs#version=15.2.0",
-//RS             ),
-//RS         ] {
-//RS             assert_eq!(migrate_public_ref(raw).canonical, replacement);
-//RS             assert_eq!(migrate_persisted_ref(raw).canonical, persisted);
-//RS             assert_eq!(
-//RS                 classify(raw),
-//RS                 Err(RefError::RetiredNixpkgs {
-//RS                     raw: raw.into(),
-//RS                     replacement: replacement.into(),
-//RS                 })
-//RS             );
-//RS         }
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn classifies_jetpack_and_canonicalizes_bare_package_refs() {
-//RS         let explicit = classify("ripgrep@jetpack").unwrap();
-//RS         assert_eq!(explicit.source, Source::Jetpack);
-//RS         assert_eq!(with_default_source("ripgrep"), "ripgrep@jetpack");
-//RS         assert_eq!(
-//RS             canonical_locked_ref(&with_default_source("ripgrep")),
-//RS             canonical_locked_ref("ripgrep@jetpack")
-//RS         );
-//RS         assert_eq!(canonical_locked_ref("ripgrep@nixpkgs"), "ripgrep@jetpack");
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn bare_and_explicit_jetpack_refs_classify_identically() {
-//RS         assert_eq!(
-//RS             classify("ripgrep").unwrap(),
-//RS             classify("ripgrep@jetpack").unwrap()
-//RS         );
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn nixpkgs_public_ref_is_an_exact_jetpack_rewrite() {
-//RS         assert!(matches!(
-//RS             classify("ripgrep@nixpkgs"),
-//RS             Err(RefError::RetiredNixpkgs { replacement, .. })
-//RS                 if replacement == "ripgrep@jetpack"
-//RS         ));
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn classifies_github_repo() {
-//RS         let r = classify("halcyonomega/my-fastfetch-jet-config@github").unwrap();
-//RS         assert_eq!(r.source, Source::Github);
-//RS         assert_eq!(r.package, "halcyonomega/my-fastfetch-jet-config");
-//RS         assert_eq!(r.short_name(), "my-fastfetch-jet-config");
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn classifies_local_path() {
-//RS         let r = classify("./my-env").unwrap();
-//RS         assert_eq!(r.source, Source::Path);
-//RS         assert_eq!(r.package, "./my-env");
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn classifies_direct_cran_root_with_exact_version() {
-//RS         let r = classify("jsonlite@cran#version=1.9.0").unwrap();
-//RS         assert_eq!(r.source, Source::Cran);
-//RS         assert_eq!(r.package, "jsonlite#version=1.9.0");
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn classifies_direct_luarocks_root_with_exact_version() {
-//RS         let r = classify("luasocket@luarocks#version=3.1.0-1").unwrap();
-//RS         assert_eq!(r.source, Source::LuaRocks);
-//RS         assert_eq!(r.package, "luasocket#version=3.1.0-1");
-//RS         assert_eq!(ProviderKind::parse("luarocks"), ProviderKind::LuaRocks);
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn classifies_direct_scripting_registry_roots() {
-//RS         for (raw, source, provider) in [
-//RS             (
-//RS                 "rack@ruby#version=3.2.0",
-//RS                 Source::RubyGems,
-//RS                 ProviderKind::RubyGems,
-//RS             ),
-//RS             (
-//RS                 "JSON-MaybeXS@perl#version=1.004008",
-//RS                 Source::Cpan,
-//RS                 ProviderKind::Cpan,
-//RS             ),
-//RS             (
-//RS                 "monolog/monolog@php#version=3.9.0",
-//RS                 Source::Packagist,
-//RS                 ProviderKind::Packagist,
-//RS             ),
-//RS         ] {
-//RS             let spec = classify(raw).unwrap();
-//RS             assert_eq!(spec.source, source);
-//RS             assert_eq!(ProviderKind::parse(spec.source.label()), provider);
-//RS         }
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn classifies_direct_jet_registry_npm_and_cargo_roots() {
-//RS         for (raw, source, provider) in [
-//RS             (
-//RS                 "hello@jet-registry#version=1.0.0",
-//RS                 Source::JetRegistry,
-//RS                 ProviderKind::JetRegistry,
-//RS             ),
-//RS             ("left-pad@npm#version=1.3.0", Source::Npm, ProviderKind::Npm),
-//RS             (
-//RS                 "serde@cargo#version=1.0.200",
-//RS                 Source::Cargo,
-//RS                 ProviderKind::Cargo,
-//RS             ),
-//RS         ] {
-//RS             let spec = classify(raw).unwrap();
-//RS             assert_eq!(spec.source, source);
-//RS             assert_eq!(ProviderKind::parse(spec.source.label()), provider);
-//RS         }
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn classifies_native_release_source() {
-//RS         let spec = classify("omp@releases").unwrap();
-//RS         assert_eq!(spec.source, Source::Releases);
-//RS         assert_eq!(spec.package, "omp");
-//RS         assert_eq!(ProviderKind::parse("jetpackage"), ProviderKind::JetPackage);
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn short_name_discards_version_selector() {
-//RS         let spec = classify("omp@releases#18.0.0").unwrap();
-//RS         assert_eq!(spec.short_name(), "omp");
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn bare_package_defaults_to_jetpack() {
-//RS         let spec = classify("fastfetch").unwrap();
-//RS         assert_eq!(spec.source, Source::Jetpack);
-//RS         assert_eq!(spec.package, "fastfetch");
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn rejects_empty_halves() {
-//RS         assert!(matches!(classify("@nixpkgs"), Err(RefError::EmptyHalf(_))));
-//RS         assert!(matches!(
-//RS             classify("fastfetch@"),
-//RS             Err(RefError::EmptyHalf(_))
-//RS         ));
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn bare_package_selector_uses_jetpack() {
-//RS         let spec = classify("fastfetch#latest").unwrap();
-//RS         assert_eq!(spec.source, Source::Jetpack);
-//RS         assert_eq!(spec.package, "fastfetch#latest");
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn rejects_unknown_source() {
-//RS         match classify("wget@brew") {
-//RS             Err(RefError::UnknownSource { source, .. }) => assert_eq!(source, "brew"),
-//RS             other => panic!("expected UnknownSource, got {other:?}"),
-//RS         }
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn old_provider_first_ref_teaches_the_flip() {
-//RS         assert_eq!(
-//RS             classify("github@owner/repo"),
-//RS             Err(RefError::ProviderFirst {
-//RS                 raw: "github@owner/repo".into(),
-//RS                 replacement: "owner/repo@github".into(),
-//RS             })
-//RS         );
-//RS         assert_eq!(
-//RS             classify("path@../helpers"),
-//RS             Err(RefError::ProviderFirst {
-//RS                 raw: "path@../helpers".into(),
-//RS                 replacement: "../helpers".into(),
-//RS             })
-//RS         );
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn package_ref_keeps_version_after_source() {
-//RS         let table = SourceTable::from_decls([(
-//RS             "vendor".to_string(),
-//RS             "acme/helpers@github".to_string(),
-//RS             ProviderKind::Core,
-//RS         )]);
-//RS         let r = classify_in("textkit@vendor#1.2.0", &table).unwrap();
-//RS         assert_eq!(r.package, "textkit#1.2.0");
-//RS         assert_eq!(r.source, Source::Named("vendor".into()));
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn provider_ref_marks_channel_selectors() {
-//RS         assert_eq!(
-//RS             classify_provider_ref("openai/codex@github#latest")
-//RS                 .unwrap()
-//RS                 .channel,
-//RS             Some(ChannelRef::Latest)
-//RS         );
-//RS         assert_eq!(
-//RS             classify_provider_ref("openai/codex@github#main")
-//RS                 .unwrap()
-//RS                 .channel,
-//RS             Some(ChannelRef::Main)
-//RS         );
-//RS         assert_eq!(
-//RS             classify_provider_ref("openai/codex@github#v0.x")
-//RS                 .unwrap()
-//RS                 .channel,
-//RS             Some(ChannelRef::SemverMask("v0.x".to_string()))
-//RS         );
-//RS         assert_eq!(
-//RS             classify_provider_ref("openai/codex@github#v0.50.1")
-//RS                 .unwrap()
-//RS                 .channel,
-//RS             None
-//RS         );
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn classifies_declared_named_source() {
-//RS         let table = SourceTable::from_decls([(
-//RS             "stable".to_string(),
-//RS             "github:NixOS/nixpkgs/nixos-24.05".to_string(),
-//RS             ProviderKind::Nix,
-//RS         )]);
-//RS         let r = classify_in("ripgrep@stable", &table).unwrap();
-//RS         assert_eq!(r.source, Source::Named("stable".to_string()));
-//RS         assert_eq!(r.package, "ripgrep");
-//RS         assert_eq!(r.source.label(), "stable");
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn named_source_unknown_lists_declared() {
-//RS         let table = SourceTable::from_decls([
-//RS             ("stable".to_string(), "u1".to_string(), ProviderKind::Nix),
-//RS             ("unstable".to_string(), "u2".to_string(), ProviderKind::Core),
-//RS         ]);
-//RS         match classify_in("neovim@beta", &table) {
-//RS             Err(RefError::UnknownSource { declared, .. }) => {
-//RS                 assert_eq!(declared, vec!["stable", "unstable"]);
-//RS             }
-//RS             other => panic!("expected UnknownSource, got {other:?}"),
-//RS         }
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn builtins_resolve_without_declaration() {
-//RS         let table = SourceTable::empty();
-//RS         assert!(matches!(
-//RS             classify_in("fd@nixpkgs", &table),
-//RS             Err(RefError::RetiredNixpkgs { replacement, .. })
-//RS                 if replacement == "fd@jetpack"
-//RS         ));
-//RS         assert!(Source::is_builtin("nixpkgs"));
-//RS         assert!(!Source::is_builtin("stable"));
-//RS     }
-//RS 
-//RS     // ── workspace-index addressing (Slice B, D-MONOREF1=A) ──
-//RS 
-//RS     fn ws_index() -> WorkspaceIndex {
-//RS         WorkspaceIndex::from_members([
-//RS             ("logging".to_string(), "./infra/logging".to_string()),
-//RS             ("ranker".to_string(), "packages/ranker".to_string()),
-//RS         ])
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn bare_form_resolves_unique_member() {
-//RS         let r = classify_with_workspace("logging", &SourceTable::empty(), &ws_index()).unwrap();
-//RS         assert_eq!(r.source, Source::Path);
-//RS         assert_eq!(r.package, "infra/logging");
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn path_form_resolves_member() {
-//RS         // Path form matches the normalized relative path (`./` trimmed).
-//RS         let r =
-//RS             classify_with_workspace("infra/logging", &SourceTable::empty(), &ws_index()).unwrap();
-//RS         assert_eq!(r.source, Source::Path);
-//RS         assert_eq!(r.package, "infra/logging");
-//RS         // The other member by its stored path.
-//RS         let r2 =
-//RS             classify_with_workspace("packages/ranker", &SourceTable::empty(), &ws_index()).unwrap();
-//RS         assert_eq!(r2.package, "packages/ranker");
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn unknown_member_is_e1231_with_suggestion() {
-//RS         let err = classify_with_workspace("loggin", &SourceTable::empty(), &ws_index())
-//RS             .expect_err("typo must not resolve");
-//RS         assert_eq!(err.code(), Some("E1231"));
-//RS         match err {
-//RS             RefError::UnknownMember { suggestions, .. } => {
-//RS                 assert_eq!(suggestions, vec!["logging"]);
-//RS             }
-//RS             other => panic!("expected UnknownMember, got {other:?}"),
-//RS         }
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn unknown_path_member_suggests_paths_only() {
-//RS         let err = classify_with_workspace("infra/loggin", &SourceTable::empty(), &ws_index())
-//RS             .expect_err("typo must not resolve");
-//RS         match err {
-//RS             RefError::UnknownMember { suggestions, .. } => {
-//RS                 assert_eq!(suggestions, vec!["infra/logging"]);
-//RS             }
-//RS             other => panic!("expected UnknownMember, got {other:?}"),
-//RS         }
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn ambiguous_bare_member_is_e1230_lists_candidates() {
-//RS         let index = WorkspaceIndex::from_members([
-//RS             ("logging".to_string(), "infra/logging".to_string()),
-//RS             ("logging".to_string(), "apps/logging".to_string()),
-//RS         ]);
-//RS         let err = classify_with_workspace("logging", &SourceTable::empty(), &index)
-//RS             .expect_err("two members share the name — must be ambiguous");
-//RS         assert_eq!(err.code(), Some("E1230"));
-//RS         match err {
-//RS             RefError::AmbiguousMember { candidates, .. } => {
-//RS                 assert_eq!(candidates.len(), 2);
-//RS                 assert!(candidates.contains(&"infra/logging".to_string()));
-//RS                 assert!(candidates.contains(&"apps/logging".to_string()));
-//RS             }
-//RS             other => panic!("expected AmbiguousMember, got {other:?}"),
-//RS         }
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn source_form_wins_over_index() {
-//RS         // An explicit `package@source` is never shadowed by the index.
-//RS         let table =
-//RS             SourceTable::from_decls([("nixpkgs".to_string(), "u".to_string(), ProviderKind::Nix)]);
-//RS         let r = classify_with_workspace("logging@jetpack", &table, &ws_index()).unwrap();
-//RS         assert_eq!(r.source, Source::Jetpack);
-//RS         assert_eq!(r.package, "logging");
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn empty_index_uses_jetpack_for_bare_package() {
-//RS         let spec =
-//RS             classify_with_workspace("logging", &SourceTable::empty(), &WorkspaceIndex::empty())
-//RS                 .unwrap();
-//RS         assert_eq!(spec.source, Source::Jetpack);
-//RS         assert_eq!(spec.package, "logging");
-//RS     }
-//RS 
-//RS     // ── target@provider source refs (D-JPK-REF1=A; amends U6) ──
-//RS 
-//RS     #[test]
-//RS     fn provider_ref_github_with_rev() {
-//RS         let r = classify_provider_ref("NixOS/nixpkgs/nixos-24.05@github").unwrap();
-//RS         assert_eq!(r.provider, Source::Github);
-//RS         assert_eq!(r.target, "NixOS/nixpkgs/nixos-24.05");
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn provider_ref_local_path() {
-//RS         let r = classify_provider_ref("../helpers").unwrap();
-//RS         assert_eq!(r.provider, Source::Path);
-//RS         assert_eq!(r.target, "../helpers");
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn provider_ref_retires_nixpkgs_source_spelling() {
-//RS         assert_eq!(
-//RS             classify_provider_ref("nixpkgs-unstable@nixpkgs"),
-//RS             Err(RefError::RetiredNixpkgs {
-//RS                 raw: "nixpkgs-unstable@nixpkgs".into(),
-//RS                 replacement: "nixpkgs-unstable@jetpack".into(),
-//RS             })
-//RS         );
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn channel_policies_are_checked_and_keep_channel_intent() {
-//RS         let pinned = classify_provider_ref("rustc@jetpack").unwrap();
-//RS         assert_eq!(pinned.policy, ChannelPolicy::Pinned);
-//RS         assert_eq!(pinned.channel, None);
-//RS 
-//RS         let manual = classify_provider_ref("jq@jetpack#latest").unwrap();
-//RS         assert_eq!(manual.policy, ChannelPolicy::Manual);
-//RS         assert_eq!(manual.target, "jq");
-//RS         assert_eq!(manual.channel, Some(ChannelRef::Latest));
-//RS 
-//RS         let automatic = classify_provider_ref("omp@jetpack#auto").unwrap();
-//RS         assert_eq!(automatic.policy, ChannelPolicy::Automatic);
-//RS         assert_eq!(automatic.target, "omp");
-//RS         assert_eq!(automatic.channel, Some(ChannelRef::Latest));
-//RS 
-//RS         assert!(matches!(
-//RS             classify_provider_ref(&format!("omp#auto{}jetpack", Syntax::REF_PROVIDER_AT)),
-//RS             Err(RefError::NonCanonical { replacement, .. })
-//RS                 if replacement == "omp@jetpack#auto"
-//RS         ));
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn retired_selector_forms_do_not_fall_back_to_canonical_parsers() {
-//RS         for (raw, replacement) in [
-//RS             ("#auto omp@releases", "omp@releases#auto"),
-//RS             ("omp#v18.0.4@releases", "omp@releases#v18.0.4"),
-//RS         ] {
-//RS             assert!(matches!(
-//RS                 classify(raw),
-//RS                 Err(RefError::NonCanonical { replacement: actual, .. })
-//RS                     if actual == replacement
-//RS             ));
-//RS             assert!(matches!(
-//RS                 classify_provider_ref(raw),
-//RS                 Err(RefError::NonCanonical { replacement: actual, .. })
-//RS                     if actual == replacement
-//RS             ));
-//RS         }
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn provider_ref_splits_on_last_at() {
-//RS         let r = classify_provider_ref("owner@host/repo@github").unwrap();
-//RS         assert_eq!(r.provider, Source::Github);
-//RS         assert_eq!(r.target, "owner@host/repo");
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn provider_ref_rejects_missing_at() {
-//RS         assert!(matches!(
-//RS             classify_provider_ref("github/NixOS/nixpkgs"),
-//RS             Err(RefError::MissingSeparator(_))
-//RS         ));
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn provider_ref_rejects_empty_halves() {
-//RS         assert!(matches!(
-//RS             classify_provider_ref("@github"),
-//RS             Err(RefError::EmptyHalf(_))
-//RS         ));
-//RS         assert!(matches!(
-//RS             classify_provider_ref("owner/repo@"),
-//RS             Err(RefError::EmptyHalf(_))
-//RS         ));
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn provider_ref_rejects_unknown_provider() {
-//RS         match classify_provider_ref("owner/repo@gitlab") {
-//RS             Err(RefError::UnknownSource { source, .. }) => assert_eq!(source, "gitlab"),
-//RS             other => panic!("expected UnknownSource, got {other:?}"),
-//RS         }
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn provider_ref_rejects_provider_first_and_path_word() {
-//RS         assert_eq!(
-//RS             classify_provider_ref("github@owner/repo"),
-//RS             Err(RefError::ProviderFirst {
-//RS                 raw: "github@owner/repo".into(),
-//RS                 replacement: "owner/repo@github".into(),
-//RS             })
-//RS         );
-//RS         assert_eq!(
-//RS             classify_provider_ref("../helpers@path"),
-//RS             Err(RefError::PathProviderRetired {
-//RS                 raw: "../helpers@path".into(),
-//RS                 path: "../helpers".into(),
-//RS             })
-//RS         );
-//RS     }
-//RS }
-//RS 
-// END-PORT-PENDING 2106 crates/jet-pkg-model/src/RefSpec.rs:1-1666
+// The sole classifier and migration bodies live in the shared package model.
+// This packet keeps the Rust item order and anchors without creating parallel APIs.
+use Compiler.JetPkgModel.Source.Refs.RefSpec.[RefSource, ProviderKind, ChannelPolicy, SourceTable, RefSpec, RefError, WorkspaceIndex, ProviderRef, ChannelRef]
+use Compiler.JetPkgModel.Source.Refs.RefMigration.MigratedRef
 
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:18
+// Source -> Compiler/JetPkgModel/Source/Refs/RefSpec.jet:16 RefSource.
+// All16 variants, including Named(String), are retained in the sole carrier.
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:58
+// Source.label -> RefSpec.jet:52 RefSource.label: each Foundation source token.
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:82
+// Source.is_builtin -> RefSpec.jet:75, reading REF_SOURCE_PROVIDERS.
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:86
+// Source.builtin -> RefSpec.jet:96: all15 built-in tokens, otherwise None.
+
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:121
+// ProviderKind -> RefSpec.jet:126, all14 provider variants including Infer.
+impl ProviderKind {
+    // Rust: crates/jet-pkg-model/src/RefSpec.rs:122
+    pub fn default() -> ProviderKind { ProviderKind.Nix }
+}
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:146
+// ProviderKind.parse -> RefSpec.jet:189; unknown names default to Nix.
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:164
+// ProviderKind.label -> RefSpec.jet:145, Infer retained as internal-only label.
+
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:186
+// SourceEntry -> RefSpec.jet:255 SourceTableEntry: upstream/via/policy/raw.
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:195
+// ChannelPolicy -> RefSpec.jet:209 Pinned/Manual/Automatic.
+impl ChannelPolicy {
+    // Rust: crates/jet-pkg-model/src/RefSpec.rs:196
+    pub fn default() -> ChannelPolicy { ChannelPolicy.Pinned }
+}
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:206
+// ChannelPolicy.as_str -> RefSpec.jet:217.
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:214
+// ChannelPolicy.moves -> RefSpec.jet:225, false only for Pinned.
+
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:223
+// SourceTable -> RefSpec.jet:265: name-indexed map, sorted public enumeration.
+impl SourceTable {
+    // Rust: crates/jet-pkg-model/src/RefSpec.rs:222
+    pub fn default() -> SourceTable { SourceTable.empty() }
+}
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:230
+// SourceTable.empty -> RefSpec.jet:270.
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:235
+// SourceTable.from_decls -> RefSpec.jet:275: last name wins, policy from upstream,
+// original raw spelling retained; NamedSourceDecl is the existing tuple carrier.
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:261
+// SourceTable.ensure_decl -> RefSpec.jet:285: existing name unchanged.
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:282
+// SourceTable.set_channel_metadata -> RefSpec.jet:291, absent name unchanged.
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:295
+// SourceTable.upstream -> RefSpec.jet:298.
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:300
+// SourceTable.provider -> RefSpec.jet:303, undeclared defaults Nix.
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:305
+// SourceTable.channel_policy -> RefSpec.jet:308, undeclared defaults Pinned.
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:310
+// SourceTable.source_ref -> RefSpec.jet:313, retains original raw spelling.
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:315
+// SourceTable.declared_names -> RefSpec.jet:318: sort keys once.
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:321
+// SourceTable.declarations -> RefSpec.jet:325, sorted NamedSourceDecl records.
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:329
+// SourceTable.set_upstream -> RefSpec.jet:335, absent name unchanged.
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:339
+// SourceTable.trust_lines -> RefSpec.jet:343, exact Rust Debug variant bytes
+// supplied by ProviderKind.identity167, not lowercase provider labels.
+
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:350
+// RefSpec -> RefSpec.jet:354 source/package/raw.
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:358
+// RefSpec.short_name -> RefSpec.jet:360: remove selector, then last path component.
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:371
+// RefError -> RefSpec.jet:464 #Error: all10 variants and payloads retained.
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:412
+// RefError.code -> RefSpec.jet:492: E1317/E1230/E1231 or None.
+
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:430
+// WorkspaceIndex -> RefSpec.jet:511 ordered WorkspaceMember records.
+impl WorkspaceIndex {
+    // Rust: crates/jet-pkg-model/src/RefSpec.rs:429
+    pub fn default() -> WorkspaceIndex { WorkspaceIndex.empty() }
+}
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:438
+// WorkspaceIndex.empty -> RefSpec.jet:517.
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:445
+// WorkspaceIndex.from_members -> RefSpec.jet:524: normalize every path once.
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:458
+// WorkspaceIndex.is_empty -> RefSpec.jet:533.
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:464
+// WorkspaceIndex.candidate_labels -> RefSpec.jet:539; names vs paths by query form.
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:473
+// WorkspaceIndex.by_path -> RefSpec.jet:548, exact normalized comparison.
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:483
+// WorkspaceIndex.by_name -> RefSpec.jet:558, all matches in source order.
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:494
+// normalize_member_path -> RefSpec.jet:584 pkg_normalize_member_path:
+// trim whitespace, replace backslash, remove one ./, remove all trailing /.
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:501
+// is_bare_path -> RefSpec.jet:592 pkg_is_bare_path: ./, ../ or / prefix.
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:507
+// with_default_source -> RefSpec.jet:599 pkg_with_default_source:
+// preserve local/explicit source; otherwise attach jetpack before selector.
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:527
+// provider_first -> RefSpec.jet:613 pkg_ref_provider_first, bare path replacement.
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:542
+// classify -> RefSpec.jet:367 RefSpec.classify with empty source table.
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:550
+// classify_in -> RefSpec.jet:376 RefSpec.classify_in plus RefSource.resolve81:
+// retired-input errors first, local paths, last @ and first #, exact source
+// resolution, declared source.package form, bare jetpack fallback, missing @.
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:642
+// classify_with_workspace -> RefSpec.jet:424 RefSpec.classify_with_workspace:
+// explicit source precedence, defer bare catalog default for populated index,
+// preserve all non-MissingSeparator errors, resolve only source-less queries.
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:680
+// resolve_in_index -> RefSpec.jet:568 WorkspaceIndex.resolve:
+// one local member, unknown with nearest suggestions, ambiguous with all paths.
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:712
+// nearest -> RefSpec.jet:628 pkg_ref_nearest: distance then label ordering,
+// byte-length cutoff max(query,label)/2+1 and at most3 suggestions.
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:728
+// edit_distance -> RefSpec.jet:646 pkg_edit_distance, Unicode scalar DP.
+
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:760
+// ProviderRef -> RefSpec.jet:726 provider/target/channel/policy/raw.
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:772
+// ProviderRef.upstream -> RefSpec.jet:736, provider:target plus channel selector.
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:791
+// ChannelRef -> RefSpec.jet:684 Latest/Main/SemverMask(String).
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:798
+// ChannelRef.parse_selector -> RefSpec.jet:697.
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:807
+// ChannelRef.as_str -> RefSpec.jet:689.
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:816
+// is_semver_mask -> RefSpec.jet:710 pkg_is_semver_mask: v<ASCII digits>.x.
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:832
+// MigratedRef -> Compiler/JetPkgModel/Source/Refs/RefMigration.jet:12.
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:837
+// legacy_policy_prefix -> RefMigration.jet:57 pkg_ref_legacy_policy_prefix:
+// #auto/#latest followed by whitespace only, stripping that whitespace.
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:852
+// policy_for_selector -> RefSpec.jet:233 ChannelPolicy.for_selector.
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:861
+// valid_source_token -> RefMigration.jet:95 pkg_ref_valid_source_token:
+// nonempty ASCII alphanumeric, hyphen, underscore or dot only.
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:869
+// migrate_persisted_ref -> RefMigration.jet:17 MigratedRef.persisted:
+// malformed forms stay unchanged; source selector beats target selector beats
+// policy prefix; preserve explicit legacy movement policy before inferred policy.
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:944
+// migrate_public_ref -> RefMigration.jet:49 MigratedRef.public:
+// migrate selectors, then rewrite nixpkgs source without changing policy.
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:956
+// noncanonical_input_error -> RefMigration.jet:107 pkg_ref_noncanonical_input_error:
+// RetiredNixpkgs precedence over NonCanonical; no input acceptance via migrator.
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:973
+// retired_selector_replacement -> RefMigration.jet:119:
+// diagnostic only; require deleted selector position/prefix and nonempty target.
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:1010
+// rewrite_public_nixpkgs -> RefMigration.jet:131 pkg_ref_rewrite_public_nixpkgs.
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:1040
+// canonical_locked_ref -> RefMigration.jet:147 pkg_canonical_locked_ref:
+// migrate persisted form then unify nixpkgs/jetpack lock keys, retain selector.
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:1066
+// policy_for_ref -> RefMigration.jet:161 pkg_policy_for_ref.
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:1076
+// split_channel_ref -> RefMigration.jet:169 pkg_split_channel_ref:
+// last # only; preserve exact selector in base, extract recognized channels.
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:1086
+// policy_for_upstream -> RefSpec.jet:242 ChannelPolicy.for_upstream.
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:1093
+// classify_provider_ref -> RefSpec.jet:745 ProviderRef.classify and track771:
+// retired errors first, bare paths, last @, provider-first teaching errors,
+// path-provider retirement, unknown built-in rejection, auto/latest/manual
+// tracking versus exact pinned selector left in target.
+
+// Original #[test] registrations are retained once in
+// Jetpack/PackageModel/Tests/RefSpec.jet (all37 cases, no duplicated suite).
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:1175
+// retires_nixpkgs_public_spelling_but_preserves_persisted_provenance -> Tests/RefSpec47.
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:1206
+// classifies_jetpack_and_canonicalizes_bare_package_refs -> Tests/RefSpec60.
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:1218
+// bare_and_explicit_jetpack_refs_classify_identically -> Tests/RefSpec68.
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:1226
+// nixpkgs_public_ref_is_an_exact_jetpack_rewrite -> Tests/RefSpec72.
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:1235
+// classifies_github_repo -> Tests/RefSpec76.
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:1244
+// classifies_local_path -> Tests/RefSpec83.
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:1251
+// classifies_direct_cran_root_with_exact_version -> Tests/RefSpec89.
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:1258
+// classifies_direct_luarocks_root_with_exact_version -> Tests/RefSpec95.
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:1265
+// classifies_direct_scripting_registry_roots -> Tests/RefSpec102.
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:1290
+// classifies_direct_jet_registry_npm_and_cargo_roots -> Tests/RefSpec115.
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:1312
+// classifies_native_release_source -> Tests/RefSpec128.
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:1320
+// short_name_discards_version_selector -> Tests/RefSpec135.
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:1326
+// bare_package_defaults_to_jetpack -> Tests/RefSpec139.
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:1333
+// rejects_empty_halves -> Tests/RefSpec145.
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:1342
+// bare_package_selector_uses_jetpack -> Tests/RefSpec150.
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:1349
+// rejects_unknown_source -> Tests/RefSpec156.
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:1357
+// old_provider_first_ref_teaches_the_flip -> Tests/RefSpec163.
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:1375
+// package_ref_keeps_version_after_source -> Tests/RefSpec168.
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:1387
+// provider_ref_marks_channel_selectors -> Tests/RefSpec175.
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:1415
+// classifies_declared_named_source -> Tests/RefSpec182.
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:1428
+// named_source_unknown_lists_declared -> Tests/RefSpec190.
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:1442
+// builtins_resolve_without_declaration -> Tests/RefSpec206.
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:1454
+// ws_index -> Tests/RefSpec40 pkg_test_ws_index, exact two member records.
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:1462
+// bare_form_resolves_unique_member -> Tests/RefSpec215.
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:1469
+// path_form_resolves_member -> Tests/RefSpec221.
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:1483
+// unknown_member_is_e1231_with_suggestion -> Tests/RefSpec230.
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:1496
+// unknown_path_member_suggests_paths_only -> Tests/RefSpec239.
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:1508
+// ambiguous_bare_member_is_e1230_lists_candidates -> Tests/RefSpec246.
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:1527
+// source_form_wins_over_index -> Tests/RefSpec263.
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:1537
+// empty_index_uses_jetpack_for_bare_package -> Tests/RefSpec271.
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:1548
+// provider_ref_github_with_rev -> Tests/RefSpec277.
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:1555
+// provider_ref_local_path -> Tests/RefSpec283.
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:1562
+// provider_ref_retires_nixpkgs_source_spelling -> Tests/RefSpec289.
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:1573
+// channel_policies_are_checked_and_keep_channel_intent -> Tests/RefSpec293.
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:1596
+// retired_selector_forms_do_not_fall_back_to_canonical_parsers -> Tests/RefSpec315.
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:1615
+// provider_ref_splits_on_last_at -> Tests/RefSpec332.
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:1622
+// provider_ref_rejects_missing_at -> Tests/RefSpec338.
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:1630
+// provider_ref_rejects_empty_halves -> Tests/RefSpec342.
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:1642
+// provider_ref_rejects_unknown_provider -> Tests/RefSpec347.
+// Rust: crates/jet-pkg-model/src/RefSpec.rs:1650
+// provider_ref_rejects_provider_first_and_path_word -> Tests/RefSpec354.

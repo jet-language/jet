@@ -1,661 +1,84 @@
-// PORT-PENDING 2137 crates-jet-pkg-model-src-powershellbind: crates/jet-pkg-model/src/PowerShellBind.rs:1-657
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! Persistent PowerShell 7 object-pipeline binder (D-FFI-PWSH1=A).
-//RS 
-//RS use std::io::Read;
-//RS use std::path::{Path, PathBuf};
-//RS use std::process::{Command, Stdio};
-//RS use std::time::{Duration, Instant};
-//RS 
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct BindResult {
-//RS     pub source: String,
-//RS     pub bound: Vec<String>,
-//RS     pub archive: PathBuf,
-//RS     pub provenance: String,
-//RS }
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub enum BindError {
-//RS     Source(String),
-//RS     ToolMissing(&'static str),
-//RS     ToolFailed(&'static str, String),
-//RS     IO(String),
-//RS }
-//RS impl std::fmt::Display for BindError {
-//RS     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-//RS         match self {
-//RS             Self::Source(v) | Self::IO(v) => f.write_str(v),
-//RS             Self::ToolMissing(v) => write!(f, "the provisioned `{v}` tool was not found"),
-//RS             Self::ToolFailed(t, v) => write!(f, "`{t}` rejected the PowerShell binding input: {v}"),
-//RS         }
-//RS     }
-//RS }
-//RS #[derive(Clone)]
-//RS struct BoundFunction {
-//RS     pwsh: String,
-//RS     jet: String,
-//RS }
-//RS 
-//RS pub fn bind(path: &Path, source: &str, lib: &str, cache: &Path) -> Result<BindResult, BindError> {
-//RS     require_supported_host(cfg!(unix))?;
-//RS     if !ident(lib) {
-//RS         return Err(BindError::Source(format!(
-//RS             "`{lib}` is not a valid Jet library name"
-//RS         )));
-//RS     }
-//RS     let pwsh = tool_path("pwsh").ok_or(BindError::ToolMissing("pwsh"))?;
-//RS     let script = std::fs::canonicalize(path)
-//RS         .map_err(|e| BindError::IO(format!("could not resolve the PowerShell script: {e}")))?;
-//RS     std::fs::create_dir_all(cache)
-//RS         .map_err(|e| BindError::IO(format!("could not create PowerShell binding cache: {e}")))?;
-//RS     let build = cache.join(format!(".pwsh-build-{lib}"));
-//RS     let _ = std::fs::remove_dir_all(&build);
-//RS     std::fs::create_dir_all(&build)
-//RS         .map_err(|e| BindError::IO(format!("could not create PowerShell build directory: {e}")))?;
-//RS     let validator = build.join("validate.ps1");
-//RS     std::fs::write(&validator,"$tokens = $null\n$errors = $null\n$ast = [System.Management.Automation.Language.Parser]::ParseFile($args[0], [ref]$tokens, [ref]$errors)\nif ($errors.Count -ne 0) { [Console]::Error.WriteLine('ParserError'); exit 2 }\n$ast.EndBlock.Statements | Where-Object { $_ -is [System.Management.Automation.Language.FunctionDefinitionAst] } | ForEach-Object { [Console]::Out.WriteLine($_.Name) }\n").map_err(|e|BindError::IO(format!("could not write PowerShell validator: {e}")))?;
-//RS     let discovered = run_capture(
-//RS         Command::new(&pwsh)
-//RS             .args(["-NoLogo", "-NoProfile", "-NonInteractive", "-File"])
-//RS             .arg(&validator)
-//RS             .arg(&script),
-//RS         "pwsh",
-//RS     )?;
-//RS     let functions = parse_function_names(&discovered)?;
-//RS     let worker = cache.join(format!("{lib}_worker.ps1"));
-//RS     std::fs::write(&worker, render_worker(&functions))
-//RS         .map_err(|e| BindError::IO(format!("could not write PowerShell worker: {e}")))?;
-//RS     let worker = std::fs::canonicalize(&worker)
-//RS         .map_err(|e| BindError::IO(format!("could not resolve the PowerShell worker: {e}")))?;
-//RS     let c = build.join(format!("jet_pwsh_{lib}.c"));
-//RS     let object = build.join(format!("jet_pwsh_{lib}.o"));
-//RS     std::fs::write(&c, render_c(lib, &pwsh, &worker, &script, &functions))
-//RS         .map_err(|e| BindError::IO(format!("could not write PowerShell process bridge: {e}")))?;
-//RS     run(
-//RS         Command::new("cc")
-//RS             .args(["-std=c11", "-D_POSIX_C_SOURCE=200809L", "-fPIC", "-c"])
-//RS             .arg(&c)
-//RS             .arg("-o")
-//RS             .arg(&object),
-//RS         "cc",
-//RS     )?;
-//RS     let archive = cache.join(format!("libjet_pwsh_{lib}.a"));
-//RS     let _ = std::fs::remove_file(&archive);
-//RS     run(
-//RS         Command::new("ar").arg("rcs").arg(&archive).arg(&object),
-//RS         "ar",
-//RS     )?;
-//RS     let mut identity = b"jet-pwsh-bind-v1\0".to_vec();
-//RS     identity.extend_from_slice(source.as_bytes());
-//RS     identity.push(0);
-//RS     identity.extend_from_slice(script.to_string_lossy().as_bytes());
-//RS     identity.push(0);
-//RS     identity.extend_from_slice(pwsh.to_string_lossy().as_bytes());
-//RS     identity.push(0);
-//RS     identity.extend_from_slice(render_worker(&functions).as_bytes());
-//RS     let result = BindResult {
-//RS         source: render_jet(lib, &functions),
-//RS         bound: functions.iter().map(|v| v.jet.clone()).collect(),
-//RS         provenance: {
-//RS             let mut provenance = format!(
-//RS                 "schema=jet-pwsh-bind-v1\nsha256={}\npwsh={}\nscript={}\nworker={}\n",
-//RS                 crate::SHA256::sha256_hex(&identity),
-//RS                 pwsh.display(),
-//RS                 script.display(),
-//RS                 worker.display()
-//RS             );
-//RS             crate::ForeignBridge::append_boundary_for_artifact(
-//RS                 &mut provenance,
-//RS                 *crate::AST::binder_descriptor(crate::AST::ForeignLanguage::PowerShell)
-//RS                     .ok_or_else(|| BindError::Source("PowerShell binder descriptor is not registered".into()))?,
-//RS                 lib,
-//RS                 &script,
-//RS                 &archive,
-//RS                 format!(
-//RS                     "pwsh={};cc={};ar={}",
-//RS                     pwsh.display(),
-//RS                     crate::ForeignBridge::tool_identity("cc"),
-//RS                     crate::ForeignBridge::tool_identity("ar")
-//RS                 ),
-//RS             )
-//RS             .map_err(BindError::IO)?;
-//RS             provenance
-//RS         },
-//RS         archive,
-//RS     };
-//RS     let _ = std::fs::remove_dir_all(&build);
-//RS     Ok(result)
-//RS }
-//RS 
-//RS fn parse_function_names(bytes: &[u8]) -> Result<Vec<BoundFunction>, BindError> {
-//RS     let text = std::str::from_utf8(bytes)
-//RS         .map_err(|_| BindError::Source("PowerShell returned non-UTF-8 function metadata".into()))?;
-//RS     let mut out = Vec::new();
-//RS     for line in text.lines() {
-//RS         let name = line.trim();
-//RS         if name.is_empty() {
-//RS             continue;
-//RS         }
-//RS         if !powershell_ident(name) {
-//RS             return Err(BindError::Source(format!(
-//RS                 "PowerShell function `{name}` cannot be projected as a Jet identifier"
-//RS             )));
-//RS         }
-//RS         let jet = name
-//RS             .split('-')
-//RS             .map(|part| part.to_ascii_lowercase())
-//RS             .collect::<Vec<_>>()
-//RS             .join("_");
-//RS         if reserved_jet_function(&jet) {
-//RS             return Err(BindError::Source(format!(
-//RS                 "PowerShell function `{name}` projects to reserved Jet name `{jet}`"
-//RS             )));
-//RS         }
-//RS         if out
-//RS             .iter()
-//RS             .any(|v: &BoundFunction| v.jet.eq_ignore_ascii_case(&jet))
-//RS         {
-//RS             return Err(BindError::Source(format!(
-//RS                 "PowerShell function `{name}` collides with another generated Jet function `{jet}`"
-//RS             )));
-//RS         }
-//RS         out.push(BoundFunction {
-//RS             pwsh: name.to_string(),
-//RS             jet,
-//RS         });
-//RS     }
-//RS     if out.is_empty() {
-//RS         return Err(BindError::Source(
-//RS             "no top-level PowerShell functions were found".into(),
-//RS         ));
-//RS     }
-//RS     Ok(out)
-//RS }
-//RS 
-//RS fn render_worker(functions: &[BoundFunction]) -> String {
-//RS     let allowed = functions
-//RS         .iter()
-//RS         .map(|v| format!("'{}'", v.pwsh.replace('\'', "''")))
-//RS         .collect::<Vec<_>>()
-//RS         .join(", ");
-//RS     format!(
-//RS         r#"$ErrorActionPreference = 'Stop'
-//RS $ProgressPreference = 'SilentlyContinue'
-//RS $inputStream = [Console]::OpenStandardInput()
-//RS $outputStream = [Console]::OpenStandardOutput()
-//RS $utf8 = [System.Text.UTF8Encoding]::new($false)
-//RS $allowed = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-//RS @({allowed}) | ForEach-Object {{ [void]$allowed.Add($_) }}
-//RS $null = . $args[0] 2>$null 3>$null 4>$null 5>$null 6>$null
-//RS $ready = $utf8.GetBytes('READY')
-//RS $outputStream.Write([BitConverter]::GetBytes([int]$ready.Length), 0, 4)
-//RS $outputStream.Write($ready, 0, $ready.Length)
-//RS $outputStream.Flush()
-//RS 
-//RS function Read-Exact([byte[]]$buffer, [int]$count) {{
-//RS   $offset = 0
-//RS   while ($offset -lt $count) {{
-//RS     $read = $inputStream.Read($buffer, $offset, $count - $offset)
-//RS     if ($read -eq 0) {{ return $false }}
-//RS     $offset += $read
-//RS   }}
-//RS   return $true
-//RS }}
-//RS 
-//RS while ($true) {{
-//RS   $header = [byte[]]::new(4)
-//RS   if (-not (Read-Exact $header 4)) {{ break }}
-//RS   $length = [BitConverter]::ToInt32($header, 0)
-//RS   if ($length -lt 1 -or $length -gt 1048576) {{ break }}
-//RS   $payload = [byte[]]::new($length)
-//RS   if (-not (Read-Exact $payload $length)) {{ break }}
-//RS   $request = $null
-//RS   try {{
-//RS     $request = $utf8.GetString($payload) | ConvertFrom-JSON -AsHashtable -Depth 64 2>$null 3>$null 4>$null 5>$null 6>$null
-//RS     if ($request.op -eq 'shutdown') {{ break }}
-//RS     if ($request.op -ne 'invoke' -or -not $allowed.Contains([string]$request.command)) {{ throw 'rejected command identity' }}
-//RS     $value = & ([string]$request.command) $request.input 2>$null 3>$null 4>$null 5>$null 6>$null
-//RS     $response = [ordered]@{{ id = $request.id; ok = $true; value = $value }}
-//RS   }} catch {{
-//RS     $response = [ordered]@{{ id = if ($null -ne $request) {{ $request.id }} else {{ 0 }}; ok = $false; code = 'CommandFailed'; value = $null }}
-//RS   }}
-//RS   $json = $response | ConvertTo-JSON -Depth 64 -Compress 2>$null 3>$null 4>$null 5>$null 6>$null
-//RS   $bytes = $utf8.GetBytes($json)
-//RS   if ($bytes.Length -gt 1048576) {{ break }}
-//RS   $outputStream.Write([BitConverter]::GetBytes([int]$bytes.Length), 0, 4)
-//RS   $outputStream.Write([BitConverter]::GetBytes([int64]$response.id), 0, 8)
-//RS   $outputStream.Write($bytes, 0, $bytes.Length)
-//RS   $outputStream.Flush()
-//RS }}
-//RS "#
-//RS     )
-//RS }
-//RS 
-//RS fn render_jet(lib: &str, functions: &[BoundFunction]) -> String {
-//RS     let abi = format!("jet_pwsh_{lib}");
-//RS     let mut out = format!(
-//RS         r#"#Import module c.{abi} {{
-//RS     fn open() -> Int = "{abi}_open"
-//RS     fn take_error() -> Int = "{abi}_take_error"
-//RS     fn cancel(handle: Int) = "{abi}_cancel"
-//RS     fn close(handle: Int) = "{abi}_close"
-//RS "#
-//RS     );
-//RS     for function in functions {
-//RS         out.push_str(&format!(
-//RS             "    fn {}(handle: Int, input: String, deadline_ms: Int) -> String = \"{abi}_invoke_{}\"\n",
-//RS             function.jet, function.jet
-//RS         ));
-//RS     }
-//RS     out.push_str(&format!(
-//RS         r#"}}
-//RS use c.{abi} as abi
-//RS use core.encoding.json as json
-//RS 
-//RS pub struct Session {{
-//RS     value: Int
-//RS }}
-//RS 
-//RS #Error
-//RS pub enum PowerShellError {{
-//RS     NotRunning
-//RS     Timeout
-//RS     Cancelled
-//RS     Protocol
-//RS     CommandFailed
-//RS     Limit
-//RS }}
-//RS 
-//RS "#
-//RS     ));
-//RS     out.push_str(&crate::Bindgen::render_decode_response(
-//RS         "PowerShellError",
-//RS         crate::Bindgen::DecoderProtocol::StandardEnvelope,
-//RS     ));
-//RS     out.push_str(
-//RS         r#"impl Session.Close {
-//RS     fn close(^self) { abi.close(self.value) }
-//RS }
-//RS 
-//RS pub fn close(session: ^Session) {}
-//RS 
-//RS pub fn open() -> Session PowerShellError! {
-//RS     handle :: abi.open()
-//RS     if abi.take_error() != 0 -> return Err(PowerShellError.NotRunning)
-//RS     return Ok(Session{ value: handle })
-//RS }
-//RS 
-//RS pub fn cancel(session: Session) { abi.cancel(session.value) }
-//RS 
-//RS "#,
-//RS     );
-//RS     for function in functions {
-//RS         let call = format!("abi.{}", function.jet);
-//RS         out.push_str(&format!(
-//RS             r#"pub fn {}(session: Session, input: DataTree, deadline_ms: Int) -> DataTree PowerShellError! {{
-//RS     raw :: {}(session.value, json.to_string(input), deadline_ms)
-//RS     code :: abi.take_error()
-//RS     return decode_response(raw, code)
-//RS }}
-//RS 
-//RS "#,
-//RS             function.jet, call
-//RS         ));
-//RS     }
-//RS     out
-//RS }
-//RS 
-//RS #[cfg(test)]
-//RS pub(crate) fn render_probe() -> String {
-//RS     render_jet(
-//RS         "registry",
-//RS         &[BoundFunction {
-//RS             pwsh: "Transform".into(),
-//RS             jet: "transform".into(),
-//RS         }],
-//RS     )
-//RS }
-//RS 
-//RS fn render_c(
-//RS     lib: &str,
-//RS     pwsh: &Path,
-//RS     worker: &Path,
-//RS     script: &Path,
-//RS     functions: &[BoundFunction],
-//RS ) -> String {
-//RS     let abi = format!("jet_pwsh_{lib}");
-//RS     let mut wrappers = String::new();
-//RS     for f in functions {
-//RS         wrappers.push_str(&format!("const char* {abi}_invoke_{}(int64_t h,const char*input,int64_t deadline){{return invoke(h,\"{}\",input,deadline);}}\n",f.jet,f.pwsh));
-//RS     }
-//RS     render_supervisor_c(
-//RS         &abi,
-//RS         pwsh,
-//RS         worker,
-//RS         script,
-//RS         &wrappers,
-//RS         "\"-NoLogo\",\"-NoProfile\",\"-NonInteractive\",\"-File\",worker_path,script_path",
-//RS     )
-//RS }
-//RS 
-//RS /// Shared bounded process/wire supervisor. Language binders still own worker
-//RS /// semantics; this only centralizes the audited framing, deadline, handle,
-//RS /// cancellation, and child-reaping machinery.
-//RS pub(crate) fn render_supervisor_c(
-//RS     abi: &str,
-//RS     executable: &Path,
-//RS     worker: &Path,
-//RS     script: &Path,
-//RS     wrappers: &str,
-//RS     exec_args: &str,
-//RS ) -> String {
-//RS     render_supervisor_c_with_temp(abi, executable, worker, script, wrappers, exec_args, None)
-//RS }
-//RS 
-//RS /// Variant for workers needing a private scratch directory. The supervisor
-//RS /// creates it after fork, exports it as `JET_BIND_TEMP`, and removes its one
-//RS /// declared artifact on every reap path, including timeout and cancellation.
-//RS pub(crate) fn render_supervisor_c_with_temp(
-//RS     abi: &str,
-//RS     executable: &Path,
-//RS     worker: &Path,
-//RS     script: &Path,
-//RS     wrappers: &str,
-//RS     exec_args: &str,
-//RS     temp_prefix: Option<&str>,
-//RS ) -> String {
-//RS     let temp_prefix = temp_prefix.unwrap_or("");
-//RS     format!(
-//RS         r#"#include <errno.h>
-//RS #include <fcntl.h>
-//RS #include <poll.h>
-//RS #include <pthread.h>
-//RS #include <signal.h>
-//RS #include <stdint.h>
-//RS #include <stdio.h>
-//RS #include <stdlib.h>
-//RS #include <string.h>
-//RS #include <sys/stat.h>
-//RS #include <sys/types.h>
-//RS #include <sys/wait.h>
-//RS #include <time.h>
-//RS #include <unistd.h>
-//RS #define LIMIT 1048576
-//RS #define SLOTS 32
-//RS typedef struct {{pid_t pid;int input;int output;uint32_t generation;int cancelled;pthread_mutex_t io;}} Slot;
-//RS static Slot slots[SLOTS];static pthread_mutex_t lock=PTHREAD_MUTEX_INITIALIZER;static pthread_once_t once=PTHREAD_ONCE_INIT;static _Thread_local int64_t failed;static _Thread_local char result[LIMIT+1];static uint64_t request_id;
-//RS static const char executable_path[]="{}";static const char worker_path[]="{}";static const char script_path[]="{}";static const char temp_prefix[]="{}";
-//RS static int64_t now_ms(void){{struct timespec t;if(clock_gettime(CLOCK_MONOTONIC,&t)!=0)return 0;return (int64_t)t.tv_sec*1000+t.tv_nsec/1000000;}}
-//RS static void init(void){{for(int i=0;i<SLOTS;i++)pthread_mutex_init(&slots[i].io,0);}}
-//RS static int wait_fd(int fd,short events,int64_t end){{for(;;){{int64_t left=end-now_ms();if(left<=0)return 0;struct pollfd p={{fd,events,0}};int n=poll(&p,1,left>2147483647?2147483647:(int)left);if(n>0)return (p.revents&events)!=0?1:-1;if(n==0)return 0;if(errno!=EINTR)return -1;}}}}
-//RS static ssize_t pipe_write(int fd,const void*b,size_t n){{sigset_t block,old,pending;sigemptyset(&block);sigaddset(&block,SIGPIPE);if(pthread_sigmask(SIG_BLOCK,&block,&old)!=0){{errno=EIO;return -1;}}sigpending(&pending);int had=sigismember(&pending,SIGPIPE);ssize_t wrote=write(fd,b,n);int saved=errno;if(wrote<0&&saved==EPIPE&&!had){{struct timespec zero={{0,0}};while(sigtimedwait(&block,0,&zero)<0&&errno==EINTR){{}}}}pthread_sigmask(SIG_SETMASK,&old,0);errno=saved;return wrote;}}
-//RS static int write_all(int fd,const unsigned char*b,size_t n,int64_t end){{size_t at=0;while(at<n){{int ready=wait_fd(fd,POLLOUT,end);if(ready<=0)return ready;ssize_t wrote=pipe_write(fd,b+at,n-at);if(wrote>0)at+=(size_t)wrote;else if(wrote==0||(wrote<0&&errno!=EINTR))return -1;}}return 1;}}
-//RS static int read_all(int fd,unsigned char*b,size_t n,int64_t end){{size_t at=0;while(at<n){{int ready=wait_fd(fd,POLLIN,end);if(ready<=0)return ready;ssize_t got=read(fd,b+at,n-at);if(got>0)at+=(size_t)got;else if(got==0)return -1;else if(errno!=EINTR)return -1;}}return 1;}}
-//RS static void temp_path(pid_t pid,char*out,size_t cap){{if(temp_prefix[0])snprintf(out,cap,"%s%ld",temp_prefix,(long)pid);else out[0]=0;}}
-//RS static void cleanup_temp(pid_t pid){{char dir[256],file[272];temp_path(pid,dir,sizeof(dir));if(!dir[0])return;snprintf(file,sizeof(file),"%s/plot.svg",dir);unlink(file);rmdir(dir);}}
-//RS static void reap(pid_t pid){{if(pid>0){{if(kill(-pid,SIGKILL)<0&&errno==ESRCH)kill(pid,SIGKILL);while(waitpid(pid,0,0)<0&&errno==EINTR){{}}cleanup_temp(pid);}}}}
-//RS static void clear_pid(pid_t pid){{pthread_mutex_lock(&lock);for(int i=0;i<SLOTS;i++)if(slots[i].pid==pid){{if(slots[i].input>=0)close(slots[i].input);if(slots[i].output>=0)close(slots[i].output);slots[i].pid=0;slots[i].input=-1;slots[i].output=-1;slots[i].cancelled=0;}}pthread_mutex_unlock(&lock);}}
-//RS static void finish(void){{for(int i=0;i<SLOTS;i++){{pthread_mutex_lock(&lock);pid_t pid=slots[i].pid;pthread_mutex_unlock(&lock);if(pid>0){{reap(pid);clear_pid(pid);}}}}}}
-//RS static void finish_once(void){{init();atexit(finish);}}
-//RS static int spawn_worker(pid_t*pid,int*input,int*output){{int to[2],from[2];if(pipe(to))return 0;if(pipe(from)){{close(to[0]);close(to[1]);return 0;}}pid_t child=fork();if(child<0){{close(to[0]);close(to[1]);close(from[0]);close(from[1]);return 0;}}if(child==0){{setpgid(0,0);if(temp_prefix[0]){{char dir[256];temp_path(getpid(),dir,sizeof(dir));if(!dir[0]||mkdir(dir,0700)!=0||setenv("JET_BIND_TEMP",dir,1)!=0)_exit(127);}}dup2(to[0],0);dup2(from[1],1);int sink=open("/dev/null",O_WRONLY);if(sink>=0)dup2(sink,2);close(to[0]);close(to[1]);close(from[0]);close(from[1]);execl(executable_path,executable_path,{exec_args},(char*)0);_exit(127);}}setpgid(child,child);close(to[0]);close(from[1]);int64_t end=now_ms()+5000;unsigned char header[4],ready[5];int ok=read_all(from[0],header,4,end);if(ok>0){{if(header[0]==5&&header[1]==0&&header[2]==0&&header[3]==0)ok=read_all(from[0],ready,5,end);else ok=-1;}}if(ok<=0||memcmp(ready,"READY",5)!=0){{close(to[1]);close(from[0]);reap(child);return 0;}}*pid=child;*input=to[1];*output=from[0];return 1;}}
-//RS static int snapshot(int64_t h,int*index,pid_t*pid,int*input,int*output){{int idx=(int)(h&255)-1;uint32_t gen=(uint32_t)((uint64_t)h>>8);if(idx<0||idx>=SLOTS)return 0;pthread_mutex_lock(&lock);Slot*s=&slots[idx];int ok=s->pid>0&&s->generation==gen;if(ok){{*index=idx;*pid=s->pid;*input=s->input;*output=s->output;}}pthread_mutex_unlock(&lock);return ok;}}
-//RS int64_t {abi}_take_error(void){{int64_t value=failed;failed=0;return value;}}
-//RS int64_t {abi}_open(void){{pthread_once(&once,finish_once);failed=0;pid_t pid;int input,output;if(!spawn_worker(&pid,&input,&output)){{failed=1;return 0;}}pthread_mutex_lock(&lock);for(int i=0;i<SLOTS;i++)if(slots[i].pid==0){{slots[i].generation++;if(slots[i].generation==0)slots[i].generation=1;slots[i].pid=pid;slots[i].input=input;slots[i].output=output;uint64_t h=((uint64_t)slots[i].generation<<8)|(uint64_t)(i+1);pthread_mutex_unlock(&lock);return (int64_t)h;}}pthread_mutex_unlock(&lock);reap(pid);close(input);close(output);failed=1;return 0;}}
-//RS static const char* invoke(int64_t h,const char*command,const char*json,int64_t deadline){{failed=0;result[0]=0;if(!json){{failed=4;return result;}}size_t json_n=strlen(json);if(json_n>LIMIT-256){{failed=5;return result;}}if(deadline<1||deadline>300000){{failed=2;return result;}}int idx,input,output;pid_t pid;if(!snapshot(h,&idx,&pid,&input,&output)){{failed=1;return result;}}pthread_mutex_lock(&slots[idx].io);if(!snapshot(h,&idx,&pid,&input,&output)){{pthread_mutex_unlock(&slots[idx].io);failed=1;return result;}}uint64_t id=__atomic_add_fetch(&request_id,1,__ATOMIC_RELAXED);char*request=malloc(json_n+256);if(!request){{pthread_mutex_unlock(&slots[idx].io);failed=5;return result;}}int n=snprintf(request,json_n+256,"{{\"id\":%llu,\"op\":\"invoke\",\"command\":\"%s\",\"input\":%s}}",(unsigned long long)id,command,json);if(n<1||(size_t)n>LIMIT){{free(request);pthread_mutex_unlock(&slots[idx].io);failed=5;return result;}}unsigned char header[4]={{(unsigned char)n,(unsigned char)(n>>8),(unsigned char)(n>>16),(unsigned char)(n>>24)}};int64_t end=now_ms()+deadline;int io=write_all(input,header,4,end);if(io>0)io=write_all(input,(unsigned char*)request,(size_t)n,end);free(request);unsigned char response_header[4],response_id[8];if(io>0)io=read_all(output,response_header,4,end);uint32_t size=0;if(io>0){{size=(uint32_t)response_header[0]|((uint32_t)response_header[1]<<8)|((uint32_t)response_header[2]<<16)|((uint32_t)response_header[3]<<24);if(size>LIMIT)io=-2;}}if(io>0)io=read_all(output,response_id,8,end);if(io>0){{uint64_t received=0;for(int b=0;b<8;b++)received|=(uint64_t)response_id[b]<<(8*b);if(received!=id)io=-3;}}if(io>0)io=read_all(output,(unsigned char*)result,size,end);if(io>0)result[size]=0;if(io<=0){{pthread_mutex_lock(&lock);int cancelled=slots[idx].pid==pid&&slots[idx].cancelled;pthread_mutex_unlock(&lock);reap(pid);clear_pid(pid);failed=cancelled?3:(io==0?2:(io==-2?5:4));result[0]=0;}}pthread_mutex_unlock(&slots[idx].io);return result;}}
-//RS void {abi}_cancel(int64_t h){{failed=0;int idx,input,output;pid_t pid;if(!snapshot(h,&idx,&pid,&input,&output)){{failed=1;return;}}pthread_mutex_lock(&lock);if(slots[idx].pid==pid)slots[idx].cancelled=1;pthread_mutex_unlock(&lock);if(kill(-pid,SIGKILL)<0&&errno==ESRCH)kill(pid,SIGKILL);}}
-//RS void {abi}_close(int64_t h){{failed=0;int idx,input,output;pid_t pid;if(!snapshot(h,&idx,&pid,&input,&output)){{failed=1;return;}}pthread_mutex_lock(&slots[idx].io);if(snapshot(h,&idx,&pid,&input,&output)){{unsigned char frame[21]={{17,0,0,0,'{{','\"','o','p','\"',':','\"','s','h','u','t','d','o','w','n','\"','}}'}};int64_t end=now_ms()+250;write_all(input,frame,sizeof(frame),end);reap(pid);clear_pid(pid);}}pthread_mutex_unlock(&slots[idx].io);}}
-//RS {wrappers}"#,
-//RS         c_escape(&executable.to_string_lossy()),
-//RS         c_escape(&worker.to_string_lossy()),
-//RS         c_escape(&script.to_string_lossy()),
-//RS         c_escape(temp_prefix)
-//RS     )
-//RS }
-//RS 
-//RS fn tool_path(tool: &str) -> Option<PathBuf> {
-//RS     let path = std::env::var_os("PATH")?;
-//RS     std::env::split_paths(&path)
-//RS         .map(|v| v.join(tool))
-//RS         .find(|v| v.is_file())
-//RS         .and_then(|v| std::fs::canonicalize(v).ok())
-//RS }
-//RS fn run_capture(command: &mut Command, tool: &'static str) -> Result<Vec<u8>, BindError> {
-//RS     const CAP: usize = 64 * 1024;
-//RS     command.stdout(Stdio::piped()).stderr(Stdio::piped());
-//RS     let mut child = command.spawn().map_err(|e| {
-//RS         if e.kind() == std::io::ErrorKind::NotFound {
-//RS             BindError::ToolMissing(tool)
-//RS         } else {
-//RS             BindError::IO(format!("could not start `{tool}`: {e}"))
-//RS         }
-//RS     })?;
-//RS     let stdout = child
-//RS         .stdout
-//RS         .take()
-//RS         .ok_or_else(|| BindError::IO(format!("could not supervise `{tool}` stdout")))?;
-//RS     let stderr = child
-//RS         .stderr
-//RS         .take()
-//RS         .ok_or_else(|| BindError::IO(format!("could not supervise `{tool}` stderr")))?;
-//RS     let out = std::thread::spawn(move || drain(stdout, CAP));
-//RS     let err = std::thread::spawn(move || drain(stderr, CAP));
-//RS     let deadline = Instant::now() + Duration::from_secs(60);
-//RS     let status = loop {
-//RS         match child
-//RS             .try_wait()
-//RS             .map_err(|e| BindError::IO(format!("could not supervise `{tool}`: {e}")))?
-//RS         {
-//RS             Some(v) => break v,
-//RS             None if Instant::now() >= deadline => {
-//RS                 let _ = child.kill();
-//RS                 let _ = child.wait();
-//RS                 let _ = out.join();
-//RS                 let _ = err.join();
-//RS                 return Err(BindError::ToolFailed(
-//RS                     tool,
-//RS                     "the tool exceeded the 60 second limit".into(),
-//RS                 ));
-//RS             }
-//RS             None => std::thread::sleep(Duration::from_millis(10)),
-//RS         }
-//RS     };
-//RS     let stdout = out
-//RS         .join()
-//RS         .map_err(|_| BindError::IO(format!("`{tool}` stdout reader failed")))??;
-//RS     let stderr = err
-//RS         .join()
-//RS         .map_err(|_| BindError::IO(format!("`{tool}` stderr reader failed")))??;
-//RS     if status.success() {
-//RS         Ok(stdout)
-//RS     } else {
-//RS         Err(BindError::ToolFailed(tool, launder(&stderr)))
-//RS     }
-//RS }
-//RS fn run(command: &mut Command, tool: &'static str) -> Result<(), BindError> {
-//RS     const CAP: usize = 64 * 1024;
-//RS     command.stdout(Stdio::piped()).stderr(Stdio::piped());
-//RS     let mut child = command.spawn().map_err(|e| {
-//RS         if e.kind() == std::io::ErrorKind::NotFound {
-//RS             BindError::ToolMissing(tool)
-//RS         } else {
-//RS             BindError::IO(format!("could not start `{tool}`: {e}"))
-//RS         }
-//RS     })?;
-//RS     let stdout = child
-//RS         .stdout
-//RS         .take()
-//RS         .ok_or_else(|| BindError::IO(format!("could not supervise `{tool}` stdout")))?;
-//RS     let stderr = child
-//RS         .stderr
-//RS         .take()
-//RS         .ok_or_else(|| BindError::IO(format!("could not supervise `{tool}` stderr")))?;
-//RS     let out = std::thread::spawn(move || drain(stdout, CAP));
-//RS     let err = std::thread::spawn(move || drain(stderr, CAP));
-//RS     let deadline = Instant::now() + Duration::from_secs(60);
-//RS     let status = loop {
-//RS         match child
-//RS             .try_wait()
-//RS             .map_err(|e| BindError::IO(format!("could not supervise `{tool}`: {e}")))?
-//RS         {
-//RS             Some(v) => break v,
-//RS             None if Instant::now() >= deadline => {
-//RS                 let _ = child.kill();
-//RS                 let _ = child.wait();
-//RS                 let _ = out.join();
-//RS                 let _ = err.join();
-//RS                 return Err(BindError::ToolFailed(
-//RS                     tool,
-//RS                     "the tool exceeded the 60 second limit".into(),
-//RS                 ));
-//RS             }
-//RS             None => std::thread::sleep(Duration::from_millis(10)),
-//RS         }
-//RS     };
-//RS     let stdout = out
-//RS         .join()
-//RS         .map_err(|_| BindError::IO(format!("`{tool}` stdout reader failed")))??;
-//RS     let stderr = err
-//RS         .join()
-//RS         .map_err(|_| BindError::IO(format!("`{tool}` stderr reader failed")))??;
-//RS     if status.success() {
-//RS         Ok(())
-//RS     } else {
-//RS         let detail = if stderr.is_empty() { &stdout } else { &stderr };
-//RS         Err(BindError::ToolFailed(tool, launder(detail)))
-//RS     }
-//RS }
-//RS fn drain(mut input: impl Read, limit: usize) -> Result<Vec<u8>, BindError> {
-//RS     let mut out = Vec::new();
-//RS     let mut buf = [0u8; 8192];
-//RS     loop {
-//RS         let n = input
-//RS             .read(&mut buf)
-//RS             .map_err(|e| BindError::IO(format!("could not read foreign tool output: {e}")))?;
-//RS         if n == 0 {
-//RS             break;
-//RS         }
-//RS         let keep = (limit - out.len()).min(n);
-//RS         out.extend_from_slice(&buf[..keep]);
-//RS     }
-//RS     Ok(out)
-//RS }
-//RS fn launder(v: &[u8]) -> String {
-//RS     let text = String::from_utf8_lossy(v);
-//RS     if text.contains("ParserError") {
-//RS         return "the script has a PowerShell parse error".into();
-//RS     }
-//RS     text.lines()
-//RS         .map(str::trim)
-//RS         .find(|v| !v.is_empty())
-//RS         .map(|v| v.chars().take(160).collect())
-//RS         .unwrap_or_else(|| "the foreign tool returned a failure status".into())
-//RS }
-//RS fn c_escape(v: &str) -> String {
-//RS     let mut out = String::new();
-//RS     for b in v.bytes() {
-//RS         match b {
-//RS             b'\\' => out.push_str("\\\\"),
-//RS             b'"' => out.push_str("\\\""),
-//RS             b'\n' => out.push_str("\\n"),
-//RS             b'\r' => out.push_str("\\r"),
-//RS             b'\t' => out.push_str("\\t"),
-//RS             0x20..=0x7e => out.push(b as char),
-//RS             _ => out.push_str(&format!("\\{:03o}", b)),
-//RS         }
-//RS     }
-//RS     out
-//RS }
-//RS fn ident(v: &str) -> bool {
-//RS     let mut chars = v.chars();
-//RS     matches!(chars.next(),Some(c)if c.is_ascii_alphabetic()||c=='_')
-//RS         && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
-//RS }
-//RS fn powershell_ident(v: &str) -> bool {
-//RS     let mut chars = v.chars();
-//RS     matches!(chars.next(),Some(c)if c.is_ascii_alphabetic()||c=='_')
-//RS         && chars.all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
-//RS }
-//RS fn reserved_jet_function(v: &str) -> bool {
-//RS     matches!(
-//RS         v,
-//RS         "open"
-//RS             | "take_error"
-//RS             | "cancel"
-//RS             | "close"
-//RS             | "decode_response"
-//RS             | "abi"
-//RS             | "json"
-//RS             | "Session"
-//RS             | "PowerShellError"
-//RS     ) || crate::Syntax::JET_KEYWORD_LIST.contains(&v)
-//RS         || crate::Syntax::JET_TYPE_LIST.contains(&v)
-//RS }
-//RS fn require_supported_host(unix: bool) -> Result<(), BindError> {
-//RS     if unix {
-//RS         Ok(())
-//RS     } else {
-//RS         Err(BindError::Source(
-//RS             "persistent PowerShell bindings require a POSIX host process supervisor".into(),
-//RS         ))
-//RS     }
-//RS }
-//RS 
-//RS #[cfg(test)]
-//RS mod tests {
-//RS     #[test]
-//RS     fn projects_powershell_names_without_changing_foreign_lookup() {
-//RS         let functions = super::parse_function_names(b"Get-Stateful\nFail\n").unwrap();
-//RS         assert_eq!(
-//RS             functions.iter().map(|v| v.jet.as_str()).collect::<Vec<_>>(),
-//RS             ["get_stateful", "fail"]
-//RS         );
-//RS         let jet = super::render_jet("ops", &functions);
-//RS         let worker = super::render_worker(&functions);
-//RS         assert!(jet.contains("pub fn get_stateful("));
-//RS         assert!(jet.contains("fn open() -> Int ="));
-//RS         assert!(jet.contains("pub fn open() -> Session PowerShellError! {"));
-//RS         assert!(jet.contains("Session{ value: handle }"));
-//RS         assert!(!jet.contains("=>"));
-//RS         assert!(!jet.contains("Session.{"));
-//RS         assert!(worker.contains("'Get-Stateful'"));
-//RS     }
-//RS     #[test]
-//RS     fn renders_one_response_decoder_for_powershell_operations() {
-//RS         let functions = super::parse_function_names(b"Transform\nFail\n").unwrap();
-//RS         let jet = super::render_jet("ops", &functions);
-//RS         assert_eq!(jet.matches("fn decode_response(").count(), 1);
-//RS         assert_eq!(jet.matches("response.field(\"ok\")").count(), 1);
-//RS         assert_eq!(jet.matches("raw :: abi.transform(").count(), 1);
-//RS         assert_eq!(jet.matches("raw :: abi.fail(").count(), 1);
-//RS         assert_eq!(jet.matches("return decode_response(raw, code)").count(), 2);
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn rejects_generated_powershell_helper_and_alias_collisions() {
-//RS         for (name, jet) in [("Take-Error", "take_error"), ("ABI", "abi")] {
-//RS             let Err(error) = super::parse_function_names(name.as_bytes()) else {
-//RS                 panic!("generated PowerShell name collision was accepted")
-//RS             };
-//RS             assert_eq!(
-//RS                 error,
-//RS                 super::BindError::Source(format!(
-//RS                     "PowerShell function `{name}` projects to reserved Jet name `{jet}`"
-//RS                 ))
-//RS             );
-//RS         }
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn non_posix_hosts_fail_instead_of_emitting_a_posix_facade() {
-//RS         let error = super::require_supported_host(false).unwrap_err();
-//RS         assert_eq!(
-//RS             error,
-//RS             super::BindError::Source(
-//RS                 "persistent PowerShell bindings require a POSIX host process supervisor".into()
-//RS             )
-//RS         );
-//RS     }
-//RS }
-//RS 
-// END-PORT-PENDING 2137 crates/jet-pkg-model/src/PowerShellBind.rs:1-657
+// Persistent PowerShell 7 object-pipeline binder (D-FFI-PWSH1=A).
+// The canonical binder and shared supervisor own the implementations; no second API.
 
+// Rust: crates/jet-pkg-model/src/PowerShellBind.rs:9
+// BindResult is the shared four-field result; native archive paths integrate as OSPath.
+use Jetpack.PackageModel.Foreign.Binders.BinderTools.[ForeignBindResult]
+// Rust: crates/jet-pkg-model/src/PowerShellBind.rs:16
+// BindError uses the shared carrier. ToolFailed.action is "rejected the PowerShell binding input".
+// Rust: crates/jet-pkg-model/src/PowerShellBind.rs:23
+// Display is ForeignBindError.message (ForeignBindError.jet:19), preserving each message.
+use Compiler.JetPkgModel.ForeignBindError.[ForeignBindError]
+// Rust: crates/jet-pkg-model/src/PowerShellBind.rs:33
+use Jetpack.PackageModel.Foreign.Binders.PowerShell.[PwshBoundFunction]
+
+// Rust: crates/jet-pkg-model/src/PowerShellBind.rs:37
+// GATE #4494: native FS, tool execution, and bounded process supervision.
+// GATE #4483: host guard must use core.sys.target.selected_family(), not the build host.
+use Jetpack.PackageModel.Foreign.Binders.PowerShell.[pkg_powershell_bind]
+// Rust: crates/jet-pkg-model/src/PowerShellBind.rs:128
+use Jetpack.PackageModel.Foreign.Binders.PowerShell.[pkg_powershell_parse_function_names]
+// Rust: crates/jet-pkg-model/src/PowerShellBind.rs:173
+// PowerShell worker owns the original length framing, command allow-list and response IDs.
+use Jetpack.PackageModel.Foreign.Binders.PowerShell.[pkg_powershell_render_worker]
+// Rust: crates/jet-pkg-model/src/PowerShellBind.rs:232
+use Jetpack.PackageModel.Foreign.Binders.PowerShell.[pkg_powershell_render_jet]
+// Rust: crates/jet-pkg-model/src/PowerShellBind.rs:306
+use Jetpack.PackageModel.Foreign.Binders.PowerShell.[pkg_powershell_render_probe]
+// Rust: crates/jet-pkg-model/src/PowerShellBind.rs:317
+use Jetpack.PackageModel.Foreign.Binders.PowerShell.[pkg_powershell_render_c]
+// Rust: crates/jet-pkg-model/src/PowerShellBind.rs:342
+// GATE #4494: rendered C owns fork/pipes/poll/pthread/TLS/child reaping, never calls Rust.
+use Jetpack.PackageModel.Foreign.WorkerSupervisor.[pkg_worker_render_supervisor_c]
+// Rust: crates/jet-pkg-model/src/PowerShellBind.rs:356
+// Shared template retains private scratch setup and cleanup on every reap path.
+use Jetpack.PackageModel.Foreign.WorkerSupervisor.[pkg_worker_render_supervisor_c_with_temp]
+// Rust: crates/jet-pkg-model/src/PowerShellBind.rs:413
+use Jetpack.PackageModel.Foreign.Binders.BinderRender.[pkg_binder_resolved_tool_path]
+// Rust: crates/jet-pkg-model/src/PowerShellBind.rs:420
+// run_capture maps to pkg_worker_run_tool(..., .PowerShell, true), stdout on success.
+// Rust: crates/jet-pkg-model/src/PowerShellBind.rs:472
+// run maps to pkg_worker_run_tool(..., .PowerShell, false), discard success stdout.
+// Both use BinderTools.pkg_binder_capture: 64KiB per stream, 60s deadline, timeout error.
+use Jetpack.PackageModel.Foreign.WorkerSupervisor.[pkg_worker_run_tool, WorkerLanguage]
+
+// Rust: crates/jet-pkg-model/src/PowerShellBind.rs:525
+// Drain all bytes even after the retained prefix is full, so a writer cannot block.
+fn drain(input: &std.io.Read, limit: Int) -[IO]> [U8] ForeignBindError! {
+    out := [U8]{}
+    buf := [U8; 8192]{0}
+    loop {
+        // GATE #4494: native reader, bounded stack buffer.
+        n :: input.read(&buf) catch e {
+            return Err(ForeignBindError.IO("could not read foreign tool output: {e}"))
+        }
+        if n == 0 -> break
+        keep :: (limit - out.len()).min(n)
+        &out.extend(buf[0..<keep])
+    }
+    out
+}
+
+// Rust: crates/jet-pkg-model/src/PowerShellBind.rs:540
+// Laundering is WorkerLanguage.PowerShell.launder: ParserError special message,
+// otherwise first nonempty trimmed line limited to 160 Unicode scalar values.
+// Rust: crates/jet-pkg-model/src/PowerShellBind.rs:551
+use Jetpack.PackageModel.Foreign.Binders.BinderRender.[pkg_binder_c_escape]
+// Rust: crates/jet-pkg-model/src/PowerShellBind.rs:566
+use Compiler.JetPkgModel.Text.Identifier.[pkg_binder_is_ident]
+// Rust: crates/jet-pkg-model/src/PowerShellBind.rs:571
+use Jetpack.PackageModel.Foreign.Binders.PowerShell.[pkg_powershell_ident]
+// Rust: crates/jet-pkg-model/src/PowerShellBind.rs:576
+use Jetpack.PackageModel.Foreign.Binders.PowerShell.[pkg_powershell_reserved]
+// Rust: crates/jet-pkg-model/src/PowerShellBind.rs:591
+use Jetpack.PackageModel.Foreign.WorkerSupervisor.[pkg_worker_require_supported_host]
+
+// Rust: crates/jet-pkg-model/src/PowerShellBind.rs:604
+// projects_powershell_names_without_changing_foreign_lookup: Tests/ForeignBindersPowerShell.jet:3.
+// Rust: crates/jet-pkg-model/src/PowerShellBind.rs:621
+// renders_one_response_decoder_for_powershell_operations: Tests/ForeignBindersPowerShell.jet:19.
+// Rust: crates/jet-pkg-model/src/PowerShellBind.rs:632
+// rejects_generated_powershell_helper_and_alias_collisions: Tests/ForeignBindersPowerShell.jet:29.
+// Rust: crates/jet-pkg-model/src/PowerShellBind.rs:647
+// non_posix_hosts_fail_instead_of_emitting_a_posix_facade: Tests/ForeignBindersPowerShell.jet:40.
+// All four original test bodies already live in that paired canonical suite.

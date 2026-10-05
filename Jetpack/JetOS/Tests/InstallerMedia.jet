@@ -1,0 +1,33 @@
+use jetpack.JetOS.InstallerMedia.[smoke_prove_kernel_image, smoke_prove_initrd_image, write_sparse_marker]
+use tempfile.[tempdir]
+use std.[fs]
+
+// Rust: crates/jetpack/src/JetOS/installer_media.rs:331-355 (native file controls; no inline Rust tests).
+#Test("media_smoke_checks_real_file_headers_not_file_existence") {
+    tmp :: tempdir().unwrap()
+    file :: tmp.path().join("payload")
+    fs.write(&file, "not a boot payload").unwrap()
+    assert(!smoke_prove_kernel_image(&file))
+    assert(!smoke_prove_initrd_image(&file))
+    fs.write(&file, &[0x7f, 0x45, 0x4c, 0x46]).unwrap()
+    assert(smoke_prove_kernel_image(&file))
+    fs.write(&file, "MZ--HdrS").unwrap()
+    assert(smoke_prove_kernel_image(&file))
+    fs.write(&file, &[0x1f, 0x8b]).unwrap()
+    assert(smoke_prove_initrd_image(&file))
+    fs.write(&file, "070702").unwrap()
+    assert(smoke_prove_initrd_image(&file))
+    fs.write(&file, &[0, 0x28, 0xb5, 0x2f, 0xfd]).unwrap()
+    assert(smoke_prove_initrd_image(&file))
+}
+#Test("sparse_marker_preserves_text_and_declared_length_without_claiming_bootability") {
+    tmp :: tempdir().unwrap()
+    file :: tmp.path().join("staged.raw")
+    marker :: "JETOS-RAW-STAGED\n"
+    write_sparse_marker(&file, 4096, marker).unwrap()
+    bytes :: fs.read(&file).unwrap()
+    assert_eq(bytes.len(), 4096)
+    assert_eq(&bytes[0..marker.len()], marker.as_bytes())
+    assert(!smoke_prove_kernel_image(&file))
+    assert(!smoke_prove_initrd_image(&file))
+}

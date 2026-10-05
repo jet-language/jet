@@ -1,0 +1,387 @@
+// Private continuation of CliCompilerSpeed helpers; real native CLI journeys.
+// Rust: tests/cli_compiler_speed.rs:302
+#Test("compiler_speed_checker_accepts_generated_baseline") {
+    if selected_family() != "unix" -> return // GATE #4483
+    baseline :: synthetic_v4_baseline()
+    report :: checker_report_from_baseline(baseline)
+    output :: run_checker_fixture("compiler-speed-checker-accept", baseline, report)
+    assert(output.status.code() == Val(0), "generated baseline was rejected:\n{output_text(output)}")
+    assert(output_text(output).contains("perf gate OK"), "checker did not report success:\n{output_text(output)}")
+}
+// Rust: tests/cli_compiler_speed.rs:320
+#Test("compiler_speed_checker_rejects_unsupported_baseline_version") {
+    if selected_family() != "unix" -> return // GATE #4483
+    baseline :: synthetic_v4_baseline()
+    version :: json_number(parse(baseline).unwrap(), "version")
+    bumped :: baseline.replacen("\"version\":{version}", "\"version\":{version + 1}", 1)
+    output :: run_checker_fixture("compiler-speed-checker-version", bumped, "")
+    text :: output_text(output)
+    assert(!output.status.success(), "unsupported version was accepted:\n{text}")
+    assert(text.contains("unsupported compiler-speed baseline version: {version + 1}"), "version mismatch was not named:\n{text}")
+}
+// Rust: tests/cli_compiler_speed.rs:344
+#Test("compiler_speed_checker_rejects_changed_machine_rustc_identity") {
+    if selected_family() != "unix" -> return // GATE #4483
+    baseline :: synthetic_v4_baseline()
+    parsed :: parse(baseline).unwrap()
+    machine_rustc :: json_str(json_field(json_field(parsed, "machine"), "rustc")).expect("machine rustc identity").to_string()
+    bumped :: baseline.replacen("\"rustc\":\"{machine_rustc}\"", "\"rustc\":\"changed-rustc\"", 1)
+    assert(bumped != baseline, "machine rustc mutation did not apply")
+    output :: run_checker_fixture("compiler-speed-checker-rustc", bumped, checker_report_from_baseline(baseline))
+    text :: output_text(output)
+    assert(!output.status.success(), "changed rustc identity was accepted:\n{text}")
+    assert(text.contains("rustc changed: changed-rustc -> {machine_rustc}"), "rustc mismatch was not named:\n{text}")
+}
+
+// Rust: tests/cli_compiler_speed.rs:378
+#Test("compiler_speed_default_profile_routing_is_removal_sensitive_and_production_backed") {
+    if selected_family() != "unix" -> return // GATE #4483
+    scratch :: Scratch.new("compiler-speed-default-profile-routing")
+    std.fs.write(scratch.join("main.jet"), "fn run() { print(\"default-profile\") }\n").unwrap()
+    loop args in [[String]]{[String]{"run", "--trace-tiers", "main.jet"}, [String]{"dev", "--watch=off", "--trace-tiers", "main.jet"}} {
+        output :: Command.new(jet()).args(args).current_dir(scratch.path).env("JET_STORE_DIR", scratch.join("store")).env("JET_STORE_CAP_BYTES", "21474836480").env("JET_STORE_RESERVE_BYTES", "2147483648").env("JET_RUN_CACHE_DIR", scratch.join("run-cache")).env("NO_COLOR", "1").output().unwrap()
+        trace :: String.from_utf8_lossy(output.stderr)
+        assert(output.status.code() == Val(0), "{args[0]} failed:\n{output_text(output)}")
+        assert(output.stdout == "default-profile\n".bytes())
+        // Native O1 is the default fast production lens; no retired JIT route.
+        assert(trace.lines().any(line -> line.starts_with("run") && line.contains("O1")), "{args[0]} lost default fast production lens:\n{trace}")
+        assert(!trace.contains("O0"), "{args[0]} default route deoptimized:\n{trace}")
+    }
+    production :: Command.new(jet()).args([String]{"build", "main.jet", "--trace-tiers"}).current_dir(scratch.path).env("JET_STORE_DIR", scratch.join("store")).env("JET_STORE_CAP_BYTES", "21474836480").env("JET_STORE_RESERVE_BYTES", "2147483648").env("NO_COLOR", "1").output().unwrap()
+    assert(production.status.code() == Val(0), output_text(production))
+    run :: Command.new(scratch.join(".jet/build/main")).current_dir(scratch.path).output().unwrap()
+    assert(run.status.code() == Val(0))
+    assert(run.stdout == "default-profile\n".bytes())
+    // The native plan, not obsolete rustc flags, establishes optimized/stripped defaults.
+    mode :: jet_cli.BuildMode.default()
+    assert(mode.optimize && !mode.debug_info && mode.cross_crate_lto)
+    assert(mode.codegen_units == None)
+}
+
+// Rust: tests/cli_compiler_speed.rs:481
+#Test("compiler_speed_named_job_dev_matches_run_and_interpreter") {
+    if selected_family() != "unix" -> return // GATE #4483
+    scratch :: Scratch.new("compiler-speed-named-job-dev")
+    std.fs.copy(repository_file("Examples/features/devloop/job_runner.jet"), scratch.join("run.jet")).unwrap()
+    std.fs.copy(repository_file("Tools/perf/package.jet"), scratch.join("package.jet")).unwrap()
+    expected :: "hello from job\nseeded\n"
+    invoke :: (args: [String], tag: String) -> {
+        Command.new(jet()).args(args).current_dir(scratch.path).env("JET_STORE_DIR", scratch.join("{tag}-store")).env("JET_STORE_CAP_BYTES", "21474836480").env("JET_STORE_RESERVE_BYTES", "2147483648").env("JET_RUN_CACHE_DIR", scratch.join("{tag}-run-cache")).env("NO_COLOR", "1").output().unwrap()
+    }
+    run :: invoke([String]{"run", "run.jet", "--", "seed_data"}, "run")
+    dev :: invoke([String]{"dev", "run.jet", "--watch=off", "--quiet", "--", "seed_data"}, "dev")
+    interpreter :: invoke([String]{"run", "--interpret", "run.jet", "--", "seed_data"}, "interpreter")
+    loop (label, output) in [(String, Output)]{("run", run), ("dev", dev), ("interpreter", interpreter)} {
+        assert(output.status.code() == Val(0), "{label} named-job execution failed:\n{output_text(output)}")
+        assert(output.stdout == expected.bytes(), "{label} named-job output diverged")
+    }
+    assert(run.stdout == dev.stdout)
+    assert(run.stdout == interpreter.stdout)
+    unknown :: invoke([String]{"dev", "run.jet", "--watch=off", "--quiet", "--", "missing_job"}, "unknown")
+    assert(unknown.status.code() != Val(0))
+    assert(String.from_utf8_lossy(unknown.stderr).contains("E1294"))
+}
+
+// Rust: tests/cli_compiler_speed.rs:684
+#Test("production_build_follows_compiler_speed_plan_flags_and_linker") {
+    if selected_family() != "unix" -> return // GATE #4483
+    scratch :: Scratch.new("compiler-speed-production")
+    std.fs.write(scratch.join("main.jet"), "fn run() { print(\"compiler-speed\") }\n").unwrap()
+    tools :: scratch.join("tools")
+    std.fs.create_dir_all(tools).unwrap()
+    linker_log :: scratch.join("linker.log")
+    real_linker :: path_program("cc")
+    write_executable(tools.join("cc"), "#!/bin/sh\n{ printf '%s\\n' BEGIN; printf '%s\\n' \"$@\"; printf '%s\\n' END; } >> \"$JET_TEST_LINKER_LOG\"\nexec \"$JET_TEST_REAL_LINKER\" \"$@\"\n")
+    output :: Command.new(jet()).args([String]{"build", "main.jet", "--profile=debug"}).current_dir(scratch.path).env("RUSTC_LINKER", tools.join("cc")).env("JET_TEST_REAL_LINKER", real_linker).env("JET_TEST_LINKER_LOG", linker_log).env("JET_STORE_DIR", scratch.join("store")).env("JET_STORE_CAP_BYTES", "21474836480").env("JET_STORE_RESERVE_BYTES", "2147483648").env("JET_DEBUG_NATIVE_CACHE_LOG", scratch.join("native-cache.log")).env("NO_COLOR", "1").output().unwrap()
+    assert(output.status.code() == Val(0), output_text(output))
+    run :: Command.new(scratch.join(".jet/build/main")).current_dir(scratch.path).output().unwrap()
+    assert(run.status.code() == Val(0))
+    assert(run.stdout == "compiler-speed\n".bytes())
+    recorded :: invocations(std.fs.read_to_string(linker_log).unwrap())
+    assert(!recorded.is_empty(), "explicit native linker was not invoked")
+    assert(recorded.iter().any(args -> args.iter().any(arg -> arg.ends_with(".o"))), "native linker lost program/runtime objects")
+    key :: metadata_value(scratch)
+    assert(key.len() == 64 && lowercase_digest(key))
+    mode :: jet_cli.BuildMode.debug()
+    assert(!mode.optimize && mode.debug_info && !mode.cross_crate_lto)
+    // Native object code replaces rustc codegen-units/lto/--extern representation.
+    assert(mode.codegen_units == Val(256))
+}
+
+// Rust: tests/cli_compiler_speed.rs:773
+#Test("production_build_is_reproducible_across_checkout_paths") {
+    if selected_family() != "unix" -> return // GATE #4483
+    left :: Scratch.new("compiler-speed-repro-left")
+    right :: Scratch.new("compiler-speed-repro-right")
+    package :: "name: \"deterministic_build\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO] } }\n"
+    source :: "fn run() { print(\"deterministic-build\") }\n"
+    loop scratch in [Scratch]{left, right} {
+        std.fs.create_dir_all(scratch.join("src")).unwrap()
+        std.fs.write(scratch.join("package.jet"), package).unwrap()
+        std.fs.write(scratch.join("src/main.jet"), source).unwrap()
+        output :: Command.new(jet()).args([String]{"run", "--release", "src/main.jet"}).current_dir(scratch.path).env("JET_STORE_DIR", scratch.join("store")).env("JET_RECEIPT_BYPASS", "1").env("JET_DEBUG_NATIVE_CACHE_LOG", scratch.join("native-cache.log")).env("NO_COLOR", "1").output().unwrap()
+        assert(output.status.code() == Val(0), output_text(output))
+        assert(output.stdout == "deterministic-build\n".bytes())
+    }
+    // Native artifact and action-key determinism replaces generated-Rust determinism.
+    assert_content_metadata_and_remap(left, right)
+    left_binary :: std.fs.read(left.join(".jet/build/main")).unwrap()
+    right_binary :: std.fs.read(right.join(".jet/build/main")).unwrap()
+    assert(sha256_hex(left_binary) == sha256_hex(right_binary))
+    assert(left_binary == right_binary)
+}
+
+// Rust: tests/cli_compiler_speed.rs:829
+#Test("explicit_project_link_build_is_reproducible_and_content_sensitive") {
+    if selected_family() != "unix" -> return // GATE #4483
+    left :: Scratch.new("compiler-speed-c-link-left")
+    right :: Scratch.new("compiler-speed-c-link-right")
+    package :: "name: \"deterministic_c_build\"\nversion: \"0.1.0\"\ndeps: { answer: c@\"./native\" }\nauthority: { holds: { allow: [IO, Mem.Alloc] } }\n"
+    source :: "use c.answer as answer\n#Import module c.answer { fn value() -> I32 = \"answer_value\" }\nfn run() { print(\"{answer.value()}\") }\n"
+    loop scratch in [Scratch]{left, right} {
+        std.fs.create_dir_all(scratch.join("native")).unwrap()
+        std.fs.create_dir_all(scratch.join("src")).unwrap()
+        std.fs.write(scratch.join("package.jet"), package).unwrap()
+        std.fs.write(scratch.join("src/main.jet"), source).unwrap()
+    }
+    build_archive :: (scratch: Scratch, value: I32) -> {
+        std.fs.write(scratch.join("native/answer.c"), "int answer_value(void) {{ return {value}; }}\n").unwrap()
+        compile :: Command.new(path_program("cc")).arg("-c").arg(scratch.join("native/answer.c")).arg("-o").arg(scratch.join("native/answer.o")).output().unwrap()
+        assert(compile.status.success(), output_text(compile))
+        archive :: Command.new(path_program("ar")).args([String]{"rcs", "native/libanswer.a", "native/answer.o"}).current_dir(scratch.path).output().unwrap()
+        assert(archive.status.success(), output_text(archive))
+    }
+    build_archive(left, 42)
+    build_archive(right, 42)
+    invoke :: (scratch: Scratch) -> {
+        Command.new(jet()).args([String]{"run", "--release", "src/main.jet"}).current_dir(scratch.path).env("JET_STORE_DIR", scratch.join("store")).env("JET_STORE_CAP_BYTES", "21474836480").env("JET_STORE_RESERVE_BYTES", "2147483648").env("JET_RECEIPT_BYPASS", "1").env("JET_DEBUG_NATIVE_CACHE_LOG", scratch.join("native-cache.log")).env("NO_COLOR", "1").output().unwrap()
+    }
+    left_run :: invoke(left)
+    right_run :: invoke(right)
+    assert(left_run.status.code() == Val(0), output_text(left_run))
+    assert(right_run.status.code() == Val(0), output_text(right_run))
+    assert(left_run.stdout == "42\n".bytes())
+    assert(right_run.stdout == "42\n".bytes())
+    left_metadata :: metadata_value(left)
+    right_metadata :: metadata_value(right)
+    assert_content_metadata_and_remap(left, right)
+    assert(left_metadata == right_metadata)
+    build_archive(left, 43)
+    // Start a new log so cache_key reads the changed invocation, not the first build.
+    std.fs.remove_file(left.join("native-cache.log")).unwrap()
+    changed_run :: invoke(left)
+    assert(changed_run.status.code() == Val(0), output_text(changed_run))
+    assert(changed_run.stdout == "43\n".bytes())
+    changed_metadata :: metadata_value(left)
+    assert(changed_metadata.len() == 64 && lowercase_digest(changed_metadata))
+    assert(left_metadata != changed_metadata, "changed linked archive did not change native action key")
+}
+
+// Rust: tests/cli_compiler_speed.rs:961
+#Test("production_build_reports_missing_explicit_linker_as_tool_error") {
+    if selected_family() != "unix" -> return // GATE #4483
+    scratch :: Scratch.new("compiler-speed-linker-failure")
+    std.fs.write(scratch.join("main.jet"), "fn run() { print(\"should-not-link\") }\n").unwrap()
+    missing_linker :: scratch.join("missing-linker")
+    output :: Command.new(jet()).args([String]{"build", "main.jet", "--profile=debug"}).current_dir(scratch.path).env("RUSTC_LINKER", missing_linker).env("JET_STORE_DIR", scratch.join("store")).env("JET_STORE_CAP_BYTES", "21474836480").env("JET_STORE_RESERVE_BYTES", "2147483648").env("NO_COLOR", "1").output().unwrap()
+    stderr :: String.from_utf8_lossy(output.stderr)
+    assert(output.status.code() == Val(1), "unexpected build result:\n{stderr}")
+    assert(stderr.contains("L2101"), "missing linker lost tool diagnostic:\n{stderr}")
+    assert(stderr.contains(missing_linker.display().to_string()))
+    assert(!stderr.contains("internal compiler error"))
+}
+
+// Rust: tests/cli_compiler_speed.rs:1000
+#Test("production_build_reuses_and_repairs_stdlib_objects") {
+    if selected_family() != "unix" -> return // GATE #4483
+    scratch :: Scratch.new("compiler-speed-runtime-cache")
+    std.fs.write(scratch.join("main.jet"), "use core.math as math\n\nfn run() {\n    print(\"first\")\n    print(math.abs(Float{-1.0}) == 1.0)\n}\n").unwrap()
+    std.fs.write(scratch.join("package.jet"), "name: \"compiler_speed\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO] } }\n").unwrap()
+    cold :: build(scratch)
+    assert(cold.status.code() == Val(0), output_text(cold))
+    first :: Command.new(scratch.join(".jet/build/main")).current_dir(scratch.path).output().unwrap()
+    assert(first.status.code() == Val(0))
+    assert(first.stdout == "first\ntrue\n".bytes())
+    assert(String.from_utf8_lossy(cold.stderr).contains("[build] runtime   ->"))
+    cache_log :: std.fs.read_to_string(scratch.join("native-cache.log")).unwrap()
+    assert(cache_log.lines().any(line -> has_digest_field(line, "runtime=") && has_corelib_identity(line) && has_digest_field(line, "key=")), "native cache log lost runtime/Core digests:\n{cache_log}")
+    key :: cache_key(cache_log)
+    store :: Store.new(scratch.join("store")).unwrap()
+    initial_status :: store.status().unwrap()
+    assert(initial_status.entries.iter().any(entry -> entry.kind == EntryKind.Blob))
+    assert(initial_status.entries.iter().any(entry -> entry.kind == EntryKind.Action))
+    binary_digest :: sha256_hex(std.fs.read(scratch.join(".jet/build/main")).unwrap())
+    cached_bin :: initial_status.entries.iter().find(entry -> entry.kind == EntryKind.Blob && entry.key == binary_digest).expect("cold build published final binary blob").path
+    unchanged :: build(scratch)
+    assert(unchanged.status.code() == Val(0), output_text(unchanged))
+    assert(String.from_utf8_lossy(unchanged.stderr).contains("cache hit -> reused cached binary"))
+    unchanged_output :: Command.new(scratch.join(".jet/build/main")).current_dir(scratch.path).output().unwrap()
+    assert(unchanged_output.status.code() == Val(0))
+    assert(unchanged_output.stdout == "first\ntrue\n".bytes())
+    std.fs.write(cached_bin, "corrupt final binary".bytes()).unwrap()
+    final_repaired :: build(scratch)
+    assert(final_repaired.status.code() == Val(0), output_text(final_repaired))
+    assert(!String.from_utf8_lossy(final_repaired.stderr).contains("cache hit -> reused cached binary"))
+    assert(String.from_utf8_lossy(final_repaired.stderr).contains("cache store -> saved binary"))
+    final_repaired_output :: Command.new(scratch.join(".jet/build/main")).current_dir(scratch.path).output().unwrap()
+    assert(final_repaired_output.status.code() == Val(0))
+    assert(final_repaired_output.stdout == "first\ntrue\n".bytes())
+    repaired_cache_hit :: build(scratch)
+    assert(repaired_cache_hit.status.code() == Val(0), output_text(repaired_cache_hit))
+    assert(String.from_utf8_lossy(repaired_cache_hit.stderr).contains("cache hit -> reused cached binary"))
+    if store.lookup_artifact(key).unwrap() == {
+        .Hit(_) -> {}
+        _ -> panic("repaired final binary was not readable from machine-wide store")
+    }
+    std.fs.write(scratch.join("main.jet"), "use core.math as math\n\nfn run() {\n    print(\"changed\")\n    print(math.abs(Float{-1.0}) == 1.0)\n}\n").unwrap()
+    warm :: build(scratch)
+    assert(warm.status.code() == Val(0), output_text(warm))
+    changed :: Command.new(scratch.join(".jet/build/main")).current_dir(scratch.path).output().unwrap()
+    assert(changed.status.code() == Val(0))
+    assert(changed.stdout == "changed\ntrue\n".bytes())
+    assert(store.status().unwrap().entries.iter().filter(entry -> entry.kind == EntryKind.Blob).count() >= 2)
+    std.fs.write(scratch.join("main.jet"), "use core.math as math\n\nfn run() {\n    print(\"repaired\")\n    print(math.abs(Float{-1.0}) == 1.0)\n}\n").unwrap()
+    repaired :: build(scratch)
+    assert(repaired.status.code() == Val(0), output_text(repaired))
+    repaired_output :: Command.new(scratch.join(".jet/build/main")).current_dir(scratch.path).output().unwrap()
+    assert(repaired_output.status.code() == Val(0))
+    assert(repaired_output.stdout == "repaired\ntrue\n".bytes())
+    assert(String.from_utf8_lossy(repaired.stderr).contains("cache store -> saved binary"))
+}
+
+// Rust: tests/cli_compiler_speed.rs:1206
+#Test("release_build_timing_runs_inner_cache_and_invalidates_on_source_edit") {
+    if selected_family() != "unix" -> return // GATE #4483
+    scratch :: Scratch.new("compiler-speed-release-cache-reuse")
+    source :: "fn run() { print(\"release-cache\") }\n"
+    std.fs.write(scratch.join("main.jet"), source).unwrap()
+    cold :: release_build(scratch)
+    cold_stderr :: String.from_utf8_lossy(cold.stderr)
+    assert(cold.status.code() == Val(0), cold_stderr)
+    assert(cold_stderr.matches("[build] cache miss -> compiling").count() == 1)
+    first_binary :: std.fs.read(scratch.join(".jet/build/main")).unwrap()
+    std.fs.write(scratch.join("main.jet"), source).unwrap()
+    unchanged :: release_build(scratch)
+    unchanged_stderr :: String.from_utf8_lossy(unchanged.stderr)
+    assert(unchanged.status.code() == Val(0), unchanged_stderr)
+    assert(unchanged_stderr.matches("[build] cache hit -> reused cached binary").count() == 1)
+    assert(unchanged_stderr.matches("[build] cache miss -> compiling").count() == 0)
+    assert(first_binary == std.fs.read(scratch.join(".jet/build/main")).unwrap())
+    std.fs.write(scratch.join("main.jet"), "fn run() { print(\"release-cache-edited\") }\n").unwrap()
+    edited :: release_build(scratch)
+    edited_stderr :: String.from_utf8_lossy(edited.stderr)
+    assert(edited.status.code() == Val(0), edited_stderr)
+    assert(edited_stderr.matches("[build] cache miss -> compiling").count() == 1)
+    assert(edited_stderr.matches("[build] cache hit -> reused cached binary").count() == 0)
+}
+
+// Rust: tests/cli_compiler_speed.rs:1291
+#Test("second_identical_build_replays_receipt") {
+    if selected_family() != "unix" -> return // GATE #4483
+    scratch :: Scratch.new("compiler-speed-receipt-replay")
+    std.fs.write(scratch.join("main.jet"), "fn run() { print(\"receipt-replay\") }\n").unwrap()
+    tools :: scratch.join("tools")
+    std.fs.create_dir_all(tools).unwrap()
+    linker_log :: scratch.join("linker.log")
+    real_linker :: path_program("cc")
+    write_executable(tools.join("cc"), "#!/bin/sh\n{ printf '%s\\n' BEGIN; printf '%s\\n' \"$@\"; printf '%s\\n' END; } >> \"$JET_TEST_LINKER_LOG\"\nexec \"$JET_TEST_REAL_LINKER\" \"$@\"\n")
+    store :: scratch.join("store")
+    logged_nodes :: () -> {
+        record :: Store.new(store).unwrap().last_build_record(scratch.path, "main.jet").unwrap()
+        if record == .Val(record) -> record.nodes.iter().map(node -> (node.kind, node.why_ran)).collect() else -> [(String, String)]{}
+    }
+    invoke :: (shell_temp: OSPath) -> {
+        std.fs.create_dir_all(shell_temp).unwrap()
+        Command.new(jet()).args([String]{"build", "main.jet", "--profile=debug"}).current_dir(scratch.path).env("RUSTC_LINKER", tools.join("cc")).env("JET_TEST_REAL_LINKER", real_linker).env("JET_TEST_LINKER_LOG", linker_log).env("JET_STORE_DIR", store).env("JET_STORE_CAP_BYTES", "21474836480").env("JET_STORE_RESERVE_BYTES", "2147483648").env("NIX_BUILD_TOP", shell_temp).env("TMPDIR", shell_temp).env("TMP", shell_temp).env("TEMP", shell_temp).env("TEMPDIR", shell_temp).env("NO_COLOR", "1").output().unwrap()
+    }
+    first :: invoke(scratch.join("nix-shell.first"))
+    first_stderr :: String.from_utf8_lossy(first.stderr)
+    assert(first.status.code() == Val(0), first_stderr)
+    assert(!first_stderr.contains("up to date:"))
+    first_log :: std.fs.read_to_string(linker_log).unwrap()
+    assert(!invocations(first_log).is_empty(), "first build must invoke native linker")
+    binary :: scratch.join(".jet/build/main")
+    first_binary :: std.fs.read(binary).unwrap()
+    first_modified :: std.fs.metadata(binary).unwrap().modified().unwrap()
+    assert(logged_nodes().iter().any(pair -> pair.0 == "check" && pair.1 != "reused"))
+    second :: invoke(scratch.join("nix-shell.second"))
+    second_stderr :: String.from_utf8_lossy(second.stderr)
+    assert(second.status.code() == Val(0), second_stderr)
+    assert(second_stderr.contains("up to date: "))
+    assert(second.stdout == first.stdout)
+    replayed :: logged_nodes()
+    assert(!replayed.is_empty() && replayed.iter().all(pair -> pair.1 == "reused"))
+    assert(std.fs.read_to_string(linker_log).unwrap() == first_log, "receipt replay must not invoke native linker")
+    assert(std.fs.metadata(binary).unwrap().modified().unwrap() == first_modified)
+    assert(std.fs.read(binary).unwrap() == first_binary)
+}
+
+// Rust: tests/cli_compiler_speed.rs:1425
+#Test("cache_cli_status_prune_limit_and_doctor_snapshots") {
+    if selected_family() != "unix" -> return // GATE #4483
+    scratch :: Scratch.new("compiler-speed-store-cli")
+    store_root :: scratch.join("store")
+    store :: Store.new(store_root).unwrap()
+    store.publish_blob([U8].repeat(U8{0}, 2048)).unwrap()
+    status :: cache_cli(scratch, [String]{"cache", "status"})
+    assert(status.status.code() == Val(0), output_text(status))
+    assert(String.from_utf8(status.stdout).unwrap() == "store      {store_root.display()}\nlimit      20 GiB (JET_STORE_CAP_BYTES)\nreserve    keep 2 GiB free on that filesystem\nused       2 KiB · 1 blobs · 0 records · 0 ThinLTO caches\nleases     0 live\ntiers      local\n")
+    prune :: cache_cli(scratch, [String]{"cache", "prune", "--to", "1K"})
+    assert(prune.status.code() == Val(0), output_text(prune))
+    assert(String.from_utf8(prune.stdout).unwrap() == "prune      2 KiB -> 0 B (target 1 KiB)\nremoved    1 entries · freed 2 KiB\npinned     0 B\n")
+    limit :: cache_cli(scratch, [String]{"cache", "limit", "--host", "4G"})
+    assert(limit.status.code() == Val(0), output_text(limit))
+    assert(String.from_utf8(limit.stdout).unwrap() == "host limit 4 GiB (persisted)\nstore      {store_root.display()}\n")
+    limited_status :: cache_cli(scratch, [String]{"cache", "status"})
+    assert(String.from_utf8(limited_status.stdout).unwrap() == "store      {store_root.display()}\nlimit      4 GiB (host policy)\nreserve    keep 2 GiB free on that filesystem\nused       0 B · 0 blobs · 0 records · 0 ThinLTO caches\nleases     0 live\ntiers      local\n")
+    doctor :: cache_cli(scratch, [String]{"self", "doctor"})
+    doctor_stdout :: String.from_utf8_lossy(doctor.stdout)
+    assert(doctor_stdout.contains("artifact store: {store_root.display()} (footprint 0 B; cap 4 GiB; reserve 2 GiB; 0 entries; 0 live leases)"), "doctor lost artifact-store footprint row:\n{doctor_stdout}")
+}
+
+// Rust: tests/cli_compiler_speed.rs:1629
+#Test("recursive_enum_check_scales_linearly") {
+    if selected_os() != "linux" -> return // GATE #4483
+    USES :: 6
+    MEMORY_CEILING_KIB :: U64{1024 * 1024}
+    limit :: Duration.from_secs(120)
+    (small, small_peak) :: timed_check("recursive-enum-scaling-n", "{USES} layered use sites", recursive_enum_program(USES), limit)
+    (large, large_peak) :: timed_check("recursive-enum-scaling-4n", "{4 * USES} layered use sites", recursive_enum_program(4 * USES), limit)
+    assert(large <= small * 5, "4x use sites took {large:?} against {small:?} for N: checking must stay near linear")
+    loop (uses, peak) in [(Int, U64)]{(USES, small_peak), (4 * USES, large_peak)} {
+        assert(peak <= MEMORY_CEILING_KIB, "`jet check` with {uses} layered use sites peaked at {peak} KiB, over {MEMORY_CEILING_KIB} KiB ceiling")
+    }
+}
+// Rust: tests/cli_compiler_speed.rs:1659
+#Test("wide_enum_derive_check_scales_linearly") {
+    if selected_os() != "linux" -> return // GATE #4483
+    VARIANTS :: 40
+    limit :: Duration.from_secs(120)
+    (small, _) :: timed_check("wide-enum-scaling-n", "{VARIANTS} enum variants", wide_enum_program(VARIANTS), limit)
+    (large, _) :: timed_check("wide-enum-scaling-4n", "{4 * VARIANTS} enum variants", wide_enum_program(4 * VARIANTS), limit)
+    assert(large <= small * 5, "4x enum variants took {large:?} against {small:?} for N: derive expansion must stay near linear")
+}
+
+// Rust: tests/cli_compiler_speed.rs:1698
+#Test("parallel_check_matches_serial_check") {
+    if selected_family() != "unix" -> return // GATE #4483
+    scratch :: Scratch.new("parallel-check-identity")
+    std.fs.write(scratch.join("package.jet"), "name: \"parallel_identity\"\nversion: \"0.1.0\"\n").unwrap()
+    std.fs.write(scratch.join("helper.jet"), "pub fn double(value: Int) -> Int { value * 2 }\npub fn label(value: Int) -> String { value }\npub fn ratio(total: Int, count: Int) -> Int { total / count + missing }\npub fn flag(value: Int) -> Bool { value + 1 }\n").unwrap()
+    std.fs.write(scratch.join("main.jet"), "use helper\nfn first() -> Int { helper.double(\"two\") }\nfn second() -> String { helper.label(4) + 1 }\nfn third() -> Int { unknown_call(3) }\nfn fourth() -> Bool { helper.flag(2) == \"yes\" }\nfn run() {\n    print(first())\n    print(second())\n    print(third())\n    print(fourth())\n}\n").unwrap()
+    repository :: repository_file("")
+    cases := [(OSPath, String)]{(scratch.path, "main.jet")}
+    loop example in [String]{"Examples/features/modules/imports/run.jet", "Examples/features/modules/generic_modules.jet", "Examples/features/errors/inferred_failure_union.jet", "Examples/features/errors/typed_error_families.jet", "Examples/features/generics/generic_callback_values.jet", "Examples/features/traits/impl_shape_matrix.jet"} {
+        &cases.push((repository, example))
+    }
+    loop index in 0..<cases.len() {
+        (dir, target) :: cases[index]
+        serial :: check_output(dir, target, "1", scratch.join("store-{index}-serial"))
+        parallel :: check_output(dir, target, "8", scratch.join("store-{index}-parallel"))
+        assert(String.from_utf8_lossy(serial.1) == String.from_utf8_lossy(parallel.1), "`jet check {target}` stderr differs between 1 and 8 check threads")
+        assert(String.from_utf8_lossy(serial.0) == String.from_utf8_lossy(parallel.0), "`jet check {target}` stdout differs between 1 and 8 check threads")
+        if index == 0 {
+            assert(String.from_utf8_lossy(serial.1).matches("Error [").count() >= 4, "multi-module fixture must report errors from several bodies in both modules:\n{String.from_utf8_lossy(serial.1)}")
+        }
+    }
+}

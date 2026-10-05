@@ -1,0 +1,911 @@
+// Rust: tests/pkg.rs:1803
+use Jetpack.CLI.Tests.Integration.Pkg.*
+use Jetpack.CLI.Tests.Integration.Common.Scratch
+use jet.[Manifest, Loader, AST, Fetch, Publish, Lock, Store, SHA256, Driver, Syntax, Sema, Diagnostics, compile_with_path, render_diagnostics]
+use Jetpack.[Package, EffectBudget, Foreign]
+use std.[fs, env, Command]
+use core.sys.target.[selected_os, selected_family]
+// GATE #4494: real filesystem links, environment, processes and shared fixture lock.
+// GATE #4483: target-dispatched Unix and supported hardlink checks.
+
+// Rust: tests/pkg.rs:1803
+#Test("denied_import_boundary_fact_reaches_structure_inspection") {
+    root :: tmp_dir("import_boundary_denied_structure_fact")
+    write(root, "package.jet", min_manifest("app", "0.1.0") + "boundaries: { deny: [{ from: \"app.ui\", to: \"app.db\" }] }\n")
+    write(root, "ui.jet", "use db\nfn run() -> { }\n")
+    write(root, "db.jet", "pub fn value() -> Int { 1 }\n")
+    entry :: root.join("ui.jet")
+    shown :: entry.to_str().expect("entry text")
+    diagnostics :: Loader.load_entry_with_diagnostics(shown).expect_err("denied edge must retain its loader fact")
+    fact :: diagnostics.iter().find_map(entry -> entry.structure_fact).expect("denied edge structure fact")
+    assert_eq(fact.subject, "app.ui -> app.db")
+    assert_eq(fact.status, "denied")
+    assert_eq(fact.gate, Some("manifest rule edit"))
+    inspected :: Command.new(jet_bin()).current_dir(root).args(["inspect", "structure", shown]).env("NO_COLOR", "1").output().expect("inspect structure must run")
+    assert(!inspected.status.success(), "denied inspection must fail")
+    stdout :: String.from_utf8(inspected.stdout).expect("inspection is UTF-8")
+    assert(stdout.contains("Structure.ImportEdge"))
+    assert(stdout.contains("app.ui -> app.db"))
+    assert(stdout.contains("denied"))
+    assert(stdout.contains("manifest rule edit"))
+    stderr :: String.from_utf8(inspected.stderr).expect("diagnostics are UTF-8")
+    assert(stderr.contains("E0619"), "missing denied-edge diagnostic: {stderr}")
+    fs.remove_dir_all(root).expect("remove root")
+}
+
+// Rust: tests/pkg.rs:1848
+#Test("manifest_parse_dep_path") {
+    raw :: manifest_with_deps("root", "0.1.0", "    helpers: ../helpers,")
+    mf :: Manifest.parse(OSPath.from("package.jet"), raw).expect("path dep should parse")
+    dep :: mf.dependencies.get("helpers").expect("missing helpers dep")
+    assert(match dep { Manifest.DepSpec.Path(path) -> path == "../helpers"; _ -> false })
+}
+
+// Rust: tests/pkg.rs:1857
+#Test("manifest_rejects_traversal_dependency_name") {
+    raw :: manifest_with_deps("root", "0.1.0", "    ../escape: \"1.0.0\",")
+    error :: Manifest.parse(OSPath.from("package.jet"), raw).expect_err("dependency names must not become path components")
+    assert_eq(error.code, "E1206", "{error.code} {error.what}")
+}
+
+// Rust: tests/pkg.rs:1865
+#Test("manifest_parse_dep_git_tag") {
+    raw :: manifest_with_deps("root", "0.1.0", "    parsekit: { git: \"https://github.com/acme/parsekit\", tag: \"v0.4.1\" },")
+    mf :: Manifest.parse(OSPath.from("package.jet"), raw).expect("git tag dep should parse")
+    dep :: mf.dependencies.get("parsekit").expect("missing parsekit")
+    assert(match dep { Manifest.DepSpec.Git(url, Manifest.GitSelector.Tag(t)) -> url.contains("parsekit") && t == "v0.4.1"; _ -> false })
+}
+
+// Rust: tests/pkg.rs:1884
+#Test("manifest_parse_foreign_package_dep") {
+    raw :: manifest_with_deps("root", "0.1.0", "    plotly: js@\"plotly#version=2.35.0@npm\",")
+    mf :: Manifest.parse(OSPath.from("package.jet"), raw).expect("foreign package dep should parse")
+    assert(match mf.dependencies.get("plotly") { Some(Manifest.DepSpec.Foreign(AST.ForeignLanguage.JS, reference)) -> reference == "plotly#version=2.35.0@npm"; _ -> false })
+}
+
+// Rust: tests/pkg.rs:1902
+#Test("foreign_package_provider_fetch_lock_and_locked_round_trip") {
+    _guard :: STORE_LOCK.lock().expect("store lock")
+    project :: Scratch.new("foreign_provider_project")
+    stale_project :: Scratch.new("foreign_provider_stale")
+    failed_project :: Scratch.new("foreign_provider_failure")
+    fixtures :: Scratch.new("foreign_provider_fixtures")
+    store :: Scratch.new("foreign_provider_store")
+    artifact :: fixtures.join("foreign/npm/plotly-plotly_version_2_35_0/.jet/bindings/js/plotly.jet")
+    fs.create_dir_all(artifact.parent().expect("artifact parent")).expect("create artifact dir")
+    descriptor :: AST.binder_descriptor(AST.ForeignLanguage.JS).expect("JS descriptor").stamp()
+    fs.write(artifact, "// jet-ffi-descriptor={descriptor}\npub fn scatter() -> Int {\n    return 7\n}\n").expect("write binding")
+    manifest_text :: manifest_with_deps("consumer", "0.1.0", "    plotly: js@\"plotly#version=2.35.0@npm\",")
+    for root in [project.path, failed_project.path] { fs.write(root.join("package.jet"), manifest_text).expect("write manifest") }
+    main :: project.join("main.jet")
+    fs.write(main, "use js.plotly as plot\nfn run() -> {\n    print(plot.scatter())\n}\n").expect("write consumer")
+    manifest :: Manifest.parse(project.join("package.jet"), manifest_text).expect("parse consumer")
+    old_root :: env.var_os("JETPACK_ROOT")
+    old_fixtures :: env.var_os("JETPACK_FIXTURES")
+    env.set_var("JETPACK_ROOT", store.path)
+    env.set_var("JETPACK_FIXTURES", fixtures.path)
+    fs.write(stale_project.join("package.jet"), manifest_text).expect("write stale manifest")
+    fs.write(artifact, "// jet-ffi-descriptor=stale\npub fn scatter() -> Int {\n    return 7\n}\n").expect("write stale binding")
+    stale_manifest :: Manifest.parse(stale_project.join("package.jet"), manifest_text).expect("parse stale manifest")
+    stale :: Fetch.fetch(stale_project.path, stale_manifest, None, Fetch.FetchOptions(locked: false, update: false, update_dep: None, resolution: Publish.ResolveMode.Conservative)).expect_err("stale provider binding must fail before ingestion")
+    assert(stale.iter().any(diagnostic -> diagnostic.code == "E1256"))
+    fs.write(artifact, "// jet-ffi-descriptor={descriptor}\npub fn scatter() -> Int {\n    return 7\n}\n").expect("restore binding")
+    fetched :: Fetch.fetch(project.path, manifest, None, Fetch.FetchOptions(locked: false, update: false, update_dep: None, resolution: Publish.ResolveMode.Conservative))
+    (lock, dep_dirs) :: fetched.expect("foreign provider fetch should realize the package")
+    assert(dep_dirs.get("plotly").is_some_and(path -> path.is_dir()))
+    assert(Foreign.project_binding_path(project.path, AST.ForeignLanguage.JS, "plotly").is_file())
+    foreign :: lock.packages.iter().find(package -> package.name == "plotly").expect("foreign package must be in lock")
+    assert(match foreign.source { Lock.LockSource.Foreign(AST.ForeignLanguage.JS, reference, output) -> reference == "plotly#version=2.35.0@npm" && !output.is_empty(); _ -> false })
+    assert(foreign.envelope.is_some_and(envelope -> !envelope.output_hash.is_empty()))
+    lock_text :: fs.read_to_string(project.join(".jet/lock")).expect("read lock")
+    round_trip :: Lock.parse(lock_text).expect("foreign lock should parse back")
+    assert_eq(round_trip.packages, lock.packages)
+    source :: fs.read_to_string(main).expect("read consumer")
+    _ :: compile_with_path(source, main.to_string_lossy()).expect("compiler must consume the provider-projected binding")
+    locked :: Fetch.fetch(project.path, manifest, Some(lock), Fetch.FetchOptions(locked: true, update: false, update_dep: None, resolution: Publish.ResolveMode.Conservative)).expect("locked foreign provider round-trip should verify")
+    assert_eq(locked.0.packages, lock.packages)
+    fs.remove_dir_all(fixtures.join("foreign/npm")).expect("remove provider")
+    failed_manifest :: Manifest.parse(failed_project.join("package.jet"), manifest_text).expect("parse failure manifest")
+    failure :: Fetch.fetch(failed_project.path, failed_manifest, None, Fetch.FetchOptions(locked: false, update: false, update_dep: None, resolution: Publish.ResolveMode.Conservative)).expect_err("missing provider artifact must fail before foreign fetch succeeds")
+    assert(failure.iter().any(diagnostic -> diagnostic.code == "E1256"))
+    assert(!failed_project.join(".jet/lock").exists())
+    if value :: old_root { env.set_var("JETPACK_ROOT", value) } else { env.remove_var("JETPACK_ROOT") }
+    if value :: old_fixtures { env.set_var("JETPACK_FIXTURES", value) } else { env.remove_var("JETPACK_FIXTURES") }
+}
+
+// Rust: tests/pkg.rs:2058
+#Test("manifest_parse_e1206_missing_required_field") {
+    raw :: "version: \"0.1.0\"\n"
+    err :: Manifest.parse(OSPath.from("package.jet"), raw).expect_err("missing name should fail")
+    assert_eq(err.code, "E1206")
+}
+
+// Rust: tests/pkg.rs:2068
+#Test("manifest_parse_e1206_unknown_field") {
+    raw :: #IncludeText("tests/ui/manifest_unknown_field/package.jet")
+    err :: Manifest.parse(OSPath.from("package.jet"), raw).expect_err("payload: wrapper should fail")
+    assert_eq(err.code, "E1206")
+    assert(err.what.contains("payload"))
+}
+
+// Rust: tests/pkg.rs:2079
+#Test("manifest_parse_e1209_reserved_nonempty") {
+    raw :: min_manifest("myapp", "0.1.0") + "\ndev_deps: {\n    testlib: ../testlib,\n}\n"
+    err :: Manifest.parse(OSPath.from("package.jet"), raw).expect_err("non-empty dev_deps should fail E1209")
+    assert_eq(err.code, "E1209")
+}
+
+// Rust: tests/pkg.rs:2091
+#Test("manifest_parse_effects_block") {
+    raw :: min_manifest("app", "0.1.0") + "\nauthority: {\n    holds: { allow: [FS, Time], deny: [Net, Panic] },\n}\n"
+    pm :: Package.PackageFacts.parse(raw, "test").expect("authority holds should parse")
+    assert(pm.effects_enabled)
+    assert_eq(pm.effects_allow, Some(["FS", "Time"]))
+    assert_eq(pm.effects_deny, Some(["Net", "Panic"]))
+}
+
+// Rust: tests/pkg.rs:2108
+#Test("manifest_panic_budget_names_the_dependency_stop_site") {
+    raw :: min_manifest("app", "0.1.0") + "\nauthority: { holds: { deny: [Panic] } }\n"
+    manifest :: Package.PackageFacts.parse(raw, "test").expect("Panic should be a manifest effect root")
+    entries :: [EffectBudget.PackageEffects(name: "panicdep", effects: Sema.EffectSet.from(["Panic"]), effect_sites: [:], panic_sites: ["panicdep::parse_port"], boundary_span: Some(Diagnostics.Span.new(4, 12)))]
+    diagnostics :: EffectBudget.enforce(entries, manifest)
+    assert_eq(diagnostics.len(), 1)
+    assert_eq(diagnostics[0].code, "E1220")
+    assert(diagnostics[0].what.contains("panicdep"))
+    assert(diagnostics[0].what.contains("parse_port"))
+    assert(diagnostics[0].fix.contains("fallible result"))
+    assert(diagnostics[0].fix.contains("#Pre"))
+    assert_eq(diagnostics[0].span, Some(Diagnostics.Span.new(4, 12)))
+}
+
+// Rust: tests/pkg.rs:2133
+#Test("manifest_parse_grants_block") {
+    raw :: min_manifest("app", "0.1.0") + "\nauthority: { grants: { \"pdf-lib\": [Net] } }\n"
+    pm :: Package.PackageFacts.parse(raw, "test").expect("grants block should parse")
+    assert_eq(pm.grants, [("pdf-lib", ["Net"])])
+}
+
+// Rust: tests/pkg.rs:2144
+#Test("manifest_parse_authority_block_holds_grants_trust_and_providers") {
+    raw :: min_manifest("app", "0.1.0") + "\nauthority: {\n    holds: { allow: [Net, DB.Read], deny: [Exec] },\n    grants: { \"image-codec\": [FS.Read] },\n    trust: { default: prompt, ci: { prompt: deny }, services: { stripe: allow } },\n    providers: { nix: { registry: \"nixpkgs\", deny: [\"openssl-1.0\"] } },\n}\n"
+    pm :: Package.PackageFacts.parse(raw, "test").expect("one authority block should parse")
+    assert_eq(pm.authority.holds.allow, Some(["Net", "DB.Read"]))
+    assert_eq(pm.authority.holds.deny, Some(["Exec"]))
+    assert_eq(pm.authority.grants, [("image-codec", ["FS.Read"])])
+    assert_eq(pm.grants, pm.authority.grants)
+    assert_eq(pm.effects_allow, pm.authority.holds.allow)
+    assert_eq(pm.effects_deny, pm.authority.holds.deny)
+    assert_eq(pm.authority.trust.and_then(trust -> trust.default), Some(Package.TrustDecision.Prompt))
+    assert_eq(pm.authority.providers.len(), 1)
+    assert_eq(pm.authority.providers[0].provider, "nix")
+    assert_eq(pm.authority.providers[0].registry, "nixpkgs")
+    assert_eq(pm.authority.providers[0].deny, ["openssl-1.0"])
+}
+
+// Rust: tests/pkg.rs:2182
+#Test("manifest_parse_authority_trust_block") {
+    raw :: min_manifest("app", "0.1.0") + "\nauthority: { trust: { default: prompt, ci: { prompt: deny }, services: { postgres: prompt }, require: attested } }\n"
+    pm :: Package.PackageFacts.parse(raw, "test").expect("authority.trust block should parse")
+    policy :: pm.authority.trust.expect("authority trust policy should be stored")
+    assert_eq(policy.default, Some(Package.TrustDecision.Prompt))
+    assert_eq(policy.ci_prompt, Some(Package.TrustDecision.Deny))
+    assert_eq(policy.services, [("postgres", Package.TrustDecision.Prompt)])
+    assert_eq(policy.require, Some(Package.ProvenanceRequirement.Attested))
+}
+
+// Rust: tests/pkg.rs:2213
+#Test("manifest_authority_trust_rejects_unknown_decision") {
+    raw :: min_manifest("app", "0.1.0") + "\nauthority: { trust: { default: maybe } }\n"
+    err :: Package.PackageFacts.parse(raw, "test").expect_err("unknown trust decision should fail")
+    assert(match err { Package.PackageParseError.BadEffectsBlock(_) -> true; _ -> false })
+}
+
+// Rust: tests/pkg.rs:2224
+#Test("manifest_no_effects_block_disables_enforcement") {
+    raw :: min_manifest("app", "0.1.0")
+    pm :: Package.PackageFacts.parse(raw, "test").expect("valid manifest should parse")
+    assert(!pm.effects_enabled)
+    assert_eq(pm.effects_allow, None)
+}
+
+// Rust: tests/pkg.rs:2233
+#Test("manifest_parse_effects_e1221_unknown_effect") {
+    raw :: min_manifest("app", "0.1.0") + "\nauthority: { holds: { allow: [NotAnEffect] } }\n"
+    err :: Package.PackageFacts.parse(raw, "test").expect_err("unknown effect name should fail E1221")
+    diag :: Manifest.parse(OSPath.from("package.jet"), raw).expect_err("should surface through Manifest::parse too")
+    assert_eq(diag.code, "E1221")
+    assert(match err { Package.PackageParseError.BadEffectsBlock(_) -> true; _ -> false })
+}
+
+// Rust: tests/pkg.rs:2247
+#Test("manifest_parse_effects_e1221_unknown_field") {
+    raw :: min_manifest("app", "0.1.0") + "\nauthority: { holds: { nope: [FS] } }\n"
+    diag :: Manifest.parse(OSPath.from("package.jet"), raw).expect_err("unknown effects field should fail E1221")
+    assert_eq(diag.code, "E1221")
+}
+
+// Rust: tests/pkg.rs:2255
+#Test("effect_budget_load_ok_reports_via_compile_with_path") {
+    tmp :: tmp_dir("effbudget_ok")
+    write(tmp, "package.jet", min_manifest("app", "0.1.0") + "\nauthority: { holds: { allow: [IO] } }\n")
+    entry :: tmp.join("run.jet")
+    fs.write(entry, "fn run() -> { print(\"hi\") }\n").expect("write entry")
+    result :: compile_with_path("", entry.to_string_lossy())
+    assert(result.is_ok(), "a well-formed authority.holds budget should not block compilation:\n{result.err().map(d -> render_diagnostics(\"run.jet\", \"\", d)).unwrap_or_default()}")
+    _ :: fs.remove_dir_all(tmp)
+}
+
+// Rust: tests/pkg.rs:2282
+#Test("cli_build_prints_effect_summary") {
+    if !jet_bin().is_file() { eprintln("note: skipping cli_build_prints_effect_summary (run `cargo build` first)"); return }
+    tmp :: tmp_dir("effbudget_summary")
+    store :: tmp.join("store")
+    fs.create_dir_all(store).expect("create store")
+    write(tmp, "hello.jet", "use core.files as fs\nfn run() -> { fs.write(\"/tmp/jet_effbudget_test.txt\", \"x\") ?? panic(\"e\") }\n")
+    out :: jet_cmd(["build", "hello.jet"], tmp, store)
+    assert(out.status.success(), "jet build failed:\n{String.from_utf8_lossy(out.stderr)}")
+    stderr :: String.from_utf8_lossy(out.stderr)
+    assert(stderr.contains("effects:") && stderr.contains("FS"), "expected an effect summary naming FS on stderr, got:\n{stderr}")
+    _ :: fs.remove_dir_all(tmp)
+}
+
+// Rust: tests/pkg.rs:2316
+#Test("cli_build_enforces_effect_budget_e1220") {
+    if !jet_bin().is_file() { eprintln("note: skipping cli_build_enforces_effect_budget_e1220 (run `cargo build` first)"); return }
+    tmp :: tmp_dir("effbudget_deny")
+    store :: tmp.join("store")
+    fs.create_dir_all(store).expect("create store")
+    write(tmp, "netdep/package.jet", min_manifest("netdep", "0.1.0"))
+    write(tmp, "netdep/netdep.jet", "use core.net as net\npub fn ping() -> { net.tcp_connect(\"127.0.0.1:1\") ?? panic(\"e\") }\n")
+    write(tmp, "package.jet", manifest_with_deps("app", "0.1.0", "    netdep: ./netdep,") + "\nauthority: { holds: { allow: [FS] } }\n")
+    write(tmp, "run.jet", "use netdep\nfn run() -> { netdep.ping() }\n")
+    out :: jet_cmd(["build", "run.jet"], tmp, store)
+    stderr :: String.from_utf8_lossy(out.stderr)
+    assert(!out.status.success(), "expected build to fail on an out-of-budget effect, stderr:\n{stderr}")
+    assert(stderr.contains("E1220") && stderr.contains("netdep"), "expected E1220 naming `netdep`, got:\n{stderr}")
+    _ :: fs.remove_dir_all(tmp)
+}
+
+// Rust: tests/pkg.rs:2363
+#Test("cli_build_rejects_undeclared_effect_budget_leaf") {
+    if !jet_bin().is_file() { eprintln("note: skipping cli_build_rejects_undeclared_effect_budget_leaf (run `cargo build` first)"); return }
+    tmp :: tmp_dir("effbudget_leaf_typo")
+    store :: tmp.join("store")
+    fs.create_dir_all(store).expect("create store")
+    write(tmp, "package.jet", min_manifest("app", "0.1.0") + "\nauthority: { holds: { allow: [FS.Raed] } }\n")
+    write(tmp, "run.jet", "fn run() -> {}\n")
+    out :: jet_cmd(["build", "run.jet"], tmp, store)
+    stderr :: String.from_utf8_lossy(out.stderr)
+    assert(!out.status.success(), "{stderr}")
+    assert(stderr.contains("E0750") && stderr.contains("FS.Read"), "budget typo should resolve against Prelude effect leaves:\n{stderr}")
+    _ :: fs.remove_dir_all(tmp)
+}
+
+// Rust: tests/pkg.rs:2392
+#Test("cli_build_lint_never_blocks_by_default") {
+    if !jet_bin().is_file() { eprintln("note: skipping cli_build_lint_never_blocks_by_default (run `cargo build` first)"); return }
+    tmp :: tmp_dir("lintpolicy_default")
+    store :: tmp.join("store")
+    fs.create_dir_all(store).expect("create store")
+    write(tmp, "package.jet", min_manifest("app", "0.1.0"))
+    write(tmp, "run.jet", "struct Invoice { price: Float }\nfn run() -> { print(\"hi\") }\n")
+    out :: jet_cmd(["build", "run.jet"], tmp, store)
+    stderr :: String.from_utf8_lossy(out.stderr)
+    assert(stderr.contains("L0504"), "expected the L0504 lint to still print as a warning, got:\n{stderr}")
+    assert(stderr.contains("effects:"), "expected the build to proceed past the lint gate to the effect summary, got:\n{stderr}")
+    assert(!stderr.contains("E1293"), "no `policy.lints` block was declared — E1293 must never fire, got:\n{stderr}")
+    _ :: fs.remove_dir_all(tmp)
+}
+
+// Rust: tests/pkg.rs:2438
+#Test("cli_build_enforces_lint_policy_e1293") {
+    if !jet_bin().is_file() { eprintln("note: skipping cli_build_enforces_lint_policy_e1293 (run `cargo build` first)"); return }
+    tmp :: tmp_dir("lintpolicy_deny")
+    store :: tmp.join("store")
+    fs.create_dir_all(store).expect("create store")
+    write(tmp, "package.jet", min_manifest("app", "0.1.0") + "\npolicy: {\n    lints: { deny: [float_money] },\n}\n")
+    write(tmp, "run.jet", "struct Invoice { price: Float }\nfn run() -> { print(\"hi\") }\n")
+    out :: jet_cmd(["build", "run.jet"], tmp, store)
+    stderr :: String.from_utf8_lossy(out.stderr)
+    assert(!out.status.success(), "expected the build to fail once policy.lints denies float_money, stderr:\n{stderr}")
+    assert(stderr.contains("E1293") && stderr.contains("L0504"), "expected E1293 naming float_money/L0504, got:\n{stderr}")
+    assert(!stderr.contains("Warning [L0504]"), "a denied lint must not also be printed as a plain warning:\n{stderr}")
+    _ :: fs.remove_dir_all(tmp)
+}
+
+// Rust: tests/pkg.rs:2481
+#Test("cli_build_unused_lint_warns_by_default_and_denies_by_policy") {
+    if !jet_bin().is_file() { eprintln("note: skipping cli_build_unused_lint_warns_by_default_and_denies_by_policy (run `cargo build` first)"); return }
+    tmp :: tmp_dir("lintpolicy_unused")
+    store :: tmp.join("store")
+    fs.create_dir_all(store).expect("create store")
+    write(tmp, "package.jet", min_manifest("app", "0.1.0"))
+    write(tmp, "run.jet", "fn run() -> {\n    unused_binding :: 1\n    print(\"hi\")\n}\n")
+    warning :: jet_cmd(["build", "run.jet"], tmp, store)
+    warning_stderr :: String.from_utf8_lossy(warning.stderr)
+    assert(warning.status.success(), "default warning must not block the build:\n{warning_stderr}")
+    assert(warning_stderr.contains("L0101"), "expected unused-local warning:\n{warning_stderr}")
+    assert(warning_stderr.contains("effects:"), "default build did not pass the lint gate:\n{warning_stderr}")
+    assert(!warning_stderr.contains("E1293"), "default warning must not be denied:\n{warning_stderr}")
+    write(tmp, "package.jet", min_manifest("app", "0.1.0") + "\npolicy: {\n    lints: { deny: [unused_local_binding] },\n}\n")
+    denied :: jet_cmd(["build", "run.jet"], tmp, store)
+    denied_stderr :: String.from_utf8_lossy(denied.stderr)
+    assert(!denied.status.success(), "denied lint must fail:\n{denied_stderr}")
+    assert(denied_stderr.contains("E1293") && denied_stderr.contains("L0101"), "expected E1293 to name unused_local_binding/L0101:\n{denied_stderr}")
+    assert(!denied_stderr.contains("Warning [L0101]"), "denied lint must not remain a plain warning:\n{denied_stderr}")
+    _ :: fs.remove_dir_all(tmp)
+}
+
+// Rust: tests/pkg.rs:2542
+#Test("cli_build_rejects_lint_code_policy_value_with_complete_diagnostic") {
+    if !jet_bin().is_file() { eprintln("note: skipping cli_build_rejects_lint_code_policy_value_with_complete_diagnostic (run `cargo build` first)"); return }
+    tmp :: tmp_dir("lintpolicy_code_value")
+    store :: tmp.join("store")
+    fs.create_dir_all(store).expect("create store")
+    config :: #IncludeText("tests/ui/lint_policy_code_name.jet").lines().find_map(line -> line.strip_prefix("// @lint_policy_config ")).expect("lint policy code fixture must carry a manifest sample")
+    write(tmp, "package.jet", config)
+    write(tmp, "run.jet", "fn run() -> { print(\"hi\") }\n")
+    out :: jet_cmd(["build", "run.jet"], tmp, store)
+    stderr :: String.from_utf8_lossy(out.stderr)
+    assert(!out.status.success(), "a lint code is not a policy value:\n{stderr}")
+    assert(stderr.contains("Error [E1206]: `package.jet` has a manifest shape error."), "missing diagnostic what:\n{stderr}")
+    assert(stderr.contains("Why: A manifest field, value, or policy form is outside the current `package.jet` grammar."), "missing diagnostic why:\n{stderr}")
+    assert(stderr.contains("Fix: For a lint selector, use `same_enum_guard_table` in `policy.lints.deny` instead of diagnostic code `L0302`; otherwise use the current `package.jet` grammar."), "missing diagnostic fix:\n{stderr}")
+    _ :: fs.remove_dir_all(tmp)
+}
+
+// Rust: tests/pkg.rs:2590
+#Test("manifest_toolchain_ok") {
+    raw :: min_manifest("myapp", "0.1.0")
+    mf :: Manifest.parse(OSPath.from("package.jet"), raw).expect("parse manifest")
+    assert(Manifest.check_toolchain(mf, "package.jet").is_ok())
+}
+
+// Rust: tests/pkg.rs:2597
+#Test("manifest_toolchain_e1208_future_version") {
+    raw :: "name: \"myapp\"\nversion: \"0.1.0\"\njet: \">=99.0.0\"\n"
+    mf :: Manifest.parse(OSPath.from("package.jet"), raw).expect("parse manifest")
+    err :: Manifest.check_toolchain(mf, "package.jet").expect_err("E1208")
+    assert_eq(err.code, "E1208")
+}
+
+// Rust: tests/pkg.rs:2609
+#Test("manifest_template_plain_parses") {
+    raw :: Manifest.new_template("myapp", false)
+    mf :: Manifest.parse(OSPath.from("package.jet"), raw).expect("plain template should parse")
+    assert_eq(mf.package.name, "myapp")
+    assert_eq(mf.package.version, "0.1.0")
+    assert(mf.package.jet_constraint.is_some(), "plain template needs jet constraint")
+}
+
+// Rust: tests/pkg.rs:2622
+#Test("manifest_template_annotated_has_dep_comments") {
+    raw :: Manifest.new_template("myapp", true)
+    assert(raw.contains("// Jet package dependencies:"), "annotated template should have dep comment block: {raw}")
+    _ :: Manifest.parse(OSPath.from("package.jet"), raw).expect("annotated template should parse")
+}
+
+// Rust: tests/pkg.rs:2639
+#Test("manifest_add_dep_inserts_in_existing_table") {
+    raw :: min_manifest("root", "0.1.0") + "\ndeps: {\n}\n"
+    updated :: Manifest.add_dependency(raw, "helpers", Manifest.DepSpec.Path(path: "../helpers"))
+    mf :: Manifest.parse(OSPath.from("package.jet"), updated).expect("should reparse")
+    assert(match mf.dependencies.get("helpers") { Some(Manifest.DepSpec.Path(path)) -> path == "../helpers"; _ -> false })
+}
+
+// Rust: tests/pkg.rs:2656
+#Test("manifest_add_dep_creates_table_when_absent") {
+    raw :: min_manifest("root", "0.1.0")
+    updated :: Manifest.add_dependency(raw, "helpers", Manifest.DepSpec.Path(path: "../helpers"))
+    assert(updated.contains("deps:"), "should create deps: block")
+    mf :: Manifest.parse(OSPath.from("package.jet"), updated).expect("should reparse")
+    assert(match mf.dependencies.get("helpers") { Some(Manifest.DepSpec.Path(path)) -> path == "../helpers"; _ -> false })
+}
+
+// Rust: tests/pkg.rs:2674
+#Test("manifest_add_dep_expands_inline_empty_table") {
+    raw :: min_manifest("root", "0.1.0") + "\ndeps: {}\n"
+    updated :: Manifest.add_dependency(raw, "helpers", Manifest.DepSpec.Path(path: "../helpers"))
+    mf :: Manifest.parse(OSPath.from("package.jet"), updated).expect("inline empty deps table should stay parseable")
+    assert(match mf.dependencies.get("helpers") { Some(Manifest.DepSpec.Path(path)) -> path == "../helpers"; _ -> false })
+    assert(updated.contains("deps: {\n    helpers: ../helpers,\n}\n"))
+}
+
+// Rust: tests/pkg.rs:2693
+#Test("manifest_remove_dep_removes_correct_entry") {
+    raw :: min_manifest("root", "0.1.0") + "\ndeps: {\n    helpers: ../helpers,\n    other: ../other,\n}\n"
+    updated :: Manifest.remove_dependency(raw, "helpers")
+    mf :: Manifest.parse(OSPath.from("package.jet"), updated).expect("should reparse")
+    assert(mf.dependencies.get("helpers").is_none(), "helpers should be removed")
+    assert(mf.dependencies.get("other").is_some(), "other should remain")
+}
+
+// Rust: tests/pkg.rs:2713
+#Test("sha256_empty_vector") {
+    hash :: SHA256.sha256_hex(b"")
+    assert_eq(hash, "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
+}
+
+// Rust: tests/pkg.rs:2723
+#Test("sha256_known_vector_matches_self") {
+    hash :: SHA256.sha256_hex(b"abc")
+    assert_eq(hash.len(), 64, "sha256 hex must be exactly 64 chars")
+    assert(hash.starts_with("ba7816bf8f01cfea"), "sha256(abc) prefix mismatch")
+}
+
+// Rust: tests/pkg.rs:2736
+#Test("tree_hash_deterministic") {
+    tmp :: tmp_dir("tree_hash_det")
+    write(tmp, "a.jet", "fn foo() -> {}")
+    write(tmp, "b.jet", "fn bar() -> {}")
+    h1 :: SHA256.tree_hash(tmp)
+    h2 :: SHA256.tree_hash(tmp)
+    assert_eq(h1, h2, "tree hash must be deterministic")
+    assert(h1.starts_with("sha256-"), "tree hash must have sha256- prefix")
+    _ :: fs.remove_dir_all(tmp)
+}
+
+// Rust: tests/pkg.rs:2753
+#Test("tree_hash_changes_on_content_change") {
+    tmp :: tmp_dir("tree_hash_chg")
+    write(tmp, "a.jet", "fn foo() -> {}")
+    h1 :: SHA256.tree_hash(tmp)
+    write(tmp, "a.jet", "fn foo() -> { print(\"hello\") }")
+    h2 :: SHA256.tree_hash(tmp)
+    assert_ne(h1, h2, "tree hash must change when file content changes")
+    _ :: fs.remove_dir_all(tmp)
+}
+
+// Rust: tests/pkg.rs:2770
+#Test("fingerprint_is_deterministic") {
+    fp1 :: Lock.compute_fingerprint("sha256-aabbcc", ["sha256-ddeeff"], "")
+    fp2 :: Lock.compute_fingerprint("sha256-aabbcc", ["sha256-ddeeff"], "")
+    assert_eq(fp1, fp2)
+    assert(fp1.starts_with("sha256-"))
+}
+
+// Rust: tests/pkg.rs:2778
+#Test("fingerprint_changes_with_deps") {
+    fp1 :: Lock.compute_fingerprint("sha256-aabbcc", [], "")
+    fp2 :: Lock.compute_fingerprint("sha256-aabbcc", ["sha256-ddeeff"], "")
+    assert_ne(fp1, fp2, "fingerprint must change when dep fingerprints differ")
+}
+
+// Rust: tests/pkg.rs:2791
+#Test("fingerprint_changes_with_capability_digest") {
+    fp_read :: Lock.compute_fingerprint("sha256-aabbcc", [], "pkg\nfn scale(v: Vec3)")
+    fp_write :: Lock.compute_fingerprint("sha256-aabbcc", [], "pkg\nfn scale(v: &Vec3)")
+    assert_ne(fp_read, fp_write, "fingerprint must change when a public capability changes")
+    fp_none_a :: Lock.compute_fingerprint("sha256-aabbcc", ["sha256-x"], "")
+    fp_none_b :: Lock.compute_fingerprint("sha256-aabbcc", ["sha256-x"], "")
+    assert_eq(fp_none_a, fp_none_b)
+    assert_ne(fp_none_a, fp_read, "a frozen digest must differ from none")
+}
+
+// Rust: tests/pkg.rs:2811
+#Test("store_path_format_name_version_fp") {
+    p :: Store.store_path("mylib", "1.0.0", "sha256-deadbeef")
+    name :: p.file_name().expect("file name").to_str().expect("UTF-8 name")
+    assert_eq(name, "mylib-1.0.0-deadbeef", "store entry: <name>-<version>-<fp_no_prefix>")
+}
+
+// Rust: tests/pkg.rs:2821
+#Test("store_path_strips_sha256_prefix") {
+    tmp :: tmp_dir("store_path_idem")
+    store :: tmp.join("store")
+    fs.create_dir_all(store).expect("create store")
+    with_store(store, () -> {
+        with_pfx :: Store.store_path("mylib", "1.0.0", "sha256-deadbeef")
+        without :: Store.store_path("mylib", "1.0.0", "deadbeef")
+        assert_eq(with_pfx, without)
+    })
+}
+
+// Rust: tests/pkg.rs:2837
+#Test("store_ensure_path_dep_creates_entry") {
+    tmp :: tmp_dir("store_ensure")
+    store :: tmp.join("store")
+    fs.create_dir_all(store).expect("create store")
+    src :: tmp.join("mylib_src")
+    write(src, "mylib.jet", "pub fn hello() -> String { return \"hi\" }\n")
+    write(src, "package.jet", min_manifest("mylib", "0.1.0"))
+    fp :: "sha256-0000000000000000000000000000000000000000000000000000000000000000"
+    (entry, _hash) :: with_store(store, () -> { Store.ensure_path_dep("mylib", "0.1.0", fp, src).expect("ensure_path_dep should succeed") })
+    assert(entry.is_dir(), "store entry dir must exist")
+    assert(entry.join("mylib.jet").is_file(), "source file must be in store")
+    _ :: fs.remove_dir_all(tmp)
+}
+
+// Rust: tests/pkg.rs:2867
+#Test("store_ensure_is_idempotent") {
+    tmp :: tmp_dir("store_idem")
+    store :: tmp.join("store")
+    fs.create_dir_all(store).expect("create store")
+    src :: tmp.join("mylib_src")
+    write(src, "mylib.jet", "pub fn x() -> {}\n")
+    write(src, "package.jet", min_manifest("mylib", "0.1.0"))
+    fp :: "sha256-1111111111111111111111111111111111111111111111111111111111111111"
+    (p1, p2) :: with_store(store, () -> {
+        (a, _) :: Store.ensure_path_dep("mylib", "0.1.0", fp, src).expect("first install")
+        (b, _) :: Store.ensure_path_dep("mylib", "0.1.0", fp, src).expect("second install")
+        (a, b)
+    })
+    assert_eq(p1, p2, "second call must return the same store path")
+    _ :: fs.remove_dir_all(tmp)
+}
+
+// Rust: tests/pkg.rs:2890
+#Test("store_install_rejects_source_and_destination_symlinks") {
+    if selected_family() == "unix" {
+        tmp :: tmp_dir("store_symlink_boundary")
+        store :: tmp.join("store")
+        fs.create_dir_all(store).expect("create store")
+        outside :: tmp.join("outside")
+        fs.write(outside, "must survive\n").expect("write outside")
+        source :: tmp.join("source")
+        fs.create_dir_all(source).expect("create source")
+        fs.write(source.join("package.jet"), "name: \"safe\"\n").expect("write package")
+        outcomes :: with_store(store, () -> {
+            entry :: Store.store_path("safe", "0.1.0", "sha256-safe")
+            fs.symlink(outside, entry).expect("destination symlink")
+            destination :: Store.ensure_path_dep("safe", "0.1.0", "sha256-safe", source)
+            fs.remove_file(entry).expect("remove symlink")
+            fs.symlink(outside, source.join("leak")).expect("source symlink")
+            source_result :: Store.ensure_path_dep("safe", "0.1.0", "sha256-source", source)
+            (destination, source_result)
+        })
+        assert(outcomes.0.is_err(), "store entry symlink must be refused")
+        assert(outcomes.1.is_err(), "source tree symlink must be refused")
+        assert_eq(fs.read_to_string(outside).expect("outside survived"), "must survive\n")
+        _ :: fs.remove_dir_all(tmp)
+    }
+}
+
+// Rust: tests/pkg.rs:2926
+#Test("store_snapshot_install_and_vendor_reject_multiply_linked_source") {
+    if ["linux", "android", "macos", "ios"].contains(selected_os()) {
+        scratch :: Scratch.new("store_vendor_hardlink")
+        store :: scratch.join("store")
+        fs.create_dir_all(store).expect("create store")
+        source :: scratch.join("source")
+        write(source, "package.jet", min_manifest("dep", "0.1.0"))
+        outside :: scratch.join("outside.bin")
+        fs.write(outside, b"must remain outside\n").expect("write outside")
+        fs.hard_link(outside, source.join("linked.bin")).expect("link source")
+        snapshot :: with_store(store, () -> Store.snapshot_tree(source))
+        assert(snapshot.is_err(), "snapshot_tree must reject multiply-linked source files")
+        ensured :: with_store(store, () -> Store.ensure_path_dep("dep", "0.1.0", "sha256-hardlink", source))
+        assert(ensured.is_err(), "ensure_path_dep must reject multiply-linked source files")
+        dep_dirs := [:]
+        dep_dirs.insert("dep", source.clone())
+        vendor_dir :: scratch.join("vendor")
+        vendored :: Publish.vendor(scratch.path, make_test_lock("dep", "0.1.0", "sha256-hardlink"), dep_dirs, vendor_dir)
+        assert(vendored.is_err(), "Publish::vendor must reject multiply-linked source files")
+        assert(!vendor_dir.join("dep").exists(), "failed vendor must not publish a dependency directory")
+        assert_eq(fs.read(outside).expect("read outside"), b"must remain outside\n", "hardlinked source bytes must remain unchanged")
+    }
+}
+
+// Rust: tests/pkg.rs:2977
+#Test("source_snapshot_keeps_verified_bytes_after_source_mutation") {
+    tmp :: tmp_dir("source_snapshot_mutation")
+    store :: tmp.join("store")
+    fs.create_dir_all(store).expect("create store")
+    source :: tmp.join("source")
+    write(source, "package.jet", min_manifest("safe", "0.1.0"))
+    write(source, "lib.jet", "pub fn trusted() -> {}\n")
+    (snapshot, verified_hash) :: with_store(store, () -> {
+        snapshot :: Store.snapshot_tree(source).expect("snapshot must verify")
+        verified_hash :: snapshot.content_hash().to_string()
+        (snapshot, verified_hash)
+    })
+    fs.write(source.join("lib.jet"), "pub fn hostile() -> {}\n").expect("mutate source")
+    assert_eq(fs.read_to_string(snapshot.path().join("lib.jet")).expect("read verified bytes"), "pub fn trusted() -> {}\n", "consumers must keep using the verified snapshot after the source changes")
+    assert_eq(snapshot.content_hash(), verified_hash)
+    assert_eq(SHA256.try_tree_hash(snapshot.path()).expect("hash snapshot"), verified_hash)
+    drop(snapshot)
+    _ :: fs.remove_dir_all(tmp)
+}
+
+// Rust: tests/pkg.rs:3012
+#Test("store_tamper_detected_e1204") {
+    tmp :: tmp_dir("tamper")
+    store :: tmp.join("store")
+    fs.create_dir_all(store).expect("create store")
+    src :: tmp.join("mylib_src")
+    write(src, "mylib.jet", "pub fn ok() -> {}\n")
+    write(src, "package.jet", min_manifest("mylib", "0.1.0"))
+    fp :: "sha256-2222222222222222222222222222222222222222222222222222222222222222"
+    (entry, genuine_hash) :: with_store(store, () -> {
+        (e, h) :: Store.ensure_path_dep("mylib", "0.1.0", fp, src).expect("install")
+        (e, h)
+    })
+    fs.write(entry.join("mylib.jet"), "pub fn evil() -> { /* tampered */ }\n").expect("tamper")
+    result :: Store.verify_entry("mylib", entry, genuine_hash)
+    diag :: result.expect_err("verify_entry must return E1204 after tampering")
+    assert_eq(diag.code, "E1204")
+    _ :: fs.remove_dir_all(tmp)
+}
+
+// Rust: tests/pkg.rs:3047
+#Test("content_hash_recorded_at_install") {
+    tmp :: tmp_dir("castore_record")
+    store :: tmp.join("store")
+    fs.create_dir_all(store).expect("create store")
+    src :: tmp.join("src")
+    write(src, "lib.jet", "pub fn x() -> {}\n")
+    write(src, "package.jet", min_manifest("mylib", "0.1.0"))
+    fp :: "sha256-aaaa0000000000000000000000000000000000000000000000000000000000aa"
+    (entry, hash) :: with_store(store, () -> { Store.ensure_path_dep("mylib", "0.1.0", fp, src).expect("install") })
+    assert(entry.is_dir())
+    assert(hash.starts_with("sha256-"), "content hash must be sha256-prefixed")
+    Store.verify_content_hash("mylib", entry, hash).expect("fresh install must verify")
+    _ :: fs.remove_dir_all(tmp)
+}
+
+// Rust: tests/pkg.rs:3074
+#Test("content_hash_mismatch_after_tamper") {
+    tmp :: tmp_dir("castore_tamper")
+    store :: tmp.join("store")
+    fs.create_dir_all(store).expect("create store")
+    src :: tmp.join("src")
+    write(src, "lib.jet", "pub fn x() -> {}\n")
+    write(src, "package.jet", min_manifest("mylib", "0.1.0"))
+    fp :: "sha256-bbbb0000000000000000000000000000000000000000000000000000000000bb"
+    (entry, original_hash) :: with_store(store, () -> { Store.ensure_path_dep("mylib", "0.1.0", fp, src).expect("install") })
+    fs.write(entry.join("lib.jet"), "pub fn evil() -> {}\n").expect("tamper")
+    result :: Store.verify_content_hash("mylib", entry, original_hash)
+    diag :: result.expect_err("tampered entry must fail verify_content_hash")
+    assert_eq(diag.code, "E1204")
+    _ :: fs.remove_dir_all(tmp)
+}
+
+// Rust: tests/pkg.rs:3099
+#Test("content_hash_covers_non_jet_files_copied_into_store") {
+    tmp :: tmp_dir("castore_non_jet_tamper")
+    store :: tmp.join("store")
+    fs.create_dir_all(store).expect("create store")
+    src :: tmp.join("src")
+    write(src, "lib.jet", "pub fn x() -> {}\n")
+    write(src, "package.jet", min_manifest("mylib", "0.1.0"))
+    fs.write(src.join("runtime.data"), b"trusted bytes\n").expect("write data")
+    source_hash :: SHA256.tree_hash(src)
+    fs.write(src.join("runtime.data"), b"hostile bytes\n").expect("mutate data")
+    assert_ne(source_hash, SHA256.tree_hash(src), "copied non-.jet files must be part of the source identity")
+    fs.write(src.join("runtime.data"), b"trusted bytes\n").expect("restore data")
+    fp :: "sha256-cccc0000000000000000000000000000000000000000000000000000000000cc"
+    (entry, original_hash) :: with_store(store, () -> { Store.ensure_path_dep("mylib", "0.1.0", fp, src).expect("install") })
+    fs.write(entry.join("runtime.data"), b"tampered bytes\n").expect("tamper stored data")
+    error :: Store.verify_content_hash("mylib", entry, original_hash).expect_err("tampering a copied non-.jet file must fail verification")
+    assert_eq(error.code, "E1204")
+    _ :: fs.remove_dir_all(tmp)
+}
+
+// Rust: tests/pkg.rs:3131
+#Test("lock_file_content_hash_roundtrip") {
+    pkg :: Lock.LockedPackage(name: "foo", version: "1.0.0", source: Lock.LockSource.Path("../foo"), nix_closure: None, locked: None, fingerprint: "sha256-cccc", content_hash: Some("sha256-deadbeef"), dependencies: [], layer: Some(Syntax.RuntimeLayer.Core), inferred_layer: Some(Syntax.RuntimeLayer.Std), effects: [], effect_grants: [], required_effects: [], granted_effects: [], denied_effects: [], effect_authority: None, envelope: None, receipt: None, provenance: None)
+    lock :: Lock.LockFile(version: 1, packages: [pkg], root_dependencies: ["foo"], authority: None, workspace_members: [Lock.LockedWorkspaceMember(name: "hello", path: "packages/hello", source_digest: "no-workspace-source", canonical_path: "/workspace/packages/hello", package_digest: "sha256-package")], comptime_inputs: [], workspace_source_digest: None, workspace_overlay_policy: Default.default(), toolchains: [], browsers: [], source_channels: [], build_stamp: None, build_contributions: [])
+    serialized :: Lock.write(lock)
+    assert(serialized.contains("content-hash = \"sha256-deadbeef\""), "content-hash must appear in lockfile")
+    assert(serialized.contains("layer = \"core\""))
+    assert(serialized.contains("inferred-layer = \"hosted\""))
+    parsed :: Lock.parse(serialized).expect("must parse back")
+    assert_eq(parsed.packages[0].content_hash, Some("sha256-deadbeef"))
+    assert_eq(parsed.packages[0].layer, Some(Syntax.RuntimeLayer.Core))
+    assert_eq(parsed.packages[0].inferred_layer, Some(Syntax.RuntimeLayer.Std))
+    assert_eq(parsed.workspace_members[0].name, "hello")
+    assert_eq(parsed.workspace_members[0].path, "packages/hello")
+}
+
+// Rust: tests/pkg.rs:3207
+#Test("hardlink_projects_share_store_inode") {
+    tmp :: tmp_dir("hardlink")
+    store :: tmp.join("store")
+    fs.create_dir_all(store).expect("create store")
+    src :: tmp.join("mylib_src")
+    write(src, "mylib.jet", "pub fn hi() -> {}\n")
+    write(src, "package.jet", min_manifest("mylib", "0.1.0"))
+    fp :: "sha256-3333333333333333333333333333333333333333333333333333333333333333"
+    link1 :: tmp.join("proj1/deps/mylib")
+    link2 :: tmp.join("proj2/deps/mylib")
+    store_entry :: with_store(store, () -> {
+        (e, _) :: Store.ensure_path_dep("mylib", "0.1.0", fp, src).expect("install")
+        Store.link_into_project(e, link1).expect("link first")
+        Store.link_into_project(e, link2).expect("link second")
+        e
+    })
+    store_ino :: fs.metadata(store_entry.join("mylib.jet")).expect("store metadata").ino()
+    link1_ino :: fs.metadata(link1.join("mylib.jet")).expect("first metadata").ino()
+    link2_ino :: fs.metadata(link2.join("mylib.jet")).expect("second metadata").ino()
+    assert_eq(store_ino, link1_ino, "link1 must share inode with store")
+    assert_eq(store_ino, link2_ino, "link2 must share inode with store")
+    _ :: fs.remove_dir_all(tmp)
+}
+
+// Rust: tests/pkg.rs:3246
+#Test("path_dep_compiles_ok") {
+    tmp :: tmp_dir("pd_compile")
+    write(tmp, "greeter/package.jet", min_manifest("greeter", "0.1.0"))
+    write(tmp, "greeter/greeter.jet", "pub fn greet() -> String { return \"hello!\" }\n")
+    write(tmp, "package.jet", manifest_with_deps("myapp", "0.1.0", "    greeter: ./greeter,"))
+    entry :: tmp.join("run.jet")
+    fs.write(entry, "use greeter\nfn run() -> { print(greeter.greet()) }\n").expect("write entry")
+    result :: compile_with_path("", entry.to_string_lossy())
+    assert(result.is_ok(), "path dep project should compile:\n{result.err().map(d -> render_diagnostics(\"run.jet\", \"\", d)).unwrap_or_default()}")
+    _ :: fs.remove_dir_all(tmp)
+}
+
+// Rust: tests/pkg.rs:3288
+#Test("transitive_path_dependency_cannot_escape_declaring_package") {
+    tmp :: tmp_dir("transitive_path_escape")
+    store :: tmp.join("store")
+    fs.create_dir_all(store).expect("create store")
+    write(tmp, "outer/package.jet", manifest_with_deps("outer", "0.1.0", "    escape: ../outside,"))
+    write(tmp, "outer/outer.jet", "pub fn outer() -> {}\n")
+    write(tmp, "outside/package.jet", min_manifest("outside", "0.1.0"))
+    write(tmp, "outside/outside.jet", "pub fn hostile() -> {}\n")
+    raw :: manifest_with_deps("app", "0.1.0", "    outer: ./outer,")
+    write(tmp, "package.jet", raw)
+    manifest :: Manifest.parse(tmp.join("package.jet"), raw).expect("parse manifest")
+    options :: Fetch.FetchOptions(locked: false, update: false, update_dep: None, resolution: Publish.ResolveMode.Conservative)
+    error :: with_store(store, () -> { Fetch.fetch(tmp, manifest, None, options).expect_err("a transitive path escape must be rejected") })
+    assert_eq(first_diag_code(error), "E1206")
+    assert(error[0].what.contains("escapes"))
+    assert(!store.join("outside").exists(), "escaped package was ingested")
+    _ :: fs.remove_dir_all(tmp)
+}
+
+// Rust: tests/pkg.rs:3330
+#Test("transitive_path_dependency_cannot_escape_via_symlinked_directory") {
+    if selected_family() == "unix" {
+        tmp :: tmp_dir("transitive_path_symlink_escape")
+        store :: tmp.join("store")
+        fs.create_dir_all(store).expect("create store")
+        write(tmp, "outer/package.jet", manifest_with_deps("outer", "0.1.0", "    escape: ./link/escape,"))
+        write(tmp, "outer/outer.jet", "pub fn outer() -> {}\n")
+        write(tmp, "outside/escape/package.jet", min_manifest("escape", "0.1.0"))
+        write(tmp, "outside/escape/escape.jet", "pub fn hostile() -> {}\n")
+        fs.symlink(tmp.join("outside"), tmp.join("outer/link")).expect("symlink outside")
+        raw :: manifest_with_deps("app", "0.1.0", "    outer: ./outer,")
+        write(tmp, "package.jet", raw)
+        manifest :: Manifest.parse(tmp.join("package.jet"), raw).expect("parse manifest")
+        options :: Fetch.FetchOptions(locked: false, update: false, update_dep: None, resolution: Publish.ResolveMode.Conservative)
+        error :: with_store(store, () -> { Fetch.fetch(tmp, manifest, None, options).expect_err("a symlinked transitive path must be rejected") })
+        assert_eq(first_diag_code(error), "E1206")
+        assert(!store.join("escape").exists(), "escaped package was ingested")
+        _ :: fs.remove_dir_all(tmp)
+    }
+}
+
+// Rust: tests/pkg.rs:3374
+#Test("version_conflict_emits_e1201") {
+    tmp :: tmp_dir("ver_conflict")
+    write(tmp, "liba/package.jet", min_manifest("mylib", "1.0.0"))
+    write(tmp, "liba/mylib.jet", "pub fn v1() -> {}\n")
+    write(tmp, "libb/package.jet", min_manifest("mylib", "2.0.0"))
+    write(tmp, "libb/mylib.jet", "pub fn v2() -> {}\n")
+    write(tmp, "package.jet", manifest_with_deps("conflict_app", "0.1.0", "    liba: ./liba,\n    libb: ./libb,"))
+    entry :: tmp.join("run.jet")
+    fs.write(entry, "fn run() -> {}\n").expect("write entry")
+    diags :: compile_with_path("", entry.to_string_lossy()).expect_err("version conflict must fail with E1201")
+    assert_eq(first_diag_code(diags), "E1201")
+    _ :: fs.remove_dir_all(tmp)
+}
+
+// Rust: tests/pkg.rs:3403
+#Test("toolchain_only_lock_keeps_declared_path_unlocked") {
+    tmp :: tmp_dir("toolchain_only_lock")
+    write(tmp, "greeter/package.jet", min_manifest("greeter", "0.1.0"))
+    write(tmp, "greeter/greeter.jet", "pub fn greet() -> String { return \"hi\" }\n")
+    manifest_text :: manifest_with_deps("app", "0.1.0", "    greeter: ./greeter,")
+    write(tmp, "package.jet", manifest_text)
+    write(tmp, ".jet/lock", "version = 1\n\n[[package]]\nname = \"app\"\nsource = { root = \".\" }\n\n[root]\ndependencies = []\n")
+    entry :: tmp.join("run.jet")
+    fs.write(entry, "fn run() -> {}\n").expect("write entry")
+    ordinary :: compile_with_path("", entry.to_string_lossy())
+    assert(ordinary.is_ok(), "toolchain-only lock must not block declared path loading: {ordinary.err():?}")
+    manifest :: Manifest.parse(tmp.join("package.jet"), manifest_text).expect("parse manifest")
+    lock :: Lock.parse(fs.read_to_string(tmp.join(".jet/lock")).expect("read lock")).expect("parse lock")
+    locked :: Fetch.FetchOptions(locked: true, update: false, update_dep: None, resolution: Publish.ResolveMode.Conservative)
+    error :: Fetch.fetch(tmp, manifest, Some(lock), locked).expect_err("strict locked resolution must reject missing dependency facts")
+    assert_eq(first_diag_code(error), "E1217")
+    _ :: fs.remove_dir_all(tmp)
+}
+
+// Rust: tests/pkg.rs:3452
+#Test("toolchain_mismatch_emits_e1208") {
+    tmp :: tmp_dir("tc_mismatch")
+    write(tmp, "package.jet", "name: \"app\"\nversion: \"0.1.0\"\njet: \">=99.0.0\"\n")
+    entry :: tmp.join("run.jet")
+    fs.write(entry, "fn run() -> { print(\"hi\") }\n").expect("write entry")
+    diags :: compile_with_path("", entry.to_string_lossy()).expect_err("toolchain mismatch must fail with E1208")
+    assert_eq(first_diag_code(diags), "E1208")
+    _ :: fs.remove_dir_all(tmp)
+}
+
+// Rust: tests/pkg.rs:3471
+#Test("reserved_section_emits_e1209") {
+    tmp :: tmp_dir("reserved_sec")
+    write(tmp, "package.jet", min_manifest("app", "0.1.0") + "\ndev_deps: {\n    testlib: ../testlib,\n}\n")
+    entry :: tmp.join("run.jet")
+    fs.write(entry, "fn run() -> {}\n").expect("write entry")
+    diags :: compile_with_path("", entry.to_string_lossy()).expect_err("reserved section must fail with E1209")
+    assert_eq(first_diag_code(diags), "E1209")
+    _ :: fs.remove_dir_all(tmp)
+}
+
+// Rust: tests/pkg.rs:3494
+#Test("fetch_locked_rejects_missing_lock") {
+    tmp :: tmp_dir("locked_no_lock")
+    store :: tmp.join("store")
+    fs.create_dir_all(store).expect("create store")
+    raw :: manifest_with_deps("app", "0.1.0", "    greeter: ./greeter,")
+    write(tmp, "package.jet", raw)
+    mf :: Manifest.parse(tmp.join("package.jet"), raw).expect("parse manifest")
+    opts :: Fetch.FetchOptions(locked: true, update: false, update_dep: None, resolution: Publish.ResolveMode.Conservative)
+    result :: with_store(store, () -> Fetch.fetch(tmp, mf, None, opts))
+    diags :: result.expect_err("--locked with no lock file should fail")
+    assert_eq(first_diag_code(diags), "E1202")
+    _ :: fs.remove_dir_all(tmp)
+}
+
+// Rust: tests/pkg.rs:3518
+#Test("compiler_rejects_transitive_path_dependency_escape") {
+    tmp :: tmp_dir("compiler_transitive_path_escape")
+    outer :: tmp.join("outer")
+    outside :: tmp.join("outside")
+    write(outer, "package.jet", min_manifest("outer", "0.1.0") + "\ndeps: { escape: ../outside }\n")
+    write(outer, "outer.jet", "pub fn value() -> {}\n")
+    write(outside, "package.jet", min_manifest("outside", "0.1.0"))
+    write(outside, "outside.jet", "pub fn value() -> {}\n")
+    raw :: manifest_with_deps("app", "0.1.0", "    outer: ./outer,")
+    write(tmp, "package.jet", raw)
+    write(tmp, "run.jet", "fn run() -> {}\n")
+    entry :: tmp.join("run.jet")
+    errors :: Driver.compile_bundle_path_build(entry.to_str().expect("entry text"), Driver.BuildRunOptions.default()).expect_err("the compiler must not read a transitive manifest outside its package")
+    assert_eq(first_diag_code(errors), "E1206")
+    _ :: fs.remove_dir_all(tmp)
+}
+
+// Rust: tests/pkg.rs:3545
+#Test("compiler_accepts_transitive_path_dependency_the_root_declares") {
+    tmp :: tmp_dir("compiler_transitive_path_root_declared")
+    outer :: tmp.join("outer")
+    shared :: tmp.join("shared")
+    write(outer, "package.jet", min_manifest("outer", "0.1.0") + "\ndeps: { shared: ../shared }\n")
+    write(outer, "outer.jet", "pub fn value() -> {}\n")
+    write(shared, "package.jet", min_manifest("shared", "0.1.0"))
+    write(shared, "shared.jet", "pub fn value() -> {}\n")
+    raw :: manifest_with_deps("app", "0.1.0", "    outer: ./outer,\n    shared: ./shared,")
+    write(tmp, "package.jet", raw)
+    write(tmp, "run.jet", "fn run() -> {}\n")
+    entry :: tmp.join("run.jet")
+    result :: Driver.compile_bundle_path_build(entry.to_str().expect("entry text"), Driver.BuildRunOptions.default())
+    assert(result.err().map_or(true, errors -> errors.iter().all(d -> d.code != "E1206")), "a path the root declares is not an escape: {result.err().map(errors -> errors.iter().map(d -> d.code.clone()).collect()):?}")
+    _ :: fs.remove_dir_all(tmp)
+}
+
+// Rust: tests/pkg.rs:3577
+#Test("fetch_locked_rejects_tampered_path_dependency_store_entry") {
+    tmp :: tmp_dir("locked_path_tamper")
+    store :: tmp.join("store")
+    dependency :: tmp.join("greeter")
+    fs.create_dir_all(store).expect("create store")
+    write(dependency, "package.jet", min_manifest("greeter", "0.1.0"))
+    write(dependency, "greeter.jet", "pub fn greet() -> {}\n")
+    raw :: manifest_with_deps("app", "0.1.0", "    greeter: ./greeter,")
+    write(tmp, "package.jet", raw)
+    manifest :: Manifest.parse(tmp.join("package.jet"), raw).expect("parse manifest")
+    unlocked :: Fetch.FetchOptions(locked: false, update: false, update_dep: None, resolution: Publish.ResolveMode.Conservative)
+    (lock, _) :: with_store(store, () -> { Fetch.fetch(tmp, manifest, None, unlocked).expect("initial path fetch should create a content hash") })
+    locked :: Fetch.FetchOptions(locked: true, update: false, update_dep: None, resolution: Publish.ResolveMode.Conservative)
+    error :: with_store(store, () -> {
+        package :: lock.packages.iter().find(package -> package.name == "greeter").expect("path dependency must be recorded in the lock")
+        store_entry :: Store.store_path(package.name, package.version, package.fingerprint)
+        fs.write(store_entry.join("greeter.jet"), "pub fn compromised() -> {}\n").expect("tamper")
+        Fetch.fetch(tmp, manifest, Some(lock), locked).expect_err("locked fetch must reject a changed store entry")
+    })
+    assert_eq(first_diag_code(error), "E1204")
+    _ :: fs.remove_dir_all(tmp)
+}

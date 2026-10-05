@@ -1,0 +1,27 @@
+use jetpack.JetOS.ActivationProvenance.[write_activation_diff, write_health_checks, compat_hatches_json]
+use jet_env_model.ModuleEval.[SystemPlan, OptionPlan, ServicePlan, ServicePlanExtra]
+use core.files as files
+use std.[fs]
+
+struct ActivationProvenanceScratch { path: OSPath }
+impl ActivationProvenanceScratch.Close {
+    fn close(^self) -[FS]> { _ :: fs.remove_dir_all(self.path) }
+}
+
+// Behavioral control for Rust activation_provenance.rs13/39/91; no original inline tests.
+#Test("jetos_activation_health_and_compat_preserve_source_fields") {
+    scratch :: ActivationProvenanceScratch{path: OSPath.from(files.tmpdir("jetos-activation-") ?? panic("scratch"))}
+    system :: SystemPlan{
+        name: "host", target: "linux.x64", packages: [],
+        services: [ServicePlan{name: "worker", enable: true, extra: [ServicePlanExtra{key: "ready", value: "\"worker-ready\""}]}, ServicePlan{name: "off", enable: false, extra: []}],
+        options: [OptionPlan{key: "network.hostName", value: "\"named\""}, OptionPlan{key: "packages.overlay.demo", value: "\"custom\""}]
+    }
+    write_activation_diff(scratch.path, OSPath.from("published"), &system, &[]) ?? panic("activation diff")
+    assert_eq(fs.read_to_string(scratch.path.join("activation-diff.txt")) ?? panic("diff read"), "host: host\nprevious: <activation-time>\nnext: published\npackages: 0\nservices: 1\noptions: 2\n  service worker enable=true\n  option network.hostName = \"named\"\n  option packages.overlay.demo = \"custom\"\n")
+    write_health_checks(scratch.path, &system) ?? panic("health")
+    assert_eq(fs.read_to_string(scratch.path.join("health-checks.txt")) ?? panic("health read"), "jetos health checks\nservice worker: worker-ready\nnetwork hostname: named\n")
+    hatches :: compat_hatches_json(&system)
+    assert(hatches.contains("packages.overlay.demo"))
+    assert(hatches.contains("custom"))
+    assert(!hatches.contains("network.hostName"))
+}

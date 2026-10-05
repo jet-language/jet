@@ -1,0 +1,481 @@
+use std.fs
+use std.env
+use std.process.Command
+use core.files.OSPath
+use core.sys.target
+use jet_foundation.SHA256.sha256_hex
+use jet_cli.Tests.Integration.Codemod.[jet, temp_dir, check_stderr, simple_batch]
+
+// Native journeys use real processes, filesystem identities, symlinks and hardlinks.
+// GATE #4494: native process/filesystem substrate. GATE #4483: selected target family.
+// #4499 is not applicable: tests/codemod.rs:1-920 uses no composite map keys.
+
+// Rust: tests/codemod.rs:42
+#Test("codemod_rename_dry_run_apply_and_undo") {
+    dir :: temp_dir("rename")
+    source :: dir.join("Examples/main.jet")
+    fs.create_dir_all(source.parent().unwrap()).unwrap()
+    fs.write(source, "fn report() {{\n    print(\"ok\")\n}}\n\nfn run() {{\n    report()\n}}\n").unwrap()
+    object :: dir.join("rename.codemod.json")
+    fs.write(object, "{{\"name\":\"RenameReport\",\"entry\":\"{source.display()}\",\"operation\":\"rename\",\"from\":\"report\",\"to\":\"summarize\"}}\n").unwrap()
+    dry :: Command.new(jet()).args(["inspect", "codemod"]).arg(object.to_str().unwrap()).arg("--dry-run").output().expect("jet inspect codemod --dry-run")
+    assert(dry.status.success(), "stderr: {String.from_utf8_lossy(dry.stderr)}")
+    dry_text :: String.from_utf8_lossy(dry.stdout)
+    assert(dry_text.contains("RenameReport"))
+    assert(dry_text.contains("report -> summarize"))
+    assert(fs.read_to_string(source).unwrap().contains("fn report"), "dry run must not write")
+    apply :: Command.new(jet()).args(["inspect", "codemod", "apply", object.to_str().unwrap()]).output().expect("jet inspect codemod apply")
+    assert(apply.status.success(), "stderr: {String.from_utf8_lossy(apply.stderr)}")
+    changed :: fs.read_to_string(source).unwrap()
+    assert(changed.contains("fn summarize"))
+    assert(changed.contains("summarize()"))
+    log :: dir.join(".jet/codemods/RenameReport.log.json")
+    assert(log.exists(), "apply should write replay log")
+    log_text :: fs.read_to_string(log).unwrap()
+    assert(log_text.contains("inverse_from"))
+    assert(log_text.contains("after_hash"))
+    assert(log_text.contains("inverse_edits"))
+    assert(log_text.contains("\"semantic_ops\""))
+    assert(log_text.contains("\"kind\":\"rename\""))
+    assert(log_text.contains("\"from\":\"report\""))
+    assert(log_text.contains("\"to\":\"summarize\""))
+    undo :: Command.new(jet()).args(["inspect", "codemod", "undo", log.to_str().unwrap()]).output().expect("jet inspect codemod undo")
+    assert(undo.status.success(), "stderr: {String.from_utf8_lossy(undo.stderr)}")
+    restored :: fs.read_to_string(source).unwrap()
+    assert(restored.contains("fn report"))
+    assert(restored.contains("report()"))
+}
+
+// Rust: tests/codemod.rs:119
+#Test("retired_codemod_dry_run_teaches_flag") {
+    output :: Command.new(jet()).args(["inspect", "codemod", "dry-run", "missing.codemod.json"]).output().unwrap()
+    assert(!output.status.success())
+    stderr :: String.from_utf8_lossy(output.stderr)
+    assert(stderr.contains("is retired"), "{stderr}")
+    assert(stderr.contains("--dry-run"), "{stderr}")
+}
+
+// Rust: tests/codemod.rs:131
+#Test("codemod_undo_refuses_changed_file") {
+    dir :: temp_dir("stale")
+    source :: dir.join("Examples/main.jet")
+    fs.create_dir_all(source.parent().unwrap()).unwrap()
+    fs.write(source, "fn report() {{\n    print(\"ok\")\n}}\n\nfn run() {{\n    report()\n}}\n").unwrap()
+    object :: dir.join("rename.codemod.json")
+    fs.write(object, "{{\"name\":\"StaleRename\",\"entry\":\"{source.display()}\",\"operation\":\"rename\",\"from\":\"report\",\"to\":\"summarize\"}}\n").unwrap()
+    apply :: Command.new(jet()).args(["inspect", "codemod", "apply", object.to_str().unwrap()]).output().expect("jet inspect codemod apply")
+    assert(apply.status.success(), "stderr: {String.from_utf8_lossy(apply.stderr)}")
+    fs.write(source, "fn summarize() {{\n    print(\"changed\")\n}}\n\nfn run() {{\n    summarize()\n}}\n").unwrap()
+    log :: dir.join(".jet/codemods/StaleRename.log.json")
+    undo :: Command.new(jet()).args(["inspect", "codemod", "undo", log.to_str().unwrap()]).output().expect("jet inspect codemod undo")
+    assert(!undo.status.success())
+    stderr :: String.from_utf8_lossy(undo.stderr)
+    assert(stderr.contains("checkpoint mismatch"), "stderr: {stderr}")
+    assert(fs.read_to_string(source).unwrap().contains("changed"))
+}
+
+// Rust: tests/codemod.rs:177
+#Test("batch_rules_reindex_across_clean_and_fixture_roots_then_undo_exactly") {
+    project :: temp_dir("batch_chain")
+    example_relative :: OSPath.from_text("Examples").join("report.jet")
+    example :: project.join(example_relative)
+    fixture_relative :: OSPath.from_text("tests").join("ui").join("report_type.jet")
+    fixture :: project.join(fixture_relative)
+    fixture_stderr :: fixture.with_extension("stderr")
+    migrations :: project.join("migrations")
+    fs.create_dir_all(example.parent().unwrap()).unwrap()
+    fs.create_dir_all(fixture.parent().unwrap()).unwrap()
+    fs.create_dir_all(migrations).unwrap()
+    clean_before :: "fn legacy_parse(text: String) -> Int {{ return 42 }}\nfn parse_int(text: String, base: Int) -> Int {{ return 42 }}\nfn report(value: Int) {{ print(value) }}\nfn run() {{ report(legacy_parse(\"42\")) }}\n"
+    clean_after :: "fn legacy_parse(text: String) -> Int {{ return 42 }}\nfn parse_int(text: String, base: Int) -> Int {{ return 42 }}\nfn summarize(value: Int) {{ print(value) }}\nfn run() {{ summarize(parse_int(\"42\", base: 10)) }}\n"
+    fixture_before :: "fn legacy_parse(text: String) -> Int {{ return 42 }}\nfn parse_int(text: String, base: Int) -> Int {{ return 42 }}\nfn report(value: Int) {{}}\nfn run() {{ report(legacy_parse(true)) }}\n"
+    fixture_after :: "fn legacy_parse(text: String) -> Int {{ return 42 }}\nfn parse_int(text: String, base: Int) -> Int {{ return 42 }}\nfn summarize(value: Int) {{}}\nfn run() {{ summarize(parse_int(true, base: 10)) }}\n"
+    fs.write(example, clean_before).unwrap()
+    fs.write(fixture, fixture_before).unwrap()
+    stderr_before :: check_stderr(fixture)
+    fs.write(fixture_stderr, stderr_before).unwrap()
+    fs.write(fixture, fixture_after).unwrap()
+    stderr_after :: check_stderr(fixture)
+    fs.write(migrations.join("report_type.after.stderr"), stderr_after).unwrap()
+    fs.write(fixture, fixture_before).unwrap()
+    object :: migrations.join("batch.codemod.json")
+    object_text :: """
+{{
+  "version": 2,
+  "name": "ReportV2",
+  "project": "..",
+  "roots": [
+    {{"path": "$EXAMPLE", "validate": "clean"}},
+    {{"path": "$FIXTURE", "validate": "fixture"}}
+  ],
+  "rules": [
+    {{"id": "rename-report", "kind": "symbol_rename", "from": {{"name": "report", "symbol_kind": "function"}}, "to": "summarize", "matches": 4}},
+    {{"id": "parse-needs-base", "kind": "ast_rewrite", "node": "expr", "match": "legacy_parse($input)", "replace": "parse_int($input, base: 10)", "matches": 2}}
+  ],
+  "snapshot_after": {{"$FIXTURE": "migrations/report_type.after.stderr"}}
+}}
+""".replace("$EXAMPLE", example_relative.to_str().unwrap()).replace("$FIXTURE", fixture_relative.to_str().unwrap())
+    fs.write(object, object_text).unwrap()
+    dry :: Command.new(jet()).args(["inspect", "codemod"]).arg(object.to_str().unwrap()).arg("--dry-run").output().unwrap()
+    assert(dry.status.success(), "{String.from_utf8_lossy(dry.stderr)}")
+    dry_out :: String.from_utf8_lossy(dry.stdout)
+    assert(dry_out.contains("parse-needs-base: 2 matches"), "{dry_out}")
+    assert_eq(fs.read_to_string(example).unwrap(), clean_before)
+    assert_eq(fs.read(fixture_stderr).unwrap(), stderr_before)
+    assert(!project.join(".jet/codemods/ReportV2.log.json").exists())
+    apply :: Command.new(jet()).args(["inspect", "codemod", "apply", object.to_str().unwrap(), "--yes"]).output().unwrap()
+    assert(apply.status.success(), "{String.from_utf8_lossy(apply.stderr)}")
+    assert_eq(fs.read_to_string(example).unwrap(), clean_after)
+    assert_eq(fs.read_to_string(fixture).unwrap(), fixture_after)
+    assert_eq(fs.read(fixture_stderr).unwrap(), stderr_after)
+    log :: project.join(".jet/codemods/ReportV2.log.json")
+    log_text :: fs.read_to_string(log).unwrap()
+    assert(log_text.contains("\"kind\":\"rename\""), "{log_text}")
+    assert(log_text.contains("\"kind\":\"ast_rewrite\""), "{log_text}")
+    assert(log_text.contains("\"rule_id\":\"rename-report\""), "{log_text}")
+    undo :: Command.new(jet()).args(["inspect", "codemod", "undo", log.to_str().unwrap()]).output().unwrap()
+    assert(undo.status.success(), "{String.from_utf8_lossy(undo.stderr)}")
+    assert_eq(fs.read_to_string(example).unwrap(), clean_before)
+    assert_eq(fs.read_to_string(fixture).unwrap(), fixture_before)
+    assert_eq(fs.read(fixture_stderr).unwrap(), stderr_before)
+}
+
+// Rust: tests/codemod.rs:301
+#Test("batch_refuses_declared_count_and_unknown_fields_without_writes") {
+    project :: temp_dir("batch_refuse")
+    object :: simple_batch(project, 3)
+    source :: project.join("Examples/a.jet")
+    before :: fs.read(source).unwrap()
+    count :: Command.new(jet()).args(["inspect", "codemod"]).arg(object.to_str().unwrap()).arg("--dry-run").output().unwrap()
+    assert(!count.status.success())
+    assert(String.from_utf8_lossy(count.stderr).contains("matched 2, expected 3"))
+    assert_eq(fs.read(source).unwrap(), before)
+    raw :: fs.read_to_string(object).unwrap()
+    fs.write(object, raw.replacen("\"name\":", "\"mystery\":1,\"name\":", 1)).unwrap()
+    unknown :: Command.new(jet()).args(["inspect", "codemod"]).arg(object.to_str().unwrap()).arg("--dry-run").output().unwrap()
+    assert(!unknown.status.success())
+    assert(String.from_utf8_lossy(unknown.stderr).contains("unknown field"))
+    assert_eq(fs.read(source).unwrap(), before)
+}
+
+// Rust: tests/codemod.rs:334
+#Test("interrupted_batch_recovers_before_the_next_plan") {
+    project :: temp_dir("batch_recovery")
+    object :: simple_batch(project, 2)
+    source :: project.join("Examples/a.jet")
+    source_b :: project.join("Examples/b.jet")
+    fs.write(source_b, "fn report() {{ print(\"b\") }}\nfn run() {{ report() }}\n").unwrap()
+    object_text :: fs.read_to_string(object).unwrap()
+    fs.write(object, object_text.replace("Examples/a.jet", "Examples").replace("\"matches\":2", "\"matches\":4")).unwrap()
+    before :: fs.read(source).unwrap()
+    before_b :: fs.read(source_b).unwrap()
+    crashed :: Command.new(jet()).env("JET_CODEMOD_CRASH_AFTER_RENAME", "1").args(["inspect", "codemod", "apply", object.to_str().unwrap(), "--yes"]).output().unwrap()
+    assert_eq(crashed.status.code(), Val(86))
+    assert(project.join(".jet/codemods/transaction.journal").exists())
+    assert_ne(fs.read(source).unwrap(), before)
+    assert_eq(fs.read(source_b).unwrap(), before_b)
+    recovered :: Command.new(jet()).args(["inspect", "codemod"]).arg(object.to_str().unwrap()).arg("--dry-run").output().unwrap()
+    assert(recovered.status.success(), "{String.from_utf8_lossy(recovered.stderr)}")
+    assert_eq(fs.read(source).unwrap(), before)
+    assert_eq(fs.read(source_b).unwrap(), before_b)
+    assert(!project.join(".jet/codemods/transaction.journal").exists())
+}
+
+// Rust: tests/codemod.rs:387
+#Test("all_after_crash_completes_log_then_undo_restores_every_file") {
+    project :: temp_dir("batch_complete_recovery")
+    object :: simple_batch(project, 2)
+    source :: project.join("Examples/a.jet")
+    before :: fs.read(source).unwrap()
+    crashed :: Command.new(jet()).env("JET_CODEMOD_CRASH_AFTER_RENAME", "1").args(["inspect", "codemod", "apply", object.to_str().unwrap(), "--yes"]).output().unwrap()
+    assert_eq(crashed.status.code(), Val(86))
+    log :: project.join(".jet/codemods/BatchRename.log.json")
+    assert(!log.exists())
+    undo :: Command.new(jet()).args(["inspect", "codemod", "undo", log.to_str().unwrap()]).output().unwrap()
+    assert(undo.status.success(), "{String.from_utf8_lossy(undo.stderr)}")
+    assert_eq(fs.read(source).unwrap(), before)
+    assert(!project.join(".jet/codemods/transaction.journal").exists())
+}
+
+// Rust: tests/codemod.rs:421
+#Test("batch_rejects_symlink_and_parent_escape_roots") {
+    if target.selected_family() == "unix" {
+        project :: temp_dir("batch_paths")
+        fs.create_dir_all(project.join("Examples")).unwrap()
+        outside :: project.parent().unwrap().join("codemod-outside.jet")
+        fs.write(outside, "fn run() {{}}\n").unwrap()
+        fs.symlink(outside, project.join("Examples/link.jet")).unwrap()
+        object :: project.join("bad.codemod.json")
+        loop root in ["Examples/link.jet", "Examples/../tests/ui/x.jet"] {
+            fs.write(object, "{{\"version\":2,\"name\":\"Bad\",\"project\":\".\",\"roots\":[{{\"path\":\"{root}\",\"validate\":\"clean\"}}],\"rules\":[{{\"id\":\"x\",\"kind\":\"symbol_rename\",\"from\":{{\"name\":\"run\",\"symbol_kind\":\"function\"}},\"to\":\"start\",\"matches\":1}}]}}\n").unwrap()
+            output :: Command.new(jet()).args(["inspect", "codemod"]).arg(object.to_str().unwrap()).arg("--dry-run").output().unwrap()
+            assert(!output.status.success(), "root {root} must fail")
+        }
+    }
+}
+
+// Rust: tests/codemod.rs:442
+#Test("schema_one_inverse_edit_log_remains_readable") {
+    dir :: temp_dir("schema_one_log")
+    source :: dir.join("Examples/main.jet")
+    fs.create_dir_all(source.parent().unwrap()).unwrap()
+    before :: "fn report() {{}}\nfn run() {{ report() }}\n"
+    after :: "fn summarize() {{}}\nfn run() {{ summarize() }}\n"
+    fs.write(source, after).unwrap()
+    hash :: (s: String) -> "sha256-{sha256_hex(s.bytes())}"
+    log :: dir.join(".jet/codemods/old.log.json")
+    fs.create_dir_all(log.parent().unwrap()).unwrap()
+    fs.write(log, "{{\"name\":\"Old\",\"files\":[{{\"path\":\"{source.display()}\",\"before_hash\":\"{hash(before)}\",\"after_hash\":\"{hash(after)}\",\"inverse_edits\":[{{\"start\":3,\"end\":12,\"new_text\":\"report\"}},{{\"start\":29,\"end\":38,\"new_text\":\"report\"}}]}}]}}\n").unwrap()
+    undo :: Command.new(jet()).args(["inspect", "codemod", "undo", log.to_str().unwrap()]).output().unwrap()
+    assert(undo.status.success(), "{String.from_utf8_lossy(undo.stderr)}")
+    assert_eq(fs.read_to_string(source).unwrap(), before)
+}
+
+// Rust: tests/codemod.rs:466
+#Test("batch_refuses_collision_invalid_binding_and_overlapping_ast_nodes") {
+    project :: temp_dir("batch_semantic_refusals")
+    source :: project.join("Examples/a.jet")
+    fs.create_dir_all(source.parent().unwrap()).unwrap()
+    body :: "fn report(value: Int) {{ print(value) }}\nfn summarize(value: Int) {{ print(value) }}\nfn run() {{ report(report(1)) }}\n"
+    fs.write(source, body).unwrap()
+    object :: project.join("bad.codemod.json")
+    fs.write(object, "{{\"version\":2,\"name\":\"Collision\",\"project\":\".\",\"roots\":[{{\"path\":\"Examples/a.jet\",\"validate\":\"clean\"}}],\"rules\":[{{\"id\":\"rename\",\"kind\":\"symbol_rename\",\"from\":{{\"name\":\"report\",\"symbol_kind\":\"function\"}},\"to\":\"summarize\",\"matches\":3}}]}}\n").unwrap()
+    collision :: Command.new(jet()).args(["inspect", "codemod"]).arg(object.to_str().unwrap()).arg("--dry-run").output().unwrap()
+    assert(!collision.status.success())
+    assert(String.from_utf8_lossy(collision.stderr).contains("destination `summarize`"))
+    fs.write(object, "{{\"version\":2,\"name\":\"Binding\",\"project\":\".\",\"roots\":[{{\"path\":\"Examples/a.jet\",\"validate\":\"clean\"}}],\"rules\":[{{\"id\":\"binding\",\"kind\":\"ast_rewrite\",\"node\":\"expr\",\"match\":\"report($value)\",\"replace\":\"missing($value)\",\"matches\":2}}]}}\n").unwrap()
+    binding :: Command.new(jet()).args(["inspect", "codemod"]).arg(object.to_str().unwrap()).arg("--dry-run").output().unwrap()
+    assert(!binding.status.success())
+    assert(String.from_utf8_lossy(binding.stderr).contains("does not resolve"))
+    fs.write(object, "{{\"version\":2,\"name\":\"Overlap\",\"project\":\".\",\"roots\":[{{\"path\":\"Examples/a.jet\",\"validate\":\"clean\"}}],\"rules\":[{{\"id\":\"overlap\",\"kind\":\"ast_rewrite\",\"node\":\"expr\",\"match\":\"report($value)\",\"replace\":\"summarize($value)\",\"matches\":2}}]}}\n").unwrap()
+    overlap :: Command.new(jet()).args(["inspect", "codemod"]).arg(object.to_str().unwrap()).arg("--dry-run").output().unwrap()
+    assert(!overlap.status.success())
+    assert(String.from_utf8_lossy(overlap.stderr).contains("overlapping edits"), "{String.from_utf8_lossy(overlap.stderr)}")
+    assert_eq(fs.read_to_string(source).unwrap(), body)
+}
+
+// Rust: tests/codemod.rs:511
+#Test("semantic_rename_uses_resolved_reference_identity_not_spelling") {
+    project :: temp_dir("batch_identity")
+    source :: project.join("Examples/a.jet")
+    fs.create_dir_all(source.parent().unwrap()).unwrap()
+    before :: "fn report() {{ print(\"function\") }}\nfn run() {{ report :: 7\nprint(report) }}\n"
+    fs.write(source, before).unwrap()
+    object :: project.join("rename.codemod.json")
+    fs.write(object, "{{\"version\":2,\"name\":\"Identity\",\"project\":\".\",\"roots\":[{{\"path\":\"Examples/a.jet\",\"validate\":\"clean\"}}],\"rules\":[{{\"id\":\"rename\",\"kind\":\"symbol_rename\",\"from\":{{\"name\":\"report\",\"symbol_kind\":\"function\"}},\"to\":\"summarize\",\"matches\":1}}]}}\n").unwrap()
+    output :: Command.new(jet()).args(["inspect", "codemod", "apply", object.to_str().unwrap(), "--yes"]).output().unwrap()
+    assert(output.status.success(), "{String.from_utf8_lossy(output.stderr)}")
+    assert_eq(fs.read_to_string(source).unwrap(), "fn summarize() {{ print(\"function\") }}\nfn run() {{ report :: 7\nprint(report) }}\n")
+}
+
+// Rust: tests/codemod.rs:542
+#Test("typed_ast_rewrite_matches_only_compiler_owned_node_class") {
+    project :: temp_dir("batch_node_class")
+    source :: project.join("Examples/a.jet")
+    fs.create_dir_all(source.parent().unwrap()).unwrap()
+    fs.write(source, "fn helper(value: Int) {{}}\nfn run() {{ print(\"Int stays text\") }}\n").unwrap()
+    object :: project.join("types.codemod.json")
+    fs.write(object, "{{\"version\":2,\"name\":\"Types\",\"project\":\".\",\"roots\":[{{\"path\":\"Examples/a.jet\",\"validate\":\"clean\"}}],\"rules\":[{{\"id\":\"type\",\"kind\":\"ast_rewrite\",\"node\":\"type\",\"match\":\"Int\",\"replace\":\"Float\",\"matches\":1}}]}}\n").unwrap()
+    output :: Command.new(jet()).args(["inspect", "codemod", "apply", object.to_str().unwrap(), "--yes"]).output().unwrap()
+    assert(output.status.success(), "{String.from_utf8_lossy(output.stderr)}")
+    assert_eq(fs.read_to_string(source).unwrap(), "fn helper(value: Float) {{}}\nfn run() {{ print(\"Int stays text\") }}\n")
+}
+
+// Rust: tests/codemod.rs:576
+#Test("typed_ast_type_nodes_cover_params_returns_fields_distincts_and_alias_targets") {
+    project :: temp_dir("batch_type_coverage")
+    source :: project.join("Examples/a.jet")
+    fs.create_dir_all(source.parent().unwrap()).unwrap()
+    fs.write(source, "struct Box {{ value: Int }}\nCount :: distinct Int\nalias ResultOf<T> :: Int Int!\nfn convert(value: Int) -> Int {{ return value }}\nfn run() {{}}\n").unwrap()
+    object :: project.join("types.codemod.json")
+    fs.write(object, "{{\"version\":2,\"name\":\"TypeCoverage\",\"project\":\".\",\"roots\":[{{\"path\":\"Examples/a.jet\",\"validate\":\"clean\"}}],\"rules\":[{{\"id\":\"alias-target\",\"kind\":\"ast_rewrite\",\"node\":\"type\",\"match\":\"Int Int!\",\"replace\":\"Float Float!\",\"matches\":1}},{{\"id\":\"simple-types\",\"kind\":\"ast_rewrite\",\"node\":\"type\",\"match\":\"Int\",\"replace\":\"Float\",\"matches\":4}}]}}\n").unwrap()
+    output :: Command.new(jet()).args(["inspect", "codemod"]).arg(object.to_str().unwrap()).arg("--dry-run").output().unwrap()
+    assert(output.status.success(), "{String.from_utf8_lossy(output.stderr)}")
+    stdout :: String.from_utf8_lossy(output.stdout)
+    assert(stdout.contains("simple-types: 4 matches"), "{stdout}")
+    assert(stdout.contains("alias-target: 1 matches"), "{stdout}")
+}
+
+// Rust: tests/codemod.rs:604
+#Test("typed_ast_repeated_capture_backtracking_keeps_original_binding") {
+    project :: temp_dir("batch_repeated_capture")
+    source :: project.join("Examples/a.jet")
+    fs.create_dir_all(source.parent().unwrap()).unwrap()
+    fs.write(source, "fn pair(a: Int, b: Int) -> Int {{ return a + b }}\nfn same(value: Int) -> Int {{ return value }}\nfn run() {{ print(pair(1, 2))\nprint(pair(3, 3)) }}\n").unwrap()
+    object :: project.join("repeat.codemod.json")
+    fs.write(object, "{{\"version\":2,\"name\":\"Repeat\",\"project\":\".\",\"roots\":[{{\"path\":\"Examples/a.jet\",\"validate\":\"clean\"}}],\"rules\":[{{\"id\":\"repeat\",\"kind\":\"ast_rewrite\",\"node\":\"expr\",\"match\":\"pair($value, $value)\",\"replace\":\"same($value)\",\"matches\":1}}]}}\n").unwrap()
+    output :: Command.new(jet()).args(["inspect", "codemod", "apply", object.to_str().unwrap(), "--yes"]).output().unwrap()
+    assert(output.status.success(), "{String.from_utf8_lossy(output.stderr)}")
+    after :: fs.read_to_string(source).unwrap()
+    assert(after.contains("pair(1, 2)"))
+    assert(after.contains("same(3)"))
+}
+
+// Rust: tests/codemod.rs:636
+#Test("typed_ast_variadic_capture_consumes_one_compiler_list_slot") {
+    project :: temp_dir("batch_variadic_capture")
+    source :: project.join("Examples/a.jet")
+    fs.create_dir_all(source.parent().unwrap()).unwrap()
+    fs.write(source, "fn run() {{ values :: [1, 2, 3]\nprint(values) }}\n").unwrap()
+    object :: project.join("variadic.codemod.json")
+    fs.write(object, "{{\"version\":2,\"name\":\"Variadic\",\"project\":\".\",\"roots\":[{{\"path\":\"Examples/a.jet\",\"validate\":\"clean\"}}],\"rules\":[{{\"id\":\"append\",\"kind\":\"ast_rewrite\",\"node\":\"expr\",\"match\":\"[$values...]\",\"replace\":\"[$values..., 4]\",\"matches\":1}}]}}\n").unwrap()
+    output :: Command.new(jet()).args(["inspect", "codemod", "apply", object.to_str().unwrap(), "--yes"]).output().unwrap()
+    assert(output.status.success(), "{String.from_utf8_lossy(output.stderr)}")
+    assert(fs.read_to_string(source).unwrap().contains("[1, 2, 3, 4]"))
+}
+
+// Rust: tests/codemod.rs:662
+#Test("typed_ast_variadic_capture_is_rejected_in_binary_scalar_slot") {
+    project :: temp_dir("batch_variadic_scalar")
+    source :: project.join("Examples/a.jet")
+    fs.create_dir_all(source.parent().unwrap()).unwrap()
+    before :: "fn run() {{ print(1 + 2) }}\n"
+    fs.write(source, before).unwrap()
+    object :: project.join("variadic.codemod.json")
+    fs.write(object, "{{\"version\":2,\"name\":\"ScalarVariadic\",\"project\":\".\",\"roots\":[{{\"path\":\"Examples/a.jet\",\"validate\":\"clean\"}}],\"rules\":[{{\"id\":\"scalar\",\"kind\":\"ast_rewrite\",\"node\":\"expr\",\"match\":\"$values... + 2\",\"replace\":\"$values... + 3\",\"matches\":1}}]}}\n").unwrap()
+    output :: Command.new(jet()).args(["inspect", "codemod"]).arg(object.to_str().unwrap()).arg("--dry-run").output().unwrap()
+    assert(!output.status.success())
+    stderr :: String.from_utf8_lossy(output.stderr)
+    assert(stderr.contains("not a valid Jet expr template") || stderr.contains("matched 0, expected 1"), "{stderr}")
+    assert_eq(fs.read_to_string(source).unwrap(), before)
+}
+
+// Rust: tests/codemod.rs:688
+#Test("transaction_rejects_swapped_temp_inode_before_destination_rename") {
+    if target.selected_family() == "unix" {
+        project :: temp_dir("batch_temp_swap")
+        object :: simple_batch(project, 2)
+        source :: project.join("Examples/a.jet")
+        before :: fs.read(source).unwrap()
+        crashed :: Command.new(jet()).env("JET_CODEMOD_CRASH_AFTER_JOURNAL", "1").args(["inspect", "codemod", "apply", object.to_str().unwrap(), "--yes"]).output().unwrap()
+        assert_eq(crashed.status.code(), Val(87))
+        temp :: fs.read_dir(source.parent().unwrap()).unwrap().map(entry -> entry.unwrap().path()).find(path -> path.file_name().unwrap().to_string_lossy().starts_with(".jet-codemod-")).expect("staged temp must remain after simulated crash")
+        fs.remove_file(temp).unwrap()
+        fs.write(temp, "hostile replacement\n".bytes()).unwrap()
+        recovered :: Command.new(jet()).args(["inspect", "codemod"]).arg(object.to_str().unwrap()).arg("--dry-run").output().unwrap()
+        assert(!recovered.status.success())
+        assert(String.from_utf8_lossy(recovered.stderr).contains("identity changed"))
+        assert_eq(fs.read(source).unwrap(), before)
+        assert(project.join(".jet/codemods/transaction.journal").exists())
+    }
+}
+
+// Rust: tests/codemod.rs:732
+#Test("transaction_rejects_destination_parent_directory_swap") {
+    if target.selected_family() == "unix" {
+        project :: temp_dir("batch_directory_swap")
+        object :: simple_batch(project, 2)
+        source :: project.join("Examples/a.jet")
+        before :: fs.read(source).unwrap()
+        crashed :: Command.new(jet()).env("JET_CODEMOD_CRASH_AFTER_JOURNAL", "1").args(["inspect", "codemod", "apply", object.to_str().unwrap(), "--yes"]).output().unwrap()
+        assert_eq(crashed.status.code(), Val(87))
+        held :: project.join("examples-held")
+        fs.rename(project.join("Examples"), held).unwrap()
+        fs.create_dir(project.join("Examples")).unwrap()
+        hostile :: project.join("Examples/a.jet")
+        fs.write(hostile, "fn hostile() {{}}\n".bytes()).unwrap()
+        recovered :: Command.new(jet()).args(["inspect", "codemod"]).arg(object.to_str().unwrap()).arg("--dry-run").output().unwrap()
+        assert(!recovered.status.success())
+        assert(String.from_utf8_lossy(recovered.stderr).contains("identity changed"))
+        assert_eq(fs.read(held.join("a.jet")).unwrap(), before)
+        assert_eq(fs.read(hostile).unwrap(), "fn hostile() {{}}\n".bytes())
+    }
+}
+
+// Rust: tests/codemod.rs:769
+#Test("directory_lock_ignores_hostile_hardlinked_lock_filename") {
+    if target.selected_family() == "unix" {
+        project :: temp_dir("batch_lock_hardlink")
+        object :: simple_batch(project, 2)
+        codemods :: project.join(".jet/codemods")
+        fs.create_dir_all(codemods).unwrap()
+        sentinel :: project.join("sentinel")
+        fs.write(sentinel, "must remain unchanged\n".bytes()).unwrap()
+        fs.hard_link(sentinel, codemods.join("codemod.lock")).unwrap()
+        output :: Command.new(jet()).args(["inspect", "codemod", "apply", object.to_str().unwrap(), "--yes"]).output().unwrap()
+        assert(output.status.success(), "{String.from_utf8_lossy(output.stderr)}")
+        assert_eq(fs.read(sentinel).unwrap(), "must remain unchanged\n".bytes())
+    }
+}
+
+// Rust: tests/codemod.rs:799
+#Test("undo_rejects_log_symlinks_and_destination_hardlink_aliases_before_reading") {
+    if target.selected_family() == "unix" {
+        project :: temp_dir("undo_aliases")
+        a :: project.join("Examples/a.jet")
+        b :: project.join("Examples/b.jet")
+        logs :: project.join(".jet/codemods")
+        fs.create_dir_all(a.parent().unwrap()).unwrap()
+        fs.create_dir_all(logs).unwrap()
+        fs.write(a, "fn run() {{}}\n").unwrap()
+        fs.hard_link(a, b).unwrap()
+        bytes :: fs.read(a).unwrap()
+        hex := String.new()
+        loop byte in bytes { &hex.push_str("{byte:02x}") }
+        hash :: "sha256-{sha256_hex(bytes)}"
+        real :: logs.join("Alias.log.json")
+        fs.write(real, "{{\"schema\":2,\"name\":\"Alias\",\"project\":\"{project.display()}\",\"files\":[{{\"path\":\"{a.display()}\",\"before_hash\":\"{hash}\",\"after_hash\":\"{hash}\",\"before_bytes\":\"{hex}\",\"after_bytes\":\"{hex}\"}},{{\"path\":\"{b.display()}\",\"before_hash\":\"{hash}\",\"after_hash\":\"{hash}\",\"before_bytes\":\"{hex}\",\"after_bytes\":\"{hex}\"}}]}}\n").unwrap()
+        alias :: logs.join("AliasLink.log.json")
+        fs.symlink(real, alias).unwrap()
+        linked :: Command.new(jet()).args(["inspect", "codemod", "undo", alias.to_str().unwrap()]).output().unwrap()
+        assert(!linked.status.success())
+        assert(String.from_utf8_lossy(linked.stderr).contains("regular non-link"))
+        duplicated :: Command.new(jet()).args(["inspect", "codemod", "undo", real.to_str().unwrap()]).output().unwrap()
+        assert(!duplicated.status.success())
+        stderr :: String.from_utf8_lossy(duplicated.stderr)
+        assert(stderr.contains("alias the same file") || stderr.contains("regular file with one link") || stderr.contains("multiple hard links"), "{stderr}")
+    }
+}
+
+// Rust: tests/codemod.rs:841
+#Test("windows_transaction_source_binds_temp_and_flushes_opened_directories") {
+    // This is the original source-level Rust comparator, not a runtime Rust bridge.
+    source :: fs.read_to_string(OSPath.from_text(env.var("CARGO_MANIFEST_DIR").unwrap()).join("Source/CmdCodemod/Transaction.rs")).unwrap()
+    assert(source.contains("let temp_final = final_path(temp.as_raw_handle())?"))
+    assert(source.contains("opened temp does not belong to opened project parent directory"))
+    assert(source.contains("FlushFileBuffers(parent.as_raw_handle())"))
+    assert(source.contains("FILE_FLAG_BACKUP_SEMANTICS"))
+    assert(source.contains("FILE_FLAG_OPEN_REPARSE_POINT"))
+}
+
+// Rust: tests/codemod.rs:851
+#Test("recovery_rejects_hostile_journal_paths_without_touching_outside_file") {
+    project :: temp_dir("batch_hostile_journal")
+    object :: simple_batch(project, 2)
+    outside :: project.parent().unwrap().join("{project.file_name().unwrap().to_string_lossy()}-outside.jet")
+    fs.write(outside, "outside bytes\n".bytes()).unwrap()
+    dir :: project.join(".jet/codemods")
+    fs.create_dir_all(dir).unwrap()
+    hex :: (bytes: [U8]) -> {
+        result := String.new()
+        loop byte in bytes { &result.push_str("{byte:02x}") }
+        result
+    }
+    log :: dir.join("Hostile.log.json")
+    before_hex :: hex("outside bytes\n".bytes())
+    after_hex :: hex("owned\n".bytes())
+    journal :: "{{\"schema\":2,\"tx\":\"hostile\",\"completed\":0,\"log_path\":\"{log.display()}\",\"log\":\"\",\"files\":[{{\"path\":\"{outside.display()}\",\"temp\":\"{outside.with_extension("tmp").display()}\",\"destination_id\":[1,1],\"temp_id\":[2,2],\"before\":\"{before_hex}\",\"after\":\"{after_hex}\"}}]}}\n"
+    journal_path :: dir.join("transaction.journal")
+    fs.write(journal_path, journal).unwrap()
+    output :: Command.new(jet()).args(["inspect", "codemod"]).arg(object.to_str().unwrap()).arg("--dry-run").output().unwrap()
+    assert(!output.status.success())
+    stderr :: String.from_utf8_lossy(output.stderr)
+    assert(stderr.contains("escapes retained project"), "{stderr}")
+    assert_eq(fs.read(outside).unwrap(), "outside bytes\n".bytes())
+    assert(journal_path.exists(), "hostile journal must remain for inspection")
+}
+
+// Rust: tests/codemod.rs:891
+#Test("dry_run_diff_preserves_eof_newline_truth") {
+    project :: temp_dir("batch_eof_diff")
+    source :: project.join("Examples/a.jet")
+    fs.create_dir_all(source.parent().unwrap()).unwrap()
+    fs.write(source, "fn report() {{}}\nfn run() {{ report() }}".bytes()).unwrap()
+    object :: project.join("rename.codemod.json")
+    fs.write(object, "{{\"version\":2,\"name\":\"Eof\",\"project\":\".\",\"roots\":[{{\"path\":\"Examples/a.jet\",\"validate\":\"clean\"}}],\"rules\":[{{\"id\":\"rename\",\"kind\":\"symbol_rename\",\"from\":{{\"name\":\"report\",\"symbol_kind\":\"function\"}},\"to\":\"summarize\",\"matches\":2}}]}}\n").unwrap()
+    output :: Command.new(jet()).args(["inspect", "codemod"]).arg(object.to_str().unwrap()).arg("--dry-run").output().unwrap()
+    assert(output.status.success(), "{String.from_utf8_lossy(output.stderr)}")
+    stdout :: String.from_utf8_lossy(output.stdout)
+    assert_eq(stdout.matches("\\ No newline at end of file").count(), 2, "{stdout}")
+    assert_eq(fs.read(source).unwrap(), "fn report() {{}}\nfn run() {{ report() }}".bytes())
+}

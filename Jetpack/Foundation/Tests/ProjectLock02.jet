@@ -1,0 +1,146 @@
+// Native fixtures, never mocks. GATE #4494: real fs/handles/process fixtures.
+use core.sys.target.[selected_os, selected_family]
+
+// Rust: crates/jetpack/src/RuntimePolicy/Lock/windows.rs:305
+#Test("lockfileex_runtime_serializes_and_pins_file_identity") {
+    if selected_os() != "windows" -> return // GATE #4483
+    root :: std.env.temp_dir().join("jetpack-lockfileex-{std.process.id()}")
+    std.fs.create_dir_all(root) ?? panic("root")
+    path :: root.join("lock")
+    first :: windows_lock_open(path) ?? panic("first")
+    second :: windows_lock_open(path) ?? panic("second")
+    assert(windows_lock_try_lock(&first) ?? panic("first lock"))
+    assert(!(windows_lock_try_lock(&second) ?? panic("contended lock")))
+    if std.fs.rename(path, root.join("replacement")) == {
+        .Ok(_) -> panic("a live lock handle must deny delete sharing")
+        .Err(_) -> {}
+    }
+    windows_lock_unlock(&first) ?? panic("first unlock")
+    assert(windows_lock_try_lock(&second) ?? panic("second lock"))
+    windows_lock_unlock(&second) ?? panic("second unlock")
+    std.mem.drop(^first)
+    std.mem.drop(^second)
+    std.fs.remove_dir_all(root) ?? panic("cleanup")
+}
+
+// Rust: crates/jetpack/src/RuntimePolicy/Lock/windows.rs:323
+#Test("reparse_points_fail_closed_when_creation_is_permitted") {
+    if selected_os() != "windows" -> return // GATE #4483
+    root :: std.env.temp_dir().join("jetpack-lockfileex-reparse-{std.process.id()}")
+    std.fs.create_dir_all(root) ?? panic("root")
+    target :: root.join("target")
+    link :: root.join("lock")
+    std.fs.write(target, "target") ?? panic("target")
+    if std.os.windows.fs.symlink_file(target, link) == {
+        .Ok(_) -> {
+            if windows_lock_open(link) == {
+                .Ok(_) -> panic("reparse leaf must fail closed")
+                .Err(_) -> {}
+            }
+        }
+        .Err(error) -> {
+            // GATE #4409: skip only the original PermissionDenied fixture branch.
+            if error.kind() != .PermissionDenied -> panic("couldn't create reparse fixture: {error}")
+        }
+    }
+    std.fs.remove_dir_all(root) ?? panic("cleanup")
+}
+
+// Rust: crates/jetpack/src/RuntimePolicy/Lock/windows.rs:339
+#Test("parent_junction_is_rejected_before_lock_leaf_open") {
+    if selected_os() != "windows" -> return // GATE #4483
+    root :: std.env.temp_dir().join("jetpack-lockfileex-parent-junction-{std.process.id()}")
+    std.fs.create_dir_all(root) ?? panic("root")
+    target :: root.join("target")
+    junction :: root.join("junction")
+    std.fs.create_dir_all(target) ?? panic("target")
+    output :: std.process.Command.new("cmd").args([String]{"/C", "mklink", "/J"}).arg(junction).arg(target).output() ?? panic("mklink")
+    if output.status.success() {
+        if windows_lock_open(junction.join("lock")) == {
+            .Ok(_) -> panic("a junction in any parent component must fail closed")
+            .Err(_) -> {}
+        }
+        std.fs.remove_dir(junction) ?? panic("remove junction")
+    }
+    std.fs.remove_dir_all(root) ?? panic("cleanup")
+}
+
+// Rust: crates/jetpack/src/RuntimePolicy/Lock/windows.rs:365
+#Test("parent_replacement_is_blocked_while_component_identity_is_pinned") {
+    if selected_os() != "windows" -> return // GATE #4483
+    root :: std.env.temp_dir().join("jetpack-lockfileex-parent-replace-{std.process.id()}")
+    parent :: root.join("state")
+    displaced :: root.join("state-displaced")
+    std.fs.create_dir_all(parent) ?? panic("parent")
+    path :: parent.join("lock")
+    lock :: windows_lock_open(path) ?? panic("lock")
+    if std.fs.rename(parent, displaced) == {
+        .Ok(_) -> panic("pinned parent must deny replacement")
+        .Err(_) -> {}
+    }
+    windows_lock_validate_path(&lock, path) ?? panic("identity")
+    std.mem.drop(^lock)
+    std.fs.rename(parent, displaced) ?? panic("rename after close")
+    std.fs.remove_dir_all(root) ?? panic("cleanup")
+}
+
+// Rust: crates/jetpack/src/RuntimePolicy/Lock/unix.rs:61,121,160,173
+#Test("unix lock root domain survives independent marker names and rejects replacement") {
+    if selected_family() != "unix" || !runtime_lock_unix_supported() -> return
+    root :: std.env.temp_dir().join("jetpack-unix-root-lock-{std.process.id()}")
+    markers :: root.join(".locks")
+    std.fs.create_dir_all(markers) ?? panic("markers")
+    first_path :: markers.join("first.lock")
+    second_path :: markers.join("second.lock")
+    first :: unix_lock_open(first_path) ?? panic("first")
+    second :: unix_lock_open(second_path) ?? panic("second")
+    assert(unix_lock_try_lock(&first) ?? panic("first lock"))
+    assert(!(unix_lock_try_lock(&second) ?? panic("same root domain")))
+    if unix_lock_validate_path(&first, second_path) == {
+        .Ok(_) -> panic("different marker path must be rejected")
+        .Err(error) -> assert_eq(error.kind(), .InvalidInput)
+    }
+    std.fs.rename(first_path, markers.join("displaced.lock")) ?? panic("displace marker")
+    std.fs.write(first_path, "replacement") ?? panic("replace marker")
+    if unix_lock_validate_path(&first, first_path) == {
+        .Ok(_) -> panic("replaced marker inode must be rejected")
+        .Err(error) -> assert_eq(error.kind(), .Other)
+    }
+    unix_lock_unlock(&first) ?? panic("first unlock")
+    assert(unix_lock_try_lock(&second) ?? panic("second lock"))
+    unix_lock_unlock(&second) ?? panic("second unlock")
+    std.mem.drop(^first)
+    std.mem.drop(^second)
+    std.fs.remove_dir_all(root) ?? panic("cleanup")
+}
+
+// Rust: crates/jetpack/src/RuntimePolicy/Lock/unsupported.rs:6-35
+#Test("unsupported advisory lock target returns the original unsupported error") {
+    if selected_os() == "windows" || (selected_family() == "unix" && runtime_lock_unix_supported()) -> return
+    path :: std.env.temp_dir().join("jetpack-unsupported-lock")
+    if runtime_lock_backend_open(path) == {
+        .Ok(_) -> panic("unsupported target cannot acquire a lock")
+        .Err(error) -> assert_eq(error.kind(), .Unsupported)
+    }
+    if runtime_lock_backend_open_existing(path) == {
+        .Ok(_) -> panic("unsupported target cannot open an existing lock")
+        .Err(error) -> assert_eq(error.kind(), .Unsupported)
+    }
+    lock :: BackendLockFile.Unsupported(UnsupportedLockFile{})
+    if runtime_lock_backend_validate_path(&lock, path) == {
+        .Ok(_) -> panic("unsupported target cannot validate")
+        .Err(error) -> assert_eq(error.kind(), .Unsupported)
+    }
+    if runtime_lock_backend_try_lock(&lock) == {
+        .Ok(_) -> panic("unsupported target cannot try-lock")
+        .Err(error) -> assert_eq(error.kind(), .Unsupported)
+    }
+    if runtime_lock_backend_unlock(&lock) == {
+        .Ok(_) -> panic("unsupported target cannot unlock")
+        .Err(error) -> assert_eq(error.kind(), .Unsupported)
+    }
+    if runtime_lock_backend_set_inheritable(&lock) == {
+        .Ok(_) -> panic("unsupported target cannot enable inheritance")
+        .Err(error) -> assert_eq(error.kind(), .Unsupported)
+    }
+}

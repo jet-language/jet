@@ -1,0 +1,24 @@
+use Jetpack.PackageModel.Source.Store.HangarRoots.*
+
+// Rust: crates/jet-pkg-model/src/Store.rs:605
+#Test("hangar_dir_uses_the_native_leaf") {
+    roots :: HangarRoots{root: OSPath.from_text("/tmp/jet-root"), dev_mode: true}
+    // GATE #4483: selected-target dispatch, never the build host.
+    os :: core.sys.target.selected_os()
+    leaf :: if os == "macos" || os == "windows" -> "Hangar" else -> "hangar"
+    assert_eq(roots.hangar_dir(), OSPath.from_text("/tmp/jet-root").join(leaf))
+}
+
+// Rust: crates/jet-pkg-model/src/Store.rs:622
+#Test("explicit_root_keeps_the_custom_hangar_child") {
+    roots :: HangarRoots{root: OSPath.from_text("/tmp/jet-root"), dev_mode: false}
+    assert_eq(roots.hangar_dir(), OSPath.from_text("/tmp/jet-root/hangar"))
+}
+
+// Rust: crates/jet-pkg-model/src/Store.rs:631
+#Test("isolated_root_requires_explicit_construction") {
+    roots :: HangarRoots.at(OSPath.from_text("/explicit/jet-test-root"))
+    assert_eq(roots.root, OSPath.from_text("/explicit/jet-test-root"))
+    assert(!roots.dev_mode)
+    assert_eq(roots.hangar_dir(), OSPath.from_text("/explicit/jet-test-root/hangar"))
+}

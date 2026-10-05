@@ -1,0 +1,10 @@
+// Rust: crates/jet-pkg-model/src/CFFI.rs:4095
+#Test("stale_generated_descriptor_is_rejected_before_loading") {
+    source :: "// jet-ffi-descriptor=stale\n#Bindgen module c.probe.__bindgen__ {\n    fn ping() -> Int = \"ping\"\n}\n"
+    diagnostics := [Diagnostic]{}
+    modules := [LoadedModule]{}
+    load_cache_source(source, OSPath(".jet/bindings/c/probe.jet"), "probe", &diagnostics, &modules)
+    assert_eq(modules.len(), 0)
+    assert_eq(diagnostics.len(), 1)
+    assert_eq(diagnostics[0].code, "E3208")
+}

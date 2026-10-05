@@ -1,0 +1,10 @@
+use jetpack.JetOS.Entry.[default_config_path, resolve_config_path]
+
+// Rust: crates/jetpack/src/JetOS/entry.rs:207-218 (behavioral controls; no inline Rust tests).
+#Test("resolve_config_path_defaults_for_absent_and_empty_prefix") {
+    assert_eq(resolve_config_path(None), default_config_path())
+    assert_eq(resolve_config_path(Val("")), default_config_path())
+}
+#Test("resolve_config_path_preserves_explicit_native_path") {
+    assert_eq(resolve_config_path(Val("../machines/config.jet")), OSPath.from("../machines/config.jet"))
+}

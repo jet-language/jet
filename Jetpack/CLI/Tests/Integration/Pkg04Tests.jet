@@ -1,0 +1,863 @@
+use std.[fs, env]
+use std.process.[Command, Stdio]
+use std.os.unix.fs.symlink
+use core.sys.target.selected_family
+use core.files.OSPath
+use common.make_tree_writable
+use Jetpack.CLI.Tests.Integration.Pkg.[jet_bin, jet_cmd, jet_cmd_env, tmp_dir, write, min_manifest,
+    manifest_with_deps, have_git, with_store, bare_registry, init_clean_project, seed_core_review, read_index_file]
+use Jetpack.CLI.Tests.Integration.Pkg04.make_test_lock
+use Jetpack.[Manifest, Fetch, Lock, Publish, Store]
+use Jetpack.Publish.[diff_public_api, extract_public_api, extract_public_api_for_package, ApiItem, BumpKind,
+    classify_bump, e1218, e2601, e2604, check_conflicts, VersionConstraint, VersionReq,
+    emit_spdx, emit_cyclonedx, audit_lockfile, Severity, parse_registries_from_env, PrePublishGate, ResolveMode, IndexEntry]
+use Jetpack.Publish.ApiFreeze.[legacy_api_name, legacy_api_signature, ApiSnapshot, snapshot_from_items_with_effects, API_SNAPSHOT_VERSION]
+use Jetpack.Publish.SemVer.SemVer
+use Jetpack.Publish.Advisory.Advisory
+use jet.[Authority, Loader, Sema, compile_with_path]
+// GATE #4494: real subprocesses, concurrent publication, environment and filesystem.
+// GATE #4483: Unix symlink journeys dispatch on the selected target family.
+
+// Rust: tests/pkg.rs:5433
+#Test("cli_run_reports_ambiguous_retired_entry_layout") {
+    assert(jet_bin().is_file(), "the Cargo-provided jet binary must exist")
+    tmp :: tmp_dir("cli_run_entry_ambiguous")
+    store :: tmp.join("store")
+    fs.create_dir_all(&store).unwrap()
+    write(&tmp, "package.jet", &min_manifest("ambiguous", "0.1.0"))
+    write(&tmp, "run.jet", "fn run() { print(\"current\") }\n")
+    write(&tmp, "main.jet", "fn run() { print(\"retired\") }\n")
+    out :: jet_cmd(&["run"], &tmp, &store)
+    assert(!out.status.success())
+    stderr :: String.from_utf8_lossy(&out.stderr)
+    assert(stderr.contains("ambiguous project entry"), "{stderr}")
+    assert(stderr.contains("main.jet") && stderr.contains("run.jet"), "{stderr}")
+    assert_eq(stderr.matches("`run.jet`").count(), 1, "{stderr}")
+    assert(tmp.join("main.jet").is_file())
+    assert(tmp.join("run.jet").is_file())
+    fs.remove_dir_all(&tmp).unwrap()
+}
+
+// Rust: tests/pkg.rs:5462
+#Test("cli_run_reports_named_canonical_retired_entry_layout") {
+    assert(jet_bin().is_file(), "the Cargo-provided jet binary must exist")
+    tmp :: tmp_dir("cli_run_named_entry_ambiguous")
+    store :: tmp.join("store")
+    fs.create_dir_all(&store).unwrap()
+    write(&tmp, "package.jet", &min_manifest("ambiguous", "0.1.0"))
+    write(&tmp, "ambiguous.jet", "fn run() { print(\"current\") }\n")
+    write(&tmp, "main.jet", "fn run() { print(\"retired\") }\n")
+    out :: jet_cmd(&["run"], &tmp, &store)
+    assert(!out.status.success())
+    stderr :: String.from_utf8_lossy(&out.stderr)
+    assert(stderr.contains("ambiguous project entry"), "{stderr}")
+    assert(stderr.contains("main.jet") && stderr.contains("ambiguous.jet"), "{stderr}")
+    assert(tmp.join("main.jet").is_file())
+    assert(tmp.join("ambiguous.jet").is_file())
+    fs.remove_dir_all(&tmp).unwrap()
+}
+
+// Rust: tests/pkg.rs:5490
+#Test("cli_run_keeps_explicit_retired_entry_target") {
+    assert(jet_bin().is_file(), "the Cargo-provided jet binary must exist")
+    tmp :: tmp_dir("cli_run_explicit_retired")
+    store :: tmp.join("store")
+    fs.create_dir_all(&store).unwrap()
+    write(&tmp, "main.jet", "fn run() { print(\"explicit\") }\n")
+    out :: jet_cmd(&["run", "main.jet"], &tmp, &store)
+    assert(out.status.success(), "explicit source target failed:\n{String.from_utf8_lossy(&out.stderr)}")
+    assert_eq(String.from_utf8_lossy(&out.stdout), "explicit\n")
+    assert(tmp.join("main.jet").is_file())
+    assert(!tmp.join("run.jet").exists())
+    fs.remove_dir_all(&tmp).unwrap()
+}
+
+// Rust: tests/pkg.rs:5515
+#Test("unsupported_authority_reports_a_host_recovery") {
+    diagnostic :: Authority.AuthorityError.Unsupported("descriptor-relative no-follow authority is unavailable on this platform").diagnostic()
+    assert_eq(diagnostic.code, "E1334")
+    assert(diagnostic.what.contains("unavailable on this platform"))
+    assert(diagnostic.why.contains("descriptor-relative no-follow"))
+    assert(diagnostic.fix.contains("use a platform"))
+}
+
+// Rust: tests/pkg.rs:5528
+#Test("cli_run_authority_failure_offers_specific_recovery") {
+    if selected_family() != "unix" { return }
+    tmp :: tmp_dir("cli_run_authority_recovery")
+    store :: tmp.join("store")
+    fs.create_dir_all(&store).unwrap()
+    write(&tmp, "package.jet", &min_manifest("authority", "0.1.0"))
+    write(&tmp, "real.jet", "fn run() { print(\"real\") }\n")
+    symlink("real.jet", tmp.join("run.jet")).unwrap()
+    out :: jet_cmd(&["run"], &tmp, &store)
+    assert(!out.status.success())
+    stderr :: String.from_utf8_lossy(&out.stderr)
+    assert(stderr.contains("Error [E1334]:"), "{stderr}")
+    assert(stderr.contains("run.jet") && stderr.contains("symlink"), "{stderr}")
+    assert(stderr.contains("replace the symlink with the expected regular file"), "{stderr}")
+    fs.remove_dir_all(&tmp).unwrap()
+}
+
+// Rust: tests/pkg.rs:5555
+#Test("cli_build_sbom_writes_spdx") {
+    if !jet_bin().is_file() { eprintln("note: skipping cli_build_sbom (run `cargo build` first)"); return }
+    tmp :: tmp_dir("cli_build_sbom")
+    store :: tmp.join("store")
+    fs.create_dir_all(&store).unwrap()
+    write(&tmp, "hello.jet", "fn run() { print(\"hi\") }\n")
+    out :: jet_cmd(&["build", "--sbom", "hello.jet"], &tmp, &store)
+    stdout :: String.from_utf8_lossy(&out.stdout)
+    assert(out.status.success(), "jet build --sbom failed:\n{String.from_utf8_lossy(&out.stderr)}")
+    assert(stdout.contains("sbom:"), "build output must announce the SBOM path")
+    spdx :: tmp.join(".jet/build/hello.spdx")
+    assert(spdx.is_file(), "expected SBOM at {spdx.display()}")
+    body :: fs.read_to_string(&spdx).unwrap()
+    assert(body.starts_with("SPDXVersion: SPDX-2.3\n"), "SBOM must be SPDX 2.3")
+    _ :: fs.remove_dir_all(&tmp)
+}
+
+// Rust: tests/pkg.rs:5591
+#Test("cli_vendor_dir_flag_relocates") {
+    if !jet_bin().is_file() || !have_git() { eprintln("note: skipping cli_vendor_dir (need built binary)"); return }
+    tmp :: tmp_dir("cli_vendor_dir")
+    store :: tmp.join("store")
+    fs.create_dir_all(&store).unwrap()
+    write(&tmp, "greeter/package.jet", &min_manifest("greeter", "0.1.0"))
+    write(&tmp, "greeter/greeter.jet", "pub fn greet() -> String { return \"hi\" }\n")
+    write(&tmp, "package.jet", &manifest_with_deps("app", "0.1.0", "    greeter: ./greeter,"))
+    out :: jet_cmd(&["registry", "vendor", "--vendor-dir", "third_party"], &tmp, &store)
+    assert(out.status.success(), "jet registry vendor --vendor-dir failed:\n{String.from_utf8_lossy(&out.stderr)}")
+    assert(tmp.join("third_party/greeter").is_dir(), "dep must land in the chosen dir")
+    assert(tmp.join("third_party/manifest.json").is_file(), "vendor manifest must be written")
+    assert(!tmp.join("vendor").exists(), "default vendor/ must not be created")
+    _ :: fs.remove_dir_all(&tmp)
+}
+
+// Rust: tests/pkg.rs:5644
+#Test("cli_jet_new_annotated_has_dep_comments") {
+    if !jet_bin().is_file() { eprintln("note: skipping cli_jet_new_annotated (run `cargo build` first)"); return }
+    tmp :: tmp_dir("cli_annotated")
+    store :: tmp.join("store")
+    fs.create_dir_all(&store).unwrap()
+    _ :: jet_cmd(&["new", "annotated_app", "--annotated"], &tmp, &store)
+    manifest :: fs.read_to_string(tmp.join("annotated_app/package.jet")).expect("package.jet must exist after jet new --annotated")
+    assert(manifest.contains("// Jet package dependencies:"), "annotated template should have dep comments:\n{manifest}")
+    _ :: fs.remove_dir_all(&tmp)
+}
+
+// Rust: tests/pkg.rs:5668
+#Test("cli_end_to_end_new_then_add_path") {
+    if !jet_bin().is_file() { eprintln("note: skipping cli_end_to_end (run `cargo build` first)"); return }
+    tmp :: tmp_dir("e2e")
+    store :: tmp.join("store")
+    fs.create_dir_all(&store).unwrap()
+    out :: jet_cmd(&["new", "myapp"], &tmp, &store)
+    assert(out.status.success(), "jet new failed:\n{String.from_utf8_lossy(&out.stderr)}")
+    lib :: tmp.join("mylib")
+    write(&lib, "package.jet", &min_manifest("mylib", "0.1.0"))
+    write(&lib, "mylib.jet", "pub fn answer() -> Int { return 42 }\n")
+    proj :: tmp.join("myapp")
+    added :: jet_cmd(&["add", "mylib", "--path", "../mylib"], &proj, &store)
+    assert(added.status.success(), "jet add --path failed:\n{String.from_utf8_lossy(&added.stderr)}")
+    manifest :: fs.read_to_string(proj.join("package.jet")).unwrap()
+    assert(manifest.contains("mylib"), "package.jet should list mylib after jet add")
+    _ :: fs.remove_dir_all(&tmp)
+}
+
+// Rust: tests/pkg.rs:5711
+#Test("cli_add_path_into_inline_empty_deps_table") {
+    if !jet_bin().is_file() { eprintln("note: skipping cli_add_path_into_inline_empty_deps_table (run `cargo build` first)"); return }
+    tmp :: tmp_dir("cli_add_inline_deps")
+    store :: tmp.join("store")
+    fs.create_dir_all(&store).unwrap()
+    write(&tmp, "package.jet", &(min_manifest("app", "0.1.0") + "\ndeps: {}\n"))
+    lib :: tmp.join("mylib")
+    write(&lib, "package.jet", &min_manifest("mylib", "0.1.0"))
+    write(&lib, "mylib.jet", "pub fn answer() -> Int { return 42 }\n")
+    out :: jet_cmd(&["add", "mylib", "--path", "./mylib"], &tmp, &store)
+    assert(out.status.success(), "jet add --path failed:\n{String.from_utf8_lossy(&out.stderr)}")
+    raw :: fs.read_to_string(tmp.join("package.jet")).unwrap()
+    manifest :: Manifest.parse(&tmp.join("package.jet"), &raw).expect("jet add must leave an inline deps table parseable")
+    assert(manifest.dependencies.contains_key("mylib"))
+    assert(raw.contains("deps: {\n    mylib: ./mylib,\n}\n"))
+    fetch :: jet_cmd(&["fetch"], &tmp, &store)
+    assert(fetch.status.success(), "fetch after add failed:\n{String.from_utf8_lossy(&fetch.stderr)}")
+    _ :: fs.remove_dir_all(&tmp)
+}
+
+// Rust: tests/pkg.rs:5754
+#Test("cli_remove_absent_dependency_is_an_error") {
+    if !jet_bin().is_file() { eprintln("note: skipping cli_remove_absent_dependency_is_an_error (run `cargo build` first)"); return }
+    tmp :: tmp_dir("cli_remove_absent")
+    store :: tmp.join("store")
+    fs.create_dir_all(&store).unwrap()
+    manifest_path :: tmp.join("package.jet")
+    before :: min_manifest("app", "0.1.0")
+    write(&tmp, "package.jet", &before)
+    out :: jet_cmd(&["remove", "json"], &tmp, &store)
+    stderr :: String.from_utf8_lossy(&out.stderr)
+    stdout :: String.from_utf8_lossy(&out.stdout)
+    assert(!out.status.success(), "absent dependency removal must fail")
+    assert(stderr.contains("json") && stderr.contains("not present"), "missing absent-dep diagnostic:\n{stderr}")
+    assert(!stdout.contains("removed") && !stdout.contains("fetched"), "false success output:\n{stdout}")
+    assert_eq(fs.read_to_string(manifest_path).unwrap(), before)
+    _ :: fs.remove_dir_all(&tmp)
+}
+
+// Rust: tests/pkg.rs:5787
+#Test("cli_corrupt_manifest_has_one_diagnostic_across_package_commands") {
+    if !jet_bin().is_file() { eprintln("note: skipping cli_corrupt_manifest_has_one_diagnostic_across_package_commands (run `cargo build` first)"); return }
+    tmp :: tmp_dir("cli_corrupt_manifest")
+    store :: tmp.join("store")
+    fs.create_dir_all(&store).unwrap()
+    write(&tmp, "package.jet", &(min_manifest("app", "0.1.0") + "\ndeps: {\n}\nunknown: ../broken,\n"))
+    write(&tmp, "run.jet", "fn run() { print(\"hi\") }\n")
+    lib :: tmp.join("mylib")
+    write(&lib, "package.jet", &min_manifest("mylib", "0.1.0"))
+    outputs :: [jet_cmd(&["fetch"], &tmp, &store), jet_cmd(&["build", "run.jet"], &tmp, &store),
+        jet_cmd(&["add", "mylib", "--path", "./mylib"], &tmp, &store)]
+    lines: [String] :: outputs.iter().map((out) -> {
+        assert(!out.status.success(), "corrupt manifest command unexpectedly succeeded")
+        String.from_utf8_lossy(&out.stderr).lines().find((line) -> line.starts_with("Error [E1206]:")).unwrap_or("").to_string()
+    }).collect()
+    assert(lines.iter().all((line) -> !line.is_empty()), "missing E1206 diagnosis: {lines:?}")
+    assert(lines.windows(2).all((pair) -> pair[0] == pair[1]), "inconsistent diagnostics: {lines:?}")
+    _ :: fs.remove_dir_all(&tmp)
+}
+
+// Rust: tests/pkg.rs:5841
+#Test("semver_break_e2601") {
+    old_api :: [ApiItem { kind: "fn", name: "parse", signature: "fn parse(raw: String) -> Int" }]
+    new_api: [ApiItem] :: []
+    changes :: diff_public_api(&old_api, &new_api)
+    assert(!changes.is_empty(), "removed pub fn must be a breaking change")
+    diag :: e2601("1.2.0", BumpKind.Minor, &changes[0], 2)
+    assert_eq(diag.code, "E2601")
+    assert(diag.what.contains("1.2.0"), "what must name the version")
+    assert(diag.why.contains("minor"), "why must name the bump kind")
+    assert(diag.fix.contains("2.0.0"), "fix must name the next major")
+    assert(diag.why.contains("parse") || diag.why.contains("removed"), "why must name the broken item or action")
+}
+
+// Rust: tests/pkg.rs:5870
+#Test("returned_view_source_union_change_feeds_e1218_and_e2601") {
+    item :: (source: &String) -> ApiItem { kind: "fn", name: "pick",
+        signature: "fn pick(left: [Int], right: [Int]) -> View<Int> ; view_source = {source}" }
+    changes :: diff_public_api(&[item("parameter:0;access:read;path:range")],
+        &[item("one_of(parameter:0;path:range,parameter:1;path:range);access:read")])
+    assert_eq(changes.len(), 1, "adding a possible owner to a source union must be breaking")
+    assert(changes[0].description.contains("parameter:0"))
+    assert(changes[0].description.contains("parameter:1"))
+    bump :: classify_bump(&SemVer.parse("1.0.0").unwrap(), &SemVer.parse("1.1.0").unwrap())
+    assert_eq(bump, BumpKind.Minor)
+    assert_eq(e1218("1.0.0", "1.1.0", bump, &changes[0], 2).code, "E1218")
+    assert_eq(e2601("1.1.0", bump, &changes[0], 2).code, "E2601")
+}
+
+// Rust: tests/pkg.rs:5903
+#Test("capability_sigil_frozen_in_public_api") {
+    dir :: tmp_dir("cap_api_freeze")
+    write_src :: "struct Account { balance: Int }\npub fn deposit(a: &Account, amount: Int) -> Int {\n    a.balance = a.balance + amount\n    return a.balance\n}\n"
+    f :: dir.join("write.jet")
+    fs.write(&f, write_src).unwrap()
+    write_api :: extract_public_api(write_src, f.to_str().unwrap())
+    deposit :: write_api.iter().find((i) -> i.name == "deposit").expect("deposit must be in the public API")
+    assert(deposit.signature.contains("a: &"), "the write sigil must be frozen onto the param type in the published signature, got `{deposit.signature}`")
+    read_src :: "struct Account { balance: Int }\npub fn deposit(a: Account, amount: Int) -> Int { return a.balance + amount }\n"
+    f2 :: dir.join("read.jet")
+    fs.write(&f2, read_src).unwrap()
+    read_api :: extract_public_api(read_src, f2.to_str().unwrap())
+    changes :: diff_public_api(&read_api, &write_api)
+    assert(!changes.is_empty(), "a read -> write capability drift on a pub fn must be a breaking change")
+    _ :: fs.remove_dir_all(&dir)
+}
+
+// Rust: tests/pkg.rs:5949
+#Test("cli_typed_default_is_not_frozen_as_positional") {
+    dir :: tmp_dir("cli_default_api_freeze")
+    src :: "#CLI\npub struct Config {\n    port: Int{3000}\n    required: Int\n}\n"
+    path :: dir.join("config.jet")
+    fs.write(&path, src).unwrap()
+    api :: extract_public_api_for_package(src, path.to_str().unwrap(), "config")
+    config :: api.iter().find((item) -> item.name == "Config").expect("public CLI struct must be frozen")
+    assert_eq(config.signature, "struct Config { port: Int; required: Int [positional 0] }")
+    _ :: fs.remove_dir_all(&dir)
+}
+
+// Rust: tests/pkg.rs:5967
+#Test("physical_unit_api_freeze_and_semver_share_one_canonical_signature") {
+    dir :: tmp_dir("physical_unit_api_freeze")
+    current :: "#UnitFamily(Length, base: meter) { meter millimeter(scale: 1/1000) }\npub fn distance() -> Millimeter { return Millimeter.from_float(1.0) }\n"
+    current_path :: dir.join("current.jet")
+    fs.write(&current_path, current).unwrap()
+    current_api :: extract_public_api_for_package(current, current_path.to_str().unwrap(), "physics")
+    bundle := Loader.load_entry_with_overlay(current_path.to_str().unwrap(), None, true).unwrap()
+    (_, facts) :: Sema.check_bundle_with_effect_facts(&bundle, Sema.CompileMode.Check)
+    entry :: &bundle.modules[bundle.entry]
+    frozen :: snapshot_from_items_with_effects(&entry.items, "physics", "1.0.0", Some(&facts.solved), Some(&entry.alias))
+    assert_eq(frozen.api_version, API_SNAPSHOT_VERSION)
+    frozen_api: [ApiItem] :: frozen.funcs.iter().map((function) -> ApiItem { kind: "fn", name: function.name.clone(), signature: function.signature.clone() }).collect()
+    assert(diff_public_api(&frozen_api, &current_api).is_empty())
+    changed :: "#UnitFamily(Length, base: meter) { meter millimeter(scale: 1/100) }\npub fn distance() -> Millimeter { return Millimeter.from_float(1.0) }\n"
+    changed_path :: dir.join("changed.jet")
+    fs.write(&changed_path, changed).unwrap()
+    changed_api :: extract_public_api_for_package(changed, changed_path.to_str().unwrap(), "physics")
+    assert_eq(diff_public_api(&current_api, &changed_api).len(), 1)
+    foreign_api :: extract_public_api_for_package(current, current_path.to_str().unwrap(), "geometry")
+    assert_eq(diff_public_api(&current_api, &foreign_api).len(), 1)
+    affine :: "#UnitFamily(Temperature, base: kelvin) { kelvin celsius(scale: 1, offset: 27315/100) }\npub fn target() -> CelsiusPoint { return CelsiusPoint.from_float(20.0) }\n"
+    affine_path :: dir.join("affine.jet")
+    fs.write(&affine_path, affine).unwrap()
+    affine_api :: extract_public_api_for_package(affine, affine_path.to_str().unwrap(), "physics")
+    shifted :: "#UnitFamily(Temperature, base: kelvin) { kelvin celsius(scale: 1, offset: 27415/100) }\npub fn target() -> CelsiusPoint { return CelsiusPoint.from_float(20.0) }\n"
+    shifted_path :: dir.join("shifted.jet")
+    fs.write(&shifted_path, shifted).unwrap()
+    shifted_api :: extract_public_api_for_package(shifted, shifted_path.to_str().unwrap(), "physics")
+    assert_eq(diff_public_api(&affine_api, &shifted_api).len(), 1)
+    length_generic :: "pub fn keep<Q: Quantity<Length, .Linear>>(value: ^Q) -> Q { return value }\n"
+    time_generic :: "pub fn keep<Q: Quantity<Time, .Linear>>(value: ^Q) -> Q { return value }\n"
+    length_path :: dir.join("length_generic.jet")
+    time_path :: dir.join("time_generic.jet")
+    fs.write(&length_path, length_generic).unwrap()
+    fs.write(&time_path, time_generic).unwrap()
+    length_api :: extract_public_api_for_package(length_generic, length_path.to_str().unwrap(), "physics")
+    time_api :: extract_public_api_for_package(time_generic, time_path.to_str().unwrap(), "physics")
+    assert_eq(length_api[0].signature, "fn keep<Q: Quantity<Length, .Linear>>(value: ^Q) Q -[]>")
+    assert_eq(diff_public_api(&length_api, &time_api).len(), 1)
+    _ :: fs.remove_dir_all(&dir)
+}
+
+// Rust: tests/pkg.rs:6066
+#Test("soft_public_names_are_not_semver_promises") {
+    dir :: tmp_dir("soft_public_api")
+    old :: "pub fn stable() {}\npub fn _unstable() {}\n"
+    new :: "pub fn stable() {}\n"
+    old_path :: dir.join("old.jet")
+    new_path :: dir.join("new.jet")
+    fs.write(&old_path, old).unwrap()
+    fs.write(&new_path, new).unwrap()
+    old_api :: extract_public_api(old, old_path.to_str().unwrap())
+    new_api :: extract_public_api(new, new_path.to_str().unwrap())
+    assert(old_api.iter().all((item) -> item.name != "_unstable"))
+    assert(diff_public_api(&old_api, &new_api).is_empty())
+    _ :: fs.remove_dir_all(&dir)
+}
+
+// Rust: tests/pkg.rs:6086
+#Test("inferred_public_effect_drift_is_breaking") {
+    dir :: tmp_dir("effect_api_drift")
+    pure_path :: dir.join("pure.jet")
+    io_path :: dir.join("io.jet")
+    pure :: "pub fn report() -> Int { return 1 }\n"
+    io :: "pub fn report() -> Int {\n    print(\"report\")\n    return 1\n}\n"
+    fs.write(&pure_path, pure).unwrap()
+    fs.write(&io_path, io).unwrap()
+    pure_api :: extract_public_api(pure, pure_path.to_str().unwrap())
+    io_api :: extract_public_api(io, io_path.to_str().unwrap())
+    assert(pure_api[0].signature.contains("-[]>"))
+    assert(io_api[0].signature.contains("-[IO]>"))
+    assert_eq(diff_public_api(&pure_api, &io_api).len(), 1)
+    _ :: fs.remove_dir_all(&dir)
+}
+
+// Rust: tests/pkg.rs:6107
+#Test("inferred_inline_module_effects_are_published") {
+    dir :: tmp_dir("inline_module_effect_api")
+    old_dir :: dir.join("old")
+    new_dir :: dir.join("new")
+    fs.create_dir_all(&old_dir).unwrap()
+    fs.create_dir_all(&new_dir).unwrap()
+    old_path :: old_dir.join("run.jet")
+    new_path :: new_dir.join("run.jet")
+    old :: "module files { pub fn report() { print(\"report\") } }\nmodule bench { pub fn report() {} }\n"
+    new :: "module files { pub fn report() { print(\"report\") } }\nmodule bench { pub fn report() { print(\"bench\") } }\n"
+    fs.write(&old_path, old).unwrap()
+    fs.write(&new_path, new).unwrap()
+    old_api :: extract_public_api(old, old_path.to_str().unwrap())
+    new_api :: extract_public_api(new, new_path.to_str().unwrap())
+    report :: old_api.iter().find((item) -> item.name == "files.report").expect("inline module function is public API")
+    assert(report.signature.contains("-[IO]>"), "{report.signature}")
+    assert(old_api.iter().any((item) -> item.name == "bench.report"))
+    assert_eq(diff_public_api(&old_api, &new_api).len(), 1)
+    _ :: fs.remove_dir_all(&dir)
+}
+
+// Rust: tests/pkg.rs:6136
+#Test("v2_snapshot_upgrade_matches_duplicate_inline_leaves") {
+    dir :: tmp_dir("v2_inline_api_upgrade")
+    path :: dir.join("current.jet")
+    source :: "module bench { pub fn report() {} }\nmodule files { pub fn report(x: Int) {} }\n"
+    fs.write(&path, source).unwrap()
+    current := extract_public_api(source, path.to_str().unwrap()).into_iter().filter((item) -> item.kind == "fn").collect()
+    for item in &current {
+        item.name = legacy_api_name(&item.name).to_string()
+        item.signature = legacy_api_signature(&item.signature)
+    }
+    previous :: ApiSnapshot.parse("api_version = 2\npackage = demo\npublished_version = 1.0.0\nfn report()\nfn report(x: Int (a whole number))\n").expect("v2 snapshot")
+    old := previous.funcs.iter().map((function) -> ApiItem { kind: "fn", name: function.name.clone(), signature: function.signature.clone() }).collect()
+    for item in &old {
+        item.name = legacy_api_name(&item.name).to_string()
+        item.signature = legacy_api_signature(&item.signature)
+    }
+    assert(diff_public_api(&old, &current).is_empty(), "old={old:#?}\ncurrent={current:#?}")
+    _ :: fs.remove_dir_all(&dir)
+}
+
+// Rust: tests/pkg.rs:6179
+#Test("public_effect_metadata_preserves_symbolic_rows") {
+    dir :: tmp_dir("effect_api_open_row")
+    path :: dir.join("open.jet")
+    source :: "pub fn invoke<E>(act: fn() -[..E]> Int) -[..E]> Int { return act() }\n"
+    fs.write(&path, source).unwrap()
+    api :: extract_public_api(source, path.to_str().unwrap())
+    assert(api[0].signature.contains("-[..E]>"), "{api[0].signature}")
+    _ :: fs.remove_dir_all(&dir)
+}
+
+// Rust: tests/pkg.rs:6194
+#Test("public_trait_effect_contract_drift_is_breaking") {
+    dir :: tmp_dir("trait_effect_api_drift")
+    old_path :: dir.join("old.jet")
+    new_path :: dir.join("new.jet")
+    old :: "pub trait Render { fn draw(self) -[IO]> Int }\n"
+    new :: "pub trait Render { fn draw(self) -[GPU]> Int }\n"
+    fs.write(&old_path, old).unwrap()
+    fs.write(&new_path, new).unwrap()
+    old_api :: extract_public_api(old, old_path.to_str().unwrap())
+    new_api :: extract_public_api(new, new_path.to_str().unwrap())
+    assert(old_api[0].signature.contains("-[IO]>"))
+    assert(new_api[0].signature.contains("-[GPU]>"))
+    assert(!diff_public_api(&old_api, &new_api).is_empty(), "trait method effect drift must be breaking")
+    _ :: fs.remove_dir_all(&dir)
+}
+
+// Rust: tests/pkg.rs:6218
+#Test("physical_unit_trait_methods_use_canonical_dimensions") {
+    dir :: tmp_dir("physical_unit_trait_api")
+    path :: dir.join("current.jet")
+    // Bare Meter uses the canonical Prelude family, not a local nominal shadow.
+    source :: "pub trait Measure { fn scale(value: Meter) -> Meter }\n"
+    fs.write(&path, source).unwrap()
+    api :: extract_public_api(source, path.to_str().unwrap())
+    method :: api.iter().find((item) -> item.name == "Measure.scale").expect("public trait method")
+    assert_eq(method.signature, "fn Measure.scale(value: Meter{package=core.units; family=Length; base=Meter; dimension=core.units%3A%3ALength:1; scale=1; provenance=Rational; offset=0}) Meter{package=core.units; family=Length; base=Meter; dimension=core.units%3A%3ALength:1; scale=1; provenance=Rational; offset=0}")
+    bundle := Loader.load_entry_with_overlay(path.to_str().unwrap(), None, true).expect("trait source bundle")
+    (_, facts) :: Sema.check_bundle_with_effect_facts(&bundle, Sema.CompileMode.Check)
+    entry :: &bundle.modules[bundle.entry]
+    frozen :: snapshot_from_items_with_effects(&entry.items, "physics", "1.0.0", Some(&facts.solved), Some(&entry.alias))
+    assert_eq(frozen.funcs.iter().find((item) -> item.name == "Measure.scale").expect("frozen public trait method").signature, method.signature)
+    _ :: fs.remove_dir_all(&dir)
+}
+
+// Rust: tests/pkg.rs:6271
+#Test("resolver_conflict_e2602") {
+    constraints :: [VersionConstraint { package: "log", req: VersionReq.parse("^1.0").unwrap(), from: "web-server 2.1.0" },
+        VersionConstraint { package: "log", req: VersionReq.parse("^2.0").unwrap(), from: "db-client 3.0.0" }]
+    diags :: check_conflicts(&constraints, &[:])
+    assert(!diags.is_empty(), "disjoint major caret ranges must be a conflict")
+    assert_eq(diags[0].code, "E2602")
+    why :: &diags[0].why
+    assert(why.contains("log"), "why must name the conflicting package")
+    assert(why.contains("web-server") || why.contains("db-client"), "why must name a dependent")
+}
+
+// Rust: tests/pkg.rs:6303
+#Test("vendored_offline_locked_build") {
+    tmp :: tmp_dir("m8_vendor_locked")
+    store :: tmp.join("store")
+    fs.create_dir_all(&store).unwrap()
+    write(&tmp, "greeter/package.jet", &min_manifest("greeter", "0.1.0"))
+    write(&tmp, "greeter/greeter.jet", "pub fn greet() -> String { return \"hi\" }\n")
+    write(&tmp, "package.jet", &manifest_with_deps("vendored_app", "0.1.0", "    greeter: ./greeter,"))
+    write(&tmp, "run.jet", "use greeter\nfn run() { print(greeter.greet()) }\n")
+    entry :: tmp.join("run.jet")
+    pack_path :: tmp.join("package.jet")
+    mf :: Manifest.parse(&pack_path, &fs.read_to_string(&pack_path).unwrap()).unwrap()
+    opts :: Fetch.FetchOptions { locked: false, update: false, update_dep: None, resolution: ResolveMode.Conservative }
+    result :: with_store(&store, () -> Fetch.fetch(&tmp, &mf, None, &opts))
+    assert(result.is_ok(), "initial fetch must succeed")
+    (lock, dep_dirs) :: result.unwrap()
+    vendor_dir :: tmp.join("vendor")
+    vendor_result :: Publish.vendor(&tmp, &lock, &dep_dirs, &vendor_dir)
+    assert(vendor_result.is_ok(), "vendor must succeed")
+    copied :: vendor_result.unwrap()
+    assert(copied.contains("greeter"), "greeter must be vendored")
+    assert(tmp.join("vendor/greeter").is_dir(), "vendor/greeter must exist")
+    manifest :: fs.read_to_string(tmp.join("vendor/manifest.json")).unwrap()
+    assert(manifest.contains("\"name\": \"greeter\""), "manifest must list greeter")
+    assert(manifest.contains("\"fingerprint\""), "manifest must record fingerprints")
+    lock_text :: fs.read_to_string(tmp.join(".jet/lock")).unwrap_or_default()
+    assert(!lock_text.is_empty(), "lock file must exist after fetch")
+    compile_result :: with_store(&store, () -> compile_with_path("", &entry.to_string_lossy()))
+    assert(compile_result.is_ok(), "vendored project must compile offline")
+    _ :: fs.remove_dir_all(&tmp)
+}
+
+// Rust: tests/pkg.rs:6391
+#Test("vendor_rejects_symlink_sources_and_traversal_names") {
+    if selected_family() != "unix" { return }
+    tmp :: tmp_dir("vendor_symlink_boundary")
+    outside :: tmp.join("outside")
+    fs.write(&outside, "must survive\n").unwrap()
+    source :: tmp.join("source")
+    fs.create_dir_all(&source).unwrap()
+    fs.write(source.join("package.jet"), "name: \"dep\"\n").unwrap()
+    symlink(&outside, source.join("leak")).unwrap()
+    symlink_deps :: ["dep": source.clone()]
+    symlink_result :: Publish.vendor(&tmp, &make_test_lock("dep", "0.1.0", "sha256-dep"), &symlink_deps, &tmp.join("vendor-symlink"))
+    assert(symlink_result.is_err(), "vendor must refuse source symlinks")
+    assert_eq(fs.read_to_string(&outside).unwrap(), "must survive\n")
+    safe_source :: tmp.join("safe-source")
+    fs.create_dir_all(&safe_source).unwrap()
+    fs.write(safe_source.join("package.jet"), "name: \"escape\"\n").unwrap()
+    traversal_deps :: ["../escape": safe_source]
+    traversal_result :: Publish.vendor(&tmp, &make_test_lock("../escape", "0.1.0", "sha256-escape"), &traversal_deps, &tmp.join("vendor-name"))
+    assert(traversal_result.is_err(), "vendor must refuse traversal-shaped dependency names")
+    assert(!tmp.join("escape").exists())
+    _ :: fs.remove_dir_all(&tmp)
+}
+
+// Rust: tests/pkg.rs:6479
+#Test("sbom_spdx_golden") {
+    lock :: make_test_lock("logger", "1.2.3", "sha256-deadbeef00112233445566778899aabbccddeeff00112233445566778899aabb")
+    sbom :: emit_spdx(&lock, "myapp", "0.5.0")
+    assert(sbom.starts_with("SPDXVersion: SPDX-2.3\n"))
+    assert(sbom.contains("DataLicense: CC0-1.0\n"))
+    assert(sbom.contains("DocumentNamespace: https://jet-lang.dev/spdx/myapp-0.5.0-"))
+    assert(sbom.contains("PackageName: logger\n"))
+    assert(sbom.contains("PackageVersion: 1.2.3\n"))
+    assert(sbom.contains("PackageChecksum: SHA256: deadbeef00112233445566778899aabbccddeeff00112233445566778899aabb\n"))
+    assert(sbom.contains("Relationship: SPDXRef-root DEPENDS_ON SPDXRef-pkg-0\n"))
+}
+
+// Rust: tests/pkg.rs:6500
+#Test("sbom_cyclonedx_golden") {
+    lock :: make_test_lock("logger", "1.2.3", "sha256-deadbeef00112233445566778899aabbccddeeff00112233445566778899aabb")
+    sbom :: emit_cyclonedx(&lock, "myapp", "0.5.0")
+    assert(sbom.contains("\"bomFormat\": \"CycloneDX\""))
+    assert(sbom.contains("\"specVersion\": \"1.5\""))
+    assert(sbom.contains("\"name\": \"logger\""))
+    assert(sbom.contains("\"version\": \"1.2.3\""))
+    assert(sbom.contains("\"alg\": \"SHA-256\""))
+    assert(sbom.contains("deadbeef00112233445566778899aabbccddeeff00112233445566778899aabb"))
+}
+
+// Rust: tests/pkg.rs:6518
+#Test("audit_e2603_on_vulnerable_dep") {
+    lock :: make_test_lock("crypto-lib", "0.9.0", "sha256-aabb")
+    advisories :: [Advisory { id: "JET-2026-SEC-001", package: "crypto-lib", affected: VersionReq.parse("^0").unwrap(),
+        fixed: Some(SemVer.parse("0.9.5").unwrap()), title: "Timing side-channel in AES-GCM", severity: Severity.Critical }]
+    matches :: audit_lockfile(&lock, &advisories).unwrap()
+    assert_eq(matches.len(), 1, "one advisory match expected")
+    d :: &matches[0].diagnostic
+    assert_eq(d.code, "E2603")
+    assert(d.what.contains("JET-2026-SEC-001"))
+    assert(d.what.contains("crypto-lib"))
+    assert(d.what.contains("Timing side-channel"))
+    assert(d.what.contains("[critical]"), "severity must prefix the message")
+    assert_eq(matches[0].severity, Severity.Critical)
+}
+
+// Rust: tests/pkg.rs:6549
+#Test("audit_non_critical_is_advisory") {
+    lock :: make_test_lock("util-lib", "1.0.0", "sha256-ccdd")
+    advisories :: [Advisory { id: "JET-2026-INFO-1", package: "util-lib", affected: VersionReq.parse("^1").unwrap(),
+        fixed: Some(SemVer.parse("1.0.2").unwrap()), title: "Minor info leak in debug logs", severity: Severity.Low }]
+    matches :: audit_lockfile(&lock, &advisories).unwrap()
+    assert_eq(matches.len(), 1)
+    assert_eq(matches[0].severity, Severity.Low)
+    assert(matches.iter().all((m) -> m.severity != Severity.Critical))
+}
+
+// Rust: tests/pkg.rs:6572
+#Test("e1217_missing_locked_revision") {
+    raw :: manifest_with_deps("app", "0.1.0", "    greeter: ./greeter,")
+    tmp :: tmp_dir("e1217")
+    write(&tmp, "package.jet", &raw)
+    mf :: Manifest.parse(&tmp.join("package.jet"), &raw).unwrap()
+    empty_lock :: Lock.LockFile { version: 1, packages: [], root_dependencies: [], authority: None,
+        workspace_members: [], workspace_source_digest: None, workspace_overlay_policy: Default.default(),
+        comptime_inputs: [], toolchains: [], browsers: [], source_channels: [], build_stamp: None, build_contributions: [] }
+    diagnostic :: Lock.verify_all_manifest_deps_locked(&mf, &empty_lock).expect_err("missing locked revision must fail").diagnostic()
+    assert_eq(diagnostic.code, "E1217")
+    assert(diagnostic.what.contains("greeter"))
+    assert(diagnostic.why.contains("missing `package`"))
+    assert(diagnostic.fix.contains("fetch"))
+    assert(diagnostic.fix.contains(".jet/lock"))
+    good_lock :: make_test_lock("greeter", "0.1.0", "sha256-aabb")
+    assert(Lock.verify_all_manifest_deps_locked(&mf, &good_lock).is_ok())
+    _ :: fs.remove_dir_all(&tmp)
+}
+
+// Rust: tests/pkg.rs:6615
+#Test("e1218_breaking_change_under_minor_bump") {
+    old :: [ApiItem { kind: "fn", name: "parse", signature: "fn parse(raw: String) -> Int" }]
+    new: [ApiItem] :: []
+    breaking :: diff_public_api(&old, &new)
+    assert(!breaking.is_empty())
+    bump :: classify_bump(&SemVer.parse("1.0.0").unwrap(), &SemVer.parse("1.1.0").unwrap())
+    assert_eq(bump, BumpKind.Minor)
+    d :: e1218("1.0.0", "1.1.0", bump, &breaking[0], 2)
+    assert_eq(d.code, "E1218")
+    assert(d.what.contains("1.1.0"))
+    assert(d.fix.contains("2.0.0"), "fix must suggest a major bump")
+}
+
+// Rust: tests/pkg.rs:6642
+#Test("integrity_e2604_on_tampered_store") {
+    diag :: e2604("mylib", "1.0.0", "sha256-expected", "sha256-actual")
+    assert_eq(diag.code, "E2604")
+    assert(diag.what.contains("mylib"))
+    assert(diag.what.contains("1.0.0"))
+    assert(diag.why.contains("sha256-expected"))
+    assert(diag.why.contains("sha256-actual"))
+}
+
+// Rust: tests/pkg.rs:6654
+#Test("private_registry_from_env") {
+    environment :: ["JET_REGISTRY_INTERNAL_URL": "https://registry.acme.corp/jet"]
+    regs :: parse_registries_from_env(&environment)
+    assert(!regs.is_empty())
+    assert_eq(regs[0].name, "internal")
+    assert_eq(regs[0].url, "https://registry.acme.corp/jet")
+    assert(!regs[0].mirror)
+}
+
+// Rust: tests/pkg.rs:6669
+#Test("pre_publish_gate_blocks_on_build_failure") {
+    gate :: PrePublishGate { build_ok: false, tests_ok: true, breaking: [], version: "1.1.0", bump_kind: BumpKind.Minor, next_major: 2 }
+    assert(gate.is_blocked(), "failed build must block publish")
+}
+
+// Rust: tests/pkg.rs:6683
+#Test("pre_publish_gate_passes_with_no_breaks_and_minor_bump") {
+    gate :: PrePublishGate { build_ok: true, tests_ok: true, breaking: [], version: "1.1.0", bump_kind: BumpKind.Minor, next_major: 2 }
+    assert(!gate.is_blocked())
+    assert(gate.semver_errors().is_empty())
+}
+
+// Rust: tests/pkg.rs:6702
+#Test("cli_publish_refuses_dirty_git_tree") {
+    if !jet_bin().is_file() { eprintln("note: skipping cli_publish_refuses_dirty_git_tree (run `cargo build` first)"); return }
+    if !have_git() { eprintln("note: skipping cli_publish_refuses_dirty_git_tree (git not found)"); return }
+    tmp :: tmp_dir("pub_dirty")
+    store :: tmp.join("store")
+    fs.create_dir_all(&store).unwrap()
+    write(&tmp, "package.jet", &min_manifest("dirtypkg", "1.0.0"))
+    write(&tmp, "run.jet", "fn run() { print(\"hello\") }\n")
+    for cmd_args in [["init", "-b", "main"], ["config", "user.email", "test@jet.test"],
+        ["config", "user.name", "Jet Test"], ["add", "."], ["commit", "-m", "initial"]] {
+        _ :: Command.new("git").args(cmd_args).current_dir(&tmp).output().unwrap()
+    }
+    write(&tmp, "untracked.jet", "// dirty\n")
+    out :: jet_cmd(&["registry", "publish"], &tmp, &store)
+    assert(!out.status.success(), "jet registry publish must fail on a dirty tree")
+    stderr :: String.from_utf8_lossy(&out.stderr)
+    assert(stderr.contains("E2605"), "jet registry publish must cite E2605 for a dirty tree:\n{stderr}")
+    // Bogus local registry fails fast after the dirty-tree warning, without network.
+    cache :: tmp.join("cache")
+    bogus :: "file://{tmp.join(\"nonexistent.git\").to_str().unwrap()}"
+    out_force :: jet_cmd_env(&["registry", "publish", "--force"], &tmp,
+        &[("JET_PACKAGE_STORE_DIR", store.to_str().unwrap()), ("JET_REGISTRY_URL", bogus.as_str()), ("JET_REGISTRY_CACHE_DIR", cache.to_str().unwrap())])
+    stderr_force :: String.from_utf8_lossy(&out_force.stderr)
+    assert(stderr_force.contains("warning") && stderr_force.contains("uncommitted"), "jet registry publish --force must warn about uncommitted changes:\n{stderr_force}")
+    _ :: fs.remove_dir_all(&tmp)
+}
+
+// Rust: tests/pkg.rs:6782
+#Test("cli_publish_pushes_index_and_enforces_immutability_e1234") {
+    if !jet_bin().is_file() { eprintln("note: skipping cli_publish_pushes_index (run `cargo build` first)"); return }
+    if !have_git() { eprintln("note: skipping cli_publish_pushes_index (git not found)"); return }
+    tmp :: tmp_dir("pub_push")
+    proj :: tmp.join("proj")
+    fs.create_dir_all(&proj).unwrap()
+    bare :: tmp.join("registry.git")
+    url :: bare_registry(&bare)
+    cache :: tmp.join("cache")
+    store :: tmp.join("store")
+    fs.create_dir_all(&store).unwrap()
+    keys :: tmp.join("keys")
+    init_clean_project(&proj, "textkit", "1.2.0")
+    seed_core_review(&bare, "textkit", "1.2.0")
+    envs :: &[("JET_REGISTRY_URL", url.as_str()), ("JET_REGISTRY_CACHE_DIR", cache.to_str().unwrap()),
+        ("JET_PACKAGE_STORE_DIR", store.to_str().unwrap()), ("JET_KEYS_DIR", keys.to_str().unwrap())]
+    out :: jet_cmd_env(&["registry", "publish"], &proj, envs)
+    assert(out.status.success(), "publish should succeed:\n{String.from_utf8_lossy(&out.stderr)}")
+    index :: read_index_file(&bare, "textkit").expect("index file must exist in registry")
+    assert(index.contains("\"name\":\"textkit\""), "index line:\n{index}")
+    assert(index.contains("\"version\":\"1.2.0\""), "index line:\n{index}")
+    assert(index.contains("\"yanked\":false"), "index line:\n{index}")
+    entry :: index.lines().find_map(IndexEntry.parse_line).expect("published index line must parse")
+    referrer :: "referrers/{entry.content_hash}/index.json"
+    referrer_probe :: Command.new("git").args(["--git-dir", bare.to_str().unwrap(), "cat-file", "-e"])
+        .arg("HEAD:{referrer}").output().unwrap()
+    assert(referrer_probe.status.success(), "publish must commit the OCI referrer index at {referrer}")
+    // Commit the durable generated public API snapshot before republishing.
+    for cmd_args in [["add", "."], ["commit", "-m", "snapshot api"]] {
+        _ :: Command.new("git").args(cmd_args).current_dir(&proj).output().unwrap()
+    }
+    out2 :: jet_cmd_env(&["registry", "publish"], &proj, envs)
+    assert(!out2.status.success(), "republishing an existing version must fail")
+    stderr2 :: String.from_utf8_lossy(&out2.stderr)
+    assert(stderr2.contains("E1234"), "republish must cite E1234:\n{stderr2}")
+    _ :: fs.remove_dir_all(&tmp)
+}
+
+// Rust: tests/pkg.rs:6875
+#Test("cli_concurrent_publish_keeps_one_immutable_version") {
+    if !jet_bin().is_file() || !have_git() { eprintln("note: skipping cli_concurrent_publish (need built binary and git)"); return }
+    tmp :: tmp_dir("pub_concurrent")
+    left :: tmp.join("left")
+    right :: tmp.join("right")
+    bare :: tmp.join("registry.git")
+    url :: bare_registry(&bare)
+    cache :: tmp.join("cache")
+    keys :: tmp.join("keys")
+    fs.create_dir_all(&left).unwrap()
+    fs.create_dir_all(&right).unwrap()
+    init_clean_project(&left, "racekit", "1.0.0")
+    init_clean_project(&right, "racekit", "1.0.0")
+    write(&right, "run.jet", "#Test(\"smoke\") { expect(1 == 1) }\nfn run() { print(\"different bytes\") }\n")
+    for args in [["add", "."], ["commit", "-m", "different source"]] {
+        _ :: Command.new("git").args(args).current_dir(&right).output().unwrap()
+    }
+    seed_core_review(&bare, "racekit", "1.0.0")
+    keygen :: jet_cmd_env(&["registry", "keygen"], &left, &[("JET_KEYS_DIR", keys.to_str().unwrap())])
+    assert(keygen.status.success(), "shared publish keygen failed: {String.from_utf8_lossy(&keygen.stderr)}")
+    spawn :: (project: &OSPath, store: &OSPath) -> Command.new(jet_bin()).args(["registry", "publish"])
+        .current_dir(project).env("JET_REGISTRY_URL", &url).env("JET_REGISTRY_CACHE_DIR", &cache)
+        .env("JET_KEYS_DIR", &keys).env("JET_PACKAGE_STORE_DIR", store)
+        .stdout(Stdio.piped()).stderr(Stdio.piped()).spawn().unwrap()
+    left_child :: spawn(&left, &tmp.join("left-store"))
+    right_child :: spawn(&right, &tmp.join("right-store"))
+    left_output :: left_child.wait_with_output().unwrap()
+    right_output :: right_child.wait_with_output().unwrap()
+    outputs :: [&left_output, &right_output]
+    assert_eq(outputs.iter().filter((output) -> output.status.success()).count(), 1,
+        "exactly one concurrent immutable publish may win: left={left_output.status:?}, right={right_output.status:?}")
+    loser :: outputs.iter().find((output) -> !output.status.success()).expect("one concurrent publisher must lose")
+    assert(String.from_utf8_lossy(&loser.stderr).contains("E1234"),
+        "duplicate concurrent publish must report immutable-version error: {String.from_utf8_lossy(&loser.stderr)}")
+    index :: read_index_file(&bare, "racekit").expect("winning index entry must be published")
+    assert_eq(index.lines().filter((line) -> line.contains("\"version\":\"1.0.0\"")).count(), 1,
+        "concurrent publication must leave one immutable index line: {index}")
+    for path in ["artifacts/racekit/1.0.0/package.jet", "metadata/racekit.json", "transparency/log", "transparency/checkpoint"] {
+        output :: Command.new("git").args(["--git-dir", bare.to_str().unwrap(), "cat-file", "-e"]).arg("HEAD:{path}").output().unwrap()
+        assert(output.status.success(), "winning publish omitted {path}")
+    }
+    _ :: fs.remove_dir_all(&tmp)
+}
+
+// Rust: tests/pkg.rs:6982
+#Test("registry_fetch_installs_verified_artifact_in_hangar_and_locked_reuses_it") {
+    if !jet_bin().is_file() || !have_git() { eprintln("note: skipping registry_fetch_installs_verified_artifact (need built binary and git)"); return }
+    tmp :: tmp_dir("registry_fetch_hangar")
+    publisher :: tmp.join("publisher")
+    consumer :: tmp.join("consumer")
+    fs.create_dir_all(&publisher).unwrap()
+    fs.create_dir_all(&consumer).unwrap()
+    bare :: tmp.join("registry.git")
+    url :: bare_registry(&bare)
+    cache :: tmp.join("registry-cache")
+    store :: tmp.join("legacy-store")
+    hangar_root :: tmp.join("jetpack-root")
+    keys :: tmp.join("keys")
+    fs.create_dir_all(&store).unwrap()
+    init_clean_project(&publisher, "textkit", "1.2.0")
+    seed_core_review(&bare, "textkit", "1.2.0")
+    publish :: jet_cmd_env(&["registry", "publish"], &publisher,
+        &[("JET_REGISTRY_URL", url.as_str()), ("JET_REGISTRY_CACHE_DIR", cache.to_str().unwrap()),
+          ("JET_PACKAGE_STORE_DIR", store.to_str().unwrap()), ("JET_KEYS_DIR", keys.to_str().unwrap())])
+    assert(publish.status.success(), "registry publish failed:\n{String.from_utf8_lossy(&publish.stderr)}")
+    raw :: manifest_with_deps("consumer", "0.1.0", "    textkit: textkit#1.2.0,") + "\npolicy: { licenses: .Allow([\"MIT\"]), sources: { \"textkit\": [\"jet\"] } }\n"
+    write(&consumer, "package.jet", &raw)
+    manifest :: Manifest.parse(&consumer.join("package.jet"), &raw).unwrap()
+    opts :: Fetch.FetchOptions { locked: false, update: false, update_dep: None, resolution: ResolveMode.Conservative }
+    denied_raw :: manifest_with_deps("consumer", "0.1.0", "    textkit: textkit#1.2.0,") + "\npolicy: { licenses: .Allow([\"MIT\"]), sources: { \"textkit\": [\"other\"] } }\n"
+    denied_manifest :: Manifest.parse(&consumer.join("package.jet"), &denied_raw).expect("denied policy manifest parses")
+    denied :: with_store(&store, () -> {
+        previous :: [("JET_REGISTRY_URL", env.var_os("JET_REGISTRY_URL")), ("JET_REGISTRY_CACHE_DIR", env.var_os("JET_REGISTRY_CACHE_DIR")),
+            ("JET_KEYS_DIR", env.var_os("JET_KEYS_DIR")), ("JETPACK_ROOT", env.var_os("JETPACK_ROOT"))]
+        env.set_var("JET_REGISTRY_URL", &url)
+        env.set_var("JET_REGISTRY_CACHE_DIR", &cache)
+        env.set_var("JET_KEYS_DIR", &keys)
+        env.set_var("JETPACK_ROOT", &hangar_root)
+        result :: Fetch.fetch(&consumer, &denied_manifest, None, &opts)
+        for (key, value) in previous { if value is Some(v) { env.set_var(key, v) } else { env.remove_var(key) } }
+        result
+    }).expect_err("wrong source mapping must deny before Hangar ingest")
+    assert_eq(denied[0].code, "E1207")
+    assert(denied[0].what.contains("source authority"))
+    assert(denied[0].what.contains("consumer -> textkit#1.2.0"))
+    assert(denied[0].why.contains("package `consumer`"))
+    assert(denied[0].fix.contains("use an allowed source"))
+    assert(Store.list(&Store.Roots.at(hangar_root.clone())).into_iter().all((entry) -> !(entry.name == "textkit" && entry.version == "1.2.0")))
+    (lock, dep_dirs) :: with_store(&store, () -> {
+        previous :: [("JET_REGISTRY_URL", env.var_os("JET_REGISTRY_URL")), ("JET_REGISTRY_CACHE_DIR", env.var_os("JET_REGISTRY_CACHE_DIR")),
+            ("JET_KEYS_DIR", env.var_os("JET_KEYS_DIR")), ("JETPACK_ROOT", env.var_os("JETPACK_ROOT"))]
+        env.set_var("JET_REGISTRY_URL", &url)
+        env.set_var("JET_REGISTRY_CACHE_DIR", &cache)
+        env.set_var("JET_KEYS_DIR", &keys)
+        env.set_var("JETPACK_ROOT", &hangar_root)
+        result :: Fetch.fetch(&consumer, &manifest, None, &opts)
+        for (key, value) in previous { if value is Some(v) { env.set_var(key, v) } else { env.remove_var(key) } }
+        result.expect("verified registry fetch should succeed")
+    })
+    installed :: dep_dirs.get("textkit").expect("registry dep directory")
+    assert(installed.starts_with(hangar_root.join("hangar").join("objects")), "registry dependency must resolve from Hangar, got {installed.display()}")
+    assert(installed.join("package.jet").is_file())
+    assert(!installed.starts_with(&store), "registry dependency must not use the legacy path store")
+    lock_source :: lock.packages.iter().find((package) -> package.name == "textkit").expect("registry package must be locked")
+    assert(match &lock_source.source { Lock.LockSource.Registry { .. } -> true; _ -> false }, "registry dependency must retain registry lock identity")
+    hangar_entry :: Store.list(&Store.Roots.at(hangar_root.clone())).into_iter()
+        .find((entry) -> entry.name == "textkit" && entry.version == "1.2.0").expect("registry fetch must register immutable Hangar metadata")
+    assert_eq(hangar_entry.out.as_str(), installed.to_string_lossy().as_ref(), "Hangar metadata must point at the resolved output")
+    assert_eq(hangar_entry.cache_identity.source_fingerprint, lock_source.content_hash.as_deref().expect("registry lock must retain the source hash"))
+    assert(hangar_entry.envelope.provenance.contains("package=textkit#1.2.0"), "Hangar provenance must retain the immutable registry package identity")
+    assert(hangar_entry.envelope.provenance.contains("package-policy=package=textkit#1.2.0;license=MIT;source=jet;source-rule=textkit => [jet];fingerprint=sha256-"),
+        "Hangar provenance must retain the package policy receipt")
+    assert(hangar_entry.cache_identity.policy_fingerprint.starts_with("sha256-"), "Hangar cache identity must bind the package policy")
+    assert_eq(hangar_entry.cache_identity.policy_fingerprint, Publish.policy_fingerprint(&manifest.policy), "Hangar cache identity must use the canonical policy fingerprint")
+    assert(hangar_entry.envelope.provenance.contains("oci-referrers=subject="), "Hangar provenance must retain the verified OCI referrer receipt")
+    update_opts :: Fetch.FetchOptions { locked: false, update: true, update_dep: Some("textkit"), resolution: ResolveMode.Conservative }
+    _ :: with_store(&store, () -> {
+        previous :: [("JET_REGISTRY_URL", env.var_os("JET_REGISTRY_URL")), ("JET_REGISTRY_CACHE_DIR", env.var_os("JET_REGISTRY_CACHE_DIR")),
+            ("JET_KEYS_DIR", env.var_os("JET_KEYS_DIR")), ("JETPACK_ROOT", env.var_os("JETPACK_ROOT"))]
+        env.set_var("JET_REGISTRY_URL", &url)
+        env.set_var("JET_REGISTRY_CACHE_DIR", &cache)
+        env.set_var("JET_KEYS_DIR", &keys)
+        env.set_var("JETPACK_ROOT", &hangar_root)
+        result :: Fetch.fetch(&consumer, &manifest, Some(&lock), &update_opts)
+        for (key, value) in previous { if value is Some(v) { env.set_var(key, v) } else { env.remove_var(key) } }
+        result.expect("targeted registry update should preserve the verified package")
+    })
+    semantic_lock :: fs.read_to_string(consumer.join(".jet/lock")).unwrap()
+    assert(semantic_lock.contains("adapter-id = \"registry.pubgrub\""))
+    assert(semantic_lock.contains("update-command = \"jet update textkit\""))
+    assert(semantic_lock.contains("exact = \"textkit#1.2.0\""))
+    assert(semantic_lock.contains("package-policy=package=textkit#1.2.0;license=MIT;source=jet;source-rule=textkit => [jet];fingerprint=sha256-"),
+        "semantic lock must retain the matched source rule and policy receipt: {semantic_lock}")
+    assert(semantic_lock.contains("pattern = \"textkit\""))
+    assert(semantic_lock.contains("sources = [\"jet\"]"))
+    locked_opts :: Fetch.FetchOptions { locked: true, update: false, update_dep: None, resolution: ResolveMode.Conservative }
+    locked_dirs :: with_store(&store, () -> {
+        previous :: [("JET_REGISTRY_URL", env.var_os("JET_REGISTRY_URL")), ("JET_REGISTRY_CACHE_DIR", env.var_os("JET_REGISTRY_CACHE_DIR")),
+            ("JET_KEYS_DIR", env.var_os("JET_KEYS_DIR")), ("JETPACK_ROOT", env.var_os("JETPACK_ROOT"))]
+        env.set_var("JET_REGISTRY_URL", &url)
+        env.set_var("JET_REGISTRY_CACHE_DIR", &cache)
+        env.set_var("JET_KEYS_DIR", &keys)
+        env.set_var("JETPACK_ROOT", &hangar_root)
+        result :: Fetch.fetch(&consumer, &manifest, Some(&lock), &locked_opts)
+        for (key, value) in previous { if value is Some(v) { env.set_var(key, v) } else { env.remove_var(key) } }
+        result.expect("locked registry fetch should verify and reuse the published artifact").1
+    })
+    assert_eq(locked_dirs.get("textkit"), Some(installed), "locked consumption must resolve the same immutable Hangar object")
+    offline_registry_url :: "file://{tmp.display()}/must-not-be-read.git"
+    offline :: jet_cmd_env(&["fetch", "--offline"], &consumer,
+        &[("JET_REGISTRY_URL", offline_registry_url.as_str()), ("JET_REGISTRY_CACHE_DIR", cache.to_str().unwrap()),
+          ("JET_PACKAGE_STORE_DIR", store.to_str().unwrap()), ("JET_KEYS_DIR", keys.to_str().unwrap()), ("JETPACK_ROOT", hangar_root.to_str().unwrap())])
+    assert(offline.status.success(), "offline registry fetch must use the verified local lock path:\n{String.from_utf8_lossy(&offline.stderr)}")
+    make_tree_writable(&tmp)
+    fs.remove_dir_all(tmp).unwrap()
+}

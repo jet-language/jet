@@ -1,0 +1,318 @@
+// Private Jetpack.Store.Tests fragment; canonical original bodies are retained
+// at their inspected owners below, with explicit Rust name -> #Test mapping.
+// Only selected-platform and native representation fidelity gaps are repeated
+// here as replacements. Integration removes their superseded registrations.
+use core.sys.target
+
+// Rust: crates/jetpack/src/Store/Tests.rs:72
+// required_child_pipe_preserves_value_and_reports_missing_pipe ->
+// StoreIngest.jet:26 #Test("store required child pipe preserves value and reports missing pipe").
+// Rust: crates/jetpack/src/Store/Tests.rs:126
+// record_and_list_roundtrip -> StoreIntegration.jet:33 #Test("store record and list roundtrip").
+// Rust: crates/jetpack/src/Store/Tests.rs:158
+// abi_universe_isolation_keeps_native_closures_hangar_only -> StoreRoots.jet:67
+// #Test("store abi universe isolation keeps native closures hangar only").
+// Rust: crates/jetpack/src/Store/Tests.rs:301
+// clean_keeps_fresh_entries -> StoreRoots.jet:102 #Test("store clean keeps fresh entries").
+// Rust: crates/jetpack/src/Store/Tests.rs:332
+// clean_quarantines_malformed_objects_and_continues -> StoreRoots.jet:113
+// #Test("store clean quarantines malformed objects and continues").
+// Rust: crates/jetpack/src/Store/Tests.rs:366
+// lock_receipt_root_keeps_entry_reachable_without_other_root_facts -> StoreRoots.jet:153
+// #Test("store lock receipt root keeps entry reachable without other root facts").
+// Rust: crates/jetpack/src/Store/Tests.rs:411
+// lock_receipt_root_keeps_connected_closure_reachable -> StoreRoots.jet:173
+// #Test("store lock receipt root keeps connected closure reachable").
+// Rust: crates/jetpack/src/Store/Tests.rs:452
+// lock_receipt_identity_mismatch_fails_closed_before_cleanup -> StoreRoots.jet:191
+// #Test("store lock receipt identity mismatch fails closed before cleanup").
+// Rust: crates/jetpack/src/Store/Tests.rs:480
+// lock_receipt_version_mismatch_fails_closed_before_projection -> StoreRoots.jet:206
+// #Test("store lock receipt version mismatch fails closed before projection").
+// Rust: crates/jetpack/src/Store/Tests.rs:515
+// clean_sweeps_unreachable_receipt_objects -> StoreRoots.jet:221
+// #Test("store clean sweeps unreachable receipt objects").
+// Rust: crates/jetpack/src/Store/Tests.rs:536
+// malformed_project_lock_fails_closed_before_hangar_cleanup -> StoreRoots.jet:237
+// #Test("store malformed project lock fails closed before hangar cleanup").
+// Rust: crates/jetpack/src/Store/Tests.rs:571
+// committed_profile_generation_survives_lease_teardown_and_clean -> StoreRoots.jet:269
+// #Test("store committed profile generation survives lease teardown and clean").
+// Rust: crates/jetpack/src/Store/Tests.rs:621
+// profile_generation_root_keeps_transitive_closure_cycle_safely -> StoreRoots.jet:294
+// #Test("store profile generation root keeps transitive closure cycle safely").
+// Rust: crates/jetpack/src/Store/Tests.rs:662
+// external_consumer_root_resumes_exactly_and_never_rebinds -> StoreRoots.jet:314
+// #Test("store external consumer root resumes exactly and never rebinds");
+// store_test_nul_join preserves the embedded NUL in identity and digest bytes.
+// Rust: crates/jetpack/src/Store/Tests.rs:749
+// manual_external_root_is_typed_atomic_and_cas_bound -> StoreRoots.jet:352
+// #Test("store manual external root is typed atomic and cas bound").
+// Rust: crates/jetpack/src/Store/Tests.rs:883
+// manual_external_root_rejects_path_escape_and_unknown_reference -> StoreRoots.jet:407
+// #Test("store manual external root rejects path escape and unknown reference").
+// Rust: crates/jetpack/src/Store/Tests.rs:896
+// ids_differ_by_ref -> StoreIntegration.jet:50 #Test("store entry ids differ by ref").
+// Rust: crates/jetpack/src/Store/Tests.rs:903
+// id_omits_empty_version -> StoreIntegration.jet:54 #Test("store entry id omits empty version").
+// Rust: crates/jetpack/src/Store/Tests.rs:951
+// cache_candidate_preflight_does_not_read_closure_graph -> StoreCache.jet:5
+// #Test("store cache candidate preflight does not read closure graph").
+// Rust: crates/jetpack/src/Store/Tests.rs:975
+// verified_cache_rejects_wrong_platform_and_incomplete_proof -> StoreCache.jet:17
+// #Test("store verified cache rejects wrong platform and incomplete proof").
+// Rust: crates/jetpack/src/Store/Tests.rs:1051
+// closure_rejects_parent_traversal_to_sibling -> StoreCache.jet:46
+// #Test("store closure rejects parent traversal to sibling").
+// Rust: crates/jetpack/src/Store/Tests.rs:1082
+// nix_compat_output_fails_closed_without_native_store_authority -> StoreIntegration.jet:94
+// #Test("store nix compat output fails closed without native store authority").
+// Rust: crates/jetpack/src/Store/Tests.rs:1094
+// nix_external_output_projects_into_hangar_without_mutating_source -> StoreIntegration.jet:103
+// #Test("store nix external output projects into hangar without mutating source").
+// Rust: crates/jetpack/src/Store/Tests.rs:1116
+// nix_multi_output_lease_projects_binary_from_non_primary_output -> StoreCache.jet:63
+// #Test("store nix multi output lease projects binary from non primary output");
+// Linux projection assertion must use selected_os() == .Linux, not sys.os().
+// Rust: crates/jetpack/src/Store/Tests.rs:1216
+// hostile_out_pointer_never_quarantines_another_object -> StoreCache.jet:122
+// #Test("store hostile out pointer never quarantines another object").
+// Rust: crates/jetpack/src/Store/Tests.rs:1260
+// proven_digest_mismatch_still_quarantines_object -> StoreCache.jet:141
+// #Test("store proven digest mismatch still quarantines object").
+// Rust: crates/jetpack/src/Store/Tests.rs:1286
+// identity_only_quarantine_preserves_shared_cas_object -> StoreCache.jet:162
+// #Test("store identity only quarantine preserves shared cas object").
+// Rust: crates/jetpack/src/Store/Tests.rs:1357
+// quarantine_skips_concurrently_refreshed_record -> StoreCache.jet:209
+// #Test("store quarantine skips concurrently refreshed record").
+// Rust: crates/jetpack/src/Store/Tests.rs:1409
+// quarantine_skips_same_action_record_repaired_before_lock -> StoreCache.jet:230
+// #Test("store quarantine skips same action record repaired before lock").
+// Rust: crates/jetpack/src/Store/Tests.rs:1482
+// cache_lease_is_private_snapshot_without_long_object_lock -> StoreCache.jet:271
+// #Test("store cache lease is private snapshot without long object lock").
+// Rust: crates/jetpack/src/Store/Tests.rs:1551
+// realization_type_distinguishes_fresh_cached_and_missing_outputs -> StoreCache.jet:313
+// #Test("store realization type distinguishes fresh cached and missing outputs").
+// Rust: crates/jetpack/src/Store/Tests.rs:1730
+// configured_key_is_required_before_signature_verifier_runs -> StoreIntegration.jet:118
+// #Test("store configured key is required before signature verifier runs").
+
+// Rust: crates/jetpack/src/Store/Tests.rs:85
+#Test("open_snapshot_files_rejects_paths_outside_root_before_inspection") {
+    roots :: store_test_temp_roots()
+    snapshot_root :: files.join(roots.root, "snapshot")
+    outside :: files.join(roots.root, "outside/payload")
+    outside_dir :: files.join(roots.root, "outside-empty-dir")
+    files.create_dir_all(snapshot_root) ?? panic("snapshot root")
+    files.create_dir_all(files.dirname(outside)) ?? panic("outside directory")
+    files.create_dir_all(outside_dir) ?? panic("outside empty directory")
+    files.write(outside, "outside") ?? panic("outside payload")
+    opened := [SnapshotFile]{}
+    reject :: (path: String) -> {
+        if store_open_snapshot_files(snapshot_root, path, &opened) == {
+            .Ok(_) -> panic("outside snapshot path must be rejected")
+            .Err(error) -> {
+                assert(error == .InvalidInput(_)) // GATE #4409
+                assert_eq(error.message(), "snapshot path `{path}` is outside snapshot root `{snapshot_root}`")
+            }
+        }
+        assert(opened.is_empty())
+    }
+    reject(outside)
+    reject(outside_dir)
+    // GATE #4483: only the original Unix symlink arm is selected.
+    if target.selected_family() == .Unix {
+        outside_link :: files.join(roots.root, "outside-link")
+        files.symlink(outside, outside_link) ?? panic("outside symlink") // GATE #4494
+        reject(outside_link)
+        assert_eq(files.read_link(outside_link) ?? panic("read link"), outside)
+        assert_eq(files.read(outside) ?? panic("read payload"), "outside")
+    }
+    store_test_drop_roots(roots)
+}
+
+// Rust: crates/jetpack/src/Store/Tests.rs:554
+#Test("symlinked_project_lock_is_rejected_before_hangar_cleanup") {
+    if target.selected_family() != .Unix -> return // GATE #4483
+    roots :: store_test_temp_roots()
+    project :: files.join(roots.root, "project")
+    managed :: files.join(project, SOURCE_ROOT_DIR)
+    outside :: files.join(roots.root, "outside-lock")
+    files.create_dir_all(managed) ?? panic("managed directory")
+    files.write(outside, "version = 1\n") ?? panic("outside lock")
+    files.symlink(outside, files.join(managed, "lock")) ?? panic("symlink") // GATE #4494
+    if store_nearest_lock_path(project) == {
+        .Ok(_) -> panic("symlinked project lock must fail")
+        .Err(error) -> {
+            assert(error == .InvalidData(_)) // GATE #4409
+            assert(error.message().contains("is a symlink"))
+        }
+    }
+    store_test_drop_roots(roots)
+}
+
+// Rust: crates/jetpack/src/Store/Tests.rs:911
+#Test("verified_cache_rejects_deleted_and_tampered_outputs") {
+    verification := StoreVerification.new()
+    roots :: store_test_temp_roots()
+    entry :: store_test_ingest_fixture(&verification, roots, "verified-cache", [String: String]{"out": "trusted"}, [String]{}).entry
+    out :: entry.out
+    expectation :: store_test_expectation(out)
+    proof :: store_verify_cache_entry(&verification, roots, entry, entry.reference, expectation)
+    assert(!proof.signature_verified)
+    assert(proof.unsigned_local_allowed)
+    assert(store_test_verified(&verification, roots, entry.reference, expectation))
+    // GATE #4494: lstat root and original set_readonly(false) semantics, not 0644.
+    native_out :: OSPath.from_text(out)
+    stamp :: store_object_stamp(std.fs.symlink_metadata(native_out) ?? panic("root lstat"))
+    payload :: native_out.join("payload")
+    permissions := (std.fs.metadata(payload) ?? panic("payload metadata")).permissions()
+    &permissions.set_readonly(false)
+    std.fs.set_permissions(payload, permissions) ?? panic("payload permissions")
+    std.fs.write(payload, "tampered".bytes()) ?? panic("rewrite payload")
+    assert_eq(stamp, store_object_stamp(std.fs.symlink_metadata(native_out) ?? panic("root lstat")))
+    use_proof :: store_verify_cache_entry(&verification, roots, entry, entry.reference, expectation)
+    assert(!use_proof.output_digest)
+    assert(!use_proof.trusted())
+    assert(store_verify_hangar_object(&verification, roots, entry) == .Err(_))
+    root_permissions := (std.fs.metadata(native_out) ?? panic("root metadata")).permissions()
+    &root_permissions.set_readonly(false)
+    std.fs.set_permissions(native_out, root_permissions) ?? panic("root permissions")
+    std.fs.remove_dir_all(native_out) ?? panic("delete output")
+    assert(!store_test_verified(&verification, roots, entry.reference, expectation))
+    store_test_drop_roots(roots)
+}
+
+// Rust: crates/jetpack/src/Store/Tests.rs:1312
+#Test("unreadable_shared_cas_object_survives_quarantine") {
+    if target.selected_family() != .Unix -> return // GATE #4483
+    verification := StoreVerification.new()
+    roots :: store_test_temp_roots()
+    stale :: store_test_ingest_fixture(&verification, roots, "unreadable-stale", [String: String]{"out": "same"}, [String]{})
+    survivor :: store_test_ingest_fixture(&verification, roots, "unreadable-survivor", [String: String]{"out": "same"}, [String]{})
+    assert_eq(stale.entry.out, survivor.entry.out)
+    object :: stale.entry.out
+    payload :: OSPath.from_text(object).join("payload")
+    // GATE #4494: preserve the original complete native permissions value.
+    original_permissions :: (std.fs.metadata(payload) ?? panic("metadata")).permissions()
+    std.fs.set_permissions(payload, std.fs.Permissions.from_mode(0)) ?? panic("mode000")
+    assert(store_full_verified_output_hash(&verification, object, roots.hangar_dir(), false) == .Err(_))
+    mismatch := store_test_expectation(object)
+    mismatch.identity.source_fingerprint = "wrong-source"
+    store_quarantine_invalid_entry(&verification, roots, stale.entry, mismatch) ?? panic("quarantine")
+    assert(files.exists(object))
+    assert(store_find_by_reference(&verification, roots, stale.entry.reference) == None)
+    std.fs.set_permissions(payload, original_permissions) ?? panic("restore permissions")
+    graph :: store_closure_graph(&verification, roots) ?? panic("graph")
+    assert(!graph.records.has_key(stale.entry.id))
+    assert(graph.deleted_records.contains(stale.entry.id))
+    hit :: store_find_verified_by_reference(&verification, roots, survivor.entry.reference, store_test_expectation(object)) ?? panic("lookup")
+    verified :: hit ?? panic("survivor hit")
+    verified.lease.validate() ?? panic("validate lease")
+    verified.lease.release()
+    store_test_drop_roots(roots)
+}
+
+// Rust: crates/jetpack/src/Store/Tests.rs:1458
+#Test("quarantine_failure_restores_permissions_without_tombstone") {
+    if target.selected_family() != .Unix -> return // GATE #4483
+    verification := StoreVerification.new()
+    roots :: store_test_temp_roots()
+    entry :: store_test_ingest_fixture(&verification, roots, "restore", [String: String]{"out": "same"}, [String]{}).entry
+    hangar :: roots.hangar_dir()
+    files.write(files.join(hangar, "quarantine"), "blocks directory creation") ?? panic("block quarantine")
+    files.set_mode(hangar, 0o555) ?? panic("mode0555") // GATE #4494
+    mismatch := store_test_expectation(entry.out)
+    mismatch.identity.source_fingerprint = "wrong-source"
+    if store_quarantine_invalid_entry(&verification, roots, entry, mismatch) == {
+        .Ok(_) -> panic("blocked quarantine must fail")
+        .Err(error) -> assert(error == .InvalidData(_)) // GATE #4409
+    }
+    assert_eq((files.stat(hangar) ?? panic("metadata")).mode & 0o777, 0o555)
+    assert(files.exists(files.join(hangar, entry.id)))
+    files.set_mode(hangar, 0o755) ?? panic("mode0755")
+    assert(store_find_by_reference(&verification, roots, entry.reference) != None)
+    store_test_drop_roots(roots)
+}
+
+// Rust: crates/jetpack/src/Store/Tests.rs:1521
+#Test("lease_recovery_waits_for_descendant_then_reclaims_idle_container") {
+    if target.selected_family() != .Unix -> return // GATE #4483
+    verification := StoreVerification.new()
+    roots :: store_test_temp_roots()
+    ingested :: store_test_ingest_fixture(&verification, roots, "lease-tree", [String: String]{"out": "trusted"}, [String]{})
+    hit :: store_find_verified_by_reference(&verification, roots, ingested.entry.reference, store_test_expectation(ingested.entry.out)) ?? panic("lookup")
+    verified :: hit ?? panic("cache hit")
+    lease_root :: files.dirname(verified.lease.snapshot_root)
+    verified.lease.mark_process_handoff()
+    // GATE #4494: native child descendants inherit the actual handoff lifetime.
+    child := std.process.Command.new("/bin/sh").args([String]{"-c", "/bin/sleep 2 >/dev/null 2>&1 &"}).spawn() ?? panic("spawn")
+    _ :: &child.wait() ?? panic("wait")
+    verified.lease.release()
+    assert(files.exists(lease_root))
+    assert_eq(store_recover_hangar(&verification, roots) ?? panic("recover"), 0)
+    assert(files.exists(lease_root))
+    std.thread.sleep(std.time.Duration.from_secs(2))
+    assert_eq(store_recover_hangar(&verification, roots) ?? panic("recover"), 1)
+    assert(!files.exists(lease_root))
+    store_test_drop_roots(roots)
+}
+
+// Rust: crates/jetpack/src/Store/Tests.rs:1631
+#Test("leased_fd_view_executes_original_after_rename_symlink_swap") {
+    if target.selected_os() != .Linux -> return // GATE #4483
+    verification := StoreVerification.new()
+    roots :: store_test_temp_roots()
+    out :: files.join(roots.root, "fd-view-output")
+    tool :: files.join(out, "bin/tool")
+    files.create_dir_all(files.dirname(tool)) ?? panic("fixture directory")
+    files.write(files.join(out, "bin/tool-real"), "#!/bin/sh\nprintf trusted") ?? panic("trusted tool")
+    files.set_mode(files.join(out, "bin/tool-real"), 0o555) ?? panic("mode0555")
+    files.symlink("tool-real", tool) ?? panic("symlink") // GATE #4494
+    envelope :: Envelope.for_output(out, "fd-view@mine", "core-source")
+    store_record_verified(&verification, roots, "fd-view", "1", "fd-view@mine", out, files.join(out, "bin"), "", envelope, store_test_identity()) ?? panic("record")
+    hit :: store_find_verified_by_reference(&verification, roots, "fd-view@mine", store_test_expectation(out)) ?? panic("lookup")
+    verified :: hit ?? panic("cache hit")
+    lease :: verified.lease
+    projected_bin :: lease.projected_bin_dir() ?? panic("projected bin")
+    assert(projected_bin.starts_with("/proc/self/fd/"))
+    assert(!store_path_starts_with(projected_bin, out))
+    stable_tool :: lease.stable_path(tool) ?? panic("stable tool")
+    explicit_tool :: lease.executable_for(tool) ?? panic("explicit executable")
+    // GATE #4494: actual native child stdout bytes, not text-decoded receipts.
+    explicit :: std.process.Command.new(explicit_tool).output() ?? panic("execute")
+    assert_eq(explicit.stdout, "trusted".bytes())
+    assert(lease.executable_for(files.join(out, "bin/other-tool")) == None)
+    assert(lease.executable_for_command(files.join(out, "bin/other-tool")) == .Err(_))
+    moved :: files.join(roots.root, "fd-view-original")
+    attacker :: files.join(roots.root, "fd-view-attacker")
+    files.rename(out, moved) ?? panic("rename original")
+    files.create_dir_all(files.join(attacker, "bin")) ?? panic("attacker directory")
+    files.write(files.join(attacker, "bin/tool"), "#!/bin/sh\nprintf attacker") ?? panic("attacker tool")
+    files.set_mode(files.join(attacker, "bin/tool"), 0o755) ?? panic("mode0755")
+    files.symlink(attacker, out) ?? panic("swap")
+    lease.validate() ?? panic("validate lease")
+    confined :: lease.executable_for(tool) ?? panic("confined executable")
+    assert_eq((std.process.Command.new(confined).output() ?? panic("execute confined")).stdout, "trusted".bytes())
+    assert(lease.executable_for(files.join(attacker, "bin/tool")) == None)
+    wrapper :: lease.wrapper_dir() ?? panic("wrapper")
+    assert(files.set_mode(wrapper, 0o755) == .Err(_))
+    assert(files.remove(files.join(wrapper, "tool")) == .Err(_))
+    lease.validate() ?? panic("validate lease")
+    store_make_tree_writable_for_removal(lease.snapshot_root) ?? panic("writable snapshot")
+    snapshot_tool :: files.join(lease.snapshot_root, "bin/tool")
+    files.remove(snapshot_tool) ?? panic("remove snapshot tool")
+    files.write(snapshot_tool, "#!/bin/sh\nprintf snapshot-attacker") ?? panic("snapshot attacker")
+    files.set_mode(snapshot_tool, 0o755) ?? panic("mode0755")
+    output :: std.process.Command.new(stable_tool).output() ?? panic("execute stable")
+    assert(output.status.success())
+    assert_eq(String.from_bytes(output.stdout) ?? panic("UTF8 stdout"), "trusted")
+    nested :: std.process.Command.new("/bin/sh").args([String]{"-c", "exec tool"}).env("PATH", "{wrapper}:/usr/bin:/bin").output() ?? panic("nested")
+    assert(nested.status.success())
+    assert_eq(String.from_bytes(nested.stdout) ?? panic("UTF8 stdout"), "trusted")
+    assert_eq(files.read(files.join(out, "bin/tool")) ?? panic("read attacker"), "#!/bin/sh\nprintf attacker")
+    lease.release()
+    store_test_drop_roots(roots)
+}

@@ -1,0 +1,54 @@
+use jet_pkg_model.Lock.*
+use Jetpack.PackageModel.Tests.LockEnvelope.*
+use Jetpack.PackageModel.Tests.LockRoundTrip.pkg_lock_test_reported
+use jet.Diagnostics.render_all
+use core.files as files
+use std.[env, fs]
+// Existing substantive round-trip/atomicity tests are mapped in Lock03.jet.
+// These retain the original assertions missing from the canonical counterparts.
+
+// Rust: crates/jet-pkg-model/src/Lock.rs:5291
+#Test("oversized_lock_value_returns_corrupt_lock_diagnostic") {
+    raw :: "version = 1\nprovenance = \"{pkg_lock_test_repeat("x", PKG_MAX_LOCK_VALUE_BYTES)}\"\n"
+    diagnostic :: if pkg_lock_parse_with_path(raw, ".jet/lock") == {
+        .Ok(_) -> panic("an oversized lock value must stop parsing")
+        .Err(error) -> pkg_lock_test_reported(error)
+    }
+    assert_eq(diagnostic.code, "E1205")
+    rendered :: render_all(".jet/lock", "", [diagnostic])
+    // GATE #4494: manifest-root environment and real filesystem snapshot read.
+    snapshot :: OSPath.from(env.build_var("CARGO_MANIFEST_DIR")).join("../..")
+        .join("tests/fixtures/jetpack-diagnostics/E1205.stderr")
+    assert_eq(rendered, fs.read_to_string(snapshot).expect("E1205 fixture"))
+}
+
+// Rust: crates/jet-pkg-model/src/Lock.rs:5309
+#Test("bounded_lock_reader_rejects_oversized_line") {
+    scratch :: pkg_lock_test_project("lock-reader-kind")
+    path :: files.join(scratch.path, UNIFIED_LOCK_FILE)
+    files.write(path, "version = 1\n{pkg_lock_test_repeat("x", PKG_MAX_LOCK_VALUE_BYTES + 1)}\n") ?? panic("seed")
+    // Rust InvalidData maps to the canonical LockError.Invalid variant.
+    if pkg_lock_read_text(path) == {
+        .Ok(_) -> panic("oversized line must be rejected")
+        .Err(error) -> if error == {
+            .Invalid(message) -> assert(message.contains("1 MiB safety limit"))
+            else -> panic("expected invalid lock data, got {error.message()}")
+        }
+    }
+    assert_eq(pkg_lock_load(scratch.path), None)
+}
+
+// Rust: crates/jet-pkg-model/src/Lock.rs:5333
+#Test("bounded_lock_reader_rejects_oversized_file") {
+    scratch :: pkg_lock_test_project("lock-file-reader-kind")
+    path :: files.join(scratch.path, UNIFIED_LOCK_FILE)
+    files.write(path, "version = 1\n{pkg_lock_test_repeat("x\n", PKG_MAX_LOCK_BYTES /% 2 + 1)}") ?? panic("seed")
+    if pkg_lock_read_text(path) == {
+        .Ok(_) -> panic("oversized file must be rejected")
+        .Err(error) -> if error == {
+            .Invalid(message) -> assert(message.contains("lock file exceeds"))
+            else -> panic("expected invalid lock data, got {error.message()}")
+        }
+    }
+    assert_eq(pkg_lock_load(scratch.path), None)
+}

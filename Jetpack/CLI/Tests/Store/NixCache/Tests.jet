@@ -1,0 +1,138 @@
+// Canonical Store tests are retained, not redeclared. The three tests below
+// restore the assertions/fixtures reduced by the previous translation.
+use jet_foundation.[diagnostic_render_all]
+use jetpack.Store.[encode_zstd_deterministic]
+// GATE #4494: real native filesystem, crypto, compression and loopback cache.
+
+// Rust: crates/jetpack/src/Store/NixCache/Tests.rs:26
+// standard_narinfo_parses_real_zstd_and_distinct_hashes -> Store/Tests/NixCache.jet:239.
+// Rust: crates/jetpack/src/Store/NixCache/Tests.rs:36
+// standard_narinfo_defaults_to_bzip2_and_keeps_optional_hashes_optional -> Store/Tests/NixCache.jet:248.
+// Rust: crates/jetpack/src/Store/NixCache/Tests.rs:58
+// nix_narinfo_signature_matches_upstream_fingerprint -> Store/Tests/NixCache.jet:258.
+
+// Rust: crates/jetpack/src/Store/NixCache/Tests.rs:93
+#Test("native_nix_cache_streams_without_process_tools") {
+    source :: files.read("Jetpack/Store/Source/NixCache/NixCacheTransport.jet") ?? panic("native cache source")
+    assert(!source.contains("Command"))
+    assert(!source.contains("curl"))
+    assert(!source.contains("nix-store"))
+    root :: store_nix_test_unique_dir("stream")
+    files.create_dir_all(files.join(root, "bin")) ?? panic("bin")
+    payload := [U8]{}
+    loop _ in 0..<(128 * 1024) -> &payload.push(U8{120})
+    files.write_bytes(files.join(root, "bin/payload"), payload) ?? panic("payload")
+    encoded :: store_write_nar(root) ?? panic("write nar")
+    nar :: encoded.bytes
+    expected :: encoded.stats
+    assert(expected.bytes > 64 * 1024)
+    streaming := crypto.Hasher.new()
+    start := 0
+    loop start < nar.len() {
+        end :: if start + 73 < nar.len() -> start + 73 else -> nar.len()
+        &streaming.update(nar[start..<end])
+        start = end
+    }
+    assert_eq(streaming.digest(), store_sha256_hex(nar))
+    compressed :: encode_zstd_deterministic(nar) ?? panic("deterministic zstd")
+    assert_eq(zstd.decompress(compressed) ?? panic("zstd round trip"), nar)
+    destination :: "{root}.decoded"
+    actual :: store_read_nar_stream(store_nix_test_byte_source(nar, 65536), destination, expected.bytes) ?? panic("read nar")
+    assert_eq(actual, expected)
+    assert_eq((files.read_bytes(files.join(destination, "bin/payload")) ?? panic("decoded payload")).len(), 128 * 1024)
+    store_nix_test_remove_dir(root)
+    store_nix_test_remove_dir(destination)
+}
+
+// Rust: crates/jetpack/src/Store/NixCache/Tests.rs:130
+// native_nix_cache_recurses_and_admits_closure_atomically -> Store/Tests/NixCache.jet:304.
+// Rust: crates/jetpack/src/Store/NixCache/Tests.rs:267
+// native_nix_cache_shared_transitive_object_admits_twice_and_stores_once -> Store/Tests/NixCache.jet:372.
+// Rust: crates/jetpack/src/Store/NixCache/Tests.rs:571
+// native_nix_cache_pinned_repair_rejects_replacement_proof_before_publication -> Store/Tests/NixCache.jet:431.
+// Rust: crates/jetpack/src/Store/NixCache/Tests.rs:634
+// native_nix_cache_planning_skips_narinfo_for_a_fully_admitted_closure -> Store/Tests/NixCache.jet:476.
+// Rust: crates/jetpack/src/Store/NixCache/Tests.rs:667
+// native_nix_cache_admits_case_colliding_posix_names_with_stable_digest -> Store/Tests/NixCache.jet:495.
+// Rust: crates/jetpack/src/Store/NixCache/Tests.rs:703
+// native_nix_cache_admits_backslash_component_names -> Store/Tests/NixCache.jet:512.
+// Rust: crates/jetpack/src/Store/NixCache/Tests.rs:775
+// native_nix_cache_admits_sibling_store_relative_symlink_and_host_escape -> Store/Tests/NixCache.jet:546.
+// Rust: crates/jetpack/src/Store/NixCache/Tests.rs:898
+// native_nix_cache_admits_reregisters_and_reuses_file_root -> Store/Tests/NixCache.jet:578.
+// Rust: crates/jetpack/src/Store/NixCache/Tests.rs:933
+// native_nix_cache_memoizes_verified_digest_until_root_replacement -> Store/Tests/NixCache.jet:599.
+// Rust: crates/jetpack/src/Store/NixCache/Tests.rs:974
+// native_nix_cache_admits_and_reuses_a_symlink_root -> Store/Tests/NixCache.jet:627.
+// Rust: crates/jetpack/src/Store/NixCache/Tests.rs:1029
+// native_nix_cache_replaces_a_corrupt_existing_object -> Store/Tests/NixCache.jet:648.
+// Rust: crates/jetpack/src/Store/NixCache/Tests.rs:1069
+// native_nix_cache_sweeps_dead_stages_but_keeps_current_pid_stages -> Store/Tests/NixCache.jet:666.
+// Rust: crates/jetpack/src/Store/NixCache/Tests.rs:1094
+// native_nix_cache_reads_canonical_directories_symlinks_and_executables -> Store/Tests/NixCache.jet:686.
+// Rust: crates/jetpack/src/Store/NixCache/Tests.rs:1196
+// native_nix_cache_removes_a_readonly_partial_stream_tree -> Store/Tests/NixCache.jet:720.
+// Rust: crates/jetpack/src/Store/NixCache/Tests.rs:1242
+// native_nix_cache_registration_reports_the_failed_cas_condition -> Store/Tests/NixCache.jet:745.
+
+// Rust: crates/jetpack/src/Store/NixCache/Tests.rs:1365
+#Test("native_nix_cache_negative_inputs_fail_closed") {
+    verification := StoreVerification.new()
+    store_path :: "/nix/store/22222222222222222222222222222222-negative"
+    seed :: store_nix_test_seed(9)
+    wrong_seed :: store_nix_test_seed(10)
+    key_id :: "test-cache-1"
+    valid_nar :: store_nix_test_nar_with_directory_entries([[U8]]{})
+    invalid_magic_nar := [U8]{U8{9}, U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{0}}
+    &invalid_magic_nar.extend("not-a-nar".bytes())
+    loop _ in 0..<7 -> &invalid_magic_nar.push(U8{0})
+    _ :: store_nix_test_single_failure(&verification, "wrong-key", store_path, store_nix_test_signed_narinfo(store_path, "negative.nar", valid_nar, [String]{}, key_id, seed), valid_nar, wrong_seed, NixCacheErrorKind.Signature)
+
+    // Original deterministic frame and LAST-byte corruption, not a magic-byte
+    // substitute. Metadata hashes the exact uncorrupted deterministic frame.
+    compressed :: encode_zstd_deterministic(valid_nar) ?? panic("deterministic zstd")
+    zstd_info :: store_nix_test_signed_narinfo_with_payload(store_path, "negative.nar.zst", compressed, valid_nar, NixCompression.Zstd, [String]{}, key_id, seed)
+    corrupted := compressed.clone()
+    corruption_index :: corrupted.len() - 1
+    corrupted[corruption_index] = U8{Int.from_u8(corrupted[corruption_index]) ~| 1}
+    _ :: store_nix_test_single_failure(&verification, "compressed-corruption", store_path, zstd_info, corrupted, seed, NixCacheErrorKind.CompressedCorruption)
+
+    nar_error :: store_nix_test_single_failure(&verification, "nar-corruption", store_path, store_nix_test_signed_narinfo(store_path, "negative.nar", invalid_magic_nar, [String]{}, key_id, seed), invalid_magic_nar, seed, NixCacheErrorKind.NarCorruption)
+    assert(nar_error.message().contains(store_path))
+    assert(nar_error.message().contains("invalid magic"))
+    duplicate_nar :: store_nix_test_nar_with_directory_entries([[U8]]{"A".bytes(), "A".bytes()})
+    _ :: store_nix_test_single_failure(&verification, "duplicate-entry", store_path, store_nix_test_signed_narinfo(store_path, "duplicate.nar", duplicate_nar, [String]{}, key_id, seed), duplicate_nar, seed, NixCacheErrorKind.DuplicateEntry)
+    traversal_nar :: store_nix_test_nar_with_directory_entries([[U8]]{"..".bytes()})
+    _ :: store_nix_test_single_failure(&verification, "path-traversal", store_path, store_nix_test_signed_narinfo(store_path, "traversal.nar", traversal_nar, [String]{}, key_id, seed), traversal_nar, seed, NixCacheErrorKind.PathTraversal)
+    signed :: String.from_bytes(store_nix_test_signed_narinfo(store_path, "negative.nar", valid_nar, [String]{}, key_id, seed)) ?? panic("narinfo text")
+    url_traversal :: signed.replace("URL: nar/negative.nar\n", "URL: ../negative.nar\n")
+    _ :: store_nix_test_single_failure(&verification, "url-traversal", store_path, url_traversal.bytes(), valid_nar, seed, NixCacheErrorKind.PathTraversal)
+    reference :: "/nix/store/33333333333333333333333333333333-reference"
+    with_reference :: String.from_bytes(store_nix_test_signed_narinfo(store_path, "negative.nar", valid_nar, [String]{reference}, key_id, seed)) ?? panic("narinfo text")
+    duplicate_references :: with_reference.replace("References: 33333333333333333333333333333333-reference\n", "References: 33333333333333333333333333333333-reference 33333333333333333333333333333333-reference\n")
+    _ :: store_nix_test_single_failure(&verification, "duplicate-reference", store_path, duplicate_references.bytes(), valid_nar, seed, NixCacheErrorKind.DuplicateEntry)
+}
+
+// Rust: crates/jetpack/src/Store/NixCache/Tests.rs:1509
+#Test("native_nix_cache_failures_are_e1350_and_snapshot_pinned") {
+    error :: NixCacheError.new(NixCacheErrorKind.PathTraversal, "test")
+    assert_eq(error.code(), "E1350")
+    // Bind the original producer diagnostic, not a synthesized expected string.
+    rendered :: diagnostic_render_all("<nix-cache>", "", [Diagnostic]{error.diagnostic()}, false)
+    snapshot :: "tests/fixtures/jetpack-diagnostics/nix_cache_admission_failures.stderr"
+    if sys.var_os("UPDATE_EXPECT") != None -> files.write(snapshot, rendered) ?? panic("update diagnostic snapshot")
+    assert_eq(rendered, files.read(snapshot) ?? panic("missing Nix cache diagnostic snapshot"))
+    kinds :: [NixCacheErrorKind]{.Metadata, .WrongKey, .Signature, .Transport, .UnsupportedCompression, .CompressedCorruption, .NarCorruption, .MissingReference, .PathTraversal, .DuplicateEntry, .Admission}
+    loop kind in kinds -> assert_eq(NixCacheError.new(kind, "test").code(), "E1350")
+    cases :: [(detail: String, kind: NixCacheErrorKind)]{
+        (detail: "NAR stream directory contains duplicate names", kind: .DuplicateEntry),
+        (detail: "NAR name is not one safe path component", kind: .PathTraversal),
+        (detail: "zstd data corruption detected", kind: .CompressedCorruption),
+    }
+    loop case in cases {
+        // GATE #4409: original io::ErrorKind::InvalidData classification input.
+        io_error :: std.io.Error.new(.InvalidData, case.detail)
+        assert_eq(classify_nar_error(&io_error), case.kind)
+        assert_eq(NixCacheError.new(case.kind, case.detail).code(), "E1350")
+    }
+}

@@ -1,0 +1,562 @@
+// Rust: tests/image.rs:1
+use Jetpack.CLI.Tests.Integration.Image.*
+use common.Scratch
+use jet_env_model.ModuleEval.evaluate_env
+use jet.Diagnostics
+use core.sys
+use Core.Foundation.TEXT_NUL
+// GATE #4494: tests exercise actual filesystem, process, sockets and threads.
+use std.[fs, TcpListener, thread]
+
+// Rust: tests/image.rs:219
+#Test("committed_oci_image_example_field_checks_clean") {
+    path :: OSPath.from(env("CARGO_MANIFEST_DIR")).join("tests/fixtures/jetpack-typed/image.jet")
+    src :: fs.read_to_string(path) ?? panic("fixture")
+    plan :: evaluate_env(&src, path.parent().unwrap()) ?? panic("evaluate")
+    assert_eq(plan.images.len(), 1)
+    image :: &plan.images[0]
+    assert_eq(image.name, "server")
+    assert_eq(image.from, "server")
+    assert_eq(image.expose, [8080, 8443])
+    assert_eq(image.env_vars, [("RUST_LOG", "info")])
+    assert_eq(image.files, ["config/app.toml"])
+}
+
+// Rust: tests/image.rs:238
+#Test("committed_environment_image_example_field_checks_clean") {
+    path :: OSPath.from(env("CARGO_MANIFEST_DIR")).join("tests/fixtures/jetpack-typed/environment_image.jet")
+    src :: fs.read_to_string(path) ?? panic("fixture")
+    plan :: evaluate_env(&src, path.parent().unwrap()) ?? panic("evaluate")
+    assert_eq(plan.images.len(), 1)
+    image :: &plan.images[0]
+    assert(image.from_environment)
+    assert_eq(image.from, "dev")
+    assert_eq(image.target.as_deref(), Val("linux.arm64"))
+    assert_eq(image.user, Val(10001))
+    assert_eq(image.entrypoint.as_deref(), Val("/bin/sh"))
+    assert_eq(image.health.as_deref(), Val("test -x /bin/sh"))
+    assert_eq(image.expose, [8080])
+    assert_eq(image.files, ["config/app.toml"])
+}
+
+// Rust: tests/image.rs:259
+#Test("oci_from_library_source_is_rejected") {
+    scratch :: Scratch.new("library-rejected")
+    write_project(&scratch.path, "library", false)
+    src :: fs.read_to_string(scratch.path.join("env.jet")) ?? panic("env")
+    err :: evaluate_env(&src, &scratch.path).unwrap_err()
+    assert_eq(err.code, "E1267")
+    rendered :: Diagnostics.render_all("env.jet", &src, [&err])
+    assert(rendered.contains("non-executable package `app`"), rendered)
+    assert(rendered.contains("declared `library`"), rendered)
+}
+
+// Rust: tests/image.rs:278
+#Test("image_unknown_kind_is_e1266") {
+    src :: "module image.server { kind: .Docker, from: packages.app }"
+    err :: evaluate_env(src, &std.env.temp_dir()).unwrap_err()
+    assert_eq(err.code, "E1266")
+}
+
+// Rust: tests/image.rs:287
+#Test("oci_field_wrong_shape_is_e1269") {
+    scratch :: Scratch.new("field-shape")
+    write_project(&scratch.path, "executable", false)
+    src :: "module image.server { from: packages.app, expose: \"8080\" }"
+    err :: evaluate_env(src, &scratch.path).unwrap_err()
+    assert_eq(err.code, "E1269")
+}
+
+// Rust: tests/image.rs:296
+#Test("oci_expose_invalid_port_is_e1269") {
+    scratch :: Scratch.new("invalid-port")
+    write_project(&scratch.path, "executable", false)
+    src :: "module image.server { from: packages.app, expose: [0, 70000] }"
+    err :: evaluate_env(src, &scratch.path).unwrap_err()
+    assert_eq(err.code, "E1269")
+}
+
+// Rust: tests/image.rs:309
+#Test("image_builds_real_oci_layout") {
+    scratch :: Scratch.new("build-ok")
+    write_project(&scratch.path, "executable", true)
+    out :: jetpack().args(["image", "server"]).current_dir(&scratch.path).env("NO_COLOR", "1").output() ?? panic("image")
+    stderr :: String.from_utf8_lossy(&out.stderr)
+    assert_eq(out.status.code(), Val(0), "build should succeed: {stderr}")
+    assert(stderr.contains("built image `server`"), stderr)
+    out_dir :: scratch.path.join(".jet/images/server")
+    assert(out_dir.join("oci-layout").is_file())
+    assert(out_dir.join("index.json").is_file())
+    index :: fs.read_to_string(out_dir.join("index.json")) ?? panic("index")
+    assert(index.contains("application/vnd.oci.image.manifest.v1+json"))
+}
+
+// Rust: tests/image.rs:334
+#Test("image_build_is_reproducible_end_to_end") {
+    scratch :: Scratch.new("reproducible")
+    write_project(&scratch.path, "executable", true)
+    digest_of :: || -> {
+        out :: jetpack().args(["image", "server"]).current_dir(&scratch.path).env("NO_COLOR", "1").output() ?? panic("image")
+        assert_eq(out.status.code(), Val(0))
+        fs.read_to_string(scratch.path.join(".jet/images/server/index.json")) ?? panic("index")
+    }
+    a :: digest_of()
+    fs.remove_dir_all(scratch.path.join(".jet/images")) ?? panic("remove images")
+    b :: digest_of()
+    assert_eq(a, b, "same project must build byte-identical index.json")
+}
+
+// Rust: tests/image.rs:356
+#Test("image_push_copies_a_real_layout_and_refuses_conflicts") {
+    project :: Scratch.new("copy-layout-project")
+    destination_root :: Scratch.new("copy-layout-destination")
+    write_project(&project.path, "executable", true)
+    destination :: destination_root.path.join("published")
+    destination_ref :: "file://{destination.display()}"
+    out :: jetpack().args(["image", "server", "--push"]).arg(&destination_ref).current_dir(&project.path).env("NO_COLOR", "1").output() ?? panic("push")
+    stderr :: String.from_utf8_lossy(&out.stderr)
+    assert_eq(out.status.code(), Val(0), "copy should succeed: {stderr}")
+    source :: project.path.join(".jet/images/server")
+    assert_eq(fs.read(source.join("index.json")) ?? panic("source index"), fs.read(destination.join("index.json")) ?? panic("destination index"))
+    assert_eq(fs.read(source.join("oci-layout")) ?? panic("source layout"), fs.read(destination.join("oci-layout")) ?? panic("destination layout"))
+    source_blobs := (fs.read_dir(source.join("blobs/sha256")) ?? panic("source blobs")).map(entry -> (entry ?? panic("entry")).file_name()).collect()
+    destination_blobs := (fs.read_dir(destination.join("blobs/sha256")) ?? panic("destination blobs")).map(entry -> (entry ?? panic("entry")).file_name()).collect()
+    source_blobs.sort()
+    destination_blobs.sort()
+    assert_eq(source_blobs, destination_blobs)
+    fs.write(destination.join("index.json"), "conflicting layout".as_bytes()) ?? panic("conflict")
+    rejected :: jetpack().args(["image", "server", "--push"]).arg(&destination_ref).current_dir(&project.path).env("NO_COLOR", "1").output() ?? panic("push conflict")
+    rejected_stderr :: String.from_utf8_lossy(&rejected.stderr)
+    assert_eq(rejected.status.code(), Val(2), "conflicts must fail: {rejected_stderr}")
+    assert(rejected_stderr.contains("byte-identical"), rejected_stderr)
+    assert_eq(fs.read(destination.join("index.json")) ?? panic("conflict index"), "conflicting layout".as_bytes())
+}
+
+// Rust: tests/image.rs:411
+#Test("image_push_uses_the_real_oci_distribution_path") {
+    project :: Scratch.new("registry-project")
+    write_project(&project.path, "executable", true)
+    listener :: TcpListener.bind("127.0.0.1:0") ?? panic("bind")
+    port :: (listener.local_addr() ?? panic("local address")).port()
+    server :: thread.spawn(|| -> registry_test_server(^listener, 7))
+    reference :: "http://127.0.0.1:{port}/demo/server:1"
+    out :: jetpack().args(["image", "server", "--push"]).arg(&reference).current_dir(&project.path).env("NO_COLOR", "1").output() ?? panic("push")
+    stderr :: String.from_utf8_lossy(&out.stderr)
+    requests :: server.join() ?? panic("join server")
+    assert_eq(out.status.code(), Val(0), "registry push should succeed: {stderr}")
+    assert_eq(requests.len(), 7, "requests: {requests:?}")
+    assert_eq(requests.iter().filter(request -> request.0 == "HEAD").count(), 2)
+    assert_eq(requests.iter().filter(request -> request.0 == "POST").count(), 2)
+    assert_eq(requests.iter().filter(request -> request.0 == "PUT" && request.1.starts_with("/test-upload")).count(), 2)
+    manifest :: requests.iter().find(request -> request.0 == "PUT" && request.1.contains("/manifests/1")) ?? panic("manifest PUT")
+    assert(manifest.2.windows("schemaVersion".len()).any(window -> window == "schemaVersion".as_bytes()))
+    assert(stderr.contains("published"), stderr)
+}
+
+// Rust: tests/image.rs:467
+#Test("image_registry_missing_tool_fails_before_claiming_publish") {
+    project :: Scratch.new("registry-missing-tool")
+    empty_path :: Scratch.new("registry-empty-path")
+    write_project(&project.path, "executable", true)
+    out :: jetpack().args(["image", "server", "--push", "http://127.0.0.1:9/demo/server:1"]).current_dir(&project.path).env("NO_COLOR", "1").env("PATH", &empty_path.path).output() ?? panic("push")
+    stderr :: String.from_utf8_lossy(&out.stderr)
+    assert_eq(out.status.code(), Val(2))
+    assert(stderr.contains("OCI registry adapter could not start"), stderr)
+    assert(stderr.contains("couldn't publish image"), stderr)
+}
+
+// Rust: tests/image.rs:496
+#Test("environment_image_uses_realized_package_output") {
+    project :: Scratch.new("environment-store")
+    root :: Scratch.new("environment-store-root")
+    fs.write(project.path.join("env.jet"), "module env.dev { packages: [\"bash@nixpkgs\"] }\nmodule image.server { from: env.dev }\n") ?? panic("env")
+    ingest_executable(&root.path, "bash", "bash@nixpkgs", "bash")
+    out :: jetpack().args(["image", "server"]).current_dir(&project.path).env("JETPACK_ROOT", &root.path).env("NO_COLOR", "1").output() ?? panic("image")
+    stderr :: String.from_utf8_lossy(&out.stderr)
+    assert_eq(out.status.code(), Val(0), "image should use Hangar output: {stderr}")
+    report :: fs.read_to_string(project.path.join(".jet/images/server/projection.json")) ?? panic("report")
+    assert(report.contains("package:bash@nixpkgs"), "projection: {report}")
+    assert(!project.path.join(".jet/build").exists())
+    image :: project.path.join(".jet/images/server")
+    layer :: image_layer(&image)
+    shell :: ("bin/sh" + TEXT_NUL).as_bytes()
+    assert(layer.windows(shell.len()).any(window -> window == shell))
+    assert(!image_blob_containing(&image, "\"User\":\"10001\"".as_bytes()).is_empty())
+    plan :: fs.read_to_string(image.join("plan.json")) ?? panic("plan")
+    assert(plan.contains("\"source\":\"env:dev\""), "plan: {plan}")
+    assert(plan.contains("\"entrypoint\":[\"/bin/sh\"]"), "plan: {plan}")
+    assert(plan.contains("\"platform\":\"linux.x64\""), "plan: {plan}")
+    assert(plan.contains("\"user\":10001"), "plan: {plan}")
+    assert(plan.contains("\"expose\":[]"), "plan: {plan}")
+    assert(plan.contains("\"healthcheck\":false"), "plan: {plan}")
+    assert(plan.contains("\"services\":[]"), "plan: {plan}")
+    assert(plan.contains("\"content\":\"Hangar\""), "plan: {plan}")
+    assert(plan.contains("\"cache\":\"Hangar\""), "plan: {plan}")
+    assert(plan.contains("\"archive\":\"Hangar\""), "plan: {plan}")
+    assert(plan.contains("\"signing\":\"Hangar\""), "plan: {plan}")
+    assert(plan.contains("\"provenance\":\"Hangar+.jet/lock\""), "plan: {plan}")
+    assert(plan.contains("\"inputs\":\".jet/lock\""), "plan: {plan}")
+    assert(plan.contains("\"platforms\":\".jet/lock\""), "plan: {plan}")
+    assert(plan.contains("\"publish\":\"Hangar\""), "plan: {plan}")
+    assert(plan.contains("\"remote\":\"D-JPK-REMOTE1\""), "plan: {plan}")
+    dossier :: fs.read_to_string(image.join("dossier.json")) ?? panic("dossier")
+    assert(dossier.contains("runtime-mount-or-reference-only"), "dossier: {dossier}")
+}
+
+// Rust: tests/image.rs:567
+#Test("environment_image_projects_explicit_extra_file_reproducibly") {
+    project :: Scratch.new("environment-extra-file")
+    root :: Scratch.new("environment-extra-file-root")
+    fs.create_dir_all(project.path.join("config")) ?? panic("config dir")
+    fs.write(project.path.join("env.jet"), "module env.dev { packages: [\"bash@nixpkgs\"] }\nmodule image.server { from: env.dev, files: [\"config/app.toml\"] }\n") ?? panic("env")
+    fs.write(project.path.join("config/app.toml"), "port = 8080\n".as_bytes()) ?? panic("extra file")
+    ingest_executable(&root.path, "bash", "bash@nixpkgs", "bash")
+    build :: || -> {
+        out :: jetpack().args(["image", "server"]).current_dir(&project.path).env("JETPACK_ROOT", &root.path).env("NO_COLOR", "1").output() ?? panic("image")
+        assert_eq(out.status.code(), Val(0), String.from_utf8_lossy(&out.stderr))
+        fs.read_to_string(project.path.join(".jet/images/server/index.json")) ?? panic("index")
+    }
+    first :: build()
+    image :: project.path.join(".jet/images/server")
+    report :: fs.read_to_string(image.join("projection.json")) ?? panic("report")
+    assert(report.contains("file:config/app.toml"), "projection: {report}")
+    plan :: fs.read_to_string(image.join("plan.json")) ?? panic("plan")
+    assert(plan.contains("config/app.toml"), "plan: {plan}")
+    assert(image_layer(&image).windows("port = 8080\n".len()).any(window -> window == "port = 8080\n".as_bytes()))
+    fs.remove_dir_all(project.path.join(".jet/images")) ?? panic("remove images")
+    second :: build()
+    assert_eq(first, second, "extra-file projection must preserve image identity")
+}
+
+// Rust: tests/image.rs:618
+#Test("environment_image_rejects_public_managed_extra_file") {
+    project :: Scratch.new("environment-managed-file")
+    root :: Scratch.new("environment-managed-file-root")
+    fs.create_dir_all(project.path.join("config")) ?? panic("config dir")
+    fs.write(project.path.join("env.jet"), "module env.dev {\n    packages: [\"bash@nixpkgs\"]\n    files: [\"config/generated.txt\": File{ content: \"managed\\n\", mode: .Copy }]\n}\nmodule image.server { from: env.dev, files: [\"config/generated.txt\"] }\n") ?? panic("env")
+    fs.write(project.path.join("config/generated.txt"), "project\n".as_bytes()) ?? panic("generated file")
+    ingest_executable(&root.path, "bash", "bash@nixpkgs", "bash")
+    out :: jetpack().args(["image", "server"]).current_dir(&project.path).env("JETPACK_ROOT", &root.path).env("NO_COLOR", "1").output() ?? panic("image")
+    stderr :: String.from_utf8_lossy(&out.stderr)
+    assert_eq(out.status.code(), Val(2), stderr)
+    assert(stderr.contains("E1336"), "stderr: {stderr}")
+    assert(stderr.contains("managed environment files"), "stderr: {stderr}")
+    report :: fs.read_to_string(project.path.join(".jet/images/server/projection.json")) ?? panic("report")
+    assert(report.contains("file:config/generated.txt"), "projection: {report}")
+    assert(report.contains("\"rejected\""), "projection: {report}")
+    assert(!project.path.join(".jet/images/server/blobs").exists())
+}
+
+// Rust: tests/image.rs:660
+#Test("environment_image_rejects_extra_file_path_conflict") {
+    project :: Scratch.new("environment-file-conflict")
+    root :: Scratch.new("environment-file-conflict-root")
+    fs.create_dir_all(project.path.join("bin")) ?? panic("bin dir")
+    fs.write(project.path.join("env.jet"), "module env.dev { packages: [\"bash@nixpkgs\"] }\nmodule image.server { from: env.dev, files: [\"bin/sh\"] }\n") ?? panic("env")
+    fs.write(project.path.join("bin/sh"), "project shell\n".as_bytes()) ?? panic("shell")
+    ingest_executable(&root.path, "bash", "bash@nixpkgs", "bash")
+    out :: jetpack().args(["image", "server"]).current_dir(&project.path).env("JETPACK_ROOT", &root.path).env("NO_COLOR", "1").output() ?? panic("image")
+    stderr :: String.from_utf8_lossy(&out.stderr)
+    assert_eq(out.status.code(), Val(2), stderr)
+    assert(stderr.contains("E1336"), "stderr: {stderr}")
+    assert(stderr.contains("conflicts"), "stderr: {stderr}")
+    report :: fs.read_to_string(project.path.join(".jet/images/server/projection.json")) ?? panic("report")
+    assert(report.contains("file:bin/sh"), "projection: {report}")
+    assert(report.contains("\"rejected\""), "projection: {report}")
+    assert(!project.path.join(".jet/images/server/blobs").exists())
+}
+
+// Rust: tests/image.rs:691
+#Test("environment_image_projects_named_environment_not_default") {
+    project :: Scratch.new("environment-selection")
+    root :: Scratch.new("environment-selection-root")
+    fs.write(project.path.join("env.jet"), "module env.dev { packages: [\"bash@nixpkgs\"] }\nmodule env.full { packages: [\"sh@nixpkgs\"] }\nmodule image.server { from: env.full, target: linux.arm64 }\n") ?? panic("env")
+    ingest_executable(&root.path, "bash", "bash@nixpkgs", "bash")
+    ingest_executable_for_platform(&root.path, "sh", "sh@nixpkgs", "sh", "aarch64-linux")
+    out :: jetpack().args(["image", "server"]).current_dir(&project.path).env("JETPACK_ROOT", &root.path).env("NO_COLOR", "1").output() ?? panic("image")
+    assert_eq(out.status.code(), Val(0), String.from_utf8_lossy(&out.stderr))
+    report :: fs.read_to_string(project.path.join(".jet/images/server/projection.json")) ?? panic("report")
+    assert(report.contains("package:sh@nixpkgs"), "projection: {report}")
+    assert(!report.contains("package:bash@nixpkgs"), "projection: {report}")
+    assert(report.contains("platform:linux.arm64"), "projection: {report}")
+    assert(!image_blob_containing(&project.path.join(".jet/images/server"), "\"architecture\":\"arm64\"".as_bytes()).is_empty())
+}
+
+// Rust: tests/image.rs:737
+#Test("environment_image_requires_a_realized_shell_package") {
+    project :: Scratch.new("environment-no-shell")
+    root :: Scratch.new("environment-no-shell-root")
+    fs.write(project.path.join("env.jet"), "module env.dev { packages: [\"tool@nixpkgs\"] }\nmodule image.server { from: env.dev }\n") ?? panic("env")
+    ingest_executable(&root.path, "tool", "tool@nixpkgs", "tool")
+    out :: jetpack().args(["image", "server"]).current_dir(&project.path).env("JETPACK_ROOT", &root.path).env("NO_COLOR", "1").output() ?? panic("image")
+    stderr :: String.from_utf8_lossy(&out.stderr)
+    assert_eq(out.status.code(), Val(2))
+    assert(stderr.contains("E1336"), "stderr: {stderr}")
+    assert(stderr.contains("no shell"), "stderr: {stderr}")
+}
+
+// Rust: tests/image.rs:761
+#Test("environment_image_rejects_hangar_platform_mismatch") {
+    project :: Scratch.new("environment-platform-mismatch")
+    root :: Scratch.new("environment-platform-mismatch-root")
+    fs.write(project.path.join("env.jet"), "module env.dev { packages: [\"bash@nixpkgs\"] }\nmodule image.server { from: env.dev, target: linux.arm64 }\n") ?? panic("env")
+    ingest_executable_for_platform(&root.path, "bash", "bash@nixpkgs", "bash", "x86_64-linux")
+    out :: jetpack().args(["image", "server"]).current_dir(&project.path).env("JETPACK_ROOT", &root.path).env("NO_COLOR", "1").output() ?? panic("image")
+    stderr :: String.from_utf8_lossy(&out.stderr)
+    assert_eq(out.status.code(), Val(2), stderr)
+    assert(stderr.contains("E1336"), "stderr: {stderr}")
+    assert(stderr.contains("platform"), "stderr: {stderr}")
+    report :: fs.read_to_string(project.path.join(".jet/images/server/projection.json")) ?? panic("report")
+    assert(report.contains("\"rejected\""), "projection: {report}")
+}
+
+// Rust: tests/image.rs:788
+#Test("environment_image_rejects_an_unsupported_integration_host") {
+    project :: Scratch.new("environment-unsupported-host")
+    fs.write(project.path.join("env.jet"), "module env.dev { imports: [env.platform.apple()] }\nmodule image.server { from: env.dev }\n") ?? panic("env")
+    out :: jetpack().args(["image", "server"]).current_dir(&project.path).env("NO_COLOR", "1").output() ?? panic("image")
+    stderr :: String.from_utf8_lossy(&out.stderr)
+    assert_eq(out.status.code(), Val(2), "unsupported hosts must fail: {stderr}")
+    assert(stderr.contains("E1333"), stderr)
+    assert(stderr.contains("not supported on target"), stderr)
+    report :: fs.read_to_string(project.path.join(".jet/images/server/projection.json")) ?? panic("report")
+    assert(report.contains("integration:apple:host"), "projection: {report}")
+}
+
+// Rust: tests/image.rs:818
+#Test("environment_image_omits_cloud_and_vault_facts_without_secret_names") {
+    project :: Scratch.new("environment-secret-integrations")
+    root :: Scratch.new("environment-secret-integrations-root")
+    fs.write(project.path.join("env.jet"), "module env.dev {\n    packages: [\"bash@nixpkgs\"]\n    imports: [\n        env.cloud.credentials([aws_production]),\n        env.security.vault([database_password])\n    ]\n}\nmodule image.server { from: env.dev }\n") ?? panic("env")
+    ingest_executable(&root.path, "bash", "bash@nixpkgs", "bash")
+    out :: jetpack().args(["image", "server"]).current_dir(&project.path).env("JETPACK_ROOT", &root.path).env("NO_COLOR", "1").output() ?? panic("image")
+    assert_eq(out.status.code(), Val(0), "image should project the environment successfully: {String.from_utf8_lossy(&out.stderr)}")
+    report :: fs.read_to_string(project.path.join(".jet/images/server/projection.json")) ?? panic("report")
+    assert(report.contains("integration:cloud-credentials:activation"))
+    assert(report.contains("integration:cloud-credentials:task:credential-store-check"))
+    assert(report.contains("integration:cloud-credentials:provider:credential-store"))
+    assert(report.contains("integration:cloud-credentials:grant:credential.read"))
+    assert(report.contains("integration:vault:activation"))
+    assert(report.contains("integration:vault:task:vault-check"))
+    assert(report.contains("integration:vault:provider:vault"))
+    assert(report.contains("integration:vault:grant:vault.read"))
+    assert(report.contains("integration:cloud-credentials:secret-refs=1"))
+    assert(report.contains("integration:vault:secret-refs=1"))
+    assert(!report.contains("aws_production"), "secret name leaked: {report}")
+    assert(!report.contains("database_password"), "secret name leaked: {report}")
+    image :: project.path.join(".jet/images/server")
+    for blob in fs.read_dir(image.join("blobs/sha256")) ?? panic("blobs") {
+        bytes :: fs.read((blob ?? panic("entry")).path()) ?? panic("blob")
+        assert(!bytes.windows("aws_production".len()).any(window -> window == "aws_production".as_bytes()))
+        assert(!bytes.windows("database_password".len()).any(window -> window == "database_password".as_bytes()))
+    }
+}
+
+// Rust: tests/image.rs:882
+#Test("environment_image_rejects_secret_extra_file") {
+    project :: Scratch.new("environment-secret-file")
+    root :: Scratch.new("environment-secret-file-root")
+    fs.write(project.path.join("env.jet"), "module env.dev {\n    packages: [\"bash@nixpkgs\"]\n    dotenv: [Dotenv{ file: \".env\", allow: [\"TOKEN\"], secrets: [\"TOKEN\"] }]\n}\nmodule image.server { from: env.dev, files: [\".env\"] }\n") ?? panic("env")
+    fs.write(project.path.join(".env"), "TOKEN=super-secret-value\n".as_bytes()) ?? panic("dotenv")
+    ingest_executable(&root.path, "bash", "bash@nixpkgs", "bash")
+    out :: jetpack().args(["image", "server"]).current_dir(&project.path).env("JETPACK_ROOT", &root.path).env("NO_COLOR", "1").output() ?? panic("image")
+    stderr :: String.from_utf8_lossy(&out.stderr)
+    assert_eq(out.status.code(), Val(2), stderr)
+    assert(stderr.contains("E1336"), "stderr: {stderr}")
+    assert(!stderr.contains("super-secret-value"), "secret leaked: {stderr}")
+    report :: fs.read_to_string(project.path.join(".jet/images/server/projection.json")) ?? panic("report")
+    assert(report.contains("file:.env"), "projection: {report}")
+    assert(!report.contains("super-secret-value"), "secret leaked: {report}")
+    blobs :: fs.read_dir(project.path.join(".jet/images/server/blobs/sha256"))
+    if blobs.is_ok() {
+        for blob in blobs.unwrap() {
+            bytes :: fs.read((blob ?? panic("entry")).path()) ?? panic("blob")
+            assert(!bytes.windows("super-secret-value".len()).any(window -> window == "super-secret-value".as_bytes()))
+        }
+    }
+}
+
+// Rust: tests/image.rs:930
+#Test("environment_image_rejects_project_escape_layer_path") {
+    project :: Scratch.new("environment-layer-path")
+    root :: Scratch.new("environment-layer-path-root")
+    fs.write(project.path.join("env.jet"), "module env.dev { packages: [\"bash@nixpkgs\"] }\nmodule image.server { from: env.dev, files: [\"../outside\"] }\n") ?? panic("env")
+    ingest_executable(&root.path, "bash", "bash@nixpkgs", "bash")
+    out :: jetpack().args(["image", "server"]).current_dir(&project.path).env("JETPACK_ROOT", &root.path).env("NO_COLOR", "1").output() ?? panic("image")
+    stderr :: String.from_utf8_lossy(&out.stderr)
+    assert_eq(out.status.code(), Val(2), "unsafe layer path must fail: {stderr}")
+    assert(stderr.contains("safe project-relative paths"), "stderr: {stderr}")
+    report :: fs.read_to_string(project.path.join(".jet/images/server/projection.json")) ?? panic("report")
+    assert(report.contains("file:../outside"), "projection: {report}")
+    assert(report.contains("\"rejected\""), "projection: {report}")
+}
+
+// Rust: tests/image.rs:965
+#Test("environment_image_rejects_symlinked_extra_file") {
+    // GATE #4483: original test is Unix-only; #4494 real symlink primitive.
+    if sys.target.selected_family() == "unix" {
+        project :: Scratch.new("environment-image-symlink-file")
+        root :: Scratch.new("environment-image-symlink-root")
+        outside :: Scratch.new("environment-image-symlink-outside")
+        fs.write(project.path.join("env.jet"), "module env.dev { packages: [\"bash@nixpkgs\"] }\nmodule image.server { from: env.dev, files: [\"payload.bin\"] }\n") ?? panic("env")
+        fs.write(outside.path.join("payload.bin"), "must not be read\n".as_bytes()) ?? panic("outside")
+        fs.symlink(outside.path.join("payload.bin"), project.path.join("payload.bin")) ?? panic("symlink")
+        ingest_executable(&root.path, "bash", "bash@nixpkgs", "bash")
+        out :: jetpack().args(["image", "server"]).current_dir(&project.path).env("JETPACK_ROOT", &root.path).env("NO_COLOR", "1").output() ?? panic("image")
+        stderr :: String.from_utf8_lossy(&out.stderr)
+        assert_eq(out.status.code(), Val(2), "symlinked image file must fail: {stderr}")
+        assert(stderr.contains("not a symlink") || stderr.contains("symlink"), "stderr: {stderr}")
+        assert_eq(fs.read_to_string(outside.path.join("payload.bin")) ?? panic("outside read"), "must not be read\n")
+    }
+}
+
+// Rust: tests/image.rs:1009
+#Test("environment_image_rejects_hardlinked_extra_file") {
+    if sys.target.selected_family() == "unix" {
+        project :: Scratch.new("environment-image-hardlink-file")
+        root :: Scratch.new("environment-image-hardlink-root")
+        outside :: Scratch.new("environment-image-hardlink-outside")
+        fs.write(project.path.join("env.jet"), "module env.dev { packages: [\"bash@nixpkgs\"] }\nmodule image.server { from: env.dev, files: [\"payload.bin\"] }\n") ?? panic("env")
+        fs.write(outside.path.join("payload.bin"), "must not be read\n".as_bytes()) ?? panic("outside")
+        fs.hard_link(outside.path.join("payload.bin"), project.path.join("payload.bin")) ?? panic("hard link")
+        ingest_executable(&root.path, "bash", "bash@nixpkgs", "bash")
+        out :: jetpack().args(["image", "server"]).current_dir(&project.path).env("JETPACK_ROOT", &root.path).env("NO_COLOR", "1").output() ?? panic("image")
+        stderr :: String.from_utf8_lossy(&out.stderr)
+        assert_eq(out.status.code(), Val(2), "hardlinked image file must fail: {stderr}")
+        assert(stderr.contains("hard link"), "stderr: {stderr}")
+        assert_eq(fs.read_to_string(outside.path.join("payload.bin")) ?? panic("outside read"), "must not be read\n")
+    }
+}
+
+// Rust: tests/image.rs:1048
+#Test("environment_image_rejects_symlinked_ancestor_extra_file") {
+    if sys.target.selected_family() == "unix" {
+        project :: Scratch.new("environment-image-symlink-ancestor-file")
+        root :: Scratch.new("environment-image-symlink-ancestor-root")
+        outside :: Scratch.new("environment-image-symlink-ancestor-outside")
+        fs.write(project.path.join("env.jet"), "module env.dev { packages: [\"bash@nixpkgs\"] }\nmodule image.server { from: env.dev, files: [\"nested/payload.bin\"] }\n") ?? panic("env")
+        fs.write(outside.path.join("payload.bin"), "must not be read\n".as_bytes()) ?? panic("outside")
+        fs.symlink(&outside.path, project.path.join("nested")) ?? panic("symlink")
+        ingest_executable(&root.path, "bash", "bash@nixpkgs", "bash")
+        out :: jetpack().args(["image", "server"]).current_dir(&project.path).env("JETPACK_ROOT", &root.path).env("NO_COLOR", "1").output() ?? panic("image")
+        stderr :: String.from_utf8_lossy(&out.stderr)
+        assert_eq(out.status.code(), Val(2), "symlinked ancestor image file must fail: {stderr}")
+        assert(stderr.contains("not a symlink") || stderr.contains("symlink") || stderr.contains("not a directory"), "stderr: {stderr}")
+        assert_eq(fs.read_to_string(outside.path.join("payload.bin")) ?? panic("outside read"), "must not be read\n")
+    }
+}
+
+// Rust: tests/image.rs:1089
+#Test("environment_image_rejects_unredactable_cloud_secret") {
+    project :: Scratch.new("environment-cloud-secret-loss")
+    fs.write(project.path.join("env.jet"), "module env.dev {\n    imports: [env.cloud.credentials(\"super_secret_value\")]\n}\nmodule image.server { from: env.dev }\n") ?? panic("env")
+    out :: jetpack().args(["image", "server"]).current_dir(&project.path).env("NO_COLOR", "1").output() ?? panic("image")
+    assert_eq(out.status.code(), Val(2))
+    stderr :: String.from_utf8_lossy(&out.stderr)
+    assert(stderr.contains("E1335"), "stderr: {stderr}")
+    assert(!stderr.contains("super_secret_value"), "secret input leaked: {stderr}")
+}
+
+// Rust: tests/image.rs:1117
+#Test("environment_image_requires_explicit_service_selection") {
+    project :: Scratch.new("environment-service")
+    fs.write(project.path.join("env.jet"), "module env.dev { services: { api: { run: [\"true\"] } } }\nmodule image.server { from: env.dev }\n") ?? panic("env")
+    out :: jetpack().args(["image", "server"]).current_dir(&project.path).env("NO_COLOR", "1").output() ?? panic("image")
+    stderr :: String.from_utf8_lossy(&out.stderr)
+    assert_eq(out.status.code(), Val(2), "service projection must fail: {stderr}")
+    block :: stderr.split("\n\n").find(block -> block.contains("Error [E1336]")) ?? panic("E1336 diagnostic block")
+    diagnostic :: block.lines().filter(line -> !line.is_empty()).map(line -> { trimmed := line.trim() // #4303
+        trimmed.to_string()
+    }).collect().join("\n")
+    expected := include_str("tests/cli/image_service_projection_e1336.txt").trim() // #4303
+    assert_eq(diagnostic, expected)
+    report :: fs.read_to_string(project.path.join(".jet/images/server/projection.json")) ?? panic("rejected image projection report")
+    assert(report.contains("\"rejected\":[\"services\"]"), "projection: {report}")
+}
+
+// Rust: tests/image.rs:1161
+#Test("environment_image_projects_supervised_services") {
+    project :: Scratch.new("environment-service-image")
+    fs.write(project.path.join("env.jet"), "module env.dev {\n    packages: [\"bash@nixpkgs\", \"db@nixpkgs\", \"sleep@nixpkgs\", \"worker@nixpkgs\"]\n    services: { db: { enable: true, run: [\"db\"] }, api: { enable: true, ports: [8080], after: [\"db\"], run: [\"worker\", \"--port\", \"8080\"] } }\n}\nmodule image.server { from: env.dev, services: [\"api\"] }\n") ?? panic("env")
+    ingest_executable(&project.path, "bash", "bash@nixpkgs", "bash")
+    ingest_executable(&project.path, "db", "db@nixpkgs", "db")
+    ingest_executable(&project.path, "sleep", "sleep@nixpkgs", "sleep")
+    ingest_executable(&project.path, "worker", "worker@nixpkgs", "worker")
+    out :: jetpack().args(["image", "server"]).current_dir(&project.path).env("JETPACK_ROOT", &project.path).env("NO_COLOR", "1").output() ?? panic("image")
+    assert_eq(out.status.code(), Val(0), "supervised image must build: {String.from_utf8_lossy(&out.stderr)}")
+    layer :: image_layer(&project.path.join(".jet/images/server"))
+    assert(layer.windows("jet/supervise".len()).any(window -> window == "jet/supervise".as_bytes()), "supervisor path is not in the OCI layer")
+    worker_cmd :: "start '/usr/local/bin/worker' '--port' '8080'".as_bytes()
+    assert(layer.windows(worker_cmd.len()).any(window -> window == worker_cmd), "service command is not in the generated supervisor")
+    db_cmd :: "start '/usr/local/bin/db'".as_bytes()
+    db_start :: layer.windows(db_cmd.len()).position(window -> window == db_cmd) ?? panic("dependency command")
+    worker_prefix :: "start '/usr/local/bin/worker'".as_bytes()
+    worker_start :: layer.windows(worker_prefix.len()).position(window -> window == worker_prefix) ?? panic("dependent command")
+    assert(db_start < worker_start, "dependency must start first")
+    report :: fs.read_to_string(project.path.join(".jet/images/server/projection.json")) ?? panic("report")
+    assert(report.contains("services:jet/supervise"), "projection: {report}")
+    assert(report.contains("service:api"), "projection: {report}")
+    plan :: fs.read_to_string(project.path.join(".jet/images/server/plan.json")) ?? panic("plan")
+    assert(plan.contains("\"entrypoint\":[\"/jet/supervise\"]"), "plan: {plan}")
+    assert(plan.contains("\"services\":[\"api\",\"db\"]"), "plan: {plan}")
+}
+
+// Rust: tests/image.rs:1230
+#Test("environment_image_rejects_a_service_without_projected_executable") {
+    project :: Scratch.new("environment-service-missing-tool")
+    root :: Scratch.new("environment-service-missing-tool-root")
+    fs.write(project.path.join("env.jet"), "module env.dev {\n    packages: [\"bash@nixpkgs\"]\n    services: { api: { enable: true, run: [\"worker\"] } }\n}\nmodule image.server { from: env.dev, services: [\"api\"] }\n") ?? panic("env")
+    ingest_executable(&root.path, "bash", "bash@nixpkgs", "bash")
+    out :: jetpack().args(["image", "server"]).current_dir(&project.path).env("JETPACK_ROOT", &root.path).env("NO_COLOR", "1").output() ?? panic("image")
+    stderr :: String.from_utf8_lossy(&out.stderr)
+    assert_eq(out.status.code(), Val(2), "missing service tool: {stderr}")
+    assert(stderr.contains("E1336"), "stderr: {stderr}")
+    assert(stderr.contains("not a projected package"), "stderr: {stderr}")
+    report :: fs.read_to_string(project.path.join(".jet/images/server/projection.json")) ?? panic("report")
+    assert(report.contains("\"rejected\":[\"services\"]"), "projection: {report}")
+}
+
+// Rust: tests/image.rs:1266
+#Test("image_of_unbuilt_package_is_honest") {
+    scratch :: Scratch.new("unbuilt")
+    write_project(&scratch.path, "executable", false)
+    out :: jetpack().args(["image", "server"]).current_dir(&scratch.path).env("NO_COLOR", "1").output() ?? panic("image")
+    stderr :: String.from_utf8_lossy(&out.stderr)
+    assert_eq(out.status.code(), Val(2))
+    assert(stderr.contains("isn't built yet"), stderr)
+    assert(!scratch.path.join(".jet/images").exists())
+}
+
+// Rust: tests/image.rs:1286
+#Test("image_push_is_gated_e1268") {
+    scratch :: Scratch.new("push-gated")
+    write_project(&scratch.path, "executable", true)
+    out :: jetpack().args(["image", "server", "--push", "ghcr.io/acme/server:1.0"]).current_dir(&scratch.path).env("NO_COLOR", "1").output() ?? panic("push")
+    stderr :: String.from_utf8_lossy(&out.stderr)
+    assert_eq(out.status.code(), Val(2))
+    assert(stderr.contains("E1268"), "expected E1268: {stderr}")
+    assert(stderr.contains("TLS"), stderr)
+    assert(!scratch.path.join(".jet/images").exists())
+}
+
+// Rust: tests/image.rs:1309
+#Test("image_unknown_name_is_friendly") {
+    scratch :: Scratch.new("unknown-name")
+    write_project(&scratch.path, "executable", true)
+    out :: jetpack().args(["image", "ghost"]).current_dir(&scratch.path).env("NO_COLOR", "1").output() ?? panic("image")
+    stderr :: String.from_utf8_lossy(&out.stderr)
+    assert_eq(out.status.code(), Val(2))
+    assert(stderr.contains("no image `ghost`"), stderr)
+    assert(stderr.contains("server"), "lists declared images: {stderr}")
+}
+
+// Rust: tests/image.rs:1329
+#Test("image_of_iso_kind_is_friendly_not_built") {
+    scratch :: Scratch.new("iso-not-built")
+    fs.write(scratch.path.join("env.jet"), "module system.web { target: linux.x64 }\nmodule image.installer { from: system.web }\n") ?? panic("env")
+    out :: jetpack().args(["image", "installer"]).current_dir(&scratch.path).env("NO_COLOR", "1").output() ?? panic("image")
+    stderr :: String.from_utf8_lossy(&out.stderr)
+    assert_eq(out.status.code(), Val(2))
+    assert(stderr.contains("disk image, not a container"), stderr)
+    assert(stderr.contains("Phase D"), stderr)
+}

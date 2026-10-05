@@ -1,0 +1,722 @@
+// Rust: tests/jetpack_engine.rs:7195-8995
+use Jetpack.CLI.Tests.Integration.Support.JetpackFixtures.*
+use Jetpack.CLI.Tests.Integration.JetpackEngine.*
+use tests.common
+use Jetpack.[Store, Provider, RefSpec, SemanticLock, SHA256, JSON]
+use core.sys
+// GATE #4494: real CLI child processes, native filesystem, metadata and Cell.
+use std.[fs, Command, Cell, env]
+
+// Rust: tests/jetpack_engine.rs:7195
+#Test("bridge_flake_native_commits_losses_and_preserves_lock_on_failure") {
+    dir :: Scratch.new("bridge-native-loss-lock")
+    fs.write(dir.join("flake.nix"), "{{\n  devShells.x86_64-linux.default = {{\n    packages = [ pkgs.fd ];\n    shellHook = \"export FOO=1\";\n  }};\n}}\n") ?? panic("flake")
+    first :: jetpack().args([String]{"bridge", "flake", "--no-color"}).current_dir(dir.path).env("PATH", "/usr/bin:/bin").output() ?? panic("bridge")
+    assert(first.status.success(), "stderr: {String.from_utf8_lossy(first.stderr)}")
+    assert(String.from_utf8_lossy(first.stdout).contains("packages: [fd]"), "stdout: {String.from_utf8_lossy(first.stdout)}")
+    stderr :: String.from_utf8_lossy(first.stderr)
+    assert(stderr.contains("L0204"), "native loss was not disclosed: {stderr}")
+    assert(stderr.contains("shellHook"), "native loss name missing: {stderr}")
+    lock_path :: dir.join(".jet/lock")
+    before :: fs.read(lock_path) ?? panic("native bridge must commit its lock")
+    lock_text :: String.from_utf8_lossy(before)
+    assert(lock_text.contains("shellHook"), "lock lost native loss fact: {lock_text}")
+    fs.write(dir.join("flake.nix"), "{{ devShells.x86_64-linux.default = {{ packages = pkgs.lib.optionals true [ pkgs.fd ]; }}; }}\n") ?? panic("dynamic flake")
+    failed :: jetpack().args([String]{"bridge", "flake", "--no-color"}).current_dir(dir.path).env("PATH", "/usr/bin:/bin").output() ?? panic("bridge failure")
+    assert_eq(failed.status.code(), Val(1))
+    assert(String.from_utf8_lossy(failed.stderr).contains("E1256"))
+    assert_eq(fs.read(lock_path) ?? panic("preserved lock"), before)
+}
+
+// Rust: tests/jetpack_engine.rs:7258
+#Test("bridge_flake_commits_transitive_locked_registry_facts_without_nix") {
+    dir :: Scratch.new("bridge-locked-flake")
+    fs.write(dir.join("flake.nix"), "{{\n  inputs.tools.url = \"github:example/tools?rev=0123456789abcdef0123456789abcdef01234567\";\n  devShells.x86_64-linux.default = pkgs.mkShell {{ packages = [ pkgs.fd ]; }};\n}}\n") ?? panic("flake")
+    flake_lock :: "{{\n  \"nodes\": {{\n    \"root\": {{ \"inputs\": {{ \"tools\": \"tools\" }} }},\n    \"tools\": {{\n      \"inputs\": {{ \"nixpkgs\": \"nixpkgs\" }},\n      \"locked\": {{ \"owner\": \"example\", \"repo\": \"tools\", \"rev\": \"0123456789abcdef0123456789abcdef01234567\", \"type\": \"github\" }},\n      \"original\": {{ \"owner\": \"example\", \"repo\": \"tools\", \"type\": \"github\" }}\n    }},\n    \"nixpkgs\": {{\n      \"locked\": {{ \"owner\": \"NixOS\", \"repo\": \"nixpkgs\", \"rev\": \"89abcdef0123456789abcdef0123456789abcdef\", \"type\": \"github\" }},\n      \"original\": {{ \"id\": \"nixpkgs\", \"type\": \"indirect\" }}\n    }}\n  }},\n  \"root\": \"root\",\n  \"version\": 7\n}}\n"
+    fs.write(dir.join("flake.lock"), flake_lock) ?? panic("flake lock")
+    output :: jetpack().args([String]{"bridge", "flake", "--no-color"}).current_dir(dir.path).env("PATH", "/usr/bin:/bin").output() ?? panic("bridge")
+    assert(output.status.success(), "stderr: {String.from_utf8_lossy(output.stderr)}")
+    assert(String.from_utf8_lossy(output.stdout).contains("packages: [fd]"), "stdout: {String.from_utf8_lossy(output.stdout)}")
+    semantic :: fs.read_to_string(dir.join(".jet/lock")) ?? panic("semantic lock")
+    lock :: SemanticLock.parse(&semantic)
+    edge :: lock.records.iter().find((record) -> record.identity.key == "flake-lock-node:tools") ?? panic("tools lock node record")
+    assert_eq(edge.identity.exact, "{{\"inputs\":[{{\"name\":\"nixpkgs\",\"target\":\"nixpkgs\"}}],\"locked\":{{\"owner\":\"example\",\"repo\":\"tools\",\"rev\":\"0123456789abcdef0123456789abcdef01234567\",\"type\":\"github\"}},\"name\":\"tools\",\"original\":{{\"owner\":\"example\",\"repo\":\"tools\",\"type\":\"github\"}}}}")
+    registry :: lock.records.iter().find((record) -> record.identity.key == "flake-registry:nixpkgs") ?? panic("nixpkgs registry record")
+    assert_eq(registry.identity.exact, "{{\"alias\":\"nixpkgs\",\"locked\":{{\"owner\":\"NixOS\",\"repo\":\"nixpkgs\",\"rev\":\"89abcdef0123456789abcdef0123456789abcdef\",\"type\":\"github\"}},\"node\":\"nixpkgs\",\"original\":{{\"id\":\"nixpkgs\",\"type\":\"indirect\"}}}}")
+    replay :: jetpack().args([String]{"bridge", "flake", "--no-color"}).current_dir(dir.path).env("PATH", "/usr/bin:/bin").output() ?? panic("replay")
+    assert_eq(replay.status.code(), Val(0), "replay stderr: {String.from_utf8_lossy(replay.stderr)}")
+    assert_eq(replay.stdout, output.stdout)
+    assert_eq(fs.read_to_string(dir.join(".jet/lock")) ?? panic("lock replay"), semantic)
+    wrong_lock :: flake_lock.replace("\"original\": {{ \"owner\": \"example\", \"repo\": \"tools\", \"type\": \"github\" }}", "\"original\": {{ \"owner\": \"wrong\", \"repo\": \"repo\", \"type\": \"github\" }}")
+    fs.remove_file(dir.join(".jet/lock")) ?? panic("remove semantic lock")
+    fs.write(dir.join("flake.lock"), wrong_lock) ?? panic("wrong lock")
+    failure :: jetpack().args([String]{"bridge", "flake", "--no-color"}).current_dir(dir.path).env("PATH", "/usr/bin:/bin").output() ?? panic("wrong bridge")
+    failure_stderr :: String.from_utf8(failure.stderr) ?? panic("stderr UTF8")
+    assert_eq(failure.status.code(), Val(1), "{failure_stderr}")
+    assert(failure_stderr.contains("Error [E1340]: couldn't load the foreign graph"), "{failure_stderr}")
+    assert(failure_stderr.contains("flake.lock root input `tools` maps to node `tools` with a different source URL or indirect alias"), "{failure_stderr}")
+}
+
+// Rust: tests/jetpack_engine.rs:7366
+#Test("bridge_flake_rejects_dynamic_native_evaluator_input") {
+    dir :: Scratch.new("bridge-native-unsupported")
+    fs.write(dir.join("flake.nix"), "{{ devShells.x86_64-linux.default = pkgs.mkShell {{ packages = pkgs.lib.optionals true [ pkgs.fd ]; }}; }}") ?? panic("flake")
+    output :: jetpack().args([String]{"bridge", "flake", "--no-color"}).current_dir(dir.path).env("PATH", "/usr/bin:/bin").output() ?? panic("bridge")
+    assert(!output.status.success())
+    stderr :: String.from_utf8_lossy(output.stderr)
+    assert(stderr.contains("literal package list"), "stderr: {stderr}")
+}
+
+// Rust: tests/jetpack_engine.rs:7385
+#Test("bridge_flake_prints_shim_and_warns_on_unmapped_shell_hook") {
+    dir :: Scratch.new("bridge-shim")
+    fs.write(dir.join("flake.nix"), "{{ }}") ?? panic("flake")
+    fixtures :: Scratch.new("bridge-shim-fx")
+    fs.write(fixtures.join("flake-devshell.json"), "{{\"buildInputs\": [\"ripgrep\", \"fd\"], \"shellHook\": \"export FOO=1\", \"fixtureOnly\": true}}") ?? panic("fixture")
+    output :: jetpack().args([String]{"bridge", "flake", "--no-color", "--fixtures"}).arg(fixtures.path).current_dir(dir.path).output() ?? panic("bridge")
+    assert(output.status.success(), "stderr: {String.from_utf8_lossy(output.stderr)}")
+    stdout :: String.from_utf8_lossy(output.stdout)
+    assert(stdout.contains("module env.dev {{"), "stdout: {stdout}")
+    assert(stdout.contains("packages: [fd, ripgrep]"), "stdout: {stdout}")
+    stderr :: String.from_utf8_lossy(output.stderr)
+    assert(stderr.contains("L0204"), "stderr: {stderr}")
+    assert(stderr.contains("shellHook"), "stderr: {stderr}")
+    assert(stderr.contains("fixtureOnly"), "stderr: {stderr}")
+    lock :: fs.read_to_string(dir.join(".jet/lock")) ?? panic("lock")
+    assert(lock.contains("flake-unsupported:fixtureOnly"), "fixture-only loss was not persisted: {lock}")
+}
+
+// Rust: tests/jetpack_engine.rs:7426
+#Test("bridge_flake_twice_produces_identical_shim_stdout") {
+    dir :: Scratch.new("bridge-drift")
+    fs.write(dir.join("flake.nix"), "{{ }}") ?? panic("flake")
+    fixtures :: Scratch.new("bridge-drift-fx")
+    fs.write(fixtures.join("flake-devshell.json"), "{{\"buildInputs\": [\"nodejs\", \"ripgrep\"], \"shellHook\": \"\"}}") ?? panic("fixture")
+    run :: () -> jetpack().args([String]{"bridge", "flake", "--no-color", "--fixtures"}).arg(fixtures.path).current_dir(dir.path).output() ?? panic("bridge")
+    a :: run()
+    b :: run()
+    assert(a.status.success())
+    assert(b.status.success())
+    assert_eq(a.stdout, b.stdout)
+}
+
+// Rust: tests/jetpack_engine.rs:7454
+#Test("bridge_flake_no_flake_nix_here_is_friendly") {
+    dir :: Scratch.new("bridge-noflake")
+    output :: jetpack().args([String]{"bridge", "flake", "--no-color"}).current_dir(dir.path).output() ?? panic("bridge")
+    assert(!output.status.success())
+    stderr :: String.from_utf8_lossy(output.stderr)
+    assert(stderr.contains("no foreign flake"), "stderr: {stderr}")
+}
+
+// Rust: tests/jetpack_engine.rs:7467
+#Test("jetpack_import_flake_writes_env_and_lock_from_fixture") {
+    dir :: Scratch.new("import-flake")
+    fs.write(dir.join("flake.nix"), "{{ }}") ?? panic("flake")
+    fixtures :: Scratch.new("import-flake-fx")
+    fs.write(fixtures.join("flake-devshell.json"), "{{\"buildInputs\": [\"ripgrep\", \"fd\"], \"shellHook\": \"\"}}") ?? panic("devshell")
+    fs.write(fixtures.join("catalog.json"), "{{\"packages\": [\"fd\", \"ripgrep\"]}}") ?? panic("catalog")
+    output :: jetpack().args([String]{"import", "flake.nix", "--no-color", "--fixtures"}).arg(fixtures.path).current_dir(dir.path).env("PATH", "").output() ?? panic("import")
+    assert(output.status.success(), "stderr: {String.from_utf8_lossy(output.stderr)}")
+    assert_eq(fs.read_to_string(dir.join("env.jet")) ?? panic("env"), "// Generated by `jetpack import` from a bounded Nix devShell.\nmodule env.dev {{\n    packages: [fd, ripgrep]\n}}\n")
+    lock :: fs.read_to_string(dir.join(".jet/lock")) ?? panic("lock")
+    assert(lock.contains("kind = \"package\""), "lock: {lock}")
+    assert(lock.contains("key = \"fd\""), "lock: {lock}")
+    assert(lock.contains("exact = \"fd@jetpack\""), "lock: {lock}")
+    assert(lock.contains("key = \"ripgrep\""), "lock: {lock}")
+}
+
+// Rust: tests/jetpack_engine.rs:7506
+#Test("jetpack_import_reports_unmappable_and_keeps_mappable_packages") {
+    dir :: Scratch.new("import-gap")
+    fs.write(dir.join("flake.nix"), "{{ }}") ?? panic("flake")
+    fixtures :: Scratch.new("import-gap-fx")
+    fs.write(fixtures.join("flake-devshell.json"), "{{\"buildInputs\": [\"ripgrep\", \"ripgrepp\"], \"shellHook\": \"\"}}") ?? panic("devshell")
+    fs.write(fixtures.join("catalog.json"), "{{\"packages\": [\"ripgrep\"]}}") ?? panic("catalog")
+    output :: jetpack().args([String]{"import", "flake.nix", "--no-color", "--fixtures"}).arg(fixtures.path).current_dir(dir.path).env("PATH", "").output() ?? panic("import")
+    assert(output.status.success(), "stderr: {String.from_utf8_lossy(output.stderr)}")
+    environment :: fs.read_to_string(dir.join("env.jet")) ?? panic("env")
+    assert(environment.contains("packages: [ripgrep]"), "env: {environment}")
+    assert(!environment.contains("ripgrepp"), "env: {environment}")
+    stderr :: String.from_utf8_lossy(output.stderr)
+    assert_eq(stderr.matches("JT0101").count(), 1, "stderr: {stderr}")
+    assert(stderr.contains("unmappable Nix input `ripgrepp` at `flake.nix`; nearest catalog candidate: `ripgrep`"), "stderr: {stderr}")
+    lock :: fs.read_to_string(dir.join(".jet/lock")) ?? panic("lock")
+    assert(lock.contains("key = \"nix-import-unmapped:ripgrepp\""), "lock: {lock}")
+}
+
+// Rust: tests/jetpack_engine.rs:7552
+#Test("jetpack_import_accepts_a_direct_shell_nix_expression") {
+    dir :: Scratch.new("import-shell")
+    fs.write(dir.join("shell.nix"), "pkgs: mkShell {{ packages = [ pkgs.fd ]; }}") ?? panic("shell")
+    output :: jetpack().args([String]{"import", "shell.nix", "--no-color"}).current_dir(dir.path).env("PATH", "").output() ?? panic("import")
+    assert(output.status.success(), "stderr: {String.from_utf8_lossy(output.stderr)}")
+    environment :: fs.read_to_string(dir.join("env.jet")) ?? panic("env")
+    assert(environment.contains("packages: [fd]"), "env: {environment}")
+    lock :: fs.read_to_string(dir.join(".jet/lock")) ?? panic("lock")
+    assert(lock.contains("exact = \"fd@jetpack\""), "lock: {lock}")
+}
+
+// Rust: tests/jetpack_engine.rs:7577
+#Test("core_provider_runs_first_party_package_without_nix") {
+    base :: Scratch.new("core")
+    repo :: base.join("jet-pkgs")
+    proj :: base.join("proj")
+    root :: base.join("root")
+    hello_pkg :: repo.join("pkgs/hello")
+    hello_bin :: hello_pkg.join("bin")
+    fs.create_dir_all(hello_bin) ?? panic("bin")
+    fs.create_dir_all(proj) ?? panic("project")
+    fs.write(hello_pkg.join("hello.jet"), "module hello {{ }}\n") ?? panic("module")
+    greet :: hello_bin.join("hello")
+    fs.write(greet, "#!/bin/sh\necho hello from jet-pkgs\n") ?? panic("executable")
+    if sys.target.selected_family() == "unix" -> fs.set_permissions(greet, fs.Permissions.from_mode(0o755)) ?? panic("permissions")
+    fs.write(proj.join("env.jet"), "use jetpack as pkg\npub fn shell() -> [JSON] {{\n    return [\n        pkg.source(\"mine\", \"{repo.to_string_lossy()}\", \"core\"),\n        pkg.packages([\"hello@mine\"])\n    ]\n}}\n") ?? panic("environment")
+    output :: jetpack().args([String]{"run", "--no-color", "--", "hello"}).current_dir(proj).env("JETPACK_ROOT", root).env("PATH", "/usr/bin:/bin").output() ?? panic("run")
+    assert(output.status.success(), "stderr: {String.from_utf8_lossy(output.stderr)}")
+    stdout := String.from_utf8_lossy(output.stdout).trim() // #4303
+    assert_eq(stdout, "hello from jet-pkgs")
+}
+
+// Rust: tests/jetpack_engine.rs:7625
+#Test("typed_core_source_inferred_from_pack_jet") {
+    base :: Scratch.new("typed-core")
+    repo :: base.join("jet-pkgs")
+    proj :: base.join("proj")
+    root :: base.join("root")
+    hello_pkg :: repo.join("pkgs/hello")
+    hello_bin :: hello_pkg.join("bin")
+    fs.create_dir_all(hello_bin) ?? panic("bin")
+    fs.create_dir_all(proj) ?? panic("project")
+    fs.write(repo.join("package.jet"), "name: \"jet-pkgs\"\nversion: \"0.1.0\"\npackages: {{\n    hello: executable,\n}}\n") ?? panic("package")
+    fs.write(hello_pkg.join("hello.jet"), "module hello {{ }}\n") ?? panic("module")
+    greet :: hello_bin.join("hello")
+    fs.write(greet, "#!/bin/sh\necho hello from jet-pkgs\n") ?? panic("executable")
+    if sys.target.selected_family() == "unix" -> fs.set_permissions(greet, fs.Permissions.from_mode(0o755)) ?? panic("permissions")
+    fs.write(proj.join("env.jet"), "module dev {{\n    sources: {{ mine: {repo.to_string_lossy()} }}\n    env.dev: Env{{\n        packages: [mine.hello],\n    }}\n}}\n") ?? panic("environment")
+    output :: jetpack().args([String]{"env", "--trust", "--yes", "--no-color", "--", "hello"}).current_dir(proj).env("JETPACK_ROOT", root).env("PATH", "/usr/bin:/bin").output() ?? panic("env")
+    assert(output.status.success(), "stderr: {String.from_utf8_lossy(output.stderr)}")
+    stdout := String.from_utf8_lossy(output.stdout).trim() // #4303
+    assert_eq(stdout, "hello from jet-pkgs")
+}
+
+// Rust: tests/jetpack_engine.rs:7685
+#Test("core_provider_builds_library_package_without_nix") {
+    base :: Scratch.new("core-library")
+    repo :: base.join("jet-pkgs")
+    proj :: base.join("proj")
+    root :: base.join("root")
+    lib_pkg :: repo.join("lib/mathlib")
+    fs.create_dir_all(lib_pkg) ?? panic("library")
+    fs.create_dir_all(proj) ?? panic("project")
+    fs.write(repo.join("package.jet"), "name: \"jet-pkgs\"\nversion: \"0.1.0\"\npackages: {{\n    mathlib: library,\n}}\n") ?? panic("package")
+    fs.write(lib_pkg.join("mathlib.jet"), "module mathlib {{\n    pub fn add(a: Int, b: Int) -> Int {{ return a + b }}\n}}\n") ?? panic("library source")
+    fs.write(proj.join("env.jet"), "module dev {{\n    sources: {{ mine: {repo.to_string_lossy()} }}\n    env.dev: Env{{\n        packages: [mine.mathlib],\n    }}\n}}\n") ?? panic("environment")
+    output :: jetpack().args([String]{"build", "--no-color"}).current_dir(proj).env("JETPACK_ROOT", root).env("PATH", "/usr/bin:/bin").output() ?? panic("build")
+    assert(output.status.success(), "stderr: {String.from_utf8_lossy(output.stderr)}")
+    stderr :: String.from_utf8_lossy(output.stderr)
+    assert(stderr.contains("built 1 package(s)"), "expected build success status, got: {stderr}")
+}
+
+// Rust: tests/jetpack_engine.rs:7741
+#Test("core_cargo_build_requires_exact_trust_before_running_build_script") {
+    base :: Scratch.new("core-cargo-trust")
+    repo :: base.join("jet-pkgs")
+    project :: base.join("project")
+    root :: base.join("root")
+    home :: base.join("home")
+    marker :: base.join("host-marker")
+    fs.create_dir_all(repo) ?? panic("repo")
+    fs.create_dir_all(project) ?? panic("project")
+    fs.create_dir_all(home) ?? panic("home")
+    fs.write(repo.join("package.jet"), "name: \"jet-pkgs\"\nversion: \"0.1.0\"\npackages: {{ escape: library }}\n") ?? panic("package")
+    fs.write(repo.join("escape.jet"), "module escape {{ }}\n") ?? panic("module")
+    // Foreign Cargo source is the trust-gate attack fixture, not a Rust runtime bridge.
+    fs.write(repo.join("lib.rs"), "pub fn value() -> u8 {{ 1 }}\n") ?? panic("foreign library")
+    fs.write(repo.join("Cargo.toml"), "[package]\nname = \"escape\"\nversion = \"0.1.0\"\nbuild = \"build.rs\"\n[lib]\npath = \"lib.rs\"\n") ?? panic("foreign manifest")
+    fs.write(repo.join("Cargo.lock"), "# This file is automatically @generated by Cargo.\nversion = 3\n\n[[package]]\nname = \"escape\"\nversion = \"0.1.0\"\n\n") ?? panic("foreign lock")
+    marker_text :: marker.to_string_lossy()
+    fs.write(repo.join("build.rs"), "fn main() {{ let _ = std::fs::write({marker_text:?}, \"escaped\"); }}\n") ?? panic("foreign attack")
+    fs.write(project.join("env.jet"), "use jetpack as pkg\npub fn shell() -> [JSON] {{\n    return [\n        pkg.source(\"mine\", \"{repo.to_string_lossy()}\", \"core\"),\n        pkg.packages([\"escape@mine\"])\n    ]\n}}\n") ?? panic("environment")
+    output :: jetpack().args([String]{"build", "--no-color"}).current_dir(project).env("HOME", home).env("JETPACK_ROOT", root)
+        .env("JETPACK_FAKE_SANDBOX", "unavailable").env("PATH", "/usr/bin:/bin").output() ?? panic("untrusted build")
+    stderr :: String.from_utf8_lossy(output.stderr)
+    assert(!output.status.success(), "stderr: {stderr}")
+    assert(stderr.contains("E1255"), "stderr: {stderr}")
+    assert(!marker.exists(), "build.rs ran before exact trust approval")
+    assert(Store.list(&Store.Roots.at(root)).is_empty())
+}
+
+// Rust: tests/jetpack_engine.rs:7802
+#Test("committed_example_builds_offline_end_to_end") {
+    project :: Scratch.new("example-e2e-project")
+    copy_dir_recursive(&example_dir(), &project.path)
+    root :: Scratch.new("example-e2e")
+    output :: jetpack().args([String]{"build", "--no-color", "--offline"}).current_dir(project.path).env("JETPACK_ROOT", root.path).env("JETPACK_FIXTURES", example_fixtures(&root.path)).output() ?? panic("offline build")
+    assert(output.status.success(), "stderr: {String.from_utf8_lossy(output.stderr)}")
+    stderr :: String.from_utf8_lossy(output.stderr)
+    assert(stderr.contains("building completed 0/3 · current: stable -> ripgrep · resolving") && stderr.contains("building completed 1/3 · current: unstable -> neovim · resolving") && stderr.contains("building completed 2/3 · current: mine -> hello · resolving"), "plain non-TTY output must preserve ordered source-to-package edges: {stderr}")
+    loop pkg in [String]{"ripgrep", "neovim", "hello"} -> assert(stderr.contains(pkg), "expected `{pkg}` in build output: {stderr}")
+    assert(stderr.contains("built 3 package(s)"), "stderr: {stderr}")
+}
+
+// Rust: tests/jetpack_engine.rs:7843
+#Test("use_many_packages_settles_one_row_per_package_without_output_flood") {
+    if sys.target.selected_family() != "unix" -> return
+    project :: Scratch.new("use-many-packages")
+    copy_dir_recursive(&example_dir(), &project.path)
+    root :: Scratch.new("use-many-packages-root")
+    fixtures :: example_fixtures(&root.path)
+    artifact :: fixtures.join("omp-1.0.0")
+    fs.write(artifact, "#!/bin/sh\nprintf '%s\\n' omp\n") ?? panic("artifact")
+    digest :: SHA256.sha256_file_hex(&artifact) ?? panic("digest")
+    fs.write(fixtures.join("jetpackage-omp.json"), "{{\"tag\":\"v1.0.0\",\"version\":\"1.0.0\",\"sha256\":\"{digest}\",\"artifact\":\"omp-1.0.0\"}}") ?? panic("metadata")
+    refs :: (0..26).map((_) -> "omp@releases#1.0.0").collect().join(" ")
+    binary :: common.jetpack_bin().display().to_string().replace('\'', "'\\''")
+    fixtures_arg :: fixtures.display().to_string().replace('\'', "'\\''")
+    command :: "stty rows 30 cols 120; exec '{binary}' use --prep --offline --fixtures '{fixtures_arg}' -y {refs}"
+    output :: Command.new("script").args([String]{"-qfec", command, "/dev/null"}).current_dir(project.path).env("JETPACK_ROOT", root.path)
+        .env("JETPACK_FIXTURES", fixtures).env_remove("NO_COLOR").env_remove("FORCE_COLOR").output() ?? panic("pty command")
+    assert(output.status.success(), "stderr: {String.from_utf8_lossy(output.stderr)}\nstdout: {String.from_utf8_lossy(output.stdout)}")
+    transcript :: String.from_utf8_lossy(output.stdout)
+    settled :: transcript.matches('✓').count()
+    assert_eq(settled, 26, "one settled row per package: {transcript}")
+    assert(settled + 1 <= 30, "26 settled rows plus aggregate must fit the 30-row terminal: {transcript}")
+    assert(transcript.contains("0/26 packages"), "aggregate live line must remain pinned above settled rows: {transcript}")
+}
+
+// Rust: tests/jetpack_engine.rs:7899
+#Test("failed_first_dependency_reports_zero_completed_nodes") {
+    (_base, proj, root) :: core_hello_project("progress-first-failure")
+    env_path :: proj.join("env.jet")
+    environment :: (fs.read_to_string(env_path) ?? panic("environment")).replace("[\"hello@mine\"]", "[\"missing@mine\", \"hello@mine\"]")
+    fs.write(env_path, environment) ?? panic("environment")
+    out :: jetpack().args([String]{"build", "--no-color"}).current_dir(proj).env("JETPACK_ROOT", root).output() ?? panic("build")
+    assert(!out.status.success())
+    stderr :: String.from_utf8_lossy(out.stderr)
+    assert(stderr.contains("building completed 0/2 · current: mine -> missing · resolving"), "first failure must not claim completion: {stderr}")
+    assert(!stderr.contains("building completed 1/2 · current: mine -> missing"))
+    assert(stderr.contains("error:") || stderr.to_lowercase().contains("could not"), "failure must print a diagnostic after erasing the live region: {stderr}")
+}
+
+// Rust: tests/jetpack_engine.rs:7928
+#Test("typed_module_example_builds_offline_end_to_end") {
+    source :: OSPath.from(env.var("JET_TEST_REPOSITORY") ?? panic("source repository")).join("tests/fixtures/jetpack-typed")
+    project :: Scratch.new("typed-e2e-project")
+    copy_dir_recursive(&source, &project.path)
+    root :: Scratch.new("typed-e2e")
+    output :: jetpack().args([String]{"build", "--no-color", "--offline"}).current_dir(project.path).env("JETPACK_ROOT", root.path)
+        .env("JETPACK_FIXTURES", realized_fixtures(&project.join("fixtures"), &root.path)).output() ?? panic("typed build")
+    assert(output.status.success(), "stderr: {String.from_utf8_lossy(output.stderr)}")
+    stderr :: String.from_utf8_lossy(output.stderr)
+    loop pkg in [String]{"ripgrep", "fd", "jq"} -> assert(stderr.contains(pkg), "expected `{pkg}` in build output: {stderr}")
+    assert(stderr.contains("built 3 package(s)"), "stderr: {stderr}")
+}
+
+// Rust: tests/jetpack_engine.rs:7968
+#Test("core_provider_fetches_remote_git_package_from_env") {
+    if Command.new("git").arg("--version").output().is_err() {
+        eprintln("note: skipping remote core provider integration test (git not found)")
+        return
+    }
+    base :: Scratch.new("core-remote")
+    repo :: base.join("remote")
+    proj :: base.join("proj")
+    root :: base.join("root")
+    hello_pkg :: repo.join("pkgs/hello")
+    hello_bin :: hello_pkg.join("bin")
+    fs.create_dir_all(hello_bin) ?? panic("bin")
+    fs.create_dir_all(proj) ?? panic("project")
+    fs.write(hello_pkg.join("hello.jet"), "module hello {{ }}\n") ?? panic("module")
+    greet :: hello_bin.join("hello")
+    fs.write(greet, "#!/bin/sh\necho hello from remote jet-pkgs\n") ?? panic("executable")
+    if sys.target.selected_family() == "unix" -> fs.set_permissions(greet, fs.Permissions.from_mode(0o755)) ?? panic("permissions")
+    loop args in [[String]]{[String]{"init"}, [String]{"config", "user.email", "jetpack@example.invalid"}, [String]{"config", "user.name", "Jet Test"}, [String]{"add", "."}, [String]{"commit", "-m", "init"}} {
+        out :: Command.new("git").args(args).current_dir(repo).output() ?? panic("git")
+        assert(out.status.success(), "git failed: {String.from_utf8_lossy(out.stderr)}")
+    }
+    fs.write(proj.join("env.jet"), "use jetpack as pkg\npub fn shell() -> [JSON] {{\n    return [\n        pkg.source(\"mine\", \"file://{repo.to_string_lossy()}#HEAD\", \"core\"),\n        pkg.packages([\"hello@mine\"])\n    ]\n}}\n") ?? panic("environment")
+    output :: jetpack().args([String]{"run", "--no-color", "--", "hello"}).current_dir(proj).env("JETPACK_ROOT", root).output() ?? panic("run")
+    assert(output.status.success(), "stderr: {String.from_utf8_lossy(output.stderr)}")
+    stdout := String.from_utf8_lossy(output.stdout).trim() // #4303
+    assert_eq(stdout, "hello from remote jet-pkgs")
+    assert(root.join("sources").is_dir(), "remote source cache was not created")
+    offline :: jetpack().args([String]{"build", "--no-color", "--offline"}).current_dir(proj).env("JETPACK_ROOT", root).env_remove("JETPACK_FIXTURES").output() ?? panic("offline")
+    assert(offline.status.success(), "stderr: {String.from_utf8_lossy(offline.stderr)}")
+}
+
+// Rust: tests/jetpack_engine.rs:8056
+#Test("offline_without_fixtures_errors") {
+    root :: Scratch.new("root")
+    out :: jetpack().args([String]{"build", "fastfetch@nixpkgs", "--no-color", "--offline"}).env("JETPACK_ROOT", root.path).env_remove("JETPACK_FIXTURES").output() ?? panic("offline")
+    assert(!out.status.success())
+    stderr :: String.from_utf8_lossy(out.stderr)
+    assert(stderr.contains("E1276"), "stderr: {stderr}")
+    assert(stderr.contains("fastfetch@nixpkgs"), "stderr: {stderr}")
+}
+
+// Rust: tests/jetpack_engine.rs:8073
+#Test("jetpack_toml_retirement_fires_e1225_from_cli") {
+    proj :: Scratch.new("retired-toml")
+    root :: Scratch.new("retired-toml-root")
+    fs.write(proj.join("jetpack.toml"), "[repo]\nname = \"old\"\n") ?? panic("retired config")
+    fs.write(proj.join("env.jet"), "use jetpack as pkg\npub fn shell() -> [JSON] {{\n    return [pkg.source(\"nixpkgs\"), pkg.packages([\"ripgrep\"])]\n}}\n") ?? panic("environment")
+    out :: jetpack().args([String]{"build", "--no-color", "--offline"}).current_dir(proj.path).env("JETPACK_ROOT", root.path).env("JETPACK_FIXTURES", example_fixtures(&root.path)).output() ?? panic("build")
+    assert_eq(out.status.code(), Val(2))
+    stderr :: String.from_utf8_lossy(out.stderr)
+    expected :: fs.read_to_string(OSPath.from(env.var("JET_TEST_REPOSITORY") ?? panic("source repository")).join("tests/cli/jetpack_toml_retired.txt")) ?? panic("retirement snapshot")
+    assert(stderr.ends_with(expected), "stderr: {stderr}")
+}
+
+// Rust: tests/jetpack_engine.rs:8100
+#Test("jetpack_toml_retirement_fires_from_nested_directory") {
+    project :: Scratch.new("retired-toml-nested")
+    nested :: project.join("packages/app/src")
+    root :: Scratch.new("retired-toml-nested-root")
+    fs.create_dir_all(nested) ?? panic("nested")
+    fs.write(project.join("jetpack.toml"), "[repo]\nname = \"old\"\n") ?? panic("retired config")
+    out :: jetpack().args([String]{"build", "--no-color", "--offline"}).current_dir(nested).env("JETPACK_ROOT", root.path).output() ?? panic("build")
+    assert_eq(out.status.code(), Val(2))
+    stderr :: String.from_utf8_lossy(out.stderr)
+    expected :: fs.read_to_string(OSPath.from(env.var("JET_TEST_REPOSITORY") ?? panic("source repository")).join("tests/cli/jetpack_toml_retired.txt")) ?? panic("retirement snapshot")
+    assert(stderr.ends_with(expected), "stderr: {stderr}")
+}
+
+// Rust: tests/jetpack_engine.rs:8121
+#Test("env_jet_sources_resolve_without_toml") {
+    base :: Scratch.new("env-sources")
+    repo :: base.join("jet-pkgs")
+    proj :: base.join("proj")
+    root :: base.join("root")
+    hello_pkg :: repo.join("pkgs/hello")
+    hello_bin :: hello_pkg.join("bin")
+    fs.create_dir_all(hello_bin) ?? panic("bin")
+    fs.create_dir_all(proj) ?? panic("project")
+    fs.write(hello_pkg.join("hello.jet"), "module hello {{ }}\n") ?? panic("module")
+    greet :: hello_bin.join("hello")
+    fs.write(greet, "#!/bin/sh\necho hello from env-source\n") ?? panic("executable")
+    if sys.target.selected_family() == "unix" -> fs.set_permissions(greet, fs.Permissions.from_mode(0o755)) ?? panic("permissions")
+    fs.write(proj.join("env.jet"), "use jetpack as pkg\npub fn shell() -> [JSON] {{\n    return [\n        pkg.source(\"mine\", \"{repo.to_string_lossy()}\", \"core\"),\n        pkg.packages([\"hello@mine\"])\n    ]\n}}\n") ?? panic("environment")
+    out :: jetpack().args([String]{"build", "--no-color", "--", "hello"}).current_dir(proj).env("JETPACK_ROOT", root).env("PATH", "/usr/bin:/bin").output() ?? panic("build")
+    assert(out.status.success(), "stderr: {String.from_utf8_lossy(out.stderr)}")
+}
+
+// Rust: tests/jetpack_engine.rs:8164
+#Test("package_transition_cli_covers_split_fold_init_restore_and_failures") {
+    env_project :: Scratch.new("transition-cli-env")
+    env_original :: "name: \"demo\"\nenvironments: {{ development: Environment{{ tools: [\"git\"] }} }}\n"
+    fs.write(env_project.join("package.jet"), env_original) ?? panic("package")
+    checked :: jet().args([String]{"split", "env", "--check"}).current_dir(env_project.path).output() ?? panic("check")
+    assert(checked.status.success(), "stderr: {String.from_utf8_lossy(checked.stderr)}")
+    assert(String.from_utf8_lossy(checked.stdout).contains("No files changed."))
+    assert(!env_project.join("package/env.jet").exists())
+    split :: jet().args([String]{"split", "env"}).current_dir(env_project.path).output() ?? panic("split")
+    assert(split.status.success(), "stderr: {String.from_utf8_lossy(split.stderr)}")
+    assert(env_project.join("package/env.jet").is_file())
+    fold_check :: jet().args([String]{"fold", "package/env.jet", "--check"}).current_dir(env_project.path).output() ?? panic("fold check")
+    assert(fold_check.status.success(), "stderr: {String.from_utf8_lossy(fold_check.stderr)}")
+    assert(String.from_utf8_lossy(fold_check.stdout).contains("No files changed."))
+    fold :: jet().args([String]{"fold", "package/env.jet"}).current_dir(env_project.path).output() ?? panic("fold")
+    assert(fold.status.success(), "stderr: {String.from_utf8_lossy(fold.stderr)}")
+    assert_eq(fs.read_to_string(env_project.join("package.jet")) ?? panic("restored package"), env_original)
+    assert(!env_project.join("package/env.jet").exists())
+
+    package_project :: Scratch.new("transition-cli-package")
+    package_original :: "name: \"workspace\"\napp :: Config{{ version: \"1\" }}\n"
+    fs.write(package_project.join("package.jet"), package_original) ?? panic("package")
+    package_check :: jet().args([String]{"split", "package", "app", "--check"}).current_dir(package_project.path).output() ?? panic("package check")
+    assert(package_check.status.success(), "stderr: {String.from_utf8_lossy(package_check.stderr)}")
+    package_json_output :: jet().args([String]{"split", "package", "app", "--check", "--json"}).current_dir(package_project.path).output() ?? panic("json check")
+    assert(package_json_output.status.success(), "stderr: {String.from_utf8_lossy(package_json_output.stderr)}")
+    package_json :: JSON.parse(String.from_utf8_lossy(package_json_output.stdout)) ?? panic("json")
+    assert_eq(json_string(&package_json, "before"), json_string(&package_json, "after"))
+    package_split :: jet().args([String]{"split", "package", "app"}).current_dir(package_project.path).output() ?? panic("package split")
+    assert(package_split.status.success(), "stderr: {String.from_utf8_lossy(package_split.stderr)}")
+    assert(package_project.join("packages/app/package.jet").is_file())
+    package_fold :: jet().args([String]{"fold", "packages/app/package.jet"}).current_dir(package_project.path).output() ?? panic("package fold")
+    assert(package_fold.status.success(), "stderr: {String.from_utf8_lossy(package_fold.stderr)}")
+    assert_eq(fs.read_to_string(package_project.join("package.jet")) ?? panic("restored package"), package_original)
+
+    stale_project :: Scratch.new("transition-cli-stale-member")
+    fs.write(stale_project.join("package.jet"), package_original) ?? panic("stale package")
+    stale_split :: jet().args([String]{"split", "package", "app"}).current_dir(stale_project.path).output() ?? panic("stale split")
+    assert(stale_split.status.success(), "stderr: {String.from_utf8_lossy(stale_split.stderr)}")
+    stale_member := fs.OpenOptions.new().append(true).open(stale_project.join("packages/app/package.jet")) ?? panic("append member")
+    &stale_member.write_all("// changed after the plan\n".as_bytes()) ?? panic("change member")
+    stale_fold :: jet().args([String]{"fold", "packages/app/package.jet"}).current_dir(stale_project.path).output() ?? panic("stale fold")
+    assert_eq(stale_fold.status.code(), Val(1))
+    assert(String.from_utf8_lossy(stale_fold.stderr).contains("stale transition"))
+    assert(stale_project.join("packages/app/package.jet").is_file())
+
+    duplicate_project :: Scratch.new("transition-cli-duplicate-member")
+    fs.create_dir_all(duplicate_project.join("packages/existing")) ?? panic("existing")
+    fs.write(duplicate_project.join("packages/existing/package.jet"), "name: \"app\"\n") ?? panic("existing package")
+    duplicate_original :: "name: \"workspace\"\nmembers: [\"packages/existing\"]\napp :: Config{{ version: \"1\" }}\n"
+    fs.write(duplicate_project.join("package.jet"), duplicate_original) ?? panic("duplicate package")
+    duplicate :: jet().args([String]{"split", "package", "app"}).current_dir(duplicate_project.path).output() ?? panic("duplicate split")
+    assert_eq(duplicate.status.code(), Val(1))
+    assert(String.from_utf8_lossy(duplicate.stderr).contains("member Package name `app` is declared more than once"))
+    assert_eq(fs.read_to_string(duplicate_project.join("package.jet")) ?? panic("preserved package"), duplicate_original)
+    assert(!duplicate_project.join("packages/app/package.jet").exists())
+
+    hosts_project :: Scratch.new("transition-cli-hosts")
+    fs.write(hosts_project.join("package.jet"), "name: \"demo\"\noutputs: {{ server: System{{ name: \"server\" }} }}\n") ?? panic("hosts package")
+    hosts_split :: jet().args([String]{"split", "hosts", "server"}).current_dir(hosts_project.path).output() ?? panic("hosts split")
+    assert(hosts_split.status.success(), "stderr: {String.from_utf8_lossy(hosts_split.stderr)}")
+    assert(hosts_project.join("package/fleet.jet").is_file())
+    hosts_fold :: jet().args([String]{"fold", "package/fleet.jet"}).current_dir(hosts_project.path).output() ?? panic("hosts fold")
+    assert(hosts_fold.status.success(), "stderr: {String.from_utf8_lossy(hosts_fold.stderr)}")
+
+    unknown_hosts :: Scratch.new("transition-cli-unknown-host")
+    fs.write(unknown_hosts.join("package.jet"), "name: \"demo\"\noutputs: {{ server: System{{ name: \"server\" }} }}\n") ?? panic("unknown hosts")
+    unknown :: jet().args([String]{"split", "hosts", "missing"}).current_dir(unknown_hosts.path).output() ?? panic("unknown split")
+    assert_eq(unknown.status.code(), Val(1))
+    assert(String.from_utf8_lossy(unknown.stderr).contains("outputs.missing"))
+    assert(!unknown_hosts.join("package/fleet.jet").exists())
+
+    stale_hosts :: Scratch.new("transition-cli-stale-host")
+    fs.write(stale_hosts.join("package.jet"), "name: \"demo\"\noutputs: {{ server: System{{ name: \"server\" }} }}\n") ?? panic("stale hosts")
+    stale_hosts_split :: jet().args([String]{"split", "hosts", "server"}).current_dir(stale_hosts.path).output() ?? panic("stale hosts split")
+    assert(stale_hosts_split.status.success(), "stderr: {String.from_utf8_lossy(stale_hosts_split.stderr)}")
+    stale_fleet := fs.OpenOptions.new().append(true).open(stale_hosts.join("package/fleet.jet")) ?? panic("append fleet")
+    &stale_fleet.write_all("// changed after the plan\n".as_bytes()) ?? panic("change fleet")
+    stale_hosts_fold :: jet().args([String]{"fold", "package/fleet.jet"}).current_dir(stale_hosts.path).output() ?? panic("stale hosts fold")
+    assert_eq(stale_hosts_fold.status.code(), Val(1))
+    assert(String.from_utf8_lossy(stale_hosts_fold.stderr).contains("stale transition"))
+
+    ambiguous_hosts :: Scratch.new("transition-cli-ambiguous-host-journal")
+    fs.write(ambiguous_hosts.join("package.jet"), "name: \"demo\"\noutputs: {{ server: System{{ name: \"server\" }} }}\n") ?? panic("ambiguous hosts")
+    ambiguous_split :: jet().args([String]{"split", "hosts", "server"}).current_dir(ambiguous_hosts.path).output() ?? panic("ambiguous split")
+    assert(ambiguous_split.status.success(), "stderr: {String.from_utf8_lossy(ambiguous_split.stderr)}")
+    journal_dir :: ambiguous_hosts.join(".jet/package-transition")
+    journal :: (((fs.read_dir(journal_dir) ?? panic("journal directory")).next() ?? panic("journal entry")) ?? panic("journal")).path()
+    fs.copy(journal, journal_dir.join("duplicate-journal")) ?? panic("duplicate journal")
+    ambiguous_fold :: jet().args([String]{"fold", "package/fleet.jet"}).current_dir(ambiguous_hosts.path).output() ?? panic("ambiguous fold")
+    assert_eq(ambiguous_fold.status.code(), Val(1))
+    assert(String.from_utf8_lossy(ambiguous_fold.stderr).contains("found 2"))
+
+    invalid_hosts :: Scratch.new("transition-cli-invalid-host")
+    fs.write(invalid_hosts.join("package.jet"), "name: \"demo\"\noutputs: {{ server: System{{ name: \"server\" }} }}\n") ?? panic("invalid hosts")
+    invalid :: jet().args([String]{"split", "hosts", "server/name"}).current_dir(invalid_hosts.path).output() ?? panic("invalid split")
+    assert_eq(invalid.status.code(), Val(1))
+    invalid_stderr :: String.from_utf8_lossy(invalid.stderr)
+    assert(invalid_stderr.contains("E1206"), "{invalid_stderr}")
+    assert(!invalid_hosts.join("package/fleet.jet").exists())
+
+    legacy_project :: Scratch.new("transition-cli-legacy")
+    originals :: [(String, String)]{
+        ("pkg.jet", "name: \"demo\"\nversion: \"0.1.0\"\n"),
+        ("env.jet", "module env.dev {{ tools: [\"git@nixpkgs\"] }}\n"),
+        ("workspace.jet", "module workspace {{ members: [] }}\n"),
+        ("config.jet", "Config{{ }}\n")
+    }
+    loop (name, source) in originals -> fs.write(legacy_project.join(name), source) ?? panic("role file")
+    init_check :: jet().args([String]{"init", "--check"}).current_dir(legacy_project.path).output() ?? panic("init check")
+    assert(init_check.status.success(), "stderr: {String.from_utf8_lossy(init_check.stderr)}")
+    assert(String.from_utf8_lossy(init_check.stdout).contains("No files changed."))
+    init :: jet().args([String]{"init"}).current_dir(legacy_project.path).output() ?? panic("init")
+    assert(init.status.success(), "stderr: {String.from_utf8_lossy(init.stderr)}")
+    assert(legacy_project.join("package.jet").is_file())
+    restore_check :: jet().args([String]{"init", "--restore-role-files", "--check"}).current_dir(legacy_project.path).output() ?? panic("restore check")
+    assert(restore_check.status.success(), "stderr: {String.from_utf8_lossy(restore_check.stderr)}")
+    restore :: jet().args([String]{"init", "--restore-role-files"}).current_dir(legacy_project.path).output() ?? panic("restore")
+    assert(restore.status.success(), "stderr: {String.from_utf8_lossy(restore.stderr)}")
+    loop (name, source) in originals -> assert_eq(fs.read_to_string(legacy_project.join(name)) ?? panic("restored role"), source)
+    assert(!legacy_project.join("package.jet").exists())
+}
+
+// Rust: tests/jetpack_engine.rs:8512
+#Test("mono_example_has_two_package_jet_members") {
+    mono :: mono_example_dir()
+    assert(mono.join("workspace.jet").exists(), "workspace.jet missing from mono example")
+    greeter_pkg :: mono.join("packages/greeter/package.jet")
+    logger_pkg :: mono.join("packages/logger/package.jet")
+    assert(greeter_pkg.exists(), "packages/greeter/package.jet missing: {greeter_pkg:?}")
+    assert(logger_pkg.exists(), "packages/logger/package.jet missing: {logger_pkg:?}")
+    workspace_src :: fs.read_to_string(mono.join("workspace.jet")) ?? panic("workspace")
+    assert(workspace_src.contains("find(\"./packages\")"), "workspace.jet should use find-based member discovery")
+}
+
+// Rust: tests/jetpack_engine.rs:8540
+#Test("jet_build_reports_source_states") {
+    (_base, proj, root) :: core_hello_project("t4-build")
+    run :: () -> jetpack().args([String]{"build", "--no-color"}).current_dir(proj).env("JETPACK_ROOT", root).env("PATH", "/usr/bin:/bin").output() ?? panic("build")
+    first :: run()
+    assert(first.status.success(), "stderr: {String.from_utf8_lossy(first.stderr)}")
+    out1 :: String.from_utf8_lossy(first.stderr)
+    assert(out1.contains("built"), "first build must report `built`: {out1}")
+    assert(out1.contains("1 built"), "summary must count the built package: {out1}")
+    assert(out1.contains("build sandbox outcome: non-executing (no child launched)"), "build must report the recorded non-executing receipt: {out1}")
+    second :: run()
+    assert(second.status.success())
+    out2 :: String.from_utf8_lossy(second.stderr)
+    assert(out2.contains("cached"), "re-build of the same content must report `cached`: {out2}")
+    assert(out2.contains("1 cached"), "summary must count the cache hit: {out2}")
+    assert(out2.contains("build sandbox outcome: verified cache only"), "cache-only build must not claim a fresh sandbox execution: {out2}")
+}
+
+// Rust: tests/jetpack_engine.rs:8591
+#Test("epoch4_dogfood_portfolio_rebuilds_offline_after_component_loss") {
+    (base, project, root) :: core_hello_project("epoch4-dogfood-portfolio")
+    missing_tools :: base.join("missing-tools")
+    fs.create_dir_all(missing_tools) ?? panic("missing tools")
+    source_executable :: base.join("jet-pkgs/pkgs/hello/bin/hello")
+    build :: (offline: Bool) -> {
+        command := jetpack()
+        &command.args([String]{"build", "--no-color"}).current_dir(project).env("JETPACK_ROOT", root).env("PATH", missing_tools)
+        if offline -> &command.arg("--offline")
+        command.output() ?? panic("portfolio build")
+    }
+    first :: build(false)
+    assert(first.status.success(), "first portfolio build failed: {String.from_utf8_lossy(first.stderr)}")
+    first_stderr :: String.from_utf8_lossy(first.stderr)
+    assert(first_stderr.contains("built") && first_stderr.contains("1 built"), "first portfolio build must publish a real result: {first_stderr}")
+    cached :: build(true)
+    assert(cached.status.success(), "offline portfolio reuse failed: {String.from_utf8_lossy(cached.stderr)}")
+    cached_stderr :: String.from_utf8_lossy(cached.stderr)
+    assert(cached_stderr.contains("cached") && cached_stderr.contains("1 cached"), "offline portfolio reuse must report a verified cache hit: {cached_stderr}")
+    entered :: jetpack().args([String]{"env", "--no-color", "--trust", "--offline", "--", "hello"}).current_dir(project)
+        .env("JETPACK_ROOT", root).env("HOME", base.join("home")).env("PATH", missing_tools).output() ?? panic("entry")
+    assert(entered.status.success(), "offline front-door entry needs no ambient tools: {String.from_utf8_lossy(entered.stderr)}")
+    entered_stdout := String.from_utf8_lossy(entered.stdout).trim() // #4303
+    assert_eq(entered_stdout, "hello from jet-pkgs")
+    roots :: Store.Roots.at(root.clone())
+    entry :: (fs.read_dir(roots.hangar_dir()) ?? panic("hangar")).filter_map((item) -> item.ok()).find_map((node) -> {
+        text :: fs.read_to_string(node.path().join("meta.json")).ok()?
+        parsed :: Store.parse_meta(&text)?
+        if parsed.reference == "hello@mine" -> Val(parsed) else -> None
+    }) ?? panic("portfolio build must register its Hangar entry")
+    make_directories_writable(OSPath.from(entry.out))
+    fs.remove_dir_all(entry.out) ?? panic("remove output")
+    fs.remove_file(source_executable) ?? panic("remove source")
+    failed :: build(true)
+    assert(!failed.status.success(), "missing portfolio component must fail closed")
+    failed_stderr :: String.from_utf8_lossy(failed.stderr)
+    assert(!failed_stderr.contains("built 1 package(s): 0 built, 1 cached"), "missing portfolio component was falsely reported as cached: {failed_stderr}")
+    fs.write(source_executable, "#!/bin/sh\necho hello from jet-pkgs\n") ?? panic("repair source")
+    if sys.target.selected_family() == "unix" -> fs.set_permissions(source_executable, fs.Permissions.from_mode(0o755)) ?? panic("executable")
+    rebuilt :: build(true)
+    assert(rebuilt.status.success(), "offline portfolio rebuild failed: {String.from_utf8_lossy(rebuilt.stderr)}")
+    rebuilt_stderr :: String.from_utf8_lossy(rebuilt.stderr)
+    assert(rebuilt_stderr.contains("built") && !rebuilt_stderr.contains("1 cached"), "repaired portfolio must rebuild instead of hiding the failure: {rebuilt_stderr}")
+    (stale, _) :: write_hangar_meta(&root, "epoch4-dogfood-stale", "stale", "1.0", Val(1))
+    clean :: jetpack().args([String]{"hangar", "clean", "--no-color", "--yes"}).env("JETPACK_ROOT", root).env("PATH", missing_tools).output() ?? panic("clean")
+    assert(clean.status.success(), "portfolio clean failed: {String.from_utf8_lossy(clean.stderr)}")
+    assert(!stale.exists(), "portfolio clean left stale Hangar state")
+}
+
+// Rust: tests/jetpack_engine.rs:8715
+#Test("jet_build_publishes_then_falls_back_to_source_when_cache_is_unavailable") {
+    (_base, proj, root) :: core_hello_project("cache-source-fallback")
+    mirror :: Scratch.new("cache-source-fallback-mirror")
+    roots :: Store.Roots{root: root.clone(), dev_mode: false}
+    Store.bind_cache(&roots, "public", [String]{mirror.path.display().to_string()}, None, None, true) ?? panic("bind cache")
+    run :: (fake_sandbox: String?) -> {
+        command := jetpack()
+        &command.args([String]{"build", "--no-color"}).current_dir(proj).env("JETPACK_ROOT", root).env("PATH", "/usr/bin:/bin")
+        if fake_sandbox == { .Val(value) -> &command.env("JETPACK_FAKE_SANDBOX", value); .None -> {} }
+        command.output() ?? panic("build")
+    }
+    first :: run(None)
+    assert(first.status.success(), "stderr: {String.from_utf8_lossy(first.stderr)}")
+    entry :: Store.find_by_reference(&roots, "hello@mine") ?? panic("entry")
+    producer :: Store.ProducerRecord.decode(entry.producer_record) ?? panic("producer")
+    assert(producer.facts.get("cache.reproducibility").is_some_and((value) -> value.starts_with("independent-agreeing-v1:")), "uncached source builds must carry fresh independent agreement")
+    assert(!root.join("private/unreproducible").exists())
+    assert((fs.read_dir(mirror.path) ?? panic("mirror")).flatten().any((entry) -> entry.path().extension().and_then((ext) -> ext.to_str()) == Val("narinfo")), "source realization must publish a signed cache record")
+    make_writable(&entry.out)
+    fs.write(OSPath.from(entry.out).join("bin/hello"), "tampered\n") ?? panic("tamper")
+    substituted :: run(Val("unavailable"))
+    assert(substituted.status.success(), "verified cache substitution must repair the local candidate: {String.from_utf8_lossy(substituted.stderr)}")
+    substituted_stderr :: String.from_utf8_lossy(substituted.stderr)
+    assert(substituted_stderr.contains("L0205"), "unavailable allow-mode action must record the fallback decision: {substituted_stderr}")
+    assert(substituted_stderr.contains("substituted") && substituted_stderr.contains("1 substituted"), "production build must report the verified substitution: {substituted_stderr}")
+    repaired :: Store.find_by_reference(&roots, "hello@mine") ?? panic("repaired entry")
+    assert_eq(fs.read_to_string(OSPath.from(repaired.out).join("bin/hello")) ?? panic("repaired payload"), "#!/bin/sh\necho hello from jet-pkgs\n")
+    make_writable(&repaired.out)
+    fs.write(OSPath.from(repaired.out).join("bin/hello"), "tampered again\n") ?? panic("tamper again")
+    fs.remove_dir_all(mirror.path) ?? panic("remove mirror")
+    fs.write(mirror.path, "cache substituter unavailable") ?? panic("unavailable mirror")
+    fallback :: run(None)
+    assert(fallback.status.success(), "source fallback must survive an unavailable substituter: {String.from_utf8_lossy(fallback.stderr)}")
+    stderr :: String.from_utf8_lossy(fallback.stderr)
+    assert(stderr.contains("built"), "fallback must rebuild from source: {stderr}")
+    assert(!stderr.contains("1 cached"), "an unavailable substituter must not report a cache hit: {stderr}")
+}
+
+// Rust: tests/jetpack_engine.rs:8818
+#Test("jet_build_rejects_cache_after_manifest_semantics_change") {
+    (base, proj, root) :: core_hello_project("truth-manifest-identity")
+    manifest :: base.join("jet-pkgs/package.jet")
+    fs.write(manifest, "name: \"demo\"\nversion: \"1.0.0\"\npackages: {{ hello: executable }}\n") ?? panic("manifest")
+    run :: () -> jetpack().args([String]{"build", "--no-color"}).current_dir(proj).env("JETPACK_ROOT", root).env("PATH", "/usr/bin:/bin").output() ?? panic("build")
+    assert(run().status.success())
+    fs.write(manifest, "name: \"demo\"\nversion: \"2.0.0\"\npackages: {{ hello: executable }}\n") ?? panic("changed manifest")
+    rejected :: run()
+    assert(!rejected.status.success())
+    stderr :: String.from_utf8_lossy(rejected.stderr)
+    assert(stderr.contains("E2604"), "stderr: {stderr}")
+    assert(stderr.contains("recipe identity verification"), "stderr: {stderr}")
+}
+
+// Rust: tests/jetpack_engine.rs:8852
+#Test("independent_root_runner_promotes_only_agreed_source_output") {
+    (_base, project, root) :: core_hello_project("independent-root-runner")
+    roots :: Store.Roots.at(root.clone())
+    repo :: (project.parent() ?? panic("parent")).join("jet-pkgs")
+    table :: RefSpec.SourceTable.from_decls([(String, String, RefSpec.ProviderKind)]{("mine", "path:{repo.display()}", RefSpec.ProviderKind.Core)})
+    spec :: RefSpec.classify_in("hello@mine", &table) ?? panic("spec")
+    store_dir :: roots.hangar_dir()
+    ctx :: Provider.Ctx{fixtures: None, store_dir: &store_dir, offline: true, project_dir: None, nix_index: None, nix_roots: None, allow_local_nix_catalog: false}
+    result :: Store.certify_independent_root_build(&roots, &ctx, Store.RealizeRequest.Package{spec: &spec, table: &table}, Store.IndependentRootOptions.default()) ?? panic("independent build")
+    assert(result.attestation.starts_with("independent-agreeing-v1:"))
+    assert(OSPath.from(result.entry.out).starts_with(roots.hangar_dir().join("objects")))
+    producer :: Store.ProducerRecord.decode(result.entry.producer_record) ?? panic("producer")
+    assert_eq(producer.facts.get("cache.reproducibility"), Val(result.attestation))
+    assert(!root.join("private/unreproducible").exists())
+    assert(!fs.read_dir(roots.hangar_dir().join("reproducibility-staging")).map((entries) -> entries.flatten().next().is_some()).unwrap_or(false))
+}
+
+// Rust: tests/jetpack_engine.rs:8898
+#Test("independent_root_runner_rejects_divergence_before_registration") {
+    (_base, project, root) :: core_hello_project("independent-root-divergence")
+    roots :: Store.Roots.at(root.clone())
+    repo :: (project.parent() ?? panic("parent")).join("jet-pkgs")
+    table :: RefSpec.SourceTable.from_decls([(String, String, RefSpec.ProviderKind)]{("mine", "path:{repo.display()}", RefSpec.ProviderKind.Core)})
+    spec :: RefSpec.classify_in("hello@mine", &table) ?? panic("spec")
+    store_dir :: roots.hangar_dir()
+    ctx :: Provider.Ctx{fixtures: None, store_dir: &store_dir, offline: true, project_dir: None, nix_index: None, nix_roots: None, allow_local_nix_catalog: false}
+    checks :: Cell.new(0)
+    source :: repo.join("pkgs/hello/bin/hello")
+    changed :: () -> {
+        count :: checks.get() + 1
+        checks.set(count)
+        if count == 2 -> fs.write(source, "#!/bin/sh\necho divergent\n") ?? panic("diverge")
+        false
+    }
+    failure :: Store.certify_independent_root_build(&roots, &ctx, Store.RealizeRequest.Package{spec: &spec, table: &table}, Store.IndependentRootOptions{retries: 0, cancelled: Val(&changed)}).err() ?? panic("expected divergence")
+    error :: "{failure:?}"
+    assert(error.contains("conflicting independent roots"), "{error}")
+    assert(Store.list(&roots).is_empty())
+    reports :: root.join("private/unreproducible")
+    report_entry :: (fs.read_dir(reports) ?? panic("reports")).flatten().find((entry) -> entry.path().extension().and_then((value) -> value.to_str()) == Val("json")) ?? panic("divergence evidence")
+    report :: fs.read_to_string(report_entry.path()) ?? panic("report")
+    assert(report.contains("\"kind\":\"action-identity\""), "{report}")
+    assert(report.contains("\"left_action_key\""), "{report}")
+    assert(report.contains("\"right_action_key\""), "{report}")
+}
+
+// Rust: tests/jetpack_engine.rs:8957
+#Test("independent_root_runner_cancellation_leaves_no_store_result") {
+    (_base, project, root) :: core_hello_project("independent-root-cancel")
+    roots :: Store.Roots.at(root.clone())
+    repo :: (project.parent() ?? panic("parent")).join("jet-pkgs")
+    table :: RefSpec.SourceTable.from_decls([(String, String, RefSpec.ProviderKind)]{("mine", "path:{repo.display()}", RefSpec.ProviderKind.Core)})
+    spec :: RefSpec.classify_in("hello@mine", &table) ?? panic("spec")
+    store_dir :: roots.hangar_dir()
+    ctx :: Provider.Ctx{fixtures: None, store_dir: &store_dir, offline: true, project_dir: None, nix_index: None, nix_roots: None, allow_local_nix_catalog: false}
+    cancelled :: () -> true
+    error :: Store.certify_independent_root_build(&roots, &ctx, Store.RealizeRequest.Package{spec: &spec, table: &table}, Store.IndependentRootOptions{retries: 1, cancelled: Val(&cancelled)}).err() ?? panic("expected cancellation")
+    assert("{error:?}".contains("cancelled"), "{error:?}")
+    assert(Store.list(&roots).is_empty())
+}

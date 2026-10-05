@@ -1,0 +1,77 @@
+// Exact original test mappings to existing substantive canonical claims.
+// Do not register a duplicate claim for the same Rust assertion.
+// Rust: crates/jetpack/src/SemanticLock.rs:3799
+// parses_follows_outputs_and_round_trips_through_semantic_lock ->
+// SemanticLockFlake.jet120: two inputs, follows revision, named shell and
+// input/output/text round trip, with the original inline Nix fixture.
+// Rust: crates/jetpack/src/SemanticLock.rs:3827
+// ignores_nested_package_references_when_pinning_outputs ->
+// SemanticLockFlake.jet145: only fetched, not nested default, is pinned.
+// Rust: crates/jetpack/src/SemanticLock.rs:3847
+// pinned_flake_lock_fixture_preserves_nodes_edges_and_registry_resolution ->
+// SemanticLockFlake.jet161: stage-a flake/lock inlined at48/59, exact revision
+// values, all node names, systems follow edge, registry identity/type/owner/
+// repo, complete graph and semantic-text round trip.
+// Rust: crates/jetpack/src/SemanticLock.rs:3930
+// transitive_indirect_registry_resolution_round_trips ->
+// SemanticLockFlake.jet189: exact original fixture, nixpkgs node/revision,
+// complete registry and node round trips.
+// Rust: crates/jetpack/src/SemanticLock.rs:3971
+// indirect_registry_alias_ref_and_query_identity_round_trips_and_rejects_drift ->
+// SemanticLockFlake.jet227: exact fixture/ref/dir mutation, exact revision,
+// alias/node, complete restored graph and both source-URL rejection reasons.
+// Rust: crates/jetpack/src/SemanticLock.rs:4026
+// flake_lock_follow_paths_resolve_to_terminal_node -> SemanticLockFlake.jet262:
+// both two-hop root and direct flake-utils paths resolve Some(systems).
+// Rust: crates/jetpack/src/SemanticLock.rs:4053
+// flake_lock_revision_drift_fails_closed -> SemanticLockFlake.jet274:
+// exact input/revision conflict, wrong repository source-URL rejection.
+// Rust: crates/jetpack/src/SemanticLock.rs:4098
+// flake_lock_metadata_and_indirect_alias_fail_closed -> SemanticLockFlake.jet307:
+// missing original, root original, empty node name, indirect missing id.
+// Rust: crates/jetpack/src/SemanticLock.rs:4190
+// floating_or_conflicting_foreign_inputs_fail_closed -> SemanticLockFlake.jet366:
+// MissingRevision and ConflictingInput, retaining original source fixtures.
+// Rust: crates/jetpack/src/SemanticLock.rs:4210
+// lock_input_without_revision_is_not_promoted_from_nar_hash ->
+// SemanticLockFlake.jet379: exact no-rev lock fixture and MissingRevision(nixpkgs).
+// Rust: crates/jetpack/src/SemanticLock.rs:4229
+// semantic_lock_requires_every_flake_input_record -> SemanticLockFlake.jet398:
+// orphan LockInput fails with MissingRevision(nixpkgs).
+// Rust: crates/jetpack/src/SemanticLock.rs:4243
+// loading_a_changed_flake_rejects_a_stale_semantic_lock -> SemanticLockStore.jet83:
+// real files, unchanged load, changed source StaleSemanticLock, untouched lock
+// bytes and still-readable prior fingerprint (not the narrowed pure control
+// in SemanticLockFlake.jet413).
+// Rust: crates/jetpack/src/SemanticLock.rs:4279
+// flake_parts_composition_is_graph_data_and_round_trips -> SemanticLockFlake.jet439:
+// exact framework/modules/empty sources/sorted systems/perSystem composition,
+// unsupported exclusion, composition and stable JSON round trip.
+// Rust: crates/jetpack/src/SemanticLock.rs:4316
+// loaded_flake_parts_modules_are_fingerprinted_in_the_same_lock ->
+// SemanticLockStore.jet112: real flake/module/shared files, both exact source
+// hashes, semantic-lock reload, shared-source drift with composition reason.
+
+#Test("overlay_tuple_map_union_preserves_order_and_empty_action_override") {
+    before :: [(overlay: String, package: String): String]{
+        (overlay: "z", package: "same"): "same",
+        (overlay: "a", package: "removed"): "old",
+        (overlay: "a", package: "changed"): "before"
+    }
+    after :: [(overlay: String, package: String): String]{
+        (overlay: "z", package: "same"): "same",
+        (overlay: "a", package: "changed"): "after",
+        (overlay: "b", package: "added"): "new"
+    }
+    actions :: [String: [String]]{"changed": [String]{}}
+    result :: overlay_invalidations(before, after, actions)
+    assert_eq(result.len(), 3)
+    assert_eq(result[0].package, "changed")
+    assert_eq(result[0].affected_action_keys, [String]{})
+    assert_eq(result[0].reason, "overlay `a` changed package `changed` policy (before → after)")
+    assert_eq(result[1].package, "removed")
+    assert_eq(result[1].reason, "overlay `a` removed package `removed`")
+    assert_eq(result[2].overlay, "b")
+    assert_eq(result[2].affected_action_keys, [String]{"action:added"})
+    assert_eq(result[2].reason, "overlay `b` added package `added`")
+}

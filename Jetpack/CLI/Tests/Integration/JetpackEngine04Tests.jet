@@ -1,0 +1,657 @@
+use Jetpack.CLI.Tests.Integration.Support.JetpackFixtures.*
+use Jetpack.CLI.Tests.Integration.JetpackEngine.*
+use common.Scratch
+use std.fs
+use Jetpack.[Store, ProviderFacts, SemanticLock, SHA256, JSON]
+use Jetpack.ProviderGraph.[normalize_provider_document, ProviderFamily]
+// GATE #4494: actual native process/filesystem integration, no Rust bridge.
+
+// Rust: tests/jetpack_engine.rs:5421
+#Test("channel_build_without_lock_is_e1271") {
+    proj :: Scratch.new("proj")
+    root :: Scratch.new("root")
+    fs.write(proj.join("env.jet"), "\nmodule dev {\n    sources: { default: acme/tools@github#latest }\n    env.dev: Env{ packages: [default.greet] }\n}\n") ?? panic("write env")
+    out :: jetpack().args(["build", "--no-color", "--offline"]).current_dir(&proj.path).env("JETPACK_ROOT", &root.path).output() ?? panic("build")
+    assert_eq(out.status.code(), Val(2))
+    stderr :: String.from_utf8_lossy(out.stderr)
+    assert(stderr.contains("E1271"), "stderr: {stderr}")
+    assert(stderr.contains("jetpack update default"), "stderr: {stderr}")
+}
+
+// Rust: tests/jetpack_engine.rs:5450
+#Test("channel_update_accepts_main_and_semver_mask") {
+    proj :: Scratch.new("proj")
+    root :: Scratch.new("root")
+    fixtures :: Scratch.new("fx")
+    fs.write(proj.join("env.jet"), "\nmodule dev {\n    sources: {\n        trunk: acme/tools@github#main,\n        stable: acme/tools@github#v0.x,\n    }\n    env.dev: Env{ packages: [trunk.greet, stable.greet] }\n}\n") ?? panic("write env")
+    fs.create_dir_all(&fixtures.path) ?? panic("create fixtures")
+    fs.write(fixtures.join("channels.txt"), "github:acme/tools main github:acme/tools#abc123\ngithub:acme/tools v0.x github:acme/tools#v0.9.4\n") ?? panic("write channels")
+    out :: jetpack().args(["update", "--no-color", "--yes", "--fixtures"]).arg(&fixtures.path).current_dir(&proj.path).env("JETPACK_ROOT", &root.path).output() ?? panic("update")
+    assert(out.status.success(), "stderr: {String.from_utf8_lossy(out.stderr)}")
+    lock :: fs.read_to_string(proj.join(".jet/lock")) ?? panic("read lock")
+    assert(lock.contains("name = \"trunk\""), "lock: {lock}")
+    assert(lock.contains("channel = \"main\""), "lock: {lock}")
+    assert(lock.contains("exact = \"github:acme/tools#abc123\""), "lock: {lock}")
+    assert(lock.contains("name = \"stable\""), "lock: {lock}")
+    assert(lock.contains("channel = \"v0.x\""), "lock: {lock}")
+    assert(lock.contains("exact = \"github:acme/tools#v0.9.4\""), "lock: {lock}")
+}
+
+// Rust: tests/jetpack_engine.rs:5503
+#Test("outdated_reports_newer_channel_without_mutating_lock") {
+    proj :: Scratch.new("proj")
+    root :: Scratch.new("root")
+    fixtures :: Scratch.new("fx")
+    fs.write(proj.join("env.jet"), "\nmodule dev {\n    sources: { default: acme/tools@github#latest }\n    env.dev: Env{ packages: [default.greet] }\n}\n") ?? panic("write env")
+    fs.create_dir_all(proj.join(".jet")) ?? panic("create .jet")
+    fs.write(proj.join(".jet/lock"), "version = 1\n\n[[source_channel]]\nname = \"default\"\nchannel = \"latest\"\nexact = \"github:acme/tools#v1.2.0\"\n\n[root]\ndependencies = []\n") ?? panic("write lock")
+    write_channel_fixture(&fixtures.path, "github:acme/tools", "latest", "github:acme/tools#v1.3.0")
+    out :: jetpack().args(["outdated", "--no-color", "--fixtures"]).arg(&fixtures.path).current_dir(&proj.path).env("JETPACK_ROOT", &root.path).output() ?? panic("outdated")
+    assert(out.status.success(), "stderr: {String.from_utf8_lossy(out.stderr)}")
+    stderr :: String.from_utf8_lossy(out.stderr)
+    assert(stderr.contains("v1.2.0"), "stderr: {stderr}")
+    assert(stderr.contains("v1.3.0"), "stderr: {stderr}")
+    lock :: fs.read_to_string(proj.join(".jet/lock")) ?? panic("read lock")
+    assert(lock.contains("exact = \"github:acme/tools#v1.2.0\""), "lock mutated: {lock}")
+}
+
+// Rust: tests/jetpack_engine.rs:5553
+#Test("automatic_channel_refresh_writes_lock_and_manifest_without_update") {
+    proj :: Scratch.new("proj")
+    root :: Scratch.new("root")
+    fixtures :: Scratch.new("fx")
+    fs.write(proj.join("env.jet"), "\nmodule dev {\n    sources: { automatic: omp@nixpkgs#auto }\n    env.dev: Env{ packages: [] }\n}\n") ?? panic("write env")
+    write_channel_fixture(&fixtures.path, "nixpkgs:omp", "latest", "nixpkgs:omp#1.2.3")
+    build :: jetpack().args(["build", "--no-color", "--yes", "--fixtures"]).arg(&fixtures.path).current_dir(&proj.path).env("JETPACK_ROOT", &root.path).output() ?? panic("build")
+    assert(build.status.success(), "stderr: {String.from_utf8_lossy(build.stderr)}")
+    lock :: fs.read_to_string(proj.join(".jet/lock")) ?? panic("read lock")
+    assert(lock.contains("name = \"automatic\""), "lock: {lock}")
+    assert(lock.contains("exact = \"nixpkgs:omp#1.2.3\""), "lock: {lock}")
+    manifest :: fs.read_to_string(proj.join("env.jet")) ?? panic("read env")
+    assert(manifest.contains("omp@nixpkgs#auto"), "manifest: {manifest}")
+}
+
+// Rust: tests/jetpack_engine.rs:5595
+#Test("automatic_channel_refresh_moves_again_after_manifest_writeback") {
+    proj :: Scratch.new("proj")
+    root :: Scratch.new("root")
+    fixtures :: Scratch.new("fx")
+    fs.write(proj.join("env.jet"), "\nmodule dev {\n    sources: { automatic: omp@nixpkgs#auto }\n    env.dev: Env{ packages: [] }\n}\n") ?? panic("write env")
+    for exact in ["nixpkgs:omp#1.2.3", "nixpkgs:omp#1.2.4"] {
+        write_channel_fixture(&fixtures.path, "nixpkgs:omp", "latest", exact)
+        build :: jetpack().args(["build", "--no-color", "--yes", "--fixtures"]).arg(&fixtures.path).current_dir(&proj.path).env("JETPACK_ROOT", &root.path).output() ?? panic("build")
+        assert(build.status.success(), "stderr: {String.from_utf8_lossy(build.stderr)}")
+    }
+    lock :: fs.read_to_string(proj.join(".jet/lock")) ?? panic("read lock")
+    assert(lock.contains("exact = \"nixpkgs:omp#1.2.4\""), "lock: {lock}")
+    manifest :: fs.read_to_string(proj.join("env.jet")) ?? panic("read env")
+    assert(manifest.contains("omp@nixpkgs#auto"), "manifest: {manifest}")
+}
+
+// Rust: tests/jetpack_engine.rs:5638
+#Test("update_of_pinned_source_is_e1352") {
+    proj :: Scratch.new("proj")
+    root :: Scratch.new("root")
+    fs.write(proj.join("env.jet"), "\nmodule dev {\n    sources: { stable: rustc@jetpack }\n    env.dev: Env{ packages: [] }\n}\n") ?? panic("write env")
+    out :: jetpack().args(["update", "stable", "--no-color"]).current_dir(&proj.path).env("JETPACK_ROOT", &root.path).output() ?? panic("update")
+    assert_eq(out.status.code(), Val(2))
+    stderr :: String.from_utf8_lossy(out.stderr)
+    assert(stderr.contains("E1352"), "stderr: {stderr}")
+    assert(stderr.contains("#auto"), "stderr: {stderr}")
+}
+
+// Rust: tests/jetpack_engine.rs:5664
+#Test("outdated_labels_pinned_manual_and_automatic_sources") {
+    proj :: Scratch.new("proj")
+    root :: Scratch.new("root")
+    fixtures :: Scratch.new("fx")
+    fs.write(proj.join("env.jet"), "\nmodule dev {\n    sources: {\n        pinned: rustc@jetpack,\n        manual: jq@jetpack#latest,\n        automatic: omp@jetpack#auto,\n    }\n    env.dev: Env{ packages: [] }\n}\n") ?? panic("write env")
+    fs.create_dir_all(proj.join(".jet")) ?? panic("create .jet")
+    fs.write(proj.join(".jet/lock"), "version = 1\n\n[[source_channel]]\nname = \"manual\"\nchannel = \"latest\"\nexact = \"nixpkgs:jq#1.0\"\n\n[[source_channel]]\nname = \"automatic\"\nchannel = \"latest\"\nexact = \"nixpkgs:omp#1.0\"\n\n[root]\ndependencies = []\n") ?? panic("write lock")
+    write_channel_fixture(&fixtures.path, "nixpkgs:jq", "latest", "nixpkgs:jq#1.0")
+    write_channel_fixture(&fixtures.path, "nixpkgs:omp", "latest", "nixpkgs:omp#1.0")
+    out :: jetpack().args(["outdated", "--no-color", "--fixtures"]).arg(&fixtures.path).current_dir(&proj.path).env("JETPACK_ROOT", &root.path).output() ?? panic("outdated")
+    assert(out.status.success(), "stderr: {String.from_utf8_lossy(out.stderr)}")
+    stderr :: String.from_utf8_lossy(out.stderr)
+    assert(stderr.contains("pinned"), "stderr: {stderr}")
+    assert(stderr.contains("manual"), "stderr: {stderr}")
+    assert(stderr.contains("automatic"), "stderr: {stderr}")
+}
+
+// Rust: tests/jetpack_engine.rs:5710
+#Test("add_adapt_prints_snippet_without_editing_env") {
+    proj :: Scratch.new("proj")
+    output :: jetpack().args(["add", "./vendor/weirdctl", "--adapt", "--no-color"]).current_dir(&proj.path).output() ?? panic("add adapt")
+    assert(output.status.success())
+    stdout :: String.from_utf8_lossy(output.stdout)
+    assert(stdout.contains("Pkg.adapt("), "stdout: {stdout}")
+    assert(stdout.contains("source: \"./vendor/weirdctl\""), "stdout: {stdout}")
+    assert(!proj.join("env.jet").exists())
+}
+
+// Rust: tests/jetpack_engine.rs:5728
+#Test("named_source_env_resolves_with_pin") {
+    proj :: Scratch.new("proj")
+    root :: Scratch.new("root")
+    fs.write(proj.join("env.jet"), "use jetpack as pkg\npub fn shell() -> [JSON] {\n    return [\n        pkg.source(\"stable\", \"NixOS/nixpkgs/nixos-24.05@github\"),\n        pkg.packages([\"ripgrep@stable\"])\n    ]\n}\n") ?? panic("write env")
+    output :: jetpack().args(["build", "--no-color", "--offline"]).current_dir(&proj.path).env("JETPACK_ROOT", &root.path).env("JETPACK_FIXTURES", example_fixtures(&root.path)).output() ?? panic("build")
+    assert(output.status.success(), "stderr: {String.from_utf8_lossy(output.stderr)}")
+    stderr :: String.from_utf8_lossy(output.stderr)
+    assert(stderr.contains("ripgrep"), "stderr: {stderr}")
+}
+
+// Rust: tests/jetpack_engine.rs:5756
+#Test("unknown_named_source_in_env_is_friendly") {
+    proj :: Scratch.new("proj")
+    root :: Scratch.new("root")
+    fs.write(proj.join("env.jet"), "use jetpack as pkg\npub fn shell() -> [JSON] {\n    return [\n        pkg.source(\"stable\", \"NixOS/nixpkgs/nixos-24.05@github\"),\n        pkg.packages([\"neovim@beta\"])\n    ]\n}\n") ?? panic("write env")
+    output :: jetpack().args(["build", "--no-color", "--offline"]).current_dir(&proj.path).env("JETPACK_ROOT", &root.path).env("JETPACK_FIXTURES", example_fixtures(&root.path)).output() ?? panic("build")
+    assert_eq(output.status.code(), Val(2))
+    stderr :: String.from_utf8_lossy(output.stderr)
+    assert(stderr.contains("not a known source"), "stderr: {stderr}")
+    assert(stderr.contains("stable"), "should list declared names: {stderr}")
+}
+
+// Rust: tests/jetpack_engine.rs:5782
+#Test("jetpack_env_runs_command_in_project_env") {
+    (base, proj, root) :: core_hello_project("env")
+    output :: jetpack().args(["env", "--no-color", "--trust", "--", "hello"]).current_dir(proj).env("JETPACK_ROOT", root).env("HOME", base.join("home")).env("PATH", "/usr/bin:/bin").output() ?? panic("env")
+    assert(output.status.success(), "stderr: {String.from_utf8_lossy(output.stderr)}")
+    text := String.from_utf8_lossy(output.stdout).trim() // #4303
+    assert_eq(text, "hello from jet-pkgs")
+    roots :: Store.Roots.at(root)
+    entry :: Store.find_by_reference(&roots, "hello@mine") ?? panic("core realization should register a Store entry")
+    producer :: Store.ProducerRecord.decode(entry.producer_record) ?? panic("Store producer record")
+    shared :: ProviderFacts.from_json(producer.facts.get("provider-facts") ?? panic("Store entry should carry shared provider facts")) ?? panic("shared provider facts JSON")
+    shared.validate() ?? panic("Store provider facts are lossless")
+    assert_eq(shared.reference, entry.reference)
+    assert(!shared.native_document.is_empty())
+}
+
+// Rust: tests/jetpack_engine.rs:5827
+#Test("jetpack_env_propagates_child_exit_status") {
+    (base, proj, root) :: core_hello_project("env-status")
+    output :: jetpack().args(["env", "--no-color", "--trust", "--", "sh", "-c", "exit 17"]).current_dir(proj).env("JETPACK_ROOT", root).env("HOME", base.join("home")).env("PATH", "/usr/bin:/bin").output() ?? panic("env")
+    assert_eq(output.status.code(), Val(17), "stderr: {String.from_utf8_lossy(output.stderr)}")
+}
+
+// Rust: tests/jetpack_engine.rs:5846
+#Test("jetpack_env_prep_materializes_without_entering") {
+    (base, proj, root) :: core_hello_project("env-prep")
+    prep :: jetpack().args(["env", "--prep", "--no-color", "--trust"]).current_dir(proj).env("JETPACK_ROOT", root).env("HOME", base.join("home")).env("PATH", "/usr/bin:/bin").output() ?? panic("prep")
+    assert(prep.status.success(), "env --prep failed: {String.from_utf8_lossy(prep.stderr)}")
+    enter :: jetpack().args(["env", "--no-color", "--trust", "--", "hello"]).current_dir(proj).env("JETPACK_ROOT", root).env("HOME", base.join("home")).env("PATH", "/usr/bin:/bin").output() ?? panic("enter")
+    assert(enter.status.success(), "entry after prep failed: {String.from_utf8_lossy(enter.stderr)}")
+    text := String.from_utf8_lossy(enter.stdout).trim() // #4303
+    assert_eq(text, "hello from jet-pkgs")
+}
+
+// Rust: tests/jetpack_engine.rs:5881
+#Test("provider_conformance_pypi_swiftpm_maven_round_trips_the_production_carrier") {
+    revision :: "0123456789abcdef0123456789abcdef01234567"
+    pypi :: "{\"info\":{\"name\":\"sample-pkg\",\"version\":\"2.4.1\",\"license\":\"MIT\",\"requires_python\":\">=3.10\",\"requires_dist\":[\"httpx>=0.27\"],\"classifiers\":[\"Programming Language :: Python :: 3\"]},\"urls\":[{\"filename\":\"sample_pkg-2.4.1.tar.gz\",\"digests\":{\"sha256\":\"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\"},\"yanked\":false}],\"vulnerabilities\":[{\"id\":\"PYSEC-0000\"}]}"
+    swiftpm :: "{\"version\":1,\"pins\":[{\"package\":\"swift-log\",\"repositoryURL\":\"https://github.com/apple/swift-log.git\",\"state\":{\"revision\":\"{revision}\",\"version\":\"1.5.4\"}}]}"
+    maven :: "<project>\n  <modelVersion>4.0.0</modelVersion>\n  <groupId>com.example</groupId>\n  <artifactId>sample</artifactId>\n  <version>1.2.3</version>\n  <packaging>jar</packaging>\n  <licenses><license><name>Apache-2.0</name><url>https://www.apache.org/licenses/LICENSE-2.0</url></license></licenses>\n  <dependencies><dependency><groupId>org.example</groupId><artifactId>dep</artifactId><version>3.0.0</version><scope>test</scope></dependency></dependencies>\n  <build><plugins><plugin><artifactId>maven-compiler-plugin</artifactId><version>3.13.0</version><goals><goal>compile</goal></goals></plugin></plugins></build>\n  <profiles><profile><id>linux</id><activation><os><name>Linux</name></os></activation></profile></profiles>\n  <scm><url>https://example.invalid/sample</url></scm>\n</project>"
+    for (family, native) in [(ProviderFamily.PyPI, pypi), (ProviderFamily.SwiftPM, swiftpm), (ProviderFamily.Maven, maven)] {
+        report :: normalize_provider_document(family, native)
+        report.validate() ?? panic("lossless provider report")
+        shared :: report.shared_facts()
+        assert_eq(shared.native_document, native)
+        assert(shared.explain_lines().iter().any(line -> line.contains("native") && line.contains("retained")))
+        exported :: ProviderFacts.from_json(report.export_json()) ?? panic("provider export uses the shared carrier")
+        assert_eq(exported, shared)
+        lock :: report.lock_record("app", shared.reference, "x86_64-linux") ?? panic("provider lock uses the shared carrier")
+        locked :: ProviderFacts.from_json(lock.future_fields.get("provider-facts") ?? panic("provider facts in lock")) ?? panic("locked provider facts JSON")
+        assert_eq(locked, shared)
+        digest :: shared.digest()
+        assert_eq(lock.future_fields.get("provider-facts-digest"), Val(digest))
+    }
+}
+
+// Rust: tests/jetpack_engine.rs:5942
+#Test("provider_conformance_reports_loss_and_conflict_without_defaults") {
+    missing_version :: normalize_provider_document(ProviderFamily.PyPI, "{\"info\":{\"name\":\"sample-pkg\"},\"urls\":[]}")
+    assert(missing_version.losses.iter().any(loss -> loss.contains("exact version")))
+    assert(missing_version.validate().is_err())
+    assert(missing_version.shared_facts().losses.iter().any(loss -> loss.reason.contains("exact version")))
+    branch_only :: normalize_provider_document(ProviderFamily.SwiftPM, "{\"version\":1,\"pins\":[{\"package\":\"swift-log\",\"state\":{\"branch\":\"main\"}}]}")
+    assert(branch_only.losses.iter().any(loss -> loss.contains("exact revision")))
+    assert(branch_only.validate().is_err())
+    conflicting_pom :: "<project><groupId>com.example</groupId><artifactId>sample</artifactId><version>1.0.0</version><version>2.0.0</version></project>"
+    conflict :: normalize_provider_document(ProviderFamily.Maven, conflicting_pom)
+    assert(conflict.conflicts.iter().any(finding -> finding.contains("conflicting version")))
+    assert(conflict.validate().is_err())
+    unsupported_xml :: normalize_provider_document(ProviderFamily.Maven, "<m:project xmlns:m=\"urn:example\"><m:artifactId>sample</m:artifactId></m:project>")
+    assert(unsupported_xml.losses.iter().any(loss -> loss.contains("namespaced XML")))
+    assert(unsupported_xml.validate().is_err())
+}
+
+// Rust: tests/jetpack_engine.rs:5990
+#Test("env_dash_p_adds_adhoc_package_with_no_manifest_at_all") {
+    root :: Scratch.new("dashp-root")
+    proj :: Scratch.new("dashp-proj")
+    fixtures :: Scratch.new("dashp-fx")
+    out :: Scratch.new("dashp-out")
+    write_runnable_fixture(&fixtures.path, &root.path, &out.path)
+    output :: jetpack().args(["env", "--no-color", "--trust", "--offline", "--fixtures"]).arg(&fixtures.path).args(["-p", "greet", "--", "greet"]).current_dir(&proj.path).env("JETPACK_ROOT", &root.path).output() ?? panic("env")
+    assert(output.status.success(), "stderr: {String.from_utf8_lossy(output.stderr)}")
+    text := String.from_utf8_lossy(output.stdout).trim() // #4303
+    assert_eq(text, "hello from jetpack")
+}
+
+// Rust: tests/jetpack_engine.rs:6020
+#Test("env_dash_p_merges_with_project_declared_packages") {
+    (base, proj, root) :: core_hello_project("dashp-merge")
+    fixtures :: base.join("fixtures")
+    out :: base.join("greet-out")
+    write_runnable_fixture(&fixtures, &root, &out)
+    output :: jetpack().args(["env", "--no-color", "--trust", "--offline", "--fixtures"]).arg(fixtures).args(["-p", "greet", "--", "sh", "-c", "hello && greet"]).current_dir(proj).env("JETPACK_ROOT", root).env("HOME", base.join("home")).output() ?? panic("env")
+    assert(output.status.success(), "stderr: {String.from_utf8_lossy(output.stderr)}")
+    stdout :: String.from_utf8_lossy(output.stdout)
+    assert(stdout.contains("hello from jet-pkgs"), "stdout: {stdout}")
+    assert(stdout.contains("hello from jetpack"), "stdout: {stdout}")
+}
+
+// Rust: tests/jetpack_engine.rs:6047
+#Test("env_without_env_jet_or_packages_is_still_nothing_to_do") {
+    root :: Scratch.new("nothing-root")
+    proj :: Scratch.new("nothing-proj")
+    output :: jetpack().args(["env", "--no-color"]).current_dir(&proj.path).env("JETPACK_ROOT", &root.path).output() ?? panic("env")
+    assert(!output.status.success())
+    stderr :: String.from_utf8_lossy(output.stderr)
+    assert(stderr.contains("nothing to do"), "stderr: {stderr}")
+}
+
+// Rust: tests/jetpack_engine.rs:6064
+#Test("env_flake_detection_ordering_project_env_wins_without_flag") {
+    (base, proj, root) :: core_hello_project("flake-ordering")
+    fs.write(proj.join("flake.nix"), "this is not valid nix") ?? panic("write flake")
+    output :: jetpack().args(["env", "--no-color", "--trust", "--", "hello"]).current_dir(proj).env("JETPACK_ROOT", root).env("HOME", base.join("home")).env("PATH", "/usr/bin:/bin").output() ?? panic("env")
+    assert(output.status.success(), "stderr: {String.from_utf8_lossy(output.stderr)}")
+    text := String.from_utf8_lossy(output.stdout).trim() // #4303
+    assert_eq(text, "hello from jet-pkgs")
+}
+
+// Rust: tests/jetpack_engine.rs:6093
+#Test("env_flake_flag_requires_trust_before_native_projection") {
+    (base, proj, root) :: core_hello_project("flake-forced")
+    fs.write(proj.join("flake.nix"), "{ }") ?? panic("write flake")
+    output :: jetpack().args(["env", "--no-color", "--flake"]).current_dir(proj).env("JETPACK_ROOT", root).env("HOME", base.join("home")).env("PATH", "/usr/bin:/bin").output() ?? panic("env")
+    assert(!output.status.success())
+    stderr :: String.from_utf8_lossy(output.stderr)
+    assert(stderr.contains("E1255"), "stderr: {stderr}")
+    assert(stderr.contains("--trust"), "stderr: {stderr}")
+    assert(!stderr.contains("E1256"), "stderr: {stderr}")
+}
+
+// Rust: tests/jetpack_engine.rs:6114
+#Test("env_flake_native_projection_runs_without_nix_on_path") {
+    project :: Scratch.new("flake-native-env")
+    fs.write(project.join("flake.nix"), "{ devShells.x86_64-linux.default = { }; }") ?? panic("write flake")
+    output :: jetpack().args(["env", "--flake", "--trust", "--no-color", "--", "/bin/sh", "-c", "printf native-flake"]).current_dir(&project.path).env("PATH", "").output() ?? panic("env")
+    assert(output.status.success(), "stderr: {String.from_utf8_lossy(output.stderr)}")
+    text := String.from_utf8_lossy(output.stdout).trim() // #4303
+    assert_eq(text, "native-flake")
+}
+
+// Rust: tests/jetpack_engine.rs:6151
+#Test("bridge_flake_projects_imported_flake_parts_module_and_preserves_last_lock_on_failure") {
+    project :: Scratch.new("flake-parts-bridge")
+    fs.create_dir_all(project.join("parts")) ?? panic("create parts")
+    fs.write(project.join("flake.nix"), "\nlet marker = \"flake-parts mkFlake\"; in {\n  imports = [ ./parts/dev.nix ];\n  systems = [ \"x86_64-linux\" ];\n  perSystem = true;\n  outputs = import ./parts/dev.nix;\n}\n") ?? panic("write flake")
+    fs.write(project.join("parts/dev.nix"), "{ devShells.x86_64-linux.default = { packages = [ pkgs.fd ]; }; }\n") ?? panic("write module")
+    first :: jetpack().args(["bridge", "flake", "--no-color"]).current_dir(&project.path).env("PATH", "").output() ?? panic("bridge")
+    assert(first.status.success(), "stderr: {String.from_utf8_lossy(first.stderr)}")
+    assert(String.from_utf8_lossy(first.stdout).contains("packages: [fd]"), "stdout: {String.from_utf8_lossy(first.stdout)}")
+    lock_path :: project.join(".jet/lock")
+    before :: fs.read(lock_path) ?? panic("successful bridge must commit a semantic lock")
+    lock_text :: String.from_utf8(before.clone()) ?? panic("lock utf8")
+    assert(lock_text.contains("flake-composition:flake-parts"), lock_text)
+    assert(lock_text.contains("./parts/dev.nix"), lock_text)
+    previous :: SemanticLock.parse(lock_text)
+    previous_graph :: SemanticLock.FlakeGraph.from_semantic_lock("flake.nix", &previous) ?? panic("the committed imported-module projection must remain usable")
+    assert(previous_graph.named_dev_shells().iter().any(output -> output.provenance.contains("./parts/dev.nix")))
+    fs.write(project.join("parts/dev.nix"), "{ devShells.x86_64-linux.default = { packages = pkgs.lib.optionals true [ pkgs.fd ]; }; }\n") ?? panic("write dynamic module")
+    failed :: jetpack().args(["bridge", "flake", "--no-color"]).current_dir(&project.path).env("PATH", "").output() ?? panic("bridge")
+    assert_eq(failed.status.code(), Val(1))
+    stderr :: String.from_utf8_lossy(failed.stderr)
+    assert(stderr.contains("E1256"), "stderr: {stderr}")
+    assert_eq(fs.read(lock_path) ?? panic("read preserved lock"), before)
+}
+
+// Rust: tests/jetpack_engine.rs:6223
+#Test("env_flake_dynamic_projection_reports_e1256_without_nix") {
+    project :: Scratch.new("flake-dynamic-env")
+    fs.write(project.join("flake.nix"), "{ devShells.x86_64-linux.default = pkgs.mkShell { packages = pkgs.lib.optionals true [ pkgs.fd ]; }; }") ?? panic("write flake")
+    output :: jetpack().args(["env", "--flake", "--trust", "--no-color"]).current_dir(&project.path).env("PATH", "").output() ?? panic("env")
+    assert_eq(output.status.code(), Val(1))
+    stderr :: String.from_utf8_lossy(output.stderr)
+    assert(stderr.contains("E1256"), "stderr: {stderr}")
+    assert(!stderr.contains("couldn't run `nix`"), "stderr: {stderr}")
+}
+
+// Rust: tests/jetpack_engine.rs:6243
+#Test("env_flake_with_no_foreign_flake_present_is_friendly") {
+    root :: Scratch.new("flake-none-root")
+    proj :: Scratch.new("flake-none-proj")
+    output :: jetpack().args(["env", "--no-color", "--flake"]).current_dir(&proj.path).env("JETPACK_ROOT", &root.path).output() ?? panic("env")
+    assert(!output.status.success())
+    stderr :: String.from_utf8_lossy(output.stderr)
+    assert(stderr.contains("no foreign flake"), "stderr: {stderr}")
+}
+
+// Rust: tests/jetpack_engine.rs:6258
+#Test("retired_profile_flag_teaches_preset") {
+    project :: Scratch.new("retired-profile-flag")
+    fs.write(project.join("env.jet"), "module env.dev {\n    packages: [nixpkgs.ripgrep]\n}\n") ?? panic("write env")
+    output :: jetpack().args(["env", "info", "--profile", "work", "--no-color"]).current_dir(&project.path).output() ?? panic("info")
+    stderr :: String.from_utf8_lossy(output.stderr)
+    assert(stderr.contains("E1300"), "stderr: {stderr}")
+    assert(stderr.contains("--preset"), "stderr: {stderr}")
+    assert(!output.status.success(), "the retired spelling must not select anything")
+}
+
+// Rust: tests/jetpack_engine.rs:6280
+#Test("retired_environment_flag_teaches_env") {
+    project :: Scratch.new("retired-environment-flag")
+    fs.write(project.join("env.jet"), "module env.dev {\n    packages: [nixpkgs.ripgrep]\n}\n") ?? panic("write env")
+    output :: jetpack().args(["env", "info", "--env-profile", "full", "--no-color"]).current_dir(&project.path).output() ?? panic("info")
+    stderr :: String.from_utf8_lossy(output.stderr)
+    assert(stderr.contains("E1342"), "stderr: {stderr}")
+    assert(stderr.contains("`--env <name>`"), "stderr: {stderr}")
+    assert(!output.status.success(), "the retired spelling must not select an environment module")
+}
+
+// Rust: tests/jetpack_engine.rs:6302
+#Test("env_info_json_discloses_selected_preset_and_language_projection") {
+    project :: Scratch.new("env-info-composition")
+    fs.write(project.join("env.jet"), "module env.dev {\n    presets: {\n        host: { hostname: \"epoch5-host\", variables: [String:String]{ \"MODE\": \"dev\" } }\n        user: { user: \"epoch5-user\" }\n    }\n    services: {\n        redis: { enable: true, ports: [6379], after: [\"database\"] }\n    }\n    languages: [\n        \"rust\": Lang{ enable: true, channel: .Stable },\n        \"zig\": Lang{ enable: true }\n    ]\n    packages: [nixpkgs.ripgrep]\n}\nmodule env.full {\n    packages: [nixpkgs.fd]\n}\n") ?? panic("write env")
+    fs.write(project.join("run.jet"), "#Job\nfn lint() {}\n") ?? panic("write job")
+    output :: jetpack().args(["env", "info", "--json", "--no-color"]).current_dir(&project.path).env("HOSTNAME", "epoch5-host").env("USER", "epoch5-user").output() ?? panic("info")
+    assert(output.status.success(), "stderr: {String.from_utf8_lossy(output.stderr)}")
+    stdout :: String.from_utf8_lossy(output.stdout)
+    assert(stdout.contains("\"preset\":\"host+user\""), "stdout: {stdout}")
+    assert(stdout.contains("\"selected_presets\":[\"host\",\"user\"]"), "stdout: {stdout}")
+    assert(stdout.contains("\"active_environment\":\"dev\""), "stdout: {stdout}")
+    assert(stdout.contains("\"active_environment_provenance\":[\"env.dev\"]"), "stdout: {stdout}")
+    assert(stdout.contains("\"language_catalog\""), "stdout: {stdout}")
+    assert(stdout.contains("\"fingerprint\":\""), "stdout: {stdout}")
+    assert(stdout.contains("\"language_projections\""), "stdout: {stdout}")
+    assert(stdout.contains("\"host\":\"native\""), "stdout: {stdout}")
+    assert(stdout.contains("\"platform\":\"x86_64-linux\""), "stdout: {stdout}")
+    assert(stdout.contains("\"license\":\"Apache-2.0 OR MIT\""), "stdout: {stdout}")
+    assert(stdout.contains("\"missing_tools\":[]"), "stdout: {stdout}")
+    assert(stdout.contains("\"included\""), "stdout: {stdout}")
+    assert(stdout.contains("\"omitted\""), "stdout: {stdout}")
+    assert(stdout.contains("\"name\":\"Zig\""), "stdout: {stdout}")
+    assert(stdout.contains("\"zig@nixpkgs\""), "stdout: {stdout}")
+    assert(stdout.contains("\"services\":[{\"name\":\"redis\""), "stdout: {stdout}")
+    assert(stdout.contains("\"checks\":[],\"jobs\":[\"lint\"]"), "stdout: {stdout}")
+    assert(!stdout.contains("\"tasks\":[\"lint\"]"), "stdout: {stdout}")
+    assert(stdout.contains("\"variables\":[{\"name\":\"MODE\""), "stdout: {stdout}")
+    full :: jetpack().args(["env", "info", "--json", "--no-color", "--env", "full"]).current_dir(&project.path).env("HOSTNAME", "epoch5-host").env("USER", "epoch5-user").output() ?? panic("full info")
+    assert(full.status.success(), "stderr: {String.from_utf8_lossy(full.stderr)}")
+    full_stdout :: String.from_utf8_lossy(full.stdout)
+    assert(full_stdout.contains("\"active_environment\":\"full\""), "stdout: {full_stdout}")
+    assert(full_stdout.contains("\"active_environment_provenance\":[\"env.full\"]"), "stdout: {full_stdout}")
+    assert(full_stdout.contains("\"fd@nixpkgs\""), "stdout: {full_stdout}")
+    assert(!full_stdout.contains("\"ripgrep@nixpkgs\""), "stdout: {full_stdout}")
+    missing :: jetpack().args(["env", "info", "--no-color", "--env", "missing"]).current_dir(&project.path).env("HOSTNAME", "epoch5-host").env("USER", "epoch5-user").output() ?? panic("missing info")
+    assert(!missing.status.success())
+    missing_stderr :: String.from_utf8_lossy(missing.stderr)
+    assert(missing_stderr.contains("E1337"), "stderr: {missing_stderr}")
+    assert(missing_stderr.contains("environment module `missing` is not declared"), "stderr: {missing_stderr}")
+}
+
+// Rust: tests/jetpack_engine.rs:6441
+#Test("env_info_json_discloses_reads_and_typed_service_facts_without_starting_processes") {
+    project :: Scratch.new("env-info-facts")
+    fs.write(project.join("env.jet"), "module env.dev {\n    prompt: $HOME\n    services: {\n        fixture: {\n            enable: false,\n            ports: [8080],\n            run: [\"fixture\", \"--port\", \"8080\"],\n            ready: \"fixture --ready\",\n            data_dir: \"state/fixture\",\n            watch: [\"src\"],\n            after: [\"database\"],\n            before_start: [\"lint\"],\n            sockets: [\"run/fixture.sock\"]\n        }\n    }\n    files: [\"config/generated.txt\": File{ content: \"generated\\n\", mode: .Copy }]\n}\n") ?? panic("write env")
+    fs.write(project.join("run.jet"), "#Job\nfn lint() {}\n") ?? panic("write job")
+    output :: jetpack().args(["env", "info", "--json", "--no-color"]).current_dir(&project.path).env("HOME", "/test/home").output() ?? panic("info")
+    assert(output.status.success(), "stderr: {String.from_utf8_lossy(output.stderr)}")
+    stdout :: String.from_utf8_lossy(output.stdout)
+    assert(JSON.parse(stdout).is_ok(), "info JSON must parse: {stdout}")
+    assert(stdout.contains("\"variables\":[{\"name\":\"HOME\",\"sources\":[\"environment\"]}"), "stdout: {stdout}")
+    assert(stdout.contains("\"name\":\"fixture\",\"enabled\":false"), "stdout: {stdout}")
+    assert(stdout.contains("\"run\":[\"fixture\",\"--port\",\"8080\"]"), "stdout: {stdout}")
+    assert(stdout.contains("\"ready\":\"fixture --ready\""), "stdout: {stdout}")
+    assert(stdout.contains("\"data_dir\":\"state/fixture\""), "stdout: {stdout}")
+    assert(stdout.contains("\"watch\":[\"src\"]"), "stdout: {stdout}")
+    assert(stdout.contains("\"after\":[\"database\"]"), "stdout: {stdout}")
+    assert(stdout.contains("\"before_start\":[\"lint\"]"), "stdout: {stdout}")
+    assert(stdout.contains("\"sockets\":[\"run/fixture.sock\"]"), "stdout: {stdout}")
+    assert(stdout.contains("\"files\":[\"config/generated.txt\"]"), "stdout: {stdout}")
+    assert(stdout.contains("\"jobs\":[\"lint\"]"), "stdout: {stdout}")
+    assert(!project.join(".jet/services").exists(), "info must not start services")
+}
+
+// Rust: tests/jetpack_engine.rs:6528
+#Test("env_sync_applies_typed_files_and_refuses_unmanaged_destinations") {
+    project :: Scratch.new("env-sync-files")
+    root :: Scratch.new("env-sync-files-root")
+    home :: Scratch.new("env-sync-files-home")
+    fs.write(project.join("env.jet"), "module env.dev {\n    files: [\n        \"generated/config.txt\": File{ content: \"generated\\n\", mode: .Copy },\n        \"seed/config.txt\": File{ content: \"seeded\\n\", mode: .Seed }\n    ]\n}\n") ?? panic("write env")
+    fs.create_dir_all(project.join("seed")) ?? panic("create seed")
+    fs.write(project.join("seed/config.txt"), "keep me\n") ?? panic("write seed")
+    output :: jetpack().args(["env", "sync", "--trust", "--yes", "--offline", "--no-color"]).current_dir(&project.path).env("JETPACK_ROOT", &root.path).env("HOME", &home.path).output() ?? panic("sync")
+    assert(output.status.success(), "stderr: {String.from_utf8_lossy(output.stderr)}")
+    assert_eq(fs.read_to_string(project.join("generated/config.txt")) ?? panic("read generated"), "generated\n")
+    assert_eq(fs.read_to_string(project.join("seed/config.txt")) ?? panic("read seed"), "keep me\n")
+    assert(project.join(".jet/files/state").is_file())
+    blocked :: Scratch.new("env-sync-files-blocked")
+    blocked_root :: Scratch.new("env-sync-files-blocked-root")
+    blocked_home :: Scratch.new("env-sync-files-blocked-home")
+    fs.write(blocked.join("env.jet"), fs.read(project.join("env.jet")) ?? panic("read env")) ?? panic("copy env")
+    fs.create_dir_all(blocked.join("generated")) ?? panic("create generated")
+    fs.write(blocked.join("generated/config.txt"), "user-owned\n") ?? panic("write user-owned")
+    refused :: jetpack().args(["env", "sync", "--trust", "--yes", "--offline", "--no-color"]).current_dir(&blocked.path).env("JETPACK_ROOT", &blocked_root.path).env("HOME", &blocked_home.path).output() ?? panic("sync")
+    assert_eq(refused.status.code(), Val(2))
+    assert(String.from_utf8_lossy(refused.stderr).contains("unmanaged destination"), "stderr: {String.from_utf8_lossy(refused.stderr)}")
+    assert_eq(fs.read_to_string(blocked.join("generated/config.txt")) ?? panic("read user-owned"), "user-owned\n")
+    assert(!blocked.join(".jet/files/state").exists())
+}
+
+// Rust: tests/jetpack_engine.rs:6613
+#Test("env_info_json_discloses_typed_integration_projection") {
+    project :: Scratch.new("env-info-integrations")
+    fs.write(project.join("env.jet"), "module env.dev {\n    imports: [\n        env.platform.android(api: 35, build_tools: \"35.0.0\", ndk: \"27.1\"),\n        env.platform.apple(targets: [.IOS]),\n        env.security.certificates([dev_certificate]),\n        env.cloud.credentials([aws_production]),\n        env.security.vault([database_password]),\n        env.network.hosts([\"api.local\": \"127.0.0.1\"]),\n        env.agent.codex(mcp: [repo_server]),\n        env.editor.vscode()\n    ]\n}\n") ?? panic("write env")
+    output :: jetpack().args(["env", "info", "--json", "--no-color"]).current_dir(&project.path).env("JET_TARGET", "x86_64-linux-darwin").output() ?? panic("info")
+    assert(output.status.success(), "stderr: {String.from_utf8_lossy(output.stderr)}")
+    stdout :: String.from_utf8_lossy(output.stdout)
+    assert(stdout.contains("\"integrations\":["), "stdout: {stdout}")
+    assert(stdout.contains("\"kind\":\"android\""), "stdout: {stdout}")
+    assert(stdout.contains("\"kind\":\"apple\""), "stdout: {stdout}")
+    assert(stdout.contains("\"kind\":\"certificates\""), "stdout: {stdout}")
+    assert(stdout.contains("\"kind\":\"cloud-credentials\""), "stdout: {stdout}")
+    assert(stdout.contains("\"kind\":\"vault\""), "stdout: {stdout}")
+    assert(stdout.contains("\"kind\":\"hosts\""), "stdout: {stdout}")
+    assert(stdout.contains("\"kind\":\"codex-agent\""), "stdout: {stdout}")
+    assert(stdout.contains("\"kind\":\"editor\""), "stdout: {stdout}")
+    assert(stdout.contains("\"option_keys\":[\"api\",\"build_tools\",\"license\",\"ndk\"]"), "stdout: {stdout}")
+    assert(stdout.contains("\"option_keys\":[\"license\",\"targets\"]"), "stdout: {stdout}")
+    assert(stdout.contains("\"host_checks\":["), "stdout: {stdout}")
+    assert(stdout.contains("\"grants\":["), "stdout: {stdout}")
+    assert(stdout.contains("\"secrets\":[\"dev_certificate\"]"), "stdout: {stdout}")
+    assert(stdout.contains("\"grants\":[\"certificate.read\"]"), "stdout: {stdout}")
+    assert(stdout.contains("\"secrets\":[\"aws_production\"]"), "stdout: {stdout}")
+    assert(stdout.contains("\"grants\":[\"credential.read\"]"), "stdout: {stdout}")
+    assert(stdout.contains("\"secrets\":[\"database_password\"]"), "stdout: {stdout}")
+    assert(stdout.contains("\"grants\":[\"vault.read\"]"), "stdout: {stdout}")
+    assert(stdout.contains("\"grants\":[\"mcp.read\"]"), "stdout: {stdout}")
+    assert(stdout.contains("\"packages\":[\"vscode@nixpkgs\"]"), "stdout: {stdout}")
+    assert(stdout.contains("\"option_keys\":[\"host.api.local\"]"), "stdout: {stdout}")
+}
+
+// Rust: tests/jetpack_engine.rs:6711
+#Test("env_requires_a_persisted_cloud_integration_grant") {
+    project :: Scratch.new("cloud-integration-grant")
+    root :: Scratch.new("cloud-integration-grant-root")
+    home :: Scratch.new("cloud-integration-grant-home")
+    fs.write(project.join("env.jet"), "module env.dev {\n    imports: [env.cloud.credentials([aws_production])]\n}\n") ?? panic("write env")
+    output :: jetpack().args(["env", "--trust", "--offline", "--no-color", "--", "true"]).current_dir(&project.path).env("JETPACK_ROOT", &root.path).env("HOME", &home.path).output() ?? panic("env")
+    assert_eq(output.status.code(), Val(2))
+    stderr :: String.from_utf8_lossy(output.stderr)
+    assert(stderr.contains("E1335"), "stderr: {stderr}")
+    assert(stderr.contains("cloud-credentials:credential.read"), "stderr: {stderr}")
+    assert(!stderr.contains("aws_production"), "secret name leaked: {stderr}")
+}
+
+// Rust: tests/jetpack_engine.rs:6744
+#Test("env_requires_a_persisted_vault_integration_grant") {
+    project :: Scratch.new("vault-integration-grant")
+    root :: Scratch.new("vault-integration-grant-root")
+    home :: Scratch.new("vault-integration-grant-home")
+    fs.write(project.join("env.jet"), "module env.dev {\n    imports: [env.security.vault([database_password])]\n}\n") ?? panic("write env")
+    output :: jetpack().args(["env", "--trust", "--offline", "--no-color", "--", "true"]).current_dir(&project.path).env("JETPACK_ROOT", &root.path).env("HOME", &home.path).output() ?? panic("env")
+    assert_eq(output.status.code(), Val(2))
+    stderr :: String.from_utf8_lossy(output.stderr)
+    assert(stderr.contains("E1335"), "stderr: {stderr}")
+    assert(stderr.contains("vault:vault.read"), "stderr: {stderr}")
+    assert(!stderr.contains("database_password"), "secret name leaked: {stderr}")
+}
+
+// Rust: tests/jetpack_engine.rs:6774
+#Test("env_info_rejects_unredactable_integration_secret") {
+    project :: Scratch.new("env-info-integration-secret")
+    fs.write(project.join("env.jet"), "module env.dev {\n    imports: [env.cloud.credentials(\"super_secret_value\")]\n}\n") ?? panic("write env")
+    output :: jetpack().args(["env", "info", "--no-color"]).current_dir(&project.path).output() ?? panic("info")
+    assert(!output.status.success())
+    stderr :: String.from_utf8_lossy(output.stderr)
+    assert(stderr.contains("E1335"), "stderr: {stderr}")
+    assert(!stderr.contains("super_secret_value"), "stderr: {stderr}")
+}
+
+// Rust: tests/jetpack_engine.rs:6796
+#Test("env_info_rejects_unsupported_apple_integration_target") {
+    project :: Scratch.new("env-info-apple-target")
+    fs.write(project.join("env.jet"), "module env.dev {\n    imports: [env.platform.apple(targets: [.IOS])]\n}\n") ?? panic("write env")
+    output :: jetpack().args(["env", "info", "--no-color"]).current_dir(&project.path).output() ?? panic("info")
+    assert(!output.status.success())
+    stderr :: String.from_utf8_lossy(output.stderr)
+    assert(stderr.contains("E1335"), "stderr: {stderr}")
+    assert(stderr.contains("apple integration"), "stderr: {stderr}")
+}
+
+// Rust: tests/jetpack_engine.rs:6818
+#Test("bridge_flake_uses_native_evaluator_without_nix") {
+    dir :: Scratch.new("bridge-nonix")
+    fs.write(dir.join("flake.nix"), "{ devShells.x86_64-linux.default = pkgs.mkShell { packages = [ pkgs.fd ]; }; }") ?? panic("write flake")
+    output :: jetpack().args(["bridge", "flake", "--no-color"]).current_dir(&dir.path).env("PATH", "").output() ?? panic("bridge")
+    assert(output.status.success(), "stderr: {String.from_utf8_lossy(output.stderr)}")
+    assert(String.from_utf8_lossy(output.stdout).contains("packages: [fd]"), "stdout: {String.from_utf8_lossy(output.stdout)}")
+    lock_text :: fs.read_to_string(dir.join(".jet/lock")) ?? panic("native bridge must commit the pinned evaluator ledger")
+    lock :: SemanticLock.parse(lock_text)
+    inventory :: lock.records.iter().filter(record -> record.identity.key.starts_with("flake-evaluator-inventory:")).collect()
+    assert_eq(inventory.len(), 17, lock_text)
+    assert_eq(inventory.iter().filter(record -> record.identity.exact.contains("class=evaluable")).count(), 10)
+    assert_eq(inventory.iter().filter(record -> record.identity.exact.contains("class=buildable")).count(), 5)
+    skipped :: inventory.iter().filter(record -> record.identity.exact.starts_with("status=skipped;")).collect()
+    assert_eq(skipped.len(), 2, lock_text)
+    assert(skipped.iter().any(record -> record.identity.key.ends_with(":dynamic-derivations") && record.identity.exact == "status=skipped;class=skipped;reason=dynamic staging has a separate compatibility boundary"))
+    assert(skipped.iter().any(record -> record.identity.key.ends_with(":ifd") && record.identity.exact == "status=skipped;class=skipped;reason=import-from-derivation requires a separate authority grant"))
+    for (surface, class, reason) in [
+        ("fixed-output-fetchers", "buildable", "explicit fetch authority returns verified canonical store paths"),
+        ("cross-system-packages", "buildable", "explicit target authority projects pinned systems"),
+        ("external-flakes", "evaluable", "explicit provider authority evaluates bounded external sources")
+    ] {
+        key :: "flake-evaluator-inventory:{surface}"
+        exact :: "status=covered;class={class};reason={reason}"
+        assert(inventory.iter().any(record -> record.identity.key == key && record.identity.exact == exact), "missing inventory record {key}: {lock_text}")
+    }
+    assert(lock.records.iter().any(record -> record.identity.key == "flake-evaluator" && record.identity.exact == "native-nix:2.34.8:b5aa0fbd538984f6e3d201be0005b4463d8b09f8:x86_64-linux"))
+    before_failure :: lock_text
+    fs.write(dir.join("flake.nix"), " ".repeat((1 << 20) + 1)) ?? panic("write oversized flake")
+    failed :: jetpack().args(["bridge", "flake", "--no-color"]).current_dir(&dir.path).env("PATH", "").output() ?? panic("bridge")
+    assert_eq(failed.status.code(), Val(1))
+    stderr :: String.from_utf8_lossy(failed.stderr)
+    assert(stderr.contains("E1256"), "stderr: {stderr}")
+    assert(!stderr.contains("nix eval"), "stderr: {stderr}")
+    assert_eq(fs.read_to_string(dir.join(".jet/lock")) ?? panic("read lock"), before_failure)
+}
+
+// Rust: tests/jetpack_engine.rs:6936
+#Test("bridge_flake_breadth_and_json_budget_use_native_evaluator_without_nix") {
+    dir :: Scratch.new("bridge-native-breadth")
+    fs.write(dir.join("flake.nix"), "{ devShells.x86_64-linux.default = pkgs.mkShell {\n  packages = builtins.attrValues (builtins.fromJSON \"{\\\"b\\\":\\\"ripgrep\\\",\\\"a\\\":\\\"fd\\\"}\");\n}; }") ?? panic("write flake")
+    output :: jetpack().args(["bridge", "flake", "--no-color"]).current_dir(&dir.path).env("PATH", "").output() ?? panic("bridge")
+    assert(output.status.success(), "stderr: {String.from_utf8_lossy(output.stderr)}")
+    assert(String.from_utf8_lossy(output.stdout).contains("packages: [fd, ripgrep]"), "stdout: {String.from_utf8_lossy(output.stdout)}")
+    lock_before_budget_failure :: fs.read_to_string(dir.join(".jet/lock")) ?? panic("native breadth bridge must commit a lock before the failure case")
+    opens :: "[".repeat(257)
+    closes :: "]".repeat(257)
+    nested_json :: "{opens}true{closes}"
+    over_budget :: "{ devShells.x86_64-linux.default = pkgs.mkShell { packages = builtins.fromJSON \"{nested_json}\"; }; }"
+    fs.write(dir.join("flake.nix"), over_budget) ?? panic("write over-budget flake")
+    failed :: jetpack().args(["bridge", "flake", "--no-color"]).current_dir(&dir.path).env("PATH", "").output() ?? panic("bridge")
+    assert(!failed.status.success())
+    stderr :: String.from_utf8_lossy(failed.stderr)
+    assert(stderr.contains("E1256"), "stderr: {stderr}")
+    assert(stderr.contains("JSON value is too deeply nested"), "stderr: {stderr}")
+    assert(!stderr.contains("nix eval"), "stderr: {stderr}")
+    assert_eq(fs.read_to_string(dir.join(".jet/lock")) ?? panic("read lock"), lock_before_budget_failure)
+}
+
+// Rust: tests/jetpack_engine.rs:6990
+#Test("bridge_flake_projects_fetchers_cross_packages_and_external_flakes_without_nix") {
+    dir :: Scratch.new("bridge-native-nix-breadth")
+    fs.create_dir_all(dir.join("dep")) ?? panic("create dep")
+    fs.write(dir.join("dep/flake.nix"), "{ packages.x86_64-linux.default = pkgs.fd; }") ?? panic("write dep")
+    source_bytes :: "fixed-output\n".as_bytes()
+    fs.write(dir.join("source.txt"), source_bytes) ?? panic("write source")
+    source_hash :: SHA256.sha256_hex(source_bytes)
+    source :: "{\n  devShells.x86_64-linux.default = pkgs.mkShell {\n    packages = [\n      (builtins.getFlake \"path:./dep\").packages.x86_64-linux.default\n      pkgs.pkgsCross.aarch64-multiplatform.foo\n    ];\n  };\n  packages.x86_64-linux.fetched = builtins.derivationStrict {\n    name = \"fetched\";\n    system = \"x86_64-linux\";\n    builder = \"/bin/sh\";\n    args = [ \"-c\" \"echo $src > $out\" ];\n    src = builtins.fetchurl {\n      url = \"file:./source.txt\";\n      sha256 = \"{source_hash}\";\n      name = \"source.txt\";\n    };\n  };\n}\n"
+    fs.write(dir.join("flake.nix"), source) ?? panic("write flake")
+    output :: jetpack().args(["bridge", "flake", "--no-color"]).current_dir(&dir.path).env("PATH", "").output() ?? panic("bridge")
+    assert(output.status.success(), "stderr: {String.from_utf8_lossy(output.stderr)}")
+    stdout :: String.from_utf8_lossy(output.stdout)
+    assert(stdout.contains("packages: [fd, fetched]"), "stdout: {stdout}")
+    stderr :: String.from_utf8_lossy(output.stderr)
+    assert(stderr.contains("cross-package:aarch64-linux/foo"), "stderr: {stderr}")
+    assert(!stderr.contains("nix eval"), "stderr: {stderr}")
+    lock_path :: dir.join(".jet/lock")
+    lock_before_failure :: fs.read_to_string(lock_path) ?? panic("breadth bridge lock")
+    assert(lock_before_failure.contains("flake-devshell:devShells:x86_64-linux:default") && lock_before_failure.contains("packages=fd;unsupported=cross-package:aarch64-linux/foo"), "lock: {lock_before_failure}")
+    assert(lock_before_failure.contains("flake-derivation:packages:x86_64-linux:fetched"), "lock: {lock_before_failure}")
+    fs.write(dir.join("source.txt"), "tampered\n".as_bytes()) ?? panic("tamper source")
+    fetch_failed :: jetpack().args(["bridge", "flake", "--no-color"]).current_dir(&dir.path).env("PATH", "").output() ?? panic("bridge")
+    assert_eq(fetch_failed.status.code(), Val(1))
+    fetch_failure_stderr :: String.from_utf8_lossy(fetch_failed.stderr)
+    assert(fetch_failure_stderr.contains("E1256"), "stderr: {fetch_failure_stderr}")
+    assert(fetch_failure_stderr.contains("verified fetch hash mismatch"), "stderr: {fetch_failure_stderr}")
+    assert_eq(fs.read_to_string(lock_path) ?? panic("read lock"), lock_before_failure)
+    fs.write(dir.join("flake.nix"), "{ devShells.x86_64-linux.default = pkgs.mkShell {\n  packages = [ (builtins.getFlake \"github:NixOS/nixpkgs\").packages.x86_64-linux.default ];\n}; }") ?? panic("write external flake")
+    failed :: jetpack().args(["bridge", "flake", "--no-color"]).current_dir(&dir.path).env("PATH", "").output() ?? panic("bridge")
+    assert_eq(failed.status.code(), Val(1))
+    failure_stderr :: String.from_utf8_lossy(failed.stderr)
+    assert(failure_stderr.contains("E1256"), "stderr: {failure_stderr}")
+    assert(failure_stderr.contains("provider authority"), "stderr: {failure_stderr}")
+    assert(!failure_stderr.contains("nix eval"), "stderr: {failure_stderr}")
+    assert_eq(fs.read_to_string(lock_path) ?? panic("read lock"), lock_before_failure)
+}
+
+// Rust: tests/jetpack_engine.rs:7108
+#Test("bridge_flake_projects_overlays_named_devshells_and_all_outputs_without_nix") {
+    dir :: Scratch.new("bridge-native-evaluator-breadth")
+    fs.write(dir.join("flake.nix"), "{\n  packages.x86_64-linux.default = builtins.derivation {\n    name = \"many\";\n    system = \"x86_64-linux\";\n    builder = \"/bin/sh\";\n    outputs = [ \"out\" \"dev\" \"doc\" ];\n  };\n  devShells.x86_64-linux.default =\n    (import pkgs { overlays = [ (final: prev: { custom = prev.fd; }) ]; }).mkShell {\n      packages = [ (import pkgs { overlays = [ (final: prev: { custom = prev.fd; }) ]; }).custom ];\n    };\n  devShells.x86_64-linux.debug = {\n    packages = [ pkgs.ripgrep ];\n    inputsFrom = [];\n    shellHook = \"export DEBUG=1\";\n  };\n}\n") ?? panic("write flake")
+    output :: jetpack().args(["bridge", "flake", "--no-color"]).current_dir(&dir.path).env("PATH", "").output() ?? panic("bridge")
+    assert(output.status.success(), "stderr: {String.from_utf8_lossy(output.stderr)}")
+    assert(String.from_utf8_lossy(output.stdout).contains("packages: [fd]"), "stdout: {String.from_utf8_lossy(output.stdout)}")
+    stderr :: String.from_utf8_lossy(output.stderr)
+    assert(stderr.contains("L0204"), "stderr: {stderr}")
+    assert(stderr.contains("inputsFrom"), "stderr: {stderr}")
+    lock :: fs.read_to_string(dir.join(".jet/lock")) ?? panic("read lock")
+    assert(lock.contains("flake-devshell:devShells:x86_64-linux:debug"), "lock: {lock}")
+    assert(lock.contains("packages=ripgrep;unsupported=inputsFrom,shellHook"), "lock: {lock}")
+    assert(lock.contains("flake-derivation:packages:x86_64-linux:default"), "lock: {lock}")
+    assert(lock.contains("drvPath=/nix/store/iqjpmbf780gw1gqzhcvarkhw6h9y4c98-many.drv;dev=/nix/store/0cmdcz6gdcx6k0wf2ir78dh5isib04w3-many-dev;doc=/nix/store/v5m6bfihjhlp2ggsr9zcgw1j4wz1z1az-many-doc;out=/nix/store/3d8xbsqfn74lgzz2x82y3hh8i9mmx7xy-many"), "lock: {lock}")
+    overlay_list :: std.iter.repeat("overlay").take(65).collect().join(" ")
+    over_budget :: "let overlay = final: prev: {}; in { devShells.x86_64-linux.default = (import pkgs { overlays = [ {overlay_list} ]; }).mkShell { packages = []; }; }"
+    fs.write(dir.join("flake.nix"), over_budget) ?? panic("write over-budget flake")
+    failed :: jetpack().args(["bridge", "flake", "--no-color"]).current_dir(&dir.path).env("PATH", "").output() ?? panic("bridge")
+    assert_eq(failed.status.code(), Val(1))
+    failure_stderr :: String.from_utf8_lossy(failed.stderr)
+    assert(failure_stderr.contains("E1256"), "stderr: {failure_stderr}")
+    assert(failure_stderr.contains("overlay list exceeds 64"), "stderr: {failure_stderr}")
+    assert_eq(fs.read_to_string(dir.join(".jet/lock")) ?? panic("read lock"), lock)
+}

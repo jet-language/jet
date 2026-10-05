@@ -1,826 +1,334 @@
-// PORT-PENDING 0877 crates-jetpack-src-jetos-vm-proof: crates/jetpack/src/JetOS/vm_proof.rs:1-822
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS use super::desktop_store_vm::find_path_tool;
-//RS use super::generation::build_generation;
-//RS use super::generation_files::systems_dir;
-//RS use super::installer_media::write_installer_media;
-//RS use super::load_validate::validate_system_options;
-//RS use super::types::{Generation, OSFlags, VM_GUEST_PROOF_MARKER, VM_PROOF_TIMEOUT_MS, VM_TOOLS};
-//RS use crate::Output::Theme;
-//RS use crate::JSON;
-//RS use jet_env_model::ModuleEval::{EnvPlan, SystemPlan, VmTestPlan};
-//RS use std::fs;
-//RS use std::path::{Path, PathBuf};
-//RS use std::process::{Command, Stdio};
-//RS use std::time::{Duration, Instant};
-//RS 
-//RS pub(super) fn write_vm_install_plan(
-//RS     gen: &Generation,
-//RS     system: &SystemPlan,
-//RS     disk: &str,
-//RS     media_proof: &Path,
-//RS     real_guest: bool,
-//RS ) -> std::io::Result<PathBuf> {
-//RS     let proof_dir = systems_dir().join("vm-proofs");
-//RS     fs::create_dir_all(&proof_dir)?;
-//RS     let proof = proof_dir.join(format!("{}-{}-vm-proof.json", system.name, gen.name));
-//RS     let tools = vm_tools_json();
-//RS     let iso = systems_dir()
-//RS         .join("images")
-//RS         .join(format!("jetos-installer-{}.iso", system.name));
-//RS     let staging_boot = systems_dir()
-//RS         .join("images")
-//RS         .join(format!("jetos-installer-{}.iso.d/boot", system.name));
-//RS     let commands = qemu_proof_commands_json(&staging_boot, disk, &iso, &system.name, &gen.name);
-//RS     let guest = guest_proof_path(&proof);
-//RS     let proof_tier = if real_guest { "real-guest" } else { "plumbing" };
-//RS     let media_proof_sha256 = file_sha256(media_proof).map_err(std::io::Error::other)?;
-//RS     let iso_fingerprint = file_fingerprint(&iso).map_err(std::io::Error::other)?;
-//RS     let text = format!(
-//RS         "{{\"host\":{},\"generation\":{},\"state\":\"harness-ready\",\"proof_tier\":{},\"disk\":{},\"installer_media\":{},\"media_proof\":{},\"media_proof_sha256\":{},\"installer_iso_fingerprint\":{},\"expected_guest_proof\":{},\"tools\":[{}],\"commands\":[{}],\"steps\":[\"build-generation\",\"create-hybrid-iso\",\"boot-installer-qemu\",\"install-to-disk\",\"reboot-installed-disk\",\"verify-guest-proof\",\"boot-graphical-desktop\"],\"guest_assertions\":[{}]}}",
-//RS         JSON::quote(&system.name),
-//RS         JSON::quote(&gen.name),
-//RS         JSON::quote(proof_tier),
-//RS         JSON::quote(disk),
-//RS         JSON::quote(&format!("jetos-installer-{}.iso", system.name)),
-//RS         JSON::quote(&media_proof.display().to_string()),
-//RS         JSON::quote(&media_proof_sha256),
-//RS         JSON::quote(&iso_fingerprint),
-//RS         JSON::quote(&guest.display().to_string()),
-//RS         tools,
-//RS         commands,
-//RS         guest_assertions_json()
-//RS     );
-//RS     fs::write(&proof, text)?;
-//RS     Ok(proof)
-//RS }
-//RS 
-//RS pub(super) fn prove_vm_guest(
-//RS     gen: &Generation,
-//RS     system: &SystemPlan,
-//RS     disk: &str,
-//RS     media_proof: &Path,
-//RS     harness: &Path,
-//RS     real_guest: bool,
-//RS ) -> Result<Option<PathBuf>, String> {
-//RS     if let Some(final_path) = finalize_vm_guest_proof(gen, system, disk, media_proof, harness)? {
-//RS         return Ok(Some(final_path));
-//RS     }
-//RS     if !run_vm_install_harness(gen, system, disk, media_proof, harness, real_guest)? {
-//RS         return Ok(None);
-//RS     }
-//RS     finalize_vm_guest_proof(gen, system, disk, media_proof, harness)
-//RS }
-//RS 
-//RS fn run_vm_install_harness(
-//RS     gen: &Generation,
-//RS     system: &SystemPlan,
-//RS     disk: &str,
-//RS     media_proof: &Path,
-//RS     harness: &Path,
-//RS     real_guest: bool,
-//RS ) -> Result<bool, String> {
-//RS     let iso = systems_dir()
-//RS         .join("images")
-//RS         .join(format!("jetos-installer-{}.iso", system.name));
-//RS     let staging_boot = systems_dir()
-//RS         .join("images")
-//RS         .join(format!("jetos-installer-{}.iso.d/boot", system.name));
-//RS     let log_dir = vm_run_log_dir(harness);
-//RS     if log_dir.exists() {
-//RS         fs::remove_dir_all(&log_dir)
-//RS             .map_err(|e| format!("clearing `{}` failed: {e}", log_dir.display()))?;
-//RS     }
-//RS     fs::create_dir_all(&log_dir)
-//RS         .map_err(|e| format!("creating `{}` failed: {e}", log_dir.display()))?;
-//RS     let mut graphical_output = String::new();
-//RS     for command in qemu_proof_commands(&staging_boot, disk, &iso, &system.name, &gen.name) {
-//RS         let output = run_vm_command(&command, &log_dir)?;
-//RS         if command.phase == "boot-graphical-desktop" {
-//RS             graphical_output = output;
-//RS         }
-//RS     }
-//RS     let Some(report) = extract_guest_proof_report(&graphical_output) else {
-//RS         return Ok(false);
-//RS     };
-//RS     write_runner_guest_proof(gen, system, disk, media_proof, harness, &report, real_guest)?;
-//RS     Ok(true)
-//RS }
-//RS 
-//RS fn vm_run_log_dir(harness: &Path) -> PathBuf {
-//RS     let stem = harness
-//RS         .file_stem()
-//RS         .and_then(|s| s.to_str())
-//RS         .unwrap_or("vm-proof");
-//RS     harness.with_file_name(format!("{stem}.run"))
-//RS }
-//RS 
-//RS fn run_vm_command(command: &VmCommand, log_dir: &Path) -> Result<String, String> {
-//RS     let Some(program) = command.argv.first() else {
-//RS         return Err(format!("VM phase `{}` has no executable", command.phase));
-//RS     };
-//RS     let stdout_path = log_dir.join(format!("{}.stdout", command.phase));
-//RS     let stderr_path = log_dir.join(format!("{}.stderr", command.phase));
-//RS     let stdout = fs::File::create(&stdout_path)
-//RS         .map_err(|e| format!("creating `{}` failed: {e}", stdout_path.display()))?;
-//RS     let stderr = fs::File::create(&stderr_path)
-//RS         .map_err(|e| format!("creating `{}` failed: {e}", stderr_path.display()))?;
-//RS     let mut child = Command::new(program)
-//RS         .args(command.argv.iter().skip(1))
-//RS         .stdout(Stdio::from(stdout))
-//RS         .stderr(Stdio::from(stderr))
-//RS         .spawn()
-//RS         .map_err(|e| format!("starting VM phase `{}` failed: {e}", command.phase))?;
-//RS     let start = Instant::now();
-//RS     let timeout = vm_proof_timeout();
-//RS     let status = loop {
-//RS         if let Some(status) = child
-//RS             .try_wait()
-//RS             .map_err(|e| format!("waiting for VM phase `{}` failed: {e}", command.phase))?
-//RS         {
-//RS             break status;
-//RS         }
-//RS         if start.elapsed() > timeout {
-//RS             let _ = child.kill();
-//RS             let _ = child.wait();
-//RS             let stdout = fs::read_to_string(&stdout_path).unwrap_or_default();
-//RS             let stderr = fs::read_to_string(&stderr_path).unwrap_or_default();
-//RS             return Err(format!(
-//RS                 "VM phase `{}` timed out after {}ms; stdout `{}`, stderr `{}`{}{}",
-//RS                 command.phase,
-//RS                 timeout.as_millis(),
-//RS                 stdout_path.display(),
-//RS                 stderr_path.display(),
-//RS                 log_excerpt("stdout", &stdout),
-//RS                 log_excerpt("stderr", &stderr)
-//RS             ));
-//RS         }
-//RS         std::thread::sleep(Duration::from_millis(50));
-//RS     };
-//RS     let stdout = fs::read_to_string(&stdout_path).unwrap_or_default();
-//RS     let stderr = fs::read_to_string(&stderr_path).unwrap_or_default();
-//RS     if !status.success() {
-//RS         return Err(format!(
-//RS             "VM phase `{}` exited with {}; stdout `{}`, stderr `{}`{}{}",
-//RS             command.phase,
-//RS             status,
-//RS             stdout_path.display(),
-//RS             stderr_path.display(),
-//RS             log_excerpt("stdout", &stdout),
-//RS             log_excerpt("stderr", &stderr)
-//RS         ));
-//RS     }
-//RS     Ok(format!("{stdout}\n{stderr}"))
-//RS }
-//RS 
-//RS pub(super) fn run_interactive_vm_command(command: &VmCommand) -> Result<i32, String> {
-//RS     let Some(program) = command.argv.first() else {
-//RS         return Err(format!("VM phase `{}` has no executable", command.phase));
-//RS     };
-//RS     let status = Command::new(program)
-//RS         .args(command.argv.iter().skip(1))
-//RS         .status()
-//RS         .map_err(|e| format!("starting VM phase `{}` failed: {e}", command.phase))?;
-//RS     Ok(status
-//RS         .code()
-//RS         .unwrap_or(if status.success() { 0 } else { 1 }))
-//RS }
-//RS 
-//RS fn log_excerpt(label: &str, text: &str) -> String {
-//RS     let line = text
-//RS         .lines()
-//RS         .map(str::trim)
-//RS         .find(|line| !line.is_empty())
-//RS         .unwrap_or("");
-//RS     if line.is_empty() {
-//RS         String::new()
-//RS     } else {
-//RS         let excerpt = line.chars().take(240).collect::<String>();
-//RS         format!("; {label}: {excerpt}")
-//RS     }
-//RS }
-//RS 
-//RS fn vm_proof_timeout() -> Duration {
-//RS     std::env::var("JETOS_VM_PROOF_TIMEOUT_MS")
-//RS         .ok()
-//RS         .and_then(|raw| raw.parse::<u64>().ok())
-//RS         .map(Duration::from_millis)
-//RS         .unwrap_or_else(|| Duration::from_millis(VM_PROOF_TIMEOUT_MS))
-//RS }
-//RS 
-//RS pub(super) fn extract_guest_proof_report(output: &str) -> Option<String> {
-//RS     output.lines().find_map(|line| {
-//RS         line.split_once(VM_GUEST_PROOF_MARKER)
-//RS             .map(|(_, rest)| rest.trim().to_string())
-//RS     })
-//RS }
-//RS 
-//RS fn write_runner_guest_proof(
-//RS     gen: &Generation,
-//RS     system: &SystemPlan,
-//RS     disk: &str,
-//RS     media_proof: &Path,
-//RS     harness: &Path,
-//RS     report: &str,
-//RS     real_guest: bool,
-//RS ) -> Result<(), String> {
-//RS     require_guest_report(report, system, gen)?;
-//RS     let guest = guest_proof_path(harness);
-//RS     let proof_tier = if real_guest { "real-guest" } else { "plumbing" };
-//RS     let installer_iso = systems_dir()
-//RS         .join("images")
-//RS         .join(format!("jetos-installer-{}.iso", system.name));
-//RS     let text = format!(
-//RS         "{{\"state\":\"guest-passed\",\"proof_tier\":{},\"host\":{},\"generation\":{},\"disk\":{},\"media_proof\":{},\"media_proof_sha256\":{},\"installer_iso_fingerprint\":{},\"assertions\":[{}],\"tools\":[{}],\"serial_report\":{}}}\n",
-//RS         JSON::quote(proof_tier),
-//RS         JSON::quote(&system.name),
-//RS         JSON::quote(&gen.name),
-//RS         JSON::quote(disk),
-//RS         JSON::quote(&media_proof.display().to_string()),
-//RS         JSON::quote(&file_sha256(media_proof)?),
-//RS         JSON::quote(&file_fingerprint(&installer_iso)?),
-//RS         guest_assertions_json(),
-//RS         vm_tools_json(),
-//RS         JSON::quote(report)
-//RS     );
-//RS     fs::write(&guest, text).map_err(|e| format!("writing `{}` failed: {e}", guest.display()))
-//RS }
-//RS 
-//RS fn require_guest_report(report: &str, system: &SystemPlan, gen: &Generation) -> Result<(), String> {
-//RS     if !report.contains("\"state\":\"guest-passed\"") {
-//RS         return Err("guest serial proof did not report state=guest-passed".to_string());
-//RS     }
-//RS     require_json_field(report, "host", &system.name)?;
-//RS     require_json_field(report, "generation", &gen.name)?;
-//RS     require_guest_assertions(report)
-//RS }
-//RS 
-//RS fn finalize_vm_guest_proof(
-//RS     gen: &Generation,
-//RS     system: &SystemPlan,
-//RS     disk: &str,
-//RS     media_proof: &Path,
-//RS     harness: &Path,
-//RS ) -> Result<Option<PathBuf>, String> {
-//RS     let guest = guest_proof_path(harness);
-//RS     if !guest.is_file() {
-//RS         return Ok(None);
-//RS     }
-//RS     let text = fs::read_to_string(&guest)
-//RS         .map_err(|e| format!("reading `{}` failed: {e}", guest.display()))?;
-//RS     if let Err(e) = validate_cached_guest_proof(&text, system, gen, disk, media_proof) {
-//RS         // Drop the unusable cached proof so a rerun records a fresh one, but
-//RS         // surface why it was rejected — silent invalidation hides real drift.
-//RS         let _ = fs::remove_file(&guest);
-//RS         return Err(e);
-//RS     }
-//RS     for (name, _path, sha) in vm_tool_facts() {
-//RS         if !text.contains(&name) || !text.contains(&sha) {
-//RS             return Err(format!("missing tool proof for `{name}`"));
-//RS         }
-//RS     }
-//RS     let guest_sha = fs::read(&guest)
-//RS         .map(|bytes| crate::SHA256::sha256_hex(&bytes))
-//RS         .map_err(|e| format!("hashing `{}` failed: {e}", guest.display()))?;
-//RS     let harness_text = fs::read_to_string(harness)
-//RS         .map_err(|e| format!("reading `{}` failed: {e}", harness.display()))?;
-//RS     let final_text = harness_text.replacen(
-//RS         "\"state\":\"harness-ready\"",
-//RS         &format!(
-//RS             "\"state\":\"guest-passed\",\"guest_proof\":{},\"guest_proof_sha256\":{}",
-//RS             JSON::quote(&guest.display().to_string()),
-//RS             JSON::quote(&guest_sha)
-//RS         ),
-//RS         1,
-//RS     );
-//RS     fs::write(harness, final_text)
-//RS         .map_err(|e| format!("writing `{}` failed: {e}", harness.display()))?;
-//RS     Ok(Some(harness.to_path_buf()))
-//RS }
-//RS 
-//RS fn validate_cached_guest_proof(
-//RS     text: &str,
-//RS     system: &SystemPlan,
-//RS     gen: &Generation,
-//RS     disk: &str,
-//RS     media_proof: &Path,
-//RS ) -> Result<(), String> {
-//RS     require_json_field(text, "state", "guest-passed")?;
-//RS     require_json_field(text, "host", &system.name)?;
-//RS     require_json_field(text, "generation", &gen.name)?;
-//RS     require_json_field(text, "disk", disk)?;
-//RS     require_json_field(text, "media_proof", &media_proof.display().to_string())?;
-//RS     require_json_field(text, "media_proof_sha256", &file_sha256(media_proof)?)?;
-//RS     let installer_iso = systems_dir()
-//RS         .join("images")
-//RS         .join(format!("jetos-installer-{}.iso", system.name));
-//RS     require_json_field(
-//RS         text,
-//RS         "installer_iso_fingerprint",
-//RS         &file_fingerprint(&installer_iso)?,
-//RS     )?;
-//RS     require_guest_assertions(text)
-//RS }
-//RS 
-//RS pub(super) fn require_vm_run_proof(
-//RS     gen: &Generation,
-//RS     system: &SystemPlan,
-//RS     disk: &str,
-//RS     media_proof: &Path,
-//RS     harness: &Path,
-//RS ) -> Result<(), String> {
-//RS     if !harness.is_file() {
-//RS         return Err(format!("missing VM proof `{}`", harness.display()));
-//RS     }
-//RS     let harness_text = fs::read_to_string(harness)
-//RS         .map_err(|e| format!("reading `{}` failed: {e}", harness.display()))?;
-//RS     require_json_field(&harness_text, "state", "guest-passed")?;
-//RS     require_json_field(&harness_text, "host", &system.name)?;
-//RS     require_json_field(&harness_text, "generation", &gen.name)?;
-//RS     require_json_field(&harness_text, "disk", disk)?;
-//RS     require_json_field(
-//RS         &harness_text,
-//RS         "media_proof",
-//RS         &media_proof.display().to_string(),
-//RS     )?;
-//RS     Ok(())
-//RS }
-//RS 
-//RS pub(super) fn file_sha256(path: &Path) -> Result<String, String> {
-//RS     fs::read(path)
-//RS         .map(|bytes| crate::SHA256::sha256_hex(&bytes))
-//RS         .map_err(|e| format!("hashing `{}` failed: {e}", path.display()))
-//RS }
-//RS 
-//RS fn file_fingerprint(path: &Path) -> Result<String, String> {
-//RS     // Content-bound: installer media is restaged on every prove run, so an
-//RS     // mtime-based fingerprint would invalidate every cached guest proof.
-//RS     Ok(format!("sha256={}", file_sha256(path)?))
-//RS }
-//RS 
-//RS fn guest_proof_path(harness: &Path) -> PathBuf {
-//RS     let stem = harness
-//RS         .file_stem()
-//RS         .and_then(|s| s.to_str())
-//RS         .unwrap_or("vm-proof");
-//RS     harness.with_file_name(format!("{stem}-guest-proof.json"))
-//RS }
-//RS 
-//RS fn require_json_field(text: &str, key: &str, expected: &str) -> Result<(), String> {
-//RS     let needle = format!("\"{key}\"");
-//RS     let Some(mut rest) = text.split_once(&needle).map(|(_, r)| r.trim_start()) else {
-//RS         return Err(format!("missing `{key}`"));
-//RS     };
-//RS     if let Some(after) = rest.strip_prefix(':') {
-//RS         rest = after.trim_start();
-//RS     } else {
-//RS         return Err(format!("missing `:` after `{key}`"));
-//RS     }
-//RS     let Some(rest) = rest.strip_prefix('"') else {
-//RS         return Err(format!("`{key}` is not a string"));
-//RS     };
-//RS     let Some(end) = rest.find('"') else {
-//RS         return Err(format!("`{key}` is not closed"));
-//RS     };
-//RS     let found = &rest[..end];
-//RS     if found == expected {
-//RS         Ok(())
-//RS     } else {
-//RS         Err(format!("`{key}` expected `{expected}`, found `{found}`"))
-//RS     }
-//RS }
-//RS 
-//RS fn require_guest_assertions(text: &str) -> Result<(), String> {
-//RS     let expected = format!("\"assertions\":[{}]", guest_assertions_json());
-//RS     if text.contains(&expected) {
-//RS         Ok(())
-//RS     } else {
-//RS         Err("guest assertions did not match the required install/reboot proof set".to_string())
-//RS     }
-//RS }
-//RS 
-//RS pub(super) fn require_real_vm_tools() -> Result<(), String> {
-//RS     let mut rejected = Vec::new();
-//RS     // The real tier realizes the disk through the hidden system backend and
-//RS     // boots it directly, so only QEMU and `nix` must be real. The installer
-//RS     // media tools stay a plumbing-tier (E1279) concern.
-//RS     for name in ["qemu-system-x86_64", "qemu-img", "nix"] {
-//RS         let Some(path) = find_on_path(name) else {
-//RS             rejected.push(format!("{name}: missing"));
-//RS             continue;
-//RS         };
-//RS         // A real toolchain binary is a native executable. Scripts, empty
-//RS         // stubs, and non-ELF stand-ins are harness fixtures, not proof tools.
-//RS         let bytes = fs::read(&path).unwrap_or_default();
-//RS         let is_native_executable = bytes.starts_with(b"\x7fELF");
-//RS         if !is_native_executable {
-//RS             rejected.push(format!("{}: {}", name, path.display()));
-//RS         }
-//RS     }
-//RS     if rejected.is_empty() {
-//RS         Ok(())
-//RS     } else {
-//RS         Err(format!(
-//RS             "D-JOS-REALGUEST1=C forbids script/fake VM toolchains for replacement acceptance; rejected {}.",
-//RS             rejected.join(", ")
-//RS         ))
-//RS     }
-//RS }
-//RS 
-//RS fn find_on_path(name: &str) -> Option<PathBuf> {
-//RS     std::env::var_os("PATH").and_then(|paths| {
-//RS         std::env::split_paths(&paths)
-//RS             .map(|dir| dir.join(name))
-//RS             .find(|path| path.is_file())
-//RS     })
-//RS }
-//RS 
-//RS const GUEST_ASSERTIONS: [&str; 9] = [
-//RS     "current-generation-matches",
-//RS     "packages-present",
-//RS     "services-active",
-//RS     "network-up",
-//RS     "rollback-generation-bootable",
-//RS     "terminal-login-ready",
-//RS     "desktop-session-ready",
-//RS     "graphical-console-ready",
-//RS     "desktop-launchers-run",
-//RS ];
-//RS 
-//RS pub(super) struct VmCommand {
-//RS     pub(super) phase: &'static str,
-//RS     pub(super) argv: Vec<String>,
-//RS }
-//RS 
-//RS fn ovmf_code_path() -> Option<PathBuf> {
-//RS     std::env::var_os("JETOS_OVMF_CODE")
-//RS         .map(PathBuf::from)
-//RS         .filter(|path| path.is_file())
-//RS }
-//RS 
-//RS fn qemu_proof_commands(
-//RS     boot_dir: &Path,
-//RS     disk: &str,
-//RS     iso: &Path,
-//RS     host: &str,
-//RS     generation: &str,
-//RS ) -> Vec<VmCommand> {
-//RS     let iso_path = iso.display().to_string();
-//RS     let kernel = boot_dir.join("kernel").display().to_string();
-//RS     let initrd = boot_dir.join("initrd").display().to_string();
-//RS     let mut boot_installer = vec![
-//RS         "qemu-system-x86_64".to_string(),
-//RS         "-m".to_string(),
-//RS         "2048".to_string(),
-//RS         "-nographic".to_string(),
-//RS         "-monitor".to_string(),
-//RS         "none".to_string(),
-//RS     ];
-//RS     if let Some(ovmf) = ovmf_code_path() {
-//RS         boot_installer.extend([
-//RS             "-drive".to_string(),
-//RS             format!("if=pflash,format=raw,readonly=on,file={}", ovmf.display()),
-//RS         ]);
-//RS     }
-//RS     boot_installer.extend([
-//RS         "-cdrom".to_string(),
-//RS         iso_path,
-//RS         "-drive".to_string(),
-//RS         format!("file={disk},format=qcow2,if=ide"),
-//RS         "-netdev".to_string(),
-//RS         format!("user,id=net0,hostname={host}"),
-//RS         "-device".to_string(),
-//RS         "virtio-net-pci,netdev=net0".to_string(),
-//RS         "-boot".to_string(),
-//RS         "d".to_string(),
-//RS     ]);
-//RS     let graphical_cmdline = format!(
-//RS         "console=ttyS0 rdinit=/jetos/init init=/jetos/init jetos.mode=desktop-verify jetos.host={host} jetos.generation={generation} root=LABEL=jetos-root rw"
-//RS     );
-//RS     let mut boot_installed_disk = vec![
-//RS         "qemu-system-x86_64".to_string(),
-//RS         "-m".to_string(),
-//RS         "2048".to_string(),
-//RS         "-nographic".to_string(),
-//RS         "-monitor".to_string(),
-//RS         "none".to_string(),
-//RS     ];
-//RS     if let Some(ovmf) = ovmf_code_path() {
-//RS         boot_installed_disk.extend([
-//RS             "-drive".to_string(),
-//RS             format!("if=pflash,format=raw,readonly=on,file={}", ovmf.display()),
-//RS         ]);
-//RS     }
-//RS     boot_installed_disk.extend([
-//RS         "-drive".to_string(),
-//RS         format!("file={disk},format=qcow2,if=ide"),
-//RS         "-netdev".to_string(),
-//RS         format!("user,id=net0,hostname={host}"),
-//RS         "-device".to_string(),
-//RS         "virtio-net-pci,netdev=net0".to_string(),
-//RS         "-boot".to_string(),
-//RS         "c".to_string(),
-//RS     ]);
-//RS     vec![
-//RS         VmCommand {
-//RS             phase: "create-disk",
-//RS             argv: vec![
-//RS                 "qemu-img".to_string(),
-//RS                 "create".to_string(),
-//RS                 "-f".to_string(),
-//RS                 "qcow2".to_string(),
-//RS                 disk.to_string(),
-//RS                 "16G".to_string(),
-//RS             ],
-//RS         },
-//RS         VmCommand {
-//RS             phase: "boot-installer",
-//RS             argv: boot_installer,
-//RS         },
-//RS         VmCommand {
-//RS             phase: "boot-installed-disk",
-//RS             argv: boot_installed_disk,
-//RS         },
-//RS         VmCommand {
-//RS             phase: "boot-graphical-desktop",
-//RS             argv: vec![
-//RS                 "qemu-system-x86_64".to_string(),
-//RS                 "-m".to_string(),
-//RS                 "2048".to_string(),
-//RS                 "-display".to_string(),
-//RS                 qemu_vnc_display().to_string(),
-//RS                 "-serial".to_string(),
-//RS                 "stdio".to_string(),
-//RS                 "-monitor".to_string(),
-//RS                 "none".to_string(),
-//RS                 "-vga".to_string(),
-//RS                 "std".to_string(),
-//RS                 "-device".to_string(),
-//RS                 "qemu-xhci,id=xhci".to_string(),
-//RS                 "-device".to_string(),
-//RS                 "usb-kbd,bus=xhci.0".to_string(),
-//RS                 "-device".to_string(),
-//RS                 "usb-tablet,bus=xhci.0".to_string(),
-//RS                 "-kernel".to_string(),
-//RS                 kernel,
-//RS                 "-initrd".to_string(),
-//RS                 initrd,
-//RS                 "-append".to_string(),
-//RS                 graphical_cmdline,
-//RS                 "-drive".to_string(),
-//RS                 format!("file={disk},format=qcow2,if=ide"),
-//RS                 "-netdev".to_string(),
-//RS                 format!("user,id=net0,hostname={host}"),
-//RS                 "-device".to_string(),
-//RS                 "virtio-net-pci,netdev=net0".to_string(),
-//RS                 "-boot".to_string(),
-//RS                 "c".to_string(),
-//RS             ],
-//RS         },
-//RS     ]
-//RS }
-//RS 
-//RS pub(super) fn qemu_interactive_run_command(
-//RS     boot_dir: &Path,
-//RS     disk: &str,
-//RS     host: &str,
-//RS     generation: &str,
-//RS ) -> VmCommand {
-//RS     let kernel = boot_dir.join("kernel").display().to_string();
-//RS     let initrd = boot_dir.join("initrd").display().to_string();
-//RS     let console = "tty0";
-//RS     let cmdline = format!(
-//RS         "console={console} rdinit=/jetos/init init=/jetos/init jetos.mode=run jetos.host={host} jetos.generation={generation} root=LABEL=jetos-root rw systemd.unit=graphical.target"
-//RS     );
-//RS     let mut argv = vec![
-//RS         "qemu-system-x86_64".to_string(),
-//RS         "-m".to_string(),
-//RS         "2048".to_string(),
-//RS         "-cpu".to_string(),
-//RS         "max".to_string(),
-//RS     ];
-//RS     if qemu_has_local_display() {
-//RS         argv.extend([
-//RS             "-display".to_string(),
-//RS             "gtk,gl=off".to_string(),
-//RS             "-serial".to_string(),
-//RS             "none".to_string(),
-//RS         ]);
-//RS     } else {
-//RS         argv.extend([
-//RS             "-display".to_string(),
-//RS             qemu_vnc_display().to_string(),
-//RS             "-serial".to_string(),
-//RS             "none".to_string(),
-//RS         ]);
-//RS     }
-//RS     argv.extend([
-//RS         "-monitor".to_string(),
-//RS         "none".to_string(),
-//RS         "-vga".to_string(),
-//RS         "std".to_string(),
-//RS         "-device".to_string(),
-//RS         "qemu-xhci,id=xhci".to_string(),
-//RS         "-device".to_string(),
-//RS         "usb-kbd,bus=xhci.0".to_string(),
-//RS         "-device".to_string(),
-//RS         "usb-tablet,bus=xhci.0".to_string(),
-//RS         "-kernel".to_string(),
-//RS         kernel,
-//RS         "-initrd".to_string(),
-//RS         initrd,
-//RS         "-append".to_string(),
-//RS         cmdline,
-//RS         "-drive".to_string(),
-//RS         format!("file={disk},format=qcow2,if=ide"),
-//RS         "-netdev".to_string(),
-//RS         format!("user,id=net0,hostname={host}"),
-//RS         "-device".to_string(),
-//RS         "virtio-net-pci,netdev=net0".to_string(),
-//RS         "-boot".to_string(),
-//RS         "c".to_string(),
-//RS     ]);
-//RS     VmCommand {
-//RS         phase: "run-installed-disk",
-//RS         argv,
-//RS     }
-//RS }
-//RS 
-//RS fn qemu_vnc_display() -> &'static str {
-//RS     "vnc=127.0.0.1:0"
-//RS }
-//RS 
-//RS pub(super) fn qemu_vnc_endpoint() -> &'static str {
-//RS     "127.0.0.1:5900"
-//RS }
-//RS 
-//RS pub(super) fn qemu_has_local_display() -> bool {
-//RS     if std::env::var_os("JETOS_QEMU_VNC").is_some() {
-//RS         return false;
-//RS     }
-//RS     std::env::var_os("DISPLAY").is_some() || std::env::var_os("WAYLAND_DISPLAY").is_some()
-//RS }
-//RS 
-//RS fn qemu_proof_commands_json(
-//RS     boot_dir: &Path,
-//RS     disk: &str,
-//RS     iso: &Path,
-//RS     host: &str,
-//RS     generation: &str,
-//RS ) -> String {
-//RS     qemu_proof_commands(boot_dir, disk, iso, host, generation)
-//RS         .into_iter()
-//RS         .map(|command| {
-//RS             let argv_json = command
-//RS                 .argv
-//RS                 .iter()
-//RS                 .map(|arg| JSON::quote(arg))
-//RS                 .collect::<Vec<_>>()
-//RS                 .join(",");
-//RS             format!(
-//RS                 "{{\"phase\":{},\"argv\":[{}]}}",
-//RS                 JSON::quote(command.phase),
-//RS                 argv_json
-//RS             )
-//RS         })
-//RS         .collect::<Vec<_>>()
-//RS         .join(",")
-//RS }
-//RS 
-//RS pub(super) fn run_vmtest(
-//RS     theme: &Theme,
-//RS     plan: &EnvPlan,
-//RS     vmtest: &VmTestPlan,
-//RS     disk: &str,
-//RS     flags: &OSFlags,
-//RS     source_config: &Path,
-//RS ) -> Result<PathBuf, String> {
-//RS     let proof_dir = systems_dir().join("vm-tests");
-//RS     fs::create_dir_all(&proof_dir)
-//RS         .map_err(|e| format!("creating `{}` failed: {e}", proof_dir.display()))?;
-//RS     let mut host_facts = Vec::new();
-//RS     for host in &vmtest.hosts {
-//RS         let Some(system) = plan.systems.iter().find(|s| s.name == host.system).cloned() else {
-//RS             return Err(format!(
-//RS                 "host `{}` names unknown system `{}`",
-//RS                 host.name, host.system
-//RS             ));
-//RS         };
-//RS         if !validate_system_options(theme, &system) {
-//RS             return Err(format!("system `{}` failed option validation", system.name));
-//RS         }
-//RS         let host_disk = vmtest_host_disk(disk, &host.name, vmtest.hosts.len());
-//RS         let Some(gen) = build_generation(theme, plan, &system, flags, source_config) else {
-//RS             return Err(format!("building system `{}` failed", system.name));
-//RS         };
-//RS         let media = write_installer_media(&gen, &system, "guided-ext4")
-//RS             .map_err(|e| format!("writing installer media for `{}` failed: {e}", system.name))?;
-//RS         let harness = write_vm_install_plan(&gen, &system, &host_disk, &media, false)
-//RS             .map_err(|e| format!("writing VM proof plan for `{}` failed: {e}", system.name))?;
-//RS         let final_path = prove_vm_guest(&gen, &system, &host_disk, &media, &harness, false)
-//RS             .map_err(|e| format!("guest proof for `{}` failed: {e}", system.name))?
-//RS             .ok_or_else(|| format!("guest proof for `{}` was not recorded", system.name))?;
-//RS         host_facts.push(VmTestHostFact {
-//RS             name: host.name.clone(),
-//RS             system: system.name,
-//RS             generation: gen.name,
-//RS             disk: host_disk,
-//RS             proof: final_path.display().to_string(),
-//RS         });
-//RS     }
-//RS     let proof = proof_dir.join(format!("{}-vmtest-proof.json", vmtest.name));
-//RS     fs::write(&proof, vmtest_proof_json(vmtest, &host_facts))
-//RS         .map_err(|e| format!("writing `{}` failed: {e}", proof.display()))?;
-//RS     Ok(proof)
-//RS }
-//RS 
-//RS struct VmTestHostFact {
-//RS     name: String,
-//RS     system: String,
-//RS     generation: String,
-//RS     disk: String,
-//RS     proof: String,
-//RS }
-//RS 
-//RS fn vmtest_host_disk(disk: &str, host: &str, host_count: usize) -> String {
-//RS     if host_count <= 1 {
-//RS         return disk.to_string();
-//RS     }
-//RS     let path = Path::new(disk);
-//RS     let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or(disk);
-//RS     let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("qcow2");
-//RS     let file = format!("{stem}-{host}.{ext}");
-//RS     path.parent()
-//RS         .filter(|p| !p.as_os_str().is_empty())
-//RS         .map(|p| p.join(&file).display().to_string())
-//RS         .unwrap_or(file)
-//RS }
-//RS 
-//RS fn vmtest_proof_json(vmtest: &VmTestPlan, hosts: &[VmTestHostFact]) -> String {
-//RS     let host_json = hosts
-//RS         .iter()
-//RS         .map(|host| {
-//RS             JSON::object_of(&[
-//RS                 ("name", &host.name),
-//RS                 ("system", &host.system),
-//RS                 ("generation", &host.generation),
-//RS                 ("disk", &host.disk),
-//RS                 ("proof", &host.proof),
-//RS             ])
-//RS         })
-//RS         .collect::<Vec<_>>()
-//RS         .join(",");
-//RS     let assertions = vmtest
-//RS         .assertions
-//RS         .iter()
-//RS         .map(|a| JSON::quote(a))
-//RS         .collect::<Vec<_>>()
-//RS         .join(",");
-//RS     format!(
-//RS         "{{\"kind\":\"jetos.vmtest.proof\",\"schema_version\":1,\"state\":\"passed\",\"name\":{},\"hosts\":[{}],\"assertions\":[{}],\"run\":{},\"proofs\":[\"build-generation\",\"install-reboot-proof\",\"typed-assertion-record\"]}}\n",
-//RS         JSON::quote(&vmtest.name),
-//RS         host_json,
-//RS         assertions,
-//RS         JSON::quote(&vmtest.run)
-//RS     )
-//RS }
-//RS 
-//RS fn guest_assertions_json() -> String {
-//RS     GUEST_ASSERTIONS
-//RS         .iter()
-//RS         .map(|assertion| JSON::quote(assertion))
-//RS         .collect::<Vec<_>>()
-//RS         .join(",")
-//RS }
-//RS 
-//RS pub(super) fn vm_tools_json() -> String {
-//RS     vm_tool_facts()
-//RS         .into_iter()
-//RS         .map(|(name, path, sha)| {
-//RS             JSON::object_of(&[("name", &name), ("path", &path), ("sha256", &sha)])
-//RS         })
-//RS         .collect::<Vec<_>>()
-//RS         .join(",")
-//RS }
-//RS 
-//RS fn vm_tool_facts() -> Vec<(String, String, String)> {
-//RS     VM_TOOLS
-//RS         .iter()
-//RS         .map(|tool| {
-//RS             let Some(path) = find_path_tool(tool) else {
-//RS                 return (
-//RS                     (*tool).to_string(),
-//RS                     "<missing>".to_string(),
-//RS                     "<missing>".to_string(),
-//RS                 );
-//RS             };
-//RS             let path_text = path.display().to_string();
-//RS             let sha = fs::read(&path)
-//RS                 .map(|bytes| crate::SHA256::sha256_hex(&bytes))
-//RS                 .unwrap_or_else(|_| "<unreadable>".to_string());
-//RS             ((*tool).to_string(), path_text, sha)
-//RS         })
-//RS         .collect()
-//RS }
-// END-PORT-PENDING 0877 crates/jetpack/src/JetOS/vm_proof.rs:1-822
+use jetpack.JetOS.DesktopStoreVm.[find_path_tool]
+use jetpack.JetOS.Generation.[build_generation]
+use jetpack.JetOS.GenerationFiles.[systems_dir]
+use jetpack.JetOS.InstallerMedia.[write_installer_media]
+use jetpack.JetOS.LoadValidate.[validate_system_options]
+use jetpack.JetOS.Types.[JetOSGeneration, JetOSFlags, JETOS_VM_GUEST_PROOF_MARKER, JETOS_VM_PROOF_TIMEOUT_MS, JETOS_VM_TOOLS]
+use jetpack.Output.[Theme]
+use jetpack.[JSON, SHA256]
+use jet_env_model.ModuleEval.[EnvPlan, SystemPlan, VmTestPlan]
+use std.[fs, io, env, thread]
+use std.process.[Command, Stdio]
+use std.time.[Duration, Instant]
 
+// Rust: crates/jetpack/src/JetOS/vm_proof.rs:15
+pub fn write_vm_install_plan(gen: &JetOSGeneration, system: &SystemPlan, disk: &String, media_proof: &OSPath, real_guest: Bool) -> OSPath io.Error! {
+    // GATE #4494 native filesystem.
+    proof_dir :: systems_dir().join("vm-proofs")
+    fs.create_dir_all(&proof_dir)?
+    proof :: proof_dir.join("{system.name}-{gen.name}-vm-proof.json")
+    tools :: vm_tools_json()
+    iso :: systems_dir().join("images").join("jetos-installer-{system.name}.iso")
+    staging_boot :: systems_dir().join("images").join("jetos-installer-{system.name}.iso.d/boot")
+    commands :: qemu_proof_commands_json(&staging_boot, disk, &iso, &system.name, &gen.name)
+    guest :: guest_proof_path(&proof)
+    proof_tier :: if real_guest { "real-guest" } else { "plumbing" }
+    media_proof_sha256 :: file_sha256(media_proof).map_err(io.Error.other)?
+    iso_fingerprint :: file_fingerprint(&iso).map_err(io.Error.other)?
+    text :: "{{\"host\":{JSON.quote(&system.name)},\"generation\":{JSON.quote(&gen.name)},\"state\":\"harness-ready\",\"proof_tier\":{JSON.quote(proof_tier)},\"disk\":{JSON.quote(disk)},\"installer_media\":{JSON.quote("jetos-installer-{system.name}.iso")},\"media_proof\":{JSON.quote(media_proof.display().to_string())},\"media_proof_sha256\":{JSON.quote(&media_proof_sha256)},\"installer_iso_fingerprint\":{JSON.quote(&iso_fingerprint)},\"expected_guest_proof\":{JSON.quote(guest.display().to_string())},\"tools\":[{tools}],\"commands\":[{commands}],\"steps\":[\"build-generation\",\"create-hybrid-iso\",\"boot-installer-qemu\",\"install-to-disk\",\"reboot-installed-disk\",\"verify-guest-proof\",\"boot-graphical-desktop\"],\"guest_assertions\":[{guest_assertions_json()}]}}"
+    fs.write(&proof, text)?
+    Ok(proof)
+}
+
+// Rust: crates/jetpack/src/JetOS/vm_proof.rs:56
+pub fn prove_vm_guest(gen: &JetOSGeneration, system: &SystemPlan, disk: &String, media_proof: &OSPath, harness: &OSPath, real_guest: Bool) -> OSPath? String! {
+    if final_path :: finalize_vm_guest_proof(gen, system, disk, media_proof, harness)? { return Ok(.Val(final_path)) }
+    if !run_vm_install_harness(gen, system, disk, media_proof, harness, real_guest)? { return Ok(.None) }
+    finalize_vm_guest_proof(gen, system, disk, media_proof, harness)
+}
+
+// Rust: crates/jetpack/src/JetOS/vm_proof.rs:73
+fn run_vm_install_harness(gen: &JetOSGeneration, system: &SystemPlan, disk: &String, media_proof: &OSPath, harness: &OSPath, real_guest: Bool) -> Bool String! {
+    iso :: systems_dir().join("images").join("jetos-installer-{system.name}.iso")
+    staging_boot :: systems_dir().join("images").join("jetos-installer-{system.name}.iso.d/boot")
+    log_dir :: vm_run_log_dir(harness)
+    if log_dir.exists() { fs.remove_dir_all(&log_dir).map_err(e -> "clearing `{log_dir.display()}` failed: {e}")? }
+    fs.create_dir_all(&log_dir).map_err(e -> "creating `{log_dir.display()}` failed: {e}")?
+    graphical_output := ""
+    loop command in qemu_proof_commands(&staging_boot, disk, &iso, &system.name, &gen.name) {
+        output :: run_vm_command(&command, &log_dir)?
+        if command.phase == "boot-graphical-desktop" { graphical_output = output }
+    }
+    report :: extract_guest_proof_report(&graphical_output) ?? return Ok(false)
+    write_runner_guest_proof(gen, system, disk, media_proof, harness, &report, real_guest)?
+    Ok(true)
+}
+
+// Rust: crates/jetpack/src/JetOS/vm_proof.rs:108
+fn vm_run_log_dir(harness: &OSPath) -> OSPath {
+    stem :: harness.file_stem().and_then(s -> s.to_str()).unwrap_or("vm-proof")
+    harness.with_file_name("{stem}.run")
+}
+
+// Rust: crates/jetpack/src/JetOS/vm_proof.rs:116
+fn run_vm_command(command: &VmCommand, log_dir: &OSPath) -> String String! {
+    // GATE #4494 native process, child polling, thread sleep, monotonic clock.
+    program :: command.argv.first() ?? return Err("VM phase `{command.phase}` has no executable")
+    stdout_path :: log_dir.join("{command.phase}.stdout")
+    stderr_path :: log_dir.join("{command.phase}.stderr")
+    stdout :: fs.File.create(&stdout_path).map_err(e -> "creating `{stdout_path.display()}` failed: {e}")?
+    stderr :: fs.File.create(&stderr_path).map_err(e -> "creating `{stderr_path.display()}` failed: {e}")?
+    child := Command.new(program).args(command.argv.iter().skip(1)).stdout(Stdio.from(stdout)).stderr(Stdio.from(stderr)).spawn().map_err(e -> "starting VM phase `{command.phase}` failed: {e}")?
+    start :: Instant.now()
+    timeout :: vm_proof_timeout()
+    status :: loop {
+        if status :: child.try_wait().map_err(e -> "waiting for VM phase `{command.phase}` failed: {e}")? { break status }
+        if start.elapsed() > timeout {
+            _ :: child.kill()
+            _ :: child.wait()
+            stdout :: fs.read_to_string(&stdout_path).unwrap_or_default()
+            stderr :: fs.read_to_string(&stderr_path).unwrap_or_default()
+            return Err("VM phase `{command.phase}` timed out after {timeout.as_millis()}ms; stdout `{stdout_path.display()}`, stderr `{stderr_path.display()}`{log_excerpt("stdout", &stdout)}{log_excerpt("stderr", &stderr)}")
+        }
+        thread.sleep(Duration.from_millis(50))
+    }
+    stdout :: fs.read_to_string(&stdout_path).unwrap_or_default()
+    stderr :: fs.read_to_string(&stderr_path).unwrap_or_default()
+    if !status.success() { return Err("VM phase `{command.phase}` exited with {status}; stdout `{stdout_path.display()}`, stderr `{stderr_path.display()}`{log_excerpt("stdout", &stdout)}{log_excerpt("stderr", &stderr)}") }
+    Ok("{stdout}\n{stderr}")
+}
+
+// Rust: crates/jetpack/src/JetOS/vm_proof.rs:174
+pub fn run_interactive_vm_command(command: &VmCommand) -> I32 String! {
+    program :: command.argv.first() ?? return Err("VM phase `{command.phase}` has no executable")
+    status :: Command.new(program).args(command.argv.iter().skip(1)).status().map_err(e -> "starting VM phase `{command.phase}` failed: {e}")?
+    Ok(status.code().unwrap_or(if status.success() { 0 } else { 1 }))
+}
+
+// Rust: crates/jetpack/src/JetOS/vm_proof.rs:187
+fn log_excerpt(label: &String, text: &String) -> String {
+    line := text.lines().map(line -> line.trim()).find(line -> !line.is_empty()).unwrap_or("") // #4303
+    if line.is_empty() { "" } else { excerpt :: line.chars().take(240).collect::<String>(); "; {label}: {excerpt}" }
+}
+
+// Rust: crates/jetpack/src/JetOS/vm_proof.rs:201
+fn vm_proof_timeout() -> Duration {
+    env.var("JETOS_VM_PROOF_TIMEOUT_MS").ok().and_then(raw -> raw.parse::<U64>().ok()).map(Duration.from_millis).unwrap_or_else(() -> Duration.from_millis(JETOS_VM_PROOF_TIMEOUT_MS))
+}
+
+// Rust: crates/jetpack/src/JetOS/vm_proof.rs:209
+pub fn extract_guest_proof_report(output: &String) -> String? {
+    output.lines().find_map(line -> line.split_once(JETOS_VM_GUEST_PROOF_MARKER).map((_, rest) -> { value := rest.trim() // #4303
+        value.to_string() }))
+}
+
+// Rust: crates/jetpack/src/JetOS/vm_proof.rs:216
+fn write_runner_guest_proof(gen: &JetOSGeneration, system: &SystemPlan, disk: &String, media_proof: &OSPath, harness: &OSPath, report: &String, real_guest: Bool) -> Unit String! {
+    require_guest_report(report, system, gen)?
+    guest :: guest_proof_path(harness)
+    proof_tier :: if real_guest { "real-guest" } else { "plumbing" }
+    installer_iso :: systems_dir().join("images").join("jetos-installer-{system.name}.iso")
+    text :: "{{\"state\":\"guest-passed\",\"proof_tier\":{JSON.quote(proof_tier)},\"host\":{JSON.quote(&system.name)},\"generation\":{JSON.quote(&gen.name)},\"disk\":{JSON.quote(disk)},\"media_proof\":{JSON.quote(media_proof.display().to_string())},\"media_proof_sha256\":{JSON.quote(file_sha256(media_proof)?)},\"installer_iso_fingerprint\":{JSON.quote(file_fingerprint(&installer_iso)?)},\"assertions\":[{guest_assertions_json()}],\"tools\":[{vm_tools_json()}],\"serial_report\":{JSON.quote(report)}}}\n"
+    fs.write(&guest, text).map_err(e -> "writing `{guest.display()}` failed: {e}")
+}
+
+// Rust: crates/jetpack/src/JetOS/vm_proof.rs:247
+fn require_guest_report(report: &String, system: &SystemPlan, gen: &JetOSGeneration) -> Unit String! {
+    if !report.contains("\"state\":\"guest-passed\"") { return Err("guest serial proof did not report state=guest-passed") }
+    require_json_field(report, "host", &system.name)?
+    require_json_field(report, "generation", &gen.name)?
+    require_guest_assertions(report)
+}
+
+// Rust: crates/jetpack/src/JetOS/vm_proof.rs:256
+fn finalize_vm_guest_proof(gen: &JetOSGeneration, system: &SystemPlan, disk: &String, media_proof: &OSPath, harness: &OSPath) -> OSPath? String! {
+    guest :: guest_proof_path(harness)
+    if !guest.is_file() { return Ok(.None) }
+    text :: fs.read_to_string(&guest).map_err(e -> "reading `{guest.display()}` failed: {e}")?
+    if .Err(e) :: validate_cached_guest_proof(&text, system, gen, disk, media_proof) { _ :: fs.remove_file(&guest); return Err(e) }
+    loop (name, _path, sha) in vm_tool_facts() {
+        if !text.contains(&name) || !text.contains(&sha) { return Err("missing tool proof for `{name}`") }
+    }
+    guest_sha :: fs.read(&guest).map(bytes -> SHA256.sha256_hex(&bytes)).map_err(e -> "hashing `{guest.display()}` failed: {e}")?
+    harness_text :: fs.read_to_string(harness).map_err(e -> "reading `{harness.display()}` failed: {e}")?
+    final_text :: harness_text.replacen("\"state\":\"harness-ready\"", "\"state\":\"guest-passed\",\"guest_proof\":{JSON.quote(guest.display().to_string())},\"guest_proof_sha256\":{JSON.quote(&guest_sha)}", 1)
+    fs.write(harness, final_text).map_err(e -> "writing `{harness.display()}` failed: {e}")?
+    Ok(.Val(harness.to_path_buf()))
+}
+
+// Rust: crates/jetpack/src/JetOS/vm_proof.rs:299
+fn validate_cached_guest_proof(text: &String, system: &SystemPlan, gen: &JetOSGeneration, disk: &String, media_proof: &OSPath) -> Unit String! {
+    require_json_field(text, "state", "guest-passed")?
+    require_json_field(text, "host", &system.name)?
+    require_json_field(text, "generation", &gen.name)?
+    require_json_field(text, "disk", disk)?
+    require_json_field(text, "media_proof", &media_proof.display().to_string())?
+    require_json_field(text, "media_proof_sha256", &file_sha256(media_proof)?)?
+    installer_iso :: systems_dir().join("images").join("jetos-installer-{system.name}.iso")
+    require_json_field(text, "installer_iso_fingerprint", &file_fingerprint(&installer_iso)?)?
+    require_guest_assertions(text)
+}
+
+// Rust: crates/jetpack/src/JetOS/vm_proof.rs:323
+pub fn require_vm_run_proof(gen: &JetOSGeneration, system: &SystemPlan, disk: &String, media_proof: &OSPath, harness: &OSPath) -> Unit String! {
+    if !harness.is_file() { return Err("missing VM proof `{harness.display()}`") }
+    harness_text :: fs.read_to_string(harness).map_err(e -> "reading `{harness.display()}` failed: {e}")?
+    require_json_field(&harness_text, "state", "guest-passed")?
+    require_json_field(&harness_text, "host", &system.name)?
+    require_json_field(&harness_text, "generation", &gen.name)?
+    require_json_field(&harness_text, "disk", disk)?
+    require_json_field(&harness_text, "media_proof", &media_proof.display().to_string())?
+    Ok(())
+}
+
+// Rust: crates/jetpack/src/JetOS/vm_proof.rs:347
+pub fn file_sha256(path: &OSPath) -> String String! {
+    fs.read(path).map(bytes -> SHA256.sha256_hex(&bytes)).map_err(e -> "hashing `{path.display()}` failed: {e}")
+}
+
+// Rust: crates/jetpack/src/JetOS/vm_proof.rs:353
+fn file_fingerprint(path: &OSPath) -> String String! { Ok("sha256={file_sha256(path)?}") }
+
+// Rust: crates/jetpack/src/JetOS/vm_proof.rs:359
+fn guest_proof_path(harness: &OSPath) -> OSPath {
+    stem :: harness.file_stem().and_then(s -> s.to_str()).unwrap_or("vm-proof")
+    harness.with_file_name("{stem}-guest-proof.json")
+}
+
+// Rust: crates/jetpack/src/JetOS/vm_proof.rs:367
+fn require_json_field(text: &String, key: &String, expected: &String) -> Unit String! {
+    needle :: "\"{key}\""
+    rest := text.split_once(&needle).map((_, r) -> r.trim_start()) ?? return Err("missing `{key}`") // #4303
+    if after :: rest.strip_prefix(':') { rest = after.trim_start() } else { return Err("missing `:` after `{key}`") }
+    rest :: rest.strip_prefix('"') ?? return Err("`{key}` is not a string")
+    end :: rest.find('"') ?? return Err("`{key}` is not closed")
+    found := rest[..end] // #4303
+    if found == expected { Ok(()) } else { Err("`{key}` expected `{expected}`, found `{found}`") }
+}
+
+// Rust: crates/jetpack/src/JetOS/vm_proof.rs:391
+fn require_guest_assertions(text: &String) -> Unit String! {
+    expected :: "\"assertions\":[{guest_assertions_json()}]"
+    if text.contains(&expected) { Ok(()) } else { Err("guest assertions did not match the required install/reboot proof set") }
+}
+
+// Rust: crates/jetpack/src/JetOS/vm_proof.rs:400
+pub fn require_real_vm_tools() -> Unit String! {
+    rejected := [] as [String]
+    loop name in ["qemu-system-x86_64", "qemu-img", "nix"] {
+        path :: find_on_path(name) ?? { rejected.push("{name}: missing"); continue }
+        bytes :: fs.read(&path).unwrap_or_default()
+        is_native_executable :: bytes.starts_with(b"\x7fELF")
+        if !is_native_executable { rejected.push("{name}: {path.display()}") }
+    }
+    if rejected.is_empty() { Ok(()) } else { Err("D-JOS-REALGUEST1=C forbids script/fake VM toolchains for replacement acceptance; rejected {rejected.join(", ")}.") }
+}
+
+// Rust: crates/jetpack/src/JetOS/vm_proof.rs:428
+fn find_on_path(name: &String) -> OSPath? {
+    env.var_os("PATH").and_then(paths -> env.split_paths(&paths).map(dir -> dir.join(name)).find(path -> path.is_file()))
+}
+
+// Rust: crates/jetpack/src/JetOS/vm_proof.rs:436
+const GUEST_ASSERTIONS: [String] = ["current-generation-matches", "packages-present", "services-active", "network-up", "rollback-generation-bootable", "terminal-login-ready", "desktop-session-ready", "graphical-console-ready", "desktop-launchers-run"]
+
+// Rust: crates/jetpack/src/JetOS/vm_proof.rs:448
+pub struct VmCommand { pub phase: String, pub argv: [String] }
+
+// Rust: crates/jetpack/src/JetOS/vm_proof.rs:453
+fn ovmf_code_path() -> OSPath? { env.var_os("JETOS_OVMF_CODE").map(OSPath.from).filter(path -> path.is_file()) }
+
+// Rust: crates/jetpack/src/JetOS/vm_proof.rs:459
+fn qemu_proof_commands(boot_dir: &OSPath, disk: &String, iso: &OSPath, host: &String, generation: &String) -> [VmCommand] {
+    iso_path :: iso.display().to_string()
+    kernel :: boot_dir.join("kernel").display().to_string()
+    initrd :: boot_dir.join("initrd").display().to_string()
+    boot_installer := ["qemu-system-x86_64", "-m", "2048", "-nographic", "-monitor", "none"]
+    if ovmf :: ovmf_code_path() { boot_installer.extend(["-drive", "if=pflash,format=raw,readonly=on,file={ovmf.display()}"]) }
+    boot_installer.extend(["-cdrom", iso_path, "-drive", "file={disk},format=qcow2,if=ide", "-netdev", "user,id=net0,hostname={host}", "-device", "virtio-net-pci,netdev=net0", "-boot", "d"])
+    graphical_cmdline :: "console=ttyS0 rdinit=/jetos/init init=/jetos/init jetos.mode=desktop-verify jetos.host={host} jetos.generation={generation} root=LABEL=jetos-root rw"
+    boot_installed_disk := ["qemu-system-x86_64", "-m", "2048", "-nographic", "-monitor", "none"]
+    if ovmf :: ovmf_code_path() { boot_installed_disk.extend(["-drive", "if=pflash,format=raw,readonly=on,file={ovmf.display()}"]) }
+    boot_installed_disk.extend(["-drive", "file={disk},format=qcow2,if=ide", "-netdev", "user,id=net0,hostname={host}", "-device", "virtio-net-pci,netdev=net0", "-boot", "c"])
+    [VmCommand(phase: "create-disk", argv: ["qemu-img", "create", "-f", "qcow2", disk.to_string(), "16G"]), VmCommand(phase: "boot-installer", argv: boot_installer), VmCommand(phase: "boot-installed-disk", argv: boot_installed_disk), VmCommand(phase: "boot-graphical-desktop", argv: ["qemu-system-x86_64", "-m", "2048", "-display", qemu_vnc_display().to_string(), "-serial", "stdio", "-monitor", "none", "-vga", "std", "-device", "qemu-xhci,id=xhci", "-device", "usb-kbd,bus=xhci.0", "-device", "usb-tablet,bus=xhci.0", "-kernel", kernel, "-initrd", initrd, "-append", graphical_cmdline, "-drive", "file={disk},format=qcow2,if=ide", "-netdev", "user,id=net0,hostname={host}", "-device", "virtio-net-pci,netdev=net0", "-boot", "c"])]
+}
+
+// Rust: crates/jetpack/src/JetOS/vm_proof.rs:581
+pub fn qemu_interactive_run_command(boot_dir: &OSPath, disk: &String, host: &String, generation: &String) -> VmCommand {
+    kernel :: boot_dir.join("kernel").display().to_string()
+    initrd :: boot_dir.join("initrd").display().to_string()
+    console :: "tty0"
+    cmdline :: "console={console} rdinit=/jetos/init init=/jetos/init jetos.mode=run jetos.host={host} jetos.generation={generation} root=LABEL=jetos-root rw systemd.unit=graphical.target"
+    argv := ["qemu-system-x86_64", "-m", "2048", "-cpu", "max"]
+    if qemu_has_local_display() { argv.extend(["-display", "gtk,gl=off", "-serial", "none"]) } else { argv.extend(["-display", qemu_vnc_display().to_string(), "-serial", "none"]) }
+    argv.extend(["-monitor", "none", "-vga", "std", "-device", "qemu-xhci,id=xhci", "-device", "usb-kbd,bus=xhci.0", "-device", "usb-tablet,bus=xhci.0", "-kernel", kernel, "-initrd", initrd, "-append", cmdline, "-drive", "file={disk},format=qcow2,if=ide", "-netdev", "user,id=net0,hostname={host}", "-device", "virtio-net-pci,netdev=net0", "-boot", "c"])
+    VmCommand(phase: "run-installed-disk", argv: argv)
+}
+
+// Rust: crates/jetpack/src/JetOS/vm_proof.rs:647
+fn qemu_vnc_display() -> String { "vnc=127.0.0.1:0" }
+
+// Rust: crates/jetpack/src/JetOS/vm_proof.rs:651
+pub fn qemu_vnc_endpoint() -> String { "127.0.0.1:5900" }
+
+// Rust: crates/jetpack/src/JetOS/vm_proof.rs:655
+pub fn qemu_has_local_display() -> Bool {
+    if env.var_os("JETOS_QEMU_VNC").is_some() { return false }
+    env.var_os("DISPLAY").is_some() || env.var_os("WAYLAND_DISPLAY").is_some()
+}
+
+// Rust: crates/jetpack/src/JetOS/vm_proof.rs:662
+fn qemu_proof_commands_json(boot_dir: &OSPath, disk: &String, iso: &OSPath, host: &String, generation: &String) -> String {
+    qemu_proof_commands(boot_dir, disk, iso, host, generation).into_iter().map(command -> {
+        argv_json :: command.argv.iter().map(arg -> JSON.quote(arg)).collect::<[String]>().join(",")
+        "{{\"phase\":{JSON.quote(command.phase)},\"argv\":[{argv_json}]}}"
+    }).collect::<[String]>().join(",")
+}
+
+// Rust: crates/jetpack/src/JetOS/vm_proof.rs:688
+pub fn run_vmtest(theme: &Theme, plan: &EnvPlan, vmtest: &VmTestPlan, disk: &String, flags: &JetOSFlags, source_config: &OSPath) -> OSPath String! {
+    proof_dir :: systems_dir().join("vm-tests")
+    fs.create_dir_all(&proof_dir).map_err(e -> "creating `{proof_dir.display()}` failed: {e}")?
+    host_facts := [] as [VmTestHostFact]
+    loop host in &vmtest.hosts {
+        system :: plan.systems.iter().find(s -> s.name == host.system).cloned() ?? return Err("host `{host.name}` names unknown system `{host.system}`")
+        if !validate_system_options(theme, &system) { return Err("system `{system.name}` failed option validation") }
+        host_disk :: vmtest_host_disk(disk, &host.name, vmtest.hosts.len())
+        gen :: build_generation(theme, plan, &system, flags, source_config) ?? return Err("building system `{system.name}` failed")
+        media :: write_installer_media(&gen, &system, "guided-ext4").map_err(e -> "writing installer media for `{system.name}` failed: {e}")?
+        harness :: write_vm_install_plan(&gen, &system, &host_disk, &media, false).map_err(e -> "writing VM proof plan for `{system.name}` failed: {e}")?
+        final_path :: prove_vm_guest(&gen, &system, &host_disk, &media, &harness, false).map_err(e -> "guest proof for `{system.name}` failed: {e}")?.ok_or_else(() -> "guest proof for `{system.name}` was not recorded")?
+        host_facts.push(VmTestHostFact(name: host.name.clone(), system: system.name, generation: gen.name, disk: host_disk, proof: final_path.display().to_string()))
+    }
+    proof :: proof_dir.join("{vmtest.name}-vmtest-proof.json")
+    fs.write(&proof, vmtest_proof_json(vmtest, &host_facts)).map_err(e -> "writing `{proof.display()}` failed: {e}")?
+    Ok(proof)
+}
+
+// Rust: crates/jetpack/src/JetOS/vm_proof.rs:735
+struct VmTestHostFact { name: String, system: String, generation: String, disk: String, proof: String }
+
+// Rust: crates/jetpack/src/JetOS/vm_proof.rs:743
+fn vmtest_host_disk(disk: &String, host: &String, host_count: USize) -> String {
+    if host_count <= 1 { return disk.to_string() }
+    path :: OSPath.new(disk)
+    stem :: path.file_stem().and_then(s -> s.to_str()).unwrap_or(disk)
+    ext :: path.extension().and_then(s -> s.to_str()).unwrap_or("qcow2")
+    file :: "{stem}-{host}.{ext}"
+    path.parent().filter(p -> !p.as_os_str().is_empty()).map(p -> p.join(&file).display().to_string()).unwrap_or(file)
+}
+
+// Rust: crates/jetpack/src/JetOS/vm_proof.rs:757
+fn vmtest_proof_json(vmtest: &VmTestPlan, hosts: &[VmTestHostFact]) -> String {
+    host_json :: hosts.iter().map(host -> JSON.object_of(&[("name", &host.name), ("system", &host.system), ("generation", &host.generation), ("disk", &host.disk), ("proof", &host.proof)])).collect::<[String]>().join(",")
+    assertions :: vmtest.assertions.iter().map(a -> JSON.quote(a)).collect::<[String]>().join(",")
+    "{{\"kind\":\"jetos.vmtest.proof\",\"schema_version\":1,\"state\":\"passed\",\"name\":{JSON.quote(&vmtest.name)},\"hosts\":[{host_json}],\"assertions\":[{assertions}],\"run\":{JSON.quote(&vmtest.run)},\"proofs\":[\"build-generation\",\"install-reboot-proof\",\"typed-assertion-record\"]}}\n"
+}
+
+// Rust: crates/jetpack/src/JetOS/vm_proof.rs:786
+fn guest_assertions_json() -> String { GUEST_ASSERTIONS.iter().map(assertion -> JSON.quote(assertion)).collect::<[String]>().join(",") }
+
+// Rust: crates/jetpack/src/JetOS/vm_proof.rs:794
+pub fn vm_tools_json() -> String {
+    vm_tool_facts().into_iter().map((name, path, sha) -> JSON.object_of(&[("name", &name), ("path", &path), ("sha256", &sha)])).collect::<[String]>().join(",")
+}
+
+// Rust: crates/jetpack/src/JetOS/vm_proof.rs:804
+fn vm_tool_facts() -> [(String, String, String)] {
+    JETOS_VM_TOOLS.iter().map(tool -> {
+        path :: find_path_tool(tool) ?? return (tool.to_string(), "<missing>", "<missing>")
+        path_text :: path.display().to_string()
+        sha :: fs.read(&path).map(bytes -> SHA256.sha256_hex(&bytes)).unwrap_or_else(_ -> "<unreadable>")
+        (tool.to_string(), path_text, sha)
+    }).collect()
+}

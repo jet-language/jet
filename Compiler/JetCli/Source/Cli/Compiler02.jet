@@ -1,1187 +1,608 @@
-// PORT-PENDING 2073 source-compiler-slice-1801: Source/Compiler.rs:1801-2983
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS                                 .collect(),
-//RS                         ),
-//RS                     ),
-//RS                 ],
-//RS             )
-//RS         })
-//RS         .collect();
-//RS     ct_struct(
-//RS         "CompilerEffect",
-//RS         vec![
-//RS             ("function", CtValue::Str(effect.function.clone())),
-//RS             ("direct", compiler_string_list(effect.direct.clone())),
-//RS             ("callees", compiler_string_list(effect.callees.clone())),
-//RS             ("inferred", compiler_string_list(effect.inferred.clone())),
-//RS             ("maximal", CtValue::Bool(effect.maximal)),
-//RS             ("provenance", CtValue::List(provenance)),
-//RS         ],
-//RS     )
-//RS }
-//RS 
-//RS fn compiler_output_entry_value(entry: &jet_semindex::OutputEntryFact) -> CtValue {
-//RS     ct_struct(
-//RS         "CompilerOutputEntry",
-//RS         vec![
-//RS             ("identity", CtValue::Str(entry.identity.clone())),
-//RS             ("name", CtValue::Str(entry.name.clone())),
-//RS             ("module", CtValue::Str(entry.module_path.clone())),
-//RS             (
-//RS                 "definition_span",
-//RS                 compiler_semantic_span(entry.definition_span),
-//RS             ),
-//RS             (
-//RS                 "reference_span",
-//RS                 compiler_semantic_span(entry.reference_span),
-//RS             ),
-//RS             ("params", compiler_string_list(entry.params.clone())),
-//RS             (
-//RS                 "return_type",
-//RS                 compiler_option_string(entry.return_type.as_deref()),
-//RS             ),
-//RS             (
-//RS                 "failure_contract",
-//RS                 CtValue::Str(entry.failure_contract.clone()),
-//RS             ),
-//RS             ("failure_source", CtValue::Str(entry.failure_source.clone())),
-//RS             ("authority", CtValue::Str(entry.authority.clone())),
-//RS             ("effects", compiler_string_list(entry.effects.clone())),
-//RS         ],
-//RS     )
-//RS }
-//RS 
-//RS fn compiler_output_value(output: &jet_semindex::OutputFact) -> CtValue {
-//RS     ct_struct(
-//RS         "CompilerOutput",
-//RS         vec![
-//RS             ("binding", CtValue::Str(output.binding.clone())),
-//RS             ("kind", CtValue::Str(output.kind.clone())),
-//RS             ("name", CtValue::Str(output.name.clone())),
-//RS             ("module", CtValue::Str(output.module_path.clone())),
-//RS             ("span", compiler_semantic_span(output.span)),
-//RS             ("entry", compiler_output_entry_value(&output.entry)),
-//RS         ],
-//RS     )
-//RS }
-//RS 
-//RS fn compiler_semantic_index_value(
-//RS     index: &jet_semindex::SemIndex,
-//RS     source: &str,
-//RS     fact_registry: &jet_foundation::Facts::FactRegistry,
-//RS ) -> CtValue {
-//RS     ct_struct(
-//RS         "CompilerSemanticIndex",
-//RS         vec![
-//RS             (
-//RS                 "schema_version",
-//RS                 CtValue::Int(index.schema_version() as i64),
-//RS             ),
-//RS             (
-//RS                 "source_digest",
-//RS                 CtValue::Str(crate::SHA256::sha256_hex(source.as_bytes())),
-//RS             ),
-//RS             (
-//RS                 "definitions",
-//RS                 CtValue::List(
-//RS                     index
-//RS                         .definitions()
-//RS                         .iter()
-//RS                         .map(compiler_definition_value)
-//RS                         .collect(),
-//RS                 ),
-//RS             ),
-//RS             (
-//RS                 "references",
-//RS                 CtValue::List(
-//RS                     index
-//RS                         .references()
-//RS                         .iter()
-//RS                         .map(compiler_reference_value)
-//RS                         .collect(),
-//RS                 ),
-//RS             ),
-//RS             (
-//RS                 "calls",
-//RS                 CtValue::List(index.call_edges().iter().map(compiler_call_value).collect()),
-//RS             ),
-//RS             (
-//RS                 "structural_nodes",
-//RS                 CtValue::List(
-//RS                     index
-//RS                         .structural_nodes()
-//RS                         .iter()
-//RS                         .map(compiler_structural_node_value)
-//RS                         .collect(),
-//RS                 ),
-//RS             ),
-//RS             (
-//RS                 "effects",
-//RS                 CtValue::List(index.effects().iter().map(compiler_effect_value).collect()),
-//RS             ),
-//RS             (
-//RS                 "arithmetic",
-//RS                 CtValue::List(
-//RS                     index
-//RS                         .arithmetic()
-//RS                         .iter()
-//RS                         .map(compiler_arithmetic_value)
-//RS                         .collect(),
-//RS                 ),
-//RS             ),
-//RS             (
-//RS                 "outputs",
-//RS                 CtValue::List(index.outputs().iter().map(compiler_output_value).collect()),
-//RS             ),
-//RS             (
-//RS                 "state_graphs",
-//RS                 CtValue::List(
-//RS                     index
-//RS                         .state_graphs()
-//RS                         .iter()
-//RS                         .map(compiler_state_graph_value)
-//RS                         .collect(),
-//RS                 ),
-//RS             ),
-//RS             ("fact_registry", compiler_fact_registry_value(fact_registry)),
-//RS             (
-//RS                 "derivations",
-//RS                 CtValue::List(
-//RS                     index
-//RS                         .derivations()
-//RS                         .iter()
-//RS                         .map(compiler_derivation_value)
-//RS                         .collect(),
-//RS                 ),
-//RS             ),
-//RS         ],
-//RS     )
-//RS }
-//RS 
-//RS fn checked_value(source: &str) -> CtValue {
-//RS     let (checked_diagnostics, bundle, effect_facts) =
-//RS         crate::Driver::check_eval_with_effect_facts(source, "core.compiler.jet");
-//RS     checked_value_from_parts(source, &checked_diagnostics, bundle.as_ref(), &effect_facts)
-//RS }
-//RS 
-//RS fn checked_value_from_parts(
-//RS     source: &str,
-//RS     checked_diagnostics: &[Diagnostic],
-//RS     bundle: Option<&AST::ProgramBundle>,
-//RS     effect_facts: &crate::Sema::SemIndexEffectFacts,
-//RS ) -> CtValue {
-//RS     let syntax = parse_source(source);
-//RS     let diagnostics = checked_diagnostics
-//RS         .iter()
-//RS         .map(diagnostic_view)
-//RS         .collect::<Vec<_>>();
-//RS     let has_errors = checked_diagnostics
-//RS         .iter()
-//RS         .any(|diagnostic| diagnostic.severity == Severity::Error);
-//RS     let syntax_value = syntax_tree_value(&syntax);
-//RS     let (functions, effects, semantic_index) = if let Some(bundle) = bundle {
-//RS         let index = jet_semindex::from_checked(bundle, effect_facts);
-//RS         let semantic_facts = crate::Driver::program_semantic_facts(bundle, effect_facts);
-//RS         let view = SemIndexProgramIndex { index: &index };
-//RS         let program =
-//RS             crate::Comptime::build_program_info_with_index(bundle, &semantic_facts, Some(&view));
-//RS         let functions =
-//RS             field_value(&program, "functions").unwrap_or_else(|| CtValue::List(Vec::new()));
-//RS         let effects = CtValue::List(
-//RS             index
-//RS                 .effects()
-//RS                 .iter()
-//RS                 .map(|effect| effect_info_value(effect.inferred.clone()))
-//RS                 .collect(),
-//RS         );
-//RS         let semantic_index = if has_errors {
-//RS             CtValue::absent(Type::Named("CompilerSemanticIndex".to_string()))
-//RS         } else {
-//RS             CtValue::Present(Box::new(compiler_semantic_index_value(
-//RS                 &index,
-//RS                 source,
-//RS                 &effect_facts.fact_registry,
-//RS             )))
-//RS         };
-//RS         (functions, effects, semantic_index)
-//RS     } else {
-//RS         let functions = syntax
-//RS             .items
-//RS             .iter()
-//RS             .filter(|node| node.kind == SyntaxNodeKind::Function)
-//RS             .map(compiler_function_value)
-//RS             .collect::<Vec<_>>();
-//RS         (
-//RS             CtValue::List(functions),
-//RS             CtValue::absent(Type::Named("CompilerSemanticIndex".to_string())),
-//RS             CtValue::absent(Type::Named("CompilerSemanticIndex".to_string())),
-//RS         )
-//RS     };
-//RS     ct_struct(
-//RS         "CompilerChecked",
-//RS         vec![
-//RS             ("schema_version", CtValue::Int(i64::from(SCHEMA_VERSION))),
-//RS             ("source", CtValue::Str(source.to_string())),
-//RS             ("syntax", syntax_value),
-//RS             (
-//RS                 "diagnostics",
-//RS                 CtValue::List(diagnostics.iter().map(diagnostic_value).collect()),
-//RS             ),
-//RS             ("functions", functions),
-//RS             ("effects", effects),
-//RS             ("semantic_index", semantic_index),
-//RS         ],
-//RS     )
-//RS }
-//RS 
-//RS fn source_map_value(map: &SourceMap) -> CtValue {
-//RS     ct_struct(
-//RS         "CompilerSourceMap",
-//RS         vec![
-//RS             ("schema_version", CtValue::Int(i64::from(SCHEMA_VERSION))),
-//RS             (
-//RS                 "sources",
-//RS                 CtValue::List(map.sources.iter().cloned().map(CtValue::Str).collect()),
-//RS             ),
-//RS             (
-//RS                 "generated_lines",
-//RS                 CtValue::List(
-//RS                     map.generated_lines
-//RS                         .iter()
-//RS                         .map(|line| {
-//RS                             ct_struct(
-//RS                                 "CompilerGeneratedLine",
-//RS                                 vec![
-//RS                                     ("generated_line", CtValue::Int(line.generated_line as i64)),
-//RS                                     (
-//RS                                         "source",
-//RS                                         line.source.clone().map_or(
-//RS                                             CtValue::absent(Type::String),
-//RS                                             |source| {
-//RS                                                 CtValue::Present(Box::new(CtValue::Str(source)))
-//RS                                             },
-//RS                                         ),
-//RS                                     ),
-//RS                                     ("source_line", CtValue::Int(line.source_line as i64)),
-//RS                                 ],
-//RS                             )
-//RS                         })
-//RS                         .collect(),
-//RS                 ),
-//RS             ),
-//RS         ],
-//RS     )
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-//RS pub struct TextRange {
-//RS     pub start: usize,
-//RS     pub end: usize,
-//RS }
-//RS 
-//RS impl From<Span> for TextRange {
-//RS     fn from(span: Span) -> Self {
-//RS         TextRange {
-//RS             start: span.start,
-//RS             end: span.end,
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-//RS pub struct LineCol {
-//RS     pub line: usize,
-//RS     pub column: usize,
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct TokenView {
-//RS     pub kind: &'static str,
-//RS     pub text: String,
-//RS     pub span: TextRange,
-//RS     pub start: LineCol,
-//RS     pub end: LineCol,
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-//RS pub enum DiagnosticSeverity {
-//RS     Error,
-//RS     Lint,
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct DiagnosticView {
-//RS     pub code: String,
-//RS     pub severity: DiagnosticSeverity,
-//RS     pub message: String,
-//RS     pub why: String,
-//RS     pub fix: String,
-//RS     pub span: Option<TextRange>,
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-//RS pub enum SyntaxNodeKind {
-//RS     Function,
-//RS     Struct,
-//RS     Enum,
-//RS     Trait,
-//RS     Tag,
-//RS     Effect,
-//RS     Impl,
-//RS     Const,
-//RS     Test,
-//RS     ExternRust,
-//RS     Module,
-//RS     CModule,
-//RS     CodeModule,
-//RS     ErrorConversion,
-//RS     Migration,
-//RS     State,
-//RS     Protocol,
-//RS     Derive,
-//RS     GenericModule,
-//RS     ModuleAlias,
-//RS     Distinct,
-//RS     TypeAlias,
-//RS     UnitFamily,
-//RS     Marker,
-//RS     Fact,
-//RS     TemplateLoop,
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct SyntaxNode {
-//RS     pub kind: SyntaxNodeKind,
-//RS     pub name: Option<String>,
-//RS     pub span: TextRange,
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct SyntaxTree {
-//RS     pub api_version: u32,
-//RS     pub schema_version: u32,
-//RS     pub source: String,
-//RS     pub items: Vec<SyntaxNode>,
-//RS     pub diagnostics: Vec<DiagnosticView>,
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct LexedSource {
-//RS     pub api_version: u32,
-//RS     pub schema_version: u32,
-//RS     pub source: String,
-//RS     pub tokens: Vec<TokenView>,
-//RS     pub diagnostics: Vec<DiagnosticView>,
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct SourceMap {
-//RS     pub api_version: u32,
-//RS     pub schema_version: u32,
-//RS     pub sources: Vec<String>,
-//RS     pub generated_lines: Vec<GeneratedLine>,
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct GeneratedLine {
-//RS     pub generated_line: usize,
-//RS     pub source: Option<String>,
-//RS     pub source_line: usize,
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct SemIndexView {
-//RS     pub schema_version: u32,
-//RS     pub source_digest: String,
-//RS     pub definitions: Vec<jet_semindex::SymbolDef>,
-//RS     pub references: Vec<jet_semindex::SymbolRef>,
-//RS     pub calls: Vec<jet_semindex::CallEdge>,
-//RS     pub effects: Vec<jet_semindex::EffectFact>,
-//RS     pub arithmetic: Vec<jet_semindex::ArithmeticOperationFact>,
-//RS     pub outputs: Vec<jet_semindex::OutputFact>,
-//RS     pub state_graphs: Vec<jet_semindex::StateGraphFact>,
-//RS     pub fact_registry: jet_foundation::Facts::FactRegistry,
-//RS     pub derivations: Vec<jet_foundation::Facts::DerivationRecord>,
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct CheckedFile {
-//RS     pub api_version: u32,
-//RS     pub schema_version: u32,
-//RS     pub diagnostics: Vec<DiagnosticView>,
-//RS     pub syntax: Option<SyntaxTree>,
-//RS     pub semantic_index: Option<SemIndexView>,
-//RS }
-//RS 
-//RS pub fn lex_source(src: &str) -> LexedSource {
-//RS     let (tokens, diagnostics) = match Package::mask_inline_package_source(src) {
-//RS         Ok((source, _)) => Lexer::lex(&source),
-//RS         Err(error) => (Vec::new(), vec![error.diagnostic()]),
-//RS     };
-//RS     let positions = SourcePositionIndex::new(src);
-//RS     LexedSource {
-//RS         api_version: API_VERSION,
-//RS         schema_version: SCHEMA_VERSION,
-//RS         source: src.to_string(),
-//RS         tokens: tokens
-//RS             .iter()
-//RS             .map(|token| token_view(src, token, &positions))
-//RS             .collect(),
-//RS         diagnostics: diagnostics.iter().map(diagnostic_view).collect(),
-//RS     }
-//RS }
-//RS pub fn parse_source(src: &str) -> SyntaxTree {
-//RS     let lexed = lex_source(src);
-//RS     if !lexed.diagnostics.is_empty() {
-//RS         return SyntaxTree {
-//RS             api_version: API_VERSION,
-//RS             schema_version: SCHEMA_VERSION,
-//RS             source: src.to_string(),
-//RS             items: Vec::new(),
-//RS             diagnostics: lexed.diagnostics,
-//RS         };
-//RS     }
-//RS 
-//RS     let source_for_parse = Package::mask_inline_package_source(src)
-//RS         .map(|(source, _)| source)
-//RS         .unwrap_or_else(|_| src.to_string());
-//RS     let (tokens, _) = Lexer::lex(&source_for_parse);
-//RS 
-//RS     match Parser::parse_for_check_with_source(&tokens, &source_for_parse) {
-//RS         Ok((program, parse_teaching)) => SyntaxTree {
-//RS             api_version: API_VERSION,
-//RS             schema_version: SCHEMA_VERSION,
-//RS             source: src.to_string(),
-//RS             items: program.items.iter().map(item_node).collect(),
-//RS             diagnostics: parse_teaching.iter().map(diagnostic_view).collect(),
-//RS         },
-//RS         Err(diagnostics) => SyntaxTree {
-//RS             api_version: API_VERSION,
-//RS             schema_version: SCHEMA_VERSION,
-//RS             source: src.to_string(),
-//RS             items: Vec::new(),
-//RS             diagnostics: diagnostics.iter().map(diagnostic_view).collect(),
-//RS         },
-//RS     }
-//RS }
-//RS 
-//RS pub fn check_file(path: &std::path::Path) -> CheckedFile {
-//RS     let file = path.to_string_lossy();
-//RS     let (diagnostics, bundle, facts) =
-//RS         crate::Driver::check_file_with_effect_facts(&file, None, true);
-//RS     let has_errors = diagnostics.iter().any(|d| d.severity == Severity::Error);
-//RS     let source = std::fs::read_to_string(path).unwrap_or_default();
-//RS     let syntax = bundle
-//RS         .as_ref()
-//RS         .map(|bundle| bundle_syntax_tree(bundle, &source));
-//RS     let semantic_index = if has_errors {
-//RS         None
-//RS     } else {
-//RS         bundle.as_ref().map(|bundle| {
-//RS             SemIndexView::from_index(
-//RS                 jet_semindex::from_checked(bundle, &facts),
-//RS                 &source,
-//RS                 &facts.fact_registry,
-//RS             )
-//RS         })
-//RS     };
-//RS     CheckedFile {
-//RS         api_version: API_VERSION,
-//RS         schema_version: SCHEMA_VERSION,
-//RS         diagnostics: diagnostics.iter().map(diagnostic_view).collect(),
-//RS         syntax,
-//RS         semantic_index,
-//RS     }
-//RS }
-//RS 
-//RS /// Stable JSON envelope shared by the CLI mirror and callers that need to
-//RS /// persist compiler facts. This is deliberately hand-written: the compiler
-//RS /// seam has no serialization dependency, and the field order is part of the
-//RS /// schema's deterministic output.
-//RS pub const JSON_SCHEMA_VERSION: u32 = SCHEMA_VERSION;
-//RS 
-//RS fn compiler_json(operation: &str, compiler: StatusValue) -> String {
-//RS     StatusEnvelope::new(format!("inspect.compiler.{operation}"), true)
-//RS         .with_field("compiler", compiler)
-//RS         .json()
-//RS }
-//RS 
-//RS fn compiler_payload(operation: &str, value: StatusValue) -> StatusValue {
-//RS     StatusValue::object(
-//RS         StatusFields::new()
-//RS             .with("schema_version", JSON_SCHEMA_VERSION)
-//RS             .with("api_version", API_VERSION)
-//RS             .with("operation", operation)
-//RS             .with("value", value),
-//RS     )
-//RS }
-//RS 
-//RS pub fn lex_source_json(source: &str) -> String {
-//RS     compiler_json("lex", compiler_payload("lex", status_lexed(&lex_source(source))))
-//RS }
-//RS 
-//RS pub fn parse_source_json(source: &str) -> String {
-//RS     compiler_json(
-//RS         "parse",
-//RS         compiler_payload("parse", status_syntax_tree(&parse_source(source))),
-//RS     )
-//RS }
-//RS 
-//RS pub fn check_file_json(path: &std::path::Path) -> String {
-//RS     let file = path.to_string_lossy();
-//RS     let source = match std::fs::read_to_string(path) {
-//RS         Ok(source) => source,
-//RS         Err(error) => {
-//RS             return compiler_api_error_json(
-//RS                 "check",
-//RS                 &file,
-//RS                 "E0956",
-//RS                 format!("could not read compiler input: {error}"),
-//RS             )
-//RS         }
-//RS     };
-//RS     let compiler = StatusValue::object(
-//RS         StatusFields::new()
-//RS             .with("schema_version", JSON_SCHEMA_VERSION)
-//RS             .with("api_version", API_VERSION)
-//RS             .with("operation", "check")
-//RS             .with("file", file.as_ref())
-//RS             .with("value", status_ct_value(&checked_value(&source))),
-//RS     );
-//RS     compiler_json("check", compiler)
-//RS }
-//RS 
-//RS /// Serialize one compiler-operation failure at the JSON boundary. The typed
-//RS /// Jet surface uses `CompilerError`; JSON carries the same fields without
-//RS /// leaking a Rust or rustc error string as the whole payload.
-//RS pub fn compiler_api_error_json(
-//RS     operation: &str,
-//RS     file: &str,
-//RS     code: &str,
-//RS     message: impl Into<String>,
-//RS ) -> String {
-//RS     let compiler = StatusValue::object(
-//RS         StatusFields::new()
-//RS             .with("schema_version", JSON_SCHEMA_VERSION)
-//RS             .with("api_version", API_VERSION)
-//RS             .with("operation", operation)
-//RS             .with("file", file)
-//RS             .with(
-//RS                 "error",
-//RS                 StatusValue::object(
-//RS                     StatusFields::new()
-//RS                         .with("code", code)
-//RS                         .with("message", message.into()),
-//RS                 ),
-//RS             ),
-//RS     );
-//RS     StatusEnvelope::new(format!("inspect.compiler.{operation}"), false)
-//RS         .with_field("compiler", compiler)
-//RS         .json()
-//RS }
-//RS 
-//RS pub fn source_map_json(rust_source: &str) -> String {
-//RS     compiler_json(
-//RS         "source_map",
-//RS         compiler_payload(
-//RS             "source_map",
-//RS             status_source_map(&source_map_from_generated_rust(rust_source)),
-//RS         ),
-//RS     )
-//RS }
-//RS 
-//RS fn status_span(range: Option<TextRange>) -> StatusValue {
-//RS     range.map_or(StatusValue::Null, |range| {
-//RS         StatusValue::object(
-//RS             StatusFields::new()
-//RS                 .with("start", range.start)
-//RS                 .with("end", range.end),
-//RS         )
-//RS     })
-//RS }
-//RS 
-//RS fn status_diagnostic(diagnostic: &DiagnosticView) -> StatusValue {
-//RS     StatusValue::object(
-//RS         StatusFields::new()
-//RS             .with("code", diagnostic.code.as_str())
-//RS             .with(
-//RS                 "severity",
-//RS                 match diagnostic.severity {
-//RS                     DiagnosticSeverity::Error => "error",
-//RS                     DiagnosticSeverity::Lint => "lint",
-//RS                 },
-//RS             )
-//RS             .with("message", diagnostic.message.as_str())
-//RS             .with("why", diagnostic.why.as_str())
-//RS             .with("fix", diagnostic.fix.as_str())
-//RS             .with("span", status_span(diagnostic.span)),
-//RS     )
-//RS }
-//RS 
-//RS fn status_diagnostics(diagnostics: &[DiagnosticView]) -> StatusValue {
-//RS     StatusValue::array(diagnostics.iter().map(status_diagnostic))
-//RS }
-//RS 
-//RS fn status_lexed(lexed: &LexedSource) -> StatusValue {
-//RS     let tokens = StatusValue::array(lexed.tokens.iter().map(|token| {
-//RS         StatusValue::object(
-//RS             StatusFields::new()
-//RS                 .with("kind", token.kind)
-//RS                 .with("text", token.text.as_str())
-//RS                 .with(
-//RS                     "span",
-//RS                     StatusValue::object(
-//RS                         StatusFields::new()
-//RS                             .with("start", token.span.start)
-//RS                             .with("end", token.span.end),
-//RS                     ),
-//RS                 )
-//RS                 .with(
-//RS                     "start",
-//RS                     StatusValue::object(
-//RS                         StatusFields::new()
-//RS                             .with("line", token.start.line)
-//RS                             .with("column", token.start.column),
-//RS                     ),
-//RS                 )
-//RS                 .with(
-//RS                     "end",
-//RS                     StatusValue::object(
-//RS                         StatusFields::new()
-//RS                             .with("line", token.end.line)
-//RS                             .with("column", token.end.column),
-//RS                     ),
-//RS                 ),
-//RS         )
-//RS     }));
-//RS     StatusValue::object(
-//RS         StatusFields::new()
-//RS             .with("schema_version", lexed.schema_version)
-//RS             .with("api_version", lexed.api_version)
-//RS             .with("source", lexed.source.as_str())
-//RS             .with("tokens", tokens)
-//RS             .with("diagnostics", status_diagnostics(&lexed.diagnostics)),
-//RS     )
-//RS }
-//RS 
-//RS fn syntax_node_kind_name(kind: SyntaxNodeKind) -> &'static str {
-//RS     match kind {
-//RS         SyntaxNodeKind::Function => "function",
-//RS         SyntaxNodeKind::Struct => "struct",
-//RS         SyntaxNodeKind::Enum => "enum",
-//RS         SyntaxNodeKind::Trait => "trait",
-//RS         SyntaxNodeKind::Tag => "tag",
-//RS         SyntaxNodeKind::Effect => "effect",
-//RS         SyntaxNodeKind::Impl => "impl",
-//RS         SyntaxNodeKind::Const => "const",
-//RS         SyntaxNodeKind::Test => "test",
-//RS         SyntaxNodeKind::ExternRust => "extern_rust",
-//RS         SyntaxNodeKind::Module => "module",
-//RS         SyntaxNodeKind::CModule => "c_module",
-//RS         SyntaxNodeKind::CodeModule => "code_module",
-//RS         SyntaxNodeKind::ErrorConversion => "error_conversion",
-//RS         SyntaxNodeKind::Migration => "migration",
-//RS         SyntaxNodeKind::State => "state",
-//RS         SyntaxNodeKind::Protocol => "protocol",
-//RS         SyntaxNodeKind::Derive => "derive",
-//RS         SyntaxNodeKind::GenericModule => "generic_module",
-//RS         SyntaxNodeKind::ModuleAlias => "module_alias",
-//RS         SyntaxNodeKind::Distinct => "distinct",
-//RS         SyntaxNodeKind::TypeAlias => "type_alias",
-//RS         SyntaxNodeKind::UnitFamily => "unit_family",
-//RS         SyntaxNodeKind::Marker => "marker",
-//RS         SyntaxNodeKind::Fact => "fact",
-//RS         SyntaxNodeKind::TemplateLoop => "template_loop",
-//RS     }
-//RS }
-//RS 
-//RS fn status_syntax_tree(tree: &SyntaxTree) -> StatusValue {
-//RS     let items = StatusValue::array(tree.items.iter().map(|node| {
-//RS         StatusValue::object(
-//RS             StatusFields::new()
-//RS                 .with("kind", syntax_node_kind_name(node.kind))
-//RS                 .with(
-//RS                     "name",
-//RS                     node.name
-//RS                         .as_deref()
-//RS                         .map(StatusValue::from)
-//RS                         .unwrap_or(StatusValue::Null),
-//RS                 )
-//RS                 .with(
-//RS                     "span",
-//RS                     StatusValue::object(
-//RS                         StatusFields::new()
-//RS                             .with("start", node.span.start)
-//RS                             .with("end", node.span.end),
-//RS                     ),
-//RS                 ),
-//RS         )
-//RS     }));
-//RS     StatusValue::object(
-//RS         StatusFields::new()
-//RS             .with("schema_version", tree.schema_version)
-//RS             .with("api_version", tree.api_version)
-//RS             .with("source", tree.source.as_str())
-//RS             .with("items", items)
-//RS             .with("diagnostics", status_diagnostics(&tree.diagnostics)),
-//RS     )
-//RS }
-//RS 
-//RS fn status_source_map(map: &SourceMap) -> StatusValue {
-//RS     let sources = StatusValue::array(map.sources.iter().map(|source| StatusValue::from(source.as_str())));
-//RS     let lines = StatusValue::array(map.generated_lines.iter().map(|line| {
-//RS         StatusValue::object(
-//RS             StatusFields::new()
-//RS                 .with("generated_line", line.generated_line)
-//RS                 .with(
-//RS                     "source",
-//RS                     line.source
-//RS                         .as_deref()
-//RS                         .map(StatusValue::from)
-//RS                         .unwrap_or(StatusValue::Null),
-//RS                 )
-//RS                 .with("source_line", line.source_line),
-//RS         )
-//RS     }));
-//RS     StatusValue::object(
-//RS         StatusFields::new()
-//RS             .with("schema_version", map.schema_version)
-//RS             .with("api_version", map.api_version)
-//RS             .with("sources", sources)
-//RS             .with("generated_lines", lines),
-//RS     )
-//RS }
-//RS fn status_map_key(key: &CtKey) -> String {
-//RS     match key {
-//RS         CtKey::Int(value) => value.to_string(),
-//RS         CtKey::Str(value) => value.clone(),
-//RS         CtKey::Bool(value) => value.to_string(),
-//RS         CtKey::Char(value) => value.to_string(),
-//RS         CtKey::Tuple(_) | CtKey::Struct { .. } | CtKey::Enum { .. } => {
-//RS             key.to_value().to_json()
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn status_ct_value(value: &CtValue) -> StatusValue {
-//RS     match value {
-//RS         CtValue::Int(value) => StatusValue::from(*value),
-//RS         CtValue::Float(value) => StatusValue::Float(value.to_json()),
-//RS         CtValue::Bool(value) => StatusValue::from(*value),
-//RS         CtValue::Char(value) => StatusValue::from(value.to_string()),
-//RS         CtValue::Str(value) => StatusValue::from(value.as_str()),
-//RS         CtValue::BigInt(value) => StatusValue::from(value.to_string_rep().as_str()),
-//RS         CtValue::Bytes(values) => {
-//RS             StatusValue::array(values.iter().map(|value| StatusValue::from(*value as i128)))
-//RS         }
-//RS         CtValue::List(values) => StatusValue::array(values.iter().map(status_ct_value)),
-//RS         CtValue::Map(values) => StatusValue::object(
-//RS             values.iter().fold(StatusFields::new(), |fields, (key, value)| {
-//RS                 fields.with(status_map_key(key), status_ct_value(value))
-//RS             }),
-//RS         ),
-//RS         CtValue::Struct { fields, .. } => StatusValue::object(
-//RS             fields
-//RS                 .iter()
-//RS                 .filter(|(name, _)| !crate::Syntax::is_memo_storage_name(name))
-//RS                 .fold(StatusFields::new(), |fields, (name, value)| {
-//RS                     fields.with(name.as_str(), status_ct_value(value))
-//RS                 }),
-//RS         ),
-//RS         CtValue::Enum {
-//RS             variant, args, ..
-//RS         } if args.is_empty() => StatusValue::from(variant.as_str()),
-//RS         CtValue::Enum {
-//RS             variant, args, ..
-//RS         } if args.iter().all(|(label, _)| label.is_some()) => {
-//RS             let fields = args.iter().fold(StatusFields::new(), |fields, (label, value)| {
-//RS                 fields.with(
-//RS                     label.as_deref().expect("checked enum label"),
-//RS                     status_ct_value(value),
-//RS                 )
-//RS             });
-//RS             StatusValue::object(StatusFields::new().with(variant.as_str(), StatusValue::object(fields)))
-//RS         }
-//RS         CtValue::Enum { variant, args, .. } => StatusValue::object(
-//RS             StatusFields::new().with(
-//RS                 variant.as_str(),
-//RS                 StatusValue::array(args.iter().map(|(_, value)| status_ct_value(value))),
-//RS             ),
-//RS         ),
-//RS         CtValue::Present(value) => status_ct_value(value),
-//RS         CtValue::Failed(CtReport::Clean(_)) | CtValue::Unit | CtValue::Closure(_) => {
-//RS             StatusValue::Null
-//RS         }
-//RS         CtValue::Failed(CtReport::Told(value)) => {
-//RS             StatusValue::object(StatusFields::new().with("err", status_ct_value(value)))
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS pub fn source_map_from_generated_rust(rust_src: &str) -> SourceMap {
-//RS     let mut sources = Vec::new();
-//RS     let mut current_source = None;
-//RS     let mut generated_lines = Vec::new();
-//RS     for (idx, line) in rust_src.lines().enumerate() {
-//RS         let generated_line = idx + 1;
-//RS         let trimmed = line.trim_start();
-//RS         if let Some(source) = trimmed.strip_prefix("// jet:source-map source=") {
-//RS             current_source = Some(source.to_string());
-//RS             if !sources.iter().any(|s| s == source) {
-//RS                 sources.push(source.to_string());
-//RS             }
-//RS             continue;
-//RS         }
-//RS         if let Some(rest) = trimmed.strip_prefix("// jet:line ") {
-//RS             if let Ok(source_line) = rest.trim().parse::<usize>() {
-//RS                 generated_lines.push(GeneratedLine {
-//RS                     generated_line,
-//RS                     source: current_source.clone(),
-//RS                     source_line,
-//RS                 });
-//RS             }
-//RS         }
-//RS     }
-//RS     SourceMap {
-//RS         api_version: API_VERSION,
-//RS         schema_version: SCHEMA_VERSION,
-//RS         sources,
-//RS         generated_lines,
-//RS     }
-//RS }
-//RS 
-//RS impl SemIndexView {
-//RS     fn from_index(
-//RS         index: jet_semindex::SemIndex,
-//RS         source: &str,
-//RS         fact_registry: &jet_foundation::Facts::FactRegistry,
-//RS     ) -> Self {
-//RS         SemIndexView {
-//RS             schema_version: index.schema_version(),
-//RS             source_digest: crate::SHA256::sha256_hex(source.as_bytes()),
-//RS             definitions: index.definitions().to_vec(),
-//RS             references: index.references().to_vec(),
-//RS             calls: index.call_edges().to_vec(),
-//RS             effects: index.effects().to_vec(),
-//RS             arithmetic: index.arithmetic().to_vec(),
-//RS             outputs: index.outputs().to_vec(),
-//RS             state_graphs: index.state_graphs().to_vec(),
-//RS             fact_registry: fact_registry.clone(),
-//RS             derivations: index.derivations().to_vec(),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS const POSITION_CHECKPOINT_BYTES: usize = 1024;
-//RS 
-//RS #[derive(Debug, Clone, Copy)]
-//RS struct PositionCheckpoint {
-//RS     offset: usize,
-//RS     line: usize,
-//RS     column: usize,
-//RS }
-//RS 
-//RS struct SourcePositionIndex {
-//RS     checkpoints: Vec<PositionCheckpoint>,
-//RS }
-//RS 
-//RS impl SourcePositionIndex {
-//RS     /// Sample byte offsets instead of retaining one position per byte. A
-//RS     /// lookup does a binary search followed by a bounded UTF-8 scan.
-//RS     fn new(src: &str) -> Self {
-//RS         let capacity = (src.len() / POSITION_CHECKPOINT_BYTES).saturating_add(2);
-//RS         let mut checkpoints = Vec::with_capacity(capacity);
-//RS         let mut line = 1;
-//RS         let mut column = 1;
-//RS         checkpoints.push(PositionCheckpoint {
-//RS             offset: 0,
-//RS             line,
-//RS             column,
-//RS         });
-//RS 
-//RS         let mut next_checkpoint = POSITION_CHECKPOINT_BYTES;
-//RS         for (offset, ch) in src.char_indices() {
-//RS             while offset >= next_checkpoint {
-//RS                 checkpoints.push(PositionCheckpoint {
-//RS                     offset,
-//RS                     line,
-//RS                     column,
-//RS                 });
-//RS                 next_checkpoint = next_checkpoint.saturating_add(POSITION_CHECKPOINT_BYTES);
-//RS             }
-//RS             if ch == '\n' {
-//RS                 line += 1;
-//RS                 column = 1;
-//RS             } else {
-//RS                 column += 1;
-//RS             }
-//RS         }
-//RS         if checkpoints.last().map(|checkpoint| checkpoint.offset) != Some(src.len()) {
-//RS             checkpoints.push(PositionCheckpoint {
-//RS                 offset: src.len(),
-//RS                 line,
-//RS                 column,
-//RS             });
-//RS         }
-//RS 
-//RS         SourcePositionIndex { checkpoints }
-//RS     }
-//RS 
-//RS     fn line_col(&self, src: &str, offset: usize) -> LineCol {
-//RS         let checkpoint_index = self
-//RS             .checkpoints
-//RS             .binary_search_by_key(&offset, |checkpoint| checkpoint.offset)
-//RS             .unwrap_or_else(|index| index.saturating_sub(1));
-//RS         let checkpoint = self.checkpoints[checkpoint_index];
-//RS         let bytes_after_checkpoint = offset.saturating_sub(checkpoint.offset);
-//RS         let mut line = checkpoint.line;
-//RS         let mut column = checkpoint.column;
-//RS         for (relative, ch) in src[checkpoint.offset..].char_indices() {
-//RS             if relative >= bytes_after_checkpoint {
-//RS                 break;
-//RS             }
-//RS             if ch == '\n' {
-//RS                 line += 1;
-//RS                 column = 1;
-//RS             } else {
-//RS                 column += 1;
-//RS             }
-//RS         }
-//RS         LineCol { line, column }
-//RS     }
-//RS }
-//RS 
-//RS fn token_view(src: &str, token: &Token, positions: &SourcePositionIndex) -> TokenView {
-//RS     let start = positions.line_col(src, token.span.start);
-//RS     let end = positions.line_col(src, token.span.end);
-//RS     TokenView {
-//RS         kind: token_kind_name(&token.kind),
-//RS         text: token_text(src, token),
-//RS         span: token.span.into(),
-//RS         start,
-//RS         end,
-//RS     }
-//RS }
-//RS 
-//RS fn diagnostic_view(diagnostic: &Diagnostic) -> DiagnosticView {
-//RS     DiagnosticView {
-//RS         code: diagnostic.code.to_string(),
-//RS         severity: match diagnostic.severity {
-//RS             Severity::Error => DiagnosticSeverity::Error,
-//RS             Severity::Lint => DiagnosticSeverity::Lint,
-//RS         },
-//RS         message: diagnostic.what.clone(),
-//RS         why: diagnostic.why.clone(),
-//RS         fix: diagnostic.fix.clone(),
-//RS         span: diagnostic.span.map(Into::into),
-//RS     }
-//RS }
-//RS 
-//RS fn bundle_syntax_tree(bundle: &AST::ProgramBundle, source: &str) -> SyntaxTree {
-//RS     let mut items = Vec::new();
-//RS     for module in &bundle.modules {
-//RS         items.extend(module.items.iter().map(item_node));
-//RS     }
-//RS     SyntaxTree {
-//RS         api_version: API_VERSION,
-//RS         schema_version: SCHEMA_VERSION,
-//RS         source: source.to_string(),
-//RS         items,
-//RS         diagnostics: Vec::new(),
-//RS     }
-//RS }
-//RS 
-//RS fn item_node(item: &AST::Item) -> SyntaxNode {
-//RS     let (kind, name, span) = match item {
-//RS         AST::Item::Func(f) => (SyntaxNodeKind::Function, Some(f.name.clone()), f.name_span),
-//RS         AST::Item::Struct(s) => (SyntaxNodeKind::Struct, Some(s.name.clone()), s.name_span),
-//RS         AST::Item::Enum(e) => (SyntaxNodeKind::Enum, Some(e.name.clone()), e.name_span),
-//RS         AST::Item::Distinct(d) => (SyntaxNodeKind::Distinct, Some(d.name.clone()), d.name_span),
-//RS         AST::Item::TypeAlias(a) => (SyntaxNodeKind::TypeAlias, Some(a.name.clone()), a.name_span),
-//RS         AST::Item::UnitFamily(f) => (
-//RS             SyntaxNodeKind::UnitFamily,
-//RS             Some(f.family.clone()),
-//RS             f.family_span,
-//RS         ),
-//RS         AST::Item::Trait(t) => (SyntaxNodeKind::Trait, Some(t.name.clone()), t.name_span),
-//RS         AST::Item::Tag(t) => (SyntaxNodeKind::Tag, Some(t.name.clone()), t.name_span),
-//RS         AST::Item::EffectDecl(effect) => (
-//RS             SyntaxNodeKind::Effect,
-//RS             Some(effect.name.clone()),
-//RS             effect.name_span,
-//RS         ),
-//RS         AST::Item::Impl(i) => (SyntaxNodeKind::Impl, Some(i.type_name.clone()), i.type_span),
-//RS         AST::Item::Const(c) => (SyntaxNodeKind::Const, Some(c.name.clone()), c.name_span),
-//RS         AST::Item::Test(t) => (SyntaxNodeKind::Test, t.name.clone(), t.name_span),
-//RS         AST::Item::ExternRust(e) => (
-//RS             SyntaxNodeKind::ExternRust,
-//RS             Some(e.crate_spec.clone()),
-//RS             e.span,
-//RS         ),
-//RS         AST::Item::Module(m) => (SyntaxNodeKind::Module, Some(m.name.clone()), m.name_span),
-//RS         AST::Item::CModule(m) => (SyntaxNodeKind::CModule, Some(m.lib.clone()), m.path_span),
-//RS         AST::Item::CodeModule(m) => (
-//RS             SyntaxNodeKind::CodeModule,
-//RS             Some(m.name.clone()),
-//RS             m.name_span,
-//RS         ),
-//RS         AST::Item::ErrorConv(e) => (
-//RS             SyntaxNodeKind::ErrorConversion,
-//RS             Some(format!("{} -> {}", e.from_ty, e.to_ty)),
-//RS             e.from_span,
-//RS         ),
-//RS         AST::Item::Migration(m) => (
-//RS             SyntaxNodeKind::Migration,
-//RS             Some(m.type_name.clone()),
-//RS             m.type_span,
-//RS         ),
-//RS         AST::Item::ProtocolDecl(p) => (SyntaxNodeKind::Protocol, Some(p.name.clone()), p.name_span),
-//RS         AST::Item::UserDerive(d) => (
-//RS             SyntaxNodeKind::Derive,
-//RS             Some(d.trait_name.clone()),
-//RS             d.trait_span,
-//RS         ),
-//RS         AST::Item::GenericModule(m) => (
-//RS             SyntaxNodeKind::GenericModule,
-//RS             Some(m.name.clone()),
-//RS             m.name_span,
-//RS         ),
-//RS         AST::Item::ModuleAlias(m) => (
-//RS             SyntaxNodeKind::ModuleAlias,
-//RS             Some(m.name.clone()),
-//RS             m.name_span,
-//RS         ),
-//RS         AST::Item::MarkerDecl(m) => (SyntaxNodeKind::Marker, Some(m.name.clone()), m.name_span),
-//RS         AST::Item::FactDecl(f) => (SyntaxNodeKind::Fact, Some(f.name.clone()), f.name_span),
-//RS         // D-STRUCT-ONCE1=A: a root declaration loop is a nameless template
-//RS         // that sema expands; surface it by its own span.
-//RS         AST::Item::TemplateLoop(l) => (SyntaxNodeKind::TemplateLoop, None, l.span),
-//RS     };
-//RS     SyntaxNode {
-//RS         kind,
-//RS         name,
-//RS         span: span.into(),
-//RS     }
-//RS }
-//RS 
-//RS fn token_text(src: &str, token: &Token) -> String {
-//RS     if token.span.start <= token.span.end && token.span.end <= src.len() {
-//RS         src[token.span.start..token.span.end].to_string()
-//RS     } else {
-//RS         String::new()
-//RS     }
-//RS }
-//RS 
-//RS fn token_kind_name(kind: &TokKind) -> &'static str {
-//RS     match kind {
-//RS         TokKind::KwFn => "keyword.fn",
-//RS         TokKind::KwPub => "keyword.pub",
-//RS         TokKind::KwPriv => "keyword.priv",
-//RS         TokKind::KwIf => "keyword.if",
-//RS         TokKind::KwElse => "keyword.else",
-//RS         TokKind::KwIn => "keyword.in",
-//RS         TokKind::KwBreak => "keyword.break",
-//RS         TokKind::KwTrue => "literal.true",
-//RS         TokKind::KwFalse => "literal.false",
-//RS         TokKind::KwMutate => "keyword.mutate",
-//RS         TokKind::KwMove => "keyword.move",
-//RS         TokKind::KwCopy => "keyword.copy",
-//RS         TokKind::KwStruct => "keyword.struct",
-//RS         TokKind::KwEnum => "keyword.enum",
-//RS         TokKind::KwImpl => "keyword.impl",
-//RS         TokKind::KwTrait => "keyword.trait",
-//RS         TokKind::KwTag => "keyword.tag",
-//RS         TokKind::KwEffect => "keyword.effect",
-//RS         TokKind::KwDerive => "keyword.derive",
-//RS         TokKind::KwSelf => "keyword.self",
-//RS         TokKind::KwNull => "literal.null",
-//RS         TokKind::KwIt => "keyword.it",
-//RS         TokKind::KwConst => "keyword.const",
-//RS         TokKind::KwComptime => "keyword.comptime",
-//RS         TokKind::KwReturn => "keyword.return",
-//RS         TokKind::KwLoop => "keyword.loop",
-//RS         TokKind::KwYield => "keyword.yield",
-//RS         TokKind::KwUse => "keyword.use",
-//RS         TokKind::KwExtern => "keyword.extern",
-//RS         TokKind::KwModule => "keyword.module",
-//RS         TokKind::Ident(_) => "identifier",
-//RS         TokKind::Str(_) => "literal.string",
-//RS         TokKind::RawStr(_) => "literal.raw_string",
-//RS         TokKind::Int(..) => "literal.int",
-//RS         TokKind::Float(..) => "literal.float",
-//RS         TokKind::UnitNumber { .. } => "literal.unit_number",
-//RS         TokKind::Char(_) => "literal.char",
-//RS         TokKind::LParen => "punctuation.left_paren",
-//RS         TokKind::RParen => "punctuation.right_paren",
-//RS         TokKind::LBrace => "punctuation.left_brace",
-//RS         TokKind::RBrace => "punctuation.right_brace",
-//RS         TokKind::LBracket => "punctuation.left_bracket",
-//RS         TokKind::RBracket => "punctuation.right_bracket",
-//RS         TokKind::FenceOpen => "operator.fence_open",
-//RS         TokKind::FenceClose => "operator.fence_close",
-//RS         TokKind::Colon => "punctuation.colon",
-//RS         TokKind::ColonColon => "operator.bind_immutable",
-//RS         TokKind::ColonEq => "operator.bind_mutable",
-//RS         TokKind::Comma => "punctuation.comma",
-//RS         TokKind::UnifiedArrow => "operator.unified_arrow",
-//RS         TokKind::LambdaArrow => "operator.lambda_arrow",
-//RS         TokKind::Semi => "terminator",
-//RS         TokKind::Eq => "operator.assign",
-//RS         TokKind::Dot => "punctuation.dot",
-//RS         TokKind::DotDot => "operator.range",
-//RS         TokKind::DotDotLt => "operator.range_exclusive",
-//RS         TokKind::DotDotDot => "operator.spread",
-//RS         TokKind::At => "punctuation.at",
-//RS         TokKind::Question => "operator.try",
-//RS         TokKind::QuestionQuestion => "operator.fallback",
-//RS         TokKind::QuestionDot => "operator.optional_field",
-//RS         TokKind::Plus => "operator.add",
-//RS         TokKind::Minus => "operator.subtract",
-//RS         TokKind::Star => "operator.star",
-//RS         TokKind::Slash => "operator.divide",
-//RS         TokKind::SlashPercent => "operator.floor_divide",
-//RS         TokKind::Percent => "operator.modulo",
-//RS         TokKind::PercentPercent => "operator.remainder",
-//RS         TokKind::Amp => "operator.amp",
-//RS         TokKind::Pipe => "operator.alternative",
-//RS         TokKind::Caret => "operator.caret",
-//RS         TokKind::Tilde => "operator.tilde",
-//RS         TokKind::TildePipe => "operator.tilde_pipe",
-//RS         TokKind::TildePipeEq => "operator.tilde_pipe_assign",
-//RS         TokKind::TildeTilde => "operator.trait_attach",
-//RS         TokKind::Shl => "operator.shift_left",
-//RS         TokKind::Shr => "operator.shift_right",
-//RS         TokKind::AndAnd => "operator.and",
-//RS         TokKind::OrOr => "operator.or",
-//RS         TokKind::Bang => "operator.not",
-//RS         TokKind::EqEq => "operator.equal",
-//RS         TokKind::NotEq => "operator.not_equal",
-//RS         TokKind::Lt => "operator.less",
-//RS         TokKind::Gt => "operator.greater",
-//RS         TokKind::Le => "operator.less_equal",
-//RS         TokKind::Ge => "operator.greater_equal",
-//RS         TokKind::Compare => "operator.compare",
-//RS         TokKind::PlusEq => "operator.add_assign",
-//RS         TokKind::PlusPlus => "retired.plus_plus",
-//RS         TokKind::MinusEq => "operator.subtract_assign",
-//RS         TokKind::MinusMinus => "retired.minus_minus",
-//RS         TokKind::StarEq => "operator.multiply_assign",
-//RS         TokKind::SlashEq => "operator.divide_assign",
-//RS         TokKind::SlashPercentEq => "operator.floor_divide_assign",
-//RS         TokKind::PercentEq => "operator.modulo_assign",
-//RS         TokKind::PercentPercentEq => "operator.remainder_assign",
-//RS         TokKind::AmpEq => "operator.amp_assign",
-//RS         TokKind::PipeEq => "operator.bit_or_assign",
-//RS         TokKind::CaretEq => "operator.caret_assign",
-//RS         TokKind::ShlEq => "operator.shift_left_assign",
-//RS         TokKind::ShrEq => "operator.shift_right_assign",
-//RS         TokKind::Hash => "punctuation.hash",
-//RS         TokKind::Dollar => "punctuation.dollar",
-//RS         TokKind::LineComment(_) => "comment.line",
-//RS         TokKind::BlockComment(_) => "comment.block",
-//RS         TokKind::Eof => "eof",
-//RS     }
-//RS }
-//RS 
-// END-PORT-PENDING 2073 Source/Compiler.rs:1801-2983
+// Rust: Source/Compiler.rs:1821-2982
+use crate.[AST, Driver, Comptime, SHA256, Syntax, Lexer, Parser]
+use crate.AST.[CtKey, CtReport, CtValue, Type]
+use crate.Diagnostics.[Diagnostic, Severity, Span]
+use crate.Lexer.[TokKind, Token]
+use crate.Compiler.[API_VERSION, SCHEMA_VERSION, ct_struct, compiler_string_list,
+    compiler_option_string, compiler_semantic_span, compiler_definition_value,
+    compiler_reference_value, compiler_call_value, compiler_structural_node_value,
+    compiler_effect_value, compiler_arithmetic_value, compiler_state_graph_value,
+    compiler_fact_registry_value, compiler_derivation_value, SemIndexProgramIndex,
+    field_value, compiler_function_value, effect_info_value, diagnostic_value, syntax_tree_value]
+use jet_driver.Package
+use jet_foundation.Report.[StatusEnvelope, StatusFields, StatusValue]
+use jet_foundation.Facts.[FactRegistry, DerivationRecord]
+use jet_semindex.[SemIndex, OutputEntryFact, OutputFact, SymbolDef, SymbolRef, CallEdge,
+    EffectFact, ArithmeticOperationFact, StateGraphFact, from_checked]
+use std.fs
 
+// Rust: Source/Compiler.rs:1821
+fn compiler_output_entry_value(entry: &OutputEntryFact) -> CtValue {
+    ct_struct("CompilerOutputEntry", [
+        ("identity", CtValue.Str(entry.identity.clone())),
+        ("name", CtValue.Str(entry.name.clone())),
+        ("module", CtValue.Str(entry.module_path.clone())),
+        ("definition_span", compiler_semantic_span(entry.definition_span)),
+        ("reference_span", compiler_semantic_span(entry.reference_span)),
+        ("params", compiler_string_list(entry.params.clone())),
+        ("return_type", compiler_option_string(entry.return_type.as_deref())),
+        ("failure_contract", CtValue.Str(entry.failure_contract.clone())),
+        ("failure_source", CtValue.Str(entry.failure_source.clone())),
+        ("authority", CtValue.Str(entry.authority.clone())),
+        ("effects", compiler_string_list(entry.effects.clone()))
+    ])
+}
+// Rust: Source/Compiler.rs:1852
+fn compiler_output_value(output: &OutputFact) -> CtValue {
+    ct_struct("CompilerOutput", [
+        ("binding", CtValue.Str(output.binding.clone())),
+        ("kind", CtValue.Str(output.kind.clone())),
+        ("name", CtValue.Str(output.name.clone())),
+        ("module", CtValue.Str(output.module_path.clone())),
+        ("span", compiler_semantic_span(output.span)),
+        ("entry", compiler_output_entry_value(output.entry))
+    ])
+}
+// Rust: Source/Compiler.rs:1866
+fn compiler_semantic_index_value(index: &SemIndex, source: &String, fact_registry: &FactRegistry) -> CtValue {
+    ct_struct("CompilerSemanticIndex", [
+        ("schema_version", CtValue.Int(index.schema_version() as I64)),
+        ("source_digest", CtValue.Str(SHA256.sha256_hex(source.as_bytes()))),
+        ("definitions", CtValue.List(index.definitions().iter().map(compiler_definition_value).collect())),
+        ("references", CtValue.List(index.references().iter().map(compiler_reference_value).collect())),
+        ("calls", CtValue.List(index.call_edges().iter().map(compiler_call_value).collect())),
+        ("structural_nodes", CtValue.List(index.structural_nodes().iter().map(compiler_structural_node_value).collect())),
+        ("effects", CtValue.List(index.effects().iter().map(compiler_effect_value).collect())),
+        ("arithmetic", CtValue.List(index.arithmetic().iter().map(compiler_arithmetic_value).collect())),
+        ("outputs", CtValue.List(index.outputs().iter().map(compiler_output_value).collect())),
+        ("state_graphs", CtValue.List(index.state_graphs().iter().map(compiler_state_graph_value).collect())),
+        ("fact_registry", compiler_fact_registry_value(fact_registry)),
+        ("derivations", CtValue.List(index.derivations().iter().map(compiler_derivation_value).collect()))
+    ])
+}
+// Rust: Source/Compiler.rs:1959
+fn checked_value(source: &String) -> CtValue {
+    (checked_diagnostics, bundle, effect_facts) :: Driver.check_eval_with_effect_facts(source, "core.compiler.jet")
+    checked_value_from_parts(source, checked_diagnostics, bundle.as_ref(), effect_facts)
+}
+// Rust: Source/Compiler.rs:1965
+fn checked_value_from_parts(source: &String, checked_diagnostics: &[Diagnostic], bundle: &AST.ProgramBundle?, effect_facts: &crate.Sema.SemIndexEffectFacts) -> CtValue {
+    syntax :: parse_source(source)
+    diagnostics :: checked_diagnostics.iter().map(diagnostic_view).collect()
+    has_errors :: checked_diagnostics.iter().any(diagnostic -> diagnostic.severity == Severity.Error)
+    syntax_value :: syntax_tree_value(syntax)
+    (functions, effects, semantic_index) :: if bundle == {
+        Val(bundle) -> {
+            index :: from_checked(bundle, effect_facts)
+            semantic_facts :: Driver.program_semantic_facts(bundle, effect_facts)
+            view :: SemIndexProgramIndex { index: &index }
+            program :: Comptime.build_program_info_with_index(bundle, semantic_facts, Val(&view))
+            functions :: field_value(program, "functions").unwrap_or_else(() -> CtValue.List([]))
+            effects :: CtValue.List(index.effects().iter().map(effect -> effect_info_value(effect.inferred.clone())).collect())
+            semantic_index :: if has_errors {
+                CtValue.absent(Type.Named("CompilerSemanticIndex"))
+            } else {
+                CtValue.Present(compiler_semantic_index_value(index, source, effect_facts.fact_registry))
+            }
+            (functions, effects, semantic_index)
+        }
+        None -> {
+            functions :: syntax.items.iter().filter(node -> node.kind == SyntaxNodeKind.Function).map(compiler_function_value).collect()
+            (CtValue.List(functions), CtValue.absent(Type.Named("CompilerSemanticIndex")), CtValue.absent(Type.Named("CompilerSemanticIndex")))
+        }
+    }
+    ct_struct("CompilerChecked", [
+        ("schema_version", CtValue.Int(SCHEMA_VERSION as I64)),
+        ("source", CtValue.Str(source.clone())),
+        ("syntax", syntax_value),
+        ("diagnostics", CtValue.List(diagnostics.iter().map(diagnostic_value).collect())),
+        ("functions", functions), ("effects", effects), ("semantic_index", semantic_index)
+    ])
+}
+// Rust: Source/Compiler.rs:2035
+fn source_map_value(map: &SourceMap) -> CtValue {
+    ct_struct("CompilerSourceMap", [
+        ("schema_version", CtValue.Int(SCHEMA_VERSION as I64)),
+        ("sources", CtValue.List(map.sources.iter().cloned().map(CtValue.Str).collect())),
+        ("generated_lines", CtValue.List(map.generated_lines.iter().map(line -> {
+            ct_struct("CompilerGeneratedLine", [
+                ("generated_line", CtValue.Int(line.generated_line as I64)),
+                ("source", line.source.clone().map_or(CtValue.absent(Type.String), source -> CtValue.Present(CtValue.Str(source)))),
+                ("source_line", CtValue.Int(line.source_line as I64))
+            ])
+        }).collect()))
+    ])
+}
+// Rust: Source/Compiler.rs:2075
+struct TextRange {
+    start: USize
+    end: USize
+    // Rust: Source/Compiler.rs:2081
+    fn from(span: Span) -> TextRange { TextRange { start: span.start, end: span.end } }
+}
+// Rust: Source/Compiler.rs:2090
+struct LineCol { line: USize; column: USize }
+// Rust: Source/Compiler.rs:2096
+struct TokenView { kind: String; text: String; span: TextRange; start: LineCol; end: LineCol }
+// Rust: Source/Compiler.rs:2105
+ enum DiagnosticSeverity { Error; Lint }
+// Rust: Source/Compiler.rs:2111
+struct DiagnosticView { code: String; severity: DiagnosticSeverity; message: String; why: String; fix: String; span: TextRange? }
+// Rust: Source/Compiler.rs:2121
+ enum SyntaxNodeKind {
+    Function; Struct; Enum; Trait; Tag; Effect; Impl; Const; Test; ExternRust
+    Module; CModule; CodeModule; ErrorConversion; Migration; State; Protocol
+    Derive; GenericModule; ModuleAlias; Distinct; TypeAlias; UnitFamily; Marker; Fact; TemplateLoop
+}
+// Rust: Source/Compiler.rs:2152
+struct SyntaxNode { kind: SyntaxNodeKind; name: String?; span: TextRange }
+// Rust: Source/Compiler.rs:2159
+struct SyntaxTree { api_version: U32; schema_version: U32; source: String; items: [SyntaxNode]; diagnostics: [DiagnosticView] }
+// Rust: Source/Compiler.rs:2168
+struct LexedSource { api_version: U32; schema_version: U32; source: String; tokens: [TokenView]; diagnostics: [DiagnosticView] }
+// Rust: Source/Compiler.rs:2177
+struct SourceMap { api_version: U32; schema_version: U32; sources: [String]; generated_lines: [GeneratedLine] }
+// Rust: Source/Compiler.rs:2185
+struct GeneratedLine { generated_line: USize; source: String?; source_line: USize }
+// Rust: Source/Compiler.rs:2192
+struct SemIndexView {
+    schema_version: U32
+    source_digest: String
+    definitions: [SymbolDef]
+    references: [SymbolRef]
+    calls: [CallEdge]
+    effects: [EffectFact]
+    arithmetic: [ArithmeticOperationFact]
+    outputs: [OutputFact]
+    state_graphs: [StateGraphFact]
+    fact_registry: FactRegistry
+    derivations: [DerivationRecord]
+    // Rust: Source/Compiler.rs:2652
+    fn from_index(index: SemIndex, source: &String, fact_registry: &FactRegistry) -> SemIndexView {
+        SemIndexView {
+            schema_version: index.schema_version(), source_digest: SHA256.sha256_hex(source.as_bytes()),
+            definitions: index.definitions().to_vec(), references: index.references().to_vec(),
+            calls: index.call_edges().to_vec(), effects: index.effects().to_vec(),
+            arithmetic: index.arithmetic().to_vec(), outputs: index.outputs().to_vec(),
+            state_graphs: index.state_graphs().to_vec(), fact_registry: fact_registry.clone(),
+            derivations: index.derivations().to_vec()
+        }
+    }
+}
+// Rust: Source/Compiler.rs:2207
+struct CheckedFile { api_version: U32; schema_version: U32; diagnostics: [DiagnosticView]; syntax: SyntaxTree?; semantic_index: SemIndexView? }
+// Rust: Source/Compiler.rs:2214
+fn lex_source(src: &String) -> LexedSource {
+    (tokens, diagnostics) :: if Package.mask_inline_package_source(src) == {
+        Ok((source, _)) -> Lexer.lex(source)
+        Err(error) -> ([], [error.diagnostic()])
+    }
+    positions :: SourcePositionIndex.new(src)
+    LexedSource {
+        api_version: API_VERSION, schema_version: SCHEMA_VERSION, source: src.clone(),
+        tokens: tokens.iter().map(token -> token_view(src, token, positions)).collect(),
+        diagnostics: diagnostics.iter().map(diagnostic_view).collect()
+    }
+}
+// Rust: Source/Compiler.rs:2231
+fn parse_source(src: &String) -> SyntaxTree {
+    lexed :: lex_source(src)
+    if !lexed.diagnostics.is_empty() {
+        return SyntaxTree { api_version: API_VERSION, schema_version: SCHEMA_VERSION, source: src.clone(), items: [], diagnostics: lexed.diagnostics }
+    }
+    source_for_parse :: Package.mask_inline_package_source(src).map((source, _) -> source).unwrap_or_else(_ -> src.clone())
+    (tokens, _) :: Lexer.lex(source_for_parse)
+    if Parser.parse_for_check_with_source(tokens, source_for_parse) == {
+        Ok((program, parse_teaching)) -> SyntaxTree {
+            api_version: API_VERSION, schema_version: SCHEMA_VERSION, source: src.clone(),
+            items: program.items.iter().map(item_node).collect(), diagnostics: parse_teaching.iter().map(diagnostic_view).collect()
+        }
+        Err(diagnostics) -> SyntaxTree {
+            api_version: API_VERSION, schema_version: SCHEMA_VERSION, source: src.clone(), items: [],
+            diagnostics: diagnostics.iter().map(diagnostic_view).collect()
+        }
+    }
+}
+// Rust: Source/Compiler.rs:2266
+fn check_file(path: &OSPath) -> CheckedFile {
+    file :: path.to_string_lossy()
+    (diagnostics, bundle, facts) :: Driver.check_file_with_effect_facts(file, None, true)
+    has_errors :: diagnostics.iter().any(d -> d.severity == Severity.Error)
+    // GATE #4494: native retained-path file read.
+    source :: fs.read_to_string(path).unwrap_or_default()
+    syntax :: bundle.as_ref().map(bundle -> bundle_syntax_tree(bundle, source))
+    semantic_index :: if has_errors { None } else {
+        bundle.as_ref().map(bundle -> SemIndexView.from_index(from_checked(bundle, facts), source, facts.fact_registry))
+    }
+    CheckedFile { api_version: API_VERSION, schema_version: SCHEMA_VERSION, diagnostics: diagnostics.iter().map(diagnostic_view).collect(), syntax: syntax, semantic_index: semantic_index }
+}
+// Rust: Source/Compiler.rs:2295
+// Stable JSON envelope: hand-written field order is part of deterministic output.
+const JSON_SCHEMA_VERSION: U32 = SCHEMA_VERSION
+// Rust: Source/Compiler.rs:2301
+fn compiler_json(operation: &String, compiler: StatusValue) -> String {
+    StatusEnvelope.new("inspect.compiler.{operation}", true).with_field("compiler", compiler).json()
+}
+// Rust: Source/Compiler.rs:2307
+fn compiler_payload(operation: &String, value: StatusValue) -> StatusValue {
+    StatusValue.object(StatusFields.new().with("schema_version", JSON_SCHEMA_VERSION).with("api_version", API_VERSION).with("operation", operation).with("value", value))
+}
+// Rust: Source/Compiler.rs:2317
+fn lex_source_json(source: &String) -> String {
+    compiler_json("lex", compiler_payload("lex", status_lexed(lex_source(source))))
+}
+// Rust: Source/Compiler.rs:2321
+fn parse_source_json(source: &String) -> String {
+    compiler_json("parse", compiler_payload("parse", status_syntax_tree(parse_source(source))))
+}
+// Rust: Source/Compiler.rs:2328
+fn check_file_json(path: &OSPath) -> String {
+    file :: path.to_string_lossy()
+    // GATE #4494: native retained-path file read, preserving I/O failure.
+    source :: if fs.read_to_string(path) == {
+        Ok(source) -> source
+        Err(error) -> return compiler_api_error_json("check", file, "E0956", "could not read compiler input: {error}")
+    }
+    compiler :: StatusValue.object(StatusFields.new().with("schema_version", JSON_SCHEMA_VERSION)
+        .with("api_version", API_VERSION).with("operation", "check").with("file", file.as_ref())
+        .with("value", status_ct_value(checked_value(source))))
+    compiler_json("check", compiler)
+}
+// Rust: Source/Compiler.rs:2355
+// Typed Jet failures use CompilerError; the JSON boundary carries the same fields.
+fn compiler_api_error_json(operation: &String, file: &String, code: &String, message: String) -> String {
+    compiler :: StatusValue.object(StatusFields.new().with("schema_version", JSON_SCHEMA_VERSION)
+        .with("api_version", API_VERSION).with("operation", operation).with("file", file)
+        .with("error", StatusValue.object(StatusFields.new().with("code", code).with("message", message))))
+    StatusEnvelope.new("inspect.compiler.{operation}", false).with_field("compiler", compiler).json()
+}
+// Rust: Source/Compiler.rs:2381
+fn source_map_json(rust_source: &String) -> String {
+    compiler_json("source_map", compiler_payload("source_map", status_source_map(source_map_from_generated_rust(rust_source))))
+}
+// Rust: Source/Compiler.rs:2391
+fn status_span(range: TextRange?) -> StatusValue {
+    range.map_or(StatusValue.Null, range -> StatusValue.object(StatusFields.new().with("start", range.start).with("end", range.end)))
+}
+// Rust: Source/Compiler.rs:2401
+fn status_diagnostic(diagnostic: &DiagnosticView) -> StatusValue {
+    StatusValue.object(StatusFields.new().with("code", diagnostic.code.as_str())
+        .with("severity", if diagnostic.severity == { DiagnosticSeverity.Error -> "error"; DiagnosticSeverity.Lint -> "lint" })
+        .with("message", diagnostic.message.as_str()).with("why", diagnostic.why.as_str())
+        .with("fix", diagnostic.fix.as_str()).with("span", status_span(diagnostic.span)))
+}
+// Rust: Source/Compiler.rs:2419
+fn status_diagnostics(diagnostics: &[DiagnosticView]) -> StatusValue { StatusValue.array(diagnostics.iter().map(status_diagnostic)) }
+// Rust: Source/Compiler.rs:2423
+fn status_lexed(lexed: &LexedSource) -> StatusValue {
+    tokens :: StatusValue.array(lexed.tokens.iter().map(token -> {
+        StatusValue.object(StatusFields.new().with("kind", token.kind).with("text", token.text.as_str())
+            .with("span", StatusValue.object(StatusFields.new().with("start", token.span.start).with("end", token.span.end)))
+            .with("start", StatusValue.object(StatusFields.new().with("line", token.start.line).with("column", token.start.column)))
+            .with("end", StatusValue.object(StatusFields.new().with("line", token.end.line).with("column", token.end.column))))
+    }))
+    StatusValue.object(StatusFields.new().with("schema_version", lexed.schema_version).with("api_version", lexed.api_version)
+        .with("source", lexed.source.as_str()).with("tokens", tokens).with("diagnostics", status_diagnostics(lexed.diagnostics)))
+}
+// Rust: Source/Compiler.rs:2465
+fn syntax_node_kind_name(kind: SyntaxNodeKind) -> String {
+    if kind == {
+        SyntaxNodeKind.Function -> "function"
+        SyntaxNodeKind.Struct -> "struct"
+        SyntaxNodeKind.Enum -> "enum"
+        SyntaxNodeKind.Trait -> "trait"
+        SyntaxNodeKind.Tag -> "tag"
+        SyntaxNodeKind.Effect -> "effect"
+        SyntaxNodeKind.Impl -> "impl"
+        SyntaxNodeKind.Const -> "const"
+        SyntaxNodeKind.Test -> "test"
+        SyntaxNodeKind.ExternRust -> "extern_rust"
+        SyntaxNodeKind.Module -> "module"
+        SyntaxNodeKind.CModule -> "c_module"
+        SyntaxNodeKind.CodeModule -> "code_module"
+        SyntaxNodeKind.ErrorConversion -> "error_conversion"
+        SyntaxNodeKind.Migration -> "migration"
+        SyntaxNodeKind.State -> "state"
+        SyntaxNodeKind.Protocol -> "protocol"
+        SyntaxNodeKind.Derive -> "derive"
+        SyntaxNodeKind.GenericModule -> "generic_module"
+        SyntaxNodeKind.ModuleAlias -> "module_alias"
+        SyntaxNodeKind.Distinct -> "distinct"
+        SyntaxNodeKind.TypeAlias -> "type_alias"
+        SyntaxNodeKind.UnitFamily -> "unit_family"
+        SyntaxNodeKind.Marker -> "marker"
+        SyntaxNodeKind.Fact -> "fact"
+        SyntaxNodeKind.TemplateLoop -> "template_loop"
+    }
+}
+// Rust: Source/Compiler.rs:2496
+fn status_syntax_tree(tree: &SyntaxTree) -> StatusValue {
+    items :: StatusValue.array(tree.items.iter().map(node -> {
+        StatusValue.object(StatusFields.new().with("kind", syntax_node_kind_name(node.kind))
+            .with("name", node.name.as_deref().map(StatusValue.from).unwrap_or(StatusValue.Null))
+            .with("span", StatusValue.object(StatusFields.new().with("start", node.span.start).with("end", node.span.end))))
+    }))
+    StatusValue.object(StatusFields.new().with("schema_version", tree.schema_version).with("api_version", tree.api_version)
+        .with("source", tree.source.as_str()).with("items", items).with("diagnostics", status_diagnostics(tree.diagnostics)))
+}
+// Rust: Source/Compiler.rs:2528
+fn status_source_map(map: &SourceMap) -> StatusValue {
+    sources :: StatusValue.array(map.sources.iter().map(source -> StatusValue.from(source.as_str())))
+    lines :: StatusValue.array(map.generated_lines.iter().map(line -> {
+        StatusValue.object(StatusFields.new().with("generated_line", line.generated_line)
+            .with("source", line.source.as_deref().map(StatusValue.from).unwrap_or(StatusValue.Null))
+            .with("source_line", line.source_line))
+    }))
+    StatusValue.object(StatusFields.new().with("schema_version", map.schema_version).with("api_version", map.api_version)
+        .with("sources", sources).with("generated_lines", lines))
+}
+// Rust: Source/Compiler.rs:2552
+fn status_map_key(key: &CtKey) -> String {
+    if key == {
+        CtKey.Int(value) -> value.to_string()
+        CtKey.Str(value) -> value.clone()
+        CtKey.Bool(value) -> value.to_string()
+        CtKey.Char(value) -> value.to_string()
+        CtKey.Tuple(_) | CtKey.Struct { .. } | CtKey.Enum { .. } -> key.to_value().to_json()
+    }
+}
+// Rust: Source/Compiler.rs:2564
+fn status_ct_value(value: &CtValue) -> StatusValue {
+    if value == {
+        CtValue.Int(value) -> StatusValue.from(value)
+        CtValue.Float(value) -> StatusValue.Float(value.to_json())
+        CtValue.Bool(value) -> StatusValue.from(value)
+        CtValue.Char(value) -> StatusValue.from(value.to_string())
+        CtValue.Str(value) -> StatusValue.from(value.as_str())
+        CtValue.BigInt(value) -> StatusValue.from(value.to_string_rep().as_str())
+        CtValue.Bytes(values) -> StatusValue.array(values.iter().map(value -> StatusValue.from(value as I128)))
+        CtValue.List(values) -> StatusValue.array(values.iter().map(status_ct_value))
+        CtValue.Map(values) -> StatusValue.object(values.iter().fold(StatusFields.new(), (fields, (key, value)) -> fields.with(status_map_key(key), status_ct_value(value))))
+        CtValue.Struct { fields, .. } -> StatusValue.object(fields.iter().filter((name, _) -> !Syntax.is_memo_storage_name(name))
+            .fold(StatusFields.new(), (fields, (name, value)) -> fields.with(name.as_str(), status_ct_value(value))))
+        CtValue.Enum { variant, args, .. } if args.is_empty() -> StatusValue.from(variant.as_str())
+        CtValue.Enum { variant, args, .. } if args.iter().all((label, _) -> label.is_some()) -> {
+            fields :: args.iter().fold(StatusFields.new(), (fields, (label, value)) -> fields.with(label.as_deref().expect("checked enum label"), status_ct_value(value)))
+            StatusValue.object(StatusFields.new().with(variant.as_str(), StatusValue.object(fields)))
+        }
+        CtValue.Enum { variant, args, .. } -> StatusValue.object(StatusFields.new().with(variant.as_str(), StatusValue.array(args.iter().map((_, value) -> status_ct_value(value)))))
+        CtValue.Present(value) -> status_ct_value(value)
+        CtValue.Failed(CtReport.Clean(_)) | CtValue.Unit | CtValue.Closure(_) -> StatusValue.Null
+        CtValue.Failed(CtReport.Told(value)) -> StatusValue.object(StatusFields.new().with("err", status_ct_value(value)))
+    }
+}
+// Rust: Source/Compiler.rs:2619
+fn source_map_from_generated_rust(rust_src: &String) -> SourceMap {
+    sources := []
+    current_source := None
+    generated_lines := []
+    loop (idx, line) in rust_src.lines().enumerate() {
+        generated_line :: idx + 1
+        trimmed := line.trim_start() // #4303
+        if trimmed.strip_prefix("// jet:source-map source=") == Val(source) {
+            current_source = Val(source.to_string())
+            if !sources.iter().any(s -> s == source) { sources.push(source.to_string()) }
+            continue
+        }
+        if trimmed.strip_prefix("// jet:line ") == Val(rest) {
+            trimmed_rest := rest.trim() // #4303
+            if trimmed_rest.parse::<USize>() == Ok(source_line) {
+                generated_lines.push(GeneratedLine { generated_line: generated_line, source: current_source.clone(), source_line: source_line })
+            }
+        }
+    }
+    SourceMap { api_version: API_VERSION, schema_version: SCHEMA_VERSION, sources: sources, generated_lines: generated_lines }
+}
+// Rust: Source/Compiler.rs:2673
+const POSITION_CHECKPOINT_BYTES: USize = 1024
+// Rust: Source/Compiler.rs:2676
+struct PositionCheckpoint { offset: USize; line: USize; column: USize }
+// Rust: Source/Compiler.rs:2682
+struct SourcePositionIndex {
+    checkpoints: [PositionCheckpoint]
+    // Rust: Source/Compiler.rs:2687
+    // Byte checkpoints bound lookup scans without retaining a position per byte.
+    fn new(src: &String) -> SourcePositionIndex {
+        capacity :: (src.len() / POSITION_CHECKPOINT_BYTES).saturating_add(2)
+        checkpoints := [PositionCheckpoint].with_capacity(capacity)
+        line := 1
+        column := 1
+        checkpoints.push(PositionCheckpoint { offset: 0, line: line, column: column })
+        next_checkpoint := POSITION_CHECKPOINT_BYTES
+        loop (offset, ch) in src.char_indices() {
+            loop offset >= next_checkpoint {
+                checkpoints.push(PositionCheckpoint { offset: offset, line: line, column: column })
+                next_checkpoint = next_checkpoint.saturating_add(POSITION_CHECKPOINT_BYTES)
+            }
+            if ch == '\n' { line += 1; column = 1 } else { column += 1 }
+        }
+        if checkpoints.last().map(checkpoint -> checkpoint.offset) != Val(src.len()) {
+            checkpoints.push(PositionCheckpoint { offset: src.len(), line: line, column: column })
+        }
+        SourcePositionIndex { checkpoints: checkpoints }
+    }
+    // Rust: Source/Compiler.rs:2728
+    fn line_col(self: &SourcePositionIndex, src: &String, offset: USize) -> LineCol {
+        checkpoint_index :: self.checkpoints.binary_search_by_key(offset, checkpoint -> checkpoint.offset)
+            .unwrap_or_else(index -> index.saturating_sub(1))
+        checkpoint :: self.checkpoints[checkpoint_index]
+        bytes_after_checkpoint :: offset.saturating_sub(checkpoint.offset)
+        line := checkpoint.line
+        column := checkpoint.column
+        loop (relative, ch) in src[checkpoint.offset..].char_indices() {
+            if relative >= bytes_after_checkpoint { break }
+            if ch == '\n' { line += 1; column = 1 } else { column += 1 }
+        }
+        LineCol { line: line, column: column }
+    }
+}
+// Rust: Source/Compiler.rs:2752
+fn token_view(src: &String, token: &Token, positions: &SourcePositionIndex) -> TokenView {
+    start :: positions.line_col(src, token.span.start)
+    end :: positions.line_col(src, token.span.end)
+    TokenView { kind: token_kind_name(token.kind), text: token_text(src, token), span: TextRange.from(token.span), start: start, end: end }
+}
+// Rust: Source/Compiler.rs:2764
+fn diagnostic_view(diagnostic: &Diagnostic) -> DiagnosticView {
+    DiagnosticView {
+        code: diagnostic.code.to_string(),
+        severity: if diagnostic.severity == { Severity.Error -> DiagnosticSeverity.Error; Severity.Lint -> DiagnosticSeverity.Lint },
+        message: diagnostic.what.clone(), why: diagnostic.why.clone(), fix: diagnostic.fix.clone(),
+        span: diagnostic.span.map(TextRange.from)
+    }
+}
+// Rust: Source/Compiler.rs:2778
+fn bundle_syntax_tree(bundle: &AST.ProgramBundle, source: &String) -> SyntaxTree {
+    items := []
+    loop module in bundle.modules { items.extend(module.items.iter().map(item_node)) }
+    SyntaxTree { api_version: API_VERSION, schema_version: SCHEMA_VERSION, source: source.clone(), items: items, diagnostics: [] }
+}
+// Rust: Source/Compiler.rs:2792
+fn item_node(item: &AST.Item) -> SyntaxNode {
+    (kind, name, span) :: if item == {
+        AST.Item.Func(f) -> (SyntaxNodeKind.Function, Val(f.name.clone()), f.name_span)
+        AST.Item.Struct(s) -> (SyntaxNodeKind.Struct, Val(s.name.clone()), s.name_span)
+        AST.Item.Enum(e) -> (SyntaxNodeKind.Enum, Val(e.name.clone()), e.name_span)
+        AST.Item.Distinct(d) -> (SyntaxNodeKind.Distinct, Val(d.name.clone()), d.name_span)
+        AST.Item.TypeAlias(a) -> (SyntaxNodeKind.TypeAlias, Val(a.name.clone()), a.name_span)
+        AST.Item.UnitFamily(f) -> (SyntaxNodeKind.UnitFamily, Val(f.family.clone()), f.family_span)
+        AST.Item.Trait(t) -> (SyntaxNodeKind.Trait, Val(t.name.clone()), t.name_span)
+        AST.Item.Tag(t) -> (SyntaxNodeKind.Tag, Val(t.name.clone()), t.name_span)
+        AST.Item.EffectDecl(effect) -> (SyntaxNodeKind.Effect, Val(effect.name.clone()), effect.name_span)
+        AST.Item.Impl(i) -> (SyntaxNodeKind.Impl, Val(i.type_name.clone()), i.type_span)
+        AST.Item.Const(c) -> (SyntaxNodeKind.Const, Val(c.name.clone()), c.name_span)
+        AST.Item.Test(t) -> (SyntaxNodeKind.Test, t.name.clone(), t.name_span)
+        AST.Item.ExternRust(e) -> (SyntaxNodeKind.ExternRust, Val(e.crate_spec.clone()), e.span)
+        AST.Item.Module(m) -> (SyntaxNodeKind.Module, Val(m.name.clone()), m.name_span)
+        AST.Item.CModule(m) -> (SyntaxNodeKind.CModule, Val(m.lib.clone()), m.path_span)
+        AST.Item.CodeModule(m) -> (SyntaxNodeKind.CodeModule, Val(m.name.clone()), m.name_span)
+        AST.Item.ErrorConv(e) -> (SyntaxNodeKind.ErrorConversion, Val("{e.from_ty} -> {e.to_ty}"), e.from_span)
+        AST.Item.Migration(m) -> (SyntaxNodeKind.Migration, Val(m.type_name.clone()), m.type_span)
+        AST.Item.ProtocolDecl(p) -> (SyntaxNodeKind.Protocol, Val(p.name.clone()), p.name_span)
+        AST.Item.UserDerive(d) -> (SyntaxNodeKind.Derive, Val(d.trait_name.clone()), d.trait_span)
+        AST.Item.GenericModule(m) -> (SyntaxNodeKind.GenericModule, Val(m.name.clone()), m.name_span)
+        AST.Item.ModuleAlias(m) -> (SyntaxNodeKind.ModuleAlias, Val(m.name.clone()), m.name_span)
+        AST.Item.MarkerDecl(m) -> (SyntaxNodeKind.Marker, Val(m.name.clone()), m.name_span)
+        AST.Item.FactDecl(f) -> (SyntaxNodeKind.Fact, Val(f.name.clone()), f.name_span)
+        // D-STRUCT-ONCE1=A: root declaration loops are nameless templates expanded by sema.
+        AST.Item.TemplateLoop(l) -> (SyntaxNodeKind.TemplateLoop, None, l.span)
+    }
+    SyntaxNode { kind: kind, name: name, span: TextRange.from(span) }
+}
+// Rust: Source/Compiler.rs:2865
+fn token_text(src: &String, token: &Token) -> String {
+    if token.span.start <= token.span.end && token.span.end <= src.len() {
+        src[token.span.start..token.span.end].to_string()
+    } else { "" }
+}
+// Rust: Source/Compiler.rs:2873
+fn token_kind_name(kind: &TokKind) -> String {
+    if kind == {
+        TokKind.KwFn -> "keyword.fn"
+        TokKind.KwPub -> "keyword.pub"
+        TokKind.KwPriv -> "keyword.priv"
+        TokKind.KwIf -> "keyword.if"
+        TokKind.KwElse -> "keyword.else"
+        TokKind.KwIn -> "keyword.in"
+        TokKind.KwBreak -> "keyword.break"
+        TokKind.KwTrue -> "literal.true"
+        TokKind.KwFalse -> "literal.false"
+        TokKind.KwMutate -> "keyword.mutate"
+        TokKind.KwMove -> "keyword.move"
+        TokKind.KwCopy -> "keyword.copy"
+        TokKind.KwStruct -> "keyword.struct"
+        TokKind.KwEnum -> "keyword.enum"
+        TokKind.KwImpl -> "keyword.impl"
+        TokKind.KwTrait -> "keyword.trait"
+        TokKind.KwTag -> "keyword.tag"
+        TokKind.KwEffect -> "keyword.effect"
+        TokKind.KwDerive -> "keyword.derive"
+        TokKind.KwSelf -> "keyword.self"
+        TokKind.KwNull -> "literal.null"
+        TokKind.KwIt -> "keyword.it"
+        TokKind.KwConst -> "keyword.const"
+        TokKind.KwComptime -> "keyword.comptime"
+        TokKind.KwReturn -> "keyword.return"
+        TokKind.KwLoop -> "keyword.loop"
+        TokKind.KwYield -> "keyword.yield"
+        TokKind.KwUse -> "keyword.use"
+        TokKind.KwExtern -> "keyword.extern"
+        TokKind.KwModule -> "keyword.module"
+        TokKind.Ident(_) -> "identifier"
+        TokKind.Str(_) -> "literal.string"
+        TokKind.RawStr(_) -> "literal.raw_string"
+        TokKind.Int(..) -> "literal.int"
+        TokKind.Float(..) -> "literal.float"
+        TokKind.UnitNumber { .. } -> "literal.unit_number"
+        TokKind.Char(_) -> "literal.char"
+        TokKind.LParen -> "punctuation.left_paren"
+        TokKind.RParen -> "punctuation.right_paren"
+        TokKind.LBrace -> "punctuation.left_brace"
+        TokKind.RBrace -> "punctuation.right_brace"
+        TokKind.LBracket -> "punctuation.left_bracket"
+        TokKind.RBracket -> "punctuation.right_bracket"
+        TokKind.FenceOpen -> "operator.fence_open"
+        TokKind.FenceClose -> "operator.fence_close"
+        TokKind.Colon -> "punctuation.colon"
+        TokKind.ColonColon -> "operator.bind_immutable"
+        TokKind.ColonEq -> "operator.bind_mutable"
+        TokKind.Comma -> "punctuation.comma"
+        TokKind.UnifiedArrow -> "operator.unified_arrow"
+        TokKind.LambdaArrow -> "operator.lambda_arrow"
+        TokKind.Semi -> "terminator"
+        TokKind.Eq -> "operator.assign"
+        TokKind.Dot -> "punctuation.dot"
+        TokKind.DotDot -> "operator.range"
+        TokKind.DotDotLt -> "operator.range_exclusive"
+        TokKind.DotDotDot -> "operator.spread"
+        TokKind.At -> "punctuation.at"
+        TokKind.Question -> "operator.try"
+        TokKind.QuestionQuestion -> "operator.fallback"
+        TokKind.QuestionDot -> "operator.optional_field"
+        TokKind.Plus -> "operator.add"
+        TokKind.Minus -> "operator.subtract"
+        TokKind.Star -> "operator.star"
+        TokKind.Slash -> "operator.divide"
+        TokKind.SlashPercent -> "operator.floor_divide"
+        TokKind.Percent -> "operator.modulo"
+        TokKind.PercentPercent -> "operator.remainder"
+        TokKind.Amp -> "operator.amp"
+        TokKind.Pipe -> "operator.alternative"
+        TokKind.Caret -> "operator.caret"
+        TokKind.Tilde -> "operator.tilde"
+        TokKind.TildePipe -> "operator.tilde_pipe"
+        TokKind.TildePipeEq -> "operator.tilde_pipe_assign"
+        TokKind.TildeTilde -> "operator.trait_attach"
+        TokKind.Shl -> "operator.shift_left"
+        TokKind.Shr -> "operator.shift_right"
+        TokKind.AndAnd -> "operator.and"
+        TokKind.OrOr -> "operator.or"
+        TokKind.Bang -> "operator.not"
+        TokKind.EqEq -> "operator.equal"
+        TokKind.NotEq -> "operator.not_equal"
+        TokKind.Lt -> "operator.less"
+        TokKind.Gt -> "operator.greater"
+        TokKind.Le -> "operator.less_equal"
+        TokKind.Ge -> "operator.greater_equal"
+        TokKind.Compare -> "operator.compare"
+        TokKind.PlusEq -> "operator.add_assign"
+        TokKind.PlusPlus -> "retired.plus_plus"
+        TokKind.MinusEq -> "operator.subtract_assign"
+        TokKind.MinusMinus -> "retired.minus_minus"
+        TokKind.StarEq -> "operator.multiply_assign"
+        TokKind.SlashEq -> "operator.divide_assign"
+        TokKind.SlashPercentEq -> "operator.floor_divide_assign"
+        TokKind.PercentEq -> "operator.modulo_assign"
+        TokKind.PercentPercentEq -> "operator.remainder_assign"
+        TokKind.AmpEq -> "operator.amp_assign"
+        TokKind.PipeEq -> "operator.bit_or_assign"
+        TokKind.CaretEq -> "operator.caret_assign"
+        TokKind.ShlEq -> "operator.shift_left_assign"
+        TokKind.ShrEq -> "operator.shift_right_assign"
+        TokKind.Hash -> "punctuation.hash"
+        TokKind.Dollar -> "punctuation.dollar"
+        TokKind.LineComment(_) -> "comment.line"
+        TokKind.BlockComment(_) -> "comment.block"
+        TokKind.Eof -> "eof"
+    }
+}

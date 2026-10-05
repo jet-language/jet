@@ -1,0 +1,28 @@
+// Rust: crates/jetpack/src/Store/NixCache/TestCache.rs:116
+#Test("nix_cache_test_base64_matches_original_padding_and_alphabet") {
+    assert_eq(base64.encode([U8]{}), "")
+    assert_eq(base64.encode("f".bytes()), "Zg==")
+    assert_eq(base64.encode("fo".bytes()), "Zm8=")
+    assert_eq(base64.encode("foo".bytes()), "Zm9v")
+    assert_eq(base64.encode([U8]{251, 255, 255}), "+///")
+}
+
+fn test_cache_get(server: &TestCacheServer, path: String) -> String {
+    socket :: server.endpoint.removeprefix("http://")
+    stream := std.net.TcpStream.connect(socket) ?? panic("connect cache")
+    &stream.write_all("GET {path} HTTP/1.1\r\nHost: localhost\r\n\r\n".bytes()) ?? panic("request")
+    bytes := [U8]{}
+    &stream.read_to_end(&bytes) ?? panic("response")
+    String.from_bytes(^bytes) ?? panic("response UTF-8")
+}
+
+// Rust: crates/jetpack/src/Store/NixCache/TestCache.rs:151-220
+// Real native cache control, not a mocked HTTP transport.
+#Test("nix_cache_test_server_atomically_replaces_routes_and_strips_query") {
+    server :: TestCacheServer.start([String: [U8]]{"/nar/a": "old".bytes()})
+    assert_eq(test_cache_get(&server, "/nar/a?download=1"), "HTTP/1.1 200 OK\r\nContent-Length: 3\r\nConnection: close\r\n\r\nold")
+    server.replace_routes([String: [U8]]{"/nar/b": "new".bytes()})
+    assert_eq(test_cache_get(&server, "/nar/a"), "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+    assert_eq(test_cache_get(&server, "/nar/b"), "HTTP/1.1 200 OK\r\nContent-Length: 3\r\nConnection: close\r\n\r\nnew")
+    close(^server)
+}

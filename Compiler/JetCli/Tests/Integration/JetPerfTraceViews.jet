@@ -1,0 +1,26 @@
+use tests.common.*
+use std.[fs, env, process]
+use std.sync.Mutex
+use jet_foundation.JetTrace.[build_skeleton_bytes, jettrace_artifact, trace_id, verify_jettrace, CapturePolicy,
+    JetSymbolRef, SourceIdentity, TraceHardware, TraceProfile, TraceProfileRow, TraceProfileSource,
+    TraceSkeleton, TraceSourceMap, TraceToolchain, TRACE_PROFILE_ROW_LIMIT]
+use jet_foundation.PerformanceBudget.CanonicalJson
+use jet_foundation.SHA256
+// GATE #4494: native process/filesystem/mutex.
+// Rust: tests/jet_perf_trace_views.rs:16
+SELF_ATTACH_LOCK :: Mutex.new(())
+// Rust: tests/jet_perf_trace_views.rs:18
+fn jet() -> OSPath { OSPath.from(env.test_binary("jet")) }
+// Rust: tests/jet_perf_trace_views.rs:22
+fn run_jet(cwd: OSPath, args: [String]) -> process.Output {
+    process.Command.new(jet()).current_dir(cwd).args(args).output().unwrap_or_else(|e| -> panic("jet {args:?} failed to launch: {e}"))
+}
+// Rust: tests/jet_perf_trace_views.rs:30
+fn temp_workspace() -> OSPath {
+    root :: unique_tmp("jet-perf")
+    fs.create_dir_all(root) ?? panic("create workspace")
+    root
+}
+// Rust: tests/jet_perf_trace_views.rs:34-35
+use tests.jet_perf_trace_parts.views.*
+use tests.jet_perf_trace_parts.base.*

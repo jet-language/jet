@@ -1,0 +1,16 @@
+use jetpack.JetOS.GenerationsActivation.[ledger_timestamp_in]
+use jetpack.JetOS.Types.[JetOSGeneration]
+
+// Rust: crates/jetpack/src/JetOS/generations_activation.rs:247-269 (behavioral controls; no inline tests).
+#Test("ledger_timestamp_preserves_full_u64_and_exact_publication") {
+    gen :: JetOSGeneration{name: "g", host: "h", path: OSPath.from("/generations/g"), created_at: 0}
+    bytes :: "18446744073709551615\th\tg\t/generations/g\twitness\n".as_bytes()
+    assert_eq(ledger_timestamp_in(bytes, &gen, "witness").unwrap(), Val(U64.MAX))
+    assert(ledger_timestamp_in(bytes, &gen, "different-witness").is_err())
+    assert_eq(ledger_timestamp_in("0\tother\tg\t/generations/g\twitness\n".as_bytes(), &gen, "witness").unwrap(), None)
+}
+#Test("ledger_timestamp_rejects_invalid_utf8_and_invalid_timestamp") {
+    gen :: JetOSGeneration{name: "g", host: "h", path: OSPath.from("/generations/g"), created_at: 0}
+    assert(ledger_timestamp_in(&[0xff], &gen, "w").is_err())
+    assert(ledger_timestamp_in("bad\th\tg\t/generations/g\tw\n".as_bytes(), &gen, "w").is_err())
+}

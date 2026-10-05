@@ -1,0 +1,176 @@
+use jetpack.NixEval.Boundary.[NativeBoundary]
+use jetpack.NixEval.[evaluate_derivation]
+use jetpack.NixEval.Tests.[STAGE_A_DERIVATION_FIXTURE, BREADTH_FIXTURE]
+use jetpack.JSON as JSON
+use std.env as env
+use std.process.[Command]
+
+// Rust: crates/jetpack/src/NixEval/Tests.rs:8
+#Test("private_integration_has_pinned_product_ready_evaluator") {
+    boundary :: NativeBoundary.embedded() ?? panic("committed manifest must validate")
+    assert(boundary.product_ready())
+}
+
+// Rust: crates/jetpack/src/NixEval/Tests.rs:14
+#Test("private_integration_projects_lazy_flake_without_external_nix") {
+    boundary :: NativeBoundary.embedded() ?? panic("committed manifest must validate")
+    evaluated :: boundary.evaluate_devshell(
+        "let make = packages: pkgs.mkShell { packages = packages; }; in { outputs = { devShells.x86_64-linux.default = make [ pkgs.fd ]; }; }",
+        "x86_64-linux"
+    ) ?? panic("private production boundary must evaluate supported lazy syntax")
+    assert_eq(evaluated.packages(), [String]{"fd"})
+    if boundary.evaluate_devshell(
+        "{ outputs = { devShells.x86_64-linux.default = pkgs.mkShell { packages = /tmp/package; }; }; }",
+        "x86_64-linux"
+    ) == {
+        .Ok(_) -> panic("private production boundary must reject ambient path authority")
+        .Err(error) -> assert(error.to_string().contains("absolute paths require explicit project-root authority"))
+    }
+}
+
+// Rust: crates/jetpack/src/NixEval/Tests.rs:36
+// GATE #4494: native current executable, child process and child-only environment.
+#Test("private_devshell_path_is_independent_of_nix_on_path") {
+    CHILD :: "JETPACK_NATIVE_DEVSHELL_NO_PATH_CHILD"
+    if env.var_os(CHILD).is_none() {
+        output :: Command.new(env.current_exe() ?? panic("current executable"))
+            .args([String]{"--exact", "NixEval::Tests::private_devshell_path_is_independent_of_nix_on_path", "--nocapture"})
+            .env(CHILD, "1").env("PATH", "").output() ?? panic("run child")
+        assert(output.status.success(), "child failed\nstdout: {String.from_utf8_lossy(output.stdout)}\nstderr: {String.from_utf8_lossy(output.stderr)}")
+    } else {
+        boundary :: NativeBoundary.embedded() ?? panic("committed manifest must validate")
+        evaluated :: boundary.evaluate_devshell(
+            "{ devShells.x86_64-linux.default = pkgs.mkShell { packages = [ pkgs.fd ]; }; }",
+            "x86_64-linux"
+        ) ?? panic("native devShell evaluator must not need Nix")
+        assert_eq(evaluated.packages(), [String]{"fd"})
+    }
+}
+
+// Rust: crates/jetpack/src/NixEval/Tests.rs:69
+#Test("private_integration_materializes_derivation_without_external_nix") {
+    evaluated :: evaluate_derivation(
+        "builtins.derivationStrict { name = \"hello\"; system = \"x86_64-linux\"; builder = \"/bin/sh\"; args = [ \"-c\" \"echo hi > $out\" ]; }",
+        "x86_64-linux"
+    ) ?? panic("private production boundary must materialize a derivation")
+    assert_eq(evaluated.drv_path(), "/nix/store/76w21n1f03fs5kw8fnffphx7qrqffw6r-hello.drv")
+    assert_eq(evaluated.outputs().get("out"), Val("/nix/store/mjs27ix6ig2bkbi3s3sm470vrv4lf7ic-hello"))
+}
+
+// Rust: crates/jetpack/src/NixEval/Tests.rs:86
+#Test("private_integration_materializes_fixed_output_derivation") {
+    evaluated :: evaluate_derivation(
+        "builtins.derivationStrict { name = \"fixed\"; system = \"x86_64-linux\"; builder = \"/bin/sh\"; args = [ \"-c\" \"echo hi > $out\" ]; outputHashAlgo = \"sha256\"; outputHashMode = \"flat\"; outputHash = \"0000000000000000000000000000000000000000000000000000000000000000\"; }",
+        "x86_64-linux"
+    ) ?? panic("private production boundary must materialize fixed output")
+    assert_eq(evaluated.drv_path(), "/nix/store/24mj56f9sfhlf0bd7x0h9xgfc709a1fn-fixed.drv")
+    assert_eq(evaluated.outputs().get("out"), Val("/nix/store/ap9h69qwrm5060ldi96axyklh3pr3yjn-fixed"))
+}
+
+// Rust: crates/jetpack/src/NixEval/Tests.rs:103
+#Test("private_integration_materializes_all_declared_non_fixed_outputs") {
+    evaluated :: evaluate_derivation(
+        "builtins.derivationStrict { name = \"many\"; system = \"x86_64-linux\"; builder = \"/bin/sh\"; outputs = [ \"out\" \"dev\" ]; }",
+        "x86_64-linux"
+    ) ?? panic("private materializer must preserve every declared output")
+    assert_eq(evaluated.outputs().len(), 2)
+    assert(evaluated.outputs().get("out").is_some_and(fn(path) -> path.ends_with("-many")))
+    assert(evaluated.outputs().get("dev").is_some_and(fn(path) -> path.ends_with("-many-dev")))
+}
+
+// Rust: crates/jetpack/src/NixEval/Tests.rs:121
+#Test("private_derivation_materializer_matches_pinned_fixture_and_errors") {
+    fixture :: JSON.parse(STAGE_A_DERIVATION_FIXTURE) ?? panic("fixture must parse")
+    root :: &fixture
+    loop case in (root.get("values") ?? panic("fixture values")).as_array() ?? panic("fixture values array") {
+        source :: (case.get("source") ?? panic("source")).as_str() ?? panic("source string")
+        system :: (case.get("system") ?? panic("system")).as_str() ?? panic("system string")
+        actual :: evaluate_derivation(source, system) ?? panic("native derivation")
+        expected :: case.get("nix_value") ?? panic("nix_value")
+        assert_eq(actual.drv_path(), (expected.get("drvPath") ?? panic("drvPath")).as_str() ?? panic("drvPath string"))
+        if expected.get_opt("outputs") == {
+            .Val(value) -> {
+                outputs :: value.as_object() ?? panic("fixture outputs object")
+                assert_eq(actual.outputs().len(), outputs.len())
+                loop (name, path) in outputs {
+                    assert_eq(actual.outputs().get(name), Val(path.as_str() ?? panic("output path")))
+                }
+            }
+            .None -> {
+                if expected.get_opt("dev").is_some() || expected.get_opt("doc").is_some() {
+                    outputs :: (expected.as_object() ?? panic("fixture nix value object")).iter().filter(fn(entry) -> entry.0 != "drvPath").collect()
+                    assert_eq(actual.outputs().len(), outputs.len())
+                    loop (name, path) in outputs {
+                        assert_eq(actual.outputs().get(name), Val(path.as_str() ?? panic("output path")))
+                    }
+                } else {
+                    assert_eq(actual.outputs().get("out"), Val((expected.get("out") ?? panic("out")).as_str() ?? panic("output path")))
+                }
+            }
+        }
+    }
+    loop case in (root.get("errors") ?? panic("fixture errors")).as_array() ?? panic("fixture errors array") {
+        source :: (case.get("source") ?? panic("source")).as_str() ?? panic("source string")
+        system :: (case.get("system") ?? panic("system")).as_str() ?? panic("system string")
+        if evaluate_derivation(source, system) == {
+            .Ok(_) -> panic("native evaluator must reject fixture error")
+            .Err(error) -> assert(error.to_string().contains((case.get("jet_error_contains") ?? panic("error text")).as_str() ?? panic("error string")))
+        }
+    }
+}
+
+// Rust: crates/jetpack/src/NixEval/Tests.rs:187
+#Test("private_integration_matches_pinned_breadth_fixture") {
+    fixture :: JSON.parse(BREADTH_FIXTURE) ?? panic("breadth fixture must parse")
+    root :: &fixture
+    boundary :: NativeBoundary.embedded() ?? panic("committed manifest must validate")
+    loop case in (root.get("values") ?? panic("breadth values")).as_array() ?? panic("breadth value array") {
+        source :: (case.get("source") ?? panic("source")).as_str() ?? panic("source string")
+        system :: (case.get("system") ?? panic("system")).as_str() ?? panic("system string")
+        output :: case.get_opt("output").and_then(fn(value) -> value.as_str().ok()) ?? "default"
+        evaluated :: boundary.evaluate_devshell_output(source, system, output) ?? panic("breadth value must evaluate through Jetpack")
+        expected :: ((case.get("jet_packages") ?? panic("packages")).as_array() ?? panic("packages array")).iter().map(fn(value) -> (value.as_str() ?? panic("package string")).to_string()).collect()
+        nix_packages :: (((case.get("nix_value") ?? panic("nix value")).get("packages") ?? panic("nix packages")).as_array() ?? panic("nix packages array")).iter().map(fn(value) -> (value.as_str() ?? panic("package string")).to_string()).collect()
+        assert_eq(nix_packages, expected)
+        assert_eq(evaluated.packages(), expected)
+        expected_unsupported :: ((case.get("jet_unsupported") ?? panic("unsupported")).as_array() ?? panic("unsupported array")).iter().map(fn(value) -> (value.as_str() ?? panic("unsupported string")).to_string()).collect()
+        assert_eq(evaluated.unsupported(), expected_unsupported)
+    }
+    loop case in (root.get("errors") ?? panic("breadth errors")).as_array() ?? panic("breadth error array") {
+        source :: (case.get("source") ?? panic("source")).as_str() ?? panic("source string")
+        system :: (case.get("system") ?? panic("system")).as_str() ?? panic("system string")
+        expected :: (case.get("jet_error") ?? panic("jet_error")).as_str() ?? panic("error string")
+        if boundary.evaluate_devshell(source, system) == {
+            .Ok(_) -> panic("breadth error must fail through Jetpack")
+            .Err(error) -> assert(error.to_string().contains(expected), "{error}")
+        }
+    }
+    loop case in (root.get("derivations") ?? panic("breadth derivations")).as_array() ?? panic("breadth derivation array") {
+        source :: (case.get("source") ?? panic("source")).as_str() ?? panic("source string")
+        system :: (case.get("system") ?? panic("system")).as_str() ?? panic("system string")
+        evaluated :: boundary.evaluate_derivation(source, system) ?? panic("breadth derivation must materialize through Jetpack")
+        nix_value :: case.get("nix_value") ?? panic("nix_value")
+        assert_eq(evaluated.drv_path(), (nix_value.get("drvPath") ?? panic("drvPath")).as_str() ?? panic("drvPath string"))
+        loop name in [String]{"out", "dev", "doc"} {
+            assert_eq(evaluated.outputs().get(name), Val((nix_value.get(name) ?? panic("output")).as_str() ?? panic("output string")))
+        }
+    }
+}
+
+// Rust: crates/jetpack/src/NixEval/Tests.rs:282
+// GATE #4494: native current executable, child process and child-only environment.
+#Test("private_derivation_path_is_independent_of_nix_on_path") {
+    CHILD :: "JETPACK_NATIVE_DERIVATION_NO_PATH_CHILD"
+    if env.var_os(CHILD).is_none() {
+        output :: Command.new(env.current_exe() ?? panic("current executable"))
+            .args([String]{"--exact", "NixEval::Tests::private_derivation_path_is_independent_of_nix_on_path", "--nocapture"})
+            .env(CHILD, "1").env("PATH", "").output() ?? panic("run child")
+        assert(output.status.success(), "child failed\nstdout: {String.from_utf8_lossy(output.stdout)}\nstderr: {String.from_utf8_lossy(output.stderr)}")
+    } else {
+        evaluated :: evaluate_derivation(
+            "builtins.derivation { name = \"no-path\"; system = \"x86_64-linux\"; builder = \"/bin/sh\"; }",
+            "x86_64-linux"
+        ) ?? panic("native derivation evaluator must not need Nix")
+        assert(evaluated.drv_path().ends_with("-no-path.drv"))
+    }
+}

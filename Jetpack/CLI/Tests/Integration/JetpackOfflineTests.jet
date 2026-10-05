@@ -1,0 +1,474 @@
+use Jetpack.CLI.Tests.Integration.JetpackOffline.[jetpack, write_runnable_fixture, rust_sources]
+use Jetpack.CLI.Tests.Integration.Support.JetpackFixtures as fixtures
+use common.Scratch
+use std.[fs, env, thread]
+use std.time.[Duration, Instant]
+use core.files.OSPath
+use core.sys.target.[selected_os, selected_family]
+use Jetpack.[Platform, Output]
+// GATE #4494: native process, filesystem, permission and sleep primitives.
+// GATE #4483: selected-target OS/family, not the writer's host.
+
+// Rust: tests/jetpack_offline.rs:64
+#Test("offline_build_and_run_use_hangar_cache_with_network_denied") {
+    project :: Scratch.new("project")
+    root :: Scratch.new("root")
+    fixture_dir :: Scratch.new("fixtures")
+    out_dir :: Scratch.new("out")
+    _ :: write_runnable_fixture(fixture_dir.path, root.path, out_dir.path, None)
+    first :: jetpack().args(["build", "greet@nixpkgs", "--no-color", "--offline", "--fixtures"])
+        .arg(fixture_dir.path).current_dir(project.path).env("JETPACK_ROOT", root.path).output().unwrap()
+    assert(first.status.success(), "stderr: {String.from_utf8_lossy(first.stderr)}")
+    second :: jetpack().args(["build", "greet@nixpkgs", "--no-color", "--offline"])
+        .current_dir(project.path).env("JETPACK_ROOT", root.path).env("JETPACK_DENY_NETWORK", "1")
+        .env_remove("JETPACK_FIXTURES").output().unwrap()
+    assert(second.status.success(), "stderr: {String.from_utf8_lossy(second.stderr)}")
+    stderr :: String.from_utf8_lossy(second.stderr)
+    assert(stderr.contains("cached"), "stderr: {stderr}")
+    assert(!stderr.contains("fixture"), "stderr: {stderr}")
+    run :: jetpack().args(["run", "greet@nixpkgs", "--no-color", "--offline", "--", "greet"])
+        .current_dir(project.path).env("JETPACK_ROOT", root.path).env("JETPACK_DENY_NETWORK", "1")
+        .env_remove("JETPACK_FIXTURES").output().unwrap()
+    assert(run.status.success(), "stderr: {String.from_utf8_lossy(run.stderr)}")
+    stdout :: String.from_utf8_lossy(run.stdout)
+    assert(stdout.contains("hello from offline cache"), "stdout: {stdout}")
+}
+
+// Rust: tests/jetpack_offline.rs:136
+#Test("selected_workspace_run_propagates_unsafe_metadata_failure_before_command") {
+    if selected_family() != "unix" { return }
+    project :: Scratch.new("unsafe-metadata-project")
+    root :: Scratch.new("unsafe-metadata-root")
+    fixture_dir :: Scratch.new("unsafe-metadata-fixtures")
+    out_dir :: Scratch.new("unsafe-metadata-out")
+    _ :: write_runnable_fixture(fixture_dir.path, root.path, out_dir.path, Some("../outside\n"))
+    member :: project.path.join("packages/hello")
+    fs.create_dir_all(member).unwrap()
+    fs.write(project.path.join("workspace.jet"), "module workspace { members: find(\"./packages\") }\n").unwrap()
+    fs.write(member.join("package.jet"), "name: \"hello\"\nversion: \"0.1.0\"\n").unwrap()
+    fs.write(member.join("hello.jet"), "module hello { pub fn greeting() -[]> String { return \"hello\" } }\n").unwrap()
+    fs.write(project.path.join("env.jet"), "module env.dev { packages: [nixpkgs.greet] }\n").unwrap()
+    sentinel :: project.path.join("command-ran")
+    output :: jetpack().args(["run", "-p", "hello", "--offline", "--trust", "--fixtures"])
+        .arg(fixture_dir.path).args(["--", "sh", "-c", "printf executed > \"$1\"", "jet-test"])
+        .arg(sentinel).current_dir(project.path).env("JETPACK_ROOT", root.path).output().unwrap()
+    assert_eq(output.status.code(), Some(1), "{output:?}")
+    assert(!sentinel.exists(), "requested command ran after compose failure")
+    stderr :: String.from_utf8_lossy(output.stderr)
+    assert_eq(stderr.matches("couldn't compose package environment").count(), 1, "stderr: {stderr}")
+}
+
+// Rust: tests/jetpack_offline.rs:202
+#Test("offline_reuse_refuses_a_tampered_closure") {
+    project :: Scratch.new("tamper-project")
+    root :: Scratch.new("tamper-root")
+    fixture_dir :: Scratch.new("tamper-fixtures")
+    out_dir :: Scratch.new("tamper-out")
+    seeded_out :: write_runnable_fixture(fixture_dir.path, root.path, out_dir.path, None)
+    first :: jetpack().args(["build", "greet@nixpkgs", "--no-color", "--offline", "--fixtures"])
+        .arg(fixture_dir.path).current_dir(project.path).env("JETPACK_ROOT", root.path).output().unwrap()
+    assert(first.status.success(), "stderr: {String.from_utf8_lossy(first.stderr)}")
+    greet :: seeded_out.join("bin").join(if selected_os() == "windows" { "greet.bat" } else { "greet" })
+    if selected_family() == "unix" {
+        _ :: fs.set_permissions(seeded_out.join("bin"), fs.Permissions.from_mode(0o755))
+    }
+    fs.remove_file(greet).unwrap()
+    second :: jetpack().args(["build", "greet@nixpkgs", "--no-color", "--offline"])
+        .current_dir(project.path).env("JETPACK_ROOT", root.path).env("JETPACK_DENY_NETWORK", "1")
+        .env_remove("JETPACK_FIXTURES").output().unwrap()
+    assert(!second.status.success(), "a tampered closure must refuse, not serve stale; stderr: {String.from_utf8_lossy(second.stderr)}")
+    stderr :: String.from_utf8_lossy(second.stderr)
+    assert(stderr.contains("greet"), "the refusal must name the artifact; stderr: {stderr}")
+    assert(!stderr.contains("hello from offline cache"), "stale bytes must never be served; stderr: {stderr}")
+}
+
+// Rust: tests/jetpack_offline.rs:265
+#Test("offline_missing_object_is_loud_e1276") {
+    project :: Scratch.new("project")
+    root :: Scratch.new("root")
+    out :: jetpack().args(["build", "greet@nixpkgs", "--no-color", "--offline"])
+        .current_dir(project.path).env("JETPACK_ROOT", root.path).env("JETPACK_DENY_NETWORK", "1")
+        .env_remove("JETPACK_FIXTURES").output().unwrap()
+    assert_eq(out.status.code(), Some(1))
+    stderr :: String.from_utf8_lossy(out.stderr)
+    assert(stderr.contains("E1276"), "stderr: {stderr}")
+    assert(stderr.contains("greet@nixpkgs"), "stderr: {stderr}")
+}
+
+// Rust: tests/jetpack_offline.rs:283
+#Test("network_class_verbs_refuse_offline_immediately") {
+    project :: Scratch.new("project")
+    root :: Scratch.new("root")
+    loop args in [["update", "--no-color", "--offline"], ["outdated", "--no-color", "--offline"],
+        ["add", "ripgrep@nixpkgs", "--no-color", "--offline"]] {
+        out :: jetpack().args(args).current_dir(project.path).env("JETPACK_ROOT", root.path)
+            .env("JETPACK_DENY_NETWORK", "1").output().unwrap()
+        assert_eq(out.status.code(), Some(2), "args: {args:?}")
+        stderr :: String.from_utf8_lossy(out.stderr)
+        assert(stderr.contains("E1276"), "args: {args:?}\nstderr: {stderr}")
+        assert(stderr.contains("network-class command"), "args: {args:?}\nstderr: {stderr}")
+    }
+}
+
+// Rust: tests/jetpack_output.rs:18
+#Test("uncoded_errors_use_registered_report_snapshot") {
+    theme :: Output.Theme{color: false}
+    actual :: theme.render_error_coded("E1340", "package download failed", "the remote server closed the connection",
+        "check the network connection and run the command again")
+    assert_eq(actual, include_str("tests/fixtures/jetpack-diagnostics/E1340.stderr"))
+}
+
+// Rust: tests/jetpack_output.rs:33
+#Test("unsupported_nix_projection_uses_registered_report_snapshot") {
+    theme :: Output.Theme{color: false}
+    actual :: theme.render_error_coded("E1351", "Nix closure execution is unavailable on this host.",
+        "Jetpack could not create the isolated /nix/store projection: rootless `/nix/store` projection needs `unshare`.",
+        "Use a Linux host with unprivileged user and mount namespaces, or choose a native provider for this package.")
+    assert_eq(actual, include_str("tests/fixtures/jetpack-diagnostics/E1351.stderr"))
+}
+
+// Rust: tests/jetpack_output.rs:48
+#Test("pinned_channel_update_uses_registered_report_snapshot") {
+    theme :: Output.Theme{color: false}
+    actual :: theme.render_error_coded("E1352", "Source `stable` is pinned and cannot be updated.",
+        "a pinned source has no moving channel policy, so Jetpack must never change its lock or manifest",
+        "declare `stable` with `#latest` for manual movement or `#auto` for automatic movement")
+    assert_eq(actual, include_str("tests/fixtures/jetpack-diagnostics/E1352.stderr"))
+}
+
+// Rust: tests/jetpack_output.rs:63
+#Test("repeated_diagnostic_uses_one_card_count_and_next_step_snapshot") {
+    theme :: Output.Theme{color: false}
+    actual :: theme.render_collapsed_error("E1350", "native Nix cache closure could not be admitted",
+        "the same signed Nix closure failed for every requested object",
+        "repair the signed cache response or restore network access, then retry the realization.", 8)
+    assert_eq(actual, include_str("tests/fixtures/jetpack-diagnostics/collapsed_diagnostics.stderr"))
+    assert_eq(actual.matches("Error [E1350]").count(), 1)
+    assert_eq(actual.matches("Next:").count(), 1)
+}
+
+// Rust: tests/jetpack_output.rs:81
+#Test("retired_off_compiler_report_renderers_do_not_return") {
+    root :: OSPath.from(env.manifest_dir())
+    sources := [] as [OSPath]
+    rust_sources(root.join("crates/jetpack/src"), &sources)
+    &sources.push(root.join("Source/CmdGc.rs"))
+    retired :: ["eprintln!(\"error:", "eprintln!(\"Error [", "self.red(\"error:\")",
+        "format!(\"error[{{code}}]:\")", "format!(\"warning[{{code}}]:\")", "matches the compiler's house style"]
+    loop path in sources {
+        source :: fs.read_to_string(path).unwrap()
+        loop text in retired {
+            assert(!source.contains(text), "{path.display()} restored retired report text `{text}`")
+        }
+    }
+}
+
+// Rust: tests/jetpack_package_outputs.rs:12
+#Test("package_fleet_output_reaches_the_immutable_generation_and_retries_cleanly") {
+    project :: Scratch.new("package-fleet-output")
+    root :: Scratch.new("package-fleet-output-root")
+    fs.write(project.path.join("package.jet"), """name: "demo"
+outputs: {
+    workstation: System{
+        target: linux.x64
+        options: { boot: { kernel: Linux }, init: { path: "/bin/init" } }
+    }
+    prod: Fleet{
+        name: "prod"
+        hosts: { edge: system.workstation }
+    }
+}""").unwrap()
+    run :: fn() -> fixtures.jet().args(["os", "build", "workstation", "--name", "fleet-output", "--no-color", "--offline"])
+        .current_dir(project.path).env("JETPACK_ROOT", root.path).env("PATH", "/usr/bin:/bin").output().unwrap()
+    first :: run()
+    assert(first.status.success(), "stderr: {String.from_utf8_lossy(first.stderr)}")
+    deploy_plan :: root.path.join("systems/generations/fleet-output/fleet/deploy-plan.json")
+    script :: root.path.join("systems/generations/fleet-output/fleet/deploy-edge.sh")
+    system_plan :: root.path.join("systems/generations/fleet-output/plan.json")
+    first_plan :: fs.read_to_string(deploy_plan).unwrap()
+    first_system_plan :: fs.read_to_string(system_plan).unwrap()
+    assert(first_system_plan.contains("\"graph_identity\":\""))
+    graph_identity :: first_system_plan.split_once("\"graph_identity\":\"")
+        .and_then(fn(pair) -> pair.1.split_once('"').map(fn(part) -> part.0)).expect("system plan graph identity")
+    assert(first_plan.contains("\"graph_identity\":\"{graph_identity}\""), first_plan)
+    assert(first_plan.contains("\"fleet\":\"prod\""), first_plan)
+    assert(first_plan.contains("\"host\":\"edge\""), first_plan)
+    assert(first_plan.contains("\"system\":\"workstation\""), first_plan)
+    assert(script.is_file(), "missing generated Fleet host script")
+    script_text :: fs.read_to_string(script).unwrap()
+    assert(script_text.contains("\"graph_identity\":\"{graph_identity}\""), script_text)
+    root_proof :: fs.read_to_string(root.path.join("systems/generations/fleet-output/generation-root.json")).unwrap()
+    assert(root_proof.contains("\"kind\":\"jetos.generation-root.v1\"") && root_proof.contains("\"source_proof_sha256\":\"")
+        && root_proof.contains("\"files_proof_sha256\":\"") && root_proof.contains("\"witness\":\""), root_proof)
+    ledger :: fs.read_to_string(root.path.join("systems/generations.log")).unwrap()
+    ledger_row :: ledger.lines().find(fn(line) -> line.contains("\tfleet-output\t")).expect("generation ledger row")
+    witness :: root_proof.split_once("\"witness\":\"")
+        .and_then(fn(pair) -> pair.1.split_once('"').map(fn(part) -> part.0)).expect("generation root witness")
+    assert(ledger_row.ends_with("\t{witness}"), ledger)
+    second :: run()
+    assert(second.status.success(), "retry stderr: {String.from_utf8_lossy(second.stderr)}")
+    assert_eq(fs.read_to_string(deploy_plan).unwrap(), first_plan)
+    assert_eq(fs.read_to_string(system_plan).unwrap(), first_system_plan)
+}
+
+// Rust: tests/jetpack_package_outputs.rs:114
+#Test("package_fleet_path_escape_fails_before_generation_publication") {
+    project :: Scratch.new("package-fleet-path-escape")
+    root :: Scratch.new("package-fleet-path-escape-root")
+    fs.write(project.path.join("package.jet"), """name: "demo"
+outputs: {
+    workstation: System{
+        target: linux.x64
+        options: { boot: { kernel: Linux }, init: { path: "/bin/init" } }
+    }
+    prod: Fleet{ hosts: { "../escape": system.workstation } }
+}""").unwrap()
+    output :: fixtures.jet().args(["os", "plan", "workstation", "--json", "--no-color", "--offline"])
+        .current_dir(project.path).env("JETPACK_ROOT", root.path).output().unwrap()
+    assert_eq(output.status.code(), Some(2))
+    stderr :: String.from_utf8_lossy(output.stderr)
+    assert(stderr.contains("safe path component"), stderr)
+    assert(!root.path.join("systems").exists())
+}
+
+// Rust: tests/jetpack_platform.rs:20
+#Test("platform_tier_audit_contract_names_linux_macos_windows") {
+    assert_eq(Platform.TIER_ONE_OSES, [Platform.OS_LINUX, Platform.OS_MACOS, Platform.OS_WINDOWS])
+    loop arch in Platform.TIER_ONE_ARCHES {
+        loop os in Platform.TIER_ONE_OSES {
+            key :: Platform.PlatformKey.new(arch, os).unwrap()
+            assert(key.is_tier_one())
+            assert_eq(key.envelope_key(), "{arch}-{os}")
+        }
+    }
+    host :: Platform.PlatformKey.host()
+    assert(host.is_tier_one(), "the current CI host is outside Jetpack's tier-1 matrix: {host.envelope_key()}")
+    assert_eq(Platform.host_key(), host.envelope_key())
+    assert(Platform.PlatformKey.new("riscv64", Platform.OS_LINUX).is_none())
+    assert(Platform.PlatformKey.new(Platform.ARCH_X64, "freebsd").is_none())
+    assert_eq(Platform.exe_suffix_for_os(Platform.OS_WINDOWS), ".exe")
+    assert_eq(Platform.path_separator_for_os(Platform.OS_WINDOWS), ';')
+    assert_eq(Platform.path_separator_for_os(Platform.OS_LINUX), ':')
+    assert_eq(Platform.path_separator_for_os(Platform.OS_MACOS), ':')
+}
+
+// Rust: tests/jetpack_platform.rs:53
+#Test("platform_tier_gate_runs_native_package_offline_and_cleans_store") {
+    if selected_os() != "linux" { return }
+    root :: Scratch.new("platform-gate-root")
+    fixture_dir :: Scratch.new("platform-gate-fixtures")
+    staging :: Scratch.new("platform-gate-staging")
+    missing_tools :: Scratch.new("platform-gate-missing-tools")
+    fixtures.write_native_jetpack_fixture(fixture_dir.path, root.path, staging.path)
+    program :: "jetpack{Platform.exe_suffix_for_os(selected_os())}"
+    run :: jetpack().args(["use", "native-jetpack@nixpkgs", "--no-color", "--offline", "--", program, "--help"])
+        .env("JETPACK_ROOT", root.path).env("JETPACK_FIXTURES", fixture_dir.path).env("PATH", missing_tools.path).output().unwrap()
+    assert(run.status.success(), "stderr: {String.from_utf8_lossy(run.stderr)}")
+    assert(String.from_utf8_lossy(run.stdout).contains("jetpack"), "native package did not run: {String.from_utf8_lossy(run.stdout)}")
+    stale :: fixtures.write_hangar_meta(root.path, "platform-stale", "platform-stale", "1.0", Some(1)).0
+    clean :: jetpack().args(["hangar", "clean", "--no-color", "--yes"])
+        .env("JETPACK_ROOT", root.path).env("PATH", missing_tools.path).output().unwrap()
+    assert(clean.status.success(), "stderr: {String.from_utf8_lossy(clean.stderr)}")
+    assert(!stale.exists(), "production clean left stale platform state")
+}
+
+// Rust: tests/jetpack_platform.rs:114
+#Test("platform_tier_gate_accepts_data_only_output_without_executable_service") {
+    if selected_os() == "linux" { return }
+    base :: Scratch.new("platform-data-only")
+    repo :: base.path.join("jet-pkgs")
+    project :: base.path.join("project")
+    root :: base.path.join("root")
+    package :: repo.join("lib/mathlib")
+    fs.create_dir_all(package).unwrap()
+    fs.create_dir_all(project).unwrap()
+    fs.write(repo.join("package.jet"), "name: \"jet-pkgs\"\nversion: \"0.1.0\"\npackages: {\n    mathlib: library,\n}\n").unwrap()
+    fs.write(package.join("mathlib.jet"), "module mathlib {\n    pub fn add(a: Int, b: Int) -> Int { return a + b }\n}\n").unwrap()
+    fs.write(project.join("env.jet"), "module dev {{\n    sources: {{ mine: {repo.to_string_lossy()} }}\n    env.dev: Env{{\n        packages: [mine.mathlib],\n    }}\n}}\n").unwrap()
+    output :: jetpack().args(["build", "--no-color"]).current_dir(project).env("JETPACK_ROOT", root)
+        .env("PATH", "/usr/bin:/bin").output().unwrap()
+    assert(output.status.success(), "data-only realization failed: {String.from_utf8_lossy(output.stderr)}")
+    stderr :: String.from_utf8_lossy(output.stderr)
+    assert(stderr.contains("built 1 package(s)"), "expected one data-only package, got: {stderr}")
+    assert(fs.read_dir(root.join("leases")).map(fn(entries) -> entries.flatten().next().is_none()).unwrap_or(true),
+        "data-only realization left a lease container")
+    assert(fs.read_dir(root.join("lease-service/leases")).map(fn(entries) -> entries.flatten().next().is_none()).unwrap_or(true),
+        "data-only realization left an authenticated lease record")
+}
+
+// Rust: tests/jetpack_platform.rs:177
+#Test("platform_gate_reaches_store_authenticated_lease_service") {
+    if selected_os() != "linux" { return }
+    root :: Scratch.new("platform-authenticated-lease-root")
+    fixture_dir :: Scratch.new("platform-authenticated-lease-fixtures")
+    staging :: Scratch.new("platform-authenticated-lease-staging")
+    missing_tools :: Scratch.new("platform-authenticated-lease-missing-tools")
+    fixtures.write_native_jetpack_fixture(fixture_dir.path, root.path, staging.path)
+    program :: "omp{Platform.exe_suffix_for_os(selected_os())}"
+    run := jetpack().args(["use", "omp@releases#1.0.0", "-y", "--no-color", "--offline", "--fixtures"])
+        .arg(fixture_dir.path).args(["--", program, "--hold"]).env("JETPACK_ROOT", root.path)
+        .env("JETPACK_FIXTURES", fixture_dir.path).env("PATH", missing_tools.path).spawn().unwrap()
+    records :: root.path.join("lease-service/leases")
+    deadline :: Instant.now() + Duration.from_secs(5)
+    found := None as (OSPath, String)?
+    loop {
+        if fs.read_dir(records).ok() is Some(entries) {
+            loop entry in entries.flatten() {
+                generation :: entry.path().join("generations/1")
+                receipt :: generation.join("receipt")
+                complete :: generation.join("complete")
+                if receipt.is_file() && complete.is_file() {
+                    if fs.read_to_string(receipt).ok() is Some(contents) {
+                        found = Some((entry.path(), contents))
+                        break
+                    }
+                }
+            }
+        }
+        if found.is_some() || Instant.now() >= deadline { break }
+        thread.sleep(Duration.from_millis(10))
+    }
+    if found.is_none() {
+        _ :: &run.kill()
+        output :: &run.wait_with_output().unwrap()
+        panic("production run did not publish a complete authenticated lease receipt: {String.from_utf8_lossy(output.stderr)}")
+    }
+    (record, receipt) :: found.unwrap()
+    assert(receipt.starts_with("JET-EXECUTABLE-LEASE/1 receipt\n"))
+    assert(receipt.contains("\ngeneration=1\n"), "receipt: {receipt}")
+    mac :: receipt.lines().find_map(fn(line) -> line.strip_prefix("mac=")).expect("authenticated lease receipt tag")
+    assert_eq(mac.len(), 64)
+    assert(mac.bytes().all(fn(byte) -> byte.is_ascii_hexdigit()))
+    witness :: fs.read_to_string(record.join("generations/1/complete")).unwrap()
+    assert_eq(witness.trim().len(), 71)
+    assert(witness.trim().starts_with("sha256-"))
+    recover :: jetpack().args(["hangar", "recover", "--no-color"]).env("JETPACK_ROOT", root.path)
+        .env("PATH", missing_tools.path).output().unwrap()
+    assert(recover.status.success(), "stderr: {String.from_utf8_lossy(recover.stderr)}")
+    assert(record.join("generations/1/receipt").is_file(), "recovery removed a live authenticated lease")
+    run_output :: &run.wait_with_output().unwrap()
+    assert(run_output.status.success(), "stderr: {String.from_utf8_lossy(run_output.stderr)}")
+    recover_after_exit :: jetpack().args(["hangar", "recover", "--no-color"]).env("JETPACK_ROOT", root.path)
+        .env("PATH", missing_tools.path).output().unwrap()
+    assert(recover_after_exit.status.success(), "stderr: {String.from_utf8_lossy(recover_after_exit.stderr)}")
+    assert(fs.read_dir(records).map(fn(entries) -> entries.flatten().next().is_none()).unwrap_or(true),
+        "idle authenticated lease record survived recovery")
+}
+
+// Rust: tests/jetpack_platform.rs:286
+#Test("platform_tier_gate_recovers_hostile_partial_lease_without_losing_good_output") {
+    root :: Scratch.new("platform-hostile-lease-root")
+    fixture_dir :: Scratch.new("platform-hostile-lease-fixtures")
+    staging :: Scratch.new("platform-hostile-lease-staging")
+    missing_tools :: Scratch.new("platform-hostile-lease-missing-tools")
+    fixtures.write_native_jetpack_fixture(fixture_dir.path, root.path, staging.path)
+    (good_object, _) :: fixtures.write_hangar_meta(root.path, "platform-hostile-good", "platform-hostile-good", "1.0", None)
+    interrupted :: root.path.join("leases").join("4294967294-1-platform-hostile-good")
+    fs.create_dir_all(interrupted.join("snapshot/bin")).unwrap()
+    fs.write(interrupted.join("snapshot/bin/partial"), "interrupted").unwrap()
+    recover :: jetpack().args(["hangar", "recover", "--no-color"]).env("JETPACK_ROOT", root.path)
+        .env("JETPACK_FIXTURES", fixture_dir.path).env("PATH", missing_tools.path).output().unwrap()
+    assert(recover.status.success(), "stderr: {String.from_utf8_lossy(recover.stderr)}")
+    assert(!interrupted.exists(), "recovery left an interrupted hostile lease")
+    assert(good_object.join("meta.json").is_file(), "recovery removed the last good Hangar object")
+}
+
+// Rust: tests/jetpack_platform.rs:329
+#Test("platform_tier_gate_exercises_native_lease_diagnostics_and_audit") {
+    if selected_os() != "linux" { return }
+    root :: Scratch.new("platform-diagnostics-root")
+    fixture_dir :: Scratch.new("platform-diagnostics-fixtures")
+    staging :: Scratch.new("platform-diagnostics-staging")
+    missing_tools :: Scratch.new("platform-diagnostics-missing-tools")
+    fixtures.write_native_jetpack_fixture(fixture_dir.path, root.path, staging.path)
+    program :: "omp{Platform.exe_suffix_for_os(selected_os())}"
+    run :: jetpack().args(["use", "omp@releases#1.0.0", "--no-color", "--offline", "--", program, "--help"])
+        .env("JETPACK_ROOT", root.path).env("JETPACK_FIXTURES", fixture_dir.path).env("PATH", missing_tools.path).output().unwrap()
+    assert(run.status.success(), "native lease handoff failed: {String.from_utf8_lossy(run.stderr)}")
+    assert(String.from_utf8_lossy(run.stdout).contains("jetpack"), "native lease child did not run: {String.from_utf8_lossy(run.stdout)}")
+    assert(fs.read_dir(root.path.join("leases")).unwrap().next().is_none(), "production child exit left an executable lease behind")
+    (good_object, _) :: fixtures.write_hangar_meta(root.path, "platform-diagnostics-good", "platform-diagnostics-good", "1.0", None)
+    stale :: root.path.join("leases").join("4294967294-1-platform-diagnostics-good")
+    fs.create_dir_all(stale.join("snapshot")).unwrap()
+    fs.write(stale.join("snapshot/partial"), "interrupted").unwrap()
+    doctor :: jetpack().args(["doctor", "--json", "--offline"]).env("JETPACK_ROOT", root.path).output().unwrap()
+    doctor_json :: String.from_utf8_lossy(doctor.stdout)
+    assert(doctor_json.contains("stale executable lease(s) found"), "doctor missed stale lease: {doctor_json}")
+    assert(stale.is_dir(), "doctor changed lease state")
+    audit :: jetpack().args(["audit", "--no-color"]).env("JETPACK_ROOT", root.path).output().unwrap()
+    assert(audit.status.success(), "audit stderr: {String.from_utf8_lossy(audit.stderr)}")
+    audit_text :: String.from_utf8_lossy(audit.stderr)
+    assert(audit_text.contains("Leases:"), "audit omitted lease state")
+    assert(audit_text.contains("0 active, 1 stale"), "audit missed stale lease: {audit_text}")
+    journal :: root.path.join("hangar/closure-db/journal")
+    fs.create_dir_all(journal).unwrap()
+    partial :: journal.join("00000000000000000099-corrupt.txn.partial")
+    fs.write(partial, "interrupted").unwrap()
+    broken :: jetpack().args(["audit", "--no-color"]).env("JETPACK_ROOT", root.path).output().unwrap()
+    assert_eq(broken.status.code(), Some(2))
+    broken_text :: String.from_utf8_lossy(broken.stderr)
+    assert(broken_text.contains("Error [E1340]:"), broken_text)
+    assert(broken_text.contains("Why:"), broken_text)
+    assert(broken_text.contains("Fix:"), broken_text)
+    assert(broken_text.contains("More: jet-lang.dev/e/E1340"), broken_text)
+    assert(partial.is_file(), "audit repaired partial journal")
+    assert(good_object.join("meta.json").is_file())
+    fs.remove_file(partial).unwrap()
+    recover :: jetpack().args(["hangar", "recover", "--no-color"]).env("JETPACK_ROOT", root.path)
+        .env("PATH", missing_tools.path).output().unwrap()
+    assert(recover.status.success(), "lease recovery stderr: {String.from_utf8_lossy(recover.stderr)}")
+    assert(!stale.exists(), "production recovery left stale lease")
+    assert(good_object.join("meta.json").is_file(), "production recovery removed the last good Hangar object")
+}
+
+// Rust: tests/jetpack_platform.rs:452
+#Test("platform_store_lease_projection_rejects_invalid_identity_in_doctor_and_audit") {
+    root :: Scratch.new("platform-invalid-lease-identity")
+    malformed :: root.path.join("leases").join("not-a-lease")
+    fs.create_dir_all(malformed).unwrap()
+    doctor :: jetpack().args(["doctor", "--json", "--offline"]).env("JETPACK_ROOT", root.path).output().unwrap()
+    assert_eq(doctor.status.code(), Some(2))
+    doctor_json :: String.from_utf8_lossy(doctor.stdout)
+    assert(doctor_json.contains("\"name\":\"leases\""), doctor_json)
+    assert(doctor_json.contains("\"status\":\"broken\""), doctor_json)
+    assert(doctor_json.contains("invalid identity"), doctor_json)
+    audit :: jetpack().args(["audit", "--no-color"]).env("JETPACK_ROOT", root.path).output().unwrap()
+    assert_eq(audit.status.code(), Some(2))
+    audit_stderr :: String.from_utf8_lossy(audit.stderr)
+    assert(audit_stderr.contains("Error [E1340]:"), audit_stderr)
+    assert(audit_stderr.contains("invalid identity"), audit_stderr)
+    assert(audit_stderr.contains("More: jet-lang.dev/e/E1340"), audit_stderr)
+    assert(malformed.is_dir(), "diagnostics mutated the lease projection")
+}
+
+// Rust: tests/jetpack_platform.rs:484
+#Test("audit_reports_stale_executable_lease_golden") {
+    root :: Scratch.new("audit-stale-lease-golden")
+    stale :: root.path.join("leases").join("4294967294-1-audit-stale")
+    fs.create_dir_all(stale.join("snapshot")).unwrap()
+    fs.write(stale.join("snapshot/partial"), "interrupted").unwrap()
+    audit :: jetpack().args(["audit", "--no-color"]).env("JETPACK_ROOT", root.path).output().unwrap()
+    assert(audit.status.success(), "audit stderr: {String.from_utf8_lossy(audit.stderr)}")
+    audit_text :: String.from_utf8_lossy(audit.stderr)
+    lease_lines :: audit_text.lines().filter(fn(line) -> line.contains("Leases:") || line.contains("Lease Note:")).collect().join("\n")
+    assert_eq("{lease_lines}\n", include_str("tests/cli/jetpack_audit_stale_lease.txt"))
+    assert(stale.is_dir(), "audit repaired stale lease state")
+}
+
+// Rust: tests/jetpack_platform.rs:514
+#Test("platform_tier_gate_reports_missing_offline_component") {
+    root :: Scratch.new("platform-failure-root")
+    fixture_dir :: Scratch.new("platform-failure-fixtures")
+    missing_tools :: Scratch.new("platform-failure-missing-tools")
+    missing :: root.path.join("missing-component-output")
+    fs.create_dir_all(fixture_dir.path).unwrap()
+    fs.write(fixture_dir.path.join("nixpkgs-native-jetpack.json"),
+        "[{{\"drvPath\":\"/nix/store/0fixture-native-jetpack.drv\",\"outputs\":{{\"out\":{missing.to_string_lossy():?}}}}}]").unwrap()
+    output :: jetpack().args(["build", "native-jetpack@nixpkgs", "--no-color", "--offline"])
+        .env("JETPACK_ROOT", root.path).env("JETPACK_FIXTURES", fixture_dir.path).env("PATH", missing_tools.path).output().unwrap()
+    assert(!output.status.success())
+    stderr :: String.from_utf8_lossy(output.stderr)
+    assert(stderr.contains("Error [E1315]:"), "stderr: {stderr}")
+    assert(stderr.contains("does not exist"), "stderr: {stderr}")
+    fixtures.assert_no_hangar_entry(root.path, "native-jetpack-")
+}

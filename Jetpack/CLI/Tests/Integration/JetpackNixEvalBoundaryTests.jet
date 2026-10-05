@@ -1,0 +1,381 @@
+// Rust: tests/jetpack_nix_eval_boundary.rs:1
+use Jetpack.CLI.Tests.Integration.JetpackNixEvalBoundary.*
+use Jetpack.CLI.Tests.Integration.Support.JetpackFixtures.[assert_jetos_stderr_snapshot_normalized, copy_dir_recursive]
+use common.Scratch
+use nix_index_cache_server.[NixIndexCacheServer, LIB_PATH, RUNTIME_PATH]
+use static_file_server.StaticFileServer
+use Jetpack.[Store, Envelope, RuntimePolicy, Lock]
+use Jetpack.Store.ProducerRecord
+use jet.Syntax
+use core.sys
+// GATE #4494: actual IO, native metadata and process-backed integration journeys.
+use std.fs
+
+// Rust: tests/jetpack_nix_eval_boundary.rs:7
+#Test("evaluator_seam_is_no_std_dependency_free_and_unsafe_forbidden") {
+    // Rust-reference architectural stop-line: the independent seam and its escape
+    // controls remain checked against their real manifests and committed fixtures.
+    root :: OSPath.from(env("CARGO_MANIFEST_DIR"))
+    manifest :: fs.read_to_string(root.join("crates/jet-nix-eval/Cargo.toml")) ?? panic("native evaluator seam manifest")
+    dependency_section :: manifest.split_once("[dependencies]") ?? panic("evaluator seam must declare an explicit dependency section")
+    dependencies := dependency_section.1.trim() // #4303
+    assert(dependencies.is_empty(), "native evaluator seam must remain dependency-free, got:\n{dependencies}")
+    assert(manifest.lines().any(line -> line.trim() == "build = false"))
+    assert(!root.join("crates/jet-nix-eval/build.rs").exists())
+    seam :: fs.read_to_string(root.join("crates/jet-nix-eval/src/lib.rs")) ?? panic("native evaluator seam root")
+    assert(seam.contains("#![no_std]"))
+    assert(seam.contains("#![forbid(unsafe_code)]"))
+    assert(seam.contains("#![deny(clippy::disallowed_types)]"))
+    clippy :: fs.read_to_string(root.join("clippy.toml")) ?? panic("workspace Clippy policy")
+    assert(clippy.contains("std::process::Command"))
+    verify :: fs.read_to_string(root.join("Tools/agent/verify-full.sh")) ?? panic("full verification entry point")
+    assert(verify.contains("verify-nix-eval-stopline.sh"))
+    escape :: fs.read_to_string(root.join("tests/fixtures/nix-compat/authority-escape/lib.rs")) ?? panic("native evaluator authority escape fixture")
+    assert(escape.contains("extern crate std as host;"))
+    assert(escape.contains("host::process::Command::new"))
+    assert(escape.contains("host::net::TcpStream as Wire"))
+    assert(escape.contains("host::net::ToSocketAddrs as Resolve"))
+    assert(escape.contains("host::os::unix::net::UnixStream as Wire"))
+    build_escape :: fs.read_to_string(root.join("tests/fixtures/nix-compat/build-script-escape/build.rs")) ?? panic("native evaluator build-script escape fixture")
+    assert(build_escape.contains("std::process::Command::new"))
+    jetpack_manifest :: fs.read_to_string(root.join("crates/jetpack/Cargo.toml")) ?? panic("jetpack manifest")
+    assert(jetpack_manifest.contains("jet-nix-eval = { path = \"../jet-nix-eval\" }"))
+    jetpack_root :: fs.read_to_string(root.join("crates/jetpack/src/lib.rs")) ?? panic("jetpack library root")
+    assert(jetpack_root.contains("pub(crate) mod NixEval;"))
+    assert(!jetpack_root.contains("pub mod NixEval;"))
+}
+
+// Rust: tests/jetpack_nix_eval_boundary.rs:56
+#Test("oracle_pin_is_independent_from_mutable_root_flake_lock") {
+    root :: OSPath.from(env("CARGO_MANIFEST_DIR"))
+    oracle :: fs.read_to_string(root.join("tests/fixtures/nix-compat/oracle.json")) ?? panic("committed oracle manifest")
+    assert(oracle.contains("\"version\": \"2.34.8\""))
+    assert(oracle.contains("b6769c588f60b3e762f73d3a8cf60294df078ccd"))
+    assert(oracle.contains("f3f1c3c5b8ad91850e0f7c590cf177f7ab022024"))
+    assert(oracle.contains("b5aa0fbd538984f6e3d201be0005b4463d8b09f8"))
+    assert(oracle.contains("\"last_modified\": 1782723713"))
+    assert(oracle.contains("sha256-oPXCU/SSUokcGaJREHibG1CBX3+s/W7orDWQOZDsEeQ="))
+    assert_eq(oracle.matches("\"build_nar_hash\": \"").count(), 4)
+    assert_eq(oracle.matches("\"executable_nar_hash\": \"").count(), 4)
+    assert_eq(oracle.matches("\"status\": \"ready\"").count(), 4)
+    assert(oracle.contains("\"corpus_status\": \"bit_exact\""))
+    breadth :: fs.read_to_string(root.join("tests/fixtures/nix-compat/breadth.json")) ?? panic("pinned breadth fixture")
+    assert(breadth.contains("\"fuzz_seeds\""))
+    assert(breadth.contains("\"locks\""))
+    assert(breadth.contains("\"output_identities\""))
+    assert(breadth.contains("\"memory_bytes\": 16777216"))
+    assert(breadth.contains("\"latency_micros\": 1000000"))
+    stopline :: fs.read_to_string(root.join("Tools/agent/verify-nix-eval-stopline.sh")) ?? panic("native evaluator stop-line")
+    assert(stopline.contains("breadth.json"))
+}
+
+// Rust: tests/jetpack_nix_index.rs:101
+#Test("index_backed_nixpkgs_records_complete_closure_and_both_proofs") {
+    project_root :: Scratch.new("nix-index-project")
+    hangar_root :: Scratch.new("nix-index-hangar")
+    server :: NixIndexCacheServer.start_ripgrep(&project_root.path)
+    server.install(&hangar_root.path)
+    project(&project_root)
+    output :: prepare(&project_root, &hangar_root, false)
+    assert(output.status.success(), "stdout: {String.from_utf8_lossy(&output.stdout)}\nstderr: {String.from_utf8_lossy(&output.stderr)}")
+    entry :: package_entry(&hangar_root)
+    assert(!entry.references.is_empty(), "Realized.references is empty")
+    roots :: Store.Roots.at(hangar_root.path.clone())
+    graph :: Store.closure_graph(&roots) ?? panic("read Hangar closure graph")
+    closure :: graph.closure(&entry.envelope.output_hash)
+    assert_eq(closure.len(), 3, "closure graph: {graph:?}")
+    assert(entry.references.iter().all(digest -> graph.objects.contains_key(digest)))
+    assert(graph.transitive_references(&entry.envelope.output_hash).len() >= 2)
+    producer :: ProducerRecord.decode(&entry.producer_record) ?? panic("decode Nix producer")
+    for fact in ["nix.index.proof.v1", "nix.index.record.sha256", "nix.index.target.sha256", "nix.index.manifest.sha256", "nix.cache.output.out.proof.sha256", "nix.cache.closure.receipt.sha256"] {
+        assert(producer.facts.get(fact).is_some_and(value -> !value.is_empty()), "missing provenance fact {fact}: {producer.facts:?}")
+    }
+    assert_eq(producer.facts.get("nix.native.format").map(value -> value.as_str()), Val("jet-nixpkgs-index-v1"))
+    assert(producer.facts.get("nix.index.proof.v1").is_some_and(proof -> proof.contains("fixture-index-signer-v1")))
+}
+
+// Rust: tests/jetpack_nix_index.rs:164
+#Test("static_publication_resolves_signed_index_and_nix_objects") {
+    project_root :: Scratch.new("static-nix-index-project")
+    hangar_root :: Scratch.new("static-nix-index-hangar")
+    publication :: Scratch.new("static-nix-index-publication")
+    server :: NixIndexCacheServer.start_static_ripgrep(&project_root.path, &publication.path)
+    server.install(&hangar_root.path)
+    project(&project_root)
+    output :: prepare(&project_root, &hangar_root, false)
+    assert(output.status.success(), "stdout: {String.from_utf8_lossy(&output.stdout)}\nstderr: {String.from_utf8_lossy(&output.stderr)}")
+    assert(publication.join("v1/nixpkgs-unstable/manifest.json").is_file())
+    assert(publication.join("v1/nixpkgs-unstable/manifest.json.sig.json").is_file())
+    assert(publication.join("index-v1").is_dir())
+    assert(publication.join("nar").is_dir())
+}
+
+// Rust: tests/jetpack_nix_index.rs:190
+#Test("static_jetpack_cache_admits_content_addressed_objects_only_after_verification") {
+    root :: Scratch.new("static-cache-root")
+    source :: Scratch.new("static-cache-source")
+    local_cache :: Scratch.new("static-cache-local")
+    publication :: Scratch.new("static-cache-publication")
+    restored :: Scratch.new("static-cache-restored")
+    roots :: Store.Roots{root: root.path.clone(), dev_mode: false}
+    fs.write(source.join("payload"), "static cache bytes\n") ?? panic("cache source")
+    entry :: (Store.ingest_tree(&roots, &Store.IngestRequest{
+        name: "static-cache-demo", version: "1", reference: "./static-cache-demo",
+        cache_identity: Store.CacheIdentity{
+            source_fingerprint: "sha256:static-cache-source", recipe_fingerprint: "sha256:static-cache-recipe",
+            policy_fingerprint: "sha256:static-cache-policy", platform: Envelope.host_platform()
+        },
+        references: [String]{}, outputs: [String: OSPath]{"out": source.path.clone()},
+        signature: "", provenance: "static cache test", platform_artifact_kind: ""
+    }) ?? panic("ingest static cache entry")).entry
+    Store.bind_cache(&roots, "public", [local_cache.path.display().to_string()], nil, nil, true) ?? panic("bind local cache publisher")
+    published :: Store.publish_cache_entry(&roots, &entry.id, "public") ?? panic("publish signed local cache objects")
+    copy_dir_recursive(&local_cache.path, &publication.path)
+    assert(publication.join("nar").join("{entry.envelope.output_hash}.nar").is_file())
+    assert(publication.join("{entry.envelope.output_hash}-{entry.id}.narinfo").is_file())
+    assert(publication.join("trust").join("{entry.envelope.output_hash}-{entry.id}.receipt").is_file())
+    assert(!publication.join("cache-public.key").exists())
+    server :: StaticFileServer.start(&publication.path)
+    trust_key :: root.join("trust/cache-public.key")
+    Store.bind_cache(&roots, "public", [server.endpoint.clone()], Val(&trust_key), nil, false) ?? panic("bind read-only static cache")
+    verified :: Store.verify_cache_transfer(&roots, &entry.id, "public") ?? panic("verify static cache objects")
+    assert_eq(verified.mirror, server.endpoint)
+    assert_eq(verified.output_hash, published.output_hash)
+    assert_eq(verified.witness, published.witness)
+    Store.substitute_cache_entry(&roots, &entry.id, "public", &restored.join("out")) ?? panic("substitute from verified static cache")
+    assert_eq(fs.read_to_string(restored.join("out/payload")) ?? panic("restored payload"), "static cache bytes\n")
+    info_path :: publication.join("{entry.envelope.output_hash}-{entry.id}.narinfo")
+    signed_info :: fs.read(&info_path) ?? panic("signed static narinfo")
+    info_text :: String.from_utf8(signed_info.clone()) ?? panic("narinfo UTF-8")
+    unsigned_info :: info_text.lines().filter(line -> !line.starts_with("Sig: ")).collect().join("\n") + "\n"
+    fs.write(&info_path, unsigned_info) ?? panic("remove static narinfo signature")
+    assert(Store.verify_cache_transfer(&roots, &entry.id, "public").is_err())
+    fs.write(info_path, signed_info) ?? panic("restore signed static narinfo")
+}
+
+// Rust: tests/jetpack_nix_index.rs:285
+#Test("index_backed_nixpkgs_reuses_closure_offline_after_network_removal") {
+    project_root :: Scratch.new("nix-index-offline-project")
+    hangar_root :: Scratch.new("nix-index-offline-hangar")
+    server :: NixIndexCacheServer.start_ripgrep(&project_root.path)
+    server.install(&hangar_root.path)
+    project(&project_root)
+    initial :: prepare(&project_root, &hangar_root, false)
+    assert(initial.status.success(), "stdout: {String.from_utf8_lossy(&initial.stdout)}\nstderr: {String.from_utf8_lossy(&initial.stderr)}")
+    server.reset_counts()
+    server.stop_network()
+    output :: prepare(&project_root, &hangar_root, true)
+    assert(output.status.success(), "stdout: {String.from_utf8_lossy(&output.stdout)}\nstderr: {String.from_utf8_lossy(&output.stderr)}")
+    assert_eq(server.count("/nix-cache-info"), 0)
+    assert_eq(server.object_request_count(&server.root_store_path), 0)
+    assert_eq(server.object_request_count(LIB_PATH), 0)
+    assert_eq(server.object_request_count(RUNTIME_PATH), 0)
+}
+
+// Rust: tests/jetpack_nix_index.rs:315
+#Test("index_backed_nixpkgs_repairs_only_missing_transitive_object") {
+    project_root :: Scratch.new("nix-index-repair-project")
+    hangar_root :: Scratch.new("nix-index-repair-hangar")
+    server :: NixIndexCacheServer.start_ripgrep(&project_root.path)
+    server.install(&hangar_root.path)
+    project(&project_root)
+    initial :: prepare(&project_root, &hangar_root, false)
+    assert(initial.status.success(), "stdout: {String.from_utf8_lossy(&initial.stdout)}\nstderr: {String.from_utf8_lossy(&initial.stderr)}")
+    roots :: Store.Roots.at(hangar_root.path.clone())
+    original :: package_entry(&hangar_root)
+    original_lock :: fs.read(project_root.join(".jet/lock")) ?? panic("lock")
+    expectation :: Store.CacheExpectation{identity: original.cache_identity.clone(), owned_output: nil, allow_unsigned_local: true}
+    deleted_path :: (Store.list_checked(&roots) ?? panic("list before deletion")).into_iter().find_map(entry -> {
+        decoded :: ProducerRecord.decode(&entry.producer_record).ok()
+        if decoded.is_none() -> return nil
+        producer :: decoded.unwrap()
+        if producer.facts.get("nix.store-path").map(value -> value.as_str()) == Val(RUNTIME_PATH) -> Val(entry.out) else -> nil
+    }) ?? panic("runtime Hangar object")
+    make_directories_writable(OSPath.from(deleted_path))
+    fs.remove_dir_all(&deleted_path) ?? panic("delete one transitive Hangar object")
+    forged_entry := original.clone()
+    forged_producer := ProducerRecord.decode(&original.producer_record) ?? panic("producer")
+    forged_producer.facts.insert("nix.cache.closure.receipt.sha256", "sha256-{\"d\".repeat(64)}")
+    forged_entry.producer_record = forged_producer.encode()
+    assert(!Store.verify_cache_entry(&roots, &forged_entry, "ripgrep@jetpack", &expectation).policy, "a re-checksummed producer must not replace the original WAL-bound repair authority")
+    server.reset_counts()
+    server.stop_network()
+    offline :: prepare(&project_root, &hangar_root, true)
+    assert_eq(offline.status.code(), Val(1), "stdout: {String.from_utf8_lossy(&offline.stdout)}\nstderr: {String.from_utf8_lossy(&offline.stderr)}")
+    offline_stderr :: String.from_utf8_lossy(&offline.stderr)
+    assert(offline_stderr.contains("E1350"), "stderr: {offline_stderr}")
+    assert(offline_stderr.contains("ripgrep@jetpack"), "offline error must name the affected locked package: {offline_stderr}")
+    assert_eq(server.count("/nix-cache-info"), 0)
+    assert_eq(server.object_request_count(RUNTIME_PATH), 0)
+    server.reset_counts()
+    server.start_network()
+    lock_text :: std.str.from_utf8(&original_lock) ?? panic("lock UTF-8")
+    tampered := Lock.parse(lock_text) ?? panic("parse lock")
+    closure := tampered.packages.iter_mut().find_map(package -> package.nix_closure.as_mut()).unwrap()
+    closure.index_authority = "d".repeat(64)
+    fs.write(project_root.join(".jet/lock"), Lock.write(&tampered)) ?? panic("tampered lock")
+    rejected :: prepare(&project_root, &hangar_root, false)
+    assert_eq(rejected.status.code(), Val(1))
+    assert(String.from_utf8_lossy(&rejected.stderr).contains("E1350"))
+    assert_eq(server.count("/nix-cache-info"), 0)
+    assert_eq(server.object_request_count(&server.root_store_path), 0)
+    assert_eq(server.object_request_count(LIB_PATH), 0)
+    assert_eq(server.object_request_count(RUNTIME_PATH), 0)
+    assert(!OSPath.from(deleted_path).exists())
+    assert_eq(package_entry(&hangar_root).producer_record, original.producer_record)
+    fs.write(project_root.join(".jet/lock"), &original_lock) ?? panic("restore lock")
+    repaired :: prepare(&project_root, &hangar_root, false)
+    assert(repaired.status.success(), "stdout: {String.from_utf8_lossy(&repaired.stdout)}\nstderr: {String.from_utf8_lossy(&repaired.stderr)}")
+    assert_eq(server.object_request_count(&server.root_store_path), 0)
+    assert_eq(server.object_request_count(LIB_PATH), 0)
+    assert_eq(server.object_request_count(RUNTIME_PATH), 2)
+    assert_eq(server.count("/nix-cache-info"), 1)
+    after :: package_entry(&hangar_root)
+    assert_eq(after.producer_record, original.producer_record)
+    assert_eq(after.envelope, original.envelope)
+    assert_eq(after.named_outputs, original.named_outputs)
+    assert_eq(fs.read(project_root.join(".jet/lock")) ?? panic("lock"), original_lock)
+    assert(Store.verify_cache_entry(&roots, &after, "ripgrep@jetpack", &expectation).trusted())
+}
+
+// Rust: tests/jetpack_nix_index.rs:413
+#Test("hangar_doctor_reports_and_repairs_cache_drift_and_staging") {
+    project_root :: Scratch.new("nix-index-doctor-project")
+    hangar_root :: Scratch.new("nix-index-doctor-hangar")
+    server :: NixIndexCacheServer.start_ripgrep(&project_root.path)
+    server.install(&hangar_root.path)
+    project(&project_root)
+    initial :: prepare(&project_root, &hangar_root, false)
+    assert(initial.status.success(), "stdout: {String.from_utf8_lossy(&initial.stdout)}\nstderr: {String.from_utf8_lossy(&initial.stderr)}")
+    roots :: Store.Roots.at(hangar_root.path.clone())
+    (runtime_path, runtime_digest) :: (Store.list_checked(&roots) ?? panic("list Hangar before doctor")).into_iter().find_map(entry -> {
+        decoded :: ProducerRecord.decode(&entry.producer_record).ok()
+        if decoded.is_none() -> return nil
+        producer :: decoded.unwrap()
+        if producer.facts.get("nix.store-path").map(value -> value.as_str()) == Val(RUNTIME_PATH) -> Val((entry.out, entry.envelope.output_hash)) else -> nil
+    }) ?? panic("runtime Hangar object")
+    runtime_output :: OSPath.from(runtime_path)
+    make_directories_writable(&runtime_output)
+    corruption :: runtime_output.join("share/doctor-corruption")
+    fs.write(&corruption, "drift".as_bytes()) ?? panic("corrupt runtime object")
+    stale_stage :: roots.hangar_dir().join("stage/nix-cache-999999999-1/payload")
+    fs.create_dir_all(&stale_stage) ?? panic("create stale admission stage")
+    fs.write(stale_stage.join("bytes"), "stale".as_bytes()) ?? panic("write stale admission stage")
+    orphan_cas :: roots.hangar_dir().join("cas/.unreferenced")
+    fs.create_dir_all(orphan_cas.parent() ?? panic("CAS parent")) ?? panic("create CAS pool")
+    fs.write(&orphan_cas, "orphan".as_bytes()) ?? panic("write orphan CAS entry")
+    cas_locks :: roots.hangar_dir().join("cas/.locks")
+    assert(cas_locks.is_dir(), "admission did not create the CAS lock namespace")
+    cas_lock_identity := nil as (U64, U64)?
+    if sys.target.selected_family() == "unix" {
+        metadata :: fs.metadata(&cas_locks) ?? panic("lock metadata")
+        cas_lock_identity = Val((metadata.dev(), metadata.ino()))
+    }
+    live_payload :: (fs.read_dir(roots.hangar_dir().join("cas")) ?? panic("cas")).map(entry -> entry.unwrap().path()).find(path -> path.is_file() && fs.read(path).unwrap() == "runtime".as_bytes()) ?? panic("live runtime payload in the private CAS")
+    live_payload_identity := nil as (U64, U64)?
+    if sys.target.selected_family() == "unix" {
+        metadata :: fs.metadata(&live_payload) ?? panic("payload metadata")
+        live_payload_identity = Val((metadata.dev(), metadata.ino()))
+    }
+    doctor := isolated_jetpack(&project_root, &hangar_root)
+    read_only :: doctor.args(["hangar", "doctor", "--no-color"]).output() ?? panic("run read-only Hangar doctor")
+    assert_eq(read_only.status.code(), Val(1))
+    assert(corruption.exists(), "read-only doctor changed object bytes")
+    assert((stale_stage.parent() ?? panic("stage parent")).exists(), "read-only doctor removed staging")
+    assert(orphan_cas.exists(), "read-only doctor removed CAS entry")
+    assert_eq(fs.read(&live_payload) ?? panic("payload"), "runtime".as_bytes())
+    server.reset_counts()
+    repair := isolated_jetpack(&project_root, &hangar_root)
+    repaired :: repair.args(["hangar", "doctor", "--repair", "--no-color"]).output() ?? panic("run repairing Hangar doctor")
+    assert(repaired.status.success(), "stdout: {String.from_utf8_lossy(&repaired.stdout)}\nstderr: {String.from_utf8_lossy(&repaired.stderr)}")
+    assert(server.object_request_count(RUNTIME_PATH) > 0)
+    assert(!(stale_stage.parent() ?? panic("stage parent")).exists())
+    assert(!orphan_cas.exists())
+    assert(!corruption.exists())
+    assert_eq(fs.read(&live_payload) ?? panic("payload"), "runtime".as_bytes())
+    assert(cas_locks.is_dir(), "repair removed the live CAS lock namespace")
+    if sys.target.selected_family() == "unix" {
+        lock_metadata :: fs.metadata(&cas_locks) ?? panic("lock metadata")
+        assert_eq((lock_metadata.dev(), lock_metadata.ino()), cas_lock_identity.unwrap())
+        payload_metadata :: fs.metadata(&live_payload) ?? panic("payload metadata")
+        assert_eq((payload_metadata.dev(), payload_metadata.ino()), live_payload_identity.unwrap())
+    }
+    assert_eq(Envelope.try_output_hash_of_in_hangar(&runtime_output.to_string_lossy(), &roots.hangar_dir(), false) ?? panic("rehash repaired runtime"), runtime_digest)
+    assert_jetos_stderr_snapshot_normalized("hangar_doctor_findings", &String.from_utf8_lossy(&read_only.stderr), &[(runtime_digest.as_str(), "<runtime-digest>")])
+    assert_jetos_stderr_snapshot_normalized("hangar_doctor_repair", &String.from_utf8_lossy(&repaired.stderr), &[(runtime_digest.as_str(), "<runtime-digest>")])
+}
+
+// Rust: tests/jetpack_no_daemon.rs:16
+#Test("runtime_policy_names_no_daemon_no_root_contract") {
+    for policy in RuntimePolicy.all_verb_policies() {
+        assert(!policy.resident_daemon, "{policy.verb} must not require a resident daemon")
+        assert(!policy.requires_root, "{policy.verb} must not require root")
+        assert(!policy.transient_sudo, "{policy.verb} must not use transient sudo by default")
+    }
+    os_switch :: RuntimePolicy.verb_policy(Syntax.OS_SUBCOMMAND, &["switch"])
+    assert(os_switch.transient_sudo)
+    assert(!os_switch.requires_root)
+}
+
+// Rust: tests/jetpack_no_daemon.rs:41
+#Test("sandbox_default_never_allows_unsandboxed_build_and_require_mode_errors") {
+    cwd :: Scratch.new("cwd")
+    home :: Scratch.new("home")
+    root :: Scratch.new("root")
+    warn :: jetpack().args(["build", "--no-color"]).current_dir(&cwd.path).env("HOME", &home.path).env("JETPACK_ROOT", &root.path).env("JETPACK_FAKE_SANDBOX", "unavailable").output() ?? panic("build")
+    warn_err :: String.from_utf8_lossy(&warn.stderr)
+    assert(!warn_err.contains("L0205"), "stderr: {warn_err}")
+    assert(!warn_err.contains("unsandboxed"), "stderr: {warn_err}")
+    warn_json :: jetpack().args(["build", "--json", "--no-color"]).current_dir(&cwd.path).env("HOME", &home.path).env("JETPACK_ROOT", &root.path).env("JETPACK_FAKE_SANDBOX", "unavailable").output() ?? panic("build JSON")
+    warn_json_err :: String.from_utf8_lossy(&warn_json.stderr)
+    assert(!warn_json_err.contains("\"code\": \"L0205\""), "stderr: {warn_json_err}")
+    assert(!warn_json_err.contains("unsandboxed"), "stderr: {warn_json_err}")
+    require :: jetpack().args(["config", "sandbox", "require", "--no-color"]).current_dir(&cwd.path).env("HOME", &home.path).env("JETPACK_ROOT", &root.path).output() ?? panic("configure sandbox")
+    assert(require.status.success())
+    fail :: jetpack().args(["build", "--no-color"]).current_dir(&cwd.path).env("HOME", &home.path).env("JETPACK_ROOT", &root.path).env("JETPACK_FAKE_SANDBOX", "unavailable").output() ?? panic("required build")
+    assert_eq(fail.status.code(), Val(2))
+    fail_err :: String.from_utf8_lossy(&fail.stderr)
+    assert(fail_err.contains("E1275"), "stderr: {fail_err}")
+    assert(fail_err.contains("approved remote builder, or enable the native sandbox"), "stderr: {fail_err}")
+    fail_json :: jetpack().args(["build", "--json", "--no-color"]).current_dir(&cwd.path).env("HOME", &home.path).env("JETPACK_ROOT", &root.path).env("JETPACK_FAKE_SANDBOX", "unavailable").output() ?? panic("required build JSON")
+    fail_json_err :: String.from_utf8_lossy(&fail_json.stderr)
+    assert(fail_json_err.contains("\"code\": \"E1275\""), "stderr: {fail_json_err}")
+    assert(fail_json_err.contains("\"severity\": \"error\""), "stderr: {fail_json_err}")
+}
+
+// Rust: tests/jetpack_no_daemon.rs:121
+#Test("available_userns_never_labels_unsandboxed_child_strong") {
+    cwd :: Scratch.new("capability-only-cwd")
+    home :: Scratch.new("capability-only-home")
+    root :: Scratch.new("capability-only-root")
+    require :: jetpack().args(["config", "sandbox", "require", "--no-color"]).current_dir(&cwd.path).env("HOME", &home.path).env("JETPACK_ROOT", &root.path).output() ?? panic("configure sandbox")
+    assert(require.status.success())
+    child :: jetpack().args(["build", "--no-color"]).current_dir(&cwd.path).env("HOME", &home.path).env("JETPACK_ROOT", &root.path).env("JETPACK_FAKE_SANDBOX", "available").output() ?? panic("build")
+    assert_eq(child.status.code(), Val(2))
+    stderr :: String.from_utf8_lossy(&child.stderr)
+    assert(stderr.contains("E1275"), "stderr: {stderr}")
+    assert(stderr.contains("has not entered a jail"), "stderr: {stderr}")
+    assert(!stderr.contains("strong"), "stderr: {stderr}")
+}
+
+// Rust: tests/jetpack_no_daemon.rs:154
+#Test("jetpack_runtime_code_has_no_privileged_helper_tokens") {
+    manifest_dir :: OSPath.from(env("CARGO_MANIFEST_DIR"))
+    roots :: [manifest_dir.join("Jetpack"), manifest_dir.join("Jetpack/PackageModel")]
+    forbidden :: ["Command.new(\"sudo\")", "shell_command(\"sudo", " setuid", "systemctl", "launchctl", "/etc/jet", "jetpackd", "daemon socket"]
+    files := [OSPath]{}
+    for root in &roots -> files.extend(source_files(root))
+    for path in files {
+        // JetOS activation alone may use the explicit transient-sudo path.
+        is_jetos :: path.file_name().and_then(name -> name.to_str()) == Val("JetOS.jet") || path.components().any(component -> component.as_os_str() == "JetOS")
+        if is_jetos -> continue
+        text :: fs.read_to_string(&path) ?? panic("source")
+        for (idx, line) in text.lines().enumerate() {
+            trimmed := line.trim_start() // #4303
+            if trimmed.starts_with("//") || trimmed.starts_with("//!") -> continue
+            for needle in forbidden {
+                assert(!line.contains(needle), "{path.display()}:{idx + 1} contains forbidden privileged token `{needle}`")
+            }
+        }
+    }
+}

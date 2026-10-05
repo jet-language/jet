@@ -1,0 +1,10 @@
+use jetpack.JetOS.IsoVmCommands.[round_up_u64]
+
+// Rust: crates/jetpack/src/JetOS/iso_vm_commands.rs:159-164 (behavioral control; no inline Rust tests).
+#Test("efi_size_rounding_preserves_zero_unit_and_exact_multiples") {
+    assert_eq(round_up_u64(17, 0), 17)
+    assert_eq(round_up_u64(0, 16), 0)
+    assert_eq(round_up_u64(32, 16), 32)
+    assert_eq(round_up_u64(33, 16), 48)
+    assert_eq(round_up_u64(96 * 1024 * 1024 + 1, 16 * 1024 * 1024), 112 * 1024 * 1024)
+}

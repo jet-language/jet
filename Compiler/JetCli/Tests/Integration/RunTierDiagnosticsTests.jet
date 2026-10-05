@@ -1,0 +1,130 @@
+use Compiler.JetCli.Tests.Integration.RunTierDiagnostics.*
+use Compiler.JetCli.Tests.Integration.Common as common
+use std.[thread, fs]
+use jet.Diagnostics.Diagnostic
+use jet_foundation.JitBackend.RunOutcome
+use Compiler.JetCli.Tests.Integration.SemaSoundnessProvenance.SUITE
+use Compiler.JetCli.Tests.Integration.SemaSoundnessParts.Support.*
+// GATE #4494: real native thread creation, 8 MiB stack, join, and filesystem.
+
+// Rust: tests/run_tier_diagnostics.rs:29
+#Test("e1112_row_text_matches_aot_run_and_interpreter") {
+    thread.Builder.new().name("e1112-tier-parity").stack_size(8 * 1024 * 1024)
+        .spawn(e1112_row_text_matches_aot_run_and_interpreter_inner).unwrap().join().unwrap()
+}
+
+// Rust: tests/run_tier_diagnostics.rs:108
+#Test("e0956_row_text_matches_aot_run_and_interpreter") {
+    thread.Builder.new().name("e0956-tier-parity").stack_size(8 * 1024 * 1024)
+        .spawn(e0956_row_text_matches_aot_run_and_interpreter_inner).unwrap().join().unwrap()
+}
+
+// Rust: tests/run_tier_diagnostics.rs:189
+#Test("e0999_row_fix_matches_aot_run_and_interpreter") {
+    thread.Builder.new().name("e0999-tier-parity").stack_size(8 * 1024 * 1024)
+        .spawn(e0999_row_fix_matches_aot_run_and_interpreter_inner).unwrap().join().unwrap()
+}
+
+// Rust: tests/run_tier_diagnostics.rs:274
+#Test("e0311_suggested_fix_matches_aot_run_and_interpreter") {
+    thread.Builder.new().name("e0311-tier-parity").stack_size(8 * 1024 * 1024)
+        .spawn(e0311_suggested_fix_matches_aot_run_and_interpreter_inner).unwrap().join().unwrap()
+}
+
+// Rust: tests/run_tier_diagnostics.rs:359
+#Test("programmable_build_check_matches_aot_interpreter_dev_and_web") {
+    scratch :: common.Scratch.new("programmable-build-tier-parity")
+    file :: scratch.join("main.jet")
+    source :: """
+struct Entity { id: Int }
+
+fn build(b: BuildContext) -> BuildPlan {
+    types :: b.program.types()
+    b.error(types[0].span, "ORG01", "entity must define archive", "company policy requires archival", "add an archive method")
+    return b.plan()
+}
+
+fn run() {}
+"""
+    fs.write(file, source).unwrap()
+    path :: file.to_string_lossy().into_owned()
+    shape :: fn(diags: [Diagnostic]) -> diags.iter().map(fn(diag) ->
+        (diag.code.clone(), diag.what.clone(), diag.why.clone(), diag.fix.clone(), diag.span)).collect()
+    aot :: jet.compile_programmable_build(path, []).expect_err("programmable build check must reject this source")
+    expected :: shape(aot)
+    assert_eq(expected.len(), 1)
+    assert_eq(expected[0].0, "ORG01")
+    interpreter :: match jet.Interpreter.run_interpreter_once_with_args(path, []) {
+        RunOutcome.Problems(diags) -> diags
+        other -> panic("interpreter must reject the programmable build check: {other:?}")
+    }
+    jit :: match jet.Interpreter.run_jit_once_with_args(path, []) {
+        RunOutcome.Problems(diags) -> diags
+        other -> panic("Cranelift run must reject the programmable build check: {other:?}")
+    }
+    dev :: match jet.Interpreter.dev_iteration(path, false, false) {
+        RunOutcome.Problems(diags) -> diags
+        other -> panic("dev must reject the programmable build check: {other:?}")
+    }
+    web :: jet.compile_web_with_gates(path, jet.Policy.GateSet.default())
+        .expect_err("web checking must reject the programmable build check")
+    loop (tier, diags) in [("Cranelift run", jit), ("interpreter", interpreter), ("dev", dev), ("web", web)] {
+        assert_eq(shape(diags), expected, "{tier} diagnostic drifted from AOT")
+    }
+}
+
+// Rust: tests/sema_soundness_parts/provenance.rs:4
+#Test("valid_corpus_reaches_rustc") {
+    // FEATURE_CLAIM: claim.native-language / valid-native-execution
+    filter :: case_filter()
+    selected :: selected_cases("valid", filter)
+    require_lane_selection("valid", filter, selected.len())
+    require_rustc()
+    failures :: run_all_collecting_failures(selected, fn(path) -> {
+        replay(path, "valid_corpus_reaches_rustc")
+        src :: fs.read_to_string(path).unwrap()
+        name :: path.file_stem().unwrap().to_string_lossy()
+        (code, _, stderr) :: common.build_and_run("jet_sema_sound_valid", name, src)
+        if code == 0 { Ok(()) } else { Err("{relative(path)}: failed (exit {code}):\n{stderr}") }
+    })
+    assert(failures.is_empty(), "{failures.len()} valid-corpus failure(s), each replayable via SEMA_SOUNDNESS_CASE=<path>:\n{failures.join(\"\n\")}")
+}
+
+// Rust: tests/sema_soundness_parts/provenance.rs:28-92
+// Strip vetted prelude modules, then reject unaudited unsafe in user bodies.
+// GATED_UNSAFE_STEMS may contain only unsafe blocks or unsafe fn declarations.
+#Test("generated_rust_has_no_unaudited_unsafe") {
+    // FEATURE_CLAIM: claim.native-language / safe-codegen-boundary
+    filter :: case_filter()
+    selected := selected_cases("valid", filter)
+    &selected.extend(selected_cases("differential", filter))
+    require_lane_selection("valid or differential", filter, selected.len())
+    failures :: run_all_collecting_failures(selected, fn(path) -> {
+        replay(path, "generated_rust_has_no_unaudited_unsafe")
+        src :: fs.read_to_string(path).unwrap()
+        // The prefix must not contain "unsafe": the source-map comment embeds it.
+        materialized :: common.unique_tmp("jet_sema_sound_prov").with_extension("jet")
+        fs.write(materialized, src).unwrap()
+        compiled :: match jet.compile_with_path(src, materialized.to_string_lossy()) {
+            Ok(c) -> c
+            Err(diags) -> return Err("{relative(path)}: front end rejected: {diags:?}")
+        }
+        user_code :: common.strip_vetted_prelude_modules(compiled.rust)
+        stem :: path.file_stem().unwrap().to_string_lossy()
+        gated :: original_example_stem(stem).map(fn(orig) -> GATED_UNSAFE_STEMS.contains(orig)).unwrap_or(false)
+        if gated {
+            loop (i, line) in user_code.lines().enumerate() {
+                if line.find("unsafe") is Some(col) {
+                    after := line[col..].trim_start_matches("unsafe").trim_start() // #4303
+                    if !(after.starts_with('{') || after.starts_with("fn ")) {
+                        return Err("{relative(path)}: ungated `unsafe` at line {i + 1}: {line.trim()}")
+                    }
+                }
+            }
+        } else if user_code.contains("unsafe") {
+            return Err("{relative(path)}: generated Rust contains `unsafe` outside the vetted prelude/gated #Unsafe tier")
+        }
+        Ok(())
+    })
+    assert(failures.is_empty(), "{failures.len()} unsafe-provenance failure(s), each replayable via SEMA_SOUNDNESS_CASE=<path>:\n{failures.join(\"\n\")}")
+}

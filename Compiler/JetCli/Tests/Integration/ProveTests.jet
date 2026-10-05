@@ -1,0 +1,478 @@
+use std.[fs, process]
+use std.process.[Command, Stdio]
+use core.sys.target
+use jet_foundation.TEXT_NUL
+use jet_cli.Tests.Integration.Prove.[jet, workspace, budget_workspace]
+// GATE #4494: all commands, pipes, artifact bytes and filesystem operations are native.
+
+// Rust: tests/prove.rs:53
+#Test("prove_projects_compatible_canonical_budget_identity_without_measuring") {
+    root :: budget_workspace("budget_projection")
+    checked :: Command.new(jet()).current_dir(root).args(["budget", "check", "--json"]).output().unwrap()
+    assert_eq(checked.status.code(), Val(0), "{String.from_utf8_lossy(checked.stderr)}")
+    command :: String.from_utf8(checked.stdout).unwrap()
+    report_id :: command.split("\"report_id\":\"").nth(1).unwrap().split('"').next().unwrap().to_string()
+    before :: fs.read_dir(root.join(".jet/perf/reports")).unwrap().count()
+    out :: Command.new(jet()).current_dir(root).args(["prove", "src/run.jet", "--json"]).output().unwrap()
+    assert_eq(out.status.code(), Val(0), "{String.from_utf8_lossy(out.stderr)}")
+    proof :: String.from_utf8(out.stdout).unwrap()
+    assert(proof.contains("\"producer\":\"jet-budget\""), proof)
+    assert(proof.contains("\"budgetId\":\"package:public-api\""), proof)
+    assert(proof.contains("\"reportId\":\"{report_id}\""), proof)
+    assert(proof.contains("\"deterministicBudget\":{{\"failed\":0,\"met\":1,\"selected\":1"), proof)
+    assert_eq(fs.read_dir(root.join(".jet/perf/reports")).unwrap().count(), before, "prove measured or wrote a report")
+}
+// Rust: tests/prove.rs:113
+#Test("prove_json_is_derived_from_real_front_end_and_sorted_target") {
+    root :: workspace("report")
+    fs.write(root.join("b.jet"), "fn b() -[]> Int {{ return 2 }}\n").unwrap()
+    fs.write(root.join("a.jet"), "fn a() -[]> Int {{ return 1 }}\n").unwrap()
+    out :: Command.new(jet()).current_dir(root).args(["prove", ".", "--json"]).output().unwrap()
+    assert_eq(out.status.code(), Val(0), "{String.from_utf8_lossy(out.stderr)}")
+    report :: String.from_utf8(out.stdout).unwrap()
+    assert(report.contains("\"kind\":\"workspace\""), report)
+    assert(report.find("a.jet").unwrap() < report.find("b.jet").unwrap(), report)
+    assert(report.contains("\"producer\":\"jet-sema\""), report)
+    assert(report.contains("\"frontEnd\":{{\"failed\":0,\"proved\":2,\"selected\":2"), report)
+}
+// Rust: tests/prove.rs:142
+#Test("prove_front_end_failure_is_typed_evidence_and_exit_one") {
+    root :: workspace("failure")
+    fs.write(root.join("bad.jet"), "fn run() {{ missing() }}\n").unwrap()
+    out :: Command.new(jet()).current_dir(root).args(["prove", "bad.jet", "--json"]).output().unwrap()
+    assert_eq(out.status.code(), Val(1))
+    assert(out.stderr.is_empty(), "JSON mode leaked stderr: {String.from_utf8_lossy(out.stderr)}")
+    report :: String.from_utf8(out.stdout).unwrap()
+    assert(report.contains("\"result\":\"fail\""), report)
+    assert(report.contains("\"outcome\":\"failed\""), report)
+    assert(report.contains("\"diagnosticIndexes\":[0]"), report)
+    assert(report.contains("\"code\":\"E0102\""), report)
+}
+// Rust: tests/prove.rs:164
+#Test("prove_usage_and_missing_target_have_exact_exit_classes") {
+    root :: workspace("usage")
+    usage :: Command.new(jet()).current_dir(root).arg("prove").output().unwrap()
+    assert_eq(usage.status.code(), Val(2))
+    missing :: Command.new(jet()).current_dir(root).args(["prove", "missing.jet"]).output().unwrap()
+    assert_eq(missing.status.code(), Val(1))
+}
+// Rust: tests/prove.rs:181
+#Test("prove_uses_canonical_package_marker_in_target_identity") {
+    root :: workspace("canonical_package")
+    fs.write(root.join("package.jet"), "name: \"demo\"\nversion: \"0.1.0\"\n").unwrap()
+    fs.write(root.join("main.jet"), "fn run() {{}}\n").unwrap()
+    out :: Command.new(jet()).current_dir(root).args(["prove", ".", "--json"]).output().unwrap()
+    assert_eq(out.status.code(), Val(0), "{String.from_utf8_lossy(out.stderr)}")
+    report :: String.from_utf8(out.stdout).unwrap()
+    assert(report.contains("\"kind\":\"package\""), report)
+    assert(report.contains("package.jet"), "canonical marker missing from identity: {report}")
+}
+// Rust: tests/prove.rs:209
+#Test("prove_capture_replay_round_trip_and_corruption_fail_closed") {
+    root :: workspace("replay_round_trip")
+    store :: root.join("store")
+    fs.write(root.join("main.jet"), "use core.time as time\n#Test(\"recorded time\") {{ observed :: time.now() }}\n").unwrap()
+    artifact :: root.join("capture.jetproof-replay")
+    artifact_arg :: artifact.file_name().unwrap().to_string_lossy().to_string()
+    captured :: Command.new(jet()).current_dir(root).args(["prove", "main.jet", "--capture={artifact_arg}", "--json"]).env("JET_STORE_DIR", store).output().unwrap()
+    assert_eq(captured.status.code(), Val(0), "stderr={String.from_utf8_lossy(captured.stderr)} stdout={String.from_utf8_lossy(captured.stdout)} artifact={artifact.display()}")
+    assert(artifact.is_file())
+    assert(captured.stderr.is_empty(), "JSON capture leaked stderr: {String.from_utf8_lossy(captured.stderr)}")
+    captured_report :: String.from_utf8_lossy(captured.stdout)
+    assert(captured_report.contains("\"inputSha256\":\""), "capture report lost target input hash: {captured_report}")
+    assert(captured_report.contains("\"targetTriple\":\""), "capture report lost target triple: {captured_report}")
+    artifact_bytes :: fs.read(artifact).unwrap()
+    assert(artifact_bytes.starts_with("JREPLAY{TEXT_NUL}".as_bytes()))
+    artifact_text :: String.from_utf8_lossy(artifact_bytes)
+    assert(artifact_text.contains("\"roots\":[\"Time\"]"))
+    assert(artifact_text.contains("\"time_site_id\":"))
+    build_digest :: artifact_text.split("\"build_digest\":\"").nth(1).and_then(tail -> tail.split('"').next()).expect("replay identity build digest")
+    assert(build_digest.len() == 64 && build_digest.bytes().all(byte -> byte.is_ascii_hexdigit()), "replay identity build digest is not a SHA-256 hash: {build_digest}")
+    assert(artifact_text.contains("\"source_digest\":\""))
+    assert(artifact_text.contains("\"semantic_mir_hash\":\""))
+    assert(artifact_text.contains("\"optimized_mir_hash\":\""))
+    assert(artifact_text.contains("\"mir_schema\":\"mir-v1\""))
+    replayed :: Command.new(jet()).current_dir(root).args(["prove", "main.jet", "--replay", artifact_arg, "--json"]).env("JET_STORE_DIR", store).output().unwrap()
+    assert_eq(replayed.status.code(), Val(0), "{String.from_utf8_lossy(replayed.stderr)}")
+    assert(replayed.stderr.is_empty(), "JSON replay leaked stderr: {String.from_utf8_lossy(replayed.stderr)}")
+    report :: String.from_utf8(replayed.stdout).unwrap()
+    assert(report.contains("\"facet\":\"replay\""), report)
+    assert(report.contains("\"reason\":\"parity_not_available\""), report)
+    corrupt := fs.read(artifact).unwrap()
+    middle :: corrupt.len() / 2
+    corrupt[middle] ^= 1
+    fs.write(artifact, corrupt).unwrap()
+    rejected :: Command.new(jet()).current_dir(root).args(["prove", "main.jet", "--replay", artifact_arg]).env("JET_STORE_DIR", store).output().unwrap()
+    assert_eq(rejected.status.code(), Val(1))
+    assert(String.from_utf8_lossy(rejected.stderr).contains("Error [E3622]"))
+}
+// Rust: tests/prove.rs:311
+#Test("run_recorded_alias_time_receipt_replays_without_execution") {
+    root :: workspace("recorded_debug_queries")
+    fs.write(root.join("package.jet"), "name: \"recorded-time\"\nversion: \"0.1.0\"\nauthority: {{ holds: {{ allow: [IO, Mem.Alloc, Time, Exec] }} }}\n").unwrap()
+    fs.write(root.join("main.jet"), "use core.time as time\nuse core.process as process\nfn run() {{\n    observed :: time.now()\n    argument :: process.args()[0]\n    marker :: \"recorded-{{observed}}\"\n    print(marker)\n    print(argument)\n}}\n").unwrap()
+    recorded :: Command.new(jet()).current_dir(root).args(["run", "main.jet", "--record=causal", "--", "recorded-arg"]).output().unwrap()
+    assert_eq(recorded.status.code(), Val(0), "{String.from_utf8_lossy(recorded.stderr)}")
+    recorded_stdout :: String.from_utf8_lossy(recorded.stdout)
+    recorded_value :: recorded_stdout.lines().find_map(line -> line.strip_prefix("recorded-")).expect("recorded run must print the captured time").to_string()
+    assert(recorded_value.parse<Int64>().is_ok(), "captured time is not an integer: {recorded_value}")
+    assert(recorded_stdout.lines().any(line -> line == "recorded-arg"))
+    artifact :: root.join(".jet/replays/causal.jetproof-replay")
+    assert(artifact.is_file())
+    debug := Command.new(jet()).current_dir(root).args(["debug", "main.jet", "--replay=causal"]).stdin(Stdio.piped()).stdout(Stdio.piped()).stderr(Stdio.piped()).spawn().unwrap()
+    debug.stdin.take().unwrap().write_all("why observed == {recorded_value}\nwhen observed\nc\n".as_bytes()).unwrap()
+    output :: debug.wait_with_output().unwrap()
+    assert_eq(output.status.code(), Val(0), "{String.from_utf8_lossy(output.stderr)}")
+    stdout :: String.from_utf8_lossy(output.stdout)
+    assert(stdout.contains("observed = {recorded_value} because act"), stdout)
+    assert(stdout.contains("last change:"), stdout)
+    assert(!stdout.contains("recorded-{recorded_value}"), "receipt replay re-executed program output: {stdout}")
+}
+// Rust: tests/prove.rs:382
+#Test("prove_replay_rejects_source_identity_divergence_before_execution") {
+    root :: workspace("replay_identity_divergence")
+    fs.write(root.join("main.jet"), "use core.time as time\nfn run() {{ observed :: time.now() }}\n").unwrap()
+    artifact :: root.join("capture.jetproof-replay")
+    captured :: Command.new(jet()).current_dir(root).args(["prove", "main.jet", "--capture=capture.jetproof-replay"]).output().unwrap()
+    assert_eq(captured.status.code(), Val(0), "{String.from_utf8_lossy(captured.stderr)}")
+    assert(artifact.is_file())
+    fs.write(root.join("main.jet"), "fn run() {{}}\n").unwrap()
+    replayed :: Command.new(jet()).current_dir(root).args(["prove", "main.jet", "--replay=capture.jetproof-replay", "--json"]).output().unwrap()
+    assert_eq(replayed.status.code(), Val(1))
+    assert(replayed.stderr.is_empty(), "JSON identity refusal leaked stderr: {String.from_utf8_lossy(replayed.stderr)}")
+    assert(String.from_utf8_lossy(replayed.stdout).contains("\"code\":\"E3621\""))
+}
+// Rust: tests/prove.rs:424
+#Test("prove_lens_union_is_canonical_and_keeps_the_complete_report") {
+    root :: workspace("lens_union")
+    fs.write(root.join("main.jet"), "fn run() {{}}\n").unwrap()
+    baseline :: Command.new(jet()).current_dir(root).args(["prove", "main.jet", "--json"]).output().unwrap()
+    assert_eq(baseline.status.code(), Val(0), "{String.from_utf8_lossy(baseline.stderr)}")
+    selected :: Command.new(jet()).current_dir(root).args(["prove", "main.jet", "--lens", "budgets", "--lens", "tests", "--lens", "budgets", "--json"]).output().unwrap()
+    assert_eq(selected.status.code(), Val(0), "{String.from_utf8_lossy(selected.stderr)}")
+    assert_eq(baseline.stdout, selected.stdout, "presentation lenses changed ProofReport")
+    human :: Command.new(jet()).current_dir(root).args(["prove", "main.jet", "--lens", "budgets", "--lens", "tests", "--lens", "budgets"]).output().unwrap()
+    assert_eq(human.status.code(), Val(0), "{String.from_utf8_lossy(human.stderr)}")
+    assert(String.from_utf8_lossy(human.stdout).contains("LENSES   tests, budgets"))
+    absorbed :: Command.new(jet()).current_dir(root).args(["prove", "main.jet", "--lens", "all", "--lens", "tests"]).output().unwrap()
+    assert_eq(absorbed.status.code(), Val(0), "{String.from_utf8_lossy(absorbed.stderr)}")
+    absorbed_stdout :: String.from_utf8_lossy(absorbed.stdout)
+    assert(absorbed_stdout.contains("LENSES   all"))
+    assert(!absorbed_stdout.contains("LENSES   all, tests"))
+    all :: Command.new(jet()).current_dir(root).args(["prove", "main.jet", "--lens", "all", "--json"]).output().unwrap()
+    assert_eq(all.status.code(), Val(0), "{String.from_utf8_lossy(all.stderr)}")
+    assert(!String.from_utf8_lossy(all.stdout).contains("\"facet\":\"solver\""))
+}
+// Rust: tests/prove.rs:502
+#Test("prove_rejected_budget_reports_are_unavailable_and_counted") {
+    root :: budget_workspace("budget_rejected_equation")
+    fs.create_dir_all(root.join(".jet/perf/reports")).unwrap()
+    fs.write(root.join(".jet/perf/reports/broken.json"), "not canonical budget JSON\n").unwrap()
+    out :: Command.new(jet()).current_dir(root).args(["prove", "src/run.jet", "--json"]).output().unwrap()
+    assert_eq(out.status.code(), Val(0), "{String.from_utf8_lossy(out.stderr)}")
+    report :: String.from_utf8(out.stdout).unwrap()
+    assert(report.contains("\"result\":\"pass_incomplete\""), report)
+    assert(report.contains("\"deterministicBudget\":{{\"failed\":0,\"met\":0,\"selected\":1,\"skipped\":0,\"unavailable\":1}}"), report)
+    assert(report.contains("\"facet\":\"budgets\""), report)
+    assert(report.contains("\"outcome\":\"unavailable\""), report)
+}
+// Rust: tests/prove.rs:532
+#Test("prove_rejects_capture_path_escape_before_writing_an_artifact") {
+    root :: workspace("capture_escape")
+    fs.write(root.join("main.jet"), "fn run() {{}}\n").unwrap()
+    out :: Command.new(jet()).current_dir(root).args(["prove", "main.jet", "--capture=../escape.jetproof-replay"]).output().unwrap()
+    assert_eq(out.status.code(), Val(1))
+    assert(String.from_utf8_lossy(out.stderr).contains("Error [E3629]"))
+    assert(!root.parent().unwrap().join("escape.jetproof-replay").exists())
+}
+// Rust: tests/prove.rs:550
+#Test("prove_capture_does_not_finalize_after_front_end_failure") {
+    root :: workspace("capture_front_end_failure")
+    fs.write(root.join("bad.jet"), "fn run() {{ missing() }}\n").unwrap()
+    artifact :: root.join("failed.jetproof-replay")
+    out :: Command.new(jet()).current_dir(root).args(["prove", "bad.jet", "--capture=failed.jetproof-replay"]).output().unwrap()
+    assert_eq(out.status.code(), Val(1))
+    assert(!artifact.exists(), "front-end failure must not leave a replay artifact")
+}
+// Rust: tests/prove.rs:567
+#Test("prove_capture_refuses_reachable_io_before_the_child_runs") {
+    root :: workspace("capture_io_preflight")
+    fs.write(root.join("main.jet"), "fn run() {{ print(\"not captured\") }}\n").unwrap()
+    artifact :: root.join("io.jetproof-replay")
+    out :: Command.new(jet()).current_dir(root).args(["prove", "main.jet", "--capture=io.jetproof-replay"]).output().unwrap()
+    assert_eq(out.status.code(), Val(1))
+    assert(String.from_utf8_lossy(out.stderr).contains("Error [E3627]"))
+    assert(!artifact.exists(), "preflight refusal must happen before artifact creation")
+}
+// Rust: tests/prove.rs:589
+#Test("prove_capture_refuses_an_opaque_callable_before_the_child_runs") {
+    root :: workspace("capture_opaque_preflight")
+    fs.write(root.join("main.jet"), "fn run() {{ provider_call() }}\n").unwrap()
+    artifact :: root.join("opaque.jetproof-replay")
+    out :: Command.new(jet()).current_dir(root).args(["prove", "main.jet", "--capture=opaque.jetproof-replay"]).output().unwrap()
+    assert_eq(out.status.code(), Val(1))
+    assert(String.from_utf8_lossy(out.stderr).contains("Error [E3625]"))
+    assert(!artifact.exists(), "opaque call must be refused before artifact creation")
+}
+// Rust: tests/prove.rs:607
+#Test("prove_capture_refuses_an_unrecorded_time_operation_before_the_child_runs") {
+    root :: workspace("capture_time_sleep_preflight")
+    fs.write(root.join("main.jet"), "use core.time as time\nfn run() {{ time.sleep(1ms) }}\n").unwrap()
+    artifact :: root.join("sleep.jetproof-replay")
+    out :: Command.new(jet()).current_dir(root).args(["prove", "main.jet", "--capture=sleep.jetproof-replay"]).output().unwrap()
+    assert_eq(out.status.code(), Val(1))
+    assert(String.from_utf8_lossy(out.stderr).contains("Error [E3625]"))
+    assert(!artifact.exists(), "unsupported Time must be refused before artifact creation")
+}
+// Rust: tests/prove.rs:629
+#Test("prove_capture_refuses_multiple_time_sites_for_the_single_record_adapter") {
+    root :: workspace("capture_multiple_time_preflight")
+    fs.write(root.join("main.jet"), "use core.time as time\nfn run() {{\n    first :: time.now()\n    second :: time.now()\n}}\n").unwrap()
+    artifact :: root.join("multiple.jetproof-replay")
+    out :: Command.new(jet()).current_dir(root).args(["prove", "main.jet", "--capture=multiple.jetproof-replay"]).output().unwrap()
+    assert_eq(out.status.code(), Val(1))
+    assert(String.from_utf8_lossy(out.stderr).contains("Error [E3625]"))
+    assert(!artifact.exists(), "multiple Time sites must be refused before artifact creation")
+}
+// Rust: tests/prove.rs:651
+#Test("prove_replay_rejects_unsafe_artifact_path_before_reading") {
+    root :: workspace("replay_path")
+    fs.write(root.join("main.jet"), "fn run() {{}}\n").unwrap()
+    out :: Command.new(jet()).current_dir(root).args(["prove", "main.jet", "--replay=../outside.jetproof-replay", "--json"]).output().unwrap()
+    assert_eq(out.status.code(), Val(1))
+    assert(out.stderr.is_empty(), "JSON path refusal leaked stderr: {String.from_utf8_lossy(out.stderr)}")
+    assert(String.from_utf8_lossy(out.stdout).contains("\"code\":\"E3622\""))
+}
+// Rust: tests/prove.rs:674
+#Test("prove_replay_refuses_unrecorded_io_before_opening_an_artifact") {
+    root :: workspace("replay_io")
+    fs.write(root.join("main.jet"), "fn run() {{ print(\"not replayed\") }}\n").unwrap()
+    out :: Command.new(jet()).current_dir(root).args(["prove", "main.jet", "--replay=missing.jetproof-replay", "--json"]).output().unwrap()
+    assert_eq(out.status.code(), Val(1))
+    assert(out.stderr.is_empty(), "JSON authority refusal leaked stderr: {String.from_utf8_lossy(out.stderr)}")
+    assert(String.from_utf8_lossy(out.stdout).contains("\"code\":\"E3623\""))
+}
+// Rust: tests/prove.rs:701
+#Test("prove_replay_refuses_unrecorded_time_sleep_before_opening_an_artifact") {
+    root :: workspace("replay_time_sleep")
+    fs.write(root.join("main.jet"), "use core.time as time\nfn run() {{ time.sleep(1ms) }}\n").unwrap()
+    out :: Command.new(jet()).current_dir(root).args(["prove", "main.jet", "--replay=missing.jetproof-replay", "--json"]).output().unwrap()
+    assert_eq(out.status.code(), Val(1))
+    assert(out.stderr.is_empty(), "JSON authority refusal leaked stderr: {String.from_utf8_lossy(out.stderr)}")
+    assert(String.from_utf8_lossy(out.stdout).contains("\"code\":\"E3623\""))
+}
+// Rust: tests/prove.rs:729
+#Test("prove_rejects_a_symlink_target") {
+    // GATE #4483: Unix-only symlink test, selected target family.
+    if target.selected_family() != "unix" -> return
+    root :: workspace("symlink_target")
+    fs.write(root.join("real.jet"), "fn run() {{}}\n").unwrap()
+    fs.unix.symlink(root.join("real.jet"), root.join("link.jet")).unwrap()
+    out :: Command.new(jet()).current_dir(root).args(["prove", "link.jet"]).output().unwrap()
+    assert_eq(out.status.code(), Val(1))
+    assert(String.from_utf8_lossy(out.stderr).contains("must not be a symlink"))
+}
+// Rust: tests/prove.rs:745
+#Test("prove_uses_structured_test_evidence_and_continues_after_failure") {
+    root :: workspace("test_continuation")
+    fs.write(root.join("a_fail.jet"), "#Test(\"first fails\") {{\n    assert(false, \"intentional\")\n}}\n").unwrap()
+    fs.write(root.join("b_pass.jet"), "#Test(\"later passes\") {{\n    assert(true)\n}}\n").unwrap()
+    out :: Command.new(jet()).current_dir(root).args(["prove", ".", "--json"]).output().unwrap()
+    assert_eq(out.status.code(), Val(1), "{String.from_utf8_lossy(out.stderr)}")
+    report :: String.from_utf8(out.stdout).unwrap()
+    assert(report.contains("\"unit\":{{\"failed\":1,\"passed\":1,\"selected\":2"), report)
+    assert(report.contains("\"schema\":\"jet.report/v1\""), report)
+    assert(report.contains("\"outcome\":\"failed\",\"producer\":\"jet-test\""), report)
+    assert(report.contains("\"outcome\":\"passed\",\"producer\":\"jet-test\""), report)
+    human :: Command.new(jet()).current_dir(root).args(["prove", "."]).output().unwrap()
+    assert_eq(human.status.code(), Val(1), "{String.from_utf8_lossy(human.stderr)}")
+    assert(String.from_utf8_lossy(human.stdout).contains("TESTS    unit: 1 passed, 1 failed, 0 skipped"), "{String.from_utf8_lossy(human.stdout)}")
+    assert(String.from_utf8_lossy(human.stderr).contains("Stop [E3001]"), "{String.from_utf8_lossy(human.stderr)}")
+}
+// Rust: tests/prove.rs:808
+#Test("prove_captures_contract_results_and_runtime_panics_structurally") {
+    root :: workspace("contract_runtime")
+    fs.write(root.join("a_contract_pass.jet"), "#Pre(value > 0, \"positive\") fn checked(value: Int) -[]> Int {{ return value }}\n#Test(\"contract pass\") {{ assert_eq(checked(1), 1) }}\n").unwrap()
+    fs.write(root.join("b_contract_fail.jet"), "#Pre(value > 0, \"positive\") fn checked(value: Int) -[]> Int {{ return value }}\n#Test(\"contract fail\") {{ checked(0) }}\n").unwrap()
+    fs.write(root.join("c_panic.jet"), "#Test(\"runtime panic\") {{ panic(\"structured boom\") }}\n").unwrap()
+    fs.write(root.join("d_later.jet"), "#Test(\"later still runs\") {{ assert(true) }}\n").unwrap()
+    out :: Command.new(jet()).current_dir(root).args(["prove", ".", "--json"]).output().unwrap()
+    assert_eq(out.status.code(), Val(70), "stderr={String.from_utf8_lossy(out.stderr)} stdout={String.from_utf8_lossy(out.stdout)}")
+    assert(out.stderr.is_empty(), "JSON prove parsed/leaked terminal stderr")
+    report :: String.from_utf8(out.stdout).unwrap()
+    assert(report.contains("\"kind\":\"contract\",\"outcome\":\"passed\""), report)
+    assert(report.contains("\"kind\":\"contract\",\"outcome\":\"failed\""), report)
+    assert(report.contains("\"code\":\"E3005\""), report)
+    assert(report.contains("\"code\":\"E3001\""), report)
+    assert(report.contains("structured boom"), report)
+    assert(report.contains("\"kind\":\"unit\",\"outcome\":\"failed\",\"producer\":\"jet-test\""), "panic was not unit evidence: {report}")
+    assert(report.contains("\"unit\":{{\"failed\":1"), "panic was not counted in unit summary: {report}")
+    assert(report.contains("\"path\":\"./d_later.jet\""), "later producer did not continue: {report}")
+}
+// Rust: tests/prove.rs:872
+#Test("prove_reports_real_property_cases_shrinks_and_continues") {
+    root :: workspace("properties")
+    fs.write(root.join("a_pass.jet"), "#Test fn identity(n: Int) {{ assert_eq(n, n) }}\n").unwrap()
+    fs.write(root.join("b_shrink.jet"), "#Test fn always_small(n: Int) {{ assert(n < 50) }}\n").unwrap()
+    fs.write(root.join("c_later.jet"), "#Test(\"later unit\") {{ assert(true) }}\n").unwrap()
+    out :: Command.new(jet()).current_dir(root).args(["prove", ".", "--json"]).output().unwrap()
+    assert_eq(out.status.code(), Val(1), "stderr={String.from_utf8_lossy(out.stderr)} stdout={String.from_utf8_lossy(out.stdout)}")
+    assert(out.stderr.is_empty())
+    report :: String.from_utf8(out.stdout).unwrap()
+    assert(report.contains("\"kind\":\"property\",\"outcome\":\"passed\""), report)
+    assert(report.contains("\"kind\":\"property\",\"outcome\":\"failed\""), report)
+    assert(report.contains("\"generatedCases\":200"), "passing property did not execute 200 cases: {report}")
+    assert(report.contains("\"shrinkTrace\":[{{\"name\":\"minimized_inputs\",\"value\":\"n = 50\"}}]"), report)
+    assert(report.contains("\"path\":\"./c_later.jet\""), "later producer did not continue: {report}")
+}
+// Rust: tests/prove.rs:927
+#Test("prove_reports_real_doctests_and_continues") {
+    root :: workspace("doctests")
+    fs.write(root.join("a_pass.jet"), "/// ```jet\n/// 2 + 2 // => 4\n/// ```\nfn value() -[]> Int {{ return 4 }}\n").unwrap()
+    fs.write(root.join("b_fail.jet"), "/// ```jet\n/// 2 + 2 // => 5\n/// ```\nfn value() -[]> Int {{ return 4 }}\n").unwrap()
+    fs.write(root.join("c_later.jet"), "#Test(\"later unit\") {{ assert(true) }}\n").unwrap()
+    out :: Command.new(jet()).current_dir(root).args(["prove", ".", "--json"]).output().unwrap()
+    assert_eq(out.status.code(), Val(1), "stderr={String.from_utf8_lossy(out.stderr)} stdout={String.from_utf8_lossy(out.stdout)}")
+    assert(out.stderr.is_empty())
+    report :: String.from_utf8(out.stdout).unwrap()
+    assert(report.contains("\"kind\":\"doctest\",\"outcome\":\"passed\""), report)
+    assert(report.contains("\"kind\":\"doctest\",\"outcome\":\"failed\""), report)
+    assert(report.contains("\"doctest\":{{\"failed\":1,\"passed\":1,\"selected\":2"), report)
+    assert(report.contains("\"path\":\"./c_later.jet\""), "later producer did not continue: {report}")
+}
+// Rust: tests/prove.rs:977
+#Test("mandatory_env_init_does_not_pull_optional_core_env_surface") {
+    root :: workspace("env_prelude")
+    fs.write(root.join("plain.jet"), "fn run() {{}}\n").unwrap()
+    out :: Command.new(jet()).current_dir(root).args(["emit", "--rust", "plain.jet"]).output().unwrap()
+    assert_eq(out.status.code(), Val(0), "{String.from_utf8_lossy(out.stderr)}")
+    rust :: String.from_utf8(out.stdout).unwrap()
+    assert(rust.contains("fn jet_std_env_init()"), rust)
+    assert(rust.contains("fn main() {{\n    jet_std_env_init();"), rust)
+    assert(!rust.contains("fn jet_std_env_get("), "optional Core env accessors leaked into plain program")
+}
+// Rust: tests/prove.rs:1004
+#Test("unknown_lens_is_exact_e2941_in_human_and_json_modes") {
+    root :: workspace("bad_lens")
+    fs.write(root.join("plain.jet"), "fn run() {{}}\n").unwrap()
+    human :: Command.new(jet()).current_dir(root).args(["prove", "plain.jet", "--lens", "test"]).output().unwrap()
+    assert_eq(human.status.code(), Val(2))
+    assert(human.stdout.is_empty())
+    assert_eq(String.from_utf8(human.stderr).unwrap(), "Error [E2941]: Unknown proof lens `test`\n Why: `jet prove` accepts all, refinements, effects, taint, contracts, tests, budgets, replay, solver\n Fix: Try `jet prove plain.jet --lens tests`\nMore: jet-lang.dev/e/E2941\n")
+    machine :: Command.new(jet()).current_dir(root).args(["prove", "plain.jet", "--lens=test", "--json"]).output().unwrap()
+    assert_eq(machine.status.code(), Val(2))
+    assert(machine.stderr.is_empty())
+    json :: String.from_utf8(machine.stdout).unwrap()
+    assert(json.contains("\"code\":\"E2941\""), json)
+    assert(!json.contains("\"evidence\""), "malformed CLI emitted a ProofReport: {json}")
+}
+// Rust: tests/prove.rs:1035
+#Test("prove_lens_shows_failed_unselected_evidence") {
+    root :: workspace("lens_projection")
+    fs.write(root.join("main.jet"), "#Test(\"outside\") {{ assert(false, \"lens failure\") }}\n").unwrap()
+    out :: Command.new(jet()).current_dir(root).args(["prove", "main.jet", "--lens", "contracts"]).output().unwrap()
+    assert_eq(out.status.code(), Val(1))
+    stdout :: String.from_utf8(out.stdout).unwrap()
+    assert(stdout.contains("OUTSIDE SELECTED LENSES"), stdout)
+    assert(stdout.contains("unit outside"), stdout)
+}
+// Rust: tests/prove.rs:1054
+#Test("prove_solver_lens_emits_checked_certificate_evidence") {
+    root :: workspace("solver_lens")
+    fs.write(root.join("checked.jet"), "#[Pre(value > 0, \"positive\"), Post(result == value, \"unchanged\")] fn checked(value: Int) -[]> Int {{ return value }}\n").unwrap()
+    out :: Command.new(jet()).current_dir(root).args(["prove", "checked.jet", "--lens", "solver", "--json"]).output().unwrap()
+    assert_eq(out.status.code(), Val(0), "stderr={String.from_utf8_lossy(out.stderr)} stdout={String.from_utf8_lossy(out.stdout)}")
+    report :: String.from_utf8_lossy(out.stdout)
+    assert(report.contains("\"facet\":\"solver\""), report)
+    assert(report.contains("\"status\":\"proved\""), report)
+    assert(report.contains("\"certificateSha256\":"), report)
+    assert(report.contains("\"backend\":\"native-presburger\""), report)
+    assert(report.contains("\"solver\":{{\"disproved\":0,\"proved\":1"), report)
+    repeated :: Command.new(jet()).current_dir(root).args(["prove", "checked.jet", "--lens", "solver", "--json"]).output().unwrap()
+    assert_eq(repeated.status.code(), Val(0))
+    assert_eq(out.stdout, repeated.stdout, "solver certificate output is not deterministic")
+}
+// Rust: tests/prove.rs:1099
+#Test("prove_solver_counterexample_is_checked_producer_evidence") {
+    root :: workspace("solver_counterexample_producer")
+    fs.write(root.join("bad.jet"), "#[Pre(value > 0, \"positive\"), Post(result > value, \"fee grows\")] fn add_fee(value: Int) -[]> Int {{ return value }}\n").unwrap()
+    out :: Command.new(jet()).current_dir(root).args(["prove", "bad.jet", "--lens", "solver", "--json"]).output().unwrap()
+    assert_eq(out.status.code(), Val(1), "{String.from_utf8_lossy(out.stderr)}")
+    report :: String.from_utf8(out.stdout).unwrap()
+    assert(report.contains("\"code\":\"E2950\""), report)
+    assert(report.contains("\"outcome\":\"disproved\""), report)
+    assert(report.contains("\"counterexample\":["), report)
+}
+// Rust: tests/prove.rs:1124
+#Test("prove_capture_sensitive_refuses_without_tty_and_leaves_no_artifact") {
+    root :: workspace("capture_sensitive_non_tty")
+    fs.write(root.join("main.jet"), "use core.time as time\n#Test {{ observed :: time.now() }}\n").unwrap()
+    out :: Command.new(jet()).current_dir(root).args(["prove", "main.jet", "--capture-sensitive=sensitive.jetproof-replay"]).output().unwrap()
+    assert_eq(out.status.code(), Val(1))
+    assert(String.from_utf8_lossy(out.stderr).contains("Error [E3627]"))
+    assert(!root.join("sensitive.jetproof-replay").exists())
+}
+// Rust: tests/prove.rs:1146
+#Test("prove_capture_rejects_multi_member_targets_before_authority_or_artifact") {
+    root :: workspace("replay_cardinality")
+    fs.write(root.join("a.jet"), "fn a() {{}}\n").unwrap()
+    fs.write(root.join("b.jet"), "fn b() {{}}\n").unwrap()
+    out :: Command.new(jet()).current_dir(root).args(["prove", ".", "--capture=multi.jetproof-replay"]).output().unwrap()
+    assert_eq(out.status.code(), Val(1))
+    assert(String.from_utf8_lossy(out.stderr).contains("Error [E3624]"))
+    assert(!root.join("multi.jetproof-replay").exists())
+}
+// Rust: tests/prove.rs:1161
+#Test("prove_sensitive_capture_json_is_a_single_stdout_diagnostic") {
+    root :: workspace("replay_sensitive_json")
+    fs.write(root.join("main.jet"), "fn run() {{}}\n").unwrap()
+    out :: Command.new(jet()).current_dir(root).args(["prove", "main.jet", "--capture-sensitive", "--json"]).output().unwrap()
+    assert_eq(out.status.code(), Val(1))
+    assert(out.stderr.is_empty(), "JSON capture leaked stderr")
+    stdout :: String.from_utf8(out.stdout).unwrap()
+    assert(stdout.contains("\"code\":\"E3627\""), stdout)
+    assert(!root.join(".jetproof-replay").exists())
+}
+// Rust: tests/prove.rs:1177
+#Test("prove_replay_rejects_schema_and_identity_changes_as_typed_failures") {
+    root :: workspace("replay_identity_schema")
+    fs.write(root.join("main.jet"), "fn run() {{}}\n").unwrap()
+    artifact :: "capture.jetproof-replay"
+    captured :: Command.new(jet()).current_dir(root).args(["prove", "main.jet", "--capture={artifact}", "--json"]).output().unwrap()
+    assert_eq(captured.status.code(), Val(0))
+    artifact_path :: root.join(artifact)
+    original :: fs.read(artifact_path).unwrap()
+    incompatible := ~original
+    incompatible[10] = 1
+    fs.write(artifact_path, incompatible).unwrap()
+    schema :: Command.new(jet()).current_dir(root).args(["prove", "main.jet", "--replay", artifact, "--json"]).output().unwrap()
+    assert_eq(schema.status.code(), Val(1))
+    assert(schema.stderr.is_empty())
+    assert(String.from_utf8_lossy(schema.stdout).contains("\"code\":\"E3620\""))
+    fs.write(artifact_path, original).unwrap()
+    fs.write(root.join("main.jet"), "fn run() {{ assert(false) }}\n").unwrap()
+    identity :: Command.new(jet()).current_dir(root).args(["prove", "main.jet", "--replay", artifact, "--json"]).output().unwrap()
+    assert_eq(identity.status.code(), Val(1))
+    assert(identity.stderr.is_empty())
+    assert(String.from_utf8_lossy(identity.stdout).contains("\"code\":\"E3621\""))
+}
+// Rust: tests/prove.rs:1220
+#Test("prove_presentation_lenses_keep_the_complete_json_report_unchanged") {
+    root :: workspace("lens_report_identity")
+    fs.write(root.join("main.jet"), "fn run() {{}}\n").unwrap()
+    full :: Command.new(jet()).current_dir(root).args(["prove", "main.jet", "--json"]).output().unwrap()
+    contracts :: Command.new(jet()).current_dir(root).args(["prove", "main.jet", "--lens", "contracts", "--json"]).output().unwrap()
+    assert_eq(full.status.code(), Val(0))
+    assert_eq(contracts.status.code(), Val(0))
+    assert_eq(full.stdout, contracts.stdout)
+}
+// Rust: tests/prove.rs:1239
+#Test("prove_solver_lens_reports_a_verified_counterexample") {
+    root :: workspace("solver_counterexample")
+    fs.write(root.join("bad.jet"), "#Post(result > value, \"grows\") fn unchanged(value: Int) -[]> Int {{ return value }}\n").unwrap()
+    out :: Command.new(jet()).current_dir(root).args(["prove", "bad.jet", "--lens", "solver", "--json"]).output().unwrap()
+    assert_eq(out.status.code(), Val(1), "{String.from_utf8_lossy(out.stderr)}")
+    report :: String.from_utf8(out.stdout).unwrap()
+    assert(report.contains("\"code\":\"E2950\""), report)
+    assert(report.contains("\"status\":\"disproved\""), report)
+}

@@ -1,0 +1,81 @@
+use Jetpack.Store.*
+use Jetpack.Store.Transaction.*
+use Jetpack.Envelope.host_platform
+use std.[env, fs, process]
+use std.sync.atomic.Ordering
+// GATE #4494: native filesystem, process identity and transaction atomic sequence.
+
+// Rust: crates/jetpack/src/Store/TransactionTests.rs:8
+struct RootGuard { roots: Roots }
+// Rust: crates/jetpack/src/Store/TransactionTests.rs:13
+impl RootGuard {
+    fn new(tag: String) -> RootGuard {
+        path :: env.temp_dir().join("jet-admission-{tag}-{process.id()}-{TRANSACTION_SEQUENCE.fetch_add(1, Ordering.Relaxed)}")
+        fs.create_dir_all(path) ?? panic("create transaction root")
+        RootGuard{roots: Roots{root: ^path, dev_mode: true}}
+    }
+}
+// Rust: crates/jetpack/src/Store/TransactionTests.rs:30
+impl RootGuard.Close {
+    fn close(^self) -> {
+        _ :: make_tree_writable_for_removal(self.roots.root)
+        _ :: fs.remove_dir_all(self.roots.root)
+    }
+}
+// Rust: crates/jetpack/src/Store/TransactionTests.rs:36
+fn identity() -> CacheIdentity {
+    CacheIdentity{source_fingerprint: "transaction-source", recipe_fingerprint: "transaction-recipe",
+        policy_fingerprint: "transaction-policy", platform: host_platform()}
+}
+// Rust: crates/jetpack/src/Store/TransactionTests.rs:45
+fn request(roots: Roots, name: String) -> IngestRequest {
+    source :: roots.root.join("source-{name}")
+    fs.create_dir_all(source) ?? panic("create source")
+    fs.write(source.join("payload"), name.bytes()) ?? panic("write source")
+    IngestRequest{name: name, version: "1", reference: "path:{name}", cache_identity: identity(),
+        references: [], outputs: ["out": ^source], signature: "", provenance: "admission-transaction-test",
+        platform_artifact_kind: ""}
+}
+// Rust: crates/jetpack/src/Store/TransactionTests.rs:62
+fn assert_no_committed_package(roots: Roots) -> {
+    assert((list_checked(roots) ?? panic("list")).is_empty())
+    assert((closure_graph(roots) ?? panic("graph")).records.is_empty())
+    assert_eq((fs.read_dir(roots.hangar_dir().join(OBJECTS_DIR)) ?? panic("objects")).count(), 0)
+}
+// Rust: crates/jetpack/src/Store/TransactionTests.rs:74
+#Test("admission_failure_after_object_publication_recovers_without_live_orphans") {
+    guard :: RootGuard.new("object")
+    req :: request(guard.roots, "object")
+    result :: with_admission_failure(AdmissionFailurePoint.AfterObjectPublication, || -> ingest_tree(guard.roots, req))
+    assert(result.is_err())
+    recover_hangar(guard.roots) ?? panic("recover")
+    recover_hangar(guard.roots) ?? panic("recover twice")
+    assert_no_committed_package(guard.roots)
+}
+// Rust: crates/jetpack/src/Store/TransactionTests.rs:88
+#Test("admission_failure_after_receipt_publication_recovers_without_half_registration") {
+    guard :: RootGuard.new("receipt")
+    req :: request(guard.roots, "receipt")
+    result :: with_admission_failure(AdmissionFailurePoint.AfterReceiptPublication, || -> ingest_tree(guard.roots, req))
+    assert(result.is_err())
+    recover_hangar(guard.roots) ?? panic("recover")
+    recover_hangar(guard.roots) ?? panic("recover twice")
+    assert_no_committed_package(guard.roots)
+}
+// Rust: crates/jetpack/src/Store/TransactionTests.rs:102
+#Test("admission_failure_after_closure_registration_recovers_projection_idempotently") {
+    guard :: RootGuard.new("closure")
+    req :: request(guard.roots, "closure")
+    result :: with_admission_failure(AdmissionFailurePoint.AfterClosureRegistration, || -> ingest_tree(guard.roots, req))
+    assert(result.is_err())
+    committed :: list_checked(guard.roots) ?? panic("list")
+    assert_eq(committed.len(), 1)
+    meta :: guard.roots.hangar_dir().join(committed[0].id).join("meta.json")
+    fs.remove_file(meta) ?? panic("remove metadata")
+    recover_hangar(guard.roots) ?? panic("recover")
+    recovered :: list_checked(guard.roots) ?? panic("list recovered")
+    assert_eq(recovered, committed)
+    recover_hangar(guard.roots) ?? panic("recover twice")
+    assert_eq(list_checked(guard.roots) ?? panic("list twice"), recovered)
+    assert_eq((closure_graph(guard.roots) ?? panic("graph")).records.len(), 1)
+}

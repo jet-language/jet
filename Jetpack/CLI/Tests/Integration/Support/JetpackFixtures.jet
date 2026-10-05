@@ -1,830 +1,536 @@
-// PORT-PENDING 1162 tests-support-jetpack-fixtures: tests/support/jetpack_fixtures.rs:1-826
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! Shared fixture helpers for the split `tests/jetpack_*.rs` suites
-//RS //! (Tower card #367 slice 6). Each package-manager test binary includes this file
-//RS //! via `#[path = "support/jetpack_fixtures.rs"] mod jetpack_fixtures;` and
-//RS //! compiles its own copy, mirroring `tests/common/mod.rs` — hence the
-//RS //! file-level `allow(dead_code)` (not every suite uses every helper).
-//RS //!
-//RS //! Extracted byte-identical from the original `tests/jetpack.rs` (module
-//RS //! item bodies unchanged; only added `pub` for cross-module visibility).
-//RS 
-//RS #![allow(dead_code)]
-//RS 
-//RS use std::fs;
-//RS use std::path::{Path, PathBuf};
-//RS use std::process::Command;
-//RS use jet_foundation::DataTree::DataTree;
-//RS use jet_foundation::JSON::parse;
-//RS 
-//RS use crate::common::{jetos_bin, jetpack_bin};
-//RS #[allow(unused_imports)]
-//RS pub use crate::common::{make_tree_writable, Scratch};
-//RS 
-//RS pub fn jetpack() -> Command {
-//RS     neutral_command(jetpack_bin())
-//RS }
-//RS 
-//RS pub fn jet() -> Command {
-//RS     neutral_command(Path::new(env!("CARGO_BIN_EXE_jet")))
-//RS }
-//RS 
-//RS pub fn jetos() -> Command {
-//RS     neutral_command(jetos_bin())
-//RS }
-//RS 
-//RS /// Keep no-project commands outside the repository without creating a cwd
-//RS /// whose deletion could strand a surviving child or descendant. Redirect all
-//RS /// process temporary files to the shared disk-backed test scratch root.
-//RS pub fn neutral_command(binary: &Path) -> Command {
-//RS     let mut command = Command::new(binary);
-//RS     let temp = crate::common::test_scratch_root("jetpack-command-tmp");
-//RS     let root = temp.ancestors().last().expect("temp path has no root");
-//RS     command
-//RS         .current_dir(root)
-//RS         .env("TMPDIR", &temp)
-//RS         .env("TMP", &temp)
-//RS         .env("TEMP", &temp);
-//RS     command
-//RS }
-//RS 
-//RS pub fn copy_dir_recursive(src: &Path, dst: &Path) {
-//RS     fs::create_dir_all(dst).unwrap();
-//RS     let mut entries = fs::read_dir(src)
-//RS         .unwrap()
-//RS         .filter_map(Result::ok)
-//RS         .collect::<Vec<_>>();
-//RS     entries.sort_by_key(|entry| entry.file_name());
-//RS     for entry in entries {
-//RS         let path = entry.path();
-//RS         let target = dst.join(entry.file_name());
-//RS         if entry.file_type().unwrap().is_dir() {
-//RS             copy_dir_recursive(&path, &target);
-//RS         } else {
-//RS             fs::copy(&path, &target).unwrap();
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS pub fn studio_addr(line: &str) -> String {
-//RS     let printed = line
-//RS         .trim()
-//RS         .strip_prefix("http://")
-//RS         .expect("Studio service URL must use http");
-//RS     let (host, suffix) = printed
-//RS         .split_once("/studio/")
-//RS         .expect("Studio service URL must point at /studio/");
-//RS     format!("{host}{suffix}")
-//RS }
-//RS 
-//RS pub fn studio_raw(addr: &str, request: &str) -> String {
-//RS     let connect_addr = addr.split_once('?').map(|(host, _)| host).unwrap_or(addr);
-//RS     let mut stream = std::net::TcpStream::connect(connect_addr).unwrap();
-//RS     {
-//RS         use std::io::Write;
-//RS         stream.write_all(request.as_bytes()).unwrap();
-//RS     }
-//RS     let _ = stream.shutdown(std::net::Shutdown::Write);
-//RS     let mut response = String::new();
-//RS     {
-//RS         use std::io::Read;
-//RS         if let Err(e) = stream.read_to_string(&mut response) {
-//RS             assert_eq!(
-//RS                 e.kind(),
-//RS                 std::io::ErrorKind::ConnectionReset,
-//RS                 "studio HTTP read failed: {e}"
-//RS             );
-//RS         }
-//RS     }
-//RS     response
-//RS }
-//RS 
-//RS pub fn studio_http(addr: &str, method: &str, path: &str, body: &str) -> String {
-//RS     let (connect_addr, session) = addr.split_once('?').unwrap_or((addr, ""));
-//RS     let target = if session.is_empty() {
-//RS         path.to_string()
-//RS     } else {
-//RS         let separator = if path.contains('?') { '&' } else { '?' };
-//RS         format!("{path}{separator}{session}")
-//RS     };
-//RS     let origin = format!("http://{connect_addr}");
-//RS     let content_type = if method == "POST" {
-//RS         "Content-Type: application/json\r\n"
-//RS     } else {
-//RS         ""
-//RS     };
-//RS     let origin_header = if method == "POST" {
-//RS         format!("Origin: {origin}\r\n")
-//RS     } else {
-//RS         String::new()
-//RS     };
-//RS     let mut stream = std::net::TcpStream::connect(connect_addr).unwrap();
-//RS     {
-//RS         use std::io::Write;
-//RS         write!(
-//RS             stream,
-//RS             "{method} {target} HTTP/1.1\r\nHost: {connect_addr}\r\n{origin_header}{content_type}Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
-//RS             body.len(),
-//RS         )
-//RS         .unwrap();
-//RS     }
-//RS     let _ = stream.shutdown(std::net::Shutdown::Write);
-//RS     let mut response = String::new();
-//RS     {
-//RS         use std::io::Read;
-//RS         if let Err(e) = stream.read_to_string(&mut response) {
-//RS             assert_eq!(
-//RS                 e.kind(),
-//RS                 std::io::ErrorKind::ConnectionReset,
-//RS                 "studio HTTP read failed: {e}"
-//RS             );
-//RS         }
-//RS     }
-//RS     response
-//RS }
-//RS 
-//RS pub fn studio_json_string(response: &str, key: &str) -> String {
-//RS     let needle = format!("\"{key}\":\"");
-//RS     response
-//RS         .split_once(&needle)
-//RS         .and_then(|(_, rest)| rest.split_once('\"').map(|(value, _)| value.to_string()))
-//RS         .unwrap_or_else(|| panic!("missing Studio JSON string `{key}`: {response}"))
-//RS }
-//RS 
-//RS pub fn studio_json(response: &str) -> DataTree {
-//RS     let body = response
-//RS         .split_once("\r\n\r\n")
-//RS         .map(|(_, body)| body)
-//RS         .unwrap_or(response);
-//RS     parse(body.trim())
-//RS         .unwrap_or_else(|error| panic!("invalid Studio JSON response: {error}: {response}"))
-//RS }
-//RS 
-//RS pub fn json_string(json: &DataTree, key: &str) -> String {
-//RS     json.get(key)
-//RS         .and_then(DataTree::as_str)
-//RS         .unwrap_or_else(|error| panic!("invalid JSON string `{key}`: {error}: {json:?}"))
-//RS         .to_string()
-//RS }
-//RS 
-//RS #[derive(Clone)]
-//RS pub struct StudioTestOwner {
-//RS     pub session_id: String,
-//RS     pub token: String,
-//RS     pub base_revision: String,
-//RS }
-//RS 
-//RS pub fn studio_session(addr: &str) -> String {
-//RS     let response = studio_http(addr, "POST", "/studio/transaction", "{\"op\":\"session\"}");
-//RS     studio_json_string(&response, "session_id")
-//RS }
-//RS 
-//RS pub fn studio_changeset_owner(response: &str, session_id: &str) -> StudioTestOwner {
-//RS     StudioTestOwner {
-//RS         session_id: session_id.to_string(),
-//RS         token: studio_json_string(response, "token"),
-//RS         base_revision: studio_json_string(response, "base_revision"),
-//RS     }
-//RS }
-//RS 
-//RS pub fn studio_owned_transaction(addr: &str, op: &str, owner: &StudioTestOwner) -> String {
-//RS     studio_http(
-//RS         addr,
-//RS         "POST",
-//RS         "/studio/transaction",
-//RS         &format!(
-//RS             "{{\"op\":\"{op}\",\"session_id\":\"{}\",\"token\":\"{}\",\"base_revision\":\"{}\"}}",
-//RS             owner.session_id, owner.token, owner.base_revision
-//RS         ),
-//RS     )
-//RS }
-//RS 
-//RS pub fn studio_session_transaction(addr: &str, op: &str, session_id: &str) -> String {
-//RS     studio_http(
-//RS         addr,
-//RS         "POST",
-//RS         "/studio/transaction",
-//RS         &format!("{{\"op\":\"{op}\",\"session_id\":\"{session_id}\"}}"),
-//RS     )
-//RS }
-//RS 
-//RS pub fn studio_stage_option(
-//RS     addr: &str,
-//RS     session_id: &str,
-//RS     key: &str,
-//RS     value: &str,
-//RS     write: bool,
-//RS ) -> String {
-//RS     studio_http(
-//RS         addr,
-//RS         "POST",
-//RS         "/studio/transaction",
-//RS         &format!(
-//RS             "{{\"op\":\"set-option\",\"session_id\":\"{session_id}\",\"key\":\"{}\",\"value\":\"{}\",\"write\":{write}}}",
-//RS             test_json_escape(key),
-//RS             test_json_escape(value),
-//RS         ),
-//RS     )
-//RS }
-//RS 
-//RS pub fn studio_attack_snapshot(server_pid: u32, truncate: bool) -> std::thread::JoinHandle<()> {
-//RS     std::thread::spawn(move || {
-//RS         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-//RS         loop {
-//RS             let snapshot = fs::read_dir(format!("/proc/{server_pid}/fd"))
-//RS                 .into_iter()
-//RS                 .flatten()
-//RS                 .filter_map(Result::ok)
-//RS                 .find(|entry| {
-//RS                     fs::read_link(entry.path())
-//RS                         .map(|target| {
-//RS                             target
-//RS                                 .to_string_lossy()
-//RS                                 .contains("memfd:jetos-studio-source-")
-//RS                         })
-//RS                         .unwrap_or(false)
-//RS                 })
-//RS                 .map(|entry| entry.path());
-//RS             if let Some(path) = snapshot {
-//RS                 let attempt = std::fs::OpenOptions::new()
-//RS                     .write(true)
-//RS                     .truncate(truncate)
-//RS                     .open(path);
-//RS                 assert!(
-//RS                     attempt.is_err(),
-//RS                     "sealed Studio source accepted hostile write access"
-//RS                 );
-//RS                 return;
-//RS             }
-//RS             assert!(
-//RS                 std::time::Instant::now() < deadline,
-//RS                 "Studio snapshot never appeared"
-//RS             );
-//RS             std::thread::sleep(std::time::Duration::from_millis(1));
-//RS         }
-//RS     })
-//RS }
-//RS 
-//RS pub fn assert_no_ephemeral_links(path: &Path) {
-//RS     let Ok(meta) = fs::symlink_metadata(path) else {
-//RS         return;
-//RS     };
-//RS     if meta.file_type().is_symlink() {
-//RS         let target = fs::read_link(path).unwrap();
-//RS         let text = target.to_string_lossy();
-//RS         assert!(
-//RS             !text.contains("/proc/self/fd/"),
-//RS             "ephemeral FD link: {} -> {text}",
-//RS             path.display()
-//RS         );
-//RS         assert!(
-//RS             !text.contains("/leases/"),
-//RS             "ephemeral lease link: {} -> {text}",
-//RS             path.display()
-//RS         );
-//RS         return;
-//RS     }
-//RS     if meta.is_dir() {
-//RS         for entry in fs::read_dir(path).unwrap().flatten() {
-//RS             assert_no_ephemeral_links(&entry.path());
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS pub fn example_fixtures(root: &Path) -> PathBuf {
-//RS     realized_fixtures(
-//RS         &Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/jetpack-project/fixtures"),
-//RS         root,
-//RS     )
-//RS }
-//RS 
-//RS pub fn realized_fixtures(committed: &Path, root: &Path) -> PathBuf {
-//RS     let fixtures = root.join("realized-fixtures");
-//RS     if fixtures.is_dir() {
-//RS         return fixtures;
-//RS     }
-//RS     fs::create_dir_all(&fixtures).unwrap();
-//RS     for entry in fs::read_dir(committed).unwrap() {
-//RS         let entry = entry.unwrap();
-//RS         let name = entry.file_name();
-//RS         let source = entry.path();
-//RS         let destination = fixtures.join(&name);
-//RS         if source.extension().and_then(|ext| ext.to_str()) != Some("json") {
-//RS             fs::copy(source, destination).unwrap();
-//RS             continue;
-//RS         }
-//RS         let stem = source.file_stem().unwrap().to_string_lossy();
-//RS         let staging = root.join("example-fixture-outputs").join(stem.as_ref());
-//RS         fs::create_dir_all(&staging).unwrap();
-//RS         fs::write(staging.join("payload"), stem.as_bytes()).unwrap();
-//RS         let output = seed_hangar_object(root, &staging);
-//RS         let mut json = fs::read_to_string(source).unwrap();
-//RS         let key = json.find("\"out\"").unwrap();
-//RS         let colon = key + json[key..].find(':').unwrap() + 1;
-//RS         let value_start = colon + json[colon..].find('"').unwrap();
-//RS         let value_end = value_start + 1 + json[value_start + 1..].find('"').unwrap() + 1;
-//RS         json.replace_range(
-//RS             value_start..value_end,
-//RS             &format!("{:?}", output.to_string_lossy()),
-//RS         );
-//RS         fs::write(destination, json).unwrap();
-//RS     }
-//RS     fixtures
-//RS }
-//RS 
-//RS /// The committed jetpack project fixture (`env.jet` + `jet-pkgs/`).
-//RS pub fn example_dir() -> PathBuf {
-//RS     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/jetpack-project")
-//RS }
-//RS 
-//RS fn seed_hangar_object(root: &Path, staging_dir: &Path) -> PathBuf {
-//RS     jetpack::Store::seal_local_output(staging_dir).unwrap();
-//RS     let digest = jetpack::Envelope::try_output_hash_of(&staging_dir.to_string_lossy()).unwrap();
-//RS     let out_dir = root.join("hangar").join("objects").join(&digest);
-//RS     fs::create_dir_all(out_dir.parent().unwrap()).unwrap();
-//RS     let mut staging_permissions = fs::metadata(staging_dir).unwrap().permissions();
-//RS     #[cfg(unix)]
-//RS     {
-//RS         use std::os::unix::fs::PermissionsExt;
-//RS         staging_permissions.set_mode(staging_permissions.mode() | 0o200);
-//RS     }
-//RS     #[cfg(not(unix))]
-//RS     staging_permissions.set_readonly(false);
-//RS     fs::set_permissions(staging_dir, staging_permissions).unwrap();
-//RS     fs::rename(staging_dir, &out_dir).unwrap();
-//RS     jetpack::Store::seal_local_output(&out_dir).unwrap();
-//RS     assert_eq!(
-//RS         jetpack::Envelope::try_output_hash_of(&out_dir.to_string_lossy()).unwrap(),
-//RS         digest,
-//RS         "published fixture must retain its content-addressed identity"
-//RS     );
-//RS     out_dir
-//RS }
-//RS 
-//RS /// Write a provider fixture whose `out` is a real content-addressed Hangar
-//RS /// object, so closure validation can prove it before executing its binary.
-//RS pub fn write_runnable_fixture(fixtures: &Path, root: &Path, staging_dir: &Path) -> PathBuf {
-//RS     fs::create_dir_all(fixtures).unwrap();
-//RS     let bin = staging_dir.join("bin");
-//RS     fs::create_dir_all(&bin).unwrap();
-//RS     let greet = bin.join("greet");
-//RS     fs::write(&greet, "#!/bin/sh\necho hello from jetpack\n").unwrap();
-//RS     #[cfg(unix)]
-//RS     {
-//RS         use std::os::unix::fs::PermissionsExt;
-//RS         fs::set_permissions(&greet, fs::Permissions::from_mode(0o755)).unwrap();
-//RS     }
-//RS     let out_dir = seed_hangar_object(root, staging_dir);
-//RS     let json = format!(
-//RS         "[{{\"drvPath\":\"/nix/store/0fixture00000000000000000000-greet.drv\",\"outputs\":{{\"out\":{:?}}}}}]",
-//RS         out_dir.to_string_lossy()
-//RS     );
-//RS     fs::write(fixtures.join("nixpkgs-greet.json"), &json).unwrap();
-//RS     fs::write(fixtures.join("jetpack-greet.json"), &json).unwrap();
-//RS     out_dir
-//RS }
-//RS 
-//RS /// Write a small native executable fixture. This exercises executable lease
-//RS /// handoff on every tier-1 host without hashing the multi-hundred-megabyte
-//RS /// debug `jetpack` binary on every store verification.
-//RS pub fn write_native_jetpack_fixture(fixtures: &Path, root: &Path, staging_dir: &Path) -> PathBuf {
-//RS     fs::create_dir_all(fixtures).unwrap();
-//RS     let bin = staging_dir.join("bin");
-//RS     fs::create_dir_all(&bin).unwrap();
-//RS     let name = format!("jetpack{}", std::env::consts::EXE_SUFFIX);
-//RS     let executable = bin.join(&name);
-//RS     let source = staging_dir
-//RS         .parent()
-//RS         .unwrap_or(staging_dir)
-//RS         .join("native-jetpack-fixture.rs");
-//RS     fs::write(
-//RS         &source,
-//RS         r#"fn main() {
-//RS     if std::env::args().nth(1).as_deref() == Some("--hold") {
-//RS         std::thread::sleep(std::time::Duration::from_secs(5));
-//RS     }
-//RS     if std::env::args().nth(1).as_deref() == Some("--help") {
-//RS         println!("jetpack platform fixture");
-//RS     }
-//RS }
-//RS "#,
-//RS     )
-//RS     .unwrap();
-//RS     let rustc = std::env::var_os("RUSTC").unwrap_or_else(|| "rustc".into());
-//RS     let output = Command::new(rustc)
-//RS         .args(["--edition=2021", "-C", "debuginfo=0", "-C", "opt-level=0"])
-//RS         .arg(&source)
-//RS         .arg("-o")
-//RS         .arg(&executable)
-//RS         .output()
-//RS         .unwrap_or_else(|error| panic!("could not compile native platform fixture: {error}"));
-//RS     assert!(
-//RS         output.status.success(),
-//RS         "native platform fixture compilation failed: {}",
-//RS         String::from_utf8_lossy(&output.stderr)
-//RS     );
-//RS     let artifact_name = format!("omp-native-jetpack-fixture{}", std::env::consts::EXE_SUFFIX);
-//RS     let artifact = fixtures.join(&artifact_name);
-//RS     fs::copy(&executable, &artifact).unwrap();
-//RS     let artifact_digest = jetpack::SHA256::sha256_file_hex(&artifact).unwrap();
-//RS     let out_dir = seed_hangar_object(root, staging_dir);
-//RS     let json = format!(
-//RS         "[{{\"drvPath\":\"/nix/store/0fixture00000000000000000000-native-jetpack.drv\",\"outputs\":{{\"out\":{:?}}}}}]",
-//RS         out_dir.to_string_lossy()
-//RS     );
-//RS     fs::write(fixtures.join("nixpkgs-native-jetpack.json"), &json).unwrap();
-//RS     fs::write(
-//RS         fixtures.join("jetpackage-omp.json"),
-//RS         format!(
-//RS             "{{\"tag\":\"v1.0.0\",\"version\":\"1.0.0\",\"sha256\":\"{artifact_digest}\",\"artifact\":{artifact_name:?}}}"
-//RS         ),
-//RS     )
-//RS     .unwrap();
-//RS     out_dir
-//RS }
-//RS 
-//RS pub fn assert_no_hangar_entry(root: &Path, name: &str) {
-//RS     let hangar = root.join("hangar");
-//RS     if let Ok(entries) = fs::read_dir(&hangar) {
-//RS         assert!(entries
-//RS             .flatten()
-//RS             .all(|entry| { !entry.file_name().to_string_lossy().starts_with(name) }));
-//RS     }
-//RS     let journal = hangar.join("closure-db/journal");
-//RS     if let Ok(entries) = fs::read_dir(journal) {
-//RS         assert_eq!(
-//RS             entries
-//RS                 .flatten()
-//RS                 .filter(
-//RS                     |entry| entry.path().extension().and_then(|ext| ext.to_str()) == Some("txn")
-//RS                 )
-//RS                 .count(),
-//RS             0,
-//RS             "failed registration left a closure journal transaction"
-//RS         );
-//RS     }
-//RS     for empty in [hangar.join("objects"), root.join("leases")] {
-//RS         if let Ok(mut entries) = fs::read_dir(&empty) {
-//RS             assert!(
-//RS                 entries.next().is_none(),
-//RS                 "failed registration left state in {}",
-//RS                 empty.display()
-//RS             );
-//RS         }
-//RS     }
-//RS     fn assert_no_root(path: &Path) {
-//RS         let Ok(entries) = fs::read_dir(path) else {
-//RS             return;
-//RS         };
-//RS         for entry in entries.flatten() {
-//RS             assert_ne!(
-//RS                 entry.file_name(),
-//RS                 "nix-gc-root",
-//RS                 "failed registration left a Nix GC root"
-//RS             );
-//RS             if entry.file_type().is_ok_and(|kind| kind.is_dir()) {
-//RS                 assert_no_root(&entry.path());
-//RS             }
-//RS         }
-//RS     }
-//RS     assert_no_root(&hangar);
-//RS }
-//RS 
-//RS /// Write a `fastfetch@nixpkgs` fixture whose `out` points at a real directory
-//RS /// we control (see `write_runnable_fixture`).
-//RS pub fn write_fastfetch_fixture(fixtures: &Path, root: &Path, staging_dir: &Path) -> PathBuf {
-//RS     fs::create_dir_all(fixtures).unwrap();
-//RS     let bin = staging_dir.join("bin");
-//RS     fs::create_dir_all(&bin).unwrap();
-//RS     let fastfetch = bin.join("fastfetch");
-//RS     fs::write(&fastfetch, "#!/bin/sh\necho fastfetch stub\n").unwrap();
-//RS     #[cfg(unix)]
-//RS     {
-//RS         use std::os::unix::fs::PermissionsExt;
-//RS         fs::set_permissions(&fastfetch, fs::Permissions::from_mode(0o755)).unwrap();
-//RS     }
-//RS     let out_dir = seed_hangar_object(root, staging_dir);
-//RS     let json = format!(
-//RS         "[{{\"drvPath\":\"/nix/store/0fixture00000000000000000000-fastfetch.drv\",\"outputs\":{{\"out\":{:?}}}}}]",
-//RS         out_dir.to_string_lossy()
-//RS     );
-//RS     fs::write(fixtures.join("nixpkgs-fastfetch.json"), json).unwrap();
-//RS     out_dir
-//RS }
-//RS 
-//RS pub fn write_channel_fixture(fixtures: &Path, base: &str, channel: &str, exact: &str) {
-//RS     fs::create_dir_all(fixtures).unwrap();
-//RS     fs::write(
-//RS         fixtures.join("channels.txt"),
-//RS         format!("{base} {channel} {exact} 240000000\n"),
-//RS     )
-//RS     .unwrap();
-//RS }
-//RS 
-//RS pub fn now_secs() -> u64 {
-//RS     std::time::SystemTime::now()
-//RS         .duration_since(std::time::UNIX_EPOCH)
-//RS         .unwrap()
-//RS         .as_secs()
-//RS }
-//RS 
-//RS pub fn test_json_escape(value: &str) -> String {
-//RS     value
-//RS         .replace('\\', "\\\\")
-//RS         .replace('"', "\\\"")
-//RS         .replace('\n', "\\n")
-//RS }
-//RS 
-//RS pub fn test_shell_quote(value: &Path) -> String {
-//RS     format!("'{}'", value.display().to_string().replace('\'', "'\\''"))
-//RS }
-//RS 
-//RS pub fn write_executable(path: &Path, text: &str) {
-//RS     fs::write(path, text).unwrap();
-//RS     #[cfg(unix)]
-//RS     {
-//RS         use std::os::unix::fs::PermissionsExt;
-//RS         fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
-//RS     }
-//RS }
-//RS 
-//RS pub fn write_fake_vm_tools(bin: &Path, guest_passes: bool) {
-//RS     fs::create_dir_all(bin).unwrap();
-//RS     let limine_data = bin.join("limine-data");
-//RS     fs::create_dir_all(&limine_data).unwrap();
-//RS     fs::write(limine_data.join("limine-bios.sys"), "fake limine bios\n").unwrap();
-//RS     fs::write(limine_data.join("BOOTX64.EFI"), "fake limine efi\n").unwrap();
-//RS     write_executable(
-//RS         &bin.join("limine"),
-//RS         &format!(
-//RS             "#!/bin/sh\nif [ \"$1\" = \"--print-datadir\" ]; then printf '%s\\n' '{}'; exit 0; fi\nexit 0\n",
-//RS             limine_data.display()
-//RS         ),
-//RS     );
-//RS     write_executable(
-//RS         &bin.join("xorriso"),
-//RS         "#!/bin/sh\nout=''\nprev=''\nfor arg in \"$@\"; do\n  if [ \"$prev\" = '-o' ]; then out=\"$arg\"; fi\n  prev=\"$arg\"\ndone\nif [ -n \"$out\" ]; then printf 'fake iso\\n' > \"$out\"; fi\nexit 0\n",
-//RS     );
-//RS     write_executable(
-//RS         &bin.join("qemu-img"),
-//RS         "#!/bin/sh\nif [ \"$1\" = 'create' ]; then printf 'fake qcow2\\n' > \"$4\"; fi\nexit 0\n",
-//RS     );
-//RS     let guest_line = if guest_passes {
-//RS         "host=unknown\ngeneration=unknown\nfor arg in \"$@\"; do\n  case \"$arg\" in\n    *jetos.host=*) host=\"${arg#*jetos.host=}\"; host=\"${host%% *}\" ;;\n  esac\n  case \"$arg\" in\n    *jetos.generation=*) generation=\"${arg#*jetos.generation=}\"; generation=\"${generation%% *}\" ;;\n  esac\ndone\ncase \" $* \" in\n  *'jetos.mode=desktop-verify'*) echo \"jetos proof: display manager command gdm\"; echo \"jetos proof: desktop session command gnome-session\"; echo \"jetos proof: terminal fallback ready\"; echo \"JETOS_GUEST_PROOF: {\\\"state\\\":\\\"guest-passed\\\",\\\"host\\\":\\\"$host\\\",\\\"generation\\\":\\\"$generation\\\",\\\"assertions\\\":[\\\"current-generation-matches\\\",\\\"packages-present\\\",\\\"services-active\\\",\\\"network-up\\\",\\\"rollback-generation-bootable\\\",\\\"terminal-login-ready\\\",\\\"desktop-session-ready\\\",\\\"graphical-console-ready\\\",\\\"desktop-launchers-run\\\"]}\" ;;\n  *' -boot c '*) echo \"JETOS_GUEST_PROOF: {\\\"state\\\":\\\"guest-passed\\\",\\\"host\\\":\\\"$host\\\",\\\"generation\\\":\\\"$generation\\\",\\\"assertions\\\":[\\\"current-generation-matches\\\",\\\"packages-present\\\",\\\"services-active\\\",\\\"network-up\\\",\\\"rollback-generation-bootable\\\",\\\"terminal-login-ready\\\",\\\"desktop-session-ready\\\"]}\" ;;\nesac\n"
-//RS     } else {
-//RS         "echo 'qemu booted without guest proof'\n"
-//RS     };
-//RS     write_executable(
-//RS         &bin.join("qemu-system-x86_64"),
-//RS         &format!("#!/bin/sh\n{guest_line}exit 0\n"),
-//RS     );
-//RS     write_executable(&bin.join("mkfs.ext4"), "#!/bin/sh\nexit 0\n");
-//RS     write_executable(&bin.join("mkfs.vfat"), "#!/bin/sh\nexit 0\n");
-//RS     write_executable(&bin.join("sfdisk"), "#!/bin/sh\nexit 0\n");
-//RS     write_executable(&bin.join("blockdev"), "#!/bin/sh\nexit 0\n");
-//RS     for tool in [
-//RS         "cat", "cp", "ln", "mkdir", "mount", "rm", "setsid", "sleep", "sync", "poweroff", "halt",
-//RS     ] {
-//RS         write_executable(&bin.join(tool), "#!/bin/sh\nexit 0\n");
-//RS     }
-//RS     write_executable(&bin.join("mmd"), "#!/bin/sh\nexit 0\n");
-//RS     write_executable(&bin.join("mcopy"), "#!/bin/sh\nexit 0\n");
-//RS     write_executable(
-//RS         &bin.join("zstd"),
-//RS         "#!/bin/sh\nlast=''\nfor arg in \"$@\"; do last=\"$arg\"; done\nwhile IFS= read -r line; do printf '%s\\n' \"$line\"; done < \"$last\"\n",
-//RS     );
-//RS }
-//RS 
-//RS /// Register a real, contract-valid hangar object via the production
-//RS /// `ingest_tree` API.
-//RS ///
-//RS /// Card #420's producer-record refactor made `jetpack hangar clean`/`closure_graph`
-//RS /// fail-closed: every hangar entry it walks must decode a valid
-//RS /// `ProducerRecord` and pass `store_validates_complete_closure` (real content
-//RS /// re-hashed against the recorded digest — see
-//RS /// `crates/jetpack/src/Store/Closure.rs::{normalize_legacy_entry,
-//RS /// store_validates_complete_closure}`). A hand-written `meta.json` with a
-//RS /// fictitious `/nix/store/...` `out` and blank `CacheIdentity` can no longer
-//RS /// satisfy that — it always fails with "legacy package lacks immutable
-//RS /// producer facts" or "has no dependency references or store-validated
-//RS /// closure proof". `ingest_tree` (provider `hangar-ingest`) is the only
-//RS /// producer-record-issuing constructor reachable from outside the `jetpack`
-//RS /// crate (the `store-record`/`core` provider path is `#[cfg(test)]`-gated
-//RS /// inside `jetpack` itself), so fixtures now go through it to get a real
-//RS /// digest over real bytes.
-//RS ///
-//RS /// The digest is no longer caller-chosen (it's the real hash of the fixture
-//RS /// payload), so this returns `(hangar_dir, envelope_output_hash)` — callers
-//RS /// that need to cross-reference the digest elsewhere (e.g. a lockfile's
-//RS /// `output-hash`) read it back from the second element.
-//RS ///
-//RS /// `last_used_at`, when given, is backdated via the card #650 `test-seam`
-//RS /// (`jetpack::Store::test_backdate_last_used_at`) — a plain `meta.json` text
-//RS /// edit doesn't survive the next hangar operation (the closure journal is
-//RS /// the real source of truth and gets re-materialized over it).
-//RS pub fn write_hangar_meta(
-//RS     root: &Path,
-//RS     id: &str,
-//RS     name: &str,
-//RS     version: &str,
-//RS     last_used_at: Option<u64>,
-//RS ) -> (PathBuf, String) {
-//RS     let roots = jetpack::Store::Roots {
-//RS         root: root.to_path_buf(),
-//RS         dev_mode: false,
-//RS     };
-//RS     let src = root.join(format!("hangar-meta-src-{id}"));
-//RS     fs::create_dir_all(&src).unwrap();
-//RS     fs::write(src.join("payload"), format!("fixture payload: {id}")).unwrap();
-//RS     let entry = jetpack::Store::ingest_tree(
-//RS         &roots,
-//RS         &jetpack::Store::IngestRequest {
-//RS             name: name.to_string(),
-//RS             version: version.to_string(),
-//RS             reference: format!("fixture:{id}"),
-//RS             cache_identity: jetpack::Store::CacheIdentity {
-//RS                 source_fingerprint: format!("sha256-fixture-source-{id}"),
-//RS                 recipe_fingerprint: format!("sha256-fixture-recipe-{id}"),
-//RS                 policy_fingerprint: "policy=fixture".to_string(),
-//RS                 platform: jetpack::Envelope::host_platform(),
-//RS             },
-//RS             references: Vec::new(),
-//RS             outputs: std::collections::BTreeMap::from([("out".to_string(), src.clone())]),
-//RS             signature: String::new(),
-//RS             provenance: "fixture".to_string(),
-//RS             platform_artifact_kind: String::new(),
-//RS         },
-//RS     )
-//RS     .unwrap()
-//RS     .entry;
-//RS     fs::remove_dir_all(&src).ok();
-//RS     if let Some(ts) = last_used_at {
-//RS         jetpack::Store::test_backdate_last_used_at(&roots, &entry.id, ts).unwrap();
-//RS     }
-//RS     let dir = root.join("hangar").join(&entry.id);
-//RS     (dir, entry.envelope.output_hash)
-//RS }
-//RS 
-//RS pub fn write_lock_with_live_output(project: &Path, name: &str, version: &str, output_hash: &str) {
-//RS     let dot = project.join(".jet");
-//RS     fs::create_dir_all(&dot).unwrap();
-//RS     fs::write(
-//RS         dot.join("lock"),
-//RS         format!(
-//RS             "version = 1\n\n[[package]]\nname = \"{name}\"\nversion = \"{version}\"\nsource = {{ path = \".\" }}\nfingerprint = \"sha256-test\"\ndependencies = []\noutput-hash = \"{output_hash}\"\n\n[root]\ndependencies = [\"{name}\"]\n"
-//RS         ),
-//RS     )
-//RS     .unwrap();
-//RS }
-//RS 
-//RS /// Build a scratch project whose `env.jet` pulls a first-party `core` package
-//RS /// (`hello`) from a local repo. Returns `(base, proj, root)` so a test can run
-//RS /// a jetpack command in `proj` with `JETPACK_ROOT=root` and no nix on PATH.
-//RS pub fn core_hello_project(tag: &str) -> (Scratch, PathBuf, PathBuf) {
-//RS     let base = Scratch::new(tag);
-//RS     let repo = base.join("jet-pkgs");
-//RS     let proj = base.join("proj");
-//RS     let root = base.join("root");
-//RS     let hello_pkg = repo.join("pkgs/hello");
-//RS     let hello_bin = hello_pkg.join("bin");
-//RS     fs::create_dir_all(&hello_bin).unwrap();
-//RS     fs::create_dir_all(&proj).unwrap();
-//RS     fs::write(hello_pkg.join("hello.jet"), "module hello { }\n").unwrap();
-//RS     fs::write(
-//RS         repo.join("package.jet"),
-//RS         "name: \"fixture\"\nversion: \"0.1.0\"\npackages: { hello: executable }\n",
-//RS     )
-//RS     .unwrap();
-//RS     let greet = hello_bin.join("hello");
-//RS     fs::write(&greet, "#!/bin/sh\necho hello from jet-pkgs\n").unwrap();
-//RS     #[cfg(unix)]
-//RS     {
-//RS         use std::os::unix::fs::PermissionsExt;
-//RS         fs::set_permissions(&greet, fs::Permissions::from_mode(0o755)).unwrap();
-//RS     }
-//RS     fs::write(
-//RS         proj.join("env.jet"),
-//RS         format!(
-//RS             "use jetpack as pkg\npub fn shell() -> [JSON] {{\n    return [\n        pkg.source(\"mine\", \"{}\", \"core\"),\n        pkg.packages([\"hello@mine\"])\n    ]\n}}\n",
-//RS             repo.to_string_lossy()
-//RS         ),
-//RS     )
-//RS     .unwrap();
-//RS     (base, proj, root)
-//RS }
-//RS 
-//RS /// The committed jetpack-config fixture dir.
-//RS pub fn config_example_dir() -> PathBuf {
-//RS     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/jetpack-config")
-//RS }
-//RS 
-//RS pub fn assert_jetos_stderr_snapshot(name: &str, stderr: &str) {
-//RS     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-//RS         .join("tests/fixtures/jetpack-diagnostics")
-//RS         .join(format!("{name}.stderr"));
-//RS     let expected = fs::read_to_string(&path)
-//RS         .unwrap_or_else(|e| panic!("missing jetos diagnostic snapshot {}: {e}", path.display()));
-//RS     assert_eq!(
-//RS         stderr, expected,
-//RS         "jetos diagnostic snapshot `{name}` changed"
-//RS     );
-//RS }
-//RS 
-//RS pub fn assert_jetos_stderr_snapshot_trimmed(name: &str, stderr: &str) {
-//RS     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-//RS         .join("tests/fixtures/jetpack-diagnostics")
-//RS         .join(format!("{name}.stderr"));
-//RS     let expected = fs::read_to_string(&path)
-//RS         .unwrap_or_else(|e| panic!("missing jetos diagnostic snapshot {}: {e}", path.display()));
-//RS     assert_eq!(
-//RS         stderr.trim_end(),
-//RS         expected.trim_end(),
-//RS         "jetos diagnostic snapshot `{name}` changed"
-//RS     );
-//RS }
-//RS 
-//RS pub fn assert_jetos_stderr_snapshot_normalized(
-//RS     name: &str,
-//RS     stderr: &str,
-//RS     replacements: &[(&str, &str)],
-//RS ) {
-//RS     let mut normalized = stderr.to_string();
-//RS     for (from, to) in replacements {
-//RS         normalized = normalized.replace(from, to);
-//RS     }
-//RS     assert_jetos_stderr_snapshot(name, &normalized);
-//RS }
-//RS 
-//RS pub fn write_cachyos_source_recipe(pkg: &Path) {
-//RS     let source = pkg.join("source");
-//RS     fs::create_dir_all(&source).unwrap();
-//RS     fs::write(
-//RS         source.join("recipe.jet"),
-//RS         "kernel cachyos { source: \"cachyos/linux-cachyos\", build: source }\n",
-//RS     )
-//RS     .unwrap();
-//RS     write_executable(&source.join("build.sh"), "#!/bin/sh\nexit 0\n");
-//RS     fs::write(
-//RS         source.join("config"),
-//RS         "CONFIG_CACHYOS=y\nCONFIG_EXT4_FS=y\n",
-//RS     )
-//RS     .unwrap();
-//RS     fs::write(source.join("patches.manifest"), "cachyos-scheduler.patch\n").unwrap();
-//RS     fs::write(
-//RS         source.join("initrd-inputs.manifest"),
-//RS         "busybox\nkmod\nsystemd\n",
-//RS     )
-//RS     .unwrap();
-//RS }
-//RS 
-//RS pub fn write_cachyos_source_builder(pkg: &Path, body: &str) {
-//RS     write_executable(&pkg.join("source/build.sh"), body);
-//RS }
-//RS 
-//RS pub fn write_bootlike_cachyos_artifacts(pkg: &Path) {
-//RS     fs::create_dir_all(pkg.join("boot")).unwrap();
-//RS     fs::write(pkg.join("boot/vmlinuz-cachyos"), "MZ test kernel\nHdrS\n").unwrap();
-//RS     fs::write(pkg.join("boot/initrd-cachyos"), "070701 test initrd\n").unwrap();
-//RS }
-//RS 
-//RS /// Stage a flake-root fixture plus a stub `nix` on PATH whose `eval` prints
-//RS /// the canned live-extractor result (or fails when `output` is None).
-//RS pub fn write_live_import_fixture(src: &Path, tools: &Path, output: Option<&str>) {
-//RS     fs::write(
-//RS         src.join("flake.nix"),
-//RS         "{\n  outputs = { ... }: { nixosConfigurations.halcyon = { }; };\n}\n",
-//RS     )
-//RS     .unwrap();
-//RS     fs::write(
-//RS         src.join("flake.lock"),
-//RS         r#"{"nodes":{"nixpkgs":{"locked":{"owner":"NixOS","repo":"nixpkgs","rev":"fef9403a3e4d31b0a23f0bacebbec52c248fbb51"}}}}"#,
-//RS     )
-//RS     .unwrap();
-//RS     fs::create_dir_all(tools).unwrap();
-//RS     let body = match output {
-//RS         Some(json) => format!(
-//RS             "#!/bin/sh\ncase \" $* \" in\n  *' eval '*) printf '%s\\n' '{json}'; exit 0 ;;\nesac\nexit 0\n"
-//RS         ),
-//RS         None => "#!/bin/sh\necho 'error: attribute missing' >&2\nexit 1\n".to_string(),
-//RS     };
-//RS     write_executable(&tools.join("nix"), &body);
-//RS }
-//RS 
-//RS pub const LIVE_IMPORT_EVAL_JSON: &str = r#"{"host":"halcyon","stateVersion":"26.05","tz":"America/New_York","locale":"en_US.UTF-8","keyboard":"us","desktopGnome":false,"desktopPlasma":true,"dmGdm":false,"dmSddm":true,"loaderLimine":true,"loaderSystemdBoot":false,"efiTouch":false,"kernelName":"linux-cachyos","kernelParams":["quiet"],"sysctl":{"vm.swappiness":10},"firewallTcp":[22,443],"firewallUdp":[53317],"nameservers":["1.1.1.1"],"networkmanager":true,"zramEnable":true,"zramPercent":25,"svcOpenssh":true,"svcPipewire":true,"svcRtkit":true,"svcTailscale":true,"svcLibvirtd":true,"svcDocker":true,"svcFlatpak":false,"svcSteam":true,"svcGamemode":true,"svcPcscd":true,"svcBluetooth":false,"stylix":true,"packages":["git","ripgrep","jetbrains.idea-ultimate"],"users":[{"name":"nate","home":"/home/nate","groups":["wheel","networkmanager"],"shell":"fish"}],"hm":[{"name":"nate","packages":["ghostty"],"programs":["git","starship"]}]}"#;
-//RS 
-//RS /// Scrape a string field's value out of a harness/proof JSON blob (the VM
-//RS /// proof files are flat string fields, so a split is enough).
-//RS pub fn harness_json_field(text: &str, key: &str) -> String {
-//RS     let needle = format!("\"{key}\":\"");
-//RS     let (_, rest) = text
-//RS         .split_once(&needle)
-//RS         .unwrap_or_else(|| panic!("harness JSON lacks `{key}`: {text}"));
-//RS     rest.split('"').next().unwrap().to_string()
-//RS }
-//RS 
-//RS /// The committed multi-package monorepo example dir.
-//RS pub fn mono_example_dir() -> PathBuf {
-//RS     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/jetpack-mono")
-//RS }
-// END-PORT-PENDING 1162 tests/support/jetpack_fixtures.rs:1-826
+// Shared fixture helpers for the split jetpack integration suites.
+use std.[fs, env, time, thread]
+use std.process.Command
+use std.net.[TcpStream, Shutdown]
+use std.io.ErrorKind
+use core.files.OSPath
+use core.sys.target.[selected_os, selected_family]
+use jet_foundation.DataTree.DataTree
+use jet_foundation.JSON.parse
+use common.[jetos_bin, jetpack_bin, make_tree_writable, Scratch, test_scratch_root]
+use jetpack.[Store, Envelope, SHA256]
 
+// Rust: tests/support/jetpack_fixtures.rs:22
+pub fn jetpack() -> Command { neutral_command(jetpack_bin()) }
+
+// Rust: tests/support/jetpack_fixtures.rs:26
+pub fn jet() -> Command { neutral_command(OSPath.new(env.var("CARGO_BIN_EXE_jet").unwrap())) }
+
+// Rust: tests/support/jetpack_fixtures.rs:30
+pub fn jetos() -> Command { neutral_command(jetos_bin()) }
+
+// Rust: tests/support/jetpack_fixtures.rs:37
+// Keep no-project commands outside the repository and redirect temporary files
+// to the disk-backed test scratch root, without a disposable cwd.
+// GATE #4494: native process environment and working-directory setup.
+pub fn neutral_command(binary: OSPath) -> Command {
+    command := Command.new(binary)
+    temp := test_scratch_root("jetpack-command-tmp")
+    root := temp.ancestors().last().expect("temp path has no root")
+    command.current_dir(root).env("TMPDIR", temp).env("TMP", temp).env("TEMP", temp)
+    command
+}
+
+// Rust: tests/support/jetpack_fixtures.rs:49
+pub fn copy_dir_recursive(src: OSPath, dst: OSPath) -> {
+    fs.create_dir_all(dst).unwrap()
+    entries := fs.read_dir(src).unwrap().filter_map((entry) -> entry.ok()).collect()
+    entries.sort_by_key((entry) -> entry.file_name())
+    for entry in entries {
+        path := entry.path()
+        target := dst.join(entry.file_name())
+        if entry.file_type().unwrap().is_dir() {
+            copy_dir_recursive(path, target)
+        } else {
+            fs.copy(path, target).unwrap()
+        }
+    }
+}
+
+// Rust: tests/support/jetpack_fixtures.rs:67
+pub fn studio_addr(line: String) -> String {
+    trimmed := line.trim() // #4303
+    printed := trimmed.strip_prefix("http://").expect("Studio service URL must use http")
+    (host, suffix) := printed.split_once("/studio/").expect("Studio service URL must point at /studio/")
+    "{host}{suffix}"
+}
+
+// Rust: tests/support/jetpack_fixtures.rs:78
+// GATE #4494: native TCP stream; #4409: ConnectionReset error-kind fidelity.
+pub fn studio_raw(addr: String, request: String) -> String {
+    connect_addr := addr.split_once('?').map((pair) -> pair.0).unwrap_or(addr)
+    stream := TcpStream.connect(connect_addr).unwrap()
+    stream.write_all(request.as_bytes()).unwrap()
+    _ :: stream.shutdown(Shutdown.Write)
+    response := String.new()
+    match stream.read_to_string(&response) {
+        Err(e) -> assert_eq(e.kind(), ErrorKind.ConnectionReset, "studio HTTP read failed: {e}")
+        Ok(_) -> {}
+    }
+    response
+}
+
+// Rust: tests/support/jetpack_fixtures.rs:100
+// GATE #4494: native TCP stream; #4409: ConnectionReset error-kind fidelity.
+pub fn studio_http(addr: String, method: String, path: String, body: String) -> String {
+    (connect_addr, session) := addr.split_once('?').unwrap_or((addr, ""))
+    target := if session.is_empty() { path.to_string() } else {
+        separator := if path.contains('?') { '&' } else { '?' }
+        "{path}{separator}{session}"
+    }
+    origin := "http://{connect_addr}"
+    content_type := if method == "POST" { "Content-Type: application/json\r\n" } else { "" }
+    origin_header := if method == "POST" { "Origin: {origin}\r\n" } else { String.new() }
+    stream := TcpStream.connect(connect_addr).unwrap()
+    stream.write_all("{method} {target} HTTP/1.1\r\nHost: {connect_addr}\r\n{origin_header}{content_type}Content-Length: {body.len()}\r\nConnection: close\r\n\r\n{body}".as_bytes()).unwrap()
+    _ :: stream.shutdown(Shutdown.Write)
+    response := String.new()
+    match stream.read_to_string(&response) {
+        Err(e) -> assert_eq(e.kind(), ErrorKind.ConnectionReset, "studio HTTP read failed: {e}")
+        Ok(_) -> {}
+    }
+    response
+}
+
+// Rust: tests/support/jetpack_fixtures.rs:144
+pub fn studio_json_string(response: String, key: String) -> String {
+    needle := "\"{key}\":\""
+    response.split_once(needle)
+        .and_then((pair) -> pair.1.split_once('\"').map((value) -> value.0.to_string()))
+        .unwrap_or_else(() -> panic("missing Studio JSON string `{key}`: {response}"))
+}
+
+// Rust: tests/support/jetpack_fixtures.rs:152
+pub fn studio_json(response: String) -> DataTree {
+    body := response.split_once("\r\n\r\n").map((pair) -> pair.1).unwrap_or(response)
+    trimmed := body.trim() // #4303
+    parse(trimmed).unwrap_or_else((error) -> panic("invalid Studio JSON response: {error}: {response}"))
+}
+
+// Rust: tests/support/jetpack_fixtures.rs:161
+pub fn json_string(json: DataTree, key: String) -> String {
+    json.get(key).and_then((value) -> value.as_str())
+        .unwrap_or_else((error) -> panic("invalid JSON string `{key}`: {error}: {json:?}"))
+        .to_string()
+}
+
+// Rust: tests/support/jetpack_fixtures.rs:169
+pub struct StudioTestOwner {
+    pub session_id: String
+    pub token: String
+    pub base_revision: String
+}
+
+// Rust: tests/support/jetpack_fixtures.rs:175
+pub fn studio_session(addr: String) -> String {
+    response := studio_http(addr, "POST", "/studio/transaction", "{\"op\":\"session\"}")
+    studio_json_string(response, "session_id")
+}
+
+// Rust: tests/support/jetpack_fixtures.rs:180
+pub fn studio_changeset_owner(response: String, session_id: String) -> StudioTestOwner {
+    StudioTestOwner {
+        session_id: session_id.to_string(),
+        token: studio_json_string(response, "token"),
+        base_revision: studio_json_string(response, "base_revision")
+    }
+}
+
+// Rust: tests/support/jetpack_fixtures.rs:188
+pub fn studio_owned_transaction(addr: String, op: String, owner: StudioTestOwner) -> String {
+    studio_http(addr, "POST", "/studio/transaction",
+        "{{\"op\":\"{op}\",\"session_id\":\"{owner.session_id}\",\"token\":\"{owner.token}\",\"base_revision\":\"{owner.base_revision}\"}}")
+}
+
+// Rust: tests/support/jetpack_fixtures.rs:200
+pub fn studio_session_transaction(addr: String, op: String, session_id: String) -> String {
+    studio_http(addr, "POST", "/studio/transaction", "{{\"op\":\"{op}\",\"session_id\":\"{session_id}\"}}")
+}
+
+// Rust: tests/support/jetpack_fixtures.rs:209
+pub fn studio_stage_option(addr: String, session_id: String, key: String, value: String, write: Bool) -> String {
+    studio_http(addr, "POST", "/studio/transaction",
+        "{{\"op\":\"set-option\",\"session_id\":\"{session_id}\",\"key\":\"{test_json_escape(key)}\",\"value\":\"{test_json_escape(value)}\",\"write\":{write}}}")
+}
+
+// Rust: tests/support/jetpack_fixtures.rs:228
+// GATE #4494: native thread, procfs descriptor inspection and hostile open.
+pub fn studio_attack_snapshot(server_pid: U32, truncate: Bool) -> thread.JoinHandle[Unit] {
+    thread.spawn(() -> {
+        deadline := time.Instant.now() + time.Duration.from_secs(10)
+        loop {
+            snapshot := fs.read_dir("/proc/{server_pid}/fd").into_iter().flatten()
+                .filter_map((entry) -> entry.ok())
+                .find((entry) -> fs.read_link(entry.path())
+                    .map((target) -> target.to_string_lossy().contains("memfd:jetos-studio-source-"))
+                    .unwrap_or(false))
+                .map((entry) -> entry.path())
+            if snapshot is Some(path) {
+                attempt := fs.OpenOptions.new().write(true).truncate(truncate).open(path)
+                assert(attempt.is_err(), "sealed Studio source accepted hostile write access")
+                return
+            }
+            assert(time.Instant.now() < deadline, "Studio snapshot never appeared")
+            thread.sleep(time.Duration.from_millis(1))
+        }
+    })
+}
+
+// Rust: tests/support/jetpack_fixtures.rs:266
+pub fn assert_no_ephemeral_links(path: OSPath) -> {
+    meta := match fs.symlink_metadata(path) { Ok(value) -> value, Err(_) -> return }
+    if meta.file_type().is_symlink() {
+        target := fs.read_link(path).unwrap()
+        text := target.to_string_lossy()
+        assert(!text.contains("/proc/self/fd/"), "ephemeral FD link: {path.display()} -> {text}")
+        assert(!text.contains("/leases/"), "ephemeral lease link: {path.display()} -> {text}")
+        return
+    }
+    if meta.is_dir() {
+        for entry in fs.read_dir(path).unwrap().flatten() { assert_no_ephemeral_links(entry.path()) }
+    }
+}
+
+// Rust: tests/support/jetpack_fixtures.rs:292
+pub fn example_fixtures(root: OSPath) -> OSPath {
+    realized_fixtures(OSPath.new(env.var("CARGO_MANIFEST_DIR").unwrap()).join("tests/fixtures/jetpack-project/fixtures"), root)
+}
+
+// Rust: tests/support/jetpack_fixtures.rs:299
+pub fn realized_fixtures(committed: OSPath, root: OSPath) -> OSPath {
+    fixtures := root.join("realized-fixtures")
+    if fixtures.is_dir() { return fixtures }
+    fs.create_dir_all(fixtures).unwrap()
+    for result in fs.read_dir(committed).unwrap() {
+        entry := result.unwrap()
+        name := entry.file_name()
+        source := entry.path()
+        destination := fixtures.join(name)
+        if source.extension().and_then((ext) -> ext.to_str()) != Some("json") {
+            fs.copy(source, destination).unwrap()
+            continue
+        }
+        stem := source.file_stem().unwrap().to_string_lossy()
+        staging := root.join("example-fixture-outputs").join(stem)
+        fs.create_dir_all(staging).unwrap()
+        fs.write(staging.join("payload"), stem.as_bytes()).unwrap()
+        output := seed_hangar_object(root, staging)
+        json := fs.read_to_string(source).unwrap()
+        key := json.find("\"out\"").unwrap()
+        colon := key + json[key..].find(':').unwrap() + 1
+        value_start := colon + json[colon..].find('"').unwrap()
+        value_end := value_start + 1 + json[value_start + 1..].find('"').unwrap() + 1
+        json.replace_range(value_start..value_end, "{output.to_string_lossy():?}")
+        fs.write(destination, json).unwrap()
+    }
+    fixtures
+}
+
+// Rust: tests/support/jetpack_fixtures.rs:334
+pub fn example_dir() -> OSPath {
+    OSPath.new(env.var("CARGO_MANIFEST_DIR").unwrap()).join("tests/fixtures/jetpack-project")
+}
+
+// Rust: tests/support/jetpack_fixtures.rs:338
+// GATE #4494: native permission modes; #4483: selected target family.
+fn seed_hangar_object(root: OSPath, staging_dir: OSPath) -> OSPath {
+    Store.seal_local_output(staging_dir).unwrap()
+    digest := Envelope.try_output_hash_of(staging_dir.to_string_lossy()).unwrap()
+    out_dir := root.join("hangar").join("objects").join(digest)
+    fs.create_dir_all(out_dir.parent().unwrap()).unwrap()
+    staging_permissions := fs.metadata(staging_dir).unwrap().permissions()
+    if selected_family() == "unix" {
+        staging_permissions.set_mode(staging_permissions.mode() | 0o200)
+    } else {
+        staging_permissions.set_readonly(false)
+    }
+    fs.set_permissions(staging_dir, staging_permissions).unwrap()
+    fs.rename(staging_dir, out_dir).unwrap()
+    Store.seal_local_output(out_dir).unwrap()
+    assert_eq(Envelope.try_output_hash_of(out_dir.to_string_lossy()).unwrap(), digest,
+        "published fixture must retain its content-addressed identity")
+    out_dir
+}
+
+// Rust: tests/support/jetpack_fixtures.rs:364
+pub fn write_runnable_fixture(fixtures: OSPath, root: OSPath, staging_dir: OSPath) -> OSPath {
+    fs.create_dir_all(fixtures).unwrap()
+    bin := staging_dir.join("bin")
+    fs.create_dir_all(bin).unwrap()
+    greet := bin.join("greet")
+    fs.write(greet, "#!/bin/sh\necho hello from jetpack\n").unwrap()
+    if selected_family() == "unix" { // GATE #4494, #4483
+        fs.set_permissions(greet, fs.Permissions.from_mode(0o755)).unwrap()
+    }
+    out_dir := seed_hangar_object(root, staging_dir)
+    json := "[{{\"drvPath\":\"/nix/store/0fixture00000000000000000000-greet.drv\",\"outputs\":{{\"out\":{out_dir.to_string_lossy():?}}}}}]"
+    fs.write(fixtures.join("nixpkgs-greet.json"), json).unwrap()
+    fs.write(fixtures.join("jetpack-greet.json"), json).unwrap()
+    out_dir
+}
+
+// Rust: tests/support/jetpack_fixtures.rs:388
+// GATE #4494: compile and execute real native platform fixture.
+pub fn write_native_jetpack_fixture(fixtures: OSPath, root: OSPath, staging_dir: OSPath) -> OSPath {
+    fs.create_dir_all(fixtures).unwrap()
+    bin := staging_dir.join("bin")
+    fs.create_dir_all(bin).unwrap()
+    suffix := if selected_os() == "windows" { ".exe" } else { "" } // GATE #4483
+    name := "jetpack{suffix}"
+    executable := bin.join(name)
+    source := staging_dir.parent().unwrap_or(staging_dir).join("native-jetpack-fixture.rs")
+    // Rust fixture source text remains Rust; this is not a Jet entry point.
+    fs.write(source, r#"fn main() {
+    if std::env::args().nth(1).as_deref() == Some("--hold") {
+        std::thread::sleep(std::time::Duration::from_secs(5));
+    }
+    if std::env::args().nth(1).as_deref() == Some("--help") {
+        println!("jetpack platform fixture");
+    }
+}
+"#).unwrap()
+    rustc := env.var_os("RUSTC").unwrap_or_else(() -> OSPath.new("rustc"))
+    output := Command.new(rustc).args(["--edition=2021", "-C", "debuginfo=0", "-C", "opt-level=0"])
+        .arg(source).arg("-o").arg(executable).output()
+        .unwrap_or_else((error) -> panic("could not compile native platform fixture: {error}"))
+    assert(output.status.success(), "native platform fixture compilation failed: {String.from_utf8_lossy(output.stderr)}")
+    artifact_name := "omp-native-jetpack-fixture{suffix}"
+    artifact := fixtures.join(artifact_name)
+    fs.copy(executable, artifact).unwrap()
+    artifact_digest := SHA256.sha256_file_hex(artifact).unwrap()
+    out_dir := seed_hangar_object(root, staging_dir)
+    json := "[{{\"drvPath\":\"/nix/store/0fixture00000000000000000000-native-jetpack.drv\",\"outputs\":{{\"out\":{out_dir.to_string_lossy():?}}}}}]"
+    fs.write(fixtures.join("nixpkgs-native-jetpack.json"), json).unwrap()
+    fs.write(fixtures.join("jetpackage-omp.json"),
+        "{{\"tag\":\"v1.0.0\",\"version\":\"1.0.0\",\"sha256\":\"{artifact_digest}\",\"artifact\":{artifact_name:?}}}").unwrap()
+    out_dir
+}
+
+// Rust: tests/support/jetpack_fixtures.rs:444
+pub fn assert_no_hangar_entry(root: OSPath, name: String) -> {
+    hangar := root.join("hangar")
+    if fs.read_dir(hangar) is Ok(entries) {
+        assert(entries.flatten().all((entry) -> !entry.file_name().to_string_lossy().starts_with(name)))
+    }
+    journal := hangar.join("closure-db/journal")
+    if fs.read_dir(journal) is Ok(entries) {
+        assert_eq(entries.flatten().filter((entry) -> entry.path().extension().and_then((ext) -> ext.to_str()) == Some("txn")).count(),
+            0, "failed registration left a closure journal transaction")
+    }
+    for empty in [hangar.join("objects"), root.join("leases")] {
+        if fs.read_dir(empty) is Ok(entries) {
+            assert(entries.next().is_none(), "failed registration left state in {empty.display()}")
+        }
+    }
+    // Rust: tests/support/jetpack_fixtures.rs:473
+    fn assert_no_root(path: OSPath) -> {
+        entries := match fs.read_dir(path) { Ok(value) -> value, Err(_) -> return }
+        for entry in entries.flatten() {
+            assert_ne(entry.file_name(), "nix-gc-root", "failed registration left a Nix GC root")
+            if entry.file_type().is_ok_and((kind) -> kind.is_dir()) { assert_no_root(entry.path()) }
+        }
+    }
+    assert_no_root(hangar)
+}
+
+// Rust: tests/support/jetpack_fixtures.rs:493
+pub fn write_fastfetch_fixture(fixtures: OSPath, root: OSPath, staging_dir: OSPath) -> OSPath {
+    fs.create_dir_all(fixtures).unwrap()
+    bin := staging_dir.join("bin")
+    fs.create_dir_all(bin).unwrap()
+    fastfetch := bin.join("fastfetch")
+    fs.write(fastfetch, "#!/bin/sh\necho fastfetch stub\n").unwrap()
+    if selected_family() == "unix" { // GATE #4494, #4483
+        fs.set_permissions(fastfetch, fs.Permissions.from_mode(0o755)).unwrap()
+    }
+    out_dir := seed_hangar_object(root, staging_dir)
+    json := "[{{\"drvPath\":\"/nix/store/0fixture00000000000000000000-fastfetch.drv\",\"outputs\":{{\"out\":{out_dir.to_string_lossy():?}}}}}]"
+    fs.write(fixtures.join("nixpkgs-fastfetch.json"), json).unwrap()
+    out_dir
+}
+
+// Rust: tests/support/jetpack_fixtures.rs:513
+pub fn write_channel_fixture(fixtures: OSPath, base: String, channel: String, exact: String) -> {
+    fs.create_dir_all(fixtures).unwrap()
+    fs.write(fixtures.join("channels.txt"), "{base} {channel} {exact} 240000000\n").unwrap()
+}
+
+// Rust: tests/support/jetpack_fixtures.rs:522
+pub fn now_secs() -> U64 {
+    time.SystemTime.now().duration_since(time.UNIX_EPOCH).unwrap().as_secs() // GATE #4494
+}
+
+// Rust: tests/support/jetpack_fixtures.rs:529
+// This is a fixture helper, not a Rust #[test].
+pub fn test_json_escape(value: String) -> String {
+    value.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n")
+}
+
+// Rust: tests/support/jetpack_fixtures.rs:536
+// This is a fixture helper, not a Rust #[test].
+pub fn test_shell_quote(value: OSPath) -> String {
+    "'{value.display().to_string().replace('\'', "'\\''")}'"
+}
+
+// Rust: tests/support/jetpack_fixtures.rs:540
+pub fn write_executable(path: OSPath, text: String) -> {
+    fs.write(path, text).unwrap()
+    if selected_family() == "unix" { // GATE #4494, #4483
+        fs.set_permissions(path, fs.Permissions.from_mode(0o755)).unwrap()
+    }
+}
+
+// Rust: tests/support/jetpack_fixtures.rs:549
+pub fn write_fake_vm_tools(bin: OSPath, guest_passes: Bool) -> {
+    fs.create_dir_all(bin).unwrap()
+    limine_data := bin.join("limine-data")
+    fs.create_dir_all(limine_data).unwrap()
+    fs.write(limine_data.join("limine-bios.sys"), "fake limine bios\n").unwrap()
+    fs.write(limine_data.join("BOOTX64.EFI"), "fake limine efi\n").unwrap()
+    write_executable(bin.join("limine"),
+        "#!/bin/sh\nif [ \"$1\" = \"--print-datadir\" ]; then printf '%s\\n' '{limine_data.display()}'; exit 0; fi\nexit 0\n")
+    write_executable(bin.join("xorriso"), "#!/bin/sh\nout=''\nprev=''\nfor arg in \"$@\"; do\n  if [ \"$prev\" = '-o' ]; then out=\"$arg\"; fi\n  prev=\"$arg\"\ndone\nif [ -n \"$out\" ]; then printf 'fake iso\\n' > \"$out\"; fi\nexit 0\n")
+    write_executable(bin.join("qemu-img"), "#!/bin/sh\nif [ \"$1\" = 'create' ]; then printf 'fake qcow2\\n' > \"$4\"; fi\nexit 0\n")
+    guest_line := if guest_passes {
+        "host=unknown\ngeneration=unknown\nfor arg in \"$@\"; do\n  case \"$arg\" in\n    *jetos.host=*) host=\"${arg#*jetos.host=}\"; host=\"${host%% *}\" ;;\n  esac\n  case \"$arg\" in\n    *jetos.generation=*) generation=\"${arg#*jetos.generation=}\"; generation=\"${generation%% *}\" ;;\n  esac\ndone\ncase \" $* \" in\n  *'jetos.mode=desktop-verify'*) echo \"jetos proof: display manager command gdm\"; echo \"jetos proof: desktop session command gnome-session\"; echo \"jetos proof: terminal fallback ready\"; echo \"JETOS_GUEST_PROOF: {\\\"state\\\":\\\"guest-passed\\\",\\\"host\\\":\\\"$host\\\",\\\"generation\\\":\\\"$generation\\\",\\\"assertions\\\":[\\\"current-generation-matches\\\",\\\"packages-present\\\",\\\"services-active\\\",\\\"network-up\\\",\\\"rollback-generation-bootable\\\",\\\"terminal-login-ready\\\",\\\"desktop-session-ready\\\",\\\"graphical-console-ready\\\",\\\"desktop-launchers-run\\\"]}\" ;;\n  *' -boot c '*) echo \"JETOS_GUEST_PROOF: {\\\"state\\\":\\\"guest-passed\\\",\\\"host\\\":\\\"$host\\\",\\\"generation\\\":\\\"$generation\\\",\\\"assertions\\\":[\\\"current-generation-matches\\\",\\\"packages-present\\\",\\\"services-active\\\",\\\"network-up\\\",\\\"rollback-generation-bootable\\\",\\\"terminal-login-ready\\\",\\\"desktop-session-ready\\\"]}\" ;;\nesac\n"
+    } else { "echo 'qemu booted without guest proof'\n" }
+    write_executable(bin.join("qemu-system-x86_64"), "#!/bin/sh\n{guest_line}exit 0\n")
+    write_executable(bin.join("mkfs.ext4"), "#!/bin/sh\nexit 0\n")
+    write_executable(bin.join("mkfs.vfat"), "#!/bin/sh\nexit 0\n")
+    write_executable(bin.join("sfdisk"), "#!/bin/sh\nexit 0\n")
+    write_executable(bin.join("blockdev"), "#!/bin/sh\nexit 0\n")
+    for tool in ["cat", "cp", "ln", "mkdir", "mount", "rm", "setsid", "sleep", "sync", "poweroff", "halt"] {
+        write_executable(bin.join(tool), "#!/bin/sh\nexit 0\n")
+    }
+    write_executable(bin.join("mmd"), "#!/bin/sh\nexit 0\n")
+    write_executable(bin.join("mcopy"), "#!/bin/sh\nexit 0\n")
+    write_executable(bin.join("zstd"), "#!/bin/sh\nlast=''\nfor arg in \"$@\"; do last=\"$arg\"; done\nwhile IFS= read -r line; do printf '%s\\n' \"$line\"; done < \"$last\"\n")
+}
+
+// Rust: tests/support/jetpack_fixtures.rs:623
+// Register real content through ingest_tree; the journal owns last-used time.
+pub fn write_hangar_meta(root: OSPath, id: String, name: String, version: String, last_used_at: U64?) -> (OSPath, String) {
+    roots := Store.Roots { root: root.to_path_buf(), dev_mode: false }
+    src := root.join("hangar-meta-src-{id}")
+    fs.create_dir_all(src).unwrap()
+    fs.write(src.join("payload"), "fixture payload: {id}").unwrap()
+    entry := Store.ingest_tree(roots, Store.IngestRequest {
+        name: name.to_string(), version: version.to_string(), reference: "fixture:{id}",
+        cache_identity: Store.CacheIdentity {
+            source_fingerprint: "sha256-fixture-source-{id}",
+            recipe_fingerprint: "sha256-fixture-recipe-{id}",
+            policy_fingerprint: "policy=fixture", platform: Envelope.host_platform()
+        },
+        references: [], outputs: ["out": src.clone()], signature: "", provenance: "fixture", platform_artifact_kind: ""
+    }).unwrap().entry
+    _ :: fs.remove_dir_all(src).ok()
+    if last_used_at is Some(ts) { Store.test_backdate_last_used_at(roots, entry.id, ts).unwrap() }
+    dir := root.join("hangar").join(entry.id)
+    (dir, entry.envelope.output_hash)
+}
+
+// Rust: tests/support/jetpack_fixtures.rs:666
+pub fn write_lock_with_live_output(project: OSPath, name: String, version: String, output_hash: String) -> {
+    dot := project.join(".jet")
+    fs.create_dir_all(dot).unwrap()
+    fs.write(dot.join("lock"), "version = 1\n\n[[package]]\nname = \"{name}\"\nversion = \"{version}\"\nsource = {{ path = \".\" }}\nfingerprint = \"sha256-test\"\ndependencies = []\noutput-hash = \"{output_hash}\"\n\n[root]\ndependencies = [\"{name}\"]\n").unwrap()
+}
+
+// Rust: tests/support/jetpack_fixtures.rs:681
+pub fn core_hello_project(tag: String) -> (Scratch, OSPath, OSPath) {
+    base := Scratch.new(tag)
+    repo := base.join("jet-pkgs")
+    proj := base.join("proj")
+    root := base.join("root")
+    hello_pkg := repo.join("pkgs/hello")
+    hello_bin := hello_pkg.join("bin")
+    fs.create_dir_all(hello_bin).unwrap()
+    fs.create_dir_all(proj).unwrap()
+    fs.write(hello_pkg.join("hello.jet"), "module hello { }\n").unwrap()
+    fs.write(repo.join("package.jet"), "name: \"fixture\"\nversion: \"0.1.0\"\npackages: { hello: executable }\n").unwrap()
+    greet := hello_bin.join("hello")
+    fs.write(greet, "#!/bin/sh\necho hello from jet-pkgs\n").unwrap()
+    if selected_family() == "unix" { // GATE #4494, #4483
+        fs.set_permissions(greet, fs.Permissions.from_mode(0o755)).unwrap()
+    }
+    fs.write(proj.join("env.jet"), "use jetpack as pkg\npub fn shell() -> [JSON] {{\n    return [\n        pkg.source(\"mine\", \"{repo.to_string_lossy()}\", \"core\"),\n        pkg.packages([\"hello@mine\"])\n    ]\n}}\n").unwrap()
+    (^base, proj, root)
+}
+
+// Rust: tests/support/jetpack_fixtures.rs:715
+pub fn config_example_dir() -> OSPath {
+    OSPath.new(env.var("CARGO_MANIFEST_DIR").unwrap()).join("tests/fixtures/jetpack-config")
+}
+
+// Rust: tests/support/jetpack_fixtures.rs:719
+pub fn assert_jetos_stderr_snapshot(name: String, stderr: String) -> {
+    path := OSPath.new(env.var("CARGO_MANIFEST_DIR").unwrap()).join("tests/fixtures/jetpack-diagnostics").join("{name}.stderr")
+    expected := fs.read_to_string(path).unwrap_or_else((e) -> panic("missing jetos diagnostic snapshot {path.display()}: {e}"))
+    assert_eq(stderr, expected, "jetos diagnostic snapshot `{name}` changed")
+}
+
+// Rust: tests/support/jetpack_fixtures.rs:731
+pub fn assert_jetos_stderr_snapshot_trimmed(name: String, stderr: String) -> {
+    path := OSPath.new(env.var("CARGO_MANIFEST_DIR").unwrap()).join("tests/fixtures/jetpack-diagnostics").join("{name}.stderr")
+    expected := fs.read_to_string(path).unwrap_or_else((e) -> panic("missing jetos diagnostic snapshot {path.display()}: {e}"))
+    actual_trimmed := stderr.trim_end() // #4303
+    expected_trimmed := expected.trim_end() // #4303
+    assert_eq(actual_trimmed, expected_trimmed, "jetos diagnostic snapshot `{name}` changed")
+}
+
+// Rust: tests/support/jetpack_fixtures.rs:744
+pub fn assert_jetos_stderr_snapshot_normalized(name: String, stderr: String, replacements: [(String, String)]) -> {
+    normalized := stderr.to_string()
+    for (from, to) in replacements { normalized = normalized.replace(from, to) }
+    assert_jetos_stderr_snapshot(name, normalized)
+}
+
+// Rust: tests/support/jetpack_fixtures.rs:756
+pub fn write_cachyos_source_recipe(pkg: OSPath) -> {
+    source := pkg.join("source")
+    fs.create_dir_all(source).unwrap()
+    fs.write(source.join("recipe.jet"), "kernel cachyos { source: \"cachyos/linux-cachyos\", build: source }\n").unwrap()
+    write_executable(source.join("build.sh"), "#!/bin/sh\nexit 0\n")
+    fs.write(source.join("config"), "CONFIG_CACHYOS=y\nCONFIG_EXT4_FS=y\n").unwrap()
+    fs.write(source.join("patches.manifest"), "cachyos-scheduler.patch\n").unwrap()
+    fs.write(source.join("initrd-inputs.manifest"), "busybox\nkmod\nsystemd\n").unwrap()
+}
+
+// Rust: tests/support/jetpack_fixtures.rs:778
+pub fn write_cachyos_source_builder(pkg: OSPath, body: String) -> {
+    write_executable(pkg.join("source/build.sh"), body)
+}
+
+// Rust: tests/support/jetpack_fixtures.rs:782
+pub fn write_bootlike_cachyos_artifacts(pkg: OSPath) -> {
+    fs.create_dir_all(pkg.join("boot")).unwrap()
+    fs.write(pkg.join("boot/vmlinuz-cachyos"), "MZ test kernel\nHdrS\n").unwrap()
+    fs.write(pkg.join("boot/initrd-cachyos"), "070701 test initrd\n").unwrap()
+}
+
+// Rust: tests/support/jetpack_fixtures.rs:790
+pub fn write_live_import_fixture(src: OSPath, tools: OSPath, output: String?) -> {
+    fs.write(src.join("flake.nix"), "{\n  outputs = { ... }: { nixosConfigurations.halcyon = { }; };\n}\n").unwrap()
+    fs.write(src.join("flake.lock"), r#"{"nodes":{"nixpkgs":{"locked":{"owner":"NixOS","repo":"nixpkgs","rev":"fef9403a3e4d31b0a23f0bacebbec52c248fbb51"}}}}"#).unwrap()
+    fs.create_dir_all(tools).unwrap()
+    body := match output {
+        Some(json) -> "#!/bin/sh\ncase \" $* \" in\n  *' eval '*) printf '%s\\n' '{json}'; exit 0 ;;\nesac\nexit 0\n"
+        None -> "#!/bin/sh\necho 'error: attribute missing' >&2\nexit 1\n"
+    }
+    write_executable(tools.join("nix"), body)
+}
+
+// Rust: tests/support/jetpack_fixtures.rs:811
+pub const LIVE_IMPORT_EVAL_JSON: String = r#"{"host":"halcyon","stateVersion":"26.05","tz":"America/New_York","locale":"en_US.UTF-8","keyboard":"us","desktopGnome":false,"desktopPlasma":true,"dmGdm":false,"dmSddm":true,"loaderLimine":true,"loaderSystemdBoot":false,"efiTouch":false,"kernelName":"linux-cachyos","kernelParams":["quiet"],"sysctl":{"vm.swappiness":10},"firewallTcp":[22,443],"firewallUdp":[53317],"nameservers":["1.1.1.1"],"networkmanager":true,"zramEnable":true,"zramPercent":25,"svcOpenssh":true,"svcPipewire":true,"svcRtkit":true,"svcTailscale":true,"svcLibvirtd":true,"svcDocker":true,"svcFlatpak":false,"svcSteam":true,"svcGamemode":true,"svcPcscd":true,"svcBluetooth":false,"stylix":true,"packages":["git","ripgrep","jetbrains.idea-ultimate"],"users":[{"name":"nate","home":"/home/nate","groups":["wheel","networkmanager"],"shell":"fish"}],"hm":[{"name":"nate","packages":["ghostty"],"programs":["git","starship"]}]}"#
+
+// Rust: tests/support/jetpack_fixtures.rs:815
+pub fn harness_json_field(text: String, key: String) -> String {
+    needle := "\"{key}\":\""
+    (_, rest) := text.split_once(needle).unwrap_or_else(() -> panic("harness JSON lacks `{key}`: {text}"))
+    rest.split('"').next().unwrap().to_string()
+}
+
+// Rust: tests/support/jetpack_fixtures.rs:824
+pub fn mono_example_dir() -> OSPath {
+    OSPath.new(env.var("CARGO_MANIFEST_DIR").unwrap()).join("tests/fixtures/jetpack-mono")
+}

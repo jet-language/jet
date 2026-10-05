@@ -1,557 +1,62 @@
-// PORT-PENDING 2058 crates-jet-pkg-model-src-cffi-slice-3601: crates/jet-pkg-model/src/CFFI.rs:3601-4153
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS                 .join(if cfg!(target_os = "macos") {
-//RS                     "libgnat.dylib"
-//RS                 } else {
-//RS                     "libgnat.so"
-//RS                 })
-//RS                 .is_file()
-//RS         {
-//RS             return Ok(LinkFlags {
-//RS                 lib_dirs: vec![dir.display().to_string(), runtime_dir.into()],
-//RS                 link_names: vec![
-//RS                     format!("static=jet_ada_{actual}"),
-//RS                     "gnat".into(),
-//RS                     "pthread".into(),
-//RS                     "dl".into(),
-//RS                     "m".into(),
-//RS                 ],
-//RS                 rpath_dirs: vec![runtime_dir.into()],
-//RS                 ..Default::default()
-//RS             });
-//RS         }
-//RS         return Err(e3201(lib));
-//RS     }
-//RS     if let Some(actual) = lib.strip_prefix("jet_pascal_") {
-//RS         let dir = project_root
-//RS             .join(Syntax::SOURCE_ROOT_DIR)
-//RS             .join(ForeignLanguage::Pascal.bindings_subdir());
-//RS         let archive = dir.join(format!("libjet_pascal_{actual}.a"));
-//RS         let runtime = dir.join(format!(
-//RS             "libjet_pascal_{actual}_runtime{}",
-//RS             if cfg!(target_os = "macos") {
-//RS                 ".dylib"
-//RS             } else if cfg!(target_os = "windows") {
-//RS                 ".dll"
-//RS             } else {
-//RS                 ".so"
-//RS             }
-//RS         ));
-//RS         if archive.is_file() && runtime.is_file() {
-//RS             let path = dir.display().to_string();
-//RS             return Ok(LinkFlags {
-//RS                 lib_dirs: vec![path.clone()],
-//RS                 link_names: vec![
-//RS                     format!("static=jet_pascal_{actual}"),
-//RS                     format!("dylib=jet_pascal_{actual}_runtime"),
-//RS                     "pthread".into(),
-//RS                     "dl".into(),
-//RS                     "m".into(),
-//RS                 ],
-//RS                 rpath_dirs: vec![path],
-//RS                 ..Default::default()
-//RS             });
-//RS         }
-//RS         return Err(e3201(lib));
-//RS     }
-//RS     if let Some(actual) = lib.strip_prefix("jet_dart_") {
-//RS         let dir = project_root
-//RS             .join(Syntax::SOURCE_ROOT_DIR)
-//RS             .join(ForeignLanguage::Dart.bindings_subdir());
-//RS         let archive = dir.join(format!("libjet_dart_{actual}.a"));
-//RS         if archive.is_file() {
-//RS             return Ok(LinkFlags {
-//RS                 lib_dirs: vec![dir.display().to_string()],
-//RS                 link_names: vec![format!("static=jet_dart_{actual}")],
-//RS                 ..Default::default()
-//RS             });
-//RS         }
-//RS         return Err(e3201(lib));
-//RS     }
-//RS     if let Some(actual) = lib.strip_prefix("jet_pwsh_") {
-//RS         let dir = project_root
-//RS             .join(Syntax::SOURCE_ROOT_DIR)
-//RS             .join(ForeignLanguage::PowerShell.bindings_subdir());
-//RS         let archive = dir.join(format!("libjet_pwsh_{actual}.a"));
-//RS         if archive.is_file() {
-//RS             return Ok(LinkFlags {
-//RS                 lib_dirs: vec![dir.display().to_string()],
-//RS                 link_names: vec![format!("static=jet_pwsh_{actual}"), "pthread".into()],
-//RS                 ..Default::default()
-//RS             });
-//RS         }
-//RS         return Err(e3201(lib));
-//RS     }
-//RS     if let Some(actual) = lib.strip_prefix("jet_py_") {
-//RS         let dir = project_root
-//RS             .join(Syntax::SOURCE_ROOT_DIR)
-//RS             .join(ForeignLanguage::Py.bindings_subdir());
-//RS         let archive = dir.join(format!("libjet_py_{actual}.a"));
-//RS         if archive.is_file() {
-//RS             return Ok(LinkFlags {
-//RS                 lib_dirs: vec![dir.display().to_string()],
-//RS                 link_names: vec![format!("static=jet_py_{actual}"), "pthread".into()],
-//RS                 ..Default::default()
-//RS             });
-//RS         }
-//RS         return Err(e3201(lib));
-//RS     }
-//RS     if let Some(actual) = lib.strip_prefix("jet_perl_") {
-//RS         let dir = project_root
-//RS             .join(Syntax::SOURCE_ROOT_DIR)
-//RS             .join(ForeignLanguage::Perl.bindings_subdir());
-//RS         let archive = dir.join(format!("libjet_perl_{actual}.a"));
-//RS         if archive.is_file() {
-//RS             return Ok(LinkFlags {
-//RS                 lib_dirs: vec![dir.display().to_string()],
-//RS                 link_names: vec![format!("static=jet_perl_{actual}"), "pthread".into()],
-//RS                 ..Default::default()
-//RS             });
-//RS         }
-//RS         return Err(e3201(lib));
-//RS     }
-//RS     if let Some(actual) = lib.strip_prefix("jet_ruby_") {
-//RS         let dir = project_root
-//RS             .join(Syntax::SOURCE_ROOT_DIR)
-//RS             .join(ForeignLanguage::Ruby.bindings_subdir());
-//RS         let archive = dir.join(format!("libjet_ruby_{actual}.a"));
-//RS         if archive.is_file() {
-//RS             return Ok(LinkFlags {
-//RS                 lib_dirs: vec![dir.display().to_string()],
-//RS                 link_names: vec![format!("static=jet_ruby_{actual}"), "pthread".into()],
-//RS                 ..Default::default()
-//RS             });
-//RS         }
-//RS         return Err(e3201(lib));
-//RS     }
-//RS     if let Some(actual) = lib.strip_prefix("jet_php_") {
-//RS         let dir = project_root
-//RS             .join(Syntax::SOURCE_ROOT_DIR)
-//RS             .join(ForeignLanguage::Php.bindings_subdir());
-//RS         let archive = dir.join(format!("libjet_php_{actual}.a"));
-//RS         if archive.is_file() {
-//RS             return Ok(LinkFlags {
-//RS                 lib_dirs: vec![dir.display().to_string()],
-//RS                 link_names: vec![format!("static=jet_php_{actual}"), "pthread".into()],
-//RS                 ..Default::default()
-//RS             });
-//RS         }
-//RS         return Err(e3201(lib));
-//RS     }
-//RS     if let Some(actual) = lib.strip_prefix("jet_r_") {
-//RS         let dir = project_root
-//RS             .join(Syntax::SOURCE_ROOT_DIR)
-//RS             .join(ForeignLanguage::R.bindings_subdir());
-//RS         let archive = dir.join(format!("libjet_r_{actual}.a"));
-//RS         if archive.is_file() {
-//RS             return Ok(LinkFlags {
-//RS                 lib_dirs: vec![dir.display().to_string()],
-//RS                 link_names: vec![format!("static=jet_r_{actual}"), "pthread".into()],
-//RS                 ..Default::default()
-//RS             });
-//RS         }
-//RS         return Err(e3201(lib));
-//RS     }
-//RS     if let Some(actual) = lib.strip_prefix("jet_octave_") {
-//RS         let dir = project_root
-//RS             .join(Syntax::SOURCE_ROOT_DIR)
-//RS             .join(ForeignLanguage::Octave.bindings_subdir());
-//RS         let archive = dir.join(format!("libjet_octave_{actual}.a"));
-//RS         if archive.is_file() {
-//RS             return Ok(LinkFlags {
-//RS                 lib_dirs: vec![dir.display().to_string()],
-//RS                 link_names: vec![format!("static=jet_octave_{actual}"), "pthread".into()],
-//RS                 ..Default::default()
-//RS             });
-//RS         }
-//RS         return Err(e3201(lib));
-//RS     }
-//RS     if let Some(actual) = lib.strip_prefix("jet_com_") {
-//RS         let dir = project_root
-//RS             .join(Syntax::SOURCE_ROOT_DIR)
-//RS             .join(ForeignLanguage::Com.bindings_subdir());
-//RS         let archive = dir.join(format!("libjet_com_{actual}.a"));
-//RS         let host_target = crate::FFI::host_target();
-//RS         if host_target.to_ascii_lowercase().contains("windows")
-//RS             && target.to_ascii_lowercase().contains("windows")
-//RS             && archive.is_file()
-//RS         {
-//RS             return Ok(LinkFlags {
-//RS                 lib_dirs: vec![dir.display().to_string()],
-//RS                 link_names: vec![
-//RS                     format!("static=jet_com_{actual}"),
-//RS                     "ole32".into(),
-//RS                     "oleaut32".into(),
-//RS                 ],
-//RS                 ..Default::default()
-//RS             });
-//RS         }
-//RS         return Err(e3201(lib));
-//RS     }
-//RS     if let Some(actual) = lib.strip_prefix("jet_fortran_") {
-//RS         let archive = project_root
-//RS             .join(Syntax::SOURCE_ROOT_DIR)
-//RS             .join(ForeignLanguage::Fortran.bindings_subdir())
-//RS             .join(format!("libjet_fortran_{actual}.a"));
-//RS         if archive.is_file() {
-//RS             return Ok(LinkFlags {
-//RS                 lib_dirs: vec![archive
-//RS                     .parent()
-//RS                     .unwrap_or(project_root)
-//RS                     .display()
-//RS                     .to_string()],
-//RS                 link_names: vec![format!("static=jet_fortran_{actual}")],
-//RS                 ..Default::default()
-//RS             });
-//RS         }
-//RS         return Err(e3201(lib));
-//RS     }
-//RS     if let Some(actual) = lib.strip_prefix("jet_cobol_") {
-//RS         let dir = project_root
-//RS             .join(Syntax::SOURCE_ROOT_DIR)
-//RS             .join(ForeignLanguage::Cobol.bindings_subdir());
-//RS         let archive = dir.join(format!("libjet_cobol_{actual}.a"));
-//RS         let path_file = dir.join(format!("{actual}.cobol-path"));
-//RS         let Ok(runtime_dir) = std::fs::read_to_string(path_file) else {
-//RS             return Err(e3201(lib));
-//RS         };
-//RS         let runtime_dir = runtime_dir.trim();
-//RS         if archive.is_file()
-//RS             && std::path::Path::new(runtime_dir).is_absolute()
-//RS             && std::path::Path::new(runtime_dir)
-//RS                 .join(if cfg!(target_os = "macos") {
-//RS                     "libcob.dylib"
-//RS                 } else {
-//RS                     "libcob.so"
-//RS                 })
-//RS                 .is_file()
-//RS         {
-//RS             return Ok(LinkFlags {
-//RS                 lib_dirs: vec![dir.display().to_string(), runtime_dir.to_string()],
-//RS                 link_names: vec![
-//RS                     format!("static=jet_cobol_{actual}"),
-//RS                     "dylib=cob".into(),
-//RS                     "pthread".into(),
-//RS                     "dl".into(),
-//RS                     "m".into(),
-//RS                 ],
-//RS                 rpath_dirs: vec![runtime_dir.to_string()],
-//RS                 ..Default::default()
-//RS             });
-//RS         }
-//RS         return Err(e3201(lib));
-//RS     }
-//RS     // 1. A declared `<lib>: c@…` dep in the manifest's `deps:` block.
-//RS     if let Some(target) = declared_c_dep_for_entry(lib, project_root, entry) {
-//RS         return clib_link(lib, &target, project_root);
-//RS     }
-//RS     // 2. pkg-config fallback (undeclared `use c.<lib>`).
-//RS     match pkg_config_link(lib) {
-//RS         PkgConfig::Found(flags) => Ok(flags),
-//RS         PkgConfig::NotFound | PkgConfig::Unavailable => Err(e3201(lib)),
-//RS     }
-//RS }
-//RS 
-//RS 
-//RS fn declared_c_dep_for_entry(
-//RS     lib: &str,
-//RS     project_root: &Path,
-//RS     entry: Option<&Path>,
-//RS ) -> Option<String> {
-//RS     use crate::Package::{DepSource, PackageFacts};
-//RS     let facts: PackageFacts = if let Some(entry) = entry {
-//RS         let source = std::fs::read_to_string(entry).ok()?;
-//RS         match crate::Package::extract_inline_package(&source).ok()? {
-//RS             Some(block) => {
-//RS                 if PackageFacts::load(project_root).is_some() {
-//RS                     return None;
-//RS                 }
-//RS                 PackageFacts::parse(block.body(&source), entry.display().to_string()).ok()?
-//RS             }
-//RS             None => PackageFacts::load(project_root)?.ok()?,
-//RS         }
-//RS     } else {
-//RS         PackageFacts::load(project_root)?.ok()?
-//RS     };
-//RS     facts.deps.into_iter().find_map(|(name, source)| {
-//RS         if name != lib {
-//RS             return None;
-//RS         }
-//RS         match source {
-//RS             DepSource::CLib { target } => Some(target),
-//RS             _ => None,
-//RS         }
-//RS     })
-//RS }
-//RS 
-//RS /// Libc-family names that the platform always links and that have no `.pc`
-//RS /// file: a bare `-l <lib>` on the default search path is correct for these.
-//RS const ALWAYS_LINKED_LIBC: &[&str] = &["c", "m", "pthread", "dl", "rt", "util"];
-//RS 
-//RS /// Resolve a declared `c@<target>` dep into link flags (S59/D-CFFI2).
-//RS ///   - `target == "system"` → (a) `pkg-config <lib>`; else (b) a bare `-l <lib>`
-//RS ///     for the always-linked libc set (no `.pc`); else (c) auto-provision
-//RS ///     `nixpkgs#<lib>`; else (d) E3201.
-//RS ///   - `target` of the form `nixpkgs:<attr>` → always auto-provision
-//RS ///     `nixpkgs#<attr>` (the nix attr may differ from the link name).
-//RS ///   - any other `target` → a local dir: `-L <path>`, `-I <path>`, `-l <lib>`.
-//RS fn clib_link(lib: &str, target: &str, project_root: &Path) -> Result<LinkFlags, Diagnostic> {
-//RS     // Explicit nixpkgs attr: `c@nixpkgs:<attr>`.
-//RS     if let Some(attr) = target.strip_prefix(NIXPKGS_TARGET_PREFIX) {
-//RS         return provision_from_nixpkgs(lib, attr, project_root);
-//RS     }
-//RS 
-//RS     if target == Syntax::SYSTEM_LIB_TARGET {
-//RS         // (a) host pkg-config.
-//RS         if let PkgConfig::Found(flags) = pkg_config_link(lib) {
-//RS             return Ok(flags);
-//RS         }
-//RS         // (b) always-linked libc: a bare `-l <lib>` is the declared intent.
-//RS         if ALWAYS_LINKED_LIBC.contains(&lib) {
-//RS             return Ok(LinkFlags {
-//RS                 link_names: vec![lib.to_string()],
-//RS                 ..Default::default()
-//RS             });
-//RS         }
-//RS         // (c) auto-provision from nixpkgs (attr == link name).
-//RS         return provision_from_nixpkgs(lib, lib, project_root);
-//RS     }
-//RS 
-//RS     // Local dir: link from `<path>` with the lib's own name.
-//RS     Ok(LinkFlags {
-//RS         include_dirs: vec![target.to_string()],
-//RS         lib_dirs: vec![target.to_string()],
-//RS         link_names: vec![lib.to_string()],
-//RS         rpath_dirs: Vec::new(),
-//RS     })
-//RS }
-//RS 
-//RS /// `target` prefix selecting an explicit nixpkgs attribute for a C dep.
-//RS const NIXPKGS_TARGET_PREFIX: &str = "nixpkgs:";
-//RS 
-//RS /// Realize `nixpkgs#<attr>` to a store path and build link flags from it.
-//RS /// The store path is cached at `<root>/.jet/clinks/<lib>` so repeat builds skip
-//RS /// the nix call; a stale/missing cached path re-realizes.
-//RS fn provision_from_nixpkgs(
-//RS     lib: &str,
-//RS     attr: &str,
-//RS     project_root: &Path,
-//RS ) -> Result<LinkFlags, Diagnostic> {
-//RS     let store = match cached_store_path(lib, project_root) {
-//RS         Some(p) => p,
-//RS         None => {
-//RS             let p = realize_nixpkgs(attr).map_err(|reason| e3210(lib, attr, &reason))?;
-//RS             write_cached_store_path(lib, &p, project_root);
-//RS             p
-//RS         }
-//RS     };
-//RS     let lib_dir = format!("{store}/lib");
-//RS     let include_dir = format!("{store}/include");
-//RS     Ok(LinkFlags {
-//RS         include_dirs: vec![include_dir],
-//RS         lib_dirs: vec![lib_dir.clone()],
-//RS         link_names: vec![lib.to_string()],
-//RS         rpath_dirs: vec![lib_dir],
-//RS     })
-//RS }
-//RS 
-//RS /// `<root>/.jet/clinks/<lib>` — the per-lib resolved-store-path cache file.
-//RS fn clink_cache_file(lib: &str, project_root: &Path) -> std::path::PathBuf {
-//RS     project_root
-//RS         .join(Syntax::SOURCE_ROOT_DIR)
-//RS         .join("clinks")
-//RS         .join(lib)
-//RS }
-//RS 
-//RS /// Read a cached store path if present and still a valid store dir.
-//RS fn cached_store_path(lib: &str, project_root: &Path) -> Option<String> {
-//RS     let f = clink_cache_file(lib, project_root);
-//RS     let p = std::fs::read_to_string(&f).ok()?;
-//RS     let p = p.trim().to_string();
-//RS     if !p.is_empty() && Path::new(&p).is_dir() {
-//RS         Some(p)
-//RS     } else {
-//RS         None
-//RS     }
-//RS }
-//RS 
-//RS /// Persist a resolved store path for next time (best-effort).
-//RS fn write_cached_store_path(lib: &str, store: &str, project_root: &Path) {
-//RS     let f = clink_cache_file(lib, project_root);
-//RS     if let Some(parent) = f.parent() {
-//RS         let _ = std::fs::create_dir_all(parent);
-//RS     }
-//RS     let _ = std::fs::write(&f, store);
-//RS }
-//RS 
-//RS /// Run `nix build --no-link --print-out-paths nixpkgs#<attr>`; return the store
-//RS /// path (first line of stdout). On any failure return a trimmed reason string.
-//RS fn realize_nixpkgs(attr: &str) -> Result<String, String> {
-//RS     let flake = format!("nixpkgs#{attr}");
-//RS     let out = std::process::Command::new("nix")
-//RS         .args(["build", "--no-link", "--print-out-paths"])
-//RS         .arg(&flake)
-//RS         .output()
-//RS         .map_err(|e| {
-//RS             if e.kind() == std::io::ErrorKind::NotFound {
-//RS                 "`nix` is not installed".to_string()
-//RS             } else {
-//RS                 e.to_string()
-//RS             }
-//RS         })?;
-//RS     if !out.status.success() {
-//RS         let stderr = String::from_utf8_lossy(&out.stderr);
-//RS         let reason = stderr
-//RS             .trim()
-//RS             .lines()
-//RS             .last()
-//RS             .unwrap_or("nix build failed")
-//RS             .to_string();
-//RS         return Err(reason);
-//RS     }
-//RS     let path = String::from_utf8_lossy(&out.stdout)
-//RS         .lines()
-//RS         .next()
-//RS         .unwrap_or("")
-//RS         .trim()
-//RS         .to_string();
-//RS     if path.is_empty() {
-//RS         return Err("nix build produced no store path".to_string());
-//RS     }
-//RS     Ok(path)
-//RS }
-//RS 
-//RS /// E3210 — a declared C dep could not be auto-provisioned from nixpkgs.
-//RS pub fn e3210(lib: &str, attr: &str, reason: &str) -> Diagnostic {
-//RS     Diagnostic::error(
-//RS         "E3210",
-//RS         format!("Couldn't fetch C library `{}` from nixpkgs.", lib),
-//RS         format!(
-//RS             "`{lib}: {}{}{}` asked Jet to provision `nixpkgs#{attr}`, but `nix build` failed: {reason}",
-//RS             Syntax::DEP_PROVIDER_C, Syntax::REF_PROVIDER_AT, Syntax::SYSTEM_LIB_TARGET,
-//RS         ),
-//RS         format!(
-//RS             "Check the attr exists (`nix build nixpkgs#{attr}`), or point at a local build with `{lib}: {}@\"<path>\"`, or install it and use `{}`.",
-//RS             Syntax::DEP_PROVIDER_C, Syntax::SYSTEM_LIB_TARGET,
-//RS         ),
-//RS         None,
-//RS     )
-//RS }
-//RS 
-//RS /// Native-library link inputs for rustc (`-l`, `-L`, `-I` analog via cc args).
-//RS #[derive(Debug, Clone, Default)]
-//RS pub struct LinkFlags {
-//RS     pub include_dirs: Vec<String>,
-//RS     pub lib_dirs: Vec<String>,
-//RS     /// Names passed to `-l` (e.g. `raylib`).
-//RS     pub link_names: Vec<String>,
-//RS     /// Dirs to bake into the binary's runtime search path (`-Wl,-rpath`), so a
-//RS     /// shared library realized into `/nix/store` is found at run time with no
-//RS     /// `LD_LIBRARY_PATH`.
-//RS     pub rpath_dirs: Vec<String>,
-//RS }
-//RS 
-//RS /// E3201 — C library not found via a declared `c@…` dep or pkg-config.
-//RS fn e3201(lib: &str) -> Diagnostic {
-//RS     Diagnostic::error(
-//RS         "E3201",
-//RS         format!("C library `{}` was not found.", lib),
-//RS         format!(
-//RS             "Jet looked for a `{lib}: {}@…` dep in `{}`, then tried `pkg-config {lib}` on the system; neither provided include/link paths.",
-//RS             Syntax::DEP_PROVIDER_C, Syntax::PACKAGE_FILE,
-//RS         ),
-//RS         format!(
-//RS             "Install the system package (e.g. `pacman -S {lib}`), or declare it as `{lib}: {}{}{}` in `deps:`.",
-//RS             Syntax::DEP_PROVIDER_C, Syntax::REF_PROVIDER_AT, Syntax::SYSTEM_LIB_TARGET,
-//RS         ),
-//RS         None,
-//RS     )
-//RS }
-//RS 
-//RS /// E3209 — the linker could not find a C library at link time. Distinct from
-//RS /// E3201 (resolution found no paths up front): here resolution produced a
-//RS /// `-l<name>` but the library is not on the link search path. Kept off the I2
-//RS /// ICE banner — a missing system library is a user/system problem, not
-//RS /// generated code being rejected by rustc.
-//RS pub fn e3209(lib: &str) -> Diagnostic {
-//RS     Diagnostic::error(
-//RS         "E3209",
-//RS         format!("The linker couldn't find C library `{}`.", lib),
-//RS         format!(
-//RS             "Your program links against `{lib}`, but the linker reported `cannot find -l{lib}` — the library isn't on the link search path.",
-//RS         ),
-//RS         format!(
-//RS             "Declare it in `deps:` so Jet provisions it: `{lib}: {}{}{}` (host pkg-config, else fetched from nixpkgs), or `{lib}: {}@nixpkgs:<attr>` to pick the nixpkgs attribute, or install the system package.",
-//RS             Syntax::DEP_PROVIDER_C, Syntax::REF_PROVIDER_AT, Syntax::SYSTEM_LIB_TARGET,
-//RS             Syntax::DEP_PROVIDER_C,
-//RS         ),
-//RS         None,
-//RS     )
-//RS }
-//RS 
-//RS #[cfg(test)]
-//RS mod tests {
-//RS     use super::*;
-//RS 
-//RS     #[test]
-//RS     fn stale_generated_descriptor_is_rejected_before_loading() {
-//RS         let source = "// jet-ffi-descriptor=stale\n#Bindgen module c.probe.__bindgen__ {\n    fn ping() -> Int = \"ping\"\n}\n";
-//RS         let mut diagnostics = Vec::new();
-//RS         let mut modules = Vec::new();
-//RS         load_cache_source(
-//RS             source,
-//RS             Path::new(".jet/bindings/c/probe.jet"),
-//RS             "probe",
-//RS             &mut diagnostics,
-//RS             &mut modules,
-//RS         );
-//RS         assert_eq!(modules.len(), 0);
-//RS         assert_eq!(diagnostics.len(), 1);
-//RS         assert_eq!(diagnostics[0].code, "E3208");
-//RS     }
-//RS }
-//RS 
-//RS enum PkgConfig {
-//RS     Found(LinkFlags),
-//RS     NotFound,
-//RS     Unavailable,
-//RS }
-//RS 
-//RS /// Run `pkg-config --cflags --libs <lib>` and parse `-I`/`-L`/`-l` flags.
-//RS fn pkg_config_link(lib: &str) -> PkgConfig {
-//RS     let out = match std::process::Command::new("pkg-config")
-//RS         .arg("--cflags")
-//RS         .arg("--libs")
-//RS         .arg(lib)
-//RS         .output()
-//RS     {
-//RS         Ok(o) => o,
-//RS         Err(_) => return PkgConfig::Unavailable,
-//RS     };
-//RS     if !out.status.success() {
-//RS         return PkgConfig::NotFound;
-//RS     }
-//RS     let text = String::from_utf8_lossy(&out.stdout);
-//RS     PkgConfig::Found(parse_pkg_config(&text, lib))
-//RS }
-//RS 
-//RS /// Parse a pkg-config flag line into structured `LinkFlags`. Public for tests.
-//RS pub fn parse_pkg_config(text: &str, lib: &str) -> LinkFlags {
-//RS     let mut flags = LinkFlags::default();
-//RS     for tok in text.split_whitespace() {
-//RS         if let Some(d) = tok.strip_prefix("-I") {
-//RS             flags.include_dirs.push(d.to_string());
-//RS         } else if let Some(d) = tok.strip_prefix("-L") {
-//RS             flags.lib_dirs.push(d.to_string());
-//RS         } else if let Some(n) = tok.strip_prefix("-l") {
-//RS             flags.link_names.push(n.to_string());
-//RS         }
-//RS     }
-//RS     if flags.link_names.is_empty() {
-//RS         flags.link_names.push(lib.to_string());
-//RS     }
-//RS     flags
-//RS }
-//RS 
-// END-PORT-PENDING 2058 crates/jet-pkg-model/src/CFFI.rs:3601-4153
+// C-FFI link resolution has one canonical implementation in
+// Compiler/JetPkgModel/Source/CFFI/LinkResolution.jet; no duplicate APIs here.
 
+// Rust: crates/jet-pkg-model/src/CFFI.rs:3371
+// resolve_link_for_target_with_entry (tail3601-3851) belongs to packet2057's
+// complete function: pkg_cffi_resolve_link_for_target_with_entry, LinkResolution.jet:132;
+// generated Ada/Pascal/Dart/PowerShell/Py/Com/Fortran/Cobol arms:182-221.
+
+// Rust: crates/jet-pkg-model/src/CFFI.rs:3854
+// declared_c_dep_for_entry: pkg_cffi_declared_c_dep_for_entry, LinkResolution.jet:275;
+// inline/manifest authority and fallible load: pkg_cffi_declared_package_facts:284,
+// pkg_cffi_project_facts:304.
+
+// Rust: crates/jet-pkg-model/src/CFFI.rs:3887
+// ALWAYS_LINKED_LIBC: CFFI_ALWAYS_LINKED_LIBC, LinkResolution.jet:13.
+
+// Rust: crates/jet-pkg-model/src/CFFI.rs:3896
+// clib_link: pkg_cffi_clib_link, LinkResolution.jet:312 (nixpkgs/system/local).
+
+// Rust: crates/jet-pkg-model/src/CFFI.rs:3928
+// NIXPKGS_TARGET_PREFIX: CFFI_NIXPKGS_TARGET_PREFIX, LinkResolution.jet:11.
+
+// Rust: crates/jet-pkg-model/src/CFFI.rs:3933
+// provision_from_nixpkgs: pkg_cffi_provision_from_nixpkgs, LinkResolution.jet:332.
+
+// Rust: crates/jet-pkg-model/src/CFFI.rs:3957
+// clink_cache_file: pkg_cffi_clink_cache_file, LinkResolution.jet:347.
+
+// Rust: crates/jet-pkg-model/src/CFFI.rs:3965
+// cached_store_path: pkg_cffi_cached_store_path, LinkResolution.jet:352.
+
+// Rust: crates/jet-pkg-model/src/CFFI.rs:3977
+// write_cached_store_path: pkg_cffi_write_cached_store_path, LinkResolution.jet:361.
+
+// Rust: crates/jet-pkg-model/src/CFFI.rs:3987
+// realize_nixpkgs: pkg_cffi_realize_nixpkgs, LinkResolution.jet:369;
+// NotFound spawn reason: pkg_cffi_nix_spawn_reason:382. // GATE #4494
+
+// Rust: crates/jet-pkg-model/src/CFFI.rs:4023
+// e3210: pkg_cffi_e3210, LinkResolution.jet:42 (exact diagnostic strings).
+
+// Rust: crates/jet-pkg-model/src/CFFI.rs:4041
+// LinkFlags: LinkResolution.jet:16, default/empty:25.
+
+// Rust: crates/jet-pkg-model/src/CFFI.rs:4053
+// e3201: pkg_cffi_e3201, LinkResolution.jet:31 (exact diagnostic strings).
+
+// Rust: crates/jet-pkg-model/src/CFFI.rs:4074
+// e3209: pkg_cffi_e3209, LinkResolution.jet:37 (exact diagnostic strings).
+
+// Rust: crates/jet-pkg-model/src/CFFI.rs:4095
+// stale_generated_descriptor_is_rejected_before_loading: Tests/CFFI03Tests.jet.
+
+// Rust: crates/jet-pkg-model/src/CFFI.rs:4112
+// PkgConfig: PkgConfigOutcome, LinkResolution.jet:390 (Found/NotFound/Unavailable).
+
+// Rust: crates/jet-pkg-model/src/CFFI.rs:4119
+// pkg_config_link: pkg_cffi_pkg_config_link, LinkResolution.jet:397. // GATE #4494
+
+// Rust: crates/jet-pkg-model/src/CFFI.rs:4137
+// parse_pkg_config: pkg_cffi_parse_pkg_config, LinkResolution.jet:405;
+// Unicode whitespace tokenization: pkg_cffi_whitespace_tokens:426.

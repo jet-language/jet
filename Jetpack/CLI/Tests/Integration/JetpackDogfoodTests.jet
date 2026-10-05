@@ -1,0 +1,447 @@
+use std.[env, fs]
+use std.process.[Command, Stdio]
+use std.time.[Instant, Duration]
+use core.files.OSPath
+use core.sys.target
+use tests.[common, no_nix_namespace]
+use tests.jetpack_fixtures.[jetpack, jet, Scratch]
+use jetpack_cli.Tests.Integration.JetpackDogfood.[TEST, ROOT, TARGET, MODE, required_directory, command, enter, checked, run_phase]
+use jetpack_cli.Tests.Integration.JetpackEnvUseOffline.[write_native_omp_fixture, write_native_pid_fixture, run_env, tree_bytes, restore_mtime]
+use jetpack_cli.Tests.Integration.JetpackSemanticLock.[unique_root, pkg]
+use jetpack.Lock
+use jetpack.Lock.[DependencyProvenance, LockEnvelope]
+use jetpack.Package.[ProvenanceRequirement, PackageFacts]
+use jetpack.Overlay
+use jetpack.Overlay.[OverlayPolicy, OverlaySet, PackageOverride]
+use jetpack.Store
+use jetpack.SemanticLock
+use jetpack.SemanticLock.[apply_overlay_invalidations, atomic_commit, load, merge, merge_revalidate_commit, overlay_invalidations, record_catalog_selection, revalidate, selective_update, strip_semantic_sections, LockInput, LockRecordKind, SemanticLockFile, SourceMapEntry, ValidationIssue]
+
+// GATE #4494 native filesystem/process/time; #4483 selected OS/family;
+// #4499 exact composite tuple map keys in overlay_invalidations_helper; no string surrogate.
+
+// Rust: tests/jetpack_dogfood.rs:26
+#Ignore("live signed-cache downloads and real compiler build; requires a bounded coordinated dogfood root and target")
+#Test("jet_repository_env_cold_and_offline_without_nix_host_store_or_fixtures") {
+    if target.selected_os() == "linux" {
+        base :: required_directory(ROOT)
+        build_target :: required_directory(TARGET)
+        repo :: OSPath.from_text(env.var("CARGO_MANIFEST_DIR").unwrap())
+        project :: base.join("project")
+        if env.var_os(no_nix_namespace.CHILD_MARKER).is_some() {
+            offline :: env.var(MODE).unwrap() == "offline"
+            network :: if offline -> no_nix_namespace.NetworkMode.Disabled else -> no_nix_namespace.NetworkMode.Enabled
+            no_nix_namespace.run_in_no_nix_namespace(TEST, network, () -> run_phase(base, project, build_target, offline))
+            return
+        }
+        assert(env.var_os("JETPACK_FIXTURES").is_none(), "live proof must not use fixtures")
+        assert(!project.exists(), "use a fresh dogfood root; do not overwrite a previous receipt")
+        assert(!base.join("store").exists(), "cold proof requires an empty Hangar")
+        loop directory in [project, base.join("home"), base.join("tmp")] { fs.create_dir_all(directory).unwrap() }
+        loop entry in fs.read_dir(repo).unwrap() {
+            entry :: entry.unwrap()
+            name :: entry.file_name()
+            text :: name.to_string_lossy()
+            if text == ".git" || text == ".jet" || text == "target" || text.starts_with("target-") { continue }
+            if text == "env.jet" { fs.copy(entry.path(), project.join(name)).unwrap() }
+            else { fs.symlink(entry.path(), project.join(name)).unwrap() }
+        }
+        fs.symlink(build_target, project.join("target")).unwrap()
+        cargo_home :: env.var_os("CARGO_HOME").map(value -> OSPath.from(value))
+            .unwrap_or_else(() -> OSPath.from(env.var_os("HOME").unwrap()).join(".cargo"))
+        env.set_var("JETPACK_DOGFOOD_CARGO_HOME", cargo_home)
+        env.set_var("TMPDIR", base.join("tmp"))
+        env.set_var(MODE, "online")
+        no_nix_namespace.run_in_no_nix_namespace(TEST, no_nix_namespace.NetworkMode.Enabled, () -> {})
+        lock :: fs.read(project.join(".jet/lock")).expect("native admission must produce a lock")
+        fs.create_dir(base.join("replaced-catalog")).unwrap()
+        env.set_var(MODE, "offline")
+        no_nix_namespace.run_in_no_nix_namespace(TEST, no_nix_namespace.NetworkMode.Disabled, () -> {})
+        assert_eq(fs.read(project.join(".jet/lock")).unwrap(), lock, "offline replay changed locked authority")
+        smoke := fs.read_to_string(base.join("offline-compiler-smoke.stdout")).unwrap().trim() // #4303
+        assert_eq(smoke, "hello, world", "the namespace child must execute the ignored test body, not silently skip it")
+        assert(!base.join("home/.jet/trust").exists(), "one-run trust must not persist a grant")
+    }
+}
+
+// Rust: tests/jetpack_env_use_offline.rs:51
+#Test("warm_jet_entry_execs_tool_without_wrapper_process") {
+    if target.selected_os() == "linux" {
+        project :: Scratch.new("warm-jet-entry-project")
+        root :: Scratch.new("warm-jet-entry-root")
+        fixtures :: Scratch.new("warm-jet-entry-fixtures")
+        home :: Scratch.new("warm-jet-entry-home")
+        write_native_pid_fixture(fixtures.path)
+        fs.write(project.join("env.jet"), "module env.dev {{ packages: [\"omp@releases#1.0.0\"] }}\n").unwrap()
+        prep :: jetpack().args(["env", "--prep", "--yes", "--trust", "--offline", "--no-color", "--fixtures"]).arg(fixtures.path)
+            .current_dir(project.path).env("JETPACK_ROOT", root.path).env("HOME", home.path).output().unwrap()
+        assert(prep.status.success(), "env --prep failed: {String.from_utf8_lossy(prep.stderr)}")
+        fs.remove_file(fixtures.path.join("jetpackage-omp.json")).unwrap()
+        fs.remove_file(fixtures.path.join("omp-1.0.0")).unwrap()
+        command := jet()
+        &command.args(["env", "--trust", "--offline", "--no-color", "--", "omp"]).current_dir(project.path)
+            .env("JETPACK_ROOT", root.path).env("HOME", home.path).env("JETPACK_DENY_NETWORK", "1").env_remove("JETPACK_FIXTURES")
+        &command.stdout(Stdio.piped())
+        child :: &command.spawn().unwrap()
+        pid :: child.id()
+        output :: child.wait_with_output().unwrap()
+        assert(output.status.success(), "warm jet entry failed: {String.from_utf8_lossy(output.stderr)}")
+        pid_text := String.from_utf8_lossy(output.stdout).trim() // #4303
+        tool_pid :: pid_text.parse<U32>().unwrap_or_else(error -> panic("warm entry did not return the selected tool pid: {error}; stdout={output.stdout:?}; stderr={output.stderr:?}"))
+        assert_eq(tool_pid, pid, "warm entry retained a Jet/Jetpack wrapper process")
+    }
+}
+
+// Rust: tests/jetpack_env_use_offline.rs:173
+#Test("fully_materialized_env_and_use_enter_without_network_or_prompt") {
+    if target.selected_os() == "linux" {
+        project :: Scratch.new("env-use-offline-project")
+        root :: Scratch.new("env-use-offline-root")
+        fixtures :: Scratch.new("env-use-offline-fixtures")
+        home :: Scratch.new("env-use-offline-home")
+        _ :: write_native_omp_fixture(fixtures.path)
+        fs.write(project.join("env.jet"), "module env.dev {{ packages: [\"omp@releases#1.0.0\"] }}\n").unwrap()
+        prep :: jetpack().args(["env", "--prep", "--yes", "--trust", "--offline", "--no-color", "--fixtures"]).arg(fixtures.path)
+            .current_dir(project.path).env("JETPACK_ROOT", root.path).env("HOME", home.path).output().unwrap()
+        assert(prep.status.success(), "env --prep failed: {String.from_utf8_lossy(prep.stderr)}")
+        fs.remove_file(fixtures.path.join("jetpackage-omp.json")).unwrap()
+        fs.remove_file(fixtures.path.join("omp-1.0.0")).unwrap()
+        warmup :: run_env(project.path, root.path, home.path, false)
+        assert(warmup.status.success(), "cached entry failed: {String.from_utf8_lossy(warmup.stderr)}")
+        warmup_text := String.from_utf8_lossy(warmup.stdout).trim() // #4303
+        assert_eq(warmup_text, "cached")
+        receipt_path :: project.join(".jet/receipts/env-entry")
+        receipt_before :: fs.read(receipt_path).unwrap()
+        output_hash :: String.from_utf8(receipt_before).unwrap().lines().find(line -> line.starts_with("omp@"))
+            .and_then(line -> line.split('\t').nth(3)).unwrap().to_string()
+        out_dir :: root.path.join("hangar/objects").join(output_hash)
+        lock_path :: project.join(".jet/lock")
+        lock_before :: fs.read(lock_path).ok()
+        root_bytes_before_warm_runs :: tree_bytes(root.path)
+        loop run in 0..<3 {
+            started :: Instant.now()
+            output :: run_env(project.path, root.path, home.path, run == 0)
+            elapsed :: started.elapsed()
+            assert(elapsed < Duration.from_secs(1), "warm env run {run} took {elapsed:?}: {String.from_utf8_lossy(output.stderr)}")
+            assert(output.status.success(), "warm env run {run} failed: {String.from_utf8_lossy(output.stderr)}")
+            stdout := String.from_utf8_lossy(output.stdout).trim() // #4303
+            assert_eq(stdout, "cached")
+            stderr :: String.from_utf8_lossy(output.stderr)
+            assert(stderr.contains("cache hit 100 percent"), "stderr: {stderr}")
+            if run == 0 { assert(!stderr.contains("TIMING step omp"), "warm path realized omp; receipt:\n{fs.read_to_string(receipt_path).unwrap()}\nstderr:\n{stderr}") }
+            assert(!stderr.contains("continue?"), "cached entry prompted: {stderr}")
+        }
+        assert_eq(fs.read(receipt_path).unwrap(), receipt_before)
+        assert_eq(fs.read(lock_path).ok(), lock_before)
+        assert_eq(tree_bytes(root.path), root_bytes_before_warm_runs, "warm reuse left net Hangar/lease bytes")
+        env_path :: project.join("env.jet")
+        original_env :: fs.read(env_path).unwrap()
+        changed_env := ~original_env
+        &changed_env.extend_from_slice("\n".bytes())
+        fs.write(env_path, changed_env).unwrap()
+        changed_input :: run_env(project.path, root.path, home.path, true)
+        assert(changed_input.status.success(), "changed environment input failed: {String.from_utf8_lossy(changed_input.stderr)}")
+        changed_text := String.from_utf8_lossy(changed_input.stdout).trim() // #4303
+        assert_eq(changed_text, "cached")
+        assert(String.from_utf8_lossy(changed_input.stderr).contains("TIMING step omp"), "changed environment input was incorrectly warm-reused: {String.from_utf8_lossy(changed_input.stderr)}")
+        fs.write(env_path, original_env).unwrap()
+        restored_input :: run_env(project.path, root.path, home.path, false)
+        assert(restored_input.status.success(), "restored environment input failed: {String.from_utf8_lossy(restored_input.stderr)}")
+        journal_path :: fs.read_dir(root.path.join("hangar/closure-db/journal")).unwrap().map(entry -> entry.unwrap().path())
+            .find(path -> path.extension().and_then(extension -> extension.to_str()) == Val("txn")).unwrap()
+        journal_metadata :: fs.metadata(journal_path).unwrap()
+        status :: Command.new("touch").args(["-d", "@1"]).arg(journal_path).status().unwrap()
+        assert(status.success(), "could not mutate journal mtime")
+        changed_journal :: run_env(project.path, root.path, home.path, true)
+        assert(changed_journal.status.success(), "changed store journal failed: {String.from_utf8_lossy(changed_journal.stderr)}")
+        assert(String.from_utf8_lossy(changed_journal.stderr).contains("TIMING step omp"), "changed store journal was incorrectly warm-reused: {String.from_utf8_lossy(changed_journal.stderr)}")
+        restore_mtime(journal_path, &journal_metadata)
+        restored_journal :: run_env(project.path, root.path, home.path, false)
+        assert(restored_journal.status.success(), "restored store journal failed: {String.from_utf8_lossy(restored_journal.stderr)}")
+        if target.selected_family() == "unix" {
+            seal_path :: root.path.join("hangar/seals").join(output_hash)
+            seal_before :: fs.read(seal_path).unwrap()
+            seal_metadata :: fs.metadata(seal_path).unwrap()
+            tampered_seal := ~seal_before
+            tampered_seal[0] ^= 1
+            fs.write(seal_path, tampered_seal).unwrap()
+            restore_mtime(seal_path, &seal_metadata)
+            tampered_metadata :: fs.metadata(seal_path).unwrap()
+            assert_eq(tampered_metadata.len(), seal_metadata.len())
+            assert_eq(tampered_metadata.mtime(), seal_metadata.mtime())
+            assert_eq(tampered_metadata.mtime_nsec(), seal_metadata.mtime_nsec())
+            output :: run_env(project.path, root.path, home.path, true)
+            assert(output.status.success(), "same-stat seal mutation did not cold-fallback: {String.from_utf8_lossy(output.stderr)}")
+            stderr :: String.from_utf8_lossy(output.stderr)
+            assert(stderr.contains("TIMING step omp"), "same-stat seal mutation was incorrectly warm-reused: {stderr}")
+            fs.write(seal_path, seal_before).unwrap()
+            restore_mtime(seal_path, &seal_metadata)
+            restored :: run_env(project.path, root.path, home.path, false)
+            assert(restored.status.success(), "restored seal failed: {String.from_utf8_lossy(restored.stderr)}")
+            fs.remove_file(seal_path).unwrap()
+            deleted_seal :: run_env(project.path, root.path, home.path, true)
+            assert(deleted_seal.status.success(), "deleted seal did not cold-fallback: {String.from_utf8_lossy(deleted_seal.stderr)}")
+            deleted_stderr :: String.from_utf8_lossy(deleted_seal.stderr)
+            assert(deleted_stderr.contains("TIMING step omp"), "deleted seal was incorrectly warm-reused: {deleted_stderr}")
+        }
+        receipt :: fs.read_to_string(project.join(".jet/receipts/env-entry")).unwrap()
+        assert(receipt.starts_with("jetpack-env-entry-v4\n"), "normal env entry must publish the verified activation receipt: {receipt}")
+        output :: jetpack().args(["use", "omp@releases#1.0.0", "--offline", "--", "omp"]).current_dir(project.path)
+            .env("JETPACK_ROOT", root.path).env("HOME", home.path).env("JETPACK_DENY_NETWORK", "1").env_remove("JETPACK_FIXTURES").output().unwrap()
+        assert(output.status.success(), "cached entry failed: {String.from_utf8_lossy(output.stderr)}")
+        stdout := String.from_utf8_lossy(output.stdout).trim() // #4303
+        assert_eq(stdout, "cached")
+        stderr :: String.from_utf8_lossy(output.stderr)
+        assert(!stderr.contains("continue?"), "cached entry prompted: {stderr}")
+        common.make_tree_writable(out_dir)
+        fs.remove_dir_all(out_dir).unwrap()
+        deleted_object :: run_env(project.path, root.path, home.path, true)
+        assert(!deleted_object.status.success(), "deleted direct-CAS output was served: {String.from_utf8_lossy(deleted_object.stderr)}")
+    }
+}
+
+// Rust: tests/jetpack_env_use_offline.rs:415
+#Test("native_env_and_use_enter_without_network_or_prompt") {
+    project :: Scratch.new("native-env-use-offline-project")
+    root :: Scratch.new("native-env-use-offline-root")
+    fixtures :: Scratch.new("native-env-use-offline-fixtures")
+    home :: Scratch.new("native-env-use-offline-home")
+    _ :: write_native_omp_fixture(fixtures.path)
+    fs.write(project.join("env.jet"), "module env.dev {{ packages: [\"omp@releases#1.0.0\"] }}\n").unwrap()
+    prep :: jetpack().args(["env", "--prep", "--yes", "--trust", "--offline", "--no-color", "--fixtures"]).arg(fixtures.path)
+        .current_dir(project.path).env("JETPACK_ROOT", root.path).env("HOME", home.path).output().unwrap()
+    assert(prep.status.success(), "env --prep failed: {String.from_utf8_lossy(prep.stderr)}")
+    fs.remove_file(fixtures.path.join("jetpackage-omp.json")).unwrap()
+    fs.remove_file(fixtures.path.join("omp-1.0.0")).unwrap()
+    loop args in [["env", "--trust", "--offline", "--no-color", "--", "omp"], ["use", "omp@releases#1.0.0", "--offline", "--no-color", "--", "omp"]] {
+        output :: jetpack().args(args).current_dir(project.path).env("JETPACK_ROOT", root.path).env("HOME", home.path)
+            .env("JETPACK_DENY_NETWORK", "1").env_remove("JETPACK_FIXTURES").output().unwrap()
+        assert(output.status.success(), "cached entry failed: {String.from_utf8_lossy(output.stderr)}")
+        stdout := String.from_utf8_lossy(output.stdout).trim() // #4303
+        assert_eq(stdout, "cached")
+        stderr :: String.from_utf8_lossy(output.stderr)
+        assert(!stderr.contains("continue?"), "cached entry prompted: {stderr}")
+    }
+}
+
+// Rust: tests/jetpack_semantic_lock.rs:57
+#Test("provenance_policy_none_logged_attested_and_e1204") {
+    loop (spelling, expected) in [("none", ProvenanceRequirement.None), ("logged", ProvenanceRequirement.Logged), ("attested", ProvenanceRequirement.Attested)] {
+        facts :: PackageFacts.parse("name: \"app\"\nversion: \"0.1.0\"\nauthority: {{ trust: {{ require: {spelling} }} }}\n", "test").expect("authority provenance requirement should parse")
+        assert_eq(facts.authority.trust.unwrap().require, Val(expected))
+    }
+    lock := Lock.parse("""
+version = 1
+
+[[package]]
+name = "textkit"
+version = "1.2.0"
+source = {{ path = "textkit" }}
+fingerprint = "fp-textkit"
+content-hash = "sha256-locked"
+dependencies = []
+
+[root]
+dependencies = ["textkit"]
+""").expect("provenance lock fixture should parse")
+    assert(Lock.enforce_provenance_requirement(lock, ProvenanceRequirement.None).is_ok())
+    assert(Lock.enforce_provenance_requirement(lock, ProvenanceRequirement.Logged).is_err())
+    lock.packages[0].provenance = Val(DependencyProvenance{transparency: Val("registry log #48122"), publisher: Val("ed25519:ak3f \"textkit team\""), build: None})
+    lock.packages[0].envelope = Val(LockEnvelope{output_hash: "sha256-output", platform: "x86_64-linux", signature: "", provenance: "provider-built", catalog_tier: "", catalog_trust: ""})
+    assert(Lock.enforce_provenance_requirement(lock, ProvenanceRequirement.Logged).is_ok())
+    assert(Lock.enforce_provenance_requirement(lock, ProvenanceRequirement.Attested).is_err(), "generic envelope provenance is recorded evidence, not an attestation")
+    lock.packages[0].provenance.as_mut().unwrap().build = Val("slsa v1.0")
+    assert(Lock.enforce_provenance_requirement(lock, ProvenanceRequirement.Attested).is_ok())
+    encoded :: Lock.write(lock)
+    assert(encoded.contains("provenance-transparency = \"registry log #48122\""))
+    assert(encoded.contains("provenance-publisher = \"ed25519:ak3f \\\"textkit team\\\"\""))
+    assert(encoded.contains("provenance-build = \"slsa v1.0\""))
+    round_trip :: Lock.parse(encoded).expect("provenance fields should round-trip")
+    assert_eq(round_trip.packages[0].provenance, lock.packages[0].provenance)
+    root :: unique_root("provenance-e1204")
+    entry :: root.join("textkit")
+    fs.create_dir_all(entry).unwrap()
+    fs.write(entry.join("package.jet"), "name: \"textkit\"\nversion: \"1.2.0\"\n").unwrap()
+    diagnostic :: Store.verify_content_hash("textkit", entry, "sha256-not-the-tree").expect_err("a changed store entry must retain E1204")
+    assert_eq(diagnostic.code, "E1204")
+    _ :: fs.remove_dir_all(root)
+}
+
+// Rust: tests/jetpack_semantic_lock.rs:139
+#Test("live_lock_path_atomic_commit_roundtrip_preserves_machine_sections") {
+    root :: unique_root("live")
+    lock_path :: Store.lock_path(root)
+    fs.create_dir_all(lock_path.parent().unwrap()).unwrap()
+    fs.write(lock_path, """
+version = 1
+
+[[package]]
+name = "app"
+version = "0.1.0"
+source = {{ root = "." }}
+fingerprint = "fp-app"
+dependencies = []
+
+[root]
+dependencies = ["app"]
+""").unwrap()
+    semantic := SemanticLockFile.with_records([pkg("app", "core.log", "1.2.3", "sha256-log")])
+    semantic.inputs = [LockInput{name: "nixpkgs", url: "github:NixOS/nixpkgs/abc", follows: ""}, LockInput{name: "home", url: "github:nix-community/home-manager", follows: "nixpkgs"}]
+    semantic.source_maps = [SourceMapEntry{pattern: "core.*", sources: ["catalog:core.log", "core"]}]
+    atomic_commit(root, semantic).expect("atomic commit")
+    raw :: fs.read_to_string(lock_path).unwrap()
+    assert(raw.contains("[[package]]"))
+    assert(raw.contains("name = \"app\""))
+    assert(raw.contains("[[semantic_record]]"))
+    assert(raw.contains("[[lock_input]]"))
+    assert(raw.contains("[[source_map]]"))
+    assert(raw.contains("follows = \"nixpkgs\""))
+    machine :: Lock.parse(raw).expect("machine lock parse")
+    assert_eq(machine.packages.len(), 1)
+    assert_eq(machine.packages[0].name, "app")
+    loaded :: load(root).expect("semantic load")
+    assert_eq(loaded.records.len(), 1)
+    assert_eq(loaded.inputs.len(), 2)
+    assert_eq(loaded.source_maps.len(), 1)
+    assert_eq(loaded.records[0].identity.exact, "1.2.3")
+    _ :: fs.remove_dir_all(root)
+}
+
+// Rust: tests/jetpack_semantic_lock.rs:203
+#Test("catalog_selection_records_owner_and_source_ref") {
+    lock := SemanticLockFile.default()
+    record_catalog_selection(&lock, "app", "log", "core.log@1.2.3", "sha256-catalog", "x86_64-linux", "workspace selected shared logging")
+    assert_eq(lock.records.len(), 1)
+    assert_eq(lock.records[0].rationales[0].source_ref, "catalog:log")
+    assert_eq(lock.records[0].rationales[0].adapter_id, "workspace.catalog")
+    assert(revalidate(lock).is_ok())
+}
+
+// Rust: tests/jetpack_semantic_lock.rs:224
+#Test("selective_update_keeps_unrelated_record_bytes_stable") {
+    lock := SemanticLockFile.with_records([pkg("app", "core.log", "1.2.3", "sha256-log"), pkg("app", "core.http", "2.0.0", "sha256-http")])
+    before :: SemanticLock.write(lock)
+    http_block :: before.split("[[semantic_record]]").find(block -> block.contains("key = \"core.http\"")).expect("http record").to_string()
+    selective_update(&lock, pkg("app", "core.log", "1.3.0", "sha256-log-new"))
+    after :: SemanticLock.write(lock)
+    http_after :: after.split("[[semantic_record]]").find(block -> block.contains("key = \"core.http\"")).expect("http record after").to_string()
+    assert_eq(http_block, http_after)
+    assert(after.contains("exact = \"1.3.0\""))
+}
+
+// Rust: tests/jetpack_semantic_lock.rs:248
+#Test("input_follows_cycle_and_missing_target_fail_revalidate") {
+    lock := SemanticLockFile.with_records([pkg("app", "core.log", "1.2.3", "sha256-log")])
+    lock.inputs = [LockInput{name: "a", url: "u-a", follows: "b"}, LockInput{name: "b", url: "u-b", follows: "a"}]
+    err :: revalidate(lock).expect_err("cycle")
+    assert(err.iter().any(issue -> issue == ValidationIssue.InputCycle(_)))
+    lock.inputs = [LockInput{name: "home", url: "u", follows: "missing"}]
+    missing :: revalidate(lock).expect_err("missing follows")
+    assert(missing.iter().any(issue -> issue == ValidationIssue.MissingFollows{..}))
+}
+
+// Rust: tests/jetpack_semantic_lock.rs:280
+#Test("source_map_rejects_wrong_authority") {
+    lock := SemanticLockFile.with_records([pkg("app", "Company.Lib", "1.0.0", "sha256-lib")])
+    lock.records[0].rationales[0].source_ref = "nuget:PublicGallery"
+    lock.source_maps = [SourceMapEntry{pattern: "Company.*", sources: ["nuget:CompanyFeed"]}]
+    err :: revalidate(lock).expect_err("source authority")
+    assert(err.iter().any(issue -> issue == ValidationIssue.SourceAuthority{..}))
+}
+
+// Rust: tests/jetpack_semantic_lock.rs:295
+#Test("overlay_change_invalidates_exact_action_keys_and_explains_why") {
+    before :: OverlayPolicy{overlays: [OverlaySet{name: "beta", provider: None, packages: [PackageOverride{package: "foo", source: None, version: Val("1.0.0"), flags: [], priority: 0, field_priorities: [:], env: [], patches: ["patches/a.patch"], allow_unfree: false}]}], ..OverlayPolicy.default()}
+    after :: OverlayPolicy{overlays: [OverlaySet{name: "beta", provider: None, packages: [PackageOverride{package: "foo", source: None, version: Val("1.0.0"), flags: [], priority: 0, field_priorities: [:], env: [], patches: ["patches/a.patch", "patches/b.patch"], allow_unfree: false}]}], ..OverlayPolicy.default()}
+    actions :: [String:[String]]{"foo": ["action:foo:build", "action:foo:check"]}
+    inv :: Overlay.invalidations_against(before, after, actions).unwrap()
+    assert_eq(inv.len(), 1)
+    assert_eq(inv[0].affected_action_keys, ["action:foo:build", "action:foo:check"])
+    assert(inv[0].reason.contains("changed package `foo`"))
+    assert_ne(inv[0].policy_fingerprint_before, inv[0].policy_fingerprint_after)
+    overlay_record :: Overlay.semantic_records(before, "app", "x86_64-linux").unwrap().into_iter().next().unwrap()
+    lock := SemanticLockFile.with_records([pkg("app", "foo", "1.0.0", "sha256-foo"), overlay_record])
+    apply_overlay_invalidations(&lock, inv)
+    assert(!lock.records.iter().any(record -> record.identity.kind == LockRecordKind.PackageOverlay))
+    foo :: lock.records.iter().find(record -> record.identity.key == "foo").unwrap()
+    assert(foo.identity.hash.is_empty(), "hash cleared for rebuild")
+}
+
+// Rust: tests/jetpack_semantic_lock.rs:374
+#Test("overlay_semantic_projection_uses_resolved_facts_and_provenance") {
+    policy :: Overlay.parse_workspace_policy("""
+module workspace {{
+    overlay base {{
+        package("foo").version: "1"
+    }}
+    overlay force {{
+        package("foo").version: Force("2")
+    }}
+}}
+""").unwrap()
+    records :: Overlay.semantic_records(policy, "app", "x86_64-linux").unwrap()
+    record :: records.iter().find(record -> record.identity.key == "force:foo").unwrap()
+    assert_eq(record.identity.exact, "2")
+    assert_eq(record.future_fields.get("overlay-fact-version"), Val("2"))
+    assert_eq(record.rationales.len(), 2)
+    assert(record.rationales.iter().any(rationale -> rationale.reason.contains("base")))
+    assert(record.rationales.iter().any(rationale -> rationale.reason.contains("force")))
+    loaded :: SemanticLock.parse(SemanticLock.write(SemanticLockFile.with_records(records)))
+    loaded_record :: loaded.records.iter().find(record -> record.identity.key == "force:foo").unwrap()
+    assert_eq(loaded_record.future_fields.get("overlay-fact-version"), Val("2"))
+    assert_eq(loaded_record.rationales.len(), 2)
+    explanation :: SemanticLock.explain(SemanticLockFile.with_records([~loaded_record]), "package-overlay:force:foo").expect("overlay explanation")
+    assert_eq(explanation.contenders.len(), 2)
+    assert(explanation.contenders.iter().any(rationale -> rationale.reason.contains("base")))
+    assert(explanation.contenders.iter().any(rationale -> rationale.reason.contains("force")))
+}
+
+// Rust: tests/jetpack_semantic_lock.rs:436
+#Test("merge_revalidate_commit_rejects_conflicts_before_write") {
+    root :: unique_root("merge-conflict")
+    left :: SemanticLockFile.with_records([pkg("app", "core.log", "1.2.3", "sha256-a")])
+    right :: SemanticLockFile.with_records([pkg("app", "core.log", "1.3.0", "sha256-b")])
+    err :: merge_revalidate_commit(root, SemanticLockFile.default(), left, right).expect_err("conflict")
+    assert(!err.issues.is_empty())
+    assert(!SemanticLock.live_path(root).exists())
+    _ :: fs.remove_dir_all(root)
+}
+
+// Rust: tests/jetpack_semantic_lock.rs:448
+#Test("merge_revalidate_commit_writes_when_clean") {
+    root :: unique_root("merge-ok")
+    left :: SemanticLockFile.with_records([pkg("app", "core.log", "1.2.3", "sha256-log")])
+    right :: SemanticLockFile.with_records([pkg("app", "core.http", "2.0.0", "sha256-http")])
+    merged :: merge_revalidate_commit(root, SemanticLockFile.default(), left, right).unwrap()
+    assert_eq(merged.records.len(), 2)
+    loaded :: load(root).unwrap()
+    assert_eq(loaded.records.len(), 2)
+    raw :: fs.read_to_string(SemanticLock.live_path(root)).unwrap()
+    machine :: strip_semantic_sections(raw)
+    assert(!machine.contains("semantic_record"))
+    assert(machine.contains("version = 1"))
+    _ :: fs.remove_dir_all(root)
+}
+
+// Rust: tests/jetpack_semantic_lock.rs:469
+#Test("overlay_invalidations_helper_matches_fingerprint_diff") {
+    before :: [(String, String):String]{("beta", "foo"): "fp-1"}
+    after :: [(String, String):String]{("beta", "foo"): "fp-2"}
+    actions :: [String:[String]]{"foo": ["a:foo"]}
+    inv :: overlay_invalidations(before, after, actions)
+    assert_eq(inv[0].affected_action_keys, ["a:foo"])
+}
+
+// Rust: tests/jetpack_semantic_lock.rs:478
+#Test("three_way_merge_preserves_inputs_and_source_maps") {
+    base := SemanticLockFile.default()
+    base.inputs = [LockInput{name: "nixpkgs", url: "old", follows: ""}]
+    left := ~base
+    left.source_maps = [SourceMapEntry{pattern: "Acme.*", sources: ["nuget:Acme"]}]
+    right := ~base
+    right.inputs = [LockInput{name: "nixpkgs", url: "new", follows: ""}]
+    out :: merge(base, left, right)
+    assert(out.conflicts.is_empty())
+    assert_eq(out.merged.inputs[0].url, "new")
+    assert_eq(out.merged.source_maps[0].pattern, "Acme.*")
+}

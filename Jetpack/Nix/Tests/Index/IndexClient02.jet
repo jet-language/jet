@@ -1,0 +1,362 @@
+// Original Rust tests; private helpers are shared with Tests/NixIndex.jet.
+// Rust: crates/jetpack/src/NixIndex.rs:3281
+// REVISION -> NIX_TEST_INDEX_REVISION, RIPGREP_DRV -> NIX_TEST_RIPGREP_DRV,
+// RIPGREP_OUT -> NIX_TEST_RIPGREP_OUT, AUX_DRV -> NIX_TEST_AUX_DRV,
+// AUX_OUT -> NIX_TEST_AUX_OUT (Tests/NixIndex.jet:5-9).
+// Rust: crates/jetpack/src/NixIndex.rs:3287
+// FixedClock / now_unix -> IndexClient.NixIndexClock.Fixed / now_unix.
+// Rust: crates/jetpack/src/NixIndex.rs:3294
+// MutableClock / now_unix -> sequential online/offline Fixed clock snapshots;
+// the original atomic changes only between the two client lifetimes.
+// Rust: crates/jetpack/src/NixIndex.rs:3301
+// MapTransport / get_bounded -> Tests/NixIndex.nix_test_map_transport (53).
+// Rust: crates/jetpack/src/NixIndex.rs:3320
+// ripgrep_record -> Tests/NixIndex.nix_test_ripgrep_record (28).
+// Rust: crates/jetpack/src/NixIndex.rs:3416
+// auxiliary_record -> Tests/NixIndex.nix_test_auxiliary_record (32).
+// Rust: crates/jetpack/src/NixIndex.rs:3427
+// document_for -> Tests/NixIndex.nix_test_document_for (40).
+// Rust: crates/jetpack/src/NixIndex.rs:3442
+// signed_fixture -> nix_test_signed_fixture_at(NIX_TEST_LOOPBACK_ENDPOINT).
+// Rust: crates/jetpack/src/NixIndex.rs:3446
+// signed_fixture_at -> Tests/NixIndex.nix_test_signed_fixture_at (70),
+// nix_test_signed_client (87), nix_test_sign (23): real Ed25519 fixture bytes.
+
+// Rust: crates/jetpack/src/NixIndex.rs:3332
+#Test("local_channel_without_manifest_requires_one_intact_index_revision") {
+    root :: nix_test_index_scratch("local-index-pin")
+    installed :: nix_test_install_local_index(root, "nixos-unstable", NIX_TEST_INDEX_REVISION, "x86_64-linux")
+    client :: NixIndexClient.from_local_catalog(root, true) ?? panic("local catalog")
+    assert_eq(client.local_channel_revision("nixos-unstable", "x86_64-linux") ?? panic("single revision"), NIX_TEST_INDEX_REVISION)
+    key :: NixIndexKey{channel: "nixos-unstable", revision: NIX_TEST_INDEX_REVISION, system: "x86_64-linux", attrpath: [String]{"ripgrep"}}
+    resolved :: client.resolve(key) ?? panic("local resolution")
+    assert_eq(resolved.record, nix_test_ripgrep_record())
+    assert_eq(resolved.trust, NixIndexTrustTier.LocalUnofficial)
+    files.write(installed.path, "corrupt") ?? panic("corrupt target")
+    assert(nix_test_is_invalid(nix_test_revision_error(client, "nixos-unstable", "x86_64-linux")))
+    files.write_bytes(installed.path, installed.compressed) ?? panic("restore target")
+    _ :: nix_test_install_local_index(root, "nixos-unstable", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "x86_64-linux")
+    assert(nix_test_is_invalid(nix_test_revision_error(client, "nixos-unstable", "x86_64-linux")))
+    decoded :: nix_index_zstd_decode_bounded(installed.compressed, NIX_INDEX_MAX_DECODED_BYTES) ?? panic("decode target")
+    target :: nix_index_target_for(NIX_TEST_INDEX_REVISION, "x86_64-linux", "https://catalog.invalid", installed.compressed, decoded, [U8]{}, 1) ?? panic("catalog target")
+    manifest :: nix_index_producer_manifest_bytes("nixos-unstable", 1, 1, 1000, [NixIndexManifestTarget]{target}) ?? panic("catalog manifest")
+    manifest_dir :: files.join(root, "v1/nixos-unstable")
+    files.create_dir_all(manifest_dir) ?? panic("manifest directory")
+    files.write_bytes(files.join(manifest_dir, "manifest.json"), manifest) ?? panic("manifest file")
+    assert_eq(client.local_channel_revision("nixos-unstable", "x86_64-linux") ?? panic("manifest revision"), NIX_TEST_INDEX_REVISION)
+    files.remove_all(root) ?? panic("scratch cleanup")
+}
+
+// Rust: crates/jetpack/src/NixIndex.rs:3392
+#Test("local_channel_rejects_index_identity_mismatches") {
+    identities :: [(channel: String, system: String)]{(channel: "nixpkgs-unstable", system: "x86_64-linux"), (channel: "nixos-unstable", system: "aarch64-linux")}
+    loop identity in identities {
+        root :: nix_test_index_scratch("local-index-identity")
+        _ :: nix_test_install_local_index(root, identity.channel, NIX_TEST_INDEX_REVISION, identity.system)
+        client :: NixIndexClient.from_local_catalog(root, true) ?? panic("local catalog")
+        assert(nix_test_is_invalid(nix_test_revision_error(client, "nixos-unstable", "x86_64-linux")))
+        files.remove_all(root) ?? panic("scratch cleanup")
+    }
+}
+
+// Rust: crates/jetpack/src/NixIndex.rs:3519
+#Test("nix_index_requires_explicit_endpoint_and_key") {
+    root :: nix_test_index_scratch("explicit-config")
+    roots :: HangarRoots{root, dev_mode: true}
+    assert_eq(nix_test_invalid_detail(nix_test_roots_error(roots)), "signed nixpkgs index endpoint and public key must be configured explicitly")
+    files.create_dir_all(files.join(root, "trust")) ?? panic("trust directory")
+    files.write(files.join(root, "trust/nix-index-v1.ed25519.pub"), "fixture-index-signer-v1:{base64.encode(nix_test_seed(7))}\n") ?? panic("trust key")
+    assert_eq(nix_test_invalid_detail(nix_test_roots_error(roots)), "nix index endpoint and public-key overrides must be installed together")
+    files.remove_all(root) ?? panic("scratch cleanup")
+}
+
+// Rust: crates/jetpack/src/NixIndex.rs:3563
+#Test("nix_index_never_accepts_the_test_key_as_an_official_root") {
+    root :: nix_test_index_scratch("test-root")
+    files.create_dir_all(files.join(root, "config")) ?? panic("config directory")
+    files.create_dir_all(files.join(root, "trust")) ?? panic("trust directory")
+    files.write(files.join(root, "config/nix-index-v1.endpoint"), "http://127.0.0.1:9999\n") ?? panic("endpoint")
+    files.write(files.join(root, "trust/nix-index-v1.ed25519.pub"), "{NIX_INDEX_TEST_KEY_ID}:{base64.encode(nix_test_seed(7))}\n") ?? panic("trust key")
+    error :: nix_test_roots_error(HangarRoots{root, dev_mode: false})
+    assert_eq(error.code(), 1348)
+    assert_eq(nix_test_invalid_detail(error), "nix index trust root `jet-test-index-v1` is test-only and cannot be used for official signed indexes")
+    files.remove_all(root) ?? panic("scratch cleanup")
+}
+
+// Rust: crates/jetpack/src/NixIndex.rs:3601
+#Test("nix_index_holds_endpoint_after_config_rewrite") {
+    root :: nix_test_index_scratch("config-rewrite")
+    files.create_dir_all(files.join(root, "config")) ?? panic("config directory")
+    files.create_dir_all(files.join(root, "trust")) ?? panic("trust directory")
+    // GATE #4494: real native listener, stream IO and thread; no test provider.
+    listener :: std.net.TcpListener.bind(("127.0.0.1", 0)) ?? panic("bind")
+    port :: listener.local_addr().port()
+    endpoint :: "http://127.0.0.1:{port}"
+    endpoint_path :: files.join(root, "config/nix-index-v1.endpoint")
+    files.write(endpoint_path, "{endpoint}\n") ?? panic("endpoint")
+    key :: crypto.SigningKey.from_bytes(nix_test_seed(7)) ?? panic("signing key")
+    files.write(files.join(root, "trust/nix-index-v1.ed25519.pub"), "fixture-index-signer-v1:{base64.encode(key.public_key().bytes)}\n") ?? panic("trust key")
+    client :: NixIndexClient.from_roots_with_mode(HangarRoots{root, dev_mode: false}, false) ?? panic("configured client")
+    files.write(endpoint_path, "http://127.0.0.1:9\n") ?? panic("rewrite endpoint")
+    server :: std.thread.spawn(() -> {
+        accepted :: listener.accept() ?? panic("accept")
+        stream := accepted.0
+        request := [U8].repeat(U8{0}, 1024)
+        _ :: &stream.read(&request)
+        &stream.write_all("HTTP/1.1 200 OK\r\nContent-Length: 4\r\nConnection: close\r\n\r\nheld".bytes()) ?? panic("response")
+    })
+    body :: client.transport.get_bounded("{endpoint}/held", 32) ?? panic("held endpoint")
+    assert_eq(body, "held".bytes())
+    server.join() ?? panic("server thread")
+    files.remove_all(root) ?? panic("scratch cleanup")
+}
+
+// Rust: crates/jetpack/src/NixIndex.rs:3653
+#Test("nix_index_resolves_exact_ripgrep_record") {
+    fixture :: nix_test_signed_fixture_at(NIX_TEST_LOOPBACK_ENDPOINT)
+    client :: nix_test_signed_client(fixture, NIX_TEST_LOOPBACK_ENDPOINT, fixture.responses, NixIndexClock.Fixed(NIX_TEST_FIXTURE_NOW), false)
+    resolved :: client.resolve(nix_test_ripgrep_key()) ?? panic("signed resolution")
+    assert_eq(resolved.record, nix_test_ripgrep_record())
+    assert_eq(resolved.proof.revision, NIX_TEST_INDEX_REVISION)
+    assert_eq(resolved.proof.system, "x86_64-linux")
+    assert_eq(resolved.proof.manifest_generation, 1)
+    assert_eq(resolved.proof.jet_key_id, "test-key")
+    assert(files.exists(files.join(fixture.root, NIX_INDEX_ROOT)))
+    files.remove_all(fixture.root) ?? panic("scratch cleanup")
+}
+
+// Rust: crates/jetpack/src/NixIndex.rs:3678
+#Test("nix_index_resolves_documented_official_endpoint_layout") {
+    endpoint :: "https://index.jet-lang.dev"
+    fixture :: nix_test_signed_fixture_at(endpoint)
+    client :: nix_test_signed_client(fixture, endpoint, fixture.responses, NixIndexClock.Fixed(NIX_TEST_FIXTURE_NOW), false)
+    resolved :: client.resolve(nix_test_ripgrep_key()) ?? panic("signed resolution")
+    assert_eq(resolved.record, nix_test_ripgrep_record())
+    assert(fixture.responses.get("{endpoint}/v1/nixpkgs-unstable/manifest.json") != None)
+    target_prefix :: "{endpoint}/index-v1/{NIX_TEST_INDEX_REVISION}/x86_64-linux/"
+    found := false
+    loop entry in fixture.responses {
+        if entry.key.starts_with(target_prefix) -> found = true
+    }
+    assert(found)
+    files.remove_all(fixture.root) ?? panic("scratch cleanup")
+}
+
+// Rust: crates/jetpack/src/NixIndex.rs:3706
+#Test("nix_index_reordered_input_is_byte_identical") {
+    first_records :: [NixIndexRecord]{nix_test_ripgrep_record(), nix_test_auxiliary_record()}
+    second_records :: [NixIndexRecord]{nix_test_auxiliary_record(), nix_test_ripgrep_record()}
+    first :: nix_index_canonical_test_index("nixpkgs-unstable", NIX_TEST_INDEX_REVISION, "x86_64-linux", 1, first_records, [NixIndexCoverageMiss]{}) ?? panic("first index")
+    second :: nix_index_canonical_test_index("nixpkgs-unstable", NIX_TEST_INDEX_REVISION, "x86_64-linux", 1, second_records, [NixIndexCoverageMiss]{}) ?? panic("second index")
+    assert_eq(first.decoded, second.decoded)
+    assert_eq(first.compressed, second.compressed)
+    assert_eq(pkg_sha256_hex(first.compressed), pkg_sha256_hex(second.compressed))
+}
+
+// Rust: crates/jetpack/src/NixIndex.rs:3734
+#Test("nix_index_coverage_report_partitions_indexed_and_not_indexed_attrs") {
+    oracle :: [NixIndexOracleCandidate]{
+        NixIndexOracleCandidate{record: nix_test_ripgrep_record(), cache_admitted: true},
+        NixIndexOracleCandidate{record: nix_test_auxiliary_record(), cache_admitted: false},
+    }
+    generated :: nix_index_producer_generate("nixpkgs-unstable", "x86_64-linux", NIX_TEST_INDEX_REVISION, 1, oracle, [String]{NIX_TEST_RIPGREP_OUT, NIX_TEST_AUX_OUT}) ?? panic("generate")
+    report :: nix_index_producer_coverage_report(generated.decoded) ?? panic("coverage report")
+    parsed :: json.parse(report) ?? panic("coverage report JSON")
+    assert(report.contains("\"system\":\"x86_64-linux\""))
+    assert(report.contains("\"indexed\":[[\"ripgrep\"]]"))
+    assert(report.contains("\"notIndexed\":[{{"))
+    assert(report.contains("missing-narinfo"))
+    assert(pkg_json_object(parsed) != None)
+}
+
+// Rust: crates/jetpack/src/NixIndex.rs:3768
+#Test("nix_index_differential_oracle_accepts_nix_output_map") {
+    oracle :: "{{\"revision\":\"{NIX_TEST_INDEX_REVISION}\",\"system\":\"x86_64-linux\",\"records\":[{{\"attrpath\":[\"ripgrep\"],\"version\":\"15.2.0\",\"drvPath\":\"{NIX_TEST_RIPGREP_DRV}\",\"outputs\":{{\"out\":{{\"path\":\"{NIX_TEST_RIPGREP_OUT}\"}}}},\"cache\":true}}]}}"
+    records :: nix_index_parse_oracle_for_producer(oracle.bytes(), "x86_64-linux", NIX_TEST_INDEX_REVISION) ?? panic("oracle")
+    assert_eq(records.len(), 1)
+    assert_eq(records[0].record, nix_test_ripgrep_record())
+    generated :: nix_index_producer_generate("nixpkgs-unstable", "x86_64-linux", NIX_TEST_INDEX_REVISION, 1, records, [String]{NIX_TEST_RIPGREP_OUT}) ?? panic("generate")
+    assert_eq(nix_index_decode_index_records_for_producer(generated.decoded) ?? panic("decode records"), [NixIndexRecord]{nix_test_ripgrep_record()})
+}
+
+// Rust: crates/jetpack/src/NixIndex.rs:3792
+#Test("nix_index_differential_oracle_rejects_a_different_pinned_revision") {
+    oracle :: "{{\"revision\":\"0000000000000000000000000000000000000000\",\"system\":\"x86_64-linux\",\"records\":[]}}"
+    if nix_index_parse_oracle_for_producer(oracle.bytes(), "x86_64-linux", NIX_TEST_INDEX_REVISION) == {
+        .Ok(_) -> panic("a different pinned revision must be rejected")
+        .Err(error) -> assert(error.message().contains("wrong pinned revision"))
+    }
+}
+
+// Rust: crates/jetpack/src/NixIndex.rs:3801
+#Test("nix_index_signature_verifies_real_bytes_and_rejects_mutation") {
+    seed :: nix_test_seed(7)
+    built :: nix_index_canonical_test_index("nixpkgs-unstable", NIX_TEST_INDEX_REVISION, "x86_64-linux", 1, [NixIndexRecord]{nix_test_ripgrep_record()}, [NixIndexCoverageMiss]{}) ?? panic("test index")
+    sidecar :: nix_index_signature_sidecar("test-key", nix_test_sign(seed, nix_index_producer_signature_request(built.decoded)))
+    signature :: NixIndexSignature.parse(sidecar) ?? panic("sidecar")
+    public_key :: (crypto.SigningKey.from_bytes(seed) ?? panic("key")).public_key()
+    nix_index_verify_index_signature(public_key, "test-key", signature, built.decoded) ?? panic("the real bytes verify")
+    forged := ~built.decoded
+    position :: forged.len() - 2
+    forged[position] = U8{Int.from_u8(forged[position]) ~| 1}
+    if nix_index_verify_index_signature(public_key, "test-key", signature, forged) == {
+        .Ok(_) -> panic("mutated bytes must not verify")
+        else -> {}
+    }
+}
+
+// Rust: crates/jetpack/src/NixIndex.rs:3832
+#Test("nix_index_refuses_a_server_signature_from_a_substituted_key") {
+    fixture :: nix_test_signed_fixture_at(NIX_TEST_LOOPBACK_ENDPOINT)
+    manifest_url :: "{NIX_TEST_LOOPBACK_ENDPOINT}/v1/nixpkgs-unstable/manifest.json"
+    manifest :: fixture.responses.get(manifest_url) ?? panic("served manifest")
+    responses := ~fixture.responses
+    responses["{manifest_url}.sig.json"] = nix_index_signature_sidecar("test-key", nix_test_sign(nix_test_seed(8), nix_index_manifest_signature_request(manifest)))
+    client :: nix_test_signed_client(fixture, NIX_TEST_LOOPBACK_ENDPOINT, responses, NixIndexClock.Fixed(NIX_TEST_FIXTURE_NOW), false)
+    error :: nix_test_resolve_error(client, nix_test_ripgrep_key())
+    assert_eq(error.code(), 1348)
+    assert_eq(nix_test_invalid_detail(error), "nix index manifest signature verification failed")
+    files.remove_all(fixture.root) ?? panic("scratch cleanup")
+}
+
+// Rust: crates/jetpack/src/NixIndex.rs:3873
+#Test("nix_index_rejects_forged_stale_cross_system_duplicate_and_ambiguous_input") {
+    if NixIndexDocument.parse(`{"schema":1,"schema":1}`.bytes()) == {
+        .Ok(_) -> panic("duplicate keys must be rejected")
+        else -> {}
+    }
+    ripgrep :: NixIndexRecordWire.from_record(nix_test_ripgrep_record())
+    duplicate_records := nix_test_document_for(ripgrep)
+    &duplicate_records.records.push(ripgrep)
+    assert(nix_test_document_rejected(duplicate_records))
+    duplicate_names := ~ripgrep
+    &duplicate_names.outputs.push(NixIndexOutputWire{name: "out", store_path: NIX_TEST_AUX_OUT})
+    assert(nix_test_document_rejected(nix_test_document_for(duplicate_names)))
+    duplicate_paths :: NixIndexRecordWire{attrpath: [String]{"ripgrep"}, version: "15.2.0", drv_path: NIX_TEST_RIPGREP_DRV, outputs: [NixIndexOutputWire]{NixIndexOutputWire{name: "out", store_path: NIX_TEST_RIPGREP_OUT}, NixIndexOutputWire{name: "bin", store_path: NIX_TEST_RIPGREP_OUT}}}
+    assert(nix_test_document_rejected(nix_test_document_for(duplicate_paths)))
+    empty_version := ~ripgrep
+    empty_version.version = ""
+    assert(nix_test_document_rejected(nix_test_document_for(empty_version)))
+    no_outputs := ~ripgrep
+    no_outputs.outputs = [NixIndexOutputWire]{}
+    assert(nix_test_document_rejected(nix_test_document_for(no_outputs)))
+    no_primary :: NixIndexRecordWire{attrpath: [String]{"ripgrep"}, version: "15.2.0", drv_path: NIX_TEST_RIPGREP_DRV, outputs: [NixIndexOutputWire]{NixIndexOutputWire{name: "dev", store_path: NIX_TEST_RIPGREP_OUT}}}
+    assert(nix_test_document_rejected(nix_test_document_for(no_primary)))
+    if nix_index_validate_store_path("/nix/store/not-a-store-path", false) == {
+        .Ok(_) -> panic("a malformed store path must be rejected")
+        else -> {}
+    }
+    fixture :: nix_test_signed_fixture_at(NIX_TEST_LOOPBACK_ENDPOINT)
+    client :: nix_test_signed_client(fixture, NIX_TEST_LOOPBACK_ENDPOINT, fixture.responses, NixIndexClock.Fixed(NIX_TEST_FIXTURE_NOW), false)
+    key := nix_test_ripgrep_key()
+    _ :: client.resolve(key) ?? panic("signed resolution")
+    assert(nix_test_generation_rejected(client, 0, 1723000000, "stale"))
+    assert(nix_test_generation_rejected(client, 1, 1724000000, "same-generation-fork"))
+    key.attrpath = [String]{"not-the-requested-attr"}
+    missing :: nix_test_resolve_error(client, key)
+    if missing == {
+        .NotIndexed(_, _, _, _, _) -> {}
+        else -> panic("missing attribute must be NotIndexed")
+    }
+    key.system = "aarch64-linux"
+    assert(nix_test_is_invalid(nix_test_resolve_error(client, key)))
+    files.remove_all(fixture.root) ?? panic("scratch cleanup")
+}
+
+// Rust: crates/jetpack/src/NixIndex.rs:3981
+#Test("nix_index_rejects_manifest_signature_schema_drift") {
+    seed :: nix_test_seed(7)
+    bytes :: "{{}}".bytes()
+    drifted :: NixIndexSignature{schema: 0, key_id: "test-key", algorithm: "ed25519", signature: base64.encode(nix_test_sign(seed, nix_index_manifest_signature_request(bytes)))}
+    public_key :: (crypto.SigningKey.from_bytes(seed) ?? panic("key")).public_key()
+    if nix_index_verify_manifest_signature(public_key, "test-key", drifted.canonical_bytes(), bytes) == {
+        .Ok(_) -> panic("a drifted signature schema must be rejected")
+        else -> {}
+    }
+}
+
+// Rust: crates/jetpack/src/NixIndex.rs:3997
+#Test("nix_index_whole_refresh_retains_targets_and_rejects_rollback") {
+    fixture :: nix_test_signed_fixture_at(NIX_TEST_LOOPBACK_ENDPOINT)
+    client :: nix_test_signed_client(fixture, NIX_TEST_LOOPBACK_ENDPOINT, fixture.responses, NixIndexClock.Fixed(NIX_TEST_FIXTURE_NOW), false)
+    _ :: client.resolve(nix_test_ripgrep_key()) ?? panic("signed resolution")
+    state :: client.load_highest_generation("nixpkgs-unstable") ?? panic("rollback state")
+    highest :: state ?? panic("recorded generation")
+    assert_eq(highest.generation, 1)
+    targets :: files.join(files.join(files.join(files.join(fixture.root, NIX_INDEX_ROOT), "targets"), NIX_TEST_INDEX_REVISION), "x86_64-linux")
+    assert_eq((files.list_dir(targets) ?? panic("target directory")).len(), 2)
+    assert(nix_test_generation_rejected(client, 0, 1723000000, "stale"))
+    files.remove_all(fixture.root) ?? panic("scratch cleanup")
+}
+
+// Rust: crates/jetpack/src/NixIndex.rs:4040
+#Test("nix_index_offline_rejects_expired_cached_manifest") {
+    fixture :: nix_test_signed_fixture_at(NIX_TEST_LOOPBACK_ENDPOINT)
+    online :: nix_test_signed_client(fixture, NIX_TEST_LOOPBACK_ENDPOINT, fixture.responses, NixIndexClock.Fixed(NIX_TEST_FIXTURE_NOW), false)
+    _ :: online.resolve(nix_test_ripgrep_key()) ?? panic("signed resolution")
+    offline :: nix_test_signed_client(fixture, NIX_TEST_LOOPBACK_ENDPOINT, fixture.responses, NixIndexClock.Fixed(1724604800), true)
+    error :: nix_test_resolve_error(offline, nix_test_ripgrep_key())
+    assert_eq(error.code(), 1276)
+    if error == {
+        .Offline(_) -> {}
+        else -> panic("an expired cached manifest is an offline refusal")
+    }
+    files.remove_all(fixture.root) ?? panic("scratch cleanup")
+}
+
+// Rust: crates/jetpack/src/NixIndex.rs:4072
+fn collect_text_files(path: OSPath, result: &[OSPath]) -> {
+    // GATE #4494: std directory-entry type queries must not follow symlinks.
+    loop entry in std.fs.read_dir(path) ?? panic("read directory") {
+        item :: entry ?? panic("directory entry")
+        kind :: item.file_type() ?? panic("entry type")
+        if kind.is_dir() {
+            collect_text_files(item.path(), &result)
+        } else if kind.is_file() {
+            &result.push(item.path())
+        }
+    }
+}
+
+// Rust: crates/jetpack/src/NixIndex.rs:4084
+fn branded_host(token: String) -> String? {
+    trimmed := token.trim_matches((character: Char) -> "`!#$%&*+,;<>?\\][}{)(".contains(character)) // #4303
+    value :: if trimmed.starts_with("https://") -> trimmed.removeprefix("https://") else if trimmed.starts_with("http://") -> trimmed.removeprefix("http://") else -> trimmed
+    authority :: value.split((character: Char) -> character == '/' || character == '?' || character == '#').next() ?? return None
+    hostpart :: authority.rsplit("@").next() ?? return None
+    hostview :: hostpart.split(":").next() ?? return None
+    host := hostview.trim_end_matches('.') // #4303
+    is_jet_domain := false
+    loop label in host.split(".") {
+        if label == "jet" || label == "jet-lang" -> is_jet_domain = true
+    }
+    is_owned :: host == "jet-lang.dev" || host.ends_with(".jet-lang.dev")
+    if is_jet_domain && !is_owned -> Val(host) else -> None
+}
+
+// Rust: crates/jetpack/src/NixIndex.rs:4133
+#Test("shipped_jet_domains_use_owned_domain") {
+    // GATE #4494: package-root environment and native UTF-8 filesystem reads.
+    repo :: OSPath.from_text(env!("CARGO_MANIFEST_DIR")).join("../..")
+    paths := [OSPath]{}
+    loop relative in [String]{"crates", "Source", "Docs"} -> collect_text_files(repo.join(relative), &paths)
+    violations := [String]{}
+    loop path in paths {
+        text := ""
+        if std.fs.read_to_string(path) == {
+            .Ok(value) -> text = value
+            .Err(_) -> continue
+        }
+        line_number := 0
+        loop line in text.lines() {
+            line_number += 1
+            loop token in line.split((character: Char) -> character.is_whitespace() || character == '"' || character == '\'' || character == '`' || character == '<' || character == '>') {
+                if branded_host(token) == {
+                    .Val(host) -> &violations.push("{path.display()}:{line_number} ({host})")
+                    else -> {}
+                }
+            }
+        }
+    }
+    assert(violations.is_empty(), "unowned Jet-branded host(s) in shipped surfaces:\n{violations.join("\n")}")
+}

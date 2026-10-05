@@ -1,0 +1,23 @@
+use jetpack.JetOS.InitrdOverlay.[OwnedCpioEntry, cpio_newc_owned, cpio_trailer_header_offset, append_overlay_to_cpio_plain, first_zstd_frame_offset]
+
+// Rust: crates/jetpack/src/JetOS/initrd_overlay.rs:556-567/608-709 (behavioral controls; no inline tests).
+#Test("cpio_overlay_replaces_trailer_and_keeps_aligned_newc_archive") {
+    plain :: cpio_newc_owned(&[OwnedCpioEntry.file("first", 0o100644, [1, 2])])
+    old_trailer :: cpio_trailer_header_offset(&plain).unwrap()
+    overlay :: cpio_newc_owned(&[OwnedCpioEntry.file("second", 0o100755, [3])])
+    merged :: append_overlay_to_cpio_plain(plain.clone(), &overlay)
+    assert_eq(&merged[0..old_trailer], &plain[0..old_trailer])
+    assert_eq(&merged[old_trailer..], overlay.as_slice())
+    assert_eq(merged.len() % 4, 0)
+    assert(cpio_trailer_header_offset(&merged).unwrap() > old_trailer)
+}
+#Test("zstd_frame_requires_alignment_and_valid_cpio_prefix") {
+    magic :: [U8]{0x28, 0xb5, 0x2f, 0xfd}
+    assert_eq(first_zstd_frame_offset(&magic), Val(0))
+    assert_eq(first_zstd_frame_offset(&[0, 0x28, 0xb5, 0x2f, 0xfd]), None)
+    assert_eq(first_zstd_frame_offset(&[0, 0, 0, 0, 0x28, 0xb5, 0x2f, 0xfd]), None)
+    prefix := cpio_newc_owned(&[])
+    offset :: prefix.len()
+    prefix.extend_from_slice(&magic)
+    assert_eq(first_zstd_frame_offset(&prefix), Val(offset))
+}

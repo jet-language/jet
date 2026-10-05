@@ -1,0 +1,53 @@
+use std.fs
+use std.process.[Command, Output]
+use core.files.OSPath
+use jetpack.SHA256
+use tests.jetpack_fixtures.jetpack
+
+// Rust: tests/jetpack_env_use_offline.rs:20
+pub fn write_native_omp_fixture(fixtures: OSPath) -> String {
+    // GATE #4494: real fixture artifact on native filesystem.
+    fs.create_dir_all(fixtures).unwrap()
+    artifact :: fixtures.join("omp-1.0.0")
+    fs.write(artifact, "#!/bin/sh\nprintf '%s\\n' cached\n").unwrap()
+    digest :: SHA256.sha256_file_hex(artifact).unwrap()
+    fs.write(fixtures.join("jetpackage-omp.json"), "{{\"tag\":\"v1.0.0\",\"version\":\"1.0.0\",\"sha256\":\"{digest}\",\"artifact\":\"omp-1.0.0\"}}").unwrap()
+    digest
+}
+
+// Rust: tests/jetpack_env_use_offline.rs:35
+pub fn write_native_pid_fixture(fixtures: OSPath) -> {
+    fs.create_dir_all(fixtures).unwrap()
+    artifact :: fixtures.join("omp-1.0.0")
+    fs.write(artifact, "#!/bin/sh\nprintf '%s\\n' \"$$\"\n").unwrap()
+    digest :: SHA256.sha256_file_hex(artifact).unwrap()
+    fs.write(fixtures.join("jetpackage-omp.json"), "{{\"tag\":\"v1.0.0\",\"version\":\"1.0.0\",\"sha256\":\"{digest}\",\"artifact\":\"omp-1.0.0\"}}").unwrap()
+}
+
+// Rust: tests/jetpack_env_use_offline.rs:120
+pub fn run_env(project: OSPath, root: OSPath, home: OSPath, timing: Bool) -> Output {
+    command := jetpack()
+    &command.args(["env", "--trust", "--offline", "--no-color", "--", "omp"]).current_dir(project)
+        .env("JETPACK_ROOT", root).env("HOME", home).env("JETPACK_DENY_NETWORK", "1").env_remove("JETPACK_FIXTURES")
+    if timing { &command.env("JETPACK_TIMING", "1") }
+    &command.output().unwrap()
+}
+
+// Rust: tests/jetpack_env_use_offline.rs:136
+pub fn tree_bytes(path: OSPath) -> U64 {
+    metadata :: fs.symlink_metadata(path) ?? return 0
+    if metadata.file_type().is_symlink() { return 0 }
+    if metadata.is_file() { return metadata.len() }
+    if !metadata.is_dir() { return 0 }
+    bytes := U64{0}
+    loop entry in fs.read_dir(path).unwrap() { bytes += tree_bytes(entry.unwrap().path()) }
+    bytes
+}
+
+// Rust: tests/jetpack_env_use_offline.rs:156
+pub fn restore_mtime(path: OSPath, metadata: &fs.Metadata) -> {
+    // GATE #4494: exact native seconds/nanoseconds metadata.
+    timestamp :: "@{metadata.mtime()}.{metadata.mtime_nsec()}"
+    status :: Command.new("touch").args(["-d", timestamp]).arg(path).status().unwrap()
+    assert(status.success(), "could not restore {path.display()} mtime")
+}

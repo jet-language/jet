@@ -1,0 +1,383 @@
+use Jetpack.CLI.Tests.Integration.EnvHook.*
+use common.[jetpack_bin, Scratch]
+use Jetpack.SHA256
+use std.[fs, env, Command, Stdio, Permissions]
+use core.sys
+// GATE #4494: real process, piped IO, filesystem permissions and symlinks.
+// GATE #4483: selected-family dispatch preserves Unix-only coverage.
+
+// Rust: tests/env_hook.rs:72
+#Test("hook_prints_installable_snippet_per_shell") {
+    for (shell, needle) in [("bash", "PROMPT_COMMAND"), ("zsh", "add-zsh-hook precmd __jet_env_hook"), ("fish", "--on-event fish_prompt")] {
+        out :: Command.new(jetpack_bin()).args(["env", "hook", shell]).output() ?? panic("hook output")
+        assert(out.status.success(), "`enter hook {shell}` must exit 0")
+        stdout :: String.from_utf8_lossy(out.stdout)
+        assert(stdout.contains(needle), "`hook {shell}` output missing `{needle}`:\n{stdout}")
+        assert(stdout.contains("command jet env export {shell}"), "`hook {shell}` must call back into `jet env export {shell}`:\n{stdout}")
+        assert(stdout.contains("__jet_help_prefill"), "`hook {shell}` must install help-app prefill widgets:\n{stdout}")
+        assert(!stdout.contains("__jetpack_"), "hook {shell} leaked engine identifiers:\n{stdout}")
+    }
+}
+
+// Rust: tests/env_hook.rs:104
+#Test("hook_unknown_shell_is_a_clean_error") {
+    out :: Command.new(jetpack_bin()).args(["env", "hook", "tcsh"]).output() ?? panic("hook output")
+    assert_eq(out.status.code(), Val(2))
+    stderr :: String.from_utf8_lossy(out.stderr)
+    assert(stderr.to_ascii_lowercase().contains("unknown shell"), stderr)
+    assert(stderr.contains("bash, zsh, fish"), stderr)
+}
+
+// Rust: tests/env_hook.rs:117
+#Test("export_outside_any_env_is_silent") {
+    scratch :: Scratch.new("noenv")
+    out :: export_cmd(&scratch.path).args(["env", "export", "bash"]).output() ?? panic("export")
+    assert(out.status.success())
+    assert(out.stdout.is_empty(), "no env.jet in the tree must emit nothing:\n{String.from_utf8_lossy(out.stdout)}")
+}
+
+// Rust: tests/env_hook.rs:132
+#Test("export_does_not_emit_untrusted_typed_environment_shell_code") {
+    project :: Scratch.new("typed-env-hook-trust")
+    home :: Scratch.new("typed-env-hook-trust-home")
+    marker :: project.path.join("envhook-pwned")
+    fs.write(project.path.join("env.jet"), "module env.dev {\n    presets: {\n        default: { variables: [String:String]{ \"PROMPT_COMMAND\": \"printf injected > envhook-pwned\" } }\n    }\n}\n") ?? panic("write env")
+    out :: export_cmd(&project.path).args(["env", "export", "bash"]).env("HOME", &home.path).output() ?? panic("export")
+    assert(out.status.success(), "stderr: {String.from_utf8_lossy(out.stderr)}")
+    if sys.target.selected_family() == "unix" {
+        shell := Command.new(host_bash()).args(["--noprofile", "--norc", "-c", "source /dev/stdin; if [ -n \"${PROMPT_COMMAND:-}\" ]; then eval \"$PROMPT_COMMAND\"; fi"])
+            .current_dir(&project.path).env_clear().env("HOME", &home.path).env("PATH", "/usr/bin:/bin")
+            .stdin(Stdio.piped()).stdout(Stdio.null()).stderr(Stdio.piped()).spawn() ?? panic("spawn bash")
+        input := &shell.stdin.take() ?? panic("shell stdin")
+        &input.write_all(out.stdout) ?? panic("write script")
+        drop(^input)
+        shell_out :: &shell.wait_with_output() ?? panic("wait bash")
+        assert(shell_out.status.success(), "the shell harness rejected the generated script: {String.from_utf8_lossy(shell_out.stderr)}")
+    }
+    assert(!marker.exists(), "untrusted shell payload executed")
+    assert(out.stdout.is_empty(), "an untrusted typed environment must not emit shell code:\n{String.from_utf8_lossy(out.stdout)}")
+}
+
+// Rust: tests/env_hook.rs:197
+#Test("export_rejects_shell_syntax_in_environment_names") {
+    for (name, body, marker) in [
+        ("var-name", "module env.dev {\n    presets: {\n        default: { variables: [String:String]{ \"BAD; touch envhook-var-pwned\": \"value\" } }\n    }\n}\n", "envhook-var-pwned"),
+        ("unset-name", "module env.dev {\n    unset: [\"BAD; touch envhook-unset-pwned\"]\n}\n", "envhook-unset-pwned")
+    ] {
+        project :: Scratch.new(name)
+        fs.write(project.path.join("env.jet"), body) ?? panic("write env")
+        out :: export_cmd(&project.path).args(["env", "export", "bash"]).output() ?? panic("export")
+        assert(!out.status.success(), "hostile {name} must be rejected")
+        assert(String.from_utf8_lossy(out.stderr).contains("not a valid environment name"), "missing name validation diagnostic for {name}:\n{String.from_utf8_lossy(out.stderr)}")
+        assert(!project.path.join(marker).exists())
+    }
+}
+
+// Rust: tests/env_hook.rs:235
+#Test("export_activates_nearest_env_from_root_and_subdir") {
+    scratch :: Scratch.new("activate")
+    write_prompt_only_env(&scratch.path)
+    inner :: scratch.path.join("src").join("inner")
+    fs.create_dir_all(inner) ?? panic("create inner")
+    root :: scratch.path.to_string_lossy().to_string()
+    for dir in [&scratch.path, &inner] {
+        out :: export_cmd(dir).args(["env", "export", "bash"]).output() ?? panic("export")
+        assert(out.status.success())
+        stdout :: String.from_utf8_lossy(out.stdout)
+        assert(stdout.contains("export JETPACK_ENV_DIR='{root}'"), "activation from {dir} must anchor to the env root:\n{stdout}")
+        assert(stdout.contains("export JETPACK_ENV=1"), stdout)
+        assert(stdout.contains("export JETPACK_ENV_OLD_PATH="), stdout)
+        assert(stdout.contains("export PATH="), stdout)
+    }
+}
+
+// Rust: tests/env_hook.rs:262
+#Test("export_uses_a_durable_hangar_path_for_realized_package") {
+    if sys.target.selected_family() == "unix" {
+        project :: Scratch.new("package-export")
+        root :: Scratch.new("package-export-root")
+        fixtures :: Scratch.new("package-export-fixtures")
+        home :: Scratch.new("package-export-home")
+        artifact :: fixtures.join("omp-1.0.0")
+        fs.write(artifact, "#!/bin/sh\nprintf '%s\\n' cached\n") ?? panic("write artifact")
+        artifact_digest :: SHA256.sha256_file_hex(artifact) ?? panic("hash artifact")
+        fs.write(fixtures.join("jetpackage-omp.json"), "{\"tag\":\"v1.0.0\",\"version\":\"1.0.0\",\"sha256\":\"{artifact_digest}\",\"artifact\":\"omp-1.0.0\"}") ?? panic("write manifest")
+        fs.write(project.join("env.jet"), "module env.dev { packages: [\"omp@releases#1.0.0\"] }\n") ?? panic("write env")
+        prep :: Command.new(jetpack_bin()).args(["env", "--prep", "--yes", "--trust", "--offline", "--no-color", "--fixtures"])
+            .arg(&fixtures.path).current_dir(&project.path).env("JETPACK_ROOT", &root.path).env("HOME", &home.path)
+            .env("JETPACK_DENY_NETWORK", "1").output() ?? panic("prep")
+        assert(prep.status.success(), "env --prep failed: {String.from_utf8_lossy(prep.stderr)}")
+        fs.remove_file(fixtures.join("jetpackage-omp.json")) ?? panic("remove manifest")
+        fs.remove_file(artifact) ?? panic("remove artifact")
+        out :: export_cmd(&project.path).args(["env", "--trust", "--offline", "export", "bash"])
+            .env("JETPACK_ROOT", &root.path).env("HOME", &home.path).env("JETPACK_DENY_NETWORK", "1").output() ?? panic("export")
+        assert(out.status.success(), "package export failed: {String.from_utf8_lossy(out.stderr)}")
+        script :: String.from_utf8_lossy(out.stdout)
+        assert(!script.contains("/proc/self/fd/"), "parent-shell activation leaked a process-local lease path:\n{script}")
+        durable_bin := nil as OSPath?
+        for result in fs.read_dir(root.path.join("hangar/objects")) ?? panic("read objects") {
+            if entry :: result.ok() {
+                object :: entry.path()
+                if filename :: object.file_name() {
+                    if name :: filename.to_str() {
+                        if name.starts_with("sha256-") && object.join("bin").is_dir() {
+                            durable_bin = Val(object.join("bin"))
+                            break
+                        }
+                    }
+                }
+            }
+        }
+        bin :: durable_bin ?? panic("prep must publish a sealed Hangar object with a bin directory")
+        expected_prefix :: "export PATH='{bin.display()}:"
+        assert(script.contains(expected_prefix), "activation did not publish the sealed Hangar bin directory:\n{script}")
+        shell := Command.new(host_bash()).args(["--noprofile", "--norc", "-c", "source /dev/stdin; omp"])
+            .current_dir(&project.path).env_clear().env("HOME", &home.path).env("PATH", "/usr/bin:/bin")
+            .stdin(Stdio.piped()).stdout(Stdio.piped()).stderr(Stdio.piped()).spawn() ?? panic("spawn bash")
+        input := &shell.stdin.take() ?? panic("shell stdin")
+        &input.write_all(out.stdout) ?? panic("write script")
+        drop(^input)
+        shell_out :: &shell.wait_with_output() ?? panic("wait bash")
+        assert(shell_out.status.success(), "generated activation did not run after exporter exit: {String.from_utf8_lossy(shell_out.stderr)}")
+        text := String.from_utf8_lossy(shell_out.stdout).trim() // #4303
+        assert_eq(text, "cached")
+    }
+}
+
+// Rust: tests/env_hook.rs:375
+#Test("enter_from_nested_directory_projects_allowlisted_dotenv_and_unsets") {
+    scratch :: Scratch.new("dotenv-nested")
+    inner :: scratch.path.join("src").join("inner")
+    fs.create_dir_all(inner) ?? panic("create inner")
+    fs.write(scratch.path.join(".env"), "VISIBLE=from-dotenv\nSECRET=hidden\nUNLISTED=must-not-load\n") ?? panic("write dotenv")
+    fs.write(scratch.path.join("env.jet"), "module env.dev {\n  dotenv: Dotenv{ file: \".env\", allow: [\"VISIBLE\", \"SECRET\"], secrets: [\"SECRET\"] }\n  unset: [\"REMOVE_ME\"]\n}\n") ?? panic("write env")
+    out :: export_cmd(&inner).args(["env", "--trust", "--no-color", "--", "sh", "-c", "printf '%s|%s|%s|%s' \"$VISIBLE\" \"$SECRET\" \"${UNLISTED:-unset}\" \"${REMOVE_ME:-unset}\""])
+        .env("VISIBLE", "from-parent").env("REMOVE_ME", "remove-me").env("UNLISTED", "from-parent").output() ?? panic("enter")
+    assert(out.status.success(), "stderr: {String.from_utf8_lossy(out.stderr)}")
+    text := String.from_utf8_lossy(out.stdout).trim() // #4303
+    assert_eq(text, "from-dotenv|hidden|from-parent|unset")
+}
+
+// Rust: tests/env_hook.rs:416
+#Test("export_disable_unloads_active_env") {
+    scratch :: Scratch.new("disable")
+    write_prompt_only_env(&scratch.path)
+    root :: scratch.path.to_string_lossy().to_string()
+    out :: export_cmd(&scratch.path).args(["env", "export", "bash"]).env("JET_ENV_DISABLE", "1")
+        .env("JETPACK_ENV_DIR", root).env("JETPACK_ENV_OLD_PATH", "/usr/bin:/bin").output() ?? panic("export")
+    assert(out.status.success())
+    stdout :: String.from_utf8_lossy(out.stdout)
+    assert(stdout.contains("export PATH='/usr/bin:/bin'"), stdout)
+    assert(stdout.contains("unset JETPACK_ENV_DIR"), stdout)
+    assert(stdout.contains("unset JETPACK_ENV\n"), stdout)
+    assert(stdout.contains("unset GIT_CONFIG_COUNT"), stdout)
+}
+
+// Rust: tests/env_hook.rs:436
+#Test("export_unchanged_directory_is_silent") {
+    scratch :: Scratch.new("stable")
+    write_prompt_only_env(&scratch.path)
+    root :: scratch.path.to_string_lossy().to_string()
+    first :: export_cmd(&scratch.path).args(["env", "export", "bash"]).output() ?? panic("first export")
+    assert(first.status.success())
+    hash :: activation_hash(first.stdout)
+    out :: export_cmd(&scratch.path).args(["env", "export", "bash"]).env("JETPACK_ENV_DIR", root).env("JETPACK_ENV_HASH", hash).output() ?? panic("export")
+    assert(out.status.success())
+    assert(out.stdout.is_empty(), "already-active env must be a no-op:\n{String.from_utf8_lossy(out.stdout)}")
+}
+
+// Rust: tests/env_hook.rs:461
+#Test("export_changed_definition_reactivates_at_next_prompt") {
+    scratch :: Scratch.new("changed")
+    write_prompt_only_env(&scratch.path)
+    root :: scratch.path.to_string_lossy().to_string()
+    first :: export_cmd(&scratch.path).args(["env", "export", "bash"]).output() ?? panic("first export")
+    assert(first.status.success())
+    hash :: activation_hash(first.stdout)
+    fs.write(scratch.path.join("env.jet"), "module env.dev {\n  prompt: \"changed\"\n}\n") ?? panic("change env")
+    out :: export_cmd(&scratch.path).args(["env", "export", "bash"]).env("JETPACK_ENV_DIR", root).env("JETPACK_ENV_HASH", hash).output() ?? panic("export")
+    assert(out.status.success())
+    assert(!out.stdout.is_empty(), "a changed definition must emit replacement activation")
+    replacement :: String.from_utf8_lossy(out.stdout)
+    assert(replacement.contains("changed"), "replacement facts missing:\n{replacement}")
+    assert(!replacement.contains("smoke"), "stale facts survived reload:\n{replacement}")
+    assert(replacement.contains("export JETPACK_ENV_HASH='"))
+}
+
+// Rust: tests/env_hook.rs:500
+#Test("export_failed_reload_keeps_the_previous_activation") {
+    scratch :: Scratch.new("failed-reload")
+    write_prompt_only_env(&scratch.path)
+    root :: scratch.path.to_string_lossy().to_string()
+    first :: export_cmd(&scratch.path).args(["env", "export", "bash"]).output() ?? panic("first export")
+    assert(first.status.success())
+    hash :: activation_hash(first.stdout)
+    fs.write(scratch.path.join("env.jet"), "module env.dev {\n") ?? panic("break env")
+    out :: export_cmd(&scratch.path).args(["env", "export", "bash"]).env("JETPACK_ENV_DIR", root).env("JETPACK_ENV_HASH", hash).output() ?? panic("export")
+    assert(out.status.success())
+    assert(out.stdout.is_empty(), "failed reload must not unload the previous activation")
+}
+
+// Rust: tests/env_hook.rs:525
+#Test("enter_runs_a_trusted_lifecycle_hook_before_the_child") {
+    scratch :: Scratch.new("trusted-hook")
+    fs.write(scratch.path.join("env.jet"), "module env.dev {\n    on_enter: [{\n        name: \"marker\",\n        command: \"printf entered > .hook-marker\",\n        trusted: true,\n    }]\n}\n") ?? panic("write env")
+    out :: Command.new(jetpack_bin()).current_dir(&scratch.path).args(["env", "--trust", "--no-color", "--", "/bin/sh", "-c", "test -f .hook-marker"])
+        .env("PATH", "/usr/bin:/bin").output() ?? panic("enter")
+    assert(out.status.success(), "trusted lifecycle hook must run before enter: {String.from_utf8_lossy(out.stderr)}")
+    assert_eq(fs.read_to_string(scratch.path.join(".hook-marker")) ?? panic("read marker"), "entered")
+}
+
+// Rust: tests/env_hook.rs:565
+#Test("enter_resolves_a_bare_lifecycle_name_to_a_typed_job") {
+    scratch :: Scratch.new("typed-lifecycle-job")
+    fs.write(scratch.path.join("env.jet"), "module env.dev {\n    on_enter: [seed_config]\n}\n") ?? panic("write env")
+    fs.write(scratch.path.join("run.jet"), "#Job\nfn seed_config() {\n        print(\"typed lifecycle job\")\n}\nfn run() {}\n") ?? panic("write job")
+    // Keep the caller's toolchain visible to the nested jet run task.
+    out :: Command.new(jetpack_bin()).current_dir(&scratch.path).args(["env", "--trust", "--no-color", "--", "true"])
+        .env("PATH", env.var_os("PATH") ?? panic("tests run with Rust on PATH")).output() ?? panic("enter")
+    assert(out.status.success(), "typed lifecycle job must run through the job path: {String.from_utf8_lossy(out.stderr)}")
+    assert(String.from_utf8_lossy(out.stdout).contains("typed lifecycle job"), "task output missing: {String.from_utf8_lossy(out.stdout)}")
+}
+
+// Rust: tests/env_hook.rs:610
+#Test("enter_rejects_an_undeclared_lifecycle_job_before_launch") {
+    scratch :: Scratch.new("undeclared-lifecycle-job")
+    fs.write(scratch.path.join("env.jet"), "module env.dev {\n  on_enter: [missing_task]\n}\n") ?? panic("write env")
+    fs.write(scratch.path.join("run.jet"), "fn run() {}\n") ?? panic("write job")
+    out :: Command.new(jetpack_bin()).current_dir(&scratch.path).args(["env", "--trust", "--no-color", "--", "true"])
+        .env("PATH", env.var_os("PATH") ?? panic("tests run with Rust on PATH")).output() ?? panic("enter")
+    assert_eq(out.status.code(), Val(2))
+    stderr :: String.from_utf8_lossy(out.stderr)
+    assert(stderr.contains("E1294"), "missing lifecycle job diagnostic:\n{stderr}")
+    assert(stderr.contains("missing_task"), "missing task name:\n{stderr}")
+    assert(!stderr.contains("running job missing_task"), "undeclared lifecycle job must be rejected before child launch:\n{stderr}")
+}
+
+// Rust: tests/env_hook.rs:644
+#Test("export_runs_typed_lifecycle_jobs_without_stdout_pollution") {
+    scratch :: Scratch.new("typed-lifecycle-export")
+    home :: Scratch.new("typed-lifecycle-export-home")
+    fs.write(scratch.path.join("env.jet"), "module env.dev {\n  on_enter: [seed_config]\n}\n") ?? panic("write env")
+    fs.write(scratch.path.join("run.jet"), "#Job\nfn seed_config() { print(\"typed lifecycle job\") }\nfn run() {}\n") ?? panic("write job")
+    selector :: "env:{scratch.path.display()}"
+    trusted :: Command.new(jetpack_bin()).current_dir(&scratch.path).args(["trust", "grant", selector, "--scope", "user"])
+        .env("HOME", &home.path).env("PATH", env.var_os("PATH") ?? panic("tests run with Rust on PATH")).output() ?? panic("grant trust")
+    assert(trusted.status.success(), "trust setup failed: {String.from_utf8_lossy(trusted.stderr)}")
+    out :: export_cmd(&scratch.path).args(["env", "--no-color", "export", "bash"]).env("HOME", &home.path)
+        .env("PATH", env.var_os("PATH") ?? panic("tests run with Rust on PATH")).output() ?? panic("export")
+    assert(out.status.success(), "stderr: {String.from_utf8_lossy(out.stderr)}")
+    stdout :: String.from_utf8_lossy(out.stdout)
+    assert(stdout.contains("export JETPACK_ENV=1"), "missing activation; stderr: {String.from_utf8_lossy(out.stderr)}\nstdout:\n{stdout}")
+    assert(!stdout.contains("typed lifecycle job"), "task output must not corrupt shell activation:\n{stdout}")
+}
+
+// Rust: tests/env_hook.rs:700
+#Test("enter_requires_trust_for_a_trusted_lifecycle_hook") {
+    project :: Scratch.new("trusted-hook-gate")
+    home :: Scratch.new("trusted-hook-gate-home")
+    fs.write(project.path.join("env.jet"), "module env.dev {\n    on_enter: [{\n        name: \"marker\",\n        command: \"printf entered > .hook-marker\",\n        trusted: true,\n    }]\n}\n") ?? panic("write env")
+    out :: Command.new(jetpack_bin()).current_dir(&project.path).args(["env", "--no-color", "--", "/bin/true"])
+        .env("HOME", &home.path).env("PATH", "/usr/bin:/bin").output() ?? panic("enter")
+    assert_eq(out.status.code(), Val(2))
+    stderr :: String.from_utf8_lossy(out.stderr)
+    assert(stderr.contains("E1255"), "missing trust diagnostic:\n{stderr}")
+    assert(!project.path.join(".hook-marker").exists())
+}
+
+// Rust: tests/env_hook.rs:732
+#Test("env_test_rejects_an_untrusted_lifecycle_hook") {
+    scratch :: Scratch.new("untrusted-hook")
+    fs.write(scratch.path.join("env.jet"), "module env.dev {\n    on_enter: [{\n        name: \"needs-review\",\n        command: \"false\",\n    }]\n}\n") ?? panic("write env")
+    out :: Command.new(jetpack_bin()).current_dir(&scratch.path).args(["env", "--trust", "--no-color", "test"])
+        .env("PATH", "/usr/bin:/bin").output() ?? panic("env test")
+    assert_eq(out.status.code(), Val(2))
+    stderr :: String.from_utf8_lossy(out.stderr)
+    assert(stderr.contains("E1329"), "missing trust diagnostic:\n{stderr}")
+    assert(stderr.contains("needs-review"), "missing hook name:\n{stderr}")
+}
+
+// Rust: tests/env_hook.rs:764
+#Test("env_test_runs_hooks_checks_and_command_in_a_clean_child") {
+    scratch :: Scratch.new("clean-hook")
+    fs.write(scratch.path.join("env.jet"), "module env.dev {\n    on_enter: [{\n        name: \"clean-enter\",\n        command: \"test -z \\\"$JET_PARENT_SENTINEL\\\" && printf entered > .clean-marker\",\n        trusted: true,\n    }]\n    checks: [{\n        name: \"clean-check\",\n        command: \"test -z \\\"$JET_PARENT_SENTINEL\\\" && test -f .clean-marker\",\n        trusted: true,\n    }]\n}\n") ?? panic("write env")
+    out :: Command.new(jetpack_bin()).current_dir(&scratch.path).args(["env", "--trust", "--no-color", "test", "--", "/bin/sh", "-c", "test -z \"$JET_PARENT_SENTINEL\" && test -f .clean-marker"])
+        .env("JET_PARENT_SENTINEL", "must-not-leak").env("PATH", "/usr/bin:/bin").output() ?? panic("env test")
+    assert(out.status.success(), "clean env test must run every lifecycle phase without host leakage: {String.from_utf8_lossy(out.stderr)}")
+    assert_eq(fs.read_to_string(scratch.path.join(".clean-marker")) ?? panic("read marker"), "entered")
+}
+
+// Rust: tests/env_hook.rs:812
+#Test("enter_installs_and_runs_a_native_git_hook_from_the_typed_environment") {
+    if sys.target.selected_family() == "unix" {
+        scratch :: Scratch.new("git-hooks-enter")
+        hooks :: scratch.path.join("scripts/githooks")
+        fs.create_dir_all(hooks) ?? panic("create hooks")
+        hook :: hooks.join("pre-commit")
+        fs.write(hook, "#!/bin/sh\nprintf ran > .git-hook-ran\n") ?? panic("write hook")
+        fs.set_permissions(hook, Permissions.from_mode(0o755)) ?? panic("chmod hook")
+        fs.write(scratch.path.join("env.jet"), "module env.dev {\n  git_hooks_path: \"scripts/githooks\"\n}\n") ?? panic("write env")
+        fs.write(scratch.path.join("tracked.txt"), "tracked\n") ?? panic("write tracked")
+        for args in [["init", "--quiet"], ["config", "user.name", "Jet Test"], ["config", "user.email", "jet-test@example.invalid"], ["add", "tracked.txt"]] {
+            out :: Command.new("git").current_dir(&scratch.path).args(args).output() ?? panic("git setup")
+            assert(out.status.success(), "git setup failed: {String.from_utf8_lossy(out.stderr)}")
+        }
+        path :: fs.canonicalize(hooks) ?? panic("canonicalize hooks")
+        path_output :: Command.new(jetpack_bin()).current_dir(&scratch.path).args(["env", "--trust", "--no-color", "--", "git", "config", "--get", "core.hooksPath"])
+            .env("PATH", env.var_os("PATH") ?? panic("tests run with Git on PATH")).output() ?? panic("git projection")
+        assert(path_output.status.success(), "Git config projection failed: {String.from_utf8_lossy(path_output.stderr)}")
+        text := String.from_utf8_lossy(path_output.stdout).trim() // #4303
+        assert_eq(text, path.to_string_lossy())
+        commit :: Command.new(jetpack_bin()).current_dir(&scratch.path).args(["env", "--trust", "--no-color", "--", "git", "commit", "-m", "hook"])
+            .env("PATH", env.var_os("PATH") ?? panic("tests run with Git on PATH")).output() ?? panic("git commit")
+        assert(commit.status.success(), "native Git hook run failed: {String.from_utf8_lossy(commit.stderr)}")
+        assert_eq(fs.read_to_string(scratch.path.join(".git-hook-ran")) ?? panic("read hook marker"), "ran")
+    }
+}
+
+// Rust: tests/env_hook.rs:905
+#Test("env_test_projects_git_hooks_into_the_clean_ci_command") {
+    scratch :: Scratch.new("git-hooks-ci")
+    hooks :: scratch.path.join("scripts/githooks")
+    fs.create_dir_all(hooks) ?? panic("create hooks")
+    fs.write(scratch.path.join("env.jet"), "module env.ci {\n  git_hooks_path: \"scripts/githooks\"\n}\n") ?? panic("write env")
+    expected :: (fs.canonicalize(hooks) ?? panic("canonicalize hooks")).to_string_lossy().to_string()
+    git := nil as OSPath?
+    for directory in env.split_paths(env.var_os("PATH") ?? panic("tests run with Git on PATH")) {
+        candidate :: directory.join("git")
+        if candidate.is_file() { git = Val(candidate); break }
+    }
+    executable :: git ?? panic("Git executable must be discoverable for the CI projection test")
+    out :: Command.new(jetpack_bin()).current_dir(&scratch.path).args(["env", "--trust", "--env", "ci", "--no-color", "test", "--"])
+        .arg(executable).args(["config", "--get", "core.hooksPath"]).env("PATH", env.var_os("PATH") ?? panic("tests run with Git on PATH")).output() ?? panic("env test")
+    assert(out.status.success(), "CI environment test failed: {String.from_utf8_lossy(out.stderr)}")
+    assert(String.from_utf8_lossy(out.stdout).contains(expected), "CI command did not receive core.hooksPath: stdout={String.from_utf8_lossy(out.stdout)} stderr={String.from_utf8_lossy(out.stderr)}")
+}
+
+// Rust: tests/env_hook.rs:955
+#Test("enter_rejects_a_missing_git_hooks_directory_before_launch") {
+    scratch :: Scratch.new("git-hooks-missing")
+    fs.write(scratch.path.join("env.jet"), "module env.dev {\n  git_hooks_path: \"scripts/githooks\"\n}\n") ?? panic("write env")
+    out :: Command.new(jetpack_bin()).current_dir(&scratch.path).args(["env", "--trust", "--no-color", "--", "sh", "-c", "touch child-ran"])
+        .env("PATH", "/usr/bin:/bin").output() ?? panic("enter")
+    assert_eq(out.status.code(), Val(2))
+    stderr :: String.from_utf8_lossy(out.stderr)
+    assert(stderr.contains("E1333"), "missing git hook path diagnostic: {stderr}")
+    assert(!scratch.path.join("child-ran").exists())
+}
+
+// Rust: tests/env_hook.rs:987
+#Test("enter_rejects_a_trusted_hook_cwd_that_escapes_through_a_symlink") {
+    if sys.target.selected_family() == "unix" {
+        project :: Scratch.new("trusted-hook-symlink")
+        outside :: Scratch.new("trusted-hook-outside")
+        fs.symlink(&outside.path, project.path.join("link")) ?? panic("symlink")
+        fs.write(project.path.join("env.jet"), "module env.dev {\n    on_enter: [{\n        name: \"escape\",\n        cwd: \"link\",\n        command: \"printf escaped > escaped\",\n        trusted: true,\n    }]\n}\n") ?? panic("write env")
+        out :: Command.new(jetpack_bin()).current_dir(&project.path).args(["env", "--trust", "--no-color", "--", "/bin/true"])
+            .env("PATH", "/usr/bin:/bin").output() ?? panic("enter")
+        assert_eq(out.status.code(), Val(2))
+        stderr :: String.from_utf8_lossy(out.stderr)
+        assert(stderr.contains("unsafe cwd"), "missing boundary diagnostic:\n{stderr}")
+        assert(!outside.path.join("escaped").exists())
+    }
+}

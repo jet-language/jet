@@ -1,371 +1,164 @@
-// PORT-PENDING 0868 crates-jetpack-src-jetos-entry-module-group: crates/jetpack/src/JetOS/store_realize.rs:1-367
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS use super::options_rendering::{clean_symbol, option_value};
-//RS use super::types::{OSFlags, GNOME_DESKTOP_PACKAGES};
-//RS use crate::Output::Theme;
-//RS use crate::Provider;
-//RS use crate::RefSpec;
-//RS use crate::Store;
-//RS use crate::Trust;
-//RS use jet_env_model::ModuleEval::SystemPlan;
-//RS use std::path::{Path, PathBuf};
-//RS 
-//RS pub(super) struct RealizedPackage {
-//RS     entry: Store::StoreEntry,
-//RS     lease: Store::CacheLease,
-//RS     original_out: PathBuf,
-//RS     original_reference: String,
-//RS     consumption_override: Option<PathBuf>,
-//RS }
-//RS 
-//RS impl std::ops::Deref for RealizedPackage {
-//RS     type Target = Store::StoreEntry;
-//RS 
-//RS     fn deref(&self) -> &Self::Target {
-//RS         &self.entry
-//RS     }
-//RS }
-//RS 
-//RS impl RealizedPackage {
-//RS     fn from_verified(realized: Store::VerifiedRealization) -> Self {
-//RS         let original_out = realized.original_output().to_path_buf();
-//RS         let original_reference = realized.original_reference().to_string();
-//RS         let (entry, _source_state, lease) = realized.into_parts();
-//RS         Self {
-//RS             entry,
-//RS             lease,
-//RS             original_out,
-//RS             original_reference,
-//RS             consumption_override: None,
-//RS         }
-//RS     }
-//RS 
-//RS     pub(super) fn consumption_path(&self, path: &str) -> std::io::Result<PathBuf> {
-//RS         if let Some(root) = &self.consumption_override {
-//RS             let relative = Path::new(path)
-//RS                 .strip_prefix(&self.entry.out)
-//RS                 .map_err(|_| std::io::Error::other("package member escapes realized output"))?;
-//RS             return Ok(root.join(relative));
-//RS         }
-//RS         self.lease.stable_path(path)
-//RS     }
-//RS 
-//RS     pub(super) fn set_consumption_override(&mut self, path: PathBuf) {
-//RS         self.consumption_override = Some(path);
-//RS     }
-//RS 
-//RS     pub(super) fn original_output(&self) -> &Path {
-//RS         &self.original_out
-//RS     }
-//RS 
-//RS     pub(super) fn original_reference(&self) -> &str {
-//RS         &self.original_reference
-//RS     }
-//RS 
-//RS     /// Hangar identities only. Provider-native paths such as `/nix/store/...`
-//RS     /// remain provider roots and never enter Jetpack lifecycle target sets.
-//RS     pub(super) fn output_digests(&self, roots: &Store::Roots) -> Vec<String> {
-//RS         let objects = roots.hangar_dir().join("objects");
-//RS         let mut digests = self
-//RS             .entry
-//RS             .named_outputs
-//RS             .values()
-//RS             .filter(|digest| canonical_hangar_digest(digest) && objects.join(digest).is_dir())
-//RS             .cloned()
-//RS             .collect::<Vec<_>>();
-//RS         if digests.is_empty()
-//RS             && !self.entry.envelope.output_hash.is_empty()
-//RS             && canonical_hangar_digest(&self.entry.envelope.output_hash)
-//RS             && objects.join(&self.entry.envelope.output_hash).is_dir()
-//RS         {
-//RS             digests.push(self.entry.envelope.output_hash.clone());
-//RS         }
-//RS         digests.sort();
-//RS         digests.dedup();
-//RS         digests
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Debug, PartialEq, Eq)]
-//RS pub(super) enum RealizeRefError {
-//RS     Provider(String),
-//RS     BuildRejected,
-//RS }
-//RS 
-//RS #[derive(Debug, PartialEq, Eq)]
-//RS enum CoreBuildAuthorizationError {
-//RS     Identity(String),
-//RS     Denied,
-//RS }
-//RS 
-//RS /// Gate the exact Core Cargo action before Store realization can reach a
-//RS /// provider build hook. JetOS uses the same identity and trust gate as the
-//RS /// regular package realization path.
-//RS fn authorize_core_build(
-//RS     theme: &Theme,
-//RS     trust_store: &Path,
-//RS     spec: &RefSpec::RefSpec,
-//RS     table: &RefSpec::SourceTable,
-//RS     ctx: &Provider::Ctx<'_>,
-//RS     bypass: bool,
-//RS ) -> Result<(), CoreBuildAuthorizationError> {
-//RS     match Provider::approval_facts(spec, table, ctx) {
-//RS         Ok(Some(identity)) => {
-//RS             crate::RuntimePolicy::warn_sandbox_fallback(theme);
-//RS             Trust::gate_build_identity(theme, trust_store, &identity, bypass)
-//RS                 .map_err(|_| CoreBuildAuthorizationError::Denied)
-//RS         }
-//RS         Ok(None) => Ok(()),
-//RS         Err(reason) => Err(CoreBuildAuthorizationError::Identity(reason)),
-//RS     }
-//RS }
-//RS 
-//RS fn report_core_build_identity_error(theme: &Theme, reason: &str) {
-//RS     theme.error_coded(
-//RS         "E1275",
-//RS         "build sandboxing is required but unavailable",
-//RS         &format!("could not establish the exact Core Cargo build identity: {reason}"),
-//RS         "provide a trusted substitute or approved remote builder, or enable the native sandbox, then retry.",
-//RS     );
-//RS }
-//RS 
-//RS fn canonical_hangar_digest(digest: &str) -> bool {
-//RS     digest.len() == 71
-//RS         && digest.starts_with("sha256-")
-//RS         && digest[7..]
-//RS             .bytes()
-//RS             .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
-//RS }
-//RS 
-//RS pub(super) fn first_party_package_ref(
-//RS     table: &RefSpec::SourceTable,
-//RS     package: &str,
-//RS ) -> Option<String> {
-//RS     table
-//RS         .declarations()
-//RS         .into_iter()
-//RS         .find(|(_, _, via)| *via == RefSpec::ProviderKind::Core)
-//RS         .map(|(name, _, _)| format!("{package}@{name}"))
-//RS }
-//RS 
-//RS pub(super) fn jetos_runtime_package_ref(
-//RS     table: &RefSpec::SourceTable,
-//RS     package: &str,
-//RS     offline: bool,
-//RS ) -> Option<String> {
-//RS     if offline {
-//RS         first_party_package_ref(table, package)
-//RS     } else {
-//RS         Some(format!("{package}@nixpkgs"))
-//RS     }
-//RS }
-//RS 
-//RS pub(super) fn desktop_default_required_packages(system: &SystemPlan) -> &'static [&'static str] {
-//RS     let requested = option_value(
-//RS         system,
-//RS         &["services.desktop.profile", "services.desktop.session"],
-//RS     )
-//RS     .is_some()
-//RS         || option_value(system, &["services.displayManager"]).is_some()
-//RS         || option_value(system, &["init.defaultTarget"]).as_deref() == Some("graphical.target");
-//RS     if !requested {
-//RS         return &[];
-//RS     }
-//RS     let profile = option_value(system, &["services.desktop.profile"])
-//RS         .map(|s| clean_symbol(&s))
-//RS         .or_else(|| option_value(system, &["services.desktop.session"]).map(|s| clean_symbol(&s)))
-//RS         .unwrap_or_else(|| "Default".to_string());
-//RS     let profile = profile.to_ascii_lowercase();
-//RS     if profile == "default" || profile == "gnome" {
-//RS         &GNOME_DESKTOP_PACKAGES
-//RS     } else {
-//RS         &[]
-//RS     }
-//RS }
-//RS 
-//RS pub(super) fn realize_ref(
-//RS     theme: &Theme,
-//RS     roots: &Store::Roots,
-//RS     flags: &OSFlags,
-//RS     table: &RefSpec::SourceTable,
-//RS     spec: &RefSpec::RefSpec,
-//RS     project_dir: &Path,
-//RS     name_w: usize,
-//RS     mut progress: Option<(&mut crate::Output::LiveRegion<'_>, usize, usize)>,
-//RS ) -> Option<RealizedPackage> {
-//RS     if let Some((live, step, total)) = progress.as_mut() {
-//RS         live.set_dependency_status(
-//RS             "Building System",
-//RS             *step,
-//RS             *total,
-//RS             spec.source.label(),
-//RS             &spec.package,
-//RS             "Resolving",
-//RS         );
-//RS     } else {
-//RS         theme.status(&format!("Resolving {} ...", theme.bold(&spec.raw)));
-//RS     }
-//RS     let store_dir = roots.hangar_dir();
-//RS     let fixtures =
-//RS         if flags.offline && Provider::uses_nix_provider(spec, table, flags.offline, &store_dir) {
-//RS             Provider::fixtures_from_env(flags.fixtures.clone())
-//RS         } else {
-//RS             flags.fixtures.clone()
-//RS         };
-//RS     let ctx = Provider::Ctx {
-//RS         fixtures: fixtures.as_deref(),
-//RS         store_dir: &store_dir,
-//RS         offline: flags.offline,
-//RS         project_dir: Some(project_dir),
-//RS         nix_index: None,
-//RS         nix_roots: None,
-//RS         allow_local_nix_catalog: false,
-//RS     };
-//RS     let trust_store = Trust::store_path();
-//RS     match authorize_core_build(
-//RS         theme,
-//RS         &trust_store,
-//RS         spec,
-//RS         table,
-//RS         &ctx,
-//RS         flags.trust,
-//RS     ) {
-//RS         Ok(()) => {}
-//RS         Err(CoreBuildAuthorizationError::Denied) => {
-//RS             if let Some((live, _, _)) = progress.as_mut() {
-//RS                 live.clear();
-//RS             }
-//RS             return None;
-//RS         }
-//RS         Err(CoreBuildAuthorizationError::Identity(reason)) => {
-//RS             if let Some((live, _, _)) = progress.as_mut() {
-//RS                 live.clear();
-//RS             }
-//RS             report_core_build_identity_error(theme, &reason);
-//RS             return None;
-//RS         }
-//RS     }
-//RS     match Store::realize_verified(roots, &ctx, Store::RealizeRequest::Package { spec, table }) {
-//RS         Ok(realized) => {
-//RS             if let Some((live, _, _)) = progress.as_mut() {
-//RS                 live.clear();
-//RS             }
-//RS             let entry = realized.metadata();
-//RS             theme.row(
-//RS                 &entry.name,
-//RS                 name_w,
-//RS                 &entry.version,
-//RS                 realized.source_state().label(),
-//RS             );
-//RS             theme.detail(&theme.gray(&entry.out));
-//RS             Some(RealizedPackage::from_verified(realized))
-//RS         }
-//RS         Err(Store::RealizeError::Integrity(failure)) => {
-//RS             if let Some((live, _, _)) = progress.as_mut() {
-//RS                 live.clear();
-//RS             }
-//RS             Store::report_integrity(theme, &failure);
-//RS             None
-//RS         }
-//RS         Err(e) => {
-//RS             if let Some((live, _, _)) = progress.as_mut() {
-//RS                 live.clear();
-//RS             }
-//RS             theme.error(
-//RS                 "could not realize a jetos package",
-//RS                 &format!("provider failed for `{}`: {e:?}", spec.raw),
-//RS                 "check the source ref, or rerun without --offline if this source needs fetching.",
-//RS             );
-//RS             None
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS pub(super) fn try_realize_ref(
-//RS     theme: &Theme,
-//RS     roots: &Store::Roots,
-//RS     flags: &OSFlags,
-//RS     table: &RefSpec::SourceTable,
-//RS     spec: &RefSpec::RefSpec,
-//RS     project_dir: &Path,
-//RS     name_w: usize,
-//RS     mut progress: Option<(&mut crate::Output::LiveRegion<'_>, usize, usize)>,
-//RS ) -> Result<RealizedPackage, RealizeRefError> {
-//RS     if let Some((live, step, total)) = progress.as_mut() {
-//RS         live.set_dependency_status(
-//RS             "Building System",
-//RS             *step,
-//RS             *total,
-//RS             spec.source.label(),
-//RS             &spec.package,
-//RS             "Resolving",
-//RS         );
-//RS     } else {
-//RS         theme.status(&format!("Resolving {} ...", theme.bold(&spec.raw)));
-//RS     }
-//RS     let store_dir = roots.hangar_dir();
-//RS     let fixtures =
-//RS         if flags.offline && Provider::uses_nix_provider(spec, table, flags.offline, &store_dir) {
-//RS             Provider::fixtures_from_env(flags.fixtures.clone())
-//RS         } else {
-//RS             flags.fixtures.clone()
-//RS         };
-//RS     let ctx = Provider::Ctx {
-//RS         fixtures: fixtures.as_deref(),
-//RS         store_dir: &store_dir,
-//RS         offline: flags.offline,
-//RS         project_dir: Some(project_dir),
-//RS         nix_index: None,
-//RS         nix_roots: None,
-//RS         allow_local_nix_catalog: false,
-//RS     };
-//RS     let trust_store = Trust::store_path();
-//RS     match authorize_core_build(
-//RS         theme,
-//RS         &trust_store,
-//RS         spec,
-//RS         table,
-//RS         &ctx,
-//RS         flags.trust,
-//RS     ) {
-//RS         Ok(()) => {}
-//RS         Err(CoreBuildAuthorizationError::Denied) => {
-//RS             if let Some((live, _, _)) = progress.as_mut() {
-//RS                 live.clear();
-//RS             }
-//RS             return Err(RealizeRefError::BuildRejected);
-//RS         }
-//RS         Err(CoreBuildAuthorizationError::Identity(reason)) => {
-//RS             if let Some((live, _, _)) = progress.as_mut() {
-//RS                 live.clear();
-//RS             }
-//RS             report_core_build_identity_error(theme, &reason);
-//RS             return Err(RealizeRefError::BuildRejected);
-//RS         }
-//RS     }
-//RS     let realized =
-//RS         Store::realize_verified(roots, &ctx, Store::RealizeRequest::Package { spec, table })
-//RS             .map_err(|e| {
-//RS                 if let Some((live, _, _)) = progress.as_mut() {
-//RS                     live.clear();
-//RS                 }
-//RS                 RealizeRefError::Provider(format!(
-//RS                     "verified realization failed for `{}`: {e:?}",
-//RS                     spec.raw
-//RS                 ))
-//RS             })?;
-//RS     if let Some((live, _, _)) = progress.as_mut() {
-//RS         live.clear();
-//RS     }
-//RS     let entry = realized.metadata();
-//RS     theme.row(
-//RS         &entry.name,
-//RS         name_w,
-//RS         &entry.version,
-//RS         realized.source_state().label(),
-//RS     );
-//RS     theme.detail(&theme.gray(&entry.out));
-//RS     Ok(RealizedPackage::from_verified(realized))
-//RS }
-// END-PORT-PENDING 0868 crates/jetpack/src/JetOS/store_realize.rs:1-367
+use jetpack.JetOS.OptionsRendering.[clean_symbol, option_value]
+use jetpack.JetOS.Types.[JetOSFlags, JetOSRealizedPackage, JETOS_GNOME_DESKTOP_PACKAGES]
+use jetpack.Output.[Theme, LiveRegion]
+use jetpack.[Provider, RefSpec, Store, Trust, RuntimePolicy]
+use jet_env_model.ModuleEval.[SystemPlan]
 
+// Rust: crates/jetpack/src/JetOS/store_realize.rs:11
+// Carrier and consumption_path/original_output/original_reference remain owned by Types.
+impl JetOSRealizedPackage {
+    // Rust: crates/jetpack/src/JetOS/store_realize.rs:22
+    fn deref(self: &JetOSRealizedPackage) -> &Store.StoreEntry { &self.entry }
+
+    // Rust: crates/jetpack/src/JetOS/store_realize.rs:28
+    fn from_verified(realized: Store.VerifiedRealization) -> JetOSRealizedPackage {
+        original_out :: realized.original_output().to_path_buf()
+        original_reference :: realized.original_reference().to_string()
+        (entry, _source_state, lease) :: realized.into_parts()
+        JetOSRealizedPackage{entry: ^entry, lease: ^lease, original_out: ^original_out, original_reference_text: ^original_reference, consumption_override: None}
+    }
+
+    // Rust: crates/jetpack/src/JetOS/store_realize.rs:51
+    pub fn set_consumption_override(self: &JetOSRealizedPackage, path: OSPath) -> {
+        self.consumption_override = Val(^path)
+    }
+
+    // Rust: crates/jetpack/src/JetOS/store_realize.rs:65
+    // Provider-native roots never enter Hangar lifecycle target sets.
+    pub fn output_digests(self: &JetOSRealizedPackage, roots: &Store.Roots) -> [String] {
+        objects :: roots.hangar_dir().join("objects")
+        digests := self.entry.named_outputs.values().filter(digest -> canonical_hangar_digest(digest) && objects.join(digest).is_dir()).cloned().collect::<[String]>()
+        if digests.is_empty() && !self.entry.envelope.output_hash.is_empty() && canonical_hangar_digest(self.entry.envelope.output_hash) && objects.join(self.entry.envelope.output_hash).is_dir() {
+            digests.push(self.entry.envelope.output_hash.clone())
+        }
+        digests.sort()
+        digests.dedup()
+        ^digests
+    }
+}
+
+// Rust: crates/jetpack/src/JetOS/store_realize.rs:88
+#Error
+pub enum RealizeRefError { Provider(String), BuildRejected }
+
+// Rust: crates/jetpack/src/JetOS/store_realize.rs:94
+#Error
+enum CoreBuildAuthorizationError { Identity(String), Denied }
+
+// Rust: crates/jetpack/src/JetOS/store_realize.rs:102
+fn authorize_core_build(theme: &Theme, trust_store: &OSPath, spec: &RefSpec.RefSpec, table: &RefSpec.SourceTable, ctx: &Provider.Ctx, bypass: Bool) -> Unit CoreBuildAuthorizationError! {
+    if Provider.approval_facts(spec, table, ctx) == {
+        .Ok(.Val(identity)) -> {
+            RuntimePolicy.warn_sandbox_fallback(theme)
+            Trust.gate_build_identity(theme, trust_store, &identity, bypass).map_err(_ -> CoreBuildAuthorizationError.Denied)
+        }
+        .Ok(.None) -> Ok(())
+        .Err(reason) -> Err(CoreBuildAuthorizationError.Identity(^reason))
+    }
+}
+
+// Rust: crates/jetpack/src/JetOS/store_realize.rs:121
+fn report_core_build_identity_error(theme: &Theme, reason: String) -> {
+    theme.error_coded("E1275", "build sandboxing is required but unavailable", "could not establish the exact Core Cargo build identity: {reason}", "provide a trusted substitute or approved remote builder, or enable the native sandbox, then retry.")
+}
+
+// Rust: crates/jetpack/src/JetOS/store_realize.rs:130
+fn canonical_hangar_digest(digest: String) -> Bool {
+    digest.len() == 71 && digest.starts_with("sha256-") && digest.bytes().skip(7).all(byte -> byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+}
+
+// Rust: crates/jetpack/src/JetOS/store_realize.rs:138
+pub fn first_party_package_ref(table: &RefSpec.SourceTable, package: String) -> String? {
+    table.declarations().into_iter().find((_, _, via) -> via == RefSpec.ProviderKind.Core).map((name, _, _) -> "{package}@{name}")
+}
+
+// Rust: crates/jetpack/src/JetOS/store_realize.rs:149
+pub fn jetos_runtime_package_ref(table: &RefSpec.SourceTable, package: String, offline: Bool) -> String? {
+    if offline -> first_party_package_ref(table, package) else -> Val("{package}@nixpkgs")
+}
+
+// Rust: crates/jetpack/src/JetOS/store_realize.rs:161
+pub fn desktop_default_required_packages(system: &SystemPlan) -> &[String] {
+    requested :: option_value(system, &["services.desktop.profile", "services.desktop.session"]).is_some()
+        || option_value(system, &["services.displayManager"]).is_some()
+        || option_value(system, &["init.defaultTarget"]).as_deref() == Val("graphical.target")
+    if !requested { return &[] }
+    profile :: option_value(system, &["services.desktop.profile"]).map(s -> clean_symbol(s))
+        .or_else(() -> option_value(system, &["services.desktop.session"]).map(s -> clean_symbol(s))).unwrap_or_else(() -> "Default")
+    profile :: profile.to_ascii_lowercase()
+    if profile == "default" || profile == "gnome" -> &JETOS_GNOME_DESKTOP_PACKAGES else -> &[]
+}
+
+// Rust: crates/jetpack/src/JetOS/store_realize.rs:184
+pub fn realize_ref(theme: &Theme, roots: &Store.Roots, flags: &JetOSFlags, table: &RefSpec.SourceTable, spec: &RefSpec.RefSpec, project_dir: &OSPath, name_w: USize, progress: (&LiveRegion, USize, USize)?) -> JetOSRealizedPackage? {
+    if (live, step, total) :: progress.as_mut() {
+        live.set_dependency_status("Building System", step, total, spec.source.label(), spec.package, "Resolving")
+    } else { theme.status("Resolving {theme.bold(spec.raw)} ...") }
+    store_dir :: roots.hangar_dir()
+    fixtures :: if flags.offline && Provider.uses_nix_provider(spec, table, flags.offline, &store_dir) -> Provider.fixtures_from_env(flags.fixtures.clone()) else -> flags.fixtures.clone()
+    ctx :: Provider.Ctx{fixtures: fixtures.as_deref(), store_dir: &store_dir, offline: flags.offline, project_dir: Val(project_dir), nix_index: None, nix_roots: None, allow_local_nix_catalog: false}
+    trust_store :: Trust.store_path()
+    if authorize_core_build(theme, &trust_store, spec, table, &ctx, flags.trust) == {
+        .Ok(()) -> {}
+        .Err(.Denied) -> {
+            if (live, _, _) :: progress.as_mut() { live.clear() }
+            return None
+        }
+        .Err(.Identity(reason)) -> {
+            if (live, _, _) :: progress.as_mut() { live.clear() }
+            report_core_build_identity_error(theme, reason)
+            return None
+        }
+    }
+    if Store.realize_verified(roots, &ctx, Store.RealizeRequest.Package{spec: spec, table: table}) == {
+        .Ok(realized) -> {
+            if (live, _, _) :: progress.as_mut() { live.clear() }
+            entry :: realized.metadata()
+            theme.row(entry.name, name_w, entry.version, realized.source_state().label())
+            theme.detail(theme.gray(entry.out))
+            Val(JetOSRealizedPackage.from_verified(^realized))
+        }
+        .Err(Store.RealizeError.Integrity(failure)) -> {
+            if (live, _, _) :: progress.as_mut() { live.clear() }
+            Store.report_integrity(theme, &failure)
+            None
+        }
+        .Err(e) -> {
+            if (live, _, _) :: progress.as_mut() { live.clear() }
+            theme.error("could not realize a jetos package", "provider failed for `{spec.raw}`: {e.debug()}", "check the source ref, or rerun without --offline if this source needs fetching.")
+            None
+        }
+    }
+}
+
+// Rust: crates/jetpack/src/JetOS/store_realize.rs:282
+pub fn try_realize_ref(theme: &Theme, roots: &Store.Roots, flags: &JetOSFlags, table: &RefSpec.SourceTable, spec: &RefSpec.RefSpec, project_dir: &OSPath, name_w: USize, progress: (&LiveRegion, USize, USize)?) -> JetOSRealizedPackage RealizeRefError! {
+    if (live, step, total) :: progress.as_mut() {
+        live.set_dependency_status("Building System", step, total, spec.source.label(), spec.package, "Resolving")
+    } else { theme.status("Resolving {theme.bold(spec.raw)} ...") }
+    store_dir :: roots.hangar_dir()
+    fixtures :: if flags.offline && Provider.uses_nix_provider(spec, table, flags.offline, &store_dir) -> Provider.fixtures_from_env(flags.fixtures.clone()) else -> flags.fixtures.clone()
+    ctx :: Provider.Ctx{fixtures: fixtures.as_deref(), store_dir: &store_dir, offline: flags.offline, project_dir: Val(project_dir), nix_index: None, nix_roots: None, allow_local_nix_catalog: false}
+    trust_store :: Trust.store_path()
+    if authorize_core_build(theme, &trust_store, spec, table, &ctx, flags.trust) == {
+        .Ok(()) -> {}
+        .Err(.Denied) -> {
+            if (live, _, _) :: progress.as_mut() { live.clear() }
+            return Err(RealizeRefError.BuildRejected)
+        }
+        .Err(.Identity(reason)) -> {
+            if (live, _, _) :: progress.as_mut() { live.clear() }
+            report_core_build_identity_error(theme, reason)
+            return Err(RealizeRefError.BuildRejected)
+        }
+    }
+    realized :: Store.realize_verified(roots, &ctx, Store.RealizeRequest.Package{spec: spec, table: table}).map_err(e -> {
+        if (live, _, _) :: progress.as_mut() { live.clear() }
+        RealizeRefError.Provider("verified realization failed for `{spec.raw}`: {e.debug()}")
+    })?
+    if (live, _, _) :: progress.as_mut() { live.clear() }
+    entry :: realized.metadata()
+    theme.row(entry.name, name_w, entry.version, realized.source_state().label())
+    theme.detail(theme.gray(entry.out))
+    Ok(JetOSRealizedPackage.from_verified(^realized))
+}

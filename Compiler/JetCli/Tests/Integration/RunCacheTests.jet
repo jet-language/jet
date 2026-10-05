@@ -1,0 +1,413 @@
+// Rust: tests/run_cache.rs:149
+use Compiler.JetCli.Tests.Integration.RunCache.*
+use Compiler.JetCli.Tests.Integration.Common as common
+use jet.RunCache
+use std.[env, fs, Command, Instant]
+use core.sys.target.selected_family
+// GATE #4494: native in-process run-cache capture/replay and phase/trace hooks,
+// real filesystem, process, PTY, environment and clock providers.
+// Rust's retiring JIT representation checks map to native O0 cache behavior;
+// run_native_once and take_last_trace belong to the canonical native run-cache owner.
+
+// Rust: tests/run_cache.rs:149
+#Test("warm_hit_skips_front_end_and_matches_stdout") {
+    _guard :: lock_run_cache_tests()
+    root :: common.test_scratch_root("run_cache").join("jet_run_cache_{unique()}")
+    _ :: fs.remove_dir_all(root)
+    fs.create_dir_all(root).expect("create root")
+    file :: root.join("hi.jet")
+    fs.write(file, "fn run() -> {\n    print(\"warm-ok\")\n}\n").expect("write entry")
+    cache :: root.join("cache")
+    (c1, out1, err1) :: run_jet(cache, file, None, [("JET_RUN_TRACE", "1")])
+    assert_eq(c1, 0, "cold failed: {err1}")
+    assert_eq(out1, "warm-ok\n")
+    assert(err1.contains("[run-cache] store"), "expected store: {err1}")
+    (c2, out2, err2) :: run_jet(cache, file, None, [("JET_RUN_TRACE", "1")])
+    assert_eq(c2, 0, "warm failed: {err2}")
+    assert_eq(out2, "warm-ok\n")
+    assert(err2.contains("[run-cache] hit"), "expected hit: {err2}")
+    fs.write(file, "fn run() -> {\n    print(\"changed\")\n}\n").expect("edit entry")
+    (c3, out3, err3) :: run_jet(cache, file, None, [("JET_RUN_TRACE", "1")])
+    assert_eq(c3, 0, "re-cold failed: {err3}")
+    assert_eq(out3, "changed\n")
+    assert(err3.contains("[run-cache] store"), "expected re-store after edit: {err3}")
+}
+
+// Rust: tests/run_cache.rs:179
+#Test("named_job_warm_hit_preserves_selection_and_arguments") {
+    _guard :: lock_run_cache_tests()
+    repo :: OSPath.from(env.manifest_dir())
+    source_project :: repo.join("Examples/features/devloop")
+    assert(!source_project.join(".jet").exists(), "checked-in job example already has generated `.jet` state")
+    staged :: common.ProjectScratch.for_project(source_project, "run-cache-job")
+    file :: staged.path.join("job_runner.jet")
+    expected :: fs.read(repo.join("Examples/features/expected/devloop/job_runner.greet.out")).expect("expected job output")
+    cache :: common.test_scratch_root("run_cache").join("jet_run_job_cache_{unique()}")
+    _ :: fs.remove_dir_all(cache)
+    run :: () -> { Command.new(jet_bin()).args(["run", file.to_str().expect("file text"), "--", "greet"]).current_dir(staged.path).env("JET_RUN_CACHE_DIR", cache).env("JET_RUN_TRACE", "1").env("NO_COLOR", "1").output().expect("run named job") }
+    cold :: run()
+    assert(cold.status.success(), "{String.from_utf8_lossy(cold.stderr)}")
+    assert_eq(cold.stdout, expected)
+    assert(String.from_utf8_lossy(cold.stderr).contains("[run-cache] store"), "{String.from_utf8_lossy(cold.stderr)}")
+    warm :: run()
+    assert(warm.status.success(), "{String.from_utf8_lossy(warm.stderr)}")
+    assert_eq(warm.stdout, expected)
+    assert(String.from_utf8_lossy(warm.stderr).contains("[run-cache] hit"), "{String.from_utf8_lossy(warm.stderr)}")
+    assert(!source_project.join(".jet").exists(), "named-job execution created `.jet` in the checked-in example project")
+}
+
+// Rust: tests/run_cache.rs:239
+#Test("warm_runtime_stop_preserves_source_location") {
+    _guard :: lock_run_cache_tests()
+    root :: common.test_scratch_root("run_cache").join("jet_run_stop_location_{unique()}")
+    _ :: fs.remove_dir_all(root)
+    fs.create_dir_all(root).expect("create root")
+    file :: root.join("bounds.jet")
+    fs.write(file, "fn run() -> {\n    n := 1\n    xs := [n]\n    print(xs[9])\n}\n").expect("write bounds")
+    cache :: root.join("cache")
+    (cold_code, _, cold_err) :: run_jet(cache, file, None, [])
+    (warm_code, _, warm_err) :: run_jet(cache, file, None, [])
+    arrow :: "  --> {file.display()}:4"
+    assert_eq(cold_code, 70, "cold stderr: {cold_err}")
+    assert_eq(warm_code, 70, "warm stderr: {warm_err}")
+    assert(cold_err.contains(arrow), "cold stderr: {cold_err}")
+    assert(warm_err.contains(arrow), "warm stderr: {warm_err}")
+}
+
+// Rust: tests/run_cache.rs:263
+#Test("dependency_and_argv_invalidate_cache_key") {
+    _guard :: lock_run_cache_tests()
+    root :: common.test_scratch_root("run_cache").join("jet_run_dep_{unique()}")
+    _ :: fs.remove_dir_all(root)
+    fs.create_dir_all(root).expect("create root")
+    dep :: root.join("dep.jet")
+    main :: root.join("main.jet")
+    fs.write(dep, "pub fn greet() -> {\n    print(\"v1\")\n}\n").expect("write dependency")
+    fs.write(main, "use dep\nfn run() -> {\n    dep.greet()\n}\n").expect("write main")
+    k1 :: RunCache.run_cache_key(main, [])
+    fs.write(dep, "pub fn greet() -> {\n    print(\"v2\")\n}\n").expect("edit dependency")
+    k2 :: RunCache.run_cache_key(main, [])
+    assert_ne(k1, k2, "dependency content must invalidate run-cache key")
+    k3 :: RunCache.run_cache_key(main, ["--x"])
+    assert_ne(k2, k3, "argv must participate in run-cache key")
+}
+
+// Rust: tests/run_cache.rs:285
+#Test("argv_change_misses_cache") {
+    _guard :: lock_run_cache_tests()
+    root :: common.test_scratch_root("run_cache").join("jet_run_argv_{unique()}")
+    _ :: fs.remove_dir_all(root)
+    fs.create_dir_all(root).expect("create root")
+    file :: root.join("a.jet")
+    fs.write(file, "fn run() -> {\n    print(\"ok\")\n}\n").expect("write entry")
+    cache :: root.join("cache")
+    out :: Command.new(jet_bin()).arg("run").arg(file).arg("--").arg("one").env("JET_RUN_CACHE_DIR", cache).env("JET_RUN_TRACE", "1").output().expect("run one")
+    assert(out.status.success(), "{String.from_utf8_lossy(out.stderr)}")
+    assert(String.from_utf8_lossy(out.stderr).contains("[run-cache] store"), "{String.from_utf8_lossy(out.stderr)}")
+    out2 :: Command.new(jet_bin()).arg("run").arg(file).arg("--").arg("two").env("JET_RUN_CACHE_DIR", cache).env("JET_RUN_TRACE", "1").output().expect("run two")
+    err2 :: String.from_utf8_lossy(out2.stderr)
+    assert(out2.status.success(), "{err2}")
+    assert(err2.contains("[run-cache] store"), "argv change must miss: {err2}")
+}
+
+// Rust: tests/run_cache.rs:332
+#Test("phases_zero_on_inprocess_warm_hit") {
+    _guard :: lock_run_cache_tests()
+    root :: common.test_scratch_root("run_cache").join("jet_run_phases_{unique()}")
+    _ :: fs.remove_dir_all(root)
+    fs.create_dir_all(root).expect("create root")
+    file :: root.join("p.jet")
+    fs.write(file, "fn run() -> {\n    print(1)\n}\n").expect("write entry")
+    cache :: root.join("cache")
+    env.set_var("JET_RUN_CACHE_DIR", cache)
+    RunCache.reset_phases()
+    cold :: RunCache.run_native_once(file.to_str().expect("entry text")).expect("cold native execution")
+    after_cold :: RunCache.phases()
+    assert(after_cold.cache_misses >= 1 || after_cold.parse >= 1, "cold must miss or parse: {after_cold:?}")
+    RunCache.reset_phases()
+    warm :: RunCache.run_native_once(file.to_str().expect("entry text")).expect("warm native execution")
+    assert_eq(warm.stdout, "1\n")
+    after_warm :: RunCache.phases()
+    assert_eq(after_warm.parse, 0, "warm must skip parse: {after_warm:?}")
+    assert_eq(after_warm.check, 0, "warm must skip check: {after_warm:?}")
+    assert_eq(after_warm.lower, 0, "warm must skip lower: {after_warm:?}")
+    assert_eq(after_warm.codegen, 0, "warm must skip codegen: {after_warm:?}")
+    assert_eq(after_warm.link, 0, "warm must skip link: {after_warm:?}")
+    assert(after_warm.cache_hits >= 1, "expected cache hit: {after_warm:?}")
+    env.remove_var("JET_RUN_CACHE_DIR")
+}
+
+// Rust: tests/run_cache.rs:378
+#Test("tty_run_does_not_promote_to_dev") {
+    if selected_family() == "unix" {
+        _guard :: lock_run_cache_tests()
+        root :: common.test_scratch_root("run_cache").join("tty_{unique()}")
+        _ :: fs.remove_dir_all(root)
+        fs.create_dir_all(root).expect("create root")
+        fs.write(root.join("package.jet"), "name: \"tty_run\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [Exec, IO, Mem.Alloc, Time, Time.Wait] } }\n").expect("write package")
+        file :: root.join("tty.jet")
+        fs.write(file, "use core.time as time\nfn run() -> {\n    time.sleep(250ms)\n    print(\"tty\")\n}\n").expect("write tty entry")
+        cache :: root.join("cache")
+        jet :: jet_bin()
+        quoted_jet :: jet.replace("'", "'\\''")
+        quoted_file :: file.display().to_string().replace("'", "'\\''")
+        shell_line :: "exec '{quoted_jet}' run '{quoted_file}'"
+        out :: Command.new("script").args(["-qfec", shell_line, "/dev/null"]).env("JET_RUN_CACHE_DIR", cache).env_remove("NO_COLOR").env_remove("FORCE_COLOR").env_remove("JET_JSON").output().expect("util-linux script must allocate a real PTY")
+        transcript :: "{String.from_utf8_lossy(out.stdout)}\n{String.from_utf8_lossy(out.stderr)}"
+        assert(out.status.success(), "{transcript}")
+        assert(transcript.contains("tty"), "{transcript}")
+        assert(!transcript.contains("tip: for a faster edit loop"), "normal TTY run emitted an automatic promotion: {transcript}")
+    }
+}
+
+// Rust: tests/run_cache.rs:424
+// The retiring JIT-specific name/module representation maps to resident native O0 replay.
+#Test("default_run_stays_resident_native_cache_not_static_aot") {
+    _guard :: lock_run_cache_tests()
+    root :: common.test_scratch_root("run_cache").join("jet_native_not_aot_{unique()}")
+    fs.create_dir_all(root).expect("create root")
+    file :: root.join("x.jet")
+    fs.write(file, "fn run() -> {\n    print(\"jit\")\n}\n").expect("write entry")
+    cache :: root.join("cache")
+    (c1, _, err1) :: run_jet(cache, file, None, [("JET_RUN_TRACE", "1")])
+    assert_eq(c1, 0, "{err1}")
+    (c2, out2, err2) :: run_jet(cache, file, None, [("JET_RUN_TRACE", "1")])
+    assert_eq(c2, 0, "{err2}")
+    assert_eq(out2, "jit\n")
+    assert(err2.contains("[run-cache] hit"), "{err2}")
+    has_module := false
+    if entries :: fs.read_dir(cache).ok() {
+        for entry in entries { if item :: entry.ok() { if item.path().join("module.bin").is_file() { has_module = true; break } } }
+    }
+    assert(has_module, "expected module.bin under run cache")
+}
+
+// Rust: tests/run_cache.rs:458
+#Test("example_stems_replay_identically_on_a_second_run") {
+    _guard :: lock_run_cache_tests()
+    cache :: common.unique_tmp("jet_run_cache_replay")
+    _ :: fs.remove_dir_all(cache)
+    repo :: OSPath.from(env.manifest_dir())
+    entry :: repo.join("Examples/features/streams/generators.jet")
+    env.set_var("JET_RUN_CACHE_DIR", cache)
+    assert_eq(RunCache.cache_root_for_entry(entry), Some(cache.clone()), "JET_RUN_CACHE_DIR must redirect the run-cache root away from the machine's")
+    env.remove_var("JET_RUN_CACHE_DIR")
+    rows :: [("Examples/features/streams/generators.jet", false, false), ("Examples/features/cli/typed_entry_args.jet", false, false), ("Examples/features/errors/default_err_edge.jet", true, true)]
+    for (stem, must_warm_hit, must_exit_nonzero) in rows {
+        source_file :: repo.join(stem)
+        assert(source_file.is_file(), "matrix row is not a file: {stem}")
+        source_project :: source_file.parent().expect("feature example has a project root")
+        assert(!source_project.join(".jet").exists(), "{stem}: checked-in example already has generated `.jet` state")
+        staged :: common.ProjectScratch.for_project(source_project, "run-cache-replay")
+        file :: staged.path.join(source_file.file_name().expect("feature entry has a name"))
+        project :: staged.path
+        row_cache :: cache.join(stem.replace("/", "_"))
+        _ :: fs.remove_dir_all(row_cache)
+        (cold_code, cold_out, cold_err) :: run_jet(row_cache, file, Some(project), [])
+        (warm_code, warm_out, warm_err) :: run_jet(row_cache, file, Some(project), [])
+        assert_eq(cold_code, warm_code, "{stem}: exit code changed on the second run\ncold stderr: {cold_err}\nwarm stderr: {warm_err}")
+        assert_eq(cold_out, warm_out, "{stem}: stdout changed on the second run\nwarm stderr: {warm_err}")
+        assert_eq(cold_err, warm_err, "{stem}: stderr changed on the second run")
+        if must_exit_nonzero { assert_ne(cold_code, 0, "{stem}: this row must fail, or it cannot catch a replay that exits 0\nstderr: {cold_err}") }
+        if must_warm_hit {
+            (trace_code, trace_out, trace_err) :: run_jet(row_cache, file, Some(project), [("JET_RUN_TRACE", "1")])
+            assert(trace_err.contains("[run-cache] hit"), "{stem}: expected a warm hit, so the replay path is what ran: {trace_err}")
+            assert_eq(trace_code, cold_code, "{stem}: traced replay changed the exit code")
+            assert_eq(trace_out, cold_out, "{stem}: traced replay changed stdout")
+        }
+        assert(!source_project.join(".jet").exists(), "{stem}: replay created `.jet` in the checked-in feature directory")
+    }
+}
+
+// Rust: tests/run_cache.rs:599
+#Test("checked_entry_error_rails_preserve_native_cli_reports") {
+    _guard :: lock_run_cache_tests()
+    for (name, source, expected_exit, payloads, _) in ENTRY_ERROR_CASES {
+        scratch :: common.Scratch.new("checked-entry-rail-{name}")
+        project :: scratch.path.join("project")
+        fs.create_dir_all(project).expect("create project")
+        fs.write(project.join("package.jet"), "name: \"checked_entry_rail\"\nversion: \"0.1.0\"\n").expect("write package")
+        entry :: project.join("run.jet")
+        fs.write(entry, source).expect("write entry")
+        cache :: scratch.path.join("cache")
+        store :: scratch.path.join("store").to_string_lossy()
+        jetpack :: scratch.path.join("jetpack").to_string_lossy()
+        environment :: [("NO_COLOR", "1"), ("JETPACK_ENV", "1"), ("JET_STORE_DIR", store), ("JETPACK_ROOT", jetpack)]
+        cold :: run_jet(cache, entry, Some(project), environment)
+        repeated :: run_jet(cache, entry, Some(project), environment)
+        assert_eq(cold.0, expected_exit, "{name}: wrong cold exit: {cold.2}")
+        assert_eq(repeated, cold, "{name}: repeated execution changed its report")
+        assert(cold.1.is_empty(), "{name}: unexpected stdout: {cold.1:?}")
+        for payload in payloads { assert(cold.2.contains(payload), "{name}: lost payload {payload:?}: {cold.2}") }
+        if expected_exit == 0 { assert(cold.2.is_empty(), "{name}: successful entry emitted a report: {cold.2}") }
+        for _ in 0..2 {
+            traced :: run_jet_with_args(cache, entry, Some(project), environment, ["--trace-tiers"])
+            assert_eq(traced.0, expected_exit, "{name}: traced exit changed: {traced.2}")
+            assert_eq(traced.1, cold.1, "{name}: traced stdout changed")
+            for payload in payloads { assert(traced.2.contains(payload), "{name}: traced report lost {payload:?}: {traced.2}") }
+            assert(traced.2.lines().any(line -> {
+                fields := line.split_whitespace()
+                fields.next().is_some_and(symbol -> symbol.rsplit("::").next() == Some("run")) && fields.next() == Some("O0") && fields.next() == Some("native")
+            }), "{name}: entry did not execute natively: {traced.2}")
+            assert(!traced.2.contains("interp") && !traced.2.contains("deopt"), "{name}: native entry fell back: {traced.2}")
+        }
+    }
+}
+
+// Rust: tests/run_cache.rs:663
+#Test("checked_entry_error_rails_preserve_cache_payload_and_eligibility") {
+    _guard :: lock_run_cache_tests()
+    _restore :: RestoreCacheEnv(value: env.var_os("JET_RUN_CACHE_DIR"))
+    for (name, source, expected_exit, payloads, cacheable) in ENTRY_ERROR_CASES {
+        scratch :: common.Scratch.new("checked-entry-codec-{name}")
+        project :: scratch.path.join("project")
+        fs.create_dir_all(project).expect("create project")
+        fs.write(project.join("package.jet"), "name: \"checked_entry_codec\"\nversion: \"0.1.0\"\n").expect("write package")
+        entry :: project.join("run.jet")
+        fs.write(entry, source).expect("write entry")
+        cache :: scratch.path.join("cache")
+        env.set_var("JET_RUN_CACHE_DIR", cache)
+        artifact :: cache.join(RunCache.run_cache_key(entry, [])).join("module.bin")
+        cold := None
+        for execution in 0..2 {
+            RunCache.reset_phases()
+            _ :: RunCache.take_last_trace()
+            outcome :: RunCache.run_native_once(entry.to_str().expect("entry text")).expect("{name}: entry did not execute")
+            result :: (outcome.exit_code, outcome.stdout, outcome.stderr)
+            phases :: RunCache.phases()
+            rows :: RunCache.take_last_trace()
+            assert_eq(result.0, expected_exit, "{name}: wrong exit: {result.2}")
+            assert(result.1.is_empty(), "{name}: unexpected stdout: {result.1:?}")
+            for payload in payloads { assert(result.2.contains(payload), "{name}: lost {payload:?}: {result.2}") }
+            if expected_exit == 0 { assert(result.2.is_empty(), "{name}: successful entry emitted a report: {result.2}") }
+            assert(rows.iter().any(row -> row.function_name.rsplit("::").next() == Some("run") && row.optimization == .O0 && row.native) && rows.iter().all(row -> row.native), "{name}: entry must execute natively without deopt: {rows:?}")
+            assert_eq(artifact.exists(), cacheable, "{name}: wrong artifact eligibility")
+            if execution == 1 && cacheable {
+                assert_eq(phases.cache_hits, 1, "{name}: actual warm load required: {phases:?}")
+                assert_eq(phases.cache_misses, 0, "{name}: warm load missed: {phases:?}")
+                assert_eq((phases.parse, phases.check, phases.lower, phases.codegen, phases.link), (0, 0, 0, 0, 0), "{name}: cached execution recompiled: {phases:?}")
+            } else {
+                assert_eq(phases.cache_hits, 0, "{name}: unexpected cache hit: {phases:?}")
+                assert_eq(phases.cache_misses, 1, "{name}: cold execution must reach artifact capture: {phases:?}")
+                assert_eq(phases.codegen, 1, "{name}: uncached execution must compile native code: {phases:?}")
+            }
+            if prior :: cold { assert_eq(result, prior, "{name}: repeated cache-boundary execution changed its report") }
+            else { cold = Some(result) }
+        }
+    }
+}
+
+// Rust: tests/run_cache.rs:731
+#Test("cache_admission_preserves_native_results_without_unserialized_compile_state") {
+    _guard :: lock_run_cache_tests()
+    _restore :: RestoreCacheEnv(value: env.var_os("JET_RUN_CACHE_DIR"))
+    cases :: [
+        ("strings_and_small_ints", "fn run() -> {\n    print(\"cache-string\")\n    print(7)\n}", "cache-string\n7\n", true),
+        ("bytes", "BYTES :: prep { embed_bytes(\"payload.bin\") }\nfn inspect(bytes: [U8]) -> {\n    print(bytes.len())\n    print(bytes[0])\n}\nfn run() -> { inspect(BYTES) }", "3\n65\n", false),
+        ("large_i64", "fn run() -> { print(9223372036854775807) }", "9223372036854775807\n", false),
+        ("big_int", "fn run() -> { print(184467440737095516160) }", "184467440737095516160\n", false),
+        ("schema", "fn equal(left: [Int], right: [Int]) -> Bool Never! { left == right }\nfn run() -> { print(equal([1, 2], [1, 2])) }", "true\n", false)
+    ]
+    for (name, source, expected, cacheable) in cases {
+        scratch :: common.Scratch.new("cache-admission-{name}")
+        fs.write(scratch.path.join("package.jet"), "name: \"cache_admission\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO, Mem.Alloc] } }\n").expect("write package")
+        fs.write(scratch.path.join("payload.bin"), b"ABC").expect("write blob")
+        entry :: scratch.path.join("run.jet")
+        fs.write(entry, source).expect("write entry")
+        cache :: scratch.path.join("cache")
+        env.set_var("JET_RUN_CACHE_DIR", cache)
+        artifact :: cache.join(RunCache.run_cache_key(entry, [])).join("module.bin")
+        count :: if cacheable { 3 } else { 2 }
+        for execution in 0..count {
+            if execution == 2 {
+                stale := fs.read(artifact).expect("read artifact")
+                stale[0..4].copy_from_slice(U32.from(10).to_le_bytes())
+                fs.write(artifact, stale).expect("write stale version")
+            }
+            RunCache.reset_phases()
+            _ :: RunCache.take_last_trace()
+            outcome :: RunCache.run_native_once(entry.to_str().expect("entry text")).expect("{name}: native execution failed")
+            result :: (outcome.exit_code, outcome.stdout, outcome.stderr)
+            assert_eq(result, (0, expected.to_string(), String.new()), "{name}: changed native result")
+            rows :: RunCache.take_last_trace()
+            assert(rows.iter().any(row -> row.function_name.rsplit("::").next() == Some("run") && row.optimization == .O0 && row.native) && rows.iter().all(row -> row.native), "{name}: cache refusal must not cause interpreter fallback: {rows:?}")
+            assert_eq(artifact.exists(), cacheable, "{name}: wrong cache admission")
+            phases :: RunCache.phases()
+            if cacheable && execution == 1 {
+                assert_eq((phases.cache_hits, phases.cache_misses, phases.parse, phases.check, phases.lower, phases.codegen, phases.link), (1, 0, 0, 0, 0, 0, 0), "{name}: supported compile state must actually replay: {phases:?}")
+            } else {
+                assert_eq((phases.cache_hits, phases.cache_misses, phases.codegen), (0, 1, 1), "{name}: unsupported compile state must compile native code: {phases:?}")
+            }
+        }
+    }
+}
+
+// Rust: tests/run_cache.rs:799
+#Test("script_start_budget_fixtures_and_peers") {
+    _guard :: lock_run_cache_tests()
+    source_fix :: fixture_dir()
+    assert(!source_fix.join(".jet").exists(), "checked-in script-speed fixture already has generated `.jet` state")
+    staged :: common.ProjectScratch.for_project(source_fix, "script-speed")
+    fix :: staged.path
+    cache :: common.test_scratch_root("run_cache").join("jet_run_fix_{unique()}")
+    hello :: fix.join("hello.jet")
+    (c1, out1, err1) :: run_jet(cache, hello, Some(fix), [("JET_RUN_TRACE", "1")])
+    assert_eq(c1, 0, "{err1}")
+    assert_eq(out1, "script-speed-hello\n")
+    assert(err1.contains("[run-cache] store"), "{err1}")
+    (c2, out2, err2) :: run_jet(cache, hello, Some(fix), [("JET_RUN_TRACE", "1")])
+    assert_eq(c2, 0, "{err2}")
+    assert_eq(out2, "script-speed-hello\n")
+    assert(err2.contains("[run-cache] hit"), "{err2}")
+    file :: fix.join("file_read.jet")
+    (fc, fout, ferr) :: run_jet(cache, file, Some(fix), [])
+    assert_eq(fc, 0, "{ferr}")
+    (fw, fout2, ferr2) :: run_jet(cache, file, Some(fix), [])
+    assert_eq(fw, 0, "{ferr2}")
+    assert_eq(fout, fout2)
+    json :: fix.join("json_text.jet")
+    (jc, jout, jerr) :: run_jet(cache, json, Some(fix), [])
+    assert_eq(jc, 0, "{jerr}")
+    (jw, jout2, jerr2) :: run_jet(cache, json, Some(fix), [])
+    assert_eq(jw, 0, "{jerr2}")
+    assert_eq(jout, jout2)
+    sub :: fix.join("subprocess.jet")
+    (sc, sout, serr) :: run_jet(cache, sub, Some(fix), [])
+    assert_eq(sc, 0, "{serr}")
+    assert_eq(sout.trim(), "0")
+    noop :: fix.join("noop.jet")
+    budget_bin :: budget_jet_bin()
+    using_product :: budget_bin.is_some()
+    timed_bin :: budget_bin.unwrap_or_else(jet_bin)
+    assert(run_jet_status_bin(timed_bin, cache, noop, Some(fix)), "noop populate failed ({timed_bin})")
+    warm := []
+    for _ in 0..7 {
+        t0 :: Instant.now()
+        assert(run_jet_status_bin(timed_bin, cache, noop, Some(fix)), "warm noop status failed")
+        warm.push(t0.elapsed().as_micros())
+    }
+    median_samples := warm.clone()
+    warm_median_us :: median_u(&median_samples)
+    warm_p90_us :: p90_u(&warm)
+    bash :: peer_us(["bash", "-c", "true"], None)
+    node :: peer_us(["node", "-e", ""], None)
+    python :: peer_us(["python3", "-c", "pass"], None).or_else(() -> peer_us(["python", "-c", "pass"], None))
+    bash_file :: peer_us(["bash", "-c", "cat data.txt"], Some(fix))
+    node_file :: peer_us(["node", "-e", "process.stdout.write(assert('fs').readFileSync('data.txt','utf8'))"], Some(fix))
+    bash_sub :: peer_us(["bash", "-c", "true"], None)
+    node_sub :: peer_us(["node", "-e", "assert('child_process').execFileSync('true')"], None)
+    fastest_us :: [bash, python, node].iter().flatten().min()
+    budget_us :: fastest_us.map(p -> p.saturating_mul(2))
+    eprintln("script-start budget evidence: {machine_meta()} bin={timed_bin} product={using_product} warm_jet_noop_median_ms={us_as_ms(warm_median_us)} warm_jet_noop_p90_ms={us_as_ms(warm_p90_us)} fastest_peer_ms={fastest_us.map(us_as_ms):?} budget_2x_ms={budget_us.map(us_as_ms):?} bash_ms={bash.map(us_as_ms):?} python_ms={python.map(us_as_ms):?} node_ms={node.map(us_as_ms):?} bash_file_ms={bash_file.map(us_as_ms):?} node_file_ms={node_file.map(us_as_ms):?} bash_sub_ms={bash_sub.map(us_as_ms):?} node_sub_ms={node_sub.map(us_as_ms):?}")
+    assert(bash.is_some() || node.is_some() || python.is_some(), "need at least one peer runtime")
+    assert(bash_sub.is_some() || node_sub.is_some(), "subprocess peers must be measurable")
+    assert(!source_fix.join(".jet").exists(), "script-speed fixture run created `.jet` in the checked-in source directory")
+    if using_product {
+        peer :: fastest_us.expect("peer sample present")
+        budget :: budget_us.expect("peer budget")
+        assert(warm_median_us <= budget, "warm no-op median {us_as_ms(warm_median_us)}ms exceeds D-SCRIPT-BUDGET1=B (≤2× fastest peer {us_as_ms(peer)}ms = {us_as_ms(budget)}ms)")
+    } else {
+        assert(warm_median_us < 100_000, "warm no-op median {us_as_ms(warm_median_us)}ms exceeds 100ms debug sanity (build release jet to enforce D-SCRIPT-BUDGET1=B)")
+        eprintln("note: D-SCRIPT-BUDGET1=B hard gate skipped — no target/release/jet or JET_BUDGET_BIN")
+    }
+}

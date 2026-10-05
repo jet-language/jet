@@ -1,241 +1,107 @@
-// PORT-PENDING 0867 crates-jetpack-src-jetos-activation-provenance-module-group: crates/jetpack/src/JetOS/activation_provenance.rs:1-237
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS use super::etc_boot_facts::{cachyos_kernel_entry, kernel_package_json};
-//RS use super::options_rendering::{
-//RS     clean_value, collect_names, option_value, package_path_or_literal, service_extra,
-//RS     shell_single_quote,
-//RS };
-//RS use super::root_projection::enable_unit;
-//RS use super::store_realize::RealizedPackage;
-//RS use crate::JSON;
-//RS use jet_env_model::ModuleEval::SystemPlan;
-//RS use std::fs;
-//RS use std::path::Path;
-//RS 
-//RS pub(super) fn write_activation_diff(
-//RS     dir: &Path,
-//RS     published_dir: &Path,
-//RS     system: &SystemPlan,
-//RS     realized: &[RealizedPackage],
-//RS ) -> std::io::Result<()> {
-//RS     let enabled_services = system.services.iter().filter(|s| s.enable).count();
-//RS     let mut diff = String::new();
-//RS     diff.push_str(&format!("host: {}\n", system.name));
-//RS     diff.push_str("previous: <activation-time>\n");
-//RS     diff.push_str(&format!("next: {}\n", published_dir.display()));
-//RS     diff.push_str(&format!("packages: {}\n", realized.len()));
-//RS     diff.push_str(&format!("services: {enabled_services}\n"));
-//RS     diff.push_str(&format!("options: {}\n", system.options.len()));
-//RS     for pkg in realized {
-//RS         diff.push_str(&format!("  package {} -> {}\n", pkg.reference, pkg.out));
-//RS     }
-//RS     for svc in system.services.iter().filter(|s| s.enable) {
-//RS         diff.push_str(&format!("  service {} enable=true\n", svc.name));
-//RS     }
-//RS     for option in &system.options {
-//RS         diff.push_str(&format!("  option {} = {}\n", option.key, option.value));
-//RS     }
-//RS     fs::write(dir.join("activation-diff.txt"), diff)
-//RS }
-//RS 
-//RS pub(super) fn write_health_checks(dir: &Path, system: &SystemPlan) -> std::io::Result<()> {
-//RS     let mut out = String::new();
-//RS     out.push_str("jetos health checks\n");
-//RS     for svc in system.services.iter().filter(|s| s.enable) {
-//RS         let check = service_extra(svc, &["health", "ready"])
-//RS             .unwrap_or_else(|| format!("systemctl is-active {}", svc.name));
-//RS         out.push_str(&format!("service {}: {}\n", svc.name, check));
-//RS     }
-//RS     let host = option_value(system, &["network.hostName", "network.hostname"])
-//RS         .unwrap_or_else(|| system.name.clone());
-//RS     out.push_str(&format!("network hostname: {host}\n"));
-//RS     for name in collect_names(system, "health") {
-//RS         if let Some(command) = option_value(system, &[&format!("health.{name}.command")]) {
-//RS             out.push_str(&format!("check {name}: {command}\n"));
-//RS         }
-//RS     }
-//RS     fs::write(dir.join("health-checks.txt"), out)
-//RS }
-//RS 
-//RS pub(super) fn write_provenance(
-//RS     dir: &Path,
-//RS     system: &SystemPlan,
-//RS     realized: &[RealizedPackage],
-//RS ) -> std::io::Result<()> {
-//RS     let packages = realized
-//RS         .iter()
-//RS         .map(|p| {
-//RS             JSON::object_of(&[
-//RS                 ("name", &p.name),
-//RS                 ("reference", &p.reference),
-//RS                 ("out", &p.out),
-//RS                 ("bin", &p.bin),
-//RS                 ("output_hash", &p.envelope.output_hash),
-//RS                 ("provenance", &p.envelope.provenance),
-//RS             ])
-//RS         })
-//RS         .collect::<Vec<_>>()
-//RS         .join(",");
-//RS     let kernel = cachyos_kernel_entry(realized)
-//RS         .map(kernel_package_json)
-//RS         .unwrap_or_else(|| "null".to_string());
-//RS     let text = format!(
-//RS         "{{\"host\":{},\"target\":{},\"kernel\":{},\"packages\":[{}],\"compat_escape_hatches\":[{}]}}",
-//RS         JSON::quote(&system.name),
-//RS         JSON::quote(&system.target),
-//RS         kernel,
-//RS         packages,
-//RS         compat_hatches_json(system)
-//RS     );
-//RS     fs::write(dir.join("provenance.json"), text)
-//RS }
-//RS 
-//RS pub(super) fn compat_hatches_json(system: &SystemPlan) -> String {
-//RS     let mut hatches = Vec::new();
-//RS     for option in &system.options {
-//RS         if option.key.starts_with("packages.overlay.")
-//RS             || option.key.starts_with("packages.specialArgs.")
-//RS             || option.key.starts_with("packages.nixModule.")
-//RS         {
-//RS             hatches.push(JSON::object_of(&[
-//RS                 ("key", &option.key),
-//RS                 ("value", &clean_value(&option.value)),
-//RS                 ("audit", "compatibility escape hatch"),
-//RS                 ("provenance_visible", "true"),
-//RS                 ("studio_visible", "true"),
-//RS                 ("native_replacement", "tracked"),
-//RS             ]));
-//RS         }
-//RS     }
-//RS     hatches.join(",")
-//RS }
-//RS 
-//RS pub(super) fn write_systemd_units(dir: &Path, system: &SystemPlan) -> std::io::Result<()> {
-//RS     let unit_dir = dir.join("etc/systemd/system");
-//RS     fs::create_dir_all(&unit_dir)?;
-//RS     for svc in &system.services {
-//RS         if !svc.enable {
-//RS             continue;
-//RS         }
-//RS         let exec = svc
-//RS             .extra
-//RS             .iter()
-//RS             .find(|(k, _)| k == "exec" || k == "command")
-//RS             .map(|(_, v)| v.trim_matches('"').to_string())
-//RS             .unwrap_or_else(|| "/usr/bin/env true".to_string());
-//RS         fs::write(
-//RS             unit_dir.join(format!("{}.service", svc.name)),
-//RS             format!(
-//RS                 "[Unit]\nDescription=jetos service {}\n\n[Service]\nExecStart={}\nRestart=on-failure\n\n[Install]\nWantedBy=multi-user.target\n",
-//RS                 svc.name, exec
-//RS             ),
-//RS         )?;
-//RS         enable_unit(
-//RS             &unit_dir,
-//RS             "multi-user.target",
-//RS             &format!("{}.service", svc.name),
-//RS         )?;
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS pub(super) fn write_terminal_environment(dir: &Path, system: &SystemPlan) -> std::io::Result<()> {
-//RS     let terminal_dir = dir.join("terminal");
-//RS     let etc = dir.join("etc");
-//RS     let unit_dir = etc.join("systemd/system");
-//RS     fs::create_dir_all(&terminal_dir)?;
-//RS     fs::create_dir_all(&etc)?;
-//RS     fs::create_dir_all(&unit_dir)?;
-//RS 
-//RS     let users = collect_names(system, "users");
-//RS     let login_user = users.first().cloned().unwrap_or_else(|| "root".to_string());
-//RS     let shell = if login_user == "root" {
-//RS         "/bin/sh".to_string()
-//RS     } else {
-//RS         option_value(system, &[&format!("users.{login_user}.shell")])
-//RS             .map(|s| package_path_or_literal(&s))
-//RS             .unwrap_or_else(|| "/run/current-system/sw/bin/sh".to_string())
-//RS     };
-//RS 
-//RS     let mut shells = String::from("/bin/sh\n/run/current-system/sw/bin/sh\n");
-//RS     if !shells.lines().any(|line| line == shell) {
-//RS         shells.push_str(&shell);
-//RS         shells.push('\n');
-//RS     }
-//RS     fs::write(etc.join("shells"), shells)?;
-//RS     let prompt_label = format!("JetOS {}", system.name);
-//RS     let prompt_bash = format!(
-//RS         "\\[\\033[1;36m\\]JetOS\\[\\033[0m\\] \\[\\033[2m\\]{}\\[\\033[0m\\] \\w \\$ ",
-//RS         system.name
-//RS     );
-//RS     let prompt_plain = format!("JetOS {} $ ", system.name);
-//RS     fs::write(
-//RS         etc.join("profile"),
-//RS         format!(
-//RS             "export PATH=/run/current-system/sw/bin:/bin:/sbin:/usr/bin:/usr/sbin\nexport JETOS_GENERATION=/run/current-system\nexport JETOS_HOST={}\nexport JETOS_BRAND=JetOS\nexport JETOS_PROMPT={}\nif [ -n \"${{BASH_VERSION:-}}\" ]; then\n    PS1={}\nelse\n    PS1={}\nfi\nexport PS1\n",
-//RS             shell_single_quote(&system.name),
-//RS             shell_single_quote(&prompt_label),
-//RS             shell_single_quote(&prompt_bash),
-//RS             shell_single_quote(&prompt_plain)
-//RS         ),
-//RS     )?;
-//RS     fs::write(
-//RS         etc.join("issue"),
-//RS         format!(
-//RS             "JetOS {}\nproof-backed system shell\n\\n \\l\n",
-//RS             system.name
-//RS         ),
-//RS     )?;
-//RS     fs::write(
-//RS         etc.join("motd"),
-//RS         format!(
-//RS             "JetOS {}\n/run/current-system is live\nsource-owned, proof-backed\n",
-//RS             system.name
-//RS         ),
-//RS     )?;
-//RS     fs::write(etc.join("securetty"), "ttyS0\ntty1\n")?;
-//RS 
-//RS     let home_root = dir.join("home");
-//RS     for user in &users {
-//RS         let home = option_value(system, &[&format!("users.{user}.home")])
-//RS             .unwrap_or_else(|| format!("/home/{user}"));
-//RS         if let Some(rel) = home.strip_prefix('/') {
-//RS             fs::create_dir_all(dir.join(rel))?;
-//RS             fs::write(
-//RS                 dir.join(rel).join(".profile"),
-//RS                 ". /etc/profile\ncd \"$HOME\" 2>/dev/null || true\n",
-//RS             )?;
-//RS         } else {
-//RS             fs::create_dir_all(home_root.join(user))?;
-//RS         }
-//RS     }
-//RS 
-//RS     fs::write(
-//RS         unit_dir.join("serial-getty@ttyS0.service"),
-//RS         format!(
-//RS             "[Unit]\nDescription=jetos serial login on %I\nAfter=systemd-user-sessions.service plymouth-quit-wait.service\n\n[Service]\nExecStart=/run/current-system/sw/bin/agetty --autologin {} --noclear %I 115200 linux\nType=idle\nRestart=always\n\n[Install]\nWantedBy=getty.target\n",
-//RS             login_user
-//RS         ),
-//RS     )?;
-//RS     enable_unit(&unit_dir, "getty.target", "serial-getty@ttyS0.service")?;
-//RS     fs::write(
-//RS         unit_dir.join("getty@tty1.service"),
-//RS         format!(
-//RS             "[Unit]\nDescription=jetos virtual-console login on %I\nAfter=systemd-user-sessions.service plymouth-quit-wait.service\n\n[Service]\nExecStart=/run/current-system/sw/bin/agetty --autologin {} --noclear %I linux\nType=idle\nRestart=always\n\n[Install]\nWantedBy=getty.target\n",
-//RS             login_user
-//RS         ),
-//RS     )?;
-//RS     enable_unit(&unit_dir, "getty.target", "getty@tty1.service")?;
-//RS 
-//RS     fs::write(
-//RS         terminal_dir.join("facts.json"),
-//RS         format!(
-//RS             "{{\"login_user\":{},\"shell\":{},\"serial_tty\":\"ttyS0\",\"virtual_tty\":\"tty1\",\"profile\":\"/etc/profile\",\"prompt\":{},\"motd\":\"/etc/motd\",\"unit_dir\":\"etc/systemd/system\",\"proof\":\"terminal-login-ready\"}}",
-//RS             JSON::quote(&login_user),
-//RS             JSON::quote(&shell),
-//RS             JSON::quote(&prompt_plain)
-//RS         ),
-//RS     )
-//RS }
-// END-PORT-PENDING 0867 crates/jetpack/src/JetOS/activation_provenance.rs:1-237
+use jetpack.JetOS.EtcBootFacts.[jetos_cachyos_kernel_entry, jetos_kernel_package_json]
+use jetpack.JetOS.OptionsRendering.[jetos_clean_value, jetos_collect_names, jetos_option_value, jetos_package_path_or_literal, jetos_service_extra, jetos_shell_single_quote]
+use jetpack.JetOS.RootProjection.[jetos_enable_unit]
+use jetpack.JetOS.Types.[JetOSRealizedPackage]
+use jetpack.[JSON]
+use jet_env_model.ModuleEval.[SystemPlan]
+use std.[fs]
+use std.io.[Error]
 
+// Rust: crates/jetpack/src/JetOS/activation_provenance.rs:13
+pub fn write_activation_diff(dir: OSPath, published_dir: OSPath, system: &SystemPlan, realized: &[JetOSRealizedPackage]) -> () Error! {
+    enabled_services :: system.services.iter().filter(s -> s.enable).count()
+    diff := "host: {system.name}\nprevious: <activation-time>\nnext: {published_dir.display()}\npackages: {realized.len()}\nservices: {enabled_services}\noptions: {system.options.len()}\n"
+    loop pkg in realized { &diff.push_str("  package {pkg.entry.reference} -> {pkg.entry.out}\n") }
+    loop svc in system.services.iter().filter(s -> s.enable) { &diff.push_str("  service {svc.name} enable=true\n") }
+    loop option in system.options { &diff.push_str("  option {option.key} = {option.value}\n") }
+    // GATE #4494: native filesystem write; exact source artifact bytes.
+    fs.write(dir.join("activation-diff.txt"), diff)
+}
+// Rust: crates/jetpack/src/JetOS/activation_provenance.rs:39
+pub fn write_health_checks(dir: OSPath, system: &SystemPlan) -> () Error! {
+    out := "jetos health checks\n"
+    loop svc in system.services.iter().filter(s -> s.enable) {
+        check :: jetos_service_extra(svc, ["health", "ready"]) ?? "systemctl is-active {svc.name}"
+        &out.push_str("service {svc.name}: {check}\n")
+    }
+    host :: jetos_option_value(system, ["network.hostName", "network.hostname"]) ?? system.name.clone()
+    &out.push_str("network hostname: {host}\n")
+    loop name in jetos_collect_names(system, "health") {
+        if command :: jetos_option_value(system, ["health.{name}.command"]) { &out.push_str("check {name}: {command}\n") }
+    }
+    fs.write(dir.join("health-checks.txt"), out)
+}
+// Rust: crates/jetpack/src/JetOS/activation_provenance.rs:58
+pub fn write_provenance(dir: OSPath, system: &SystemPlan, realized: &[JetOSRealizedPackage]) -> () Error! {
+    packages :: realized.iter().map(p -> JSON.object_of([
+        ("name", p.entry.name), ("reference", p.entry.reference), ("out", p.entry.out),
+        ("bin", p.entry.bin), ("output_hash", p.entry.envelope.output_hash), ("provenance", p.entry.envelope.provenance)
+    ])).collect<[String]>().join(",")
+    kernel :: jetos_cachyos_kernel_entry(realized).map(entry -> jetos_kernel_package_json(entry)) ?? "null"
+    text :: "{{\"host\":{JSON.quote(system.name)},\"target\":{JSON.quote(system.target)},\"kernel\":{kernel},\"packages\":[{packages}],\"compat_escape_hatches\":[{compat_hatches_json(system)}]}}"
+    fs.write(dir.join("provenance.json"), text)
+}
+// Rust: crates/jetpack/src/JetOS/activation_provenance.rs:91
+pub fn compat_hatches_json(system: &SystemPlan) -> String {
+    hatches := [String]{}
+    loop option in system.options {
+        if option.key.starts_with("packages.overlay.") || option.key.starts_with("packages.specialArgs.") || option.key.starts_with("packages.nixModule.") {
+            &hatches.push(JSON.object_of([
+                ("key", option.key), ("value", jetos_clean_value(option.value)), ("audit", "compatibility escape hatch"),
+                ("provenance_visible", "true"), ("studio_visible", "true"), ("native_replacement", "tracked")
+            ]))
+        }
+    }
+    hatches.join(",")
+}
+// Rust: crates/jetpack/src/JetOS/activation_provenance.rs:111
+pub fn write_systemd_units(dir: OSPath, system: &SystemPlan) -> () Error! {
+    unit_dir :: dir.join("etc/systemd/system")
+    fs.create_dir_all(unit_dir)?
+    loop svc in system.services {
+        if !svc.enable { continue }
+        exec :: svc.extra.iter().find(field -> field.key == "exec" || field.key == "command")
+            .map(field -> field.value.trim_matches('"').to_string()) ?? "/usr/bin/env true"
+        fs.write(unit_dir.join("{svc.name}.service"), "[Unit]\nDescription=jetos service {svc.name}\n\n[Service]\nExecStart={exec}\nRestart=on-failure\n\n[Install]\nWantedBy=multi-user.target\n")?
+        jetos_enable_unit(unit_dir, "multi-user.target", "{svc.name}.service")?
+    }
+    .Ok(())
+}
+// Rust: crates/jetpack/src/JetOS/activation_provenance.rs:140
+pub fn write_terminal_environment(dir: OSPath, system: &SystemPlan) -> () Error! {
+    terminal_dir :: dir.join("terminal")
+    etc :: dir.join("etc")
+    unit_dir :: etc.join("systemd/system")
+    fs.create_dir_all(terminal_dir)?
+    fs.create_dir_all(etc)?
+    fs.create_dir_all(unit_dir)?
+    users :: jetos_collect_names(system, "users")
+    login_user :: users.first().cloned() ?? "root"
+    shell :: if login_user == "root" -> "/bin/sh"
+        else -> jetos_option_value(system, ["users.{login_user}.shell"]).map(s -> jetos_package_path_or_literal(s)) ?? "/run/current-system/sw/bin/sh"
+    shells := "/bin/sh\n/run/current-system/sw/bin/sh\n"
+    if !shells.lines().any(line -> line == shell) { &shells.push_str("{shell}\n") }
+    fs.write(etc.join("shells"), shells)?
+    prompt_label :: "JetOS {system.name}"
+    prompt_bash :: "\\[\\033[1;36m\\]JetOS\\[\\033[0m\\] \\[\\033[2m\\]{system.name}\\[\\033[0m\\] \\w \\$ "
+    prompt_plain :: "JetOS {system.name} $ "
+    fs.write(etc.join("profile"), "export PATH=/run/current-system/sw/bin:/bin:/sbin:/usr/bin:/usr/sbin\nexport JETOS_GENERATION=/run/current-system\nexport JETOS_HOST={jetos_shell_single_quote(system.name)}\nexport JETOS_BRAND=JetOS\nexport JETOS_PROMPT={jetos_shell_single_quote(prompt_label)}\nif [ -n \"${{BASH_VERSION:-}}\" ]; then\n    PS1={jetos_shell_single_quote(prompt_bash)}\nelse\n    PS1={jetos_shell_single_quote(prompt_plain)}\nfi\nexport PS1\n")?
+    fs.write(etc.join("issue"), "JetOS {system.name}\nproof-backed system shell\n\\n \\l\n")?
+    fs.write(etc.join("motd"), "JetOS {system.name}\n/run/current-system is live\nsource-owned, proof-backed\n")?
+    fs.write(etc.join("securetty"), "ttyS0\ntty1\n")?
+    home_root :: dir.join("home")
+    loop user in users {
+        home :: jetos_option_value(system, ["users.{user}.home"]) ?? "/home/{user}"
+        if rel :: home.strip_prefix('/') {
+            fs.create_dir_all(dir.join(rel))?
+            fs.write(dir.join(rel).join(".profile"), ". /etc/profile\ncd \"$HOME\" 2>/dev/null || true\n")?
+        } else {
+            fs.create_dir_all(home_root.join(user))?
+        }
+    }
+    fs.write(unit_dir.join("serial-getty@ttyS0.service"), "[Unit]\nDescription=jetos serial login on %I\nAfter=systemd-user-sessions.service plymouth-quit-wait.service\n\n[Service]\nExecStart=/run/current-system/sw/bin/agetty --autologin {login_user} --noclear %I 115200 linux\nType=idle\nRestart=always\n\n[Install]\nWantedBy=getty.target\n")?
+    jetos_enable_unit(unit_dir, "getty.target", "serial-getty@ttyS0.service")?
+    fs.write(unit_dir.join("getty@tty1.service"), "[Unit]\nDescription=jetos virtual-console login on %I\nAfter=systemd-user-sessions.service plymouth-quit-wait.service\n\n[Service]\nExecStart=/run/current-system/sw/bin/agetty --autologin {login_user} --noclear %I linux\nType=idle\nRestart=always\n\n[Install]\nWantedBy=getty.target\n")?
+    jetos_enable_unit(unit_dir, "getty.target", "getty@tty1.service")?
+    fs.write(terminal_dir.join("facts.json"), "{{\"login_user\":{JSON.quote(login_user)},\"shell\":{JSON.quote(shell)},\"serial_tty\":\"ttyS0\",\"virtual_tty\":\"tty1\",\"profile\":\"/etc/profile\",\"prompt\":{JSON.quote(prompt_plain)},\"motd\":\"/etc/motd\",\"unit_dir\":\"etc/systemd/system\",\"proof\":\"terminal-login-ready\"}}")
+}

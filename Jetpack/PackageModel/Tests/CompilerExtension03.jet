@@ -1,0 +1,21 @@
+use jet_pkg_model.CompilerExtension.[wasm_substrate_crate_spec, runtime_source, WORLD_NAME]
+use Jetpack.PackageModel.Source.Foreign.RustBridge.RuntimeProviders.FFI_WASMTIME_CRATE_SPEC
+// Rust: crates/jet-pkg-model/src/CompilerExtension.rs:1822
+// Source oracle only: inspect the hidden foreign-host emitter, never execute Rust.
+#Test("host_reuses_jet_pkg_model_wasmtime_substrate") {
+    assert_eq(wasm_substrate_crate_spec(), (FFI_WASMTIME_CRATE_SPEC.name, FFI_WASMTIME_CRATE_SPEC.version))
+    assert_eq(wasm_substrate_crate_spec(), ("wasmtime", "25"))
+    runtime :: runtime_source()
+    assert(runtime.contains("wasmtime::component"), "compiler-extension host must use the Component Model substrate")
+    assert(runtime.contains("jet_compiler_extension_load"), "host entry must be compiler-extension-specific")
+    assert(!runtime.contains("jet_plugin_load"), "must not reuse application core.plugin entry points")
+    assert(runtime.contains(WORLD_NAME), "runtime must name the compiler-extension world")
+    assert(!runtime.contains("\"jetplugin\""), "runtime must not bind the application plugin world name")
+    assert(runtime.contains("consume_fuel"), "runtime must apply fuel limits")
+    assert(runtime.contains("epoch_interruption"), "runtime must enable wall-clock epoch interruption")
+    assert(runtime.contains("set_epoch_deadline") && runtime.contains("increment_epoch"), "runtime must arm and tick the epoch deadline on analyze")
+    assert(runtime.contains("StoreLimitsBuilder"), "runtime must apply memory/table StoreLimits")
+    assert(runtime.contains("Linker::new") && runtime.contains("no clock, random, filesystem, network, or process"), "runtime must deny host imports under the deterministic sandbox law")
+    assert(!runtime.contains("wasi:") && !runtime.contains("add_to_linker") && !runtime.contains("WasiCtx"), "runtime must not wire WASI or other ambient host imports")
+    assert(runtime.contains("10_000_000") && runtime.contains("16777216") && runtime.contains("2_000"), "runtime defaults must mirror ResourceLimits::v1_defaults")
+}

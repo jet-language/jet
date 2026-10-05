@@ -1,1038 +1,184 @@
-// PORT-PENDING 2118 crates-jet-store-src-runtime: crates/jet-store/src/runtime.rs:1-1034
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! Content-addressed native runtime rlib cache.
-//RS //!
-//RS //! Codegen keeps emitting one complete Rust program for inspection and I1/I2
-//RS //! audits. Native builders extract its marked Prelude/runtime and Core blocks,
-//RS //! compile that mutually dependent closure once as ONE `jet_runtime` rlib, then
-//RS //! link the user program against it. The two blocks reference each other
-//RS //! (the fixed runtime reaches `jet_std`, the scheduler world, SIMD kernels and
-//RS //! `DataTree` in the Core block, and Core reaches the runtime traits), so they
-//RS //! cannot be two crates: Rust crates cannot depend on each other cyclically.
-//RS //! The Core block is selected only by build facts (edition, OS, test harness,
-//RS //! runtime parts, devtools policy), never by user source, so the key is the
-//RS //! (runtime source, rustc identity, flags) tuple and many programs share it.
-//RS //!
-//RS //! Packaging prebuilds the default build-fact set: the `jet-runtime/`
-//RS //! directory beside the `jet` executable holds `<key>/libjet_runtime.rlib`
-//RS //! under exactly this key, so a fresh machine with an empty store links the
-//RS //! shipped rlib instead of compiling the runtime. Other keys (another rustc,
-//RS //! profile, CPU, or feature set) miss it and build on demand into the store.
-//RS 
-//RS use crate::{ArtifactLookup, ArtifactRestore, Lease, LeaseTarget, Store, StoreError, StoredArtifact};
-//RS use jet_foundation::RustSource::rust_code_mask;
-//RS use jet_foundation::SHA256::sha256_hex;
-//RS use std::collections::HashMap;
-//RS use std::ffi::{OsStr, OsString};
-//RS use std::fs;
-//RS use std::path::{Path, PathBuf};
-//RS use std::process::{Command, Stdio};
-//RS use std::sync::atomic::{AtomicU64, Ordering};
-//RS use std::sync::{LazyLock, Mutex};
-//RS 
-//RS const CACHE_SCHEMA: &[u8] = b"jet-runtime-rlib-v9";
-//RS const RUNTIME_CRATE_NAME: &str = "jet_runtime";
-//RS const RUNTIME_RLIB_FILE: &str = "libjet_runtime.rlib";
-//RS const RUNTIME_CRATE_PREFIX: &str = "#![allow(warnings)]\n";
-//RS const BEGIN: &str = "// jet:cached-runtime-begin\n";
-//RS const END: &str = "// jet:cached-runtime-end\n";
-//RS const CORE_BEGIN: &str = "// jet:cached-core-begin\n";
-//RS const CORE_END: &str = "// jet:cached-core-end\n";
-//RS /// Directory beside the `jet` executable holding prebuilt runtime rlibs as
-//RS /// `<key>/libjet_runtime.rlib`.
-//RS pub const PREBUILT_DIR_NAME: &str = "jet-runtime";
-//RS /// When set, every runtime rlib a process links is also written to this
-//RS /// directory in the `PREBUILT_DIR_NAME` layout. The packaging step sets it
-//RS /// while building a seed program to populate the shipped prebuilt directory.
-//RS pub const PREBUILD_EXPORT_ENV: &str = "JET_RUNTIME_PREBUILD_DIR";
-//RS /// Separates the `rustc -vV` identity from the host CPU description when the
-//RS /// flags select `target-cpu=native`: the key must name the CPU the rlib was
-//RS /// tuned for, or a prebuilt rlib could reach a machine lacking its features.
-//RS const NATIVE_CPU_IDENTITY: &str = "jet:target-cpu=native\n";
-//RS 
-//RS static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
-//RS 
-//RS #[derive(Debug)]
-//RS pub enum RuntimeError {
-//RS     Tool(String),
-//RS     Cache(StoreError),
-//RS }
-//RS 
-//RS impl std::fmt::Display for RuntimeError {
-//RS     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-//RS         match self {
-//RS             Self::Tool(message) => formatter.write_str(message),
-//RS             Self::Cache(error) => error.fmt(formatter),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS impl std::error::Error for RuntimeError {}
-//RS 
-//RS impl From<StoreError> for RuntimeError {
-//RS     fn from(error: StoreError) -> Self {
-//RS         Self::Cache(error)
-//RS     }
-//RS }
-//RS 
-//RS #[must_use = "keep the runtime lease alive until its consuming rustc command exits"]
-//RS pub struct PreparedRuntime {
-//RS     rust: String,
-//RS     runtime_rlib: Option<PathBuf>,
-//RS     cache_hit: bool,
-//RS     repaired: bool,
-//RS     prebuilt: bool,
-//RS     _lease: Option<Lease>,
-//RS     _materialized_root: Option<MaterializedRoot>,
-//RS }
-//RS 
-//RS struct MaterializedRoot(PathBuf);
-//RS 
-//RS impl MaterializedRoot {
-//RS     fn new(store: &Store) -> Result<Self, RuntimeError> {
-//RS         let path = store.root().join("staging").join(format!(
-//RS             "runtime-link-{}-{}",
-//RS             std::process::id(),
-//RS             NEXT_TEMP.fetch_add(1, Ordering::Relaxed)
-//RS         ));
-//RS         fs::create_dir_all(&path).map_err(StoreError::Io)?;
-//RS         Ok(Self(path))
-//RS     }
-//RS 
-//RS     fn path(&self) -> &Path {
-//RS         &self.0
-//RS     }
-//RS }
-//RS impl Drop for MaterializedRoot {
-//RS     fn drop(&mut self) {
-//RS         let _ = fs::remove_dir_all(&self.0);
-//RS     }
-//RS }
-//RS 
-//RS impl PreparedRuntime {
-//RS     pub fn inline(rust: &str) -> Self {
-//RS         Self {
-//RS             rust: rust.to_string(),
-//RS             runtime_rlib: None,
-//RS             cache_hit: false,
-//RS             repaired: false,
-//RS             prebuilt: false,
-//RS             _lease: None,
-//RS             _materialized_root: None,
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn rust(&self) -> &str {
-//RS         &self.rust
-//RS     }
-//RS 
-//RS     pub fn cache_hit(&self) -> bool {
-//RS         self.cache_hit
-//RS     }
-//RS 
-//RS     pub fn repaired(&self) -> bool {
-//RS         self.repaired
-//RS     }
-//RS 
-//RS     /// True when the runtime rlib came from the prebuilt directory shipped
-//RS     /// beside the `jet` executable rather than from the store or rustc.
-//RS     pub fn prebuilt(&self) -> bool {
-//RS         self.prebuilt
-//RS     }
-//RS 
-//RS     /// True when the program crate links the cached runtime rlib instead of
-//RS     /// carrying the runtime source itself.
-//RS     pub fn is_split(&self) -> bool {
-//RS         self.runtime_rlib.is_some()
-//RS     }
-//RS 
-//RS     pub fn add_rustc_args(&self, command: &mut Command) {
-//RS         if let Some(rlib) = &self.runtime_rlib {
-//RS             command
-//RS                 .arg("--extern")
-//RS                 .arg(format!("{RUNTIME_CRATE_NAME}={}", rlib.display()));
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// Prepare the generated program for one native rustc invocation.
-//RS pub fn prepare(
-//RS     store: &Store,
-//RS     rustc: &OsStr,
-//RS     generated: &str,
-//RS     rustc_flags: &[OsString],
-//RS     rustc_env: &[(OsString, OsString)],
-//RS ) -> Result<PreparedRuntime, RuntimeError> {
-//RS     let split = match split_generated(generated) {
-//RS         Ok(Some(split)) => split,
-//RS         Ok(None) | Err(_) => return Ok(PreparedRuntime::inline(generated)),
-//RS     };
-//RS     let compile_flags = runtime_compile_flags(rustc_flags);
-//RS     let rustc_version = rustc_identity(rustc, rustc_env, targets_native_cpu(&compile_flags))
-//RS         .map_err(RuntimeError::Tool)?;
-//RS     let exported_runtime = export_runtime_source(&split.runtime);
-//RS     let runtime_key = cache_key(
-//RS         &split.runtime,
-//RS         &exported_runtime,
-//RS         rustc,
-//RS         &rustc_version,
-//RS         &compile_flags,
-//RS         rustc_env,
-//RS     );
-//RS     let prepared = if let Some(rlib) = prebuilt_runtime_rlib(&runtime_key) {
-//RS         PreparedRuntime {
-//RS             rust: split.program,
-//RS             runtime_rlib: Some(rlib),
-//RS             cache_hit: true,
-//RS             repaired: false,
-//RS             prebuilt: true,
-//RS             _lease: None,
-//RS             _materialized_root: None,
-//RS         }
-//RS     } else {
-//RS         let materialized_root = MaterializedRoot::new(store)?;
-//RS         let Some(runtime) = compile_artifact(
-//RS             store,
-//RS             &runtime_key,
-//RS             &exported_runtime,
-//RS             rustc,
-//RS             &compile_flags,
-//RS             rustc_env,
-//RS             materialized_root.path(),
-//RS         )?
-//RS         else {
-//RS             return Ok(PreparedRuntime::inline(generated));
-//RS         };
-//RS         PreparedRuntime {
-//RS             rust: split.program,
-//RS             runtime_rlib: Some(runtime.artifact.path),
-//RS             cache_hit: runtime.cache_hit,
-//RS             repaired: runtime.repaired,
-//RS             prebuilt: false,
-//RS             _lease: Some(runtime.lease),
-//RS             _materialized_root: Some(materialized_root),
-//RS         }
-//RS     };
-//RS     if let Some(rlib) = &prepared.runtime_rlib {
-//RS         export_prebuilt_runtime(&runtime_key, rlib)?;
-//RS     }
-//RS     Ok(prepared)
-//RS }
-//RS 
-//RS /// The shipped rlib for `key`: `<exe dir>/jet-runtime/<key>/libjet_runtime.rlib`.
-//RS /// The key covers the runtime source, rustc identity (host CPU included for
-//RS /// `target-cpu=native`), flags and environment, so a present file is exactly
-//RS /// the artifact rustc would produce here.
-//RS fn prebuilt_runtime_rlib(key: &str) -> Option<PathBuf> {
-//RS     let executable = std::env::current_exe().ok()?;
-//RS     let path = executable
-//RS         .parent()?
-//RS         .join(PREBUILT_DIR_NAME)
-//RS         .join(key)
-//RS         .join(RUNTIME_RLIB_FILE);
-//RS     path.is_file().then_some(path)
-//RS }
-//RS 
-//RS /// Packaging hook (`JET_RUNTIME_PREBUILD_DIR`): copy the linked rlib into the
-//RS /// prebuilt layout under `key`, atomically, unless that entry already exists.
-//RS fn export_prebuilt_runtime(key: &str, rlib: &Path) -> Result<(), RuntimeError> {
-//RS     let Some(dir) = std::env::var_os(PREBUILD_EXPORT_ENV).filter(|dir| !dir.is_empty()) else {
-//RS         return Ok(());
-//RS     };
-//RS     let entry = PathBuf::from(dir).join(key);
-//RS     let target = entry.join(RUNTIME_RLIB_FILE);
-//RS     if target.is_file() {
-//RS         return Ok(());
-//RS     }
-//RS     fs::create_dir_all(&entry).map_err(StoreError::Io)?;
-//RS     let staged = entry.join(format!(
-//RS         ".{RUNTIME_RLIB_FILE}.{}-{}",
-//RS         std::process::id(),
-//RS         NEXT_TEMP.fetch_add(1, Ordering::Relaxed)
-//RS     ));
-//RS     let copied = fs::copy(rlib, &staged).and_then(|_| fs::rename(&staged, &target));
-//RS     if let Err(error) = copied {
-//RS         let _ = fs::remove_file(&staged);
-//RS         return Err(RuntimeError::Cache(StoreError::Io(error)));
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS /// Whether the runtime compile flags tune code for the host CPU.
-//RS fn targets_native_cpu(flags: &[OsString]) -> bool {
-//RS     flags.iter().any(|flag| {
-//RS         let flag = flag.as_os_str();
-//RS         flag == OsStr::new("target-cpu=native") || flag == OsStr::new("-Ctarget-cpu=native")
-//RS     })
-//RS }
-//RS 
-//RS /// Linker selection and link arguments affect the final user crate, not the
-//RS /// reusable runtime/Core closure. Keep them on the final rustc invocation.
-//RS fn runtime_compile_flags(flags: &[OsString]) -> Vec<OsString> {
-//RS     let mut compile_flags = Vec::with_capacity(flags.len());
-//RS     let mut index = 0;
-//RS     while index < flags.len() {
-//RS         let flag = &flags[index];
-//RS         if flag.as_os_str() == OsStr::new("-C") {
-//RS             if let Some(value) = flags.get(index + 1) {
-//RS                 if is_link_only_flag(value) {
-//RS                     index += 2;
-//RS                     continue;
-//RS                 }
-//RS             }
-//RS         } else if is_link_only_flag(flag) {
-//RS             index += 1;
-//RS             continue;
-//RS         }
-//RS         compile_flags.push(flag.clone());
-//RS         index += 1;
-//RS     }
-//RS     compile_flags
-//RS }
-//RS 
-//RS fn is_link_only_flag(flag: &OsStr) -> bool {
-//RS     let flag = flag.to_string_lossy();
-//RS     flag.starts_with("linker=")
-//RS         || flag.starts_with("link-arg=")
-//RS         || flag.starts_with("-Clinker=")
-//RS         || flag.starts_with("-Clink-arg=")
-//RS }
-//RS 
-//RS struct CompiledArtifact {
-//RS     artifact: StoredArtifact,
-//RS     cache_hit: bool,
-//RS     repaired: bool,
-//RS     lease: Lease,
-//RS }
-//RS 
-//RS fn compile_artifact(
-//RS     store: &Store,
-//RS     key: &str,
-//RS     exported: &str,
-//RS     rustc: &OsStr,
-//RS     rustc_flags: &[OsString],
-//RS     rustc_env: &[(OsString, OsString)],
-//RS     materialized_root: &Path,
-//RS ) -> Result<Option<CompiledArtifact>, RuntimeError> {
-//RS     let (repaired, artifact) = match store.lookup_artifact(key)? {
-//RS         ArtifactLookup::Hit(artifact) => (false, Some(artifact)),
-//RS         ArtifactLookup::Missing => (false, None),
-//RS         ArtifactLookup::Corrupt => (true, None),
-//RS     };
-//RS     if let Some(mut artifact) = artifact {
-//RS         let path = materialize_artifact(store, key, materialized_root)?;
-//RS         artifact.path = path;
-//RS         let lease = store.acquire_artifact_lease(&[
-//RS             LeaseTarget::Action(artifact.action),
-//RS             LeaseTarget::Blob(artifact.object),
-//RS         ])?;
-//RS         return Ok(Some(CompiledArtifact {
-//RS             artifact,
-//RS             cache_hit: true,
-//RS             repaired,
-//RS             lease,
-//RS         }));
-//RS     }
-//RS 
-//RS     let staging = store.root().join("staging").join(format!(
-//RS         "{RUNTIME_CRATE_NAME}-{}-{}",
-//RS         std::process::id(),
-//RS         NEXT_TEMP.fetch_add(1, Ordering::Relaxed)
-//RS     ));
-//RS     fs::create_dir_all(&staging).map_err(|error| {
-//RS         RuntimeError::Cache(StoreError::Io(error))
-//RS     })?;
-//RS     let source = staging.join("runtime.rs");
-//RS     let staged_rlib = staging.join(RUNTIME_RLIB_FILE);
-//RS     fs::write(&source, format!("{RUNTIME_CRATE_PREFIX}{exported}")).map_err(|error| {
-//RS         let _ = fs::remove_dir_all(&staging);
-//RS         RuntimeError::Cache(StoreError::Io(error))
-//RS     })?;
-//RS 
-//RS     let mut command = Command::new(rustc);
-//RS     command
-//RS         .args([
-//RS             "--edition",
-//RS             "2021",
-//RS             "--crate-name",
-//RS             RUNTIME_CRATE_NAME,
-//RS             "--crate-type",
-//RS             "rlib",
-//RS         ])
-//RS         .args(rustc_flags)
-//RS         .arg("-C")
-//RS         .arg(format!("metadata={key}"));
-//RS     if let Ok(prefix) = fs::canonicalize(&staging) {
-//RS         command
-//RS             .arg("--remap-path-prefix")
-//RS             .arg(format!("{}=/jet/build", prefix.display()));
-//RS     }
-//RS     command.arg(&source).arg("-o").arg(&staged_rlib);
-//RS     for (name, value) in rustc_env {
-//RS         command.env(name, value);
-//RS     }
-//RS     let output = command.output().map_err(|error| {
-//RS         let _ = fs::remove_dir_all(&staging);
-//RS         RuntimeError::Tool(format!("could not run rustc for cached runtime: {error}"))
-//RS     })?;
-//RS     let _ = fs::remove_file(&source);
-//RS     if !output.status.success() {
-//RS         let _ = fs::remove_dir_all(&staging);
-//RS         return Ok(None);
-//RS     }
-//RS     match store.publish_file(key, &staged_rlib) {
-//RS         Ok(_) => {}
-//RS         Err(StoreError::Conflict { .. }) => {}
-//RS         Err(error) => {
-//RS             let _ = fs::remove_dir_all(&staging);
-//RS             return Err(RuntimeError::Cache(error));
-//RS         }
-//RS     }
-//RS     let _ = fs::remove_dir_all(&staging);
-//RS     let mut artifact = match store.lookup_artifact(key)? {
-//RS         ArtifactLookup::Hit(artifact) => artifact,
-//RS         ArtifactLookup::Missing | ArtifactLookup::Corrupt => return Ok(None),
-//RS     };
-//RS     artifact.path = materialize_artifact(store, key, materialized_root)?;
-//RS     let lease = store.acquire_artifact_lease(&[
-//RS         LeaseTarget::Action(artifact.action),
-//RS         LeaseTarget::Blob(artifact.object),
-//RS     ])?;
-//RS     Ok(Some(CompiledArtifact {
-//RS         artifact,
-//RS         cache_hit: false,
-//RS         repaired,
-//RS         lease,
-//RS     }))
-//RS }
-//RS fn materialize_artifact(
-//RS     store: &Store,
-//RS     key: &str,
-//RS     root: &Path,
-//RS ) -> Result<PathBuf, RuntimeError> {
-//RS     let path = root.join(RUNTIME_RLIB_FILE);
-//RS     match store.restore_file(key, &path)? {
-//RS         ArtifactRestore::Hit { .. } => Ok(path),
-//RS         ArtifactRestore::Missing | ArtifactRestore::Corrupt => Err(RuntimeError::Cache(
-//RS             StoreError::Corrupt {
-//RS                 path,
-//RS                 reason: "published runtime artifact disappeared before linking".to_string(),
-//RS             },
-//RS         )),
-//RS     }
-//RS }
-//RS 
-//RS 
-//RS struct SplitGenerated {
-//RS     /// The runtime block followed by the Core block: one crate, because the
-//RS     /// two blocks reference each other.
-//RS     runtime: String,
-//RS     program: String,
-//RS }
-//RS fn split_generated(generated: &str) -> Result<Option<SplitGenerated>, String> {
-//RS     let Some(begin) = generated.find(BEGIN) else {
-//RS         return Ok(None);
-//RS     };
-//RS     if generated.matches(BEGIN).count() != 1 || generated.matches(END).count() != 1 {
-//RS         return Err("generated Rust has an invalid runtime marker pair".to_string());
-//RS     }
-//RS     let runtime_start = begin + BEGIN.len();
-//RS     let relative_end = generated[runtime_start..]
-//RS         .find(END)
-//RS         .ok_or_else(|| "generated Rust has an unterminated runtime block".to_string())?;
-//RS     let runtime_end = runtime_start + relative_end;
-//RS     let after_runtime = runtime_end + END.len();
-//RS     let mut runtime = generated[runtime_start..runtime_end].to_string();
-//RS     let core_begin = generated.find(CORE_BEGIN);
-//RS     if core_begin.is_none() && generated.matches(CORE_END).count() != 0 {
-//RS         return Err("generated Rust has an invalid core marker pair".to_string());
-//RS     }
-//RS     if generated.matches(CORE_BEGIN).count() > 1 || generated.matches(CORE_END).count() > 1 {
-//RS         return Err("generated Rust has an invalid core marker pair".to_string());
-//RS     }
-//RS     let mut program = String::with_capacity(generated.len() - runtime.len() + 48);
-//RS     program.push_str(&generated[..begin]);
-//RS     program.push_str("extern crate jet_runtime;\nuse jet_runtime::*;\n");
-//RS     if let Some(core_begin) = core_begin {
-//RS         if core_begin < after_runtime {
-//RS             return Err("generated Rust has nested runtime/core markers".to_string());
-//RS         }
-//RS         let core_start = core_begin + CORE_BEGIN.len();
-//RS         let core_end = core_start
-//RS             + generated[core_start..]
-//RS                 .find(CORE_END)
-//RS                 .ok_or_else(|| "generated Rust has an unterminated core block".to_string())?;
-//RS         runtime.push_str(&generated[core_start..core_end]);
-//RS         program.push_str(&generated[after_runtime..core_begin]);
-//RS         program.push_str(&generated[core_end + CORE_END.len()..]);
-//RS     } else {
-//RS         program.push_str(&generated[after_runtime..]);
-//RS     }
-//RS     Ok(Some(SplitGenerated { runtime, program }))
-//RS }
-//RS 
-//RS /// A generated program whose runtime/Core closure builds as the separate
-//RS /// `jet_runtime` crate: that crate's exported source, and the program, which
-//RS /// links it through `extern crate jet_runtime; use jet_runtime::*;`.
-//RS pub struct RuntimeCrateSplit {
-//RS     pub runtime_lib: String,
-//RS     pub program: String,
-//RS }
-//RS 
-//RS /// The `prepare` split for builders that compile the runtime crate
-//RS /// themselves (the bootstrap cargo workspace). The text before the runtime
-//RS /// block is the program's runtime hook (the FFI reporter that
-//RS /// `jet_std_env_init` installs), so it builds inside the runtime crate.
-//RS /// `None` when the text has no runtime block.
-//RS pub fn split_runtime_crate(generated: &str) -> Result<Option<RuntimeCrateSplit>, String> {
-//RS     let Some(split) = split_generated(generated)? else {
-//RS         return Ok(None);
-//RS     };
-//RS     let head = &generated[..generated.find(BEGIN).unwrap_or(0)];
-//RS     let program = split
-//RS         .program
-//RS         .strip_prefix(head)
-//RS         .ok_or_else(|| "split program does not start with the pre-runtime text".to_string())?
-//RS         .to_string();
-//RS     Ok(Some(RuntimeCrateSplit {
-//RS         runtime_lib: format!(
-//RS             "{RUNTIME_CRATE_PREFIX}{}",
-//RS             export_runtime_source(&format!("{head}{}", split.runtime))
-//RS         ),
-//RS         program,
-//RS     }))
-//RS }
-//RS 
-//RS /// Make every item of a generated crate visible to the crates that depend on
-//RS /// it, exactly as the runtime crate is exported.
-//RS pub fn export_crate_source(source: &str) -> String {
-//RS     export_runtime_source(source)
-//RS }
-//RS 
-//RS fn cache_key(
-//RS     source: &str,
-//RS     exported_source: &str,
-//RS     rustc: &OsStr,
-//RS     rustc_version: &str,
-//RS     rustc_flags: &[OsString],
-//RS     rustc_env: &[(OsString, OsString)],
-//RS ) -> String {
-//RS     let mut data = Vec::new();
-//RS     push_bytes(&mut data, CACHE_SCHEMA);
-//RS     push_bytes(&mut data, RUNTIME_CRATE_NAME.as_bytes());
-//RS     push_bytes(&mut data, source.as_bytes());
-//RS     push_bytes(&mut data, RUNTIME_CRATE_PREFIX.as_bytes());
-//RS     push_bytes(&mut data, exported_source.as_bytes());
-//RS     push_bytes(&mut data, &os_bytes(rustc));
-//RS     push_bytes(&mut data, rustc_version.as_bytes());
-//RS     push_bytes(&mut data, b"flags");
-//RS     push_bytes(&mut data, &(rustc_flags.len() as u64).to_be_bytes());
-//RS     for flag in rustc_flags {
-//RS         push_bytes(&mut data, &os_bytes(flag));
-//RS     }
-//RS     push_bytes(&mut data, b"env");
-//RS     push_bytes(&mut data, &(rustc_env.len() as u64).to_be_bytes());
-//RS     for (name, value) in rustc_env {
-//RS         push_bytes(&mut data, &os_bytes(name));
-//RS         push_bytes(&mut data, &os_bytes(value));
-//RS     }
-//RS     sha256_hex(&data)
-//RS }
-//RS 
-//RS fn push_bytes(out: &mut Vec<u8>, value: &[u8]) {
-//RS     out.extend_from_slice(&(value.len() as u64).to_be_bytes());
-//RS     out.extend_from_slice(value);
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS fn os_bytes(value: &OsStr) -> Vec<u8> {
-//RS     use std::os::unix::ffi::OsStrExt;
-//RS     value.as_bytes().to_vec()
-//RS }
-//RS 
-//RS #[cfg(windows)]
-//RS fn os_bytes(value: &OsStr) -> Vec<u8> {
-//RS     use std::os::windows::ffi::OsStrExt;
-//RS     value
-//RS         .encode_wide()
-//RS         .flat_map(u16::to_le_bytes)
-//RS         .collect::<Vec<_>>()
-//RS }
-//RS 
-//RS #[cfg(not(any(unix, windows)))]
-//RS fn os_bytes(value: &OsStr) -> Vec<u8> {
-//RS     value.to_string_lossy().as_bytes().to_vec()
-//RS }
-//RS 
-//RS /// The `rustc -vV` identity of `rustc` under `rustc_env`, followed, when the
-//RS /// flags tune for the host CPU, by `NATIVE_CPU_IDENTITY` and the
-//RS /// `rustc --print cfg -C target-cpu=native` description of this CPU.
-//RS fn rustc_identity(
-//RS     rustc: &OsStr,
-//RS     rustc_env: &[(OsString, OsString)],
-//RS     native_cpu: bool,
-//RS ) -> Result<String, String> {
-//RS     static IDENTITIES: LazyLock<Mutex<HashMap<Vec<u8>, String>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
-//RS     let mut identity_key = Vec::new();
-//RS     push_bytes(&mut identity_key, &os_bytes(rustc));
-//RS     push_bytes(&mut identity_key, &(rustc_env.len() as u64).to_be_bytes());
-//RS     for (name, value) in rustc_env {
-//RS         push_bytes(&mut identity_key, &os_bytes(name));
-//RS         push_bytes(&mut identity_key, &os_bytes(value));
-//RS     }
-//RS     identity_key.push(u8::from(native_cpu));
-//RS     let identities = &*IDENTITIES;
-//RS     if let Some(identity) = identities.lock().unwrap().get(&identity_key).cloned() {
-//RS         return Ok(identity);
-//RS     }
-//RS     // Both queries run concurrently: the CPU description costs no wall time.
-//RS     let cpu_query = native_cpu
-//RS         .then(|| spawn_rustc_query(rustc, rustc_env, &["--print", "cfg", "-C", "target-cpu=native"]));
-//RS     let mut identity = finish_rustc_query(spawn_rustc_query(rustc, rustc_env, &["-vV"]))?;
-//RS     if let Some(cpu_query) = cpu_query {
-//RS         identity.push_str(NATIVE_CPU_IDENTITY);
-//RS         identity.push_str(&finish_rustc_query(cpu_query)?);
-//RS     }
-//RS     identities
-//RS         .lock()
-//RS         .unwrap()
-//RS         .insert(identity_key, identity.clone());
-//RS     Ok(identity)
-//RS }
-//RS 
-//RS struct RustcQuery {
-//RS     rendered: String,
-//RS     child: std::io::Result<std::process::Child>,
-//RS }
-//RS 
-//RS fn spawn_rustc_query(rustc: &OsStr, rustc_env: &[(OsString, OsString)], args: &[&str]) -> RustcQuery {
-//RS     let mut command = Command::new(rustc);
-//RS     command
-//RS         .args(args)
-//RS         .stdin(Stdio::null())
-//RS         .stdout(Stdio::piped())
-//RS         .stderr(Stdio::piped());
-//RS     for (name, value) in rustc_env {
-//RS         command.env(name, value);
-//RS     }
-//RS     RustcQuery {
-//RS         rendered: args.join(" "),
-//RS         child: command.spawn(),
-//RS     }
-//RS }
-//RS 
-//RS fn finish_rustc_query(query: RustcQuery) -> Result<String, String> {
-//RS     let rendered = query.rendered;
-//RS     let output = query
-//RS         .child
-//RS         .and_then(std::process::Child::wait_with_output)
-//RS         .map_err(|error| format!("could not run rustc {rendered}: {error}"))?;
-//RS     if !output.status.success() {
-//RS         return Err(format!(
-//RS             "rustc {rendered} failed: {}",
-//RS             String::from_utf8_lossy(&output.stderr)
-//RS         ));
-//RS     }
-//RS     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
-//RS }
-//RS 
-//RS #[derive(Clone, Copy, PartialEq, Eq)]
-//RS enum Scope {
-//RS     Module,
-//RS     Struct,
-//RS     Enum,
-//RS     Trait,
-//RS     InherentImpl,
-//RS     TraitImpl,
-//RS     Function,
-//RS     /// A `macro_rules!` body: the items it generates when the runtime invokes
-//RS     /// it are part of the runtime boundary (`export_macro_line`).
-//RS     Macro,
-//RS     /// A module-level `thread_local! { … }` block: its statics are items.
-//RS     ThreadLocal,
-//RS     Other,
-//RS }
-//RS 
-//RS /// Make the generated runtime boundary callable from its dependent user crate.
-//RS /// Prelude files remain canonical and unchanged; visibility changes exist only
-//RS /// in the cached build artifact.
-//RS fn export_runtime_source(source: &str) -> String {
-//RS     let mask = rust_code_mask(source);
-//RS     let source_lines = source.split_inclusive('\n').collect::<Vec<_>>();
-//RS     let mask_lines = mask.split_inclusive('\n').collect::<Vec<_>>();
-//RS     let mut out = String::with_capacity(source.len() + source.len() / 40);
-//RS     let mut scopes = vec![(Scope::Module, 0usize)];
-//RS     let mut depth = 0usize;
-//RS     let mut pending = String::new();
-//RS     let mut macro_exported = false;
-//RS     // Level of the outermost open `macro_rules!` scope, kept incrementally:
-//RS     // emitted program bodies nest thousands of blocks deep, so rescanning
-//RS     // `scopes` per line would make the export quadratic.
-//RS     let mut macro_level: Option<usize> = None;
-//RS 
-//RS     for (line, masked) in source_lines.into_iter().zip(mask_lines) {
-//RS         while scopes.last().is_some_and(|(_, level)| *level > depth) {
-//RS             scopes.pop();
-//RS         }
-//RS         if macro_level.is_some_and(|level| level > depth) {
-//RS             macro_level = None;
-//RS         }
-//RS         let scope = scopes
-//RS             .last()
-//RS             .map(|(scope, _)| *scope)
-//RS             .unwrap_or(Scope::Other);
-//RS         let direct = scopes.last().is_some_and(|(_, level)| *level == depth);
-//RS         // `pending` is non-empty only while an item header is still open — a
-//RS         // multi-line generic parameter list or `where` clause. Those rows are
-//RS         // continuations, not items: `pub fn jet_fixed_list_concat<\n T: Clone,\n
-//RS         // const LEFT: usize,` would otherwise become `pub const LEFT: usize,`
-//RS         // inside the angle brackets and the runtime crate would not even parse.
-//RS         let code = masked.trim();
-//RS         let rewritten = if let Some(level) = macro_level {
-//RS             export_macro_line(line, masked, depth == level + 1)
-//RS         } else if direct && pending.is_empty() {
-//RS             export_line(line, masked, scope)
-//RS         } else {
-//RS             line.to_string()
-//RS         };
-//RS         // A root `macro_rules!` is textually scoped to the crate that defines
-//RS         // it; the program crate invokes some of them (`jet_history_callable!`),
-//RS         // so the split runtime exports every root macro by path.
-//RS         if scopes.len() == 1
-//RS             && direct
-//RS             && pending.is_empty()
-//RS             && code.starts_with("macro_rules!")
-//RS             && !macro_exported
-//RS         {
-//RS             let indent = line.len() - line.trim_start().len();
-//RS             out.push_str(&line[..indent]);
-//RS             out.push_str("#[macro_export]\n");
-//RS         }
-//RS         out.push_str(&rewritten);
-//RS         if !code.is_empty() {
-//RS             macro_exported = code == "#[macro_export]"
-//RS                 || (macro_exported && code.starts_with('#'));
-//RS         }
-//RS         if direct && pending.is_empty() && starts_item_header(code, scope) {
-//RS             pending.push_str(code);
-//RS             pending.push(' ');
-//RS         } else if direct && !pending.is_empty() {
-//RS             pending.push_str(code);
-//RS             pending.push(' ');
-//RS         }
-//RS 
-//RS         for byte in masked.bytes() {
-//RS             match byte {
-//RS                 b'{' => {
-//RS                     let kind = if direct && !pending.is_empty() {
-//RS                         scope_for_header(&pending)
-//RS                     } else {
-//RS                         Scope::Other
-//RS                     };
-//RS                     depth += 1;
-//RS                     if kind == Scope::Macro && macro_level.is_none() {
-//RS                         macro_level = Some(depth);
-//RS                     }
-//RS                     scopes.push((kind, depth));
-//RS                     pending.clear();
-//RS                 }
-//RS                 b'}' => {
-//RS                     if depth > 0 {
-//RS                         depth -= 1;
-//RS                     }
-//RS                     while scopes.last().is_some_and(|(_, level)| *level > depth) {
-//RS                         scopes.pop();
-//RS                     }
-//RS                     pending.clear();
-//RS                 }
-//RS                 b';' if direct => pending.clear(),
-//RS                 _ => {}
-//RS             }
-//RS         }
-//RS     }
-//RS     out
-//RS }
-//RS 
-//RS fn export_line(line: &str, masked: &str, scope: Scope) -> String {
-//RS     let code = masked.trim_start();
-//RS     if code.is_empty() || code.starts_with('#') {
-//RS         return line.to_string();
-//RS     }
-//RS     let should_export = match scope {
-//RS         Scope::Module => starts_exportable_item(code) || starts_restricted_reexport(code),
-//RS         Scope::Struct => looks_like_struct_field(code),
-//RS         Scope::InherentImpl => starts_impl_member(code),
-//RS         Scope::ThreadLocal => strip_visibility(code).starts_with("static "),
-//RS         _ => false,
-//RS     };
-//RS     if !should_export {
-//RS         return line.to_string();
-//RS     }
-//RS     let indent = line.len() - line.trim_start().len();
-//RS     let body = &line[indent..];
-//RS     let exported = if let Some(rest) = restricted_visibility_rest(body) {
-//RS         format!("{}pub {}", &line[..indent], rest)
-//RS     } else if body.starts_with("pub ") {
-//RS         line.to_string()
-//RS     } else {
-//RS         format!("{}pub {}", &line[..indent], body)
-//RS     };
-//RS     if scope == Scope::Module && is_tuple_struct(code) {
-//RS         export_tuple_field(exported)
-//RS     } else {
-//RS         exported
-//RS     }
-//RS }
-//RS 
-//RS /// Inside a `macro_rules!` body an explicit restricted visibility widens at
-//RS /// any depth, and an item written directly in a transcriber (`trait $name`,
-//RS /// `fn $name`) becomes `pub`: the runtime invokes these macros to generate
-//RS /// items the program crate names. Deeper lines (impl members, statements) and
-//RS /// the arm structure itself are not item syntax and stay as written.
-//RS fn export_macro_line(line: &str, masked: &str, transcriber_item: bool) -> String {
-//RS     let indent = line.len() - line.trim_start().len();
-//RS     let code = masked.trim_start();
-//RS     if let Some(rest) = restricted_visibility_rest(&line[indent..])
-//RS         .filter(|_| restricted_visibility_rest(code).is_some())
-//RS     {
-//RS         return format!("{}pub {}", &line[..indent], rest);
-//RS     }
-//RS     if transcriber_item && !code.starts_with("pub") && starts_exportable_item(code) {
-//RS         return format!("{}pub {}", &line[..indent], &line[indent..]);
-//RS     }
-//RS     line.to_string()
-//RS }
-//RS 
-//RS fn is_tuple_struct(code: &str) -> bool {
-//RS     let code = strip_visibility(code);
-//RS     code.starts_with("struct ") && code.contains('(') && !code.contains('{')
-//RS }
-//RS 
-//RS fn export_tuple_field(mut line: String) -> String {
-//RS     let Some(struct_at) = line.find("struct ") else {
-//RS         return line;
-//RS     };
-//RS     let Some(relative_open) = line[struct_at + "struct ".len()..].find('(') else {
-//RS         return line;
-//RS     };
-//RS     let open = struct_at + "struct ".len() + relative_open;
-//RS     if !line[open + 1..].starts_with("pub ") {
-//RS         line.insert_str(open + 1, "pub ");
-//RS     }
-//RS     line
-//RS }
-//RS 
-//RS fn restricted_visibility_rest(value: &str) -> Option<&str> {
-//RS     let rest = value.strip_prefix("pub(")?;
-//RS     let close = rest.find(')')?;
-//RS     rest.get(close + 1..)?.strip_prefix(' ')
-//RS }
-//RS 
-//RS /// A `pub(crate) use …;` at module scope IS part of the runtime boundary: it is
-//RS /// how the Core prelude publishes a fragment it keeps inside a private module
-//RS /// (`mod jet_sync { … } pub(crate) use jet_sync::*;` — `core.sync` CRDTs, the
-//RS /// `core.db` row policy, `app.sync`; `mod jet_crypto_entropy` likewise). Left
-//RS /// alone, the split runtime rlib kept those names crate-private and the user
-//RS /// crate could not see a single one, so rustc rejected generated code that the
-//RS /// monolith accepts. A *bare* `use` is a private import, not a boundary, and
-//RS /// stays private so no `std` path leaks into the program's glob namespace.
-//RS fn starts_restricted_reexport(code: &str) -> bool {
-//RS     restricted_visibility_rest(code).is_some_and(|rest| rest.starts_with("use "))
-//RS }
-//RS 
-//RS fn strip_visibility(code: &str) -> &str {
-//RS     if let Some(rest) = code.strip_prefix("pub ") {
-//RS         return rest;
-//RS     }
-//RS     if let Some(rest) = code.strip_prefix("pub(") {
-//RS         if let Some(close) = rest.find(')') {
-//RS             return rest[close + 1..].trim_start();
-//RS         }
-//RS     }
-//RS     code
-//RS }
-//RS 
-//RS fn starts_exportable_item(code: &str) -> bool {
-//RS     let code = strip_visibility(code);
-//RS     [
-//RS         "fn ", "struct ", "enum ", "union ", "trait ", "type ", "const ", "static ", "mod ",
-//RS     ]
-//RS     .iter()
-//RS     .any(|prefix| code.starts_with(prefix))
-//RS         || ["unsafe fn ", "async fn ", "const fn ", "async unsafe fn "]
-//RS             .iter()
-//RS             .any(|prefix| code.starts_with(prefix))
-//RS         || ((code.starts_with("unsafe extern ") || code.starts_with("extern "))
-//RS             && code.contains(" fn "))
-//RS }
-//RS 
-//RS fn starts_impl_member(code: &str) -> bool {
-//RS     let code = strip_visibility(code);
-//RS     [
-//RS         "fn ",
-//RS         "const ",
-//RS         "type ",
-//RS         "unsafe fn ",
-//RS         "async fn ",
-//RS         "const fn ",
-//RS     ]
-//RS     .iter()
-//RS     .any(|prefix| code.starts_with(prefix))
-//RS }
-//RS 
-//RS fn looks_like_struct_field(code: &str) -> bool {
-//RS     let code = strip_visibility(code);
-//RS     let Some(colon) = code.find(':') else {
-//RS         return false;
-//RS     };
-//RS     if code[..colon].ends_with(':') || code.as_bytes().get(colon + 1) == Some(&b':') {
-//RS         return false;
-//RS     }
-//RS     let name = code[..colon].trim();
-//RS     !name.is_empty()
-//RS         && !name.chars().any(char::is_whitespace)
-//RS         && name
-//RS             .bytes()
-//RS             .all(|byte| byte == b'_' || byte.is_ascii_alphanumeric())
-//RS }
-//RS 
-//RS fn starts_item_header(code: &str, scope: Scope) -> bool {
-//RS     match scope {
-//RS         Scope::Module => {
-//RS             let code = strip_visibility(code);
-//RS             starts_exportable_item(code)
-//RS                 || code.starts_with("impl")
-//RS                 || code.starts_with("unsafe impl")
-//RS                 || code.starts_with("extern ")
-//RS                 || code.starts_with("macro_rules!")
-//RS                 || code.starts_with("thread_local!")
-//RS         }
-//RS         Scope::InherentImpl | Scope::TraitImpl | Scope::Trait => starts_impl_member(code),
-//RS         _ => false,
-//RS     }
-//RS }
-//RS 
-//RS fn scope_for_header(header: &str) -> Scope {
-//RS     let header = strip_visibility(header.trim_start());
-//RS     if header.starts_with("struct ") || header.starts_with("union ") {
-//RS         Scope::Struct
-//RS     } else if header.starts_with("enum ") {
-//RS         Scope::Enum
-//RS     } else if header.starts_with("trait ") {
-//RS         Scope::Trait
-//RS     } else if header.starts_with("impl") || header.starts_with("unsafe impl") {
-//RS         if header.contains(" for ") {
-//RS             Scope::TraitImpl
-//RS         } else {
-//RS             Scope::InherentImpl
-//RS         }
-//RS     } else if header.starts_with("mod ") {
-//RS         Scope::Module
-//RS     } else if header.starts_with("macro_rules!") {
-//RS         Scope::Macro
-//RS     } else if header.starts_with("thread_local!") {
-//RS         Scope::ThreadLocal
-//RS     } else if header.contains("fn ") {
-//RS         Scope::Function
-//RS     } else {
-//RS         Scope::Other
-//RS     }
-//RS }
-//RS 
-//RS #[cfg(test)]
-//RS mod tests {
-//RS     use super::*;
-//RS 
-//RS     fn emitted_target_dossier_source(layer: &str, provider: &str, closure: &str) -> String {
-//RS         format!(
-//RS             "{BEGIN}// jet:target-dossier layer={layer} provider={provider} closure={closure} artifact=fixture\nfn runtime_entry() {{}}\n{END}"
-//RS         )
-//RS     }
-//RS 
-//RS     fn key_for_source(source: &str) -> String {
-//RS         cache_key(
-//RS             source,
-//RS             "fixed-exported-runtime",
-//RS             OsStr::new("rustc"),
-//RS             "rustc-test",
-//RS             &[],
-//RS             &[],
-//RS         )
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn target_dossier_source_invalidates_runtime_key() {
-//RS         let provider = "target-providers-v1:sha256:provider-a";
-//RS         let closure = "prelude-hosted-v1:sha256:closure-a";
-//RS         let base = emitted_target_dossier_source("hosted", provider, closure);
-//RS         let variants = [
-//RS             (
-//RS                 "layer",
-//RS                 emitted_target_dossier_source("core", provider, closure),
-//RS             ),
-//RS             (
-//RS                 "provider digest/identity",
-//RS                 emitted_target_dossier_source(
-//RS                     "hosted",
-//RS                     "target-providers-v1:sha256:provider-b",
-//RS                     closure,
-//RS                 ),
-//RS             ),
-//RS             (
-//RS                 "Prelude closure",
-//RS                 emitted_target_dossier_source(
-//RS                     "hosted",
-//RS                     provider,
-//RS                     "prelude-hosted-v1:sha256:closure-b",
-//RS                 ),
-//RS             ),
-//RS         ];
-//RS         let runtime_base = key_for_source(&base);
-//RS         assert_eq!(runtime_base, key_for_source(&base));
-//RS         for (field, changed) in variants {
-//RS             assert_ne!(
-//RS                 runtime_base,
-//RS                 key_for_source(&changed),
-//RS                 "{field} source identity must invalidate the runtime rlib key"
-//RS             );
-//RS         }
-//RS     }
-//RS 
-//RS     /// The fixed runtime and the Core block reference each other, so the split
-//RS     /// must put both into the one `jet_runtime` crate and leave the program
-//RS     /// only user code plus that single dependency.
-//RS     #[test]
-//RS     fn split_puts_runtime_and_core_into_one_crate() {
-//RS         let generated = format!(
-//RS             "#![allow(warnings)]\n{BEGIN}fn runtime_item() {{ core_item() }}\n{END}\
-//RS              {CORE_BEGIN}fn core_item() {{}}\n{CORE_END}fn main() {{ runtime_item() }}\n"
-//RS         );
-//RS         let split = split_generated(&generated)
-//RS             .expect("valid markers")
-//RS             .expect("marked program splits");
-//RS         assert_eq!(
-//RS             split.runtime,
-//RS             "fn runtime_item() { core_item() }\nfn core_item() {}\n"
-//RS         );
-//RS         assert_eq!(
-//RS             split.program,
-//RS             "#![allow(warnings)]\nextern crate jet_runtime;\nuse jet_runtime::*;\nfn main() { runtime_item() }\n"
-//RS         );
-//RS     }
-//RS 
-//RS     /// The program crate names items a runtime `macro_rules!` generates (the
-//RS     /// fixed-width `jet_u64_trap_shl` kernels, `trait JetHistoryFn1`) and
-//RS     /// invokes root macros itself (`jet_history_callable!`), and reads
-//RS     /// thread-local runtime state. Trait impl members stay untouched.
-//RS     #[test]
-//RS     fn export_opens_macro_and_thread_local_runtime_items() {
-//RS         let source = "macro_rules! kernels {\n    ($name:ident, $t:ty) => {\n        pub(crate) fn $name(value: $t) -> $t { value }\n        trait Callable {}\n        impl Marker for $t {\n            fn mark(&self) {}\n        }\n    };\n}\n#[macro_export]\nmacro_rules! exported {\n    () => {};\n}\nkernels!(jet_u64_trap_shl, u64);\nthread_local! {\n    static STATE: u8 = const { 0 };\n}\n";
-//RS         assert_eq!(
-//RS             export_runtime_source(source),
-//RS             "#[macro_export]\nmacro_rules! kernels {\n    ($name:ident, $t:ty) => {\n        pub fn $name(value: $t) -> $t { value }\n        pub trait Callable {}\n        impl Marker for $t {\n            fn mark(&self) {}\n        }\n    };\n}\n#[macro_export]\nmacro_rules! exported {\n    () => {};\n}\nkernels!(jet_u64_trap_shl, u64);\nthread_local! {\n    pub static STATE: u8 = const { 0 };\n}\n"
-//RS         );
-//RS     }
-//RS }
-//RS 
-// END-PORT-PENDING 2118 crates/jet-store/src/runtime.rs:1-1034
+use core.sys.target
+use core.files.runtime.kernel_path_components.[OSPath]
 
+// Canonical runtime cache: NativeRuntimeCache.jet. Pure Rust-text processing:
+// Compiler/JetStore/Source/Runtime/{RuntimeSplit,RuntimeExport}. No duplicate APIs.
+// Rust: crates/jet-store/src/runtime.rs:31
+// CACHE_SCHEMA: STORE_RUNTIME_CACHE_SCHEMA, NativeRuntimeCache.jet:17.
+// Rust: crates/jet-store/src/runtime.rs:32
+// RUNTIME_CRATE_NAME: STORE_RUNTIME_CRATE_NAME, NativeRuntimeCache.jet:18.
+// Rust: crates/jet-store/src/runtime.rs:33
+// RUNTIME_RLIB_FILE: STORE_RUNTIME_RLIB_FILE, NativeRuntimeCache.jet:19.
+// Rust: crates/jet-store/src/runtime.rs:34
+// RUNTIME_CRATE_PREFIX: STORE_RUNTIME_CRATE_PREFIX, RuntimeSplit.jet:5.
+// Rust: crates/jet-store/src/runtime.rs:35
+// BEGIN: STORE_RUNTIME_BEGIN, RuntimeSplit.jet:6.
+// Rust: crates/jet-store/src/runtime.rs:36
+// END: STORE_RUNTIME_END, RuntimeSplit.jet:7.
+// Rust: crates/jet-store/src/runtime.rs:37
+// CORE_BEGIN: STORE_RUNTIME_CORE_BEGIN, RuntimeSplit.jet:8.
+// Rust: crates/jet-store/src/runtime.rs:38
+// CORE_END: STORE_RUNTIME_CORE_END, RuntimeSplit.jet:9.
+// Rust: crates/jet-store/src/runtime.rs:41
+// PREBUILT_DIR_NAME: STORE_RUNTIME_PREBUILT_DIR, NativeRuntimeCache.jet:22.
+// Rust: crates/jet-store/src/runtime.rs:45
+// PREBUILD_EXPORT_ENV: STORE_RUNTIME_PREBUILD_EXPORT_ENV, NativeRuntimeCache.jet:26.
+// Rust: crates/jet-store/src/runtime.rs:49
+// NATIVE_CPU_IDENTITY: STORE_RUNTIME_NATIVE_CPU_IDENTITY, NativeRuntimeCache.jet:30.
+// Rust: crates/jet-store/src/runtime.rs:51
+// NEXT_TEMP: sole core.sys.host.retained_counter.temp_counter_next producer. // GATE #4494
+// Rust: crates/jet-store/src/runtime.rs:54
+// RuntimeError: NativeRuntimeError, NativeRuntimeCache.jet:35.
+// Rust: crates/jet-store/src/runtime.rs:60
+// Display.fmt: NativeRuntimeError.message, NativeRuntimeCache.jet:39.
+// Rust: crates/jet-store/src/runtime.rs:68
+// Error: canonical #Error NativeRuntimeError carrier.
+// Rust: crates/jet-store/src/runtime.rs:71
+// From<StoreError>: ArtifactStoreError -> NativeRuntimeError, NativeRuntimeCache.jet:47.
+// Rust: crates/jet-store/src/runtime.rs:77
+// PreparedRuntime: NativeRuntimeCache.jet:136; caller must retain lease through rustc exit.
+// Rust: crates/jet-store/src/runtime.rs:87
+// MaterializedRoot: NativeRuntimeMaterializedRoot, NativeRuntimeCache.jet:115.
+// Rust: crates/jet-store/src/runtime.rs:90
+// new: NativeRuntimeCache.jet:118.
+// Rust: crates/jet-store/src/runtime.rs:100
+// path: NativeRuntimeCache.jet:124.
+// Rust: crates/jet-store/src/runtime.rs:105
+// Drop: NativeRuntimeMaterializedRoot.Close, NativeRuntimeCache.jet:127.
+// Rust: crates/jet-store/src/runtime.rs:111
+// PreparedRuntime.inline: NativeRuntimeCache.jet:146.
+// Rust: crates/jet-store/src/runtime.rs:123
+// rust: NativeRuntimeCache.jet:158.
+// Rust: crates/jet-store/src/runtime.rs:127
+// cache_hit: NativeRuntimeCache.jet:160.
+// Rust: crates/jet-store/src/runtime.rs:131
+// repaired: NativeRuntimeCache.jet:162.
+// Rust: crates/jet-store/src/runtime.rs:137
+// prebuilt: NativeRuntimeCache.jet:166.
+// Rust: crates/jet-store/src/runtime.rs:143
+// is_split: NativeRuntimeCache.jet:170.
+// Rust: crates/jet-store/src/runtime.rs:147
+// add_rustc_args: NativeRuntimeCache.jet:173.
+// Rust: crates/jet-store/src/runtime.rs:157
+// prepare: store_runtime_prepare, NativeRuntimeCache.jet:197. // GATE #4494
+// Rust: crates/jet-store/src/runtime.rs:224
+// prebuilt_runtime_rlib: store_runtime_prebuilt_rlib, NativeRuntimeCache.jet:239.
+// Rust: crates/jet-store/src/runtime.rs:236
+// export_prebuilt_runtime: store_runtime_export_prebuilt, NativeRuntimeCache.jet:249.
+// Rust: crates/jet-store/src/runtime.rs:260
+// targets_native_cpu: store_runtime_targets_native_cpu, NativeRuntimeCache.jet:274.
+// Rust: crates/jet-store/src/runtime.rs:269
+// runtime_compile_flags: store_runtime_compile_flags, NativeRuntimeCache.jet:283.
+// Rust: crates/jet-store/src/runtime.rs:291
+// is_link_only_flag: store_runtime_is_link_only_flag, NativeRuntimeCache.jet:300.
+// Rust: crates/jet-store/src/runtime.rs:299
+// CompiledArtifact: NativeRuntimeCompiledArtifact, NativeRuntimeCache.jet:305.
+// Rust: crates/jet-store/src/runtime.rs:306
+// compile_artifact: store_runtime_compile_artifact, NativeRuntimeCache.jet:315.
+// Rust: crates/jet-store/src/runtime.rs:406
+// materialize_artifact: store_runtime_materialize_artifact, NativeRuntimeCache.jet:397.
+// Rust: crates/jet-store/src/runtime.rs:424
+// SplitGenerated: RuntimeSplit.jet:12.
+// Rust: crates/jet-store/src/runtime.rs:430
+// split_generated: RuntimeSplit.jet:20.
+// Rust: crates/jet-store/src/runtime.rs:475
+// RuntimeCrateSplit: RuntimeSplit.jet:69.
+// Rust: crates/jet-store/src/runtime.rs:485
+// split_runtime_crate: RuntimeSplit.jet:76.
+// Rust: crates/jet-store/src/runtime.rs:506
+// export_crate_source: RuntimeExport.jet:32.
+// Rust: crates/jet-store/src/runtime.rs:510
+// cache_key: store_runtime_cache_key, NativeRuntimeCache.jet:409.
+// Rust: crates/jet-store/src/runtime.rs:540
+// push_bytes: store_runtime_push_bytes, NativeRuntimeCache.jet:431.
+
+// Rust: crates/jet-store/src/runtime.rs:546
+// Rust: crates/jet-store/src/runtime.rs:552
+// Rust: crates/jet-store/src/runtime.rs:561
+fn os_bytes(value: OSPath) -> [U8] {
+    // GATE #4483: cfg family selection; #4494: native OsStr codec.
+    family :: target.selected_family()
+    if family == "unix" -> return value.encoded
+    if family == "windows" {
+        out := [U8]{}
+        loop word in std.os.windows.ffi.OsStrExt.encode_wide(value) { // GATE #4494
+            &out.push(U8{word & U16{255}})
+            &out.push(U8{word >> 8})
+        }
+        return out
+    }
+    std.ffi.OsStr.to_string_lossy(value).bytes() // GATE #4494
+}
+
+// Rust: crates/jet-store/src/runtime.rs:568
+// rustc_identity: NativeRuntimeIdentityCache.rustc_identity, NativeRuntimeCache.jet:71;
+// spawn/finish phases below preserve the source's concurrent CPU/version queries.
+
+// Rust: crates/jet-store/src/runtime.rs:601
+struct RustcQuery {
+    rendered: String
+    child: std.process.Child IOError! // GATE #4494
+}
+
+// Rust: crates/jet-store/src/runtime.rs:606
+fn spawn_rustc_query(rustc: OSPath, rustc_env: [(OSPath, OSPath)], args: [String]) -> RustcQuery {
+    command := std.process.Command.new(rustc) // GATE #4494
+    &command.args(args)
+    &command.stdin(std.process.Stdio.null())
+    &command.stdout(std.process.Stdio.piped())
+    &command.stderr(std.process.Stdio.piped())
+    loop (name, value) in rustc_env -> &command.env(name, value)
+    RustcQuery{rendered: args.join(" "), child: command.spawn()}
+}
+
+// Rust: crates/jet-store/src/runtime.rs:622
+fn finish_rustc_query(query: RustcQuery) -> String Err! {
+    rendered :: query.rendered
+    child :: query.child ?? return Err("could not run rustc {rendered}: {err}")
+    output :: child.wait_with_output() ?? return Err("could not run rustc {rendered}: {err}") // GATE #4494
+    if !output.status.success() {
+        return Err("rustc {rendered} failed: {String.from_utf8_lossy(output.stderr)}")
+    }
+    Ok(String.from_utf8_lossy(output.stdout))
+}
+
+// Rust: crates/jet-store/src/runtime.rs:638
+// Scope: NativeRuntimeScope, RuntimeExport.jet:4 (all ten original variants).
+// Rust: crates/jet-store/src/runtime.rs:657
+// export_runtime_source: export_crate_source, RuntimeExport.jet:32;
+// incremental macro_level avoids rescanning nested scopes, original mask retained.
+// Rust: crates/jet-store/src/runtime.rs:754
+// export_line: store_runtime_export_line, RuntimeExport.jet:114.
+// Rust: crates/jet-store/src/runtime.rs:790
+// export_macro_line: store_runtime_export_macro_line, RuntimeExport.jet:142.
+// Rust: crates/jet-store/src/runtime.rs:804
+// is_tuple_struct: store_runtime_is_tuple_struct, RuntimeExport.jet:158.
+// Rust: crates/jet-store/src/runtime.rs:809
+// export_tuple_field: store_runtime_export_tuple_field, RuntimeExport.jet:164.
+// Rust: crates/jet-store/src/runtime.rs:823
+// restricted_visibility_rest: store_runtime_restricted_visibility_rest, RuntimeExport.jet:176.
+// Rust: crates/jet-store/src/runtime.rs:837
+// starts_restricted_reexport: store_runtime_starts_restricted_reexport, RuntimeExport.jet:191.
+// Rust: crates/jet-store/src/runtime.rs:841
+// strip_visibility: store_runtime_strip_visibility, RuntimeExport.jet:198.
+// Rust: crates/jet-store/src/runtime.rs:853
+// starts_exportable_item: store_runtime_starts_exportable_item, RuntimeExport.jet:218.
+// Rust: crates/jet-store/src/runtime.rs:867
+// starts_impl_member: store_runtime_starts_impl_member, RuntimeExport.jet:225.
+// Rust: crates/jet-store/src/runtime.rs:881
+// looks_like_struct_field: store_runtime_looks_like_struct_field, RuntimeExport.jet:231.
+// Rust: crates/jet-store/src/runtime.rs:897
+// starts_item_header: store_runtime_starts_item_header, RuntimeExport.jet:246.
+// Rust: crates/jet-store/src/runtime.rs:913
+// scope_for_header: store_runtime_scope_for_header, RuntimeExport.jet:257.
+// Rust: crates/jet-store/src/runtime.rs:944
+// emitted_target_dossier_source: store_runtime_test_dossier_source, Tests/NativeRuntimeCache.jet:6.
+// Rust: crates/jet-store/src/runtime.rs:950
+// key_for_source: store_runtime_test_key, Tests/NativeRuntimeCache.jet:10.
+// Rust: crates/jet-store/src/runtime.rs:962
+// target_dossier_source_invalidates_runtime_key: Tests/NativeRuntimeCache.jet:20.
+// Rust: crates/jet-store/src/runtime.rs:1003
+// split_puts_runtime_and_core_into_one_crate: Tests/NativeRuntimeCache.jet:38;
+// duplicate Compiler/JetStore/Tests/Runtime.jet:2 registration must be reconciled.
+// Rust: crates/jet-store/src/runtime.rs:1026
+// export_opens_macro_and_thread_local_runtime_items: Tests/NativeRuntimeCache.jet:87.

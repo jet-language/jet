@@ -1,0 +1,10 @@
+use jetpack.JetOS.StoreRealize.[canonical_hangar_digest]
+
+// Rust: crates/jetpack/src/JetOS/store_realize.rs:130-136 (behavioral control; no inline Rust tests).
+#Test("canonical_hangar_digest_requires_lowercase_sha256_identity") {
+    assert(canonical_hangar_digest("sha256-" + "a".repeat(64)))
+    assert(!canonical_hangar_digest("sha256-" + "A".repeat(64)))
+    assert(!canonical_hangar_digest("sha256-" + "g".repeat(64)))
+    assert(!canonical_hangar_digest("sha256-" + "a".repeat(63)))
+    assert(!canonical_hangar_digest("sha512-" + "a".repeat(64)))
+}

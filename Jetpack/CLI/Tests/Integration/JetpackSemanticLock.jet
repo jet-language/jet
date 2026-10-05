@@ -1,0 +1,23 @@
+use std.[env, fs]
+use std.time.[SystemTime, UNIX_EPOCH]
+use core.files.OSPath
+use jetpack.SemanticLock.[SemanticRecord, LockIdentity, LockRecordKind, LockRationale]
+
+// Rust: tests/jetpack_semantic_lock.rs:19
+pub fn unique_root(tag: String) -> OSPath {
+    // GATE #4494: actual wall-clock and native scratch filesystem.
+    nanos :: SystemTime.now().duration_since(UNIX_EPOCH).unwrap().as_nanos()
+    root :: env.temp_dir().join("jet-jp13-{tag}-{nanos}")
+    _ :: fs.remove_dir_all(root)
+    fs.create_dir_all(root).unwrap()
+    root
+}
+
+// Rust: tests/jetpack_semantic_lock.rs:30
+pub fn pkg(owner: String, key: String, exact: String, hash: String) -> SemanticRecord {
+    SemanticRecord.new(
+        LockIdentity{kind: LockRecordKind.Package, key: key, exact: exact, hash: hash, platform: "x86_64-linux"},
+        LockRationale{owner_package: owner, reason: "{owner} declared {key}", source_ref: "catalog:{key}",
+            provider: "core", channel_input: "stable", exact_output: exact, policy_fingerprint: "policy-1",
+            recipe_id: "", adapter_id: "", signature: "ed25519:sig", cache_provenance: "hangar", update_command: "jet update {key}"})
+}

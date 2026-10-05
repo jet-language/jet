@@ -1,224 +1,145 @@
-// PORT-PENDING 0948 crates-jetpack-src-store-sealtests-module-group: crates/jetpack/src/Store/NixCache/TestCache.rs:1-220
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS use super::*;
-//RS use crate::Store::NixNarInfoSignature;
-//RS use ed25519_dalek::{Signer, SigningKey};
-//RS use std::collections::BTreeMap;
-//RS use std::fs;
-//RS use std::io::{Read, Write};
-//RS use std::net::{TcpListener, TcpStream};
-//RS use std::path::{Path, PathBuf};
-//RS use std::sync::{Arc, Mutex};
-//RS use std::thread;
-//RS use std::time::Duration;
-//RS 
-//RS pub(super) fn unique_dir(tag: &str) -> PathBuf {
-//RS     let path = std::env::temp_dir().join(format!("jet-nix-cache-{tag}-{}", std::process::id()));
-//RS     let _ = fs::remove_dir_all(&path);
-//RS     fs::create_dir_all(&path).unwrap();
-//RS     path
-//RS }
-//RS 
-//RS pub(super) fn remove_dir(path: &Path) {
-//RS     let _ = fs::remove_dir_all(path);
-//RS }
-//RS 
-//RS pub(super) fn signed_narinfo(
-//RS     store_path: &str,
-//RS     nar_name: &str,
-//RS     nar: &[u8],
-//RS     references: &[&str],
-//RS     key_id: &str,
-//RS     signing_key: &SigningKey,
-//RS ) -> Vec<u8> {
-//RS     signed_narinfo_with_payload(
-//RS         store_path,
-//RS         nar_name,
-//RS         nar,
-//RS         nar,
-//RS         NixCompression::None,
-//RS         references,
-//RS         key_id,
-//RS         signing_key,
-//RS     )
-//RS }
-//RS 
-//RS pub(super) fn signed_zstd_narinfo(
-//RS     store_path: &str,
-//RS     nar_name: &str,
-//RS     nar: &[u8],
-//RS     references: &[&str],
-//RS     key_id: &str,
-//RS     signing_key: &SigningKey,
-//RS ) -> Vec<u8> {
-//RS     let compressed = crate::Store::encode_zstd_deterministic(nar).unwrap();
-//RS     signed_narinfo_with_payload(
-//RS         store_path,
-//RS         nar_name,
-//RS         &compressed,
-//RS         nar,
-//RS         NixCompression::Zstd,
-//RS         references,
-//RS         key_id,
-//RS         signing_key,
-//RS     )
-//RS }
-//RS 
-//RS fn signed_narinfo_with_payload(
-//RS     store_path: &str,
-//RS     nar_name: &str,
-//RS     payload: &[u8],
-//RS     nar: &[u8],
-//RS     compression: NixCompression,
-//RS     references: &[&str],
-//RS     key_id: &str,
-//RS     signing_key: &SigningKey,
-//RS ) -> Vec<u8> {
-//RS     let file_hash = format!("sha256:{}", crate::SHA256::sha256_hex(payload));
-//RS     let nar_hash = format!("sha256:{}", crate::SHA256::sha256_hex(nar));
-//RS     let references = references
-//RS         .iter()
-//RS         .map(|reference| reference.rsplit('/').next().unwrap())
-//RS         .collect::<Vec<_>>()
-//RS         .join(" ");
-//RS     let mut info = NixNarInfo {
-//RS         store_path: store_path.to_string(),
-//RS         url: format!("nar/{nar_name}"),
-//RS         compression,
-//RS         file_hash: Some(file_hash.clone()),
-//RS         file_size: Some(payload.len() as u64),
-//RS         nar_hash,
-//RS         nar_size: nar.len() as u64,
-//RS         references: references.split_whitespace().map(str::to_string).collect(),
-//RS         deriver: None,
-//RS         ca: None,
-//RS         signatures: Vec::new(),
-//RS     };
-//RS     let fingerprint = info.fingerprint("/nix/store").unwrap();
-//RS     info.signatures.push(NixNarInfoSignature {
-//RS         key_id: key_id.to_string(),
-//RS         signature: signing_key.sign(&fingerprint).to_bytes(),
-//RS     });
-//RS     format!(
-//RS         "StorePath: {}\nURL: {}\nCompression: {}\nFileHash: {}\nFileSize: {}\nNarHash: {}\nNarSize: {}\nReferences: {}\nSig: {}:{}\n",
-//RS         info.store_path,
-//RS         info.url,
-//RS         info.compression.as_str(),
-//RS         file_hash,
-//RS         info.file_size.unwrap(),
-//RS         info.nar_hash,
-//RS         info.nar_size,
-//RS         references,
-//RS         key_id,
-//RS         base64_encode(&info.signatures[0].signature),
-//RS     )
-//RS     .into_bytes()
-//RS }
-//RS 
-//RS pub(super) fn base64_encode(bytes: &[u8]) -> String {
-//RS     const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-//RS     let mut output = String::new();
-//RS     for chunk in bytes.chunks(3) {
-//RS         let first = chunk[0];
-//RS         output.push(ALPHABET[(first >> 2) as usize] as char);
-//RS         output.push(
-//RS             ALPHABET[((first & 0x03) << 4 | chunk.get(1).copied().unwrap_or(0) >> 4) as usize]
-//RS                 as char,
-//RS         );
-//RS         if let Some(second) = chunk.get(1) {
-//RS             output.push(
-//RS                 ALPHABET[((second & 0x0f) << 2 | chunk.get(2).copied().unwrap_or(0) >> 6) as usize]
-//RS                     as char,
-//RS             );
-//RS         } else {
-//RS             output.push('=');
-//RS         }
-//RS         if let Some(third) = chunk.get(2) {
-//RS             output.push(ALPHABET[(third & 0x3f) as usize] as char);
-//RS         } else {
-//RS             output.push('=');
-//RS         }
-//RS     }
-//RS     output
-//RS }
-//RS 
-//RS pub(super) struct TestCacheServer {
-//RS     pub(super) endpoint: String,
-//RS     routes: Arc<Mutex<BTreeMap<String, Vec<u8>>>>,
-//RS     stop: Arc<std::sync::atomic::AtomicBool>,
-//RS     join: Option<thread::JoinHandle<()>>,
-//RS }
-//RS 
-//RS impl TestCacheServer {
-//RS     pub(super) fn start(routes: BTreeMap<String, Vec<u8>>) -> Self {
-//RS         let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
-//RS         listener.set_nonblocking(true).unwrap();
-//RS         let address = listener.local_addr().unwrap();
-//RS         let routes = Arc::new(Mutex::new(routes));
-//RS         let thread_routes = Arc::clone(&routes);
-//RS         let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
-//RS         let thread_stop = Arc::clone(&stop);
-//RS         let join = thread::spawn(move || {
-//RS             while !thread_stop.load(std::sync::atomic::Ordering::Relaxed) {
-//RS                 match listener.accept() {
-//RS                     Ok((stream, _)) => serve_cache_request(stream, &thread_routes),
-//RS                     Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-//RS                         thread::sleep(Duration::from_millis(1));
-//RS                     }
-//RS                     Err(_) => break,
-//RS                 }
-//RS             }
-//RS         });
-//RS         Self {
-//RS             endpoint: format!("http://127.0.0.1:{}", address.port()),
-//RS             routes,
-//RS             stop,
-//RS             join: Some(join),
-//RS         }
-//RS     }
-//RS 
-//RS     pub(super) fn replace_routes(&self, routes: BTreeMap<String, Vec<u8>>) {
-//RS         *self.routes.lock().unwrap() = routes;
-//RS     }
-//RS }
-//RS 
-//RS impl Drop for TestCacheServer {
-//RS     fn drop(&mut self) {
-//RS         self.stop.store(true, std::sync::atomic::Ordering::Relaxed);
-//RS         let _ = TcpStream::connect(self.endpoint.strip_prefix("http://").unwrap());
-//RS         if let Some(join) = self.join.take() {
-//RS             join.join().unwrap();
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn serve_cache_request(mut stream: TcpStream, routes: &Arc<Mutex<BTreeMap<String, Vec<u8>>>>) {
-//RS     let mut request = [0u8; 4096];
-//RS     let count = stream.read(&mut request).unwrap_or(0);
-//RS     let path = std::str::from_utf8(&request[..count])
-//RS         .ok()
-//RS         .and_then(|request| request.lines().next())
-//RS         .and_then(|line| line.split_whitespace().nth(1))
-//RS         .unwrap_or("/")
-//RS         .split('?')
-//RS         .next()
-//RS         .unwrap_or("/");
-//RS     let body = routes.lock().unwrap().get(path).cloned();
-//RS     match body {
-//RS         Some(body) => {
-//RS             let header = format!(
-//RS                 "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-//RS                 body.len()
-//RS             );
-//RS             let _ = stream.write_all(header.as_bytes());
-//RS             let _ = stream.write_all(&body);
-//RS         }
-//RS         None => {
-//RS             let _ = stream.write_all(
-//RS                 b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
-//RS             );
-//RS         }
-//RS     }
-//RS }
-// END-PORT-PENDING 0948 crates/jetpack/src/Store/NixCache/TestCache.rs:1-220
+// Test-only continuation of canonical Store.NixCache support, not a second
+// binary-cache client. Replace the disk-backed test server at integration.
+use std.[env, fs, io, net, sync, thread, time]
 
+// Rust: crates/jetpack/src/Store/NixCache/TestCache.rs:13
+fn unique_dir(tag: String) -> OSPath {
+    path :: env.temp_dir().join("jet-nix-cache-{tag}-{std.process.id()}")
+    _ :: fs.remove_dir_all(path)
+    fs.create_dir_all(path) ?? panic("create cache test directory")
+    path
+}
+// Rust: crates/jetpack/src/Store/NixCache/TestCache.rs:20
+fn remove_dir(path: OSPath) -> {
+    _ :: fs.remove_dir_all(path)
+}
+// Rust: crates/jetpack/src/Store/NixCache/TestCache.rs:24
+// signed_narinfo -> Store/Tests/NixCacheTestSupport.jet41
+// store_nix_test_signed_narinfo, using the canonical seed/signing-key carrier.
+// Rust: crates/jetpack/src/Store/NixCache/TestCache.rs:44
+// signed_zstd_narinfo -> Store/Tests/NixCacheTestSupport.jet46
+// store_nix_test_signed_zstd_narinfo, deterministic encoder at36.
+
+// Rust: crates/jetpack/src/Store/NixCache/TestCache.rs:65
+// Replace canonical store_nix_test_signed_narinfo_with_payload: Rust takes
+// the literal suffix after '/', then split_whitespace of the joined names.
+fn signed_narinfo_with_payload(store_path: String, nar_name: String, payload: [U8], nar: [U8], compression: NixCompression, references: [String], key_id: String, seed: [U8]) -> [U8] {
+    file_hash :: "sha256:{store_sha256_hex(payload)}"
+    nar_hash :: "sha256:{store_sha256_hex(nar)}"
+    names := [String]{}
+    loop reference in references {
+        suffix :: reference.rsplit("/").first() ?? panic("split always yields a suffix")
+        &names.push(suffix)
+    }
+    reference_text :: names.join(" ")
+    parsed_references := [String]{}
+    loop reference in reference_text.split_whitespace() -> &parsed_references.push(reference)
+    info := NixNarInfo{
+        store_path: store_path, url: "nar/{nar_name}", compression: compression,
+        file_hash: Val(file_hash), file_size: Val(U64.from_usize(payload.len())),
+        nar_hash: nar_hash, nar_size: U64.from_usize(nar.len()),
+        references: parsed_references, deriver: None, ca: None,
+        signatures: [NixNarInfoSignature]{}
+    }
+    fingerprint :: info.fingerprint("/nix/store") ?? panic("narinfo fingerprint")
+    signature :: crypto.sign(crypto.SigningKey{bytes: seed}, fingerprint) ?? panic("narinfo signature")
+    &info.signatures.push(NixNarInfoSignature{key_id: key_id, signature: signature.bytes})
+    "StorePath: {info.store_path}\nURL: {info.url}\nCompression: {info.compression.as_str()}\nFileHash: {file_hash}\nFileSize: {info.file_size ?? panic("file size")}\nNarHash: {info.nar_hash}\nNarSize: {info.nar_size}\nReferences: {reference_text}\nSig: {key_id}:{base64.encode(info.signatures[0].signature)}\n".bytes()
+}
+
+// Rust: crates/jetpack/src/Store/NixCache/TestCache.rs:116
+// base64_encode (including ALPHABET at117) -> canonical base64.encode;
+// standard 64 alphabet and '=' padding, exercised in the paired controls.
+
+// Rust: crates/jetpack/src/Store/NixCache/TestCache.rs:143
+struct TestCacheServer {
+    endpoint: String
+    routes: sync.Arc<sync.Mutex<[String: [U8]]>>
+    stop: sync.Arc<sync.atomic.AtomicBool>
+    join: thread.JoinHandle<Unit>?
+
+    // Rust: crates/jetpack/src/Store/NixCache/TestCache.rs:151
+    fn start(routes: [String: [U8]]) -> TestCacheServer {
+        // GATE #4494: native TCP listener, Arc/Mutex, atomics and join handles.
+        listener :: net.TcpListener.bind(("127.0.0.1", 0)) ?? panic("bind test cache")
+        listener.set_nonblocking(true) ?? panic("nonblocking test cache")
+        address :: listener.local_addr() ?? panic("test cache address")
+        shared_routes :: sync.Arc.new(sync.Mutex.new(^routes))
+        thread_routes :: shared_routes.clone()
+        stop :: sync.Arc.new(sync.atomic.AtomicBool.new(false))
+        thread_stop :: stop.clone()
+        join :: thread.spawn(() -> {
+            loop !thread_stop.load(sync.atomic.Ordering.Relaxed) {
+                if listener.accept() == {
+                    .Ok((stream, _)) -> serve_cache_request(^stream, &thread_routes)
+                    .Err(error) -> {
+                        if error.kind() == io.ErrorKind.WouldBlock { // GATE #4409
+                            thread.sleep(time.Duration.from_millis(1))
+                        } else {
+                            break
+                        }
+                    }
+                }
+            }
+        })
+        TestCacheServer{endpoint: "http://127.0.0.1:{address.port()}", routes: shared_routes, stop: stop, join: Val(^join)}
+    }
+
+    // Rust: crates/jetpack/src/Store/NixCache/TestCache.rs:178
+    fn replace_routes(self, routes: [String: [U8]]) -> {
+        guard := self.routes.lock() ?? panic("poisoned test cache routes")
+        guard.value = ^routes
+    }
+
+}
+
+impl TestCacheServer.Close {
+    // Rust: crates/jetpack/src/Store/NixCache/TestCache.rs:184
+    fn close(^self) -> {
+        self.stop.store(true, sync.atomic.Ordering.Relaxed)
+        address :: self.endpoint.removeprefix("http://")
+        _ :: net.TcpStream.connect(address)
+        if self.join == {
+            .Val(join) -> ^join.join() ?? panic("test cache thread")
+            .None -> {}
+        }
+    }
+}
+
+// Rust: crates/jetpack/src/Store/NixCache/TestCache.rs:193
+fn serve_cache_request(stream: net.TcpStream, routes: &sync.Arc<sync.Mutex<[String: [U8]]>>) -> {
+    request := [U8; 4096].filled(0)
+    count :: &stream.read(&request) ?? 0
+    // Borrowed UTF-8 view, not a copied whole HTTP request.
+    decoded :: std.str.from_utf8(&request[0..<count])
+    path := "/"
+    if decoded == {
+        .Ok(text) -> {
+            if text.lines().first() == {
+                .Val(line) -> path = line.split_whitespace().nth(1) ?? "/"
+                .None -> {}
+            }
+        }
+        .Err(_) -> {}
+    }
+    path = path.split("?").first() ?? "/"
+    body := [U8]?{None}
+    {
+        guard :: routes.lock() ?? panic("poisoned test cache routes")
+        // Clone the selected body before releasing the map mutex, as Rust.
+        if guard.value.get(path) == {
+            .Val(found) -> body = Val(~found)
+            .None -> {}
+        }
+    }
+    if body == {
+        .Val(bytes) -> {
+            header :: "HTTP/1.1 200 OK\r\nContent-Length: {bytes.len()}\r\nConnection: close\r\n\r\n"
+            _ :: &stream.write_all(header.bytes())
+            _ :: &stream.write_all(bytes)
+        }
+        .None -> {
+            _ :: &stream.write_all("HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".bytes())
+        }
+    }
+}

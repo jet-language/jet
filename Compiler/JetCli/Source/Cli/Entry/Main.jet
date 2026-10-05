@@ -1,1804 +1,885 @@
-// PORT-PENDING 2029 source-main-slice-1: Source/main.rs:1-1800
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! jet CLI: check / build / run / test / new / fmt / try / lsp +
-//RS //!          add / remove / fetch / update (M12.1 package manager).
-//RS //!
-//RS //! The driver owns invariant I2: rustc's voice never reaches the user as
-//RS //! if it were their fault. A rustc failure on generated code is reported
-//RS //! as an internal compiler error in jet.
-//RS 
-//RS // Source files/modules use PascalCase names (owner decision).
-//RS #![allow(non_snake_case)]
-//RS 
-//RS use std::collections::{BTreeMap, BTreeSet};
-//RS use std::fs;
-//RS use std::io::{self, BufRead, Write};
-//RS use std::path::{Path, PathBuf};
-//RS use std::process::{exit, Command};
-//RS 
-//RS use jet::Diagnostics::{Diagnostic, ReportPath, Severity};
-//RS use jet::ExitCodes;
-//RS pub(crate) use jet::{Diagnostics, Syntax, SHA256};
-//RS use jet_foundation::BuildEffect;
-//RS pub(crate) use jet::ReceiptStore;
-//RS use jet_foundation::Report::{
-//RS     render_status, render_status_with_reports, StatusFields, StatusValue,
-//RS };
-//RS 
-//RS // D-ALLOC-PROGRAM1=A: the CLI executable installs the resident instance once.
-//RS // JIT/interpreter entry points only marshal the checked package fact into the
-//RS // same Prelude kernel; they never implement allocation policy.
-//RS #[global_allocator]
-//RS static JET_HOST_ALLOCATOR: jet::program_allocator::JetHostProgramAllocator =
-//RS     jet::program_allocator::JetHostProgramAllocator;
-//RS 
-//RS mod CheckReceipt;
-//RS mod CmdBackendScaffold;
-//RS mod CmdBudget;
-//RS mod CmdCodemod;
-//RS mod CmdCompile;
-//RS mod CmdConsoleHost;
-//RS mod CmdDb;
-//RS mod CmdDevTools;
-//RS mod CmdDoc;
-//RS mod CmdDossier;
-//RS mod CmdExec;
-//RS mod CmdExpand;
-//RS mod CmdFill;
-//RS mod CmdFlash;
-//RS mod CmdGates;
-//RS mod CmdGc;
-//RS mod CmdImpact;
-//RS mod CmdImport;
-//RS mod CmdInspect;
-//RS mod CmdLearn;
-//RS mod CmdLocalApp;
-//RS mod CmdMemory;
-//RS mod CmdMigration;
-//RS mod CmdNotebook;
-//RS mod CmdPackage;
-//RS mod CmdPerf;
-//RS mod CmdPkg;
-//RS mod CmdProve;
-//RS mod CmdRemote;
-//RS mod CmdReview;
-//RS mod CmdSchema;
-//RS mod CmdSemIndex;
-//RS mod CmdStatus;
-//RS mod CmdStructuralMerge;
-//RS mod CmdStructure;
-//RS mod CmdSupply;
-//RS mod CmdTest;
-//RS mod CmdTry;
-//RS mod DevAot;
-//RS mod EngineDispatch;
-//RS mod NativeLinker;
-//RS mod OutputAdapter;
-//RS mod ProductionReceipt;
-//RS mod ProveReplay;
-//RS mod ProveSolver;
-//RS #[allow(dead_code)]
-//RS mod Store;
-//RS use OutputAdapter::{
-//RS     active_profile, advisory_lints_visible, write_machine, write_mode_diagnostic,
-//RS     write_mode_machine, write_mode_renderable, write_mode_status, write_renderable, write_status,
-//RS };
-//RS pub(crate) use OutputAdapter::{OutputAdapter as OutputAdapterHost, OutputMode};
-//RS 
-//RS use CmdBackendScaffold::run_new_backend;
-//RS use CmdCodemod::run_generate;
-//RS use CmdCompile::{
-//RS     prepare_project_environment, project_environment_requirement, require_project_environment,
-//RS     resolve_named_profile, run_build_query, run_compiler_api, run_debug_native, run_dev_entry,
-//RS     run_dev_web, run_external_fmt, run_fix, run_fmt, run_fuzz, run_native_execution,
-//RS     run_native_source_from_stdin, run_new, run_test_opts, run_web_app_dev_entry,
-//RS     scaffold_browser_tests, validate_target, FuzzRunOpts, NativeExecutionRequest, TestRunOpts,
-//RS };
-//RS use CmdConsoleHost::ConsoleHost;
-//RS use CmdDb::run_db;
-//RS use CmdDevTools::{
-//RS     run_bind, run_completions, run_dev, run_devtools, run_doctor, run_emit_rust, run_eval,
-//RS     run_eval_expression, run_explain, run_explain_cost, run_explain_marker, run_explain_web_graph,
-//RS     run_lint_a11y, run_lint_complexity, run_lint_cost, run_repl, watch_policy_from, WatchPolicy,
-//RS };
-//RS use CmdDoc::run_doc;
-//RS use CmdDossier::run_module_explain;
-//RS use CmdExec::run_exec;
-//RS use CmdExpand::run_expand;
-//RS use CmdFill::run_fill;
-//RS use CmdFlash::run_flash;
-//RS use CmdImpact::run_impact;
-//RS use CmdInspect::{run_digest, run_env, run_inspect, run_output, run_provenance};
-//RS use CmdLearn::run as run_learn;
-//RS use CmdPackage::run_package;
-//RS use CmdPkg::{run_add, run_fetch, run_remove, run_update};
-//RS use CmdProve::run_prove;
-//RS use CmdRemote::run_remote;
-//RS use CmdReview::run_review;
-//RS use CmdSchema::run_schema;
-//RS use CmdSemIndex::{run_find, run_semindex};
-//RS use CmdStructuralMerge::{run_diff, run_merge, structural_help};
-//RS use CmdSupply::{
-//RS     run_audit, run_copy_audit, run_key_backup, run_keygen, run_publish, run_sbom, run_vendor,
-//RS     run_yank,
-//RS };
-//RS use CmdTry::run_try;
-//RS 
-//RS /// Render one spanless driver failure through Jet's shared diagnostic frame.
-//RS fn cli_diagnostic_copy(code: &str) -> (&'static str, &'static str) {
-//RS     match code {
-//RS         "E1202" => (
-//RS             "the lockfile must contain the exact dependency graph before a locked or supply-chain command can run",
-//RS             "run `jet fetch`, then run the command again",
-//RS         ),
-//RS         "E1235" => (
-//RS             "the registry endpoint contains credentials or URL parameters, or its git operation failed because of network, authentication, or local-clone state; rendered endpoint details are redacted",
-//RS             "remove URL credentials and parameters, configure the host Git credential provider for the registry path, then check network access",
-//RS         ),
-//RS         "E2101" => (
-//RS             "Jet command groups accept only commands in their named area",
-//RS             "run `jet help` or the command group's `help` route",
-//RS         ),
-//RS         "E2102" => (
-//RS             "Jet ignores no flags silently, so a typo cannot quietly change a command",
-//RS             "correct the named flag, or run `jet help` to see the flags",
-//RS         ),
-//RS         "E2104" => (
-//RS             "Jet needs valid command input before it can run this command",
-//RS             "correct the named argument or input, then run the command again",
-//RS         ),
-//RS         "E2105" => (
-//RS             "Jet could not complete the named file, tool, or operating-system operation",
-//RS             "correct the named problem, then run the command again",
-//RS         ),
-//RS         "E2941" => (
-//RS             "jet prove accepts only its registered proof lenses",
-//RS             "use `all`, `refinements`, `effects`, `taint`, `contracts`, `tests`, `budgets`, `replay`, or `solver`",
-//RS         ),
-//RS         _ => (
-//RS             "Jet could not complete this command",
-//RS             "correct the named problem, then run the command again",
-//RS         ),
-//RS     }
-//RS }
-//RS 
-//RS pub(crate) fn emit_cli_diagnostic(code: &str, what: String) {
-//RS     let (why, fix) = cli_diagnostic_copy(code);
-//RS     emit_cli_report(code, what, why.to_string(), fix.to_string(), false);
-//RS }
-//RS 
-//RS pub(crate) fn emit_cli_diagnostic_with_fix(code: &str, what: String, fix: String) {
-//RS     let (why, _) = cli_diagnostic_copy(code);
-//RS     emit_cli_report(code, what, why.to_string(), fix, false);
-//RS }
-//RS 
-//RS pub(crate) fn emit_cli_report(code: &str, what: String, why: String, fix: String, json: bool) {
-//RS     emit_cli_report_for_action("cli", code, what, why, fix, json);
-//RS }
-//RS 
-//RS /// Render a command-owned diagnostic with the command action in the shared
-//RS /// status envelope. Callers that are not one of the named command producers
-//RS /// keep the `cli` action through `emit_cli_report`.
-//RS pub(crate) fn emit_cli_report_for_action(
-//RS     action: &str,
-//RS     code: &str,
-//RS     what: String,
-//RS     why: String,
-//RS     fix: String,
-//RS     json: bool,
-//RS ) {
-//RS     let diagnostic = jet::Diagnostics::Diagnostic::error(code, what, why, fix, None);
-//RS     emit_cli_value_for_action(diagnostic, json, action);
-//RS }
-//RS 
-//RS fn emit_cli_value(diagnostic: Diagnostic, json: bool) {
-//RS     emit_cli_value_for_action(diagnostic, json, "cli");
-//RS }
-//RS 
-//RS fn emit_cli_value_for_action(diagnostic: Diagnostic, json: bool, action: &str) {
-//RS     let profile = active_profile();
-//RS     if json || profile.is_some_and(|profile| profile.machine_enabled()) {
-//RS         let report_file = ReportPath::from_process("");
-//RS         let report = diagnostic.to_report(&report_file, "");
-//RS         let rendered =
-//RS             render_status_with_reports(action, false, std::iter::once(report), StatusFields::new());
-//RS         let rendered = format!("{rendered}\n");
-//RS         if let Some(profile) = profile.filter(|profile| profile.machine_enabled()) {
-//RS             write_machine(profile, &rendered);
-//RS         } else {
-//RS             write_mode_machine(
-//RS                 OutputMode {
-//RS                     json: true,
-//RS                     color: jet::Diagnostics::ColorChoice::Never,
-//RS                     quiet: false,
-//RS                 },
-//RS                 &rendered,
-//RS             );
-//RS         }
-//RS     } else {
-//RS         let color = profile.is_some_and(|profile| profile.ansi_enabled());
-//RS         let rendered = jet::render_all_colored("", "", &[diagnostic], color);
-//RS         if let Some(profile) = profile {
-//RS             write_status(profile, &rendered);
-//RS         } else {
-//RS             write_mode_diagnostic(
-//RS                 OutputMode {
-//RS                     json: false,
-//RS                     color: jet::Diagnostics::ColorChoice::Never,
-//RS                     quiet: false,
-//RS                 },
-//RS                 &rendered,
-//RS             );
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn emit_cli_diagnostics(file: &str, source: &str, diagnostics: &[Diagnostic]) {
-//RS     let profile = active_profile();
-//RS     if profile.is_some_and(|profile| profile.machine_enabled()) {
-//RS         let machine_file = machine_report_path_for_process(file);
-//RS         let clears = jet::Diagnostics::report_clear_counts(diagnostics);
-//RS         let reports = diagnostics.iter().zip(clears).map(|(diagnostic, clears)| {
-//RS             diagnostic.to_report_with_clears(&machine_file, source, clears)
-//RS         });
-//RS         let rendered =
-//RS             render_status_with_reports("diagnostics", false, reports, StatusFields::new());
-//RS         let rendered = format!("{rendered}\n");
-//RS         if let Some(profile) = profile {
-//RS             write_machine(profile, &rendered);
-//RS         } else {
-//RS             write_mode_machine(
-//RS                 OutputMode {
-//RS                     json: true,
-//RS                     color: jet::Diagnostics::ColorChoice::Never,
-//RS                     quiet: false,
-//RS                 },
-//RS                 &rendered,
-//RS             );
-//RS         }
-//RS     } else {
-//RS         let color = profile.is_some_and(|profile| profile.ansi_enabled());
-//RS         let rendered = jet::render_all_colored(file, source, diagnostics, color);
-//RS         if let Some(profile) = profile {
-//RS             write_status(profile, &rendered);
-//RS         } else {
-//RS             write_mode_diagnostic(
-//RS                 OutputMode {
-//RS                     json: false,
-//RS                     color: jet::Diagnostics::ColorChoice::Never,
-//RS                     quiet: false,
-//RS                 },
-//RS                 &rendered,
-//RS             );
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS pub(crate) fn emit_cli_row(code: &str, holes: &[(&str, &str)], json: bool) {
-//RS     let diagnostic = jet::Diagnostics::Diagnostic::from_row(code, holes, None);
-//RS     emit_cli_value(diagnostic, json);
-//RS }
-//RS 
-//RS pub(crate) fn emit_cli_row_with_detail(
-//RS     code: &str,
-//RS     holes: &[(&str, &str)],
-//RS     detail: String,
-//RS     json: bool,
-//RS ) {
-//RS     let diagnostic = jet::Diagnostics::Diagnostic::from_row(code, holes, None).with_detail(detail);
-//RS     emit_cli_value(diagnostic, json);
-//RS }
-//RS 
-//RS macro_rules! cli_error {
-//RS     (@fix $code:expr, $what:expr, $fix:expr) => {
-//RS         crate::emit_cli_diagnostic_with_fix($code, ($what).to_string(), ($fix).to_string())
-//RS     };
-//RS     (@full $code:expr, $what:expr, $why:expr, $fix:expr) => {
-//RS         crate::emit_cli_report(
-//RS             $code,
-//RS             ($what).to_string(),
-//RS             ($why).to_string(),
-//RS             ($fix).to_string(),
-//RS             false,
-//RS         )
-//RS     };
-//RS     ($code:expr, $($arg:tt)*) => {
-//RS         crate::emit_cli_diagnostic($code, format!($($arg)*))
-//RS     };
-//RS }
-//RS pub(crate) use cli_error;
-//RS 
-//RS /// Offer the existing Jetpack environment boundary when an interactive
-//RS /// `jet dev` would otherwise be refused. The child inherits stdio, so its
-//RS /// resolver progress and any realization diagnostic stay in this terminal.
-//RS fn offer_dev_environment(raw: &[String], file: &str, output: &OutputAdapterHost) {
-//RS     let Some((environment, import)) = project_environment_requirement(Path::new(file)) else {
-//RS         return;
-//RS     };
-//RS     if output.profile().machine_enabled()
-//RS         || !output.stdin_is_terminal()
-//RS         || !output.stderr_is_terminal()
-//RS     {
-//RS         return;
-//RS     }
-//RS 
-//RS     write_mode_diagnostic(
-//RS         output.mode(),
-//RS         &format!("jet dev needs {environment} for `use {import}`.\nRealize it now? [Y/n]\n"),
-//RS     );
-//RS     let _ = std::io::stderr().flush();
-//RS     let mut answer = String::new();
-//RS     let Ok(read) = std::io::stdin().read_line(&mut answer) else {
-//RS         return;
-//RS     };
-//RS     if read == 0
-//RS         || (!answer.trim().is_empty()
-//RS             && !matches!(answer.trim().to_ascii_lowercase().as_str(), "y" | "yes"))
-//RS     {
-//RS         return;
-//RS     }
-//RS 
-//RS     let Ok(jet_binary) = std::env::current_exe() else {
-//RS         return;
-//RS     };
-//RS     let mut forwarded = Vec::with_capacity(raw.len() + 2);
-//RS     forwarded.push("env".to_string());
-//RS     forwarded.push("--".to_string());
-//RS     forwarded.push(jet_binary.to_string_lossy().into_owned());
-//RS     forwarded.extend(raw.iter().cloned());
-//RS     exit(EngineDispatch::dispatch(
-//RS         jet::Syntax::JETPACK_BINARY_NAME,
-//RS         "env",
-//RS         &forwarded,
-//RS     ));
-//RS }
-//RS 
-//RS /// D-BUILDPROFILE1 (ratified 2026-06-25): the optimization level carried by a
-//RS /// named build profile. Three levels mapping directly to rustc opt-level values.
-//RS #[derive(Clone, Copy, PartialEq, Eq)]
-//RS pub(crate) enum OptimizeLevel {
-//RS     /// `optimize: none` — rustc opt-level=0; fast compile, no optimization.
-//RS     None,
-//RS     /// `optimize: basic` — rustc opt-level=2; the driver default.
-//RS     Basic,
-//RS     /// `optimize: full` — rustc `-C opt-level=3`; maximum throughput.
-//RS     Full,
-//RS }
-//RS 
-//RS impl OptimizeLevel {
-//RS     /// Cache-key tag unique per level so different profiles don't share entries.
-//RS     pub(crate) fn cache_tag(self) -> &'static str {
-//RS         match self {
-//RS             OptimizeLevel::None => "opt:none",
-//RS             OptimizeLevel::Basic => "opt:basic",
-//RS             OptimizeLevel::Full => "opt:full",
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// Convert from the manifest `BuildOptimize` enum to the driver `OptimizeLevel`.
-//RS impl From<jet::Package::BuildOptimize> for OptimizeLevel {
-//RS     fn from(v: jet::Package::BuildOptimize) -> Self {
-//RS         match v {
-//RS             jet::Package::BuildOptimize::None => OptimizeLevel::None,
-//RS             jet::Package::BuildOptimize::Basic => OptimizeLevel::Basic,
-//RS             jet::Package::BuildOptimize::Full => OptimizeLevel::Full,
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// D-BUILDPROFILE1: rustc flags and typed setting contributions derived from a
-//RS /// profile definition.
-//RS #[derive(Clone, PartialEq, Eq)]
-//RS pub(crate) struct ProfileConfig {
-//RS     pub optimize: OptimizeLevel,
-//RS     pub debug_info: bool,
-//RS     pub codegen_units: Option<u16>,
-//RS     pub small: bool,
-//RS     /// ThinLTO across the program crate and its cached runtime rlib. Off for
-//RS     /// the default dev build, so its final link only compiles the program
-//RS     /// crate; release profiles keep full cross-crate optimization.
-//RS     pub cross_crate_lto: bool,
-//RS     pub panic_abort: bool,
-//RS     pub inspect: jet::Package::Blocks::ReleaseInspect,
-//RS     pub settings: BTreeMap<String, String>,
-//RS }
-//RS 
-//RS impl ProfileConfig {
-//RS     pub(crate) fn release() -> Self {
-//RS         Self {
-//RS             optimize: OptimizeLevel::Full,
-//RS             debug_info: false,
-//RS             codegen_units: None,
-//RS             small: false,
-//RS             cross_crate_lto: true,
-//RS             panic_abort: false,
-//RS             settings: BTreeMap::new(),
-//RS             inspect: Default::default(),
-//RS         }
-//RS     }
-//RS 
-//RS     pub(crate) fn debug() -> Self {
-//RS         Self {
-//RS             optimize: OptimizeLevel::None,
-//RS             debug_info: true,
-//RS             codegen_units: Some(256),
-//RS             small: false,
-//RS             panic_abort: false,
-//RS             cross_crate_lto: false,
-//RS             settings: BTreeMap::new(),
-//RS             inspect: Default::default(),
-//RS         }
-//RS     }
-//RS 
-//RS     pub(crate) fn ci() -> Self {
-//RS         Self {
-//RS             optimize: OptimizeLevel::Basic,
-//RS             debug_info: true,
-//RS             codegen_units: None,
-//RS             small: false,
-//RS             cross_crate_lto: true,
-//RS             panic_abort: false,
-//RS             settings: BTreeMap::new(),
-//RS             inspect: Default::default(),
-//RS         }
-//RS     }
-//RS 
-//RS     pub(crate) fn from_def(def: &jet::Package::BuildProfileDef) -> Self {
-//RS         use jet::Package::BuildPanic;
-//RS         Self {
-//RS             optimize: OptimizeLevel::from(def.optimize),
-//RS             debug_info: def.debug_info,
-//RS             codegen_units: None,
-//RS             small: def.small,
-//RS             cross_crate_lto: true,
-//RS             panic_abort: matches!(def.panic, Some(BuildPanic::Abort)),
-//RS             settings: def.settings.clone(),
-//RS             inspect: def.inspect,
-//RS         }
-//RS     }
-//RS 
-//RS     /// Cache-key suffix for user-defined profiles — encodes every flag that
-//RS     /// affects the emitted binary.
-//RS     pub(crate) fn settings_tag(&self) -> String {
-//RS         let mut parts = vec![self.optimize.cache_tag().to_string()];
-//RS         parts.push(format!("inspect:{}", self.inspect.cfg_value()));
-//RS         if self.debug_info {
-//RS             parts.push("dbg".into());
-//RS         }
-//RS         if self.small {
-//RS             parts.push("small".into());
-//RS         }
-//RS         if !self.cross_crate_lto {
-//RS             parts.push("lto=off".into());
-//RS         }
-//RS         if self.panic_abort {
-//RS             parts.push("panic=abort".into());
-//RS         }
-//RS         if let Some(units) = self.codegen_units {
-//RS             parts.push(format!("codegen-units={units}"));
-//RS         }
-//RS         if !self.settings.is_empty() {
-//RS             parts.push(format!(
-//RS                 "settings:{}",
-//RS                 self.settings
-//RS                     .iter()
-//RS                     .map(|(key, value)| format!("{}:{key}{}:{value}", key.len(), value.len()))
-//RS                     .collect::<Vec<_>>()
-//RS                     .join("")
-//RS             ));
-//RS         }
-//RS         parts.join(";")
-//RS     }
-//RS 
-//RS     #[cfg(test)]
-//RS     pub(crate) fn rustc_args(&self, ffi: bool) -> Vec<String> {
-//RS         self.rustc_args_for_target(ffi, false)
-//RS     }
-//RS 
-//RS     /// D-SIMD3=B: native AOT builds opt into the host CPU so LLVM can use its
-//RS     /// available vector instructions. Cross-target builds keep the portable
-//RS     /// baseline; `#Scalar` is the per-function opt-out boundary.
-//RS     pub(crate) fn rustc_args_for_target(&self, ffi: bool, native: bool) -> Vec<String> {
-//RS         let mut args = Vec::new();
-//RS         if self.small {
-//RS             args.extend(
-//RS                 [
-//RS                     "-C",
-//RS                     "opt-level=z",
-//RS                     "-C",
-//RS                     "panic=abort",
-//RS                     "-C",
-//RS                     "strip=symbols",
-//RS                 ]
-//RS                 .into_iter()
-//RS                 .map(str::to_string),
-//RS             );
-//RS             if !ffi {
-//RS                 args.extend(["-C".to_string(), "lto=fat".to_string()]);
-//RS             }
-//RS             if native {
-//RS                 args.extend(["-C".to_string(), "target-cpu=native".to_string()]);
-//RS             }
-//RS             return args;
-//RS         }
-//RS         if let Some(units) = self.codegen_units {
-//RS             args.extend(["-C".to_string(), format!("codegen-units={units}")]);
-//RS         }
-//RS         match self.optimize {
-//RS             OptimizeLevel::None => {
-//RS                 args.extend([
-//RS                     "-C".to_string(),
-//RS                     "opt-level=0".to_string(),
-//RS                     "-C".to_string(),
-//RS                     "lto=off".to_string(),
-//RS                 ]);
-//RS             }
-//RS             OptimizeLevel::Basic => {
-//RS                 args.extend(["-C".to_string(), "opt-level=2".to_string()]);
-//RS             }
-//RS             OptimizeLevel::Full => {
-//RS                 args.extend(["-C".to_string(), "opt-level=3".to_string()]);
-//RS             }
-//RS         }
-//RS         if self.debug_info {
-//RS             args.extend(["-C".to_string(), "debuginfo=2".to_string()]);
-//RS         } else if !matches!(self.optimize, OptimizeLevel::None) {
-//RS             args.extend(["-C".to_string(), "strip=symbols".to_string()]);
-//RS         }
-//RS         if self.panic_abort {
-//RS             args.extend(["-C".to_string(), "panic=abort".to_string()]);
-//RS         }
-//RS         if !ffi && !matches!(self.optimize, OptimizeLevel::None) {
-//RS             let lto = if self.cross_crate_lto { "lto=thin" } else { "lto=off" };
-//RS             args.extend(["-C".to_string(), lto.to_string()]);
-//RS         }
-//RS         if native {
-//RS             args.extend(["-C".to_string(), "target-cpu=native".to_string()]);
-//RS         }
-//RS         args
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Clone)]
-//RS pub(crate) enum BuildProfile {
-//RS     /// Default `jet build` profile: opt-level=2 without cross-crate LTO, so the
-//RS     /// final link compiles only the program crate against the cached runtime.
-//RS     Default,
-//RS     /// D-BUILD-DEFAULT1: fast `jet run`/`jet dev` profile.
-//RS     Fast,
-//RS     /// D-BUILDPROFILE1: `--release` / `--profile=release`. Full optimization
-//RS     /// with ThinLTO across the program and its runtime rlib.
-//RS     Release,
-//RS     /// D-MEM-SENTRY1: release optimization with runtime sentries enabled at
-//RS     /// every audited memory boundary.
-//RS     Hardened,
-//RS     /// D-BUILDPROFILE1: `--profile=debug`. No optimization.
-//RS     Debug,
-//RS     /// D-BUILDPROFILE1: `--profile=ci`. Optimized with debug symbols for CI.
-//RS     Ci,
-//RS     /// D-BUILDPROFILE1: user-defined or manifest-overridden profile settings.
-//RS     Named { name: String, config: ProfileConfig },
-//RS     /// S15: size-oriented (`opt-level=z`, fat LTO, `panic=abort`).
-//RS     Small,
-//RS     /// E2-M15: typed no-OS / embedded profile — only the Core layer; `panic=abort`.
-//RS     NoOs,
-//RS }
-//RS 
-//RS impl BuildProfile {
-//RS     /// D-BUILD-DEFAULT1: command defaults are explicit, never ambient.
-//RS     pub(crate) fn default_for_command(command: &str) -> Self {
-//RS         match command {
-//RS             "run" | "dev" => BuildProfile::Fast,
-//RS             _ => BuildProfile::Default,
-//RS         }
-//RS     }
-//RS 
-//RS     pub(crate) fn is_release(&self) -> bool {
-//RS         match self {
-//RS             BuildProfile::Release | BuildProfile::Hardened => true,
-//RS             BuildProfile::Named { name, .. } => name == Syntax::BUILD_PROFILE_RELEASE,
-//RS             _ => false,
-//RS         }
-//RS     }
-//RS 
-//RS     /// #3953 owner ruling: dev profiles build native code through Cranelift;
-//RS     /// release-class, CI, size, no-OS and named profiles keep rustc/LLVM.
-//RS     pub(crate) fn cranelift_backend(&self) -> bool {
-//RS         matches!(self, BuildProfile::Default | BuildProfile::Fast | BuildProfile::Debug)
-//RS     }
-//RS 
-//RS     pub(crate) fn release_inspect(&self) -> Option<jet::Package::Blocks::ReleaseInspect> {
-//RS         self.is_release().then(|| self.config().inspect)
-//RS     }
-//RS 
-//RS     /// Ratified performance-budget applicability name. Default builds retain
-//RS     /// the existing `dev` profile identity; named profiles use their declared
-//RS     /// name, never their cache-settings suffix.
-//RS     pub(crate) fn budget_name(&self) -> &str {
-//RS         match self {
-//RS             BuildProfile::Default => "dev",
-//RS             BuildProfile::Fast => "dev",
-//RS             BuildProfile::Release => "release",
-//RS             BuildProfile::Hardened => "hardened",
-//RS             BuildProfile::Debug => "debug",
-//RS             BuildProfile::Ci => "ci",
-//RS             BuildProfile::Named { name, .. } => name,
-//RS             BuildProfile::Small => "small",
-//RS             BuildProfile::NoOs => "no-os",
-//RS         }
-//RS     }
-//RS 
-//RS     pub(crate) fn cache_tag(&self) -> String {
-//RS         match self {
-//RS             BuildProfile::Default => "default".to_string(),
-//RS             BuildProfile::Fast => "fast".to_string(),
-//RS             BuildProfile::Release => "release".to_string(),
-//RS             BuildProfile::Hardened => "hardened".to_string(),
-//RS             BuildProfile::Debug => "debug".to_string(),
-//RS             BuildProfile::Ci => "ci".to_string(),
-//RS             BuildProfile::Named { name, config } => {
-//RS                 format!("profile:{name};{}", config.settings_tag())
-//RS             }
-//RS             BuildProfile::Small => "small".to_string(),
-//RS             BuildProfile::NoOs => "no-os".to_string(),
-//RS         }
-//RS     }
-//RS 
-//RS     pub(crate) fn config(&self) -> ProfileConfig {
-//RS         match self {
-//RS             BuildProfile::Default => ProfileConfig {
-//RS                 optimize: OptimizeLevel::Basic,
-//RS                 debug_info: false,
-//RS                 codegen_units: None,
-//RS                 small: false,
-//RS                 cross_crate_lto: false,
-//RS                 panic_abort: false,
-//RS                 settings: BTreeMap::new(),
-//RS                 inspect: Default::default(),
-//RS             },
-//RS             BuildProfile::Fast => ProfileConfig {
-//RS                 optimize: OptimizeLevel::None,
-//RS                 debug_info: false,
-//RS                 codegen_units: Some(256),
-//RS                 small: false,
-//RS                 cross_crate_lto: false,
-//RS                 panic_abort: false,
-//RS                 settings: BTreeMap::new(),
-//RS                 inspect: Default::default(),
-//RS             },
-//RS             BuildProfile::Release | BuildProfile::Hardened => ProfileConfig::release(),
-//RS             BuildProfile::Debug => ProfileConfig::debug(),
-//RS             BuildProfile::Ci => ProfileConfig::ci(),
-//RS             BuildProfile::Named { config, .. } => config.clone(),
-//RS             BuildProfile::Small => ProfileConfig {
-//RS                 optimize: OptimizeLevel::Basic,
-//RS                 debug_info: false,
-//RS                 codegen_units: None,
-//RS                 small: true,
-//RS                 cross_crate_lto: false,
-//RS                 panic_abort: true,
-//RS                 settings: BTreeMap::new(),
-//RS                 inspect: Default::default(),
-//RS             },
-//RS             BuildProfile::NoOs => ProfileConfig {
-//RS                 optimize: OptimizeLevel::Basic,
-//RS                 debug_info: false,
-//RS                 codegen_units: None,
-//RS                 small: true,
-//RS                 cross_crate_lto: false,
-//RS                 panic_abort: true,
-//RS                 settings: BTreeMap::new(),
-//RS                 inspect: Default::default(),
-//RS             },
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS pub(crate) fn usage() -> String {
-//RS     usage_in(jet::CLI::HelpOrder::default())
-//RS }
-//RS 
-//RS fn usage_in(order: jet::CLI::HelpOrder) -> String {
-//RS     jet::CLI::usage_page(env!("CARGO_PKG_VERSION"), order)
-//RS }
-//RS 
-//RS /// `jet help --sort frequency|az|za` (D-HELP-SORT1=A, owner spelling `az`
-//RS /// and `za`). Without `--sort`, `jet help` lists the most used commands first.
-//RS fn help_order(jet_argv: &[String]) -> jet::CLI::HelpOrder {
-//RS     if !jet_argv
-//RS         .iter()
-//RS         .any(|arg| arg == "--sort" || arg.starts_with("--sort="))
-//RS     {
-//RS         return jet::CLI::HelpOrder::default();
-//RS     }
-//RS     let value = test_option_value(jet_argv, "--sort").unwrap_or_default();
-//RS     jet::CLI::HelpOrder::parse(&value).unwrap_or_else(|| {
-//RS         crate::cli_error!(
-//RS             @fix "E2104",
-//RS             format!("`{value}` is not a `jet help` order"),
-//RS             format!(
-//RS                 "choose one of {}: `jet help --sort az`",
-//RS                 jet::CLI::HelpOrder::NAMES
-//RS             )
-//RS         );
-//RS         exit(ExitCodes::USAGE);
-//RS     })
-//RS }
-//RS 
-//RS /// #1659 criterion 2: `jet <cmd> --help`/`-h`. Rendered from the same
-//RS /// `jet::CLI` tables and `usage()` text as `jet help` and the man page — not
-//RS /// a hand-duplicated per-command help string.
-//RS fn command_help(cmd: &str) -> String {
-//RS     let bin = jet::Syntax::BINARY_NAME;
-//RS     // A bare group name reaches here only for a non-exhaustive front door
-//RS     // (`os`, `env`, or `db`) — exhaustive groups are handled by normalization.
-//RS     if let Some(group) = jet::CLI::command_group(cmd) {
-//RS         let mut output = format!(
-//RS             "{bin} {cmd} — {}\n\n{}",
-//RS             group.summary,
-//RS             jet::CLI::command_group_usage(cmd)
-//RS         );
-//RS         if cmd == "db" {
-//RS             output.push_str("\nFlags:\n");
-//RS             for (long, help) in jet::CLI::flags_for_command(cmd) {
-//RS                 output.push_str(&format!("  {long:<28} {help}\n"));
-//RS             }
-//RS         }
-//RS         return output;
-//RS     }
-//RS     // A normalized nested-action dispatch word (`publish`, `graph`, …).
-//RS     if let Some((group, action)) = jet::CLI::moved_command(cmd) {
-//RS         let mut lines = String::new();
-//RS         for usage_line in action.usage.lines() {
-//RS             lines.push_str(&format!("  {bin} {} {}\n", group.name, usage_line));
-//RS         }
-//RS         return format!(
-//RS             "{bin} {} {cmd} — {}\n\n{lines}",
-//RS             group.name,
-//RS             jet::CLI::action_help_summary(group.name, action)
-//RS         );
-//RS     }
-//RS     // A canonical flat top-level command: summary, usage, and flags all come
-//RS     // from the live registry. No parsing of a second usage string.
-//RS     let Some(command) = jet::CLI::COMMANDS
-//RS         .iter()
-//RS         .find(|command| command.name == cmd)
-//RS     else {
-//RS         return format!("{bin} {cmd}\n\nRun `{bin} help` to see every command.\n");
-//RS     };
-//RS     let mut output = format!(
-//RS         "{bin} {cmd} — {}\n\n  {}\n",
-//RS         command.summary,
-//RS         jet::CLI::command_usage(cmd),
-//RS     );
-//RS     for (long, help) in jet::CLI::flags_for_command(cmd) {
-//RS         output.push_str(&format!("  {long:<28} {help}\n"));
-//RS     }
-//RS     output
-//RS }
-//RS 
-//RS /// True when `arg` names a Jet source file or project directory (c6vz465 sugar:
-//RS /// `jet <file>` → `jet run <file>`). Unknown bare stems that do not exist are
-//RS /// false so E2101 still fires for typos like `buld`.
-//RS fn looks_like_jet_source(arg: &str) -> bool {
-//RS     let path = Path::new(arg);
-//RS     if path.extension().is_some_and(|e| e == jet::Syntax::FILE_EXT) {
-//RS         return true;
-//RS     }
-//RS     if path.exists() {
-//RS         return path.is_file() || path.is_dir();
-//RS     }
-//RS     Path::new(&format!("{}.{}", arg, jet::Syntax::FILE_EXT)).exists()
-//RS }
-//RS 
-//RS /// U16 (D-JPK-BRIDGE1=A): `nix run nixpkgs#fastfetch` parity.
-//RS ///
-//RS /// Top-level `jet run tool@nixpkgs` is not a Jet source compile; it is the
-//RS /// package-engine path, with the ratified `<package>@<source>` CLI spelling. Lower it
-//RS /// to `jetpack use tool@nixpkgs -- tool`, preserving the offline fixture flags
-//RS /// used by the same provider path and forwarding user args after `--`.
-//RS fn dispatch_nixpkgs_run(raw: &[String], target: &str, sep: Option<usize>) -> Option<i32> {
-//RS     let (package, source) = target.rsplit_once(jet::Syntax::REF_PROVIDER_AT)?;
-//RS     if source != jet::Syntax::REF_SOURCE_NIXPKGS || package.is_empty() {
-//RS         return None;
-//RS     }
-//RS 
-//RS     let before_sep = sep.map_or(raw, |i| &raw[..i]);
-//RS     let mut fwd = vec!["use".to_string(), target.to_string()];
-//RS     let mut command_args = Vec::new();
-//RS     let mut saw_run = false;
-//RS     let mut saw_target = false;
-//RS     let mut i = 0usize;
-//RS     while i < before_sep.len() {
-//RS         let a = &before_sep[i];
-//RS         if !saw_run && a == "run" {
-//RS             saw_run = true;
-//RS             i += 1;
-//RS             continue;
-//RS         }
-//RS         if !saw_target && a == target {
-//RS             saw_target = true;
-//RS             i += 1;
-//RS             continue;
-//RS         }
-//RS         match a.as_str() {
-//RS             "--no-color" | "--offline" => fwd.push(a.clone()),
-//RS             "--fixtures" => {
-//RS                 fwd.push(a.clone());
-//RS                 if let Some(value) = before_sep.get(i + 1) {
-//RS                     fwd.push(value.clone());
-//RS                     i += 1;
-//RS                 }
-//RS             }
-//RS             "--color=never" => fwd.push("--no-color".to_string()),
-//RS             s if s.starts_with("--") => {
-//RS                 emit_cli_report(
-//RS                     "E2102",
-//RS                     format!("`{s}` isn't a flag `jet run …@nixpkgs` understands"),
-//RS                     "this form forwards only package-run flags before `--`; tool arguments go after `--`".to_string(),
-//RS                     format!("write `jet run {package}@nixpkgs -- {s}` to pass it to the tool."),
-//RS                     false,
-//RS                 );
-//RS                 return Some(ExitCodes::USAGE);
-//RS             }
-//RS             other => command_args.push(other.to_string()),
-//RS         }
-//RS         i += 1;
-//RS     }
-//RS 
-//RS     fwd.push("--".to_string());
-//RS     fwd.push(package.to_string());
-//RS     fwd.extend(command_args);
-//RS     if let Some(i) = sep {
-//RS         fwd.extend(raw[i + 1..].iter().cloned());
-//RS     }
-//RS     Some(EngineDispatch::dispatch(
-//RS         jet::Syntax::JETPACK_BINARY_NAME,
-//RS         "use",
-//RS         &fwd,
-//RS     ))
-//RS }
-//RS 
-//RS /// The bare-`jet` greeting (D-DX): friendly, exit 0, not a usage error.
-//RS /// Shown when argv is flags-only with no subcommand (not for a bare `jet` —
-//RS /// that starts the REPL per c6vz465). Its rows are the registry's `headline`
-//RS /// commands in `jet help`'s measured order (#3724).
-//RS fn greeting() -> String {
-//RS     let bin = jet::Syntax::BINARY_NAME;
-//RS     let mut output = format!(
-//RS         "Welcome to {lang}! (v{ver})\n\nGet started:\n",
-//RS         lang = jet::Syntax::LANG_NAME,
-//RS         ver = env!("CARGO_PKG_VERSION"),
-//RS     );
-//RS     for command in jet::CLI::commands_in(jet::CLI::HelpOrder::Frequency)
-//RS         .into_iter()
-//RS         .filter(|command| command.headline)
-//RS     {
-//RS         let invocation = format!("{bin} {}", command.name);
-//RS         output.push_str(&format!("  {invocation:<12} {}\n", command.summary));
-//RS     }
-//RS     let help = format!("{bin} help");
-//RS     output.push_str(&format!("\n  {help:<12} see every command\n"));
-//RS     output
-//RS }
-//RS 
-//RS /// Teach E2101 for an unknown subcommand, with a "did you mean" when one is
-//RS /// close (reusing the edit-distance muscle behind S14 teaching errors).
-//RS // E2101 has the same argv-only boundary as E2102: no Jet source span exists for
-//RS // a command token, so there is no `fix_edits` entry for `jet fix` to apply.
-//RS fn unknown_subcommand(cmd: &str) -> ! {
-//RS     let bin = jet::Syntax::BINARY_NAME;
-//RS     let fix = match jet::CLI::closest_command(cmd) {
-//RS         Some(close) => format!("did you mean `{bin} {close}`? Run `{bin} help` to see them all."),
-//RS         None => format!("run `{bin} help` to see every command."),
-//RS     };
-//RS     emit_cli_report(
-//RS         "E2101",
-//RS         format!("`{cmd}` isn't a {bin} command."),
-//RS         format!("every {bin} run starts with a command like `run`, `check`, or `new`."),
-//RS         fix,
-//RS         false,
-//RS     );
-//RS     exit(ExitCodes::USAGE);
-//RS }
-//RS 
-//RS fn normalize_compiler_alias(raw: &mut Vec<String>, argv0: &str) {
-//RS     let Some(name) = Path::new(argv0).file_name().and_then(|name| name.to_str()) else {
-//RS         return;
-//RS     };
-//RS     let name = name.strip_suffix(".exe").unwrap_or(name);
-//RS     let Some(verb) = (match name {
-//RS         "jet-cc" => Some("cc"),
-//RS         "jet-cxx" | "jet-c++" => Some("c++"),
-//RS         _ => None,
-//RS     }) else {
-//RS         return;
-//RS     };
-//RS     raw.insert(0, verb.to_string());
-//RS }
-//RS 
-//RS fn normalize_frequency_ring_argv(
-//RS     raw: &mut Vec<String>,
-//RS     mode: OutputMode,
-//RS     profile: jet_cli::OutputProfile::OutputProfile,
-//RS ) {
-//RS     if let Some(retired) = jet::CLI::retired_command(raw) {
-//RS         let category = retired.category;
-//RS         let rewrite = retired.rewrite;
-//RS         if category == jet::CLI::RetirementCategory::Semantic {
-//RS             teach_retired(retired, raw, mode.json);
-//RS         }
-//RS         let rewrite = rewrite.expect("rename retirement needs a rewrite rule");
-//RS         let replacement = (retired.fix)(raw);
-//RS         *raw = rewrite(raw);
-//RS         if !mode.json && !mode.quiet {
-//RS             write_status(
-//RS                 profile,
-//RS                 &format!("Notice: `{}` is now `{replacement}`.\n", retired.spelling),
-//RS             );
-//RS         }
-//RS     }
-//RS     let Some(first) = raw.first().map(String::as_str) else {
-//RS         return;
-//RS     };
-//RS     if let Some((group_spec, _)) = jet::CLI::moved_command(first) {
-//RS         let group = group_spec.name;
-//RS         let verb = first;
-//RS         let replacement = format!("jet {group} {}", raw.join(" "));
-//RS         emit_cli_report(
-//RS             "E2101",
-//RS             format!("`{verb}` moved under `jet {group}`."),
-//RS             "infrequent commands live in a named area so daily Jet commands stay easy to scan."
-//RS                 .to_string(),
-//RS             format!("run `{replacement}`."),
-//RS             mode.json,
-//RS         );
-//RS         exit(ExitCodes::USAGE);
-//RS     }
-//RS     let Some(group) = raw.first().cloned() else {
-//RS         return;
-//RS     };
-//RS     // D-CLI-SURFACE3=B: `os` is not exhaustive — jetos's own native verbs
-//RS     // (`check`/`build`/`switch`/…, D-JPK-OSVERB1) stay opaque to this
-//RS     // registry, so bare `jet os` / `jet os help` fall through unchanged to
-//RS     // the real `jet os` dispatcher instead of being hijacked by this
-//RS     // group's (partial) action list.
-//RS     let exhaustive = jet::CLI::command_group(&group)
-//RS         .map(|spec| spec.exhaustive)
-//RS         .unwrap_or(false);
-//RS     if let Some(spec) = jet::CLI::command_group(&group) {
-//RS         // #1659 criterion 2: `--help`/`-h` are real help requests here, not
-//RS         // an unmodeled subword — retiring the E2101 that used to fire for
-//RS         // an exhaustive group help request.
-//RS         let asks_help = if group == "env" {
-//RS             matches!(raw.get(1).map(String::as_str), Some("help"))
-//RS                 || raw.get(1).is_some_and(|a| jet::CLI::is_help_flag(a))
-//RS         } else {
-//RS             raw.len() == 1
-//RS                 || matches!(raw.get(1).map(String::as_str), Some("help"))
-//RS                 || raw.get(1).is_some_and(|a| jet::CLI::is_help_flag(a))
-//RS         };
-//RS         if (exhaustive || group == "env") && asks_help {
-//RS             let help = format!(
-//RS                 "jet {group} — {}\n{}",
-//RS                 spec.summary,
-//RS                 jet::CLI::command_group_usage(&group)
-//RS             );
-//RS             write_renderable(profile, &help);
-//RS             exit(ExitCodes::OK);
-//RS         }
-//RS     }
-//RS     let Some(sub) = raw.get(1).cloned() else {
-//RS         return;
-//RS     };
-//RS     if exhaustive && jet::CLI::nested_command(&group, &sub).is_none() {
-//RS         emit_cli_report(
-//RS             "E2101",
-//RS             format!("`{sub}` isn't a jet {group} command."),
-//RS             format!("jet {group} accepts only commands in its named area."),
-//RS             format!("run `jet {group} help`."),
-//RS             mode.json,
-//RS         );
-//RS         exit(ExitCodes::USAGE);
-//RS     }
-//RS     if let Some((_, action)) = jet::CLI::nested_command(&group, &sub) {
-//RS         if !action.handler.keeps_group() {
-//RS             raw[0] = action.handler.dispatch_word().to_string();
-//RS             raw.remove(1);
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn run_project_parts(raw: &[String], profile: jet_cli::OutputProfile::OutputProfile) -> ! {
-//RS     let skipped_only = raw.iter().any(|arg| arg == "--skipped");
-//RS     let root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-//RS     let (report, failures) = jet::ProjectParts::scan_with_diagnostics(&root, &[]);
-//RS     if let Some(failure) = failures.iter().find(|failure| failure.authority) {
-//RS         emit_cli_value(failure.problem.clone(), profile.machine_enabled());
-//RS         exit(ExitCodes::USER_ERROR);
-//RS     }
-//RS     let parts = report
-//RS         .parts
-//RS         .iter()
-//RS         .filter(|part| !skipped_only || part.state == jet::ProjectParts::ProjectPartState::Skipped)
-//RS         .collect::<Vec<_>>();
-//RS     let source_files = if skipped_only {
-//RS         Vec::new()
-//RS     } else {
-//RS         report.source_files.iter().collect::<Vec<_>>()
-//RS     };
-//RS     let relative = |path: &Path| {
-//RS         path.strip_prefix(&root)
-//RS             .unwrap_or(path)
-//RS             .to_string_lossy()
-//RS             .replace('\\', "/")
-//RS     };
-//RS     let source_name = |path: &Path| {
-//RS         let mut name = relative(path);
-//RS         let extension = format!(".{}", jet::Syntax::FILE_EXT);
-//RS         if name.ends_with(&extension) {
-//RS             name.truncate(name.len() - extension.len());
-//RS         }
-//RS         format!(
-//RS             "{}{}",
-//RS             jet::Syntax::PROJECT_IMPORT_PREFIX,
-//RS             name.replace('/', ".")
-//RS         )
-//RS     };
-//RS     if profile.machine_enabled() {
-//RS         let mut part_values = Vec::with_capacity(parts.len() + source_files.len());
-//RS         part_values.extend(parts.iter().map(|part| {
-//RS             StatusValue::object(
-//RS                 StatusFields::new()
-//RS                     .with("name", part.canonical_name())
-//RS                     .with("path", relative(&part.path))
-//RS                     .with("state", part.state.name()),
-//RS             )
-//RS         }));
-//RS         part_values.extend(source_files.iter().map(|path| {
-//RS             StatusValue::object(
-//RS                 StatusFields::new()
-//RS                     .with("name", source_name(path))
-//RS                     .with("path", relative(path))
-//RS                     .with("state", "automatic"),
-//RS             )
-//RS         }));
-//RS         let conflict_values = report.conflicts.iter().map(|conflict| {
-//RS             StatusValue::object(
-//RS                 StatusFields::new()
-//RS                     .with("name", conflict.canonical_name())
-//RS                     .with(
-//RS                         "paths",
-//RS                         StatusValue::array(
-//RS                             conflict
-//RS                                 .paths
-//RS                                 .iter()
-//RS                                 .map(|path| StatusValue::from(relative(path))),
-//RS                         ),
-//RS                     ),
-//RS             )
-//RS         });
-//RS         let payload = render_status(
-//RS             "inspect.parts",
-//RS             true,
-//RS             StatusFields::new()
-//RS                 .with("parts", StatusValue::array(part_values))
-//RS                 .with("conflicts", StatusValue::array(conflict_values)),
-//RS         );
-//RS         write_machine(profile, &format!("{payload}\n"));
-//RS     } else if profile.unicode_enabled() {
-//RS         let columns = vec![
-//RS             jet_cli::AdaptiveTable::TableColumn::new(
-//RS                 "state",
-//RS                 jet_cli::AdaptiveTable::TableCellKind::Text,
-//RS             ),
-//RS             jet_cli::AdaptiveTable::TableColumn::new(
-//RS                 "name",
-//RS                 jet_cli::AdaptiveTable::TableCellKind::Text,
-//RS             ),
-//RS             jet_cli::AdaptiveTable::TableColumn::new(
-//RS                 "path",
-//RS                 jet_cli::AdaptiveTable::TableCellKind::Text,
-//RS             ),
-//RS         ];
-//RS         let mut rows = Vec::with_capacity(parts.len() + source_files.len());
-//RS         rows.extend(parts.iter().map(|part| {
-//RS             jet_cli::AdaptiveTable::TableRow::new(vec![
-//RS                 jet_cli::AdaptiveTable::TableCell::text(part.state.name()),
-//RS                 jet_cli::AdaptiveTable::TableCell::text(part.canonical_name()),
-//RS                 jet_cli::AdaptiveTable::TableCell::text(relative(&part.path)),
-//RS             ])
-//RS         }));
-//RS         rows.extend(source_files.iter().map(|path| {
-//RS             jet_cli::AdaptiveTable::TableRow::new(vec![
-//RS                 jet_cli::AdaptiveTable::TableCell::text("automatic"),
-//RS                 jet_cli::AdaptiveTable::TableCell::text(source_name(path)),
-//RS                 jet_cli::AdaptiveTable::TableCell::text(relative(path)),
-//RS             ])
-//RS         }));
-//RS         let table = jet_cli::AdaptiveTable::AdaptiveTable::new(columns, rows);
-//RS         if let Some(rendered) = table.layout(&profile).render() {
-//RS             write_renderable(profile, &format!("{rendered}\n"));
-//RS         }
-//RS         for conflict in &report.conflicts {
-//RS             let rendered = jet::render_diagnostics("", "", &[conflict.diagnostic(&root, None)]);
-//RS             write_status(profile, &rendered);
-//RS         }
-//RS     } else {
-//RS         let mut rendered = String::new();
-//RS         for part in parts {
-//RS             rendered.push_str(&format!(
-//RS                 "{:<9} {:<24} {}\n",
-//RS                 part.state.name(),
-//RS                 part.canonical_name(),
-//RS                 relative(&part.path)
-//RS             ));
-//RS         }
-//RS         for path in source_files {
-//RS             rendered.push_str(&format!(
-//RS                 "{:<9} {:<24} {}\n",
-//RS                 "automatic",
-//RS                 source_name(path),
-//RS                 relative(path)
-//RS             ));
-//RS         }
-//RS         write_renderable(profile, &rendered);
-//RS         for conflict in &report.conflicts {
-//RS             let rendered = jet::render_diagnostics("", "", &[conflict.diagnostic(&root, None)]);
-//RS             write_status(profile, &rendered);
-//RS         }
-//RS     }
-//RS     exit(if report.conflicts.is_empty() {
-//RS         ExitCodes::OK
-//RS     } else {
-//RS         ExitCodes::USER_ERROR
-//RS     });
-//RS }
-//RS 
-//RS /// D-ONCE-RETIRE1=C: semantic retirement rows hard-error with their registry
-//RS /// owned fix. Pure rename rows are rewritten by the caller before dispatch.
-//RS fn teach_retired(spec: &jet::CLI::RetiredCommandSpec, raw: &[String], json: bool) -> ! {
-//RS     debug_assert_eq!(spec.category, jet::CLI::RetirementCategory::Semantic);
-//RS     emit_cli_report(
-//RS         spec.error_code,
-//RS         format!("`{}` isn't a jet command", spec.spelling),
-//RS         spec.why.to_string(),
-//RS         format!("run `{}`", (spec.fix)(raw)),
-//RS         json,
-//RS     );
-//RS     exit(ExitCodes::USAGE);
-//RS }
-//RS 
-//RS /// Validate every `--flag` in argv against the registry. The first unknown flag
-//RS /// teaches E2102 (with a suggestion) and exits usage.
-//RS ///
-//RS /// `subcmd` is the subcommand being run (e.g. `"run"`, `"test"`). When the
-//RS /// subcommand can forward args to a program, the Fix line also teaches the `--`
-//RS /// separator form (D-CLI1=A).
-//RS fn check_flags(raw: &[String], subcmd: &str) {
-//RS     let bin = jet::Syntax::BINARY_NAME;
-//RS     let external_fmt = subcmd == "fmt"
-//RS         && raw
-//RS             .iter()
-//RS             .any(|arg| arg == jet::Syntax::FMT_FLAG_LANG || arg.starts_with("--lang="));
-//RS     // E2102 is an argv diagnostic, not a Jet-source diagnostic: there is no
-//RS     // source file and byte span for `jet fix` to apply, so its flag suggestion
-//RS     // remains prose-only until the CLI report gains an argv edit surface.
-//RS     for a in raw {
-//RS         if !a.starts_with("--") || a == "--" {
-//RS             continue;
-//RS         }
-//RS         if jet::CLI::is_known_flag(a) {
-//RS             continue;
-//RS         }
-//RS         let head = a.split('=').next().unwrap_or(a);
-//RS         if external_fmt
-//RS             && matches!(
-//RS                 head,
-//RS                 "--trust"
-//RS                     | "--offline"
-//RS                     | "--online"
-//RS                     | "--no-color"
-//RS                     | "--json"
-//RS                     | "--flake"
-//RS                     | "--pure"
-//RS                     | "--yes"
-//RS                     | "--fixtures"
-//RS                     | "--preset"
-//RS                     | "--env"
-//RS             )
-//RS         {
-//RS             continue;
-//RS         }
-//RS         if head == "--emit-rust" {
-//RS             emit_cli_report(
-//RS                 "E2102",
-//RS                 format!("`--emit-rust` isn't a flag {bin} understands"),
-//RS                 "generated output belongs to the `emit` command".to_string(),
-//RS                 format!("run `{bin} emit --rust <file.{}>`", jet::Syntax::FILE_EXT),
-//RS                 false,
-//RS             );
-//RS             exit(ExitCodes::USAGE);
-//RS         }
-//RS         let fix = match jet::CLI::closest_flag(head) {
-//RS             Some(close) if matches!(subcmd, "run" | "test") => format!(
-//RS                 "did you mean `{close}`? Or use `{bin} {subcmd} <file> -- {head}` to pass it to your program"
-//RS             ),
-//RS             Some(close) if subcmd == jet::CLI::JOBS_COMMAND => format!(
-//RS                 "did you mean `{close}`? Or write it after the job name, `{bin} {subcmd} <name> {head}`, to pass it to the job"
-//RS             ),
-//RS             Some(close) => format!("did you mean `{close}`? (run `{bin} help` for the flags)"),
-//RS             None if matches!(subcmd, "run" | "test") => format!(
-//RS                 "use `{bin} {subcmd} <file> -- {head}` to pass this flag to your program"
-//RS             ),
-//RS             None if subcmd == jet::CLI::JOBS_COMMAND => format!(
-//RS                 "write it after the job name, `{bin} {subcmd} <name> {head}`, to pass it to the job"
-//RS             ),
-//RS             None => format!("drop the flag, or run `{bin} help` to see the flags"),
-//RS         };
-//RS         emit_cli_report(
-//RS             "E2102",
-//RS             format!("`{head}` isn't a flag {bin} understands"),
-//RS             format!("flags before `--` belong to {bin}; everything after `--` is forwarded to your program"),
-//RS             fix,
-//RS             false,
-//RS         );
-//RS         exit(ExitCodes::USAGE);
-//RS     }
-//RS }
-//RS 
-//RS fn reject_retired_gate_flags(argv: &[String], json: bool) {
-//RS     let Some(retirement) = jet::Syntax::retirement("allow-impure") else {
-//RS         return;
-//RS     };
-//RS     if !argv.iter().any(|arg| arg == retirement.retired) {
-//RS         return;
-//RS     }
-//RS     emit_cli_report(
-//RS         retirement.code.unwrap_or("E1343"),
-//RS         format!("`{}` is retired", retirement.retired),
-//RS         "the old boolean changed which audited escapes were checked and is no longer accepted"
-//RS             .to_string(),
-//RS         format!("use `{}`", retirement.canonical),
-//RS         json,
-//RS     );
-//RS     exit(ExitCodes::USAGE);
-//RS }
-//RS /// D-RIGHTS-CLI1=B: one invocation spelling for authority. The values are
-//RS /// canonical effect roots or leaves; old per-effect flags are retired rather
-//RS /// than silently interpreted as a second policy language.
-//RS fn reject_retired_authority_flags(argv: &[String], json: bool) {
-//RS     for argument in argv {
-//RS         let head = argument.split('=').next().unwrap_or(argument);
-//RS         let Some((kind, effect)) = BuildEffect::ALL.into_iter().find_map(|effect| {
-//RS             let allow = format!("--allow-{}", effect.flag());
-//RS             let deny = format!("--deny-{}", effect.flag());
-//RS             if head == allow {
-//RS                 Some(("allow", effect))
-//RS             } else if head == deny {
-//RS                 Some(("deny", effect))
-//RS             } else {
-//RS                 None
-//RS             }
-//RS         }) else {
-//RS             continue;
-//RS         };
-//RS         emit_cli_report(
-//RS             "E2102",
-//RS             format!("`{head}` is retired"),
-//RS             "authority grants and denials use one comma-separated rights surface".to_string(),
-//RS             format!("use `--{kind}={}`", effect.name()),
-//RS             json,
-//RS         );
-//RS         exit(ExitCodes::USAGE);
-//RS     }
-//RS }
-//RS 
-//RS /// Parse the canonical invocation authority rows once at the host boundary.
-//RS /// Runtime REPLs keep roots or leaves; native build policy receives the same
-//RS /// names and projects only the ten build-capability roots below.
-//RS fn parse_authority_flags(argv: &[String], json: bool) -> (Vec<String>, Vec<String>) {
-//RS     let mut allow = Vec::new();
-//RS     let mut deny = Vec::new();
-//RS     let mut index = 0;
-//RS     while index < argv.len() {
-//RS         let argument = argv[index].as_str();
-//RS         let (kind, inline) = if let Some(value) = argument.strip_prefix("--allow=") {
-//RS             (Some("allow"), Some(value))
-//RS         } else if let Some(value) = argument.strip_prefix("--deny=") {
-//RS             (Some("deny"), Some(value))
-//RS         } else if argument == "--allow" {
-//RS             (Some("allow"), None)
-//RS         } else if argument == "--deny" {
-//RS             (Some("deny"), None)
-//RS         } else {
-//RS             (None, None)
-//RS         };
-//RS         let Some(kind) = kind else {
-//RS             index += 1;
-//RS             continue;
-//RS         };
-//RS         let value = match inline {
-//RS             Some(value) => value.to_string(),
-//RS             None => {
-//RS                 let Some(value) = argv.get(index + 1).filter(|value| !value.starts_with('-'))
-//RS                 else {
-//RS                     emit_cli_report(
-//RS                         "E2104",
-//RS                         format!("`--{kind}` needs a comma-separated rights value"),
-//RS                         "authority is read before the program's own arguments".to_string(),
-//RS                         format!("use `--{kind}=FS.Read,Time`"),
-//RS                         json,
-//RS                     );
-//RS                     exit(ExitCodes::USAGE);
-//RS                 };
-//RS                 index += 1;
-//RS                 value.clone()
-//RS             }
-//RS         };
-//RS         if value.trim().is_empty() {
-//RS             emit_cli_report(
-//RS                 "E2104",
-//RS                 format!("`--{kind}` needs a non-empty rights value"),
-//RS                 "authority names one or more effect roots or leaves".to_string(),
-//RS                 format!("use `--{kind}=FS.Read,Time`"),
-//RS                 json,
-//RS             );
-//RS             exit(ExitCodes::USAGE);
-//RS         }
-//RS         for raw_right in value.split(',') {
-//RS             let right = raw_right.trim();
-//RS             let Some(canonical) = jet_foundation::Authority::parse_right(right) else {
-//RS                 emit_cli_report(
-//RS                     "E2104",
-//RS                     format!("unknown authority right `{right}`"),
-//RS                     "authority names match the canonical effect roots and leaves".to_string(),
-//RS                     format!("use `--{kind}=FS.Read,Time`"),
-//RS                     json,
-//RS                 );
-//RS                 exit(ExitCodes::USAGE);
-//RS             };
-//RS             let rights = if kind == "allow" {
-//RS                 &mut allow
-//RS             } else {
-//RS                 &mut deny
-//RS             };
-//RS             if !rights.iter().any(|existing| existing == &canonical) {
-//RS                 rights.push(canonical);
-//RS             }
-//RS         }
-//RS         index += 1;
-//RS     }
-//RS     if let Some(right) = allow
-//RS         .iter()
-//RS         .find(|right| deny.iter().any(|denied| denied == *right))
-//RS     {
-//RS         emit_cli_report(
-//RS             "E2102",
-//RS             format!("authority right `{right}` is both allowed and denied"),
-//RS             "the same exact effective right cannot be granted and denied in one invocation"
-//RS                 .to_string(),
-//RS             format!("remove one of `--allow={right}` or `--deny={right}`"),
-//RS             json,
-//RS         );
-//RS         exit(ExitCodes::USAGE);
-//RS     }
-//RS     (allow, deny)
-//RS }
-//RS 
-//RS fn build_grants_from_authority(allow: &[String]) -> Vec<String> {
-//RS     let mut grants = BTreeSet::new();
-//RS     for right in allow {
-//RS         let root = jet_foundation::Authority::root(right);
-//RS         if let Some(effect) = BuildEffect::parse(root) {
-//RS             grants.insert(effect.flag().to_string());
-//RS         }
-//RS     }
-//RS     grants.into_iter().collect()
-//RS }
-//RS 
-//RS fn named_record_for_command(argv: &[String], command: &str, json: bool) -> Option<String> {
-//RS     let mut name = None;
-//RS     for arg in argv.iter().skip(1) {
-//RS         if arg == "--record" {
-//RS             crate::cli_error!(
-//RS                 @fix "E2104",
-//RS                 "`--record` needs a closed `=NAME` value",
-//RS                 "write `--record=NAME` on `run`, `dev`, `test`, or `debug`"
-//RS             );
-//RS             exit(ExitCodes::USAGE);
-//RS         }
-//RS         let Some(parsed) = crate::ProveReplay::parse_record_flag(arg) else {
-//RS             continue;
-//RS         };
-//RS         if !matches!(command, "run" | "dev" | "test" | "debug") {
-//RS             crate::cli_error!(
-//RS                 @fix "E2102",
-//RS                 format!("`--record` is not valid with `jet {command}`"),
-//RS                 "use `--record=NAME` on `run`, `dev`, `test`, or `debug`"
-//RS             );
-//RS             exit(ExitCodes::USAGE);
-//RS         }
-//RS         match parsed {
-//RS             Ok(value) => name = Some(value),
-//RS             Err(message) => {
-//RS                 crate::ProveReplay::emit_diag(
-//RS                     "E2104",
-//RS                     "invalid replay name",
-//RS                     &message,
-//RS                     "write `--record=NAME` with letters, digits, `-`, or `_`",
-//RS                     json,
-//RS                 );
-//RS                 exit(ExitCodes::USAGE);
-//RS             }
-//RS         }
-//RS     }
-//RS     name
-//RS }
-//RS 
-//RS fn named_debug_replay(argv: &[String], command: &str, json: bool) -> Option<String> {
-//RS     if command != "debug" {
-//RS         return None;
-//RS     }
-//RS     let mut path = None;
-//RS     for arg in argv.iter().skip(1) {
-//RS         if arg == "--replay" {
-//RS             crate::cli_error!(
-//RS                 @fix "E2104",
-//RS                 "`--replay` needs a closed `=NAME` value",
-//RS                 "write `--replay=NAME` on `jet debug`"
-//RS             );
-//RS             exit(ExitCodes::USAGE);
-//RS         }
-//RS         let Some(parsed) = crate::ProveReplay::parse_closed_replay_flag(arg) else {
-//RS             continue;
-//RS         };
-//RS         match parsed {
-//RS             Ok(value) => path = Some(value),
-//RS             Err(message) => {
-//RS                 crate::ProveReplay::emit_diag(
-//RS                     "E2104",
-//RS                     "invalid replay name",
-//RS                     &message,
-//RS                     "write `--replay=NAME` with letters, digits, `-`, or `_`",
-//RS                     json,
-//RS                 );
-//RS                 exit(ExitCodes::USAGE);
-//RS             }
-//RS         }
-//RS     }
-//RS     path
-//RS }
-//RS 
-//RS fn parse_gate_flags(argv: &[String], json: bool) -> jet::Policy::GateSet {
-//RS     let mut gates = jet::Policy::GateSet::default();
-//RS     let mut index = 0;
-//RS     while index < argv.len() {
-//RS         let argument = &argv[index];
-//RS         let spec = if let Some(spec) = argument.strip_prefix("--gate=") {
-//RS             Some(spec.to_string())
-//RS         } else if argument == "--gate" {
-//RS             match argv.get(index + 1) {
-//RS                 Some(spec) if !spec.starts_with('-') => {
-//RS                     index += 1;
-//RS                     Some(spec.clone())
-//RS                 }
-//RS                 _ => None,
-//RS             }
-//RS         } else {
-//RS             None
-//RS         };
-//RS         if let Some(spec) = spec {
-//RS             match jet::Policy::GateSet::parse(&spec) {
-//RS                 Ok(key) => gates.insert(key),
-//RS                 Err(detail) => {
-//RS                     emit_cli_report(
-//RS                         "E2104",
-//RS                         "invalid audited gate".to_string(),
-//RS                         detail,
-//RS                         "use `--gate unsafe=allow`, `--gate impure=allow`, or `--gate nondeterministic=allow`".to_string(),
-//RS                         json,
-//RS                     );
-//RS                     exit(ExitCodes::USAGE);
-//RS                 }
-//RS             }
-//RS         } else if argument == "--gate" {
-//RS             emit_cli_report(
-//RS                 "E2104",
-//RS                 "`--gate` needs a gate assignment".to_string(),
-//RS                 "an invocation gate names one audited escape and its allow value".to_string(),
-//RS                 "use `--gate name=allow`".to_string(),
-//RS                 json,
-//RS             );
-//RS             exit(ExitCodes::USAGE);
-//RS         }
-//RS         index += 1;
-//RS     }
-//RS     gates
-//RS }
-//RS 
-//RS fn parse_setting_overrides(argv: &[String], json: bool) -> BTreeMap<String, String> {
-//RS     let mut settings = BTreeMap::new();
-//RS     let mut index = 0;
-//RS     while index < argv.len() {
-//RS         let argument = &argv[index];
-//RS         let raw = if let Some(value) = argument.strip_prefix("--set=") {
-//RS             value.to_string()
-//RS         } else if argument == "--set" {
-//RS             match argv.get(index + 1) {
-//RS                 Some(value) => {
-//RS                     index += 1;
-//RS                     value.clone()
-//RS                 }
-//RS                 None => {
-//RS                     emit_cli_report(
-//RS                         "E2104",
-//RS                         "`--set` needs a key=value assignment".to_string(),
-//RS                         "a typed package setting override names one declared key and its value"
-//RS                             .to_string(),
-//RS                         "use `--set key=value`".to_string(),
-//RS                         json,
-//RS                     );
-//RS                     exit(ExitCodes::USAGE);
-//RS                 }
-//RS             }
-//RS         } else {
-//RS             index += 1;
-//RS             continue;
-//RS         };
-//RS         let Some((key, value)) = raw.split_once('=') else {
-//RS             emit_cli_report(
-//RS                 "E2104",
-//RS                 "`--set` needs a key=value assignment".to_string(),
-//RS                 "a typed package setting override names one declared key and its value".to_string(),
-//RS                 "use `--set key=value`".to_string(),
-//RS                 json,
-//RS             );
-//RS             exit(ExitCodes::USAGE);
-//RS         };
-//RS         let key = key.trim();
-//RS         if key.is_empty() {
-//RS             emit_cli_report(
-//RS                 "E2104",
-//RS                 "`--set` needs a non-empty key".to_string(),
-//RS                 "the compiler must be able to resolve one declared setting before it parses the value".to_string(),
-//RS                 "use `--set key=value` with a declared key".to_string(),
-//RS                 json,
-//RS             );
-//RS             exit(ExitCodes::USAGE);
-//RS         }
-//RS         if settings
-//RS             .insert(key.to_string(), value.trim().to_string())
-//RS             .is_some()
-//RS         {
-//RS             emit_cli_report(
-//RS                 "E2104",
-//RS                 format!("setting `{key}` is assigned more than once"),
-//RS                 "one invocation must contribute one unambiguous value for each declared setting"
-//RS                     .to_string(),
-//RS                 "remove the duplicate `--set` assignment".to_string(),
-//RS                 json,
-//RS             );
-//RS             exit(ExitCodes::USAGE);
-//RS         }
-//RS         index += 1;
-//RS     }
-//RS     settings
-//RS }
-//RS /// Find an external `jet-<cmd>` executable on PATH (D-DX5).
-//RS fn find_external(cmd: &str) -> Option<PathBuf> {
-//RS     // Keep the derived executable name to one safe path component. Otherwise
-//RS     // separators in an unknown command can escape the PATH entry below.
-//RS     if cmd.is_empty()
-//RS         || matches!(cmd, "." | "..")
-//RS         || cmd
-//RS             .chars()
-//RS             .any(|character| character.is_control() || matches!(character, '/' | '\\' | ':'))
-//RS     {
-//RS         return None;
-//RS     }
-//RS     let exe = format!("{}-{}", jet::Syntax::BINARY_NAME, cmd);
-//RS     let path = std::env::var_os("PATH")?;
-//RS     for dir in std::env::split_paths(&path) {
-//RS         let candidate = dir.join(&exe);
-//RS         if candidate.is_file() && is_executable(&candidate) {
-//RS             return Some(candidate);
-//RS         }
-//RS     }
-//RS     None
-//RS }
-//RS 
-//RS /// `jet ?` dispatch (D-FE-HELP1=D). Bare `jet ?` on a TTY opens the
-//RS /// interactive hybrid help app; `jet ? <query>` and any non-TTY use are
-//RS /// non-interactive — the static full palette (no args) or the best matches
-//RS /// for `<query>` (args), printed once and exited. Named recording/replay
-//RS /// requests deliberately use the headless reducer, so their artifacts and
-//RS /// output never depend on a live terminal.
-//RS fn run_question_mark(args: &[String], output: &OutputAdapterHost) -> ! {
-//RS     let profile = output.profile();
-//RS     let color = profile.ansi_enabled();
-//RS     let mut query_args = Vec::new();
-//RS     let mut record_name = None;
-//RS     let mut replay_name = None;
-//RS     let mut skip_value = false;
-//RS     let project_root = jet::build_project_root(".").unwrap_or_else(|_| {
-//RS         std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
-//RS     });
-//RS     let store =
-//RS         jet_cli::Recording::RecordingStore::new(project_root.join(".jet").join("replays"));
-//RS     for arg in args {
-//RS         if skip_value {
-//RS             skip_value = false;
-//RS             continue;
-//RS         }
-//RS         if arg == "--color" {
-//RS             skip_value = true;
-//RS             continue;
-//RS         }
-//RS         if arg == "--record" {
-//RS             question_mark_recording_error(
-//RS                 ExitCodes::USAGE,
-//RS                 "E2104",
-//RS                 "`--record` needs a closed `=NAME` value",
-//RS                 "use `jet ? --record=NAME`",
-//RS                 profile.machine_enabled(),
-//RS             );
-//RS         }
-//RS         if let Some(name) = arg.strip_prefix("--record=") {
-//RS             if record_name.is_some() {
-//RS                 question_mark_recording_error(
-//RS                     ExitCodes::USAGE,
-//RS                     "E2104",
-//RS                     "`jet ?` accepts only one `--record=NAME` request",
-//RS                     "remove the duplicate recording flag",
-//RS                     profile.machine_enabled(),
-//RS                 );
-//RS             }
-//RS             if let Err(error) = store.path_for_name(name) {
-//RS                 question_mark_recording_error(
-//RS                     ExitCodes::USAGE,
-//RS                     "E2104",
-//RS                     format!("invalid recording name: {error}"),
-//RS                     "use letters, digits, `-`, or `_` in NAME",
-//RS                     profile.machine_enabled(),
-//RS                 );
-//RS             }
-//RS             record_name = Some(name.to_string());
-//RS             continue;
-//RS         }
-//RS         if arg == "--replay" {
-//RS             question_mark_recording_error(
-//RS                 ExitCodes::USAGE,
-//RS                 "E2104",
-//RS                 "`--replay` needs a closed `=NAME` value",
-//RS                 "use `jet ? --replay=NAME`",
-//RS                 profile.machine_enabled(),
-//RS             );
-//RS         }
-//RS         if let Some(name) = arg.strip_prefix("--replay=") {
-//RS             if replay_name.is_some() {
-//RS                 question_mark_recording_error(
-//RS                     ExitCodes::USAGE,
-//RS                     "E2104",
-//RS                     "`jet ?` accepts only one `--replay=NAME` request",
-//RS                     "remove the duplicate replay flag",
-//RS                     profile.machine_enabled(),
-//RS                 );
-//RS             }
-//RS             if let Err(error) = store.path_for_name(name) {
-//RS                 question_mark_recording_error(
-//RS                     ExitCodes::USAGE,
-//RS                     "E2104",
-//RS                     format!("invalid replay name: {error}"),
-//RS                     "use letters, digits, `-`, or `_` in NAME",
-//RS                     profile.machine_enabled(),
-//RS                 );
-//RS             }
-//RS             replay_name = Some(name.to_string());
-//RS             continue;
-//RS         }
-//RS         if !arg.starts_with("--color=") && arg != "--json" && arg != "--quiet" {
-//RS             query_args.push(arg.as_str());
-//RS         }
-//RS     }
-//RS     if record_name.is_some() && replay_name.is_some() {
-//RS         question_mark_recording_error(
-//RS             ExitCodes::USAGE,
-//RS             "E2104",
-//RS             "`jet ?` cannot record and replay in the same request",
-//RS             "choose either `--record=NAME` or `--replay=NAME`",
-//RS             profile.machine_enabled(),
-//RS         );
-//RS     }
-//RS     if (record_name.is_some() || replay_name.is_some()) && !query_args.is_empty() {
-//RS         question_mark_recording_error(
-//RS             ExitCodes::USAGE,
-//RS             "E2104",
-//RS             "a `jet ?` recording request cannot include a help query",
-//RS             "remove the query, or run `jet ? <query>` without recording",
-//RS             profile.machine_enabled(),
-//RS         );
-//RS     }
-//RS     if let Some(name) = record_name {
-//RS         run_question_mark_recording(&store, &name, profile);
-//RS     }
-//RS     if let Some(name) = replay_name {
-//RS         run_question_mark_replay(&store, &name, profile);
-//RS     }
-//RS     if !query_args.is_empty() {
-//RS         let query = query_args.join(" ");
-//RS         let rendered = jet::Help::run_query(&query, color);
-//RS         write_renderable(profile, &rendered);
-//RS         exit(ExitCodes::OK);
-//RS     }
-//RS     if output.help_interactive() && profile.human_enabled() {
-//RS         jet::Help::Interactive::run(color).ok();
-//RS         exit(ExitCodes::OK);
-//RS     }
-//RS     let rendered = jet::Help::Render::render_categorized(
-//RS         &jet::Help::build_index(),
-//RS         0,
-//RS         false,
-//RS         None,
-//RS         profile.width(),
-//RS         color,
-//RS         None,
-//RS     );
-//RS     write_renderable(profile, &format!("{rendered}\n"));
-//RS     exit(ExitCodes::OK);
-//RS }
-//RS 
-//RS const QUESTION_MARK_RECORDING_HEIGHT: usize = 24;
-//RS 
-//RS fn question_mark_recording_error(
-//RS     status: i32,
-//RS     code: &str,
-//RS     what: impl Into<String>,
-//RS     fix: impl Into<String>,
-//RS     json: bool,
-//RS ) -> ! {
-//RS     emit_cli_report(
-//RS         code,
-//RS         what.into(),
-//RS         "the requested help recording cannot be used".to_string(),
-//RS         fix.into(),
-//RS         json,
-//RS     );
-//RS     exit(status);
-//RS }
-//RS 
-//RS fn question_mark_recording_identity(
-//RS     profile: jet_cli::OutputProfile::OutputProfile,
-//RS ) -> Result<jet_cli::Recording::RecordingIdentity, String> {
-//RS     let width = u16::try_from(profile.width())
-//RS         .map_err(|_| format!("output width {} exceeds recording limits", profile.width()))?;
-//RS     jet_cli::Recording::RecordingIdentity::new(
-//RS         "?",
-//RS         width,
-//RS         u16::try_from(QUESTION_MARK_RECORDING_HEIGHT)
-//RS             .expect("question-mark recording height fits in u16"),
-//RS         profile.ansi_enabled(),
-//RS     )
-//RS     .map_err(|error| error.to_string())
-//RS }
-//RS 
-//RS fn run_question_mark_recording(
-//RS     store: &jet_cli::Recording::RecordingStore,
-//RS     name: &str,
-//RS     profile: jet_cli::OutputProfile::OutputProfile,
-//RS ) -> ! {
-//RS     let identity = match question_mark_recording_identity(profile) {
-//RS         Ok(identity) => identity,
-//RS         Err(error) => question_mark_recording_error(
-//RS             ExitCodes::USAGE,
-//RS             "E2104",
-//RS             format!("cannot create help recording identity: {error}"),
-//RS             "use a terminal width within the recording limits",
-//RS             profile.machine_enabled(),
-//RS         ),
-//RS     };
-//RS     let mut replay = match jet_cli::Headless::HeadlessReplay::new(identity) {
-//RS         Ok(replay) => replay,
-// END-PORT-PENDING 2029 Source/main.rs:1-1800
+// Rust: Source/main.rs:1
+// CLI driver: compiler/runner/tooling/package commands. Generated backend failures
+// remain internal compiler errors rather than attributing foreign-tool voice to users.
+use std.fs as fs
+use std.io as io
+use std.env as env
+use std.process.[exit, Command]
+use jet.Diagnostics.[Diagnostic, ReportPath, Severity, ColorChoice]
+use jet.Diagnostics as Diagnostics
+use jet.ExitCodes as ExitCodes
+use jet.Syntax as Syntax
+use jet.SHA256 as SHA256
+use jet.ReceiptStore as ReceiptStore
+use jet.Package as Package
+use jet.CLI as CLI
+use jet.Policy as Policy
+use jet.ProjectParts as ProjectParts
+use jet.Help as Help
+use jet.[render_all_colored, render_diagnostics, build_project_root]
+use jet_foundation.BuildEffect
+use jet_foundation.Authority as Authority
+use jet_foundation.Report.[render_status, render_status_with_reports, StatusFields, StatusValue]
+use jet_cli.OutputProfile.[OutputProfile]
+use jet_cli.AdaptiveTable.[AdaptiveTable, TableColumn, TableCellKind, TableRow, TableCell]
+use jet_cli.Recording.[RecordingStore, RecordingIdentity]
+use jet_cli.Headless.[HeadlessReplay]
+// Rust: Source/main.rs:26
+// GATE #4494: install the canonical resident program allocator once at executable startup.
+#GlobalAllocator
+JET_HOST_ALLOCATOR :: jet.program_allocator.JetHostProgramAllocator
+// Rust: Source/main.rs:33
+use jet_cli.CheckReceipt as CheckReceipt
+use jet_cli.CmdBackendScaffold as CmdBackendScaffold
+use jet_cli.CmdBudget as CmdBudget
+use jet_cli.CmdCodemod as CmdCodemod
+use jet_cli.CmdCompile as CmdCompile
+use jet_cli.CmdConsoleHost as CmdConsoleHost
+use jet_cli.CmdDb as CmdDb
+use jet_cli.CmdDevTools as CmdDevTools
+use jet_cli.CmdDoc as CmdDoc
+use jet_cli.CmdDossier as CmdDossier
+use jet_cli.CmdExec as CmdExec
+use jet_cli.CmdExpand as CmdExpand
+use jet_cli.CmdFill as CmdFill
+use jet_cli.CmdFlash as CmdFlash
+use jet_cli.CmdGates as CmdGates
+use jet_cli.CmdGc as CmdGc
+use jet_cli.CmdImpact as CmdImpact
+use jet_cli.CmdImport as CmdImport
+use jet_cli.CmdInspect as CmdInspect
+use jet_cli.CmdLearn as CmdLearn
+use jet_cli.CmdLocalApp as CmdLocalApp
+use jet_cli.CmdMemory as CmdMemory
+use jet_cli.CmdMigration as CmdMigration
+use jet_cli.CmdNotebook as CmdNotebook
+use jet_cli.CmdPackage as CmdPackage
+use jet_cli.CmdPerf as CmdPerf
+use jet_cli.CmdPkg as CmdPkg
+use jet_cli.CmdProve as CmdProve
+use jet_cli.CmdRemote as CmdRemote
+use jet_cli.CmdReview as CmdReview
+use jet_cli.CmdSchema as CmdSchema
+use jet_cli.CmdSemIndex as CmdSemIndex
+use jet_cli.CmdStatus as CmdStatus
+use jet_cli.CmdStructuralMerge as CmdStructuralMerge
+use jet_cli.CmdStructure as CmdStructure
+use jet_cli.CmdSupply as CmdSupply
+use jet_cli.CmdTest as CmdTest
+use jet_cli.CmdTry as CmdTry
+use jet_cli.DevAot as DevAot
+use jet_cli.EngineDispatch as EngineDispatch
+use jet_cli.NativeLinker as NativeLinker
+use jet_cli.OutputAdapter as OutputAdapter
+use jet_cli.ProductionReceipt as ProductionReceipt
+use jet_cli.ProveReplay as ProveReplay
+use jet_cli.ProveSolver as ProveSolver
+use jet_cli.Store as Store
+// Rust: Source/main.rs:80
+use jet_cli.OutputAdapter.[active_profile, advisory_lints_visible, write_machine, write_mode_diagnostic, write_mode_machine, write_mode_renderable, write_mode_status, write_renderable, write_status, OutputAdapterHost, OutputMode]
+// Rust: Source/main.rs:86
+use jet_cli.CmdBackendScaffold.run_new_backend
+use jet_cli.CmdCodemod.run_generate
+use jet_cli.CmdCompile.[prepare_project_environment, project_environment_requirement, require_project_environment, resolve_named_profile, run_build_query, run_compiler_api, run_debug_native, run_dev_entry, run_dev_web, run_external_fmt, run_fix, run_fmt, run_fuzz, run_native_execution, run_native_source_from_stdin, run_new, run_test_opts, run_web_app_dev_entry, scaffold_browser_tests, validate_target, FuzzRunOpts, NativeExecutionRequest, TestRunOpts]
+use jet_cli.CmdConsoleHost.ConsoleHost
+use jet_cli.CmdDb.run_db
+use jet_cli.CmdDevTools.[run_bind, run_completions, run_dev, run_devtools, run_doctor, run_emit_rust, run_eval, run_eval_expression, run_explain, run_explain_cost, run_explain_marker, run_explain_web_graph, run_lint_a11y, run_lint_complexity, run_lint_cost, run_repl, watch_policy_from, WatchPolicy]
+use jet_cli.CmdDoc.run_doc
+use jet_cli.CmdDossier.run_module_explain
+use jet_cli.CmdExec.run_exec
+use jet_cli.CmdExpand.run_expand
+use jet_cli.CmdFill.run_fill
+use jet_cli.CmdFlash.run_flash
+use jet_cli.CmdImpact.run_impact
+use jet_cli.CmdInspect.[run_digest, run_env, run_inspect, run_output, run_provenance]
+use jet_cli.CmdLearn.run as run_learn
+use jet_cli.CmdPackage.run_package
+use jet_cli.CmdPkg.[run_add, run_fetch, run_remove, run_update]
+use jet_cli.CmdProve.run_prove
+use jet_cli.CmdRemote.run_remote
+use jet_cli.CmdReview.run_review
+use jet_cli.CmdSchema.run_schema
+use jet_cli.CmdSemIndex.[run_find, run_semindex]
+use jet_cli.CmdStructuralMerge.[run_diff, run_merge, structural_help]
+use jet_cli.CmdSupply.[run_audit, run_copy_audit, run_key_backup, run_keygen, run_publish, run_sbom, run_vendor, run_yank]
+use jet_cli.CmdTry.run_try
+use jet_cli.Cli.Entry.Main02.[run_question_mark_replay, is_executable]
+use jet_cli.Cli.Entry.Main04.[machine_report_path_for_process]
+use jet_cli.Cli.Entry.Main05.[test_option_value]
 
+// Rust: Source/main.rs:126
+fn cli_diagnostic_copy(code: String) -> (String, String) {
+    match code {
+        "E1202" -> ("the lockfile must contain the exact dependency graph before a locked or supply-chain command can run", "run `jet fetch`, then run the command again")
+        "E1235" -> ("the registry endpoint contains credentials or URL parameters, or its git operation failed because of network, authentication, or local-clone state; rendered endpoint details are redacted", "remove URL credentials and parameters, configure the host Git credential provider for the registry path, then check network access")
+        "E2101" -> ("Jet command groups accept only commands in their named area", "run `jet help` or the command group's `help` route")
+        "E2102" -> ("Jet ignores no flags silently, so a typo cannot quietly change a command", "correct the named flag, or run `jet help` to see the flags")
+        "E2104" -> ("Jet needs valid command input before it can run this command", "correct the named argument or input, then run the command again")
+        "E2105" -> ("Jet could not complete the named file, tool, or operating-system operation", "correct the named problem, then run the command again")
+        "E2941" -> ("jet prove accepts only its registered proof lenses", "use `all`, `refinements`, `effects`, `taint`, `contracts`, `tests`, `budgets`, `replay`, or `solver`")
+        _ -> ("Jet could not complete this command", "correct the named problem, then run the command again")
+    }
+}
+// Rust: Source/main.rs:163
+pub fn emit_cli_diagnostic(code: String, what: String) -> {
+    (why, fix) :: cli_diagnostic_copy(code)
+    emit_cli_report(code, what, why.to_string(), fix.to_string(), false)
+}
+// Rust: Source/main.rs:168
+pub fn emit_cli_diagnostic_with_fix(code: String, what: String, fix: String) -> {
+    (why, _) :: cli_diagnostic_copy(code)
+    emit_cli_report(code, what, why.to_string(), fix, false)
+}
+// Rust: Source/main.rs:173
+pub fn emit_cli_report(code: String, what: String, why: String, fix: String, json: Bool) -> {
+    emit_cli_report_for_action("cli", code, what, why, fix, json)
+}
+// Rust: Source/main.rs:180
+pub fn emit_cli_report_for_action(action: String, code: String, what: String, why: String, fix: String, json: Bool) -> {
+    diagnostic :: Diagnostic.error(code, what, why, fix, None)
+    emit_cli_value_for_action(diagnostic, json, action)
+}
+// Rust: Source/main.rs:192
+pub fn emit_cli_value(diagnostic: Diagnostic, json: Bool) -> {
+    emit_cli_value_for_action(diagnostic, json, "cli")
+}
+// Rust: Source/main.rs:196
+fn emit_cli_value_for_action(diagnostic: Diagnostic, json: Bool, action: String) -> {
+    profile :: active_profile()
+    if json || profile.is_some_and(|profile| -> profile.machine_enabled()) {
+        report_file :: ReportPath.from_process("")
+        report :: diagnostic.to_report(report_file, "")
+        status :: render_status_with_reports(action, false, [report], StatusFields.new())
+        rendered :: "{status}\n"
+        if machine_profile :: profile.filter(|profile| -> profile.machine_enabled()) {
+            write_machine(machine_profile, rendered)
+        } else {
+            write_mode_machine(OutputMode{json: true, color: ColorChoice.Never, quiet: false}, rendered)
+        }
+    } else {
+        color :: profile.is_some_and(|profile| -> profile.ansi_enabled())
+        rendered :: render_all_colored("", "", [diagnostic], color)
+        if host_profile :: profile { write_status(host_profile, rendered) }
+        else { write_mode_diagnostic(OutputMode{json: false, color: ColorChoice.Never, quiet: false}, rendered) }
+    }
+}
+// Rust: Source/main.rs:234
+pub fn emit_cli_diagnostics(file: String, source: String, diagnostics: [Diagnostic]) -> {
+    profile :: active_profile()
+    if profile.is_some_and(|profile| -> profile.machine_enabled()) {
+        machine_file :: machine_report_path_for_process(file)
+        clears :: Diagnostics.report_clear_counts(diagnostics)
+        reports :: diagnostics.iter().zip(clears).map(|(diagnostic, clears)| -> diagnostic.to_report_with_clears(machine_file, source, clears))
+        status :: render_status_with_reports("diagnostics", false, reports, StatusFields.new())
+        rendered :: "{status}\n"
+        if host_profile :: profile { write_machine(host_profile, rendered) }
+        else { write_mode_machine(OutputMode{json: true, color: ColorChoice.Never, quiet: false}, rendered) }
+    } else {
+        color :: profile.is_some_and(|profile| -> profile.ansi_enabled())
+        rendered :: render_all_colored(file, source, diagnostics, color)
+        if host_profile :: profile { write_status(host_profile, rendered) }
+        else { write_mode_diagnostic(OutputMode{json: false, color: ColorChoice.Never, quiet: false}, rendered) }
+    }
+}
+// Rust: Source/main.rs:275
+pub fn emit_cli_row(code: String, holes: [(String, String)], json: Bool) -> {
+    diagnostic :: Diagnostic.from_row(code, holes, None)
+    emit_cli_value(diagnostic, json)
+}
+// Rust: Source/main.rs:280
+pub fn emit_cli_row_with_detail(code: String, holes: [(String, String)], detail: String, json: Bool) -> {
+    diagnostic :: Diagnostic.from_row(code, holes, None).with_detail(detail)
+    emit_cli_value(diagnostic, json)
+}
+// Rust: Source/main.rs:290
+// cli_error macro's @fix/@full/plain arms migrate directly to
+// emit_cli_diagnostic_with_fix / emit_cli_report / emit_cli_diagnostic above.
+
+// Rust: Source/main.rs:312
+// GATE #4494: native terminal stdio, current executable, and child dispatch.
+pub fn offer_dev_environment(raw: [String], file: String, output: OutputAdapterHost) -> {
+    requirement :: project_environment_requirement(OSPath.from(file))
+    if requirement.is_none() { return }
+    (environment, import) :: requirement.unwrap()
+    if output.profile().machine_enabled() || !output.stdin_is_terminal() || !output.stderr_is_terminal() { return }
+    write_mode_diagnostic(output.mode(), "jet dev needs {environment} for `use {import}`.\nRealize it now? [Y/n]\n")
+    _ :: io.stderr().flush()
+    answer := String.new()
+    read :: match io.stdin().read_line(&answer) { Ok(read) -> read, Err(_) -> return }
+    trimmed := answer.trim() // #4303
+    lowered :: trimmed.to_ascii_lowercase()
+    if read == 0 || (!trimmed.is_empty() && lowered != "y" && lowered != "yes") { return }
+    jet_binary :: match env.current_exe() { Ok(binary) -> binary, Err(_) -> return }
+    forwarded := [String].with_capacity(raw.len() + 2)
+    &forwarded.push("env")
+    &forwarded.push("--")
+    &forwarded.push(jet_binary.to_string_lossy().into_owned())
+    &forwarded.extend(raw.iter().cloned())
+    exit(EngineDispatch.dispatch(Syntax.JETPACK_BINARY_NAME, "env", forwarded))
+}
+
+// Rust: Source/main.rs:357
+pub enum OptimizeLevel { None, Basic, Full }
+impl OptimizeLevel {
+    // Rust: Source/main.rs:368
+    pub fn cache_tag(self) -> String {
+        match self { .None -> "opt:none", .Basic -> "opt:basic", .Full -> "opt:full" }
+    }
+    // Rust: Source/main.rs:379
+    pub fn from(v: Package.BuildOptimize) -> OptimizeLevel {
+        match v { .None -> .None, .Basic -> .Basic, .Full -> .Full }
+    }
+}
+// Rust: Source/main.rs:391
+pub struct ProfileConfig {
+    pub optimize: OptimizeLevel
+    pub debug_info: Bool
+    pub codegen_units: u16?
+    pub small: Bool
+    pub cross_crate_lto: Bool
+    pub panic_abort: Bool
+    pub inspect: Package.Blocks.ReleaseInspect
+    pub settings: [String:String]
+}
+impl ProfileConfig {
+    // Rust: Source/main.rs:406
+    pub fn release() -> ProfileConfig {
+        ProfileConfig{optimize: .Full, debug_info: false, codegen_units: None, small: false, cross_crate_lto: true, panic_abort: false, settings: [:], inspect: Package.Blocks.ReleaseInspect.default()}
+    }
+    // Rust: Source/main.rs:419
+    pub fn debug() -> ProfileConfig {
+        ProfileConfig{optimize: .None, debug_info: true, codegen_units: Val(256u16), small: false, panic_abort: false, cross_crate_lto: false, settings: [:], inspect: Package.Blocks.ReleaseInspect.default()}
+    }
+    // Rust: Source/main.rs:432
+    pub fn ci() -> ProfileConfig {
+        ProfileConfig{optimize: .Basic, debug_info: true, codegen_units: None, small: false, cross_crate_lto: true, panic_abort: false, settings: [:], inspect: Package.Blocks.ReleaseInspect.default()}
+    }
+    // Rust: Source/main.rs:445
+    pub fn from_def(def: Package.BuildProfileDef) -> ProfileConfig {
+        ProfileConfig{optimize: OptimizeLevel.from(def.optimize), debug_info: def.debug_info, codegen_units: None, small: def.small, cross_crate_lto: true, panic_abort: def.panic == Val(Package.BuildPanic.Abort), settings: def.settings.clone(), inspect: def.inspect}
+    }
+    // Rust: Source/main.rs:461
+    pub fn settings_tag(self) -> String {
+        parts := [self.optimize.cache_tag().to_string()]
+        &parts.push("inspect:{self.inspect.cfg_value()}")
+        if self.debug_info { &parts.push("dbg") }
+        if self.small { &parts.push("small") }
+        if !self.cross_crate_lto { &parts.push("lto=off") }
+        if self.panic_abort { &parts.push("panic=abort") }
+        if units :: self.codegen_units { &parts.push("codegen-units={units}") }
+        if !self.settings.is_empty() {
+            keys := self.settings.keys().collect()
+            &keys.sort()
+            encoded :: keys.iter().map(|key| -> "{key.len()}:{key}{self.settings[key].len()}:{self.settings[key]}").collect<[String]>().join("")
+            &parts.push("settings:{encoded}")
+        }
+        parts.join(";")
+    }
+    // Rust: Source/main.rs:493
+    pub fn rustc_args(self, ffi: Bool) -> [String] { self.rustc_args_for_target(ffi, false) }
+    // Rust: Source/main.rs:500
+    // Foreign compiler argument data retained for explicit foreign-tool output;
+    // native profile execution consumes the typed config, never a Rust callback.
+    pub fn rustc_args_for_target(self, ffi: Bool, native: Bool) -> [String] {
+        args := [String]{}
+        if self.small {
+            &args.extend(["-C", "opt-level=z", "-C", "panic=abort", "-C", "strip=symbols"])
+            if !ffi { &args.extend(["-C", "lto=fat"]) }
+            if native { &args.extend(["-C", "target-cpu=native"]) }
+            return args
+        }
+        if units :: self.codegen_units { &args.extend(["-C", "codegen-units={units}"]) }
+        match self.optimize {
+            .None -> { &args.extend(["-C", "opt-level=0", "-C", "lto=off"]) }
+            .Basic -> { &args.extend(["-C", "opt-level=2"]) }
+            .Full -> { &args.extend(["-C", "opt-level=3"]) }
+        }
+        if self.debug_info { &args.extend(["-C", "debuginfo=2"]) }
+        else if self.optimize != .None { &args.extend(["-C", "strip=symbols"]) }
+        if self.panic_abort { &args.extend(["-C", "panic=abort"]) }
+        if !ffi && self.optimize != .None {
+            lto :: if self.cross_crate_lto { "lto=thin" } else { "lto=off" }
+            &args.extend(["-C", lto.to_string()])
+        }
+        if native { &args.extend(["-C", "target-cpu=native"]) }
+        args
+    }
+}
+
+// Rust: Source/main.rs:562
+pub enum BuildProfile { Default, Fast, Release, Hardened, Debug, Ci, Named(name: String, config: ProfileConfig), Small, NoOs }
+impl BuildProfile {
+    // Rust: Source/main.rs:588
+    pub fn default_for_command(command: String) -> BuildProfile {
+        match command { "run" | "dev" -> .Fast, _ -> .Default }
+    }
+    // Rust: Source/main.rs:595
+    pub fn is_release(self) -> Bool {
+        match self { .Release | .Hardened -> true, .Named(name, _) -> name == Syntax.BUILD_PROFILE_RELEASE, _ -> false }
+    }
+    // Rust: Source/main.rs:605
+    pub fn cranelift_backend(self) -> Bool {
+        match self { .Default | .Fast | .Debug -> true, _ -> false }
+    }
+    // Rust: Source/main.rs:609
+    pub fn release_inspect(self) -> Package.Blocks.ReleaseInspect? {
+        if self.is_release() { Val(self.config().inspect) } else { None }
+    }
+    // Rust: Source/main.rs:616
+    pub fn budget_name(self) -> String {
+        match self { .Default | .Fast -> "dev", .Release -> "release", .Hardened -> "hardened", .Debug -> "debug", .Ci -> "ci", .Named(name, _) -> name, .Small -> "small", .NoOs -> "no-os" }
+    }
+    // Rust: Source/main.rs:630
+    pub fn cache_tag(self) -> String {
+        match self { .Default -> "default", .Fast -> "fast", .Release -> "release", .Hardened -> "hardened", .Debug -> "debug", .Ci -> "ci", .Named(name, config) -> "profile:{name};{config.settings_tag()}", .Small -> "small", .NoOs -> "no-os" }
+    }
+    // Rust: Source/main.rs:646
+    pub fn config(self) -> ProfileConfig {
+        match self {
+            .Default -> ProfileConfig{optimize: .Basic, debug_info: false, codegen_units: None, small: false, cross_crate_lto: false, panic_abort: false, settings: [:], inspect: Package.Blocks.ReleaseInspect.default()}
+            .Fast -> ProfileConfig{optimize: .None, debug_info: false, codegen_units: Val(256u16), small: false, cross_crate_lto: false, panic_abort: false, settings: [:], inspect: Package.Blocks.ReleaseInspect.default()}
+            .Release | .Hardened -> ProfileConfig.release()
+            .Debug -> ProfileConfig.debug()
+            .Ci -> ProfileConfig.ci()
+            .Named(_, config) -> config.clone()
+            .Small | .NoOs -> ProfileConfig{optimize: .Basic, debug_info: false, codegen_units: None, small: true, cross_crate_lto: false, panic_abort: true, settings: [:], inspect: Package.Blocks.ReleaseInspect.default()}
+        }
+    }
+}
+
+// Rust: Source/main.rs:696
+pub fn usage() -> String { usage_in(CLI.HelpOrder.default()) }
+// Rust: Source/main.rs:700
+fn usage_in(order: CLI.HelpOrder) -> String { CLI.usage_page(env.package_version(), order) }
+// Rust: Source/main.rs:706
+pub fn help_order(jet_argv: [String]) -> CLI.HelpOrder {
+    if !jet_argv.iter().any(|arg| -> arg == "--sort" || arg.starts_with("--sort=")) { return CLI.HelpOrder.default() }
+    value :: test_option_value(jet_argv, "--sort").unwrap_or_default()
+    CLI.HelpOrder.parse(value).unwrap_or_else(|| -> {
+        emit_cli_diagnostic_with_fix("E2104", "`{value}` is not a `jet help` order", "choose one of {CLI.HelpOrder.NAMES}: `jet help --sort az`")
+        exit(ExitCodes.USAGE)
+    })
+}
+// Rust: Source/main.rs:730
+pub fn command_help(cmd: String) -> String {
+    bin :: Syntax.BINARY_NAME
+    if group :: CLI.command_group(cmd) {
+        output := "{bin} {cmd} — {group.summary}\n\n{CLI.command_group_usage(cmd)}"
+        if cmd == "db" {
+            &output.push_str("\nFlags:\n")
+            loop (long, help) in CLI.flags_for_command(cmd) { &output.push_str("  {long:<28} {help}\n") }
+        }
+        return output
+    }
+    if (group, action) :: CLI.moved_command(cmd) {
+        lines := String.new()
+        loop usage_line in action.usage.lines() { &lines.push_str("  {bin} {group.name} {usage_line}\n") }
+        return "{bin} {group.name} {cmd} — {CLI.action_help_summary(group.name, action)}\n\n{lines}"
+    }
+    command :: match CLI.COMMANDS.iter().find(|command| -> command.name == cmd) {
+        Val(command) -> command
+        None -> return "{bin} {cmd}\n\nRun `{bin} help` to see every command.\n"
+    }
+    output := "{bin} {cmd} — {command.summary}\n\n  {CLI.command_usage(cmd)}\n"
+    loop (long, help) in CLI.flags_for_command(cmd) { &output.push_str("  {long:<28} {help}\n") }
+    output
+}
+// Rust: Source/main.rs:782
+pub fn looks_like_jet_source(arg: String) -> Bool {
+    path :: OSPath.from(arg)
+    if path.extension().is_some_and(|e| -> e == Syntax.FILE_EXT) { return true }
+    if path.exists() { return path.is_file() || path.is_dir() }
+    OSPath.from("{arg}.{Syntax.FILE_EXT}").exists()
+}
+// Rust: Source/main.rs:799
+pub fn dispatch_nixpkgs_run(raw: [String], target: String, sep: USize?) -> i32? {
+    (package, source) :: target.rsplit_once(Syntax.REF_PROVIDER_AT) ?? return None
+    if source != Syntax.REF_SOURCE_NIXPKGS || package.is_empty() { return None }
+    before_sep :: sep.map_or(raw, |i| -> raw[..i])
+    fwd := ["use", target.to_string()]
+    command_args := [String]{}
+    saw_run := false
+    saw_target := false
+    i := 0usize
+    loop i < before_sep.len() {
+        a :: before_sep[i]
+        if !saw_run && a == "run" { saw_run = true; i += 1; continue }
+        if !saw_target && a == target { saw_target = true; i += 1; continue }
+        match a.as_str() {
+            "--no-color" | "--offline" -> &fwd.push(a.clone())
+            "--fixtures" -> {
+                &fwd.push(a.clone())
+                if value :: before_sep.get(i + 1) { &fwd.push(value.clone()); i += 1 }
+            }
+            "--color=never" -> &fwd.push("--no-color")
+            s if s.starts_with("--") -> {
+                emit_cli_report("E2102", "`{s}` isn't a flag `jet run …@nixpkgs` understands", "this form forwards only package-run flags before `--`; tool arguments go after `--`", "write `jet run {package}@nixpkgs -- {s}` to pass it to the tool.", false)
+                return Val(ExitCodes.USAGE)
+            }
+            other -> &command_args.push(other.to_string())
+        }
+        i += 1
+    }
+    &fwd.push("--")
+    &fwd.push(package.to_string())
+    &fwd.extend(command_args)
+    if i :: sep { &fwd.extend(raw[i + 1..].iter().cloned()) }
+    Val(EngineDispatch.dispatch(Syntax.JETPACK_BINARY_NAME, "use", fwd))
+}
+// Rust: Source/main.rs:865
+pub fn greeting() -> String {
+    bin :: Syntax.BINARY_NAME
+    output := "Welcome to {Syntax.LANG_NAME}! (v{env.package_version()})\n\nGet started:\n"
+    loop command in CLI.commands_in(CLI.HelpOrder.Frequency).into_iter().filter(|command| -> command.headline) {
+        invocation :: "{bin} {command.name}"
+        &output.push_str("  {invocation:<12} {command.summary}\n")
+    }
+    help :: "{bin} help"
+    &output.push_str("\n  {help:<12} see every command\n")
+    output
+}
+// Rust: Source/main.rs:888
+pub fn unknown_subcommand(cmd: String) -> Never {
+    bin :: Syntax.BINARY_NAME
+    fix :: match CLI.closest_command(cmd) {
+        Val(close) -> "did you mean `{bin} {close}`? Run `{bin} help` to see them all."
+        None -> "run `{bin} help` to see every command."
+    }
+    emit_cli_report("E2101", "`{cmd}` isn't a {bin} command.", "every {bin} run starts with a command like `run`, `check`, or `new`.", fix, false)
+    exit(ExitCodes.USAGE)
+}
+// Rust: Source/main.rs:904
+pub fn normalize_compiler_alias(raw: &[String], argv0: String) -> {
+    name :: OSPath.from(argv0).file_name().and_then(|name| -> name.to_str()) ?? return
+    bare :: name.strip_suffix(".exe").unwrap_or(name)
+    verb :: match bare { "jet-cc" -> "cc", "jet-cxx" | "jet-c++" -> "c++", _ -> return }
+    &raw.insert(0, verb.to_string())
+}
+// Rust: Source/main.rs:919
+pub fn normalize_frequency_ring_argv(raw: &[String], mode: OutputMode, profile: OutputProfile) -> {
+    if retired :: CLI.retired_command(raw) {
+        category :: retired.category
+        rewrite :: retired.rewrite
+        if category == CLI.RetirementCategory.Semantic { teach_retired(retired, raw, mode.json) }
+        apply :: rewrite.expect("rename retirement needs a rewrite rule")
+        replacement :: retired.fix(raw)
+        raw = apply(raw)
+        if !mode.json && !mode.quiet { write_status(profile, "Notice: `{retired.spelling}` is now `{replacement}`.\n") }
+    }
+    first :: raw.first().map(|s| -> s.as_str()) ?? return
+    if (group_spec, _) :: CLI.moved_command(first) {
+        group :: group_spec.name
+        verb :: first
+        replacement :: "jet {group} {raw.join(" ")}"
+        emit_cli_report("E2101", "`{verb}` moved under `jet {group}`.", "infrequent commands live in a named area so daily Jet commands stay easy to scan.", "run `{replacement}`.", mode.json)
+        exit(ExitCodes.USAGE)
+    }
+    group :: raw.first().cloned() ?? return
+    // os is non-exhaustive: real native jetos verbs remain opaque to this registry.
+    exhaustive :: CLI.command_group(group).map(|spec| -> spec.exhaustive).unwrap_or(false)
+    if spec :: CLI.command_group(group) {
+        asks_help :: if group == "env" {
+            raw.get(1).map(|s| -> s.as_str()) == Val("help") || raw.get(1).is_some_and(|a| -> CLI.is_help_flag(a))
+        } else {
+            raw.len() == 1 || raw.get(1).map(|s| -> s.as_str()) == Val("help") || raw.get(1).is_some_and(|a| -> CLI.is_help_flag(a))
+        }
+        if (exhaustive || group == "env") && asks_help {
+            help :: "jet {group} — {spec.summary}\n{CLI.command_group_usage(group)}"
+            write_renderable(profile, help)
+            exit(ExitCodes.OK)
+        }
+    }
+    sub :: raw.get(1).cloned() ?? return
+    if exhaustive && CLI.nested_command(group, sub).is_none() {
+        emit_cli_report("E2101", "`{sub}` isn't a jet {group} command.", "jet {group} accepts only commands in its named area.", "run `jet {group} help`.", mode.json)
+        exit(ExitCodes.USAGE)
+    }
+    if (_, action) :: CLI.nested_command(group, sub) {
+        if !action.handler.keeps_group() { raw[0] = action.handler.dispatch_word().to_string(); &raw.remove(1) }
+    }
+}
+// Rust: Source/main.rs:1011
+pub fn run_project_parts(raw: [String], profile: OutputProfile) -> Never {
+    skipped_only :: raw.iter().any(|arg| -> arg == "--skipped")
+    root :: env.current_dir().unwrap_or_else(|_| -> OSPath.from("."))
+    (report, failures) :: ProjectParts.scan_with_diagnostics(root, [])
+    if failure :: failures.iter().find(|failure| -> failure.authority) {
+        emit_cli_value(failure.problem.clone(), profile.machine_enabled())
+        exit(ExitCodes.USER_ERROR)
+    }
+    parts :: report.parts.iter().filter(|part| -> !skipped_only || part.state == ProjectParts.ProjectPartState.Skipped).collect()
+    source_files :: if skipped_only { [] } else { report.source_files.iter().collect() }
+    // Rust: Source/main.rs:1029
+    relative :: |path: OSPath| -> path.strip_prefix(root).unwrap_or(path).to_string_lossy().replace('\\', "/")
+    // Rust: Source/main.rs:1035
+    source_name :: |path: OSPath| -> {
+        name := relative(path)
+        extension :: ".{Syntax.FILE_EXT}"
+        if name.ends_with(extension) { &name.truncate(name.len() - extension.len()) }
+        "{Syntax.PROJECT_IMPORT_PREFIX}{name.replace('/', ".")}"
+    }
+    if profile.machine_enabled() {
+        part_values := [StatusValue].with_capacity(parts.len() + source_files.len())
+        &part_values.extend(parts.iter().map(|part| -> StatusValue.object(StatusFields.new().with("name", part.canonical_name()).with("path", relative(part.path)).with("state", part.state.name()))))
+        &part_values.extend(source_files.iter().map(|path| -> StatusValue.object(StatusFields.new().with("name", source_name(path)).with("path", relative(path)).with("state", "automatic"))))
+        conflict_values :: report.conflicts.iter().map(|conflict| -> StatusValue.object(StatusFields.new().with("name", conflict.canonical_name()).with("paths", StatusValue.array(conflict.paths.iter().map(|path| -> StatusValue.from(relative(path)))))))
+        payload :: render_status("inspect.parts", true, StatusFields.new().with("parts", StatusValue.array(part_values)).with("conflicts", StatusValue.array(conflict_values)))
+        write_machine(profile, "{payload}\n")
+    } else if profile.unicode_enabled() {
+        columns :: [TableColumn.new("state", TableCellKind.Text), TableColumn.new("name", TableCellKind.Text), TableColumn.new("path", TableCellKind.Text)]
+        rows := [TableRow].with_capacity(parts.len() + source_files.len())
+        &rows.extend(parts.iter().map(|part| -> TableRow.new([TableCell.text(part.state.name()), TableCell.text(part.canonical_name()), TableCell.text(relative(part.path))])))
+        &rows.extend(source_files.iter().map(|path| -> TableRow.new([TableCell.text("automatic"), TableCell.text(source_name(path)), TableCell.text(relative(path))])))
+        table :: AdaptiveTable.new(columns, rows)
+        if rendered :: table.layout(profile).render() { write_renderable(profile, "{rendered}\n") }
+        loop conflict in report.conflicts {
+            rendered :: render_diagnostics("", "", [conflict.diagnostic(root, None)])
+            write_status(profile, rendered)
+        }
+    } else {
+        rendered := String.new()
+        loop part in parts { &rendered.push_str("{part.state.name():<9} {part.canonical_name():<24} {relative(part.path)}\n") }
+        loop path in source_files { &rendered.push_str("{"automatic":<9} {source_name(path):<24} {relative(path)}\n") }
+        write_renderable(profile, rendered)
+        loop conflict in report.conflicts {
+            rendered :: render_diagnostics("", "", [conflict.diagnostic(root, None)])
+            write_status(profile, rendered)
+        }
+    }
+    exit(if report.conflicts.is_empty() { ExitCodes.OK } else { ExitCodes.USER_ERROR })
+}
+// Rust: Source/main.rs:1159
+pub fn teach_retired(spec: CLI.RetiredCommandSpec, raw: [String], json: Bool) -> Never {
+    debug_assert_eq(spec.category, CLI.RetirementCategory.Semantic)
+    emit_cli_report(spec.error_code, "`{spec.spelling}` isn't a jet command", spec.why.to_string(), "run `{spec.fix(raw)}`", json)
+    exit(ExitCodes.USAGE)
+}
+// Rust: Source/main.rs:1177
+pub fn check_flags(raw: [String], subcmd: String) -> {
+    bin :: Syntax.BINARY_NAME
+    external_fmt :: subcmd == "fmt" && raw.iter().any(|arg| -> arg == Syntax.FMT_FLAG_LANG || arg.starts_with("--lang="))
+    // argv-only teaching copy has no source span or fix_edits.
+    loop a in raw {
+        if !a.starts_with("--") || a == "--" { continue }
+        if CLI.is_known_flag(a) { continue }
+        head :: a.split('=').next().unwrap_or(a)
+        if external_fmt && ["--trust", "--offline", "--online", "--no-color", "--json", "--flake", "--pure", "--yes", "--fixtures", "--preset", "--env"].contains(head) { continue }
+        if head == "--emit-rust" {
+            emit_cli_report("E2102", "`--emit-rust` isn't a flag {bin} understands", "generated output belongs to the `emit` command", "run `{bin} emit --rust <file.{Syntax.FILE_EXT}>`", false)
+            exit(ExitCodes.USAGE)
+        }
+        fix :: match CLI.closest_flag(head) {
+            Val(close) if subcmd == "run" || subcmd == "test" -> "did you mean `{close}`? Or use `{bin} {subcmd} <file> -- {head}` to pass it to your program"
+            Val(close) if subcmd == CLI.JOBS_COMMAND -> "did you mean `{close}`? Or write it after the job name, `{bin} {subcmd} <name> {head}`, to pass it to the job"
+            Val(close) -> "did you mean `{close}`? (run `{bin} help` for the flags)"
+            None if subcmd == "run" || subcmd == "test" -> "use `{bin} {subcmd} <file> -- {head}` to pass this flag to your program"
+            None if subcmd == CLI.JOBS_COMMAND -> "write it after the job name, `{bin} {subcmd} <name> {head}`, to pass it to the job"
+            None -> "drop the flag, or run `{bin} help` to see the flags"
+        }
+        emit_cli_report("E2102", "`{head}` isn't a flag {bin} understands", "flags before `--` belong to {bin}; everything after `--` is forwarded to your program", fix, false)
+        exit(ExitCodes.USAGE)
+    }
+}
+// Rust: Source/main.rs:1249
+pub fn reject_retired_gate_flags(argv: [String], json: Bool) -> {
+    retirement :: Syntax.retirement("allow-impure") ?? return
+    if !argv.iter().any(|arg| -> arg == retirement.retired) { return }
+    emit_cli_report(retirement.code.unwrap_or("E1343"), "`{retirement.retired}` is retired", "the old boolean changed which audited escapes were checked and is no longer accepted", "use `{retirement.canonical}`", json)
+    exit(ExitCodes.USAGE)
+}
+// Rust: Source/main.rs:1269
+pub fn reject_retired_authority_flags(argv: [String], json: Bool) -> {
+    loop argument in argv {
+        head :: argument.split('=').next().unwrap_or(argument)
+        retired :: BuildEffect.ALL.into_iter().find_map(|effect| -> {
+            allow :: "--allow-{effect.flag()}"
+            deny :: "--deny-{effect.flag()}"
+            if head == allow { Val(("allow", effect)) }
+            else if head == deny { Val(("deny", effect)) }
+            else { None }
+        })
+        if retired.is_none() { continue }
+        (kind, effect) :: retired.unwrap()
+        emit_cli_report("E2102", "`{head}` is retired", "authority grants and denials use one comma-separated rights surface", "use `--{kind}={effect.name()}`", json)
+        exit(ExitCodes.USAGE)
+    }
+}
+// Rust: Source/main.rs:1299
+pub fn parse_authority_flags(argv: [String], json: Bool) -> ([String], [String]) {
+    allow := [String]{}
+    deny := [String]{}
+    index := 0usize
+    loop index < argv.len() {
+        argument :: argv[index].as_str()
+        (kind, inline) :: if value :: argument.strip_prefix("--allow=") { (Val("allow"), Val(value)) }
+            else if value :: argument.strip_prefix("--deny=") { (Val("deny"), Val(value)) }
+            else if argument == "--allow" { (Val("allow"), None) }
+            else if argument == "--deny" { (Val("deny"), None) }
+            else { (None, None) }
+        if kind.is_none() { index += 1; continue }
+        selected_kind :: kind.unwrap()
+        value :: match inline {
+            Val(value) -> value.to_string()
+            None -> {
+                next :: argv.get(index + 1).filter(|value| -> !value.starts_with('-'))
+                if next.is_none() {
+                    emit_cli_report("E2104", "`--{selected_kind}` needs a comma-separated rights value", "authority is read before the program's own arguments", "use `--{selected_kind}=FS.Read,Time`", json)
+                    exit(ExitCodes.USAGE)
+                }
+                index += 1
+                next.unwrap().clone()
+            }
+        }
+        if value.trim().is_empty() {
+            emit_cli_report("E2104", "`--{selected_kind}` needs a non-empty rights value", "authority names one or more effect roots or leaves", "use `--{selected_kind}=FS.Read,Time`", json)
+            exit(ExitCodes.USAGE)
+        }
+        loop raw_right in value.split(',') {
+            right := raw_right.trim() // #4303
+            canonical :: Authority.parse_right(right).unwrap_or_else(|| -> {
+                emit_cli_report("E2104", "unknown authority right `{right}`", "authority names match the canonical effect roots and leaves", "use `--{selected_kind}=FS.Read,Time`", json)
+                exit(ExitCodes.USAGE)
+            })
+            if selected_kind == "allow" {
+                if !allow.iter().any(|existing| -> existing == canonical) { &allow.push(canonical) }
+            } else {
+                if !deny.iter().any(|existing| -> existing == canonical) { &deny.push(canonical) }
+            }
+        }
+        index += 1
+    }
+    if right :: allow.iter().find(|right| -> deny.iter().any(|denied| -> denied == right)) {
+        emit_cli_report("E2102", "authority right `{right}` is both allowed and denied", "the same exact effective right cannot be granted and denied in one invocation", "remove one of `--allow={right}` or `--deny={right}`", json)
+        exit(ExitCodes.USAGE)
+    }
+    (allow, deny)
+}
+// Rust: Source/main.rs:1388
+pub fn build_grants_from_authority(allow: [String]) -> [String] {
+    grants := [String:Bool]{}
+    loop right in allow {
+        root :: Authority.root(right)
+        if effect :: BuildEffect.parse(root) { grants[effect.flag().to_string()] = true }
+    }
+    sorted := grants.keys().collect()
+    &sorted.sort()
+    sorted
+}
+// Rust: Source/main.rs:1399
+pub fn named_record_for_command(argv: [String], command: String, json: Bool) -> String? {
+    name := None
+    loop arg in argv.iter().skip(1) {
+        if arg == "--record" {
+            emit_cli_diagnostic_with_fix("E2104", "`--record` needs a closed `=NAME` value", "write `--record=NAME` on `run`, `dev`, `test`, or `debug`")
+            exit(ExitCodes.USAGE)
+        }
+        parsed :: ProveReplay.parse_record_flag(arg)
+        if parsed.is_none() { continue }
+        if command != "run" && command != "dev" && command != "test" && command != "debug" {
+            emit_cli_diagnostic_with_fix("E2102", "`--record` is not valid with `jet {command}`", "use `--record=NAME` on `run`, `dev`, `test`, or `debug`")
+            exit(ExitCodes.USAGE)
+        }
+        match parsed.unwrap() {
+            Ok(value) -> name = Val(value)
+            Err(message) -> {
+                ProveReplay.emit_diag("E2104", "invalid replay name", message, "write `--record=NAME` with letters, digits, `-`, or `_`", json)
+                exit(ExitCodes.USAGE)
+            }
+        }
+    }
+    name
+}
+// Rust: Source/main.rs:1438
+pub fn named_debug_replay(argv: [String], command: String, json: Bool) -> String? {
+    if command != "debug" { return None }
+    path := None
+    loop arg in argv.iter().skip(1) {
+        if arg == "--replay" {
+            emit_cli_diagnostic_with_fix("E2104", "`--replay` needs a closed `=NAME` value", "write `--replay=NAME` on `jet debug`")
+            exit(ExitCodes.USAGE)
+        }
+        parsed :: ProveReplay.parse_closed_replay_flag(arg)
+        if parsed.is_none() { continue }
+        match parsed.unwrap() {
+            Ok(value) -> path = Val(value)
+            Err(message) -> {
+                ProveReplay.emit_diag("E2104", "invalid replay name", message, "write `--replay=NAME` with letters, digits, `-`, or `_`", json)
+                exit(ExitCodes.USAGE)
+            }
+        }
+    }
+    path
+}
+// Rust: Source/main.rs:1472
+pub fn parse_gate_flags(argv: [String], json: Bool) -> Policy.GateSet {
+    gates := Policy.GateSet.default()
+    index := 0usize
+    loop index < argv.len() {
+        argument :: argv[index]
+        spec :: if spec :: argument.strip_prefix("--gate=") { Val(spec.to_string()) }
+            else if argument == "--gate" {
+                match argv.get(index + 1) {
+                    Val(spec) if !spec.starts_with('-') -> { index += 1; Val(spec.clone()) }
+                    _ -> None
+                }
+            } else { None }
+        if assignment :: spec {
+            match Policy.GateSet.parse(assignment) {
+                Ok(key) -> &gates.insert(key)
+                Err(detail) -> {
+                    emit_cli_report("E2104", "invalid audited gate", detail, "use `--gate unsafe=allow`, `--gate impure=allow`, or `--gate nondeterministic=allow`", json)
+                    exit(ExitCodes.USAGE)
+                }
+            }
+        } else if argument == "--gate" {
+            emit_cli_report("E2104", "`--gate` needs a gate assignment", "an invocation gate names one audited escape and its allow value", "use `--gate name=allow`", json)
+            exit(ExitCodes.USAGE)
+        }
+        index += 1
+    }
+    gates
+}
+// Rust: Source/main.rs:1519
+pub fn parse_setting_overrides(argv: [String], json: Bool) -> [String:String] {
+    settings := [String:String]{}
+    index := 0usize
+    loop index < argv.len() {
+        argument :: argv[index]
+        raw :: if value :: argument.strip_prefix("--set=") { value.to_string() }
+            else if argument == "--set" {
+                match argv.get(index + 1) {
+                    Val(value) -> { index += 1; value.clone() }
+                    None -> {
+                        emit_cli_report("E2104", "`--set` needs a key=value assignment", "a typed package setting override names one declared key and its value", "use `--set key=value`", json)
+                        exit(ExitCodes.USAGE)
+                    }
+                }
+            } else { index += 1; continue }
+        (raw_key, raw_value) :: raw.split_once('=').unwrap_or_else(|| -> {
+            emit_cli_report("E2104", "`--set` needs a key=value assignment", "a typed package setting override names one declared key and its value", "use `--set key=value`", json)
+            exit(ExitCodes.USAGE)
+        })
+        key := raw_key.trim() // #4303
+        if key.is_empty() {
+            emit_cli_report("E2104", "`--set` needs a non-empty key", "the compiler must be able to resolve one declared setting before it parses the value", "use `--set key=value` with a declared key", json)
+            exit(ExitCodes.USAGE)
+        }
+        value := raw_value.trim() // #4303
+        if (&settings.insert(key.to_string(), value.to_string())).is_some() {
+            emit_cli_report("E2104", "setting `{key}` is assigned more than once", "one invocation must contribute one unambiguous value for each declared setting", "remove the duplicate `--set` assignment", json)
+            exit(ExitCodes.USAGE)
+        }
+        index += 1
+    }
+    settings
+}
+// Rust: Source/main.rs:1588
+pub fn find_external(cmd: String) -> OSPath? {
+    // Derive only one safe component, never escape a PATH entry.
+    if cmd.is_empty() || cmd == "." || cmd == ".." || cmd.chars().any(|character| -> character.is_control() || character == '/' || character == '\\' || character == ':') { return None }
+    exe :: "{Syntax.BINARY_NAME}-{cmd}"
+    path :: env.var_os("PATH") ?? return None
+    loop dir in env.split_paths(path) {
+        candidate :: dir.join(exe)
+        if candidate.is_file() && is_executable(candidate) { return Val(candidate) }
+    }
+    None
+}
+// Rust: Source/main.rs:1616
+pub fn run_question_mark(args: [String], output: OutputAdapterHost) -> Never {
+    profile :: output.profile()
+    color :: profile.ansi_enabled()
+    query_args := [String]{}
+    record_name := None
+    replay_name := None
+    skip_value := false
+    project_root :: build_project_root(".").unwrap_or_else(|_| -> env.current_dir().unwrap_or_else(|_| -> OSPath.from(".")))
+    store :: RecordingStore.new(project_root.join(".jet").join("replays"))
+    loop arg in args {
+        if skip_value { skip_value = false; continue }
+        if arg == "--color" { skip_value = true; continue }
+        if arg == "--record" { question_mark_recording_error(ExitCodes.USAGE, "E2104", "`--record` needs a closed `=NAME` value", "use `jet ? --record=NAME`", profile.machine_enabled()) }
+        if name :: arg.strip_prefix("--record=") {
+            if record_name.is_some() { question_mark_recording_error(ExitCodes.USAGE, "E2104", "`jet ?` accepts only one `--record=NAME` request", "remove the duplicate recording flag", profile.machine_enabled()) }
+            if store.path_for_name(name) == {
+                Err(error) -> question_mark_recording_error(ExitCodes.USAGE, "E2104", "invalid recording name: {error}", "use letters, digits, `-`, or `_` in NAME", profile.machine_enabled())
+                Ok(_) -> {}
+            }
+            record_name = Val(name.to_string())
+            continue
+        }
+        if arg == "--replay" { question_mark_recording_error(ExitCodes.USAGE, "E2104", "`--replay` needs a closed `=NAME` value", "use `jet ? --replay=NAME`", profile.machine_enabled()) }
+        if name :: arg.strip_prefix("--replay=") {
+            if replay_name.is_some() { question_mark_recording_error(ExitCodes.USAGE, "E2104", "`jet ?` accepts only one `--replay=NAME` request", "remove the duplicate replay flag", profile.machine_enabled()) }
+            if store.path_for_name(name) == {
+                Err(error) -> question_mark_recording_error(ExitCodes.USAGE, "E2104", "invalid replay name: {error}", "use letters, digits, `-`, or `_` in NAME", profile.machine_enabled())
+                Ok(_) -> {}
+            }
+            replay_name = Val(name.to_string())
+            continue
+        }
+        if !arg.starts_with("--color=") && arg != "--json" && arg != "--quiet" { &query_args.push(arg.as_str()) }
+    }
+    if record_name.is_some() && replay_name.is_some() { question_mark_recording_error(ExitCodes.USAGE, "E2104", "`jet ?` cannot record and replay in the same request", "choose either `--record=NAME` or `--replay=NAME`", profile.machine_enabled()) }
+    if (record_name.is_some() || replay_name.is_some()) && !query_args.is_empty() { question_mark_recording_error(ExitCodes.USAGE, "E2104", "a `jet ?` recording request cannot include a help query", "remove the query, or run `jet ? <query>` without recording", profile.machine_enabled()) }
+    if name :: record_name { run_question_mark_recording(store, name, profile) }
+    if name :: replay_name { run_question_mark_replay(store, name, profile) }
+    if !query_args.is_empty() {
+        query :: query_args.join(" ")
+        rendered :: Help.run_query(query, color)
+        write_renderable(profile, rendered)
+        exit(ExitCodes.OK)
+    }
+    if output.help_interactive() && profile.human_enabled() {
+        _ :: Help.Interactive.run(color).ok()
+        exit(ExitCodes.OK)
+    }
+    rendered :: Help.Render.render_categorized(Help.build_index(), 0, false, None, profile.width(), color, None)
+    write_renderable(profile, "{rendered}\n")
+    exit(ExitCodes.OK)
+}
+// Rust: Source/main.rs:1750
+QUESTION_MARK_RECORDING_HEIGHT :: 24usize
+// Rust: Source/main.rs:1752
+pub fn question_mark_recording_error(status: i32, code: String, what: String, fix: String, json: Bool) -> Never {
+    emit_cli_report(code, what, "the requested help recording cannot be used", fix, json)
+    exit(status)
+}
+// Rust: Source/main.rs:1769
+pub fn question_mark_recording_identity(profile: OutputProfile) -> RecordingIdentity Err! {
+    width :: u16.try_from(profile.width()).map_err(|_| -> "output width {profile.width()} exceeds recording limits")?
+    RecordingIdentity.new("?", width, u16.try_from(QUESTION_MARK_RECORDING_HEIGHT).expect("question-mark recording height fits in u16"), profile.ansi_enabled()).map_err(|error| -> error.to_string())
+}
+// Rust: Source/main.rs:1784-1855
+// Whole boundary function owned here; Main02 skips the initial Rust1801-1855 tail.
+pub fn run_question_mark_recording(store: RecordingStore, name: String, profile: OutputProfile) -> Never {
+    identity :: match question_mark_recording_identity(profile) {
+        Ok(identity) -> identity
+        Err(error) -> question_mark_recording_error(ExitCodes.USAGE, "E2104", "cannot create help recording identity: {error}", "use a terminal width within the recording limits", profile.machine_enabled())
+    }
+    replay := match HeadlessReplay.new(identity) {
+        Ok(replay) -> replay
+        Err(error) -> question_mark_recording_error(ExitCodes.USER_ERROR, "E3629", "could not initialize help recording: {error}", "retry the recording with the same terminal profile", profile.machine_enabled())
+    }
+    output :: match (&replay.capture_output()) {
+        Ok(output) -> output
+        Err(error) -> question_mark_recording_error(ExitCodes.USER_ERROR, "E3629", "could not capture help recording: {error}", "retry the recording", profile.machine_enabled())
+    }
+    recording :: replay.recording()
+    path :: match store.write(name, recording) {
+        Ok(path) -> path
+        Err(error) -> question_mark_recording_error(ExitCodes.USER_ERROR, "E3629", "could not publish help recording: {error}", "choose a new NAME or remove the conflicting artifact", profile.machine_enabled())
+    }
+    artifact_id :: match recording.artifact_id() {
+        Ok(artifact_id) -> artifact_id
+        Err(error) -> question_mark_recording_error(ExitCodes.USER_ERROR, "E3629", "could not identify help recording: {error}", "retry the recording", profile.machine_enabled())
+    }
+    if profile.machine_enabled() {
+        payload :: render_status("help.record", true, StatusFields.new().with("artifact", path.display().to_string()).with("artifact_id", artifact_id).with("frames", recording.events().len()))
+        write_machine(profile, "{payload}\n")
+    } else {
+        write_renderable(profile, "{output}\n")
+        write_status(profile, "recording: {path.display()}\n")
+    }
+    exit(ExitCodes.OK)
+}

@@ -1,1156 +1,198 @@
-// PORT-PENDING 1166 tests-target-machines: tests/target_machines.rs:1-1152
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! Card #239: typed target machines — validation, firmware artifacts, QEMU.
-//RS 
-//RS mod common;
-//RS 
-//RS use jet::Driver::{
-//RS     build_target_machine_firmware, qemu_target_machine_smoke, TargetMachineCompileError,
-//RS };
-//RS use jet::Syntax::RuntimeLayer;
-//RS use jet::TargetMachine::{
-//RS     AllocatorPolicy, ByteSize, ByteSinkPolicy, ClockPolicy, EntropyPolicy, ExecutionTier,
-//RS     LinkerInput, MemoryAccess, MemoryKind, MemoryRegion, MmioAccess, MmioPolicy, PanicPolicy,
-//RS     ProviderContract, SchedulerPolicy, StartupPolicy, TargetCapability, TargetMachine,
-//RS     TargetMachineError, TargetMachineUse, UnsafeGate,
-//RS };
-//RS 
-//RS fn checked_program_object(machine: &TargetMachine, dir: &std::path::Path) -> std::path::PathBuf {
-//RS     use std::process::Command;
-//RS     std::fs::create_dir_all(dir).expect("create program fixture directory");
-//RS     let source = dir.join("program.c");
-//RS     let object = dir.join("program.o");
-//RS     std::fs::write(
-//RS         &source,
-//RS         concat!(
-//RS             "typedef __SIZE_TYPE__ size_t;\n",
-//RS             "extern int __jet_target_write(const unsigned char *, size_t, size_t *);\n",
-//RS             "void __jet_program_entry(void) {\n",
-//RS             "    const unsigned char text[] = \"program-linked\\n\";\n",
-//RS             "    size_t used = 0;\n",
-//RS             "    __jet_target_write(text, sizeof(text) - 1, &used);\n",
-//RS             "}\n",
-//RS         ),
-//RS     )
-//RS     .expect("write program fixture");
-//RS     let clang = std::env::var_os("CC").unwrap_or_else(|| "clang".into());
-//RS     let output = Command::new(&clang)
-//RS         .arg(format!("--target={}", machine.triple))
-//RS         .arg("-nostdlib")
-//RS         .arg("-ffreestanding")
-//RS         .arg("-fno-builtin")
-//RS         .arg("-c")
-//RS         .arg(&source)
-//RS         .arg("-o")
-//RS         .arg(&object)
-//RS         .output()
-//RS         .expect("spawn clang for checked program fixture");
-//RS     assert!(
-//RS         output.status.success(),
-//RS         "clang fixture failed: {}",
-//RS         String::from_utf8_lossy(&output.stderr)
-//RS     );
-//RS     object
-//RS }
-//RS 
-//RS fn sensor_machine() -> TargetMachine {
-//RS     let mut machine = TargetMachine::board_sensor_v1();
-//RS     // Keep MMIO range used by compile-path volatile tests.
-//RS     machine.memory = vec![
-//RS         MemoryRegion::new(
-//RS             "flash",
-//RS             0x0800_0000,
-//RS             ByteSize::kib(512),
-//RS             MemoryKind::Flash,
-//RS             MemoryAccess::Rx,
-//RS         ),
-//RS         MemoryRegion::new(
-//RS             "ram",
-//RS             0x2000_0000,
-//RS             ByteSize::kib(64),
-//RS             MemoryKind::Ram,
-//RS             MemoryAccess::Rw,
-//RS         ),
-//RS         MemoryRegion::new(
-//RS             "peripherals",
-//RS             0x4000_0000,
-//RS             ByteSize::mib(1),
-//RS             MemoryKind::Mmio,
-//RS             MemoryAccess::Rw,
-//RS         ),
-//RS     ];
-//RS     machine.linker = LinkerInput::File {
-//RS         path: "vendor/memory.x".to_string(),
-//RS         sha256: "sha256:abc123".to_string(),
-//RS     };
-//RS     machine.allocator = AllocatorPolicy::Fixed {
-//RS         region: "ram".to_string(),
-//RS         size: ByteSize::kib(8),
-//RS     };
-//RS     machine.panic = PanicPolicy::Abort;
-//RS     machine
-//RS }
-//RS 
-//RS #[test]
-//RS fn hosted_jet_sees_no_target_ceremony() {
-//RS     let machine = TargetMachine::hosted("x86_64-unknown-linux-gnu");
-//RS     let usage = TargetMachineUse {
-//RS         core_apis: vec!["core.files".to_string(), "core.http.client".to_string()],
-//RS         heap_required: true,
-//RS         ..TargetMachineUse::default()
-//RS     };
-//RS     assert!(!machine.no_os);
-//RS     assert!(matches!(machine.linker, LinkerInput::HostedDefault));
-//RS     assert!(matches!(machine.allocator, AllocatorPolicy::HostedDefault));
-//RS     assert!(matches!(machine.panic, PanicPolicy::HostedDefault));
-//RS     assert!(machine.memory.is_empty());
-//RS     assert_eq!(machine.max_runtime_layer(), RuntimeLayer::Std);
-//RS     assert!(machine.validate(&usage).is_empty());
-//RS     assert!(machine.supports_execution_tier(ExecutionTier::Dev).is_ok());
-//RS     assert!(machine.supports_execution_tier(ExecutionTier::Jit).is_ok());
-//RS     let audit = machine.audit_json(&usage);
-//RS     assert!(audit.contains("\"environment\":\"hosted\""));
-//RS     assert!(audit.contains("\"execution\":{\"aot\":true,\"dev\":true,\"jit\":true}"));
-//RS }
-//RS 
-//RS #[test]
-//RS fn typed_target_machine_accepts_complete_board_facts() {
-//RS     let usage = TargetMachineUse {
-//RS         stack_bytes: ByteSize::kib(4).bytes,
-//RS         static_ram_bytes: ByteSize::kib(12).bytes,
-//RS         heap_required: true,
-//RS         core_apis: vec!["core.encoding.json".to_string()],
-//RS         mmio: vec![MmioAccess {
-//RS             address: 0x4000_0100,
-//RS             size: ByteSize::bytes(4),
-//RS             unsafe_gate: Some(UnsafeGate {
-//RS                 reason: "timer status register".to_string(),
-//RS             }),
-//RS         }],
-//RS         required_capabilities: Vec::new(),
-//RS     };
-//RS     assert_eq!(sensor_machine().validate(&usage), Vec::new());
-//RS     let review = sensor_machine().safety_review(&usage);
-//RS     assert!(review.passes(), "{review:?}");
-//RS }
-//RS 
-//RS #[test]
-//RS fn no_os_allocator_and_core_limits_are_data_errors() {
-//RS     let mut machine = sensor_machine();
-//RS     machine.allocator = AllocatorPolicy::None;
-//RS     let usage = TargetMachineUse {
-//RS         heap_required: true,
-//RS         core_apis: vec!["core.files".to_string(), "core.mem".to_string()],
-//RS         ..TargetMachineUse::default()
-//RS     };
-//RS     let errors = machine.validate(&usage);
-//RS     assert!(errors.contains(&TargetMachineError::HeapRequiresAllocator));
-//RS     assert!(errors.contains(&TargetMachineError::CoreApiUnavailable {
-//RS         api: "core.files".to_string(),
-//RS         required: RuntimeLayer::Std,
-//RS         available: RuntimeLayer::Core
-//RS     }));
-//RS     assert!(errors.contains(&TargetMachineError::CoreApiUnavailable {
-//RS         api: "core.mem".to_string(),
-//RS         required: RuntimeLayer::Alloc,
-//RS         available: RuntimeLayer::Core
-//RS     }));
-//RS     machine.allocator = AllocatorPolicy::Counting {
-//RS         cap: Some(ByteSize::mib(8)),
-//RS     };
-//RS     let errors = machine.validate(&TargetMachineUse::default());
-//RS     assert!(errors.contains(&TargetMachineError::HostedAllocatorRequiresOs));
-//RS }
-//RS 
-//RS #[test]
-//RS fn no_os_core_mem_try_allocation_compiles_with_fixed_allocator() {
-//RS     let dir = std::env::temp_dir().join(format!(
-//RS         "jet_target_machine_try_allocation_{}",
-//RS         std::process::id()
-//RS     ));
-//RS     let _ = std::fs::remove_dir_all(&dir);
-//RS     std::fs::create_dir_all(&dir).unwrap();
-//RS     let file = dir.join("try_allocation.jet");
-//RS     std::fs::write(
-//RS         &file,
-//RS         include_str!("../Examples/features/memory/try_allocation.jet"),
-//RS     )
-//RS     .unwrap();
-//RS     jet::Driver::compile_bundle_path_with_target_machine(
-//RS         &file.to_string_lossy(),
-//RS         jet::Sema::CompileMode::Run,
-//RS         &sensor_machine(),
-//RS     )
-//RS     .expect("no-os core.mem fallible allocation should compile before codegen");
-//RS     let _ = std::fs::remove_dir_all(&dir);
-//RS }
-//RS 
-//RS #[test]
-//RS fn linker_override_requires_hashed_provenance() {
-//RS     let mut machine = sensor_machine();
-//RS     machine.linker = LinkerInput::File {
-//RS         path: "vendor/memory.x".to_string(),
-//RS         sha256: String::new(),
-//RS     };
-//RS     let errors = machine.validate(&TargetMachineUse::default());
-//RS     assert!(errors.contains(&TargetMachineError::LinkerFileMissingHash {
-//RS         path: "vendor/memory.x".to_string()
-//RS     }));
-//RS }
-//RS 
-//RS #[test]
-//RS fn allocator_size_must_fit_named_ram_region() {
-//RS     let mut machine = sensor_machine();
-//RS     machine.memory.push(MemoryRegion::new(
-//RS         "scratch",
-//RS         0x2001_0000,
-//RS         ByteSize::kib(4),
-//RS         MemoryKind::Ram,
-//RS         MemoryAccess::Rw,
-//RS     ));
-//RS     machine.allocator = AllocatorPolicy::Fixed {
-//RS         region: "scratch".to_string(),
-//RS         size: ByteSize::kib(8),
-//RS     };
-//RS     let errors = machine.validate(&TargetMachineUse::default());
-//RS     assert!(
-//RS         errors.contains(&TargetMachineError::AllocatorRegionTooSmall {
-//RS             region: "scratch".to_string(),
-//RS             requested_bytes: ByteSize::kib(8).bytes,
-//RS             available_bytes: ByteSize::kib(4).bytes,
-//RS         })
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn selected_target_machine_rejects_unavailable_core_api_before_codegen() {
-//RS     let dir = std::env::temp_dir().join(format!("jet_target_machine_{}", std::process::id()));
-//RS     let _ = std::fs::remove_dir_all(&dir);
-//RS     std::fs::create_dir_all(&dir).unwrap();
-//RS     let file = dir.join("main.jet");
-//RS     std::fs::write(
-//RS         &file,
-//RS         r#"
-//RS use core.files as fs
-//RS 
-//RS fn run() {
-//RS     print(fs.read("missing.txt") ?? "missing")
-//RS }
-//RS "#,
-//RS     )
-//RS     .unwrap();
-//RS     let err = jet::Driver::compile_bundle_path_with_target_machine(
-//RS         &file.to_string_lossy(),
-//RS         jet::Sema::CompileMode::Run,
-//RS         &sensor_machine(),
-//RS     )
-//RS     .expect_err("no-os target machine should reject core.files before codegen");
-//RS     match err {
-//RS         TargetMachineCompileError::Diagnostics(diags) => {
-//RS             assert!(diags.iter().any(|diagnostic| diagnostic.code == "E3310"));
-//RS         }
-//RS         TargetMachineCompileError::Machine(errors) => {
-//RS             panic!("expected registered diagnostics, got machine errors: {errors:?}")
-//RS         }
-//RS     }
-//RS     let _ = std::fs::remove_dir_all(&dir);
-//RS }
-//RS 
-//RS #[test]
-//RS fn selected_target_machine_validates_direct_mmio_accesses() {
-//RS     let dir = std::env::temp_dir().join(format!("jet_target_machine_mmio_{}", std::process::id()));
-//RS     let _ = std::fs::remove_dir_all(&dir);
-//RS     std::fs::create_dir_all(&dir).unwrap();
-//RS     let file = dir.join("main.jet");
-//RS     std::fs::write(
-//RS         &file,
-//RS         r#"
-//RS use core.mem as mem
-//RS 
-//RS fn run() {
-//RS     #Unsafe("timer register is mapped by board.sensor_v1") {
-//RS         p :: mem.Ptr<Int>.from_addr(0x40000100)
-//RS         mem.volatile_write(p, 7)
-//RS         _seen :: mem.volatile_read(p)
-//RS     }
-//RS }
-//RS "#,
-//RS     )
-//RS     .unwrap();
-//RS     jet::Driver::compile_bundle_path_with_target_machine(
-//RS         &file.to_string_lossy(),
-//RS         jet::Sema::CompileMode::Run,
-//RS         &sensor_machine(),
-//RS     )
-//RS     .expect("machine should accept direct volatile access inside MMIO range");
-//RS     let _ = std::fs::remove_dir_all(&dir);
-//RS }
-//RS 
-//RS #[test]
-//RS fn selected_target_machine_rejects_direct_mmio_outside_region() {
-//RS     let dir = std::env::temp_dir().join(format!(
-//RS         "jet_target_machine_bad_mmio_{}",
-//RS         std::process::id()
-//RS     ));
-//RS     let _ = std::fs::remove_dir_all(&dir);
-//RS     std::fs::create_dir_all(&dir).unwrap();
-//RS     let file = dir.join("main.jet");
-//RS     std::fs::write(
-//RS         &file,
-//RS         r#"
-//RS use core.mem as mem
-//RS 
-//RS fn run() {
-//RS     #Unsafe("this address is intentionally outside the board MMIO region") {
-//RS         p :: mem.Ptr<Int>.from_addr(0x50000000)
-//RS         mem.volatile_write(p, 7)
-//RS     }
-//RS }
-//RS "#,
-//RS     )
-//RS     .unwrap();
-//RS     let err = jet::Driver::compile_bundle_path_with_target_machine(
-//RS         &file.to_string_lossy(),
-//RS         jet::Sema::CompileMode::Run,
-//RS         &sensor_machine(),
-//RS     )
-//RS     .expect_err("target machine should reject direct volatile access outside MMIO range");
-//RS     match err {
-//RS         TargetMachineCompileError::Diagnostics(diags) => {
-//RS             assert!(diags.iter().any(|diagnostic| diagnostic.code == "E3313"));
-//RS         }
-//RS         TargetMachineCompileError::Machine(errors) => {
-//RS             panic!("expected registered diagnostics, got machine errors: {errors:?}")
-//RS         }
-//RS     }
-//RS     let _ = std::fs::remove_dir_all(&dir);
-//RS }
-//RS 
-//RS #[test]
-//RS fn audit_report_is_machine_stable() {
-//RS     let usage = TargetMachineUse {
-//RS         core_apis: vec!["core.files".to_string()],
-//RS         ..TargetMachineUse::default()
-//RS     };
-//RS     let audit = sensor_machine().audit_json(&usage);
-//RS     assert!(audit.contains("\"environment\":\"no-os\""));
-//RS     assert!(audit.contains("\"linker\":{\"kind\":\"file\""));
-//RS     assert!(audit.contains("\"allocator\":{\"kind\":\"fixed\""));
-//RS     assert!(audit.contains("\"panic\":{\"kind\":\"report\""));
-//RS     assert!(audit.contains("\"unavailable_core_apis\":[\"core.files\"]"));
-//RS     assert!(audit.contains("\"execution\":{\"aot\":true,\"dev\":false,\"jit\":false}"));
-//RS }
-//RS 
-//RS #[test]
-//RS fn no_os_machine_rejects_dev_and_jit_explicitly() {
-//RS     let machine = TargetMachine::board_sensor_v1();
-//RS     assert!(machine.supports_execution_tier(ExecutionTier::Aot).is_ok());
-//RS     match machine.supports_execution_tier(ExecutionTier::Dev) {
-//RS         Err(TargetMachineError::ExecutionTierUnsupported { tier, .. }) => {
-//RS             assert_eq!(tier, "dev")
-//RS         }
-//RS         other => panic!("expected Dev rejection, got {other:?}"),
-//RS     }
-//RS     match machine.supports_execution_tier(ExecutionTier::Jit) {
-//RS         Err(TargetMachineError::ExecutionTierUnsupported { tier, .. }) => {
-//RS             assert_eq!(tier, "jit")
-//RS         }
-//RS         other => panic!("expected Jit rejection, got {other:?}"),
-//RS     }
-//RS }
-//RS 
-//RS #[test]
-//RS fn hostile_machines_fail_closed() {
-//RS     let mut overlapping = TargetMachine::board_sensor_v1();
-//RS     overlapping.memory.push(MemoryRegion::new(
-//RS         "clash",
-//RS         0x0000_0100,
-//RS         ByteSize::kib(1),
-//RS         MemoryKind::Flash,
-//RS         MemoryAccess::Rx,
-//RS     ));
-//RS     let errors = overlapping.validate(&TargetMachineUse::default());
-//RS     assert!(
-//RS         errors
-//RS             .iter()
-//RS             .any(|e| matches!(e, TargetMachineError::OverlappingMemoryRegions { .. })),
-//RS         "{errors:?}"
-//RS     );
-//RS 
-//RS     let mut bad_heap = TargetMachine::board_sensor_v1();
-//RS     bad_heap.allocator = AllocatorPolicy::None;
-//RS     let usage = TargetMachineUse {
-//RS         heap_required: true,
-//RS         ..TargetMachineUse::default()
-//RS     };
-//RS     assert!(bad_heap
-//RS         .validate(&usage)
-//RS         .contains(&TargetMachineError::HeapRequiresAllocator));
-//RS 
-//RS     let mut missing_panic = TargetMachine::board_sensor_v1();
-//RS     missing_panic.panic = PanicPolicy::Unspecified;
-//RS     assert!(missing_panic
-//RS         .validate(&TargetMachineUse::default())
-//RS         .contains(&TargetMachineError::MissingPanicPolicy));
-//RS }
-//RS 
-//RS #[test]
-//RS fn mcu_firmware_build_writes_elf_map_audit_and_size_budget() {
-//RS     let machine = TargetMachine::board_sensor_v1();
-//RS     let usage = TargetMachineUse {
-//RS         stack_bytes: ByteSize::kib(2).bytes,
-//RS         static_ram_bytes: ByteSize::kib(1).bytes,
-//RS         ..TargetMachineUse::default()
-//RS     };
-//RS     let dir = std::env::temp_dir().join(format!("jet_mcu_fw_{}", std::process::id()));
-//RS     let _ = std::fs::remove_dir_all(&dir);
-//RS     let program = checked_program_object(&machine, &dir);
-//RS     let arts = build_target_machine_firmware(&machine, &usage, &program, &dir)
-//RS         .expect("MCU firmware build should succeed");
-//RS     assert!(arts.elf.is_file(), "missing elf {}", arts.elf.display());
-//RS     assert!(arts.map.is_file(), "missing map {}", arts.map.display());
-//RS     assert!(
-//RS         arts.linker_script.is_file(),
-//RS         "missing linker {}",
-//RS         arts.linker_script.display()
-//RS     );
-//RS     assert!(
-//RS         arts.audit_json.is_file(),
-//RS         "missing audit {}",
-//RS         arts.audit_json.display()
-//RS     );
-//RS     let map = std::fs::read_to_string(&arts.map).unwrap();
-//RS     assert!(
-//RS         map.contains("Reset_Handler") || map.contains(".text"),
-//RS         "{map}"
-//RS     );
-//RS     let linker = std::fs::read_to_string(&arts.linker_script).unwrap();
-//RS     assert!(linker.contains("MEMORY {"));
-//RS     assert!(linker.contains("flash (rx)"));
-//RS     assert!(arts.size_budget.ok());
-//RS     assert!(arts.audit.contains("\"size_budget\""));
-//RS     assert!(arts.audit.contains("\"environment\":\"no-os\""));
-//RS     let bytes = std::fs::metadata(&arts.elf).unwrap().len();
-//RS     assert!(
-//RS         bytes > 0
-//RS             && bytes
-//RS                 <= machine
-//RS                     .memory
-//RS                     .iter()
-//RS                     .filter(|r| r.kind == MemoryKind::Flash)
-//RS                     .map(|r| r.size.bytes)
-//RS                     .sum::<u64>()
-//RS     );
-//RS     let serial = qemu_target_machine_smoke(&machine, &arts.elf)
-//RS         .expect("QEMU MPS2 should run the linked program");
-//RS     assert!(serial.contains("program-linked\n"), "{serial}");
-//RS     let _ = std::fs::remove_dir_all(&dir);
-//RS }
-//RS 
-//RS #[test]
-//RS fn linux_freestanding_qemu_virt_boots_with_audit() {
-//RS     let machine = TargetMachine::board_virt_aarch64();
-//RS     let usage = TargetMachineUse::default();
-//RS     let dir = std::env::temp_dir().join(format!("jet_virt_fw_{}", std::process::id()));
-//RS     let _ = std::fs::remove_dir_all(&dir);
-//RS     let program = checked_program_object(&machine, &dir);
-//RS     let arts = build_target_machine_firmware(&machine, &usage, &program, &dir)
-//RS         .expect("virt aarch64 firmware build should succeed");
-//RS     assert!(arts.map.is_file());
-//RS     assert!(arts.audit.contains("board.virt_aarch64"));
-//RS     let serial = qemu_target_machine_smoke(&machine, &arts.elf)
-//RS         .expect("QEMU virt should run the linked program");
-//RS     assert!(serial.contains("program-linked\n"), "{serial}");
-//RS     let _ = std::fs::remove_dir_all(&dir);
-//RS }
-//RS 
-//RS #[test]
-//RS fn dossier_target_lens_returns_stable_json() {
-//RS     let sensor = jet::Driver::target_machine_dossier_json("board.sensor_v1").unwrap();
-//RS     assert!(sensor.contains("\"name\":\"board.sensor_v1\""));
-//RS     assert!(sensor.contains("\"environment\":\"no-os\""));
-//RS     let hosted = jet::Driver::target_machine_dossier_json("hosted").unwrap();
-//RS     assert!(hosted.contains("\"environment\":\"hosted\""));
-//RS     assert!(jet::Driver::target_machine_dossier_json("nope").is_err());
-//RS }
-//RS #[test]
-//RS fn wasm_profiles_are_explicit_and_provider_bound() {
-//RS     let browser = TargetMachine::wasm_browser();
-//RS     assert_eq!(browser.environment_identity(), "browser");
-//RS     assert!(browser.is_browser_target());
-//RS     assert!(browser.is_web_target());
-//RS     assert!(browser.validate(&TargetMachineUse::default()).is_empty());
-//RS 
-//RS     let wasi = TargetMachine::wasm_wasi();
-//RS     assert_eq!(wasi.environment_identity(), "wasi");
-//RS     assert!(wasi.is_wasi_target());
-//RS     assert!(!wasi.is_web_target());
-//RS     assert!(wasi.validate(&TargetMachineUse::default()).is_empty());
-//RS 
-//RS     let no_os = TargetMachine::wasm_no_os();
-//RS     assert_eq!(no_os.environment_identity(), "no-os");
-//RS     assert!(!no_os.is_web_target());
-//RS     assert_eq!(no_os.max_runtime_layer(), RuntimeLayer::Core);
-//RS     assert!(no_os.validate(&TargetMachineUse::default()).is_empty());
-//RS }
-//RS 
-//RS #[test]
-//RS fn provider_changes_invalidate_target_artifact_identity() {
-//RS     let usage = TargetMachineUse::from_core_apis(["core.ui"]);
-//RS     let browser = TargetMachine::wasm_browser();
-//RS     let before = browser.target_dossier(&usage, ExecutionTier::Aot, "compiler", "deps");
-//RS     let mut changed = browser.clone();
-//RS     changed.byte_sink = jet::TargetMachine::ByteSinkPolicy::Provider {
-//RS         read: None,
-//RS         write: Some(ProviderContract::new("other.write", "sha256:other")),
-//RS         report: Some(ProviderContract::new("other.report", "sha256:other")),
-//RS     };
-//RS     let after = changed.target_dossier(&usage, ExecutionTier::Aot, "compiler", "deps");
-//RS     assert_ne!(before.provider_identity, after.provider_identity);
-//RS     assert_ne!(
-//RS         before.cache_bytes(&browser.triple),
-//RS         after.cache_bytes(&changed.triple)
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn independent_safety_review_covers_gates() {
-//RS     let machine = TargetMachine::board_sensor_v1();
-//RS     let usage = TargetMachineUse {
-//RS         mmio: vec![MmioAccess {
-//RS             address: 0x4000_0100,
-//RS             size: ByteSize::bytes(4),
-//RS             unsafe_gate: Some(UnsafeGate {
-//RS                 reason: "UART TX register is mapped by the target machine".to_string(),
-//RS             }),
-//RS         }],
-//RS         ..TargetMachineUse::default()
-//RS     };
-//RS     let review = machine.safety_review(&usage);
-//RS     assert!(review.no_os);
-//RS     assert!(review.panic_explicit);
-//RS     assert!(review.allocator_explicit);
-//RS     assert!(review.linker_explicit);
-//RS     assert!(review.mmio_requires_unsafe);
-//RS     assert!(review.mmio_inside_declared_regions);
-//RS     assert!(review.aot_only);
-//RS     assert!(review.passes());
-//RS }
-//RS #[derive(Clone, Copy)]
-//RS struct ProviderFactCase {
-//RS     name: &'static str,
-//RS     capability: TargetCapability,
-//RS     set: fn(&mut TargetMachine, ProviderContract),
-//RS     clear: fn(&mut TargetMachine),
-//RS }
-//RS 
-//RS fn target_test_provider(name: &str) -> ProviderContract {
-//RS     ProviderContract::new(
-//RS         format!("tests.target.{name}"),
-//RS         format!("sha256:tests-target-{name}"),
-//RS     )
-//RS }
-//RS 
-//RS fn set_mmio_provider(machine: &mut TargetMachine, provider: ProviderContract) {
-//RS     machine.mmio = MmioPolicy::Provider { provider };
-//RS }
-//RS 
-//RS fn clear_mmio_provider(machine: &mut TargetMachine) {
-//RS     machine.mmio = MmioPolicy::None;
-//RS }
-//RS 
-//RS fn set_wall_provider(machine: &mut TargetMachine, provider: ProviderContract) {
-//RS     machine.wall_clock = ClockPolicy::Provider { provider };
-//RS }
-//RS 
-//RS fn clear_wall_provider(machine: &mut TargetMachine) {
-//RS     machine.wall_clock = ClockPolicy::None;
-//RS }
-//RS 
-//RS fn set_monotonic_provider(machine: &mut TargetMachine, provider: ProviderContract) {
-//RS     machine.monotonic_clock = ClockPolicy::Provider { provider };
-//RS }
-//RS 
-//RS fn clear_monotonic_provider(machine: &mut TargetMachine) {
-//RS     machine.monotonic_clock = ClockPolicy::None;
-//RS }
-//RS 
-//RS fn set_zone_data_provider(machine: &mut TargetMachine, provider: ProviderContract) {
-//RS     machine.zone_data = ClockPolicy::Provider { provider };
-//RS }
-//RS 
-//RS fn clear_zone_data_provider(machine: &mut TargetMachine) {
-//RS     machine.zone_data = ClockPolicy::None;
-//RS }
-//RS 
-//RS fn set_sleep_provider(machine: &mut TargetMachine, provider: ProviderContract) {
-//RS     machine.sleep = ClockPolicy::Provider { provider };
-//RS }
-//RS 
-//RS fn clear_sleep_provider(machine: &mut TargetMachine) {
-//RS     machine.sleep = ClockPolicy::None;
-//RS }
-//RS 
-//RS fn set_entropy_provider(machine: &mut TargetMachine, provider: ProviderContract) {
-//RS     machine.entropy = EntropyPolicy::Provider { provider };
-//RS }
-//RS 
-//RS fn clear_entropy_provider(machine: &mut TargetMachine) {
-//RS     machine.entropy = EntropyPolicy::None;
-//RS }
-//RS 
-//RS fn set_scheduler_provider(machine: &mut TargetMachine, provider: ProviderContract) {
-//RS     machine.scheduler = SchedulerPolicy::Cooperative { provider };
-//RS }
-//RS 
-//RS fn clear_scheduler_provider(machine: &mut TargetMachine) {
-//RS     machine.scheduler = SchedulerPolicy::None;
-//RS }
-//RS 
-//RS fn set_io_read_provider(machine: &mut TargetMachine, provider: ProviderContract) {
-//RS     machine.byte_sink = ByteSinkPolicy::Provider {
-//RS         read: Some(provider),
-//RS         write: Some(target_test_provider("io-write")),
-//RS         report: Some(target_test_provider("panic-report")),
-//RS     };
-//RS }
-//RS 
-//RS fn clear_io_read_provider(machine: &mut TargetMachine) {
-//RS     machine.byte_sink = ByteSinkPolicy::Provider {
-//RS         read: None,
-//RS         write: Some(target_test_provider("io-write")),
-//RS         report: Some(target_test_provider("panic-report")),
-//RS     };
-//RS }
-//RS 
-//RS fn set_io_write_provider(machine: &mut TargetMachine, provider: ProviderContract) {
-//RS     machine.byte_sink = ByteSinkPolicy::Provider {
-//RS         read: Some(target_test_provider("io-read")),
-//RS         write: Some(provider),
-//RS         report: Some(target_test_provider("panic-report")),
-//RS     };
-//RS }
-//RS 
-//RS fn clear_io_write_provider(machine: &mut TargetMachine) {
-//RS     machine.byte_sink = ByteSinkPolicy::Provider {
-//RS         read: Some(target_test_provider("io-read")),
-//RS         write: None,
-//RS         report: Some(target_test_provider("panic-report")),
-//RS     };
-//RS }
-//RS 
-//RS fn set_panic_report_provider(machine: &mut TargetMachine, provider: ProviderContract) {
-//RS     machine.byte_sink = ByteSinkPolicy::Provider {
-//RS         read: Some(target_test_provider("io-read")),
-//RS         write: Some(target_test_provider("io-write")),
-//RS         report: Some(provider),
-//RS     };
-//RS }
-//RS 
-//RS fn clear_panic_report_provider(machine: &mut TargetMachine) {
-//RS     machine.byte_sink = ByteSinkPolicy::Provider {
-//RS         read: Some(target_test_provider("io-read")),
-//RS         write: Some(target_test_provider("io-write")),
-//RS         report: None,
-//RS     };
-//RS }
-//RS 
-//RS fn set_allocator_provider(machine: &mut TargetMachine, provider: ProviderContract) {
-//RS     machine.allocator = AllocatorPolicy::Provider { provider };
-//RS }
-//RS 
-//RS fn clear_allocator_provider(machine: &mut TargetMachine) {
-//RS     machine.allocator = AllocatorPolicy::None;
-//RS }
-//RS 
-//RS fn set_startup_provider(machine: &mut TargetMachine, provider: ProviderContract) {
-//RS     machine.startup = StartupPolicy::Generated { provider };
-//RS }
-//RS 
-//RS fn clear_startup_provider(machine: &mut TargetMachine) {
-//RS     machine.startup = StartupPolicy::Unspecified;
-//RS }
-//RS 
-//RS fn provider_fact_cases() -> Vec<ProviderFactCase> {
-//RS     vec![
-//RS         ProviderFactCase {
-//RS             name: "MMIO",
-//RS             capability: TargetCapability::Mmio,
-//RS             set: set_mmio_provider,
-//RS             clear: clear_mmio_provider,
-//RS         },
-//RS         ProviderFactCase {
-//RS             name: "Time.Wall",
-//RS             capability: TargetCapability::TimeWall,
-//RS             set: set_wall_provider,
-//RS             clear: clear_wall_provider,
-//RS         },
-//RS         ProviderFactCase {
-//RS             name: "Time.Monotonic",
-//RS             capability: TargetCapability::TimeMonotonic,
-//RS             set: set_monotonic_provider,
-//RS             clear: clear_monotonic_provider,
-//RS         },
-//RS         ProviderFactCase {
-//RS             name: "Time.ZoneData",
-//RS             capability: TargetCapability::TimeZoneData,
-//RS             set: set_zone_data_provider,
-//RS             clear: clear_zone_data_provider,
-//RS         },
-//RS         ProviderFactCase {
-//RS             name: "Time.Sleep",
-//RS             capability: TargetCapability::TimeSleep,
-//RS             set: set_sleep_provider,
-//RS             clear: clear_sleep_provider,
-//RS         },
-//RS         ProviderFactCase {
-//RS             name: "Rand.Entropy",
-//RS             capability: TargetCapability::Entropy,
-//RS             set: set_entropy_provider,
-//RS             clear: clear_entropy_provider,
-//RS         },
-//RS         ProviderFactCase {
-//RS             name: "Target.Scheduler",
-//RS             capability: TargetCapability::Scheduler,
-//RS             set: set_scheduler_provider,
-//RS             clear: clear_scheduler_provider,
-//RS         },
-//RS         ProviderFactCase {
-//RS             name: "IO.Read",
-//RS             capability: TargetCapability::IoRead,
-//RS             set: set_io_read_provider,
-//RS             clear: clear_io_read_provider,
-//RS         },
-//RS         ProviderFactCase {
-//RS             name: "IO.Write",
-//RS             capability: TargetCapability::IoWrite,
-//RS             set: set_io_write_provider,
-//RS             clear: clear_io_write_provider,
-//RS         },
-//RS         ProviderFactCase {
-//RS             name: "Panic.Report",
-//RS             capability: TargetCapability::PanicReport,
-//RS             set: set_panic_report_provider,
-//RS             clear: clear_panic_report_provider,
-//RS         },
-//RS         ProviderFactCase {
-//RS             name: "Target.Allocator",
-//RS             capability: TargetCapability::Allocator,
-//RS             set: set_allocator_provider,
-//RS             clear: clear_allocator_provider,
-//RS         },
-//RS         ProviderFactCase {
-//RS             name: "Target.Startup",
-//RS             capability: TargetCapability::Startup,
-//RS             set: set_startup_provider,
-//RS             clear: clear_startup_provider,
-//RS         },
-//RS     ]
-//RS }
-//RS 
-//RS fn required_capability_use(capability: TargetCapability) -> TargetMachineUse {
-//RS     let mut usage = TargetMachineUse {
-//RS         required_capabilities: vec![capability],
-//RS         ..TargetMachineUse::default()
-//RS     };
-//RS     if capability == TargetCapability::Allocator {
-//RS         usage.heap_required = true;
-//RS     }
-//RS     usage
-//RS }
-//RS 
-//RS fn has_missing_capability(
-//RS     errors: &[TargetMachineError],
-//RS     capability: TargetCapability,
-//RS ) -> bool {
-//RS     errors.iter().any(|error| match error {
-//RS         TargetMachineError::MissingTargetCapability { capability: found } => {
-//RS             found == capability.as_str()
-//RS         }
-//RS         TargetMachineError::HeapRequiresAllocator => capability == TargetCapability::Allocator,
-//RS         _ => false,
-//RS     })
-//RS }
-//RS 
-//RS fn has_invalid_provider(errors: &[TargetMachineError], capability: TargetCapability) -> bool {
-//RS     errors.iter().any(|error| {
-//RS         matches!(
-//RS             error,
-//RS             TargetMachineError::InvalidProviderContract {
-//RS                 capability: found,
-//RS                 ..
-//RS             } if found == capability.as_str()
-//RS         )
-//RS     })
-//RS }
-//RS 
-//RS #[test]
-//RS fn target_provider_fact_matrix_covers_present_missing_and_malformed() {
-//RS     for case in provider_fact_cases() {
-//RS         let usage = required_capability_use(case.capability);
-//RS 
-//RS         let mut present = sensor_machine();
-//RS         (case.set)(&mut present, target_test_provider(case.name));
-//RS         let errors = present.validate(&usage);
-//RS         assert!(
-//RS             errors.is_empty(),
-//RS             "{} present provider rejected: {errors:?}",
-//RS             case.name
-//RS         );
-//RS         assert!(
-//RS             jet::Sema::check_target_machine(&present, &usage).is_empty(),
-//RS             "{} present provider reached a sema diagnostic",
-//RS             case.name
-//RS         );
-//RS 
-//RS         let mut missing = sensor_machine();
-//RS         (case.clear)(&mut missing);
-//RS         let errors = missing.validate(&usage);
-//RS         assert!(
-//RS             has_missing_capability(&errors, case.capability),
-//RS             "{} missing provider was admitted: {errors:?}",
-//RS             case.name
-//RS         );
-//RS         let diagnostics = jet::Sema::check_target_machine(&missing, &usage);
-//RS         let expected_code = if case.capability == TargetCapability::Allocator {
-//RS             "E3303"
-//RS         } else {
-//RS             "E3311"
-//RS         };
-//RS         assert!(
-//RS             diagnostics.iter().any(|diagnostic| diagnostic.code == expected_code),
-//RS             "{} missing provider did not use {expected_code}: {diagnostics:?}",
-//RS             case.name
-//RS         );
-//RS 
-//RS         for (form, provider) in [
-//RS             (
-//RS                 "missing identity",
-//RS                 ProviderContract::new("", "not-a-digest"),
-//RS             ),
-//RS             (
-//RS                 "missing digest",
-//RS                 ProviderContract::new("tests.target.invalid", ""),
-//RS             ),
-//RS             (
-//RS                 "empty sha256 payload",
-//RS                 ProviderContract::new("tests.target.invalid", "sha256:"),
-//RS             ),
-//RS         ] {
-//RS             let mut malformed = sensor_machine();
-//RS             (case.set)(&mut malformed, provider);
-//RS             let errors = malformed.validate(&usage);
-//RS             assert!(
-//RS                 has_invalid_provider(&errors, case.capability),
-//RS                 "{} {form} provider was admitted: {errors:?}",
-//RS                 case.name
-//RS             );
-//RS             let diagnostics = jet::Sema::check_target_machine(&malformed, &usage);
-//RS             assert!(
-//RS                 diagnostics.iter().any(|diagnostic| diagnostic.code == "E3312"),
-//RS                 "{} {form} provider did not use E3312: {diagnostics:?}",
-//RS                 case.name
-//RS             );
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS #[test]
-//RS fn panic_policy_matrix_covers_explicit_missing_and_malformed() {
-//RS     let mut present = sensor_machine();
-//RS     present.panic = PanicPolicy::Abort;
-//RS     assert!(
-//RS         present.validate(&TargetMachineUse::default()).is_empty(),
-//RS         "explicit abort panic policy was rejected"
-//RS     );
-//RS     assert!(
-//RS         jet::Sema::check_target_machine(&present, &TargetMachineUse::default()).is_empty(),
-//RS         "explicit abort panic policy reached a diagnostic"
-//RS     );
-//RS 
-//RS     let mut missing = sensor_machine();
-//RS     missing.panic = PanicPolicy::Unspecified;
-//RS     let errors = missing.validate(&TargetMachineUse::default());
-//RS     assert!(
-//RS         errors.contains(&TargetMachineError::MissingPanicPolicy),
-//RS         "missing panic policy was admitted: {errors:?}"
-//RS     );
-//RS     let diagnostics = jet::Sema::check_target_machine(&missing, &TargetMachineUse::default());
-//RS     assert!(
-//RS         diagnostics.iter().any(|diagnostic| diagnostic.code == "E3314"),
-//RS         "missing panic policy did not use E3314: {diagnostics:?}"
-//RS     );
-//RS 
-//RS     let mut malformed = sensor_machine();
-//RS     malformed.panic = PanicPolicy::Report {
-//RS         provider: ProviderContract::new("", "not-a-digest"),
-//RS     };
-//RS     let errors = malformed.validate(&TargetMachineUse::default());
-//RS     assert!(
-//RS         has_invalid_provider(&errors, TargetCapability::PanicReport),
-//RS         "malformed panic provider was admitted: {errors:?}"
-//RS     );
-//RS     let diagnostics = jet::Sema::check_target_machine(&malformed, &TargetMachineUse::default());
-//RS     assert!(
-//RS         diagnostics.iter().any(|diagnostic| diagnostic.code == "E3312"),
-//RS         "malformed panic provider did not use E3312: {diagnostics:?}"
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn startup_provider_covers_entry_vector_abi_and_placement() {
-//RS     let sensor = sensor_machine();
-//RS     let startup = sensor
-//RS         .generate_startup_source()
-//RS         .expect("sensor startup source should be generated");
-//RS     assert_eq!(startup.filename, "startup.c");
-//RS     for marker in [
-//RS         "typedef void (*vec_t)(void);",
-//RS         "void __jet_program_entry(void);",
-//RS         "__attribute__((section(\".vectors\"), used))",
-//RS         "vec_t const vectors[]",
-//RS         "__jet_data_load",
-//RS         "__jet_bss_start",
-//RS         "__jet_program_entry();",
-//RS         "wfi",
-//RS     ] {
-//RS         assert!(startup.contents.contains(marker), "missing startup marker {marker}");
-//RS     }
-//RS     let linker = sensor
-//RS         .generate_linker_script()
-//RS         .expect("sensor linker should be generated");
-//RS     for marker in [
-//RS         "ENTRY(Reset_Handler)",
-//RS         "KEEP(*(.vectors))",
-//RS         "__jet_stack_top",
-//RS         "__jet_data_start",
-//RS         "__jet_data_end",
-//RS         "__jet_data_load",
-//RS         "__jet_bss_start",
-//RS         "__jet_bss_end",
-//RS         "__jet_heap_start",
-//RS         "__jet_heap_end",
-//RS         "> ram AT > flash",
-//RS     ] {
-//RS         assert!(linker.contains(marker), "missing linker placement marker {marker}");
-//RS     }
-//RS 
-//RS     let virt = TargetMachine::board_virt_aarch64();
-//RS     let startup = virt
-//RS         .generate_startup_source()
-//RS         .expect("aarch64 startup source should be generated");
-//RS     assert_eq!(startup.filename, "startup.S");
-//RS     for marker in [
-//RS         ".global _start",
-//RS         "_start:",
-//RS         "ldr x0, =__jet_stack_top",
-//RS         "bl __jet_program_entry",
-//RS         "wfe",
-//RS     ] {
-//RS         assert!(startup.contents.contains(marker), "missing aarch64 marker {marker}");
-//RS     }
-//RS     assert!(
-//RS         virt
-//RS             .generate_linker_script()
-//RS             .expect("aarch64 linker should be generated")
-//RS             .contains("ENTRY(_start)")
-//RS     );
-//RS }
-//RS 
-//RS fn write_target_fixture(
-//RS     tag: &str,
-//RS     source: &str,
-//RS ) -> (std::path::PathBuf, std::path::PathBuf) {
-//RS     let dir = std::env::temp_dir().join(format!(
-//RS         "jet_target_machine_witness_{tag}_{}",
-//RS         std::process::id()
-//RS     ));
-//RS     let _ = std::fs::remove_dir_all(&dir);
-//RS     std::fs::create_dir_all(&dir).expect("create target witness directory");
-//RS     let file = dir.join(format!("{tag}.jet"));
-//RS     std::fs::write(&file, source).expect("write target witness");
-//RS     (dir, file)
-//RS }
-//RS 
-//RS fn compile_target_fixture(
-//RS     tag: &str,
-//RS     source: &str,
-//RS     machine: &TargetMachine,
-//RS ) -> Result<jet::CompileOutput, TargetMachineCompileError> {
-//RS     let (dir, file) = write_target_fixture(tag, source);
-//RS     let shown = file.to_string_lossy();
-//RS     let result = jet::Driver::compile_bundle_path_with_target_machine(
-//RS         &shown,
-//RS         jet::Sema::CompileMode::Run,
-//RS         machine,
-//RS     );
-//RS     let _ = std::fs::remove_dir_all(dir);
-//RS     result
-//RS }
-//RS 
-//RS #[test]
-//RS fn malformed_target_provider_is_rejected_before_codegen() {
-//RS     let mut machine = sensor_machine();
-//RS     machine.wall_clock = ClockPolicy::Provider {
-//RS         provider: ProviderContract::new("tests.target.clock", ""),
-//RS     };
-//RS     let result = compile_target_fixture(
-//RS         "malformed_provider",
-//RS         include_str!("target_witness/heap_free_core.jet"),
-//RS         &machine,
-//RS     );
-//RS     match result {
-//RS         Err(TargetMachineCompileError::Diagnostics(diagnostics)) => {
-//RS             assert!(
-//RS                 diagnostics.iter().any(|diagnostic| diagnostic.code == "E3312"),
-//RS                 "expected E3312 before codegen: {diagnostics:?}"
-//RS             );
-//RS         }
-//RS         Err(TargetMachineCompileError::Machine(errors)) => {
-//RS             panic!("target provider failed outside sema diagnostics: {errors:?}");
-//RS         }
-//RS         Ok(_) => panic!("malformed target provider reached codegen"),
-//RS     }
-//RS }
-//RS 
-//RS #[test]
-//RS fn heap_free_core_target_witness() {
-//RS     let source = include_str!("target_witness/heap_free_core.jet");
-//RS     let machine = TargetMachine::wasm_no_os();
-//RS     assert_eq!(machine.max_runtime_layer(), RuntimeLayer::Core);
-//RS     // Applicable tier: AOT. Dev/JIT are excluded by the no-OS execution contract.
-//RS     assert!(machine.supports_execution_tier(ExecutionTier::Aot).is_ok());
-//RS     assert!(machine.supports_execution_tier(ExecutionTier::Dev).is_err());
-//RS     assert!(machine.supports_execution_tier(ExecutionTier::Jit).is_err());
-//RS     let output = compile_target_fixture("heap_free_core", source, &machine)
-//RS         .expect("heap-free Core witness should compile");
-//RS     assert_eq!(output.inferred_layer, RuntimeLayer::Core);
-//RS     assert!(output.web.is_none());
-//RS     assert!(
-//RS         output
-//RS             .rust
-//RS             .contains("// jet:target-dossier layer=core provider=target-providers-v1:")
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn allocator_firmware_target_witness() {
-//RS     let source = include_str!("target_witness/allocator_firmware.jet");
-//RS     let machine = sensor_machine();
-//RS     assert_eq!(machine.max_runtime_layer(), RuntimeLayer::Alloc);
-//RS     // Applicable tier: AOT firmware. Dev/JIT are excluded for no-OS machines.
-//RS     assert!(machine.supports_execution_tier(ExecutionTier::Aot).is_ok());
-//RS     assert!(machine.supports_execution_tier(ExecutionTier::Dev).is_err());
-//RS     assert!(machine.supports_execution_tier(ExecutionTier::Jit).is_err());
-//RS 
-//RS     let output = compile_target_fixture("allocator_firmware", source, &machine)
-//RS         .expect("allocator firmware witness should compile");
-//RS     assert_eq!(output.inferred_layer, RuntimeLayer::Alloc);
-//RS     assert!(
-//RS         output
-//RS             .rust
-//RS             .contains("// jet:target-dossier layer=alloc provider=target-providers-v1:")
-//RS     );
-//RS 
-//RS     let usage = TargetMachineUse::from_core_apis(["core.mem"]);
-//RS     let out_dir = std::env::temp_dir().join(format!(
-//RS         "jet_allocator_firmware_witness_{}",
-//RS         std::process::id()
-//RS     ));
-//RS     let _ = std::fs::remove_dir_all(&out_dir);
-//RS     let program = checked_program_object(&machine, &out_dir);
-//RS     let artifacts = build_target_machine_firmware(&machine, &usage, &program, &out_dir)
-//RS         .expect("allocator firmware target should emit an AOT image");
-//RS     assert!(artifacts.elf.is_file());
-//RS     assert!(artifacts.map.is_file());
-//RS     assert!(artifacts.audit.contains("\"allocator\":{\"kind\":\"fixed\""));
-//RS     assert!(artifacts.audit.contains("\"execution\":{\"aot\":true"));
-//RS     let _ = std::fs::remove_dir_all(out_dir);
-//RS }
-//RS 
-//RS #[test]
-//RS fn browser_wasm_target_witness() {
-//RS     let source = include_str!("target_witness/browser_wasm.jet");
-//RS     let machine = TargetMachine::wasm_browser();
-//RS     assert!(machine.is_browser_target());
-//RS     assert!(machine.is_web_target());
-//RS     // Browser web output is AOT; the hosted machine remains valid for Dev/JIT.
-//RS     for tier in [ExecutionTier::Aot, ExecutionTier::Dev, ExecutionTier::Jit] {
-//RS         assert!(
-//RS             machine.supports_execution_tier(tier).is_ok(),
-//RS             "browser machine rejected hosted tier {}",
-//RS             tier.as_str()
-//RS         );
-//RS     }
-//RS     let output = compile_target_fixture("browser_wasm", source, &machine)
-//RS         .expect("browser Wasm witness should compile");
-//RS     let web = output.web.expect("browser machine should emit web artifacts");
-//RS     for marker in [
-//RS         "\"wasmTriple\": \"wasm32-unknown-unknown\"",
-//RS         "\"runtimeLayer\": \"hosted\"",
-//RS         "\"providerIdentity\": \"target-providers-v1:",
-//RS         "\"targetEnvironment\": \"browser\"",
-//RS     ] {
-//RS         assert!(web.manifest_json.contains(marker), "missing browser marker {marker}");
-//RS     }
-//RS     assert!(web.js_app.contains("const JET_TARGET_DOSSIER"));
-//RS     assert!(web.wasm_rust.contains("jet_target_artifact_identity_ptr"));
-//RS }
-//RS 
-//RS #[test]
-//RS fn wasi_target_witness() {
-//RS     let source = include_str!("target_witness/wasi.jet");
-//RS     let machine = TargetMachine::wasm_wasi();
-//RS     assert!(machine.is_wasi_target());
-//RS     assert!(!machine.is_web_target());
-//RS     // WASI uses the hosted AOT provider set here; hosted Dev/JIT remain allowed.
-//RS     for tier in [ExecutionTier::Aot, ExecutionTier::Dev, ExecutionTier::Jit] {
-//RS         assert!(
-//RS             machine.supports_execution_tier(tier).is_ok(),
-//RS             "WASI machine rejected hosted tier {}",
-//RS             tier.as_str()
-//RS         );
-//RS     }
-//RS     let output =
-//RS         compile_target_fixture("wasi", source, &machine).expect("WASI witness should compile");
-//RS     assert!(output.web.is_none());
-//RS     assert_eq!(output.inferred_layer, RuntimeLayer::Alloc);
-//RS     assert!(
-//RS         output
-//RS             .rust
-//RS             .contains("// jet:target-dossier layer=alloc provider=target-providers-v1:")
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn hosted_default_target_witness() {
-//RS     let source = include_str!("target_witness/hosted_default.jet");
-//RS     let machine = TargetMachine::hosted("x86_64-unknown-linux-gnu");
-//RS     assert!(!machine.no_os);
-//RS     // Hosted default applies to AOT, Dev, and JIT; no no-OS tier is excluded.
-//RS     for tier in [ExecutionTier::Aot, ExecutionTier::Dev, ExecutionTier::Jit] {
-//RS         assert!(
-//RS             machine.supports_execution_tier(tier).is_ok(),
-//RS             "hosted machine rejected tier {}",
-//RS             tier.as_str()
-//RS         );
-//RS     }
-//RS     let output = compile_target_fixture("hosted_default", source, &machine)
-//RS         .expect("hosted default witness should compile");
-//RS     assert_eq!(output.inferred_layer, RuntimeLayer::Alloc);
-//RS     assert!(output.web.is_none());
-//RS     assert!(
-//RS         output
-//RS             .rust
-//RS             .contains("// jet:target-dossier layer=alloc provider=target-providers-v1:")
-//RS     );
-//RS     let (status, stdout, stderr) = common::build_and_run(
-//RS         "target_machine_hosted_witness",
-//RS         "hosted_default",
-//RS         source,
-//RS     );
-//RS     assert_eq!(status, 0, "hosted runner failed: {stderr}");
-//RS     assert_eq!(stdout, "hosted default\n");
-//RS }
-// END-PORT-PENDING 1166 tests/target_machines.rs:1-1152
+// Card #239: typed target machines — validation, firmware artifacts, QEMU.
+use Compiler.JetCli.Tests.Integration.Common as common
+use jet.Driver.[build_target_machine_firmware, qemu_target_machine_smoke, TargetMachineCompileError]
+use jet.Syntax.RuntimeLayer
+use jet.TargetMachine.[AllocatorPolicy, ByteSize, ByteSinkPolicy, ClockPolicy, EntropyPolicy, ExecutionTier, LinkerInput, MemoryAccess, MemoryKind, MemoryRegion, MmioAccess, MmioPolicy, PanicPolicy, ProviderContract, SchedulerPolicy, StartupPolicy, TargetCapability, TargetMachine, TargetMachineError, TargetMachineUse, UnsafeGate]
+use std.[fs, env, process]
+use std.process.Command
+// GATE #4494: native filesystem, environment and subprocess primitives.
 
+// Rust: tests/target_machines.rs:16
+fn checked_program_object(machine: &TargetMachine, dir: &OSPath) -> OSPath {
+    fs.create_dir_all(dir).expect("create program fixture directory")
+    source :: dir.join("program.c")
+    object :: dir.join("program.o")
+    fs.write(source, "typedef __SIZE_TYPE__ size_t;\n" +
+        "extern int __jet_target_write(const unsigned char *, size_t, size_t *);\n" +
+        "void __jet_program_entry(void) {\n" +
+        "    const unsigned char text[] = \"program-linked\\n\";\n" +
+        "    size_t used = 0;\n" +
+        "    __jet_target_write(text, sizeof(text) - 1, &used);\n" +
+        "}\n").expect("write program fixture")
+    clang :: env.var_os("CC").unwrap_or_else(fn() -> OSPath("clang"))
+    output :: Command.new(clang).arg("--target={machine.triple}")
+        .arg("-nostdlib").arg("-ffreestanding").arg("-fno-builtin")
+        .arg("-c").arg(source).arg("-o").arg(object).output()
+        .expect("spawn clang for checked program fixture")
+    assert(output.status.success(), "clang fixture failed: {String.from_utf8_lossy(output.stderr)}")
+    object
+}
+
+// Rust: tests/target_machines.rs:54
+fn sensor_machine() -> TargetMachine {
+    machine := TargetMachine.board_sensor_v1()
+    // Keep MMIO range used by compile-path volatile tests.
+    machine.memory = [
+        MemoryRegion.new("flash", 0x0800_0000, ByteSize.kib(512), MemoryKind.Flash, MemoryAccess.Rx),
+        MemoryRegion.new("ram", 0x2000_0000, ByteSize.kib(64), MemoryKind.Ram, MemoryAccess.Rw),
+        MemoryRegion.new("peripherals", 0x4000_0000, ByteSize.mib(1), MemoryKind.Mmio, MemoryAccess.Rw),
+    ]
+    machine.linker = LinkerInput.File { path: "vendor/memory.x", sha256: "sha256:abc123" }
+    machine.allocator = AllocatorPolicy.Fixed { region: "ram", size: ByteSize.kib(8) }
+    machine.panic = PanicPolicy.Abort
+    machine
+}
+
+// Rust: tests/target_machines.rs:538
+struct ProviderFactCase {
+    name: String
+    capability: TargetCapability
+    set: fn(&TargetMachine, ProviderContract) -> Unit
+    clear: fn(&TargetMachine) -> Unit
+}
+
+// Rust: tests/target_machines.rs:545
+fn target_test_provider(name: String) -> ProviderContract {
+    ProviderContract.new("tests.target.{name}", "sha256:tests-target-{name}")
+}
+// Rust: tests/target_machines.rs:552
+fn set_mmio_provider(machine: &TargetMachine, provider: ProviderContract) -> Unit {
+    machine.mmio = MmioPolicy.Provider { provider: ^provider }
+}
+// Rust: tests/target_machines.rs:556
+fn clear_mmio_provider(machine: &TargetMachine) -> Unit { machine.mmio = MmioPolicy.None }
+// Rust: tests/target_machines.rs:560
+fn set_wall_provider(machine: &TargetMachine, provider: ProviderContract) -> Unit {
+    machine.wall_clock = ClockPolicy.Provider { provider: ^provider }
+}
+// Rust: tests/target_machines.rs:564
+fn clear_wall_provider(machine: &TargetMachine) -> Unit { machine.wall_clock = ClockPolicy.None }
+// Rust: tests/target_machines.rs:568
+fn set_monotonic_provider(machine: &TargetMachine, provider: ProviderContract) -> Unit {
+    machine.monotonic_clock = ClockPolicy.Provider { provider: ^provider }
+}
+// Rust: tests/target_machines.rs:572
+fn clear_monotonic_provider(machine: &TargetMachine) -> Unit { machine.monotonic_clock = ClockPolicy.None }
+// Rust: tests/target_machines.rs:576
+fn set_zone_data_provider(machine: &TargetMachine, provider: ProviderContract) -> Unit {
+    machine.zone_data = ClockPolicy.Provider { provider: ^provider }
+}
+// Rust: tests/target_machines.rs:580
+fn clear_zone_data_provider(machine: &TargetMachine) -> Unit { machine.zone_data = ClockPolicy.None }
+// Rust: tests/target_machines.rs:584
+fn set_sleep_provider(machine: &TargetMachine, provider: ProviderContract) -> Unit {
+    machine.sleep = ClockPolicy.Provider { provider: ^provider }
+}
+// Rust: tests/target_machines.rs:588
+fn clear_sleep_provider(machine: &TargetMachine) -> Unit { machine.sleep = ClockPolicy.None }
+// Rust: tests/target_machines.rs:592
+fn set_entropy_provider(machine: &TargetMachine, provider: ProviderContract) -> Unit {
+    machine.entropy = EntropyPolicy.Provider { provider: ^provider }
+}
+// Rust: tests/target_machines.rs:596
+fn clear_entropy_provider(machine: &TargetMachine) -> Unit { machine.entropy = EntropyPolicy.None }
+// Rust: tests/target_machines.rs:600
+fn set_scheduler_provider(machine: &TargetMachine, provider: ProviderContract) -> Unit {
+    machine.scheduler = SchedulerPolicy.Cooperative { provider: ^provider }
+}
+// Rust: tests/target_machines.rs:604
+fn clear_scheduler_provider(machine: &TargetMachine) -> Unit { machine.scheduler = SchedulerPolicy.None }
+// Rust: tests/target_machines.rs:608
+fn set_io_read_provider(machine: &TargetMachine, provider: ProviderContract) -> Unit {
+    machine.byte_sink = ByteSinkPolicy.Provider { read: provider,
+        write: target_test_provider("io-write"), report: target_test_provider("panic-report") }
+}
+// Rust: tests/target_machines.rs:616
+fn clear_io_read_provider(machine: &TargetMachine) -> Unit {
+    machine.byte_sink = ByteSinkPolicy.Provider { read: nil,
+        write: target_test_provider("io-write"), report: target_test_provider("panic-report") }
+}
+// Rust: tests/target_machines.rs:624
+fn set_io_write_provider(machine: &TargetMachine, provider: ProviderContract) -> Unit {
+    machine.byte_sink = ByteSinkPolicy.Provider { read: target_test_provider("io-read"),
+        write: provider, report: target_test_provider("panic-report") }
+}
+// Rust: tests/target_machines.rs:632
+fn clear_io_write_provider(machine: &TargetMachine) -> Unit {
+    machine.byte_sink = ByteSinkPolicy.Provider { read: target_test_provider("io-read"),
+        write: nil, report: target_test_provider("panic-report") }
+}
+// Rust: tests/target_machines.rs:640
+fn set_panic_report_provider(machine: &TargetMachine, provider: ProviderContract) -> Unit {
+    machine.byte_sink = ByteSinkPolicy.Provider { read: target_test_provider("io-read"),
+        write: target_test_provider("io-write"), report: provider }
+}
+// Rust: tests/target_machines.rs:648
+fn clear_panic_report_provider(machine: &TargetMachine) -> Unit {
+    machine.byte_sink = ByteSinkPolicy.Provider { read: target_test_provider("io-read"),
+        write: target_test_provider("io-write"), report: nil }
+}
+// Rust: tests/target_machines.rs:656
+fn set_allocator_provider(machine: &TargetMachine, provider: ProviderContract) -> Unit {
+    machine.allocator = AllocatorPolicy.Provider { provider: ^provider }
+}
+// Rust: tests/target_machines.rs:660
+fn clear_allocator_provider(machine: &TargetMachine) -> Unit { machine.allocator = AllocatorPolicy.None }
+// Rust: tests/target_machines.rs:664
+fn set_startup_provider(machine: &TargetMachine, provider: ProviderContract) -> Unit {
+    machine.startup = StartupPolicy.Generated { provider: ^provider }
+}
+// Rust: tests/target_machines.rs:668
+fn clear_startup_provider(machine: &TargetMachine) -> Unit { machine.startup = StartupPolicy.Unspecified }
+
+// Rust: tests/target_machines.rs:672
+fn provider_fact_cases() -> [ProviderFactCase] {
+    [
+        ProviderFactCase { name: "MMIO", capability: TargetCapability.Mmio, set: set_mmio_provider, clear: clear_mmio_provider },
+        ProviderFactCase { name: "Time.Wall", capability: TargetCapability.TimeWall, set: set_wall_provider, clear: clear_wall_provider },
+        ProviderFactCase { name: "Time.Monotonic", capability: TargetCapability.TimeMonotonic, set: set_monotonic_provider, clear: clear_monotonic_provider },
+        ProviderFactCase { name: "Time.ZoneData", capability: TargetCapability.TimeZoneData, set: set_zone_data_provider, clear: clear_zone_data_provider },
+        ProviderFactCase { name: "Time.Sleep", capability: TargetCapability.TimeSleep, set: set_sleep_provider, clear: clear_sleep_provider },
+        ProviderFactCase { name: "Rand.Entropy", capability: TargetCapability.Entropy, set: set_entropy_provider, clear: clear_entropy_provider },
+        ProviderFactCase { name: "Target.Scheduler", capability: TargetCapability.Scheduler, set: set_scheduler_provider, clear: clear_scheduler_provider },
+        ProviderFactCase { name: "IO.Read", capability: TargetCapability.IoRead, set: set_io_read_provider, clear: clear_io_read_provider },
+        ProviderFactCase { name: "IO.Write", capability: TargetCapability.IoWrite, set: set_io_write_provider, clear: clear_io_write_provider },
+        ProviderFactCase { name: "Panic.Report", capability: TargetCapability.PanicReport, set: set_panic_report_provider, clear: clear_panic_report_provider },
+        ProviderFactCase { name: "Target.Allocator", capability: TargetCapability.Allocator, set: set_allocator_provider, clear: clear_allocator_provider },
+        ProviderFactCase { name: "Target.Startup", capability: TargetCapability.Startup, set: set_startup_provider, clear: clear_startup_provider },
+    ]
+}
+// Rust: tests/target_machines.rs:749
+fn required_capability_use(capability: TargetCapability) -> TargetMachineUse {
+    usage := TargetMachineUse { required_capabilities: [capability], ..TargetMachineUse.default() }
+    if capability == TargetCapability.Allocator { usage.heap_required = true }
+    usage
+}
+// Rust: tests/target_machines.rs:760
+fn has_missing_capability(errors: &[TargetMachineError], capability: TargetCapability) -> Bool {
+    errors.iter().any(fn(error) -> match error {
+        TargetMachineError.MissingTargetCapability { capability: found } -> found == capability.as_str()
+        TargetMachineError.HeapRequiresAllocator -> capability == TargetCapability.Allocator
+        _ -> false
+    })
+}
+// Rust: tests/target_machines.rs:773
+fn has_invalid_provider(errors: &[TargetMachineError], capability: TargetCapability) -> Bool {
+    errors.iter().any(fn(error) -> match error {
+        TargetMachineError.InvalidProviderContract { capability: found, .. } -> found == capability.as_str()
+        _ -> false
+    })
+}
+
+// Rust: tests/target_machines.rs:958
+fn write_target_fixture(tag: String, source: String) -> (OSPath, OSPath) {
+    dir :: env.temp_dir().join("jet_target_machine_witness_{tag}_{process.id()}")
+    _ :: fs.remove_dir_all(dir)
+    fs.create_dir_all(dir).expect("create target witness directory")
+    file :: dir.join("{tag}.jet")
+    fs.write(file, source).expect("write target witness")
+    (dir, file)
+}
+// Rust: tests/target_machines.rs:973
+fn compile_target_fixture(tag: String, source: String, machine: &TargetMachine) -> jet.CompileOutput TargetMachineCompileError! {
+    (dir, file) :: write_target_fixture(tag, source)
+    shown :: file.to_string_lossy()
+    result :: jet.Driver.compile_bundle_path_with_target_machine(shown, jet.Sema.CompileMode.Run, machine)
+    _ :: fs.remove_dir_all(dir)
+    result
+}

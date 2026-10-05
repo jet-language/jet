@@ -1,0 +1,175 @@
+use jetpack.JetOS.NixosBackend.*
+use jetpack.[RefSpec]
+use jet_env_model.ModuleEval.[SystemPlan, ServicePlan, OptionPlan]
+use jet_pkg_model.Merge.[Pkg]
+use std.[fs, env, process, io]
+
+// Rust: crates/jetpack/src/JetOS/nixos_backend.rs:1622
+fn table_with_nixpkgs() -> RefSpec.SourceTable {
+    RefSpec.SourceTable.from_decls([("default", "github:NixOS/nixpkgs/fef9403a3e4d31b0a23f0bacebbec52c248fbb51", RefSpec.ProviderKind.Nix)])
+}
+
+// Rust: crates/jetpack/src/JetOS/nixos_backend.rs:1630
+fn opt(key: String, value: String) -> OptionPlan { OptionPlan(key: key, value: value) }
+
+// Rust: crates/jetpack/src/JetOS/nixos_backend.rs:1637
+fn full_system() -> SystemPlan {
+    SystemPlan(name: "halcyon-gnome", target: "linux.x64",
+        packages: [Pkg.new("default", "firefox"), Pkg.new("default", "btop")],
+        services: [ServicePlan(name: "openssh", enable: true, extra: [("ports", "[22]")]), ServicePlan(name: "backup", enable: true, extra: [("exec", "/run/current-system/sw/bin/hello"), ("timer", "daily")])],
+        options: [opt("network.hostName", "halcyon-gnome"), opt("network.networkmanager.enable", "true"), opt("network.firewall.allowedTcpPorts", "[22, 443]"), opt("network.dns", "[\"1.1.1.1\", \"8.8.8.8\"]"), opt("filesystem.timeZone", "\"America/New_York\""), opt("services.localization.locale", "\"en_US.UTF-8\""), opt("services.localization.keyboardLayout", "\"us\""), opt("users.nate.normal", "true"), opt("users.nate.home", "\"/home/nate\""), opt("users.nate.groups", "[\"wheel\", \"networkmanager\"]"), opt("users.nate.initialPassword", "\"jetos\""), opt("users.nate.shell", "default.fish"), opt("boot.loader", ".SystemdBoot"), opt("boot.loader.efi.canTouchVariables", "false"), opt("boot.kernel.params", "[\"quiet\"]"), opt("init.defaultTarget", "\"graphical.target\""), opt("services.desktop.profile", ".Default"), opt("services.displayManager", "\"gdm\""), opt("services.desktop.autoLogin.user", "\"nate\""), opt("services.audio.pipewire.enable", "true"), opt("services.audio.rtkit.enable", "true")])
+}
+
+// Rust: crates/jetpack/src/JetOS/nixos_backend.rs:1690
+#Test("maps_full_system_to_nixos") {
+    table :: table_with_nixpkgs()
+    system :: full_system()
+    mapping :: map_system_to_nixos(&system, &table).expect("fully mapped system")
+    assert_eq(mapping.nixpkgs_owner, "NixOS")
+    assert_eq(mapping.nixpkgs_repo, "nixpkgs")
+    assert_eq(mapping.nixpkgs_rev, "fef9403a3e4d31b0a23f0bacebbec52c248fbb51")
+    assert_eq(mapping.system_packages, ["firefox", "btop"])
+    assert(mapping.body_lines.contains("  networking.hostName = \"halcyon-gnome\";"))
+    assert(mapping.body_lines.contains("  boot.loader.systemd-boot.enable = true;"))
+    assert(mapping.body_lines.contains("  services.desktopManager.gnome.enable = true;"))
+    assert(mapping.body_lines.contains("  services.displayManager.gdm.enable = true;"))
+    assert(mapping.body_lines.iter().any(l -> l.contains("shell = pkgs.fish;")))
+    assert(mapping.body_lines.contains("  programs.fish.enable = true;"))
+    assert(mapping.body_lines.iter().any(l -> l.contains("services.openssh.enable = true;")))
+    assert(mapping.body_lines.iter().any(l -> l.contains("systemd.services.\"backup\"")))
+    assert(mapping.body_lines.iter().any(l -> l.contains("systemd.timers.\"backup\"")))
+}
+
+// Rust: crates/jetpack/src/JetOS/nixos_backend.rs:1738
+#Test("flake_and_configuration_render_expected_nix") {
+    table :: table_with_nixpkgs()
+    system :: full_system()
+    mapping :: map_system_to_nixos(&system, &table).unwrap()
+    flake :: render_flake_nix(&system.name, &mapping)
+    assert(flake.contains("inputs.nixpkgs.url = \"github:NixOS/nixpkgs/fef9403a3e4d31b0a23f0bacebbec52c248fbb51\";"))
+    assert(flake.contains("nixosConfigurations.halcyon-gnome = lib.nixosSystem {"))
+    assert(flake.contains("config = self.nixosConfigurations.halcyon-gnome.config;"))
+    assert(flake.contains("firmware = pkgs.OVMF.fd;"))
+    configuration :: render_configuration_nix(&system, &mapping)
+    assert(configuration.contains("system.stateVersion = \"26.05\";"))
+    assert(!configuration.contains("system.nixos.distroName"))
+    assert(!configuration.contains("system.nixos.distroId"))
+    assert(configuration.contains("environment.systemPackages = map jetosPkg [ \"firefox\" \"btop\" ];"))
+    assert(configuration.contains("programs.bash.promptInit = lib.mkAfter"))
+    assert(configuration.contains("PS1='NixOS comparison $ '"))
+    assert(configuration.contains("environment.etc.issue.text = \"NixOS comparison guest"))
+    assert(configuration.contains("systemd.services.nixos-comparison-proof = {"))
+    assert(configuration.contains("path = [ pkgs.bash pkgs.util-linux pkgs.systemd"))
+    assert(configuration.contains("prompt=$(runuser -u nate -- bash --noprofile --rcfile /etc/bashrc -i -c 'printf \"%s\" \"$PS1\"'"))
+    assert(configuration.contains("pgrep -u nate -f gnome-shell"))
+    assert(configuration.contains("NIXOS_COMPARISON_PROOF:"))
+}
+
+// Rust: crates/jetpack/src/JetOS/nixos_backend.rs:1769
+#Test("unmapped_option_key_is_rejected") {
+    table :: table_with_nixpkgs()
+    system := full_system()
+    system.options.push(opt("apps.workload.bogusFeature", "true"))
+    err :: map_system_to_nixos(&system, &table).unwrap_err()
+    assert(err.iter().any(m -> m.contains("option `apps.workload.bogusFeature`")), "{err:?}")
+}
+
+// Rust: crates/jetpack/src/JetOS/nixos_backend.rs:1784
+#Test("non_nixpkgs_package_is_rejected") {
+    table :: table_with_nixpkgs()
+    system := full_system()
+    system.packages.push(Pkg.new("mine", "hello"))
+    err :: map_system_to_nixos(&system, &table).unwrap_err()
+    assert(err.iter().any(m -> m.contains("package `mine.hello`")), "{err:?}")
+}
+
+// Rust: crates/jetpack/src/JetOS/nixos_backend.rs:1798
+#Test("unknown_service_without_exec_is_rejected") {
+    table :: table_with_nixpkgs()
+    system := full_system()
+    system.services.push(ServicePlan(name: "mystery", enable: true, extra: []))
+    err :: map_system_to_nixos(&system, &table).unwrap_err()
+    assert(err.iter().any(m -> m.contains("service `mystery`")), "{err:?}")
+}
+
+// Rust: crates/jetpack/src/JetOS/nixos_backend.rs:1814
+#Test("missing_nixpkgs_pin_is_rejected") {
+    table :: RefSpec.SourceTable.from_decls([] as [(String, String, RefSpec.ProviderKind)])
+    system := full_system()
+    system.packages = []
+    system.services = []
+    system.options = []
+    err :: map_system_to_nixos(&system, &table).unwrap_err()
+    assert(err.iter().any(m -> m.contains("needs exactly one nixpkgs pin")), "{err:?}")
+}
+
+// Rust: crates/jetpack/src/JetOS/nixos_backend.rs:1832
+#Test("nixos_migration_plan_snapshots_build_and_boot_argv") {
+    dir_root :: env.temp_dir().join("nixos-migration-test-plan-{process.id()}")
+    _ :: fs.remove_dir_all(&dir_root)
+    fs.create_dir_all(&dir_root).unwrap()
+    system :: full_system()
+    path :: write_migration_plan(&dir_root, &system, "halcyon.qcow2", false).unwrap()
+    text :: fs.read_to_string(&path).unwrap()
+    assert(text.contains("\"kind\":\"nixos.migration.plan\""))
+    assert(text.contains("\"phase\":\"nix-build-disk\""))
+    assert(text.contains("\"path:.#disk\""))
+    assert(text.contains("\"phase\":\"nix-build-firmware\""))
+    assert(text.contains("\"path:.#firmware\""))
+    assert(text.contains("\"phase\":\"boot-real-guest\""))
+    assert(text.contains("\"-enable-kvm\""))
+    assert(text.contains("\"virtio-gpu-pci\""))
+    assert(text.contains("\"-qmp\""))
+    assert(text.contains("file=halcyon.qcow2,format=qcow2,if=virtio"))
+    _ :: fs.remove_dir_all(&dir_root)
+}
+
+// Rust: crates/jetpack/src/JetOS/nixos_backend.rs:1854
+#Test("migration_bundle_preserves_observed_guest_identity") {
+    root :: env.temp_dir().join("nixos-migration-guest-fact-{process.id()}")
+    _ :: fs.remove_dir_all(&root)
+    fs.create_dir_all(&root).unwrap()
+    disk :: root.join("staged.qcow2")
+    screenshot :: root.join("staged.png")
+    plan :: root.join("plan.json")
+    fs.write(&disk, b"qcow2").unwrap()
+    fs.write(&screenshot, b"png").unwrap()
+    fs.write(&plan, b"{}").unwrap()
+    system :: full_system()
+    mapping :: map_system_to_nixos(&system, &table_with_nixpkgs()).unwrap()
+    report :: "{\"host\":\"halcyon-gnome\",\"os_release\":\"NixOS\",\"prompt\":\"NixOS observed-profile\",\"banner\":\"NixOS comparison guest\",\"proof\":\"live-desktop\"}"
+    run :: MigrationRun(report: report, screenshot: screenshot, argv: ["qemu-system-x86_64"])
+    out :: root.join("published")
+    publish_migration_bundle(&out, &system, &mapping, &disk, &plan, &run).unwrap()
+    host :: out.join("nixos/halcyon-gnome")
+    fact :: fs.read_to_string(host.join("guest-fact.json")).unwrap()
+    assert(fact.contains("\"kind\":\"nixos.migration.vmtest.guest-fact\""))
+    assert(fact.contains("\"os_release\":\"NixOS\""))
+    assert(fact.contains("\"prompt\":\"NixOS observed-profile\""))
+    assert(!fact.contains("\"prompt\":\"NixOS halcyon-gnome\""))
+    assert(fact.contains("\"banner\":\"NixOS comparison guest\""))
+    assert(!fact.to_ascii_lowercase().contains("jetos"))
+    assert(host.join("system.qcow2").is_file())
+    assert(host.join("proof.json").is_file())
+    assert(host.join("receipt.json").is_file())
+    _ :: fs.remove_dir_all(&root)
+}
+
+// Rust: crates/jetpack/src/JetOS/nixos_backend.rs:1890
+#Test("malformed_guest_report_is_not_projected_into_diagnostics") {
+    report :: "{not-json AWS_SECRET_ACCESS_KEY=secret Authorization: Bearer token"
+    error :: require_nixos_guest_fact(&report).unwrap_err()
+    assert_eq(error, "invalid guest fact JSON; guest payload was suppressed")
+    assert(!error.contains("secret"))
+    assert(!error.contains("token"))
+}
+
+// Rust: crates/jetpack/src/JetOS/nixos_backend.rs:1902
+#Test("cleanup_failure_preserves_the_root_cause") {
+    stage :: OSPath.new("/private-stage")
+    error :: finish_private_stage_with(stage, Err("root build failure"), _ -> Err(io.Error.new(.PermissionDenied, "denied"))).unwrap_err()
+    assert(error.contains("root build failure"))
+    assert(error.contains("cleanup also failed"))
+    assert(error.contains("/private-stage"))
+    assert(error.contains("denied"))
+}

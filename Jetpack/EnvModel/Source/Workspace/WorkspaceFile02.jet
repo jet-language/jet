@@ -1,17 +1,18 @@
-// PORT-PENDING 0960 crates-jetpack-src-workspacefile: crates/jetpack/src/WorkspaceFile.rs:1-13
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! Re-export shim — the declaration-resolved workspace evaluator now lives in
-//RS //! `jet-env-model`
-//RS //! (card #367 D-PRODUCT-SPLIT1=C slice 5).
-//RS //!
-//RS //! All types and functions are re-exported here so existing call sites
-//RS //! that use `jetpack::WorkspaceFile::…` continue to compile unchanged.
-//RS 
-//RS pub use jet_env_model::WorkspaceFile::{
-//RS     changed_workspace_source_diagnostic, evaluate, evaluate_checked_source, evaluate_source,
-//RS     has_build_entry, load, load_checked, load_checked_source, load_checked_with_resolver,
-//RS     resolve_workspace_source, WorkspaceMember, WorkspacePlan, WorkspaceSnapshot, WorkspaceSource,
-//RS     WorkspaceSourceRole,
-//RS };
-// END-PORT-PENDING 0960 crates/jetpack/src/WorkspaceFile.rs:1-13
+// Rust: crates/jetpack/src/WorkspaceFile.rs:1
+// The Rust compatibility re-export shim has no Jet declaration: callers use
+// the canonical jet_env_model workspace owner directly.
+// Rust: crates/jetpack/src/WorkspaceFile.rs:8
+// changed_workspace_source_diagnostic -> envmodel_changed_workspace_source_diagnostic
+// evaluate -> envmodel_workspace_evaluate
+// evaluate_checked_source -> envmodel_workspace_evaluate_checked_source
+// evaluate_source -> envmodel_workspace_evaluate_source
+// has_build_entry -> envmodel_workspace_has_build_entry
+// load -> envmodel_workspace_load
+// load_checked -> envmodel_workspace_load_checked
+// load_checked_source -> envmodel_workspace_load_checked_source
+// load_checked_with_resolver -> envmodel_workspace_load_checked_with_resolver
+// These functions and WorkspaceSnapshot remain in WorkspaceFile.jet.
+// resolve_workspace_source, WorkspaceSource and WorkspaceSourceRole remain
+// in the canonical declaration resolver; WorkspaceMember and WorkspacePlan
+// remain in the canonical workspace plan owner. No duplicate aliases.
 

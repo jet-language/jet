@@ -1,0 +1,305 @@
+use std.[fs, env, process]
+use tests.common.[jetpack_bin, Scratch]
+use tests.support.no_nix_namespace.[run_in_no_nix_namespace, NetworkMode]
+use jet_env_model.ModuleEval.[evaluate_env_with_environment, SecretDeclaration]
+use Jetpack.Store.seal_local_output
+use Jetpack.Envelope.try_output_hash_of
+// GATE #4494: real subprocess execution, native environment and sealed fixtures.
+// Rust: tests/env_dev_trust.rs:22
+fn jetpack() -> process.Command { process.Command.new(jetpack_bin()) }
+// Rust: tests/env_dev_trust.rs:26
+fn jet() -> process.Command { process.Command.new(env.test_binary("jet")) }
+// Rust: tests/env_dev_trust.rs:36
+fn write_fastfetch_fixture(fixtures: OSPath, root: OSPath, staging_dir: OSPath) -> {
+    fs.create_dir_all(fixtures) ?? panic("create fixtures")
+    bin :: staging_dir.join("bin")
+    fs.create_dir_all(bin) ?? panic("create bin")
+    fastfetch :: bin.join("fastfetch")
+    fs.write(fastfetch, "#!/bin/sh\necho fastfetch stub\n") ?? panic("write fastfetch")
+    if core.sys.target.selected_family() == "unix" { // GATE #4483
+        fs.set_permissions(fastfetch, fs.Permissions.from_mode(0o755)) ?? panic("chmod fastfetch")
+    }
+    seal_local_output(staging_dir) ?? panic("seal staging")
+    digest :: try_output_hash_of(staging_dir.to_string_lossy()) ?? panic("hash staging")
+    out_dir :: root.join("hangar").join("objects").join(digest)
+    fs.create_dir_all(out_dir.parent() ?? panic("object parent")) ?? panic("create object parent")
+    staging_permissions := (fs.metadata(staging_dir) ?? panic("staging metadata")).permissions()
+    if core.sys.target.selected_family() == "unix" { staging_permissions.set_mode(staging_permissions.mode() | 0o200) }
+    else { staging_permissions.set_readonly(false) }
+    fs.set_permissions(staging_dir, staging_permissions) ?? panic("make staging writable")
+    fs.rename(staging_dir, out_dir) ?? panic("publish fixture")
+    seal_local_output(out_dir) ?? panic("seal object")
+    assert_eq(try_output_hash_of(out_dir.to_string_lossy()) ?? panic("hash object"), digest, "published fixture must retain its content-addressed identity")
+    drv_path :: fixtures.join("fastfetch.drv")
+    fs.write(drv_path, "fixture derivation identity\n") ?? panic("write derivation")
+    json :: format("[{{\"drvPath\":{:?},\"outputs\":{{\"out\":{:?}}}}}]", drv_path.to_string_lossy(), out_dir.to_string_lossy())
+    fs.write(fixtures.join("nixpkgs-fastfetch.json"), json) ?? panic("write fixture metadata")
+}
+// Rust: tests/env_dev_trust.rs:85
+fn write_packageless_project(dir: OSPath, main_src: String) -> {
+    fs.write(dir.join("env.jet"), "module env.dev { }\n") ?? panic("write env")
+    fs.write(dir.join("main.jet"), main_src) ?? panic("write main")
+}
+// Rust: tests/env_dev_trust.rs:92
+fn write_package_project(dir: OSPath, main_src: String) -> {
+    fs.write(dir.join("env.jet"), "module env.dev { packages: [nixpkgs.fastfetch] }\n") ?? panic("write env")
+    fs.write(dir.join("main.jet"), main_src) ?? panic("write main")
+}
+// Rust: tests/env_dev_trust.rs:103
+fn write_secret_project(dir: OSPath, main_src: String) -> {
+    fs.write(dir.join("env.jet"), "module env.dev { secrets: { db_password: { required: true } } }\n") ?? panic("write env")
+    fs.write(dir.join("main.jet"), main_src) ?? panic("write main")
+}
+// Rust: tests/env_dev_trust.rs:112
+fn assert_cached_entries(proj: OSPath, root: OSPath, home: OSPath) -> {
+    entry :: jetpack().args(["env", "--no-color", "--", "fastfetch"]).current_dir(proj).env("JETPACK_ROOT", root).env("HOME", home).env_remove("JETPACK_FIXTURES").output() ?? panic("cached env")
+    assert(entry.status.success(), "cached env entry failed: {String.from_utf8_lossy(entry.stderr)}")
+    assert_eq(String.from_utf8_lossy(entry.stdout).trim(), "fastfetch stub")
+    assert(!String.from_utf8_lossy(entry.stderr).contains("continue?"))
+    use_shell :: jetpack().args(["use", "fastfetch@jetpack", "--no-color", "--", "fastfetch"]).current_dir(proj).env("JETPACK_ROOT", root).env("HOME", home).env_remove("JETPACK_FIXTURES").output() ?? panic("cached use")
+    assert(use_shell.status.success(), "cached use entry failed: {String.from_utf8_lossy(use_shell.stderr)}")
+    assert_eq(String.from_utf8_lossy(use_shell.stdout).trim(), "fastfetch stub")
+    assert(!String.from_utf8_lossy(use_shell.stderr).contains("continue?"))
+}
+// Rust: tests/env_dev_trust.rs:159
+#Test("typed_secret_map_captures_metadata_and_read_time_composition") {
+    project :: Scratch.new("typed-secret-map")
+    source :: """
+        module env.ci {
+            secrets: {
+                API_KEY: {
+                    required: true
+                    description: "CI credential"
+                    allowed_environments: ["ci", "prod"]
+                    rotation: max_age(90d)
+                    default: none
+                    generate: none
+                }
+                DB_URL: compose(
+                    template: postgres://{DB_USER}:{DB_PASSWORD}@{DB_HOST}/app
+                    from: [DB_HOST, DB_USER, DB_PASSWORD]
+                )
+            }
+        }
+        module env.prod { }
+    """
+    plan :: evaluate_env_with_environment(source, project.path, Some("ci")) ?? panic("typed metadata and compose declarations must evaluate")
+    assert_eq(plan.secrets.iter().map(|secret| -> secret.name.as_str()).collect(), ["API_KEY", "DB_URL"])
+    assert(plan.secrets[0].required)
+    assert_eq(plan.secrets[0].allowed_environments, ["ci", "prod"])
+    assert_eq(plan.secrets[1].declaration, SecretDeclaration.Compose{template: "postgres://{DB_USER}:{DB_PASSWORD}@{DB_HOST}/app", from: ["DB_HOST", "DB_PASSWORD", "DB_USER"]})
+    shown :: format("{plan:?}")
+    assert(shown.contains("API_KEY"), "plan disclosure must retain names: {shown}")
+    assert(shown.contains("DB_URL"), "plan disclosure must retain names: {shown}")
+    assert(!shown.contains("CI credential"), "metadata text must not be disclosed: {shown}")
+    assert(!shown.contains("postgres://"), "compose templates must not be disclosed: {shown}")
+}
+// Rust: tests/env_dev_trust.rs:230
+#Test("env_runs_no_project_function") {
+    proj :: Scratch.new("env-no-fn")
+    root :: Scratch.new("env-no-fn-root")
+    home :: Scratch.new("env-no-fn-home")
+    write_packageless_project(proj.path, "fn run() { print(\"SHOULD-NOT-RUN\") }\n")
+    out :: jetpack().args(["env", "--no-color", "--", "echo", "entered"]).current_dir(proj.path).env("JETPACK_ROOT", root.path).env("HOME", home.path).output() ?? panic("env entry")
+    assert(out.status.success(), "stderr: {String.from_utf8_lossy(out.stderr)}")
+    stdout :: String.from_utf8_lossy(out.stdout)
+    assert(stdout.contains("entered"), "stdout: {stdout}")
+    assert(!stdout.contains("SHOULD-NOT-RUN"), "env entry must never run a project function: {stdout}")
+}
+// Rust: tests/env_dev_trust.rs:260
+#Test("cached_env_and_use_enter_offline_without_confirmation") {
+    TEST_NAME :: "cached_env_and_use_enter_offline_without_confirmation"
+    PROJECT_ENV :: "JETPACK_CACHED_ENTRY_PROJECT"
+    ROOT_ENV :: "JETPACK_CACHED_ENTRY_ROOT"
+    HOME_ENV :: "JETPACK_CACHED_ENTRY_HOME"
+    if Some(project) :: env.var_os(PROJECT_ENV).map(OSPath.from) {
+        root :: OSPath.from(env.var_os(ROOT_ENV) ?? panic("cached-entry root"))
+        home :: OSPath.from(env.var_os(HOME_ENV) ?? panic("cached-entry home"))
+        run_in_no_nix_namespace(TEST_NAME, NetworkMode.Disabled, || -> assert_cached_entries(project, root, home))
+        return
+    }
+    proj :: Scratch.new("cached-entry")
+    root :: Scratch.new("cached-entry-root")
+    home :: Scratch.new("cached-entry-home")
+    fixtures :: Scratch.new("cached-entry-fixtures")
+    fastfetch_out :: Scratch.new("cached-entry-fastfetch-out")
+    fs.write(proj.path.join("env.jet"), "module env.dev { packages: [jetpack.fastfetch] }\n") ?? panic("write env")
+    write_fastfetch_fixture(fixtures.path, root.path, fastfetch_out.path)
+    fs.copy(fixtures.join("nixpkgs-fastfetch.json"), fixtures.join("jetpack-fastfetch.json")) ?? panic("copy fixture")
+    pattern :: "{proj.path.display()}*"
+    grant :: jetpack().args(["config", "trust", "add", pattern, "--no-color"]).env("HOME", home.path).output() ?? panic("grant")
+    assert(grant.status.success(), "trust grant failed: {String.from_utf8_lossy(grant.stderr)}")
+    prep :: jetpack().args(["env", "--prep", "--yes", "--no-color", "--offline"]).current_dir(proj.path).env("JETPACK_ROOT", root.path).env("HOME", home.path).env("JETPACK_FIXTURES", fixtures.path).output() ?? panic("prep")
+    assert(prep.status.success(), "env prep failed: {String.from_utf8_lossy(prep.stderr)}")
+    fs.remove_file(fixtures.join("nixpkgs-fastfetch.json")) ?? panic("remove nix metadata")
+    fs.remove_file(fixtures.join("jetpack-fastfetch.json")) ?? panic("remove jetpack metadata")
+    fs.remove_file(fixtures.join("fastfetch.drv")) ?? panic("remove derivation")
+    env.set_var(PROJECT_ENV, proj.path)
+    env.set_var(ROOT_ENV, root.path)
+    env.set_var(HOME_ENV, home.path)
+    // The helper re-executes the named test in the real isolated namespace.
+    run_in_no_nix_namespace(TEST_NAME, NetworkMode.Disabled, || -> {})
+    env.remove_var(PROJECT_ENV)
+    env.remove_var(ROOT_ENV)
+    env.remove_var(HOME_ENV)
+}
+// Rust: tests/env_dev_trust.rs:340
+#Test("project_dev_runs_fn_dev_after_service_wait") {
+    proj :: Scratch.new("dev-runs-fn-dev")
+    root :: Scratch.new("dev-runs-fn-dev-root")
+    home :: Scratch.new("dev-runs-fn-dev-home")
+    write_packageless_project(proj.path, "fn dev() { print(\"DEV-RAN\") }\n")
+    out :: jetpack().args(["dev", "--no-color"]).current_dir(proj.path).env("JETPACK_ROOT", root.path).env("HOME", home.path).output() ?? panic("dev")
+    assert(out.status.success(), "stderr: {String.from_utf8_lossy(out.stderr)}")
+    stdout :: String.from_utf8_lossy(out.stdout)
+    assert(stdout.contains("DEV-RAN"), "stdout: {stdout}")
+}
+// Rust: tests/env_dev_trust.rs:364
+#Test("dev_no_entry_is_e1254") {
+    proj :: Scratch.new("dev-no-entry")
+    root :: Scratch.new("dev-no-entry-root")
+    home :: Scratch.new("dev-no-entry-home")
+    write_packageless_project(proj.path, "fn other() { print(\"nope\") }\n")
+    out :: jetpack().args(["dev", "--no-color"]).current_dir(proj.path).env("JETPACK_ROOT", root.path).env("HOME", home.path).output() ?? panic("dev")
+    assert_eq(out.status.code(), Some(2))
+    stderr :: String.from_utf8_lossy(out.stderr)
+    assert(stderr.contains("E1254"), "stderr: {stderr}")
+}
+// Rust: tests/env_dev_trust.rs:386
+#Test("dev_untrusted_non_interactive_is_e1255") {
+    proj :: Scratch.new("dev-untrusted")
+    root :: Scratch.new("dev-untrusted-root")
+    home :: Scratch.new("dev-untrusted-home")
+    write_package_project(proj.path, "fn dev() { print(\"DEV-RAN\") }\n")
+    out :: jetpack().args(["dev", "--no-color"]).current_dir(proj.path).env("JETPACK_ROOT", root.path).env("HOME", home.path).output() ?? panic("dev")
+    assert_eq(out.status.code(), Some(2))
+    stderr :: String.from_utf8_lossy(out.stderr)
+    assert(stderr.contains("E1255"), "stderr: {stderr}")
+    assert(!String.from_utf8_lossy(out.stdout).contains("DEV-RAN"))
+}
+// Rust: tests/env_dev_trust.rs:408
+#Test("dev_secret_env_untrusted_non_interactive_is_e1255") {
+    proj :: Scratch.new("dev-secret-untrusted")
+    root :: Scratch.new("dev-secret-untrusted-root")
+    home :: Scratch.new("dev-secret-untrusted-home")
+    write_secret_project(proj.path, "fn dev() { print(\"DEV-RAN\") }\n")
+    out :: jetpack().args(["dev", "--no-color"]).current_dir(proj.path).env("JETPACK_ROOT", root.path).env("HOME", home.path).output() ?? panic("dev")
+    assert_eq(out.status.code(), Some(2))
+    stderr :: String.from_utf8_lossy(out.stderr)
+    assert(stderr.contains("E1255"), "stderr: {stderr}")
+    assert(!String.from_utf8_lossy(out.stdout).contains("DEV-RAN"))
+}
+// Rust: tests/env_dev_trust.rs:430
+#Test("dev_declared_missing_secret_is_e1263") {
+    proj :: Scratch.new("dev-secret-missing")
+    root :: Scratch.new("dev-secret-missing-root")
+    home :: Scratch.new("dev-secret-missing-home")
+    write_secret_project(proj.path, "fn dev() { print(\"DEV-RAN\") }\n")
+    out :: jetpack().args(["dev", "--no-color", "--trust"]).current_dir(proj.path).env("JETPACK_ROOT", root.path).env("HOME", home.path).output() ?? panic("dev")
+    assert_eq(out.status.code(), Some(2))
+    stderr :: String.from_utf8_lossy(out.stderr)
+    assert(stderr.contains("E1263 required secret named db_password is missing for environment dev"), "stderr: {stderr}")
+    assert(!String.from_utf8_lossy(out.stdout).contains("DEV-RAN"))
+}
+// Rust: tests/env_dev_trust.rs:454
+#Test("env_declared_missing_secret_is_e1263") {
+    proj :: Scratch.new("env-secret-missing")
+    root :: Scratch.new("env-secret-missing-root")
+    home :: Scratch.new("env-secret-missing-home")
+    write_secret_project(proj.path, "fn run() { print(\"SHOULD-NOT-RUN\") }\n")
+    out :: jetpack().args(["env", "--no-color", "--trust", "--", "echo", "entered"]).current_dir(proj.path).env("JETPACK_ROOT", root.path).env("HOME", home.path).output() ?? panic("env")
+    assert_eq(out.status.code(), Some(2))
+    stderr :: String.from_utf8_lossy(out.stderr)
+    assert(stderr.contains("E1263 required secret named db_password is missing for environment dev"), "stderr: {stderr}")
+    assert(!String.from_utf8_lossy(out.stdout).contains("entered"))
+}
+// Rust: tests/env_dev_trust.rs:478
+#Test("secret_env_beats_foreign_flake_autodetect") {
+    proj :: Scratch.new("secret-env-beats-flake")
+    root :: Scratch.new("secret-env-beats-flake-root")
+    home :: Scratch.new("secret-env-beats-flake-home")
+    write_secret_project(proj.path, "fn run() { print(\"SHOULD-NOT-RUN\") }\n")
+    fs.write(proj.path.join("flake.nix"), "{ outputs = _: {}; }\n") ?? panic("write flake")
+    out :: jetpack().args(["env", "--no-color", "--", "echo", "entered"]).current_dir(proj.path).env("JETPACK_ROOT", root.path).env("HOME", home.path).output() ?? panic("env")
+    assert_eq(out.status.code(), Some(2))
+    stderr :: String.from_utf8_lossy(out.stderr)
+    assert(stderr.contains("E1255"), "stderr: {stderr}")
+    assert(!stderr.contains("E1256"), "stderr: {stderr}")
+}
+// Rust: tests/env_dev_trust.rs:500
+#Test("dev_trust_flag_bypasses") {
+    proj :: Scratch.new("dev-trust-flag")
+    root :: Scratch.new("dev-trust-flag-root")
+    home :: Scratch.new("dev-trust-flag-home")
+    fixtures :: Scratch.new("dev-trust-flag-fixtures")
+    fastfetch_out :: Scratch.new("dev-trust-flag-fastfetch-out")
+    write_package_project(proj.path, "fn dev() { print(\"DEV-RAN\") }\n")
+    write_fastfetch_fixture(fixtures.path, root.path, fastfetch_out.path)
+    out :: jetpack().args(["dev", "--no-color", "--offline", "--trust"]).current_dir(proj.path).env("JETPACK_ROOT", root.path).env("HOME", home.path).env("JETPACK_FIXTURES", fixtures.path).output() ?? panic("dev")
+    assert(out.status.success(), "stderr: {String.from_utf8_lossy(out.stderr)}")
+    stdout :: String.from_utf8_lossy(out.stdout)
+    assert(stdout.contains("DEV-RAN"), "stdout: {stdout}")
+    trust_file :: home.path.join(".jet").join("trust")
+    assert(!trust_file.exists(), "`--trust` must never persist a grant")
+}
+// Rust: tests/env_dev_trust.rs:531
+#Test("dev_pattern_trust_preauthorizes") {
+    proj :: Scratch.new("dev-pattern-trust")
+    root :: Scratch.new("dev-pattern-trust-root")
+    home :: Scratch.new("dev-pattern-trust-home")
+    fixtures :: Scratch.new("dev-pattern-trust-fixtures")
+    fastfetch_out :: Scratch.new("dev-pattern-trust-fastfetch-out")
+    write_package_project(proj.path, "fn dev() { print(\"DEV-RAN\") }\n")
+    write_fastfetch_fixture(fixtures.path, root.path, fastfetch_out.path)
+    pattern :: "{proj.path.display()}*"
+    add_out :: jetpack().args(["config", "trust", "add", pattern, "--no-color"]).env("HOME", home.path).output() ?? panic("add trust")
+    assert(add_out.status.success(), "stderr: {String.from_utf8_lossy(add_out.stderr)}")
+    out :: jetpack().args(["dev", "--no-color", "--offline"]).current_dir(proj.path).env("JETPACK_ROOT", root.path).env("HOME", home.path).env("JETPACK_FIXTURES", fixtures.path).output() ?? panic("dev")
+    assert(out.status.success(), "stderr: {String.from_utf8_lossy(out.stderr)}")
+    stdout :: String.from_utf8_lossy(out.stdout)
+    assert(stdout.contains("DEV-RAN"), "stdout: {stdout}")
+}
+// Rust: tests/env_dev_trust.rs:571
+#Test("config_trust_list_and_remove") {
+    home :: Scratch.new("config-trust-list")
+    pattern :: "/some/project/*"
+    _ :: jetpack().args(["config", "trust", "add", pattern, "--no-color"]).env("HOME", home.path).output() ?? panic("add")
+    list_out :: jetpack().args(["config", "trust", "list", "--no-color"]).env("HOME", home.path).output() ?? panic("list")
+    assert(list_out.status.success())
+    stderr :: String.from_utf8_lossy(list_out.stderr)
+    assert(stderr.contains(pattern), "stderr: {stderr}")
+    remove_out :: jetpack().args(["config", "trust", "remove", pattern, "--no-color"]).env("HOME", home.path).output() ?? panic("remove")
+    assert(remove_out.status.success())
+    trust_file :: home.path.join(".jet").join("trust")
+    contents :: fs.read_to_string(trust_file).unwrap_or_default()
+    assert(!contents.contains(pattern), "contents: {contents}")
+}
+// Rust: tests/env_dev_trust.rs:602
+#Test("top_level_jet_trust_grant_list_explain_revoke") {
+    home :: Scratch.new("top-level-jet-trust")
+    grant :: jet().args(["trust", "grant", "acme/web@github:postgres.service", "--scope", "repo", "--color=never"]).env("HOME", home.path).output() ?? panic("grant")
+    assert(grant.status.success(), "stderr: {String.from_utf8_lossy(grant.stderr)}")
+    list :: jet().args(["trust", "list", "--json", "--color=never"]).env("HOME", home.path).output() ?? panic("list")
+    assert(list.status.success())
+    stdout :: String.from_utf8_lossy(list.stdout)
+    assert(stdout.contains("\"authority\":\"service\""), "stdout: {stdout}")
+    assert(stdout.contains("\"subject\":\"acme/web@github:postgres.service\""), "stdout: {stdout}")
+    assert(stdout.contains("\"scope\":\"repo\""), "stdout: {stdout}")
+    explain :: jet().args(["trust", "explain", "service:acme/web@github:postgres.service", "--color=never"]).env("HOME", home.path).output() ?? panic("explain")
+    assert(explain.status.success())
+    stderr :: String.from_utf8_lossy(explain.stderr)
+    assert(stderr.contains("exact authority: service"), "stderr: {stderr}")
+    revoke :: jet().args(["trust", "revoke", "service:acme/web@github:postgres.service", "--color=never"]).env("HOME", home.path).output() ?? panic("revoke")
+    assert(revoke.status.success())
+    list_after :: jet().args(["trust", "list", "--json", "--color=never"]).env("HOME", home.path).output() ?? panic("list after")
+    assert_eq(String.from_utf8_lossy(list_after.stdout).trim(), "{\"grants\":[]}")
+}
+// Rust: tests/env_dev_trust.rs:681
+#Test("top_level_jet_trust_grant_scope_needs_value") {
+    home :: Scratch.new("trust-scope-value-home")
+    out :: jet().args(["trust", "grant", "service:postgres.service", "--scope"]).env("HOME", home.path).env("NO_COLOR", "1").output() ?? panic("grant missing scope")
+    assert_eq(out.status.code(), Some(2))
+    stderr :: String.from_utf8_lossy(out.stderr)
+    assert(stderr.contains("couldn't parse trust grant"), "stderr: {stderr}")
+    assert(stderr.contains("unknown trust scope"), "stderr: {stderr}")
+}

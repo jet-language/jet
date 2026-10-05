@@ -1,0 +1,259 @@
+// Native filesystem fixtures. GATE #4494: std fs/env and atomic counter primitives.
+use std.sync.atomic.[AtomicUsize, Ordering]
+transition_test_counter :: AtomicUsize.new(1)
+
+// Rust: crates/jetpack/src/Transition.rs:2235
+fn temp_root(label: String) -[FS, Env]> String {
+    sequence :: transition_test_counter.fetch_add(1, Ordering.Relaxed) // GATE #4494
+    root :: files.join(std.env.temp_dir().to_string_lossy().to_string(), "jet-transition-{label}-{sequence}")
+    std.fs.create_dir_all(root) ?? panic("temp root: {err}")
+    root
+}
+
+// Rust: crates/jetpack/src/Transition.rs:2245
+#Test("environment_split_and_fold_restore_exact_root") {
+    root :: temp_root("env")
+    original :: "name: \"demo\"\nenvironments: { development: Environment{ tools: [\"git\"] } }\n".bytes()
+    std.fs.write(files.join(root, TRANSITION_PACKAGE_FILE), original) ?? panic("write: {err}")
+    result :: env_transition_split(root, SplitTarget.Environment, false) ?? panic("split: {err}")
+    assert(result.summary.before_fingerprint == result.summary.after_fingerprint)
+    assert(std.fs.is_file(files.join(root, "package/env.jet")))
+    env_transition_fold(root, "package/env.jet", false) ?? panic("fold: {err}")
+    assert((std.fs.read(files.join(root, TRANSITION_PACKAGE_FILE)) ?? panic("read: {err}")) == original)
+    assert(!std.fs.exists(files.join(root, "package/env.jet")))
+    std.fs.remove_dir_all(root) ?? panic("cleanup: {err}")
+}
+
+// Rust: crates/jetpack/src/Transition.rs:2263
+#Test("stale_split_refuses_without_mutation") {
+    root :: temp_root("stale")
+    std.fs.write(files.join(root, TRANSITION_PACKAGE_FILE), "name: \"demo\"\nenvironments: { dev: Environment{ } }\n") ?? panic("write: {err}")
+    plan :: env_transition_split_plan(root, SplitTarget.Environment) ?? panic("plan: {err}")
+    std.fs.write(files.join(root, TRANSITION_PACKAGE_FILE), "name: \"changed\"\n") ?? panic("write: {err}")
+    error :: plan.apply().unwrap_err()
+    assert(error.message().contains("stale transition"))
+    assert(!std.fs.exists(files.join(root, "package/env.jet")))
+    std.fs.remove_dir_all(root) ?? panic("cleanup: {err}")
+}
+
+// Rust: crates/jetpack/src/Transition.rs:2279
+#Test("package_split_moves_named_config_and_records_member") {
+    root :: temp_root("member")
+    std.fs.write(files.join(root, TRANSITION_PACKAGE_FILE), "name: \"workspace\"\napp :: Config{ version: \"1\" }\n") ?? panic("write: {err}")
+    env_transition_split(root, SplitTarget.Package("app"), false) ?? panic("split: {err}")
+    member :: std.fs.read_to_string(files.join(root, "packages/app/package.jet")) ?? panic("read: {err}")
+    assert(member.contains("name: \"app\""))
+    assert((std.fs.read_to_string(files.join(root, TRANSITION_PACKAGE_FILE)) ?? panic("read: {err}")).contains("members:"))
+    env_transition_fold(root, "packages/app/package.jet", false) ?? panic("fold: {err}")
+    assert((std.fs.read_to_string(files.join(root, TRANSITION_PACKAGE_FILE)) ?? panic("read: {err}")).contains("app :: Config"))
+    std.fs.remove_dir_all(root) ?? panic("cleanup: {err}")
+}
+
+// Rust: crates/jetpack/src/Transition.rs:2307
+#Test("package_split_rejects_duplicate_member_name_before_writes") {
+    root :: temp_root("member-duplicate")
+    std.fs.create_dir_all(files.join(root, "packages/existing")) ?? panic("mkdir: {err}")
+    std.fs.write(files.join(root, "packages/existing/package.jet"), "name: \"app\"\n") ?? panic("write: {err}")
+    original :: "name: \"workspace\"\nmembers: [\"packages/existing\"]\napp :: Config{ version: \"1\" }\n"
+    std.fs.write(files.join(root, TRANSITION_PACKAGE_FILE), original) ?? panic("write: {err}")
+    error :: env_transition_split(root, SplitTarget.Package("app"), false).unwrap_err()
+    assert(error.message().contains("member Package name `app` is declared more than once"))
+    assert((std.fs.read_to_string(files.join(root, TRANSITION_PACKAGE_FILE)) ?? panic("read: {err}")) == original)
+    assert(!std.fs.exists(files.join(root, "packages/app/package.jet")))
+    std.fs.remove_dir_all(root) ?? panic("cleanup: {err}")
+}
+
+// Rust: crates/jetpack/src/Transition.rs:2341
+#Test("hosts_split_and_fold_restore_exact_root") {
+    root :: temp_root("hosts")
+    original :: "name: \"demo\"\noutputs: { server: System{ name: \"server\" } }\n".bytes()
+    std.fs.write(files.join(root, TRANSITION_PACKAGE_FILE), original) ?? panic("write: {err}")
+    env_transition_split(root, SplitTarget.Hosts("server"), false) ?? panic("split: {err}")
+    fleet :: std.fs.read_to_string(files.join(root, "package/fleet.jet")) ?? panic("read: {err}")
+    assert(fleet.contains("hosts: { server: system.server }"))
+    env_transition_fold(root, "package/fleet.jet", false) ?? panic("fold: {err}")
+    assert((std.fs.read(files.join(root, TRANSITION_PACKAGE_FILE)) ?? panic("read: {err}")) == original)
+    assert(!std.fs.exists(files.join(root, "package/fleet.jet")))
+    std.fs.remove_dir_all(root) ?? panic("cleanup: {err}")
+}
+
+// Rust: crates/jetpack/src/Transition.rs:2365
+#Test("hosts_split_binds_the_checked_system_name_not_the_output_key") {
+    root :: temp_root("hosts-system-name")
+    std.fs.write(files.join(root, TRANSITION_PACKAGE_FILE), "name: \"demo\"\noutputs: { server: System{ name: \"halcyon\", target: linux.x64 } }\n") ?? panic("write: {err}")
+    env_transition_split(root, SplitTarget.Hosts("server"), false) ?? panic("split: {err}")
+    fleet :: std.fs.read_to_string(files.join(root, "package/fleet.jet")) ?? panic("read: {err}")
+    assert(fleet.contains("hosts: { server: system.halcyon }"))
+    facts :: (PackageFacts.load(root) ?? panic("load: {err}")) ?? panic("missing facts")
+    projection :: jet_env_model.ModuleEval.project_package_outputs(facts) ?? panic("project: {err}")
+    assert(projection.systems[0].name == "halcyon")
+    assert(projection.fleets[0].hosts[0].system == "halcyon")
+    std.fs.remove_dir_all(root) ?? panic("cleanup: {err}")
+}
+
+// Rust: crates/jetpack/src/Transition.rs:2393
+#Test("fold_recovers_a_journaled_partial_split_without_touching_live_bytes") {
+    root :: temp_root("hosts-partial")
+    original :: "name: \"demo\"\noutputs: { server: System{ name: \"server\", target: linux.x64 } }\n".bytes()
+    std.fs.write(files.join(root, TRANSITION_PACKAGE_FILE), original) ?? panic("write: {err}")
+    plan :: env_transition_split_plan(root, SplitTarget.Hosts("server")) ?? panic("plan: {err}")
+    env_transition_create_real_dirs(root, files.dirname(plan.journal_path)) ?? panic("mkdir: {err}")
+    env_transition_write_atomic(plan.journal_path, plan.journal) ?? panic("journal: {err}")
+    generated :: files.join(root, "package/fleet.jet")
+    generated_change :: plan.changes.iter().find(change -> change.relative == "package/fleet.jet") ?? panic("missing change")
+    env_transition_apply_state(root, generated, generated_change.after) ?? panic("apply state: {err}")
+    env_transition_fold(root, "package/fleet.jet", false) ?? panic("fold: {err}")
+    assert((std.fs.read(files.join(root, TRANSITION_PACKAGE_FILE)) ?? panic("read: {err}")) == original)
+    assert(!std.fs.exists(generated))
+    assert(!std.fs.exists(plan.journal_path))
+    std.fs.remove_dir_all(root) ?? panic("cleanup: {err}")
+}
+
+// Rust: crates/jetpack/src/Transition.rs:2425
+#Test("corrupt_transition_journal_refuses_fold_without_mutation") {
+    root :: temp_root("hosts-corrupt-journal")
+    original :: "name: \"demo\"\noutputs: { server: System{ name: \"server\", target: linux.x64 } }\n".bytes()
+    std.fs.write(files.join(root, TRANSITION_PACKAGE_FILE), original) ?? panic("write: {err}")
+    env_transition_split(root, SplitTarget.Hosts("server"), false) ?? panic("split: {err}")
+    live_package :: std.fs.read(files.join(root, TRANSITION_PACKAGE_FILE)) ?? panic("read: {err}")
+    journal :: (std.fs.read_dir(files.join(root, TRANSITION_JOURNAL_DIR)) ?? panic("read dir: {err}")).next().unwrap().unwrap().path()
+    std.fs.write(journal, "corrupt\n".bytes()) ?? panic("write: {err}")
+    error :: env_transition_fold(root, "package/fleet.jet", false).unwrap_err()
+    assert(error.message().contains("unknown format"))
+    assert((std.fs.read(files.join(root, TRANSITION_PACKAGE_FILE)) ?? panic("read: {err}")) == live_package)
+    assert(std.fs.is_file(files.join(root, "package/fleet.jet")))
+    std.fs.remove_dir_all(root) ?? panic("cleanup: {err}")
+}
+
+// Rust: crates/jetpack/src/Transition.rs:2454
+#Test("hosts_split_rejects_invalid_and_ambiguous_targets_before_writes") {
+    invalid_root :: temp_root("hosts-invalid")
+    std.fs.write(files.join(invalid_root, TRANSITION_PACKAGE_FILE), "name: \"demo\"\noutputs: { server: System{ name: \"server\" } }\n") ?? panic("write: {err}")
+    invalid :: env_transition_split(invalid_root, SplitTarget.Hosts("server/name"), false).unwrap_err()
+    assert(invalid.message().contains("invalid host name"))
+    assert(!std.fs.exists(files.join(invalid_root, "package/fleet.jet")))
+    std.fs.remove_dir_all(invalid_root) ?? panic("cleanup: {err}")
+    ambiguous_root :: temp_root("hosts-ambiguous")
+    std.fs.write(files.join(ambiguous_root, TRANSITION_PACKAGE_FILE), "name: \"demo\"\noutputs: { server: Executable{ name: \"server\", entry: run } }\n") ?? panic("write: {err}")
+    ambiguous :: env_transition_split(ambiguous_root, SplitTarget.Hosts("server"), false).unwrap_err()
+    assert(ambiguous.message().contains("host extraction needs a System Output"))
+    assert(!std.fs.exists(files.join(ambiguous_root, "package/fleet.jet")))
+    std.fs.remove_dir_all(ambiguous_root) ?? panic("cleanup: {err}")
+}
+
+// Rust: crates/jetpack/src/Transition.rs:2498
+#Test("legacy_open_role_file_is_rejected_before_writes") {
+    root :: temp_root("legacy-open")
+    std.fs.write(files.join(root, "pkg.jet"), "name: \"demo\"\n") ?? panic("write: {err}")
+    std.fs.write(files.join(root, "config.jet"), "languages: [python]\n") ?? panic("write: {err}")
+    error :: env_transition_init(root, false).unwrap_err()
+    assert(error.message().contains("open role fields"))
+    assert(!std.fs.exists(files.join(root, TRANSITION_PACKAGE_FILE)))
+    std.fs.remove_dir_all(root) ?? panic("cleanup: {err}")
+}
+
+// Rust: crates/jetpack/src/Transition.rs:2509
+#Test("legacy_role_fold_restores_every_source_byte_identically") {
+    root :: temp_root("legacy-round-trip")
+    originals :: [(String, String)]{
+        ("pkg.jet", "payload: { name: \"demo\", version: \"0.1.0\" }\n"),
+        ("env.jet", "module env.dev {\n    tools: [\"git@nixpkgs\"]\n}\n\nmodule env.ci {\n    tools: [\"cargo@nixpkgs\"]\n}\n"),
+        ("workspace.jet", "module workspace { members: [] }\n"),
+        ("config.jet", "Config{ }\n")
+    }
+    loop (name, source) in originals {
+        std.fs.write(files.join(root, name), source) ?? panic("write: {err}")
+    }
+    preview :: env_transition_init(root, true) ?? panic("preview: {err}")
+    assert(preview.summary.changes.iter().any(change -> change.path == TRANSITION_PACKAGE_FILE))
+    assert(preview.summary.before_fingerprint != preview.summary.after_fingerprint)
+    env_transition_init(root, false) ?? panic("init: {err}")
+    assert(std.fs.is_file(files.join(root, TRANSITION_PACKAGE_FILE)))
+    assert(std.fs.is_file(files.join(root, "package/env-dev.jet")))
+    assert(std.fs.is_file(files.join(root, "package/env-ci.jet")))
+    migrated :: (PackageFacts.load(root) ?? panic("load: {err}")) ?? panic("missing facts")
+    assert(migrated.name == "demo")
+    assert(migrated.environments.has_key("dev"))
+    assert(migrated.environments.has_key("ci"))
+    assert(!std.fs.exists(files.join(root, "pkg.jet")))
+    assert(!std.fs.exists(files.join(root, "env.jet")))
+    assert(!std.fs.exists(files.join(root, "workspace.jet")))
+    assert(!std.fs.exists(files.join(root, "config.jet")))
+    assert(std.fs.is_file(preview.summary.journal))
+    env_transition_restore_role_files(root, true) ?? panic("preview restore: {err}")
+    env_transition_restore_role_files(root, false) ?? panic("restore: {err}")
+    loop (name, source) in originals {
+        assert((std.fs.read(files.join(root, name)) ?? panic("read: {err}")) == source.bytes())
+    }
+    assert(!std.fs.exists(files.join(root, TRANSITION_PACKAGE_FILE)))
+    assert(!std.fs.exists(files.join(root, "package/env-dev.jet")))
+    assert(!std.fs.exists(files.join(root, "package/env-ci.jet")))
+    assert(!std.fs.exists(preview.summary.journal))
+    std.fs.remove_dir_all(root) ?? panic("cleanup: {err}")
+}
+
+// Rust: crates/jetpack/src/Transition.rs:2564
+#Test("legacy_unknown_identity_field_is_rejected_before_writes") {
+    root :: temp_root("legacy-unknown")
+    std.fs.write(files.join(root, "pkg.jet"), "payload: { name: \"demo\", version: \"0.1.0\", future: \"lost\" }\n") ?? panic("write: {err}")
+    error :: env_transition_init(root, false).unwrap_err()
+    assert(error.message().contains("identity contains unknown field `future`"))
+    assert(!std.fs.exists(files.join(root, TRANSITION_PACKAGE_FILE)))
+    assert(!std.fs.exists(files.join(root, ".jet/package-transition")))
+    std.fs.remove_dir_all(root) ?? panic("cleanup: {err}")
+}
+
+// Rust: crates/jetpack/src/Transition.rs:2582
+#Test("legacy_unknown_nested_dependency_field_is_rejected_before_writes") {
+    root :: temp_root("legacy-unknown-dep")
+    std.fs.write(files.join(root, "pkg.jet"), "payload: { name: \"demo\", version: \"0.1.0\" }\ndeps: { tool: { git: \"https://example.invalid/tool\", tag: \"v1\", future: \"lost\" } }\n") ?? panic("write: {err}")
+    error :: env_transition_init(root, false).unwrap_err()
+    assert(error.message().contains("dependency `tool` contains unknown field `future`"))
+    assert(!std.fs.exists(files.join(root, TRANSITION_PACKAGE_FILE)))
+    assert(!std.fs.exists(files.join(root, ".jet/package-transition")))
+    std.fs.remove_dir_all(root) ?? panic("cleanup: {err}")
+}
+
+// Rust: crates/jetpack/src/Transition.rs:2602
+#Test("legacy_ambiguous_identity_is_rejected_before_writes") {
+    cases :: [(String, String, String)]{
+        ("legacy-mixed-identity", "payload: { name: \"demo\", version: \"0.1.0\" }\nname: \"other\"\n", "mixes top-level identity fields with an identity block"),
+        ("legacy-duplicate-identity", "payload: { name: \"demo\", name: \"other\", version: \"0.1.0\" }\n", "identity declares field `name` more than once")
+    }
+    loop (label, source, expected) in cases {
+        root :: temp_root(label)
+        std.fs.write(files.join(root, "pkg.jet"), source) ?? panic("write: {err}")
+        error :: env_transition_init(root, false).unwrap_err()
+        assert(error.message().contains(expected))
+        assert(!std.fs.exists(files.join(root, TRANSITION_PACKAGE_FILE)))
+        assert(!std.fs.exists(files.join(root, ".jet/package-transition")))
+        std.fs.remove_dir_all(root) ?? panic("cleanup: {err}")
+    }
+}
+
+// Rust: crates/jetpack/src/Transition.rs:2626
+#Test("legacy_restore_refuses_stale_root_without_mutation") {
+    root :: temp_root("legacy-stale-restore")
+    std.fs.write(files.join(root, "pkg.jet"), "payload: { name: \"demo\", version: \"0.1.0\" }\n") ?? panic("write: {err}")
+    result :: env_transition_init(root, false) ?? panic("init: {err}")
+    journal :: result.summary.journal
+    package :: files.join(root, TRANSITION_PACKAGE_FILE)
+    std.fs.write(package, "name: \"tampered\"\nversion: \"0.1.0\"\n") ?? panic("write: {err}")
+    error :: env_transition_restore_role_files(root, false).unwrap_err()
+    assert(error.message().contains("stale transition"))
+    assert((std.fs.read_to_string(package) ?? panic("read: {err}")) == "name: \"tampered\"\nversion: \"0.1.0\"\n")
+    assert(std.fs.is_file(journal))
+    std.fs.remove_dir_all(root) ?? panic("cleanup: {err}")
+}
+
+// Rust: crates/jetpack/src/Transition.rs:2648
+#Test("duplicate_legacy_environment_is_rejected_before_writes") {
+    root :: temp_root("legacy-duplicate-env")
+    std.fs.write(files.join(root, "pkg.jet"), "payload: { name: \"demo\", version: \"0.1.0\" }\n") ?? panic("write: {err}")
+    std.fs.write(files.join(root, "env.jet"), "module env.dev { tools: [\"git@nixpkgs\"] }\nmodule env.dev { tools: [\"cargo@nixpkgs\"] }\n") ?? panic("write: {err}")
+    error :: env_transition_init(root, false).unwrap_err()
+    assert(error.message().contains("declares environment `dev` more than once"))
+    assert(!std.fs.exists(files.join(root, TRANSITION_PACKAGE_FILE)))
+    assert(!std.fs.exists(files.join(root, "package/env-dev.jet")))
+    std.fs.remove_dir_all(root) ?? panic("cleanup: {err}")
+}

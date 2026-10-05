@@ -1,0 +1,29 @@
+// Rust: crates/jetpack/src/ProviderGraph.rs:3615-5417
+// No original inline tests in this window. These controls preserve the
+// representation and byte-offset gaps in the canonical report mechanism.
+
+#Test("provider_document_array_strings_preserve_typed_and_untrimmed_names") {
+    object :: [String: DataTree]{"items": DataTree.Array([DataTree]{
+        DataTree.Text(""), DataTree.TypedText("typed"),
+        DataTree.Object([String: DataTree]{"name": DataTree.TypedText(" name ")}),
+        DataTree.Int(3)
+    })}
+    assert(json_array_strings(object, "items") == [String]{"", "typed", " name "})
+    assert(json_array_strings(object, "missing") == [String]{})
+}
+
+#Test("provider_document_json_value_retains_native_representation") {
+    assert(json_value_text(DataTree.TypedText("a\"b")) == "a\"b")
+    assert(json_value_json(DataTree.TypedText("a\"b")) == "\"a\\\"b\"")
+    assert(json_value_json(DataTree.Number("1.00")) == "1.00")
+    assert(json_value_json(DataTree.Bytes([U8]{1, 255})) == "[1,255]")
+    assert(json_value_json(DataTree.Array([DataTree]{DataTree.Null, DataTree.Bool(false)})) == "[null,false]")
+    assert(json_value_json(DataTree.Object([String: DataTree]{"n": DataTree.Number("1e+2")})) == "{{\"n\":1e+2}}")
+}
+
+#Test("provider_document_xml_blocks_retain_byte_offsets") {
+    blocks :: xml_blocks("é<x/>\n<x a='>'>body</x><xyz>no</xyz><x>unterminated", "x")
+    assert(blocks.len() == 1)
+    assert(blocks[0].start == 7)
+    assert(blocks[0].text == "<x a='>'>body</x>")
+}

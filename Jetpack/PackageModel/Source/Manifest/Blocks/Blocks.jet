@@ -1,1804 +1,200 @@
-// PORT-PENDING 2064 crates-jet-pkg-model-src-package-blocks-slice-1: crates/jet-pkg-model/src/Package/Blocks.rs:1-1800
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! Structural sub-parsers for the `deps:`, `packages:`, `boundaries:`, `build:`,
-//RS //! `authority:`, and `policy:` blocks of the ratified `package.jet`
-//RS //! vocabulary
-//RS //! (D-CONF-PLANE1, D-CONF-NAME1). These blocks carry semantics ratified by
-//RS //! their own, separate decisions (D-JPK23, D-TGT1/D-TGT2/D-TGT3, D-CFFI2,
-//RS //! D-BUILDPROFILE1, D-CTEFFECT1, D-EFFBUDGET1, D-AUTHORITY-MANIFEST1,
-//RS //! D-BOUND-PROV1, D-JPK-GRANTSCHEMA1, D-JPK-PROVIDERAUTH1, D-LINTPOLICY1,
-//RS //! D-PACKAGE-POLICY-SCOPE1,
-//RS //! D-ONCE-AUTODERIVE1) — this module is the single reader for all of them, so
-//RS //! `package.jet` never again has two parsers for one fact.
-//RS 
-//RS #[path = "ReleaseInspect.rs"]
-//RS mod ReleaseInspection;
-//RS pub use self::ReleaseInspection::ReleaseInspect;
-//RS 
-//RS use super::PackageParseError;
-//RS use crate::Diagnostics::{Diagnostic, Span};
-//RS use crate::RefSpec::{self, Source};
-//RS use crate::Syntax;
-//RS use std::collections::{BTreeMap, BTreeSet, HashSet};
-//RS use std::path::{Component, Path};
-//RS 
-//RS // ── small structural helpers (std-only, comment-stripped input) ────────────
-//RS 
-//RS /// Split a `{ … }` body into `key: value` entries at top-level commas.
-//RS pub(super) fn key_value_entries(body: &str) -> Result<Vec<(String, String)>, PackageParseError> {
-//RS     let mut entries = Vec::new();
-//RS     for entry in top_level_commas(body) {
-//RS         let entry = entry.trim();
-//RS         if entry.is_empty() {
-//RS             continue;
-//RS         }
-//RS         if let Some((k, v)) = entry.split_once(':') {
-//RS             entries.push((k.trim().to_string(), v.trim().to_string()));
-//RS         } else {
-//RS             return Err(err(format!("malformed metadata field `{entry}`")));
-//RS         }
-//RS     }
-//RS     Ok(entries)
-//RS }
-//RS 
-//RS /// Split on commas that are not nested inside `()`/`[]`/`{}`.
-//RS pub(super) fn top_level_commas(body: &str) -> Vec<String> {
-//RS     let mut out = Vec::new();
-//RS     let mut depth = 0i32;
-//RS     let mut cur = String::new();
-//RS     let mut quoted = false;
-//RS     let mut escaped = false;
-//RS     for c in body.chars() {
-//RS         if quoted {
-//RS             cur.push(c);
-//RS             if escaped {
-//RS                 escaped = false;
-//RS             } else if c == '\\' {
-//RS                 escaped = true;
-//RS             } else if c == '"' {
-//RS                 quoted = false;
-//RS             }
-//RS             continue;
-//RS         }
-//RS         match c {
-//RS             '"' => {
-//RS                 quoted = true;
-//RS                 cur.push(c);
-//RS             }
-//RS             '(' | '[' | '{' => {
-//RS                 depth += 1;
-//RS                 cur.push(c);
-//RS             }
-//RS             ')' | ']' | '}' => {
-//RS                 depth -= 1;
-//RS                 cur.push(c);
-//RS             }
-//RS             ',' if depth == 0 => {
-//RS                 out.push(std::mem::take(&mut cur));
-//RS             }
-//RS             _ => cur.push(c),
-//RS         }
-//RS     }
-//RS     if !cur.trim().is_empty() {
-//RS         out.push(cur);
-//RS     }
-//RS     out
-//RS }
-//RS 
-//RS /// Strip surrounding double quotes if present; otherwise return as-is, trimmed.
-//RS pub(super) fn unquote(s: &str) -> String {
-//RS     let s = s.trim();
-//RS     if s.len() >= 2 && s.starts_with('"') && s.ends_with('"') {
-//RS         s[1..s.len() - 1].to_string()
-//RS     } else {
-//RS         s.to_string()
-//RS     }
-//RS }
-//RS 
-//RS /// D-STRUCT-EDGE1=A: one package-owned import edge denial.
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct ImportBoundary {
-//RS     pub from: String,
-//RS     pub to: String,
-//RS }
-//RS 
-//RS impl ImportBoundary {
-//RS     /// Match an exact module name or one trailing subtree wildcard. Both
-//RS     /// `name.*` and `name*` are accepted as the same trailing-wildcard shape;
-//RS     /// the manifest keeps the user's spelling for diagnostics and digests.
-//RS     pub fn matches(&self, from: &str, to: &str) -> bool {
-//RS         boundary_pattern_matches(&self.from, from) && boundary_pattern_matches(&self.to, to)
-//RS     }
-//RS }
-//RS 
-//RS fn boundary_pattern_matches(pattern: &str, value: &str) -> bool {
-//RS     let Some(prefix) = pattern.strip_suffix('*') else {
-//RS         return pattern == value;
-//RS     };
-//RS     let prefix = prefix.strip_suffix('.').unwrap_or(prefix);
-//RS     prefix.is_empty() || value == prefix || value.starts_with(&format!("{prefix}."))
-//RS }
-//RS 
-//RS fn parse_boundary_pattern(field: &str, value: &str) -> Result<String, PackageParseError> {
-//RS     let value = value.trim();
-//RS     if value.len() < 2 || !value.starts_with('"') || !value.ends_with('"') {
-//RS         return Err(err(format!(
-//RS             "`boundaries.deny.{field}` must be a quoted module pattern"
-//RS         )));
-//RS     }
-//RS     let value = unquote(value);
-//RS     let stars = value.chars().filter(|ch| *ch == '*').count();
-//RS     if stars > 1 || (stars == 1 && !value.ends_with('*')) {
-//RS         return Err(err(format!(
-//RS             "`boundaries.deny.{field}` allows at most one trailing `*` subtree wildcard"
-//RS         )));
-//RS     }
-//RS     let prefix = value.strip_suffix('*').unwrap_or(&value);
-//RS     if prefix.trim_end_matches('.').is_empty() && !value.ends_with('*') {
-//RS         return Err(err(format!("`boundaries.deny.{field}` must name a module")));
-//RS     }
-//RS     Ok(value)
-//RS }
-//RS 
-//RS /// Parse `boundaries: { deny: [{ from: "...", to: "..." }] }`.
-//RS pub(super) fn parse_boundaries(body: &str) -> Result<Vec<ImportBoundary>, PackageParseError> {
-//RS     let mut deny = None;
-//RS     for (field, value) in key_value_entries(body)? {
-//RS         if field != "deny" {
-//RS             return Err(err(format!("unknown `boundaries` field `{field}`")));
-//RS         }
-//RS         if deny.replace(value).is_some() {
-//RS             return Err(err("`boundaries.deny` is declared more than once"));
-//RS         }
-//RS     }
-//RS     let Some(value) = deny else {
-//RS         return Ok(Vec::new());
-//RS     };
-//RS     let value = value.trim();
-//RS     let Some(list) = value
-//RS         .strip_prefix('[')
-//RS         .and_then(|rest| rest.strip_suffix(']'))
-//RS     else {
-//RS         return Err(err("`boundaries.deny` must be a list of edge records"));
-//RS     };
-//RS     let mut boundaries = Vec::new();
-//RS     for entry in top_level_commas(list) {
-//RS         let entry = entry.trim();
-//RS         if entry.is_empty() {
-//RS             continue;
-//RS         }
-//RS         let Some(record) = entry
-//RS             .strip_prefix('{')
-//RS             .and_then(|rest| rest.strip_suffix('}'))
-//RS         else {
-//RS             return Err(err("each `boundaries.deny` entry must be an edge record"));
-//RS         };
-//RS         let mut from = None;
-//RS         let mut to = None;
-//RS         for (field, value) in key_value_entries(record)? {
-//RS             match field.as_str() {
-//RS                 "from" if from.is_none() => from = Some(parse_boundary_pattern("from", &value)?),
-//RS                 "to" if to.is_none() => to = Some(parse_boundary_pattern("to", &value)?),
-//RS                 "from" | "to" => {
-//RS                     return Err(err(format!(
-//RS                         "`boundaries.deny.{field}` is declared more than once"
-//RS                     )))
-//RS                 }
-//RS                 other => return Err(err(format!("unknown boundary edge field `{other}`"))),
-//RS             }
-//RS         }
-//RS         let Some(from) = from else {
-//RS             return Err(err("each `boundaries.deny` entry needs `from`"));
-//RS         };
-//RS         let Some(to) = to else {
-//RS             return Err(err("each `boundaries.deny` entry needs `to`"));
-//RS         };
-//RS         boundaries.push(ImportBoundary { from, to });
-//RS     }
-//RS     Ok(boundaries)
-//RS }
-//RS 
-//RS fn err(detail: impl Into<String>) -> PackageParseError {
-//RS     PackageParseError::Composition(detail.into())
-//RS }
-//RS 
-//RS fn bad_mem(detail: impl Into<String>) -> PackageParseError {
-//RS     PackageParseError::BadMemoryPolicy {
-//RS         detail: detail.into(),
-//RS     }
-//RS }
-//RS 
-//RS fn bad_guarantee(detail: impl Into<String>) -> PackageParseError {
-//RS     PackageParseError::BadGuaranteePolicy {
-//RS         detail: detail.into(),
-//RS     }
-//RS }
-//RS 
-//RS fn bad_allocator(detail: impl Into<String>) -> PackageParseError {
-//RS     PackageParseError::BadAllocatorPolicy {
-//RS         detail: detail.into(),
-//RS     }
-//RS }
-//RS 
-//RS /// D-ALLOC-PROGRAM1=A: parse the hosted program allocator as one typed fact.
-//RS /// v1 ships the hidden system heap and its counting/capping wrapper; unknown
-//RS /// values fail closed instead of becoming strings that engines reinterpret.
-//RS pub(super) fn parse_program_allocator(
-//RS     value: &str,
-//RS ) -> Result<crate::TargetMachine::AllocatorPolicy, PackageParseError> {
-//RS     use crate::TargetMachine::{AllocatorPolicy, ByteSize};
-//RS 
-//RS     let compact = value
-//RS         .chars()
-//RS         .filter(|ch| !ch.is_whitespace())
-//RS         .collect::<String>();
-//RS     if compact == "mem.Heap" {
-//RS         return Ok(AllocatorPolicy::HostedDefault);
-//RS     }
-//RS     let Some(args) = compact
-//RS         .strip_prefix("mem.Counting.over(")
-//RS         .and_then(|value| value.strip_suffix(')'))
-//RS     else {
-//RS         return Err(bad_allocator(
-//RS             "`allocator:` must be `mem.Heap` or `mem.Counting.over(mem.Heap, cap: <bytes>)`",
-//RS         ));
-//RS     };
-//RS     let args = top_level_commas(args);
-//RS     if args.is_empty() || args[0] != "mem.Heap" || args.len() > 2 {
-//RS         return Err(bad_allocator(
-//RS             "`mem.Counting.over` wraps `mem.Heap` and accepts only the optional `cap:` argument",
-//RS         ));
-//RS     }
-//RS     let cap = match args.get(1) {
-//RS         None => None,
-//RS         Some(value) => {
-//RS             let Some(value) = value.strip_prefix("cap:") else {
-//RS                 return Err(bad_allocator(
-//RS                     "the counting allocator's optional argument is spelled `cap:`",
-//RS                 ));
-//RS             };
-//RS             Some(ByteSize::bytes(parse_allocator_bytes(value)?))
-//RS         }
-//RS     };
-//RS     Ok(AllocatorPolicy::Counting { cap })
-//RS }
-//RS 
-//RS fn parse_allocator_bytes(value: &str) -> Result<u64, PackageParseError> {
-//RS     let (digits, multiplier) = match value.rsplit_once('.') {
-//RS         Some((digits, "bytes")) => (digits, 1u64),
-//RS         Some((digits, "kb" | "kib")) => (digits, 1024u64),
-//RS         Some((digits, "mb" | "mib")) => (digits, 1024u64.pow(2)),
-//RS         Some((digits, "gb" | "gib")) => (digits, 1024u64.pow(3)),
-//RS         Some(_) => {
-//RS             return Err(bad_allocator(
-//RS                 "`cap:` uses exact bytes or a `.kb`, `.mb`, or `.gb` byte quantity",
-//RS             ))
-//RS         }
-//RS         None => (value, 1u64),
-//RS     };
-//RS     let digits = digits.replace('_', "");
-//RS     let count = digits.parse::<u64>().map_err(|_| {
-//RS         bad_allocator("`cap:` must be a positive whole-byte quantity such as `2.gb`")
-//RS     })?;
-//RS     let bytes = count
-//RS         .checked_mul(multiplier)
-//RS         .filter(|bytes| *bytes > 0)
-//RS         .ok_or_else(|| {
-//RS             bad_allocator("`cap:` must be a positive byte quantity that fits in 64 bits")
-//RS         })?;
-//RS     Ok(bytes)
-//RS }
-//RS 
-//RS // ── deps: … (D-JPK23, D-JPK-REF1, S59/D-CFFI2) ──────────────────────────────
-//RS 
-//RS /// Where a dependency resolves from.
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub enum DepSource {
-//RS     /// The selector from a `name#version` registry ref.
-//RS     Version(String),
-//RS     /// A bare path or `target@provider` source ref.
-//RS     Provider { provider: Source, target: String },
-//RS     /// An inline git dependency (D-JPK23): any remote, with an explicit
-//RS     /// selector — `{ git: "<url>", tag/branch/rev: "<value>" }`.
-//RS     Git {
-//RS         url: String,
-//RS         selector: crate::Manifest::GitSelector,
-//RS     },
-//RS     /// A native C-library link dependency (S59/D-CFFI2): `lib: c@system`
-//RS     /// (pkg-config, bare `-l <lib>` fallback) or `lib: c@"vendor/path"`
-//RS     /// (local dir). A CLib dep is a link dep, not a Jet package.
-//RS     CLib { target: String },
-//RS     /// D-FFI-UNIFY1: a package-backed foreign namespace dependency such as
-//RS     /// `plotly: js@"plotly#version=2.35.0@npm"`. The map key is the library
-//RS     /// name; the value retains the language root and the exact provider ref.
-//RS     Foreign {
-//RS         language: crate::AST::ForeignLanguage,
-//RS         reference: String,
-//RS     },
-//RS }
-//RS 
-//RS /// Render one `DepSource` for a public package view.
-//RS ///
-//RS /// Dependency declarations stay useful to tools, but transport credentials
-//RS /// must never cross the public projection. Git URL user information and
-//RS /// query/fragment text are removed; all other dependency forms retain the
-//RS /// ordinary [`dep_display`] spelling.
-//RS pub fn dep_display_redacted(source: &DepSource) -> String {
-//RS     match source {
-//RS         DepSource::Git { url, selector } => {
-//RS             let (field, value) = match selector {
-//RS                 crate::Manifest::GitSelector::Tag(value) => ("tag", value),
-//RS                 crate::Manifest::GitSelector::Branch(value) => ("branch", value),
-//RS                 crate::Manifest::GitSelector::Rev(value) => ("rev", value),
-//RS             };
-//RS             format!(
-//RS                 "{{ git: {:?}, {field}: {value:?} }}",
-//RS                 redact_dependency_url(url)
-//RS             )
-//RS         }
-//RS         _ => dep_display(source),
-//RS     }
-//RS }
-//RS 
-//RS fn redact_dependency_url(value: &str) -> String {
-//RS     let value = value.split(['?', '#']).next().unwrap_or(value);
-//RS     let Some(separator) = value.find("://") else {
-//RS         return value.to_string();
-//RS     };
-//RS     let authority_start = separator + 3;
-//RS     let authority_end = value[authority_start..]
-//RS         .find(['/', '?', '#'])
-//RS         .map(|offset| authority_start + offset)
-//RS         .unwrap_or(value.len());
-//RS     let authority = &value[authority_start..authority_end];
-//RS     let Some(at) = authority.rfind('@') else {
-//RS         return value.to_string();
-//RS     };
-//RS     format!(
-//RS         "{}{}{}",
-//RS         &value[..authority_start],
-//RS         &authority[at + 1..],
-//RS         &value[authority_end..]
-//RS     )
-//RS }
-//RS 
-//RS /// Render one `DepSource` back to its display/audit string form.
-//RS pub fn dep_display(source: &DepSource) -> String {
-//RS     match source {
-//RS         DepSource::Version(value) => value.clone(),
-//RS         DepSource::Provider { provider, target } => {
-//RS             if matches!(provider, Source::Path) {
-//RS                 target.clone()
-//RS             } else {
-//RS                 format!("{target}@{}", provider.label())
-//RS             }
-//RS         }
-//RS         DepSource::Git { url, selector } => {
-//RS             let (field, value) = match selector {
-//RS                 crate::Manifest::GitSelector::Tag(value) => ("tag", value),
-//RS                 crate::Manifest::GitSelector::Branch(value) => ("branch", value),
-//RS                 crate::Manifest::GitSelector::Rev(value) => ("rev", value),
-//RS             };
-//RS             format!("{{ git: {url:?}, {field}: {value:?} }}")
-//RS         }
-//RS         DepSource::CLib { target } => format!("lib: {target}"),
-//RS         DepSource::Foreign {
-//RS             language,
-//RS             reference,
-//RS         } => format!("{}@{reference:?}", language.root()),
-//RS     }
-//RS }
-//RS 
-//RS fn bad_dep_value(name: &str, value: &str) -> PackageParseError {
-//RS     err(format!(
-//RS         "dependency `{name}` has value `{value}`, which is not a `name#version`, bare path, `target@provider` ref, foreign `lang@\"ref\"`, or inline git struct"
-//RS     ))
-//RS }
-//RS 
-//RS fn ref_error(name: &str, error: &RefSpec::RefError) -> PackageParseError {
-//RS     match error {
-//RS         RefSpec::RefError::ProviderFirst { raw, replacement } => err(format!(
-//RS             "dependency `{name}` uses retired provider-first ref `{raw}`; write `{replacement}`"
-//RS         )),
-//RS         RefSpec::RefError::RetiredNixpkgs { raw, replacement } => err(format!(
-//RS             "dependency `{name}` uses the retired `nixpkgs` source spelling `{raw}`; write `{replacement}`"
-//RS         )),
-//RS         RefSpec::RefError::PathProviderRetired { raw, path } => err(format!(
-//RS             "dependency `{name}` uses retired path-provider ref `{raw}`; write the bare path `{path}`"
-//RS         )),
-//RS         other => err(format!("dependency `{name}`'s ref is invalid: {other:?}")),
-//RS     }
-//RS }
-//RS 
-//RS pub(super) fn parse_deps(body: &str) -> Result<BTreeMap<String, DepSource>, PackageParseError> {
-//RS     let mut deps = BTreeMap::new();
-//RS     for (name, value) in key_value_entries(body)? {
-//RS         if !validate_dependency_name(&name) {
-//RS             return Err(err(format!(
-//RS                 "dependency name `{name}` must be one safe path component"
-//RS             )));
-//RS         }
-//RS         let trimmed = value.trim();
-//RS         let source = if let Some(inner) = trimmed.strip_prefix('{') {
-//RS             let inner = inner.strip_suffix('}').unwrap_or(inner);
-//RS             parse_git_dep(&name, inner)?
-//RS         } else if let Some(target) = parse_c_lib_ref(trimmed) {
-//RS             DepSource::CLib { target }
-//RS         } else if let Some(foreign) = parse_foreign_ref(&name, trimmed)? {
-//RS             foreign
-//RS         } else {
-//RS             // Both the bare legacy tokens (`helpers: ../helpers`,
-//RS             // `textkit: textkit#1.2.0`) and the ratified quoted spelling
-//RS             // (`httpkit: "^2"`, D-CONF-NAME1) are accepted — unquote before
-//RS             // classifying so both read the same.
-//RS             let unquoted = unquote(trimmed);
-//RS             if RefSpec::is_bare_path(&unquoted) || unquoted.contains(Syntax::REF_PROVIDER_AT) {
-//RS                 match RefSpec::classify_provider_ref(&unquoted) {
-//RS                     Ok(r) => DepSource::Provider {
-//RS                         provider: r.provider,
-//RS                         target: r.target,
-//RS                     },
-//RS                     Err(error) => return Err(ref_error(&name, &error)),
-//RS                 }
-//RS             } else if let Some((package, selector)) = unquoted.split_once('#') {
-//RS                 if package == name && !selector.is_empty() {
-//RS                     DepSource::Version(selector.to_string())
-//RS                 } else {
-//RS                     return Err(bad_dep_value(&name, trimmed));
-//RS                 }
-//RS             } else if trimmed.starts_with('"') {
-//RS                 // A bare quoted string with no `#`/`@`/path shape is a plain
-//RS                 // version selector (D-CONF-NAME1: `deps: { httpkit: "^2" }`).
-//RS                 DepSource::Version(unquoted)
-//RS             } else {
-//RS                 return Err(bad_dep_value(&name, trimmed));
-//RS             }
-//RS         };
-//RS         if deps.insert(name.clone(), source).is_some() {
-//RS             return Err(err(format!(
-//RS                 "dependency `{name}` is declared more than once"
-//RS             )));
-//RS         }
-//RS     }
-//RS     Ok(deps)
-//RS }
-//RS 
-//RS /// Dependency names become directory names in the store and project build
-//RS /// tree. Keep that path boundary in the package model, before any resolver or
-//RS /// publisher can turn a manifest key into a filesystem path.
-//RS pub(super) fn validate_dependency_name(name: &str) -> bool {
-//RS     !name.is_empty()
-//RS         && name != "."
-//RS         && name != ".."
-//RS         && !name.contains(['/', '\\', ':'])
-//RS         && !name.chars().any(char::is_control)
-//RS         && matches!(
-//RS             Path::new(name).components().next(),
-//RS             Some(Component::Normal(_))
-//RS         )
-//RS         && Path::new(name).components().nth(1).is_none()
-//RS }
-//RS 
-//RS #[cfg(test)]
-//RS mod tests {
-//RS     use super::{dep_display_redacted, validate_dependency_name, DepSource};
-//RS 
-//RS     #[test]
-//RS     fn dependency_names_reject_path_components() {
-//RS         for name in [
-//RS             "../escape",
-//RS             "..",
-//RS             "escape/name",
-//RS             r"escape\name",
-//RS             "escape:name",
-//RS         ] {
-//RS             assert!(
-//RS                 !validate_dependency_name(name),
-//RS                 "accepted unsafe name: {name}"
-//RS             );
-//RS         }
-//RS         assert!(validate_dependency_name("safe-name"));
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn public_dependency_display_redacts_git_credentials_and_parameters() {
-//RS         let source = DepSource::Git {
-//RS             url:
-//RS                 "https://build-user:build-secret@example.test/acme/tool?token=query-secret#private"
-//RS                     .to_string(),
-//RS             selector: crate::Manifest::GitSelector::Rev("abc123".to_string()),
-//RS         };
-//RS         let display = dep_display_redacted(&source);
-//RS         assert_eq!(
-//RS             display,
-//RS             r#"{ git: "https://example.test/acme/tool", rev: "abc123" }"#
-//RS         );
-//RS         assert!(!display.contains("build-secret"));
-//RS         assert!(!display.contains("query-secret"));
-//RS         assert!(!display.contains("private"));
-//RS     }
-//RS }
-//RS 
-//RS /// Detect a native C-library link ref (S59/D-CFFI2): `c@system` or
-//RS /// `c@"vendor/path"`.
-//RS fn parse_c_lib_ref(value: &str) -> Option<String> {
-//RS     let (provider, target) = value.split_once(Syntax::REF_PROVIDER_AT)?;
-//RS     if provider.trim() != Syntax::DEP_PROVIDER_C {
-//RS         return None;
-//RS     }
-//RS     Some(unquote(target))
-//RS }
-//RS 
-//RS /// Detect the D-FFI-UNIFY1 project-tier dependency shape. Keep the inner
-//RS /// provider ref quoted: that is the boundary between the foreign language
-//RS /// root and the provider's own ref grammar. C remains owned by S59's native
-//RS /// `c@target` form and is therefore deliberately not captured here.
-//RS fn parse_foreign_ref(name: &str, value: &str) -> Result<Option<DepSource>, PackageParseError> {
-//RS     let Some((language, reference)) = value.split_once(Syntax::REF_PROVIDER_AT) else {
-//RS         return Ok(None);
-//RS     };
-//RS     let Some(language) = crate::AST::ForeignLanguage::from_root(language.trim()) else {
-//RS         return Ok(None);
-//RS     };
-//RS     if language == crate::AST::ForeignLanguage::C {
-//RS         return Ok(None);
-//RS     }
-//RS     let reference = reference.trim();
-//RS     if !reference.starts_with('"') || !reference.ends_with('"') {
-//RS         return Err(err(format!(
-//RS             "foreign dependency `{name}` must quote its provider ref as `{}@\"ref\"`",
-//RS             language.root()
-//RS         )));
-//RS     }
-//RS     let reference = unquote(reference);
-//RS     if reference.trim().is_empty() {
-//RS         return Err(err(format!(
-//RS             "foreign dependency `{name}` has an empty provider ref"
-//RS         )));
-//RS     }
-//RS     Ok(Some(DepSource::Foreign {
-//RS         language,
-//RS         reference,
-//RS     }))
-//RS }
-//RS 
-//RS /// Parse an inline git dependency's body: `git: "<url>", tag/branch/rev:
-//RS /// "<value>"` — exactly one selector (D-JPK23).
-//RS fn parse_git_dep(name: &str, body: &str) -> Result<DepSource, PackageParseError> {
-//RS     let mut url = None;
-//RS     let mut tag = None;
-//RS     let mut branch = None;
-//RS     let mut rev = None;
-//RS     let mut seen = HashSet::new();
-//RS     for (key, value) in key_value_entries(body)? {
-//RS         if !seen.insert(key.clone()) {
-//RS             return Err(err(format!(
-//RS                 "git dependency `{name}.{key}` is declared more than once"
-//RS             )));
-//RS         }
-//RS         let v = unquote(&value);
-//RS         match key.as_str() {
-//RS             "git" => url = Some(v),
-//RS             "tag" => tag = Some(v),
-//RS             "branch" => branch = Some(v),
-//RS             "rev" => rev = Some(v),
-//RS             _ => {}
-//RS         }
-//RS     }
-//RS     let Some(url) = url else {
-//RS         return Err(err(format!("git dependency `{name}` is missing `git:`")));
-//RS     };
-//RS     let selector = match (tag, branch, rev) {
-//RS         (Some(t), None, None) => crate::Manifest::GitSelector::Tag(t),
-//RS         (None, Some(b), None) => crate::Manifest::GitSelector::Branch(b),
-//RS         (None, None, Some(r)) => crate::Manifest::GitSelector::Rev(r),
-//RS         _ => {
-//RS             return Err(err(format!(
-//RS                 "git dependency `{name}` must have exactly one of `tag`, `branch`, `rev`"
-//RS             )))
-//RS         }
-//RS     };
-//RS     Ok(DepSource::Git { url, selector })
-//RS }
-//RS 
-//RS // ── packages: … (U10, D-TGT1/D-TGT2/D-TGT3) ────────────────────────────────
-//RS 
-//RS /// The realize axis for a package (U10): `library` is imported for code;
-//RS /// `executable` installs a binary on PATH.
-//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-//RS pub enum PackageKind {
-//RS     Library,
-//RS     Executable,
-//RS }
-//RS 
-//RS /// One build target of a package (D-TGT1/D-TGT2).
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub enum Target {
-//RS     Library,
-//RS     Executable,
-//RS     Test,
-//RS     Example,
-//RS     Plugin { export: Option<String> },
-//RS }
-//RS 
-//RS /// One entry in the `packages: { … }` block (U10 + D-TGT1).
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct PackageEntry {
-//RS     pub name: String,
-//RS     pub targets: Vec<Target>,
-//RS }
-//RS 
-//RS /// The exact identity selected for a package target.
-//RS ///
-//RS /// Built-in web identities are deliberately closed. Other identities name a
-//RS /// typed target-profile declaration, which the language target-profile
-//RS /// semantic pass resolves separately.
-//RS #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-//RS pub enum TargetProfileIdentity {
-//RS     WebBrowser,
-//RS     WebWasiServer,
-//RS     WebNoOs,
-//RS     Named(String),
-//RS }
-//RS 
-//RS impl TargetProfileIdentity {
-//RS     pub const WEB_BROWSER: &'static str = "web.browser";
-//RS     pub const WEB_WASI_SERVER: &'static str = "web.wasi_server";
-//RS     pub const WEB_NO_OS: &'static str = "web.no_os";
-//RS 
-//RS     /// Parse one exact target-profile identity.
-//RS     pub fn parse(value: &str) -> Result<Self, String> {
-//RS         let value = value.trim();
-//RS         if value.is_empty() {
-//RS             return Err("target profile identity must not be empty".to_string());
-//RS         }
-//RS         if value
-//RS             .chars()
-//RS             .any(|character| !character.is_ascii_alphanumeric() && !matches!(character, '_' | '.' | '-'))
-//RS         {
-//RS             return Err(format!(
-//RS                 "target profile identity `{value}` contains characters outside `[A-Za-z0-9_.-]`"
-//RS             ));
-//RS         }
-//RS         if value.starts_with('.') || value.ends_with('.') || value.contains("..") {
-//RS             return Err(format!(
-//RS                 "target profile identity `{value}` must use non-empty dotted components"
-//RS             ));
-//RS         }
-//RS 
-//RS         match value {
-//RS             Self::WEB_BROWSER => return Ok(Self::WebBrowser),
-//RS             Self::WEB_WASI_SERVER => return Ok(Self::WebWasiServer),
-//RS             Self::WEB_NO_OS => return Ok(Self::WebNoOs),
-//RS             _ => {}
-//RS         }
-//RS 
-//RS         let lower = value.to_ascii_lowercase();
-//RS         if lower == "web" || lower.starts_with("web.") {
-//RS             return Err(format!(
-//RS                 "unknown web target profile `{value}`; allowed identities are `{}`, `{}`, and `{}`",
-//RS                 Self::WEB_BROWSER,
-//RS                 Self::WEB_WASI_SERVER,
-//RS                 Self::WEB_NO_OS
-//RS             ));
-//RS         }
-//RS         if lower == "wasm"
-//RS             || lower.starts_with("wasm.")
-//RS             || lower.starts_with("wasm32-")
-//RS             || lower == "no_os"
-//RS             || lower.starts_with("no_os.")
-//RS             || lower == "no-os"
-//RS             || lower.starts_with("no-os.")
-//RS             || lower == "freestanding"
-//RS         {
-//RS             return Err(format!(
-//RS                 "generic Wasm/no-OS target profile `{value}` is not selectable; use an exact typed profile identity"
-//RS             ));
-//RS         }
-//RS         Ok(Self::Named(value.to_string()))
-//RS     }
-//RS 
-//RS     pub fn as_str(&self) -> &str {
-//RS         match self {
-//RS             Self::WebBrowser => Self::WEB_BROWSER,
-//RS             Self::WebWasiServer => Self::WEB_WASI_SERVER,
-//RS             Self::WebNoOs => Self::WEB_NO_OS,
-//RS             Self::Named(value) => value,
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn is_web_builtin(&self) -> bool {
-//RS         matches!(
-//RS             self,
-//RS             Self::WebBrowser | Self::WebWasiServer | Self::WebNoOs
-//RS         )
-//RS     }
-//RS 
-//RS     fn validate(&self) -> Result<(), String> {
-//RS         let parsed = Self::parse(self.as_str())?;
-//RS         if parsed == *self {
-//RS             Ok(())
-//RS         } else {
-//RS             Err(format!(
-//RS                 "target profile identity `{}` does not match its typed identity",
-//RS                 self.as_str()
-//RS             ))
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS impl std::fmt::Display for TargetProfileIdentity {
-//RS     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-//RS         formatter.write_str(self.as_str())
-//RS     }
-//RS }
-//RS 
-//RS /// One named package target and the exact profile it selects.
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct TargetProfileSelection {
-//RS     pub name: String,
-//RS     pub profile: TargetProfileIdentity,
-//RS }
-//RS 
-//RS /// Ordered target-profile selections keyed by target name.
-//RS #[derive(Debug, Clone, PartialEq, Eq, Default)]
-//RS pub struct PackageTargets {
-//RS     selections: BTreeMap<String, TargetProfileSelection>,
-//RS }
-//RS 
-//RS impl PackageTargets {
-//RS     pub fn from_selections(
-//RS         selections: impl IntoIterator<Item = TargetProfileSelection>,
-//RS     ) -> Result<Self, String> {
-//RS         let mut by_name = BTreeMap::new();
-//RS         let mut profiles = BTreeSet::new();
-//RS         for selection in selections {
-//RS             let name = selection.name.trim();
-//RS             if name.is_empty() {
-//RS                 return Err("target name must not be empty".to_string());
-//RS             }
-//RS             if name.chars().any(char::is_whitespace) {
-//RS                 return Err(format!("target name `{name}` must not contain whitespace"));
-//RS             }
-//RS             if by_name.contains_key(name) {
-//RS                 return Err(format!("target `{name}` is declared more than once"));
-//RS             }
-//RS             selection.profile.validate()?;
-//RS             if !profiles.insert(selection.profile.as_str().to_string()) {
-//RS                 return Err(format!(
-//RS                     "target profile `{}` is selected more than once",
-//RS                     selection.profile
-//RS                 ));
-//RS             }
-//RS             by_name.insert(
-//RS                 name.to_string(),
-//RS                 TargetProfileSelection {
-//RS                     name: name.to_string(),
-//RS                     profile: selection.profile,
-//RS                 },
-//RS             );
-//RS         }
-//RS         Ok(Self { selections: by_name })
-//RS     }
-//RS 
-//RS     pub fn get(&self, target_name: &str) -> Option<&TargetProfileSelection> {
-//RS         self.selections.get(target_name)
-//RS     }
-//RS 
-//RS     pub fn profile(&self, target_name: &str) -> Option<&TargetProfileIdentity> {
-//RS         self.get(target_name).map(|selection| &selection.profile)
-//RS     }
-//RS 
-//RS     pub fn iter(&self) -> impl Iterator<Item = &TargetProfileSelection> {
-//RS         self.selections.values()
-//RS     }
-//RS 
-//RS     pub fn as_map(&self) -> &BTreeMap<String, TargetProfileSelection> {
-//RS         &self.selections
-//RS     }
-//RS 
-//RS     pub fn len(&self) -> usize {
-//RS         self.selections.len()
-//RS     }
-//RS 
-//RS     pub fn is_empty(&self) -> bool {
-//RS         self.selections.is_empty()
-//RS     }
-//RS }
-//RS 
-//RS fn target_profile_entries(
-//RS     body: &str,
-//RS ) -> Result<Vec<(String, String)>, PackageParseError> {
-//RS     let mut entries = Vec::new();
-//RS     for entry in top_level_lines_or_commas(body) {
-//RS         let entry = entry.trim();
-//RS         if entry.is_empty() {
-//RS             continue;
-//RS         }
-//RS         if let Some((key, value)) = entry.split_once(':') {
-//RS             entries.push((key.trim().to_string(), value.trim().to_string()));
-//RS         } else {
-//RS             return Err(err(format!("malformed target profile field `{entry}`")));
-//RS         }
-//RS     }
-//RS     Ok(entries)
-//RS }
-//RS 
-//RS fn top_level_lines_or_commas(body: &str) -> Vec<String> {
-//RS     let mut out = Vec::new();
-//RS     let mut depth = 0i32;
-//RS     let mut current = String::new();
-//RS     let mut quoted = false;
-//RS     let mut escaped = false;
-//RS     for character in body.chars() {
-//RS         if quoted {
-//RS             current.push(character);
-//RS             if escaped {
-//RS                 escaped = false;
-//RS             } else if character == '\\' {
-//RS                 escaped = true;
-//RS             } else if character == '"' {
-//RS                 quoted = false;
-//RS             }
-//RS             continue;
-//RS         }
-//RS         match character {
-//RS             '"' => {
-//RS                 quoted = true;
-//RS                 current.push(character);
-//RS             }
-//RS             '(' | '[' | '{' => {
-//RS                 depth += 1;
-//RS                 current.push(character);
-//RS             }
-//RS             ')' | ']' | '}' => {
-//RS                 depth -= 1;
-//RS                 current.push(character);
-//RS             }
-//RS             ',' | '\n' if depth == 0 => {
-//RS                 if !current.trim().is_empty() {
-//RS                     out.push(std::mem::take(&mut current));
-//RS                 }
-//RS             }
-//RS             _ => current.push(character),
-//RS         }
-//RS     }
-//RS     if !current.trim().is_empty() {
-//RS         out.push(current);
-//RS     }
-//RS     out
-//RS }
-//RS 
-//RS pub(super) fn parse_target_profiles(body: &str) -> Result<PackageTargets, PackageParseError> {
-//RS     let entries = target_profile_entries(body)?;
-//RS     if entries.is_empty() {
-//RS         return Err(PackageParseError::BadTargetField {
-//RS             name: "targets".to_string(),
-//RS             detail: "the `targets` block must declare at least one target".to_string(),
-//RS         });
-//RS     }
-//RS 
-//RS     let mut selections = Vec::with_capacity(entries.len());
-//RS     for (raw_name, value) in entries {
-//RS         let name = unquote(&raw_name);
-//RS         if name.is_empty() {
-//RS             return Err(PackageParseError::BadTargetField {
-//RS                 name: "targets".to_string(),
-//RS                 detail: "target names must not be empty".to_string(),
-//RS             });
-//RS         }
-//RS         let inner = value
-//RS             .trim()
-//RS             .strip_prefix('{')
-//RS             .and_then(|body| body.strip_suffix('}'))
-//RS             .map(str::trim)
-//RS             .ok_or_else(|| PackageParseError::BadTargetField {
-//RS                 name: name.clone(),
-//RS                 detail: "target selection must be a record containing only `profile`".to_string(),
-//RS             })?;
-//RS 
-//RS         let mut profile = None;
-//RS         let mut seen = HashSet::new();
-//RS         for (field, raw_profile) in target_profile_entries(inner)? {
-//RS             if !seen.insert(field.clone()) {
-//RS                 return Err(PackageParseError::BadTargetField {
-//RS                     name: name.clone(),
-//RS                     detail: format!("target field `{field}` is declared more than once"),
-//RS                 });
-//RS             }
-//RS             if field != "profile" {
-//RS                 return Err(PackageParseError::BadTargetField {
-//RS                     name: name.clone(),
-//RS                     detail: format!(
-//RS                         "unknown target selection field `{field}` (allowed: `profile`)"
-//RS                     ),
-//RS                 });
-//RS             }
-//RS             let raw_profile = unquote(&raw_profile);
-//RS             let identity = TargetProfileIdentity::parse(&raw_profile).map_err(|detail| {
-//RS                 PackageParseError::BadTargetField {
-//RS                     name: name.clone(),
-//RS                     detail,
-//RS                 }
-//RS             })?;
-//RS             profile = Some(identity);
-//RS         }
-//RS         let profile = profile.ok_or_else(|| PackageParseError::BadTargetField {
-//RS             name: name.clone(),
-//RS             detail: "target selection must declare `profile`".to_string(),
-//RS         })?;
-//RS         selections.push(TargetProfileSelection { name, profile });
-//RS     }
-//RS 
-//RS     PackageTargets::from_selections(selections).map_err(|detail| PackageParseError::BadTargetField {
-//RS         name: "targets".to_string(),
-//RS         detail,
-//RS     })
-//RS }
-//RS 
-//RS pub(super) fn parse_packages(body: &str) -> Result<Vec<PackageEntry>, PackageParseError> {
-//RS     let mut packages = Vec::new();
-//RS     for entry in top_level_commas(body) {
-//RS         let entry = entry.trim();
-//RS         if entry.is_empty() {
-//RS             continue;
-//RS         }
-//RS         let (name, targets) = match entry.split_once(':') {
-//RS             Some((k, v)) => {
-//RS                 let name = k.trim().to_string();
-//RS                 let value = v.trim();
-//RS                 if let Some(inner) = value.strip_prefix('{') {
-//RS                     let inner = inner
-//RS                         .trim_end()
-//RS                         .strip_suffix('}')
-//RS                         .unwrap_or(inner.trim_end());
-//RS                     let targets = parse_package_entry_block(&name, inner)?;
-//RS                     (name, targets)
-//RS                 } else {
-//RS                     let target = parse_target(&name, value)?;
-//RS                     (name, vec![target])
-//RS                 }
-//RS             }
-//RS             None => (entry.to_string(), Vec::new()),
-//RS         };
-//RS         packages.push(PackageEntry { name, targets });
-//RS     }
-//RS     Ok(packages)
-//RS }
-//RS 
-//RS fn parse_target(name: &str, value: &str) -> Result<Target, PackageParseError> {
-//RS     let (keyword, block) = match value.split_once('{') {
-//RS         Some((kw, rest)) => {
-//RS             let body = rest.trim_end().strip_suffix('}').unwrap_or(rest.trim_end());
-//RS             (kw.trim(), Some(body))
-//RS         }
-//RS         None => (value.trim(), None),
-//RS     };
-//RS     if keyword == Syntax::TARGET_SANDBOX || keyword == Syntax::RETIRED_TARGET_PLUGIN {
-//RS         let export = match block {
-//RS             Some(body) => validate_plugin_block(name, body)?,
-//RS             None => None,
-//RS         };
-//RS         return Ok(Target::Plugin { export });
-//RS     }
-//RS     let kind = match keyword {
-//RS         k if k == Syntax::TARGET_LIBRARY => Target::Library,
-//RS         k if k == Syntax::TARGET_EXECUTABLE => Target::Executable,
-//RS         k if k == Syntax::TARGET_TEST => Target::Test,
-//RS         k if k == Syntax::TARGET_EXAMPLE => Target::Example,
-//RS         k if Syntax::TARGET_RESERVED.contains(&k) => {
-//RS             return Err(PackageParseError::BadTarget {
-//RS                 name: name.to_string(),
-//RS                 value: k.to_string(),
-//RS                 reserved: true,
-//RS             });
-//RS         }
-//RS         other => {
-//RS             return Err(PackageParseError::BadTarget {
-//RS                 name: name.to_string(),
-//RS                 value: other.to_string(),
-//RS                 reserved: false,
-//RS             });
-//RS         }
-//RS     };
-//RS     if let Some(body) = block {
-//RS         validate_target_block(name, body)?;
-//RS     }
-//RS     Ok(kind)
-//RS }
-//RS 
-//RS fn validate_target_block(name: &str, body: &str) -> Result<(), PackageParseError> {
-//RS     let mut seen = HashSet::new();
-//RS     for (key, _value) in key_value_entries(body)? {
-//RS         if !seen.insert(key.clone()) {
-//RS             return Err(PackageParseError::BadTargetField {
-//RS                 name: name.to_string(),
-//RS                 detail: format!("target field `{key}` is declared more than once"),
-//RS             });
-//RS         }
-//RS         if key != Syntax::TARGET_FIELD_ENTRY && key != Syntax::TARGET_FIELD_NAME {
-//RS             return Err(PackageParseError::BadTargetField {
-//RS                 name: name.to_string(),
-//RS                 detail: format!(
-//RS                     "unknown target field `{key}` (allowed: `{}`, `{}`)",
-//RS                     Syntax::TARGET_FIELD_ENTRY,
-//RS                     Syntax::TARGET_FIELD_NAME,
-//RS                 ),
-//RS             });
-//RS         }
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn validate_plugin_block(name: &str, body: &str) -> Result<Option<String>, PackageParseError> {
-//RS     let mut export = None;
-//RS     let mut seen = HashSet::new();
-//RS     for (key, value) in key_value_entries(body)? {
-//RS         if !seen.insert(key.clone()) {
-//RS             return Err(PackageParseError::BadTargetField {
-//RS                 name: name.to_string(),
-//RS                 detail: format!("sandbox field `{key}` is declared more than once"),
-//RS             });
-//RS         }
-//RS         if key == Syntax::TARGET_FIELD_ENTRY || key == Syntax::TARGET_FIELD_NAME {
-//RS             // free-form, consumed by the build pipeline.
-//RS         } else if key == Syntax::TARGET_FIELD_EXPORT {
-//RS             export = Some(unquote(&value));
-//RS         } else {
-//RS             return Err(PackageParseError::BadTargetField {
-//RS                 name: name.to_string(),
-//RS                 detail: format!(
-//RS                     "unknown field `{key}` on `sandbox` (allowed: `{}`, `{}`, `{}`)",
-//RS                     Syntax::TARGET_FIELD_ENTRY,
-//RS                     Syntax::TARGET_FIELD_NAME,
-//RS                     Syntax::TARGET_FIELD_EXPORT,
-//RS                 ),
-//RS             });
-//RS         }
-//RS     }
-//RS     Ok(export)
-//RS }
-//RS 
-//RS fn parse_package_entry_block(name: &str, body: &str) -> Result<Vec<Target>, PackageParseError> {
-//RS     let mut seen = HashSet::new();
-//RS     for (key, value) in key_value_entries(body)? {
-//RS         if !seen.insert(key.clone()) {
-//RS             return Err(PackageParseError::BadTargetField {
-//RS                 name: name.to_string(),
-//RS                 detail: format!("package field `{key}` is declared more than once"),
-//RS             });
-//RS         }
-//RS         if key == Syntax::PACKAGE_FIELD_KIND_REMOVED {
-//RS             return Err(PackageParseError::KindFieldRemoved {
-//RS                 name: name.to_string(),
-//RS             });
-//RS         }
-//RS         if key == Syntax::PACKAGE_FIELD_TARGETS {
-//RS             return parse_targets_list(name, value.trim());
-//RS         }
-//RS         return Err(PackageParseError::BadTargetField {
-//RS             name: name.to_string(),
-//RS             detail: format!("unknown package field `{key}`"),
-//RS         });
-//RS     }
-//RS     Ok(Vec::new())
-//RS }
-//RS 
-//RS fn parse_targets_list(name: &str, value: &str) -> Result<Vec<Target>, PackageParseError> {
-//RS     let inner = value
-//RS         .strip_prefix('[')
-//RS         .and_then(|s| s.strip_suffix(']'))
-//RS         .unwrap_or(value);
-//RS     let mut targets = Vec::new();
-//RS     for entry in top_level_commas(inner) {
-//RS         let entry = entry.trim();
-//RS         if entry.is_empty() {
-//RS             continue;
-//RS         }
-//RS         targets.push(parse_target(name, entry)?);
-//RS     }
-//RS     Ok(targets)
-//RS }
-//RS 
-//RS // ── build: … (D-BUILDPROFILE1, D-CTEFFECT1) ─────────────────────────────────
-//RS 
-//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-//RS pub enum BuildOptimize {
-//RS     None,
-//RS     Basic,
-//RS     Full,
-//RS }
-//RS 
-//RS impl BuildOptimize {
-//RS     pub fn as_str(self) -> &'static str {
-//RS         match self {
-//RS             BuildOptimize::None => Syntax::BUILD_OPTIMIZE_NONE,
-//RS             BuildOptimize::Basic => Syntax::BUILD_OPTIMIZE_BASIC,
-//RS             BuildOptimize::Full => Syntax::BUILD_OPTIMIZE_FULL,
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn cache_tag(self) -> &'static str {
-//RS         match self {
-//RS             BuildOptimize::None => "opt:none",
-//RS             BuildOptimize::Basic => "opt:basic",
-//RS             BuildOptimize::Full => "opt:full",
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-//RS pub enum BuildPanic {
-//RS     #[default]
-//RS     Unwind,
-//RS     Abort,
-//RS }
-//RS 
-//RS /// Development-time replay policy from the package's `dev: .{ … }` block.
-//RS ///
-//RS /// The package model owns the typed manifest facts. Runtime adapters map this
-//RS /// value to their own capture sink without reparsing package source.
-//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-//RS pub struct DevRecordsBudget {
-//RS     pub max_bytes: u64,
-//RS }
-//RS 
-//RS impl Default for DevRecordsBudget {
-//RS     fn default() -> Self {
-//RS         Self {
-//RS             max_bytes: 256 * 1024 * 1024,
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-//RS pub enum DevCaptureSetting {
-//RS     #[default]
-//RS     Default,
-//RS     On,
-//RS     Off,
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-//RS pub struct DevRecordsPolicy {
-//RS     pub capture: DevCaptureSetting,
-//RS     pub budget: DevRecordsBudget,
-//RS }
-//RS 
-//RS impl Default for DevRecordsPolicy {
-//RS     fn default() -> Self {
-//RS         Self {
-//RS             capture: DevCaptureSetting::Default,
-//RS             budget: DevRecordsBudget::default(),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-//RS pub struct DevPolicy {
-//RS     pub swap: bool,
-//RS     pub records: DevRecordsPolicy,
-//RS }
-//RS 
-//RS impl Default for DevPolicy {
-//RS     fn default() -> Self {
-//RS         Self {
-//RS             swap: true,
-//RS             records: DevRecordsPolicy::default(),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn record_body<'a>(value: &'a str, field: &str) -> Result<&'a str, PackageParseError> {
-//RS     let Some(open) = value.find('{') else {
-//RS         return Err(err(format!("{field} needs a record value")));
-//RS     };
-//RS     let Some(close) = value.rfind('}') else {
-//RS         return Err(err(format!("{field} needs a closed record value")));
-//RS     };
-//RS     Ok(&value[open + 1..close])
-//RS }
-//RS 
-//RS pub(super) fn parse_dev(value: &str) -> Result<DevPolicy, PackageParseError> {
-//RS     let body = record_body(value, "dev")?;
-//RS     let mut policy = DevPolicy::default();
-//RS     let mut seen_swap = false;
-//RS     let mut seen_records = false;
-//RS     for (key, raw) in key_value_entries(body)? {
-//RS         match key.as_str() {
-//RS             "swap" => {
-//RS                 if seen_swap {
-//RS                     return Err(err("dev policy field `swap` is declared more than once"));
-//RS                 }
-//RS                 seen_swap = true;
-//RS                 policy.swap = match raw.trim() {
-//RS                     "true" => true,
-//RS                     "false" => false,
-//RS                     _ => return Err(err("dev policy field `swap` expected `true` or `false")),
-//RS                 };
-//RS             }
-//RS             "records" => {
-//RS                 if seen_records {
-//RS                     return Err(err("dev policy field `records` is declared more than once"));
-//RS                 }
-//RS                 seen_records = true;
-//RS                 policy.records = parse_dev_records(&raw)?;
-//RS             }
-//RS             other => {
-//RS                 return Err(err(format!(
-//RS                     "dev policy has unknown field `{other}` (allowed: swap, records)"
-//RS                 )));
-//RS             }
-//RS         }
-//RS     }
-//RS     Ok(policy)
-//RS }
-//RS 
-//RS fn parse_dev_records(value: &str) -> Result<DevRecordsPolicy, PackageParseError> {
-//RS     let body = record_body(value, "dev.records")?;
-//RS     let mut policy = DevRecordsPolicy::default();
-//RS     let mut seen_capture = false;
-//RS     let mut seen_budget = false;
-//RS     for (key, raw) in key_value_entries(body)? {
-//RS         match key.as_str() {
-//RS             "capture" => {
-//RS                 if seen_capture {
-//RS                     return Err(err(
-//RS                         "dev.records field `capture` is declared more than once",
-//RS                     ));
-//RS                 }
-//RS                 seen_capture = true;
-//RS                 policy.capture = match unquote(&raw).as_str() {
-//RS                     "default" => DevCaptureSetting::Default,
-//RS                     "on" => DevCaptureSetting::On,
-//RS                     "off" => DevCaptureSetting::Off,
-//RS                     _ => {
-//RS                         return Err(err(
-//RS                             "dev.records.capture expected `default`, `on`, or `off`",
-//RS                         ))
-//RS                     }
-//RS                 };
-//RS             }
-//RS             "budget" => {
-//RS                 if seen_budget {
-//RS                     return Err(err(
-//RS                         "dev.records field `budget` is declared more than once",
-//RS                     ));
-//RS                 }
-//RS                 seen_budget = true;
-//RS                 policy.budget = parse_dev_records_budget(&raw)?;
-//RS             }
-//RS             other => {
-//RS                 return Err(err(format!(
-//RS                     "dev.records has unknown field `{other}` (allowed: capture, budget)"
-//RS                 )));
-//RS             }
-//RS         }
-//RS     }
-//RS     Ok(policy)
-//RS }
-//RS 
-//RS fn parse_dev_records_budget(value: &str) -> Result<DevRecordsBudget, PackageParseError> {
-//RS     let body = record_body(value, "dev.records.budget")?;
-//RS     let mut budget = DevRecordsBudget::default();
-//RS     let mut seen_size = false;
-//RS     for (key, raw) in key_value_entries(body)? {
-//RS         match key.as_str() {
-//RS             "size" => {
-//RS                 if seen_size {
-//RS                     return Err(err(
-//RS                         "dev.records.budget field `size` is declared more than once",
-//RS                     ));
-//RS                 }
-//RS                 seen_size = true;
-//RS                 budget.max_bytes = parse_dev_record_bytes(&raw)?;
-//RS             }
-//RS             other => {
-//RS                 return Err(err(format!(
-//RS                     "dev.records.budget has unknown field `{other}` (allowed: size)"
-//RS                 )));
-//RS             }
-//RS         }
-//RS     }
-//RS     Ok(budget)
-//RS }
-//RS 
-//RS fn parse_dev_record_bytes(value: &str) -> Result<u64, PackageParseError> {
-//RS     let compact = unquote(value).to_ascii_lowercase();
-//RS     let compact = compact.trim();
-//RS     let (digits, multiplier) = ["bytes", "gib", "gb", "mib", "mb", "kib", "kb", "b"]
-//RS         .iter()
-//RS         .find_map(|suffix| compact.strip_suffix(suffix).map(|digits| (digits, *suffix)))
-//RS         .map(|(digits, suffix)| {
-//RS             let multiplier = match suffix {
-//RS                 "gib" | "gb" => 1024u64.pow(3),
-//RS                 "mib" | "mb" => 1024u64.pow(2),
-//RS                 "kib" | "kb" => 1024,
-//RS                 _ => 1,
-//RS             };
-//RS             (digits.trim(), multiplier)
-//RS         })
-//RS         .unwrap_or((compact, 1));
-//RS     let count = digits
-//RS         .replace('_', "")
-//RS         .split_whitespace()
-//RS         .collect::<String>()
-//RS         .parse::<u64>()
-//RS         .ok()
-//RS         .filter(|n| *n > 0)
-//RS         .ok_or_else(|| {
-//RS             err("dev.records.budget.size must be a positive whole-byte quantity")
-//RS         })?;
-//RS     count
-//RS         .checked_mul(multiplier)
-//RS         .filter(|bytes| *bytes > 0)
-//RS         .ok_or_else(|| err("dev.records.budget.size does not fit in 64 bits"))
-//RS }
-//RS 
-//RS /// One named build profile declared in `build: .{ … }`.
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct BuildProfileDef {
-//RS     pub name: String,
-//RS     pub optimize: BuildOptimize,
-//RS     pub debug_info: bool,
-//RS     pub small: bool,
-//RS     pub panic: Option<BuildPanic>,
-//RS     /// D-CONF-MODULE1=A: profile contributions to declared typed settings.
-//RS     pub settings: BTreeMap<String, String>,
-//RS     /// D-DX-PROD1: release-only devtools presence form.
-//RS     pub inspect: ReleaseInspect,
-//RS     /// Game packaging policy resolved from this named profile.
-//RS     pub game_development_stripping: Option<bool>,
-//RS     pub game_cook_mode: Option<String>,
-//RS }
-//RS 
-//RS pub(super) fn parse_build(body: &str) -> Result<Vec<BuildProfileDef>, PackageParseError> {
-//RS     let mut profiles = Vec::new();
-//RS     let mut seen = HashSet::new();
-//RS     for (name, value) in key_value_entries(body)? {
-//RS         if !seen.insert(name.clone()) {
-//RS             return Err(err(format!(
-//RS                 "build field `{name}` is declared more than once"
-//RS             )));
-//RS         }
-//RS         if name == Syntax::BUILD_FIELD_ALLOW {
-//RS             continue;
-//RS         }
-//RS         let value = value.trim();
-//RS         let inner_block = if let Some(rest) = value.strip_prefix(Syntax::BUILD_CTOR) {
-//RS             let rest = rest.trim_start_matches('.').trim();
-//RS             rest.strip_prefix('{')
-//RS                 .and_then(|s| s.strip_suffix('}'))
-//RS                 .map(|s| s.trim())
-//RS         } else if let Some(s) = value.strip_prefix('{') {
-//RS             s.strip_suffix('}').map(|s| s.trim())
-//RS         } else {
-//RS             return Err(err(format!(
-//RS                 "build profile `{name}` needs a `Build.{{ optimize: none|basic|full, … }}` value"
-//RS             )));
-//RS         };
-//RS         let inner = inner_block.unwrap_or("");
-//RS         let mut optimize_val: Option<String> = None;
-//RS         let mut debug_info = false;
-//RS         let mut small = false;
-//RS         let mut panic = None;
-//RS         let mut settings = BTreeMap::new();
-//RS         let mut inspect = ReleaseInspect::default();
-//RS         let mut game_development_stripping = None;
-//RS         let mut game_cook_mode = None;
-//RS         let mut seen_fields = HashSet::new();
-//RS         for (key, val) in key_value_entries(inner)? {
-//RS             if !seen_fields.insert(key.clone()) {
-//RS                 return Err(err(format!(
-//RS                     "build profile `{name}.{key}` is declared more than once"
-//RS                 )));
-//RS             }
-//RS             if key == Syntax::BUILD_FIELD_OPTIMIZE {
-//RS                 optimize_val = Some(unquote(&val));
-//RS             } else if key == Syntax::BUILD_FIELD_DEBUG_INFO {
-//RS                 debug_info = parse_bool(&name, &val)?;
-//RS             } else if key == Syntax::BUILD_FIELD_SMALL {
-//RS                 small = parse_bool(&name, &val)?;
-//RS             } else if key == Syntax::BUILD_FIELD_PANIC {
-//RS                 let val = unquote(&val);
-//RS                 panic = Some(match val.as_str() {
-//RS                     s if s == Syntax::BUILD_PANIC_ABORT => BuildPanic::Abort,
-//RS                     s if s == Syntax::BUILD_PANIC_UNWIND => BuildPanic::Unwind,
-//RS                     _ => return Err(err(format!("build profile `{name}` has an unknown `panic:` value — use `abort` or `unwind`"))),
-//RS                 });
-//RS             } else if key == ReleaseInspect::FIELD {
-//RS                 if name != Syntax::BUILD_PROFILE_RELEASE {
-//RS                     return Err(err(format!(
-//RS                         "build profile `{name}` may declare `inspect:` only on `release`"
-//RS                     )));
-//RS                 }
-//RS                 inspect = ReleaseInspect::parse(&val).map_err(|detail| {
-//RS                     err(format!(
-//RS                         "build profile `{name}` has an invalid `inspect:` value `{}` — {detail}",
-//RS                         val.trim()
-//RS                     ))
-//RS                 })?;
-//RS             } else if key == "game_development_stripping" {
-//RS                 game_development_stripping = Some(parse_bool(&name, &val)?);
-//RS             } else if key == "game_cook_mode" {
-//RS                 let mode = unquote(&val);
-//RS                 if !matches!(mode.as_str(), "fast" | "reproducible" | "scripts-only") {
-//RS                     return Err(err(format!(
-//RS                         "build profile `{name}` has an unknown `game_cook_mode:` value `{mode}`"
-//RS                     )));
-//RS                 }
-//RS                 game_cook_mode = Some(mode);
-//RS             } else if key == Syntax::BUILD_FIELD_SETTINGS {
-//RS                 let inner = val
-//RS                     .trim_start_matches('.')
-//RS                     .trim()
-//RS                     .strip_prefix('{')
-//RS                     .and_then(|s| s.strip_suffix('}'))
-//RS                     .map(|s| s.trim())
-//RS                     .ok_or_else(|| {
-//RS                         err(format!(
-//RS                             "build profile `{name}` needs `settings: {{ key: value, … }}`"
-//RS                         ))
-//RS                     })?;
-//RS                 for (k, v) in key_value_entries(inner)? {
-//RS                     if settings.insert(k.clone(), unquote(&v)).is_some() {
-//RS                         return Err(err(format!(
-//RS                             "build profile `{name}.settings.{k}` is declared more than once"
-//RS                         )));
-//RS                     }
-//RS                 }
-//RS             } else if matches!(
-//RS                 key.as_str(),
-//RS                 Syntax::RETIRED_BUILD_FIELD_FEATURES | Syntax::RETIRED_BUILD_FIELD_ENV
-//RS             ) {
-//RS                 return Err(err(format!(
-//RS                     "build profile `{name}` uses retired `{key}:`; declare a typed `settings: {{ key: Type = default }}` entry and override it with `--set key=value`"
-//RS                 )));
-//RS             } else {
-//RS                 return Err(err(format!(
-//RS                     "build profile `{name}` has an unknown field `{key}` (allowed: optimize, debug_info, small, panic, inspect, game_development_stripping, game_cook_mode, settings)"
-//RS                 )));
-//RS             }
-//RS         }
-//RS         let optimize = match optimize_val.as_deref() {
-//RS             Some(s) if s == Syntax::BUILD_OPTIMIZE_NONE => BuildOptimize::None,
-//RS             Some(s) if s == Syntax::BUILD_OPTIMIZE_BASIC => BuildOptimize::Basic,
-//RS             Some(s) if s == Syntax::BUILD_OPTIMIZE_FULL => BuildOptimize::Full,
-//RS             Some(_) | None => {
-//RS                 return Err(err(format!(
-//RS                     "build profile `{name}` is missing `optimize: none|basic|full`"
-//RS                 )))
-//RS             }
-//RS         };
-//RS         profiles.push(BuildProfileDef {
-//RS             name,
-//RS             optimize,
-//RS             debug_info,
-//RS             small,
-//RS             panic,
-//RS             settings,
-//RS             inspect,
-//RS             game_development_stripping,
-//RS             game_cook_mode,
-//RS         });
-//RS     }
-//RS     Ok(profiles)
-//RS }
-//RS 
-//RS /// D-CTEFFECT1: `build: .{ allow: #(FS, Exec) }`.
-//RS pub(super) fn parse_build_allow(body: &str) -> Result<Vec<String>, PackageParseError> {
-//RS     let mut allow = Vec::new();
-//RS     let mut seen_allow = false;
-//RS     for (name, value) in key_value_entries(body)? {
-//RS         if name != Syntax::BUILD_FIELD_ALLOW {
-//RS             continue;
-//RS         }
-//RS         if seen_allow {
-//RS             return Err(PackageParseError::BadEffectsBlock(
-//RS                 "`build.allow:` is declared more than once".to_string(),
-//RS             ));
-//RS         }
-//RS         seen_allow = true;
-//RS         let value = value.trim();
-//RS         let inner = value
-//RS             .strip_prefix("#(")
-//RS             .and_then(|value| value.strip_suffix(')'))
-//RS             .ok_or_else(|| {
-//RS                 PackageParseError::BadEffectsBlock(
-//RS                     "`build.allow:` must be an effect tuple like `#(FS, Exec)`".to_string(),
-//RS                 )
-//RS             })?;
-//RS         for effect in top_level_commas(inner) {
-//RS             let effect = unquote(effect.trim());
-//RS             if crate::Sema::Effect::parse(crate::Sema::effect_root(&effect)).is_none() {
-//RS                 return Err(PackageParseError::BadEffectsBlock(format!(
-//RS                     "`{effect}` isn't a known build effect"
-//RS                 )));
-//RS             }
-//RS             allow.push(effect);
-//RS         }
-//RS     }
-//RS     Ok(allow)
-//RS }
-//RS 
-//RS fn parse_bool(profile: &str, value: &str) -> Result<bool, PackageParseError> {
-//RS     match value.trim() {
-//RS         "true" => Ok(true),
-//RS         "false" => Ok(false),
-//RS         _ => Err(err(format!(
-//RS             "build profile `{profile}` expected `true` or `false`"
-//RS         ))),
-//RS     }
-//RS }
-//RS 
-//RS fn parse_string_list(value: &str) -> Result<Vec<String>, ()> {
-//RS     let inner = value
-//RS         .trim()
-//RS         .strip_prefix('[')
-//RS         .and_then(|s| s.strip_suffix(']'))
-//RS         .ok_or(())?;
-//RS     let mut out = Vec::new();
-//RS     for entry in top_level_commas(inner) {
-//RS         let entry = entry.trim();
-//RS         if entry.is_empty() {
-//RS             continue;
-//RS         }
-//RS         out.push(unquote(entry));
-//RS     }
-//RS     Ok(out)
-//RS }
-//RS 
-//RS pub(super) fn parse_grants(body: &str) -> Result<Vec<(String, Vec<String>)>, PackageParseError> {
-//RS     let mut out = Vec::new();
-//RS     let mut seen = HashSet::new();
-//RS     for (key, value) in key_value_entries(body)? {
-//RS         let dep = unquote(&key);
-//RS         if !seen.insert(dep.clone()) {
-//RS             return Err(err(format!("grant `{dep}` is declared more than once")));
-//RS         }
-//RS         let effects = parse_effect_list(&dep, value.trim())?;
-//RS         out.push((dep, effects));
-//RS     }
-//RS     Ok(out)
-//RS }
-//RS 
-//RS fn parse_effect_list(field: &str, value: &str) -> Result<Vec<String>, PackageParseError> {
-//RS     let names = parse_string_list(value).map_err(|_| {
-//RS         PackageParseError::BadEffectsBlock(format!("`{field}:` must be a list like `[DB, Net]`"))
-//RS     })?;
-//RS     for name in &names {
-//RS         if crate::Sema::Effect::parse(crate::Sema::effect_root(name)).is_none() {
-//RS             return Err(PackageParseError::BadEffectsBlock(format!(
-//RS                 "`{name}` isn't a known effect (see the closed vocabulary in Prelude/Effects.jet)"
-//RS             )));
-//RS         }
-//RS         if name.contains('(') {
-//RS             if !field.ends_with("deny") {
-//RS                 return Err(PackageParseError::BadEffectsBlock(format!(
-//RS                     "`{name}` is a parameterized memory denial and belongs only in an `authority.holds.deny` list — use `Mem.Alloc(above: 65536)` there"
-//RS                 )));
-//RS             }
-//RS             if crate::Sema::memory_allocation_bound(name).is_none() {
-//RS                 return Err(PackageParseError::BadEffectsBlock(format!(
-//RS                 "`{name}` has an invalid parameterized rights entry — use `Mem.Alloc(above: 65536)`"
-//RS                 )));
-//RS             }
-//RS         }
-//RS     }
-//RS     Ok(names)
-//RS }
-//RS fn parse_authority_needs(value: &str) -> Result<Vec<String>, PackageParseError> {
-//RS     let needs = parse_string_list(value).map_err(|_| {
-//RS         PackageParseError::BadEffectsBlock(
-//RS             "`authority.needs:` must be a list like `[DB, Net, UI.Clipboard]`".to_string(),
-//RS         )
-//RS     })?;
-//RS     for name in &needs {
-//RS         if jet_foundation::Syntax::is_ui_capability(name) {
-//RS             continue;
-//RS         }
-//RS         if crate::Sema::Effect::parse(crate::Sema::effect_root(name)).is_none() {
-//RS             return Err(PackageParseError::BadEffectsBlock(format!(
-//RS                 "`{name}` isn't a known effect or UI capability"
-//RS             )));
-//RS         }
-//RS         if name.contains('(') {
-//RS             return Err(PackageParseError::BadEffectsBlock(format!(
-//RS                 "`{name}` is a parameterized memory denial and cannot be declared in `authority.needs`"
-//RS             )));
-//RS         }
-//RS     }
-//RS     if let Some(denied_only) = needs.iter().find(|right| {
-//RS         let root = crate::Sema::effect_root(right);
-//RS         root == "Panic" || root == "Mem"
-//RS     }) {
-//RS         return Err(PackageParseError::BadEffectsBlock(format!(
-//RS             "`{denied_only}` is deny-only and cannot be declared in `authority.needs`"
-//RS         )));
-//RS     }
-//RS     Ok(needs)
-//RS }
-//RS 
-//RS 
-//RS // ── authority: … / policy: … (D-AUTHORITY-MANIFEST1, D-BOUND-PROV1,
-//RS //    D-JPK-GRANTSCHEMA1, D-JPK-PROVIDERAUTH1, D-LINTPOLICY1,
-//RS //    D-PACKAGE-POLICY-SCOPE1, D-ONCE-AUTODERIVE1, D-MEM-GUARANTEE1) ──────────
-//RS 
-//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-//RS pub enum TrustDecision {
-//RS     Allow,
-//RS     Prompt,
-//RS     Deny,
-//RS }
-//RS 
-//RS /// D-AUTHORITY-MANIFEST1=A: the package's own authority bound.
-//RS #[derive(Debug, Clone, PartialEq, Eq, Default)]
-//RS pub struct AuthorityHolds {
-//RS     pub allow: Option<Vec<String>>,
-//RS     pub deny: Option<Vec<String>>,
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, PartialEq, Eq, Default)]
-//RS pub struct TrustPolicy {
-//RS     pub default: Option<TrustDecision>,
-//RS     pub ci_prompt: Option<TrustDecision>,
-//RS     pub services: Vec<(String, TrustDecision)>,
-//RS     /// D-BOUND-PROV1: optional provenance floor for dependency resolution.
-//RS     pub require: Option<ProvenanceRequirement>,
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-//RS pub enum ProvenanceRequirement {
-//RS     None,
-//RS     Logged,
-//RS     Attested,
-//RS }
-//RS 
-//RS impl ProvenanceRequirement {
-//RS     pub fn label(self) -> &'static str {
-//RS         match self {
-//RS             Self::None => Syntax::AUTHORITY_TRUST_REQUIRE_NONE,
-//RS             Self::Logged => Syntax::AUTHORITY_TRUST_REQUIRE_LOGGED,
-//RS             Self::Attested => Syntax::AUTHORITY_TRUST_REQUIRE_ATTESTED,
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct ProviderAuthority {
-//RS     pub provider: String,
-//RS     pub registry: String,
-//RS     pub allow: Vec<String>,
-//RS     pub deny: Vec<String>,
-//RS }
-//RS 
-//RS /// D-AUTHORITY-MANIFEST1=A: one parsed authority block. The package model
-//RS /// copies this into its public authority fact and projects holds/grants into
-//RS /// the effect-budget summary inputs. `needs` is a guest declaration, not a
-//RS /// second grant store.
-//RS #[derive(Debug, Clone, PartialEq, Eq, Default)]
-//RS pub struct AuthorityBlock {
-//RS     pub holds: AuthorityHolds,
-//RS     pub needs: Vec<String>,
-//RS     pub grants: Vec<(String, Vec<String>)>,
-//RS     pub trust: Option<TrustPolicy>,
-//RS     pub providers: Vec<ProviderAuthority>,
-//RS }
-//RS 
-//RS fn authority_bad(detail: impl Into<String>) -> PackageParseError {
-//RS     PackageParseError::BadEffectsBlock(format!("malformed `authority:` block: {}", detail.into()))
-//RS }
-//RS 
-//RS fn authority_object_body<'a>(value: &'a str, field: &str) -> Result<&'a str, PackageParseError> {
-//RS     let value = value.trim();
-//RS     let Some(open) = value.find('{') else {
-//RS         return Err(authority_bad(format!(
-//RS             "`authority.{field}` must be a record"
-//RS         )));
-//RS     };
-//RS     let Some(close) = value.rfind('}') else {
-//RS         return Err(authority_bad(format!(
-//RS             "`authority.{field}` is missing `}}`"
-//RS         )));
-//RS     };
-//RS     if close <= open || !value[close + 1..].trim().is_empty() {
-//RS         return Err(authority_bad(format!(
-//RS             "`authority.{field}` must contain one complete record"
-//RS         )));
-//RS     }
-//RS     Ok(&value[open + 1..close])
-//RS }
-//RS 
-//RS fn parse_authority_holds(body: &str) -> Result<AuthorityHolds, PackageParseError> {
-//RS     let mut holds = AuthorityHolds::default();
-//RS     let mut seen = HashSet::new();
-//RS     for (key, value) in key_value_entries(body).map_err(authority_error)? {
-//RS         if !seen.insert(key.clone()) {
-//RS             return Err(authority_bad(format!(
-//RS                 "authority.holds.{key} is declared more than once"
-//RS             )));
-//RS         }
-//RS         match key.as_str() {
-//RS             Syntax::AUTHORITY_HOLDS_FIELD_ALLOW => {
-//RS                 holds.allow = Some(
-//RS                     parse_effect_list("authority.holds.allow", value.trim())
-//RS                         .map_err(authority_error)?,
-//RS                 );
-//RS             }
-//RS             Syntax::AUTHORITY_HOLDS_FIELD_DENY => {
-//RS                 holds.deny = Some(
-//RS                     parse_effect_list("authority.holds.deny", value.trim())
-//RS                         .map_err(authority_error)?,
-//RS                 );
-//RS             }
-//RS             _ => {
-//RS                 return Err(authority_bad(format!(
-//RS                     "unknown `authority.holds` field `{key}` — allowed: `{}`, `{}`",
-//RS                     Syntax::AUTHORITY_HOLDS_FIELD_ALLOW,
-//RS                     Syntax::AUTHORITY_HOLDS_FIELD_DENY,
-//RS                 )))
-//RS             }
-//RS         }
-//RS     }
-//RS     Ok(holds)
-//RS }
-//RS 
-//RS pub(super) fn parse_authority(body: &str) -> Result<AuthorityBlock, PackageParseError> {
-//RS     let mut authority = AuthorityBlock::default();
-//RS     let mut seen = HashSet::new();
-//RS     for (key, value) in key_value_entries(body).map_err(authority_error)? {
-//RS         if !seen.insert(key.clone()) {
-//RS             return Err(authority_bad(format!(
-//RS                 "authority.{key} is declared more than once"
-//RS             )));
-//RS         }
-//RS         match key.as_str() {
-//RS             Syntax::AUTHORITY_FIELD_HOLDS => {
-//RS                 authority.holds = parse_authority_holds(authority_object_body(&value, "holds")?)?;
-//RS             }
-//RS             Syntax::AUTHORITY_FIELD_NEEDS => {
-//RS                 authority.needs = parse_authority_needs(&value).map_err(authority_error)?;
-//RS             }
-//RS             Syntax::AUTHORITY_FIELD_GRANTS => {
-//RS                 authority.grants = parse_grants(authority_object_body(&value, "grants")?)
-//RS                     .map_err(authority_error)?;
-//RS             }
-//RS             Syntax::AUTHORITY_FIELD_TRUST => {
-//RS                 authority.trust = Some(parse_authority_trust_body(authority_object_body(
-//RS                     &value, "trust",
-//RS                 )?)?);
-//RS             }
-//RS             Syntax::AUTHORITY_FIELD_PROVIDERS => {
-//RS                 authority.providers =
-//RS                     parse_provider_authority_body(authority_object_body(&value, "providers")?)?;
-//RS             }
-//RS             _ => {
-//RS                 return Err(authority_bad(format!(
-//RS                     "unknown `authority` field `{key}` — allowed: `{}`, `{}`, `{}`, `{}`, `{}`",
-//RS                     Syntax::AUTHORITY_FIELD_HOLDS,
-//RS                     Syntax::AUTHORITY_FIELD_NEEDS,
-//RS                     Syntax::AUTHORITY_FIELD_GRANTS,
-//RS                     Syntax::AUTHORITY_FIELD_TRUST,
-//RS                     Syntax::AUTHORITY_FIELD_PROVIDERS,
-//RS                 )))
-//RS             }
-//RS         }
-//RS     }
-//RS     Ok(authority)
-//RS }
-//RS 
-//RS /// Parse the complete `authority:` value so a missing or non-record outer
-//RS /// value uses the same malformed-authority error as malformed nested fields.
-//RS pub(crate) fn parse_authority_value(value: &str) -> Result<AuthorityBlock, PackageParseError> {
-//RS     let body = authority_object_body(value, "authority")?;
-//RS     parse_authority(body)
-//RS }
-//RS 
-//RS fn authority_error(error: PackageParseError) -> PackageParseError {
-//RS     match error {
-//RS         PackageParseError::Composition(detail) => authority_bad(detail),
-//RS         other => other,
-//RS     }
-//RS }
-// END-PORT-PENDING 2064 crates/jet-pkg-model/src/Package/Blocks.rs:1-1800
+use Compiler.JetPkgModel.Source.Manifest.Blocks.Targets.[TargetProfileIdentity]
+use Compiler.JetPkgModel.Source.Manifest.Blocks.BuildProfiles.[BuildPanic]
+use Compiler.JetPkgModel.Source.Manifest.Blocks.Authority.[TrustPolicy, ServiceTrust]
 
+// Rust: crates/jet-pkg-model/src/Package/Blocks.rs:12-14
+// ReleaseInspect is the canonical jet_foundation.JetReleaseInspect carrier;
+// its parser and display logic live in BuildProfiles and ReleaseDevtools.
+
+// Rust: crates/jet-pkg-model/src/Package/Blocks.rs:26
+// key_value_entries -> Compiler/JetPkgModel/Source/Manifest/ManifestText.jet:53 (pkg_key_value_entries).
+// Rust: crates/jet-pkg-model/src/Package/Blocks.rs:43
+// top_level_commas -> ManifestText.jet:17 (pkg_top_level_commas).
+// Rust: crates/jet-pkg-model/src/Package/Blocks.rs:87
+// unquote -> ManifestText.jet:65 (pkg_unquote).
+
+// Rust: crates/jet-pkg-model/src/Package/Blocks.rs:98
+// ImportBoundary and matches -> Compiler/JetPkgModel/Source/Manifest/Blocks/Boundaries.jet:5/11.
+// Rust: crates/jet-pkg-model/src/Package/Blocks.rs:112
+// boundary_pattern_matches -> Boundaries.jet:16 (pkg_boundary_pattern_matches).
+// Rust: crates/jet-pkg-model/src/Package/Blocks.rs:120
+// parse_boundary_pattern -> Boundaries.jet:23 (pkg_parse_boundary_pattern).
+// Rust: crates/jet-pkg-model/src/Package/Blocks.rs:142
+// parse_boundaries -> Boundaries.jet:41 (pkg_parse_boundaries).
+
+// Rust: crates/jet-pkg-model/src/Package/Blocks.rs:199
+// err is inlined as the canonical PackageParseError.Composition construction.
+// Rust: crates/jet-pkg-model/src/Package/Blocks.rs:203
+// bad_mem -> Compiler/JetPkgModel/Source/Manifest/Blocks/Policy.jet:9 (pkg_bad_mem).
+// Rust: crates/jet-pkg-model/src/Package/Blocks.rs:209
+// bad_guarantee -> Policy.jet:13 (pkg_bad_guarantee).
+// Rust: crates/jet-pkg-model/src/Package/Blocks.rs:215
+// bad_allocator -> Compiler/JetPkgModel/Source/Manifest/Blocks/Allocator.jet:9 (pkg_bad_allocator).
+// Rust: crates/jet-pkg-model/src/Package/Blocks.rs:224
+// parse_program_allocator -> Allocator.jet:13 (pkg_parse_program_allocator).
+// Rust: crates/jet-pkg-model/src/Package/Blocks.rs:264
+// parse_allocator_bytes -> Allocator.jet:27 (pkg_parse_allocator_bytes).
+
+// Rust: crates/jet-pkg-model/src/Package/Blocks.rs:294
+// DepSource -> Compiler/JetPkgModel/Source/Manifest/Blocks/Dependencies.jet:9.
+// Rust: crates/jet-pkg-model/src/Package/Blocks.rs:324
+// dep_display_redacted -> Dependencies.jet:38 (pkg_dep_display_redacted).
+// Rust: crates/jet-pkg-model/src/Package/Blocks.rs:341
+// redact_dependency_url -> Dependencies.jet:45 (pkg_redact_dependency_url).
+// Rust: crates/jet-pkg-model/src/Package/Blocks.rs:364
+// dep_display -> Dependencies.jet:23 (pkg_dep_display).
+// Rust: crates/jet-pkg-model/src/Package/Blocks.rs:390
+// bad_dep_value -> Dependencies.jet:73 (pkg_bad_dep_value).
+// Rust: crates/jet-pkg-model/src/Package/Blocks.rs:396
+// ref_error -> Dependencies.jet:77 (pkg_dep_ref_error).
+// Rust: crates/jet-pkg-model/src/Package/Blocks.rs:411
+// parse_deps -> Dependencies.jet:102/117 (pkg_parse_deps/pkg_parse_dep_value).
+// Rust: crates/jet-pkg-model/src/Package/Blocks.rs:467
+// validate_dependency_name -> Dependencies.jet:154 (pkg_validate_dependency_name).
+// Rust: crates/jet-pkg-model/src/Package/Blocks.rs:485
+// dependency_names_reject_path_components -> Jetpack/PackageModel/Tests/ManifestBlocks.jet:4.
+// Rust: crates/jet-pkg-model/src/Package/Blocks.rs:502
+// public_dependency_display_redacts_git_credentials_and_parameters -> Tests/ManifestBlocks.jet:12.
+// Rust: crates/jet-pkg-model/src/Package/Blocks.rs:522
+// parse_c_lib_ref -> Dependencies.jet:159 (pkg_parse_c_lib_ref).
+// Rust: crates/jet-pkg-model/src/Package/Blocks.rs:534
+// parse_foreign_ref -> Dependencies.jet:167 (pkg_parse_foreign_ref).
+// Rust: crates/jet-pkg-model/src/Package/Blocks.rs:565
+// parse_git_dep -> Dependencies.jet:179 (pkg_parse_git_dep).
+
+// Rust: crates/jet-pkg-model/src/Package/Blocks.rs:607
+// PackageKind -> Targets.jet:7.
+// Rust: crates/jet-pkg-model/src/Package/Blocks.rs:614
+// Target -> Targets.jet:13 (PackageTarget).
+// Rust: crates/jet-pkg-model/src/Package/Blocks.rs:624
+// PackageEntry -> Targets.jet:22.
+// Rust: crates/jet-pkg-model/src/Package/Blocks.rs:635
+// TargetProfileIdentity -> Targets.jet:41.
+// Rust: crates/jet-pkg-model/src/Package/Blocks.rs:643
+// WEB_BROWSER/WEB_WASI_SERVER/WEB_NO_OS -> Targets.jet:35-37 TARGET_PROFILE_WEB_* constants.
+// Rust: crates/jet-pkg-model/src/Package/Blocks.rs:648
+// TargetProfileIdentity.parse -> Targets.jet:48.
+// Rust: crates/jet-pkg-model/src/Package/Blocks.rs:699
+// TargetProfileIdentity.as_str -> Targets.jet:76.
+// Rust: crates/jet-pkg-model/src/Package/Blocks.rs:708
+// TargetProfileIdentity.is_web_builtin -> Targets.jet:85.
+// Rust: crates/jet-pkg-model/src/Package/Blocks.rs:715
+// TargetProfileIdentity.validate -> Targets.jet:92.
+
+// Rust: crates/jet-pkg-model/src/Package/Blocks.rs:728
+impl TargetProfileIdentity {
+    // Rust: crates/jet-pkg-model/src/Package/Blocks.rs:729
+    // GATE #4499: standard formatting protocol.
+    pub fn fmt(self, formatter: &std.fmt.Formatter) -> std.fmt.Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
+// Rust: crates/jet-pkg-model/src/Package/Blocks.rs:736
+// TargetProfileSelection -> Targets.jet:99.
+// Rust: crates/jet-pkg-model/src/Package/Blocks.rs:743
+// PackageTargets -> Targets.jet:105; its default is the existing empty:108.
+// Rust: crates/jet-pkg-model/src/Package/Blocks.rs:748
+// PackageTargets.from_selections -> Targets.jet:112.
+// Rust: crates/jet-pkg-model/src/Package/Blocks.rs:782
+// PackageTargets.get -> Targets.jet:128.
+// Rust: crates/jet-pkg-model/src/Package/Blocks.rs:786
+// PackageTargets.profile -> Targets.jet:132.
+// Rust: crates/jet-pkg-model/src/Package/Blocks.rs:790
+// PackageTargets.iter -> Targets.jet:138 (target-name sorted).
+// Rust: crates/jet-pkg-model/src/Package/Blocks.rs:794
+// PackageTargets.as_map -> Targets.jet:144.
+// Rust: crates/jet-pkg-model/src/Package/Blocks.rs:798
+// PackageTargets.len -> Targets.jet:148.
+// Rust: crates/jet-pkg-model/src/Package/Blocks.rs:802
+// PackageTargets.is_empty -> Targets.jet:152.
+// Rust: crates/jet-pkg-model/src/Package/Blocks.rs:807
+// target_profile_entries -> Targets.jet:157 (pkg_target_profile_entries).
+// Rust: crates/jet-pkg-model/src/Package/Blocks.rs:825
+// top_level_lines_or_commas -> ManifestText.jet:354 (pkg_top_level_lines_or_commas).
+// Rust: crates/jet-pkg-model/src/Package/Blocks.rs:870
+// parse_target_profiles -> Targets.jet:169 (pkg_parse_target_profiles).
+// Rust: crates/jet-pkg-model/src/Package/Blocks.rs:937
+// parse_packages -> Targets.jet:198 (pkg_parse_packages).
+// Rust: crates/jet-pkg-model/src/Package/Blocks.rs:967
+// parse_target -> Targets.jet:223 (pkg_parse_target).
+// Rust: crates/jet-pkg-model/src/Package/Blocks.rs:1008
+// validate_target_block -> Targets.jet:254 (pkg_validate_target_block).
+// Rust: crates/jet-pkg-model/src/Package/Blocks.rs:1031
+// validate_plugin_block -> Targets.jet:265 (pkg_validate_plugin_block).
+// Rust: crates/jet-pkg-model/src/Package/Blocks.rs:1060
+// parse_package_entry_block -> Targets.jet:280 (pkg_parse_package_entry_block).
+// Rust: crates/jet-pkg-model/src/Package/Blocks.rs:1085
+// parse_targets_list -> Targets.jet:289 (pkg_parse_targets_list).
+
+// Rust: crates/jet-pkg-model/src/Package/Blocks.rs:1104
+// BuildOptimize and as_str:1111/cache_tag:1119 -> BuildProfiles.jet:11/16/24.
+// Rust: crates/jet-pkg-model/src/Package/Blocks.rs:1129
+// BuildPanic -> BuildProfiles.jet:33; its derived default is Unwind.
+impl BuildPanic {
+    pub fn default() -> BuildPanic { BuildPanic.Unwind }
+}
+// Rust: crates/jet-pkg-model/src/Package/Blocks.rs:1140
+// DevRecordsBudget and default:1145 -> BuildProfiles.jet:39/42.
+// Rust: crates/jet-pkg-model/src/Package/Blocks.rs:1153
+// DevCaptureSetting -> BuildProfiles.jet:47.
+// Rust: crates/jet-pkg-model/src/Package/Blocks.rs:1161
+// DevRecordsPolicy and default:1167 -> BuildProfiles.jet:53/57.
+// Rust: crates/jet-pkg-model/src/Package/Blocks.rs:1176
+// DevPolicy and default:1182 -> BuildProfiles.jet:62/66.
+// Rust: crates/jet-pkg-model/src/Package/Blocks.rs:1190
+// record_body -> BuildProfiles.jet:88 (pkg_block_record_body).
+// Rust: crates/jet-pkg-model/src/Package/Blocks.rs:1200
+// parse_dev -> BuildProfiles.jet:94 (pkg_parse_dev).
+// Rust: crates/jet-pkg-model/src/Package/Blocks.rs:1235
+// parse_dev_records -> BuildProfiles.jet:123 (pkg_parse_dev_records).
+// Rust: crates/jet-pkg-model/src/Package/Blocks.rs:1279
+// parse_dev_records_budget -> BuildProfiles.jet:153 (pkg_parse_dev_records_budget).
+// Rust: crates/jet-pkg-model/src/Package/Blocks.rs:1304
+// parse_dev_record_bytes -> BuildProfiles.jet:168 (pkg_parse_dev_record_bytes).
+// Rust: crates/jet-pkg-model/src/Package/Blocks.rs:1338
+// BuildProfileDef -> BuildProfiles.jet:72.
+// Rust: crates/jet-pkg-model/src/Package/Blocks.rs:1353
+// parse_build -> BuildProfiles.jet:192/205 (pkg_parse_build/pkg_parse_build_profile).
+// Rust: crates/jet-pkg-model/src/Package/Blocks.rs:1487
+// parse_build_allow -> BuildProfiles.jet:283 (pkg_parse_build_allow).
+// Rust: crates/jet-pkg-model/src/Package/Blocks.rs:1522
+// parse_bool -> BuildProfiles.jet:300 (pkg_parse_build_bool).
+// Rust: crates/jet-pkg-model/src/Package/Blocks.rs:1532
+// parse_string_list -> ManifestText.jet:416 (pkg_parse_string_list).
+// Rust: crates/jet-pkg-model/src/Package/Blocks.rs:1549
+// parse_grants -> Authority.jet:313 (pkg_parse_grants).
+// Rust: crates/jet-pkg-model/src/Package/Blocks.rs:1563
+// parse_effect_list -> Authority.jet:325 (pkg_parse_effect_list).
+// Rust: crates/jet-pkg-model/src/Package/Blocks.rs:1588
+// parse_authority_needs -> Authority.jet:337 (pkg_parse_authority_needs).
+
+// Rust: crates/jet-pkg-model/src/Package/Blocks.rs:1626
+// TrustDecision -> Authority.jet:8.
+// Rust: crates/jet-pkg-model/src/Package/Blocks.rs:1634
+// AuthorityHolds and derived default -> Authority.jet:15/19.
+// Rust: crates/jet-pkg-model/src/Package/Blocks.rs:1640
+// TrustPolicy -> Authority.jet:36.
+impl TrustPolicy {
+    pub fn default() -> TrustPolicy {
+        TrustPolicy { default: none, ci_prompt: none, services: [ServiceTrust]{}, require: none }
+    }
+}
+// Rust: crates/jet-pkg-model/src/Package/Blocks.rs:1649
+// ProvenanceRequirement and label:1656 -> Authority.jet:47/52.
+// Rust: crates/jet-pkg-model/src/Package/Blocks.rs:1666
+// ProviderAuthority -> Authority.jet:61.
+// Rust: crates/jet-pkg-model/src/Package/Blocks.rs:1678
+// AuthorityBlock and derived default -> Authority.jet:70/77.
+// Rust: crates/jet-pkg-model/src/Package/Blocks.rs:1686
+// authority_bad -> Authority.jet:104 (pkg_authority_bad).
+// Rust: crates/jet-pkg-model/src/Package/Blocks.rs:1690
+// authority_object_body -> Authority.jet:124 (pkg_authority_object_body).
+// Rust: crates/jet-pkg-model/src/Package/Blocks.rs:1710
+// parse_authority_holds -> Authority.jet:132 (pkg_parse_authority_holds).
+// Rust: crates/jet-pkg-model/src/Package/Blocks.rs:1744
+// parse_authority -> Authority.jet:155 (pkg_parse_authority).
+// Rust: crates/jet-pkg-model/src/Package/Blocks.rs:1790
+// parse_authority_value -> Authority.jet:185 (pkg_parse_authority_value).
+// Rust: crates/jet-pkg-model/src/Package/Blocks.rs:1795-1800
+// authority_error -> Authority.jet:110 (pkg_authority_error), complete through slice end.

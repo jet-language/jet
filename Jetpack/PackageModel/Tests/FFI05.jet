@@ -1,0 +1,64 @@
+// Rust: crates/jet-pkg-model/src/FFI.rs:7223
+#Test("c_wrapper_escapes_native_symbol_as_link_name") {
+    entry :: ExternEntry{jet_name: "host_add", rust_path: "host-add$raw", wrapper_name: "jet_ffi_guest___jet_mod__host_add", params: [(AccessConvention.Read, Type.Int)], param_names: ["value"], return_type: Val(Type.Int), crate_spec: "std", line_hint: "`#Import(c) fn host_add`", inline: None, c_abi: true, generated: false, c_module: true, close: None}
+    source :: emit_c_wrapper_fn(entry, [String]{}, CRecordDefinitions.default())
+    assert(source.contains("#[link_name = \"host-add$raw\"]"))
+    assert(source.contains("fn jet_ffi_guest___jet_mod__host_add_native(p0: i64) -> i64;"))
+    assert(source.contains("unsafe { jet_ffi_guest___jet_mod__host_add_native(p0) }"))
+    assert(!source.contains("fn host-add$raw"))
+}
+
+// Rust: crates/jet-pkg-model/src/FFI.rs:7246
+#Test("c_handle_cabi_uses_native_pointer_for_checked_nominal_type") {
+    entry :: ExternEntry{jet_name: "gzclose", rust_path: "gzclose", wrapper_name: "jet_ffi_gzclose", params: [(AccessConvention.Move, Type.Named("GzFile"))], param_names: ["file"], return_type: None, crate_spec: "std", line_hint: "generated zlib close", inline: None, c_abi: true, generated: true, c_module: true, close: None}
+    handles :: [String]{"GzFile"}
+    source :: emit_cabi_trampoline(entry, handles, CRecordDefinitions.default()).unwrap()
+    assert(source.contains("args[0].value as usize as *mut std::os::raw::c_void"))
+    assert(source.contains("jet_ffi_gzclose(args[0].value"))
+    assert(!source.contains("as GzFile"))
+}
+
+// Rust: crates/jet-pkg-model/src/FFI.rs:7274
+#Test("c_handle_cabi_preserves_writable_pointee_abi") {
+    entry :: ExternEntry{jet_name: "hb_font_set_scale", rust_path: "hb_font_set_scale", wrapper_name: "jet_ffi_hb_font_set_scale", params: [(AccessConvention.Write, Type.Named("HbFont")), (AccessConvention.Read, Type.Int), (AccessConvention.Read, Type.Int)], param_names: ["font", "x_scale", "y_scale"], return_type: None, crate_spec: "std", line_hint: "generated harfbuzz scale", inline: None, c_abi: true, generated: true, c_module: true, close: None}
+    handles :: [String]{"HbFont"}
+    source :: emit_cabi_trampoline(entry, handles, CRecordDefinitions.default()).unwrap()
+    assert(source.contains("args[0].value as usize as *mut std::os::raw::c_void"))
+    assert(source.contains("jet_ffi_hb_font_set_scale(args[0].value"))
+}
+
+// Rust: crates/jet-pkg-model/src/FFI.rs:7305
+#Test("cabi_trampoline_emits_mutable_scalar_and_string_pointer_abi") {
+    scalar :: ExternEntry{jet_name: "out_scalar", rust_path: "out_scalar", wrapper_name: "jet_ffi_out_scalar", params: [(AccessConvention.Write, Type.Int)], param_names: ["value"], return_type: None, crate_spec: "std", line_hint: "portable scalar write fixture", inline: None, c_abi: true, generated: true, c_module: true, close: None}
+    scalar_source :: emit_cabi_trampoline(scalar, [String]{}, CRecordDefinitions.default()).unwrap()
+    assert(scalar_source.contains("fn jet_ffi_out_scalar_native(p0: *mut i64);"))
+    assert(scalar_source.contains("p0_ptr as *mut i64"))
+    cases :: [(Type, String)]{
+        (Type.IntN{signed: false, bits: 16}, "u16"),
+        (Type.Float, "f64"),
+        (Type.Float32, "f32"),
+        (Type.Bool, "bool"),
+        (Type.Char, "u32"),
+        (Type.InlineRange{base: Type.Int, lo: 0, hi: 10}, "i64"),
+        (Type.Tagged{marker: TagMarker.User("ffi"), inner: Type.Float32}, "f32"),
+        (Type.Quantity{base: Type.Float, dimension: Dimension.scalar()}, "f64")
+    }
+    loop (index, (ty, native)) in cases.iter().enumerate() {
+        entry := scalar.clone()
+        entry.jet_name = "out_scalar_{index}"
+        entry.rust_path = entry.jet_name.clone()
+        entry.wrapper_name = "jet_ffi_{entry.jet_name}"
+        entry.params = [(AccessConvention.Write, ty)]
+        source :: emit_cabi_trampoline(entry, [String]{}, CRecordDefinitions.default()).unwrap()
+        assert(source.contains("fn {entry.wrapper_name}_native(p0: *mut {native});"), "missing mutable native ABI for {entry.jet_name}: {source}")
+    }
+    generated :: emit_wrapper_lib([scalar.clone()], false, false, false, false, false, false, false, false, false, false, false)
+    assert(generated.contains("jet_ffi_out_scalar_cabi"))
+    nominal := scalar.clone()
+    nominal.params = [(AccessConvention.Read, Type.Named("Nominal"))]
+    assert(emit_cabi_trampoline(nominal, [String]{}, CRecordDefinitions.default()) == None, "unclassified nominals must not be guessed as opaque native pointers")
+    string :: ExternEntry{jet_name: "out_string", rust_path: "out_string", wrapper_name: "jet_ffi_out_string", params: [(AccessConvention.Write, Type.String)], param_names: ["value"], return_type: None, crate_spec: "std", line_hint: "portable string write fixture", inline: None, c_abi: true, generated: true, c_module: true, close: None}
+    string_source :: emit_cabi_trampoline(string, [String]{}, CRecordDefinitions.default()).unwrap()
+    assert(string_source.contains("fn jet_ffi_out_string_native(p0: *mut std::os::raw::c_char);"))
+    assert(string_source.contains("p0_ptr as *mut std::os::raw::c_char"))
+}

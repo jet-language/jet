@@ -2,15 +2,15 @@
 // Card #367 / D-PRODUCT-SPLIT1=C: JetOS owns this entry point while
 // realization continues through Jetpack's `os` verb.
 use jetpack.Codegen.MIREval.[install_mir_bridge]
-use jetpack.[run]
+use jetpack
 use std.[env, process]
 
 // Rust: crates/jetos/src/main.rs:13
-fn main() -> {
+fn run() -> {
     install_mir_bridge()
     // GATE #4494: native process arguments and exit.
     args: [String] := env.args().skip(1).collect()
     args.insert(0, "os")
-    process.exit(run(args))
+    process.exit(jetpack.run(args))
 }
 

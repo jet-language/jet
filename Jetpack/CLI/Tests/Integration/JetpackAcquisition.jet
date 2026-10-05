@@ -1,0 +1,13 @@
+// Rust: tests/jetpack_acquisition.rs:1
+use Jetpack.SHA256
+// GATE #4494: real filesystem fixture publication.
+use std.fs
+
+// Rust: tests/jetpack_acquisition.rs:13
+fn write_native_omp_fixture(fixtures: &OSPath) -> {
+    fs.create_dir_all(fixtures) ?? panic("fixtures")
+    artifact :: fixtures.join("omp-1.0.0")
+    fs.write(artifact, "#!/bin/sh\nprintf '%s\\n' downloaded\n") ?? panic("artifact")
+    digest :: SHA256.sha256_file_hex(&artifact) ?? panic("artifact digest")
+    fs.write(fixtures.join("jetpackage-omp.json"), "{{\"tag\":\"v1.0.0\",\"version\":\"1.0.0\",\"sha256\":\"{digest}\",\"artifact\":\"omp-1.0.0\"}}") ?? panic("artifact metadata")
+}

@@ -1,0 +1,316 @@
+use Jetpack.CLI.Tests.Integration.JetpackDiscovery.*
+use Jetpack.CLI.Tests.Integration.Support.JetpackFixtures as fixtures
+use common.Scratch
+use std.[fs, Command, env]
+use Jetpack.JSON
+// GATE #4494: real native process and filesystem integration.
+
+// Rust: tests/jetpack_discovery.rs:45
+#Test("search_reads_local_fixture_metadata_offline") {
+    project :: Scratch.new("project")
+    root :: Scratch.new("root")
+    copy_project(&project.path)
+    out :: jetpack().args(["search", "rip", "--no-color", "--offline", "--fixtures", "fixtures"]).current_dir(&project.path).env("JETPACK_ROOT", &root.path).output() ?? panic("search")
+    assert(out.status.success(), "stderr: {String.from_utf8_lossy(out.stderr)}")
+    stdout :: String.from_utf8_lossy(out.stdout)
+    assert(stdout.contains("default.ripgrep"), "stdout: {stdout}")
+    assert(stdout.contains("14.1.0"), "stdout: {stdout}")
+    assert(project.path.join(".jet/discovery/index.jsonl").is_file(), "search should persist the local discovery index")
+}
+
+// Rust: tests/jetpack_discovery.rs:78
+#Test("info_json_is_stable_and_includes_service_options") {
+    project :: Scratch.new("project")
+    root :: Scratch.new("root")
+    copy_project(&project.path)
+    out :: jetpack().args(["info", "default.ripgrep", "--json", "--no-color", "--offline", "--fixtures", "fixtures"]).current_dir(&project.path).env("JETPACK_ROOT", &root.path).output() ?? panic("info")
+    assert(out.status.success(), "stderr: {String.from_utf8_lossy(out.stderr)}")
+    stdout :: String.from_utf8_lossy(out.stdout)
+    assert(stdout.contains("\"reference\":\"ripgrep@default\""), stdout)
+    assert(stdout.contains("\"version\":\"14.1.0\""), stdout)
+    assert(stdout.contains("\"maintainer_liveness\":\"not-applicable\""), stdout)
+    assert(stdout.contains("\"name\":\"enable\""), stdout)
+    assert(stdout.contains("\"name\":\"ready\""), stdout)
+}
+
+// Rust: tests/jetpack_discovery.rs:117
+#Test("jet_inspect_info_shows_registry_maintainer_liveness") {
+    project :: Scratch.new("registry-info-project")
+    root :: Scratch.new("registry-info-root")
+    fs.create_dir_all(project.path.join(".jet")) ?? panic("create .jet")
+    fs.write(project.path.join(".jet/lock"), "version = 1\n\n[[package]]\nname = \"textkit\"\nversion = \"1.2.0\"\nsource = { registry = \"jet\", reference = \"textkit@jet\", output = \"out\", source-hash = \"sha256-tree\", repository = \"https://registry\", authority = \"jet-registry-index\", tier = \"community\", gate-status = \"signature=passed;audit=passed;name=passed;liveness=passed;review=not-required\" }\nfingerprint = \"fp\"\ndependencies = []\n") ?? panic("write lock")
+    json_out :: jet().args(["inspect", "info", "jet.textkit", "--json", "--offline", "--no-color"]).current_dir(&project.path).env("JETPACK_ROOT", &root.path).output() ?? panic("info")
+    assert(json_out.status.success(), "stderr: {String.from_utf8_lossy(json_out.stderr)}")
+    json :: String.from_utf8_lossy(json_out.stdout)
+    assert(json.contains("\"maintainer_liveness\":\"passed\""), json)
+    human_out :: jet().args(["inspect", "info", "jet.textkit", "--offline", "--no-color"]).current_dir(&project.path).env("JETPACK_ROOT", &root.path).output() ?? panic("human info")
+    assert(human_out.status.success(), "stderr: {String.from_utf8_lossy(human_out.stderr)}")
+    human :: String.from_utf8_lossy(human_out.stdout)
+    assert(human.contains("maintainer liveness: passed"), human)
+}
+
+// Rust: tests/jetpack_discovery.rs:167
+#Test("search_matches_typed_service_options_offline") {
+    project :: Scratch.new("project")
+    root :: Scratch.new("root")
+    copy_project(&project.path)
+    out :: jetpack().args(["search", "ready", "--no-color", "--offline", "--fixtures", "fixtures"]).current_dir(&project.path).env("JETPACK_ROOT", &root.path).output() ?? panic("search")
+    assert(out.status.success(), "stderr: {String.from_utf8_lossy(out.stderr)}")
+    stdout :: String.from_utf8_lossy(out.stdout)
+    assert(stdout.contains("default.ripgrep"), "stdout: {stdout}")
+}
+
+// Rust: tests/jetpack_discovery.rs:195
+#Test("top_level_jet_search_routes_typed_option_queries_through_main") {
+    project :: Scratch.new("project")
+    root :: Scratch.new("root")
+    copy_project(&project.path)
+    out :: jet().args(["search", "ready", "--no-color", "--offline", "--fixtures", "fixtures"]).current_dir(&project.path).env("JETPACK_ROOT", &root.path).output() ?? panic("search")
+    assert(out.status.success(), "stderr: {String.from_utf8_lossy(out.stderr)}")
+    stdout :: String.from_utf8_lossy(out.stdout)
+    assert(stdout.contains("default.ripgrep"), "stdout: {stdout}")
+}
+
+// Rust: tests/jetpack_discovery.rs:223
+#Test("search_without_local_index_fails_closed") {
+    project :: Scratch.new("empty-project")
+    root :: Scratch.new("root")
+    out :: jetpack().args(["search", "ready", "--no-color", "--offline"]).current_dir(&project.path).env("JETPACK_ROOT", &root.path).output() ?? panic("search")
+    assert_eq(out.status.code(), Val(2))
+    stderr :: String.from_utf8_lossy(out.stderr)
+    assert(stderr.contains("no local discovery index"), "stderr: {stderr}")
+}
+
+// Rust: tests/jetpack_discovery.rs:242
+#Test("top_level_jet_search_dispatches_to_jetpack") {
+    project :: Scratch.new("project")
+    root :: Scratch.new("root")
+    copy_project(&project.path)
+    out :: jet().args(["search", "jq", "--no-color", "--offline", "--fixtures", "fixtures"]).current_dir(&project.path).env("JETPACK_ROOT", &root.path).output() ?? panic("search")
+    assert(out.status.success(), "stderr: {String.from_utf8_lossy(out.stderr)}")
+    stdout :: String.from_utf8_lossy(out.stdout)
+    assert(stdout.contains("default.jq"), "stdout: {stdout}")
+}
+
+// Rust: tests/jetpack_discovery.rs:270
+#Test("top_level_jet_search_help_is_flat") {
+    out :: jet().args(["search", "--help"]).output() ?? panic("help")
+    assert(out.status.success(), "stderr: {String.from_utf8_lossy(out.stderr)}")
+    stdout :: String.from_utf8_lossy(out.stdout)
+    assert(stdout.contains("jet search <query>"), "stdout: {stdout}")
+    assert(!stdout.contains("jet inspect search"), "stdout: {stdout}")
+    stderr :: String.from_utf8_lossy(out.stderr)
+    assert(!stderr.contains("E2101"), "stderr: {stderr}")
+}
+
+// Rust: tests/jetpack_discovery.rs:285
+#Test("jet_inspect_search_is_no_longer_a_canonical_route") {
+    project :: Scratch.new("project")
+    root :: Scratch.new("root")
+    copy_project(&project.path)
+    out :: jet().args(["inspect", "search", "jq", "--no-color", "--offline", "--fixtures", "fixtures"]).current_dir(&project.path).env("JETPACK_ROOT", &root.path).output() ?? panic("search")
+    assert_eq(out.status.code(), Val(2), "grouped search must be rejected")
+    stderr :: String.from_utf8_lossy(out.stderr)
+    assert(stderr.contains("E2101"), "stderr: {stderr}")
+    assert(stderr.contains("isn't a jet inspect command"), "stderr: {stderr}")
+}
+
+// Rust: tests/jetpack_dispatch.rs:19
+#Test("bare_jetpack_prints_help_without_entering_an_environment") {
+    project :: Scratch.new("bare-jetpack-project")
+    root :: Scratch.new("bare-jetpack-root")
+    fs.write(project.join("env.jet"), "module broken { invalid }") ?? panic("write env")
+    output :: fixtures.jetpack().current_dir(&project.path).env("JETPACK_ROOT", &root.path).output() ?? panic("bare jetpack")
+    assert(output.status.success(), "bare `jetpack` should print help and exit successfully: {String.from_utf8_lossy(output.stderr)}")
+    help :: String.from_utf8_lossy(output.stderr)
+    assert(help.contains("jet env"), "stderr: {help}")
+    assert(!project.join(".jet").exists(), "bare `jetpack` entered env")
+}
+
+// Rust: tests/jetpack_dispatch.rs:40
+#Test("jet_clean_delegates_to_jetpack_clean") {
+    root :: Scratch.new("root")
+    (stale, _) :: fixtures.write_hangar_meta(&root.path, "old-top", "oldtop", "1.0", Val(1))
+    out :: fixtures.jet().args(["clean", "--no-color", "--yes"]).env("JETPACK_ROOT", &root.path).output() ?? panic("clean")
+    assert(out.status.success(), "stderr: {String.from_utf8_lossy(out.stderr)}")
+    assert(!stale.exists(), "`jet clean` should collect via jetpack")
+    stderr :: String.from_utf8_lossy(out.stderr)
+    assert(stderr.contains("cleaned hangar"), "stderr: {stderr}")
+}
+
+// Rust: tests/jetpack_dispatch.rs:60
+#Test("jet_shared_store_status_does_not_default_to_install") {
+    home :: Scratch.new("shared-store-status-home")
+    data :: Scratch.new("shared-store-status-data")
+    state :: Scratch.new("shared-store-status-state")
+    legacy_hangar :: state.join("jet/hangar")
+    fs.create_dir_all(legacy_hangar) ?? panic("create legacy hangar")
+    fs.write(legacy_hangar.join("marker"), "legacy") ?? panic("write marker")
+    output :: fixtures.jet().args(["shared-store", "status", "--no-color"]).env_remove("JETPACK_ROOT")
+        .env("HOME", &home.path).env("XDG_DATA_HOME", &data.path).env("XDG_STATE_HOME", &state.path).output() ?? panic("status")
+    assert(output.status.success(), "stderr: {String.from_utf8_lossy(output.stderr)}")
+    stderr :: String.from_utf8_lossy(output.stderr)
+    assert(stderr.contains("shared-store broker is not installed."), "stderr: {stderr}")
+    assert(!stderr.contains("Error [E1340]"), "stderr: {stderr}")
+    assert(!stderr.contains("shared-store install failed"), "stderr: {stderr}")
+    assert(!stderr.contains("sudo"), "stderr: {stderr}")
+    assert(!stderr.contains("jetpack hangar shared install"), "stderr: {stderr}")
+    assert(legacy_hangar.join("marker").is_file())
+    assert(!data.path.join("jet/hangar").exists())
+    assert(!data.path.join("jet/shared-store").exists())
+}
+
+// Rust: tests/jetpack_dispatch.rs:105
+#Test("bare_jet_outdated_is_a_teaching_error_naming_jet_inspect_outdated") {
+    proj :: Scratch.new("proj")
+    root :: Scratch.new("root")
+    fx :: Scratch.new("fx")
+    fs.write(proj.join("env.jet"), "\nmodule dev {\n    sources: { default: acme/tools@github#latest }\n    env.dev: Env.{ packages: [default.greet] }\n}\n") ?? panic("write env")
+    fs.create_dir_all(proj.join(".jet")) ?? panic("create .jet")
+    fs.write(proj.join(".jet/lock"), "version = 1\n\n[[source_channel]]\nname = \"default\"\nchannel = \"latest\"\nexact = \"github:acme/tools#v1.2.0\"\n\n[root]\ndependencies = []\n") ?? panic("write lock")
+    fixtures.write_channel_fixture(&fx.path, "github:acme/tools", "latest", "github:acme/tools#v1.3.0")
+    out :: fixtures.jet().args(["outdated", "--no-color", "--fixtures"]).arg(&fx.path).current_dir(&proj.path).env("JETPACK_ROOT", &root.path).env("PATH", "").output() ?? panic("outdated")
+    assert_eq(out.status.code(), Val(2), "bare `jet outdated` must be rejected")
+    stderr :: String.from_utf8_lossy(out.stderr)
+    assert(stderr.contains("E2101"), "stderr: {stderr}")
+    assert(stderr.contains("jet inspect outdated"), "stderr: {stderr}")
+}
+
+// Rust: tests/jetpack_dispatch.rs:153
+#Test("jet_inspect_outdated_dispatches_to_jetpack") {
+    proj :: Scratch.new("proj")
+    root :: Scratch.new("root")
+    fx :: Scratch.new("fx")
+    fs.write(proj.join("env.jet"), "\nmodule dev {\n    sources: { default: acme/tools@github#latest }\n    env.dev: Env.{ packages: [default.greet] }\n}\n") ?? panic("write env")
+    fs.create_dir_all(proj.join(".jet")) ?? panic("create .jet")
+    fs.write(proj.join(".jet/lock"), "version = 1\n\n[[source_channel]]\nname = \"default\"\nchannel = \"latest\"\nexact = \"github:acme/tools#v1.2.0\"\n\n[root]\ndependencies = []\n") ?? panic("write lock")
+    fixtures.write_channel_fixture(&fx.path, "github:acme/tools", "latest", "github:acme/tools#v1.3.0")
+    out :: fixtures.jet().args(["inspect", "outdated", "--no-color", "--fixtures"]).arg(&fx.path).current_dir(&proj.path).env("JETPACK_ROOT", &root.path).output() ?? panic("outdated")
+    assert(out.status.success(), "stderr: {String.from_utf8_lossy(out.stderr)}")
+    stderr :: String.from_utf8_lossy(out.stderr)
+    assert(stderr.contains("v1.2.0"), "stderr: {stderr}")
+    assert(stderr.contains("v1.3.0"), "stderr: {stderr}")
+}
+
+// Rust: tests/jetpack_dispatch.rs:198
+#Test("jet_env_delegates_to_jetpack_env") {
+    (base, proj, root) :: fixtures.core_hello_project("jet-env")
+    output :: Command.new(env.compile_time("CARGO_BIN_EXE_jet")).args(["env", "--no-color", "--trust", "--offline", "--", "hello"])
+        .current_dir(proj).env("JETPACK_ROOT", root).env("HOME", base.join("home")).env("PATH", "").output() ?? panic("env")
+    assert(output.status.success(), "stderr: {String.from_utf8_lossy(output.stderr)}")
+    text := String.from_utf8_lossy(output.stdout).trim() // #4303
+    assert_eq(text, "hello from jet-pkgs")
+}
+
+// Rust: tests/jetpack_dispatch.rs:226
+#Test("jet_run_without_nix_compatibility_output_reports_e1272") {
+    root :: Scratch.new("jet-run-no-nix-root")
+    output :: fixtures.jet().args(["run", "postgres@nixpkgs", "--no-color"]).env("JETPACK_ROOT", &root.path).env("PATH", "").output() ?? panic("run")
+    assert_eq(output.status.code(), Val(2))
+    stderr :: String.from_utf8_lossy(output.stderr)
+    assert(stderr.contains("E1272"), "stderr: {stderr}")
+    assert(stderr.contains("postgres@nixpkgs"), "stderr: {stderr}")
+    assert(stderr.contains("does not invoke an installed Nix executable"), "stderr: {stderr}")
+    assert(!stderr.contains("couldn't run `nix`"), "stderr: {stderr}")
+}
+
+// Rust: tests/jetpack_dispatch.rs:246
+#Test("jet_env_sync_delegates_to_typed_managed_file_sync") {
+    project :: Scratch.new("jet-env-sync")
+    root :: Scratch.new("jet-env-sync-root")
+    home :: Scratch.new("jet-env-sync-home")
+    fs.write(project.join("env.jet"), "module env.dev {\n    files: [\"config/generated.txt\": File{ content: \"generated\\n\", mode: .Copy }]\n}\n") ?? panic("write env")
+    output :: fixtures.jet().args(["env", "sync", "--trust", "--yes", "--offline", "--no-color"])
+        .current_dir(&project.path).env("JETPACK_ROOT", &root.path).env("HOME", &home.path).output() ?? panic("sync")
+    assert(output.status.success(), "stderr: {String.from_utf8_lossy(output.stderr)}")
+    assert_eq(fs.read_to_string(project.join("config/generated.txt")) ?? panic("read generated"), "generated\n")
+    assert(project.join(".jet/files/state").is_file())
+}
+
+// Rust: tests/jetpack_dispatch.rs:279
+#Test("jet_env_info_discloses_typed_summary_without_realizing_or_starting_services") {
+    project :: Scratch.new("jet-env-info")
+    root :: Scratch.new("jet-env-info-root")
+    fs.create_dir_all(project.join("scripts/githooks")) ?? panic("create hooks")
+    fs.write(project.join("env.jet"), "module env.dev {\n    prompt: $HOME\n    packages: [nixpkgs.ripgrep]\n    git_hooks_path: \"scripts/githooks\"\n    services: {\n        fixture: {\n            enable: false,\n            ports: [8080],\n            run: [\"fixture\", \"--port\", \"8080\"],\n            ready: \"fixture --ready\",\n            data_dir: \"state/fixture\",\n            watch: [\"src\"],\n            after: [\"database\"],\n            before_start: [\"lint\"],\n            sockets: [\"run/fixture.sock\"]\n        }\n    }\n    files: [\"config/generated.txt\": File{ content: \"generated\\n\", mode: .Copy }]\n}\nmodule env.full {\n    prompt: $FULL_ONLY\n    packages: [nixpkgs.fd]\n    services: {\n        sibling: { enable: false, ports: [9090] }\n    }\n    checks: [{\n        name: \"full-only-check\",\n        command: \"true\",\n    }]\n    files: [\"config/full.txt\": File{ content: \"full\\n\", mode: .Copy }]\n}\n") ?? panic("write env")
+    fs.write(project.join("run.jet"), "#Job\nfn lint() {}\n") ?? panic("write job")
+    output :: fixtures.jet().args(["env", "info", "--json", "--offline", "--no-color"]).current_dir(&project.path).env("JETPACK_ROOT", &root.path).env("HOME", "/test/home").output() ?? panic("info")
+    assert(output.status.success(), "stderr: {String.from_utf8_lossy(output.stderr)}")
+    stdout :: String.from_utf8_lossy(output.stdout)
+    assert(JSON.parse(stdout).is_ok(), "info JSON must parse: {stdout}")
+    for fact in [
+        "\"packages\":[\"ripgrep@nixpkgs\"]", "\"name\":\"fixture\",\"enabled\":false",
+        "\"run\":[\"fixture\",\"--port\",\"8080\"]", "\"ready\":\"fixture --ready\"",
+        "\"after\":[\"database\"]", "\"before_start\":[\"lint\"]", "\"sockets\":[\"run/fixture.sock\"]",
+        "\"checks\":[],\"jobs\":[\"lint\"]", "\"variables\":[{\"name\":\"HOME\",\"sources\":[\"environment\"]}]",
+        "\"files\":[\"config/generated.txt\"]", "\"git_hooks_path\":\"scripts/githooks\""
+    ] {
+        assert(stdout.contains(fact), "missing {fact}; status={output.status.code()}; stderr={String.from_utf8_lossy(output.stderr)}; stdout={stdout}")
+    }
+    assert(!stdout.contains("\"name\":\"sibling\""))
+    assert(!stdout.contains("full-only-check"))
+    assert(!stdout.contains("FULL_ONLY"))
+    assert(!stdout.contains("config/full.txt"))
+    assert(!project.join(".jet/services").exists(), "env info must not start a service supervisor")
+    human :: fixtures.jet().args(["env", "info", "--offline", "--no-color"]).current_dir(&project.path).env("JETPACK_ROOT", &root.path).env("HOME", "/test/home").output() ?? panic("human info")
+    assert(human.status.success(), "stderr: {String.from_utf8_lossy(human.stderr)}")
+    human_output :: "{String.from_utf8_lossy(human.stdout)}{String.from_utf8_lossy(human.stderr)}"
+    for fact in ["fixture (disabled", "ports=8080", "run=fixture --port 8080", "ready=fixture --ready", "data_dir=state/fixture", "watch=src", "after=database", "before_start=lint", "sockets=run/fixture.sock", "git hooks path: scripts/githooks"] {
+        assert(human_output.contains(fact), "missing {fact}; output={human_output}")
+    }
+    assert(!project.join(".jet/services").exists(), "human env info must not start a service supervisor")
+    full :: fixtures.jet().args(["env", "info", "--json", "--offline", "--no-color", "--env", "full"]).current_dir(&project.path).env("JETPACK_ROOT", &root.path).env("HOME", "/test/home").output() ?? panic("full info")
+    assert(full.status.success(), "stderr: {String.from_utf8_lossy(full.stderr)}")
+    full_stdout :: String.from_utf8_lossy(full.stdout)
+    assert(full_stdout.contains("\"active_environment\":\"full\""))
+    assert(full_stdout.contains("\"packages\":[\"fd@nixpkgs\"]"))
+    assert(full_stdout.contains("\"name\":\"sibling\",\"enabled\":false"))
+    assert(full_stdout.contains("\"checks\":[\"full-only-check\"]"))
+    assert(full_stdout.contains("\"name\":\"FULL_ONLY\""))
+    assert(full_stdout.contains("\"files\":[\"config/full.txt\"]"))
+    assert(!full_stdout.contains("\"name\":\"fixture\""))
+    assert(!full_stdout.contains("config/generated.txt"))
+    missing :: fixtures.jet().args(["env", "info", "--offline", "--no-color", "--env", "missing"]).current_dir(&project.path).env("JETPACK_ROOT", &root.path).output() ?? panic("missing info")
+    assert_eq(missing.status.code(), Val(2), "missing environment must fail")
+    stderr :: String.from_utf8_lossy(missing.stderr)
+    assert(stderr.contains("E1337"), "missing environment lost its diagnostic: {stderr}")
+    assert(stderr.contains("environment module `missing` is not declared"), "missing environment failure is not actionable: {stderr}")
+    assert(!project.join(".jet/services").exists(), "failed env info must not leave a service supervisor")
+}
+
+// Rust: tests/jetpack_dispatch.rs:466
+#Test("top_level_jet_run_nixpkgs_suffix_tool_execs_tool") {
+    root :: Scratch.new("jet-run-nixpkgs-root")
+    proj :: Scratch.new("jet-run-nixpkgs-proj")
+    fx :: Scratch.new("jet-run-nixpkgs-fx")
+    out :: Scratch.new("jet-run-nixpkgs-out")
+    fixtures.write_runnable_fixture(&fx.path, &root.path, &out.path)
+    output :: fixtures.jet().args(["run", "greet@nixpkgs", "--no-color", "--offline", "--fixtures"]).arg(&fx.path).current_dir(&proj.path).env("JETPACK_ROOT", &root.path).env("PATH", "").output() ?? panic("run")
+    assert(output.status.success(), "stderr: {String.from_utf8_lossy(output.stderr)}")
+    text := String.from_utf8_lossy(output.stdout).trim() // #4303
+    assert_eq(text, "hello from jetpack")
+    stderr :: String.from_utf8_lossy(output.stderr)
+    assert_eq(stderr.matches("running greet@nixpkgs -> greet").count(), 1, "stderr: {stderr}")
+}
+
+// Rust: tests/jetpack_dispatch.rs:508
+#Test("jet_os_bridge_flake_delegates_to_jetpack") {
+    project :: Scratch.new("jet-bridge-flake")
+    root :: Scratch.new("jet-bridge-flake-root")
+    fs.write(project.join("flake.nix"), "{ devShells.x86_64-linux.default = pkgs.mkShell { packages = [ pkgs.fd ]; }; }") ?? panic("write flake")
+    output :: fixtures.jet().args(["os", "bridge", "flake", "--no-color"]).current_dir(&project.path).env("JETPACK_ROOT", &root.path).env("PATH", "").output() ?? panic("bridge")
+    assert(output.status.success(), "stderr: {String.from_utf8_lossy(output.stderr)}")
+    assert(String.from_utf8_lossy(output.stdout).contains("packages: [fd]"), "stdout: {String.from_utf8_lossy(output.stdout)}")
+    assert(project.join(".jet/lock").is_file(), "the production bridge must commit its typed foreign graph")
+}
+
+// Rust: tests/jetpack_dispatch.rs:541
+#Test("jet_os_bridge_flake_reports_missing_foreign_input") {
+    project :: Scratch.new("jet-bridge-flake-missing")
+    root :: Scratch.new("jet-bridge-flake-missing-root")
+    output :: fixtures.jet().args(["os", "bridge", "flake", "--no-color"]).current_dir(&project.path).env("JETPACK_ROOT", &root.path).env("PATH", "").output() ?? panic("bridge")
+    assert_eq(output.status.code(), Val(2))
+    stderr :: String.from_utf8_lossy(output.stderr)
+    assert(stderr.contains("no foreign flake"), "stderr: {stderr}")
+    assert(!project.join(".jet/lock").exists(), "a failed bridge must not publish a misleading lock")
+}

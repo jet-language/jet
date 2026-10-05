@@ -1,0 +1,47 @@
+use jetpack_store.[required_child_pipe, add_nix_projection_path, open_snapshot_files]
+use std.fs as fs
+use std.io as io
+
+// Behavioral controls for Rust: crates/jetpack/src/Store/Reuse.rs:2376
+#Test("required_child_pipe_preserves_value_and_other_error") {
+    assert_eq(required_child_pipe(Val(17), "missing child pipe") ?? panic("present pipe"), 17)
+    if required_child_pipe<Int>(None, "missing child pipe") == {
+        .Ok(_) -> panic("missing child pipe must fail")
+        .Err(error) -> {
+            assert_eq(error.kind(), io.ErrorKind.Other)
+            assert_eq(error.to_string(), "missing child pipe")
+        }
+    }
+}
+
+// Behavioral controls for Rust: crates/jetpack/src/Store/Reuse.rs:2277
+#Test("nix_projection_paths_validate_digest_and_keep_insert_conflict_semantics") {
+    digests := [String: String]{}
+    add_nix_projection_path(&digests, "/nix/store/hash-package", "first") ?? panic("canonical output")
+    add_nix_projection_path(&digests, "/nix/store/hash-package", "first") ?? panic("same output")
+    if add_nix_projection_path(&digests, "/nix/store/hash-package", "second") == {
+        .Ok(_) -> panic("conflicting canonical output must fail")
+        .Err(error) -> assert_eq(error.to_string(), "conflicting canonical Nix output path `/nix/store/hash-package`")
+    }
+    assert_eq(digests["/nix/store/hash-package"], "second")
+    loop logical in [String]{"/outside/hash-package", "/nix/store/", "/nix/store/..", "/nix/store/one/two"} {
+        assert(add_nix_projection_path(&digests, logical, "first").is_err())
+    }
+    loop digest in [String]{"", "..", "one/two"} {
+        assert(add_nix_projection_path(&digests, "/nix/store/another", digest).is_err())
+    }
+}
+
+// Behavioral control for Rust: crates/jetpack/src/Store/Reuse.rs:2629
+// GATE #4409: prefix failure is InvalidInput and precedes any filesystem lookup.
+#Test("snapshot_prefix_error_is_invalid_input_before_open") {
+    opened := [(OSPath, fs.File)]{}
+    if open_snapshot_files(OSPath.from("/snapshot/root"), OSPath.from("/outside/file"), &opened) == {
+        .Ok(_) -> panic("outside snapshot path must fail")
+        .Err(error) -> {
+            assert_eq(error.kind(), io.ErrorKind.InvalidInput)
+            assert_eq(error.to_string(), "snapshot path `/outside/file` is outside snapshot root `/snapshot/root`")
+        }
+    }
+    assert_eq(opened.len(), 0)
+}

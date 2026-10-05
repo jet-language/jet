@@ -1,0 +1,241 @@
+use std.[env, fs, process, thread, time]
+use jet.[Explain, Help]
+// GATE #4494: util-linux script supplies a real PTY, native pipes and sleeps.
+// Rust: tests/help_pty.rs:10
+fn run_pty(keys: [U8], color: String, no_color: Bool) -> String { run_pty_sized(keys, color, no_color, 24, 120) }
+// Rust: tests/help_pty.rs:14
+fn run_pty_sized(keys: [U8], color: String, no_color: Bool, rows: USize, cols: USize) -> String { run_pty_sized_steps([keys], color, no_color, rows, cols) }
+// Rust: tests/help_pty.rs:18
+fn run_pty_sized_steps(steps: [[U8]], color: String, no_color: Bool, rows: USize, cols: USize) -> String { run_pty_steps("stty rows {rows} cols {cols};", steps, color, no_color) }
+// Rust: tests/help_pty.rs:33
+fn run_pty_steps(setup: String, steps: [[U8]], color: String, no_color: Bool) -> String {
+    jet :: env.test_binary("jet")
+    shell_line :: "{setup} exec '{jet.replace('\'', "'\\''")}' '?' '--color={color}'"
+    command := process.Command.new("script")
+    command.args(["-qfec", shell_line, "/dev/null"]).env_remove("NO_COLOR").env_remove("FORCE_COLOR")
+        .stdin(process.Stdio.piped()).stdout(process.Stdio.piped()).stderr(process.Stdio.piped())
+    if no_color { command.env("NO_COLOR", "") }
+    child := command.spawn() ?? panic("util-linux script must allocate a real PTY")
+    stdin := child.stdin.take() ?? panic("stdin")
+    thread.sleep(time.Duration.from_millis(150))
+    for keys in steps {
+        stdin.write_all(keys) ?? panic("write PTY keys")
+        stdin.flush() ?? panic("flush")
+        thread.sleep(time.Duration.from_millis(150))
+    }
+    stdin.close()
+    out :: child.wait_with_output() ?? panic("wait PTY")
+    assert(out.status.success(), "PTY child failed: {String.from_utf8_lossy(out.stderr)}")
+    String.from_utf8_lossy(out.stdout).to_string()
+}
+// Rust: tests/help_pty.rs:71
+fn visible_cols(line: String) -> USize {
+    escaped := false
+    line.chars().filter(|ch| -> {
+        if escaped { if ch == 'm' { escaped = false }; false }
+        else if ch == '\x1b' { escaped = true; false } else -> true
+    }).count()
+}
+// Rust: tests/help_pty.rs:90
+fn final_frame_before_cleanup(transcript: String) -> String {
+    normalized :: transcript.replace('\r', "")
+    parts :: normalized.split("\x1b[J").collect()
+    assert(parts.len() >= 3, "missing redraw/cleanup sentinels:\n{transcript}")
+    frame := parts[parts.len() - 2].to_string()
+    if Some(alt_leave) :: frame.find("\x1b[?1049l") { frame.truncate(alt_leave) }
+    if Some(cursor) :: frame.rfind("\x1b[") { frame.truncate(cursor) }
+    frame
+}
+// Rust: tests/help_pty.rs:107
+fn cursor_up_counts(transcript: String) -> [USize] {
+    bytes :: transcript.bytes()
+    counts := []
+    i := 0
+    while i + 3 < bytes.len() {
+        if bytes[i] == b'\x1b' && bytes[i + 1] == b'[' && bytes[i + 2].is_ascii_digit() {
+            end := i + 2
+            while end < bytes.len() && bytes[end].is_ascii_digit() { end += 1 }
+            if bytes.get(end) == Some(b'A') {
+                counts.push((String.from_utf8(bytes[i + 2..end]) ?? panic("UTF8")).parse[USize]() ?? panic("count"))
+                i = end
+            }
+        }
+        i += 1
+    }
+    counts
+}
+// Rust: tests/help_pty.rs:132
+fn transcript_selected_command(transcript: String, command: String) -> Bool {
+    transcript.replace('\r', "").lines().any(|line| -> line.contains("│> ") && line.replace('[', "").replace(']', "").contains("jet {command}"))
+}
+// Rust: tests/help_pty.rs:143
+#Test("enter_expands_then_guides_without_hooks_instead_of_pasting") {
+    if core.sys.target.selected_family() != "unix" -> return // GATE #4483
+    transcript :: run_pty(b"\r\r", "never", false).replace('\r', "")
+    assert(transcript.contains("selected: jet run"), "Enter should name the selected command:\n{transcript}")
+    assert(transcript.contains("not inserted") && transcript.contains("jet env hook"), "Enter without hooks should tell the user how to install prefill:\n{transcript}")
+    assert(!transcript.contains("Examples/features/basics/hello.jet"), "Enter selects command, not example:\n{transcript}")
+    assert(!transcript.contains("Hello, Jet!"), "Enter executed selected command:\n{transcript}")
+}
+// Rust: tests/help_pty.rs:166
+#Test("alt_enter_guides_example_without_hooks_instead_of_pasting") {
+    if core.sys.target.selected_family() != "unix" -> return
+    transcript :: run_pty(b"\r\x1b\r", "never", false).replace('\r', "")
+    assert(transcript.contains("selected: jet run"), "Alt-Enter should name the selected example:\n{transcript}")
+    assert(transcript.contains("not inserted") && transcript.contains("jet env hook"), "Alt-Enter without hooks should tell the user how to install prefill:\n{transcript}")
+    assert(!transcript.contains("Hello, Jet!"), "Alt-Enter executed selected command:\n{transcript}")
+}
+// Rust: tests/help_pty.rs:184
+#Test("shell_prefill_mode_keeps_palette_on_tty_while_stdout_is_captured") {
+    if core.sys.target.selected_family() != "unix" -> return
+    jet :: env.test_binary("jet")
+    picked :: OSPath.from("/tmp").join("jet-help-picked-{process.id()}")
+    shell_line :: "JET_HELP_SHELL_PREFILL=1 '{jet.replace('\'', "'\\''")}' '?' --color=never > '{picked.display()}'; printf '\\nJET_HELP_CAPTURED\\n'"
+    command := process.Command.new("script")
+    command.args(["-qfec", shell_line, "/dev/null"]).stdin(process.Stdio.piped()).stdout(process.Stdio.piped()).stderr(process.Stdio.piped())
+    child := command.spawn() ?? panic("util-linux script must allocate a real PTY")
+    stdin := child.stdin.take() ?? panic("stdin")
+    thread.sleep(time.Duration.from_millis(150))
+    match stdin.write_all(b"\r") {
+        Err(error) -> {
+            stdin.close()
+            out :: child.wait_with_output() ?? panic("wait closed PTY")
+            panic("PTY closed before input ({error}):\nstdout:\n{String.from_utf8_lossy(out.stdout)}\nstderr:\n{String.from_utf8_lossy(out.stderr)}")
+        }, _ -> {}
+    }
+    stdin.flush() ?? panic("flush")
+    thread.sleep(time.Duration.from_millis(150))
+    stdin.write_all(b"\r") ?? panic("select")
+    thread.sleep(time.Duration.from_millis(150))
+    stdin.close()
+    out :: child.wait_with_output() ?? panic("wait")
+    selected :: fs.read_to_string(picked) ?? panic("read selection")
+    _ :: fs.remove_file(picked)
+    assert(out.status.success(), "PTY child failed: {String.from_utf8_lossy(out.stderr)}")
+    transcript :: String.from_utf8_lossy(out.stdout)
+    assert(transcript.contains("command palette"), "captured stdout disabled palette:\n{transcript}")
+    assert(transcript.contains("JET_HELP_CAPTURED"), "shell did not regain control:\n{transcript}")
+    assert_eq(selected, "jet run\n")
+    assert(!transcript.contains("ready to copy"), "palette duplicated the shell prefill:\n{transcript}")
+    assert(!transcript.contains("Hello, Jet!"), "captured selection executed:\n{transcript}")
+}
+// Rust: tests/help_pty.rs:247
+#Test("explicit_color_law_reaches_interactive_renderer") {
+    if core.sys.target.selected_family() != "unix" -> return
+    colored :: run_pty(b"q", "always", false)
+    assert(colored.contains("\x1b[1;96m") || colored.contains("\x1b[48;5;24"), "color renderer not active:\n{colored:?}")
+    plain :: run_pty(b"q", "never", false)
+    assert(!plain.contains("\x1b[1;96m"), "--color=never leaked styles:\n{plain:?}")
+    assert(!plain.contains("\x1b[48;5;24"), "--color=never leaked selection bg:\n{plain:?}")
+    no_color :: run_pty(b"q", "auto", true)
+    assert(!no_color.contains("\x1b[1;96m"), "NO_COLOR leaked styles:\n{no_color:?}")
+    assert(!no_color.contains("\x1b[48;5;24"), "NO_COLOR leaked selection bg:\n{no_color:?}")
+}
+// Rust: tests/help_pty.rs:274
+#Test("f1_uses_alt_screen_and_escape_restores_palette") {
+    if core.sys.target.selected_family() != "unix" -> return
+    transcript :: run_pty(b"\x1bOP\x1b\x1b", "never", false)
+    assert(transcript.contains("\x1b[?1049h"), "F1 did not enter reference screen")
+    assert(transcript.contains("\x1b[?1049l"), "Escape did not restore screen")
+    assert(transcript.contains("Usage   jet run"), "reference detail pane did not render:\n{transcript}")
+    assert(transcript.contains("command palette"), "overlay was not preserved:\n{transcript}")
+}
+// Rust: tests/help_pty.rs:295
+#Test("f1_search_opens_verbatim_error_code_page") {
+    if core.sys.target.selected_family() != "unix" -> return
+    transcript :: run_pty(b"\x1bOPE0102\x1b\x1b", "never", false)
+    ex :: Explain.lookup("E0102") ?? panic("explain")
+    canonical :: Explain.render(ex, false)
+    assert(transcript.replace('\r', "").contains(canonical), "F1 page diverged from canonical Explain bytes:\n{transcript}")
+}
+// Rust: tests/help_pty.rs:307
+#Test("normal_search_and_detail_open_verbatim_error_code_page") {
+    if core.sys.target.selected_family() != "unix" -> return
+    transcript :: run_pty_sized_steps([b"E0102", b"\t", b"\x1b"], "never", false, 24, 120)
+    ex :: Explain.lookup("E0102") ?? panic("explain")
+    canonical :: Explain.render(ex, false)
+    assert(transcript.replace('\r', "").matches(canonical).count() >= 2, "normal and Tab-detail E-code pages must both preserve canonical Explain bytes:\n{transcript}")
+}
+// Rust: tests/help_pty.rs:319
+#Test("fuzzy_results_scroll_selected_row_within_terminal_height") {
+    if core.sys.target.selected_family() != "unix" -> return
+    index :: Help.build_index()
+    hits :: Help.search(index, "E")
+    move_count :: hits.len().saturating_sub(1).min(20)
+    assert(move_count > 18, "query must exercise a longer-than-viewport result set")
+    command :: |index: USize| -> match hits[index] {
+        Help.Hit.Command{entry, ..} -> entry.symbol.name.as_str(),
+        Help.Hit.Code(_) -> panic("fuzzy query unexpectedly returned exact code")
+    }
+    keys := b"E".to_vec()
+    keys.extend(std.iter.repeat_n(b"\x1b[B", move_count).flatten())
+    transcript :: run_pty_sized_steps([keys, b"\x1b"], "never", false, 24, 80)
+    frame :: final_frame_before_cleanup(transcript)
+    assert(cursor_up_counts(transcript).iter().all(|count| -> count < 24), "a redraw exceeded the 24-row viewport")
+    assert(transcript_selected_command(transcript, command(move_count)), "scrolled selection was not rendered")
+    assert(transcript_selected_command(frame, command(move_count)), "selected row was clipped:\n{frame}")
+    assert(frame.lines().count() <= 24, "final frame exceeded 24 rows:\n{frame}")
+    assert(frame.lines().all(|line| -> visible_cols(line) <= 80), "final frame exceeded 80 cols:\n{frame}")
+}
+// Rust: tests/help_pty.rs:362
+#Test("zero_size_pty_bounds_initial_transition_to_effective_height") {
+    if core.sys.target.selected_family() != "unix" -> return
+    transcript :: run_pty_sized_steps([b"E", b"\x7fq"], "never", false, 0, 0)
+    frame :: final_frame_before_cleanup(transcript)
+    assert(cursor_up_counts(transcript).iter().all(|count| -> count < 8), "zero-size transition moved above the effective viewport")
+    assert(frame.lines().count() <= 8, "zero-size frame exceeded 8 rows:\n{frame}")
+    assert(frame.lines().all(|line| -> visible_cols(line) <= 50), "zero-size frame exceeded 50 cols:\n{frame}")
+}
+// Rust: tests/help_pty.rs:382
+#Test("live_shrink_redraws_categorized_view_within_new_height") {
+    if core.sys.target.selected_family() != "unix" -> return
+    setup :: "stty rows 24 cols 80; (sleep 0.4; stty rows 8 cols 50 </dev/tty) &"
+    down :: b"\x1b[B\x1b[B\x1b[B\x1b[B\x1b[B"
+    transcript :: run_pty_steps(setup, [b"", b"", b"", down, b"", b"q"], "never", false)
+    frame :: final_frame_before_cleanup(transcript)
+    assert(cursor_up_counts(transcript).iter().all(|count| -> count < 8), "live shrink moved above the new viewport")
+    assert_eq(frame.lines().count(), 8, "shrunken frame did not use 8 rows:\n{frame}")
+    assert(frame.contains("│> ▸ Reference"), "later selected category was clipped:\n{frame}")
+    assert(frame.lines().all(|line| -> visible_cols(line) <= 50), "shrunken frame exceeded 50 cols:\n{frame}")
+}
+// Rust: tests/help_pty.rs:409
+#Test("live_narrow_resize_uses_actual_terminal_size") {
+    if core.sys.target.selected_family() != "unix" -> return
+    setup :: "stty rows 24 cols 80; (sleep 0.4; stty rows 7 cols 32 </dev/tty) &"
+    transcript :: run_pty_steps(setup, [b"", b"", b"", b"\x1b[B", b"", b"q"], "never", false)
+    frame :: final_frame_before_cleanup(transcript)
+    assert(cursor_up_counts(transcript).iter().all(|count| -> count < 7), "live resize moved above the terminal")
+    assert_eq(frame.lines().count(), 7, "resized frame did not use 7 rows:\n{frame}")
+    assert(frame.lines().all(|line| -> visible_cols(line) <= 32), "resized frame exceeded 32 cols:\n{frame}")
+}
+// Rust: tests/help_pty.rs:436
+#Test("narrow_fuzzy_results_fit_actual_terminal") {
+    if core.sys.target.selected_family() != "unix" -> return
+    transcript :: run_pty_sized_steps([b"run", b"\x1b"], "never", false, 7, 32)
+    frame :: final_frame_before_cleanup(transcript)
+    assert(frame.contains("jet [run]"), "fuzzy result was not rendered:\n{frame}")
+    assert_eq(frame.lines().count(), 7, "fuzzy frame exceeded 7 rows:\n{frame}")
+    assert(frame.lines().all(|line| -> visible_cols(line) <= 32), "fuzzy frame exceeded 32 cols:\n{frame}")
+}
+// Rust: tests/help_pty.rs:455
+#Test("short_detail_view_scrolls_without_moving_terminal") {
+    if core.sys.target.selected_family() != "unix" -> return
+    keys := b"\r\t".to_vec()
+    keys.extend(std.iter.repeat_n(b"\x1b[B", 12).flatten())
+    transcript :: run_pty_sized_steps([keys, b"\x1b", b"q"], "never", false, 8, 60)
+    assert(cursor_up_counts(transcript).iter().all(|count| -> count < 8), "detail redraw moved above the terminal")
+    assert(transcript.contains("--target") || transcript.contains("--profile") || transcript.contains("F1 reference"), "detail view did not scroll to later content:\n{transcript}")
+}
+// Rust: tests/help_pty.rs:474
+#Test("short_f1_viewport_keeps_later_selection_visible_without_scrolling_terminal") {
+    if core.sys.target.selected_family() != "unix" -> return
+    keys := b"\x1bOP".to_vec()
+    keys.extend(std.iter.repeat_n(b"\x1b[B", 7).flatten())
+    keys.extend_from_slice(b"\x1b\x1b")
+    transcript :: run_pty_sized(keys, "never", false, 8, 60)
+    frame :: final_frame_before_cleanup(transcript)
+    lines :: frame.lines().collect()
+    assert(frame.contains(">   run"), "final selected row wrong/clipped:\n{frame}")
+    assert_eq(lines.len(), 8, "final frame scrolled or exceeded rows:\n{frame}")
+    assert(lines.iter().all(|line| -> visible_cols(line) <= 60), "final frame exceeded 60 cols:\n{frame}")
+}

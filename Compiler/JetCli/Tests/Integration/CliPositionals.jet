@@ -1,0 +1,105 @@
+use std.fs
+use std.env
+use std.process.[Command, id]
+use core.files.[OSPath]
+
+// Rust: tests/cli_positionals.rs:10
+fn jet() -> OSPath { OSPath.from_text(env.var("CARGO_BIN_EXE_jet").unwrap()) }
+
+// Rust: tests/cli_positionals.rs:14
+fn scratch(name: String) -> OSPath {
+    // GATE #4494: real filesystem and process operations.
+    dir :: env.temp_dir().join("jet-cli-pos-{name}-{id()}")
+    _ :: fs.remove_dir_all(dir)
+    fs.create_dir_all(dir).unwrap()
+    dir
+}
+
+// Rust: tests/cli_positionals.rs:21
+fn write_todo(dir: OSPath) -> {
+    fs.write(dir.join("todo.jet"), """
+#CLI
+struct Commands {
+    fn add(self, text: String, due: String{""}) -> {
+        print(text)
+        print(due)
+    }
+
+    fn login(self, token: String) -> {
+        print(token)
+    }
+}
+
+fn run(args: Commands) -> {
+}
+""").unwrap()
+}
+
+// Rust: tests/cli_positionals.rs:44
+#Test("positional_bare_form_fills_required_field") {
+    dir :: scratch("bare")
+    write_todo(dir)
+    out :: Command.new(jet()).args(["run", "--profile=debug", "todo.jet", "--", "add", "buy-milk"]).current_dir(dir).output().unwrap()
+    assert(out.status.success(), "stderr={String.from_utf8_lossy(out.stderr)}")
+    stdout :: String.from_utf8_lossy(out.stdout)
+    assert(stdout.contains("buy-milk"), "{stdout}")
+}
+
+// Rust: tests/cli_positionals.rs:69
+#Test("surplus_bare_arguments_are_parse_errors_with_usage") {
+    dir :: scratch("surplus")
+    fs.write(dir.join("typed.jet"), """
+#CLI
+struct Args {
+    name: String{"world"}
+    count: Int{1}
+}
+
+fn run(args: Args) -> {
+    print("{args.name} {args.count}")
+}
+""").unwrap()
+    out :: Command.new(jet()).args(["run", "--profile=debug", "typed.jet", "--", "alice", "bob"]).current_dir(dir).output().unwrap()
+    stderr :: String.from_utf8_lossy(out.stderr)
+    assert_eq(out.status.code(), Val(2), "{stderr}")
+    assert(stderr.contains("unexpected arguments"), "{stderr}")
+    assert(stderr.contains("`alice`"), "{stderr}")
+    assert(stderr.contains("`bob`"), "{stderr}")
+    assert(stderr.contains("Usage:"), "{stderr}")
+    assert(out.stdout.is_empty(), "stdout={String.from_utf8_lossy(out.stdout)}")
+}
+
+// Rust: tests/cli_positionals.rs:107
+#Test("named_form_still_works_and_optional_stays_flag") {
+    dir :: scratch("named")
+    write_todo(dir)
+    out :: Command.new(jet()).args(["run", "--profile=debug", "todo.jet", "--", "add", "--text", "buy-milk", "--due", "fri"]).current_dir(dir).output().unwrap()
+    assert(out.status.success(), "stderr={String.from_utf8_lossy(out.stderr)}")
+    stdout :: String.from_utf8_lossy(out.stdout)
+    assert(stdout.contains("buy-milk"), "{stdout}")
+    assert(stdout.contains("fri"), "{stdout}")
+}
+
+// Rust: tests/cli_positionals.rs:136
+#Test("named_wins_over_positional") {
+    dir :: scratch("named-wins")
+    write_todo(dir)
+    out :: Command.new(jet()).args(["run", "--profile=debug", "todo.jet", "--", "add", "bare-loses", "--text", "named-wins"]).current_dir(dir).output().unwrap()
+    assert(out.status.success(), "stderr={String.from_utf8_lossy(out.stderr)}")
+    stdout :: String.from_utf8_lossy(out.stdout)
+    assert(stdout.contains("named-wins"), "{stdout}")
+    assert(!stdout.contains("bare-loses"), "{stdout}")
+}
+
+// Rust: tests/cli_positionals.rs:164
+#Test("help_lists_arguments_before_options") {
+    dir :: scratch("help")
+    write_todo(dir)
+    out :: Command.new(jet()).args(["run", "--profile=debug", "todo.jet", "--", "add", "--help"]).current_dir(dir).output().unwrap()
+    assert(out.status.success())
+    stdout :: String.from_utf8_lossy(out.stdout)
+    args_at :: stdout.find("Arguments:").expect("Arguments section")
+    opts_at :: stdout.find("Options:").expect("Options section")
+    assert(args_at < opts_at, "{stdout}")
+    assert(stdout.contains("text"), "{stdout}")
+}

@@ -1,0 +1,317 @@
+use std.[fs, env, process]
+use std.collections.BTreeSet
+use std.time.Duration
+use core.files.OSPath
+use Jetpack.[SHA256, Trust, Output]
+use Jetpack.TrustRoot.[allow_cache_witness, canonical_root, canonical_snapshot, canonical_targets,
+    fixture_threshold_root, is_cache_witness_allowed, sign_root, sign_snapshot, sign_targets,
+    sign_timestamp, BoundIdentity, CacheProvenance, CacheReceipt, FixedClock, IdentityKind,
+    public_trust_manifest, PublisherIdentity, PublicTrustKey, RootBootstrap, SnapshotMetaEntry,
+    SnapshotMetadata, TargetMeta, TargetsMetadata, TimestampMetadata, TrustEngine, TrustError,
+    TrustKey, TrustPolicy, MetadataRole]
+use Jetpack.CLI.Tests.Integration.JetpackTrustRoot.[MATRIX, AUDITED, collect_direct_provider_calls,
+    live_repo_root, evidence_resolves, matrix_rows, tower_cards, card_refs]
+use Jetpack.CLI.Tests.Integration.Support.JetpackFixtures.[jetpack, write_channel_fixture, Scratch]
+// GATE #4494: real process, filesystem, clock and signing substrate.
+// GATE #4499: IdentityKind map key equality remains the canonical enum's equality.
+
+// Rust: tests/jetpack_trust_root.rs:21
+#Test("trust_publication_contract_is_owned_pending_and_has_no_fake_root") {
+    repo :: OSPath.new(env!("CARGO_MANIFEST_DIR"))
+    publication :: repo.join("Docs/site/dist/keys")
+    manifest :: fs.read_to_string(publication.join("trust-manifest.json")).unwrap()
+    assert_eq(manifest.trim(), "{\"schema\":1,\"domain\":\"jet-lang.dev\",\"status\":\"awaiting-key-ceremony\",\"root\":null,\"keys\":[],\"rotation\":\"offline threshold root rotation; publish a new manifest only after the old root verifies the new root\"}")
+    assert(!publication.join("nix-index-v1.ed25519.pub").exists())
+    readme :: fs.read_to_string(publication.join("README.md")).unwrap()
+    docs :: fs.read_to_string(repo.join("Docs/spec/packaging/trust-root.md")).unwrap()
+    for text in ["https://keys.jet-lang.dev/nix-index-v1.ed25519.pub", "key-id:base64-public-key",
+        "ed25519", "issued_unix", "expires_unix", "manual update"] {
+        assert(readme.contains(text) || docs.contains(text), "missing contract text: {text}")
+    }
+    assert(!manifest.contains("jet-test-index-v1"))
+}
+
+// Rust: tests/jetpack_trust_root.rs:50
+#Test("trust_publication_exporter_rejects_the_test_index_key") {
+    value :: "jet-test-index-v1:{\"A\".repeat(43) + \"=\"}"
+    error :: PublicTrustKey.from_nix_line("index", &value).unwrap_err()
+    assert(match error {
+        TrustError.InvalidKey { detail } -> detail == "test public trust key `jet-test-index-v1` cannot be published"
+        _ -> false
+    })
+    key :: PublicTrustKey.from_nix_line("index", "official-index-v1:11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=").unwrap()
+    manifest :: public_trust_manifest("jet-lang.dev", None, &[key]).unwrap()
+    assert(manifest.contains("\"key_id\":\"official-index-v1\""))
+    assert(manifest.contains("\"algorithm\":\"ed25519\""))
+    assert(manifest.contains("nix-index-v1.ed25519.pub"))
+}
+
+// Rust: tests/jetpack_trust_root.rs:71
+#Test("jp6a_bootstrap_threshold_delegation_snapshot_and_identities") {
+    now: U64 :: 1_710_000_000
+    dir :: env.temp_dir().join("jetpack-trust-root-it-{process.id()}-{now}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    (root, keyring, keys) :: fixture_threshold_root(1, now + 86_400).unwrap()
+    signed_root :: sign_root(&root, &[&keys[0], &keys[1]]).unwrap()
+    pin :: SHA256.sha256_hex(canonical_root(&root).as_bytes())
+    eng := TrustEngine.bootstrap(&signed_root, keyring,
+        TrustPolicy { trusted_unix: Some(now), max_clock_skew: Duration.from_secs(60), ..TrustPolicy.default() },
+        Some(&pin), &FixedClock(now), Some(&dir)).unwrap()
+    loaded :: RootBootstrap.load(&dir).unwrap()
+    assert_eq(loaded.pin_digest, pin)
+    assert(loaded.consistent_snapshot)
+    // Signature strip.
+    stripped := signed_root.clone()
+    stripped.signatures.clear()
+    assert(match TrustEngine.bootstrap(&stripped, eng.keyring.clone(), TrustPolicy.default(), Some(&pin), &FixedClock(now), None) {
+        Err(TrustError.SignatureStripped { .. }) -> true
+        _ -> false
+    })
+    // Threshold-minus-one recovery drill, then real 2-of-3 rotation.
+    rotated := root.clone()
+    rotated.version = 2
+    eng.recovery_drill_threshold_minus_one(&rotated, &[&keys[0]], &FixedClock(now)).unwrap()
+    rotated.roles = eng.root.roles.clone()
+    rotated.public_key_ids = eng.root.public_key_ids.clone()
+    rotated.delegations = eng.root.delegations.clone()
+    signed_rot :: sign_root(&rotated, &[&keys[1], &keys[2]]).unwrap()
+    eng.update_root(&signed_rot, &FixedClock(now)).unwrap()
+    targets :: TargetsMetadata {
+        version: 3, expires_unix: now + 3600,
+        targets: ["jetsrc/pkg": TargetMeta { length: 3, hashes: ["sha256": SHA256.sha256_hex(b"pkg")], custom: [:] }],
+    }
+    signed_t :: sign_targets(&targets, &[&keys[3]]).unwrap()
+    eng.verify_targets(&signed_t, Some("jetsrc/pkg"), &FixedClock(now)).unwrap()
+    assert(match eng.verify_targets(&signed_t, Some("other/pkg"), &FixedClock(now)) {
+        Err(TrustError.DelegationDenied { .. }) -> true
+        _ -> false
+    })
+    t_canon :: canonical_targets(&targets)
+    snap :: SnapshotMetadata {
+        version: 4, expires_unix: now + 3600,
+        meta: ["targets": SnapshotMetaEntry { version: 3, length: t_canon.len() as U64,
+            hashes: ["sha256": SHA256.sha256_hex(t_canon.as_bytes())] }],
+    }
+    signed_s :: sign_snapshot(&snap, &[&keys[4]]).unwrap()
+    eng.verify_snapshot(&signed_s, &t_canon, 3, &FixedClock(now)).unwrap()
+    s_canon :: canonical_snapshot(&snap)
+    ts :: TimestampMetadata { version: 5, expires_unix: now + 3600,
+        snapshot: SnapshotMetaEntry { version: 4, length: s_canon.len() as U64,
+            hashes: ["sha256": SHA256.sha256_hex(s_canon.as_bytes())] },
+    }
+    eng.verify_timestamp(&sign_timestamp(&ts, &[&keys[5]]).unwrap(), &s_canon, 4, &FixedClock(now)).unwrap()
+    eng.bind_identity(BoundIdentity.registry("registry.jet-lang.dev")).unwrap()
+    eng.bind_identity(BoundIdentity.cache_builder("builder.ci")).unwrap()
+    eng.bind_identity(BoundIdentity.remote_executor("exec.1")).unwrap()
+    eng.bind_identity(BoundIdentity.publisher("pub.alice", PublisherIdentity.OfflineEd25519 {
+        public_key_hex: "ab".repeat(32), key_id: "alice-ed25519",
+    })).unwrap()
+    assert_eq(eng.identities.get(&IdentityKind.Publisher).unwrap().name, "pub.alice")
+    assert(match eng.bind_identity(BoundIdentity.registry("other.registry")) {
+        Err(TrustError.IdentityKindMismatch { .. }) -> true
+        _ -> false
+    })
+    _ :: fs.remove_dir_all(&dir)
+}
+
+// Rust: tests/jetpack_trust_root.rs:214
+#Test("jp6b_compromise_rollback_freeze_and_mix_and_match_fail_closed") {
+    now: U64 :: 1_710_100_000
+    // temp_dir honours TMPDIR; witness assertions need real scratch storage.
+    dir :: env.temp_dir().join("jetpack-trust-root-jp6b-{process.id()}-{now}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    (root, keyring, keys) :: fixture_threshold_root(1, now + 86_400).unwrap()
+    signed_root :: sign_root(&root, &[&keys[0], &keys[1]]).unwrap()
+    pin :: SHA256.sha256_hex(canonical_root(&root).as_bytes())
+    bootstrap :: () -> TrustEngine.bootstrap(&signed_root, keyring.clone(), TrustPolicy.default(), Some(&pin), &FixedClock(now), None).unwrap()
+    compromised :: TrustKey.generate("compromised-root")
+    forged_root :: sign_root(&root, &[&keys[0], &compromised]).unwrap()
+    assert(match TrustEngine.bootstrap(&forged_root, keyring.clone(), TrustPolicy.default(), Some(&pin), &FixedClock(now), None) {
+        Err(TrustError.ThresholdUnmet { role: MetadataRole.Root, have: 1, need: 2 }) -> true
+        _ -> false
+    })
+    replacement := root.clone()
+    replacement.version = 2
+    replacement_root :: sign_root(&replacement, &[&keys[0], &keys[1]]).unwrap()
+    assert(match TrustEngine.bootstrap(&replacement_root, keyring.clone(), TrustPolicy.default(), Some(&pin), &FixedClock(now), None) {
+        Err(TrustError.BootstrapPinMismatch { .. }) -> true
+        _ -> false
+    })
+    targets := TargetsMetadata { version: 1, expires_unix: now + 3600,
+        targets: ["jetsrc/pkg": TargetMeta { length: 3, hashes: ["sha256": SHA256.sha256_hex(b"pkg")], custom: [:] }],
+    }
+    signed_targets :: sign_targets(&targets, &[&keys[3]]).unwrap()
+    engine := bootstrap()
+    engine.verify_targets(&signed_targets, Some("jetsrc/pkg"), &FixedClock(now)).unwrap()
+    targets.version = 2
+    signed_v2 :: sign_targets(&targets, &[&keys[3]]).unwrap()
+    engine.verify_targets(&signed_v2, Some("jetsrc/pkg"), &FixedClock(now)).unwrap()
+    signed_old :: sign_targets(&TargetsMetadata { version: 1, ..targets.clone() }, &[&keys[3]]).unwrap()
+    assert(match engine.verify_targets(&signed_old, Some("jetsrc/pkg"), &FixedClock(now)) {
+        Err(TrustError.Rollback { role: MetadataRole.Targets, .. }) -> true
+        _ -> false
+    })
+    frozen :: TargetsMetadata { version: 3, expires_unix: now, ..targets.clone() }
+    assert(match bootstrap().verify_targets(&sign_targets(&frozen, &[&keys[3]]).unwrap(), Some("jetsrc/pkg"), &FixedClock(now)) {
+        Err(TrustError.Expired { role: MetadataRole.Targets, .. }) -> true
+        _ -> false
+    })
+    changed_custom := signed_targets.clone()
+    _ :: changed_custom.signed.targets.get_mut("jetsrc/pkg").unwrap().custom.insert("provenance", "attacker")
+    changed_custom.signatures = sign_targets(&changed_custom.signed, &[&keys[3]]).unwrap().signatures
+    custom_engine := bootstrap()
+    custom_engine.verify_targets(&signed_targets, Some("jetsrc/pkg"), &FixedClock(now)).unwrap()
+    assert(match custom_engine.verify_targets(&changed_custom, Some("jetsrc/pkg"), &FixedClock(now)) {
+        Err(TrustError.ConsistentSnapshotMismatch { .. }) -> true
+        _ -> false
+    })
+    chain := bootstrap()
+    chain.verify_targets(&signed_targets, Some("jetsrc/pkg"), &FixedClock(now)).unwrap()
+    targets_canonical :: canonical_targets(&signed_targets.signed)
+    snapshot :: SnapshotMetadata { version: 1, expires_unix: now + 3600,
+        meta: ["targets": SnapshotMetaEntry { version: 1, length: targets_canonical.len() as U64,
+            hashes: ["sha256": SHA256.sha256_hex(targets_canonical.as_bytes())] }],
+    }
+    signed_snapshot :: sign_snapshot(&snapshot, &[&keys[4]]).unwrap()
+    chain.verify_snapshot(&signed_snapshot, &targets_canonical, 1, &FixedClock(now)).unwrap()
+    snapshot_canonical :: canonical_snapshot(&snapshot)
+    timestamp :: TimestampMetadata { version: 1, expires_unix: now + 3600,
+        snapshot: SnapshotMetaEntry { version: 1, length: snapshot_canonical.len() as U64 + 1,
+            hashes: ["sha256": SHA256.sha256_hex(snapshot_canonical.as_bytes())] },
+    }
+    assert(match chain.verify_timestamp(&sign_timestamp(&timestamp, &[&keys[5]]).unwrap(), &snapshot_canonical, 1, &FixedClock(now)) {
+        Err(TrustError.ConsistentSnapshotMismatch { .. }) -> true
+        _ -> false
+    })
+    cache_key :: TrustKey.generate("cache-receipt")
+    provenance :: CacheProvenance { reference: "jetsrc/pkg", source: "git:source", builder: "cache-builder:trusted",
+        action: "sha256:action", output: "sha256:output", platform: "linux.x86_64",
+        sandbox: "sandbox:policy-bound", policy: "sha256:policy",
+    }
+    receipt :: CacheReceipt.issue("public", provenance, 1, now, now + 60, &cache_key).unwrap()
+    receipt.verify(&cache_key, &FixedClock(now)).unwrap()
+    assert(!receipt.witness.is_empty())
+    allow_cache_witness(&dir, "public", &receipt.witness).unwrap()
+    assert(is_cache_witness_allowed(&dir, "public", &receipt.witness).unwrap())
+    untrusted_witness :: if receipt.witness == "stranger" { "other-stranger" } else { "stranger" }
+    assert(!is_cache_witness_allowed(&dir, "public", untrusted_witness).unwrap())
+    tampered_witness := receipt.clone()
+    tampered_witness.witness = untrusted_witness.to_string()
+    assert(match tampered_witness.verify(&cache_key, &FixedClock(now)) {
+        Err(TrustError.CacheReceiptInvalid { .. }) -> true
+        _ -> false
+    })
+    tampered_receipt := receipt.clone()
+    tampered_receipt.provenance.output = "sha256:attacker"
+    assert(match tampered_receipt.verify(&cache_key, &FixedClock(now)) {
+        Err(TrustError.CacheReceiptInvalid { .. }) -> true
+        _ -> false
+    })
+    assert(match receipt.verify(&cache_key, &FixedClock(now + 60)) {
+        Err(TrustError.CacheReceiptExpired { .. }) -> true
+        _ -> false
+    })
+}
+
+// Rust: tests/jetpack_trust_root.rs:445
+#Test("core_build_hook_requires_the_exact_trust_identity") {
+    dir :: env.temp_dir().join("jetpack-core-build-trust-it-{process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    store :: dir.join("trust")
+    Trust.add_grant(&store, &Trust.TrustGrant { authority: "build", subject: "build-sha256:trusted", scope: "repo" })
+    hostile_identity :: "build-sha256:trusted\n$(touch core-build-pwned)"
+    theme :: Output.Theme.resolve(true)
+    assert(Trust.gate_build_identity(&theme, &store, hostile_identity, false).is_err())
+    assert(!dir.join("core-build-pwned").exists())
+    _ :: fs.remove_dir_all(&dir).ok()
+}
+
+// Rust: tests/jetpack_truth.rs:20
+#Test("canonical_product_ownership_is_split") {
+    // FEATURE_CLAIM: claim.product-boundaries / canonical-product-split
+    root :: OSPath.new(env!("CARGO_MANIFEST_DIR"))
+    root_manifest :: fs.read_to_string(root.join("Cargo.toml")).unwrap()
+    driver_manifest :: fs.read_to_string(root.join("crates/jet-driver/Cargo.toml")).unwrap()
+    jetpack_manifest :: fs.read_to_string(root.join("crates/jetpack/Cargo.toml")).unwrap()
+    jetos_manifest :: fs.read_to_string(root.join("crates/jetos/Cargo.toml")).unwrap()
+    assert_eq(root_manifest.matches("[[bin]]").count(), 1)
+    assert(root_manifest.contains("name = \"jet\""))
+    assert(!root_manifest.contains("name = \"jetpack\""))
+    assert(!root_manifest.contains("name = \"jetos\""))
+    assert(jetpack_manifest.contains("name = \"jetpack\""))
+    assert(jetos_manifest.contains("name = \"jetos\""))
+    assert(driver_manifest.contains("jet-pkg-model"))
+    assert(!driver_manifest.contains("jetpack ="))
+}
+
+// Rust: tests/jetpack_truth.rs:40
+#Test("truth_matrix_covers_every_done_epoch4_card") {
+    root :: OSPath.new(env!("CARGO_MANIFEST_DIR"))
+    raw :: fs.read_to_string(root.join(MATRIX)).unwrap()
+    rows :: matrix_rows(&raw)
+    cards :: tower_cards(&live_repo_root(&root))
+    done :: cards.iter().filter((pair) -> pair.1.epoch == "e4" && pair.1.phase == "done")
+        .map((pair) -> pair.0).collect[BTreeSet[U64]]()
+    audited :: rows.keys().copied().collect[BTreeSet[U64]]()
+    expected :: AUDITED.iter().copied().collect[BTreeSet[U64]]()
+    assert_eq(audited, expected, "truth matrix audited set drifted")
+    assert(done.is_subset(&audited), "live E4 done cards missing from audit")
+    for reopened in [6, 330] {
+        assert_eq(cards.get(&reopened).map((card) -> card.phase.as_str()), Some("ready"),
+            "#{reopened} must remain reopened until its live successor lands")
+    }
+    allowed :: ["live", "compatibility-only", "model-only", "schema-only", "fixture-only"]
+    nums :: rows.keys().copied().collect()
+    nums.sort()
+    for num in nums {
+        (class, evidence, boundary) :: rows.get(&num).unwrap()
+        card :: cards.get(&num).unwrap_or_else(() -> panic("#{num}: card missing from Tower"))
+        assert(allowed.contains(class.as_str()), "#{num}: bad class {class}")
+        assert(evidence.len() >= 8, "#{num}: evidence is not specific")
+        assert(evidence_resolves(&root, &evidence), "#{num}: evidence does not resolve: {evidence}")
+        assert(!boundary.trim().is_empty(), "#{num}: empty completion boundary")
+        if num != 418 { assert(!card.log_empty, "#{num}: done/reclassified claim has no Tower evidence log") }
+        if class != "live" {
+            successors :: card_refs(&boundary)
+            assert(!successors.is_empty(), "#{num}: non-live row needs successor")
+            assert(successors.iter().any((successor) -> cards.get(successor)
+                .is_some_and((card) -> card.phase != "done" && card.phase != "frozen")),
+                "#{num}: named successors are absent, done, or frozen: {successors:?}")
+        }
+    }
+}
+
+// Rust: tests/jetpack_truth.rs:114
+#Test("provider_realization_has_one_production_callsite") {
+    root :: OSPath.new(env!("CARGO_MANIFEST_DIR"))
+    violations: [String] := []
+    collect_direct_provider_calls(&root.join("crates/jetpack/src"), &violations)
+    assert_eq(violations, ["crates/jetpack/src/Store.rs"],
+        "Provider realization must remain private behind Store::realize_verified")
+}
+
+// Rust: tests/jetpack_update_confirmation.rs:11
+#Test("update_noninteractive_requires_yes_and_short_yes_applies") {
+    project :: Scratch.new("update-confirmation-project")
+    root :: Scratch.new("update-confirmation-root")
+    fixtures :: Scratch.new("update-confirmation-fixtures")
+    fs.write(project.join("env.jet"), "module dev {\n    sources: { default: acme/tools@github#latest }\n    env.dev: Env{ packages: [default.greet] }\n}\n").unwrap()
+    write_channel_fixture(&fixtures.path, "github:acme/tools", "latest", "github:acme/tools#v1.2.0")
+    plan_only :: jetpack().args(["update", "--no-color", "--fixtures"]).arg(&fixtures.path)
+        .current_dir(&project.path).env("JETPACK_ROOT", &root.path).output().unwrap()
+    assert_eq(plan_only.status.code(), Some(2))
+    plan_stderr :: String.from_utf8_lossy(&plan_only.stderr)
+    assert(plan_stderr.contains("plan only; pass -y or --yes to apply in a non-interactive shell"), "stderr: {plan_stderr}")
+    assert(!project.join(".jet/lock").exists())
+    assert(fs.read_dir(&root.path).unwrap().next().is_none(), "non-interactive update downloaded or realized a package")
+    applied :: jetpack().args(["update", "--no-color", "-y", "--fixtures"]).arg(&fixtures.path)
+        .current_dir(&project.path).env("JETPACK_ROOT", &root.path).output().unwrap()
+    assert(applied.status.success(), "stderr: {String.from_utf8_lossy(&applied.stderr)}")
+    applied_stderr :: String.from_utf8_lossy(&applied.stderr)
+    assert(applied_stderr.contains("applying plan (--yes)"))
+    assert(!applied_stderr.contains("Apply?"))
+    assert(fs.read_to_string(project.join(".jet/lock")).unwrap().contains("exact = \"github:acme/tools#v1.2.0\""))
+}

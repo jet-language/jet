@@ -1,0 +1,74 @@
+use std.fs
+use std.env
+use std.process.[Command, id]
+use std.sync.atomic.[AtomicU64, Ordering]
+use core.files.[OSPath]
+
+// Rust: tests/production_receipt.rs:8
+// GATE #4494: process-wide atomic scratch counter.
+NEXT :: AtomicU64.new(0)
+
+// Rust: tests/production_receipt.rs:10
+fn scratch(tag: String) -> OSPath {
+    path :: env.temp_dir().join("jet-production-receipt-{tag}-{id()}-{NEXT.fetch_add(1, Ordering.Relaxed)}")
+    fs.create_dir_all(path).unwrap()
+    path
+}
+
+// Rust: tests/production_receipt.rs:20
+fn receipt(root: OSPath) -> String {
+    reports :: root.join(".jet/reports")
+    entries :: fs.read_dir(reports).unwrap()
+    for entry in entries {
+        if entry == {
+            .Ok(found) -> {
+                path :: found.path().join("receipt")
+                if path.is_file() -> return fs.read_to_string(path).unwrap()
+            }
+            .Err(_) -> {}
+        }
+    }
+    panic("no production receipt in {reports.display()}")
+}
+
+// Rust: tests/production_receipt.rs:31
+fn hex(value: String) -> String {
+    result := String.new()
+    for byte in value.as_bytes() { result.push_str(format("{byte:02x}")) }
+    result
+}
+
+// Rust: tests/production_receipt.rs:40
+#Test("production_failure_receipt_is_canonical_redacted_and_tier_stable") {
+    source_secret :: "PRODUCTION_RECEIPT_SOURCE_MARKER_755"
+    input_secret :: "PRODUCTION_RECEIPT_INPUT_MARKER_755"
+    environment_secret :: "PRODUCTION_RECEIPT_ENV_MARKER_755"
+    source :: "// {source_secret}\nfn run() -> { panic(\"{input_secret}\") }\n"
+    jet :: OSPath.from_text(env.var("CARGO_BIN_EXE_jet").unwrap())
+    // Retired interpreter/JIT representations map to the current hosted O0
+    // run/dev modes; release exercises O2 using the same receipt assertions.
+    modes :: [["run", "main.jet"], ["dev", "main.jet", "--watch=off"], ["run", "--release", "main.jet"]]
+    receipts := [String]{}
+    for (index, mode) in modes.iter().enumerate() {
+        root :: scratch("tier-{index}")
+        fs.write(root.join("main.jet"), source).unwrap()
+        // GATE #4494: real native child capture.
+        output :: Command.new(jet).args(mode).arg("--").arg(input_secret)
+            .env("JET_PRODUCTION_USER_DATA", environment_secret).env("JET_STORE_DIR", root.join("cache"))
+            .current_dir(root).output().unwrap()
+        assert_eq(output.status.code(), Val(70), "{mode.join(" ")} failed:\n{String.from_utf8_lossy(output.stderr)}")
+        text :: receipt(root)
+        assert(text.starts_with("jet-development-receipt-v1\n"))
+        assert(text.contains("closure\t\t"))
+        assert(text.contains("input\t"))
+        for (key, value) in [("code", "E3001"), ("file", "main.jet"), ("line", "2"), ("function", "run")] {
+            assert(text.contains("failure-path\t{hex(key)}\t{hex(value)}"))
+        }
+        for forbidden in [source_secret, input_secret, environment_secret] {
+            assert(!text.contains(forbidden), "receipt leaked `{forbidden}`")
+        }
+        receipts.push(text)
+        _ :: fs.remove_dir_all(root)
+    }
+    assert(receipts.windows(2).all((pair) -> pair[0] == pair[1]))
+}

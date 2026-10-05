@@ -1,1759 +1,291 @@
-// PORT-PENDING 0991 tests-cli-compiler-speed: tests/cli_compiler_speed.rs:1-1755
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS mod common;
-//RS 
-//RS #[cfg(unix)]
-//RS mod production_path {
-//RS     use super::common::Scratch;
-//RS     use jet_foundation::DataTree::DataTree;
-//RS     use jet_foundation::JSON::{json_get, json_int, json_str, parse};
-//RS     use std::env;
-//RS     use std::fs;
-//RS     use std::os::unix::fs::PermissionsExt;
-//RS     use std::path::{Path, PathBuf};
-//RS     use std::process::Command;
-//RS 
-//RS 
-//RS     fn jet() -> PathBuf {
-//RS         PathBuf::from(env!("CARGO_BIN_EXE_jet"))
-//RS     }
-//RS 
-//RS     fn path_program(name: &str) -> PathBuf {
-//RS         let path = env::var_os("PATH").unwrap_or_default();
-//RS         env::split_paths(&path)
-//RS             .map(|directory| directory.join(name))
-//RS             .find(|candidate| candidate.is_file())
-//RS             .unwrap_or_else(|| panic!("{name} is required for the production-path check"))
-//RS     }
-//RS 
-//RS     fn write_executable(path: &Path, body: &str) {
-//RS         fs::write(path, body).unwrap();
-//RS         fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
-//RS     }
-//RS 
-//RS     fn repository_file(path: &str) -> PathBuf {
-//RS         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(path)
-//RS     }
-//RS 
-//RS     fn json_field<'a>(value: &'a DataTree, key: &str) -> &'a DataTree {
-//RS         json_get(value, key).unwrap_or_else(|| panic!("missing JSON field {key}"))
-//RS     }
-//RS 
-//RS     fn json_text<'a>(value: &'a DataTree, key: &str) -> &'a str {
-//RS         json_str(json_field(value, key)).unwrap_or_else(|| panic!("JSON field {key} is not text"))
-//RS     }
-//RS 
-//RS     fn json_number(value: &DataTree, key: &str) -> i64 {
-//RS         json_int(json_field(value, key))
-//RS             .unwrap_or_else(|| panic!("JSON field {key} is not numeric"))
-//RS     }
-//RS 
-//RS     fn synthetic_v4_baseline() -> String {
-//RS         let states = [
-//RS             "jit-clean",
-//RS             "jit-no-change",
-//RS             "jit-representative-edit",
-//RS             "aot-release-clean",
-//RS             "aot-release-no-change",
-//RS             "aot-release-representative-edit",
-//RS         ];
-//RS         let source_hash = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-//RS         let expected_hash = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
-//RS         let manifest_hash = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
-//RS         let workload_hash = "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff";
-//RS         let libc_hash = "1111111111111111111111111111111111111111111111111111111111111111";
-//RS         let allocator_hash = "2222222222222222222222222222222222222222222222222222222222222222";
-//RS         let allocator_environment_hash =
-//RS             "3333333333333333333333333333333333333333333333333333333333333333";
-//RS         let hardware_hash = "4444444444444444444444444444444444444444444444444444444444444444";
-//RS         let topology_hash = "5555555555555555555555555555555555555555555555555555555555555555";
-//RS         let toolchain_hash = "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd";
-//RS         let rustc_hash = "6666666666666666666666666666666666666666666666666666666666666666";
-//RS         let output_hash = "7777777777777777777777777777777777777777777777777777777777777777";
-//RS         let error_hash = "8888888888888888888888888888888888888888888888888888888888888888";
-//RS         let linker_hash = "9999999999999999999999999999999999999999999999999999999999999999";
-//RS         let compiler_hash = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
-//RS         let rustc_vv_hash = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
-//RS         let jet_env_hash = "abababababababababababababababababababababababababababababababab";
-//RS         let peer_contract = "6f9085bde94607c64f688587c06e6fc2f3e02fba10104c960c7488dba341c183";
-//RS         let mut runs = String::new();
-//RS         let mut peers = String::new();
-//RS         for state in states {
-//RS             let (stage, profile, backend, linker, linker_identity, cache_state, cache_policy) =
-//RS                 if state.starts_with("jit-") {
-//RS                     (
-//RS                         "jit-fast",
-//RS                         "fast",
-//RS                         "cranelift",
-//RS                         "none",
-//RS                         "none",
-//RS                         if state.ends_with("no-change") {
-//RS                             "NoChange"
-//RS                         } else if state.ends_with("representative-edit") {
-//RS                             "Edit"
-//RS                         } else {
-//RS                             "Clean"
-//RS                         },
-//RS                         if state.ends_with("no-change") {
-//RS                             "shared-cache-after-warmup"
-//RS                         } else if state.ends_with("representative-edit") {
-//RS                             "base-cache-snapshot-before-edit"
-//RS                         } else {
-//RS                             "fresh-cache-per-sample"
-//RS                         },
-//RS                     )
-//RS                 } else {
-//RS                     (
-//RS                         "aot-release",
-//RS                         "release",
-//RS                         "rustc-llvm",
-//RS                         "ld",
-//RS                         linker_hash,
-//RS                         if state.ends_with("no-change") {
-//RS                             "NoChange"
-//RS                         } else if state.ends_with("representative-edit") {
-//RS                             "Edit"
-//RS                         } else {
-//RS                             "Clean"
-//RS                         },
-//RS                         if state.ends_with("no-change") {
-//RS                             "shared-cache-after-warmup"
-//RS                         } else if state.ends_with("representative-edit") {
-//RS                             "base-cache-snapshot-before-edit"
-//RS                         } else {
-//RS                             "fresh-cache-per-sample"
-//RS                         },
-//RS                     )
-//RS                 };
-//RS             let phase = format!(
-//RS                 "parse_us=1;sema_us=1;source=fixture.jet;source_sha256={source_hash};source_bytes=1;expected_sha256={expected_hash};expected_bytes=1;manifest_sha256={manifest_hash};workload_sha256={workload_hash};role=base;profile={profile};backend={backend};linker={linker};linker_path={linker};linker_sha256={linker_identity};linker_backend={linker};linker_backend_path={linker};linker_backend_sha256={linker_identity};cache_state={cache_state};cache_policy={cache_policy};cache_hits=1;cache_misses=0;libc_sha256={libc_hash};allocator_sha256={allocator_hash};allocator_environment_sha256={allocator_environment_hash};hardware_sha256={hardware_hash};topology_sha256={topology_hash};toolchain_sha256={toolchain_hash};rustc_sha256={rustc_hash};top_cause=none;artifact_bytes=0;parity=verified;semantic_parity=verified;diagnostic_parity=verified;effect_parity=verified;tier_parity=verified;dev_profile=dev;aot_profile=release"
-//RS             );
-//RS             if !runs.is_empty() {
-//RS                 runs.push(',');
-//RS             }
-//RS             runs.push_str(&format!(
-//RS                 r#"{{"program":"fixture.jet","state":"{state}","stage":"{stage}","latency_ns":100,"memory_bytes":100,"variance_pct":0,"stdout_sha256":"{output_hash}","stderr_sha256":"{error_hash}","phase_totals":"{phase}"}}"#
-//RS             ));
-//RS             for (peer, language, value) in [("rustc", "rust", 100), ("cxx", "cxx", 101)] {
-//RS                 for metric in ["latency_ns", "memory_bytes"] {
-//RS                     if !peers.is_empty() {
-//RS                         peers.push(',');
-//RS                     }
-//RS                     peers.push_str(&format!(
-//RS                         r#"{{"peer":"{peer}","language":"{language}","program":"fixture.jet","state":"{state}","metric":"{metric}","value":{value},"workload_sha256":"{workload_hash}","source_sha256":"{source_hash}","expected_sha256":"{expected_hash}","manifest_sha256":"{manifest_hash}","toolchain_sha256":"{toolchain_hash}"}}"#
-//RS                     ));
-//RS                 }
-//RS             }
-//RS         }
-//RS         let corpus_hash = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-//RS         format!(
-//RS             r#"{{"schema":"jet.compiler-speed","version":4,"corpus_sha256":"{corpus_hash}","manifest_sha256":"{manifest_hash}","stage":"matrix","peer_version":1,"peer_contract_sha256":"{peer_contract}","peer_run_id":"fixture-run","peer_keys":"rustc:rust,cxx:cxx","peer_metrics":"latency_ns,memory_bytes","peer_count":2,"peer_rows":24,"parity":{{"status":"verified","cases":1,"semantic":"verified","diagnostics":"verified","effects":"verified","tiers":"verified"}},"machine":{{"allocator_source_sha256":"{allocator_hash}","allocator_environment_sha256":"{allocator_environment_hash}","arch":"x86_64","compiler_sha256":"{compiler_hash}","cpus":2,"governor":"governor","hardware_sha256":"{hardware_hash}","hostname":"fixture","kernel":"kernel","libc_sha256":"{libc_hash}","load1_start_milli":100,"load1_peak_milli":200,"load1_end_milli":150,"memory_bytes":1024,"os":"Linux","rustc":"rustc","rustc_vv_sha256":"{rustc_vv_hash}","target":"target","toolchain_sha256":"{toolchain_hash}","topology_sha256":"{topology_hash}","jet_env_sha256":"{jet_env_hash}","llvm":"llvm","rustc_sha256":"{rustc_hash}"}},"budgets":{{"latency_regression_pct":15,"memory_regression_pct":15,"samples":20,"variance_pct":100,"warmups":1}},"outliers_discarded":0,"runs":[{runs}],"peers":[{peers}]}}
-//RS "#
-//RS         )
-//RS     }
-//RS 
-//RS     fn checker_report_from_baseline(baseline: &str) -> String {
-//RS         let root = parse(baseline).expect("generated compiler-speed baseline JSON");
-//RS         let machine = json_field(&root, "machine");
-//RS         let budgets = json_field(&root, "budgets");
-//RS         let parity = json_field(&root, "parity");
-//RS         let runs = json_field(&root, "runs")
-//RS             .as_array()
-//RS             .expect("compiler-speed baseline runs array");
-//RS         assert_eq!(
-//RS             runs.len() % 6,
-//RS             0,
-//RS             "baseline runs are not six rows per corpus row"
-//RS         );
-//RS         let machine_id = format!(
-//RS             "{}/{}/cpus={}/host={}",
-//RS             json_text(machine, "os"),
-//RS             json_text(machine, "arch"),
-//RS             json_number(machine, "cpus"),
-//RS             json_text(machine, "hostname")
-//RS         );
-//RS         let peer_contract = json_text(&root, "peer_contract_sha256");
-//RS         let peer_run_id = json_text(&root, "peer_run_id");
-//RS         let peer_keys = json_text(&root, "peer_keys");
-//RS         let peer_metrics = json_text(&root, "peer_metrics");
-//RS         let peer_count = json_number(&root, "peer_count");
-//RS         let peer_rows = json_number(&root, "peer_rows");
-//RS         let mut report = format!(
-//RS             "compiler-speed version={} corpus={} corpus_sha256={} manifest_sha256={} stage=matrix machine={} target={} rustc={} llvm={} rustc_vv_sha256={} rustc_sha256={} compiler_sha256={} jet_env_sha256={} libc_sha256={} allocator_sha256={} allocator_environment_sha256={} hardware_sha256={} topology_sha256={} toolchain_sha256={} kernel={} governor={} load1_start_milli={} load1_peak_milli={} load1_end_milli={} memory_bytes={} profiles=jit-fast,aot-release backends=cranelift,rustc-llvm warmups={} samples={} outliers_discarded={} parity={} parity_cases={} peer_contract_sha256={} peer_run_id={} peer_machine={} peer_target={} peer_keys={} peer_metrics={} peer_count={} peer_rows={}\n",
-//RS             json_number(&root, "version"),
-//RS             runs.len() / 6,
-//RS             json_text(&root, "corpus_sha256"),
-//RS             json_text(&root, "manifest_sha256"),
-//RS             machine_id,
-//RS             json_text(machine, "target"),
-//RS             json_text(machine, "rustc"),
-//RS             json_text(machine, "llvm"),
-//RS             json_text(machine, "rustc_vv_sha256"),
-//RS             json_text(machine, "rustc_sha256"),
-//RS             json_text(machine, "compiler_sha256"),
-//RS             json_text(machine, "jet_env_sha256"),
-//RS             json_text(machine, "libc_sha256"),
-//RS             json_text(machine, "allocator_source_sha256"),
-//RS             json_text(machine, "allocator_environment_sha256"),
-//RS             json_text(machine, "hardware_sha256"),
-//RS             json_text(machine, "topology_sha256"),
-//RS             json_text(machine, "toolchain_sha256"),
-//RS             json_text(machine, "kernel"),
-//RS             json_text(machine, "governor"),
-//RS             json_number(machine, "load1_start_milli"),
-//RS             json_number(machine, "load1_peak_milli"),
-//RS             json_number(machine, "load1_end_milli"),
-//RS             json_number(machine, "memory_bytes"),
-//RS             json_number(budgets, "warmups"),
-//RS             json_number(budgets, "samples"),
-//RS             json_number(&root, "outliers_discarded"),
-//RS             json_text(parity, "status"),
-//RS             json_number(parity, "cases"),
-//RS             peer_contract,
-//RS             peer_run_id,
-//RS             machine_id,
-//RS             json_text(machine, "target"),
-//RS             peer_keys,
-//RS             peer_metrics,
-//RS             peer_count,
-//RS             peer_rows,
-//RS         );
-//RS         report.push_str("program\tstate\tstage\tlatency_ns\tmemory_bytes\tvariance_pct\toutput_sha256:stderr_sha256\tphases\n");
-//RS         for run in runs {
-//RS             report.push_str(&format!(
-//RS                 "{}\t{}\t{}\t{}\t{}\t{}\t{}:{}\tphases={}\n",
-//RS                 json_text(run, "program"),
-//RS                 json_text(run, "state"),
-//RS                 json_text(run, "stage"),
-//RS                 json_number(run, "latency_ns"),
-//RS                 json_number(run, "memory_bytes"),
-//RS                 json_number(run, "variance_pct"),
-//RS                 json_text(run, "stdout_sha256"),
-//RS                 json_text(run, "stderr_sha256"),
-//RS                 json_text(run, "phase_totals"),
-//RS             ));
-//RS         }
-//RS         report.push_str(&format!(
-//RS             "compiler-speed-peer version=1 run_id={} corpus_sha256={} manifest_sha256={} target={} machine={} peers={} metrics={} contract_sha256={} peer_count={} rows={}\n",
-//RS             peer_run_id,
-//RS             json_text(&root, "corpus_sha256"),
-//RS             json_text(&root, "manifest_sha256"),
-//RS             json_text(machine, "target"),
-//RS             machine_id,
-//RS             peer_keys,
-//RS             peer_metrics,
-//RS             peer_contract,
-//RS             peer_count,
-//RS             peer_rows,
-//RS         ));
-//RS         report.push_str("peer\tlanguage\tprogram\tstate\tmetric\tvalue\tworkload_sha256\tsource_sha256\texpected_sha256\tmanifest_sha256\ttoolchain_sha256\n");
-//RS         for run in runs {
-//RS             for (peer, language, value) in [("rustc", "rust", 100), ("cxx", "cxx", 101)] {
-//RS                 for metric in ["latency_ns", "memory_bytes"] {
-//RS                     report.push_str(&format!(
-//RS                         "{peer}\t{language}\t{}\t{}\t{metric}\t{value}\tffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff\taaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\tbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\tbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\tdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\n",
-//RS                         json_text(run, "program"),
-//RS                         json_text(run, "state"),
-//RS                     ));
-//RS                 }
-//RS             }
-//RS         }
-//RS         report
-//RS     }
-//RS 
-//RS     fn run_checker_fixture(name: &str, baseline: &str, report: &str) -> std::process::Output {
-//RS         let scratch = Scratch::new(name);
-//RS         let fixture_perf = scratch.join("Tools/perf");
-//RS         fs::create_dir_all(&fixture_perf).unwrap();
-//RS         let checker = fixture_perf.join("ci-perf-check.sh");
-//RS         fs::copy(repository_file("Tools/perf/ci-perf-check.sh"), &checker).unwrap();
-//RS         fs::set_permissions(&checker, fs::Permissions::from_mode(0o755)).unwrap();
-//RS         fs::write(fixture_perf.join("baseline.json"), baseline).unwrap();
-//RS         let report_path = scratch.join("current.report");
-//RS         fs::write(&report_path, report).unwrap();
-//RS         write_executable(
-//RS             &fixture_perf.join("dashboard.sh"),
-//RS             "#!/bin/sh\ncat \"$JET_TEST_CURRENT_REPORT\"\n",
-//RS         );
-//RS         let scratch_root = env::var_os("JET_PERF_SCRATCH_ROOT")
-//RS             .map(PathBuf::from)
-//RS             .or_else(|| env::var_os("HOME").map(|home| PathBuf::from(home).join(".cache/jet-perf")))
-//RS             .expect("disk-backed compiler-speed scratch root")
-//RS             .join("rust-checker-fixtures");
-//RS         Command::new(checker)
-//RS             .current_dir(&scratch.path)
-//RS             .env(
-//RS                 "JET_CI_CANDIDATE_COMMIT",
-//RS                 "0123456789abcdef0123456789abcdef01234567",
-//RS             )
-//RS             .env("JET_TEST_CURRENT_REPORT", report_path)
-//RS             .env("JET_PERF_SCRATCH_ROOT", scratch_root)
-//RS             .output()
-//RS             .unwrap()
-//RS     }
-//RS 
-//RS     fn output_text(output: &std::process::Output) -> String {
-//RS         format!(
-//RS             "{}{}",
-//RS             String::from_utf8_lossy(&output.stdout),
-//RS             String::from_utf8_lossy(&output.stderr)
-//RS         )
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn compiler_speed_checker_accepts_generated_baseline() {
-//RS         let baseline = synthetic_v4_baseline();
-//RS         let report = checker_report_from_baseline(&baseline);
-//RS         let output = run_checker_fixture("compiler-speed-checker-accept", &baseline, &report);
-//RS         assert_eq!(
-//RS             output.status.code(),
-//RS             Some(0),
-//RS             "generated baseline was rejected:\n{}",
-//RS             output_text(&output)
-//RS         );
-//RS         assert!(
-//RS             output_text(&output).contains("perf gate OK"),
-//RS             "checker did not report success:\n{}",
-//RS             output_text(&output)
-//RS         );
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn compiler_speed_checker_rejects_unsupported_baseline_version() {
-//RS         let baseline = synthetic_v4_baseline();
-//RS         let version = json_number(&parse(&baseline).unwrap(), "version");
-//RS         let bumped = baseline.replacen(
-//RS             &format!("\"version\":{version}"),
-//RS             &format!("\"version\":{}", version + 1),
-//RS             1,
-//RS         );
-//RS         let output = run_checker_fixture("compiler-speed-checker-version", &bumped, "");
-//RS         let text = output_text(&output);
-//RS         assert!(
-//RS             !output.status.success(),
-//RS             "unsupported version was accepted:\n{text}"
-//RS         );
-//RS         assert!(
-//RS             text.contains(&format!(
-//RS                 "unsupported compiler-speed baseline version: {}",
-//RS                 version + 1
-//RS             )),
-//RS             "version mismatch was not named:\n{text}"
-//RS         );
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn compiler_speed_checker_rejects_changed_machine_rustc_identity() {
-//RS         let baseline = synthetic_v4_baseline();
-//RS         let parsed = parse(&baseline).unwrap();
-//RS         let machine_rustc = json_str(json_field(json_field(&parsed, "machine"), "rustc"))
-//RS             .expect("machine rustc identity")
-//RS             .to_string();
-//RS         let bumped = baseline.replacen(
-//RS             &format!("\"rustc\":\"{machine_rustc}\""),
-//RS             "\"rustc\":\"changed-rustc\"",
-//RS             1,
-//RS         );
-//RS         assert_ne!(bumped, baseline, "machine rustc mutation did not apply");
-//RS         let report = checker_report_from_baseline(&baseline);
-//RS         let output = run_checker_fixture("compiler-speed-checker-rustc", &bumped, &report);
-//RS         let text = output_text(&output);
-//RS         assert!(
-//RS             !output.status.success(),
-//RS             "changed rustc identity was accepted:\n{text}"
-//RS         );
-//RS         assert!(
-//RS             text.contains(&format!("rustc changed: changed-rustc -> {machine_rustc}")),
-//RS             "rustc mismatch was not named:\n{text}"
-//RS         );
-//RS     }
-//RS 
-//RS     fn prepend_path(directory: &Path) -> std::ffi::OsString {
-//RS         let mut paths = vec![directory.to_path_buf()];
-//RS         let path = env::var_os("PATH").unwrap_or_default();
-//RS         paths.extend(env::split_paths(&path));
-//RS         env::join_paths(paths).unwrap()
-//RS     }
-//RS 
-//RS 
-//RS     #[test]
-//RS     fn compiler_speed_default_profile_routing_is_removal_sensitive_and_production_backed() {
-//RS         let scratch = Scratch::new("compiler-speed-default-profile-routing");
-//RS         fs::write(
-//RS             scratch.join("main.jet"),
-//RS             "fn run() { print(\"default-profile\") }\n",
-//RS         )
-//RS         .unwrap();
-//RS 
-//RS         for args in [
-//RS             vec!["run", "--trace-tiers", "main.jet"],
-//RS             vec!["dev", "--watch=off", "--trace-tiers", "main.jet"],
-//RS         ] {
-//RS             let output = Command::new(jet())
-//RS                 .args(&args)
-//RS                 .current_dir(&scratch.path)
-//RS                 .env("JET_STORE_DIR", scratch.join("store"))
-//RS                 .env("JET_STORE_CAP_BYTES", "21474836480")
-//RS                 .env("JET_STORE_RESERVE_BYTES", "2147483648")
-//RS                 .env("JET_RUN_CACHE_DIR", scratch.join("jit-cache"))
-//RS                 .env("NO_COLOR", "1")
-//RS                 .output()
-//RS                 .unwrap();
-//RS             let trace = String::from_utf8_lossy(&output.stderr);
-//RS             assert_eq!(
-//RS                 output.status.code(),
-//RS                 Some(0),
-//RS                 "{} failed:\nstdout: {}\nstderr: {trace}",
-//RS                 args[0],
-//RS                 String::from_utf8_lossy(&output.stdout)
-//RS             );
-//RS             assert_eq!(output.stdout, b"default-profile\n", "{} output", args[0]);
-//RS             assert!(
-//RS                 trace
-//RS                     .lines()
-//RS                     .any(|line| line.starts_with("run") && line.contains("tier1 native")),
-//RS                 "{} did not use the default fast production lens:\n{trace}",
-//RS                 args[0]
-//RS             );
-//RS             assert!(
-//RS                 !trace.contains("tier0 interp"),
-//RS                 "{} default route deoptimized:\n{trace}",
-//RS                 args[0]
-//RS             );
-//RS         }
-//RS 
-//RS         let tools = scratch.join("tools");
-//RS         fs::create_dir_all(&tools).unwrap();
-//RS         let rustc_log = scratch.join("default-rustc.log");
-//RS         let real_rustc = path_program("rustc");
-//RS         let real_linker = path_program("cc");
-//RS         write_executable(
-//RS             &tools.join("rustc"),
-//RS             "#!/bin/sh\n\
-//RS              { printf '%s\\n' BEGIN; printf '%s\\n' \"$@\"; printf '%s\\n' END; } >> \"$JET_TEST_RUSTC_LOG\"\n\
-//RS              exec \"$JET_TEST_REAL_RUSTC\" \"$@\"\n",
-//RS         );
-//RS         let build = Command::new(jet())
-//RS             .args(["build", "main.jet"])
-//RS             .current_dir(&scratch.path)
-//RS             .env("PATH", prepend_path(&tools))
-//RS             .env("RUSTC_LINKER", &real_linker)
-//RS             .env("JET_TEST_REAL_RUSTC", &real_rustc)
-//RS             .env("JET_TEST_RUSTC_LOG", &rustc_log)
-//RS             .env("JET_STORE_DIR", scratch.join("store"))
-//RS             .env("JET_STORE_CAP_BYTES", "21474836480")
-//RS             .env("JET_STORE_RESERVE_BYTES", "2147483648")
-//RS             .env("NO_COLOR", "1")
-//RS             .output()
-//RS             .unwrap();
-//RS         assert_eq!(
-//RS             build.status.code(),
-//RS             Some(0),
-//RS             "default production build failed:\n{}",
-//RS             String::from_utf8_lossy(&build.stderr)
-//RS         );
-//RS         let run = Command::new(scratch.join(".jet/build/main"))
-//RS             .current_dir(&scratch.path)
-//RS             .output()
-//RS             .unwrap();
-//RS         assert_eq!(run.status.code(), Some(0));
-//RS         assert_eq!(run.stdout, b"default-profile\n");
-//RS 
-//RS         let log = fs::read_to_string(rustc_log).unwrap();
-//RS         let final_args = invocations(&log)
-//RS             .into_iter()
-//RS             .find(|args| has_pair(args, "--crate-name", "main"))
-//RS             .expect("recorded final rustc invocation");
-//RS         for flag in ["opt-level=2", "lto=off", "strip=symbols"] {
-//RS             assert!(
-//RS                 final_args.iter().any(|arg| arg == flag),
-//RS                 "default profile omitted {flag}: {final_args:?}"
-//RS             );
-//RS         }
-//RS         assert!(
-//RS             !final_args.iter().any(|arg| arg == "opt-level=0")
-//RS                 && !final_args
-//RS                     .iter()
-//RS                     .any(|arg| arg.starts_with("codegen-units=")),
-//RS             "default profile used fast-build flags: {final_args:?}"
-//RS         );
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn compiler_speed_named_job_dev_matches_run_and_interpreter() {
-//RS         let scratch = Scratch::new("compiler-speed-named-job-dev");
-//RS         fs::copy(
-//RS             repository_file("Examples/features/devloop/job_runner.jet"),
-//RS             scratch.join("run.jet"),
-//RS         )
-//RS         .unwrap();
-//RS         fs::copy(
-//RS             repository_file("Tools/perf/package.jet"),
-//RS             scratch.join("package.jet"),
-//RS         )
-//RS         .unwrap();
-//RS         let expected = "hello from job\nseeded\n";
-//RS         let invoke = |args: &[&str], tag: &str| {
-//RS             Command::new(jet())
-//RS                 .args(args)
-//RS                 .current_dir(&scratch.path)
-//RS                 .env("JET_STORE_DIR", scratch.path.join(format!("{tag}-store")))
-//RS                 .env("JET_STORE_CAP_BYTES", "21474836480")
-//RS                 .env("JET_STORE_RESERVE_BYTES", "2147483648")
-//RS                 .env(
-//RS                     "JET_RUN_CACHE_DIR",
-//RS                     scratch.path.join(format!("{tag}-run-cache")),
-//RS                 )
-//RS                 .env("NO_COLOR", "1")
-//RS                 .output()
-//RS                 .unwrap()
-//RS         };
-//RS 
-//RS         let run = invoke(&["run", "run.jet", "--", "seed_data"], "run");
-//RS         let dev = invoke(
-//RS             &[
-//RS                 "dev",
-//RS                 "run.jet",
-//RS                 "--watch=off",
-//RS                 "--quiet",
-//RS                 "--",
-//RS                 "seed_data",
-//RS             ],
-//RS             "dev",
-//RS         );
-//RS         let interpreter = invoke(
-//RS             &["run", "--interpret", "run.jet", "--", "seed_data"],
-//RS             "interpreter",
-//RS         );
-//RS         for (label, output) in [("run", &run), ("dev", &dev), ("interpreter", &interpreter)] {
-//RS             assert_eq!(
-//RS                 output.status.code(),
-//RS                 Some(0),
-//RS                 "{label} named-job execution failed:\n{}",
-//RS                 String::from_utf8_lossy(&output.stderr)
-//RS             );
-//RS             assert_eq!(
-//RS                 output.stdout,
-//RS                 expected.as_bytes(),
-//RS                 "{label} named-job output diverged"
-//RS             );
-//RS         }
-//RS         assert_eq!(run.stdout, dev.stdout, "JIT/dev named-job output diverged");
-//RS         assert_eq!(
-//RS             run.stdout, interpreter.stdout,
-//RS             "JIT/interpreter named-job output diverged"
-//RS         );
-//RS 
-//RS         let unknown = invoke(
-//RS             &[
-//RS                 "dev",
-//RS                 "run.jet",
-//RS                 "--watch=off",
-//RS                 "--quiet",
-//RS                 "--",
-//RS                 "missing_job",
-//RS             ],
-//RS             "unknown",
-//RS         );
-//RS         let stderr = String::from_utf8_lossy(&unknown.stderr);
-//RS         assert_ne!(
-//RS             unknown.status.code(),
-//RS             Some(0),
-//RS             "unknown dev job was accepted"
-//RS         );
-//RS         assert!(
-//RS             stderr.contains("E1294"),
-//RS             "unknown dev job lost E1294:\n{stderr}"
-//RS         );
-//RS     }
-//RS 
-//RS 
-//RS     fn invocations(log: &str) -> Vec<Vec<String>> {
-//RS         let mut all = Vec::new();
-//RS         let mut current = None;
-//RS         for line in log.lines() {
-//RS             match line {
-//RS                 "BEGIN" => current = Some(Vec::new()),
-//RS                 "END" => {
-//RS                     if let Some(args) = current.take() {
-//RS                         all.push(args);
-//RS                     }
-//RS                 }
-//RS                 arg => {
-//RS                     if let Some(args) = current.as_mut() {
-//RS                         args.push(arg.to_string());
-//RS                     }
-//RS                 }
-//RS             }
-//RS         }
-//RS         all
-//RS     }
-//RS 
-//RS     fn has_pair(args: &[String], flag: &str, value: &str) -> bool {
-//RS         args.windows(2)
-//RS             .any(|window| window[0] == flag && window[1] == value)
-//RS     }
-//RS     fn metadata_value(args: &[String]) -> &str {
-//RS         args.windows(2)
-//RS             .find_map(|window| {
-//RS                 (window[0] == "-C")
-//RS                     .then(|| window[1].strip_prefix("metadata="))
-//RS                     .flatten()
-//RS             })
-//RS             .expect("rustc invocation has content metadata")
-//RS     }
-//RS 
-//RS     fn assert_content_metadata_and_remap(args: &[String]) {
-//RS         let metadata = metadata_value(args);
-//RS         assert!(
-//RS             metadata.len() == 64
-//RS                 && metadata
-//RS                     .bytes()
-//RS                     .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase()),
-//RS             "rustc metadata is not a lowercase SHA-256 key: {metadata:?}; args={args:?}"
-//RS         );
-//RS         assert!(
-//RS             args.windows(2).any(|window| {
-//RS                 window[0] == "--remap-path-prefix" && window[1].ends_with("=/jet/build")
-//RS             }),
-//RS             "rustc invocation did not remap its build workdir: {args:?}"
-//RS         );
-//RS     }
-//RS 
-//RS     fn has_digest_field(line: &str, field: &str) -> bool {
-//RS         line.split_whitespace().any(|part| {
-//RS             let Some(value) = part.strip_prefix(field) else {
-//RS                 return false;
-//RS             };
-//RS             value.len() == 64
-//RS                 && value
-//RS                     .bytes()
-//RS                     .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
-//RS         })
-//RS     }
-//RS     fn cache_key(log: &str) -> String {
-//RS         log.lines()
-//RS             .flat_map(str::split_whitespace)
-//RS             .find_map(|part| {
-//RS                 let value = part.strip_prefix("key=")?;
-//RS                 (value.len() == 64
-//RS                     && value
-//RS                         .bytes()
-//RS                         .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase()))
-//RS                 .then(|| value.to_owned())
-//RS             })
-//RS             .expect("native cache log has a build key")
-//RS     }
-//RS 
-//RS     fn has_corelib_identity(line: &str) -> bool {
-//RS         line.contains("corelib=/* jet-corelib-r10 ")
-//RS             && ["source=", "closure=", "fp="]
-//RS                 .iter()
-//RS                 .all(|field| has_digest_field(line, field))
-//RS     }
-//RS 
-//RS     fn build(scratch: &Scratch) -> std::process::Output {
-//RS         Command::new(jet())
-//RS             .args(["build", "main.jet", "--profile=debug", "--verbose"])
-//RS             .current_dir(&scratch.path)
-//RS             .env("JET_STORE_DIR", scratch.join("store"))
-//RS             .env("JET_STORE_CAP_BYTES", "21474836480")
-//RS             .env("JET_STORE_RESERVE_BYTES", "2147483648")
-//RS             .env("JET_RUNTIME_CACHE_STATS", "1")
-//RS             .env(
-//RS                 "JET_DEBUG_NATIVE_CACHE_LOG",
-//RS                 scratch.join("native-cache.log"),
-//RS             )
-//RS             .env("JET_RECEIPT_BYPASS", "1")
-//RS             .env("NO_COLOR", "1")
-//RS             .output()
-//RS             .unwrap()
-//RS     }
-//RS     fn release_build(scratch: &Scratch) -> std::process::Output {
-//RS         Command::new(jet())
-//RS             .args(["build", "main.jet", "--profile=release", "--verbose"])
-//RS             .current_dir(&scratch.path)
-//RS             .env("JET_STORE_DIR", scratch.join("store"))
-//RS             .env("JET_STORE_CAP_BYTES", "21474836480")
-//RS             .env("JET_STORE_RESERVE_BYTES", "2147483648")
-//RS             .env("JET_RECEIPT_BYPASS", "1")
-//RS             .env("NO_COLOR", "1")
-//RS             .output()
-//RS             .unwrap()
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn production_build_follows_compiler_speed_plan_flags_and_linker() {
-//RS         let scratch = Scratch::new("compiler-speed-production");
-//RS         fs::write(
-//RS             scratch.join("main.jet"),
-//RS             "fn run() { print(\"compiler-speed\") }\n",
-//RS         )
-//RS         .unwrap();
-//RS         let tools = scratch.join("tools");
-//RS         fs::create_dir_all(&tools).unwrap();
-//RS         let rustc_log = scratch.join("rustc.log");
-//RS         let real_rustc = path_program("rustc");
-//RS         let real_linker = path_program("cc");
-//RS         write_executable(
-//RS             &tools.join("rustc"),
-//RS             "#!/bin/sh\n\
-//RS              { printf '%s\\n' BEGIN; printf '%s\\n' \"$@\"; printf '%s\\n' END; } >> \"$JET_TEST_RUSTC_LOG\"\n\
-//RS              exec \"$JET_TEST_REAL_RUSTC\" \"$@\"\n",
-//RS         );
-//RS 
-//RS         let build = Command::new(jet())
-//RS             .args(["build", "main.jet", "--profile=debug"])
-//RS             .current_dir(&scratch.path)
-//RS             .env("PATH", prepend_path(&tools))
-//RS             .env("RUSTC_LINKER", &real_linker)
-//RS             .env("JET_TEST_REAL_RUSTC", &real_rustc)
-//RS             .env("JET_TEST_RUSTC_LOG", &rustc_log)
-//RS             .env("JET_STORE_DIR", scratch.join("store"))
-//RS             .env("JET_STORE_CAP_BYTES", "21474836480")
-//RS             .env("JET_STORE_RESERVE_BYTES", "2147483648")
-//RS             .env("NO_COLOR", "1")
-//RS             .output()
-//RS             .unwrap();
-//RS         assert_eq!(
-//RS             build.status.code(),
-//RS             Some(0),
-//RS             "production build failed:\n{}",
-//RS             String::from_utf8_lossy(&build.stderr)
-//RS         );
-//RS 
-//RS         let run = Command::new(scratch.join(".jet/build/main"))
-//RS             .current_dir(&scratch.path)
-//RS             .output()
-//RS             .unwrap();
-//RS         assert_eq!(run.status.code(), Some(0));
-//RS         assert_eq!(run.stdout, b"compiler-speed\n");
-//RS         let log = fs::read_to_string(rustc_log).unwrap();
-//RS 
-//RS         let recorded = invocations(&log);
-//RS         let final_args = recorded
-//RS             .iter()
-//RS             .find(|args| has_pair(args, "--crate-name", "main"))
-//RS             .expect("recorded final rustc invocation");
-//RS         assert_content_metadata_and_remap(final_args);
-//RS         let runtime_args = recorded
-//RS             .iter()
-//RS             .filter(|args| has_pair(args, "--crate-name", "jet_runtime"))
-//RS             .collect::<Vec<_>>();
-//RS         assert!(
-//RS             !runtime_args.is_empty(),
-//RS             "recorded runtime rlib rustc invocation"
-//RS         );
-//RS         for args in runtime_args {
-//RS             assert_content_metadata_and_remap(args);
-//RS         }
-//RS         // The program must link the cached runtime, not fall back to compiling
-//RS         // the inline monolith after a rejected runtime crate.
-//RS         assert!(
-//RS             final_args
-//RS                 .windows(2)
-//RS                 .any(|pair| pair[0] == "--extern" && pair[1].starts_with("jet_runtime=")),
-//RS             "final rustc invocation did not link the cached runtime rlib: {final_args:?}"
-//RS         );
-//RS         for flag in ["codegen-units=256", "opt-level=0", "lto=off", "debuginfo=2"] {
-//RS             assert!(
-//RS                 final_args.iter().any(|arg| arg == flag),
-//RS                 "final rustc invocation omitted {flag}: {final_args:?}"
-//RS             );
-//RS         }
-//RS         assert!(
-//RS             has_pair(
-//RS                 final_args,
-//RS                 "-C",
-//RS                 &format!("linker={}", real_linker.display())
-//RS             ),
-//RS             "final rustc invocation omitted explicit linker: {final_args:?}"
-//RS         );
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn production_build_is_reproducible_across_checkout_paths() {
-//RS         let left = Scratch::new("compiler-speed-repro-left");
-//RS         let right = Scratch::new("compiler-speed-repro-right");
-//RS         let package =
-//RS             "name: \"deterministic_build\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO] } }\n";
-//RS         let source = "fn run() { print(\"deterministic-build\") }\n";
-//RS         for scratch in [&left, &right] {
-//RS             fs::create_dir_all(scratch.join("src")).unwrap();
-//RS             fs::write(scratch.join("package.jet"), package).unwrap();
-//RS             fs::write(scratch.join("src/main.jet"), source).unwrap();
-//RS         }
-//RS         let build = |scratch: &Scratch| {
-//RS             Command::new(jet())
-//RS                 .args(["run", "--release", "src/main.jet"])
-//RS                 .current_dir(&scratch.path)
-//RS                 .env("JET_STORE_DIR", scratch.join("store"))
-//RS                 .env("JET_RECEIPT_BYPASS", "1")
-//RS                 .env("NO_COLOR", "1")
-//RS                 .output()
-//RS                 .unwrap()
-//RS         };
-//RS         for (name, output) in [("left", build(&left)), ("right", build(&right))] {
-//RS             assert_eq!(
-//RS                 output.status.code(),
-//RS                 Some(0),
-//RS                 "{name} reproducibility build failed:\n{}",
-//RS                 String::from_utf8_lossy(&output.stderr)
-//RS             );
-//RS         }
-//RS 
-//RS         let left_rust = fs::read(left.join(".jet/build/main.rs")).unwrap();
-//RS         let right_rust = fs::read(right.join(".jet/build/main.rs")).unwrap();
-//RS         assert_eq!(
-//RS             jet::SHA256::sha256_hex(&left_rust),
-//RS             jet::SHA256::sha256_hex(&right_rust),
-//RS             "generated Rust SHA-256 changed with checkout path"
-//RS         );
-//RS         assert_eq!(
-//RS             left_rust, right_rust,
-//RS             "generated Rust changed with checkout path"
-//RS         );
-//RS 
-//RS         let left_binary = fs::read(left.join(".jet/build/main")).unwrap();
-//RS         let right_binary = fs::read(right.join(".jet/build/main")).unwrap();
-//RS         assert_eq!(
-//RS             jet::SHA256::sha256_hex(&left_binary),
-//RS             jet::SHA256::sha256_hex(&right_binary),
-//RS             "native binary SHA-256 changed with checkout path"
-//RS         );
-//RS         assert_eq!(
-//RS             left_binary, right_binary,
-//RS             "native binary changed with checkout path"
-//RS         );
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn explicit_project_link_build_is_reproducible_and_content_sensitive() {
-//RS         let left = Scratch::new("compiler-speed-c-link-left");
-//RS         let right = Scratch::new("compiler-speed-c-link-right");
-//RS         let package =
-//RS             "name: \"deterministic_c_build\"\nversion: \"0.1.0\"\ndeps: { answer: c@\"./native\" }\nauthority: { holds: { allow: [IO, Mem.Alloc] } }\n";
-//RS         let source = "use c.answer as answer\n#Import module c.answer { fn value() -> I32 = \"answer_value\" }\nfn run() { print(\"{answer.value()}\") }\n";
-//RS         for scratch in [&left, &right] {
-//RS             fs::create_dir_all(scratch.join("native")).unwrap();
-//RS             fs::create_dir_all(scratch.join("src")).unwrap();
-//RS             fs::write(scratch.join("package.jet"), package).unwrap();
-//RS             fs::write(scratch.join("src/main.jet"), source).unwrap();
-//RS         }
-//RS         let build_archive = |scratch: &Scratch, value: i32| {
-//RS             fs::write(
-//RS                 scratch.join("native/answer.c"),
-//RS                 format!("int answer_value(void) {{ return {value}; }}\n"),
-//RS             )
-//RS             .unwrap();
-//RS             let object = scratch.join("native/answer.o");
-//RS             let compile = Command::new(path_program("cc"))
-//RS                 .args([
-//RS                     "-c",
-//RS                     scratch.join("native/answer.c").to_str().unwrap(),
-//RS                     "-o",
-//RS                     object.to_str().unwrap(),
-//RS                 ])
-//RS                 .output()
-//RS                 .unwrap();
-//RS             assert!(
-//RS                 compile.status.success(),
-//RS                 "C archive source failed: {}",
-//RS                 String::from_utf8_lossy(&compile.stderr)
-//RS             );
-//RS             let archive = Command::new(path_program("ar"))
-//RS                 .args(["rcs", "native/libanswer.a", "native/answer.o"])
-//RS                 .current_dir(&scratch.path)
-//RS                 .output()
-//RS                 .unwrap();
-//RS             assert!(
-//RS                 archive.status.success(),
-//RS                 "C archive creation failed: {}",
-//RS                 String::from_utf8_lossy(&archive.stderr)
-//RS             );
-//RS         };
-//RS         build_archive(&left, 42);
-//RS         build_archive(&right, 42);
-//RS 
-//RS         let tools = left.join("tools");
-//RS         fs::create_dir_all(&tools).unwrap();
-//RS         let real_rustc = path_program("rustc");
-//RS         let left_log = left.join("rustc.log");
-//RS         write_executable(
-//RS             &tools.join("rustc"),
-//RS             "#!/bin/sh\n\
-//RS              { printf '%s\\n' BEGIN; printf '%s\\n' \"$@\"; printf '%s\\n' END; } >> \"$JET_TEST_RUSTC_LOG\"\n\
-//RS              exec \"$JET_TEST_REAL_RUSTC\" \"$@\"\n",
-//RS         );
-//RS         let run = |scratch: &Scratch, log: &Path| {
-//RS             Command::new(jet())
-//RS                 .args(["run", "--release", "src/main.jet"])
-//RS                 .current_dir(&scratch.path)
-//RS                 .env("PATH", prepend_path(&tools))
-//RS                 .env("JET_TEST_REAL_RUSTC", &real_rustc)
-//RS                 .env("JET_TEST_RUSTC_LOG", log)
-//RS                 .env("JET_STORE_DIR", scratch.join("store"))
-//RS                 .env("JET_STORE_CAP_BYTES", "21474836480")
-//RS                 .env("JET_STORE_RESERVE_BYTES", "2147483648")
-//RS                 .env("JET_RECEIPT_BYPASS", "1")
-//RS                 .env("NO_COLOR", "1")
-//RS                 .output()
-//RS                 .unwrap()
-//RS         };
-//RS         let left_run = run(&left, &left_log);
-//RS         assert_eq!(
-//RS             left_run.status.code(),
-//RS             Some(0),
-//RS             "left explicit-link run failed:\n{}",
-//RS             String::from_utf8_lossy(&left_run.stderr)
-//RS         );
-//RS         assert_eq!(left_run.stdout, b"42\n");
-//RS         let right_log = right.join("rustc.log");
-//RS         let right_run = run(&right, &right_log);
-//RS         assert_eq!(
-//RS             right_run.status.code(),
-//RS             Some(0),
-//RS             "right explicit-link run failed:\n{}",
-//RS             String::from_utf8_lossy(&right_run.stderr)
-//RS         );
-//RS         assert_eq!(right_run.stdout, b"42\n");
-//RS 
-//RS         let final_args = |log: &Path| {
-//RS             let log = fs::read_to_string(log).unwrap();
-//RS             invocations(&log)
-//RS                 .into_iter()
-//RS                 .find(|args| has_pair(args, "--crate-name", "main"))
-//RS                 .expect("recorded explicit-link final rustc invocation")
-//RS         };
-//RS         let left_metadata = {
-//RS             let args = final_args(&left_log);
-//RS             assert_content_metadata_and_remap(&args);
-//RS             metadata_value(&args).to_string()
-//RS         };
-//RS         let right_metadata = {
-//RS             let args = final_args(&right_log);
-//RS             assert_content_metadata_and_remap(&args);
-//RS             metadata_value(&args).to_string()
-//RS         };
-//RS         assert_eq!(
-//RS             left_metadata, right_metadata,
-//RS             "project-local C link metadata changed with checkout path"
-//RS         );
-//RS 
-//RS         build_archive(&left, 43);
-//RS         let changed_log = left.join("rustc-changed.log");
-//RS         let changed_run = run(&left, &changed_log);
-//RS         assert_eq!(
-//RS             changed_run.status.code(),
-//RS             Some(0),
-//RS             "changed explicit-link run failed:\n{}",
-//RS             String::from_utf8_lossy(&changed_run.stderr)
-//RS         );
-//RS         assert_eq!(changed_run.stdout, b"43\n");
-//RS         let changed_args = final_args(&changed_log);
-//RS         assert_content_metadata_and_remap(&changed_args);
-//RS         assert_ne!(
-//RS             left_metadata,
-//RS             metadata_value(&changed_args),
-//RS             "changed linked archive did not change rustc metadata"
-//RS         );
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn production_build_reports_missing_explicit_linker_as_tool_error() {
-//RS         let scratch = Scratch::new("compiler-speed-linker-failure");
-//RS         fs::write(
-//RS             scratch.join("main.jet"),
-//RS             "fn run() { print(\"should-not-link\") }\n",
-//RS         )
-//RS         .unwrap();
-//RS         let missing_linker = scratch.join("missing-linker");
-//RS         let build = Command::new(jet())
-//RS             .args(["build", "main.jet", "--profile=debug"])
-//RS             .current_dir(&scratch.path)
-//RS             .env("RUSTC_LINKER", &missing_linker)
-//RS             .env("JET_STORE_DIR", scratch.join("store"))
-//RS             .env("JET_STORE_CAP_BYTES", "21474836480")
-//RS             .env("JET_STORE_RESERVE_BYTES", "2147483648")
-//RS             .env("NO_COLOR", "1")
-//RS             .output()
-//RS             .unwrap();
-//RS         let stderr = String::from_utf8_lossy(&build.stderr);
-//RS         assert_eq!(
-//RS             build.status.code(),
-//RS             Some(1),
-//RS             "unexpected build result:\n{stderr}"
-//RS         );
-//RS         assert!(
-//RS             stderr.contains("L2101"),
-//RS             "missing linker lost tool diagnostic:\n{stderr}"
-//RS         );
-//RS         assert!(
-//RS             stderr.contains(&missing_linker.display().to_string()),
-//RS             "missing linker path absent from diagnostic:\n{stderr}"
-//RS         );
-//RS         assert!(
-//RS             !stderr.contains("internal compiler error"),
-//RS             "missing linker reached ICE rail:\n{stderr}"
-//RS         );
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn production_build_reuses_and_repairs_stdlib_objects() {
-//RS         let scratch = Scratch::new("compiler-speed-runtime-cache");
-//RS         fs::write(
-//RS             scratch.join("main.jet"),
-//RS             r#"use core.math as math
-//RS 
-//RS fn run() {
-//RS     print("first")
-//RS     print(math.abs(Float{-1.0}) == 1.0)
-//RS }
-//RS "#,
-//RS         )
-//RS         .unwrap();
-//RS         fs::write(
-//RS             scratch.join("package.jet"),
-//RS             "name: \"compiler_speed\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO] } }\n",
-//RS         )
-//RS         .unwrap();
-//RS 
-//RS         let cold = build(&scratch);
-//RS         assert_eq!(
-//RS             cold.status.code(),
-//RS             Some(0),
-//RS             "cold production build failed:\n{}",
-//RS             String::from_utf8_lossy(&cold.stderr)
-//RS         );
-//RS         let first = Command::new(scratch.join(".jet/build/main"))
-//RS             .current_dir(&scratch.path)
-//RS             .output()
-//RS             .unwrap();
-//RS         assert_eq!(first.status.code(), Some(0));
-//RS         assert_eq!(first.stdout, b"first\ntrue\n");
-//RS         assert!(
-//RS             String::from_utf8_lossy(&cold.stderr).contains("[build] runtime   ->"),
-//RS             "cold build did not report its runtime-store decision:\n{}",
-//RS             String::from_utf8_lossy(&cold.stderr)
-//RS         );
-//RS 
-//RS         let cache_log = fs::read_to_string(scratch.join("native-cache.log")).unwrap();
-//RS         assert!(
-//RS             cache_log.lines().any(|line| {
-//RS                 has_digest_field(line, "runtime=")
-//RS                     && has_corelib_identity(line)
-//RS                     && has_digest_field(line, "key=")
-//RS             }),
-//RS             "native cache log did not expose relevant runtime/Core digests:\n{cache_log}"
-//RS         );
-//RS         let cache_key = cache_key(&cache_log);
-//RS         let store = jet_store::Store::new(scratch.join("store")).unwrap();
-//RS         let initial_status = store.status().unwrap();
-//RS         assert!(
-//RS             initial_status
-//RS                 .entries
-//RS                 .iter()
-//RS                 .any(|entry| entry.kind == jet_store::EntryKind::Blob),
-//RS             "cold build did not publish a blob to the machine-wide store"
-//RS         );
-//RS         assert!(
-//RS             initial_status
-//RS                 .entries
-//RS                 .iter()
-//RS                 .any(|entry| entry.kind == jet_store::EntryKind::Action),
-//RS             "cold build did not publish an action record to the machine-wide store"
-//RS         );
-//RS         let binary_digest =
-//RS             jet::SHA256::sha256_hex(&fs::read(scratch.join(".jet/build/main")).unwrap());
-//RS         let cached_bin = initial_status
-//RS             .entries
-//RS             .iter()
-//RS             .find(|entry| entry.kind == jet_store::EntryKind::Blob && entry.key == binary_digest)
-//RS             .map(|entry| entry.path.clone())
-//RS             .expect("cold build published a final binary blob");
-//RS 
-//RS         let unchanged = build(&scratch);
-//RS         assert_eq!(
-//RS             unchanged.status.code(),
-//RS             Some(0),
-//RS             "unchanged production build failed:\n{}",
-//RS             String::from_utf8_lossy(&unchanged.stderr)
-//RS         );
-//RS         assert!(
-//RS             String::from_utf8_lossy(&unchanged.stderr)
-//RS                 .contains("cache hit -> reused cached binary"),
-//RS             "unchanged production build did not reuse its final binary:\n{}",
-//RS             String::from_utf8_lossy(&unchanged.stderr)
-//RS         );
-//RS         let unchanged_output = Command::new(scratch.join(".jet/build/main"))
-//RS             .current_dir(&scratch.path)
-//RS             .output()
-//RS             .unwrap();
-//RS         assert_eq!(unchanged_output.status.code(), Some(0));
-//RS         assert_eq!(unchanged_output.stdout, b"first\ntrue\n");
-//RS 
-//RS         fs::write(&cached_bin, b"corrupt final binary").unwrap();
-//RS         let final_repaired = build(&scratch);
-//RS         assert_eq!(
-//RS             final_repaired.status.code(),
-//RS             Some(0),
-//RS             "corrupt final-cache build failed:\n{}",
-//RS             String::from_utf8_lossy(&final_repaired.stderr)
-//RS         );
-//RS         assert!(
-//RS             !String::from_utf8_lossy(&final_repaired.stderr)
-//RS                 .contains("cache hit -> reused cached binary"),
-//RS             "corrupt final binary was reused:\n{}",
-//RS             String::from_utf8_lossy(&final_repaired.stderr)
-//RS         );
-//RS         assert!(
-//RS             String::from_utf8_lossy(&final_repaired.stderr).contains("cache store -> saved binary"),
-//RS             "final cache repair did not republish the binary:\n{}",
-//RS             String::from_utf8_lossy(&final_repaired.stderr)
-//RS         );
-//RS         let final_repaired_output = Command::new(scratch.join(".jet/build/main"))
-//RS             .current_dir(&scratch.path)
-//RS             .output()
-//RS             .unwrap();
-//RS         assert_eq!(final_repaired_output.status.code(), Some(0));
-//RS         assert_eq!(final_repaired_output.stdout, b"first\ntrue\n");
-//RS         let repaired_cache_hit = build(&scratch);
-//RS         assert_eq!(
-//RS             repaired_cache_hit.status.code(),
-//RS             Some(0),
-//RS             "repaired final-cache build failed:\n{}",
-//RS             String::from_utf8_lossy(&repaired_cache_hit.stderr)
-//RS         );
-//RS         assert!(
-//RS             String::from_utf8_lossy(&repaired_cache_hit.stderr)
-//RS                 .contains("cache hit -> reused cached binary"),
-//RS             "repaired final binary was not reusable:\n{}",
-//RS             String::from_utf8_lossy(&repaired_cache_hit.stderr)
-//RS         );
-//RS         assert!(
-//RS             matches!(
-//RS                 store.lookup_artifact(&cache_key).unwrap(),
-//RS                 jet_store::ArtifactLookup::Hit(_)
-//RS             ),
-//RS             "repaired final binary was not readable from the machine-wide store"
-//RS         );
-//RS 
-//RS         fs::write(
-//RS             scratch.join("main.jet"),
-//RS             r#"use core.math as math
-//RS 
-//RS fn run() {
-//RS     print("changed")
-//RS     print(math.abs(Float{-1.0}) == 1.0)
-//RS }
-//RS "#,
-//RS         )
-//RS         .unwrap();
-//RS         let warm = build(&scratch);
-//RS         assert_eq!(
-//RS             warm.status.code(),
-//RS             Some(0),
-//RS             "warm production build failed:\n{}",
-//RS             String::from_utf8_lossy(&warm.stderr)
-//RS         );
-//RS         let changed = Command::new(scratch.join(".jet/build/main"))
-//RS             .current_dir(&scratch.path)
-//RS             .output()
-//RS             .unwrap();
-//RS         assert_eq!(changed.status.code(), Some(0));
-//RS         assert_eq!(changed.stdout, b"changed\ntrue\n");
-//RS         assert!(
-//RS             store
-//RS                 .status()
-//RS                 .unwrap()
-//RS                 .entries
-//RS                 .iter()
-//RS                 .filter(|entry| entry.kind == jet_store::EntryKind::Blob)
-//RS                 .count()
-//RS                 >= 2,
-//RS             "changed build did not retain distinct binary blobs in the machine-wide store"
-//RS         );
-//RS 
-//RS         fs::write(
-//RS             scratch.join("main.jet"),
-//RS             r#"use core.math as math
-//RS 
-//RS fn run() {
-//RS     print("repaired")
-//RS     print(math.abs(Float{-1.0}) == 1.0)
-//RS }
-//RS "#,
-//RS         )
-//RS         .unwrap();
-//RS         let repaired = build(&scratch);
-//RS         assert_eq!(
-//RS             repaired.status.code(),
-//RS             Some(0),
-//RS             "corrupt-cache build failed:\n{}",
-//RS             String::from_utf8_lossy(&repaired.stderr)
-//RS         );
-//RS         let repaired_output = Command::new(scratch.join(".jet/build/main"))
-//RS             .current_dir(&scratch.path)
-//RS             .output()
-//RS             .unwrap();
-//RS         assert_eq!(repaired_output.status.code(), Some(0));
-//RS         assert_eq!(repaired_output.stdout, b"repaired\ntrue\n");
-//RS         assert!(
-//RS             String::from_utf8_lossy(&repaired.stderr).contains("cache store -> saved binary"),
-//RS             "changed cache object was not stored visibly:\n{}",
-//RS             String::from_utf8_lossy(&repaired.stderr)
-//RS         );
-//RS     }
-//RS     #[test]
-//RS     fn release_build_timing_runs_inner_cache_and_invalidates_on_source_edit() {
-//RS         let scratch = Scratch::new("compiler-speed-release-cache-reuse");
-//RS         let source = "fn run() { print(\"release-cache\") }\n";
-//RS         fs::write(scratch.join("main.jet"), source).unwrap();
-//RS 
-//RS         let cold = release_build(&scratch);
-//RS         let cold_stderr = String::from_utf8_lossy(&cold.stderr);
-//RS         assert_eq!(
-//RS             cold.status.code(),
-//RS             Some(0),
-//RS             "cold release build failed:\n{cold_stderr}"
-//RS         );
-//RS         assert_eq!(
-//RS             cold_stderr
-//RS                 .matches("[build] cache miss -> compiling")
-//RS                 .count(),
-//RS             1,
-//RS             "cold release build must compile once:\n{cold_stderr}"
-//RS         );
-//RS         let first_binary = fs::read(scratch.join(".jet/build/main")).unwrap();
-//RS 
-//RS         // Rewriting identical bytes changes filesystem metadata, but must not
-//RS         // change the content key or turn the warm invocation into a miss.
-//RS         fs::write(scratch.join("main.jet"), source).unwrap();
-//RS         let unchanged = release_build(&scratch);
-//RS         let unchanged_stderr = String::from_utf8_lossy(&unchanged.stderr);
-//RS         assert_eq!(
-//RS             unchanged.status.code(),
-//RS             Some(0),
-//RS             "unchanged release build failed:\n{unchanged_stderr}"
-//RS         );
-//RS         assert_eq!(
-//RS             unchanged_stderr
-//RS                 .matches("[build] cache hit -> reused cached binary")
-//RS                 .count(),
-//RS             1,
-//RS             "unchanged release build must report one inner cache hit:\n{unchanged_stderr}"
-//RS         );
-//RS         assert_eq!(
-//RS             unchanged_stderr
-//RS                 .matches("[build] cache miss -> compiling")
-//RS                 .count(),
-//RS             0,
-//RS             "unchanged release build must not report a stale receipt miss:\n{unchanged_stderr}"
-//RS         );
-//RS         assert_eq!(
-//RS             first_binary,
-//RS             fs::read(scratch.join(".jet/build/main")).unwrap(),
-//RS             "a byte-identical release build must reuse the same artifact"
-//RS         );
-//RS 
-//RS         fs::write(
-//RS             scratch.join("main.jet"),
-//RS             "fn run() { print(\"release-cache-edited\") }\n",
-//RS         )
-//RS         .unwrap();
-//RS         let edited = release_build(&scratch);
-//RS         let edited_stderr = String::from_utf8_lossy(&edited.stderr);
-//RS         assert_eq!(
-//RS             edited.status.code(),
-//RS             Some(0),
-//RS             "edited release build failed:\n{edited_stderr}"
-//RS         );
-//RS         assert_eq!(
-//RS             edited_stderr
-//RS                 .matches("[build] cache miss -> compiling")
-//RS                 .count(),
-//RS             1,
-//RS             "edited source must invalidate the release cache exactly once:\n{edited_stderr}"
-//RS         );
-//RS         assert_eq!(
-//RS             edited_stderr
-//RS                 .matches("[build] cache hit -> reused cached binary")
-//RS                 .count(),
-//RS             0,
-//RS             "edited source must not reuse the prior release artifact:\n{edited_stderr}"
-//RS         );
-//RS     }
-//RS 
-//RS     /// D-DEVR-TWICE1=A / D-BUILD-NOCHANGE1=A: the second identical
-//RS     /// `jet build` answers from its Receipt instead of checking and compiling
-//RS     /// again. Each invocation runs under its own Nix shell temp root
-//RS     /// (`nix develop` mints a fresh `/tmp/nix-shell.*` per shell), so the
-//RS     /// Receipt closure must not fingerprint that plumbing.
-//RS     #[test]
-//RS     fn second_identical_build_replays_receipt() {
-//RS         let scratch = Scratch::new("compiler-speed-receipt-replay");
-//RS         fs::write(
-//RS             scratch.join("main.jet"),
-//RS             "fn run() { print(\"receipt-replay\") }\n",
-//RS         )
-//RS         .unwrap();
-//RS         let tools = scratch.join("tools");
-//RS         fs::create_dir_all(&tools).unwrap();
-//RS         let rustc_log = scratch.join("rustc.log");
-//RS         let real_rustc = path_program("rustc");
-//RS         let real_linker = path_program("cc");
-//RS         write_executable(
-//RS             &tools.join("rustc"),
-//RS             "#!/bin/sh\n\
-//RS              { printf '%s\\n' BEGIN; printf '%s\\n' \"$@\"; printf '%s\\n' END; } >> \"$JET_TEST_RUSTC_LOG\"\n\
-//RS              exec \"$JET_TEST_REAL_RUSTC\" \"$@\"\n",
-//RS         );
-//RS         let store = scratch.join("store");
-//RS         let logged_nodes = || -> Vec<(String, String)> {
-//RS             jet_store::Store::new(&store)
-//RS                 .unwrap()
-//RS                 .last_build_record(&scratch.path, "main.jet")
-//RS                 .unwrap()
-//RS                 .map(|record| {
-//RS                     record
-//RS                         .nodes
-//RS                         .into_iter()
-//RS                         .map(|node| (node.kind, node.why_ran))
-//RS                         .collect()
-//RS                 })
-//RS                 .unwrap_or_default()
-//RS         };
-//RS 
-//RS         let build = |shell_temp: &Path| -> std::process::Output {
-//RS             fs::create_dir_all(shell_temp).unwrap();
-//RS             Command::new(jet())
-//RS                 .args(["build", "main.jet", "--profile=debug"])
-//RS                 .current_dir(&scratch.path)
-//RS                 .env("PATH", prepend_path(&tools))
-//RS                 .env("RUSTC_LINKER", &real_linker)
-//RS                 .env("JET_TEST_REAL_RUSTC", &real_rustc)
-//RS                 .env("JET_TEST_RUSTC_LOG", &rustc_log)
-//RS                 .env("JET_STORE_DIR", scratch.join("store"))
-//RS                 .env("JET_STORE_CAP_BYTES", "21474836480")
-//RS                 .env("JET_STORE_RESERVE_BYTES", "2147483648")
-//RS                 .env("NIX_BUILD_TOP", shell_temp)
-//RS                 .env("TMPDIR", shell_temp)
-//RS                 .env("TMP", shell_temp)
-//RS                 .env("TEMP", shell_temp)
-//RS                 .env("TEMPDIR", shell_temp)
-//RS                 .env("NO_COLOR", "1")
-//RS                 .output()
-//RS                 .unwrap()
-//RS         };
-//RS 
-//RS         let first = build(&scratch.join("nix-shell.first"));
-//RS         let first_stderr = String::from_utf8_lossy(&first.stderr);
-//RS         assert_eq!(
-//RS             first.status.code(),
-//RS             Some(0),
-//RS             "first debug build failed:\n{first_stderr}"
-//RS         );
-//RS         assert!(
-//RS             !first_stderr.contains("up to date:"),
-//RS             "first build must do the work, not replay a receipt:\n{first_stderr}"
-//RS         );
-//RS         let first_log = fs::read_to_string(&rustc_log).unwrap();
-//RS         assert!(
-//RS             invocations(&first_log)
-//RS                 .iter()
-//RS                 .any(|args| has_pair(args, "--crate-name", "main")),
-//RS             "first build must run rustc for the program:\n{first_log}"
-//RS         );
-//RS         let binary = scratch.join(".jet/build/main");
-//RS         let first_binary = fs::read(&binary).unwrap();
-//RS         let first_modified = fs::metadata(&binary).unwrap().modified().unwrap();
-//RS         assert!(
-//RS             logged_nodes()
-//RS                 .iter()
-//RS                 .any(|(kind, why)| kind == "check" && why != "reused"),
-//RS             "first build must log its executed Check nodes: {:?}",
-//RS             logged_nodes()
-//RS         );
-//RS 
-//RS         let second = build(&scratch.join("nix-shell.second"));
-//RS         let second_stderr = String::from_utf8_lossy(&second.stderr);
-//RS         assert_eq!(
-//RS             second.status.code(),
-//RS             Some(0),
-//RS             "second debug build failed:\n{second_stderr}"
-//RS         );
-//RS         assert!(
-//RS             second_stderr.contains("up to date: "),
-//RS             "second identical build must replay its Receipt:\n{second_stderr}"
-//RS         );
-//RS         assert_eq!(
-//RS             second.stdout, first.stdout,
-//RS             "replayed build must reproduce the recorded stdout"
-//RS         );
-//RS         let replayed = logged_nodes();
-//RS         assert!(
-//RS             !replayed.is_empty() && replayed.iter().all(|(_, why)| why == "reused"),
-//RS             "two identical builds under different shell temp roots must share one closure: {replayed:?}"
-//RS         );
-//RS         assert_eq!(
-//RS             fs::read_to_string(&rustc_log).unwrap(),
-//RS             first_log,
-//RS             "a replayed build must not run rustc or the linker"
-//RS         );
-//RS         assert_eq!(
-//RS             fs::metadata(&binary).unwrap().modified().unwrap(),
-//RS             first_modified,
-//RS             "a replayed build must not rewrite the binary"
-//RS         );
-//RS         assert_eq!(
-//RS             fs::read(&binary).unwrap(),
-//RS             first_binary,
-//RS             "a replayed build must leave the first binary in place"
-//RS         );
-//RS     }
-//RS     fn cache_cli(scratch: &Scratch, args: &[&str]) -> std::process::Output {
-//RS         Command::new(jet())
-//RS             .args(args)
-//RS             .current_dir(&scratch.path)
-//RS             .env("JET_STORE_DIR", scratch.join("store"))
-//RS             .env("JET_STORE_CAP_BYTES", "21474836480")
-//RS             .env("JET_STORE_RESERVE_BYTES", "2147483648")
-//RS             .env("NO_COLOR", "1")
-//RS             .output()
-//RS             .unwrap()
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn cache_cli_status_prune_limit_and_doctor_snapshots() {
-//RS         let scratch = Scratch::new("compiler-speed-store-cli");
-//RS         let store_root = scratch.join("store");
-//RS         let store = jet_store::Store::new(&store_root).unwrap();
-//RS         store.publish_blob(&vec![0u8; 2048]).unwrap();
-//RS 
-//RS         let status = cache_cli(&scratch, &["cache", "status"]);
-//RS         assert_eq!(
-//RS             status.status.code(),
-//RS             Some(0),
-//RS             "cache status failed:\n{}",
-//RS             String::from_utf8_lossy(&status.stderr)
-//RS         );
-//RS         assert_eq!(
-//RS             String::from_utf8(status.stdout).unwrap(),
-//RS             format!(
-//RS                 "store      {}\n\
-//RS                  limit      20 GiB (JET_STORE_CAP_BYTES)\n\
-//RS                  reserve    keep 2 GiB free on that filesystem\n\
-//RS                  used       2 KiB · 1 blobs · 0 records · 0 ThinLTO caches\n\
-//RS                  leases     0 live\n\
-//RS                  tiers      local\n",
-//RS                 store_root.display()
-//RS             )
-//RS         );
-//RS 
-//RS         let prune = cache_cli(&scratch, &["cache", "prune", "--to", "1K"]);
-//RS         assert_eq!(
-//RS             prune.status.code(),
-//RS             Some(0),
-//RS             "cache prune failed:\n{}",
-//RS             String::from_utf8_lossy(&prune.stderr)
-//RS         );
-//RS         assert_eq!(
-//RS             String::from_utf8(prune.stdout).unwrap(),
-//RS             "prune      2 KiB -> 0 B (target 1 KiB)\n\
-//RS              removed    1 entries · freed 2 KiB\n\
-//RS              pinned     0 B\n"
-//RS         );
-//RS 
-//RS         let limit = cache_cli(&scratch, &["cache", "limit", "--host", "4G"]);
-//RS         assert_eq!(
-//RS             limit.status.code(),
-//RS             Some(0),
-//RS             "cache limit failed:\n{}",
-//RS             String::from_utf8_lossy(&limit.stderr)
-//RS         );
-//RS         assert_eq!(
-//RS             String::from_utf8(limit.stdout).unwrap(),
-//RS             format!(
-//RS                 "host limit 4 GiB (persisted)\nstore      {}\n",
-//RS                 store_root.display()
-//RS             )
-//RS         );
-//RS 
-//RS         let limited_status = cache_cli(&scratch, &["cache", "status"]);
-//RS         assert_eq!(
-//RS             String::from_utf8(limited_status.stdout).unwrap(),
-//RS             format!(
-//RS                 "store      {}\n\
-//RS                  limit      4 GiB (host policy)\n\
-//RS                  reserve    keep 2 GiB free on that filesystem\n\
-//RS                  used       0 B · 0 blobs · 0 records · 0 ThinLTO caches\n\
-//RS                  leases     0 live\n\
-//RS                  tiers      local\n",
-//RS                 store_root.display()
-//RS             )
-//RS         );
-//RS 
-//RS         let doctor = cache_cli(&scratch, &["self", "doctor"]);
-//RS         let doctor_stdout = String::from_utf8_lossy(&doctor.stdout);
-//RS         assert!(
-//RS             doctor_stdout.contains(&format!(
-//RS                 "artifact store: {} (footprint 0 B; cap 4 GiB; reserve 2 GiB; 0 entries; 0 live leases)",
-//RS                 store_root.display()
-//RS             )),
-//RS             "doctor lost the artifact-store footprint row:\n{doctor_stdout}"
-//RS         );
-//RS     }
-//RS 
-//RS     /// #3661: a three-way recursive enum sits under a chain of layered
-//RS     /// structs, each holding two copies of the layer below, and every layer
-//RS     /// has one use site that binds it and matches its enum. Ownership type
-//RS     /// walks (sendability, clone, view, heap) that only guard their current
-//RS     /// path re-walk each layer once per path: 2^layers per binding (16 layers
-//RS     /// took 50 s on the debug build; the compiler's own AST is such a graph).
-//RS     /// Walking each named type once per query keeps 4N use sites within 5x
-//RS     /// of N, and the check's memory stays under a fixed ceiling.
-//RS     #[cfg(target_os = "linux")]
-//RS     fn recursive_enum_program(uses: usize) -> String {
-//RS         let mut source = String::from(
-//RS             "enum Tree {\n    Leaf(Int)\n    Branch(left: Tree, right: Forest)\n    Tagged(label: String, body: Node)\n}\n\n\
-//RS              enum Forest {\n    Empty\n    Trees([Tree])\n    Linked(head: Tree, rest: Forest)\n}\n\n\
-//RS              enum Node {\n    Plain(Int)\n    Holds(Tree?)\n    Grows(Forest)\n}\n\n\
-//RS              struct Layer0 {\n    tree: Tree\n    node: Node\n}\n\n\
-//RS              fn use_0(layer: Layer0) -> Int {\n    if layer.tree == {\n        .Leaf(value) -> value\n        .Branch(_, _) -> 1\n        .Tagged(_, _) -> 2\n    }\n}\n\n",
-//RS         );
-//RS         for layer in 1..=uses {
-//RS             let below = layer - 1;
-//RS             source.push_str(&format!(
-//RS                 "struct Layer{layer} {{\n    left: Layer{below}\n    right: Layer{below}\n    tree: Tree\n}}\n\n\
-//RS                  fn use_{layer}(layer: Layer{layer}) -> Int {{\n    inner :: layer.left\n    if layer.tree == {{\n        \
-//RS                  .Leaf(value) -> value + use_{below}(inner)\n        .Branch(_, _) -> {layer}\n        \
-//RS                  .Tagged(_, body) -> if body == {{\n            .Plain(value) -> value\n            .Holds(_) -> 0\n            \
-//RS                  .Grows(_) -> {layer}\n        }}\n    }}\n}}\n\n"
-//RS             ));
-//RS         }
-//RS         source.push_str(
-//RS             "fn run() {\n    print(use_0(Layer0{tree: Tree.Leaf(1), node: Node.Plain(2)}))\n}\n",
-//RS         );
-//RS         source
-//RS     }
-//RS 
-//RS     /// Peak resident set (KiB) over `pid` and every live descendant.
-//RS     #[cfg(target_os = "linux")]
-//RS     fn tree_peak_rss_kib(pid: u32) -> u64 {
-//RS         let mut peak = 0;
-//RS         let mut pending = vec![pid];
-//RS         while let Some(current) = pending.pop() {
-//RS             if let Ok(status) = fs::read_to_string(format!("/proc/{current}/status")) {
-//RS                 if let Some(kib) = status
-//RS                     .lines()
-//RS                     .find_map(|line| line.strip_prefix("VmHWM:"))
-//RS                     .and_then(|value| value.trim().trim_end_matches("kB").trim().parse::<u64>().ok())
-//RS                 {
-//RS                     peak = peak.max(kib);
-//RS                 }
-//RS             }
-//RS             let Ok(tasks) = fs::read_dir(format!("/proc/{current}/task")) else {
-//RS                 continue;
-//RS             };
-//RS             for task in tasks.flatten() {
-//RS                 if let Ok(children) = fs::read_to_string(task.path().join("children")) {
-//RS                     pending.extend(children.split_whitespace().filter_map(|child| child.parse::<u32>().ok()));
-//RS                 }
-//RS             }
-//RS         }
-//RS         peak
-//RS     }
-//RS 
-//RS     /// #3661: an enum's auto-derived `Equatable`/`Comparable` expand the
-//RS     /// Prelude provider templates, which pair every variant with every other
-//RS     /// one. Each pairing condition must read the reflected variants in place:
-//RS     /// copying the whole reflected enum per condition made an enum with V
-//RS     /// variants cost V^3 (the self-hosted compiler's AST enums took minutes).
-//RS     #[cfg(target_os = "linux")]
-//RS     fn wide_enum_program(variants: usize) -> String {
-//RS         let mut source = String::from("enum Wide {\n");
-//RS         for variant in 0..variants {
-//RS             source.push_str(&format!("    Case{variant}(first: Int, second: String)\n"));
-//RS         }
-//RS         source.push_str(
-//RS             "}\n\nfn run() {\n    same :: Wide.Case0{first: 1, second: \"a\"} == Wide.Case1{first: 2, second: \"b\"}\n    print(same)\n}\n",
-//RS         );
-//RS         source
-//RS     }
-//RS 
-//RS     /// Wall time and peak memory of one `jet check` of `program`, capped at
-//RS     /// `limit`; `label` names the program's size in failure messages.
-//RS     #[cfg(target_os = "linux")]
-//RS     fn timed_check(
-//RS         name: &str,
-//RS         label: &str,
-//RS         program: String,
-//RS         limit: std::time::Duration,
-//RS     ) -> (std::time::Duration, u64) {
-//RS         let scratch = Scratch::new(name);
-//RS         fs::write(scratch.join("main.jet"), program).unwrap();
-//RS         let stderr_path = scratch.join("check.stderr");
-//RS         let started = std::time::Instant::now();
-//RS         let mut child = Command::new(jet())
-//RS             .args(["check", "main.jet"])
-//RS             .current_dir(&scratch.path)
-//RS             .env("JET_RECEIPT_BYPASS", "1")
-//RS             .env("JET_STORE_DIR", scratch.join("store"))
-//RS             .env("NO_COLOR", "1")
-//RS             .stdout(std::process::Stdio::null())
-//RS             .stderr(fs::File::create(&stderr_path).unwrap())
-//RS             .spawn()
-//RS             .unwrap();
-//RS         let mut peak = 0;
-//RS         let status = loop {
-//RS             peak = peak.max(tree_peak_rss_kib(child.id()));
-//RS             if let Some(status) = child.try_wait().unwrap() {
-//RS                 break status;
-//RS             }
-//RS             if started.elapsed() > limit {
-//RS                 let _ = child.kill();
-//RS                 let _ = child.wait();
-//RS                 panic!("`jet check` with {label} ran past {limit:?}: checking is super-linear again");
-//RS             }
-//RS             std::thread::sleep(std::time::Duration::from_millis(10));
-//RS         };
-//RS         let elapsed = started.elapsed();
-//RS         let stderr = fs::read_to_string(&stderr_path).unwrap_or_default();
-//RS         assert!(
-//RS             status.success(),
-//RS             "`jet check` rejected the program with {label}:\n{stderr}"
-//RS         );
-//RS         (elapsed, peak)
-//RS     }
-//RS 
-//RS     #[cfg(target_os = "linux")]
-//RS     #[test]
-//RS     fn recursive_enum_check_scales_linearly() {
-//RS         const USES: usize = 6;
-//RS         const MEMORY_CEILING_KIB: u64 = 1024 * 1024;
-//RS         let limit = std::time::Duration::from_secs(120);
-//RS         let (small, small_peak) = timed_check(
-//RS             "recursive-enum-scaling-n",
-//RS             &format!("{USES} layered use sites"),
-//RS             recursive_enum_program(USES),
-//RS             limit,
-//RS         );
-//RS         let (large, large_peak) = timed_check(
-//RS             "recursive-enum-scaling-4n",
-//RS             &format!("{} layered use sites", 4 * USES),
-//RS             recursive_enum_program(4 * USES),
-//RS             limit,
-//RS         );
-//RS         assert!(
-//RS             large <= small * 5,
-//RS             "4x the use sites took {large:?} against {small:?} for N: checking must stay near linear"
-//RS         );
-//RS         for (uses, peak) in [(USES, small_peak), (4 * USES, large_peak)] {
-//RS             assert!(
-//RS                 peak <= MEMORY_CEILING_KIB,
-//RS                 "`jet check` with {uses} layered use sites peaked at {peak} KiB, over the {MEMORY_CEILING_KIB} KiB ceiling"
-//RS             );
-//RS         }
-//RS     }
-//RS 
-//RS     #[cfg(target_os = "linux")]
-//RS     #[test]
-//RS     fn wide_enum_derive_check_scales_linearly() {
-//RS         const VARIANTS: usize = 40;
-//RS         let limit = std::time::Duration::from_secs(120);
-//RS         let (small, _) = timed_check(
-//RS             "wide-enum-scaling-n",
-//RS             &format!("{VARIANTS} enum variants"),
-//RS             wide_enum_program(VARIANTS),
-//RS             limit,
-//RS         );
-//RS         let (large, _) = timed_check(
-//RS             "wide-enum-scaling-4n",
-//RS             &format!("{} enum variants", 4 * VARIANTS),
-//RS             wide_enum_program(4 * VARIANTS),
-//RS             limit,
-//RS         );
-//RS         assert!(
-//RS             large <= small * 5,
-//RS             "4x the enum variants took {large:?} against {small:?} for N: derive expansion must stay near linear"
-//RS         );
-//RS     }
-//RS 
-//RS     /// `jet check` output for `target`, run from `dir` with `threads` body
-//RS     /// checkers and a private store, so neither run reuses the other's work.
-//RS     fn check_output(dir: &Path, target: &str, threads: &str, store: &Path) -> (Vec<u8>, Vec<u8>) {
-//RS         let output = Command::new(jet())
-//RS             .args(["check", target])
-//RS             .current_dir(dir)
-//RS             .env("JET_CHECK_THREADS", threads)
-//RS             .env("JET_RECEIPT_BYPASS", "1")
-//RS             .env("JET_STORE_DIR", store)
-//RS             .env("NO_COLOR", "1")
-//RS             .output()
-//RS             .unwrap();
-//RS         (output.stdout, output.stderr)
-//RS     }
-//RS 
-//RS     /// Parallel body checking merges worker products in source order, so the
-//RS     /// worker count must never change a diagnostic, its order or its text.
-//RS     #[test]
-//RS     fn parallel_check_matches_serial_check() {
-//RS         let scratch = Scratch::new("parallel-check-identity");
-//RS         fs::write(scratch.join("package.jet"), "name: \"parallel_identity\"\nversion: \"0.1.0\"\n")
-//RS             .unwrap();
-//RS         fs::write(
-//RS             scratch.join("helper.jet"),
-//RS             "pub fn double(value: Int) -> Int { value * 2 }\n\
-//RS              pub fn label(value: Int) -> String { value }\n\
-//RS              pub fn ratio(total: Int, count: Int) -> Int { total / count + missing }\n\
-//RS              pub fn flag(value: Int) -> Bool { value + 1 }\n",
-//RS         )
-//RS         .unwrap();
-//RS         fs::write(
-//RS             scratch.join("main.jet"),
-//RS             "use helper\n\
-//RS              fn first() -> Int { helper.double(\"two\") }\n\
-//RS              fn second() -> String { helper.label(4) + 1 }\n\
-//RS              fn third() -> Int { unknown_call(3) }\n\
-//RS              fn fourth() -> Bool { helper.flag(2) == \"yes\" }\n\
-//RS              fn run() {\n    print(first())\n    print(second())\n    print(third())\n    print(fourth())\n}\n",
-//RS         )
-//RS         .unwrap();
-//RS         let repository = repository_file("");
-//RS         let mut cases = vec![(scratch.path.clone(), "main.jet".to_string())];
-//RS         for example in [
-//RS             "Examples/features/modules/imports/run.jet",
-//RS             "Examples/features/modules/generic_modules.jet",
-//RS             "Examples/features/errors/inferred_failure_union.jet",
-//RS             "Examples/features/errors/typed_error_families.jet",
-//RS             "Examples/features/generics/generic_callback_values.jet",
-//RS             "Examples/features/traits/impl_shape_matrix.jet",
-//RS         ] {
-//RS             cases.push((repository.clone(), example.to_string()));
-//RS         }
-//RS         for (index, (dir, target)) in cases.iter().enumerate() {
-//RS             let serial = check_output(dir, target, "1", &scratch.join(&format!("store-{index}-serial")));
-//RS             let parallel =
-//RS                 check_output(dir, target, "8", &scratch.join(&format!("store-{index}-parallel")));
-//RS             assert_eq!(
-//RS                 String::from_utf8_lossy(&serial.1),
-//RS                 String::from_utf8_lossy(&parallel.1),
-//RS                 "`jet check {target}` stderr differs between 1 and 8 check threads"
-//RS             );
-//RS             assert_eq!(
-//RS                 String::from_utf8_lossy(&serial.0),
-//RS                 String::from_utf8_lossy(&parallel.0),
-//RS                 "`jet check {target}` stdout differs between 1 and 8 check threads"
-//RS             );
-//RS             if index == 0 {
-//RS                 assert!(
-//RS                     String::from_utf8_lossy(&serial.1).matches("Error [").count() >= 4,
-//RS                     "the multi-module fixture must report errors from several bodies in both modules:\n{}",
-//RS                     String::from_utf8_lossy(&serial.1)
-//RS                 );
-//RS             }
-//RS         }
-//RS     }
-//RS }
-// END-PORT-PENDING 0991 tests/cli_compiler_speed.rs:1-1755
+// Private CLI integration-test helpers. Native process/fs/env/time APIs: GATE #4494.
+use common.[Scratch]
+use jet_foundation.DataTree.[DataTree]
+use jet_foundation.JSON.[json_get, json_int, json_str, parse]
+use std.process.[Command, Output, Stdio]
+use std.time.[Duration, Instant]
+use core.sys.target.[selected_os, selected_family]
+use jet_store.[Store, EntryKind, ArtifactLookup]
+use jet.SHA256.[sha256_hex]
 
+// Rust: tests/cli_compiler_speed.rs:15
+fn jet() -> OSPath { OSPath.from(std.env.var_os("JET_TEST_BINARY").expect("Jet CLI test binary")) }
+// Rust: tests/cli_compiler_speed.rs:19
+fn path_program(name: String) -> OSPath {
+    path :: std.env.var_os("PATH").unwrap_or_default()
+    loop directory in std.env.split_paths(path) {
+        candidate :: directory.join(name)
+        if candidate.is_file() -> return candidate
+    }
+    panic("{name} is required for the production-path check")
+}
+// Rust: tests/cli_compiler_speed.rs:27
+fn write_executable(path: OSPath, body: String) -> {
+    std.fs.write(path, body).unwrap()
+    std.fs.set_permissions(path, std.fs.Permissions.from_mode(0o755)).unwrap() // GATE #4494
+}
+// Rust: tests/cli_compiler_speed.rs:32
+fn repository_file(path: String) -> OSPath {
+    OSPath.from(std.env.var_os("JET_TEST_REPOSITORY").expect("Jet repository root")).join(path)
+}
+// Rust: tests/cli_compiler_speed.rs:36
+fn json_field(value: DataTree, key: String) -> DataTree {
+    json_get(value, key) ?? panic("missing JSON field {key}")
+}
+// Rust: tests/cli_compiler_speed.rs:40
+fn json_text(value: DataTree, key: String) -> String {
+    json_str(json_field(value, key)) ?? panic("JSON field {key} is not text")
+}
+// Rust: tests/cli_compiler_speed.rs:44
+fn json_number(value: DataTree, key: String) -> I64 {
+    json_int(json_field(value, key)) ?? panic("JSON field {key} is not numeric")
+}
+
+// Rust: tests/cli_compiler_speed.rs:49
+fn synthetic_v4_baseline() -> String {
+    states :: [String]{"jit-clean", "jit-no-change", "jit-representative-edit", "aot-release-clean", "aot-release-no-change", "aot-release-representative-edit"}
+    source_hash :: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    expected_hash :: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    manifest_hash :: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    workload_hash :: "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+    libc_hash :: "1111111111111111111111111111111111111111111111111111111111111111"
+    allocator_hash :: "2222222222222222222222222222222222222222222222222222222222222222"
+    allocator_environment_hash :: "3333333333333333333333333333333333333333333333333333333333333333"
+    hardware_hash :: "4444444444444444444444444444444444444444444444444444444444444444"
+    topology_hash :: "5555555555555555555555555555555555555555555555555555555555555555"
+    toolchain_hash :: "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+    rustc_hash :: "6666666666666666666666666666666666666666666666666666666666666666"
+    output_hash :: "7777777777777777777777777777777777777777777777777777777777777777"
+    error_hash :: "8888888888888888888888888888888888888888888888888888888888888888888"
+    linker_hash :: "9999999999999999999999999999999999999999999999999999999999999999"
+    compiler_hash :: "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    rustc_vv_hash :: "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+    jet_env_hash :: "abababababababababababababababababababababababababababababababab"
+    peer_contract :: "6f9085bde94607c64f688587c06e6fc2f3e02fba10104c960c7488dba341c183"
+    runs := String.new()
+    peers := String.new()
+    loop state in states {
+        fast :: state.starts_with("jit-")
+        stage :: if fast -> "jit-fast" else -> "aot-release"
+        profile :: if fast -> "fast" else -> "release"
+        backend :: if fast -> "cranelift" else -> "rustc-llvm"
+        linker :: if fast -> "none" else -> "ld"
+        linker_identity :: if fast -> "none" else -> linker_hash
+        cache_state :: if state.ends_with("no-change") -> "NoChange" else -> if state.ends_with("representative-edit") -> "Edit" else -> "Clean"
+        cache_policy :: if state.ends_with("no-change") -> "shared-cache-after-warmup" else -> if state.ends_with("representative-edit") -> "base-cache-snapshot-before-edit" else -> "fresh-cache-per-sample"
+        phase :: "parse_us=1;sema_us=1;source=fixture.jet;source_sha256={source_hash};source_bytes=1;expected_sha256={expected_hash};expected_bytes=1;manifest_sha256={manifest_hash};workload_sha256={workload_hash};role=base;profile={profile};backend={backend};linker={linker};linker_path={linker};linker_sha256={linker_identity};linker_backend={linker};linker_backend_path={linker};linker_backend_sha256={linker_identity};cache_state={cache_state};cache_policy={cache_policy};cache_hits=1;cache_misses=0;libc_sha256={libc_hash};allocator_sha256={allocator_hash};allocator_environment_sha256={allocator_environment_hash};hardware_sha256={hardware_hash};topology_sha256={topology_hash};toolchain_sha256={toolchain_hash};rustc_sha256={rustc_hash};top_cause=none;artifact_bytes=0;parity=verified;semantic_parity=verified;diagnostic_parity=verified;effect_parity=verified;tier_parity=verified;dev_profile=dev;aot_profile=release"
+        if !runs.is_empty() -> &runs.push(',')
+        &runs.push_str("{{\"program\":\"fixture.jet\",\"state\":\"{state}\",\"stage\":\"{stage}\",\"latency_ns\":100,\"memory_bytes\":100,\"variance_pct\":0,\"stdout_sha256\":\"{output_hash}\",\"stderr_sha256\":\"{error_hash}\",\"phase_totals\":\"{phase}\"}}")
+        loop (peer, language, value) in [(String, String, Int)]{("rustc", "rust", 100), ("cxx", "cxx", 101)} {
+            loop metric in [String]{"latency_ns", "memory_bytes"} {
+                if !peers.is_empty() -> &peers.push(',')
+                &peers.push_str("{{\"peer\":\"{peer}\",\"language\":\"{language}\",\"program\":\"fixture.jet\",\"state\":\"{state}\",\"metric\":\"{metric}\",\"value\":{value},\"workload_sha256\":\"{workload_hash}\",\"source_sha256\":\"{source_hash}\",\"expected_sha256\":\"{expected_hash}\",\"manifest_sha256\":\"{manifest_hash}\",\"toolchain_sha256\":\"{toolchain_hash}\"}}")
+            }
+        }
+    }
+    corpus_hash :: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    "{{\"schema\":\"jet.compiler-speed\",\"version\":4,\"corpus_sha256\":\"{corpus_hash}\",\"manifest_sha256\":\"{manifest_hash}\",\"stage\":\"matrix\",\"peer_version\":1,\"peer_contract_sha256\":\"{peer_contract}\",\"peer_run_id\":\"fixture-run\",\"peer_keys\":\"rustc:rust,cxx:cxx\",\"peer_metrics\":\"latency_ns,memory_bytes\",\"peer_count\":2,\"peer_rows\":24,\"parity\":{{\"status\":\"verified\",\"cases\":1,\"semantic\":\"verified\",\"diagnostics\":\"verified\",\"effects\":\"verified\",\"tiers\":\"verified\"}},\"machine\":{{\"allocator_source_sha256\":\"{allocator_hash}\",\"allocator_environment_sha256\":\"{allocator_environment_hash}\",\"arch\":\"x86_64\",\"compiler_sha256\":\"{compiler_hash}\",\"cpus\":2,\"governor\":\"governor\",\"hardware_sha256\":\"{hardware_hash}\",\"hostname\":\"fixture\",\"kernel\":\"kernel\",\"libc_sha256\":\"{libc_hash}\",\"load1_start_milli\":100,\"load1_peak_milli\":200,\"load1_end_milli\":150,\"memory_bytes\":1024,\"os\":\"Linux\",\"rustc\":\"rustc\",\"rustc_vv_sha256\":\"{rustc_vv_hash}\",\"target\":\"target\",\"toolchain_sha256\":\"{toolchain_hash}\",\"topology_sha256\":\"{topology_hash}\",\"jet_env_sha256\":\"{jet_env_hash}\",\"llvm\":\"llvm\",\"rustc_sha256\":\"{rustc_hash}\"}},\"budgets\":{{\"latency_regression_pct\":15,\"memory_regression_pct\":15,\"samples\":20,\"variance_pct\":100,\"warmups\":1}},\"outliers_discarded\":0,\"runs\":[{runs}],\"peers\":[{peers}]}}\n"
+}
+
+// Rust: tests/cli_compiler_speed.rs:153
+fn checker_report_from_baseline(baseline: String) -> String {
+    root :: parse(baseline).expect("generated compiler-speed baseline JSON")
+    machine :: json_field(root, "machine")
+    budgets :: json_field(root, "budgets")
+    parity :: json_field(root, "parity")
+    runs :: json_field(root, "runs").as_array().expect("compiler-speed baseline runs array")
+    assert(runs.len() % 6 == 0)
+    machine_id :: "{json_text(machine, "os")}/{json_text(machine, "arch")}/cpus={json_number(machine, "cpus")}/host={json_text(machine, "hostname") }"
+    peer_contract :: json_text(root, "peer_contract_sha256")
+    peer_run_id :: json_text(root, "peer_run_id")
+    peer_keys :: json_text(root, "peer_keys")
+    peer_metrics :: json_text(root, "peer_metrics")
+    peer_count :: json_number(root, "peer_count")
+    peer_rows :: json_number(root, "peer_rows")
+    report := "compiler-speed version={json_number(root, "version")} corpus={runs.len() / 6} corpus_sha256={json_text(root, "corpus_sha256")} manifest_sha256={json_text(root, "manifest_sha256")} stage=matrix machine={machine_id} target={json_text(machine, "target")} rustc={json_text(machine, "rustc")} llvm={json_text(machine, "llvm")} rustc_vv_sha256={json_text(machine, "rustc_vv_sha256")} rustc_sha256={json_text(machine, "rustc_sha256")} compiler_sha256={json_text(machine, "compiler_sha256")} jet_env_sha256={json_text(machine, "jet_env_sha256")} libc_sha256={json_text(machine, "libc_sha256")} allocator_sha256={json_text(machine, "allocator_source_sha256")} allocator_environment_sha256={json_text(machine, "allocator_environment_sha256")} hardware_sha256={json_text(machine, "hardware_sha256")} topology_sha256={json_text(machine, "topology_sha256")} toolchain_sha256={json_text(machine, "toolchain_sha256")} kernel={json_text(machine, "kernel")} governor={json_text(machine, "governor")} load1_start_milli={json_number(machine, "load1_start_milli")} load1_peak_milli={json_number(machine, "load1_peak_milli")} load1_end_milli={json_number(machine, "load1_end_milli")} memory_bytes={json_number(machine, "memory_bytes")} profiles=jit-fast,aot-release backends=cranelift,rustc-llvm warmups={json_number(budgets, "warmups")} samples={json_number(budgets, "samples")} outliers_discarded={json_number(root, "outliers_discarded")} parity={json_text(parity, "status")} parity_cases={json_number(parity, "cases")} peer_contract_sha256={peer_contract} peer_run_id={peer_run_id} peer_machine={machine_id} peer_target={json_text(machine, "target")} peer_keys={peer_keys} peer_metrics={peer_metrics} peer_count={peer_count} peer_rows={peer_rows}\n"
+    &report.push_str("program\tstate\tstage\tlatency_ns\tmemory_bytes\tvariance_pct\toutput_sha256:stderr_sha256\tphases\n")
+    loop run in runs {
+        &report.push_str("{json_text(run, "program")}\t{json_text(run, "state")}\t{json_text(run, "stage")}\t{json_number(run, "latency_ns")}\t{json_number(run, "memory_bytes")}\t{json_number(run, "variance_pct")}\t{json_text(run, "stdout_sha256")}:{json_text(run, "stderr_sha256")}\tphases={json_text(run, "phase_totals")}\n")
+    }
+    &report.push_str("compiler-speed-peer version=1 run_id={peer_run_id} corpus_sha256={json_text(root, "corpus_sha256")} manifest_sha256={json_text(root, "manifest_sha256")} target={json_text(machine, "target")} machine={machine_id} peers={peer_keys} metrics={peer_metrics} contract_sha256={peer_contract} peer_count={peer_count} rows={peer_rows}\n")
+    &report.push_str("peer\tlanguage\tprogram\tstate\tmetric\tvalue\tworkload_sha256\tsource_sha256\texpected_sha256\tmanifest_sha256\ttoolchain_sha256\n")
+    loop run in runs {
+        loop (peer, language, value) in [(String, String, Int)]{("rustc", "rust", 100), ("cxx", "cxx", 101)} {
+            loop metric in [String]{"latency_ns", "memory_bytes"} {
+                &report.push_str("{peer}\t{language}\t{json_text(run, "program")}\t{json_text(run, "state")}\t{metric}\t{value}\tffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff\taaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\tbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\tbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\tdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\n")
+            }
+        }
+    }
+    report
+}
+
+// Rust: tests/cli_compiler_speed.rs:262
+fn run_checker_fixture(name: String, baseline: String, report: String) -> Output {
+    scratch :: Scratch.new(name)
+    fixture_perf :: scratch.join("Tools/perf")
+    std.fs.create_dir_all(fixture_perf).unwrap()
+    checker :: fixture_perf.join("ci-perf-check.sh")
+    std.fs.copy(repository_file("Tools/perf/ci-perf-check.sh"), checker).unwrap()
+    std.fs.set_permissions(checker, std.fs.Permissions.from_mode(0o755)).unwrap()
+    std.fs.write(fixture_perf.join("baseline.json"), baseline).unwrap()
+    report_path :: scratch.join("current.report")
+    std.fs.write(report_path, report).unwrap()
+    write_executable(fixture_perf.join("dashboard.sh"), "#!/bin/sh\ncat \"$JET_TEST_CURRENT_REPORT\"\n")
+    scratch_root := std.env.var_os("JET_PERF_SCRATCH_ROOT").map(path -> OSPath.from(path))
+    if scratch_root == None -> scratch_root = std.env.var_os("HOME").map(home -> OSPath.from(home).join(".cache/jet-perf"))
+    root :: scratch_root.expect("disk-backed compiler-speed scratch root").join("rust-checker-fixtures")
+    Command.new(checker).current_dir(scratch.path).env("JET_CI_CANDIDATE_COMMIT", "0123456789abcdef0123456789abcdef01234567").env("JET_TEST_CURRENT_REPORT", report_path).env("JET_PERF_SCRATCH_ROOT", root).output().unwrap()
+}
+// Rust: tests/cli_compiler_speed.rs:293
+fn output_text(output: Output) -> String { "{String.from_utf8_lossy(output.stdout)}{String.from_utf8_lossy(output.stderr)}" }
+// Rust: tests/cli_compiler_speed.rs:369
+fn prepend_path(directory: OSPath) -> std.ffi.OsString {
+    paths := [OSPath]{directory}
+    loop path in std.env.split_paths(std.env.var_os("PATH").unwrap_or_default()) -> &paths.push(path)
+    std.env.join_paths(paths).unwrap()
+}
+// Rust: tests/cli_compiler_speed.rs:569
+fn invocations(log: String) -> [[String]] {
+    all := [[String]]{}
+    current := [String]?{None}
+    loop line in log.lines() {
+        if line == "BEGIN" { current = Val([String]{}) }
+        else if line == "END" {
+            if current == .Val(args) -> &all.push(^args)
+            current = None
+        } else if current == .Val(&args) -> &args.push(line.to_string())
+    }
+    all
+}
+// Rust: tests/cli_compiler_speed.rs:590
+fn has_pair(args: [String], flag: String, value: String) -> Bool {
+    loop index in 1..<args.len() {
+        if args[index - 1] == flag && args[index] == value -> return true
+    }
+    false
+}
+// Rust: tests/cli_compiler_speed.rs:594
+// Retired rustc metadata is now verified at the native action-key boundary.
+fn metadata_value(scratch: Scratch) -> String {
+    cache_key(std.fs.read_to_string(scratch.join("native-cache.log")).unwrap())
+}
+// Rust: tests/cli_compiler_speed.rs:604
+fn assert_content_metadata_and_remap(left: Scratch, right: Scratch) -> {
+    left_key :: metadata_value(left)
+    right_key :: metadata_value(right)
+    assert(left_key.len() == 64 && lowercase_digest(left_key))
+    assert(right_key.len() == 64 && lowercase_digest(right_key))
+    assert(left_key == right_key)
+    assert(std.fs.read(left.join(".jet/build/main")).unwrap() == std.fs.read(right.join(".jet/build/main")).unwrap())
+}
+fn lowercase_digest(value: String) -> Bool {
+    value.bytes().iter().all(byte -> byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+}
+// Rust: tests/cli_compiler_speed.rs:621
+fn has_digest_field(line: String, field: String) -> Bool {
+    loop part in line.split_whitespace() {
+        if part.strip_prefix(field) == .Val(value) {
+            if value.len() == 64 && lowercase_digest(value) -> return true
+        }
+    }
+    false
+}
+// Rust: tests/cli_compiler_speed.rs:632
+fn cache_key(log: String) -> String {
+    loop line in log.lines() {
+        loop part in line.split_whitespace() {
+            if part.strip_prefix("key=") == .Val(value) {
+                if value.len() == 64 && lowercase_digest(value) -> return value.to_string()
+            }
+        }
+    }
+    panic("native cache log has a build key")
+}
+// Rust: tests/cli_compiler_speed.rs:646
+fn has_corelib_identity(line: String) -> Bool {
+    line.contains("corelib=/* jet-corelib-r10 ") && [String]{"source=", "closure=", "fp="}.iter().all(field -> has_digest_field(line, field))
+}
+// Rust: tests/cli_compiler_speed.rs:653
+fn build(scratch: Scratch) -> Output {
+    Command.new(jet()).args([String]{"build", "main.jet", "--profile=debug", "--verbose"}).current_dir(scratch.path).env("JET_STORE_DIR", scratch.join("store")).env("JET_STORE_CAP_BYTES", "21474836480").env("JET_STORE_RESERVE_BYTES", "2147483648").env("JET_RUNTIME_CACHE_STATS", "1").env("JET_DEBUG_NATIVE_CACHE_LOG", scratch.join("native-cache.log")).env("JET_RECEIPT_BYPASS", "1").env("NO_COLOR", "1").output().unwrap()
+}
+// Rust: tests/cli_compiler_speed.rs:670
+fn release_build(scratch: Scratch) -> Output {
+    Command.new(jet()).args([String]{"build", "main.jet", "--profile=release", "--verbose"}).current_dir(scratch.path).env("JET_STORE_DIR", scratch.join("store")).env("JET_STORE_CAP_BYTES", "21474836480").env("JET_STORE_RESERVE_BYTES", "2147483648").env("JET_RECEIPT_BYPASS", "1").env("NO_COLOR", "1").output().unwrap()
+}
+// Rust: tests/cli_compiler_speed.rs:1412
+fn cache_cli(scratch: Scratch, args: [String]) -> Output {
+    Command.new(jet()).args(args).current_dir(scratch.path).env("JET_STORE_DIR", scratch.join("store")).env("JET_STORE_CAP_BYTES", "21474836480").env("JET_STORE_RESERVE_BYTES", "2147483648").env("NO_COLOR", "1").output().unwrap()
+}
+// Rust: tests/cli_compiler_speed.rs:1514
+fn recursive_enum_program(uses: Int) -> String {
+    source := "enum Tree {\n    Leaf(Int)\n    Branch(left: Tree, right: Forest)\n    Tagged(label: String, body: Node)\n}\n\nenum Forest {\n    Empty\n    Trees([Tree])\n    Linked(head: Tree, rest: Forest)\n}\n\nenum Node {\n    Plain(Int)\n    Holds(Tree?)\n    Grows(Forest)\n}\n\nstruct Layer0 {\n    tree: Tree\n    node: Node\n}\n\nfn use_0(layer: Layer0) -> Int {\n    if layer.tree == {\n        .Leaf(value) -> value\n        .Branch(_, _) -> 1\n        .Tagged(_, _) -> 2\n    }\n}\n\n"
+    loop layer in 1..=uses {
+        below :: layer - 1
+        &source.push_str("struct Layer{layer} {{\n    left: Layer{below}\n    right: Layer{below}\n    tree: Tree\n}}\n\nfn use_{layer}(layer: Layer{layer}) -> Int {{\n    inner :: layer.left\n    if layer.tree == {{\n        .Leaf(value) -> value + use_{below}(inner)\n        .Branch(_, _) -> {layer}\n        .Tagged(_, body) -> if body == {{\n            .Plain(value) -> value\n            .Holds(_) -> 0\n            .Grows(_) -> {layer}\n        }}\n    }}\n}}\n\n")
+    }
+    &source.push_str("fn run() {\n    print(use_0(Layer0{tree: Tree.Leaf(1), node: Node.Plain(2)}))\n}\n")
+    source
+}
+// Rust: tests/cli_compiler_speed.rs:1540
+fn tree_peak_rss_kib(pid: U32) -> U64 {
+    peak := U64{0}
+    pending := [U32]{pid}
+    loop !pending.is_empty() {
+        current :: pending.pop().unwrap()
+        if std.fs.read_to_string("/proc/{current}/status") == .Ok(status) {
+            loop line in status.lines() {
+                if line.strip_prefix("VmHWM:") == .Val(value) {
+                    text := value.trim().trim_end_matches("kB").trim() // #4303
+                    if text.parse[U64]() == .Ok(kib) -> peak = peak.max(kib)
+                    break
+                }
+            }
+        }
+        tasks :: std.fs.read_dir("/proc/{current}/task") ?? next
+        loop task in tasks {
+            entry :: task ?? next
+            if std.fs.read_to_string(entry.path().join("children")) == .Ok(children) {
+                loop child in children.split_whitespace() {
+                    if child.parse[U32]() == .Ok(id) -> &pending.push(id)
+                }
+            }
+        }
+    }
+    peak
+}
+// Rust: tests/cli_compiler_speed.rs:1571
+fn wide_enum_program(variants: Int) -> String {
+    source := "enum Wide {\n"
+    loop variant in 0..<variants -> &source.push_str("    Case{variant}(first: Int, second: String)\n")
+    &source.push_str("}\n\nfn run() {\n    same :: Wide.Case0{first: 1, second: \"a\"} == Wide.Case1{first: 2, second: \"b\"}\n    print(same)\n}\n")
+    source
+}
+// Rust: tests/cli_compiler_speed.rs:1585
+fn timed_check(name: String, label: String, program: String, limit: Duration) -> (Duration, U64) {
+    scratch :: Scratch.new(name)
+    std.fs.write(scratch.join("main.jet"), program).unwrap()
+    stderr_path :: scratch.join("check.stderr")
+    started :: Instant.now()
+    child := Command.new(jet()).args([String]{"check", "main.jet"}).current_dir(scratch.path).env("JET_RECEIPT_BYPASS", "1").env("JET_STORE_DIR", scratch.join("store")).env("NO_COLOR", "1").stdout(Stdio.null()).stderr(std.fs.File.create(stderr_path).unwrap()).spawn().unwrap()
+    peak := U64{0}
+    status :: loop {
+        peak = peak.max(tree_peak_rss_kib(child.id()))
+        if child.try_wait().unwrap() == .Val(status) -> break status
+        if started.elapsed() > limit {
+            _ :: child.kill()
+            _ :: child.wait()
+            panic("`jet check` with {label} ran past {limit:?}: checking is super-linear again")
+        }
+        std.thread.sleep(Duration.from_millis(10)) // GATE #4494
+    }
+    elapsed :: started.elapsed()
+    stderr :: std.fs.read_to_string(stderr_path).unwrap_or_default()
+    assert(status.success(), "`jet check` rejected the program with {label}:\n{stderr}")
+    (elapsed, peak)
+}
+// Rust: tests/cli_compiler_speed.rs:1682
+fn check_output(dir: OSPath, target: String, threads: String, store: OSPath) -> ([U8], [U8]) {
+    output :: Command.new(jet()).args([String]{"check", target}).current_dir(dir).env("JET_CHECK_THREADS", threads).env("JET_RECEIPT_BYPASS", "1").env("JET_STORE_DIR", store).env("NO_COLOR", "1").output().unwrap()
+    (output.stdout, output.stderr)
+}

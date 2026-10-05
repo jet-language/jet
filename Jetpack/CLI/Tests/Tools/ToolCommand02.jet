@@ -1,0 +1,59 @@
+use jetpack.CLI.Tools.ToolCommand02.[json_field_u64, validate_store_root]
+use jet_foundation.DataTree.[DataTree]
+use core.sys.target.[selected_family]
+
+// All seven original bodies and substantive assertions already exist at the
+// canonical Tests/Tools.jet owner. Do not register duplicate tests.
+// Rust: crates/jetpack/src/CLI/tool.rs:2849
+// task_names_parse_plain_and_every -> Tests/Tools.jet:45
+// #Test("task names parse plain and every"): serve/lint present, run absent.
+// Rust: crates/jetpack/src/CLI/tool.rs:2862
+// external_provider_list_covers_ballot_examples -> Tests/Tools.jet:53
+// #Test("external provider list covers ballot examples"): npm/cargo/pypi.
+// Rust: crates/jetpack/src/CLI/tool.rs:2869
+// profile_witness_binds_immutable_metadata_and_sorted_digests -> Tests/Tools.jet:59
+// #Test("profile witness binds immutable metadata and sorted digests"): a/b order
+// invariance, changed metadata changes hash, sha256- prefix, exact lock scope.
+// Rust: crates/jetpack/src/CLI/tool.rs:2883
+// generation_metadata_roundtrips_original_store_digest -> Tests/Tools.jet:69
+// #Test("generation metadata roundtrips original store digest"): distinct d Store
+// and e projection digest, one parsed tool, generation7 in serialized metadata.
+// Rust: crates/jetpack/src/CLI/tool.rs:2904
+// profile_metadata_rejects_unknown_fields_and_duplicate_bins -> Tests/Tools.jet:78
+// #Test("profile metadata rejects unknown fields and duplicate bins"): injected
+// unknown field refused and same bin owned by left/right refused on formatting.
+// Rust: crates/jetpack/src/CLI/tool.rs:2949
+// current_pointer_checksum_rejects_bitflips_and_truncation -> Tests/Tools.jet:92
+// #Test("current pointer checksum rejects bitflips and truncation"): generation9
+// roundtrip, 9->8 bitflip, removal of final newline all retained.
+// Rust: crates/jetpack/src/CLI/tool.rs:2968
+// tool_ref_writeback_migrates_legacy_spellings -> Tests/Tools.jet:100
+// #Test("tool ref writeback migrates legacy spellings"): manifest and generation
+// write canonical can1357/oh-my-pi@github#v18.0.4; both legacy spellings absent.
+
+// Additional control for Rust: crates/jetpack/src/CLI/tool.rs:2786
+#Test("tool_json_u64_preserves_exact_integer_and_missing_field_errors") {
+    fields :: [("int", DataTree.Int(42)), ("float", DataTree.Float(9007199254740991.0)), ("fraction", DataTree.Float(1.5)), ("negative", DataTree.Int(-1)), ("text", DataTree.Text("42"))]
+    assert_eq(json_field_u64(&fields, "int") ?? panic("integer"), U64{42})
+    assert_eq(json_field_u64(&fields, "float") ?? panic("exact float"), U64{9007199254740991})
+    assert(json_field_u64(&fields, "fraction").is_err())
+    assert(json_field_u64(&fields, "negative").is_err())
+    if json_field_u64(&fields, "text") == {
+        .Err(error) -> assert_eq(error, "profile field `text` is not an exact integer")
+        .Ok(_) -> panic("text must not parse as numeric")
+    }
+    if json_field_u64(&fields, "missing") == {
+        .Err(error) -> assert_eq(error, "profile field `missing` is not a number")
+        .Ok(_) -> panic("missing field")
+    }
+}
+
+// Additional control for Rust: crates/jetpack/src/CLI/tool.rs:2829
+#Test("tool_store_root_uses_selected_native_path_components") {
+    assert(validate_store_root("relative").is_err())
+    if selected_family() == "unix" {
+        validate_store_root("/store") ?? panic("absolute store")
+        validate_store_root("/store/back\\slash") ?? panic("backslash is a normal Unix filename")
+        assert(validate_store_root("/store/../escape").is_err())
+    }
+}

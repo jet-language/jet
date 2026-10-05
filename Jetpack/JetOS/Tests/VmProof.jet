@@ -1,0 +1,27 @@
+use jetpack.JetOS.VmProof.*
+
+// Behavioral control for Rust: crates/jetpack/src/JetOS/vm_proof.rs:187-199,209-214
+#Test("vm_serial_marker_and_bounded_log_excerpt") {
+    assert_eq(extract_guest_proof_report("noise\nserial JETOS_GUEST_PROOF:  {\"state\":\"guest-passed\"}  \n"), .Val("{\"state\":\"guest-passed\"}"))
+    assert_eq(extract_guest_proof_report("not a guest proof"), .None)
+    assert_eq(log_excerpt("stderr", "\n  first diagnostic  \nsecond diagnostic"), "; stderr: first diagnostic")
+    assert_eq(log_excerpt("stdout", " \n\t\n"), "")
+}
+
+// Behavioral control for Rust: crates/jetpack/src/JetOS/vm_proof.rs:359-398,743-755
+#Test("vm_proof_fields_assertions_and_disk_ownership") {
+    assert(require_json_field("{\"host\" : \"halcyon\"}", "host", "halcyon").is_ok())
+    assert_eq(require_json_field("{}", "host", "halcyon").unwrap_err(), "missing `host`")
+    assert_eq(require_json_field("\"host\" \"halcyon\"", "host", "halcyon").unwrap_err(), "missing `:` after `host`")
+    assert_eq(require_json_field("\"host\":7", "host", "halcyon").unwrap_err(), "`host` is not a string")
+    assert_eq(require_json_field("\"host\":\"halcyon", "host", "halcyon").unwrap_err(), "`host` is not closed")
+    assert_eq(require_json_field("\"host\":\"other\"", "host", "halcyon").unwrap_err(), "`host` expected `halcyon`, found `other`")
+    assert(require_guest_assertions("{{\"assertions\":[{guest_assertions_json()}]}}").is_ok())
+    assert(require_guest_assertions("{\"assertions\":[]}").is_err())
+    assert_eq(vmtest_host_disk("/tmp/disk.qcow2", "guest", 1), "/tmp/disk.qcow2")
+    assert_eq(vmtest_host_disk("/tmp/disk.qcow2", "guest", 2), "/tmp/disk-guest.qcow2")
+    assert_eq(vmtest_host_disk("disk", "guest", 2), "disk-guest.qcow2")
+    assert_eq(guest_proof_path(&OSPath.new("/tmp/harness.json")), OSPath.new("/tmp/harness-guest-proof.json"))
+    assert_eq(vm_run_log_dir(&OSPath.new("/tmp/harness.json")), OSPath.new("/tmp/harness.run"))
+    assert_eq(qemu_vnc_endpoint(), "127.0.0.1:5900")
+}

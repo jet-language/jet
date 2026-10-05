@@ -1,1804 +1,222 @@
-// PORT-PENDING 2088 crates-jet-pkg-model-src-compilerextension-slice-1: crates/jet-pkg-model/src/CompilerExtension.rs:1-1800
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! D-DX5-HOOK1=A (Tower #549) — compiler-extension v1 host surface.
-//RS //!
-//RS //! Reuses the shipped WASM Component Model substrate (`WASMTIME_CRATE_SPEC` +
-//RS //! `Prelude/CompilerExtension.rs`) in the isolated sibling `jetpack` process,
-//RS //! with a **compiler-specific** WIT world
-//RS //! that stays distinct from:
-//RS //! - application `target: sandbox` / `core.plugin` (world `jetplugin`, D-PLUGIN1)
-//RS //! - PATH-discovered `jet-*` helpers (D-DX5)
-//RS //!
-//RS //! V1 contract (ratified): post-sema typed read-only snapshot in → validated
-//RS //! findings/edit proposals out. The host remains the only semantic authority;
-//RS //! plugins cannot mutate compiler state or expose rustc (I2/I3).
-//RS //!
-//RS //! # Protocol (exact)
-//RS //!
-//RS //! Wire bytes for `analyze(snapshot) -> response` are UTF-8 DataTree values with
-//RS //! **deterministic key order** (lexicographic) and no insignificant whitespace.
-//RS //! Schema version is `protocol` (must equal [`PROTOCOL_VERSION`]).
-//RS //!
-//RS //! Snapshot fields: `protocol`, `stage`, `abilities`, `limits`, `trust`,
-//RS //! `types`, `symbols`, `spans`, `host_imports` (symbols carry `effects` +
-//RS //! `provenance`; type facts carry structural shape metadata).
-//RS //!
-//RS //! # Limits / trust / lifecycle
-//RS //!
-//RS //! - [`ResourceLimits`]: fuel, memory, table, finding/edit/response caps, wall timeout.
-//RS //! - [`TrustPolicy`]: components are `untrusted` by default; protocol + ability
-//RS //!   negotiation must pass before analyze.
-//RS //! - **Deterministic sandbox:** empty host linker — no clock/random/fs/net/process
-//RS //!   imports; guests that declare them fail closed at load (D-DX5-HOOK1).
-//RS //! - [`ExtensionSession`]: Idle → Loaded → (optional staged response) → Closed.
-//RS //!   Staging never mutates compiler facts; [`ExtensionSession::rollback`] discards
-//RS //!   staged output only (accept latch stays final); [`ExtensionSession::close`]
-//RS //!   invokes a guest closer (host passes `jet_compiler_extension_close`) so
-//RS //!   guest Store/memory is dropped.
-//RS 
-//RS use crate::FFI::WASMTIME_CRATE_SPEC;
-//RS use jet_foundation::Authority::HostImportFact;
-//RS use jet_foundation::DataTree::DataTree;
-//RS use crate::JSON;
-//RS use std::collections::{BTreeMap, BTreeSet};
-//RS 
-//RS /// Closed set of Jet plugin mechanisms (I8 — one semantic role each).
-//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-//RS pub enum PluginMechanism {
-//RS     /// D-DX5: `jet-<cmd>` executables discovered on PATH.
-//RS     PathHelper,
-//RS     /// D-PLUGIN1 / D-DEP-WASM1: application `target: sandbox` + `core.plugin`.
-//RS     ApplicationPlugin,
-//RS     /// D-DX5-HOOK1=A: compiler-extension WASM component (this module).
-//RS     CompilerExtension,
-//RS }
-//RS 
-//RS /// Wire protocol version for the typed post-sema snapshot contract.
-//RS pub const PROTOCOL_VERSION: u32 = 1;
-//RS 
-//RS /// First hook stage: after sema, typed facts only.
-//RS pub const STAGE: &str = "typed";
-//RS 
-//RS /// Component Model world name — fixed for every compiler-extension component.
-//RS /// Distinct from application plugins' fixed world `jetplugin` (D-PLUGIN-EXPORT1).
-//RS pub const WORLD_NAME: &str = "compiler-extension-v1";
-//RS 
-//RS /// WIT package identity for the compiler-extension world.
-//RS pub const PACKAGE_NAME: &str = "jet:compiler-extension@0.1.0";
-//RS 
-//RS /// Application `target: sandbox` world name (D-PLUGIN1 / D-PLUGIN-EXPORT1).
-//RS /// Kept here so callers can assert the two worlds never collide (I8).
-//RS pub const APPLICATION_PLUGIN_WORLD: &str = "jetplugin";
-//RS 
-//RS /// Required guest export that receives the versioned snapshot and returns a
-//RS /// validated response payload (findings / proposed edits as opaque bytes in
-//RS /// the host runtime; typed decode is host-owned).
-//RS pub const ANALYZE_EXPORT: &str = "analyze";
-//RS 
-//RS /// Expert env registration until a user-facing spelling is balloted
-//RS /// (D-DX5-HOOK1: "Exact user-facing registration spelling remains a later
-//RS /// ballot if new syntax is needed"). Absolute or relative path to one
-//RS /// `compiler-extension-v1` `.wasm` component. Unset → skip the post-sema hook.
-//RS pub const ENV_COMPILER_EXTENSION: &str = "JET_COMPILER_EXTENSION";
-//RS 
-//RS /// Hidden sibling-host verb. Version is part of the process protocol.
-//RS pub const HOST_SUBCOMMAND: &str = "__compiler-extension-v1";
-//RS 
-//RS /// Maximum encoded snapshot accepted across the compiler/host pipe.
-//RS pub const MAX_SNAPSHOT_BYTES: usize = 16 * 1024 * 1024;
-//RS 
-//RS /// Outer process deadline. Guest execution has its own 2s Wasmtime deadline;
-//RS /// this larger cap also bounds host startup, IPC, and crash cleanup.
-//RS pub const HOST_PROCESS_TIMEOUT_MS: u64 = 5_000;
-//RS 
-//RS /// Authority a v1 component may negotiate. Later stages extend this set
-//RS /// rather than inventing a second plugin system (D-DX5-HOOK1 hybrid law).
-//RS #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-//RS pub enum Ability {
-//RS     ReadTypes,
-//RS     ReadSymbols,
-//RS     ReadEffects,
-//RS     ReadSpans,
-//RS     ReadProvenance,
-//RS     EmitFinding,
-//RS     ProposeEdit,
-//RS }
-//RS 
-//RS impl Ability {
-//RS     pub fn as_str(self) -> &'static str {
-//RS         match self {
-//RS             Ability::ReadTypes => "read_types",
-//RS             Ability::ReadSymbols => "read_symbols",
-//RS             Ability::ReadEffects => "read_effects",
-//RS             Ability::ReadSpans => "read_spans",
-//RS             Ability::ReadProvenance => "read_provenance",
-//RS             Ability::EmitFinding => "emit_finding",
-//RS             Ability::ProposeEdit => "propose_edit",
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn parse(s: &str) -> Option<Ability> {
-//RS         Some(match s {
-//RS             "read_types" => Ability::ReadTypes,
-//RS             "read_symbols" => Ability::ReadSymbols,
-//RS             "read_effects" => Ability::ReadEffects,
-//RS             "read_spans" => Ability::ReadSpans,
-//RS             "read_provenance" => Ability::ReadProvenance,
-//RS             "emit_finding" => Ability::EmitFinding,
-//RS             "propose_edit" => Ability::ProposeEdit,
-//RS             _ => return None,
-//RS         })
-//RS     }
-//RS 
-//RS     /// V1 floor: typed observation + findings/edits.
-//RS     pub fn v1_defaults() -> &'static [Ability] {
-//RS         &[
-//RS             Ability::ReadTypes,
-//RS             Ability::ReadSymbols,
-//RS             Ability::ReadEffects,
-//RS             Ability::ReadSpans,
-//RS             Ability::ReadProvenance,
-//RS             Ability::EmitFinding,
-//RS             Ability::ProposeEdit,
-//RS         ]
-//RS     }
-//RS }
-//RS 
-//RS /// Hard resource caps applied by the host (guest cannot raise them).
-//RS /// Numeric defaults are mirrored in `Prelude/CompilerExtension.rs`.
-//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-//RS pub struct ResourceLimits {
-//RS     /// Wasmtime fuel units granted per `analyze` call.
-//RS     pub max_fuel: u64,
-//RS     /// Max linear memory bytes per instance.
-//RS     pub max_memory_bytes: usize,
-//RS     /// Max table elements per instance.
-//RS     pub max_table_elements: usize,
-//RS     /// Max findings accepted in one response.
-//RS     pub max_findings: usize,
-//RS     /// Max proposed edits accepted in one response.
-//RS     pub max_edits: usize,
-//RS     /// Max raw response payload bytes.
-//RS     pub max_response_bytes: usize,
-//RS     /// Wall-clock budget for one `analyze` (ms). Host enforces via wasmtime
-//RS     /// epoch interruption; validation always checks the declared value.
-//RS     pub timeout_ms: u64,
-//RS }
-//RS 
-//RS impl ResourceLimits {
-//RS     pub const fn v1_defaults() -> Self {
-//RS         Self {
-//RS             max_fuel: 10_000_000,
-//RS             max_memory_bytes: 16 * 1024 * 1024,
-//RS             max_table_elements: 10_000,
-//RS             max_findings: 256,
-//RS             max_edits: 64,
-//RS             max_response_bytes: 256 * 1024,
-//RS             timeout_ms: 2_000,
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// Trust class for a loaded component. V1 admits only untrusted sandboxed
-//RS /// guests — no elevated host imports (no clock/random/fs/net/process), no
-//RS /// compiler mutation rights (deterministic sandbox / D-DX5-HOOK1).
-//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-//RS pub enum TrustPolicy {
-//RS     Untrusted,
-//RS }
-//RS 
-//RS impl TrustPolicy {
-//RS     pub fn as_str(self) -> &'static str {
-//RS         match self {
-//RS             TrustPolicy::Untrusted => "untrusted",
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn parse(s: &str) -> Option<Self> {
-//RS         match s {
-//RS             "untrusted" => Some(TrustPolicy::Untrusted),
-//RS             _ => None,
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// Protocol / validation failure — Jet-owned; never a rustc message (I2).
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct ProtocolError {
-//RS     pub message: String,
-//RS }
-//RS 
-//RS impl ProtocolError {
-//RS     pub fn new(message: impl Into<String>) -> Self {
-//RS         Self {
-//RS             message: message.into(),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS impl std::fmt::Display for ProtocolError {
-//RS     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-//RS         f.write_str(&self.message)
-//RS     }
-//RS }
-//RS 
-//RS /// Negotiate abilities against the v1 allowlist + protocol version.
-//RS pub fn negotiate_abilities(
-//RS     protocol: u32,
-//RS     requested: &[Ability],
-//RS ) -> Result<Vec<Ability>, ProtocolError> {
-//RS     if protocol != PROTOCOL_VERSION {
-//RS         return Err(ProtocolError::new(format!(
-//RS             "compiler-extension protocol mismatch: host={PROTOCOL_VERSION}, guest={protocol}"
-//RS         )));
-//RS     }
-//RS     let allow: BTreeSet<_> = Ability::v1_defaults().iter().copied().collect();
-//RS     let mut granted = BTreeSet::new();
-//RS     for cap in requested {
-//RS         if !allow.contains(cap) {
-//RS             return Err(ProtocolError::new(format!(
-//RS                 "ability `{}` is not in the v1 allowlist",
-//RS                 cap.as_str()
-//RS             )));
-//RS         }
-//RS         granted.insert(*cap);
-//RS     }
-//RS     Ok(granted.into_iter().collect())
-//RS }
-//RS 
-//RS /// Span fact visible to the guest (read-only).
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct SpanFact {
-//RS     pub id: String,
-//RS     pub file: String,
-//RS     pub start: u32,
-//RS     pub end: u32,
-//RS }
-//RS 
-//RS /// Structural interface shape carried by an existing `TypeFact` identity.
-//RS /// This is metadata for copied boundary payloads, not a second wire type
-//RS /// system; nested entries refer back to the same `types` identity set.
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub enum TypeFactShape {
-//RS     Opaque,
-//RS     Scalar,
-//RS     CodableRecord { fields: Vec<TypeFieldFact> },
-//RS     List { element_type_id: String },
-//RS     Option { inner_type_id: String },
-//RS     Result {
-//RS         ok_type_id: String,
-//RS         error_type_id: String,
-//RS     },
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct TypeFieldFact {
-//RS     pub name: String,
-//RS     pub type_id: String,
-//RS }
-//RS 
-//RS /// Type fact (read-only). `id` remains the interface snapshot identity used
-//RS /// by symbols and host imports.
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct TypeFact {
-//RS     pub id: String,
-//RS     pub repr: String,
-//RS     pub shape: TypeFactShape,
-//RS }
-//RS 
-//RS /// Symbol fact carrying effects + provenance (read-only).
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct SymbolFact {
-//RS     pub id: String,
-//RS     pub name: String,
-//RS     pub kind: String,
-//RS     pub type_id: String,
-//RS     pub span_id: String,
-//RS     pub effects: Vec<String>,
-//RS     pub provenance: String,
-//RS }
-//RS 
-//RS /// Deterministic typed post-sema snapshot (host → guest).
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct TypedSnapshot {
-//RS     pub protocol: u32,
-//RS     pub stage: String,
-//RS     pub abilities: Vec<Ability>,
-//RS     pub limits: ResourceLimits,
-//RS     pub trust: TrustPolicy,
-//RS     pub types: Vec<TypeFact>,
-//RS     pub symbols: Vec<SymbolFact>,
-//RS     pub spans: Vec<SpanFact>,
-//RS     /// Host imports use this same snapshot's type identities for copied
-//RS     /// payloads; no parallel interface registry is permitted.
-//RS     pub host_imports: Vec<HostImportFact>,
-//RS }
-//RS 
-//RS impl TypedSnapshot {
-//RS     /// Build a v1 snapshot with no host imports.
-//RS     pub fn new(
-//RS         abilities: Vec<Ability>,
-//RS         types: Vec<TypeFact>,
-//RS         symbols: Vec<SymbolFact>,
-//RS         spans: Vec<SpanFact>,
-//RS     ) -> Result<Self, ProtocolError> {
-//RS         Self::new_with_imports(abilities, types, symbols, spans, Vec::new())
-//RS     }
-//RS 
-//RS     /// Build a snapshot with structured host-import facts. All facts are
-//RS     /// sorted by identity before encode for byte-stable replay.
-//RS     pub fn new_with_imports(
-//RS         abilities: Vec<Ability>,
-//RS         types: Vec<TypeFact>,
-//RS         symbols: Vec<SymbolFact>,
-//RS         spans: Vec<SpanFact>,
-//RS         host_imports: Vec<HostImportFact>,
-//RS     ) -> Result<Self, ProtocolError> {
-//RS         let abilities = negotiate_abilities(PROTOCOL_VERSION, &abilities)?;
-//RS         let mut types = types;
-//RS         let mut symbols = symbols;
-//RS         let mut spans = spans;
-//RS         let mut host_imports = host_imports;
-//RS         types.sort_by(|a, b| a.id.cmp(&b.id));
-//RS         symbols.sort_by(|a, b| a.id.cmp(&b.id));
-//RS         spans.sort_by(|a, b| a.id.cmp(&b.id));
-//RS         host_imports.sort_by(|a, b| a.id.cmp(&b.id));
-//RS         validate_interface_facts(&types, &symbols, &spans, &host_imports)?;
-//RS         Ok(Self {
-//RS             protocol: PROTOCOL_VERSION,
-//RS             stage: STAGE.to_string(),
-//RS             abilities,
-//RS             limits: ResourceLimits::v1_defaults(),
-//RS             trust: TrustPolicy::Untrusted,
-//RS             types,
-//RS             symbols,
-//RS             spans,
-//RS             host_imports,
-//RS         })
-//RS     }
-//RS 
-//RS     pub fn encode(&self) -> Result<Vec<u8>, ProtocolError> {
-//RS         if self.protocol != PROTOCOL_VERSION {
-//RS             return Err(ProtocolError::new(format!(
-//RS                 "snapshot protocol must be {PROTOCOL_VERSION}"
-//RS             )));
-//RS         }
-//RS         if self.stage != STAGE {
-//RS             return Err(ProtocolError::new(format!(
-//RS                 "snapshot stage must be `{STAGE}` in v1"
-//RS             )));
-//RS         }
-//RS         if self.trust != TrustPolicy::Untrusted {
-//RS             return Err(ProtocolError::new(
-//RS                 "v1 trust policy admits only `untrusted` components",
-//RS             ));
-//RS         }
-//RS         let caps: Vec<String> = self
-//RS             .abilities
-//RS             .iter()
-//RS             .map(|c| c.as_str().to_string())
-//RS             .collect();
-//RS         let mut obj = BTreeMap::new();
-//RS         obj.insert(
-//RS             "abilities".into(),
-//RS             DataTree::Array(caps.into_iter().map(DataTree::Text).collect()),
-//RS         );
-//RS         obj.insert("limits".into(), limits_to_json(&self.limits));
-//RS         obj.insert(
-//RS             "host_imports".into(),
-//RS             DataTree::Array(
-//RS                 self.host_imports
-//RS                     .iter()
-//RS                     .map(host_import_to_json)
-//RS                     .collect(),
-//RS             ),
-//RS         );
-//RS         obj.insert("protocol".into(), DataTree::Int(self.protocol as i64));
-//RS         obj.insert(
-//RS             "spans".into(),
-//RS             DataTree::Array(self.spans.iter().map(span_to_json).collect()),
-//RS         );
-//RS         obj.insert("stage".into(), DataTree::Text(self.stage.clone()));
-//RS         obj.insert(
-//RS             "symbols".into(),
-//RS             DataTree::Array(self.symbols.iter().map(symbol_to_json).collect()),
-//RS         );
-//RS         obj.insert(
-//RS             "trust".into(),
-//RS             DataTree::Text(self.trust.as_str().to_string()),
-//RS         );
-//RS         obj.insert(
-//RS             "types".into(),
-//RS             DataTree::Array(self.types.iter().map(type_to_json).collect()),
-//RS         );
-//RS         Ok(stringify(&object(obj)).into_bytes())
-//RS     }
-//RS 
-//RS     pub fn decode(bytes: &[u8]) -> Result<Self, ProtocolError> {
-//RS         let text = std::str::from_utf8(bytes)
-//RS             .map_err(|_| ProtocolError::new("snapshot is not valid UTF-8"))?;
-//RS         let root = JSON::parse(text).map_err(ProtocolError::new)?;
-//RS         let obj = object_map(&root)
-//RS             .map_err(|e| ProtocolError::new(format!("snapshot root: {e}")))?;
-//RS         require_keys_with_optional(
-//RS             &obj,
-//RS             &[
-//RS                 "protocol",
-//RS                 "stage",
-//RS                 "abilities",
-//RS                 "limits",
-//RS                 "trust",
-//RS                 "types",
-//RS                 "symbols",
-//RS                 "spans",
-//RS             ],
-//RS             &["host_imports"],
-//RS         )?;
-//RS         let protocol = json_u32(obj.get("protocol").unwrap(), "protocol")?;
-//RS         if protocol != PROTOCOL_VERSION {
-//RS             return Err(ProtocolError::new(format!(
-//RS                 "compiler-extension protocol mismatch: host={PROTOCOL_VERSION}, snapshot={protocol}"
-//RS             )));
-//RS         }
-//RS         let stage = obj
-//RS             .get("stage")
-//RS             .unwrap()
-//RS             .as_str()
-//RS             .map_err(ProtocolError::new)?;
-//RS         if stage != STAGE {
-//RS             return Err(ProtocolError::new(format!(
-//RS                 "snapshot stage must be `{STAGE}`, got `{stage}`"
-//RS             )));
-//RS         }
-//RS         let trust_s = obj
-//RS             .get("trust")
-//RS             .unwrap()
-//RS             .as_str()
-//RS             .map_err(ProtocolError::new)?;
-//RS         let trust = TrustPolicy::parse(trust_s)
-//RS             .ok_or_else(|| ProtocolError::new(format!("unknown trust policy `{trust_s}`")))?;
-//RS         let caps = parse_abilities(obj.get("abilities").unwrap())?;
-//RS         let limits = limits_from_json(obj.get("limits").unwrap())?;
-//RS         let types = parse_types(obj.get("types").unwrap())?;
-//RS         let symbols = parse_symbols(obj.get("symbols").unwrap())?;
-//RS         let spans = parse_spans(obj.get("spans").unwrap())?;
-//RS         let host_imports = obj
-//RS             .get("host_imports")
-//RS             .map(parse_host_imports)
-//RS             .transpose()?
-//RS             .unwrap_or_default();
-//RS         validate_interface_facts(&types, &symbols, &spans, &host_imports)?;
-//RS         Ok(Self {
-//RS             protocol,
-//RS             stage: stage.to_string(),
-//RS             abilities: caps,
-//RS             limits,
-//RS             trust,
-//RS             types,
-//RS             symbols,
-//RS             spans,
-//RS             host_imports,
-//RS         })
-//RS     }
-//RS 
-//RS     fn span_ids(&self) -> BTreeSet<&str> {
-//RS         self.spans.iter().map(|s| s.id.as_str()).collect()
-//RS     }
-//RS 
-//RS     fn type_ids(&self) -> BTreeSet<&str> {
-//RS         self.types.iter().map(|t| t.id.as_str()).collect()
-//RS     }
-//RS }
-//RS 
-//RS /// One validated finding proposed by the guest.
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct Finding {
-//RS     pub rule: String,
-//RS     pub span_id: String,
-//RS     pub message: String,
-//RS     pub severity: String,
-//RS }
-//RS 
-//RS /// One validated edit proposal (host applies only after accept).
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct ProposedEdit {
-//RS     pub span_id: String,
-//RS     pub replacement: String,
-//RS     pub rationale: String,
-//RS }
-//RS 
-//RS /// Guest → host analyze response (pre-validation shape after decode).
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct AnalyzeResponse {
-//RS     pub protocol: u32,
-//RS     pub findings: Vec<Finding>,
-//RS     pub proposed_edits: Vec<ProposedEdit>,
-//RS     /// V1 requires this empty; non-empty is a protocol error.
-//RS     pub artifacts: Vec<String>,
-//RS }
-//RS 
-//RS impl AnalyzeResponse {
-//RS     pub fn encode(&self) -> Result<Vec<u8>, ProtocolError> {
-//RS         let mut obj = BTreeMap::new();
-//RS         obj.insert(
-//RS             "artifacts".into(),
-//RS             DataTree::Array(
-//RS                 self.artifacts
-//RS                     .iter()
-//RS                     .cloned()
-//RS                     .map(DataTree::Text)
-//RS                     .collect(),
-//RS             ),
-//RS         );
-//RS         obj.insert(
-//RS             "findings".into(),
-//RS             DataTree::Array(self.findings.iter().map(finding_to_json).collect()),
-//RS         );
-//RS         obj.insert("protocol".into(), DataTree::Int(self.protocol as i64));
-//RS         obj.insert(
-//RS             "proposed_edits".into(),
-//RS             DataTree::Array(self.proposed_edits.iter().map(edit_to_json).collect()),
-//RS         );
-//RS         Ok(stringify(&object(obj)).into_bytes())
-//RS     }
-//RS 
-//RS     pub fn decode(bytes: &[u8]) -> Result<Self, ProtocolError> {
-//RS         let text = std::str::from_utf8(bytes)
-//RS             .map_err(|_| ProtocolError::new("response is not valid UTF-8"))?;
-//RS         let root = JSON::parse(text).map_err(ProtocolError::new)?;
-//RS         let obj = object_map(&root)
-//RS             .map_err(|e| ProtocolError::new(format!("response root: {e}")))?;
-//RS         require_keys(
-//RS             &obj,
-//RS             &["protocol", "findings", "proposed_edits", "artifacts"],
-//RS         )?;
-//RS         let protocol = json_u32(obj.get("protocol").unwrap(), "protocol")?;
-//RS         let findings = parse_findings(obj.get("findings").unwrap())?;
-//RS         let proposed_edits = parse_edits(obj.get("proposed_edits").unwrap())?;
-//RS         let artifacts = parse_string_array(obj.get("artifacts").unwrap(), "artifacts")?;
-//RS         Ok(Self {
-//RS             protocol,
-//RS             findings,
-//RS             proposed_edits,
-//RS             artifacts,
-//RS         })
-//RS     }
-//RS }
-//RS 
-//RS /// Validate a decoded response against the snapshot, granted abilities,
-//RS /// and resource limits. Successful validation does **not** mutate compiler
-//RS /// state — the host must explicitly accept staged findings/edits.
-//RS pub fn validate_response(
-//RS     snapshot: &TypedSnapshot,
-//RS     response: &AnalyzeResponse,
-//RS     raw_len: usize,
-//RS ) -> Result<(), ProtocolError> {
-//RS     if response.protocol != PROTOCOL_VERSION {
-//RS         return Err(ProtocolError::new(format!(
-//RS             "response protocol must be {PROTOCOL_VERSION}, got {}",
-//RS             response.protocol
-//RS         )));
-//RS     }
-//RS     if raw_len > snapshot.limits.max_response_bytes {
-//RS         return Err(ProtocolError::new(format!(
-//RS             "response exceeds max_response_bytes ({} > {})",
-//RS             raw_len, snapshot.limits.max_response_bytes
-//RS         )));
-//RS     }
-//RS     if !response.artifacts.is_empty() {
-//RS         return Err(ProtocolError::new(
-//RS             "v1 responses must leave `artifacts` empty (no artifact mutation)",
-//RS         ));
-//RS     }
-//RS     if response.findings.len() > snapshot.limits.max_findings {
-//RS         return Err(ProtocolError::new(format!(
-//RS             "too many findings ({} > {})",
-//RS             response.findings.len(),
-//RS             snapshot.limits.max_findings
-//RS         )));
-//RS     }
-//RS     if response.proposed_edits.len() > snapshot.limits.max_edits {
-//RS         return Err(ProtocolError::new(format!(
-//RS             "too many proposed_edits ({} > {})",
-//RS             response.proposed_edits.len(),
-//RS             snapshot.limits.max_edits
-//RS         )));
-//RS     }
-//RS     let caps: BTreeSet<_> = snapshot.abilities.iter().copied().collect();
-//RS     if !response.findings.is_empty() && !caps.contains(&Ability::EmitFinding) {
-//RS         return Err(ProtocolError::new(
-//RS             "findings require ability `emit_finding`",
-//RS         ));
-//RS     }
-//RS     if !response.proposed_edits.is_empty() && !caps.contains(&Ability::ProposeEdit) {
-//RS         return Err(ProtocolError::new(
-//RS             "proposed_edits require ability `propose_edit`",
-//RS         ));
-//RS     }
-//RS     let span_ids = snapshot.span_ids();
-//RS     let type_ids = snapshot.type_ids();
-//RS     // Snapshot internal consistency: symbol refs must resolve when those
-//RS     // read abilities were granted.
-//RS     if caps.contains(&Ability::ReadSymbols) {
-//RS         for sym in &snapshot.symbols {
-//RS             if caps.contains(&Ability::ReadTypes) && !type_ids.contains(sym.type_id.as_str()) {
-//RS                 return Err(ProtocolError::new(format!(
-//RS                     "symbol `{}` references unknown type_id `{}`",
-//RS                     sym.id, sym.type_id
-//RS                 )));
-//RS             }
-//RS             if caps.contains(&Ability::ReadSpans) && !span_ids.contains(sym.span_id.as_str()) {
-//RS                 return Err(ProtocolError::new(format!(
-//RS                     "symbol `{}` references unknown span_id `{}`",
-//RS                     sym.id, sym.span_id
-//RS                 )));
-//RS             }
-//RS         }
-//RS     }
-//RS     for f in &response.findings {
-//RS         if f.rule.is_empty() || f.message.is_empty() {
-//RS             return Err(ProtocolError::new(
-//RS                 "finding `rule` and `message` must be non-empty",
-//RS             ));
-//RS         }
-//RS         if !matches!(f.severity.as_str(), "error" | "warning" | "note") {
-//RS             return Err(ProtocolError::new(format!(
-//RS                 "finding severity must be error|warning|note, got `{}`",
-//RS                 f.severity
-//RS             )));
-//RS         }
-//RS         if !span_ids.contains(f.span_id.as_str()) {
-//RS             return Err(ProtocolError::new(format!(
-//RS                 "finding references unknown span_id `{}`",
-//RS                 f.span_id
-//RS             )));
-//RS         }
-//RS     }
-//RS     for e in &response.proposed_edits {
-//RS         if e.rationale.is_empty() {
-//RS             return Err(ProtocolError::new(
-//RS                 "proposed_edit `rationale` must be non-empty",
-//RS             ));
-//RS         }
-//RS         if !span_ids.contains(e.span_id.as_str()) {
-//RS             return Err(ProtocolError::new(format!(
-//RS                 "proposed_edit references unknown span_id `{}`",
-//RS                 e.span_id
-//RS             )));
-//RS         }
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS /// Decode + validate in one step (host analyze path).
-//RS pub fn decode_and_validate_response(
-//RS     snapshot: &TypedSnapshot,
-//RS     bytes: &[u8],
-//RS ) -> Result<AnalyzeResponse, ProtocolError> {
-//RS     let response = AnalyzeResponse::decode(bytes)?;
-//RS     validate_response(snapshot, &response, bytes.len())?;
-//RS     Ok(response)
-//RS }
-//RS 
-//RS /// Host-side lifecycle for one extension instance.
-//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-//RS pub enum SessionPhase {
-//RS     Idle,
-//RS     Loaded,
-//RS     Closed,
-//RS }
-//RS 
-//RS /// Session state machine: staging is ephemeral; rollback discards staged only
-//RS /// (accept latch stays final); close invokes the guest closer so WASM memory
-//RS /// is dropped.
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct ExtensionSession {
-//RS     phase: SessionPhase,
-//RS     handle: Option<u64>,
-//RS     staged: Option<AnalyzeResponse>,
-//RS     /// True only after host explicitly accepts staged output (never auto).
-//RS     committed: bool,
-//RS }
-//RS 
-//RS impl ExtensionSession {
-//RS     pub fn new() -> Self {
-//RS         Self {
-//RS             phase: SessionPhase::Idle,
-//RS             handle: None,
-//RS             staged: None,
-//RS             committed: false,
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn phase(&self) -> SessionPhase {
-//RS         self.phase
-//RS     }
-//RS 
-//RS     pub fn is_committed(&self) -> bool {
-//RS         self.committed
-//RS     }
-//RS 
-//RS     pub fn staged(&self) -> Option<&AnalyzeResponse> {
-//RS         self.staged.as_ref()
-//RS     }
-//RS 
-//RS     pub fn on_loaded(&mut self, handle: u64) -> Result<(), ProtocolError> {
-//RS         if self.phase != SessionPhase::Idle {
-//RS             return Err(ProtocolError::new(
-//RS                 "extension session can only load from Idle",
-//RS             ));
-//RS         }
-//RS         if handle == 0 {
-//RS             return Err(ProtocolError::new("handle 0 is the error sentinel"));
-//RS         }
-//RS         self.handle = Some(handle);
-//RS         self.phase = SessionPhase::Loaded;
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     /// Validate guest bytes and stage them. Does not commit into compiler state.
-//RS     pub fn stage_response(
-//RS         &mut self,
-//RS         snapshot: &TypedSnapshot,
-//RS         bytes: &[u8],
-//RS     ) -> Result<&AnalyzeResponse, ProtocolError> {
-//RS         if self.phase != SessionPhase::Loaded {
-//RS             return Err(ProtocolError::new(
-//RS                 "stage_response requires a Loaded session",
-//RS             ));
-//RS         }
-//RS         if self.committed {
-//RS             return Err(ProtocolError::new(
-//RS                 "session already committed; open a new session",
-//RS             ));
-//RS         }
-//RS         let response = decode_and_validate_response(snapshot, bytes)?;
-//RS         self.staged = Some(response);
-//RS         Ok(self.staged.as_ref().unwrap())
-//RS     }
-//RS 
-//RS     /// Discard staged findings/edits only. Compiler facts unchanged.
-//RS     /// Does **not** clear the accept latch — after [`Self::accept_staged`],
-//RS     /// rollback cannot reopen staging; open a new session instead.
-//RS     pub fn rollback(&mut self) {
-//RS         self.staged = None;
-//RS     }
-//RS 
-//RS     /// Host-only accept of staged output. Still does not call rustc (I2/I3).
-//RS     pub fn accept_staged(&mut self) -> Result<AnalyzeResponse, ProtocolError> {
-//RS         if self.phase != SessionPhase::Loaded {
-//RS             return Err(ProtocolError::new("accept requires Loaded session"));
-//RS         }
-//RS         let staged = self
-//RS             .staged
-//RS             .take()
-//RS             .ok_or_else(|| ProtocolError::new("nothing staged to accept"))?;
-//RS         self.committed = true;
-//RS         Ok(staged)
-//RS     }
-//RS 
-//RS     /// Close the session and drop the guest via `close_guest(handle)`.
-//RS     ///
-//RS     /// Host path must pass the WASM runtime closer
-//RS     /// (`jet_compiler_extension_close` in `Prelude/CompilerExtension.rs`) so
-//RS     /// the guest `Store`/linear memory is freed. Returns whatever the closer
-//RS     /// reports (or `false` when no handle was live). Clears staged output;
-//RS     /// session ends in [`SessionPhase::Closed`].
-//RS     pub fn close(&mut self, close_guest: impl FnOnce(u64) -> bool) -> bool {
-//RS         let handle = self.handle.take();
-//RS         self.staged = None;
-//RS         self.committed = false;
-//RS         self.phase = SessionPhase::Closed;
-//RS         match handle {
-//RS             Some(h) => close_guest(h),
-//RS             None => false,
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS impl Default for ExtensionSession {
-//RS     fn default() -> Self {
-//RS         Self::new()
-//RS     }
-//RS }
-//RS 
-//RS /// Parse `jet_compiler_extension_load` wire (`O:<handle>` / `E:<message>`).
-//RS /// Failures are Jet-owned strings — never rustc diagnostics (I2).
-//RS pub fn parse_load_result(wire: &str) -> Result<u64, ProtocolError> {
-//RS     if let Some(rest) = wire.strip_prefix("O:") {
-//RS         rest.parse::<u64>().map_err(|_| {
-//RS             ProtocolError::new(format!("malformed compiler-extension load handle: {wire}"))
-//RS         })
-//RS     } else if let Some(msg) = wire.strip_prefix("E:") {
-//RS         Err(ProtocolError::new(msg.to_string()))
-//RS     } else {
-//RS         Err(ProtocolError::new(format!(
-//RS             "malformed compiler-extension load wire: {wire}"
-//RS         )))
-//RS     }
-//RS }
-//RS 
-//RS /// Parse `jet_compiler_extension_analyze` wire (`O:<len>:<hex>` / `E:<message>`).
-//RS pub fn parse_analyze_result(wire: &str) -> Result<Vec<u8>, ProtocolError> {
-//RS     if let Some(rest) = wire.strip_prefix("O:") {
-//RS         let (len_s, hex) = rest.split_once(':').ok_or_else(|| {
-//RS             ProtocolError::new(format!("malformed compiler-extension analyze wire: {wire}"))
-//RS         })?;
-//RS         let len: usize = len_s.parse().map_err(|_| {
-//RS             ProtocolError::new(format!(
-//RS                 "malformed compiler-extension analyze length: {len_s}"
-//RS             ))
-//RS         })?;
-//RS         if hex.len() != len * 2 {
-//RS             return Err(ProtocolError::new(format!(
-//RS                 "compiler-extension analyze hex length mismatch: expected {}, got {}",
-//RS                 len * 2,
-//RS                 hex.len()
-//RS             )));
-//RS         }
-//RS         let mut bytes = Vec::with_capacity(len);
-//RS         let chars: Vec<char> = hex.chars().collect();
-//RS         for chunk in chars.chunks(2) {
-//RS             let s: String = chunk.iter().collect();
-//RS             let b = u8::from_str_radix(&s, 16).map_err(|_| {
-//RS                 ProtocolError::new(format!("malformed compiler-extension analyze hex: {s}"))
-//RS             })?;
-//RS             bytes.push(b);
-//RS         }
-//RS         Ok(bytes)
-//RS     } else if let Some(msg) = wire.strip_prefix("E:") {
-//RS         Err(ProtocolError::new(msg.to_string()))
-//RS     } else {
-//RS         Err(ProtocolError::new(format!(
-//RS             "malformed compiler-extension analyze wire: {wire}"
-//RS         )))
-//RS     }
-//RS }
-//RS 
-//RS /// True when a host/guest failure string looks like a leaked rustc diagnostic (I2).
-//RS pub fn message_exposes_rustc(message: &str) -> bool {
-//RS     let lower = message.to_ascii_lowercase();
-//RS     lower.contains("rustc") || lower.contains("error[e") || lower.contains("--explain")
-//RS }
-//RS 
-//RS /// Load → analyze → validate/stage → accept → close through one
-//RS /// supplied Component Model host. `jetpack` supplies the real Wasmtime
-//RS /// functions; keeping orchestration here preserves one protocol/lifecycle.
-//RS pub fn analyze_with_host(
-//RS     wasm_path: &str,
-//RS     snapshot: &TypedSnapshot,
-//RS     load_guest: fn(&str) -> String,
-//RS     analyze_guest: fn(u64, &[u8]) -> String,
-//RS     close_guest: fn(u64) -> bool,
-//RS ) -> Result<AnalyzeResponse, ProtocolError> {
-//RS     let wire = load_guest(wasm_path);
-//RS     let handle = match parse_load_result(&wire) {
-//RS         Ok(h) => h,
-//RS         Err(e) => {
-//RS             if message_exposes_rustc(&e.message) {
-//RS                 return Err(ProtocolError::new(
-//RS                     "compiler-extension failed with an internal message",
-//RS                 ));
-//RS             }
-//RS             return Err(e);
-//RS         }
-//RS     };
-//RS     let mut session = ExtensionSession::new();
-//RS     if let Err(e) = session.on_loaded(handle) {
-//RS         let _ = close_guest(handle);
-//RS         return Err(e);
-//RS     }
-//RS 
-//RS     let snap_bytes = match snapshot.encode() {
-//RS         Ok(b) => b,
-//RS         Err(e) => {
-//RS             let _ = session.close(close_guest);
-//RS             return Err(e);
-//RS         }
-//RS     };
-//RS     let analyze_wire = analyze_guest(handle, &snap_bytes);
-//RS     let raw = match parse_analyze_result(&analyze_wire) {
-//RS         Ok(b) => b,
-//RS         Err(e) => {
-//RS             let _ = session.close(close_guest);
-//RS             if message_exposes_rustc(&e.message) {
-//RS                 return Err(ProtocolError::new(
-//RS                     "compiler-extension failed with an internal message",
-//RS                 ));
-//RS             }
-//RS             return Err(e);
-//RS         }
-//RS     };
-//RS     if let Err(e) = session.stage_response(snapshot, &raw) {
-//RS         let _ = session.close(close_guest);
-//RS         return Err(e);
-//RS     }
-//RS     let accepted = match session.accept_staged() {
-//RS         Ok(r) => r,
-//RS         Err(e) => {
-//RS             let _ = session.close(close_guest);
-//RS             return Err(e);
-//RS         }
-//RS     };
-//RS     let _ = session.close(close_guest);
-//RS     Ok(accepted)
-//RS }
-//RS 
-//RS /// This host's mechanism identity.
-//RS pub fn mechanism() -> PluginMechanism {
-//RS     PluginMechanism::CompilerExtension
-//RS }
-//RS 
-//RS /// Same wasmtime crate pin as application `core.plugin` (D-DEP-WASM1=A).
-//RS /// Compiler-extension host must not invent a second loader dependency.
-//RS pub fn wasm_substrate_crate_spec() -> (&'static str, &'static str) {
-//RS     WASMTIME_CRATE_SPEC
-//RS }
-//RS 
-//RS /// Hand-written wasmtime Component Model host runtime (include_str substrate,
-//RS /// same ownership pattern as `Prelude/Plugin.rs` for application plugins).
-//RS pub fn runtime_source() -> &'static str {
-//RS     include_str!("Prelude/CompilerExtension.rs")
-//RS }
-//RS 
-//RS /// Canonical `.wit` world text for a compiler-extension component.
-//RS /// Snapshot and response travel as `list<u8>` so the wire schema can version
-//RS /// independently of the WIT shape; the host validates decoded payloads.
-//RS pub fn wit_world() -> String {
-//RS     format!(
-//RS         "package {PACKAGE_NAME};\n\n\
-//RS          world {WORLD_NAME} {{\n\
-//RS          \t/// Versioned typed post-sema snapshot bytes (host-owned schema).\n\
-//RS          \texport {ANALYZE_EXPORT}: func(snapshot: list<u8>) -> list<u8>;\n\
-//RS          }}\n"
-//RS     )
-//RS }
-//RS 
-//RS /// True when `world` names the application-plugin world, not this host.
-//RS pub fn is_application_plugin_world(world: &str) -> bool {
-//RS     world == APPLICATION_PLUGIN_WORLD
-//RS }
-//RS 
-//RS /// True when `world` names this compiler-extension world.
-//RS pub fn is_compiler_extension_world(world: &str) -> bool {
-//RS     world == WORLD_NAME
-//RS }
-//RS 
-//RS // ── DataTree helpers (deterministic stringify; BTreeMap key order) ────────────
-//RS 
-//RS fn object(map: BTreeMap<String, DataTree>) -> DataTree {
-//RS     DataTree::Object(map.into_iter().collect())
-//RS }
-//RS 
-//RS fn object_map(value: &DataTree) -> Result<BTreeMap<String, DataTree>, String> {
-//RS     let DataTree::Object(fields) = value else {
-//RS         return Err("expected a DataTree object".to_string());
-//RS     };
-//RS     Ok(fields.iter().cloned().collect())
-//RS }
-//RS 
-//RS fn stringify(v: &DataTree) -> String {
-//RS     match v {
-//RS         DataTree::Null => "null".into(),
-//RS         DataTree::Bool(true) => "true".into(),
-//RS         DataTree::Bool(false) => "false".into(),
-//RS         DataTree::Int(n) => n.to_string(),
-//RS         DataTree::Float(n) => format!("{n}"),
-//RS         DataTree::Number(text) => text.clone(),
-//RS         DataTree::TypedText(text) | DataTree::Text(text) => JSON::quote(text),
-//RS         DataTree::Bytes(values) => format!(
-//RS             "[{}]",
-//RS             values
-//RS                 .iter()
-//RS                 .map(u8::to_string)
-//RS                 .collect::<Vec<_>>()
-//RS                 .join(",")
-//RS         ),
-//RS         DataTree::Array(items) => {
-//RS             let mut out = String::from("[");
-//RS             for (i, item) in items.iter().enumerate() {
-//RS                 if i > 0 {
-//RS                     out.push(',');
-//RS                 }
-//RS                 out.push_str(&stringify(item));
-//RS             }
-//RS             out.push(']');
-//RS             out
-//RS         }
-//RS         DataTree::Object(map) => {
-//RS             let mut out = String::from("{");
-//RS             for (i, (k, v)) in map.iter().enumerate() {
-//RS                 if i > 0 {
-//RS                     out.push(',');
-//RS                 }
-//RS                 out.push_str(&JSON::quote(k));
-//RS                 out.push(':');
-//RS                 out.push_str(&stringify(v));
-//RS             }
-//RS             out.push('}');
-//RS             out
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn limits_to_json(l: &ResourceLimits) -> DataTree {
-//RS     let mut m = BTreeMap::new();
-//RS     m.insert("max_edits".into(), DataTree::Int(l.max_edits as i64));
-//RS     m.insert(
-//RS         "max_findings".into(),
-//RS         DataTree::Int(l.max_findings as i64),
-//RS     );
-//RS     m.insert("max_fuel".into(), DataTree::Int(l.max_fuel as i64));
-//RS     m.insert(
-//RS         "max_memory_bytes".into(),
-//RS         DataTree::Int(l.max_memory_bytes as i64),
-//RS     );
-//RS     m.insert(
-//RS         "max_response_bytes".into(),
-//RS         DataTree::Int(l.max_response_bytes as i64),
-//RS     );
-//RS     m.insert(
-//RS         "max_table_elements".into(),
-//RS         DataTree::Int(l.max_table_elements as i64),
-//RS     );
-//RS     m.insert("timeout_ms".into(), DataTree::Int(l.timeout_ms as i64));
-//RS     object(m)
-//RS }
-//RS 
-//RS fn limits_from_json(v: &DataTree) -> Result<ResourceLimits, ProtocolError> {
-//RS     let obj =
-//RS         object_map(v).map_err(|e| ProtocolError::new(format!("limits: {e}")))?;
-//RS     require_keys(
-//RS         &obj,
-//RS         &[
-//RS             "max_fuel",
-//RS             "max_memory_bytes",
-//RS             "max_table_elements",
-//RS             "max_findings",
-//RS             "max_edits",
-//RS             "max_response_bytes",
-//RS             "timeout_ms",
-//RS         ],
-//RS     )?;
-//RS     Ok(ResourceLimits {
-//RS         max_fuel: json_u64(obj.get("max_fuel").unwrap(), "max_fuel")?,
-//RS         max_memory_bytes: json_usize(obj.get("max_memory_bytes").unwrap(), "max_memory_bytes")?,
-//RS         max_table_elements: json_usize(
-//RS             obj.get("max_table_elements").unwrap(),
-//RS             "max_table_elements",
-//RS         )?,
-//RS         max_findings: json_usize(obj.get("max_findings").unwrap(), "max_findings")?,
-//RS         max_edits: json_usize(obj.get("max_edits").unwrap(), "max_edits")?,
-//RS         max_response_bytes: json_usize(
-//RS             obj.get("max_response_bytes").unwrap(),
-//RS             "max_response_bytes",
-//RS         )?,
-//RS         timeout_ms: json_u64(obj.get("timeout_ms").unwrap(), "timeout_ms")?,
-//RS     })
-//RS }
-//RS 
-//RS fn span_to_json(s: &SpanFact) -> DataTree {
-//RS     let mut m = BTreeMap::new();
-//RS     m.insert("end".into(), DataTree::Int(s.end as i64));
-//RS     m.insert("file".into(), DataTree::Text(s.file.clone()));
-//RS     m.insert("id".into(), DataTree::Text(s.id.clone()));
-//RS     m.insert("start".into(), DataTree::Int(s.start as i64));
-//RS     object(m)
-//RS }
-//RS 
-//RS fn type_to_json(t: &TypeFact) -> DataTree {
-//RS     let mut m = BTreeMap::new();
-//RS     m.insert("id".into(), DataTree::Text(t.id.clone()));
-//RS     m.insert("repr".into(), DataTree::Text(t.repr.clone()));
-//RS     m.insert("shape".into(), type_shape_to_json(&t.shape));
-//RS     object(m)
-//RS }
-//RS 
-//RS fn type_shape_to_json(shape: &TypeFactShape) -> DataTree {
-//RS     let mut m = BTreeMap::new();
-//RS     match shape {
-//RS         TypeFactShape::Opaque => {
-//RS             m.insert("kind".into(), DataTree::Text("opaque".into()));
-//RS         }
-//RS         TypeFactShape::Scalar => {
-//RS             m.insert("kind".into(), DataTree::Text("scalar".into()));
-//RS         }
-//RS         TypeFactShape::CodableRecord { fields } => {
-//RS             m.insert("kind".into(), DataTree::Text("codable_record".into()));
-//RS             m.insert(
-//RS                 "fields".into(),
-//RS                 DataTree::Array(
-//RS                     fields
-//RS                         .iter()
-//RS                         .map(|field| {
-//RS                             let mut value = BTreeMap::new();
-//RS                             value.insert("name".into(), DataTree::Text(field.name.clone()));
-//RS                             value.insert(
-//RS                                 "type_id".into(),
-//RS                                 DataTree::Text(field.type_id.clone()),
-//RS                             );
-//RS                             object(value)
-//RS                         })
-//RS                         .collect(),
-//RS                 ),
-//RS             );
-//RS         }
-//RS         TypeFactShape::List { element_type_id } => {
-//RS             m.insert("element_type_id".into(), DataTree::Text(element_type_id.clone()));
-//RS             m.insert("kind".into(), DataTree::Text("list".into()));
-//RS         }
-//RS         TypeFactShape::Option { inner_type_id } => {
-//RS             m.insert("inner_type_id".into(), DataTree::Text(inner_type_id.clone()));
-//RS             m.insert("kind".into(), DataTree::Text("option".into()));
-//RS         }
-//RS         TypeFactShape::Result {
-//RS             ok_type_id,
-//RS             error_type_id,
-//RS         } => {
-//RS             m.insert("error_type_id".into(), DataTree::Text(error_type_id.clone()));
-//RS             m.insert("kind".into(), DataTree::Text("result".into()));
-//RS             m.insert("ok_type_id".into(), DataTree::Text(ok_type_id.clone()));
-//RS         }
-//RS     }
-//RS     object(m)
-//RS }
-//RS 
-//RS fn host_import_to_json(import: &HostImportFact) -> DataTree {
-//RS     let mut m = BTreeMap::new();
-//RS     m.insert("id".into(), DataTree::Text(import.id.clone()));
-//RS     m.insert(
-//RS         "operation".into(),
-//RS         DataTree::Text(import.operation.clone()),
-//RS     );
-//RS     m.insert(
-//RS         "parameter_type_ids".into(),
-//RS         DataTree::Array(
-//RS             import
-//RS                 .parameter_type_ids
-//RS                 .iter()
-//RS                 .cloned()
-//RS                 .map(DataTree::Text)
-//RS                 .collect(),
-//RS         ),
-//RS     );
-//RS     m.insert(
-//RS         "required_right".into(),
-//RS         DataTree::Text(import.required_right.clone()),
-//RS     );
-//RS     m.insert(
-//RS         "result_type_id".into(),
-//RS         import
-//RS             .result_type_id
-//RS             .as_ref()
-//RS             .map_or(DataTree::Null, |id| DataTree::Text(id.clone())),
-//RS     );
-//RS     object(m)
-//RS }
-//RS 
-//RS fn symbol_to_json(s: &SymbolFact) -> DataTree {
-//RS     let mut m = BTreeMap::new();
-//RS     m.insert(
-//RS         "effects".into(),
-//RS         DataTree::Array(s.effects.iter().cloned().map(DataTree::Text).collect()),
-//RS     );
-//RS     m.insert("id".into(), DataTree::Text(s.id.clone()));
-//RS     m.insert("kind".into(), DataTree::Text(s.kind.clone()));
-//RS     m.insert("name".into(), DataTree::Text(s.name.clone()));
-//RS     m.insert("provenance".into(), DataTree::Text(s.provenance.clone()));
-//RS     m.insert("span_id".into(), DataTree::Text(s.span_id.clone()));
-//RS     m.insert("type_id".into(), DataTree::Text(s.type_id.clone()));
-//RS     object(m)
-//RS }
-//RS 
-//RS fn finding_to_json(f: &Finding) -> DataTree {
-//RS     let mut m = BTreeMap::new();
-//RS     m.insert("message".into(), DataTree::Text(f.message.clone()));
-//RS     m.insert("rule".into(), DataTree::Text(f.rule.clone()));
-//RS     m.insert("severity".into(), DataTree::Text(f.severity.clone()));
-//RS     m.insert("span_id".into(), DataTree::Text(f.span_id.clone()));
-//RS     object(m)
-//RS }
-//RS 
-//RS fn edit_to_json(e: &ProposedEdit) -> DataTree {
-//RS     let mut m = BTreeMap::new();
-//RS     m.insert("rationale".into(), DataTree::Text(e.rationale.clone()));
-//RS     m.insert(
-//RS         "replacement".into(),
-//RS         DataTree::Text(e.replacement.clone()),
-//RS     );
-//RS     m.insert("span_id".into(), DataTree::Text(e.span_id.clone()));
-//RS     object(m)
-//RS }
-//RS 
-//RS fn require_keys(obj: &BTreeMap<String, DataTree>, keys: &[&str]) -> Result<(), ProtocolError> {
-//RS     for k in keys {
-//RS         if !obj.contains_key(*k) {
-//RS             return Err(ProtocolError::new(format!("missing key `{k}`")));
-//RS         }
-//RS     }
-//RS     // Exact schema: reject unknown keys so wire shape stays frozen.
-//RS     for k in obj.keys() {
-//RS         if !keys.contains(&k.as_str()) {
-//RS             return Err(ProtocolError::new(format!("unknown key `{k}`")));
-//RS         }
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn require_keys_with_optional(
-//RS     obj: &BTreeMap<String, DataTree>,
-//RS     required: &[&str],
-//RS     optional: &[&str],
-//RS ) -> Result<(), ProtocolError> {
-//RS     for key in required {
-//RS         if !obj.contains_key(*key) {
-//RS             return Err(ProtocolError::new(format!("missing key `{key}`")));
-//RS         }
-//RS     }
-//RS     for key in obj.keys() {
-//RS         if !required.contains(&key.as_str()) && !optional.contains(&key.as_str()) {
-//RS             return Err(ProtocolError::new(format!("unknown key `{key}`")));
-//RS         }
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn json_u32(v: &DataTree, name: &str) -> Result<u32, ProtocolError> {
-//RS     match v {
-//RS         DataTree::Int(n) if *n >= 0 && *n <= u32::MAX as i64 => Ok(*n as u32),
-//RS         DataTree::Float(n) if n.fract() == 0.0 && *n >= 0.0 && *n <= u32::MAX as f64 => {
-//RS             Ok(*n as u32)
-//RS         }
-//RS         _ => Err(ProtocolError::new(format!("`{name}` must be a u32"))),
-//RS     }
-//RS }
-//RS 
-//RS fn json_u64(v: &DataTree, name: &str) -> Result<u64, ProtocolError> {
-//RS     match v {
-//RS         DataTree::Int(n) if *n >= 0 => Ok(*n as u64),
-//RS         DataTree::Float(n) if n.fract() == 0.0 && *n >= 0.0 && *n <= (u64::MAX as f64) => {
-//RS             Ok(*n as u64)
-//RS         }
-//RS         _ => Err(ProtocolError::new(format!("`{name}` must be a u64"))),
-//RS     }
-//RS }
-//RS 
-//RS fn json_usize(v: &DataTree, name: &str) -> Result<usize, ProtocolError> {
-//RS     let n = json_u64(v, name)?;
-//RS     usize::try_from(n).map_err(|_| ProtocolError::new(format!("`{name}` out of range")))
-//RS }
-//RS 
-//RS fn parse_abilities(v: &DataTree) -> Result<Vec<Ability>, ProtocolError> {
-//RS     let arr = v
-//RS         .as_array()
-//RS         .map_err(|e| ProtocolError::new(format!("abilities: {e}")))?;
-//RS     let mut out = Vec::with_capacity(arr.len());
-//RS     for item in arr {
-//RS         let s = item.as_str().map_err(ProtocolError::new)?;
-//RS         let cap = Ability::parse(s)
-//RS             .ok_or_else(|| ProtocolError::new(format!("unknown ability `{s}`")))?;
-//RS         out.push(cap);
-//RS     }
-//RS     out.sort();
-//RS     out.dedup();
-//RS     negotiate_abilities(PROTOCOL_VERSION, &out)
-//RS }
-//RS 
-//RS fn parse_string_array(v: &DataTree, name: &str) -> Result<Vec<String>, ProtocolError> {
-//RS     let arr = v
-//RS         .as_array()
-//RS         .map_err(|e| ProtocolError::new(format!("{name}: {e}")))?;
-//RS     arr.iter()
-//RS         .map(|item| {
-//RS             item.as_str()
-//RS                 .map(|s| s.to_string())
-//RS                 .map_err(ProtocolError::new)
-//RS         })
-//RS         .collect()
-//RS }
-//RS 
-//RS fn parse_types(v: &DataTree) -> Result<Vec<TypeFact>, ProtocolError> {
-//RS     let arr = v
-//RS         .as_array()
-//RS         .map_err(|e| ProtocolError::new(format!("types: {e}")))?;
-//RS     let mut out = Vec::with_capacity(arr.len());
-//RS     for item in arr {
-//RS         let obj = object_map(item).map_err(|e| ProtocolError::new(format!("type: {e}")))?;
-//RS         require_keys_with_optional(&obj, &["id", "repr"], &["shape"])?;
-//RS         let shape = obj
-//RS             .get("shape")
-//RS             .map(parse_type_shape)
-//RS             .transpose()?
-//RS             .unwrap_or(TypeFactShape::Opaque);
-//RS         out.push(TypeFact {
-//RS             id: obj
-//RS                 .get("id")
-//RS                 .unwrap()
-//RS                 .as_str()
-//RS                 .map_err(ProtocolError::new)?
-//RS                 .to_string(),
-//RS             repr: obj
-//RS                 .get("repr")
-//RS                 .unwrap()
-//RS                 .as_str()
-//RS                 .map_err(ProtocolError::new)?
-//RS                 .to_string(),
-//RS             shape,
-//RS         });
-//RS     }
-//RS     Ok(out)
-//RS }
-//RS 
-//RS fn parse_type_shape(v: &DataTree) -> Result<TypeFactShape, ProtocolError> {
-//RS     let obj = object_map(v).map_err(|e| ProtocolError::new(format!("type shape: {e}")))?;
-//RS     let kind = obj
-//RS         .get("kind")
-//RS         .ok_or_else(|| ProtocolError::new("type shape is missing `kind`"))?
-//RS         .as_str()
-//RS         .map_err(ProtocolError::new)?;
-//RS     match kind {
-//RS         "opaque" => {
-//RS             require_keys(&obj, &["kind"])?;
-//RS             Ok(TypeFactShape::Opaque)
-//RS         }
-//RS         "scalar" => {
-//RS             require_keys(&obj, &["kind"])?;
-//RS             Ok(TypeFactShape::Scalar)
-//RS         }
-//RS         "codable_record" => {
-//RS             require_keys(&obj, &["kind", "fields"])?;
-//RS             let fields = obj
-//RS                 .get("fields")
-//RS                 .unwrap()
-//RS                 .as_array()
-//RS                 .map_err(|e| ProtocolError::new(format!("record fields: {e}")))?;
-//RS             let mut out = Vec::with_capacity(fields.len());
-//RS             for field in fields {
-//RS                 let field =
-//RS                     object_map(field).map_err(|e| ProtocolError::new(format!("record field: {e}")))?;
-//RS                 require_keys(&field, &["name", "type_id"])?;
-//RS                 out.push(TypeFieldFact {
-//RS                     name: field
-//RS                         .get("name")
-//RS                         .unwrap()
-//RS                         .as_str()
-//RS                         .map_err(ProtocolError::new)?
-//RS                         .to_string(),
-//RS                     type_id: field
-//RS                         .get("type_id")
-//RS                         .unwrap()
-//RS                         .as_str()
-//RS                         .map_err(ProtocolError::new)?
-//RS                         .to_string(),
-//RS                 });
-//RS             }
-//RS             Ok(TypeFactShape::CodableRecord { fields: out })
-//RS         }
-//RS         "list" => {
-//RS             require_keys(&obj, &["kind", "element_type_id"])?;
-//RS             Ok(TypeFactShape::List {
-//RS                 element_type_id: obj
-//RS                     .get("element_type_id")
-//RS                     .unwrap()
-//RS                     .as_str()
-//RS                     .map_err(ProtocolError::new)?
-//RS                     .to_string(),
-//RS             })
-//RS         }
-//RS         "option" => {
-//RS             require_keys(&obj, &["kind", "inner_type_id"])?;
-//RS             Ok(TypeFactShape::Option {
-//RS                 inner_type_id: obj
-//RS                     .get("inner_type_id")
-//RS                     .unwrap()
-//RS                     .as_str()
-//RS                     .map_err(ProtocolError::new)?
-//RS                     .to_string(),
-//RS             })
-//RS         }
-//RS         "result" => {
-//RS             require_keys(&obj, &["kind", "ok_type_id", "error_type_id"])?;
-//RS             Ok(TypeFactShape::Result {
-//RS                 ok_type_id: obj
-//RS                     .get("ok_type_id")
-//RS                     .unwrap()
-//RS                     .as_str()
-//RS                     .map_err(ProtocolError::new)?
-//RS                     .to_string(),
-//RS                 error_type_id: obj
-//RS                     .get("error_type_id")
-//RS                     .unwrap()
-//RS                     .as_str()
-//RS                     .map_err(ProtocolError::new)?
-//RS                     .to_string(),
-//RS             })
-//RS         }
-//RS         other => Err(ProtocolError::new(format!(
-//RS             "unknown type shape `{other}`"
-//RS         ))),
-//RS     }
-//RS }
-//RS 
-//RS fn parse_host_imports(v: &DataTree) -> Result<Vec<HostImportFact>, ProtocolError> {
-//RS     let arr = v
-//RS         .as_array()
-//RS         .map_err(|e| ProtocolError::new(format!("host_imports: {e}")))?;
-//RS     let mut out = Vec::with_capacity(arr.len());
-//RS     for item in arr {
-//RS         let obj = object_map(item).map_err(|e| ProtocolError::new(format!("host import: {e}")))?;
-//RS         require_keys(
-//RS             &obj,
-//RS             &[
-//RS                 "id",
-//RS                 "operation",
-//RS                 "parameter_type_ids",
-//RS                 "required_right",
-//RS                 "result_type_id",
-//RS             ],
-//RS         )?;
-//RS         let result_type_id = match obj.get("result_type_id").unwrap() {
-//RS             DataTree::Null => None,
-//RS             value => Some(value.as_str().map_err(ProtocolError::new)?.to_string()),
-//RS         };
-//RS         out.push(HostImportFact {
-//RS             id: obj
-//RS                 .get("id")
-//RS                 .unwrap()
-//RS                 .as_str()
-//RS                 .map_err(ProtocolError::new)?
-//RS                 .to_string(),
-//RS             operation: obj
-//RS                 .get("operation")
-//RS                 .unwrap()
-//RS                 .as_str()
-//RS                 .map_err(ProtocolError::new)?
-//RS                 .to_string(),
-//RS             parameter_type_ids: parse_string_array(
-//RS                 obj.get("parameter_type_ids").unwrap(),
-//RS                 "parameter_type_ids",
-//RS             )?,
-//RS             required_right: obj
-//RS                 .get("required_right")
-//RS                 .unwrap()
-//RS                 .as_str()
-//RS                 .map_err(ProtocolError::new)?
-//RS                 .to_string(),
-//RS             result_type_id,
-//RS         });
-//RS     }
-//RS     Ok(out)
-//RS }
-//RS 
-//RS fn validate_interface_facts(
-//RS     types: &[TypeFact],
-//RS     symbols: &[SymbolFact],
-//RS     spans: &[SpanFact],
-//RS     host_imports: &[HostImportFact],
-//RS ) -> Result<(), ProtocolError> {
-//RS     let mut type_ids = BTreeSet::new();
-//RS     for fact in types {
-//RS         if fact.id.is_empty() || !type_ids.insert(fact.id.as_str()) {
-//RS             return Err(ProtocolError::new(format!(
-//RS                 "duplicate or empty type identity `{}`",
-//RS                 fact.id
-//RS             )));
-//RS         }
-//RS     }
-//RS     for fact in types {
-//RS         let referenced = |id: &str, label: &str| {
-//RS             if id.is_empty() || !type_ids.contains(id) {
-//RS                 Err(ProtocolError::new(format!(
-//RS                     "type `{}` references unknown {label} `{id}`",
-//RS                     fact.id
-//RS                 )))
-//RS             } else {
-//RS                 Ok(())
-//RS             }
-//RS         };
-//RS         match &fact.shape {
-//RS             TypeFactShape::Opaque | TypeFactShape::Scalar => {}
-//RS             TypeFactShape::CodableRecord { fields } => {
-//RS                 let mut field_names = BTreeSet::new();
-//RS                 for field in fields {
-//RS                     if field.name.is_empty() || !field_names.insert(field.name.as_str()) {
-//RS                         return Err(ProtocolError::new(format!(
-//RS                             "type `{}` repeats or omits a record field name",
-//RS                             fact.id
-//RS                         )));
-//RS                     }
-//RS                     referenced(&field.type_id, "record field type")?;
-//RS                 }
-//RS             }
-//RS             TypeFactShape::List { element_type_id } => {
-//RS                 referenced(element_type_id, "list element type")?;
-//RS             }
-//RS             TypeFactShape::Option { inner_type_id } => {
-//RS                 referenced(inner_type_id, "option inner type")?;
-//RS             }
-//RS             TypeFactShape::Result {
-//RS                 ok_type_id,
-//RS                 error_type_id,
-//RS             } => {
-//RS                 referenced(ok_type_id, "result success type")?;
-//RS                 referenced(error_type_id, "result error type")?;
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     let mut span_ids = BTreeSet::new();
-//RS     for span in spans {
-//RS         if span.id.is_empty() || !span_ids.insert(span.id.as_str()) {
-//RS             return Err(ProtocolError::new(format!(
-//RS                 "duplicate or empty span identity `{}`",
-//RS                 span.id
-//RS             )));
-//RS         }
-//RS     }
-//RS 
-//RS     let mut symbol_ids = BTreeSet::new();
-//RS     for symbol in symbols {
-//RS         if symbol.id.is_empty() || !symbol_ids.insert(symbol.id.as_str()) {
-//RS             return Err(ProtocolError::new(format!(
-//RS                 "duplicate or empty symbol identity `{}`",
-//RS                 symbol.id
-//RS             )));
-//RS         }
-//RS         if !type_ids.contains(symbol.type_id.as_str()) {
-//RS             return Err(ProtocolError::new(format!(
-//RS                 "symbol `{}` references unknown type `{}`",
-//RS                 symbol.id, symbol.type_id
-//RS             )));
-//RS         }
-//RS         if !span_ids.contains(symbol.span_id.as_str()) {
-//RS             return Err(ProtocolError::new(format!(
-//RS                 "symbol `{}` references unknown span `{}`",
-//RS                 symbol.id, symbol.span_id
-//RS             )));
-//RS         }
-//RS     }
-//RS 
-//RS     let mut import_ids = BTreeSet::new();
-//RS     for import in host_imports {
-//RS         if import.id.is_empty() || !import_ids.insert(import.id.as_str()) {
-//RS             return Err(ProtocolError::new(format!(
-//RS                 "duplicate or empty host-import identity `{}`",
-//RS                 import.id
-//RS             )));
-//RS         }
-//RS         if jet_foundation::Authority::parse_right(&import.required_right).is_none() {
-//RS             return Err(ProtocolError::new(format!(
-//RS                 "host import `{}` has unknown required right `{}`",
-//RS                 import.id, import.required_right
-//RS             )));
-//RS         }
-//RS         for type_id in import.payload_type_ids() {
-//RS             if !type_ids.contains(type_id) {
-//RS                 return Err(ProtocolError::new(format!(
-//RS                     "host import `{}` references unknown payload type `{type_id}`",
-//RS                     import.id
-//RS                 )));
-//RS             }
-//RS         }
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn parse_spans(v: &DataTree) -> Result<Vec<SpanFact>, ProtocolError> {
-//RS     let arr = v
-//RS         .as_array()
-//RS         .map_err(|e| ProtocolError::new(format!("spans: {e}")))?;
-//RS     let mut out = Vec::with_capacity(arr.len());
-//RS     for item in arr {
-//RS         let obj = object_map(item).map_err(|e| ProtocolError::new(format!("span: {e}")))?;
-//RS         require_keys(&obj, &["id", "file", "start", "end"])?;
-//RS         out.push(SpanFact {
-//RS             id: obj
-//RS                 .get("id")
-//RS                 .unwrap()
-//RS                 .as_str()
-//RS                 .map_err(ProtocolError::new)?
-//RS                 .to_string(),
-//RS             file: obj
-//RS                 .get("file")
-//RS                 .unwrap()
-//RS                 .as_str()
-//RS                 .map_err(ProtocolError::new)?
-//RS                 .to_string(),
-//RS             start: json_u32(obj.get("start").unwrap(), "start")?,
-//RS             end: json_u32(obj.get("end").unwrap(), "end")?,
-//RS         });
-//RS     }
-//RS     Ok(out)
-//RS }
-//RS 
-//RS fn parse_symbols(v: &DataTree) -> Result<Vec<SymbolFact>, ProtocolError> {
-//RS     let arr = v
-//RS         .as_array()
-//RS         .map_err(|e| ProtocolError::new(format!("symbols: {e}")))?;
-//RS     let mut out = Vec::with_capacity(arr.len());
-//RS     for item in arr {
-//RS         let obj = object_map(item).map_err(|e| ProtocolError::new(format!("symbol: {e}")))?;
-//RS         require_keys(
-//RS             &obj,
-//RS             &[
-//RS                 "id",
-//RS                 "name",
-//RS                 "kind",
-//RS                 "type_id",
-//RS                 "span_id",
-//RS                 "effects",
-//RS                 "provenance",
-//RS             ],
-//RS         )?;
-//RS         out.push(SymbolFact {
-//RS             id: obj
-//RS                 .get("id")
-//RS                 .unwrap()
-//RS                 .as_str()
-//RS                 .map_err(ProtocolError::new)?
-//RS                 .to_string(),
-//RS             name: obj
-//RS                 .get("name")
-//RS                 .unwrap()
-//RS                 .as_str()
-//RS                 .map_err(ProtocolError::new)?
-//RS                 .to_string(),
-//RS             kind: obj
-//RS                 .get("kind")
-//RS                 .unwrap()
-//RS                 .as_str()
-//RS                 .map_err(ProtocolError::new)?
-//RS                 .to_string(),
-//RS             type_id: obj
-//RS                 .get("type_id")
-//RS                 .unwrap()
-//RS                 .as_str()
-//RS                 .map_err(ProtocolError::new)?
-//RS                 .to_string(),
-//RS             span_id: obj
-//RS                 .get("span_id")
-//RS                 .unwrap()
-//RS                 .as_str()
-//RS                 .map_err(ProtocolError::new)?
-//RS                 .to_string(),
-//RS             effects: parse_string_array(obj.get("effects").unwrap(), "effects")?,
-//RS             provenance: obj
-//RS                 .get("provenance")
-//RS                 .unwrap()
-//RS                 .as_str()
-//RS                 .map_err(ProtocolError::new)?
-//RS                 .to_string(),
-//RS         });
-//RS     }
-//RS     Ok(out)
-//RS }
-//RS 
-//RS fn parse_findings(v: &DataTree) -> Result<Vec<Finding>, ProtocolError> {
-//RS     let arr = v
-//RS         .as_array()
-//RS         .map_err(|e| ProtocolError::new(format!("findings: {e}")))?;
-//RS     let mut out = Vec::with_capacity(arr.len());
-//RS     for item in arr {
-//RS         let obj = object_map(item).map_err(|e| ProtocolError::new(format!("finding: {e}")))?;
-//RS         require_keys(&obj, &["rule", "span_id", "message", "severity"])?;
-//RS         out.push(Finding {
-//RS             rule: obj
-//RS                 .get("rule")
-//RS                 .unwrap()
-//RS                 .as_str()
-//RS                 .map_err(ProtocolError::new)?
-//RS                 .to_string(),
-//RS             span_id: obj
-//RS                 .get("span_id")
-//RS                 .unwrap()
-//RS                 .as_str()
-//RS                 .map_err(ProtocolError::new)?
-//RS                 .to_string(),
-//RS             message: obj
-//RS                 .get("message")
-//RS                 .unwrap()
-//RS                 .as_str()
-//RS                 .map_err(ProtocolError::new)?
-//RS                 .to_string(),
-//RS             severity: obj
-//RS                 .get("severity")
-//RS                 .unwrap()
-//RS                 .as_str()
-//RS                 .map_err(ProtocolError::new)?
-//RS                 .to_string(),
-//RS         });
-//RS     }
-//RS     Ok(out)
-//RS }
-//RS 
-//RS fn parse_edits(v: &DataTree) -> Result<Vec<ProposedEdit>, ProtocolError> {
-//RS     let arr = v
-//RS         .as_array()
-//RS         .map_err(|e| ProtocolError::new(format!("proposed_edits: {e}")))?;
-//RS     let mut out = Vec::with_capacity(arr.len());
-//RS     for item in arr {
-//RS         let obj = object_map(item).map_err(|e| ProtocolError::new(format!("proposed_edit: {e}")))?;
-//RS         require_keys(&obj, &["span_id", "replacement", "rationale"])?;
-//RS         out.push(ProposedEdit {
-//RS             span_id: obj
-//RS                 .get("span_id")
-//RS                 .unwrap()
-//RS                 .as_str()
-//RS                 .map_err(ProtocolError::new)?
-//RS                 .to_string(),
-//RS             replacement: obj
-//RS                 .get("replacement")
-//RS                 .unwrap()
-//RS                 .as_str()
-//RS                 .map_err(ProtocolError::new)?
-//RS                 .to_string(),
-//RS             rationale: obj
-//RS                 .get("rationale")
-//RS                 .unwrap()
-//RS                 .as_str()
-//RS                 .map_err(ProtocolError::new)?
-//RS                 .to_string(),
-//RS         });
-//RS     }
-//RS     Ok(out)
-//RS }
-//RS 
-//RS #[cfg(test)]
-//RS mod tests {
-//RS     use super::*;
-//RS 
-//RS     fn sample_snapshot() -> TypedSnapshot {
-//RS         TypedSnapshot::new(
-//RS             Ability::v1_defaults().to_vec(),
-//RS             vec![TypeFact {
-//RS                 id: "t1".into(),
-//RS                 repr: "Int".into(),
-//RS                 shape: TypeFactShape::Scalar,
-//RS             }],
-//RS             vec![SymbolFact {
-//RS                 id: "s1".into(),
-//RS                 name: "x".into(),
-//RS                 kind: "let".into(),
-//RS                 type_id: "t1".into(),
-//RS                 span_id: "sp1".into(),
-//RS                 effects: vec!["pure".into()],
-//RS                 provenance: "sema".into(),
-//RS             }],
-//RS             vec![SpanFact {
-//RS                 id: "sp1".into(),
-//RS                 file: "main.jet".into(),
-//RS                 start: 10,
-//RS                 end: 11,
-//RS             }],
-//RS         )
-//RS         .unwrap()
-//RS     }
-//RS     #[test]
-//RS     fn structured_types_and_host_imports_roundtrip_as_one_snapshot() {
-//RS         let snapshot = TypedSnapshot::new_with_imports(
-//RS             Ability::v1_defaults().to_vec(),
-//RS             vec![
-//RS                 TypeFact {
-//RS                     id: "t-list".into(),
-//RS                     repr: "[Int]".into(),
-//RS                     shape: TypeFactShape::List {
-//RS                         element_type_id: "t-int".into(),
-//RS                     },
-//RS                 },
-//RS                 TypeFact {
-//RS                     id: "t-int".into(),
-//RS                     repr: "Int".into(),
-//RS                     shape: TypeFactShape::Scalar,
-//RS                 },
-//RS             ],
-//RS             Vec::new(),
-//RS             Vec::new(),
-//RS             vec![HostImportFact::new(
-//RS                 "host-read",
-//RS                 "read_file",
-//RS                 "FS.Read",
-//RS                 vec!["t-list".into()],
-//RS                 Some("t-int".into()),
-//RS             )],
-// END-PORT-PENDING 2088 crates/jet-pkg-model/src/CompilerExtension.rs:1-1800
+// Compiler-extension source ownership. Reuse CompilerExtension.jet's sole
+// protocol, fact carriers, validation, and session bodies; no parallel API.
+use jet_pkg_model.FFI.[WASMTIME_CRATE_SPEC]
 
+// Rust: crates/jet-pkg-model/src/CompilerExtension.rs:45
+// PluginMechanism -> CompilerExtension.jet:41.
+// Rust: crates/jet-pkg-model/src/CompilerExtension.rs:55
+// PROTOCOL_VERSION -> CompilerExtension.jet:17 EXTENSION_PROTOCOL_VERSION.
+// Rust: crates/jet-pkg-model/src/CompilerExtension.rs:58
+// STAGE -> CompilerExtension.jet:19 EXTENSION_STAGE.
+// Rust: crates/jet-pkg-model/src/CompilerExtension.rs:62
+// WORLD_NAME -> CompilerExtension.jet:21 EXTENSION_WORLD_NAME.
+// Rust: crates/jet-pkg-model/src/CompilerExtension.rs:65
+// PACKAGE_NAME -> CompilerExtension.jet:22 EXTENSION_PACKAGE_NAME.
+// Rust: crates/jet-pkg-model/src/CompilerExtension.rs:69
+// APPLICATION_PLUGIN_WORLD -> CompilerExtension.jet:25 EXTENSION_APPLICATION_PLUGIN_WORLD.
+// Rust: crates/jet-pkg-model/src/CompilerExtension.rs:74
+// ANALYZE_EXPORT -> CompilerExtension.jet:27 EXTENSION_ANALYZE_EXPORT.
+// Rust: crates/jet-pkg-model/src/CompilerExtension.rs:80
+// ENV_COMPILER_EXTENSION -> CompilerExtension.jet:30 EXTENSION_ENV_COMPILER_EXTENSION.
+// Rust: crates/jet-pkg-model/src/CompilerExtension.rs:83
+// HOST_SUBCOMMAND -> CompilerExtension.jet:32 EXTENSION_HOST_SUBCOMMAND.
+// Rust: crates/jet-pkg-model/src/CompilerExtension.rs:86
+// MAX_SNAPSHOT_BYTES -> CompilerExtension.jet:34 EXTENSION_MAX_SNAPSHOT_BYTES.
+// Rust: crates/jet-pkg-model/src/CompilerExtension.rs:90
+// HOST_PROCESS_TIMEOUT_MS -> CompilerExtension.jet:36 EXTENSION_HOST_PROCESS_TIMEOUT_MS.
+
+// Rust: crates/jet-pkg-model/src/CompilerExtension.rs:95
+// Ability -> CompilerExtension.jet:52 ExtensionAbility.
+// Rust: crates/jet-pkg-model/src/CompilerExtension.rs:106
+// Ability.as_str -> CompilerExtension.jet:61.
+// Rust: crates/jet-pkg-model/src/CompilerExtension.rs:118
+// Ability.parse -> CompilerExtension.jet:73.
+// Rust: crates/jet-pkg-model/src/CompilerExtension.rs:132
+// Ability.v1_defaults -> CompilerExtension.jet:100.
+// Rust: crates/jet-pkg-model/src/CompilerExtension.rs:148
+// ResourceLimits -> CompilerExtension.jet:110 ExtensionResourceLimits.
+// Rust: crates/jet-pkg-model/src/CompilerExtension.rs:167
+// ResourceLimits.v1_defaults -> CompilerExtension.jet:126.
+// Rust: crates/jet-pkg-model/src/CompilerExtension.rs:184
+// TrustPolicy -> CompilerExtension.jet:160 ExtensionTrustPolicy.
+// Rust: crates/jet-pkg-model/src/CompilerExtension.rs:189
+// TrustPolicy.as_str -> CompilerExtension.jet:163.
+// Rust: crates/jet-pkg-model/src/CompilerExtension.rs:195
+// TrustPolicy.parse -> CompilerExtension.jet:169.
+// Rust: crates/jet-pkg-model/src/CompilerExtension.rs:205
+// ProtocolError -> CompilerExtension.jet:180 ExtensionProtocolError (#Error).
+// Rust: crates/jet-pkg-model/src/CompilerExtension.rs:210
+// ProtocolError.new -> CompilerExtension.jet:183.
+
+// Rust: crates/jet-pkg-model/src/CompilerExtension.rs:217
+impl ExtensionProtocolError {
+    // Rust: crates/jet-pkg-model/src/CompilerExtension.rs:218
+    // GATE #4499: the standard formatter protocol; preserve the exact message.
+    fn fmt(self, formatter: &std.fmt.Formatter) -> std.fmt.Result {
+        &formatter.write_str(self.message)
+    }
+}
+
+// Rust: crates/jet-pkg-model/src/CompilerExtension.rs:224
+// negotiate_abilities -> CompilerExtension.jet:607 pkg_extension_negotiate_abilities.
+// Rust: crates/jet-pkg-model/src/CompilerExtension.rs:249
+// SpanFact -> CompilerExtension.jet:189.
+// Rust: crates/jet-pkg-model/src/CompilerExtension.rs:260
+// TypeFactShape -> CompilerExtension.jet:203.
+// Rust: crates/jet-pkg-model/src/CompilerExtension.rs:273
+// TypeFieldFact -> CompilerExtension.jet:267.
+// Rust: crates/jet-pkg-model/src/CompilerExtension.rs:281
+// TypeFact -> CompilerExtension.jet:274.
+// Rust: crates/jet-pkg-model/src/CompilerExtension.rs:289
+// SymbolFact -> CompilerExtension.jet:285.
+// Rust: crates/jet-pkg-model/src/CompilerExtension.rs:301
+// TypedSnapshot -> CompilerExtension.jet:310.
+// Rust: crates/jet-pkg-model/src/CompilerExtension.rs:317
+// TypedSnapshot.new -> CompilerExtension.jet:322.
+// Rust: crates/jet-pkg-model/src/CompilerExtension.rs:328
+// TypedSnapshot.new_with_imports -> CompilerExtension.jet:328.
+// Rust: crates/jet-pkg-model/src/CompilerExtension.rs:358
+// TypedSnapshot.encode -> CompilerExtension.jet:353 encode_bytes.
+// Rust: crates/jet-pkg-model/src/CompilerExtension.rs:415
+// TypedSnapshot.decode -> CompilerExtension.jet:381 decode_bytes.
+// Rust: crates/jet-pkg-model/src/CompilerExtension.rs:482
+// TypedSnapshot.span_ids -> CompilerExtension.jet:405.
+// Rust: crates/jet-pkg-model/src/CompilerExtension.rs:486
+// TypedSnapshot.type_ids -> CompilerExtension.jet:411.
+// Rust: crates/jet-pkg-model/src/CompilerExtension.rs:493
+// Finding -> CompilerExtension.jet:419 ExtensionFinding.
+// Rust: crates/jet-pkg-model/src/CompilerExtension.rs:502
+// ProposedEdit -> CompilerExtension.jet:431 ExtensionProposedEdit.
+// Rust: crates/jet-pkg-model/src/CompilerExtension.rs:510
+// AnalyzeResponse -> CompilerExtension.jet:442.
+// Rust: crates/jet-pkg-model/src/CompilerExtension.rs:519
+// AnalyzeResponse.encode -> CompilerExtension.jet:450 encode_bytes.
+// Rust: crates/jet-pkg-model/src/CompilerExtension.rs:543
+// AnalyzeResponse.decode -> CompilerExtension.jet:464 decode_bytes.
+// Rust: crates/jet-pkg-model/src/CompilerExtension.rs:569
+// validate_response -> CompilerExtension.jet:480 AnalyzeResponse.validate.
+// Rust: crates/jet-pkg-model/src/CompilerExtension.rs:672
+// decode_and_validate_response -> CompilerExtension.jet:518 AnalyzeResponse.decode_and_validate.
+// Rust: crates/jet-pkg-model/src/CompilerExtension.rs:683
+// SessionPhase -> CompilerExtension.jet:526 ExtensionSessionPhase.
+// Rust: crates/jet-pkg-model/src/CompilerExtension.rs:693
+// ExtensionSession -> CompilerExtension.jet:535.
+// Rust: crates/jet-pkg-model/src/CompilerExtension.rs:702
+// ExtensionSession.new -> CompilerExtension.jet:542.
+// Rust: crates/jet-pkg-model/src/CompilerExtension.rs:711
+// ExtensionSession.phase -> CompilerExtension.jet:546.
+// Rust: crates/jet-pkg-model/src/CompilerExtension.rs:715
+// ExtensionSession.is_committed -> CompilerExtension.jet:550.
+// Rust: crates/jet-pkg-model/src/CompilerExtension.rs:719
+// ExtensionSession.staged -> CompilerExtension.jet:554.
+// Rust: crates/jet-pkg-model/src/CompilerExtension.rs:723
+// ExtensionSession.on_loaded -> CompilerExtension.jet:558.
+// Rust: crates/jet-pkg-model/src/CompilerExtension.rs:738
+// ExtensionSession.stage_response -> CompilerExtension.jet:566.
+// Rust: crates/jet-pkg-model/src/CompilerExtension.rs:761
+// ExtensionSession.rollback -> CompilerExtension.jet:576.
+// Rust: crates/jet-pkg-model/src/CompilerExtension.rs:766
+// ExtensionSession.accept_staged -> CompilerExtension.jet:581.
+// Rust: crates/jet-pkg-model/src/CompilerExtension.rs:785
+// ExtensionSession.close -> CompilerExtension.jet:592.
+
+// Rust: crates/jet-pkg-model/src/CompilerExtension.rs:797
+impl ExtensionSession {
+    // Rust: crates/jet-pkg-model/src/CompilerExtension.rs:798
+    fn default() -> ExtensionSession { ExtensionSession.new() }
+}
+
+// Rust: crates/jet-pkg-model/src/CompilerExtension.rs:805
+// parse_load_result -> CompilerExtension.jet:621 pkg_extension_parse_load_result.
+// Rust: crates/jet-pkg-model/src/CompilerExtension.rs:820
+// parse_analyze_result -> CompilerExtension.jet:637 pkg_extension_parse_analyze_result.
+// Rust: crates/jet-pkg-model/src/CompilerExtension.rs:857
+// message_exposes_rustc -> CompilerExtension.jet:658 pkg_extension_message_exposes_rustc.
+// Rust: crates/jet-pkg-model/src/CompilerExtension.rs:865
+// analyze_with_host -> CompilerExtension.jet:672 pkg_extension_analyze_with_host.
+// Rust: crates/jet-pkg-model/src/CompilerExtension.rs:926
+// mechanism -> CompilerExtension.jet:720 pkg_extension_mechanism.
+
+// Rust: crates/jet-pkg-model/src/CompilerExtension.rs:932
+pub fn wasm_substrate_crate_spec() -> (String, String) { WASMTIME_CRATE_SPEC }
+
+// Rust: crates/jet-pkg-model/src/CompilerExtension.rs:938
+// This is immutable reference source text for source-inspection assertions only.
+// It does not compile or invoke a Rust host. Execution uses the native Jet host.
+pub fn runtime_source() -> String {
+    // GATE #4494: compile-time embedded-source primitive.
+    std.include_str("crates/jet-pkg-model/src/Prelude/CompilerExtension.rs")
+}
+
+// Rust: crates/jet-pkg-model/src/CompilerExtension.rs:945
+// wit_world -> CompilerExtension.jet:727 pkg_extension_wit_world.
+// Rust: crates/jet-pkg-model/src/CompilerExtension.rs:956
+// is_application_plugin_world -> CompilerExtension.jet:732 pkg_extension_is_application_plugin_world.
+// Rust: crates/jet-pkg-model/src/CompilerExtension.rs:961
+// is_compiler_extension_world -> CompilerExtension.jet:737 pkg_extension_is_compiler_extension_world.
+// Rust: crates/jet-pkg-model/src/CompilerExtension.rs:967
+// object -> canonical DataTree.Object constructor (same map carrier).
+// Rust: crates/jet-pkg-model/src/CompilerExtension.rs:971
+// object_map -> canonical pkg_json_object used by CompilerExtension.jet:749 pkg_extension_object.
+// Rust: crates/jet-pkg-model/src/CompilerExtension.rs:978
+// stringify -> json.canonical used by CompilerExtension.jet:367/455; byte-ordered keys.
+// Rust: crates/jet-pkg-model/src/CompilerExtension.rs:1022
+// limits_to_json -> CompilerExtension.jet:130 ExtensionResourceLimits.to_json_tree.
+// Rust: crates/jet-pkg-model/src/CompilerExtension.rs:1046
+// limits_from_json -> CompilerExtension.jet:142 ExtensionResourceLimits.from_json_tree.
+// Rust: crates/jet-pkg-model/src/CompilerExtension.rs:1078
+// span_to_json -> CompilerExtension.jet:195 SpanFact.to_json_tree.
+// Rust: crates/jet-pkg-model/src/CompilerExtension.rs:1087
+// type_to_json -> CompilerExtension.jet:279 TypeFact.to_json_tree.
+// Rust: crates/jet-pkg-model/src/CompilerExtension.rs:1095
+// type_shape_to_json -> CompilerExtension.jet:211 TypeFactShape.to_json_tree.
+// Rust: crates/jet-pkg-model/src/CompilerExtension.rs:1144
+// host_import_to_json -> CompilerExtension.jet:840 pkg_extension_host_import_json.
+// Rust: crates/jet-pkg-model/src/CompilerExtension.rs:1176
+// symbol_to_json -> CompilerExtension.jet:294 SymbolFact.to_json_tree.
+// Rust: crates/jet-pkg-model/src/CompilerExtension.rs:1191
+// finding_to_json -> CompilerExtension.jet:425 ExtensionFinding.to_json_tree.
+// Rust: crates/jet-pkg-model/src/CompilerExtension.rs:1200
+// edit_to_json -> CompilerExtension.jet:436 ExtensionProposedEdit.to_json_tree.
+// Rust: crates/jet-pkg-model/src/CompilerExtension.rs:1211
+// require_keys -> CompilerExtension.jet:767 pkg_extension_require_keys (empty optional list).
+// Rust: crates/jet-pkg-model/src/CompilerExtension.rs:1226
+// require_keys_with_optional -> CompilerExtension.jet:767 pkg_extension_require_keys.
+// Rust: crates/jet-pkg-model/src/CompilerExtension.rs:1244
+// json_u32 -> CompilerExtension.jet:796 pkg_extension_json_u32.
+// Rust: crates/jet-pkg-model/src/CompilerExtension.rs:1254
+// json_u64 -> CompilerExtension.jet:801 pkg_extension_json_u64.
+
+// Rust: crates/jet-pkg-model/src/CompilerExtension.rs:1264
+fn json_usize(value: DataTree, name: String) -> UInt ExtensionProtocolError! {
+    n :: pkg_extension_json_u64(value, name)
+    UInt.try_from(n).map_err(_ -> ExtensionProtocolError.new("`{name}` out of range"))
+}
+
+// Rust: crates/jet-pkg-model/src/CompilerExtension.rs:1269
+// parse_abilities -> CompilerExtension.jet:807 pkg_extension_parse_abilities.
+// Rust: crates/jet-pkg-model/src/CompilerExtension.rs:1285
+// parse_string_array -> CompilerExtension.jet:818 pkg_extension_string_array.
+// Rust: crates/jet-pkg-model/src/CompilerExtension.rs:1298
+// parse_types -> CompilerExtension.jet:825 pkg_extension_parse_types.
+// Rust: crates/jet-pkg-model/src/CompilerExtension.rs:1330
+// parse_type_shape -> CompilerExtension.jet:226 TypeFactShape.from_json_tree.
+// Rust: crates/jet-pkg-model/src/CompilerExtension.rs:1420
+// parse_host_imports -> CompilerExtension.jet:854 pkg_extension_parse_host_imports.
+// Rust: crates/jet-pkg-model/src/CompilerExtension.rs:1470
+// validate_interface_facts -> CompilerExtension.jet:878 pkg_extension_validate_interface_facts.
+// Rust: crates/jet-pkg-model/src/CompilerExtension.rs:1584
+// parse_spans -> CompilerExtension.jet:936 pkg_extension_parse_spans.
+// Rust: crates/jet-pkg-model/src/CompilerExtension.rs:1612
+// parse_symbols -> CompilerExtension.jet:952 pkg_extension_parse_symbols.
+// Rust: crates/jet-pkg-model/src/CompilerExtension.rs:1674
+// parse_findings -> CompilerExtension.jet:971 pkg_extension_parse_findings.
+// Rust: crates/jet-pkg-model/src/CompilerExtension.rs:1712
+// parse_edits -> CompilerExtension.jet:987 pkg_extension_parse_edits.
+
+// Rust: crates/jet-pkg-model/src/CompilerExtension.rs:1748
+// sample_snapshot -> paired Tests/CompilerExtension.jet:6 pkg_test_extension_snapshot.
+// Rust: crates/jet-pkg-model/src/CompilerExtension.rs:1775
+// structured_types_and_host_imports_roundtrip_as_one_snapshot (whole test through
+// 1806) -> paired Tests/CompilerExtension.jet:37; the sole existing registration.
+// Packet 2089 must omit the 1801-1806 orphan tail.

@@ -1,0 +1,701 @@
+// Private continuation of JetpackEngine02 imports and canonical native fixtures.
+// Rust: tests/jetpack_engine.rs:1813
+#Test("package_policy_parses_exact_expiring_source_exception") {
+    raw :: "\nname: \"consumer\"\nversion: \"0.1.0\"\npolicy: {\n    exceptions: [PolicyException{\n        id: \"JSA-2026-0001\",\n        scope: \"Acme.Widget#1.2.3\",\n        reason: \"urgent security fix\",\n        expires: 9999999999,\n    }],\n}\n"
+    manifest :: Manifest.parse(OSPath.from("package.jet"), raw).expect("source policy exception should parse")
+    assert(manifest.policy.exceptions.len() == 1)
+    exception :: manifest.policy.exceptions[0]
+    assert(exception.id == "JSA-2026-0001")
+    assert(exception.scope == "Acme.Widget#1.2.3")
+    assert(exception.matches("Acme.Widget", "1.2.3"))
+    assert(exception.summary().contains("reason=urgent security fix"))
+    invalid :: Manifest.parse(OSPath.from("package.jet"), "name: \"consumer\"\nversion: \"0.1.0\"\npolicy: { exceptions: [PolicyException{ id: \"JSA-1\", scope: \"Acme.Widget#^1.2\", reason: \"why\", expires: 10 }] }\n").expect_err("exception scope ranges must fail closed")
+    assert(invalid.code == "E1206")
+    assert(invalid.why.contains("PolicyException.scope"))
+}
+// Rust: tests/jetpack_engine.rs:1845
+#Test("package_policy_drops_expired_source_exception_from_receipt") {
+    policy := PackagePolicy.default()
+    policy.exceptions = [PackagePolicyException]{PackagePolicyException{id: "JSA-EXPIRED", scope: "Acme.Widget#1.2.3", reason: "old waiver", expires_at: 0}}
+    receipt :: authorize_package_candidate(policy, "Acme.Widget", "1.2.3", Val("MIT"), "public").expect("expired exceptions do not invalidate otherwise valid candidate")
+    assert(receipt.exception == None)
+    assert(!receipt.summary().contains("exception="))
+}
+// Rust: tests/jetpack_engine.rs:1868
+#Test("package_policy_rejects_unmapped_or_non_spdx_candidates_before_ingest") {
+    policy := PackagePolicy.default()
+    policy.licenses = Val([String]{"MIT"})
+    policy.source_maps = [(String, [String])]{("Acme.*", [String]{"internal"})}
+    source_error :: authorize_package_candidate(policy, "Acme.Widget", "1.2.3", Val("MIT"), "public").expect_err("dependency-confusion source must be denied")
+    assert(source_error.detail.contains("not allowed"))
+    license_error :: validate_published_license("Acme.Widget", "1.2.3", Val("not a license")).expect_err("malformed SPDX must be denied")
+    assert(license_error.detail.contains("invalid SPDX"))
+    diagnostic :: package_policy_diagnostic(license_error)
+    assert(diagnostic.code == "E2607")
+    assert(diagnostic.what.contains("invalid SPDX"))
+    assert(diagnostic.why.contains("security-sensitive"))
+    assert(diagnostic.fix.contains("valid SPDX expression"))
+    malformed :: Manifest.parse(OSPath.from("package.jet"), "name: \"consumer\"\nversion: \"0.1.0\"\npolicy: { licenses: .Allow([\"MIT\", \"MIT\"]) }\n").expect_err("duplicate license policy entries must be rejected")
+    assert(malformed.code == "E1206")
+    assert(malformed.what.contains("package.jet"))
+    assert(malformed.why.contains("package metadata policy is malformed"))
+    assert(malformed.fix.contains("syntax-decisions.md"))
+}
+
+// Rust: tests/jetpack_engine.rs:1909
+#Test("real_cargo_project_import_preserves_lock_facts_and_migration_findings") {
+    project :: Scratch.new("provider-import-real-cargo")
+    fs.write(project.join("Cargo.toml"), "[package]\nname = \"real-app\"\nversion = \"0.4.0\"\nlicense = \"MIT\"\nbuild = \"build.rs\"\n\n[dependencies]\nserde = \"1\"\n\n[target.'cfg(unix)'.dependencies]\ncc = \"1\"\n\n[dev-dependencies]\ninsta = \"1\"\n").unwrap()
+    fs.write(project.join("Cargo.lock"), "version = 4\n\n[[package]]\nname = \"serde\"\nversion = \"1.0.200\"\nsource = \"registry+https://example.invalid\"\nchecksum = \"serde-checksum\"\n\n[[package]]\nname = \"cc\"\nversion = \"1.0.99\"\nsource = \"registry+https://example.invalid\"\nchecksum = \"cc-checksum\"\n\n[[package]]\nname = \"insta\"\nversion = \"1.39.0\"\nsource = \"registry+https://example.invalid\"\nchecksum = \"insta-checksum\"\n").unwrap()
+    plan :: import_cargo(fs.read_to_string(project.join("Cargo.toml")).unwrap(), fs.read_to_string(project.join("Cargo.lock")).unwrap())
+    assert(plan.todos.iter().any(todo -> todo.source_path == "Cargo.toml" && todo.message.contains("build script")))
+    loop (name, version, provider_ref) in [(String, String, String)]{("serde", "1.0.200", "serde@cargo#version=1.0.200"), ("cc", "1.0.99", "cc@cargo#version=1.0.99&platform=cfg(unix)")} {
+        assert(plan.emit_pkg_jet().contains("{name}: {provider_ref}"), "generated package omitted {provider_ref}: {plan.emit_pkg_jet()}")
+        facts :: plan.provider_facts.get(provider_ref).expect("real project provider facts")
+        facts.validate().expect("lossless Cargo dependency facts")
+        assert(facts.native_document.contains("Cargo.toml:"))
+        assert(facts.native_document.contains("Cargo.lock:"))
+        assert(facts.resolved_source == "cargo:{name}@{version}")
+        assert(facts.provenance.get("package.version") == Val("Cargo.lock.version"))
+        assert(facts.explain_lines().iter().any(line -> line == "native Cargo.toml+Cargo.lock: retained"))
+        assert(ProviderFacts.from_json(facts.to_json()).expect("Cargo provider facts export") == facts)
+        if name == "cc" -> assert(facts.selector.platform == "cfg(unix)")
+    }
+    insta :: plan.provider_facts.get("insta@cargo#version=1.39.0").expect("real project dev-dependency facts")
+    insta.validate().expect("lossless Cargo dev-dependency facts")
+    assert(!plan.emit_pkg_jet().contains("insta:"))
+    assert(plan.todos.iter().any(todo -> todo.source_path == "Cargo.toml" && todo.message.contains("dev")))
+    assert(plan.deps.iter().any(dep -> dep.name == "cc"))
+    assert(plan.deps.iter().any(dep -> dep.name == "insta" && dep.dev))
+}
+// Rust: tests/jetpack_engine.rs:2013
+#Test("cargo_import_keeps_unlocked_target_identity_without_duplicate_selector_facts") {
+    plan :: import_cargo("[package]\nname = \"app\"\nversion = \"0.1.0\"\n[target.'cfg(unix)'.dependencies]\ncc = \"1\"\n", "")
+    assert(plan.deps[0].provider_ref == "cc@cargo#platform=cfg(unix)")
+    facts :: plan.provider_facts.get("cc@cargo#platform=cfg(unix)").expect("unlocked target provider facts")
+    assert(facts.losses.iter().all(loss -> !loss.reason.contains("duplicate selector fact `platform=cfg(unix)`")))
+    assert(plan.todos.iter().any(todo -> todo.source_path == "Cargo.lock" && todo.message.contains("unresolved")))
+    assert(!plan.emit_pkg_jet().contains("cc:"))
+}
+// Rust: tests/jetpack_engine.rs:2036
+#Test("jet_registry_dependency_roles_features_and_constraints_round_trip") {
+    native :: "{{\"name\":\"rolekit\",\"version\":\"1.0.0\",\"content_hash\":\"sha256-rolekit\",\"dependencies\":{{\"runtime\":\"^1.0\"}},\"build_dependencies\":{{\"cc\":{{\"require\":\"^1.0\",\"strict\":true}}}},\"dev_dependencies\":{{\"insta\":\"^1.0\"}},\"optional_dependencies\":{{\"trace\":\"^1.0\"}},\"peer_dependencies\":{{\"host\":\"^2.0\"}},\"features\":{{\"default\":[\"trace\"]}},\"constraints\":{{\"runtime\":{{\"prefer\":\"1.0.1\",\"reject\":[\"1.0.2\"],\"strict\":true}}}}}}"
+    report :: normalize_provider_document(ProviderFamily.JetRegistry, native)
+    report.validate().expect("registry dependency metadata must be lossless")
+    loop key in [String]{"provider.registry.dependency-role.build", "provider.registry.dependency.build.cc", "provider.registry.features", "provider.registry.constraints"} {
+        assert(report.facts.typed.has_key(key), "registry fact carrier omitted {key}")
+    }
+    lock :: report.lock_record("engine-test", "rolekit@jet-registry#version=1.0.0", "x86_64-linux").expect("registry provider lock")
+    facts :: ProviderFacts.from_json(lock.future_fields.get("provider-facts").expect("provider facts in semantic lock")).expect("provider facts round trip")
+    assert(facts.native_document == native)
+    assert(facts.facts.has_key("provider.registry.dependency-role.build"))
+    assert(facts.facts.has_key("provider.registry.constraints"))
+}
+// Rust: tests/jetpack_engine.rs:2078
+#Test("provider_conformance_nuget_conan_vcpkg_uses_shared_production_carrier") {
+    documents :: [(ProviderFamily, String, String)]{
+        (ProviderFamily.NuGet, "<package><metadata><id>widget</id><version>1.2.3</version><licenseExpression>MIT</licenseExpression><repository type=\"git\" url=\"https://example.invalid/widget\" /></metadata></package>", "widget@nuget#version=1.2.3"),
+        (ProviderFamily.Conan, "name = \"widget\"\nversion = \"1.2.3\"\nlicense = \"MIT\"\ndef requirements(self):\n    self.requires(\"zlib/1.3.1\")\n", "widget@conan#version=1.2.3"),
+        (ProviderFamily.Vcpkg, "{{\"name\":\"widget\",\"version-string\":\"1.2.3\",\"license\":\"MIT\",\"dependencies\":[{{\"name\":\"zlib\",\"version>=\":\"1.3.0\",\"features\":[\"core\"]}}],\"features\":{{\"tools\":[\"fmt\"]}}}}", "widget@vcpkg#version=1.2.3")
+    }
+    loop (family, native, reference) in documents {
+        report :: normalize_provider_document(family, native)
+        report.validate().expect("lossless provider report")
+        lock :: report.lock_record("engine-test", reference, "x86_64-linux").expect("provider lock")
+        facts :: ProviderFacts.from_json(lock.future_fields.get("provider-facts").expect("shared provider facts in lock")).expect("shared provider facts JSON")
+        assert(facts.native_document == native)
+        assert(facts.qualified_reference() == reference)
+        assert(report.shared_facts().explain_lines().iter().any(line -> line.contains("provider")))
+    }
+    malformed :: normalize_provider_document(ProviderFamily.Vcpkg, "{{\"name\":\"widget\",\"version\":\"1.0.0\",\"version-string\":\"1.1.0\",\"dependencies\":[{{\"features\":[\"core\"]}}]}}")
+    assert(malformed.validate().is_err())
+    assert(malformed.losses.iter().any(loss -> loss.contains("no non-empty `name`")))
+    assert(malformed.conflicts.iter().any(conflict -> conflict.contains("conflicting version fields")))
+}
+// Rust: tests/jetpack_engine.rs:2137
+#Test("provider_conformance_homebrew_github_binary_uses_shared_production_carrier") {
+    digest :: "sha256-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    revision :: "0123456789abcdef0123456789abcdef01234567"
+    homebrew :: "{{\"name\":\"jq\",\"version\":\"1.7.1\",\"versions\":{{\"stable\":\"1.7.1\"}},\"tap\":\"homebrew/core\",\"dependencies\":[\"oniguruma\"],\"source\":{{\"url\":\"https://example.invalid/jq.tar.gz\",\"sha256\":\"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\"}},\"bottle\":{{\"stable\":{{\"files\":{{\"x86_64_linux\":{{\"url\":\"https://example.invalid/jq.bottle.tar.gz\",\"sha256\":\"abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789\"}}}}}}}},\"relocatable\":true,\"test\":\"system \\\"#{{bin}}/jq\\\"\"}}"
+    github :: "{{\"name\":\"tool\",\"tag_name\":\"v1.2.3\",\"target_commitish\":\"{revision}\",\"repository\":{{\"full_name\":\"acme/tool\"}},\"assets\":[{{\"name\":\"tool-linux\",\"platform\":\"x86_64-linux\",\"digest\":\"{digest}\",\"browser_download_url\":\"https://example.invalid/tool\"}}],\"signature\":{{\"key\":\"pk\",\"value\":\"sig\"}},\"advisories\":[\"CVE-0000-0000\"]}}"
+    binary :: "{{\"name\":\"tool\",\"hash\":\"{digest}\",\"platforms\":[\"x86_64-linux\"],\"url\":\"https://example.invalid/tool\",\"signature\":{{\"key\":\"pk\",\"value\":\"sig\"}},\"provenance\":{{\"builder\":\"ci\"}},\"sbom\":{{\"format\":\"spdx\"}},\"variants\":{{\"debug\":{{\"features\":[\"trace\"]}}}}}}"
+    loop (family, native, reference) in [(ProviderFamily, String, String)]{(ProviderFamily.Homebrew, homebrew, "jq#version=1.7.1@homebrew"), (ProviderFamily.Github, github, "tool@github#version=v1.2.3"), (ProviderFamily.Binary, binary, "tool#digest=sha256-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef@binary")} {
+        report :: normalize_provider_document(family, native)
+        report.validate().unwrap_or_else(error -> panic("lossless provider report: {error}"))
+        shared :: report.shared_facts()
+        assert(shared.native_document == native)
+        assert(shared.explain_lines().iter().any(line -> line.contains("native") && line.contains("retained")))
+        assert(ProviderFacts.from_json(report.export_json()).expect("provider export uses shared carrier") == shared)
+        lock :: report.lock_record("engine-test", reference, "x86_64-linux").expect("provider lock uses shared carrier")
+        locked :: ProviderFacts.from_json(lock.future_fields.get("provider-facts").expect("provider facts in lock")).expect("locked provider facts JSON")
+        assert(locked == shared)
+        assert(lock.future_fields.get("provider-facts-digest") == Val(shared.digest()))
+    }
+    assert(normalize_provider_document(ProviderFamily.Homebrew, homebrew).facts.typed.has_key("provider.homebrew.bottle.x86_64_linux.sha256"))
+    github_report :: normalize_provider_document(ProviderFamily.Github, github)
+    assert(github_report.facts.typed.has_key("provider.github.revision"))
+    assert(github_report.shared_facts().facts.has_key("provider.github.asset.tool-linux.browser_download_url"))
+    assert(normalize_provider_document(ProviderFamily.Binary, binary).shared_facts().facts.has_key("provider.binary.provenance"))
+}
+// Rust: tests/jetpack_engine.rs:2221
+#Test("provider_conformance_homebrew_github_binary_reports_loss_and_conflict_without_defaults") {
+    homebrew :: normalize_provider_document(ProviderFamily.Homebrew, "{{\"name\":\"jq\",\"version\":\"1.7.1\",\"versions\":{{\"stable\":\"1.7.2\"}}}}")
+    assert(homebrew.conflicts.iter().any(conflict -> conflict.contains("conflicting version")))
+    assert(homebrew.validate().is_err())
+    assert(homebrew.shared_facts().conflicts.iter().any(conflict -> conflict.right.contains("conflicting version") && conflict.left != conflict.right))
+    github :: normalize_provider_document(ProviderFamily.Github, "{{\"name\":\"tool\",\"tag_name\":\"v1.2.3\",\"assets\":[{{\"name\":\"tool-linux\",\"platform\":\"x86_64-linux\",\"browser_download_url\":\"https://example.invalid/tool\"}}]}}")
+    assert(github.losses.iter().any(loss -> loss.contains("no content digest")))
+    assert(github.validate().is_err())
+    assert(github.shared_facts().losses.iter().any(loss -> loss.reason.contains("no content digest")))
+    binary :: normalize_provider_document(ProviderFamily.Binary, "{{\"name\":\"tool\",\"hash\":\"sha256-aa\"}}")
+    assert(binary.losses.iter().any(loss -> loss.contains("not an exact digest")))
+    assert(binary.losses.iter().any(loss -> loss.contains("no target platform")))
+    assert(binary.validate().is_err())
+    assert(binary.shared_facts().losses.iter().any(loss -> loss.reason.contains("exact version, revision, or digest")))
+}
+// Rust: tests/jetpack_engine.rs:2273
+#Test("real_project_import_reports_lossy_npm_requests_without_generated_refs") {
+    project :: Scratch.new("provider-import-real-npm")
+    fs.write(project.join("package.json"), "{{\n  \"name\": \"web-app\",\n  \"version\": \"1.2.3\",\n  \"dependencies\": {{\"vite\": \"^5.4.0\"}},\n  \"devDependencies\": {{\"typescript\": \"~5.5.0\"}},\n  \"optionalDependencies\": {{\"fsevents\": \"2.3.3\"}},\n  \"peerDependencies\": {{\"react\": \"^18.0.0\"}},\n  \"bundledDependencies\": [\"local-tool\"],\n  \"scripts\": {{\"build\": \"vite build\"}}\n}}\n").unwrap()
+    document :: fs.read_to_string(project.join("package.json")).unwrap()
+    plan :: import_npm(document)
+    generated :: plan.emit_pkg_jet()
+    loop name in [String]{"vite", "typescript", "fsevents", "react"} -> assert(!generated.contains("{name}:"), "lossy ref generated: {generated}")
+    loop (name, field) in [(String, String)]{("vite", "dependencies"), ("typescript", "devDependencies"), ("react", "peerDependencies")} {
+        facts :: plan.provider_facts.get("{name}@npm").expect("provider facts for unresolved npm dependency")
+        assert(facts.native_document.contains("web-app"))
+        assert(facts.losses.iter().any(loss -> loss.source == "package.json.{field}"))
+        assert(plan.todos.iter().any(todo -> todo.source_path == "package.json" && todo.message.contains("unresolved")))
+    }
+    optional :: plan.provider_facts.get("fsevents#version=2.3.3@npm").expect("provider facts for exact optional npm dependency")
+    optional.validate().expect("lossless npm optional dependency facts")
+    assert(optional.provenance.get("package.dependency_kind") == Val("package.json.optionalDependencies"))
+    assert(optional.explain_lines().iter().any(line -> line == "native package.json: retained"))
+    assert(ProviderFacts.from_json(optional.to_json()).expect("npm facts export") == optional)
+    assert(plan.todos.iter().any(todo -> todo.source_path == "package.json" && todo.message.contains("optional")))
+    assert(plan.todos.iter().any(todo -> todo.source_path == "package.json" && todo.message.contains("bundled")))
+    assert(plan.todos.iter().any(todo -> todo.message.contains("legacy build action")))
+}
+// Rust: tests/jetpack_engine.rs:2354
+#Test("cargo_import_reports_ambiguous_lock_identity_without_generation") {
+    plan :: import_cargo("[package]\nname = \"app\"\nversion = \"0.1.0\"\n[dependencies]\nserde = \"1\"\n", "[[package]]\nname = \"serde\"\nversion = \"1.0.200\"\nsource = \"registry+one\"\n[[package]]\nname = \"serde\"\nversion = \"1.0.201\"\nsource = \"registry+two\"\n")
+    assert(!plan.emit_pkg_jet().contains("serde:"))
+    facts :: plan.provider_facts.get("serde@cargo").expect("ambiguous Cargo provider facts")
+    assert(facts.conflicts.iter().any(conflict -> conflict.key == "provider.selector.version" && conflict.source == "Cargo.lock"))
+    assert(plan.todos.iter().any(todo -> todo.source_path == "Cargo.lock" && todo.message.contains("conflicts")))
+}
+
+// Rust: tests/jetpack_engine.rs:2374
+#Test("doctor_checks_real_state_and_is_read_only") {
+    project :: Scratch.new("doctor-project")
+    root :: Scratch.new("doctor-root")
+    keys :: Scratch.new("doctor-keys")
+    registry :: project.join("registry.git")
+    registry_init :: Command.new("git").args([String]{"init", "--bare"}).arg(registry).output().unwrap()
+    assert(registry_init.status.success(), String.from_utf8_lossy(registry_init.stderr))
+    keygen :: jet().args([String]{"registry", "keygen"}).current_dir(project.path).env("JET_KEYS_DIR", keys.path).output().unwrap()
+    assert(keygen.status.success(), String.from_utf8_lossy(keygen.stderr))
+    registry_url :: "file://{registry.display()}"
+    credentialed_registry_url :: "http://user:super-secret@example.invalid/index"
+    // Native crypto has no Rust signing bridge. Snapshot the real key artifact/cache instead.
+    helper :: keys.join("jet.ed25519")
+    helper_before :: fs.metadata(helper).unwrap()
+    helper_bytes_before :: fs.read(helper).unwrap()
+    // Rust: tests/jetpack_engine.rs:2406 (signing_bridge_files)
+    signing_bridge_files :: (dir: OSPath, key: String) -> {
+        names := [std.ffi.OsString]{}
+        loop entry in fs.read_dir(dir).unwrap() {
+            name :: entry.unwrap().file_name()
+            if name.to_string_lossy().contains(key) -> &names.push(name)
+        }
+        &names.sort()
+        names
+    }
+    helper_dir :: keys.path
+    helper_key :: "jet.ed25519"
+    helper_parent_before :: signing_bridge_files(helper_dir, helper_key)
+    healthy :: jetpack().args([String]{"doctor", "--json", "--online"}).current_dir(project.path).env("JETPACK_ROOT", root.path).env("JET_KEYS_DIR", keys.path).env("JET_REGISTRY_URL", registry_url).output().unwrap()
+    assert(healthy.status.success(), String.from_utf8_lossy(healthy.stderr))
+    healthy_json :: JSON.parse(String.from_utf8_lossy(healthy.stdout)).unwrap()
+    assert(json_string(healthy_json, "status") == "healthy")
+    assert(fs.metadata(helper).unwrap().len() == helper_before.len(), "doctor changed native signing artifact")
+    assert(fs.read(helper).unwrap() == helper_bytes_before, "doctor changed native signing bytes")
+    assert(signing_bridge_files(helper_dir, helper_key) == helper_parent_before, "doctor changed signing key cache")
+    fs.remove_file(keys.join("jet.ed25519")).unwrap()
+    degraded :: jetpack().args([String]{"doctor", "--online"}).current_dir(project.path).env("JETPACK_ROOT", root.path).env("JET_KEYS_DIR", keys.path).env("JET_REGISTRY_URL", credentialed_registry_url).output().unwrap()
+    assert(degraded.status.code() == Val(2))
+    degraded_text :: String.from_utf8(degraded.stderr).unwrap()
+    assert(degraded_text.contains("[Fail] registry"), degraded_text)
+    assert(degraded_text.contains("embedded registry credentials"), degraded_text)
+    assert(degraded_text.contains("[Warn] signing"), degraded_text)
+    assert(degraded_text.ends_with("Result: broken\n"), degraded_text)
+    assert(!degraded_text.contains("super-secret"), "credential leaked: {degraded_text}")
+    query_degraded :: jetpack().args([String]{"doctor", "--online"}).current_dir(project.path).env("JETPACK_ROOT", root.path).env("JET_KEYS_DIR", keys.path).env("JET_REGISTRY_URL", "file:///registry.git?access_token=super-secret").output().unwrap()
+    assert(query_degraded.status.code() == Val(2))
+    query_degraded_text :: String.from_utf8(query_degraded.stderr).unwrap()
+    assert(query_degraded_text.contains("embedded registry credentials"), query_degraded_text)
+    assert(!query_degraded_text.contains("super-secret"), "credential leaked: {query_degraded_text}")
+    forced :: jet().args([String]{"registry", "keygen", "--force"}).current_dir(project.path).env("JET_KEYS_DIR", keys.path).output().unwrap()
+    assert(forced.status.success(), String.from_utf8_lossy(forced.stderr))
+    public_path :: keys.join("jet.ed25519.pub")
+    matching_public :: fs.read_to_string(public_path).unwrap()
+    mismatched_public := matching_public.bytes()
+    mismatched_public[0] = if mismatched_public[0] == U8{48} -> U8{49} else -> U8{48}
+    fs.write(public_path, mismatched_public).unwrap()
+    mismatch :: jetpack().args([String]{"doctor", "--online"}).current_dir(project.path).env("JETPACK_ROOT", root.path).env("JET_KEYS_DIR", keys.path).env("JET_REGISTRY_URL", credentialed_registry_url).output().unwrap()
+    mismatch_text :: String.from_utf8(mismatch.stderr).unwrap()
+    assert(mismatch.status.code() == Val(2), mismatch_text)
+    assert(mismatch_text.contains("does not match its public key"), mismatch_text)
+    assert(!mismatch_text.contains("super-secret"), "credential leaked: {mismatch_text}")
+    fs.write(public_path, matching_public).unwrap()
+    output :: root.join("owned-output")
+    fs.create_dir_all(output).unwrap()
+    fs.write(output.join("payload"), "trusted bytes").unwrap()
+    roots :: Roots{root: root.path, dev_mode: false}
+    entry :: Store.ingest_tree(roots, IngestRequest{name: "demo", version: "1", reference: "./demo", cache_identity: CacheIdentity{source_fingerprint: "sha256-test-source", recipe_fingerprint: "sha256-test-recipe", policy_fingerprint: "sha256-test-policy", platform: Envelope.host_platform()}, references: [String]{}, outputs: [String: OSPath]{"out": output}, signature: "", provenance: "./demo via test", platform_artifact_kind: ""}).unwrap().entry
+    meta :: root.join("hangar/{entry.id}/meta.json")
+    old_meta :: fs.read_to_string(meta).unwrap()
+    stale_meta :: old_meta.replace("\"last_used_at\": \"{entry.last_used_at}\"", "\"last_used_at\": \"0\"")
+    fs.write(meta, stale_meta).unwrap()
+    make_writable(&entry.out)
+    fs.write(OSPath.from(entry.out).join("payload"), "corrupt bytes").unwrap()
+    fs.create_dir_all(root.join(".locks")).unwrap()
+    stale_lock :: root.join(".locks/abandoned.lock")
+    fs.write(stale_lock, "pid=4294967294\n").unwrap()
+    fs.remove_file(keys.join("jet.ed25519")).unwrap()
+    before_meta :: fs.read(meta).unwrap()
+    before_lock :: fs.read(stale_lock).unwrap()
+    before_public :: fs.read(keys.join("jet.ed25519.pub")).unwrap()
+    before_public_permissions :: fs.metadata(keys.join("jet.ed25519.pub")).unwrap().permissions()
+    before_output_permissions :: fs.metadata(output.join("payload")).unwrap().permissions()
+    broken :: jetpack().args([String]{"doctor", "--json", "--offline"}).current_dir(project.path).env("JETPACK_ROOT", root.path).env("JET_KEYS_DIR", keys.path).env("JET_REGISTRY_URL", "file://{project.join("missing").display()}").output().unwrap()
+    assert(broken.status.code() == Val(2))
+    text :: String.from_utf8(broken.stdout).unwrap()
+    assert(text.contains("failed its content digest"), text)
+    assert(text.contains("local index missing"), text)
+    assert(!text.contains("stale lock"), text)
+    assert(text.contains("kernel advisory locks readable"), text)
+    assert(text.contains("unused for more than 30 days"), text)
+    assert(text.contains("signing key for `jet` is missing"), text)
+    assert(fs.read(meta).unwrap() == before_meta, "doctor changed metadata")
+    assert(fs.read(stale_lock).unwrap() == before_lock, "doctor changed lock state")
+    assert(fs.read(keys.join("jet.ed25519.pub")).unwrap() == before_public, "doctor changed public key")
+    assert(fs.metadata(keys.join("jet.ed25519.pub")).unwrap().permissions() == before_public_permissions, "doctor changed key permissions")
+    assert(fs.metadata(output.join("payload")).unwrap().permissions() == before_output_permissions, "doctor changed output permissions")
+}
+
+// Rust: tests/jetpack_engine.rs:2633
+#Test("override_draft_writes_reviewed_workspace_policy_and_explains_it") {
+    project :: Scratch.new("override-draft")
+    fs.create_dir_all(project.join("patches")).unwrap()
+    fs.write(project.join("patches/foo.patch"), "patch body\n").unwrap()
+    out :: jetpack().args([String]{"override", "draft", "foo@nixpkgs", "--overlay", "plasma_beta", "--provider", "nixpkgs", "--channel", "plasma-beta", "--patch", "patches/foo.patch", "--allow-unfree", "--no-color"}).current_dir(project.path).output().unwrap()
+    assert(out.status.success(), String.from_utf8_lossy(out.stderr))
+    workspace :: fs.read_to_string(project.join("workspace.jet")).unwrap()
+    assert(workspace.contains("overlay plasma_beta"), workspace)
+    assert(workspace.contains("Provider.nixpkgs(channel: \"plasma-beta\")"), workspace)
+    assert(workspace.contains("\"foo\": .{") && workspace.contains("patches: [patch(\"patches/foo.patch\")]") && workspace.contains("allowUnfree: true"), workspace)
+    explain :: jetpack().args([String]{"explain", "package-overlay:plasma_beta:foo", "--no-color"}).current_dir(project.path).output().unwrap()
+    assert(explain.status.success(), String.from_utf8_lossy(explain.stderr))
+    stdout :: String.from_utf8_lossy(explain.stdout)
+    assert(stdout.contains("package-overlay:plasma_beta:foo") && stdout.contains("provider: nixpkgs") && stdout.contains("policy: workspace.overlay.resolved:foo"), "explain: {stdout}")
+    explain_json :: jetpack().args([String]{"explain", "package-overlay:plasma_beta:foo", "--json", "--no-color"}).current_dir(project.path).output().unwrap()
+    assert(explain_json.status.success(), String.from_utf8_lossy(explain_json.stderr))
+    assert(explain_json.stderr.is_empty())
+    explain_json_stdout :: String.from_utf8_lossy(explain_json.stdout)
+    assert(!explain_json_stdout.contains("schema_version"))
+    report :: JSON.parse(explain_json_stdout.trim()).expect("overlay explain JSON")
+    assert(json_string(report, "schema") == "jet.report/v1")
+    assert(json_string(report, "moment") == "tool")
+    assert(json_string(report, "action") == "explain")
+    assert(json_string(report, "status") == "ok")
+    assert(json_string(report, "lens") == "overlay")
+}
+
+// Rust: tests/jetpack_engine.rs:2720
+#Test("build_resolves_fixture_ref") {
+    root :: Scratch.new("root")
+    out :: jetpack().args([String]{"build", "fastfetch@nixpkgs", "--no-color", "--offline"}).env("JETPACK_ROOT", root.path).env("PATH", "").env("JETPACK_FIXTURES", example_fixtures(root.path)).output().unwrap()
+    assert(out.status.success())
+    stderr :: String.from_utf8_lossy(out.stderr)
+    assert(stderr.contains("fastfetch"), stderr)
+    assert(stderr.contains("substituted"), stderr)
+    assert(!stderr.contains("couldn't run `nix`"), stderr)
+    assert(stderr.contains("/hangar/objects/sha256-"), stderr)
+    explained :: jet().args([String]{"explain", "fastfetch", "--json", "--no-color"}).env("JETPACK_ROOT", root.path).env("JETPACK_FIXTURES", example_fixtures(root.path)).output().unwrap()
+    assert(explained.status.success(), String.from_utf8_lossy(explained.stderr))
+    stdout :: String.from_utf8_lossy(explained.stdout)
+    assert(stdout.contains("\"schema\":\"jet.report/v1\""))
+    assert(stdout.contains("\"moment\":\"tool\""))
+    explain_report :: JSON.parse(stdout.trim()).expect("package explain JSON")
+    assert(json_string(explain_report, "schema") == "jet.report/v1")
+    assert(json_string(explain_report, "moment") == "tool")
+    assert(json_string(explain_report, "action") == "explain")
+    assert(json_string(explain_report, "status") == "ok")
+    assert(stdout.contains("\"provider_facts\":"))
+    assert(stdout.contains("\"direct_dependencies\":"))
+    assert(stdout.contains("\"roots\":"))
+    assert(stdout.contains("\"decision\":\"realized\""), stdout)
+    assert(stdout.contains("\"output_digest\":\"matches\""), stdout)
+    loop lens in [String]{"why-depends", "what-depends", "closure", "why-live", "rebuild"} {
+        viewed :: jet().args([String]{"explain", lens, "fastfetch", "--json", "--no-color"}).env("JETPACK_ROOT", root.path).env("JETPACK_FIXTURES", example_fixtures(root.path)).output().unwrap()
+        assert(viewed.status.success(), "{lens} stderr: {String.from_utf8_lossy(viewed.stderr)}")
+        viewed_stdout :: String.from_utf8_lossy(viewed.stdout)
+        assert(viewed_stdout.contains("\"lens\":\"{lens}\""), viewed_stdout)
+    }
+    roots :: Roots{root: root.path, dev_mode: false}
+    entry :: Store.list(roots).iter().find(entry -> entry.name == "fastfetch").expect("fixture build must publish fastfetch to Store")
+    make_writable(&entry.out)
+    fs.write(OSPath.from(entry.out).join("payload"), "tampered\n").unwrap()
+    rebuild :: jet().args([String]{"explain", "rebuild", "fastfetch", "--json", "--no-color"}).env("JETPACK_ROOT", root.path).env("JETPACK_FIXTURES", example_fixtures(root.path)).output().unwrap()
+    assert(rebuild.status.success(), String.from_utf8_lossy(rebuild.stderr))
+    rebuild_stdout :: String.from_utf8_lossy(rebuild.stdout)
+    rebuild_report :: JSON.parse(rebuild_stdout.trim()).expect("rebuild JSON")
+    assert(json_string(rebuild_report, "schema") == "jet.report/v1")
+    assert(json_string(rebuild_report, "action") == "explain")
+    assert(rebuild_stdout.contains("\"severity\":\"warning\""))
+    assert(rebuild_stdout.contains("\"what\":"))
+    assert(rebuild_stdout.contains("\"decision\":\"rebuild-required\""))
+    assert(rebuild_stdout.contains("\"output_digest\":\"mismatch\""))
+    assert(rebuild_stdout.contains("\"kind\":\"loss\""))
+    assert(rebuild_stdout.contains("stored output digest differs"))
+}
+// Rust: tests/jetpack_engine.rs:2819
+#Test("package_explain_matches_failed_provider_reference_target") {
+    root :: Scratch.new("package-explain-failed-provider-ref")
+    roots :: Roots{root: root.path, dev_mode: false}
+    attempt := Attempt.new("left-pad", "left-pad#version=2.0.17@npm", "npm", "sha256-recipe", "sha256-source")
+    &attempt.push_step(StepLog{index: 1, total: 1, name: "fetch", command: "fetch left-pad", cwd: root.path.display().to_string(), status: "failed", stdout: "", stderr: "network unavailable"})
+    attempt.persist(roots.hangar_dir()).unwrap()
+    explanation :: Store.explain_package(roots, "left-pad#version=2.0.17@npm", ExplainLens.Rebuild).unwrap().expect("failed provider reference should explain build attempt")
+    assert(explanation.entry == None)
+    assert(explanation.rebuild.decision == "rebuild-required")
+    assert(explanation.rebuild.attempt.unwrap().package == "left-pad")
+}
+// Rust: tests/jetpack_engine.rs:2857
+#Test("no_nix_projects_external_output_and_build_facts") {
+    root :: Scratch.new("nix-projection-root")
+    fixtures :: Scratch.new("nix-projection-fixtures")
+    staging :: Scratch.new("nix-projection-output")
+    bin :: staging.join("bin")
+    fs.create_dir_all(bin).unwrap()
+    executable :: bin.join("greet")
+    fs.write(executable, "#!/bin/sh\necho projected\n").unwrap()
+    if selected_family() == "unix" -> fs.set_permissions(executable, fs.Permissions.from_mode(0o755)).unwrap()
+    Store.seal_local_output(staging.path).unwrap()
+    fs.write(fixtures.join("nixpkgs-greet.json"), "[{{\"drvPath\":\"/nix/store/0fixture00000000000000000000-greet.drv\",\"outputs\":{{\"out\":{staging.path.to_string_lossy():?}}}}}]").unwrap()
+    built :: jetpack().args([String]{"build", "greet@nixpkgs", "--no-color", "--offline"}).env("JETPACK_ROOT", root.path).env("JETPACK_FIXTURES", fixtures.path).env("PATH", "").output().unwrap()
+    assert(built.status.success(), String.from_utf8_lossy(built.stderr))
+    roots :: Roots.at(root.path)
+    entry :: Store.list_checked(roots).unwrap().iter().find(entry -> entry.reference == "greet@nixpkgs").expect("raw Nix output must publish through Store")
+    assert(OSPath.from(entry.out).starts_with(roots.hangar_dir().join("objects")), "Nix output escaped Hangar projection: {entry.out}")
+    assert(staging.path.exists(), "projection must not mutate source store")
+    producer :: ProducerRecord.decode(entry.producer_record).unwrap()
+    assert(producer.provider == "nix")
+    assert(producer.facts.get("nix.projection.mode") == Val("canonical-hangar"))
+    assert(producer.facts.get("nix.build.root") == Val("/build"))
+    assert(producer.facts.get("nix.build.home") == Val("/homeless-shelter"))
+    provider_facts :: ProviderFacts.from_json(producer.facts.get("provider-facts").expect("Nix production path must publish shared provider carrier")).expect("Nix producer provider facts must decode")
+    provider_facts.validate().expect("Nix producer facts must remain lossless")
+    assert(provider_facts.native_format == "json")
+    assert(provider_facts.native_document.contains("drvPath"))
+    assert(provider_facts.facts.has_key("nix.native.document"))
+    entered :: jetpack().args([String]{"env", "--no-color", "--trust", "--offline", "--fixtures"}).arg(fixtures.path).args([String]{"-p", "greet", "--", "/bin/sh", "-c", "printf '%s|%s|%s|%s' \"$HOME\" \"$NIX_BUILD_TOP\" \"$TMPDIR\" \"$LC_ALL\""}).env("JETPACK_ROOT", root.path).env("PATH", "").output().unwrap()
+    assert(entered.status.success(), String.from_utf8_lossy(entered.stderr))
+    assert(String.from_utf8_lossy(entered.stdout).trim() == "/homeless-shelter|/build|/build|C")
+}
+
+// Rust: tests/jetpack_engine.rs:2969
+#Test("connected_receipt_reaches_lock_and_fails_closed_on_corruption") {
+    project :: Scratch.new("connected-receipt-project")
+    root :: Scratch.new("connected-receipt-root")
+    fixtures :: Scratch.new("connected-receipt-fixtures")
+    staging :: Scratch.new("connected-receipt-staging")
+    write_runnable_fixture(fixtures.path, root.path, staging.path)
+    fs.write(project.join("env.jet"), "module dev { env.dev: Env{ packages: [nixpkgs.greet] } }\n").unwrap()
+    build :: () -> {
+        jetpack().args([String]{"build", "--no-color", "--offline"}).current_dir(project.path).env("JETPACK_ROOT", root.path).env("JETPACK_FIXTURES", fixtures.path).output().unwrap()
+    }
+    first :: build()
+    assert(first.status.success(), String.from_utf8_lossy(first.stderr))
+    roots :: Roots{root: root.path, dev_mode: false}
+    entry :: Store.list_checked(roots).unwrap().iter().find(entry -> entry.name == "greet").expect("production build must publish greet")
+    assert(entry.receipt.starts_with("sha256-"))
+    receipt_path :: root.join("hangar/receipts").join(entry.receipt)
+    receipt :: fs.read(receipt_path).unwrap()
+    receipt_text :: String.from_utf8(receipt).unwrap()
+    assert(receipt_text.starts_with("jet-development-receipt-v1\n"))
+    assert(receipt_text.contains("act\t\t7061636b6167652d7265616c697a6174696f6e\t"))
+    assert(receipt_text.contains("closure\t\t7368613235362d"))
+    loop field in [String]{"input\t", "action\t", "output\t", "activation-proof\t\t\n", "parent-generation\t\t\n"} -> assert(receipt_text.contains(field), "missing {field:?}: {receipt_text}")
+    assert(receipt_text.contains("witness\t\t"))
+    assert(receipt_text.contains("outcome\t\t706173736564\t"))
+    lock :: fs.read_to_string(project.join(".jet/lock")).unwrap()
+    assert(lock.contains("receipt = \"{entry.receipt}\""), "lock does not project receipt {entry.receipt}: {lock}")
+    output :: OSPath.from(entry.out).join("bin/greet")
+    output_before_failure :: fs.read(output).unwrap()
+    fs.write(receipt_path, "corrupt receipt".bytes()).unwrap()
+    failed :: build()
+    assert(!failed.status.success())
+    failure :: "{String.from_utf8_lossy(failed.stdout)}{String.from_utf8_lossy(failed.stderr)}"
+    assert(failure.contains("receipt"), "corruption was not explained: {failure}")
+    assert(fs.read(output).unwrap() == output_before_failure)
+    fs.remove_file(receipt_path).unwrap()
+    recovered :: jetpack().args([String]{"hangar", "recover", "--no-color"}).current_dir(project.path).env("JETPACK_ROOT", root.path).output().unwrap()
+    assert(recovered.status.success(), String.from_utf8_lossy(recovered.stderr))
+    assert(fs.read(receipt_path).unwrap() == receipt)
+    rebuilt :: build()
+    assert(rebuilt.status.success(), "recovered receipt was not reusable: stdout={String.from_utf8_lossy(rebuilt.stdout)} stderr={String.from_utf8_lossy(rebuilt.stderr)}")
+    orphan_bytes :: "orphan receipt".bytes()
+    orphan_digest :: "sha256-{SHA256.sha256_hex(orphan_bytes)}"
+    orphan_path :: root.join("hangar/receipts").join(orphan_digest)
+    fs.write(orphan_path, orphan_bytes).unwrap()
+    cleaned :: jetpack().args([String]{"hangar", "clean", "--no-color", "--yes"}).current_dir(project.path).env("JETPACK_ROOT", root.path).output().unwrap()
+    assert(cleaned.status.success(), "receipt cleanup failed: {String.from_utf8_lossy(cleaned.stderr)}")
+    assert(!orphan_path.exists(), "unreachable receipt was not collected")
+    assert(fs.read(receipt_path).unwrap() == receipt)
+}
+
+// Rust: tests/jetpack_engine.rs:3094
+#Test("list_shows_realized_package") {
+    root :: Scratch.new("root")
+    fixtures :: Scratch.new("fixtures")
+    staging :: Scratch.new("greet-out")
+    write_runnable_fixture(fixtures.path, root.path, staging.path)
+    built :: jetpack().args([String]{"build", "greet@nixpkgs", "--no-color", "--offline"}).env("JETPACK_ROOT", root.path).env("JETPACK_FIXTURES", fixtures.path).output().unwrap()
+    assert(built.status.success(), String.from_utf8_lossy(built.stderr))
+    out :: jetpack().args([String]{"hangar", "list", "--no-color"}).env("JETPACK_ROOT", root.path).output().unwrap()
+    assert(out.status.success())
+    stderr :: String.from_utf8_lossy(out.stderr)
+    assert(stderr.contains("greet"), "stderr: {stderr}")
+}
+// Rust: tests/jetpack_engine.rs:3121
+#Test("disappeared_output_build_fails_without_store_state_and_retries") {
+    root :: Scratch.new("missing-output-root")
+    fixtures :: Scratch.new("missing-output-fixtures")
+    missing :: root.join("not-realized")
+    fs.create_dir_all(missing).unwrap()
+    fs.write(missing.join("payload"), "present at fixture creation").unwrap()
+    fs.write(fixtures.join("nixpkgs-greet.json"), "[{{\"drvPath\":\"/nix/store/0fixture-greet.drv\",\"outputs\":{{\"out\":{missing.to_string_lossy():?}}}}}]").unwrap()
+    fs.remove_dir_all(missing).unwrap()
+    build :: () -> {
+        jetpack().args([String]{"build", "greet@nixpkgs", "--no-color", "--offline"}).env("JETPACK_ROOT", root.path).env("JETPACK_FIXTURES", fixtures.path).output().unwrap()
+    }
+    failed :: build()
+    assert(!failed.status.success())
+    stderr :: String.from_utf8_lossy(failed.stderr)
+    assert(stderr.contains("Error [E1315]:"), stderr)
+    assert(stderr.contains("does not exist"), stderr)
+    assert_no_hangar_entry(root.path, "greet-")
+    listed :: jetpack().args([String]{"hangar", "list", "--no-color"}).env("JETPACK_ROOT", root.path).output().unwrap()
+    assert(!String.from_utf8_lossy(listed.stderr).contains("greet"))
+    staging :: Scratch.new("retry-greet-output")
+    write_runnable_fixture(fixtures.path, root.path, staging.path)
+    retried :: build()
+    assert(retried.status.success(), String.from_utf8_lossy(retried.stderr))
+}
+// Rust: tests/jetpack_engine.rs:3170
+#Test("unreadable_and_wrong_kind_outputs_leave_no_store_entry") {
+    if selected_family() != "unix" -> return // GATE #4483
+    root :: Scratch.new("invalid-output-root")
+    fixtures :: Scratch.new("invalid-output-fixtures")
+    fixture :: fixtures.join("nixpkgs-greet.json")
+    write_fixture :: (out: OSPath) -> {
+        fs.write(fixture, "[{{\"drvPath\":\"/nix/store/0fixture-greet.drv\",\"outputs\":{{\"out\":{out.to_string_lossy():?}}}}}]").unwrap()
+    }
+    build :: () -> {
+        jetpack().args([String]{"build", "greet@nixpkgs", "--no-color", "--offline"}).env("JETPACK_ROOT", root.path).env("JETPACK_FIXTURES", fixtures.path).output().unwrap()
+    }
+    unreadable :: root.join("unreadable")
+    fs.create_dir_all(unreadable).unwrap()
+    fs.set_permissions(unreadable, fs.Permissions.from_mode(0o000)).unwrap()
+    if fs.read_dir(unreadable).is_err() {
+        write_fixture(unreadable)
+        failed :: build()
+        stderr :: String.from_utf8_lossy(failed.stderr)
+        assert(!failed.status.success(), stderr)
+        assert(stderr.contains("Error [E1315]:"), stderr)
+        assert(stderr.contains("Permission denied"), stderr)
+        assert_no_hangar_entry(root.path, "greet-")
+    }
+    fs.set_permissions(unreadable, fs.Permissions.from_mode(0o700)).unwrap()
+    socket :: std.env.temp_dir().join("jpk-sock-{std.process.id()}")
+    listener :: std.os.unix.net.UnixListener.bind(socket).unwrap() // GATE #4494
+    write_fixture(socket)
+    failed :: build()
+    stderr :: String.from_utf8_lossy(failed.stderr)
+    assert(!failed.status.success(), stderr)
+    assert(stderr.contains("Error [E1315]:"), stderr)
+    assert(stderr.contains("unsupported special file"), stderr)
+    assert_no_hangar_entry(root.path, "greet-")
+    std.mem.drop(^listener)
+    _ :: fs.remove_file(socket)
+}
+
+// Rust: tests/jetpack_engine.rs:3230
+#Test("clean_removes_only_stale_unreferenced_hangar_objects") {
+    root :: Scratch.new("root")
+    stale :: write_hangar_meta(root.path, "old-1", "old", "1.0", Val(1)).0
+    fresh :: write_hangar_meta(root.path, "fresh-1", "fresh", "1.0", Val(now_secs())).0
+    fs.write(stale.join("payload"), "old bytes").unwrap()
+    fs.write(fresh.join("payload"), "fresh bytes").unwrap()
+    out :: jetpack().args([String]{"hangar", "clean", "--no-color", "--yes"}).env("JETPACK_ROOT", root.path).output().unwrap()
+    assert(out.status.success(), String.from_utf8_lossy(out.stderr))
+    assert(!stale.exists(), "stale object should be collected")
+    assert(fresh.exists(), "fresh object should be kept")
+    stderr :: String.from_utf8_lossy(out.stderr)
+    assert(stderr.contains("removed 2 stale object"), stderr)
+}
+// Rust: tests/jetpack_engine.rs:3257
+#Test("clean_without_yes_prints_plan_and_does_not_apply_in_non_tty") {
+    root :: Scratch.new("root")
+    stale :: write_hangar_meta(root.path, "old-plan", "oldplan", "1.0", Val(1)).0
+    fs.write(stale.join("payload"), "old bytes").unwrap()
+    out :: jetpack().args([String]{"hangar", "clean", "--no-color"}).env("JETPACK_ROOT", root.path).output().unwrap()
+    assert(out.status.success(), String.from_utf8_lossy(out.stderr))
+    assert(stale.exists(), "plan-only clean must not delete objects")
+    stderr :: String.from_utf8_lossy(out.stderr)
+    assert(stderr.contains("Plan hangar clean"), stderr)
+    assert(stderr.contains("- stale-objects"), stderr)
+    assert(stderr.contains("-y or --yes"), stderr)
+}
+// Rust: tests/jetpack_engine.rs:3280
+#Test("clean_keeps_lock_reachable_and_legacy_unknown_hangar_objects") {
+    root :: Scratch.new("root")
+    project :: Scratch.new("proj")
+    (live, live_hash) :: write_hangar_meta(root.path, "live-1", "live", "1.0", Val(1))
+    legacy :: write_hangar_meta(root.path, "legacy-1", "legacy", "1.0", None).0
+    write_lock_with_live_output(project.path, "live", "1.0", live_hash)
+    out :: jetpack().args([String]{"hangar", "clean", "--no-color", "--yes"}).current_dir(project.path).env("JETPACK_ROOT", root.path).output().unwrap()
+    assert(out.status.success(), String.from_utf8_lossy(out.stderr))
+    assert(live.exists(), "lock-reachable object should be kept")
+    assert(legacy.exists(), "legacy object without timestamps should be kept")
+}
+// Rust: tests/jetpack_engine.rs:3306
+#Test("clean_sweeps_orphan_build_scratch_but_keeps_active_scratch") {
+    root :: Scratch.new("root")
+    scratch :: root.path.join("hangar/build-scratch")
+    orphan :: scratch.join("orphan")
+    active :: scratch.join("active")
+    fs.create_dir_all(orphan).unwrap()
+    fs.create_dir_all(active).unwrap()
+    fs.write(orphan.join("tmp"), "dead").unwrap()
+    fs.write(active.join(".active"), "").unwrap()
+    fs.write(active.join("tmp"), "live").unwrap()
+    out :: jetpack().args([String]{"hangar", "clean", "--no-color", "--yes"}).env("JETPACK_ROOT", root.path).output().unwrap()
+    assert(out.status.success(), String.from_utf8_lossy(out.stderr))
+    assert(!orphan.exists(), "orphan scratch should be swept")
+    assert(active.exists(), "active scratch marker protects scratch")
+}
+// Rust: tests/jetpack_engine.rs:3332
+#Test("clean_sweeps_preserved_failed_build_scratch") {
+    root :: Scratch.new("root")
+    scratch :: root.path.join("hangar/failed-scratch")
+    failed :: scratch.join("weirdctl-1")
+    fs.create_dir_all(failed).unwrap()
+    fs.write(failed.join("build.log"), "failed build").unwrap()
+    out :: jetpack().args([String]{"hangar", "clean", "--no-color", "--yes"}).env("JETPACK_ROOT", root.path).output().unwrap()
+    assert(out.status.success(), String.from_utf8_lossy(out.stderr))
+    assert(!failed.exists(), "failed-build scratch should be swept")
+}
+// Rust: tests/jetpack_engine.rs:3353
+#Test("clean_optimizes_duplicate_files_inside_hangar_only") {
+    root :: Scratch.new("root")
+    first :: write_hangar_meta(root.path, "dup-a", "dupa", "1.0", Val(now_secs())).0
+    second :: write_hangar_meta(root.path, "dup-b", "dupb", "1.0", Val(now_secs())).0
+    fs.write(first.join("blob"), "same payload").unwrap()
+    fs.write(second.join("blob"), "same payload").unwrap()
+    out :: jetpack().args([String]{"hangar", "clean", "--no-color", "--yes"}).env("JETPACK_ROOT", root.path).output().unwrap()
+    assert(out.status.success(), String.from_utf8_lossy(out.stderr))
+    stderr :: String.from_utf8_lossy(out.stderr)
+    assert(stderr.contains("optimized duplicate Jet-owned files: saved"), stderr)
+    assert(fs.read_to_string(first.join("blob")).unwrap() == "same payload")
+    assert(fs.read_to_string(second.join("blob")).unwrap() == "same payload")
+}
+// Rust: tests/jetpack_engine.rs:3386
+#Test("clean_reclaims_unreachable_canonical_hangar_objects") {
+    root :: Scratch.new("canonical-gc-root")
+    source :: Scratch.new("canonical-gc-source")
+    fs.write(source.join("payload"), "orphaned bytes\n").unwrap()
+    roots :: Roots{root: root.path, dev_mode: false}
+    entry :: Store.ingest_tree(roots, IngestRequest{name: "canonical-gc", version: "1", reference: "path:canonical-gc", cache_identity: CacheIdentity{source_fingerprint: "sha256:canonical-gc-source", recipe_fingerprint: "sha256:canonical-gc-recipe", policy_fingerprint: "sha256:canonical-gc-policy", platform: Envelope.host_platform()}, references: [String]{}, outputs: [String: OSPath]{"out": source.path}, signature: "", provenance: "canonical GC test", platform_artifact_kind: ""}).unwrap().entry
+    output :: OSPath.from(entry.out)
+    receipt :: roots.hangar_dir().join("receipts").join(entry.receipt)
+    assert(output.is_dir())
+    assert(receipt.is_file())
+    assert(Store.remove_closure_record(roots, entry.id).unwrap())
+    plan :: Store.clean_plan(roots).unwrap()
+    assert(plan.removed_objects >= 1, "canonical object missing from GC plan")
+    assert(plan.removed_receipts == 1)
+    report :: Store.clean(roots).unwrap()
+    assert(report.removed_objects >= 1)
+    assert(report.removed_receipts == 1)
+    assert(!output.exists(), "unreachable canonical object survived GC")
+    assert(!receipt.exists(), "unreachable receipt survived GC")
+}
+// Rust: tests/jetpack_engine.rs:3435
+#Test("build_runs_opportunistic_clean_after_success") {
+    root :: Scratch.new("root")
+    stale :: write_hangar_meta(root.path, "old-auto", "oldauto", "1.0", Val(1)).0
+    out :: jetpack().args([String]{"build", "fastfetch@nixpkgs", "--no-color", "--offline"}).env("JETPACK_ROOT", root.path).env("JETPACK_FIXTURES", example_fixtures(root.path)).env("JETPACK_AUTO_CLEAN_ALWAYS", "1").output().unwrap()
+    assert(out.status.success(), String.from_utf8_lossy(out.stderr))
+    assert(!stale.exists(), "successful build should run opportunistic clean")
+    stderr :: String.from_utf8_lossy(out.stderr)
+    assert(stderr.contains("auto-cleaned hangar"), stderr)
+}
+
+// Rust: tests/jetpack_engine.rs:3460
+#Test("run_dash_dash_executes_in_env_and_returns_status") {
+    root :: Scratch.new("root")
+    fixtures :: Scratch.new("fx")
+    out_dir :: Scratch.new("out")
+    write_runnable_fixture(fixtures.path, root.path, out_dir.path)
+    output :: jetpack().args([String]{"run", "greet@nixpkgs", "--no-color", "--offline", "--", "greet"}).env("JETPACK_ROOT", root.path).env("JETPACK_FIXTURES", fixtures.path).output().unwrap()
+    assert(output.status.success(), String.from_utf8_lossy(output.stderr))
+    assert(String.from_utf8_lossy(output.stdout).trim() == "hello from jetpack")
+}
+// Rust: tests/jetpack_engine.rs:3489
+#Test("run_explicit_package_without_command_runs_package_visibly") {
+    root :: Scratch.new("root")
+    fixtures :: Scratch.new("fx")
+    out_dir :: Scratch.new("out")
+    write_runnable_fixture(fixtures.path, root.path, out_dir.path)
+    output :: jetpack().args([String]{"run", "greet@nixpkgs", "--no-color", "--offline"}).env("JETPACK_ROOT", root.path).env("JETPACK_FIXTURES", fixtures.path).output().unwrap()
+    assert(output.status.success(), String.from_utf8_lossy(output.stderr))
+    assert(String.from_utf8_lossy(output.stdout).trim() == "hello from jetpack")
+    stderr :: String.from_utf8_lossy(output.stderr)
+    assert(stderr.contains("running greet@nixpkgs -> greet"), stderr)
+    assert(stderr.contains("(no args)"), stderr)
+}
+// Rust: tests/jetpack_engine.rs:3519
+#Test("run_dash_dash_propagates_failure_status") {
+    root :: Scratch.new("root")
+    fixtures :: Scratch.new("fx")
+    out_dir :: Scratch.new("out")
+    write_runnable_fixture(fixtures.path, root.path, out_dir.path)
+    output :: jetpack().args([String]{"run", "greet@nixpkgs", "--no-color", "--offline", "--", "false"}).env("JETPACK_ROOT", root.path).env("JETPACK_FIXTURES", fixtures.path).output().unwrap()
+    assert(!output.status.success())
+}
+// Rust: tests/jetpack_engine.rs:3542
+#Test("parent_env_unchanged_after_use") {
+    root :: Scratch.new("root")
+    fixtures :: Scratch.new("fx")
+    write_native_lease_fixture(&fixtures.path)
+    before :: std.env.var("PATH").unwrap_or_default()
+    output :: jetpack().args([String]{"use", "omp@releases#1.0.0", "-y", "--no-color", "--offline", "--fixtures"}).arg(fixtures.path).args([String]{"--", "sh", "-c", "printf %s \"$PATH\""}).env("JETPACK_ROOT", root.path).env("JETPACK_FIXTURES", fixtures.path).output().unwrap()
+    assert(output.status.success(), "lease handoff command failed: {String.from_utf8_lossy(output.stderr)}")
+    child_path :: String.from_utf8_lossy(output.stdout)
+    entries := child_path.split(':')
+    wrapper :: entries.next().unwrap_or_default()
+    assert(wrapper.starts_with("/proc/self/fd/"), "expected sealed FD-pinned exec-wrapper dir first, got: {child_path}")
+    bin :: entries.next().unwrap_or_default()
+    assert(!bin.starts_with(root.path.to_string_lossy().to_string()), "raw package output escaped lease handoff, got: {child_path}")
+    assert(std.env.var("PATH").unwrap_or_default() == before)
+    entry :: Store.find_by_reference(Roots.at(root.path), "omp@releases#1.0.0").unwrap()
+    explicit_raw_path :: OSPath.from(entry.out).join("bin/omp")
+    explicit :: jetpack().args([String]{"use", "omp@releases#1.0.0", "-y", "--no-color", "--offline", "--fixtures"}).arg(fixtures.path).arg("--").arg(explicit_raw_path).env("JETPACK_ROOT", root.path).env("JETPACK_FIXTURES", fixtures.path).output().unwrap()
+    assert(explicit.status.success(), "explicit leased executable escaped confinement: {String.from_utf8_lossy(explicit.stderr)}")
+    assert(String.from_utf8_lossy(explicit.stdout).trim() == "hello from jetpack")
+}
+// Rust: tests/jetpack_engine.rs:3632
+// The trailing #[test] belongs to the first registration in packet 1088, not another item here.

@@ -1,1177 +1,232 @@
-// PORT-PENDING 0857 crates-jetpack-src-cli-tool-slice-1826: crates/jetpack/src/CLI/tool.rs:1826-2998
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS fn tool_manifest_source_table(
-//RS     spec: &RefSpec::RefSpec,
-//RS     version: &str,
-//RS     policy: ChannelPolicy,
-//RS ) -> RefSpec::SourceTable {
-//RS     let mut table = cwd_table();
-//RS     if spec.source.label() == crate::Provider::native::SOURCE_NAME && !version.is_empty() {
-//RS         let upstream = format!(
-//RS             "{}#v{}",
-//RS             crate::Provider::native::UPSTREAM,
-//RS             version.trim_start_matches('v')
-//RS         );
-//RS         table.set_upstream(crate::Provider::native::SOURCE_NAME, upstream.clone());
-//RS         table.set_channel_metadata(
-//RS             crate::Provider::native::SOURCE_NAME,
-//RS             policy,
-//RS             source_manifest_ref(&upstream, policy),
-//RS         );
-//RS     }
-//RS     table
-//RS }
-//RS 
-//RS fn uninstall_tool(theme: &Theme, name: &str) -> Result<bool, String> {
-//RS     let _ = theme;
-//RS     RuntimePolicy::with_lock(&tools_state_dir(), PROFILE_LOCK_SCOPE, || {
-//RS         recover_profile_state()?;
-//RS         let mut tools = read_current_tools().map_err(io::Error::other)?;
-//RS         let before = tools.len();
-//RS         tools.retain(|tool| tool.name != name && tool.bins.iter().all(|bin| bin != name));
-//RS         if tools.len() == before {
-//RS             return Ok(false);
-//RS         }
-//RS         write_generation_locked(&tools, None)?;
-//RS         record_tool_manifest_locked(&tools, &RefSpec::SourceTable::empty(), None)?;
-//RS         Ok(true)
-//RS     })
-//RS     .map_err(|error| error.to_string())
-//RS }
-//RS 
-//RS fn write_generation_locked(
-//RS     tools: &[InstalledTool],
-//RS     live: Option<(&Store::ProfileInstallReceipt, &Store::CacheLease)>,
-//RS ) -> io::Result<u64> {
-//RS     let gen = next_generation()?;
-//RS     let gen_dir = generations_dir().join(gen.to_string());
-//RS     fs::create_dir(&gen_dir)?;
-//RS     let result = (|| {
-//RS         let mut generation_tools = tools.to_vec();
-//RS         materialize_generation_bins(&gen_dir, &mut generation_tools, live)?;
-//RS         let meta = format_generation_meta(gen, &generation_tools)?;
-//RS         write_synced(&gen_dir.join("meta.json"), meta.as_bytes())?;
-//RS         validate_generation_bins(gen, &generation_tools)?;
-//RS         let witness = generation_record_witness(&meta, gen).map_err(io::Error::other)?;
-//RS         write_synced(
-//RS             &gen_dir.join(PROFILE_COMPLETE_FILE),
-//RS             format!("{witness}\n").as_bytes(),
-//RS         )?;
-//RS         Store::sync_store_directory(&gen_dir)?;
-//RS         Store::sync_store_directory(&generations_dir())?;
-//RS         profile_failpoint("after-generation")?;
-//RS 
-//RS         if !generation_tools.is_empty() {
-//RS             ensure_generation_roots(gen, &generation_tools, &witness)?;
-//RS             profile_failpoint("after-root-commit")?;
-//RS         }
-//RS         profile_failpoint("before-pointer")?;
-//RS         publish_generation(gen, &witness, &generation_tools)?;
-//RS         profile_failpoint("after-pointer")?;
-//RS         Ok(gen)
-//RS     })();
-//RS     if result.is_err() && !gen_dir.join(PROFILE_COMPLETE_FILE).is_file() {
-//RS         let _ = fs::remove_dir_all(&gen_dir);
-//RS     }
-//RS     result
-//RS }
-//RS 
-//RS fn next_generation() -> io::Result<u64> {
-//RS     fs::create_dir_all(generations_dir())?;
-//RS     let mut maximum = 0u64;
-//RS     for entry in fs::read_dir(generations_dir())? {
-//RS         let entry = entry?;
-//RS         let name = entry
-//RS             .file_name()
-//RS             .into_string()
-//RS             .map_err(|_| io::Error::other("tool generation name is not UTF-8"))?;
-//RS         let generation = name
-//RS             .parse::<u64>()
-//RS             .map_err(|_| io::Error::other(format!("invalid tool generation `{name}`")))?;
-//RS         if generation == 0 || !entry.file_type()?.is_dir() {
-//RS             return Err(io::Error::other(format!(
-//RS                 "invalid tool generation `{name}`"
-//RS             )));
-//RS         }
-//RS         maximum = maximum.max(generation);
-//RS     }
-//RS     maximum
-//RS         .checked_add(1)
-//RS         .ok_or_else(|| io::Error::other("tool generation number overflow"))
-//RS }
-//RS 
-//RS fn recover_profile_state() -> io::Result<()> {
-//RS     fs::create_dir_all(tools_state_dir())?;
-//RS     for partial in [
-//RS         PROFILE_POINTER_PARTIAL,
-//RS         PROFILE_CURRENT_PARTIAL,
-//RS         TOOL_MANIFEST_PARTIAL,
-//RS     ] {
-//RS         let partial = tools_state_dir().join(partial);
-//RS         match fs::symlink_metadata(&partial) {
-//RS             Ok(metadata) if metadata.file_type().is_file() => fs::remove_file(&partial)?,
-//RS             Ok(_) => {
-//RS                 return Err(io::Error::other(
-//RS                     "tool generation pointer partial is not a regular file",
-//RS                 ))
-//RS             }
-//RS             Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-//RS             Err(error) => return Err(error),
-//RS         }
-//RS     }
-//RS     recover_projection_staging()?;
-//RS 
-//RS     migrate_legacy_generations_locked()?;
-//RS 
-//RS     let requested_current = current_generation_locked().ok().flatten();
-//RS     let mut publish = 0;
-//RS     if generations_dir().is_dir() {
-//RS         let mut generations = fs::read_dir(generations_dir())?
-//RS             .map(|entry| {
-//RS                 let entry = entry?;
-//RS                 entry
-//RS                     .file_name()
-//RS                     .to_string_lossy()
-//RS                     .parse::<u64>()
-//RS                     .map_err(|_| io::Error::other("invalid tool generation name"))
-//RS             })
-//RS             .collect::<io::Result<Vec<_>>>()?;
-//RS         generations.sort();
-//RS         for generation in generations {
-//RS             let complete = generations_dir()
-//RS                 .join(generation.to_string())
-//RS                 .join(PROFILE_COMPLETE_FILE);
-//RS             if !complete.is_file() {
-//RS                 continue;
-//RS             }
-//RS             let tools = read_generation_tools(generation).map_err(io::Error::other)?;
-//RS             let metadata = read_bounded(
-//RS                 &generations_dir()
-//RS                     .join(generation.to_string())
-//RS                     .join("meta.json"),
-//RS             )?;
-//RS             let witness =
-//RS                 generation_record_witness(&metadata, generation).map_err(io::Error::other)?;
-//RS             if read_bounded(&complete)?.trim() != witness {
-//RS                 return Err(io::Error::other("tool generation witness mismatch"));
-//RS             }
-//RS             validate_generation_bins(generation, &tools)?;
-//RS             if !tools.is_empty() {
-//RS                 ensure_generation_roots(generation, &tools, &witness)?;
-//RS             }
-//RS             publish = publish.max(generation);
-//RS         }
-//RS     }
-//RS     if publish != 0 {
-//RS         let selected = requested_current
-//RS             .filter(|generation| {
-//RS                 generation_numbers()
-//RS                     .unwrap_or_default()
-//RS                     .contains(generation)
-//RS             })
-//RS             .unwrap_or(publish);
-//RS         let tools = read_generation_tools(selected).map_err(io::Error::other)?;
-//RS         let metadata = read_bounded(
-//RS             &generations_dir()
-//RS                 .join(selected.to_string())
-//RS                 .join("meta.json"),
-//RS         )?;
-//RS         publish_generation(
-//RS             selected,
-//RS             &generation_record_witness(&metadata, selected).map_err(io::Error::other)?,
-//RS             &tools,
-//RS         )?;
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn recover_projection_staging() -> io::Result<()> {
-//RS     let directory = user_bin_dir();
-//RS     let metadata = match fs::symlink_metadata(&directory) {
-//RS         Ok(metadata) => metadata,
-//RS         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
-//RS         Err(error) => return Err(error),
-//RS     };
-//RS     if metadata.file_type().is_symlink() || !metadata.is_dir() {
-//RS         return Err(io::Error::other("managed tool bin directory is not a real directory"));
-//RS     }
-//RS     for entry in fs::read_dir(&directory)? {
-//RS         let entry = entry?;
-//RS         let name = entry.file_name();
-//RS         let Some(name) = name.to_str() else {
-//RS             continue;
-//RS         };
-//RS         if !name.starts_with(".projection-") || !name.ends_with(".partial") {
-//RS             continue;
-//RS         }
-//RS         let path = entry.path();
-//RS         let metadata = fs::symlink_metadata(&path)?;
-//RS         if metadata.file_type().is_symlink() || !metadata.is_file() {
-//RS             return Err(io::Error::other(format!(
-//RS                 "managed projection staging `{}` is not a regular file",
-//RS                 path.display()
-//RS             )));
-//RS         }
-//RS         fs::remove_file(path)?;
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn migrate_legacy_generations_locked() -> io::Result<()> {
-//RS     if !generations_dir().is_dir() {
-//RS         return Ok(());
-//RS     }
-//RS     let mut legacy = Vec::new();
-//RS     for entry in fs::read_dir(generations_dir())? {
-//RS         let entry = entry?;
-//RS         if !entry.file_type()?.is_dir() {
-//RS             return Err(io::Error::other("invalid tool generation entry"));
-//RS         }
-//RS         let generation = entry
-//RS             .file_name()
-//RS             .to_str()
-//RS             .and_then(|name| name.parse::<u64>().ok())
-//RS             .filter(|generation| *generation != 0)
-//RS             .ok_or_else(|| io::Error::other("invalid tool generation name"))?;
-//RS         if !entry.path().join(PROFILE_COMPLETE_FILE).is_file()
-//RS             || !entry.path().join("meta.json").is_file()
-//RS         {
-//RS             continue;
-//RS         }
-//RS         let metadata = read_bounded(&entry.path().join("meta.json"))?;
-//RS         let parsed = JSON::parse(&metadata).map_err(io::Error::other)?;
-//RS         let DataTree::Object(root) = parsed else {
-//RS             return Err(io::Error::other("tool metadata root is not an object"));
-//RS         };
-//RS         if tree_field(&root, "schema").is_none() {
-//RS             legacy.push((generation, entry.path(), metadata));
-//RS         }
-//RS     }
-//RS     legacy.sort_by_key(|(generation, _, _)| *generation);
-//RS     for (generation, path, metadata) in legacy {
-//RS         let tools =
-//RS             parse_legacy_generation_meta(&metadata, generation).map_err(io::Error::other)?;
-//RS         let digests = tools
-//RS             .iter()
-//RS             .map(|tool| tool.output_hash.clone())
-//RS             .collect::<std::collections::BTreeSet<_>>();
-//RS         let witness = profile_generation_witness(&metadata, &digests);
-//RS         let marker = read_bounded(&path.join(PROFILE_COMPLETE_FILE))?;
-//RS         if marker != "complete\n" && marker != format!("{witness}\n") {
-//RS             return Err(io::Error::other(format!(
-//RS                 "legacy tool generation {generation} witness mismatch; remove only after auditing `{}`",
-//RS                 path.display()
-//RS             )));
-//RS         }
-//RS         if !canonical_generation_matches(&tools)? {
-//RS             write_generation_locked(&tools, None)?;
-//RS         }
-//RS         let archive = tools_state_dir().join("legacy-generations");
-//RS         fs::create_dir_all(&archive)?;
-//RS         let destination = archive.join(format!("generation-{generation}"));
-//RS         if destination.exists() {
-//RS             return Err(io::Error::other(
-//RS                 "legacy profile migration archive collision",
-//RS             ));
-//RS         }
-//RS         fs::rename(&path, &destination)?;
-//RS         Store::sync_store_directory(&archive)?;
-//RS         Store::sync_store_directory(&generations_dir())?;
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn canonical_generation_matches(legacy: &[InstalledTool]) -> io::Result<bool> {
-//RS     for entry in fs::read_dir(generations_dir())? {
-//RS         let entry = entry?;
-//RS         let Some(generation) = entry
-//RS             .file_name()
-//RS             .to_str()
-//RS             .and_then(|name| name.parse::<u64>().ok())
-//RS         else {
-//RS             continue;
-//RS         };
-//RS         let Ok(record) = read_generation_record(generation) else {
-//RS             continue;
-//RS         };
-//RS         if record.tools.len() == legacy.len()
-//RS             && record
-//RS                 .tools
-//RS                 .iter()
-//RS                 .zip(legacy)
-//RS                 .all(|(left, right)| tool_authority_equal(left, right))
-//RS         {
-//RS             validate_generation_bins(generation, &record.tools)?;
-//RS             return Ok(true);
-//RS         }
-//RS     }
-//RS     Ok(false)
-//RS }
-//RS 
-//RS fn tool_authority_equal(left: &InstalledTool, right: &InstalledTool) -> bool {
-//RS     left.name == right.name
-//RS         && left.version == right.version
-//RS         && left.source == right.source
-//RS         && left.reference == right.reference
-//RS         && left.bins == right.bins
-//RS         && left.members == right.members
-//RS         && left.output_hash == right.output_hash
-//RS         && left.store_root == right.store_root
-//RS }
-//RS 
-//RS fn ensure_generation_roots(
-//RS     generation: u64,
-//RS     tools: &[InstalledTool],
-//RS     witness: &str,
-//RS ) -> io::Result<()> {
-//RS     let mut authorities = std::collections::BTreeMap::<String, Vec<String>>::new();
-//RS     for tool in tools {
-//RS         validate_digest(&tool.output_hash)?;
-//RS         authorities
-//RS             .entry(tool.store_root.clone())
-//RS             .or_default()
-//RS             .push(tool.output_hash.clone());
-//RS     }
-//RS     let mut prepared = Vec::new();
-//RS     for (root, targets) in authorities {
-//RS         let roots = Store::Roots {
-//RS             root: PathBuf::from(root),
-//RS             dev_mode: true,
-//RS         };
-//RS         if let Some(receipt) = Store::reconcile_profile_generation_root(
-//RS             &roots,
-//RS             PROFILE_OWNER,
-//RS             Syntax::TOOL_PROFILE_NAME,
-//RS             generation,
-//RS             witness,
-//RS             targets,
-//RS             now_secs(),
-//RS         )? {
-//RS             prepared.push((roots, receipt));
-//RS         }
-//RS     }
-//RS     profile_failpoint("after-root-prepare")?;
-//RS     let commit_count = prepared.len();
-//RS     for (index, (roots, receipt)) in prepared.into_iter().enumerate() {
-//RS         Store::commit_profile_generation_root(&roots, &receipt, now_secs())?;
-//RS         if index + 1 != commit_count {
-//RS             profile_failpoint("between-root-commits")?;
-//RS         }
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn materialize_generation_bins(
-//RS     generation_dir: &Path,
-//RS     tools: &mut [InstalledTool],
-//RS     live: Option<(&Store::ProfileInstallReceipt, &Store::CacheLease)>,
-//RS ) -> io::Result<()> {
-//RS     let bin_dir = generation_dir.join("bin");
-//RS     fs::create_dir(&bin_dir)?;
-//RS     let mut projected = std::collections::BTreeSet::new();
-//RS     for tool in tools {
-//RS         if tool.bins.len() != tool.members.len() || tool.bins.is_empty() {
-//RS             return Err(io::Error::other(
-//RS                 "profile tool has mismatched bin/member pairs",
-//RS             ));
-//RS         }
-//RS         let live_lease = live
-//RS             .filter(|(receipt, _)| {
-//RS                 receipt.reference == tool.reference
-//RS                     && receipt.output_hash == tool.output_hash
-//RS                     && receipt.store_root.to_string_lossy() == tool.store_root
-//RS             })
-//RS             .map(|(_, lease)| lease);
-//RS         let fallback_lease = if live_lease.is_none() {
-//RS             let roots = Store::Roots {
-//RS                 root: PathBuf::from(&tool.store_root),
-//RS                 dev_mode: true,
-//RS             };
-//RS             let entry = Store::list_checked(&roots)?
-//RS                 .into_iter()
-//RS                 .find(|entry| {
-//RS                     entry.reference == tool.reference
-//RS                         && entry.envelope.output_hash == tool.output_hash
-//RS                 })
-//RS                 .ok_or_else(|| io::Error::other("profile StoreEntry authority is unavailable"))?;
-//RS             Some(Store::snapshot_lease(&roots, &entry)?)
-//RS         } else {
-//RS             None
-//RS         };
-//RS         let source_lease = live_lease
-//RS             .or(fallback_lease.as_ref())
-//RS             .ok_or_else(|| io::Error::other("profile executable lease is unavailable"))?;
-//RS         let mut member_digests = Vec::with_capacity(tool.bins.len());
-//RS         for (bin, member) in tool.bins.iter().zip(&tool.members) {
-//RS             validate_bin_name(bin).map_err(io::Error::other)?;
-//RS             validate_bin_name(member).map_err(io::Error::other)?;
-//RS             let physical = ProfileDispatch::physical_bin_name(bin);
-//RS             if !projected.insert(physical.to_ascii_lowercase()) {
-//RS                 return Err(io::Error::other(format!("duplicate profile bin `{bin}`")));
-//RS             }
-//RS             let destination = bin_dir.join(physical);
-//RS             let proof = source_lease.copy_profile_executable(member, &destination)?;
-//RS             #[cfg(unix)]
-//RS             if proof.mode & 0o111 == 0 {
-//RS                 return Err(io::Error::other("profile projection is not executable"));
-//RS             }
-//RS             make_profile_projection_read_only(&destination)?;
-//RS             member_digests.push(proof.digest);
-//RS         }
-//RS         tool.member_digests = member_digests;
-//RS     }
-//RS     Store::sync_store_directory(&bin_dir)
-//RS }
-//RS 
-//RS fn validated_store_member(tool: &InstalledTool, member: &str) -> io::Result<PathBuf> {
-//RS     let roots = Store::Roots {
-//RS         root: PathBuf::from(&tool.store_root),
-//RS         dev_mode: true,
-//RS     };
-//RS     let entry = Store::list_checked(&roots)?
-//RS         .into_iter()
-//RS         .find(|entry| {
-//RS             entry.reference == tool.reference && entry.envelope.output_hash == tool.output_hash
-//RS         })
-//RS         .ok_or_else(|| io::Error::other("profile StoreEntry authority is unavailable"))?;
-//RS     let source = Path::new(&entry.bin).join(member);
-//RS     let metadata = fs::symlink_metadata(&source)?;
-//RS     if !metadata.is_file() || metadata.file_type().is_symlink() {
-//RS         return Err(io::Error::other(
-//RS             "profile executable member is not a no-follow file",
-//RS         ));
-//RS     }
-//RS     Ok(source)
-//RS }
-//RS 
-//RS fn validate_generation_bins(generation: u64, tools: &[InstalledTool]) -> io::Result<()> {
-//RS     let bin_dir = generations_dir().join(generation.to_string()).join("bin");
-//RS     let expected = tools
-//RS         .iter()
-//RS         .flat_map(|tool| {
-//RS             tool.bins
-//RS                 .iter()
-//RS                 .map(|bin| ProfileDispatch::physical_bin_name(bin))
-//RS         })
-//RS         .collect::<std::collections::BTreeSet<_>>();
-//RS     let actual = fs::read_dir(&bin_dir)?
-//RS         .map(|entry| {
-//RS             entry?
-//RS                 .file_name()
-//RS                 .into_string()
-//RS                 .map_err(|_| io::Error::other("profile bin is not UTF-8"))
-//RS         })
-//RS         .collect::<io::Result<std::collections::BTreeSet<_>>>()?;
-//RS     if actual != expected {
-//RS         return Err(io::Error::other("tool generation bin projection mismatch"));
-//RS     }
-//RS     for tool in tools {
-//RS         if tool.bins.len() != tool.member_digests.len() {
-//RS             return Err(io::Error::other("profile projection proof count mismatch"));
-//RS         }
-//RS         for member in &tool.members {
-//RS             let _ = validated_store_member(tool, member)?;
-//RS         }
-//RS         for (bin, digest) in tool.bins.iter().zip(&tool.member_digests) {
-//RS             let proof =
-//RS                 Store::profile_file_proof(&bin_dir.join(ProfileDispatch::physical_bin_name(bin)))?;
-//RS             if &proof.digest != digest {
-//RS                 return Err(io::Error::other(format!(
-//RS                     "profile projection proof mismatch for `{bin}`"
-//RS                 )));
-//RS             }
-//RS             #[cfg(unix)]
-//RS             if proof.mode & 0o111 == 0 {
-//RS                 return Err(io::Error::other(format!(
-//RS                     "profile projection is not executable for `{bin}`"
-//RS                 )));
-//RS             }
-//RS         }
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn publish_generation(generation: u64, witness: &str, tools: &[InstalledTool]) -> io::Result<()> {
-//RS     fs::create_dir_all(user_jet_dir())?;
-//RS     fs::create_dir_all(user_bin_dir())?;
-//RS     if fs::symlink_metadata(user_bin_dir())?
-//RS         .file_type()
-//RS         .is_symlink()
-//RS     {
-//RS         return Err(io::Error::other(
-//RS             "legacy profile bin symlink requires explicit migration",
-//RS         ));
-//RS     }
-//RS     let previous = read_current_tools().unwrap_or_default();
-//RS     let active = tools
-//RS         .iter()
-//RS         .flat_map(|tool| tool.bins.iter())
-//RS         .map(|bin| ProfileDispatch::physical_bin_name(bin))
-//RS         .collect::<BTreeSet<_>>();
-//RS     for tool in tools {
-//RS         for bin in &tool.bins {
-//RS             let path = user_bin_dir().join(ProfileDispatch::physical_bin_name(bin));
-//RS             install_profile_projection(generation, bin)
-//RS                 .map_err(|error| managed_tool_write_error(bin, &path, error))?;
-//RS         }
-//RS     }
-//RS     Store::sync_store_directory(&user_bin_dir())?;
-//RS 
-//RS     let pointer = ProfileDispatch::format_current_pointer(&ProfileDispatch::CurrentPointer {
-//RS         generation,
-//RS         witness: witness.to_string(),
-//RS     })?;
-//RS     atomic_write_current_pointer(pointer.as_bytes())?;
-//RS     profile_failpoint("after-current-pointer")?;
-//RS     let profile = format!(
-//RS         "{{\n  \"name\": \"{}\",\n  \"current\": {},\n  \"witness\": {}\n}}\n",
-//RS         Syntax::TOOL_PROFILE_NAME,
-//RS         generation,
-//RS         json_str(witness),
-//RS     );
-//RS     atomic_write_profile_pointer(profile.as_bytes())?;
-//RS     // Install and publish every new projection before retiring names that
-//RS     // belong only to the previous generation. A crash, antivirus hold, or
-//RS     // interrupted cleanup therefore leaves the last published name usable;
-//RS     // stale names are harmless and are removed on the next successful publish.
-//RS     for bin in previous.iter().flat_map(|tool| &tool.bins) {
-//RS         let physical = ProfileDispatch::physical_bin_name(bin);
-//RS         if active.contains(&physical) {
-//RS             continue;
-//RS         }
-//RS         let path = user_bin_dir().join(&physical);
-//RS         match fs::symlink_metadata(&path) {
-//RS             Ok(metadata) if metadata.file_type().is_symlink() => {
-//RS                 return Err(io::Error::other(format!(
-//RS                     "managed tool `{bin}` cannot remove symlink projection `{}`",
-//RS                     path.display()
-//RS                 )))
-//RS             }
-//RS             Ok(metadata) if metadata.is_file() => fs::remove_file(&path)
-//RS                 .map_err(|error| managed_tool_write_error(bin, &path, error))?,
-//RS             Ok(_) => {
-//RS                 return Err(io::Error::other(format!(
-//RS                     "managed tool `{bin}` projection is not a regular file"
-//RS                 )))
-//RS             }
-//RS             Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-//RS             Err(error) => return Err(error),
-//RS         }
-//RS     }
-//RS     Store::sync_store_directory(&user_bin_dir())
-//RS }
-//RS 
-//RS fn managed_tool_write_error(bin: &str, path: &Path, error: io::Error) -> io::Error {
-//RS     if error.kind() == io::ErrorKind::PermissionDenied {
-//RS         io::Error::new(
-//RS             io::ErrorKind::PermissionDenied,
-//RS             format!(
-//RS                 "managed tool `{bin}` cannot write `{}`: {error}",
-//RS                 path.display()
-//RS             ),
-//RS         )
-//RS     } else {
-//RS         error
-//RS     }
-//RS }
-//RS 
-//RS fn install_profile_projection(generation: u64, bin: &str) -> io::Result<()> {
-//RS     validate_bin_name(bin).map_err(io::Error::other)?;
-//RS     let physical = ProfileDispatch::physical_bin_name(bin);
-//RS     let source = generations_dir()
-//RS         .join(generation.to_string())
-//RS         .join("bin")
-//RS         .join(&physical);
-//RS     let destination = user_bin_dir().join(&physical);
-//RS     match fs::symlink_metadata(&destination) {
-//RS         Ok(metadata) if metadata.file_type().is_symlink() => {
-//RS             return Err(io::Error::other(format!(
-//RS                 "managed projection `{}` is a symlink",
-//RS                 destination.display()
-//RS             )))
-//RS         }
-//RS         Ok(metadata) if !metadata.is_file() => {
-//RS             return Err(io::Error::other(format!(
-//RS                 "managed projection `{}` is not a regular file",
-//RS                 destination.display()
-//RS             )))
-//RS         }
-//RS         Ok(_) => {}
-//RS         Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-//RS         Err(error) => return Err(error),
-//RS     }
-//RS     let partial = user_bin_dir().join(format!(
-//RS         ".projection-{physical}-{}.partial",
-//RS         std::process::id()
-//RS     ));
-//RS     match fs::symlink_metadata(&partial) {
-//RS         Ok(metadata) if metadata.file_type().is_symlink() => {
-//RS             return Err(io::Error::other(format!(
-//RS                 "managed projection staging `{}` is a symlink",
-//RS                 partial.display()
-//RS             )))
-//RS         }
-//RS         Ok(metadata) if metadata.is_file() => fs::remove_file(&partial)?,
-//RS         Ok(_) => {
-//RS             return Err(io::Error::other(format!(
-//RS                 "managed projection staging `{}` is not a regular file",
-//RS                 partial.display()
-//RS             )))
-//RS         }
-//RS         Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-//RS         Err(error) => return Err(error),
-//RS     }
-//RS     if let Err(error) = fs::hard_link(&source, &partial) {
-//RS         if error.kind() == io::ErrorKind::PermissionDenied {
-//RS             return Err(error);
-//RS         }
-//RS         fs::copy(&source, &partial)?;
-//RS     }
-//RS     finalize_profile_pointer(&partial, &destination)
-//RS }
-//RS 
-//RS fn make_profile_projection_read_only(path: &Path) -> io::Result<()> {
-//RS     #[cfg(unix)]
-//RS     {
-//RS         use std::os::unix::fs::PermissionsExt as _;
-//RS         let mode = fs::metadata(path)?.permissions().mode() & 0o777;
-//RS         fs::set_permissions(path, fs::Permissions::from_mode(mode & !0o222))?;
-//RS     }
-//RS     #[cfg(not(unix))]
-//RS     {
-//RS         let mut permissions = fs::metadata(path)?.permissions();
-//RS         permissions.set_readonly(true);
-//RS         fs::set_permissions(path, permissions)?;
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn validate_bin_name(value: &str) -> Result<(), String> {
-//RS     ProfileDispatch::validate_bin_name(value).map_err(|error| error.to_string())
-//RS }
-//RS 
-//RS fn validate_digest(value: &str) -> io::Result<()> {
-//RS     let Some(hex) = value.strip_prefix("sha256-") else {
-//RS         return Err(io::Error::other("profile digest is not sha256"));
-//RS     };
-//RS     if hex.len() != 64
-//RS         || !hex
-//RS             .bytes()
-//RS             .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
-//RS     {
-//RS         return Err(io::Error::other("profile digest is not canonical"));
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS pub(super) fn read_bounded(path: &Path) -> io::Result<String> {
-//RS     const MAX_PROFILE_METADATA: u64 = 1024 * 1024;
-//RS     let file = fs::File::open(path)?;
-//RS     if file.metadata()?.len() > MAX_PROFILE_METADATA {
-//RS         return Err(io::Error::other("profile metadata exceeds byte bound"));
-//RS     }
-//RS     let mut bytes = Vec::new();
-//RS     std::io::Read::take(file, MAX_PROFILE_METADATA + 1).read_to_end(&mut bytes)?;
-//RS     if bytes.len() as u64 > MAX_PROFILE_METADATA {
-//RS         return Err(io::Error::other("profile metadata exceeds byte bound"));
-//RS     }
-//RS     String::from_utf8(bytes).map_err(|_| io::Error::other("profile metadata is not UTF-8"))
-//RS }
-//RS 
-//RS pub(super) fn write_synced(path: &Path, bytes: &[u8]) -> io::Result<()> {
-//RS     let mut file = fs::OpenOptions::new()
-//RS         .write(true)
-//RS         .create_new(true)
-//RS         .open(path)?;
-//RS     file.write_all(bytes)?;
-//RS     file.sync_all()
-//RS }
-//RS 
-//RS pub(super) fn profile_generation_witness(
-//RS     metadata: &str,
-//RS     digests: &std::collections::BTreeSet<String>,
-//RS ) -> String {
-//RS     let mut canonical = format!(
-//RS         "jet-profile-generation-witness-v1\nmetadata\t{}\n",
-//RS         SHA256::sha256_hex(metadata.as_bytes())
-//RS     );
-//RS     for digest in digests {
-//RS         canonical.push_str("target\t");
-//RS         canonical.push_str(digest);
-//RS         canonical.push('\n');
-//RS     }
-//RS     format!("sha256-{}", SHA256::sha256_hex(canonical.as_bytes()))
-//RS }
-//RS 
-//RS fn generation_record_witness(metadata: &str, generation: u64) -> Result<String, String> {
-//RS     let parsed = ProfileDispatch::parse_generation_metadata(metadata, generation)
-//RS         .map_err(|error| error.to_string())?;
-//RS     Ok(ProfileDispatch::generation_witness(metadata, &parsed))
-//RS }
-//RS 
-//RS fn profile_failpoint(phase: &str) -> io::Result<()> {
-//RS     if std::env::var(PROFILE_FAILPOINT_ENV).ok().as_deref() == Some(phase) {
-//RS         return Err(io::Error::other(format!(
-//RS             "profile publication failpoint `{phase}`"
-//RS         )));
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn atomic_write_profile_pointer(bytes: &[u8]) -> io::Result<()> {
-//RS     let directory = tools_state_dir();
-//RS     let partial = directory.join(PROFILE_POINTER_PARTIAL);
-//RS     write_synced(&partial, bytes)?;
-//RS     finalize_profile_pointer(&partial, &profile_path())?;
-//RS     Store::sync_store_directory(&directory)
-//RS }
-//RS 
-//RS fn atomic_write_current_pointer(bytes: &[u8]) -> io::Result<()> {
-//RS     let directory = tools_state_dir();
-//RS     let partial = directory.join(PROFILE_CURRENT_PARTIAL);
-//RS     write_synced(&partial, bytes)?;
-//RS     finalize_profile_pointer(&partial, &current_path())?;
-//RS     Store::sync_store_directory(&directory)
-//RS }
-//RS 
-//RS #[cfg(windows)]
-//RS pub(super) fn finalize_profile_pointer(partial: &Path, destination: &Path) -> io::Result<()> {
-//RS     use std::os::windows::ffi::OsStrExt as _;
-//RS     const MOVEFILE_REPLACE_EXISTING: u32 = 0x0000_0001;
-//RS     const MOVEFILE_WRITE_THROUGH: u32 = 0x0000_0008;
-//RS     #[link(name = "kernel32")]
-//RS     unsafe extern "system" {
-//RS         fn MoveFileExW(existing: *const u16, replacement: *const u16, flags: u32) -> i32;
-//RS     }
-//RS     let mut existing = partial.as_os_str().encode_wide().collect::<Vec<_>>();
-//RS     existing.push(0);
-//RS     let mut replacement = destination.as_os_str().encode_wide().collect::<Vec<_>>();
-//RS     replacement.push(0);
-//RS     if unsafe {
-//RS         MoveFileExW(
-//RS             existing.as_ptr(),
-//RS             replacement.as_ptr(),
-//RS             MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
-//RS         )
-//RS     } == 0
-//RS     {
-//RS         return Err(io::Error::last_os_error());
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS #[cfg(not(windows))]
-//RS pub(super) fn finalize_profile_pointer(partial: &Path, destination: &Path) -> io::Result<()> {
-//RS     fs::rename(partial, destination)
-//RS }
-//RS 
-//RS fn format_generation_meta(gen: u64, tools: &[InstalledTool]) -> io::Result<String> {
-//RS     let metadata = ProfileDispatch::GenerationMetadata {
-//RS         generation: gen,
-//RS         created_at: now_secs(),
-//RS         tools: tools
-//RS             .iter()
-//RS             .map(|tool| ProfileDispatch::GenerationTool {
-//RS                 name: tool.name.clone(),
-//RS                 version: tool.version.clone(),
-//RS                 source: tool.source.clone(),
-//RS                 reference: RefSpec::migrate_persisted_ref(&tool.reference).canonical,
-//RS                 output_hash: tool.output_hash.clone(),
-//RS                 store_root: tool.store_root.clone(),
-//RS                 bins: tool.bins.clone(),
-//RS                 members: tool.members.clone(),
-//RS                 projection_hashes: tool.member_digests.clone(),
-//RS             })
-//RS             .collect(),
-//RS     };
-//RS     ProfileDispatch::format_generation_metadata(&metadata)
-//RS }
-//RS fn json_str(s: &str) -> String {
-//RS     format!(
-//RS         "\"{}\"",
-//RS         s.replace('\\', "\\\\")
-//RS             .replace('"', "\\\"")
-//RS             .replace('\n', "\\n")
-//RS     )
-//RS }
-//RS 
-//RS fn parse_generation_meta(
-//RS     text: &str,
-//RS     expected_generation: u64,
-//RS ) -> Result<Vec<InstalledTool>, String> {
-//RS     let metadata = ProfileDispatch::parse_generation_metadata(text, expected_generation)
-//RS         .map_err(|error| error.to_string())?;
-//RS     Ok(metadata
-//RS         .tools
-//RS         .into_iter()
-//RS         .map(|tool| InstalledTool {
-//RS             name: tool.name,
-//RS             version: tool.version,
-//RS             source: tool.source,
-//RS             reference: tool.reference,
-//RS             bins: tool.bins,
-//RS             members: tool.members,
-//RS             member_digests: tool.projection_hashes,
-//RS             output_hash: tool.output_hash,
-//RS             store_root: tool.store_root,
-//RS         })
-//RS         .collect())
-//RS }
-//RS fn parse_legacy_generation_meta(
-//RS     text: &str,
-//RS     expected_generation: u64,
-//RS ) -> Result<Vec<InstalledTool>, String> {
-//RS     let DataTree::Object(root) = JSON::parse(text)? else {
-//RS         return Err("legacy profile metadata root is not an object".into());
-//RS     };
-//RS     expect_exact_keys(
-//RS         &root,
-//RS         &["created_at", "generation", "profile", "tools"],
-//RS         "legacy profile metadata",
-//RS     )?;
-//RS     if json_field_string(&root, "profile")? != Syntax::TOOL_PROFILE_NAME
-//RS         || json_field_u64(&root, "generation")? != expected_generation
-//RS     {
-//RS         return Err("legacy profile metadata identity mismatch".into());
-//RS     }
-//RS     let _ = json_field_u64(&root, "created_at")?;
-//RS     let DataTree::Array(entries) = tree_field(&root, "tools").ok_or("legacy metadata lacks tools")?
-//RS     else {
-//RS         return Err("legacy profile tools field is not an array".into());
-//RS     };
-//RS     if entries.len() > MAX_PROFILE_TOOLS {
-//RS         return Err("legacy profile tool count exceeds bound".into());
-//RS     }
-//RS     let roots = Store::resolve();
-//RS     validate_store_root(&roots.root.to_string_lossy())?;
-//RS     let store = Store::list_checked(&roots).map_err(|error| error.to_string())?;
-//RS     let mut tools = Vec::with_capacity(entries.len());
-//RS     let mut seen_bins = std::collections::BTreeSet::new();
-//RS     for entry in entries {
-//RS         let DataTree::Object(tool) = entry else {
-//RS             return Err("legacy profile tool entry is not an object".into());
-//RS         };
-//RS         expect_exact_keys(
-//RS             tool,
-//RS             &[
-//RS                 "bins",
-//RS                 "name",
-//RS                 "output_hash",
-//RS                 "reference",
-//RS                 "source",
-//RS                 "targets",
-//RS                 "version",
-//RS             ],
-//RS             "legacy profile tool",
-//RS         )?;
-//RS         let name = bounded_json_string(tool, "name")?;
-//RS         let version = bounded_json_string(tool, "version")?;
-//RS         let source = bounded_json_string(tool, "source")?;
-//RS         let reference = bounded_json_string(tool, "reference")?;
-//RS         let output_hash = bounded_json_string(tool, "output_hash")?;
-//RS         validate_digest(&output_hash).map_err(|error| error.to_string())?;
-//RS         let bins = json_string_array(tool, "bins")?;
-//RS         let targets = json_bounded_string_array(tool, "targets", MAX_PROFILE_STRING)?;
-//RS         if bins.is_empty() || bins.len() != targets.len() {
-//RS             return Err("legacy profile tool has mismatched bin/target pairs".into());
-//RS         }
-//RS         let authority = store
-//RS             .iter()
-//RS             .find(|entry| entry.reference == reference && entry.envelope.output_hash == output_hash)
-//RS             .ok_or("legacy profile Store authority is unavailable")?;
-//RS         let mut members = Vec::with_capacity(targets.len());
-//RS         for (bin, target) in bins.iter().zip(&targets) {
-//RS             validate_bin_name(bin)?;
-//RS             if !seen_bins.insert(bin.clone()) {
-//RS                 return Err(format!("duplicate legacy profile bin `{bin}`"));
-//RS             }
-//RS             let target = Path::new(target);
-//RS             let member = target
-//RS                 .file_name()
-//RS                 .and_then(|name| name.to_str())
-//RS                 .ok_or("legacy profile target has no UTF-8 member")?;
-//RS             validate_bin_name(member)?;
-//RS             if target != Path::new(&authority.bin).join(member) {
-//RS                 return Err("legacy profile target escapes verified Store authority".into());
-//RS             }
-//RS             members.push(member.to_string());
-//RS         }
-//RS         tools.push(InstalledTool {
-//RS             name,
-//RS             version,
-//RS             source,
-//RS             reference,
-//RS             bins,
-//RS             members,
-//RS             member_digests: Vec::new(),
-//RS             output_hash,
-//RS             store_root: roots.root.to_string_lossy().into_owned(),
-//RS         });
-//RS     }
-//RS     tools
-//RS         .sort_by(|left, right| (&left.name, &left.reference).cmp(&(&right.name, &right.reference)));
-//RS     Ok(tools)
-//RS }
-//RS 
-//RS fn tree_field<'a>(
-//RS     object: &'a [(String, DataTree)],
-//RS     key: &str,
-//RS ) -> Option<&'a DataTree> {
-//RS     object
-//RS         .iter()
-//RS         .find_map(|(name, value)| (name == key).then_some(value))
-//RS }
-//RS 
-//RS fn expect_exact_keys(
-//RS     object: &[(String, DataTree)],
-//RS     expected: &[&str],
-//RS     label: &str,
-//RS ) -> Result<(), String> {
-//RS     let mut actual = object
-//RS         .iter()
-//RS         .map(|(key, _)| key.as_str())
-//RS         .collect::<Vec<_>>();
-//RS     actual.sort_unstable();
-//RS     let mut expected = expected.to_vec();
-//RS     expected.sort_unstable();
-//RS     if actual != expected {
-//RS         return Err(format!("{label} has unknown or missing fields"));
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn json_field_string<'a>(
-//RS     object: &'a [(String, DataTree)],
-//RS     key: &str,
-//RS ) -> Result<&'a str, String> {
-//RS     tree_field(object, key)
-//RS         .ok_or_else(|| format!("missing key `{key}`"))?
-//RS         .as_str()
-//RS }
-//RS 
-//RS fn bounded_json_string(
-//RS     object: &[(String, DataTree)],
-//RS     key: &str,
-//RS ) -> Result<String, String> {
-//RS     let value = json_field_string(object, key)?;
-//RS     if value.len() > MAX_PROFILE_STRING || value.bytes().any(|byte| byte == 0) {
-//RS         return Err(format!("profile field `{key}` exceeds bounds"));
-//RS     }
-//RS     Ok(value.to_string())
-//RS }
-//RS 
-//RS fn json_field_u64(object: &[(String, DataTree)], key: &str) -> Result<u64, String> {
-//RS     match tree_field(object, key) {
-//RS         Some(DataTree::Int(value)) if *value >= 0 => Ok(*value as u64),
-//RS         Some(DataTree::Float(value))
-//RS             if value.is_finite()
-//RS                 && *value >= 0.0
-//RS                 && value.fract() == 0.0
-//RS                 && *value <= 9_007_199_254_740_991.0 =>
-//RS         {
-//RS             Ok(*value as u64)
-//RS         }
-//RS         Some(_) => Err(format!("profile field `{key}` is not an exact integer")),
-//RS         None => Err(format!("profile field `{key}` is not a number")),
-//RS     }
-//RS }
-//RS 
-//RS fn json_string_array(
-//RS     object: &[(String, DataTree)],
-//RS     key: &str,
-//RS ) -> Result<Vec<String>, String> {
-//RS     json_bounded_string_array(object, key, 255)
-//RS }
-//RS 
-//RS fn json_bounded_string_array(
-//RS     object: &[(String, DataTree)],
-//RS     key: &str,
-//RS     max_len: usize,
-//RS ) -> Result<Vec<String>, String> {
-//RS     let Some(DataTree::Array(values)) = tree_field(object, key) else {
-//RS         return Err(format!("profile field `{key}` is not an array"));
-//RS     };
-//RS     values
-//RS         .iter()
-//RS         .map(|value| {
-//RS             let value = value.as_str()?;
-//RS             if value.len() > max_len || value.bytes().any(|byte| byte == 0) {
-//RS                 return Err(format!("profile field `{key}` exceeds bounds"));
-//RS             }
-//RS             Ok(value.to_string())
-//RS         })
-//RS         .collect()
-//RS }
-//RS 
-//RS fn validate_store_root(value: &str) -> Result<(), String> {
-//RS     let path = Path::new(value);
-//RS     if !path.is_absolute()
-//RS         || path.components().any(|component| {
-//RS             matches!(
-//RS                 component,
-//RS                 std::path::Component::ParentDir | std::path::Component::CurDir
-//RS             )
-//RS         })
-//RS     {
-//RS         return Err("profile Store authority is not an absolute normalized path".into());
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS #[cfg(test)]
-//RS mod tests {
-//RS     use super::*;
-//RS 
-//RS     #[test]
-//RS     fn task_names_parse_plain_and_every() {
-//RS         let src = r#"
-//RS #Job fn serve() { }
-//RS #Every(5min) #Job fn lint() { }
-//RS fn run() { }
-//RS "#;
-//RS         let names = task_names_in(src);
-//RS         assert!(names.contains(&"serve".into()), "{names:?}");
-//RS         assert!(names.contains(&"lint".into()), "{names:?}");
-//RS         assert!(!names.iter().any(|n| n == "run"));
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn external_provider_list_covers_ballot_examples() {
-//RS         assert!(Syntax::TOOL_EXTERNAL_PROVIDERS.contains(&"npm"));
-//RS         assert!(Syntax::TOOL_EXTERNAL_PROVIDERS.contains(&"cargo"));
-//RS         assert!(Syntax::TOOL_EXTERNAL_PROVIDERS.contains(&"pypi"));
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn profile_witness_binds_immutable_metadata_and_sorted_digests() {
-//RS         let left = std::collections::BTreeSet::from([
-//RS             format!("sha256-{}", "b".repeat(64)),
-//RS             format!("sha256-{}", "a".repeat(64)),
-//RS         ]);
-//RS         let right = left.iter().rev().cloned().collect();
-//RS         let witness = profile_generation_witness("immutable", &left);
-//RS         assert_eq!(witness, profile_generation_witness("immutable", &right));
-//RS         assert_ne!(witness, profile_generation_witness("changed", &left));
-//RS         assert!(witness.starts_with("sha256-"));
-//RS         assert_eq!(PROFILE_LOCK_SCOPE, "profile-user-tools");
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn generation_metadata_roundtrips_original_store_digest() {
-//RS         let digest = format!("sha256-{}", "d".repeat(64));
-//RS         let tools = vec![InstalledTool {
-//RS             name: "tool".into(),
-//RS             version: "1".into(),
-//RS             source: "path".into(),
-//RS             reference: "./tool".into(),
-//RS             bins: vec!["tool".into()],
-//RS             members: vec!["tool".into()],
-//RS             member_digests: vec![format!("sha256-{}", "e".repeat(64))],
-//RS             output_hash: digest.clone(),
-//RS             store_root: "/store".into(),
-//RS         }];
-//RS         let metadata = format_generation_meta(7, &tools).expect("format metadata");
-//RS         let parsed = parse_generation_meta(&metadata, 7).expect("parse");
-//RS         assert_eq!(parsed.len(), 1);
-//RS         assert_eq!(parsed[0].output_hash, digest);
-//RS         assert!(metadata.contains("\"generation\": 7"));
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn profile_metadata_rejects_unknown_fields_and_duplicate_bins() {
-//RS         let digest = format!("sha256-{}", "d".repeat(64));
-//RS         let projection = format!("sha256-{}", "e".repeat(64));
-//RS         let tool = InstalledTool {
-//RS             name: "left".into(),
-//RS             version: "1".into(),
-//RS             source: "path".into(),
-//RS             reference: "./left".into(),
-//RS             bins: vec!["same".into()],
-//RS             members: vec!["left".into()],
-//RS             member_digests: vec![projection.clone()],
-//RS             output_hash: digest.clone(),
-//RS             store_root: "/store".into(),
-//RS         };
-//RS         let metadata =
-//RS             format_generation_meta(1, std::slice::from_ref(&tool)).expect("format metadata");
-//RS         let corrupted = metadata.replacen("{\n", "{\n  \"unknown\": true,\n", 1);
-//RS         assert!(parse_generation_meta(&corrupted, 1).is_err());
-//RS 
-//RS         let mut right = tool.clone();
-//RS         right.name = "right".into();
-//RS         right.reference = "./right".into();
-//RS         right.members = vec!["right".into()];
-//RS         let duplicate = ProfileDispatch::GenerationMetadata {
-//RS             generation: 1,
-//RS             created_at: 1,
-//RS             tools: [tool, right]
-//RS                 .into_iter()
-//RS                 .map(|tool| ProfileDispatch::GenerationTool {
-//RS                     name: tool.name,
-//RS                     version: tool.version,
-//RS                     source: tool.source,
-//RS                     reference: tool.reference,
-//RS                     output_hash: tool.output_hash,
-//RS                     store_root: tool.store_root,
-//RS                     bins: tool.bins,
-//RS                     members: tool.members,
-//RS                     projection_hashes: tool.member_digests,
-//RS                 })
-//RS                 .collect(),
-//RS         };
-//RS         assert!(ProfileDispatch::format_generation_metadata(&duplicate).is_err());
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn current_pointer_checksum_rejects_bitflips_and_truncation() {
-//RS         let witness = format!("sha256-{}", "f".repeat(64));
-//RS         let record = ProfileDispatch::CurrentPointer {
-//RS             generation: 9,
-//RS             witness: witness.clone(),
-//RS         };
-//RS         let pointer = ProfileDispatch::format_current_pointer(&record).unwrap();
-//RS         assert_eq!(
-//RS             ProfileDispatch::parse_current_pointer(&pointer).unwrap(),
-//RS             record
-//RS         );
-//RS         assert!(ProfileDispatch::parse_current_pointer(
-//RS             &pointer.replace("generation\t9", "generation\t8")
-//RS         )
-//RS         .is_err());
-//RS         assert!(ProfileDispatch::parse_current_pointer(pointer.trim_end()).is_err());
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn tool_ref_writeback_migrates_legacy_spellings() {
-//RS         let legacy = "#auto can1357/oh-my-pi#v18.0.4@github";
-//RS         let manifest = parse_tool_manifest(&format!(
-//RS             "{{\n  \"profile\":\"tools\",\n  \"schema\":\"jet-user-tools-v1\",\n  \"sources\":[{{\"name\":\"releases\",\"policy\":\"#auto\",\"provider\":\"jetpackage\",\"raw\":{raw:?},\"upstream\":\"github:can1357/oh-my-pi#v18.0.4\"}}],\n  \"tools\":[{{\"bins\":[\"omp\"],\"members\":[\"omp\"],\"name\":\"omp\",\"reference\":{raw:?},\"resolved\":\"can1357/oh-my-pi#v18.0.4@github\",\"tier\":\"#auto\"}}]\n}}",
-//RS             raw = legacy
-//RS         ))
-//RS         .expect("legacy tool manifest parses");
-//RS         let formatted = format_tool_manifest(&manifest);
-//RS         assert!(formatted.contains("can1357/oh-my-pi@github#v18.0.4"));
-//RS         assert!(!formatted.contains(legacy));
-//RS         assert!(!formatted.contains("can1357/oh-my-pi#v18.0.4@github"));
-//RS 
-//RS         let metadata = format_generation_meta(
-//RS             7,
-//RS             &[InstalledTool {
-//RS                 name: "omp".into(),
-//RS                 version: "18.0.4".into(),
-//RS                 source: "github".into(),
-//RS                 reference: legacy.into(),
-//RS                 bins: vec!["omp".into()],
-//RS                 members: vec!["omp".into()],
-//RS                 member_digests: vec![format!("sha256-{}", "e".repeat(64))],
-//RS                 output_hash: format!("sha256-{}", "f".repeat(64)),
-//RS                 store_root: "/store".into(),
-//RS             }],
-//RS         )
-//RS         .expect("generation metadata formats");
-//RS         assert!(metadata.contains("can1357/oh-my-pi@github#v18.0.4"));
-//RS         assert!(!metadata.contains(legacy));
-//RS     }
-//RS }
-// END-PORT-PENDING 0857 crates/jetpack/src/CLI/tool.rs:1826-2998
+// Private continuation of CLI.ToolCommand; canonical owners below are retained,
+// not duplicated as wrappers. Fidelity gaps are complete replacement bodies for
+// integration into those same owners.
+use jetpack.CLI.Tools.ToolCommand.[cli_tool_manifest_source_table, cli_uninstall_tool]
+use jetpack.CLI.Tools.ToolProfile.[cli_tool_generations_dir]
+use jet_foundation.DataTree.[DataTree]
+use std.[fs]
+use std.io.[Error, ErrorKind]
+use core.sys.target.[selected_family]
+use core.sys.host.windows_file.[MoveFileExW, wide_for_win32]
+use core.sys.host.retained_buffers.[wide_ptr]
 
+// Rust: crates/jetpack/src/CLI/tool.rs:1826
+// tool_manifest_source_table -> Tools/ToolCommand.jet:839 cli_tool_manifest_source_table.
+// Retains cwd table and pinned native #v version; channel-policy raw spelling
+// divergence is recorded for integration at this existing owner.
+// Rust: crates/jetpack/src/CLI/tool.rs:1848
+// uninstall_tool -> Tools/ToolCommand.jet:853 cli_uninstall_tool.
+// Retains profile lock/recovery, name-or-bin removal, new generation and manifest.
+// Rust: crates/jetpack/src/CLI/tool.rs:1865
+// write_generation_locked -> Tools/ToolProfile.jet:282 cli_write_tool_generation_locked
+// and :295 cli_tool_write_generation_body. Same materialize/meta/validate/witness/
+// sync/root/failpoint/publish order and only incomplete-directory cleanup.
+
+// Rust: crates/jetpack/src/CLI/tool.rs:1902
+// Replace Tools/ToolProfile.jet:235 cli_tool_next_generation at integration:
+// Rust accepts the entire U64 range and obtains entry type without following links.
+fn next_generation() -> U64 Error! {
+    directory :: OSPath.from(cli_tool_generations_dir())
+    fs.create_dir_all(directory)?
+    maximum: U64 := 0
+    loop entry in fs.read_dir(directory)? {
+        entry :: entry?
+        name :: entry.file_name().into_string().map_err(_ -> Error.other("tool generation name is not UTF-8"))?
+        generation :: name.parse<U64>().map_err(_ -> Error.other("invalid tool generation `{name}`"))?
+        if generation == 0 || !entry.file_type()?.is_dir() {
+            return .Err(Error.other("invalid tool generation `{name}`"))
+        }
+        maximum = maximum.max(generation)
+    }
+    maximum.checked_add(1).ok_or_else(() -> Error.other("tool generation number overflow"))
+}
+
+// Rust: crates/jetpack/src/CLI/tool.rs:1926
+// recover_profile_state -> Tools/ToolProfile.jet:398 cli_recover_tool_profile_state.
+// Includes all three partial removals, projection staging, legacy migration,
+// sorted complete generations, witness/bin/root checks and requested-or-max publish.
+// Rust: crates/jetpack/src/CLI/tool.rs:2011
+// recover_projection_staging -> Tools/BinProjection.jet:161 cli_recover_projection_staging.
+// Same real-directory refusal and regular-only .projection-*.partial cleanup.
+// Rust: crates/jetpack/src/CLI/tool.rs:2043
+// migrate_legacy_generations_locked -> Tools/ToolProfile.jet:451 cli_migrate_legacy_tool_generations_locked.
+// Same schema absence detection, ascending migration, exact legacy marker check,
+// authority matching and collision-refusing archive rename with both directory syncs.
+// Rust: crates/jetpack/src/CLI/tool.rs:2107
+// canonical_generation_matches -> Tools/ToolProfile.jet:486 cli_canonical_tool_generation_matches.
+// Unreadable records are skipped; matching ordered authority lists validate bins.
+// Rust: crates/jetpack/src/CLI/tool.rs:2134
+// tool_authority_equal -> Tools/ToolProfile.jet:31 InstalledUserTool.same_authority.
+// All eight authority fields match; member_digests deliberately excluded.
+// Rust: crates/jetpack/src/CLI/tool.rs:2145
+// ensure_generation_roots -> Tools/ToolProfile.jet:326 cli_ensure_tool_generation_roots.
+// Groups exact Store root strings, sorts root keys once, reconciles all roots
+// before committing any, preserving after-root-prepare/between-root-commits.
+// Rust: crates/jetpack/src/CLI/tool.rs:2187
+// materialize_generation_bins -> Tools/BinProjection.jet:25 cli_materialize_generation_bins
+// with :59 cli_tool_store_entry and :68 cli_tool_project_bins.
+// Existing StoreVerification and ToolLiveInstall are canonical capability carriers;
+// no second receipt/lease type. Fallback lease release occurs on success and error.
+// Rust: crates/jetpack/src/CLI/tool.rs:2249
+// validated_store_member -> Tools/BinProjection.jet:89 cli_validated_store_member.
+// Matches reference/output_hash, obtains no-follow member metadata and refuses links.
+// Rust: crates/jetpack/src/CLI/tool.rs:2270
+// validate_generation_bins -> Tools/BinProjection.jet:100 cli_validate_generation_bins.
+// Exact distinct physical-name set, proof-count, member-authority/digest/execute checks.
+// Rust: crates/jetpack/src/CLI/tool.rs:2317
+// publish_generation -> Tools/ToolProfile.jet:353 cli_publish_tool_generation.
+// New projections -> bin sync -> checked current pointer -> failpoint -> profile
+// pointer -> stale regular-file removal -> bin sync; symlinks are never removed.
+
+// Rust: crates/jetpack/src/CLI/tool.rs:2387
+// Replace BinProjection.cli_managed_tool_write_error's error conversion:
+// the original IO PermissionDenied kind is retained with the contextual message.
+fn managed_tool_write_error(bin: String, path: OSPath, error: Error) -> Error {
+    if error.kind() == ErrorKind.PermissionDenied ->
+        Error.new(ErrorKind.PermissionDenied, "managed tool `{bin}` cannot write `{path.display()}`: {error}")
+        else -> ^error
+}
+// Rust: crates/jetpack/src/CLI/tool.rs:2401
+// install_profile_projection -> Tools/BinProjection.jet:124 cli_install_profile_projection.
+// Refuses nonregular destination/staging, hard-links then copies only on
+// non-PermissionDenied failure, finalizes staged pointer. Use replacement below.
+
+// Rust: crates/jetpack/src/CLI/tool.rs:2456
+// Replace Tools/BinProjection.jet:148 cli_make_profile_projection_read_only:
+// non-Unix uses native readonly permissions, never Unix mode-bit arithmetic.
+fn make_profile_projection_read_only(path: OSPath) -> () Error! {
+    // GATE #4494, #4483: real selected-platform permissions.
+    if selected_family() == "unix" {
+        mode :: fs.metadata(path)?.permissions().mode() & 0o777
+        fs.set_permissions(path, fs.Permissions.from_mode(mode & !0o222))?
+    } else {
+        permissions := fs.metadata(path)?.permissions()
+        &permissions.set_readonly(true)
+        fs.set_permissions(path, permissions)?
+    }
+    .Ok(())
+}
+// Rust: crates/jetpack/src/CLI/tool.rs:2472
+// validate_bin_name -> Profile/GenerationMetadata.jet:211 cli_validate_bin_name,
+// sole ProfileDispatch validation; do not create a second component validator.
+// Rust: crates/jetpack/src/CLI/tool.rs:2476
+// validate_digest -> Profile/GenerationMetadata.jet:255 cli_profile_validate_digest
+// with :260 cli_profile_validate_hex64/:265 cli_is_lower_hex64.
+// Exact sha256- prefix, length64 and lowercase ASCII hexadecimal.
+// Rust: crates/jetpack/src/CLI/tool.rs:2490
+// read_bounded -> Tools/BinProjection.jet:174 cli_read_bounded.
+// One retained handle, metadata bound1MiB then at most1MiB+1 bytes and UTF8 refusal.
+// Rust: crates/jetpack/src/CLI/tool.rs:2491
+// MAX_PROFILE_METADATA -> Tools/BinProjection.jet:8 TOOL_PROFILE_MAX_METADATA_BYTES.
+// Rust: crates/jetpack/src/CLI/tool.rs:2504
+// write_synced -> Tools/BinProjection.jet:189 cli_write_synced.
+// Exclusive creation, complete write and native sync, no replacement on open.
+// Rust: crates/jetpack/src/CLI/tool.rs:2513
+// profile_generation_witness -> Profile/GenerationMetadata.jet:191 cli_profile_generation_witness.
+// Metadata hash and sorted distinct target digest lines, final sha256- hash.
+// Rust: crates/jetpack/src/CLI/tool.rs:2529
+// generation_record_witness -> Tools/ToolProfile.jet:183 cli_tool_generation_record_witness
+// -> ToolGenerationMetadata.parse then .witness, no parallel metadata parser.
+// Rust: crates/jetpack/src/CLI/tool.rs:2535
+// profile_failpoint -> Tools/ToolProfile.jet:88 cli_profile_failpoint.
+// Exact phase match in JETPACK_INTERNAL_TEST_PROFILE_FAILPOINT gives refusal.
+// Rust: crates/jetpack/src/CLI/tool.rs:2544
+// atomic_write_profile_pointer -> Tools/BinProjection.jet:200 cli_atomic_write_profile_pointer.
+// Rust: crates/jetpack/src/CLI/tool.rs:2552
+// atomic_write_current_pointer -> Tools/BinProjection.jet:208 cli_atomic_write_current_pointer.
+// Both exclusively write partial, finalize and sync tools_state_dir.
+
+// Rust: crates/jetpack/src/CLI/tool.rs:2561
+// Rust: crates/jetpack/src/CLI/tool.rs:2587
+// Replace Tools/BinProjection.jet:196 cli_finalize_profile_pointer:
+// Windows requires MoveFileExW replacement plus write-through, not a generic rename.
+fn finalize_profile_pointer(partial: OSPath, destination: OSPath) -> () Error! {
+    if selected_family() == "windows" {
+        // Rust: crates/jetpack/src/CLI/tool.rs:2563
+        MOVEFILE_REPLACE_EXISTING: U32 :: 0x0000_0001
+        // Rust: crates/jetpack/src/CLI/tool.rs:2564
+        MOVEFILE_WRITE_THROUGH: U32 :: 0x0000_0008
+        // Rust: crates/jetpack/src/CLI/tool.rs:2567
+        // GATE #4494: canonical native wide path conversion and kernel32 binding.
+        existing :: wide_for_win32(partial)?
+        replacement :: wide_for_win32(destination)?
+        moved :: #Unsafe("both NUL-terminated wide path owners stay live through MoveFileExW") {
+            MoveFileExW(wide_ptr(existing, 0), wide_ptr(replacement, 0), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)
+        }
+        if moved == 0 { return .Err(Error.last_os_error()) }
+        .Ok(())
+    } else {
+        fs.rename(partial, destination)
+    }
+}
+
+// Rust: crates/jetpack/src/CLI/tool.rs:2591
+// format_generation_meta -> Tools/ToolProfile.jet:146 cli_format_tool_generation_meta.
+// Shared ToolGenerationMetadata/ToolGenerationTool owner, canonical persisted refs.
+// Rust: crates/jetpack/src/CLI/tool.rs:2612
+// json_str -> Tools/ToolProfile.jet:389 cli_tool_json_str. Exact three escapes.
+// Rust: crates/jetpack/src/CLI/tool.rs:2621
+// parse_generation_meta -> Tools/ToolProfile.jet:164 cli_parse_tool_generation_meta.
+// Moves projection_hashes into InstalledUserTool.member_digests.
+// Rust: crates/jetpack/src/CLI/tool.rs:2643
+// parse_legacy_generation_meta -> Tools/ToolProfile.jet:505 cli_parse_legacy_tool_generation_meta.
+// Full exact keys/bounds/Store verification/target equality checks and canonical order.
+// Rust: crates/jetpack/src/CLI/tool.rs:2739
+// tree_field -> Profile/GenerationMetadata.jet shared object.get, following
+// canonical DataTree conversion; ordered-object duplicate fidelity is integration-owned.
+// Rust: crates/jetpack/src/CLI/tool.rs:2748
+// expect_exact_keys -> Profile/GenerationMetadata.jet:323 cli_json_expect_exact_keys.
+// Sorted full key list equality, not a subset check.
+// Rust: crates/jetpack/src/CLI/tool.rs:2766
+// json_field_string -> Profile/GenerationMetadata.jet:331 cli_json_string_field.
+// Rust: crates/jetpack/src/CLI/tool.rs:2775
+// bounded_json_string -> Tools/ToolManifest.jet:159 cli_tool_bounded_json_string.
+// Byte bound4096 and NUL refusal, not scalar count.
+
+// Rust: crates/jetpack/src/CLI/tool.rs:2786
+// Replace signed-return Profile/GenerationMetadata.jet:339 cli_json_integer_field
+// for this Rust U64 helper without losing exact numeric/error precedence.
+fn json_field_u64(object: &[(String, DataTree)], key: String) -> U64 Err! {
+    value :: object.iter().find_map((name, value) -> if name == key -> Val(value) else -> None)
+    if value == {
+        .Val(.Int(value)) -> {
+            if value >= 0 -> .Ok(U64{value})
+                else -> .Err("profile field `{key}` is not an exact integer")
+        }
+        .Val(.Float(value)) -> {
+            if value.is_finite() && value >= 0.0 && value.fract() == 0.0 && value <= 9007199254740991.0 ->
+                .Ok(U64{value})
+                else -> .Err("profile field `{key}` is not an exact integer")
+        }
+        .Val(_) -> .Err("profile field `{key}` is not an exact integer")
+        .None -> .Err("profile field `{key}` is not a number")
+    }
+}
+// Rust: crates/jetpack/src/CLI/tool.rs:2802
+// json_string_array -> Profile/GenerationMetadata.jet:352 cli_json_string_array
+// with max_len255, forbid_nul=true.
+// Rust: crates/jetpack/src/CLI/tool.rs:2809
+// json_bounded_string_array -> same owner with source max_len, forbid_nul=true.
+
+// Rust: crates/jetpack/src/CLI/tool.rs:2829
+// Replace Profile/GenerationMetadata.jet:247 cli_path_is_normalized_absolute
+// text splitting: use native OSPath components (backslash is normal on Unix).
+fn validate_store_root(value: String) -> () Err! {
+    path :: OSPath.from(value)
+    if !path.is_absolute() || path.components().any(component -> if component == {
+        .ParentDir | .CurDir -> true
+        _ -> false
+    }) {
+        return .Err("profile Store authority is not an absolute normalized path")
+    }
+    .Ok(())
+}
+
+// Rust: crates/jetpack/src/CLI/tool.rs:2849
+// Rust: crates/jetpack/src/CLI/tool.rs:2862
+// Rust: crates/jetpack/src/CLI/tool.rs:2869
+// Rust: crates/jetpack/src/CLI/tool.rs:2883
+// Rust: crates/jetpack/src/CLI/tool.rs:2904
+// Rust: crates/jetpack/src/CLI/tool.rs:2949
+// Rust: crates/jetpack/src/CLI/tool.rs:2968
+// Original tests already live in Tests/Tools.jet:45-117; exact mappings in paired file.

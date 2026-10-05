@@ -1,0 +1,790 @@
+use Jetpack.CLI.Tests.Integration.Pkg.*
+use std.[fs, env]
+use std.process.Command
+use Jetpack.[SemanticLock, MigrationImport, ProviderGraph, ProviderFacts, Replacement]
+use Jetpack.PackageGraph.[CatalogEntry, VisibleEdgeKind, PackageNode, MissingDependencyFix]
+use Jetpack.SemanticLock.[SemanticLockFile, LockRecordKind]
+use Jetpack.ProviderGraph.[AuthorityGraph, FetchDecision, ProviderFamily, ProviderObject, ProviderRequest, ReplacementOverlay]
+use Jetpack.MigrationImport.[GeneratedFile, ImportConflict, MigrationStatus]
+use Jetpack.Replacement.[PackageIdentity, ProofStatus, ProofFailureKind, GoldenFixture, ReplacementPolicy, ReplacementDecision, ReplacementCandidate, ImporterProgressFact, ImporterReplacementStatus]
+use Jetpack.ProviderFactValue
+use jet.[Manifest, Loader, Sema, Diagnostics, Policy]
+use jet_foundation.Names.StructureFactKind
+use common.[build_and_run, have_web_target]
+// GATE #4494: native subprocess/fs operations and the actual native-tier test provider.
+// GATE #4483: Web-target availability comes from the native test provider.
+
+// Rust: tests/pkg.rs:76
+#Test("shape6_registry_routes_and_retired_bare_snapshots") {
+    tmp :: tmp_dir("shape6_registry")
+    store :: tmp.join("store")
+    fs.create_dir_all(store).expect("create store")
+    key :: jet_cmd(["registry", "key"], &tmp, &store)
+    assert(!key.status.success())
+    assert_eq(String.from_utf8(key.stderr).expect("UTF-8 error"), "Error [E2104]: `jet registry key` needs a subcommand — try `jet registry key backup`.\n Why: Jet needs valid command input before it can run this command\n Fix: correct the named argument or input, then run the command again\n")
+    for verb in ["publish", "keygen", "key", "yank"] {
+        bare :: jet_cmd([verb, "sentinel"], &tmp, &store)
+        assert_eq(bare.status.code(), Some(2), "bare jet {verb}")
+        assert_eq(String.from_utf8(bare.stderr).expect("UTF-8 error"), "Error [E2101]: `{verb}` moved under `jet registry`.\n Why: infrequent commands live in a named area so daily Jet commands stay easy to scan.\n Fix: run `jet registry {verb} sentinel`.\n")
+    }
+    fs.remove_dir_all(tmp).expect("remove scratch")
+}
+
+// Rust: tests/pkg.rs:387
+#Test("strict_graph_rejects_transitive_import") {
+    graph :: graph_with_app()
+    err :: graph.check_visible("app", "log").expect_err("transitive dep must not be visible")
+    assert(err.reason.contains("direct deps"))
+    assert_eq(err.requested, "log")
+}
+
+// Rust: tests/pkg.rs:397
+#Test("strict_graph_accepts_direct_dep") {
+    graph :: graph_with_app()
+    edge :: graph.check_visible("app", "ui").expect("direct dep visible")
+    assert_eq(edge.dependency, "ui")
+    assert_eq(edge.kind, VisibleEdgeKind.DirectDep)
+}
+
+// Rust: tests/pkg.rs:407
+#Test("catalog_edge_behaves_like_direct_dep_after_selection") {
+    graph := graph_with_app()
+    graph.add_catalog(CatalogEntry { logical_name: "log", provider_ref: "core.log@1.2.3", version_rule: "1.2", allowed_packages: ["app"], owner_workspace: "root", rationale: "workspace selected shared logging version" })
+    edge :: graph.check_visible("app", "log").expect("catalog edge visible")
+    assert_eq(edge.kind, VisibleEdgeKind.Catalog)
+    assert_eq(edge.provider_ref, "core.log@1.2.3")
+}
+
+// Rust: tests/pkg.rs:426
+#Test("lock_records_catalog_owner_and_rationale") {
+    lock :: SemanticLockFile { records: [semantic_record("app", "core.log", "1.2.3")], ..SemanticLockFile.default() }
+    text :: SemanticLock.write(&lock)
+    assert(text.contains("owner-package = \"app\""))
+    assert(text.contains("reason = \"app declared core.log\""))
+    parsed :: SemanticLock.parse(&text)
+    assert_eq(parsed.records[0].rationales[0].owner_package, "app")
+}
+
+// Rust: tests/pkg.rs:440
+#Test("catalog_merge_conflict_names_owner_package") {
+    left :: SemanticLockFile { records: [semantic_record("app", "core.log", "1.2.3")], ..SemanticLockFile.default() }
+    right :: SemanticLockFile { records: [semantic_record("app", "core.log", "1.3.0")], ..SemanticLockFile.default() }
+    out :: SemanticLock.merge(&SemanticLockFile.default(), &left, &right)
+    assert_eq(out.conflicts.len(), 1)
+    assert_eq(out.conflicts[0].owner_package, "app")
+    assert_eq(out.conflicts[0].semantic_key, "package:core.log")
+}
+
+// Rust: tests/pkg.rs:457
+#Test("missing_dep_fix_prefers_direct_add_for_single_package") {
+    graph :: graph_with_app()
+    err :: graph.check_visible("app", "only-app").unwrap_err()
+    assert(err.fix_text().contains("jet add only-app --path ../only-app"))
+}
+
+// Rust: tests/pkg.rs:466
+#Test("missing_dep_fix_does_not_catalog_without_hidden_use_evidence") {
+    graph := graph_with_app()
+    graph.add_package(PackageNode.new("direct-only").with_deps(["shared"]))
+    err :: graph.check_visible("app", "shared").unwrap_err()
+    assert(match err.fix { MissingDependencyFix.DirectAddPath { .. } -> true; _ -> false })
+}
+
+// Rust: tests/pkg.rs:478
+#Test("missing_dep_fix_prefers_catalog_for_workspace_reuse") {
+    graph :: graph_with_app()
+    err :: graph.check_visible("app", "log").unwrap_err()
+    assert(err.fix_text().contains("catalog data"))
+    assert(err.fix_text().contains("app"))
+    assert(err.fix_text().contains("worker"))
+}
+
+// Rust: tests/pkg.rs:487
+#Test("lsp_completion_hides_transitive_deps") {
+    graph :: graph_with_app()
+    visible :: graph.visible_edges("app").into_iter().map((edge) -> edge.dependency).collect()
+    assert_eq(visible, ["ui"])
+    assert(!visible.contains("log"))
+}
+
+// Rust: tests/pkg.rs:499
+#Test("lock_record_kinds_roundtrip_unknown_future_fields") {
+    raw :: "semantic-lock-version = 1\n\n[[semantic_record]]\nkind = \"future-kind\"\nkey = \"k\"\nexact = \"e\"\nhash = \"h\"\nplatform = \"p\"\nfuture-key = \"future-value\"\n"
+    parsed :: SemanticLock.parse(&raw)
+    assert(match parsed.records[0].identity.kind { LockRecordKind.Future(_) -> true; _ -> false })
+    assert_eq(parsed.records[0].future_fields.get("future-key"), Some("future-value"))
+    reparsed :: SemanticLock.parse(&SemanticLock.write(&SemanticLockFile { records: parsed.records, ..SemanticLockFile.default() }))
+    assert_eq(reparsed.records[0].future_fields.get("future-key"), Some("future-value"))
+}
+
+// Rust: tests/pkg.rs:522
+#Test("lock_rationale_preserves_exact_identity") {
+    a :: SemanticLockFile { records: [semantic_record("app", "core.log", "1.2.3")], ..SemanticLockFile.default() }
+    b := a.clone()
+    b.records[0].rationales[0].reason = "human text changed"
+    assert_eq(a.records[0].identity.machine_identity(), b.records[0].identity.machine_identity())
+}
+
+// Rust: tests/pkg.rs:537
+#Test("lock_merge_independent_additions") {
+    left :: SemanticLockFile { records: [semantic_record("app", "core.log", "1.2.3")], ..SemanticLockFile.default() }
+    right :: SemanticLockFile { records: [semantic_record("app", "core.http", "2.0.0")], ..SemanticLockFile.default() }
+    out :: SemanticLock.merge(&SemanticLockFile.default(), &left, &right)
+    assert(out.conflicts.is_empty())
+    assert_eq(out.merged.records.len(), 2)
+}
+
+// Rust: tests/pkg.rs:553
+#Test("lock_merge_same_identity_two_owners") {
+    left :: SemanticLockFile { records: [semantic_record("app", "core.log", "1.2.3")], ..SemanticLockFile.default() }
+    right :: SemanticLockFile { records: [semantic_record("worker", "core.log", "1.2.3")], ..SemanticLockFile.default() }
+    out :: SemanticLock.merge(&SemanticLockFile.default(), &left, &right)
+    assert(out.conflicts.is_empty())
+    assert_eq(out.merged.records[0].rationales.len(), 2)
+}
+
+// Rust: tests/pkg.rs:569
+#Test("lock_merge_conflicting_identity_diagnostic") {
+    left :: SemanticLockFile { records: [semantic_record("app", "core.log", "1.2.3")], ..SemanticLockFile.default() }
+    right :: SemanticLockFile { records: [semantic_record("app", "core.log", "1.3.0")], ..SemanticLockFile.default() }
+    out :: SemanticLock.merge(&SemanticLockFile.default(), &left, &right)
+    assert_eq(out.conflicts[0].left_reason, "app declared core.log")
+    assert_eq(out.conflicts[0].right_reason, "app declared core.log")
+}
+
+// Rust: tests/pkg.rs:585
+#Test("lock_merge_conflicts_on_same_version_different_hash") {
+    left :: SemanticLockFile { records: [semantic_record_with_hash("app", "core.log", "1.2.3", "sha256-left")], ..SemanticLockFile.default() }
+    right :: SemanticLockFile { records: [semantic_record_with_hash("app", "core.log", "1.2.3", "sha256-right")], ..SemanticLockFile.default() }
+    out :: SemanticLock.merge(&SemanticLockFile.default(), &left, &right)
+    assert_eq(out.conflicts.len(), 1)
+}
+
+// Rust: tests/pkg.rs:610
+#Test("lock_merge_accepts_one_sided_identity_change_from_base") {
+    base :: SemanticLockFile { records: [semantic_record("app", "core.log", "1.2.3")], ..SemanticLockFile.default() }
+    left :: base.clone()
+    right :: SemanticLockFile { records: [semantic_record("app", "core.log", "1.3.0")], ..SemanticLockFile.default() }
+    out :: SemanticLock.merge(&base, &left, &right)
+    assert(out.conflicts.is_empty())
+    assert_eq(out.merged.records[0].identity.exact, "1.3.0")
+}
+
+// Rust: tests/pkg.rs:627
+#Test("lock_merge_platform_specific_records") {
+    left :: SemanticLockFile { records: [semantic_record("app", "bin.tool:x86_64-linux", "1")], ..SemanticLockFile.default() }
+    right_rec := semantic_record("app", "bin.tool:aarch64-macos", "1")
+    right_rec.identity.platform = "aarch64-macos"
+    right :: SemanticLockFile { records: [right_rec], ..SemanticLockFile.default() }
+    out :: SemanticLock.merge(&SemanticLockFile.default(), &left, &right)
+    assert(out.conflicts.is_empty())
+    assert_eq(out.merged.records.len(), 2)
+}
+
+// Rust: tests/pkg.rs:645
+#Test("lock_explain_names_owner_policy_provider_platform") {
+    lock :: SemanticLockFile { records: [semantic_record("app", "core.log", "1.2.3")], ..SemanticLockFile.default() }
+    fact :: SemanticLock.explain(&lock, "package:core.log").expect("explain fact")
+    assert_eq(fact.owners, ["app"])
+    assert_eq(fact.provider, "core")
+    assert_eq(fact.platform, "x86_64-linux")
+    assert_eq(fact.policy_fingerprint, "policy-1")
+    assert_eq(fact.contenders.len(), 1)
+}
+
+// Rust: tests/pkg.rs:660
+#Test("lock_satisfied_offline_verbs_do_not_touch_network") {
+    obj :: ProviderObject { family: ProviderFamily.Npm, ref_key: "left-pad", exact_identity: "npm:left-pad@1.0.0", hash: "sha256-aa", platform: "any", signature: "", audit: [], sandbox_effects: [], build_effects: [] }
+    graph := AuthorityGraph.default()
+    graph.add_locked(obj)
+    decision :: graph.fetch_allowed(&ProviderRequest { family: ProviderFamily.Npm, ref_key: "left-pad", exact_identity: "npm:left-pad@1.0.0", hash: "sha256-aa", platform: "any", offline: true })
+    assert_eq(decision, FetchDecision.AllowedOfflineSatisfied)
+}
+
+// Rust: tests/pkg.rs:689
+#Test("read_only_verbs_do_not_rewrite_lock") {
+    lock :: SemanticLockFile { records: [semantic_record("app", "core.log", "1.2.3")], ..SemanticLockFile.default() }
+    before :: SemanticLock.write(&lock)
+    after :: SemanticLock.write(&SemanticLock.parse(&before))
+    assert_eq(before, after)
+}
+
+// Rust: tests/pkg.rs:701
+#Test("nix_import_emits_role_modules_and_todos") {
+    plan :: MigrationImport.import_nix_facts("flake.nix", "{{\"name\":\"app\",\"packages\":[\"ripgrep\"],\"shellHook\":\"echo hi\"}}")
+    assert(plan.generated_files.iter().any((f) -> f.path == "env.jet"))
+    assert(plan.todos.iter().any((t) -> t.message.contains("shellHook")))
+}
+
+// Rust: tests/pkg.rs:711
+#Test("nix_import_emits_exact_refs_and_retains_native_facts") {
+    plan :: MigrationImport.import_nix_facts("flake.lock", "{{\"name\":\"app\",\"version\":\"1.0.0\",\"source\":\"nixpkgs\",\"packages\":[{{\"name\":\"ripgrep\",\"version\":\"14.1.1\",\"drvPath\":\"/nix/store/hash-ripgrep-14.1.1.drv\",\"buildInputs\":[\"openssl\"],\"system\":\"x86_64-linux\",\"license\":\"BSD-3-Clause\"}}]}}")
+    assert_eq(plan.deps[0].provider_ref, "ripgrep@nixpkgs#version=14.1.1")
+    assert_eq(plan.deps[0].locked_version, "14.1.1")
+    assert(plan.emit_pkg_jet().contains("ripgrep: ripgrep@nixpkgs#version=14.1.1"))
+    facts :: &plan.provider_facts["ripgrep@nixpkgs#version=14.1.1"]
+    facts.validate().expect("exact Nix import is lossless")
+    assert_eq(facts.native_format, "flake-facts.json")
+    assert(facts.native_document.contains("drvPath"))
+    assert(facts.facts.contains_key("provider.nix.import.drvPath"))
+    assert(facts.facts.contains_key("provider.nix.dependency.build"))
+    assert(facts.facts.contains_key("provider.nix.variant.system"))
+    assert(facts.facts.contains_key("provider.nix.license"))
+    assert(facts.facts.contains_key("provider.nix.source.drv_path"))
+}
+
+// Rust: tests/pkg.rs:733
+#Test("nix_import_keeps_mutable_refs_out_of_generated_source") {
+    plan :: MigrationImport.import_nix_facts("flake.nix", "{{\"name\":\"app\",\"packages\":[\"ripgrep\"]}}")
+    assert_eq(plan.deps[0].provider_ref, "ripgrep@nixpkgs")
+    assert(!plan.emit_pkg_jet().contains("ripgrep: ripgrep@nixpkgs"))
+    assert(plan.provider_facts["ripgrep@nixpkgs"].losses.iter().any((loss) -> loss.reason.contains("no exact version")))
+    assert(plan.todos.iter().any((todo) -> todo.message.contains("migration remains unresolved")))
+}
+
+// Rust: tests/pkg.rs:751
+#Test("nix_import_reports_malformed_package_facts_without_generating_them") {
+    plan :: MigrationImport.import_nix_facts("flake.lock", "{{\"name\":\"app\",\"version\":\"1.0.0\",\"packages\":[{{\"name\":\"broken\",\"version\":\"1.0.0\",\"drvPath\":1,\"buildInputs\":false}}]}}")
+    facts :: &plan.provider_facts["broken@nixpkgs#version=1.0.0"]
+    assert(facts.losses.iter().any((loss) -> loss.reason.contains("drvPath")))
+    assert(facts.losses.iter().any((loss) -> loss.reason.contains("buildInputs")))
+    assert(!plan.emit_pkg_jet().contains("broken: broken@nixpkgs#version=1.0.0"))
+}
+
+// Rust: tests/pkg.rs:771
+#Test("cargo_import_preserves_locked_versions") {
+    plan :: MigrationImport.import_cargo("[package]\nname = \"app\"\nversion = \"0.1.0\"\n[dependencies]\nserde = \"1\"\n", "[[package]]\nname = \"serde\"\nversion = \"1.0.200\"\n")
+    assert_eq(plan.deps[0].locked_version, "1.0.200")
+    assert_eq(plan.deps[0].provider_ref, "serde@cargo#version=1.0.200")
+    assert(plan.emit_pkg_jet().contains("serde: serde@cargo#version=1.0.200"))
+    assert(plan.provider_facts["serde#version=1.0.200@cargo"].validate().is_ok())
+    assert(plan.ffi_stubs.iter().any((s) -> s.symbol == "serde"))
+}
+
+// Rust: tests/pkg.rs:788
+#Test("npm_import_turns_scripts_into_legacy_build_actions") {
+    plan :: MigrationImport.import_npm("{{\"name\":\"web\",\"version\":\"1.0.0\",\"dependencies\":{{\"vite\":\"5\"}},\"scripts\":{{\"build\":\"vite build\"}}}}")
+    assert(plan.deps.iter().any((d) -> d.name == "vite"))
+    assert_eq(plan.deps[0].provider_ref, "vite@npm")
+    assert(!plan.emit_pkg_jet().contains("vite: vite@npm"))
+    assert(plan.todos.iter().any((t) -> t.message.contains("legacy build action")))
+    assert(plan.provider_facts.values().any((facts) -> facts.losses.iter().any((loss) -> loss.reason.contains("not an exact lock"))))
+}
+
+// Rust: tests/pkg.rs:806
+#Test("npm_import_emits_exact_provider_refs_and_retains_requests") {
+    plan :: MigrationImport.import_npm("{{\"name\":\"web\",\"version\":\"1.0.0\",\"dependencies\":{{\"vite\":\"5.4.0\"}}}}")
+    assert_eq(plan.deps[0].provider_ref, "vite@npm#version=5.4.0")
+    assert_eq(plan.deps[0].locked_version, "5.4.0")
+    assert(plan.emit_pkg_jet().contains("vite: vite@npm#version=5.4.0"))
+    assert(plan.provider_facts["vite@npm#version=5.4.0"].validate().is_ok())
+}
+
+// Rust: tests/pkg.rs:819
+#Test("cargo_import_reports_missing_lock_without_generating_mutable_ref") {
+    plan :: MigrationImport.import_cargo("[package]\nname = \"app\"\nversion = \"0.1.0\"\n[dependencies]\nserde = \"1\"\n", "")
+    assert_eq(plan.deps[0].provider_ref, "serde@cargo")
+    assert(!plan.emit_pkg_jet().contains("serde: serde@cargo"))
+    assert(plan.todos.iter().any((todo) -> todo.message.contains("unresolved")))
+    assert(plan.provider_facts["serde@cargo"].losses.iter().any((loss) -> loss.reason.contains("no exact version")))
+}
+
+// Rust: tests/pkg.rs:837
+#Test("python_import_marks_dynamic_metadata_todo") {
+    plan :: MigrationImport.import_python_metadata("pkg", ["version"])
+    assert(plan.todos[0].message.contains("dynamic Python metadata"))
+    assert(MigrationImport.todo_diagnostics_need_ballot())
+}
+
+// Rust: tests/pkg.rs:844
+#Test("swiftpm_import_emits_provider_refs") {
+    plan :: MigrationImport.import_swiftpm("swift-log", "abc123")
+    assert_eq(plan.deps[0].provider_ref, "swift-log#revision=abc123@swiftpm")
+    assert_eq(plan.deps[0].locked_version, "abc123")
+    assert(plan.provider_facts["swift-log#revision=abc123@swiftpm"].validate().is_ok())
+}
+
+// Rust: tests/pkg.rs:857
+#Test("import_idempotent_without_user_edits") {
+    file :: GeneratedFile { path: "env.jet", contents: "module env.dev\n", owned: true }
+    merged :: MigrationImport.merge_generated_file(Some("module env.dev\n"), &file).expect("stable")
+    assert_eq(merged, "module env.dev\n")
+}
+
+// Rust: tests/pkg.rs:869
+#Test("import_conflict_preserves_user_edit") {
+    file :: GeneratedFile { path: "env.jet", contents: "module env.dev\n", owned: true }
+    err :: MigrationImport.merge_generated_file(Some("# jet-import: edited\nmodule env.dev\n"), &file).expect_err("user edit must conflict")
+    assert_eq(err, ImportConflict.UserEditedGeneratedLine { path: "env.jet" })
+}
+
+// Rust: tests/pkg.rs:887
+#Test("import_conflicts_on_any_generated_file_drift") {
+    file :: GeneratedFile { path: "env.jet", contents: "module env.dev\n", owned: true }
+    err :: MigrationImport.merge_generated_file(Some("module env.dev\n// user change\n"), &file).expect_err("any drift from generated baseline must conflict")
+    assert_eq(err, ImportConflict.UserEditedGeneratedLine { path: "env.jet" })
+}
+
+// Rust: tests/pkg.rs:905
+#Test("migration_status_feeds_lock_explain") {
+    status :: MigrationStatus.AdapterWrapped { name: "left-pad" }
+    record := semantic_record("app", "left-pad", "1.0.0")
+    record.rationales[0].adapter_id = match status { MigrationStatus.AdapterWrapped { name } -> "adapter:{name}"; _ -> "" }
+    assert_eq(record.rationales[0].adapter_id, "adapter:left-pad")
+}
+
+// Rust: tests/pkg.rs:919
+#Test("provider_contract_covers_core_nix_path_github") {
+    contracts :: ProviderGraph.built_in_contracts()
+    families :: contracts.iter().map((c) -> c.family.clone()).collect()
+    assert(families.contains(ProviderFamily.Core))
+    assert(families.contains(ProviderFamily.Nix))
+    assert(families.contains(ProviderFamily.Path))
+    assert(families.contains(ProviderFamily.Github))
+    assert(!contracts.iter().find((contract) -> contract.family == ProviderFamily.Homebrew).expect("Homebrew contract").fetches_bytes)
+    assert(!contracts.iter().find((contract) -> contract.family == ProviderFamily.Github).expect("GitHub contract").fetches_bytes)
+    assert(contracts.iter().find((contract) -> contract.family == ProviderFamily.Binary).expect("binary contract").fetches_bytes)
+}
+
+// Rust: tests/pkg.rs:951
+#Test("npm_metadata_normalizes_deps_scripts_bins") {
+    facts :: ProviderGraph.normalize_npm("{{\"name\":\"web\",\"version\":\"1.0.0\",\"license\":\"MIT\",\"dependencies\":{{\"vite\":\"5\"}},\"scripts\":{{\"build\":\"vite build\"}},\"bin\":{{\"web\":\"cli.js\"}}}}")
+    assert_eq(facts.dependencies, ["vite"])
+    assert_eq(facts.scripts, ["build"])
+    assert_eq(facts.bins, ["web"])
+}
+
+// Rust: tests/pkg.rs:961
+#Test("provider_report_round_trips_through_lock_and_explain") {
+    native :: "{{\"name\":\"web\",\"version\":\"1.0.0\",\"license\":\"MIT\",\"dependencies\":{{\"vite\":\"5\"}}}}"
+    report :: ProviderGraph.normalize_provider_document(ProviderFamily.Npm, &native)
+    report.validate().expect("lossless npm report")
+    shared :: report.shared_facts()
+    assert_eq(shared.qualified_reference(), "web#version=1.0.0@npm")
+    assert_eq(shared.native_document, native)
+    assert(shared.explain_lines().iter().any((line) -> line == "native json: retained"))
+    round_trip :: ProviderFacts.from_json(&report.export_json()).expect("shared provider facts JSON")
+    assert_eq(round_trip, shared)
+    lock :: report.lock_record("app", "web@npm#1.0.0", "any").expect("provider semantic lock")
+    assert_eq(lock.identity.exact, "web#version=1.0.0@npm")
+    digest :: shared.digest()
+    assert_eq(lock.future_fields.get("provider-facts-digest"), Some(&digest))
+}
+
+// Rust: tests/pkg.rs:988
+#Test("provider_report_surfaces_missing_identity_as_loss") {
+    report :: ProviderGraph.normalize_provider_document(ProviderFamily.Npm, "{{\"name\":\"web\"}}")
+    assert(!report.is_lossless())
+    error :: report.validate().expect_err("missing provider version")
+    assert(error.contains("lossy") || error.contains("exact"), "{error}")
+    shared :: report.shared_facts_for("web@npm")
+    assert(shared.losses.iter().any((loss) -> loss.reason.contains("exact version")))
+}
+
+// Rust: tests/pkg.rs:1005
+#Test("provider_report_preserves_alias_resolution_and_typed_native_facts") {
+    native :: "{{\"name\":\"web\",\"version\":\"1.0.0\",\"yanked\":false}}"
+    report :: ProviderGraph.normalize_provider_document(ProviderFamily.Npm, &native)
+    shared :: report.shared_facts_for("web@catalog")
+    shared.validate().expect("catalog alias remains lossless")
+    assert_eq(shared.qualified_reference(), "web#version=1.0.0@catalog")
+    assert_eq(shared.native_document, native)
+    assert_eq(shared.facts.get("provider.resolved_selector"), Some(&ProviderFactValue.Text("#version=1.0.0")))
+    assert_eq(shared.facts.get("provider.npm.native.yanked"), Some(&ProviderFactValue.List([ProviderFactValue.Bool(false)])))
+    lock :: report.lock_record("app", "web@catalog", "any").expect("alias lock retains source authority")
+    assert_eq(lock.identity.exact, "web#version=1.0.0@catalog")
+    locked :: ProviderFacts.from_json(lock.future_fields.get("provider-facts").expect("provider facts in lock")).expect("locked provider facts")
+    locked.validate().expect("locked alias facts")
+    assert_eq(locked.reference, "web@catalog")
+}
+
+// Rust: tests/pkg.rs:1040
+#Test("swiftpm_v2_report_keeps_revision_and_native_bytes") {
+    revision :: "0123456789abcdef0123456789abcdef01234567"
+    native :: "{{\"pins\":[{{\"identity\":\"swift-log\",\"state\":{{\"revision\":\"{revision}\",\"version\":\"1.5.4\"}}}}]}}"
+    report :: ProviderGraph.normalize_provider_document(ProviderFamily.SwiftPM, &native)
+    report.validate().expect("SwiftPM v2 pin is lossless")
+    shared :: report.shared_facts()
+    assert_eq(shared.qualified_reference(), "swift-log#revision={revision}@swiftpm")
+    assert_eq(shared.native_document, native)
+    assert(shared.facts.get("provider.revision").is_some_and((value) -> "{value:?}".contains(revision)))
+}
+
+// Rust: tests/pkg.rs:1061
+#Test("homebrew_report_reads_stable_version_and_dependencies") {
+    native :: "{{\"name\":\"jq\",\"versions\":{{\"stable\":\"1.7.1\"}},\"license\":\"MIT\",\"dependencies\":[\"oniguruma\"]}}"
+    report :: ProviderGraph.normalize_provider_document(ProviderFamily.Homebrew, &native)
+    report.validate().expect("Homebrew formula identity is lossless")
+    assert_eq(report.facts.version, "1.7.1")
+    assert_eq(report.facts.dependencies, ["oniguruma"])
+    assert_eq(report.shared_facts().native_document, native)
+}
+
+// Rust: tests/pkg.rs:1074
+#Test("homebrew_conformance_retains_bottle_source_and_hook_facts") {
+    native :: "{{\"name\":\"jq\",\"full_name\":\"jq\",\"version\":\"1.7.1\",\"versions\":{{\"stable\":\"1.7.1\",\"head\":\"HEAD\"}},\"license\":\"MIT\",\"tap\":\"homebrew/core\",\"dependencies\":[\"oniguruma\"],\"build_dependencies\":[\"pkg-config\"],\"test_dependencies\":[\"bats-core\"],\"recommended_dependencies\":[{{\"name\":\"less\",\"version\":\"1.0\"}}],\"source\":{{\"url\":\"https://example.invalid/jq.tar.gz\",\"sha256\":\"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\"}},\"bottle\":{{\"stable\":{{\"files\":{{\"arm64_sonoma\":{{\"url\":\"https://example.invalid/jq.arm64.bottle.tar.gz\",\"sha256\":\"abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789\"}}}}}}}},\"relocatable\":true,\"test\":\"system \\\"#{{bin}}/jq\\\", \\\"--version\\\"\",\"deprecated\":false}}"
+    report :: ProviderGraph.normalize_provider_document(ProviderFamily.Homebrew, &native)
+    report.validate().expect("Homebrew formula is lossless")
+    assert_eq(report.facts.dependencies, ["oniguruma"])
+    assert_eq(report.facts.build_dependencies, ["pkg-config"])
+    assert_eq(report.facts.dev_dependencies, ["bats-core"])
+    assert(report.facts.typed.contains_key("provider.homebrew.bottle.arm64_sonoma.sha256"))
+    assert(report.shared_facts().facts.contains_key("provider.homebrew.hook.test"))
+    shared :: report.shared_facts()
+    lock :: report.lock_record("app", "jq@homebrew#1.7.1", "x86_64-linux").expect("Homebrew provider lock")
+    locked :: ProviderFacts.from_json(lock.future_fields.get("provider-facts").expect("provider facts in Homebrew lock")).expect("Homebrew provider facts JSON")
+    assert_eq(locked, shared)
+    assert_eq(locked.native_document, native)
+}
+
+// Rust: tests/pkg.rs:1108
+#Test("homebrew_conformance_reports_conflicting_identity_facts") {
+    report :: ProviderGraph.normalize_provider_document(ProviderFamily.Homebrew, "{{\"name\":\"jq\",\"version\":\"1.7.1\",\"versions\":{{\"stable\":\"1.7.2\"}}}}")
+    assert(report.conflicts.iter().any((conflict) -> conflict.contains("conflicting version")))
+    assert(report.validate().is_err())
+}
+
+// Rust: tests/pkg.rs:1122
+#Test("github_conformance_retains_release_assets_source_and_status") {
+    digest :: "sha256-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    revision :: "0123456789abcdef0123456789abcdef01234567"
+    native :: "{{\"name\":\"tool\",\"tag_name\":\"v1.2.3\",\"target_commitish\":\"{revision}\",\"license\":\"MIT\",\"repository\":{{\"full_name\":\"acme/tool\"}},\"draft\":false,\"prerelease\":false,\"assets\":[{{\"name\":\"tool-linux\",\"platform\":\"x86_64-linux\",\"digest\":\"{digest}\",\"browser_download_url\":\"https://example.invalid/tool\"}}],\"signature\":{{\"key\":\"pk\",\"value\":\"sig\"}},\"advisories\":[\"CVE-0000-0000\"],\"hooks\":{{\"build\":\"reviewed\"}}}}"
+    report :: ProviderGraph.normalize_provider_document(ProviderFamily.Github, &native)
+    report.validate().expect("GitHub release is lossless")
+    assert_eq(report.facts.version, "v1.2.3")
+    assert(report.facts.platforms.contains("x86_64-linux"))
+    assert(report.facts.typed.contains_key("provider.github.revision"))
+    assert(report.shared_facts().facts.contains_key("provider.github.asset.tool-linux.browser_download_url"))
+    shared :: report.shared_facts()
+    lock :: report.lock_record("app", "tool@github#v1.2.3", "x86_64-linux").expect("GitHub provider lock")
+    locked :: ProviderFacts.from_json(lock.future_fields.get("provider-facts").expect("provider facts in GitHub lock")).expect("GitHub provider facts JSON")
+    assert_eq(locked, shared)
+    assert_eq(locked.native_document, native)
+}
+
+// Rust: tests/pkg.rs:1153
+#Test("github_conformance_reports_unhashed_release_assets") {
+    report :: ProviderGraph.normalize_provider_document(ProviderFamily.Github, "{{\"name\":\"tool\",\"tag_name\":\"v1.2.3\",\"assets\":[{{\"name\":\"tool-linux\",\"browser_download_url\":\"https://example.invalid/tool\"}}]}}")
+    assert(report.losses.iter().any((loss) -> loss.contains("no content digest")))
+    assert(report.validate().is_err())
+}
+
+// Rust: tests/pkg.rs:1167
+#Test("binary_conformance_retains_platform_signature_and_provenance") {
+    digest :: "sha256-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    native :: "{{\"name\":\"tool\",\"version\":\"2.0.0\",\"hash\":\"{digest}\",\"platforms\":[\"x86_64-linux\"],\"license\":\"MIT\",\"url\":\"https://example.invalid/tool\",\"signature\":{{\"key\":\"pk\",\"value\":\"sig\"}},\"provenance\":{{\"builder\":\"ci\"}},\"sbom\":{{\"format\":\"spdx\"}},\"variants\":{{\"debug\":{{\"features\":[\"trace\"]}}}}}}"
+    report :: ProviderGraph.normalize_provider_document(ProviderFamily.Binary, &native)
+    report.validate().expect("binary provider facts are lossless")
+    assert_eq(report.shared_facts().selector.digest, digest)
+    assert(report.shared_facts().facts.contains_key("provider.binary.signature"))
+    assert(report.shared_facts().facts.contains_key("provider.binary.provenance"))
+    assert_eq(report.shared_facts().native_document, native)
+}
+
+// Rust: tests/pkg.rs:1190
+#Test("binary_conformance_reports_missing_platform_and_weak_hash") {
+    report :: ProviderGraph.normalize_provider_document(ProviderFamily.Binary, "{{\"name\":\"tool\",\"hash\":\"sha256-aa\"}}")
+    assert(report.losses.iter().any((loss) -> loss.contains("not an exact digest")))
+    assert(report.losses.iter().any((loss) -> loss.contains("no target platform")))
+    assert(report.validate().is_err())
+}
+
+// Rust: tests/pkg.rs:1208
+#Test("binary_report_uses_digest_identity_without_fabricating_a_version") {
+    digest :: "sha256-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    native :: "{{\"name\":\"tool\",\"hash\":\"{digest}\",\"platforms\":[\"linux\"]}}"
+    report :: ProviderGraph.normalize_provider_document(ProviderFamily.Binary, &native)
+    report.validate().expect("binary digest is an exact identity")
+    assert_eq(report.shared_facts().qualified_reference(), "tool#digest={digest}@binary")
+    assert_eq(report.shared_facts().native_document, native)
+}
+
+// Rust: tests/pkg.rs:1224
+#Test("binary_report_surfaces_an_invalid_digest_as_loss") {
+    report :: ProviderGraph.normalize_provider_document(ProviderFamily.Binary, "{{\"name\":\"tool\",\"hash\":\"sha256-aa\",\"platforms\":[\"linux\"]}}")
+    assert(!report.is_lossless())
+    shared :: report.shared_facts()
+    assert(shared.losses.iter().any((loss) -> loss.reason.contains("exact version, revision, or digest")))
+    assert(report.validate().is_err())
+}
+
+// Rust: tests/pkg.rs:1240
+#Test("cargo_metadata_normalizes_features_and_build_script_fact") {
+    facts :: ProviderGraph.normalize_cargo("[package]\nname = \"lib\"\nversion = \"0.1.0\"\nbuild = \"build.rs\"\n[dependencies]\nserde = \"1\"\n[build-dependencies]\ncc = \"1\"\n")
+    assert_eq(facts.dependencies, ["serde"])
+    assert_eq(facts.build_dependencies, ["cc"])
+    assert_eq(facts.scripts, ["build.rs"])
+}
+
+// Rust: tests/pkg.rs:1250
+#Test("pypi_dynamic_metadata_becomes_todo_fact") {
+    facts :: ProviderGraph.normalize_pypi("pkg", "1.0.0", true)
+    assert(facts.todos[0].contains("dynamic metadata"))
+}
+
+// Rust: tests/pkg.rs:1256
+#Test("swiftpm_metadata_locks_exact_revision") {
+    facts :: ProviderGraph.normalize_swiftpm("swift-log", "abc123")
+    assert_eq(facts.integrity_hash, "abc123")
+    assert_eq(facts.source_identity, "swiftpm:swift-log@abc123")
+}
+
+// Rust: tests/pkg.rs:1263
+#Test("binary_provider_requires_hash_and_platform") {
+    assert(ProviderGraph.binary_object("tool", "", "linux", "").is_err())
+    assert(ProviderGraph.binary_object("tool", "sha256-aa", "", "").is_err())
+    obj :: ProviderGraph.binary_object("tool", "sha256-aa", "linux", "").expect("hash + platform ok")
+    assert_eq(obj.exact_identity, "binary:tool:linux:sha256-aa")
+}
+
+// Rust: tests/pkg.rs:1272
+#Test("provider_fetch_denied_under_offline_without_lock") {
+    decision :: AuthorityGraph.default().fetch_allowed(&ProviderRequest { family: ProviderFamily.Cargo, ref_key: "serde", exact_identity: "cargo:serde@1", hash: "sha256-aa", platform: "any", offline: true })
+    assert_eq(decision, FetchDecision.DeniedOfflineMissingLock)
+}
+
+// Rust: tests/pkg.rs:1286
+#Test("provider_fetch_allowed_offline_with_satisfied_lock") {
+    graph := AuthorityGraph.default()
+    graph.add_locked(ProviderObject { family: ProviderFamily.Cargo, ref_key: "serde", exact_identity: "cargo:serde@1", hash: "sha256-aa", platform: "any", signature: "", audit: [], sandbox_effects: [], build_effects: [] })
+    decision :: graph.fetch_allowed(&ProviderRequest { family: ProviderFamily.Cargo, ref_key: "serde", exact_identity: "cargo:serde@1", hash: "sha256-aa", platform: "any", offline: true })
+    assert_eq(decision, FetchDecision.AllowedOfflineSatisfied)
+}
+
+// Rust: tests/pkg.rs:1314
+#Test("replacement_candidate_visible_but_inactive") {
+    facts := ProviderGraph.normalize_npm("{{\"name\":\"left-pad\",\"version\":\"1.0.0\"}}")
+    facts.replacement_candidates.push(ReplacementOverlay { foreign_identity: PackageIdentity.new("npm", "left-pad", "1.0.0"), native_identity: PackageIdentity.new("core", "core.text.pad", "1.0.0"), covered_public_symbols: [], unsupported_symbols: [], license: "MIT", platforms: ["x86_64-linux"], proof_status: ProofStatus.Missing, proof_digest: "", proof_inputs: [] })
+    record :: semantic_record("app", &facts.name, &facts.version)
+    assert_eq(facts.source_identity, "npm:left-pad@1.0.0")
+    assert_eq(record.identity.semantic_key(), "package:left-pad")
+    assert_eq(facts.replacement_candidates[0].proof_status, ProofStatus.Missing)
+    assert_eq(facts.replacement_candidates[0].native_identity.ref_string(), "core:core.text.pad@1.0.0")
+}
+
+// Rust: tests/pkg.rs:1343
+#Test("replacement_compat_proof_fails_on_missing_symbol") {
+    foreign :: replacement_surface("npm", "left-pad", "1.0.0")
+    native := replacement_surface("core", "core.text.pad", "1.0.0")
+    native.public_symbols.retain((symbol) -> symbol.name != "trim")
+    report :: Replacement.run_proof(&foreign, &native, "x86_64-linux")
+    assert(report.failures.iter().any((f) -> f.kind == ProofFailureKind.MissingPublicSymbol && f.name == "trim"))
+}
+
+// Rust: tests/pkg.rs:1356
+#Test("replacement_compat_proof_fails_on_effect_mismatch") {
+    foreign :: replacement_surface("npm", "left-pad", "1.0.0")
+    native := replacement_surface("core", "core.text.pad", "1.0.0")
+    native.public_symbols[0].effects = ["fs.read"]
+    report :: Replacement.run_proof(&foreign, &native, "x86_64-linux")
+    assert(report.failures.iter().any((f) -> f.kind == ProofFailureKind.EffectMismatch && f.name == "pad_left"))
+}
+
+// Rust: tests/pkg.rs:1369
+#Test("replacement_compat_proof_fails_on_error_shape_mismatch") {
+    foreign :: replacement_surface("npm", "left-pad", "1.0.0")
+    native := replacement_surface("core", "core.text.pad", "1.0.0")
+    native.public_symbols[0].errors = ["RangeError"]
+    report :: Replacement.run_proof(&foreign, &native, "x86_64-linux")
+    assert(report.failures.iter().any((f) -> f.kind == ProofFailureKind.ErrorShapeMismatch && f.name == "pad_left"))
+}
+
+// Rust: tests/pkg.rs:1382
+#Test("replacement_compat_proof_fails_on_golden_output_diff") {
+    foreign :: replacement_surface("npm", "left-pad", "1.0.0")
+    native := replacement_surface("core", "core.text.pad", "1.0.0")
+    native.goldens = [GoldenFixture.new("pad_left_basic", "hi\n")]
+    report :: Replacement.run_proof(&foreign, &native, "x86_64-linux")
+    assert(report.failures.iter().any((f) -> f.kind == ProofFailureKind.GoldenOutputDiff && f.name == "pad_left_basic"))
+}
+
+// Rust: tests/pkg.rs:1395
+#Test("replacement_compat_proof_pass_enables_policy_replacement") {
+    candidate :: replacement_passed_candidate()
+    policy :: ReplacementPolicy.allow(&candidate.foreign_identity, &candidate.native_identity, "app")
+    decision :: Replacement.resolve_replacement(&candidate, &policy, "app", "x86_64-linux")
+    match decision {
+        ReplacementDecision.Active(active) -> {
+            assert_eq(active.native_identity.ref_string(), "core:core.text.pad@1.0.0")
+            assert_eq(active.lock_record.identity.kind.as_str(), "replacement-overlay")
+        }
+        _ -> panic("passed proof + allow policy should activate replacement")
+    }
+}
+
+// Rust: tests/pkg.rs:1418
+#Test("replacement_policy_deny_blocks_replacement") {
+    candidate :: replacement_passed_candidate()
+    decision :: Replacement.resolve_replacement(&candidate, &ReplacementPolicy.default(), "app", "x86_64-linux")
+    assert(match decision { ReplacementDecision.Denied { .. } -> true; _ -> false })
+}
+
+// Rust: tests/pkg.rs:1431
+#Test("replacement_preserves_foreign_call_site") {
+    candidate :: replacement_passed_candidate()
+    policy :: ReplacementPolicy.prefer(&candidate.foreign_identity, &candidate.native_identity, "app")
+    decision :: Replacement.resolve_replacement(&candidate, &policy, "app", "x86_64-linux")
+    match decision {
+        ReplacementDecision.Active(active) -> {
+            assert_eq(active.foreign_call_site, "npm:left-pad@1.0.0")
+            assert_eq(active.lock_record.identity.key, "npm:left-pad@1.0.0@x86_64-linux")
+            assert_eq(active.lock_record.identity.exact, "core:core.text.pad@1.0.0")
+        }
+        _ -> panic("prefer policy should activate replacement")
+    }
+}
+
+// Rust: tests/pkg.rs:1455
+#Test("replacement_lock_records_foreign_native_proof_and_policy") {
+    candidate :: replacement_passed_candidate()
+    record :: Replacement.replacement_lock_record(&candidate, "app", "x86_64-linux", "policy.replacements:npm:left-pad@1.0.0=>core:core.text.pad@1.0.0:allow")
+    assert_eq(record.future_fields.get("replacement-foreign").map((s) -> s.as_str()), Some("npm:left-pad@1.0.0"))
+    assert_eq(record.future_fields.get("replacement-native").map((s) -> s.as_str()), Some("core:core.text.pad@1.0.0"))
+    assert_eq(record.future_fields.get("replacement-proof-digest").map((s) -> s.as_str()), Some(candidate.proof_digest.as_str()))
+    assert_eq(record.future_fields.get("replacement-proof-inputs").map((s) -> s.contains("platform=x86_64-linux")), Some(true))
+    assert(record.rationales[0].policy_fingerprint.contains("policy.replacements"))
+}
+
+// Rust: tests/pkg.rs:1497
+#Test("replacement_lock_merge_conflict_names_owners") {
+    foreign :: replacement_identity("npm", "left-pad", "1.0.0")
+    mk_candidate :: (native: String) -> ReplacementCandidate {
+        foreign_identity: foreign.clone(), native_identity: PackageIdentity.new("core", native, "1.0.0"),
+        covered_public_symbols: ["pad_left"], unsupported_symbols: [], license: "MIT",
+        platforms: ["x86_64-linux"], proof_status: ProofStatus.Passed, proof_digest: "proof-{native}",
+        proof_inputs: ["platform=x86_64-linux;native={native}"]
+    }
+    left :: SemanticLockFile { records: [Replacement.replacement_lock_record(&mk_candidate("core.text.pad"), "app", "x86_64-linux", "policy-left")], ..SemanticLockFile.default() }
+    right :: SemanticLockFile { records: [Replacement.replacement_lock_record(&mk_candidate("core.string.pad"), "app", "x86_64-linux", "policy-right")], ..SemanticLockFile.default() }
+    out :: SemanticLock.merge(&SemanticLockFile.default(), &left, &right)
+    assert_eq(out.conflicts.len(), 1)
+    assert_eq(out.conflicts[0].owner_package, "app")
+    assert_eq(out.conflicts[0].semantic_key, "replacement-overlay:npm:left-pad@1.0.0@x86_64-linux")
+}
+
+// Rust: tests/pkg.rs:1542
+#Test("replacement_lock_keys_are_platform_specific") {
+    candidate :: replacement_passed_candidate()
+    linux :: Replacement.replacement_lock_record(&candidate, "app", "x86_64-linux", "policy")
+    macos :: Replacement.replacement_lock_record(&candidate, "app", "aarch64-apple-darwin", "policy")
+    assert_ne(linux.identity.semantic_key(), macos.identity.semantic_key())
+}
+
+// Rust: tests/pkg.rs:1556
+#Test("replacement_importer_reports_replacement_progress") {
+    candidate :: replacement_passed_candidate()
+    proof :: ImporterProgressFact.from_candidate(&candidate)
+    active :: ImporterProgressFact.active(&candidate)
+    assert_eq(proof.status, ImporterReplacementStatus.ProofPassed)
+    assert_eq(active.status, ImporterReplacementStatus.ReplacementActive)
+    assert_eq(active.proof_digest, candidate.proof_digest)
+}
+
+// Rust: tests/pkg.rs:1571
+#Test("manifest_parse_valid_fields") {
+    raw :: "name:    \"myapp\"\nversion: \"1.2.3\"\njet:     \">=0.1.0\"\ndescription: \"A test package\"\nlicense: \"MIT OR Apache-2.0\"\nrepository: \"https://example.com\"\ndeps: {{\n}}\n"
+    path :: OSPath.from("package.jet")
+    mf :: Manifest.parse(&path, &raw).expect("valid manifest should parse")
+    assert_eq(mf.package.name, "myapp")
+    assert_eq(mf.package.version, "1.2.3")
+    assert_eq(mf.package.jet_constraint.as_deref(), Some(">=0.1.0"))
+    assert_eq(mf.package.description.as_deref(), Some("A test package"))
+    assert_eq(mf.package.license.as_deref(), Some("MIT OR Apache-2.0"))
+    assert(mf.dependencies.is_empty())
+    assert(mf.boundaries.is_empty())
+}
+
+// Rust: tests/pkg.rs:1593
+#Test("manifest_parse_import_boundaries") {
+    raw :: min_manifest("app", "0.1.0") + "\nboundaries: {{\n    deny: [\n        {{ from: \"app.ui\", to: \"app.db\" }},\n        {{ from: \"app.api.*\", to: \"app.db.*\" }},\n    ],\n}}\n"
+    mf :: Manifest.parse(&OSPath.from("package.jet"), &raw).expect("boundary policy should parse")
+    assert_eq(mf.boundaries.len(), 2)
+    assert_eq(mf.boundaries[0].from, "app.ui")
+    assert_eq(mf.boundaries[0].to, "app.db")
+    assert(mf.boundaries[1].matches("app.api.auth", "app.db.users"))
+    assert(!mf.boundaries[1].matches("app.web", "app.db.users"))
+}
+
+// Rust: tests/pkg.rs:1613
+#Test("manifest_parse_import_boundaries_rejects_malformed_patterns") {
+    for (label, pattern) in [("unquoted", "app.ui"), ("interior wildcard", "app.*.ui"), ("multiple wildcards", "app.**")] {
+        raw :: min_manifest("app", "0.1.0") + "boundaries: {{ deny: [{{ from: {pattern}, to: \"app.db\" }}] }}\n"
+        error :: Manifest.parse(&OSPath.from("package.jet"), &raw).expect_err("malformed boundary pattern must use E1206")
+        assert_eq(error.code, "E1206", "{label}")
+        assert(error.what.contains("package.jet"), "{label}: {error.what}")
+    }
+    for (label, block) in [
+        ("unknown boundary field", "boundaries: {{ allow: [{{ from: \"app.ui\", to: \"app.db\" }}] }}"),
+        ("missing from", "boundaries: {{ deny: [{{ to: \"app.db\" }}] }}"),
+        ("missing to", "boundaries: {{ deny: [{{ from: \"app.ui\" }}] }}"),
+        ("duplicate edge field", "boundaries: {{ deny: [{{ from: \"app.ui\", from: \"app.api\", to: \"app.db\" }}] }}")
+    ] {
+        raw :: min_manifest("app", "0.1.0") + block + "\n"
+        error :: Manifest.parse(&OSPath.from("package.jet"), &raw).expect_err("malformed boundary record must use E1206")
+        assert_eq(error.code, "E1206", "{label}")
+    }
+}
+
+// Rust: tests/pkg.rs:1651
+#Test("loader_enforces_import_boundaries_and_warns_on_zero_match") {
+    denied :: tmp_dir("import_boundary_denied")
+    write(&denied, "package.jet", &(min_manifest("app", "0.1.0") + "boundaries: {{ deny: [{{ from: \"app.ui\", to: \"app.db\" }}] }}\n"))
+    write(&denied, "ui.jet", "use db\nfn run() -[IO]> {{ }}\n")
+    write(&denied, "db.jet", "pub fn value() -> Int {{ 1 }}\n")
+    error :: Loader.load_entry(denied.join("ui.jet").to_str().expect("UTF-8 entry")).expect_err("a denied import edge must fail during loading")
+    assert_eq(first_diag_code(&error), "E0619")
+    assert(error[0].what.contains("app.ui"))
+    assert(error[0].what.contains("app.db"))
+    fs.remove_dir_all(denied).expect("remove denied project")
+    unused :: tmp_dir("import_boundary_unused")
+    write(&unused, "package.jet", &(min_manifest("app", "0.1.0") + "boundaries: {{ deny: [{{ from: \"app.ui\", to: \"app.db\" }}] }}\n"))
+    write(&unused, "ui.jet", "fn run() {{ }}\n")
+    bundle :: Loader.load_entry(unused.join("ui.jet").to_str().expect("UTF-8 entry")).expect("an unmatched boundary is a warning")
+    assert(bundle.parse_teaching.iter().any((diagnostic) -> diagnostic.code == "L0619"))
+    fs.remove_dir_all(unused).expect("remove unused project")
+}
+
+// Rust: tests/pkg.rs:1686
+#Test("loader_records_import_edge_facts_and_erases_boundary_policy_before_codegen") {
+    root :: tmp_dir("import_boundary_structure_fact")
+    write(&root, "package.jet", &(min_manifest("app", "0.1.0") + "boundaries: {{ deny: [{{ from: \"app.ui\", to: \"app.hidden.*\" }}] }}\n"))
+    write(&root, "ui.jet", "use db\nfn run() -[IO]> {{ print(db.value()) }}\n")
+    write(&root, "db.jet", "pub fn value() -> Int {{ 1 }}\n")
+    entry :: root.join("ui.jet")
+    shown :: entry.to_str().expect("UTF-8 entry")
+    bundle := Loader.load_entry(shown).expect("allowed edge must load")
+    diagnostics :: Sema.check_bundle(&bundle, Sema.CompileMode.Run)
+    assert(diagnostics.iter().all((diagnostic) -> diagnostic.severity == Diagnostics.Severity.Lint), "allowed boundary edge diagnostics: {diagnostics:?}")
+    edge :: bundle.name_ledger.structure_facts().iter().find((fact) -> fact.kind == StructureFactKind.ImportEdge).expect("allowed edge structure fact")
+    assert_eq(edge.subject, "app.ui -> app.db")
+    assert_eq(edge.status, "allowed")
+    assert_eq(edge.gate.as_deref(), Some("manifest rule edit"))
+    gates :: Sema.GateLedger.GateLedger.collect(&bundle, Policy.GateSet.default())
+    assert(gates.entries().iter().any((entry) -> entry.kind == Sema.GateLedger.GateKind.Structure && entry.scope == "import-edge" && entry.subject == "app.ui -> app.db"))
+    inspected_output :: Command.new(jet_bin()).current_dir(root).args(["inspect", "structure", shown]).env("NO_COLOR", "1").output().expect("inspect structure must run")
+    assert(inspected_output.status.success(), "inspect failed: {inspected_output:?}")
+    inspected :: String.from_utf8(inspected_output.stdout).expect("inspection is UTF-8")
+    assert(inspected.contains("Structure.ImportEdge"))
+    assert(inspected.contains("app.ui -> app.db"))
+    assert(inspected.contains("manifest rule edit"))
+    // Rust generated-source/JIT/interpreter assertions migrate to native tier behavior.
+    // The structural boundary remains inspection-only while every executable tier
+    // runs the allowed edge and returns exactly the same observable output.
+    for tier in ["O0", "O1", "O2"] {
+        output :: build_and_run(&entry, tier, &root.join(".cache").join(tier)).expect("allowed edge must codegen and run")
+        assert(output.status.success(), "{tier} failed: stdout={String.from_utf8_lossy(output.stdout)} stderr={String.from_utf8_lossy(output.stderr)}")
+        assert_eq(output.stdout, "1\n".as_bytes(), "{tier} output")
+        assert(!String.from_utf8_lossy(output.stdout).contains("manifest rule edit"))
+        assert(!String.from_utf8_lossy(output.stdout).contains("app.hidden.*"))
+    }
+    dev_output :: Command.new(jet_bin()).current_dir(root).args(["dev", shown, "--watch=off"]).env("NO_COLOR", "1").env("JET_RUN_CACHE_DIR", root.join(".cache/dev/run")).env("JET_STORE_DIR", root.join(".cache/dev/build")).output().expect("dev command must run")
+    assert(dev_output.status.success(), "dev failed: stdout={String.from_utf8_lossy(dev_output.stdout)} stderr={String.from_utf8_lossy(dev_output.stderr)}")
+    assert_eq(dev_output.stdout, "1\n".as_bytes(), "dev output")
+    if have_web_target() {
+        output :: Command.new(jet_bin()).current_dir(root).args(["build", "--target=web", shown]).env("NO_COLOR", "1").env("JET_STORE_DIR", root.join(".cache/web")).output().expect("web command must run")
+        assert(output.status.success(), "web failed: stdout={String.from_utf8_lossy(output.stdout)} stderr={String.from_utf8_lossy(output.stderr)}")
+    } else {
+        eprintln("note: skipping import-boundary web tier proof (wasm target unavailable)")
+    }
+    fs.remove_dir_all(root).expect("remove boundary project")
+}

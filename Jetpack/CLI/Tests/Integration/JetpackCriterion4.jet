@@ -1,0 +1,20 @@
+// Rust: tests/jetpack_criterion4.rs:1
+// GATE #4494: no-follow native filesystem metadata, inode identity and blocks.
+// GATE #4499: exact composite (device, inode) map-key equality.
+use std.fs
+
+// Rust: tests/jetpack_criterion4.rs:16
+fn measured_bytes(path: &OSPath, seen: &[(U64, U64): Bool]) -> U64 {
+    metadata :: fs.symlink_metadata(path) ?? panic("metadata")
+    identity :: (metadata.dev(), metadata.ino())
+    if seen.contains_key(identity) -> return 0
+    &seen.insert(identity, true)
+    total := metadata.blocks() * 512
+    if metadata.is_dir() {
+        loop item in fs.read_dir(path) ?? panic("directory") {
+            entry :: item ?? panic("entry")
+            total += measured_bytes(&entry.path(), seen)
+        }
+    }
+    total
+}

@@ -1,0 +1,270 @@
+// Rust: crates/jetpack/src/Store/Tests/tests/nix_projection.rs:1
+use Jetpack.Store.Tests.*
+use Jetpack.Store.[StoreEntry, ProducerRecord, AdmittedNixClosure, NixOutputRequest, NixNarInfo, NixCompression, NixNarInfoSignature, Closure, Receipt]
+use Jetpack.[Roots, RuntimePolicy, SHA256, Provider]
+use Jetpack.Shell
+use jet_env_model.ModuleEval.[PromptPathMode, PromptStripMode]
+use ed25519_dalek.[Signer, SigningKey]
+use core.sys
+// Rust: crates/jetpack/src/Store/Tests/tests/nix_projection.rs:18
+use tests.support.no_nix_namespace
+// GATE #4494: native IO, processes, TCP listener, threads, mutexes and atomics.
+use std.[fs, env, Command, IOErrorKind, Duration, thread]
+use std.net.[TcpListener, TcpStream]
+use std.sync.[Arc, Mutex]
+use std.sync.atomic.[AtomicBool, Ordering]
+
+// Rust: crates/jetpack/src/Store/Tests/tests/nix_projection.rs:22
+ROOTLESS_PROJECTION_ROOT :: "JETPACK_ROOTLESS_PROJECTION_ROOT"
+
+// Rust: crates/jetpack/src/Store/Tests/tests/nix_projection.rs:65
+fn run_rootless_projection_child() -> {
+    if sys.target.selected_os() != "linux" -> return
+    root :: OSPath.from(env.var_os(ROOTLESS_PROJECTION_ROOT) ?? panic("rootless projection child needs its admitted Hangar root"))
+    roots :: Roots{root: root, dev_mode: true}
+    entries :: list_checked(&roots) ?? panic("list")
+    entry :: find_entry(&entries, "/nix/store/00000000000000000000000000000000-root")
+    lease :: snapshot_lease(&roots, &entry) ?? panic("lease")
+    vars := [String: String]{}
+    if env.var("LD_LIBRARY_PATH") == { .Ok(value) -> &vars.insert("LD_LIBRARY_PATH", value); .Err(_) -> {} }
+    shell_env :: Shell.Env{bin_dirs: [String]{}, vars: vars, unset_vars: [String]{}, refs: [String]{entry.reference},
+        label: "nix-projection-test", prompt_path: PromptPathMode.Short, prompt_strip: PromptStripMode.Off, cache_leases: [lease]}
+    code :: Shell.run_clean_command(&shell_env, [String]{"/nix/store/00000000000000000000000000000000-root/bin/rg"})
+    assert_eq(code, 0)
+}
+
+// Rust: crates/jetpack/src/Store/Tests/tests/nix_projection.rs:141
+DYNAMIC_PROJECTION_ROOT :: "JETPACK_DYNAMIC_PROJECTION_ROOT"
+// Rust: crates/jetpack/src/Store/Tests/tests/nix_projection.rs:144
+DYNAMIC_PROJECTION_STORE_PATH :: "JETPACK_DYNAMIC_PROJECTION_STORE_PATH"
+
+// Rust: crates/jetpack/src/Store/Tests/tests/nix_projection.rs:147
+fn run_dynamic_projection_child() -> {
+    if sys.target.selected_os() != "linux" -> return
+    root :: OSPath.from(env.var_os(DYNAMIC_PROJECTION_ROOT) ?? panic("dynamic projection child needs its admitted Hangar root"))
+    store_path :: env.var_os(DYNAMIC_PROJECTION_STORE_PATH) ?? panic("dynamic projection child needs its Nix store path")
+    roots :: Roots{root: root, dev_mode: true}
+    entry :: find_entry(&(list_checked(&roots) ?? panic("list")), store_path.to_str() ?? panic("store path UTF8"))
+    lease :: snapshot_lease(&roots, &entry) ?? panic("lease")
+    vars := [String: String]{}
+    // Preserve the namespace harness's staged loader/library path outside /nix/store.
+    if env.var("LD_LIBRARY_PATH") == { .Ok(value) -> &vars.insert("LD_LIBRARY_PATH", value); .Err(_) -> {} }
+    shell_env :: Shell.Env{bin_dirs: [String]{}, vars: vars, unset_vars: [String]{}, refs: [String]{entry.reference},
+        label: "dynamic-nix-projection-test", prompt_path: PromptPathMode.Short, prompt_strip: PromptStripMode.Off, cache_leases: [lease]}
+    code :: Shell.run_clean_command(&shell_env, [String]{"{store_path.to_string_lossy()}/bin/true"})
+    assert_eq(code, 0)
+}
+
+// Rust: crates/jetpack/src/Store/Tests/tests/nix_projection.rs:183
+fn dynamic_projection_host_precondition() -> Void Err! {
+    HOST_LIBC_CANDIDATES :: [String]{"/lib/x86_64-linux-gnu/libc.so.6", "/lib64/libc.so.6", "/usr/lib/x86_64-linux-gnu/libc.so.6", "/usr/lib64/libc.so.6"}
+    if !HOST_LIBC_CANDIDATES.iter().any((path) -> OSPath.from(path).is_file()) {
+        return Err("isolated namespace has no host libc.so.6")
+    }
+    binary :: OSPath.from("/run/current-system/sw/bin/true")
+    if !binary.is_file() -> return Err("Nix dynamic binary is unavailable: {binary.display()}")
+    ldd :: Command.new("ldd").arg(binary).output().map_err((error) -> "ldd is unavailable: {error}")?
+    if !ldd.status.success() {
+        stderr := String.from_utf8_lossy(ldd.stderr).trim() // #4303
+        return Err("ldd cannot inspect {binary.display()}: {stderr}")
+    }
+    output :: String.from_utf8_lossy(ldd.stdout)
+    if !output.lines().any((line) -> line.contains("libc.so.6") && line.contains("/nix/store/")) {
+        return Err("Nix dynamic binary has no host libc.so.6 resolution: {binary.display()}")
+    }
+    Ok(())
+}
+
+// Rust: crates/jetpack/src/Store/Tests/tests/nix_projection.rs:228
+fn admit_dynamic_closure(roots: &Roots) -> String {
+    binary :: OSPath.from("/run/current-system/sw/bin/true")
+    resolved :: fs.canonicalize(binary) ?? panic("Nix dynamic binary")
+    binary_root :: (resolved.parent().and_then((path) -> path.parent()) ?? panic("Nix dynamic binary store root")).to_path_buf()
+    root_path :: binary_root.to_string_lossy().into_owned()
+    ldd :: Command.new("ldd").arg(binary).output() ?? panic("ldd Nix dynamic binary")
+    assert(ldd.status.success(), "ldd failed: {String.from_utf8_lossy(ldd.stderr)}")
+    store_paths := [String: Bool]{root_path: true}
+    loop token in String.from_utf8_lossy(ldd.stdout).split_whitespace() {
+        start :: token.find("/nix/store/") ?? continue
+        candidate := token[start..] // #4303
+        offset :: candidate["/nix/store/".len()..].find('/') ?? continue
+        end :: "/nix/store/".len() + offset
+        path := candidate[..end] // #4303
+        if OSPath.from(path).is_dir() -> &store_paths.insert(path.to_string(), true)
+    }
+    sorted_paths := store_paths.keys().collect()
+    &sorted_paths.sort()
+    dependencies :: sorted_paths.iter().filter((path) -> path != root_path).cloned().collect()
+    signing_key :: SigningKey.from_bytes([U8]{17; 32})
+    key_id :: "jetpack-dynamic-projection-test-1"
+    routes := [String: [U8]]{"/nix-cache-info": "StoreDir: /nix/store\nWantMassQuery: 1\n".as_bytes().to_vec()}
+    loop (index, store_path) in sorted_paths.iter().enumerate() {
+        (nar, _) :: write_nar(OSPath.from(store_path)) ?? panic("write nar")
+        references :: if store_path == root_path -> dependencies.clone() else -> [String]{}
+        nar_name :: "dynamic-{index}.nar"
+        basename :: store_path.rsplit('/').next() ?? panic("store basename")
+        &routes.insert("/{basename[..32]}.narinfo", signed_narinfo(store_path, nar_name, &nar, &references, key_id, &signing_key))
+        &routes.insert("/nar/{nar_name}", nar)
+    }
+    server := ProjectionCacheServer.start(routes)
+    fs.create_dir_all(roots.root.join("config")) ?? panic("config")
+    fs.create_dir_all(roots.root.join("trust")) ?? panic("trust")
+    fs.write(roots.root.join("config/nix-cache-v1.endpoint"), server.endpoint) ?? panic("endpoint")
+    fs.write(roots.root.join("trust/nix-cache-v1.ed25519.pub"), "{key_id}:{base64_encode(signing_key.verifying_key().to_bytes())}\n") ?? panic("trust key")
+    admitted :: admit_nix_closure(roots, [NixOutputRequest]{NixOutputRequest{name: "out", store_path: root_path}}, false) ?? panic("admit closure")
+    assert(admitted.objects.len() > 1, "dynamic binary needs a runtime closure")
+    _ :: canonicalize_admitted_records(roots, &admitted)
+    &server.drop()
+    root_path
+}
+
+// Rust: crates/jetpack/src/Store/Tests/tests/nix_projection.rs:512
+fn find_entry(entries: &[StoreEntry], store_path: &String) -> StoreEntry {
+    entry :: entries.iter().find((entry) -> {
+        ProducerRecord.decode(entry.producer_record).ok().and_then((producer) -> producer.facts.get("nix.store-path").cloned()) == Val(store_path)
+    }) ?? panic("missing admitted Nix entry for {store_path}")
+    entry.clone()
+}
+
+// Rust: crates/jetpack/src/Store/Tests/tests/nix_projection.rs:526
+fn canonicalize_admitted_records(roots: &Roots, admitted: &AdmittedNixClosure) -> [StoreEntry] {
+    entries :: list_checked(roots) ?? panic("list")
+    canonical := [StoreEntry]{}
+    loop source in entries {
+        entry := source
+        producer := ProducerRecord.decode(entry.producer_record) ?? panic("producer")
+        store_path :: producer.facts.get("nix.store-path").cloned() ?? continue
+        if !admitted.objects.contains_key(store_path) -> continue
+        loop (key, value) in Provider.nix_build_facts_record() -> &producer.facts.insert(key, value)
+        &producer.facts.insert("nix.output.out", store_path)
+        entry.producer_record = producer.encode()
+        &entry.receipt.clear()
+        &canonical.push(entry)
+    }
+    RuntimePolicy.with_lock(&roots.root, "hangar", () -> {
+        loop entry in &canonical -> Receipt.prepare_entry_receipt(roots, entry)?
+        Closure.register_entries_unlocked(roots, &canonical)
+    }) ?? panic("register canonical records")
+    list_checked(roots) ?? panic("list canonical")
+}
+
+// Rust: crates/jetpack/src/Store/Tests/tests/nix_projection.rs:555
+fn admit_signed_closure(roots: &Roots) -> AdmittedNixClosure {
+    source :: roots.root.join("nix-projection-source")
+    fs.create_dir_all(source.join("root/bin")) ?? panic("root bin")
+    fs.create_dir_all(source.join("leaf")) ?? panic("leaf")
+    fs.write(source.join("root/bin/rg"), "#!/bin/sh\ntest -f /nix/store/11111111111111111111111111111111-leaf/payload\n".as_bytes()) ?? panic("script")
+    if sys.target.selected_family() == "unix" {
+        fs.set_permissions(source.join("root/bin/rg"), fs.Permissions.from_mode(0o755)) ?? panic("executable")
+    }
+    fs.write(source.join("leaf/payload"), "leaf".as_bytes()) ?? panic("leaf payload")
+    (root_nar, _) :: write_nar(source.join("root")) ?? panic("root nar")
+    (leaf_nar, _) :: write_nar(source.join("leaf")) ?? panic("leaf nar")
+    root_path :: "/nix/store/00000000000000000000000000000000-root"
+    leaf_path :: "/nix/store/11111111111111111111111111111111-leaf"
+    signing_key :: SigningKey.from_bytes([U8]{9; 32})
+    key_id :: "jetpack-projection-test-1"
+    routes :: [String: [U8]]{
+        "/nix-cache-info": "StoreDir: /nix/store\nWantMassQuery: 1\n".as_bytes().to_vec(),
+        "/00000000000000000000000000000000.narinfo": signed_narinfo(root_path, "root.nar", &root_nar, &[String]{leaf_path}, key_id, &signing_key),
+        "/11111111111111111111111111111111.narinfo": signed_narinfo(leaf_path, "leaf.nar", &leaf_nar, &[String]{}, key_id, &signing_key),
+        "/nar/root.nar": root_nar, "/nar/leaf.nar": leaf_nar
+    }
+    server := ProjectionCacheServer.start(routes)
+    fs.create_dir_all(roots.root.join("config")) ?? panic("config")
+    fs.create_dir_all(roots.root.join("trust")) ?? panic("trust")
+    fs.write(roots.root.join("config/nix-cache-v1.endpoint"), server.endpoint) ?? panic("endpoint")
+    fs.write(roots.root.join("trust/nix-cache-v1.ed25519.pub"), "{key_id}:{base64_encode(signing_key.verifying_key().to_bytes())}\n") ?? panic("trust key")
+    admitted :: admit_nix_closure(roots, [NixOutputRequest]{NixOutputRequest{name: "out", store_path: root_path}}, false) ?? panic("admit closure")
+    &server.drop()
+    admitted
+}
+
+// Rust: crates/jetpack/src/Store/Tests/tests/nix_projection.rs:632
+fn signed_narinfo(store_path: &String, nar_name: &String, nar: &[U8], references: &[String], key_id: &String, signing_key: &SigningKey) -> [U8] {
+    hash :: "sha256:{SHA256.sha256_hex(nar)}"
+    reference_names :: references.iter().map((reference) -> reference.rsplit('/').next() ?? panic("reference basename")).collect().join(" ")
+    info := NixNarInfo{store_path: store_path.clone(), url: "nar/{nar_name}", compression: NixCompression.None,
+        file_hash: Val(hash.clone()), file_size: Val(nar.len() as U64), nar_hash: hash, nar_size: nar.len() as U64,
+        references: reference_names.split_whitespace().map((value) -> value.to_string()).collect(), deriver: None, ca: None, signatures: [NixNarInfoSignature]{}}
+    fingerprint :: info.fingerprint("/nix/store") ?? panic("fingerprint")
+    &info.signatures.push(NixNarInfoSignature{key_id: key_id.clone(), signature: signing_key.sign(&fingerprint).to_bytes()})
+    "StorePath: {info.store_path}\nURL: {info.url}\nCompression: none\nFileHash: {info.file_hash ?? panic("file hash")}\nFileSize: {info.file_size ?? panic("file size")}\nNarHash: {info.nar_hash}\nNarSize: {info.nar_size}\nReferences: {reference_names}\nSig: {key_id}:{base64_encode(info.signatures[0].signature)}\n".into_bytes()
+}
+
+// Rust: crates/jetpack/src/Store/Tests/tests/nix_projection.rs:679
+fn base64_encode(bytes: &[U8]) -> String {
+    ALPHABET :: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/".as_bytes()
+    output := String.new()
+    loop chunk in bytes.chunks(3) {
+        first :: chunk[0]
+        &output.push(ALPHABET[(first >> 2) as USize] as Char)
+        &output.push(ALPHABET[((first & 0x03) << 4 | (chunk.get(1).copied() ?? 0) >> 4) as USize] as Char)
+        if chunk.get(1) == {
+            .Val(second) -> &output.push(ALPHABET[((second & 0x0f) << 2 | (chunk.get(2).copied() ?? 0) >> 6) as USize] as Char)
+            .None -> &output.push('=')
+        }
+        if chunk.get(2) == {
+            .Val(third) -> &output.push(ALPHABET[(third & 0x3f) as USize] as Char)
+            .None -> &output.push('=')
+        }
+    }
+    output
+}
+
+// Rust: crates/jetpack/src/Store/Tests/tests/nix_projection.rs:706
+struct ProjectionCacheServer {
+    endpoint: String,
+    stop: Arc[AtomicBool],
+    join: thread.JoinHandle[Void]?,
+
+    // Rust: crates/jetpack/src/Store/Tests/tests/nix_projection.rs:713
+    fn start(routes: [String: [U8]]) -> ProjectionCacheServer {
+        listener :: TcpListener.bind(("127.0.0.1", 0)) ?? panic("bind")
+        listener.set_nonblocking(true) ?? panic("nonblocking")
+        address :: listener.local_addr() ?? panic("address")
+        shared_routes :: Arc.new(Mutex.new(routes))
+        thread_routes :: Arc.clone(&shared_routes)
+        stop :: Arc.new(AtomicBool.new(false))
+        thread_stop :: Arc.clone(&stop)
+        join :: thread.spawn(() -> {
+            loop !thread_stop.load(Ordering.Relaxed) {
+                if listener.accept() == {
+                    .Ok((stream, _)) -> serve_request(stream, &thread_routes)
+                    .Err(error) -> {
+                        if error.kind() == IOErrorKind.WouldBlock -> thread.sleep(Duration.from_millis(1))
+                        else -> break
+                    }
+                }
+            }
+        })
+        ProjectionCacheServer{endpoint: "http://127.0.0.1:{address.port()}", stop: stop, join: Val(join)}
+    }
+
+    // Rust: crates/jetpack/src/Store/Tests/tests/nix_projection.rs:741
+    #Drop
+    fn drop(&self) -> {
+        self.stop.store(true, Ordering.Relaxed)
+        _ :: TcpStream.connect(self.endpoint.strip_prefix("http://") ?? panic("endpoint prefix"))
+        if &self.join.take() == { .Val(join) -> join.join() ?? panic("server join"); .None -> {} }
+    }
+}
+
+// Rust: crates/jetpack/src/Store/Tests/tests/nix_projection.rs:750
+fn serve_request(incoming: TcpStream, routes: &Arc[Mutex[[String: [U8]]]]) -> {
+    stream := incoming
+    request := [U8]{0; 4096}
+    count :: stream.read(&request).unwrap_or(0)
+    path :: String.from_utf8(&request[..count]).ok().and_then((request) -> request.lines().next()).and_then((line) -> line.split_whitespace().nth(1)).unwrap_or("/").split('?').next().unwrap_or("/")
+    body :: (routes.lock() ?? panic("routes lock")).get(path).cloned()
+    if body == {
+        .Val(bytes) -> {
+            header :: "HTTP/1.1 200 OK\r\nContent-Length: {bytes.len()}\r\nConnection: close\r\n\r\n"
+            _ :: &stream.write_all(header.as_bytes())
+            _ :: &stream.write_all(&bytes)
+        }
+        .None -> {
+            _ :: &stream.write_all("HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".as_bytes())
+        }
+    }
+}

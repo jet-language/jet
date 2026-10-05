@@ -1,42 +1,71 @@
-// PORT-PENDING 0866 crates-jetpack-src-jetos: crates/jetpack/src/JetOS.rs:1-38
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! jetos realization tier (Epoch 7).
-//RS //!
-//RS //! `jet os` is the user-facing command. The implementation lives in the
-//RS //! Jetpack engine because it reuses Jetpack's source table, provider boundary,
-//RS //! hangar, and trust/runtime policy.
-//RS 
-//RS mod activation_provenance;
-//RS mod commands;
-//RS mod desktop_store_vm;
-//RS mod entry;
-//RS mod etc_boot_facts;
-//RS mod generation;
-//RS mod generation_files;
-//RS mod generations_activation;
-//RS mod identity;
-//RS mod initrd_overlay;
-//RS mod installer_media;
-//RS mod iso_vm_commands;
-//RS mod kernel_bootstrap;
-//RS mod load_validate;
-//RS mod module_storage_workload;
-//RS mod nixos_backend;
-//RS mod nixos_import;
-//RS mod nixos_import_live;
-//RS mod options_rendering;
-//RS mod root_projection;
-//RS mod store_realize;
-//RS mod studio_projection;
-//RS mod system_facts;
-//RS mod theme_fleet_lifecycle;
-//RS mod types;
-//RS mod user_flatpak_perf;
-//RS mod vm_commands;
-//RS mod vm_proof;
-//RS 
-//RS pub use entry::{main, resolve_config_path, user_main};
-//RS pub(crate) use studio_projection::studio_pages_json;
-//RS pub use types::OSFlags;
-// END-PORT-PENDING 0866 crates/jetpack/src/JetOS.rs:1-38
+// Rust: crates/jetpack/src/JetOS.rs:1
+// `jet os` realization lives in the canonical Jetpack.JetOS package, reusing
+// Jetpack source/provider/Store/trust/runtime owners. This former Rust facade
+// has no callable logic and intentionally introduces no compatibility reexports.
 
+// Rust: crates/jetpack/src/JetOS.rs:7
+// activation_provenance -> Jetpack/JetOS/Source/ActivationProvenance.jet
+// Rust: crates/jetpack/src/JetOS.rs:8
+// commands -> Jetpack/JetOS/Source/Commands.jet
+// Rust: crates/jetpack/src/JetOS.rs:9
+// desktop_store_vm -> Jetpack/JetOS/Source/DesktopStoreVm.jet
+// Rust: crates/jetpack/src/JetOS.rs:10
+// entry -> Jetpack/JetOS/Source/Entry.jet
+// Rust: crates/jetpack/src/JetOS.rs:11
+// etc_boot_facts -> Jetpack/JetOS/Source/EtcBootFacts.jet
+// Rust: crates/jetpack/src/JetOS.rs:12
+// generation -> Jetpack/JetOS/Source/Generation.jet
+// Rust: crates/jetpack/src/JetOS.rs:13
+// generation_files -> Jetpack/JetOS/Source/GenerationFiles.jet
+// Rust: crates/jetpack/src/JetOS.rs:14
+// generations_activation -> Jetpack/JetOS/Source/GenerationsActivation.jet
+// Rust: crates/jetpack/src/JetOS.rs:15
+// identity -> Jetpack/JetOS/Source/Identity.jet
+// Rust: crates/jetpack/src/JetOS.rs:16
+// initrd_overlay -> Jetpack/JetOS/Source/InitrdOverlay.jet
+// Rust: crates/jetpack/src/JetOS.rs:17
+// installer_media -> Jetpack/JetOS/Source/InstallerMedia.jet
+// Rust: crates/jetpack/src/JetOS.rs:18
+// iso_vm_commands -> Jetpack/JetOS/Source/IsoVmCommands.jet
+// Rust: crates/jetpack/src/JetOS.rs:19
+// kernel_bootstrap -> Jetpack/JetOS/Source/KernelBootstrap.jet
+// Rust: crates/jetpack/src/JetOS.rs:20
+// load_validate -> Jetpack/JetOS/Source/LoadValidate.jet
+// Rust: crates/jetpack/src/JetOS.rs:21
+// module_storage_workload -> Jetpack/JetOS/Source/ModuleStorageWorkload.jet
+// Rust: crates/jetpack/src/JetOS.rs:22
+// nixos_backend -> Jetpack/JetOS/Source/NixosBackend.jet
+// Rust: crates/jetpack/src/JetOS.rs:23
+// nixos_import -> Jetpack/JetOS/Source/NixosMapping.jet and NixosImportRendering.jet
+// Rust: crates/jetpack/src/JetOS.rs:24
+// nixos_import_live -> Jetpack/JetOS/Source/NixosImportLive.jet
+// Rust: crates/jetpack/src/JetOS.rs:25
+// options_rendering -> Jetpack/JetOS/Source/OptionsRendering.jet
+// Rust: crates/jetpack/src/JetOS.rs:26
+// root_projection -> Jetpack/JetOS/Source/RootProjection.jet
+// Rust: crates/jetpack/src/JetOS.rs:27
+// store_realize -> Jetpack/JetOS/Source/StoreRealize.jet
+// Rust: crates/jetpack/src/JetOS.rs:28
+// studio_projection -> Jetpack/JetOS/Source/StudioProjection.jet and StudioProjection02.jet
+// Rust: crates/jetpack/src/JetOS.rs:29
+// system_facts -> Jetpack/JetOS/Source/SystemFacts.jet
+// Rust: crates/jetpack/src/JetOS.rs:30
+// theme_fleet_lifecycle -> Jetpack/JetOS/Source/ThemeOptionsApps.jet, FleetFacts.jet, FleetLifecycle.jet
+// Rust: crates/jetpack/src/JetOS.rs:31
+// types -> Jetpack/JetOS/Source/Types.jet
+// Rust: crates/jetpack/src/JetOS.rs:32
+// user_flatpak_perf -> Jetpack/JetOS/Source/UserFlatpakPerf.jet
+// Rust: crates/jetpack/src/JetOS.rs:33
+// vm_commands -> Jetpack/JetOS/Source/VmCommands.jet
+// Rust: crates/jetpack/src/JetOS.rs:34
+// vm_proof -> Jetpack/JetOS/Source/VmProof.jet
+
+// Rust: crates/jetpack/src/JetOS.rs:36
+// main, resolve_config_path, user_main -> direct imports from jetpack.JetOS.Entry.
+// Entry's bodies remain under its separately queued sole owner, not this facade.
+// Rust: crates/jetpack/src/JetOS.rs:37
+// studio_pages_json -> jetpack.JetOS.StudioProjection.jetos_studio_pages_json (:143).
+// Rust: crates/jetpack/src/JetOS.rs:38
+// OSFlags -> jetpack.JetOS.Types.JetOSFlags (:10), the existing canonical carrier.
+// No tests or runtime operations in this module inventory: gates
+// #4494/#4483/#4499/#4409 are not applicable within this exact Rust window.

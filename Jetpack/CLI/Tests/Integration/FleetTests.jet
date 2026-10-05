@@ -1,0 +1,149 @@
+// Rust: tests/fleet.rs:1
+use Jetpack.CLI.Tests.Integration.Fleet.*
+use Jetpack.CLI.Tests.Integration.Common.[Scratch, manifest_dir]
+use Jetpack.EnvModel.ModuleEval.[evaluate_env, HostOverrideValue]
+use Compiler.Comptime.CtValue
+use std.fs
+
+// Rust: tests/fleet.rs:27
+#Test("fleet_host_unknown_system_is_e1242") {
+    (code, rendered) :: render("module fleet.prod { hosts: { web1: system.ghost } }")
+    assert_eq(code, "E1242")
+    assert(rendered.contains("host `web1` names an unknown system `ghost`"), "{rendered}")
+}
+
+// Rust: tests/fleet.rs:38
+#Test("fleet_unknown_field_is_e1244") {
+    (code, _) :: render("module fleet.prod { region: \"us\" }")
+    assert_eq(code, "E1244")
+}
+
+// Rust: tests/fleet.rs:45
+#Test("fleet_missing_hosts_is_e1245") {
+    (code, _) :: render("module fleet.prod { }")
+    assert_eq(code, "E1245")
+}
+
+// Rust: tests/fleet.rs:54
+#Test("fleet_valid_captures_hosts_and_overrides") {
+    src :: """
+module system.web { target: linux.x64 }
+module fleet.prod {
+    hosts: {
+        web1: system.web.{ region: "us-east" },
+        web2: system.web,
+    }
+}
+"""
+    plan :: evaluate_env(&src, &std.env.temp_dir()) ?? panic("evaluate valid fleet")
+    assert_eq(plan.fleets.len(), 1)
+    fleet :: &plan.fleets[0]
+    assert_eq(fleet.name, "prod")
+    assert_eq(fleet.hosts.len(), 2)
+    assert_eq(fleet.hosts[0].system, "web")
+    assert_eq(fleet.hosts[0].override_source.as_deref(), Val("{ region: \"us-east\" }"))
+    assert_eq(fleet.hosts[1].overrides, None)
+}
+
+// Rust: tests/fleet.rs:78
+#Test("fleet_override_computes_fields_in_dependency_order_with_provenance") {
+    src :: """
+module system.web { target: linux.x64 }
+module fleet.prod {
+    hosts: { web1: system.web.{ region: base + 2, base: 40 } }
+}
+"""
+    plan :: evaluate_env(&src, &std.env.temp_dir()) ?? panic("evaluate computed override")
+    override_plan :: plan.fleets[0].hosts[0].overrides ?? panic("override plan")
+    assert_eq(override_plan.fields[0].1, HostOverrideValue.Value(CtValue.Int(42)))
+    region :: override_plan.provenance.iter().find((fact) -> fact.field == "region") ?? panic("region provenance")
+    assert_eq(region.dependencies, [String]{"base"})
+    assert(region.pure)
+    assert(region.source.contains("region"))
+}
+
+// Rust: tests/fleet.rs:104
+#Test("fleet_override_options_keep_symbolic_atoms_and_evaluate_values") {
+    src :: """
+module system.web { target: linux.x64 }
+module fleet.prod {
+    hosts: {
+        web1: system.web.{ options: [network.hostName: laptop, filesystem.timeZone: "UTC", tuning.retries: base + 1], base: 4 }
+    }
+}
+"""
+    plan :: evaluate_env(&src, &std.env.temp_dir()) ?? panic("evaluate option overrides")
+    override_plan :: plan.fleets[0].hosts[0].overrides ?? panic("override plan")
+    options :: if override_plan.fields[0].1 == {
+        .Options(options) -> options
+        _ -> panic("expected options override, got {override_plan.fields[0]:?}")
+    }
+    assert_eq(options.iter().map((option) -> (option.key.as_str(), option.value.as_str())).collect(), [(String, String)]{
+        ("network.hostName", "laptop"),
+        ("filesystem.timeZone", "\"UTC\""),
+        ("tuning.retries", "5")
+    })
+    retries :: override_plan.provenance.iter().find((fact) -> fact.field == "options") ?? panic("options provenance")
+    assert_eq(retries.dependencies, [String]{"base"})
+    assert(retries.pure)
+}
+
+// Rust: tests/fleet.rs:143
+#Test("fleet_override_dependency_cycle_is_rejected_before_capture") {
+    src :: """
+module system.web { target: linux.x64 }
+module fleet.prod {
+    hosts: { web1: system.web.{ region: base + 1, base: region + 1 } }
+}
+"""
+    error :: evaluate_env(&src, &std.env.temp_dir()).expect_err("expected dependency cycle")
+    assert_eq(error.code, "E0338")
+}
+
+// Rust: tests/fleet.rs:160
+#Test("committed_fleet_example_field_checks_clean") {
+    path :: manifest_dir().join("tests/fixtures/jetpack-typed/fleet.jet")
+    src :: fs.read_to_string(path) ?? panic("read committed fixture")
+    dir :: path.parent() ?? panic("fixture directory")
+    plan :: evaluate_env(&src, &dir) ?? panic("evaluate committed fixture")
+    assert_eq(plan.systems.len(), 1)
+    assert_eq(plan.systems[0].name, "web")
+    assert_eq(plan.fleets.len(), 1)
+    assert_eq(plan.fleets[0].name, "prod")
+    hosts :: plan.fleets[0].hosts.iter().map((h) -> h.name.as_str()).collect()
+    assert_eq(hosts, [String]{"web1", "web2", "web3"})
+    assert(plan.fleets[0].hosts.iter().all((h) -> h.system == "web"))
+}
+
+// Rust: tests/fleet.rs:198
+#Test("push_valid_fleet_is_gated_e1243") {
+    proj :: Scratch.new("push-gated")
+    write_fleet_project(&proj.path)
+    out :: jetpack().arg("push").arg("prod").current_dir(proj.path).env("NO_COLOR", "1").output() ?? panic("push valid fleet")
+    stderr :: String.from_utf8_lossy(out.stderr)
+    assert_eq(out.status.code(), Val(2), "gated push exits non-zero: {stderr}")
+    assert(stderr.contains("E1243"), "expected E1243: {stderr}")
+    assert(stderr.contains("prod"), "names the fleet: {stderr}")
+    assert(stderr.contains("web1") && stderr.contains("system.web"), "lists the validated hosts: {stderr}")
+}
+
+// Rust: tests/fleet.rs:224
+#Test("push_unknown_fleet_is_friendly") {
+    proj :: Scratch.new("push-unknown")
+    write_fleet_project(&proj.path)
+    out :: jetpack().arg("push").arg("staging").current_dir(proj.path).env("NO_COLOR", "1").output() ?? panic("push unknown fleet")
+    stderr :: String.from_utf8_lossy(out.stderr)
+    assert_eq(out.status.code(), Val(2))
+    assert(stderr.contains("no fleet `staging`"), "{stderr}")
+    assert(stderr.contains("prod"), "lists declared fleets: {stderr}")
+}
+
+// Rust: tests/fleet.rs:243
+#Test("push_fleet_with_bad_host_is_e1242") {
+    proj :: Scratch.new("push-bad-host")
+    fs.write(proj.path.join("env.jet"), "module fleet.prod { hosts: { web1: system.ghost } }\n") ?? panic("write bad fleet")
+    out :: jetpack().arg("push").arg("prod").current_dir(proj.path).env("NO_COLOR", "1").output() ?? panic("push bad host")
+    stderr :: String.from_utf8_lossy(out.stderr)
+    assert_eq(out.status.code(), Val(2))
+    assert(stderr.contains("E1242"), "cross-check fires first: {stderr}")
+}

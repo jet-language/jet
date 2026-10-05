@@ -1,380 +1,232 @@
-// PORT-PENDING 2033 source-main-slice-7201: Source/main.rs:7201-7576
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS         for change in &result.summary.changes {
-//RS             write_mode_status(
-//RS                 mode,
-//RS                 &format!(
-//RS                     "{}\n",
-//RS                     if check_only {
-//RS                         format!("Would {}: {}", change.action, change.path.display())
-//RS                     } else {
-//RS                         format!("{}d {}.", change.action, change.path.display())
-//RS                     }
-//RS                 ),
-//RS             );
-//RS         }
-//RS         if result.summary.before_fingerprint == result.summary.after_fingerprint {
-//RS             write_mode_status(
-//RS                 mode,
-//RS                 &format!(
-//RS                     "package graph unchanged: {}\n",
-//RS                     result.summary.after_fingerprint
-//RS                 ),
-//RS             );
-//RS         } else {
-//RS             write_mode_status(
-//RS                 mode,
-//RS                 &format!(
-//RS                     "package graph before: {}\n",
-//RS                     result.summary.before_fingerprint
-//RS                 ),
-//RS             );
-//RS             write_mode_status(
-//RS                 mode,
-//RS                 &format!(
-//RS                     "package graph after: {}\n",
-//RS                     result.summary.after_fingerprint
-//RS                 ),
-//RS             );
-//RS         }
-//RS         if check_only {
-//RS             write_mode_status(mode, "No files changed.\n");
-//RS         } else {
-//RS             write_mode_status(
-//RS                 mode,
-//RS                 &format!("Transition journal: {}\n", result.summary.journal.display()),
-//RS             );
-//RS         }
-//RS     }
-//RS     exit(ExitCodes::OK)
-//RS }
-//RS 
-//RS fn report_transition_error(error: &jetpack::Transition::TransitionError) -> ! {
-//RS     let message = error.0.as_str();
-//RS     let (code, why, fix) = if message.contains("pkg.jet") || message.contains("retired") {
-//RS         (
-//RS             "E1226",
-//RS             "the package transition accepts only the current package manifest and its recorded migration path.",
-//RS             "rename the retired manifest to `package.jet`, or run `jet init --check` in the project root.",
-//RS         )
-//RS     } else if message.contains("already exists") {
-//RS         (
-//RS             "E1252",
-//RS             "a transition never overwrites an existing package manifest or generated role file.",
-//RS             "review the existing file, or run the transition in an empty package root.",
-//RS         )
-//RS     } else if message.contains("journal") || message.contains("fingerprint") {
-//RS         (
-//RS             "E1204",
-//RS             "a recorded package transition no longer matches the files on disk, so Jet refuses a stale or tampered replay.",
-//RS             "restore the recorded files or remove the stale transition journal and make a fresh checked transition.",
-//RS         )
-//RS     } else {
-//RS         (
-//RS             "E1206",
-//RS             "the package manifest or transition input does not have the required typed shape.",
-//RS             "fix the named package or role file, then rerun the transition with `--check` first.",
-//RS         )
-//RS     };
-//RS     emit_cli_report(
-//RS         code,
-//RS         message.to_string(),
-//RS         why.to_string(),
-//RS         fix.to_string(),
-//RS         false,
-//RS     );
-//RS     exit(ExitCodes::USER_ERROR);
-//RS }
-//RS 
-//RS fn run_init(script: Option<&str>, raw: &[String], mode: OutputMode) -> ! {
-//RS     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-//RS     if raw.iter().any(|arg| arg == "--restore-role-files") {
-//RS         let check_only = raw.iter().any(|arg| arg == "--check");
-//RS         match jetpack::Transition::restore_role_files(&cwd, check_only) {
-//RS             Ok(result) => print_transition_result(&result, check_only, mode),
-//RS             Err(error) => {
-//RS                 crate::cli_error!("E2105", "{error}");
-//RS                 exit(ExitCodes::USER_ERROR);
-//RS             }
-//RS         }
-//RS     }
-//RS     if raw.iter().any(|arg| arg == "--check") {
-//RS         let has_role_file = ["pkg.jet", "env.jet", "workspace.jet", "config.jet"]
-//RS             .iter()
-//RS             .any(|name| cwd.join(name).is_file());
-//RS         if has_role_file {
-//RS             match jetpack::Transition::init(&cwd, true) {
-//RS                 Ok(result) => print_transition_result(&result, true, mode),
-//RS                 Err(error) => {
-//RS                     crate::cli_error!("E2105", "{error}");
-//RS                     exit(ExitCodes::USER_ERROR);
-//RS                 }
-//RS             }
-//RS         }
-//RS         write_mode_status(
-//RS             mode,
-//RS             "No migration-era role files found.\nNo files changed.\n",
-//RS         );
-//RS         exit(ExitCodes::OK);
-//RS     }
-//RS     if script.is_none()
-//RS         && ["pkg.jet", "env.jet", "workspace.jet", "config.jet"]
-//RS             .iter()
-//RS             .any(|name| cwd.join(name).is_file())
-//RS         && !cwd.join(jet::Syntax::PACKAGE_FILE).is_file()
-//RS     {
-//RS         match jetpack::Transition::init(&cwd, false) {
-//RS             Ok(result) => print_transition_result(&result, false, mode),
-//RS             Err(error) => {
-//RS                 crate::cli_error!("E2105", "{error}");
-//RS                 exit(ExitCodes::USER_ERROR);
-//RS             }
-//RS         }
-//RS     }
-//RS     let name = cwd
-//RS         .file_name()
-//RS         .and_then(|s| s.to_str())
-//RS         .unwrap_or("app")
-//RS         .to_string();
-//RS     match jetpack::JetPin::write_init(&cwd, &name, env!("CARGO_PKG_VERSION")) {
-//RS         Ok(msg) => {
-//RS             if let Some(script) = script {
-//RS                 lift_inline_deps_into_manifest(&cwd, script, mode);
-//RS             }
-//RS             write_mode_status(mode, &format!("{msg}\n"));
-//RS             exit(ExitCodes::OK);
-//RS         }
-//RS         Err(d) => {
-//RS             print_toolchain_diag(&d, mode);
-//RS             exit(ExitCodes::USER_ERROR);
-//RS         }
-//RS     }
-//RS }
-//RS /// U11: fold `script`'s inline deps into `<cwd>/package.jet`'s `deps: {}` block
-//RS /// (just written by `write_init`), preserving comments/formatting via the
-//RS /// same comment-preserving editor `jet add` uses.
-//RS fn lift_inline_deps_into_manifest(cwd: &Path, script: &str, mode: OutputMode) {
-//RS     let script_path = resolve_source_path(script);
-//RS     let Ok(src) = fs::read_to_string(&script_path) else {
-//RS         return;
-//RS     };
-//RS     let source_for_parse = match jet::Package::mask_inline_package_source(&src) {
-//RS         Ok((masked, _)) => masked,
-//RS         Err(_) => return,
-//RS     };
-//RS     let (toks, lex_diags) = jet::Lexer::lex(&source_for_parse);
-//RS     if !lex_diags.is_empty() {
-//RS         return;
-//RS     }
-//RS     let Ok(prog) = jet::Parser::parse_with_source(&toks, &source_for_parse) else {
-//RS         return;
-//RS     };
-//RS     let deps = jet::ScriptDeps::collect(&prog);
-//RS     if deps.is_empty() {
-//RS         return;
-//RS     }
-//RS     let Some(manifest_path) = jet::Loader::manifest_path(cwd) else {
-//RS         return;
-//RS     };
-//RS     let Ok(mut raw) = fs::read_to_string(&manifest_path) else {
-//RS         return;
-//RS     };
-//RS     for dep in &deps {
-//RS         raw = jet::Manifest::add_dependency(
-//RS             &raw,
-//RS             &dep.name,
-//RS             &jet::Manifest::DepSpec::Registry(dep.selector.clone()),
-//RS         );
-//RS     }
-//RS     if fs::write(&manifest_path, raw).is_ok() {
-//RS         write_mode_status(
-//RS             mode,
-//RS             &format!(
-//RS                 "lifted {} inline dependenc{} into {}\n",
-//RS                 deps.len(),
-//RS                 if deps.len() == 1 { "y" } else { "ies" },
-//RS                 manifest_path
-//RS                     .file_name()
-//RS                     .and_then(|name| name.to_str())
-//RS                     .unwrap_or("package.jet")
-//RS             ),
-//RS         );
-//RS     }
-//RS }
-//RS 
-//RS /// `jet fetch --lock <script.jet>` (D-CLI-STORE2=A, was `jet store lock` /
-//RS /// `jet lock`) — U11: resolve a manifest-less script's inline
-//RS /// `use pkg#version;` deps and write the `<script.jet>.lock` sidecar,
-//RS /// keyed by the script's own content hash (edit the script, the lock goes
-//RS /// stale — the same "locks by file-content hash" contract `jet run` uses).
-//RS fn run_lock(script: Option<&str>, mode: OutputMode) {
-//RS     let Some(raw_arg) = script else {
-//RS         crate::cli_error!(
-//RS             "E2104",
-//RS             "`jet fetch --lock` needs a script path, e.g. `jet fetch --lock stats.jet`"
-//RS         );
-//RS         exit(ExitCodes::USER_ERROR);
-//RS     };
-//RS     let file = resolve_source_path(raw_arg);
-//RS     let script_path = Path::new(&file);
-//RS     let script_dir = script_path.parent().unwrap_or(Path::new("."));
-//RS 
-//RS     if jet::Loader::find_manifest_root(script_dir).is_some() {
-//RS         crate::cli_error!(
-//RS             "E1202",
-//RS             "`{file}` belongs to a project with a `{}` — use `jet fetch` to lock its dependencies",
-//RS             jet::Syntax::PACKAGE_FILE
-//RS         );
-//RS         exit(ExitCodes::USER_ERROR);
-//RS     }
-//RS 
-//RS     let src = match fs::read_to_string(&file) {
-//RS         Ok(s) => s,
-//RS         Err(e) => {
-//RS             crate::cli_error!("E2105", "couldn't read `{file}`: {e}");
-//RS             exit(ExitCodes::USER_ERROR);
-//RS         }
-//RS     };
-//RS     let source_for_parse = match jet::Package::mask_inline_package_source(&src) {
-//RS         Ok((masked, _)) => masked,
-//RS         Err(error) => {
-//RS             report_problems(mode, &file, &src, &[error.diagnostic()]);
-//RS             exit(ExitCodes::USER_ERROR);
-//RS         }
-//RS     };
-//RS     let (toks, lex_diags) = jet::Lexer::lex(&source_for_parse);
-//RS     if !lex_diags.is_empty() {
-//RS         report_problems(mode, &file, &src, &lex_diags);
-//RS         exit(ExitCodes::USER_ERROR);
-//RS     }
-//RS     let prog = match jet::Parser::parse_with_source(&toks, &source_for_parse) {
-//RS         Ok(p) => p,
-//RS         Err(diags) => {
-//RS             report_problems(mode, &file, &src, &diags);
-//RS             exit(ExitCodes::USER_ERROR);
-//RS         }
-//RS     };
-//RS 
-//RS     let deps = jet::ScriptDeps::collect(&prog);
-//RS     let mut locked = Vec::new();
-//RS     for dep in &deps {
-//RS         match jet::ScriptDeps::resolve(dep, script_dir) {
-//RS             Ok(r) => locked.push(jetpack::ScriptLock::LockedInlineDep {
-//RS                 name: r.name,
-//RS                 selector: r.selector,
-//RS                 resolved: r.resolved_version,
-//RS                 content_hash: r.content_hash,
-//RS             }),
-//RS             Err(reason) => {
-//RS                 let d = jet::ScriptDeps::e1253(dep, &reason);
-//RS                 report_problems(mode, &file, &src, &[d]);
-//RS                 exit(ExitCodes::USER_ERROR);
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     let script_hash = jet::ScriptDeps::file_hash(script_path).unwrap_or_default();
-//RS     let lock = jetpack::ScriptLock::ScriptLockFile {
-//RS         version: jetpack::ScriptLock::SCRIPT_LOCK_VERSION,
-//RS         script_hash,
-//RS         deps: locked,
-//RS     };
-//RS     match jetpack::ScriptLock::write(script_path, &lock) {
-//RS         Ok(()) => {
-//RS             write_mode_status(
-//RS                 mode,
-//RS                 &format!(
-//RS                     "wrote {}\n",
-//RS                     jetpack::ScriptLock::sidecar_path(script_path).display()
-//RS                 ),
-//RS             );
-//RS             exit(ExitCodes::OK);
-//RS         }
-//RS         Err(e) => {
-//RS             crate::cli_error!("E2105", "couldn't write the lock sidecar: {e}");
-//RS             exit(ExitCodes::USER_ERROR);
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// `jet update jet [<channel>]` — move the toolchain pin (D-JPK-TOOLCHAIN1=A
-//RS /// #179). The only place the pin moves.
-//RS fn run_update_jet(channel: Option<&str>, mode: OutputMode) -> ! {
-//RS     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-//RS     let root = require_manifest_root(
-//RS         &cwd,
-//RS         "error: `jet update jet` needs a project — no `package.jet` found here or above",
-//RS     );
-//RS     match jetpack::JetPin::move_pin(&root, channel, env!("CARGO_PKG_VERSION")) {
-//RS         Ok(msg) => {
-//RS             write_mode_status(mode, &format!("{msg}\n"));
-//RS             exit(ExitCodes::OK);
-//RS         }
-//RS         Err(d) => {
-//RS             print_toolchain_diag(&d, mode);
-//RS             exit(ExitCodes::USER_ERROR);
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS pub(crate) fn flag_value<'a>(args: &'a [String], flag: &str) -> Option<&'a str> {
-//RS     let mut iter = args.iter();
-//RS     while let Some(a) = iter.next() {
-//RS         if a == flag {
-//RS             return iter.next().map(String::as_str);
-//RS         }
-//RS     }
-//RS     None
-//RS }
-//RS 
-//RS fn test_option_value(args: &[String], flag: &str) -> Option<String> {
-//RS     args.iter().enumerate().find_map(|(index, arg)| {
-//RS         if let Some(value) = arg.strip_prefix(&format!("{flag}=")) {
-//RS             Some(value.to_string())
-//RS         } else if arg == flag {
-//RS             args.get(index + 1).cloned()
-//RS         } else {
-//RS             None
-//RS         }
-//RS     })
-//RS }
-//RS 
-//RS /// Find the manifest root from `cwd`, or exit. D-JPK-FILENAME2=B (A2): when
-//RS /// there's no `package.jet` but a retired filename (`pkg.jet`/`pack.jet`/
-//RS /// `payload.jet`/`jet.toml`) sits where it belongs, teaches E1226 instead of
-//RS /// the generic "no package.jet found" — `fallback_hint` is that generic
-//RS /// message's body for
-//RS /// commands that genuinely have no manifest at all.
-//RS pub(crate) fn require_manifest_root(cwd: &Path, fallback_hint: &str) -> PathBuf {
-//RS     match jet::Loader::find_package_root_checked(cwd) {
-//RS         Ok(Some(root)) => root,
-//RS         Ok(None) => {
-//RS             match jet::Loader::stale_manifest_name_message(cwd) {
-//RS                 Some(msg) => write_mode_diagnostic(
-//RS                     OutputMode {
-//RS                         json: false,
-//RS                         color: jet::Diagnostics::ColorChoice::Never,
-//RS                         quiet: false,
-//RS                     },
-//RS                     &msg,
-//RS                 ),
-//RS                 None => write_mode_diagnostic(
-//RS                     OutputMode {
-//RS                         json: false,
-//RS                         color: jet::Diagnostics::ColorChoice::Never,
-//RS                         quiet: false,
-//RS                     },
-//RS                     &format!("{fallback_hint}\n"),
-//RS                 ),
-//RS             }
-//RS             exit(ExitCodes::USER_ERROR);
-//RS         }
-//RS         Err(diagnostic) => {
-//RS             emit_cli_diagnostics(jet::Syntax::PACKAGE_FILE, "", &[diagnostic]);
-//RS             exit(ExitCodes::USER_ERROR);
-//RS         }
-//RS     }
-//RS }
-//RS 
-// END-PORT-PENDING 2033 Source/main.rs:7201-7576
+use jet.[Syntax, ExitCodes, Package, Lexer, Parser, ScriptDeps, Loader, Manifest]
+use jetpack.[Transition, JetPin, ScriptLock]
+use std.[fs, env]
+use std.process.[exit]
+use crate.[OutputMode, cli_error, emit_cli_report, emit_cli_diagnostics, print_transition_result, write_mode_status, write_mode_diagnostic, print_toolchain_diag, resolve_source_path, report_problems, JET_VERSION]
 
+// Rust: Source/main.rs:7201-7248
+// The transition-result continuation is part of Main04.print_transition_result.
+
+// Rust: Source/main.rs:7250
+pub fn report_transition_error(error: Transition.TransitionError) -> Never {
+    message :: error.0
+    (code, why, fix) :: if message.contains("pkg.jet") || message.contains("retired") {
+        ("E1226", "the package transition accepts only the current package manifest and its recorded migration path.", "rename the retired manifest to `package.jet`, or run `jet init --check` in the project root.")
+    } else if message.contains("already exists") {
+        ("E1252", "a transition never overwrites an existing package manifest or generated role file.", "review the existing file, or run the transition in an empty package root.")
+    } else if message.contains("journal") || message.contains("fingerprint") {
+        ("E1204", "a recorded package transition no longer matches the files on disk, so Jet refuses a stale or tampered replay.", "restore the recorded files or remove the stale transition journal and make a fresh checked transition.")
+    } else {
+        ("E1206", "the package manifest or transition input does not have the required typed shape.", "fix the named package or role file, then rerun the transition with `--check` first.")
+    }
+    emit_cli_report(code, message.to_string(), why.to_string(), fix.to_string(), false)
+    exit(ExitCodes.USER_ERROR)
+}
+
+// Rust: Source/main.rs:7287
+pub fn run_init(script: String?, raw: [String], mode: OutputMode) -> Never {
+    // GATE #4494: native working directory.
+    cwd :: env.current_dir().unwrap_or_else(_ -> OSPath.from("."))
+    if raw.iter().any(arg -> arg == "--restore-role-files") {
+        check_only :: raw.iter().any(arg -> arg == "--check")
+        match Transition.restore_role_files(cwd, check_only) {
+            .Ok(result) -> print_transition_result(result, check_only, mode)
+            .Err(error) -> {
+                cli_error("E2105", "{error}")
+                exit(ExitCodes.USER_ERROR)
+            }
+        }
+    }
+    if raw.iter().any(arg -> arg == "--check") {
+        has_role_file :: ["pkg.jet", "env.jet", "workspace.jet", "config.jet"].iter().any(name -> cwd.join(name).is_file())
+        if has_role_file {
+            match Transition.init(cwd, true) {
+                .Ok(result) -> print_transition_result(result, true, mode)
+                .Err(error) -> {
+                    cli_error("E2105", "{error}")
+                    exit(ExitCodes.USER_ERROR)
+                }
+            }
+        }
+        write_mode_status(mode, "No migration-era role files found.\nNo files changed.\n")
+        exit(ExitCodes.OK)
+    }
+    if script.is_none() && ["pkg.jet", "env.jet", "workspace.jet", "config.jet"].iter().any(name -> cwd.join(name).is_file()) && !cwd.join(Syntax.PACKAGE_FILE).is_file() {
+        match Transition.init(cwd, false) {
+            .Ok(result) -> print_transition_result(result, false, mode)
+            .Err(error) -> {
+                cli_error("E2105", "{error}")
+                exit(ExitCodes.USER_ERROR)
+            }
+        }
+    }
+    name :: cwd.file_name().and_then(name -> name.to_str()).unwrap_or("app").to_string()
+    match JetPin.write_init(cwd, name, JET_VERSION) {
+        .Ok(msg) -> {
+            if source :: script { lift_inline_deps_into_manifest(cwd, source, mode) }
+            write_mode_status(mode, "{msg}\n")
+            exit(ExitCodes.OK)
+        }
+        .Err(diagnostic) -> {
+            print_toolchain_diag(diagnostic, mode)
+            exit(ExitCodes.USER_ERROR)
+        }
+    }
+}
+
+// Rust: Source/main.rs:7354
+// Fold inline dependencies into the newly written manifest using the comment-preserving editor.
+fn lift_inline_deps_into_manifest(cwd: OSPath, script: String, mode: OutputMode) -> {
+    script_path :: resolve_source_path(script)
+    // GATE #4494: native source and manifest reads/writes.
+    src :: fs.read_to_string(script_path).ok() ?? return
+    (source_for_parse, _) :: Package.mask_inline_package_source(src).ok() ?? return
+    (toks, lex_diags) :: Lexer.lex(source_for_parse)
+    if !lex_diags.is_empty() { return }
+    prog :: Parser.parse_with_source(toks, source_for_parse).ok() ?? return
+    deps :: ScriptDeps.collect(prog)
+    if deps.is_empty() { return }
+    manifest_path :: Loader.manifest_path(cwd) ?? return
+    raw := fs.read_to_string(manifest_path).ok() ?? return
+    loop dep in deps {
+        raw = Manifest.add_dependency(raw, dep.name, Manifest.DepSpec.Registry(dep.selector.clone()))
+    }
+    if fs.write(manifest_path, raw).is_ok() {
+        suffix :: if deps.len() == 1 -> "y" else -> "ies"
+        name :: manifest_path.file_name().and_then(name -> name.to_str()).unwrap_or("package.jet")
+        write_mode_status(mode, "lifted {deps.len()} inline dependenc{suffix} into {name}\n")
+    }
+}
+
+// Rust: Source/main.rs:7408
+// Lock a manifest-less script's inline dependencies against its content hash.
+pub fn run_lock(script: String?, mode: OutputMode) -> {
+    raw_arg :: script ?? {
+        cli_error("E2104", "`jet fetch --lock` needs a script path, e.g. `jet fetch --lock stats.jet`")
+        exit(ExitCodes.USER_ERROR)
+    }
+    file :: resolve_source_path(raw_arg)
+    script_path :: OSPath.from(file)
+    script_dir :: script_path.parent().unwrap_or(OSPath.from("."))
+    if Loader.find_manifest_root(script_dir).is_some() {
+        cli_error("E1202", "`{file}` belongs to a project with a `{Syntax.PACKAGE_FILE}` — use `jet fetch` to lock its dependencies")
+        exit(ExitCodes.USER_ERROR)
+    }
+    // GATE #4494: native script read and lock sidecar write.
+    src :: match fs.read_to_string(file) {
+        .Ok(source) -> source
+        .Err(error) -> {
+            cli_error("E2105", "couldn't read `{file}`: {error}")
+            exit(ExitCodes.USER_ERROR)
+        }
+    }
+    source_for_parse :: match Package.mask_inline_package_source(src) {
+        .Ok((masked, _)) -> masked
+        .Err(error) -> {
+            report_problems(mode, file, src, [error.diagnostic()])
+            exit(ExitCodes.USER_ERROR)
+        }
+    }
+    (toks, lex_diags) :: Lexer.lex(source_for_parse)
+    if !lex_diags.is_empty() {
+        report_problems(mode, file, src, lex_diags)
+        exit(ExitCodes.USER_ERROR)
+    }
+    prog :: match Parser.parse_with_source(toks, source_for_parse) {
+        .Ok(program) -> program
+        .Err(diags) -> {
+            report_problems(mode, file, src, diags)
+            exit(ExitCodes.USER_ERROR)
+        }
+    }
+    deps :: ScriptDeps.collect(prog)
+    locked: [ScriptLock.LockedInlineDep] = []
+    loop dep in deps {
+        match ScriptDeps.resolve(dep, script_dir) {
+            .Ok(resolved) -> locked.push(ScriptLock.LockedInlineDep {
+                name: resolved.name,
+                selector: resolved.selector,
+                resolved: resolved.resolved_version,
+                content_hash: resolved.content_hash,
+            })
+            .Err(reason) -> {
+                diagnostic :: ScriptDeps.e1253(dep, reason)
+                report_problems(mode, file, src, [diagnostic])
+                exit(ExitCodes.USER_ERROR)
+            }
+        }
+    }
+    script_hash :: ScriptDeps.file_hash(script_path).unwrap_or_default()
+    lock :: ScriptLock.ScriptLockFile {
+        version: ScriptLock.SCRIPT_LOCK_VERSION,
+        script_hash: script_hash,
+        deps: ^locked,
+    }
+    match ScriptLock.write(script_path, lock) {
+        .Ok(_) -> {
+            write_mode_status(mode, "wrote {ScriptLock.sidecar_path(script_path).display()}\n")
+            exit(ExitCodes.OK)
+        }
+        .Err(error) -> {
+            cli_error("E2105", "couldn't write the lock sidecar: {error}")
+            exit(ExitCodes.USER_ERROR)
+        }
+    }
+}
+
+// Rust: Source/main.rs:7500
+// The only command that moves the toolchain pin.
+pub fn run_update_jet(channel: String?, mode: OutputMode) -> Never {
+    // GATE #4494: native working directory.
+    cwd :: env.current_dir().unwrap_or_else(_ -> OSPath.from("."))
+    root :: require_manifest_root(cwd, "error: `jet update jet` needs a project — no `package.jet` found here or above")
+    match JetPin.move_pin(root, channel, JET_VERSION) {
+        .Ok(msg) -> {
+            write_mode_status(mode, "{msg}\n")
+            exit(ExitCodes.OK)
+        }
+        .Err(diagnostic) -> {
+            print_toolchain_diag(diagnostic, mode)
+            exit(ExitCodes.USER_ERROR)
+        }
+    }
+}
+
+// Rust: Source/main.rs:7518
+pub fn flag_value(args: [String], flag: String) -> String? {
+    iter := args.iter()
+    loop a :: iter.next() {
+        if a == flag { return iter.next() }
+    }
+    none
+}
+
+// Rust: Source/main.rs:7528
+pub fn test_option_value(args: [String], flag: String) -> String? {
+    prefix :: "{flag}="
+    loop (index, arg) in args.iter().enumerate() {
+        if value :: arg.strip_prefix(prefix) { return value.to_string() }
+        else if arg == flag { return args.get(index + 1).cloned() }
+    }
+    none
+}
+
+// Rust: Source/main.rs:7546
+// Teach E1226 for retired manifests instead of a generic missing-package hint.
+pub fn require_manifest_root(cwd: OSPath, fallback_hint: String) -> OSPath {
+    match Loader.find_package_root_checked(cwd) {
+        .Ok(root) -> {
+            if path :: root { return path }
+            mode :: OutputMode { json: false, color: jet.Diagnostics.ColorChoice.Never, quiet: false }
+            match Loader.stale_manifest_name_message(cwd) {
+                .Some(msg) -> write_mode_diagnostic(mode, msg)
+                .None -> write_mode_diagnostic(mode, "{fallback_hint}\n")
+            }
+            exit(ExitCodes.USER_ERROR)
+        }
+        .Err(diagnostic) -> {
+            emit_cli_diagnostics(Syntax.PACKAGE_FILE, "", [diagnostic])
+            exit(ExitCodes.USER_ERROR)
+        }
+    }
+}

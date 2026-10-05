@@ -1,0 +1,34 @@
+use jetpack.JetOS.DesktopStoreVm.[write_vm_proof]
+use jetpack.[SHA256]
+use jet_env_model.ModuleEval.[SystemPlan, ServicePlan]
+use core.files as files
+use std.[fs]
+use std.io.[ErrorKind]
+
+struct DesktopVmScratch { path: OSPath }
+impl DesktopVmScratch.Close {
+    fn close(^self) -[FS]> { _ :: fs.remove_dir_all(self.path) }
+}
+
+// Behavioral control for Rust: crates/jetpack/src/JetOS/desktop_store_vm.rs:439
+// GATE #4494/#4409: real missing-file error and generated proof bytes, not mocked IO.
+#Test("jetos_vm_proof_refuses_missing_units_and_binds_exact_plan") {
+    scratch :: DesktopVmScratch{path: OSPath.from(files.tmpdir("jetos-vm-proof-") ?? panic("scratch"))}
+    system := SystemPlan{name: "host", target: "linux.x64", packages: [], services: [], options: []}
+    fs.write(scratch.path.join("vm-proof.txt"), "stale") ?? panic("stale proof")
+    write_vm_proof(scratch.path, &system, "plan") ?? panic("low risk")
+    assert(!scratch.path.join("vm-proof.txt").is_file())
+    system.services = [ServicePlan{name: "worker", enable: true, extra: []}]
+    if write_vm_proof(scratch.path, &system, "plan") == {
+        .Err(error) -> {
+            assert_eq(error.kind(), ErrorKind.NotFound)
+            assert(error.to_string().contains("missing generated service unit"))
+        }
+        .Ok(_) -> panic("unit must be required")
+    }
+    fs.create_dir_all(scratch.path.join("etc/systemd/system")) ?? panic("unit directory")
+    fs.write(scratch.path.join("etc/systemd/system/worker.service"), "[Service]\n") ?? panic("unit")
+    write_vm_proof(scratch.path, &system, "plan") ?? panic("proof")
+    hash :: SHA256.sha256_hex("plan".as_bytes())
+    assert_eq(fs.read_to_string(scratch.path.join("vm-proof.txt")) ?? panic("proof read"), "vm proof for host\nplan-sha256: {hash}\nrisk: service-risk\nboot-graph: pass\nservice-artifacts: pass\nrollback-required: true\n")
+}

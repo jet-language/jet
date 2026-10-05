@@ -1,0 +1,689 @@
+// Rust: tests/jetpack_engine.rs:3633-5420
+use Jetpack.CLI.Tests.Integration.JetpackEngine.*
+use common.[Scratch, write_native_catalog, NativeCatalogRecipe]
+use nix_index_cache_server
+use no_nix_namespace
+use Jetpack.[Store, RefSpec, SHA256]
+use jet_env_model.ModuleEval.evaluate_env
+use jet_foundation.JSON.json_escape
+use core.sys
+// GATE #4494: real filesystem, processes, threads, environment and namespace substrate.
+use std.[fs, env, Instant, Duration, thread]
+
+// Rust: tests/jetpack_engine.rs:3633
+#Test("use_rejects_unrecorded_path_inside_lease") {
+    root :: Scratch.new("lease-caller-confinement-root")
+    fixtures :: Scratch.new("lease-caller-confinement-fixtures")
+    write_native_lease_fixture(&fixtures.path)
+    prime :: jetpack().args(["use", "omp@releases#1.0.0", "-y", "--no-color", "--offline", "--fixtures"]).arg(&fixtures.path).args(["--", "sh", "-c", "true"]).env("JETPACK_ROOT", &root.path).env("JETPACK_FIXTURES", &fixtures.path).output() ?? panic("prime")
+    assert(prime.status.success(), "lease setup failed: {String.from_utf8_lossy(&prime.stderr)}")
+    entry :: Store.find_by_reference(&Store.Roots.at(root.path.clone()), "omp@releases#1.0.0") ?? panic("find entry")
+    // Valid after OS normalization, but not a recorded member spelling.
+    unrecorded :: OSPath.from(entry.out).join("bin/../bin/omp")
+    output :: jetpack().args(["use", "omp@releases#1.0.0", "-y", "--no-color", "--offline", "--fixtures"]).arg(&fixtures.path).args(["--", unrecorded.to_str().unwrap()]).env("JETPACK_ROOT", &root.path).env("JETPACK_FIXTURES", &fixtures.path).output() ?? panic("use")
+    assert_eq(output.status.code(), Val(126), "unrecorded lease path must fail before child launch: {String.from_utf8_lossy(&output.stderr)}")
+    stderr :: String.from_utf8_lossy(&output.stderr)
+    assert(stderr.contains("Error [E1340]:"), "stderr: {stderr}")
+    assert(stderr.contains("not a recorded member"), "stderr: {stderr}")
+    assert(!String.from_utf8_lossy(&output.stdout).contains("hello from jetpack"))
+    // GATE #4483: original Unix symlink arm.
+    if sys.target.selected_family() == "unix" {
+        alias :: root.path.join("lease-output-alias")
+        fs.symlink(OSPath.from(entry.out).join("bin"), &alias) ?? panic("symlink")
+        aliased :: alias.join("omp")
+        aliased_output :: jetpack().args(["use", "omp@releases#1.0.0", "-y", "--no-color", "--offline", "--fixtures"]).arg(&fixtures.path).args(["--", aliased.to_str().unwrap()]).env("JETPACK_ROOT", &root.path).env("JETPACK_FIXTURES", &fixtures.path).output() ?? panic("aliased use")
+        assert_eq(aliased_output.status.code(), Val(126), "symlink alias into a lease must fail before child launch: {String.from_utf8_lossy(&aliased_output.stderr)}")
+        assert(String.from_utf8_lossy(&aliased_output.stderr).contains("not a recorded member"), "stderr: {String.from_utf8_lossy(&aliased_output.stderr)}")
+        assert(!String.from_utf8_lossy(&aliased_output.stdout).contains("hello from jetpack"))
+    }
+}
+
+// Rust: tests/jetpack_engine.rs:3739
+#Test("use_fails_closed_when_executable_lease_service_key_is_invalid") {
+    root :: Scratch.new("invalid-executable-lease-key-root")
+    fixtures :: Scratch.new("invalid-executable-lease-key-fixtures")
+    write_native_lease_fixture(&fixtures.path)
+    service :: root.path.join("lease-service")
+    fs.create_dir_all(&service) ?? panic("service dir")
+    fs.write(service.join("auth.key"), [U8; 31].filled(0)) ?? panic("invalid key")
+    output :: jetpack().args(["use", "omp@releases#1.0.0", "-y", "--no-color", "--offline", "--fixtures"]).arg(&fixtures.path).args(["--", "omp"]).env("JETPACK_ROOT", &root.path).env("JETPACK_FIXTURES", &fixtures.path).output() ?? panic("use")
+    assert(!output.status.success())
+    stderr :: String.from_utf8_lossy(&output.stderr)
+    assert(stderr.contains("Error [E1315]:"), "stderr: {stderr}")
+    assert(stderr.contains("32-byte file"), "stderr: {stderr}")
+    assert(!String.from_utf8_lossy(&output.stdout).contains("hello from jetpack"))
+    assert(fs.read_dir(root.path.join("leases")).map(entries -> entries.flatten().next().is_none()).unwrap_or(true), "failed lease setup left an executable container")
+    offset :: stderr.find("Error [E1315]:") ?? panic("lease failure diagnostic")
+    diagnostic := stderr[offset..] // #4303
+    assert_jetos_stderr_snapshot_trimmed("executable_lease_service_key_invalid", diagnostic)
+}
+
+// Rust: tests/jetpack_engine.rs:3791
+#Test("executable_lease_process_tree_recovery_uses_store_production_path") {
+    if sys.target.selected_family() == "unix" {
+        root :: Scratch.new("lease-process-tree-root")
+        fixtures :: Scratch.new("lease-process-tree-fixtures")
+        out_dir :: Scratch.new("lease-process-tree-output")
+        ready :: root.path.join("descendant-ready")
+        release :: root.path.join("descendant-release")
+        write_native_jetpack_fixture(&fixtures.path, &root.path, &out_dir.path)
+        run :: jetpack().args(["use", "omp@releases#1.0.0", "-y", "--no-color", "--offline", "--fixtures"]).arg(&fixtures.path).args(["--", "/bin/sh", "-c", "printf ready > \"$LEASE_READY\"; while [ ! -f \"$LEASE_RELEASE\" ]; do /bin/sleep 0.01; done >/dev/null 2>&1 </dev/null &"]).env("JETPACK_ROOT", &root.path).env("JETPACK_FIXTURES", &fixtures.path).env("LEASE_READY", &ready).env("LEASE_RELEASE", &release).output() ?? panic("use")
+        assert(run.status.success(), "stderr: {String.from_utf8_lossy(&run.stderr)}")
+        assert(ready.exists(), "descendant did not start before parent exit")
+        leases :: root.path.join("leases")
+        lease :: ((fs.read_dir(&leases) ?? panic("leases")).next() ?? panic("lease entry")).unwrap().path()
+        recover_while_child_runs :: jetpack().args(["hangar", "recover", "--no-color"]).env("JETPACK_ROOT", &root.path).output() ?? panic("recover")
+        assert(recover_while_child_runs.status.success(), "stderr: {String.from_utf8_lossy(&recover_while_child_runs.stderr)}")
+        assert(lease.exists(), "live descendant lease was reclaimed early")
+        fs.write(&release, "release") ?? panic("release")
+        deadline :: Instant.now() + Duration.from_secs(5)
+        while lease.exists() {
+            assert(Instant.now() < deadline, "idle descendant lease was not reclaimed")
+            recover_after_child_exit :: jetpack().args(["hangar", "recover", "--no-color"]).env("JETPACK_ROOT", &root.path).output() ?? panic("recover")
+            assert(recover_after_child_exit.status.success(), "stderr: {String.from_utf8_lossy(&recover_after_child_exit.stderr)}")
+            thread.sleep(Duration.from_millis(10))
+        }
+    }
+}
+
+// Rust: tests/jetpack_engine.rs:3869
+#Test("bad_ref_is_friendly_and_exits_2") {
+    out :: jetpack().args(["run", "fastfetch", "--no-color"]).output() ?? panic("run")
+    assert_eq(out.status.code(), Val(2))
+    stderr :: String.from_utf8_lossy(&out.stderr)
+    assert(stderr.contains("missing a source"), "stderr: {stderr}")
+    assert(stderr.contains("package@source#version"), "stderr: {stderr}")
+}
+
+// Rust: tests/jetpack_engine.rs:3884
+#Test("provider_first_ref_is_coded_and_snapshot_pinned") {
+    root :: Scratch.new("ref-provider-first")
+    out :: jetpack().args(["run", "github@owner/repo", "--no-color"]).env("JETPACK_ROOT", &root.path).output() ?? panic("run")
+    assert_eq(out.status.code(), Val(2))
+    assert_jetos_stderr_snapshot_trimmed("ref_provider_first", &String.from_utf8_lossy(&out.stderr))
+}
+
+// Rust: tests/jetpack_engine.rs:3899
+#Test("retired_nixpkgs_source_is_coded_and_snapshot_pinned") {
+    root :: Scratch.new("ref-nixpkgs-source-retired")
+    out :: jetpack().args(["run", "ripgrep@nixpkgs", "--no-color"]).env("JETPACK_ROOT", &root.path).output() ?? panic("run")
+    assert_eq(out.status.code(), Val(2))
+    assert_jetos_stderr_snapshot_trimmed("ref_nixpkgs_source_retired", &String.from_utf8_lossy(&out.stderr))
+}
+
+// Rust: tests/jetpack_engine.rs:3914
+#Test("declared_source_package_named_like_provider_resolves_as_package") {
+    src :: "\nmodule env.dev {\n    sources: { default: NixOS/nixpkgs/nixos-unstable@github }\n    packages: [default.[cargo]]\n}\n"
+    plan :: evaluate_env(src, OSPath.from(env("CARGO_MANIFEST_DIR"))) ?? panic("evaluate")
+    assert_eq(plan.package_refs, ["cargo@default"])
+    spec :: RefSpec.classify_in(&plan.package_refs[0], &plan.table) ?? panic("classify")
+    assert_eq(spec.package, "cargo")
+    assert_eq(spec.source, RefSpec.Source.Named("default"))
+}
+
+// Rust: tests/jetpack_engine.rs:3934
+#Test("retired_path_provider_is_coded_and_snapshot_pinned") {
+    root :: Scratch.new("ref-path-provider")
+    out :: jetpack().args(["run", "../vendor/tool@path", "--no-color"]).env("JETPACK_ROOT", &root.path).output() ?? panic("run")
+    assert_eq(out.status.code(), Val(2))
+    assert_jetos_stderr_snapshot_trimmed("ref_path_provider_retired", &String.from_utf8_lossy(&out.stderr))
+}
+
+// Rust: tests/jetpack_engine.rs:3949
+#Test("unknown_source_is_friendly") {
+    out :: jetpack().args(["build", "wget@brew", "--no-color"]).output() ?? panic("build")
+    assert_eq(out.status.code(), Val(2))
+    stderr :: String.from_utf8_lossy(&out.stderr)
+    assert(stderr.contains("not a known source"), "stderr: {stderr}")
+}
+
+// Rust: tests/jetpack_engine.rs:3960
+#Test("add_then_remove_edits_env_file") {
+    (_base, proj, root) :: core_hello_project("add-remove")
+    env_path :: proj.join("env.jet")
+    fs.write(&env_path, (fs.read_to_string(&env_path) ?? panic("env")).replace("\"hello@mine\"", "")) ?? panic("clear package")
+    add :: jetpack().args(["add", "hello@mine", "--no-color"]).current_dir(&proj).env("JETPACK_ROOT", &root).output() ?? panic("add")
+    assert(add.status.success(), "stderr: {String.from_utf8_lossy(&add.stderr)}")
+    assert(String.from_utf8_lossy(&add.stderr).contains("✓ hello     0.1.0"), "add must print its verified resolved version: {String.from_utf8_lossy(&add.stderr)}")
+    added_env :: fs.read_to_string(proj.join("env.jet")) ?? panic("env")
+    assert(added_env.contains("hello"), "env.jet: {added_env}")
+    assert(added_env.contains("pkg.packages"), "env.jet: {added_env}")
+    remove :: jetpack().args(["remove", "hello@mine", "--no-color", "--yes"]).current_dir(&proj).env("JETPACK_ROOT", &root).output() ?? panic("remove")
+    assert(remove.status.success())
+    removed_env :: fs.read_to_string(proj.join("env.jet")) ?? panic("env")
+    assert(!removed_env.contains("\"hello@mine\""), "env.jet still has hello: {removed_env}")
+}
+
+// Rust: tests/jetpack_engine.rs:4005
+#Test("remove_without_yes_prints_plan_and_keeps_env_file_in_non_tty") {
+    (_base, proj, root) :: core_hello_project("remove-plan")
+    env_path :: proj.join("env.jet")
+    fs.write(&env_path, (fs.read_to_string(&env_path) ?? panic("env")).replace("\"hello@mine\"", "")) ?? panic("clear package")
+    add :: jetpack().args(["add", "hello@mine", "--no-color"]).current_dir(&proj).env("JETPACK_ROOT", &root).output() ?? panic("add")
+    assert(add.status.success())
+    remove :: jetpack().args(["remove", "hello@mine", "--no-color"]).current_dir(&proj).env("JETPACK_ROOT", &root).output() ?? panic("remove")
+    assert(remove.status.success())
+    unchanged :: fs.read_to_string(proj.join("env.jet")) ?? panic("env")
+    assert(unchanged.contains("\"hello@mine\""), "env.jet was changed: {unchanged}")
+    stderr :: String.from_utf8_lossy(&remove.stderr)
+    assert(stderr.contains("Plan env edit"), "stderr: {stderr}")
+    assert(stderr.contains("- hello"), "stderr: {stderr}")
+    assert(stderr.contains("Download 0 B"), "stderr: {stderr}")
+    assert(stderr.contains("-y or --yes"), "stderr: {stderr}")
+}
+
+// Rust: tests/jetpack_engine.rs:4040
+#Test("remove_with_short_yes_applies_identically_to_long_yes") {
+    // D-FE-CLI1: -y and --yes bypass the mutation gate identically.
+    (_base, proj, root) :: core_hello_project("remove-short-yes")
+    env_path :: proj.join("env.jet")
+    fs.write(&env_path, (fs.read_to_string(&env_path) ?? panic("env")).replace("\"hello@mine\"", "")) ?? panic("clear package")
+    add :: jetpack().args(["add", "hello@mine", "--no-color"]).current_dir(&proj).env("JETPACK_ROOT", &root).output() ?? panic("add")
+    assert(add.status.success(), "stderr: {String.from_utf8_lossy(&add.stderr)}")
+    remove :: jetpack().args(["remove", "hello@mine", "--no-color", "-y"]).current_dir(&proj).env("JETPACK_ROOT", &root).output() ?? panic("remove")
+    assert(remove.status.success(), "stderr: {String.from_utf8_lossy(&remove.stderr)}")
+    removed_env :: fs.read_to_string(proj.join("env.jet")) ?? panic("env")
+    assert(!removed_env.contains("\"hello@mine\""), "short -y must apply the remove plan: {removed_env}")
+    stderr :: String.from_utf8_lossy(&remove.stderr)
+    assert(stderr.contains("Plan env edit"), "stderr: {stderr}")
+    assert(stderr.contains("- hello"), "stderr: {stderr}")
+    assert(stderr.contains("applying plan (--yes)") || stderr.contains("removed"), "short -y must take the yes-bypass path: {stderr}")
+}
+
+// Rust: tests/jetpack_engine.rs:4089
+#Test("run_with_project_env_file_resolves_declared_packages") {
+    proj :: Scratch.new("proj")
+    root :: Scratch.new("root")
+    fixtures :: Scratch.new("fixtures")
+    fastfetch_out :: Scratch.new("fastfetch-out")
+    write_fastfetch_fixture(&fixtures.path, &root.path, &fastfetch_out.path)
+    fs.write(proj.join("env.jet"), "use jetpack as pkg\npub fn shell() -> [JSON] {\n    return [\n        pkg.source(\"nixpkgs\"),\n        pkg.packages([\"fastfetch\"])\n    ]\n}\n") ?? panic("env")
+    output :: jetpack().args(["run", "--no-color", "--offline", "--", "true"]).current_dir(&proj.path).env("JETPACK_ROOT", &root.path).env("JETPACK_FIXTURES", &fixtures.path).output() ?? panic("run")
+    assert(output.status.success(), "stderr: {String.from_utf8_lossy(&output.stderr)}")
+    stderr :: String.from_utf8_lossy(&output.stderr)
+    assert(stderr.contains("fastfetch"), "stderr: {stderr}")
+}
+
+// Rust: tests/jetpack_engine.rs:4118
+#Test("nested_package_commands_use_the_nearest_package_root") {
+    (base, project, root) :: core_hello_project("package-root")
+    package :: project.join("package")
+    nested :: package.join("src")
+    fs.create_dir_all(&nested) ?? panic("nested dir")
+    fs.rename(project.join("env.jet"), package.join("env.jet")) ?? panic("move env")
+    fs.write(package.join("package.jet"), "name: \"demo\"\n") ?? panic("package")
+    output :: jetpack().args(["run", "--no-color", "--offline", "--", "true"]).current_dir(&nested).env("JETPACK_ROOT", &root).env("JETPACK_FIXTURES", example_fixtures(&root)).output() ?? panic("run")
+    assert(output.status.success(), "nearest package root was not used: {String.from_utf8_lossy(&output.stderr)}")
+    assert(String.from_utf8_lossy(&output.stderr).contains("hello"), "package-root env facts were not loaded: {String.from_utf8_lossy(&output.stderr)}")
+    drop(base)
+}
+
+// Rust: tests/jetpack_engine.rs:4147
+#Test("typed_environment_without_packages_or_secrets_requires_trust") {
+    project :: Scratch.new("typed-trust-gate")
+    root :: Scratch.new("typed-trust-gate-root")
+    home :: Scratch.new("typed-trust-gate-home")
+    fs.write(project.join("env.jet"), "module env.dev {\n    services: {\n        hostile: { enable: false, run: [\"sh\", \"-c\", \"touch escaped\"] }\n    }\n}\n") ?? panic("env")
+    output :: jetpack().args(["env", "--no-color", "--offline", "--", "true"]).current_dir(&project.path).env("HOME", &home.path).env("JETPACK_ROOT", &root.path).output() ?? panic("env")
+    assert_eq(output.status.code(), Val(2), "typed environment must not run before trust: {String.from_utf8_lossy(&output.stderr)}")
+    stderr :: String.from_utf8_lossy(&output.stderr)
+    assert(stderr.contains("E1255"), "missing trust diagnostic: {stderr}")
+    assert(!project.join("escaped").exists(), "untrusted typed environment executed a hostile command")
+    run_output :: jetpack().args(["run", "--no-color", "--offline", "--", "true"]).current_dir(&project.path).env("HOME", &home.path).env("JETPACK_ROOT", &root.path).output() ?? panic("run")
+    assert_eq(run_output.status.code(), Val(2), "jet run must not realize an untrusted typed environment: {String.from_utf8_lossy(&run_output.stderr)}")
+    run_stderr :: String.from_utf8_lossy(&run_output.stderr)
+    assert(run_stderr.contains("E1255"), "jet run skipped the typed-environment trust gate: {run_stderr}")
+    assert(!project.join("escaped").exists(), "jet run executed a hostile typed environment before trust")
+}
+
+// Rust: tests/jetpack_engine.rs:4207
+#Test("selected_workspace_run_requires_typed_environment_trust") {
+    project :: Scratch.new("selected-typed-trust-gate")
+    root :: Scratch.new("selected-typed-trust-gate-root")
+    home :: Scratch.new("selected-typed-trust-gate-home")
+    member :: project.join("packages/hello")
+    fs.create_dir_all(&member) ?? panic("member dir")
+    fs.write(project.join("workspace.jet"), "module workspace { members: [\"./packages/hello\"] }\n") ?? panic("workspace")
+    fs.write(member.join("package.jet"), "name: \"hello\"\nversion: \"0.1.0\"\n") ?? panic("package")
+    fs.write(member.join("hello.jet"), "module hello { }\n") ?? panic("hello")
+    fs.write(project.join("env.jet"), "module env.dev {\n    services: {\n        hostile: { enable: false, run: [\"sh\", \"-c\", \"touch escaped\"] }\n    }\n}\n") ?? panic("env")
+    output :: jetpack().args(["run", "-p", "hello", "--no-color", "--offline", "--", "true"]).current_dir(&project.path).env("HOME", &home.path).env("JETPACK_ROOT", &root.path).output() ?? panic("run")
+    assert_eq(output.status.code(), Val(2), "selected workspace run must not compose before trust: {String.from_utf8_lossy(&output.stderr)}")
+    stderr :: String.from_utf8_lossy(&output.stderr)
+    assert(stderr.contains("E1255"), "missing trust diagnostic: {stderr}")
+    assert(!project.join("escaped").exists(), "selected workspace run executed an untrusted typed environment")
+}
+
+// Rust: tests/jetpack_engine.rs:4265
+#Test("typed_env_copy_adapter_realizes_local_source") {
+    proj :: Scratch.new("proj")
+    root :: Scratch.new("root")
+    vendor :: proj.join("vendor/tool")
+    fs.create_dir_all(vendor.join("share")) ?? panic("share dir")
+    fs.write(vendor.join("share/readme.txt"), "adapted\n") ?? panic("readme")
+    fs.write(proj.join("env.jet"), "\nmodule dev {\n    env.dev: Env{\n        packages: [\n            Pkg.adapt(\n                name: \"tool\",\n                source: \"./vendor/tool\",\n                recipe: Recipe.copy()\n            )\n        ],\n    }\n}\n") ?? panic("env")
+    output :: jetpack().args(["build", "--no-color"]).current_dir(&proj.path).env("JETPACK_ROOT", &root.path).output() ?? panic("build")
+    assert(output.status.success(), "stderr: {String.from_utf8_lossy(&output.stderr)}")
+    roots :: Store.Roots{root: root.path.clone(), dev_mode: false}
+    entries :: Store.list_checked(&roots) ?? panic("portfolio Hangar listing failed under {roots.hangar_dir().display()}")
+    assert(entries.iter().any(entry -> fs.read_to_string(OSPath.from(entry.out).join("share/readme.txt")).unwrap_or_default() == "adapted\n"), "adapter output missing copied file: {entries:?}")
+    cached :: jetpack().args(["build", "--no-color"]).current_dir(&proj.path).env("JETPACK_ROOT", &root.path).output() ?? panic("cached build")
+    assert(cached.status.success(), "stderr: {String.from_utf8_lossy(&cached.stderr)}")
+    assert(String.from_utf8_lossy(&cached.stderr).contains("1 cached"), "stderr: {String.from_utf8_lossy(&cached.stderr)}")
+}
+
+// Rust: tests/jetpack_engine.rs:4335
+#Test("typed_env_build_recipe_realizes_local_source") {
+    proj :: Scratch.new("build-recipe-project")
+    root :: Scratch.new("build-recipe-root")
+    home :: Scratch.new("build-recipe-home")
+    vendor :: proj.join("vendor/tool")
+    fs.create_dir_all(&vendor) ?? panic("vendor dir")
+    fs.write(vendor.join("payload.txt"), "built recipe\n") ?? panic("payload")
+    fs.write(proj.join("env.jet"), "\nmodule dev {\n    env.dev: Env{\n        packages: [\n            Pkg.adapt(\n                name: \"tool\",\n                source: \"./vendor/tool\",\n                recipe: Recipe.build(steps: [\n                    .install_tree(src: \".\", dest: \"share\"),\n                ])\n            )\n        ],\n    }\n}\n") ?? panic("env")
+    output :: jetpack().args(["build", "--no-color", "--trust"]).current_dir(&proj.path).env("HOME", &home.path).env("JETPACK_ROOT", &root.path).output() ?? panic("build")
+    assert(output.status.success(), "stderr: {String.from_utf8_lossy(&output.stderr)}")
+    roots :: Store.Roots{root: root.path.clone(), dev_mode: false}
+    entries :: Store.list(&roots)
+    assert(entries.iter().any(entry -> fs.read_to_string(OSPath.from(entry.out).join("share/payload.txt")).unwrap_or_default() == "built recipe\n"), "build recipe output missing copied file: {entries:?}")
+}
+
+// Rust: tests/jetpack_engine.rs:4388
+#Test("typed_env_build_recipe_uses_declared_tool_dependencies") {
+    proj :: Scratch.new("build-recipe-dependency-project")
+    root :: Scratch.new("build-recipe-dependency-root")
+    fixtures :: Scratch.new("build-recipe-dependency-fixtures")
+    staging :: Scratch.new("build-recipe-dependency-staging")
+    write_runnable_fixture(&fixtures.path, &root.path, &staging.path)
+    fs.create_dir_all(proj.join("vendor/tool")) ?? panic("vendor dir")
+    fs.write(proj.join("env.jet"), "\nmodule dev {\n    env.dev: Env{\n        packages: [\n            Pkg.adapt(\n                name: \"tool\",\n                source: \"./vendor/tool\",\n                deps: [default.greet],\n                recipe: Recipe.build(steps: [\n                    .exec(tool: \"greet\", args: []),\n                ])\n            )\n        ],\n    }\n}\n") ?? panic("env")
+    output :: jetpack().args(["build", "--no-color", "--offline", "--trust"]).current_dir(&proj.path).env("JETPACK_ROOT", &root.path).env("JETPACK_FIXTURES", &fixtures.path).output() ?? panic("build")
+    assert(output.status.success(), "stderr: {String.from_utf8_lossy(&output.stderr)}")
+    roots :: Store.Roots{root: root.path.clone(), dev_mode: false}
+    assert(Store.list(&roots).iter().any(entry -> entry.reference == "adapt:tool:./vendor/tool"), "adapter with a declared executable dependency was not realized: {Store.list(&roots):?}")
+}
+
+// Rust: tests/jetpack_engine.rs:4441
+#Test("typed_env_build_hook_approval_binds_declared_dependency_refs") {
+    proj :: Scratch.new("build-hook-dependency-identity-project")
+    root :: Scratch.new("build-hook-dependency-identity-root")
+    fixtures :: Scratch.new("build-hook-dependency-identity-fixtures")
+    home :: Scratch.new("build-hook-dependency-identity-home")
+    staging :: Scratch.new("build-hook-dependency-identity-staging")
+    write_runnable_fixture(&fixtures.path, &root.path, &staging.path)
+    // Same executable, different declared ref: trust/cache identity must include deps.
+    fs.copy(fixtures.join("nixpkgs-greet.json"), fixtures.join("nixpkgs-hello.json")) ?? panic("copy fixture")
+    fs.create_dir_all(proj.join("vendor/tool")) ?? panic("vendor dir")
+    fs.write(proj.join("env.jet"), "\nmodule dev {\n    env.dev: Env{\n        packages: [\n            Pkg.adapt(\n                name: \"tool\",\n                source: \"./vendor/tool\",\n                deps: [default.greet],\n                recipe: Recipe.build(steps: [\n                    .exec(tool: \"greet\", args: []),\n                ])\n            )\n        ],\n    }\n}\n") ?? panic("env")
+    first :: jetpack().args(["build", "--no-color", "--offline", "--trust"]).current_dir(&proj.path).env("HOME", &home.path).env("JETPACK_ROOT", &root.path).env("JETPACK_FIXTURES", &fixtures.path).output() ?? panic("build")
+    assert(first.status.success(), "initial build failed: {String.from_utf8_lossy(&first.stderr)}")
+    roots :: Store.Roots{root: root.path.clone(), dev_mode: false}
+    entry :: Store.list(&roots).into_iter().find(entry -> entry.reference == "adapt:tool:./vendor/tool") ?? panic("initial adapter should be recorded")
+    decoded :: Store.ProducerRecord.decode(&entry.producer_record) ?? panic("adapter producer record should decode")
+    old_identity :: (decoded.facts.get("build.identity") ?? panic("adapter producer should record its build identity")).clone()
+    selector :: "build:{old_identity}"
+    grant :: jetpack().args(["trust", "grant", &selector, "--scope", "user"]).env("HOME", &home.path).output() ?? panic("grant")
+    assert(grant.status.success(), "build identity trust setup failed: {String.from_utf8_lossy(&grant.stderr)}")
+    changed :: (fs.read_to_string(proj.join("env.jet")) ?? panic("env")).replace("default.greet", "default.hello")
+    fs.write(proj.join("env.jet"), changed) ?? panic("change deps")
+    second :: jetpack().args(["build", "--no-color", "--offline"]).current_dir(&proj.path).env("HOME", &home.path).env("JETPACK_ROOT", &root.path).env("JETPACK_FIXTURES", &fixtures.path).output() ?? panic("build changed deps")
+    stderr :: String.from_utf8_lossy(&second.stderr)
+    assert_eq(second.status.code(), Val(1), "stderr: {stderr}")
+    assert(stderr.contains("E1255"), "changed dependency was accepted: {stderr}")
+    assert(stderr.contains("build hook"), "wrong trust failure: {stderr}")
+}
+
+// Rust: tests/jetpack_engine.rs:4543
+#Test("typed_env_prebuilt_adapter_runs_from_path") {
+    proj :: Scratch.new("proj")
+    root :: Scratch.new("root")
+    vendor :: proj.join("vendor/weirdctl")
+    fs.create_dir_all(&vendor) ?? panic("vendor dir")
+    bin :: vendor.join("weirdctl")
+    fs.write(&bin, "#!/bin/sh\necho weird ok\n") ?? panic("binary")
+    if sys.target.selected_family() == "unix" {
+        fs.set_permissions(&bin, fs.Permissions.from_mode(0o755)) ?? panic("permissions")
+    }
+    fs.write(proj.join("env.jet"), "\nmodule dev {\n    env.dev: Env{\n        packages: [\n            Pkg.adapt(\n                name: \"weirdctl\",\n                source: \"./vendor/weirdctl\",\n                recipe: Recipe.prebuilt(bin: \"weirdctl\", as: \"weirdctl\")\n            )\n        ],\n    }\n}\n") ?? panic("env")
+    output :: jetpack().args(["run", "--no-color", "--", "weirdctl"]).current_dir(&proj.path).env("JETPACK_ROOT", &root.path).env("PATH", "/usr/bin:/bin").output() ?? panic("run")
+    assert(output.status.success(), "stderr: {String.from_utf8_lossy(&output.stderr)}")
+    stdout := String.from_utf8_lossy(&output.stdout).trim() // #4303
+    assert_eq(stdout, "weird ok")
+}
+
+// Rust: tests/jetpack_engine.rs:4588
+#Test("no_nix_unindexed_nixpkgs_package_reports_e1349") {
+    project :: Scratch.new("unindexed-nixpkgs-project")
+    root :: Scratch.new("root")
+    server :: nix_index_cache_server.NixIndexCacheServer.start_unindexed(&project.path)
+    server.install(&root.path)
+    fs.create_dir_all(project.join(".jet")) ?? panic("jet dir")
+    fs.write(project.join(".jet/lock"), "version = 1\n\n[[source_channel]]\nname = \"nixpkgs\"\nchannel = \"nixpkgs-unstable\"\nexact = \"github:NixOS/nixpkgs#{nix_index_cache_server.REVISION}\"\n\n[root]\ndependencies = []\n") ?? panic("lock")
+    output :: jetpack().args(["build", "postgres@nixpkgs", "--no-color"]).current_dir(&project.path).env("JETPACK_ROOT", &root.path).env("PATH", "").output() ?? panic("build")
+    assert_eq(output.status.code(), Val(2))
+    stderr :: String.from_utf8_lossy(&output.stderr)
+    assert(stderr.contains("E1349"), "stderr: {stderr}")
+    assert(stderr.contains("postgres"), "stderr: {stderr}")
+    assert(stderr.contains("not covered"), "stderr: {stderr}")
+    assert(!stderr.contains("E1272"), "unindexed signed record must not use the retired bridge diagnostic: {stderr}")
+    assert(!stderr.contains("E1256"), "stderr: {stderr}")
+    assert(!stderr.contains("couldn't run `nix`"), "stderr: {stderr}")
+}
+
+// Rust: tests/jetpack_engine.rs:4623
+#Test("local_unofficial_nixpkgs_catalog_is_explicit_and_auditable") {
+    project :: Scratch.new("local-unofficial-nixpkgs-project")
+    root :: Scratch.new("local-unofficial-nixpkgs-root")
+    catalog :: Scratch.new("local-unofficial-nixpkgs-catalog")
+    server :: nix_index_cache_server.NixIndexCacheServer.start_ripgrep(&project.path)
+    server.install(&root.path)
+    server.install_local_catalog(&catalog.path)
+    fs.write(project.join("env.jet"), "module dev {{\n    sources: {{ default: NixOS/nixpkgs/{nix_index_cache_server.REVISION}@github }}\n    env.dev: Env{{ packages: [default.ripgrep] }}\n}}\n") ?? panic("env")
+    fs.create_dir_all(project.join(".jet")) ?? panic("jet dir")
+    fs.write(project.join(".jet/lock"), "version = 1\n\n[[source_channel]]\nname = \"default\"\nchannel = \"{nix_index_cache_server.CHANNEL}\"\nexact = \"github:NixOS/nixpkgs#{nix_index_cache_server.REVISION}\"\n\n[root]\ndependencies = []\n") ?? panic("lock")
+    server.corrupt_index_signature()
+    official :: jetpack().args(["env", "--prep", "--no-color", "--trust"]).current_dir(&project.path).env("JETPACK_ROOT", &root.path).env("PATH", "").output() ?? panic("official env")
+    official_text :: "{String.from_utf8_lossy(&official.stdout)}{String.from_utf8_lossy(&official.stderr)}"
+    assert_eq(official.status.code(), Val(2), "official output: {official_text}")
+    assert(official_text.contains("E1348"), "official output: {official_text}")
+    assert(!official_text.contains("local-unofficial"), "invalid official signature must not downgrade: {official_text}")
+    local :: jetpack().args(["env", "--prep", "--no-color", "--trust", "--local-nix-catalog", catalog.path.to_str().unwrap()]).current_dir(&project.path).env("JETPACK_ROOT", &root.path).env("PATH", "").output() ?? panic("local env")
+    local_text :: "{String.from_utf8_lossy(&local.stdout)}{String.from_utf8_lossy(&local.stderr)}"
+    assert(local.status.success(), "local output: {local_text}")
+    assert(local_text.contains("local-unofficial"), "local output: {local_text}")
+    assert(local_text.contains("unverified"), "local output: {local_text}")
+    assert(local_text.contains("name-to-store-path mapping is unverified"), "local output: {local_text}")
+    roots :: Store.Roots.at(root.path.clone())
+    entry :: (Store.list_checked(&roots) ?? panic("list")).into_iter().find(entry -> entry.reference == "ripgrep@nixpkgs") ?? panic("local catalog package entry")
+    lock :: fs.read_to_string(project.join(".jet/lock")) ?? panic("lock")
+    assert(lock.contains("catalog-tier = \"local-unofficial\""), "lock: {lock}")
+    assert(lock.contains("catalog-trust = \"unverified\""), "lock: {lock}")
+    receipt :: fs.read_to_string(root.join("hangar/receipts").join(&entry.receipt)) ?? panic("receipt")
+    assert(receipt.contains("636174616c6f672d7472757374"), "receipt lacks catalog-trust input: {receipt}")
+    assert(receipt.contains("756e7665726966696564"), "receipt lacks unverified value: {receipt}")
+    audit :: jetpack().args(["audit", "--no-color"]).current_dir(&project.path).env("JETPACK_ROOT", &root.path).output() ?? panic("audit")
+    audit_text :: "{String.from_utf8_lossy(&audit.stdout)}{String.from_utf8_lossy(&audit.stderr)}"
+    assert(audit.status.success(), "audit output: {audit_text}")
+    assert(audit_text.contains(&entry.id), "audit output: {audit_text}")
+    assert(audit_text.contains("signature-chain: none"), "audit output: {audit_text}")
+    assert(audit_text.contains("objects without a Nix index signature chain"), "audit output: {audit_text}")
+}
+
+// Rust: tests/jetpack_engine.rs:4759
+#Test("env_wizard_detects_remembers_catalog_and_shows_progress") {
+    if sys.target.selected_family() == "unix" {
+        project :: Scratch.new("env-catalog-wizard-project")
+        root :: Scratch.new("env-catalog-wizard-root")
+        catalog :: project.join("target-nixfeed/feed")
+        write_native_catalog(&catalog, &project.path, &[NativeCatalogRecipe{
+            name: "native-tool", version: "1.0.0", bin: "native-tool", artifact_name: "native-tool",
+            contents: "#!/bin/sh\necho native catalog\n".as_bytes().to_vec()
+        }])
+        fs.write(project.join("env.jet"), "module env.dev { packages: [jetpack.native-tool] }\n") ?? panic("env")
+        fs.create_dir_all(project.join(".jet")) ?? panic("jet dir")
+        fs.write(project.join(".jet/lock"), "version = 1\n\n[root]\ndependencies = []\n") ?? panic("lock")
+        first :: jetpack().args(["env", "--prep", "--no-color", "--trust", "--yes"]).current_dir(&project.path).env("JETPACK_ROOT", &root.path).env("PATH", "").output() ?? panic("first env")
+        first_text :: "{String.from_utf8_lossy(&first.stdout)}{String.from_utf8_lossy(&first.stderr)}"
+        assert(first.status.success(), "first env output: {first_text}")
+        assert(first_text.contains("package catalog setup"), "first env output: {first_text}")
+        assert(first_text.contains("catalog saved for this project"), "first env output: {first_text}")
+        assert(first_text.contains("Resolving env.dev package plan"), "first env output: {first_text}")
+        second :: jetpack().args(["env", "--prep", "--no-color", "--trust", "--yes"]).current_dir(&project.path).env("JETPACK_ROOT", &root.path).env("PATH", "").output() ?? panic("second env")
+        second_text :: "{String.from_utf8_lossy(&second.stdout)}{String.from_utf8_lossy(&second.stderr)}"
+        assert(second.status.success(), "remembered env output: {second_text}")
+        assert(second_text.contains("remembered for this project"), "remembered env output: {second_text}")
+    }
+}
+
+// Rust: tests/jetpack_engine.rs:4836
+#Test("local_catalog_mixes_native_recipe_and_nix_mapping") {
+    project :: Scratch.new("local-catalog-native-project")
+    root :: Scratch.new("local-catalog-native-root")
+    catalog :: Scratch.new("local-catalog-native-catalog")
+    server :: nix_index_cache_server.NixIndexCacheServer.start_ripgrep(&project.path)
+    server.install(&root.path)
+    server.install_local_catalog(&catalog.path)
+    artifact :: project.join("native-tool")
+    fs.write(&artifact, "#!/bin/sh\necho native catalog\n".as_bytes()) ?? panic("artifact")
+    digest :: SHA256.sha256_file_hex(&artifact) ?? panic("digest")
+    url :: "file://{artifact.display()}"
+    recipes :: "{{\"schema\":1,\"recipes\":[{{\"name\":\"native-tool\",\"version\":\"1.0.0\",\"kind\":\"prebuilt\",\"url\":\"{json_escape(&url)}\",\"sha256\":\"{digest}\",\"bin\":\"native-tool\"}}]}}"
+    fs.write(catalog.join("recipes-v1.json"), recipes) ?? panic("recipes")
+    fs.write(project.join("env.jet"), "module dev {{\n    sources: {{ default: NixOS/nixpkgs/{nix_index_cache_server.REVISION}@github }}\n    env.dev: Env{{ packages: [native-tool, default.ripgrep] }}\n}}\n") ?? panic("env")
+    fs.create_dir_all(project.join(".jet")) ?? panic("jet dir")
+    fs.write(project.join(".jet/lock"), "version = 1\n\n[[source_channel]]\nname = \"default\"\nchannel = \"{nix_index_cache_server.CHANNEL}\"\nexact = \"github:NixOS/nixpkgs#{nix_index_cache_server.REVISION}\"\n\n[root]\ndependencies = []\n") ?? panic("lock")
+    output :: jetpack().args(["build", "--no-color", "--trust", "--local-nix-catalog", catalog.path.to_str().unwrap()]).current_dir(&project.path).env("JETPACK_ROOT", &root.path).env("PATH", "/usr/bin:/bin").output() ?? panic("build")
+    text :: "{String.from_utf8_lossy(&output.stdout)}{String.from_utf8_lossy(&output.stderr)}"
+    assert(output.status.success(), "build output: {text}")
+    roots :: Store.Roots.at(root.path.clone())
+    entries :: Store.list_checked(&roots) ?? panic("list")
+    native :: entries.iter().find(entry -> entry.name == "native-tool") ?? panic("native recipe entry")
+    native_producer :: Store.ProducerRecord.decode(&native.producer_record) ?? panic("native producer")
+    assert_eq(native_producer.provider, "jetpackage")
+    assert_eq(native_producer.facts.get("source.kind").map(value -> value.as_str()), Val("local-unofficial-catalog"))
+    assert_eq(native_producer.facts.get("nix.index.tier").map(value -> value.as_str()), Val("local-unofficial"))
+    assert_eq(native_producer.facts.get("nix.index.signature-chain").map(value -> value.as_str()), Val("none"))
+    assert(!native_producer.facts.contains_key("nix.drv_path"))
+    assert(OSPath.from(native.out).join("bin/native-tool").is_file())
+    nix :: entries.iter().find(entry -> entry.name == "ripgrep") ?? panic("nix mapping entry")
+    nix_producer :: Store.ProducerRecord.decode(&nix.producer_record) ?? panic("nix producer")
+    assert_eq(nix_producer.provider, "nix")
+    assert_eq(nix_producer.facts.get("nix.index.tier").map(value -> value.as_str()), Val("local-unofficial"))
+    lock :: fs.read_to_string(project.join(".jet/lock")) ?? panic("lock")
+    assert(lock.contains("catalog-tier = \"local-unofficial\""), "lock: {lock}")
+    assert(lock.contains("catalog-trust = \"unverified\""), "lock: {lock}")
+    receipt :: fs.read_to_string(root.join("hangar/receipts").join(&native.receipt)) ?? panic("receipt")
+    assert(receipt.contains("756e7665726966696564"), "receipt: {receipt}")
+    audit :: jetpack().args(["audit", "--no-color"]).current_dir(&project.path).env("JETPACK_ROOT", &root.path).output() ?? panic("audit")
+    audit_text :: "{String.from_utf8_lossy(&audit.stdout)}{String.from_utf8_lossy(&audit.stderr)}"
+    assert(audit.status.success(), "audit output: {audit_text}")
+    assert(audit_text.contains(&native.id), "audit output: {audit_text}")
+    assert(audit_text.contains("signature-chain: none"), "audit output: {audit_text}")
+}
+
+// Rust: tests/jetpack_engine.rs:4971
+#Test("indexed_nixpkgs_closure_reuses_offline_and_repairs_one_object") {
+    TEST_NAME :: "indexed_nixpkgs_closure_reuses_offline_and_repairs_one_object"
+    PHASE_ENV :: "JETPACK_INDEXED_NIX_PHASE"
+    PROJECT_ENV :: "JETPACK_INDEXED_NIX_PROJECT"
+    ROOT_ENV :: "JETPACK_INDEXED_NIX_ROOT"
+    (project_dir, root_dir, _owned_project, _owned_root, server, child) :: match (env.var_os(PROJECT_ENV).map(path -> OSPath.from(path)), env.var_os(ROOT_ENV).map(path -> OSPath.from(path))) {
+        (Val(project_dir), Val(root_dir)) -> (project_dir, root_dir, nil, nil, nil, true)
+        (nil, nil) -> {
+            project :: Scratch.new("indexed-nixpkgs-project")
+            root :: Scratch.new("root")
+            project_dir :: project.path.clone()
+            root_dir :: root.path.clone()
+            server :: nix_index_cache_server.NixIndexCacheServer.start_ripgrep(&project_dir)
+            server.install(&root_dir)
+            (project_dir, root_dir, Val(project), Val(root), Val(server), false)
+        }
+        _ -> panic("indexed Nix project/root environment must be configured together")
+    }
+    if !child {
+        // Channel agrees with the signed fixture index key.
+        fs.write(project_dir.join("env.jet"), "module dev {{\n    sources: {{ default: NixOS/nixpkgs/{nix_index_cache_server.CHANNEL}@github }}\n    env.dev: Env{{ packages: [default.ripgrep] }}\n}}\n") ?? panic("env")
+        fs.create_dir_all(project_dir.join(".jet")) ?? panic("jet dir")
+        fs.write(project_dir.join(".jet/lock"), "version = 1\n\n[[source_channel]]\nname = \"default\"\nchannel = \"{nix_index_cache_server.CHANNEL}\"\nexact = \"github:NixOS/nixpkgs#{nix_index_cache_server.REVISION}\"\n\n[root]\ndependencies = []\n") ?? panic("lock")
+    }
+    run :: |offline: Bool| -> {
+        command := jetpack()
+        command.args(["env", "--no-color", "--trust"]).current_dir(&project_dir).env("JETPACK_ROOT", &root_dir).env("PATH", "/usr/bin").env("JETPACK_DEBUG_NIX_CACHE", "1").env_remove("JETPACK_FIXTURES")
+        if offline -> command.arg("--offline")
+        command.args(["--", "rg", "--version"])
+        command.output() ?? panic("run")
+    }
+    if child {
+        phase :: env.var(PHASE_ENV) ?? panic("indexed Nix child phase")
+        network :: match phase.as_str() {
+            "online-initial" | "online-repair" -> no_nix_namespace.NetworkMode.Enabled
+            "offline-reuse" | "offline-missing" -> no_nix_namespace.NetworkMode.Disabled
+            other -> panic("unknown indexed Nix test phase `{other}`")
+        }
+        no_nix_namespace.run_in_no_nix_namespace(TEST_NAME, network, || -> {
+            output :: run(phase.starts_with("offline-"))
+            stdout :: String.from_utf8_lossy(&output.stdout)
+            stderr :: String.from_utf8_lossy(&output.stderr)
+            match phase.as_str() {
+                "online-initial" | "offline-reuse" | "online-repair" -> {
+                    assert(output.status.success(), "stdout: {stdout}\nstderr: {stderr}")
+                    assert(stdout.contains("ripgrep 15.2.0"), "stdout: {stdout}")
+                }
+                "offline-missing" -> {
+                    assert_eq(output.status.code(), Val(2), "stdout: {stdout}\nstderr: {stderr}")
+                    assert(stderr.contains("E1350"), "stderr: {stderr}")
+                    assert(stderr.contains(nix_index_cache_server.RUNTIME_PATH), "offline error must name missing reference: {stderr}")
+                }
+                _ -> panic("unreachable phase")
+            }
+        })
+        return
+    }
+    env.set_var(PROJECT_ENV, &project_dir)
+    env.set_var(ROOT_ENV, &root_dir)
+    for (phase, network) in [("online-initial", no_nix_namespace.NetworkMode.Enabled), ("offline-reuse", no_nix_namespace.NetworkMode.Disabled)] {
+        env.set_var(PHASE_ENV, phase)
+        // Parent callback intentionally empty: the namespace harness re-execs this test.
+        no_nix_namespace.run_in_no_nix_namespace(TEST_NAME, network, || -> {})
+    }
+    env.remove_var(PHASE_ENV)
+    roots :: Store.Roots.at(root_dir.clone())
+    entries :: Store.list_checked(&roots) ?? panic("list")
+    producer :: |entry: &Store.StoreEntry| -> Store.ProducerRecord.decode(&entry.producer_record).unwrap()
+    package :: entries.iter().find(entry -> producer(entry).facts.contains_key("nix.index.proof.v1")) ?? panic("indexed Nix package entry")
+    package_producer :: producer(package)
+    assert(!package_producer.facts["nix.index.proof.v1"].is_empty())
+    assert(!package_producer.facts["nix.cache.output.out.proof.sha256"].is_empty())
+    assert(!package_producer.facts["nix.cache.closure.receipt.sha256"].is_empty())
+    object_digest :: |store_path: &String| -> {
+        entry :: entries.iter().find(entry -> producer(entry).facts.get("nix.store-path").map(value -> value.as_str()) == Val(store_path)) ?? panic("missing admitted object {store_path}")
+        entry.envelope.output_hash.clone()
+    }
+    root_digest :: object_digest(nix_index_cache_server.ROOT_PATH)
+    library_digest :: object_digest(nix_index_cache_server.LIB_PATH)
+    runtime_digest :: object_digest(nix_index_cache_server.RUNTIME_PATH)
+    graph :: Store.closure_graph(&roots) ?? panic("graph")
+    assert_eq(package.envelope.output_hash, root_digest)
+    assert_eq(package.references, [library_digest.clone()])
+    assert_eq(graph.direct_references(&root_digest), [library_digest.clone()])
+    assert_eq(graph.direct_references(&library_digest), [runtime_digest.clone()])
+    assert(graph.transitive_references(&root_digest).contains(&runtime_digest))
+    missing :: roots.hangar_dir().join("objects").join(&runtime_digest)
+    make_tree_writable(&missing)
+    fs.remove_dir_all(&missing) ?? panic("remove runtime")
+    env.set_var(PHASE_ENV, "offline-missing")
+    no_nix_namespace.run_in_no_nix_namespace(TEST_NAME, no_nix_namespace.NetworkMode.Disabled, || -> {})
+    env.remove_var(PHASE_ENV)
+    env.set_var(PHASE_ENV, "online-repair")
+    no_nix_namespace.run_in_no_nix_namespace(TEST_NAME, no_nix_namespace.NetworkMode.Enabled, || -> {})
+    env.remove_var(PHASE_ENV)
+    env.remove_var(PROJECT_ENV)
+    env.remove_var(ROOT_ENV)
+    owned_server :: server.as_ref() ?? panic("parent owns indexed Nix server")
+    assert_eq(owned_server.object_request_count(nix_index_cache_server.ROOT_PATH), 2, "repair must reuse root object")
+    assert_eq(owned_server.object_request_count(nix_index_cache_server.LIB_PATH), 2, "repair must reuse library object")
+    assert_eq(owned_server.object_request_count(nix_index_cache_server.RUNTIME_PATH), 4, "repair must fetch only missing runtime object")
+}
+
+// Rust: tests/jetpack_engine.rs:5170
+#Test("package_and_environment_paths_have_no_installed_nix_shellout") {
+    sources :: [
+        ("Bridge", include_str("Jetpack/Provider/Source/Bridge/FlakeBridge.jet")),
+        ("Bridge/FlakeImport", include_str("Jetpack/Provider/Source/Bridge/FlakeImport.jet")),
+        ("Provider", include_str("Jetpack/Provider/Source/Core/ProviderDispatch.jet")),
+        ("Provider/Core", include_str("Jetpack/Provider/Source/Core/CorePackageProvider.jet")),
+        ("Provider/Nix", include_str("Jetpack/Provider/Source/Nix/NixRealization.jet")),
+        ("NixIndex", include_str("Jetpack/Nix/Source/Index/IndexClient.jet")),
+        ("NixIndex/Wire", include_str("Jetpack/Nix/Source/Index/IndexWire.jet")),
+        ("Store/NixCache", include_str("Jetpack/Store/Source/NixCache/NixCacheTransport.jet")),
+        ("Store/NixClosure", include_str("Jetpack/Store/Source/NixCache/NixClosureAdmission.jet")),
+        ("Store/NixDownload", include_str("Jetpack/Store/Source/NixCache/NixDownloadPlan.jet")),
+        ("CLI/realize", include_str("Jetpack/CLI/Source/Realize/RealizeRefs.jet")),
+        ("CLI/realize/Project", include_str("Jetpack/CLI/Source/Realize/ProjectPlan.jet")),
+        ("CLI/run_enter_dev", include_str("Jetpack/CLI/Source/Env/UseCommand.jet")),
+        ("CLI/run_enter_dev/Env", include_str("Jetpack/CLI/Source/Env/EnvCommand.jet")),
+        ("CLI/run_enter_dev/Compose", include_str("Jetpack/CLI/Source/Env/ComposeEnv.jet")),
+        ("CLI/profile", include_str("Jetpack/CLI/Source/Profile/ProfileCommand.jet")),
+        ("CLI/profile/Build", include_str("Jetpack/CLI/Source/Profile/ProfileGenerationBuild.jet")),
+        ("CLI/tool", include_str("Jetpack/CLI/Source/Tools/ToolCommand.jet")),
+        ("CLI/tool/Profile", include_str("Jetpack/CLI/Source/Tools/ToolProfile.jet")),
+        ("CLI/trust_env_build", include_str("Jetpack/CLI/Source/Build.jet")),
+        ("CLI/trust_env_build/Trust", include_str("Jetpack/CLI/Source/Commands/TrustCommand.jet")),
+        ("Store", include_str("Jetpack/Store/Source/Hangar/RealizeVerified.jet")),
+        ("Store/Admission", include_str("Jetpack/Store/Source/Hangar/AdmissionTransaction.jet")),
+        ("Store/Listing", include_str("Jetpack/Store/Source/Hangar/HangarListing.jet"))
+    ]
+    for (path, source) in sources {
+        for forbidden in ["Command.new(\"nix\")", "Command.new(\"nix-store\")", "Command.new(\"curl\")", "Command.new(\"wget\")"] {
+            assert(!source.contains(forbidden), "{path} must not shell out to installed Nix via {forbidden}")
+        }
+    }
+}
+
+// Rust: tests/jetpack_engine.rs:5223
+#Test("no_nix_ad_hoc_package_reports_e1272") {
+    proj :: Scratch.new("proj")
+    root :: Scratch.new("root")
+    output :: jetpack().args(["env", "-p", "postgres", "--no-color", "--trust", "--", "true"]).current_dir(&proj.path).env("JETPACK_ROOT", &root.path).env("PATH", "").output() ?? panic("env")
+    assert_eq(output.status.code(), Val(2))
+    stderr :: String.from_utf8_lossy(&output.stderr)
+    assert(stderr.contains("E1272"), "stderr: {stderr}")
+    assert(stderr.contains("postgres@nixpkgs"), "stderr: {stderr}")
+    assert(!stderr.contains("couldn't run `nix`"), "stderr: {stderr}")
+}
+
+// Rust: tests/jetpack_engine.rs:5249
+#Test("no_nix_mixed_env_realizes_core_then_reports_nix_hole") {
+    (base, proj, root) :: core_hello_project("no-nix-mixed")
+    fs.write(proj.join("env.jet"), (fs.read_to_string(proj.join("env.jet")) ?? panic("env")).replace("pkg.packages([\"hello@mine\"])", "pkg.packages([\"hello@mine\", \"postgres@nixpkgs\"])")) ?? panic("mixed env")
+    output :: jetpack().args(["build", "--no-color"]).current_dir(&proj).env("JETPACK_ROOT", &root).env("HOME", base.join("home")).env("PATH", "").output() ?? panic("build")
+    assert_eq(output.status.code(), Val(2))
+    stderr :: String.from_utf8_lossy(&output.stderr)
+    assert(stderr.lines().any(line -> line.contains("hello") && line.split_whitespace().any(word -> word == "built")), "stderr: {stderr}")
+    assert(stderr.contains("E1272"), "stderr: {stderr}")
+    assert(stderr.contains("postgres@nixpkgs"), "stderr: {stderr}")
+    metas :: (fs.read_dir(root.join("hangar")) ?? panic("hangar")).flatten().filter_map(entry -> fs.read_to_string(entry.path().join("meta.json")).ok()).collect().join("\n")
+    assert(metas.contains("\"name\": \"hello\""), "metas: {metas}")
+}
+
+// Rust: tests/jetpack_engine.rs:5288
+#Test("no_nix_json_lists_realized_refs_and_holes") {
+    (base, proj, root) :: core_hello_project("no-nix-json")
+    fs.write(proj.join("env.jet"), (fs.read_to_string(proj.join("env.jet")) ?? panic("env")).replace("pkg.packages([\"hello@mine\"])", "pkg.packages([\"hello@mine\", \"postgres@nixpkgs\"])")) ?? panic("mixed env")
+    output :: jetpack().args(["build", "--no-color", "--json"]).current_dir(&proj).env("JETPACK_ROOT", &root).env("HOME", base.join("home")).env("PATH", "").output() ?? panic("build")
+    assert_eq(output.status.code(), Val(2))
+    stdout :: String.from_utf8_lossy(&output.stdout)
+    assert(stdout.contains("\"code\":\"E1272\""), "stdout: {stdout}")
+    assert(stdout.contains("\"realized\":[\"hello@mine\"]"), "stdout: {stdout}")
+    assert(stdout.contains("\"holes\":[\"postgres@nixpkgs\"]"), "stdout: {stdout}")
+}
+
+// Rust: tests/jetpack_engine.rs:5320
+#Test("typed_env_bad_adapter_is_e1270") {
+    proj :: Scratch.new("proj")
+    root :: Scratch.new("root")
+    fs.write(proj.join("env.jet"), "\nmodule dev {\n    env.dev: Env{\n        packages: [\n            Pkg.adapt(\n                name: \"broken\",\n                source: \"./vendor/broken\",\n                recipe: Recipe.build()\n            )\n        ],\n    }\n}\n") ?? panic("env")
+    output :: jetpack().args(["build", "--no-color"]).current_dir(&proj.path).env("JETPACK_ROOT", &root.path).output() ?? panic("build")
+    assert_eq(output.status.code(), Val(2))
+    stderr :: String.from_utf8_lossy(&output.stderr)
+    assert(stderr.contains("E1270"), "stderr: {stderr}")
+}
+
+// Rust: tests/jetpack_engine.rs:5352
+#Test("channel_update_writes_exact_lock_and_build_uses_it_offline") {
+    proj :: Scratch.new("proj")
+    root :: Scratch.new("root")
+    fixtures :: Scratch.new("fx")
+    fs.write(proj.join("env.jet"), "\nmodule dev {\n    sources: { default: acme/tools@github#latest }\n    env.dev: Env{ packages: [default.greet] }\n}\n") ?? panic("env")
+    write_channel_fixture(&fixtures.path, "github:acme/tools", "latest", "github:acme/tools#v1.2.0")
+    fs.write(fixtures.join("default-greet.json"), "[{\"drvPath\":\"/nix/store/0000000000000000000000000000000b-greet-1.2.0.drv\",\"outputs\":{\"out\":\"/nix/store/0000000000000000000000000000000a-greet-1.2.0\"}}]") ?? panic("fixture")
+    update :: jetpack().args(["update", "--no-color", "--yes", "--fixtures"]).arg(&fixtures.path).current_dir(&proj.path).env("JETPACK_ROOT", &root.path).output() ?? panic("update")
+    assert(update.status.success(), "stderr: {String.from_utf8_lossy(&update.stderr)}")
+    assert(String.from_utf8_lossy(&update.stderr).contains("Download 240 MB"), "stderr: {String.from_utf8_lossy(&update.stderr)}")
+    lock :: fs.read_to_string(proj.join(".jet/lock")) ?? panic("lock")
+    assert(lock.contains("[[source_channel]]"), "lock: {lock}")
+    assert(lock.contains("channel = \"latest\""), "lock: {lock}")
+    assert(lock.contains("exact = \"github:acme/tools#v1.2.0\""), "lock: {lock}")
+    build :: jetpack().args(["build", "--no-color", "--offline"]).current_dir(&proj.path).env("JETPACK_ROOT", &root.path).env("JETPACK_FIXTURES", realized_fixtures(&fixtures.path, &root.path)).output() ?? panic("build")
+    assert(build.status.success(), "stderr: {String.from_utf8_lossy(&build.stderr)}")
+}

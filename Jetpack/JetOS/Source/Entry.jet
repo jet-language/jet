@@ -1,222 +1,128 @@
-// PORT-PENDING 0868 crates-jetpack-src-jetos-entry-module-group: crates/jetpack/src/JetOS/entry.rs:1-218
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS use super::commands::{
-//RS     cmd_build, cmd_check, cmd_generations, cmd_image, cmd_init, cmd_lift, cmd_migrate, cmd_plan,
-//RS     cmd_proof, cmd_rollback,
-//RS };
-//RS use super::generation::build_generation;
-//RS use super::generations_activation::{
-//RS     activate_generation, find_rollback_generation, latest_generation_for, print_help,
-//RS };
-//RS use super::load_validate::load_user_generation_target;
-//RS use super::nixos_import::cmd_import;
-//RS use super::options_rendering::render_user_profile_json;
-//RS use super::types::{OSFlags, Target};
-//RS use super::vm_commands::cmd_vm;
-//RS use crate::Output::Theme;
-//RS use crate::Syntax;
-//RS use crate::JSON;
-//RS use std::fs;
-//RS use std::path::PathBuf;
-//RS 
-//RS pub fn main(theme: &Theme, verb: Option<&str>, args: &[String], flags: &OSFlags) -> i32 {
-//RS     match verb {
-//RS         Some(v) if v == Syntax::OS_VERB_CHECK => cmd_check(theme, args),
-//RS         Some(v) if v == Syntax::OS_VERB_PLAN => cmd_plan(theme, args, flags),
-//RS         Some(v) if v == Syntax::OS_VERB_PROOF => cmd_proof(theme, args, flags),
-//RS         Some(v) if v == Syntax::OS_VERB_BUILD => cmd_build(theme, args, flags, false),
-//RS         Some(v) if v == Syntax::OS_VERB_SWITCH => cmd_build(theme, args, flags, true),
-//RS         Some(v) if v == Syntax::OS_VERB_ROLLBACK => cmd_rollback(theme, args),
-//RS         Some(v) if v == Syntax::OS_VERB_GENERATIONS => cmd_generations(args),
-//RS         Some(v) if v == Syntax::OS_VERB_INIT => cmd_init(theme, args, flags),
-//RS         Some(v) if v == Syntax::OS_VERB_LIFT => cmd_lift(theme, args, flags),
-//RS         Some(v) if v == Syntax::OS_VERB_IMPORT => cmd_import(theme, args, flags),
-//RS         Some(v) if v == Syntax::OS_VERB_MIGRATE => cmd_migrate(theme, args, flags),
-//RS         Some(v) if v == Syntax::OS_VERB_IMAGE => cmd_image(theme, args, flags),
-//RS         Some(v) if v == Syntax::OS_VERB_VM => cmd_vm(theme, args, flags),
-//RS         Some("help" | "--help" | "-h") => {
-//RS             print_help();
-//RS             0
-//RS         }
-//RS         Some(other) => {
-//RS             theme.error(
-//RS                 &format!("`{other}` is not a jetos verb"),
-//RS                 &format!("jetos verbs are: {}.", Syntax::OS_VERBS.join(", ")),
-//RS                 "run `jet os help`.",
-//RS             );
-//RS             2
-//RS         }
-//RS         None => {
-//RS             print_help();
-//RS             2
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS pub fn user_main(theme: &Theme, verb: Option<&str>, args: &[String], flags: &OSFlags) -> i32 {
-//RS     let Some(action) = verb else {
-//RS         theme.error(
-//RS             "user needs an action",
-//RS             "D-JOS-USERAPPLY1=A: standalone user generations support plan, build, switch, rollback, and prove.",
-//RS             "run `jetos user plan <name>`.",
-//RS         );
-//RS         return 2;
-//RS     };
-//RS     if !Syntax::USER_VERBS.contains(&action) {
-//RS         theme.error(
-//RS             &format!("`{action}` is not a jetos user action"),
-//RS             &format!("jetos user actions are: {}.", Syntax::USER_VERBS.join(", ")),
-//RS             "run `jetos user plan <name>`.",
-//RS         );
-//RS         return 2;
-//RS     }
-//RS     let user = args.first().map_or("", String::as_str);
-//RS     if user.is_empty() {
-//RS         theme.error(
-//RS             "user action needs a generation name",
-//RS             "D-JOS-USERENV1=A: `user.<name>` or `users.<name>` declares a per-user generation.",
-//RS             "run `jetos user plan nate`.",
-//RS         );
-//RS         return 2;
-//RS     }
-//RS     let target = Target {
-//RS         config: default_config_path(),
-//RS         host: user.to_string(),
-//RS     };
-//RS     let Some((plan, system)) = load_user_generation_target(theme, &target, user) else {
-//RS         return 2;
-//RS     };
-//RS     match action {
-//RS         "plan" => {
-//RS             let profile = render_user_profile_json(&system, user);
-//RS             if flags.json {
-//RS                 println!("{profile}");
-//RS             } else {
-//RS                 theme.ok(&format!("jetos user plan for {}", theme.bold(user)));
-//RS                 println!("{profile}");
-//RS             }
-//RS             0
-//RS         }
-//RS         "build" => {
-//RS             let Some(gen) = build_generation(theme, &plan, &system, flags, &target.config) else {
-//RS                 return 2;
-//RS             };
-//RS             theme.ok(&format!(
-//RS                 "built user {} generation {}",
-//RS                 theme.bold(user),
-//RS                 theme.bold(&gen.name)
-//RS             ));
-//RS             theme.detail(&format!("{}", gen.path.join("users").join(user).display()));
-//RS             0
-//RS         }
-//RS         "switch" => {
-//RS             let Some(gen) = build_generation(theme, &plan, &system, flags, &target.config) else {
-//RS                 return 2;
-//RS             };
-//RS             if let Err(e) = activate_generation(&gen) {
-//RS                 theme.error(
-//RS                     "could not activate the user generation",
-//RS                     &format!("updating the current/default pointers failed: {e}"),
-//RS                     "check permissions on the Jetpack root, or set JETPACK_ROOT.",
-//RS                 );
-//RS                 return 2;
-//RS             }
-//RS             theme.ok(&format!(
-//RS                 "activated user {} generation {}",
-//RS                 theme.bold(user),
-//RS                 theme.bold(&gen.name)
-//RS             ));
-//RS             0
-//RS         }
-//RS         "rollback" => {
-//RS             let requested = args.get(1).map(String::as_str);
-//RS             let Some(gen) = find_rollback_generation(&system.name, requested) else {
-//RS                 theme.error(
-//RS                     "no user generation is available for rollback",
-//RS                     &format!(
-//RS                         "no recorded jetos generation for user `{user}` exists for `{}`.",
-//RS                         system.name
-//RS                     ),
-//RS                     "run `jetos user build <name>` or `jetos user switch <name>` first.",
-//RS                 );
-//RS                 return 2;
-//RS             };
-//RS             match activate_generation(&gen) {
-//RS                 Ok(()) => {
-//RS                     theme.ok(&format!(
-//RS                         "rolled back user {user} to {}",
-//RS                         theme.bold(&gen.name)
-//RS                     ));
-//RS                     0
-//RS                 }
-//RS                 Err(e) => {
-//RS                     theme.error(
-//RS                         "could not activate the rollback generation",
-//RS                         &format!("updating the current/default pointers failed: {e}"),
-//RS                         "check permissions on the Jetpack root, or set JETPACK_ROOT.",
-//RS                     );
-//RS                     2
-//RS                 }
-//RS             }
-//RS         }
-//RS         "prove" => {
-//RS             let Some(gen) = latest_generation_for(&system.name) else {
-//RS                 theme.error(
-//RS                     "jetos user proof is missing",
-//RS                     &format!(
-//RS                         "no built generation exists for user `{user}` on `{}`.",
-//RS                         system.name
-//RS                     ),
-//RS                     "run `jetos user build <name>` first.",
-//RS                 );
-//RS                 return 2;
-//RS             };
-//RS             let profile = gen.path.join("users").join(user).join("profile.json");
-//RS             let proof = gen.path.join("users").join(user).join("proof.txt");
-//RS             if !profile.is_file() || !proof.is_file() {
-//RS                 theme.error(
-//RS                     "jetos user proof is incomplete",
-//RS                     &format!(
-//RS                         "generation `{}` lacks the user artifact/proof files for `{user}`.",
-//RS                         gen.name
-//RS                     ),
-//RS                     "rebuild the user generation.",
-//RS                 );
-//RS                 return 2;
-//RS             }
-//RS             if flags.json {
-//RS                 println!(
-//RS                     "{{\"user\":{},\"host\":{},\"generation\":{},\"profile\":{},\"proof\":{}}}",
-//RS                     JSON::quote(user),
-//RS                     JSON::quote(&system.name),
-//RS                     JSON::quote(&gen.name),
-//RS                     JSON::quote(&profile.display().to_string()),
-//RS                     JSON::quote(&proof.display().to_string())
-//RS                 );
-//RS             } else {
-//RS                 theme.ok(&format!(
-//RS                     "jetos user proof for {user} generation {}",
-//RS                     gen.name
-//RS                 ));
-//RS                 println!("{}", fs::read_to_string(proof).unwrap_or_default());
-//RS             }
-//RS             0
-//RS         }
-//RS         _ => unreachable!("checked user action"),
-//RS     }
-//RS }
-//RS 
-//RS pub fn resolve_config_path(prefix: Option<&str>) -> PathBuf {
-//RS     match prefix {
-//RS         Some("") | None => default_config_path(),
-//RS         Some(path) => PathBuf::from(path),
-//RS     }
-//RS }
-//RS 
-//RS pub(super) fn default_config_path() -> PathBuf {
-//RS     std::env::current_dir()
-//RS         .unwrap_or_else(|_| PathBuf::from("."))
-//RS         .join(Syntax::CONFIG_FILE)
-//RS }
-// END-PORT-PENDING 0868 crates/jetpack/src/JetOS/entry.rs:1-218
+use jetpack.JetOS.Commands.[cmd_build, cmd_check, cmd_generations, cmd_image, cmd_init, cmd_lift, cmd_migrate, cmd_plan, cmd_proof, cmd_rollback]
+use jetpack.JetOS.Generation.[build_generation]
+use jetpack.JetOS.GenerationsActivation.[activate_generation, find_rollback_generation, latest_generation_for, print_help]
+use jetpack.JetOS.LoadValidate.[load_user_generation_target]
+use jetpack.JetOS.NixosMapping.[cmd_import]
+use jetpack.JetOS.OptionsRendering.[render_user_profile_json]
+use jetpack.JetOS.Types.[JetOSFlags, JetOSTarget]
+use jetpack.JetOS.VmCommands.[cmd_vm]
+use jetpack.Output.[Theme]
+use jetpack.[Syntax, JSON]
+use std.[fs, env]
 
+// Rust: crates/jetpack/src/JetOS/entry.rs:20
+pub fn main(theme: &Theme, verb: String?, args: &[String], flags: &JetOSFlags) -> I32 {
+    if verb == {
+        .Val(v) if v == Syntax.OS_VERB_CHECK -> cmd_check(theme, args)
+        .Val(v) if v == Syntax.OS_VERB_PLAN -> cmd_plan(theme, args, flags)
+        .Val(v) if v == Syntax.OS_VERB_PROOF -> cmd_proof(theme, args, flags)
+        .Val(v) if v == Syntax.OS_VERB_BUILD -> cmd_build(theme, args, flags, false)
+        .Val(v) if v == Syntax.OS_VERB_SWITCH -> cmd_build(theme, args, flags, true)
+        .Val(v) if v == Syntax.OS_VERB_ROLLBACK -> cmd_rollback(theme, args)
+        .Val(v) if v == Syntax.OS_VERB_GENERATIONS -> cmd_generations(args)
+        .Val(v) if v == Syntax.OS_VERB_INIT -> cmd_init(theme, args, flags)
+        .Val(v) if v == Syntax.OS_VERB_LIFT -> cmd_lift(theme, args, flags)
+        .Val(v) if v == Syntax.OS_VERB_IMPORT -> cmd_import(theme, args, flags)
+        .Val(v) if v == Syntax.OS_VERB_MIGRATE -> cmd_migrate(theme, args, flags)
+        .Val(v) if v == Syntax.OS_VERB_IMAGE -> cmd_image(theme, args, flags)
+        .Val(v) if v == Syntax.OS_VERB_VM -> cmd_vm(theme, args, flags)
+        .Val("help" | "--help" | "-h") -> { print_help(); 0 }
+        .Val(other) -> {
+            theme.error("`{other}` is not a jetos verb", "jetos verbs are: {Syntax.OS_VERBS.join(", ")}.", "run `jet os help`.")
+            2
+        }
+        .None -> { print_help(); 2 }
+    }
+}
+
+// Rust: crates/jetpack/src/JetOS/entry.rs:54
+pub fn user_main(theme: &Theme, verb: String?, args: &[String], flags: &JetOSFlags) -> I32 {
+    action :: verb ?? {
+        theme.error("user needs an action", "D-JOS-USERAPPLY1=A: standalone user generations support plan, build, switch, rollback, and prove.", "run `jetos user plan <name>`.")
+        return 2
+    }
+    if !Syntax.USER_VERBS.contains(action) {
+        theme.error("`{action}` is not a jetos user action", "jetos user actions are: {Syntax.USER_VERBS.join(", ")}.", "run `jetos user plan <name>`.")
+        return 2
+    }
+    user :: args.first().map(s -> s.as_str()).unwrap_or("")
+    if user.is_empty() {
+        theme.error("user action needs a generation name", "D-JOS-USERENV1=A: `user.<name>` or `users.<name>` declares a per-user generation.", "run `jetos user plan nate`.")
+        return 2
+    }
+    target :: JetOSTarget{config: default_config_path(), host: user.to_string()}
+    (plan, system) :: load_user_generation_target(theme, &target, user) ?? return 2
+    if action == {
+        "plan" -> {
+            profile :: render_user_profile_json(&system, user)
+            if !flags.json { theme.ok("jetos user plan for {theme.bold(user)}") }
+            println(profile)
+            0
+        }
+        "build" -> {
+            gen :: build_generation(theme, &plan, &system, flags, &target.config) ?? return 2
+            theme.ok("built user {theme.bold(user)} generation {theme.bold(gen.name)}")
+            theme.detail(gen.path.join("users").join(user).display().to_string())
+            0
+        }
+        "switch" -> {
+            gen :: build_generation(theme, &plan, &system, flags, &target.config) ?? return 2
+            if activate_generation(&gen) == {
+                .Ok(()) -> {}
+                .Err(e) -> {
+                    theme.error("could not activate the user generation", "updating the current/default pointers failed: {e}", "check permissions on the Jetpack root, or set JETPACK_ROOT.")
+                    return 2
+                }
+            }
+            theme.ok("activated user {theme.bold(user)} generation {theme.bold(gen.name)}")
+            0
+        }
+        "rollback" -> {
+            requested :: args.get(1).map(s -> s.as_str())
+            gen :: find_rollback_generation(system.name, requested) ?? {
+                theme.error("no user generation is available for rollback", "no recorded jetos generation for user `{user}` exists for `{system.name}`.", "run `jetos user build <name>` or `jetos user switch <name>` first.")
+                return 2
+            }
+            if activate_generation(&gen) == {
+                .Ok(()) -> { theme.ok("rolled back user {user} to {theme.bold(gen.name)}"); 0 }
+                .Err(e) -> {
+                    theme.error("could not activate the rollback generation", "updating the current/default pointers failed: {e}", "check permissions on the Jetpack root, or set JETPACK_ROOT.")
+                    2
+                }
+            }
+        }
+        "prove" -> {
+            gen :: latest_generation_for(system.name) ?? {
+                theme.error("jetos user proof is missing", "no built generation exists for user `{user}` on `{system.name}`.", "run `jetos user build <name>` first.")
+                return 2
+            }
+            profile :: gen.path.join("users").join(user).join("profile.json")
+            proof :: gen.path.join("users").join(user).join("proof.txt")
+            if !profile.is_file() || !proof.is_file() {
+                theme.error("jetos user proof is incomplete", "generation `{gen.name}` lacks the user artifact/proof files for `{user}`.", "rebuild the user generation.")
+                return 2
+            }
+            if flags.json {
+                println("{{\"user\":{JSON.quote(user)},\"host\":{JSON.quote(system.name)},\"generation\":{JSON.quote(gen.name)},\"profile\":{JSON.quote(profile.display().to_string())},\"proof\":{JSON.quote(proof.display().to_string())}}}")
+            } else {
+                theme.ok("jetos user proof for {user} generation {gen.name}")
+                println(fs.read_to_string(proof).unwrap_or_default())
+            }
+            0
+        }
+        _ -> unreachable("checked user action")
+    }
+}
+
+// Rust: crates/jetpack/src/JetOS/entry.rs:207
+pub fn resolve_config_path(prefix: String?) -> OSPath {
+    if prefix == {
+        .Val("") | .None -> default_config_path()
+        .Val(path) -> OSPath.from(path)
+    }
+}
+
+// Rust: crates/jetpack/src/JetOS/entry.rs:214
+pub fn default_config_path() -> OSPath {
+    env.current_dir().unwrap_or_else(_ -> OSPath.from(".")).join(Syntax.CONFIG_FILE)
+}

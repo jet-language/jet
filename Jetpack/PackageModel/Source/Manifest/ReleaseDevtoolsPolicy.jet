@@ -1,448 +1,112 @@
-// PORT-PENDING 2148 crates-jet-pkg-model-src-package-releasedevtoolspolicy: crates/jet-pkg-model/src/Package/ReleaseDevtoolsPolicy.rs:1-444
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! Typed release-devtools build and deployment policy (D-DX-PROD1).
-//RS //!
-//RS //! The manifest chooses which release code may exist. Deployment variables only
-//RS //! enable an endpoint already carried by that release; they cannot add code.
-//RS //! Values are deliberately split from the policy so inspect/explain can project
-//RS //! the safe facts without ever carrying the bearer token.
-//RS 
-//RS use std::fmt;
-//RS use std::net::IpAddr;
-//RS 
-//RS use super::Blocks::ReleaseInspect;
-//RS 
-//RS pub const INSPECT_ENABLE_ENV: &str = "JET_INSPECT";
-//RS pub const INSPECT_TOKEN_ENV: &str = "JET_INSPECT_TOKEN";
-//RS pub const INSPECT_ALLOWLIST_ENV: &str = "JET_INSPECT_ALLOWLIST";
-//RS const MAX_ALLOWLIST_ENTRIES: usize = 64;
-//RS 
-//RS /// The only release endpoint form.  Development hosts use their existing
-//RS /// session-bound routes and do not use this value.
-//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-//RS pub enum ReleaseDevtoolsEndpoint {
-//RS     Absent,
-//RS     ReadOnly,
-//RS }
-//RS 
-//RS impl ReleaseDevtoolsEndpoint {
-//RS     pub const fn as_str(self) -> &'static str {
-//RS         match self {
-//RS             Self::Absent => "absent",
-//RS             Self::ReadOnly => "read_only",
-//RS         }
-//RS     }
-//RS 
-//RS     pub const fn is_enabled(self) -> bool {
-//RS         matches!(self, Self::ReadOnly)
-//RS     }
-//RS }
-//RS 
-//RS /// Release endpoint authentication is never optional.
-//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-//RS pub enum ReleaseDevtoolsAuthentication {
-//RS     BearerToken,
-//RS }
-//RS 
-//RS impl ReleaseDevtoolsAuthentication {
-//RS     pub const fn as_str(self) -> &'static str {
-//RS         match self {
-//RS             Self::BearerToken => "bearer_token",
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// Network authority for the release endpoint.
-//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-//RS pub enum ReleaseDevtoolsAuthority {
-//RS     LoopbackOrAllowlist,
-//RS }
-//RS 
-//RS impl ReleaseDevtoolsAuthority {
-//RS     pub const fn as_str(self) -> &'static str {
-//RS         match self {
-//RS             Self::LoopbackOrAllowlist => "loopback_or_allowlist",
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// Package sites decide which values become observable.  The endpoint never
-//RS /// promotes an event's other fields into a payload.
-//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-//RS pub enum ReleaseDevtoolsPublication {
-//RS     SiteGated,
-//RS }
-//RS 
-//RS impl ReleaseDevtoolsPublication {
-//RS     pub const fn as_str(self) -> &'static str {
-//RS         match self {
-//RS             Self::SiteGated => "site_gated",
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// One exact IP address or CIDR network accepted by the deployment allowlist.
-//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-//RS pub struct ReleaseDevtoolsNetwork {
-//RS     address: IpAddr,
-//RS     prefix: u8,
-//RS }
-//RS 
-//RS impl ReleaseDevtoolsNetwork {
-//RS     pub fn parse(value: &str) -> Result<Self, String> {
-//RS         let value = value.trim();
-//RS         if value.is_empty() {
-//RS             return Err("inspect allowlist entries cannot be empty".to_string());
-//RS         }
-//RS         let (address, prefix) = if let Some((address, prefix)) = value.split_once('/') {
-//RS             let address = address
-//RS                 .trim()
-//RS                 .parse::<IpAddr>()
-//RS                 .map_err(|_| format!("invalid inspect allowlist address `{address}`"))?;
-//RS             let prefix = prefix
-//RS                 .trim()
-//RS                 .parse::<u8>()
-//RS                 .map_err(|_| format!("invalid inspect allowlist prefix `{prefix}`"))?;
-//RS             (address, prefix)
-//RS         } else {
-//RS             let address = value
-//RS                 .parse::<IpAddr>()
-//RS                 .map_err(|_| format!("invalid inspect allowlist address `{value}`"))?;
-//RS             let prefix = if address.is_ipv4() { 32 } else { 128 };
-//RS             (address, prefix)
-//RS         };
-//RS         let max_prefix = if address.is_ipv4() { 32 } else { 128 };
-//RS         if prefix > max_prefix {
-//RS             return Err(format!(
-//RS                 "inspect allowlist prefix `/{prefix}` exceeds `/{max_prefix}`"
-//RS             ));
-//RS         }
-//RS         Ok(Self { address, prefix })
-//RS     }
-//RS 
-//RS     pub const fn address(self) -> IpAddr {
-//RS         self.address
-//RS     }
-//RS 
-//RS     pub const fn prefix(self) -> u8 {
-//RS         self.prefix
-//RS     }
-//RS 
-//RS     pub fn contains(self, candidate: IpAddr) -> bool {
-//RS         match (self.address, candidate) {
-//RS             (IpAddr::V4(network), IpAddr::V4(candidate)) => {
-//RS                 let network = u32::from(network);
-//RS                 let candidate = u32::from(candidate);
-//RS                 let mask = if self.prefix == 0 {
-//RS                     0
-//RS                 } else {
-//RS                     u32::MAX << (32 - self.prefix as u32)
-//RS                 };
-//RS                 network & mask == candidate & mask
-//RS             }
-//RS             (IpAddr::V6(network), IpAddr::V6(candidate)) => {
-//RS                 let network = u128::from(network);
-//RS                 let candidate = u128::from(candidate);
-//RS                 let mask = if self.prefix == 0 {
-//RS                     0
-//RS                 } else {
-//RS                     u128::MAX << (128 - self.prefix as u32)
-//RS                 };
-//RS                 network & mask == candidate & mask
-//RS             }
-//RS             _ => false,
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS impl fmt::Display for ReleaseDevtoolsNetwork {
-//RS     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-//RS         write!(formatter, "{}/{}", self.address, self.prefix)
-//RS     }
-//RS }
-//RS 
-//RS /// Bounded, typed deployment allowlist.  It contains no hostnames and never
-//RS /// treats malformed input as an empty list.
-//RS #[derive(Clone, Debug, Default, Eq, PartialEq)]
-//RS pub struct ReleaseDevtoolsAllowlist(Vec<ReleaseDevtoolsNetwork>);
-//RS 
-//RS impl ReleaseDevtoolsAllowlist {
-//RS     pub fn parse(value: &str) -> Result<Self, String> {
-//RS         let mut entries = Vec::new();
-//RS         for item in value.split(',').map(str::trim).filter(|item| !item.is_empty()) {
-//RS             if entries.len() == MAX_ALLOWLIST_ENTRIES {
-//RS                 return Err(format!(
-//RS                     "inspect allowlist cannot contain more than {MAX_ALLOWLIST_ENTRIES} entries"
-//RS                 ));
-//RS             }
-//RS             entries.push(ReleaseDevtoolsNetwork::parse(item)?);
-//RS         }
-//RS         Ok(Self(entries))
-//RS     }
-//RS 
-//RS     pub fn is_empty(&self) -> bool {
-//RS         self.0.is_empty()
-//RS     }
-//RS 
-//RS     pub fn contains(&self, address: IpAddr) -> bool {
-//RS         self.0.iter().copied().any(|network| network.contains(address))
-//RS     }
-//RS 
-//RS     pub fn as_slice(&self) -> &[ReleaseDevtoolsNetwork] {
-//RS         &self.0
-//RS     }
-//RS }
-//RS 
-//RS /// Deployment-only activation facts.  `token` stays private so callers must
-//RS /// ask for it explicitly, while `Debug` redacts it for inspect/log surfaces.
-//RS #[derive(Clone, Default, Eq, PartialEq)]
-//RS pub struct ReleaseDevtoolsDeployment {
-//RS     enabled: bool,
-//RS     token: Option<String>,
-//RS     pub allowlist: ReleaseDevtoolsAllowlist,
-//RS }
-//RS 
-//RS impl fmt::Debug for ReleaseDevtoolsDeployment {
-//RS     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-//RS         formatter
-//RS             .debug_struct("ReleaseDevtoolsDeployment")
-//RS             .field("enabled", &self.enabled)
-//RS             .field("token", &self.token.as_ref().map(|_| "<redacted>"))
-//RS             .field("allowlist", &self.allowlist)
-//RS             .finish()
-//RS     }
-//RS }
-//RS 
-//RS impl ReleaseDevtoolsDeployment {
-//RS     pub fn from_env() -> Result<Self, String> {
-//RS         let enabled = std::env::var(INSPECT_ENABLE_ENV)
-//RS             .map(|value| value.trim() == "1")
-//RS             .unwrap_or(false);
-//RS         let token = std::env::var(INSPECT_TOKEN_ENV)
-//RS             .ok()
-//RS             .map(|value| value.trim().to_string())
-//RS             .filter(|value| !value.is_empty());
-//RS         let allowlist = match std::env::var(INSPECT_ALLOWLIST_ENV) {
-//RS             Ok(value) => ReleaseDevtoolsAllowlist::parse(&value)?,
-//RS             Err(std::env::VarError::NotPresent) => ReleaseDevtoolsAllowlist::default(),
-//RS             Err(error) => {
-//RS                 return Err(format!(
-//RS                     "could not read {INSPECT_ALLOWLIST_ENV}: {error}"
-//RS                 ))
-//RS             }
-//RS         };
-//RS         Ok(Self {
-//RS             enabled,
-//RS             token,
-//RS             allowlist,
-//RS         })
-//RS     }
-//RS 
-//RS     pub fn enabled(&self) -> bool {
-//RS         self.enabled
-//RS     }
-//RS 
-//RS     pub fn token(&self) -> Option<&str> {
-//RS         self.token.as_deref()
-//RS     }
-//RS 
-//RS     pub fn with_values(
-//RS         enabled: bool,
-//RS         token: Option<String>,
-//RS         allowlist: ReleaseDevtoolsAllowlist,
-//RS     ) -> Self {
-//RS         Self {
-//RS             enabled,
-//RS             token: token.filter(|value| !value.trim().is_empty()),
-//RS             allowlist,
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// One folded release policy.  `inspect == None` is the ordinary development
-//RS /// host; `Some(.Local/.ReadOnly/.None)` is a selected release profile form.
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub struct ReleaseDevtoolsPolicy {
-//RS     pub inspect: Option<ReleaseInspect>,
-//RS     pub endpoint: ReleaseDevtoolsEndpoint,
-//RS     pub authentication: ReleaseDevtoolsAuthentication,
-//RS     pub authority: ReleaseDevtoolsAuthority,
-//RS     pub publication: ReleaseDevtoolsPublication,
-//RS     pub local_rail: bool,
-//RS     pub panel_code: bool,
-//RS     pub stream_code: bool,
-//RS     pub deployment: ReleaseDevtoolsDeployment,
-//RS }
-//RS 
-//RS impl ReleaseDevtoolsPolicy {
-//RS     /// Existing `jet dev` hosts retain their session-bound writable protocol.
-//RS     pub fn development() -> Self {
-//RS         Self {
-//RS             inspect: None,
-//RS             endpoint: ReleaseDevtoolsEndpoint::Absent,
-//RS             authentication: ReleaseDevtoolsAuthentication::BearerToken,
-//RS             authority: ReleaseDevtoolsAuthority::LoopbackOrAllowlist,
-//RS             publication: ReleaseDevtoolsPublication::SiteGated,
-//RS             local_rail: true,
-//RS             panel_code: true,
-//RS             stream_code: true,
-//RS             deployment: ReleaseDevtoolsDeployment::default(),
-//RS         }
-//RS     }
-//RS 
-//RS     /// Project the already parsed `build.release.inspect` fact exactly once.
-//RS     pub fn from_manifest_profile(inspect: ReleaseInspect) -> Self {
-//RS         let (endpoint, local_rail, panel_code, stream_code) = match inspect {
-//RS             ReleaseInspect::Local => (
-//RS                 ReleaseDevtoolsEndpoint::Absent,
-//RS                 true,
-//RS                 false,
-//RS                 false,
-//RS             ),
-//RS             ReleaseInspect::ReadOnly => (
-//RS                 ReleaseDevtoolsEndpoint::ReadOnly,
-//RS                 true,
-//RS                 true,
-//RS                 true,
-//RS             ),
-//RS             ReleaseInspect::None => (
-//RS                 ReleaseDevtoolsEndpoint::Absent,
-//RS                 false,
-//RS                 false,
-//RS                 false,
-//RS             ),
-//RS         };
-//RS         Self {
-//RS             inspect: Some(inspect),
-//RS             endpoint,
-//RS             authentication: ReleaseDevtoolsAuthentication::BearerToken,
-//RS             authority: ReleaseDevtoolsAuthority::LoopbackOrAllowlist,
-//RS             publication: ReleaseDevtoolsPublication::SiteGated,
-//RS             local_rail,
-//RS             panel_code,
-//RS             stream_code,
-//RS             deployment: ReleaseDevtoolsDeployment::default(),
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn with_deployment(mut self, deployment: ReleaseDevtoolsDeployment) -> Self {
-//RS         self.deployment = deployment;
-//RS         self
-//RS     }
-//RS 
-//RS     pub fn from_manifest_profile_with_env(
-//RS         inspect: ReleaseInspect,
-//RS     ) -> Result<Self, String> {
-//RS         Ok(Self::from_manifest_profile(inspect).with_deployment(
-//RS             ReleaseDevtoolsDeployment::from_env()?,
-//RS         ))
-//RS     }
-//RS 
-//RS     pub fn is_release(&self) -> bool {
-//RS         self.inspect.is_some()
-//RS     }
-//RS 
-//RS     pub fn endpoint_enabled(&self) -> bool {
-//RS         self.endpoint.is_enabled()
-//RS     }
-//RS 
-//RS     pub fn deployment_enabled(&self) -> bool {
-//RS         self.endpoint_enabled() && self.deployment.enabled()
-//RS     }
-//RS 
-//RS     pub fn peer_allowed(&self, address: IpAddr) -> bool {
-//RS         address.is_loopback() || self.deployment.allowlist.contains(address)
-//RS     }
-//RS 
-//RS     pub fn release_cfg_value(&self) -> Option<&'static str> {
-//RS         self.inspect.map(ReleaseInspect::cfg_value)
-//RS     }
-//RS 
-//RS     /// Redacted facts for `jet inspect`/`jet explain`; the bearer token and
-//RS     /// activation bit never cross this projection.
-//RS     pub fn facts(&self) -> ReleaseDevtoolsPolicyFacts {
-//RS         ReleaseDevtoolsPolicyFacts {
-//RS             inspect: self.inspect,
-//RS             endpoint: self.endpoint,
-//RS             authentication: self.authentication,
-//RS             authority: self.authority,
-//RS             publication: self.publication,
-//RS             allowlist: self.deployment.allowlist.clone(),
-//RS             local_rail: self.local_rail,
-//RS             panel_code: self.panel_code,
-//RS             stream_code: self.stream_code,
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// Safe policy facts suitable for inspect/explain output.
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub struct ReleaseDevtoolsPolicyFacts {
-//RS     pub inspect: Option<ReleaseInspect>,
-//RS     pub endpoint: ReleaseDevtoolsEndpoint,
-//RS     pub authentication: ReleaseDevtoolsAuthentication,
-//RS     pub authority: ReleaseDevtoolsAuthority,
-//RS     pub publication: ReleaseDevtoolsPublication,
-//RS     pub allowlist: ReleaseDevtoolsAllowlist,
-//RS     pub local_rail: bool,
-//RS     pub panel_code: bool,
-//RS     pub stream_code: bool,
-//RS }
-//RS impl Default for ReleaseDevtoolsPolicy {
-//RS     fn default() -> Self {
-//RS         Self::development()
-//RS     }
-//RS }
-//RS 
-//RS 
-//RS #[cfg(test)]
-//RS mod tests {
-//RS     use super::*;
-//RS     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
-//RS 
-//RS     #[test]
-//RS     fn release_forms_project_to_closed_typed_facts() {
-//RS         let local = ReleaseDevtoolsPolicy::from_manifest_profile(ReleaseInspect::Local);
-//RS         assert!(!local.endpoint_enabled());
-//RS         assert!(local.local_rail);
-//RS         assert!(!local.panel_code);
-//RS         assert!(!local.stream_code);
-//RS 
-//RS         let read_only =
-//RS             ReleaseDevtoolsPolicy::from_manifest_profile(ReleaseInspect::ReadOnly);
-//RS         assert!(read_only.endpoint_enabled());
-//RS         assert!(read_only.panel_code);
-//RS         assert!(read_only.stream_code);
-//RS         assert_eq!(read_only.facts().publication, ReleaseDevtoolsPublication::SiteGated);
-//RS 
-//RS         let none = ReleaseDevtoolsPolicy::from_manifest_profile(ReleaseInspect::None);
-//RS         assert!(!none.local_rail);
-//RS         assert!(!none.endpoint_enabled());
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn allowlist_supports_exact_addresses_and_networks() {
-//RS         let allowlist = ReleaseDevtoolsAllowlist::parse("10.24.3.0/24,2001:db8::/32").unwrap();
-//RS         assert!(allowlist.contains(IpAddr::V4(Ipv4Addr::new(10, 24, 3, 8))));
-//RS         assert!(!allowlist.contains(IpAddr::V4(Ipv4Addr::new(10, 24, 4, 8))));
-//RS         assert!(allowlist.contains(IpAddr::V6(Ipv6Addr::new(
-//RS             0x2001, 0xdb8, 0, 0, 0, 0, 0, 1,
-//RS         ))));
-//RS         assert!(ReleaseDevtoolsAllowlist::parse("10.0.0.1/33").is_err());
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn deployment_debug_redacts_token() {
-//RS         let deployment = ReleaseDevtoolsDeployment::with_values(
-//RS             true,
-//RS             Some("secret-value".to_string()),
-//RS             ReleaseDevtoolsAllowlist::default(),
-//RS         );
-//RS         let debug = format!("{deployment:?}");
-//RS         assert!(!debug.contains("secret-value"));
-//RS         assert!(debug.contains("<redacted>"));
-//RS     }
-//RS }
-//RS 
-// END-PORT-PENDING 2148 crates/jet-pkg-model/src/Package/ReleaseDevtoolsPolicy.rs:1-444
+// Release-devtools policy: release manifests select compiled code; deployment
+// only activates the existing endpoint. Projection never includes bearer tokens.
+use jet_foundation.[JetReleaseInspect, JetReleaseDevtoolsEndpoint, JetReleaseDevtoolsAuthentication,
+    JetReleaseDevtoolsAuthority, JetReleaseDevtoolsPublication, JetReleaseDevtoolsNetwork,
+    JetReleaseDevtoolsDeployment, JetReleaseDevtoolsPolicy]
 
+// Rust: crates/jet-pkg-model/src/Package/ReleaseDevtoolsPolicy.rs:13
+// INSPECT_ENABLE_ENV: ReleaseDevtools.jet:9.
+// Rust: crates/jet-pkg-model/src/Package/ReleaseDevtoolsPolicy.rs:14
+// INSPECT_TOKEN_ENV: ReleaseDevtools.jet:10.
+// Rust: crates/jet-pkg-model/src/Package/ReleaseDevtoolsPolicy.rs:15
+// INSPECT_ALLOWLIST_ENV: ReleaseDevtools.jet:11.
+// Rust: crates/jet-pkg-model/src/Package/ReleaseDevtoolsPolicy.rs:16
+// MAX_ALLOWLIST_ENTRIES: ReleaseDevtools.jet:12 INSPECT_MAX_ALLOWLIST_ENTRIES.
+// Rust: crates/jet-pkg-model/src/Package/ReleaseDevtoolsPolicy.rs:21
+// ReleaseDevtoolsEndpoint: Foundation Target/ReleaseDevtools.jet:6.
+// Rust: crates/jet-pkg-model/src/Package/ReleaseDevtoolsPolicy.rs:27
+// as_str: ReleaseDevtools.jet:41 pkg_release_endpoint_as_str.
+// Rust: crates/jet-pkg-model/src/Package/ReleaseDevtoolsPolicy.rs:34
+// is_enabled: direct ReadOnly comparison, as pkg_release_policy_endpoint_enabled271.
+// Rust: crates/jet-pkg-model/src/Package/ReleaseDevtoolsPolicy.rs:41
+// ReleaseDevtoolsAuthentication: Foundation Target/ReleaseDevtools.jet:8.
+// Rust: crates/jet-pkg-model/src/Package/ReleaseDevtoolsPolicy.rs:46
+// as_str: ReleaseDevtools.jet:48 pkg_release_authentication_as_str.
+// Rust: crates/jet-pkg-model/src/Package/ReleaseDevtoolsPolicy.rs:55
+// ReleaseDevtoolsAuthority: Foundation Target/ReleaseDevtools.jet:10.
+// Rust: crates/jet-pkg-model/src/Package/ReleaseDevtoolsPolicy.rs:60
+// as_str: ReleaseDevtools.jet:54 pkg_release_authority_as_str.
+// Rust: crates/jet-pkg-model/src/Package/ReleaseDevtoolsPolicy.rs:70
+// ReleaseDevtoolsPublication: Foundation Target/ReleaseDevtools.jet:12.
+// Rust: crates/jet-pkg-model/src/Package/ReleaseDevtoolsPolicy.rs:75
+// as_str: ReleaseDevtools.jet:60 pkg_release_publication_as_str.
+// Rust: crates/jet-pkg-model/src/Package/ReleaseDevtoolsPolicy.rs:84
+// ReleaseDevtoolsNetwork: Foundation Target/ReleaseDevtools.jet:14.
+// Rust: crates/jet-pkg-model/src/Package/ReleaseDevtoolsPolicy.rs:90
+// parse: ReleaseDevtools.jet:155 pkg_release_network_parse.
+// Rust: crates/jet-pkg-model/src/Package/ReleaseDevtoolsPolicy.rs:121
+// address: canonical network.address field.
+// Rust: crates/jet-pkg-model/src/Package/ReleaseDevtoolsPolicy.rs:125
+// prefix: canonical network.prefix field.
+// Rust: crates/jet-pkg-model/src/Package/ReleaseDevtoolsPolicy.rs:129
+// contains: ReleaseDevtools.jet:174 pkg_release_network_contains; matching
+// families only, zero prefix accepts all addresses in that family.
+// Rust: crates/jet-pkg-model/src/Package/ReleaseDevtoolsPolicy.rs:157
+// Display: ReleaseDevtools.jet:181 pkg_release_network_display.
+// Rust: crates/jet-pkg-model/src/Package/ReleaseDevtoolsPolicy.rs:165
+// ReleaseDevtoolsAllowlist: canonical [JetReleaseDevtoolsNetwork], empty default.
+// Rust: crates/jet-pkg-model/src/Package/ReleaseDevtoolsPolicy.rs:168
+// parse: ReleaseDevtools.jet:187 pkg_release_allowlist_parse; skipped blanks and
+// strict 64-entry bound with malformed entries rejected, never discarded.
+// Rust: crates/jet-pkg-model/src/Package/ReleaseDevtoolsPolicy.rs:181
+// is_empty: canonical list.is_empty().
+// Rust: crates/jet-pkg-model/src/Package/ReleaseDevtoolsPolicy.rs:185
+// contains: ReleaseDevtools.jet:198 pkg_release_allowlist_contains.
+// Rust: crates/jet-pkg-model/src/Package/ReleaseDevtoolsPolicy.rs:189
+// as_slice: the canonical list view, no wrapper or extra copy.
+// Rust: crates/jet-pkg-model/src/Package/ReleaseDevtoolsPolicy.rs:197
+// ReleaseDevtoolsDeployment: Foundation Target/ReleaseDevtools.jet:16.
+fn pkg_release_deployment_default() -> JetReleaseDevtoolsDeployment {
+    JetReleaseDevtoolsDeployment{enabled: false, token: .None, allowlist: [JetReleaseDevtoolsNetwork]{}}
+}
+// Rust: crates/jet-pkg-model/src/Package/ReleaseDevtoolsPolicy.rs:204
+// Debug: ReleaseDevtools.jet:230 pkg_release_deployment_debug; redacted token.
+// Rust: crates/jet-pkg-model/src/Package/ReleaseDevtoolsPolicy.rs:215
+// from_env: ReleaseDevtools.jet:216 pkg_release_deployment_from_env.
+// Rust: crates/jet-pkg-model/src/Package/ReleaseDevtoolsPolicy.rs:239
+// enabled: canonical deployment.enabled field.
+// Rust: crates/jet-pkg-model/src/Package/ReleaseDevtoolsPolicy.rs:243
+// token: canonical explicit deployment.token access, not policy facts.
+// Rust: crates/jet-pkg-model/src/Package/ReleaseDevtoolsPolicy.rs:247
+// with_values: ReleaseDevtools.jet:207 pkg_release_deployment_with_values;
+// drops blank tokens but preserves all bytes of nonblank tokens.
+// Rust: crates/jet-pkg-model/src/Package/ReleaseDevtoolsPolicy.rs:263
+// ReleaseDevtoolsPolicy: Foundation Target/ReleaseDevtools.jet:22.
+// Rust: crates/jet-pkg-model/src/Package/ReleaseDevtoolsPolicy.rs:277
+pub fn pkg_release_policy_development() -> JetReleaseDevtoolsPolicy {
+    JetReleaseDevtoolsPolicy{inspect: .None, endpoint: JetReleaseDevtoolsEndpoint.Absent,
+        authentication: JetReleaseDevtoolsAuthentication.BearerToken,
+        authority: JetReleaseDevtoolsAuthority.LoopbackOrAllowlist,
+        publication: JetReleaseDevtoolsPublication.SiteGated,
+        local_rail: true, panel_code: true, stream_code: true, deployment: pkg_release_deployment_default()}
+}
+// Rust: crates/jet-pkg-model/src/Package/ReleaseDevtoolsPolicy.rs:292
+// from_manifest_profile: ReleaseDevtools.jet:242 pkg_release_policy_from_manifest_profile.
+// Rust: crates/jet-pkg-model/src/Package/ReleaseDevtoolsPolicy.rs:326
+// with_deployment: ReleaseDevtools.jet:257 pkg_release_policy_with_deployment.
+// Rust: crates/jet-pkg-model/src/Package/ReleaseDevtoolsPolicy.rs:331
+// from_manifest_profile_with_env: ReleaseDevtools.jet:263 pkg_release_policy_from_manifest_profile_with_env.
+// Rust: crates/jet-pkg-model/src/Package/ReleaseDevtoolsPolicy.rs:339
+// is_release: ReleaseDevtools.jet:267 pkg_release_policy_is_release.
+// Rust: crates/jet-pkg-model/src/Package/ReleaseDevtoolsPolicy.rs:343
+// endpoint_enabled: ReleaseDevtools.jet:271 pkg_release_policy_endpoint_enabled.
+// Rust: crates/jet-pkg-model/src/Package/ReleaseDevtoolsPolicy.rs:347
+// deployment_enabled: ReleaseDevtools.jet:275 pkg_release_policy_deployment_enabled.
+// Rust: crates/jet-pkg-model/src/Package/ReleaseDevtoolsPolicy.rs:351
+// peer_allowed: ReleaseDevtools.jet:280 pkg_release_policy_peer_allowed.
+// Rust: crates/jet-pkg-model/src/Package/ReleaseDevtoolsPolicy.rs:355
+// release_cfg_value: ReleaseDevtools.jet:286 pkg_release_policy_cfg_value.
+// Rust: crates/jet-pkg-model/src/Package/ReleaseDevtoolsPolicy.rs:361
+// facts: ReleaseDevtools.jet:305 pkg_release_policy_facts; no token or enabled bit.
+// Rust: crates/jet-pkg-model/src/Package/ReleaseDevtoolsPolicy.rs:378
+// ReleaseDevtoolsPolicyFacts: ReleaseDevtools.jet:293.
+// Rust: crates/jet-pkg-model/src/Package/ReleaseDevtoolsPolicy.rs:390
+impl JetReleaseDevtoolsPolicy {
+    pub fn default() -> Self { pkg_release_policy_development() }
+}
+// Rust: crates/jet-pkg-model/src/Package/ReleaseDevtoolsPolicy.rs:402
+// release_forms_project_to_closed_typed_facts: Tests/ReleaseDevtools.jet:19.
+// Rust: crates/jet-pkg-model/src/Package/ReleaseDevtoolsPolicy.rs:422
+// allowlist_supports_exact_addresses_and_networks: Tests/ReleaseDevtools.jet:35.
+// Rust: crates/jet-pkg-model/src/Package/ReleaseDevtoolsPolicy.rs:433
+// deployment_debug_redacts_token: Tests/ReleaseDevtools.jet:46.

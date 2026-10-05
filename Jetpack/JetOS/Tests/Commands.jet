@@ -1,0 +1,10 @@
+use jetpack.JetOS.Commands.[cmd_rollback]
+use jetpack.Output.[Theme]
+
+// Behavioral control for Rust: crates/jetpack/src/JetOS/commands.rs:222
+// Missing host must be refused before any generation lookup or activation.
+#Test("jetos_rollback_requires_nonempty_host") {
+    theme :: Theme.plain()
+    assert_eq(cmd_rollback(&theme, &[]), I32{2})
+    assert_eq(cmd_rollback(&theme, &[""]), I32{2})
+}

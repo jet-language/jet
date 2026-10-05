@@ -1,0 +1,94 @@
+use tests.common.Scratch
+use jet_foundation.ExitCodes
+use jet_foundation.MachineOutput.[read_machine_output, MachineRecord]
+use jet_foundation.JSON.[json_get, json_str, parse]
+use std.[fs, env, process]
+// GATE #4494: native subprocess and real trace fixture.
+// Rust: tests/machine_output.rs:19
+#Derive(Copy)
+enum MachineStream { Stdout, Stderr }
+// Rust: tests/machine_output.rs:24
+struct MachineDoor { label: String, args: [String], action: String?, expected_status: I32, expected_stream: MachineStream }
+// Rust: tests/machine_output.rs:32
+fn assert_machine_stream(label: String, stream: String, bytes: [U8], action: String?) -> {
+    assert(!bytes.iter().all(|byte| -> byte.is_ascii_whitespace()), "{label} expected machine output on {stream}")
+    text :: String.from_utf8(bytes).unwrap_or_else(|error| -> panic("{label} {stream} is not UTF-8 machine output: {error}"))
+    records :: read_machine_output(text).unwrap_or_else(|error| -> panic("{label} {stream} is not machine output: {error}\n{text}"))
+    assert_eq(records.len(), 1, "{label} {stream} must contain exactly one machine record:\n{text}")
+    value :: parse(text).unwrap_or_else(|error| -> panic("{label} {stream} is not one JSON object: {error}\n{text}"))
+    match action {
+        Some(expected) -> {
+            assert_eq(records, [MachineRecord.Status])
+            actual :: json_get(value, "action").and_then(json_str) ?? panic("{label} {stream} has no action:\n{text}")
+            assert_eq(actual, expected, "{label} emitted the wrong action")
+        }, None -> assert_eq(records, [MachineRecord.Report])
+    }
+}
+// Rust: tests/machine_output.rs:61
+fn assert_machine_door(root: OSPath, door: MachineDoor) -> {
+    output :: process.Command.new(env.test_binary("jet")).args(door.args).current_dir(root).env("NO_COLOR", "1").output().unwrap_or_else(|error| -> panic("{door.label} did not start: {error}"))
+    assert_eq(output.status.code(), Some(door.expected_status), "{door.label} returned an unexpected exit status")
+    (expected, other, expected_name, other_name) :: match door.expected_stream {
+        MachineStream.Stdout -> (output.stdout, output.stderr, "stdout", "stderr"),
+        MachineStream.Stderr -> (output.stderr, output.stdout, "stderr", "stdout")
+    }
+    assert_machine_stream(door.label, expected_name, expected, door.action)
+    assert(other.iter().all(|byte| -> byte.is_ascii_whitespace()), "{door.label} emitted unexpected output on {other_name}:\n{String.from_utf8_lossy(other)}")
+}
+// Rust: tests/machine_output.rs:89
+#Test("every_json_report_door_uses_the_one_machine_envelope") {
+    scratch :: Scratch.new("machine-output-envelope")
+    fs.write(scratch.join("run.jet"), "fn square(n: Int) -> Int { n * n }\n\nfn run() -> { square(2) }\n") ?? panic("write run")
+    fs.write(scratch.join("env.jet"), "module env.dev { }\n") ?? panic("write env")
+    fs.write(scratch.join("before.jet"), "fn square(n: Int) -> Int { n * n }\n\nfn run() -> { square(2) }\n") ?? panic("write before")
+    fs.write(scratch.join("after.jet"), "fn square(n: Int) -> Int { n * n + 1 }\n\nfn run() -> { square(2) }\n") ?? panic("write after")
+    // Real argv doors; never synthetic renderer calls.
+    doors :: [
+        MachineDoor{label: "check", args: ["check", "run.jet", "--json"], action: Some("check"), expected_status: ExitCodes.OK, expected_stream: MachineStream.Stdout},
+        MachineDoor{label: "build-effects", args: ["build", "run.jet", "--json"], action: Some("build.effects"), expected_status: ExitCodes.OK, expected_stream: MachineStream.Stdout},
+        MachineDoor{label: "fmt", args: ["fmt", "--check", "run.jet", "--json"], action: Some("fmt"), expected_status: ExitCodes.OK, expected_stream: MachineStream.Stdout},
+        MachineDoor{label: "budget", args: ["budget", "check", "--json"], action: Some("check"), expected_status: ExitCodes.OK, expected_stream: MachineStream.Stdout},
+        MachineDoor{label: "compiler-always-json", args: ["inspect", "compiler", "lex", "run.jet"], action: Some("inspect.compiler.lex"), expected_status: ExitCodes.OK, expected_stream: MachineStream.Stdout},
+        MachineDoor{label: "compiler", args: ["inspect", "compiler", "lex", "run.jet", "--json"], action: Some("inspect.compiler.lex"), expected_status: ExitCodes.OK, expected_stream: MachineStream.Stdout},
+        MachineDoor{label: "compiler-parse", args: ["inspect", "compiler", "parse", "run.jet", "--json"], action: Some("inspect.compiler.parse"), expected_status: ExitCodes.OK, expected_stream: MachineStream.Stdout},
+        MachineDoor{label: "compiler-check", args: ["inspect", "compiler", "check", "run.jet", "--json"], action: Some("inspect.compiler.check"), expected_status: ExitCodes.OK, expected_stream: MachineStream.Stdout},
+        MachineDoor{label: "compiler-source-map", args: ["inspect", "compiler", "source-map", "run.jet", "--json"], action: Some("inspect.compiler.source_map"), expected_status: ExitCodes.OK, expected_stream: MachineStream.Stdout},
+        MachineDoor{label: "reserved", args: ["inspect", "reserved", "--json"], action: Some("inspect.reserved"), expected_status: ExitCodes.OK, expected_stream: MachineStream.Stdout},
+        MachineDoor{label: "digest", args: ["inspect", "digest", "--list-topics", "--json"], action: Some("inspect.digest"), expected_status: ExitCodes.OK, expected_stream: MachineStream.Stdout},
+        MachineDoor{label: "env", args: ["inspect", "env", "env.jet", "--json"], action: Some("inspect.env"), expected_status: ExitCodes.OK, expected_stream: MachineStream.Stdout},
+        MachineDoor{label: "semindex", args: ["inspect", "semindex", "run.jet", "--json"], action: Some("inspect.semindex"), expected_status: ExitCodes.OK, expected_stream: MachineStream.Stdout},
+        MachineDoor{label: "expand", args: ["inspect", "expand", "--facts", "inline", "run.jet", "--json"], action: Some("inspect.semindex"), expected_status: ExitCodes.OK, expected_stream: MachineStream.Stdout},
+        MachineDoor{label: "expand-memory", args: ["inspect", "expand", "--facts", "memory", "run.jet", "--json"], action: Some("inspect.semindex"), expected_status: ExitCodes.OK, expected_stream: MachineStream.Stdout},
+        MachineDoor{label: "expand-web", args: ["inspect", "expand", "--facts", "web", "run.jet", "--json"], action: Some("inspect.semindex"), expected_status: ExitCodes.OK, expected_stream: MachineStream.Stdout},
+        MachineDoor{label: "expand-effects", args: ["inspect", "expand", "--facts", "effects", "run.jet", "--json"], action: Some("inspect.semindex"), expected_status: ExitCodes.OK, expected_stream: MachineStream.Stdout},
+        MachineDoor{label: "expand-layout", args: ["inspect", "expand", "--facts", "layout", "run.jet", "--json"], action: Some("inspect.semindex"), expected_status: ExitCodes.OK, expected_stream: MachineStream.Stdout},
+        MachineDoor{label: "expand-derive", args: ["inspect", "expand", "--facts", "derive", "run.jet", "--json"], action: Some("inspect.semindex"), expected_status: ExitCodes.OK, expected_stream: MachineStream.Stdout},
+        MachineDoor{label: "expand-templates", args: ["inspect", "expand", "--facts", "templates", "run.jet", "--json"], action: Some("inspect.semindex"), expected_status: ExitCodes.OK, expected_stream: MachineStream.Stdout},
+        MachineDoor{label: "expand-callable-signature", args: ["inspect", "expand", "--facts", "callable-signature", "run.jet", "--json"], action: Some("inspect.semindex"), expected_status: ExitCodes.OK, expected_stream: MachineStream.Stdout},
+        MachineDoor{label: "gates", args: ["inspect", "gates", "run.jet", "--json"], action: Some("inspect.gates"), expected_status: ExitCodes.OK, expected_stream: MachineStream.Stdout},
+        MachineDoor{label: "structure", args: ["inspect", "structure", "run.jet", "--json"], action: Some("inspect.structure"), expected_status: ExitCodes.OK, expected_stream: MachineStream.Stdout},
+        MachineDoor{label: "live", args: ["inspect", "live", "0", "--json"], action: None, expected_status: ExitCodes.USER_ERROR, expected_stream: MachineStream.Stdout},
+        MachineDoor{label: "impact", args: ["inspect", "impact", "run.jet", "square", "--json"], action: Some("inspect.impact"), expected_status: ExitCodes.OK, expected_stream: MachineStream.Stdout},
+        MachineDoor{label: "graph", args: ["inspect", "graph", "run.jet", "--json"], action: Some("inspect.build"), expected_status: ExitCodes.OK, expected_stream: MachineStream.Stdout},
+        MachineDoor{label: "query-build", args: ["inspect", "query", "build", "run.jet", "--json"], action: Some("inspect.build"), expected_status: ExitCodes.OK, expected_stream: MachineStream.Stdout},
+        MachineDoor{label: "structural-diff", args: ["diff", "--structural", "before.jet", "after.jet", "--json"], action: Some("diff.structural"), expected_status: ExitCodes.OK, expected_stream: MachineStream.Stdout},
+        MachineDoor{label: "find", args: ["find", "square", "run.jet", "--json"], action: Some("find"), expected_status: ExitCodes.OK, expected_stream: MachineStream.Stdout},
+        MachineDoor{label: "fill", args: ["fill", "run.jet", "--json"], action: Some("fill"), expected_status: ExitCodes.OK, expected_stream: MachineStream.Stdout},
+        MachineDoor{label: "eval", args: ["eval", "1 + 2", "--json"], action: Some("eval"), expected_status: ExitCodes.OK, expected_stream: MachineStream.Stdout},
+        MachineDoor{label: "status", args: ["status", "run.jet", "--json"], action: Some("status"), expected_status: ExitCodes.OK, expected_stream: MachineStream.Stdout},
+        MachineDoor{label: "audit-memory", args: ["audit", "memory", "--json"], action: None, expected_status: ExitCodes.USER_ERROR, expected_stream: MachineStream.Stdout},
+        MachineDoor{label: "audit-copies", args: ["audit", "copies", "run.jet", "--json"], action: Some("audit.copies"), expected_status: ExitCodes.OK, expected_stream: MachineStream.Stdout},
+        MachineDoor{label: "gc-report", args: ["gc", "report", "--json"], action: None, expected_status: ExitCodes.USER_ERROR, expected_stream: MachineStream.Stdout},
+        MachineDoor{label: "remote-list", args: ["remote", "list", "--json"], action: Some("remote.list"), expected_status: ExitCodes.OK, expected_stream: MachineStream.Stdout},
+        MachineDoor{label: "hangar-generations", args: ["hangar", "generations", "--json"], action: Some("generations"), expected_status: ExitCodes.OK, expected_stream: MachineStream.Stdout}
+    ]
+    for door in doors { assert_machine_door(scratch.path, door) }
+    trace :: scratch.join("fixture.jettrace")
+    fs.copy(OSPath.from(env.manifest_dir()).join(".jet/perf/1787269028-687eeec2.jettrace"), trace) ?? panic("copy trace")
+    trace_text :: trace.to_string_lossy().to_string()
+    for (label, action, expected_action) in [("perf-view", "view", "perf.view"), ("perf-export", "export", "perf.export")] {
+        args :: ["perf", action, trace_text, "--json"]
+        door :: MachineDoor{label: label, args: args, action: Some(expected_action), expected_status: ExitCodes.OK, expected_stream: MachineStream.Stdout}
+        assert_machine_door(scratch.path, door)
+    }
+}

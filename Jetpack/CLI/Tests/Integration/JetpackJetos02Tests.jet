@@ -1,0 +1,798 @@
+use Jetpack.CLI.Tests.Integration.JetpackJetos.*
+use Jetpack.CLI.Tests.Integration.JetpackJetos02.*
+use Jetpack.CLI.Tests.Integration.Support.JetpackFixtures.*
+use std.[fs, Command]
+use core.sys
+// GATE #4494: filesystem, processes, native permissions, trace and QEMU fixture tools.
+// GATE #4483: cfg Linux/unix branches use selected target facts.
+
+// Rust: tests/jetpack_jetos.rs:2348
+#Test("os_plan_prints_checked_system_contract_without_building") {
+    root :: Scratch.new("os-plan-root")
+    out :: jet().args(["os", "plan", "halcyon", "--json", "--no-color", "--offline"]).current_dir(config_example_dir()).env("JETPACK_ROOT", root.path).env("PATH", "/usr/bin:/bin").output() ?? panic("plan")
+    assert(out.status.success(), "stderr: {String.from_utf8_lossy(out.stderr)}")
+    json :: String.from_utf8_lossy(out.stdout)
+    assert(json.contains("\"host\":\"halcyon\""), "plan: {json}")
+    assert(json.contains("\"loader\":\"Limine\""), "plan: {json}")
+    assert(json.contains("\"kernel\":\"CachyOS\""), "plan: {json}")
+    assert(json.contains("\"key\": \"users.nate.normal\""), "plan: {json}")
+    assert(!root.join("systems/generations").exists(), "plan must not create a generation")
+}
+
+// Rust: tests/jetpack_jetos.rs:2378
+#Ignore("epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored")
+#Test("jetos_user_commands_use_same_generation_engine") {
+    root :: Scratch.new("jetos-user-root")
+    plan :: jetos().args(["user", "plan", "nate", "--json", "--no-color"]).current_dir(config_example_dir()).env("JETPACK_ROOT", root.path).env("PATH", "/usr/bin:/bin").output() ?? panic("user plan")
+    assert(plan.status.success(), "stderr: {String.from_utf8_lossy(plan.stderr)}")
+    stdout :: String.from_utf8_lossy(plan.stdout)
+    assert(stdout.contains("\"kind\":\"jetos.user-generation\"") && stdout.contains("\"user\":\"nate\""), "plan: {stdout}")
+    build :: jetos().args(["user", "build", "nate", "--name", "user-gen", "--no-color", "--offline"]).current_dir(config_example_dir()).env("JETPACK_ROOT", root.path).env("PATH", "/usr/bin:/bin").output() ?? panic("user build")
+    assert(build.status.success(), "stderr: {String.from_utf8_lossy(build.stderr)}")
+    assert(root.path.join("systems/generations/user-gen/users/nate/profile.json").is_file(), "expected user generation artifact")
+    proof :: jetos().args(["user", "prove", "nate", "--json", "--no-color"]).current_dir(config_example_dir()).env("JETPACK_ROOT", root.path).env("PATH", "/usr/bin:/bin").output() ?? panic("user prove")
+    assert(proof.status.success(), "stderr: {String.from_utf8_lossy(proof.stderr)}")
+    stdout :: String.from_utf8_lossy(proof.stdout)
+    assert(stdout.contains("\"user\":\"nate\"") && stdout.contains("user-gen"), "proof: {stdout}")
+}
+
+// Rust: tests/jetpack_jetos.rs:2447
+#Ignore("epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored")
+#Test("os_build_bare_host_uses_current_repo_config") {
+    proj :: Scratch.new("os-repo")
+    root :: Scratch.new("os-default-root")
+    pkg :: proj.join("jet-pkgs/pkgs/cachyos-kernel")
+    systemd :: proj.join("jet-pkgs/pkgs/systemd")
+    fs.create_dir_all(pkg.join("boot")) ?? panic("kernel dir")
+    fs.create_dir_all(systemd.join("bin")) ?? panic("systemd dir")
+    fs.write(proj.join("jet-pkgs/package.jet"), "name: \"jet-pkgs\"\nversion: \"0.1.0\"\npackages: { cachyos-kernel: library, systemd: executable }\n") ?? panic("packages")
+    fs.write(pkg.join("cachyos-kernel.jet"), "module cachyos-kernel { }\n") ?? panic("kernel module")
+    write_bootlike_cachyos_artifacts(&pkg)
+    write_cachyos_source_recipe(&pkg)
+    fs.write(systemd.join("systemd.jet"), "module systemd { }\n") ?? panic("systemd module")
+    fs.write(systemd.join("bin/systemd"), "test systemd\n") ?? panic("systemd")
+    fs.write(proj.join("config.jet"), "module box {\n    sources: { mine: ./jet-pkgs }\n    system.box: { target: linux.x64 }\n}\n") ?? panic("config")
+    out :: jet().args(["os", "build", "box", "--no-color", "--offline"]).current_dir(proj.path).env("JETPACK_ROOT", root.path).env("PATH", "/usr/bin:/bin").output() ?? panic("build")
+    assert(out.status.success(), "stderr: {String.from_utf8_lossy(out.stderr)}")
+    stderr :: String.from_utf8_lossy(out.stderr)
+    assert(stderr.contains("box"), "stderr: {stderr}")
+}
+
+// Rust: tests/jetpack_jetos.rs:2493
+#Ignore("epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored")
+#Test("os_cachyos_kernel_source_recipe_builds_boot_artifacts") {
+    proj :: Scratch.new("os-kernel-source-build")
+    root :: Scratch.new("os-kernel-source-build-root")
+    pkg :: proj.join("jet-pkgs/pkgs/cachyos-kernel")
+    systemd :: proj.join("jet-pkgs/pkgs/systemd")
+    fs.create_dir_all(pkg) ?? panic("kernel dir")
+    fs.create_dir_all(systemd.join("bin")) ?? panic("systemd dir")
+    fs.write(proj.join("jet-pkgs/package.jet"), "name: \"jet-pkgs\"\nversion: \"0.1.0\"\npackages: { cachyos-kernel: library, systemd: executable }\n") ?? panic("packages")
+    fs.write(pkg.join("cachyos-kernel.jet"), "module cachyos-kernel { }\n") ?? panic("kernel module")
+    write_cachyos_source_recipe(&pkg)
+    write_cachyos_source_builder(&pkg, "#!/bin/sh\nset -eu\nprintf 'MZ built cachyos kernel\nHdrS\n' > \"$JETOS_KERNEL_OUT/vmlinuz-cachyos\"\nprintf '070701 built cachyos initrd\n' > \"$JETOS_KERNEL_OUT/initrd-cachyos\"\n")
+    fs.write(systemd.join("systemd.jet"), "module systemd { }\n") ?? panic("systemd module")
+    fs.write(systemd.join("bin/systemd"), "test systemd\n") ?? panic("systemd")
+    fs.write(proj.join("config.jet"), "module box {\n    sources: { mine: ./jet-pkgs }\n    system.box: { target: linux.x64 }\n}\n") ?? panic("config")
+    out :: jet().args(["os", "build", "box", "--name", "kernel-source-built", "--no-color", "--offline"]).current_dir(proj.path).env("JETPACK_ROOT", root.path).env("PATH", "/usr/bin:/bin").output() ?? panic("build")
+    assert(out.status.success(), "stderr: {String.from_utf8_lossy(out.stderr)}")
+    kernel :: fs.read_to_string(root.path.join("systems/generations/kernel-source-built/boot/kernel")) ?? panic("kernel")
+    assert(kernel.contains("built cachyos kernel"), "kernel: {kernel}")
+    boot :: fs.read_to_string(root.path.join("systems/generations/kernel-source-built/boot/facts.json")) ?? panic("boot facts")
+    assert(boot.contains("\"bootstrap\":\"source-built\""), "boot: {boot}")
+}
+
+// Rust: tests/jetpack_jetos.rs:2561
+#Ignore("epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored")
+#Test("os_cachyos_kernel_source_builder_failure_is_diagnostic") {
+    proj :: Scratch.new("os-kernel-source-build-fail")
+    root :: Scratch.new("os-kernel-source-build-fail-root")
+    pkg :: proj.join("jet-pkgs/pkgs/cachyos-kernel")
+    systemd :: proj.join("jet-pkgs/pkgs/systemd")
+    fs.create_dir_all(pkg) ?? panic("kernel dir")
+    fs.create_dir_all(systemd.join("bin")) ?? panic("systemd dir")
+    fs.write(proj.join("jet-pkgs/package.jet"), "name: \"jet-pkgs\"\nversion: \"0.1.0\"\npackages: { cachyos-kernel: library, systemd: executable }\n") ?? panic("packages")
+    fs.write(pkg.join("cachyos-kernel.jet"), "module cachyos-kernel { }\n") ?? panic("kernel module")
+    write_cachyos_source_recipe(&pkg)
+    write_cachyos_source_builder(&pkg, "#!/bin/sh\necho compiler missing >&2\nexit 7\n")
+    fs.write(systemd.join("systemd.jet"), "module systemd { }\n") ?? panic("systemd module")
+    fs.write(systemd.join("bin/systemd"), "test systemd\n") ?? panic("systemd")
+    fs.write(proj.join("config.jet"), "module box {\n    sources: { mine: ./jet-pkgs }\n    system.box: { target: linux.x64 }\n}\n") ?? panic("config")
+    out :: jet().args(["os", "build", "box", "--no-color", "--offline"]).current_dir(proj.path).env("JETPACK_ROOT", root.path).env("PATH", "/usr/bin:/bin").output() ?? panic("build")
+    assert_eq(out.status.code(), Val(2))
+    stderr :: String.from_utf8_lossy(out.stderr)
+    diagnostic := stderr.find("\n  error[E1286]").map((idx) -> stderr[idx..]).unwrap_or(stderr) // #4303
+    assert_jetos_stderr_snapshot("cachyos_source_build_failed", diagnostic)
+}
+
+// Rust: tests/jetpack_jetos.rs:2605
+#Ignore("epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored")
+#Test("os_cachyos_kernel_requires_first_party_source") {
+    proj :: Scratch.new("os-missing-kernel")
+    root :: Scratch.new("os-missing-kernel-root")
+    fs.write(proj.join("config.jet"), "module box {\n    system.box: { target: linux.x64 }\n}\n") ?? panic("config")
+    out :: jet().args(["os", "build", "box", "--no-color", "--offline"]).current_dir(proj.path).env("JETPACK_ROOT", root.path).env("PATH", "/usr/bin:/bin").output() ?? panic("build")
+    assert_eq(out.status.code(), Val(2))
+    stderr :: String.from_utf8_lossy(out.stderr)
+    assert_jetos_stderr_snapshot("missing_cachyos_kernel", &stderr)
+}
+
+// Rust: tests/jetpack_jetos.rs:2627
+#Ignore("epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored")
+#Test("os_systemd_init_requires_first_party_source") {
+    proj :: Scratch.new("os-missing-systemd")
+    root :: Scratch.new("os-missing-systemd-root")
+    pkg :: proj.join("jet-pkgs/pkgs/cachyos-kernel")
+    fs.create_dir_all(pkg.join("boot")) ?? panic("kernel dir")
+    fs.write(proj.join("jet-pkgs/package.jet"), "name: \"jet-pkgs\"\nversion: \"0.1.0\"\npackages: { cachyos-kernel: library }\n") ?? panic("packages")
+    fs.write(pkg.join("cachyos-kernel.jet"), "module cachyos-kernel { }\n") ?? panic("kernel module")
+    write_bootlike_cachyos_artifacts(&pkg)
+    write_cachyos_source_recipe(&pkg)
+    fs.write(proj.join("config.jet"), "module box {\n    sources: { mine: ./jet-pkgs }\n    system.box: { target: linux.x64 }\n}\n") ?? panic("config")
+    out :: jet().args(["os", "build", "box", "--no-color", "--offline"]).current_dir(proj.path).env("JETPACK_ROOT", root.path).env("PATH", "/usr/bin:/bin").output() ?? panic("build")
+    assert_eq(out.status.code(), Val(2))
+    stderr :: String.from_utf8_lossy(out.stderr)
+    diagnostic := stderr.find("\n  error[E1281]").map((idx) -> stderr[idx..]).unwrap_or(stderr) // #4303
+    assert_jetos_stderr_snapshot("missing_systemd_init", diagnostic)
+}
+
+// Rust: tests/jetpack_jetos.rs:2667
+#Ignore("epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored")
+#Test("os_default_gnome_desktop_requires_first_party_packages") {
+    proj :: Scratch.new("os-missing-gnome-desktop")
+    root :: Scratch.new("os-missing-gnome-desktop-root")
+    kernel :: proj.join("jet-pkgs/pkgs/cachyos-kernel")
+    systemd :: proj.join("jet-pkgs/pkgs/systemd")
+    fs.create_dir_all(kernel.join("boot")) ?? panic("kernel dir")
+    fs.create_dir_all(systemd.join("bin")) ?? panic("systemd dir")
+    fs.write(proj.join("jet-pkgs/package.jet"), "name: \"jet-pkgs\"\nversion: \"0.1.0\"\npackages: { cachyos-kernel: library, systemd: executable }\n") ?? panic("packages")
+    fs.write(kernel.join("cachyos-kernel.jet"), "module cachyos-kernel { }\n") ?? panic("kernel module")
+    write_bootlike_cachyos_artifacts(&kernel)
+    write_cachyos_source_recipe(&kernel)
+    fs.write(systemd.join("systemd.jet"), "module systemd { }\n") ?? panic("systemd module")
+    write_executable(&systemd.join("bin/systemd"), "#!/bin/sh\nexit 0\n")
+    fs.write(proj.join("config.jet"), "module box {\n    sources: { mine: ./jet-pkgs }\n    system.box: { target: linux.x64, options: [ services.desktop.profile: .Default ] }\n}\n") ?? panic("config")
+    out :: jet().args(["os", "build", "box", "--no-color", "--offline"]).current_dir(proj.path).env("JETPACK_ROOT", root.path).env("PATH", "/usr/bin:/bin").output() ?? panic("build")
+    assert_eq(out.status.code(), Val(2))
+    stderr :: String.from_utf8_lossy(out.stderr)
+    diagnostic := stderr.find("\n  error[E1288]").map((idx) -> stderr[idx..]).unwrap_or(stderr) // #4303
+    assert_jetos_stderr_snapshot("missing_gnome_desktop", diagnostic)
+}
+
+// Rust: tests/jetpack_jetos.rs:2711
+#Ignore("epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored")
+#Test("os_cachyos_kernel_requires_boot_artifacts") {
+    proj :: Scratch.new("os-missing-kernel-artifacts")
+    root :: Scratch.new("os-missing-kernel-artifacts-root")
+    pkg :: proj.join("jet-pkgs/pkgs/cachyos-kernel")
+    systemd :: proj.join("jet-pkgs/pkgs/systemd")
+    fs.create_dir_all(pkg) ?? panic("kernel dir")
+    fs.create_dir_all(systemd.join("bin")) ?? panic("systemd dir")
+    fs.write(proj.join("jet-pkgs/package.jet"), "name: \"jet-pkgs\"\nversion: \"0.1.0\"\npackages: { cachyos-kernel: library, systemd: executable }\n") ?? panic("packages")
+    fs.write(pkg.join("cachyos-kernel.jet"), "module cachyos-kernel { }\n") ?? panic("kernel module")
+    fs.write(systemd.join("systemd.jet"), "module systemd { }\n") ?? panic("systemd module")
+    fs.write(systemd.join("bin/systemd"), "test systemd\n") ?? panic("systemd")
+    fs.write(proj.join("config.jet"), "module box {\n    sources: { mine: ./jet-pkgs }\n    system.box: { target: linux.x64 }\n}\n") ?? panic("config")
+    out :: jet().args(["os", "build", "box", "--no-color", "--offline"]).current_dir(proj.path).env("JETPACK_ROOT", root.path).env("PATH", "/usr/bin:/bin").output() ?? panic("build")
+    assert_eq(out.status.code(), Val(2))
+    stderr :: String.from_utf8_lossy(out.stderr)
+    diagnostic := stderr.find("\n  error[E1282]").map((idx) -> stderr[idx..]).unwrap_or(stderr) // #4303
+    assert_jetos_stderr_snapshot_trimmed("missing_cachyos_boot_artifacts", diagnostic)
+}
+
+// Rust: tests/jetpack_jetos.rs:2753
+#Ignore("epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored")
+#Test("os_cachyos_kernel_rejects_text_boot_artifacts") {
+    proj :: Scratch.new("os-text-kernel-artifacts")
+    root :: Scratch.new("os-text-kernel-artifacts-root")
+    pkg :: proj.join("jet-pkgs/pkgs/cachyos-kernel")
+    systemd :: proj.join("jet-pkgs/pkgs/systemd")
+    fs.create_dir_all(pkg.join("boot")) ?? panic("kernel dir")
+    fs.create_dir_all(systemd.join("bin")) ?? panic("systemd dir")
+    fs.write(proj.join("jet-pkgs/package.jet"), "name: \"jet-pkgs\"\nversion: \"0.1.0\"\npackages: { cachyos-kernel: library, systemd: executable }\n") ?? panic("packages")
+    fs.write(pkg.join("cachyos-kernel.jet"), "module cachyos-kernel { }\n") ?? panic("kernel module")
+    fs.write(pkg.join("boot/vmlinuz-cachyos"), "not a kernel\n") ?? panic("text kernel")
+    fs.write(pkg.join("boot/initrd-cachyos"), "not an initrd\n") ?? panic("text initrd")
+    write_cachyos_source_recipe(&pkg)
+    fs.write(systemd.join("systemd.jet"), "module systemd { }\n") ?? panic("systemd module")
+    fs.write(systemd.join("bin/systemd"), "test systemd\n") ?? panic("systemd")
+    fs.write(proj.join("config.jet"), "module box {\n    sources: { mine: ./jet-pkgs }\n    system.box: { target: linux.x64 }\n}\n") ?? panic("config")
+    out :: jet().args(["os", "build", "box", "--no-color", "--offline"]).current_dir(proj.path).env("JETPACK_ROOT", root.path).env("PATH", "/usr/bin:/bin").output() ?? panic("build")
+    assert_eq(out.status.code(), Val(2))
+    stderr :: String.from_utf8_lossy(out.stderr)
+    diagnostic := stderr.find("\n  error[E1282]").map((idx) -> stderr[idx..]).unwrap_or(stderr) // #4303
+    assert_jetos_stderr_snapshot_trimmed("missing_cachyos_boot_artifacts", diagnostic)
+}
+
+// Rust: tests/jetpack_jetos.rs:2798
+#Ignore("epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored")
+#Test("os_cachyos_kernel_requires_source_recipe") {
+    proj :: Scratch.new("os-missing-kernel-source")
+    root :: Scratch.new("os-missing-kernel-source-root")
+    pkg :: proj.join("jet-pkgs/pkgs/cachyos-kernel")
+    systemd :: proj.join("jet-pkgs/pkgs/systemd")
+    fs.create_dir_all(pkg.join("boot")) ?? panic("kernel dir")
+    fs.create_dir_all(systemd.join("bin")) ?? panic("systemd dir")
+    fs.write(proj.join("jet-pkgs/package.jet"), "name: \"jet-pkgs\"\nversion: \"0.1.0\"\npackages: { cachyos-kernel: library, systemd: executable }\n") ?? panic("packages")
+    fs.write(pkg.join("cachyos-kernel.jet"), "module cachyos-kernel { }\n") ?? panic("kernel module")
+    write_bootlike_cachyos_artifacts(&pkg)
+    fs.write(systemd.join("systemd.jet"), "module systemd { }\n") ?? panic("systemd module")
+    fs.write(systemd.join("bin/systemd"), "test systemd\n") ?? panic("systemd")
+    fs.write(proj.join("config.jet"), "module box {\n    sources: { mine: ./jet-pkgs }\n    system.box: { target: linux.x64 }\n}\n") ?? panic("config")
+    out :: jet().args(["os", "build", "box", "--no-color", "--offline"]).current_dir(proj.path).env("JETPACK_ROOT", root.path).env("PATH", "/usr/bin:/bin").output() ?? panic("build")
+    assert_eq(out.status.code(), Val(2))
+    stderr :: String.from_utf8_lossy(out.stderr)
+    diagnostic := stderr.find("\n  error[E1284]").map((idx) -> stderr[idx..]).unwrap_or(stderr) // #4303
+    assert_jetos_stderr_snapshot_trimmed("missing_cachyos_source_recipe", diagnostic)
+}
+
+// Rust: tests/jetpack_jetos.rs:2841
+#Ignore("epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored")
+#Test("os_systemd_init_requires_init_artifact") {
+    proj :: Scratch.new("os-missing-systemd-artifact")
+    root :: Scratch.new("os-missing-systemd-artifact-root")
+    kernel :: proj.join("jet-pkgs/pkgs/cachyos-kernel")
+    systemd :: proj.join("jet-pkgs/pkgs/systemd")
+    fs.create_dir_all(kernel.join("boot")) ?? panic("kernel dir")
+    fs.create_dir_all(systemd) ?? panic("systemd dir")
+    fs.write(proj.join("jet-pkgs/package.jet"), "name: \"jet-pkgs\"\nversion: \"0.1.0\"\npackages: { cachyos-kernel: library, systemd: executable }\n") ?? panic("packages")
+    fs.write(kernel.join("cachyos-kernel.jet"), "module cachyos-kernel { }\n") ?? panic("kernel module")
+    write_bootlike_cachyos_artifacts(&kernel)
+    write_cachyos_source_recipe(&kernel)
+    fs.write(systemd.join("systemd.jet"), "module systemd { }\n") ?? panic("systemd module")
+    fs.write(proj.join("config.jet"), "module box {\n    sources: { mine: ./jet-pkgs }\n    system.box: { target: linux.x64 }\n}\n") ?? panic("config")
+    out :: jet().args(["os", "build", "box", "--no-color", "--offline"]).current_dir(proj.path).env("JETPACK_ROOT", root.path).env("PATH", "/usr/bin:/bin").output() ?? panic("build")
+    assert_eq(out.status.code(), Val(2))
+    stderr :: String.from_utf8_lossy(out.stderr)
+    diagnostic := stderr.find("\n  error[E1283]").map((idx) -> stderr[idx..]).unwrap_or(stderr) // #4303
+    assert_jetos_stderr_snapshot("missing_systemd_init_artifact", diagnostic)
+}
+
+// Rust: tests/jetpack_jetos.rs:2884
+#Ignore("epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored")
+#Test("os_missing_host_is_friendly_and_exits_2") {
+    root :: Scratch.new("os-no-host")
+    out :: jet().args(["os", "build", "--no-color"]).env("JETPACK_ROOT", root.path).output() ?? panic("build")
+    assert_eq(out.status.code(), Val(2))
+    assert_jetos_stderr_snapshot("missing_host", String.from_utf8_lossy(out.stderr))
+}
+
+// Rust: tests/jetpack_jetos.rs:2898
+#Ignore("epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored")
+#Test("os_missing_external_root_is_friendly_and_exits_2") {
+    root :: Scratch.new("os-no-root")
+    out :: jet().args(["os", "build", "laptop@", "--no-color"]).env("JETPACK_ROOT", root.path).output() ?? panic("build")
+    assert_eq(out.status.code(), Val(2))
+    assert_jetos_stderr_snapshot_trimmed("missing_host_root", String.from_utf8_lossy(out.stderr))
+}
+
+// Rust: tests/jetpack_jetos.rs:2914
+#Ignore("epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored")
+#Test("os_unknown_host_lists_available_systems") {
+    root :: Scratch.new("os-bad-host")
+    out :: jet().args(["os", "build", "nope", "--no-color", "--offline"]).current_dir(config_example_dir()).env("JETPACK_ROOT", root.path).output() ?? panic("build")
+    assert_eq(out.status.code(), Val(2))
+    assert_jetos_stderr_snapshot("unknown_host", String.from_utf8_lossy(out.stderr))
+}
+
+// Rust: tests/jetpack_jetos.rs:2929
+#Ignore("epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored")
+#Test("os_missing_config_file_is_friendly") {
+    root :: Scratch.new("os-no-config")
+    out :: jet().args(["os", "build", "box@/definitely/not/here", "--no-color"]).env("JETPACK_ROOT", root.path).output() ?? panic("build")
+    assert_eq(out.status.code(), Val(2))
+    assert_jetos_stderr_snapshot("missing_config", String.from_utf8_lossy(out.stderr))
+}
+
+// Rust: tests/jetpack_jetos.rs:2943
+#Ignore("epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored")
+#Test("os_retired_option_namespace_is_snapshot_pinned") {
+    proj :: Scratch.new("os-bad-namespace")
+    root :: Scratch.new("os-bad-namespace-root")
+    fs.write(proj.join("config.jet"), "module box {\n    system.box: { target: linux.x64, options: [net.hostName: \"box\"] }\n}\n") ?? panic("config")
+    out :: jet().args(["os", "build", "box", "--no-color", "--offline"]).current_dir(proj.path).env("JETPACK_ROOT", root.path).output() ?? panic("build")
+    assert_eq(out.status.code(), Val(2))
+    assert_jetos_stderr_snapshot("retired_namespace", String.from_utf8_lossy(out.stderr))
+}
+
+// Rust: tests/jetpack_jetos.rs:2964
+#Ignore("epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored")
+#Test("os_generations_are_newest_first_and_rollback_activates_prior") {
+    root :: Scratch.new("os-gens-root")
+    for name in ["first", "second"] {
+        out :: jet().args(["os", "switch", "halcyon", "--name", name, "--no-color", "--offline"]).current_dir(config_example_dir()).env("JETPACK_ROOT", root.path).env("PATH", "/usr/bin:/bin").output() ?? panic("switch")
+        assert(out.status.success(), "stderr: {String.from_utf8_lossy(out.stderr)}")
+    }
+    assert(!root.join("systems/generations/second/activation-proof.txt").exists(), "activation must never mutate a sealed generation")
+    sealed_retry :: jet().args(["os", "build", "halcyon", "--name", "second", "--no-color", "--offline"]).current_dir(config_example_dir()).env("JETPACK_ROOT", root.path).env("PATH", "/usr/bin:/bin").output() ?? panic("sealed retry")
+    assert(sealed_retry.status.success(), "activation left the sealed proof stale: {String.from_utf8_lossy(sealed_retry.stderr)}")
+    for name in ["first", "second"] {
+        proof :: fs.read_to_string(root.path.join("systems/generations").join(name).join("generation-root.json")) ?? panic("root proof")
+        assert(proof.contains("\"kind\":\"jetos.generation-root.v1\"") && proof.contains("\"output_digests\":[\"sha256-"), "retained generation {name} must keep its typed Hangar root proof: {proof}")
+    }
+    journal :: root.join("hangar/lifecycle-db/journal")
+    read_journal :: () -> {
+        entries := (fs.read_dir(journal) ?? panic("journal")).filter_map((entry) -> entry.ok()).map((entry) -> (entry.file_name(), fs.read(entry.path()).expect("read journal"))).collect()
+        entries.sort_by((a, b) -> a.0.cmp(b.0))
+        entries
+    }
+    lifecycle_before_rollback :: read_journal()
+    lifecycle_text :: lifecycle_before_rollback.iter().map((entry) -> String.from_utf8_lossy(entry.1)).collect()
+    assert(lifecycle_text.matches("external-consumer").count() >= 2, "both retained generations must remain lifecycle roots: {lifecycle_text}")
+    list :: jet().args(["os", "generations", "halcyon", "--no-color"]).env("JETPACK_ROOT", root.path).output() ?? panic("list")
+    assert(list.status.success())
+    stdout :: String.from_utf8_lossy(list.stdout)
+    second :: stdout.find("second") ?? panic("second")
+    first :: stdout.find("first") ?? panic("first")
+    assert(second < first, "generations should be newest-first: {stdout}")
+    proof :: fs.read_to_string(root.path.join("systems/activation-proofs/halcyon/second.txt")) ?? panic("activation proof")
+    assert(proof.contains("service-risk"), "proof: {proof}")
+    assert(proof.contains("rollback-proof: pass previous=first"), "proof: {proof}")
+    rollback :: jet().args(["os", "rollback", "halcyon", "first", "--no-color"]).env("JETPACK_ROOT", root.path).output() ?? panic("rollback")
+    assert(rollback.status.success(), "stderr: {String.from_utf8_lossy(rollback.stderr)}")
+    assert(String.from_utf8_lossy(rollback.stderr).contains("rolled back"), "stderr: {String.from_utf8_lossy(rollback.stderr)}")
+    assert_eq(read_journal(), lifecycle_before_rollback, "rollback changes activation pointers, never lifecycle roots")
+    same :: jet().args(["os", "rollback", "halcyon", "first", "--no-color"]).env("JETPACK_ROOT", root.path).output() ?? panic("same rollback")
+    assert_eq(same.status.code(), Val(2))
+    stderr :: String.from_utf8_lossy(same.stderr)
+    assert(stderr.contains("no generation is available"), "stderr: {stderr}")
+}
+
+// Rust: tests/jetpack_jetos.rs:3106
+#Ignore("epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored")
+#Test("os_vm_run_never_reaches_nixos_migration_backend") {
+    proj :: Scratch.new("os-vm-real-no-nixpkgs-pin")
+    root :: Scratch.new("os-vm-real-no-nixpkgs-pin-root")
+    fs.write(proj.join("config.jet"), "module halcyon {\n    sources: {}\n    system.halcyon: {\n        target: linux.x64,\n        packages: [],\n        services: {},\n        options: [\n            network.hostName: halcyon,\n        ],\n    }\n}\n") ?? panic("config")
+    out :: jet().args(["os", "vm", "run", "halcyon", "--disk", "halcyon.qcow2", "--no-color", "--offline"]).current_dir(proj.path).env("JETPACK_ROOT", root.path).env("PATH", "/usr/bin:/bin").output() ?? panic("run")
+    assert_eq(out.status.code(), Val(2))
+    stderr :: String.from_utf8_lossy(out.stderr)
+    assert(!stderr.contains("E1291"), "product VM path reached NixOS backend: {stderr}")
+    assert(!root.join("systems/backend").exists())
+}
+
+// Rust: tests/jetpack_jetos.rs:3141
+#Ignore("epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored")
+#Test("os_vm_prove_requires_pinned_media_tools") {
+    root :: Scratch.new("os-vm-tools-root")
+    tools :: Scratch.new("os-vm-tools-empty")
+    out :: jet().args(["os", "vm", "prove", "halcyon", "--disk", "halcyon.qcow2", "--no-color", "--offline"]).current_dir(config_example_dir()).env("JETPACK_ROOT", root.path).env("PATH", tools.path).output() ?? panic("prove")
+    assert_eq(out.status.code(), Val(2))
+    assert_jetos_stderr_snapshot_trimmed("vm_tools_missing", String.from_utf8_lossy(out.stderr))
+    assert(!root.join("systems/vm-proofs").exists(), "missing tools must not write VM proof artifacts")
+}
+
+// Rust: tests/jetpack_jetos.rs:3171
+#Ignore("epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored")
+#Test("os_vm_run_requires_proved_installed_disk") {
+    root :: Scratch.new("os-vm-run-unproven-root")
+    tools :: Scratch.new("os-vm-run-unproven-tools")
+    write_fake_vm_tools(&tools.path, false)
+    out :: jet().args(["os", "vm", "run", "halcyon", "--disk", "halcyon.qcow2", "--no-color", "--offline"]).current_dir(config_example_dir()).env("JETPACK_ROOT", root.path).env("PATH", tools.path).output() ?? panic("run")
+    assert_eq(out.status.code(), Val(2))
+    assert_jetos_stderr_snapshot("vm_run_unproven", String.from_utf8_lossy(out.stderr))
+}
+
+// Rust: tests/jetpack_jetos.rs:3198
+#Ignore("epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored")
+#Test("os_vm_prove_real_tier_is_retired_to_explicit_migration") {
+    root :: Scratch.new("os-vm-real-root")
+    tools :: Scratch.new("os-vm-real-tools")
+    write_fake_vm_tools(&tools.path, true)
+    out :: jet().args(["os", "vm", "prove", "halcyon", "--disk", "halcyon.qcow2", "--real", "--name", "vm-real", "--no-color", "--offline"]).current_dir(config_example_dir()).env("JETPACK_ROOT", root.path).env("PATH", tools.path).output() ?? panic("prove")
+    assert_eq(out.status.code(), Val(2))
+    stderr :: String.from_utf8_lossy(out.stderr)
+    assert(stderr.contains("`--real` is not a jetos VM option"), "{stderr}")
+    assert(stderr.contains("jet os migrate compare-nixos <host> --out <dir>"), "{stderr}")
+    assert(!root.join("systems/vm-proofs").exists(), "retired product path must not write comparison proof")
+}
+
+// Rust: tests/jetpack_jetos.rs:3240
+#Ignore("epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored")
+#Test("os_migrate_compare_nixos_is_explicit_and_proof_gated") {
+    if sys.target.selected_os() != "linux" -> return
+    root :: Scratch.new("os-migrate-nixos-root")
+    (path, outputs) :: build_nixos_migration_test_tools(&root.path)
+    out_dir :: root.join("published")
+    out :: jet().args(["os", "migrate", "compare-nixos", "halcyon-gnome", "--out", out_dir.to_str().expect("out path"), "--no-color", "--offline"])
+        .current_dir(OSPath.from(env("CARGO_MANIFEST_DIR")).join("tests/fixtures/jetpack-config-real"))
+        .env("JETPACK_ROOT", root.path).env("JET_TEST_TOOL_ROOT", outputs)
+        .env("JET_TEST_MISSING_LOCKED_INPUT", "github:NixOS/nixpkgs/fef9403a3e4d31b0a23f0bacebbec52c248fbb51")
+        .env("JET_TEST_REQUIRE_COMPOSED_METADATA", "1").env("PATH", path).output() ?? panic("migration")
+    stderr :: String.from_utf8_lossy(out.stderr)
+    assert_eq(out.status.code(), Val(2), "stdout: {String.from_utf8_lossy(out.stdout)}\nstderr: {stderr}")
+    assert(stderr.contains("migration comparison unavailable offline: github:NixOS/nixpkgs/fef9403a3e4d31b0a23f0bacebbec52c248fbb51"), "{stderr}")
+    assert(!out_dir.exists(), "comparison artifacts must not publish before guest proof")
+}
+
+// Rust: tests/jetpack_jetos.rs:3286
+#Ignore("epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored")
+#Test("nixos_migration_prompt_probe_executes_interactive_shell_init") {
+    root :: Scratch.new("nixos-interactive-prompt")
+    bashrc :: root.join("bashrc")
+    backend :: fs.read_to_string("Jetpack/JetOS/Source/NixosBackend.jet") ?? panic("backend source")
+    prompt_init := backend.lines().map((line) -> line.trim()).find((line) -> line.starts_with("PS1=")).expect("generated NixOS configuration must initialize PS1") // #4303
+    fs.write(bashrc, "{prompt_init}\nexport PS1\n") ?? panic("bashrc")
+    out :: Command.new("bash").args(["--noprofile", "--rcfile"]).arg(bashrc).args(["-i", "-c", "printf '%s' \"$PS1\""]).output() ?? panic("bash")
+    assert(out.status.success(), "{String.from_utf8_lossy(out.stderr)}")
+    assert_eq(String.from_utf8(out.stdout) ?? panic("stdout"), "NixOS comparison $ ")
+}
+
+// Rust: tests/jetpack_jetos.rs:3317
+#Ignore("epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored")
+#Test("nixos_migration_protects_stage_before_writing_inputs") {
+    if sys.target.selected_os() != "linux" -> return
+    root :: Scratch.new("nixos-private-stage")
+    out_dir :: root.join("published")
+    trace :: root.join("stage.trace")
+    jet_program :: jet().get_program().to_owned()
+    out :: Command.new("strace").args(["-f", "-s", "4096", "-o"]).arg(trace).args(["-e", "trace=%file", "--"]).arg(jet_program)
+        .args(["os", "migrate", "compare-nixos", "halcyon-gnome", "--out", out_dir.to_str().expect("out path"), "--no-color"])
+        .current_dir(OSPath.from(env("CARGO_MANIFEST_DIR")).join("tests/fixtures/jetpack-config-real"))
+        .env("JETPACK_ROOT", root.path).env("NIX_REMOTE", "invalid").output() ?? panic("strace")
+    assert_eq(out.status.code(), Val(2))
+    assert(!out_dir.exists())
+    trace :: fs.read_to_string(trace) ?? panic("trace")
+    marker :: "/.nixos-comparison-halcyon-gnome-"
+    lines :: trace.lines().collect()
+    mkdir :: lines.iter().position((line) -> line.contains("mkdir(") && line.contains(marker) && line.contains("0700")) ?? panic("private 0700 mkdir missing:\n{trace}")
+    first_input :: lines.iter().position((line) -> line.contains(marker) && (line.contains("/flake.nix") || line.contains("/configuration.nix") || line.contains("/input-facts.json"))) ?? panic("private input creation missing:\n{trace}")
+    protected :: lines.iter().enumerate().filter_map((entry) -> {
+        (index, line) :: entry
+        if index < first_input && line.contains(marker) && line.contains("AT_SYMLINK_NOFOLLOW") && (line.contains("S_IFDIR|0700") || line.contains("stx_mode=S_IFDIR|0700")) { Val(index) } else { None }
+    }).collect()
+    assert_eq(protected.len(), 2, "expected post-mkdir and pre-write verification:\n{trace}")
+    insecure :: lines.iter().find((line) -> line.contains(marker) && (line.contains("st_mode=S_IFDIR|") || line.contains("stx_mode=S_IFDIR|")) && !line.contains("S_IFDIR|0700"))
+    assert(insecure.is_none(), "stage mode widened: {insecure}")
+    assert(mkdir < protected[0], "mode checked before mkdir:\n{trace}")
+    assert(protected[1] < first_input, "private input opened before mode/no-follow verification:\n{trace}")
+}
+
+// Rust: tests/jetpack_jetos.rs:3593
+#Ignore("epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored")
+#Test("nixos_migration_publish_stage_is_private_and_collision_safe") {
+    if sys.target.selected_os() != "linux" -> return
+    root :: Scratch.new("nixos-private-publish")
+    (path, outputs) :: build_nixos_migration_test_tools(&root.path)
+    published :: root.join("published")
+    success_trace :: root.join("publish-success.trace")
+    out :: traced_nixos_migration(&root, &published, &success_trace, &path, &outputs, false, false)
+    assert(out.status.success(), "stdout: {String.from_utf8_lossy(out.stdout)}\nstderr: {String.from_utf8_lossy(out.stderr)}")
+    trace :: fs.read_to_string(success_trace) ?? panic("trace")
+    marker :: "/.nixos-comparison-publish-halcyon-gnome-"
+    lines :: trace.lines().collect()
+    mkdir :: lines.iter().position((line) -> line.contains("mkdir(") && line.contains(marker) && line.contains("0700")) ?? panic("private publish mkdir missing:\n{trace}")
+    protected :: lines.iter().position((line) -> line.contains(marker) && line.contains("AT_SYMLINK_NOFOLLOW") && (line.contains("S_IFDIR|0700") || line.contains("stx_mode=S_IFDIR|0700"))) ?? panic("private publish verification missing:\n{trace}")
+    first_output :: lines.iter().position((line) -> line.contains(marker) && line.contains("/nixos/halcyon-gnome/system.qcow2")) ?? panic("private publish output missing:\n{trace}")
+    assert(mkdir < protected && protected < first_output, "{trace}")
+    if sys.target.selected_family() == "unix" {
+        assert_eq((fs.metadata(published) ?? panic("published metadata")).permissions().mode() & 0o777, 0o700)
+    }
+    host :: published.join("nixos/halcyon-gnome")
+    image :: host.join("system.qcow2")
+    proof :: host.join("proof.json")
+    receipt :: host.join("receipt.json")
+    assert(image.is_file())
+    assert(proof.is_file())
+    assert(receipt.is_file())
+    assert((fs.read_to_string(proof) ?? panic("proof")).contains("\"image\":\"system.qcow2\""))
+    assert((fs.read_to_string(receipt) ?? panic("receipt")).contains("\"boot_proof\":\"proof.json\""))
+    plan :: fs.read_to_string(host.join("build-boot-plan.json")) ?? panic("plan")
+    assert_eq(plan.matches("\"--offline\"").count(), 2, "{plan}")
+    stdout :: String.from_utf8(out.stdout) ?? panic("stdout")
+    for path in [&image, &proof, &receipt] { assert(stdout.contains(path.display().to_string()), "{stdout}") }
+    json_out_dir :: root.join("json-output")
+    json_trace :: root.join("publish-json.trace")
+    out :: traced_nixos_migration(&root, &json_out_dir, &json_trace, &path, &outputs, false, true)
+    assert(out.status.success(), "stdout: {String.from_utf8_lossy(out.stdout)}\nstderr: {String.from_utf8_lossy(out.stderr)}")
+    assert_eq(String.from_utf8(out.stdout) ?? panic("stdout"),
+        "{{\"kind\":\"nixos.migration.comparison\",\"state\":\"proved\",\"host\":\"halcyon-gnome\",\"image\":\"{json_out_dir.join("nixos/halcyon-gnome/system.qcow2").display()}\",\"proof\":\"{json_out_dir.join("nixos/halcyon-gnome/proof.json").display()}\",\"receipt\":\"{json_out_dir.join("nixos/halcyon-gnome/receipt.json").display()}\"}}\n")
+    collision_out :: root.join("collision-output")
+    collision_trace :: root.join("publish-collision.trace")
+    out :: traced_nixos_migration(&root, &collision_out, &collision_trace, &path, &outputs, true, false)
+    assert_eq(out.status.code(), Val(2))
+    assert(!collision_out.exists())
+    trace :: fs.read_to_string(collision_trace) ?? panic("trace")
+    assert(trace.lines().any((line) -> line.contains("mkdir(") && line.contains(marker) && line.contains("0700") && line.contains("EEXIST")), "preexisting publish leaf did not fail atomically:\n{trace}")
+}
+
+// Rust: tests/jetpack_jetos.rs:3718
+#Ignore("epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored")
+#Test("nixos_migration_rejects_direct_engine_front_doors") {
+    marker :: std.process.id().to_string()
+    for (name, command, prefix) in [("jetpack", jetpack(), ["os", "migrate"]), ("jetos", jetos(), ["migrate"])] {
+        root :: Scratch.new("os-direct-migration-rejected")
+        out_dir :: root.join("should-not-publish")
+        out :: command.args(prefix).args(["compare-nixos", "halcyon", "--out", out_dir.to_str().expect("out path"), "--no-color", "--offline"])
+            .current_dir(config_example_dir()).env("JETPACK_ROOT", root.path).env("JET_INTERNAL_ROOT_DISPATCH_PID", marker).output() ?? panic("direct migration")
+        stderr :: String.from_utf8_lossy(out.stderr)
+        assert_eq(out.status.code(), Val(2), "{name}: {stderr}")
+        assert(stderr.contains("available only through root `jet`"), "{name}: {stderr}")
+        assert(!out_dir.exists(), "{name} reached migration publication")
+    }
+}
+
+// Rust: tests/jetpack_jetos.rs:3753
+#Ignore("epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored")
+#Test("direct_os_engines_install_the_config_eval_bridge") {
+    for (command, args) in [(jetpack(), ["os", "check", "halcyon", "--no-color"]), (jetos(), ["check", "halcyon", "--no-color"])] {
+        root :: Scratch.new("os-direct-engine-bridge")
+        out :: command.args(args).current_dir(config_example_dir()).env("JETPACK_ROOT", root.path).output() ?? panic("check")
+        assert(out.status.success(), "stdout: {String.from_utf8_lossy(out.stdout)}\nstderr: {String.from_utf8_lossy(out.stderr)}")
+    }
+}
+
+// Rust: tests/jetpack_jetos.rs:3776
+#Ignore("epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored")
+#Test("nixos_migration_backend_has_no_product_path_or_rebranding_rewrite") {
+    vm :: fs.read_to_string("Jetpack/JetOS/Source/VmCommands.jet") ?? panic("vm source")
+    generation :: fs.read_to_string("Jetpack/JetOS/Source/Generation.jet") ?? panic("generation source")
+    backend :: fs.read_to_string("Jetpack/JetOS/Source/NixosBackend.jet") ?? panic("backend source")
+    files :: fs.read_to_string("Jetpack/JetOS/Source/GenerationFiles.jet") ?? panic("generation files")
+    syntax :: fs.read_to_string("Compiler/JetFoundation/Source/Syntax/JetpackConfig.jet") ?? panic("syntax source")
+    assert(!vm.contains("NixosBackend"), "{vm}")
+    assert(!generation.contains("NixosBackend"), "{generation}")
+    assert(!backend.contains("distroName = \"jetos\""), "{backend}")
+    assert(!backend.contains("bounded_redacted_tail"))
+    assert(backend.contains("private build output was suppressed"))
+    assert(backend.contains("guest payload was suppressed"))
+    service := backend.split_once("const CONFIGURATION_PROOF_SERVICE").and_then((parts) -> parts.1.split_once("fn render_configuration_nix")).map((parts) -> parts.0).expect("proof service") // #4303
+    assert(service.contains("--rcfile /etc/bashrc -i"))
+    assert(syntax.contains("OS_VERB_MIGRATE") && syntax.contains("\"migrate\""))
+    assert(syntax.contains("OS_MIGRATION_COMPARE_NIXOS") && syntax.contains("\"compare-nixos\""))
+    assert(syntax.contains("OS_MIGRATION_FLAG_OUT") && syntax.contains("\"--out\""))
+    assert(syntax.contains("OS_VERB_MIGRATE,"))
+    for pattern in ["sanitize_runtime_branding", "replace_bytes_in_place", "b\"NixOS\".as_slice(), b\"JetOS\""] {
+        assert(!files.contains(pattern), "rebranding rewrite remains: {pattern}")
+    }
+}
+
+// Rust: tests/jetpack_jetos.rs:3812
+#Ignore("epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored")
+#Test("os_vm_prove_writes_media_bound_harness") {
+    root :: Scratch.new("os-vm-proof-root")
+    tools :: Scratch.new("os-vm-proof-tools")
+    write_fake_vm_tools(&tools.path, false)
+    out :: jet().args(["os", "vm", "prove", "halcyon", "--disk", "halcyon.qcow2", "--name", "vm-proof", "--no-color", "--offline"]).current_dir(config_example_dir()).env("JETPACK_ROOT", root.path).env("PATH", tools.path).output() ?? panic("prove")
+    assert_eq(out.status.code(), Val(2))
+    stderr :: String.from_utf8_lossy(out.stderr)
+    assert(stderr.contains("error[E1285]"), "stderr should refuse harness-only proof: {stderr}")
+    proof_dir :: root.path.join("systems/vm-proofs")
+    proof :: (fs.read_dir(proof_dir) ?? panic("proofs")).filter_map((entry) -> entry.ok()).map((entry) -> entry.path()).find((path) -> path.extension().and_then((e) -> e.to_str()) == Val("json")) ?? panic("vm proof json")
+    data :: fs.read_to_string(proof) ?? panic("proof")
+    assert(data.contains("\"state\":\"harness-ready\""), "proof should not claim guest pass before QEMU run: {data}")
+    assert(data.contains("\"proof_tier\":\"plumbing\""), "fake-tool harness should be labeled plumbing tier: {data}")
+    assert(data.contains("\"disk\":\"halcyon.qcow2\""), "proof: {data}")
+    assert(data.contains("\"media_proof\":"), "proof should bind installer media: {data}")
+    assert(data.contains("\"expected_guest_proof\":"), "proof should name the guest proof artifact path: {data}")
+    assert(data.contains("\"sha256\":"), "proof should hash tools: {data}")
+    assert(data.contains("rollback-generation-bootable"), "proof should name guest assertions: {data}")
+    assert(data.contains("terminal-login-ready") && data.contains("desktop-session-ready") && data.contains("graphical-console-ready") && data.contains("desktop-launchers-run"), "proof should require terminal and desktop readiness: {data}")
+    assert(data.contains("\"phase\":\"boot-installer\""), "proof should record QEMU boot phase: {data}")
+    assert(data.contains("\"phase\":\"boot-installed-disk\""), "proof should record reboot phase: {data}")
+    assert(data.contains("\"phase\":\"boot-graphical-desktop\""), "proof should record graphical desktop phase: {data}")
+    assert(data.contains("\"-cdrom\"") && data.contains("jetos-installer-halcyon.iso"), "installer phase should boot the ISO media: {data}")
+    installed_phase := data.split("\"phase\":\"boot-installed-disk\"").nth(1).and_then((rest) -> rest.split("\"phase\":\"boot-graphical-desktop\"").next()).expect("installed-disk command in proof") // #4303
+    assert(installed_phase.contains("\"-boot\",\"c\"") && installed_phase.contains("file=halcyon.qcow2,format=qcow2,if=ide") && !installed_phase.contains("\"-kernel\"") && !installed_phase.contains("\"-initrd\"") && !installed_phase.contains("\"-append\""), "installed-disk phase should boot firmware/disk, not direct kernel: {installed_phase}")
+    assert(data.contains("\"-kernel\"") && data.contains("/boot/kernel"), "graphical proof should direct-boot the generation kernel: {data}")
+    assert(data.contains("\"-initrd\"") && data.contains("/boot/initrd"), "graphical proof should direct-boot the generation initrd: {data}")
+    assert(data.contains("jetos.mode=desktop-verify") && data.contains("\"-display\"") && data.contains("vnc=127.0.0.1:0") && data.contains("\"-vga\"") && data.contains("\"std\""), "graphical proof should expose a fixed VNC-backed stdvga display: {data}")
+    assert(data.contains("qemu-xhci,id=xhci") && data.contains("usb-kbd,bus=xhci.0") && data.contains("usb-tablet,bus=xhci.0"), "graphical proof should expose explicit USB input devices for VNC use: {data}")
+    assert(data.contains("rdinit=/jetos/init"), "graphical QEMU proof should boot the JetOS verifier overlay script: {data}")
+    assert(data.contains("jetos.generation=vm-proof"), "QEMU proof should bind guest boot to the generation name: {data}")
+    assert(data.contains("console=ttyS0"), "QEMU proof needs serial output for guest proof marker: {data}")
+    assert(proof.with_file_name("halcyon-vm-proof-vm-proof.run").join("boot-graphical-desktop.stdout").is_file(), "vm prove should run the recorded QEMU phases")
+    assert(root.path.join("systems/images/jetos-installer-halcyon.iso.proof.json").is_file(), "vm prove should build media proof first")
+}
+
+// Rust: tests/jetpack_jetos.rs:3960
+#Ignore("epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored")
+#Test("os_vm_prove_runs_qemu_and_records_guest_proof") {
+    root :: Scratch.new("os-vm-run-root")
+    tools :: Scratch.new("os-vm-run-tools")
+    write_fake_vm_tools(&tools.path, true)
+    out :: jet().args(["os", "vm", "prove", "halcyon", "--disk", "halcyon.qcow2", "--name", "vm-live", "--no-color", "--offline"]).current_dir(config_example_dir()).env("JETPACK_ROOT", root.path).env("PATH", tools.path).output() ?? panic("prove")
+    assert(out.status.success(), "stderr: {String.from_utf8_lossy(out.stderr)}")
+    proof :: root.path.join("systems/vm-proofs/halcyon-vm-live-vm-proof.json")
+    guest :: root.path.join("systems/vm-proofs/halcyon-vm-live-vm-proof-guest-proof.json")
+    final_proof :: fs.read_to_string(proof) ?? panic("proof")
+    assert(final_proof.contains("\"state\":\"guest-passed\""), "proof: {final_proof}")
+    assert(final_proof.contains("\"proof_tier\":\"plumbing\""), "regular VM proof is harness plumbing until --real passes: {final_proof}")
+    assert(final_proof.contains("\"guest_proof_sha256\""), "proof: {final_proof}")
+    guest_proof :: fs.read_to_string(guest) ?? panic("guest proof")
+    assert(guest_proof.contains("\"serial_report\""), "guest proof: {guest_proof}")
+    assert(guest_proof.contains("halcyon") && guest_proof.contains("vm-live"), "guest serial report should bind host and generation: {guest_proof}")
+    assert(guest_proof.contains("\"qemu-system-x86_64\""), "guest proof should bind the runner toolchain: {guest_proof}")
+    boot_log :: root.path.join("systems/vm-proofs/halcyon-vm-live-vm-proof.run/boot-graphical-desktop.stdout")
+    assert((fs.read_to_string(boot_log) ?? panic("boot log")).contains("JETOS_GUEST_PROOF"), "boot log should carry guest proof marker")
+    run :: jet().args(["os", "vm", "run", "halcyon", "--disk", "halcyon.qcow2", "--no-color", "--offline"]).current_dir(config_example_dir()).env("JETPACK_ROOT", root.path).env("PATH", tools.path).output() ?? panic("run")
+    assert(run.status.success(), "stderr: {String.from_utf8_lossy(run.stderr)}")
+    stdout :: String.from_utf8_lossy(run.stdout)
+    stderr :: String.from_utf8_lossy(run.stderr)
+    assert(stderr.contains("booting jetos VM halcyon generation vm-live"), "stderr: {stderr}")
+    assert(stdout.contains("JETOS_GUEST_PROOF"), "interactive run should launch QEMU with the proved disk: {stdout}")
+}
+
+// Rust: tests/jetpack_jetos.rs:4064
+#Ignore("epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored")
+#Test("os_vm_test_runs_declared_scenario_and_records_proof") {
+    project :: Scratch.new("os-vmtest-project")
+    copy_dir_recursive(&config_example_dir(), &project.path)
+    config := fs.read_to_string(project.path.join("config.jet")) ?? panic("config")
+    config.push_str("\n\nmodule vmtest.ssh-smoke {\n    hosts: { halcyon: system.halcyon }\n    run: test {\n        halcyon.wait_for_boot()\n        halcyon.assert_unit_active(.openssh)\n        halcyon.assert_port_open(22)\n    }\n}\n")
+    fs.write(project.path.join("config.jet"), config) ?? panic("write config")
+    root :: Scratch.new("os-vmtest-root")
+    tools :: Scratch.new("os-vmtest-tools")
+    write_fake_vm_tools(&tools.path, true)
+    out :: jet().args(["os", "vm", "test", "ssh-smoke", "--disk", "ssh-smoke.qcow2", "--name", "vmtest-proof", "--no-color", "--offline"]).current_dir(project.path).env("JETPACK_ROOT", root.path).env("PATH", tools.path).output() ?? panic("vmtest")
+    assert(out.status.success(), "stderr: {String.from_utf8_lossy(out.stderr)}")
+    proof :: root.path.join("systems/vm-tests/ssh-smoke-vmtest-proof.json")
+    data :: fs.read_to_string(proof) ?? panic("proof")
+    assert(data.contains("\"kind\":\"jetos.vmtest.proof\"") && data.contains("\"state\":\"passed\"") && data.contains("\"name\":\"ssh-smoke\""), "proof: {data}")
+    assert(data.contains("\"name\": \"halcyon\"") && data.contains("\"system\": \"halcyon\"") && data.contains("\"disk\": \"ssh-smoke.qcow2\""), "proof: {data}")
+    assert(data.contains("\"wait_for_boot\"") && data.contains("\"assert_unit_active\"") && data.contains("\"assert_port_open\""), "proof should capture typed assertion methods: {data}")
+    assert(data.contains("halcyon.assert_unit_active(.openssh)"), "proof should carry the source test body for replay: {data}")
+    assert(root.path.join("systems/vm-proofs/halcyon-vmtest-proof-vm-proof.json").is_file(), "vmtest should reuse the install/reboot VM proof harness")
+}
+
+// Rust: tests/jetpack_jetos.rs:4144
+#Ignore("epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored")
+#Test("os_vm_prove_accepts_matching_guest_proof") {
+    root :: Scratch.new("os-vm-guest-proof-root")
+    tools :: Scratch.new("os-vm-guest-proof-tools")
+    write_fake_vm_tools(&tools.path, false)
+    args :: ["os", "vm", "prove", "halcyon", "--disk", "halcyon.qcow2", "--name", "vm-proof", "--no-color", "--offline"]
+    first :: jet().args(args).current_dir(config_example_dir()).env("JETPACK_ROOT", root.path).env("PATH", tools.path).output() ?? panic("first prove")
+    assert_eq(first.status.code(), Val(2))
+    proof :: root.path.join("systems/vm-proofs/halcyon-vm-proof-vm-proof.json")
+    guest :: root.path.join("systems/vm-proofs/halcyon-vm-proof-vm-proof-guest-proof.json")
+    media_proof :: root.path.join("systems/images/jetos-installer-halcyon.iso.proof.json")
+    harness :: fs.read_to_string(proof) ?? panic("harness")
+    fs.write(guest, "{{\"state\":\"guest-passed\",\"host\":\"halcyon\",\"generation\":\"vm-proof\",\"disk\":\"halcyon.qcow2\",\"media_proof\":\"{test_json_escape(media_proof.display().to_string())}\",\"media_proof_sha256\":\"{harness_json_field(&harness, "media_proof_sha256")}\",\"installer_iso_fingerprint\":\"{harness_json_field(&harness, "installer_iso_fingerprint")}\",\"assertions\":[\"current-generation-matches\",\"packages-present\",\"services-active\",\"network-up\",\"rollback-generation-bootable\",\"terminal-login-ready\",\"desktop-session-ready\",\"graphical-console-ready\",\"desktop-launchers-run\"],\"toolchain\":\"{test_json_escape(&harness)}\"}}\n") ?? panic("write guest")
+    second :: jet().args(args).current_dir(config_example_dir()).env("JETPACK_ROOT", root.path).env("PATH", tools.path).output() ?? panic("second prove")
+    assert(second.status.success(), "stderr: {String.from_utf8_lossy(second.stderr)}")
+    final_proof :: fs.read_to_string(proof) ?? panic("final proof")
+    assert(final_proof.contains("\"state\":\"guest-passed\""), "proof: {final_proof}")
+    assert(final_proof.contains("\"guest_proof_sha256\""), "proof: {final_proof}")
+}
+
+// Rust: tests/jetpack_jetos.rs:4215
+#Ignore("epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored")
+#Test("os_vm_prove_rejects_incomplete_guest_proof") {
+    root :: Scratch.new("os-vm-stale-guest-proof-root")
+    tools :: Scratch.new("os-vm-stale-guest-proof-tools")
+    write_fake_vm_tools(&tools.path, false)
+    args :: ["os", "vm", "prove", "halcyon", "--disk", "halcyon.qcow2", "--name", "vm-proof", "--no-color", "--offline"]
+    first :: jet().args(args).current_dir(config_example_dir()).env("JETPACK_ROOT", root.path).env("PATH", tools.path).output() ?? panic("first prove")
+    assert_eq(first.status.code(), Val(2))
+    proof :: root.path.join("systems/vm-proofs/halcyon-vm-proof-vm-proof.json")
+    guest :: root.path.join("systems/vm-proofs/halcyon-vm-proof-vm-proof-guest-proof.json")
+    media_proof :: root.path.join("systems/images/jetos-installer-halcyon.iso.proof.json")
+    harness :: fs.read_to_string(proof) ?? panic("harness")
+    fs.write(guest, "{{\"state\":\"guest-passed\",\"host\":\"halcyon\",\"generation\":\"vm-proof\",\"disk\":\"halcyon.qcow2\",\"media_proof\":\"{test_json_escape(media_proof.display().to_string())}\",\"media_proof_sha256\":\"{harness_json_field(&harness, "media_proof_sha256")}\",\"installer_iso_fingerprint\":\"{harness_json_field(&harness, "installer_iso_fingerprint")}\",\"assertions\":[\"current-generation-matches\",\"packages-present\",\"services-active\",\"network-up\"],\"toolchain\":\"{test_json_escape(&harness)}\"}}\n") ?? panic("write guest")
+    second :: jet().args(args).current_dir(config_example_dir()).env("JETPACK_ROOT", root.path).env("PATH", tools.path).output() ?? panic("second prove")
+    assert_eq(second.status.code(), Val(2))
+    stderr :: String.from_utf8_lossy(second.stderr)
+    assert(stderr.contains("guest assertions did not match"), "stderr: {stderr}")
+    final_proof :: fs.read_to_string(proof) ?? panic("final proof")
+    assert(final_proof.contains("\"state\":\"harness-ready\""), "proof should remain unpromoted: {final_proof}")
+}
+
+// Rust: tests/jetpack_jetos.rs:4283
+#Ignore("epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored")
+#Test("os_vm_prove_rejects_stale_guest_generation") {
+    root :: Scratch.new("os-vm-stale-generation-root")
+    tools :: Scratch.new("os-vm-stale-generation-tools")
+    write_fake_vm_tools(&tools.path, false)
+    args :: ["os", "vm", "prove", "halcyon", "--disk", "halcyon.qcow2", "--name", "vm-proof", "--no-color", "--offline"]
+    first :: jet().args(args).current_dir(config_example_dir()).env("JETPACK_ROOT", root.path).env("PATH", tools.path).output() ?? panic("first prove")
+    assert_eq(first.status.code(), Val(2))
+    proof :: root.path.join("systems/vm-proofs/halcyon-vm-proof-vm-proof.json")
+    guest :: root.path.join("systems/vm-proofs/halcyon-vm-proof-vm-proof-guest-proof.json")
+    media_proof :: root.path.join("systems/images/jetos-installer-halcyon.iso.proof.json")
+    harness :: fs.read_to_string(proof) ?? panic("harness")
+    fs.write(guest, "{{\"state\":\"guest-passed\",\"host\":\"halcyon\",\"generation\":\"older-generation\",\"disk\":\"halcyon.qcow2\",\"media_proof\":\"{test_json_escape(media_proof.display().to_string())}\",\"assertions\":[\"current-generation-matches\",\"packages-present\",\"services-active\",\"network-up\",\"rollback-generation-bootable\",\"terminal-login-ready\",\"desktop-session-ready\",\"graphical-console-ready\",\"desktop-launchers-run\"],\"toolchain\":\"{test_json_escape(&harness)}\"}}\n") ?? panic("write guest")
+    second :: jet().args(args).current_dir(config_example_dir()).env("JETPACK_ROOT", root.path).env("PATH", tools.path).output() ?? panic("second prove")
+    assert_eq(second.status.code(), Val(2))
+    stderr :: String.from_utf8_lossy(second.stderr)
+    assert(stderr.contains("`generation` expected `vm-proof`, found `older-generation`"), "stderr: {stderr}")
+}
+
+// Rust: tests/jetpack_jetos.rs:4344
+#Ignore("epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored")
+#Test("os_image_writes_jetos_installer_media_proof") {
+    root :: Scratch.new("os-image-root")
+    tools :: Scratch.new("os-image-tools")
+    boot :: Scratch.new("os-image-boot")
+    fs.write(boot.join("kernel"), "MZ test kernel\nHdrS\n") ?? panic("kernel")
+    initrd_input := b"070701 test initrd with embedded zstd magic ".to_vec()
+    initrd_input.extend([0x28, 0xb5, 0x2f, 0xfd, 10])
+    fs.write(boot.join("initrd"), initrd_input) ?? panic("initrd")
+    write_fake_vm_tools(&tools.path, true)
+    out :: jet().args(["os", "image", "halcyon", "--manual", "/dev/sda", "--no-color", "--offline"])
+        .current_dir(config_example_dir()).env("JETPACK_ROOT", root.path).env("PATH", tools.path)
+        .env("JETOS_CACHYOS_KERNEL", boot.join("kernel")).env("JETOS_CACHYOS_INITRD", boot.join("initrd")).output() ?? panic("image")
+    assert(out.status.success(), "stderr: {String.from_utf8_lossy(out.stderr)}")
+    proof :: root.path.join("systems/images/jetos-installer-halcyon.iso.proof.json")
+    data :: fs.read_to_string(proof) ?? panic("proof")
+    assert(data.contains("\"brand\":\"jetos\""), "data: {data}")
+    assert(data.contains("\"kind\":\"hybrid-iso\""), "data: {data}")
+    assert(data.contains("\"state\":\"built\""), "data: {data}")
+    assert(data.contains("\"sha256\":"), "data: {data}")
+    assert(root.path.join("systems/images/jetos-installer-halcyon.iso").is_file(), "expected real hybrid ISO artifact")
+    variant_proof :: root.path.join("systems/images/jetos-image-variants-halcyon.proof.json")
+    variants :: fs.read_to_string(variant_proof) ?? panic("variants")
+    assert(variants.contains("\"kind\":\"jetos.image-variants\"") && (variants.contains("\"proof\":\"image-variants-smoke-proved\"") || variants.contains("\"proof\":\"image-variants-staged\"")) && variants.contains("\"kind\": \"qcow2\"") && variants.contains("\"kind\": \"sd\"") && variants.contains("\"kind\": \"netboot-ipxe\""), "variants: {variants}")
+    assert(variants.contains("\"kind\": \"raw\"") && variants.contains("\"state\": \"staged\""), "raw sparse marker must be staged: {variants}")
+    assert(variants.contains("\"kind\": \"sd\"") && variants.split("\"kind\": \"sd\"").nth(1).map((rest) -> rest.contains("\"state\": \"staged\"")).unwrap_or(false), "sd sparse marker must be staged: {variants}")
+    for artifact in ["jetos-halcyon.qcow2", "jetos-halcyon.raw", "jetos-halcyon-sd.img", "jetos-halcyon-netboot/vmlinuz", "jetos-halcyon-netboot/initrd", "jetos-halcyon-netboot/ipxe.conf"] {
+        assert(root.path.join("systems/images").join(artifact).is_file(), "expected image variant artifact {artifact}")
+    }
+    ipxe :: fs.read_to_string(root.path.join("systems/images/jetos-halcyon-netboot/ipxe.conf")) ?? panic("ipxe")
+    assert(ipxe.contains("kernel vmlinuz") && ipxe.contains("initrd initrd") && ipxe.contains("jetos.mode=run"), "ipxe: {ipxe}")
+    staging :: root.path.join("systems/images/jetos-installer-halcyon.iso.d")
+    transaction :: fs.read_to_string(staging.join("install/transaction.json")) ?? panic("transaction")
+    assert(transaction.contains("\"disk\":\"/dev/sda\""), "tx: {transaction}")
+    assert(transaction.contains("\"partition-gpt\"") && transaction.contains("\"mkfs.vfat-esp\"") && transaction.contains("\"install-limine-esp\""), "tx: {transaction}")
+    install :: fs.read_to_string(staging.join("install/install.sh")) ?? panic("install")
+    assert(install.contains("sfdisk --wipe always"), "install: {install}")
+    assert(install.contains("blockdev --rereadpt"), "install: {install}")
+    assert(install.contains("mkfs.vfat -F 32"), "install: {install}")
+    assert(install.contains("mkfs.ext4"), "install: {install}")
+    assert(install.contains("EFI/BOOT/BOOTX64.EFI") && install.contains("installed-limine.conf"), "install: {install}")
+    assert(install.contains("install-proof.json"), "install: {install}")
+    verify :: fs.read_to_string(staging.join("install/guest-verify.sh")) ?? panic("verify")
+    assert(verify.contains("system=\"$root/var/lib/jetos/generations/") && verify.contains("need \"$system/plan.json\""), "verify: {verify}")
+    assert(verify.contains("jetos verifier: missing $path"), "verify: {verify}")
+    assert(verify.contains("LABEL=jetos-root /dev/vda2 /dev/sda2 /dev/vda /dev/sda"), "verify should probe partitioned installed disks: {verify}")
+    assert(verify.contains("terminal/facts.json") && verify.contains("serial-getty@ttyS0.service") && verify.contains("desktop/facts.json") && verify.contains("sw/bin/gdm") && verify.contains("sw/bin/gnome-session") && verify.contains("sw/bin/gnome-shell") && verify.contains("jetos-desktop-session") && verify.contains("jetos-studio") && verify.contains("--jetos-proof") && verify.contains("desktop-launchers-run"), "verify: {verify}")
+    assert(verify.contains("for svc in openssh backup metrics"), "verify: {verify}")
+    assert(verify.contains("\"rollback\""), "verify: {verify}")
+    initrd_bytes :: fs.read(staging.join("boot/initrd")) ?? panic("staged initrd")
+    assert(initrd_bytes.starts_with(b"070701"), "raw newc initrd with embedded compressed payload bytes must stay a raw cpio archive")
+    initrd :: String.from_utf8_lossy(initrd_bytes)
+    assert(initrd.contains("jetos.mode=install"), "initrd: {initrd}")
+    assert(initrd.contains("jetos.mode=verify"), "initrd: {initrd}")
+    assert(initrd.contains("jetos.mode=desktop-verify"), "initrd: {initrd}")
+    assert(initrd.contains("jetos/init"), "initrd should carry the JetOS init dispatcher: {initrd}")
+    assert(initrd.contains("mount -t proc proc /proc") && initrd.contains("mount -t devtmpfs devtmpfs /dev"), "initrd dispatcher should prepare proc/dev before reading cmdline: {initrd}")
+    assert(initrd.contains("LABEL=jetos-root /dev/vda2 /dev/sda2 /dev/vda /dev/sda"), "initrd should probe partitioned installed disks before installer fallback: {initrd}")
+    assert(initrd.contains("use_system_nix") && initrd.contains("ln -s \"$system_nix\" /nix"), "initrd should expose the installed generation nix store when no initrd /nix exists: {initrd}")
+    assert(initrd.contains("jetos/tools/bin/sh") && initrd.contains("jetos/tools/bin/sfdisk") && initrd.contains("jetos/tools/bin/blockdev"), "initrd should carry installer partition tools: {initrd}")
+    assert(initrd.contains("exec chroot /sysroot /run/current-system/sbin/init") && initrd.contains("SYSTEMD_UNIT_PATH=/etc/systemd/system") && initrd.contains("for top in etc sbin sw share studio init systemd lib usr network") && initrd.contains("ln -s \"$generation_target/$top\" \"/sysroot/$top\""), "initrd run mode should hand off to installed current-system, not fallback shell: {initrd}")
+    assert(initrd.contains("jetos/modules/atkbd.ko.xz") && initrd.contains("jetos/modules/usbhid.ko.xz") && initrd.contains("jetos/modules/xhci-hcd.ko.xz"), "initrd should carry keyboard and USB HID modules for VNC input: {initrd}")
+    assert(initrd.contains("JETOS_GUEST_PROOF"), "initrd should carry guest proof reporter: {initrd}")
+    limine :: fs.read_to_string(staging.join("boot/limine.conf")) ?? panic("limine")
+    assert(limine.contains("/Install jetos 26.10 (Apex) — halcyon") && limine.contains("cmdline: console=ttyS0 rdinit=/jetos/init") && limine.contains("jetos.disk=/dev/sda"), "limine: {limine}")
+    installed_limine :: fs.read_to_string(staging.join("boot/installed-limine.conf")) ?? panic("installed limine")
+    assert(installed_limine.contains("/jetos 26.10 (Apex) — halcyon verify"), "installed limine: {installed_limine}")
+    installer_os_release :: fs.read_to_string(staging.join("jetos/current-system/etc/os-release")) ?? panic("os-release")
+    installer_usr_os_release :: fs.read_to_string(staging.join("jetos/current-system/usr/lib/os-release")) ?? panic("usr os-release")
+    assert_eq(installer_os_release, installer_usr_os_release)
+    assert(installer_os_release.contains("PRETTY_NAME=\"jetos 26.10 (Apex)\"") && installer_os_release.contains("VERSION_CODENAME=apex"))
+    installer_wallpaper :: fs.read_to_string(staging.join("jetos/current-system/share/backgrounds/jetos/apex.svg")) ?? panic("wallpaper")
+    assert(installer_wallpaper.contains("jetos 26.10 Apex") && installer_wallpaper.contains("linearGradient") && installer_wallpaper.len() > 1_000, "installer must contain projected wallpaper bytes")
+    for text in [limine.as_str(), installed_limine.as_str(), installer_os_release.as_str(), installer_wallpaper.as_str()] {
+        assert(!text.contains("NixOS") && !text.contains("Yarara"))
+    }
+    assert(staging.join("boot/efiboot.img").is_file(), "installer media should carry a UEFI FAT ESP boot image")
+    assert(staging.join("EFI/BOOT/BOOTX64.EFI").is_file(), "installer media should expose the EFI loader for target ESP install")
+    assert(staging.join("boot/installed-limine.conf").is_file(), "installer media should carry installed-disk Limine config")
+    assert_eq(fs.read_to_string(staging.join("limine.conf")) ?? panic("root limine"), limine, "Limine config should be available at the ISO root and /boot")
+    assert(staging.join("jetos/provenance.json").is_file())
+    assert(staging.join("jetos/current-system/etc/systemd/system/openssh.service").is_file(), "installer media should carry the full generation")
+    assert(!(fs.symlink_metadata(staging.join("jetos/current-system/plan.json")) ?? panic("plan metadata")).file_type().is_symlink(), "installer media must be self-contained")
+    assert(!(fs.symlink_metadata(staging.join("jetos/current-system/sbin/init")) ?? panic("init metadata")).file_type().is_symlink(), "installer media must not point back to the host root")
+}
+
+// Rust: tests/jetpack_jetos.rs:4640
+#Ignore("epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored")
+#Test("os_init_writes_guided_ext4_config") {
+    proj :: Scratch.new("os-init")
+    out :: jet().args(["os", "init", "laptop", "--no-color"]).current_dir(proj.path).output() ?? panic("init")
+    assert(out.status.success(), "stderr: {String.from_utf8_lossy(out.stderr)}")
+    config :: fs.read_to_string(proj.join("config.jet")) ?? panic("config")
+    assert(config.contains("system.laptop"), "config: {config}")
+    assert(config.contains("filesystem.layout"), "config: {config}")
+    assert(config.contains("network.hostName"), "config: {config}")
+}

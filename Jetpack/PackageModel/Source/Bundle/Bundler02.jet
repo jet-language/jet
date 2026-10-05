@@ -1,640 +1,91 @@
-// PORT-PENDING 2081 crates-jet-pkg-model-src-bundler-slice-1801: crates/jet-pkg-model/src/Bundler.rs:1801-2436
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS         signature_url: updater.signature_url.clone(),
-//RS         release_notes_url: updater.release_notes_url.clone(),
-//RS         payload_sha256: payload_sha256.into(),
-//RS         payload_bytes: spec.executable.bytes.len() as u64,
-//RS     }
-//RS }
-//RS 
-//RS fn bundle_metadata_json(
-//RS     spec: &BundleSpec,
-//RS     metadata: &BundleMetadata,
-//RS     executable_digest: &str,
-//RS     icons: &[BundleIcon],
-//RS     hooks: &[SigningHook],
-//RS ) -> CanonicalJson {
-//RS     let icon_values = icons
-//RS         .iter()
-//RS         .map(|icon| {
-//RS             CanonicalJson::object([
-//RS                 ("bytes".into(), integer(icon.bytes.len() as u64)),
-//RS                 ("format".into(), text(icon.format.as_str())),
-//RS                 ("name".into(), text(&icon.name)),
-//RS                 ("sha256".into(), text(&icon.digest())),
-//RS                 ("size".into(), integer(icon.size)),
-//RS             ])
-//RS             .expect("fixed bundle icon JSON keys")
-//RS         })
-//RS         .collect();
-//RS     CanonicalJson::object([
-//RS         ("categories".into(), CanonicalJson::Array(metadata.categories.iter().map(|value| text(value)).collect())),
-//RS         ("description".into(), text(&metadata.description)),
-//RS         ("executable".into(), text(&spec.executable.name)),
-//RS         ("executable_sha256".into(), text(executable_digest)),
-//RS         ("format".into(), text(PACKAGE_BUNDLE_FORMAT)),
-//RS         ("icons".into(), CanonicalJson::Array(icon_values)),
-//RS         ("kind".into(), text(spec.kind.as_str())),
-//RS         ("identifier".into(), text(&metadata.identifier)),
-//RS         ("name".into(), text(&metadata.display_name)),
-//RS         ("package".into(), text(&spec.package)),
-//RS         ("publisher".into(), text(&metadata.publisher)),
-//RS         (
-//RS             "signing_hooks".into(),
-//RS             CanonicalJson::Array(hooks.iter().map(signing_hook_json).collect()),
-//RS         ),
-//RS         ("target".into(), text(spec.target.as_str())),
-//RS         ("version".into(), text(&spec.version)),
-//RS     ])
-//RS     .expect("fixed bundle metadata JSON keys")
-//RS }
-//RS 
-//RS fn game_manifest_path(spec: &BundleSpec) -> String {
-//RS     match spec.target {
-//RS         BundleTarget::LinuxAppImage => {
-//RS             format!("usr/share/{}/jet-game.json", spec.metadata.identifier)
-//RS         }
-//RS         BundleTarget::MacOSApp => {
-//RS             format!(
-//RS                 "{}.app/Contents/Resources/jet-game.json",
-//RS                 spec.metadata.identifier
-//RS             )
-//RS         }
-//RS         BundleTarget::WindowsMsix => "jet/jet-game.json".into(),
-//RS     }
-//RS }
-//RS 
-//RS fn game_asset_path(spec: &BundleSpec, path: &str) -> String {
-//RS     match spec.target {
-//RS         BundleTarget::LinuxAppImage => {
-//RS             format!("usr/share/{}/assets/{path}", spec.metadata.identifier)
-//RS         }
-//RS         BundleTarget::MacOSApp => {
-//RS             format!(
-//RS                 "{}.app/Contents/Resources/assets/{path}",
-//RS                 spec.metadata.identifier
-//RS             )
-//RS         }
-//RS         BundleTarget::WindowsMsix => format!("assets/{path}"),
-//RS     }
-//RS }
-//RS 
-//RS fn game_spec_json(game: &GameBundleSpec) -> CanonicalJson {
-//RS     CanonicalJson::object([
-//RS         ("assets".into(), CanonicalJson::Array(game.assets.iter().map(game_asset_json).collect())),
-//RS         ("backend".into(), text(&game.backend)),
-//RS         ("build_identity".into(), text(&game.build_identity)),
-//RS         ("cook_mode".into(), text(&game.cook_mode)),
-//RS         ("crash_consent".into(), text(&game.crash_consent)),
-//RS         ("crash_reporter".into(), text(&game.crash_reporter)),
-//RS         ("crash_runtime".into(), game_crash_runtime_json(&game.crash_runtime)),
-//RS         ("development_stripping".into(), CanonicalJson::Bool(game.development_stripping)),
-//RS         ("export_preset".into(), text(&game.export_preset)),
-//RS         ("format".into(), text("jet.game.bundle")),
-//RS         ("profile".into(), text(&game.profile)),
-//RS         ("renderer".into(), text(&game.renderer)),
-//RS         ("source_revision".into(), text(&game.source_revision)),
-//RS     ])
-//RS     .expect("fixed game bundle JSON keys")
-//RS }
-//RS fn game_spec_receipt_json(game: &GameBundleSpec) -> CanonicalJson {
-//RS     CanonicalJson::object([
-//RS         (
-//RS             "assets".into(),
-//RS             CanonicalJson::Array(game.assets.iter().map(game_asset_receipt_json).collect()),
-//RS         ),
-//RS         ("backend".into(), text(&receipt_safe_text(&game.backend))),
-//RS         ("build_identity".into(), text(&receipt_safe_text(&game.build_identity))),
-//RS         ("cook_mode".into(), text(&receipt_safe_text(&game.cook_mode))),
-//RS         ("crash_consent".into(), text(&receipt_safe_text(&game.crash_consent))),
-//RS         ("crash_reporter".into(), text(&receipt_safe_text(&game.crash_reporter))),
-//RS         (
-//RS             "crash_runtime".into(),
-//RS             game_crash_runtime_receipt_json(&game.crash_runtime),
-//RS         ),
-//RS         ("development_stripping".into(), CanonicalJson::Bool(game.development_stripping)),
-//RS         ("export_preset".into(), text(&receipt_safe_text(&game.export_preset))),
-//RS         ("format".into(), text("jet.game.bundle")),
-//RS         ("profile".into(), text(&receipt_safe_text(&game.profile))),
-//RS         ("renderer".into(), text(&receipt_safe_text(&game.renderer))),
-//RS         ("source_revision".into(), text(&receipt_source(&game.source_revision))),
-//RS     ])
-//RS     .expect("fixed receipt game JSON keys")
-//RS }
-//RS 
-//RS fn game_crash_runtime_json(runtime: &GameCrashReporterSpec) -> CanonicalJson {
-//RS     CanonicalJson::object([
-//RS         ("abi".into(), text(GAME_CRASH_REPORTER_ABI)),
-//RS         ("installation".into(), text(&runtime.installation)),
-//RS         (
-//RS             "memory".into(),
-//RS             CanonicalJson::object([
-//RS                 ("max_logs".into(), integer(runtime.memory_logs)),
-//RS                 ("max_stacks".into(), integer(runtime.memory_stacks)),
-//RS             ])
-//RS             .expect("fixed game crash memory JSON keys"),
-//RS         ),
-//RS         (
-//RS             "retention".into(),
-//RS             CanonicalJson::object([
-//RS                 ("max_reports".into(), integer(runtime.retention_limit)),
-//RS                 ("mode".into(), text(&runtime.retention_mode)),
-//RS                 ("path".into(), text(&runtime.retention_path)),
-//RS             ])
-//RS             .expect("fixed game crash retention JSON keys"),
-//RS         ),
-//RS         ("routing".into(), text(&runtime.routing)),
-//RS         ("upload_policy".into(), text(&runtime.upload_policy)),
-//RS     ])
-//RS     .expect("fixed game crash runtime JSON keys")
-//RS }
-//RS 
-//RS fn game_crash_runtime_receipt_json(runtime: &GameCrashReporterSpec) -> CanonicalJson {
-//RS     CanonicalJson::object([
-//RS         ("abi".into(), text(&receipt_safe_text(GAME_CRASH_REPORTER_ABI))),
-//RS         ("installation".into(), text(&receipt_safe_text(&runtime.installation))),
-//RS         (
-//RS             "memory".into(),
-//RS             CanonicalJson::object([
-//RS                 ("max_logs".into(), integer(runtime.memory_logs)),
-//RS                 ("max_stacks".into(), integer(runtime.memory_stacks)),
-//RS             ])
-//RS             .expect("fixed receipt game crash memory JSON keys"),
-//RS         ),
-//RS         (
-//RS             "retention".into(),
-//RS             CanonicalJson::object([
-//RS                 ("max_reports".into(), integer(runtime.retention_limit)),
-//RS                 ("mode".into(), text(&receipt_safe_text(&runtime.retention_mode))),
-//RS                 ("path".into(), text(&receipt_source(&runtime.retention_path))),
-//RS             ])
-//RS             .expect("fixed receipt game crash retention JSON keys"),
-//RS         ),
-//RS         ("routing".into(), text(&receipt_safe_text(&runtime.routing))),
-//RS         (
-//RS             "upload_policy".into(),
-//RS             text(&receipt_safe_text(&runtime.upload_policy)),
-//RS         ),
-//RS     ])
-//RS     .expect("fixed receipt game crash runtime JSON keys")
-//RS }
-//RS 
-//RS 
-//RS fn game_manifest_json(spec: &BundleSpec, game: &GameBundleSpec) -> CanonicalJson {
-//RS     CanonicalJson::object([
-//RS         ("game".into(), game_spec_json(game)),
-//RS         ("package".into(), text(&spec.package)),
-//RS         ("target".into(), text(spec.target.as_str())),
-//RS         ("version".into(), text(&spec.version)),
-//RS     ])
-//RS     .expect("fixed game manifest JSON keys")
-//RS }
-//RS 
-//RS fn game_asset_json(asset: &GameBundleAsset) -> CanonicalJson {
-//RS     CanonicalJson::object([
-//RS         ("bytes".into(), integer(asset.bytes.len() as u64)),
-//RS         ("mode".into(), integer(asset.mode)),
-//RS         ("path".into(), text(&asset.path)),
-//RS         ("sha256".into(), text(&asset.digest())),
-//RS     ])
-//RS     .expect("fixed game asset JSON keys")
-//RS }
-//RS fn game_asset_receipt_json(asset: &GameBundleAsset) -> CanonicalJson {
-//RS     CanonicalJson::object([
-//RS         ("bytes".into(), integer(asset.bytes.len() as u64)),
-//RS         ("mode".into(), integer(asset.mode)),
-//RS         ("path".into(), text(&receipt_source(&asset.path))),
-//RS         ("sha256".into(), text(&asset.digest())),
-//RS     ])
-//RS     .expect("fixed receipt game asset JSON keys")
-//RS }
-//RS 
-//RS 
-//RS fn bundle_plan_json(plan: &BundlePlan) -> CanonicalJson {
-//RS     CanonicalJson::object([
-//RS         ("artifact_name".into(), text(&plan.artifact_name)),
-//RS         ("files".into(), CanonicalJson::Array(plan.files.iter().map(file_json).collect())),
-//RS         ("game".into(), plan.game.as_ref().map(game_spec_json).unwrap_or(CanonicalJson::Null)),
-//RS         ("format".into(), text(PACKAGE_BUNDLE_FORMAT)),
-//RS         ("identity".into(), text(&plan.identity)),
-//RS         ("kind".into(), text(plan.kind.as_str())),
-//RS         ("launch".into(), launch_json(&plan.launch)),
-//RS         ("metadata".into(), metadata_json(&plan.metadata)),
-//RS         ("package".into(), text(&plan.package)),
-//RS         ("executable_source".into(), text(&plan.executable_source)),
-//RS         ("inputs".into(), CanonicalJson::Array(plan.inputs.iter().map(BundleInputFact::to_json).collect())),
-//RS         (
-//RS             "signing_hooks".into(),
-//RS             CanonicalJson::Array(plan.signing_hooks.iter().map(signing_hook_json).collect()),
-//RS         ),
-//RS         ("target".into(), text(plan.target.as_str())),
-//RS         (
-//RS             "updater".into(),
-//RS             plan.updater
-//RS                 .as_ref()
-//RS                 .map(UpdaterManifest::to_json)
-//RS                 .unwrap_or(CanonicalJson::Null),
-//RS         ),
-//RS         ("version".into(), text(&plan.version)),
-//RS         ("schema_version".into(), integer(plan.schema_version)),
-//RS     ])
-//RS     .expect("fixed bundle plan JSON keys")
-//RS }
-//RS 
-//RS fn metadata_json(metadata: &BundleMetadata) -> CanonicalJson {
-//RS     CanonicalJson::object([
-//RS         ("categories".into(), CanonicalJson::Array(metadata.categories.iter().map(|value| text(value)).collect())),
-//RS         ("description".into(), text(&metadata.description)),
-//RS         ("display_name".into(), text(&metadata.display_name)),
-//RS         ("identifier".into(), text(&metadata.identifier)),
-//RS         ("publisher".into(), text(&metadata.publisher)),
-//RS     ])
-//RS     .expect("fixed bundle metadata projection keys")
-//RS }
-//RS 
-//RS fn file_json(file: &BundleFile) -> CanonicalJson {
-//RS     CanonicalJson::object([
-//RS         ("bytes".into(), integer(file.bytes.len() as u64)),
-//RS         ("kind".into(), text(file.kind.as_str())),
-//RS         ("mode".into(), integer(file.mode)),
-//RS         ("path".into(), text(&file.path)),
-//RS         ("sha256".into(), text(&file.digest())),
-//RS     ])
-//RS     .expect("fixed bundle file JSON keys")
-//RS }
-//RS 
-//RS fn launch_json(launch: &LaunchDescriptor) -> CanonicalJson {
-//RS     CanonicalJson::object([
-//RS         ("arguments_passthrough".into(), CanonicalJson::Bool(launch.arguments_passthrough)),
-//RS         ("executable".into(), text(&launch.executable)),
-//RS         ("launcher".into(), text(&launch.launcher)),
-//RS     ])
-//RS     .expect("fixed launch JSON keys")
-//RS }
-//RS 
-//RS fn signing_hook_json(hook: &SigningHook) -> CanonicalJson {
-//RS     CanonicalJson::object([
-//RS         ("args".into(), CanonicalJson::Array(hook.args.iter().map(|value| text(value)).collect())),
-//RS         ("inputs".into(), CanonicalJson::Array(hook.inputs.iter().map(signing_input_json).collect())),
-//RS         ("name".into(), text(&hook.name)),
-//RS         ("phase".into(), text(hook.phase.as_str())),
-//RS         ("program".into(), text(&hook.program)),
-//RS     ])
-//RS     .expect("fixed signing hook JSON keys")
-//RS }
-//RS fn signing_hook_receipt_json(hook: &SigningHook) -> CanonicalJson {
-//RS     // Hook arguments may carry a password, token, or key.  The plan keeps the
-//RS     // exact declaration for the adapter, while the receipt intentionally
-//RS     // retains only the argument count and redaction markers.
-//RS     let args = hook.args.iter().map(|_| text("<redacted>")).collect();
-//RS     CanonicalJson::object([
-//RS         ("args".into(), CanonicalJson::Array(args)),
-//RS         ("args_redacted".into(), CanonicalJson::Bool(true)),
-//RS         (
-//RS             "inputs".into(),
-//RS             CanonicalJson::Array(hook.inputs.iter().map(signing_input_receipt_json).collect()),
-//RS         ),
-//RS         ("name".into(), text(&hook.name)),
-//RS         ("phase".into(), text(hook.phase.as_str())),
-//RS         ("program".into(), text(&receipt_source(&hook.program))),
-//RS     ])
-//RS     .expect("fixed receipt signing hook JSON keys")
-//RS }
-//RS 
-//RS fn updater_receipt_json(updater: &UpdaterManifest) -> CanonicalJson {
-//RS     CanonicalJson::object([
-//RS         ("artifact".into(), text(&updater.artifact)),
-//RS         ("channel".into(), text(&updater.channel)),
-//RS         ("package".into(), text(&updater.package)),
-//RS         ("payload_bytes".into(), integer(updater.payload_bytes)),
-//RS         ("payload_sha256".into(), text(&updater.payload_sha256)),
-//RS         (
-//RS             "release_notes_url".into(),
-//RS             optional_receipt_url(updater.release_notes_url.as_deref()),
-//RS         ),
-//RS         ("schema".into(), text(&updater.schema)),
-//RS         ("signature_url".into(), optional_receipt_url(updater.signature_url.as_deref())),
-//RS         ("target".into(), text(updater.target.as_str())),
-//RS         ("url".into(), text(&receipt_url(&updater.url))),
-//RS         ("version".into(), text(&updater.version)),
-//RS     ])
-//RS     .expect("fixed receipt updater JSON keys")
-//RS }
-//RS 
-//RS fn optional_receipt_url(value: Option<&str>) -> CanonicalJson {
-//RS     value
-//RS         .map(|value| text(&receipt_url(value)))
-//RS         .unwrap_or(CanonicalJson::Null)
-//RS }
-//RS 
-//RS fn receipt_url(value: &str) -> String {
-//RS     if value.contains('@') || value.contains('?') || value.contains('#') {
-//RS         "<redacted>".into()
-//RS     } else {
-//RS         receipt_safe_text(value)
-//RS     }
-//RS }
-//RS 
-//RS fn optional_receipt_text(value: Option<&str>) -> CanonicalJson {
-//RS     value
-//RS         .map(|value| text(&receipt_safe_text(value)))
-//RS         .unwrap_or(CanonicalJson::Null)
-//RS }
-//RS 
-//RS fn receipt_safe_text(value: &str) -> String {
-//RS     if contains_sensitive_marker(value) {
-//RS         "<redacted>".into()
-//RS     } else {
-//RS         value.into()
-//RS     }
-//RS }
-//RS 
-//RS fn receipt_source(value: &str) -> String {
-//RS     if value.contains('@') || value.contains('?') || value.contains('#') {
-//RS         "<redacted>".into()
-//RS     } else {
-//RS         receipt_safe_text(value)
-//RS     }
-//RS }
-//RS 
-//RS fn contains_sensitive_marker(value: &str) -> bool {
-//RS     let value = value.to_ascii_lowercase();
-//RS     [
-//RS         "password",
-//RS         "passphrase",
-//RS         "secret",
-//RS         "credential",
-//RS         "api-key",
-//RS         "apikey",
-//RS         "authorization",
-//RS         "bearer ",
-//RS     ]
-//RS     .iter()
-//RS     .any(|marker| value.contains(marker))
-//RS }
-//RS 
-//RS fn signing_input_receipt_json(input: &SigningHookInput) -> CanonicalJson {
-//RS     CanonicalJson::object([
-//RS         ("digest".into(), text(&input.digest)),
-//RS         ("path".into(), text(&receipt_source(&input.path))),
-//RS     ])
-//RS     .expect("fixed receipt signing input JSON keys")
-//RS }
-//RS fn signing_input_json(input: &SigningHookInput) -> CanonicalJson {
-//RS     CanonicalJson::object([
-//RS         ("digest".into(), text(&input.digest)),
-//RS         ("path".into(), text(&input.path)),
-//RS     ])
-//RS     .expect("fixed signing input JSON keys")
-//RS }
-//RS fn bundle_input_receipt_json(input: &BundleInputFact) -> CanonicalJson {
-//RS     CanonicalJson::object([
-//RS         ("bytes".into(), integer(input.bytes)),
-//RS         ("digest".into(), text(&input.digest)),
-//RS         ("path".into(), text(&receipt_source(&input.path))),
-//RS         ("role".into(), text(&input.role)),
-//RS     ])
-//RS     .expect("fixed receipt bundle input JSON keys")
-//RS }
-//RS 
-//RS fn artifact_digest(files: &[BundleFile]) -> String {
-//RS     let mut ordered = files.iter().collect::<Vec<_>>();
-//RS     ordered.sort_by(|left, right| left.path.cmp(&right.path));
-//RS     let mut bytes = Vec::new();
-//RS     bytes.extend_from_slice(b"jet-package-artifact-v1\0");
-//RS     for file in ordered {
-//RS         frame(&mut bytes, file.path.as_bytes());
-//RS         frame(&mut bytes, file.kind.as_str().as_bytes());
-//RS         bytes.extend_from_slice(&file.mode.to_be_bytes());
-//RS         frame(&mut bytes, &file.bytes);
-//RS     }
-//RS     SHA256::sha256_hex(&bytes)
-//RS }
-//RS 
-//RS fn frame(out: &mut Vec<u8>, value: &[u8]) {
-//RS     out.extend_from_slice(&(value.len() as u64).to_be_bytes());
-//RS     out.extend_from_slice(value);
-//RS }
-//RS 
-//RS fn text(value: &str) -> CanonicalJson {
-//RS     CanonicalJson::String(value.into())
-//RS }
-//RS 
-//RS fn optional_text(value: Option<&str>) -> CanonicalJson {
-//RS     value.map(text).unwrap_or(CanonicalJson::Null)
-//RS }
-//RS 
-//RS fn integer(value: impl ToString) -> CanonicalJson {
-//RS     CanonicalJson::Integer(value.to_string())
-//RS }
-//RS 
-//RS fn linux_launcher(executable: &str) -> Vec<u8> {
-//RS     let executable = shell_double_quote(executable);
-//RS     format!(
-//RS         "#!/bin/sh\nset -eu\nHERE=$(CDPATH= cd -- \"$(dirname -- \"$0\")\" && pwd)\nexec \"$HERE/usr/bin/{executable}\" \"$@\"\n"
-//RS     )
-//RS     .into_bytes()
-//RS }
-//RS 
-//RS fn shell_double_quote(value: &str) -> String {
-//RS     value
-//RS         .replace('\\', "\\\\")
-//RS         .replace('"', "\\\"")
-//RS         .replace('$', "\\$")
-//RS         .replace('`', "\\`")
-//RS }
-//RS 
-//RS fn linux_desktop_file(metadata: &BundleMetadata, icon_name: Option<&str>) -> Vec<u8> {
-//RS     let mut out = String::from("[Desktop Entry]\nType=Application\nVersion=1.0\n");
-//RS     let _ = writeln!(out, "Name={}", desktop_escape(&metadata.display_name));
-//RS     let _ = writeln!(out, "Exec=AppRun");
-//RS     if let Some(icon) = icon_name {
-//RS         let _ = writeln!(out, "Icon={}", desktop_escape(icon));
-//RS     }
-//RS     if !metadata.description.is_empty() {
-//RS         let _ = writeln!(out, "Comment={}", desktop_escape(&metadata.description));
-//RS     }
-//RS     out.push_str("Terminal=false\n");
-//RS     if !metadata.categories.is_empty() {
-//RS         let _ = writeln!(out, "Categories={};", metadata.categories.join(";"));
-//RS     }
-//RS     out.into_bytes()
-//RS }
-//RS 
-//RS fn desktop_escape(value: &str) -> String {
-//RS     value.replace('\\', "\\\\").replace('\n', "\\n")
-//RS }
-//RS 
-//RS fn mac_info_plist(spec: &BundleSpec, icon_name: Option<&str>) -> Vec<u8> {
-//RS     let mut out = String::from(
-//RS         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\"><dict>\n",
-//RS     );
-//RS     let _ = writeln!(out, "<key>CFBundleDisplayName</key><string>{}</string>", xml_escape(&spec.metadata.display_name));
-//RS     let _ = writeln!(out, "<key>CFBundleExecutable</key><string>{}</string>", xml_escape(&spec.executable.name));
-//RS     let _ = writeln!(out, "<key>CFBundleIdentifier</key><string>{}</string>", xml_escape(&spec.metadata.identifier));
-//RS     let _ = writeln!(out, "<key>CFBundleName</key><string>{}</string>", xml_escape(&spec.metadata.display_name));
-//RS     let _ = writeln!(out, "<key>CFBundleShortVersionString</key><string>{}</string>", xml_escape(&spec.version));
-//RS     let _ = writeln!(out, "<key>CFBundleVersion</key><string>{}</string>", xml_escape(&spec.version));
-//RS     if let Some(icon) = icon_name {
-//RS         let _ = writeln!(out, "<key>CFBundleIconFile</key><string>{}</string>", xml_escape(icon));
-//RS     }
-//RS     out.push_str("</dict></plist>\n");
-//RS     out.into_bytes()
-//RS }
-//RS 
-//RS fn windows_executable_name(name: &str) -> String {
-//RS     if name.to_ascii_lowercase().ends_with(".exe") {
-//RS         name.to_string()
-//RS     } else {
-//RS         format!("{name}.exe")
-//RS     }
-//RS }
-//RS 
-//RS fn windows_manifest(
-//RS     spec: &BundleSpec,
-//RS     executable: &str,
-//RS     logo: Option<&str>,
-//RS ) -> Result<Vec<u8>, BundleError> {
-//RS     let version = windows_version(&spec.version)?;
-//RS     let mut out = String::from(
-//RS         "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<Package xmlns=\"http://schemas.microsoft.com/appx/manifest/foundation/windows10\" xmlns:uap=\"http://schemas.microsoft.com/appx/manifest/uap/windows10\" IgnorableNamespaces=\"uap\">\n",
-//RS     );
-//RS     let _ = writeln!(
-//RS         out,
-//RS         "<Identity Name=\"{}\" Publisher=\"{}\" Version=\"{}\" />",
-//RS         xml_escape(&spec.metadata.identifier),
-//RS         xml_escape(&spec.metadata.publisher),
-//RS         version
-//RS     );
-//RS     out.push_str("<Properties>\n");
-//RS     let _ = writeln!(out, "<DisplayName>{}</DisplayName>", xml_escape(&spec.metadata.display_name));
-//RS     let _ = writeln!(out, "<PublisherDisplayName>{}</PublisherDisplayName>", xml_escape(&spec.metadata.publisher));
-//RS     if let Some(logo) = logo {
-//RS         let _ = writeln!(out, "<Logo>{}</Logo>", xml_escape(logo));
-//RS     }
-//RS     out.push_str("</Properties>\n<Applications>\n");
-//RS     let _ = writeln!(
-//RS         out,
-//RS         "<Application ID=\"App\" Executable=\"{}\" EntryPoint=\"Windows.FullTrustApplication\">",
-//RS         xml_escape(executable)
-//RS     );
-//RS     let _ = write!(
-//RS         out,
-//RS         "<uap:VisualElements AppListEntry=\"none\" DisplayName=\"{}\"",
-//RS         xml_escape(&spec.metadata.display_name)
-//RS     );
-//RS     if let Some(logo) = logo {
-//RS         let _ = write!(
-//RS             out,
-//RS             " Square44x44Logo=\"{}\" Square150x150Logo=\"{}\"",
-//RS             xml_escape(logo),
-//RS             xml_escape(logo)
-//RS         );
-//RS     }
-//RS     out.push_str(" />\n</Application>\n</Applications>\n</Package>\n");
-//RS     Ok(out.into_bytes())
-//RS }
-//RS 
-//RS fn windows_content_types(files: &[BundleFile]) -> Vec<u8> {
-//RS     let mut extensions = BTreeSet::new();
-//RS     for file in files {
-//RS         let extension = file
-//RS             .path
-//RS             .rsplit('/')
-//RS             .next()
-//RS             .and_then(|name| name.rsplit_once('.').map(|(_, extension)| extension))
-//RS             .unwrap_or("");
-//RS         if !extension.is_empty() {
-//RS             extensions.insert(extension.to_ascii_lowercase());
-//RS         }
-//RS     }
-//RS     let mut out = String::from(
-//RS         "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\">",
-//RS     );
-//RS     for extension in extensions {
-//RS         let content_type = match extension.as_str() {
-//RS             "xml" => "application/xml",
-//RS             "json" => "application/json",
-//RS             "exe" => "application/octet-stream",
-//RS             "png" => "image/png",
-//RS             "ico" => "image/x-icon",
-//RS             "icns" => "image/icns",
-//RS             "svg" => "image/svg+xml",
-//RS             _ => "application/octet-stream",
-//RS         };
-//RS         let _ = write!(
-//RS             out,
-//RS             "<Default Extension=\"{}\" ContentType=\"{}\"/>",
-//RS             xml_escape(&extension),
-//RS             content_type
-//RS         );
-//RS     }
-//RS     out.push_str("</Types>\n");
-//RS     out.into_bytes()
-//RS }
-//RS 
-//RS fn sha256_base64(hex: &str) -> String {
-//RS     let bytes = hex.as_bytes();
-//RS     if bytes.len() % 2 != 0 {
-//RS         return hex.to_owned();
-//RS     }
-//RS     let mut decoded = Vec::with_capacity(bytes.len() / 2);
-//RS     for pair in bytes.chunks_exact(2) {
-//RS         let Some(high) = hex_nibble(pair[0]) else {
-//RS             return hex.to_owned();
-//RS         };
-//RS         let Some(low) = hex_nibble(pair[1]) else {
-//RS             return hex.to_owned();
-//RS         };
-//RS         decoded.push((high << 4) | low);
-//RS     }
-//RS     const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-//RS     let mut encoded = String::with_capacity((decoded.len() + 2) / 3 * 4);
-//RS     for chunk in decoded.chunks(3) {
-//RS         let value = (u32::from(chunk[0]) << 16)
-//RS             | (u32::from(chunk.get(1).copied().unwrap_or(0)) << 8)
-//RS             | u32::from(chunk.get(2).copied().unwrap_or(0));
-//RS         encoded.push(ALPHABET[((value >> 18) & 0x3f) as usize] as char);
-//RS         encoded.push(ALPHABET[((value >> 12) & 0x3f) as usize] as char);
-//RS         if chunk.len() > 1 {
-//RS             encoded.push(ALPHABET[((value >> 6) & 0x3f) as usize] as char);
-//RS         } else {
-//RS             encoded.push('=');
-//RS         }
-//RS         if chunk.len() > 2 {
-//RS             encoded.push(ALPHABET[(value & 0x3f) as usize] as char);
-//RS         } else {
-//RS             encoded.push('=');
-//RS         }
-//RS     }
-//RS     encoded
-//RS }
-//RS 
-//RS fn windows_block_map(files: &[BundleFile]) -> Vec<u8> {
-//RS     let mut out = String::from(
-//RS         "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<BlockMap xmlns=\"http://schemas.microsoft.com/appx/2010/blockmap\" HashMethod=\"http://www.w3.org/2001/04/xmlenc#sha256\">",
-//RS     );
-//RS     for file in files {
-//RS         let _ = write!(
-//RS             out,
-//RS             "<File Name=\"{}\" Size=\"{}\"><Block Hash=\"{}\" /></File>",
-//RS             xml_escape(&file.path),
-//RS             file.bytes.len(),
-//RS             sha256_base64(&file.digest())
-//RS         );
-//RS     }
-//RS     out.push_str("</BlockMap>\n");
-//RS     out.into_bytes()
-//RS }
-//RS 
-//RS fn xml_escape(value: &str) -> String {
-//RS     value
-//RS         .replace('&', "&amp;")
-//RS         .replace('<', "&lt;")
-//RS         .replace('>', "&gt;")
-//RS         .replace('"', "&quot;")
-//RS         .replace('\'', "&apos;")
-//RS }
-//RS 
-// END-PORT-PENDING 2081 crates/jet-pkg-model/src/Bundler.rs:1801-2436
+// Bundle helper implementations have one canonical owner: BundlePlan.jet.
+// Keep its checked carriers and JSON projections, not duplicate helper APIs.
 
+// Rust: crates/jet-pkg-model/src/Bundler.rs:1790
+// updater_manifest tail1801-1806: packet2080 owns complete UpdaterManifest.for_spec, BundlePlan.jet:95.
+// Rust: crates/jet-pkg-model/src/Bundler.rs:1808
+// bundle_metadata_json: pkg_bundle_metadata_json, BundlePlan.jet:828.
+// Rust: crates/jet-pkg-model/src/Bundler.rs:1850
+// game_manifest_path: pkg_bundle_game_manifest_path, BundlePlan.jet:869.
+// Rust: crates/jet-pkg-model/src/Bundler.rs:1865
+// game_asset_path: pkg_bundle_game_asset_path, BundlePlan.jet:877.
+// Rust: crates/jet-pkg-model/src/Bundler.rs:1880
+// game_spec_json: pkg_bundle_game_spec_json, BundlePlan.jet:885.
+// Rust: crates/jet-pkg-model/src/Bundler.rs:1898
+// game_spec_receipt_json: pkg_bundle_game_spec_receipt_json, BundlePlan.jet:912.
+// Rust: crates/jet-pkg-model/src/Bundler.rs:1923
+// game_crash_runtime_json: pkg_bundle_crash_runtime_json(runtime, false), BundlePlan.jet:945.
+// Rust: crates/jet-pkg-model/src/Bundler.rs:1950
+// game_crash_runtime_receipt_json: pkg_bundle_crash_runtime_json(runtime, true), BundlePlan.jet:945.
+// Rust: crates/jet-pkg-model/src/Bundler.rs:1981
+// game_manifest_json: pkg_bundle_game_manifest_json, BundlePlan.jet:957.
+// Rust: crates/jet-pkg-model/src/Bundler.rs:1991
+// game_asset_json: exact asset projection in pkg_bundle_game_spec_json, BundlePlan.jet:886-893.
+// Rust: crates/jet-pkg-model/src/Bundler.rs:2000
+// game_asset_receipt_json: exact redacted asset projection in pkg_bundle_game_spec_receipt_json, BundlePlan.jet:913-920.
+// Rust: crates/jet-pkg-model/src/Bundler.rs:2011
+// bundle_plan_json: BundlePlan.to_json_tree, BundlePlan.jet:404.
+// Rust: crates/jet-pkg-model/src/Bundler.rs:2042
+// metadata_json: pkg_bundle_plan_metadata_json, BundlePlan.jet:859.
+// Rust: crates/jet-pkg-model/src/Bundler.rs:2053
+// file_json: BundleFile.to_json_tree, BundlePlan.jet:51.
+// Rust: crates/jet-pkg-model/src/Bundler.rs:2064
+// launch_json: LaunchDescriptor.to_json_tree, BundlePlan.jet:72.
+// Rust: crates/jet-pkg-model/src/Bundler.rs:2073
+// signing_hook_json: pkg_bundle_signing_hook_json, BundlePlan.jet:966.
+// Rust: crates/jet-pkg-model/src/Bundler.rs:2083
+// signing_hook_receipt_json: pkg_bundle_signing_hook_receipt_json, BundlePlan.jet:981;
+// all argument values redacted, input paths redacted, digest retained.
+// Rust: crates/jet-pkg-model/src/Bundler.rs:2102
+// updater_receipt_json: UpdaterManifest.receipt_json_tree, BundlePlan.jet:129.
+// Rust: crates/jet-pkg-model/src/Bundler.rs:2122
+// optional_receipt_url: pkg_bundle_optional_receipt_url, BundlePlan.jet:996.
+// Rust: crates/jet-pkg-model/src/Bundler.rs:2128
+// receipt_url: pkg_bundle_receipt_source, BundlePlan.jet:1016 (identical source/URL redaction).
+// Rust: crates/jet-pkg-model/src/Bundler.rs:2136
+// optional_receipt_text: pkg_bundle_optional_receipt_text, BundlePlan.jet:1003.
+// Rust: crates/jet-pkg-model/src/Bundler.rs:2142
+// receipt_safe_text: pkg_bundle_receipt_safe_text, BundlePlan.jet:1010.
+// Rust: crates/jet-pkg-model/src/Bundler.rs:2150
+// receipt_source: pkg_bundle_receipt_source, BundlePlan.jet:1016.
+// Rust: crates/jet-pkg-model/src/Bundler.rs:2158
+// contains_sensitive_marker: pkg_bundle_contains_sensitive_marker, BundlePlan.jet:1021.
+// Rust: crates/jet-pkg-model/src/Bundler.rs:2174
+// signing_input_receipt_json: exact input projection in pkg_bundle_signing_hook_receipt_json, BundlePlan.jet:985.
+// Rust: crates/jet-pkg-model/src/Bundler.rs:2181
+// signing_input_json: exact input projection in pkg_bundle_signing_hook_json, BundlePlan.jet:968.
+// Rust: crates/jet-pkg-model/src/Bundler.rs:2188
+// bundle_input_receipt_json: BundleInputFact.receipt_json_tree, BundlePlan.jet:170.
+// Rust: crates/jet-pkg-model/src/Bundler.rs:2198
+// artifact_digest: pkg_bundle_artifact_digest, BundlePlan.jet:1032;
+// path-sorted framed path/kind, big-endian32 mode, framed payload, NUL schema terminator.
+// Rust: crates/jet-pkg-model/src/Bundler.rs:2212
+// frame: pkg_bundle_frame, BundlePlan.jet:1047, u64 big-endian byte length.
+// Rust: crates/jet-pkg-model/src/Bundler.rs:2217
+// text: canonical CanonicalJSON.String constructor used directly by all projections.
+// Rust: crates/jet-pkg-model/src/Bundler.rs:2221
+// optional_text: pkg_bundle_optional_text, BundlePlan.jet:815.
+// Rust: crates/jet-pkg-model/src/Bundler.rs:2225
+// integer: pkg_bundle_integer, BundlePlan.jet:797, canonical integer decimal text.
+// Rust: crates/jet-pkg-model/src/Bundler.rs:2229
+// linux_launcher: pkg_bundle_linux_launcher, BundlePlan.jet:1060.
+// Rust: crates/jet-pkg-model/src/Bundler.rs:2237
+// shell_double_quote: pkg_bundle_shell_double_quote, BundlePlan.jet:1065.
+// Rust: crates/jet-pkg-model/src/Bundler.rs:2245
+// linux_desktop_file: pkg_bundle_linux_desktop_file, BundlePlan.jet:1069.
+// Rust: crates/jet-pkg-model/src/Bundler.rs:2262
+// desktop_escape: pkg_bundle_desktop_escape, BundlePlan.jet:1081.
+// Rust: crates/jet-pkg-model/src/Bundler.rs:2266
+// mac_info_plist: pkg_bundle_mac_info_plist, BundlePlan.jet:1085.
+// Rust: crates/jet-pkg-model/src/Bundler.rs:2283
+// windows_executable_name: pkg_bundle_windows_executable_name, BundlePlan.jet:1105.
+// Rust: crates/jet-pkg-model/src/Bundler.rs:2291
+// windows_manifest: pkg_bundle_windows_manifest, BundlePlan.jet:1111.
+// Rust: crates/jet-pkg-model/src/Bundler.rs:2336
+// windows_content_types: pkg_bundle_windows_content_types, BundlePlan.jet:1137.
+// Rust: crates/jet-pkg-model/src/Bundler.rs:2374
+// sha256_base64: pkg_bundle_sha256_base64, BundlePlan.jet:1166.
+// Rust: crates/jet-pkg-model/src/Bundler.rs:2411
+// windows_block_map: pkg_bundle_windows_block_map, BundlePlan.jet:1171.
+// Rust: crates/jet-pkg-model/src/Bundler.rs:2428
+// xml_escape: pkg_bundle_xml_escape, BundlePlan.jet:1180.

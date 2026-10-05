@@ -1,1266 +1,225 @@
-// PORT-PENDING 0930 crates-jetpack-src-store-cache-slice-1800: crates/jetpack/src/Store/Cache.rs:1800-3061
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS fn write_new_key(path: &Path) -> io::Result<()> {
-//RS     ensure_parent(path)?;
-//RS     let secret = os_random_bytes::<32>()?.to_vec();
-//RS     if fs::symlink_metadata(path).is_ok() {
-//RS         return Ok(());
-//RS     }
-//RS     let mut file = fs::OpenOptions::new()
-//RS         .write(true)
-//RS         .create_new(true)
-//RS         .open(path)?;
-//RS     file.write_all(&secret)?;
-//RS     file.sync_all()?;
-//RS     #[cfg(unix)]
-//RS     {
-//RS         use std::os::unix::fs::PermissionsExt;
-//RS         let mut permissions = file.metadata()?.permissions();
-//RS         permissions.set_mode(0o600);
-//RS         fs::set_permissions(path, permissions)?;
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn bindings_dir(roots: &Roots) -> PathBuf {
-//RS     roots.root.join("cache").join("bindings")
-//RS }
-//RS 
-//RS fn binding_path(roots: &Roots, role: &str) -> io::Result<PathBuf> {
-//RS     validate_component(role, "cache role")?;
-//RS     Ok(bindings_dir(roots).join(format!("{role}.conf")))
-//RS }
-//RS 
-//RS fn parse_endpoint(endpoint: &str) -> io::Result<CacheEndpoint> {
-//RS     validate_text(endpoint, "cache endpoint")?;
-//RS     if endpoint == "hangar://local" || endpoint == "hangar://" {
-//RS         return Ok(CacheEndpoint::Hangar);
-//RS     }
-//RS     if let Some(path) = endpoint.strip_prefix("file://") {
-//RS         let path = absolute_endpoint_path(path, "file cache endpoint")?;
-//RS         return Ok(CacheEndpoint::Local(path));
-//RS     }
-//RS     if endpoint.starts_with("http://") || endpoint.starts_with("https://") {
-//RS         validate_http_base(endpoint)?;
-//RS         return Ok(CacheEndpoint::Http(
-//RS             endpoint.trim_end_matches('/').to_string(),
-//RS         ));
-//RS     }
-//RS     if endpoint.starts_with("ssh://") || endpoint.starts_with("ssh-ng://") {
-//RS         return parse_ssh_endpoint(endpoint);
-//RS     }
-//RS     if endpoint.starts_with("s3://") {
-//RS         validate_s3_uri(endpoint)?;
-//RS         return Ok(CacheEndpoint::S3(
-//RS             endpoint.trim_end_matches('/').to_string(),
-//RS         ));
-//RS     }
-//RS     if endpoint.starts_with("daemon://") || endpoint.starts_with("nix://") {
-//RS         return Err(invalid(
-//RS             "Nix store endpoints are retired; use Jetpack's native cache protocol",
-//RS         ));
-//RS     }
-//RS     let path = absolute_endpoint_path(endpoint, "cache mirror")?;
-//RS     Ok(CacheEndpoint::Local(path))
-//RS }
-//RS 
-//RS fn absolute_endpoint_path(raw: &str, label: &str) -> io::Result<PathBuf> {
-//RS     if raw.is_empty() || !Path::new(raw).is_absolute() {
-//RS         return Err(invalid(&format!("{label} must contain an absolute path")));
-//RS     }
-//RS     if raw.contains('?') || raw.contains('#') {
-//RS         return Err(invalid(&format!(
-//RS             "{label} cannot contain a query or fragment"
-//RS         )));
-//RS     }
-//RS     let path = PathBuf::from(raw);
-//RS     validate_path_components(&path)?;
-//RS     Ok(path)
-//RS }
-//RS 
-//RS fn parse_ssh_endpoint(endpoint: &str) -> io::Result<CacheEndpoint> {
-//RS     let (scheme, rest) = endpoint
-//RS         .split_once("://")
-//RS         .ok_or_else(|| invalid("SSH endpoint is missing its scheme"))?;
-//RS     let (authority, path) = rest.split_once('/').unwrap_or((rest, ""));
-//RS     if authority.is_empty()
-//RS         || authority.starts_with('-')
-//RS         || !authority.bytes().all(|byte| {
-//RS             byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'@' | b':' | b'-')
-//RS         })
-//RS     {
-//RS         return Err(invalid("SSH endpoint has an unsafe host name"));
-//RS     }
-//RS     let root = if path.is_empty() {
-//RS         "/var/cache/jet".to_string()
-//RS     } else {
-//RS         format!("/{path}")
-//RS     };
-//RS     validate_remote_key(&root)?;
-//RS     if scheme != "ssh" && scheme != "ssh-ng" {
-//RS         return Err(invalid("unknown SSH endpoint scheme"));
-//RS     }
-//RS     Ok(CacheEndpoint::Ssh {
-//RS         target: authority.to_string(),
-//RS         root,
-//RS     })
-//RS }
-//RS 
-//RS fn validate_http_base(endpoint: &str) -> io::Result<()> {
-//RS     let (_, rest) = endpoint
-//RS         .split_once("://")
-//RS         .ok_or_else(|| invalid("HTTP endpoint is missing its scheme"))?;
-//RS     let authority = rest.split('/').next().unwrap_or_default();
-//RS     if authority.is_empty()
-//RS         || authority.starts_with('-')
-//RS         || authority.contains('@')
-//RS         || authority.contains('?')
-//RS         || authority.contains('#')
-//RS         || authority.chars().any(char::is_whitespace)
-//RS     {
-//RS         return Err(invalid("HTTP endpoint has an unsafe host name"));
-//RS     }
-//RS     if rest.split('/').any(|part| part == "..") {
-//RS         return Err(invalid("HTTP endpoint contains a parent path"));
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn validate_s3_uri(endpoint: &str) -> io::Result<()> {
-//RS     let rest = endpoint
-//RS         .strip_prefix("s3://")
-//RS         .ok_or_else(|| invalid("S3 endpoint is missing its scheme"))?;
-//RS     let bucket = rest.split('/').next().unwrap_or_default();
-//RS     if bucket.is_empty()
-//RS         || !bucket
-//RS             .bytes()
-//RS             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-'))
-//RS         || rest.contains('?')
-//RS         || rest.contains('#')
-//RS         || rest.split('/').any(|part| part == "..")
-//RS     {
-//RS         return Err(invalid("S3 endpoint has an unsafe bucket or prefix"));
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn validate_remote_key(key: &str) -> io::Result<()> {
-//RS     if key.is_empty()
-//RS         || !key.starts_with('/')
-//RS         || key.contains('\0')
-//RS         || key.chars().any(char::is_whitespace)
-//RS         || key.split('/').any(|part| part == "..")
-//RS         || key.bytes().any(|byte| {
-//RS             matches!(
-//RS                 byte,
-//RS                 b'\'' | b'"' | b'`' | b'$' | b';' | b'&' | b'|' | b'<' | b'>'
-//RS             )
-//RS         })
-//RS     {
-//RS         return Err(invalid("remote cache path is unsafe"));
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn validate_relative_key(key: &str) -> io::Result<()> {
-//RS     if key.is_empty()
-//RS         || key.starts_with('/')
-//RS         || key
-//RS             .bytes()
-//RS             .any(|byte| byte == 0 || byte.is_ascii_control() || matches!(byte, b'?' | b'#' | b'%'))
-//RS         || Path::new(key)
-//RS             .components()
-//RS             .any(|component| matches!(component, Component::ParentDir | Component::Prefix(_)))
-//RS     {
-//RS         return Err(invalid("cache object key is unsafe"));
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn endpoint_key(endpoint: &CacheEndpoint, key: &str) -> io::Result<String> {
-//RS     validate_relative_key(key)?;
-//RS     match endpoint {
-//RS         CacheEndpoint::Http(base) => Ok(format!("{base}/{key}")),
-//RS         CacheEndpoint::S3(base) => Ok(format!("{base}/{key}")),
-//RS         CacheEndpoint::Ssh { root, .. } => {
-//RS             let path = format!("{}/{}", root.trim_end_matches('/'), key);
-//RS             validate_remote_key(&path)?;
-//RS             Ok(path)
-//RS         }
-//RS         CacheEndpoint::Local(root) => {
-//RS             let path = root.join(key);
-//RS             validate_path_components(&path)?;
-//RS             Ok(path.to_string_lossy().into_owned())
-//RS         }
-//RS         CacheEndpoint::Hangar => Err(invalid("this endpoint does not expose cache object keys")),
-//RS     }
-//RS }
-//RS 
-//RS fn endpoint_get(endpoint: &CacheEndpoint, key: &str, limit: u64) -> io::Result<Option<Vec<u8>>> {
-//RS     match endpoint {
-//RS         CacheEndpoint::Local(_) => {
-//RS             let path = PathBuf::from(endpoint_key(endpoint, key)?);
-//RS             match read_regular_bounded(&path, limit) {
-//RS                 Ok(bytes) => Ok(Some(bytes)),
-//RS                 Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
-//RS                 Err(error) => Err(error),
-//RS             }
-//RS         }
-//RS         CacheEndpoint::Http(_) => http_get(endpoint_key(endpoint, key)?, limit),
-//RS         CacheEndpoint::Ssh { target, .. } => ssh_get(target, &endpoint_key(endpoint, key)?, limit),
-//RS         CacheEndpoint::S3(_) => s3_get(endpoint_key(endpoint, key)?, limit),
-//RS         CacheEndpoint::Hangar => Err(invalid("this endpoint has no cache object read operation")),
-//RS     }
-//RS }
-//RS 
-//RS fn endpoint_put(endpoint: &CacheEndpoint, key: &str, bytes: &[u8]) -> io::Result<()> {
-//RS     let remote = endpoint_key(endpoint, key)?;
-//RS     match endpoint {
-//RS         CacheEndpoint::Local(root) => {
-//RS             ensure_directory(root)?;
-//RS             write_resumable(&PathBuf::from(remote), bytes)
-//RS         }
-//RS         CacheEndpoint::Http(_) => http_put(remote, bytes),
-//RS         CacheEndpoint::Ssh { target, .. } => {
-//RS             let parent = Path::new(&remote)
-//RS                 .parent()
-//RS                 .ok_or_else(|| invalid("SSH cache object has no parent"))?;
-//RS             ssh_mkdir(target, &parent.to_string_lossy())?;
-//RS             ssh_put(target, &remote, bytes)
-//RS         }
-//RS         CacheEndpoint::S3(_) => s3_put(remote, bytes),
-//RS         CacheEndpoint::Hangar => Err(invalid("this endpoint has no cache object write operation")),
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS struct TransferProof {
-//RS     signed_fingerprint: String,
-//RS     witness: Option<String>,
-//RS     receipt_version: Option<u64>,
-//RS     receipt_expires_unix: Option<u64>,
-//RS }
-//RS 
-//RS fn publish_endpoint(
-//RS     endpoint: &CacheEndpoint,
-//RS     info: &NarInfo,
-//RS     nar: &[u8],
-//RS     key: &TrustKey,
-//RS     _roots: &Roots,
-//RS     entry: &StoreEntry,
-//RS     role: &str,
-//RS ) -> io::Result<TransferProof> {
-//RS     let caps = endpoint.capabilities();
-//RS     if !caps.write {
-//RS         return Err(invalid(&format!(
-//RS             "{} endpoint is read-only",
-//RS             endpoint.label()
-//RS         )));
-//RS     }
-//RS     match endpoint {
-//RS         CacheEndpoint::Local(root) => {
-//RS             let receipt = cache_receipt_for_publication(endpoint, role, entry, key)?;
-//RS             publish_local_resumable(root, info, nar, key, &receipt)?;
-//RS             Ok(TransferProof {
-//RS                 signed_fingerprint: fingerprint_for_key(key),
-//RS                 witness: Some(receipt.witness.clone()),
-//RS                 receipt_version: Some(receipt.version),
-//RS                 receipt_expires_unix: Some(receipt.expires_unix),
-//RS             })
-//RS         }
-//RS         CacheEndpoint::Hangar => Err(invalid(
-//RS             "Hangar is the local source store and cannot publish cache objects",
-//RS         )),
-//RS         CacheEndpoint::Http(_) | CacheEndpoint::Ssh { .. } | CacheEndpoint::S3(_) => {
-//RS             let signed = info.clone().signed(key)?;
-//RS             let signed_text = signed.to_text()?;
-//RS             let info_key = format!(
-//RS                 "{}.narinfo",
-//RS                 info.store_path
-//RS                     .rsplit('/')
-//RS                     .next()
-//RS                     .ok_or_else(|| invalid("narinfo store path has no name"))?
-//RS             );
-//RS             let receipt = cache_receipt_for_publication(endpoint, role, entry, key)?;
-//RS             let receipt_text = encode_cache_receipt(&receipt)?;
-//RS             let store_name = info_key
-//RS                 .strip_suffix(".narinfo")
-//RS                 .ok_or_else(|| invalid("narinfo key has no suffix"))?;
-//RS             let receipt_key = cache_receipt_key(store_name)?;
-//RS             publish_remote_atomic(
-//RS                 endpoint,
-//RS                 [
-//RS                     (info.url.as_str(), nar),
-//RS                     (&info_key, signed_text.as_bytes()),
-//RS                     (receipt_key.as_str(), receipt_text.as_bytes()),
-//RS                 ],
-//RS             )?;
-//RS             Ok(TransferProof {
-//RS                 signed_fingerprint: fingerprint_for_info(&signed),
-//RS                 witness: Some(receipt.witness.clone()),
-//RS                 receipt_version: Some(receipt.version),
-//RS                 receipt_expires_unix: Some(receipt.expires_unix),
-//RS             })
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn publish_remote_atomic<'a>(
-//RS     endpoint: &CacheEndpoint,
-//RS     objects: impl IntoIterator<Item = (&'a str, &'a [u8])>,
-//RS ) -> io::Result<()> {
-//RS     let capabilities = endpoint.capabilities();
-//RS     if !capabilities.write {
-//RS         return Err(invalid(&format!(
-//RS             "{} cache endpoint does not provide write access",
-//RS             endpoint.label()
-//RS         )));
-//RS     }
-//RS     if !capabilities.promote {
-//RS         return Err(invalid(&format!(
-//RS             "{} cache endpoint has no atomic promotion support",
-//RS             endpoint.label()
-//RS         )));
-//RS     }
-//RS     for (key, bytes) in objects {
-//RS         let partial = format!("{key}.partial");
-//RS         write_remote_resumable(endpoint, &partial, bytes)?;
-//RS         let uploaded = endpoint_get(endpoint, &partial, bytes.len() as u64 + 1)?
-//RS             .ok_or_else(|| invalid("cache endpoint lost its staged object"))?;
-//RS         if uploaded != bytes {
-//RS             return Err(invalid(
-//RS                 "cache endpoint staged bytes differ from the signed object",
-//RS             ));
-//RS         }
-//RS         promote_remote(endpoint, &partial, key, bytes)?;
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn write_remote_resumable(endpoint: &CacheEndpoint, key: &str, bytes: &[u8]) -> io::Result<()> {
-//RS     let offset = match endpoint_get(endpoint, key, bytes.len() as u64 + 1)? {
-//RS         Some(existing) if existing == bytes => return Ok(()),
-//RS         Some(existing) if bytes.starts_with(&existing) => existing.len(),
-//RS         Some(_) => 0,
-//RS         None => 0,
-//RS     };
-//RS     if offset == 0 {
-//RS         return endpoint_put(endpoint, key, bytes);
-//RS     }
-//RS     match endpoint {
-//RS         CacheEndpoint::Ssh { target, .. } => {
-//RS             ssh_append(target, &endpoint_key(endpoint, key)?, &bytes[offset..])
-//RS         }
-//RS         _ => endpoint_put(endpoint, key, bytes),
-//RS     }
-//RS }
-//RS 
-//RS fn promote_remote(
-//RS     endpoint: &CacheEndpoint,
-//RS     partial: &str,
-//RS     final_key: &str,
-//RS     bytes: &[u8],
-//RS ) -> io::Result<()> {
-//RS     if let Some(existing) = endpoint_get(endpoint, final_key, bytes.len() as u64 + 1)? {
-//RS         if existing == bytes {
-//RS             return Ok(());
-//RS         }
-//RS         return Err(invalid(
-//RS             "cache endpoint already has conflicting final bytes",
-//RS         ));
-//RS     }
-//RS     match endpoint {
-//RS         CacheEndpoint::Ssh { target, .. } => {
-//RS             ssh_mkdir_for_key(endpoint, final_key)?;
-//RS             ssh_promote(
-//RS                 target,
-//RS                 &endpoint_key(endpoint, partial)?,
-//RS                 &endpoint_key(endpoint, final_key)?,
-//RS             )
-//RS         }
-//RS         CacheEndpoint::S3(_) => s3_promote(
-//RS             endpoint_key(endpoint, partial)?,
-//RS             endpoint_key(endpoint, final_key)?,
-//RS         ),
-//RS         _ => Err(invalid(&format!(
-//RS             "{} cache endpoint cannot promote staged objects",
-//RS             endpoint.label()
-//RS         ))),
-//RS     }
-//RS }
-//RS 
-//RS fn verify_hangar_endpoint(
-//RS     roots: &Roots,
-//RS     endpoint: &CacheEndpoint,
-//RS     entry: &StoreEntry,
-//RS ) -> io::Result<Option<Vec<u8>>> {
-//RS     if !matches!(endpoint, CacheEndpoint::Hangar) {
-//RS         return Ok(None);
-//RS     }
-//RS     let actual = super::try_entry_output_hash(roots, entry).map_err(io::Error::other)?;
-//RS     if actual != entry.envelope.output_hash {
-//RS         return Err(invalid(
-//RS             "local Hangar output hash disagrees with its identity",
-//RS         ));
-//RS     }
-//RS     let (nar, _) = super::write_nar(Path::new(&entry.out))?;
-//RS     Ok(Some(nar))
-//RS }
-//RS 
-//RS fn substitute_hangar_endpoint(
-//RS     roots: &Roots,
-//RS     endpoint: &CacheEndpoint,
-//RS     entry: &StoreEntry,
-//RS     destination: &Path,
-//RS ) -> io::Result<Option<Vec<u8>>> {
-//RS     if !matches!(endpoint, CacheEndpoint::Hangar) {
-//RS         return Ok(None);
-//RS     }
-//RS     let result = (|| {
-//RS         let actual = super::try_entry_output_hash(roots, entry).map_err(io::Error::other)?;
-//RS         if actual != entry.envelope.output_hash {
-//RS             return Err(invalid(
-//RS                 "local Hangar output hash disagrees with its identity",
-//RS             ));
-//RS         }
-//RS         copy_tree(Path::new(&entry.out), destination)?;
-//RS         super::seal_node(destination)?;
-//RS         let actual = crate::Envelope::try_output_hash_of(&destination.to_string_lossy())
-//RS             .map_err(io::Error::other)?;
-//RS         if actual != entry.envelope.output_hash {
-//RS             return Err(invalid(
-//RS                 "local Hangar output hash disagrees with its identity",
-//RS             ));
-//RS         }
-//RS         let (nar, _) = super::write_nar(destination)?;
-//RS         Ok(nar)
-//RS     })();
-//RS     match result {
-//RS         Ok(nar) => Ok(Some(nar)),
-//RS         Err(error) => {
-//RS             let _ = remove_tree(destination);
-//RS             Err(error)
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn copy_tree(source: &Path, destination: &Path) -> io::Result<()> {
-//RS     if let Some(parent) = destination.parent() {
-//RS         fs::create_dir_all(parent)?;
-//RS     }
-//RS     super::copy_snapshot_node(source, destination, &mut BTreeMap::new())
-//RS }
-//RS 
-//RS fn http_get(url: String, limit: u64) -> io::Result<Option<Vec<u8>>> {
-//RS     let response = jet_net::get_stream(&url, std::time::Duration::from_secs(120))
-//RS         .map_err(|error| invalid(&format!("HTTP cache GET failed: {error}")))?;
-//RS     let status = response.status();
-//RS     if status == 404 || status == 410 {
-//RS         return Ok(None);
-//RS     }
-//RS     if !(200..300).contains(&status) {
-//RS         return Err(invalid(&format!(
-//RS             "HTTP cache GET failed with status {status}"
-//RS         )));
-//RS     }
-//RS     let mut body = Vec::new();
-//RS     response
-//RS         .take(limit.saturating_add(1))
-//RS         .read_to_end(&mut body)
-//RS         .map_err(|error| invalid(&format!("HTTP cache response could not be read: {error}")))?;
-//RS     if body.len() as u64 > limit {
-//RS         return Err(invalid("HTTP cache response exceeded its bound"));
-//RS     }
-//RS     Ok(Some(body))
-//RS }
-//RS 
-//RS fn http_put(url: String, bytes: &[u8]) -> io::Result<()> {
-//RS     let mut child = Command::new("curl")
-//RS         .args([
-//RS             "--silent",
-//RS             "--show-error",
-//RS             "--netrc-optional",
-//RS             "--compressed",
-//RS             "--max-time",
-//RS             "120",
-//RS             "--request",
-//RS             "PUT",
-//RS             "--data-binary",
-//RS             "@-",
-//RS             "--output",
-//RS             null_device(),
-//RS             "--write-out",
-//RS             "\n%{http_code}",
-//RS             &url,
-//RS         ])
-//RS         .stdin(Stdio::piped())
-//RS         .stdout(Stdio::piped())
-//RS         .stderr(Stdio::piped())
-//RS         .spawn()
-//RS         .map_err(|error| invalid(&format!("HTTP cache adapter could not start: {error}")))?;
-//RS     child
-//RS         .stdin
-//RS         .take()
-//RS         .ok_or_else(|| invalid("HTTP cache adapter has no input"))?
-//RS         .write_all(bytes)?;
-//RS     let (status_result, stdout, stderr) = run_bounded_output(child, 64, "HTTP cache response")?;
-//RS     let status = stdout
-//RS         .rsplit(|byte| *byte == b'\n')
-//RS         .next()
-//RS         .and_then(|value| std::str::from_utf8(value).ok())
-//RS         .and_then(|value| value.trim().parse::<u16>().ok())
-//RS         .unwrap_or(0);
-//RS     if status_result.success() && (200..300).contains(&status) {
-//RS         Ok(())
-//RS     } else {
-//RS         Err(invalid(&format!(
-//RS             "HTTP cache PUT failed with status {status}: {}",
-//RS             bounded_stderr(&stderr)
-//RS         )))
-//RS     }
-//RS }
-//RS 
-//RS fn ssh_get(target: &str, path: &str, limit: u64) -> io::Result<Option<Vec<u8>>> {
-//RS     let child = Command::new("ssh")
-//RS         .args([target, "cat", "--", path])
-//RS         .stdout(Stdio::piped())
-//RS         .stderr(Stdio::piped())
-//RS         .spawn()
-//RS         .map_err(|error| invalid(&format!("SSH cache adapter could not start: {error}")))?;
-//RS     let (status, stdout, stderr) = run_bounded_output(child, limit, "SSH cache response")?;
-//RS     if !status.success() {
-//RS         let error = bounded_stderr(&stderr);
-//RS         if error.contains("No such file") || error.contains("not found") {
-//RS             return Ok(None);
-//RS         }
-//RS         return Err(invalid(&format!("SSH cache GET failed: {error}")));
-//RS     }
-//RS     Ok(Some(stdout))
-//RS }
-//RS 
-//RS fn ssh_mkdir(target: &str, root: &str) -> io::Result<()> {
-//RS     let child = Command::new("ssh")
-//RS         .args([target, "mkdir", "-p", "--", root])
-//RS         .stdout(Stdio::piped())
-//RS         .stderr(Stdio::piped())
-//RS         .spawn()
-//RS         .map_err(|error| invalid(&format!("SSH cache adapter could not start: {error}")))?;
-//RS     let (status, _, stderr) = run_bounded_output(child, 4096, "SSH cache response")?;
-//RS     if status.success() {
-//RS         Ok(())
-//RS     } else {
-//RS         Err(invalid(&format!(
-//RS             "SSH cache mkdir failed: {}",
-//RS             bounded_stderr(&stderr)
-//RS         )))
-//RS     }
-//RS }
-//RS 
-//RS fn ssh_mkdir_for_key(endpoint: &CacheEndpoint, key: &str) -> io::Result<()> {
-//RS     let endpoint_key = endpoint_key(endpoint, key)?;
-//RS     let parent = Path::new(&endpoint_key)
-//RS         .parent()
-//RS         .ok_or_else(|| invalid("SSH cache object has no parent"))?;
-//RS     let CacheEndpoint::Ssh { target, .. } = endpoint else {
-//RS         return Err(invalid("SSH directory creation needs an SSH endpoint"));
-//RS     };
-//RS     ssh_mkdir(target, &parent.to_string_lossy())
-//RS }
-//RS 
-//RS fn ssh_put(target: &str, path: &str, bytes: &[u8]) -> io::Result<()> {
-//RS     // `path` has already passed `validate_remote_key`, so the remote shell
-//RS     // redirection cannot introduce a second command. Suppress `tee`'s copy to
-//RS     // stdout; otherwise a successful upload of a large object trips the local
-//RS     // bounded response guard.
-//RS     let command = format!("tee -- {path} >/dev/null");
-//RS     let mut child = Command::new("ssh")
-//RS         .args([target, command.as_str()])
-//RS         .stdin(Stdio::piped())
-//RS         .stdout(Stdio::piped())
-//RS         .stderr(Stdio::piped())
-//RS         .spawn()
-//RS         .map_err(|error| invalid(&format!("SSH cache adapter could not start: {error}")))?;
-//RS     child
-//RS         .stdin
-//RS         .take()
-//RS         .ok_or_else(|| invalid("SSH cache adapter has no input"))?
-//RS         .write_all(bytes)?;
-//RS     let (status, _, stderr) = run_bounded_output(child, 1, "SSH cache response")?;
-//RS     if status.success() {
-//RS         Ok(())
-//RS     } else {
-//RS         Err(invalid(&format!(
-//RS             "SSH cache PUT failed: {}",
-//RS             bounded_stderr(&stderr)
-//RS         )))
-//RS     }
-//RS }
-//RS 
-//RS fn ssh_append(target: &str, path: &str, bytes: &[u8]) -> io::Result<()> {
-//RS     validate_remote_key(path)?;
-//RS     let command = format!("tee -a -- {path} >/dev/null");
-//RS     let mut child = Command::new("ssh")
-//RS         .args([target, command.as_str()])
-//RS         .stdin(Stdio::piped())
-//RS         .stdout(Stdio::piped())
-//RS         .stderr(Stdio::piped())
-//RS         .spawn()
-//RS         .map_err(|error| invalid(&format!("SSH cache adapter could not start: {error}")))?;
-//RS     child
-//RS         .stdin
-//RS         .take()
-//RS         .ok_or_else(|| invalid("SSH cache adapter has no input"))?
-//RS         .write_all(bytes)?;
-//RS     let (status, _, stderr) = run_bounded_output(child, 1, "SSH cache response")?;
-//RS     if status.success() {
-//RS         Ok(())
-//RS     } else {
-//RS         Err(invalid(&format!(
-//RS             "SSH cache append failed: {}",
-//RS             bounded_stderr(&stderr)
-//RS         )))
-//RS     }
-//RS }
-//RS 
-//RS fn ssh_promote(target: &str, partial: &str, final_path: &str) -> io::Result<()> {
-//RS     validate_remote_key(partial)?;
-//RS     validate_remote_key(final_path)?;
-//RS     let command = format!("mv -n -- {partial} {final_path}");
-//RS     let child = Command::new("ssh")
-//RS         .args([target, command.as_str()])
-//RS         .stdout(Stdio::piped())
-//RS         .stderr(Stdio::piped())
-//RS         .spawn()
-//RS         .map_err(|error| invalid(&format!("SSH cache adapter could not start: {error}")))?;
-//RS     let (status, _, stderr) = run_bounded_output(child, 4096, "SSH cache response")?;
-//RS     if status.success() {
-//RS         Ok(())
-//RS     } else {
-//RS         Err(invalid(&format!(
-//RS             "SSH cache promotion failed: {}",
-//RS             bounded_stderr(&stderr)
-//RS         )))
-//RS     }
-//RS }
-//RS 
-//RS fn s3_get(uri: String, limit: u64) -> io::Result<Option<Vec<u8>>> {
-//RS     let child = Command::new("aws")
-//RS         .args(["s3", "cp", &uri, "-", "--only-show-errors"])
-//RS         .stdout(Stdio::piped())
-//RS         .stderr(Stdio::piped())
-//RS         .spawn()
-//RS         .map_err(|error| invalid(&format!("S3 cache adapter could not start: {error}")))?;
-//RS     let (status, stdout, stderr) = run_bounded_output(child, limit, "S3 cache response")?;
-//RS     if !status.success() {
-//RS         let error = bounded_stderr(&stderr);
-//RS         if error.contains("404") || error.contains("NoSuchKey") || error.contains("Not Found") {
-//RS             return Ok(None);
-//RS         }
-//RS         return Err(invalid(&format!("S3 cache GET failed: {error}")));
-//RS     }
-//RS     Ok(Some(stdout))
-//RS }
-//RS 
-//RS fn s3_put(uri: String, bytes: &[u8]) -> io::Result<()> {
-//RS     let mut child = Command::new("aws")
-//RS         .args(["s3", "cp", "-", &uri, "--only-show-errors"])
-//RS         .stdin(Stdio::piped())
-//RS         .stdout(Stdio::piped())
-//RS         .stderr(Stdio::piped())
-//RS         .spawn()
-//RS         .map_err(|error| invalid(&format!("S3 cache adapter could not start: {error}")))?;
-//RS     child
-//RS         .stdin
-//RS         .take()
-//RS         .ok_or_else(|| invalid("S3 cache adapter has no input"))?
-//RS         .write_all(bytes)?;
-//RS     let (status, _, stderr) = run_bounded_output(child, 4096, "S3 cache response")?;
-//RS     if status.success() {
-//RS         Ok(())
-//RS     } else {
-//RS         Err(invalid(&format!(
-//RS             "S3 cache PUT failed: {}",
-//RS             bounded_stderr(&stderr)
-//RS         )))
-//RS     }
-//RS }
-//RS 
-//RS fn s3_promote(partial: String, final_uri: String) -> io::Result<()> {
-//RS     let child = Command::new("aws")
-//RS         .args(["s3", "mv", &partial, &final_uri, "--only-show-errors"])
-//RS         .stdout(Stdio::piped())
-//RS         .stderr(Stdio::piped())
-//RS         .spawn()
-//RS         .map_err(|error| invalid(&format!("S3 cache adapter could not start: {error}")))?;
-//RS     let (status, _, stderr) = run_bounded_output(child, 4096, "S3 cache response")?;
-//RS     if status.success() {
-//RS         Ok(())
-//RS     } else {
-//RS         Err(invalid(&format!(
-//RS             "S3 cache promotion failed: {}",
-//RS             bounded_stderr(&stderr)
-//RS         )))
-//RS     }
-//RS }
-//RS 
-//RS fn bounded_stderr(bytes: &[u8]) -> String {
-//RS     String::from_utf8_lossy(&bytes[..bytes.len().min(4096)])
-//RS         .trim()
-//RS         .to_string()
-//RS }
-//RS 
-//RS /// Run a host transport with a hard stdout bound. The child is killed as soon
-//RS /// as the bound is crossed, while stderr is drained on a helper thread so a
-//RS /// noisy failed transport cannot deadlock the transfer. The caller receives
-//RS /// only bounded bytes and a bounded diagnostic prefix.
-//RS fn run_bounded_output(
-//RS     mut child: Child,
-//RS     limit: u64,
-//RS     label: &str,
-//RS ) -> io::Result<(std::process::ExitStatus, Vec<u8>, Vec<u8>)> {
-//RS     let stdout = child.stdout.take().ok_or_else(|| {
-//RS         let _ = child.kill();
-//RS         let _ = child.wait();
-//RS         invalid(&format!("{label} has no output pipe"))
-//RS     })?;
-//RS     let stderr_thread = child.stderr.take().map(|mut stderr| {
-//RS         std::thread::spawn(move || {
-//RS             let mut bytes = Vec::new();
-//RS             let mut buffer = [0u8; 4096];
-//RS             loop {
-//RS                 match stderr.read(&mut buffer) {
-//RS                     Ok(0) => break,
-//RS                     Ok(read) => {
-//RS                         if bytes.len() < 4096 {
-//RS                             let keep = read.min(4096 - bytes.len());
-//RS                             bytes.extend_from_slice(&buffer[..keep]);
-//RS                         }
-//RS                     }
-//RS                     Err(_) => break,
-//RS                 }
-//RS             }
-//RS             bytes
-//RS         })
-//RS     });
-//RS     let max = usize::try_from(limit.saturating_add(1))
-//RS         .map_err(|_| invalid(&format!("{label} bound is too large")))?;
-//RS     let mut bytes = Vec::new();
-//RS     stdout.take(max as u64).read_to_end(&mut bytes)?;
-//RS     if bytes.len() >= max {
-//RS         let _ = child.kill();
-//RS         let _ = child.wait();
-//RS         if let Some(thread) = stderr_thread {
-//RS             let _ = thread.join();
-//RS         }
-//RS         return Err(invalid(&format!("{label} exceeded its bound")));
-//RS     }
-//RS     let status = child.wait()?;
-//RS     let stderr = stderr_thread
-//RS         .map(|thread| thread.join().unwrap_or_default())
-//RS         .unwrap_or_default();
-//RS     Ok((status, bytes, stderr))
-//RS }
-//RS 
-//RS fn null_device() -> &'static str {
-//RS     if cfg!(windows) {
-//RS         "NUL"
-//RS     } else {
-//RS         "/dev/null"
-//RS     }
-//RS }
-//RS 
-//RS fn publish_local_resumable(
-//RS     root: &Path,
-//RS     info: &NarInfo,
-//RS     nar: &[u8],
-//RS     key: &TrustKey,
-//RS     receipt: &CacheReceipt,
-//RS ) -> io::Result<()> {
-//RS     crate::RuntimePolicy::with_lock(root, "cache-publish", || {
-//RS         let signed = info.clone().signed(key)?;
-//RS         if signed.nar_size != nar.len() as u64 || !super::nar_hash_matches(&signed.nar_hash, nar) {
-//RS             return Err(invalid("NAR bytes do not match signed narinfo"));
-//RS         }
-//RS         ensure_directory(root)?;
-//RS         let nar_path = root.join(&signed.url);
-//RS         validate_path_components(&nar_path)?;
-//RS         let store_name = signed
-//RS             .store_path
-//RS             .rsplit('/')
-//RS             .next()
-//RS             .ok_or_else(|| invalid("narinfo store path has no name"))?;
-//RS         let info_path = root.join(format!("{store_name}.narinfo"));
-//RS         validate_path_components(&info_path)?;
-//RS         let receipt_path = root.join(cache_receipt_key(store_name)?);
-//RS         ensure_parent(&receipt_path)?;
-//RS         ensure_directory(
-//RS             receipt_path
-//RS                 .parent()
-//RS                 .ok_or_else(|| invalid("cache receipt has no parent"))?,
-//RS         )?;
-//RS         write_resumable(&nar_path, nar)?;
-//RS         write_resumable(&info_path, signed.to_text()?.as_bytes())?;
-//RS         write_receipt(&receipt_path, receipt)?;
-//RS         clear_negative_hint(root, store_name)?;
-//RS         Ok(())
-//RS     })
-//RS }
-//RS 
-//RS fn negative_hint_path(root: &Path, identity: &str) -> PathBuf {
-//RS     let digest = SHA256::sha256_hex(identity.as_bytes());
-//RS     root.join(".jet-negative").join(format!("{digest}.until"))
-//RS }
-//RS 
-//RS fn negative_hint_fresh(root: &Path, identity: &str) -> bool {
-//RS     let path = negative_hint_path(root, identity);
-//RS     let Ok(metadata) = fs::symlink_metadata(&path) else {
-//RS         return false;
-//RS     };
-//RS     if metadata.file_type().is_symlink() || !metadata.is_file() || metadata.len() > 64 {
-//RS         return false;
-//RS     }
-//RS     let Ok(text) = read_regular_bounded(&path, 64).and_then(|bytes| {
-//RS         String::from_utf8(bytes).map_err(|_| invalid("negative cache hint is not UTF-8"))
-//RS     }) else {
-//RS         return false;
-//RS     };
-//RS     text.trim()
-//RS         .parse::<u64>()
-//RS         .ok()
-//RS         .is_some_and(|until| until > now_seconds())
-//RS }
-//RS 
-//RS fn write_negative_hint(root: &Path, identity: &str) -> io::Result<()> {
-//RS     crate::RuntimePolicy::with_lock(root, "cache-negative", || {
-//RS         let path = negative_hint_path(root, identity);
-//RS         ensure_parent(&path)?;
-//RS         if let Ok(metadata) = fs::symlink_metadata(&path) {
-//RS             if metadata.file_type().is_symlink() || !metadata.is_file() {
-//RS                 return Err(invalid("negative cache hint is not a regular file"));
-//RS             }
-//RS             fs::remove_file(&path)?;
-//RS         }
-//RS         let until = now_seconds().saturating_add(NEGATIVE_CACHE_TTL_SECS);
-//RS         write_resumable(&path, until.to_string().as_bytes())
-//RS     })
-//RS }
-//RS 
-//RS fn clear_negative_hint(root: &Path, identity: &str) -> io::Result<()> {
-//RS     let path = negative_hint_path(root, identity);
-//RS     match fs::symlink_metadata(&path) {
-//RS         Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => {
-//RS             Err(invalid("negative cache hint is not a regular file"))
-//RS         }
-//RS         Ok(_) => {
-//RS             fs::remove_file(&path)?;
-//RS             Ok(())
-//RS         }
-//RS         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
-//RS         Err(error) => Err(error),
-//RS     }
-//RS }
-//RS 
-//RS /// Write an immutable object through a resumable private partial. A completed
-//RS /// object is never replaced; a matching object is accepted and a conflicting
-//RS /// object is rejected.
-//RS fn write_resumable(path: &Path, bytes: &[u8]) -> io::Result<()> {
-//RS     if let Ok(metadata) = fs::symlink_metadata(path) {
-//RS         if metadata.file_type().is_symlink() || !metadata.is_file() {
-//RS             return Err(invalid("cache object is not a regular file"));
-//RS         }
-//RS         return if read_regular_bounded(path, bytes.len() as u64)? == bytes {
-//RS             Ok(())
-//RS         } else {
-//RS             Err(invalid("cache object already has conflicting bytes"))
-//RS         };
-//RS     }
-//RS     ensure_parent(path)?;
-//RS     let partial = path.with_extension("partial");
-//RS     let mut offset = 0usize;
-//RS     if let Ok(metadata) = fs::symlink_metadata(&partial) {
-//RS         if metadata.file_type().is_symlink()
-//RS             || !metadata.is_file()
-//RS             || metadata.len() > bytes.len() as u64
-//RS         {
-//RS             let _ = fs::remove_file(&partial);
-//RS         } else {
-//RS             let existing = read_regular_bounded(&partial, bytes.len() as u64)?;
-//RS             if !bytes.starts_with(&existing) {
-//RS                 let _ = fs::remove_file(&partial);
-//RS             } else {
-//RS                 offset = existing.len();
-//RS             }
-//RS         }
-//RS     }
-//RS     if offset == 0 && fs::symlink_metadata(&partial).is_err() {
-//RS         fs::OpenOptions::new()
-//RS             .write(true)
-//RS             .create_new(true)
-//RS             .open(&partial)?;
-//RS     }
-//RS     let mut file = fs::OpenOptions::new().append(true).open(&partial)?;
-//RS     file.write_all(&bytes[offset..])?;
-//RS     file.sync_all()?;
-//RS     if let Ok(metadata) = fs::symlink_metadata(path) {
-//RS         if metadata.file_type().is_symlink() || !metadata.is_file() {
-//RS             return Err(invalid("cache object appeared as a non-regular file"));
-//RS         }
-//RS         let same = read_regular_bounded(path, bytes.len() as u64)
-//RS             .map(|existing| existing == bytes)
-//RS             .unwrap_or(false);
-//RS         return if same {
-//RS             let _ = fs::remove_file(&partial);
-//RS             Ok(())
-//RS         } else {
-//RS             let _ = fs::remove_file(&partial);
-//RS             Err(invalid(
-//RS                 "cache object was concurrently published with different bytes",
-//RS             ))
-//RS         };
-//RS     }
-//RS     match fs::hard_link(&partial, path) {
-//RS         Ok(()) => {
-//RS             let _ = fs::remove_file(&partial);
-//RS             Ok(())
-//RS         }
-//RS         Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
-//RS             let same = read_regular_bounded(path, bytes.len() as u64)
-//RS                 .map(|existing| existing == bytes)
-//RS                 .unwrap_or(false);
-//RS             let _ = fs::remove_file(&partial);
-//RS             if same {
-//RS                 Ok(())
-//RS             } else {
-//RS                 Err(invalid(
-//RS                     "cache object was concurrently published with different bytes",
-//RS                 ))
-//RS             }
-//RS         }
-//RS         Err(error) => {
-//RS             let _ = fs::remove_file(&partial);
-//RS             Err(error)
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn ensure_directory(path: &Path) -> io::Result<()> {
-//RS     validate_path_components(path)?;
-//RS     fs::create_dir_all(path)?;
-//RS     let metadata = fs::symlink_metadata(path)?;
-//RS     if metadata.file_type().is_symlink() || !metadata.is_dir() {
-//RS         return Err(invalid("cache mirror is not a real directory"));
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn validate_endpoint(endpoint: &str) -> io::Result<()> {
-//RS     let parsed = parse_endpoint(endpoint)?;
-//RS     let caps = parsed.capabilities();
-//RS     if !caps.read {
-//RS         return Err(invalid("cache endpoint does not provide read access"));
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn validate_endpoint_binding(
-//RS     binding: &CacheBinding,
-//RS     endpoint: &CacheEndpoint,
-//RS     write: bool,
-//RS ) -> io::Result<()> {
-//RS     let caps = endpoint.capabilities();
-//RS     if !caps.read {
-//RS         return Err(invalid(&format!(
-//RS             "{} cache endpoint does not provide read access",
-//RS             endpoint.label()
-//RS         )));
-//RS     }
-//RS     if write && !caps.write {
-//RS         return Err(invalid(&format!(
-//RS             "{} cache endpoint does not provide write access",
-//RS             endpoint.label()
-//RS         )));
-//RS     }
-//RS     if !caps.trust {
-//RS         return Err(invalid(&format!(
-//RS             "{} cache endpoint does not provide trust support",
-//RS             endpoint.label()
-//RS         )));
-//RS     }
-//RS     if caps.remote_execute {
-//RS         return Err(invalid(&format!(
-//RS             "{} cache endpoint exposes forbidden remote execution",
-//RS             endpoint.label()
-//RS         )));
-//RS     }
-//RS     if binding.credential_provider.is_some() && !caps.credential {
-//RS         return Err(invalid(&format!(
-//RS             "{} cache endpoint cannot consume a typed credential provider",
-//RS             endpoint.label()
-//RS         )));
-//RS     }
-//RS     if binding.credential_provider.is_some() && caps.credential {
-//RS         return Err(invalid(&format!(
-//RS             "{} cache endpoint has no typed credential adapter; refusing ambient credentials",
-//RS             endpoint.label()
-//RS         )));
-//RS     }
-//RS     if caps.credential_required && binding.credential_provider.is_none() {
-//RS         return Err(invalid(&format!(
-//RS             "{} cache endpoint needs an explicit typed credential provider",
-//RS             endpoint.label()
-//RS         )));
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn validate_component(value: &str, label: &str) -> io::Result<()> {
-//RS     if value.is_empty()
-//RS         || value == "."
-//RS         || value == ".."
-//RS         || value.len() > 128
-//RS         || !value
-//RS             .bytes()
-//RS             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
-//RS     {
-//RS         return Err(invalid(&format!("{label} is not a safe name")));
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn validate_text(value: &str, label: &str) -> io::Result<()> {
-//RS     if value
-//RS         .bytes()
-//RS         .any(|byte| byte == 0 || byte == b'\n' || byte == b'\r')
-//RS     {
-//RS         return Err(invalid(&format!("{label} contains a line break")));
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn validate_path_components(path: &Path) -> io::Result<()> {
-//RS     if !path.is_absolute() {
-//RS         return Err(invalid("cache path must be absolute"));
-//RS     }
-//RS     let mut current = PathBuf::new();
-//RS     for component in path.components() {
-//RS         match component {
-//RS             Component::Prefix(prefix) => current.push(prefix.as_os_str()),
-//RS             Component::RootDir => current.push(Path::new(std::path::MAIN_SEPARATOR_STR)),
-//RS             Component::Normal(value) => {
-//RS                 current.push(value);
-//RS                 if let Ok(metadata) = fs::symlink_metadata(&current) {
-//RS                     if metadata.file_type().is_symlink() {
-//RS                         return Err(invalid("cache path cannot traverse a symlink"));
-//RS                     }
-//RS                 }
-//RS             }
-//RS             Component::CurDir | Component::ParentDir => {
-//RS                 return Err(invalid("cache path contains an unsafe component"));
-//RS             }
-//RS         }
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn absolutize_host_path(path: PathBuf) -> io::Result<PathBuf> {
-//RS     if path.is_absolute() {
-//RS         validate_path_components(&path)?;
-//RS         return Ok(path);
-//RS     }
-//RS     let current = std::env::current_dir()?;
-//RS     let absolute = current.join(path);
-//RS     validate_path_components(&absolute)?;
-//RS     Ok(absolute)
-//RS }
-//RS 
-//RS fn ensure_parent(path: &Path) -> io::Result<()> {
-//RS     let parent = path
-//RS         .parent()
-//RS         .ok_or_else(|| invalid("cache path has no parent"))?;
-//RS     validate_path_components(parent)?;
-//RS     fs::create_dir_all(parent)?;
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn atomic_replace(path: &Path, bytes: &[u8]) -> io::Result<()> {
-//RS     if let Ok(metadata) = fs::symlink_metadata(path) {
-//RS         if metadata.file_type().is_symlink() || !metadata.is_file() {
-//RS             return Err(invalid("cache binding path is not a regular file"));
-//RS         }
-//RS     }
-//RS     let partial = path.with_extension(format!(
-//RS         "partial-{}-{}",
-//RS         std::process::id(),
-//RS         unique_suffix()
-//RS     ));
-//RS     let mut file = fs::OpenOptions::new()
-//RS         .write(true)
-//RS         .create_new(true)
-//RS         .open(&partial)?;
-//RS     let result = (|| {
-//RS         file.write_all(bytes)?;
-//RS         file.sync_all()?;
-//RS         #[cfg(windows)]
-//RS         {
-//RS             fs::remove_file(path)?;
-//RS         }
-//RS         fs::rename(&partial, path)
-//RS     })();
-//RS     if result.is_err() {
-//RS         let _ = fs::remove_file(&partial);
-//RS     }
-//RS     result
-//RS }
-//RS 
-//RS fn read_regular_bounded(path: &Path, limit: u64) -> io::Result<Vec<u8>> {
-//RS     let limit = usize::try_from(limit).map_err(|_| invalid("cache input bound is too large"))?;
-//RS     super::Nar::read_bounded(path, limit)
-//RS }
-//RS 
-//RS fn remove_tree(path: &Path) -> io::Result<()> {
-//RS     let metadata = fs::symlink_metadata(path)?;
-//RS     if metadata.file_type().is_symlink() || !metadata.is_dir() {
-//RS         fs::remove_file(path)
-//RS     } else {
-//RS         make_tree_writable_for_removal(path)?;
-//RS         fs::remove_dir_all(path)
-//RS     }
-//RS }
-//RS 
-//RS fn line(output: &mut String, name: &str, value: &str) -> io::Result<()> {
-//RS     validate_text(name, "cache binding field")?;
-//RS     validate_text(value, "cache binding value")?;
-//RS     output.push_str(name);
-//RS     output.push('=');
-//RS     output.push_str(value);
-//RS     output.push('\n');
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn unique_suffix() -> String {
-//RS     let now = SystemTime::now()
-//RS         .duration_since(UNIX_EPOCH)
-//RS         .map(|duration| duration.as_nanos())
-//RS         .unwrap_or_default();
-//RS     format!("{}-{now}", std::process::id())
-//RS }
-//RS 
-//RS fn now_seconds() -> u64 {
-//RS     SystemTime::now()
-//RS         .duration_since(UNIX_EPOCH)
-//RS         .map(|duration| duration.as_secs())
-//RS         .unwrap_or_default()
-//RS }
-//RS 
-//RS fn invalid(message: &str) -> io::Error {
-//RS     io::Error::new(io::ErrorKind::InvalidData, message.to_string())
-//RS }
-//RS 
-//RS #[cfg(test)]
-//RS mod tests {
-//RS     use super::*;
-//RS 
-//RS     #[test]
-//RS     fn cache_credentials_cannot_be_attached_to_a_non_credential_endpoint() {
-//RS         let binding = CacheBinding {
-//RS             role: "public".to_string(),
-//RS             mirrors: vec!["file:///tmp/jet-cache".to_string()],
-//RS             trust_key: PathBuf::from("/tmp/cache.key"),
-//RS             credential_provider: Some("host-keychain".to_string()),
-//RS             allow_write: false,
-//RS         };
-//RS         assert!(binding.validate().is_err());
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn cache_write_errors_use_access_language() {
-//RS         let binding = CacheBinding {
-//RS             role: "public".to_string(),
-//RS             mirrors: vec!["https://cache.example/jet".to_string()],
-//RS             trust_key: PathBuf::from("/tmp/cache.key"),
-//RS             credential_provider: None,
-//RS             allow_write: true,
-//RS         };
-//RS         let error = binding.validate().unwrap_err().to_string();
-//RS         assert!(error.contains("write access"), "{error}");
-//RS         assert!(!error.contains("capability"), "{error}");
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn remote_cache_endpoints_never_grant_remote_execution() {
-//RS         for endpoint in [
-//RS             parse_endpoint("https://cache.example/jet").unwrap(),
-//RS             parse_endpoint("ssh://builder.example/var/cache/jet").unwrap(),
-//RS             parse_endpoint("s3://cache.example/jet").unwrap(),
-//RS         ] {
-//RS             assert!(!endpoint.capabilities().remote_execute);
-//RS         }
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn nix_store_cache_endpoints_are_rejected_before_any_host_process() {
-//RS         for endpoint in ["daemon://", "nix://local"] {
-//RS             let error = parse_endpoint(endpoint).unwrap_err();
-//RS             assert!(error.to_string().contains("retired"), "{error}");
-//RS         }
-//RS         let source = include_str!("Cache.rs");
-//RS         for executable in ["nix", "nix-store"] {
-//RS             let forbidden = format!("Command::new(\"{executable}\")");
-//RS             assert!(!source.contains(&forbidden), "{forbidden}");
-//RS         }
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn malformed_cache_binding_is_not_treated_as_unbound() {
-//RS         let root = std::env::temp_dir().join(format!(
-//RS             "jetpack-cache-binding-{}-{}",
-//RS             std::process::id(),
-//RS             now_seconds()
-//RS         ));
-//RS         let _ = fs::remove_dir_all(&root);
-//RS         fs::create_dir_all(root.join("cache/bindings")).unwrap();
-//RS         fs::write(
-//RS             root.join("cache/bindings/public.conf"),
-//RS             "not a cache binding\n",
-//RS         )
-//RS         .unwrap();
-//RS         let roots = Roots {
-//RS             root: root.clone(),
-//RS             dev_mode: false,
-//RS         };
-//RS         let error = list_cache_bindings(&roots).unwrap_err();
-//RS         assert!(error.to_string().contains("cache binding"), "{error}");
-//RS         fs::remove_dir_all(root).unwrap();
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn cache_binding_missing_trust_key_fails_before_local_fallback() {
-//RS         let root = std::env::temp_dir().join(format!(
-//RS             "jetpack-cache-key-{}-{}",
-//RS             std::process::id(),
-//RS             now_seconds()
-//RS         ));
-//RS         let _ = fs::remove_dir_all(&root);
-//RS         fs::create_dir_all(root.join("mirror")).unwrap();
-//RS         let roots = Roots {
-//RS             root: root.clone(),
-//RS             dev_mode: false,
-//RS         };
-//RS         bind_cache(
-//RS             &roots,
-//RS             "public",
-//RS             vec![format!("file://{}", root.join("mirror").display())],
-//RS             None,
-//RS             None,
-//RS             false,
-//RS         )
-//RS         .unwrap();
-//RS         fs::remove_file(root.join("trust/cache-public.key")).unwrap();
-//RS 
-//RS         let error = list_cache_bindings(&roots).unwrap_err();
-//RS         assert!(error.to_string().contains("cache trust key"), "{error}");
-//RS         fs::remove_dir_all(root).unwrap();
-//RS     }
-//RS }
-// END-PORT-PENDING 0930 crates/jetpack/src/Store/Cache.rs:1800-3061
+// Private Store.CacheBindings continuation. Canonical bodies below are reused
+// from CacheBindings, CacheEndpoints and CachePublication, not wrapped again.
+use core.sys.target
+use std.[fs, thread, process, io, path]
 
+// Rust: crates/jetpack/src/Store/Cache.rs:1800
+// write_new_key -> CacheBindings.store_cache_write_new_key (235): random 32-byte
+// secret, create-new, write, fsync, selected-Unix mode 0600.
+// Rust: crates/jetpack/src/Store/Cache.rs:1822
+// bindings_dir -> CacheBindings.store_cache_bindings_dir (245).
+// Rust: crates/jetpack/src/Store/Cache.rs:1826
+// binding_path -> CacheBindings.store_cache_binding_path (249).
+// Rust: crates/jetpack/src/Store/Cache.rs:1831
+// parse_endpoint -> CacheEndpoints.store_cache_parse_endpoint (66).
+// Rust: crates/jetpack/src/Store/Cache.rs:1864
+// absolute_endpoint_path -> CacheEndpoints.store_cache_absolute_endpoint_path (94).
+// Rust: crates/jetpack/src/Store/Cache.rs:1878
+// parse_ssh_endpoint -> CacheEndpoints.store_cache_parse_ssh_endpoint (103).
+// Rust: crates/jetpack/src/Store/Cache.rs:1906
+// validate_http_base -> CacheEndpoints.store_cache_validate_http_base (123).
+// Rust: crates/jetpack/src/Store/Cache.rs:1926
+// validate_s3_uri -> CacheEndpoints.store_cache_validate_s3_uri (134).
+// Rust: crates/jetpack/src/Store/Cache.rs:1944
+// validate_remote_key -> CacheEndpoints.store_cache_validate_remote_key (160).
+// Rust: crates/jetpack/src/Store/Cache.rs:1962
+// validate_relative_key -> CacheEndpoints.store_cache_validate_relative_key (172);
+// selected-target prefix component handling needs canonical OSPath cutover.
+// Rust: crates/jetpack/src/Store/Cache.rs:1977
+// endpoint_key -> CacheEndpoints.store_cache_endpoint_key (182).
+// Rust: crates/jetpack/src/Store/Cache.rs:1996
+// endpoint_get -> CacheEndpoints.store_cache_endpoint_get (202).
+// Rust: crates/jetpack/src/Store/Cache.rs:2013
+// endpoint_put -> CacheEndpoints.store_cache_endpoint_put (220).
+// Rust: crates/jetpack/src/Store/Cache.rs:2034
+// TransferProof -> CachePublication.CacheTransferProof (123): all four fields.
+// Rust: crates/jetpack/src/Store/Cache.rs:2041
+// publish_endpoint -> CachePublication.store_cache_publish_endpoint (1015).
+// Rust: crates/jetpack/src/Store/Cache.rs:2105
+// publish_remote_atomic -> CacheEndpoints.store_cache_publish_remote_atomic (247),
+// CacheRemoteObject (240): NAR, narinfo, receipt staged/read back/promoted in order.
+// Rust: crates/jetpack/src/Store/Cache.rs:2137
+// write_remote_resumable -> CacheEndpoints.store_cache_write_remote_resumable (263).
+// Rust: crates/jetpack/src/Store/Cache.rs:2155
+// promote_remote -> CacheEndpoints.store_cache_promote_remote (282).
+// Rust: crates/jetpack/src/Store/Cache.rs:2189
+// verify_hangar_endpoint -> CachePublication.store_cache_verify_hangar_endpoint (1042).
+// Rust: crates/jetpack/src/Store/Cache.rs:2207
+// substitute_hangar_endpoint -> CachePublication.store_cache_substitute_hangar_endpoint
+// (1052), store_cache_copy_hangar_output (1061): hash/copy/seal/hash/NAR, error cleanup.
+// Rust: crates/jetpack/src/Store/Cache.rs:2244
+// copy_tree -> CachePublication.store_cache_copy_tree (1073).
+// Rust: crates/jetpack/src/Store/Cache.rs:2251
+// http_get -> CacheEndpoints.store_cache_http_get (302); 120-second timeout gap
+// is recorded in integration items, all status/read/bound branches remain there.
+// Rust: crates/jetpack/src/Store/Cache.rs:2274
+// http_put -> CacheEndpoints.store_cache_http_put (319), exact curl argv.
+// Rust: crates/jetpack/src/Store/Cache.rs:2320
+// ssh_get -> CacheEndpoints.store_cache_ssh_get (328), cat -- and missing-file diagnosis.
+// Rust: crates/jetpack/src/Store/Cache.rs:2338
+// ssh_mkdir -> CacheEndpoints.store_cache_ssh_mkdir (337).
+// Rust: crates/jetpack/src/Store/Cache.rs:2356
+// ssh_mkdir_for_key -> CacheEndpoints.store_cache_ssh_mkdir_for_key (342).
+// Rust: crates/jetpack/src/Store/Cache.rs:2367
+// ssh_put -> CacheEndpoints.store_cache_ssh_put (355), tee output suppressed.
+// Rust: crates/jetpack/src/Store/Cache.rs:2396
+// ssh_append -> CacheEndpoints.store_cache_ssh_append (360), tee -a output suppressed.
+// Rust: crates/jetpack/src/Store/Cache.rs:2422
+// ssh_promote -> CacheEndpoints.store_cache_ssh_promote (366), mv -n --.
+// Rust: crates/jetpack/src/Store/Cache.rs:2443
+// s3_get -> CacheEndpoints.store_cache_s3_get (373).
+// Rust: crates/jetpack/src/Store/Cache.rs:2461
+// s3_put -> CacheEndpoints.store_cache_s3_put (382).
+// Rust: crates/jetpack/src/Store/Cache.rs:2485
+// s3_promote -> CacheEndpoints.store_cache_s3_promote (387).
+
+// Rust: crates/jetpack/src/Store/Cache.rs:2503
+fn bounded_stderr(bytes: [U8]) -> String {
+    // GATE #4494: native UTF-8 lossy decoding; retain invalid interior bytes too.
+    end :: bytes.len().min(4096)
+    text :: String.from_utf8_lossy(bytes[0..<end])
+    trimmed := text.trim() // #4303
+    trimmed.to_string()
+}
+
+// Rust: crates/jetpack/src/Store/Cache.rs:2513
+fn run_bounded_output(child: ^std.process.Child, limit: U64, label: String) -> (std.process.ExitStatus, [U8], [U8]) IOError! {
+    // GATE #4494: native pipe ownership, child kill/wait and helper thread.
+    owned := ^child
+    stdout := &owned.stdout.take() ?? {
+        _ :: &owned.kill()
+        _ :: &owned.wait()
+        return Err(IOError.new(.InvalidData, "{label} has no output pipe")) // #4409
+    }
+    stderr_thread := None
+    if &owned.stderr.take() == {
+        .Val(stream) -> {
+            stderr_thread = Val(std.thread.spawn(() -> {
+                stderr := ^stream
+                bytes := [U8]{}
+                buffer := [U8].repeat(U8{0}, 4096)
+                loop {
+                    if &stderr.read(&buffer) == {
+                        .Ok(0) -> break
+                        .Ok(read) -> {
+                            if bytes.len() < 4096 {
+                                keep :: read.min(4096 - bytes.len())
+                                loop at in 0..<keep -> &bytes.push(buffer[at])
+                            }
+                        }
+                        .Err(_) -> break
+                    }
+                }
+                bytes
+            }))
+        }
+        .None -> {}
+    }
+    // GATE #4483: checked conversion to selected target pointer width.
+    maximum :: USize.try_from(limit.saturating_add(U64{1})) ?? return Err(IOError.new(.InvalidData, "{label} bound is too large"))
+    bytes := [U8]{}
+    &stdout.take(maximum.as_u64()).read_to_end(&bytes)
+    if bytes.len() >= maximum {
+        _ :: &owned.kill()
+        _ :: &owned.wait()
+        if stderr_thread == {
+            .Val(handle) -> _ :: handle.join()
+            .None -> {}
+        }
+        return Err(IOError.new(.InvalidData, "{label} exceeded its bound"))
+    }
+    status :: &owned.wait()
+    stderr := [U8]{}
+    if stderr_thread == {
+        .Val(handle) -> stderr = handle.join() ?? [U8]{}
+        .None -> {}
+    }
+    Ok((status, bytes, stderr))
+}
+
+// Rust: crates/jetpack/src/Store/Cache.rs:2561
+fn null_device() -> String {
+    // GATE #4483: selected target, not compiler-host OS.
+    if target.selected_os() == .Windows -> "NUL" else -> "/dev/null"
+}
+
+// Rust: crates/jetpack/src/Store/Cache.rs:2569
+// publish_local_resumable -> CachePublication.store_cache_publish_local_resumable (1082).
+// Rust: crates/jetpack/src/Store/Cache.rs:2606
+// negative_hint_path -> CachePublication.store_cache_negative_hint_path (1105).
+// Rust: crates/jetpack/src/Store/Cache.rs:2611
+// negative_hint_fresh -> CachePublication.store_cache_negative_hint_fresh (1110).
+// Rust: crates/jetpack/src/Store/Cache.rs:2630
+// write_negative_hint -> CachePublication.store_cache_write_negative_hint (1120);
+// saturating u64 deadline addition is retained as a canonical integration item.
+// Rust: crates/jetpack/src/Store/Cache.rs:2645
+// clear_negative_hint -> CachePublication.store_cache_clear_negative_hint (1135).
+// Rust: crates/jetpack/src/Store/Cache.rs:2663
+// write_resumable -> CachePublication.store_cache_write_resumable (1146),
+// store_cache_same_bytes (1207): immutable final, prefix partial, hard-link race.
+// Rust: crates/jetpack/src/Store/Cache.rs:2743
+// ensure_directory -> CacheBindings.store_cache_ensure_directory (336).
+// Rust: crates/jetpack/src/Store/Cache.rs:2753
+// validate_endpoint -> CacheBindings.store_cache_validate_endpoint (255).
+// Rust: crates/jetpack/src/Store/Cache.rs:2762
+// validate_endpoint_binding -> CacheBindings.store_cache_validate_endpoint_binding (264).
+// Rust: crates/jetpack/src/Store/Cache.rs:2813
+// validate_component -> CacheBindings.store_cache_validate_component (282).
+// Rust: crates/jetpack/src/Store/Cache.rs:2827
+// validate_text -> CacheBindings.store_cache_validate_text (294).
+
+// Rust: crates/jetpack/src/Store/Cache.rs:2837
+fn validate_path_components(value: OSPath) -> IOError! {
+    // GATE #4494: native selected-platform components/lstat, never decode to text.
+    if !value.is_absolute() -> return Err(IOError.new(.InvalidData, "cache path must be absolute"))
+    current := OSPath.new()
+    loop component in value.components() {
+        if component == {
+            .Prefix(prefix) -> &current.push(prefix.as_os_str())
+            .RootDir -> &current.push(std.path.MAIN_SEPARATOR_STR)
+            .Normal(name) -> {
+                &current.push(name)
+                if std.fs.symlink_metadata(current) == {
+                    .Ok(metadata) -> {
+                        if metadata.file_type().is_symlink() -> return Err(IOError.new(.InvalidData, "cache path cannot traverse a symlink"))
+                    }
+                    .Err(_) -> {}
+                }
+            }
+            .CurDir | .ParentDir -> return Err(IOError.new(.InvalidData, "cache path contains an unsafe component"))
+        }
+    }
+    Ok(())
+}
+
+// Rust: crates/jetpack/src/Store/Cache.rs:2862
+// absolutize_host_path -> CacheBindings.store_cache_absolutize_host_path (319).
+// Rust: crates/jetpack/src/Store/Cache.rs:2873
+// ensure_parent -> CacheBindings.store_cache_ensure_parent (329).
+// Rust: crates/jetpack/src/Store/Cache.rs:2882
+// atomic_replace -> CacheBindings.store_cache_atomic_replace (344),
+// store_cache_finish_replace (359): exclusive partial, write/fsync, Windows unlink,
+// rename, remove partial on every failure.
+// Rust: crates/jetpack/src/Store/Cache.rs:2912
+// read_regular_bounded -> CacheBindings.store_cache_read_regular_bounded (366),
+// checked selected-USize conversion before Nar.read_bounded needs integration.
+// Rust: crates/jetpack/src/Store/Cache.rs:2917
+// remove_tree -> CacheBindings.store_cache_remove_tree (371).
+
+// Rust: crates/jetpack/src/Store/Cache.rs:2927
+fn line(output: &String, name: String, value: String) -> StoreError! {
+    store_cache_validate_text(name, "cache binding field")
+    store_cache_validate_text(value, "cache binding value")
+    &output.push_str(name)
+    &output.push_str("=")
+    &output.push_str(value)
+    &output.push_str("\n")
+    Ok(())
+}
+
+// Rust: crates/jetpack/src/Store/Cache.rs:2937
+// unique_suffix -> Archive.store_archive_unique_suffix: pid and epoch nanoseconds.
+// Rust: crates/jetpack/src/Store/Cache.rs:2945
+// now_seconds -> CacheBindings.store_cache_now_seconds (402).
+// Rust: crates/jetpack/src/Store/Cache.rs:2952
+// invalid -> StoreError.InvalidData, native IOError.new(.InvalidData, message) (#4409).

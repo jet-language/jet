@@ -1,0 +1,20 @@
+// Rust: tests/jetpack_build_debug.rs:1
+use tests.common.[jetpack_bin, Scratch]
+// GATE #4494: real filesystem and child process launcher.
+use std.[fs, env, Command]
+
+// Rust: tests/jetpack_build_debug.rs:10
+fn jetpack() -> Command { Command.new(jetpack_bin()) }
+
+// Rust: tests/jetpack_build_debug.rs:14
+fn jet() -> Command {
+    Command.new(env.var("JET_BIN") ?? panic("JET_BIN must name the built jet binary for process claims"))
+}
+
+// Rust: tests/jetpack_build_debug.rs:18
+fn write_project(dir: &OSPath) -> {
+    vendor :: dir.join("vendor/weirdctl")
+    fs.create_dir_all(vendor) ?? panic("vendor")
+    fs.write(vendor.join("README"), "source exists, binary missing") ?? panic("readme")
+    fs.write(dir.join("env.jet"), "\nmodule dev {{\n    env.dev: Env{{\n        packages: [\n            Pkg.adapt(\n                name: \"weirdctl\",\n                source: \"./vendor/weirdctl\",\n                recipe: Recipe.prebuilt(bin: \"missing-bin\", as: \"weirdctl\")\n            )\n        ],\n    }}\n}}\n") ?? panic("environment")
+}

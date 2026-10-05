@@ -1,0 +1,35 @@
+use jetpack.CLI.StudioTransactions.[apply_option_transaction, source_diff, studio_request, studio_request_string, studio_request_bool, validate_studio_proof_artifact]
+
+// Behavioral control for Rust: crates/jetpack/src/CLI/studio_transactions.rs:1270
+#Test("studio_option_transaction_preserves_indent_comma_and_final_newline") {
+    source :: "options: [\n    enabled: false,\n]\n"
+    (next, changed) :: apply_option_transaction(source, "enabled", "true") ?? panic("replace option")
+    assert(changed)
+    assert_eq(next, "options: [\n    enabled: true,\n]\n")
+    (same, changed_again) :: apply_option_transaction(next, "enabled", "true") ?? panic("same option")
+    assert(!changed_again)
+    assert_eq(same, next)
+    (inserted, inserted_change) :: apply_option_transaction("options: [\n]", "added", "42") ?? panic("insert option")
+    assert(inserted_change)
+    assert_eq(inserted, "options: [\n            added: 42,\n]")
+    assert(apply_option_transaction("host: []", "added", "42").is_err())
+}
+
+// Behavioral control for Rust: crates/jetpack/src/CLI/studio_transactions.rs:1317
+#Test("studio_source_diff_retains_context_and_insert_before_delete_tie") {
+    path :: OSPath.from("config.jet")
+    assert_eq(source_diff(path, "a\nb\n", "a\nc\n"), "diff --git a/config.jet b/config.jet\n--- a/config.jet\n+++ b/config.jet\n@@ -1,2 +1,2 @@\n a\n+c\n-b\n")
+    assert_eq(source_diff(path, "a\n", "a\n"), "diff -- config.jet\n(no changes)\n")
+}
+
+// Behavioral control for Rust: crates/jetpack/src/CLI/studio_transactions.rs:1374
+#Test("studio_request_requires_object_and_preserves_field_types") {
+    assert(studio_request("[]").is_err())
+    assert(studio_request("{").is_err())
+    request :: studio_request("{\"key\":\"value\",\"write\":true,\"wrong\":42}") ?? panic("object request")
+    assert_eq(studio_request_string(&request, "key"), Val("value"))
+    assert_eq(studio_request_string(&request, "wrong"), None)
+    assert(studio_request_bool(&request, "write"))
+    assert(!studio_request_bool(&request, "key"))
+    assert(validate_studio_proof_artifact("{}", "source", "plan").is_err())
+}

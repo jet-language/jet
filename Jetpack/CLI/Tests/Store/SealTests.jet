@@ -1,0 +1,155 @@
+use std.[env, fs, process, thread]
+use std.sync.atomic.[AtomicU64, Ordering]
+// GATE #4494: real files, atomic sequence, exact native metadata, subprocess,
+// scoped cleanup, and independent native thread; no Rust callback.
+
+// Rust: crates/jetpack/src/Store/SealTests.rs:8
+TEST_SEQUENCE :: AtomicU64.new(0)
+// Rust: crates/jetpack/src/Store/SealTests.rs:10
+struct TestRoot { path: OSPath }
+// Rust: crates/jetpack/src/Store/SealTests.rs:15
+impl TestRoot.Close {
+    fn close(^self) -> { _ :: fs.remove_dir_all(self.path) }
+}
+// Rust: crates/jetpack/src/Store/SealTests.rs:20
+fn temp_roots() -> (roots: HangarRoots, guard: TestRoot) {
+    path :: env.temp_dir().join("jetpack-seal-{process.id()}-{TEST_SEQUENCE.fetch_add(1, Ordering.Relaxed)}")
+    fs.create_dir_all(path) ?? panic("create seal test root")
+    guard :: TestRoot{path: path}
+    roots :: HangarRoots{root: ~guard.path, dev_mode: true}
+    (roots: roots, guard: ^guard)
+}
+// Rust: crates/jetpack/src/Store/SealTests.rs:35
+// fixture -> Store/Tests/Seal.jet7 store_test_seal_fixture(..., "seal-test").
+// Rust: crates/jetpack/src/Store/SealTests.rs:39
+// fixture_with_platform_artifact_kind -> Store/Tests/Seal.jet7:
+// exact trusted payload, name/version/reference/source/recipe/policy/platform,
+// single out, empty signature, seal-test provenance and supplied artifact kind.
+// Rust: crates/jetpack/src/Store/SealTests.rs:71
+// native_admission_seals_after_shared_cas_hardlinking -> Store/Tests/Seal.jet39:
+// real CAS directory, digest seal, admitted hash and zero content hash count.
+// Rust: crates/jetpack/src/Store/SealTests.rs:91
+fn mtime(metadata: fs.Metadata) -> (seconds: I64, nanos: I64) {
+    (seconds: metadata.mtime(), nanos: metadata.mtime_nsec())
+}
+// Rust: crates/jetpack/src/Store/SealTests.rs:97
+fn set_mtime(path: OSPath, seconds: I64, nanos: I64) -> {
+    stamp :: "@{seconds}.{nanos.to_string().pad_start(9, "0")}"
+    status :: process.Command.new("touch").arg("-m").arg("-d").arg(stamp).arg(path).status() ?? panic("touch")
+    assert(status.success(), "touch failed for {path.display()}")
+}
+// Rust: crates/jetpack/src/Store/SealTests.rs:114
+fn make_writable(path: OSPath) -> {
+    permissions := (fs.metadata(path) ?? panic("metadata")).permissions()
+    permissions.set_mode(permissions.mode() | 0o200)
+    fs.set_permissions(path, permissions) ?? panic("set permissions")
+}
+
+// Rust: crates/jetpack/src/Store/SealTests.rs:123
+#Test("seal_written_at_admission_and_warm_verification_skips_content_hash") {
+    if core.sys.target.selected_family() != "unix" -> return // GATE #4483
+    verification := StoreVerification.new()
+    fixture_root :: temp_roots()
+    roots :: fixture_root.roots
+    ingested :: store_test_seal_fixture(&verification, roots, "warm", "seal-test")
+    object :: OSPath.from(ingested.entry.out)
+    digest :: ingested.entry.envelope.output_hash
+    seal :: roots.hangar_dir().join(STORE_SEALS_DIR).join(digest)
+    assert(seal.is_file(), "admission must write {seal}")
+    store_reset_verified_digest_hash_count(&verification, object)
+    assert_eq(store_try_entry_output_hash(&verification, roots, ingested.entry) ?? panic("hash"), digest)
+    assert_eq(store_verified_digest_hash_count(&verification, object), 0)
+    // Restore the ORIGINAL nanoseconds; no preliminary mtime mutation/reseal.
+    payload :: object.join("payload")
+    before :: fs.metadata(payload) ?? panic("metadata")
+    make_writable(payload)
+    fs.write(payload, "tamper!".bytes()) ?? panic("tamper")
+    stamp :: mtime(before)
+    set_mtime(payload, stamp.seconds, stamp.nanos)
+    after :: fs.metadata(payload) ?? panic("metadata")
+    assert_eq(before.len(), after.len())
+    assert_eq(mtime(before), mtime(after))
+    store_reset_verified_digest_hash_count(&verification, object)
+    assert_eq((store_list_checked(&verification, roots) ?? panic("list")).len(), 1)
+    assert_eq(store_verified_digest_hash_count(&verification, object), 0)
+    assert_eq(store_check_seal(&verification, object, roots.hangar_dir()) ?? panic("check"), Val(digest))
+}
+
+// Rust: crates/jetpack/src/Store/SealTests.rs:161
+#Test("seal_mtime_drift_rehashes_once_and_reseals") {
+    if core.sys.target.selected_family() != "unix" -> return
+    verification := StoreVerification.new()
+    fixture_root :: temp_roots()
+    roots :: fixture_root.roots
+    ingested :: store_test_seal_fixture(&verification, roots, "drift", "seal-test")
+    object :: OSPath.from(ingested.entry.out)
+    digest :: ingested.entry.envelope.output_hash
+    seal :: roots.hangar_dir().join(STORE_SEALS_DIR).join(digest)
+    before :: fs.read(seal) ?? panic("read seal")
+    payload :: object.join("payload")
+    stamp :: mtime(fs.metadata(payload) ?? panic("metadata"))
+    set_mtime(payload, stamp.seconds + 1, stamp.nanos)
+    store_reset_verified_digest_hash_count(&verification, object)
+    assert_eq(store_try_entry_output_hash(&verification, roots, ingested.entry) ?? panic("hash"), digest)
+    assert_eq(store_verified_digest_hash_count(&verification, object), 1)
+    assert(before != (fs.read(seal) ?? panic("read seal")))
+    assert_eq(store_try_entry_output_hash(&verification, roots, ingested.entry) ?? panic("hash"), digest)
+    assert_eq(store_verified_digest_hash_count(&verification, object), 1)
+}
+
+// Rust: crates/jetpack/src/Store/SealTests.rs:190
+// seal_digest_mismatch_quarantines_the_tampered_object -> Store/Tests/Seal.jet106:
+// exact tamper payload, owned-output expectation, real quarantine, original
+// object absent, output- quarantine member present and digest seal absent.
+
+// Rust: crates/jetpack/src/Store/SealTests.rs:220
+#Test("hangar_verify_rehashes_despite_valid_seal_and_catches_content_corruption") {
+    if core.sys.target.selected_family() != "unix" -> return
+    verification := StoreVerification.new()
+    fixture_root :: temp_roots()
+    roots :: fixture_root.roots
+    ingested :: store_test_seal_fixture(&verification, roots, "audit", "seal-test")
+    object :: OSPath.from(ingested.entry.out)
+    digest :: ingested.entry.envelope.output_hash
+    assert_eq(store_check_seal(&verification, object, roots.hangar_dir()) ?? panic("check"), Val(digest))
+    payload :: object.join("payload")
+    before :: fs.metadata(payload) ?? panic("metadata")
+    make_writable(payload)
+    fs.write(payload, "tamper!".bytes()) ?? panic("tamper")
+    stamp :: mtime(before)
+    set_mtime(payload, stamp.seconds, stamp.nanos)
+    assert_eq(mtime(before), mtime(fs.metadata(payload) ?? panic("metadata")))
+    store_reset_verified_digest_hash_count(&verification, object)
+    assert(store_verify_hangar_object(&verification, roots, ingested.entry) == .Err(_))
+    assert_eq(store_verified_digest_hash_count(&verification, object), 1)
+}
+
+// Rust: crates/jetpack/src/Store/SealTests.rs:245
+#Test("armed_command_memo_checks_identity_once_and_stays_thread_local") {
+    if core.sys.target.selected_family() != "unix" -> return
+    verification := StoreVerification.new()
+    fixture_root :: temp_roots()
+    roots :: fixture_root.roots
+    ingested :: store_test_seal_fixture(&verification, roots, "memo", "seal-test")
+    object :: OSPath.from(ingested.entry.out)
+    digest :: ingested.entry.envelope.output_hash
+    hangar :: roots.hangar_dir()
+    child_object :: ~object
+    child_hangar :: ~hangar
+    child_digest :: ~digest
+    armed :: thread.spawn(() -> {
+        // Canonical explicit owner models the original independent TLS window.
+        child_verification := StoreVerification.new()
+        store_arm_command_memo(&child_verification)
+        assert_eq(store_check_seal(&child_verification, child_object, child_hangar) ?? panic("check"), Val(child_digest))
+        payload :: child_object.join("payload")
+        stamp :: mtime(fs.metadata(payload) ?? panic("metadata"))
+        set_mtime(payload, stamp.seconds + 7, stamp.nanos)
+        assert_eq(store_check_seal(&child_verification, child_object, child_hangar) ?? panic("check"), Val(child_digest))
+        store_remove_seal(&child_verification, child_object, child_hangar) ?? panic("remove")
+        assert_eq(store_check_seal(&child_verification, child_object, child_hangar) ?? panic("check"), None)
+    })
+    ^armed.join() ?? panic("armed thread")
+    // Main owner was never armed, preserving the original sibling isolation.
+    assert_eq(store_check_seal(&verification, object, hangar) ?? panic("check"), None)
+}

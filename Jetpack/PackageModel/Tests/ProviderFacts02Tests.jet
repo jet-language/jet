@@ -1,0 +1,121 @@
+use Jetpack.PackageModel.Source.Provider.ProviderFacts.*
+use Jetpack.PackageModel.Source.Provider.ProviderSelector.*
+
+// Rust: crates/jet-pkg-model/src/ProviderFacts.rs:1193
+#Test("bare_selector_is_version_and_features_are_lossless") {
+    selector :: ProviderSelector.parse("#2.0.17&features=lua,ssl")
+    assert_eq(selector.version, "2.0.17")
+    assert_eq(selector.revision, "")
+    assert_eq(selector.features, [String]{"lua", "ssl"})
+    assert(selector.is_exact())
+}
+
+// Rust: crates/jet-pkg-model/src/ProviderFacts.rs:1205
+#Test("provider_facts_round_trip_identity_provenance_and_native_bytes") {
+    facts := ProviderFacts.for_reference("npm", "left-pad@npm#2.0.17")
+    &facts.set_resolved_source("npm:left-pad@2.0.17")
+    &facts.set_native_document("package.json", "{{\"name\":\"left-pad\"}}\n")
+    &facts.add_fact("package.version", ProviderFactValue.Text("2.0.17"), "package.json.version")
+    facts.validate() ?? panic("lossless provider facts")
+    assert_eq(facts.qualified_reference(), "left-pad#version=2.0.17@npm")
+    round_trip :: ProviderFacts.from_json(facts.to_json()) ?? panic("provider facts JSON")
+    assert_eq(round_trip, facts)
+    assert(round_trip.explain_lines().any(fn(line) -> line == "native package.json: retained"))
+}
+
+// Rust: crates/jet-pkg-model/src/ProviderFacts.rs:1225
+#Test("mutable_selector_is_an_explicit_loss") {
+    facts :: ProviderFacts.for_reference("npm", "vite#^5@npm")
+    assert(!facts.is_lossless())
+    error :: if facts.validate() == {
+        .Err(error) -> error.message
+        .Ok(_) -> panic("mutable selector must fail closed")
+    }
+    assert(error.contains("lossy") || error.contains("exact"), error)
+}
+
+// Rust: crates/jet-pkg-model/src/ProviderFacts.rs:1238
+#Test("external_provider_requires_a_qualified_source_suffix") {
+    facts :: ProviderFacts.for_reference("npm", "left-pad#1.0.0")
+    assert(facts.losses.any(fn(loss) -> loss.reason.contains("fully qualified provider source suffix")))
+    assert(facts.validate().is_err())
+}
+
+// Rust: crates/jet-pkg-model/src/ProviderFacts.rs:1248
+#Test("digest_selector_requires_a_real_digest_shape") {
+    valid :: ProviderSelector.parse("#digest=sha256-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
+    assert(valid.is_exact())
+    invalid :: ProviderSelector.parse("#digest=0123456789abcdef0123456789abcdef")
+    assert(!invalid.is_exact())
+}
+
+// Rust: crates/jet-pkg-model/src/ProviderFacts.rs:1259
+#Test("mutable_revision_ref_is_an_explicit_loss") {
+    facts :: ProviderFacts.for_reference("swiftpm", "swift-log#revision=feature/main@swiftpm")
+    assert(facts.losses.any(fn(loss) -> loss.key == "provider.selector.revision"))
+    assert(facts.validate().is_err())
+}
+
+// Rust: crates/jet-pkg-model/src/ProviderFacts.rs:1270
+#Test("source_alias_is_retained_and_external_provider_mismatch_conflicts") {
+    alias :: ProviderFacts.for_reference("nix", "ripgrep@default")
+    assert_eq(alias.facts.get("provider.authority"), Val(ProviderFactValue.Text("default")))
+    alias.validate() ?? panic("named source authority is valid")
+    conflict :: ProviderFacts.for_reference("npm", "left-pad@cargo#1.0.0")
+    assert(conflict.conflicts.any(fn(item) -> item.key == "provider"))
+    assert(conflict.validate().is_err())
+}
+
+// Rust: crates/jet-pkg-model/src/ProviderFacts.rs:1284
+#Test("resolved_selector_makes_an_unpinned_source_explicit") {
+    facts := ProviderFacts.for_reference("npm", "left-pad@catalog")
+    &facts.set_resolved_selector("#version=2.0.17", "policy.providers.catalog")
+    &facts.set_resolved_source("left-pad#version=2.0.17@npm")
+    facts.validate() ?? panic("resolved source selector is lossless")
+    assert_eq(facts.qualified_reference(), "left-pad#version=2.0.17@catalog")
+    round_trip :: ProviderFacts.from_json(facts.to_json()) ?? panic("carrier round trip")
+    assert_eq(round_trip, facts)
+    assert(facts.explain_lines().any(fn(line) -> line.contains("provider.resolved_selector")))
+}
+
+// Rust: crates/jet-pkg-model/src/ProviderFacts.rs:1304
+#Test("conflicting_native_documents_are_reported") {
+    facts := ProviderFacts.for_reference("npm", "left-pad@npm#1.0.0")
+    &facts.set_native_document("package.json", "one")
+    &facts.set_native_document("package.json", "two")
+    assert(facts.conflicts.any(fn(conflict) -> conflict.key == "provider.native_document"))
+    assert(facts.validate().is_err())
+}
+
+// Rust: crates/jet-pkg-model/src/ProviderFacts.rs:1316
+#Test("resolved_selector_does_not_hide_unsupported_requested_facts") {
+    facts := ProviderFacts.for_reference("npm", "left-pad#channel=next@catalog")
+    &facts.set_resolved_selector("#version=2.0.17", "policy.providers.catalog")
+    assert(facts.losses.any(fn(loss) -> loss.reason.contains("unsupported selector fact")))
+    assert(facts.validate().is_err())
+}
+
+// Rust: crates/jet-pkg-model/src/ProviderFacts.rs:1327
+#Test("selector_carrier_tampering_is_rejected") {
+    facts := ProviderFacts.for_reference("npm", "left-pad#version=2.0.17@npm")
+    facts.selector.raw = "#version=2.0.17&channel=next"
+    assert(facts.validate().is_err())
+    facts := ProviderFacts.for_reference("core", "profile@core")
+    facts.selector.version = "2.0.17"
+    assert(facts.validate().is_err())
+}
+
+// Rust: crates/jet-pkg-model/src/ProviderFacts.rs:1338
+#Test("resolved_selector_rejects_unsupported_facts") {
+    facts := ProviderFacts.for_reference("npm", "left-pad@catalog")
+    &facts.set_resolved_selector("#version=2.0.17&channel=next", "policy.providers.catalog")
+    assert(facts.losses.any(fn(loss) -> loss.reason.contains("unsupported resolved selector fact")))
+    assert(facts.validate().is_err())
+}
+
+// Rust: crates/jet-pkg-model/src/ProviderFacts.rs:1349
+#Test("duplicate_selector_facts_are_explicit_loss") {
+    facts :: ProviderFacts.for_reference("npm", "left-pad#version=2.0.17&version=2.0.17&features=ssl+ssl@npm")
+    assert(facts.losses.any(fn(loss) -> loss.reason.contains("duplicate selector fact")))
+    assert(facts.validate().is_err())
+}

@@ -1,0 +1,609 @@
+use tests.common
+use jet.[compile, compile_with_path, check_with_path, compile_programmable_build, compile_tests_with_path, compile_with_entry]
+use std.[fs, env, process, thread, time]
+use std.process.[Command, Stdio]
+use jet_cli.Tests.Integration.RunEntry.[jet, median_nanos, assert_example_tier_parity]
+// GATE #4494: real native CLI, filesystem, pipes, clocks and kill/reap.
+
+// Rust: tests/run_entry.rs:4
+#Test("bare_run_stays_valid") { compile("fn run() {{}}\n").expect("bare beginner entrypoint must compile") }
+// Rust: tests/run_entry.rs:9
+#Test("script_top_level_recovery_always_consumes_a_token") {
+    diagnostics :: compile("    }}\n").expect_err("a stray `}}` is not a program")
+    assert(diagnostics.len() < 10, "top-level recovery must report the stray brace once, not in a loop: {diagnostics:?}")
+}
+// Rust: tests/run_entry.rs:21
+#Test("loose_top_level_statements_require_explicit_run") {
+    diagnostics :: compile("limit :: 2\nprint(limit)\n").expect_err("ordinary files must not invent an implicit run")
+    diagnostic :: diagnostics.iter().find(diagnostic -> diagnostic.code == "E0621").expect("explicit-run diagnostic")
+    assert(diagnostic.edit.is_none(), "the diagnostic must not offer an implicit-run rewrite: {diagnostic:?}")
+}
+// Rust: tests/run_entry.rs:36
+#Test("module_globals_and_explicit_run_keep_statement_order") {
+    source :: `
+LIMIT :: 2
+LABEL :: "start"
+my_var := 3
+
+fn run() {
+    print(LABEL)
+    print(LIMIT)
+    my_var += LIMIT
+    print(my_var)
+    print(even(LIMIT + 2))
+    print("end")
+}
+fn even(n: Int) -> Bool { return if n == 0 -> true else -> odd(n - 1) }
+fn odd(n: Int) -> Bool { return if n == 0 -> false else -> even(n - 1) }
+`
+    expected :: "start\n2\n5\ntrue\nend\n"
+    dir :: common.unique_tmp("jet_module_globals")
+    fs.create_dir_all(dir).unwrap()
+    fs.write(dir.join("main.jet"), source).unwrap()
+    // Retired execution adapters cut over to real native O1/O0 and dev routes.
+    loop (tier, args) in [("O1", ["run", "main.jet"]), ("O0", ["run", "--interpret", "main.jet"]), ("dev-O1", ["dev", "--watch=off", "main.jet"]), ("dev-O0", ["dev", "--watch=off", "--interpret", "main.jet"])] {
+        outcome :: Command.new(jet()).args(args).current_dir(dir).env("NO_COLOR", "1").output().unwrap()
+        assert_eq(String.from_utf8_lossy(outcome.stdout), expected, "{tier} stdout")
+        assert(outcome.stderr.is_empty(), "{tier} stderr: {String.from_utf8_lossy(outcome.stderr)}")
+        assert_eq(outcome.status.code(), Val(0), "{tier} exit code")
+    }
+    cli :: Command.new(jet()).args(["run", "main.jet"]).current_dir(dir).env("NO_COLOR", "1").output().expect("jet run should execute the explicit run entry")
+    assert(cli.status.success(), "jet run rejected module globals:\n{String.from_utf8_lossy(cli.stderr)}")
+    assert_eq(String.from_utf8_lossy(cli.stdout), expected, "jet run must preserve explicit-run statement order")
+    assert(cli.stderr.is_empty(), "jet run emitted unexpected stderr: {String.from_utf8_lossy(cli.stderr)}")
+    _ :: fs.remove_dir_all(dir)
+    (code, stdout, stderr) :: common.build_and_run("jet_module_globals_aot", "main", source)
+    assert_eq(code, 0, "AOT exit code: {stderr}")
+    assert_eq(stdout, expected, "AOT stdout")
+    assert(stderr.is_empty(), "AOT stderr: {stderr}")
+}
+// Rust: tests/run_entry.rs:127
+#Test("module_globals_are_file_wide_declarations") {
+    compile(`
+LIMIT :: 2
+my_var := 3
+fn helper() -> Int { return my_var + LIMIT }
+fn run() { print(helper()) }
+`).expect("module globals must be visible in every function")
+}
+// Rust: tests/run_entry.rs:144
+#Test("unannotated_run_is_fallible_by_default_and_reports_at_the_edge") {
+    source :: `
+fn step() -> Int { return Err("boom") }
+fn run() { value :: step(); print(value) }
+`
+    compile(source).expect("an unannotated run may propagate a fallible call")
+    dir :: common.unique_tmp("jet_unannotated_entry_error")
+    fs.create_dir_all(dir).unwrap()
+    fs.write(dir.join("main.jet"), source).unwrap()
+    output :: Command.new(jet()).args(["run", "main.jet"]).current_dir(dir).env("NO_COLOR", "1").output().unwrap()
+    _ :: fs.remove_dir_all(dir)
+    assert_eq(output.status.code(), Val(1))
+    stderr :: String.from_utf8_lossy(output.stderr)
+    assert(stderr.contains("boom"), "entry report should contain the source error: {stderr}")
+    assert(stderr.contains("Error"), "entry report should contain its error frame: {stderr}")
+    (code, _, aot_stderr) :: common.build_and_run("jet_unannotated_entry_error_aot", "main", source)
+    assert_eq(code, 1)
+    assert(aot_stderr.contains("boom") && aot_stderr.contains("Error"), "default native fallible entry did not report the error: {aot_stderr}")
+}
+// Rust: tests/run_entry.rs:192
+#Test("structural_entry_error_uses_jet_show_report") {
+    source :: "fn run() [String]! {{ return Err([String]{{\"boom\"}}) }}\n"
+    compile(source).expect("a structural entry error should compile")
+    (code, stdout, stderr) :: common.build_and_run("jet_structural_entry_show", "main", source)
+    assert_eq(code, 1)
+    assert(stdout.is_empty())
+    assert(stderr.contains("boom"), "structural entry errors must use JetShow: {stderr}")
+}
+// Rust: tests/run_entry.rs:210
+#Test("script_entry_uses_the_same_front_end_for_check_and_build") {
+    dir :: common.unique_tmp("jet_script_check_build")
+    fs.create_dir_all(dir).unwrap()
+    file :: dir.join("main.jet")
+    fs.write(file, "fn run() {{ print(\"script entry\") }}\n").unwrap()
+    path :: file.to_str().unwrap()
+    diagnostics :: check_with_path(path)
+    assert(diagnostics.is_empty(), "check rejected the explicit run: {diagnostics:?}")
+    compile_programmable_build(path, []).expect("build should use the explicit run entry")
+    (code, stdout, stderr) :: common.build_and_run("jet_script_check_build_native", "main", "fn run() {{ print(\"script entry\") }}\n")
+    assert_eq(code, 0, stderr)
+    assert_eq(stdout, "script entry\n", "build dropped the explicit run body")
+    _ :: fs.remove_dir_all(dir)
+}
+// Rust: tests/run_entry.rs:234
+#Test("loose_statements_are_rejected_even_with_explicit_run") {
+    source :: "print(\"before\")\nfn run() {{ print(\"middle\") }}\nprint(\"after\")\n"
+    diagnostics :: compile(source).expect_err("loose statements must be rejected outright")
+    diagnostic :: diagnostics.iter().find(diagnostic -> diagnostic.code == "E0621").expect("explicit-run diagnostic")
+    assert(diagnostic.edit.is_none(), "implicit-run auto-fix must be removed: {diagnostic:?}")
+}
+// Rust: tests/run_entry.rs:249
+#Test("explicit_run_matches_default_jit_and_forced_interpreter") {
+    dir :: env.temp_dir().join("jet_explicit_run_{process.id()}")
+    _ :: fs.remove_dir_all(dir)
+    fs.create_dir_all(dir).unwrap()
+    fs.write(dir.join("main.jet"), "fn run() {{ print(\"script entry\") }}\n").unwrap()
+    loop (tier, args) in [("O1", ["run", "main.jet"]), ("O0", ["run", "--interpret", "main.jet"]), ("dev-O1", ["dev", "--watch=off", "main.jet"]), ("dev-O0", ["dev", "--watch=off", "--interpret", "main.jet"])] {
+        outcome :: Command.new(jet()).args(args).current_dir(dir).output().unwrap()
+        assert_eq(String.from_utf8_lossy(outcome.stdout), "script entry\n", "{tier} stdout")
+        assert(outcome.stderr.is_empty(), "{tier} stderr: {String.from_utf8_lossy(outcome.stderr)}")
+        assert_eq(outcome.status.code(), Val(0), "{tier} exit code")
+    }
+    _ :: fs.remove_dir_all(dir)
+}
+// Rust: tests/run_entry.rs:283
+#Test("script_dev_verb_runs_only_explicit_run") {
+    dir :: common.unique_tmp("jet_script_dev_verb")
+    fs.create_dir_all(dir).unwrap()
+    fs.write(dir.join("main.jet"), "fn helper() -> String {{ return \"dev script\" }}\nfn run() {{ print(helper()) }}\n").unwrap()
+    output :: Command.new(jet()).args(["dev", "main.jet", "--watch=off"]).current_dir(dir).env("NO_COLOR", "1").output().expect("jet dev should run a single explicit entry")
+    _ :: fs.remove_dir_all(dir)
+    assert(output.status.success(), "jet dev rejected the explicit run:\n{String.from_utf8_lossy(output.stderr)}")
+    assert_eq(String.from_utf8_lossy(output.stdout), "dev script\n", "jet dev must execute the explicit run body exactly once")
+}
+// Rust: tests/run_entry.rs:313
+#Test("script_test_verb_keeps_test_blocks_and_does_not_run_script_body") {
+    dir :: env.temp_dir().join("jet_script_test_{process.id()}")
+    _ :: fs.remove_dir_all(dir)
+    fs.create_dir_all(dir).unwrap()
+    file :: dir.join("main.jet")
+    fs.write(file, "fn run() {{ print(\"script body\") }}\n#Test(\"script test\") {{ assert(helper()) }}\nfn helper() -> Bool {{ return true }}\n").unwrap()
+    path :: file.to_str().unwrap()
+    (harness, _) :: compile_tests_with_path("", path).expect("jet test should accept a script with a #Test block")
+    assert(harness.contains("script test"), "test name missing from harness")
+    output :: Command.new(jet()).args(["test", "--show-default", path, "--serial"]).output().expect("jet test should run")
+    _ :: fs.remove_dir_all(dir)
+    assert(output.status.success(), "jet test failed:\n{String.from_utf8_lossy(output.stderr)}")
+    stdout :: String.from_utf8_lossy(output.stdout)
+    assert(stdout.contains("script test: pass"), "stdout: {stdout}")
+    assert(!stdout.contains("script body"), "jet test ran the script body: {stdout}")
+}
+// Rust: tests/run_entry.rs:349
+#Test("explicit_dev_entry_can_select_declared_dev_without_loose_code") {
+    dir :: env.temp_dir().join("jet_explicit_dev_entry_{process.id()}")
+    _ :: fs.remove_dir_all(dir)
+    fs.create_dir_all(dir).unwrap()
+    file :: dir.join("main.jet")
+    fs.write(file, "fn dev() {{ print(\"dev body\") }}\n").unwrap()
+    compile_with_entry(file.to_str().unwrap(), "dev").expect("jet dev entry swap should accept an explicit entry")
+    output :: Command.new(jet()).args(["dev", file.to_str().unwrap(), "--watch=off"]).output().unwrap()
+    assert_eq(output.status.code(), Val(0))
+    assert_eq(String.from_utf8_lossy(output.stdout), "dev body\n", "dev body missing from native output")
+    _ :: fs.remove_dir_all(dir)
+}
+// Rust: tests/run_entry.rs:365
+#Test("imported_scripts_are_rejected_before_their_body_can_run") {
+    dir :: env.temp_dir().join("jet_imported_script_{process.id()}")
+    _ :: fs.remove_dir_all(dir)
+    fs.create_dir_all(dir).unwrap()
+    fs.write(dir.join("tools.jet"), "print(\"must not run\")\n").unwrap()
+    entry :: dir.join("main.jet")
+    fs.write(entry, "use \"./tools\"\nfn run() {{ print(\"entry\") }}\n").unwrap()
+    diagnostics :: compile_with_path("", entry.to_str().unwrap()).expect_err("imported scripts must be rejected")
+    _ :: fs.remove_dir_all(dir)
+    assert(diagnostics.iter().any(diagnostic -> diagnostic.code == "E0620"), "expected E0620, got {diagnostics:?}")
+}
+// Rust: tests/run_entry.rs:385
+#Test("fallible_unit_run_is_the_only_fallible_entrypoint") {
+    src :: "fn run() {{ return Err(\"boom\") }}\n"
+    compile(src).expect("fallible unit run should compile")
+    (code, stdout, stderr) :: common.build_and_run("jet_fallible_unit_entry", "main", src)
+    assert_eq(code, 1, "fallible run wrapper must use the shared reported exit boundary: {stderr}")
+    assert(stdout.is_empty())
+    assert(stderr.contains("boom") && stderr.contains("Error"), "fallible run wrapper must handle returned errors: {stderr}")
+}
+// Rust: tests/run_entry.rs:412
+#Test("declared_crypto_error_uses_the_generic_runtime_boundary") {
+    src :: `
+use core.crypto as crypto
+fn run() CryptoError! {
+    length :: 0
+    _ :: crypto.hkdf_sha256(crypto.Secret.from_bytes([1]), [], [], length)
+}
+`
+    compile(src).expect("CryptoError entrypoint should compile")
+    (code, stdout, stderr) :: common.build_and_run("jet_crypto_generic_entry", "main", src)
+    assert_eq(code, 1)
+    assert(stdout.is_empty())
+    assert(stderr.contains("hkdf_sha256"), "CryptoError run must retain its error type and generic reported-error boundary: {stderr}")
+    assert(!stderr.contains("unhandled cryptographic error"), stderr)
+}
+// Rust: tests/run_entry.rs:445
+#Test("unhandled_crypto_error_exits_1_with_the_generic_entry_report") {
+    src :: `
+use core.crypto as crypto
+fn dynamic_length(value: Int) -> Int { return value }
+fn run() CryptoError! {
+    length :: dynamic_length(8161)
+    _ :: crypto.hkdf_sha256(crypto.Secret.from_bytes([1]), [], [], length)
+}
+`
+    dir :: env.temp_dir().join("jet_crypto_entry_error_{process.id()}")
+    fs.create_dir_all(dir).unwrap()
+    fs.write(dir.join("unhandled_crypto_error.jet"), src).unwrap()
+    output :: Command.new(jet()).args(["run", "unhandled_crypto_error.jet"]).current_dir(dir).output().unwrap()
+    _ :: fs.remove_dir_all(dir)
+    code :: output.status.code().unwrap_or(0)
+    stdout :: String.from_utf8_lossy(output.stdout)
+    stderr :: String.from_utf8_lossy(output.stderr)
+    assert_eq(code, 1, "stderr:\n{stderr}")
+    assert(stdout.is_empty(), "stdout must stay empty: {stdout:?}")
+    assert(stderr.contains("hkdf_sha256"), "stderr should carry the error report: {stderr}")
+    assert(!stderr.contains("unhandled cryptographic error"), "stderr:\n{stderr}")
+}
+// Rust: tests/run_entry.rs:483
+#Test("user_crypto_error_is_a_normal_declared_entry_error") {
+    compile(`
+#Error
+enum CryptoError { Internal }
+fn run() CryptoError! { return Err(CryptoError.Internal) }
+`).expect("declared error families are valid at the entry")
+}
+// Rust: tests/run_entry.rs:498
+#Test("typed_entry_error_pins_the_declared_family") {
+    src :: `
+#Error
+enum StoreErr { Missing }
+fn run() StoreErr! { return Err(StoreErr.Missing) }
+`
+    compile(src).expect("typed fallible entries must compile")
+    dir :: common.unique_tmp("jet_typed_entry_error")
+    fs.create_dir_all(dir).unwrap()
+    fs.write(dir.join("main.jet"), src).unwrap()
+    output :: Command.new(jet()).args(["run", "--quiet", "main.jet"]).current_dir(dir).output().unwrap()
+    _ :: fs.remove_dir_all(dir)
+    assert_eq(output.status.code(), Val(1))
+    assert(output.stdout.is_empty())
+    assert_eq(String.from_utf8_lossy(output.stderr), "Missing\n")
+    (code, stdout, stderr) :: common.build_and_run("jet_typed_entry_aot", "main", src)
+    assert_eq(code, 1, "AOT exit code: {stderr}")
+    assert(stdout.is_empty(), "AOT stdout: {stdout:?}")
+    assert_eq(stderr, "Missing\n")
+    interpreter_dir :: common.unique_tmp("jet_typed_entry_interpreter")
+    fs.create_dir_all(interpreter_dir).unwrap()
+    interpreter_path :: interpreter_dir.join("main.jet")
+    fs.write(interpreter_path, src).unwrap()
+    output_o0 :: Command.new(jet()).args(["dev", "--interpret", "--watch=off", "--quiet", interpreter_path.to_str().unwrap()]).output().unwrap()
+    _ :: fs.remove_dir_all(interpreter_dir)
+    assert_eq(output_o0.status.code(), Val(1))
+    assert(output_o0.stdout.is_empty())
+    assert_eq(String.from_utf8_lossy(output_o0.stderr), "Missing\n")
+}
+// Rust: tests/run_entry.rs:559
+#Test("internal_crypto_error_uses_the_reported_entry_exit") {
+    src :: `
+use core.crypto as crypto
+fn run() CryptoError! { _ :: crypto.hkdf_sha256(crypto.Secret.from_bytes([1]), [], [], 0) }
+`
+    out :: compile(src).expect("CryptoError entrypoint should compile")
+    // Source-only peer comparator of the reference wrapper, not a Jet runtime bridge.
+    ffi :: out.ffi.expect("core.crypto must emit its bridge")
+    main :: out.rust.rfind("\nfn main()").expect("generated main")
+    start :: out.rust[main..].find("jet_runtime_boundary(|| {{").map(offset -> main + offset).expect("generated crypto error boundary")
+    rest :: out.rust[start..]
+    end :: rest.find("\n    }});").expect("generated boundary close") + "\n    }});".len()
+    invocation :: rest[..end]
+    ffi_name :: ffi.crate_name
+    rust :: """
+mod {ffi_name} {{
+    #[derive(Debug)]
+    pub enum JetCryptoError {{ Internal {{ incident_id: &'static str }} }}
+    impl std::fmt::Display for JetCryptoError {{
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {{
+            match self {{ Self::Internal {{ incident_id }} => write!(f, "internal {{incident_id}}") }}
+        }}
+    }}
+}}
+fn jet_runtime_boundary<T>(f: impl FnOnce() -> T) -> T {{ f() }}
+fn jet_entry_error_text<E: std::fmt::Display>(error: &E) -> String {{ error.to_string() }}
+fn jet_entry_report(error: String) -> String {{ format!("{{}}\n", error) }}
+fn jet_runtime_explicit_exit(code: i64) -> ! {{ std::process::exit(code as i32) }}
+fn jet_entry_error_exit(error: String) -> ! {{ eprint!("{{}}", jet_entry_report(error)); jet_runtime_explicit_exit(1) }}
+fn __jet_run() -> Result<(), {ffi_name}::JetCryptoError> {{
+    Err({ffi_name}::JetCryptoError::Internal {{ incident_id: "test-17" }})
+}}
+fn main() {{
+    {invocation}
+}}
+"""
+    dir :: env.temp_dir().join("jet_crypto_internal_entry_{process.id()}")
+    _ :: fs.remove_dir_all(dir)
+    fs.create_dir_all(dir).unwrap()
+    source :: dir.join("main.rs")
+    binary :: dir.join("main")
+    fs.write(source, rust).unwrap()
+    built :: Command.new("rustc").args(["--edition", "2021"]).arg(source).arg("-o").arg(binary).output().unwrap()
+    assert(built.status.success(), "rustc stderr: {String.from_utf8_lossy(built.stderr)}")
+    output :: Command.new(binary).output().unwrap()
+    _ :: fs.remove_dir_all(dir)
+    assert_eq(output.status.code(), Val(1))
+    assert_eq(String.from_utf8_lossy(output.stderr), "internal test-17\n")
+}
+// Rust: tests/run_entry.rs:631
+#Test("fallible_unit_run_can_finish_normally_after_try") {
+    src :: "fn step() -> Int {{ return Ok(1) }}\nfn run() {{ n :: step(); print(n) }}\n"
+    compile(src).expect("fallible unit run should allow normal completion")
+    (code, stdout, stderr) :: common.build_and_run("jet_fallible_unit_success", "main", src)
+    assert_eq(code, 0, "fallible unit run should synthesize success at the end: {stderr}")
+    assert_eq(stdout, "1\n")
+    assert(stderr.is_empty())
+}
+// Rust: tests/run_entry.rs:651
+#Test("unit_fallible_run_is_accepted") {
+    compile("fn run() {{ return Err(\"boom\") }}\n").expect("unit-fallible syntax is the canonical fallible run type")
+}
+// Rust: tests/run_entry.rs:661
+#Test("unit_fallible_signatures_lower_with_value_fallible_returns") {
+    src :: `
+struct Config { value: Int }
+fn save(path: String) IOError! {
+    return .Err(IOError.InvalidInput(IOContext{
+        operation: .Read,
+        resource: None,
+        os_code: None,
+        cause: Val("not implemented"),
+    }))
+}
+fn sync() { return Err("not implemented") }
+fn load() -> Config IOError! { return Ok(Config{ value: 1 }) }
+fn run() {}
+`
+    out :: compile(src).expect("unit and value fallible signatures should compile")
+    // This is a source-only reference codegen comparator, not native execution.
+    loop function in ["__jet_save", "__jet_sync", "__jet_load"] {
+        assert(out.rust.contains("pub fn {function}"), "lowered output omitted {function}:\n{out.rust}")
+    }
+    assert(out.rust.contains("pub fn __jet_load") && out.rust.contains("JetOutcome<__jet_Config"), "value-returning fallible signature lost its value type:\n{out.rust}")
+}
+// Rust: tests/run_entry.rs:700
+#Test("fallible_unit_fallthrough_is_entrypoint_only") {
+    src :: "fn helper() {{}}\nfn run() {{ print(\"hi\") }}\n"
+    diags :: compile(src).expect_err("non-run unit-fallible fallthrough needs return")
+    assert(diags.iter().any(d -> d.code == "E0114"), "expected E0114, got: {diags:?}")
+}
+// Rust: tests/run_entry.rs:717
+#Test("retired_void_type_reports_the_migration_diagnostic") {
+    diagnostics :: compile("fn run() -> Void {{ return Err(\"boom\") }}\n").expect_err("Void must not remain a source type")
+    assert(diagnostics.iter().any(d -> d.code == "E0431"), "expected E0431, got: {diagnostics:?}")
+}
+// Rust: tests/run_entry.rs:727
+#Test("classic_if_without_else_does_not_satisfy_missing_return_check") {
+    src :: "fn maybe(flag: Bool) -> Int {{ if flag {{ return 1 }} }}\nfn run() {{ print(0) }}\n"
+    diags :: compile(src).expect_err("a conditional return still needs an else path")
+    assert(diags.iter().any(d -> d.code == "E0114"), "expected E0114, got: {diags:?}")
+}
+
+// Rust: tests/run_interpret.rs:13
+#Test("run_interpret_forces_tier_zero_without_watch") {
+    dir :: env.temp_dir().join("jet_run_interpret_{process.id()}")
+    _ :: fs.remove_dir_all(dir)
+    fs.create_dir_all(dir).unwrap()
+    fs.write(dir.join("package.jet"), "name: \"run_interpret_tier\"\nversion: \"0.1.0\"\nauthority: {{ holds: {{ allow: [IO] }} }}\n").unwrap()
+    marker :: "run-interpreter-{process.id()}"
+    fs.write(dir.join("main.jet"), "fn run() {{\n    print(\"{marker}\")\n}}\n").unwrap()
+    default :: Command.new(jet()).args(["run", "--trace-tiers", "main.jet"]).current_dir(dir).env("JET_RUN_CACHE_DIR", dir.join("run-cache")).env("NO_COLOR", "1").output().unwrap()
+    assert_eq(default.status.code(), Val(0), "{String.from_utf8_lossy(default.stderr)}")
+    assert(!default.stdout.is_empty(), "default tier returned success with empty stdout: {String.from_utf8_lossy(default.stderr)}")
+    assert_eq(default.stdout, "{marker}\n".as_bytes())
+    assert(String.from_utf8_lossy(default.stderr).contains("O1"))
+    forced :: Command.new(jet()).args(["run", "--trace-tiers", "--interpret", "main.jet"]).current_dir(dir).env("JET_RUN_CACHE_DIR", dir.join("run-cache")).env("NO_COLOR", "1").output().unwrap()
+    assert_eq(forced.status.code(), Val(0), "{String.from_utf8_lossy(forced.stderr)}")
+    assert(!forced.stdout.is_empty())
+    assert(!String.from_utf8_lossy(forced.stderr).contains("O1"))
+    assert_eq(forced.stdout, default.stdout)
+    _ :: fs.remove_dir_all(dir)
+}
+// Rust: tests/run_interpret.rs:68
+#Test("run_interpret_rejects_release_profile") {
+    root :: OSPath.from(env.manifest_dir())
+    output :: Command.new(jet()).args(["run", "--interpret", "--release", "Examples/features/errors/result_handler.jet"]).current_dir(root).env("NO_COLOR", "1").output().unwrap()
+    assert_eq(output.status.code(), Val(2))
+    assert(output.stdout.is_empty())
+    stderr :: String.from_utf8_lossy(output.stderr)
+    assert(stderr.contains("E2102"), stderr)
+    assert(stderr.contains("--interpret"), stderr)
+}
+// Rust: tests/run_interpret.rs:96
+#Test("argv_agrees_on_every_native_tier") {
+    dir :: env.temp_dir().join("jet_run_interpret_argv_{process.id()}")
+    _ :: fs.remove_dir_all(dir)
+    fs.create_dir_all(dir).unwrap()
+    fs.write(dir.join("package.jet"), "name: \"run_interpret_argv\"\nversion: \"0.1.0\"\nauthority: {{ holds: {{ allow: [Exec, IO, Mem.Alloc] }} }}\n").unwrap()
+    fs.write(dir.join("main.jet"), "use core.process as process\n\nfn run() {{\n    args :: process.argv()\n    user_args :: process.args()\n    print(args.len())\n    print(user_args.len())\n    loop arg in user_args {{\n        print(\"<{{arg}}>\")\n    }}\n}}\n").unwrap()
+    program_args :: ["--flag", "--port=50000", "report file.jet", "Δ", "", "pre--post", "--", "--interpret"]
+    cache :: dir.join("cache")
+    run :: fn(label: String, args: [String]) {
+        output :: Command.new(jet()).args(args).current_dir(dir).env("JET_RUN_CACHE_DIR", cache.join(label).join("run")).env("JET_STORE_DIR", cache.join(label).join("build")).env("NO_COLOR", "1").output().unwrap_or_else(error -> panic("{label} should start: {error}"))
+        assert_eq(output.status.code(), Val(0), "{label} failed:\n{String.from_utf8_lossy(output.stderr)}")
+        assert(output.stderr.is_empty(), "{label} wrote stderr: {String.from_utf8_lossy(output.stderr)}")
+        output.stdout
+    }
+    invocation :: fn(label: String, command: String, extra: [String]) {
+        args := [command]; args.extend_from_slice(extra); args.push("main.jet"); args.push("--"); args.extend_from_slice(program_args)
+        run(label, args)
+    }
+    empty_invocation :: fn(label: String, command: String, extra: [String]) {
+        args := [command]; args.extend_from_slice(extra); args.push("main.jet"); args.push("--")
+        run(label, args)
+    }
+    default :: invocation("default", "run", [])
+    interpret :: invocation("interpret", "run", ["--interpret"])
+    release :: invocation("release", "run", ["--release"])
+    dev_args := ["dev", "--watch=off", "main.jet", "--"]; dev_args.extend_from_slice(program_args)
+    dev :: run("dev", dev_args)
+    empty_default :: empty_invocation("empty-default", "run", [])
+    empty_interpret :: empty_invocation("empty-interpret", "run", ["--interpret"])
+    empty_release :: empty_invocation("empty-release", "run", ["--release"])
+    empty_dev :: empty_invocation("empty-dev", "dev", ["--watch=off"])
+    build :: Command.new(jet()).args(["build", "main.jet", "--quiet"]).current_dir(dir).env("JET_STORE_DIR", cache.join("aot-build")).env("NO_COLOR", "1").output().unwrap()
+    assert_eq(build.status.code(), Val(0), "AOT build failed:\n{String.from_utf8_lossy(build.stderr)}")
+    aot_run :: fn(label: String, args: [String]) {
+        output :: Command.new(dir.join(".jet/build/main")).args(args).current_dir(dir).output().unwrap()
+        assert_eq(output.status.code(), Val(0), "{label} binary failed:\n{String.from_utf8_lossy(output.stderr)}")
+        assert(output.stderr.is_empty(), "{label} binary wrote stderr: {String.from_utf8_lossy(output.stderr)}")
+        output.stdout
+    }
+    aot :: aot_run("AOT", program_args)
+    empty_aot :: aot_run("AOT empty", [])
+    loop (label, output) in [("interpret", interpret), ("release", release), ("dev", dev), ("AOT", aot)] { assert_eq(output, default, "{label} argv output diverged") }
+    expected :: "9\n8\n<--flag>\n<--port=50000>\n<report file.jet>\n<Δ>\n<>\n<pre--post>\n<-->\n<--interpret>\n"
+    assert_eq(default, expected.as_bytes(), "forwarded argv was not preserved")
+    loop (label, output) in [("empty default", empty_default), ("empty interpret", empty_interpret), ("empty release", empty_release), ("empty dev", empty_dev), ("empty AOT", empty_aot)] { assert_eq(output, b"1\n0\n", "{label} argv output diverged") }
+    _ :: fs.remove_dir_all(dir)
+}
+// Rust: tests/run_interpret.rs:242
+#Test("undrained_db_pool_exits_cleanly_on_in_process_tiers") {
+    dir :: env.temp_dir().join("jet_run_interpret_db_pool_{process.id()}")
+    _ :: fs.remove_dir_all(dir)
+    fs.create_dir_all(dir).unwrap()
+    fs.write(dir.join("package.jet"), "name: \"run_interpret_db_pool\"\nversion: \"0.1.0\"\nauthority: {{ holds: {{ allow: [DB, IO, Mem.Alloc, Time.Wait] }} }}\n").unwrap()
+    fs.write(dir.join("main.jet"), "use core.db as db\n\nfn run() {{\n    pool :: db.pool(\":memory:\", max: 1) ?? return\n    ready :: pool.ready() ?? false\n    print(\"ready {{ready}}\")\n}}\n").unwrap()
+    loop (label, extra) in [("default", []), ("interpret", ["--interpret"])] {
+        output :: Command.new(jet()).arg("run").args(extra).arg("main.jet").current_dir(dir).env("JET_RUN_CACHE_DIR", dir.join("cache").join(label)).env("NO_COLOR", "1").output().unwrap()
+        stderr :: String.from_utf8_lossy(output.stderr)
+        assert_eq(output.status.code(), Val(0), "{label} failed: {stderr}")
+        assert_eq(output.stdout, b"ready true\n", "{label} stdout")
+        assert(stderr.is_empty(), "{label} wrote stderr at exit: {stderr}")
+    }
+    _ :: fs.remove_dir_all(dir)
+}
+// Rust: tests/run_interpret.rs:277
+#Test("run_interpret_keeps_unused_c_member_lists_runnable") {
+    dir :: env.temp_dir().join("jet_run_interpret_imports_{process.id()}")
+    _ :: fs.remove_dir_all(dir)
+    fs.create_dir_all(dir).unwrap()
+    fs.write(dir.join("package.jet"), "name: \"run_interpret_imports\"\nversion: \"0.1.0\"\nauthority: {{ holds: {{ allow: [IO] }} }}\ndeps: {{ c: c@system, m: c@system }}\n").unwrap()
+    fs.write(dir.join("main.jet"), "use core.math.[abs, min]\nuse core.encoding.[json, csv]\nuse c.[c as libc, m]\nfn run() {{\n    print(abs(-8))\n    print(min(9, 4))\n}}\n").unwrap()
+    run :: fn(interpret: Bool) {
+        cache :: dir.join(if interpret -> "cache-interpreter" else -> "cache-default")
+        command := Command.new(jet())
+        command.args(["run", "--trace-tiers"])
+        if interpret -> command.arg("--interpret")
+        command.arg("main.jet").current_dir(dir).env("JET_RUN_CACHE_DIR", cache.join("run")).env("JET_STORE_DIR", cache.join("build")).env("NO_COLOR", "1").output().unwrap()
+    }
+    default :: run(false)
+    assert_eq(default.status.code(), Val(0), "{String.from_utf8_lossy(default.stderr)}")
+    forced :: run(true)
+    assert_eq(forced.status.code(), Val(0), "{String.from_utf8_lossy(forced.stderr)}")
+    assert_eq(forced.stdout, default.stdout)
+    assert(!String.from_utf8_lossy(forced.stderr).contains("E2201"))
+    _ :: fs.remove_dir_all(dir)
+}
+// Rust: tests/run_interpret.rs:331
+#Test("c_extern_calls_match_aot_and_interpreter") {
+    root :: OSPath.from(env.manifest_dir())
+    project :: root.join("Examples/features/lowlevel/cbind")
+    cache :: env.temp_dir().join("jet_c_extern_parity_{process.id()}")
+    _ :: fs.remove_dir_all(cache)
+    run :: fn(mode: String) {
+        command := Command.new(jet()); command.arg("run")
+        if mode == { "release" -> command.arg("--release"); "interpret" -> command.arg("--interpret"); _ -> {} }
+        command.arg("run.jet").current_dir(project).env("JET_RUN_CACHE_DIR", cache.join(mode).join("run")).env("JET_STORE_DIR", cache.join(mode).join("build")).env("NO_COLOR", "1").env("JETPACK_ENV", "1").output().unwrap()
+    }
+    release :: run("release"); default :: run("default"); interpret :: run("interpret")
+    loop (mode, output) in [("release", release), ("default", default), ("interpret", interpret)] {
+        assert_eq(output.status.code(), Val(0), "{mode} C extern run failed:\n{String.from_utf8_lossy(output.stderr)}")
+        assert_eq(output.stdout, b"10\n7\n", "{mode} C extern output")
+        assert(output.stderr.is_empty(), "{mode} C extern stderr: {output.stderr:?}")
+    }
+    _ :: fs.remove_dir_all(cache)
+}
+// Rust: tests/run_interpret.rs:395
+#Test("sieve_scales_linearly") {
+    MEASURED_SAMPLES :: 3
+    RUN_TIMEOUT :: time.Duration.from_secs(30)
+    root :: OSPath.from(env.manifest_dir())
+    fixture :: root.join("Tools/gauntlet/entries/sieve/jet")
+    scratch :: common.Scratch.new("sieve-scales-linearly")
+    loop file in ["package.jet", "run.jet"] {
+        fs.copy(fixture.join(file), scratch.path.join(file)).unwrap_or_else(error -> panic("copy sieve fixture `{file}`: {error}"))
+    }
+    cases :: [(10000, b"count 1229\nlargest 9973\n"), (100000, b"count 9592\nlargest 99991\n")]
+    run :: fn(n: U32) {
+        n_arg :: n.to_string()
+        started :: time.Instant.now()
+        child := Command.new(jet()).args(["run", "--interpret", "run.jet", "--", n_arg]).current_dir(scratch.path).env("JET_RUN_CACHE_DIR", scratch.path.join("run-cache")).env("JET_STORE_DIR", scratch.path.join("store")).env("NO_COLOR", "1").stdout(Stdio.piped()).stderr(Stdio.piped()).spawn().unwrap_or_else(error -> panic("start sieve n={n}: {error}"))
+        loop {
+            if child.try_wait().unwrap_or_else(error -> panic("poll sieve n={n}: {error}")).is_some() -> break
+            if started.elapsed() >= RUN_TIMEOUT {
+                _ :: child.kill(); _ :: child.wait()
+                panic("sieve n={n} exceeded {RUN_TIMEOUT:?}")
+            }
+            thread.sleep(time.Duration.from_millis(10))
+        }
+        output :: child.wait_with_output().unwrap_or_else(error -> panic("collect sieve n={n}: {error}"))
+        assert_eq(output.status.code(), Val(0), "sieve n={n} failed:\n{String.from_utf8_lossy(output.stderr)}")
+        assert(output.stderr.is_empty(), "sieve n={n} wrote stderr: {String.from_utf8_lossy(output.stderr)}")
+        (started.elapsed().as_nanos(), output.stdout)
+    }
+    (_, stdout) :: run(10000)
+    assert_eq(stdout, b"count 1229\nlargest 9973\n", "sieve n=10000 output changed")
+    timings := [(U32, U128)]{}
+    loop (n, expected) in cases {
+        samples := [U128]{}
+        loop _ in 0..<MEASURED_SAMPLES {
+            (elapsed, stdout) :: run(n)
+            assert_eq(stdout, expected, "sieve n={n} output changed")
+            samples.push(elapsed)
+        }
+        timings.push((n, median_nanos(&samples)))
+    }
+    small :: timings[0].1; large :: timings[1].1
+    assert(small > 0 && large > 0, "sieve timings must be positive")
+    eprintln("native O0 sieve scaling: n={timings[0].0} median_ns={small} n={timings[1].0} median_ns={large} samples={MEASURED_SAMPLES}")
+    assert(large < small.saturating_mul(10), "native O0 sieve exceeded linear scaling: n={timings[0].0} median_ns={small} n={timings[1].0} median_ns={large} ratio={Float64(large) / Float64(small):.2}x")
+}
+// Rust: tests/run_interpret.rs:576
+#Test("scoped_borrow_bands_agrees_on_every_tier") {
+    assert_example_tier_parity("scoped_borrow_bands", "Examples/features/concurrency/scoped_borrow_bands.jet", "Examples/features/expected/concurrency/scoped_borrow_bands.out")
+}
+// Rust: tests/run_interpret.rs:587
+#Test("data_json_agrees_on_every_tier") {
+    assert_example_tier_parity("data_json", "Examples/features/tooling/data_json.jet", "Examples/features/expected/tooling/data_json.out")
+}
+// Rust: tests/run_interpret.rs:603
+#Test("udp_responder_progresses_under_parent_wait") {
+    dir :: env.temp_dir().join("jet_run_interpret_udp_responder_{process.id()}")
+    _ :: fs.remove_dir_all(dir)
+    fs.create_dir_all(dir).unwrap()
+    fs.write(dir.join("package.jet"), "name: \"run_interpret_udp_responder\"\nversion: \"0.1.0\"\nauthority: {{ holds: {{ allow: [Exec, IO, Mem.Alloc, Net, Panic] }} }}\n").unwrap()
+    fs.write(dir.join("main.jet"), `
+use core.net as net
+fn run() {
+    server :: net.udp_bind("127.0.0.1:0") ?? panic("DNS server")
+    address :: net.socket_to_string(net.udp_local_addr(server) ?? panic("server address"))
+    responder :: task {
+        request :: net.udp_receive(server, 512) ?? panic("DNS query")
+        query :: net.udp_packet_bytes(request)
+        response :: [U8]{
+            query[0], query[1], 0x81, 0x80, 0, 1, 0, 1, 0, 0, 0, 0,
+            7, 101, 120, 97, 109, 112, 108, 101, 4, 116, 101, 115, 116, 0,
+            0, 16, 0, 1,
+            0xc0, 0x0c, 0, 16, 0, 1, 0, 0, 0, 60, 0, 4,
+            3, 106, 101, 116
+        }
+        net.udp_send_bytes_to(server, response, net.udp_packet_addr(request)) ?? panic("DNS response")
+        print("responder answered")
+    }
+    result :: net.dns_txt_at(address, "example.test", 1000) ?? panic("DNS TXT")
+    responder.join() ?? panic("DNS responder")
+    print(result.len() == 1 && result[0] == "jet")
+}
+`).unwrap()
+    child := Command.new(jet()).args(["run", "--trace-tiers", "--interpret", "main.jet"]).current_dir(dir).env("JET_RUN_CACHE_DIR", dir.join("run-cache")).env("JET_STORE_DIR", dir.join("store")).env("NO_COLOR", "1").stdout(Stdio.piped()).stderr(Stdio.piped()).spawn().unwrap()
+    bound :: time.Instant.now() + time.Duration.from_secs(60)
+    loop while child.try_wait().unwrap().is_none() {
+        if time.Instant.now() >= bound {
+            _ :: child.kill(); _ :: child.wait()
+            panic("native O0 wedged: the UDP responder task never progressed")
+        }
+        thread.sleep(time.Duration.from_millis(20))
+    }
+    output :: child.wait_with_output().unwrap()
+    stdout :: String.from_utf8_lossy(output.stdout)
+    stderr :: String.from_utf8_lossy(output.stderr)
+    assert_eq(output.status.code(), Val(0), "stdout:\n{stdout}\nstderr:\n{stderr}")
+    assert_eq(stdout, "responder answered\ntrue\n", "stderr:\n{stderr}")
+    assert(stderr.lines().any(line -> line.starts_with("run") && line.contains("O0")), "forced `--interpret` did not run `run` on native O0:\n{stderr}")
+    _ :: fs.remove_dir_all(dir)
+}

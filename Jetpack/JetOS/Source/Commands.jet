@@ -1,489 +1,261 @@
-// PORT-PENDING 0867 crates-jetpack-src-jetos-activation-provenance-module-group: crates/jetpack/src/JetOS/commands.rs:1-485
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS use super::entry::default_config_path;
-//RS use super::generation::build_generation;
-//RS use super::generation_files::{
-//RS     diff_packages, dir_size_bytes, generation_ordinal, read_generation_packages, render_plan_json,
-//RS };
-//RS use super::generations_activation::{
-//RS     activate_generation, find_rollback_generation, generation_named, latest_generation_for,
-//RS     prove_activation, read_generations, render_generation_proof_json,
-//RS };
-//RS use super::installer_media::{write_image_variant_artifacts, write_installer_media};
-//RS use super::load_validate::{load_target, parse_target_or_report};
-//RS use super::nixos_backend::cmd_migrate_compare_nixos;
-//RS use super::nixos_import::cmd_import;
-//RS use super::types::OSFlags;
-//RS use crate::Output::Theme;
-//RS use crate::Syntax;
-//RS use std::fs;
-//RS use std::path::Path;
-//RS 
-//RS pub(super) fn cmd_check(theme: &Theme, args: &[String]) -> i32 {
-//RS     let Some(target) = parse_target_or_report(theme, args.first().map(String::as_str)) else {
-//RS         return 2;
-//RS     };
-//RS     match load_target(theme, &target) {
-//RS         Some((_, system)) => {
-//RS             theme.ok(&format!(
-//RS                 "jetos {} checked ({})",
-//RS                 theme.bold(&system.name),
-//RS                 system.target
-//RS             ));
-//RS             0
-//RS         }
-//RS         None => 2,
-//RS     }
-//RS }
-//RS 
-//RS pub(super) fn cmd_plan(theme: &Theme, args: &[String], flags: &OSFlags) -> i32 {
-//RS     let Some(target) = parse_target_or_report(theme, args.first().map(String::as_str)) else {
-//RS         return 2;
-//RS     };
-//RS     let Some((plan_data, system)) = load_target(theme, &target) else {
-//RS         return 2;
-//RS     };
-//RS     let plan = render_plan_json(&system, &[], None, plan_data.graph_identity.as_deref());
-//RS     if flags.json {
-//RS         println!("{plan}");
-//RS     } else {
-//RS         if let Some(identity) = plan_data.graph_identity.as_deref() {
-//RS             theme.graph_identity(identity);
-//RS         }
-//RS         theme.ok(&format!("jetos plan for {}", theme.bold(&system.name)));
-//RS         println!("{plan}");
-//RS     }
-//RS     0
-//RS }
-//RS 
-//RS pub(super) fn cmd_proof(theme: &Theme, args: &[String], flags: &OSFlags) -> i32 {
-//RS     let Some(target) = parse_target_or_report(theme, args.first().map(String::as_str)) else {
-//RS         return 2;
-//RS     };
-//RS     if load_target(theme, &target).is_none() {
-//RS         return 2;
-//RS     }
-//RS     let generation = flags
-//RS         .name
-//RS         .as_deref()
-//RS         .and_then(|name| generation_named(&target.host, name))
-//RS         .or_else(|| {
-//RS             if flags.name.is_none() {
-//RS                 latest_generation_for(&target.host)
-//RS             } else {
-//RS                 None
-//RS             }
-//RS         });
-//RS     let Some(gen) = generation else {
-//RS         theme.error_coded(
-//RS             "E1278",
-//RS             "jetos proof is missing",
-//RS             &format!(
-//RS                 "no built generation exists for `{}`; proof is read from generation artifacts.",
-//RS                 target.host
-//RS             ),
-//RS                 "run `jet os build <host>` first, using the same `--name` when selecting an exact generation.",
-//RS         );
-//RS         return 2;
-//RS     };
-//RS     match render_generation_proof_json(&gen) {
-//RS         Ok(proof) => {
-//RS             if flags.json {
-//RS                 println!("{proof}");
-//RS             } else {
-//RS                 theme.ok(&format!(
-//RS                     "jetos proof for {} generation {}",
-//RS                     theme.bold(&gen.host),
-//RS                     theme.bold(&gen.name)
-//RS                 ));
-//RS                 println!("{proof}");
-//RS             }
-//RS             0
-//RS         }
-//RS         Err(e) => {
-//RS             theme.error_coded(
-//RS                 "E1278",
-//RS                 "jetos proof is incomplete",
-//RS                 &format!("reading proof artifacts for `{}` failed: {e}", gen.name),
-//RS                 "run `jet os build <host>` again so plan, proof, provenance, health, and rollback facts are regenerated.",
-//RS             );
-//RS             2
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS pub(super) fn cmd_build(theme: &Theme, args: &[String], flags: &OSFlags, activate: bool) -> i32 {
-//RS     let Some(target) = parse_target_or_report(theme, args.first().map(String::as_str)) else {
-//RS         return 2;
-//RS     };
-//RS     let Some((plan, system)) = load_target(theme, &target) else {
-//RS         return 2;
-//RS     };
-//RS     if activate {
-//RS         if let Some(existing) = flags
-//RS             .name
-//RS             .as_deref()
-//RS             .and_then(|name| generation_named(&system.name, name))
-//RS         {
-//RS             if !prove_activation(theme, &existing, &system) {
-//RS                 return 2;
-//RS             }
-//RS             return match activate_generation(&existing) {
-//RS                 Ok(()) => {
-//RS                     theme.ok(&format!(
-//RS                         "jetos generation {} activated",
-//RS                         theme.bold(&existing.name)
-//RS                     ));
-//RS                     0
-//RS                 }
-//RS                 Err(error) => {
-//RS                     theme.error(
-//RS                         "could not activate the generation",
-//RS                         &format!("updating the current/default pointers failed: {error}"),
-//RS                         "check permissions on the Jetpack root, or set JETPACK_ROOT.",
-//RS                     );
-//RS                     2
-//RS                 }
-//RS             };
-//RS         }
-//RS     }
-//RS     // Tier 3 (D-FE-CLI1): `switch` is the mutation — it diffs the outgoing
-//RS     // generation against the one this build produces and gates on Apply?
-//RS     // before activating. `jetos build` never activates, so it never touches
-//RS     // the running system and needs no gate (and no diff work).
-//RS     let outgoing_ordinal = generation_ordinal(&system.name);
-//RS     let outgoing_packages = if activate {
-//RS         latest_generation_for(&system.name)
-//RS             .map(|g| read_generation_packages(&g.path))
-//RS             .unwrap_or_default()
-//RS     } else {
-//RS         Vec::new()
-//RS     };
-//RS     match build_generation(theme, &plan, &system, flags, &target.config) {
-//RS         Some(gen) => {
-//RS             theme.ok(&format!(
-//RS                 "jetos generation {} built for {}",
-//RS                 theme.bold(&gen.name),
-//RS                 theme.bold(&system.name)
-//RS             ));
-//RS             theme.detail(&gen.path.display().to_string());
-//RS             if activate {
-//RS                 if !prove_activation(theme, &gen, &system) {
-//RS                     return 2;
-//RS                 }
-//RS                 let diff = diff_packages(&outgoing_packages, &read_generation_packages(&gen.path));
-//RS                 if !diff.is_empty() {
-//RS                     let incoming_ordinal = outgoing_ordinal + 1;
-//RS                     theme.plan_gen_header(outgoing_ordinal, incoming_ordinal);
-//RS                     let name_w = diff.iter().map(|d| d.name.len()).max().unwrap_or(0).max(8);
-//RS                     for row in &diff {
-//RS                         theme.plan_row(row.mark, &row.name, name_w, &row.from, &row.to);
-//RS                     }
-//RS                     let download_bytes: u64 = diff
-//RS                         .iter()
-//RS                         .filter_map(|d| d.out.as_deref())
-//RS                         .map(|out| dir_size_bytes(Path::new(out)))
-//RS                         .sum();
-//RS                     if download_bytes > 0 {
-//RS                         theme.download_line(download_bytes);
-//RS                     }
-//RS                     if !theme.confirm_apply(flags.assume_yes) {
-//RS                         // Plan-only: the generation stays built and recorded
-//RS                         // (rollback-visible via `jet os generations`), but
-//RS                         // the running system is untouched.
-//RS                         return 0;
-//RS                     }
-//RS                     theme.applied_header(incoming_ordinal);
-//RS                     for row in &diff {
-//RS                         if !matches!(row.mark, crate::Output::PlanMark::Remove) {
-//RS                             theme.ready_row(&row.name, name_w, &row.to);
-//RS                         }
-//RS                     }
-//RS                 }
-//RS                 match activate_generation(&gen) {
-//RS                     Ok(()) => theme.ok(&format!(
-//RS                         "jetos generation {} activated",
-//RS                         theme.bold(&gen.name)
-//RS                     )),
-//RS                     Err(e) => {
-//RS                         theme.error(
-//RS                             "could not activate the generation",
-//RS                             &format!("updating the current/default pointers failed: {e}"),
-//RS                             "check permissions on the Jetpack root, or set JETPACK_ROOT.",
-//RS                         );
-//RS                         return 2;
-//RS                     }
-//RS                 }
-//RS             }
-//RS             0
-//RS         }
-//RS         None => 2,
-//RS     }
-//RS }
-//RS 
-//RS pub(super) fn cmd_rollback(theme: &Theme, args: &[String]) -> i32 {
-//RS     let host = args.first().map_or("", String::as_str);
-//RS     if host.is_empty() {
-//RS         theme.error(
-//RS             "rollback needs a host",
-//RS             "`jet os rollback` activates a recorded generation for one host.",
-//RS             "run `jet os generations`, then `jet os rollback <host> [<name>]`.",
-//RS         );
-//RS         return 2;
-//RS     }
-//RS     let requested = args.get(1).map(String::as_str);
-//RS     let Some(gen) = find_rollback_generation(host, requested) else {
-//RS         theme.error(
-//RS             "no generation is available for rollback",
-//RS             &format!("no recorded jetos generation matches host `{host}`."),
-//RS             "run `jet os build <host>` or `jet os generations`.",
-//RS         );
-//RS         return 2;
-//RS     };
-//RS     match activate_generation(&gen) {
-//RS         Ok(()) => {
-//RS             theme.ok(&format!(
-//RS                 "rolled back {} to {}",
-//RS                 host,
-//RS                 theme.bold(&gen.name)
-//RS             ));
-//RS             0
-//RS         }
-//RS         Err(e) => {
-//RS             theme.error(
-//RS                 "could not activate the rollback generation",
-//RS                 &format!("updating the current/default pointers failed: {e}"),
-//RS                 "check permissions on the Jetpack root, or set JETPACK_ROOT.",
-//RS             );
-//RS             2
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS pub(super) fn cmd_generations(args: &[String]) -> i32 {
-//RS     let host = args.first().map(String::as_str);
-//RS     let mut gens = read_generations();
-//RS     if let Some(host) = host {
-//RS         gens.retain(|g| g.host == host);
-//RS     }
-//RS     gens.sort_by(|a, b| {
-//RS         b.created_at
-//RS             .cmp(&a.created_at)
-//RS             .then_with(|| b.name.cmp(&a.name))
-//RS     });
-//RS     for gen in gens {
-//RS         println!(
-//RS             "{}\t{}\t{}\t{}",
-//RS             gen.created_at,
-//RS             gen.host,
-//RS             gen.name,
-//RS             gen.path.display()
-//RS         );
-//RS     }
-//RS     0
-//RS }
-//RS 
-//RS pub(super) fn cmd_init(theme: &Theme, args: &[String], flags: &OSFlags) -> i32 {
-//RS     let host = args.first().map_or("host", String::as_str);
-//RS     let path = default_config_path();
-//RS     if path.exists() {
-//RS         theme.error(
-//RS             "config.jet already exists",
-//RS             "`jet os init` never overwrites a repo's OS config.",
-//RS             "edit config.jet, or move it aside and run init again.",
-//RS         );
-//RS         return 2;
-//RS     }
-//RS     if let Some(parent) = path.parent() {
-//RS         if let Err(e) = fs::create_dir_all(parent) {
-//RS             theme.error(
-//RS                 "could not create the jetos config directory",
-//RS                 &format!("creating `{}` failed: {e}", parent.display()),
-//RS                 "check permissions, or create the directory yourself.",
-//RS             );
-//RS             return 2;
-//RS         }
-//RS     }
-//RS     let disk = flags
-//RS         .manual_disk
-//RS         .as_deref()
-//RS         .map(|d| {
-//RS             format!(
-//RS                 "            filesystem.root.device: \"{}\",\n",
-//RS                 d.replace('"', "\\\"")
-//RS             )
-//RS         })
-//RS         .unwrap_or_else(|| "            filesystem.layout: \"guided-ext4\",\n".to_string());
-//RS     let contents = format!(
-//RS         "module {host} {{\n    system.{host}: {{\n        target: linux.x64,\n        packages: [],\n        services: {{\n            systemd: {{ enable: true, exec: \"/usr/bin/env true\" }},\n        }},\n        options: [\n{disk}            network.hostName: {host},\n            packages.base: true,\n        ],\n    }}\n}}\n"
-//RS     );
-//RS     match fs::write(&path, contents) {
-//RS         Ok(()) => {
-//RS             theme.ok(&format!("wrote jetos config {}", path.display()));
-//RS             theme.detail("generated systemd-ready system skeleton");
-//RS             0
-//RS         }
-//RS         Err(e) => {
-//RS             theme.error(
-//RS                 "could not write the jetos config",
-//RS                 &format!("writing `{}` failed: {e}", path.display()),
-//RS                 "check permissions, or pass a writable HOME.",
-//RS             );
-//RS             2
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS pub(super) fn cmd_lift(theme: &Theme, args: &[String], flags: &OSFlags) -> i32 {
-//RS     let host = args.first().map_or("host", String::as_str);
-//RS     let root = args.get(1).map_or("/", String::as_str);
-//RS     let import_args = vec![
-//RS         root.to_string(),
-//RS         Syntax::OS_IMPORT_FLAG_HOST.to_string(),
-//RS         host.to_string(),
-//RS         Syntax::OS_IMPORT_FLAG_FACTS_ONLY.to_string(),
-//RS     ];
-//RS     cmd_import(theme, &import_args, flags)
-//RS }
-//RS 
-//RS pub(super) fn cmd_migrate(theme: &Theme, args: &[String], flags: &OSFlags) -> i32 {
-//RS     if !invoked_by_root_jet() {
-//RS         theme.error(
-//RS             "NixOS comparison is available only through root `jet`",
-//RS             "D-JOS-MIGRATIONVERB1=A authorizes only `jet os migrate compare-nixos`; direct engine front doors cannot reach the migration backend.",
-//RS             "run `jet os migrate compare-nixos <host> --out <dir>`.",
-//RS         );
-//RS         return 2;
-//RS     }
-//RS     let Some((action, rest)) = args.split_first() else {
-//RS         theme.error(
-//RS             "migration needs an action",
-//RS             "D-JOS-MIGRATIONVERB1=A permits only an explicit NixOS comparison migration.",
-//RS             "run `jet os migrate compare-nixos <host> --out <dir>`.",
-//RS         );
-//RS         return 2;
-//RS     };
-//RS     if action != Syntax::OS_MIGRATION_COMPARE_NIXOS {
-//RS         theme.error(
-//RS             &format!("`{action}` is not a jetos migration action"),
-//RS             "The only migration action is `compare-nixos`.",
-//RS             "run `jet os migrate compare-nixos <host> --out <dir>`.",
-//RS         );
-//RS         return 2;
-//RS     }
-//RS     let Some(target) = parse_target_or_report(theme, rest.first().map(String::as_str)) else {
-//RS         return 2;
-//RS     };
-//RS     let Some(out_index) = rest
-//RS         .iter()
-//RS         .position(|arg| arg == Syntax::OS_MIGRATION_FLAG_OUT)
-//RS     else {
-//RS         theme.error(
-//RS             "NixOS comparison needs an output directory",
-//RS             "`--out <dir>` receives the proved NixOS image, boot proof, guest fact, and receipt.",
-//RS             "run `jet os migrate compare-nixos <host> --out <dir>`.",
-//RS         );
-//RS         return 2;
-//RS     };
-//RS     let Some(out) = rest
-//RS         .get(out_index + 1)
-//RS         .filter(|value| !value.starts_with('-'))
-//RS     else {
-//RS         theme.error(
-//RS             "NixOS comparison output directory is missing",
-//RS             "`--out` must be followed by one directory.",
-//RS             "run `jet os migrate compare-nixos <host> --out <dir>`.",
-//RS         );
-//RS         return 2;
-//RS     };
-//RS     if out_index != 1 || rest.len() != 3 {
-//RS         theme.error(
-//RS             "NixOS comparison has unsupported arguments",
-//RS             "The migration action accepts one host and one `--out <dir>` argument.",
-//RS             "run `jet os migrate compare-nixos <host> --out <dir>`.",
-//RS         );
-//RS         return 2;
-//RS     }
-//RS     let Some((plan, system)) = load_target(theme, &target) else {
-//RS         return 2;
-//RS     };
-//RS     cmd_migrate_compare_nixos(theme, &plan.table, &system, Path::new(out), flags)
-//RS }
-//RS 
-//RS #[cfg(target_os = "linux")]
-//RS fn invoked_by_root_jet() -> bool {
-//RS     let Ok(parent) = std::env::var(Syntax::ROOT_ENGINE_DISPATCH_PID_ENV) else {
-//RS         return false;
-//RS     };
-//RS     let Ok(parent) = parent.parse::<u32>() else {
-//RS         return false;
-//RS     };
-//RS     let Ok(status) = fs::read_to_string("/proc/self/status") else {
-//RS         return false;
-//RS     };
-//RS     let Some(actual_parent) = status
-//RS         .lines()
-//RS         .find_map(|line| line.strip_prefix("PPid:"))
-//RS         .and_then(|value| value.trim().parse::<u32>().ok())
-//RS     else {
-//RS         return false;
-//RS     };
-//RS     if parent != actual_parent {
-//RS         return false;
-//RS     }
-//RS     fs::read_link(format!("/proc/{parent}/exe"))
-//RS         .ok()
-//RS         .and_then(|path| path.file_stem().map(|name| name == Syntax::BINARY_NAME))
-//RS         .unwrap_or(false)
-//RS }
-//RS 
-//RS #[cfg(not(target_os = "linux"))]
-//RS fn invoked_by_root_jet() -> bool {
-//RS     false
-//RS }
-//RS 
-//RS pub(super) fn cmd_image(theme: &Theme, args: &[String], flags: &OSFlags) -> i32 {
-//RS     let Some(target) = parse_target_or_report(theme, args.first().map(String::as_str)) else {
-//RS         return 2;
-//RS     };
-//RS     let Some((plan, system)) = load_target(theme, &target) else {
-//RS         return 2;
-//RS     };
-//RS     let Some(gen) = build_generation(theme, &plan, &system, flags, &target.config) else {
-//RS         return 2;
-//RS     };
-//RS     let disk = flags.manual_disk.as_deref().unwrap_or("guided-ext4");
-//RS     match write_installer_media(&gen, &system, disk) {
-//RS         Ok(path) => match write_image_variant_artifacts(&gen, &system) {
-//RS             Ok(variant_proof) => {
-//RS                 theme.detail(&format!(
-//RS                     "wrote image variant proof {}",
-//RS                     variant_proof.display()
-//RS                 ));
-//RS                 theme.ok(&format!(
-//RS                     "wrote jetos installer media proof {}",
-//RS                     path.display()
-//RS                 ));
-//RS                 0
-//RS             }
-//RS             Err(e) => {
-//RS                 theme.error(
-//RS                     "could not write jetos image variants",
-//RS                     &format!("writing image variant artifacts failed: {e}"),
-//RS                     "check permissions on the Jetpack root, or set JETPACK_ROOT.",
-//RS                 );
-//RS                 2
-//RS             }
-//RS         },
-//RS         Err(e) => {
-//RS             theme.error(
-//RS                 "could not write the jetos installer media",
-//RS                 &format!("writing installer media artifacts failed: {e}"),
-//RS                 "check permissions on the Jetpack root, or set JETPACK_ROOT.",
-//RS             );
-//RS             2
-//RS         }
-//RS     }
-//RS }
-// END-PORT-PENDING 0867 crates/jetpack/src/JetOS/commands.rs:1-485
+use jetpack.JetOS.Entry.[default_config_path]
+use jetpack.JetOS.Generation.[build_generation]
+use jetpack.JetOS.GenerationFiles.[diff_packages, dir_size_bytes, generation_ordinal, read_generation_packages, render_plan_json]
+use jetpack.JetOS.GenerationsActivation.[activate_generation, find_rollback_generation, generation_named, latest_generation_for, prove_activation, read_generations, render_generation_proof_json]
+use jetpack.JetOS.InstallerMedia.[write_image_variant_artifacts, write_installer_media]
+use jetpack.JetOS.LoadValidate.[load_target, parse_target_or_report]
+use jetpack.JetOS.NixosBackend.[cmd_migrate_compare_nixos]
+use jetpack.JetOS.NixosMapping.[cmd_import]
+use jetpack.JetOS.Types.[JetOSFlags]
+use jetpack.Output.[Theme, PlanMark]
+use jetpack.[Syntax]
+use std.[fs, env]
+use core.sys.target.[selected_os]
 
+// Rust: crates/jetpack/src/JetOS/commands.rs:20
+pub fn cmd_check(theme: &Theme, args: &[String]) -> I32 {
+    target :: parse_target_or_report(theme, args.first().map(s -> s.as_str())) ?? return 2
+    if load_target(theme, &target) == {
+        .Val((_, system)) -> {
+            theme.ok("jetos {theme.bold(system.name)} checked ({system.target})")
+            0
+        }
+        .None -> 2
+    }
+}
+// Rust: crates/jetpack/src/JetOS/commands.rs:37
+pub fn cmd_plan(theme: &Theme, args: &[String], flags: &JetOSFlags) -> I32 {
+    target :: parse_target_or_report(theme, args.first().map(s -> s.as_str())) ?? return 2
+    (plan_data, system) :: load_target(theme, &target) ?? return 2
+    plan :: render_plan_json(&system, [], None, plan_data.graph_identity.as_deref())
+    if flags.json { println(plan) } else {
+        if identity :: plan_data.graph_identity.as_deref() { theme.graph_identity(identity) }
+        theme.ok("jetos plan for {theme.bold(system.name)}")
+        println(plan)
+    }
+    0
+}
+// Rust: crates/jetpack/src/JetOS/commands.rs:57
+pub fn cmd_proof(theme: &Theme, args: &[String], flags: &JetOSFlags) -> I32 {
+    target :: parse_target_or_report(theme, args.first().map(s -> s.as_str())) ?? return 2
+    if load_target(theme, &target).is_none() { return 2 }
+    generation :: flags.name.as_deref().and_then(name -> generation_named(target.host, name))
+        .or_else(() -> if flags.name.is_none() -> latest_generation_for(target.host) else -> None)
+    gen :: generation ?? {
+        theme.error_coded("E1278", "jetos proof is missing",
+            "no built generation exists for `{target.host}`; proof is read from generation artifacts.",
+            "run `jet os build <host>` first, using the same `--name` when selecting an exact generation.")
+        return 2
+    }
+    if render_generation_proof_json(&gen) == {
+        .Ok(proof) -> {
+            if flags.json { println(proof) } else {
+                theme.ok("jetos proof for {theme.bold(gen.host)} generation {theme.bold(gen.name)}")
+                println(proof)
+            }
+            0
+        }
+        .Err(error) -> {
+            theme.error_coded("E1278", "jetos proof is incomplete",
+                "reading proof artifacts for `{gen.name}` failed: {error}",
+                "run `jet os build <host>` again so plan, proof, provenance, health, and rollback facts are regenerated.")
+            2
+        }
+    }
+}
+// Rust: crates/jetpack/src/JetOS/commands.rs:113
+pub fn cmd_build(theme: &Theme, args: &[String], flags: &JetOSFlags, activate: Bool) -> I32 {
+    target :: parse_target_or_report(theme, args.first().map(s -> s.as_str())) ?? return 2
+    (plan, system) :: load_target(theme, &target) ?? return 2
+    if activate {
+        if existing :: flags.name.as_deref().and_then(name -> generation_named(system.name, name)) {
+            if !prove_activation(theme, &existing, &system) { return 2 }
+            return if activate_generation(&existing) == {
+                .Ok(()) -> {
+                    theme.ok("jetos generation {theme.bold(existing.name)} activated")
+                    0
+                }
+                .Err(error) -> {
+                    theme.error("could not activate the generation", "updating the current/default pointers failed: {error}", "check permissions on the Jetpack root, or set JETPACK_ROOT.")
+                    2
+                }
+            }
+        }
+    }
+    // switch is the mutation. A plain build neither computes a diff nor activates.
+    outgoing_ordinal :: generation_ordinal(system.name)
+    outgoing_packages :: if activate -> latest_generation_for(system.name).map(g -> read_generation_packages(g.path)).unwrap_or_default() else -> []
+    gen :: build_generation(theme, &plan, &system, flags, &target.config) ?? return 2
+    theme.ok("jetos generation {theme.bold(gen.name)} built for {theme.bold(system.name)}")
+    theme.detail(gen.path.display().to_string())
+    if activate {
+        if !prove_activation(theme, &gen, &system) { return 2 }
+        diff :: diff_packages(&outgoing_packages, &read_generation_packages(gen.path))
+        if !diff.is_empty() {
+            incoming_ordinal :: outgoing_ordinal + 1
+            theme.plan_gen_header(outgoing_ordinal, incoming_ordinal)
+            name_w :: diff.iter().map(d -> d.name.len()).max().unwrap_or(0).max(8)
+            loop row in diff { theme.plan_row(row.mark, row.name, name_w, row.from, row.to) }
+            download_bytes: U64 :: diff.iter().filter_map(d -> d.out.as_deref()).map(out -> dir_size_bytes(OSPath.from(out))).sum()
+            if download_bytes > 0 { theme.download_line(download_bytes) }
+            if !theme.confirm_apply(flags.assume_yes) { return 0 }
+            theme.applied_header(incoming_ordinal)
+            loop row in diff {
+                if row.mark != PlanMark.Remove { theme.ready_row(row.name, name_w, row.to) }
+            }
+        }
+        if activate_generation(&gen) == {
+            .Ok(()) -> theme.ok("jetos generation {theme.bold(gen.name)} activated")
+            .Err(error) -> {
+                theme.error("could not activate the generation", "updating the current/default pointers failed: {error}", "check permissions on the Jetpack root, or set JETPACK_ROOT.")
+                return 2
+            }
+        }
+    }
+    0
+}
+// Rust: crates/jetpack/src/JetOS/commands.rs:222
+pub fn cmd_rollback(theme: &Theme, args: &[String]) -> I32 {
+    host :: args.first().map(s -> s.as_str()) ?? ""
+    if host.is_empty() {
+        theme.error("rollback needs a host", "`jet os rollback` activates a recorded generation for one host.", "run `jet os generations`, then `jet os rollback <host> [<name>]`.")
+        return 2
+    }
+    requested :: args.get(1).map(s -> s.as_str())
+    gen :: find_rollback_generation(host, requested) ?? {
+        theme.error("no generation is available for rollback", "no recorded jetos generation matches host `{host}`.", "run `jet os build <host>` or `jet os generations`.")
+        return 2
+    }
+    if activate_generation(&gen) == {
+        .Ok(()) -> {
+            theme.ok("rolled back {host} to {theme.bold(gen.name)}")
+            0
+        }
+        .Err(error) -> {
+            theme.error("could not activate the rollback generation", "updating the current/default pointers failed: {error}", "check permissions on the Jetpack root, or set JETPACK_ROOT.")
+            2
+        }
+    }
+}
+// Rust: crates/jetpack/src/JetOS/commands.rs:261
+pub fn cmd_generations(args: &[String]) -> I32 {
+    host :: args.first().map(s -> s.as_str())
+    gens := read_generations()
+    if host :: host { &gens.retain(g -> g.host == host) }
+    &gens.sort_by((a, b) -> (b.created_at <=> a.created_at).then(b.name <=> a.name))
+    loop gen in gens { println("{gen.created_at}\t{gen.host}\t{gen.name}\t{gen.path.display()}") }
+    0
+}
+// Rust: crates/jetpack/src/JetOS/commands.rs:284
+pub fn cmd_init(theme: &Theme, args: &[String], flags: &JetOSFlags) -> I32 {
+    host :: args.first().map(s -> s.as_str()) ?? "host"
+    path :: default_config_path()
+    if path.exists() {
+        theme.error("config.jet already exists", "`jet os init` never overwrites a repo's OS config.", "edit config.jet, or move it aside and run init again.")
+        return 2
+    }
+    // GATE #4494: native path creation and writes, not a Rust callback.
+    if parent :: path.parent() {
+        if fs.create_dir_all(parent) == {
+            .Ok(()) -> {}
+            .Err(error) -> {
+                theme.error("could not create the jetos config directory", "creating `{parent.display()}` failed: {error}", "check permissions, or create the directory yourself.")
+                return 2
+            }
+        }
+    }
+    disk :: flags.manual_disk.as_deref().map(d -> "            filesystem.root.device: \"{d.replace("\"", "\\\"")}\",\n")
+        ?? "            filesystem.layout: \"guided-ext4\",\n"
+    contents :: "module {host} {{\n    system.{host}: {{\n        target: linux.x64,\n        packages: [],\n        services: {{\n            systemd: {{ enable: true, exec: \"/usr/bin/env true\" }},\n        }},\n        options: [\n{disk}            network.hostName: {host},\n            packages.base: true,\n        ],\n    }}\n}}\n"
+    if fs.write(path, contents) == {
+        .Ok(()) -> {
+            theme.ok("wrote jetos config {path.display()}")
+            theme.detail("generated systemd-ready system skeleton")
+            0
+        }
+        .Err(error) -> {
+            theme.error("could not write the jetos config", "writing `{path.display()}` failed: {error}", "check permissions, or pass a writable HOME.")
+            2
+        }
+    }
+}
+// Rust: crates/jetpack/src/JetOS/commands.rs:335
+pub fn cmd_lift(theme: &Theme, args: &[String], flags: &JetOSFlags) -> I32 {
+    host :: args.first().map(s -> s.as_str()) ?? "host"
+    root :: args.get(1).map(s -> s.as_str()) ?? "/"
+    import_args :: [root.to_string(), Syntax.OS_IMPORT_FLAG_HOST.to_string(), host.to_string(), Syntax.OS_IMPORT_FLAG_FACTS_ONLY.to_string()]
+    cmd_import(theme, &import_args, flags)
+}
+// Rust: crates/jetpack/src/JetOS/commands.rs:347
+pub fn cmd_migrate(theme: &Theme, args: &[String], flags: &JetOSFlags) -> I32 {
+    if !invoked_by_root_jet() {
+        theme.error("NixOS comparison is available only through root `jet`",
+            "D-JOS-MIGRATIONVERB1=A authorizes only `jet os migrate compare-nixos`; direct engine front doors cannot reach the migration backend.",
+            "run `jet os migrate compare-nixos <host> --out <dir>`.")
+        return 2
+    }
+    (action, rest) :: args.split_first() ?? {
+        theme.error("migration needs an action", "D-JOS-MIGRATIONVERB1=A permits only an explicit NixOS comparison migration.", "run `jet os migrate compare-nixos <host> --out <dir>`.")
+        return 2
+    }
+    if action != Syntax.OS_MIGRATION_COMPARE_NIXOS {
+        theme.error("`{action}` is not a jetos migration action", "The only migration action is `compare-nixos`.", "run `jet os migrate compare-nixos <host> --out <dir>`.")
+        return 2
+    }
+    target :: parse_target_or_report(theme, rest.first().map(s -> s.as_str())) ?? return 2
+    out_index :: rest.iter().position(arg -> arg == Syntax.OS_MIGRATION_FLAG_OUT) ?? {
+        theme.error("NixOS comparison needs an output directory", "`--out <dir>` receives the proved NixOS image, boot proof, guest fact, and receipt.", "run `jet os migrate compare-nixos <host> --out <dir>`.")
+        return 2
+    }
+    out :: rest.get(out_index + 1).filter(value -> !value.starts_with('-')) ?? {
+        theme.error("NixOS comparison output directory is missing", "`--out` must be followed by one directory.", "run `jet os migrate compare-nixos <host> --out <dir>`.")
+        return 2
+    }
+    if out_index != 1 || rest.len() != 3 {
+        theme.error("NixOS comparison has unsupported arguments", "The migration action accepts one host and one `--out <dir>` argument.", "run `jet os migrate compare-nixos <host> --out <dir>`.")
+        return 2
+    }
+    (plan, system) :: load_target(theme, &target) ?? return 2
+    cmd_migrate_compare_nixos(theme, &plan.table, &system, OSPath.from(out), flags)
+}
+// Rust: crates/jetpack/src/JetOS/commands.rs:412
+// Rust: crates/jetpack/src/JetOS/commands.rs:439
+fn invoked_by_root_jet() -> Bool {
+    // GATE #4483: nonLinux false is the original source arm, not a native fallback.
+    if selected_os() != "linux" { return false }
+    // GATE #4494: real env, procfs status and parent executable link.
+    parent :: env.var(Syntax.ROOT_ENGINE_DISPATCH_PID_ENV) ?? return false
+    parent :: parent.parse<U32>() ?? return false
+    status :: fs.read_to_string(OSPath.from("/proc/self/status")) ?? return false
+    actual_parent :: status.lines().find_map(line -> line.strip_prefix("PPid:")).and_then(value -> {
+        trimmed := value.trim() // #4303
+        trimmed.parse<U32>().ok()
+    }) ?? return false
+    if parent != actual_parent { return false }
+    fs.read_link(OSPath.from("/proc/{parent}/exe")).ok()
+        .and_then(path -> path.file_stem().map(name -> name == Syntax.BINARY_NAME)).unwrap_or(false)
+}
+// Rust: crates/jetpack/src/JetOS/commands.rs:443
+pub fn cmd_image(theme: &Theme, args: &[String], flags: &JetOSFlags) -> I32 {
+    target :: parse_target_or_report(theme, args.first().map(s -> s.as_str())) ?? return 2
+    (plan, system) :: load_target(theme, &target) ?? return 2
+    gen :: build_generation(theme, &plan, &system, flags, &target.config) ?? return 2
+    disk :: flags.manual_disk.as_deref() ?? "guided-ext4"
+    if write_installer_media(&gen, &system, disk) == {
+        .Ok(path) -> if write_image_variant_artifacts(&gen, &system) == {
+            .Ok(variant_proof) -> {
+                theme.detail("wrote image variant proof {variant_proof.display()}")
+                theme.ok("wrote jetos installer media proof {path.display()}")
+                0
+            }
+            .Err(error) -> {
+                theme.error("could not write jetos image variants", "writing image variant artifacts failed: {error}", "check permissions on the Jetpack root, or set JETPACK_ROOT.")
+                2
+            }
+        }
+        .Err(error) -> {
+            theme.error("could not write the jetos installer media", "writing installer media artifacts failed: {error}", "check permissions on the Jetpack root, or set JETPACK_ROOT.")
+            2
+        }
+    }
+}

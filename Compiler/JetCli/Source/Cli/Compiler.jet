@@ -1,1804 +1,718 @@
-// PORT-PENDING 2072 source-compiler-slice-1: Source/Compiler.rs:1-1800
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! Public read-only front-end toolkit API (D-FRONTENDAPI1=A).
-//RS 
-//RS use crate::Comptime::DevSink;
-//RS use crate::Diagnostics::{Diagnostic, Severity, Span};
-//RS use crate::Lexer::{TokKind, Token};
-//RS use crate::AST::{CtKey, CtReport, CtValue, Type};
-//RS use crate::{Lexer, Parser, AST};
-//RS use jet_foundation::Report::{StatusEnvelope, StatusFields, StatusValue};
-//RS use std::path::{Path, PathBuf};
-//RS 
-//RS use jet_driver::Authority::{AuthorityError, AuthorityResolver};
-//RS use jet_driver::{Lock, Package, Public as PackageModel};
-//RS use jet_env_model::ModuleEval::{evaluate_env_with_source_loader, SourceLoader};
-//RS 
-//RS pub const API_VERSION: u32 = 1;
-//RS pub const SCHEMA_VERSION: u32 = 1;
-//RS 
-//RS /// Version 1 package-view field matrix.
-//RS ///
-//RS /// `manifest` is the uncomposed declaration view and `package` is the
-//RS /// composed package-facts view. Both expose only manifest metadata that has no
-//RS /// `@build.*` spelling; current-package identity stays exclusively at
-//RS /// `@build.package.name` and `@build.package.version`. `dependencies` and
-//RS /// `outputs` use the underlying `BTreeMap` key order. `packages` and
-//RS /// `build_profiles` retain model order. Lock package and root-dependency lists
-//RS /// retain lock-model order. Profile sets and collision maps use key order;
-//RS /// profile `extends`, `packages`, and `sources` retain declaration order.
-//RS /// Optional source fields are `Option<String>` and collections are present as
-//RS /// empty lists when the model has no declarations. Dependency source strings
-//RS /// redact Git URL credentials and URL parameters; files are read only through
-//RS /// the pinned package-root authority. Every operation returns a `Result` whose
-//RS /// failure is `PackageReadError { code, file, message, cause }`; the Jet
-//RS /// carrier is `CompilerPackageError` with the same four fields. The retained
-//RS /// model records no per-field source positions, so the views expose no
-//RS /// fabricated position data.
-//RS pub use PackageModel::PACKAGE_MODEL_SCHEMA_VERSION;
-//RS 
-//RS fn compiler_error_value(code: &str, message: impl Into<String>, span: Span) -> CtValue {
-//RS     ct_struct(
-//RS         "CompilerError",
-//RS         vec![
-//RS             ("code", CtValue::Str(code.to_string())),
-//RS             ("message", CtValue::Str(message.into())),
-//RS             ("span", span_value(span.into())),
-//RS         ],
-//RS     )
-//RS }
-//RS 
-//RS fn compiler_package_error_value(error: &PackageReadError) -> CtValue {
-//RS     ct_struct(
-//RS         "CompilerPackageError",
-//RS         vec![
-//RS             ("code", CtValue::Str(error.code.clone())),
-//RS             ("message", CtValue::Str(error.message.clone())),
-//RS             ("file", CtValue::Str(error.file.clone())),
-//RS             ("cause", CtValue::Str(error.cause.clone())),
-//RS         ],
-//RS     )
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct PackageReadError {
-//RS     pub code: String,
-//RS     pub message: String,
-//RS     pub file: String,
-//RS     pub cause: String,
-//RS }
-//RS 
-//RS impl PackageReadError {
-//RS     pub fn new(
-//RS         code: impl Into<String>,
-//RS         file: impl Into<String>,
-//RS         message: impl Into<String>,
-//RS         cause: impl Into<String>,
-//RS     ) -> Self {
-//RS         Self {
-//RS             code: code.into(),
-//RS             message: message.into(),
-//RS             file: file.into(),
-//RS             cause: cause.into(),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS pub use PackageModel::{
-//RS     BuildProfileView, DependencyView, KeyValueView, LockView, LockedPackageView, ManifestView,
-//RS     OutputView, PackageTargetView, PackageView, ProfileSetView, ProfileView, TargetProfileView,
-//RS };
-//RS 
-//RS fn package_read_error(
-//RS     file: impl Into<String>,
-//RS     message: impl Into<String>,
-//RS     cause: impl Into<String>,
-//RS ) -> PackageReadError {
-//RS     PackageReadError::new("E0956", file, message, cause)
-//RS }
-//RS 
-//RS fn authority_reason(cause: &AuthorityError) -> String {
-//RS     match cause {
-//RS         AuthorityError::Missing(_) => {
-//RS             "authority input is missing; restore the required metadata and try again".to_string()
-//RS         }
-//RS         AuthorityError::ManifestParse { .. } => {
-//RS             "package metadata is malformed; fix the metadata and try again".to_string()
-//RS         }
-//RS         AuthorityError::Io { operation, .. } => {
-//RS             format!("couldn't {operation} authority metadata; restore access and try again")
-//RS         }
-//RS         AuthorityError::Symlink(_) => {
-//RS             "authority input is a symlink; replace it with the expected file or directory"
-//RS                 .to_string()
-//RS         }
-//RS         AuthorityError::WrongKind {
-//RS             expected, actual, ..
-//RS         } => format!("authority input is a {actual}, but the operation requires a {expected}"),
-//RS         AuthorityError::Escapes(_) => {
-//RS             "authority path escapes its root; use a relative path below the authority root"
-//RS                 .to_string()
-//RS         }
-//RS         AuthorityError::AmbiguousManifest(_) => {
-//RS             "the package has multiple manifest roots; keep only package.jet".to_string()
-//RS         }
-//RS         AuthorityError::RetiredManifest(_) => {
-//RS             "the retired manifest name is not accepted; use package.jet".to_string()
-//RS         }
-//RS         AuthorityError::WorkspaceAmbiguous(_) => {
-//RS             "workspace authority is declared in multiple files; keep one authority source"
-//RS                 .to_string()
-//RS         }
-//RS         AuthorityError::WorkspaceNoModule => {
-//RS             "the authority source has no workspace module; declare the workspace module".to_string()
-//RS         }
-//RS         AuthorityError::NestedMembers { .. } => {
-//RS             "a member Package cannot declare another members list; keep membership at one level"
-//RS                 .to_string()
-//RS         }
-//RS         AuthorityError::Invalid { .. } => {
-//RS             "authority metadata is invalid; fix the metadata fields and try again".to_string()
-//RS         }
-//RS         AuthorityError::Changed(_) => {
-//RS             "authority input changed during resolution; restore it and retry".to_string()
-//RS         }
-//RS         AuthorityError::Unsupported(_) => {
-//RS             "authority resolution is unavailable on this platform".to_string()
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn authority_diagnostic(cause: &AuthorityError) -> Diagnostic {
-//RS     let code = cause.diagnostic().code;
-//RS     Diagnostic::error(
-//RS         code,
-//RS         "authority input is unavailable".to_string(),
-//RS         authority_reason(cause),
-//RS         "restore the authority input and retry the operation".to_string(),
-//RS         None,
-//RS     )
-//RS }
-//RS 
-//RS fn authority_read_error(
-//RS     file: impl Into<String>,
-//RS     message: impl Into<String>,
-//RS     cause: AuthorityError,
-//RS ) -> PackageReadError {
-//RS     let code = cause.diagnostic().code;
-//RS     package_read_error(
-//RS         file,
-//RS         message,
-//RS         format!("{code}: {}", authority_reason(&cause)),
-//RS     )
-//RS }
-//RS 
-//RS fn diagnostic_cause(diagnostic: &Diagnostic) -> String {
-//RS     match &diagnostic.detail {
-//RS         Some(detail) => format!("{}: {}; {}", diagnostic.code, diagnostic.what, detail),
-//RS         None => format!("{}: {}", diagnostic.code, diagnostic.what),
-//RS     }
-//RS }
-//RS 
-//RS fn inline_carrier_error(error: Package::InlinePackageError) -> PackageReadError {
-//RS     let code = error.diagnostic().code;
-//RS     package_read_error(
-//RS         crate::Syntax::PACKAGE_FILE,
-//RS         "could not read the inline package",
-//RS         format!(
-//RS             "{code}: inline Package carrier is malformed; fix the leading package block and try again"
-//RS         ),
-//RS     )
-//RS }
-//RS 
-//RS fn inline_parse_error(error: Package::PackageParseError) -> PackageReadError {
-//RS     let diagnostic = jet_driver::Manifest::manifest_parse_diagnostic(
-//RS         Path::new(crate::Syntax::PACKAGE_FILE),
-//RS         &error,
-//RS     );
-//RS     package_read_error(
-//RS         crate::Syntax::PACKAGE_FILE,
-//RS         "could not read the inline package",
-//RS         diagnostic_cause(&diagnostic),
-//RS     )
-//RS }
-//RS 
-//RS fn inline_authority_error(
-//RS     carrier: &jet_driver::Authority::CheckedFile,
-//RS     message: impl Into<String>,
-//RS     error: impl std::fmt::Display,
-//RS ) -> PackageReadError {
-//RS     authority_read_error(
-//RS         crate::Syntax::PACKAGE_FILE,
-//RS         message,
-//RS         AuthorityError::Invalid {
-//RS             path: carrier.path.clone(),
-//RS             detail: error.to_string(),
-//RS         },
-//RS     )
-//RS }
-//RS 
-//RS fn checked_inline_package(
-//RS     resolver: &AuthorityResolver,
-//RS ) -> Result<
-//RS     Option<(
-//RS         jet_driver::Authority::CheckedFile,
-//RS         Package::Blocks::InlinePackageBlock,
-//RS         String,
-//RS     )>,
-//RS     PackageReadError,
-//RS > {
-//RS     let candidates = [
-//RS         PathBuf::from(crate::Syntax::DEFAULT_ENTRY_FILE),
-//RS         PathBuf::from("src").join(crate::Syntax::DEFAULT_ENTRY_FILE),
-//RS     ];
-//RS     for relative in candidates {
-//RS         let file = match resolver.checked_file(&relative) {
-//RS             Ok(file) => file,
-//RS             Err(error) if error.is_missing() => continue,
-//RS             Err(error) => {
-//RS                 return Err(authority_read_error(
-//RS                     crate::Syntax::PACKAGE_FILE,
-//RS                     "could not read the inline package carrier",
-//RS                     error,
-//RS                 ))
-//RS             }
-//RS         };
-//RS         record_checked_file(&file);
-//RS         let source = file.text().map_err(|error| {
-//RS             authority_read_error(
-//RS                 crate::Syntax::PACKAGE_FILE,
-//RS                 "could not decode the inline package carrier",
-//RS                 error,
-//RS             )
-//RS         })?;
-//RS         let block = Package::extract_inline_package(&source).map_err(inline_carrier_error)?;
-//RS         resolver.revalidate_file(&file).map_err(|error| {
-//RS             authority_read_error(
-//RS                 crate::Syntax::PACKAGE_FILE,
-//RS                 "the inline package carrier changed while it was being read",
-//RS                 error,
-//RS             )
-//RS         })?;
-//RS         if let Some(block) = block {
-//RS             return Ok(Some((file, block, source)));
-//RS         }
-//RS     }
-//RS     Ok(None)
-//RS }
-//RS 
-//RS fn inline_package_facts(
-//RS     resolver: &AuthorityResolver,
-//RS     carrier: &jet_driver::Authority::CheckedFile,
-//RS     block: &Package::Blocks::InlinePackageBlock,
-//RS     source: &str,
-//RS ) -> Result<Package::PackageFacts, PackageReadError> {
-//RS     let mut facts = Package::PackageFacts::parse_uncomposed(
-//RS         block.body(source),
-//RS         carrier.path.display().to_string(),
-//RS     )
-//RS     .map_err(inline_parse_error)?;
-//RS     facts.compose_configs(resolver.root()).map_err(|error| {
-//RS         inline_authority_error(carrier, "could not compose the inline package facts", error)
-//RS     })?;
-//RS     facts.validate_guarantees().map_err(|error| {
-//RS         inline_authority_error(
-//RS             carrier,
-//RS             "could not validate the inline package facts",
-//RS             error,
-//RS         )
-//RS     })?;
-//RS     facts.validate_defaults().map_err(|error| {
-//RS         inline_authority_error(
-//RS             carrier,
-//RS             "could not validate the inline package defaults",
-//RS             error,
-//RS         )
-//RS     })?;
-//RS     facts
-//RS         .validate_members_in(resolver.root())
-//RS         .map_err(|error| {
-//RS             inline_authority_error(
-//RS                 carrier,
-//RS                 "could not validate the inline package members",
-//RS                 error,
-//RS             )
-//RS         })?;
-//RS     Ok(facts)
-//RS }
-//RS 
-//RS fn record_inline_package_inputs(
-//RS     resolver: &AuthorityResolver,
-//RS     carrier: &jet_driver::Authority::CheckedFile,
-//RS     facts: &Package::PackageFacts,
-//RS ) -> Result<(), PackageReadError> {
-//RS     record_checked_file(carrier);
-//RS     for path in &facts.resolved_config_paths {
-//RS         let file = resolver.checked_file(Path::new(path)).map_err(|cause| {
-//RS             authority_read_error(
-//RS                 crate::Syntax::PACKAGE_FILE,
-//RS                 "could not revalidate an inline package configuration input",
-//RS                 cause,
-//RS             )
-//RS         })?;
-//RS         record_checked_file(&file);
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn record_checked_file(file: &jet_driver::Authority::CheckedFile) {
-//RS     let path = file
-//RS         .relative
-//RS         .to_string_lossy()
-//RS         .replace(std::path::MAIN_SEPARATOR, "/");
-//RS     crate::Comptime::record_package_input(path, crate::SHA256::sha256_hex(&file.bytes));
-//RS }
-//RS 
-//RS fn record_checked_package_inputs(
-//RS     resolver: &AuthorityResolver,
-//RS     package: &jet_driver::Authority::CheckedPackage,
-//RS ) -> Result<(), PackageReadError> {
-//RS     record_checked_file(&package.member.manifest.file);
-//RS     for path in &package.facts.resolved_config_paths {
-//RS         let file = resolver.checked_file(Path::new(path)).map_err(|cause| {
-//RS             authority_read_error(
-//RS                 path.clone(),
-//RS                 "could not revalidate a package configuration input",
-//RS                 cause,
-//RS             )
-//RS         })?;
-//RS         record_checked_file(&file);
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn profile_view(profile: &jet_env_model::ModuleEval::PackageProfileSpec) -> ProfileView {
-//RS     ProfileView::from_parts(
-//RS         profile.name.clone(),
-//RS         profile.extends.clone(),
-//RS         profile.packages.clone(),
-//RS         profile
-//RS             .collisions
-//RS             .iter()
-//RS             .map(|(key, value)| (key.clone(), value.clone())),
-//RS         profile.sources.clone(),
-//RS     )
-//RS }
-//RS 
-//RS fn profile_set_view(profiles: &jet_env_model::ModuleEval::PackageProfileSet) -> ProfileSetView {
-//RS     ProfileSetView::from_profiles(profiles.profiles.values().map(profile_view))
-//RS }
-//RS 
-//RS pub fn read_manifest(root: &Path) -> Result<ManifestView, PackageReadError> {
-//RS     let resolver = AuthorityResolver::open(root).map_err(|cause| {
-//RS         authority_read_error(
-//RS             crate::Syntax::PACKAGE_FILE,
-//RS             "could not open the pinned package root",
-//RS             cause,
-//RS         )
-//RS     })?;
-//RS     match resolver.checked_manifest(Path::new(".")) {
-//RS         Ok(manifest) => {
-//RS             record_checked_file(&manifest.file);
-//RS             Ok(PackageModel::manifest_view_from_facts(&manifest.facts))
-//RS         }
-//RS         Err(cause) if cause.is_missing() => {
-//RS             let Some((carrier, block, source)) = checked_inline_package(&resolver)? else {
-//RS                 return Err(package_read_error(
-//RS                     crate::Syntax::PACKAGE_FILE,
-//RS                     "could not read the package manifest",
-//RS                     "no package manifest or inline Package carrier was found",
-//RS                 ));
-//RS             };
-//RS             let facts = Package::PackageFacts::parse_uncomposed(
-//RS                 block.body(&source),
-//RS                 carrier.path.display().to_string(),
-//RS             )
-//RS             .map_err(inline_parse_error)?;
-//RS             Ok(PackageModel::manifest_view_from_facts(&facts))
-//RS         }
-//RS         Err(cause) => Err(authority_read_error(
-//RS             crate::Syntax::PACKAGE_FILE,
-//RS             "could not read the package manifest",
-//RS             cause,
-//RS         )),
-//RS     }
-//RS }
-//RS 
-//RS pub fn read_package(root: &Path) -> Result<PackageView, PackageReadError> {
-//RS     let resolver = AuthorityResolver::open(root).map_err(|cause| {
-//RS         authority_read_error(
-//RS             crate::Syntax::PACKAGE_FILE,
-//RS             "could not open the pinned package root",
-//RS             cause,
-//RS         )
-//RS     })?;
-//RS     match resolver.checked_root_package() {
-//RS         Ok(package) => {
-//RS             record_checked_package_inputs(&resolver, &package)?;
-//RS             Ok(PackageModel::package_view_from_facts(&package.facts))
-//RS         }
-//RS         Err(cause) if cause.is_missing() => {
-//RS             let Some((carrier, block, source)) = checked_inline_package(&resolver)? else {
-//RS                 return Err(package_read_error(
-//RS                     crate::Syntax::PACKAGE_FILE,
-//RS                     "could not compose the package facts",
-//RS                     "no package manifest or inline Package carrier was found",
-//RS                 ));
-//RS             };
-//RS             let facts = inline_package_facts(&resolver, &carrier, &block, &source)?;
-//RS             record_inline_package_inputs(&resolver, &carrier, &facts)?;
-//RS             Ok(PackageModel::package_view_from_facts(&facts))
-//RS         }
-//RS         Err(cause) => Err(authority_read_error(
-//RS             crate::Syntax::PACKAGE_FILE,
-//RS             "could not compose the package facts",
-//RS             cause,
-//RS         )),
-//RS     }
-//RS }
-//RS 
-//RS pub fn read_lock(root: &Path) -> Result<LockView, PackageReadError> {
-//RS     let resolver = AuthorityResolver::open(root).map_err(|cause| {
-//RS         authority_read_error(
-//RS             crate::Syntax::UNIFIED_LOCK_FILE,
-//RS             "could not open the pinned package root",
-//RS             cause,
-//RS         )
-//RS     })?;
-//RS     let file = resolver
-//RS         .checked_file(Path::new(crate::Syntax::UNIFIED_LOCK_FILE))
-//RS         .map_err(|cause| {
-//RS             authority_read_error(
-//RS                 crate::Syntax::UNIFIED_LOCK_FILE,
-//RS                 "could not read the package lock",
-//RS                 cause,
-//RS             )
-//RS         })?;
-//RS     record_checked_file(&file);
-//RS     let text = file.text().map_err(|cause| {
-//RS         authority_read_error(
-//RS             crate::Syntax::UNIFIED_LOCK_FILE,
-//RS             "could not decode the package lock",
-//RS             cause,
-//RS         )
-//RS     })?;
-//RS     let lock = Lock::parse(&text).map_err(|cause| {
-//RS         package_read_error(
-//RS             crate::Syntax::UNIFIED_LOCK_FILE,
-//RS             "could not parse the package lock",
-//RS             cause,
-//RS         )
-//RS     })?;
-//RS     resolver.revalidate_file(&file).map_err(|cause| {
-//RS         authority_read_error(
-//RS             crate::Syntax::UNIFIED_LOCK_FILE,
-//RS             "the package lock changed while it was being read",
-//RS             cause,
-//RS         )
-//RS     })?;
-//RS     Ok(PackageModel::lock_view_from_lock(&lock))
-//RS }
-//RS 
-//RS struct PackageSourceLoader {
-//RS     resolver: AuthorityResolver,
-//RS     checked_inputs: Vec<jet_driver::Authority::CheckedFile>,
-//RS     last_file: String,
-//RS }
-//RS 
-//RS impl SourceLoader for PackageSourceLoader {
-//RS     fn read_file(&mut self, relative: &Path) -> Result<String, Diagnostic> {
-//RS         self.last_file = relative
-//RS             .to_string_lossy()
-//RS             .replace(std::path::MAIN_SEPARATOR, "/");
-//RS         let file = self
-//RS             .resolver
-//RS             .checked_file(relative)
-//RS             .map_err(|cause| authority_diagnostic(&cause))?;
-//RS         record_checked_file(&file);
-//RS         let text = file.text().map_err(|cause| authority_diagnostic(&cause))?;
-//RS         self.checked_inputs.push(file);
-//RS         Ok(text)
-//RS     }
-//RS 
-//RS     fn list_jet_files(&mut self, relative: &Path) -> Result<Vec<PathBuf>, Diagnostic> {
-//RS         self.last_file = relative
-//RS             .to_string_lossy()
-//RS             .replace(std::path::MAIN_SEPARATOR, "/");
-//RS         let files = self
-//RS             .resolver
-//RS             .discover_files(relative, Some(crate::Syntax::FILE_EXT))
-//RS             .map_err(|cause| authority_diagnostic(&cause))?;
-//RS         for file in &files {
-//RS             record_checked_file(file);
-//RS         }
-//RS         self.checked_inputs.extend(files.iter().cloned());
-//RS         Ok(files.into_iter().map(|file| file.relative).collect())
-//RS     }
-//RS 
-//RS     fn package_facts(&mut self) -> Result<Option<Package::PackageFacts>, Diagnostic> {
-//RS         self.last_file = crate::Syntax::PACKAGE_FILE.to_string();
-//RS         match self.resolver.checked_root_package() {
-//RS             Ok(package) => {
-//RS                 record_checked_package_inputs(&self.resolver, &package).map_err(|error| {
-//RS                     Diagnostic::error(
-//RS                         error.code,
-//RS                         error.message,
-//RS                         error.cause,
-//RS                         "restore the package inputs and try again".to_string(),
-//RS                         None,
-//RS                     )
-//RS                 })?;
-//RS                 Ok(Some(package.facts))
-//RS             }
-//RS             Err(error) if error.is_missing() => {
-//RS                 let facts = crate::Loader::package_facts_for_root(self.resolver.root()).map_err(
-//RS                     |mut diagnostics| {
-//RS                         diagnostics.pop().unwrap_or_else(|| {
-//RS                             Diagnostic::error(
-//RS                                 "E1206",
-//RS                                 "package context is unavailable".to_string(),
-//RS                                 "the inline package facts could not be loaded".to_string(),
-//RS                                 "restore the package source and try again".to_string(),
-//RS                                 None,
-//RS                             )
-//RS                         })
-//RS                     },
-//RS                 )?;
-//RS                 Ok(facts)
-//RS             }
-//RS             Err(error) => Err(error.diagnostic()),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS pub fn read_profiles(root: &Path) -> Result<ProfileSetView, PackageReadError> {
-//RS     let resolver = AuthorityResolver::open(root).map_err(|cause| {
-//RS         authority_read_error(
-//RS             crate::Syntax::ENV_FILE,
-//RS             "could not open the pinned package root",
-//RS             cause,
-//RS         )
-//RS     })?;
-//RS     let env_file = resolver
-//RS         .checked_file(Path::new(crate::Syntax::ENV_FILE))
-//RS         .map_err(|cause| {
-//RS             authority_read_error(
-//RS                 crate::Syntax::ENV_FILE,
-//RS                 "could not read the profile source",
-//RS                 cause,
-//RS             )
-//RS         })?;
-//RS     record_checked_file(&env_file);
-//RS     let source = env_file.text().map_err(|cause| {
-//RS         authority_read_error(
-//RS             crate::Syntax::ENV_FILE,
-//RS             "could not decode the profile source",
-//RS             cause,
-//RS         )
-//RS     })?;
-//RS     let base_dir = resolver.root().to_path_buf();
-//RS     let mut loader = PackageSourceLoader {
-//RS         resolver,
-//RS         checked_inputs: vec![env_file],
-//RS         last_file: crate::Syntax::ENV_FILE.to_string(),
-//RS     };
-//RS     let plan = match evaluate_env_with_source_loader(&source, &base_dir, &mut loader, None, None) {
-//RS         Ok(plan) => plan,
-//RS         Err(cause) => {
-//RS             return Err(package_read_error(
-//RS                 loader.last_file.clone(),
-//RS                 "could not evaluate the profile source",
-//RS                 diagnostic_cause(&cause),
-//RS             ));
-//RS         }
-//RS     };
-//RS     for file in &loader.checked_inputs {
-//RS         let file_name = file
-//RS             .relative
-//RS             .to_string_lossy()
-//RS             .replace(std::path::MAIN_SEPARATOR, "/");
-//RS         loader.resolver.revalidate_file(file).map_err(|cause| {
-//RS             authority_read_error(
-//RS                 file_name,
-//RS                 "a profile input changed while it was being read",
-//RS                 cause,
-//RS             )
-//RS         })?;
-//RS     }
-//RS     let mut profiles = jet_env_model::ModuleEval::PackageProfileSet::default();
-//RS     for profile in plan.package_profiles {
-//RS         profiles.insert_checked(profile).map_err(|cause| {
-//RS             package_read_error(
-//RS                 crate::Syntax::ENV_FILE,
-//RS                 "could not compose the profile set",
-//RS                 cause.to_string(),
-//RS             )
-//RS         })?;
-//RS     }
-//RS     Ok(profile_set_view(&profiles))
-//RS }
-//RS 
-//RS fn optional_string(value: Option<&String>) -> CtValue {
-//RS     compiler_option_string(value.map(String::as_str))
-//RS }
-//RS 
-//RS fn target_value(targets: &[TargetProfileView]) -> CtValue {
-//RS     // The legacy scalar can represent one exact target name.  Do not pick a
-//RS     // profile when the package declares multiple named targets.
-//RS     match targets {
-//RS         [target] => optional_string(Some(&target.name)),
-//RS         _ => optional_string(None),
-//RS     }
-//RS }
-//RS 
-//RS fn dependency_value(dependency: &DependencyView) -> CtValue {
-//RS     ct_struct(
-//RS         "CompilerDependency",
-//RS         vec![
-//RS             ("name", CtValue::Str(dependency.name.clone())),
-//RS             ("source", CtValue::Str(dependency.source.clone())),
-//RS         ],
-//RS     )
-//RS }
-//RS 
-//RS fn package_target_value(package: &PackageTargetView) -> CtValue {
-//RS     ct_struct(
-//RS         "CompilerPackageTarget",
-//RS         vec![
-//RS             ("name", CtValue::Str(package.name.clone())),
-//RS             ("targets", compiler_string_list(package.targets.clone())),
-//RS         ],
-//RS     )
-//RS }
-//RS 
-//RS fn output_value(output: &OutputView) -> CtValue {
-//RS     ct_struct(
-//RS         "CompilerPackageOutput",
-//RS         vec![
-//RS             ("name", CtValue::Str(output.name.clone())),
-//RS             ("kind", CtValue::Str(output.kind.clone())),
-//RS             ("entry", optional_string(output.entry.as_ref())),
-//RS         ],
-//RS     )
-//RS }
-//RS 
-//RS fn build_profile_value(profile: &BuildProfileView) -> CtValue {
-//RS     ct_struct(
-//RS         "CompilerBuildProfile",
-//RS         vec![
-//RS             ("name", CtValue::Str(profile.name.clone())),
-//RS             ("optimize", CtValue::Str(profile.optimize.clone())),
-//RS             ("debug_info", CtValue::Bool(profile.debug_info)),
-//RS             ("small", CtValue::Bool(profile.small)),
-//RS             ("panic", optional_string(profile.panic.as_ref())),
-//RS         ],
-//RS     )
-//RS }
-//RS 
-//RS fn manifest_value(view: &ManifestView) -> CtValue {
-//RS     ct_struct(
-//RS         "CompilerManifest",
-//RS         vec![
-//RS             (
-//RS                 "schema_version",
-//RS                 CtValue::Int(i64::from(view.schema_version)),
-//RS             ),
-//RS             ("file", CtValue::Str(view.file.clone())),
-//RS             ("jet", optional_string(view.jet.as_ref())),
-//RS             ("edition", optional_string(view.edition.as_ref())),
-//RS             ("description", optional_string(view.description.as_ref())),
-//RS             ("license", optional_string(view.license.as_ref())),
-//RS             ("repository", optional_string(view.repository.as_ref())),
-//RS             ("layer", optional_string(view.layer.as_ref())),
-//RS             ("target", target_value(&view.targets)),
-//RS             (
-//RS                 "dependencies",
-//RS                 CtValue::List(view.dependencies.iter().map(dependency_value).collect()),
-//RS             ),
-//RS             (
-//RS                 "packages",
-//RS                 CtValue::List(view.packages.iter().map(package_target_value).collect()),
-//RS             ),
-//RS             (
-//RS                 "outputs",
-//RS                 CtValue::List(view.outputs.iter().map(output_value).collect()),
-//RS             ),
-//RS             (
-//RS                 "build_profiles",
-//RS                 CtValue::List(
-//RS                     view.build_profiles
-//RS                         .iter()
-//RS                         .map(build_profile_value)
-//RS                         .collect(),
-//RS                 ),
-//RS             ),
-//RS         ],
-//RS     )
-//RS }
-//RS 
-//RS fn package_value(view: &PackageView) -> CtValue {
-//RS     ct_struct(
-//RS         "CompilerPackage",
-//RS         vec![
-//RS             (
-//RS                 "schema_version",
-//RS                 CtValue::Int(i64::from(view.schema_version)),
-//RS             ),
-//RS             ("file", CtValue::Str(view.file.clone())),
-//RS             ("jet", optional_string(view.jet.as_ref())),
-//RS             ("edition", optional_string(view.edition.as_ref())),
-//RS             ("description", optional_string(view.description.as_ref())),
-//RS             ("license", optional_string(view.license.as_ref())),
-//RS             ("repository", optional_string(view.repository.as_ref())),
-//RS             ("layer", optional_string(view.layer.as_ref())),
-//RS             ("target", target_value(&view.targets)),
-//RS             (
-//RS                 "dependencies",
-//RS                 CtValue::List(view.dependencies.iter().map(dependency_value).collect()),
-//RS             ),
-//RS             (
-//RS                 "packages",
-//RS                 CtValue::List(view.packages.iter().map(package_target_value).collect()),
-//RS             ),
-//RS             (
-//RS                 "outputs",
-//RS                 CtValue::List(view.outputs.iter().map(output_value).collect()),
-//RS             ),
-//RS             (
-//RS                 "build_profiles",
-//RS                 CtValue::List(
-//RS                     view.build_profiles
-//RS                         .iter()
-//RS                         .map(build_profile_value)
-//RS                         .collect(),
-//RS                 ),
-//RS             ),
-//RS         ],
-//RS     )
-//RS }
-//RS 
-//RS fn locked_package_value(package: &LockedPackageView) -> CtValue {
-//RS     ct_struct(
-//RS         "CompilerLockedPackage",
-//RS         vec![
-//RS             ("name", CtValue::Str(package.name.clone())),
-//RS             ("version", CtValue::Str(package.version.clone())),
-//RS             ("source_kind", CtValue::Str(package.source_kind.clone())),
-//RS             ("source", optional_string(package.source.as_ref())),
-//RS             ("revision", optional_string(package.revision.as_ref())),
-//RS             ("fingerprint", CtValue::Str(package.fingerprint.clone())),
-//RS             (
-//RS                 "content_hash",
-//RS                 optional_string(package.content_hash.as_ref()),
-//RS             ),
-//RS             (
-//RS                 "dependencies",
-//RS                 compiler_string_list(package.dependencies.clone()),
-//RS             ),
-//RS             ("layer", optional_string(package.layer.as_ref())),
-//RS             (
-//RS                 "inferred_layer",
-//RS                 optional_string(package.inferred_layer.as_ref()),
-//RS             ),
-//RS         ],
-//RS     )
-//RS }
-//RS 
-//RS fn key_value_value(value: &KeyValueView) -> CtValue {
-//RS     ct_struct(
-//RS         "CompilerKeyValue",
-//RS         vec![
-//RS             ("key", CtValue::Str(value.key.clone())),
-//RS             ("value", CtValue::Str(value.value.clone())),
-//RS         ],
-//RS     )
-//RS }
-//RS 
-//RS fn profile_value(profile: &ProfileView) -> CtValue {
-//RS     ct_struct(
-//RS         "CompilerProfile",
-//RS         vec![
-//RS             ("name", CtValue::Str(profile.name.clone())),
-//RS             ("extends", compiler_string_list(profile.extends.clone())),
-//RS             ("packages", compiler_string_list(profile.packages.clone())),
-//RS             (
-//RS                 "collisions",
-//RS                 CtValue::List(profile.collisions.iter().map(key_value_value).collect()),
-//RS             ),
-//RS             ("sources", compiler_string_list(profile.sources.clone())),
-//RS         ],
-//RS     )
-//RS }
-//RS 
-//RS fn lock_value(view: &LockView) -> CtValue {
-//RS     ct_struct(
-//RS         "CompilerLock",
-//RS         vec![
-//RS             (
-//RS                 "schema_version",
-//RS                 CtValue::Int(i64::from(view.schema_version)),
-//RS             ),
-//RS             ("file", CtValue::Str(view.file.clone())),
-//RS             ("version", CtValue::Int(i64::from(view.version))),
-//RS             (
-//RS                 "root_dependencies",
-//RS                 compiler_string_list(view.root_dependencies.clone()),
-//RS             ),
-//RS             (
-//RS                 "packages",
-//RS                 CtValue::List(view.packages.iter().map(locked_package_value).collect()),
-//RS             ),
-//RS         ],
-//RS     )
-//RS }
-//RS 
-//RS fn profile_set_value(view: &ProfileSetView) -> CtValue {
-//RS     ct_struct(
-//RS         "CompilerProfileSet",
-//RS         vec![
-//RS             (
-//RS                 "schema_version",
-//RS                 CtValue::Int(i64::from(view.schema_version)),
-//RS             ),
-//RS             ("file", CtValue::Str(view.file.clone())),
-//RS             (
-//RS                 "profiles",
-//RS                 CtValue::List(view.profiles.iter().map(profile_value).collect()),
-//RS             ),
-//RS         ],
-//RS     )
-//RS }
-//RS 
-//RS /// D-FRONTENDAPI1=A: comptime bridge for the same read-only compiler values
-//RS /// exposed by this Rust module. The callback is installed at the compiler
-//RS /// entry seam; it deliberately declines every other Core module so the normal
-//RS /// interpreter/AOT paths remain unchanged.
-//RS pub fn eval_core_call(
-//RS     module: &str,
-//RS     method: &str,
-//RS     args: Vec<CtValue>,
-//RS     span: Span,
-//RS ) -> Option<Result<CtValue, Diagnostic>> {
-//RS     eval_core_call_with_type(module, method, args, span, None, None)
-//RS }
-//RS 
-//RS /// Ambient callback variant carrying the resolved return type for typed
-//RS /// absence payloads. The compiler API wrapper above stays four-argument for
-//RS /// callers that use the public read-only toolkit directly.
-//RS pub fn eval_core_call_with_type(
-//RS     module: &str,
-//RS     method: &str,
-//RS     args: Vec<CtValue>,
-//RS     span: Span,
-//RS     _resolved_ret: Option<Type>,
-//RS     _sink: Option<&mut DevSink>,
-//RS ) -> Option<Result<CtValue, Diagnostic>> {
-//RS     if module == "core.build" {
-//RS         let result = match (method, args.as_slice()) {
-//RS             ("graph", [plan]) => crate::Comptime::Build::eval_build_graph(plan, span),
-//RS             ("receipt_diff", [before, after]) => {
-//RS                 crate::Comptime::Build::eval_build_receipt_diff(before, after, span)
-//RS             }
-//RS             _ => Err(Diagnostic::error(
-//RS                 "E3502",
-//RS                 format!("unsupported core.build operation `{method}`"),
-//RS                 "core.build exposes only the checked graph and receipt diff queries".to_string(),
-//RS                 "call `core.build.graph` with one BuildPlan or `core.build.receipt_diff` with two BuildGraph values".to_string(),
-//RS                 Some(span),
-//RS             )),
-//RS         };
-//RS         return Some(result);
-//RS     }
-//RS     if module != "core.compiler" {
-//RS         return None;
-//RS     }
-//RS     if matches!(method, "manifest" | "package" | "lock" | "profiles") {
-//RS         if !args.is_empty() {
-//RS             return Some(Ok(CtValue::failed(Box::new(
-//RS                 compiler_package_error_value(&PackageReadError::new(
-//RS                     "E0956",
-//RS                     "",
-//RS                     format!("`core.compiler.{method}` takes no arguments"),
-//RS                     "call the package view from `fn build` or a comptime binding without a path argument",
-//RS                 )),
-//RS             ))));
-//RS         }
-//RS         let Some(root) = crate::Comptime::package_read_root() else {
-//RS             return Some(Ok(CtValue::failed(Box::new(
-//RS                 compiler_package_error_value(&PackageReadError::new(
-//RS                     "E0956",
-//RS                     "",
-//RS                     format!("`core.compiler.{method}` is available only during package-aware compile-time evaluation"),
-//RS                     "call the package view from `fn build` or a comptime binding; the compiler pins the package root for you",
-//RS                 )),
-//RS             ))));
-//RS         };
-//RS         let result = match method {
-//RS             "manifest" => read_manifest(&root).map(|view| manifest_value(&view)),
-//RS             "package" => read_package(&root).map(|view| package_value(&view)),
-//RS             "lock" => read_lock(&root).map(|view| lock_value(&view)),
-//RS             "profiles" => read_profiles(&root).map(|view| profile_set_value(&view)),
-//RS             _ => Err(package_read_error(
-//RS                 "",
-//RS                 "unknown package view operation",
-//RS                 "the compiler package view dispatcher received an unsupported operation",
-//RS             )),
-//RS         };
-//RS         return Some(Ok(match result {
-//RS             Ok(value) => CtValue::Present(Box::new(value)),
-//RS             Err(error) => CtValue::failed(Box::new(compiler_package_error_value(&error))),
-//RS         }));
-//RS     }
-//RS     let source = match args.first() {
-//RS         Some(CtValue::Str(source)) if args.len() == 1 && method != "check" => source.clone(),
-//RS         Some(CtValue::Struct { type_name, fields })
-//RS             if args.len() == 1 && method == "check" && type_name == "CompilerSyntaxTree" =>
-//RS         {
-//RS             match fields
-//RS                 .iter()
-//RS                 .find_map(|(name, value)| {
-//RS                     (name == "source").then(|| match value {
-//RS                         CtValue::Str(source) => Some(source.clone()),
-//RS                         _ => None,
-//RS                     })
-//RS                 })
-//RS                 .flatten()
-//RS             {
-//RS                 Some(source) => source,
-//RS                 None => {
-//RS                     return Some(Ok(CtValue::failed(Box::new(compiler_error_value(
-//RS                         "E0956",
-//RS                         "`core.compiler.check` needs a parsed syntax tree with its source",
-//RS                         span,
-//RS                     )))))
-//RS                 }
-//RS             }
-//RS         }
-//RS         _ => {
-//RS             let message = if method == "check" {
-//RS                 "`core.compiler.check` expects one CompilerSyntaxTree".to_string()
-//RS             } else {
-//RS                 format!("`core.compiler.{method}` expects one source String")
-//RS             };
-//RS             return Some(Ok(CtValue::failed(Box::new(compiler_error_value(
-//RS                 "E0956", message, span,
-//RS             )))));
-//RS         }
-//RS     };
-//RS     if method == "check" {
-//RS         let Some(CtValue::Struct { fields, .. }) = args.first() else {
-//RS             unreachable!("check input was validated above")
-//RS         };
-//RS         let schema = fields
-//RS             .iter()
-//RS             .find_map(|(name, value)| (name == "schema_version").then_some(value));
-//RS         if !matches!(schema, Some(CtValue::Int(value)) if *value == i64::from(SCHEMA_VERSION)) {
-//RS             let got = schema
-//RS                 .and_then(|value| match value {
-//RS                     CtValue::Int(value) => Some(*value),
-//RS                     _ => None,
-//RS                 })
-//RS                 .map_or_else(|| "missing".to_string(), |value| value.to_string());
-//RS             return Some(Ok(CtValue::failed(Box::new(compiler_error_value(
-//RS                 "E0956",
-//RS                 format!("unsupported CompilerSyntaxTree schema version {got}"),
-//RS                 span,
-//RS             )))));
-//RS         }
-//RS     }
-//RS     let value = match method {
-//RS         "lex" => lexed_value(&lex_source(&source)),
-//RS         "parse" => syntax_tree_value(&parse_source(&source)),
-//RS         "check" => checked_value(&source),
-//RS         "source_map" => source_map_value(&source_map_from_generated_rust(&source)),
-//RS         _ => {
-//RS             return Some(Ok(CtValue::failed(Box::new(compiler_error_value(
-//RS                 "E0956",
-//RS                 format!("unknown `core.compiler` operation `{method}`"),
-//RS                 span,
-//RS             )))))
-//RS         }
-//RS     };
-//RS     Some(Ok(CtValue::Present(Box::new(value))))
-//RS }
-//RS 
-//RS fn ct_struct(type_name: &str, fields: Vec<(&str, CtValue)>) -> CtValue {
-//RS     CtValue::Struct {
-//RS         type_name: type_name.to_string(),
-//RS         fields: fields
-//RS             .into_iter()
-//RS             .map(|(name, value)| (name.to_string(), value))
-//RS             .collect(),
-//RS     }
-//RS }
-//RS 
-//RS fn span_value(range: TextRange) -> CtValue {
-//RS     ct_struct(
-//RS         crate::Syntax::TYPE_SOURCE_SPAN,
-//RS         vec![
-//RS             ("start", CtValue::Int(range.start as i64)),
-//RS             ("end", CtValue::Int(range.end as i64)),
-//RS         ],
-//RS     )
-//RS }
-//RS 
-//RS fn optional_span(range: Option<TextRange>) -> CtValue {
-//RS     range.map_or(
-//RS         CtValue::absent(Type::Named(crate::Syntax::TYPE_SOURCE_SPAN.to_string())),
-//RS         |range| CtValue::Present(Box::new(span_value(range))),
-//RS     )
-//RS }
-//RS 
-//RS fn diagnostic_value(diagnostic: &DiagnosticView) -> CtValue {
-//RS     ct_struct(
-//RS         "CompilerDiagnostic",
-//RS         vec![
-//RS             ("code", CtValue::Str(diagnostic.code.clone())),
-//RS             (
-//RS                 "severity",
-//RS                 CtValue::Str(match diagnostic.severity {
-//RS                     DiagnosticSeverity::Error => "error".to_string(),
-//RS                     DiagnosticSeverity::Lint => "lint".to_string(),
-//RS                 }),
-//RS             ),
-//RS             ("message", CtValue::Str(diagnostic.message.clone())),
-//RS             ("why", CtValue::Str(diagnostic.why.clone())),
-//RS             ("fix", CtValue::Str(diagnostic.fix.clone())),
-//RS             ("span", optional_span(diagnostic.span)),
-//RS         ],
-//RS     )
-//RS }
-//RS 
-//RS fn lexed_value(lexed: &LexedSource) -> CtValue {
-//RS     ct_struct(
-//RS         "CompilerLexed",
-//RS         vec![
-//RS             ("schema_version", CtValue::Int(i64::from(SCHEMA_VERSION))),
-//RS             ("source", CtValue::Str(lexed.source.clone())),
-//RS             (
-//RS                 "tokens",
-//RS                 CtValue::List(
-//RS                     lexed
-//RS                         .tokens
-//RS                         .iter()
-//RS                         .map(|token| {
-//RS                             ct_struct(
-//RS                                 "CompilerToken",
-//RS                                 vec![
-//RS                                     ("kind", CtValue::Str(token.kind.to_string())),
-//RS                                     ("text", CtValue::Str(token.text.clone())),
-//RS                                     ("span", span_value(token.span)),
-//RS                                 ],
-//RS                             )
-//RS                         })
-//RS                         .collect(),
-//RS                 ),
-//RS             ),
-//RS             (
-//RS                 "diagnostics",
-//RS                 CtValue::List(lexed.diagnostics.iter().map(diagnostic_value).collect()),
-//RS             ),
-//RS         ],
-//RS     )
-//RS }
-//RS 
-//RS fn syntax_node_value(node: &SyntaxNode) -> CtValue {
-//RS     let kind = match node.kind {
-//RS         SyntaxNodeKind::Function => "function",
-//RS         SyntaxNodeKind::Struct => "struct",
-//RS         SyntaxNodeKind::Enum => "enum",
-//RS         SyntaxNodeKind::Trait => "trait",
-//RS         SyntaxNodeKind::Tag => "tag",
-//RS         SyntaxNodeKind::Effect => "effect",
-//RS         SyntaxNodeKind::Impl => "impl",
-//RS         SyntaxNodeKind::Const => "const",
-//RS         SyntaxNodeKind::Test => "test",
-//RS         SyntaxNodeKind::ExternRust => "extern_rust",
-//RS         SyntaxNodeKind::Module => "module",
-//RS         SyntaxNodeKind::CModule => "c_module",
-//RS         SyntaxNodeKind::CodeModule => "code_module",
-//RS         SyntaxNodeKind::ErrorConversion => "error_conversion",
-//RS         SyntaxNodeKind::Migration => "migration",
-//RS         SyntaxNodeKind::State => "state",
-//RS         SyntaxNodeKind::Protocol => "protocol",
-//RS         SyntaxNodeKind::Derive => "derive",
-//RS         SyntaxNodeKind::GenericModule => "generic_module",
-//RS         SyntaxNodeKind::ModuleAlias => "module_alias",
-//RS         SyntaxNodeKind::Distinct => "distinct",
-//RS         SyntaxNodeKind::TypeAlias => "type_alias",
-//RS         SyntaxNodeKind::UnitFamily => "unit_family",
-//RS         SyntaxNodeKind::Marker => "marker",
-//RS         SyntaxNodeKind::Fact => "fact",
-//RS         SyntaxNodeKind::TemplateLoop => "template_loop",
-//RS     };
-//RS     ct_struct(
-//RS         "CompilerNode",
-//RS         vec![
-//RS             ("kind", CtValue::Str(kind.to_string())),
-//RS             (
-//RS                 "name",
-//RS                 node.name
-//RS                     .clone()
-//RS                     .map_or(CtValue::absent(Type::String), |name| {
-//RS                         CtValue::Present(Box::new(CtValue::Str(name)))
-//RS                     }),
-//RS             ),
-//RS             ("span", span_value(node.span)),
-//RS         ],
-//RS     )
-//RS }
-//RS 
-//RS fn syntax_tree_value(tree: &SyntaxTree) -> CtValue {
-//RS     ct_struct(
-//RS         "CompilerSyntaxTree",
-//RS         vec![
-//RS             ("schema_version", CtValue::Int(i64::from(SCHEMA_VERSION))),
-//RS             ("source", CtValue::Str(tree.source.clone())),
-//RS             (
-//RS                 "items",
-//RS                 CtValue::List(tree.items.iter().map(syntax_node_value).collect()),
-//RS             ),
-//RS             (
-//RS                 "diagnostics",
-//RS                 CtValue::List(tree.diagnostics.iter().map(diagnostic_value).collect()),
-//RS             ),
-//RS         ],
-//RS     )
-//RS }
-//RS 
-//RS fn compiler_function_value(node: &SyntaxNode) -> CtValue {
-//RS     let name = node.name.clone().unwrap_or_default();
-//RS     ct_struct(
-//RS         "FunctionInfo",
-//RS         vec![
-//RS             ("name", CtValue::Str(name.clone())),
-//RS             ("module", CtValue::Str("core.compiler".to_string())),
-//RS             ("identity", CtValue::Str(format!("core.compiler::{name}"))),
-//RS             ("params", CtValue::List(Vec::new())),
-//RS             ("span", span_value(node.span)),
-//RS             (
-//RS                 "effects",
-//RS                 ct_struct("EffectInfo", vec![("values", CtValue::List(Vec::new()))]),
-//RS             ),
-//RS             ("reaches_panic", CtValue::Bool(false)),
-//RS             ("arithmetic", CtValue::List(Vec::new())),
-//RS         ],
-//RS     )
-//RS }
-//RS 
-//RS fn field_value(value: &CtValue, name: &str) -> Option<CtValue> {
-//RS     match value {
-//RS         CtValue::Struct { fields, .. } => fields
-//RS             .iter()
-//RS             .find(|(field, _)| field == name)
-//RS             .map(|(_, value)| value.clone()),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn effect_info_value(values: impl IntoIterator<Item = String>) -> CtValue {
-//RS     ct_struct(
-//RS         "EffectInfo",
-//RS         vec![(
-//RS             "values",
-//RS             CtValue::List(values.into_iter().map(CtValue::Str).collect()),
-//RS         )],
-//RS     )
-//RS }
-//RS 
-//RS fn compiler_option_string(value: Option<&str>) -> CtValue {
-//RS     value.map_or(CtValue::absent(Type::String), |value| {
-//RS         CtValue::Present(Box::new(CtValue::Str(value.to_string())))
-//RS     })
-//RS }
-//RS 
-//RS fn compiler_option_int(value: Option<usize>) -> CtValue {
-//RS     value.map_or(CtValue::absent(Type::Int), |value| {
-//RS         CtValue::Present(Box::new(CtValue::Int(value as i64)))
-//RS     })
-//RS }
-//RS 
-//RS fn compiler_string_list(values: impl IntoIterator<Item = String>) -> CtValue {
-//RS     CtValue::List(values.into_iter().map(CtValue::Str).collect())
-//RS }
-//RS 
-//RS fn compiler_semantic_span(span: jet_semindex::SourceSpan) -> CtValue {
-//RS     span_value(TextRange {
-//RS         start: span.start,
-//RS         end: span.end,
-//RS     })
-//RS }
-//RS 
-//RS fn compiler_arithmetic_value(value: &jet_semindex::ArithmeticOperationFact) -> CtValue {
-//RS     ct_struct(
-//RS         "CompilerArithmeticOperation",
-//RS         vec![
-//RS             ("operation", CtValue::Str(value.operation.clone())),
-//RS             ("policy", CtValue::Str(value.policy.clone())),
-//RS             ("module", CtValue::Str(value.module_path.clone())),
-//RS             (
-//RS                 "operation_span",
-//RS                 compiler_semantic_span(value.operation_span),
-//RS             ),
-//RS             ("scope_span", compiler_semantic_span(value.scope_span)),
-//RS         ],
-//RS     )
-//RS }
-//RS 
-//RS fn compiler_symbol_kind_value(kind: &jet_semindex::SymbolKind) -> CtValue {
-//RS     let (kind_name, params, ret, fields, variants, parent, mutable, ty) = match kind {
-//RS         jet_semindex::SymbolKind::Module => (
-//RS             "module",
-//RS             Vec::new(),
-//RS             None,
-//RS             Vec::new(),
-//RS             Vec::new(),
-//RS             None,
-//RS             None,
-//RS             None,
-//RS         ),
-//RS         jet_semindex::SymbolKind::Function { params, ret, .. } => (
-//RS             "function",
-//RS             params
-//RS                 .iter()
-//RS                 .map(|(name, ty)| {
-//RS                     ct_struct(
-//RS                         "CompilerParam",
-//RS                         vec![
-//RS                             ("name", CtValue::Str(name.clone())),
-//RS                             ("ty", CtValue::Str(ty.clone())),
-//RS                         ],
-//RS                     )
-//RS                 })
-//RS                 .collect(),
-//RS             ret.as_deref(),
-//RS             Vec::new(),
-//RS             Vec::new(),
-//RS             None,
-//RS             None,
-//RS             None,
-//RS         ),
-//RS         jet_semindex::SymbolKind::Struct { fields } => (
-//RS             "struct",
-//RS             Vec::new(),
-//RS             None,
-//RS             fields
-//RS                 .iter()
-//RS                 .map(|(name, ty)| {
-//RS                     ct_struct(
-//RS                         "CompilerField",
-//RS                         vec![
-//RS                             ("name", CtValue::Str(name.clone())),
-//RS                             ("ty", CtValue::Str(ty.clone())),
-//RS                         ],
-//RS                     )
-//RS                 })
-//RS                 .collect(),
-//RS             Vec::new(),
-//RS             None,
-//RS             None,
-//RS             None,
-//RS         ),
-//RS         jet_semindex::SymbolKind::Enum { variants } => (
-//RS             "enum",
-//RS             Vec::new(),
-//RS             None,
-//RS             Vec::new(),
-//RS             variants.clone(),
-//RS             None,
-//RS             None,
-//RS             None,
-//RS         ),
-//RS         jet_semindex::SymbolKind::Trait => (
-//RS             "trait",
-//RS             Vec::new(),
-//RS             None,
-//RS             Vec::new(),
-//RS             Vec::new(),
-//RS             None,
-//RS             None,
-//RS             None,
-//RS         ),
-//RS         jet_semindex::SymbolKind::Tag => (
-//RS             "tag",
-//RS             Vec::new(),
-//RS             None,
-//RS             Vec::new(),
-//RS             Vec::new(),
-//RS             None,
-//RS             None,
-//RS             None,
-//RS         ),
-//RS         jet_semindex::SymbolKind::Type => (
-//RS             "type",
-//RS             Vec::new(),
-//RS             None,
-//RS             Vec::new(),
-//RS             Vec::new(),
-//RS             None,
-//RS             None,
-//RS             None,
-//RS         ),
-//RS         jet_semindex::SymbolKind::Const => (
-//RS             "const",
-//RS             Vec::new(),
-//RS             None,
-//RS             Vec::new(),
-//RS             Vec::new(),
-//RS             None,
-//RS             None,
-//RS             None,
-//RS         ),
-//RS         jet_semindex::SymbolKind::EnumVariant { parent } => (
-//RS             "enum_variant",
-//RS             Vec::new(),
-//RS             None,
-//RS             Vec::new(),
-//RS             Vec::new(),
-//RS             Some(parent.as_str()),
-//RS             None,
-//RS             None,
-//RS         ),
-//RS         jet_semindex::SymbolKind::Field { ty, parent } => (
-//RS             "field",
-//RS             Vec::new(),
-//RS             None,
-//RS             Vec::new(),
-//RS             Vec::new(),
-//RS             Some(parent.as_str()),
-//RS             None,
-//RS             Some(ty.as_str()),
-//RS         ),
-//RS         jet_semindex::SymbolKind::Local { mutable, ty } => (
-//RS             "local",
-//RS             Vec::new(),
-//RS             None,
-//RS             Vec::new(),
-//RS             Vec::new(),
-//RS             None,
-//RS             Some(*mutable),
-//RS             ty.as_deref(),
-//RS         ),
-//RS         jet_semindex::SymbolKind::Param { ty } => (
-//RS             "param",
-//RS             Vec::new(),
-//RS             None,
-//RS             Vec::new(),
-//RS             Vec::new(),
-//RS             None,
-//RS             None,
-//RS             Some(ty.as_str()),
-//RS         ),
-//RS     };
-//RS     ct_struct(
-//RS         "CompilerSymbolKind",
-//RS         vec![
-//RS             ("kind", CtValue::Str(kind_name.to_string())),
-//RS             ("params", CtValue::List(params)),
-//RS             ("ret", compiler_option_string(ret)),
-//RS             ("fields", CtValue::List(fields)),
-//RS             ("variants", compiler_string_list(variants)),
-//RS             ("parent", compiler_option_string(parent)),
-//RS             (
-//RS                 "mutable",
-//RS                 mutable.map_or(CtValue::absent(Type::Bool), |value| {
-//RS                     CtValue::Present(Box::new(CtValue::Bool(value)))
-//RS                 }),
-//RS             ),
-//RS             ("ty", compiler_option_string(ty)),
-//RS         ],
-//RS     )
-//RS }
-//RS 
-//RS fn compiler_view_source_value(source: &jet_semindex::ViewSourceFact) -> CtValue {
-//RS     let (kind, index, module, name) = match source {
-//RS         jet_semindex::ViewSourceFact::Receiver => ("receiver", None, None, None),
-//RS         jet_semindex::ViewSourceFact::Parameter(index) => ("parameter", Some(*index), None, None),
-//RS         jet_semindex::ViewSourceFact::Static { module_path, name } => (
-//RS             "static",
-//RS             None,
-//RS             Some(module_path.as_str()),
-//RS             Some(name.as_str()),
-//RS         ),
-//RS     };
-//RS     ct_struct(
-//RS         "CompilerViewSource",
-//RS         vec![
-//RS             ("kind", CtValue::Str(kind.to_string())),
-//RS             ("index", compiler_option_int(index)),
-//RS             ("module", compiler_option_string(module)),
-//RS             ("name", compiler_option_string(name)),
-//RS         ],
-//RS     )
-//RS }
-//RS 
-//RS fn compiler_view_projection_value(projection: &jet_semindex::ViewProjectionFact) -> CtValue {
-//RS     let (kind, name) = match projection {
-//RS         jet_semindex::ViewProjectionFact::Field(name) => ("field", Some(name.as_str())),
-//RS         jet_semindex::ViewProjectionFact::Index => ("index", None),
-//RS         jet_semindex::ViewProjectionFact::Range => ("range", None),
-//RS     };
-//RS     ct_struct(
-//RS         "CompilerViewProjection",
-//RS         vec![
-//RS             ("kind", CtValue::Str(kind.to_string())),
-//RS             ("name", compiler_option_string(name)),
-//RS         ],
-//RS     )
-//RS }
-//RS 
-//RS fn compiler_view_provenance_value(provenance: &jet_semindex::ViewProvenanceFact) -> CtValue {
-//RS     let sources = provenance
-//RS         .sources
-//RS         .iter()
-//RS         .map(|source| {
-//RS             ct_struct(
-//RS                 "CompilerViewSourcePath",
-//RS                 vec![
-//RS                     ("source", compiler_view_source_value(&source.source)),
-//RS                     (
-//RS                         "projections",
-//RS                         CtValue::List(
-//RS                             source
-//RS                                 .projections
-//RS                                 .iter()
-//RS                                 .map(compiler_view_projection_value)
-//RS                                 .collect(),
-//RS                         ),
-//RS                     ),
-//RS                 ],
-//RS             )
-//RS         })
-//RS         .collect();
-//RS     ct_struct(
-//RS         "CompilerViewProvenance",
-//RS         vec![
-//RS             (
-//RS                 "output_path",
-//RS                 compiler_string_list(provenance.output_path.clone()),
-//RS             ),
-//RS             ("sources", CtValue::List(sources)),
-//RS             ("mutable", CtValue::Bool(provenance.mutable)),
-//RS         ],
-//RS     )
-//RS }
-//RS 
-//RS fn compiler_state_node_value(node: &jet_semindex::StateNodeFact) -> CtValue {
-//RS     ct_struct(
-//RS         "CompilerStateNode",
-//RS         vec![
-//RS             ("name", CtValue::Str(node.name.clone())),
-//RS             ("terminal", CtValue::Bool(node.terminal)),
-//RS             (
-//RS                 "reachable",
-//RS                 node.reachable.map_or_else(
-//RS                     || CtValue::absent(Type::Bool),
-//RS                     |value| CtValue::Present(Box::new(CtValue::Bool(value))),
-//RS                 ),
-//RS             ),
-//RS             ("span", compiler_semantic_span(node.span)),
-//RS         ],
-//RS     )
-//RS }
-//RS 
-//RS fn compiler_state_transition_value(transition: &jet_semindex::StateTransitionFact) -> CtValue {
-//RS     ct_struct(
-//RS         "CompilerStateTransition",
-//RS         vec![
-//RS             ("operation", CtValue::Str(transition.operation.clone())),
-//RS             ("from", compiler_option_string(transition.from.as_deref())),
-//RS             ("to", CtValue::Str(transition.to.clone())),
-//RS         ],
-//RS     )
-//RS }
-//RS 
-//RS fn compiler_state_graph_value(graph: &jet_semindex::StateGraphFact) -> CtValue {
-//RS     ct_struct(
-//RS         "CompilerStateGraph",
-//RS         vec![
-//RS             ("owner", CtValue::Str(graph.owner.clone())),
-//RS             ("module", CtValue::Str(graph.module_path.clone())),
-//RS             (
-//RS                 "states",
-//RS                 CtValue::List(
-//RS                     graph
-//RS                         .states
-//RS                         .iter()
-//RS                         .map(compiler_state_node_value)
-//RS                         .collect(),
-//RS                 ),
-//RS             ),
-//RS             (
-//RS                 "transitions",
-//RS                 CtValue::List(
-//RS                     graph
-//RS                         .transitions
-//RS                         .iter()
-//RS                         .map(compiler_state_transition_value)
-//RS                         .collect(),
-//RS                 ),
-//RS             ),
-//RS         ],
-//RS     )
-//RS }
-//RS 
-//RS fn compiler_fact_declaration_value(
-//RS     declaration: &jet_foundation::Facts::FactDeclaration,
-//RS ) -> CtValue {
-//RS     ct_struct(
-//RS         "CompilerFactDeclaration",
-//RS         vec![
-//RS             ("kind", CtValue::Str(declaration.kind.name().to_string())),
-//RS             ("name", CtValue::Str(declaration.name.clone())),
-//RS             (
-//RS                 "members",
-//RS                 compiler_string_list(declaration.members.iter().cloned()),
-//RS             ),
-//RS             ("deny", compiler_string_list(declaration.deny.iter().cloned())),
-//RS             ("from", compiler_string_list(declaration.from.iter().cloned())),
-//RS         ],
-//RS     )
-//RS }
-//RS 
-//RS fn compiler_fact_registry_value(
-//RS     registry: &jet_foundation::Facts::FactRegistry,
-//RS ) -> CtValue {
-//RS     CtValue::List(
-//RS         registry
-//RS             .iter()
-//RS             .map(compiler_fact_declaration_value)
-//RS             .collect(),
-//RS     )
-//RS }
-//RS 
-//RS fn compiler_derivation_observation_value(
-//RS     observation: &jet_foundation::Facts::DerivationObservation,
-//RS ) -> CtValue {
-//RS     ct_struct(
-//RS         "CompilerDerivationObservation",
-//RS         vec![
-//RS             (
-//RS                 "counterexample",
-//RS                 compiler_option_string(observation.counterexample_id.as_deref()),
-//RS             ),
-//RS             (
-//RS                 "event",
-//RS                 compiler_option_string(observation.event_id.as_deref()),
-//RS             ),
-//RS         ],
-//RS     )
-//RS }
-//RS 
-//RS fn compiler_derivation_payload_value(
-//RS     payload: &jet_foundation::Facts::DerivationPayload,
-//RS ) -> CtValue {
-//RS     ct_struct(
-//RS         "CompilerDerivationPayload",
-//RS         vec![
-//RS             ("kind", CtValue::Str(payload.kind().to_string())),
-//RS             ("json", CtValue::Str(payload.to_json())),
-//RS         ],
-//RS     )
-//RS }
-//RS 
-//RS fn compiler_derivation_value(record: &jet_foundation::Facts::DerivationRecord) -> CtValue {
-//RS     ct_struct(
-//RS         "CompilerDerivationRecord",
-//RS         vec![
-//RS             ("id", CtValue::Str(record.id.clone())),
-//RS             ("subject", CtValue::Str(record.subject.clone())),
-//RS             ("claim", CtValue::Str(record.claim.clone())),
-//RS             ("producer", CtValue::Str(record.producer.clone())),
-//RS             (
-//RS                 "method",
-//RS                 CtValue::Str(record.method.as_str().to_string()),
-//RS             ),
-//RS             ("rule", CtValue::Str(record.rule.clone())),
-//RS             ("premises", compiler_string_list(record.premises.clone())),
-//RS             (
-//RS                 "identity",
-//RS                 ct_struct(
-//RS                     "CompilerDerivationIdentity",
-//RS                     vec![
-//RS                         ("source", CtValue::Str(record.identity.source.clone())),
-//RS                         ("build", CtValue::Str(record.identity.build.clone())),
-//RS                         ("run", CtValue::Str(record.identity.run.clone())),
-//RS                         ("target", CtValue::Str(record.identity.target.clone())),
-//RS                     ],
-//RS                 ),
-//RS             ),
-//RS             (
-//RS                 "assumptions",
-//RS                 compiler_string_list(record.assumptions.clone()),
-//RS             ),
-//RS             (
-//RS                 "disposition",
-//RS                 CtValue::Str(record.disposition.as_str().to_string()),
-//RS             ),
-//RS             (
-//RS                 "observation",
-//RS                 record.observation.as_ref().map_or_else(
-//RS                     || CtValue::absent(Type::Named("CompilerDerivationObservation".to_string())),
-//RS                     |value| {
-//RS                         CtValue::Present(Box::new(compiler_derivation_observation_value(value)))
-//RS                     },
-//RS                 ),
-//RS             ),
-//RS             (
-//RS                 "payload",
-//RS                 record.payload.as_ref().map_or_else(
-//RS                     || CtValue::absent(Type::Named("CompilerDerivationPayload".to_string())),
-//RS                     |value| CtValue::Present(Box::new(compiler_derivation_payload_value(value))),
-//RS                 ),
-//RS             ),
-//RS         ],
-//RS     )
-//RS }
-//RS 
-//RS 
-//RS fn compiler_definition_value(definition: &jet_semindex::SymbolDef) -> CtValue {
-//RS     ct_struct(
-//RS         "CompilerDefinition",
-//RS         vec![
-//RS             ("identity", CtValue::Str(definition.identity.clone())),
-//RS             ("name", CtValue::Str(definition.name.clone())),
-//RS             ("module", CtValue::Str(definition.module_path.clone())),
-//RS             ("span", compiler_semantic_span(definition.def_span)),
-//RS             ("kind", compiler_symbol_kind_value(&definition.kind)),
-//RS             (
-//RS                 "view_provenance",
-//RS                 CtValue::List(
-//RS                     definition
-//RS                         .view_provenance
-//RS                         .iter()
-//RS                         .map(compiler_view_provenance_value)
-//RS                         .collect(),
-//RS                 ),
-//RS             ),
-//RS         ],
-//RS     )
-//RS }
-//RS 
-//RS fn compiler_anchor_value(anchor: &jet_semindex::DefinitionAnchor) -> CtValue {
-//RS     ct_struct(
-//RS         "CompilerDefinitionAnchor",
-//RS         vec![
-//RS             ("module", CtValue::Str(anchor.module_path.clone())),
-//RS             ("kind", CtValue::Str(anchor.kind.clone())),
-//RS             (
-//RS                 "semantic_identity",
-//RS                 compiler_option_string(anchor.semantic_identity.as_deref()),
-//RS             ),
-//RS             ("span", compiler_semantic_span(anchor.def_span)),
-//RS         ],
-//RS     )
-//RS }
-//RS 
-//RS fn compiler_reference_value(reference: &jet_semindex::SymbolRef) -> CtValue {
-//RS     ct_struct(
-//RS         "CompilerReference",
-//RS         vec![
-//RS             ("name", CtValue::Str(reference.name.clone())),
-//RS             ("module", CtValue::Str(reference.module_path.clone())),
-//RS             (
-//RS                 "scope_identity",
-//RS                 compiler_option_string(reference.scope_identity.as_deref()),
-//RS             ),
-//RS             (
-//RS                 "target",
-//RS                 reference.target.as_ref().map_or(
-//RS                     CtValue::absent(Type::Named("CompilerDefinitionAnchor".to_string())),
-//RS                     |target| CtValue::Present(Box::new(compiler_anchor_value(target))),
-//RS                 ),
-//RS             ),
-//RS             ("span", compiler_semantic_span(reference.span)),
-//RS         ],
-//RS     )
-//RS }
-//RS 
-//RS fn compiler_call_value(call: &jet_semindex::CallEdge) -> CtValue {
-//RS     ct_struct(
-//RS         "CompilerCall",
-//RS         vec![
-//RS             ("caller", CtValue::Str(call.caller.clone())),
-//RS             ("callee", CtValue::Str(call.callee.clone())),
-//RS             ("module", CtValue::Str(call.module_path.clone())),
-//RS             ("span", compiler_semantic_span(call.call_span)),
-//RS         ],
-//RS     )
-//RS }
-//RS 
-//RS fn compiler_structural_node_value(node: &jet_semindex::StructuralNode) -> CtValue {
-//RS     ct_struct(
-//RS         "CompilerStructuralNode",
-//RS         vec![
-//RS             ("id", CtValue::Int(node.id as i64)),
-//RS             ("parent", compiler_option_int(node.parent)),
-//RS             ("slot", CtValue::Str(node.slot.clone())),
-//RS             (
-//RS                 "slot_kind",
-//RS                 CtValue::Str(
-//RS                     match node.slot_kind {
-//RS                         jet_semindex::StructuralSlotKind::Scalar => "scalar",
-//RS                         jet_semindex::StructuralSlotKind::List => "list",
-//RS                     }
-//RS                     .to_string(),
-//RS                 ),
-//RS             ),
-//RS             ("ordinal", CtValue::Int(node.ordinal as i64)),
-//RS             ("class", CtValue::Str(node.class.clone())),
-//RS             ("shape", CtValue::Str(node.shape.clone())),
-//RS             ("module", CtValue::Str(node.module_path.clone())),
-//RS             ("span", compiler_semantic_span(node.span)),
-//RS         ],
-//RS     )
-//RS }
-//RS 
-//RS struct SemIndexProgramIndex<'a> {
-//RS     index: &'a jet_semindex::SemIndex,
-//RS }
-//RS 
-//RS impl crate::Comptime::ProgramIndexView for SemIndexProgramIndex<'_> {
-//RS     fn definitions(&self) -> Vec<CtValue> {
-//RS         self.index
-//RS             .definitions()
-//RS             .iter()
-//RS             .map(compiler_definition_value)
-//RS             .collect()
-//RS     }
-//RS 
-//RS     fn references(&self) -> Vec<CtValue> {
-//RS         self.index
-//RS             .references()
-//RS             .iter()
-//RS             .map(compiler_reference_value)
-//RS             .collect()
-//RS     }
-//RS 
-//RS     fn call_edges(&self) -> Vec<CtValue> {
-//RS         self.index
-//RS             .call_edges()
-//RS             .iter()
-//RS             .map(compiler_call_value)
-//RS             .collect()
-//RS     }
-//RS 
-//RS     fn structural_nodes(&self) -> Vec<CtValue> {
-//RS         self.index
-//RS             .structural_nodes()
-//RS             .iter()
-//RS             .map(compiler_structural_node_value)
-//RS             .collect()
-//RS     }
-//RS }
-//RS 
-//RS pub(crate) fn program_info_value(
-//RS     bundle: &AST::ProgramBundle,
-//RS     effect_facts: &crate::Sema::SemIndexEffectFacts,
-//RS ) -> CtValue {
-//RS     let semantic_facts = crate::Driver::program_semantic_facts(bundle, effect_facts);
-//RS     let index = jet_semindex::from_checked(bundle, effect_facts);
-//RS     let view = SemIndexProgramIndex { index: &index };
-//RS     crate::Comptime::build_program_info_with_index(bundle, &semantic_facts, Some(&view))
-//RS }
-//RS 
-//RS fn compiler_effect_value(effect: &jet_semindex::EffectFact) -> CtValue {
-//RS     let provenance = effect
-//RS         .provenance
-//RS         .iter()
-//RS         .map(|origin| {
-//RS             ct_struct(
-//RS                 "CompilerEffectProvenance",
-//RS                 vec![
-//RS                     ("effect", CtValue::Str(origin.effect.clone())),
-//RS                     ("call_path", compiler_string_list(origin.call_path.clone())),
-//RS                     (
-//RS                         "spans",
-//RS                         CtValue::List(
-//RS                             origin
-//RS                                 .spans
-//RS                                 .iter()
-//RS                                 .copied()
-//RS                                 .map(compiler_semantic_span)
-// END-PORT-PENDING 2072 Source/Compiler.rs:1-1800
+// Public read-only front-end toolkit API (D-FRONTENDAPI1=A).
+use jet.Comptime
+use jet.Comptime.DevSink
+use jet.Diagnostics.[Diagnostic, Severity, Span]
+use jet.Lexer.[TokKind, Token]
+use jet.AST.[CtKey, CtReport, CtValue, Type]
+use jet.[Lexer, Parser, AST, Syntax, Loader, SHA256]
+use jet_foundation.Report.[StatusEnvelope, StatusFields, StatusValue]
+use jet_driver.Authority.[AuthorityError, AuthorityResolver, CheckedFile, CheckedPackage]
+use jet_driver.[Lock, Package]
+use jet_driver.Public as PackageModel
+use jet_env_model.ModuleEval.[evaluate_env_with_source_loader, SourceLoader, PackageProfileSpec, PackageProfileSet]
+// Rust: Source/Compiler.rs:15
+pub API_VERSION :: U32(1)
+// Rust: Source/Compiler.rs:16
+pub SCHEMA_VERSION :: U32(1)
+// Version 1: manifest is uncomposed; package is composed. Current package identity
+// belongs only to @build.package.name/version. Maps retain sorted key order,
+// model lists retain model order. URLs redact credentials and parameters; reads
+// use the pinned package-root authority. No fabricated per-field positions.
+// Rust: Source/Compiler.rs:36
+pub use jet_driver.Public.PACKAGE_MODEL_SCHEMA_VERSION
+// Rust: Source/Compiler.rs:38
+fn compiler_error_value(code: String, message: String, span: Span) -> CtValue {
+    ct_struct("CompilerError", [("code", CtValue.Str(code)), ("message", CtValue.Str(message)), ("span", span_value(span.into()))])
+}
+// Rust: Source/Compiler.rs:49
+fn compiler_package_error_value(error: PackageReadError) -> CtValue {
+    ct_struct("CompilerPackageError", [("code", CtValue.Str(error.code)), ("message", CtValue.Str(error.message)),
+        ("file", CtValue.Str(error.file)), ("cause", CtValue.Str(error.cause))])
+}
+// Rust: Source/Compiler.rs:61
+#Error
+pub struct PackageReadError {
+    pub code: String
+    pub message: String
+    pub file: String
+    pub cause: String
+}
+// Rust: Source/Compiler.rs:69
+impl PackageReadError {
+    // Rust: Source/Compiler.rs:70
+    pub fn new(code: String, file: String, message: String, cause: String) -> Self {
+        Self{code: code, message: message, file: file, cause: cause}
+    }
+}
+// Rust: Source/Compiler.rs:85
+pub use jet_driver.Public.[BuildProfileView, DependencyView, KeyValueView, LockView, LockedPackageView,
+    ManifestView, OutputView, PackageTargetView, PackageView, ProfileSetView, ProfileView, TargetProfileView]
+// Rust: Source/Compiler.rs:90
+fn package_read_error(file: String, message: String, cause: String) -> PackageReadError {
+    PackageReadError.new("E0956", file, message, cause)
+}
+// Rust: Source/Compiler.rs:98
+fn authority_reason(cause: AuthorityError) -> String {
+    if cause == {
+        .Missing(_) -> "authority input is missing; restore the required metadata and try again"
+        .ManifestParse{..} -> "package metadata is malformed; fix the metadata and try again"
+        .Io{operation, ..} -> "couldn't {operation} authority metadata; restore access and try again"
+        .Symlink(_) -> "authority input is a symlink; replace it with the expected file or directory"
+        .WrongKind{expected, actual, ..} -> "authority input is a {actual}, but the operation requires a {expected}"
+        .Escapes(_) -> "authority path escapes its root; use a relative path below the authority root"
+        .AmbiguousManifest(_) -> "the package has multiple manifest roots; keep only package.jet"
+        .RetiredManifest(_) -> "the retired manifest name is not accepted; use package.jet"
+        .WorkspaceAmbiguous(_) -> "workspace authority is declared in multiple files; keep one authority source"
+        .WorkspaceNoModule -> "the authority source has no workspace module; declare the workspace module"
+        .NestedMembers{..} -> "a member Package cannot declare another members list; keep membership at one level"
+        .Invalid{..} -> "authority metadata is invalid; fix the metadata fields and try again"
+        .Changed(_) -> "authority input changed during resolution; restore it and retry"
+        .Unsupported(_) -> "authority resolution is unavailable on this platform"
+    }
+}
+// Rust: Source/Compiler.rs:149
+fn authority_diagnostic(cause: AuthorityError) -> Diagnostic {
+    Diagnostic.error(cause.diagnostic().code, "authority input is unavailable", authority_reason(cause),
+        "restore the authority input and retry the operation", .None)
+}
+// Rust: Source/Compiler.rs:160
+fn authority_read_error(file: String, message: String, cause: AuthorityError) -> PackageReadError {
+    code :: cause.diagnostic().code
+    package_read_error(file, message, "{code}: {authority_reason(cause)}")
+}
+// Rust: Source/Compiler.rs:173
+fn diagnostic_cause(diagnostic: Diagnostic) -> String {
+    if diagnostic.detail == {
+        .Val(detail) -> "{diagnostic.code}: {diagnostic.what}; {detail}"
+        .None -> "{diagnostic.code}: {diagnostic.what}"
+    }
+}
+// Rust: Source/Compiler.rs:180
+fn inline_carrier_error(error: Package.InlinePackageError) -> PackageReadError {
+    code :: error.diagnostic().code
+    package_read_error(Syntax.PACKAGE_FILE, "could not read the inline package",
+        "{code}: inline Package carrier is malformed; fix the leading package block and try again")
+}
+// Rust: Source/Compiler.rs:191
+fn inline_parse_error(error: Package.PackageParseError) -> PackageReadError {
+    diagnostic :: jet_driver.Manifest.manifest_parse_diagnostic(OSPath.from(Syntax.PACKAGE_FILE), error)
+    package_read_error(Syntax.PACKAGE_FILE, "could not read the inline package", diagnostic_cause(diagnostic))
+}
+// Rust: Source/Compiler.rs:203
+fn inline_authority_error(carrier: CheckedFile, message: String, error: String) -> PackageReadError {
+    authority_read_error(Syntax.PACKAGE_FILE, message, AuthorityError.Invalid{path: carrier.path, detail: error.to_string()})
+}
+// Rust: Source/Compiler.rs:218
+fn checked_inline_package(resolver: AuthorityResolver) -> (CheckedFile, Package.Blocks.InlinePackageBlock, String)? PackageReadError! {
+    candidates :: [OSPath.from(Syntax.DEFAULT_ENTRY_FILE), OSPath.from("src").join(Syntax.DEFAULT_ENTRY_FILE)]
+    loop relative in candidates {
+        file :: if resolver.checked_file(relative) == {
+            .Ok(file) -> file
+            .Err(error) -> {
+                if error.is_missing() -> continue
+                return Err(authority_read_error(Syntax.PACKAGE_FILE, "could not read the inline package carrier", error))
+            }
+        }
+        record_checked_file(file)
+        source :: file.text().map_err(error -> authority_read_error(Syntax.PACKAGE_FILE,
+            "could not decode the inline package carrier", error))?
+        block :: Package.extract_inline_package(source).map_err(inline_carrier_error)?
+        resolver.revalidate_file(file).map_err(error -> authority_read_error(Syntax.PACKAGE_FILE,
+            "the inline package carrier changed while it was being read", error))?
+        if block == .Val(block) -> return Ok(.Val((file, block, source)))
+    }
+    Ok(.None)
+}
+// Rust: Source/Compiler.rs:267
+fn inline_package_facts(resolver: AuthorityResolver, carrier: CheckedFile, block: Package.Blocks.InlinePackageBlock,
+    source: String) -> Package.PackageFacts PackageReadError! {
+    facts := Package.PackageFacts.parse_uncomposed(block.body(source), carrier.path.display().to_string()).map_err(inline_parse_error)?
+    facts.compose_configs(resolver.root()).map_err(error -> inline_authority_error(carrier, "could not compose the inline package facts", error.to_string()))?
+    facts.validate_guarantees().map_err(error -> inline_authority_error(carrier, "could not validate the inline package facts", error.to_string()))?
+    facts.validate_defaults().map_err(error -> inline_authority_error(carrier, "could not validate the inline package defaults", error.to_string()))?
+    facts.validate_members_in(resolver.root()).map_err(error -> inline_authority_error(carrier, "could not validate the inline package members", error.to_string()))?
+    Ok(facts)
+}
+// Rust: Source/Compiler.rs:307
+fn record_inline_package_inputs(resolver: AuthorityResolver, carrier: CheckedFile, facts: Package.PackageFacts) -> Unit PackageReadError! {
+    record_checked_file(carrier)
+    loop path in facts.resolved_config_paths {
+        file :: resolver.checked_file(OSPath.from(path)).map_err(cause -> authority_read_error(Syntax.PACKAGE_FILE,
+            "could not revalidate an inline package configuration input", cause))?
+        record_checked_file(file)
+    }
+    Ok(())
+}
+// Rust: Source/Compiler.rs:326
+fn record_checked_file(file: CheckedFile) -> Unit {
+    // GATE #4494: native path separator and checked descriptor bytes.
+    path :: file.relative.to_string_lossy().replace(std.path.MAIN_SEPARATOR, "/")
+    Comptime.record_package_input(path, SHA256.sha256_hex(file.bytes))
+}
+// Rust: Source/Compiler.rs:334
+fn record_checked_package_inputs(resolver: AuthorityResolver, package: CheckedPackage) -> Unit PackageReadError! {
+    record_checked_file(package.member.manifest.file)
+    loop path in package.facts.resolved_config_paths {
+        file :: resolver.checked_file(OSPath.from(path)).map_err(cause -> authority_read_error(path,
+            "could not revalidate a package configuration input", cause))?
+        record_checked_file(file)
+    }
+    Ok(())
+}
+// Rust: Source/Compiler.rs:352
+fn profile_view(profile: PackageProfileSpec) -> ProfileView {
+    ProfileView.from_parts(profile.name, profile.extends, profile.packages,
+        profile.collisions.keys().sorted().map(key -> (key, profile.collisions[key])).collect(), profile.sources)
+}
+// Rust: Source/Compiler.rs:365
+fn profile_set_view(profiles: PackageProfileSet) -> ProfileSetView {
+    ProfileSetView.from_profiles(profiles.profiles.keys().sorted().map(key -> profile_view(profiles.profiles[key])).collect())
+}
+// Rust: Source/Compiler.rs:369
+pub fn read_manifest(root: OSPath) -> ManifestView PackageReadError! {
+    resolver :: AuthorityResolver.open(root).map_err(cause -> authority_read_error(Syntax.PACKAGE_FILE,
+        "could not open the pinned package root", cause))?
+    if resolver.checked_manifest(OSPath.from(".")) == {
+        .Ok(manifest) -> {
+            record_checked_file(manifest.file)
+            Ok(PackageModel.manifest_view_from_facts(manifest.facts))
+        }
+        .Err(cause) -> {
+            if !cause.is_missing() -> return Err(authority_read_error(Syntax.PACKAGE_FILE, "could not read the package manifest", cause))
+            inline :: checked_inline_package(resolver)?
+            if inline == .Val((carrier, block, source)) {
+                facts :: Package.PackageFacts.parse_uncomposed(block.body(source), carrier.path.display().to_string()).map_err(inline_parse_error)?
+                return Ok(PackageModel.manifest_view_from_facts(facts))
+            }
+            Err(package_read_error(Syntax.PACKAGE_FILE, "could not read the package manifest", "no package manifest or inline Package carrier was found"))
+        }
+    }
+}
+// Rust: Source/Compiler.rs:405
+pub fn read_package(root: OSPath) -> PackageView PackageReadError! {
+    resolver :: AuthorityResolver.open(root).map_err(cause -> authority_read_error(Syntax.PACKAGE_FILE,
+        "could not open the pinned package root", cause))?
+    if resolver.checked_root_package() == {
+        .Ok(package) -> {
+            record_checked_package_inputs(resolver, package)?
+            Ok(PackageModel.package_view_from_facts(package.facts))
+        }
+        .Err(cause) -> {
+            if !cause.is_missing() -> return Err(authority_read_error(Syntax.PACKAGE_FILE, "could not compose the package facts", cause))
+            inline :: checked_inline_package(resolver)?
+            if inline == .Val((carrier, block, source)) {
+                facts :: inline_package_facts(resolver, carrier, block, source)?
+                record_inline_package_inputs(resolver, carrier, facts)?
+                return Ok(PackageModel.package_view_from_facts(facts))
+            }
+            Err(package_read_error(Syntax.PACKAGE_FILE, "could not compose the package facts", "no package manifest or inline Package carrier was found"))
+        }
+    }
+}
+// Rust: Source/Compiler.rs:438
+pub fn read_lock(root: OSPath) -> LockView PackageReadError! {
+    resolver :: AuthorityResolver.open(root).map_err(cause -> authority_read_error(Syntax.UNIFIED_LOCK_FILE,
+        "could not open the pinned package root", cause))?
+    file :: resolver.checked_file(OSPath.from(Syntax.UNIFIED_LOCK_FILE)).map_err(cause -> authority_read_error(Syntax.UNIFIED_LOCK_FILE,
+        "could not read the package lock", cause))?
+    record_checked_file(file)
+    text :: file.text().map_err(cause -> authority_read_error(Syntax.UNIFIED_LOCK_FILE, "could not decode the package lock", cause))?
+    lock :: Lock.parse(text).map_err(cause -> package_read_error(Syntax.UNIFIED_LOCK_FILE, "could not parse the package lock", cause))?
+    resolver.revalidate_file(file).map_err(cause -> authority_read_error(Syntax.UNIFIED_LOCK_FILE,
+        "the package lock changed while it was being read", cause))?
+    Ok(PackageModel.lock_view_from_lock(lock))
+}
+// Rust: Source/Compiler.rs:480
+struct PackageSourceLoader {
+    resolver: AuthorityResolver
+    checked_inputs: [CheckedFile]
+    last_file: String
+}
+// Rust: Source/Compiler.rs:486
+impl SourceLoader for PackageSourceLoader {
+    // Rust: Source/Compiler.rs:487
+    fn read_file(&self, relative: OSPath) -> String Diagnostic! {
+        // GATE #4494: native path separator.
+        self.last_file = relative.to_string_lossy().replace(std.path.MAIN_SEPARATOR, "/")
+        file :: self.resolver.checked_file(relative).map_err(authority_diagnostic)?
+        record_checked_file(file)
+        text :: file.text().map_err(authority_diagnostic)?
+        self.checked_inputs.push(file)
+        Ok(text)
+    }
+    // Rust: Source/Compiler.rs:501
+    fn list_jet_files(&self, relative: OSPath) -> [OSPath] Diagnostic! {
+        // GATE #4494: native path separator.
+        self.last_file = relative.to_string_lossy().replace(std.path.MAIN_SEPARATOR, "/")
+        files :: self.resolver.discover_files(relative, .Val(Syntax.FILE_EXT)).map_err(authority_diagnostic)?
+        loop file in files -> record_checked_file(file)
+        self.checked_inputs.extend(files)
+        Ok(files.iter().map(file -> file.relative).collect())
+    }
+    // Rust: Source/Compiler.rs:516
+    fn package_facts(&self) -> Package.PackageFacts? Diagnostic! {
+        self.last_file = Syntax.PACKAGE_FILE
+        if self.resolver.checked_root_package() == {
+            .Ok(package) -> {
+                record_checked_package_inputs(self.resolver, package).map_err(error -> Diagnostic.error(error.code,
+                    error.message, error.cause, "restore the package inputs and try again", .None))?
+                Ok(.Val(package.facts))
+            }
+            .Err(error) -> {
+                if !error.is_missing() -> return Err(error.diagnostic())
+                facts :: Loader.package_facts_for_root(self.resolver.root()).map_err(diagnostics -> {
+                    diagnostics.pop().unwrap_or_else(() -> Diagnostic.error("E1206", "package context is unavailable",
+                        "the inline package facts could not be loaded", "restore the package source and try again", .None))
+                })?
+                Ok(facts)
+            }
+        }
+    }
+}
+// Rust: Source/Compiler.rs:552
+pub fn read_profiles(root: OSPath) -> ProfileSetView PackageReadError! {
+    resolver :: AuthorityResolver.open(root).map_err(cause -> authority_read_error(Syntax.ENV_FILE, "could not open the pinned package root", cause))?
+    env_file :: resolver.checked_file(OSPath.from(Syntax.ENV_FILE)).map_err(cause -> authority_read_error(Syntax.ENV_FILE, "could not read the profile source", cause))?
+    record_checked_file(env_file)
+    source :: env_file.text().map_err(cause -> authority_read_error(Syntax.ENV_FILE, "could not decode the profile source", cause))?
+    base_dir :: resolver.root().to_path_buf()
+    loader := PackageSourceLoader{resolver: resolver, checked_inputs: [env_file], last_file: Syntax.ENV_FILE}
+    plan :: evaluate_env_with_source_loader(source, base_dir, &loader, .None, .None).map_err(cause ->
+        package_read_error(loader.last_file, "could not evaluate the profile source", diagnostic_cause(cause)))?
+    loop file in loader.checked_inputs {
+        // GATE #4494: native path separator.
+        file_name :: file.relative.to_string_lossy().replace(std.path.MAIN_SEPARATOR, "/")
+        loader.resolver.revalidate_file(file).map_err(cause -> authority_read_error(file_name,
+            "a profile input changed while it was being read", cause))?
+    }
+    profiles := PackageProfileSet.default()
+    loop profile in plan.package_profiles {
+        profiles.insert_checked(profile).map_err(cause -> package_read_error(Syntax.ENV_FILE, "could not compose the profile set", cause.to_string()))?
+    }
+    Ok(profile_set_view(profiles))
+}
+
+// Rust: Source/Compiler.rs:619
+fn optional_string(value: String?) -> CtValue { compiler_option_string(value) }
+// Rust: Source/Compiler.rs:623
+fn target_value(targets: [TargetProfileView]) -> CtValue {
+    // A scalar cannot choose among multiple named target profiles.
+    if targets.len() == 1 -> optional_string(.Val(targets[0].name)) else -> optional_string(.None)
+}
+// Rust: Source/Compiler.rs:632
+fn dependency_value(dependency: DependencyView) -> CtValue {
+    ct_struct("CompilerDependency", [("name", CtValue.Str(dependency.name)), ("source", CtValue.Str(dependency.source))])
+}
+// Rust: Source/Compiler.rs:642
+fn package_target_value(package: PackageTargetView) -> CtValue {
+    ct_struct("CompilerPackageTarget", [("name", CtValue.Str(package.name)), ("targets", compiler_string_list(package.targets))])
+}
+// Rust: Source/Compiler.rs:652
+fn output_value(output: OutputView) -> CtValue {
+    ct_struct("CompilerPackageOutput", [("name", CtValue.Str(output.name)), ("kind", CtValue.Str(output.kind)),
+        ("entry", optional_string(output.entry))])
+}
+// Rust: Source/Compiler.rs:663
+fn build_profile_value(profile: BuildProfileView) -> CtValue {
+    ct_struct("CompilerBuildProfile", [("name", CtValue.Str(profile.name)), ("optimize", CtValue.Str(profile.optimize)),
+        ("debug_info", CtValue.Bool(profile.debug_info)), ("small", CtValue.Bool(profile.small)), ("panic", optional_string(profile.panic))])
+}
+// Rust: Source/Compiler.rs:676
+fn manifest_value(view: ManifestView) -> CtValue {
+    ct_struct("CompilerManifest", [
+        ("schema_version", CtValue.Int(I64(view.schema_version))), ("file", CtValue.Str(view.file)),
+        ("jet", optional_string(view.jet)), ("edition", optional_string(view.edition)), ("description", optional_string(view.description)),
+        ("license", optional_string(view.license)), ("repository", optional_string(view.repository)), ("layer", optional_string(view.layer)),
+        ("target", target_value(view.targets)), ("dependencies", CtValue.List(view.dependencies.iter().map(dependency_value).collect())),
+        ("packages", CtValue.List(view.packages.iter().map(package_target_value).collect())),
+        ("outputs", CtValue.List(view.outputs.iter().map(output_value).collect())),
+        ("build_profiles", CtValue.List(view.build_profiles.iter().map(build_profile_value).collect()))
+    ])
+}
+// Rust: Source/Compiler.rs:717
+fn package_value(view: PackageView) -> CtValue {
+    ct_struct("CompilerPackage", [
+        ("schema_version", CtValue.Int(I64(view.schema_version))), ("file", CtValue.Str(view.file)),
+        ("jet", optional_string(view.jet)), ("edition", optional_string(view.edition)), ("description", optional_string(view.description)),
+        ("license", optional_string(view.license)), ("repository", optional_string(view.repository)), ("layer", optional_string(view.layer)),
+        ("target", target_value(view.targets)), ("dependencies", CtValue.List(view.dependencies.iter().map(dependency_value).collect())),
+        ("packages", CtValue.List(view.packages.iter().map(package_target_value).collect())),
+        ("outputs", CtValue.List(view.outputs.iter().map(output_value).collect())),
+        ("build_profiles", CtValue.List(view.build_profiles.iter().map(build_profile_value).collect()))
+    ])
+}
+// Rust: Source/Compiler.rs:758
+fn locked_package_value(package: LockedPackageView) -> CtValue {
+    ct_struct("CompilerLockedPackage", [("name", CtValue.Str(package.name)), ("version", CtValue.Str(package.version)),
+        ("source_kind", CtValue.Str(package.source_kind)), ("source", optional_string(package.source)),
+        ("revision", optional_string(package.revision)), ("fingerprint", CtValue.Str(package.fingerprint)),
+        ("content_hash", optional_string(package.content_hash)), ("dependencies", compiler_string_list(package.dependencies)),
+        ("layer", optional_string(package.layer)), ("inferred_layer", optional_string(package.inferred_layer))])
+}
+// Rust: Source/Compiler.rs:785
+fn key_value_value(value: KeyValueView) -> CtValue {
+    ct_struct("CompilerKeyValue", [("key", CtValue.Str(value.key)), ("value", CtValue.Str(value.value))])
+}
+// Rust: Source/Compiler.rs:795
+fn profile_value(profile: ProfileView) -> CtValue {
+    ct_struct("CompilerProfile", [("name", CtValue.Str(profile.name)), ("extends", compiler_string_list(profile.extends)),
+        ("packages", compiler_string_list(profile.packages)), ("collisions", CtValue.List(profile.collisions.iter().map(key_value_value).collect())),
+        ("sources", compiler_string_list(profile.sources))])
+}
+// Rust: Source/Compiler.rs:811
+fn lock_value(view: LockView) -> CtValue {
+    ct_struct("CompilerLock", [("schema_version", CtValue.Int(I64(view.schema_version))), ("file", CtValue.Str(view.file)),
+        ("version", CtValue.Int(I64(view.version))), ("root_dependencies", compiler_string_list(view.root_dependencies)),
+        ("packages", CtValue.List(view.packages.iter().map(locked_package_value).collect()))])
+}
+// Rust: Source/Compiler.rs:833
+fn profile_set_value(view: ProfileSetView) -> CtValue {
+    ct_struct("CompilerProfileSet", [("schema_version", CtValue.Int(I64(view.schema_version))), ("file", CtValue.Str(view.file)),
+        ("profiles", CtValue.List(view.profiles.iter().map(profile_value).collect()))])
+}
+// D-FRONTENDAPI1=A: decline other Core modules; preserve ordinary evaluation.
+// Rust: Source/Compiler.rs:854
+pub fn eval_core_call(module: String, method: String, args: [CtValue], span: Span) -> (CtValue Diagnostic!)? {
+    eval_core_call_with_type(module, method, args, span, .None, .None)
+}
+// Ambient variant carries resolved return type for typed absence payloads.
+// Rust: Source/Compiler.rs:866
+pub fn eval_core_call_with_type(module: String, method: String, args: [CtValue], span: Span,
+    _resolved_ret: Type?, _sink: DevSink?) -> (CtValue Diagnostic!)? {
+    if module == "core.build" {
+        result :: if (method, args.as_slice()) == {
+            ("graph", [plan]) -> Comptime.Build.eval_build_graph(plan, span)
+            ("receipt_diff", [before, after]) -> Comptime.Build.eval_build_receipt_diff(before, after, span)
+            else -> Err(Diagnostic.error("E3502", "unsupported core.build operation `{method}`",
+                "core.build exposes only the checked graph and receipt diff queries",
+                "call `core.build.graph` with one BuildPlan or `core.build.receipt_diff` with two BuildGraph values", .Val(span)))
+        }
+        return .Val(result)
+    }
+    if module != "core.compiler" -> return .None
+    if method == "manifest" || method == "package" || method == "lock" || method == "profiles" {
+        if !args.is_empty() {
+            return .Val(Ok(CtValue.failed(compiler_package_error_value(PackageReadError.new("E0956", "",
+                "`core.compiler.{method}` takes no arguments",
+                "call the package view from `fn build` or a comptime binding without a path argument")))))
+        }
+        root_option :: Comptime.package_read_root()
+        if root_option.is_none() {
+            return .Val(Ok(CtValue.failed(compiler_package_error_value(PackageReadError.new("E0956", "",
+                "`core.compiler.{method}` is available only during package-aware compile-time evaluation",
+                "call the package view from `fn build` or a comptime binding; the compiler pins the package root for you")))))
+        }
+        root :: root_option.unwrap()
+        result :: if method == {
+            "manifest" -> read_manifest(root).map(manifest_value)
+            "package" -> read_package(root).map(package_value)
+            "lock" -> read_lock(root).map(lock_value)
+            "profiles" -> read_profiles(root).map(profile_set_value)
+            else -> Err(package_read_error("", "unknown package view operation",
+                "the compiler package view dispatcher received an unsupported operation"))
+        }
+        return .Val(Ok(if result == {
+            .Ok(value) -> CtValue.Present(value)
+            .Err(error) -> CtValue.failed(compiler_package_error_value(error))
+        }))
+    }
+    source :: if args.first() == {
+        .Val(.Str(source)) if args.len() == 1 && method != "check" -> source
+        .Val(.Struct{type_name, fields}) if args.len() == 1 && method == "check" && type_name == "CompilerSyntaxTree" -> {
+            // Preserve the first named source field, even if its value is not text.
+            source_field :: fields.iter().find(pair -> pair.0 == "source").and_then(pair ->
+                if pair.1 == { .Str(source) -> .Val(source), else -> .None })
+            if source_field == {
+                .Val(source) -> source
+                .None -> return .Val(Ok(CtValue.failed(compiler_error_value("E0956",
+                    "`core.compiler.check` needs a parsed syntax tree with its source", span))))
+            }
+        }
+        else -> {
+            message :: if method == "check" -> "`core.compiler.check` expects one CompilerSyntaxTree"
+                else -> "`core.compiler.{method}` expects one source String"
+            return .Val(Ok(CtValue.failed(compiler_error_value("E0956", message, span))))
+        }
+    }
+    if method == "check" {
+        fields :: if args.first() == {
+            .Val(.Struct{fields, ..}) -> fields
+            else -> unreachable("check input was validated above")
+        }
+        schema :: fields.iter().find(pair -> pair.0 == "schema_version").map(pair -> pair.1)
+        valid :: if schema == { .Val(.Int(value)) -> value == I64(SCHEMA_VERSION), else -> false }
+        if !valid {
+            got :: schema.and_then(value -> if value == { .Int(value) -> .Val(value), else -> .None })
+                .map_or_else(() -> "missing", value -> value.to_string())
+            return .Val(Ok(CtValue.failed(compiler_error_value("E0956",
+                "unsupported CompilerSyntaxTree schema version {got}", span))))
+        }
+    }
+    value :: if method == {
+        "lex" -> lexed_value(lex_source(source))
+        "parse" -> syntax_tree_value(parse_source(source))
+        "check" -> checked_value(source)
+        "source_map" -> source_map_value(source_map_from_generated_rust(source))
+        else -> return .Val(Ok(CtValue.failed(compiler_error_value("E0956", "unknown `core.compiler` operation `{method}`", span))))
+    }
+    .Val(Ok(CtValue.Present(value)))
+}
+// Rust: Source/Compiler.rs:1003
+fn ct_struct(type_name: String, fields: [(String, CtValue)]) -> CtValue {
+    CtValue.Struct{type_name: type_name, fields: fields}
+}
+// Rust: Source/Compiler.rs:1013
+fn span_value(range: TextRange) -> CtValue {
+    ct_struct(Syntax.TYPE_SOURCE_SPAN, [("start", CtValue.Int(I64(range.start))), ("end", CtValue.Int(I64(range.end)))])
+}
+// Rust: Source/Compiler.rs:1023
+fn optional_span(range: TextRange?) -> CtValue {
+    range.map_or(CtValue.absent(Type.Named(Syntax.TYPE_SOURCE_SPAN)), range -> CtValue.Present(span_value(range)))
+}
+// Rust: Source/Compiler.rs:1030
+fn diagnostic_value(diagnostic: DiagnosticView) -> CtValue {
+    severity :: if diagnostic.severity == { .Error -> "error", .Lint -> "lint" }
+    ct_struct("CompilerDiagnostic", [("code", CtValue.Str(diagnostic.code)), ("severity", CtValue.Str(severity)),
+        ("message", CtValue.Str(diagnostic.message)), ("why", CtValue.Str(diagnostic.why)), ("fix", CtValue.Str(diagnostic.fix)),
+        ("span", optional_span(diagnostic.span))])
+}
+// Rust: Source/Compiler.rs:1050
+fn lexed_value(lexed: LexedSource) -> CtValue {
+    ct_struct("CompilerLexed", [("schema_version", CtValue.Int(I64(SCHEMA_VERSION))), ("source", CtValue.Str(lexed.source)),
+        ("tokens", CtValue.List(lexed.tokens.iter().map(token -> ct_struct("CompilerToken", [
+            ("kind", CtValue.Str(token.kind.to_string())), ("text", CtValue.Str(token.text)), ("span", span_value(token.span))
+        ])).collect())), ("diagnostics", CtValue.List(lexed.diagnostics.iter().map(diagnostic_value).collect()))])
+}
+
+// Rust: Source/Compiler.rs:1085
+fn syntax_node_value(node: SyntaxNode) -> CtValue {
+    kind :: if node.kind == {
+        .Function -> "function"
+        .Struct -> "struct"
+        .Enum -> "enum"
+        .Trait -> "trait"
+        .Tag -> "tag"
+        .Effect -> "effect"
+        .Impl -> "impl"
+        .Const -> "const"
+        .Test -> "test"
+        .ExternRust -> "extern_rust"
+        .Module -> "module"
+        .CModule -> "c_module"
+        .CodeModule -> "code_module"
+        .ErrorConversion -> "error_conversion"
+        .Migration -> "migration"
+        .State -> "state"
+        .Protocol -> "protocol"
+        .Derive -> "derive"
+        .GenericModule -> "generic_module"
+        .ModuleAlias -> "module_alias"
+        .Distinct -> "distinct"
+        .TypeAlias -> "type_alias"
+        .UnitFamily -> "unit_family"
+        .Marker -> "marker"
+        .Fact -> "fact"
+        .TemplateLoop -> "template_loop"
+    }
+    ct_struct("CompilerNode", [("kind", CtValue.Str(kind)), ("name", compiler_option_string(node.name)), ("span", span_value(node.span))])
+}
+// Rust: Source/Compiler.rs:1131
+fn syntax_tree_value(tree: SyntaxTree) -> CtValue {
+    ct_struct("CompilerSyntaxTree", [("schema_version", CtValue.Int(I64(SCHEMA_VERSION))), ("source", CtValue.Str(tree.source)),
+        ("items", CtValue.List(tree.items.iter().map(syntax_node_value).collect())),
+        ("diagnostics", CtValue.List(tree.diagnostics.iter().map(diagnostic_value).collect()))])
+}
+// Rust: Source/Compiler.rs:1149
+fn compiler_function_value(node: SyntaxNode) -> CtValue {
+    name :: node.name.unwrap_or_default()
+    ct_struct("FunctionInfo", [("name", CtValue.Str(name)), ("module", CtValue.Str("core.compiler")),
+        ("identity", CtValue.Str("core.compiler::{name}")), ("params", CtValue.List([])), ("span", span_value(node.span)),
+        ("effects", ct_struct("EffectInfo", [("values", CtValue.List([]))])), ("reaches_panic", CtValue.Bool(false)),
+        ("arithmetic", CtValue.List([]))])
+}
+// Rust: Source/Compiler.rs:1169
+fn field_value(value: CtValue, name: String) -> CtValue? {
+    if value == { .Struct{fields, ..} -> fields.iter().find(pair -> pair.0 == name).map(pair -> pair.1), else -> .None }
+}
+// Rust: Source/Compiler.rs:1179
+fn effect_info_value(values: [String]) -> CtValue { ct_struct("EffectInfo", [("values", compiler_string_list(values))]) }
+// Rust: Source/Compiler.rs:1189
+fn compiler_option_string(value: String?) -> CtValue {
+    value.map_or(CtValue.absent(Type.String), value -> CtValue.Present(CtValue.Str(value)))
+}
+// Rust: Source/Compiler.rs:1195
+fn compiler_option_int(value: USize?) -> CtValue {
+    value.map_or(CtValue.absent(Type.Int), value -> CtValue.Present(CtValue.Int(I64(value))))
+}
+// Rust: Source/Compiler.rs:1201
+fn compiler_string_list(values: [String]) -> CtValue { CtValue.List(values.into_iter().map(CtValue.Str).collect()) }
+// Rust: Source/Compiler.rs:1205
+fn compiler_semantic_span(span: jet_semindex.SourceSpan) -> CtValue { span_value(TextRange{start: span.start, end: span.end}) }
+// Rust: Source/Compiler.rs:1212
+fn compiler_arithmetic_value(value: jet_semindex.ArithmeticOperationFact) -> CtValue {
+    ct_struct("CompilerArithmeticOperation", [("operation", CtValue.Str(value.operation)), ("policy", CtValue.Str(value.policy)),
+        ("module", CtValue.Str(value.module_path)), ("operation_span", compiler_semantic_span(value.operation_span)),
+        ("scope_span", compiler_semantic_span(value.scope_span))])
+}
+// Rust: Source/Compiler.rs:1228
+fn compiler_symbol_kind_value(kind: jet_semindex.SymbolKind) -> CtValue {
+    (kind_name, params, ret, fields, variants, parent, mutable, ty) :: if kind == {
+        .Module -> ("module", [], .None, [], [], .None, .None, .None)
+        .Function{params, ret, ..} -> ("function", params.iter().map(pair -> ct_struct("CompilerParam",
+            [("name", CtValue.Str(pair.0)), ("ty", CtValue.Str(pair.1))])).collect(), ret, [], [], .None, .None, .None)
+        .Struct{fields} -> ("struct", [], .None, fields.iter().map(pair -> ct_struct("CompilerField",
+            [("name", CtValue.Str(pair.0)), ("ty", CtValue.Str(pair.1))])).collect(), [], .None, .None, .None)
+        .Enum{variants} -> ("enum", [], .None, [], variants, .None, .None, .None)
+        .Trait -> ("trait", [], .None, [], [], .None, .None, .None)
+        .Tag -> ("tag", [], .None, [], [], .None, .None, .None)
+        .Type -> ("type", [], .None, [], [], .None, .None, .None)
+        .Const -> ("const", [], .None, [], [], .None, .None, .None)
+        .EnumVariant{parent} -> ("enum_variant", [], .None, [], [], .Val(parent), .None, .None)
+        .Field{ty, parent} -> ("field", [], .None, [], [], .Val(parent), .None, .Val(ty))
+        .Local{mutable, ty} -> ("local", [], .None, [], [], .None, .Val(mutable), ty)
+        .Param{ty} -> ("param", [], .None, [], [], .None, .None, .Val(ty))
+    }
+    ct_struct("CompilerSymbolKind", [("kind", CtValue.Str(kind_name)), ("params", CtValue.List(params)),
+        ("ret", compiler_option_string(ret)), ("fields", CtValue.List(fields)), ("variants", compiler_string_list(variants)),
+        ("parent", compiler_option_string(parent)), ("mutable", mutable.map_or(CtValue.absent(Type.Bool),
+            value -> CtValue.Present(CtValue.Bool(value)))), ("ty", compiler_option_string(ty))])
+}
+// Rust: Source/Compiler.rs:1393
+fn compiler_view_source_value(source: jet_semindex.ViewSourceFact) -> CtValue {
+    (kind, index, module, name) :: if source == {
+        .Receiver -> ("receiver", .None, .None, .None)
+        .Parameter(index) -> ("parameter", .Val(index), .None, .None)
+        .Static{module_path, name} -> ("static", .None, .Val(module_path), .Val(name))
+    }
+    ct_struct("CompilerViewSource", [("kind", CtValue.Str(kind)), ("index", compiler_option_int(index)),
+        ("module", compiler_option_string(module)), ("name", compiler_option_string(name))])
+}
+// Rust: Source/Compiler.rs:1415
+fn compiler_view_projection_value(projection: jet_semindex.ViewProjectionFact) -> CtValue {
+    (kind, name) :: if projection == { .Field(name) -> ("field", .Val(name)), .Index -> ("index", .None), .Range -> ("range", .None) }
+    ct_struct("CompilerViewProjection", [("kind", CtValue.Str(kind)), ("name", compiler_option_string(name))])
+}
+// Rust: Source/Compiler.rs:1430
+fn compiler_view_provenance_value(provenance: jet_semindex.ViewProvenanceFact) -> CtValue {
+    sources :: provenance.sources.iter().map(source -> ct_struct("CompilerViewSourcePath", [
+        ("source", compiler_view_source_value(source.source)),
+        ("projections", CtValue.List(source.projections.iter().map(compiler_view_projection_value).collect()))
+    ])).collect()
+    ct_struct("CompilerViewProvenance", [("output_path", compiler_string_list(provenance.output_path)),
+        ("sources", CtValue.List(sources)), ("mutable", CtValue.Bool(provenance.mutable))])
+}
+// Rust: Source/Compiler.rs:1466
+fn compiler_state_node_value(node: jet_semindex.StateNodeFact) -> CtValue {
+    ct_struct("CompilerStateNode", [("name", CtValue.Str(node.name)), ("terminal", CtValue.Bool(node.terminal)),
+        ("reachable", node.reachable.map_or_else(() -> CtValue.absent(Type.Bool), value -> CtValue.Present(CtValue.Bool(value)))),
+        ("span", compiler_semantic_span(node.span))])
+}
+// Rust: Source/Compiler.rs:1484
+fn compiler_state_transition_value(transition: jet_semindex.StateTransitionFact) -> CtValue {
+    ct_struct("CompilerStateTransition", [("operation", CtValue.Str(transition.operation)),
+        ("from", compiler_option_string(transition.from)), ("to", CtValue.Str(transition.to))])
+}
+// Rust: Source/Compiler.rs:1495
+fn compiler_state_graph_value(graph: jet_semindex.StateGraphFact) -> CtValue {
+    ct_struct("CompilerStateGraph", [("owner", CtValue.Str(graph.owner)), ("module", CtValue.Str(graph.module_path)),
+        ("states", CtValue.List(graph.states.iter().map(compiler_state_node_value).collect())),
+        ("transitions", CtValue.List(graph.transitions.iter().map(compiler_state_transition_value).collect()))])
+}
+// Rust: Source/Compiler.rs:1525
+fn compiler_fact_declaration_value(declaration: jet_foundation.Facts.FactDeclaration) -> CtValue {
+    ct_struct("CompilerFactDeclaration", [("kind", CtValue.Str(declaration.kind.name().to_string())), ("name", CtValue.Str(declaration.name)),
+        ("members", compiler_string_list(declaration.members.iter().cloned().collect())),
+        ("deny", compiler_string_list(declaration.deny.iter().cloned().collect())),
+        ("from", compiler_string_list(declaration.from.iter().cloned().collect()))])
+}
+// Rust: Source/Compiler.rs:1543
+fn compiler_fact_registry_value(registry: jet_foundation.Facts.FactRegistry) -> CtValue {
+    CtValue.List(registry.iter().map(compiler_fact_declaration_value).collect())
+}
+// Rust: Source/Compiler.rs:1554
+fn compiler_derivation_observation_value(observation: jet_foundation.Facts.DerivationObservation) -> CtValue {
+    ct_struct("CompilerDerivationObservation", [("counterexample", compiler_option_string(observation.counterexample_id)),
+        ("event", compiler_option_string(observation.event_id))])
+}
+// Rust: Source/Compiler.rs:1572
+fn compiler_derivation_payload_value(payload: jet_foundation.Facts.DerivationPayload) -> CtValue {
+    ct_struct("CompilerDerivationPayload", [("kind", CtValue.Str(payload.kind().to_string())), ("json", CtValue.Str(payload.to_json()))])
+}
+
+// Rust: Source/Compiler.rs:1582
+fn compiler_derivation_value(record: jet_foundation.Facts.DerivationRecord) -> CtValue {
+    ct_struct("CompilerDerivationRecord", [("id", CtValue.Str(record.id)), ("subject", CtValue.Str(record.subject)),
+        ("claim", CtValue.Str(record.claim)), ("producer", CtValue.Str(record.producer)),
+        ("method", CtValue.Str(record.method.as_str().to_string())), ("rule", CtValue.Str(record.rule)),
+        ("premises", compiler_string_list(record.premises)),
+        ("identity", ct_struct("CompilerDerivationIdentity", [("source", CtValue.Str(record.identity.source)),
+            ("build", CtValue.Str(record.identity.build)), ("run", CtValue.Str(record.identity.run)), ("target", CtValue.Str(record.identity.target))])),
+        ("assumptions", compiler_string_list(record.assumptions)), ("disposition", CtValue.Str(record.disposition.as_str().to_string())),
+        ("observation", record.observation.map_or_else(() -> CtValue.absent(Type.Named("CompilerDerivationObservation")),
+            value -> CtValue.Present(compiler_derivation_observation_value(value)))),
+        ("payload", record.payload.map_or_else(() -> CtValue.absent(Type.Named("CompilerDerivationPayload")),
+            value -> CtValue.Present(compiler_derivation_payload_value(value))))])
+}
+// Rust: Source/Compiler.rs:1637
+fn compiler_definition_value(definition: jet_semindex.SymbolDef) -> CtValue {
+    ct_struct("CompilerDefinition", [("identity", CtValue.Str(definition.identity)), ("name", CtValue.Str(definition.name)),
+        ("module", CtValue.Str(definition.module_path)), ("span", compiler_semantic_span(definition.def_span)),
+        ("kind", compiler_symbol_kind_value(definition.kind)),
+        ("view_provenance", CtValue.List(definition.view_provenance.iter().map(compiler_view_provenance_value).collect()))])
+}
+// Rust: Source/Compiler.rs:1660
+fn compiler_anchor_value(anchor: jet_semindex.DefinitionAnchor) -> CtValue {
+    ct_struct("CompilerDefinitionAnchor", [("module", CtValue.Str(anchor.module_path)), ("kind", CtValue.Str(anchor.kind)),
+        ("semantic_identity", compiler_option_string(anchor.semantic_identity)), ("span", compiler_semantic_span(anchor.def_span))])
+}
+// Rust: Source/Compiler.rs:1675
+fn compiler_reference_value(reference: jet_semindex.SymbolRef) -> CtValue {
+    ct_struct("CompilerReference", [("name", CtValue.Str(reference.name)), ("module", CtValue.Str(reference.module_path)),
+        ("scope_identity", compiler_option_string(reference.scope_identity)),
+        ("target", reference.target.map_or(CtValue.absent(Type.Named("CompilerDefinitionAnchor")),
+            target -> CtValue.Present(compiler_anchor_value(target)))), ("span", compiler_semantic_span(reference.span))])
+}
+// Rust: Source/Compiler.rs:1697
+fn compiler_call_value(call: jet_semindex.CallEdge) -> CtValue {
+    ct_struct("CompilerCall", [("caller", CtValue.Str(call.caller)), ("callee", CtValue.Str(call.callee)),
+        ("module", CtValue.Str(call.module_path)), ("span", compiler_semantic_span(call.call_span))])
+}
+// Rust: Source/Compiler.rs:1709
+fn compiler_structural_node_value(node: jet_semindex.StructuralNode) -> CtValue {
+    slot_kind :: if node.slot_kind == { .Scalar -> "scalar", .List -> "list" }
+    ct_struct("CompilerStructuralNode", [("id", CtValue.Int(I64(node.id))), ("parent", compiler_option_int(node.parent)),
+        ("slot", CtValue.Str(node.slot)), ("slot_kind", CtValue.Str(slot_kind)), ("ordinal", CtValue.Int(I64(node.ordinal))),
+        ("class", CtValue.Str(node.class)), ("shape", CtValue.Str(node.shape)), ("module", CtValue.Str(node.module_path)),
+        ("span", compiler_semantic_span(node.span))])
+}
+// Rust: Source/Compiler.rs:1735
+struct SemIndexProgramIndex { index: jet_semindex.SemIndex }
+// Rust: Source/Compiler.rs:1739
+impl Comptime.ProgramIndexView for SemIndexProgramIndex {
+    // Rust: Source/Compiler.rs:1740
+    fn definitions(self) -> [CtValue] { self.index.definitions().iter().map(compiler_definition_value).collect() }
+    // Rust: Source/Compiler.rs:1748
+    fn references(self) -> [CtValue] { self.index.references().iter().map(compiler_reference_value).collect() }
+    // Rust: Source/Compiler.rs:1756
+    fn call_edges(self) -> [CtValue] { self.index.call_edges().iter().map(compiler_call_value).collect() }
+    // Rust: Source/Compiler.rs:1764
+    fn structural_nodes(self) -> [CtValue] { self.index.structural_nodes().iter().map(compiler_structural_node_value).collect() }
+}
+// Rust: Source/Compiler.rs:1773
+pub fn program_info_value(bundle: AST.ProgramBundle, effect_facts: jet.Sema.SemIndexEffectFacts) -> CtValue {
+    semantic_facts :: jet.Driver.program_semantic_facts(bundle, effect_facts)
+    index :: jet_semindex.from_checked(bundle, effect_facts)
+    view :: SemIndexProgramIndex{index: index}
+    Comptime.build_program_info_with_index(bundle, semantic_facts, .Val(view))
+}
+// Rust: Source/Compiler.rs:1783
+fn compiler_effect_value(effect: jet_semindex.EffectFact) -> CtValue {
+    provenance :: effect.provenance.iter().map(origin -> ct_struct("CompilerEffectProvenance", [
+        ("effect", CtValue.Str(origin.effect)), ("call_path", compiler_string_list(origin.call_path)),
+        ("spans", CtValue.List(origin.spans.iter().map(compiler_semantic_span).collect()))
+    ])).collect()
+    ct_struct("CompilerEffect", [("function", CtValue.Str(effect.function)), ("direct", compiler_string_list(effect.direct)),
+        ("callees", compiler_string_list(effect.callees)), ("inferred", compiler_string_list(effect.inferred)),
+        ("maximal", CtValue.Bool(effect.maximal)), ("provenance", CtValue.List(provenance))])
+}
 

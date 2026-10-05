@@ -1,0 +1,34 @@
+// Rust: tests/cli.rs:1
+use tests.common
+use tests.cli_parts.support.*
+use tests.cli_parts.core as cli_core
+use tests.cli_parts.inspect as cli_inspect
+use std.fs
+use std.env
+use std.process.[Command]
+use core.files.[OSPath]
+
+// Rust: tests/cli.rs:10
+#Test("direct_launch_shebang_runs_executable_file") {
+    if core.sys.target.selected_family() != "unix" -> return
+    // GATE #4494: native Unix permission and process primitives.
+    path :: OSPath.from_text(env.var("CARGO_MANIFEST_DIR").unwrap()).join("Examples/features/cli/direct_launch.jet")
+    original_mode :: fs.metadata(path).unwrap().permissions().mode()
+    executable := fs.metadata(path).unwrap().permissions()
+    executable.set_mode(original_mode | 0o111)
+    fs.set_permissions(path, executable).unwrap()
+    jet_path :: jet()
+    path_dir :: jet_path.parent().unwrap()
+    path_env :: "{path_dir.display()}:{env.var("PATH").unwrap_or_default()}"
+    cwd :: isolated_cwd("direct_launch_shebang")
+    direct :: Command.new(path).current_dir(cwd).env("PATH", path_env).output().unwrap()
+    via_jet :: Command.new(jet_path).arg(path).current_dir(cwd).env("PATH", path_env).output().unwrap()
+    restored := fs.metadata(path).unwrap().permissions()
+    restored.set_mode(original_mode)
+    fs.set_permissions(path, restored).unwrap()
+    assert(direct.status.success(), "direct launch failed: {String.from_utf8_lossy(direct.stderr)}")
+    assert(via_jet.status.success(), "jet file launch failed: {String.from_utf8_lossy(via_jet.stderr)}")
+    assert_eq(direct.status.code(), via_jet.status.code())
+    assert_eq(direct.stdout, via_jet.stdout)
+    assert_eq(direct.stderr, via_jet.stderr)
+}

@@ -1,0 +1,23 @@
+use std.os.unix.net.[UnixListener]
+
+// Rust: crates/jet-pkg-model/src/Envelope.rs:1782
+#Test("canonical_archive_rejects_symlink_escape_and_special_file") {
+    if core.sys.target.selected_family() != "unix" -> return
+    dir :: pkg_test_envelope_scratch("hostile-nodes")
+    outside :: files.join(files.dirname(dir), "outside-cache-proof")
+    files.write(outside, "outside") ?? panic("write outside")
+    files.symlink(outside, files.join(dir, "escape")) ?? panic("escape link")
+    assert(pkg_try_output_hash_of(dir) == .Err(_))
+    files.remove(files.join(dir, "escape")) ?? panic("remove escape")
+    files.symlink("b", files.join(dir, "a")) ?? panic("link a")
+    files.symlink("a", files.join(dir, "b")) ?? panic("link b")
+    assert(pkg_try_output_hash_of(dir) == .Ok(_))
+    files.remove(files.join(dir, "a")) ?? panic("remove a")
+    files.remove(files.join(dir, "b")) ?? panic("remove b")
+    // GATE #4494: real native Unix socket, not a FIFO substitute.
+    socket :: UnixListener.bind(files.join(dir, "socket")) ?? panic("bind socket")
+    assert(pkg_try_output_hash_of(dir) == .Err(_))
+    socket.close() ?? panic("close socket")
+    files.remove_all(dir).drop("cleanup")
+    files.remove(outside).drop("cleanup")
+}

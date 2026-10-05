@@ -1,0 +1,19 @@
+use core.sys.host.retained_clock
+use core.files.host.retained_descriptor as authority_io
+
+// Rust: crates/jet-pkg-model/src/Authority.rs:1966
+#Test("memoized_listing_sees_entries_created_after_it") {
+    root :: OSPath(pkg_test_authority_root("listing-memo"))
+    authority_io.create_dir(root).unwrap() // GATE #4494
+    notes :: pkg_authority_named_join(root, "notes.txt")
+    std.fs.write(notes, "not a source\n").unwrap() // GATE #4494
+    retained_clock.sleep_ms(120).unwrap() // GATE #4494
+    assert(AuthorityResolver.open_for_authority_walk(root).unwrap().is_none())
+    assert(AuthorityResolver.open_for_authority_walk(root).unwrap().is_none())
+    source :: pkg_authority_named_join(root, "run.jet")
+    std.fs.write(source, "fn run() {}\n").unwrap() // GATE #4494
+    assert(AuthorityResolver.open_for_authority_walk(root).unwrap().is_some(), "a source created after the memoized listing must be seen")
+    std.fs.remove_file(source).unwrap() // GATE #4494
+    assert(AuthorityResolver.open_for_authority_walk(root).unwrap().is_none())
+    std.fs.remove_dir_all(root).unwrap() // GATE #4494
+}

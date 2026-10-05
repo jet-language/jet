@@ -1,0 +1,808 @@
+// Rust: tests/jetpack_engine.rs:1
+use Jetpack.CLI.Tests.Integration.JetpackEngine.*
+use Jetpack.CLI.Tests.Integration.Support.JetpackFixtures.*
+use Jetpack.[Store, TrustRoot, Envelope, JSON, EnvHook]
+use Compiler.[Manifest, Publish]
+use core.sys
+// GATE #4494: real native filesystem, subprocesses, clock, permissions and symlinks.
+use std.[fs, SystemTime, UNIX_EPOCH]
+
+// Rust: tests/jetpack_engine.rs:84
+#Test("hangar_path_reports_the_native_user_data_location") {
+    data :: Scratch.new("hangar-path-data")
+    output :: jet().args(["hangar", "path", "--no-color"]).env_remove("JETPACK_ROOT")
+        .env("XDG_DATA_HOME", data.path).env_remove("XDG_STATE_HOME").env_remove("LOCALAPPDATA").output() ?? panic("hangar path")
+    assert(output.status.success(), "stderr: {String.from_utf8_lossy(output.stderr)}")
+    home :: std.env.var_os("USERPROFILE").or_else(() -> std.env.var_os("HOME")) ?? panic("home directory environment variable")
+    expected :: if sys.target.selected_os() == "macos" {
+        OSPath.from(home).join("Library/Application Support/Jet/Hangar")
+    } else if sys.target.selected_os() == "windows" {
+        OSPath.from(home).join("AppData/Local/Jet/Hangar")
+    } else { data.path.join("jet/hangar") }
+    assert_eq(String.from_utf8_lossy(output.stdout).trim(), expected.display().to_string())
+}
+
+// Rust: tests/jetpack_engine.rs:116
+#Test("checked_hangar_listing_rejects_oversized_metadata") {
+    scratch :: Scratch.new("hangar-scale-budget")
+    roots :: Store.Roots.at(scratch.path)
+    object :: roots.hangar_dir().join("oversized")
+    fs.create_dir_all(object) ?? panic("create object")
+    fs.write(object.join("meta.json"), [U8].repeat(120, (1 << 20) + 1)) ?? panic("write oversized metadata")
+    error :: Store.list_checked(&roots).expect_err("oversized metadata must fail")
+    assert(error.to_string().contains("exceeds 1048576 bytes"), "{error}")
+}
+
+// Rust: tests/jetpack_engine.rs:131
+#Test("hangar_migration_round_trips_without_consuming_legacy_state") {
+    legacy :: Scratch.new("hangar-migration-legacy")
+    data :: Scratch.new("hangar-migration-data")
+    old_hangar :: legacy.join("jet/hangar")
+    fs.create_dir_all(old_hangar) ?? panic("create legacy")
+    fs.write(old_hangar.join("migration-marker"), "legacy bytes") ?? panic("write legacy marker")
+    output :: jet().args(["hangar", "path", "--no-color"]).env_remove("JETPACK_ROOT")
+        .env("XDG_STATE_HOME", legacy.path).env("XDG_DATA_HOME", data.path).env_remove("LOCALAPPDATA").output() ?? panic("migration")
+    assert(output.status.success(), "stderr: {String.from_utf8_lossy(output.stderr)}")
+    new_hangar :: data.join("jet/hangar")
+    assert_eq(fs.read_to_string(new_hangar.join("migration-marker")) ?? panic("read migrated marker"), "legacy bytes")
+    assert_eq(fs.read_to_string(old_hangar.join("migration-marker")) ?? panic("read legacy marker"), "legacy bytes")
+    assert(!data.join("jet/.hangar-migration.partial").exists())
+    fs.remove_dir_all(new_hangar) ?? panic("remove migrated tree")
+    rollback :: jet().args(["hangar", "path", "--no-color"]).env_remove("JETPACK_ROOT")
+        .env("XDG_STATE_HOME", legacy.path).env("XDG_DATA_HOME", data.path).env_remove("LOCALAPPDATA").output() ?? panic("repeat migration")
+    assert(rollback.status.success(), "stderr: {String.from_utf8_lossy(rollback.stderr)}")
+    assert_eq(fs.read_to_string(new_hangar.join("migration-marker")) ?? panic("read migrated marker"), "legacy bytes")
+    assert_eq(fs.read_to_string(old_hangar.join("migration-marker")) ?? panic("read legacy marker"), "legacy bytes")
+    assert(!data.join("jet/.hangar-migration.partial").exists())
+}
+
+// Rust: tests/jetpack_engine.rs:189
+#Test("hangar_migration_rejects_path_escape_and_leaves_repair_state_visible") {
+    if sys.target.selected_os() != "linux" -> return
+    legacy :: Scratch.new("hangar-migration-escape-legacy")
+    data :: Scratch.new("hangar-migration-escape-data")
+    old_hangar :: legacy.join("jet/hangar")
+    fs.create_dir_all(old_hangar) ?? panic("create legacy")
+    outside :: legacy.join("escape-target")
+    fs.write(outside, "must stay outside") ?? panic("write outside")
+    fs.symlink("../../escape-target", old_hangar.join("escape")) ?? panic("escape link")
+    output :: jet().args(["hangar", "path", "--no-color"]).env_remove("JETPACK_ROOT")
+        .env("XDG_STATE_HOME", legacy.path).env("XDG_DATA_HOME", data.path).env_remove("LOCALAPPDATA").output() ?? panic("migration escape")
+    assert_eq(output.status.code(), Val(2))
+    stderr :: String.from_utf8_lossy(output.stderr)
+    assert(stderr.contains("E2604"), "{stderr}")
+    assert(stderr.contains("escapes its migration root"), "{stderr}")
+    assert(!data.join("jet/hangar").exists())
+    assert(data.join("jet/.hangar-migration.partial").is_dir())
+    assert_eq(fs.read_to_string(outside) ?? panic("read outside"), "must stay outside")
+    retry :: jet().args(["hangar", "path", "--no-color"]).env_remove("JETPACK_ROOT")
+        .env("XDG_STATE_HOME", legacy.path).env("XDG_DATA_HOME", data.path).env_remove("LOCALAPPDATA").output() ?? panic("retry escape")
+    assert_eq(retry.status.code(), Val(2))
+    assert(String.from_utf8_lossy(retry.stderr).contains("incomplete Hangar migration"), "{String.from_utf8_lossy(retry.stderr)}")
+    assert_eq(fs.read_to_string(outside) ?? panic("read outside"), "must stay outside")
+}
+
+// Rust: tests/jetpack_engine.rs:235
+#Test("hangar_migration_rejects_missing_path_escape") {
+    if sys.target.selected_os() != "linux" -> return
+    legacy :: Scratch.new("hangar-migration-missing-escape-legacy")
+    data :: Scratch.new("hangar-migration-missing-escape-data")
+    old_hangar :: legacy.join("jet/hangar")
+    fs.create_dir_all(old_hangar) ?? panic("create legacy")
+    fs.symlink("../../missing-target", old_hangar.join("escape")) ?? panic("missing escape link")
+    output :: jet().args(["hangar", "path", "--no-color"]).env_remove("JETPACK_ROOT")
+        .env("XDG_STATE_HOME", legacy.path).env("XDG_DATA_HOME", data.path).env_remove("LOCALAPPDATA").output() ?? panic("missing escape")
+    assert_eq(output.status.code(), Val(2))
+    stderr :: String.from_utf8_lossy(output.stderr)
+    assert(stderr.contains("E2604"), "{stderr}")
+    assert(stderr.contains("escapes its migration root"), "{stderr}")
+    assert(!data.join("jet/hangar").exists())
+    assert(data.join("jet/.hangar-migration.partial").is_dir())
+}
+
+// Rust: tests/jetpack_engine.rs:262
+#Test("hangar_migration_rejects_destination_symlink_without_following_it") {
+    if sys.target.selected_family() != "unix" -> return
+    data :: Scratch.new("hangar-migration-destination-link-data")
+    state :: Scratch.new("hangar-migration-destination-link-state")
+    outside :: Scratch.new("hangar-migration-destination-link-outside")
+    destination_parent :: data.path.join("jet")
+    fs.create_dir_all(destination_parent) ?? panic("create destination parent")
+    fs.write(outside.join("marker"), "must stay outside") ?? panic("write outside marker")
+    fs.symlink(outside.path, destination_parent.join("hangar")) ?? panic("destination link")
+    output :: jet().args(["hangar", "path", "--no-color"]).env_remove("JETPACK_ROOT")
+        .env("XDG_DATA_HOME", data.path).env("XDG_STATE_HOME", state.path).env_remove("LOCALAPPDATA").output() ?? panic("destination link migration")
+    assert_eq(output.status.code(), Val(2))
+    stderr :: String.from_utf8_lossy(output.stderr)
+    assert(stderr.contains("E2604"), "{stderr}")
+    assert(stderr.contains("Inspect the reported Hangar path"), "{stderr}")
+    assert(stderr.contains("is a symlink"), "{stderr}")
+    assert_eq(fs.read_to_string(outside.join("marker")) ?? panic("read outside marker"), "must stay outside")
+    assert_eq(fs.read_link(destination_parent.join("hangar")) ?? panic("read destination link"), outside.path)
+}
+
+// Rust: tests/jetpack_engine.rs:300
+#Test("binary_cache_local_publish_verify_and_reject_corruption") {
+    root :: Scratch.new("cache-root")
+    source :: Scratch.new("cache-source")
+    blocked :: Scratch.new("cache-blocked-mirror")
+    mirror :: Scratch.new("cache-mirror")
+    fs.remove_dir_all(blocked.path) ?? panic("remove blocked mirror")
+    fs.write(blocked.path, "the first mirror is unavailable") ?? panic("block first mirror")
+    roots :: Store.Roots{root: root.path, dev_mode: false}
+    fs.write(source.join("payload"), "cache bytes\n") ?? panic("write payload")
+    if sys.target.selected_family() == "unix" {
+        fs.symlink("payload", source.join("alias")) ?? panic("payload link")
+    }
+    entry :: (Store.ingest_tree(&roots, &Store.IngestRequest{
+        name: "cache-demo", version: "1", reference: "./cache-demo",
+        cache_identity: Store.CacheIdentity{source_fingerprint: "sha256:cache-source", recipe_fingerprint: "sha256:cache-recipe", policy_fingerprint: "sha256:cache-policy", platform: Envelope.host_platform()},
+        references: [String]{}, outputs: [String:OSPath]{"out": source.path}, signature: "", provenance: "cache test", platform_artifact_kind: ""
+    }) ?? panic("ingest cache demo")).entry
+    Store.bind_cache(&roots, "public", [String]{blocked.path.display().to_string(), mirror.path.display().to_string()}, None, None, true) ?? panic("bind cache")
+    published :: Store.publish_cache_entry(&roots, &entry.id, "public") ?? panic("publish cache")
+    assert_eq(published.output_hash, entry.envelope.output_hash)
+    assert_eq(published.mirror, mirror.path.display().to_string())
+    verified :: Store.verify_cache_transfer(&roots, &entry.id, "public") ?? panic("verify cache")
+    assert_eq(verified.output_hash, entry.envelope.output_hash)
+    assert_eq(verified.builder, published.builder)
+    assert_eq(verified.provenance, published.provenance)
+    assert(published.witness.as_deref().is_some_and((witness) -> !witness.is_empty()))
+    assert_eq(verified.witness, published.witness)
+    assert_eq(published.receipt_version, Val(1))
+    assert(published.receipt_expires_unix.is_some())
+    assert_eq(verified.receipt_version, Val(1))
+    assert(verified.receipt_expires_unix.is_some())
+    assert(!verified.signed_fingerprint.is_empty())
+    report_json :: Store.cache_report_json("verify", &verified)
+    assert(report_json.contains("\"operation\":\"verify\""))
+    assert(report_json.contains("\"signed_fingerprint\":"))
+    assert(report_json.contains("\"builder\":"))
+    assert(report_json.contains("\"provenance\":"))
+    assert(report_json.contains("\"witness\":"))
+    assert(report_json.contains("\"receipt_version\":1"))
+    assert(report_json.contains("\"receipt_expires_unix\":"))
+    explanation :: (Store.explain_package(&roots, &entry.id, Store.ExplainLens.Rebuild) ?? panic("explain")) ?? panic("published cache entry should be explainable")
+    explanation_json :: explanation.to_json()
+    assert(explanation_json.contains("\"cache_admissions\":"))
+    assert(explanation_json.contains("\"decision\":\"accepted\""))
+    assert(explanation_json.contains("\"receipt_version\":1"))
+    assert(explanation_json.contains("\"receipt_expires_unix\":"))
+    assert(explanation_json.contains(published.builder))
+    assert(explanation.text().contains("cache-trust public accepted"))
+    assert(explanation_json.contains("\"decision\":\"rebuild-required\""))
+    assert(explanation_json.contains("producer record lacks the shared provider-facts carrier"))
+    restored :: Scratch.new("cache-restored")
+    Store.substitute_cache_entry(&roots, &entry.id, "public", &restored.join("out")) ?? panic("substitute cache")
+    assert_eq(fs.read_to_string(restored.join("out/payload")) ?? panic("read restored"), "cache bytes\n")
+    if sys.target.selected_family() == "unix" {
+        assert_eq(fs.read_link(restored.join("out/alias")) ?? panic("read restored link"), OSPath.from("payload"))
+    }
+    nar :: mirror.join("nar").join("{entry.envelope.output_hash}.nar")
+    info :: mirror.join("{entry.envelope.output_hash}-{entry.id}.narinfo")
+    nar_bytes :: fs.read(nar) ?? panic("read NAR")
+    info_bytes :: fs.read(info) ?? panic("read narinfo")
+    fs.remove_file(blocked.path) ?? panic("unblock mirror")
+    fs.create_dir_all(blocked.join("nar")) ?? panic("create blocked NAR directory")
+    fs.write(blocked.join("nar").join("{entry.envelope.output_hash}.nar"), "corrupted first mirror".as_bytes()) ?? panic("corrupt first mirror")
+    fs.write(blocked.join("{entry.envelope.output_hash}-{entry.id}.narinfo"), &info_bytes) ?? panic("copy narinfo")
+    fallback :: Store.verify_cache_transfer(&roots, &entry.id, "public") ?? panic("fallback mirror")
+    assert_eq(fallback.mirror, mirror.path.display().to_string())
+    fs.remove_file(nar) ?? panic("remove NAR")
+    fs.remove_file(info) ?? panic("remove narinfo")
+    fs.write(nar.with_extension("partial"), nar_bytes.slice(0, nar_bytes.len().max(2) / 2)) ?? panic("partial NAR")
+    fs.write(info.with_extension("partial"), info_bytes.slice(0, info_bytes.len().max(2) / 2)) ?? panic("partial narinfo")
+    _ :: Store.publish_cache_entry(&roots, &entry.id, "public") ?? panic("republish")
+    assert_eq(fs.read(nar) ?? panic("read NAR"), nar_bytes)
+    assert_eq(fs.read(info) ?? panic("read narinfo"), info_bytes)
+    assert(!nar.with_extension("partial").exists())
+    assert(!info.with_extension("partial").exists())
+    cache_key_bytes :: fs.read(root.join("trust/cache-public.key")) ?? panic("read cache key")
+    cache_key :: TrustRoot.TrustKey.from_secret(cache_key_bytes.clone()) ?? panic("cache key")
+    clear_negative_hint :: () -> { _ :: fs.remove_dir_all(mirror.join(".jet-negative")) }
+    unsigned :: (String.from_utf8(info_bytes.clone()) ?? panic("narinfo UTF8")).lines().filter((line) -> !line.starts_with("Sig: ")).collect().join("\n") + "\n"
+    fs.write(info, unsigned) ?? panic("write unsigned narinfo")
+    assert(Store.verify_cache_transfer(&roots, &entry.id, "public").is_err())
+    unsigned_destination :: Scratch.new("cache-unsigned-rejected")
+    assert(Store.substitute_cache_entry(&roots, &entry.id, "public", &unsigned_destination.join("out")).is_err())
+    assert(!unsigned_destination.join("out").exists())
+    clear_negative_hint()
+    fs.write(info, &info_bytes) ?? panic("restore narinfo")
+    mismatched := Store.NarInfo.parse(String.from_utf8(&info_bytes) ?? panic("UTF8")) ?? panic("parse narinfo")
+    mismatched.deriver = Val("/jet/derivations/{\"f\".repeat(64)}")
+    fs.write(info, (mismatched.signed(&cache_key) ?? panic("sign")).to_text() ?? panic("narinfo text")) ?? panic("write mismatched narinfo")
+    assert(Store.verify_cache_transfer(&roots, &entry.id, "public").is_err())
+    mismatched_destination :: Scratch.new("cache-mismatched-rejected")
+    assert(Store.substitute_cache_entry(&roots, &entry.id, "public", &mismatched_destination.join("out")).is_err())
+    assert(!mismatched_destination.join("out").exists())
+    clear_negative_hint()
+    replayed := Store.NarInfo.parse(String.from_utf8(&info_bytes) ?? panic("UTF8")) ?? panic("parse narinfo")
+    replayed.store_path = "/jet/hangar/{entry.envelope.output_hash}-replayed"
+    fs.write(info, (replayed.signed(&cache_key) ?? panic("sign")).to_text() ?? panic("narinfo text")) ?? panic("write replayed narinfo")
+    assert(Store.verify_cache_transfer(&roots, &entry.id, "public").is_err())
+    clear_negative_hint()
+    fs.write(info, &info_bytes) ?? panic("restore narinfo")
+    malicious_nar :: "this is not a NAR".as_bytes()
+    malicious := Store.NarInfo.parse(String.from_utf8(&info_bytes) ?? panic("UTF8")) ?? panic("parse narinfo")
+    malicious.file_size = U64(malicious_nar.len())
+    malicious.nar_size = U64(malicious_nar.len())
+    malicious.nar_hash = Store.nar_digest(malicious_nar)
+    fs.write(nar, malicious_nar) ?? panic("write malicious NAR")
+    fs.write(info, (malicious.signed(&cache_key) ?? panic("sign")).to_text() ?? panic("narinfo text")) ?? panic("write malicious narinfo")
+    assert(Store.verify_cache_transfer(&roots, &entry.id, "public").is_err())
+    malicious_destination :: Scratch.new("cache-malicious-rejected")
+    assert(Store.substitute_cache_entry(&roots, &entry.id, "public", &malicious_destination.join("out")).is_err())
+    assert(!malicious_destination.join("out").exists())
+    clear_negative_hint()
+    fs.write(nar, &nar_bytes) ?? panic("restore NAR")
+    fs.write(info, &info_bytes) ?? panic("restore narinfo")
+    fs.write(nar, "corrupted cache bytes".as_bytes()) ?? panic("corrupt NAR")
+    assert(Store.verify_cache_transfer(&roots, &entry.id, "public").is_err())
+    rejected :: Scratch.new("cache-rejected")
+    assert(Store.substitute_cache_entry(&roots, &entry.id, "public", &rejected.join("out")).is_err())
+    assert(!rejected.join("out").exists())
+    fs.write(root.join("trust/cache-public.key"), [U8].repeat(0x7f, 32)) ?? panic("change cache key")
+    changed_key :: Store.verify_cache_transfer(&roots, &entry.id, "public").expect_err("changed key").to_string()
+    assert(changed_key.contains("cache key for `public` changed"), "{changed_key}")
+    fs.write(root.join("trust/cache-public.key"), cache_key_bytes) ?? panic("restore cache key")
+    TrustRoot.revoke_cache_builder(&root.path, &published.builder) ?? panic("revoke builder")
+    revoked :: Store.verify_cache_transfer(&roots, &entry.id, "public").expect_err("revoked builder").to_string()
+    assert(revoked.contains("revoked"), "{revoked}")
+    assert(revoked.contains("rebuild"), "{revoked}")
+    revoked_destination :: Scratch.new("cache-revoked-rejected")
+    assert(Store.substitute_cache_entry(&roots, &entry.id, "public", &revoked_destination.join("out")).is_err())
+    assert(!revoked_destination.join("out").exists())
+    revoked_explanation :: ((Store.explain_package(&roots, &entry.id, Store.ExplainLens.Rebuild) ?? panic("explain revoked")) ?? panic("revoked explanation")).to_json()
+    assert(revoked_explanation.contains("\"decision\":\"denied\""))
+    assert(revoked_explanation.contains("cache builder is revoked"))
+}
+
+// Rust: tests/jetpack_engine.rs:584
+#Test("cache_cli_json_uses_shared_report_schema") {
+    root :: Scratch.new("cache-cli-json-root")
+    mirror :: Scratch.new("cache-cli-json-mirror")
+    bind :: jetpack().args(["hangar", "cache", "bind", "public", mirror.path.to_str() ?? panic("mirror text"), "--yes", "--json", "--no-color"])
+        .env("JETPACK_ROOT", root.path).output() ?? panic("bind cache CLI")
+    assert(bind.status.success(), "stderr: {bind.stderr:?}")
+    assert(bind.stderr.is_empty(), "JSON bind leaked stderr: {bind.stderr:?}")
+    bind_text :: String.from_utf8_lossy(bind.stdout)
+    bind_view := bind_text.trim() // #4303
+    bind_report :: JSON.parse(bind_view) ?? panic("cache bind JSON report")
+    assert_eq(json_string(&bind_report, "schema"), "jet.report/v1")
+    assert_eq(json_string(&bind_report, "moment"), "tool")
+    assert_eq(json_string(&bind_report, "action"), "cache-bind")
+    assert_eq(json_string(&bind_report, "role"), "public")
+    list :: jetpack().args(["hangar", "cache", "list", "--json", "--no-color"]).env("JETPACK_ROOT", root.path).output() ?? panic("list cache CLI")
+    assert(list.status.success(), "stderr: {list.stderr:?}")
+    assert(list.stderr.is_empty(), "JSON list leaked stderr: {list.stderr:?}")
+    list_stdout :: String.from_utf8_lossy(list.stdout)
+    list_view := list_stdout.trim() // #4303
+    list_report :: JSON.parse(list_view) ?? panic("cache list JSON report")
+    assert_eq(json_string(&list_report, "schema"), "jet.report/v1")
+    assert_eq(json_string(&list_report, "action"), "cache-list")
+    assert(list_stdout.contains("\"bindings\":["))
+    repeated :: jetpack().args(["hangar", "cache", "list", "--json", "--no-color"]).env("JETPACK_ROOT", root.path).output() ?? panic("repeat cache list")
+    assert_eq(repeated.stdout, list.stdout)
+    missing :: jetpack().args(["hangar", "cache", "verify", "missing", "--json", "--no-color"]).env("JETPACK_ROOT", root.path).output() ?? panic("verify missing cache")
+    assert_eq(missing.status.code(), Val(2))
+    assert(missing.stderr.is_empty(), "JSON failure leaked stderr: {missing.stderr:?}")
+    missing_text :: String.from_utf8_lossy(missing.stdout)
+    missing_view := missing_text.trim() // #4303
+    missing_report :: JSON.parse(missing_view) ?? panic("cache failure JSON report")
+    assert_eq(json_string(&missing_report, "schema"), "jet.report/v1")
+    assert_eq(json_string(&missing_report, "code"), "E1340")
+    remove :: jetpack().args(["hangar", "cache", "remove", "public", "--yes", "--json", "--no-color"]).env("JETPACK_ROOT", root.path).output() ?? panic("remove cache")
+    assert(remove.status.success(), "stderr: {remove.stderr:?}")
+    remove_text :: String.from_utf8_lossy(remove.stdout)
+    remove_view := remove_text.trim() // #4303
+    remove_report :: JSON.parse(remove_view) ?? panic("cache remove JSON report")
+    assert_eq(json_string(&remove_report, "schema"), "jet.report/v1")
+    assert_eq(json_string(&remove_report, "action"), "cache-remove")
+}
+
+// Rust: tests/jetpack_engine.rs:682
+#Test("retired_store_verbs_teach_hangar_routes") {
+    root :: Scratch.new("retired-store-verbs")
+    loop (retired, route) in [(String, String)]{("cache", "hangar cache"), ("shared-store", "hangar shared"), ("vendor", "hangar vendor"), ("clean", "hangar clean"), ("list", "hangar list")} {
+        output :: jetpack().args([retired, "--no-color"]).env("JETPACK_ROOT", root.path).output() ?? panic("retired verb")
+        stderr :: String.from_utf8_lossy(output.stderr)
+        assert_eq(output.status.code(), Val(2), "{retired}: {stderr}")
+        assert(stderr.contains("Error [E1354]"), "{retired}: {stderr}")
+        assert(stderr.contains("jetpack {route}"), "{retired}: {stderr}")
+    }
+}
+
+// Rust: tests/jetpack_engine.rs:707
+#Test("hangar_shared_status_stays_read_only") {
+    root :: Scratch.new("hangar-shared-status")
+    output :: jetpack().args(["hangar", "shared", "status", "--no-color"]).env("JETPACK_ROOT", root.path).output() ?? panic("shared status")
+    assert(output.status.success(), "stderr: {output.stderr:?}")
+    assert(String.from_utf8_lossy(output.stderr).contains("broker is not installed"))
+}
+
+// Rust: tests/jetpack_engine.rs:719
+#Test("binary_cache_trust_receipt_rejects_rollback_freeze_and_mix_and_match") {
+    root :: Scratch.new("cache-trust-root")
+    source :: Scratch.new("cache-trust-source")
+    dependency_source :: Scratch.new("cache-trust-dependency-source")
+    mirror :: Scratch.new("cache-trust-mirror")
+    fs.write(source.join("payload"), "trusted bytes\n") ?? panic("write source")
+    fs.write(dependency_source.join("payload"), "dependency bytes\n") ?? panic("write dependency")
+    roots :: Store.Roots{root: root.path, dev_mode: false}
+    dependency :: (Store.ingest_tree(&roots, &Store.IngestRequest{
+        name: "cache-trust-dependency", version: "1", reference: "./cache-trust-dependency",
+        cache_identity: Store.CacheIdentity{source_fingerprint: "sha256:cache-trust-dependency-source", recipe_fingerprint: "sha256:cache-trust-dependency-recipe", policy_fingerprint: "sha256:cache-trust-dependency-policy", platform: Envelope.host_platform()},
+        references: [String]{}, outputs: [String:OSPath]{"out": dependency_source.path}, signature: "", provenance: "cache trust dependency", platform_artifact_kind: ""
+    }) ?? panic("ingest dependency")).entry
+    identity :: Store.CacheIdentity{source_fingerprint: "sha256:cache-trust-source", recipe_fingerprint: "sha256:cache-trust-recipe", policy_fingerprint: "sha256:cache-trust-policy", platform: Envelope.host_platform()}
+    entry :: (Store.ingest_tree(&roots, &Store.IngestRequest{
+        name: "cache-trust-demo", version: "1", reference: "./cache-trust-demo", cache_identity: identity.clone(),
+        references: [String]{dependency.envelope.output_hash}, outputs: [String:OSPath]{"out": source.path}, signature: "", provenance: "cache trust test", platform_artifact_kind: ""
+    }) ?? panic("ingest trust demo")).entry
+    no_closure_root :: Scratch.new("cache-trust-no-closure-root")
+    no_closure_roots :: Store.Roots{root: no_closure_root.path, dev_mode: false}
+    no_closure :: (Store.ingest_tree(&no_closure_roots, &Store.IngestRequest{
+        name: "cache-trust-demo", version: "1", reference: "./cache-trust-demo", cache_identity: identity,
+        references: [String]{}, outputs: [String:OSPath]{"out": source.path}, signature: "", provenance: "cache trust test", platform_artifact_kind: ""
+    }) ?? panic("ingest without closure")).entry
+    with_closure_action :: (Store.ProducerRecord.decode(&entry.producer_record) ?? panic("decode producer")).facts.get("cache.action") ?? panic("closure action")
+    without_closure_action :: (Store.ProducerRecord.decode(&no_closure.producer_record) ?? panic("decode producer")).facts.get("cache.action") ?? panic("action without closure")
+    assert_ne(with_closure_action, without_closure_action, "the production Store action identity must bind the realized closure")
+    Store.bind_cache(&roots, "public", [String]{mirror.path.display().to_string()}, None, None, true) ?? panic("bind cache")
+    _ :: Store.publish_cache_entry(&roots, &entry.id, "public") ?? panic("publish cache")
+    _ :: Store.verify_cache_transfer(&roots, &entry.id, "public") ?? panic("verify cache")
+    nar :: mirror.join("nar").join("{entry.envelope.output_hash}.nar")
+    info :: mirror.join("{entry.envelope.output_hash}-{entry.id}.narinfo")
+    nar_bytes :: fs.read(nar) ?? panic("read NAR")
+    info_bytes :: fs.read(info) ?? panic("read narinfo")
+    key :: TrustRoot.TrustKey.from_secret(fs.read(root.join("trust/cache-public.key")) ?? panic("read key")) ?? panic("key")
+    store_name :: "{entry.envelope.output_hash}-{entry.id}"
+    receipt_path :: mirror.path.join("trust").join("{store_name}.receipt")
+    receipt_bytes :: fs.read(receipt_path) ?? panic("read receipt")
+    field :: (name: &String) -> {
+        text :: String.from_utf8(receipt_bytes.clone()) ?? panic("receipt UTF8")
+        text.lines().find_map((line) -> line.strip_prefix("{name}=")) ?? panic("receipt field")
+    }
+    provenance :: TrustRoot.CacheProvenance{
+        reference: field("reference"), source: field("source"), builder: field("builder"), action: field("action"),
+        output: field("output"), platform: field("platform"), sandbox: field("sandbox"), policy: field("policy")
+    }
+    receipt_text :: (receipt: &TrustRoot.CacheReceipt) -> {
+        "jet-cache-receipt-v1\nrole={receipt.role}\nwitness={receipt.witness}\nversion={receipt.version}\nissued={receipt.issued_unix}\nexpires={receipt.expires_unix}\nreference={receipt.provenance.reference}\nsource={receipt.provenance.source}\nbuilder={receipt.provenance.builder}\naction={receipt.provenance.action}\noutput={receipt.provenance.output}\nplatform={receipt.provenance.platform}\nsandbox={receipt.provenance.sandbox}\npolicy={receipt.provenance.policy}\nsignature_key={receipt.signature.key_id}\nsignature_algorithm={receipt.signature.algorithm}\nsignature={receipt.signature.sig_hex}\n"
+    }
+    now :: (SystemTime.now().duration_since(UNIX_EPOCH) ?? panic("clock")).as_secs()
+    wrong_closure := provenance.clone()
+    wrong_closure.action = without_closure_action
+    wrong_closure_receipt :: TrustRoot.CacheReceipt.issue("public", wrong_closure, 2, now.saturating_sub(1), now.saturating_add(600), &key) ?? panic("issue wrong closure")
+    fs.write(receipt_path, receipt_text(&wrong_closure_receipt)) ?? panic("write wrong closure")
+    closure_error :: Store.verify_cache_transfer(&roots, &entry.id, "public").expect_err("wrong closure").to_string()
+    assert(closure_error.contains("mix-and-match"), "{closure_error}")
+    fs.write(receipt_path, &receipt_bytes) ?? panic("restore receipt")
+    tampered :: (String.from_utf8(receipt_bytes.clone()) ?? panic("UTF8")).replace("signature={field(\"signature\")}", "signature=00")
+    fs.write(receipt_path, tampered) ?? panic("tamper signature")
+    compromised :: Store.verify_cache_transfer(&roots, &entry.id, "public").expect_err("tampered signature").to_string()
+    assert(compromised.contains("signature") && compromised.contains("discard"), "{compromised}")
+    fs.write(receipt_path, &receipt_bytes) ?? panic("restore receipt")
+    fs.remove_file(receipt_path) ?? panic("remove receipt")
+    missing :: Store.verify_cache_transfer(&roots, &entry.id, "public").expect_err("missing receipt").to_string()
+    assert(missing.contains("no signed trust receipt"), "{missing}")
+    fs.write(receipt_path, &receipt_bytes) ?? panic("restore receipt")
+    v2 :: TrustRoot.CacheReceipt.issue("public", provenance.clone(), 2, now.saturating_sub(1), now.saturating_add(600), &key) ?? panic("issue v2")
+    fs.write(receipt_path, receipt_text(&v2)) ?? panic("write v2")
+    _ :: Store.verify_cache_transfer(&roots, &entry.id, "public") ?? panic("admit v2")
+    untrusted_witness :: if field("witness") == "stranger" -> "other-stranger" else -> "stranger"
+    untrusted :: TrustRoot.CacheReceipt.issue_with_witness("public", untrusted_witness, provenance.clone(), 3, now.saturating_sub(1), now.saturating_add(600), &key) ?? panic("issue untrusted witness")
+    fs.write(receipt_path, receipt_text(&untrusted)) ?? panic("write untrusted witness")
+    witness_error :: Store.verify_cache_transfer(&roots, &entry.id, "public").expect_err("untrusted witness").to_string()
+    assert(witness_error.contains(untrusted_witness), "{witness_error}")
+    assert(witness_error.contains("trust policy 'cache-witnesses/public.allow'"), "{witness_error}")
+    fs.write(receipt_path, receipt_text(&v2)) ?? panic("restore v2")
+    _ :: Store.verify_cache_transfer(&roots, &entry.id, "public") ?? panic("readmit v2")
+    v3 :: TrustRoot.CacheReceipt.issue("public", provenance.clone(), 3, now.saturating_sub(1), now.saturating_add(600), &key) ?? panic("issue v3")
+    fs.write(receipt_path, receipt_text(&v3)) ?? panic("write v3")
+    wrong_source :: Scratch.new("cache-trust-wrong-payload")
+    fs.write(wrong_source.join("payload"), "wrong trusted bytes\n") ?? panic("write wrong payload")
+    (wrong_nar, wrong_stats) :: Store.write_nar(&wrong_source.path) ?? panic("write wrong NAR")
+    wrong_info := Store.NarInfo.parse(String.from_utf8(&info_bytes) ?? panic("UTF8")) ?? panic("parse narinfo")
+    wrong_info.file_size = wrong_stats.bytes
+    wrong_info.nar_size = wrong_stats.bytes
+    wrong_info.nar_hash = wrong_stats.digest
+    fs.write(nar, wrong_nar) ?? panic("write wrong NAR")
+    fs.write(info, (wrong_info.signed(&key) ?? panic("sign")).to_text() ?? panic("narinfo text")) ?? panic("write wrong narinfo")
+    wrong_payload :: Store.verify_cache_transfer(&roots, &entry.id, "public").expect_err("wrong output identity").to_string()
+    assert(wrong_payload.contains("output identity"), "{wrong_payload}")
+    // A failed newer payload must not advance the host's admitted receipt pin.
+    fs.write(nar, &nar_bytes) ?? panic("restore NAR")
+    fs.write(info, &info_bytes) ?? panic("restore narinfo")
+    fs.write(receipt_path, receipt_text(&v2)) ?? panic("restore v2")
+    _ :: Store.verify_cache_transfer(&roots, &entry.id, "public") ?? panic("failed v3 must not consume pin")
+    same_version :: TrustRoot.CacheReceipt.issue("public", provenance.clone(), 2, now.saturating_sub(2), now.saturating_add(601), &key) ?? panic("issue conflicting v2")
+    fs.write(receipt_path, receipt_text(&same_version)) ?? panic("write conflicting v2")
+    same_version_error :: Store.verify_cache_transfer(&roots, &entry.id, "public").expect_err("conflicting v2").to_string()
+    assert(same_version_error.contains("same version"), "{same_version_error}")
+    v1 :: TrustRoot.CacheReceipt.issue("public", provenance.clone(), 1, now.saturating_sub(1), now.saturating_add(600), &key) ?? panic("issue v1")
+    fs.write(receipt_path, receipt_text(&v1)) ?? panic("write v1")
+    rollback :: Store.verify_cache_transfer(&roots, &entry.id, "public").expect_err("rollback").to_string()
+    assert(rollback.contains("rollback"), "{rollback}")
+    frozen :: TrustRoot.CacheReceipt.issue("public", provenance.clone(), 3, now.saturating_sub(20), now.saturating_sub(1), &key) ?? panic("issue expired receipt")
+    fs.write(receipt_path, receipt_text(&frozen)) ?? panic("write expired receipt")
+    frozen_error :: Store.verify_cache_transfer(&roots, &entry.id, "public").expect_err("expired receipt").to_string()
+    assert(frozen_error.contains("expired"), "{frozen_error}")
+    frozen_destination :: Scratch.new("cache-trust-frozen-destination")
+    assert(Store.substitute_cache_entry(&roots, &entry.id, "public", &frozen_destination.join("out")).is_err())
+    assert(!frozen_destination.join("out").exists())
+    mixed := provenance
+    mixed.output = "sha256:another-output"
+    mixed_receipt :: TrustRoot.CacheReceipt.issue("public", mixed, 4, now.saturating_sub(1), now.saturating_add(600), &key) ?? panic("issue mixed receipt")
+    fs.write(receipt_path, receipt_text(&mixed_receipt)) ?? panic("write mixed receipt")
+    mix_error :: Store.verify_cache_transfer(&roots, &entry.id, "public").expect_err("mixed output").to_string()
+    assert(mix_error.contains("mix-and-match"), "{mix_error}")
+}
+
+// Rust: tests/jetpack_engine.rs:1083
+#Test("reproducibility_registration_writes_first_difference_and_blocks_cache") {
+    root :: Scratch.new("reproducibility-root")
+    first_source :: Scratch.new("reproducibility-first")
+    second_source :: Scratch.new("reproducibility-second")
+    mirror :: Scratch.new("reproducibility-mirror")
+    fs.write(first_source.join("payload"), "first bytes\n") ?? panic("write first source")
+    fs.write(second_source.join("payload"), "second bytes\n") ?? panic("write second source")
+    roots :: Store.Roots{root: root.path, dev_mode: false}
+    identity :: Store.CacheIdentity{source_fingerprint: "sha256:repro-source", recipe_fingerprint: "sha256:repro-recipe", policy_fingerprint: "sha256:repro-policy", platform: Envelope.host_platform()}
+    first :: (Store.ingest_tree(&roots, &Store.IngestRequest{
+        name: "reproducible-action", version: "1", reference: "reproducibility:action", cache_identity: identity.clone(),
+        references: [String]{}, outputs: [String:OSPath]{"out": first_source.path}, signature: "", provenance: "builder:first", platform_artifact_kind: ""
+    }) ?? panic("ingest first")).entry
+    error :: Store.ingest_tree(&roots, &Store.IngestRequest{
+        name: "reproducible-action", version: "1", reference: "reproducibility:action", cache_identity: identity,
+        references: [String]{}, outputs: [String:OSPath]{"out": second_source.path}, signature: "", provenance: "builder:second", platform_artifact_kind: ""
+    }).expect_err("unreproducible action")
+    error_text :: "{error:?}"
+    assert(error_text.contains("unreproducible"), "{error_text}")
+    assert(error_text.contains("conflicting bytes"), "{error_text}")
+    reports :: root.path.join("private/unreproducible")
+    report_path :: (fs.read_dir(reports) ?? panic("read reports")).map((entry) -> (entry ?? panic("report entry")).path())
+        .find((path) -> path.extension().and_then((value) -> value.to_str()) == Val("json")) ?? panic("structured reproducibility report")
+    report :: fs.read_to_string(report_path) ?? panic("read report")
+    assert(JSON.parse(&report).is_ok(), "report must be valid JSON: {report}")
+    assert(report.contains("\"schema\":\"jet-reproducibility-report-v1\""))
+    assert(report.contains("\"producer_action\""))
+    assert(report.contains("\"first_difference\""))
+    assert(report.contains("\"path\":\"payload\""), "{report}")
+    assert(report.contains(first.envelope.output_hash))
+    assert(!(Store.list_checked(&roots) ?? panic("list checked")).iter().any((entry) -> entry.envelope.output_hash != first.envelope.output_hash))
+    Store.bind_cache(&roots, "trusted", [String]{mirror.path.display().to_string()}, None, None, true) ?? panic("bind trusted")
+    assert(Store.publish_cache_entry(&roots, &first.id, "trusted").is_err())
+}
+
+// Rust: tests/jetpack_engine.rs:1169
+#Test("binary_cache_nar_codec_rejects_noncanonical_and_malicious_input") {
+    // Rust: tests/jetpack_engine.rs:1170
+    fn string(out: &[U8], value: &[U8]) -> {
+        &out.extend_from_slice(U64(value.len()).to_le_bytes())
+        &out.extend_from_slice(value)
+        &out.resize(out.len() + (8 - value.len() % 8) % 8, 0)
+    }
+    nar := [U8]{}
+    loop value in [String]{"nix-archive-1", "(", "type", "regular", "contents", "payload", "executable", "", ")"} {
+        string(&nar, value.as_bytes())
+    }
+    assert(Store.validate_nar(&nar).is_err())
+    destination :: Scratch.new("nar-malformed-destination")
+    output :: destination.join("out")
+    assert(Store.read_nar(&nar, &output).is_err())
+    assert(!output.exists())
+    // Rust: tests/jetpack_engine.rs:1193
+    fn regular_entry(out: &[U8], name: &[U8]) -> {
+        string(out, "entry".as_bytes())
+        string(out, "(".as_bytes())
+        string(out, "name".as_bytes())
+        string(out, name)
+        loop value in [String]{"node", "(", "type", "regular", "contents", "", ")", ")"} {
+            string(out, value.as_bytes())
+        }
+    }
+    unordered_nar := [U8]{}
+    loop value in [String]{"nix-archive-1", "(", "type", "directory"} { string(&unordered_nar, value.as_bytes()) }
+    regular_entry(&unordered_nar, "z".as_bytes())
+    regular_entry(&unordered_nar, "a".as_bytes())
+    string(&unordered_nar, ")".as_bytes())
+    assert(Store.validate_nar(&unordered_nar).is_err())
+    escape_nar := [U8]{}
+    loop value in [String]{"nix-archive-1", "(", "type", "directory", "entry", "(", "name", "escape", "node", "(", "type", "symlink", "target", "../outside", ")", ")", ")"} {
+        string(&escape_nar, value.as_bytes())
+    }
+    assert(Store.validate_nar(&escape_nar).is_err())
+    escape_output :: destination.join("escape-out")
+    assert(Store.read_nar(&escape_nar, &escape_output).is_err())
+    assert(!escape_output.exists())
+    if sys.target.selected_family() == "unix" {
+        source :: Scratch.new("nar-escape-source")
+        fs.write(source.join("outside"), "outside") ?? panic("write outside")
+        fs.symlink("../outside", source.join("escape")) ?? panic("escape link")
+        assert(Store.write_nar(&source.path).is_err())
+    }
+}
+
+// Rust: tests/jetpack_engine.rs:1255
+#Test("binary_cache_narinfo_reads_standard_uncompressed_fields") {
+    hash :: Store.nar_digest("payload".as_bytes())
+    reference :: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-tool"
+    text :: "StorePath: /nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-tool\nURL: nar/tool.nar\nCompression: none\nFileHash: {hash}\nFileSize: 7\nNarHash: {hash}\nNarSize: 7\nReferences: {reference}\nDeriver: unknown-deriver\n"
+    info :: Store.NarInfo.parse(&text) ?? panic("parse narinfo")
+    canonical :: info.to_text() ?? panic("canonical narinfo")
+    assert(canonical.contains("FileHash: "))
+    assert(canonical.contains("References: {reference}\n"))
+    assert(canonical.contains("Deriver: unknown-deriver\n"))
+    assert_eq(Store.NarInfo.parse(&canonical) ?? panic("parse canonical"), info)
+}
+
+// Rust: tests/jetpack_engine.rs:1278
+#Test("package_generation_plan_uses_the_production_source_backed_resolver") {
+    project :: Scratch.new("profile-plan")
+    fs.write(project.join("env.jet"), """
+module profile.base {
+    packages: [default.ripgrep]
+}
+module profile.dev {
+    extends: ["base"]
+    packages: [default.fd]
+    collisions: { "bin/editor": "fd@default" }
+}
+""") ?? panic("write profile")
+    output :: jetpack().args(["profile", "plan", "dev", "--json", "--offline"]).current_dir(project.path)
+        .env("JETPACK_ROOT", project.join("jet-root")).output() ?? panic("profile plan")
+    assert(output.status.success(), "stderr: {String.from_utf8_lossy(output.stderr)}")
+    stdout :: String.from_utf8_lossy(output.stdout)
+    assert(stdout.contains("\"raw\":\"ripgrep@default\""), "{stdout}")
+    assert(stdout.contains("\"provider\":\"nix\""), "{stdout}")
+    assert(stdout.contains("\"fingerprint\":\"sha256-"), "{stdout}")
+    assert(stdout.contains("\"provider_facts\":{"), "{stdout}")
+    assert(stdout.contains("\"profile\":\"dev\""), "{stdout}")
+    assert(stdout.contains("\"bin/editor\":\"fd@default\""), "{stdout}")
+}
+
+// Rust: tests/jetpack_engine.rs:1315
+#Test("package_generation_lifecycle_preserves_source_facts_and_history") {
+    project :: Scratch.new("profile-generation-lifecycle")
+    root :: Scratch.new("profile-generation-root")
+    fixtures :: Scratch.new("profile-generation-fixtures")
+    staging :: Scratch.new("profile-generation-staging")
+    write_runnable_fixture(&fixtures.path, &root.path, &staging.path)
+    fs.write(project.join("env.jet"), "module profile.dev { packages: [default.greet] }\nmodule env.full { packages: [] }\n") ?? panic("write profile")
+    run :: (args: &[String]) -> {
+        jetpack().args(args).current_dir(project.path).env("JETPACK_ROOT", root.path).env("JETPACK_FIXTURES", fixtures.path).output() ?? panic("run profile command")
+    }
+    built :: run(["profile", "build", "dev", "--no-color", "--offline"])
+    assert(built.status.success(), "build stderr: {String.from_utf8_lossy(built.stderr)}")
+    generation_dir :: project.join(".jet/profiles/dev/generations/1")
+    metadata :: fs.read_to_string(generation_dir.join("meta.json")) ?? panic("generation metadata")
+    assert(metadata.contains("jet-package-generation-v1"))
+    assert(metadata.contains("\"raw\":\"greet@default\""))
+    assert(metadata.contains("\"target\":\""))
+    assert(metadata.contains("\"provider\":\"nix\""))
+    assert(metadata.contains("\"provider_facts\":{"))
+    assert(metadata.contains("\"root_hash\":\"sha256-"))
+    assert(metadata.contains("\"output_hash\":\"sha256-"))
+    assert(!project.join(".jet/profiles/dev/current").exists())
+    explained :: jet().args(["explain", "greet", "--json", "--no-color"]).current_dir(project.path)
+        .env("JETPACK_ROOT", root.path).env("JETPACK_FIXTURES", fixtures.path).output() ?? panic("explain profile")
+    assert(explained.status.success(), "explain stderr: {String.from_utf8_lossy(explained.stderr)}")
+    explained_stdout :: String.from_utf8_lossy(explained.stdout)
+    assert(explained_stdout.contains("\"schema\":\"jet.report/v1\""))
+    assert(explained_stdout.contains("\"moment\":\"tool\""))
+    assert(explained_stdout.contains("\"profile_facts\":["))
+    assert(explained_stdout.contains("\"profile\":\"dev\""))
+    assert(explained_stdout.contains("\"generation\":1"))
+    assert(explained_stdout.contains("\"output_hash\":\"sha256-"))
+    assert(explained_stdout.contains("\"output_digest\":\"matches\""))
+    loop lens in [String]{"why-depends", "what-depends", "closure", "why-live", "rebuild"} {
+        explained_lens :: jet().args(["explain", lens, "greet", "--json", "--no-color"]).current_dir(project.path)
+            .env("JETPACK_ROOT", root.path).env("JETPACK_FIXTURES", fixtures.path).output() ?? panic("explain lens")
+        assert(explained_lens.status.success(), "{lens} stderr: {String.from_utf8_lossy(explained_lens.stderr)}")
+        stdout :: String.from_utf8_lossy(explained_lens.stdout)
+        assert(stdout.contains("\"lens\":\"{lens}\""), "{stdout}")
+    }
+    hook_before_switch :: EnvHook.definition_fingerprint(&project.path, None)
+    switched :: run(["profile", "switch", "dev", "--no-color", "--offline"])
+    assert(switched.status.success(), "switch stderr: {String.from_utf8_lossy(switched.stderr)}")
+    assert((fs.read_to_string(project.join(".jet/profiles/dev/current")) ?? panic("read current")).contains("\"generation\":1"))
+    hook_after_switch :: EnvHook.definition_fingerprint(&project.path, None)
+    assert_ne(hook_before_switch, hook_after_switch)
+    entered :: run(["env", "--no-color", "--trust", "--offline", "--env", "full", "--", "/bin/sh", "-c", "command -v greet"])
+    assert(entered.status.success(), "dev-shell projection stderr: {String.from_utf8_lossy(entered.stderr)}")
+    assert_eq(String.from_utf8_lossy(entered.stdout).trim(), project.join(".jet/profiles/dev/generations/1/root/bin/greet").to_string_lossy())
+    rebuilt :: run(["profile", "build", "dev", "--no-color", "--offline"])
+    assert(rebuilt.status.success(), "second build stderr: {String.from_utf8_lossy(rebuilt.stderr)}")
+    history :: run(["profile", "generations", "dev", "--json"])
+    assert(history.status.success())
+    history_stdout :: String.from_utf8_lossy(history.stdout)
+    assert(history_stdout.contains("\"generation\":1"))
+    assert(history_stdout.contains("\"generation\":2"))
+    switched_new :: run(["profile", "switch", "dev", "--no-color", "--offline"])
+    assert(switched_new.status.success(), "second switch stderr: {String.from_utf8_lossy(switched_new.stderr)}")
+    assert((fs.read_to_string(project.join(".jet/profiles/dev/current")) ?? panic("read current")).contains("\"generation\":2"))
+    rolled_back :: run(["profile", "rollback", "dev", "--no-color"])
+    assert(rolled_back.status.success(), "rollback stderr: {String.from_utf8_lossy(rolled_back.stderr)}")
+    assert((fs.read_to_string(project.join(".jet/profiles/dev/current")) ?? panic("read current")).contains("\"generation\":1"))
+    switched_again :: run(["profile", "switch", "dev", "--no-color", "--offline"])
+    assert(switched_again.status.success(), "switch after rollback stderr: {String.from_utf8_lossy(switched_again.stderr)}")
+    assert((fs.read_to_string(project.join(".jet/profiles/dev/current")) ?? panic("read current")).contains("\"generation\":2"))
+    generation_one_root :: project.join(".jet/profiles/dev/generations/1/root")
+    generation_one_binary :: generation_one_root.join("bin/greet")
+    generation_one_original :: fs.read(generation_one_binary) ?? panic("read generation binary")
+    make_writable(generation_one_root.to_string_lossy())
+    fs.write(generation_one_binary, "tampered generation\n") ?? panic("tamper generation")
+    failed_rollback :: run(["profile", "rollback", "dev", "1", "--no-color"])
+    assert_eq(failed_rollback.status.code(), Val(2))
+    failed_rollback_stderr :: String.from_utf8_lossy(failed_rollback.stderr)
+    assert(failed_rollback_stderr.contains("root hash"), "{failed_rollback_stderr}")
+    assert((fs.read_to_string(project.join(".jet/profiles/dev/current")) ?? panic("read current")).contains("\"generation\":2"))
+    fs.write(generation_one_binary, generation_one_original) ?? panic("restore generation binary")
+    roots :: Store.Roots{root: root.path, dev_mode: false}
+    entry :: Store.list(&roots).iter().find((entry) -> entry.name == "greet") ?? panic("profile build must publish greet to the Store")
+    store_binary :: OSPath.from(entry.out).join("bin/greet")
+    store_binary_original :: fs.read(store_binary) ?? panic("read store binary")
+    store_out_permissions :: (fs.metadata(entry.out) ?? panic("store metadata")).permissions()
+    store_binary_permissions :: (fs.metadata(store_binary) ?? panic("binary metadata")).permissions()
+    make_writable(&entry.out)
+    fs.write(store_binary, "tampered\n") ?? panic("tamper store binary")
+    rebuild :: jet().args(["explain", "rebuild", "greet", "--json", "--no-color"]).current_dir(project.path)
+        .env("JETPACK_ROOT", root.path).env("JETPACK_FIXTURES", fixtures.path).output() ?? panic("explain rebuild")
+    assert(rebuild.status.success(), "rebuild explain stderr: {String.from_utf8_lossy(rebuild.stderr)}")
+    rebuild_stdout :: String.from_utf8_lossy(rebuild.stdout)
+    assert(rebuild_stdout.contains("\"decision\":\"rebuild-required\""))
+    assert(rebuild_stdout.contains("\"output_digest\":\"mismatch\""))
+    assert(rebuild_stdout.contains("\"kind\":\"loss\""))
+    assert(rebuild_stdout.contains("stored output digest differs"))
+    fs.write(store_binary, store_binary_original) ?? panic("restore store binary")
+    fs.set_permissions(entry.out, store_out_permissions) ?? panic("restore store permissions")
+    fs.set_permissions(store_binary, store_binary_permissions) ?? panic("restore binary permissions")
+    fs.remove_dir_all(root.join("hangar/lifecycle-db")) ?? panic("remove lifecycle root")
+    missing_root :: run(["profile", "generations", "dev", "--json"])
+    assert_eq(missing_root.status.code(), Val(2))
+    missing_root_stderr :: String.from_utf8_lossy(missing_root.stderr)
+    assert(missing_root_stderr.contains("profile generation lifecycle root is missing"), "{missing_root_stderr}")
+}
+
+// Rust: tests/jetpack_engine.rs:1579
+#Test("package_generation_build_applies_exact_path_collision_selection") {
+    project :: Scratch.new("profile-generation-selected-collision-project")
+    root :: Scratch.new("profile-generation-selected-collision-root")
+    fixtures :: Scratch.new("profile-generation-selected-collision-fixtures")
+    loop (package, contents) in [(String, String)]{("left", "left editor\n"), ("right", "right editor\n")} {
+        seed_profile_fixture(&root.path, &fixtures.path, package, (staging) -> {
+            bin :: staging.join("bin")
+            fs.create_dir_all(bin) ?? panic("create bin")
+            editor :: bin.join("editor")
+            fs.write(editor, contents) ?? panic("write editor")
+            if sys.target.selected_family() == "unix" {
+                fs.set_permissions(editor, fs.Permissions.from_mode(0o755)) ?? panic("executable editor")
+            }
+        })
+    }
+    fs.write(project.join("env.jet"), "module profile.dev { packages: [default.left, default.right] collisions: {\"bin/editor\": \"right@default\"} }\n") ?? panic("write collision selection")
+    output :: jetpack().args(["profile", "build", "dev", "--no-color", "--offline"]).current_dir(project.path)
+        .env("JETPACK_ROOT", root.path).env("JETPACK_FIXTURES", fixtures.path).output() ?? panic("build selected collision")
+    assert(output.status.success(), "stderr: {String.from_utf8_lossy(output.stderr)}")
+    generation :: project.join(".jet/profiles/dev/generations/1")
+    assert_eq(fs.read_to_string(generation.join("root/bin/editor")) ?? panic("read selected editor"), "right editor\n")
+    metadata :: fs.read_to_string(generation.join("meta.json")) ?? panic("generation metadata")
+    assert(metadata.contains("\"selected\":\"right@default\""))
+    assert(metadata.contains("left@default"))
+    assert(metadata.contains("right@default"))
+    assert(metadata.matches("sha256-").count() >= 3)
+}
+
+// Rust: tests/jetpack_engine.rs:1627
+#Test("package_generation_build_rejects_unresolved_exact_path_collision") {
+    project :: Scratch.new("profile-generation-collision-project")
+    root :: Scratch.new("profile-generation-collision-root")
+    fixtures :: Scratch.new("profile-generation-collision-fixtures")
+    loop (package, contents) in [(String, String)]{("left", "left editor\n"), ("right", "right editor\n")} {
+        seed_profile_fixture(&root.path, &fixtures.path, package, (staging) -> {
+            bin :: staging.join("bin")
+            fs.create_dir_all(bin) ?? panic("create bin")
+            editor :: bin.join("editor")
+            fs.write(editor, contents) ?? panic("write editor")
+            if sys.target.selected_family() == "unix" {
+                fs.set_permissions(editor, fs.Permissions.from_mode(0o755)) ?? panic("executable editor")
+            }
+        })
+    }
+    fs.write(project.join("env.jet"), "module profile.dev { packages: [default.left, default.right] }\n") ?? panic("write collision profile")
+    output :: jetpack().args(["profile", "build", "dev", "--no-color", "--offline"]).current_dir(project.path)
+        .env("JETPACK_ROOT", root.path).env("JETPACK_FIXTURES", fixtures.path).output() ?? panic("build unresolved collision")
+    assert_eq(output.status.code(), Val(2))
+    stderr :: String.from_utf8_lossy(output.stderr)
+    assert(stderr.contains("E1335"), "{stderr}")
+    assert(stderr.contains("unresolved package collision"), "{stderr}")
+    assert(stderr.contains("left@default"), "{stderr}")
+    assert(stderr.contains("right@default"), "{stderr}")
+    assert(stderr.contains("sha256-"), "{stderr}")
+}
+
+// Rust: tests/jetpack_engine.rs:1669
+#Test("package_generation_build_rejects_symlink_target_collision_even_when_selected") {
+    if sys.target.selected_family() != "unix" -> return
+    project :: Scratch.new("profile-generation-symlink-collision-project")
+    root :: Scratch.new("profile-generation-symlink-collision-root")
+    fixtures :: Scratch.new("profile-generation-symlink-collision-fixtures")
+    loop (package, target) in [(String, String)]{("left", "left-target"), ("right", "right-target")} {
+        seed_profile_fixture(&root.path, &fixtures.path, package, (staging) -> {
+            bin :: staging.join("bin")
+            fs.create_dir_all(bin) ?? panic("create bin")
+            fs.write(bin.join(target), "{target}\n") ?? panic("write symlink target")
+            fs.symlink(target, bin.join("editor")) ?? panic("editor link")
+        })
+    }
+    fs.write(project.join("env.jet"), "module profile.dev { packages: [default.left, default.right] collisions: {\"bin/editor\": \"left@default\"} }\n") ?? panic("write selected symlink collision")
+    output :: jetpack().args(["profile", "build", "dev", "--no-color", "--offline"]).current_dir(project.path)
+        .env("JETPACK_ROOT", root.path).env("JETPACK_FIXTURES", fixtures.path).output() ?? panic("build symlink collision")
+    assert_eq(output.status.code(), Val(2))
+    stderr :: String.from_utf8_lossy(output.stderr)
+    assert(stderr.contains("E1335"), "{stderr}")
+    assert(stderr.contains("symlink-target mismatch"), "{stderr}")
+    assert(stderr.contains("left@default"), "{stderr}")
+    assert(stderr.contains("right@default"), "{stderr}")
+}
+
+// Rust: tests/jetpack_engine.rs:1705
+#Test("package_generation_plan_reports_inheritance_cycles") {
+    project :: Scratch.new("profile-plan-cycle")
+    fs.write(project.join("env.jet"), "module profile.a { extends: [\"b\"] }\nmodule profile.b { extends: [\"a\"] }\n") ?? panic("write cycle")
+    output :: jetpack().args(["profile", "plan", "a", "--no-color", "--offline"]).current_dir(project.path)
+        .env("JETPACK_ROOT", project.join("jet-root")).output() ?? panic("plan cycle")
+    assert_eq(output.status.code(), Val(2))
+    stderr :: String.from_utf8_lossy(output.stderr)
+    assert(stderr.contains("E1332"), "{stderr}")
+    assert(stderr.contains("inheritance cycle"), "{stderr}")
+}
+
+// Rust: tests/jetpack_engine.rs:1725
+#Test("package_generation_plan_rejects_ambiguous_provider_facts") {
+    project :: Scratch.new("profile-plan-ambiguous-provider")
+    fs.write(project.join("env.jet"), """
+module sources { sources: { remote: acme/tools@github } }
+module profile.dev { packages: [remote.hello] }
+""") ?? panic("write ambiguous provider")
+    output :: jetpack().args(["profile", "plan", "dev", "--no-color", "--offline"]).current_dir(project.path)
+        .env("JETPACK_ROOT", project.join("jet-root")).output() ?? panic("plan ambiguous provider")
+    assert_eq(output.status.code(), Val(2))
+    stderr :: String.from_utf8_lossy(output.stderr)
+    assert(stderr.contains("E1335"), "{stderr}")
+    assert(stderr.contains("ambiguous provider fact"), "{stderr}")
+    assert(stderr.contains("unresolved inference"), "{stderr}")
+}
+
+// Rust: tests/jetpack_engine.rs:1753
+#Test("package_generation_plan_rejects_lossy_external_provider_facts") {
+    project :: Scratch.new("profile-plan-lossy-provider")
+    fs.write(project.join("env.jet"), "module profile.dev { packages: [cran.tool] }\n") ?? panic("write lossy provider")
+    output :: jetpack().args(["profile", "plan", "dev", "--no-color", "--offline"]).current_dir(project.path)
+        .env("JETPACK_ROOT", project.join("jet-root")).output() ?? panic("plan lossy provider")
+    assert_eq(output.status.code(), Val(2))
+    stderr :: String.from_utf8_lossy(output.stderr)
+    assert(stderr.contains("E1335"), "{stderr}")
+    assert(stderr.contains("lossy or conflicting provider fact"), "{stderr}")
+    assert(stderr.contains("exact version, revision, or digest"), "{stderr}")
+}
+
+// Rust: tests/jetpack_engine.rs:1780
+#Test("package_policy_authorizes_spdx_and_source_mapping_through_publish_seam") {
+    raw :: """
+name: "consumer"
+version: "0.1.0"
+license: "MIT"
+policy: {
+    licenses: .Allow(["MIT", "Apache-2.0"]),
+    sources: { "Acme.*": ["internal"] },
+}
+"""
+    manifest :: Manifest.parse(OSPath.from("package.jet"), &raw) ?? panic("policy manifest")
+    assert_eq(manifest.policy.licenses, Val([String]{"MIT", "Apache-2.0"}))
+    assert_eq(manifest.policy.source_maps, [(String, [String])]{("Acme.*", [String]{"internal"})})
+    receipt :: Publish.authorize_package_candidate(&manifest.policy, "Acme.Widget", "1.2.3", Val("MIT OR Apache-2.0"), "internal") ?? panic("mapped SPDX candidate should be allowed")
+    assert(receipt.summary().contains("source-rule=Acme.*"))
+    assert(receipt.summary().contains("fingerprint=sha256-"))
+}

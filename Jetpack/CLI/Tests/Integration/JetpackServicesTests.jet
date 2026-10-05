@@ -1,0 +1,465 @@
+use Jetpack.CLI.Tests.Integration.JetpackServices.*
+use common.Scratch
+use std.[fs, env, thread]
+use std.process.[Command, Stdio]
+use std.time.[Duration, Instant]
+use std.net.TcpListener
+use JetEnvModel.ModuleEval.DevServicePlan
+use Jetpack.Services
+use core.sys.target
+// GATE #4494: actual CLI subprocesses, sockets, process groups, polling and filesystem.
+// GATE #4483: retain Linux-only tests through selected-target dispatch.
+
+// Rust: tests/jetpack_services.rs:159
+#Test("services_up_health_logs_down_roundtrip") {
+    proj :: Scratch.new("roundtrip")
+    root :: Scratch.new("roundtrip-root")
+    home :: Scratch.new("roundtrip-home")
+    write_project(&proj.path, "fixture: {{ run: [\"sh\", \"-c\", \"echo fixture-started; sleep 30\"] }}", "fn run() {{}}\n")
+    vars :: [("JETPACK_ROOT", root.path.display().to_string()), ("HOME", home.path.display().to_string())]
+    up :: jetpack().args(["services", "up", "--no-color"]).current_dir(proj.path).envs(vars).output().expect("up")
+    assert(up.status.success(), "stderr: {String.from_utf8_lossy(up.stderr)}")
+    health :: jetpack().args(["services", "health", "--no-color"]).current_dir(proj.path).envs(vars).output().expect("health")
+    assert(health.status.success(), "stderr: {String.from_utf8_lossy(health.stderr)}")
+    wait :: jetpack().args(["services", "wait", "fixture", "--no-color"]).current_dir(proj.path).envs(vars).output().expect("wait")
+    assert(wait.status.success(), "stderr: {String.from_utf8_lossy(wait.stderr)}")
+    assert(String.from_utf8_lossy(wait.stderr).contains("service `fixture` is ready"), "stderr: {String.from_utf8_lossy(wait.stderr)}")
+    logs :: jetpack().args(["services", "logs", "fixture", "--no-color"]).current_dir(proj.path).envs(vars).output().expect("logs")
+    logs_out :: String.from_utf8_lossy(logs.stdout)
+    assert(logs_out.contains("fixture-started"), "logs: {logs_out}")
+    down :: jetpack().args(["services", "down", "--no-color"]).current_dir(proj.path).envs(vars).output().expect("down")
+    assert(down.status.success(), "stderr: {String.from_utf8_lossy(down.stderr)}")
+    // Stopped now: a fresh health check must report unhealthy.
+    health_after :: jetpack().args(["services", "health", "--no-color"]).current_dir(proj.path).envs(vars).output().expect("health after down")
+    assert(!health_after.status.success())
+}
+
+// Rust: tests/jetpack_services.rs:246
+#Test("services_from_nested_project_directory_use_the_project_state_root") {
+    proj :: Scratch.new("nested-services")
+    root :: Scratch.new("nested-services-root")
+    home :: Scratch.new("nested-services-home")
+    write_project(&proj.path, "fixture: {{ run: [\"sh\", \"-c\", \"echo nested-started; sleep 30\"] }}", "fn run() {{}}\n")
+    nested :: proj.path.join("src/nested")
+    fs.create_dir_all(nested).expect("create nested directory")
+    vars :: [("JETPACK_ROOT", root.path.display().to_string()), ("HOME", home.path.display().to_string())]
+    up :: jetpack().args(["services", "up", "--no-color"]).current_dir(nested).envs(vars).output().expect("up")
+    assert(up.status.success(), "{String.from_utf8_lossy(up.stderr)}")
+    assert(proj.path.join(".jet/services/fixture/pid").is_file())
+    assert(!nested.join(".jet/services/fixture/pid").exists())
+    health :: jetpack().args(["services", "health", "--no-color"]).current_dir(nested).envs(vars).output().expect("health")
+    assert(health.status.success(), "{String.from_utf8_lossy(health.stderr)}")
+    down :: jetpack().args(["services", "down", "--no-color"]).current_dir(nested).envs(vars).output().expect("down")
+    assert(down.status.success(), "{String.from_utf8_lossy(down.stderr)}")
+}
+
+// Rust: tests/jetpack_services.rs:302
+#Test("services_wait_reports_readiness_timeout") {
+    proj :: Scratch.new("wait-timeout")
+    root :: Scratch.new("wait-timeout-root")
+    home :: Scratch.new("wait-timeout-home")
+    write_project(&proj.path, "fixture: {{ run: [\"sleep\", \"30\"], ready: \"false\" }}", "fn run() {{}}\n")
+    out :: jetpack().args(["services", "wait", "fixture", "--no-color"]).current_dir(proj.path).env("JETPACK_ROOT", root.path).env("HOME", home.path).env("JETPACK_SERVICE_HEALTH_TIMEOUT_MS", "500").output().expect("wait")
+    assert_eq(out.status.code(), Some(1))
+    stderr :: String.from_utf8_lossy(out.stderr)
+    assert(stderr.contains("E1261"), "stderr: {stderr}")
+    assert(stderr.contains("service `fixture` is not ready"), "stderr: {stderr}")
+}
+
+// Rust: tests/jetpack_services.rs:330
+#Test("services_up_readiness_timeout_preserves_startup_failure_receipt") {
+    if target.selected_os() == "linux" {
+        proj :: Scratch.new("up-timeout-receipt")
+        root :: Scratch.new("up-timeout-receipt-root")
+        home :: Scratch.new("up-timeout-receipt-home")
+        write_project(&proj.path, "timeout: {{ run: [\"sh\", \"-c\", \"sleep 30\"], ready: \"false\" }}", "fn run() {{}}\n")
+        out :: jetpack().args(["services", "up", "timeout", "--no-color"]).current_dir(proj.path).env("JETPACK_ROOT", root.path).env("HOME", home.path).env("JETPACK_SERVICE_HEALTH_TIMEOUT_MS", "500").output().expect("up")
+        assert(!out.status.success(), "readiness timeout unexpectedly succeeded")
+        output :: "{String.from_utf8_lossy(out.stdout)}{String.from_utf8_lossy(out.stderr)}"
+        assert(output.contains("E1261"), "output: {output}")
+        service_dir :: proj.path.join(".jet/services/timeout")
+        lifecycle :: fs.read_to_string(service_dir.join("lifecycle")).expect("read lifecycle")
+        assert(lifecycle.contains("phase=failed"), "{lifecycle}")
+        assert(lifecycle.contains("recovery=startup-failed"), "{lifecycle}")
+        assert(service_dir.join("supervisor.error").is_file())
+        assert(!service_dir.join("pid").exists())
+    }
+}
+
+// Rust: tests/jetpack_services.rs:369
+// The project dev path must wait for healthy services before invoking dev().
+#Test("dev_health_gate_waits_for_service_before_running") {
+    proj :: Scratch.new("health-gate")
+    root :: Scratch.new("health-gate-root")
+    home :: Scratch.new("health-gate-home")
+    write_project(&proj.path, "fixture: {{ run: [\"sleep\", \"30\"] }}", "fn dev() {{ print(\"DEV-RAN\") }}\n")
+    out :: jetpack().args(["dev", "--no-color"]).current_dir(proj.path).env("JETPACK_ROOT", root.path).env("HOME", home.path).output().expect("dev")
+    assert(out.status.success(), "stderr: {String.from_utf8_lossy(out.stderr)}")
+    stdout :: String.from_utf8_lossy(out.stdout)
+    assert(stdout.contains("DEV-RAN"), "stdout: {stdout}")
+    // Clean up the fixture daemon left running by dev.
+    _ :: jetpack().args(["services", "down", "--no-color"]).current_dir(proj.path).env("JETPACK_ROOT", root.path).env("HOME", home.path).output().ok()
+}
+
+// Rust: tests/jetpack_services.rs:407
+#Test("dev_service_never_healthy_is_e1261") {
+    proj :: Scratch.new("e1261")
+    root :: Scratch.new("e1261-root")
+    home :: Scratch.new("e1261-home")
+    write_project(&proj.path, "fixture: {{ run: [\"sleep\", \"30\"], ready: \"false\" }}", "fn dev() {{ print(\"DEV-RAN\") }}\n")
+    out :: jetpack().args(["dev", "--no-color"]).current_dir(proj.path).env("JETPACK_ROOT", root.path).env("HOME", home.path).env("JETPACK_SERVICE_HEALTH_TIMEOUT_MS", "500").output().expect("dev")
+    assert_eq(out.status.code(), Some(2))
+    stderr :: String.from_utf8_lossy(out.stderr)
+    assert(stderr.contains("E1261"), "stderr: {stderr}")
+    assert(!String.from_utf8_lossy(out.stdout).contains("DEV-RAN"))
+    _ :: jetpack().args(["services", "down", "--no-color"]).current_dir(proj.path).env("JETPACK_ROOT", root.path).env("HOME", home.path).output().ok()
+}
+
+// Rust: tests/jetpack_services.rs:444
+// Open Service records reject unrecognized fields at supervision time (E1262).
+#Test("dev_unrecognized_service_field_is_e1262") {
+    proj :: Scratch.new("e1262")
+    root :: Scratch.new("e1262-root")
+    home :: Scratch.new("e1262-home")
+    write_project(&proj.path, "fixture: {{ run: [\"sleep\", \"30\"], prot: 5432 }}", "fn dev() {{ print(\"DEV-RAN\") }}\n")
+    out :: jetpack().args(["dev", "--no-color"]).current_dir(proj.path).env("JETPACK_ROOT", root.path).env("HOME", home.path).output().expect("dev")
+    assert_eq(out.status.code(), Some(2))
+    stderr :: String.from_utf8_lossy(out.stderr)
+    assert(stderr.contains("E1262"), "stderr: {stderr}")
+    assert(!String.from_utf8_lossy(out.stdout).contains("DEV-RAN"))
+}
+
+// Rust: tests/jetpack_services.rs:468
+#Test("services_up_unrecognized_field_is_e1262") {
+    proj :: Scratch.new("services-e1262")
+    root :: Scratch.new("services-e1262-root")
+    home :: Scratch.new("services-e1262-home")
+    write_project(&proj.path, "fixture: {{ run: [\"sleep\", \"30\"], prot: 5432 }}", "fn run() {{}}\n")
+    out :: jetpack().args(["services", "up", "--no-color"]).current_dir(proj.path).env("JETPACK_ROOT", root.path).env("HOME", home.path).output().expect("up")
+    assert_eq(out.status.code(), Some(2))
+    stderr :: String.from_utf8_lossy(out.stderr)
+    assert(stderr.contains("E1262"), "stderr: {stderr}")
+}
+
+// Rust: tests/jetpack_services.rs:493
+#Test("services_watch_restarts_after_nested_file_change") {
+    proj :: Scratch.new("watch-nested")
+    root :: Scratch.new("watch-nested-root")
+    home :: Scratch.new("watch-nested-home")
+    fs.create_dir_all(proj.path.join("src/nested")).expect("create watch directory")
+    fs.write(proj.path.join("src/nested/input"), "one\n").expect("write input")
+    write_project(&proj.path, "fixture: {{ run: [\"sh\", \"-c\", \"echo started >> restart-count; sleep 30\"], watch: [\"src\"] }}", "fn run() {{}}\n")
+    vars :: [("JETPACK_ROOT", root.path.display().to_string()), ("HOME", home.path.display().to_string())]
+    up :: jetpack().args(["services", "up", "--no-color"]).current_dir(proj.path).envs(vars).output().expect("up")
+    assert(up.status.success(), "{String.from_utf8_lossy(up.stderr)}")
+    count :: proj.path.join(".jet/services/fixture/data/restart-count")
+    wait_for_file_lines(&count, 1)
+    fs.write(proj.path.join("src/nested/input"), "two with a changed length\n").expect("change input")
+    wait_for_file_lines(&count, 2)
+    health :: jetpack().args(["services", "health", "--no-color"]).current_dir(proj.path).envs(vars).output().expect("health")
+    assert(health.status.success(), "{String.from_utf8_lossy(health.stderr)}")
+    down :: jetpack().args(["services", "down", "--no-color"]).current_dir(proj.path).envs(vars).output().expect("down")
+    assert(down.status.success(), "{String.from_utf8_lossy(down.stderr)}")
+}
+
+// Rust: tests/jetpack_services.rs:556
+#Test("services_restart_exhaustion_cleans_state") {
+    proj :: Scratch.new("restart-exhaustion")
+    root :: Scratch.new("restart-exhaustion-root")
+    home :: Scratch.new("restart-exhaustion-home")
+    write_project(&proj.path, "fixture: {{ run: [\"sh\", \"-c\", \"exit 7\"], restart: .OnFailure{{ max: 1, backoff_ms: 1 }} }}", "fn run() {{}}\n")
+    vars :: [("JETPACK_ROOT", root.path.display().to_string()), ("HOME", home.path.display().to_string()), ("JETPACK_SERVICE_HEALTH_TIMEOUT_MS", "500")]
+    up :: jetpack().args(["services", "up", "--no-color"]).current_dir(proj.path).envs(vars).output().expect("up")
+    assert(!up.status.success(), "{String.from_utf8_lossy(up.stderr)}")
+    assert(String.from_utf8_lossy(up.stderr).contains("E1261"), "stderr: {String.from_utf8_lossy(up.stderr)}")
+    pid :: proj.path.join(".jet/services/fixture/pid")
+    wait_for_missing(&pid)
+    assert(proj.path.join(".jet/services/fixture/supervisor.error").is_file(), "restart exhaustion must leave a supervisor error")
+    health :: jetpack().args(["services", "health", "--no-color"]).current_dir(proj.path).envs(vars).output().expect("health")
+    assert(!health.status.success())
+    _ :: jetpack().args(["services", "down", "--no-color"]).current_dir(proj.path).envs(vars).output().ok()
+    assert(!proj.path.join(".jet/services/fixture/.stopping").exists())
+}
+
+// Rust: tests/jetpack_services.rs:992
+#Ignore("subprocess worker invoked explicitly by production catalog tests")
+#Test("production_catalog_service_worker") {
+    if target.selected_os() == "linux" {
+        project :: OSPath.from(env.var_os("JETPACK_CATALOG_PROJECT").expect("catalog project"))
+        tools :: OSPath.from(env.var_os("JETPACK_CATALOG_TOOLS").expect("catalog tools"))
+        systemd_bin :: OSPath.from(env.var_os("JETPACK_CATALOG_SYSTEMD_BIN").expect("catalog systemd bin"))
+        name :: env.var("JETPACK_CATALOG_NAME").expect("catalog name")
+        port :: env.var("JETPACK_CATALOG_PORT").ok().and_then((value) -> value.parse[I64]().ok()) ?? 0
+        plan :: DevServicePlan { name, enable: true, ports: [port], ..DevServicePlan.default() }
+        shell_env :: catalog_tool_env(&tools, Some(systemd_bin))
+        Services.up_one(&project, &shell_env, &plan).expect("up catalog service")
+    }
+}
+
+// Rust: tests/jetpack_services.rs:1013
+#Test("production_catalog_services_prepare_state_and_pass_readiness") {
+    if target.selected_os() == "linux" {
+        proj :: Scratch.new("catalog-production")
+        tools :: Scratch.new("catalog-production-tools")
+        install_catalog_tools(&tools.path)
+        fake :: fake_systemd()
+        current_path :: env.var_os("PATH") ?? OSString.new()
+        path :: "{fake.bin.display()}:{current_path.to_string_lossy()}"
+        shell_env :: catalog_tool_env(&tools.path, None)
+        for name in ["redis", "postgres", "mysql", "mariadb", "nginx", "minio", "mailpit", "mail", "mailhog", "blackfire", "tideways"] {
+            plan :: DevServicePlan { name: name.to_string(), enable: true, ports: [0], ..DevServicePlan.default() }
+            supervisor := Command.new(env.current_exe().expect("test executable"))
+                .args(["--exact", "production_catalog_service_worker", "--ignored", "--nocapture"])
+                .env("JETPACK_CATALOG_PROJECT", proj.path).env("JETPACK_CATALOG_TOOLS", tools.path)
+                .env("JETPACK_CATALOG_SYSTEMD_BIN", fake.bin).env("JETPACK_CATALOG_NAME", name)
+                .env("JETPACK_SERVICE_SUPERVISOR", "1").env("PATH", path)
+                .stdout(Stdio.piped()).stderr(Stdio.piped()).spawn().expect("spawn catalog worker")
+            state_name :: if name == "mail" -> "mailpit" else -> name
+            service_dir :: proj.path.join(".jet/services").join(state_name)
+            wait_for_file_contains(&service_dir.join("pid"), "pid=")
+            assert(Services.wait_healthy_with_env(&proj.path, Some(&shell_env), &plan, Duration.from_secs(3)), "catalog service `{name}` did not pass its production readiness command")
+            data_dir :: service_dir.join("data")
+            match name {
+                "redis" -> assert(data_dir.join(".service-running").is_file())
+                "postgres" -> assert(data_dir.join("PG_VERSION").is_file())
+                "mysql" | "mariadb" -> assert(data_dir.join("mysql").is_dir())
+                "minio" | "mailpit" | "mail" -> { assert(data_dir.join(".service-running").is_file()) }
+                "mailhog" | "blackfire" | "tideways" -> { assert(data_dir.join(".service-running").is_file()) }
+                "nginx" -> {
+                    ports :: fs.read_to_string(service_dir.join("ports")).expect("read ports")
+                    port :: ports.lines().next().expect("port line").parse[U16]().expect("parse port")
+                    config :: data_dir.join("nginx-{port}/conf/nginx.conf")
+                    config_text :: fs.read_to_string(config).expect("read nginx config")
+                    assert(config_text.contains("listen 127.0.0.1:{port};"))
+                }
+                _ -> panic("unreachable catalog service")
+            }
+            fs.write(service_dir.join(".stopping"), "test\n".as_bytes()).expect("request catalog stop")
+            output :: supervisor.wait_with_output().expect("wait catalog worker")
+            assert(output.status.success(), "catalog worker failed: stdout={String.from_utf8_lossy(output.stdout)} stderr={String.from_utf8_lossy(output.stderr)}")
+            wait_for_missing(&service_dir.join("pid"))
+        }
+    }
+}
+
+// Rust: tests/jetpack_services.rs:1112
+#Test("production_adminer_preset_fails_closed_without_php_projection") {
+    if target.selected_os() == "linux" {
+        proj :: Scratch.new("adminer-owner-gate")
+        tools :: Scratch.new("adminer-owner-gate-tools")
+        fake :: fake_systemd()
+        current_path :: env.var_os("PATH") ?? OSString.new()
+        path :: "{fake.bin.display()}:{current_path.to_string_lossy()}"
+        worker :: Command.new(env.current_exe().expect("test executable"))
+            .args(["--exact", "production_catalog_service_worker", "--ignored", "--nocapture"])
+            .env("JETPACK_CATALOG_PROJECT", proj.path).env("JETPACK_CATALOG_TOOLS", tools.path)
+            .env("JETPACK_CATALOG_SYSTEMD_BIN", fake.bin).env("JETPACK_CATALOG_NAME", "adminer")
+            .env("JETPACK_SERVICE_SUPERVISOR", "1").env("PATH", path).output().expect("run adminer worker")
+        assert(!worker.status.success(), "Adminer must stay owner-gated")
+        stderr :: String.from_utf8_lossy(worker.stderr)
+        assert(stderr.contains("owner-gated"), "{stderr}")
+        service_dir :: proj.path.join(".jet/services/adminer")
+        assert(!service_dir.join("pid").exists())
+        assert(!service_dir.join("lifecycle").exists())
+    }
+}
+
+// Rust: tests/jetpack_services.rs:1144
+#Test("production_minio_preset_port_conflict_has_terminal_state") {
+    if target.selected_os() == "linux" {
+        proj :: Scratch.new("minio-port-conflict")
+        tools :: Scratch.new("minio-port-conflict-tools")
+        install_catalog_tools(&tools.path)
+        blocker :: TcpListener.bind(("127.0.0.1", 0)).expect("bind conflicting port")
+        port :: blocker.local_addr().expect("blocker address").port()
+        fake :: fake_systemd()
+        current_path :: env.var_os("PATH") ?? OSString.new()
+        path :: "{fake.bin.display()}:{current_path.to_string_lossy()}"
+        worker := Command.new(env.current_exe().expect("test executable"))
+            .args(["--exact", "production_catalog_service_worker", "--ignored", "--nocapture"])
+            .env("JETPACK_CATALOG_PROJECT", proj.path).env("JETPACK_CATALOG_TOOLS", tools.path)
+            .env("JETPACK_CATALOG_SYSTEMD_BIN", fake.bin).env("JETPACK_CATALOG_NAME", "minio")
+            .env("JETPACK_CATALOG_PORT", port.to_string()).env("JETPACK_SERVICE_SUPERVISOR", "1").env("PATH", path)
+            .stdout(Stdio.piped()).stderr(Stdio.piped()).spawn().expect("spawn minio worker")
+        service_dir :: proj.path.join(".jet/services/minio")
+        output :: worker.wait_with_output().expect("wait minio worker")
+        assert(!output.status.success(), "port conflict must reach the worker")
+        assert(!service_dir.join("pid").exists())
+        assert(!service_dir.join("ports").exists())
+        assert(service_dir.join("supervisor.error").is_file())
+        lifecycle :: fs.read_to_string(service_dir.join("lifecycle")).expect("read lifecycle")
+        assert(lifecycle.contains("phase=failed"), "{lifecycle}")
+        assert(lifecycle.contains("recovery=startup-failed"), "{lifecycle}")
+    }
+}
+
+// Rust: tests/jetpack_services.rs:1188
+#Test("production_postgres_preset_initialization_failure_has_terminal_state") {
+    if target.selected_os() == "linux" {
+        proj :: Scratch.new("postgres-init-failure")
+        tools :: Scratch.new("postgres-init-failure-tools")
+        install_catalog_tools(&tools.path)
+        fs.remove_file(tools.path.join("bin/initdb")).expect("remove initdb")
+        fake :: fake_systemd()
+        current_path :: env.var_os("PATH") ?? OSString.new()
+        path :: "{fake.bin.display()}:{current_path.to_string_lossy()}"
+        worker := Command.new(env.current_exe().expect("test executable"))
+            .args(["--exact", "production_catalog_service_worker", "--ignored", "--nocapture"])
+            .env("JETPACK_CATALOG_PROJECT", proj.path).env("JETPACK_CATALOG_TOOLS", tools.path)
+            .env("JETPACK_CATALOG_SYSTEMD_BIN", fake.bin).env("JETPACK_CATALOG_NAME", "postgres")
+            .env("JETPACK_SERVICE_SUPERVISOR", "1").env("PATH", path)
+            .stdout(Stdio.piped()).stderr(Stdio.piped()).spawn().expect("spawn postgres worker")
+        service_dir :: proj.path.join(".jet/services/postgres")
+        output :: worker.wait_with_output().expect("wait postgres worker")
+        assert(!output.status.success(), "initdb failure must reach the worker")
+        assert(!service_dir.join("pid").exists())
+        assert(!service_dir.join("ports").exists())
+        assert(service_dir.join("supervisor.error").is_file())
+        lifecycle :: fs.read_to_string(service_dir.join("lifecycle")).expect("read lifecycle")
+        assert(lifecycle.contains("phase=failed"), "{lifecycle}")
+        assert(lifecycle.contains("recovery=startup-failed"), "{lifecycle}")
+    }
+}
+
+// Rust: tests/jetpack_services.rs:1230
+#Test("production_path_persists_linux_authority_and_dependency_lifecycle") {
+    if target.selected_os() == "linux" {
+        proj :: Scratch.new("authority-lifecycle")
+        root :: Scratch.new("authority-lifecycle-root")
+        home :: Scratch.new("authority-lifecycle-home")
+        write_project(&proj.path, "database: {{ run: [\"sleep\", \"30\"] }}, api: {{ run: [\"sleep\", \"30\"], after: [\"database\"] }}", "fn run() {{}}\n")
+        vars :: [("JETPACK_ROOT", root.path.display().to_string()), ("HOME", home.path.display().to_string())]
+        up :: jetpack().args(["services", "up", "--no-color"]).current_dir(proj.path).envs(vars).output().expect("up")
+        assert(up.status.success(), "{String.from_utf8_lossy(up.stderr)}")
+        lifecycle :: fs.read_to_string(proj.path.join(".jet/services/api/lifecycle")).expect("read lifecycle")
+        assert(lifecycle.contains("backend=linux-systemd-user"), "{lifecycle}")
+        assert(lifecycle.contains("containment=delegated-cgroup"), "{lifecycle}")
+        assert(lifecycle.contains("phase=ready"), "{lifecycle}")
+        assert(lifecycle.contains("dependency=database"), "{lifecycle}")
+        health :: jetpack().args(["services", "health", "--json", "--no-color"]).current_dir(proj.path).envs(vars).output().expect("health")
+        assert(health.status.success(), "{String.from_utf8_lossy(health.stderr)}")
+        json :: String.from_utf8_lossy(health.stdout)
+        assert(json.contains("linux-systemd-user"), "{json}")
+        assert(json.contains("\"after\":[\"database\"]"), "{json}")
+        down :: jetpack().args(["services", "down", "--no-color"]).current_dir(proj.path).envs(vars).output().expect("down")
+        assert(down.status.success(), "{String.from_utf8_lossy(down.stderr)}")
+        stopped :: fs.read_to_string(proj.path.join(".jet/services/api/lifecycle")).expect("read stopped lifecycle")
+        assert(stopped.contains("phase=stopped"), "{stopped}")
+    }
+}
+
+// Rust: tests/jetpack_services.rs:1303
+// Fake systemd checks production flags and process-group cleanup, not a real cgroup runtime.
+#Test("production_path_kills_descendants_in_the_supervisor_process_group") {
+    if target.selected_os() == "linux" {
+        proj :: Scratch.new("authority-descendants")
+        root :: Scratch.new("authority-descendants-root")
+        home :: Scratch.new("authority-descendants-home")
+        write_project(&proj.path, "fixture: {{ run: [\"sh\", \"-c\", \"sleep 30 & child=$!; echo $child > child.pid; wait\"] }}", "fn run() {{}}\n")
+        vars :: [("JETPACK_ROOT", root.path.display().to_string()), ("HOME", home.path.display().to_string())]
+        up :: jetpack().args(["services", "up", "--no-color"]).current_dir(proj.path).envs(vars).output().expect("up")
+        assert(up.status.success(), "{String.from_utf8_lossy(up.stderr)}")
+        child_file :: proj.path.join(".jet/services/fixture/data/child.pid")
+        wait_for_file_lines(&child_file, 1)
+        child_text :: fs.read_to_string(child_file).expect("read child pid")
+        child_trimmed := child_text.trim() // #4303
+        child_pid :: child_trimmed.parse[U32]().expect("parse child pid")
+        pid_text :: fs.read_to_string(proj.path.join(".jet/services/fixture/pid")).expect("read service pid")
+        service_pid :: pid_text.lines().find_map((line) -> line.strip_prefix("pid=").and_then((value) -> value.parse[U32]().ok())).expect("parse service pid")
+        assert_ne(child_pid, service_pid, "fixture must have a real descendant")
+        assert(process_is_alive(child_pid), "descendant must be alive before down")
+        down :: jetpack().args(["services", "down", "--no-color"]).current_dir(proj.path).envs(vars).output().expect("down")
+        assert(down.status.success(), "{String.from_utf8_lossy(down.stderr)}")
+        deadline :: Instant.now() + Duration.from_secs(3)
+        while process_is_alive(child_pid) {
+            assert(Instant.now() < deadline, "descendant survived systemd scope shutdown")
+            thread.sleep(Duration.from_millis(25))
+        }
+    }
+}
+
+// Rust: tests/jetpack_services.rs:1373
+#Test("production_supervisor_stops_descendants_after_leader_exit") {
+    if target.selected_os() == "linux" {
+        proj :: Scratch.new("authority-leader-exit")
+        root :: Scratch.new("authority-leader-exit-root")
+        home :: Scratch.new("authority-leader-exit-home")
+        write_project(&proj.path, "fixture: {{ run: [\"sh\", \"-c\", \"sleep 30 & child=$!; echo $child > child.pid; while [ ! -f exit.flag ]; do sleep 0.01; done; exit 0\"] }}", "fn run() {{}}\n")
+        vars :: [("JETPACK_ROOT", root.path.display().to_string()), ("HOME", home.path.display().to_string())]
+        up :: jetpack().args(["services", "up", "--no-color"]).current_dir(proj.path).envs(vars).output().expect("up")
+        stderr :: String.from_utf8_lossy(up.stderr)
+        assert(up.status.success(), "{stderr}")
+        service_dir :: proj.path.join(".jet/services/fixture")
+        child_file :: service_dir.join("data/child.pid")
+        wait_for_file_lines(&child_file, 1)
+        child_text :: fs.read_to_string(child_file).expect("read child pid")
+        child_trimmed := child_text.trim() // #4303
+        child_pid :: child_trimmed.parse[U32]().expect("parse child pid")
+        assert(process_is_alive(child_pid), "descendant must outlive the leader")
+        fs.write(service_dir.join("data/exit.flag"), "exit\n".as_bytes()).expect("request leader exit")
+        wait_for_file_contains(&service_dir.join("lifecycle"), "phase=failed")
+        deadline :: Instant.now() + Duration.from_secs(3)
+        while process_is_alive(child_pid) {
+            assert(Instant.now() < deadline, "supervisor left a descendant alive after leader exit: child={child_pid}, lifecycle={fs.read_to_string(service_dir.join("lifecycle")) ?? ""}, pid_state={fs.read_to_string(service_dir.join("pid")) ?? ""}")
+            thread.sleep(Duration.from_millis(25))
+        }
+        cleanup_deadline :: Instant.now() + Duration.from_secs(5)
+        while service_dir.join("pid").exists() {
+            assert(Instant.now() < cleanup_deadline, "supervisor retained PID after cleanup: lifecycle={fs.read_to_string(service_dir.join("lifecycle")) ?? ""}")
+            thread.sleep(Duration.from_millis(50))
+        }
+    }
+}
+
+// Rust: tests/jetpack_services.rs:1434
+#Test("production_path_rejects_retired_depends_on_field") {
+    if target.selected_os() == "linux" {
+        proj :: Scratch.new("depends-on-rejected")
+        root :: Scratch.new("depends-on-rejected-root")
+        home :: Scratch.new("depends-on-rejected-home")
+        write_project(&proj.path, "database: {{ run: [\"sleep\", \"30\"] }}, api: {{ run: [\"sleep\", \"30\"], depends_on: [\"database\"] }}", "fn run() {{}}\n")
+        out :: jetpack().args(["services", "up", "--no-color"]).current_dir(proj.path).env("JETPACK_ROOT", root.path).env("HOME", home.path).output().expect("up")
+        assert_eq(out.status.code(), Some(2))
+        stderr :: String.from_utf8_lossy(out.stderr)
+        assert(stderr.contains("E1262"), "{stderr}")
+        assert(!proj.path.join(".jet/services/api/pid").exists())
+    }
+}
+
+// Rust: tests/jetpack_services.rs:1458
+#Test("production_path_bounds_readiness_probe_runtime") {
+    if target.selected_os() == "linux" {
+        proj :: Scratch.new("bounded-readiness-production")
+        root :: Scratch.new("bounded-readiness-production-root")
+        home :: Scratch.new("bounded-readiness-production-home")
+        write_project(&proj.path, "fixture: {{ run: [\"sleep\", \"30\"], ready: \"sleep 30\" }}", "fn run() {{}}\n")
+        started :: Instant.now()
+        out :: jetpack().args(["services", "up", "--no-color"]).current_dir(proj.path).env("JETPACK_ROOT", root.path).env("HOME", home.path).env("JETPACK_SERVICE_HEALTH_TIMEOUT_MS", "200").output().expect("up")
+        assert_eq(out.status.code(), Some(2))
+        assert(started.elapsed() < Duration.from_secs(3), "readiness probe was not bounded: {started.elapsed()}")
+        assert(String.from_utf8_lossy(out.stderr).contains("E1261"))
+        assert(!proj.path.join(".jet/services/fixture/pid").exists())
+    }
+}
+
+// Rust: tests/jetpack_services.rs:1488
+#Test("production_path_stops_dependents_after_dependency_failure") {
+    if target.selected_os() == "linux" {
+        proj :: Scratch.new("dependency-failure")
+        root :: Scratch.new("dependency-failure-root")
+        home :: Scratch.new("dependency-failure-home")
+        write_project(&proj.path, "database: {{ run: [\"sh\", \"-c\", \"sleep 1\"] }}, api: {{ run: [\"sleep\", \"30\"], after: [\"database\"] }}", "fn run() {{}}\n")
+        vars :: [("JETPACK_ROOT", root.path.display().to_string()), ("HOME", home.path.display().to_string()), ("JETPACK_SERVICE_HEALTH_TIMEOUT_MS", "1500")]
+        up :: jetpack().args(["services", "up", "--no-color"]).current_dir(proj.path).envs(vars).output().expect("up")
+        assert(up.status.success(), "{String.from_utf8_lossy(up.stderr)}")
+        api_pid :: proj.path.join(".jet/services/api/pid")
+        assert(api_pid.is_file())
+        wait_for_missing(&api_pid)
+        error :: proj.path.join(".jet/services/api/supervisor.error")
+        wait_for_file_contains(&error, "dependency `database` failed")
+        lifecycle :: fs.read_to_string(proj.path.join(".jet/services/api/lifecycle")).expect("read lifecycle")
+        assert(lifecycle.contains("recovery=dependency-failed"), "{lifecycle}")
+        down :: jetpack().args(["services", "down", "--no-color"]).current_dir(proj.path).envs(vars).output().expect("down")
+        assert(down.status.success(), "{String.from_utf8_lossy(down.stderr)}")
+    }
+}

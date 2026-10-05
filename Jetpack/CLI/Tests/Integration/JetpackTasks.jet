@@ -1,0 +1,46 @@
+use std.[fs, env]
+use std.process.Command
+use core.files.OSPath
+
+// Rust: tests/jetpack_tasks.rs:9
+// GATE #4494: native process execution.
+pub fn jet() -> Command {
+    Command.new(env.var("CARGO_BIN_EXE_jet").unwrap())
+}
+
+// Rust: tests/jetpack_tasks.rs:13
+pub fn write_main(dir: OSPath, src: String) -> {
+    fs.write(dir.join("main.jet"), src).unwrap()
+    // Printing jobs choose their package IO authority up front.
+    fs.write(dir.join("package.jet"), "name: \"test-fixture\"\nversion: \"0.1.0\"\nauthority: {\n    holds: {\n        allow: [IO, Mem.Alloc]\n    }\n}\n").unwrap()
+}
+
+// Rust: tests/jetpack_tasks.rs:267
+// The after + scalar-parameter fixture shared by argv and AOT parity tests.
+pub fn write_job_graph_package(dir: OSPath) -> {
+    write_main(dir, r#"
+#Job
+fn migrate(to: String{"latest"}) -> {
+    print("migrate {to}")
+}
+#Job(after: ["migrate"])
+fn populate(label: String{"dev"}) -> {
+    print("populate {label}")
+}
+#Job
+fn web(port: Int{8080}, host: String{"127.0.0.1"}) -> {
+    print("web host={host} port={port}")
+}
+#Job
+fn broken() -> {
+    panic("broken job")
+}
+#Job(after: ["broken"])
+fn needs_broken() -> {
+    print("needs_broken ran")
+}
+fn run() -> {}
+"#)
+    fs.write(dir.join("package.jet"), "name: \"test-fixture\"\nversion: \"0.1.0\"\nauthority: {\n    holds: {\n        allow: [IO, Mem.Alloc, Panic]\n    }\n}\n").unwrap()
+    fs.rename(dir.join("main.jet"), dir.join("run.jet")).unwrap()
+}

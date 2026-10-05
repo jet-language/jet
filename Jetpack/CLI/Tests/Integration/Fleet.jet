@@ -1,0 +1,23 @@
+// Rust: tests/fleet.rs:1
+// Fleet field checks precede the honest rollout gate; no deploy is faked.
+use Compiler.Diagnostics.render_all
+use Jetpack.EnvModel.ModuleEval.evaluate_env
+use Jetpack.CLI.Tests.Integration.Common.[jetpack_bin, Scratch]
+// GATE #4494: actual filesystem and subprocess access.
+use std.[fs, Command]
+
+// Rust: tests/fleet.rs:19
+fn render(src: &String) -> (String, String) {
+    dir :: std.env.temp_dir()
+    err :: evaluate_env(src, &dir).expect_err("expected a diagnostic")
+    rendered :: render_all("env.jet", src, [err])
+    (err.code.to_string(), rendered)
+}
+
+// Rust: tests/fleet.rs:181
+fn write_fleet_project(dir: &OSPath) -> {
+    fs.write(dir.join("env.jet"), "module system.web { target: linux.x64 }\nmodule fleet.prod {\n    hosts: { web1: system.web.{ region: \"us-east\" } }\n}\n") ?? panic("write fleet project")
+}
+
+// Rust: tests/fleet.rs:190
+fn jetpack() -> Command { Command.new(jetpack_bin()) }

@@ -1,0 +1,502 @@
+use Jetpack.CLI.Tests.Integration.JetpackEngine.*
+use Jetpack.CLI.Tests.Integration.Support.JetpackFixtures.*
+use Jetpack.[Store, Recipe, SHA256, Package, ProviderFacts, MigrationImport, ProviderGraph, Remote]
+use JetEnvModel.ModuleEval
+use Compiler.Comptime.Build.*
+use Compiler.Driver.BuildArtifactStoreHandle
+use Jetpack.Remote.*
+use std.fs
+use core.sys
+// GATE #4494: actual subprocess, filesystem and executable/permission primitives.
+// GATE #4483: platform dispatch uses selected target facts.
+
+// Rust: tests/jetpack_engine.rs:8996
+#Test("two_process_reverse_package_order_does_not_deadlock") {
+    base :: Scratch.new("reverse-order-leases")
+    repo :: base.join("repo")
+    root :: base.join("root")
+    for name in ["a", "b"] {
+        package :: repo.join("pkgs/{name}")
+        fs.create_dir_all(package.join("bin")) ?? panic("create package")
+        fs.write(package.join("{name}.jet"), "module {name} {{ }}\n") ?? panic("write module")
+        tool :: package.join("bin/{name}")
+        fs.write(tool, "#!/bin/sh\necho {name}\n") ?? panic("write tool")
+        if sys.target.selected_family() == "unix" {
+            fs.set_permissions(tool, fs.Permissions.from_mode(0o755)) ?? panic("chmod")
+        }
+    }
+    fs.write(repo.join("package.jet"), "name: \"pair\"\nversion: \"1.0.0\"\npackages: { a: executable, b: executable }\n") ?? panic("write package")
+    write_project :: (name: String, packages: [String]) -> {
+        project :: base.join(name)
+        fs.create_dir_all(project) ?? panic("create project")
+        refs :: packages.iter().map((package) -> "\"{package}@mine\"").collect().join(", ")
+        fs.write(project.join("env.jet"), "use jetpack as pkg\npub fn shell() -> [JSON] {{\n return [pkg.source(\"mine\", \"{repo.display()}\", \"core\"), pkg.packages([{refs}])]\n}}\n") ?? panic("write env")
+        project
+    }
+    ab :: write_project("ab", ["a", "b"])
+    ba :: write_project("ba", ["b", "a"])
+    seeded :: jetpack().args(["build", "--no-color"]).current_dir(ab).env("JETPACK_ROOT", root).env("PATH", "/usr/bin:/bin").output() ?? panic("seed")
+    assert(seeded.status.success(), "stderr: {String.from_utf8_lossy(seeded.stderr)}")
+    spawn :: (project: OSPath) -> jetpack().args(["env", "--no-color", "--trust", "--", "/bin/sh", "-c", "true"]).current_dir(project).env("JETPACK_ROOT", root).env("PATH", "/usr/bin:/bin").spawn().expect("spawn")
+    first :: spawn(ab)
+    second :: spawn(ba)
+    assert((first.wait_with_output() ?? panic("first wait")).status.success())
+    assert((second.wait_with_output() ?? panic("second wait")).status.success())
+}
+
+// Rust: tests/jetpack_engine.rs:9077
+#Test("jet_build_never_reports_deleted_output_as_cached") {
+    (_base, proj, root) :: core_hello_project("truth-deleted-cache")
+    run :: () -> jetpack().args(["build", "--no-color"]).current_dir(proj).env("JETPACK_ROOT", root).env("PATH", "/usr/bin:/bin").output().expect("build")
+    assert(run().status.success())
+    roots :: Store.Roots { root: root.clone(), dev_mode: false }
+    entry :: Store.find_by_reference(&roots, "hello@mine") ?? panic("find hello")
+    make_tree_writable(OSPath.from(entry.out))
+    fs.remove_dir_all(entry.out) ?? panic("delete output")
+    rejected :: run()
+    assert(!rejected.status.success())
+    rejected_stderr :: String.from_utf8_lossy(rejected.stderr)
+    assert(rejected_stderr.contains("E2604"), "stderr: {rejected_stderr}")
+    rebuilt :: run()
+    assert(rebuilt.status.success())
+    stderr :: String.from_utf8_lossy(rebuilt.stderr)
+    assert(stderr.contains("built"), "deleted output must rebuild: {stderr}")
+    assert(!stderr.contains("1 cached"), "deleted output must never count as cache hit: {stderr}")
+}
+
+// Rust: tests/jetpack_engine.rs:9118
+#Test("jet_build_never_reports_tampered_output_as_cached") {
+    (_base, proj, root) :: core_hello_project("truth-tampered-cache")
+    run :: () -> jetpack().args(["build", "--no-color"]).current_dir(proj).env("JETPACK_ROOT", root).env("PATH", "/usr/bin:/bin").output().expect("build")
+    assert(run().status.success())
+    roots :: Store.Roots { root: root.clone(), dev_mode: false }
+    entry :: Store.find_by_reference(&roots, "hello@mine") ?? panic("find hello")
+    make_tree_writable(OSPath.from(entry.out))
+    fs.write(OSPath.from(entry.out).join("bin/hello"), "tampered") ?? panic("tamper")
+    rejected :: run()
+    assert(!rejected.status.success())
+    rejected_stderr :: String.from_utf8_lossy(rejected.stderr)
+    assert(rejected_stderr.contains("E2604"), "stderr: {rejected_stderr}")
+    rebuilt :: run()
+    assert(rebuilt.status.success())
+    stderr :: String.from_utf8_lossy(rebuilt.stderr)
+    assert(stderr.contains("built"), "tampered output must rebuild: {stderr}")
+    assert(!stderr.contains("1 cached"), "tampered output must never count as cache hit: {stderr}")
+}
+
+// Rust: tests/jetpack_engine.rs:9159
+#Test("jet_vendor_writes_pinned_sources") {
+    (_base, proj, root) :: core_hello_project("t4-vendor")
+    built :: jetpack().args(["build", "--no-color"]).current_dir(proj).env("JETPACK_ROOT", root).env("PATH", "/usr/bin:/bin").output() ?? panic("build")
+    assert(built.status.success())
+    out :: jetpack().args(["hangar", "vendor", "--no-color"]).current_dir(proj).env("JETPACK_ROOT", root).env("PATH", "/usr/bin:/bin").output() ?? panic("vendor")
+    assert(out.status.success(), "stderr: {String.from_utf8_lossy(out.stderr)}")
+    pin :: proj.join("vendor/hello.sha256")
+    assert(pin.is_file(), "vendor must write a per-package sha256 pin")
+    hash :: fs.read_to_string(pin) ?? panic("read pin")
+    trimmed := hash.trim() // #4303
+    assert(trimmed.starts_with("sha256-"), "the pin must be a content hash: {hash}")
+    assert(proj.join("vendor/hello").is_dir(), "vendor must copy the package source tree")
+}
+
+// Rust: tests/jetpack_engine.rs:9199
+#Test("jet_audit_reads_without_exec") {
+    (_base, proj, root) :: core_hello_project("t4-audit")
+    built :: jetpack().args(["build", "--no-color"]).current_dir(proj).env("JETPACK_ROOT", root).env("PATH", "/usr/bin:/bin").output() ?? panic("build")
+    assert(built.status.success())
+    out :: jetpack().args(["audit", "--no-color"]).current_dir(proj).env("JETPACK_ROOT", root).env("PATH", "/usr/bin:/bin").output() ?? panic("audit")
+    assert(out.status.success(), "stderr: {String.from_utf8_lossy(out.stderr)}")
+    report :: String.from_utf8_lossy(out.stderr)
+    assert(report.contains("read-only, no build ran"), "audit is read-only: {report}")
+    assert(report.contains("Provenance:"), "audit reports provenance: {report}")
+    assert(report.contains("Source:"), "audit reports source identity: {report}")
+    assert(report.contains("Action:"), "audit reports action identity: {report}")
+    assert(report.contains("Sandbox:"), "audit reports sandbox policy: {report}")
+    assert(report.contains("Closure:"), "audit reports closure: {report}")
+    assert(report.contains("Leases:"), "audit reports executable lease state: {report}")
+    assert(!report.contains("resolving"), "audit must not realize anything: {report}")
+    journal :: root.join("hangar/closure-db/journal")
+    fs.create_dir_all(journal) ?? panic("create journal")
+    partial :: journal.join("00000000000000000099-corrupt.txn.partial")
+    fs.write(partial, "interrupted") ?? panic("partial journal")
+    broken :: jetpack().args(["audit", "--no-color"]).current_dir(proj).env("JETPACK_ROOT", root).env("PATH", "/usr/bin:/bin").output() ?? panic("broken audit")
+    assert_eq(broken.status.code(), Val(2))
+    broken_report :: String.from_utf8_lossy(broken.stderr)
+    assert(broken_report.contains("Error [E1340]:"), "{broken_report}")
+    assert(broken_report.contains("More: jet-lang.dev/e/E1340"), "{broken_report}")
+    assert(partial.is_file(), "audit repaired a partial journal")
+}
+
+// Rust: tests/jetpack_engine.rs:9284
+#Test("jet_inspect_audit_missing_inputs_fails_closed") {
+    project :: Scratch.new("inspect-audit-missing-inputs")
+    fs.write(project.join("package.jet"), "name: \"audit-probe\"\nversion: \"0.1.0\"\n") ?? panic("write package")
+    missing_lock :: jet().args(["inspect", "audit", "--no-color"]).current_dir(project.path).env_remove("JET_ADVISORY_DB").env_remove("JET_ADVISORY_TRUST").env_remove("JET_ADVISORY_PUBLIC_KEY").output() ?? panic("missing lock")
+    assert_eq(missing_lock.status.code(), Val(1))
+    missing_lock_stderr :: String.from_utf8_lossy(missing_lock.stderr)
+    assert(missing_lock_stderr.contains("E2611"), "{missing_lock_stderr}")
+    assert(missing_lock_stderr.contains("unified lockfile"), "{missing_lock_stderr}")
+    fs.create_dir_all(project.join(".jet")) ?? panic("create .jet")
+    fs.write(project.join(".jet/lock"), "version = 1\n\n[[package]]\nname = \"audit-probe\"\nversion = \"0.1.0\"\nsource = { root = \".\" }\n\n[root]\ndependencies = []\n") ?? panic("write lock")
+    missing_db :: jet().args(["inspect", "audit", "--no-color"]).current_dir(project.path).env_remove("JET_ADVISORY_DB").env_remove("JET_ADVISORY_TRUST").env_remove("JET_ADVISORY_PUBLIC_KEY").output() ?? panic("missing database")
+    assert_eq(missing_db.status.code(), Val(1), "stdout={String.from_utf8_lossy(missing_db.stdout)} stderr={String.from_utf8_lossy(missing_db.stderr)}")
+    missing_db_stderr :: String.from_utf8_lossy(missing_db.stderr)
+    assert(missing_db_stderr.contains("E2611"), "{missing_db_stderr}")
+    assert(missing_db_stderr.contains("signed advisory database"), "{missing_db_stderr}")
+}
+
+// Rust: tests/jetpack_engine.rs:9343
+#Test("jet_hangar_du_counts_source_built_objects") {
+    (_base, proj, root) :: core_hello_project("t0-du")
+    built :: jetpack().args(["build", "--no-color"]).current_dir(proj).env("JETPACK_ROOT", root).env("PATH", "/usr/bin:/bin").output() ?? panic("build")
+    assert(built.status.success())
+    out :: jetpack().args(["hangar", "du", "--no-color"]).current_dir(proj).env("JETPACK_ROOT", root).env("PATH", "/usr/bin:/bin").output() ?? panic("du")
+    assert(out.status.success(), "stderr: {String.from_utf8_lossy(out.stderr)}")
+    report :: String.from_utf8_lossy(out.stderr)
+    assert(report.contains("built"), "du must mark source-built objects: {report}")
+    assert(report.contains("1 built from source"), "du summary must count source-built objects honestly: {report}")
+}
+
+// Rust: tests/jetpack_engine.rs:9380
+#Test("staged_plan_action_production_path_is_deterministic_and_complete") {
+    scratch :: Scratch.new("staged-plan-success")
+    source :: scratch.join("source")
+    artifacts :: scratch.join("artifacts")
+    fs.create_dir_all(source) ?? panic("create source")
+    input :: b"declared staged input"
+    fs.write(source.join("manifest"), input) ?? panic("write input")
+    digest :: "sha256-{SHA256.sha256_hex(input)}"
+    platform :: "{sys.target.selected_os()}-{sys.target.selected_arch()}"
+    action :: Recipe.StagedPlanAction.new("discover", 0, 1, [Recipe.PlanInput.new("manifest", digest.clone())], Recipe.PlanAuthority { tools: ["planner", "planner-alt"], effects: [BuildEffect.Exec, BuildEffect.FS], platform: platform.clone() })
+    executable :: std.env.current_exe() ?? panic("current executable")
+    tools :: ["planner": executable.clone(), "planner-alt": executable]
+    context :: Recipe.StagedPlanContext { source_dir: &source, artifact_root: &artifacts }
+    first :: Recipe.run_staged_plan_action(&action, &context, &tools, (sandbox) -> {
+        assert_eq(sandbox.read_input("manifest") ?? panic("read input"), input)
+        emitted := Recipe.PlanFragmentAction.new("compile", "planner")
+        emitted.args = ["--stable"]
+        emitted.inputs = ["manifest"]
+        emitted.outputs = ["result.bin"]
+        emitted.env = ["STAGED_INPUT": "manifest"]
+        emitted.effects = [BuildEffect.Exec, BuildEffect.FS]
+        emitted.platform = platform.clone()
+        Ok(Recipe.BuildPlanFragment { actions: [emitted] })
+    }) ?? panic("first staged plan")
+    second :: Recipe.run_staged_plan_action(&action, &context, &tools, (sandbox) -> {
+        assert_eq(sandbox.read_input("manifest") ?? panic("read input"), input)
+        emitted := Recipe.PlanFragmentAction.new("compile", "planner")
+        emitted.args = ["--stable"]
+        emitted.inputs = ["manifest"]
+        emitted.outputs = ["result.bin"]
+        emitted.env = ["STAGED_INPUT": "manifest"]
+        emitted.effects = [BuildEffect.Exec, BuildEffect.FS]
+        emitted.platform = platform.clone()
+        Ok(Recipe.BuildPlanFragment { actions: [emitted] })
+    }) ?? panic("second staged plan")
+    assert_eq(first.action_identity, second.action_identity)
+    assert_eq(first.fragment_digest, second.fragment_digest)
+    assert_eq(first.plan_fingerprint, second.plan_fingerprint)
+    assert_eq(first.artifact_dir, second.artifact_dir)
+    assert_eq(first.lock.inputs[0].digest, digest)
+    assert(first.lock.encode().contains("tool=planner\n"))
+    assert(first.lock.encode().contains("effect=exec\n"))
+    assert(first.lock.encode().contains("platform={platform}\n"))
+    assert(first.artifact_dir.join("fragment.plan").is_file())
+    assert(first.artifact_dir.join("lock").is_file())
+    assert(first.artifact_dir.join("plan.fingerprint").is_file())
+    emitted := Recipe.PlanFragmentAction.new("compile", "planner")
+    emitted.inputs = ["manifest"]
+    emitted.outputs = ["result.bin"]
+    emitted.effects = [BuildEffect.Exec, BuildEffect.FS]
+    emitted.platform = platform.clone()
+    plan :: Recipe.lower_staged_plan_action(&action, &Recipe.BuildPlanFragment { actions: [emitted] }, &tools) ?? panic("lower plan")
+    assert_eq(plan.actions().len(), 2, "planner plus one emitted action")
+    assert(plan.actions().iter().any((item) -> item.inputs.iter().any((path) -> path.as_str() == "manifest")))
+    assert(plan.actions().iter().any((item) -> item.outputs.iter().any((path) -> path.as_str() == "result.bin")))
+    assert(plan.actions().iter().all((item) -> item.labels.get("staged.platform").is_some_and((value) -> value == platform)))
+    assert(plan.actions().iter().any((item) -> item.labels.get("authority.tool.0").is_some_and((value) -> value == "planner")))
+    reordered := action.clone()
+    reordered.authority.tools.reverse()
+    reordered.authority.effects.reverse()
+    reordered_emitted := Recipe.PlanFragmentAction.new("compile", "planner")
+    reordered_emitted.inputs = ["manifest"]
+    reordered_emitted.outputs = ["result.bin"]
+    reordered_emitted.effects = [BuildEffect.Exec, BuildEffect.FS]
+    reordered_emitted.platform = platform.clone()
+    reordered_plan :: Recipe.lower_staged_plan_action(&reordered, &Recipe.BuildPlanFragment { actions: [reordered_emitted] }, &tools) ?? panic("lower reordered plan")
+    assert_eq(Recipe.plan_recipe_fingerprint(&plan) ?? panic("fingerprint"), Recipe.plan_recipe_fingerprint(&reordered_plan) ?? panic("reordered fingerprint"), "authority declaration order must not change canonical plan identity")
+}
+
+// Rust: tests/jetpack_engine.rs:9513
+#Test("staged_plan_action_rejects_sandbox_and_graph_failures_without_artifact") {
+    scratch :: Scratch.new("staged-plan-failures")
+    source :: scratch.join("source")
+    artifacts :: scratch.join("artifacts")
+    fs.create_dir_all(source) ?? panic("create source")
+    input :: b"declared staged input"
+    fs.write(source.join("manifest"), input) ?? panic("write input")
+    platform :: "{sys.target.selected_os()}-{sys.target.selected_arch()}"
+    tools :: ["planner": std.env.current_exe().expect("current executable")]
+    context :: Recipe.StagedPlanContext { source_dir: &source, artifact_root: &artifacts }
+    make_action :: (name: String) -> Recipe.StagedPlanAction.new(name, 0, 1, [Recipe.PlanInput.new("manifest", "sha256-{SHA256.sha256_hex(input)}")], Recipe.PlanAuthority { tools: ["planner"], effects: [BuildEffect.Exec], platform: platform.clone() })
+    valid_fragment :: (tool: String, output: String) -> {
+        emitted := Recipe.PlanFragmentAction.new("step", tool)
+        emitted.inputs = ["manifest"]
+        emitted.outputs = [output]
+        emitted.effects = [BuildEffect.Exec]
+        emitted.platform = platform.clone()
+        Recipe.BuildPlanFragment { actions: [emitted] }
+    }
+    error :: Recipe.run_staged_plan_action(&make_action("undeclared"), &context, &tools, (sandbox) -> {
+        assert(sandbox.read_store("private/store").is_err())
+        assert(sandbox.resolve_package("unlocked").is_err())
+        _ :: sandbox.read_input("not-declared")?
+        panic("read_input must reject undeclared access")
+    }).expect_err("undeclared input")
+    assert_eq(error.code, "E1238")
+    assert(error.why.contains("staged plan action denied"))
+    assert(!artifacts.exists())
+    cycle_a := Recipe.PlanFragmentAction.new("a", "planner")
+    cycle_a.inputs = ["manifest"]
+    cycle_a.outputs = ["a.out"]
+    cycle_a.dependencies = ["b"]
+    cycle_a.effects = [BuildEffect.Exec]
+    cycle_a.platform = platform.clone()
+    cycle_b := Recipe.PlanFragmentAction.new("b", "planner")
+    cycle_b.inputs = ["manifest"]
+    cycle_b.outputs = ["b.out"]
+    cycle_b.dependencies = ["a"]
+    cycle_b.effects = [BuildEffect.Exec]
+    cycle_b.platform = platform.clone()
+    error :: Recipe.run_staged_plan_action(&make_action("cycle"), &context, &tools, (_) -> Ok(Recipe.BuildPlanFragment { actions: [cycle_a, cycle_b] })).expect_err("cycle")
+    assert_eq(error.code, "E1238")
+    assert(error.why.contains("cycle"))
+    assert(!artifacts.exists())
+    error :: Recipe.run_staged_plan_action(&make_action("unauthorized-tool"), &context, &tools, (_) -> Ok(valid_fragment("other-tool", "tool.out"))).expect_err("unauthorized tool")
+    assert_eq(error.code, "E1238")
+    assert(error.why.contains("undeclared tool `other-tool`"))
+    assert(!artifacts.exists())
+    missing_tools :: [String: OSPath].new()
+    error :: Recipe.run_staged_plan_action(&make_action("missing-realized-tool"), &context, &missing_tools, (_) -> Ok(valid_fragment("planner", "missing-tool.out"))).expect_err("missing tool")
+    assert_eq(error.code, "E1238")
+    assert(error.what.contains("not a realized dependency"))
+    assert(!artifacts.exists())
+    unauthorized_effect := valid_fragment("planner", "effect.out")
+    unauthorized_effect.actions[0].effects = [BuildEffect.FS]
+    error :: Recipe.run_staged_plan_action(&make_action("unauthorized-effect"), &context, &tools, (_) -> Ok(unauthorized_effect)).expect_err("unauthorized effect")
+    assert_eq(error.code, "E1238")
+    assert(error.why.contains("undeclared effect `fs`"))
+    assert(!artifacts.exists())
+    mismatched_platform := valid_fragment("planner", "platform.out")
+    mismatched_platform.actions[0].platform = "other-platform"
+    error :: Recipe.run_staged_plan_action(&make_action("platform-mismatch"), &context, &tools, (_) -> Ok(mismatched_platform)).expect_err("platform mismatch")
+    assert_eq(error.code, "E1238")
+    assert(error.why.contains("not declared platform"))
+    assert(!artifacts.exists())
+    error :: Recipe.run_staged_plan_action(&make_action("invalid-output"), &context, &tools, (_) -> Ok(valid_fragment("planner", "../escape"))).expect_err("invalid output")
+    assert_eq(error.code, "E1238")
+    assert(error.why.contains("output `../escape`"))
+    assert(!artifacts.exists())
+    overlapping_outputs := valid_fragment("planner", "overlap.out")
+    nested_output := Recipe.PlanFragmentAction.new("nested", "planner")
+    nested_output.inputs = ["manifest"]
+    nested_output.outputs = ["overlap.out/child"]
+    nested_output.effects = [BuildEffect.Exec]
+    nested_output.platform = platform.clone()
+    overlapping_outputs.actions.push(nested_output)
+    error :: Recipe.run_staged_plan_action(&make_action("overlapping-output"), &context, &tools, (_) -> Ok(overlapping_outputs)).expect_err("overlap")
+    assert_eq(error.code, "E1238")
+    assert(error.why.contains("overlap"))
+    assert(!artifacts.exists())
+    mismatched_input := make_action("input-mismatch")
+    mismatched_input.inputs[0].digest = "sha256-{"0".repeat(64)}"
+    error :: Recipe.run_staged_plan_action(&mismatched_input, &context, &tools, (_) -> Ok(valid_fragment("planner", "mismatch.out"))).expect_err("input mismatch")
+    assert_eq(error.code, "E1238")
+    assert(error.why.contains("digest mismatch"))
+    assert(!artifacts.exists())
+    error :: Recipe.run_staged_plan_action(&make_action("failed"), &context, &tools, (_) -> Err(Recipe.StagedPlanActionError.Failed("boom"))).expect_err("failure")
+    assert_eq(error.code, "E1238")
+    assert(error.why.contains("failed before publication"))
+    assert(!artifacts.exists())
+    error :: Recipe.run_staged_plan_action(&make_action("cancelled"), &context, &tools, (_) -> Err(Recipe.StagedPlanActionError.Cancelled)).expect_err("cancelled")
+    assert_eq(error.code, "E1238")
+    assert(error.what.contains("cancelled"))
+    assert(!artifacts.exists())
+}
+
+// Rust: tests/jetpack_engine.rs:9705
+#Test("jetos_plan_projects_package_system_output_deterministically") {
+    project :: Scratch.new("jetos-package-system-output")
+    fs.write(project.join("package.jet"), "name: \"demo\"\noutputs: {\n    workstation: System{\n        name: \"workstation\"\n        target: linux.x64\n        packages: [ripgrep, \"fd@nixpkgs\", ripgrep]\n        services: { ssh: { enable: true, ports: [22] } }\n        options: { network: { hostName: \"workstation\" } }\n    }\n    prod: Fleet{ hosts: { edge: \"system.workstation\" } }\n}") ?? panic("write package")
+    run :: () -> jet().args(["os", "plan", "workstation", "--json", "--no-color", "--offline"]).current_dir(project.path).env("JETPACK_ROOT", project.join("jet-root")).output().expect("plan")
+    first :: run()
+    assert(first.status.success(), "stderr: {String.from_utf8_lossy(first.stderr)}")
+    second :: run()
+    assert(second.status.success(), "stderr: {String.from_utf8_lossy(second.stderr)}")
+    assert_eq(first.stdout, second.stdout)
+    json :: String.from_utf8_lossy(first.stdout)
+    compact :: json.chars().filter((ch) -> !ch.is_ascii_whitespace()).collect()
+    assert(compact.contains("\"host\":\"workstation\""), "{json}")
+    assert(compact.contains("\"target\":\"linux.x64\""), "{json}")
+    assert(compact.contains("\"graph_identity\":\""), "{json}")
+    assert(compact.contains("\"ref\":\"ripgrep@nixpkgs\""), "{json}")
+    assert(compact.contains("\"name\":\"ssh\""), "{json}")
+    assert(compact.contains("\"fields\":[{\"key\":\"ports\",\"value\":\"[22]\"}]"), "{json}")
+    assert(compact.contains("\"key\":\"network.hostName\""), "{json}")
+    assert(!project.join("jet-root/systems/generations").exists(), "plan must not create a generation")
+}
+
+// Rust: tests/jetpack_engine.rs:9773
+#Test("package_host_split_preserves_system_projection_and_reaches_jetos") {
+    project :: Scratch.new("package-host-split-parity")
+    fs.write(project.join("package.jet"), "name: \"demo\"\noutputs: { server: System{ name: \"halcyon\", target: linux.x64, packages: [ripgrep] } }\n") ?? panic("write package")
+    before_facts :: (Package.PackageFacts.load(project.path) ?? panic("load facts")) ?? panic("package facts")
+    before :: ModuleEval.project_package_outputs(&before_facts) ?? panic("project before")
+    split :: jet().args(["split", "hosts", "server"]).current_dir(project.path).env("NO_COLOR", "1").output() ?? panic("split")
+    assert(split.status.success(), "stderr: {String.from_utf8_lossy(split.stderr)}")
+    fleet_source :: fs.read_to_string(project.join("package/fleet.jet")) ?? panic("read fleet")
+    assert(fleet_source.contains("system.halcyon"), "{fleet_source}")
+    after_facts :: (Package.PackageFacts.load(project.path) ?? panic("load facts")) ?? panic("package facts")
+    after :: ModuleEval.project_package_outputs(&after_facts) ?? panic("project after")
+    assert_eq(before.systems, after.systems)
+    assert_eq(after.fleets[0].hosts[0].system, "halcyon")
+    plan :: jet().args(["os", "plan", "halcyon", "--json", "--no-color", "--offline"]).current_dir(project.path).env("JETPACK_ROOT", project.join("jet-root")).output() ?? panic("plan")
+    assert(plan.status.success(), "stderr: {String.from_utf8_lossy(plan.stderr)}")
+    plan_json :: String.from_utf8_lossy(plan.stdout)
+    assert(plan_json.contains("\"host\":\"halcyon\""), "{plan_json}")
+    assert(plan_json.contains("\"graph_identity\":\""), "{plan_json}")
+}
+
+// Rust: tests/jetpack_engine.rs:9823
+#Test("jetos_plan_rejects_package_fleet_host_path_collision_before_generation") {
+    project :: Scratch.new("jetos-package-fleet-host-collision")
+    fs.write(project.join("package.jet"), "name: \"demo\"\noutputs: {\n    workstation: System{ target: linux.x64 }\n    laptop: System{ target: linux.arm64 }\n    blue: Fleet{ hosts: { edge: system.workstation } }\n    green: Fleet{ hosts: { edge: system.laptop } }\n}") ?? panic("write package")
+    output :: jet().args(["os", "plan", "workstation", "--json", "--no-color", "--offline"]).current_dir(project.path).env("JETPACK_ROOT", project.join("jet-root")).output() ?? panic("plan")
+    assert_eq(output.status.code(), Val(2))
+    stderr :: String.from_utf8_lossy(output.stderr)
+    assert(stderr.contains("outputs.green.hosts.edge"), "{stderr}")
+    assert(stderr.contains("collides with Fleet host"), "{stderr}")
+    assert(!project.join("jet-root/systems").exists(), "projection failure must not publish generation files")
+}
+
+// Rust: tests/jetpack_engine.rs:9861
+#Test("jetos_plan_rejects_invalid_package_system_without_mutating_store") {
+    project :: Scratch.new("jetos-package-system-invalid")
+    fs.write(project.join("package.jet"), "name: \"demo\"\noutputs: { workstation: System{ target: linux.x64, services: { ssh: {} } } }") ?? panic("write package")
+    output :: jet().args(["os", "plan", "workstation", "--json", "--no-color", "--offline"]).current_dir(project.path).env("JETPACK_ROOT", project.join("jet-root")).output() ?? panic("plan")
+    assert_eq(output.status.code(), Val(2))
+    stderr :: String.from_utf8_lossy(output.stderr)
+    assert(stderr.contains("E1340"), "{stderr}")
+    assert(stderr.contains("outputs.workstation.services.ssh.enable"), "{stderr}")
+    assert(!project.join("jet-root/systems").exists(), "a rejected projection must not publish JetOS state")
+}
+
+// Rust: tests/jetpack_engine.rs:9897
+#Test("remote_scheduler_selects_capabilities_then_fails_over_in_order") {
+    root :: Scratch.new("remote-scheduler")
+    fast_binding :: RemoteBuildBinding.new("fast", root.join("fast"), b"fast-key").expect("fast binding").with_trust_domain("trusted").with_platform("linux-x86_64").with_execute(true)
+    safe_binding :: RemoteBuildBinding.new("safe", root.join("safe"), b"safe-key").expect("safe binding").with_trust_domain("trusted").with_platform("linux-x86_64").with_execute(true)
+    capabilities :: (priority) -> RemoteBuilderCapabilities.new("linux-x86_64", "trusted").with_capability(BuildCapability.Exec).with_feature("clang").with_pool(BuildResourcePool.CPU).with_concurrency(2).with_priority(priority).with_execute(true)
+    scheduler :: RemoteScheduler.new([RemoteBuilder.new(fast_binding, capabilities(20)).expect("fast builder"), RemoteBuilder.new(safe_binding, capabilities(10)).expect("safe builder")]) ?? panic("scheduler")
+    request :: RemoteBuildRequest.new(ActionKey.new("remote-action")).with_capability(BuildCapability.Exec).with_platform("linux-x86_64").with_trust_domain("trusted").with_feature("clang").with_pool(BuildResourcePool.CPU).with_execute(true).with_local_fallback(true)
+    selected :: scheduler.select(&request) ?? panic("select")
+    assert_eq(selected.builder(), "fast")
+    dispatch :: scheduler.dispatch(&request, (builder) -> {
+        if builder.builder() == "fast" { Err(RemoteAttemptError.worker_lost("fast worker disappeared")) }
+        else { Ok(builder.builder().to_string()) }
+    }) ?? panic("dispatch")
+    assert_eq(dispatch.builder, "safe")
+    assert_eq(dispatch.attempted, ["fast", "safe"])
+    assert_eq(dispatch.value, "safe")
+}
+
+// Rust: tests/jetpack_engine.rs:9954
+#Test("remote_ineligible_builder_honors_local_fallback") {
+    project :: Scratch.new("remote-ineligible-fallback")
+    context := BuildContext.new()
+    action :: context.action("local-fallback", ActionSpec.cached(["sh", "-c", "printf fallback > build/fallback.txt"]).with_outputs(["build/fallback.txt"]).with_cap(BuildCapability.Exec).with_cap(BuildCapability.FS).with_cap(BuildCapability.Net).with_pool(BuildResourcePool.GPU)) ?? panic("action")
+    target :: context.add_executable("fallback", TargetSpec.new().with_action(action)) ?? panic("target")
+    plan :: context.plan_with_default(target) ?? panic("plan")
+    grants :: [BuildCapability.Exec, BuildCapability.FS, BuildCapability.Net].into_iter().collect()
+    binding :: RemoteBuildBinding.new("gpu-builder", project.join("remote"), b"fallback-key").expect("binding").with_trust_domain("trusted").with_execute(true).with_local_fallback(true)
+    artifact_store :: BuildArtifactStoreHandle.at(project.path.join(".jet-store")) ?? panic("open test artifact store")
+    execution :: execute_build_plan_with_front_end_and_remote(&plan, &project.path, &artifact_store, &grants, FrontEndCompletion.all_complete(), Val(&binding)) ?? panic("execute")
+    assert_eq(fs.read_to_string(project.join("build/fallback.txt")) ?? panic("read output"), "fallback")
+    assert(execution.report.events.iter().any((event) -> match event {
+        BuildExecutionEvent.Finished { action: finished, outcome: ActionOutcome.Succeeded { exit_code: 0 } } -> finished == action.id()
+        _ -> false
+    }))
+}
+
+// Rust: tests/jetpack_engine.rs:10023
+#Test("remote_execution_identity_binds_the_complete_action_request") {
+    key :: ActionKey.new("remote-action")
+    toolchain :: ContentDigest.from_bytes(b"toolchain")
+    request :: RemoteExecutionRequest {
+        key: key.clone(), attempt_id: "attempt-1", argv: ["compiler", "src/main.jet"],
+        inputs: [ActionInputSnapshot { path: BuildPath.new("src/main.jet").expect("input path"), digest: ContentDigest.from_bytes(b"source"), byte_len: 6 }],
+        outputs: [BuildPath.new("build/app").expect("output path")], toolchain_digest: toolchain.clone(),
+        sandbox: RemoteSandboxProof.new("sandbox", key.as_str(), toolchain)
+    }
+    identity :: remote_execution_identity(&request)
+    changed_argv := request.clone()
+    changed_argv.argv[1] = "src/other.jet"
+    assert_ne(identity, remote_execution_identity(&changed_argv))
+    changed_input := request.clone()
+    changed_input.inputs[0].byte_len = 7
+    assert_ne(identity, remote_execution_identity(&changed_input))
+    changed_output := ^request
+    changed_output.outputs[0] = BuildPath.new("build/other") ?? panic("changed output")
+    assert_ne(identity, remote_execution_identity(&changed_output))
+}
+
+// Rust: tests/jetpack_engine.rs:10060
+#Test("provider_conformance_real_path_preserves_registry_npm_and_cargo_facts") {
+    npm_document :: "{\"name\":\"web\",\"version\":\"1.0.0\",\"license\":\"MIT\",\"dependencies\":{\"vite\":\"5.4.0\"},\"scripts\":{\"build\":\"vite build\"},\"repository\":{\"type\":\"git\",\"url\":\"https://example.invalid/web.git\"}}"
+    npm :: MigrationImport.import_npm(npm_document)
+    npm_facts :: npm.provider_facts.get("vite#version=5.4.0@npm") ?? panic("npm production importer emits exact dependency facts")
+    npm_facts.validate() ?? panic("npm facts are lossless")
+    assert(npm.emit_pkg_jet().contains("vite: vite#version=5.4.0@npm"))
+    assert_eq(npm_facts.native_document, npm_document)
+    assert(npm_facts.explain_lines().iter().any((line) -> line == "native package.json: retained"))
+    assert_eq(ProviderFacts.from_json(npm_facts.to_json()) ?? panic("facts roundtrip"), npm_facts)
+    cargo_manifest :: "[package]\nname = \"app\"\nversion = \"0.1.0\"\nlicense = \"MIT\"\nrepository = \"https://example.invalid/app.git\"\n[dependencies]\nserde = \"1\"\n[dev-dependencies]\ninsta = \"1\"\n"
+    cargo_lock :: "[[package]]\nname = \"serde\"\nversion = \"1.0.200\"\nsource = \"registry+https://example.invalid\"\nchecksum = \"serde-checksum\"\n"
+    cargo :: MigrationImport.import_cargo(cargo_manifest, cargo_lock)
+    cargo_facts :: cargo.provider_facts.get("serde#version=1.0.200@cargo") ?? panic("Cargo production importer emits exact dependency facts")
+    cargo_facts.validate() ?? panic("Cargo facts are lossless")
+    assert(cargo.emit_pkg_jet().contains("serde: serde#version=1.0.200@cargo"))
+    assert(cargo_facts.native_document.contains("Cargo.lock:"))
+    assert(cargo_facts.facts.contains_key("provider.cargo.lock.serde.checksum"))
+    assert(cargo.provider_facts.values().any((facts) -> facts.facts.contains_key("package.dependency_kind")))
+    registry_document :: "{\"name\":\"web\",\"version\":\"1.0.0\",\"content_hash\":\"sha256-web\",\"license\":\"MIT\",\"yanked\":false,\"signature\":\"sig\",\"owner\":\"team-web\",\"source\":{\"kind\":\"git\",\"url\":\"https://example.invalid/web.git\"},\"hooks\":{\"build\":{\"digest\":\"hook-digest\"}}}"
+    registry :: ProviderGraph.normalize_provider_document(ProviderGraph.ProviderFamily.JetRegistry, registry_document)
+    registry.validate() ?? panic("Jet registry facts are lossless")
+    shared :: registry.shared_facts()
+    assert(shared.facts.contains_key("provider.registry.signature"))
+    assert(shared.facts.contains_key("provider.registry.yanked"))
+    assert_eq(shared.native_document, registry_document)
+    assert(shared.explain_lines().iter().any((line) -> line == "native json: retained"))
+    lock :: registry.lock_record("app", &shared.reference, "x86_64-linux") ?? panic("Jet registry provider lock")
+    locked :: ProviderFacts.from_json(lock.future_fields.get("provider-facts").expect("provider facts in Jet registry lock")) ?? panic("Jet registry lock facts JSON")
+    assert_eq(locked, shared)
+}
+
+// Rust: tests/jetpack_engine.rs:10128
+#Test("provider_conformance_real_path_refuses_mutable_missing_and_conflicting_facts") {
+    npm :: MigrationImport.import_npm("{\"name\":\"web\",\"version\":\"1.0.0\",\"dependencies\":{\"vite\":\"^5\"}}")
+    npm_facts :: npm.provider_facts.get("vite@npm") ?? panic("mutable npm dependency remains in the fact carrier")
+    assert(!npm.emit_pkg_jet().contains("vite: vite@npm"))
+    assert(npm_facts.losses.iter().any((loss) -> loss.reason.contains("not an exact lock identity")))
+    assert(npm.todos.iter().any((todo) -> todo.source_path == "package.json" && todo.message.contains("unresolved")))
+    cargo :: MigrationImport.import_cargo("[package]\nname = \"app\"\nversion = \"0.1.0\"\n[dependencies]\nserde = \"1\"\n", "")
+    cargo_facts :: cargo.provider_facts.get("serde@cargo") ?? panic("missing Cargo lock remains in the fact carrier")
+    assert(!cargo.emit_pkg_jet().contains("serde: serde@cargo"))
+    assert(cargo_facts.losses.iter().any((loss) -> loss.reason.contains("no exact version")))
+    assert(cargo.todos.iter().any((todo) -> todo.source_path == "Cargo.lock" && todo.message.contains("missing")))
+    conflicting_registry :: "{\"name\":\"web\",\"version\":\"1.0.0\",\"content_hash\":\"sha256-a\"}\n{\"name\":\"web\",\"version\":\"1.0.0\",\"content_hash\":\"sha256-b\"}"
+    registry :: ProviderGraph.normalize_provider_document(ProviderGraph.ProviderFamily.JetRegistry, conflicting_registry)
+    assert(!registry.is_lossless())
+    assert(registry.conflicts.iter().any((conflict) -> conflict.contains("conflicting native facts")))
+    assert(registry.lock_record("app", "web#version=1.0.0@jet-registry", "any").expect_err("conflicting registry facts must not enter the lock").contains("conflict"))
+}

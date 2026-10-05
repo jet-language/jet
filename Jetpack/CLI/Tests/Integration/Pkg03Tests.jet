@@ -1,0 +1,863 @@
+use std.[fs, env, process, panic]
+use std.process.Command
+use core.files.OSPath
+use core.sys.target.[selected_os, selected_family]
+use jet.[Manifest, Fetch, Publish, Driver, Store, Lock, SHA256, Diagnostics]
+use jetpack_cli.Tests.Integration.Pkg.[tmp_dir, write, min_manifest, manifest_with_deps, with_store, first_diag_code, have_git, jet_bin, jet_cmd]
+use jetpack_cli.Tests.Integration.Pkg03.[assert_option_git_url_rejected_before_execution, extract_rev_from_lock]
+
+// GATE #4494: real processes, filesystem, permissions, environment, panic capture.
+// GATE #4483: selected target family/OS dispatch replaces Rust cfg arms.
+// #4499 not applicable: tests/pkg.rs:3625-5432 adds no composite map keys.
+// #4409 not applicable: tests/pkg.rs:3625-5432 asserts diagnostics, not IO kinds.
+
+// Rust: tests/pkg.rs:3625
+#Test("locked_build_rejects_tampered_path_dependency_store_entry") {
+    tmp :: tmp_dir("locked_build_path_tamper")
+    store :: tmp.join("store")
+    dependency :: tmp.join("greeter")
+    fs.create_dir_all(store).unwrap()
+    write(dependency, "package.jet", min_manifest("greeter", "0.1.0"))
+    write(dependency, "greeter.jet", "pub fn greet() -> {}")
+    raw :: manifest_with_deps("app", "0.1.0", "    greeter: ./greeter,")
+    write(tmp, "package.jet", raw)
+    write(tmp, "run.jet", "fn run() -> {}\n")
+    manifest :: Manifest.parse(tmp.join("package.jet"), raw).unwrap()
+    unlocked :: Fetch.FetchOptions(locked: false, update: false, update_dep: None, resolution: Publish.ResolveMode.Conservative)
+    (lock, _) :: with_store(store, () -> Fetch.fetch(tmp, manifest, None, unlocked).expect("initial path fetch should create a lock hash"))
+    locked := Driver.BuildRunOptions.default()
+    &locked.locked = true
+    entry :: tmp.join("run.jet")
+    errors :: with_store(store, () -> {
+        package :: lock.packages.iter().find(package -> package.name == "greeter").expect("path dependency must be recorded in the lock")
+        store_entry :: Store.store_path(package.name, package.version, package.fingerprint)
+        fs.write(store_entry.join("greeter.jet"), "pub fn compromised() -> {}\n").unwrap()
+        Driver.compile_bundle_path_build(entry.to_str().unwrap(), locked).expect_err("locked build must reject a changed store entry before loading it")
+    })
+    assert_eq(first_diag_code(errors), "E1204")
+    _ :: fs.remove_dir_all(tmp)
+}
+
+// Rust: tests/pkg.rs:3671
+#Test("locked_build_rejects_wide_empty_store_tree_before_dependency_manifest_load") {
+    tmp :: tmp_dir("locked_build_wide_empty_tree")
+    store :: tmp.join("store")
+    dependency :: tmp.join("greeter")
+    fs.create_dir_all(store).unwrap()
+    write(dependency, "package.jet", min_manifest("greeter", "0.1.0"))
+    write(dependency, "greeter.jet", "pub fn greet() -> {}\n")
+    loop index in 0..128 { fs.create_dir(dependency.join("empty-{index}")).unwrap() }
+    raw :: manifest_with_deps("app", "0.1.0", "    greeter: ./greeter,")
+    write(tmp, "package.jet", raw)
+    write(tmp, "run.jet", "fn run() -> {}\n")
+    manifest :: Manifest.parse(tmp.join("package.jet"), raw).unwrap()
+    unlocked :: Fetch.FetchOptions(locked: false, update: false, update_dep: None, resolution: Publish.ResolveMode.Conservative)
+    (lock, _) :: with_store(store, () -> Fetch.fetch(tmp, manifest, None, unlocked).expect("initial path fetch should create a lock hash"))
+    lock_before :: fs.read(tmp.join(".jet/lock")).unwrap()
+    locked := Driver.BuildRunOptions.default()
+    &locked.locked = true
+    entry :: tmp.join("run.jet")
+    errors :: with_store(store, () -> {
+        package :: lock.packages.iter().find(package -> package.name == "greeter").expect("path dependency must be recorded in the lock")
+        store_entry :: Store.store_path(package.name, package.version, package.fingerprint)
+        assert(store_entry.join("empty-127").is_dir())
+        // Bounded verification must precede malformed manifest loading.
+        fs.write(store_entry.join("package.jet"), "not a package\n").unwrap()
+        errors :: Driver.compile_bundle_path_build(entry.to_str().unwrap(), locked).expect_err("locked build must reject a changed wide source tree")
+        assert_eq(fs.read(store_entry.join("package.jet")).unwrap(), "not a package\n".as_bytes())
+        errors
+    })
+    assert_eq(first_diag_code(errors), "E1204")
+    assert_eq(fs.read(tmp.join(".jet/lock")).unwrap(), lock_before)
+    _ :: fs.remove_dir_all(tmp)
+}
+
+// Rust: tests/pkg.rs:3730
+#Test("locked_build_rejects_deep_store_tree_before_dependency_manifest_load") {
+    tmp :: tmp_dir("locked_build_deep_tree")
+    store :: tmp.join("store")
+    dependency :: tmp.join("greeter")
+    fs.create_dir_all(store).unwrap()
+    write(dependency, "package.jet", min_manifest("greeter", "0.1.0"))
+    write(dependency, "greeter.jet", "pub fn greet() -> {}\n")
+    raw :: manifest_with_deps("app", "0.1.0", "    greeter: ./greeter,")
+    write(tmp, "package.jet", raw)
+    write(tmp, "run.jet", "fn run() -> {}\n")
+    manifest :: Manifest.parse(tmp.join("package.jet"), raw).unwrap()
+    unlocked :: Fetch.FetchOptions(locked: false, update: false, update_dep: None, resolution: Publish.ResolveMode.Conservative)
+    (lock, _) :: with_store(store, () -> Fetch.fetch(tmp, manifest, None, unlocked).expect("initial path fetch should create a lock hash"))
+    locked := Driver.BuildRunOptions.default()
+    &locked.locked = true
+    entry :: tmp.join("run.jet")
+    errors :: with_store(store, () -> {
+        package :: lock.packages.iter().find(package -> package.name == "greeter").expect("path dependency must be recorded in the lock")
+        store_entry :: Store.store_path(package.name, package.version, package.fingerprint)
+        nested := store_entry.clone()
+        loop index in 0..=SHA256.MAX_TREE_DEPTH {
+            &nested.push("d{index}")
+            fs.create_dir(nested).unwrap()
+        }
+        fs.write(store_entry.join("package.jet"), "not a package\n").unwrap()
+        Driver.compile_bundle_path_build(entry.to_str().unwrap(), locked).expect_err("locked build must reject a deep source tree before loading it")
+    })
+    assert_eq(first_diag_code(errors), "E1204")
+    _ :: fs.remove_dir_all(tmp)
+}
+
+// Rust: tests/pkg.rs:3783
+#Test("locked_build_rejects_manifest_lock_path_identity_mismatch") {
+    tmp :: tmp_dir("locked_build_path_identity")
+    store :: tmp.join("store")
+    dependency :: tmp.join("greeter")
+    fs.create_dir_all(store).unwrap()
+    write(dependency, "package.jet", min_manifest("greeter", "0.1.0"))
+    write(dependency, "greeter.jet", "pub fn greet() -> {}\n")
+    raw :: manifest_with_deps("app", "0.1.0", "    greeter: ./greeter,")
+    write(tmp, "package.jet", raw)
+    write(tmp, "run.jet", "fn run() -> {}\n")
+    manifest :: Manifest.parse(tmp.join("package.jet"), raw).unwrap()
+    unlocked :: Fetch.FetchOptions(locked: false, update: false, update_dep: None, resolution: Publish.ResolveMode.Conservative)
+    (lock, _) := with_store(store, () -> Fetch.fetch(tmp, manifest, None, unlocked).expect("initial path fetch should create a lock"))
+    package := &lock.packages.iter_mut().find(package -> package.name == "greeter").expect("path dependency must be recorded in the lock")
+    assert_eq(package.version, "0.1.0")
+    &package.source = Lock.LockSource.Path("./other")
+    fs.write(tmp.join(".jet/lock"), Lock.write(lock)).unwrap()
+    locked := Driver.BuildRunOptions.default()
+    &locked.locked = true
+    entry :: tmp.join("run.jet")
+    errors :: with_store(store, () -> Driver.compile_bundle_path_build(entry.to_str().unwrap(), locked).expect_err("locked build must reject a manifest/lock path identity mismatch"))
+    assert_eq(first_diag_code(errors), "E1204")
+    rendered :: Diagnostics.render_all("package.jet", raw, errors)
+    assert_eq(rendered, "Error [E1204]: locked dependency `greeter` failed source verification\n Why: the locked path source disagrees with the manifest\n Fix: run `jet fetch` to recreate the lock from the verified dependency source\nMore: jet-lang.dev/e/E1204\n")
+    _ :: fs.remove_dir_all(tmp)
+}
+
+// Rust: tests/pkg.rs:3836
+#Test("registry_dependency_reports_transport_failure") {
+    tmp :: tmp_dir("registry_dep_staged")
+    store :: tmp.join("store")
+    fs.create_dir_all(store).unwrap()
+    raw :: manifest_with_deps("app", "0.1.0", "    textkit: textkit#1.2.0,")
+    write(tmp, "package.jet", raw)
+    mf :: Manifest.parse(tmp.join("package.jet"), raw).unwrap()
+    opts :: Fetch.FetchOptions(locked: false, update: false, update_dep: None, resolution: Publish.ResolveMode.Conservative)
+    diags :: with_store(store, () -> Fetch.fetch(tmp, mf, None, opts)).expect_err("registry dependency must report its verified transport diagnostic")
+    assert_eq(first_diag_code(diags), "E1207")
+    rendered :: Diagnostics.render_all(tmp.join("package.jet").to_string_lossy(), raw, diags)
+    assert(rendered.contains("Error [E1207]:"), "unexpected diagnostic:\n{rendered}")
+    assert(rendered.contains("Why:"), "missing E1207 reason:\n{rendered}")
+    assert(rendered.contains("Fix:"), "missing E1207 fix:\n{rendered}")
+    snapshot :: OSPath.from_text(env.var("CARGO_MANIFEST_DIR").unwrap()).join("tests/fixtures/jetpack-diagnostics/E1207.stderr")
+    if env.var_os("UPDATE_EXPECT").is_some() { fs.write(snapshot, rendered).unwrap() }
+    assert_eq(rendered, fs.read_to_string(snapshot).unwrap())
+    _ :: fs.remove_dir_all(tmp)
+}
+
+// Rust: tests/pkg.rs:3877
+#Test("git_dep_local_bare_repo_fetches_ok") {
+    if !have_git() {
+        eprintln("note: skipping git_dep_local_bare_repo (git not found)")
+        return
+    }
+    tmp :: tmp_dir("git_dep")
+    src :: tmp.join("mylib_src")
+    write(src, "mylib.jet", "pub fn answer() -> Int { return 42 }\n")
+    write(src, "package.jet", min_manifest("mylib", "0.1.0"))
+    bare :: tmp.join("mylib.git")
+    _ :: Command.new("git").args(["init", "--bare", bare.to_str().unwrap()]).output().unwrap()
+    clone :: tmp.join("mylib_clone")
+    _ :: Command.new("git").args(["clone", bare.to_str().unwrap(), clone.to_str().unwrap()]).output().unwrap()
+    loop e in fs.read_dir(src).unwrap().flatten() { fs.copy(e.path(), clone.join(e.file_name())).unwrap() }
+    loop (k, v) in [("user.email", "test@jet.test"), ("user.name", "Jet Test")] {
+        _ :: Command.new("git").args(["config", k, v]).current_dir(clone).output().unwrap()
+    }
+    _ :: Command.new("git").args(["add", "."]).current_dir(clone).output().unwrap()
+    _ :: Command.new("git").args(["commit", "-m", "init"]).current_dir(clone).output().unwrap()
+    _ :: Command.new("git").args(["push", "origin", "HEAD:main"]).current_dir(clone).output().unwrap()
+    _ :: Command.new("git").args(["tag", "v0.1.0"]).current_dir(clone).output().unwrap()
+    _ :: Command.new("git").args(["push", "origin", "v0.1.0"]).current_dir(clone).output().unwrap()
+    repo_url :: "file://{bare.to_str().unwrap()}"
+    raw :: manifest_with_deps("app", "0.1.0", "    mylib: {{ git: \"{repo_url}\", tag: \"v0.1.0\" }},")
+    write(tmp, "package.jet", raw)
+    write(tmp, "run.jet", "fn run() -> {}\n")
+    store :: tmp.join("store")
+    fs.create_dir_all(store).unwrap()
+    home :: tmp.join("home")
+    fs.create_dir_all(home).unwrap()
+    mf :: Manifest.parse(tmp.join("package.jet"), raw).unwrap()
+    opts :: Fetch.FetchOptions(locked: false, update: false, update_dep: None, resolution: Publish.ResolveMode.Conservative)
+    previous_home :: env.var_os("HOME")
+    env.set_var("HOME", home)
+    (lock, _) :: with_store(store, () -> Fetch.fetch(tmp, mf, None, opts).expect("git dep fetch should succeed"))
+    match previous_home {
+        Some(value) -> env.set_var("HOME", value)
+        None -> env.remove_var("HOME")
+    }
+    revision :: lock.packages.iter().find(package -> package.name == "mylib").and_then(package -> package.locked.as_ref()).expect("git lock entry should pin a revision")
+    url_hash :: SHA256.sha256_hex(repo_url.as_bytes())
+    revision_prefix: String :: revision.rev.chars().take(16).collect()
+    cache_dir :: home.join(".jet").join("git-cache").join(url_hash[..16]).join(revision_prefix)
+    fs.write(cache_dir.join("mylib.jet"), "pub fn compromised() -> {}\n").unwrap()
+    fs.write(tmp.join(".jet/build/deps/mylib/mylib.jet"), "pub fn compromised() -> {}\n").unwrap()
+    locked :: Fetch.FetchOptions(locked: true, update: false, update_dep: None, resolution: Publish.ResolveMode.Conservative)
+    previous_home :: env.var_os("HOME")
+    env.set_var("HOME", home)
+    error :: with_store(store, () -> Fetch.fetch(tmp, mf, Some(lock), locked).expect_err("locked fetch must reject a changed git cache"))
+    match previous_home {
+        Some(value) -> env.set_var("HOME", value)
+        None -> env.remove_var("HOME")
+    }
+    assert_eq(first_diag_code(error), "E1204")
+    locked_build := Driver.BuildRunOptions.default()
+    &locked_build.locked = true
+    entry :: tmp.join("run.jet")
+    build_error :: with_store(store, () -> Driver.compile_bundle_path_build(entry.to_str().unwrap(), locked_build).expect_err("locked build must reject a changed Git dependency link"))
+    assert_eq(first_diag_code(build_error), "E1204")
+    _ :: fs.remove_dir_all(tmp)
+}
+
+// Rust: tests/pkg.rs:4022
+#Test("git_revision_with_multibyte_prefix_does_not_panic") {
+    if !have_git() {
+        eprintln("note: skipping git_revision_with_multibyte_prefix (git not found)")
+        return
+    }
+    tmp :: tmp_dir("git_revision_utf8")
+    revision :: "{\"a\".repeat(15)}é"
+    raw :: manifest_with_deps("app", "0.1.0", "    broken: {{ git: \"file:///definitely/missing.git\", rev: \"{revision}\" }},")
+    write(tmp, "package.jet", raw)
+    manifest :: Manifest.parse(tmp.join("package.jet"), raw).unwrap()
+    store :: tmp.join("store")
+    fs.create_dir_all(store).unwrap()
+    options :: Fetch.FetchOptions(locked: false, update: false, update_dep: None, resolution: Publish.ResolveMode.Conservative)
+    result :: panic.catch_unwind(panic.AssertUnwindSafe(() -> with_store(store, () -> Fetch.fetch(tmp, manifest, None, options))))
+    assert(result.is_ok(), "a multibyte git revision must return a diagnostic, not panic")
+    assert(result.unwrap().is_err(), "the missing repository must fail")
+    _ :: fs.remove_dir_all(tmp)
+}
+
+// Rust: tests/pkg.rs:4060
+#Test("git_dep_rejects_private_transport_before_network_access") {
+    if !have_git() {
+        eprintln("note: skipping git_dep_private_transport (git not found)")
+        return
+    }
+    tmp :: tmp_dir("git_private_transport")
+    raw :: manifest_with_deps("app", "0.1.0", "    private: { git: \"http://127.0.0.1:9/private.git\", rev: \"0000000000000000000000000000000000000000\" },")
+    write(tmp, "package.jet", raw)
+    mf :: Manifest.parse(tmp.join("package.jet"), raw).unwrap()
+    store :: tmp.join("store")
+    fs.create_dir_all(store).unwrap()
+    opts :: Fetch.FetchOptions(locked: false, update: false, update_dep: None, resolution: Publish.ResolveMode.Conservative)
+    diags :: with_store(store, () -> Fetch.fetch(tmp, mf, None, opts)).expect_err("private git transport must be rejected before clone")
+    assert_eq(first_diag_code(diags), "E1203")
+    rendered :: Diagnostics.render_all(tmp.join("package.jet").to_string_lossy(), raw, diags)
+    assert(rendered.contains("not allowed"), "unexpected diagnostic:\n{rendered}")
+    assert(!tmp.join(".jet").exists(), "rejected transport created project state")
+    _ :: fs.remove_dir_all(tmp)
+}
+
+// Rust: tests/pkg.rs:4100
+#Test("git_dep_rejects_reserved_ipv4_transport_before_network_access") {
+    if !have_git() {
+        eprintln("note: skipping git_dep_reserved_transport (git not found)")
+        return
+    }
+    tmp :: tmp_dir("git_reserved_transport")
+    raw :: manifest_with_deps("app", "0.1.0", "    reserved: { git: \"https://192.0.0.1/repository.git\", rev: \"0000000000000000000000000000000000000000\" },")
+    write(tmp, "package.jet", raw)
+    manifest :: Manifest.parse(tmp.join("package.jet"), raw).unwrap()
+    store :: tmp.join("store")
+    fs.create_dir_all(store).unwrap()
+    options :: Fetch.FetchOptions(locked: false, update: false, update_dep: None, resolution: Publish.ResolveMode.Conservative)
+    diags :: with_store(store, () -> Fetch.fetch(tmp, manifest, None, options)).expect_err("reserved Git transport must be rejected before clone")
+    assert_eq(first_diag_code(diags), "E1203")
+    assert(!tmp.join(".jet").exists(), "rejected transport created project state")
+    _ :: fs.remove_dir_all(tmp)
+}
+
+// Rust: tests/pkg.rs:4136
+#Test("git_transport_uses_canonical_public_ip_classifier") {
+    source :: fs.read_to_string(OSPath.from_text(env.var("CARGO_MANIFEST_DIR").unwrap()).join("Compiler/JetCli/Source/Cli/Fetch02.jet")).expect("Fetch source should be readable")
+    assert_eq(source.matches("jet_net.is_public_ip(").count(), 1, "Git transport should have one call site for the canonical IP classifier")
+    assert(!source.contains("fn is_public_ip("), "Git transport must not define a duplicate IP classifier")
+    assert(!source.contains("to_ipv4_mapped") && !source.contains("first & 0xe000"), "Git transport must not carry a second IP range table")
+}
+
+// Rust: tests/pkg.rs:4156
+#Test("git_dep_pins_validated_address_for_dns_rebinding") {
+    if selected_family() != "unix" { return }
+    tmp :: tmp_dir("git_dns_rebinding")
+    fake_bin :: tmp.join("bin")
+    fs.create_dir_all(fake_bin).unwrap()
+    fake_git :: fake_bin.join("git")
+    log :: tmp.join("git-args.log")
+    fs.write(fake_git, r#"#!/bin/sh
+case " $* " in
+    *" --version"*) exit 0 ;;
+esac
+clone_dir=""
+previous=""
+for arg in "$@"; do
+    if [ "$previous" = "-C" ]; then clone_dir="$arg"; fi
+    previous="$arg"
+done
+if [ -n "$clone_dir" ]; then exit 0; fi
+printf '%s\n' "$@" >> "$JET_TEST_GIT_LOG"
+printf 'cwd=%s\n' "$(pwd -P)" >> "$JET_TEST_GIT_LOG"
+printf 'config-count=%s\n' "${GIT_CONFIG_COUNT-}" >> "$JET_TEST_GIT_LOG"
+printf 'config-system=%s\n' "${GIT_CONFIG_SYSTEM-}" >> "$JET_TEST_GIT_LOG"
+printf 'config-global=%s\n' "${GIT_CONFIG_GLOBAL-}" >> "$JET_TEST_GIT_LOG"
+printf 'config-local=%s\n' "${GIT_CONFIG_LOCAL-}" >> "$JET_TEST_GIT_LOG"
+printf 'config-parameters=%s\n' "${GIT_CONFIG_PARAMETERS-}" >> "$JET_TEST_GIT_LOG"
+printf 'git-exec-path=%s\n' "${GIT_EXEC_PATH-}" >> "$JET_TEST_GIT_LOG"
+printf 'git-template-dir=%s\n' "${GIT_TEMPLATE_DIR-}" >> "$JET_TEST_GIT_LOG"
+printf 'git-dir=%s\n' "${GIT_DIR-}" >> "$JET_TEST_GIT_LOG"
+printf 'git-namespace=%s\n' "${GIT_NAMESPACE-}" >> "$JET_TEST_GIT_LOG"
+printf 'git-no-replace-objects=%s\n' "${GIT_NO_REPLACE_OBJECTS-}" >> "$JET_TEST_GIT_LOG"
+printf 'git-replace-ref-base=%s\n' "${GIT_REPLACE_REF_BASE-}" >> "$JET_TEST_GIT_LOG"
+printf 'git-allow-protocol=%s\n' "${GIT_ALLOW_PROTOCOL-}" >> "$JET_TEST_GIT_LOG"
+printf 'git-protocol-from-user=%s\n' "${GIT_PROTOCOL_FROM_USER-}" >> "$JET_TEST_GIT_LOG"
+printf 'http-proxy=%s\n' "${http_proxy-}" >> "$JET_TEST_GIT_LOG"
+printf 'git-proxy=%s\n' "${GIT_PROXY_COMMAND-}" >> "$JET_TEST_GIT_LOG"
+case " $* " in
+    *" ls-remote "*)
+        printf '%s\trefs/heads/main\n' '0000000000000000000000000000000000000000'
+        exit 0 ;;
+esac
+last=""
+for arg in "$@"; do last="$arg"; done
+case " $* " in
+    *" clone "*)
+        mkdir -p "$last"
+        printf '%s\n' 'name: "rebind"' 'version: "0.1.0"' 'jet: ">=0.1.0"' 'description: ""' 'license: "MIT"' 'repository: ""' > "$last/package.jet"
+        ;;
+esac
+exit 0
+"#).unwrap()
+    permissions := fs.metadata(fake_git).unwrap().permissions()
+    &permissions.set_mode(0o755)
+    fs.set_permissions(fake_git, permissions).unwrap()
+    raw :: manifest_with_deps("app", "0.1.0", "    rebind: { git: \"https://8.8.8.8/repository.git\", branch: \"main\" },")
+    write(tmp, "package.jet", raw)
+    manifest :: Manifest.parse(tmp.join("package.jet"), raw).unwrap()
+    store :: tmp.join("store")
+    home :: tmp.join("home")
+    fs.create_dir_all(store).unwrap()
+    fs.create_dir_all(home).unwrap()
+    local_config :: tmp.join(".git")
+    fs.create_dir_all(local_config).unwrap()
+    fs.write(local_config.join("config"), "[url \"file:///outside/repository.git\"]\n\tinsteadOf = https://8.8.8.8/\n").unwrap()
+    path_entries := [fake_bin.clone()]
+    if path :: env.var_os("PATH") { &path_entries.extend(env.split_paths(path)) }
+    fake_path :: env.join_paths(path_entries).unwrap()
+    options :: Fetch.FetchOptions(locked: false, update: false, update_dep: None, resolution: Publish.ResolveMode.Conservative)
+    previous_home :: env.var_os("HOME")
+    previous_path :: env.var_os("PATH")
+    previous_log :: env.var_os("JET_TEST_GIT_LOG")
+    injected_env :: ["GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0", "GIT_CONFIG_PARAMETERS", "GIT_EXEC_PATH", "GIT_TEMPLATE_DIR", "GIT_CONFIG_SYSTEM", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_LOCAL", "GIT_DIR", "GIT_NAMESPACE", "GIT_NO_REPLACE_OBJECTS", "GIT_REPLACE_REF_BASE", "GIT_ALLOW_PROTOCOL", "GIT_PROTOCOL_FROM_USER", "http_proxy", "GIT_PROXY_COMMAND"]
+    previous_injected :: injected_env.map(key -> (key, env.var_os(key)))
+    result :: with_store(store, () -> {
+        env.set_var("HOME", home)
+        env.set_var("PATH", fake_path)
+        env.set_var("JET_TEST_GIT_LOG", log)
+        env.set_var("GIT_CONFIG_COUNT", "1")
+        env.set_var("GIT_CONFIG_KEY_0", "url.file:///outside/.insteadOf")
+        env.set_var("GIT_CONFIG_VALUE_0", "https://8.8.8.8/")
+        env.set_var("GIT_CONFIG_PARAMETERS", "url.file:///outside/.insteadOf")
+        env.set_var("GIT_EXEC_PATH", tmp.join("evil-exec"))
+        env.set_var("GIT_TEMPLATE_DIR", tmp.join("evil-template"))
+        env.set_var("GIT_CONFIG_SYSTEM", tmp.join("system-config"))
+        env.set_var("GIT_CONFIG_GLOBAL", tmp.join("global-config"))
+        env.set_var("GIT_CONFIG_LOCAL", tmp.join("local-config"))
+        env.set_var("GIT_DIR", tmp.join("evil.git"))
+        env.set_var("GIT_NAMESPACE", "evil")
+        env.set_var("GIT_NO_REPLACE_OBJECTS", "1")
+        env.set_var("GIT_REPLACE_REF_BASE", "refs/evil/")
+        env.set_var("GIT_ALLOW_PROTOCOL", "ext:file")
+        env.set_var("GIT_PROTOCOL_FROM_USER", "1")
+        env.set_var("http_proxy", "http://127.0.0.1:9")
+        env.set_var("GIT_PROXY_COMMAND", "touch hostile")
+        result :: Fetch.fetch(tmp, manifest, None, options)
+        match previous_home { Some(value) -> env.set_var("HOME", value); None -> env.remove_var("HOME") }
+        match previous_path { Some(value) -> env.set_var("PATH", value); None -> env.remove_var("PATH") }
+        match previous_log { Some(value) -> env.set_var("JET_TEST_GIT_LOG", value); None -> env.remove_var("JET_TEST_GIT_LOG") }
+        loop (key, value) in previous_injected {
+            match value { Some(value) -> env.set_var(key, value); None -> env.remove_var(key) }
+        }
+        result
+    })
+    result.expect("fake Git transport should complete without network access")
+    log_text :: fs.read_to_string(log).unwrap()
+    loop value in ["http.followRedirects=false", "http.proxy=", "http.sslVerify=true", "http.curloptResolve=8.8.8.8:443:8.8.8.8", "https://8.8.8.8/repository.git"] {
+        assert_eq(log_text.lines().filter(line -> line == value).count(), 2, "{value} must reach both ls-remote and clone")
+    }
+    loop value in ["cwd=/", "config-count=0", "config-system=/dev/null", "config-global=/dev/null", "config-local=/dev/null", "config-parameters=", "git-exec-path=", "git-template-dir=", "git-dir=", "git-namespace=", "git-no-replace-objects=", "git-replace-ref-base=", "git-allow-protocol=", "git-protocol-from-user=", "http-proxy=", "git-proxy="] {
+        assert_eq(log_text.lines().filter(line -> line == value).count(), 2, "{value} must reach both ls-remote and clone")
+    }
+    _ :: fs.remove_dir_all(tmp)
+}
+
+// Rust: tests/pkg.rs:4370
+#Test("git_dep_keeps_local_source_authority_after_path_swap") {
+    if !["linux", "android", "macos", "ios"].contains(selected_os()) { return }
+    tmp :: tmp_dir("git_local_authority_race")
+    source :: tmp.join("source.git")
+    backup :: tmp.join("source.original")
+    outside :: tmp.with_file_name("jet_pkg_git_local_race_outside_{process.id()}")
+    fake_bin :: tmp.join("bin")
+    log :: tmp.join("git-authority.log")
+    fs.create_dir_all(source).unwrap()
+    fs.create_dir_all(outside).unwrap()
+    write(source, "package.jet", min_manifest("safe", "0.1.0"))
+    write(outside, "package.jet", min_manifest("evil", "0.1.0"))
+    fs.create_dir_all(fake_bin).unwrap()
+    fake_git :: fake_bin.join("git")
+    fs.write(fake_git, r#"#!/bin/sh
+case " $* " in
+    *" --version"*) exit 0 ;;
+esac
+command_name=""
+remote=""
+after_separator=0
+for arg in "$@"; do
+    if [ "$arg" = "ls-remote" ] || [ "$arg" = "clone" ]; then command_name="$arg"; fi
+    if [ "$after_separator" = 1 ] && [ -z "$remote" ]; then remote="$arg"; fi
+    if [ "$arg" = "--" ]; then after_separator=1; fi
+done
+printf 'command=%s\nremote=%s\n' "$command_name" "$remote" >> "$JET_TEST_GIT_LOG"
+if [ "$command_name" = "ls-remote" ]; then
+    mv "$JET_TEST_GIT_SOURCE" "$JET_TEST_GIT_BACKUP" || exit 10
+    ln -s "$JET_TEST_GIT_OUTSIDE" "$JET_TEST_GIT_SOURCE" || exit 11
+    printf '%s\trefs/heads/main\n' '0000000000000000000000000000000000000000'
+    exit 0
+fi
+if [ "$command_name" = "clone" ]; then
+    destination=""
+    for arg in "$@"; do destination="$arg"; done
+    mkdir -p "$destination" || exit 12
+    case "$remote" in
+        /proc/self/fd/*|/dev/fd/*)
+            printf 'authority=fd\n' >> "$JET_TEST_GIT_LOG"
+            source_path="$remote" ;;
+        file://*)
+            printf 'authority=path\n' >> "$JET_TEST_GIT_LOG"
+            source_path="${remote#file://}" ;;
+        *) exit 13 ;;
+    esac
+    cat "$source_path/package.jet" > "$destination/package.jet" || exit 14
+    exit 0
+fi
+exit 0
+"#).unwrap()
+    fs.set_permissions(fake_git, fs.Permissions.from_mode(0o755)).unwrap()
+    raw :: manifest_with_deps("app", "0.1.0", "    safe: {{ git: \"file://{source.display()}\", branch: \"main\" }},")
+    write(tmp, "package.jet", raw)
+    manifest :: Manifest.parse(tmp.join("package.jet"), raw).unwrap()
+    store :: tmp.join("store")
+    home :: tmp.join("home")
+    fs.create_dir_all(store).unwrap()
+    fs.create_dir_all(home).unwrap()
+    path_entries := [fake_bin.clone()]
+    if path :: env.var_os("PATH") { &path_entries.extend(env.split_paths(path)) }
+    fake_path :: env.join_paths(path_entries).unwrap()
+    options :: Fetch.FetchOptions(locked: false, update: false, update_dep: None, resolution: Publish.ResolveMode.Conservative)
+    env_names :: ["HOME", "PATH", "JET_TEST_GIT_LOG", "JET_TEST_GIT_SOURCE", "JET_TEST_GIT_BACKUP", "JET_TEST_GIT_OUTSIDE"]
+    previous_env :: env_names.map(key -> (key, env.var_os(key)))
+    result :: with_store(store, () -> {
+        env.set_var("HOME", home)
+        env.set_var("PATH", fake_path)
+        env.set_var("JET_TEST_GIT_LOG", log)
+        env.set_var("JET_TEST_GIT_SOURCE", source)
+        env.set_var("JET_TEST_GIT_BACKUP", backup)
+        env.set_var("JET_TEST_GIT_OUTSIDE", outside)
+        result :: Fetch.fetch(tmp, manifest, None, options)
+        loop (key, value) in previous_env {
+            match value { Some(value) -> env.set_var(key, value); None -> env.remove_var(key) }
+        }
+        result
+    })
+    _ :: fs.remove_file(source)
+    if backup.exists() { fs.rename(backup, source).unwrap() }
+    (_, dep_dirs) :: result.expect("local Git fetch must use the opened source authority")
+    fetched_manifest :: fs.read_to_string(dep_dirs.get("safe").expect("local Git dependency directory is returned").join("package.jet")).unwrap()
+    assert(fetched_manifest.contains("name: \"safe\""))
+    assert(!fetched_manifest.contains("name: \"evil\""))
+    log_text :: fs.read_to_string(log).unwrap()
+    assert(log_text.lines().any(line -> line == "authority=fd"), "local Git consumer did not receive the opened directory authority:\n{log_text}")
+    assert(!log_text.lines().any(line -> line == "authority=path"), "local Git consumer fell back to a raceable path:\n{log_text}")
+    _ :: fs.remove_dir_all(tmp)
+    _ :: fs.remove_dir_all(outside)
+}
+
+// Rust: tests/pkg.rs:4526
+#Test("git_dep_rejects_unscoped_local_transport_before_git_execution") {
+    if !have_git() {
+        eprintln("note: skipping git_dep_unscoped_local_transport (git not found)")
+        return
+    }
+    project :: tmp_dir("git_local_transport_file")
+    outside :: project.with_file_name("jet_pkg_git_local_transport_outside_{process.id()}")
+    fs.create_dir_all(outside).unwrap()
+    url :: "file://{outside.display()}"
+    loop (index, (project, outside, url)) in [(project, outside, url), (tmp_dir("git_local_transport_path"), OSPath.new(), "../unscoped.git")].into_iter().enumerate() {
+        raw :: manifest_with_deps("app", "0.1.0", "    hostile{index}: {{ git: \"{url}\", rev: \"0000000000000000000000000000000000000000\" }},")
+        write(project, "package.jet", raw)
+        manifest :: Manifest.parse(project.join("package.jet"), raw).unwrap()
+        store :: project.join("store")
+        fs.create_dir_all(store).unwrap()
+        options :: Fetch.FetchOptions(locked: false, update: false, update_dep: None, resolution: Publish.ResolveMode.Conservative)
+        diagnostics :: with_store(store, () -> Fetch.fetch(project, manifest, None, options)).expect_err("unscoped local Git transport must be rejected before Git runs")
+        assert_eq(first_diag_code(diagnostics), "E1203")
+        assert(!project.join(".jet").exists())
+        _ :: fs.remove_dir_all(project)
+        if !outside.as_os_str().is_empty() { _ :: fs.remove_dir_all(outside) }
+    }
+}
+
+// Rust: tests/pkg.rs:4584
+#Test("git_dep_rejects_embedded_credentials_before_git_execution") {
+    if !have_git() {
+        eprintln("note: skipping git_dep_embedded_credentials (git not found)")
+        return
+    }
+    tmp :: tmp_dir("git_embedded_credentials")
+    raw :: manifest_with_deps("app", "0.1.0", "    hostile: { git: \"https://user:secret@example.com/repo.git\", rev: \"0000000000000000000000000000000000000000\" },")
+    write(tmp, "package.jet", raw)
+    manifest :: Manifest.parse(tmp.join("package.jet"), raw).unwrap()
+    store :: tmp.join("store")
+    fs.create_dir_all(store).unwrap()
+    options :: Fetch.FetchOptions(locked: false, update: false, update_dep: None, resolution: Publish.ResolveMode.Conservative)
+    diagnostics :: with_store(store, () -> Fetch.fetch(tmp, manifest, None, options)).expect_err("embedded Git credentials must be rejected before network access")
+    assert_eq(first_diag_code(diagnostics), "E1203")
+    assert(!tmp.join(".jet").exists())
+    _ :: fs.remove_dir_all(tmp)
+}
+
+// Rust: tests/pkg.rs:4618
+#Test("git_dep_hostile_transports_reject_before_fake_git_execution") {
+    if selected_family() != "unix" { return }
+    run_case :: (label: String, url: String, expected_reason: String) -> {
+        tmp :: tmp_dir(label)
+        fake_bin :: tmp.join("fake-bin")
+        marker :: tmp.join("git-transport-invoked")
+        fs.create_dir_all(fake_bin).unwrap()
+        fake_git :: fake_bin.join("git")
+        fs.write(fake_git, r#"#!/bin/sh
+touch "$JET_TEST_GIT_INVOKED"
+exit 99
+"#).unwrap()
+        fs.set_permissions(fake_git, fs.Permissions.from_mode(0o755)).unwrap()
+        raw :: manifest_with_deps("app", "0.1.0", "    hostile: {{ git: \"{url}\", rev: \"0000000000000000000000000000000000000000\" }},")
+        write(tmp, "package.jet", raw)
+        manifest :: Manifest.parse(tmp.join("package.jet"), raw).unwrap()
+        store :: tmp.join("store")
+        fs.create_dir_all(store).unwrap()
+        options :: Fetch.FetchOptions(locked: false, update: false, update_dep: None, resolution: Publish.ResolveMode.Conservative)
+        path_entries := [fake_bin]
+        if path :: env.var_os("PATH") { &path_entries.extend(env.split_paths(path)) }
+        fake_path :: env.join_paths(path_entries).unwrap()
+        previous_path :: env.var_os("PATH")
+        previous_marker :: env.var_os("JET_TEST_GIT_INVOKED")
+        diagnostics :: with_store(store, () -> {
+            env.set_var("PATH", fake_path)
+            env.set_var("JET_TEST_GIT_INVOKED", marker)
+            result :: Fetch.fetch(tmp, manifest, None, options)
+            match previous_path { Some(value) -> env.set_var("PATH", value); None -> env.remove_var("PATH") }
+            match previous_marker { Some(value) -> env.set_var("JET_TEST_GIT_INVOKED", value); None -> env.remove_var("JET_TEST_GIT_INVOKED") }
+            result.expect_err("hostile Git transport must be rejected")
+        })
+        assert_eq(first_diag_code(diagnostics), "E1203")
+        rendered :: Diagnostics.render_all(tmp.join("package.jet").to_string_lossy(), raw, diagnostics)
+        assert(rendered.contains(expected_reason), "unexpected hostile Git policy diagnostic:\n{rendered}")
+        assert(!marker.exists(), "hostile Git transport executed fake git for {url}")
+        assert(!tmp.join(".jet").exists(), "rejected Git transport created project state")
+        _ :: fs.remove_dir_all(tmp)
+    }
+    run_case("git_hostile_private", "http://127.0.0.1:9/private.git", "destination resolves to a non-public address")
+    run_case("git_hostile_reserved", "https://192.0.0.1/repository.git", "destination resolves to a non-public address")
+    run_case("git_hostile_link_local", "https://169.254.169.254/latest/repository.git", "destination resolves to a non-public address")
+    run_case("git_hostile_credentials", "https://user:secret@example.com/repository.git", "SSH user-info must be a safe username")
+    local_project :: tmp_dir("git_hostile_local")
+    outside :: local_project.with_file_name("jet_pkg_git_hostile_outside_{process.id()}")
+    fs.create_dir_all(outside).unwrap()
+    run_case("git_hostile_local_file", "file://{outside.display()}", "local Git path resolves outside the project root")
+    _ :: fs.remove_dir_all(local_project)
+    _ :: fs.remove_dir_all(outside)
+    run_case("git_hostile_local_path", "../unscoped.git", "local git paths must use file:// inside the project root")
+}
+
+// Rust: tests/pkg.rs:4741
+#Test("git_dep_rejects_ssh_userinfo_option_before_transport_execution") {
+    if selected_family() != "unix" { return }
+    if !have_git() {
+        eprintln("note: skipping git_dep_ssh_userinfo_option (git not found)")
+        return
+    }
+    tmp :: tmp_dir("git_ssh_userinfo_option")
+    fake_bin :: tmp.join("bin")
+    log :: tmp.join("git-args.log")
+    marker :: tmp.join("git-transport-invoked")
+    fs.create_dir_all(fake_bin).unwrap()
+    fake_git :: fake_bin.join("git")
+    fs.write(fake_git, r#"#!/bin/sh
+printf '%s\n' "$*" >> "$JET_TEST_GIT_LOG"
+last=""
+for arg in "$@"; do last="$arg"; done
+if [ "$last" = "--version" ]; then exit 0; fi
+touch "$JET_TEST_GIT_INVOKED"
+exit 99
+"#).unwrap()
+    fs.set_permissions(fake_git, fs.Permissions.from_mode(0o755)).unwrap()
+    raw :: manifest_with_deps("app", "0.1.0", "    hostile: { git: \"ssh://-oProxyCommand=touch@8.8.8.8/repository.git\", rev: \"0000000000000000000000000000000000000000\" },")
+    write(tmp, "package.jet", raw)
+    manifest :: Manifest.parse(tmp.join("package.jet"), raw).unwrap()
+    store :: tmp.join("store")
+    fs.create_dir_all(store).unwrap()
+    options :: Fetch.FetchOptions(locked: false, update: false, update_dep: None, resolution: Publish.ResolveMode.Conservative)
+    path_entries := [fake_bin]
+    if path :: env.var_os("PATH") { &path_entries.extend(env.split_paths(path)) }
+    fake_path :: env.join_paths(path_entries).unwrap()
+    previous_path :: env.var_os("PATH")
+    previous_log :: env.var_os("JET_TEST_GIT_LOG")
+    previous_invoked :: env.var_os("JET_TEST_GIT_INVOKED")
+    result :: with_store(store, () -> {
+        env.set_var("PATH", fake_path)
+        env.set_var("JET_TEST_GIT_LOG", log)
+        env.set_var("JET_TEST_GIT_INVOKED", marker)
+        result :: Fetch.fetch(tmp, manifest, None, options)
+        match previous_path { Some(value) -> env.set_var("PATH", value); None -> env.remove_var("PATH") }
+        match previous_log { Some(value) -> env.set_var("JET_TEST_GIT_LOG", value); None -> env.remove_var("JET_TEST_GIT_LOG") }
+        match previous_invoked { Some(value) -> env.set_var("JET_TEST_GIT_INVOKED", value); None -> env.remove_var("JET_TEST_GIT_INVOKED") }
+        result
+    })
+    diagnostics :: result.expect_err("option-shaped SSH user-info must be rejected")
+    assert_eq(first_diag_code(diagnostics), "E1203")
+    assert(!log.exists(), "Git was invoked: {fs.read_to_string(log).unwrap_or_default()}")
+    assert(!marker.exists(), "hostile SSH user-info reached Git transport")
+    assert(!tmp.join(".jet").exists())
+    _ :: fs.remove_dir_all(tmp)
+}
+
+// Rust: tests/pkg.rs:4901
+#Test("git_dep_rejects_option_url_before_ls_remote_execution") {
+    if selected_family() != "unix" { return }
+    assert_option_git_url_rejected_before_execution("branch: \"main\"", "git_option_url_ls_remote")
+}
+
+// Rust: tests/pkg.rs:4907
+#Test("git_dep_rejects_option_url_before_clone_execution") {
+    if selected_family() != "unix" { return }
+    assert_option_git_url_rejected_before_execution("rev: \"0000000000000000000000000000000000000000\"", "git_option_url_clone")
+}
+
+// Rust: tests/pkg.rs:4915
+#Test("git_dep_rejects_option_revision_before_git_execution") {
+    if !have_git() {
+        eprintln("note: skipping git_dep_option_revision (git not found)")
+        return
+    }
+    tmp :: tmp_dir("git_option_revision")
+    marker :: tmp.join("git-option-injection-marker")
+    raw :: manifest_with_deps("app", "0.1.0", "    hostile: {{ git: \"file:///definitely/missing.git\", rev: \"--upload-pack=touch {marker.display()}\" }},")
+    write(tmp, "package.jet", raw)
+    mf :: Manifest.parse(tmp.join("package.jet"), raw).unwrap()
+    store :: tmp.join("store")
+    fs.create_dir_all(store).unwrap()
+    opts :: Fetch.FetchOptions(locked: false, update: false, update_dep: None, resolution: Publish.ResolveMode.Conservative)
+    diags :: with_store(store, () -> Fetch.fetch(tmp, mf, None, opts)).expect_err("an option-shaped revision must be rejected before git")
+    assert_eq(first_diag_code(diags), "E1203")
+    assert(!marker.exists())
+    _ :: fs.remove_dir_all(tmp)
+}
+
+// Rust: tests/pkg.rs:4950
+#Test("git_dep_rejects_cache_path_traversal_before_filesystem_access") {
+    if !have_git() {
+        eprintln("note: skipping git_dep_cache_path_traversal (git not found)")
+        return
+    }
+    tmp :: tmp_dir("git_cache_path_traversal")
+    escaped :: tmp.join("escaped-cache")
+    raw :: manifest_with_deps("app", "0.1.0", "    hostile: { git: \"file:///definitely/missing.git\", rev: \"../escaped-cache\" },")
+    write(tmp, "package.jet", raw)
+    manifest :: Manifest.parse(tmp.join("package.jet"), raw).unwrap()
+    store :: tmp.join("store")
+    fs.create_dir_all(store).unwrap()
+    options :: Fetch.FetchOptions(locked: false, update: false, update_dep: None, resolution: Publish.ResolveMode.Conservative)
+    diagnostics :: with_store(store, () -> Fetch.fetch(tmp, manifest, None, options)).expect_err("a traversal-shaped revision must be rejected")
+    assert_eq(first_diag_code(diagnostics), "E1203")
+    assert(!escaped.exists(), "rejected revision created an escaped cache")
+    _ :: fs.remove_dir_all(tmp)
+}
+
+// Rust: tests/pkg.rs:4991
+#Test("git_dep_branch_update_rewrites_lock") {
+    if !have_git() {
+        eprintln("note: skipping git_dep_branch_update_rewrites_lock (git not found)")
+        return
+    }
+    tmp :: tmp_dir("git_branch_upd")
+    src :: tmp.join("mylib_src")
+    write(src, "mylib.jet", "pub fn answer() -> Int { return 42 }\n")
+    write(src, "package.jet", min_manifest("mylib", "0.1.0"))
+    init_repo :: tmp.join("mylib_init")
+    _ :: Command.new("git").args(["init", "-b", "main", init_repo.to_str().unwrap()]).output().unwrap()
+    loop e in fs.read_dir(src).unwrap().flatten() { fs.copy(e.path(), init_repo.join(e.file_name())).unwrap() }
+    loop (k, v) in [("user.email", "test@jet.test"), ("user.name", "Jet Test")] {
+        _ :: Command.new("git").args(["config", k, v]).current_dir(init_repo).output().unwrap()
+    }
+    _ :: Command.new("git").args(["add", "."]).current_dir(init_repo).output().unwrap()
+    _ :: Command.new("git").args(["commit", "-m", "init"]).current_dir(init_repo).output().unwrap()
+    bare :: tmp.join("mylib.git")
+    _ :: Command.new("git").args(["clone", "--bare", init_repo.to_str().unwrap(), bare.to_str().unwrap()]).output().unwrap()
+    clone :: tmp.join("mylib_clone")
+    _ :: Command.new("git").args(["clone", bare.to_str().unwrap(), clone.to_str().unwrap()]).output().unwrap()
+    loop (k, v) in [("user.email", "test@jet.test"), ("user.name", "Jet Test")] {
+        _ :: Command.new("git").args(["config", k, v]).current_dir(clone).output().unwrap()
+    }
+    repo_url :: "file://{bare.to_str().unwrap()}"
+    raw :: manifest_with_deps("app", "0.1.0", "    mylib: {{ git: \"{repo_url}\", branch: \"main\" }},")
+    write(tmp, "package.jet", raw)
+    store :: tmp.join("store")
+    fs.create_dir_all(store).unwrap()
+    mf :: Manifest.parse(tmp.join("package.jet"), raw).unwrap()
+    opts :: Fetch.FetchOptions(locked: false, update: false, update_dep: None, resolution: Publish.ResolveMode.Conservative)
+    result :: with_store(store, () -> Fetch.fetch(tmp, mf, None, opts))
+    assert(result.is_ok(), "initial git branch fetch should succeed: {result.err():?}")
+    lock_raw :: fs.read_to_string(tmp.join(".jet/lock")).expect(".jet/lock must exist")
+    initial_rev :: extract_rev_from_lock(lock_raw)
+    assert(!initial_rev.is_empty(), "lock must contain a rev after initial fetch")
+    write(clone, "extra.jet", "pub fn extra() -> Int { return 99 }\n")
+    _ :: Command.new("git").args(["add", "."]).current_dir(clone).output().unwrap()
+    _ :: Command.new("git").args(["commit", "-m", "second commit"]).current_dir(clone).output().unwrap()
+    _ :: Command.new("git").args(["push", "origin", "HEAD:main"]).current_dir(clone).output().unwrap()
+    lock_str :: fs.read_to_string(tmp.join(".jet/lock")).unwrap()
+    existing_lock :: Lock.parse(lock_str).expect("initial lock must parse")
+    update_opts :: Fetch.FetchOptions(locked: false, update: true, update_dep: None, resolution: Publish.ResolveMode.Conservative)
+    result2 :: with_store(store, () -> Fetch.fetch(tmp, mf, Some(existing_lock), update_opts))
+    assert(result2.is_ok(), "update fetch should succeed: {result2.err():?}")
+    lock_raw2 :: fs.read_to_string(tmp.join(".jet/lock")).expect(".jet/lock must exist after update")
+    new_rev :: extract_rev_from_lock(lock_raw2)
+    assert(!new_rev.is_empty(), "lock must contain a rev after update fetch")
+    assert_ne(initial_rev, new_rev, "lock rev must change after a new commit was pushed")
+    _ :: fs.remove_dir_all(tmp)
+}
+
+// Rust: tests/pkg.rs:5173
+#Test("cli_jet_new_creates_project_structure") {
+    assert(jet_bin().is_file(), "the Cargo-provided jet binary must exist for this production-path test")
+    tmp :: tmp_dir("cli_new")
+    store :: tmp.join("store")
+    fs.create_dir_all(store).unwrap()
+    out :: jet_cmd(["new", "myapp"], tmp, store)
+    assert(out.status.success(), "jet new failed:\n{String.from_utf8_lossy(out.stderr)}")
+    proj :: tmp.join("myapp")
+    assert(proj.join("package.jet").is_file(), "jet new must create package.jet")
+    assert(proj.join("run.jet").is_file(), "jet new must create run.jet")
+    generated_run :: fs.read_to_string(proj.join("run.jet")).unwrap()
+    assert(generated_run.contains("fn run()") && !generated_run.contains("#CLI") && !generated_run.contains("core.ui"), "plain jet-new starter must be print-only:\n{generated_run}")
+    assert(proj.join(".gitignore").is_file(), "jet new must create .gitignore")
+    run :: jet_cmd(["run"], proj, store)
+    assert(run.status.success(), "new project must run without naming a file:\n{String.from_utf8_lossy(run.stderr)}")
+    assert_eq(String.from_utf8_lossy(run.stdout), "hello, world\n")
+    check :: jet_cmd(["check"], proj, store)
+    assert(check.status.success(), "new project must check without naming a file:\n{String.from_utf8_lossy(check.stderr)}")
+    edited_source :: "fn run() -> { print(\"edited\") }\n#Test(\"scaffold smoke\") { assert(true) }\n"
+    write(proj, "run.jet", edited_source)
+    test :: jet_cmd(["test"], proj, store)
+    assert(test.status.success(), "an edited project with a test must test without naming a file:\n{String.from_utf8_lossy(test.stderr)}")
+    write(proj, "run.jet", "fn run() -> { print(unknown_scaffold_name) }\n")
+    invalid :: jet_cmd(["check"], proj, store)
+    assert(!invalid.status.success(), "invalid source must fail `jet check`")
+    assert(String.from_utf8_lossy(invalid.stderr).contains("Error ["), "invalid source lost its diagnostic:\n{String.from_utf8_lossy(invalid.stderr)}")
+    write(proj, "run.jet", edited_source)
+    loop args in [["run", "--profile=debug"], ["dev", "--watch=off"]] {
+        output :: jet_cmd(args, proj, store)
+        assert(output.status.success(), "newcomer command {args:?} failed:\n{String.from_utf8_lossy(output.stderr)}")
+        assert_eq(String.from_utf8_lossy(output.stdout), "edited\n", "newcomer command {args:?} chose a different entry or tier")
+    }
+    update :: jet_cmd(["update", "jet"], proj, store)
+    assert(update.status.success(), "new project toolchain pin must update:\n{String.from_utf8_lossy(update.stderr)}")
+    assert(proj.join(".jet/lock").is_file(), "toolchain update must write .jet/lock")
+    _ :: fs.remove_dir_all(tmp)
+}
+
+// Rust: tests/pkg.rs:5282
+#Test("cli_beginner_onboarding_ordered_workflow_uses_real_binary") {
+    assert(jet_bin().is_file(), "the Cargo-provided jet binary must exist for this production-path test")
+    tmp :: tmp_dir("cli_beginner_onboarding")
+    store :: tmp.join("store")
+    fs.create_dir_all(store).unwrap()
+    created :: jet_cmd(["new", "hello"], tmp, store)
+    assert(created.status.success(), "jet new failed:\n{String.from_utf8_lossy(created.stderr)}")
+    project :: tmp.join("hello")
+    assert(project.join("run.jet").is_file())
+    assert(project.join("package.jet").is_file())
+    first_run :: jet_cmd(["run"], project, store)
+    assert(first_run.status.success())
+    assert_eq(String.from_utf8_lossy(first_run.stdout), "hello, world\n")
+    source :: r#"#CLI
+struct GreetingArgs {
+    #Doc("name to greet") name: String{"Jet"}
+}
+
+fn greet(name: String) -> String {
+    return "hello, {name}"
+}
+
+#Test("greet says hello") {
+    assert_eq(greet("Jet"), "hello, Jet")
+}
+
+fn run(args: GreetingArgs) -> {
+    print(greet(args.name))
+}
+"#
+    write(project, "run.jet", source)
+    check :: jet_cmd(["check"], project, store)
+    assert(check.status.success(), "jet check failed:\n{String.from_utf8_lossy(check.stderr)}")
+    tests :: jet_cmd(["test"], project, store)
+    assert(tests.status.success(), "jet test failed:\n{String.from_utf8_lossy(tests.stderr)}")
+    test_stdout :: String.from_utf8_lossy(tests.stdout)
+    assert(test_stdout.contains("greet says hello: pass"), "{test_stdout}")
+    assert(test_stdout.contains("1 passed, 0 failed, 0 skipped"), "{test_stdout}")
+    explicit_run :: jet_cmd(["run", "run.jet"], project, store)
+    assert(explicit_run.status.success())
+    assert_eq(String.from_utf8_lossy(explicit_run.stdout), "hello, Jet\n")
+    write(project, "run.jet", "print(\"before\")\nfn run() -> { print(\"middle\") }\nprint(\"after\")\n")
+    invalid :: jet_cmd(["check"], project, store)
+    assert(!invalid.status.success())
+    invalid_stderr :: String.from_utf8_lossy(invalid.stderr)
+    assert(invalid_stderr.contains("E0621"), "{invalid_stderr}")
+    explanation :: jet_cmd(["explain", "E0621"], project, store)
+    assert(explanation.status.success())
+    explanation_stdout :: String.from_utf8_lossy(explanation.stdout)
+    assert(explanation_stdout.contains("What this means:"), "{explanation_stdout}")
+    assert(explanation_stdout.contains("Why Jet enforces it:"), "{explanation_stdout}")
+    assert(explanation_stdout.contains("How to fix it:"), "{explanation_stdout}")
+    _ :: fs.remove_dir_all(tmp)
+}
+
+// Rust: tests/pkg.rs:5385
+#Test("cli_run_migrates_all_retired_entry_layouts") {
+    assert(jet_bin().is_file(), "the Cargo-provided jet binary must exist")
+    tmp :: tmp_dir("cli_run_entry_migration")
+    store :: tmp.join("store")
+    fs.create_dir_all(store).unwrap()
+    loop (label, retired, canonical) in [("root", "main.jet", "run.jet"), ("src", "src/main.jet", "src/run.jet"), ("managed", ".jet/main.jet", "run.jet")] {
+        project :: tmp.join(label)
+        fs.create_dir_all(project).unwrap()
+        write(project, "package.jet", min_manifest(label, "0.1.0"))
+        write(project, retired, "fn run() -> {{ print(\"{label}\") }}\n")
+        out :: jet_cmd(["run"], project, store)
+        assert(out.status.success(), "jet run failed for {label} layout:\n{String.from_utf8_lossy(out.stderr)}")
+        assert_eq(String.from_utf8_lossy(out.stdout), "{label}\n")
+        assert(project.join(canonical).is_file())
+        assert(!project.join(retired).exists())
+        stderr :: String.from_utf8_lossy(out.stderr)
+        assert(stderr.contains("notice: migrated retired entry"), "{stderr}")
+        assert(stderr.contains("main.jet") && stderr.contains("run.jet"), "{stderr}")
+    }
+    fs.remove_dir_all(tmp).unwrap()
+}

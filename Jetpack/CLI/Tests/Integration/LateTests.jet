@@ -1,0 +1,872 @@
+// Rust: crates/jetpack/src/Store/Tests/tests/late.rs:1
+use Jetpack.Store.Tests.*
+use Jetpack.Store.[Closure, Receipt, Envelope, ProducerRecord, CacheIdentity, IngestRequest, StoreEntry, AdmissionFailurePoint, LiveRoots, CacheExpectation, OBJECTS_DIR]
+use Jetpack.[Roots, RuntimePolicy, ProviderPlanFacts, SHA256]
+use Jetpack.CLI.Tests.Integration.Late.*
+use Jetpack.CLI.Tests.Integration.NixProjection.*
+use core.sys
+use tests.support.no_nix_namespace
+// GATE #4494: real filesystem operations, threads and native metadata.
+use std.[fs, env, thread, OpenOptions, IOErrorKind]
+
+// Rust: crates/jetpack/src/Store/Tests/tests/late.rs:4
+#Test("ingest_installs_valid_secondary_named_output_with_matching_digest") {
+    (roots, _g) :: temp_roots()
+    out :: roots.root.join("src-primary")
+    dev :: roots.root.join("src-dev")
+    fs.create_dir_all(out) ?? panic("create primary")
+    fs.write(out.join("payload"), "primary") ?? panic("write primary")
+    fs.write(dev, "development") ?? panic("write dev")
+    if sys.target.selected_family() == "unix" {
+        fs.symlink("payload", out.join("payload-link")) ?? panic("symlink")
+    }
+    outputs :: [String: OSPath]{"out": out, "dev": dev}
+    ingested :: ingest_tree(&roots, &IngestRequest{
+        name: "named-output", version: "1", reference: "path:named-output",
+        cache_identity: test_identity(), references: [String]{}, outputs: outputs,
+        signature: "", provenance: "", platform_artifact_kind: ""
+    }) ?? panic("ingest")
+    dev_digest :: ingested.entry.named_outputs.get("dev") ?? panic("dev digest")
+    installed :: roots.hangar_dir().join("objects").join(dev_digest)
+    assert_eq(fs.read_to_string(installed) ?? panic("read dev"), "development")
+    if sys.target.selected_family() == "unix" {
+        assert_eq(fs.read_link(OSPath.from(ingested.entry.out).join("payload-link")) ?? panic("read link"), OSPath.from("payload"))
+    }
+    actual :: Envelope.try_output_hash_of(installed.to_string_lossy()) ?? panic("hash dev")
+    assert_eq(ingested.entry.named_outputs.get("dev"), Val(actual))
+    verify_hangar_object(&roots, &ingested.entry) ?? panic("verify")
+}
+
+// Rust: crates/jetpack/src/Store/Tests/tests/late.rs:45
+#Test("ingest_path_independent_digest_ignores_source_dirname") {
+    (roots, _g) :: temp_roots()
+    left :: roots.root.join("left-name")
+    right :: roots.root.join("right-name")
+    fs.create_dir_all(left) ?? panic("left")
+    fs.create_dir_all(right) ?? panic("right")
+    fs.write(left.join("f"), "x") ?? panic("left payload")
+    fs.write(right.join("f"), "x") ?? panic("right payload")
+    a :: ingest_tree(&roots, &IngestRequest{
+        name: "a", version: "1", reference: "path:left", cache_identity: test_identity(),
+        references: [String]{}, outputs: [String: OSPath]{"out": left},
+        signature: "", provenance: "", platform_artifact_kind: ""
+    }) ?? panic("ingest left")
+    b :: ingest_tree(&roots, &IngestRequest{
+        name: "b", version: "1", reference: "path:right", cache_identity: test_identity(),
+        references: [String]{}, outputs: [String: OSPath]{"out": right},
+        signature: "", provenance: "", platform_artifact_kind: ""
+    }) ?? panic("ingest right")
+    assert_eq(a.entry.envelope.output_hash, b.entry.envelope.output_hash)
+    assert(b.deduplicated)
+}
+
+// Rust: crates/jetpack/src/Store/Tests/tests/late.rs:92
+#Test("closure_graph_named_outputs_are_independent_and_queries_are_cycle_safe") {
+    (roots, _g) :: temp_roots()
+    base :: ingest_fixture(&roots, "base", [(String, String)]{("out", "base")}, [String]{})
+    middle :: ingest_fixture(&roots, "middle", [(String, String)]{("out", "middle")}, [String]{base.entry.envelope.output_hash})
+    consumer :: ingest_fixture(&roots, "consumer", [(String, String)]{("out", "consumer-out"), ("dev", "consumer-dev")}, [String]{middle.entry.envelope.output_hash})
+    primary :: consumer.entry.envelope.output_hash.clone()
+    dev :: (consumer.entry.named_outputs.get("dev") ?? panic("dev")).clone()
+    assert_ne(primary, dev)
+    assert_eq(direct_references_of(&roots, &primary) ?? panic("references"), [String]{middle.entry.envelope.output_hash})
+    assert_eq(direct_references_of(&roots, &dev) ?? panic("dev references"), [String]{middle.entry.envelope.output_hash})
+    assert_eq(transitive_references_of(&roots, &dev) ?? panic("transitive"), [String]{base.entry.envelope.output_hash, middle.entry.envelope.output_hash})
+    expected_closure := [String]{base.entry.envelope.output_hash, dev, middle.entry.envelope.output_hash}
+    &expected_closure.sort()
+    assert_eq(closure_of(&roots, &dev) ?? panic("closure"), expected_closure)
+    assert_eq(referrers_of(&roots, &middle.entry.envelope.output_hash) ?? panic("referrers"), [String]{dev, primary})
+    action :: entry_action_key(&consumer.entry)
+    assert_eq((action_outputs_of(&roots, &action) ?? panic("action outputs")).get("dev"), Val(dev))
+    assert_eq(actions_for_output(&roots, &primary) ?? panic("actions"), [String]{action})
+    _ :: ingest_fixture(&roots, "base", [(String, String)]{("out", "base")}, [String]{primary})
+    transitive :: transitive_references_of(&roots, &primary) ?? panic("cycle traversal")
+    assert(transitive.contains(base.entry.envelope.output_hash))
+    assert(transitive.contains(middle.entry.envelope.output_hash))
+    assert(!transitive.contains(primary))
+    expected_referrers := [String]{dev, middle.entry.envelope.output_hash, primary}
+    &expected_referrers.sort()
+    assert_eq(transitive_referrers_of(&roots, &base.entry.envelope.output_hash) ?? panic("reverse traversal"), expected_referrers)
+    expected_reverse_closure := [String]{base.entry.envelope.output_hash, dev, middle.entry.envelope.output_hash, primary}
+    &expected_reverse_closure.sort()
+    assert_eq(reverse_closure_of(&roots, &base.entry.envelope.output_hash) ?? panic("reverse closure"), expected_reverse_closure)
+}
+
+// Rust: crates/jetpack/src/Store/Tests/tests/late.rs:173
+#Test("closure_refresh_and_delete_remove_stale_reverse_edges") {
+    (roots, _g) :: temp_roots()
+    left :: ingest_fixture(&roots, "left", [(String, String)]{("out", "left")}, [String]{})
+    right :: ingest_fixture(&roots, "right", [(String, String)]{("out", "right")}, [String]{})
+    consumer :: ingest_fixture(&roots, "refresh", [(String, String)]{("out", "same")}, [String]{left.entry.envelope.output_hash})
+    assert_eq(referrers_of(&roots, &left.entry.envelope.output_hash) ?? panic("left referrers"), [String]{consumer.entry.envelope.output_hash})
+    refreshed :: ingest_fixture(&roots, "refresh", [(String, String)]{("out", "same")}, [String]{right.entry.envelope.output_hash})
+    assert((closure_graph(&roots) ?? panic("graph")).referrers(left.entry.envelope.output_hash).is_empty())
+    assert_eq((closure_graph(&roots) ?? panic("graph")).referrers(right.entry.envelope.output_hash), [String]{refreshed.entry.envelope.output_hash})
+    assert(remove_closure_record(&roots, &refreshed.entry.id) ?? panic("remove record"))
+    stale_meta :: roots.hangar_dir().join(refreshed.entry.id).join("meta.json")
+    fs.write(stale_meta, refreshed.entry.meta_json()) ?? panic("stale meta")
+    assert((closure_graph(&roots) ?? panic("graph")).referrers(right.entry.envelope.output_hash).is_empty())
+    assert(!stale_meta.exists())
+    assert(!(remove_closure_record(&roots, &refreshed.entry.id) ?? panic("remove again")))
+}
+
+// Rust: crates/jetpack/src/Store/Tests/tests/late.rs:219
+#Test("closure_rejects_one_action_mapping_to_different_outputs") {
+    (roots, _g) :: temp_roots()
+    make :: (name: String, bytes: String) -> {
+        out :: roots.root.join(name)
+        fs.create_dir_all(out) ?? panic("create output")
+        fs.write(out.join("payload"), bytes) ?? panic("write output")
+        envelope :: Envelope.for_output(out.to_string_lossy(), "path:same-action", "action-conflict")
+        record_verified(&roots, name, "1", "path:same-action", out.to_string_lossy(), "", "", &envelope, &test_identity())
+    }
+    make("first-action-output", "first") ?? panic("first action")
+    error :: make("second-action-output", "second").err() ?? panic("expected conflict")
+    assert(error.to_string().contains("conflicting bytes"))
+    assert_eq((closure_graph(&roots) ?? panic("graph")).records.len(), 1)
+}
+
+// Rust: crates/jetpack/src/Store/Tests/tests/late.rs:249
+#Test("closure_action_key_includes_sorted_reference_digests") {
+    (roots, _g) :: temp_roots()
+    first :: ingest_fixture(&roots, "key-first", [(String, String)]{("out", "first")}, [String]{})
+    second :: ingest_fixture(&roots, "key-second", [(String, String)]{("out", "second")}, [String]{})
+    entry := first.entry.clone()
+    entry.references = [String]{second.entry.envelope.output_hash, first.entry.envelope.output_hash}
+    ordered :: entry_action_key(&entry)
+    &entry.references.reverse()
+    assert_eq(entry_action_key(&entry), ordered)
+    _ :: &entry.references.pop()
+    assert_ne(entry_action_key(&entry), ordered)
+    left := first.entry.clone()
+    left.reference = "a\nsource=b"
+    left.cache_identity.source_fingerprint = "c"
+    right := first.entry.clone()
+    right.reference = "a"
+    right.cache_identity.source_fingerprint = "b\nsource=c"
+    assert_ne(entry_action_key(&left), entry_action_key(&right))
+}
+
+// Rust: crates/jetpack/src/Store/Tests/tests/late.rs:274
+#Test("closure_action_key_excludes_realized_outputs_but_keeps_action_facts") {
+    (roots, _g) :: temp_roots()
+    entry := ingest_fixture(&roots, "action-projection", [(String, String)]{("out", "bytes")}, [String]{}).entry
+    original_record :: entry.producer_record.clone()
+    original :: entry_action_key(&entry)
+    producer := ProducerRecord.decode(entry.producer_record) ?? panic("producer")
+    replay := producer.plan.facts().clone()
+    &replay.insert("output.out", "sha256-different")
+    producer.plan = ProviderPlanFacts.from_facts(replay) ?? panic("plan")
+    entry.producer_record = producer.encode()
+    assert_eq(entry_action_key(&entry), original)
+    producer = ProducerRecord.decode(entry.producer_record) ?? panic("producer")
+    replay = producer.plan.facts().clone()
+    &replay.insert("action.recipe", "different-recipe")
+    producer.plan = ProviderPlanFacts.from_facts(replay) ?? panic("plan")
+    entry.producer_record = producer.encode()
+    assert_ne(entry_action_key(&entry), original)
+    producer = ProducerRecord.decode(original_record) ?? panic("original producer")
+    &producer.toolchain_facts.push_str("-different")
+    entry.producer_record = producer.encode()
+    assert_ne(entry_action_key(&entry), original)
+}
+
+// Rust: crates/jetpack/src/Store/Tests/tests/late.rs:302
+#Test("nix_action_key_is_input_derivation_only") {
+    (roots, _g) :: temp_roots()
+    first := ingest_fixture(&roots, "nix-action", [(String, String)]{("out", "bytes")}, [String]{}).entry
+    nix_record :: (drv: String, output: String, reference: String) -> {
+        (ProducerRecord.new("nix", drv, SHA256.sha256_hex(drv.as_bytes()),
+            ProviderPlanFacts.from_facts([String: String]{"nix.drv_path": drv, "nix.reference": reference, "nix.output.out": output}) ?? panic("plan"),
+            "nix-derivation:{drv}", "policy=test\nplatform=test", [String: String]{"nix.output.out": output}) ?? panic("producer")).encode()
+    }
+    first.reference = "first@nixpkgs"
+    first.cache_identity.source_fingerprint = "sha256-first-output"
+    first.producer_record = nix_record("/nix/store/action.drv", "/nix/store/first", "first@nixpkgs")
+    action :: entry_action_key(&first)
+    second := first.clone()
+    second.reference = "alias:second"
+    second.cache_identity.source_fingerprint = "sha256-second-output"
+    second.producer_record = nix_record("/nix/store/action.drv", "/nix/store/second", "alias:second")
+    assert_eq(entry_action_key(&second), action)
+    second.producer_record = nix_record("/nix/store/other.drv", "/nix/store/second", "alias:second")
+    assert_ne(entry_action_key(&second), action)
+}
+
+// Rust: crates/jetpack/src/Store/Tests/tests/late.rs:342
+#Test("nix_multi_projection_registers_recovers_queries_and_rolls_back_conflict") {
+    (roots, _g) :: temp_roots()
+    out_source :: ingest_fixture(&roots, "projection-out-bytes", [(String, String)]{("out", "out")}, [String]{})
+    dev_source :: ingest_fixture(&roots, "projection-dev-bytes", [(String, String)]{("out", "dev")}, [String]{})
+    conflict :: ingest_fixture(&roots, "projection-bad-dev", [(String, String)]{("out", "bad")}, [String]{})
+    drv :: "/nix/store/multi-projection.drv"
+    project :: (source: StoreEntry, id: String, output_name: String) -> {
+        entry := source
+        path :: entry.out.clone()
+        entry.id = id
+        entry.name = "multi-projection"
+        entry.reference = "alias:{output_name}"
+        entry.named_outputs = [String: String]{"out": entry.envelope.output_hash, output_name: entry.envelope.output_hash}
+        entry.producer_record = (ProducerRecord.new("nix", drv, SHA256.sha256_hex(drv.as_bytes()),
+            ProviderPlanFacts.from_facts([String: String]{"nix.drv_path": drv, "nix.reference": entry.reference, "nix.output.{output_name}": path}) ?? panic("plan"),
+            "nix-derivation:{drv}", "policy=test\nplatform=test", [String: String]{"nix.output.{output_name}": path}) ?? panic("producer")).encode()
+        entry
+    }
+    out :: project(out_source.entry, "projection-out", "out")
+    dev :: project(dev_source.entry, "projection-dev", "dev")
+    bad :: project(conflict.entry, "projection-bad", "dev")
+    action :: entry_action_key(&out)
+    assert_eq(entry_action_key(&dev), action)
+    RuntimePolicy.with_lock(&roots.root, "hangar", () -> {
+        register_entry_unlocked(&roots, &out)?
+        register_entry_unlocked(&roots, &dev)
+    }) ?? panic("register projections")
+    fs.remove_file(roots.hangar_dir().join(dev.id).join("meta.json")) ?? panic("remove projection")
+    outputs :: action_outputs_of(&roots, &action) ?? panic("recover outputs")
+    assert_eq(outputs.get("out"), Val(out.envelope.output_hash))
+    assert_eq(outputs.get("dev"), Val(dev.envelope.output_hash))
+    assert(roots.hangar_dir().join(dev.id).join("meta.json").is_file())
+    before :: closure_graph(&roots) ?? panic("before")
+    error :: RuntimePolicy.with_lock(&roots.root, "hangar", () -> register_entry_unlocked(&roots, &bad)).err() ?? panic("expected conflict")
+    assert(error.to_string().contains("conflicting bytes"))
+    assert_eq(closure_graph(&roots) ?? panic("after"), before)
+}
+
+// Rust: crates/jetpack/src/Store/Tests/tests/late.rs:412
+#Test("closure_empty_reference_proof_rejects_unknown_provider") {
+    (roots, _g) :: temp_roots()
+    entry := ingest_fixture(&roots, "unknown-proof", [(String, String)]{("out", "bytes")}, [String]{}).entry
+    entry.id = "unknown-proof-record"
+    original :: ProducerRecord.decode(entry.producer_record) ?? panic("producer")
+    entry.producer_record = (ProducerRecord.new("unknown-provider", original.immutable_source, original.source_digest, original.plan,
+        original.toolchain_facts, original.policy_facts, [String: String]{"closure.authority": "hangar-cas"}) ?? panic("unknown producer")).encode()
+    error :: RuntimePolicy.with_lock(&roots.root, "hangar", () -> register_entry_unlocked(&roots, &entry)).err() ?? panic("expected rejection")
+    assert(error.to_string().contains("store-validated closure proof"))
+}
+
+// Rust: crates/jetpack/src/Store/Tests/tests/late.rs:436
+#Test("closure_rejects_named_out_that_disagrees_with_primary") {
+    (roots, _g) :: temp_roots()
+    primary :: ingest_fixture(&roots, "named-out-primary", [(String, String)]{("out", "primary")}, [String]{})
+    other :: ingest_fixture(&roots, "named-out-other", [(String, String)]{("out", "other")}, [String]{})
+    conflicting := primary.entry.clone()
+    &conflicting.named_outputs.insert("out", other.entry.envelope.output_hash)
+    error :: RuntimePolicy.with_lock(&roots.root, "hangar", () -> register_entry_unlocked(&roots, &conflicting)).err() ?? panic("expected rejection")
+    assert(error.to_string().contains("names `out`"))
+}
+
+// Rust: crates/jetpack/src/Store/Tests/tests/late.rs:457
+#Test("closure_rejects_same_action_output_name_with_conflicting_bytes") {
+    (roots, _g) :: temp_roots()
+    primary :: ingest_fixture(&roots, "same-record", [(String, String)]{("out", "primary")}, [String]{})
+    named :: ingest_fixture(&roots, "named-source", [(String, String)]{("out", "named")}, [String]{})
+    action :: entry_action_key(&primary.entry)
+    conflicting := primary.entry.clone()
+    conflicting.id = "conflicting-projection"
+    conflicting.out = named.entry.out.clone()
+    conflicting.envelope.output_hash = named.entry.envelope.output_hash.clone()
+    conflicting.named_outputs = [String: String]{"out": named.entry.envelope.output_hash}
+    error :: RuntimePolicy.with_lock(&roots.root, "hangar", () -> register_entry_unlocked(&roots, &conflicting)).err() ?? panic("expected rejection")
+    assert(error.to_string().contains("conflicting bytes"))
+    assert_eq((action_outputs_of(&roots, &action) ?? panic("outputs")).len(), 1)
+    assert(!(action_outputs_of(&roots, &action) ?? panic("outputs")).contains_key("dev"))
+}
+
+// Rust: crates/jetpack/src/Store/Tests/tests/late.rs:480
+#Test("closure_journal_recovers_partial_and_rejects_committed_corruption") {
+    (roots, _g) :: temp_roots()
+    _ :: ingest_fixture(&roots, "journal", [(String, String)]{("out", "journal")}, [String]{})
+    journal :: roots.hangar_dir().join("closure-db/journal")
+    fs.write(journal.join("999.partial"), "torn") ?? panic("partial")
+    assert_eq(recover_closure_journal(&roots) ?? panic("recovery"), 1)
+    assert(!journal.join("999.partial").exists())
+    transaction :: (fs.read_dir(journal) ?? panic("journal")).flatten().map((entry) -> entry.path()).find((path) -> path.extension().and_then((ext) -> ext.to_str()) == Val("txn")) ?? panic("transaction")
+    legacy_referrers :: roots.hangar_dir().join("referrers")
+    fs.create_dir_all(legacy_referrers) ?? panic("legacy")
+    fs.write(legacy_referrers.join("fake.refs"), "fallback-must-not-win\n") ?? panic("legacy refs")
+    file := OpenOptions.new().append(true).open(transaction) ?? panic("append open")
+    &file.write_all("corrupt".as_bytes()) ?? panic("corrupt transaction")
+    error :: closure_graph(&roots).err() ?? panic("expected corruption")
+    assert_eq(error.kind(), IOErrorKind.InvalidData)
+    assert(error.to_string().contains("checksum"))
+    assert(referrers_of(&roots, "fake").is_err())
+}
+
+// Rust: crates/jetpack/src/Store/Tests/tests/late.rs:516
+#Test("committed_producer_transaction_recovers_missing_package_projection") {
+    (roots, _g) :: temp_roots()
+    ingested :: ingest_fixture(&roots, "producer-recovery", [(String, String)]{("out", "primary"), ("dev", "headers")}, [String]{})
+    meta :: roots.hangar_dir().join(ingested.entry.id).join("meta.json")
+    expected :: fs.read_to_string(meta) ?? panic("expected projection")
+    fs.remove_file(meta) ?? panic("remove projection")
+    assert_eq(recover_closure_journal(&roots) ?? panic("recover"), 1)
+    assert((list_checked(&roots) ?? panic("list")).iter().any((entry) -> entry.id == ingested.entry.id))
+    graph :: closure_graph(&roots) ?? panic("graph")
+    record :: graph.records.get(ingested.entry.id) ?? panic("record")
+    assert_eq((ProducerRecord.decode(record.producer_record) ?? panic("producer")).provider, "hangar-ingest")
+    assert_eq(record.outputs.len(), 2)
+    assert_eq(fs.read_to_string(meta) ?? panic("projection"), expected)
+    fs.write(meta, "stale but parseable projection") ?? panic("stale")
+    assert_eq(recover_closure_journal(&roots) ?? panic("recover stale"), 1)
+    assert_eq(fs.read_to_string(meta) ?? panic("projection"), expected)
+    fs.write(meta, [U8]{0xff, 0xfe, 0xfd}) ?? panic("invalid utf8")
+    assert_eq(recover_closure_journal(&roots) ?? panic("recover bytes"), 1)
+    assert_eq(fs.read_to_string(meta) ?? panic("projection"), expected)
+    fs.remove_file(meta) ?? panic("remove")
+    changed :: RuntimePolicy.with_lock(&roots.root, "hangar", () -> register_entry_unlocked(&roots, &ingested.entry)) ?? panic("register unchanged")
+    assert(!changed)
+    assert_eq(fs.read_to_string(meta) ?? panic("projection"), expected)
+}
+
+// Rust: crates/jetpack/src/Store/Tests/tests/late.rs:565
+#Test("combined_recovery_sweeps_staging_and_repairs_wal_projection") {
+    (roots, _g) :: temp_roots()
+    ingested :: ingest_fixture(&roots, "combined-recovery", [(String, String)]{("out", "bytes")}, [String]{})
+    abandoned :: roots.hangar_dir().join(".stage/abandoned")
+    fs.create_dir_all(abandoned) ?? panic("stage")
+    fs.write(abandoned.join("payload"), "partial") ?? panic("partial")
+    meta :: roots.hangar_dir().join(ingested.entry.id).join("meta.json")
+    expected :: ingested.entry.meta_json()
+    fs.write(meta, "stale") ?? panic("stale")
+    assert_eq(recover_hangar(&roots) ?? panic("recover"), 2)
+    assert(!abandoned.exists())
+    assert_eq(fs.read_to_string(meta) ?? panic("projection"), expected)
+}
+
+// Rust: crates/jetpack/src/Store/Tests/tests/late.rs:584
+#Test("admission_failure_points_hide_partial_metadata_and_recover_idempotently") {
+    points :: [AdmissionFailurePoint]{.AfterObjectPublication, .AfterReceiptPublication, .AfterClosureRegistration}
+    loop (index, point) in points.iter().enumerate() {
+        (roots, _g) :: temp_roots()
+        source :: roots.root.join("failure-source-{index}")
+        fs.create_dir_all(source) ?? panic("source")
+        fs.write(source.join("payload"), "failure-{index}") ?? panic("payload")
+        request :: IngestRequest{name: "failure-{index}", version: "1", reference: "path:failure-{index}",
+            cache_identity: test_identity(), references: [String]{}, outputs: [String: OSPath]{"out": source},
+            signature: "", provenance: "transaction-test", platform_artifact_kind: ""}
+        result :: with_admission_failure(point, () -> ingest_tree(&roots, &request))
+        assert(result.is_err(), "failure point {point:?} did not fire")
+        if point != .AfterClosureRegistration {
+            recover_hangar(&roots) ?? panic("recover")
+            recover_hangar(&roots) ?? panic("recover again")
+            assert((list_checked(&roots) ?? panic("list")).is_empty())
+            assert_eq((fs.read_dir(roots.hangar_dir().join(OBJECTS_DIR)) ?? panic("objects")).count(), 0)
+        } else {
+            committed :: list_checked(&roots) ?? panic("committed")
+            assert_eq(committed.len(), 1)
+            meta :: roots.hangar_dir().join(committed[0].id).join("meta.json")
+            fs.remove_file(meta) ?? panic("remove projection")
+            recover_hangar(&roots) ?? panic("recover")
+            recovered :: list_checked(&roots) ?? panic("recovered")
+            recover_hangar(&roots) ?? panic("recover again")
+            assert_eq(list_checked(&roots) ?? panic("list"), recovered)
+            assert_eq(recovered, committed)
+        }
+    }
+}
+
+// Rust: crates/jetpack/src/Store/Tests/tests/late.rs:636
+#Test("closure_legacy_migration_is_idempotent") {
+    (roots, _g) :: temp_roots()
+    first := ingest_fixture(&roots, "legacy-first", [(String, String)]{("out", "first")}, [String]{}).entry
+    second := ingest_fixture(&roots, "legacy-second", [(String, String)]{("out", "second")}, [String]{}).entry
+    first.references = [String]{second.envelope.output_hash}
+    second.references = [String]{first.envelope.output_hash}
+    fs.write(roots.hangar_dir().join(first.id).join("meta.json"), first.meta_json()) ?? panic("first meta")
+    fs.write(roots.hangar_dir().join(second.id).join("meta.json"), second.meta_json()) ?? panic("second meta")
+    fs.remove_dir_all(roots.hangar_dir().join("closure-db")) ?? panic("remove db")
+    assert_eq(migrate_closure_graph(&roots) ?? panic("migrate"), 2)
+    assert_eq(migrate_closure_graph(&roots) ?? panic("migrate again"), 0)
+    graph :: closure_graph(&roots) ?? panic("graph")
+    assert(graph.records.contains_key(first.id))
+    assert(graph.records.contains_key(second.id))
+    assert_eq(graph.direct_references(first.envelope.output_hash), first.references)
+    assert_eq(graph.direct_references(second.envelope.output_hash), second.references)
+}
+
+// Rust: crates/jetpack/src/Store/Tests/tests/late.rs:671
+#Test("closure_legacy_migration_rejects_atomically") {
+    (roots, _g) :: temp_roots()
+    entry := ingest_fixture(&roots, "legacy-invalid", [(String, String)]{("out", "invalid")}, [String]{}).entry
+    entry.references = [String]{"sha256-missing"}
+    fs.write(roots.hangar_dir().join(entry.id).join("meta.json"), entry.meta_json()) ?? panic("meta")
+    fs.remove_dir_all(roots.hangar_dir().join("closure-db")) ?? panic("remove db")
+    error :: migrate_closure_graph(&roots).err() ?? panic("expected missing reference")
+    assert(error.to_string().contains("references missing object"))
+    journal :: roots.hangar_dir().join("closure-db/journal")
+    transactions :: fs.read_dir(journal).ok().into_iter().flatten().flatten().filter((entry) -> entry.path().extension().and_then((ext) -> ext.to_str()) == Val("txn")).count()
+    assert_eq(transactions, 0)
+}
+
+// Rust: crates/jetpack/src/Store/Tests/tests/late.rs:697
+#Test("legacy_migration_fails_closed_without_immutable_producer_facts") {
+    (roots, _g) :: temp_roots()
+    entry := ingest_fixture(&roots, "legacy-missing-producer", [(String, String)]{("out", "legacy")}, [String]{}).entry
+    &entry.producer_record.clear()
+    entry.cache_identity = CacheIdentity.default()
+    fs.write(roots.hangar_dir().join(entry.id).join("meta.json"), entry.meta_json()) ?? panic("meta")
+    fs.remove_dir_all(roots.hangar_dir().join("closure-db")) ?? panic("remove db")
+    error :: migrate_closure_graph(&roots).err() ?? panic("expected producer rejection")
+    assert(error.to_string().contains("lacks immutable producer facts"))
+}
+
+// Rust: crates/jetpack/src/Store/Tests/tests/late.rs:720
+#Test("provider_registration_moves_local_output_into_canonical_objects") {
+    (roots, _g) :: temp_roots()
+    out :: roots.hangar_dir().join("provider-output")
+    fs.create_dir_all(out.join("bin")) ?? panic("bin")
+    fs.write(out.join("bin/tool"), "provider") ?? panic("tool")
+    seal_local_output(&out) ?? panic("seal")
+    envelope :: Envelope.for_output(out.to_string_lossy(), "path:provider", "provider")
+    (canonical_out, canonical_bin, canonical_rlib) :: canonicalize_local_output_unlocked(&roots, out.to_string_lossy(), out.join("bin").to_string_lossy(), "", &envelope.output_hash) ?? panic("canonicalize")
+    entry :: record_verified_mode(&roots, "provider", "1", "path:provider", &canonical_out, &canonical_bin, &canonical_rlib, &envelope, &test_identity(), false) ?? panic("register")
+    assert_eq(OSPath.from(entry.out), roots.hangar_dir().join("objects").join(entry.envelope.output_hash))
+    assert(!out.exists())
+    verify_hangar_object(&roots, &entry) ?? panic("verify")
+    snapshot_lease(&roots, &entry) ?? panic("lease")
+}
+
+// Rust: crates/jetpack/src/Store/Tests/tests/late.rs:765
+#Test("windows_directory_sync_contract_requests_flushable_handle") {
+    contract :: windows_directory_sync_contract()
+    assert(contract.read)
+    assert(contract.write, "FlushFileBuffers requires GENERIC_WRITE")
+    assert_eq(contract.share_mode, 0x0000_0001 | 0x0000_0002 | 0x0000_0004)
+    assert_eq(contract.custom_flags, 0x0200_0000 | 0x0020_0000)
+}
+
+// Rust: crates/jetpack/src/Store/Tests/tests/late.rs:775
+#Test("windows_store_tree_sync_flushes_directory_handle") {
+    if sys.target.selected_os() != "windows" -> return
+    (roots, _g) :: temp_roots()
+    tree :: roots.root.join("windows-sync-tree")
+    fs.create_dir_all(tree.join("nested")) ?? panic("nested")
+    fs.write(tree.join("nested/payload"), "durable") ?? panic("payload")
+    fsync_tree(&tree) ?? panic("sync")
+}
+
+// Rust: crates/jetpack/src/Store/Tests/tests/late.rs:784
+#Test("closure_registration_serializes_concurrent_writers") {
+    (roots, _g) :: temp_roots()
+    root :: roots.root.clone()
+    threads := [thread.JoinHandle[Void]]{}
+    loop index in 0..8 {
+        thread_root :: root.clone()
+        &threads.push(thread.spawn(() -> {
+            worker_roots :: Roots{root: thread_root, dev_mode: true}
+            _ :: ingest_fixture(&worker_roots, "concurrent-{index}", [(String, String)]{("out", "bytes-{index}")}, [String]{})
+        }))
+    }
+    loop worker in threads -> worker.join() ?? panic("writer join")
+    assert_eq((closure_graph(&roots) ?? panic("graph")).records.len(), 8)
+}
+
+// Rust: crates/jetpack/src/Store/Tests/tests/late.rs:811
+#Test("closure_journal_compacts_without_changing_graph") {
+    (roots, _g) :: temp_roots()
+    loop index in 0..70 {
+        _ :: ingest_fixture(&roots, "compact-{index}", [(String, String)]{("out", "compact-bytes-{index}")}, [String]{})
+    }
+    graph :: closure_graph(&roots) ?? panic("graph")
+    assert_eq(graph.records.len(), 70)
+    transactions :: (fs.read_dir(roots.hangar_dir().join("closure-db/journal")) ?? panic("journal")).flatten().filter((entry) -> entry.path().extension().and_then((ext) -> ext.to_str()) == Val("txn")).count()
+    assert(transactions < 10, "journal did not compact: {transactions}")
+}
+
+// Rust: crates/jetpack/src/Store/Tests/tests/late.rs:832
+#Test("closure_readers_are_serialized_with_registration_and_compaction") {
+    (roots, _g) :: temp_roots()
+    writer_root :: roots.root.clone()
+    writer :: thread.spawn(() -> {
+        writer_roots :: Roots{root: writer_root, dev_mode: true}
+        loop index in 0..70 {
+            _ :: ingest_fixture(&writer_roots, "reader-compact-{index}", [(String, String)]{("out", "reader-compact-bytes-{index}")}, [String]{})
+        }
+    })
+    reader_root :: roots.root.clone()
+    reader :: thread.spawn(() -> {
+        reader_roots :: Roots{root: reader_root, dev_mode: true}
+        previous := 0
+        loop _ in 0..100 {
+            count :: (closure_graph(&reader_roots) ?? panic("reader graph")).records.len()
+            assert(count >= previous, "reader observed a stale graph")
+            previous = count
+        }
+    })
+    writer.join() ?? panic("writer join")
+    reader.join() ?? panic("reader join")
+    assert_eq((closure_graph(&roots) ?? panic("graph")).records.len(), 70)
+}
+
+// Rust: crates/jetpack/src/Store/Tests/tests/late.rs:869
+#Test("cas_pool_hardlink_preserves_cache_verification_and_rejects_outside_peers") {
+    if sys.target.selected_family() != "unix" -> return
+    (roots, _g) :: temp_roots()
+    src_c :: roots.root.join("cas-c")
+    fs.create_dir_all(src_c) ?? panic("c")
+    fs.write(src_c.join("payload"), "shared-cas-bytes") ?? panic("c shared")
+    fs.write(src_c.join("unique"), "c-only") ?? panic("c unique")
+    src_d :: roots.root.join("cas-d")
+    fs.create_dir_all(src_d) ?? panic("d")
+    fs.write(src_d.join("payload"), "shared-cas-bytes") ?? panic("d shared")
+    fs.write(src_d.join("unique"), "d-only") ?? panic("d unique")
+    third :: ingest_tree(&roots, &IngestRequest{name: "cas-c", version: "1", reference: "path:cas-c", cache_identity: test_identity(),
+        references: [String]{}, outputs: [String: OSPath]{"out": src_c}, signature: "", provenance: "", platform_artifact_kind: ""}) ?? panic("ingest c")
+    fourth :: ingest_tree(&roots, &IngestRequest{name: "cas-d", version: "1", reference: "path:cas-d", cache_identity: test_identity(),
+        references: [String]{}, outputs: [String: OSPath]{"out": src_d}, signature: "", provenance: "", platform_artifact_kind: ""}) ?? panic("ingest d")
+    assert_ne(third.entry.envelope.output_hash, fourth.entry.envelope.output_hash)
+    pay_c :: OSPath.from(third.entry.out).join("payload")
+    assert((fs.metadata(pay_c) ?? panic("metadata")).nlink() >= 2)
+    report :: optimize_cas_pool(&roots) ?? panic("optimize")
+    assert_eq(report.optimized_files, 0, "{report:?}")
+    assert(roots.shared_cas_dir().is_dir())
+    assert((fs.metadata(pay_c) ?? panic("metadata")).nlink() >= 2)
+    verify_hangar_object(&roots, &third.entry) ?? panic("verify c")
+    verify_hangar_object(&roots, &fourth.entry) ?? panic("verify d")
+    expectation :: test_expectation(OSPath.from(third.entry.out))
+    proof :: verify_cache_entry(&roots, &third.entry, &third.entry.reference, &expectation)
+    assert(proof.output_digest, "{proof:?}")
+    assert(proof.trusted(), "{proof:?}")
+    ((find_verified_by_reference(&roots, &third.entry.reference, &expectation) ?? panic("find")) ?? panic("verified entry")).lease.validate() ?? panic("validate lease")
+    outside :: roots.root.join("outside-peer")
+    fs.hard_link(pay_c, outside) ?? panic("outside peer")
+    in_hangar :: Envelope.try_output_hash_of_in_hangar(&third.entry.out, &roots.hangar_dir(), false)
+    assert_eq(in_hangar ?? panic("pool-backed hash"), third.entry.envelope.output_hash)
+    pool_proof :: verify_cache_entry(&roots, &third.entry, &third.entry.reference, &expectation)
+    assert(pool_proof.output_digest, "{pool_proof:?}")
+    assert(pool_proof.trusted(), "{pool_proof:?}")
+    ((find_verified_by_reference(&roots, &third.entry.reference, &expectation) ?? panic("find")) ?? panic("verified entry")).lease.validate() ?? panic("validate lease")
+    _ :: fs.remove_file(outside).ok()
+    non_pool :: roots.hangar_dir().join("non-pool-output")
+    fs.create_dir_all(non_pool) ?? panic("non pool")
+    non_pool_payload :: non_pool.join("payload")
+    fs.write(non_pool_payload, "unpooled") ?? panic("unpooled")
+    non_pool_peer :: roots.root.join("outside-non-pool-peer")
+    fs.hard_link(non_pool_payload, non_pool_peer) ?? panic("foreign peer")
+    non_pool_result :: Envelope.try_output_hash_of_in_hangar(non_pool.to_string_lossy(), &roots.hangar_dir(), false)
+    assert(non_pool_result.is_err(), "{non_pool_result:?}")
+    _ :: fs.remove_file(non_pool_peer).ok()
+    _ :: fs.remove_dir_all(non_pool).ok()
+}
+
+// Rust: crates/jetpack/src/Store/Tests/tests/late.rs:987
+#Test("optimizer_rejects_symlinked_object_pool_without_touching_outside_data") {
+    if sys.target.selected_family() != "unix" -> return
+    (roots, _g) :: temp_roots()
+    hangar :: roots.hangar_dir()
+    outside :: roots.root.join("optimizer-outside")
+    fs.create_dir_all(hangar) ?? panic("hangar")
+    fs.create_dir_all(outside) ?? panic("outside")
+    fs.write(outside.join("live"), "must survive") ?? panic("live")
+    fs.symlink(outside, hangar.join("objects")) ?? panic("symlink")
+    error :: optimize_cas_pool(&roots).err() ?? panic("expected object pool rejection")
+    assert(error.to_string().contains("object pool"), "{error}")
+    assert_eq(fs.read_to_string(outside.join("live")) ?? panic("live"), "must survive")
+    assert(!hangar.join("cas").exists())
+}
+
+// Rust: crates/jetpack/src/Store/Tests/tests/late.rs:1007
+#Test("cleanup_unlinks_orphaned_object_symlink_without_following_target") {
+    if sys.target.selected_family() != "unix" -> return
+    (roots, _g) :: temp_roots()
+    objects :: roots.hangar_dir().join("objects")
+    outside :: roots.root.join("symlink-target")
+    fs.create_dir_all(objects) ?? panic("objects")
+    fs.create_dir_all(outside) ?? panic("outside")
+    fs.write(outside.join("must-survive"), "outside bytes") ?? panic("outside payload")
+    digest :: "sha256-{"a".repeat(64)}"
+    object :: objects.join(digest)
+    fs.symlink(outside, object) ?? panic("symlink")
+    link_bytes :: (fs.symlink_metadata(object) ?? panic("link metadata")).len()
+    plan :: clean_plan(&roots) ?? panic("plan")
+    assert_eq(plan.removed_objects, 1, "{plan:?}")
+    assert_eq(plan.removed_bytes, link_bytes, "{plan:?}")
+    report :: clean(&roots) ?? panic("clean")
+    assert_eq(report.removed_objects, 1, "{report:?}")
+    assert(fs.symlink_metadata(object).is_err())
+    assert_eq(fs.read_to_string(outside.join("must-survive")) ?? panic("survivor"), "outside bytes")
+}
+
+// Rust: crates/jetpack/src/Store/Tests/tests/late.rs:1034
+#Test("cleanup_protects_named_outputs_from_canonical_gc") {
+    (roots, _g) :: temp_roots()
+    entry :: ingest_fixture(&roots, "named-output-gc", [(String, String)]{("out", "primary"), ("dev", "secondary")}, [String]{})
+    orphaned :: collect_orphaned_canonical_objects(&roots, &LiveRoots.default(), &[String: Bool]{}) ?? panic("collect")
+    assert(orphaned.is_empty(), "{orphaned:?} for {entry.entry.id}")
+}
+
+// Rust: crates/jetpack/src/Store/Tests/tests/late.rs:1050
+#Test("cleanup_quarantines_projection_with_proven_missing_output") {
+    (roots, _g) :: temp_roots()
+    ingested :: ingest_fixture(&roots, "missing-output", [(String, String)]{("out", "bytes")}, [String]{})
+    entry :: ingested.entry
+    output :: OSPath.from(entry.out)
+    fs.remove_dir_all(output) ?? panic("remove output")
+    fs.write(roots.hangar_dir().join(entry.id).join("meta.json"), entry.meta_json()) ?? panic("meta")
+    plan :: clean_plan(&roots) ?? panic("plan")
+    assert_eq(plan.quarantined_objects, 1, "{plan:?}")
+    report :: clean(&roots) ?? panic("clean")
+    assert_eq(report.quarantined_objects, 1, "{report:?}")
+    assert(!roots.hangar_dir().join(entry.id).exists())
+    assert_eq((fs.read_dir(roots.hangar_dir().join("quarantine")) ?? panic("quarantine")).count(), 1)
+}
+
+// Rust: crates/jetpack/src/Store/Tests/tests/late.rs:1078
+#Test("clean_plan_rejects_symlinked_build_scratch_without_following_it") {
+    if sys.target.selected_family() != "unix" -> return
+    (roots, _g) :: temp_roots()
+    hangar :: roots.hangar_dir()
+    outside :: roots.root.join("scratch-outside")
+    fs.create_dir_all(hangar) ?? panic("hangar")
+    fs.create_dir_all(outside) ?? panic("outside")
+    fs.write(outside.join("live"), "must survive") ?? panic("live")
+    fs.symlink(outside, hangar.join("build-scratch")) ?? panic("symlink")
+    error :: clean_plan(&roots).err() ?? panic("expected scratch rejection")
+    assert(error.to_string().contains("build scratch"), "{error}")
+    assert_eq(fs.read_to_string(outside.join("live")) ?? panic("live"), "must survive")
+}
+
+// Rust: crates/jetpack/src/Store/Tests/tests/late.rs:1096
+#Test("ingest_rejects_semantic_xattr_without_platform_artifact_kind") {
+    if sys.target.selected_os() != "linux" -> return
+    (roots, _g) :: temp_roots()
+    src :: roots.root.join("xattr-src")
+    fs.create_dir_all(src) ?? panic("source")
+    file :: src.join("payload")
+    fs.write(file, "xattr-bytes") ?? panic("payload")
+    set_user_xattr(&file, "user.jet.test", "keep".as_bytes())
+    err :: ingest_tree(&roots, &IngestRequest{name: "xattr", version: "1", reference: "path:xattr", cache_identity: test_identity(),
+        references: [String]{}, outputs: [String: OSPath]{"out": src}, signature: "", provenance: "", platform_artifact_kind: ""}).err() ?? panic("expected xattr rejection")
+    assert_eq(err.code(), "E1315")
+    assert(err.what().contains("semantic xattr") || err.why().contains("semantic xattr"), "{err:?}")
+}
+
+// Rust: crates/jetpack/src/Store/Tests/tests/late.rs:1129
+#Test("ingest_keeps_semantic_xattr_with_platform_artifact_kind") {
+    if sys.target.selected_os() != "linux" -> return
+    (roots, _g) :: temp_roots()
+    src :: roots.root.join("xattr-ok")
+    fs.create_dir_all(src) ?? panic("source")
+    file :: src.join("payload")
+    fs.write(file, "xattr-bytes") ?? panic("payload")
+    set_user_xattr(&src, "user.jet.directory", "directory".as_bytes())
+    set_user_xattr(&file, "user.jet.test", "keep".as_bytes())
+    ingested :: ingest_tree(&roots, &IngestRequest{name: "xattr-ok", version: "1", reference: "path:xattr-ok", cache_identity: test_identity(),
+        references: [String]{}, outputs: [String: OSPath]{"out": src.clone()}, signature: "", provenance: "", platform_artifact_kind: "macos-app"}) ?? panic("ingest")
+    first_hash :: ingested.entry.envelope.output_hash.clone()
+    assert_eq(ingested.entry.platform_artifact_kind, "macos-app")
+    verify_hangar_object(&roots, &ingested.entry) ?? panic("verify")
+    sealed :: OSPath.from(ingested.entry.out).join("payload")
+    names :: Envelope.list_xattr_names(&sealed) ?? panic("file xattrs")
+    assert(names.iter().any((n) -> n == "user.jet.test"), "semantic xattr must be preserved on sealed object: {names:?}")
+    root_names :: Envelope.list_xattr_names(OSPath.from(ingested.entry.out)) ?? panic("directory xattrs")
+    assert(root_names.iter().any((name) -> name == "user.jet.directory"))
+    set_user_xattr(&src, "user.jet.directory", "changed".as_bytes())
+    changed_hash :: Envelope.try_output_hash_of_with_policy(src.to_string_lossy(), true, (_, _) -> {}) ?? panic("changed hash")
+    assert_ne(first_hash, changed_hash)
+}
+
+// Rust: crates/jetpack/src/Store/Tests/tests/late.rs:1179
+#Test("ingest_rejects_semantic_directory_xattr_without_platform_kind") {
+    if sys.target.selected_os() != "linux" -> return
+    (roots, _g) :: temp_roots()
+    src :: roots.root.join("xattr-directory-reject")
+    fs.create_dir_all(src) ?? panic("source")
+    set_user_xattr(&src, "user.jet.directory", "reject".as_bytes())
+    error :: ingest_tree(&roots, &IngestRequest{name: "xattr-directory", version: "1", reference: "path:xattr-directory", cache_identity: test_identity(),
+        references: [String]{}, outputs: [String: OSPath]{"out": src}, signature: "", provenance: "", platform_artifact_kind: ""}).err() ?? panic("expected directory xattr rejection")
+    assert(error.what().contains("semantic xattr") || error.why().contains("semantic xattr"))
+}
+
+// Rust: crates/jetpack/src/Store/Tests/tests/late.rs:1204
+#Test("ingest_symlink_xattr_is_nofollow_rejected_digested_and_copied") {
+    if sys.target.selected_os() != "macos" -> return
+    (roots, _g) :: temp_roots()
+    src :: roots.root.join("xattr-symlink")
+    fs.create_dir_all(src) ?? panic("source")
+    fs.write(src.join("target"), "bytes") ?? panic("target")
+    fs.symlink("target", src.join("link")) ?? panic("link")
+    set_apple_xattr(src.join("link"), "user.jet.symlink", "first".as_bytes())
+    request :: (kind: String) -> IngestRequest{name: "xattr-symlink", version: "1", reference: "path:xattr-symlink", cache_identity: test_identity(),
+        references: [String]{}, outputs: [String: OSPath]{"out": src.clone()}, signature: "", provenance: "", platform_artifact_kind: kind}
+    assert(ingest_tree(&roots, &request("")).is_err())
+    ingested :: ingest_tree(&roots, &request("macos-tree")) ?? panic("ingest")
+    sealed :: OSPath.from(ingested.entry.out).join("link")
+    assert((Envelope.list_xattr_names(&sealed) ?? panic("link xattrs")).iter().any((name) -> name == "user.jet.symlink"))
+    first :: ingested.entry.envelope.output_hash
+    set_apple_xattr(src.join("link"), "user.jet.symlink", "second".as_bytes())
+    second :: Envelope.try_output_hash_of_with_policy(src.to_string_lossy(), true, (_, _) -> {}) ?? panic("changed hash")
+    assert_ne(first, second)
+}
+
+// Rust: crates/jetpack/src/Store/Tests/tests/nix_projection.rs:26
+#Test("nix_projection_runs_in_rootless_namespace_without_host_store") {
+    if sys.target.selected_os() != "linux" -> return
+    test_name :: thread.current().name() ?? panic("rootless projection test name")
+    if env.var_os(no_nix_namespace.CHILD_MARKER).is_some() {
+        no_nix_namespace.run_in_no_nix_namespace(test_name, no_nix_namespace.NetworkMode.Enabled, run_rootless_projection_child)
+        return
+    }
+    (roots, _guard) :: temp_roots()
+    admitted :: admit_signed_closure(&roots)
+    entries :: canonicalize_admitted_records(&roots, &admitted)
+    assert(entries.iter().any((entry) -> {
+        ProducerRecord.decode(entry.producer_record).ok().and_then((producer) -> producer.facts.get("nix.store-path").cloned()) == Val("/nix/store/00000000000000000000000000000000-root")
+    }))
+    previous_root :: env.var_os(ROOTLESS_PROJECTION_ROOT)
+    env.set_var(ROOTLESS_PROJECTION_ROOT, roots.root)
+    no_nix_namespace.run_in_no_nix_namespace(test_name, no_nix_namespace.NetworkMode.Enabled, run_rootless_projection_child)
+    if previous_root == {
+        .Val(value) -> env.set_var(ROOTLESS_PROJECTION_ROOT, value)
+        .None -> env.remove_var(ROOTLESS_PROJECTION_ROOT)
+    }
+}
+
+// Rust: crates/jetpack/src/Store/Tests/tests/nix_projection.rs:100
+#Test("nix_projection_runs_dynamically_linked_nix_binary_without_host_store") {
+    if sys.target.selected_os() != "linux" -> return
+    test_name :: thread.current().name() ?? panic("dynamic projection test name")
+    if env.var_os(no_nix_namespace.CHILD_MARKER).is_some() {
+        no_nix_namespace.run_in_no_nix_namespace(test_name, no_nix_namespace.NetworkMode.Enabled, run_dynamic_projection_child)
+        return
+    }
+    if dynamic_projection_host_precondition() == {
+        .Ok(_) -> {}
+        .Err(reason) -> {
+            println("skipping {test_name}: {reason}")
+            return
+        }
+    }
+    (roots, _guard) :: temp_roots()
+    store_path :: admit_dynamic_closure(&roots)
+    previous_root :: env.var_os(DYNAMIC_PROJECTION_ROOT)
+    previous_store_path :: env.var_os(DYNAMIC_PROJECTION_STORE_PATH)
+    env.set_var(DYNAMIC_PROJECTION_ROOT, roots.root)
+    env.set_var(DYNAMIC_PROJECTION_STORE_PATH, store_path)
+    no_nix_namespace.run_in_no_nix_namespace(test_name, no_nix_namespace.NetworkMode.Enabled, run_dynamic_projection_child)
+    if previous_root == {
+        .Val(value) -> env.set_var(DYNAMIC_PROJECTION_ROOT, value)
+        .None -> env.remove_var(DYNAMIC_PROJECTION_ROOT)
+    }
+    if previous_store_path == {
+        .Val(value) -> env.set_var(DYNAMIC_PROJECTION_STORE_PATH, value)
+        .None -> env.remove_var(DYNAMIC_PROJECTION_STORE_PATH)
+    }
+}
+
+// Rust: crates/jetpack/src/Store/Tests/tests/nix_projection.rs:331
+#Test("nix_store_projection_includes_every_hangar_closure_object") {
+    (roots, _guard) :: temp_roots()
+    admitted :: admit_signed_closure(&roots)
+    entries :: canonicalize_admitted_records(&roots, &admitted)
+    root_path :: admitted.outputs["out"].store_path.clone()
+    entry :: find_entry(&entries, &root_path)
+    lease :: snapshot_lease(&roots, &entry) ?? panic("lease")
+    projected := [OSPath: OSPath]{}
+    loop (logical, source) in lease.nix_store_projection().iter() {
+        resolved :: fs.read_link(source).unwrap_or_else((_) -> source.clone())
+        assert(!resolved.starts_with("/nix/store"), "projection source escaped into the host store: {resolved.display()}")
+        &projected.insert(logical.clone(), resolved)
+    }
+    expected_paths := [String]{}
+    loop path in admitted.objects.keys() -> &expected_paths.push((path.strip_prefix("/nix/store/") ?? panic("store prefix")).to_string())
+    &expected_paths.sort()
+    actual_paths := [String]{}
+    loop path in projected.keys() -> &actual_paths.push((path.strip_prefix("/nix/store/") ?? panic("store prefix")).to_string())
+    &actual_paths.sort()
+    assert_eq(actual_paths, expected_paths)
+    assert(projected.values().all((path) -> path == lease.snapshot_root || path.starts_with(roots.hangar_dir().join(OBJECTS_DIR))))
+}
+
+// Rust: crates/jetpack/src/Store/Tests/tests/nix_projection.rs:368
+#Test("nix_store_projection_rejects_missing_conflicting_or_external_objects") {
+    {
+        (roots, _guard) :: temp_roots()
+        admitted :: admit_signed_closure(&roots)
+        entries :: canonicalize_admitted_records(&roots, &admitted)
+        root_path :: admitted.outputs["out"].store_path.clone()
+        entry :: find_entry(&entries, &root_path)
+        leaf :: admitted.objects.values().find((object) -> object.store_path != root_path) ?? panic("leaf")
+        if fs.symlink_metadata(leaf.hangar_path) == {
+            .Ok(metadata) -> {
+                if !metadata.is_dir() {
+                    println("skipping missing-object proof: admitted Hangar object is not a directory")
+                    return
+                }
+            }
+            .Err(error) -> {
+                if error.kind() == IOErrorKind.NotFound {
+                    println("skipping missing-object proof: admitted Hangar object is unavailable (ENOENT)")
+                    return
+                }
+                panic("inspect admitted Hangar object: {error}")
+            }
+        }
+        if make_tree_writable_for_removal(&leaf.hangar_path) == {
+            .Ok(_) -> {}
+            .Err(error) -> {
+                if error.kind() == IOErrorKind.NotFound {
+                    println("skipping missing-object proof: admitted Hangar object disappeared before permission update (ENOENT)")
+                    return
+                }
+                panic("make admitted Hangar object writable: {error}")
+            }
+        }
+        if fs.remove_dir_all(leaf.hangar_path) == {
+            .Ok(_) -> {}
+            .Err(error) -> {
+                if error.kind() == IOErrorKind.NotFound {
+                    println("skipping missing-object proof: admitted Hangar object disappeared during removal (ENOENT)")
+                    return
+                }
+                panic("remove admitted Hangar object: {error}")
+            }
+        }
+        error :: snapshot_lease(&roots, &entry).err() ?? panic("missing closure object must reject the lease")
+        assert(error.to_string().contains("Hangar object"), "{error}")
+    }
+    {
+        (roots, _guard) :: temp_roots()
+        admitted :: admit_signed_closure(&roots)
+        entries :: canonicalize_admitted_records(&roots, &admitted)
+        root_path :: admitted.outputs["out"].store_path.clone()
+        root_entry :: find_entry(&entries, &root_path)
+        leaf_path :: (admitted.objects.keys().find((path) -> path != root_path) ?? panic("leaf path")).clone()
+        conflict := (entries.iter().find((entry) -> {
+            ProducerRecord.decode(entry.producer_record).ok().and_then((producer) -> producer.facts.get("nix.store-path").cloned()) == Val(leaf_path)
+        }) ?? panic("leaf entry")).clone()
+        conflict.name = "nix-projection-conflict"
+        conflict.reference = "nix-projection-conflict@nixpkgs"
+        conflict.id = entry_id(&conflict.name, &conflict.version, &conflict.reference, &conflict.out)
+        producer := ProducerRecord.decode(conflict.producer_record) ?? panic("producer")
+        &producer.facts.insert("nix.output.out", "/nix/store/conflicting-leaf")
+        conflict.producer_record = producer.encode()
+        &conflict.receipt.clear()
+        // Registration rejects the conflicting owner before any lease sees it.
+        error :: RuntimePolicy.with_lock(&roots.root, "hangar", () -> {
+            Receipt.prepare_entry_receipt(&roots, &conflict)?
+            Closure.register_entry_unlocked(&roots, &conflict)
+        }).err() ?? panic("conflicting closure owner must be rejected at registration")
+        assert(error.to_string().contains("conflicting bytes or provenance"), "{error}")
+        lease :: snapshot_lease(&roots, &root_entry) ?? panic("the untouched root entry must still lease")
+        drop(lease)
+    }
+    if sys.target.selected_family() == "unix" {
+        (roots, _guard) :: temp_roots()
+        admitted :: admit_signed_closure(&roots)
+        entries :: canonicalize_admitted_records(&roots, &admitted)
+        root_path :: admitted.outputs["out"].store_path.clone()
+        entry :: find_entry(&entries, &root_path)
+        leaf :: admitted.objects.values().find((object) -> object.store_path != root_path) ?? panic("leaf")
+        // The canonical node hash must reject a symlink escaping the Hangar.
+        target :: roots.root.join("external-object")
+        fs.create_dir(target) ?? panic("external target")
+        make_tree_writable_for_removal(&leaf.hangar_path) ?? panic("writable")
+        fs.remove_dir_all(leaf.hangar_path) ?? panic("remove leaf")
+        fs.symlink(target, leaf.hangar_path) ?? panic("external symlink")
+        expectation :: CacheExpectation{identity: entry.cache_identity.clone(), owned_output: None, allow_unsigned_local: true}
+        proof :: verify_cache_entry(&roots, &entry, &entry.reference, &expectation)
+        assert(!proof.closure, "{proof:?}")
+        assert(!proof.trusted(), "{proof:?}")
+    }
+}

@@ -1,0 +1,29 @@
+use jetpack.JetOS.NixosImportLive.*
+use jet_foundation.DataTree.[DataTree]
+
+// Behavioral controls for Rust: crates/jetpack/src/JetOS/nixos_import_live.rs:123-164
+#Test("live_fact_scalar_and_numeric_list_shapes") {
+    root :: [("text", DataTree.Text("value")), ("flag", DataTree.Bool(true)), ("integer", DataTree.Int(7)), ("float", DataTree.Float(2.5)), ("number", DataTree.Number("9.25")), ("ports", DataTree.Array([DataTree.Int(22), DataTree.Float(443.0), DataTree.Number("80"), DataTree.Text("ignored")]))]
+    assert_eq(live_str(&root, "text"), "value")
+    assert_eq(live_str(&root, "missing"), "")
+    assert(live_bool(&root, "flag"))
+    assert(!live_bool(&root, "integer"))
+    assert_eq(live_num(&root, "integer"), .Val(7.0))
+    assert_eq(live_num(&root, "float"), .Val(2.5))
+    assert_eq(live_num(&root, "number"), .Val(9.25))
+    assert_eq(live_num_list(&root, "ports"), [22, 443, 80])
+    assert_eq(dedup_preserving_order(["b", "a", "b", "c", "a"]), ["b", "a", "c"])
+}
+
+// Behavioral controls for Rust: crates/jetpack/src/JetOS/nixos_import_live.rs:228-252,334-348,799-806
+#Test("import_labels_plumbing_and_program_coverage") {
+    assert_eq(sanitize_source_label("nix-cachyos-kernel"), "nix_cachyos_kernel")
+    assert_eq(sanitize_source_label("123-x!"), "src_123_x")
+    assert_eq(sanitize_source_label("?!"), "src_")
+    loop name in ["?", "dummy-a", "hm-session-vars.sh", "thing.desktop", "fish-manpage"] { assert(is_hm_plumbing_package(name)) }
+    assert(!is_hm_plumbing_package("firefox"))
+    assert_eq(render_live_number(50.0), "50")
+    assert_eq(render_live_int_list(&[22, 443]), "[22, 443]")
+    assert_eq(importable_hm_program("fish"), .Val("apps.program.fish.enable"))
+    assert_eq(importable_hm_program("unmapped"), .None)
+}

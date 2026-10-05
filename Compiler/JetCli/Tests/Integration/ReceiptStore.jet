@@ -1,0 +1,238 @@
+use std.fs
+use std.env
+use std.process.[Command, id]
+use std.sync.atomic.[AtomicU64, Ordering]
+use core.files.[OSPath]
+use jet.ReceiptStore.[participating_verb, ReceiptStore, PARTICIPATING_VERBS, input_paths_for]
+use jet_store.[Store]
+use jet_foundation.[TEXT_NUL]
+
+// Rust: tests/receipt_store.rs:7
+// GATE #4494: process-wide atomic counter and real filesystem/process substrate.
+NEXT :: AtomicU64.new(0)
+
+// Rust: tests/receipt_store.rs:10
+#Test("participating_verbs_are_explicit_and_bounded") {
+    assert_eq(PARTICIPATING_VERBS, ["test", "prove", "budget check"])
+    for verb in PARTICIPATING_VERBS {
+        argv :: verb.split_whitespace().map((part) -> part.to_string()).collect()
+        assert_eq(participating_verb(argv), Val(verb))
+    }
+    assert_eq(participating_verb(["budget", "update"]), None)
+    assert_eq(participating_verb(["run"]), None)
+    assert_eq(participating_verb(["check"]), None)
+    assert_eq(participating_verb(["build"]), None)
+}
+
+// Rust: tests/receipt_store.rs:31
+fn check_nodes(workspace: OSPath, store: OSPath, program: String) -> [(String, String)] {
+    record :: Store.new(store).unwrap().last_build_record(workspace, program).unwrap()
+    if record == {
+        .Val(found) -> found.nodes.iter().filter((node) -> node.kind == "check").map((node) -> (node.subject, node.why_ran)).collect()
+        .None -> []
+    }
+}
+
+// Rust: tests/receipt_store.rs:47
+fn temp_root(label: String) -> OSPath {
+    root :: env.temp_dir().join("jet-receipts-{label}-{id()}-{NEXT.fetch_add(1, Ordering.Relaxed)}")
+    _ :: fs.remove_dir_all(root)
+    fs.create_dir_all(root).unwrap()
+    root
+}
+
+// Rust: tests/receipt_store.rs:59
+#Test("content_keys_reuse_without_timestamps_and_invalidate_only_dependents") {
+    root :: temp_root("identity")
+    source :: root.join("source.jet")
+    unrelated :: root.join("unrelated.jet")
+    fs.write(source, "fn run() -> {}\n").unwrap()
+    fs.write(unrelated, "fn run() -> {}\n").unwrap()
+    store :: ReceiptStore.new(root.join("store"))
+    args :: ["check", source.display().to_string()]
+    source_claim :: store.claim("check", args, [source]).unwrap()
+    unrelated_claim :: store.claim("check", args, [unrelated]).unwrap()
+    store.write(source_claim, args, 0, "source".as_bytes(), "".as_bytes()).unwrap()
+    store.write(unrelated_claim, args, 0, "unrelated".as_bytes(), "".as_bytes()).unwrap()
+    fs.write(source, "fn run() -> {}\n").unwrap()
+    assert(store.lookup(source_claim).unwrap().is_some())
+    assert(store.lookup(unrelated_claim).unwrap().is_some())
+    fs.write(source, "fn run() -> { print(1) }\n").unwrap()
+    changed_source :: store.claim("check", args, [source]).unwrap()
+    assert_ne(changed_source.key, source_claim.key)
+    assert(store.lookup(source_claim).unwrap().is_none())
+    assert(store.lookup(unrelated_claim).unwrap().is_some())
+    _ :: fs.remove_dir_all(root)
+}
+
+// Rust: tests/receipt_store.rs:101
+#Test("check_reuses_receipt_at_the_cli_boundary") {
+    root :: temp_root("cli")
+    source :: root.join("main.jet")
+    store :: root.join("store")
+    fs.write(source, "fn run() -> {}\n").unwrap()
+    jet :: env.var("CARGO_BIN_EXE_jet").unwrap()
+    check :: () -> Command.new(jet).current_dir(root).args(["check", source.to_str().unwrap()])
+        .env("JET_STORE_DIR", store).env("NO_COLOR", "1").output().unwrap()
+    program :: "main.jet"
+    first :: check()
+    assert(first.status.success(), "{String.from_utf8_lossy(first.stderr)}")
+    fresh :: check_nodes(root, store, program)
+    assert(!fresh.is_empty(), "a fresh check must log its Check nodes")
+    assert(fresh.iter().all((node) -> node.1 != "reused"), "{fresh:?}")
+    second :: check()
+    assert(second.status.success(), "{String.from_utf8_lossy(second.stderr)}")
+    assert_eq(second.stdout, first.stdout)
+    assert_eq(second.stderr, first.stderr)
+    replayed :: check_nodes(root, store, program)
+    assert_eq(replayed.len(), fresh.len())
+    assert(replayed.iter().all((node) -> node.1 == "reused"), "{replayed:?}")
+    _ :: fs.remove_dir_all(root)
+}
+
+// Rust: tests/receipt_store.rs:136
+#Test("project_check_does_not_replay_after_higher_priority_entry_appears") {
+    root :: temp_root("stale-entry")
+    source_dir :: root.join("src")
+    store :: root.join("store")
+    fs.create_dir_all(source_dir).unwrap()
+    fs.write(root.join("package.jet"), "name: \"stale-entry\"\nversion: \"0.1.0\"\n").unwrap()
+    fs.write(source_dir.join("run.jet"), "fn run() -> {}\n").unwrap()
+    jet :: env.var("CARGO_BIN_EXE_jet").unwrap()
+    check :: () -> Command.new(jet).args(["check", "--verbose"]).current_dir(root).env("JET_STORE_DIR", store).output().unwrap()
+    first :: check()
+    assert(first.status.success(), "initial project check failed:\n{String.from_utf8_lossy(first.stderr)}")
+    fs.write(root.join("run.jet"), "fn run() -> {}\n").unwrap()
+    second :: check()
+    assert(second.status.success(), "project check after entry creation failed:\n{String.from_utf8_lossy(second.stderr)}")
+    nodes :: check_nodes(root, store, "run.jet")
+    assert(!nodes.is_empty() && nodes.iter().all((node) -> node.1 != "reused"), "new higher-priority entry must check fresh, not replay the old receipt: {nodes:?}")
+    _ :: fs.remove_dir_all(root)
+}
+
+// Rust: tests/receipt_store.rs:181
+#Test("explicit_check_receipt_tracks_package_workspace_and_generated_authorities") {
+    root :: temp_root("project-authorities")
+    package :: root.join("packages/app")
+    source :: package.join("src/main.jet")
+    package_manifest :: package.join("package.jet")
+    workspace :: root.join("workspace.jet")
+    workspace_lock :: root.join(".jet/lock")
+    package_lock :: package.join(".jet/lock")
+    generated :: package.join(".jet/generated/inputs.jet")
+    for path in [source, workspace_lock, package_lock, generated] { fs.create_dir_all(path.parent().unwrap()).unwrap() }
+    fs.write(workspace, "module workspace { members: [\"packages/app\"] }\n").unwrap()
+    fs.write(package_manifest, "name: \"app\"\nversion: \"0.1.0\"\n").unwrap()
+    fs.write(source, "fn run() -> {}\n").unwrap()
+    fs.write(workspace_lock, "workspace-lock-v1\n").unwrap()
+    fs.write(package_lock, "package-lock-v1\n").unwrap()
+    fs.write(generated, "generated-v1\n").unwrap()
+    argv :: ["check", "packages/app/src/main.jet"]
+    inputs :: input_paths_for("check", argv, root)
+    for expected in [workspace, package_manifest, workspace_lock, package_lock, generated] {
+        assert(inputs.iter().any((path) -> path == expected), "explicit check omitted authority input {expected.display()}: {inputs:?}")
+    }
+    store :: ReceiptStore.new(root.join("receipts"))
+    claim :: store.claim("check", argv, inputs).unwrap()
+    store.write(claim, argv, 0, "ok".as_bytes(), "".as_bytes()).unwrap()
+    assert(store.lookup(claim).unwrap().is_some())
+    cases :: [
+        (workspace, "module workspace { members: [] }\n", "module workspace { members: [\"packages/app\"] }\n"),
+        (package_manifest, "name: \"changed\"\n", "name: \"app\"\nversion: \"0.1.0\"\n"),
+        (workspace_lock, "workspace-lock-v2\n", "workspace-lock-v1\n"),
+        (package_lock, "package-lock-v2\n", "package-lock-v1\n"),
+        (generated, "generated-v2\n", "generated-v1\n"),
+    ]
+    for (path, replacement, original) in cases {
+        fs.write(path, replacement).unwrap()
+        assert(store.lookup(claim).unwrap().is_none(), "changed authority input {path.display()} replayed an old receipt")
+        fs.write(path, original).unwrap()
+    }
+    _ :: fs.remove_dir_all(root)
+}
+
+// Rust: tests/receipt_store.rs:259
+#Test("result_payloads_share_one_receipt_codec_and_store") {
+    root :: temp_root("kinds")
+    source :: root.join("main.jet")
+    fs.write(source, "fn run() -> {}\n").unwrap()
+    store :: ReceiptStore.new(root.join("store"))
+    args :: ["act"]
+    payloads :: [("test", "test"), ("golden", "golden"), ("budget", "budget"), ("api", "api")]
+    for (kind, payload) in payloads {
+        receipt :: store.record(kind, args, [source], 0, payload.as_bytes(), "".as_bytes()).unwrap()
+        bytes :: fs.read(store.object_path(receipt.claim.key)).unwrap()
+        assert(bytes.starts_with(("jet-receipt-v2" + TEXT_NUL).as_bytes()))
+    }
+    assert_eq(store.list().unwrap().len(), payloads.len())
+    assert_eq(store.list_current().unwrap().len(), payloads.len())
+    fs.write(source, "fn run() -> { print(1) }\n").unwrap()
+    assert(store.list_current().unwrap().is_empty())
+    assert_eq(store.list().unwrap().len(), payloads.len())
+    _ :: fs.remove_dir_all(root)
+}
+
+// Rust: tests/receipt_store.rs:290
+#Test("canonical_history_keeps_legacy_namespaces_and_separates_checkout_identities") {
+    if core.sys.target.selected_family() != "unix" -> return
+    // GATE #4494: Unix permissions, symlinks and child capture.
+    write_project :: (root: OSPath) -> {
+        fs.write(root.join("package.jet"), "name: \"receipt-boundary\"\nversion: \"0.1.0\"\n").unwrap()
+        fs.write(root.join("main.jet"), "fn run() -> {}\n").unwrap()
+    }
+    run_check :: (root: OSPath) -> Command.new(env.var("CARGO_BIN_EXE_jet").unwrap()).args(["check", "main.jet"]).current_dir(root).output().unwrap()
+    root :: temp_root("canonical")
+    write_project(root)
+    fs.create_dir_all(root.join("build")).unwrap()
+    fs.write(root.join("build/legacy-output"), "legacy-build".as_bytes()).unwrap()
+    fs.create_dir_all(root.join(".jet-build")).unwrap()
+    fs.write(root.join(".jet-build/legacy-output"), "legacy-jet-build".as_bytes()).unwrap()
+    fs.create_dir_all(root.join("src/.jet")).unwrap()
+    fs.write(root.join("src/.jet/legacy-output"), "legacy-input".as_bytes()).unwrap()
+    source_permissions := fs.metadata(root.join("main.jet")).unwrap().permissions()
+    source_permissions.set_mode(0o444)
+    fs.set_permissions(root.join("main.jet"), source_permissions).unwrap()
+    first :: run_check(root)
+    assert(first.status.success(), "canonical check failed:\n{String.from_utf8_lossy(first.stderr)}")
+    receipts :: root.join(".jet/receipts")
+    assert(receipts.is_dir(), "history must use the selected `.jet` root")
+    assert_eq(fs.read(root.join("build/legacy-output")).unwrap(), "legacy-build".as_bytes())
+    assert_eq(fs.read(root.join(".jet-build/legacy-output")).unwrap(), "legacy-jet-build".as_bytes())
+    assert_eq(fs.read(root.join("src/.jet/legacy-output")).unwrap(), "legacy-input".as_bytes())
+    assert(!root.join("build/objects").exists() && !root.join(".jet-build/objects").exists() && !root.join("src/.jet/objects").exists(), "legacy namespaces must not receive duplicate history")
+    moved :: temp_root("moved")
+    write_project(moved)
+    second :: run_check(moved)
+    assert(second.status.success(), "moved checkout check failed:\n{String.from_utf8_lossy(second.stderr)}")
+    assert(moved.join(".jet/receipts").is_dir())
+    assert_ne(fs.canonicalize(receipts).unwrap(), fs.canonicalize(moved.join(".jet/receipts")).unwrap(), "moved checkout history must not escape into the old project")
+    store :: ReceiptStore.new(receipts)
+    source :: root.join("main.jet")
+    debug :: ["check", source.display().to_string(), "--profile=debug"]
+    release :: ["check", source.display().to_string(), "--profile=release"]
+    debug_claim :: store.claim("check", debug, [source]).unwrap()
+    release_claim :: store.claim("check", release, [source]).unwrap()
+    assert_ne(debug_claim.key, release_claim.key, "profile selection must remain part of receipt identity")
+    moved_source :: moved.join("main.jet")
+    moved_claim :: ReceiptStore.new(moved.join(".jet/receipts")).claim("check", debug, [moved_source]).unwrap()
+    assert_ne(debug_claim.key, moved_claim.key, "project roots must remain separate after a checkout move")
+    alias :: temp_root("symlink-alias")
+    fs.remove_dir_all(alias).unwrap()
+    fs.symlink(root, alias).unwrap()
+    alias_run :: run_check(alias)
+    assert(alias_run.status.success(), "symlink checkout check failed:\n{String.from_utf8_lossy(alias_run.stderr)}")
+    assert_eq(fs.canonicalize(alias.join(".jet/receipts")).unwrap(), fs.canonicalize(receipts).unwrap(), "a symlinked checkout must resolve to its canonical project root")
+    fs.remove_file(alias).unwrap()
+    outside :: temp_root("escape-outside")
+    escaped :: temp_root("escape-project")
+    write_project(escaped)
+    fs.create_dir_all(escaped.join(".jet")).unwrap()
+    fs.symlink(outside, escaped.join(".jet/receipts")).unwrap()
+    escaped_run :: run_check(escaped)
+    assert(escaped_run.status.success(), "an unsafe history destination must not fail the required check:\n{String.from_utf8_lossy(escaped_run.stderr)}")
+    assert(!outside.join("objects").exists() && !outside.join("contexts").exists() && !outside.join("records").exists(), "a symlinked `.jet/receipts` must never receive history")
+    _ :: fs.remove_dir_all(root)
+    _ :: fs.remove_dir_all(moved)
+    _ :: fs.remove_dir_all(outside)
+    _ :: fs.remove_dir_all(escaped)
+}

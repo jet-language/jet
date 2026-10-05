@@ -1,0 +1,147 @@
+// Existing substantive tests stay at their canonical owners, without duplicate
+// fixtures or test declarations. Rust anchors below map every original test.
+
+// Rust: crates/jetpack/src/Provider.rs:2605
+// empty -> SourceTable.empty.
+// Rust: crates/jetpack/src/Provider.rs:2610
+// provider_git_uses_the_shared_source_fetch_policy -> Tests/Provider.jet:83
+// #Test("provider git uses the shared source fetch policy").
+// Rust: crates/jetpack/src/Provider.rs:2666
+// exclusive_temp_directories_are_random_and_collision_safe -> Tests/Provider.jet:106
+// #Test("provider exclusive temporary directories are random and collision safe").
+
+// Rust: crates/jetpack/src/Provider.rs:2681
+#Test("provider_module_stays_split_by_source_ownership") {
+    max_module_lines :: 2500
+    root :: files.read("Jetpack/Provider/Source/Core/ProviderDispatch.jet") ?? panic("dispatch source")
+    remote :: files.read("Jetpack/Provider/Source/Remote/RemoteCheckout.jet") ?? panic("remote source")
+    assert(root.lines().len() < max_module_lines)
+    assert(remote.lines().len() < max_module_lines)
+    // Jet package source ownership replaces Rust's private `mod remote`.
+    assert(root.contains("fn provider_resolve_kind("))
+    assert(remote.contains("fn provider_fetch_remote_repo("))
+    assert(!root.contains("fn provider_fetch_remote_repo("))
+    assert(!root.contains("include!("))
+    assert(!remote.contains("include!("))
+}
+
+// Rust: crates/jetpack/src/Provider.rs:2702
+// nix_lock_digest_ignores_hangar_receipt_projection -> Tests/Provider.jet:116
+// #Test("provider nix lock digest ignores hangar receipt projection").
+// Rust: crates/jetpack/src/Provider.rs:2722
+// locked_nix_index_key_uses_exact_channel_and_splits_dotted_attrpath -> Tests/Provider.jet:128
+// #Test("provider locked nix index key uses exact channel and splits dotted attrpath").
+// Rust: crates/jetpack/src/Provider.rs:2759
+// indexed_realization_records_union_and_both_provenance_families -> Tests/Provider.jet:147
+// #Test("provider indexed realization records union and both provenance families").
+// Rust: crates/jetpack/src/Provider.rs:2886
+// top_level_run_drives_kind_inference -> Tests/RemoteSource.jet:40
+// #Test("provider top level run drives kind inference").
+// Rust: crates/jetpack/src/Provider.rs:2906
+// nix_store_version_parses_path_suffix -> Tests/Provider.jet:195
+// #Test("provider nix store version parses path suffix").
+// Rust: crates/jetpack/src/Provider.rs:2932
+// translates_ref_to_flake -> Tests/Provider.jet:204 #Test("provider translates ref to flake").
+// Rust: crates/jetpack/src/Provider.rs:2944
+// flake_ref_strips_jet_version_selector_only_for_nix -> Tests/Provider.jet:209
+// #Test("provider flake ref strips jet version selector only for nix").
+// Rust: crates/jetpack/src/Provider.rs:2952
+// direct_ecosystem_roots_do_not_default_to_nix -> Tests/Provider.jet:214
+// #Test("provider direct ecosystem roots do not default to nix").
+// Rust: crates/jetpack/src/Provider.rs:2994
+// acquisition_hooks_dispatch_through_core_nix_and_script_adapters -> Tests/Provider.jet:241
+// #Test("provider acquisition hooks dispatch through core nix and script adapters").
+// Rust: crates/jetpack/src/Provider.rs:3078
+// named_source_flake_ref_uses_pin -> Tests/Provider.jet:295
+// #Test("provider named source flake ref uses pin").
+// Rust: crates/jetpack/src/Provider.rs:3094
+// named_source_changes_nix_cache_authority -> Tests/Provider.jet:302
+// #Test("provider named source repoint changes nix cache authority").
+// Rust: crates/jetpack/src/Provider.rs:3125
+// jetpack_refs_share_nix_cache_identity -> Tests/Provider.jet:312
+// #Test("provider jetpack refs share nix cache identity").
+// Rust: crates/jetpack/src/Provider.rs:3164
+// fixture_name_sanitizes_slashes -> Tests/Provider.jet:324
+// #Test("provider fixture name sanitizes slashes").
+// Rust: crates/jetpack/src/Provider.rs:3170
+// parses_good_output -> Tests/Provider.jet:328 #Test("provider parses good output").
+// Rust: crates/jetpack/src/Provider.rs:3194
+// fallback_imports_closed_graph_and_all_projections -> Tests/Provider.jet:340
+// #Test("provider fallback imports closed graph and all projections").
+// Rust: crates/jetpack/src/Provider.rs:3228
+// nix_build_facts_are_fixed_and_runtime_path_stays_composed -> Tests/Provider.jet:353
+// #Test("provider nix build facts are fixed and runtime path stays composed").
+// Rust: crates/jetpack/src/Provider.rs:3279
+// shared_carrier_rejects_unpinned_external_reference -> Tests/Provider.jet:375
+// #Test("provider shared carrier rejects unpinned external reference").
+// Rust: crates/jetpack/src/Provider.rs:3305
+// tolerates_nix_store_noise_around_output -> Tests/Provider.jet:392
+// #Test("provider tolerates nix store noise around output").
+// Rust: crates/jetpack/src/Provider.rs:3315
+// tolerates_nix_hard_link_noise_between_multiline_realization_lines -> Tests/Provider.jet:399
+// #Test("provider tolerates nix hard link noise between multiline realization lines").
+// Rust: crates/jetpack/src/Provider.rs:3327
+// rejects_duplicate_realization_payloads -> Tests/Provider.jet:407
+// #Test("provider rejects duplicate realization payloads").
+// Rust: crates/jetpack/src/Provider.rs:3337
+// rejects_multiple_nix_realization_results_in_one_payload -> Tests/Provider.jet:412
+// #Test("provider rejects multiple nix realization results in one payload").
+// Rust: crates/jetpack/src/Provider.rs:3350
+// realization_schema_error_retains_filtered_provider_noise -> Tests/Provider.jet:423
+// #Test("provider realization schema error retains filtered provider noise").
+// Rust: crates/jetpack/src/Provider.rs:3362
+// prefers_bin_output -> Tests/Provider.jet:434 #Test("provider prefers bin output").
+// Rust: crates/jetpack/src/Provider.rs:3372
+// empty_output_is_bad -> Tests/Provider.jet:443 assertion for "[]".
+// Rust: crates/jetpack/src/Provider.rs:3381
+// garbage_output_is_bad -> Tests/Provider.jet:444 assertion for "not json".
+// Rust: crates/jetpack/src/Provider.rs:3390
+// missing_outputs_key_is_bad -> Tests/Provider.jet:445 assertion for drvPath-only JSON.
+// Rust: crates/jetpack/src/Provider.rs:3399
+// missing_exact_derivation_is_bad -> Tests/Provider.jet:446 assertion for outputs-only JSON.
+// The four assertions share #Test("provider empty garbage and incomplete outputs are bad").
+// Rust: crates/jetpack/src/Provider.rs:3408
+// fixture_missing_errors -> Tests/Provider.jet:449 #Test("provider fixture missing errors").
+// Rust: crates/jetpack/src/Provider.rs:3427
+// core_provider_builds_local_package -> Tests/Provider.jet:459
+// #Test("provider core builds local package").
+// Rust: crates/jetpack/src/Provider.rs:3485
+// core_provider_kind_decides_path_entry -> Tests/Provider.jet:487
+// #Test("provider core kind decides path entry").
+// Rust: crates/jetpack/src/Provider.rs:3541
+// core_provider_fetches_remote_git_package -> Tests/Provider.jet:507
+// #Test("provider core fetches remote git package").
+// Rust: crates/jetpack/src/Provider.rs:3614
+// init_git_repo -> Tests/Provider.jet:50 provider_core_test_git_repo,
+// with command/write helpers :44 provider_core_test_git and :10 provider_core_test_write.
+// Rust: crates/jetpack/src/Provider.rs:3644
+// resolve_kind_probes_remote_pack_jet -> Tests/Provider.jet:525
+// #Test("provider resolve kind probes remote package marker").
+// Rust: crates/jetpack/src/Provider.rs:3700
+// remote_probe_resolves_a_commit_sha_rev -> Tests/Provider.jet:549
+// #Test("provider remote probe resolves a commit sha rev").
+// Rust: crates/jetpack/src/Provider.rs:3740
+// realize_resolves_inferred_remote_to_core -> Tests/Provider.jet:566
+// #Test("provider realize resolves inferred remote to core").
+// Rust: crates/jetpack/src/Provider.rs:3782
+// sparse_fetch_materializes_only_addressed_member -> Tests/Provider.jet:588
+// #Test("provider sparse fetch materializes only addressed member").
+// Rust: crates/jetpack/src/Provider.rs:3846
+// sparse_fetch_includes_in_repo_dependency -> Tests/Provider.jet:617
+// #Test("provider sparse fetch includes in repo dependency").
+// Rust: crates/jetpack/src/Provider.rs:3917
+// in_repo_dep_outside_workspace_is_e1233 -> Tests/Provider.jet:648
+// #Test("provider in repo dependency outside workspace is E1233").
+// Rust: crates/jetpack/src/Provider.rs:3963
+// canonical_monorepo_realization_uses_the_requested_member_root -> Tests/Provider.jet:670
+// #Test("provider canonical monorepo realization uses the requested member root").
+// Rust: crates/jetpack/src/Provider.rs:4030
+// core_build_writes_envelope -> Tests/Provider.jet:707 #Test("provider core build writes envelope").
+// Rust: crates/jetpack/src/Provider.rs:4105
+// bridge_build_rejects_untrusted_toolchain_outside_native_closure -> Tests/Provider.jet:740
+// #Test("provider bridge build rejects untrusted toolchain outside native closure").
+// Rust: crates/jetpack/src/Provider.rs:4156
+// tree_fingerprint_reflects_contents -> Tests/Provider.jet:765
+// #Test("provider tree fingerprint reflects contents").
+// Rust: crates/jetpack/src/Provider.rs:4172
+// unique_dir -> Tests/Provider.jet:6 provider_core_test_dir (exclusive native temp directory).

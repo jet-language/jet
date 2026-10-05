@@ -1,219 +1,41 @@
-// PORT-PENDING 2161 crates-jet-pkg-model-src-workspaceplan: crates/jet-pkg-model/src/WorkspacePlan.rs:1-215
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! `WorkspacePlan`, workspace-source authority, and `WorkspaceMember` — the
-//RS //! data types produced by evaluating a workspace declaration
-//RS //! (D-WORKSPACE1=B, D-WORKSPACE2=A).
-//RS //!
-//RS //! These types live here (L1 data model) so both the evaluator
-//RS //! (`jet-env-model::WorkspaceFile`) and the lock reader
-//RS //! (`jet-pkg-model::WorkspaceLock`) share the same definition without
-//RS //! either depending on the other.
-//RS 
-//RS pub use crate::Authority::{
-//RS     AuthorityError, AuthorityKind, AuthorityResolver, CheckedDirectory, CheckedFile,
-//RS     CheckedManifest, CheckedMember, CheckedPackage, FileIdentity,
-//RS };
-//RS use crate::Diagnostics::Diagnostic;
-//RS use crate::Overlay::OverlayPolicy;
-//RS use crate::AST::ComptimeInput;
-//RS use std::path::{Path, PathBuf};
-//RS 
-//RS /// The role of a declaration-resolved workspace source.
-//RS ///
-//RS /// `workspace.jet` is the D-WORKSPACE2 index. Other top-level declarations
-//RS /// establish an authority boundary, but are not workspace indexes.
-//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-//RS pub enum WorkspaceSourceRole {
-//RS     Index,
-//RS     Authority,
-//RS }
-//RS 
-//RS /// The one declaration-resolved workspace source used by every authority
-//RS /// lookup.
-//RS #[derive(Debug, Clone)]
-//RS pub struct WorkspaceSource {
-//RS     pub path: PathBuf,
-//RS     pub source: String,
-//RS     pub role: WorkspaceSourceRole,
-//RS     /// The opened source and its identity. Consumers must revalidate this
-//RS     /// snapshot before using the source for authority-sensitive work.
-//RS     pub checked: CheckedFile,
-//RS }
-//RS 
-//RS /// The result of evaluating a workspace declaration.
-//RS #[derive(Debug, Clone, Default)]
-//RS pub struct WorkspacePlan {
-//RS     /// Member packages in source order (the order `members:` produced them).
-//RS     pub members: Vec<WorkspaceMember>,
-//RS     /// D-CTEFFECT1 Tier-1: content-addressed inputs (`@embed`, `fetch(url,
-//RS     /// sha256:)`) that a `members:` expression pulled in during evaluation.
-//RS     /// Recorded into `.jet/lock` so the index is reproducible — a changed
-//RS     /// input invalidates the lock the same way it does for any other Tier-1
-//RS     /// call site.
-//RS     pub comptime_inputs: Vec<ComptimeInput>,
-//RS     /// D-JPK-OVERLAY1=A: reviewed package overlay/override policy from the
-//RS     /// workspace declaration; CLI commands may draft this source but never
-//RS     /// create hidden override state.
-//RS     pub overlay_policy: OverlayPolicy,
-//RS     /// Digest of the workspace source that produced this plan. Locks may be
-//RS     /// reused only when the source bytes still have this identity.
-//RS     pub source_digest: String,
-//RS }
-//RS 
-//RS /// One workspace member package.
-//RS #[derive(Debug, Clone)]
-//RS pub struct WorkspaceMember {
-//RS     /// Package name read from the member's `package.jet` (or derived from path).
-//RS     pub name: String,
-//RS     /// Path to the package directory, relative to the workspace root.
-//RS     pub path: String,
-//RS     /// Checkout-relative canonical directory identity used by the workspace
-//RS     /// lock. Relative identity keeps a committed lock portable after a
-//RS     /// checkout moves.
-//RS     pub canonical_path: String,
-//RS }
-//RS 
-//RS /// Resolve the one top-level `.jet` source that declares `module workspace`.
-//RS ///
-//RS /// The filename and declaration jointly select the role. A declared
-//RS /// `workspace.jet` is the strict D-WORKSPACE2 index. A declared workspace
-//RS /// module in any other top-level `.jet` file is an authority boundary and is
-//RS /// evaluated only for policy. A malformed canonical file still fails closed,
-//RS /// even when an arbitrary authority declaration is present beside it.
-//RS ///
-//RS /// Every candidate is inspected in deterministic filename order. More than
-//RS /// one usable declaration is E1239. Any source-discovery I/O failure is an
-//RS /// error rather than an absent workspace so callers cannot fall through to an
-//RS /// outer authority or stale lock.
-//RS pub fn resolve_workspace_source(dir: &Path) -> Option<Result<WorkspaceSource, Diagnostic>> {
-//RS     let resolver = match AuthorityResolver::open(dir) {
-//RS         Ok(resolver) => resolver,
-//RS         Err(error) if error.is_missing() => return None,
-//RS         Err(error) => return Some(Err(error.workspace_diagnostic())),
-//RS     };
-//RS     match resolver.resolve_workspace_source() {
-//RS         Ok(Some(source)) => Some(Ok(source)),
-//RS         Ok(None) => None,
-//RS         Err(error) => Some(Err(error.workspace_diagnostic())),
-//RS     }
-//RS }
-//RS 
-//RS /// E0995: the canonical workspace source is present but has no workspace
-//RS /// declaration. Keep this diagnostic in the shared model so discovery and
-//RS /// evaluation cannot drift.
-//RS pub fn e0995_no_workspace_module() -> Diagnostic {
-//RS     Diagnostic::error(
-//RS         "E0995",
-//RS         format!(
-//RS             "`{}` must declare `module {} {{ … }}`",
-//RS             crate::Syntax::WORKSPACE_FILE,
-//RS             crate::Syntax::NS_WORKSPACE
-//RS         ),
-//RS         format!(
-//RS             "`{}` is the monorepo workspace index; it must contain exactly one `module {} {{ members: … }}` body",
-//RS             crate::Syntax::WORKSPACE_FILE,
-//RS             crate::Syntax::NS_WORKSPACE
-//RS         ),
-//RS         format!(
-//RS             "write `module {} {{ members: find(\"./packages\") }}` in `{}`",
-//RS             crate::Syntax::NS_WORKSPACE,
-//RS             crate::Syntax::WORKSPACE_FILE
-//RS         ),
-//RS         None,
-//RS     )
-//RS }
-//RS 
-//RS /// Cheap token probe for a top-level `module workspace` candidate.
-//RS /// Full parsing stays in `jet-env-model::WorkspaceFile::evaluate`.
-//RS ///
-//RS /// Root discovery probes every top-level `.jet` file of the directories it
-//RS /// walks, and one command walks the same root several times; the answer is a
-//RS /// pure function of the text, so each distinct source is lexed once.
-//RS pub(crate) fn declares_workspace_module(src: &str) -> bool {
-//RS     use std::hash::{Hash, Hasher};
-//RS     static PROBED: std::sync::LazyLock<
-//RS         std::sync::Mutex<std::collections::HashMap<(usize, u64), bool>>,
-//RS     > = std::sync::LazyLock::new(Default::default);
-//RS     let mut hasher = std::collections::hash_map::DefaultHasher::new();
-//RS     src.hash(&mut hasher);
-//RS     let key = (src.len(), hasher.finish());
-//RS     if let Some(&declares) = PROBED.lock().unwrap_or_else(|poison| poison.into_inner()).get(&key) {
-//RS         return declares;
-//RS     }
-//RS     let declares = lex_declares_workspace_module(src);
-//RS     PROBED
-//RS         .lock()
-//RS         .unwrap_or_else(|poison| poison.into_inner())
-//RS         .insert(key, declares);
-//RS     declares
-//RS }
-//RS 
-//RS fn lex_declares_workspace_module(src: &str) -> bool {
-//RS     let (tokens, _lex_diags) = crate::Lexer::lex(src);
-//RS     let tokens = crate::Lexer::without_comments(&tokens);
-//RS     let mut brace_depth = 0i32;
-//RS     let mut index = 0;
-//RS     while index + 1 < tokens.len() {
-//RS         match &tokens[index].kind {
-//RS             crate::Lexer::TokKind::LBrace => {
-//RS                 brace_depth += 1;
-//RS                 index += 1;
-//RS             }
-//RS             crate::Lexer::TokKind::RBrace => {
-//RS                 brace_depth -= 1;
-//RS                 index += 1;
-//RS             }
-//RS             crate::Lexer::TokKind::KwModule if brace_depth == 0 => match &tokens[index + 1].kind {
-//RS                 crate::Lexer::TokKind::Ident(name)
-//RS                     if name == crate::Syntax::NS_WORKSPACE
-//RS                         && !name.starts_with(crate::Syntax::MODULE_INTERNAL_PREFIX) =>
-//RS                 {
-//RS                     return true;
-//RS                 }
-//RS                 _ => index += 1,
-//RS             },
-//RS             _ => index += 1,
-//RS         }
-//RS     }
-//RS     false
-//RS }
-//RS 
-//RS /// True when a workspace declaration also supplies a `members:` index field.
-//RS /// An arbitrary top-level `.jet` file that lists members is an index, not
-//RS /// authority-only metadata (D-JPK-FILENAME2=B).
-//RS pub(crate) fn declares_workspace_members(src: &str) -> bool {
-//RS     if !declares_workspace_module(src) {
-//RS         return false;
-//RS     }
-//RS     let (tokens, _lex_diags) = crate::Lexer::lex(src);
-//RS     let tokens = crate::Lexer::without_comments(&tokens);
-//RS     tokens.iter().any(|token| {
-//RS         matches!(
-//RS             &token.kind,
-//RS             crate::Lexer::TokKind::Ident(name) if name == crate::Syntax::MODULE_FIELD_MEMBERS
-//RS         )
-//RS     })
-//RS }
-//RS 
-//RS /// E1239: the workspace authority must have one declaration source.
-//RS pub(crate) fn e1239_ambiguous_workspace(paths: &[&Path]) -> Diagnostic {
-//RS     let list = paths
-//RS         .iter()
-//RS         .map(|path| {
-//RS             path.file_name()
-//RS                 .map(|name| name.to_string_lossy().into_owned())
-//RS                 .unwrap_or_else(|| path.display().to_string())
-//RS         })
-//RS         .collect::<Vec<_>>()
-//RS         .join("`, `");
-//RS     Diagnostic::error(
-//RS         "E1239",
-//RS         format!("`module workspace` is declared in more than one file: `{list}`"),
-//RS         "the workspace authority is discovered by declaration, so exactly one file may declare `module workspace { … }`".to_string(),
-//RS         "keep one declaration and delete the others".to_string(),
-//RS         None,
-//RS     )
-//RS }
-//RS 
-// END-PORT-PENDING 2161 crates/jet-pkg-model/src/WorkspacePlan.rs:1-215
+// Workspace declarations share the L1 package model with evaluation and locks.
+// Existing canonical owners are reused; there is no second workspace model.
+use jet_pkg_model.Authority.[AuthorityError, AuthorityKind, AuthorityResolver, CheckedDirectory, CheckedFile, CheckedManifest, CheckedMember, CheckedPackage, FileIdentity]
+use jet_pkg_model.Workspace.WorkspaceAuthority.[WorkspaceSourceRole, WorkspaceSource, WorkspaceSourceError, WorkspaceDeclarationCache, pkg_resolve_workspace_source, pkg_e0995_no_workspace_module, pkg_declares_workspace_module, pkg_declares_workspace_members, pkg_e1239_ambiguous_workspace]
+use jet_pkg_model.Workspace.WorkspacePlan.[WorkspacePlan, WorkspacePlanMember]
+
+// Rust: crates/jet-pkg-model/src/WorkspacePlan.rs:23
+// WorkspaceSourceRole -> Compiler/JetPkgModel/Source/Workspace/WorkspaceAuthority.jet:10.
+// Rust: crates/jet-pkg-model/src/WorkspacePlan.rs:31
+// WorkspaceSource -> WorkspaceAuthority.jet:17 (native OSPath, checked snapshot).
+// Rust: crates/jet-pkg-model/src/WorkspacePlan.rs:42
+// WorkspacePlan -> Compiler/JetPkgModel/Source/Workspace/WorkspacePlan.jet:12;
+// Default -> WorkspacePlan.empty:26, including overlay policy and source digest.
+// Rust: crates/jet-pkg-model/src/WorkspacePlan.rs:62
+// WorkspaceMember -> WorkspacePlanMember:32; do not confuse RefSpec.WorkspaceMember.
+// Rust: crates/jet-pkg-model/src/WorkspacePlan.rs:85
+// resolve_workspace_source -> WorkspaceAuthority.pkg_resolve_workspace_source:43:
+// missing root is absent; all other open/resolve errors retain workspace diagnostics.
+// Rust: crates/jet-pkg-model/src/WorkspacePlan.rs:101
+// e0995_no_workspace_module -> WorkspaceAuthority.pkg_e0995_no_workspace_module:59;
+// the registry-backed diagnostic preserves the original three message strings.
+// Rust: crates/jet-pkg-model/src/WorkspacePlan.rs:129
+// declares_workspace_module -> WorkspaceAuthority.pkg_declares_workspace_module:142.
+// Rust: crates/jet-pkg-model/src/WorkspacePlan.rs:131
+// PROBED -> WorkspaceAuthority.WorkspaceDeclarationCache:80 and
+// pkg_workspace_declaration_probe:90. Canonical discovery passes one cache through
+// its session, rather than duplicating the Rust global LazyLock/Mutex cache here.
+// GATE #4494: Rust process-global cache lifetime and hash identity remain an
+// integration item; canonical session cache computes SHA-256 and counts lexes.
+// Rust: crates/jet-pkg-model/src/WorkspacePlan.rs:148
+// lex_declares_workspace_module -> WorkspaceAuthority.pkg_lex_workspace_declaration:102
+// and pkg_workspace_tokens_declare_module:114; comment removal, brace depth,
+// top-level module/identifier matching and internal-prefix exclusion are retained.
+// Rust: crates/jet-pkg-model/src/WorkspacePlan.rs:181
+// declares_workspace_members -> WorkspaceAuthority.pkg_declares_workspace_members:149
+// and pkg_workspace_tokens_name_members:133; first require the module declaration,
+// then match the members identifier among comment-free tokens.
+// Rust: crates/jet-pkg-model/src/WorkspacePlan.rs:196
+// e1239_ambiguous_workspace -> WorkspaceAuthority.pkg_e1239_ambiguous_workspace:155;
+// deterministic input order and original diagnostic text are retained.
 

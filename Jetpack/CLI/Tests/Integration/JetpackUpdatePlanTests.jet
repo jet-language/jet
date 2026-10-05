@@ -1,0 +1,155 @@
+use std.fs
+use tests.jetpack_fixtures.[jetpack, Scratch, write_channel_fixture, assert_jetos_stderr_snapshot]
+use jetpack.Platform.PlatformKey
+use jetpack.SemanticLock
+use jetpack.SemanticLock.[locked_variant_domains, record_selected_variant, SemanticLockFile]
+use jetpack.Variant.[select_variant, missing_lock_domains, ArtifactKind, PackageVariant, VariantArch, VariantCandidate, VariantLibc, VariantLinkage, VariantOs, VariantRole, VariantSelectError]
+use jetpack_cli.Tests.Integration.JetpackVariants.key
+
+// GATE #4494: native filesystem and process fixtures.
+// #4483: host_defaults resolves selected target facts in Variant.
+// #4499: semantic lock retains canonical exact key equality/order.
+// #4409 not applicable: tests/jetpack_update_plan.rs:1-64, tests/jetpack_update_scope.rs:1-58, tests/jetpack_variants.rs:1-308 do not inspect IO kinds.
+
+// Rust: tests/jetpack_update_plan.rs:11
+#Test("combined_update_plans_both_scopes_before_one_confirmation") {
+    project :: Scratch.new("combined-update-project")
+    root :: Scratch.new("combined-update-root")
+    fixtures :: Scratch.new("combined-update-fixtures")
+    home :: Scratch.new("combined-update-home")
+    fs.write(project.join("env.jet"), "module dev {\n    sources: { default: acme/tools@github#latest }\n    env.dev: Env{ packages: [default.greet] }\n}\n").unwrap()
+    fs.create_dir_all(fixtures.path).unwrap()
+    fs.write(fixtures.join("channels.txt"), "github:acme/tools latest github:acme/tools#v1.2.0 240000000\ncore:omp latest core:omp#v2 676000000\n").unwrap()
+    manifest_dir :: home.join(".jet/tools")
+    fs.create_dir_all(manifest_dir).unwrap()
+    fs.write(manifest_dir.join("manifest.json"), r##"{
+  "profile":"tools",
+  "schema":"jet-user-tools-v1",
+  "sources":[{"name":"core","policy":"#latest","provider":"core","raw":"omp@core#latest","upstream":"core:omp#v1"}],
+  "tools":[{"bins":[],"members":[],"name":"omp","reference":"omp@core#latest","resolved":"omp@core#v1","tier":"#latest"}]
+}
+"##).unwrap()
+    output :: jetpack().args(["update", "--no-color", "--fixtures"]).arg(fixtures.path)
+        .current_dir(project.path).env("JETPACK_ROOT", root.path).env("HOME", home.path).output().unwrap()
+    assert_eq(output.status.code(), Some(2))
+    stderr :: String.from_utf8_lossy(output.stderr)
+    deps :: stderr.find("deps  default").unwrap()
+    tools :: stderr.find("tools core").unwrap()
+    gate :: stderr.find("plan only; pass -y or --yes").unwrap()
+    assert(deps < gate, "stderr: {stderr}")
+    assert(tools < gate, "stderr: {stderr}")
+    assert(stderr.contains("1 package, 240 MB"), "stderr: {stderr}")
+    assert(stderr.contains("1 package, 676 MB"), "stderr: {stderr}")
+    assert_eq(stderr.matches("plan only;").count(), 1, "stderr: {stderr}")
+    assert(!project.join(".jet/lock").exists())
+    assert(fs.read_to_string(manifest_dir.join("manifest.json")).unwrap().contains("omp@core#v1"))
+}
+
+// Rust: tests/jetpack_update_scope.rs:11
+#Test("update_from_nested_cwd_reports_and_uses_project_scope") {
+    project :: Scratch.new("update-scope-project")
+    root :: Scratch.new("update-scope-root")
+    fixtures :: Scratch.new("update-scope-fixtures")
+    home :: Scratch.new("update-scope-home")
+    nested :: project.join("packages/app")
+    fs.create_dir_all(nested).unwrap()
+    fs.write(project.join("env.jet"), "module dev { sources: { default: acme/tools@github#latest } env.dev: Env{ packages: [default.greet] } }\n").unwrap()
+    write_channel_fixture(fixtures.path, "github:acme/tools", "latest", "github:acme/tools#v1.2.0")
+    output :: jetpack().args(["update", "--no-color", "--yes", "--fixtures"]).arg(fixtures.path)
+        .current_dir(nested).env("JETPACK_ROOT", root.path).env("HOME", home.path).output().unwrap()
+    assert(output.status.success(), "stderr: {String.from_utf8_lossy(output.stderr)}")
+    stderr :: String.from_utf8_lossy(output.stderr)
+    assert(stderr.contains("scope: project dependencies"), "stderr: {stderr}")
+    assert(stderr.contains("scope: user tools"), "stderr: {stderr}")
+    assert(stderr.contains(project.path.to_string_lossy()), "stderr: {stderr}")
+    assert(fs.read_to_string(project.join(".jet/lock")).unwrap().contains("exact = \"github:acme/tools#v1.2.0\""))
+}
+
+// Rust: tests/jetpack_variants.rs:24
+#Test("closed_axes_defaults_and_identity_key") {
+    v :: PackageVariant.defaults_for_context(PlatformKey(arch: "aarch64", os: "linux"))
+    assert_eq(v.role, VariantRole.Host)
+    assert_eq(v.os, VariantOs.Linux)
+    assert_eq(v.arch, VariantArch.Aarch64)
+    assert_eq(v.libc, VariantLibc.Gnu)
+    assert_eq(v.linkage, VariantLinkage.Shared)
+    assert_eq(v.artifact, ArtifactKind.Library)
+    key :: v.identity_key()
+    assert(key.contains("role=host"))
+    assert(key.contains("os=linux"))
+    assert(key.contains("arch=aarch64"))
+    assert(key.contains("libc=gnu"))
+}
+
+// Rust: tests/jetpack_variants.rs:43
+#Test("select_exact_cross_static_musl") {
+    need :: PackageVariant.cross_target(VariantOs.Linux, VariantArch.Aarch64, VariantLibc.Musl).with_linkage(VariantLinkage.Static)
+    winner :: VariantCandidate.new("openssl-static-musl", need.clone())
+    other :: VariantCandidate.new("openssl-shared-gnu", PackageVariant.cross_target(VariantOs.Linux, VariantArch.Aarch64, VariantLibc.Gnu).with_linkage(VariantLinkage.Shared))
+    got :: select_variant(need, [winner, other], []).unwrap()
+    assert_eq(got.label, "openssl-static-musl")
+}
+
+// Rust: tests/jetpack_variants.rs:59
+#Test("ambiguous_variant_is_e1316_with_snapshot") {
+    need :: PackageVariant.cross_target(VariantOs.Linux, VariantArch.Aarch64, VariantLibc.Musl).with_linkage(VariantLinkage.Static)
+    a :: VariantCandidate.new("openssl-a", need.clone()).with_provider_fact("conan.compiler.runtime", "libstdc++11")
+    b :: VariantCandidate.new("openssl-b", need.clone()).with_provider_fact("conan.compiler.runtime", "libstdc++")
+    err :: select_variant(need, [a, b], []).unwrap_err()
+    diag :: match err {
+        VariantSelectError.Ambiguous { .. } -> err.to_diagnostic()
+        other -> panic("expected Ambiguous, got {other:?}")
+    }
+    assert_eq(diag.code, "E1316")
+    rendered :: "\n  error[{diag.code}]: {diag.what}\n    {diag.why}\n    fix: {diag.fix}\n"
+    assert_jetos_stderr_snapshot("variant_ambiguous", rendered)
+}
+
+// Rust: tests/jetpack_variants.rs:83
+#Test("action_key_includes_variant_sysroot_sdk_linker_signing") {
+    variant :: "role=target;os=linux;arch=aarch64;libc=musl;linkage=static;abi=sysv;artifact=library;features="
+    base :: key(variant, "sha256:sysroot-a", "aarch64-linux-musl", "developer-id:ACME")
+    assert_eq(base, key(variant, "sha256:sysroot-a", "aarch64-linux-musl", "developer-id:ACME"))
+    assert_ne(base, key("role=host;os=linux;arch=x86_64;libc=gnu;linkage=shared;abi=sysv;artifact=library;features=", "sha256:sysroot-a", "aarch64-linux-musl", "developer-id:ACME"))
+    assert_ne(base, key(variant, "sha256:sysroot-b", "aarch64-linux-musl", "developer-id:ACME"))
+    assert_ne(base, key(variant, "sha256:sysroot-a", "aarch64-linux-musl", "developer-id:OTHER"))
+    assert_ne(base, key(variant, "sha256:sysroot-a", "aarch64-linux-gnu", "developer-id:ACME"))
+}
+
+// Rust: tests/jetpack_variants.rs:208
+#Test("semantic_lock_covers_declared_variant_domains") {
+    need :: PackageVariant.cross_target(VariantOs.Linux, VariantArch.Aarch64, VariantLibc.Musl).with_linkage(VariantLinkage.Static)
+    native :: PackageVariant.defaults_for_context(PlatformKey(arch: "x86_64", os: "linux"))
+    lock := SemanticLockFile.default()
+    record_selected_variant(&lock, "openssl", need.identity_key(), "sha256:openssl-cross", "exact match for static musl aarch64")
+    record_selected_variant(&lock, "zlib", native.identity_key(), "sha256:zlib-native", "host default")
+    domains :: locked_variant_domains(lock)
+    assert(domains.contains(need.identity_key()))
+    assert(domains.contains(native.identity_key()))
+    missing :: missing_lock_domains([need.clone(), native.clone()], domains)
+    assert(missing.is_empty())
+    missing2 :: missing_lock_domains([need, PackageVariant.cross_target(VariantOs.Windows, VariantArch.X86_64, VariantLibc.Msvc)], domains)
+    assert_eq(missing2.len(), 1)
+    assert(missing2[0].contains("os=windows"))
+    text :: SemanticLock.write(lock)
+    assert(text.contains("kind = \"variant\""))
+    parsed :: SemanticLock.parse(text)
+    assert_eq(parsed.records.len(), 2)
+    assert(parsed.records.iter().all(r -> r.identity.kind == SemanticLock.LockRecordKind.Variant))
+}
+
+// Rust: tests/jetpack_variants.rs:265
+#Test("native_cross_toolchain_building_remote_and_emulator_domains") {
+    native :: PackageVariant.host_defaults().with_role(VariantRole.Host)
+    cross :: PackageVariant.cross_target(VariantOs.Linux, VariantArch.Aarch64, VariantLibc.Musl)
+    toolchain_building :: PackageVariant.host_defaults().with_role(VariantRole.Build).with_artifact(ArtifactKind.DevTool)
+    remote_target :: PackageVariant.cross_target(VariantOs.Linux, VariantArch.X86_64, VariantLibc.Gnu).with_feature("remote-builder")
+    emulator :: PackageVariant.cross_target(VariantOs.Linux, VariantArch.Aarch64, VariantLibc.Gnu).with_feature("emulator")
+    declared :: [native.clone(), cross.clone(), toolchain_building.clone(), remote_target.clone(), emulator.clone()]
+    lock := SemanticLockFile.default()
+    loop (pkg, v) in [("app", native), ("openssl", cross), ("gcc", toolchain_building), ("remote-lib", remote_target), ("qemu-user", emulator)] {
+        record_selected_variant(&lock, pkg, v.identity_key(), "sha256:{pkg}", "jp15 domain coverage")
+    }
+    domains :: locked_variant_domains(lock)
+    assert_eq(missing_lock_domains(declared, domains), [String]())
+}

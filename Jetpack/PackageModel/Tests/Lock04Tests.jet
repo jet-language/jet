@@ -1,0 +1,21 @@
+use jet_pkg_model.Lock.[pkg_lock_parse_with_path]
+use Jetpack.PackageModel.Tests.LockRoundTrip.[pkg_lock_test_reported]
+use jet.Diagnostics.[render_all]
+use std.[fs, env]
+
+// Rust: crates/jet-pkg-model/src/Lock.rs:5652
+#Test("unsupported_lock_version_renders_registered_snapshot") {
+    raw :: include_str!("../../../tests/fixtures/build-metadata-compat/lock-v0.lock")
+    lock_path :: OSPath.from(".jet/lock")
+    diagnostic :: match pkg_lock_parse_with_path(raw, lock_path.display().to_string()) {
+        .Ok(_) -> panic("previous lock schema must be rejected")
+        .Err(error) -> pkg_lock_test_reported(error)
+    }
+    rendered :: render_all(lock_path.display().to_string(), "", [diagnostic])
+    // GATE #4494: build-provided manifest root and native snapshot read/write.
+    snapshot :: OSPath.from(env.build_var("CARGO_MANIFEST_DIR")).join("../..").join("tests/fixtures/jetpack-diagnostics/E1214.stderr")
+    if env.var_os("UPDATE_EXPECT").is_some() {
+        fs.write(snapshot, rendered).expect("write E1214 snapshot")
+    }
+    assert_eq(rendered, fs.read_to_string(snapshot).expect("read E1214 snapshot"))
+}

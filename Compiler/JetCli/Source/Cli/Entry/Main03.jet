@@ -1,1804 +1,235 @@
-// PORT-PENDING 2031 source-main-slice-3601: Source/main.rs:3601-5400
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS             }
-//RS             return;
-//RS         }
-//RS         "fmt" => {
-//RS             // D-ECO12=A: external language formatting belongs to the same
-//RS             // environment realization/trust path as `jet env`; native `.jet`
-//RS             // formatting stays in the compiler driver below.
-//RS             if jet_argv
-//RS                 .iter()
-//RS                 .any(|a| a == jet::Syntax::FMT_FLAG_LANG || a.starts_with("--lang="))
-//RS             {
-//RS                 exit(run_external_fmt(&raw, mode));
-//RS             }
-//RS             // D-FMTPROJECT1=D: project-level formatter. No positional target
-//RS             // required — defaults to discovering the workspace/project root.
-//RS             let path_args: Vec<String> = args[1..].iter().map(|s| s.as_str().to_string()).collect();
-//RS             let stdin_mode = path_args.iter().any(|p| p == "-");
-//RS             let stdin_path: Option<String> = jet_argv
-//RS                 .iter()
-//RS                 .find_map(|a| a.strip_prefix("--stdin-path=").map(str::to_string));
-//RS             let show_diff = jet_argv.iter().any(|a| a == "--diff") || dry_run;
-//RS             let changed_only = jet_argv.iter().any(|a| a == "--changed");
-//RS             let explicit_copies = jet_argv.iter().any(|a| a == "--explicit-copies");
-//RS             let explicit_paths: Vec<String> = path_args.into_iter().filter(|p| p != "-").collect();
-//RS             run_fmt(
-//RS                 &explicit_paths,
-//RS                 stdin_mode,
-//RS                 stdin_path.as_deref(),
-//RS                 fmt_check || dry_run,
-//RS                 show_diff,
-//RS                 changed_only,
-//RS                 explicit_copies,
-//RS                 fmt_simplify,
-//RS                 mode,
-//RS             );
-//RS             return;
-//RS         }
-//RS         "fetch" => {
-//RS             // D-CLI-STORE2=A: script locking folds into `fetch --lock
-//RS             // <script.jet>` — the old standalone `jet lock` verb is retired.
-//RS             if let Some(script) = flag_value(&raw, "--lock") {
-//RS                 run_lock(Some(script), mode);
-//RS                 return;
-//RS             }
-//RS             run_fetch(locked || jet_argv.iter().any(|a| a == "--offline"));
-//RS             return;
-//RS         }
-//RS         "update" => {
-//RS             // D-JPK-TOOLCHAIN1=A (#179): `jet update jet [<channel>]` moves the
-//RS             // toolchain pin; anything else refreshes moving dependency selectors.
-//RS             if args.get(1).map(|s| s.as_str()) == Some("jet") {
-//RS                 run_update_jet(args.get(2).map(|s| s.as_str()), mode);
-//RS             }
-//RS             let dep = args.get(1).map(|s| s.as_str());
-//RS             run_update(dep);
-//RS             return;
-//RS         }
-//RS         "toolchain" => {
-//RS             run_toolchain(mode);
-//RS         }
-//RS         // U11 (D-JPK-SCRIPTDEP1=A): `jet init <script.jet>` lifts that
-//RS         // script's inline `use pkg#version;` deps into the freshly written
-//RS         // `package.jet`; bare `jet init` is unchanged.
-//RS         "init" => {
-//RS             run_init(args.get(1).map(|s| s.as_str()), &raw, mode);
-//RS         }
-//RS         "split" => {
-//RS             run_split(&args, &raw, mode);
-//RS         }
-//RS         "Fold" => {
-//RS             run_fold(&args, &raw, mode);
-//RS         }
-//RS         // D-OPTGC1=A: the grouped report is active; the old bare cleanup alias
-//RS         // still teaches `jet clean`.
-//RS         "gc" => {
-//RS             match args.get(1).map(|word| word.as_str()) {
-//RS                 Some("report") => {
-//RS                     CmdGc::run(&raw.iter().skip(2).cloned().collect::<Vec<_>>(), mode);
-//RS                     return;
-//RS                 }
-//RS                 None => {
-//RS                     emit_cli_report(
-//RS                         "E2101",
-//RS                         "`gc` isn't a jet command".to_string(),
-//RS                         "`jet clean` is the sole package-store cleanup entry (D-CLI-STORE2=A)"
-//RS                             .to_string(),
-//RS                         "run `jet clean`".to_string(),
-//RS                         json,
-//RS                     );
-//RS                     exit(ExitCodes::USAGE);
-//RS                 }
-//RS                 Some(other) => {
-//RS                     emit_cli_report(
-//RS                         "E2101",
-//RS                         format!("`{other}` isn't a jet gc command"),
-//RS                         "jet gc currently exposes only the automatic-promotion report".to_string(),
-//RS                         "run `jet gc report`".to_string(),
-//RS                         json,
-//RS                     );
-//RS                     exit(ExitCodes::USAGE);
-//RS                 }
-//RS             }
-//RS         },
-//RS         "publish" => {
-//RS             let force = raw.iter().any(|a| a == "--force");
-//RS             // c146 (D-PKGSIGN1): sign by default; --no-sign opts out.
-//RS             let no_sign = raw.iter().any(|a| a == "--no-sign");
-//RS             let foreign_registry = flag_value(&raw, "--to");
-//RS             run_publish(force, no_sign, foreign_registry, mode);
-//RS             return;
-//RS         }
-//RS         "keygen" => {
-//RS             // c146: `jet registry keygen [--registry <name>] [--force]`.
-//RS             let registry = flag_value(&raw, "--registry");
-//RS             let force = raw.iter().any(|a| a == "--force");
-//RS             run_keygen(registry, force);
-//RS             return;
-//RS         }
-//RS         "key" => {
-//RS             // c146: `jet registry key backup [<dest>] [--registry <name>]`.
-//RS             match args.get(1).map(|s| s.as_str()) {
-//RS                 Some("backup") => {
-//RS                     let registry = flag_value(&raw, "--registry");
-//RS                     let dest = args.get(2).map(|s| s.as_str());
-//RS                     run_key_backup(dest, registry);
-//RS                 }
-//RS                 Some(other) => {
-//RS                     // No typed edit: this is an argv subcommand, not Jet source.
-//RS                     crate::cli_error!("E2101", "unknown `jet registry key` subcommand `{}` — did you mean `jet registry key backup`?", other);
-//RS                     exit(ExitCodes::USER_ERROR);
-//RS                 }
-//RS                 None => {
-//RS                     crate::cli_error!(
-//RS                         "E2104",
-//RS                         "`jet registry key` needs a subcommand — try `jet registry key backup`."
-//RS                     );
-//RS                     exit(ExitCodes::USER_ERROR);
-//RS                 }
-//RS             }
-//RS             return;
-//RS         }
-//RS         "yank" => {
-//RS             // D-VERSION1=A: mark a published version as yanked (no delete).
-//RS             // `jet registry yank <version> [--message <reason>]`
-//RS             let version = args.get(1).map(|s| s.as_str());
-//RS             let message = flag_value(&raw, "--message");
-//RS             run_yank(version, message);
-//RS             return;
-//RS         }
-//RS         "vendor" => {
-//RS             let vendor_dir = flag_value(&raw, "--vendor-dir");
-//RS             run_vendor(vendor_dir);
-//RS             return;
-//RS         }
-//RS         "schema" => {
-//RS             // D-MIGRATE2C: `jet inspect schema status` / `jet inspect schema squash --before <ver>`.
-//RS             // Use the unfiltered argv so `--before` and the verb survive.
-//RS             let schema_args: Vec<String> = raw.iter().skip(1).cloned().collect();
-//RS             run_schema(&schema_args);
-//RS             return;
-//RS         },
-//RS         "db" => {
-//RS             let db_args: Vec<String> = jet_argv.iter().skip(1).cloned().collect();
-//RS             exit(run_db(&db_args, mode));
-//RS         }
-//RS         "semindex" => {
-//RS             // D-SEMINDEX1: stable semantic-index JSON smoke surface.
-//RS             let semindex_args: Vec<String> = raw.iter().skip(1).cloned().collect();
-//RS             run_semindex(&semindex_args, mode.json);
-//RS             return;
-//RS         }
-//RS         "output" => {
-//RS             let output_args: Vec<String> = raw.iter().skip(1).cloned().collect();
-//RS             run_output(&output_args, mode.json);
-//RS             return;
-//RS         }
-//RS         "find" => {
-//RS             let find_args: Vec<String> = raw.iter().skip(1).cloned().collect();
-//RS             run_find(&find_args, mode.json);
-//RS             return;
-//RS         }
-//RS         "jobs" => {
-//RS             let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-//RS             let member_flag = flag_value(jet_argv, "-p");
-//RS             let entry = resolve_bare_entry("run", &cwd, member_flag, mode, true)
-//RS                 .unwrap_or_else(|| missing_bare_entry("run", &cwd, mode));
-//RS             let registry = job_registry_for_entry(&entry.path, mode);
-//RS             validate_job_registry(&entry.path, &registry, mode);
-//RS             let job_options = jet_argv;
-//RS             let graph_requested = job_options.iter().any(|argument| argument == "--graph");
-//RS             let status_requested = job_options.iter().any(|argument| argument == "--status");
-//RS             let explain_requested = job_options.iter().any(|argument| argument == "--explain");
-//RS             let watch_requested = run_wants_watch(job_options);
-//RS             let inspection_requested =
-//RS                 graph_requested || status_requested || explain_requested;
-//RS             if inspection_requested {
-//RS                 let requested = args.get(1).map(|value| value.as_str());
-//RS                 render_job_inspection(
-//RS                     &entry.path,
-//RS                     &registry,
-//RS                     profile,
-//RS                     requested,
-//RS                     graph_requested,
-//RS                     status_requested,
-//RS                     explain_requested,
-//RS                 );
-//RS                 return;
-//RS             }
-//RS             let job_program_args = if passthrough_sep.is_some() {
-//RS                 passthrough.iter().map(|arg| (*arg).clone()).collect::<Vec<_>>()
-//RS             } else {
-//RS                 args.iter().skip(2).map(|arg| (*arg).clone()).collect::<Vec<_>>()
-//RS             };
-//RS             if watch_requested {
-//RS                 validate_job_working_directories(&entry.path, &registry, mode);
-//RS             }
-//RS             if watch_requested {
-//RS                 let requested = args.get(1).map(|value| value.as_str());
-//RS                 run_job_watch(
-//RS                     &entry.path,
-//RS                     &registry,
-//RS                     requested,
-//RS                     job_options,
-//RS                     &job_program_args,
-//RS                     mode,
-//RS                     profile,
-//RS                 );
-//RS             }
-//RS             if let Some(name) = args.get(1).map(|value| value.as_str()) {
-//RS                 if registry.find_visible(name).is_none() {
-//RS                     let declared = registry.completion_words();
-//RS                     let fix = if declared.is_empty() {
-//RS                         "mark a function `#Job`, or check the spelling".to_string()
-//RS                     } else {
-//RS                         format!(
-//RS                             "check the spelling; declared jobs: {}",
-//RS                             declared.join(", ")
-//RS                         )
-//RS                     };
-//RS                     crate::emit_cli_report(
-//RS                         "E1294",
-//RS                         format!("No job named `{name}`."),
-//RS                         "`jet jobs` only invokes visible checked `#Job fn`s in the selected entry"
-//RS                             .to_string(),
-//RS                         fix,
-//RS                         mode.json,
-//RS                     );
-//RS                     exit(ExitCodes::USER_ERROR);
-//RS                 }
-//RS                 validate_job_working_directories(&entry.path, &registry, mode);
-//RS                 let name = name.to_string();
-//RS                 let mut job_args = vec![name];
-//RS                 job_args.extend(job_program_args);
-//RS                 let program_args = job_args.iter().collect::<Vec<_>>();
-//RS                 let entry_str = entry.path.to_string_lossy().into_owned();
-//RS                 let effective = effective_target("run", &entry_str, cross_target.as_deref());
-//RS                 reject_native_web_run("run", &entry_str, effective.as_deref(), mode);
-//RS                 let effective = native_run_target("run", &entry_str, effective);
-//RS                 run_native_execution(NativeExecutionRequest {
-//RS                     command: "run",
-//RS                     file: &entry_str,
-//RS                     emit_rust,
-//RS                     emit_generated,
-//RS                     library: library_flag,
-//RS                     small,
-//RS                     no_os,
-//RS                     gates,
-//RS                     build_grants: &build_grants,
-//RS                     invocation_authority: invocation_authority.as_ref(),
-//RS                     remote_builder: remote_builder.as_deref(),
-//RS                     locked,
-//RS                     target: effective.as_deref(),
-//RS                     target_machine: selected_machine.as_ref(),
-//RS                     explain_partition,
-//RS                     verbose,
-//RS                     sbom,
-//RS                     release: release_flag,
-//RS                     profile: named_profile.as_deref(),
-//RS                     setting_overrides: &setting_overrides,
-//RS                     output: output_name.as_deref(),
-//RS                     program_args: &program_args,
-//RS                     mode,
-//RS                     output_profile: Some(&profile),
-//RS                     record: record_name.as_deref(),
-//RS                     interpret,
-//RS                     entry_fn: None,
-//RS                     check_project_scope: false,
-//RS                     package_scope: true,
-//RS                     build_override: true,
-//RS                     source_overlay: None,
-//RS                 });
-//RS             } else {
-//RS                 render_job_registry(&registry, profile);
-//RS             }
-//RS             return;
-//RS         }
-//RS         "generate" => {
-//RS             // D-DX-GENERATE1=A: source generation is an explicit command; it
-//RS             // never runs as a build/check/test side effect.
-//RS             let generate_args: Vec<String> = raw.iter().skip(1).cloned().collect();
-//RS             run_generate(&generate_args, mode.json);
-//RS             return;
-//RS         }
-//RS         "expand" => {
-//RS             // D-EXPANDCLI1=A: `jet inspect expand --facts <lens> <file>` / bare
-//RS             // `jet inspect expand <file>` — the transparency command (card #183).
-//RS             let expand_args: Vec<String> = raw.iter().skip(1).cloned().collect();
-//RS             run_expand(&expand_args, mode.json);
-//RS             return;
-//RS         }
-//RS         "audit" => {
-//RS             if raw.get(1).map(String::as_str) == Some("memory") {
-//RS                 CmdMemory::audit(&raw[2..], mode);
-//RS                 return;
-//RS             }
-//RS             // `jet audit copies [file]` and `jet audit <file.jet>` both audit
-//RS             // that source's implicit copies; the dependency audit below takes
-//RS             // no source path (#3738).
-//RS             if raw.get(1).map(String::as_str) == Some("copies") {
-//RS                 run_copy_audit(&raw[2..], mode.json);
-//RS                 return;
-//RS             }
-//RS             if raw.get(1).is_some_and(|arg| arg.ends_with(".jet")) {
-//RS                 run_copy_audit(&raw[1..], mode.json);
-//RS                 return;
-//RS             }
-//RS             let db_path = flag_value(&raw, "--advisory-db");
-//RS             run_audit(db_path);
-//RS             return;
-//RS         }
-//RS         "sbom" => {
-//RS             let cyclonedx = raw.iter().any(|a| a == "--cyclonedx");
-//RS             run_sbom(cyclonedx);
-//RS             return;
-//RS         }
-//RS         "bind" => {
-//RS             // S59 / E2-M14 Phase 4 (D-CBIND2): generate (or refresh) a C binding
-//RS             // cache from a header. Shares the bind backend with compile-time
-//RS             // auto-bind. Structural failures are rendered through the registered
-//RS             // E3208 diagnostic rather than leaking backend output.
-//RS             // Use the unfiltered argv: `bind` takes `--pkg`/`-o` flags that the
-//RS             // global `args` filter would otherwise strip.
-//RS             let bind_args: Vec<&String> = raw.iter().skip(1).collect();
-//RS             run_bind(&bind_args);
-//RS             return;
-//RS         }
-//RS         "env" => {
-//RS             // Scale-2 front door (U §8, D-DEV4): `jet env` maps to `jetpack
-//RS             // env`, forwarding flags and any trailing `-- cmd`.
-//RS             // D-JPK-DISPATCH1=B (A1): execs the `jetpack` engine binary by
-//RS             // name — never linked in-process — so the compiler binary stays
-//RS             // standalone-checkable (deleting `jetpack` still leaves `jet
-//RS             // build`/`jet run` fully working).
-//RS             let mut fwd = raw.clone();
-//RS             if let Some(pos) = fwd.iter().position(|a| a == "env") {
-//RS                 fwd.remove(pos);
-//RS             }
-//RS             fwd.insert(0, "env".to_string());
-//RS             exit(EngineDispatch::dispatch(
-//RS                 jet::Syntax::JETPACK_BINARY_NAME,
-//RS                 "env",
-//RS                 &fwd,
-//RS             ));
-//RS         }
-//RS         "push" => {
-//RS             // U15: `jet push <fleet>` deploys a fleet. D-JPK-DISPATCH1=B: execs
-//RS             // the `jetpack` engine binary, forwarding `push <fleet>` verbatim.
-//RS             // Realization is gated (Phase D) — jetpack returns an honest E1243.
-//RS             exit(EngineDispatch::dispatch(
-//RS                 jet::Syntax::JETPACK_BINARY_NAME,
-//RS                 "push",
-//RS                 &raw,
-//RS             ));
-//RS         }
-//RS         "trust" => {
-//RS             // D-JPK-GRANTCMD1=A: public trust/grant graph command. Jetpack owns
-//RS             // the trust store; `jet` stays a front door and dispatches.
-//RS             exit(EngineDispatch::dispatch(
-//RS                 jet::Syntax::JETPACK_BINARY_NAME,
-//RS                 "trust",
-//RS                 &raw,
-//RS             ));
-//RS         }
-//RS         "bridge" => {
-//RS             // U16 (card c9jetpackgates): `jet os bridge flake` translates a
-//RS             // foreign flake.nix's devShell into jetpack's `env.*` form.
-//RS             // D-JPK-DISPATCH1=B: dispatched to the jetpack engine exactly
-//RS             // like `push`/`config`, never linked in-process.
-//RS             exit(EngineDispatch::dispatch(
-//RS                 jet::Syntax::JETPACK_BINARY_NAME,
-//RS                 "bridge",
-//RS                 &raw,
-//RS             ));
-//RS         }
-//RS         "services" => {
-//RS             // U12 (card c9jetpackgates): `jet services up/down/health/logs/wait`
-//RS             // supervises the project's dev `services:` processes. D-JPK-
-//RS             // DISPATCH1=B: dispatched to the jetpack engine exactly like
-//RS             // `push`/`bridge`/`config`, never linked in-process.
-//RS             exit(EngineDispatch::dispatch(
-//RS                 jet::Syntax::JETPACK_BINARY_NAME,
-//RS                 "services",
-//RS                 &raw,
-//RS             ));
-//RS         }
-//RS         "image" => {
-//RS             // U14 (D-JPK-IMAGE1=A, card c9jetpackgates): `jet image <name>`
-//RS             // builds a declared `.Oci` image into a native OCI layout.
-//RS             // D-JPK-DISPATCH1=B: dispatched to the jetpack engine exactly
-//RS             // like `push`/`bridge`/`services`, never linked in-process.
-//RS             exit(EngineDispatch::dispatch(
-//RS                 jet::Syntax::JETPACK_BINARY_NAME,
-//RS                 "image",
-//RS                 &raw,
-//RS             ));
-//RS         }
-//RS         "os" => {
-//RS             // D-JPK-OSVERB1=A: `jet os ...` is the public jetos front door.
-//RS             // The implementation still runs in the Jetpack engine process so
-//RS             // the compiler binary stays separate from package/OS realization.
-//RS             exit(EngineDispatch::dispatch(
-//RS                 jet::Syntax::JETPACK_BINARY_NAME,
-//RS                 "os",
-//RS                 &raw,
-//RS             ));
-//RS         }
-//RS         "config" => {
-//RS             // U19: `jet config trust add/list/remove` manages the env/dev
-//RS             // trust store. D-JPK-DISPATCH1=B: dispatched to jetpack, which
-//RS             // owns the trust store (`~/.jet/trust`) alongside env realization.
-//RS             exit(EngineDispatch::dispatch(
-//RS                 jet::Syntax::JETPACK_BINARY_NAME,
-//RS                 "config",
-//RS                 &raw,
-//RS             ));
-//RS         }
-//RS         "outdated" => {
-//RS             // U21 (D-JPK-CHANNEL1=A): channel freshness is owned by Jetpack's
-//RS             // lock/source resolver. `jet outdated` is a read-only front door.
-//RS             exit(EngineDispatch::dispatch(
-//RS                 jet::Syntax::JETPACK_BINARY_NAME,
-//RS                 "outdated",
-//RS                 &raw,
-//RS             ));
-//RS         }
-//RS         "search" => {
-//RS             // U26 (D-JPK-DISCOVER1=A): package discovery is owned by Jetpack's
-//RS             // local/offline index. The compiler front door only dispatches.
-//RS             exit(EngineDispatch::dispatch(
-//RS                 jet::Syntax::JETPACK_BINARY_NAME,
-//RS                 "search",
-//RS                 &raw,
-//RS             ));
-//RS         }
-//RS         "info" => {
-//RS             // U26: same local/offline discovery surface as `jet search`.
-//RS             exit(EngineDispatch::dispatch(
-//RS                 jet::Syntax::JETPACK_BINARY_NAME,
-//RS                 "info",
-//RS                 &raw,
-//RS             ));
-//RS         }
-//RS         "logs" => {
-//RS             // U27 (D-JPK-BUILDDBG1=A): persisted build logs live in Jetpack.
-//RS             exit(EngineDispatch::dispatch(
-//RS                 jet::Syntax::JETPACK_BINARY_NAME,
-//RS                 "logs",
-//RS                 &raw,
-//RS             ));
-//RS         }
-//RS         "clean" => {
-//RS             // U22 (D-JPK-GC1=B): hangar disk lifecycle belongs to Jetpack.
-//RS             // Top-level `jet clean` is the user-facing spelling; old gc docs
-//RS             // were retired with the same decision.
-//RS             exit(EngineDispatch::dispatch(
-//RS                 jet::Syntax::JETPACK_BINARY_NAME,
-//RS                 "clean",
-//RS                 &raw,
-//RS             ));
-//RS         }
-//RS         "repl" => {
-//RS             // E2-M18: interactive REPL (D-REPL1=A, D-REPL3=A).
-//RS             if let Some(argument) = invalid_repl_console_flag(jet_argv) {
-//RS                 crate::cli_error!(
-//RS                     @fix "E2102",
-//RS                     format!("unknown `jet repl` console option `{argument}`"),
-//RS                     "use `--console`, `--sandbox data`, or `--console-ttl <milliseconds>"
-//RS                 );
-//RS                 exit(ExitCodes::USAGE);
-//RS             }
-//RS             let project = jet_argv
-//RS                 .iter()
-//RS                 .find_map(|a| a.strip_prefix("--project=").map(str::to_string))
-//RS                 .or_else(|| flag_value(jet_argv, "--project").map(str::to_string));
-//RS             if console_requested(jet_argv) {
-//RS                 exit(run_console(
-//RS                     project.as_deref(),
-//RS                     jet_argv,
-//RS                     mode,
-//RS                     &authority_allow,
-//RS                     &authority_deny,
-//RS                     gates,
-//RS                     named_profile.as_deref(),
-//RS                     &setting_overrides,
-//RS                 ));
-//RS             }
-//RS             let allow = authority_allow.clone();
-//RS             let deny = authority_deny.clone();
-//RS             // #2038: the first positional is a session preload file. `args`
-//RS             // (not `raw`) is the positional-only view, so project and authority
-//RS             // option values never land here.
-//RS             let preload = args.get(1).map(|file| file.as_str());
-//RS             run_repl(project.as_deref(), preload, &allow, &deny, mode.color);
-//RS             return;
-//RS         }
-//RS         "notebook" => {
-//RS             // D-NOTEBOOK-SURFACE1=D: shared REPL session + .jetnb / Jupyter.
-//RS             CmdNotebook::run_notebook(&raw);
-//RS             return;
-//RS         }
-//RS         "package" => {
-//RS             exit(run_package(jet_argv, mode));
-//RS         }
-//RS         "flash" => {
-//RS             exit(run_flash(&raw, mode));
-//RS         }
-//RS         // Teaching error: E0043 `jet install` -> `jet fetch`
-//RS         "install" => {
-//RS             emit_cli_row("E0043", &[], mode.json);
-//RS             exit(ExitCodes::USER_ERROR);
-//RS         }
-//RS         "dev" => {
-//RS             // D-RUN-LAW1=A: every dev verb runs one program; `jet dev` uses
-//RS             // the file-scoped watcher below. Project-level development
-//RS             // remains a Jet operation.
-//RS             // E2-M4 (D-DEV4): re-check and re-run the entry file on every save,
-//RS             // streaming output for sub-200ms feedback. The interpreter is a dev
-//RS             // convenience only — `jet build`/`jet run` never touch it (I2/I3).
-//RS             let try_anyway = raw.iter().any(|a| a == "--try-anyway");
-//RS             let canvas_options = canvas_requested.then(|| {
-//RS                 canvas_options_from_args(
-//RS                     jet_argv,
-//RS                     output_name.as_deref(),
-//RS                     requested_target.as_deref(),
-//RS                 )
-//RS             });
-//RS             // c139 (D-JIT2=A): --interpret forces tier-0 interpreter; otherwise
-//RS             // CraneliftBackend wraps it (M0 delegates, M1+ JIT-compiles).
-//RS             let use_interpreter = raw.iter().any(|a| a == "--interpret");
-//RS             // c77 (D-DEVMODE1=A): default auto-detect; experts force a mode with
-//RS             // --restart / --swap / --watch=off.
-//RS             let policy = watch_policy_from(&raw, WatchPolicy::Auto);
-//RS             let bare_member = flag_value(jet_argv, "-p");
-//RS             let resolved = match args.get(1) {
-//RS                 Some(f) => resolve_command_target(
-//RS                     "dev",
-//RS                     f,
-//RS                     bare_member,
-//RS                     mode,
-//RS                     !jet_argv.iter().any(|arg| arg == "--show-default"),
-//RS                 ),
-//RS                 None => {
-//RS                     let entry = match resolve_bare_entry(
-//RS                         "dev",
-//RS                         &std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
-//RS                         bare_member,
-//RS                         mode,
-//RS                         true,
-//RS                     ) {
-//RS                         Some(entry) => entry,
-//RS                         None => {
-//RS                             crate::cli_error!(
-//RS                                 "E2104",
-//RS                                 "`jet dev` needs a file to watch: {} dev <file.{}>",
-//RS                                 jet::Syntax::BINARY_NAME,
-//RS                                 jet::Syntax::FILE_EXT
-//RS                             );
-//RS                             exit(ExitCodes::USAGE);
-//RS                         }
-//RS                     };
-//RS                     entry
-//RS                 }
-//RS             };
-//RS             let file = resolved.path.to_string_lossy().into_owned();
-//RS             if CmdLocalApp::app_requested(&raw) {
-//RS                 let function = CmdLocalApp::app_function(&raw).unwrap_or_else(|| {
-//RS                     crate::cli_error!(
-//RS                         @fix "E2104",
-//RS                         "`jet dev --app` needs a function name",
-//RS                         "run `jet dev <file.jet> --app <function>`"
-//RS                     );
-//RS                     exit(ExitCodes::USAGE);
-//RS                 });
-//RS                 CmdLocalApp::run_local_app(
-//RS                     Path::new(&file),
-//RS                     function,
-//RS                     CmdLocalApp::app_share(&raw),
-//RS                     flag_value(&raw, "--token"),
-//RS                     mode.json,
-//RS                 );
-//RS             }
-//RS             // E2-M15: `jet dev` has the same target validation contract as
-//RS             // build/run, even when its execution tier is the native watcher.
-//RS             // A target flag must never disappear merely because dev selects a
-//RS             // different runner branch below.
-//RS             if let Some(target) = cross_target.as_deref() {
-//RS                 validate_target(target, mode);
-//RS             }
-//RS             offer_dev_environment(&raw, &file, &output);
-//RS             require_project_environment("dev", Path::new(&file), mode);
-//RS             if jet_argv.iter().any(|arg| arg == "--show-default") && !mode.quiet {
-//RS                 write_status(profile, "jet dev: using stock default\n");
-//RS             }
-//RS             let dev_profile = if let Some(profile) = named_profile.as_deref() {
-//RS                 resolve_named_profile(profile, &file, mode)
-//RS             } else if no_os {
-//RS                 BuildProfile::NoOs
-//RS             } else if small {
-//RS                 BuildProfile::Small
-//RS             } else {
-//RS                 BuildProfile::default_for_command("dev")
-//RS             };
-//RS             // c-devserver (owner-directed 2026-07-01): a `.jet` file can define
-//RS             // its own `jet dev` behavior as ordinary Jet code — a top-level
-//RS             // `fn dev()` becomes the program's real (native) entry point,
-//RS             // normally configuring and starting a `core.web.devserver` value.
-//RS             // Checked FIRST, ahead of the #Target(Web)-inferred built-in web
-//RS             // server below: `fn dev()` is the more specific, user-authored
-//RS             // override, so a file that carries BOTH `#Target(Web)` (a build
-//RS             // default) and `fn dev()` (an explicit dev-command override) must
-//RS             // run the override, not silently fall back to the built-in server
-//RS             // because a *different* marker also happened to be present. (This
-//RS             // ordering bug was caught during manual verification — the first
-//RS             // cut checked #Target(Web) first, which made `fn dev()` totally
-//RS             // unreachable on any file that also declared #Target(Web), e.g.
-//RS             // ui_web_click.jet, which has both.)
-//RS             if has_dev_entry_fn(&file) && !jet_argv.iter().any(|arg| arg == "--show-default") {
-//RS                 run_dev_entry(
-//RS                     &file,
-//RS                     dev_profile,
-//RS                     mode,
-//RS                     &setting_overrides,
-//RS                     &passthrough,
-//RS                     record_name.as_deref(),
-//RS                 );
-//RS                 return;
-//RS             }
-//RS             if entry_returns_app(&file) {
-//RS                 if use_interpreter {
-//RS                     std::env::set_var("JET_APP_DEV", "1");
-//RS                     let dev_file = std::fs::canonicalize(&file)
-//RS                         .map(|path| path.display().to_string())
-//RS                         .unwrap_or_else(|_| file.clone());
-//RS                     std::env::set_var("JET_DEV_FILE", dev_file);
-//RS                     if let Some(port) = dev_port {
-//RS                         std::env::set_var("JET_APP_PORT", port.to_string());
-//RS                     }
-//RS                     run_dev(
-//RS                         &file,
-//RS                         resolved.callable.as_deref(),
-//RS                         try_anyway,
-//RS                         policy,
-//RS                         gates,
-//RS                         mode,
-//RS                         true,
-//RS                         dev_profile.budget_name(),
-//RS                         &setting_overrides,
-//RS                         &passthrough,
-//RS                         record_name.as_deref(),
-//RS                         no_capture,
-//RS                         canvas_requested,
-//RS                         canvas_options.clone(),
-//RS                         dev_port,
-//RS                     );
-//RS                 }
-//RS                 run_web_app_dev_entry(
-//RS                     &file,
-//RS                     mode,
-//RS                     dev_port,
-//RS                     &dev_profile,
-//RS                     &setting_overrides,
-//RS                     record_name.as_deref(),
-//RS                     &passthrough,
-//RS                 );
-//RS                 return;
-//RS             }
-//RS             // c134 Phase 7: `jet dev <file> --target=web` compiles to JS/WASM
-//RS             // and serves `.jet/build/` with browser live-reload — a completely
-//RS             // different execution model from the native interpret/hot-swap
-//RS             // loop above, so it's a separate function, not a new branch
-//RS             // inside `run_dev`'s interpreter machinery.
-//RS             // D-WEBDEFAULT1 (ratified 2026-07-01, c134): no explicit --target= falls back to the
-//RS             // file's own `#Target(Web)` marker, if any.
-//RS             if effective_target("dev", &file, cross_target.as_deref()).as_deref()
-//RS                 == Some(jet::Syntax::BUILD_TARGET_WEB)
-//RS             {
-//RS                 run_dev_web(
-//RS                     &file,
-//RS                     &dev_profile,
-//RS                     mode,
-//RS                     verbose,
-//RS                     dev_port,
-//RS                     canvas_requested,
-//RS                     canvas_options,
-//RS                     &setting_overrides,
-//RS                 );
-//RS                 return;
-//RS             }
-//RS             run_dev(
-//RS                 &file,
-//RS                 resolved.callable.as_deref(),
-//RS                 try_anyway,
-//RS                 policy,
-//RS                 gates,
-//RS                 mode,
-//RS                 use_interpreter,
-//RS                 dev_profile.budget_name(),
-//RS                 &setting_overrides,
-//RS                 &passthrough,
-//RS                 record_name.as_deref(),
-//RS                 no_capture,
-//RS                 canvas_requested,
-//RS                 canvas_options,
-//RS                 dev_port,
-//RS             );
-//RS             return;
-//RS         }
-//RS         "debug" => {
-//RS             // D-DBG1/D-DBG3: `jet debug <file>` — the source-level step
-//RS             // debugger. Loads + checks the file, then steps it in the dev
-//RS             // interpreter with an interactive `(jet)` prompt. I2: every line,
-//RS             // frame, and value shown is in Jet terms (never generated Rust).
-//RS             //
-//RS             // D-DBG3 step 2 (dap-debugger): `--dap` always uses the native
-//RS             // lldb backend (an editor debugs the compiled program, never the
-//RS             // interpreter); otherwise auto-detect via the SAME boundary scan
-//RS             // the interpreter itself declines on (E2203) — one command, one
-//RS             // meaning (I8), the backend choice is never a separate flag.
-//RS             let raw_frames = raw.iter().any(|a| a == "--raw-frames"); // D-DBG2
-//RS             let dap = raw.iter().any(|a| a == "--dap");
-//RS             // D-CLI-BARE1=A: bare `jet debug` inside a package resolves the
-//RS             // entry the same way run/build/check/dev do; outside a package
-//RS             // the usage error is unchanged.
-//RS             let file: String = match args.get(1) {
-//RS                 Some(f) => resolve_command_target("debug", f, flag_value(jet_argv, "-p"), mode, false)
-//RS                     .path
-//RS                     .to_string_lossy()
-//RS                     .into_owned(),
-//RS                 None => {
-//RS                     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-//RS                     let member_flag = flag_value(jet_argv, "-p");
-//RS                     match resolve_bare_entry("debug", &cwd, member_flag, mode, false) {
-//RS                         Some(entry) => entry.path.to_string_lossy().into_owned(),
-//RS                         None => {
-//RS                             crate::cli_error!(
-//RS                                 "E2104",
-//RS                                 "`jet debug` needs a file to debug: {} debug <file.{}>",
-//RS                                 jet::Syntax::BINARY_NAME,
-//RS                                 jet::Syntax::FILE_EXT
-//RS                             );
-//RS                             exit(ExitCodes::USAGE);
-//RS                         }
-//RS                     }
-//RS                 }
-//RS             };
-//RS             let resolved = resolve_source_path(&file);
-//RS             if record_name.is_some() && debug_replay.is_some() {
-//RS                 crate::ProveReplay::emit_diag(
-//RS                     "E2104",
-//RS                     "debug accepts either recording or replay",
-//RS                     "`--record` and `--replay` cannot be used in the same debug session",
-//RS                     "choose one of `--record=NAME` or `--replay=NAME`",
-//RS                     mode.json,
-//RS                 );
-//RS                 exit(ExitCodes::USAGE);
-//RS             }
-//RS             if dap && debug_replay.is_some() {
-//RS                 crate::ProveReplay::emit_diag(
-//RS                     "E2203",
-//RS                     "replay debugging is unavailable for native sessions",
-//RS                     "the native LLDB/DAP backend cannot browse an interpreter recording",
-//RS                     "replay an interpreter receipt without `--dap` or native-only source features",
-//RS                     mode.json,
-//RS                 );
-//RS                 exit(ExitCodes::USER_ERROR);
-//RS             }
-//RS             // Open and validate a replay before selecting a live backend. The
-//RS             // receipt carries authoritative source history, so native-only
-//RS             // constructs in the current source must not turn a validated
-//RS             // no-execution replay into a live native session. `open_named_replay`
-//RS             // still performs the strict source/MIR identity checks.
-//RS             let replay = debug_replay.as_deref().map(|path| {
-//RS                 crate::ProveReplay::open_named_replay(
-//RS                     &resolved,
-//RS                     path,
-//RS                     named_profile.as_deref().unwrap_or("dev"),
-//RS                     &setting_overrides,
-//RS                     mode.json,
-//RS                 )
-//RS                 .unwrap_or_else(|status| exit(status))
-//RS             });
-//RS             let use_native =
-//RS                 dap || (replay.is_none() && jet::Debug::needs_native(&resolved).unwrap_or(false));
-//RS             if use_native {
-//RS                 if record_name.is_some() {
-//RS                     crate::ProveReplay::emit_diag(
-//RS                         "E2203",
-//RS                         "recorded reverse debugging is unavailable for native sessions",
-//RS                         "the native LLDB/DAP backend has no recorded Jet source history",
-//RS                         "remove `--record`, or debug a source program within the interpreter boundary",
-//RS                         mode.json,
-//RS                     );
-//RS                     exit(ExitCodes::USER_ERROR);
-//RS                 }
-//RS                 if debug_replay.is_some() {
-//RS                     crate::ProveReplay::emit_diag(
-//RS                         "E2203",
-//RS                         "replay debugging is unavailable for native sessions",
-//RS                         "the native LLDB/DAP backend cannot browse an interpreter recording",
-//RS                         "replay an interpreter receipt without `--dap` or native-only source features",
-//RS                         mode.json,
-//RS                     );
-//RS                     exit(ExitCodes::USER_ERROR);
-//RS                 }
-//RS                 exit(run_debug_native(&resolved, raw_frames, dap, mode));
-//RS             }
-//RS             if let Some(name) = record_name.as_deref() {
-//RS                 let capture = crate::ProveReplay::begin_named_capture(
-//RS                     &resolved,
-//RS                     name,
-//RS                     named_profile.as_deref().unwrap_or("dev"),
-//RS                     &setting_overrides,
-//RS                     mode.json,
-//RS                 )
-//RS                 .unwrap_or_else(|status| exit(status));
-//RS                 let execution = jet::Debug::run_debug_recorded(&resolved);
-//RS                 if let Err(status) =
-//RS                     crate::ProveReplay::finish_named_capture_with_run(
-//RS                         &capture,
-//RS                         execution.exit_code,
-//RS                         mode.json,
-//RS                         &execution.run,
-//RS                     )
-//RS                 {
-//RS                     exit(status);
-//RS                 }
-//RS                 exit(execution.exit_code);
-//RS             }
-//RS             if let Some(replay) = replay {
-//RS                 exit(jet::Debug::run_debug_with_recording(
-//RS                     &resolved,
-//RS                     replay.recorded_run,
-//RS                 ));
-//RS             }
-//RS             exit(jet::Debug::run_debug(&resolved));
-//RS         }
-//RS         // D-JPK-CACHECONFIG1=D: cache status, pruning, and host limits are
-//RS         // artifact-store CLI operations owned by CmdStatus.
-//RS         "cache" => {
-//RS             exit(CmdStatus::run_cache(&raw[1..], mode.json));
-//RS         }
-//RS         "shared-store" => {
-//RS             exit(EngineDispatch::dispatch(
-//RS                 jet::Syntax::JETPACK_BINARY_NAME,
-//RS                 "shared-store",
-//RS                 &raw,
-//RS             ));
-//RS         }
-//RS         "eval" => {
-//RS             // S60 / D-PURE1 (E2-M16): deterministic evaluation of pure Jet.
-//RS             let pure_flag = raw.iter().any(|a| a == "--pure");
-//RS             let argument = match args.get(1) {
-//RS                 Some(f) => f.as_str(),
-//RS                 None => {
-//RS                     crate::cli_error!(
-//RS                         "E2104",
-//RS                         "`jet eval` needs a file or an expression: {} eval <file.{} | expression>",
-//RS                         jet::Syntax::BINARY_NAME,
-//RS                         jet::Syntax::FILE_EXT
-//RS                     );
-//RS                     exit(ExitCodes::USAGE);
-//RS                 }
-//RS             };
-//RS             // #2068: one argument, two shapes. `looks_like_jet_source` is the
-//RS             // same predicate the bare-entry sugar uses, so a file, a project
-//RS             // directory, or a bare stem all keep the file form — including a
-//RS             // `.jet` name that is NOT there, which stays a file-not-found
-//RS             // error rather than being re-read as an expression. Anything else
-//RS             // is an expression, which the registry summary has always
-//RS             // promised ("Evaluate pure Jet and print JSON").
-//RS             if looks_like_jet_source(argument) {
-//RS                 run_eval(&resolve_source_path(argument), pure_flag, mode);
-//RS                 return;
-//RS             }
-//RS             // A `:meta` word is REPL vocabulary, not an expression: say so
-//RS             // instead of handing it to the parser as broken source.
-//RS             if argument.starts_with(':') {
-//RS                 crate::cli_error!(@fix "E2104", format!("`{}` is a {} command, not an expression", argument, jet::Syntax::BINARY_NAME), format!("run `{} repl` for an interactive session, or pass an expression such as `1 + 2`", jet::Syntax::BINARY_NAME));
-//RS                 exit(ExitCodes::USAGE);
-//RS             }
-//RS             run_eval_expression(argument, mode);
-//RS             return;
-//RS         }
-//RS         _ => {}
-//RS     }
-//RS     define_bare_dispatch_routes! {
-//RS         "run" | "build" | "test" | "check" | "dev" | "doc" => {
-//RS             let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-//RS             if let Some(entry) = resolve_bare_entry(
-//RS                 cmd,
-//RS                 &cwd,
-//RS                 bare_member_flag,
-//RS                 mode,
-//RS                 !jet_argv.iter().any(|arg| arg == "--show-default"),
-//RS             ) {
-//RS                 let entry_str = entry.path.to_string_lossy().to_string();
-//RS                 match cmd {
-//RS                     "doc" => {
-//RS                         run_doc(
-//RS                             &entry_str,
-//RS                             mode,
-//RS                             jet_argv.iter().any(|arg| arg == "--check"),
-//RS                         );
-//RS                         return;
-//RS                     }
-//RS                     "test" => {
-//RS                         // Spec S43: bare `jet test` collects every
-//RS                         // `#Test` in the package, so the target is the
-//RS                         // package the resolved entry belongs to — the
-//RS                         // same project shape as the package test resolver
-//RS                         // below, with member selection unchanged.
-//RS                         let entry_dir = entry
-//RS                             .path
-//RS                             .parent()
-//RS                             .filter(|path| !path.as_os_str().is_empty())
-//RS                             .unwrap_or_else(|| Path::new("."));
-//RS                         let root = jet::Loader::find_manifest_root(entry_dir)
-//RS                             .unwrap_or_else(|| entry_dir.to_path_buf());
-//RS                         let test_opts =
-//RS                             TestRunOpts::parse(jet_argv, mode, &setting_overrides);
-//RS                         if test_opts.show_default && !mode.quiet {
-//RS                             write_status(profile, "jet test: using stock default\n");
-//RS                         }
-//RS                         run_test_opts(
-//RS                             &root.to_string_lossy(),
-//RS                             test_opts,
-//RS                             mode,
-//RS                         );
-//RS                         return;
-//RS                     }
-//RS                     "dev" => {
-//RS                         let try_anyway = jet_argv.iter().any(|a| a == "--try-anyway");
-//RS                         let use_interpreter = jet_argv.iter().any(|a| a == "--interpret");
-//RS                         let policy = watch_policy_from(&raw, WatchPolicy::Auto);
-//RS                         let canvas_options = canvas_requested.then(|| {
-//RS                             canvas_options_from_args(
-//RS                                 jet_argv,
-//RS                                 output_name.as_deref(),
-//RS                                 requested_target.as_deref(),
-//RS                             )
-//RS                         });
-//RS                         let dev_profile = if let Some(profile) = named_profile.as_deref() {
-//RS                             resolve_named_profile(profile, &entry_str, mode)
-//RS                         } else if no_os {
-//RS                             BuildProfile::NoOs
-//RS                         } else if small {
-//RS                             BuildProfile::Small
-//RS                         } else {
-//RS                             BuildProfile::default_for_command("dev")
-//RS                         };
-//RS                         run_dev(
-//RS                             &entry_str,
-//RS                             entry.callable.as_deref(),
-//RS                             try_anyway,
-//RS                             policy,
-//RS                             gates,
-//RS                             mode,
-//RS                             use_interpreter,
-//RS                             dev_profile.budget_name(),
-//RS                             &setting_overrides,
-//RS                             &passthrough,
-//RS                             record_name.as_deref(),
-//RS                             no_capture,
-//RS                             canvas_requested,
-//RS                             canvas_options,
-//RS                             dev_port,
-//RS                         );
-//RS                         return;
-//RS                     }
-//RS                     _ => {
-//RS                         if jet_argv.iter().any(|arg| arg == "--show-default")
-//RS                             && !mode.quiet
-//RS                         {
-//RS                             write_status(profile, &format!("jet {cmd}: using stock default\n"));
-//RS                         }
-//RS                         // D-CLI1: use passthrough slice if `--` was present;
-//RS                         // otherwise fall back to positional words after the subcommand.
-//RS                         let program_args: Vec<&String> = if passthrough_sep.is_some() {
-//RS                             passthrough.clone()
-//RS                         } else {
-//RS                             args.iter().skip(1).copied().collect()
-//RS                         };
-//RS                         if cmd == "run" && run_wants_watch(&raw) {
-//RS                             prepare_project_environment("run", Path::new(&entry_str), mode);
-//RS                             let try_anyway = raw.iter().any(|a| a == "--try-anyway");
-//RS                             let use_interpreter = raw.iter().any(|a| a == "--interpret");
-//RS                             let run_profile = if let Some(profile) = named_profile.as_deref() {
-//RS                                 resolve_named_profile(profile, &entry_str, mode)
-//RS                             } else if no_os {
-//RS                                 BuildProfile::NoOs
-//RS                             } else if small {
-//RS                                 BuildProfile::Small
-//RS                             } else {
-//RS                                 BuildProfile::default_for_command("run")
-//RS                             };
-//RS                             run_dev(
-//RS                                 &entry_str,
-//RS                                 entry.callable.as_deref(),
-//RS                                 try_anyway,
-//RS                                 WatchPolicy::Restart,
-//RS                                 gates,
-//RS                                 mode,
-//RS                                 use_interpreter,
-//RS                                 run_profile.budget_name(),
-//RS                                 &setting_overrides,
-//RS                                 &program_args,
-//RS                                 record_name.as_deref(),
-//RS                                 false,
-//RS                                 false,
-//RS                                 None,
-//RS                                 dev_port,
-//RS                             );
-//RS                             return;
-//RS                         }
-//RS                         let effective =
-//RS                             effective_target(cmd, &entry_str, cross_target.as_deref());
-//RS                         reject_native_web_run(cmd, &entry_str, effective.as_deref(), mode);
-//RS                         let effective = native_run_target(cmd, &entry_str, effective);
-//RS                         run_native_execution(NativeExecutionRequest {
-//RS                             command: cmd,
-//RS                             file: &entry_str,
-//RS                             emit_rust,
-//RS                             emit_generated,
-//RS                             library: library_flag,
-//RS                             small,
-//RS                             no_os,
-//RS                             gates,
-//RS                             build_grants: &build_grants,
-//RS                             invocation_authority: invocation_authority.as_ref(),
-//RS                             remote_builder: remote_builder.as_deref(),
-//RS                             locked,
-//RS                             target: effective.as_deref(),
-//RS                             target_machine: selected_machine.as_ref(),
-//RS                             explain_partition,
-//RS                             verbose,
-//RS                             sbom,
-//RS                             release: release_flag,
-//RS                             profile: named_profile.as_deref(),
-//RS                             setting_overrides: &setting_overrides,
-//RS                             output: output_name.as_deref(),
-//RS                             program_args: &program_args,
-//RS                             mode,
-//RS                             output_profile: Some(&profile),
-//RS                             record: record_name.as_deref(),
-//RS                             interpret,
-//RS                             entry_fn: entry.callable.as_deref(),
-//RS                             check_project_scope: cmd == "check",
-//RS                             package_scope: cmd != "build"
-//RS                                 || !jet_argv.iter().any(|arg| arg == "--show-default"),
-//RS                             build_override: cmd != "build"
-//RS                                 || !jet_argv.iter().any(|arg| arg == "--show-default"),
-//RS                             source_overlay: None,
-//RS                         });
-//RS                         return;
-//RS                     }
-//RS                 }
-//RS             } else {
-//RS                 missing_bare_entry(cmd, &cwd, mode);
-//RS             }
-//RS         }
-//RS         _ => {
-//RS             // #2072: a target-requiring verb invoked bare (`jet fix`,
-//RS             // `jet lint`, `jet fuzz`, …) wants its OWN usage, not the
-//RS             // whole command inventory. Same registry renderer as
-//RS             // `jet <cmd> --help`; stderr + exit 2 because this is a
-//RS             // usage error, not a help request.
-//RS             write_status(profile, &command_help(cmd));
-//RS             exit(ExitCodes::USAGE);
-//RS         }
-//RS     }
-//RS     define_late_dispatch_routes! {
-//RS         "try" => {
-//RS             let keep = jet_argv.iter().any(|arg| arg == "--keep");
-//RS             run_try(target, keep, mode.json);
-//RS         }
-//RS         "fix" => {
-//RS             let edition = jet_argv
-//RS                 .iter()
-//RS                 .find_map(|a| a.strip_prefix("--edition=").map(str::to_string));
-//RS             let all = jet_argv.iter().any(|a| a == "--all");
-//RS             run_fix(target, dry_run, edition.as_deref(), all, mode);
-//RS         }
-//RS         "new" if matches!(
-//RS             args.get(1).map(|arg| arg.as_str()),
-//RS             Some("service" | "route" | "job" | "migration")
-//RS         ) =>
-//RS         {
-//RS             let kind = args.get(1).map(|arg| arg.as_str()).unwrap_or_default();
-//RS             let name = args.get(2).copied().unwrap_or_else(|| {
-//RS                 crate::cli_error!(
-//RS                     @fix "E2104",
-//RS                     format!("`jet new {kind}` needs a name"),
-//RS                     format!("run `jet new {kind} <name> --preview`")
-//RS                 );
-//RS                 exit(ExitCodes::USAGE);
-//RS             });
-//RS             run_new_backend(kind, name, jet_argv, mode);
-//RS         }
-//RS         "new" => {
-//RS             let name = args.get(1).map(|arg| arg.as_str()).unwrap_or_else(|| {
-//RS                 crate::cli_error!(
-//RS                     @fix "E2104",
-//RS                     "`jet new` needs a project name",
-//RS                     "run `jet new my_app`"
-//RS                 );
-//RS                 exit(ExitCodes::USAGE);
-//RS             });
-//RS             let template = if jet_argv
-//RS                 .iter()
-//RS                 .any(|arg| arg == "--template" || arg.starts_with("--template="))
-//RS             {
-//RS                 let value = test_option_value(jet_argv, "--template").unwrap_or_default();
-//RS                 Some(CmdCompile::NewTemplate::parse(&value).unwrap_or_else(|| {
-//RS                     crate::cli_error!(
-//RS                         @fix "E2104",
-//RS                         format!("`{value}` is not a `jet new` template"),
-//RS                         format!(
-//RS                             "choose one of {}: `jet new {name} --template ui`",
-//RS                             CmdCompile::NewTemplate::NAMES
-//RS                         )
-//RS                     );
-//RS                     exit(ExitCodes::USAGE);
-//RS                 }))
-//RS             } else {
-//RS                 None
-//RS             };
-//RS             run_new(name, annotated, template, mode);
-//RS         }
-//RS         "test-compare" => {
-//RS             CmdTest::run_test_compare(target, jet_argv, mode);
-//RS         }
-//RS         "test" => {
-//RS             if let Some(name) = test_option_value(jet_argv, "--browser-scaffold") {
-//RS                 let root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-//RS                 match scaffold_browser_tests(&root, &name) {
-//RS                     Ok(project) => {
-//RS                         write_mode_status(
-//RS                             mode,
-//RS                             &format!("created browser test project `{}`\n", project.display()),
-//RS                         );
-//RS                         exit(ExitCodes::OK);
-//RS                     }
-//RS                     Err(error) => {
-//RS                         crate::cli_error!(
-//RS                             @fix "E2104",
-//RS                             error,
-//RS                             "use `jet test --browser-scaffold=<new-project-name>`"
-//RS                         );
-//RS                         exit(ExitCodes::USER_ERROR);
-//RS                     }
-//RS                 }
-//RS             }
-//RS             let test_opts = TestRunOpts::parse(jet_argv, mode, &setting_overrides);
-//RS             if test_opts.show_default && !mode.quiet {
-//RS                 write_status(profile, "jet test: using stock default\n");
-//RS             }
-//RS             // Keep directory targets intact so package tests/checks are
-//RS             // collected together instead of resolving to one run entry.
-//RS             let target_path = Path::new(target);
-//RS             let resolved = if target_path.is_dir() {
-//RS                 target.to_string()
-//RS             } else {
-//RS                 resolve_source_path(target)
-//RS             };
-//RS             run_test_opts(&resolved, test_opts, mode);
-//RS         }
-//RS         "add" => {
-//RS             run_add(&raw);
-//RS         }
-//RS         "remove" => {
-//RS             run_remove(target);
-//RS         }
-//RS         // D-TOOL3 (E2-M11): `jet emit --rust` — print the generated Rust source.
-//RS         "emit" => {
-//RS             let rust_flag = jet_argv.iter().any(|a| a == "--rust");
-//RS             if !rust_flag {
-//RS                 emit_cli_report(
-//RS                     "E2102",
-//RS                     format!(
-//RS                         "usage: {} emit --rust <file.{}>",
-//RS                         jet::Syntax::BINARY_NAME,
-//RS                         jet::Syntax::FILE_EXT
-//RS                     ),
-//RS                     "`emit` needs a mode flag; today only `--rust` is supported".to_string(),
-//RS                     format!(
-//RS                         "run `{} emit --rust <file.{}>` to print the generated Rust",
-//RS                         jet::Syntax::BINARY_NAME,
-//RS                         jet::Syntax::FILE_EXT
-//RS                     ),
-//RS                     false,
-//RS                 );
-//RS                 exit(ExitCodes::USAGE);
-//RS             }
-//RS             let emit_metadata = jet_argv.iter().any(|a| a == "--metadata");
-//RS             run_emit_rust(target, mode, emit_metadata);
-//RS         }
-//RS         // D-TESTKIT1=A (c308 pass 2): `jet fuzz <file> [<test-name>]` — fuzz a
-//RS         // parameterized `#Test fn` (D-TEST1's property-test form).
-//RS         "fuzz" => {
-//RS             let test_name = args.get(2).map(|s| s.as_str());
-//RS             let iterations = jet_argv
-//RS                 .iter()
-//RS                 .find_map(|a| a.strip_prefix("--iterations="))
-//RS                 .and_then(|v| v.parse::<u64>().ok());
-//RS             let time_budget_ms = jet_argv
-//RS                 .iter()
-//RS                 .find_map(|a| a.strip_prefix("--time="))
-//RS                 .and_then(|v| v.parse::<f64>().ok())
-//RS                 .map(|secs| (secs * 1000.0) as u64);
-//RS             let seed = jet_argv
-//RS                 .iter()
-//RS                 .find_map(|a| a.strip_prefix("--seed="))
-//RS                 .and_then(|v| v.parse::<u64>().ok());
-//RS             let corpus = jet_argv
-//RS                 .iter()
-//RS                 .find_map(|a| a.strip_prefix("--corpus="))
-//RS                 .map(str::to_string);
-//RS             let resolved = resolve_source_path(target);
-//RS             run_fuzz(
-//RS                 &resolved,
-//RS                 test_name,
-//RS                 FuzzRunOpts {
-//RS                     iterations,
-//RS                     time_budget_ms,
-//RS                     seed,
-//RS                     corpus,
-//RS                 },
-//RS                 mode,
-//RS             );
-//RS         }
-//RS         "doc" => {
-//RS             run_doc(target, mode, jet_argv.iter().any(|arg| arg == "--check"));
-//RS         }
-//RS         // Expert-only lint categories. Ordinary build/check never run these
-//RS         // opt-in policy views.
-//RS         "lint" => {
-//RS             let categories = usize::from(a11y) + usize::from(complexity) + usize::from(cost);
-//RS             if categories != 1 {
-//RS                 emit_cli_report(
-//RS                     "E2102",
-//RS                     format!(
-//RS                         "usage: {} lint --a11y|--complexity|--cost <file.{}>",
-//RS                         jet::Syntax::BINARY_NAME,
-//RS                         jet::Syntax::FILE_EXT
-//RS                     ),
-//RS                     "`lint` needs exactly one category flag".to_string(),
-//RS                     format!(
-//RS                         "run `{} lint --a11y <file.{}>`, `{} lint --complexity <file.{}>`, or `{} lint --cost <file.{}>`",
-//RS                         jet::Syntax::BINARY_NAME,
-//RS                         jet::Syntax::FILE_EXT,
-//RS                         jet::Syntax::BINARY_NAME,
-//RS                         jet::Syntax::FILE_EXT,
-//RS                         jet::Syntax::BINARY_NAME,
-//RS                         jet::Syntax::FILE_EXT,
-//RS                     ),
-//RS                     false,
-//RS                 );
-//RS                 exit(ExitCodes::USAGE);
-//RS             }
-//RS             let resolved = resolve_source_path(target);
-//RS             if complexity {
-//RS                 let max_budget = jet_argv.iter().find_map(|arg| arg.strip_prefix("--max="));
-//RS                 let max_budget = max_budget.map(|value| match value.parse::<u32>() {
-//RS                     Ok(value) => value,
-//RS                     Err(_) => {
-//RS                         crate::cli_error!(
-//RS                             @fix "E2104",
-//RS                             format!("`--max={value}` isn't a non-negative integer"),
-//RS                             "use `--max=<n>` with a non-negative integer"
-//RS                         );
-//RS                         exit(ExitCodes::USAGE);
-//RS                     }
-//RS                 });
-//RS                 run_lint_complexity(&resolved, mode, max_budget);
-//RS             } else if cost {
-//RS                 run_lint_cost(&resolved, mode);
-//RS             } else {
-//RS                 run_lint_a11y(&resolved, mode);
-//RS             }
-//RS         }
-//RS         _ ["run" | "build" | "check"] => {
-//RS             // D-CLI1: use passthrough slice if `--` was present; otherwise fall
-//RS             // back to positional words after the file (args[0]=cmd, args[1]=file).
-//RS             let program_args: Vec<&String> = if passthrough_sep.is_some() {
-//RS                 passthrough.clone()
-//RS             } else {
-//RS                 args.iter().skip(2).copied().collect()
-//RS             };
-//RS             // Ext-optional CLI: `jet run examples/test` resolves to `examples/test.jet`
-//RS             // for the path-accepting compile commands.
-//RS             let named_build_target = named_build_entry.is_some();
-//RS             let resolved = if cmd == "build" {
-//RS                 named_build_entry.unwrap_or_else(|| {
-//RS                     resolve_command_target(
-//RS                         cmd,
-//RS                         target,
-//RS                         bare_member_flag,
-//RS                         mode,
-//RS                         !jet_argv.iter().any(|arg| arg == "--show-default"),
-//RS                     )
-//RS                 })
-//RS             } else if matches!(cmd, "run" | "check") {
-//RS                 resolve_command_target(
-//RS                     cmd,
-//RS                     target,
-//RS                     bare_member_flag,
-//RS                     mode,
-//RS                     !jet_argv.iter().any(|arg| arg == "--show-default"),
-//RS                 )
-//RS             } else {
-//RS                 ResolvedEntry::file(PathBuf::from(target))
-//RS             };
-//RS             let resolved_path = resolved.path.to_string_lossy().into_owned();
-//RS             if cmd == "run" {
-//RS                 // #439 / E3-UL6: `jet run --watch` uses the shared dependency-
-//RS                 // aware engine; `jet dev` keeps the richer swap/overlay surface.
-//RS                 if run_wants_watch(&raw) {
-//RS                     prepare_project_environment("run", Path::new(&resolved_path), mode);
-//RS                     let try_anyway = raw.iter().any(|a| a == "--try-anyway");
-//RS                     let use_interpreter = raw.iter().any(|a| a == "--interpret");
-//RS                     let run_profile = if let Some(profile) = named_profile.as_deref() {
-//RS                         resolve_named_profile(profile, &resolved_path, mode)
-//RS                     } else if no_os {
-//RS                         BuildProfile::NoOs
-//RS                     } else if small {
-//RS                         BuildProfile::Small
-//RS                     } else {
-//RS                         BuildProfile::default_for_command("run")
-//RS                     };
-//RS                     run_dev(
-//RS                         &resolved_path,
-//RS                         resolved.callable.as_deref(),
-//RS                         try_anyway,
-//RS                         WatchPolicy::Restart,
-//RS                         gates,
-//RS                         mode,
-//RS                         use_interpreter,
-//RS                         run_profile.budget_name(),
-//RS                         &setting_overrides,
-//RS                         &program_args,
-//RS                         record_name.as_deref(),
-//RS                         false,
-//RS                         false,
-//RS                         None,
-//RS                         dev_port,
-//RS                     );
-//RS                     return;
-//RS                 }
-//RS             }
-//RS             if cmd == "run" && mode.json {
-//RS                 // #3713: an escaping failure is reported as the jet.err/v1 wire.
-//RS                 jet::Outcome::jet_report_use_wire();
-//RS             }
-//RS             if jet_argv.iter().any(|arg| arg == "--show-default") && !mode.quiet {
-//RS                 write_status(profile, &format!("jet {cmd}: using stock default\n"));
-//RS             }
-//RS             let effective = effective_target(cmd, &resolved_path, cross_target.as_deref());
-//RS             reject_native_web_run(cmd, &resolved_path, effective.as_deref(), mode);
-//RS             let effective = native_run_target(cmd, &resolved_path, effective);
-//RS             run_native_execution(NativeExecutionRequest {
-//RS                 command: cmd,
-//RS                 file: &resolved_path,
-//RS                 emit_rust,
-//RS                 emit_generated,
-//RS                 library: library_flag,
-//RS                 small,
-//RS                 no_os,
-//RS                 gates,
-//RS                 build_grants: &build_grants,
-//RS                 invocation_authority: invocation_authority.as_ref(),
-//RS                 remote_builder: remote_builder.as_deref(),
-//RS                 locked,
-//RS                 target: effective.as_deref(),
-//RS                 target_machine: selected_machine.as_ref(),
-//RS                 explain_partition,
-//RS                 verbose,
-//RS                 sbom,
-//RS                 release: release_flag,
-//RS                 profile: named_profile.as_deref(),
-//RS                 setting_overrides: &setting_overrides,
-//RS                 output: output_name.as_deref(),
-//RS                 program_args: &program_args,
-//RS                 mode,
-//RS                 output_profile: Some(&profile),
-//RS                 record: record_name.as_deref(),
-//RS                 interpret,
-//RS                 entry_fn: resolved.callable.as_deref(),
-//RS                 check_project_scope: cmd == "check" && Path::new(target).is_dir(),
-//RS                 package_scope: cmd != "build"
-//RS                     || named_build_target
-//RS                     || (Path::new(target).is_dir()
-//RS                         && !jet_argv.iter().any(|arg| arg == "--show-default")),
-//RS                 build_override: cmd != "build"
-//RS                     || !jet_argv.iter().any(|arg| arg == "--show-default"),
-//RS                 source_overlay: None,
-//RS             });
-//RS         }
-//RS     }
-//RS 
-//RS     let host_dispatch_words: &[&[&str]] = &[
-//RS         dispatch_route_words!(),
-//RS         bare_dispatch_route_words!(),
-//RS         late_dispatch_route_words!(),
-//RS         alias_dispatch_route_words!(),
-//RS         perf_dispatch_route_words!(),
-//RS         lsp_dispatch_route_words!(),
-//RS     ];
-//RS     if let Some(violation) =
-//RS         jet::CLI::parser_inventory_violations_against_slices(Some(&host_dispatch_words))
-//RS             .into_iter()
-//RS             .next()
-//RS     {
-//RS         emit_cli_report(
-//RS             "E2105",
-//RS             format!("CLI parser registry drift: {violation}"),
-//RS             "the command parser and its registered surface must remain one table".to_string(),
-//RS             "repair the CLI registry drift before invoking Jet".to_string(),
-//RS             mode.json,
-//RS         );
-//RS         exit(ExitCodes::ICE);
-//RS     }
-//RS     dispatch_command!(cmd);
-//RS     if no_target {
-//RS         bare_dispatch!(cmd);
-//RS     }
-//RS     late_dispatch!(cmd);
-//RS }
-//RS 
-//RS fn parse_build_verify(args: &[String]) -> Result<Option<String>, String> {
-//RS     let mut artifact = None;
-//RS     let mut index = 0;
-//RS     while index < args.len() {
-//RS         let argument = &args[index];
-//RS         let value = if let Some(value) = argument.strip_prefix("--verify=") {
-//RS             if value.is_empty() {
-//RS                 return Err("`--verify` needs a receipt id".to_string());
-//RS             }
-//RS             Some(value)
-//RS         } else if argument == "--verify" {
-//RS             let value = args
-//RS                 .get(index + 1)
-//RS                 .filter(|value| !value.is_empty() && !value.starts_with('-'))
-//RS                 .ok_or_else(|| "`--verify` needs a receipt id".to_string())?;
-//RS             index += 1;
-//RS             Some(value.as_str())
-//RS         } else {
-//RS             None
-//RS         };
-//RS         if let Some(value) = value {
-//RS             if artifact.is_some() {
-//RS                 return Err("`--verify` may be specified only once".to_string());
-//RS             }
-//RS             artifact = Some(value.to_string());
-//RS         }
-//RS         index += 1;
-//RS     }
-//RS     Ok(artifact)
-//RS }
-//RS 
-//RS /// #439 / E3-UL6: `jet run --watch` enters the shared dependency-aware
-//RS /// watch engine. `--watch=off` (and a bare one-shot `jet run`) stay one-shot.
-//RS fn run_wants_watch(raw: &[String]) -> bool {
-//RS     let off = raw.iter().any(|a| a == "--watch=off");
-//RS     if off {
-//RS         return false;
-//RS     }
-//RS     raw.iter().any(|a| {
-//RS         a == "--watch"
-//RS             || a == "--watch=on"
-//RS             || a == "--watch=true"
-//RS             || a.starts_with("--watch=") && a != "--watch=off"
-//RS     })
-//RS }
-//RS 
-//RS /// Resolve a source-path argument, allowing the `.jet` extension to be omitted
-//RS /// (ext-optional CLI). If `raw` exists as-is, use it. Otherwise, if `raw.jet`
-//RS /// exists, use that. If neither exists, return `raw` unchanged so the normal
-//RS /// file-not-found diagnostic fires with the original name the user typed.
-//RS /// D-WEBDEFAULT1 (ratified 2026-07-01, c134): resolve the effective `--target=` value for
-//RS /// `file`. Precedence: an explicit CLI flag always wins; else the canonical Package
-//RS /// context's `target: "web"` (inline in the entry or a managed package's package.jet);
-//RS /// else a lightweight parse of `file` for a top-level `#Target(Web)` marker (a loose
-//RS /// file's own default, for standalone examples with no manifest at all).
-//RS /// Reparses the file/manifest — wasteful compared to threading the fact
-//RS /// through the real compile pipeline, but `jet` recompiles from scratch on
-//RS /// every invocation anyway (no incremental compilation), so a couple of
-//RS /// extra cheap lex+parse passes are negligible, and it keeps this CLI-only
-//RS /// concern out of `ProgramBundle`/codegen entirely.
-//RS ///
-//RS /// `jet run` also resolves the package/file web default so the execution
-//RS /// boundary can reject it with a teaching diagnostic before attempting a
-//RS /// native build. `jet dev` and `jet build` keep the same default resolution.
-//RS fn effective_target(_cmd: &str, file: &str, explicit: Option<&str>) -> Option<String> {
-//RS     if explicit.is_some() {
-//RS         return explicit.map(str::to_string);
-//RS     }
-//RS     if let Some(target) = manifest_default_target(file) {
-//RS         return Some(target);
-//RS     }
-//RS     let src = fs::read_to_string(file).ok()?;
-//RS     let src = jet::Package::mask_inline_package_source(&src).ok()?.0;
-//RS     let (toks, lex_diags) = jet::Lexer::lex(&src);
-//RS     if !lex_diags.is_empty() {
-//RS         return None;
-//RS     }
-//RS     let prog = jet::Parser::parse_with_source(&toks, &src).ok()?;
-//RS     prog.default_target
-//RS }
-//RS 
-//RS /// D-WEBRUN1=A: native `jet run` has no web execution backend for ordinary
-//RS /// web programs. An App-returning entry is the documented runtime-edge
-//RS /// exception: `jet run` serves its App, and `jet dev` reaches this same path
-//RS /// through its child `jet run`. Preserve E-WEB-RUN for non-App web programs.
-//RS fn reject_native_web_run(command: &str, file: &str, target: Option<&str>, mode: OutputMode) {
-//RS     if command == "run" && target == Some(jet::Syntax::BUILD_TARGET_WEB) && !entry_returns_app(file)
-//RS     {
-//RS         emit_cli_row("E-WEB-RUN", &[], mode.json);
-//RS         exit(ExitCodes::USER_ERROR);
-//RS     }
-//RS }
-//RS 
-//RS /// An explicit host target is a native execution choice, even when it
-//RS /// overrides a file's web default. An App-returning entry is also served by
-//RS /// the native runtime edge, regardless of its web target marker; genuinely
-//RS /// web-targeted non-App programs remain rejected above.
-//RS fn native_run_target(command: &str, file: &str, target: Option<String>) -> Option<String> {
-//RS     let host = jet_foundation::Layout::TargetLayout::host_triple();
-//RS     if command == "run"
-//RS         && (target.as_deref() == Some(host.as_str())
-//RS             || (target.as_deref() == Some(jet::Syntax::BUILD_TARGET_WEB)
-//RS                 && entry_returns_app(file)))
-//RS     {
-//RS         None
-//RS     } else {
-//RS         target
-//RS     }
-//RS }
-//RS 
-//RS /// c-devserver (owner-directed 2026-07-01): cheap lex+parse check (same style
-//RS /// as `effective_target`) for whether `file`'s entry defines a top-level `fn
-//RS /// dev()`. A lex/parse failure here is never fatal — it just means "no"; the
-//RS /// real diagnostics surface a moment later when `run_dev_entry`/`run_dev`
-//RS /// actually compiles the file.
-//RS fn has_dev_entry_fn(file: &str) -> bool {
-//RS     let src = match fs::read_to_string(file) {
-//RS         Ok(s) => s,
-//RS         Err(_) => return false,
-//RS     };
-//RS     let src = match jet::Package::mask_inline_package_source(&src) {
-//RS         Ok((masked, _)) => masked,
-//RS         Err(_) => return false,
-//RS     };
-//RS     let (toks, lex_diags) = jet::Lexer::lex(&src);
-//RS     if !lex_diags.is_empty() {
-//RS         return false;
-//RS     }
-//RS     let prog = match jet::Parser::parse_with_source(&toks, &src) {
-//RS         Ok(p) => p,
-//RS         Err(_) => return false,
-//RS     };
-//RS     prog.items
-//RS         .iter()
-//RS         .any(|i| matches!(i, jet::AST::Item::Func(f) if f.name == "dev"))
-//RS }
-//RS 
-//RS fn entry_returns_app(file: &str) -> bool {
-//RS     let source = match fs::read_to_string(file) {
-//RS         Ok(source) => source,
-//RS         Err(_) => return false,
-//RS     };
-//RS     let source = match jet::Package::mask_inline_package_source(&source) {
-//RS         Ok((masked, _)) => masked,
-//RS         Err(_) => return false,
-//RS     };
-//RS     let (tokens, diagnostics) = jet::Lexer::lex(&source);
-//RS     if !diagnostics.is_empty() {
-//RS         return false;
-//RS     }
-//RS     let program = match jet::Parser::parse_with_source(&tokens, &source) {
-//RS         Ok(program) => program,
-//RS         Err(_) => return false,
-//RS     };
-//RS     jet::AST::app_entry_run_fn(&program.items).is_some()
-//RS }
-//RS 
-//RS /// D-WEBDEFAULT1 (ratified 2026-07-01, c134): a Package `targets` selection
-//RS /// named `web` chooses one of the canonical web target profiles.
-//RS fn manifest_default_target(file: &str) -> Option<String> {
-//RS     let path = Path::new(file);
-//RS     if !path.is_file() {
-//RS         return None;
-//RS     }
-//RS     let manifest = match jet::Loader::package_facts_for_entry(path) {
-//RS         Ok(Some(manifest)) => manifest,
-//RS         Ok(None) => return None,
-//RS         Err(diagnostics) => report_entry_diagnostics(path, &diagnostics),
-//RS     };
-//RS     let profile = manifest.target_profile("web")?;
-//RS     matches!(
-//RS         profile,
-//RS         jet::Package::Blocks::TargetProfileIdentity::WebBrowser
-//RS             | jet::Package::Blocks::TargetProfileIdentity::WebWasiServer
-//RS             | jet::Package::Blocks::TargetProfileIdentity::WebNoOs
-//RS     )
-//RS     .then(|| jet::Syntax::BUILD_TARGET_WEB.to_string())
-//RS }
-//RS 
-//RS /// Report a package-scope command collision through the registered diagnostic
-//RS /// row. The package authority owns discovery; the CLI only supplies the
-//RS /// command name and the checked source locations.
-//RS fn job_registry_for_entry(
-//RS     entry: &Path,
-//RS     mode: OutputMode,
-//RS ) -> jet_foundation::CLISchema::JobRegistry {
-//RS     let display = entry.to_string_lossy().into_owned();
-//RS     let source = fs::read_to_string(entry).unwrap_or_default();
-//RS     let (diagnostics, bundle, _facts) =
-//RS         jet::Driver::check_file_with_effect_facts_for_run(&display, "dev", &BTreeMap::new());
-//RS     let errors = diagnostics
-//RS         .into_iter()
-//RS         .filter(|diagnostic| diagnostic.severity == jet::Diagnostics::Severity::Error)
-//RS         .collect::<Vec<_>>();
-//RS     if !errors.is_empty() {
-//RS         report_problems(mode, &display, &source, &errors);
-//RS         exit(ExitCodes::USER_ERROR);
-//RS     }
-//RS     let Some(bundle) = bundle else {
-//RS         report_problems(mode, &display, &source, &[]);
-//RS         exit(ExitCodes::USER_ERROR);
-//RS     };
-//RS     jet_foundation::CLISchema::JobRegistry::for_entry(&bundle)
-//RS }
-//RS 
-//RS fn reject_job_graph(entry: &Path, reason: String, mode: OutputMode) -> ! {
-//RS     crate::emit_cli_report(
-//RS         "E1331",
-//RS         format!("Invalid job graph in `{}`: {reason}", entry.display()),
-//RS         "checked #Job dependencies and execution bounds must form one valid graph".to_string(),
-//RS         "remove unknown, ambiguous, or cyclic dependencies and use a positive `parallel` bound"
-//RS             .to_string(),
-//RS         mode.json,
-//RS     );
-//RS     exit(ExitCodes::USER_ERROR);
-//RS }
-//RS 
-//RS fn validate_job_registry(
-//RS     entry: &Path,
-//RS     registry: &jet_foundation::CLISchema::JobRegistry,
-//RS     mode: OutputMode,
-//RS ) {
-//RS     for job in registry.jobs() {
-//RS         let Some(cwd) = job.cwd.as_deref() else {
-//RS             continue;
-//RS         };
-//RS         let cwd_path = Path::new(cwd);
-//RS         if cwd_path.is_absolute()
-//RS             || cwd_path
-//RS                 .components()
-//RS                 .any(|component| component == std::path::Component::ParentDir)
-//RS         {
-//RS             crate::emit_cli_report(
-//RS                 "E1330",
-//RS                 format!("job `{}` has an unsafe cwd", job.name),
-//RS                 "checked #Job dependencies and execution bounds must form one valid graph"
-//RS                     .to_string(),
-//RS                 "use a project-relative path without `..`".to_string(),
-//RS                 mode.json,
-//RS             );
-//RS             exit(ExitCodes::USER_ERROR);
-//RS         }
-//RS         let resolved = job_base_directory(entry, job);
-//RS         if resolved.exists() {
-//RS             let project = job_project_directory(entry);
-//RS             let root = project.canonicalize().unwrap_or_else(|_| project.clone());
-//RS             let resolved = resolved.canonicalize().unwrap_or_else(|_| resolved.clone());
-//RS             if !resolved.starts_with(&root) {
-//RS                 crate::emit_cli_report(
-//RS                     "E1330",
-//RS                     format!("job `{}` has an unsafe cwd", job.name),
-//RS                     "checked #Job dependencies and execution bounds must form one valid graph"
-//RS                         .to_string(),
-//RS                     "use an existing project-relative directory without symlink escapes"
-//RS                         .to_string(),
-//RS                     mode.json,
-//RS                 );
-//RS                 exit(ExitCodes::USER_ERROR);
-//RS             }
-//RS         }
-//RS     }
-//RS     if let Err(reason) = registry.validate_graph() {
-//RS         reject_job_graph(entry, reason, mode);
-//RS     }
-//RS }
-//RS 
-//RS fn validate_job_working_directories(
-//RS     entry: &Path,
-//RS     registry: &jet_foundation::CLISchema::JobRegistry,
-//RS     mode: OutputMode,
-//RS ) {
-//RS     for job in registry.jobs() {
-//RS         if job.cwd.is_some() {
-//RS             let resolved = job_base_directory(entry, job);
-//RS             if !resolved.is_dir() {
-//RS                 crate::emit_cli_report(
-//RS                     "E1330",
-//RS                     format!("job `{}` has a non-directory cwd", job.name),
-//RS                     format!("job cwd `{}` is not a directory", resolved.display()),
-//RS                     "use an existing project-relative directory for `cwd`".to_string(),
-//RS                     mode.json,
-//RS                 );
-//RS                 exit(ExitCodes::USER_ERROR);
-//RS             }
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn job_project_directory(entry: &Path) -> PathBuf {
-//RS     let entry_dir = entry.parent().unwrap_or_else(|| Path::new("."));
-//RS     jet::Loader::find_manifest_root(entry_dir).unwrap_or_else(|| entry_dir.to_path_buf())
-//RS }
-//RS fn job_base_directory(entry: &Path, job: &jet_foundation::CLISchema::JobFact) -> PathBuf {
-//RS     let project = job_project_directory(entry);
-//RS     job.cwd
-//RS         .as_deref()
-//RS         .map_or(project.clone(), |cwd| project.join(cwd))
-//RS }
-//RS 
-//RS fn job_status_string_array(values: &[String]) -> StatusValue {
-//RS     StatusValue::array(
-//RS         values
-//RS             .iter()
-//RS             .map(|value| StatusValue::String(value.clone())),
-//RS     )
-//RS }
-//RS 
-//RS fn job_status_optional_string(value: Option<&str>) -> StatusValue {
-//RS     value
-//RS         .map(|value| StatusValue::String(value.to_string()))
-//RS         .unwrap_or(StatusValue::Null)
-//RS }
-//RS 
-//RS fn job_status_skip(skip: Option<&jet::AST::JobSkip>) -> StatusValue {
-//RS     match skip {
-//RS         None => StatusValue::Null,
-//RS         Some(jet::AST::JobSkip::Always(reason)) => StatusValue::object(
-//RS             StatusFields::new()
-//RS                 .with("kind", "always")
-//RS                 .with("reason", reason.as_str()),
-//RS         ),
-//RS         Some(jet::AST::JobSkip::UnlessPlatform { platform }) => StatusValue::object(
-//RS             StatusFields::new()
-//RS                 .with("kind", "unless-platform")
-//RS                 .with("platform", platform.as_str()),
-//RS         ),
-//RS     }
-//RS }
-//RS 
-//RS fn job_status_limits(limits: &BTreeMap<String, String>) -> StatusValue {
-//RS     let mut fields = StatusFields::new();
-//RS     for (name, value) in limits {
-//RS         fields = fields.with(name.as_str(), value.as_str());
-//RS     }
-//RS     StatusValue::object(fields)
-//RS }
-//RS 
-//RS fn job_status_argument(argument: &jet_foundation::CLISchema::JobArgumentSchema) -> StatusValue {
-//RS     StatusValue::object(
-//RS         StatusFields::new()
-//RS             .with("name", argument.name.as_str())
-//RS             .with("label", argument.label.as_str())
-//RS             .with("type", argument.ty.as_str())
-//RS             .with("required", argument.required)
-//RS             .with(
-//RS                 "default",
-//RS                 job_status_optional_string(argument.default.as_deref()),
-//RS             )
-//RS             .with("variadic", argument.variadic)
-//RS             .with("zone", format!("{:?}", argument.zone)),
-//RS     )
-//RS }
-// END-PORT-PENDING 2031 Source/main.rs:3601-5400
+// Rust: Source/main.rs:3601-5047
+// The complete main item, including this dispatch continuation, is owned by Main02.main.
+use JetCli.Source.Cli.Entry.Main.[emit_cli_report, emit_cli_row, report_problems, report_entry_diagnostics]
+use JetCli.Source.Cli.OutputAdapter.[OutputMode]
+use jet.[AST, Diagnostics, Driver, Lexer, Loader, Package, Parser, Syntax, ExitCodes]
+use jet_foundation.CLISchema.[JobRegistry, JobFact, JobArgumentSchema]
+use jet_foundation.Report.[StatusFields, StatusValue]
+use jet_foundation.Layout.[TargetLayout]
+use std.fs as fs
+use std.process.[exit]
+use std.path.[Component]
 
+// Rust: Source/main.rs:5049
+pub fn parse_build_verify(args: [String]) -> String? Err! {
+    artifact := none
+    index := 0
+    loop index < args.len() {
+        argument :: args[index]
+        value := none
+        if inline :: argument.strip_prefix("--verify=") {
+            if inline.is_empty() { return .Err("`--verify` needs a receipt id") }
+            value = inline.to_string()
+        } else if argument == "--verify" {
+            following :: args.get(index + 1).filter(|value| -> !value.is_empty() && !value.starts_with('-'))
+                ?? return .Err("`--verify` needs a receipt id")
+            index += 1
+            value = following.to_string()
+        }
+        if receipt :: value {
+            if artifact.is_some() { return .Err("`--verify` may be specified only once") }
+            artifact = receipt
+        }
+        index += 1
+    }
+    .Ok(artifact)
+}
+
+// Rust: Source/main.rs:5082
+// --watch=off overrides every enabling occurrence; bare run remains one-shot.
+pub fn run_wants_watch(raw: [String]) -> Bool {
+    if raw.iter().any(|arg| -> arg == "--watch=off") { return false }
+    raw.iter().any(|arg| -> arg == "--watch" || arg == "--watch=on" || arg == "--watch=true" || arg.starts_with("--watch=") && arg != "--watch=off")
+}
+
+// Rust: Source/main.rs:5113
+// Explicit CLI target, then package web profile, then the loose source marker.
+// GATE #4494: native source read.
+pub fn effective_target(_cmd: String, file: String, explicit: String?) -> String? {
+    if explicit.is_some() { return explicit }
+    if target :: manifest_default_target(file) { return target }
+    source :: fs.read_to_string(OSPath.from(file)).ok() ?? return none
+    (masked, _) :: Package.mask_inline_package_source(source).ok() ?? return none
+    (tokens, diagnostics) :: Lexer.lex(masked)
+    if !diagnostics.is_empty() { return none }
+    program :: Parser.parse_with_source(tokens, masked).ok() ?? return none
+    program.default_target
+}
+
+// Rust: Source/main.rs:5134
+// App-returning run entries use the native serving edge; ordinary Web run is refused.
+pub fn reject_native_web_run(command: String, file: String, target: String?, mode: OutputMode) -> {
+    if command == "run" && target == Syntax.BUILD_TARGET_WEB && !entry_returns_app(file) {
+        emit_cli_row("E-WEB-RUN", [], mode.json)
+        exit(ExitCodes.USER_ERROR)
+    }
+}
+
+// Rust: Source/main.rs:5146
+// GATE #4483: canonical native execution host triple (not the cross-build target).
+pub fn native_run_target(command: String, file: String, target: String?) -> String? {
+    host :: TargetLayout.host_triple()
+    if command == "run" && (target == host || target == Syntax.BUILD_TARGET_WEB && entry_returns_app(file)) {
+        none
+    } else { target }
+}
+
+// Rust: Source/main.rs:5164
+// A cheap parser failure means no dev override; compilation owns diagnostics.
+pub fn has_dev_entry_fn(file: String) -> Bool {
+    source :: fs.read_to_string(OSPath.from(file)).ok() ?? return false
+    (masked, _) :: Package.mask_inline_package_source(source).ok() ?? return false
+    (tokens, diagnostics) :: Lexer.lex(masked)
+    if !diagnostics.is_empty() { return false }
+    program :: Parser.parse_with_source(tokens, masked).ok() ?? return false
+    program.items.iter().any(|item| -> match item {
+        .Func(function) -> function.name == "dev"
+        _ -> false
+    })
+}
+
+// Rust: Source/main.rs:5186
+pub fn entry_returns_app(file: String) -> Bool {
+    source :: fs.read_to_string(OSPath.from(file)).ok() ?? return false
+    (masked, _) :: Package.mask_inline_package_source(source).ok() ?? return false
+    (tokens, diagnostics) :: Lexer.lex(masked)
+    if !diagnostics.is_empty() { return false }
+    program :: Parser.parse_with_source(tokens, masked).ok() ?? return false
+    AST.app_entry_run_fn(program.items).is_some()
+}
+
+// Rust: Source/main.rs:5208
+pub fn manifest_default_target(file: String) -> String? {
+    path :: OSPath.from(file)
+    if !path.is_file() { return none }
+    manifest :: match Loader.package_facts_for_entry(path) {
+        .Ok(value) -> value ?? return none
+        .Err(diagnostics) -> report_entry_diagnostics(path, diagnostics)
+    }
+    profile :: manifest.target_profile("web") ?? return none
+    match profile {
+        .WebBrowser | .WebWasiServer | .WebNoOs -> Syntax.BUILD_TARGET_WEB.to_string()
+        _ -> none
+    }
+}
+
+// Rust: Source/main.rs:5231
+pub fn job_registry_for_entry(entry: OSPath, mode: OutputMode) -> JobRegistry {
+    display :: entry.to_string_lossy().to_string()
+    source :: fs.read_to_string(entry).unwrap_or_default()
+    (diagnostics, maybe_bundle, _) :: Driver.check_file_with_effect_facts_for_run(display, "dev", [:])
+    errors :: diagnostics.iter().filter(|diagnostic| -> diagnostic.severity == Diagnostics.Severity.Error).to_list()
+    if !errors.is_empty() {
+        report_problems(mode, display, source, errors)
+        exit(ExitCodes.USER_ERROR)
+    }
+    bundle :: maybe_bundle ?? {
+        report_problems(mode, display, source, [])
+        exit(ExitCodes.USER_ERROR)
+    }
+    JobRegistry.for_entry(bundle)
+}
+
+// Rust: Source/main.rs:5254
+pub fn reject_job_graph(entry: OSPath, reason: String, mode: OutputMode) -> Never {
+    emit_cli_report("E1331", "Invalid job graph in `{entry.display()}`: {reason}",
+        "checked #Job dependencies and execution bounds must form one valid graph",
+        "remove unknown, ambiguous, or cyclic dependencies and use a positive `parallel` bound", mode.json)
+    exit(ExitCodes.USER_ERROR)
+}
+
+// Rust: Source/main.rs:5266
+// GATE #4494: canonical native path metadata and symlink resolution.
+pub fn validate_job_registry(entry: OSPath, registry: JobRegistry, mode: OutputMode) -> {
+    loop job in registry.jobs() {
+        cwd :: job.cwd ?? next
+        cwd_path :: OSPath.from(cwd)
+        if cwd_path.is_absolute() || cwd_path.components().any(|component| -> component == Component.ParentDir) {
+            emit_cli_report("E1330", "job `{job.name}` has an unsafe cwd",
+                "checked #Job dependencies and execution bounds must form one valid graph",
+                "use a project-relative path without `..`", mode.json)
+            exit(ExitCodes.USER_ERROR)
+        }
+        resolved :: job_base_directory(entry, job)
+        if resolved.exists() {
+            project :: job_project_directory(entry)
+            root :: project.canonicalize().unwrap_or_else(|_| -> project)
+            canonical :: resolved.canonicalize().unwrap_or_else(|_| -> resolved)
+            if !canonical.starts_with(root) {
+                emit_cli_report("E1330", "job `{job.name}` has an unsafe cwd",
+                    "checked #Job dependencies and execution bounds must form one valid graph",
+                    "use an existing project-relative directory without symlink escapes", mode.json)
+                exit(ExitCodes.USER_ERROR)
+            }
+        }
+    }
+    if reason :: registry.validate_graph().err() { reject_job_graph(entry, reason, mode) }
+}
+
+// Rust: Source/main.rs:5315
+pub fn validate_job_working_directories(entry: OSPath, registry: JobRegistry, mode: OutputMode) -> {
+    loop job in registry.jobs() {
+        if job.cwd.is_some() {
+            resolved :: job_base_directory(entry, job)
+            if !resolved.is_dir() {
+                emit_cli_report("E1330", "job `{job.name}` has a non-directory cwd",
+                    "job cwd `{resolved.display()}` is not a directory",
+                    "use an existing project-relative directory for `cwd`", mode.json)
+                exit(ExitCodes.USER_ERROR)
+            }
+        }
+    }
+}
+
+// Rust: Source/main.rs:5337
+pub fn job_project_directory(entry: OSPath) -> OSPath {
+    entry_dir :: entry.parent().unwrap_or_else(|| -> OSPath.from("."))
+    Loader.find_manifest_root(entry_dir).unwrap_or_else(|| -> entry_dir)
+}
+
+// Rust: Source/main.rs:5341
+pub fn job_base_directory(entry: OSPath, job: JobFact) -> OSPath {
+    project :: job_project_directory(entry)
+    job.cwd.map_or(project, |cwd| -> project.join(cwd))
+}
+
+// Rust: Source/main.rs:5348
+pub fn job_status_string_array(values: [String]) -> StatusValue {
+    StatusValue.array(values.iter().map(|value| -> StatusValue.String(value)))
+}
+
+// Rust: Source/main.rs:5356
+pub fn job_status_optional_string(value: String?) -> StatusValue {
+    value.map(|text| -> StatusValue.String(text)).unwrap_or(StatusValue.Null)
+}
+
+// Rust: Source/main.rs:5362
+pub fn job_status_skip(skip: AST.JobSkip?) -> StatusValue {
+    match skip {
+        none -> StatusValue.Null
+        .Always(reason) -> StatusValue.object(StatusFields.new().with("kind", "always").with("reason", reason))
+        .UnlessPlatform{platform} -> StatusValue.object(StatusFields.new().with("kind", "unless-platform").with("platform", platform))
+    }
+}
+
+// Rust: Source/main.rs:5378
+pub fn job_status_limits(limits: [String:String]) -> StatusValue {
+    fields := StatusFields.new()
+    // Rust BTreeMap order: sort keys once, then retain the same status field ordering.
+    names := limits.keys().to_list()
+    &names.sort()
+    loop name in names { fields = fields.with(name, limits[name]) }
+    StatusValue.object(fields)
+}
+
+// Rust: Source/main.rs:5386
+pub fn job_status_argument(argument: JobArgumentSchema) -> StatusValue {
+    StatusValue.object(StatusFields.new()
+        .with("name", argument.name)
+        .with("label", argument.label)
+        .with("type", argument.ty)
+        .with("required", argument.required)
+        .with("default", job_status_optional_string(argument.default))
+        .with("variadic", argument.variadic)
+        .with("zone", argument.zone.debug()))
+}

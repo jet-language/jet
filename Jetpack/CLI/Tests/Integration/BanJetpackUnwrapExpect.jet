@@ -1,1262 +1,287 @@
-// PORT-PENDING 0971 tests-ban-jetpack-unwrap-expect-module-group: tests/ban_jetpack_unwrap_expect.rs:1-557
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! Card #456: production Jetpack must not use `unwrap()` or `expect(...)`.
-//RS //!
-//RS //! This scanner is deliberately lexical and std-only. It ignores Rust text
-//RS //! that cannot execute, removes definitely test-only items, and treats unknown
-//RS //! cfg predicates conservatively as production.
-//RS 
-//RS mod common;
-//RS 
-//RS use std::fs;
-//RS use std::path::{Path, PathBuf};
-//RS 
-//RS #[derive(Clone, Debug, PartialEq, Eq)]
-//RS enum TokenKind {
-//RS     Ident(String),
-//RS     Punct(char),
-//RS }
-//RS 
-//RS #[derive(Clone, Debug)]
-//RS struct Token {
-//RS     kind: TokenKind,
-//RS     line: usize,
-//RS }
-//RS 
-//RS #[derive(Clone, Debug, PartialEq, Eq)]
-//RS struct Finding {
-//RS     path: String,
-//RS     line: usize,
-//RS     method: String,
-//RS     item: String,
-//RS }
-//RS 
-//RS #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-//RS enum Truth {
-//RS     Yes,
-//RS     No,
-//RS     Maybe,
-//RS }
-//RS 
-//RS fn lex(source: &str) -> Vec<Token> {
-//RS     let bytes = source.as_bytes();
-//RS     let mut out = Vec::new();
-//RS     let mut i = 0;
-//RS     let mut line = 1;
-//RS     while i < bytes.len() {
-//RS         if bytes[i] == b'\n' {
-//RS             line += 1;
-//RS             i += 1;
-//RS             continue;
-//RS         }
-//RS         if bytes[i].is_ascii_whitespace() {
-//RS             i += 1;
-//RS             continue;
-//RS         }
-//RS         if bytes[i..].starts_with(b"//") {
-//RS             i += 2;
-//RS             while i < bytes.len() && bytes[i] != b'\n' {
-//RS                 i += 1;
-//RS             }
-//RS             continue;
-//RS         }
-//RS         if bytes[i..].starts_with(b"/*") {
-//RS             i += 2;
-//RS             let mut depth = 1;
-//RS             while i < bytes.len() && depth > 0 {
-//RS                 if bytes[i..].starts_with(b"/*") {
-//RS                     depth += 1;
-//RS                     i += 2;
-//RS                 } else if bytes[i..].starts_with(b"*/") {
-//RS                     depth -= 1;
-//RS                     i += 2;
-//RS                 } else {
-//RS                     if bytes[i] == b'\n' {
-//RS                         line += 1;
-//RS                     }
-//RS                     i += 1;
-//RS                 }
-//RS             }
-//RS             continue;
-//RS         }
-//RS         if let Some((end, newlines)) = raw_string_end(bytes, i) {
-//RS             line += newlines;
-//RS             i = end;
-//RS             continue;
-//RS         }
-//RS         let normal_prefix = if bytes[i..].starts_with(b"b\"") || bytes[i..].starts_with(b"c\"") {
-//RS             Some(2)
-//RS         } else if bytes[i] == b'"' {
-//RS             Some(1)
-//RS         } else {
-//RS             None
-//RS         };
-//RS         if let Some(prefix) = normal_prefix {
-//RS             i += prefix;
-//RS             while i < bytes.len() {
-//RS                 if bytes[i] == b'\\' {
-//RS                     i = (i + 2).min(bytes.len());
-//RS                 } else if bytes[i] == b'"' {
-//RS                     i += 1;
-//RS                     break;
-//RS                 } else {
-//RS                     if bytes[i] == b'\n' {
-//RS                         line += 1;
-//RS                     }
-//RS                     i += 1;
-//RS                 }
-//RS             }
-//RS             continue;
-//RS         }
-//RS         if bytes[i] == b'\'' {
-//RS             if let Some(end) = char_literal_end(bytes, i) {
-//RS                 line += bytes[i..end].iter().filter(|byte| **byte == b'\n').count();
-//RS                 i = end;
-//RS                 continue;
-//RS             }
-//RS         }
-//RS         if is_ident_start(bytes[i]) {
-//RS             let start = i;
-//RS             i += 1;
-//RS             while i < bytes.len() && is_ident_continue(bytes[i]) {
-//RS                 i += 1;
-//RS             }
-//RS             out.push(Token {
-//RS                 kind: TokenKind::Ident(source[start..i].to_string()),
-//RS                 line,
-//RS             });
-//RS             continue;
-//RS         }
-//RS         out.push(Token {
-//RS             kind: TokenKind::Punct(bytes[i] as char),
-//RS             line,
-//RS         });
-//RS         i += 1;
-//RS     }
-//RS     out
-//RS }
-//RS 
-//RS fn raw_string_end(bytes: &[u8], start: usize) -> Option<(usize, usize)> {
-//RS     let mut i = start;
-//RS     if bytes.get(i) == Some(&b'b') || bytes.get(i) == Some(&b'c') {
-//RS         i += 1;
-//RS     }
-//RS     if bytes.get(i) != Some(&b'r') {
-//RS         return None;
-//RS     }
-//RS     i += 1;
-//RS     let hashes_start = i;
-//RS     while bytes.get(i) == Some(&b'#') {
-//RS         i += 1;
-//RS     }
-//RS     if bytes.get(i) != Some(&b'"') {
-//RS         return None;
-//RS     }
-//RS     let hashes = i - hashes_start;
-//RS     i += 1;
-//RS     let mut newlines = 0;
-//RS     while i < bytes.len() {
-//RS         if bytes[i] == b'\n' {
-//RS             newlines += 1;
-//RS         }
-//RS         if bytes[i] == b'"' && bytes.get(i + 1..i + 1 + hashes) == Some(&vec![b'#'; hashes][..]) {
-//RS             return Some((i + 1 + hashes, newlines));
-//RS         }
-//RS         i += 1;
-//RS     }
-//RS     Some((bytes.len(), newlines))
-//RS }
-//RS 
-//RS fn char_literal_end(bytes: &[u8], start: usize) -> Option<usize> {
-//RS     let mut i = start + 1;
-//RS     while i < bytes.len() && bytes[i] != b'\n' {
-//RS         if bytes[i] == b'\\' {
-//RS             i += 2;
-//RS         } else if bytes[i] == b'\'' {
-//RS             return Some(i + 1);
-//RS         } else {
-//RS             i += 1;
-//RS         }
-//RS     }
-//RS     None
-//RS }
-//RS 
-//RS fn is_ident_start(byte: u8) -> bool {
-//RS     byte == b'_' || byte.is_ascii_alphabetic() || byte >= 0x80
-//RS }
-//RS 
-//RS fn is_ident_continue(byte: u8) -> bool {
-//RS     is_ident_start(byte) || byte.is_ascii_digit()
-//RS }
-//RS 
-//RS fn punct(token: &Token, expected: char) -> bool {
-//RS     token.kind == TokenKind::Punct(expected)
-//RS }
-//RS 
-//RS fn ident(token: &Token, expected: &str) -> bool {
-//RS     matches!(&token.kind, TokenKind::Ident(actual) if actual == expected)
-//RS }
-//RS 
-//RS fn matching(tokens: &[Token], start: usize, open: char, close: char) -> Option<usize> {
-//RS     let mut depth = 0;
-//RS     for (offset, token) in tokens[start..].iter().enumerate() {
-//RS         if punct(token, open) {
-//RS             depth += 1;
-//RS         } else if punct(token, close) {
-//RS             depth -= 1;
-//RS             if depth == 0 {
-//RS                 return Some(start + offset);
-//RS             }
-//RS         }
-//RS     }
-//RS     None
-//RS }
-//RS 
-//RS fn cfg_truth(tokens: &[Token]) -> Truth {
-//RS     let mut cursor = 0;
-//RS     let truth = parse_cfg_expr(tokens, &mut cursor);
-//RS     if cursor == tokens.len() {
-//RS         truth
-//RS     } else {
-//RS         Truth::Maybe
-//RS     }
-//RS }
-//RS 
-//RS fn parse_cfg_expr(tokens: &[Token], cursor: &mut usize) -> Truth {
-//RS     let Some(Token {
-//RS         kind: TokenKind::Ident(name),
-//RS         ..
-//RS     }) = tokens.get(*cursor)
-//RS     else {
-//RS         return Truth::Maybe;
-//RS     };
-//RS     let name = name.as_str();
-//RS     *cursor += 1;
-//RS     if name == "test" {
-//RS         return if *cursor == tokens.len()
-//RS             || tokens
-//RS                 .get(*cursor)
-//RS                 .is_some_and(|token| punct(token, ',') || punct(token, ')'))
-//RS         {
-//RS             Truth::No
-//RS         } else {
-//RS             Truth::Maybe
-//RS         };
-//RS     }
-//RS     if !matches!(name, "all" | "any" | "not") || !tokens.get(*cursor).is_some_and(|t| punct(t, '('))
-//RS     {
-//RS         return Truth::Maybe;
-//RS     }
-//RS     *cursor += 1;
-//RS     let mut values = Vec::new();
-//RS     while *cursor < tokens.len() && !punct(&tokens[*cursor], ')') {
-//RS         values.push(parse_cfg_expr(tokens, cursor));
-//RS         while *cursor < tokens.len()
-//RS             && !punct(&tokens[*cursor], ',')
-//RS             && !punct(&tokens[*cursor], ')')
-//RS         {
-//RS             *cursor += 1;
-//RS         }
-//RS         if tokens.get(*cursor).is_some_and(|t| punct(t, ',')) {
-//RS             *cursor += 1;
-//RS         }
-//RS     }
-//RS     if tokens.get(*cursor).is_some_and(|t| punct(t, ')')) {
-//RS         *cursor += 1;
-//RS     }
-//RS     match name {
-//RS         "all" if values.iter().any(|v| *v == Truth::No) => Truth::No,
-//RS         "all" if values.iter().all(|v| *v == Truth::Yes) => Truth::Yes,
-//RS         "any" if values.iter().any(|v| *v == Truth::Yes) => Truth::Yes,
-//RS         "any" if values.iter().all(|v| *v == Truth::No) => Truth::No,
-//RS         "not" if values.as_slice() == [Truth::Yes] => Truth::No,
-//RS         "not" if values.as_slice() == [Truth::No] => Truth::Yes,
-//RS         _ => Truth::Maybe,
-//RS     }
-//RS }
-//RS 
-//RS fn attribute_is_test_only(tokens: &[Token]) -> bool {
-//RS     if tokens.first().is_some_and(|token| ident(token, "test")) {
-//RS         return true;
-//RS     }
-//RS     if !tokens.first().is_some_and(|token| ident(token, "cfg"))
-//RS         || !tokens.get(1).is_some_and(|token| punct(token, '('))
-//RS     {
-//RS         return false;
-//RS     }
-//RS     let Some(end) = matching(tokens, 1, '(', ')') else {
-//RS         return false;
-//RS     };
-//RS     cfg_truth(&tokens[2..end]) == Truth::No
-//RS }
-//RS 
-//RS fn scan_source(path: &str, source: &str) -> Vec<Finding> {
-//RS     let tokens = lex(source);
-//RS     let mut findings = Vec::new();
-//RS     scan_scope(
-//RS         &tokens,
-//RS         0,
-//RS         tokens.len(),
-//RS         false,
-//RS         "<module>",
-//RS         path,
-//RS         &mut findings,
-//RS     );
-//RS     findings
-//RS }
-//RS 
-//RS fn scan_scope(
-//RS     tokens: &[Token],
-//RS     start: usize,
-//RS     end: usize,
-//RS     test_only: bool,
-//RS     current_item: &str,
-//RS     path: &str,
-//RS     findings: &mut Vec<Finding>,
-//RS ) {
-//RS     let mut i = start;
-//RS     let mut pending_test = false;
-//RS     let mut pending_item: Option<String> = None;
-//RS     while i < end {
-//RS         if punct(&tokens[i], '#') && tokens.get(i + 1).is_some_and(|token| punct(token, '[')) {
-//RS             if let Some(close) = matching(tokens, i + 1, '[', ']') {
-//RS                 pending_test |= attribute_is_test_only(&tokens[i + 2..close]);
-//RS                 i = close + 1;
-//RS                 continue;
-//RS             }
-//RS         }
-//RS         if let TokenKind::Ident(keyword) = &tokens[i].kind {
-//RS             if matches!(
-//RS                 keyword.as_str(),
-//RS                 "fn" | "mod" | "const" | "static" | "struct" | "enum" | "trait"
-//RS             ) {
-//RS                 if let Some(Token {
-//RS                     kind: TokenKind::Ident(name),
-//RS                     ..
-//RS                 }) = tokens.get(i + 1)
-//RS                 {
-//RS                     pending_item = Some(format!("{keyword} {name}"));
-//RS                 }
-//RS             } else if keyword == "impl" {
-//RS                 pending_item = Some("impl".to_string());
-//RS             }
-//RS         }
-//RS         if !test_only
-//RS             && !pending_test
-//RS             && i + 2 < end
-//RS             && punct(&tokens[i], '.')
-//RS             && matches!(&tokens[i + 1].kind, TokenKind::Ident(name) if name == "unwrap" || name == "expect")
-//RS             && punct(&tokens[i + 2], '(')
-//RS         {
-//RS             let TokenKind::Ident(method) = &tokens[i + 1].kind else {
-//RS                 unreachable!()
-//RS             };
-//RS             findings.push(Finding {
-//RS                 path: path.to_string(),
-//RS                 line: tokens[i + 1].line,
-//RS                 method: method.clone(),
-//RS                 item: current_item.to_string(),
-//RS             });
-//RS         }
-//RS         if punct(&tokens[i], '{') {
-//RS             let Some(close) = matching(tokens, i, '{', '}') else {
-//RS                 return;
-//RS             };
-//RS             let item = pending_item.as_deref().unwrap_or(current_item);
-//RS             scan_scope(
-//RS                 tokens,
-//RS                 i + 1,
-//RS                 close,
-//RS                 test_only || pending_test,
-//RS                 item,
-//RS                 path,
-//RS                 findings,
-//RS             );
-//RS             pending_test = false;
-//RS             pending_item = None;
-//RS             i = close + 1;
-//RS             continue;
-//RS         }
-//RS         if punct(&tokens[i], ';') {
-//RS             pending_test = false;
-//RS             pending_item = None;
-//RS         }
-//RS         i += 1;
-//RS     }
-//RS }
-//RS 
-//RS fn collect_rs_files(dir: &Path, files: &mut Vec<PathBuf>) {
-//RS     let Ok(entries) = fs::read_dir(dir) else {
-//RS         return;
-//RS     };
-//RS     for entry in entries.flatten() {
-//RS         let path = entry.path();
-//RS         let Ok(metadata) = fs::symlink_metadata(&path) else {
-//RS             continue;
-//RS         };
-//RS         if metadata.file_type().is_symlink() {
-//RS             continue;
-//RS         }
-//RS         if metadata.is_dir() {
-//RS             collect_rs_files(&path, files);
-//RS         } else if path.extension().is_some_and(|extension| extension == "rs") {
-//RS             files.push(path);
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn production_findings() -> Vec<Finding> {
-//RS     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-//RS     let mut files = Vec::new();
-//RS     collect_rs_files(&root.join("crates/jetpack/src"), &mut files);
-//RS     files.sort();
-//RS     let mut findings = Vec::new();
-//RS     for file in files {
-//RS         let relative = file
-//RS             .strip_prefix(&root)
-//RS             .expect("scanned file stays beneath repository root")
-//RS             .to_string_lossy()
-//RS             .replace('\\', "/");
-//RS         let source = fs::read_to_string(&file).expect("Jetpack source is readable");
-//RS         findings.extend(scan_source(&relative, &source));
-//RS     }
-//RS     findings
-//RS }
-//RS 
-//RS fn enforce_zero(findings: &[Finding]) -> Result<(), String> {
-//RS     if findings.is_empty() {
-//RS         return Ok(());
-//RS     }
-//RS     Err(findings
-//RS         .iter()
-//RS         .map(|finding| {
-//RS             format!(
-//RS                 "{}:{}: .{}( in {}",
-//RS                 finding.path, finding.line, finding.method, finding.item
-//RS             )
-//RS         })
-//RS         .collect::<Vec<_>>()
-//RS         .join("\n"))
-//RS }
-//RS 
-//RS #[test]
-//RS fn jetpack_production_has_no_unwrap_or_expect() {
-//RS     let findings = production_findings();
-//RS     assert!(
-//RS         enforce_zero(&findings).is_ok(),
-//RS         "production Jetpack unwrap/expect ceiling is zero:\n{}",
-//RS         enforce_zero(&findings).unwrap_err()
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn scanner_detects_production_and_seeded_gate_failure() {
-//RS     let findings = scan_source(
-//RS         "fixture.rs",
-//RS         "fn live() { value.unwrap(); other.expect(\"x\"); }",
-//RS     );
-//RS     assert_eq!(findings.len(), 2);
-//RS     assert_eq!(findings[0].item, "fn live");
-//RS     assert!(enforce_zero(&findings).is_err());
-//RS }
-//RS 
-//RS #[test]
-//RS fn scanner_ignores_nonexecuting_text_and_other_methods() {
-//RS     let source = r####"
-//RS fn live() {
-//RS     // value.unwrap();
-//RS     /* outer other.expect("x"); /* nested more.unwrap(); */ */
-//RS     let a = "text.unwrap()";
-//RS     let b = r#"raw.expect("x")"#;
-//RS     let c = b"bytes.unwrap()";
-//RS     let d = br##"raw bytes.expect("x")"##;
-//RS     let e = 'x';
-//RS     value.unwrap_or(1);
-//RS     value.unwrap_err();
-//RS }
-//RS "####;
-//RS     assert!(scan_source("fixture.rs", source).is_empty());
-//RS }
-//RS 
-//RS #[test]
-//RS fn scanner_excludes_tests_but_retains_following_production() {
-//RS     let source = r#"
-//RS #[cfg(test)]
-//RS mod tests { fn helper() { ^value.unwrap(); } }
-//RS 
-//RS #[test]
-//RS fn direct_test() { &value.expect("test"); }
-//RS 
-//RS #[cfg(test)]
-//RS const TEST_ONLY: usize = value.unwrap();
-//RS 
-//RS fn after() { ^value.unwrap(); }
-//RS "#;
-//RS     let findings = scan_source("fixture.rs", source);
-//RS     assert_eq!(findings.len(), 1);
-//RS     assert_eq!(findings[0].item, "fn after");
-//RS }
-//RS 
-//RS #[test]
-//RS fn scanner_treats_unknown_cfg_conservatively() {
-//RS     let source = r#"
-//RS #[cfg(any(test, unix))]
-//RS fn maybe_production() { value.unwrap(); }
-//RS 
-//RS #[cfg(all(test, unix))]
-//RS fn definitely_test() { value.expect("test"); }
-//RS 
-//RS #[cfg(test = "custom")]
-//RS fn key_value_is_not_builtin_test_cfg() { value.expect("production"); }
-//RS 
-//RS #[cfg(any(test = "custom", test))]
-//RS fn nested_key_value_is_not_builtin_test_cfg() { value.unwrap(); }
-//RS "#;
-//RS     let findings = scan_source("fixture.rs", source);
-//RS     assert_eq!(findings.len(), 3);
-//RS     assert_eq!(findings[0].item, "fn maybe_production");
-//RS     assert_eq!(findings[1].item, "fn key_value_is_not_builtin_test_cfg");
-//RS     assert_eq!(
-//RS         findings[2].item,
-//RS         "fn nested_key_value_is_not_builtin_test_cfg"
-//RS     );
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS #[test]
-//RS fn file_walk_does_not_follow_outside_or_cyclic_symlinks() {
-//RS     use std::os::unix::fs::symlink;
-//RS     use std::time::{SystemTime, UNIX_EPOCH};
-//RS 
-//RS     let nonce = SystemTime::now()
-//RS         .duration_since(UNIX_EPOCH)
-//RS         .expect("clock after epoch")
-//RS         .as_nanos();
-//RS     let base = std::env::temp_dir().join(format!(
-//RS         "jetpack-unwrap-ratchet-{}-{nonce}",
-//RS         std::process::id()
-//RS     ));
-//RS     let scan_root = base.join("scan");
-//RS     let outside = base.join("outside");
-//RS     fs::create_dir_all(&scan_root).unwrap();
-//RS     fs::create_dir_all(&outside).unwrap();
-//RS     fs::write(scan_root.join("safe.rs"), "fn safe() {}\n").unwrap();
-//RS     fs::write(
-//RS         outside.join("escape.rs"),
-//RS         "fn escaped() { value.unwrap(); }\n",
-//RS     )
-//RS     .unwrap();
-//RS     symlink(&outside, scan_root.join("outside-link")).unwrap();
-//RS     symlink(&scan_root, scan_root.join("cycle")).unwrap();
-//RS 
-//RS     let mut files = Vec::new();
-//RS     collect_rs_files(&scan_root, &mut files);
-//RS     files.sort();
-//RS 
-//RS     assert_eq!(files, vec![scan_root.join("safe.rs")]);
-//RS     assert!(outside.join("escape.rs").is_file());
-//RS     fs::remove_dir_all(&base).unwrap();
-//RS }
-// END-PORT-PENDING 0971 tests/ban_jetpack_unwrap_expect.rs:1-557
-
-// PORT-PENDING 0971 tests-ban-jetpack-unwrap-expect-module-group: tests/env_dev_trust.rs:1-697
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! U19 env/dev split + trust gate (D-JPK-DEVCOMPOSE1=D, card c9jetpackgates).
-//RS //!
-//RS //! Covers:
-//RS //!   * `jet env` (`jetpack env`) never runs a project function (regression);
-//RS //!   * project-level `jet dev` (bare, no file — distinct from the shipped
-//RS //!     `jet dev <file.jet>` watch loop) runs `fn dev()` after the U12 no-op
-//RS //!     service wait;
-//RS //!   * `jet dev` with neither `fn dev()` nor `fn run()` is E1254;
-//RS //!   * a trust-sensitive env hitting a non-interactive path with no grant is
-//RS //!     a clean E1255, never a hang;
-//RS //!   * `--trust` bypasses; `jetpack config trust add` pre-authorizes.
-//RS 
-//RS use std::fs;
-//RS use std::path::{Path, PathBuf};
-//RS use std::process::Command;
-//RS 
-//RS mod common;
-//RS #[path = "support/no_nix_namespace.rs"]
-//RS mod no_nix_namespace;
-//RS use common::{jetpack_bin, Scratch};
-//RS 
-//RS fn jetpack() -> Command {
-//RS     Command::new(jetpack_bin())
-//RS }
-//RS 
-//RS fn jet() -> Command {
-//RS     Command::new(env!("CARGO_BIN_EXE_jet"))
-//RS }
-//RS 
-//RS /// Write a `fastfetch@nixpkgs` fixture backed by a sealed Hangar object.
-//RS /// Store's closure proof accepts a zero-reference Nix realization only when
-//RS /// Hangar can re-hash its canonical object (or Nix protects a real
-//RS /// `/nix/store` output with a GC root). A generic temp directory is real
-//RS /// enough for leasing but has neither proof, so trust tests must place their
-//RS /// fixture output at the same content-addressed path production ingest uses.
-//RS fn write_fastfetch_fixture(
-//RS     fixtures: &std::path::Path,
-//RS     root: &std::path::Path,
-//RS     staging_dir: &std::path::Path,
-//RS ) {
-//RS     fs::create_dir_all(fixtures).unwrap();
-//RS     let bin = staging_dir.join("bin");
-//RS     fs::create_dir_all(&bin).unwrap();
-//RS     let fastfetch = bin.join("fastfetch");
-//RS     fs::write(&fastfetch, "#!/bin/sh\necho fastfetch stub\n").unwrap();
-//RS     #[cfg(unix)]
-//RS     {
-//RS         use std::os::unix::fs::PermissionsExt;
-//RS         fs::set_permissions(&fastfetch, fs::Permissions::from_mode(0o755)).unwrap();
-//RS     }
-//RS     jetpack::Store::seal_local_output(staging_dir).unwrap();
-//RS     let digest = jetpack::Envelope::try_output_hash_of(&staging_dir.to_string_lossy()).unwrap();
-//RS     let out_dir = root.join("hangar").join("objects").join(&digest);
-//RS     fs::create_dir_all(out_dir.parent().unwrap()).unwrap();
-//RS     let mut staging_permissions = fs::metadata(staging_dir).unwrap().permissions();
-//RS     #[cfg(unix)]
-//RS     {
-//RS         use std::os::unix::fs::PermissionsExt;
-//RS         staging_permissions.set_mode(staging_permissions.mode() | 0o200);
-//RS     }
-//RS     #[cfg(not(unix))]
-//RS     staging_permissions.set_readonly(false);
-//RS     fs::set_permissions(staging_dir, staging_permissions).unwrap();
-//RS     fs::rename(staging_dir, &out_dir).unwrap();
-//RS     jetpack::Store::seal_local_output(&out_dir).unwrap();
-//RS     assert_eq!(
-//RS         jetpack::Envelope::try_output_hash_of(&out_dir.to_string_lossy()).unwrap(),
-//RS         digest,
-//RS         "published fixture must retain its content-addressed identity"
-//RS     );
-//RS 
-//RS     let drv_path = fixtures.join("fastfetch.drv");
-//RS     fs::write(&drv_path, "fixture derivation identity\n").unwrap();
-//RS     let json = format!(
-//RS         "[{{\"drvPath\":{:?},\"outputs\":{{\"out\":{:?}}}}}]",
-//RS         drv_path.to_string_lossy(),
-//RS         out_dir.to_string_lossy()
-//RS     );
-//RS     fs::write(fixtures.join("nixpkgs-fastfetch.json"), json).unwrap();
-//RS }
-//RS 
-//RS /// A project with no declared packages — never trust-sensitive, so these
-//RS /// tests exercise env/dev composition and entry-fn resolution without the
-//RS /// trust gate in the way.
-//RS fn write_packageless_project(dir: &std::path::Path, main_src: &str) {
-//RS     fs::write(dir.join("env.jet"), "module env.dev { }\n").unwrap();
-//RS     fs::write(dir.join("main.jet"), main_src).unwrap();
-//RS }
-//RS 
-//RS /// A project that declares one real (fixture-realizable) package — trust
-//RS /// sensitive.
-//RS fn write_package_project(dir: &std::path::Path, main_src: &str) {
-//RS     fs::write(
-//RS         dir.join("env.jet"),
-//RS         "module env.dev { packages: [nixpkgs.fastfetch] }\n",
-//RS     )
-//RS     .unwrap();
-//RS     fs::write(dir.join("main.jet"), main_src).unwrap();
-//RS }
-//RS 
-//RS /// A project whose env only declares secrets — no packages. U13 still makes
-//RS /// this trust-sensitive because entering it may decrypt repo secrets.
-//RS fn write_secret_project(dir: &std::path::Path, main_src: &str) {
-//RS     fs::write(
-//RS         dir.join("env.jet"),
-//RS         "module env.dev { secrets: { db_password: { required: true } } }\n",
-//RS     )
-//RS     .unwrap();
-//RS     fs::write(dir.join("main.jet"), main_src).unwrap();
-//RS }
-//RS 
-//RS fn assert_cached_entries(proj: &Path, root: &Path, home: &Path) {
-//RS     let env = jetpack()
-//RS         .args(["env", "--no-color", "--", "fastfetch"])
-//RS         .current_dir(proj)
-//RS         .env("JETPACK_ROOT", root)
-//RS         .env("HOME", home)
-//RS         .env_remove("JETPACK_FIXTURES")
-//RS         .output()
-//RS         .unwrap();
-//RS     assert!(
-//RS         env.status.success(),
-//RS         "cached env entry failed: {}",
-//RS         String::from_utf8_lossy(&env.stderr)
-//RS     );
-//RS     assert_eq!(
-//RS         String::from_utf8_lossy(&env.stdout).trim(),
-//RS         "fastfetch stub"
-//RS     );
-//RS     assert!(!String::from_utf8_lossy(&env.stderr).contains("continue?"));
-//RS 
-//RS     let use_shell = jetpack()
-//RS         .args([
-//RS             "use",
-//RS             "fastfetch@jetpack",
-//RS             "--no-color",
-//RS             "--",
-//RS             "fastfetch",
-//RS         ])
-//RS         .current_dir(proj)
-//RS         .env("JETPACK_ROOT", root)
-//RS         .env("HOME", home)
-//RS         .env_remove("JETPACK_FIXTURES")
-//RS         .output()
-//RS         .unwrap();
-//RS     assert!(
-//RS         use_shell.status.success(),
-//RS         "cached use entry failed: {}",
-//RS         String::from_utf8_lossy(&use_shell.stderr)
-//RS     );
-//RS     assert_eq!(
-//RS         String::from_utf8_lossy(&use_shell.stdout).trim(),
-//RS         "fastfetch stub"
-//RS     );
-//RS     assert!(!String::from_utf8_lossy(&use_shell.stderr).contains("continue?"));
-//RS }
-//RS 
-//RS #[test]
-//RS fn typed_secret_map_captures_metadata_and_read_time_composition() {
-//RS     let project = Scratch::new("typed-secret-map");
-//RS     let source = r#"
-//RS         module env.ci {
-//RS             secrets: {
-//RS                 API_KEY: {
-//RS                     required: true
-//RS                     description: "CI credential"
-//RS                     allowed_environments: ["ci", "prod"]
-//RS                     rotation: max_age(90d)
-//RS                     default: none
-//RS                     generate: none
-//RS                 }
-//RS                 DB_URL: compose(
-//RS                     template: postgres://{DB_USER}:{DB_PASSWORD}@{DB_HOST}/app
-//RS                     from: [DB_HOST, DB_USER, DB_PASSWORD]
-//RS                 )
-//RS             }
-//RS         }
-//RS         module env.prod { }
-//RS     "#;
-//RS     let plan =
-//RS         jet_env_model::ModuleEval::evaluate_env_with_environment(source, &project.path, Some("ci"))
-//RS             .expect("typed metadata and compose declarations must evaluate");
-//RS     assert_eq!(
-//RS         plan.secrets
-//RS             .iter()
-//RS             .map(|secret| secret.name.as_str())
-//RS             .collect::<Vec<_>>(),
-//RS         ["API_KEY", "DB_URL"]
-//RS     );
-//RS     assert!(plan.secrets[0].required);
-//RS     assert_eq!(
-//RS         plan.secrets[0].allowed_environments,
-//RS         vec!["ci".to_string(), "prod".to_string()]
-//RS     );
-//RS     assert_eq!(
-//RS         plan.secrets[1].declaration,
-//RS         jet_env_model::ModuleEval::SecretDeclaration::Compose {
-//RS             template: "postgres://{DB_USER}:{DB_PASSWORD}@{DB_HOST}/app".to_string(),
-//RS             from: vec![
-//RS                 "DB_HOST".to_string(),
-//RS                 "DB_PASSWORD".to_string(),
-//RS                 "DB_USER".to_string()
-//RS             ],
-//RS         }
-//RS     );
-//RS     let shown = format!("{plan:?}");
-//RS     assert!(
-//RS         shown.contains("API_KEY"),
-//RS         "plan disclosure must retain names: {shown}"
-//RS     );
-//RS     assert!(
-//RS         shown.contains("DB_URL"),
-//RS         "plan disclosure must retain names: {shown}"
-//RS     );
-//RS     assert!(
-//RS         !shown.contains("CI credential"),
-//RS         "metadata text must not be disclosed: {shown}"
-//RS     );
-//RS     assert!(
-//RS         !shown.contains("postgres://"),
-//RS         "compose templates must not be disclosed: {shown}"
-//RS     );
-//RS }
-//RS 
-//RS /// `jetpack env` (`jet env`) realizes the declared env and drops into a
-//RS /// shell / runs a one-off command — it must NEVER run a project's own
-//RS /// `fn run()`/`fn dev()` (U19's env/dev split). Regression test: the world's
-//RS /// only way to notice a project function ran is grep the marker it prints.
-//RS #[test]
-//RS fn env_runs_no_project_function() {
-//RS     let proj = Scratch::new("env-no-fn");
-//RS     let root = Scratch::new("env-no-fn-root");
-//RS     let home = Scratch::new("env-no-fn-home");
-//RS     write_packageless_project(&proj.path, "fn run() { print(\"SHOULD-NOT-RUN\") }\n");
-//RS     let out = jetpack()
-//RS         .args(["env", "--no-color", "--", "echo", "entered"])
-//RS         .current_dir(&proj.path)
-//RS         .env("JETPACK_ROOT", &root.path)
-//RS         .env("HOME", &home.path)
-//RS         .output()
-//RS         .unwrap();
-//RS     assert!(
-//RS         out.status.success(),
-//RS         "stderr: {}",
-//RS         String::from_utf8_lossy(&out.stderr)
-//RS     );
-//RS     let stdout = String::from_utf8_lossy(&out.stdout);
-//RS     assert!(stdout.contains("entered"), "stdout: {stdout}");
-//RS     assert!(
-//RS         !stdout.contains("SHOULD-NOT-RUN"),
-//RS         "env entry must never run a project function: {stdout}"
-//RS     );
-//RS }
-//RS 
-//RS /// A fully materialized closure needs no second confirmation. Warm the
-//RS /// project env from a verified fixture, remove its provider metadata, then
-//RS /// enter both shell paths inside a network-disabled namespace. The cached
-//RS /// Hangar closure is the only possible source.
-//RS #[test]
-//RS fn cached_env_and_use_enter_offline_without_confirmation() {
-//RS     const TEST_NAME: &str = "cached_env_and_use_enter_offline_without_confirmation";
-//RS     const PROJECT_ENV: &str = "JETPACK_CACHED_ENTRY_PROJECT";
-//RS     const ROOT_ENV: &str = "JETPACK_CACHED_ENTRY_ROOT";
-//RS     const HOME_ENV: &str = "JETPACK_CACHED_ENTRY_HOME";
-//RS 
-//RS     if let Some(project) = std::env::var_os(PROJECT_ENV).map(PathBuf::from) {
-//RS         let root = PathBuf::from(std::env::var_os(ROOT_ENV).expect("cached-entry root"));
-//RS         let home = PathBuf::from(std::env::var_os(HOME_ENV).expect("cached-entry home"));
-//RS         no_nix_namespace::run_in_no_nix_namespace(
-//RS             TEST_NAME,
-//RS             no_nix_namespace::NetworkMode::Disabled,
-//RS             || assert_cached_entries(&project, &root, &home),
-//RS         );
-//RS         return;
-//RS     }
-//RS 
-//RS     let proj = Scratch::new("cached-entry");
-//RS     let root = Scratch::new("cached-entry-root");
-//RS     let home = Scratch::new("cached-entry-home");
-//RS     let fixtures = Scratch::new("cached-entry-fixtures");
-//RS     let fastfetch_out = Scratch::new("cached-entry-fastfetch-out");
-//RS     fs::write(
-//RS         proj.path.join("env.jet"),
-//RS         "module env.dev { packages: [jetpack.fastfetch] }\n",
-//RS     )
-//RS     .unwrap();
-//RS     write_fastfetch_fixture(&fixtures.path, &root.path, &fastfetch_out.path);
-//RS     fs::copy(
-//RS         fixtures.join("nixpkgs-fastfetch.json"),
-//RS         fixtures.join("jetpack-fastfetch.json"),
-//RS     )
-//RS     .unwrap();
-//RS 
-//RS     let pattern = format!("{}*", proj.path.display());
-//RS     let grant = jetpack()
-//RS         .args(["config", "trust", "add", &pattern, "--no-color"])
-//RS         .env("HOME", &home.path)
-//RS         .output()
-//RS         .unwrap();
-//RS     assert!(
-//RS         grant.status.success(),
-//RS         "trust grant failed: {}",
-//RS         String::from_utf8_lossy(&grant.stderr)
-//RS     );
-//RS 
-//RS     let prep = jetpack()
-//RS         .args(["env", "--prep", "--yes", "--no-color", "--offline"])
-//RS         .current_dir(&proj.path)
-//RS         .env("JETPACK_ROOT", &root.path)
-//RS         .env("HOME", &home.path)
-//RS         .env("JETPACK_FIXTURES", &fixtures.path)
-//RS         .output()
-//RS         .unwrap();
-//RS     assert!(
-//RS         prep.status.success(),
-//RS         "env prep failed: {}",
-//RS         String::from_utf8_lossy(&prep.stderr)
-//RS     );
-//RS     fs::remove_file(fixtures.join("nixpkgs-fastfetch.json")).unwrap();
-//RS     fs::remove_file(fixtures.join("jetpack-fastfetch.json")).unwrap();
-//RS     fs::remove_file(fixtures.join("fastfetch.drv")).unwrap();
-//RS 
-//RS     std::env::set_var(PROJECT_ENV, &proj.path);
-//RS     std::env::set_var(ROOT_ENV, &root.path);
-//RS     std::env::set_var(HOME_ENV, &home.path);
-//RS     no_nix_namespace::run_in_no_nix_namespace(
-//RS         TEST_NAME,
-//RS         no_nix_namespace::NetworkMode::Disabled,
-//RS         || {},
-//RS     );
-//RS     std::env::remove_var(PROJECT_ENV);
-//RS     std::env::remove_var(ROOT_ENV);
-//RS     std::env::remove_var(HOME_ENV);
-//RS }
-//RS 
-//RS /// Bare project dev (no file — the project-level U19 command, distinct from
-//RS /// the already-shipped `jet dev <file.jet>` watch loop) finds the project's
-//RS /// `main.jet`, waits for services (U12 no-op today), and runs its `fn dev()`.
-//RS #[test]
-//RS fn project_dev_runs_fn_dev_after_service_wait() {
-//RS     let proj = Scratch::new("dev-runs-fn-dev");
-//RS     let root = Scratch::new("dev-runs-fn-dev-root");
-//RS     let home = Scratch::new("dev-runs-fn-dev-home");
-//RS     write_packageless_project(&proj.path, "fn dev() { print(\"DEV-RAN\") }\n");
-//RS     let out = jetpack()
-//RS         .args(["dev", "--no-color"])
-//RS         .current_dir(&proj.path)
-//RS         .env("JETPACK_ROOT", &root.path)
-//RS         .env("HOME", &home.path)
-//RS         .output()
-//RS         .unwrap();
-//RS     assert!(
-//RS         out.status.success(),
-//RS         "stderr: {}",
-//RS         String::from_utf8_lossy(&out.stderr)
-//RS     );
-//RS     let stdout = String::from_utf8_lossy(&out.stdout);
-//RS     assert!(stdout.contains("DEV-RAN"), "stdout: {stdout}");
-//RS }
-//RS 
-//RS /// A project with neither `fn dev()` nor `fn run()` in its entry file is a
-//RS /// clean E1254, not a confusing compiler error further down the line.
-//RS #[test]
-//RS fn dev_no_entry_is_e1254() {
-//RS     let proj = Scratch::new("dev-no-entry");
-//RS     let root = Scratch::new("dev-no-entry-root");
-//RS     let home = Scratch::new("dev-no-entry-home");
-//RS     write_packageless_project(&proj.path, "fn other() { print(\"nope\") }\n");
-//RS     let out = jetpack()
-//RS         .args(["dev", "--no-color"])
-//RS         .current_dir(&proj.path)
-//RS         .env("JETPACK_ROOT", &root.path)
-//RS         .env("HOME", &home.path)
-//RS         .output()
-//RS         .unwrap();
-//RS     assert_eq!(out.status.code(), Some(2));
-//RS     let stderr = String::from_utf8_lossy(&out.stderr);
-//RS     assert!(stderr.contains("E1254"), "stderr: {stderr}");
-//RS }
-//RS 
-//RS /// A trust-sensitive env (it declares a package) hitting a non-interactive
-//RS /// path (the test harness's stdin is not a TTY) with no `--trust` and no
-//RS /// prior grant is a clean E1255 — never a hung prompt. The trust gate runs
-//RS /// before package realization, so this needs no fixtures.
-//RS #[test]
-//RS fn dev_untrusted_non_interactive_is_e1255() {
-//RS     let proj = Scratch::new("dev-untrusted");
-//RS     let root = Scratch::new("dev-untrusted-root");
-//RS     let home = Scratch::new("dev-untrusted-home");
-//RS     write_package_project(&proj.path, "fn dev() { print(\"DEV-RAN\") }\n");
-//RS     let out = jetpack()
-//RS         .args(["dev", "--no-color"])
-//RS         .current_dir(&proj.path)
-//RS         .env("JETPACK_ROOT", &root.path)
-//RS         .env("HOME", &home.path)
-//RS         .output()
-//RS         .unwrap();
-//RS     assert_eq!(out.status.code(), Some(2));
-//RS     let stderr = String::from_utf8_lossy(&out.stderr);
-//RS     assert!(stderr.contains("E1255"), "stderr: {stderr}");
-//RS     // Never got as far as running the project.
-//RS     assert!(!String::from_utf8_lossy(&out.stdout).contains("DEV-RAN"));
-//RS }
-//RS 
-//RS /// A secrets-only env is trust-sensitive even without packages: non-interactive
-//RS /// entry refuses before trying to decrypt or run project code.
-//RS #[test]
-//RS fn dev_secret_env_untrusted_non_interactive_is_e1255() {
-//RS     let proj = Scratch::new("dev-secret-untrusted");
-//RS     let root = Scratch::new("dev-secret-untrusted-root");
-//RS     let home = Scratch::new("dev-secret-untrusted-home");
-//RS     write_secret_project(&proj.path, "fn dev() { print(\"DEV-RAN\") }\n");
-//RS     let out = jetpack()
-//RS         .args(["dev", "--no-color"])
-//RS         .current_dir(&proj.path)
-//RS         .env("JETPACK_ROOT", &root.path)
-//RS         .env("HOME", &home.path)
-//RS         .output()
-//RS         .unwrap();
-//RS     assert_eq!(out.status.code(), Some(2));
-//RS     let stderr = String::from_utf8_lossy(&out.stderr);
-//RS     assert!(stderr.contains("E1255"), "stderr: {stderr}");
-//RS     assert!(!String::from_utf8_lossy(&out.stdout).contains("DEV-RAN"));
-//RS }
-//RS 
-//RS /// With trust granted, `jet dev` validates declared secret names before entry.
-//RS /// No store exists here, so the check is a clean E1263 and the project never
-//RS /// runs.
-//RS #[test]
-//RS fn dev_declared_missing_secret_is_e1263() {
-//RS     let proj = Scratch::new("dev-secret-missing");
-//RS     let root = Scratch::new("dev-secret-missing-root");
-//RS     let home = Scratch::new("dev-secret-missing-home");
-//RS     write_secret_project(&proj.path, "fn dev() { print(\"DEV-RAN\") }\n");
-//RS     let out = jetpack()
-//RS         .args(["dev", "--no-color", "--trust"])
-//RS         .current_dir(&proj.path)
-//RS         .env("JETPACK_ROOT", &root.path)
-//RS         .env("HOME", &home.path)
-//RS         .output()
-//RS         .unwrap();
-//RS     assert_eq!(out.status.code(), Some(2));
-//RS     let stderr = String::from_utf8_lossy(&out.stderr);
-//RS     assert!(
-//RS         stderr.contains("E1263 required secret named db_password is missing for environment dev"),
-//RS         "stderr: {stderr}"
-//RS     );
-//RS     assert!(!String::from_utf8_lossy(&out.stdout).contains("DEV-RAN"));
-//RS }
-//RS 
-//RS /// `jet env` uses the same U13 validation before entering the shell or running
-//RS /// a one-off command.
-//RS #[test]
-//RS fn env_declared_missing_secret_is_e1263() {
-//RS     let proj = Scratch::new("env-secret-missing");
-//RS     let root = Scratch::new("env-secret-missing-root");
-//RS     let home = Scratch::new("env-secret-missing-home");
-//RS     write_secret_project(&proj.path, "fn run() { print(\"SHOULD-NOT-RUN\") }\n");
-//RS     let out = jetpack()
-//RS         .args(["env", "--no-color", "--trust", "--", "echo", "entered"])
-//RS         .current_dir(&proj.path)
-//RS         .env("JETPACK_ROOT", &root.path)
-//RS         .env("HOME", &home.path)
-//RS         .output()
-//RS         .unwrap();
-//RS     assert_eq!(out.status.code(), Some(2));
-//RS     let stderr = String::from_utf8_lossy(&out.stderr);
-//RS     assert!(
-//RS         stderr.contains("E1263 required secret named db_password is missing for environment dev"),
-//RS         "stderr: {stderr}"
-//RS     );
-//RS     assert!(!String::from_utf8_lossy(&out.stdout).contains("entered"));
-//RS }
-//RS 
-//RS /// A typed env that only declares secrets still counts as the project's own
-//RS /// env; passive `flake.nix` auto-detection must not steal the command.
-//RS #[test]
-//RS fn secret_env_beats_foreign_flake_autodetect() {
-//RS     let proj = Scratch::new("secret-env-beats-flake");
-//RS     let root = Scratch::new("secret-env-beats-flake-root");
-//RS     let home = Scratch::new("secret-env-beats-flake-home");
-//RS     write_secret_project(&proj.path, "fn run() { print(\"SHOULD-NOT-RUN\") }\n");
-//RS     fs::write(proj.path.join("flake.nix"), "{ outputs = _: {}; }\n").unwrap();
-//RS     let out = jetpack()
-//RS         .args(["env", "--no-color", "--", "echo", "entered"])
-//RS         .current_dir(&proj.path)
-//RS         .env("JETPACK_ROOT", &root.path)
-//RS         .env("HOME", &home.path)
-//RS         .output()
-//RS         .unwrap();
-//RS     assert_eq!(out.status.code(), Some(2));
-//RS     let stderr = String::from_utf8_lossy(&out.stderr);
-//RS     assert!(stderr.contains("E1255"), "stderr: {stderr}");
-//RS     assert!(!stderr.contains("E1256"), "stderr: {stderr}");
-//RS }
-//RS 
-//RS /// `--trust` is the one-shot bypass: same untrusted project, but the run
-//RS /// proceeds all the way through realization to `fn dev()`.
-//RS #[test]
-//RS fn dev_trust_flag_bypasses() {
-//RS     let proj = Scratch::new("dev-trust-flag");
-//RS     let root = Scratch::new("dev-trust-flag-root");
-//RS     let home = Scratch::new("dev-trust-flag-home");
-//RS     let fixtures = Scratch::new("dev-trust-flag-fixtures");
-//RS     let fastfetch_out = Scratch::new("dev-trust-flag-fastfetch-out");
-//RS     write_package_project(&proj.path, "fn dev() { print(\"DEV-RAN\") }\n");
-//RS     write_fastfetch_fixture(&fixtures.path, &root.path, &fastfetch_out.path);
-//RS     let out = jetpack()
-//RS         .args(["dev", "--no-color", "--offline", "--trust"])
-//RS         .current_dir(&proj.path)
-//RS         .env("JETPACK_ROOT", &root.path)
-//RS         .env("HOME", &home.path)
-//RS         .env("JETPACK_FIXTURES", &fixtures.path)
-//RS         .output()
-//RS         .unwrap();
-//RS     assert!(
-//RS         out.status.success(),
-//RS         "stderr: {}",
-//RS         String::from_utf8_lossy(&out.stderr)
-//RS     );
-//RS     let stdout = String::from_utf8_lossy(&out.stdout);
-//RS     assert!(stdout.contains("DEV-RAN"), "stdout: {stdout}");
-//RS     // `--trust` is one-shot: it must not have persisted a grant.
-//RS     let trust_file = home.path.join(".jet").join("trust");
-//RS     assert!(!trust_file.exists(), "`--trust` must never persist a grant");
-//RS }
-//RS 
-//RS /// `jetpack config trust add <pattern>` pre-authorizes matching projects with
-//RS /// no per-run flag and no prompt.
-//RS #[test]
-//RS fn dev_pattern_trust_preauthorizes() {
-//RS     let proj = Scratch::new("dev-pattern-trust");
-//RS     let root = Scratch::new("dev-pattern-trust-root");
-//RS     let home = Scratch::new("dev-pattern-trust-home");
-//RS     let fixtures = Scratch::new("dev-pattern-trust-fixtures");
-//RS     let fastfetch_out = Scratch::new("dev-pattern-trust-fastfetch-out");
-//RS     write_package_project(&proj.path, "fn dev() { print(\"DEV-RAN\") }\n");
-//RS     write_fastfetch_fixture(&fixtures.path, &root.path, &fastfetch_out.path);
-//RS 
-//RS     let pattern = format!("{}*", proj.path.display());
-//RS     let add_out = jetpack()
-//RS         .args(["config", "trust", "add", &pattern, "--no-color"])
-//RS         .env("HOME", &home.path)
-//RS         .output()
-//RS         .unwrap();
-//RS     assert!(
-//RS         add_out.status.success(),
-//RS         "stderr: {}",
-//RS         String::from_utf8_lossy(&add_out.stderr)
-//RS     );
-//RS 
-//RS     let out = jetpack()
-//RS         .args(["dev", "--no-color", "--offline"])
-//RS         .current_dir(&proj.path)
-//RS         .env("JETPACK_ROOT", &root.path)
-//RS         .env("HOME", &home.path)
-//RS         .env("JETPACK_FIXTURES", &fixtures.path)
-//RS         .output()
-//RS         .unwrap();
-//RS     assert!(
-//RS         out.status.success(),
-//RS         "stderr: {}",
-//RS         String::from_utf8_lossy(&out.stderr)
-//RS     );
-//RS     let stdout = String::from_utf8_lossy(&out.stdout);
-//RS     assert!(stdout.contains("DEV-RAN"), "stdout: {stdout}");
-//RS }
-//RS 
-//RS /// `jetpack config trust list`/`remove` round-trip.
-//RS #[test]
-//RS fn config_trust_list_and_remove() {
-//RS     let home = Scratch::new("config-trust-list");
-//RS     let pattern = "/some/project/*";
-//RS     jetpack()
-//RS         .args(["config", "trust", "add", pattern, "--no-color"])
-//RS         .env("HOME", &home.path)
-//RS         .output()
-//RS         .unwrap();
-//RS     let list_out = jetpack()
-//RS         .args(["config", "trust", "list", "--no-color"])
-//RS         .env("HOME", &home.path)
-//RS         .output()
-//RS         .unwrap();
-//RS     assert!(list_out.status.success());
-//RS     let stderr = String::from_utf8_lossy(&list_out.stderr);
-//RS     assert!(stderr.contains(pattern), "stderr: {stderr}");
-//RS 
-//RS     let remove_out = jetpack()
-//RS         .args(["config", "trust", "remove", pattern, "--no-color"])
-//RS         .env("HOME", &home.path)
-//RS         .output()
-//RS         .unwrap();
-//RS     assert!(remove_out.status.success());
-//RS     let trust_file = home.path.join(".jet").join("trust");
-//RS     let contents = fs::read_to_string(&trust_file).unwrap_or_default();
-//RS     assert!(!contents.contains(pattern), "contents: {contents}");
-//RS }
-//RS 
-//RS /// `jet trust` is the D-JPK-GRANTCMD1 public front door. It dispatches to
-//RS /// Jetpack, but users never need to know the older `jetpack config trust` shape.
-//RS #[test]
-//RS fn top_level_jet_trust_grant_list_explain_revoke() {
-//RS     let home = Scratch::new("top-level-jet-trust");
-//RS 
-//RS     let grant = jet()
-//RS         .args([
-//RS             "trust",
-//RS             "grant",
-//RS             "acme/web@github:postgres.service",
-//RS             "--scope",
-//RS             "repo",
-//RS             "--color=never",
-//RS         ])
-//RS         .env("HOME", &home.path)
-//RS         .output()
-//RS         .unwrap();
-//RS     assert!(
-//RS         grant.status.success(),
-//RS         "stderr: {}",
-//RS         String::from_utf8_lossy(&grant.stderr)
-//RS     );
-//RS 
-//RS     let list = jet()
-//RS         .args(["trust", "list", "--json", "--color=never"])
-//RS         .env("HOME", &home.path)
-//RS         .output()
-//RS         .unwrap();
-//RS     assert!(list.status.success());
-//RS     let stdout = String::from_utf8_lossy(&list.stdout);
-//RS     assert!(
-//RS         stdout.contains("\"authority\":\"service\""),
-//RS         "stdout: {stdout}"
-//RS     );
-//RS     assert!(
-//RS         stdout.contains("\"subject\":\"acme/web@github:postgres.service\""),
-//RS         "stdout: {stdout}"
-//RS     );
-//RS     assert!(stdout.contains("\"scope\":\"repo\""), "stdout: {stdout}");
-//RS 
-//RS     let explain = jet()
-//RS         .args([
-//RS             "trust",
-//RS             "explain",
-//RS             "service:acme/web@github:postgres.service",
-//RS             "--color=never",
-//RS         ])
-//RS         .env("HOME", &home.path)
-//RS         .output()
-//RS         .unwrap();
-//RS     assert!(explain.status.success());
-//RS     let stderr = String::from_utf8_lossy(&explain.stderr);
-//RS     assert!(
-//RS         stderr.contains("exact authority: service"),
-//RS         "stderr: {stderr}"
-//RS     );
-//RS 
-//RS     let revoke = jet()
-//RS         .args([
-//RS             "trust",
-//RS             "revoke",
-//RS             "service:acme/web@github:postgres.service",
-//RS             "--color=never",
-//RS         ])
-//RS         .env("HOME", &home.path)
-//RS         .output()
-//RS         .unwrap();
-//RS     assert!(revoke.status.success());
-//RS 
-//RS     let list_after = jet()
-//RS         .args(["trust", "list", "--json", "--color=never"])
-//RS         .env("HOME", &home.path)
-//RS         .output()
-//RS         .unwrap();
-//RS     assert_eq!(
-//RS         String::from_utf8_lossy(&list_after.stdout).trim(),
-//RS         "{\"grants\":[]}"
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn top_level_jet_trust_grant_scope_needs_value() {
-//RS     let home = Scratch::new("trust-scope-value-home");
-//RS     let out = jet()
-//RS         .args(["trust", "grant", "service:postgres.service", "--scope"])
-//RS         .env("HOME", &home.path)
-//RS         .env("NO_COLOR", "1")
-//RS         .output()
-//RS         .unwrap();
-//RS 
-//RS     assert_eq!(out.status.code(), Some(2));
-//RS     let stderr = String::from_utf8_lossy(&out.stderr);
-//RS     assert!(
-//RS         stderr.contains("couldn't parse trust grant"),
-//RS         "stderr: {stderr}"
-//RS     );
-//RS     assert!(stderr.contains("unknown trust scope"), "stderr: {stderr}");
-//RS }
-// END-PORT-PENDING 0971 tests/env_dev_trust.rs:1-697
-
+use std.[fs, env, process, time]
+// Card #456: lexical Rust-reference production unwrap/expect ratchet.
+// GATE #4494: real filesystem walk, symlink metadata, clock and process id.
+// Rust: tests/ban_jetpack_unwrap_expect.rs:12
+#Derive(Clone, Debug, PartialEq, Eq)
+enum TokenKind { Ident(String), Punct(Char) }
+// Rust: tests/ban_jetpack_unwrap_expect.rs:18
+struct Token { kind: TokenKind, line: USize }
+// Rust: tests/ban_jetpack_unwrap_expect.rs:24
+#Derive(Clone, Debug, PartialEq, Eq)
+struct Finding { path: String, line: USize, method: String, item: String }
+// Rust: tests/ban_jetpack_unwrap_expect.rs:32
+#Derive(Copy, Debug, PartialEq, Eq)
+enum Truth { Yes, No, Maybe }
+// Rust: tests/ban_jetpack_unwrap_expect.rs:39
+fn lex(source: String) -> [Token] {
+    bytes :: source.bytes()
+    out := []
+    i := 0
+    line := 1
+    while i < bytes.len() {
+        if bytes[i] == b'\n' { line += 1; i += 1; continue }
+        if bytes[i].is_ascii_whitespace() { i += 1; continue }
+        if bytes[i..].starts_with(b"//") {
+            i += 2
+            while i < bytes.len() && bytes[i] != b'\n' { i += 1 }
+            continue
+        }
+        if bytes[i..].starts_with(b"/*") {
+            i += 2
+            depth := 1
+            while i < bytes.len() && depth > 0 {
+                if bytes[i..].starts_with(b"/*") { depth += 1; i += 2 }
+                else if bytes[i..].starts_with(b"*/") { depth -= 1; i += 2 }
+                else { if bytes[i] == b'\n' { line += 1 }; i += 1 }
+            }
+            continue
+        }
+        if Some((end, newlines)) :: raw_string_end(bytes, i) { line += newlines; i = end; continue }
+        normal_prefix :: if bytes[i..].starts_with(b"b\"") || bytes[i..].starts_with(b"c\"") -> Some(2)
+            else if bytes[i] == b'"' -> Some(1) else -> None
+        if Some(prefix) :: normal_prefix {
+            i += prefix
+            while i < bytes.len() {
+                if bytes[i] == b'\\' { i = (i + 2).min(bytes.len()) }
+                else if bytes[i] == b'"' { i += 1; break }
+                else { if bytes[i] == b'\n' { line += 1 }; i += 1 }
+            }
+            continue
+        }
+        if bytes[i] == b'\'' {
+            if Some(end) :: char_literal_end(bytes, i) {
+                line += bytes[i..end].iter().filter(|byte| -> byte == b'\n').count()
+                i = end
+                continue
+            }
+        }
+        if is_ident_start(bytes[i]) {
+            start :: i
+            i += 1
+            while i < bytes.len() && is_ident_continue(bytes[i]) { i += 1 }
+            out.push(Token{kind: TokenKind.Ident(source[start..i].to_string()), line: line})
+            continue
+        }
+        out.push(Token{kind: TokenKind.Punct(bytes[i] as Char), line: line})
+        i += 1
+    }
+    out
+}
+// Rust: tests/ban_jetpack_unwrap_expect.rs:137
+fn raw_string_end(bytes: [U8], start: USize) -> (USize, USize)? {
+    i := start
+    if bytes.get(i) == Some(b'b') || bytes.get(i) == Some(b'c') { i += 1 }
+    if bytes.get(i) != Some(b'r') -> return None
+    i += 1
+    hashes_start :: i
+    while bytes.get(i) == Some(b'#') { i += 1 }
+    if bytes.get(i) != Some(b'"') -> return None
+    hashes :: i - hashes_start
+    i += 1
+    newlines := 0
+    while i < bytes.len() {
+        if bytes[i] == b'\n' { newlines += 1 }
+        // Compare the hash suffix without allocating a repeated vector per byte.
+        if bytes[i] == b'"' && i + 1 + hashes <= bytes.len() && bytes[i + 1..i + 1 + hashes].iter().all(|b| -> b == b'#') {
+            return Some((i + 1 + hashes, newlines))
+        }
+        i += 1
+    }
+    Some((bytes.len(), newlines))
+}
+// Rust: tests/ban_jetpack_unwrap_expect.rs:168
+fn char_literal_end(bytes: [U8], start: USize) -> USize? {
+    i := start + 1
+    while i < bytes.len() && bytes[i] != b'\n' {
+        if bytes[i] == b'\\' { i += 2 }
+        else if bytes[i] == b'\'' -> return Some(i + 1)
+        else { i += 1 }
+    }
+    None
+}
+// Rust: tests/ban_jetpack_unwrap_expect.rs:182
+fn is_ident_start(byte: U8) -> Bool { byte == b'_' || byte.is_ascii_alphabetic() || byte >= 0x80 }
+// Rust: tests/ban_jetpack_unwrap_expect.rs:186
+fn is_ident_continue(byte: U8) -> Bool { is_ident_start(byte) || byte.is_ascii_digit() }
+// Rust: tests/ban_jetpack_unwrap_expect.rs:190
+fn punct(token: Token, expected: Char) -> Bool { token.kind == TokenKind.Punct(expected) }
+// Rust: tests/ban_jetpack_unwrap_expect.rs:194
+fn ident(token: Token, expected: String) -> Bool { match token.kind { TokenKind.Ident(actual) -> actual == expected, _ -> false } }
+// Rust: tests/ban_jetpack_unwrap_expect.rs:198
+fn matching(tokens: [Token], start: USize, open: Char, close: Char) -> USize? {
+    depth := 0
+    for (offset, token) in tokens[start..].iter().enumerate() {
+        if punct(token, open) { depth += 1 }
+        else if punct(token, close) { depth -= 1; if depth == 0 -> return Some(start + offset) }
+    }
+    None
+}
+// Rust: tests/ban_jetpack_unwrap_expect.rs:213
+fn cfg_truth(tokens: [Token]) -> Truth {
+    cursor := 0
+    truth :: parse_cfg_expr(tokens, &cursor)
+    if cursor == tokens.len() -> truth else -> Truth.Maybe
+}
+// Rust: tests/ban_jetpack_unwrap_expect.rs:223
+fn parse_cfg_expr(tokens: [Token], cursor: &USize) -> Truth {
+    token :: tokens.get(cursor) ?? return Truth.Maybe
+    name :: match token.kind { TokenKind.Ident(name) -> name, _ -> return Truth.Maybe }
+    cursor += 1
+    if name == "test" {
+        return if cursor == tokens.len() || tokens.get(cursor).is_some_and(|token| -> punct(token, ',') || punct(token, ')')) -> Truth.No else -> Truth.Maybe
+    }
+    if !["all", "any", "not"].contains(name) || !tokens.get(cursor).is_some_and(|t| -> punct(t, '(')) -> return Truth.Maybe
+    cursor += 1
+    values := []
+    while cursor < tokens.len() && !punct(tokens[cursor], ')') {
+        values.push(parse_cfg_expr(tokens, &cursor))
+        while cursor < tokens.len() && !punct(tokens[cursor], ',') && !punct(tokens[cursor], ')') { cursor += 1 }
+        if tokens.get(cursor).is_some_and(|t| -> punct(t, ',')) { cursor += 1 }
+    }
+    if tokens.get(cursor).is_some_and(|t| -> punct(t, ')')) { cursor += 1 }
+    match name {
+        "all" if values.iter().any(|v| -> v == Truth.No) -> Truth.No,
+        "all" if values.iter().all(|v| -> v == Truth.Yes) -> Truth.Yes,
+        "any" if values.iter().any(|v| -> v == Truth.Yes) -> Truth.Yes,
+        "any" if values.iter().all(|v| -> v == Truth.No) -> Truth.No,
+        "not" if values == [Truth.Yes] -> Truth.No,
+        "not" if values == [Truth.No] -> Truth.Yes,
+        _ -> Truth.Maybe
+    }
+}
+// Rust: tests/ban_jetpack_unwrap_expect.rs:276
+fn attribute_is_test_only(tokens: [Token]) -> Bool {
+    if tokens.first().is_some_and(|token| -> ident(token, "test")) -> return true
+    if !tokens.first().is_some_and(|token| -> ident(token, "cfg")) || !tokens.get(1).is_some_and(|token| -> punct(token, '(')) -> return false
+    end :: matching(tokens, 1, '(', ')') ?? return false
+    cfg_truth(tokens[2..end]) == Truth.No
+}
+// Rust: tests/ban_jetpack_unwrap_expect.rs:291
+fn scan_source(path: String, source: String) -> [Finding] {
+    tokens :: lex(source)
+    findings := []
+    scan_scope(tokens, 0, tokens.len(), false, "<module>", path, &findings)
+    findings
+}
+// Rust: tests/ban_jetpack_unwrap_expect.rs:306
+fn scan_scope(tokens: [Token], start: USize, end: USize, test_only: Bool, current_item: String, path: String, findings: &[Finding]) -> {
+    i := start
+    pending_test := false
+    pending_item: String? := None
+    while i < end {
+        if punct(tokens[i], '#') && tokens.get(i + 1).is_some_and(|token| -> punct(token, '[')) {
+            if Some(close) :: matching(tokens, i + 1, '[', ']') {
+                pending_test |= attribute_is_test_only(tokens[i + 2..close])
+                i = close + 1
+                continue
+            }
+        }
+        if TokenKind.Ident(keyword) :: tokens[i].kind {
+            if ["fn", "mod", "const", "static", "struct", "enum", "trait"].contains(keyword) {
+                if Some(next) :: tokens.get(i + 1) {
+                    if TokenKind.Ident(name) :: next.kind { pending_item = Some("{keyword} {name}") }
+                }
+            } else if keyword == "impl" { pending_item = Some("impl") }
+        }
+        if !test_only && !pending_test && i + 2 < end && punct(tokens[i], '.') &&
+            (ident(tokens[i + 1], "unwrap") || ident(tokens[i + 1], "expect")) && punct(tokens[i + 2], '(') {
+            method :: match tokens[i + 1].kind { TokenKind.Ident(method) -> method, _ -> panic("unreachable method") }
+            findings.push(Finding{path: path.to_string(), line: tokens[i + 1].line, method: method.to_string(), item: current_item.to_string()})
+        }
+        if punct(tokens[i], '{') {
+            close :: matching(tokens, i, '{', '}') ?? return
+            item :: pending_item.as_deref().unwrap_or(current_item)
+            scan_scope(tokens, i + 1, close, test_only || pending_test, item, path, &findings)
+            pending_test = false
+            pending_item = None
+            i = close + 1
+            continue
+        }
+        if punct(tokens[i], ';') { pending_test = false; pending_item = None }
+        i += 1
+    }
+}
+// Rust: tests/ban_jetpack_unwrap_expect.rs:386
+fn collect_rs_files(dir: OSPath, files: &[OSPath]) -> {
+    entries :: fs.read_dir(dir) ?? return
+    for entry in entries.flatten() {
+        path :: entry.path()
+        metadata :: fs.symlink_metadata(path) ?? continue
+        if metadata.file_type().is_symlink() -> continue
+        if metadata.is_dir() { collect_rs_files(path, &files) }
+        else if path.extension().is_some_and(|extension| -> extension == "rs") { files.push(^path) }
+    }
+}
+// Rust: tests/ban_jetpack_unwrap_expect.rs:406
+fn production_findings() -> [Finding] {
+    root :: OSPath.from(env.manifest_dir())
+    files := []
+    collect_rs_files(root.join("crates/jetpack/src"), &files)
+    files.sort()
+    findings := []
+    for file in files {
+        relative :: (file.strip_prefix(root) ?? panic("scanned file stays beneath repository root")).to_string_lossy().replace('\\', "/")
+        source :: fs.read_to_string(file) ?? panic("Jetpack source is readable")
+        findings.extend(scan_source(relative, source))
+    }
+    findings
+}
+// Rust: tests/ban_jetpack_unwrap_expect.rs:424
+fn enforce_zero(findings: [Finding]) -> Err! {
+    if findings.is_empty() -> return
+    throw findings.iter().map(|finding| -> "{finding.path}:{finding.line}: .{finding.method}( in {finding.item}").collect().join("\n")
+}
+// Rust: tests/ban_jetpack_unwrap_expect.rs:441
+#Test("jetpack_production_has_no_unwrap_or_expect") {
+    findings :: production_findings()
+    result :: enforce_zero(findings)
+    assert(result.is_ok(), "production Jetpack unwrap/expect ceiling is zero:\n{result.unwrap_err()}")
+}
+// Rust: tests/ban_jetpack_unwrap_expect.rs:451
+#Test("scanner_detects_production_and_seeded_gate_failure") {
+    findings :: scan_source("fixture.rs", "fn live() { value.unwrap(); other.expect(\"x\"); }")
+    assert_eq(findings.len(), 2)
+    assert_eq(findings[0].item, "fn live")
+    assert(enforce_zero(findings).is_err())
+}
+// Rust: tests/ban_jetpack_unwrap_expect.rs:462
+#Test("scanner_ignores_nonexecuting_text_and_other_methods") {
+    source :: "fn live() {\n// value.unwrap();\n/* outer other.expect(\"x\"); /* nested more.unwrap(); */ */\nlet a = \"text.unwrap()\";\nlet b = r#\"raw.expect(\"x\")\"#;\nlet c = b\"bytes.unwrap()\";\nlet d = br##\"raw bytes.expect(\"x\")\"##;\nlet e = 'x';\nvalue.unwrap_or(1);\nvalue.unwrap_err();\n}\n"
+    assert(scan_source("fixture.rs", source).is_empty())
+}
+// Rust: tests/ban_jetpack_unwrap_expect.rs:480
+#Test("scanner_excludes_tests_but_retains_following_production") {
+    source :: "#[cfg(test)]\nmod tests { fn helper() { ^value.unwrap(); } }\n#[test]\nfn direct_test() { &value.expect(\"test\"); }\n#[cfg(test)]\nconst TEST_ONLY: usize = value.unwrap();\nfn after() { ^value.unwrap(); }\n"
+    findings :: scan_source("fixture.rs", source)
+    assert_eq(findings.len(), 1)
+    assert_eq(findings[0].item, "fn after")
+}
+// Rust: tests/ban_jetpack_unwrap_expect.rs:499
+#Test("scanner_treats_unknown_cfg_conservatively") {
+    source :: "#[cfg(any(test, unix))]\nfn maybe_production() { value.unwrap(); }\n#[cfg(all(test, unix))]\nfn definitely_test() { value.expect(\"test\"); }\n#[cfg(test = \"custom\")]\nfn key_value_is_not_builtin_test_cfg() { value.expect(\"production\"); }\n#[cfg(any(test = \"custom\", test))]\nfn nested_key_value_is_not_builtin_test_cfg() { value.unwrap(); }\n"
+    findings :: scan_source("fixture.rs", source)
+    assert_eq(findings.len(), 3)
+    assert_eq(findings[0].item, "fn maybe_production")
+    assert_eq(findings[1].item, "fn key_value_is_not_builtin_test_cfg")
+    assert_eq(findings[2].item, "fn nested_key_value_is_not_builtin_test_cfg")
+}
+// Rust: tests/ban_jetpack_unwrap_expect.rs:525
+#Test("file_walk_does_not_follow_outside_or_cyclic_symlinks") {
+    if core.sys.target.selected_family() != "unix" -> return // GATE #4483
+    nonce :: (time.SystemTime.now().duration_since(time.UNIX_EPOCH) ?? panic("clock after epoch")).as_nanos()
+    base :: env.temp_dir().join("jetpack-unwrap-ratchet-{process.id()}-{nonce}")
+    scan_root :: base.join("scan")
+    outside :: base.join("outside")
+    fs.create_dir_all(scan_root) ?? panic("create scan")
+    fs.create_dir_all(outside) ?? panic("create outside")
+    fs.write(scan_root.join("safe.rs"), "fn safe() {}\n") ?? panic("write safe")
+    fs.write(outside.join("escape.rs"), "fn escaped() { value.unwrap(); }\n") ?? panic("write outside")
+    fs.symlink(outside, scan_root.join("outside-link")) ?? panic("outside symlink")
+    fs.symlink(scan_root, scan_root.join("cycle")) ?? panic("cyclic symlink")
+    files := []
+    collect_rs_files(scan_root, &files)
+    files.sort()
+    assert_eq(files, [scan_root.join("safe.rs")])
+    assert(outside.join("escape.rs").is_file())
+    fs.remove_dir_all(base) ?? panic("remove fixture")
+}

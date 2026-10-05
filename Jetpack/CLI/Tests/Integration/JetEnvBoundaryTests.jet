@@ -1,0 +1,373 @@
+// Rust: tests/jet_env_boundary.rs:1
+use tests.common as common
+use Jetpack.CLI.Tests.Integration.Support.JetpackFixtures as fixtures
+use Jetpack.CLI.Tests.Integration.JetpackBuildDebug as debug
+use Jetpack.CLI.Tests.Integration.JetpackAcquisition.write_native_omp_fixture
+use Jetpack.CLI.Tests.Integration.JetpackCriterion4 as criterion4
+use Jetpack.CLI.Tests.Integration.JetpackCriterion5 as criterion5
+use tests.support.nix_index_cache_server
+use Jetpack.[Store, Envelope, Lock, JSON]
+use jet_foundation.DataTree.DataTree
+use core.sys
+// GATE #4494: actual child processes, pipes, filesystem metadata, native threads.
+use std.[fs, env, Command, Stdio, thread]
+
+// Rust: tests/jet_env_boundary.rs:9
+#Test("toolchain_only_run_and_dev_skip_environment_realization") {
+    project :: common.Scratch.new("jet-env-toolchain-only")
+    jetpack_root :: project.join("jetpack-root-must-not-be-created")
+    fs.write(project.join("package.jet"), "name: \"jet-env-toolchain-only\"\nversion: \"0.1.0\"\n") ?? panic("package")
+    fs.write(project.join("env.jet"), "module env.dev {{ packages: [nixpkgs.git] }}\n") ?? panic("environment")
+    // ONE-arrow owner ruling: the fixture keeps the same scalar-count behavior.
+    fs.write(project.join("run.jet"), "use core.text as text\npub fn count() -> Int {{ text.scalar_count(\"toolchain\") }}\nfn run() -> {{}}\n") ?? panic("run source")
+    loop active in [Bool]{false, true} {
+        loop args in [[String]]{[String]{"run", "run.jet"}, [String]{"dev", "run.jet", "--watch=off"}} {
+            command := debug.jet()
+            &command.args(args.iter()).current_dir(project.path).env("JETPACK_ROOT", jetpack_root)
+                .env_remove("JETPACK_ENV").env_remove("JETPACK_ENV_DIR").env_remove("JETPACK_ENV_HASH")
+            if active -> &command.env("JETPACK_ENV", "1").env("JETPACK_ENV_DIR", project.path)
+            output :: command.output() ?? panic("run toolchain command")
+            assert(output.status.success(), "toolchain-only {args[0]} failed (active={active}):\n{String.from_utf8_lossy(output.stderr)}")
+            assert_eq(String.from_utf8_lossy(output.stdout), "", "toolchain-only {args[0]} output (active={active})")
+        }
+    }
+    assert(!jetpack_root.exists(), "toolchain-only run/dev must not create a Jetpack root")
+}
+
+// Rust: tests/jet_env_boundary.rs:68
+#Test("declared_package_import_refuses_run_without_prepare_and_gates_dev_test_without_acquiring") {
+    project :: common.Scratch.new("jet-env-boundary")
+    jetpack_root :: project.join("jetpack-root-must-not-be-created")
+    fs.write(project.join("package.jet"), "name: \"jet-env-boundary\"\nversion: \"0.1.0\"\ndeps: {{ helper: ./helper }}\n") ?? panic("package")
+    fs.write(project.join("env.jet"), "module env.dev {{\n    sources: {{ stable: NixOS/nixpkgs/nixos-24.05@github }}\n}}\n") ?? panic("environment")
+    fs.write(project.join("run.jet"), "use helper\nfn run() -> {{}}\n") ?? panic("run source")
+    fs.write(project.join("helper.jet"), "fn help() -> {{}}\n") ?? panic("helper")
+    loop args in [[String]]{[String]{"run", "run.jet", "--no-prepare"}, [String]{"dev", "run.jet", "--watch=off"}, [String]{"test", "run.jet"}} {
+        output :: debug.jet().args(args.iter()).current_dir(project.path).env("JETPACK_ROOT", jetpack_root)
+            .env_remove("JETPACK_ENV").env_remove("JETPACK_ENV_DIR").env_remove("JETPACK_ENV_HASH").output() ?? panic("gated command")
+        assert_eq(output.status.code(), Val(1), "{args[0]} should be gated")
+        stderr :: String.from_utf8_lossy(output.stderr)
+        assert(stderr.contains("Error [E1355]"), "{args[0]} stderr: {stderr}")
+        assert(stderr.contains("Import: `use helper`"), "{args[0]} stderr: {stderr}")
+        if args[0] == "test" {
+            expected :: fs.read_to_string(OSPath.from("tests/fixtures/jetpack-diagnostics/E1355.stderr")) ?? panic("diagnostic snapshot")
+            assert_eq(stderr, expected)
+        }
+    }
+    assert(!jetpack_root.exists(), "jet must not create a Jetpack root while refusing the commands")
+    assert(!project.join(".jet").exists(), "jet must not create project state while refusing the command")
+}
+
+// Rust: tests/jetpack_acquisition.rs:28
+#Test("non_tty_download_without_yes_fails_before_realization") {
+    root :: fixtures.Scratch.new("acquisition-non-tty-root")
+    project :: fixtures.Scratch.new("acquisition-non-tty-project")
+    fixture_dir :: fixtures.Scratch.new("acquisition-non-tty-fixtures")
+    home :: fixtures.Scratch.new("acquisition-non-tty-home")
+    write_native_omp_fixture(&fixture_dir.path)
+    output :: fixtures.jetpack().args([String]{"use", "omp@releases#1.0.0", "--no-color", "--offline", "--fixtures"})
+        .arg(fixture_dir.path).current_dir(project.path).env("JETPACK_ROOT", root.path).env("HOME", home.path)
+        .args([String]{"--", "omp"}).output() ?? panic("acquire")
+    assert(!output.status.success())
+    stderr :: String.from_utf8_lossy(output.stderr)
+    assert(stderr.contains("-y"), "stderr: {stderr}")
+    assert(output.stdout.is_empty())
+    assert(Store.list(&Store.Roots.at(root.path.clone())).is_empty())
+}
+
+// Rust: tests/jetpack_build_debug.rs:42
+#Test("failed_adapter_preserves_scratch_and_json_logs") {
+    project :: common.Scratch.new("project")
+    root :: common.Scratch.new("root")
+    debug.write_project(&project.path)
+    out :: debug.jetpack().args([String]{"build", "--no-color"}).current_dir(project.path).env("JETPACK_ROOT", root.path).output() ?? panic("build")
+    assert(!out.status.success())
+    stderr :: String.from_utf8_lossy(out.stderr)
+    assert(stderr.contains("E1273"), "stderr: {stderr}")
+    assert(stderr.contains("jet logs weirdctl"), "stderr: {stderr}")
+    assert(stderr.contains("--shell-on-fail"), "stderr: {stderr}")
+    logs :: debug.jetpack().args([String]{"logs", "weirdctl", "--json", "--no-color"}).current_dir(project.path).env("JETPACK_ROOT", root.path).output() ?? panic("logs")
+    assert(logs.status.success())
+    stdout :: String.from_utf8_lossy(logs.stdout)
+    assert(stdout.contains("\"package\":\"weirdctl\""), "{stdout}")
+    assert(stdout.contains("\"status\":\"failed\""), "{stdout}")
+    assert(stdout.contains("\"scratch_dir\":\""), "{stdout}")
+    assert(stdout.contains("missing-bin"), "{stdout}")
+    scratch :: root.path.join("hangar/failed-scratch")
+    assert((fs.read_dir(scratch) ?? panic("scratch")).next().is_some(), "failed scratch should be preserved under hangar")
+}
+
+// Rust: tests/jetpack_build_debug.rs:84
+#Test("top_level_explain_dispatches_to_jetpack") {
+    project :: common.Scratch.new("project")
+    root :: common.Scratch.new("root")
+    debug.write_project(&project.path)
+    _ :: debug.jetpack().args([String]{"build", "--no-color"}).current_dir(project.path).env("JETPACK_ROOT", root.path).output() ?? panic("build")
+    explain :: debug.jet().args([String]{"explain", "weirdctl", "--no-color"}).current_dir(project.path).env("JETPACK_ROOT", root.path).output() ?? panic("explain")
+    assert(explain.status.success())
+    stdout :: String.from_utf8_lossy(explain.stdout)
+    assert(stdout.contains("ref      adapt:weirdctl:./vendor/weirdctl"), "{stdout}")
+    assert(stdout.contains("failed"), "{stdout}")
+    assert(stdout.contains("jet logs weirdctl"), "{stdout}")
+}
+
+// Rust: tests/jetpack_build_debug.rs:115
+#Test("bare_jet_logs_is_a_teaching_error_naming_jet_inspect_logs") {
+    project :: common.Scratch.new("project")
+    root :: common.Scratch.new("root")
+    debug.write_project(&project.path)
+    _ :: debug.jetpack().args([String]{"build", "--no-color"}).current_dir(project.path).env("JETPACK_ROOT", root.path).output() ?? panic("build")
+    logs :: debug.jet().args([String]{"logs", "weirdctl", "--json", "--no-color"}).current_dir(project.path).env("JETPACK_ROOT", root.path).output() ?? panic("logs")
+    assert_eq(logs.status.code(), Val(2), "bare `jet logs` must be rejected")
+    // E2101 JSON reports on stdout, not stderr.
+    stdout :: String.from_utf8_lossy(logs.stdout)
+    assert(stdout.contains("\"code\":\"E2101\""), "stdout: {stdout}")
+    assert(stdout.contains("jet inspect logs"), "stdout: {stdout}")
+}
+
+// Rust: tests/jetpack_build_debug.rs:148
+#Test("jet_inspect_logs_dispatches_to_jetpack") {
+    project :: common.Scratch.new("project")
+    root :: common.Scratch.new("root")
+    debug.write_project(&project.path)
+    _ :: debug.jetpack().args([String]{"build", "--no-color"}).current_dir(project.path).env("JETPACK_ROOT", root.path).output() ?? panic("build")
+    logs :: debug.jet().args([String]{"inspect", "logs", "weirdctl", "--json", "--no-color"}).current_dir(project.path).env("JETPACK_ROOT", root.path).output() ?? panic("inspect logs")
+    assert(logs.status.success(), "code: {logs.status.code():?} stderr: {String.from_utf8_lossy(logs.stderr)} stdout: {String.from_utf8_lossy(logs.stdout)}")
+    assert(String.from_utf8_lossy(logs.stdout).contains("\"steps\""))
+}
+
+// Rust: tests/jetpack_build_debug.rs:177
+#Test("shell_on_fail_uses_preserved_scratch_with_fake_shell") {
+    project :: common.Scratch.new("project")
+    root :: common.Scratch.new("root")
+    marker :: root.path.join("shell-marker.txt")
+    windows :: sys.target.selected_os() == "windows"
+    shell :: root.path.join(if windows -> "fake-shell.bat" else -> "fake-shell")
+    if windows {
+        fs.write(shell, "cd > %JETPACK_FAILED_SCRATCH_MARKER%\r\n") ?? panic("windows fake shell")
+    } else {
+        fs.write(shell, "#!/bin/sh\npwd > \"$JETPACK_FAILED_SCRATCH_MARKER\"\n") ?? panic("fake shell")
+        fs.set_permissions(shell, fs.Permissions.from_mode(0o755)) ?? panic("executable shell")
+    }
+    debug.write_project(&project.path)
+    out :: debug.jetpack().args([String]{"build", "--shell-on-fail", "--no-color"}).current_dir(project.path)
+        .env("JETPACK_ROOT", root.path).env("JETPACK_SHELL_ON_FAIL", shell).env("JETPACK_FAILED_SCRATCH_MARKER", marker).output() ?? panic("shell on fail")
+    assert(!out.status.success())
+    cwd :: fs.read_to_string(marker) ?? panic("fake shell should run")
+    assert(cwd.contains("failed-scratch"), "marker: {cwd}")
+}
+
+// Rust: tests/jetpack_criterion2.rs:12
+#Test("clean_quarantines_malformed_object_and_collects_other_objects") {
+    root :: fixtures.Scratch.new("criterion2-root")
+    shared :: fixtures.Scratch.new("criterion2-shared-cas")
+    env.set_var("JETPACK_SHARED_CAS", shared.path)
+    (stale, _) :: fixtures.write_hangar_meta(&root.path, "criterion2-stale", "stale", "1.0", Val(1))
+    (fresh, _) :: fixtures.write_hangar_meta(&root.path, "criterion2-fresh", "fresh", "1.0", Val(fixtures.now_secs()))
+    malformed :: root.path.join("hangar/nix-index")
+    fs.create_dir_all(malformed) ?? panic("malformed")
+    fs.write(malformed.join("payload"), "metadata missing") ?? panic("malformed payload")
+    output :: fixtures.jetpack().args([String]{"hangar", "clean", "--no-color", "--yes"}).env("JETPACK_ROOT", root.path).output() ?? panic("clean")
+    assert(output.status.success(), "stdout: {String.from_utf8_lossy(output.stdout)}\nstderr: {String.from_utf8_lossy(output.stderr)}")
+    assert(!stale.exists(), "valid stale sibling should be collected")
+    assert(fresh.exists(), "fresh sibling should remain")
+    assert(!malformed.exists(), "malformed object should leave object pool")
+    names :: (fs.read_dir(root.path.join("hangar/quarantine")) ?? panic("quarantine")).map((item) -> (item ?? panic("entry")).file_name().to_string_lossy().into_owned()).collect()
+    assert(names.iter().any((name) -> name.contains("nix-index") && name.contains("missing-metadata")), "quarantine names: {names:?}")
+    assert(String.from_utf8_lossy(output.stderr).contains("quarantined 1 invalid object"), "stderr: {String.from_utf8_lossy(output.stderr)}")
+}
+
+// Rust: tests/jetpack_criterion4.rs:34
+#Test("hangar_du_all_reports_every_root_and_exact_physical_total") {
+    if sys.target.selected_family() != "unix" -> return
+    machine :: fixtures.Scratch.new("criterion4-machine")
+    first :: machine.join("jet-omp")
+    second :: machine.join("jet-omp2")
+    shared :: machine.join("shared-cas")
+    fs.create_dir_all(first.join("hangar/objects/one")) ?? panic("first")
+    fs.create_dir_all(second.join("hangar/objects/two")) ?? panic("second")
+    fs.create_dir_all(shared) ?? panic("shared")
+    fs.write(first.join("hangar/objects/one/payload"), [U8]{'a' as U8; 4096}) ?? panic("first payload")
+    fs.write(second.join("hangar/objects/two/payload"), [U8]{'b' as U8; 8192}) ?? panic("second payload")
+    fs.write(shared.join("shared-payload"), [U8]{'c' as U8; 2048}) ?? panic("shared payload")
+    output :: fixtures.jetpack().args([String]{"hangar", "du", "--all", "--json", "--no-color"}).env("JETPACK_ROOT", first)
+        .env("JETPACK_SHARED_CAS", shared).env("HOME", machine.path).env("XDG_DATA_HOME", machine.join("data"))
+        .env("XDG_STATE_HOME", machine.join("state")).env("XDG_CACHE_HOME", machine.path).output() ?? panic("du")
+    assert(output.status.success(), "stdout: {String.from_utf8_lossy(output.stdout)}\nstderr: {String.from_utf8_lossy(output.stderr)}")
+    wire := String.from_utf8_lossy(output.stdout).trim() // #4303
+    report :: JSON.parse(wire) ?? panic("report")
+    roots :: (report.get("roots") ?? panic("roots")).as_array() ?? panic("roots array")
+    assert(roots.iter().any((root) -> root.get("root").ok().and_then((value) -> value.as_str().ok()) == first.to_str()))
+    assert(roots.iter().any((root) -> root.get("root").ok().and_then((value) -> value.as_str().ok()) == second.to_str()))
+    assert_eq(((report.get("shared_cas") ?? panic("shared cas")).get("path") ?? panic("shared path")).as_str() ?? panic("path string"), shared.to_str() ?? panic("shared UTF8"))
+    // GATE #4499: exact composite device/inode keys, never encoded as strings.
+    seen := [(U64, U64): Bool]{}
+    expected :: criterion4.measured_bytes(&shared, &seen) + criterion4.measured_bytes(&first.join("hangar"), &seen) + criterion4.measured_bytes(&second.join("hangar"), &seen)
+    actual :: if report.get("total_bytes") ?? panic("total bytes") == {
+        .Int(value) -> value as U64
+        .Float(value) -> value as U64
+        .Number(value) -> (value.parse[F64]() ?? panic("invalid numeric total_bytes")) as U64
+        value -> panic("invalid total_bytes: {value:?}")
+    }
+    assert_eq(actual, expected)
+}
+
+// Rust: tests/jetpack_criterion5.rs:33
+#Test("thirty_concurrent_agent_realizations_stay_near_single_footprint") {
+    if sys.target.selected_family() != "unix" -> return
+    machine :: fixtures.Scratch.new("criterion5-machine")
+    shared :: machine.join("shared-cas")
+    source :: machine.join("source")
+    fs.create_dir_all(source) ?? panic("source")
+    fs.write(source.join("payload"), [U8]{'x' as U8; 4 * 1024 * 1024}) ?? panic("payload")
+    roots :: (0..30).map((index) -> machine.join("agent-{index}")).collect()
+    home :: machine.path.clone()
+    data_home :: machine.join("data")
+    state_home :: machine.join("state")
+    thread.scope((scope) -> {
+        handles := []
+        loop root in roots.iter() {
+            worker_root :: root.clone()
+            worker_source :: source.clone()
+            worker_shared :: shared.clone()
+            worker_home :: home.clone()
+            worker_data :: data_home.clone()
+            worker_state :: state_home.clone()
+            &handles.push(scope.spawn(() -> {
+                output :: fixtures.jetpack().args([String]{"hangar", "ingest", worker_source.to_str() ?? panic("source UTF8"), "--name", "same-package", "--version", "1", "--ref", "path:same-package", "--no-color"})
+                    .env("JETPACK_ROOT", worker_root).env("JETPACK_SHARED_CAS", worker_shared).env("HOME", worker_home)
+                    .env("XDG_DATA_HOME", worker_data).env("XDG_STATE_HOME", worker_state).env("XDG_CACHE_HOME", worker_home)
+                    .env_remove("JETPACK_FIXTURES").output() ?? panic("ingest")
+                assert(output.status.success(), "stdout: {String.from_utf8_lossy(output.stdout)}\nstderr: {String.from_utf8_lossy(output.stderr)}")
+            }))
+        }
+        loop handle in handles -> handle.join() ?? panic("agent join")
+    })
+    payload :: ((fs.read_dir(roots[0].join("hangar/objects")) ?? panic("objects")).map((item) -> (item ?? panic("entry")).path()).find((path) -> path.is_dir()) ?? panic("object")).join("payload")
+    assert((fs.metadata(payload) ?? panic("payload metadata")).nlink() >= 30)
+    single_bytes :: {
+        seen := [(U64, U64): Bool]{}
+        criterion5.measured_bytes(&shared, &seen) + criterion5.measured_bytes(&roots[0].join("hangar"), &seen)
+    }
+    multi_bytes :: {
+        seen := [(U64, U64): Bool]{}
+        total := criterion5.measured_bytes(&shared, &seen)
+        loop root in &roots -> total += criterion5.measured_bytes(&root.join("hangar"), &seen)
+        total
+    }
+    assert(multi_bytes <= single_bytes.saturating_mul(4), "30-root footprint {multi_bytes} exceeds single-root footprint {single_bytes}")
+}
+
+// Rust: tests/jetpack_criterion8.rs:17
+#Test("imported_locked_package_runs_builds_and_restores_without_nix") {
+    base :: fixtures.Scratch.new("criterion8-import-reuse")
+    project :: base.join("project")
+    root :: base.join("root")
+    restored_root :: base.join("restored-root")
+    fixture_dir :: base.join("fixtures")
+    staging :: base.join("staging")
+    tools :: base.join("tools")
+    marker :: base.join("nix-invoked")
+    fs.create_dir_all(project.join(".jet")) ?? panic("project state")
+    fs.create_dir_all(staging.join("bin")) ?? panic("bin")
+    fs.create_dir_all(fixture_dir) ?? panic("fixtures")
+    fs.create_dir_all(tools) ?? panic("tools")
+    fs.write(project.join(".jet/lock"), "version = 1\n\n[[source_channel]]\nname = \"jetpack\"\nchannel = \"jetpack\"\nexact = \"github:NixOS/nixpkgs#0123456789abcdef0123456789abcdef01234567\"\n\n[root]\ndependencies = []\n") ?? panic("lock")
+    fixtures.write_executable(&staging.join("bin/greet"), "#!/bin/sh\nprintf '%s\\n' 'hello from imported jetpack'\n")
+    Store.seal_local_output(&staging) ?? panic("seal")
+    output_hash :: Envelope.try_output_hash_of(staging.to_string_lossy()) ?? panic("output hash")
+    staging_text :: staging.to_string_lossy()
+    fs.write(fixture_dir.join("jetpack-greet.json"), "[{{\"drvPath\":\"/nix/store/0fixture00000000000000000000-greet.drv\",\"outputs\":{{\"out\":{staging_text:?}}},\"jetpackImport\":{{\"closedGraph\":{{\"root\":{{\"dependencies\":[]}}}},\"selectedOutputs\":{{\"out\":{staging_text:?}}},\"dependencies\":[],\"sources\":[],\"hashes\":{{\"out\":{output_hash:?}}},\"losses\":[],\"proof\":{{\"source\":\"criterion-8\"}},\"recipe\":{{\"kind\":\"compatibility\"}},\"lock\":{{\"system\":\"x86_64-linux\"}}}}}}]") ?? panic("import fixture")
+    marker_text :: marker.to_string_lossy()
+    fixtures.write_executable(&tools.join("nix"), "#!/bin/sh\nprintf '%s' invoked > {marker_text:?}\nexit 91\n")
+    imported :: fixtures.jetpack().args([String]{"build", "greet@jetpack", "--offline", "--no-color"}).current_dir(project)
+        .env("JETPACK_ROOT", root).env("JETPACK_FIXTURES", fixture_dir).env("PATH", "").output() ?? panic("import")
+    assert(imported.status.success(), "import stderr: {String.from_utf8_lossy(imported.stderr)}")
+    imported_roots :: Store.Roots.at(root.clone())
+    imported_entry :: Store.find_by_reference(&imported_roots, "greet@jetpack") ?? panic("successful import must publish the Jetpack package")
+    assert(OSPath.from(imported_entry.out).starts_with(root.join("hangar/objects")))
+    producer :: Store.ProducerRecord.decode(imported_entry.producer_record) ?? panic("producer")
+    assert_eq(producer.facts.get("nix.fallback.schema").map((value) -> value.as_str()), Val("jetpack.nix-fallback.v1"))
+    assert((fs.read_to_string(project.join(".jet/lock")) ?? panic("lock")).contains("greet@jetpack"))
+    build :: fixtures.jetpack().args([String]{"build", "greet@jetpack", "--no-color"}).current_dir(project)
+        .env("JETPACK_ROOT", root).env_remove("JETPACK_FIXTURES").env("PATH", tools).output() ?? panic("cached build")
+    assert(build.status.success(), "cached build stderr: {String.from_utf8_lossy(build.stderr)}")
+    run :: fixtures.jetpack().args([String]{"run", "greet@jetpack", "--no-color"}).current_dir(project)
+        .env("JETPACK_ROOT", root).env_remove("JETPACK_FIXTURES").env("PATH", tools).output() ?? panic("cached run")
+    assert(run.status.success(), "cached run stderr: {String.from_utf8_lossy(run.stderr)}")
+    run_stdout := String.from_utf8_lossy(run.stdout).trim() // #4303
+    assert_eq(run_stdout, "hello from imported jetpack")
+    assert(!marker.exists(), "cached Jetpack operations invoked Nix")
+    dumped :: fixtures.jetpack().args([String]{"hangar", "dump", "greet@jetpack", "--no-color"}).current_dir(project)
+        .env("JETPACK_ROOT", root).env("PATH", tools).output() ?? panic("dump")
+    assert(dumped.status.success(), "dump stderr: {String.from_utf8_lossy(dumped.stderr)}")
+    key :: root.join("trust/hangar.key")
+    assert(key.is_file(), "Jetpack dump must publish its Hangar key")
+    restore := fixtures.jetpack().args([String]{"hangar", "restore", "--key", key.to_str() ?? panic("key UTF8"), "--yes", "--no-color"})
+        .current_dir(project).env("JETPACK_ROOT", restored_root).env("PATH", tools).stdin(Stdio.piped()).spawn() ?? panic("restore")
+    stdin :: restore.stdin.as_mut() ?? panic("restore stdin")
+    &stdin.write_all(dumped.stdout) ?? panic("write dump")
+    drop(&restore.stdin.take())
+    restored :: restore.wait_with_output() ?? panic("restore output")
+    assert(restored.status.success(), "restore stderr: {String.from_utf8_lossy(restored.stderr)}")
+    restored_entry :: Store.find_by_reference(&Store.Roots.at(restored_root.clone()), "greet@jetpack") ?? panic("Jetpack restore must preserve the locked package ref")
+    assert_eq(restored_entry.envelope.output_hash, imported_entry.envelope.output_hash)
+    assert(!marker.exists(), "Jetpack restore invoked Nix")
+    restored_run :: fixtures.jetpack().args([String]{"run", "greet@jetpack", "--no-color"}).current_dir(project)
+        .env("JETPACK_ROOT", restored_root).env_remove("JETPACK_FIXTURES").env("PATH", tools).output() ?? panic("restored run")
+    assert(restored_run.status.success(), "restored run stderr: {String.from_utf8_lossy(restored_run.stderr)}")
+    restored_stdout := String.from_utf8_lossy(restored_run.stdout).trim() // #4303
+    assert_eq(restored_stdout, "hello from imported jetpack")
+    assert(!marker.exists(), "restored package execution invoked Nix")
+}
+
+// Rust: tests/jetpack_criterion8.rs:190
+#Test("local_nix_fallback_imports_exact_lock_once_then_uses_jetpack") {
+    base :: fixtures.Scratch.new("criterion8-local-nix-fallback")
+    project :: base.join("project")
+    root :: base.join("root")
+    staging :: base.join("staging")
+    nix :: base.join("nix")
+    invocations :: base.join("nix-invocations")
+    server :: nix_index_cache_server.NixIndexCacheServer.start_unindexed(&project)
+    fs.create_dir_all(project.join(".jet")) ?? panic("project state")
+    fs.create_dir_all(staging.join("bin")) ?? panic("bin")
+    fixtures.write_executable(&staging.join("bin/postgres"), "#!/bin/sh\nprintf '%s\\n' 'local fallback package'\n")
+    revision :: nix_index_cache_server.REVISION
+    fs.write(project.join(".jet/lock"), "version = 1\n\n[[source_channel]]\nname = \"jetpack\"\nchannel = \"nixpkgs-unstable\"\nexact = \"github:NixOS/nixpkgs#{revision}\"\n\n[root]\ndependencies = []\n") ?? panic("lock")
+    staging_text :: staging.to_string_lossy()
+    output :: "[{{\"drvPath\":\"/nix/store/fallback-postgres.drv\",\"outputs\":{{\"out\":{staging_text:?}}},\"jetpackImport\":{{\"closedGraph\":{{\"root\":{{\"dependencies\":[]}}}},\"selectedOutputs\":{{\"out\":{staging_text:?}}},\"dependencies\":[],\"sources\":[],\"hashes\":{{\"out\":\"output-hash\"}},\"losses\":[],\"proof\":{{\"source\":\"local-nix-test\"}},\"recipe\":{{\"kind\":\"compatibility\"}},\"lock\":{{\"system\":\"x86_64-linux\"}}}}}}]"
+    invocations_text :: invocations.to_string_lossy()
+    fixtures.write_executable(&nix, "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then printf '%s\\n' 'nix (Nix) 2.24'; exit 0; fi\nif [ \"$1\" = \"build\" ]; then printf '%s\\n' invoked >> {invocations_text:?}; printf '%s\\n' {output:?}; exit 0; fi\nexit 1\n")
+    imported :: fixtures.jetpack().args([String]{"build", "postgres@jetpack", "--no-color"}).current_dir(project)
+        .env("JETPACK_ROOT", root).env("JETPACK_NIX_FALLBACK_POLICY", "allow").env("JETPACK_NIX_FALLBACK_BIN", nix)
+        .env("PATH", "/usr/bin:/bin").output() ?? panic("local fallback")
+    assert(imported.status.success(), "local fallback stderr: {String.from_utf8_lossy(imported.stderr)}")
+    assert_eq((fs.read_to_string(invocations) ?? panic("invocations")).lines().count(), 1)
+    roots :: Store.Roots.at(root.clone())
+    entry :: Store.find_by_reference(&roots, "postgres@jetpack") ?? panic("local fallback must publish a Jetpack entry")
+    assert(OSPath.from(entry.out).starts_with(root.join("hangar/objects")))
+    producer :: Store.ProducerRecord.decode(entry.producer_record) ?? panic("producer")
+    assert_eq(producer.facts.get("nix.fallback.invocation").map((value) -> value.as_str()), Val("one-shot"))
+    assert(producer.facts.contains_key("nix.fallback.graph"))
+    assert(producer.facts.contains_key("nix.fallback.proof"))
+    lock :: fs.read_to_string(project.join(".jet/lock")) ?? panic("lock")
+    parsed_lock :: Lock.parse(&lock) ?? panic("local fallback lock parses")
+    locked :: parsed_lock.packages.iter().find((package) -> package.name == "postgres") ?? panic("local fallback lock package")
+    assert(if locked.source == { .Registry{registry, ..} -> registry == "jetpackage"; _ -> false }, "local fallback must use the canonical local provider lock source")
+    assert(locked.nix_closure.is_none(), "local fallback must not fabricate a portable Nix closure")
+    assert(lock.contains("local-nix:"))
+    assert(lock.contains("github:NixOS/nixpkgs#"))
+    cached :: fixtures.jetpack().args([String]{"build", "postgres", "--no-color"}).current_dir(project)
+        .env("JETPACK_ROOT", root).env("JETPACK_NIX_FALLBACK_POLICY", "allow").env("JETPACK_NIX_FALLBACK_BIN", nix)
+        .env("PATH", "/usr/bin:/bin").output() ?? panic("cached build")
+    assert(cached.status.success(), "cached build stderr: {String.from_utf8_lossy(cached.stderr)}")
+    run :: fixtures.jetpack().args([String]{"run", "postgres@jetpack", "--no-color"}).current_dir(project)
+        .env("JETPACK_ROOT", root).env("JETPACK_NIX_FALLBACK_POLICY", "allow").env("JETPACK_NIX_FALLBACK_BIN", nix)
+        .env("PATH", "/usr/bin:/bin").output() ?? panic("cached run")
+    assert(run.status.success(), "cached run stderr: {String.from_utf8_lossy(run.stderr)}")
+    stdout := String.from_utf8_lossy(run.stdout).trim() // #4303
+    assert_eq(stdout, "local fallback package")
+    assert_eq((fs.read_to_string(invocations) ?? panic("invocations")).lines().count(), 1)
+    drop(server)
+}

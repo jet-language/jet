@@ -1,0 +1,498 @@
+use Compiler.JetCli.Tests.Integration.Review.*
+use std.[fs, env]
+use std.process.Command
+use jet.SHA256.sha256_hex
+use jet_foundation.MachineOutput.[read_machine_output, MachineRecord]
+// GATE #4494: all journeys execute the real native Jet CLI and filesystem.
+
+// Rust: tests/review.rs:179
+#Test("review_joins_meaning_authority_and_receipt_changes") {
+    root :: scratch("joins")
+    _ :: fs.remove_dir_all(root)
+    base :: root.join("base")
+    head :: root.join("head")
+    manifest :: (allow: String) -> "name: \"review_fixture\"\nversion: \"0.1.0\"\nedition: \"2026\"\nauthority: {{ holds: {{ allow: [{allow}] }} }}\n"
+    write(&base.join("package.jet"), &manifest("FS, IO"))
+    write(&head.join("package.jet"), &manifest("FS, IO, Net"))
+    write(&base.join("run.jet"), "fn run() {{ print(\"base\") }}\n")
+    write(&head.join("run.jet"), "fn run() {{ print(\"head\") }}\n")
+    base_receipt :: root.join("base.jetproof")
+    head_receipt :: root.join("head.jetproof")
+    base_receipt_value :: proof_receipt([
+        checked_derivation("d-retained", "build-1", "run-1", "target-1", "event-retained"),
+        checked_derivation("d-lost", "build-1", "run-1", "target-1", "event-lost")
+    ], [
+        proof_evidence("claim-retained", "d-retained", "passed", "checked", "target-1", 1, "schedule:v1"),
+        proof_evidence("claim-lost", "d-lost", "passed", "checked", "target-1", 1, "schedule:v1")
+    ])
+    head_receipt_value :: proof_receipt([
+        checked_derivation("d-retained", "build-1", "run-1", "target-1", "event-retained"),
+        checked_derivation("d-gained", "build-1", "run-1", "target-1", "event-gained")
+    ], [
+        proof_evidence("claim-retained", "d-retained", "passed", "checked", "target-1", 1, "schedule:v1"),
+        proof_evidence("claim-gained", "d-gained", "passed", "checked", "target-1", 1, "schedule:v1")
+    ])
+    write(&base_receipt, &base_receipt_value)
+    write(&head_receipt, &head_receipt_value)
+    output :: Command.new(env.var_os("CARGO_BIN_EXE_jet").expect("native Jet test executable"))
+        .args(["review", base.join("run.jet").to_str().expect("UTF-8 base"), head.join("run.jet").to_str().expect("UTF-8 head"), "--base-receipt", base_receipt.to_str().expect("UTF-8 receipt"), "--receipt", head_receipt.to_str().expect("UTF-8 receipt"), "--json"])
+        .env("NO_COLOR", "1").output().expect("run review")
+    assert(output.status.success(), "review failed: {String.from_utf8_lossy(output.stderr)}")
+    stdout :: String.from_utf8(output.stdout).expect("UTF-8 review output")
+    assert_eq(read_machine_output(&stdout).expect("machine output"), [MachineRecord.Status])
+    assert(stdout.starts_with("{{\"schema\":\"jet.status/v1\""))
+    assert(stdout.contains("\"kind\":\"review\""))
+    assert(stdout.contains("body_changed"))
+    assert(stdout.contains("\"status\":\"widened\""))
+    assert(stdout.contains("\"status\":\"lost\""))
+    assert(stdout.contains("\"status\":\"gained\""))
+    assert(!stdout.contains("text_diff"))
+    _ :: fs.remove_dir_all(root)
+}
+
+// Rust: tests/review.rs:293
+#Test("comment_only_change_has_no_semantic_operation") {
+    root :: scratch("comments")
+    _ :: fs.remove_dir_all(root)
+    before :: root.join("before.jet")
+    after :: root.join("after.jet")
+    write(&before, "fn run() {{ print(\"same\") }}\n")
+    write(&after, "// review comment\nfn run() {{ print(\"same\") }}\n")
+    output :: Command.new(env.var_os("CARGO_BIN_EXE_jet").expect("native Jet test executable")).args(["review", before.to_str().expect("UTF-8 before"), after.to_str().expect("UTF-8 after"), "--json"]).env("NO_COLOR", "1").output().expect("run review")
+    assert(output.status.success(), "review failed: {String.from_utf8_lossy(output.stderr)}")
+    stdout :: String.from_utf8(output.stdout).expect("UTF-8 review output")
+    assert(stdout.contains("\"semantic_ops\":[]"))
+    assert(stdout.contains("\"changes\":[]"))
+    _ :: fs.remove_dir_all(root)
+}
+
+// Rust: tests/review.rs:324
+#Test("review_uses_a_recorded_rename_and_ignores_hand_spelling") {
+    root :: scratch("recorded_rename")
+    _ :: fs.remove_dir_all(root)
+    base :: root.join("base")
+    head :: root.join("head")
+    package :: "name: \"review_rename\"\nversion: \"0.1.0\"\nedition: \"2026\"\n"
+    write(&base.join("package.jet"), &package)
+    write(&head.join("package.jet"), &package)
+    before :: "fn report() -> Int {{\n    return 1\n}}\n"
+    after :: "fn summarize() -> Int {{\n    return 1\n}}\n"
+    write(&base.join("run.jet"), &before)
+    write(&head.join("run.jet"), &after)
+    before_hash :: sha256_hex(before.as_bytes())
+    after_hash :: sha256_hex(after.as_bytes())
+    receipt_dir :: head.join(".jet/codemods")
+    fs.create_dir_all(receipt_dir).expect("create codemod receipts")
+    write(&receipt_dir.join("rename.log.json"), "{{\"schema\":2,\"semantic_ops\":[{{\"kind\":\"rename\",\"from\":\"report\",\"to\":\"summarize\"}}],\"files\":[{{\"path\":\"{head.join("run.jet").display()}\",\"before_hash\":\"{before_hash}\",\"after_hash\":\"{after_hash}\"}}]}}")
+    output :: review_command(&base, &head, None, None)
+    assert(output.status.success(), "review failed: {output:?}")
+    stdout :: String.from_utf8(output.stdout).expect("UTF-8 review output")
+    assert(stdout.contains("\"kind\":\"renamed\""), "{stdout}")
+    hand :: root.join("hand")
+    write(&hand.join("package.jet"), &package)
+    write(&hand.join("run.jet"), &after)
+    hand_output :: review_command(&base, &hand, None, None)
+    assert(hand_output.status.success(), "review failed: {hand_output:?}")
+    hand_stdout :: String.from_utf8(hand_output.stdout).expect("UTF-8 review output")
+    assert(!hand_stdout.contains("\"kind\":\"renamed\""), "{hand_stdout}")
+    assert(hand_stdout.contains("\"kind\":\"removed\""), "{hand_stdout}")
+    assert(hand_stdout.contains("\"kind\":\"added\""), "{hand_stdout}")
+    _ :: fs.remove_dir_all(root)
+}
+
+// Rust: tests/review.rs:392
+#Test("review_uses_a_recorded_move_across_module_paths") {
+    root :: scratch("recorded_move")
+    _ :: fs.remove_dir_all(root)
+    base :: root.join("base")
+    head :: root.join("head")
+    package :: "name: \"review_move\"\nversion: \"0.1.0\"\nedition: \"2026\"\n"
+    write(&base.join("package.jet"), &package)
+    write(&head.join("package.jet"), &package)
+    source :: "fn report() -> Int {{\n    return 1\n}}\n"
+    write(&base.join("old.jet"), &source)
+    write(&head.join("new.jet"), &source)
+    source_hash :: sha256_hex(source.as_bytes())
+    receipt_dir :: head.join(".jet/codemods")
+    fs.create_dir_all(receipt_dir).expect("create codemod receipts")
+    write(&receipt_dir.join("move.log.json"), "{{\"schema\":2,\"semantic_ops\":[{{\"kind\":\"move\",\"from\":\"report\",\"to\":\"report\",\"targets\":[{{\"stable_id\":\"\",\"before\":\"fn:module:old::report\",\"after\":\"fn:module:new::report\",\"kind\":\"function\",\"module_path\":\"\"}}]}}],\"files\":[{{\"path\":\"{head.join("new.jet").display()}\",\"before_hash\":\"{source_hash}\",\"after_hash\":\"{source_hash}\"}}]}}")
+    output :: Command.new(env.var_os("CARGO_BIN_EXE_jet").expect("native Jet test executable")).args(["review", base.join("old.jet").to_str().expect("UTF-8 base"), head.join("new.jet").to_str().expect("UTF-8 head"), "--json"]).env("NO_COLOR", "1").output().expect("run review")
+    assert(output.status.success(), "review failed: {output:?}")
+    stdout :: String.from_utf8(output.stdout).expect("UTF-8 review output")
+    assert(stdout.contains("\"kind\":\"moved\""), "{stdout}")
+    assert(stdout.contains("\"alignment\":\"recorded\""), "{stdout}")
+    assert(stdout.contains("\"before\":\"old.jet\""), "{stdout}")
+    assert(stdout.contains("\"after\":\"new.jet\""), "{stdout}")
+    assert(stdout.contains("\"before_identity\":\"fn:module:old::report\""), "{stdout}")
+    assert(stdout.contains("\"after_identity\":\"fn:module:new::report\""), "{stdout}")
+    assert(stdout.contains("\"source_operation\":\"move\""), "{stdout}")
+    assert(!stdout.contains("\"kind\":\"renamed\""), "{stdout}")
+    assert(!stdout.contains("\"kind\":\"added\""), "{stdout}")
+    assert(!stdout.contains("\"kind\":\"removed\""), "{stdout}")
+    _ :: fs.remove_dir_all(root)
+}
+
+// Rust: tests/review.rs:445
+#Test("review_receipt_fixture_matrix_distinguishes_matching_stale_missing_mismatched_and_changed") {
+    base_derivation :: checked_derivation("d-shared", "build-1", "run-1", "target-1", "event-1")
+    matching_evidence :: proof_evidence("claim-shared", "d-shared", "passed", "checked", "target-1", 1, "schedule:v1")
+    matching :: proof_receipt([base_derivation], [matching_evidence])
+    run_receipt_case("matrix-matching", Some(matching), Some(matching), "", "", ["\"base_recorded\":true", "\"head_recorded\":true", "\"retained\":1", "\"preserved_checked\"", "\"verdict\":\"reviewable\""])
+    stale_derivation :: checked_derivation("d-shared", "build-2", "run-1", "target-1", "event-1")
+    stale :: proof_receipt([stale_derivation], [matching_evidence])
+    run_receipt_case("matrix-stale", Some(matching), Some(stale), "", "", ["\"unknown\"", "build identity differs", "\"verdict\":\"reviewable\""])
+    run_receipt_case("matrix-missing", None, None, "", "", ["\"base_recorded\":false", "\"head_recorded\":false", "\"gained\":0", "\"lost\":0", "\"verdict\":\"reviewable\""])
+    mismatched_evidence :: proof_evidence("claim-shared", "d-shared", "passed", "checked", "target-1", 2, "schedule:v1")
+    mismatched :: proof_receipt([base_derivation], [mismatched_evidence])
+    run_receipt_case("matrix-mismatched", Some(matching), Some(mismatched), "", "", ["\"unknown\"", "declared inputs differ", "\"verdict\":\"reviewable\""])
+    changed_evidence :: proof_evidence("claim-shared", "d-shared", "failed", "checked", "target-1", 1, "schedule:v1")
+    changed :: proof_receipt([base_derivation], [changed_evidence])
+    run_receipt_case("matrix-changed", Some(matching), Some(changed), "", "", ["\"changed\":1", "\"first_difference\"", "first differing comparable event or result", "\"verdict\":\"reviewable\""])
+}
+
+// Rust: tests/review.rs:543
+#Test("review_receipt_fixture_matrix_tracks_gained_lost_changed_retained_and_authority_widening") {
+    retained_derivation :: checked_derivation("d-retained", "build-1", "run-1", "target-1", "event-retained")
+    changed_derivation :: checked_derivation("d-changed", "build-1", "run-1", "target-1", "event-changed")
+    lost_derivation :: checked_derivation("d-lost", "build-1", "run-1", "target-1", "event-lost")
+    gained_derivation :: checked_derivation("d-gained", "build-1", "run-1", "target-1", "event-gained")
+    base :: proof_receipt([retained_derivation, changed_derivation, lost_derivation], [
+        proof_evidence("claim-retained", "d-retained", "passed", "checked", "target-1", 1, "schedule:v1"),
+        proof_evidence("claim-changed", "d-changed", "passed", "checked", "target-1", 1, "schedule:v1"),
+        proof_evidence("claim-lost", "d-lost", "passed", "checked", "target-1", 1, "schedule:v1")
+    ])
+    head :: proof_receipt([retained_derivation, changed_derivation, gained_derivation], [
+        proof_evidence("claim-retained", "d-retained", "passed", "checked", "target-1", 1, "schedule:v1"),
+        proof_evidence("claim-changed", "d-changed", "failed", "checked", "target-1", 1, "schedule:v1"),
+        proof_evidence("claim-gained", "d-gained", "passed", "checked", "target-1", 1, "schedule:v1")
+    ])
+    run_receipt_case("matrix-gained-lost", Some(base), Some(head), "", "", ["\"gained\":1", "\"lost\":1", "\"changed\":1", "\"retained\":1", "\"verdict\":\"proof lost\""])
+    retained :: proof_receipt([checked_derivation("d-authority", "build-1", "run-1", "target-1", "event-authority")], [proof_evidence("claim-authority", "d-authority", "passed", "checked", "target-1", 1, "schedule:v1")])
+    run_receipt_case("matrix-authority-retained", Some(retained), Some(retained), "FS", "FS, Net", ["\"status\":\"widened\"", "\"lost\":0", "\"verdict\":\"authority widened\""])
+    lost :: proof_receipt([], [])
+    run_receipt_case("matrix-authority-lost", Some(retained), Some(lost), "FS", "FS, Net", ["\"status\":\"widened\"", "\"lost\":1", "\"verdict\":\"authority widened and proof lost\""])
+}
+
+// Rust: tests/review.rs:686
+#Test("review_classifies_authority_by_effect_set_relation_not_checkout_path") {
+    // Separate manifest paths never decide the allow-set classification.
+    for (name, base_allow, head_allow, expected_status, expected_verdict) in [
+        ("authority-identical", "IO, Mem", "IO, Mem", None, "reviewable"),
+        ("authority-narrowed", "FS, IO, Mem", "IO, Mem", Some("narrowed"), "reviewable"),
+        ("authority-widened", "IO, Mem", "FS, IO, Mem", Some("widened"), "authority widened"),
+        ("authority-incomparable", "FS, IO", "IO, Net", Some("changed"), "authority widened")
+    ] {
+        root :: scratch(name)
+        _ :: fs.remove_dir_all(root)
+        base :: project(&root, "base", base_allow, &REVIEW_SOURCE)
+        head :: project(&root, "head", head_allow, &REVIEW_SOURCE)
+        output :: review_command(&base, &head, None, None)
+        stdout :: String.from_utf8_lossy(output.stdout).into_owned()
+        assert(output.status.success(), "review `{name}` failed:\n{stdout}\n{String.from_utf8_lossy(output.stderr)}")
+        start :: stdout.find("\"authority\":{{\"changes\":[").unwrap_or_else(() -> panic("review `{name}` omitted authority changes:\n{stdout}"))
+        changes_tail := stdout[start..] // #4303
+        changes := changes_tail[..changes_tail.find("]}}").expect("authority changes end")] // #4303
+        match expected_status {
+            None -> assert_eq(changes.matches("\"status\":").count(), 0, "`{name}`: identical authority in another directory is not a change:\n{changes}")
+            Some(status) -> {
+                assert_eq(changes.matches("\"status\":").count(), 1, "`{name}` must report exactly the allow-set change:\n{changes}")
+                assert(changes.contains("\"status\":\"{status}\",\"key\":\"build_flag:security:package:authority.holds.allow\""), "`{name}` must classify the allow set as {status}:\n{changes}")
+            }
+        }
+        assert(stdout.contains("\"verdict\":\"{expected_verdict}\""), "`{name}` must have verdict {expected_verdict}:\n{stdout}")
+        _ :: fs.remove_dir_all(root)
+    }
+}
+
+// Rust: tests/review.rs:740
+#Test("review_receipt_fixture_matrix_refuses_duplicate_claim_and_derivation_ids") {
+    first_derivation :: checked_derivation("d-first", "build-1", "run-1", "target-1", "event-first")
+    second_derivation :: checked_derivation("d-second", "build-1", "run-1", "target-1", "event-second")
+    duplicate_claim :: proof_receipt([first_derivation, second_derivation], [
+        proof_evidence("claim-duplicate", "d-first", "passed", "checked", "target-1", 1, "schedule:v1"),
+        proof_evidence("claim-duplicate", "d-first", "passed", "checked", "target-1", 1, "schedule:v1")
+    ])
+    assert_receipt_refused("matrix-duplicate-claim", &duplicate_claim, "duplicate evidence claim")
+    duplicate_derivation :: proof_receipt([first_derivation, first_derivation], [proof_evidence("claim-duplicate-derivation", "d-first", "passed", "checked", "target-1", 1, "schedule:v1")])
+    assert_receipt_refused("matrix-duplicate-derivation", &duplicate_derivation, "duplicate derivation ids")
+}
+
+// Rust: tests/review.rs:794
+#Test("review_receipt_fixture_matrix_refuses_a_missing_receipt_path") {
+    root :: scratch("matrix-missing-path")
+    _ :: fs.remove_dir_all(root)
+    base :: project(&root, "base", "", &REVIEW_SOURCE)
+    head :: project(&root, "head", "", &REVIEW_SOURCE)
+    missing :: root.join("missing.jetproof")
+    output :: review_command(&base, &head, Some(missing), None)
+    assert(!output.status.success(), "missing receipt path unexpectedly succeeded: {String.from_utf8_lossy(output.stdout)}")
+    diagnostic :: "{String.from_utf8_lossy(output.stdout)}\n{String.from_utf8_lossy(output.stderr)}"
+    assert(diagnostic.contains("E2105"), "{diagnostic}")
+    assert(diagnostic.contains("Could not read receipt"), "{diagnostic}")
+    _ :: fs.remove_dir_all(root)
+}
+
+// Rust: tests/review.rs:817
+#Test("review_operation_fixture_matrix_ignores_changed_hash_receipts") {
+    root :: scratch("matrix-changed-hash")
+    _ :: fs.remove_dir_all(root)
+    base_source :: "fn report() -> Int {{\n    return 1\n}}\n"
+    head_source :: "fn summarize() -> Int {{\n    return 1\n}}\n"
+    base :: project(&root, "base", "", &base_source)
+    head :: project(&root, "head", "", &head_source)
+    after_hash :: sha256_hex(head_source.as_bytes())
+    write(&head.join(".jet/codemods/rename.log.json"), "{{\"schema\":2,\"semantic_ops\":[{{\"kind\":\"rename\",\"from\":\"report\",\"to\":\"summarize\"}}],\"files\":[{{\"path\":\"{head.join("run.jet").display()}\",\"before_hash\":\"stale-before-hash\",\"after_hash\":\"{after_hash}\"}}]}}")
+    output :: review_command(&base, &head, None, None)
+    assert(output.status.success(), "changed-hash operation fixture failed: {String.from_utf8_lossy(output.stderr)}")
+    stdout :: String.from_utf8(output.stdout).expect("UTF-8 review output")
+    assert(!stdout.contains("\"kind\":\"renamed\""), "stale operation receipt was accepted:\n{stdout}")
+    _ :: fs.remove_dir_all(root)
+}
+
+// Rust: tests/review.rs:848
+#Test("review_observation_identity_mismatches_remain_unknown") {
+    derivation :: (build: String, run: String, target: String, premise: String) -> "{{\"id\":\"d-shared\",\"subject\":\"value\",\"claim\":\"value:contract\",\"producer\":\"test\",\"method\":\"formal_proof\",\"rule\":\"same-inputs\",\"premises\":[\"{premise}\"],\"identity\":{{\"source\":\"review-source\",\"build\":\"{build}\",\"run\":\"{run}\",\"target\":\"{target}\"}}, \"assumptions\":[\"finite-input\"],\"disposition\":\"current\",\"observation\":{{\"event\":\"event-1\",\"counterexample\":null}}}}"
+    evidence :: (contract: String, target: String, premise: String) -> "{{\"id\":\"claim-shared\",\"claimId\":\"claim-shared\",\"kind\":\"contract\",\"facet\":\"contracts\",\"producer\":\"test\",\"outcome\":\"passed\",\"state\":\"checked\",\"contract\":{{\"marker\":\"{contract}\",\"observation\":\"reached\"}},\"inputs\":{{\"arg\":1}},\"environment\":{{\"target\":\"{target}\"}},\"premises\":[\"{premise}\"],\"derivation\":{{\"id\":\"d-shared\"}}}}"
+    run_case :: (name: String, base_derivation: String, head_derivation: String, base_evidence: String, head_evidence: String, reason: String) -> {
+        base :: proof_receipt([base_derivation], [base_evidence])
+        head :: proof_receipt([head_derivation], [head_evidence])
+        run_receipt_case(name, Some(base), Some(head), "", "", ["\"unknown\"", reason])
+    }
+    run_case("observation-contract-mismatch", derivation("build-1", "run-1", "target-1", "schedule:v1"), derivation("build-1", "run-1", "target-1", "schedule:v1"), evidence("contract-a", "target-1", "schedule:v1"), evidence("contract-b", "target-1", "schedule:v1"), "observation contract differs")
+    run_case("observation-environment-mismatch", derivation("build-1", "run-1", "target-1", "schedule:v1"), derivation("build-1", "run-1", "target-1", "schedule:v1"), evidence("contract", "target-1", "schedule:v1"), evidence("contract", "target-2", "schedule:v1"), "relevant environment identity differs")
+    run_case("observation-premise-mismatch", derivation("build-1", "run-1", "target-1", "schedule:v1"), derivation("build-1", "run-1", "target-1", "schedule:v2"), evidence("contract", "target-1", "schedule:v1"), evidence("contract", "target-1", "schedule:v1"), "numerical or scheduling premises differ")
+    run_case("observation-build-mismatch", derivation("build-1", "run-1", "target-1", "schedule:v1"), derivation("build-2", "run-1", "target-1", "schedule:v1"), evidence("contract", "target-1", "schedule:v1"), evidence("contract", "target-1", "schedule:v1"), "build identity differs")
+    run_case("observation-run-mismatch", derivation("build-1", "run-1", "target-1", "schedule:v1"), derivation("build-1", "run-2", "target-1", "schedule:v1"), evidence("contract", "target-1", "schedule:v1"), evidence("contract", "target-1", "schedule:v1"), "run identity differs")
+    run_case("observation-target-mismatch", derivation("build-1", "run-1", "target-1", "schedule:v1"), derivation("build-1", "run-1", "target-2", "schedule:v1"), evidence("contract", "target-1", "schedule:v1"), evidence("contract", "target-2", "schedule:v1"), "target identity differs")
+}
+
+// Rust: tests/review.rs:921
+#Test("review_equal_sampled_observations_are_not_universal") {
+    sampled_derivation :: checked_derivation("d-sampled", "build-1", "run-1", "target-1", "event-sampled").replace("\"method\":\"formal_proof\"", "\"method\":\"sampled_agreement\"")
+    evidence :: proof_evidence("claim-sampled", "d-sampled", "passed", "checked", "target-1", 1, "schedule:v1")
+    receipt :: proof_receipt([sampled_derivation], [evidence])
+    run_receipt_case("observation-sampled-agreement", Some(receipt), Some(receipt), "", "", ["\"sampled_agreements\":[", "equal sampled traces do not establish universal equivalence", "\"verdict\":\"reviewable\""])
+}
+
+// Rust: tests/review.rs:958
+#Test("review_reports_effect_changes_as_checked_semantic_operations") {
+    root :: scratch("effect-change")
+    _ :: fs.remove_dir_all(root)
+    base :: project(&root, "base", "", "fn report() -> Int {{ return 1 }}\n")
+    head :: project(&root, "head", "", "fn report() -[IO]> Int {{\n    print(\"head\")\n    return 1\n}}\n")
+    output :: review_command(&base, &head, None, None)
+    assert(output.status.success(), "effect review failed: {String.from_utf8_lossy(output.stderr)}")
+    stdout :: String.from_utf8(output.stdout).expect("UTF-8 review output")
+    assert(stdout.contains("\"kind\":\"effect_changed\""), "{stdout}")
+    assert(stdout.contains("\"alignment\":\"matched\""), "{stdout}")
+    _ :: fs.remove_dir_all(root)
+}
+
+// Rust: tests/review.rs:989
+#Test("review_aligns_signature_changes_by_checked_identity") {
+    root :: scratch("signature-change")
+    _ :: fs.remove_dir_all(root)
+    base :: project(&root, "base", "", "fn report() -> Int {{\n    return 1\n}}\n")
+    head :: project(&root, "head", "", "fn report(value: Int) -> Int {{\n    return value\n}}\n")
+    output :: review_command(&base, &head, None, None)
+    assert(output.status.success(), "signature review failed")
+    stdout :: String.from_utf8(output.stdout).expect("UTF-8 review output")
+    assert(stdout.contains("\"kind\":\"signature_changed\""), "{stdout}")
+    _ :: fs.remove_dir_all(root)
+}
+
+// Rust: tests/review.rs:1014
+#Test("review_receipts_bind_to_sides_and_do_not_infer_proof") {
+    derivation :: (id: String, method: String, disposition: String) -> "{{\"id\":\"{id}\",\"subject\":\"value\",\"claim\":\"value:contract\",\"producer\":\"test\",\"method\":\"{method}\",\"rule\":\"same-inputs\",\"premises\":[\"schedule:v1\"],\"identity\":{{\"source\":\"review-source\",\"build\":\"build-1\",\"run\":\"run-1\",\"target\":\"target-1\"}}, \"assumptions\":[\"finite-input\"],\"disposition\":\"{disposition}\",\"observation\":{{\"event\":\"event-1\",\"counterexample\":null}}}}"
+    evidence :: (claim_id: String, derivation_id: String) -> "{{\"id\":\"{claim_id}\",\"claimId\":\"{claim_id}\",\"kind\":\"contract\",\"facet\":\"contracts\",\"producer\":\"test\",\"outcome\":\"passed\",\"state\":\"proved\",\"contract\":{{\"marker\":\"review\",\"observation\":\"reached\"}},\"inputs\":{{\"arg\":1}},\"environment\":{{\"target\":\"target-1\"}},\"premises\":[\"schedule:v1\"],\"derivation\":{{\"id\":\"{derivation_id}\"}}}}"
+    root :: scratch("receipt-binding")
+    _ :: fs.remove_dir_all(root)
+    base :: project(&root, "base", "", &REVIEW_SOURCE)
+    head :: project(&root, "head", "", &REVIEW_SOURCE)
+    base_receipt :: root.join("base.jetproof")
+    head_receipt :: root.join("head.jetproof")
+    write(&base_receipt, &proof_receipt([derivation("base-derivation", "formal_proof", "current")], [evidence("base-claim", "base-derivation")]))
+    write(&head_receipt, &proof_receipt([derivation("head-derivation", "formal_proof", "current")], [evidence("head-claim", "head-derivation")]))
+    output :: review_command(&base, &head, Some(base_receipt), Some(head_receipt))
+    assert(output.status.success(), "receipt binding failed")
+    stdout :: String.from_utf8(output.stdout).expect("UTF-8 review output")
+    assert(stdout.contains("\"base_recorded\":true"))
+    assert(stdout.contains("\"head_recorded\":true"))
+    assert(stdout.contains("\"gained\":1"))
+    assert(stdout.contains("\"lost\":1"))
+    assert(stdout.contains("\"schema\":\"jet.review/v2\""), "{stdout}")
+    assert(stdout.contains("\"snapshots\""), "{stdout}")
+    assert(stdout.contains("\"inputs\":[{{\"path\":"), "{stdout}")
+    assert(stdout.contains("\"entry\":\""), "{stdout}")
+    assert(stdout.contains("\"digest\":\""), "{stdout}")
+    assert(stdout.contains("\"claim_key\":null"), "{stdout}")
+    assert(stdout.contains("\"proof_receipt\":{{\"path\":"), "{stdout}")
+    assert(stdout.contains("\"closure\":\"entry_only\"") || stdout.contains("\"closure\":\"complete\""), "{stdout}")
+    external_receipt :: root.join("external.jetproof")
+    write(&external_receipt, &proof_receipt([derivation("shared-derivation", "formal_proof", "external")], [evidence("shared-claim", "shared-derivation")]))
+    external_output :: review_command(&base, &head, Some(external_receipt), Some(external_receipt))
+    assert(external_output.status.success(), "external receipt review failed")
+    external_stdout :: String.from_utf8(external_output.stdout).expect("UTF-8 review output")
+    assert(external_stdout.contains("\"unproved\""))
+    assert(external_stdout.contains("not a checked universal contract"))
+    _ :: fs.remove_dir_all(root)
+}
+
+// Rust: tests/review.rs:1089
+#Test("review_without_receipts_reports_unknown_provenance") {
+    root :: scratch("unknown-provenance")
+    _ :: fs.remove_dir_all(root)
+    base :: project(&root, "base", "", &REVIEW_SOURCE)
+    head :: project(&root, "head", "", &REVIEW_SOURCE)
+    output :: review_command(&base, &head, None, None)
+    assert(output.status.success(), "review without receipts failed")
+    stdout :: String.from_utf8(output.stdout).expect("UTF-8 review output")
+    assert(stdout.contains("\"schema\":\"jet.review/v2\""), "{stdout}")
+    assert(stdout.contains("\"claim_key\":null"), "{stdout}")
+    assert(stdout.contains("\"closure\":\"unknown\""), "{stdout}")
+    assert(stdout.contains("\"proof_receipt\":null"), "{stdout}")
+    _ :: fs.remove_dir_all(root)
+}
+
+// Rust: tests/review.rs:1107
+#Test("review_with_checked_dependency_reports_complete_provenance") {
+    root :: scratch("complete-provenance")
+    _ :: fs.remove_dir_all(root)
+    source :: "use \"./dep\" as dep\n\nfn run() {{\n    dep.call()\n}}\n"
+    base :: project(&root, "base", "", &source)
+    head :: project(&root, "head", "", &source)
+    write(&base.join("dep.jet"), "pub fn call() {{\n}}\n")
+    write(&head.join("dep.jet"), "pub fn call() {{\n}}\n")
+    base_receipt :: root.join("base.jetproof")
+    head_receipt :: root.join("head.jetproof")
+    write(&base_receipt, "{{\"claim_key\":\"base-claim\",\"proofReport\":{{\"derivations\":[],\"evidence\":[]}}}}")
+    write(&head_receipt, "{{\"claim_key\":\"head-claim\",\"proofReport\":{{\"derivations\":[],\"evidence\":[]}}}}")
+    output :: review_command(&base, &head, Some(base_receipt), Some(head_receipt))
+    assert(output.status.success(), "complete provenance review failed")
+    stdout :: String.from_utf8(output.stdout).expect("UTF-8 review output")
+    assert(stdout.contains("\"closure\":\"complete\""), "{stdout}")
+    assert(stdout.contains("dep.jet"), "{stdout}")
+    assert(stdout.contains("\"claim_key\":\"base-claim\""), "{stdout}")
+    assert(stdout.contains("\"claim_key\":\"head-claim\""), "{stdout}")
+    _ :: fs.remove_dir_all(root)
+}
+
+// Rust: tests/review.rs:1138
+#Test("review_default_rejects_error_bearing_side") {
+    root :: scratch("default-error-side")
+    _ :: fs.remove_dir_all(root)
+    base :: project(&root, "base", "", &REVIEW_SOURCE)
+    head :: project(&root, "head", "", "fn run() {{ missing() }}\n")
+    output :: review_command(&base, &head, None, None)
+    assert(!output.status.success(), "default semantic review unexpectedly accepted an error-bearing side: {String.from_utf8_lossy(output.stdout)}")
+    diagnostic :: "{String.from_utf8_lossy(output.stdout)}\n{String.from_utf8_lossy(output.stderr)}"
+    assert(diagnostic.contains("E"), "default semantic review omitted its checker diagnostic:\n{diagnostic}")
+    _ :: fs.remove_dir_all(root)
+}
+
+// Rust: tests/review.rs:1164
+#Test("review_diagnostics_mode_compares_error_occurrences_without_receipts") {
+    root :: scratch("diagnostics-statuses")
+    _ :: fs.remove_dir_all(root)
+    clean :: project(&root, "clean", "", "fn run() {{}}\n")
+    broken :: project(&root, "broken", "", "fn run() {{ missing() }}\n")
+    output :: diagnostic_review_command(&clean, &broken)
+    assert(output.status.success(), "diagnostic review failed: {String.from_utf8_lossy(output.stderr)}")
+    stdout :: String.from_utf8(output.stdout).expect("UTF-8 review output")
+    assert(stdout.starts_with("{{\"schema\":\"jet.diagnostic-review/v1\""))
+    assert(stdout.contains("\"base\""))
+    assert(stdout.contains("\"head\""))
+    assert(stdout.contains("\"valid\":true"))
+    assert(stdout.contains("\"valid\":false"))
+    assert(stdout.contains("\"origin\""))
+    assert(stdout.contains("\"cause\""))
+    assert(!stdout.contains("jet.status/v1"))
+    reverse :: diagnostic_review_command(&broken, &clean)
+    assert(reverse.status.success(), "reverse diagnostic review failed")
+    reverse_stdout :: String.from_utf8(reverse.stdout).expect("UTF-8 review output")
+    assert(reverse_stdout.contains("\"status\":\"resolved\""))
+    existing :: diagnostic_review_command(&broken, &broken)
+    assert(existing.status.success(), "existing diagnostic review failed")
+    existing_stdout :: String.from_utf8(existing.stdout).expect("UTF-8 review output")
+    assert(existing_stdout.contains("\"status\":\"existing\""))
+    _ :: fs.remove_dir_all(root)
+}
+
+// Rust: tests/review.rs:1200
+#Test("review_diagnostics_mode_keeps_moved_same_code_unknown") {
+    root :: scratch("diagnostics-moved")
+    _ :: fs.remove_dir_all(root)
+    base :: project(&root, "base", "", "fn run() {{ missing() }}\n")
+    head :: project(&root, "head", "", "fn run() {{\n    print(\"x\")\n    missing()\n}}\n")
+    output :: diagnostic_review_command(&base, &head)
+    assert(output.status.success(), "moved diagnostic review failed")
+    stdout :: String.from_utf8(output.stdout).expect("UTF-8 review output")
+    assert(stdout.contains("\"status\":\"unknown\""))
+    assert(stdout.contains("different location"))
+    assert(!stdout.contains("\"status\":\"resolved\""))
+    assert(!stdout.contains("\"status\":\"new\""))
+    _ :: fs.remove_dir_all(root)
+}
+
+// Rust: tests/review.rs:1222
+#Test("review_diagnostics_mode_keeps_repeated_same_code_unknown") {
+    root :: scratch("diagnostics-repeated")
+    _ :: fs.remove_dir_all(root)
+    base :: project(&root, "base", "", "fn run() {{\n    missing()\n    missing()\n}}\n")
+    head :: project(&root, "head", "", "fn run() {{\n    missing()\n}}\n")
+    output :: diagnostic_review_command(&base, &head)
+    assert(output.status.success(), "repeated diagnostic review failed: {String.from_utf8_lossy(output.stderr)}")
+    stdout :: String.from_utf8(output.stdout).expect("UTF-8 review output")
+    assert(stdout.contains("\"status\":\"unknown\""))
+    assert(stdout.contains("same-code occurrence has a different location"))
+    assert(!stdout.contains("\"status\":\"resolved\""))
+    _ :: fs.remove_dir_all(root)
+}
+
+// Rust: tests/review.rs:1248
+#Test("review_diagnostics_mode_keeps_changed_dependency_unknown") {
+    root :: scratch("diagnostics-dependency")
+    _ :: fs.remove_dir_all(root)
+    source :: "use project.dep as dep\nfn run() {{\n    dep.call()\n}}\n"
+    base :: project(&root, "base", "", &source)
+    head :: project(&root, "head", "", &source)
+    write(&base.join("dep.jet"), "module dep {{\n    pub fn call() {{\n        missing()\n    }}\n}}\n")
+    write(&head.join("dep.jet"), "module dep {{\n    pub fn call() {{\n        missing()\n    }}\n}}\n// dependency changed\n")
+    output :: diagnostic_review_command(&base, &head)
+    assert(output.status.success(), "dependency diagnostic review failed: {String.from_utf8_lossy(output.stderr)}")
+    stdout :: String.from_utf8(output.stdout).expect("UTF-8 review output")
+    assert(stdout.contains("\"status\":\"unknown\""))
+    assert(stdout.contains("diagnostic source snapshot changed in a dependency scope"))
+    assert(stdout.contains("dep.jet"))
+    _ :: fs.remove_dir_all(root)
+}
+
+// Rust: tests/review.rs:1288
+#Test("review_diagnostics_mode_exposes_incomplete_missing_import_coverage") {
+    root :: scratch("diagnostics-incomplete")
+    _ :: fs.remove_dir_all(root)
+    base :: project(&root, "base", "", "fn run() {{}}\n")
+    head :: project(&root, "head", "", "use project.missing\nfn run() {{}}\n")
+    output :: diagnostic_review_command(&base, &head)
+    assert(output.status.success(), "incomplete diagnostic review failed: {String.from_utf8_lossy(output.stderr)}")
+    stdout :: String.from_utf8(output.stdout).expect("UTF-8 review output")
+    assert(stdout.contains("\"schema\":\"jet.diagnostic-review/v1\""))
+    assert(stdout.contains("\"complete\":false"))
+    assert(stdout.contains("\"completeness\":\"incomplete\""))
+    assert(stdout.contains("\"status\":\"unknown\""))
+    assert(!stdout.contains("\"status\":\"new\""))
+    _ :: fs.remove_dir_all(root)
+}
+
+// Rust: tests/review.rs:1316
+#Test("review_diagnostics_mode_setup_failure_is_nonzero") {
+    root :: scratch("diagnostics-setup-failure")
+    _ :: fs.remove_dir_all(root)
+    missing :: root.join("missing").join("run.jet")
+    head :: project(&root, "head", "", "fn run() {{}}\n")
+    output :: Command.new(env.var_os("CARGO_BIN_EXE_jet").expect("native Jet test executable")).args(["review", missing.to_str().expect("UTF-8 missing entry"), head.join("run.jet").to_str().expect("UTF-8 head"), "--diagnostics", "--json"]).env("NO_COLOR", "1").output().expect("run diagnostic review")
+    assert(!output.status.success())
+    diagnostic :: "{String.from_utf8_lossy(output.stdout)}\n{String.from_utf8_lossy(output.stderr)}"
+    assert(diagnostic.contains("E2105"))
+    _ :: fs.remove_dir_all(root)
+}

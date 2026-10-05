@@ -1,0 +1,304 @@
+use jetpack_provider.[provider_normalize_document, ProviderFamily]
+use jet_pkg_model.[ProviderFactValue, ProviderFacts]
+
+// Rust: crates/jetpack/src/ProviderGraph.rs:5783
+#Test("lock_uses_canonical_carrier_and_retains_raw_reference") {
+    native :: "{\"name\":\"web\",\"version\":\"1.0.0\",\"dependencies\":{\"vite\":\"5\"}}"
+    report :: provider_normalize_document(ProviderFamily.Npm, native)
+    report.validate() ?? panic("lossless provider report")
+    shared :: report.shared_facts()
+    lock :: report.lock_record("app", "web@npm#1.0.0", "any") ?? panic("canonical provider lock")
+    locked :: ProviderFacts.from_json(lock.future_fields.get("provider-facts") ?? panic("provider facts in lock")) ?? panic("locked provider facts JSON")
+    assert_eq(locked, shared)
+    assert_eq(lock.rationales[0].source_ref, "web@npm#1.0.0")
+}
+
+// Rust: crates/jetpack/src/ProviderGraph.rs:5802
+#Test("unpinned_alias_lowers_resolved_selector_and_typed_native_facts") {
+    native :: "{\"name\":\"web\",\"version\":\"1.0.0\",\"yanked\":false}"
+    report :: provider_normalize_document(ProviderFamily.Npm, native)
+    shared :: report.shared_facts_for("web@catalog")
+    shared.validate() ?? panic("provider alias remains lossless")
+    assert_eq(shared.qualified_reference(), "web#version=1.0.0@catalog")
+    assert_eq(shared.facts.get("provider.resolved_selector"), Val(ProviderFactValue.Text("#version=1.0.0")))
+    assert_eq(shared.facts.get("provider.npm.native.yanked"), Val(ProviderFactValue.List([ProviderFactValue]{ProviderFactValue.Bool(false)})))
+    lock :: report.lock_record("app", "web@catalog", "any") ?? panic("provider alias lock")
+    assert_eq(lock.identity.exact, "web#version=1.0.0@catalog")
+    locked :: ProviderFacts.from_json(lock.future_fields.get("provider-facts") ?? panic("provider facts in lock")) ?? panic("locked provider facts")
+    locked.validate() ?? panic("locked alias provider facts")
+    assert_eq(locked.reference, "web@catalog")
+}
+
+// Rust: crates/jetpack/src/ProviderGraph.rs:5834
+#Test("npm_conformance_retains_native_and_typed_provider_facts") {
+    native :: "{\"name\":\"web\",\"version\":\"2.0.0\",\"license\":\"MIT\",\"dependencies\":{\"vite\":\"5.4.0\"},\"devDependencies\":{\"typescript\":\"5.5.0\"},\"optionalDependencies\":{\"fsevents\":\"2.3.3\"},\"peerDependencies\":{\"react\":\"18.3.1\"},\"scripts\":{\"build\":\"vite build\"},\"bin\":{\"web\":\"bin/web.js\"},\"os\":[\"linux\",\"darwin\"],\"cpu\":\"x64\",\"engines\":{\"node\":\">=20\"},\"repository\":{\"type\":\"git\",\"url\":\"https://example.invalid/web.git\"},\"dist\":{\"integrity\":\"sha512-abc\"}}"
+    report :: provider_normalize_document(ProviderFamily.Npm, native)
+    report.validate() ?? panic("npm provider facts are lossless")
+    assert_eq(report.native_format, "json")
+    assert_eq(report.native_document, native)
+    assert_eq(report.facts.dependencies, [String]{"vite"})
+    assert_eq(report.facts.dev_dependencies, [String]{"typescript"})
+    assert(report.facts.platforms.contains("os:linux"))
+    assert(report.facts.typed.has_key("provider.npm.hook.build"))
+    assert(report.facts.typed.has_key("provider.npm.variant.engine.node"))
+    assert(report.shared_facts().facts.has_key("provider.npm.native.repository"))
+}
+
+// Rust: crates/jetpack/src/ProviderGraph.rs:5858
+#Test("npm_pretty_documents_and_malformed_typed_fields_stay_explicit") {
+    pretty :: "{\n  \"name\": \"web\",\n  \"version\": \"1.0.0\",\n  \"dist\": {\"integrity\": \"sha512-abc\"}\n}"
+    report :: provider_normalize_document(ProviderFamily.Npm, pretty)
+    report.validate() ?? panic("pretty npm JSON remains lossless")
+    assert_eq(report.native_document, pretty)
+    malformed :: provider_normalize_document(ProviderFamily.Npm, "{\"name\":\"web\",\"version\":\"1.0.0\",\"bin\":{\"web\":1},\"engines\":{\"node\":20},\"dist\":{\"integrity\":false}}")
+    assert(malformed.losses.iter().any(fn(loss) -> loss.contains("bin") && loss.contains("strings")))
+    assert(malformed.losses.iter().any(fn(loss) -> loss.contains("engine") && loss.contains("string")))
+    assert(malformed.losses.iter().any(fn(loss) -> loss.contains("dist field `integrity`")))
+    assert(malformed.validate().is_err())
+}
+
+// Rust: crates/jetpack/src/ProviderGraph.rs:5884
+#Test("cargo_conformance_retains_lock_variants_hooks_and_source_ownership") {
+    native :: "[package]\nname = \"app\"\nversion = \"1.0.0\"\nlicense = \"MIT\"\nrepository = \"https://example.invalid/app.git\"\nbuild = \"build.rs\"\n\n[dependencies]\nserde = \"1.0\"\n\n[target.x86_64-unknown-linux-gnu.dependencies]\ncc = \"1.0\"\n\n[features]\ndefault = [\"serde\"]\n\n[[package]]\nname = \"app\"\nversion = \"1.0.0\"\n\n[[package]]\nname = \"serde\"\nversion = \"1.0.200\"\nsource = \"registry+https://example.invalid\"\nchecksum = \"abc123\"\n"
+    report :: provider_normalize_document(ProviderFamily.Cargo, native)
+    report.validate() ?? panic("Cargo provider facts are lossless")
+    assert(report.facts.dependencies.contains("serde"))
+    assert(report.facts.dependencies.contains("cc"))
+    assert(report.facts.scripts.contains("build.rs"))
+    assert(report.facts.typed.has_key("provider.cargo.variant.feature.default"))
+    assert(report.facts.typed.has_key("provider.cargo.lock.serde.checksum"))
+    assert(report.shared_facts().facts.has_key("provider.cargo.source.repository"))
+}
+
+// Rust: crates/jetpack/src/ProviderGraph.rs:5933
+#Test("cargo_comments_keep_identity_and_malformed_fields_report_loss") {
+    commented :: "[package]\nname = \"app\" # package name\nversion = \"1.0.0\" # package version\n"
+    report :: provider_normalize_document(ProviderFamily.Cargo, commented)
+    report.validate() ?? panic("Cargo inline comments do not change identity")
+    assert_eq(report.facts.name, "app")
+    assert_eq(report.facts.version, "1.0.0")
+    malformed :: provider_normalize_document(ProviderFamily.Cargo, "[package]\nname = 7\nversion = \"1.0.0\"\n[dependencies]\nserde = false\n")
+    assert(malformed.losses.iter().any(fn(loss) -> loss.contains("package field `name`")))
+    assert(malformed.losses.iter().any(fn(loss) -> loss.contains("dependency `serde`")))
+    assert(malformed.validate().is_err())
+    missing_checksum :: provider_normalize_document(ProviderFamily.Cargo, "[package]\nname = \"app\"\nversion = \"1.0.0\"\n[[package]]\nname = \"serde\"\nversion = \"1.0.200\"\nsource = \"registry+https://example.invalid\"\n")
+    assert(missing_checksum.losses.iter().any(fn(loss) -> loss.contains("registry package") && loss.contains("checksum")))
+    assert(missing_checksum.validate().is_err())
+}
+
+// Rust: crates/jetpack/src/ProviderGraph.rs:5971
+#Test("nix_conformance_retains_native_and_typed_provider_facts") {
+    native :: "{\"pname\":\"ripgrep\",\"version\":\"14.1.1\",\"drvPath\":\"/nix/store/hash-ripgrep-14.1.1.drv\",\"narHash\":\"sha256-0123456789012345678901234567890123456789012=\",\"inputDrvs\":{\"/nix/store/hash-openssl.drv\":[\"out\"]},\"buildInputs\":[\"openssl\"],\"nativeBuildInputs\":[\"pkg-config\"],\"system\":\"x86_64-linux\",\"platforms\":[\"linux\"],\"license\":\"BSD-3-Clause\",\"builder\":\"/bin/bash\",\"signatures\":[\"cache.nixos.org\"],\"owner\":\"nixos\",\"repository\":\"NixOS/nixpkgs\",\"advisories\":[\"CVE-0000-0000\"],\"meta\":{\"license\":\"BSD-3-Clause\",\"platforms\":[\"x86_64-linux\"]}}"
+    report :: provider_normalize_document(ProviderFamily.Nix, native)
+    report.validate() ?? panic("Nix provider facts are lossless")
+    assert_eq(report.native_format, "json")
+    assert_eq(report.native_document, native)
+    assert_eq(report.facts.name, "ripgrep")
+    assert_eq(report.facts.version, "14.1.1")
+    assert(report.facts.build_dependencies.contains("openssl"))
+    assert(report.facts.typed.has_key("provider.nix.dependency.build"))
+    assert(report.facts.typed.has_key("provider.nix.hook.builder"))
+    assert(report.facts.typed.has_key("provider.nix.variant.system"))
+    assert(report.facts.typed.has_key("provider.nix.signature.signatures"))
+    assert(report.facts.typed.has_key("provider.nix.source.repository"))
+    assert(report.shared_facts().facts.has_key("provider.nix.native.meta"))
+    flake_lock :: "{\"name\":\"nixpkgs\",\"version\":\"24.05\",\"root\":\"root\",\"nodes\":{\"root\":{\"locked\":{\"type\":\"github\",\"owner\":\"NixOS\",\"repo\":\"nixpkgs\",\"rev\":\"0123456789abcdef0123456789abcdef01234567\"}}}}"
+    flake_report :: provider_normalize_document(ProviderFamily.Nix, flake_lock)
+    flake_report.validate() ?? panic("Nix flake lock source facts are lossless")
+    assert_eq(flake_report.facts.source_identity, "github:NixOS/nixpkgs@0123456789abcdef0123456789abcdef01234567")
+    assert(flake_report.shared_facts().facts.has_key("provider.nix.source.locked.root.rev"))
+    shared :: report.shared_facts()
+    exported :: ProviderFacts.from_json(report.export_json()) ?? panic("Nix provider export uses the shared carrier")
+    assert_eq(exported, shared)
+    assert(shared.explain_lines().iter().any(fn(line) -> line == "native json: retained"))
+    locked :: report.lock_record("app", "ripgrep@nix#version=14.1.1", "x86_64-linux") ?? panic("Nix provider lock uses the shared carrier")
+    locked_facts :: ProviderFacts.from_json(locked.future_fields.get("provider-facts") ?? panic("Nix provider facts in lock")) ?? panic("locked Nix provider facts")
+    assert_eq(locked_facts, shared)
+}
+
+// Rust: crates/jetpack/src/ProviderGraph.rs:6045
+#Test("nix_conformance_reports_loss_and_conflict_in_native_facts") {
+    missing_source :: provider_normalize_document(ProviderFamily.Nix, "{\"pname\":\"ripgrep\",\"version\":\"14.1.1\",\"buildInputs\":[\"openssl\"]}")
+    assert(missing_source.validate().is_err())
+    assert(missing_source.losses.iter().any(fn(loss) -> loss.contains("immutable source identity")))
+    mutable_lock :: provider_normalize_document(ProviderFamily.Nix, "{\"pname\":\"ripgrep\",\"version\":\"14.1.1\",\"locked\":{\"type\":\"github\",\"owner\":\"NixOS\",\"repo\":\"nixpkgs\",\"rev\":\"main\"}}")
+    assert(mutable_lock.validate().is_err())
+    assert(mutable_lock.losses.iter().any(fn(loss) -> loss.contains("complete immutable owner/revision identity")))
+    lossy :: provider_normalize_document(ProviderFamily.Nix, "{\"pname\":\"ripgrep\",\"version\":\"14.1.1\",\"drvPath\":\"/nix/store/hash-ripgrep-14.1.1.drv\",\"platforms\":1,\"yanked\":\"unknown\",\"inputDrvs\":[1]}")
+    assert(lossy.validate().is_err())
+    assert(lossy.losses.iter().any(fn(loss) -> loss.contains("platforms")))
+    assert(lossy.losses.iter().any(fn(loss) -> loss.contains("yanked")))
+    assert(lossy.losses.iter().any(fn(loss) -> loss.contains("inputDrvs")))
+    conflicting :: provider_normalize_document(ProviderFamily.Nix, "[{\"pname\":\"ripgrep\",\"version\":\"14.1.1\",\"drvPath\":\"/nix/store/hash-ripgrep-14.1.1.drv\",\"owner\":\"nixos\"},{\"pname\":\"ripgrep\",\"version\":\"14.1.1\",\"drvPath\":\"/nix/store/hash-ripgrep-14.1.1.drv\",\"owner\":\"other\"}]")
+    assert(conflicting.validate().is_err())
+    assert(conflicting.conflicts.iter().any(fn(conflict) -> conflict.contains("conflicts with the first native record")))
+}
+
+// Rust: crates/jetpack/src/ProviderGraph.rs:6090
+#Test("jet_registry_conformance_retains_attestation_and_yank_facts") {
+    native :: "{\"name\":\"web\",\"version\":\"1.0.0\",\"content_hash\":\"sha256-web\",\"license\":\"MIT\",\"platforms\":[\"linux\"],\"yanked\":true,\"tier\":\"trusted\",\"gate_status\":\"passed\",\"public_key\":\"pk\",\"signature\":\"sig\",\"owner\":\"team-web\",\"source\":{\"kind\":\"git\",\"url\":\"https://example.invalid/web.git\"},\"advisories\":[\"CVE-0000-0000\"],\"variants\":{\"debug\":{\"features\":[\"trace\"]}},\"hooks\":{\"build\":{\"digest\":\"hook-digest\"}}}"
+    report :: provider_normalize_document(ProviderFamily.JetRegistry, native)
+    report.validate() ?? panic("Jet registry facts are lossless")
+    assert_eq(report.facts.integrity_hash, "sha256-web")
+    assert(report.facts.typed.has_key("provider.registry.signature"))
+    assert(report.facts.typed.has_key("provider.registry.yanked"))
+    assert(report.shared_facts().facts.has_key("provider.registry.native.source"))
+}
+
+// Rust: crates/jetpack/src/ProviderGraph.rs:6107
+#Test("jet_registry_pretty_json_retains_native_document") {
+    native :: "{\n  \"name\": \"web\",\n  \"version\": \"1.0.0\",\n  \"content_hash\": \"sha256-web\"\n}"
+    report :: provider_normalize_document(ProviderFamily.JetRegistry, native)
+    report.validate() ?? panic("pretty registry JSON remains lossless")
+    assert_eq(report.native_document, native)
+    assert_eq(report.facts.name, "web")
+    assert_eq(report.facts.version, "1.0.0")
+    malformed :: provider_normalize_document(ProviderFamily.JetRegistry, "{\"name\":\"web\",\"version\":\"1.0.0\",\"content_hash\":\"sha256-web\",\"hooks\":[],\"source\":false}")
+    assert(malformed.losses.iter().any(fn(loss) -> loss.contains("hooks") && loss.contains("shape")))
+    assert(malformed.losses.iter().any(fn(loss) -> loss.contains("source") && loss.contains("shape")))
+    assert(malformed.validate().is_err())
+}
+
+// Rust: crates/jetpack/src/ProviderGraph.rs:6133
+#Test("provider_conformance_reports_ambiguous_and_conflicting_native_facts") {
+    packument :: "{\"name\":\"web\",\"versions\":{\"1.0.0\":{\"name\":\"web\",\"version\":\"1.0.0\"},\"2.0.0\":{\"name\":\"web\",\"version\":\"2.0.0\"}}}"
+    report :: provider_normalize_document(ProviderFamily.Npm, packument)
+    assert(report.validate().is_err())
+    assert(report.losses.iter().any(fn(loss) -> loss.contains("multiple versions")))
+    registry :: "{\"name\":\"web\",\"version\":\"1.0.0\",\"content_hash\":\"sha256-a\"}\n{\"name\":\"web\",\"version\":\"2.0.0\",\"content_hash\":\"sha256-b\"}"
+    other :: provider_normalize_document(ProviderFamily.JetRegistry, registry)
+    assert(other.validate().is_err())
+    assert(other.losses.iter().any(fn(loss) -> loss.contains("multiple package identities")))
+    conflicting_registry :: "{\"name\":\"web\",\"version\":\"1.0.0\",\"content_hash\":\"sha256-a\"}\n{\"name\":\"web\",\"version\":\"1.0.0\",\"content_hash\":\"sha256-b\"}"
+    conflict :: provider_normalize_document(ProviderFamily.JetRegistry, conflicting_registry)
+    assert(conflict.validate().is_err())
+    assert(conflict.conflicts.iter().any(fn(item) -> item.contains("conflicting native facts")))
+}
+
+// Rust: crates/jetpack/src/ProviderGraph.rs:6168
+#Test("provider_conformance_reports_conflicting_typed_dependency_projection") {
+    github :: provider_normalize_document(ProviderFamily.Github, "{\"name\":\"tool\",\"tag_name\":\"v1.2.3\",\"dependencies\":[{\"name\":\"openssl\",\"version\":\"1.0.0\"},{\"name\":\"openssl\",\"version\":\"2.0.0\"}],\"assets\":[{\"name\":\"tool-linux\",\"digest\":\"sha256-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\",\"platform\":\"x86_64-linux\"}]}")
+    assert(github.validate().is_err())
+    assert(github.conflicts.iter().any(fn(conflict) -> conflict.contains("typed provider fact") && conflict.contains("openssl")))
+    vcpkg :: provider_normalize_document(ProviderFamily.Vcpkg, "{\"name\":\"tool\",\"version-string\":\"1.2.3\",\"dependencies\":[{\"name\":\"zlib\",\"features\":[\"core\"]},{\"name\":\"zlib\",\"features\":[\"ssl\"]}]}")
+    assert(vcpkg.validate().is_err())
+    assert(vcpkg.conflicts.iter().any(fn(conflict) -> conflict.contains("typed provider fact") && conflict.contains("zlib")))
+}
+
+// Rust: crates/jetpack/src/ProviderGraph.rs:6190
+#Test("pypi_swiftpm_maven_reports_round_trip_through_lock_and_export") {
+    revision :: "0123456789abcdef0123456789abcdef01234567"
+    pypi :: "{\"info\":{\"name\":\"sample\",\"version\":\"1.2.3\",\"license\":\"MIT\",\"requires_dist\":[\"httpx>=0.27\"]},\"urls\":[{\"filename\":\"sample.whl\",\"digests\":{\"sha256\":\"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\"},\"yanked\":false}]}"
+    swiftpm :: "{{\"version\":1,\"pins\":[{{\"package\":\"swift-log\",\"state\":{{\"revision\":\"{revision}\",\"version\":\"1.5.4\"}}}}]}}"
+    maven :: "<project><groupId>com.example</groupId><artifactId>sample</artifactId><version>1.2.3</version><dependencies><dependency><groupId>org.example</groupId><artifactId>dep</artifactId><version>3.0.0</version></dependency></dependencies></project>"
+    loop (family, document) in [(ProviderFamily, String)]{(ProviderFamily.PyPI, pypi), (ProviderFamily.SwiftPM, swiftpm), (ProviderFamily.Maven, maven)} {
+        report :: provider_normalize_document(family, document)
+        report.validate() ?? panic("provider report is lossless")
+        shared :: report.shared_facts()
+        assert_eq(shared.native_document, document)
+        assert_eq(ProviderFacts.from_json(report.export_json()) ?? panic("export JSON"), shared)
+        lock :: report.lock_record("app", shared.reference, "x86_64-linux") ?? panic("provider lock retains exact identity")
+        locked :: ProviderFacts.from_json(lock.future_fields.get("provider-facts") ?? panic("provider facts")) ?? panic("locked facts")
+        assert_eq(locked, shared)
+    }
+}
+
+// Rust: crates/jetpack/src/ProviderGraph.rs:6221
+#Test("pypi_swiftpm_maven_reports_surface_loss_and_conflict") {
+    pypi :: provider_normalize_document(ProviderFamily.PyPI, "{\"info\":{\"name\":\"sample\"},\"urls\":[]}")
+    assert(pypi.validate().is_err())
+    assert(pypi.losses.iter().any(fn(loss) -> loss.contains("exact version")))
+    swiftpm :: provider_normalize_document(ProviderFamily.SwiftPM, "{\"version\":1,\"pins\":[{\"package\":\"swift-log\",\"state\":{\"branch\":\"main\"}}]}")
+    assert(swiftpm.validate().is_err())
+    assert(swiftpm.losses.iter().any(fn(loss) -> loss.contains("exact revision")))
+    maven :: provider_normalize_document(ProviderFamily.Maven, "<project><groupId>com.example</groupId><artifactId>sample</artifactId><version>1.0.0</version><version>2.0.0</version></project>")
+    assert(maven.validate().is_err())
+    assert(maven.conflicts.iter().any(fn(conflict) -> conflict.contains("conflicting version")))
+}
+
+// Rust: crates/jetpack/src/ProviderGraph.rs:6254
+#Test("pypi_swiftpm_maven_reject_malformed_native_shapes_without_defaults") {
+    pypi :: provider_normalize_document(ProviderFamily.PyPI, "{\"info\":{\"name\":\"sample\",\"version\":\"1.0.0\"},\"urls\":[{\"filename\":\"sample.whl\",\"digests\":{\"sha256\":false}}]}")
+    assert(pypi.losses.iter().any(fn(loss) -> loss.contains("digest `sha256` must be a string")))
+    assert(pypi.validate().is_err())
+    swiftpm :: provider_normalize_document(ProviderFamily.SwiftPM, "{\"version\":9,\"pins\":[{\"identity\":\"swift-log\",\"state\":{\"revision\":1}}]}")
+    assert(swiftpm.losses.iter().any(fn(loss) -> loss.contains("unsupported") && loss.contains("version")))
+    assert(swiftpm.losses.iter().any(fn(loss) -> loss.contains("revision") && loss.contains("string")))
+    assert(swiftpm.validate().is_err())
+    maven_namespace :: provider_normalize_document(ProviderFamily.Maven, "<project xmlns=\"urn:unsupported\"><groupId>com.example</groupId><artifactId>sample</artifactId><version>1.0.0</version></project>")
+    assert(maven_namespace.losses.iter().any(fn(loss) -> loss.contains("unsupported XML namespace")))
+    assert(maven_namespace.validate().is_err())
+    duplicate_dependency :: provider_normalize_document(ProviderFamily.Maven, "<project><groupId>com.example</groupId><artifactId>sample</artifactId><version>1.0.0</version><dependencies><dependency><groupId>org.example</groupId><artifactId>dep</artifactId><version>1.0.0</version></dependency><dependency><groupId>org.example</groupId><artifactId>dep</artifactId><version>2.0.0</version></dependency></dependencies></project>")
+    assert(duplicate_dependency.conflicts.iter().any(fn(conflict) -> conflict.contains("org.example:dep") && conflict.contains("conflicting version")))
+    assert(duplicate_dependency.validate().is_err())
+}
+
+// Rust: crates/jetpack/src/ProviderGraph.rs:6302
+#Test("nuget_conan_and_vcpkg_conformance_retains_native_facts_and_lock_identity") {
+    nuget :: "<package>\n  <metadata>\n    <id>widget</id>\n    <version>1.2.3</version>\n    <licenseExpression>MIT</licenseExpression>\n    <repository type=\"git\" url=\"https://example.invalid/widget\" commit=\"abc\" />\n    <dependencies><group targetFramework=\"net8.0\"><dependency id=\"serde\" version=\"[1.0.0]\" /></group></dependencies>\n  </metadata>\n</package>"
+    conan :: "from conan import ConanFile\nclass Widget(ConanFile):\n    name = \"widget\"\n    version = \"1.2.3\"\n    license = \"MIT\"\n    settings = \"os\", \"arch\", \"compiler\", \"build_type\"\n    options = {\"shared\": [True, False]}\n    generators = \"CMakeDeps\"\n    def requirements(self):\n        self.requires(\"zlib/1.3.1\")\n"
+    vcpkg :: "{\n  \"name\": \"widget\",\n  \"version-string\": \"1.2.3\",\n  \"license\": \"MIT\",\n  \"builtin-baseline\": \"0123456789abcdef0123456789abcdef01234567\",\n  \"supports\": \"!uwp\",\n  \"dependencies\": [{\"name\":\"zlib\",\"version>=\":\"1.3.0\",\"features\":[\"core\"]}],\n  \"features\": {\"tools\": [\"fmt\"]}\n}"
+    loop (family, document, reference) in [(ProviderFamily, String, String)]{
+        (ProviderFamily.NuGet, nuget, "widget#version=1.2.3@nuget"),
+        (ProviderFamily.Conan, conan, "widget#version=1.2.3@conan"),
+        (ProviderFamily.Vcpkg, vcpkg, "widget#version=1.2.3@vcpkg")
+    } {
+        report :: provider_normalize_document(family, document)
+        report.validate() ?? panic("provider report is lossless")
+        assert_eq(report.native_document, document)
+        assert(!report.export_json().is_empty())
+        lock :: report.lock_record("app", reference, "x86_64-linux") ?? panic("provider lock retains exact identity")
+        locked :: ProviderFacts.from_json(lock.future_fields.get("provider-facts") ?? panic("provider facts in lock")) ?? panic("provider facts JSON")
+        assert_eq(locked.native_document, document)
+        assert_eq(locked.qualified_reference(), reference)
+    }
+    conan_lock :: "{\"ref\":\"widget/1.2.3@acme/stable#rrev\",\"requires\":[{\"ref\":\"zlib/1.3.1\"}],\"settings\":{\"os\":\"Linux\"},\"options\":{\"shared\":false},\"package_id\":\"pkgid\"}"
+    conan_report :: provider_normalize_document(ProviderFamily.Conan, conan_lock)
+    conan_report.validate() ?? panic("Conan JSON provider facts are lossless")
+    assert(conan_report.facts.typed.has_key("provider.conan.variant.package_id"))
+    assert(conan_report.facts.dependencies.contains("zlib@1.3.1"))
+}
+
+// Rust: crates/jetpack/src/ProviderGraph.rs:6371
+#Test("nuget_conan_and_vcpkg_conformance_reports_loss_and_conflict") {
+    nuget :: "{\"dependencies\":{\"net8.0\":{\"widget\":{\"requested\":\"[1.0.0,2.0.0)\"}}}}"
+    conan :: "{\"name\":\"widget\",\"version\":\"1.0.0\",\"requires\":[{\"package_id\":\"missing-ref\"}]}"
+    vcpkg :: "{\"name\":\"widget\",\"version\":\"1.0.0\",\"version-string\":\"1.1.0\",\"dependencies\":[{\"features\":[\"core\"]}]}"
+    nuget_report :: provider_normalize_document(ProviderFamily.NuGet, nuget)
+    assert(nuget_report.validate().is_err())
+    assert(nuget_report.losses.iter().any(fn(loss) -> loss.contains("resolved exact version") || loss.contains("range")))
+    conan_report :: provider_normalize_document(ProviderFamily.Conan, conan)
+    assert(conan_report.validate().is_err())
+    assert(conan_report.losses.iter().any(fn(loss) -> loss.contains("no dependency ref")))
+    vcpkg_report :: provider_normalize_document(ProviderFamily.Vcpkg, vcpkg)
+    assert(vcpkg_report.validate().is_err())
+    assert(vcpkg_report.conflicts.iter().any(fn(conflict) -> conflict.contains("conflicting version fields")))
+    assert(vcpkg_report.losses.iter().any(fn(loss) -> loss.contains("no non-empty `name`")))
+}
+
+// Rust: crates/jetpack/src/ProviderGraph.rs:6404
+#Test("provider_conformance_retains_real_lock_shapes_and_rejects_hooks") {
+    nuget :: "{\n  \"targets\":{\"net8.0\":{\"widget/1.2.3\":{\"type\":\"package\",\"dependencies\":{\"serde\":\"1.0.0\"}}}},\n  \"libraries\":{\"widget/1.2.3\":{\"type\":\"package\",\"sha512\":\"sha512-widget\"}},\n  \"projectFileDependencyGroups\":{\"net8.0\":[\"widget >= 1.0.0\"]}\n        }"
+    report :: provider_normalize_document(ProviderFamily.NuGet, nuget)
+    report.validate() ?? panic("single NuGet lock identity is lossless")
+    assert_eq(report.facts.platforms, [String]{"framework:net8.0"})
+    assert_eq(report.facts.integrity_hash, "sha512-widget")
+    assert(report.facts.typed.has_key("provider.nuget.target.net8.0.widget/1.2.3.serde"))
+    assert(report.facts.typed.has_key("provider.nuget.project.request.net8.0.0"))
+    ranged_xml :: "<package><metadata><id>widget</id><version>1.2.3</version><dependencies><dependency id=\"serde\" version=\"[1.0.0,2.0.0)\" /></dependencies></metadata></package>"
+    ranged :: provider_normalize_document(ProviderFamily.NuGet, ranged_xml)
+    assert(ranged.validate().is_err())
+    assert(ranged.losses.iter().any(fn(loss) -> loss.contains("serde") && loss.contains("exact version")))
+    graph :: "{\"ref\":\"widget/1.2.3\",\"graph\":{\"nodes\":{\"0\":{\"ref\":\"widget/1.2.3\",\"requires\":[\"1\"],\"tool_requires\":[\"2\"],\"package_id\":\"pkgid\"},\"1\":{\"ref\":\"zlib/1.3.1\"},\"2\":{\"ref\":\"cmake/3.29.0\"}}}}"
+    graph_report :: provider_normalize_document(ProviderFamily.Conan, graph)
+    graph_report.validate() ?? panic("Conan graph root identity is lossless")
+    assert(graph_report.facts.typed.has_key("provider.conan.graph.node.0"))
+    assert(graph_report.facts.build_dependencies.iter().any(fn(dependency) -> dependency == "2"))
+    hook :: provider_normalize_document(ProviderFamily.Conan, "name = \"widget\"\nversion = \"1.2.3\"\ndef generate(self):\n    self.run(\"cmake\")\n")
+    assert(hook.validate().is_err())
+    assert(hook.losses.iter().any(fn(loss) -> loss.contains("executable build or Python hook")))
+    malformed_vcpkg :: provider_normalize_document(ProviderFamily.Vcpkg, "{\"name\":\"widget\",\"version\":\"1.0.0\",\"dependencies\":[{\"name\":\"zlib\",\"features\":\"core\"}],\"overrides\":[{\"version\":\"1.0.0\"}]}")
+    assert(malformed_vcpkg.validate().is_err())
+    assert(malformed_vcpkg.losses.iter().any(fn(loss) -> loss.contains("features") && loss.contains("invalid shape")))
+    assert(malformed_vcpkg.losses.iter().any(fn(loss) -> loss.contains("override 0") && loss.contains("name")))
+}

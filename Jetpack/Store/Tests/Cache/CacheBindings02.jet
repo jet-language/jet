@@ -1,0 +1,78 @@
+// Original Cache.rs tests, reusing private Cache.jet scratch-directory helper.
+// Rust: crates/jetpack/src/Store/Cache.rs:2961
+#Test("cache_credentials_cannot_be_attached_to_a_non_credential_endpoint") {
+    binding :: CacheBinding{role: "public", mirrors: [String]{"file:///tmp/jet-cache"}, trust_key: "/tmp/cache.key", credential_provider: Val("host-keychain"), allow_write: false}
+    assert(binding.validate() == .Err(_))
+}
+
+// Rust: crates/jetpack/src/Store/Cache.rs:2973
+#Test("cache_write_errors_use_access_language") {
+    binding :: CacheBinding{role: "public", mirrors: [String]{"https://cache.example/jet"}, trust_key: "/tmp/cache.key", credential_provider: None, allow_write: true}
+    if binding.validate() == {
+        .Ok(_) -> panic("a write grant on a read-only endpoint must be refused")
+        .Err(error) -> {
+            message :: error.message()
+            assert(message.contains("write access"), message)
+            assert(!message.contains("capability"), message)
+        }
+    }
+}
+
+// Rust: crates/jetpack/src/Store/Cache.rs:2987
+#Test("remote_cache_endpoints_never_grant_remote_execution") {
+    loop mirror in [String]{"https://cache.example/jet", "ssh://builder.example/var/cache/jet", "s3://cache.example/jet"} {
+        endpoint :: store_cache_parse_endpoint(mirror) ?? panic("parse endpoint")
+        assert(!endpoint.capabilities().remote_execute)
+    }
+}
+
+// Rust: crates/jetpack/src/Store/Cache.rs:2998
+#Test("nix_store_cache_endpoints_are_rejected_before_any_host_process") {
+    loop endpoint in [String]{"daemon://", "nix://local"} {
+        if store_cache_parse_endpoint(endpoint) == {
+            .Ok(_) -> panic("a Nix store endpoint must be retired")
+            .Err(error) -> assert(error.message().contains("retired"), error.message())
+        }
+    }
+    // Source-language migration retains the original static process-launch ban.
+    // GATE #4494: read actual shipped source, never substitute a fixture string.
+    repository :: OSPath.from_text(env!("CARGO_MANIFEST_DIR")).join("../..")
+    source := ""
+    loop relative in [String]{"Jetpack/Store/Source/Cache/CacheBindings.jet", "Jetpack/Store/Source/Cache/CacheBindings02.jet", "Jetpack/Store/Source/Cache/CacheEndpoints.jet", "Jetpack/Store/Source/Cache/CachePublication.jet"} {
+        &source.push_str(std.fs.read_to_string(repository.join(relative)) ?? panic("read cache source"))
+    }
+    loop executable in [String]{"nix", "nix-store"} {
+        loop forbidden in [String]{"Command.new(\"{executable}\")", "Command::new(\"{executable}\")", "process.cmd([String]{{\"{executable}\""} {
+            assert(!source.contains(forbidden), forbidden)
+        }
+    }
+}
+
+// Rust: crates/jetpack/src/Store/Cache.rs:3011
+#Test("malformed_cache_binding_is_not_treated_as_unbound") {
+    root :: store_cache_test_root("binding")
+    bindings :: files.join(files.join(root, "cache"), "bindings")
+    files.create_dir_all(bindings) ?? panic("bindings directory")
+    files.write(files.join(bindings, "public.conf"), "not a cache binding\n") ?? panic("malformed binding")
+    roots :: HangarRoots{root, dev_mode: false}
+    if store_list_cache_bindings(roots) == {
+        .Ok(_) -> panic("a malformed binding must fail listing")
+        .Err(error) -> assert(error.message().contains("cache binding"), error.message())
+    }
+    files.remove_all(root) ?? panic("cleanup")
+}
+
+// Rust: crates/jetpack/src/Store/Cache.rs:3034
+#Test("cache_binding_missing_trust_key_fails_before_local_fallback") {
+    root :: store_cache_test_root("key")
+    mirror :: files.join(root, "mirror")
+    files.create_dir_all(mirror) ?? panic("mirror directory")
+    roots :: HangarRoots{root, dev_mode: false}
+    store_bind_cache(roots, "public", [String]{"file://{mirror}"}, None, None, false) ?? panic("bind cache")
+    files.remove(files.join(files.join(root, "trust"), "cache-public.key")) ?? panic("remove trust key")
+    if store_list_cache_bindings(roots) == {
+        .Ok(_) -> panic("a missing trust key must fail listing")
+        .Err(error) -> assert(error.message().contains("cache trust key"), error.message())
+    }
+    files.remove_all(root) ?? panic("cleanup")
+}

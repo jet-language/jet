@@ -1,230 +1,124 @@
-// PORT-PENDING 0872 crates-jetpack-src-jetos-installer-media-module-group: crates/jetpack/src/JetOS/kernel_bootstrap.rs:1-226
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS use super::etc_boot_facts::{
-//RS     boot_artifact, cachyos_kernel_entry, is_initrd_image, is_linux_kernel_image,
-//RS     missing_kernel_source_files,
-//RS };
-//RS use super::generation_files::copy_profile_tree;
-//RS use super::store_realize::RealizedPackage;
-//RS use super::types::{BootProfile, CACHYOS_KERNEL_PACKAGE, SYSTEMD_INIT_PACKAGE};
-//RS use crate::Output::Theme;
-//RS use std::fs;
-//RS use std::path::{Path, PathBuf};
-//RS use std::process::Command;
-//RS 
-//RS pub(super) fn run_kernel_bootstrap_builder(
-//RS     theme: &Theme,
-//RS     boot: &BootProfile,
-//RS     realized: &mut [RealizedPackage],
-//RS     use_host_defaults: bool,
-//RS     generation_dir: &Path,
-//RS ) -> bool {
-//RS     if boot.kernel != "CachyOS" {
-//RS         return true;
-//RS     }
-//RS     let Some(index) = realized
-//RS         .iter()
-//RS         .position(|entry| entry.name == CACHYOS_KERNEL_PACKAGE)
-//RS     else {
-//RS         return true;
-//RS     };
-//RS     let entry = &realized[index];
-//RS     if missing_kernel_source_files(entry).is_some() {
-//RS         return true;
-//RS     }
-//RS     let source_out = match entry.consumption_path(&entry.out) {
-//RS         Ok(path) => path,
-//RS         Err(_) => return false,
-//RS     };
-//RS     let out = generation_dir.join("kernel-build").join(&entry.name);
-//RS     if out.exists() {
-//RS         let _ = fs::remove_dir_all(&out);
-//RS     }
-//RS     if let Err(error) = copy_profile_tree(&source_out, &out) {
-//RS         theme.error_coded(
-//RS             "E1286",
-//RS             "jetos CachyOS source build failed",
-//RS             &format!("copying the leased kernel package into generation scratch failed: {error}."),
-//RS             "check the first-party cachyos-kernel source recipe and rerun `jet os build`.",
-//RS         );
-//RS         return false;
-//RS     }
-//RS     realized[index].set_consumption_override(out.clone());
-//RS     let script = out.join("source/build.sh");
-//RS     if !script.is_file() {
-//RS         return true;
-//RS     }
-//RS     let boot_dir = out.join("boot");
-//RS     if let Err(e) = fs::create_dir_all(&boot_dir).and_then(|_| make_tree_writable(&boot_dir)) {
-//RS         theme.error_coded(
-//RS             "E1286",
-//RS             "jetos CachyOS source build failed",
-//RS             &format!("could not create the cachyos-kernel boot artifact directory: {e}."),
-//RS             "check the first-party cachyos-kernel source recipe and rerun `jet os build`.",
-//RS         );
-//RS         return false;
-//RS     }
-//RS     let output = Command::new(&script)
-//RS         .current_dir(&out)
-//RS         .env("PATH", jetos_bootstrap_path())
-//RS         .env("JETOS_KERNEL_OUT", out.join("boot"))
-//RS         .env("JETOS_KERNEL_SOURCE", out.join("source"))
-//RS         .env("JETOS_KERNEL_PACKAGE", out)
-//RS         .envs(default_cachyos_kernel_env(use_host_defaults))
-//RS         .output();
-//RS     let output = match output {
-//RS         Ok(output) => output,
-//RS         Err(e) => {
-//RS             theme.error_coded(
-//RS                 "E1286",
-//RS                 "jetos CachyOS source build failed",
-//RS                 &format!("running `source/build.sh` failed: {e}."),
-//RS                 "check the first-party cachyos-kernel source recipe and rerun `jet os build`.",
-//RS             );
-//RS             return false;
-//RS         }
-//RS     };
-//RS     if !output.status.success() {
-//RS         theme.error_coded(
-//RS             "E1286",
-//RS             "jetos CachyOS source build failed",
-//RS             &format!(
-//RS                 "`source/build.sh` exited with {}; stderr: {}",
-//RS                 output.status,
-//RS                 String::from_utf8_lossy(&output.stderr).trim()
-//RS             ),
-//RS             "check the first-party cachyos-kernel source recipe and rerun `jet os build`.",
-//RS         );
-//RS         return false;
-//RS     }
-//RS     true
-//RS }
-//RS 
-//RS fn make_tree_writable(path: &Path) -> std::io::Result<()> {
-//RS     let mut perms = fs::metadata(path)?.permissions();
-//RS     perms.set_readonly(false);
-//RS     fs::set_permissions(path, perms)?;
-//RS     if path.is_dir() {
-//RS         for entry in fs::read_dir(path)? {
-//RS             let entry = entry?;
-//RS             make_tree_writable(&entry.path())?;
-//RS         }
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn jetos_bootstrap_path() -> String {
-//RS     let existing = std::env::var("PATH").unwrap_or_default();
-//RS     let defaults = "/run/current-system/sw/bin:/usr/bin:/bin:/usr/sbin:/sbin";
-//RS     if existing.is_empty() {
-//RS         defaults.to_string()
-//RS     } else {
-//RS         format!("{defaults}:{existing}")
-//RS     }
-//RS }
-//RS 
-//RS fn default_cachyos_kernel_env(use_host_defaults: bool) -> Vec<(&'static str, PathBuf)> {
-//RS     let mut env = Vec::new();
-//RS     if !use_host_defaults {
-//RS         return env;
-//RS     }
-//RS     if std::env::var_os("JETOS_CACHYOS_KERNEL").is_none() {
-//RS         if let Some(kernel) =
-//RS             first_existing_path(&["/run/booted-system/kernel", "/run/current-system/kernel"])
-//RS         {
-//RS             env.push(("JETOS_CACHYOS_KERNEL", kernel));
-//RS         }
-//RS     }
-//RS     if std::env::var_os("JETOS_CACHYOS_INITRD").is_none() {
-//RS         if let Some(initrd) =
-//RS             first_existing_path(&["/run/booted-system/initrd", "/run/current-system/initrd"])
-//RS         {
-//RS             env.push(("JETOS_CACHYOS_INITRD", initrd));
-//RS         }
-//RS     }
-//RS     if std::env::var_os("JETOS_CACHYOS_MODULES").is_none() {
-//RS         if let Some(modules) = first_existing_path(&[
-//RS             "/run/booted-system/kernel-modules",
-//RS             "/run/current-system/kernel-modules",
-//RS         ]) {
-//RS             env.push((
-//RS                 "JETOS_CACHYOS_MODULES",
-//RS                 kernel_module_tree(&modules).unwrap_or(modules),
-//RS             ));
-//RS         }
-//RS     }
-//RS     env
-//RS }
-//RS 
-//RS fn kernel_module_tree(modules: &Path) -> Option<PathBuf> {
-//RS     let lib_modules = modules.join("lib/modules");
-//RS     fs::read_dir(lib_modules)
-//RS         .ok()?
-//RS         .filter_map(Result::ok)
-//RS         .map(|entry| entry.path())
-//RS         .find(|path| path.join("kernel").is_dir())
-//RS }
-//RS 
-//RS fn first_existing_path(paths: &[&str]) -> Option<PathBuf> {
-//RS     paths.iter().map(PathBuf::from).find(|path| path.exists())
-//RS }
-//RS 
-//RS pub(super) fn validate_boot_payloads(
-//RS     theme: &Theme,
-//RS     boot: &BootProfile,
-//RS     realized: &[RealizedPackage],
-//RS ) -> bool {
-//RS     if boot.kernel == "CachyOS" {
-//RS         let Some(entry) = cachyos_kernel_entry(realized) else {
-//RS             return true;
-//RS         };
-//RS         let kernel = boot_artifact(entry, &["boot/vmlinuz-cachyos", "bzImage", "vmlinuz"]);
-//RS         let initrd = boot_artifact(entry, &["boot/initrd-cachyos", "initrd", "initrd.img"]);
-//RS         let kernel_ok = kernel
-//RS             .as_ref()
-//RS             .map(|path| is_linux_kernel_image(path))
-//RS             .unwrap_or(false);
-//RS         let initrd_ok = initrd
-//RS             .as_ref()
-//RS             .map(|path| is_initrd_image(path))
-//RS             .unwrap_or(false);
-//RS         if !kernel_ok || !initrd_ok {
-//RS             theme.error_coded(
-//RS                 "E1282",
-//RS                 "jetos CachyOS boot artifacts are missing",
-//RS                 "D-JOS-KERNELSRC1=A: the first-party `cachyos-kernel` package must provide a Linux kernel image and initrd with bootable file headers so the generation and installer can boot the same payload.",
-//RS                 "add boot/vmlinuz-cachyos and boot/initrd-cachyos with real boot payloads, or select a different ratified kernel.",
-//RS             );
-//RS             return false;
-//RS         }
-//RS         if missing_kernel_source_files(entry).is_some() {
-//RS             theme.error_coded(
-//RS                 "E1284",
-//RS                 "jetos CachyOS source recipe is missing",
-//RS                 "D-JOS-KERNELBOOTSTRAP1=A: the first-party `cachyos-kernel` package must carry source-built recipe, builder, config, patch, and initrd-input provenance beside the boot artifacts.",
-//RS                 "add source/recipe.jet, source/build.sh, source/config, source/patches.manifest, and source/initrd-inputs.manifest to the package output.",
-//RS             );
-//RS             return false;
-//RS         }
-//RS     }
-//RS     if boot.init == "/sbin/init" {
-//RS         let Some(entry) = realized
-//RS             .iter()
-//RS             .find(|entry| entry.name == SYSTEMD_INIT_PACKAGE)
-//RS         else {
-//RS             return true;
-//RS         };
-//RS         if boot_artifact(entry, &["bin/systemd", "lib/systemd/systemd", "sbin/init"]).is_none() {
-//RS             theme.error_coded(
-//RS                 "E1283",
-//RS                 "jetos systemd init artifact is missing",
-//RS                 "D-JPK-OSINIT1=A: the first-party `systemd` package must provide a bootable init binary for `/sbin/init`.",
-//RS                 "add bin/systemd, lib/systemd/systemd, or sbin/init to the package output, or select a ratified init override.",
-//RS             );
-//RS             return false;
-//RS         }
-//RS     }
-//RS     true
-//RS }
-// END-PORT-PENDING 0872 crates/jetpack/src/JetOS/kernel_bootstrap.rs:1-226
+use jetpack.JetOS.EtcBootFacts.[boot_artifact, cachyos_kernel_entry, is_initrd_image, is_linux_kernel_image, missing_kernel_source_files]
+use jetpack.JetOS.GenerationFiles.[copy_profile_tree]
+use jetpack.JetOS.Types.[JetOSRealizedPackage, JetOSBootProfile, JETOS_CACHYOS_KERNEL_PACKAGE, JETOS_SYSTEMD_INIT_PACKAGE]
+use jetpack.Output.[Theme]
+use std.[fs, env, io]
+use std.process.[Command]
 
+// Rust: crates/jetpack/src/JetOS/kernel_bootstrap.rs:13
+pub fn run_kernel_bootstrap_builder(theme: &Theme, boot: &JetOSBootProfile, realized: &[JetOSRealizedPackage], use_host_defaults: Bool, generation_dir: &OSPath) -> Bool {
+    if boot.kernel != "CachyOS" { return true }
+    index :: realized.iter().position(entry -> entry.entry.name == JETOS_CACHYOS_KERNEL_PACKAGE) ?? return true
+    entry :: &realized[index]
+    if missing_kernel_source_files(entry).is_some() { return true }
+    source_out :: entry.consumption_path(entry.entry.out).ok() ?? return false
+    out :: generation_dir.join("kernel-build").join(entry.entry.name)
+    if out.exists() { _ :: fs.remove_dir_all(&out) }
+    if copy_profile_tree(&source_out, &out) == {
+        .Ok(()) -> {}
+        .Err(error) -> {
+            theme.error_coded("E1286", "jetos CachyOS source build failed", "copying the leased kernel package into generation scratch failed: {error}.", "check the first-party cachyos-kernel source recipe and rerun `jet os build`.")
+            return false
+        }
+    }
+    realized[index].set_consumption_override(out.clone())
+    script :: out.join("source/build.sh")
+    if !script.is_file() { return true }
+    boot_dir :: out.join("boot")
+    if fs.create_dir_all(&boot_dir).and_then(_ -> make_tree_writable(&boot_dir)) == {
+        .Ok(()) -> {}
+        .Err(e) -> {
+            theme.error_coded("E1286", "jetos CachyOS source build failed", "could not create the cachyos-kernel boot artifact directory: {e}.", "check the first-party cachyos-kernel source recipe and rerun `jet os build`.")
+            return false
+        }
+    }
+    // GATE #4494 native environment and subprocess execution.
+    output :: if Command.new(&script).current_dir(&out).env("PATH", jetos_bootstrap_path()).env("JETOS_KERNEL_OUT", out.join("boot")).env("JETOS_KERNEL_SOURCE", out.join("source")).env("JETOS_KERNEL_PACKAGE", ^out).envs(default_cachyos_kernel_env(use_host_defaults)).output() == {
+        .Ok(output) -> output
+        .Err(e) -> {
+            theme.error_coded("E1286", "jetos CachyOS source build failed", "running `source/build.sh` failed: {e}.", "check the first-party cachyos-kernel source recipe and rerun `jet os build`.")
+            return false
+        }
+    }
+    if !output.status.success() {
+        stderr := String.from_utf8_lossy(&output.stderr).trim() // #4303
+        theme.error_coded("E1286", "jetos CachyOS source build failed", "`source/build.sh` exited with {output.status}; stderr: {stderr}", "check the first-party cachyos-kernel source recipe and rerun `jet os build`.")
+        return false
+    }
+    true
+}
+
+// Rust: crates/jetpack/src/JetOS/kernel_bootstrap.rs:101
+fn make_tree_writable(path: &OSPath) -> Unit io.Error! {
+    perms := fs.metadata(path)?.permissions()
+    perms.set_readonly(false)
+    fs.set_permissions(path, ^perms)?
+    if path.is_dir() {
+        loop entry in fs.read_dir(path)? {
+            entry :: entry?
+            make_tree_writable(&entry.path())?
+        }
+    }
+    Ok(())
+}
+
+// Rust: crates/jetpack/src/JetOS/kernel_bootstrap.rs:114
+fn jetos_bootstrap_path() -> String {
+    existing :: env.var("PATH").unwrap_or_default()
+    defaults :: "/run/current-system/sw/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+    if existing.is_empty() -> defaults.to_string() else -> "{defaults}:{existing}"
+}
+
+// Rust: crates/jetpack/src/JetOS/kernel_bootstrap.rs:124
+fn default_cachyos_kernel_env(use_host_defaults: Bool) -> [(String, OSPath)] {
+    overrides := [(String, OSPath)]{}
+    if !use_host_defaults { return ^overrides }
+    if env.var_os("JETOS_CACHYOS_KERNEL").is_none() {
+        if kernel :: first_existing_path(&["/run/booted-system/kernel", "/run/current-system/kernel"]) { overrides.push(("JETOS_CACHYOS_KERNEL", ^kernel)) }
+    }
+    if env.var_os("JETOS_CACHYOS_INITRD").is_none() {
+        if initrd :: first_existing_path(&["/run/booted-system/initrd", "/run/current-system/initrd"]) { overrides.push(("JETOS_CACHYOS_INITRD", ^initrd)) }
+    }
+    if env.var_os("JETOS_CACHYOS_MODULES").is_none() {
+        if modules :: first_existing_path(&["/run/booted-system/kernel-modules", "/run/current-system/kernel-modules"]) { overrides.push(("JETOS_CACHYOS_MODULES", kernel_module_tree(&modules).unwrap_or(^modules))) }
+    }
+    ^overrides
+}
+
+// Rust: crates/jetpack/src/JetOS/kernel_bootstrap.rs:157
+fn kernel_module_tree(modules: &OSPath) -> OSPath? {
+    lib_modules :: modules.join("lib/modules")
+    fs.read_dir(lib_modules).ok()?.filter_map(result -> result.ok()).map(entry -> entry.path()).find(path -> path.join("kernel").is_dir())
+}
+
+// Rust: crates/jetpack/src/JetOS/kernel_bootstrap.rs:166
+fn first_existing_path(paths: &[String]) -> OSPath? {
+    paths.iter().map(OSPath.from).find(path -> path.exists())
+}
+
+// Rust: crates/jetpack/src/JetOS/kernel_bootstrap.rs:170
+pub fn validate_boot_payloads(theme: &Theme, boot: &JetOSBootProfile, realized: &[JetOSRealizedPackage]) -> Bool {
+    if boot.kernel == "CachyOS" {
+        entry :: cachyos_kernel_entry(realized) ?? return true
+        kernel :: boot_artifact(entry, &["boot/vmlinuz-cachyos", "bzImage", "vmlinuz"])
+        initrd :: boot_artifact(entry, &["boot/initrd-cachyos", "initrd", "initrd.img"])
+        kernel_ok :: kernel.as_ref().map(is_linux_kernel_image).unwrap_or(false)
+        initrd_ok :: initrd.as_ref().map(is_initrd_image).unwrap_or(false)
+        if !kernel_ok || !initrd_ok {
+            theme.error_coded("E1282", "jetos CachyOS boot artifacts are missing", "D-JOS-KERNELSRC1=A: the first-party `cachyos-kernel` package must provide a Linux kernel image and initrd with bootable file headers so the generation and installer can boot the same payload.", "add boot/vmlinuz-cachyos and boot/initrd-cachyos with real boot payloads, or select a different ratified kernel.")
+            return false
+        }
+        if missing_kernel_source_files(entry).is_some() {
+            theme.error_coded("E1284", "jetos CachyOS source recipe is missing", "D-JOS-KERNELBOOTSTRAP1=A: the first-party `cachyos-kernel` package must carry source-built recipe, builder, config, patch, and initrd-input provenance beside the boot artifacts.", "add source/recipe.jet, source/build.sh, source/config, source/patches.manifest, and source/initrd-inputs.manifest to the package output.")
+            return false
+        }
+    }
+    if boot.init == "/sbin/init" {
+        entry :: realized.iter().find(entry -> entry.entry.name == JETOS_SYSTEMD_INIT_PACKAGE) ?? return true
+        if boot_artifact(entry, &["bin/systemd", "lib/systemd/systemd", "sbin/init"]).is_none() {
+            theme.error_coded("E1283", "jetos systemd init artifact is missing", "D-JPK-OSINIT1=A: the first-party `systemd` package must provide a bootable init binary for `/sbin/init`.", "add bin/systemd, lib/systemd/systemd, or sbin/init to the package output, or select a ratified init override.")
+            return false
+        }
+    }
+    true
+}
