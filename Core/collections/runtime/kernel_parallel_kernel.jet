@@ -29,7 +29,7 @@ pub fn jet_list_para_merge_tree<T, E>(partials: [T], merge: fn(T, T) -> T E!) ->
         }
         partials = ^next
     }
-    Ok(partials.pop().expect("non-empty para-merge lost its result"))
+    Ok(partials.pop() ?? panic("non-empty para-merge lost its result"))
 }
 // Rust: crates/jet-codegen/src/Prelude/Core/ParallelKernel.rs:49
 fn jet_list_para_chunks_kernel<R: Send, E: Send>(len: Usize, worker_limit: Usize, worker_cap: Usize,
@@ -76,12 +76,12 @@ fn jet_list_para_fold_add_fixed<T: JetSimdScalar + Send + Sync>(xs: [T], seed: T
     indexed :: jet_list_para_chunks_kernel(xs.len(), Usize.MAX, worker_cap, fn(range) {
         Ok(jet_simd_reduce_fixed_iter(xs[range].iter().copied(), seed))
     })
-    partials :: indexed.into_iter().map(fn(entry) { entry.1.expect("fixed para-fold partial cannot fail") }).collect()
+    partials :: indexed.into_iter().map(fn(entry) { entry.1 ?? panic("fixed para-fold partial cannot fail") }).collect()
     if partials.is_empty() -> return seed
     jet_list_para_merge_tree(partials, fn(left, right) {
         pair :: [left, right]
         Ok(jet_simd_reduce_fixed_iter(pair.into_iter(), T.simd_zero()))
-    }).expect("non-empty fixed para-fold lost its result")
+    }) ?? panic("non-empty fixed para-fold lost its result")
 }
 // Rust: crates/jet-codegen/src/Prelude/Core/ParallelKernel.rs:128
 pub fn jet_list_para_fold_add_fixed_f32(xs: [F32], seed: F32) -> F32 { jet_list_para_fold_add_fixed(^xs, seed) }

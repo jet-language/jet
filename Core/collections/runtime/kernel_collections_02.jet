@@ -23,7 +23,7 @@ impl<K: Ord + Clone, V: Clone> (&[K:V]).JetLoopSource {
                 if by_value -> jet_loop_source_error(source_kind)
                 keys :: self.keys().cloned().collect<[K]>()
                 keys.sort()
-                values :: keys.into_iter().map(fn(key) { (key.clone(), self.get(&key).unwrap().clone()) }).collect<[(K, V)]>().into_iter()
+                values :: keys.into_iter().map(fn(key) { (key.clone(), (self.get(&key) ?? panic("unwrap failed")).clone()) }).collect<[(K, V)]>().into_iter()
                 Box.new(values.map(fn(value) { Box.new(^value) as JetLoopAny }))
             }
             _ -> jet_loop_source_error(source_kind)
@@ -119,7 +119,7 @@ impl JetStringSplitIter.Iterator {
                             self.phase = 2
                             return .Val(String.new())
                         }
-                        ch :: self.source[self.offset..].chars().next().expect("offset in bounds")
+                        ch :: self.source[self.offset..].chars().next() ?? panic("offset in bounds")
                         width :: ch.len_utf8()
                         out :: self.source[self.offset..<self.offset + width].to_owned()
                         self.offset += width
@@ -441,7 +441,7 @@ fn jet_list_group_by<T: Clone, K: Ord + Clone, I: IntoIterator<Item = T>>(xs: I,
 }
 // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:2632
 fn jet_list_partition<T, S, I: IntoIterator<Item = T>>(xs: I, f: fn(&T) -> Bool, build: fn([T], [T]) -> S) -> S {
-    (yes, no) :: jet_list_try_partition_kernel(^xs, fn(item) -> Bool Never! { Ok(f(item)) }).unwrap()
+    (yes, no) :: jet_list_try_partition_kernel(^xs, fn(item) -> Bool Never! { Ok(f(item)) }) ?? panic("unwrap failed")
     build(^yes, ^no)
 }
 // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:2648
@@ -571,7 +571,7 @@ fn jet_iter_chunk_while<T: Clone>(it: JetIter<T>, f: fn(&T, &T) -> Bool) -> JetI
     chunks: [[T]] := []
     loop x in xs {
         if chunks.last_mut() == .Val(last) {
-            if f(last.last().unwrap(), &x) {
+            if f(last.last() ?? panic("unwrap failed"), &x) {
                 last.push(^x)
                 next
             }
