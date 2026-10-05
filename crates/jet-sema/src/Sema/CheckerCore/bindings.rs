@@ -2343,12 +2343,14 @@ impl<'a> Checker<'a> {
         self.current_binding_name = prev_binding_name;
     }
 
-    /// S74: a `val`/`var` binding that destructures a struct (`Point { x, y }`)
-    /// or a list (`[a, b]`). Each bound name is declared separately; move and
+    /// S74: a `val`/`var` binding that destructures a struct (`Point { x, y }`,
+    /// or the inferred record form `{ x, y: local }`), a tuple (`(x, y)`), or a
+    /// list (`[a, b]`). Each bound name is declared separately; move and
     /// mutability follow the per-name M2 rules. Struct destructuring is
-    /// irrefutable (you may bind any subset of fields); list destructuring is
-    /// guarded by a runtime length check in codegen, and a literal of the wrong
-    /// length is caught here (E0315).
+    /// irrefutable (you may bind any subset of fields with `..`); tuple
+    /// destructuring binds members by name (#4605, E0314); list destructuring
+    /// is guarded by a runtime length check in codegen, and a literal of the
+    /// wrong length is caught here (E0315).
     pub(crate) fn check_destructuring_binding(&mut self, b: &mut Binding) {
         let inferred = self.infer(&mut b.init);
         let pattern = b
@@ -2365,6 +2367,61 @@ impl<'a> Checker<'a> {
         };
         let it = self.resolve_type(it);
         match &pattern {
+            // #4605: the inferred record form `{ member: local, .. } :: t` reads
+            // a tuple's members by name. It normalizes into the by-name `Tuple`
+            // pattern that every later pass lowers.
+            BindPattern::Struct {
+                type_name,
+                fields,
+                rest,
+                span: pat_span,
+                ..
+            } if type_name.is_empty() && Self::tuple_pattern_members(&it).is_some() => {
+                let members = Self::tuple_pattern_members(&it).unwrap_or_default();
+                for f in fields {
+                    let ty = match members.iter().find(|(member, _)| *member == f.name) {
+                        Some((_, ty)) => ty.clone(),
+                        None => {
+                            self.diags.push(Diagnostic::error(
+                                "E0302",
+                                format!("{} has no member `{}`", it.show(), f.name),
+                                "a record pattern on a tuple can only name the tuple's members"
+                                    .to_string(),
+                                format!("use one of its members: {}", tuple_member_list(&members)),
+                                Some(f.span),
+                            ));
+                            Type::Int
+                        }
+                    };
+                    self.declare_bound(f.local_name(), f.span, ty, b.mutable, b.sigil_span);
+                }
+                let partial = fields.len() < members.len();
+                if partial && rest.is_none() {
+                    self.diags.push(Diagnostic::error(
+                        "E0326",
+                        format!("this pattern leaves out members of {}", it.show()),
+                        "a destructure that doesn't name every member must end with `..` so the skipped members are visible at a glance".to_string(),
+                        "add `, ..` before the closing `}`, or name the remaining members".to_string(),
+                        Some(*pat_span),
+                    ));
+                } else if let (false, Some(rest_span)) = (partial, rest) {
+                    self.diags.push(Diagnostic::error(
+                        "E0327",
+                        format!(
+                            "`..` is redundant — this pattern already names every member of {}",
+                            it.show()
+                        ),
+                        "a trailing `..` only makes sense when some members are left unnamed"
+                            .to_string(),
+                        "remove the `..`".to_string(),
+                        Some(*rest_span),
+                    ));
+                }
+                b.pattern = Some(BindPattern::Tuple {
+                    elems: fields.clone(),
+                    span: *pat_span,
+                });
+            }
             BindPattern::Struct {
                 type_name,
                 type_span,
@@ -2372,11 +2429,21 @@ impl<'a> Checker<'a> {
                 rest,
                 span: pat_span,
             } => {
-                let display_type_name = self.display_type_name(type_name, None);
+                // An empty `type_name` is the inferred record form `{ … } :: v`:
+                // the value's own struct type supplies the fields.
+                let inferred_record = type_name.is_empty();
                 let actual = match &it {
                     Type::Named(n) => Some(n.clone()),
                     Type::Apply { name, .. } => Some(name.clone()),
                     _ => None,
+                };
+                let display_type_name = if inferred_record {
+                    actual
+                        .as_deref()
+                        .map(|n| self.display_type_name(n, None))
+                        .unwrap_or_else(|| it.show())
+                } else {
+                    self.display_type_name(type_name, None)
                 };
                 let is_struct = actual.as_deref().is_some_and(|n| {
                     let (import_ns, lookup_name) = self.struct_type_name_parts(n);
@@ -2385,21 +2452,34 @@ impl<'a> Checker<'a> {
                         .is_some()
                 });
                 if !is_struct {
-                    self.diags.push(Diagnostic::error(
-                        "E0313",
-                        format!(
-                            "`{} {{ … }}` can only destructure a `{}` value, but this is {}",
-                            display_type_name,
-                            display_type_name,
-                            it.show()
-                        ),
-                        "destructuring with `{ }` pulls fields out of a struct value".to_string(),
-                        format!(
-                            "destructure a `{}`, or bind the whole value with a name",
-                            display_type_name
-                        ),
-                        Some(*type_span),
-                    ));
+                    let (what, why, fix) = if inferred_record {
+                        (
+                            format!(
+                                "`{{ … }}` can only destructure a struct or tuple value, but this is {}",
+                                it.show()
+                            ),
+                            "destructuring with `{ }` pulls named fields out of a struct or named members out of a tuple".to_string(),
+                            "destructure a struct or tuple, or bind the whole value with a name"
+                                .to_string(),
+                        )
+                    } else {
+                        (
+                            format!(
+                                "`{} {{ … }}` can only destructure a `{}` value, but this is {}",
+                                display_type_name,
+                                display_type_name,
+                                it.show()
+                            ),
+                            "destructuring with `{ }` pulls fields out of a struct value"
+                                .to_string(),
+                            format!(
+                                "destructure a `{}`, or bind the whole value with a name",
+                                display_type_name
+                            ),
+                        )
+                    };
+                    self.diags
+                        .push(Diagnostic::error("E0313", what, why, fix, Some(*type_span)));
                     for n in pattern.names() {
                         self.declare_bound(
                             n.local_name(),
@@ -2413,6 +2493,7 @@ impl<'a> Checker<'a> {
                 }
                 let actual = actual.unwrap();
                 let pattern_matches = match &it {
+                    _ if inferred_record => true,
                     Type::Apply {
                         name: actual_name, ..
                     } => {
@@ -2569,34 +2650,11 @@ impl<'a> Checker<'a> {
                     self.declare_bound(&e.name, e.span, elem_ty.clone(), b.mutable, b.sigil_span);
                 }
             }
+            // #4605: a tuple destructures by member name only. Every element must
+            // name a member (any order); a renamed element comes from the
+            // normalized record form `{ member: local } :: t`.
             BindPattern::Tuple { elems, span } => {
-                if let Type::Apply { name, args } = &it {
-                    // The applied run is the reserved generic `VjpRun<T>` even
-                    // when resolution qualified its head through the
-                    // non-generic source-owned `core.compute` record.
-                    if Self::split_type_name(name).1 == "VJPRun" && args.len() == 1 && elems.len() == 2 {
-                        let pull_ty = Type::Fn {
-                            params: vec![Type::Named("Tensor".to_string())],
-                            ret: Some(Box::new(args[0].clone())),
-                            effect_bound: None,
-                            param_contract: None,
-                            call_metadata: None,
-                            return_view_provenance: None,
-                        };
-                        let types = [Type::Named("Tensor".to_string()), pull_ty];
-                        for (element, ty) in elems.iter().zip(types.iter()) {
-                            self.declare_bound(
-                                &element.name,
-                                element.span,
-                                ty.clone(),
-                                b.mutable,
-                                b.sigil_span,
-                            );
-                        }
-                        return;
-                    }
-                }
-                let Type::Tuple(fields) = &it else {
+                let Some(members) = Self::tuple_pattern_members(&it) else {
                     self.diags.push(Diagnostic::error(
                         "E0313",
                         format!(
@@ -2619,47 +2677,55 @@ impl<'a> Checker<'a> {
                     }
                     return;
                 };
-                if elems.len() != fields.len() {
+                let strangers: Vec<&str> = elems
+                    .iter()
+                    .filter(|e| !members.iter().any(|(member, _)| *member == e.name))
+                    .map(|e| e.name.as_str())
+                    .collect();
+                if !strangers.is_empty() {
+                    self.diags.push(positional_tuple_destructure(&strangers, elems, &members, *span));
+                    // Recovery only: the written position picks a type so the
+                    // bound names don't cascade into further reports.
+                    for (index, n) in elems.iter().enumerate() {
+                        let ty = members.get(index).map_or(Type::Int, |(_, ty)| ty.clone());
+                        self.declare_bound(n.local_name(), n.span, ty, b.mutable, b.sigil_span);
+                    }
+                    return;
+                }
+                if elems.len() != members.len() {
                     self.diags.push(Diagnostic::error(
                         "E0315",
                         format!(
                             "this pattern binds {} member{}, but the tuple has {}",
                             elems.len(),
                             if elems.len() == 1 { "" } else { "s" },
-                            fields.len()
+                            members.len()
                         ),
-                        "a tuple pattern must name exactly as many members as the tuple holds"
+                        "a tuple pattern must name every member, so none is dropped by accident"
                             .to_string(),
                         format!(
-                            "name {} member{} to match the tuple",
-                            fields.len(),
-                            if fields.len() == 1 { "" } else { "s" }
+                            "name all {} members, or keep some with `{{ {}, .. }} :: …`",
+                            members.len(),
+                            elems
+                                .iter()
+                                .map(|e| e.name.as_str())
+                                .collect::<Vec<_>>()
+                                .join(", ")
                         ),
                         Some(*span),
                     ));
-                } else if let Expr::TupleLit(items, _, _) = &b.init {
-                    if items.len() != elems.len() {
-                        self.diags.push(Diagnostic::error(
-                                "E0315",
-                                format!(
-                                    "this pattern binds {} member{}, but the tuple literal has {}",
-                                    elems.len(),
-                                    if elems.len() == 1 { "" } else { "s" },
-                                    items.len()
-                                ),
-                                "a tuple pattern must name exactly as many members as the literal holds"
-                                    .to_string(),
-                                format!(
-                                    "name {} member{} to match the tuple",
-                                    items.len(),
-                                    if items.len() == 1 { "" } else { "s" }
-                                ),
-                                Some(*span),
-                            ));
-                    }
                 }
-                for (e, (_, fty)) in elems.iter().zip(fields.iter()) {
-                    self.declare_bound(&e.name, e.span, (**fty).clone(), b.mutable, b.sigil_span);
+                for e in elems {
+                    let ty = members
+                        .iter()
+                        .find(|(member, _)| *member == e.name)
+                        .map_or(Type::Int, |(_, ty)| ty.clone());
+                    self.declare_bound(e.local_name(), e.span, ty, b.mutable, b.sigil_span);
+                }
+                // A compute run is a borrowed handle: destructuring it leaves the
+                // run usable, so it is not moved.
+                if matches!(&it, Type::Apply { .. }) {
+                    return;
                 }
             }
             BindPattern::Refutable { .. } => {
@@ -2676,4 +2742,81 @@ impl<'a> Checker<'a> {
             }
         }
     }
+
+    /// #4605: the named members a `( … )` or inferred `{ … }` pattern can bind:
+    /// a tuple's members in checked order, or a compute run's `value`/`pull`.
+    pub(crate) fn tuple_pattern_members(it: &Type) -> Option<Vec<(String, Type)>> {
+        match it {
+            Type::Tuple(fields) => Some(
+                fields
+                    .iter()
+                    .map(|(name, ty)| (name.clone(), (**ty).clone()))
+                    .collect(),
+            ),
+            // The applied run is the reserved generic `VjpRun<T>` even when
+            // resolution qualified its head through the non-generic
+            // source-owned `core.compute` record.
+            Type::Apply { name, args }
+                if Self::split_type_name(name).1 == "VJPRun" && args.len() == 1 =>
+            {
+                let pull = Type::Fn {
+                    params: vec![Type::Named("Tensor".to_string())],
+                    ret: Some(Box::new(args[0].clone())),
+                    effect_bound: None,
+                    param_contract: None,
+                    call_metadata: None,
+                    return_view_provenance: None,
+                };
+                Some(vec![
+                    ("value".to_string(), Type::Named("Tensor".to_string())),
+                    ("pull".to_string(), pull),
+                ])
+            }
+            _ => None,
+        }
+    }
+}
+
+/// "`a`", "`a` and `b`", "`a`, `b` and `c`".
+fn tuple_member_list(members: &[(String, Type)]) -> String {
+    let names: Vec<String> = members.iter().map(|(name, _)| format!("`{name}`")).collect();
+    match names.split_last() {
+        None => String::new(),
+        Some((last, [])) => last.clone(),
+        Some((last, rest)) => format!("{} and {last}", rest.join(", ")),
+    }
+}
+
+/// E0314 (#4605): a `( … )` destructure whose names are not the tuple's
+/// members. The fix names the real members in both by-name forms.
+fn positional_tuple_destructure(
+    strangers: &[&str],
+    elems: &[crate::AST::BindName],
+    members: &[(String, Type)],
+    span: crate::Diagnostics::Span,
+) -> Diagnostic {
+    let written = elems.iter().map(|e| e.name.as_str()).collect::<Vec<_>>().join(", ");
+    let stranger_list = match strangers.split_last() {
+        Some((last, [])) => format!("`{last}` isn't a member"),
+        Some((last, rest)) => format!(
+            "{} and `{last}` aren't members",
+            rest.iter().map(|n| format!("`{n}`")).collect::<Vec<_>>().join(", ")
+        ),
+        None => String::new(),
+    };
+    let names = members.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>();
+    let renamed = names.iter().map(|n| format!("{n}: …")).collect::<Vec<_>>().join(", ");
+    Diagnostic::error(
+        "E0314",
+        format!("{stranger_list} of this tuple, so `({written})` can't bind it"),
+        format!(
+            "tuples destructure by member name, never by position; this tuple's members are {}",
+            tuple_member_list(members)
+        ),
+        format!(
+            "write `({}) :: …` to bind the members by name, or `{{ {renamed} }} :: …` to give them new names",
+            names.join(", ")
+        ),
+        Some(span),
+    )
 }
