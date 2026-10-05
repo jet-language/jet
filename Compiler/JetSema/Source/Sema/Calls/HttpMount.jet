@@ -119,19 +119,19 @@ fn sema_http_collect_mounted(expression: TExpr, graph: SemaRegistrationGraph, mo
 
 pub fn sema_http_unmounted_warnings(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult]) -> [Diagnostic] {
     mounted := [String]{}
-    loop module in modules {
-        loop function in module.functions {
-            loop expression in tir_stmt_list_children(function.body) -> sema_http_collect_mounted(expression, graph, module.module_identity, &mounted)
+    loop module_row in modules {
+        loop function in module_row.functions {
+            loop expression in tir_stmt_list_children(function.body) -> sema_http_collect_mounted(expression, graph, module_row.module_identity, &mounted)
         }
     }
     diagnostics := [Diagnostic]{}
-    loop module in graph.modules {
+    loop module_row in graph.modules {
         diagnostic_start :: diagnostics.len()
-        loop nominal in module.nominals {
+        loop nominal in module_row.nominals {
             if mounted.contains(nominal.symbol.id.key) -> next
             loop method in nominal.methods {
                 loop marker in method.declaration.markers {
-                    if sema_http_route_marker_verb(marker, graph, module.module_identity) == None -> next
+                    if sema_http_route_marker_verb(marker, graph, module_row.module_identity) == None -> next
                     &diagnostics.push(sema_lint("E2818", marker.span,
                         "HTTP route method `{method.declaration.name}` belongs to a struct that is never mounted.",
                         "Route markers record facts; only an explicit mux.mount(value) exposes that struct's routes.",
@@ -139,7 +139,7 @@ pub fn sema_http_unmounted_warnings(graph: SemaRegistrationGraph, modules: [Sema
                 }
             }
         }
-        sema_attach_diagnostic_source_locations(&diagnostics, diagnostic_start, module.source_segments)
+        sema_attach_diagnostic_source_locations(&diagnostics, diagnostic_start, module_row.source_segments)
     }
     diagnostics
 }

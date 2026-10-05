@@ -158,7 +158,7 @@ fn mounted_routes_keep_declaration_order_at_the_call_site() {
             }).expect("route example entry");
             let mut registrations = Vec::new();
             for statement in &run.body {
-                statement.for_each_expr(&mut |expression| {
+                statement.for_each_expr(|expression: &jet::AST::Expr| {
                     if let jet::AST::Expr::MethodCall { method, args, .. } = expression {
                         if matches!(method.as_str(), "get" | "post") && args.len() == 2 {
                             if let jet::AST::Expr::Str(parts, _) = &args[0].expr {
@@ -200,5 +200,114 @@ fn http_examples_match_interpreter_default_jit_and_aot() {
         assert_http_example_matches_all_tiers("http_client");
         assert_http_example_matches_all_tiers("http_route_markers");
         assert_http_example_matches_all_tiers("http_routes");
+    });
+}
+
+#[test]
+fn mounted_http_route_examples_match_all_tiers() {
+    assert!(common::have_rustc(), "HTTP route AOT proof requires rustc");
+    assert!(jet_jit::cranelift_host_supported(), "HTTP route proof requires Cranelift");
+    on_large_stack(|| {
+        assert_http_example_matches_all_tiers("http_route_markers");
+        assert_http_example_matches_all_tiers("http_routes");
+    });
+}
+
+#[test]
+fn auto_derived_http_inputs_keep_endpoint_schemas_on_all_tiers() {
+    assert!(common::have_rustc(), "HTTP schema AOT proof requires rustc");
+    assert!(jet_jit::cranelift_host_supported(), "HTTP schema proof requires Cranelift");
+    on_large_stack(|| {
+        let source = r#"
+use core.http.server as server
+use core.web as web
+struct JokeID { value: Int }
+struct Jokes {
+    #server.Get("/mounted/:id")
+    fn joke(self, id: JokeID) -> HTTPResponse HTTPError! {
+        Ok(server.response(200, "joke={id.value}"))
+    }
+}
+fn run() {
+    mux :: server.mux()
+    mux.get("/direct/:id", (id: JokeID) HTTPResponse HTTPError! -> Ok(server.response(200, "joke={id.value}")))
+    mux.mount(Jokes{})
+    schema :: web.openapi(mux)
+    print(schema.contains("\"value\"") && schema.contains("/mounted/") && schema.contains("/direct/"))
+}
+"#;
+        let scratch = common::Scratch::new("http_auto_decode");
+        let path = scratch.join("main.jet");
+        fs::write(&path, source).unwrap();
+        for interpreter in [true, false] {
+            jet_jit::reset_jit_trace_for_test();
+            let output = run_dev(&path, interpreter);
+            assert_eq!(output.stdout, "true\n", "HTTP schema tier interpreter={interpreter}");
+            assert_eq!(output.stderr, "");
+            assert_eq!(output.exit_code, 0);
+            if !interpreter {
+                assert!(jet_jit::jit_executed_for_test());
+                assert!(!jet_jit::deopt_invoked_for_test());
+                assert!(!jet_jit::fallback_invoked_for_test());
+            }
+        }
+        let (code, stdout, stderr) = common::build_and_run("http_auto_decode", "http_auto_decode", source);
+        assert_eq!(code, 0, "HTTP schema AOT: {stderr}");
+        assert_eq!(stdout, "true\n");
+        assert_eq!(stderr, "");
+    });
+}
+
+#[test]
+fn web_battery_mounted_routes_execute_with_shared_state() {
+    if std::env::var_os("JET_HTTP_BATTERY_CHILD").is_none() {
+        let scratch = common::Scratch::new("http-web-battery");
+        let roots = jetpack::Store::Roots { root: scratch.join("hangar"), dev_mode: true };
+        let source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("crates/jetpack/batteries/web");
+        let table = jetpack::RefSpec::SourceTable::from_decls([(
+            "battery".to_string(),
+            format!("path:{}", source.display()),
+            jetpack::RefSpec::ProviderKind::Core,
+        )]);
+        let spec = jetpack::RefSpec::classify_in("web@battery", &table).unwrap();
+        let store_dir = roots.hangar_dir();
+        fs::create_dir_all(&store_dir).unwrap();
+        let context = jetpack::Provider::Ctx {
+            fixtures: None, store_dir: &store_dir, offline: true,
+            project_dir: None, nix_index: None, nix_roots: None,
+            allow_local_nix_catalog: false,
+        };
+        jetpack::Store::realize_verified(&roots, &context,
+            jetpack::Store::RealizeRequest::Package { spec: &spec, table: &table })
+            .expect("realize the actual first-party web library offline");
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "web_battery_mounted_routes_execute_with_shared_state", "--nocapture", "--test-threads=1"])
+            .env("JET_HTTP_BATTERY_CHILD", "1")
+            .env("JETPACK_ROOT", &roots.root)
+            .output().unwrap();
+        assert!(output.status.success(), "web battery parity child failed:\n{}\n{}",
+            String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+        return;
+    }
+    assert!(jet_jit::cranelift_host_supported(), "web battery proof requires Cranelift");
+    on_large_stack(|| {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("Examples/features/web/battery/run.jet");
+        let interpreted = run_dev(&path, true);
+        assert_eq!(interpreted.exit_code, 0);
+        assert_eq!(interpreted.stderr, "");
+        for expected in [
+            "home:200\n", "redirect:303:/orders\n", "create:201\n", "<p>cache=1</p>",
+            "protected-failure-http:401\n", "detail:200\n", "login:200:cookie=true\n", "protected:200\n",
+        ] {
+            assert!(interpreted.stdout.contains(expected), "web battery missing {expected:?}: {}", interpreted.stdout);
+        }
+        jet_jit::reset_jit_trace_for_test();
+        let compiled = run_dev(&path, false);
+        assert_eq!(compiled.exit_code, 0);
+        assert_eq!(compiled.stderr, "");
+        assert_eq!(compiled.stdout, interpreted.stdout);
+        assert!(jet_jit::jit_executed_for_test());
+        assert!(!jet_jit::deopt_invoked_for_test());
+        assert!(!jet_jit::fallback_invoked_for_test());
     });
 }

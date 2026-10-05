@@ -4277,13 +4277,29 @@ pub(crate) fn populate_cx_from_bundle(cx: &mut Cx, bundle: &ProgramBundle, modul
     cx.import_mods = import_mod_map(bundle, module_idx);
     cx.module_alias = bundle.modules[module_idx].alias.clone();
     cx.module_identity = module_identity(bundle, module_idx);
-    // Sema's mounting callbacks name their source method by canonical nominal
-    // identity. Retain those checked bodies across imports for the existing
-    // endpoint-contract extractor; this does not register or discover routes.
-    fn register_http_method_bodies(cx: &mut Cx, bundle: &ProgramBundle, owner: usize, items: &[Item]) {
+    // Project sema's checked serde capabilities as well as source bodies for
+    // mounted callbacks. Auto-derived records carry the same endpoint schema
+    // as explicitly derived records; marker spelling is not a capability test.
+    fn register_http_metadata(cx: &mut Cx, bundle: &ProgramBundle, owner: usize, module_idx: usize, items: &[Item]) {
         for item in items {
             match item {
                 Item::Struct(definition) => {
+                    let traits = &bundle.modules[owner].trait_reg;
+                    if traits.implements_trait(&definition.name, Generics::ENCODE)
+                        || traits.implements_trait(&definition.name, Generics::DECODE)
+                    {
+                        if let Some(identity) = bundle.name_ledger.nominal_identity(owner, &definition.name) {
+                            let mut fields = jet_foundation::Reflection::fields(definition);
+                            for field in &mut fields {
+                                field.ty = super::Imports::qualify_imported_call_type(bundle, owner, "", &field.ty);
+                            }
+                            cx.codable_types.insert(identity.clone());
+                            cx.reflection_fields.insert(identity, fields);
+                        }
+                        if owner == module_idx {
+                            cx.codable_types.insert(definition.name.clone());
+                        }
+                    }
                     for method in &definition.methods {
                         let route_source = method.markers.iter().any(|marker| {
                             let crate::Sema::MarkerModules::MarkerResolution::Found(resolved) =
@@ -4299,14 +4315,14 @@ pub(crate) fn populate_cx_from_bundle(cx: &mut Cx, bundle: &ProgramBundle, modul
                     }
                 }
                 Item::CodeModule(module) => {
-                    if let Some(body) = &module.body { register_http_method_bodies(cx, bundle, owner, body); }
+                    if let Some(body) = &module.body { register_http_metadata(cx, bundle, owner, module_idx, body); }
                 }
                 _ => {}
             }
         }
     }
     for (owner, module) in bundle.modules.iter().enumerate() {
-        register_http_method_bodies(cx, bundle, owner, &module.items);
+        register_http_metadata(cx, bundle, owner, module_idx, &module.items);
     }
     // Match `qualified_key` used when constructing `TirConstantDef.key`.
     let module = cx.module_identity.clone();

@@ -2091,12 +2091,14 @@ the same E0355 rejection as the ordinary written list.
 declaring module and declaration, not a process-wide short name. A module may
 write its own marker bare. An imported marker always uses the import's local
 name: `use core.http.server as web` followed by `#web.Get(...)`. Nested exports
-retain their path, such as `#library.inner.Tag`. Bare imported markers teach
+retain their path, such as `#library.inner.LibraryNote`. Bare imported markers teach
 E0085; an ambiguous qualified path is E0086. Unknown names remain E0927 and
 private exports remain E0605. Group members resolve lexically in the group's
 declaring module, so a caller's marker or alias cannot capture them. A public
 group containing a private member is E0605; publishing a group cannot leak
 module-private authority.
+Qualified members of fixed groups count as import uses in their declaring
+scope, even when a caller receives the expanded member's local spelling.
 Nested scopes use their nearest declaration or import alias. Once an import
 alias binds a qualified head, a missing member is an error in that module,
 not permission to retry an outer alias with the same name.

@@ -913,7 +913,9 @@ pub fn sema_call_try_http_router(receiver: Expr, receiver_value: TExpr, method: 
             key :: "{scopes.bindings[binding_index].symbol.id.key}|{method}|{pattern}"
             if context.http_routes.contains(key) {
                 &diagnostics.push(sema_error("E2804", span, "Two routes both match `{sema_http_route_method_name(method)} {pattern}`.", "a duplicate route makes dispatch ambiguous; mounted and value routes share one ordered list", "remove one registration or use a distinct method and path"))
-            } else -> &context.http_routes.push(key)
+            } else {
+                &context.http_routes.push(key)
+            }
         }
     }
     pattern_error :: if dynamic -> None else -> sema_http_route_pattern_error(pattern)

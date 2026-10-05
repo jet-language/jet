@@ -1025,6 +1025,9 @@ ordered route rows, input binding, response checks, and duplicate check.
 Path placeholders bind parameters by name; a missing parameter or a type
 without text-decode capability is E2805. Invalid text in an incoming request
 keeps the runtime decoding failure rather than becoming a compile-time error.
+Default auto-derived records have the same Decode and schema capabilities as
+explicitly derived ones. `#!Codable` explicitly refuses that capability; route
+checking rejects such an input before lowering.
 Two statically known registrations of the same method and path are E2804,
 including a marker and a value route. Value routes remain available when the
 path is computed while the program runs. `web.openapi(mux)` describes the same

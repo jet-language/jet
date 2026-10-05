@@ -144,7 +144,7 @@ fn run() (HTTPError | NetError | TaskFailure)! {
     print("login-failure:{battery.login_status("alice", "wrong")}")
 
     login_state :: battery.login_state("alice", "argon2id:demo") ?? return
-    state :: Shared(RouteState{cache_version: 0, session_id: login_state.session_id})
+    state :: shared RouteState{cache_version: 0, session_id: login_state.session_id}
     print("protected-ok:{battery.protected_status(login_state.session_id, login_state.cookie)}")
     print("protected-failure:{battery.protected_status("missing", "")}")
     loop command in battery.future_commands() -> print("future:{command}")

@@ -551,6 +551,17 @@ fn visit_marker_module(bundle: &ProgramBundle, module: usize, visited: &mut [boo
 pub(crate) fn expand_marker_groups(bundle: &mut ProgramBundle) -> Vec<Diagnostic> {
     let mut raw_groups = HashMap::new();
     for (index, module) in bundle.modules.iter().enumerate() {
+        // Qualified fixed members are import reads in the declaring scope,
+        // even when expansion later restores a member's local spelling.
+        for (_, declaration, _) in declaration_rows(&module.items) {
+            if let Some(members) = &declaration.group {
+                for member in members {
+                    if let Some(span) = import_span_at(&module.items, &module.imports, &member.name, member.name_span) {
+                        bundle.name_ledger.record_loader_alias_use(index, span);
+                    }
+                }
+            }
+        }
         if declaration_rows(&module.items).iter().any(|(_, declaration, _)| declaration.group.is_some()) {
             let (tokens, _) = crate::Lexer::lex_generated(module.frontend_source.as_deref().unwrap_or(&module.source));
             raw_groups.insert(index, crate::Parser::named_marker_groups(&crate::Lexer::without_comments(&tokens)));
@@ -641,6 +652,14 @@ pub(crate) fn expand_marker_groups(bundle: &mut ProgramBundle) -> Vec<Diagnostic
             let origin = Arc::new(crate::Diagnostics::DiagnosticOrigin::new(module.display.clone(), module.path.to_string_lossy().into_owned(), module.source.clone()));
             for diagnostic in &mut diagnostics[diagnostic_start..] { diagnostic.set_origin(origin.clone()); }
         }
+        // Local groups were already checked in the initial parse. The replay
+        // replaces those exact reports; distinct repeats at one span remain.
+        bundle.parse_teaching.retain(|previous| !diagnostics[diagnostic_start..].iter().any(|replayed| {
+            previous.origin == replayed.origin && previous.severity == replayed.severity
+                && previous.code == replayed.code && previous.span == replayed.span
+                && previous.what == replayed.what && previous.why == replayed.why
+                && previous.fix == replayed.fix && previous.edit == replayed.edit
+        }));
     }
     diagnostics
 }
