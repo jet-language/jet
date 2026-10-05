@@ -90,16 +90,27 @@ fn jet_driver_present_origin(path: String, snapshot: JetDriverAuthorizedSourceSn
     None
 }
 
+// One presented origin per display path for a whole result: every diagnostic
+// of a file carries that file's exact bytes, so the file is hashed once, not
+// once per diagnostic (the compiler unit is one 12.8 MB file with thousands of
+// lints). The Rust driver shares one origin per module the same way.
+fn jet_driver_present_origin_once(path: String, snapshot: JetDriverAuthorizedSourceSnapshot, generated: [MIRSourceFile], origins: &[String:DiagnosticOrigin]) -> DiagnosticOrigin? Never! {
+    if origins.get(path) == .Val(origin) -> return Val(origin)
+    origin :: jet_driver_present_origin(path, snapshot, generated) ?? return None
+    origins[path] = origin
+    Val(origin)
+}
+
 // Project one checked diagnostic onto the file that owns it, the way the
 // bootstrap host does (Compiler/Bootstrap/Host/DiagnosticCodec.rs): a named
 // source path becomes the origin (root-relative display; a generated source
 // shows its path), and the span, edit, and labels move from aggregate offsets
 // to offsets in that file's exact bytes.
-pub fn jet_driver_present_diagnostic(diagnostic: Diagnostic, snapshot: JetDriverAuthorizedSourceSnapshot, generated: [MIRSourceFile]) -> Diagnostic Never! {
+pub fn jet_driver_present_diagnostic(diagnostic: Diagnostic, snapshot: JetDriverAuthorizedSourceSnapshot, generated: [MIRSourceFile], origins: &[String:DiagnosticOrigin]) -> Diagnostic Never! {
     presented := ~diagnostic
     path :: diagnostic.source_path ?? return presented
     if presented.origin == None {
-        presented.origin = jet_driver_present_origin(path, snapshot, generated)
+        presented.origin = jet_driver_present_origin_once(path, snapshot, generated, &origins)
         if presented.origin == None -> return presented
     }
     shift :: (diagnostic.source_start ?? 0) - (diagnostic.source_offset ?? 0)
@@ -115,7 +126,8 @@ pub fn jet_driver_present_diagnostic(diagnostic: Diagnostic, snapshot: JetDriver
 }
 
 pub fn jet_driver_present_diagnostics(diagnostics: [Diagnostic], snapshot: JetDriverAuthorizedSourceSnapshot, generated: [MIRSourceFile]) -> [Diagnostic] Never! {
-    presented :: loop diagnostic in diagnostics -> jet_driver_present_diagnostic(diagnostic, snapshot, generated)
+    origins := [String:DiagnosticOrigin]{}
+    presented :: loop diagnostic in diagnostics -> jet_driver_present_diagnostic(diagnostic, snapshot, generated, &origins)
     presented
 }
 
