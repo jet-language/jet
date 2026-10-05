@@ -139,7 +139,7 @@ fn jet_decimal_mul_pow10(value: JetBigInt, places: U32) -> JetBigInt Never! {
     if remainder == 0 { limbs.extend_from_slice(value.limbs) } else {
         factor := U32(10).pow(remainder)
         carry: U64 :: 0
-        for limb in value.limbs {
+        loop limb in value.limbs {
             product := (limb as U64) * (factor as U64) + carry
             limbs.push((product % BI_BASE) as U32)
             carry = product / BI_BASE
@@ -160,7 +160,7 @@ fn jet_decimal_pow10(scale: U32) -> JetBigInt Never! {
 fn jet_decimal_strip_trailing_zeros(value: &JetBigInt, scale: &U32) Never! {
     while scale > 0 && !value.is_zero() {
         zero_chunks: USize :: 0
-        for limb in value.limbs {
+        loop limb in value.limbs {
             if limb != 0 -> break
             zero_chunks += 1
         }
@@ -168,7 +168,7 @@ fn jet_decimal_strip_trailing_zeros(value: &JetBigInt, scale: &U32) Never! {
         if removable_chunks > 0 {
             _ :: value.limbs.drain(0..<removable_chunks)
             scale -= (removable_chunks as U32) * 9
-            continue
+            next
         }
         low := value.limbs.first().unwrap_or(0)
         zeros: U32 :: 0
@@ -192,7 +192,7 @@ fn jet_decimal_magnitude_from_digits(digits: [U8]) -> JetDecimalMagnitude Never!
     if digits.len() <= 39 {
         small: I128 :: 0
         fits :: true
-        for digit in digits {
+        loop digit in digits {
             next := small.checked_mul(10).and_then(fn(value) { value.checked_add(digit as I128) })
             match next {
                 .Val(value) => { small = value },
@@ -600,7 +600,7 @@ impl JetDecimal {
         assert(width > 0)
         value :: value
         divisor :: U32(10).pow((width - 1) as U32)
-        for _ in 0..<width {
+        loop _ in 0..<width {
             out.push(Char.from(U8(48) + ((value / divisor) as U8)))
             value %= divisor
             written += 1

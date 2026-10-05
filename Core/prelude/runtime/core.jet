@@ -199,7 +199,7 @@ fn jet_list_para_map<T: Sync, U: Send>(xs: [T], f: fn(&T) -> U, limit: JetInt) -
     worker_limit :: jet_std.jet_int_owned_to_i64(&limit).ok().and_then(value -> USize.try_from(value).ok()).unwrap_or(USize{usize_max()}).max(USize{1})
     jet_list_para_chunks(xs.len(), Int{worker_limit}, range -> {
         out := Array.with_capacity(range.len())
-        for index in range { out.push(jet_para_call(index, fn() { f(&xs[index]) })?) }
+        loop index in range { out.push(jet_para_call(index, fn() { f(&xs[index]) })?) }
         out
     }).into_iter().flatten().collect()
 }
@@ -207,7 +207,7 @@ fn jet_list_para_map<T: Sync, U: Send>(xs: [T], f: fn(&T) -> U, limit: JetInt) -
 fn jet_list_para_flags<T: Sync>(xs: &[T], f: fn(&T) -> Bool) -> [Bool] {
     jet_list_para_chunks(xs.len(), Int{usize_max()}, range -> {
         out := Array.with_capacity(range.len())
-        for index in range { out.push(jet_para_call(index, fn() { f(&xs[index]) })?) }
+        loop index in range { out.push(jet_para_call(index, fn() { f(&xs[index]) })?) }
         out
     }).into_iter().flatten().collect()
 }
@@ -231,7 +231,7 @@ fn jet_list_para_fold<T: Sync, U: Send>(xs: [T], seed: fn() -> U, step: fn(&U, &
     partials :: jet_list_para_chunks(xs.len(), Int{usize_max()}, range -> {
         start :: range.start
         acc := jet_para_call(start, seed)?
-        for index in range { acc = jet_para_call(index, fn() { step(&acc, &xs[index]) })? }
+        loop index in range { acc = jet_para_call(index, fn() { step(&acc, &xs[index]) })? }
         (start, acc)
     })
     if partials.is_empty() -> return seed()
@@ -726,7 +726,7 @@ fn jet_service_edge_report_jet(error: JetErr) -> Never { jet_service_edge_report
 fn jet_service_edge_report_rendered(report: String) -> Never {
     quoted := String.with_capacity(report.len() + 2)
     quoted.push('"')
-    for ch in report.chars() {
+    loop ch in report.chars() {
         match ch {
             '\\' -> quoted.push_str("\\\\")
             '"' -> quoted.push_str("\\\"")
