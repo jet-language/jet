@@ -220,6 +220,14 @@ pub struct JetRustEmitContext {
     // assumption on a frame still open; each is cached once that frame
     // settles capable, and dropped when it settles incapable.
     pub derive_capability_pending: [String]
+    // Per closed nominal query ("trait|nominal id|identity|name"): its
+    // verdict from the type's own impls and row, read before its fields
+    // expand (jet_rust_emit_derive_capability_gate). Kept only when the
+    // reading reported no failure.
+    pub derive_capability_gates: [String:Int]
+    // The `core.ui` and `core.ui.host` type exports that spell a Prelude
+    // `Jet*` carrier (jet_rust_emit_core_ui_type_names).
+    pub core_ui_type_names: [String:Bool]
     // Function id keys of impl methods whose free function body is not
     // emitted: printed natively inside their impl (derived Equatable and
     // Comparable) or owned by an undemanded derived codec impl
@@ -651,7 +659,7 @@ fn jet_rust_emit_variant_name(ctx: &JetRustEmitContext, type_id: MIRTypeID, vari
 // mangle (MIRRust constant / typed_enum_constant).
 fn jet_rust_emit_variant_symbol(ctx: &JetRustEmitContext, definition: MIRTypeDef?, type_name: String, variant: String) -> String Never! {
     if definition == .Val(row) -> return "{jet_rust_emit_type_name(&ctx, row.id)}::{jet_rust_emit_variant_name(&ctx, row.id, variant)}"
-    native :: jet_rust_emit_has_native_type_projection(type_name)
+    native :: jet_rust_emit_has_native_type_projection(ctx, type_name)
     "{jet_rust_emit_named_type(&ctx, type_name)}::{if native -> variant else -> jet_rust_emit_mangle_variant(variant)}"
 }
 
@@ -1073,6 +1081,8 @@ fn jet_rust_emit_context(program: MIRProgram, config: JetRustEmitConfig) -> JetR
         derive_capability_cache: [String:Bool]{},
         derive_capability_cycle_floor: JET_RUST_EMIT_NO_CYCLE_FLOOR,
         derive_capability_pending: [String]{},
+        derive_capability_gates: [String:Int]{},
+        core_ui_type_names: jet_rust_emit_core_ui_type_names(),
         skipped_methods: [String:Bool]{},
         move_facts: jet_rust_emit_empty_move_facts(),
         ref_bindings: jet_rust_emit_empty_ref_bindings(),
@@ -1118,13 +1128,13 @@ fn jet_rust_emit_context(program: MIRProgram, config: JetRustEmitConfig) -> JetR
         // native projection resolves); its MIR key is module-qualified here, so
         // the checked builtin fact selects it.
         default_err :: definition.compiler_builtin == (Val(MIRCompilerBuiltin.DefaultErr))
-        native :: default_err || jet_rust_emit_has_native_type_projection(definition.key) || jet_rust_emit_vault_host_record(definition.key)
+        native :: default_err || jet_rust_emit_has_native_type_projection(ctx, definition.key) || jet_rust_emit_vault_host_record(definition.key)
         if native -> native_type_keys[key] = true
         symbol :: if definition.compiler_builtin == {
             .Val(builtin) -> {
                 if builtin == MIRCompilerBuiltin.DefaultErr -> "{ctx.config.root_prefix}JetErr" else -> jet_rust_emit_generated_path(definition.key)
             }
-            else -> if jet_rust_emit_has_native_type_projection(definition.key) -> jet_rust_emit_apply_type(&ctx, MIRNominalRef{id: definition.id, name: definition.key}, [MIRType]{}) else -> jet_rust_emit_generated_path(definition.key)
+            else -> if jet_rust_emit_has_native_type_projection(ctx, definition.key) -> jet_rust_emit_apply_type(&ctx, MIRNominalRef{id: definition.id, name: definition.key}, [MIRType]{}) else -> jet_rust_emit_generated_path(definition.key)
         }
         &ctx.type_names.add(key, symbol).drop("the prior lookup proved this type key is new")
         &ctx.type_by_name.add(definition.key, symbol).drop("a later same-named row takes the canonical key spelling")
