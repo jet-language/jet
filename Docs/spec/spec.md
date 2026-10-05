@@ -2247,6 +2247,9 @@ Jet primitives. A future lossy log sink requires an explicit owner decision.
 Wait and I/O points inherit it, including task joins, channel receive,
 `time.sleep`, and network reads and writes. Exceeding the budget emits **E3003**
 and exits with the runtime error code (D-DEADLINE1).
+For a relative wall-clock budget, derive that absolute millisecond value from
+`time.unix_ns() /% 1_000_000 + budget_ms`; `time.now()` returns a civil
+`DateTime`, not the deadline's integer epoch.
 
 The teaching diagnostic **E0040** directs `async`/`await` users to `task`;
 **E0041** directs `Mutex`/`lock` users to channels.

@@ -6,14 +6,14 @@ package {
 use core.time as time
 
 fn run() {
-    #Context(deadline: time.now() + 20) {
+    #Context(deadline: time.unix_ns() /% 1_000_000 + 20) {
         slow :: task {
             time.sleep(10ms)
             print("finished fast")
         }
         ^slow.join() ?? panic("fast task failed")
     }
-    #Context(deadline: time.now() + 20) {
+    #Context(deadline: time.unix_ns() /% 1_000_000 + 20) {
         slow :: task {
             time.sleep(40ms)
             print("finished slow")
