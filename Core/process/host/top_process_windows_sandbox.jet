@@ -616,7 +616,7 @@ module jet_process_windows_sandbox {
                             count
                         }
                         Val(maximum) -> {
-                            shared :: budget.as_ref().expect("bounded Windows sandbox output needs a shared budget")
+                            shared :: budget.as_ref() ?? panic("bounded Windows sandbox output needs a shared budget")
                             used := shared.load(Ordering.Acquire)
                             loop {
                                 available :: maximum.saturating_sub(used)

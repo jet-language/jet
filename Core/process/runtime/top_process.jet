@@ -418,7 +418,7 @@ fn jet_process_spec_spawn(spec: &ProcessSpec) -> ProcessChild IOError! {
     }
     os :: target.selected_os()
     if (os == .Linux || os == .MacOS) && spec.policy_wire.is_some() {
-        plan :: launch_plan.as_ref().expect("authority launch must have a plan")
+        plan :: launch_plan.as_ref() ?? panic("authority launch must have a plan")
         cwd :: jet_process_policy_sandbox_cwd(spec)?
         sandbox_scope :: jet_process_policy_sandbox_scope(spec, plan.executable_identity)?
         output_dir :: if sandbox_scope.output_writable {
@@ -478,7 +478,7 @@ fn jet_process_terminal_spawn(spec: &ProcessSpec, executable_identity: String?, 
     if spec.detached {
         return Err(IOError.other(IOOperation.Resolve, spec.cmd.first().cloned(), "terminal sessions cannot be detached"))
     }
-    policy :: spec.terminal.as_ref().expect("terminal spawn needs policy")
+    policy :: spec.terminal.as_ref() ?? panic("terminal spawn needs policy")
     // GATE #4565: kernel primitive
     #Unsafe("launch actual selected-native PTY or ConPTY, retain owned terminal handles and one combined output reader") {
         if family == .Unix {
@@ -491,7 +491,7 @@ fn jet_process_terminal_spawn(spec: &ProcessSpec, executable_identity: String?, 
             stderr :: pair.slave.try_clone().map_err(fn(error) { IOError.other(IOOperation.Resolve, Val("process terminal"), error) })?
             os :: target.selected_os()
             child :: if (os == .Linux || os == .MacOS) && spec.policy_wire.is_some() {
-                executable :: executable_identity.expect("authority terminal launch must have a resolved executable")
+                executable :: executable_identity ?? panic("authority terminal launch must have a resolved executable")
                 cwd :: jet_process_policy_sandbox_cwd(spec)?
                 sandbox_scope :: jet_process_policy_sandbox_scope(spec, executable)?
                 output_dir :: if sandbox_scope.output_writable {
@@ -600,7 +600,7 @@ fn jet_process_output_state_read(state: &Arc<ProcessOutputState>, bytes: &[U8]) 
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:1082
 fn jet_process_output_state_snapshot(state: &Arc<ProcessOutputState>?, stream: String) -> String IOError! {
     if state.is_none() -> return Ok("")
-    state :: state.unwrap()
+    state :: state ?? panic("unwrap failed")
     // GATE #4565: kernel primitive
     #Unsafe("consume retained receipt bytes under native output mutex, preserving error kind and complete live-read history") {
         buffer := state.bytes.lock().unwrap_or_else(fn(poisoned) { poisoned.into_inner() })
@@ -645,7 +645,7 @@ fn jet_process_output_worker<R: io.Read + Send>(reader: R, state: Arc<ProcessOut
                 if count == 0 -> return Ok(())
                 kept :: match limit {
                     None -> count
-                    .Val(limit) -> jet_process_output_reserve(limit, budget.as_ref().expect("bounded process output needs a shared budget"), count)
+                    .Val(limit) -> jet_process_output_reserve(limit, budget.as_ref() ?? panic("bounded process output needs a shared budget"), count)
                 }
                 if kept != 0 {
                     buffer := state.bytes.lock().unwrap_or_else(fn(poisoned) { poisoned.into_inner() })
@@ -676,7 +676,7 @@ fn jet_process_spawn_output_reader<R: io.Read + Send>(reader: R?, terminal_eof: 
     budget: Arc<AtomicUsize>?, limit_hit: Arc<AtomicBool>, read_error: Arc<AtomicBool>, group_pid: U32?)
     -> (io.BufReader<ProcessReader>?, Arc<ProcessOutputState>?, JoinHandle<() io.Error!>?) {
     if reader.is_none() -> return (None, None, None)
-    reader :: reader.unwrap()
+    reader :: reader ?? panic("unwrap failed")
     // GATE #4565: kernel primitive
     #Unsafe("transfer static native pipe reader to thread and share synchronized output state with public buffered reader") {
         state :: Arc.new(ProcessOutputState{
@@ -714,7 +714,7 @@ fn jet_process_drain_reader<R: io.Read + Send>(reader: R?, limit: Usize?, budget
                                 count
                             }
                             .Val(limit) -> {
-                                budget :: budget.as_ref().expect("bounded process output needs a shared budget")
+                                budget :: budget.as_ref() ?? panic("bounded process output needs a shared budget")
                                 kept :: jet_process_output_reserve(limit, budget, count)
                                 if kept != 0 -> bytes.extend_from_slice(&chunk[0..<kept])
                                 kept

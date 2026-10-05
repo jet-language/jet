@@ -395,7 +395,7 @@ fn jet_process_spec_pipeline(specs: &[ProcessSpec]) -> ProcessReceipt IOError! {
     secret_values := specs.iter().flat_map(jet_process_policy_secret_values).collect::<[String]>()
     secret_values.sort_by_key(fn(value) { std.cmp.Reverse(value.len()) })
     secret_values.dedup()
-    Ok(jet_process_receipt(specs.last().expect("nonempty pipeline"), None, true, 0, code, success,
+    Ok(jet_process_receipt(specs.last() ?? panic("nonempty pipeline"), None, true, 0, code, success,
         Err(JetAbsent{}), timed_out, ^output_text, ^errors, Val(&secret_values)))
 }
 

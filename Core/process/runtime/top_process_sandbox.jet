@@ -331,11 +331,11 @@ pub fn wait_with_limited_output(child: ^Child, timeout: Duration?) -> Output Err
         if wait_error == .Val(error) -> return Err(.Io(error.to_string()))
         if exceeded.load(Ordering.Acquire) -> return Err(.Io("sandbox process output exceeded {MAX_CAPTURED_OUTPUT_BYTES} bytes"))
         if timed_out {
-            timeout :: timeout.expect("timeout flag requires a timeout")
+            timeout :: timeout ?? panic("timeout flag requires a timeout")
             return Err(.Io("sandbox process timed out after {timeout.as_millis()}ms"))
         }
         if cleanup_error == .Val(error) -> return Err(.Io(error.to_string()))
-        status :: status.expect("sandbox child must exit or have a cleanup reason")
+        status :: status ?? panic("sandbox child must exit or have a cleanup reason")
         Ok(Output{status: status, stdout: ^stdout.0, stderr: ^stderr.0})
     }
 }
@@ -374,7 +374,7 @@ pub fn mounted_executable_path(executable: OSPath, mounts: [ReadOnlyMount]) -> O
         if executable.strip_prefix(mounts[i].source) == .Ok(relative) {
             depth :: relative.components().count()
             // Rust max_by_key selects the last equal key, not the most-specific source.
-            if best.is_none() || depth >= best.unwrap().0 { best = Val((depth, i, relative)) }
+            if best.is_none() || depth >= (best ?? panic("unwrap failed")).0 { best = Val((depth, i, relative)) }
         }
     }
     match best { Val((_, i, relative)) -> mounts[i].destination.join(relative), None -> ~executable }
