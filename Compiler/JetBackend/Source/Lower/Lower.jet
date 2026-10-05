@@ -402,13 +402,35 @@ fn lower_repr(p: MIRProgram, ty: MIRType) -> LowerRepr Never! {
             }
             if definition.kind == {
                 .Struct(_, _) -> LowerRepr.Inline{ty: ty}
-                .Enum(variants, _) -> if lower_enum_is_tag(variants) -> LowerRepr.Discriminant else -> LowerRepr.Boxed{ty: ty}
+                .Enum(variants, _) -> {
+                    // A runtime-owned Core enum is not a native enum box,
+                    // even when its Jet declaration supplies the variants.
+                    // Only record schemas with explicit ABI adapters retain
+                    // their native layout at runtime boundaries.
+                    if definition.key.starts_with("<corelib>/") && lower_record_schema(p, ty) == None {
+                        if lower_runtime_handle(definition.name) == .Val(runtime) {
+                            clone :: if runtime.clone -> "jet_rt_handle_clone_{runtime.runtime}" else -> ""
+                            return LowerRepr.Handle{drop: "jet_rt_handle_drop_{runtime.runtime}", clone: clone}
+                        }
+                    }
+                    if lower_enum_is_tag(variants) -> LowerRepr.Discriminant else -> LowerRepr.Boxed{ty: ty}
+                }
                 .Distinct(base, _) -> lower_repr(p, base)
                 .Alias(target) -> lower_repr(p, target)
                 else -> LowerRepr.Unsupported{reason: "type {name.name}"}
             }
         }
         else -> LowerRepr.Unsupported{reason: "type {mir_type_display_name(ty)}"}
+    }
+}
+
+// Enum operations require the native discriminant/payload representation.
+// Opaque handles may point to a Rust enum or even a zero-sized Box whose
+// address is dangling; neither is memory readable using native enum offsets.
+fn lower_native_enum_layout(p: MIRProgram, ty: MIRType) -> Bool Never! {
+    if lower_repr(p, ty) == {
+        .Discriminant | .Boxed(_) -> true
+        else -> false
     }
 }
 
@@ -1890,6 +1912,8 @@ fn lower_discriminant(index: Int) -> Int Never! {
 
 
 fn lower_enum_is(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, subject: MIRValueID, owner: MIRTypeID, variant: String) Never! {
+    ty :: lower_value_type(c, subject) ?? return lower_fail(&m, &f, "enum subject has no checked type")
+    if !lower_native_enum_layout(p, ty) -> return lower_fail(&m, &f, "opaque runtime enum {mir_type_display_name(ty)} has no native enum layout")
     definition :: lower_type_def_by_id(p, owner) ?? return lower_fail(&m, &f, "enum type {owner.value} is missing")
     found :: lower_variant(definition, variant) ?? return lower_fail(&m, &f, "{definition.name} has no variant {variant}")
     value :: lower_use(&m, &f, subject) ?? return

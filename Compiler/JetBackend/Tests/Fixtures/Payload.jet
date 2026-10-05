@@ -196,3 +196,61 @@ fn fx_payload_move() -> MIRProgram Never! {
     fx_block(&b, 0, MIRTerminator.Return{value: None})
     fx_program([MIRFunction]{fx_function("run", b, fx_unit())}, ^types)
 }
+
+// Rust's Closed is a fieldless, zero-sized enum. Box<Closed>::into_raw may
+// therefore be the non-dereferenceable address 1. A borrowed Closed parameter
+// is an opaque pointer, not a native enum box with a tag at pointer + 0.
+fn fx_opaque_enum_rejected(name: String, operation: Int) -> MIRProgram Never! {
+    ty :: fx_named(name)
+    variants := [MIRVariant]{fx_variant("Closed", MIRVariantPayload.Unit)}
+    if name == "TaskFailure" {
+        variants = [MIRVariant]{
+            fx_variant("Cancelled", MIRVariantPayload.Unit),
+            fx_variant("DeadlineBlown", MIRVariantPayload.Unit),
+            fx_variant("Panicked", MIRVariantPayload.Single{value: fx_string()}),
+        }
+    }
+    definition := fx_type_def(name, MIRTypeDefKind.Enum{variants: variants, methods: [MIRFunctionID]{}})
+    definition.key = "<corelib>/native-enum-fixture::{name}"
+    b := fx_builder()
+    subject :: fx_param(&b, "opaque", ty, fx_borrow())
+    if operation == 0 {
+        fx_copy(&b, fx_bool(), MIROperation.EnumIs{subject: subject, owner: mir_type_id(name), variant: "Closed"}).drop("fixture result")
+    } else if operation == 1 {
+        fx_owned(&b, ty, MIROperation.Enum{type_id: mir_type_id(name), variant: "Closed", args: [MIREnumArg]{}}).drop("fixture result")
+    } else {
+        fx_value(&b, fx_string(), fx_borrow(), MIROperation.EnumPayload{subject: subject, owner: mir_type_id(name), variant: "Panicked", index: 0}).drop("fixture result")
+    }
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    fx_program([MIRFunction]{fx_function("run", b, fx_unit())}, [MIRTypeDef]{definition})
+}
+
+fn fx_opaque_enum_rejection_check(name: String, operation: Int) -> Bool Never! {
+    program :: fx_opaque_enum_rejected(name, operation)
+    if lower_native_enum_layout(program, fx_named(name)) -> return false
+    lowered :: lir_lower_entry(program, mir_function_id("run"))
+    found := false
+    loop issue in lowered.issues {
+        if issue.message == "opaque runtime enum {name} has no native enum layout" -> found = true
+    }
+    if !found -> return false
+    loop function in lowered.lir.functions {
+        if function.name != "run" -> next
+        loop block in function.blocks {
+            loop instruction in block.insts {
+                if instruction == .Load(_, _, offset) {
+                    if offset == 0 -> return false
+                }
+            }
+        }
+    }
+    true
+}
+
+fn fx_opaque_enum_rejection_checks() -> Bool Never! {
+    if !fx_opaque_enum_rejection_check("Closed", 0) -> return false
+    if !fx_opaque_enum_rejection_check("Closed", 1) -> return false
+    if !fx_opaque_enum_rejection_check("TaskFailure", 2) -> return false
+    print("opaque-enum: rejection checks passed (Closed ZST, construction, TaskFailure payload)")
+    true
+}

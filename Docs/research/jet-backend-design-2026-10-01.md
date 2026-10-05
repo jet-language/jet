@@ -401,6 +401,14 @@ policy. Consuming operands register as ownership sinks before lowering place
 reads: a task group cannot destructively consume a borrowed list header, and
 join/detach cannot consume a borrowed task. Loaded code and its destructors must
 remain mapped until every task body and returned value owner has finished.
+Opaque runtime-owned enums do not expose a native discriminant or payload
+layout. Their construction, variant tests and payload projections report a
+native unsupported issue unless an explicit record adapter supplies that layout.
+In particular, `TaskFailure` is a Rust-owned enum and `Closed` can be a
+zero-sized `Box` with dangling address 1; neither may be read at pointer + 0.
+The rejection fixtures cover Closed variant tests/construction and TaskFailure
+payload reads and assert that no zero-offset load was emitted for their body.
+
 Linking: the runtime rlib plus a staticlib wrapper crate
 (`extern crate jet_runtime;`, `--crate-type staticlib`) gives
 `libjet_runtime_c.a`; link the object with it and `-lpthread -ldl -lm`.
