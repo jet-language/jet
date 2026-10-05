@@ -985,3 +985,50 @@ any object interrupted before its executable/link report was written, then run
 the comparison over fresh working directories. The harness refuses new driver
 builds and shard processes while `~/.cache/jet-dev/proofq/PAUSE` exists; queue the
 continuation through proofq after the compile gate, not as a direct heavy run.
+
+### Comparing the two front-end feeds
+
+`JetDriver.jet_driver_compile_mir` runs the same checked pipeline and optimizer
+without invoking the Rust emitter. The Jet CLI's native `build` selects this
+path; release emission still selects `jet_driver_compile`. Host supplies the
+exact versioned compiler identity through `JET_COMPILER_IDENTITY` (canonical
+`name@version#build-id`), alongside `JET_TOOLCHAIN_ROOT` for Core sources.
+Native builds hand the live `MIRProgram` to `lir_lower_entry`, generate the
+object, and use the in-process linker with the packaged runtime pack.
+
+`Tests/run-front-feed.mjs` selects **every** `pass` row in an explicit native
+`results.tsv` baseline. It assembles the compiler source inventory,
+`Tests/FrontFeed.jet`, and schema-generated observation codecs into one probe.
+The Jet feed passes the driver's live MIR directly to the backend; only the
+independent Rust feed uses Debug conversion. Both feeds link the same runtime
+pack and run in separate, identically staged working directories with the
+golden's stdin. The gate requires matching stdout, stderr, and status between
+feeds, and successful stdout agreement with the golden for each feed.
+
+```sh
+node Compiler/JetBackend/Tests/run-front-feed.mjs OUT \
+  --baseline NATIVE/results.tsv --rust-mir CACHED/mir --assemble
+# Build OUT/probe/unit.jet with the reference compiler's release backend.
+JET_RUNTIME_PACK=RUNTIME/jet_runtime.pack.o \
+  node Compiler/JetBackend/Tests/run-front-feed.mjs OUT \
+  --baseline NATIVE/results.tsv --rust-jet REFERENCE_JET --probe PROBE_BINARY
+```
+
+`--rust-jet` regenerates checked MIR for the staged source via `emit --rust`
+and the MIR observation hook; it does not execute a different reference tier.
+The Debug converter follows the bootstrap codec's memo bound split, comptime
+field spelling, fixed-width trap-route derivation, and preformatted string
+interpolation. A missing checked Copy fact or payload is a stale-schema error,
+not an invented zero/default. Regenerate such cached dumps before differential
+execution. `node Compiler/JetBackend/Tests/test-front-feed-codec.mjs` exercises
+these mappings and strict token-stream observation without a full compiler
+build.
+
+Full MIR observations are retained per case. `gaps.json` and `gaps.tsv` rank
+all observed schema, type, layout/ABI, ownership/drop, route, and generic
+differences by the number of distinct affected goldens. IDs scoped to source
+authority are compared through symbolic names where pairing is unambiguous;
+ambiguous pairing is reported, never treated as equality. `--bootstrap JETC0`
+provides a front-end diagnostic census before the probe can be built.
+Preparation and a receipt-only census never establish differential parity;
+only `summary.json` with `differential_verified: true` does.
