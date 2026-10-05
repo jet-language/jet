@@ -10,13 +10,13 @@ all without DNS or network IO?
 
 ## Method
 
-- Binary: `~/.cache/jet-test-scratch/jet-current` → `jet-debug-snapshot14`, run through
-  `~/.cache/jet-luna/safe-jet.sh`.
-- Witness: `~/.cache/jet-test-scratch/Closer05/t3286/value_boundaries.jet`. It sits in a
+- Binary: `~/.cache/jet-dev/scratch/jet-current` → `jet-debug-snapshot14`, run through
+  `~/.cache/jet-dev/safe-jet.sh`.
+- Witness: `~/.cache/jet-dev/scratch/Closer05/t3286/value_boundaries.jet`. It sits in a
   scratch package whose `package.jet` grants only `[IO, Mem.Alloc]` (no `Net`), so the
   compiler proves that no cell reaches DNS or sockets.
 - Tiers: `safe-jet.sh run`, `safe-jet.sh run --interpret` and `safe-jet.sh build` plus the
-  produced binary (`~/.cache/jet-test-scratch/Closer05/tiers.sh`).
+  produced binary (`~/.cache/jet-dev/scratch/Closer05/tiers.sh`).
 - The witness was not landed as `Examples/features/net/value_boundaries.jet`. Several cells
   print wrong results (below), and a golden may only hold correct observed output.
 

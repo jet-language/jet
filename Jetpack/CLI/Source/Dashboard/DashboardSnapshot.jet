@@ -4,12 +4,12 @@
 // snapshot load, and non-TTY callers receive the compact status summary
 // rendered from one synchronous read-only snapshot.
 
-@DASHBOARD_MAX_RECENT_ACTIVITY :: 5
-@DASHBOARD_RETRY_INITIAL_MS :: 100
-@DASHBOARD_RETRY_MAX_MS :: 2000
+DASHBOARD_MAX_RECENT_ACTIVITY :: prep { 5 }
+DASHBOARD_RETRY_INITIAL_MS :: prep { 100 }
+DASHBOARD_RETRY_MAX_MS :: prep { 2000 }
 // Raw key reads return Idle after this long with nothing typed, so the loop
 // can poll the loader without spinning.
-@DASHBOARD_KEY_POLL_MS :: 100
+DASHBOARD_KEY_POLL_MS :: prep { 100 }
 
 pub enum DashboardLockState {
     Missing
@@ -71,7 +71,7 @@ pub enum DashboardKey {
     Char(String)
     Escape
     CtrlC
-    Eof
+    EOF
     // No key arrived within the poll interval.
     Idle
     Other
@@ -92,12 +92,12 @@ pub struct DashboardKeyReader {
 
     fn read_key(&self) -[IO, Time.Wait]> DashboardKey Never! {
         if self.script == .Val(bytes) {
-            if self.position >= bytes.len() -> return DashboardKey.Eof
+            if self.position >= bytes.len() -> return DashboardKey.EOF
             byte :: bytes[self.position]
             self.position += 1
             return cli_dashboard_key_for_byte(Int.from_u8(byte))
         }
-        key :: term.read_key_timeout(time.duration_ms(@DASHBOARD_KEY_POLL_MS)) ?? return DashboardKey.Idle
+        key :: term.read_key_timeout(time.duration_ms(DASHBOARD_KEY_POLL_MS)) ?? return DashboardKey.Idle
         if key == {
             .Char(text) -> if text.bytes().len() == 1 -> cli_dashboard_key_for_byte(Int.from_u8(text.bytes()[0])) else -> DashboardKey.Char(text)
             .Escape -> DashboardKey.Escape
@@ -111,7 +111,7 @@ fn cli_dashboard_key_for_byte(code: Int) -> DashboardKey Never! {
     if code == {
         27 -> DashboardKey.Escape
         3 -> DashboardKey.CtrlC
-        4 -> DashboardKey.Eof
+        4 -> DashboardKey.EOF
         else -> DashboardKey.Char(String.from_bytes([U8]{U8{code}}) ?? "")
     }
 }
@@ -119,7 +119,7 @@ fn cli_dashboard_key_for_byte(code: Int) -> DashboardKey Never! {
 pub fn cli_dashboard_key_quits(key: DashboardKey) -> Bool Never! {
     if key == {
         .Char(text) -> text == "q" || text == "Q"
-        .Escape | .CtrlC | .Eof -> true
+        .Escape | .CtrlC | .EOF -> true
         .Idle | .Other -> false
     }
 }
@@ -144,9 +144,9 @@ pub struct DashboardLoader {
     // Keeps a scripted, never-completing load open (tests).
     held: Sender<DashboardLoadResult>?
 
-    fn spawn() -[FS, Env, Exec, Time]> DashboardLoader Never! {
+    fn spawn(verification: &StoreVerification) -[IO, FS, Env, Exec, Time, Time.Wait]> DashboardLoader Never! {
         (sender, receiver) :: channel<DashboardLoadResult>(capacity: 1)
-        task sender.send(cli_dashboard_load_snapshot())
+        task sender.send(cli_dashboard_load_snapshot(&verification))
         DashboardLoader{result: receiver, held: None}
     }
 
@@ -186,10 +186,10 @@ pub struct DashboardLoaderFactory {
         DashboardLoaderFactory{script: Val(results), starts: 0}
     }
 
-    fn start(&self) -[FS, Env, Exec, Time]> DashboardLoader Never! {
+    fn start(&self, verification: &StoreVerification) -[IO, FS, Env, Exec, Time, Time.Wait]> DashboardLoader Never! {
         index :: self.starts
         self.starts += 1
-        results :: self.script ?? return DashboardLoader.spawn()
+        results :: self.script ?? return DashboardLoader.spawn(&verification)
         at :: if index < results.len() -> index else -> results.len() - 1
         DashboardLoader.completed(results[at])
     }
@@ -243,19 +243,20 @@ pub struct DashboardOutput {
 
 // Run the bare command. The TTY check stays here, at the dispatch seam, so
 // the non-interactive path can never emit an alternate-screen sequence.
-pub fn cli_run_dashboard() -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+pub fn cli_run_dashboard(verification: &StoreVerification) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+    cache := WorkspaceDeclarationCache.new()
     stdout_tty :: term.stdout().is_terminal()
     choice :: if stdout_tty -> ColorChoice.Auto else -> ColorChoice.Never
     theme :: Theme.resolve_for(choice, stdout_tty)
     if !cli_dashboard_interactive_mode(term.stdin().is_terminal(), stdout_tty) {
-        cli_dashboard_print_status_summary(theme)
-        return @EXIT_OK
+        cli_dashboard_print_status_summary(&verification, &cache, theme)
+        return EXIT_OK
     }
     // Declared before raw mode so raw mode is restored first at scope exit.
     signals :: process.signals([ProcessSignal]{ProcessSignal.Interrupt, ProcessSignal.Terminate})
     raw :: term.enable_raw_mode() ?? {
-        cli_dashboard_print_status_summary(theme)
-        return @EXIT_OK
+        cli_dashboard_print_status_summary(&verification, &cache, theme)
+        return EXIT_OK
     }
     screen :: DashboardAlternateScreen.enter()
     reader := DashboardKeyReader.terminal()
@@ -277,7 +278,7 @@ fn cli_dashboard_signalled(signals: Receiver<ProcessSignal>?) -> Bool Never! {
 // exponentially up to 2 s; `r` restarts the load at once.
 pub fn cli_dashboard_run_loop(reader: &DashboardKeyReader, loader: &DashboardLoader?, frame: &DashboardFrame, output: &DashboardOutput, theme: Theme, factory: &DashboardLoaderFactory, clock: &DashboardClock, signals: Receiver<ProcessSignal>?) -[IO, FS, Env, Exec, Time, Time.Wait]> Int Never! {
     &output.draw(frame, theme)
-    retry_delay := @DASHBOARD_RETRY_INITIAL_MS
+    retry_delay := DASHBOARD_RETRY_INITIAL_MS
     next_retry := &clock.now() + retry_delay
     if loader == None -> loader = Val(&factory.start())
     loop {
@@ -288,7 +289,7 @@ pub fn cli_dashboard_run_loop(reader: &DashboardKeyReader, loader: &DashboardLoa
         if cli_dashboard_key_refreshes(key) {
             loader = None
             frame = cli_dashboard_refresh_frame(frame)
-            retry_delay = @DASHBOARD_RETRY_INITIAL_MS
+            retry_delay = DASHBOARD_RETRY_INITIAL_MS
             next_retry = current + retry_delay
             &output.draw(frame, theme)
             loader = Val(&factory.start())
@@ -301,7 +302,7 @@ pub fn cli_dashboard_run_loop(reader: &DashboardKeyReader, loader: &DashboardLoa
             stale :: cli_dashboard_stale_snapshot(frame)
             frame = if result == {
                 .Ready(snapshot) -> {
-                    retry_delay = @DASHBOARD_RETRY_INITIAL_MS
+                    retry_delay = DASHBOARD_RETRY_INITIAL_MS
                     DashboardFrame.Ready(snapshot)
                 }
                 .Busy -> {
@@ -325,12 +326,12 @@ pub fn cli_dashboard_run_loop(reader: &DashboardKeyReader, loader: &DashboardLoa
             loader = Val(&factory.start())
         }
     }
-    @EXIT_OK
+    EXIT_OK
 }
 
 fn cli_dashboard_backoff(delay: Int) -> Int Never! {
     doubled :: delay * 2
-    if doubled > @DASHBOARD_RETRY_MAX_MS -> @DASHBOARD_RETRY_MAX_MS else -> doubled
+    if doubled > DASHBOARD_RETRY_MAX_MS -> DASHBOARD_RETRY_MAX_MS else -> doubled
 }
 
 // Loading, busy, and refreshing frames retry; a ready frame waits for `r`.
@@ -361,22 +362,24 @@ pub fn cli_dashboard_stale_snapshot(frame: DashboardFrame) -> DashboardSnapshot?
 // retrying frame; an idle store proceeds to the lock-free snapshot read. The
 // dashboard reads the committed metadata projection, not the checked listing
 // (which takes the exclusive Hangar lock and verifies every output tree).
-fn cli_dashboard_load_snapshot() -[FS, Env, Exec, Time]> DashboardLoadResult Never! {
+fn cli_dashboard_load_snapshot(verification: &StoreVerification) -[IO, FS, Env, Exec, Time, Time.Wait]> DashboardLoadResult Never! {
+    // Each background refresh is its own discovery session; no cross-task memo.
+    cache := WorkspaceDeclarationCache.new()
     roots :: pkg_resolve_roots()
     lock_path :: files.join(files.join(roots.root, ".locks"), "hangar.lock")
     state :: env_lock_state(lock_path) ?? RuntimeLockState.Absent
     if state == RuntimeLockState.Held -> return DashboardLoadResult.Busy
-    DashboardLoadResult.Ready(cli_dashboard_collect_snapshot_from(roots, store_list_read_only(roots)))
+    DashboardLoadResult.Ready(cli_dashboard_collect_snapshot_from(&verification, &cache, roots, store_list_read_only(roots)))
 }
 
-pub fn cli_dashboard_collect_snapshot() -[FS, Env, Exec, Time]> DashboardSnapshot Never! {
+pub fn cli_dashboard_collect_snapshot(verification: &StoreVerification, cache: &WorkspaceDeclarationCache) -[IO, FS, Env, Exec, Time, Time.Wait]> DashboardSnapshot Never! {
     roots :: pkg_resolve_roots()
-    cli_dashboard_collect_snapshot_from(roots, store_list_read_only(roots))
+    cli_dashboard_collect_snapshot_from(&verification, &cache, roots, store_list_read_only(roots))
 }
 
-fn cli_dashboard_collect_snapshot_from(roots: HangarRoots, listed: [StoreEntry]) -[FS, Env, Exec, Time]> DashboardSnapshot Never! {
+fn cli_dashboard_collect_snapshot_from(verification: &StoreVerification, cache: &WorkspaceDeclarationCache, roots: HangarRoots, listed: [StoreEntry]) -[IO, FS, Env, Exec, Time, Time.Wait]> DashboardSnapshot Never! {
     current_dir :: sys.current_dir() ?? "."
-    project_root :: cli_project_root(current_dir)
+    project_root :: cli_project_root(&cache, current_dir)
     env_file :: EnvFile.path_in(project_root)
     env_present :: files.is_file(env_file)
     env_source :: files.read(env_file) ?? ""
@@ -394,8 +397,8 @@ fn cli_dashboard_collect_snapshot_from(roots: HangarRoots, listed: [StoreEntry])
         lock != None -> DashboardLockState.Ready
         else -> DashboardLockState.Invalid
     }
-    active :: (sys.get(@JETPACK_ENV_MARKER) ?? "") == "1"
-    active_refs :: sys.get(@JETPACK_REF_VAR) ?? ""
+    active :: (sys.get(JETPACK_ENV_MARKER) ?? "") == "1"
+    active_refs :: sys.get(JETPACK_REF_VAR) ?? ""
     update_channels := 0
     active_environment := String?{None}
     declared_packages := Int?{None}
@@ -421,11 +424,11 @@ fn cli_dashboard_collect_snapshot_from(roots: HangarRoots, listed: [StoreEntry])
     now :: time.unix_seconds(time.now())
     activity := [DashboardActivity]{}
     loop entry in entries {
-        if activity.len() >= @DASHBOARD_MAX_RECENT_ACTIVITY -> break
+        if activity.len() >= DASHBOARD_MAX_RECENT_ACTIVITY -> break
         name :: if entry.name == "" -> entry.id else -> entry.name
         &activity.push(DashboardActivity{name: name, version: entry.version, when: cli_dashboard_age_label(cli_dashboard_activity_time(entry), now)})
     }
-    doctor :: DoctorReport.run(project_root, false)
+    doctor :: DoctorReport.run(&verification, project_root, false)
     store_health := DoctorHealth.Healthy
     loop check in doctor.checks {
         if check.name == "hangar" {
@@ -474,7 +477,7 @@ pub fn cli_dashboard_age_label(timestamp: Int, now: Int) -> String Never! {
     }
 }
 
-fn cli_dashboard_print_status_summary(theme: Theme) Never! -[IO, FS, Env, Exec, Time]> {
-    snapshot :: cli_dashboard_collect_snapshot()
+fn cli_dashboard_print_status_summary(verification: &StoreVerification, cache: &WorkspaceDeclarationCache, theme: Theme) Never! -[IO, FS, Env, Exec, Time, Time.Wait]> {
+    snapshot :: cli_dashboard_collect_snapshot(&verification, &cache)
     term.stdout().write(cli_dashboard_render_status_summary(snapshot, theme)).drop("a closed stdout cannot take the status summary")
 }

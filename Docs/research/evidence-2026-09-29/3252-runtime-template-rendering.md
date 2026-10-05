@@ -10,7 +10,7 @@ the runtime-template job relate to the existing text and format owners?
 - Searched Core for any template renderer: grep `(?i)mustache|gettext|\.mo\b|struct Template|Catalog`
   over `Core/` found no match. grep `(?i)template|catalog|gettext` over
   `Compiler/JetFoundation/Source/Registry/CoreCallRows.jet` found no match.
-- Ran a probe, `~/.cache/jet-test-scratch/Closer05/t3252/probe.jet`
+- Ran a probe, `~/.cache/jet-dev/scratch/Closer05/t3252/probe.jet`
   (`use core.text.template as template`, `template.parse_html(...)`), on snapshot14 (result below).
 - Read the owners: `Core/text/html.jet:16-86` (`escape`, `escape_quote`, `attr_escape`,
   `text_escape`, `unescape`, `strip_tags`), `Core/text/fmt.jet` (number/pad/plural helpers),
@@ -34,7 +34,7 @@ D-CORE-TEMPLATE1=A. Anything beyond it (partials, filters, lambdas) needs a new 
 
 ## Execution evidence
 
-`safe-jet.sh run ~/.cache/jet-test-scratch/Closer05/t3252/probe.jet` →
+`safe-jet.sh run ~/.cache/jet-dev/scratch/Closer05/t3252/probe.jet` →
 `Error [E1001]: There is no core module 'core.text.template'`. The same probe without the
 template import (`probe_catalog.jet`) → `Error [E1001]: There is no core module 'core.text.catalog'` (#3289).
 

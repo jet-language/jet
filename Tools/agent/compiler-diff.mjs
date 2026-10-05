@@ -411,7 +411,7 @@ function isWithin(parent, child) {
 
 function scratchRoot(options) {
   const base = process.env.JET_TEST_SCRATCH_DIR
-    || (process.env.HOME ? join(process.env.HOME, ".cache/jet-test-scratch") : null);
+    || (process.env.HOME ? join(process.env.HOME, ".cache/jet-dev/scratch") : null);
   if (!options.root && !base) throw new Unavailable("no scratch root: pass --root or set JET_TEST_SCRATCH_DIR or HOME");
   const root = options.root ?? join(base, options.canary ? "compiler-diff-canary" : "compiler-diff");
   if (isWithin("/tmp", root)) throw new Unavailable(`scratch root ${root} is on RAM-backed /tmp; use a disk path`);

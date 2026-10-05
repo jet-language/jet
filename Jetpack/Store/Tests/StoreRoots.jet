@@ -37,17 +37,17 @@ fn store_test_abi_fixture(roots: HangarRoots, name: String, provider: String, re
 }
 
 // Record one path output with a `bin` member.
-fn store_test_record_output(roots: HangarRoots, name: String, reference: String, provider: String, member: String) -> StoreEntry Never! {
+fn store_test_record_output(verification: &StoreVerification, roots: HangarRoots, name: String, reference: String, provider: String, member: String) -> StoreEntry Never! {
     out :: files.join(roots.root, "{name}-output")
     files.create_dir_all(files.join(out, "bin")) ?? panic("fixture dir")
     files.write(files.join(files.join(out, "bin"), member), name) ?? panic("fixture file")
     envelope :: Envelope.for_output(out, reference, provider)
-    store_record_verified(roots, name, "1.0", reference, out, files.join(out, "bin"), "", envelope, store_test_identity()) ?? panic("record")
+    store_record_verified(&verification, roots, name, "1.0", reference, out, files.join(out, "bin"), "", envelope, store_test_identity()) ?? panic("record")
 }
 
 // Write a project lock at `project/.jet/lock`.
 fn store_test_write_lock(project: String, text: String) Never! {
-    managed :: files.join(project, @SOURCE_ROOT_DIR)
+    managed :: files.join(project, SOURCE_ROOT_DIR)
     files.create_dir_all(managed) ?? panic("managed dir")
     files.write(files.join(managed, "lock"), text) ?? panic("lock file")
 }
@@ -65,18 +65,19 @@ fn store_test_nul_join(left: String, right: String) -> String Never! {
 }
 
 #Test("store abi universe isolation keeps native closures hangar only") {
+    verification := StoreVerification.new()
     roots :: store_test_temp_roots()
     // Stage-1 compat bytes are Hangar-owned, but remain a separate provider
     // universe.
-    compat :: store_record_realized_mode(roots, store_test_abi_fixture(roots, "compat", "nix", [String]{}, false)) ?? panic("compat record")
+    compat :: store_record_realized_mode(&verification, roots, store_test_abi_fixture(roots, "compat", "nix", [String]{}, false)) ?? panic("compat record")
     compat_digest :: compat.envelope.output_hash
     // A native runtime closure may contain a Hangar-native dependency and a
     // native library artifact, but no compat-root object.
-    native_dependency :: store_test_ingest_fixture(roots, "abi-native-dependency", [String: String]{"out": "native dependency"}, [String]{}).entry
-    native :: store_record_realized_mode(roots, store_test_abi_fixture(roots, "native", "core", [String]{native_dependency.envelope.output_hash}, true)) ?? panic("native record")
+    native_dependency :: store_test_ingest_fixture(&verification, roots, "abi-native-dependency", [String: String]{"out": "native dependency"}, [String]{}).entry
+    native :: store_record_realized_mode(&verification, roots, store_test_abi_fixture(roots, "native", "core", [String]{native_dependency.envelope.output_hash}, true)) ?? panic("native record")
     assert(store_path_starts_with(native.rlib, files.join(roots.hangar_dir(), "objects")))
 
-    graph :: store_closure_graph(roots) ?? panic("graph")
+    graph :: store_closure_graph(&verification, roots) ?? panic("graph")
     loop digest in graph.closure(native.envelope.output_hash) {
         object :: graph.objects.get(digest) ?? panic("native closure member must be a graph object")
         assert(!object.external)
@@ -85,13 +86,13 @@ fn store_test_nul_join(left: String, right: String) -> String Never! {
 
     // Both directions are guarded.
     native_leak :: store_test_abi_fixture(roots, "native-leak", "core", [String]{compat_digest}, true)
-    if store_record_realized_mode(roots, native_leak) == {
+    if store_record_realized_mode(&verification, roots, native_leak) == {
         .Ok(_) -> panic("native leak must be refused")
         .Err(error) -> assert(error.message().contains("ABI universe"))
     }
     assert(!files.exists(files.join(files.join(roots.hangar_dir(), "objects"), native_leak.envelope.output_hash)))
     compat_leak :: store_test_abi_fixture(roots, "compat-leak", "nix", [String]{native.envelope.output_hash}, false)
-    if store_record_realized_mode(roots, compat_leak) == {
+    if store_record_realized_mode(&verification, roots, compat_leak) == {
         .Ok(_) -> panic("compat leak must be refused")
         .Err(error) -> assert(error.message().contains("ABI universe"))
     }
@@ -99,21 +100,23 @@ fn store_test_nul_join(left: String, right: String) -> String Never! {
 }
 
 #Test("store clean keeps fresh entries") {
+    verification := StoreVerification.new()
     roots :: store_test_temp_roots()
     names :: [String]{"a", "b"}
-    loop name in names -> store_test_record_output(roots, name, "{name}@nixpkgs", "nix", name)
-    report :: store_clean(roots) ?? panic("clean")
+    loop name in names -> store_test_record_output(&verification, roots, name, "{name}@nixpkgs", "nix", name)
+    report :: store_clean(&verification, roots) ?? panic("clean")
     assert_eq(report.removed_objects, 0)
-    assert_eq(store_list(roots).len(), 2)
+    assert_eq(store_list(&verification, roots).len(), 2)
     store_test_drop_roots(roots)
 }
 
 #Test("store clean quarantines malformed objects and continues") {
+    verification := StoreVerification.new()
     roots :: store_test_temp_roots()
-    stale := store_test_ingest_fixture(roots, "gc-stale", [String: String]{"out": "stale"}, [String]{}).entry
-    fresh :: store_test_ingest_fixture(roots, "gc-fresh", [String: String]{"out": "fresh"}, [String]{}).entry
+    stale := store_test_ingest_fixture(&verification, roots, "gc-stale", [String: String]{"out": "stale"}, [String]{}).entry
+    fresh :: store_test_ingest_fixture(&verification, roots, "gc-fresh", [String: String]{"out": "fresh"}, [String]{}).entry
     stale.last_used_at = 1
-    store_test_register_locked(roots, stale)
+    store_test_register_locked(&verification, roots, stale)
     hangar :: roots.hangar_dir()
     malformed :: files.join(hangar, "malformed-object")
     files.create_dir_all(malformed) ?? panic("fixture dir")
@@ -123,8 +126,8 @@ fn store_test_nul_join(left: String, right: String) -> String Never! {
     files.create_dir_all(metadata_less) ?? panic("fixture dir")
     files.write(files.join(metadata_less, "payload"), "no metadata") ?? panic("fixture payload")
 
-    assert_eq((store_clean_plan(roots) ?? panic("plan")).quarantined_objects, 2)
-    report :: store_clean(roots) ?? panic("clean")
+    assert_eq((store_clean_plan(&verification, roots) ?? panic("plan")).quarantined_objects, 2)
+    report :: store_clean(&verification, roots) ?? panic("clean")
     assert_eq(report.quarantined_objects, 2)
     assert(!files.exists(files.join(hangar, stale.id)))
     assert(files.is_dir(files.join(hangar, fresh.id)))
@@ -142,18 +145,19 @@ fn store_test_nul_join(left: String, right: String) -> String Never! {
 
 // Re-register one entry under the Hangar lock (Rust `with_lock` +
 // `register_entry_unlocked`).
-fn store_test_register_locked(roots: HangarRoots, entry: StoreEntry) Never! {
+fn store_test_register_locked(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry) Never! {
     hangar_lock :: env_runtime_lock(roots.root, "hangar") ?? panic("hangar lock")
-    store_register_entry_unlocked(roots, entry) ?? panic("register")
+    store_register_entry_unlocked(&verification, roots, entry) ?? panic("register")
 }
 
 #Test("store lock receipt root keeps entry reachable without other root facts") {
+    verification := StoreVerification.new()
     roots :: store_test_temp_roots()
     out :: files.join(roots.root, "receipt-root-output")
     files.create_dir_all(files.join(out, "bin")) ?? panic("fixture dir")
     files.write(files.join(out, "bin/receipt-root"), "receipt-root") ?? panic("fixture file")
     envelope :: Envelope.for_output(out, "path:receipt-root", "path")
-    entry :: store_record_verified(roots, "receipt-root", "1", "path:receipt-root", out, files.join(out, "bin/receipt-root"), "", envelope, store_test_identity()) ?? panic("record")
+    entry :: store_record_verified(&verification, roots, "receipt-root", "1", "path:receipt-root", out, files.join(out, "bin/receipt-root"), "", envelope, store_test_identity()) ?? panic("record")
     assert(store_valid_receipt_digest(entry.receipt))
     project :: files.join(roots.root, "project")
     store_test_write_lock(project, store_test_receipt_lock("other-name", "other-version", entry.reference, entry.receipt))
@@ -167,10 +171,11 @@ fn store_test_register_locked(roots: HangarRoots, entry: StoreEntry) Never! {
 }
 
 #Test("store lock receipt root keeps connected closure reachable") {
+    verification := StoreVerification.new()
     roots :: store_test_temp_roots()
-    base :: store_test_ingest_fixture(roots, "receipt-base", [String: String]{"out": "base"}, [String]{})
-    middle :: store_test_ingest_fixture(roots, "receipt-middle", [String: String]{"out": "middle"}, [String]{base.entry.envelope.output_hash})
-    consumer :: store_test_ingest_fixture(roots, "receipt-consumer", [String: String]{"out": "consumer"}, [String]{middle.entry.envelope.output_hash})
+    base :: store_test_ingest_fixture(&verification, roots, "receipt-base", [String: String]{"out": "base"}, [String]{})
+    middle :: store_test_ingest_fixture(&verification, roots, "receipt-middle", [String: String]{"out": "middle"}, [String]{base.entry.envelope.output_hash})
+    consumer :: store_test_ingest_fixture(&verification, roots, "receipt-consumer", [String: String]{"out": "consumer"}, [String]{middle.entry.envelope.output_hash})
     project :: files.join(roots.root, "receipt-closure-project")
     store_test_write_lock(project, store_test_receipt_lock("receipt-consumer", "1", consumer.entry.reference, consumer.entry.receipt))
     live :: store_live_roots_from(roots, project) ?? panic("live roots")
@@ -184,8 +189,9 @@ fn store_test_register_locked(roots: HangarRoots, entry: StoreEntry) Never! {
 }
 
 #Test("store lock receipt identity mismatch fails closed before cleanup") {
+    verification := StoreVerification.new()
     roots :: store_test_temp_roots()
-    entry :: store_test_ingest_fixture(roots, "receipt-mismatch", [String: String]{"out": "bytes"}, [String]{})
+    entry :: store_test_ingest_fixture(&verification, roots, "receipt-mismatch", [String: String]{"out": "bytes"}, [String]{})
     project :: files.join(roots.root, "receipt-mismatch-project")
     store_test_write_lock(project, store_test_receipt_lock("wrong-package", "1", entry.entry.reference, entry.entry.receipt))
     if store_live_roots_from(roots, project) == {
@@ -193,13 +199,14 @@ fn store_test_register_locked(roots: HangarRoots, entry: StoreEntry) Never! {
         .Err(error) -> assert(error.message().contains("disagrees with Hangar closure record"))
     }
     assert(files.exists(files.join(roots.hangar_dir(), entry.entry.id)))
-    assert(files.is_file(files.join(files.join(roots.hangar_dir(), @STORE_RECEIPTS_DIR), entry.entry.receipt)))
+    assert(files.is_file(files.join(files.join(roots.hangar_dir(), STORE_RECEIPTS_DIR), entry.entry.receipt)))
     store_test_drop_roots(roots)
 }
 
 #Test("store lock receipt version mismatch fails closed before projection") {
+    verification := StoreVerification.new()
     roots :: store_test_temp_roots()
-    entry :: store_test_ingest_fixture(roots, "receipt-version-mismatch", [String: String]{"out": "bytes"}, [String]{})
+    entry :: store_test_ingest_fixture(&verification, roots, "receipt-version-mismatch", [String: String]{"out": "bytes"}, [String]{})
     project :: files.join(roots.root, "receipt-version-mismatch-project")
     store_test_write_lock(project, "version = 1\n\n[[package]]\nname = \"{entry.entry.name}\"\nversion = \"wrong-version\"\nsource = {{ path = \"{entry.entry.reference}\" }}\nfingerprint = \"\"\ndependencies = []\n")
     if store_record_receipt_projection(project, entry.entry.name, entry.entry.version, entry.entry.reference, entry.entry.envelope.output_hash, entry.entry.receipt) == {
@@ -212,16 +219,17 @@ fn store_test_register_locked(roots: HangarRoots, entry: StoreEntry) Never! {
 }
 
 #Test("store clean sweeps unreachable receipt objects") {
+    verification := StoreVerification.new()
     roots :: store_test_temp_roots()
-    entry :: store_test_ingest_fixture(roots, "orphan-receipt", [String: String]{"out": "bytes"}, [String]{})
-    receipt :: files.join(files.join(roots.hangar_dir(), @STORE_RECEIPTS_DIR), entry.entry.receipt)
+    entry :: store_test_ingest_fixture(&verification, roots, "orphan-receipt", [String: String]{"out": "bytes"}, [String]{})
+    receipt :: files.join(files.join(roots.hangar_dir(), STORE_RECEIPTS_DIR), entry.entry.receipt)
     object :: files.join(roots.hangar_dir(), entry.entry.id)
-    assert(store_remove_closure_record(roots, entry.entry.id) ?? panic("remove record"))
+    assert(store_remove_closure_record(&verification, roots, entry.entry.id) ?? panic("remove record"))
     store_make_tree_writable_for_removal(object) ?? panic("chmod")
     files.remove_all(object) ?? panic("remove object")
     assert(files.is_file(receipt))
-    assert_eq((store_clean_plan(roots) ?? panic("plan")).removed_receipts, 1)
-    assert_eq((store_clean(roots) ?? panic("clean")).removed_receipts, 1)
+    assert_eq((store_clean_plan(&verification, roots) ?? panic("plan")).removed_receipts, 1)
+    assert_eq((store_clean(&verification, roots) ?? panic("clean")).removed_receipts, 1)
     assert(!files.exists(receipt))
     store_test_drop_roots(roots)
 }
@@ -243,7 +251,7 @@ fn store_test_register_locked(roots: HangarRoots, entry: StoreEntry) Never! {
 #Test("store symlinked project lock is rejected before hangar cleanup") {
     roots :: store_test_temp_roots()
     project :: files.join(roots.root, "project")
-    managed :: files.join(project, @SOURCE_ROOT_DIR)
+    managed :: files.join(project, SOURCE_ROOT_DIR)
     outside :: files.join(roots.root, "outside-lock")
     files.create_dir_all(managed) ?? panic("managed dir")
     files.write(outside, "version = 1\n") ?? panic("outside lock")
@@ -259,21 +267,22 @@ fn store_test_register_locked(roots: HangarRoots, entry: StoreEntry) Never! {
 }
 
 #Test("store committed profile generation survives lease teardown and clean") {
+    verification := StoreVerification.new()
     roots :: store_test_temp_roots()
     out :: files.join(roots.root, "profile-root-output")
     files.create_dir_all(files.join(out, "bin")) ?? panic("fixture dir")
     files.write(files.join(out, "bin/tool"), "profile bytes") ?? panic("fixture file")
     envelope :: Envelope.for_output(out, "path:profile-tool", "path")
-    entry := store_record_verified(roots, "profile-tool", "1", "path:profile-tool", out, files.join(out, "bin"), "", envelope, store_test_identity()) ?? panic("record")
-    prepared :: store_prepare_profile_generation_root(roots, "user", "tools", 1, "sha256-{store_test_repeat("f", 64)}", [String]{entry.envelope.output_hash}, 1) ?? panic("prepare")
-    store_commit_profile_generation_root(roots, prepared, 2) ?? panic("commit")
+    entry := store_record_verified(&verification, roots, "profile-tool", "1", "path:profile-tool", out, files.join(out, "bin"), "", envelope, store_test_identity()) ?? panic("record")
+    prepared :: store_prepare_profile_generation_root(&verification, roots, "user", "tools", 1, "sha256-{store_test_repeat("f", 64)}", [String]{entry.envelope.output_hash}, 1) ?? panic("prepare")
+    store_commit_profile_generation_root(&verification, roots, prepared, 2) ?? panic("commit")
     entry.last_used_at = 1
     record :: files.join(files.join(roots.hangar_dir(), entry.id), "meta.json")
     files.write(record, entry.meta_json()) ?? panic("backdate")
-    assert_eq((store_clean_plan(roots) ?? panic("plan")).removed_objects, 0)
-    assert_eq((store_clean(roots) ?? panic("clean")).removed_objects, 0)
+    assert_eq((store_clean_plan(&verification, roots) ?? panic("plan")).removed_objects, 0)
+    assert_eq((store_clean(&verification, roots) ?? panic("clean")).removed_objects, 0)
     assert(files.is_file(record))
-    snapshot :: store_lifecycle_snapshot(roots) ?? panic("snapshot")
+    snapshot :: store_lifecycle_snapshot(&verification, roots) ?? panic("snapshot")
     assert_eq(snapshot.protected_targets.len(), 1)
     root :: snapshot.root_list()[0]
     assert(root.identity.kind == RootKind.ProfileGeneration)
@@ -283,41 +292,43 @@ fn store_test_register_locked(roots: HangarRoots, entry: StoreEntry) Never! {
 }
 
 #Test("store profile generation root keeps transitive closure cycle safely") {
+    verification := StoreVerification.new()
     roots :: store_test_temp_roots()
-    base :: store_test_ingest_fixture(roots, "profile-base", [String: String]{"out": "base"}, [String]{})
-    middle :: store_test_ingest_fixture(roots, "profile-middle", [String: String]{"out": "middle"}, [String]{base.entry.envelope.output_hash})
-    consumer :: store_test_ingest_fixture(roots, "profile-consumer", [String: String]{"out": "consumer"}, [String]{middle.entry.envelope.output_hash})
-    prepared :: store_prepare_profile_generation_root(roots, "user", "tools", 8, "sha256-{store_test_repeat("8", 64)}", [String]{consumer.entry.envelope.output_hash}, 1) ?? panic("prepare")
-    store_commit_profile_generation_root(roots, prepared, 2) ?? panic("commit")
+    base :: store_test_ingest_fixture(&verification, roots, "profile-base", [String: String]{"out": "base"}, [String]{})
+    middle :: store_test_ingest_fixture(&verification, roots, "profile-middle", [String: String]{"out": "middle"}, [String]{base.entry.envelope.output_hash})
+    consumer :: store_test_ingest_fixture(&verification, roots, "profile-consumer", [String: String]{"out": "consumer"}, [String]{middle.entry.envelope.output_hash})
+    prepared :: store_prepare_profile_generation_root(&verification, roots, "user", "tools", 8, "sha256-{store_test_repeat("8", 64)}", [String]{consumer.entry.envelope.output_hash}, 1) ?? panic("prepare")
+    store_commit_profile_generation_root(&verification, roots, prepared, 2) ?? panic("commit")
     entries :: [StoreEntry]{base.entry, middle.entry, consumer.entry}
     loop original in entries {
         entry := original
         entry.last_used_at = 1
         files.write(files.join(files.join(roots.hangar_dir(), entry.id), "meta.json"), entry.meta_json()) ?? panic("backdate")
     }
-    assert_eq((store_clean_plan(roots) ?? panic("plan")).removed_objects, 0)
-    assert_eq((store_clean(roots) ?? panic("clean")).removed_objects, 0)
-    assert_eq((store_list_checked(roots) ?? panic("listing")).len(), 3)
+    assert_eq((store_clean_plan(&verification, roots) ?? panic("plan")).removed_objects, 0)
+    assert_eq((store_clean(&verification, roots) ?? panic("clean")).removed_objects, 0)
+    assert_eq((store_list_checked(&verification, roots) ?? panic("listing")).len(), 3)
     store_test_drop_roots(roots)
 }
 
 #Test("store external consumer root resumes exactly and never rebinds") {
+    verification := StoreVerification.new()
     roots :: store_test_temp_roots()
-    first :: store_test_ingest_fixture(roots, "external-first", [String: String]{"out": "first"}, [String]{})
-    second :: store_test_ingest_fixture(roots, "external-second", [String: String]{"out": "second"}, [String]{})
+    first :: store_test_ingest_fixture(&verification, roots, "external-first", [String: String]{"out": "first"}, [String]{})
+    second :: store_test_ingest_fixture(&verification, roots, "external-second", [String: String]{"out": "second"}, [String]{})
     first_hash :: first.entry.envelope.output_hash
     second_hash :: second.entry.envelope.output_hash
     witness :: "sha256-{store_test_repeat("1", 64)}"
     key :: store_test_nul_join("host", "generation")
-    prepared :: store_reconcile_external_consumer_root(roots, "jetos-generation", key, witness, [String]{first_hash}, 1) ?? panic("prepare")
+    prepared :: store_reconcile_external_consumer_root(&verification, roots, "jetos-generation", key, witness, [String]{first_hash}, 1) ?? panic("prepare")
     assert(prepared != None)
-    resumed :: store_reconcile_external_consumer_root(roots, "jetos-generation", key, witness, [String]{first_hash}, 9) ?? panic("resume")
-    store_commit_external_consumer_root(roots, resumed ?? panic("resumed prepare"), 10) ?? panic("commit")
-    assert((store_reconcile_external_consumer_root(roots, "jetos-generation", key, witness, [String]{first_hash}, 11) ?? panic("retry")) == None)
-    assert(store_reconcile_external_consumer_root(roots, "jetos-generation", key, "sha256-{store_test_repeat("2", 64)}", [String]{second_hash}, 12) == .Err(_))
-    assert(store_reconcile_external_consumer_root(roots, "jetos-generation", store_test_nul_join("other-host", "generation"), witness, [String]{"/nix/store/not-a-hangar-object"}, 12) == .Err(_))
-    assert(store_reconcile_external_consumer_root(roots, "jetos-generation", key, witness, [String]{second_hash}, 12) == .Err(_))
-    snapshot :: store_lifecycle_snapshot(roots) ?? panic("snapshot")
+    resumed :: store_reconcile_external_consumer_root(&verification, roots, "jetos-generation", key, witness, [String]{first_hash}, 9) ?? panic("resume")
+    store_commit_external_consumer_root(&verification, roots, resumed ?? panic("resumed prepare"), 10) ?? panic("commit")
+    assert((store_reconcile_external_consumer_root(&verification, roots, "jetos-generation", key, witness, [String]{first_hash}, 11) ?? panic("retry")) == None)
+    assert(store_reconcile_external_consumer_root(&verification, roots, "jetos-generation", key, "sha256-{store_test_repeat("2", 64)}", [String]{second_hash}, 12) == .Err(_))
+    assert(store_reconcile_external_consumer_root(&verification, roots, "jetos-generation", store_test_nul_join("other-host", "generation"), witness, [String]{"/nix/store/not-a-hangar-object"}, 12) == .Err(_))
+    assert(store_reconcile_external_consumer_root(&verification, roots, "jetos-generation", key, witness, [String]{second_hash}, 12) == .Err(_))
+    snapshot :: store_lifecycle_snapshot(&verification, roots) ?? panic("snapshot")
     root :: snapshot.root_list()[0]
     assert(root.identity.kind == RootKind.ExternalConsumer)
     assert_eq(root.identity.id.as_str(), "external-consumer:jetos-generation:{store_sha256_hex(key.bytes())}")
@@ -339,36 +350,37 @@ fn store_test_is_conflict(error: ExternalRootError, expected: String?, current: 
 }
 
 #Test("store manual external root is typed atomic and cas bound") {
+    verification := StoreVerification.new()
     roots :: store_test_temp_roots()
-    first :: store_test_ingest_fixture(roots, "manual-first", [String: String]{"out": "first"}, [String]{})
-    second :: store_test_ingest_fixture(roots, "manual-second", [String: String]{"out": "second"}, [String]{})
+    first :: store_test_ingest_fixture(&verification, roots, "manual-first", [String: String]{"out": "first"}, [String]{})
+    second :: store_test_ingest_fixture(&verification, roots, "manual-second", [String: String]{"out": "second"}, [String]{})
     principal :: "manual-root-test"
     now :: store_now_secs()
     first_reference :: first.entry.reference
     second_reference :: second.entry.reference
 
-    created :: store_register_external_root_at(roots, principal, "backup-sdk", first_reference, Val(now + 3600), None, now) ?? panic("create")
+    created :: store_register_external_root_at(&verification, roots, principal, "backup-sdk", first_reference, Val(now + 3600), None, now) ?? panic("create")
     assert_eq(created.etag, "1.1")
     assert_eq(created.closure_size, 1)
     assert(!created.prepared)
-    repeated :: store_register_external_root_at(roots, principal, "backup-sdk", first_reference, Val(now + 3600), None, now + 1) ?? panic("repeat")
+    repeated :: store_register_external_root_at(&verification, roots, principal, "backup-sdk", first_reference, Val(now + 3600), None, now + 1) ?? panic("repeat")
     assert_eq(repeated.etag, created.etag)
 
-    if store_register_external_root_at(roots, principal, "backup-sdk", second_reference, Val(now + 7200), None, now + 2) == {
+    if store_register_external_root_at(&verification, roots, principal, "backup-sdk", second_reference, Val(now + 7200), None, now + 2) == {
         .Ok(_) -> panic("a rebind without an etag must conflict")
         .Err(error) -> assert(store_test_is_conflict(error, None, Val("1.1")))
     }
-    if store_register_external_root_at(roots, principal, "backup-sdk", second_reference, Val(now + 7200), Val("1.0"), now + 2) == {
+    if store_register_external_root_at(&verification, roots, principal, "backup-sdk", second_reference, Val(now + 7200), Val("1.0"), now + 2) == {
         .Ok(_) -> panic("a stale etag must conflict")
         .Err(error) -> assert(store_test_is_conflict(error, Val("1.0"), Val("1.1")))
     }
-    updated :: store_register_external_root_at(roots, principal, "backup-sdk", second_reference, Val(now + 7200), Val("1.1"), now + 2) ?? panic("update")
+    updated :: store_register_external_root_at(&verification, roots, principal, "backup-sdk", second_reference, Val(now + 7200), Val("1.1"), now + 2) ?? panic("update")
     assert_eq(updated.etag, "2.2")
-    committed_retry :: store_register_external_root_at(roots, principal, "backup-sdk", second_reference, Val(now + 7200), Val("1.1"), now + 3) ?? panic("retry")
+    committed_retry :: store_register_external_root_at(&verification, roots, principal, "backup-sdk", second_reference, Val(now + 7200), Val("1.1"), now + 3) ?? panic("retry")
     assert_eq(committed_retry, updated)
-    assert_eq(store_list_external_roots(roots, principal) ?? panic("list"), [ExternalRootView]{updated})
+    assert_eq(store_list_external_roots(&verification, roots, principal) ?? panic("list"), [ExternalRootView]{updated})
 
-    snapshot :: store_lifecycle_snapshot(roots) ?? panic("snapshot")
+    snapshot :: store_lifecycle_snapshot(&verification, roots) ?? panic("snapshot")
     manual := false
     loop root in snapshot.root_list() {
         if root.identity.kind != RootKind.Manual -> next
@@ -380,21 +392,22 @@ fn store_test_is_conflict(error: ExternalRootError, expected: String?, current: 
     }
     assert(manual)
 
-    if store_unregister_external_root_at(roots, principal, "backup-sdk", "1.1", now + 3) == {
+    if store_unregister_external_root_at(&verification, roots, principal, "backup-sdk", "1.1", now + 3) == {
         .Ok(_) -> panic("a stale remove must conflict")
         .Err(error) -> assert(error == .Conflict(_, _, _))
     }
-    store_unregister_external_root_at(roots, principal, "backup-sdk", "2.2", now + 3) ?? panic("remove")
-    store_unregister_external_root_at(roots, principal, "backup-sdk", "2.2", now + 4) ?? panic("repeat remove")
-    assert_eq((store_list_external_roots(roots, principal) ?? panic("list")).len(), 0)
-    recreated :: store_register_external_root_at(roots, principal, "backup-sdk", first_reference, None, None, now + 5) ?? panic("recreate")
+    store_unregister_external_root_at(&verification, roots, principal, "backup-sdk", "2.2", now + 3) ?? panic("remove")
+    store_unregister_external_root_at(&verification, roots, principal, "backup-sdk", "2.2", now + 4) ?? panic("repeat remove")
+    assert_eq((store_list_external_roots(&verification, roots, principal) ?? panic("list")).len(), 0)
+    recreated :: store_register_external_root_at(&verification, roots, principal, "backup-sdk", first_reference, None, None, now + 5) ?? panic("recreate")
     assert_eq(recreated.etag, "3.3")
     store_test_drop_roots(roots)
 }
 
 #Test("store manual external root rejects path escape and unknown reference") {
+    verification := StoreVerification.new()
     roots :: store_test_temp_roots()
-    if store_register_external_root_at(roots, "principal", "../escape", "missing", None, None, 1) == {
+    if store_register_external_root_at(&verification, roots, "principal", "../escape", "missing", None, None, 1) == {
         .Ok(_) -> panic("path escape must be refused")
         .Err(error) -> {
             if error == {
@@ -403,7 +416,7 @@ fn store_test_is_conflict(error: ExternalRootError, expected: String?, current: 
             }
         }
     }
-    if store_register_external_root_at(roots, "principal", "valid", "missing", None, None, 1) == {
+    if store_register_external_root_at(&verification, roots, "principal", "valid", "missing", None, None, 1) == {
         .Ok(_) -> panic("unknown reference must be refused")
         .Err(error) -> {
             if error == {

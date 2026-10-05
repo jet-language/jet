@@ -306,7 +306,8 @@ const TIR_CORE_CALL_RECORDS: &[CoreCallRecord] = &[
         &[true, false],
     )
     .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
-    .with_jit_symbol("jet_jit_net_sendfile"),
+    .with_jit_symbol("jet_jit_net_sendfile")
+    .with_native_int_result(),
     CoreCallRecord::new(
         "core.crypto.vault",
         "get",

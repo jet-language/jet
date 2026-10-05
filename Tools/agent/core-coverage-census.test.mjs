@@ -110,7 +110,7 @@ test("embedded host programs isolate alias environments and ignore host comments
 });
 
 function fixture(t) {
-  const parent = join(homedir(), ".cache/jet-test-scratch/CardW-CB-CENSUS");
+  const parent = join(homedir(), ".cache/jet-dev/scratch/CardW-CB-CENSUS");
   mkdirSync(parent, { recursive: true });
   const root = mkdtempSync(join(parent, "census-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));

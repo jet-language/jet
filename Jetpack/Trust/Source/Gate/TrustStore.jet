@@ -4,9 +4,9 @@
 // <subject>` grants with `%`/`:` escaped. `Recipe` build trust uses the same
 // store and record format through these helpers.
 
-@TRUST_HASH_PREFIX :: "hash:"
-@TRUST_PATTERN_PREFIX :: "pattern:"
-@TRUST_GRANT_PREFIX :: "grant:"
+TRUST_HASH_PREFIX :: prep { "hash:" }
+TRUST_PATTERN_PREFIX :: prep { "pattern:" }
+TRUST_GRANT_PREFIX :: prep { "grant:" }
 
 // The authority a typed grant carries. JetOS fleet/activation authorities
 // are not part of this port.
@@ -69,7 +69,7 @@ pub struct TrustGrant {
     }
 
     fn line(self) -> String Never! {
-        "{@TRUST_GRANT_PREFIX}{trust_escape_component(self.scope)}:{trust_escape_component(self.authority)}:{trust_escape_component(self.subject)}"
+        "{TRUST_GRANT_PREFIX}{trust_escape_component(self.scope)}:{trust_escape_component(self.authority)}:{trust_escape_component(self.subject)}"
     }
 
     fn is(self, authority: TrustAuthority) -> Bool Never! {
@@ -84,39 +84,39 @@ pub enum TrustRecord {
     Raw(line: String)
 
     fn parse(line: String) -> TrustRecord Never! {
-        if line.starts_with(@TRUST_HASH_PREFIX) -> return TrustRecord.Hash(line.removeprefix(@TRUST_HASH_PREFIX))
-        if line.starts_with(@TRUST_PATTERN_PREFIX) -> return TrustRecord.Pattern(line.removeprefix(@TRUST_PATTERN_PREFIX))
-        if !line.starts_with(@TRUST_GRANT_PREFIX) -> return TrustRecord.Raw(~line)
-        rest :: line.removeprefix(@TRUST_GRANT_PREFIX)
-        scope :: trust_text_split_first(rest, @TRUST_COLON) ?? return TrustRecord.Raw(~line)
-        authority :: trust_text_split_first(scope.after, @TRUST_COLON) ?? return TrustRecord.Raw(~line)
+        if line.starts_with(TRUST_HASH_PREFIX) -> return TrustRecord.Hash{hash: line.removeprefix(TRUST_HASH_PREFIX)}
+        if line.starts_with(TRUST_PATTERN_PREFIX) -> return TrustRecord.Pattern{pattern: line.removeprefix(TRUST_PATTERN_PREFIX)}
+        if !line.starts_with(TRUST_GRANT_PREFIX) -> return TrustRecord.Raw{line: ~line}
+        rest :: line.removeprefix(TRUST_GRANT_PREFIX)
+        scope :: trust_text_split_first(rest, TRUST_COLON) ?? return TrustRecord.Raw{line: ~line}
+        authority :: trust_text_split_first(scope.after, TRUST_COLON) ?? return TrustRecord.Raw{line: ~line}
         TrustRecord.Grant(TrustGrant{scope: trust_unescape_component(scope.before), authority: trust_unescape_component(authority.before), subject: trust_unescape_component(authority.after)})
     }
 
     // Rust `record_json`.
     fn json(self) -> String Never! {
         if self == {
-            .Hash(hash) -> trust_json_object_text([TrustJsonField]{
-                TrustJsonField{key: "type", value: DataTree.Text("hash")},
-                TrustJsonField{key: "hash", value: DataTree.Text(~hash)},
-                TrustJsonField{key: "revocationKey", value: DataTree.Text("{@TRUST_HASH_PREFIX}{hash}")}
+            .Hash(hash) -> trust_json_object_text([TrustJSONField]{
+                TrustJSONField{key: "type", value: DataTree.Text("hash")},
+                TrustJSONField{key: "hash", value: DataTree.Text(~hash)},
+                TrustJSONField{key: "revocationKey", value: DataTree.Text("{TRUST_HASH_PREFIX}{hash}")}
             })
-            .Pattern(pattern) -> trust_json_object_text([TrustJsonField]{
-                TrustJsonField{key: "type", value: DataTree.Text("pattern")},
-                TrustJsonField{key: "pattern", value: DataTree.Text(~pattern)},
-                TrustJsonField{key: "revocationKey", value: DataTree.Text("{@TRUST_PATTERN_PREFIX}{pattern}")}
+            .Pattern(pattern) -> trust_json_object_text([TrustJSONField]{
+                TrustJSONField{key: "type", value: DataTree.Text("pattern")},
+                TrustJSONField{key: "pattern", value: DataTree.Text(~pattern)},
+                TrustJSONField{key: "revocationKey", value: DataTree.Text("{TRUST_PATTERN_PREFIX}{pattern}")}
             })
-            .Grant(grant) -> trust_json_object_text([TrustJsonField]{
-                TrustJsonField{key: "type", value: DataTree.Text("grant")},
-                TrustJsonField{key: "authority", value: DataTree.Text(~grant.authority)},
-                TrustJsonField{key: "subject", value: DataTree.Text(~grant.subject)},
-                TrustJsonField{key: "scope", value: DataTree.Text(~grant.scope)},
-                TrustJsonField{key: "revocationKey", value: DataTree.Text(grant.key())}
+            .Grant(grant) -> trust_json_object_text([TrustJSONField]{
+                TrustJSONField{key: "type", value: DataTree.Text("grant")},
+                TrustJSONField{key: "authority", value: DataTree.Text(~grant.authority)},
+                TrustJSONField{key: "subject", value: DataTree.Text(~grant.subject)},
+                TrustJSONField{key: "scope", value: DataTree.Text(~grant.scope)},
+                TrustJSONField{key: "revocationKey", value: DataTree.Text(grant.key())}
             })
-            .Raw(line) -> trust_json_object_text([TrustJsonField]{
-                TrustJsonField{key: "type", value: DataTree.Text("raw")},
-                TrustJsonField{key: "line", value: DataTree.Text(~line)},
-                TrustJsonField{key: "revocationKey", value: DataTree.Text(~line)}
+            .Raw(line) -> trust_json_object_text([TrustJSONField]{
+                TrustJSONField{key: "type", value: DataTree.Text("raw")},
+                TrustJSONField{key: "line", value: DataTree.Text(~line)},
+                TrustJSONField{key: "revocationKey", value: DataTree.Text(~line)}
             })
         }
     }
@@ -135,14 +135,14 @@ pub fn trust_records_json(records: [TrustRecord]) -> String Never! {
 pub fn trust_parse_grant_selector(selector: String, scope: String) -> TrustGrant TrustError! {
     trimmed :: selector.trim()
     if trimmed == "" -> return Err(TrustError.Grant("grant selector is empty"))
-    if trust_text_split_first(trimmed, @TRUST_COLON) == {
+    if trust_text_split_first(trimmed, TRUST_COLON) == {
         .Val(parts) -> {
             if TrustAuthority.parse(parts.before) != None && parts.after.trim() == "" -> return Err(TrustError.Grant("trust grant `{parts.before}:` needs a subject"))
         }
         .None -> {}
     }
-    if scope != @TRUST_SCOPE_USER && scope != @TRUST_SCOPE_REPO -> return Err(TrustError.Grant("unknown trust scope `{scope}`"))
-    if trust_text_split_first(trimmed, @TRUST_COLON) == {
+    if scope != TRUST_SCOPE_USER && scope != TRUST_SCOPE_REPO -> return Err(TrustError.Grant("unknown trust scope `{scope}`"))
+    if trust_text_split_first(trimmed, TRUST_COLON) == {
         .Val(parts) -> {
             if TrustAuthority.parse(parts.before) != None -> return Ok(TrustGrant{authority: parts.before, subject: parts.after, scope})
         }
@@ -158,7 +158,7 @@ fn trust_escape_component(text: String) -> String Never! {
         if Int.from_u8(byte) == {
             37 -> loop escaped in "%25".bytes() -> &out.push(escaped)
             58 -> loop escaped in "%3A".bytes() -> &out.push(escaped)
-            @TRUST_NEWLINE | @TRUST_CARRIAGE_RETURN -> {}
+            TRUST_NEWLINE | TRUST_CARRIAGE_RETURN -> {}
             else -> &out.push(byte)
         }
     }
@@ -198,7 +198,7 @@ fn trust_hex_value(code: Int) -> Int Never! {
 // `~/.jet/trust`; `HOME`, then `USERPROFILE`, then the working directory.
 pub fn trust_store_path() -[Env]> String {
     home :: sys.get("HOME") ?? sys.get("USERPROFILE") ?? "."
-    files.join(files.join(home, @CONFIG_DEFAULT_DIR), @TRUST_FILE)
+    files.join(files.join(home, CONFIG_DEFAULT_DIR), TRUST_FILE)
 }
 
 // Trimmed non-empty store lines; an unreadable store is empty.
@@ -229,12 +229,12 @@ fn trust_store_add_line(store: String, line: String) -[FS]> Bool {
 
 // Persist a hash grant (the interactive "yes"); false when already stored.
 pub fn trust_grant_hash(store: String, hash: String) -[FS]> Bool {
-    trust_store_add_line(store, "{@TRUST_HASH_PREFIX}{hash}")
+    trust_store_add_line(store, "{TRUST_HASH_PREFIX}{hash}")
 }
 
 // `jetpack config trust add <pattern>`; false when already present.
 pub fn trust_add_pattern(store: String, pattern: String) -[FS]> Bool {
-    trust_store_add_line(store, "{@TRUST_PATTERN_PREFIX}{pattern}")
+    trust_store_add_line(store, "{TRUST_PATTERN_PREFIX}{pattern}")
 }
 
 // `jet trust grant`; false when the exact grant already exists.
@@ -256,7 +256,7 @@ pub fn trust_list_records(store: String) -[FS]> [TrustRecord] {
 
 // `jetpack config trust remove <pattern>`; false when absent.
 pub fn trust_remove_pattern(store: String, pattern: String) -[FS]> Bool {
-    target :: "{@TRUST_PATTERN_PREFIX}{pattern}"
+    target :: "{TRUST_PATTERN_PREFIX}{pattern}"
     lines :: trust_store_lines(store)
     if !lines.contains(target) -> return false
     kept := [String]{}
@@ -276,8 +276,8 @@ pub fn trust_revoke(store: String, selector: String) -[FS]> Bool {
     loop line in trust_store_lines(store) {
         record :: TrustRecord.parse(line)
         matches :: if record == {
-            .Hash(hash) -> selector == line || selector == hash || selector == trust_record_line_text(@TRUST_HASH_PREFIX, hash)
-            .Pattern(pattern) -> selector == line || selector == pattern || selector == trust_record_line_text(@TRUST_PATTERN_PREFIX, pattern)
+            .Hash(hash) -> selector == line || selector == hash || selector == trust_record_line_text(TRUST_HASH_PREFIX, hash)
+            .Pattern(pattern) -> selector == line || selector == pattern || selector == trust_record_line_text(TRUST_PATTERN_PREFIX, pattern)
             .Grant(grant) -> selector == line || selector == grant.subject || selector == grant.key() || selector == trust_record_line_text("{grant.scope}:", grant.key())
             .Raw(raw) -> selector == raw
         }
@@ -295,11 +295,11 @@ pub fn trust_revoke(store: String, selector: String) -[FS]> Bool {
 // by its spelled or canonical path.
 pub fn trust_is_trusted(store: String, project_dir: String, hash: String) -[FS, Env]> Bool {
     canonical :: files.canonicalize(project_dir) ?? ""
-    target :: "{@TRUST_HASH_PREFIX}{hash}"
+    target :: "{TRUST_HASH_PREFIX}{hash}"
     loop line in trust_store_lines(store) {
         if line == target -> return true
-        if !line.starts_with(@TRUST_PATTERN_PREFIX) -> next
-        pattern :: line.removeprefix(@TRUST_PATTERN_PREFIX)
+        if !line.starts_with(TRUST_PATTERN_PREFIX) -> next
+        pattern :: line.removeprefix(TRUST_PATTERN_PREFIX)
         if trust_matches_pattern(pattern, project_dir) || (canonical != "" && trust_matches_pattern(pattern, canonical)) -> return true
         if trust_matches_canonical_pattern(pattern, project_dir) || (canonical != "" && trust_matches_canonical_pattern(pattern, canonical)) -> return true
     }
@@ -308,7 +308,7 @@ pub fn trust_is_trusted(store: String, project_dir: String, hash: String) -[FS, 
 
 // A typed env grant names the project (pattern) or the exact hash.
 fn trust_grant_matches_project_or_hash(grant: TrustGrant, project_dir: String, hash: String) -[FS, Env]> Bool {
-    if grant.subject == hash || grant.subject == trust_record_line_text(@TRUST_HASH_PREFIX, hash) -> return true
+    if grant.subject == hash || grant.subject == trust_record_line_text(TRUST_HASH_PREFIX, hash) -> return true
     if trust_matches_pattern(grant.subject, project_dir) || trust_matches_canonical_pattern(grant.subject, project_dir) -> return true
     canonical :: files.canonicalize(project_dir) ?? return false
     trust_matches_pattern(grant.subject, canonical) || trust_matches_canonical_pattern(grant.subject, canonical)

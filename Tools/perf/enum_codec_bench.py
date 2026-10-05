@@ -63,7 +63,7 @@ except ImportError:  # pragma: no cover - resource is Unix-only.
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = Path(__file__).resolve()
-SCRATCH_DEFAULT = Path.home() / ".cache" / "jet-luna" / "enum-codec-bench"
+SCRATCH_DEFAULT = Path.home() / ".cache" / "jet-dev" / "enum-codec-bench"
 PROTOCOL_VERSION = 1
 FORMS = ("external", "internal", "untagged", "adjacent")
 CASES = ("payload", "evolution", "unknown", "malformed")

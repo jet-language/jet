@@ -1,0 +1,60 @@
+// Entity decoding preserves literal UTF-8 and leaves unknown entities unchanged.
+// Tags are stripped before decoding, so encoded markup remains ordinary text.
+use core.text.html as html
+
+fn show(label: String, input: String) {
+    print(label)
+    print(html.unescape(input))
+    print(html.unescape_and_strip(input))
+}
+
+fn expect_entity(input: String, expected: String) {
+    actual :: html.unescape(input)
+    a :: actual.bytes()
+    b :: expected.bytes()
+    if a.len() != b.len() -> panic("HTML entity byte length: {input}")
+    loop i in 0..<a.len() {
+        if a[i] != b[i] -> panic("HTML entity bytes: {input}")
+    }
+}
+
+fn entity_bounds() {
+    controls :: String.from_bytes([U8]{9, 10, 13, 32}) ?? panic("control fixture")
+    expect_entity("&#9;&#10;&#13;&#32;", controls)
+    expect_entity("&#x9;&#xA;&#xD;&#x20;", controls)
+    expect_entity("&#127;&#55295;&#57344;", String.from_bytes([U8]{127, 237, 159, 191, 238, 128, 128}) ?? panic("scalar fixture"))
+    expect_entity("&#x7F;&#xD7FF;&#xE000;", String.from_bytes([U8]{127, 237, 159, 191, 238, 128, 128}) ?? panic("scalar fixture"))
+    expect_entity("&#64976;&#65533;&#65534;&#65535;", String.from_bytes([U8]{239, 183, 144, 239, 191, 189, 239, 191, 190, 239, 191, 191}) ?? panic("BMP fixture"))
+    expect_entity("&#xFDD0;&#xFFFD;&#xFFFE;&#xFFFF;", String.from_bytes([U8]{239, 183, 144, 239, 191, 189, 239, 191, 190, 239, 191, 191}) ?? panic("BMP fixture"))
+    expect_entity("&#65536;&#131070;&#1114111;", String.from_bytes([U8]{240, 144, 128, 128, 240, 159, 191, 190, 244, 143, 191, 191}) ?? panic("astral fixture"))
+    expect_entity("&#x10000;&#x1FFFE;&#x10FFFF;", String.from_bytes([U8]{240, 144, 128, 128, 240, 159, 191, 190, 244, 143, 191, 191}) ?? panic("astral fixture"))
+    expect_entity("&#0;&#55296;&#57343;&#1114112;", "����")
+    expect_entity("&#x0;&#xD800;&#xDFFF;&#x110000;", "����")
+    expect_entity("&#9999999999999999999999999999;", "�")
+    expect_entity("&#xFFFFFFFFFFFFFFFFFFFFFFFFFFF;", "�")
+    expect_entity("&#999999999999999999999999999z;", "&#999999999999999999999999999z;")
+    expect_entity("&#xFFFFFFFFFFFFFFFFFFFFFFFFFFz;", "&#xFFFFFFFFFFFFFFFFFFFFFFFFFFz;")
+    expect_entity("&#111411z;&#x10FFFz;", "&#111411z;&#x10FFFz;")
+    expect_entity("&#0000000000000000000000000065;", "A")
+    expect_entity("&#x000000000000000000000000041;", "A")
+    expect_entity("&#X1f642;", "🙂")
+    expect_entity("café &#30028; &#x1F642;!", "café 界 🙂!")
+    expect_entity("&unknown; &#; &#x; &amp", "&unknown; &#; &#x; &amp")
+    overlong :: "&#999999999999999999999999999999999999999999999999999999999999999999;"
+    expect_entity(overlong, overlong)
+}
+
+fn run() {
+    show("empty", "")
+    show("plain", "Hello, Jet!")
+    show("named entities", "&amp; &lt; &gt; &quot; &apos;")
+    show("numeric entities", "&#65; &#xE9; &#30028; &#x1F642;")
+    show("unknown and unterminated entities", "A &unknown; B &amp")
+    show("nested tags", "<div>Hello <b>Jet &amp; friends</b>!</div>")
+    show("literal UTF-8", "café 界 🙂")
+    show("encoded markup", "&lt;b&gt;café &amp; 界&lt;/b&gt;")
+    print("escaping literal UTF-8")
+    print(html.escape_quote("café 界 🙂 & < > \" '", true))
+    print(html.escape_quote("café 界 🙂 & < > \" '", false))
+    entity_bounds()
+}

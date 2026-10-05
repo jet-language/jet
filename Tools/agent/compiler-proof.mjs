@@ -142,7 +142,7 @@ class ProofError extends Error {
 function proofScratchRoot() {
   const configured = process.env.JET_TEST_SCRATCH_DIR
     ?? process.env.JET_TEST_SCRATCH
-    ?? join(homedir(), ".cache", "jet-test-scratch");
+    ?? join(homedir(), ".cache", "jet-dev", "scratch");
   const root = resolve(configured);
   if (root === "/tmp" || root.startsWith("/tmp/")) {
     throw new ProofError("unavailable", "compiler-proof scratch must not use /tmp", "proof.scratch");

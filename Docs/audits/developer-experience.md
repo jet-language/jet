@@ -730,17 +730,17 @@ Cards use the phase and dependency rules in OUTLINE.md. Core cards retain their 
 
 The nine census sources are registered by the prior-art card and listed here with their reports and census files.
 
-- `~/.cache/jet-luna/dx/web-tooling/report.md`; `~/.cache/jet-luna/dx/web-tooling/census.json`; `~/.cache/jet-luna/dx/web-tooling/manifest.json`
-- `~/.cache/jet-luna/dx/web-frameworks/report.md`; `~/.cache/jet-luna/dx/web-frameworks/census.json`
-- `~/.cache/jet-luna/dx/live/report.md`; `~/.cache/jet-luna/dx/live/census.json`
-- `~/.cache/jet-luna/dx/games/report.md`; `~/.cache/jet-luna/dx/games/census.json`
-- `~/.cache/jet-luna/dx/backend/report.md`; `~/.cache/jet-luna/dx/backend/census.json`
-- `~/.cache/jet-luna/dx/systems/report.md`; `~/.cache/jet-luna/dx/systems/census.json`
-- `~/.cache/jet-luna/dx/mobile/report.md`; `~/.cache/jet-luna/dx/mobile/census.json`
-- `~/.cache/jet-luna/dx/data/report.md`; `~/.cache/jet-luna/dx/data/census.json`
-- `~/.cache/jet-luna/dx/cli/report.md`; `~/.cache/jet-luna/dx/cli/census.json`
+- `~/.cache/jet-dev/dx/web-tooling/report.md`; `~/.cache/jet-dev/dx/web-tooling/census.json`; `~/.cache/jet-dev/dx/web-tooling/manifest.json`
+- `~/.cache/jet-dev/dx/web-frameworks/report.md`; `~/.cache/jet-dev/dx/web-frameworks/census.json`
+- `~/.cache/jet-dev/dx/live/report.md`; `~/.cache/jet-dev/dx/live/census.json`
+- `~/.cache/jet-dev/dx/games/report.md`; `~/.cache/jet-dev/dx/games/census.json`
+- `~/.cache/jet-dev/dx/backend/report.md`; `~/.cache/jet-dev/dx/backend/census.json`
+- `~/.cache/jet-dev/dx/systems/report.md`; `~/.cache/jet-dev/dx/systems/census.json`
+- `~/.cache/jet-dev/dx/mobile/report.md`; `~/.cache/jet-dev/dx/mobile/census.json`
+- `~/.cache/jet-dev/dx/data/report.md`; `~/.cache/jet-dev/dx/data/census.json`
+- `~/.cache/jet-dev/dx/cli/report.md`; `~/.cache/jet-dev/dx/cli/census.json`
 - `docs/proposals/prototypes/devtools-ux/A-dock.html`
 - `docs/proposals/prototypes/devtools-ux/B-lens.html`
 - `docs/proposals/prototypes/devtools-ux/C-workbench.html`
 - `docs/proposals/prototypes/devtools-ux/D-pill-lens-workbench.html`
-- `~/.cache/jet-luna/dx/proto/sample-data.json`
+- `~/.cache/jet-dev/dx/proto/sample-data.json`

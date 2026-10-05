@@ -9,20 +9,20 @@
 // raw tar headers through the preflight walker, then entry kinds, names, and
 // sizes through Core's tar reader (D-CORE-CODECSTREAM1, D-CORE-TARSTREAM1).
 
-@PROVIDER_MAX_DOWNLOAD_BYTES :: 67108864
-@PROVIDER_MAX_ARCHIVE_ENTRIES :: 4096
-@PROVIDER_MAX_ARCHIVE_ENTRY_BYTES :: 67108864
-@PROVIDER_MAX_ARCHIVE_TOTAL_BYTES :: 268435456
-@PROVIDER_MAX_ARCHIVE_PATH_BYTES :: 4096
-@PROVIDER_FETCH_MAX_REDIRECTS :: 5
+PROVIDER_MAX_DOWNLOAD_BYTES :: prep { 67108864 }
+PROVIDER_MAX_ARCHIVE_ENTRIES :: prep { 4096 }
+PROVIDER_MAX_ARCHIVE_ENTRY_BYTES :: prep { 67108864 }
+PROVIDER_MAX_ARCHIVE_TOTAL_BYTES :: prep { 268435456 }
+PROVIDER_MAX_ARCHIVE_PATH_BYTES :: prep { 4096 }
+PROVIDER_FETCH_MAX_REDIRECTS :: prep { 5 }
 // A tar stream decoded through gzip may carry at most this much after its end
 // marker: the pipe capacity the Rust `gzip -dc` preflight child could fill
 // before the closed reader stopped it.
-@PROVIDER_TAR_TRAILER_BYTES :: 65536
-@PROVIDER_TAR_BLOCK :: 512
-@PROVIDER_READ_CHUNK :: 65536
+PROVIDER_TAR_TRAILER_BYTES :: prep { 65536 }
+PROVIDER_TAR_BLOCK :: prep { 512 }
+PROVIDER_READ_CHUNK :: prep { 65536 }
 // Rust `std::io::Error` text for `read_exact` at end of input.
-@PROVIDER_SHORT_READ :: "failed to fill whole buffer"
+PROVIDER_SHORT_READ :: prep { "failed to fill whole buffer" }
 
 // ── Error carrier ──
 
@@ -58,7 +58,7 @@ pub enum RegistryError {
                     .Cran -> ProviderError.Cran(reason)
                     .LuaRocks -> ProviderError.LuaRocks(reason)
                     .Registry(title) -> ProviderError.Registry{title: title, reason: reason}
-                    .NativeRelease -> ProviderError.BuildFailed("native jetpackage `{@NATIVE_PACKAGE}`: {reason}")
+                    .NativeRelease -> ProviderError.BuildFailed("native jetpackage `{NATIVE_PACKAGE}`: {reason}")
                     .NativeCatalog -> ProviderError.BuildFailed("local unofficial native catalog: {reason}")
                 }
             }
@@ -80,42 +80,42 @@ fn provider_registry_read_bytes(path: String, context: String) -[FS]> [U8] Regis
 fn provider_registry_read_text(path: String, context: String) -[FS]> String RegistryError! {
     if files.read(path) == {
         .Ok(text) -> Ok(text)
-        .Err(error) -> Err(RegistryError.Reason("{context}: {error}"))
+        .Err(error) -> return Err(RegistryError.Reason("{context}: {error}"))
     }
 }
 
 fn provider_registry_write_text(path: String, text: String, context: String) RegistryError! -[FS]> {
     if files.write(path, text) == {
-        .Ok(_) -> Ok()
-        .Err(error) -> Err(RegistryError.Reason("{context}: {error}"))
+        .Ok(_) -> {}
+        .Err(error) -> return Err(RegistryError.Reason("{context}: {error}"))
     }
 }
 
 fn provider_registry_create_dir_all(path: String, context: String) RegistryError! -[FS]> {
     if files.create_dir_all(path) == {
-        .Ok(_) -> Ok()
-        .Err(error) -> Err(RegistryError.Reason("{context}: {error}"))
+        .Ok(_) -> {}
+        .Err(error) -> return Err(RegistryError.Reason("{context}: {error}"))
     }
 }
 
 fn provider_registry_copy(from: String, to: String, context: String) RegistryError! -[FS]> {
     if files.copy2(from, to) == {
-        .Ok(_) -> Ok()
-        .Err(error) -> Err(RegistryError.Reason("{context}: {error}"))
+        .Ok(_) -> {}
+        .Err(error) -> return Err(RegistryError.Reason("{context}: {error}"))
     }
 }
 
 fn provider_registry_set_mode(path: String, mode: Int, context: String) RegistryError! -[FS]> {
     if files.set_mode(path, mode) == {
-        .Ok(_) -> Ok()
-        .Err(error) -> Err(RegistryError.Reason("{context}: {error}"))
+        .Ok(_) -> {}
+        .Err(error) -> return Err(RegistryError.Reason("{context}: {error}"))
     }
 }
 
 fn provider_registry_seal(path: String, context: String) RegistryError! -[FS]> {
     if store_seal_local_output(path) == {
-        .Ok(_) -> Ok()
-        .Err(error) -> Err(RegistryError.Reason("{context}: {error.message()}"))
+        .Ok(_) -> {}
+        .Err(error) -> return Err(RegistryError.Reason("{context}: {error.message()}"))
     }
 }
 
@@ -139,7 +139,7 @@ fn provider_registry_archive_root(unpack: String) -[FS]> String RegistryError! {
 // owns cleanup: `guard := RegistryScratch{path: scratch}` then
 // `defer close(^guard)` (Rust `Scratch` drop).
 fn provider_registry_scratch(store: String, label: String, context: String) -[FS, Rand]> String RegistryError! {
-    parent :: files.join(store, @STORE_BUILD_SCRATCH_DIR)
+    parent :: files.join(store, STORE_BUILD_SCRATCH_DIR)
     provider_registry_create_dir_all(parent, context)
     if provider_exclusive_temp_dir(parent, "{label}-{process.current_pid()}-") == {
         .Ok(path) -> Ok(path)
@@ -475,7 +475,7 @@ pub struct RegistryAuthority {
         client :: http_client.Client.new()
             .destinations(.Public)
             .proxy(.None)
-            .redirects(.Follow{max: @PROVIDER_FETCH_MAX_REDIRECTS, to: .Hosts(self.allow)})
+            .redirects(.Follow{max: PROVIDER_FETCH_MAX_REDIRECTS, to: .Hosts{entries: self.allow}})
         request :: http_client.request("GET", url).total_timeout(60s)
         response :: if client.send(request) == {
             .Ok(sent) -> sent
@@ -488,7 +488,7 @@ pub struct RegistryAuthority {
             .Ok(writer) -> writer
             .Err(error) -> { return Err(RegistryError.Reason("could not stage fetched bytes: {error}")) }
         }
-        body :: response.body(limit: @PROVIDER_MAX_DOWNLOAD_BYTES)
+        body :: response.body(limit: PROVIDER_MAX_DOWNLOAD_BYTES)
         if body.copy_to(^out) == {
             .Ok(_) -> {}
             .Err(error) -> { return Err(RegistryError.Reason("could not fetch `{url}`: {error}")) }
@@ -498,7 +498,6 @@ pub struct RegistryAuthority {
             .Ok(_) -> {}
             .Err(_) -> provider_registry_copy(body_path, destination, "could not preserve fetched bytes")
         }
-        Ok()
     }
 
     fn check_url(self, url: String) RegistryError! {
@@ -506,7 +505,6 @@ pub struct RegistryAuthority {
         if self.deny.contains(authority) || !self.allow.contains(authority) {
             return Err(RegistryError.Reason("authority.providers.{self.provider} does not authorize `{authority}`"))
         }
-        Ok()
     }
 }
 
@@ -597,8 +595,7 @@ fn provider_registry_ensure_download_budget(path: String) RegistryError! -[FS]> 
         .Ok(found) -> found
         .Err(error) -> { return Err(RegistryError.Reason("could not inspect fetched bytes: {error}")) }
     }
-    if stat.size > @PROVIDER_MAX_DOWNLOAD_BYTES -> return Err(RegistryError.Reason("fetched object is {stat.size} bytes; limit is {@PROVIDER_MAX_DOWNLOAD_BYTES}"))
-    Ok()
+    if stat.size > PROVIDER_MAX_DOWNLOAD_BYTES -> return Err(RegistryError.Reason("fetched object is {stat.size} bytes; limit is {PROVIDER_MAX_DOWNLOAD_BYTES}"))
 }
 
 // A source archive admitted for extraction: within the download budget,
@@ -611,7 +608,7 @@ fn provider_registry_validate_tar_archive(path: String, gzip: Bool) RegistryErro
     count := 0
     loop entry in listing {
         count += 1
-        if count > @PROVIDER_MAX_ARCHIVE_ENTRIES -> return Err(RegistryError.Reason("source archive has too many entries"))
+        if count > PROVIDER_MAX_ARCHIVE_ENTRIES -> return Err(RegistryError.Reason("source archive has too many entries"))
         trimmed := entry.name
         loop trimmed.ends_with("/") -> trimmed = trimmed.removesuffix("/")
         if entry.name == "" || !provider_registry_safe_relative(trimmed) {
@@ -624,13 +621,12 @@ fn provider_registry_validate_tar_archive(path: String, gzip: Bool) RegistryErro
             .File | .Directory -> {}
             else -> return Err(RegistryError.Reason("source archives may contain only regular files and directories"))
         }
-        if entry.size > @PROVIDER_MAX_ARCHIVE_ENTRY_BYTES {
-            return Err(RegistryError.Reason("source archive entry is {entry.size} bytes; per-entry limit is {@PROVIDER_MAX_ARCHIVE_ENTRY_BYTES}"))
+        if entry.size > PROVIDER_MAX_ARCHIVE_ENTRY_BYTES {
+            return Err(RegistryError.Reason("source archive entry is {entry.size} bytes; per-entry limit is {PROVIDER_MAX_ARCHIVE_ENTRY_BYTES}"))
         }
         total += entry.size
-        if total > @PROVIDER_MAX_ARCHIVE_TOTAL_BYTES -> return Err(RegistryError.Reason("source archive expands beyond {@PROVIDER_MAX_ARCHIVE_TOTAL_BYTES} bytes"))
+        if total > PROVIDER_MAX_ARCHIVE_TOTAL_BYTES -> return Err(RegistryError.Reason("source archive expands beyond {PROVIDER_MAX_ARCHIVE_TOTAL_BYTES} bytes"))
     }
-    Ok()
 }
 
 // Walk the raw tar headers of the (decoded) archive stream.
@@ -642,7 +638,7 @@ fn provider_registry_preflight_tar(path: String, gzip: Bool) RegistryError! -[FS
             .Err(error) -> { return Err(RegistryError.Reason("could not open archive: {error}")) }
         }
         loop !preflight.done {
-            chunk :: if file.read(@PROVIDER_READ_CHUNK) == {
+            chunk :: if file.read(PROVIDER_READ_CHUNK) == {
                 .Ok(bytes) -> bytes
                 .Err(error) -> { return Err(RegistryError.Reason("truncated tar header: {error}")) }
             }
@@ -655,7 +651,7 @@ fn provider_registry_preflight_tar(path: String, gzip: Bool) RegistryError! -[FS
     file := files.open(path) ?? return Err(RegistryError.Reason(unreadable))
     plain := gzip.reader(&file)
     loop !preflight.done {
-        chunk :: if plain.read(@PROVIDER_READ_CHUNK) == {
+        chunk :: if plain.read(PROVIDER_READ_CHUNK) == {
             .Ok(bytes) -> bytes
             .Err(_) -> {
                 preflight.finish()
@@ -670,12 +666,11 @@ fn provider_registry_preflight_tar(path: String, gzip: Bool) RegistryError! -[FS
     // marker at most the pipe capacity may follow.
     trailing := preflight.trailing
     loop {
-        chunk :: plain.read(@PROVIDER_READ_CHUNK) ?? return Err(RegistryError.Reason(unreadable))
+        chunk :: plain.read(PROVIDER_READ_CHUNK) ?? return Err(RegistryError.Reason(unreadable))
         if chunk.len() == 0 -> break
         trailing += chunk.len()
-        if trailing > @PROVIDER_TAR_TRAILER_BYTES -> return Err(RegistryError.Reason(unreadable))
+        if trailing > PROVIDER_TAR_TRAILER_BYTES -> return Err(RegistryError.Reason(unreadable))
     }
-    Ok()
 }
 
 // The raw tar header walker (Rust `inspect_tar_stream`), fed decoded bytes in
@@ -704,7 +699,7 @@ pub struct RegistryTarPreflight {
         loop index < chunk.len() {
             if self.done {
                 self.trailing += chunk.len() - index
-                return Ok()
+                return
             }
             if self.remaining > 0 {
                 available :: chunk.len() - index
@@ -719,25 +714,24 @@ pub struct RegistryTarPreflight {
                 if self.remaining == 0 -> &self.finish_payload()
                 next
             }
-            need :: @PROVIDER_TAR_BLOCK - self.pending.len()
+            need :: PROVIDER_TAR_BLOCK - self.pending.len()
             available :: chunk.len() - index
             count :: if need < available -> need else -> available
             loop offset in 0..<count -> &self.pending.push(chunk[index + offset])
             index += count
-            if self.pending.len() == @PROVIDER_TAR_BLOCK {
+            if self.pending.len() == PROVIDER_TAR_BLOCK {
                 header :: self.pending
                 self.pending = [U8]{}
                 &self.header(header)
             }
         }
-        Ok()
     }
 
     // End of input: complete only after the end marker.
     fn finish(self) RegistryError! {
-        if self.done -> return Ok()
-        if self.remaining > 0 -> return Err(RegistryError.Reason("truncated tar payload: {@PROVIDER_SHORT_READ}"))
-        Err(RegistryError.Reason("truncated tar header: {@PROVIDER_SHORT_READ}"))
+        if self.done -> return
+        if self.remaining > 0 -> return Err(RegistryError.Reason("truncated tar payload: {PROVIDER_SHORT_READ}"))
+        Err(RegistryError.Reason("truncated tar header: {PROVIDER_SHORT_READ}"))
     }
 
     fn header(&self, header: [U8]) RegistryError! {
@@ -750,10 +744,10 @@ pub struct RegistryTarPreflight {
         }
         if zero {
             self.done = true
-            return Ok()
+            return
         }
         self.entries += 1
-        if self.entries > @PROVIDER_MAX_ARCHIVE_ENTRIES -> return Err(RegistryError.Reason("source archive has too many entries"))
+        if self.entries > PROVIDER_MAX_ARCHIVE_ENTRIES -> return Err(RegistryError.Reason("source archive has too many entries"))
         stored :: provider_registry_tar_number(header[124..<136])
         kind :: Int.from_u8(header[156])
         // `x`, `g`, `L`, `K`: PAX records and GNU long names/links.
@@ -765,36 +759,34 @@ pub struct RegistryTarPreflight {
             }
         }
         self.pax_logical_size = None
-        if logical > @PROVIDER_MAX_ARCHIVE_ENTRY_BYTES {
-            return Err(RegistryError.Reason("source archive entry is {logical} bytes; per-entry limit is {@PROVIDER_MAX_ARCHIVE_ENTRY_BYTES}"))
+        if logical > PROVIDER_MAX_ARCHIVE_ENTRY_BYTES {
+            return Err(RegistryError.Reason("source archive entry is {logical} bytes; per-entry limit is {PROVIDER_MAX_ARCHIVE_ENTRY_BYTES}"))
         }
         self.total += logical
-        if self.total > @PROVIDER_MAX_ARCHIVE_TOTAL_BYTES -> return Err(RegistryError.Reason("source archive expands beyond {@PROVIDER_MAX_ARCHIVE_TOTAL_BYTES} bytes"))
-        if stored > @PROVIDER_MAX_ARCHIVE_ENTRY_BYTES {
-            return Err(RegistryError.Reason("source archive payload is {stored} bytes; per-entry limit is {@PROVIDER_MAX_ARCHIVE_ENTRY_BYTES}"))
+        if self.total > PROVIDER_MAX_ARCHIVE_TOTAL_BYTES -> return Err(RegistryError.Reason("source archive expands beyond {PROVIDER_MAX_ARCHIVE_TOTAL_BYTES} bytes"))
+        if stored > PROVIDER_MAX_ARCHIVE_ENTRY_BYTES {
+            return Err(RegistryError.Reason("source archive payload is {stored} bytes; per-entry limit is {PROVIDER_MAX_ARCHIVE_ENTRY_BYTES}"))
         }
         self.remaining = (stored + 511) /% 512 * 512
         self.capture = [U8]{}
         self.capture_left = if metadata -> stored else -> 0
         self.capture_kind = if metadata -> kind else -> -1
         if self.remaining == 0 -> &self.finish_payload()
-        Ok()
     }
 
     // A PAX record set names the logical size of the next entry.
     fn finish_payload(&self) RegistryError! {
         kind :: self.capture_kind
         self.capture_kind = -1
-        if kind != 120 && kind != 103 -> return Ok()
+        if kind != 120 && kind != 103 -> return
         text :: String.from_bytes(self.capture) ?? return Err(RegistryError.Reason("tar PAX metadata is not UTF-8"))
         self.pax_logical_size = provider_registry_pax_logical_size(text)
         if self.pax_logical_size == {
             .Val(size) -> {
-                if size > @PROVIDER_MAX_ARCHIVE_ENTRY_BYTES -> return Err(RegistryError.Reason("sparse source archive entry exceeds the per-entry limit"))
+                if size > PROVIDER_MAX_ARCHIVE_ENTRY_BYTES -> return Err(RegistryError.Reason("sparse source archive entry exceeds the per-entry limit"))
             }
             .None -> {}
         }
-        Ok()
     }
 }
 
@@ -879,14 +871,14 @@ fn provider_registry_tar_listing(path: String, gzip: Bool) -[FS]> [RegistryTarEn
     if gzip {
         plain := gzip.reader(&file)
         tar := archive.tar_reader(&plain)
-        loop listing.len() <= @PROVIDER_MAX_ARCHIVE_ENTRIES {
+        loop listing.len() <= PROVIDER_MAX_ARCHIVE_ENTRIES {
             found :: tar.next() ?? return Err(RegistryError.Reason(unreadable))
             entry :: found ?? break
             &listing.push(RegistryTarEntry{name: entry.name, kind: provider_registry_tar_kind(entry.kind), size: entry.size})
         }
     } else {
         tar := archive.tar_reader(&file)
-        loop listing.len() <= @PROVIDER_MAX_ARCHIVE_ENTRIES {
+        loop listing.len() <= PROVIDER_MAX_ARCHIVE_ENTRIES {
             found :: tar.next() ?? return Err(RegistryError.Reason(unreadable))
             entry :: found ?? break
             &listing.push(RegistryTarEntry{name: entry.name, kind: provider_registry_tar_kind(entry.kind), size: entry.size})
@@ -916,7 +908,7 @@ fn provider_registry_extract_tar(path: String, gzip: Bool, destination: String) 
                 .Err(error) -> { return Err(RegistryError.Reason("could not create `{entry.name}`: {error}")) }
             }
             loop {
-                chunk :: tar.read(@PROVIDER_READ_CHUNK) ?? return Err(RegistryError.Reason("could not read `{entry.name}`"))
+                chunk :: tar.read(PROVIDER_READ_CHUNK) ?? return Err(RegistryError.Reason("could not read `{entry.name}`"))
                 if chunk.len() == 0 -> break
                 out.write_all(chunk) ?? return Err(RegistryError.Reason("could not write `{entry.name}`"))
             }
@@ -933,13 +925,12 @@ fn provider_registry_extract_tar(path: String, gzip: Bool, destination: String) 
                 .Err(error) -> { return Err(RegistryError.Reason("could not create `{entry.name}`: {error}")) }
             }
             loop {
-                chunk :: tar.read(@PROVIDER_READ_CHUNK) ?? return Err(RegistryError.Reason("could not read `{entry.name}`"))
+                chunk :: tar.read(PROVIDER_READ_CHUNK) ?? return Err(RegistryError.Reason("could not read `{entry.name}`"))
                 if chunk.len() == 0 -> break
                 out.write_all(chunk) ?? return Err(RegistryError.Reason("could not write `{entry.name}`"))
             }
         }
     }
-    Ok()
 }
 
 // Create a directory entry (and return None) or a regular file's parent

@@ -10,7 +10,7 @@
     assert_eq(keyed.key.namespace, Namespace.Env)
     assert_eq(keyed.key.path, "dev")
     assert_eq(keyed.entry.packages, [Pkg]{Pkg.new("default", "ripgrep"), Pkg.new("default", "fd"), Pkg.new("unstable", "neovim")})
-    assert_eq(envmodel_test_setting_value(keyed.entry, "prompt"), Val(FactValue.Text("wordstats")))
+    assert_eq(envmodel_test_setting_value(keyed.entry, "prompt"), Val(FactValue.Text{value: "wordstats"}))
 }
 
 #Test("selects one environment module and discloses its provenance") {
@@ -117,21 +117,21 @@
 #Test("evaluates computed fact via if else") {
     src :: "\nmodule dev {{\n    env.dev: Env{{\n        prompt: if 3 > 2 -> {{ \"yes\" }} else -> {{ \"no\" }},\n    }}\n}}\n"
     modules :: envmodel_evaluate_source(src, envmodel_test_base_dir()) ?? panic("the module evaluates")
-    assert_eq(envmodel_test_setting_value(modules[0].entries[0].entry, "prompt"), Val(FactValue.Text("yes")))
+    assert_eq(envmodel_test_setting_value(modules[0].entries[0].entry, "prompt"), Val(FactValue.Text{value: "yes"}))
 }
 
 #Test("computed module fields resolve sibling values independent of source order") {
     src :: "\nmodule dev {{\n    env.dev: Env{{\n        port: base + 1,\n        prompt: if port > 8000 -> \"ready\" else -> \"waiting\",\n        base: 8000,\n    }}\n}}\n"
     modules :: envmodel_evaluate_source(src, envmodel_test_base_dir()) ?? panic("the module evaluates")
     entry :: modules[0].entries[0].entry
-    assert_eq(envmodel_test_setting_value(entry, "port"), Val(FactValue.Text("8001")))
-    assert_eq(envmodel_test_setting_value(entry, "prompt"), Val(FactValue.Text("ready")))
+    assert_eq(envmodel_test_setting_value(entry, "port"), Val(FactValue.Text{value: "8001"}))
+    assert_eq(envmodel_test_setting_value(entry, "prompt"), Val(FactValue.Text{value: "ready"}))
 }
 
 #Test("computed module fields consume top level known values") {
-    src :: "\n@BASE :: 8000\nmodule dev {{\n    env.dev: Env{{\n        port: BASE + 1,\n    }}\n}}\n"
+    src :: "\nBASE :: prep {{ 8000 }}\nmodule dev {{\n    env.dev: Env{{\n        port: BASE + 1,\n    }}\n}}\n"
     modules :: envmodel_evaluate_source(src, envmodel_test_base_dir()) ?? panic("the module evaluates")
-    assert_eq(envmodel_test_setting_value(modules[0].entries[0].entry, "port"), Val(FactValue.Text("8001")))
+    assert_eq(envmodel_test_setting_value(modules[0].entries[0].entry, "port"), Val(FactValue.Text{value: "8001"}))
 }
 
 #Test("computed module field cycles are reported before evaluation") {

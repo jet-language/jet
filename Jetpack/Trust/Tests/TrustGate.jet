@@ -19,7 +19,7 @@ fn trust_test_secret(name: String) -> SecretSpec {
 }
 
 #Test("canonical build identity selector uses build authority") {
-    grant :: trust_parse_grant_selector("build-sha256:0123456789abcdef", @TRUST_SCOPE_REPO) ?? panic("selector parses")
+    grant :: trust_parse_grant_selector("build-sha256:0123456789abcdef", TRUST_SCOPE_REPO) ?? panic("selector parses")
     assert_eq(grant.authority, TrustAuthority.Build.label())
     assert_eq(grant.subject, "build-sha256:0123456789abcdef")
 }
@@ -71,22 +71,22 @@ fn trust_test_secret(name: String) -> SecretSpec {
     secrets :: [SecretSpec]{trust_test_secret("db_password")}
 
     store :: files.join(dir, "trust")
-    trust_add_grant(store, TrustGrant{authority: TrustAuthority.Package.label(), subject: "fastfetch", scope: @TRUST_SCOPE_USER})
+    trust_add_grant(store, TrustGrant{authority: TrustAuthority.Package.label(), subject: "fastfetch", scope: TRUST_SCOPE_USER})
     assert(trust_is_env_trusted(store, dir, hash, refs, [SecretSpec]{}))
     assert(!trust_is_env_trusted(store, dir, hash, refs, secrets))
 
     build_store :: files.join(dir, "trust-build")
-    trust_add_grant(build_store, TrustGrant{authority: TrustAuthority.Build.label(), subject: hash, scope: @TRUST_SCOPE_USER})
+    trust_add_grant(build_store, TrustGrant{authority: TrustAuthority.Build.label(), subject: hash, scope: TRUST_SCOPE_USER})
     assert(trust_is_env_trusted(build_store, dir, hash, refs, secrets))
 
     env_store :: files.join(dir, "trust-env")
-    trust_add_grant(env_store, TrustGrant{authority: TrustAuthority.Env.label(), subject: "{dir}*", scope: @TRUST_SCOPE_REPO})
+    trust_add_grant(env_store, TrustGrant{authority: TrustAuthority.Env.label(), subject: "{dir}*", scope: TRUST_SCOPE_REPO})
     assert(trust_is_env_trusted(env_store, dir, hash, refs, secrets))
 }
 
 #Test("vault write grant keeps its exact authority and repository uuid") {
     uuid :: "00112233445566778899aabbccddeeff"
-    grant :: trust_parse_grant_selector("vault.write:{uuid}", @TRUST_SCOPE_USER) ?? panic("selector parses")
+    grant :: trust_parse_grant_selector("vault.write:{uuid}", TRUST_SCOPE_USER) ?? panic("selector parses")
     assert_eq(grant.authority, TrustAuthority.VaultWrite.label())
     assert_eq(grant.subject, uuid)
     assert_eq(grant.line(), "grant:user:vault.write:{uuid}")
@@ -94,9 +94,9 @@ fn trust_test_secret(name: String) -> SecretSpec {
 
 #Test("authority trust default allow and deny feed gate") {
     allow_dir :: trust_test_gate_dir("policy_allow")
-    files.write(files.join(allow_dir, @PACKAGE_FILE), "name: \"app\"\nversion: \"0.1.0\"\nauthority: {{ trust: {{ default: allow }} }}\n") ?? panic("write allow manifest")
+    files.write(files.join(allow_dir, PACKAGE_FILE), "name: \"app\"\nversion: \"0.1.0\"\nauthority: {{ trust: {{ default: allow }} }}\n") ?? panic("write allow manifest")
     deny_dir :: trust_test_gate_dir("policy_deny")
-    files.write(files.join(deny_dir, @PACKAGE_FILE), "name: \"app\"\nversion: \"0.1.0\"\nauthority: {{ trust: {{ default: deny }} }}\n") ?? panic("write deny manifest")
+    files.write(files.join(deny_dir, PACKAGE_FILE), "name: \"app\"\nversion: \"0.1.0\"\nauthority: {{ trust: {{ default: deny }} }}\n") ?? panic("write deny manifest")
     refs :: [RefSpec]{trust_test_ref("fastfetch@nixpkgs")}
     table :: SourceTable.empty()
     theme :: Theme.plain()

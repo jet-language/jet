@@ -3,7 +3,7 @@
 // the two journal-recovery claims that used a hosts split run on an
 // environment split instead.
 
-@TRANSITION_TEST_ENV_PACKAGE :: "name: \"demo\"\nenvironments: {{ development: Environment{{ tools: [\"git\"] }} }}\n"
+TRANSITION_TEST_ENV_PACKAGE :: prep { "name: \"demo\"\nenvironments: {{ development: Environment{{ tools: [\"git\"] }} }}\n" }
 
 fn env_transition_test_root(label: String) -> String {
     files.tmpdir("jet-transition-{label}-") ?? panic("claim transition root")
@@ -26,21 +26,21 @@ fn env_transition_test_error(result: TransitionResult EnvironmentError!, what: S
 
 #Test("environment split and fold restore exact root") {
     root :: env_transition_test_root("env")
-    env_transition_test_write(root, @TRANSITION_PACKAGE_FILE, @TRANSITION_TEST_ENV_PACKAGE)
+    env_transition_test_write(root, TRANSITION_PACKAGE_FILE, TRANSITION_TEST_ENV_PACKAGE)
     result :: env_transition_split(root, SplitTarget.Environment, false) ?? panic("split env")
     assert_eq(result.summary.before_fingerprint, result.summary.after_fingerprint)
     assert(files.is_file(files.join(root, "package/env.jet")))
     env_transition_fold(root, "package/env.jet", false) ?? panic("fold env")
-    assert_eq(env_transition_test_read(root, @TRANSITION_PACKAGE_FILE), @TRANSITION_TEST_ENV_PACKAGE)
+    assert_eq(env_transition_test_read(root, TRANSITION_PACKAGE_FILE), TRANSITION_TEST_ENV_PACKAGE)
     assert(!files.exists(files.join(root, "package/env.jet")))
     files.remove_all(root) ?? panic("remove root")
 }
 
 #Test("stale split refuses without mutation") {
     root :: env_transition_test_root("stale")
-    env_transition_test_write(root, @TRANSITION_PACKAGE_FILE, "name: \"demo\"\nenvironments: {{ dev: Environment{{ }} }}\n")
+    env_transition_test_write(root, TRANSITION_PACKAGE_FILE, "name: \"demo\"\nenvironments: {{ dev: Environment{{ }} }}\n")
     plan :: env_transition_split_plan(root, SplitTarget.Environment) ?? panic("plan split")
-    env_transition_test_write(root, @TRANSITION_PACKAGE_FILE, "name: \"changed\"\n")
+    env_transition_test_write(root, TRANSITION_PACKAGE_FILE, "name: \"changed\"\n")
     message :: env_transition_test_error(plan.apply(), "a stale split")
     assert(message.contains("stale transition"), message)
     assert(!files.exists(files.join(root, "package/env.jet")))
@@ -49,13 +49,13 @@ fn env_transition_test_error(result: TransitionResult EnvironmentError!, what: S
 
 #Test("package split moves named config and records member") {
     root :: env_transition_test_root("member")
-    env_transition_test_write(root, @TRANSITION_PACKAGE_FILE, "name: \"workspace\"\napp :: Config{{ version: \"1\" }}\n")
+    env_transition_test_write(root, TRANSITION_PACKAGE_FILE, "name: \"workspace\"\napp :: Config{{ version: \"1\" }}\n")
     env_transition_split(root, SplitTarget.Package("app"), false) ?? panic("split package")
     member :: env_transition_test_read(root, "packages/app/package.jet")
     assert(member.contains("name: \"app\""))
-    assert(env_transition_test_read(root, @TRANSITION_PACKAGE_FILE).contains("members:"))
+    assert(env_transition_test_read(root, TRANSITION_PACKAGE_FILE).contains("members:"))
     env_transition_fold(root, "packages/app/package.jet", false) ?? panic("fold package")
-    assert(env_transition_test_read(root, @TRANSITION_PACKAGE_FILE).contains("app :: Config"))
+    assert(env_transition_test_read(root, TRANSITION_PACKAGE_FILE).contains("app :: Config"))
     files.remove_all(root) ?? panic("remove root")
 }
 
@@ -64,22 +64,22 @@ fn env_transition_test_error(result: TransitionResult EnvironmentError!, what: S
     files.create_dir_all(files.join(root, "packages/existing")) ?? panic("create member dir")
     env_transition_test_write(root, "packages/existing/package.jet", "name: \"app\"\n")
     original :: "name: \"workspace\"\nmembers: [\"packages/existing\"]\napp :: Config{{ version: \"1\" }}\n"
-    env_transition_test_write(root, @TRANSITION_PACKAGE_FILE, original)
+    env_transition_test_write(root, TRANSITION_PACKAGE_FILE, original)
     message :: env_transition_test_error(env_transition_split(root, SplitTarget.Package("app"), false), "a duplicate member")
     assert(message.contains("member Package name `app` is declared more than once"), message)
-    assert_eq(env_transition_test_read(root, @TRANSITION_PACKAGE_FILE), original)
+    assert_eq(env_transition_test_read(root, TRANSITION_PACKAGE_FILE), original)
     assert(!files.exists(files.join(root, "packages/app/package.jet")))
     files.remove_all(root) ?? panic("remove root")
 }
 
 #Test("fold recovers a journaled partial split without touching live bytes") {
     root :: env_transition_test_root("partial")
-    env_transition_test_write(root, @TRANSITION_PACKAGE_FILE, @TRANSITION_TEST_ENV_PACKAGE)
+    env_transition_test_write(root, TRANSITION_PACKAGE_FILE, TRANSITION_TEST_ENV_PACKAGE)
     plan :: env_transition_split_plan(root, SplitTarget.Environment) ?? panic("plan split")
     env_transition_create_real_dirs(plan.root, files.dirname(plan.journal_path)) ?? panic("create journal dir")
     env_transition_write_atomic(plan.journal_path, plan.journal) ?? panic("write journal")
     generated :: files.join(plan.root, "package/env.jet")
-    generated_after := None
+    generated_after := [U8]?{None}
     loop change in plan.changes {
         if change.relative == "package/env.jet" -> generated_after = change.after
     }
@@ -87,7 +87,7 @@ fn env_transition_test_error(result: TransitionResult EnvironmentError!, what: S
 
     env_transition_fold(root, "package/env.jet", false) ?? panic("fold partial split")
 
-    assert_eq(env_transition_test_read(root, @TRANSITION_PACKAGE_FILE), @TRANSITION_TEST_ENV_PACKAGE)
+    assert_eq(env_transition_test_read(root, TRANSITION_PACKAGE_FILE), TRANSITION_TEST_ENV_PACKAGE)
     assert(!files.exists(generated))
     assert(!files.exists(plan.journal_path))
     files.remove_all(root) ?? panic("remove root")
@@ -95,17 +95,17 @@ fn env_transition_test_error(result: TransitionResult EnvironmentError!, what: S
 
 #Test("corrupt transition journal refuses fold without mutation") {
     root :: env_transition_test_root("corrupt-journal")
-    env_transition_test_write(root, @TRANSITION_PACKAGE_FILE, @TRANSITION_TEST_ENV_PACKAGE)
+    env_transition_test_write(root, TRANSITION_PACKAGE_FILE, TRANSITION_TEST_ENV_PACKAGE)
     env_transition_split(root, SplitTarget.Environment, false) ?? panic("split env")
-    live_package :: env_transition_test_read(root, @TRANSITION_PACKAGE_FILE)
-    journal_dir :: files.join(root, @TRANSITION_JOURNAL_DIR)
+    live_package :: env_transition_test_read(root, TRANSITION_PACKAGE_FILE)
+    journal_dir :: files.join(root, TRANSITION_JOURNAL_DIR)
     journals :: files.list_dir(journal_dir) ?? panic("list journals")
     journal :: files.join(journal_dir, journals[0].name)
     files.write(journal, "corrupt\n") ?? panic("corrupt journal")
     message :: env_transition_test_error(env_transition_fold(root, "package/env.jet", false), "a corrupt journal")
     assert(message.contains("unknown format"), message)
     // The split state stays live.
-    assert_eq(env_transition_test_read(root, @TRANSITION_PACKAGE_FILE), live_package)
+    assert_eq(env_transition_test_read(root, TRANSITION_PACKAGE_FILE), live_package)
     assert(files.is_file(files.join(root, "package/env.jet")))
     files.remove_all(root) ?? panic("remove root")
 }
@@ -116,7 +116,7 @@ fn env_transition_test_error(result: TransitionResult EnvironmentError!, what: S
     env_transition_test_write(root, "config.jet", "languages: [python]\n")
     message :: env_transition_test_error(env_transition_init(root, false), "an open role file")
     assert(message.contains("open role fields"), message)
-    assert(!files.exists(files.join(root, @TRANSITION_PACKAGE_FILE)))
+    assert(!files.exists(files.join(root, TRANSITION_PACKAGE_FILE)))
     files.remove_all(root) ?? panic("remove root")
 }
 
@@ -133,12 +133,12 @@ fn env_transition_test_error(result: TransitionResult EnvironmentError!, what: S
     preview :: env_transition_init(root, true) ?? panic("preview init")
     touches_package := false
     loop change in preview.summary.changes {
-        if change.path == @TRANSITION_PACKAGE_FILE -> touches_package = true
+        if change.path == TRANSITION_PACKAGE_FILE -> touches_package = true
     }
     assert(touches_package)
     assert(preview.summary.before_fingerprint != preview.summary.after_fingerprint, "migration must fingerprint distinct pre/post fact graphs")
     env_transition_init(root, false) ?? panic("apply init")
-    assert(files.is_file(files.join(root, @TRANSITION_PACKAGE_FILE)))
+    assert(files.is_file(files.join(root, TRANSITION_PACKAGE_FILE)))
     assert(files.is_file(files.join(root, "package/env-dev.jet")))
     assert(files.is_file(files.join(root, "package/env-ci.jet")))
     loaded :: PackageFacts.load(root) ?? panic("load migrated package")
@@ -152,7 +152,7 @@ fn env_transition_test_error(result: TransitionResult EnvironmentError!, what: S
     env_transition_restore_role_files(root, true) ?? panic("preview restore")
     env_transition_restore_role_files(root, false) ?? panic("apply restore")
     loop original in originals -> assert_eq(env_transition_test_read(root, original.name), original.source)
-    assert(!files.exists(files.join(root, @TRANSITION_PACKAGE_FILE)))
+    assert(!files.exists(files.join(root, TRANSITION_PACKAGE_FILE)))
     assert(!files.exists(files.join(root, "package/env-dev.jet")))
     assert(!files.exists(files.join(root, "package/env-ci.jet")))
     assert(!files.exists(preview.summary.journal))
@@ -164,7 +164,7 @@ fn env_transition_test_error(result: TransitionResult EnvironmentError!, what: S
     env_transition_test_write(root, "pkg.jet", "payload: {{ name: \"demo\", version: \"0.1.0\", future: \"lost\" }}\n")
     message :: env_transition_test_error(env_transition_init(root, false), "an unknown identity field")
     assert(message.contains("identity contains unknown field `future`"), message)
-    assert(!files.exists(files.join(root, @TRANSITION_PACKAGE_FILE)))
+    assert(!files.exists(files.join(root, TRANSITION_PACKAGE_FILE)))
     assert(!files.exists(files.join(root, ".jet/package-transition")))
     files.remove_all(root) ?? panic("remove root")
 }
@@ -174,7 +174,7 @@ fn env_transition_test_error(result: TransitionResult EnvironmentError!, what: S
     env_transition_test_write(root, "pkg.jet", "payload: {{ name: \"demo\", version: \"0.1.0\" }}\ndeps: {{ tool: {{ git: \"https://example.invalid/tool\", tag: \"v1\", future: \"lost\" }} }}\n")
     message :: env_transition_test_error(env_transition_init(root, false), "an unknown dependency field")
     assert(message.contains("dependency `tool` contains unknown field `future`"), message)
-    assert(!files.exists(files.join(root, @TRANSITION_PACKAGE_FILE)))
+    assert(!files.exists(files.join(root, TRANSITION_PACKAGE_FILE)))
     assert(!files.exists(files.join(root, ".jet/package-transition")))
     files.remove_all(root) ?? panic("remove root")
 }
@@ -189,7 +189,7 @@ fn env_transition_test_error(result: TransitionResult EnvironmentError!, what: S
         env_transition_test_write(root, "pkg.jet", case.source)
         message :: env_transition_test_error(env_transition_init(root, false), case.label)
         assert(message.contains(case.expected), message)
-        assert(!files.exists(files.join(root, @TRANSITION_PACKAGE_FILE)))
+        assert(!files.exists(files.join(root, TRANSITION_PACKAGE_FILE)))
         assert(!files.exists(files.join(root, ".jet/package-transition")))
         files.remove_all(root) ?? panic("remove root")
     }
@@ -201,10 +201,10 @@ fn env_transition_test_error(result: TransitionResult EnvironmentError!, what: S
     result :: env_transition_init(root, false) ?? panic("apply init")
     journal :: result.summary.journal
     tampered :: "name: \"tampered\"\nversion: \"0.1.0\"\n"
-    env_transition_test_write(root, @TRANSITION_PACKAGE_FILE, tampered)
+    env_transition_test_write(root, TRANSITION_PACKAGE_FILE, tampered)
     message :: env_transition_test_error(env_transition_restore_role_files(root, false), "a stale restore")
     assert(message.contains("stale transition"), message)
-    assert_eq(env_transition_test_read(root, @TRANSITION_PACKAGE_FILE), tampered)
+    assert_eq(env_transition_test_read(root, TRANSITION_PACKAGE_FILE), tampered)
     assert(files.is_file(journal))
     files.remove_all(root) ?? panic("remove root")
 }
@@ -215,7 +215,7 @@ fn env_transition_test_error(result: TransitionResult EnvironmentError!, what: S
     env_transition_test_write(root, "env.jet", "module env.dev {{ tools: [\"git@nixpkgs\"] }}\nmodule env.dev {{ tools: [\"cargo@nixpkgs\"] }}\n")
     message :: env_transition_test_error(env_transition_init(root, false), "a duplicate environment")
     assert(message.contains("declares environment `dev` more than once"), message)
-    assert(!files.exists(files.join(root, @TRANSITION_PACKAGE_FILE)))
+    assert(!files.exists(files.join(root, TRANSITION_PACKAGE_FILE)))
     assert(!files.exists(files.join(root, "package/env-dev.jet")))
     files.remove_all(root) ?? panic("remove root")
 }

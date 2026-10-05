@@ -17,12 +17,12 @@ D-CHANNEL-AUTO1.
 1. Named proof test, prebuilt binary run under the memory cap:
    `systemd-run --user --slice=jetwork.slice --scope -q -p MemoryMax=6G env TMPDIR=… Tools/agent/jet-env target-integ/debug/deps/jetpack_tool-0f59c33b64132fde <four named tests> --test-threads=1`.
    The binary was built 2026-09-29 02:06.
-2. Scratch-root run: `~/.cache/jet-test-scratch/Closer10/tool/run.sh`.
+2. Scratch-root run: `~/.cache/jet-dev/scratch/Closer10/tool/run.sh`.
    - `JETPACK_ROOT` and `HOME` point at scratch.
    - A native release fixture (`jetpackage-omp.json` plus artifact), built in
      the same shape as `write_native_omp_fixture` in `tests/jetpack_tool.rs`.
    - A project dir whose `env.jet` names `missing@releases#1.0.0`.
-   - Log: `~/.cache/jet-test-scratch/Closer10/tool/run.log`.
+   - Log: `~/.cache/jet-dev/scratch/Closer10/tool/run.log`.
 
 ## Evidence
 

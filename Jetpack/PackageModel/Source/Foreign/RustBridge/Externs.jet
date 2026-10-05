@@ -18,7 +18,7 @@ pub struct RustBridgeProgram {
     // The checked package declaration's authority needs (D-PLUGIN-AUTHORITY1).
     pub authority_needs: [String]
     // Gathered C-FFI artifacts.
-    pub cffi: CFfi
+    pub cffi: CFFI
 }
 
 // One loaded module of the checked program.
@@ -100,7 +100,7 @@ pub struct InlineEntry {
 }
 
 // Built FFI bridge artifact paths for rustc linking (jet_foundation::AST::FfiLink).
-pub struct FfiLink {
+pub struct FFILink {
     pub crate_name: String
     // Content-addressed identity of the bridge inputs.
     pub cache_identity: String
@@ -119,9 +119,9 @@ pub struct FfiLink {
     // only for secrets bridges.
     pub secrets_helper_bin_path: String?
     // Opaque C handle facts captured by the bridge input.
-    pub handle_facts: [FfiHandleFact]
+    pub handle_facts: [FFIHandleFact]
     // Explicit native link closure captured by the bridge input.
-    pub link_closure: FfiLinkClosure
+    pub link_closure: FFILinkClosure
 
     // Cargo's dependency search paths, target artifacts first, no duplicates.
     fn dependency_dirs(self) -> [String] Never! {
@@ -285,7 +285,7 @@ pub fn pkg_ffi_mangle_path(name: String) -> String Never! {
         escape :: pkg_ffi_path_escape(code)
         loop escaped in escape.bytes() -> &encoded.push(escaped)
     }
-    "{@GENERATED_NAME_PREFIX}{String.from_bytes(encoded) ?? ""}"
+    "{GENERATED_NAME_PREFIX}{String.from_bytes(encoded) ?? ""}"
 }
 
 // The escape letters that follow `_` for one non-alphanumeric byte.
@@ -446,12 +446,12 @@ fn pkg_ffi_owner_key(owner: String, name: String) -> String Never! {
 fn pkg_ffi_collect_record_items(items: [Item], owner: String, records: &[CRecordDecl], names: &[String: String], aliases: &[String: Type]) Never! {
     loop item in items {
         if item == {
-            .Struct(definition) -> pkg_ffi_collect_record(definition, owner, records, names)
-            .Distinct(definition) -> pkg_ffi_record_alias(owner, definition.name, definition.base, aliases)
-            .TypeAlias(definition) -> pkg_ffi_record_alias(owner, definition.name, definition.target, aliases)
+            .Struct(definition) -> pkg_ffi_collect_record(definition, owner, &records, &names)
+            .Distinct(definition) -> pkg_ffi_record_alias(owner, definition.name, definition.base, &aliases)
+            .TypeAlias(definition) -> pkg_ffi_record_alias(owner, definition.name, definition.target, &aliases)
             .CodeModule(code_module) -> {
                 body :: code_module.body ?? next
-                pkg_ffi_collect_record_items(body, pkg_ffi_owner_key(owner, code_module.name), records, names, aliases)
+                pkg_ffi_collect_record_items(body, pkg_ffi_owner_key(owner, code_module.name), &records, &names, &aliases)
             }
             else -> {}
         }
@@ -558,7 +558,9 @@ fn pkg_ffi_inline_asm_entry_diagnostic(asm: ExternEntry, inline: InlineEntry, ta
         if !sema_inline_assembly_register_known(target, normalized) -> return Val(pkg_ffi_asm_error("{asm.line_hint} names clobber register `{clobber}`, which is not valid for target `{target}`", "fixed assembly clobbers are checked against the selected target namespace", "use a register valid for the selected target"))
         if seen_clobbers.contains(normalized) -> return Val(pkg_ffi_asm_error("{asm.line_hint} repeats clobber register `{clobber}`", "the checked assembly contract must contain each discarded output exactly once", "remove duplicate names from `; clobbers …`"))
         &seen_clobbers.push(normalized)
-        if output_register == Val(normalized) -> return Val(pkg_ffi_asm_error("{asm.line_hint} uses `{clobber}` as both result and an early-written clobber", "an early-written clobber cannot overwrite the fixed result destination", "choose a distinct result register or clobber register"))
+        if output_register == .Val(result_register) {
+            if result_register == normalized -> return Val(pkg_ffi_asm_error("{asm.line_hint} uses `{clobber}` as both result and an early-written clobber", "an early-written clobber cannot overwrite the fixed result destination", "choose a distinct result register or clobber register"))
+        }
     }
     None
 }
@@ -610,9 +612,11 @@ fn pkg_ffi_entry_languages(entries: [ExternEntry]) -> [ForeignLanguage] Never! {
     languages := [ForeignLanguage]{}
     loop language in ForeignLanguage.all() {
         loop entry in entries {
-            if pkg_ffi_foreign_language_for_entry(entry) == Val(language) {
-                &languages.push(language)
-                break
+            if pkg_ffi_foreign_language_for_entry(entry) == .Val(entry_language) {
+                if entry_language == language {
+                    &languages.push(language)
+                    break
+                }
             }
         }
     }
@@ -628,7 +632,7 @@ fn pkg_ffi_internal_tag_spelling(internal: InternalTag) -> String Never! {
         .SharedGuardRead -> "shared_guard.read"
         .SharedGuardEdit -> "shared_guard.edit"
         .TerminalFactSet -> "terminal.fact_set"
-        .CppCallbackAbi -> "cpp.callback_abi"
+        .CppCallbackABI -> "cpp.callback_abi"
         .AllocatorView -> "allocator.view"
     }
 }

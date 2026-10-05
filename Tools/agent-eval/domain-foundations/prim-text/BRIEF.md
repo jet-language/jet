@@ -1,6 +1,6 @@
 # Probe prim-text — Text: Unicode, shaping, tokenizers, search
 
-Read `~/.cache/jet-luna/dx3/COMMON.md` first; it holds the rule, the gap rubric, the working method, and the output contract. This file adds only what is specific to this probe.
+Read `~/.cache/jet-dev/dx3/COMMON.md` first; it holds the rule, the gap rubric, the working method, and the output contract. This file adds only what is specific to this probe.
 
 ## Kind
 
@@ -16,8 +16,8 @@ Build, as library Jet: a BPE tokenizer over a 1 MB corpus; grapheme, word, and s
 
 ## Research to mine
 
-Domain census and reports: `~/.cache/jet-luna/dx2/nlp-text/`, `~/.cache/jet-luna/dx2/typography-publishing/`, `~/.cache/jet-luna/dx2/text-processing-parsing/`, `~/.cache/jet-luna/dx2/documentation-static-sites/` (report.md, census.json, claims.json). Deleted ballots with worked code: `~/.cache/jet-luna/dx2/ballots/` (grep the mechanism name). Family syntheses: `~/.cache/jet-luna/dx2/_families/*/synthesis.md`.
+Domain census and reports: `~/.cache/jet-dev/dx2/nlp-text/`, `~/.cache/jet-dev/dx2/typography-publishing/`, `~/.cache/jet-dev/dx2/text-processing-parsing/`, `~/.cache/jet-dev/dx2/documentation-static-sites/` (report.md, census.json, claims.json). Deleted ballots with worked code: `~/.cache/jet-dev/dx2/ballots/` (grep the mechanism name). Family syntheses: `~/.cache/jet-dev/dx2/_families/*/synthesis.md`.
 
 ## Output
 
-`~/.cache/jet-luna/dx3/prim-text/probe.md`, `gaps.json`, and the code under `~/.cache/jet-luna/dx3/prim-text/pkg/`. Gap ids start with `prim-text-G`.
+`~/.cache/jet-dev/dx3/prim-text/probe.md`, `gaps.json`, and the code under `~/.cache/jet-dev/dx3/prim-text/pkg/`. Gap ids start with `prim-text-G`.

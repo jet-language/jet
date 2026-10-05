@@ -180,12 +180,12 @@ fn cli_import_merge_provider_projection(target: &ProviderFacts, source: Provider
 // A package name, `name@source` / `name#selector` ref, or exact record.
 fn cli_import_nix_package(value: DataTree) -> NixImportPackage? Never! {
     name := ""
-    source := None
-    version := None
-    revision := None
-    digest := None
-    reference := None
-    immutable_source := None
+    source := String?{None}
+    version := String?{None}
+    revision := String?{None}
+    digest := String?{None}
+    reference := String?{None}
+    immutable_source := String?{None}
     if pkg_json_text(value) == {
         .Val(text) -> {
             raw :: text.trim()
@@ -215,7 +215,7 @@ fn cli_import_nix_package(value: DataTree) -> NixImportPackage? Never! {
                 digest != None -> "digest={digest ?? ""}"
                 else -> ""
             }
-            if selector == "" -> "{trimmed}@{authority}" else -> "{trimmed}@{authority}{@REF_CHANNEL_MARKER}{selector}"
+            if selector == "" -> "{trimmed}@{authority}" else -> "{trimmed}@{authority}{REF_CHANNEL_MARKER}{selector}"
         }
     }
     selector_facts :: ProviderFacts.for_reference("nix", provider_ref)
@@ -235,7 +235,7 @@ pub fn cli_import_cargo(cargo_toml: String, cargo_lock: String) -> ImportPlan Ne
     source_version :: cli_import_toml_string(cargo_toml, "version") ?? ""
     name :: if source_name == "" -> "cargo-import" else -> source_name
     version :: if source_version == "" -> "0.1.0" else -> source_version
-    root_reference :: if source_name != "" && source_version != "" -> "{name}@cargo{@REF_CHANNEL_MARKER}version={version}" else -> "{name}@cargo"
+    root_reference :: if source_name != "" && source_version != "" -> "{name}@cargo{REF_CHANNEL_MARKER}version={version}" else -> "{name}@cargo"
     &plan.packages.push(ImportedPackage{name: name, version: version})
     native_document :: "Cargo.toml:\n{cargo_toml}\nCargo.lock:\n{cargo_lock}"
     root_facts :: cli_import_retain_normalized_root(&plan, ProviderFamily.Cargo, native_document, root_reference, "Cargo.toml")
@@ -263,10 +263,10 @@ impl ImportPlan {
             .None -> ""
         }
         platform_ref :: if section.platform == {
-            .Val(platform) -> "{dep}@cargo{@REF_CHANNEL_MARKER}platform={platform}"
+            .Val(platform) -> "{dep}@cargo{REF_CHANNEL_MARKER}platform={platform}"
             .None -> "{dep}@cargo"
         }
-        provider_ref :: if locked == "" -> platform_ref else -> "{dep}@cargo{@REF_CHANNEL_MARKER}version={locked}{platform_selector}"
+        provider_ref :: if locked == "" -> platform_ref else -> "{dep}@cargo{REF_CHANNEL_MARKER}version={locked}{platform_selector}"
         &self.deps.push(ImportedDep{name: dep, provider_ref: provider_ref, locked_version: locked, dev: section.dev})
         kind :: section.kind.label()
         if section.kind != CargoDependencyKind.Runtime {
@@ -312,7 +312,7 @@ pub fn cli_import_npm(package_json: String) -> ImportPlan Never! {
     source_version :: pkg_json_text(object.get("version") ?? DataTree.Null) ?? ""
     name :: if source_name == "" -> "npm-import" else -> source_name
     version :: if source_version == "" -> "0.1.0" else -> source_version
-    root_reference :: if source_name == "" || source_version == "" -> "{name}@npm" else -> "{name}@npm{@REF_CHANNEL_MARKER}version={version}"
+    root_reference :: if source_name == "" || source_version == "" -> "{name}@npm" else -> "{name}@npm{REF_CHANNEL_MARKER}version={version}"
     &plan.packages.push(ImportedPackage{name: name, version: version})
     root_facts :: cli_import_retain_normalized_root(&plan, ProviderFamily.Npm, package_json, root_reference, "package.json")
     kinds :: [NpmDependencyKind]{NpmDependencyKind.Runtime, NpmDependencyKind.Dev, NpmDependencyKind.Optional, NpmDependencyKind.Peer}
@@ -357,7 +357,7 @@ impl ImportPlan {
             .None -> None
         }
         provider_ref :: if exact == {
-            .Val(pinned) -> "{name}@npm{@REF_CHANNEL_MARKER}version={pinned}"
+            .Val(pinned) -> "{name}@npm{REF_CHANNEL_MARKER}version={pinned}"
             .None -> "{name}@npm"
         }
         &self.deps.push(ImportedDep{name: name, provider_ref: provider_ref, locked_version: exact ?? "", dev: kind == NpmDependencyKind.Dev})
@@ -423,7 +423,7 @@ pub fn cli_import_python_metadata(name: String, dynamic_fields: [String]) -> Imp
 pub fn cli_import_swiftpm(name: String, revision: String) -> ImportPlan Never! {
     plan := ImportPlan.empty("swiftpm")
     &plan.packages.push(ImportedPackage{name: name, version: revision})
-    provider_ref :: "{name}@swiftpm{@REF_CHANNEL_MARKER}revision={revision}"
+    provider_ref :: "{name}@swiftpm{REF_CHANNEL_MARKER}revision={revision}"
     &plan.deps.push(ImportedDep{name: name, provider_ref: provider_ref, locked_version: revision, dev: false})
     facts := ProviderFacts.for_reference("swiftpm", provider_ref)
     &facts.set_resolved_source("swiftpm:{name}@{revision}")
@@ -461,7 +461,7 @@ fn cli_import_toml_string(raw: String, key: String) -> String? Never! {
 }
 
 // The quoting state while scanning a TOML value for a comment.
-enum ImportTomlQuote {
+enum ImportTOMLQuote {
     Unquoted
     Double
     Single
@@ -470,16 +470,16 @@ enum ImportTomlQuote {
 // The value text before an unquoted `#` comment, unquoted.
 fn cli_import_toml_value_text(value: String) -> String Never! {
     bytes :: value.bytes()
-    quote := ImportTomlQuote.Unquoted
+    quote := ImportTOMLQuote.Unquoted
     escaped := false
     loop index in 0..<bytes.len() {
         code :: Int.from_u8(bytes[index])
         if {
-            quote == ImportTomlQuote.Double && code == 34 && !escaped -> quote = ImportTomlQuote.Unquoted
-            quote == ImportTomlQuote.Single && code == 39 -> quote = ImportTomlQuote.Unquoted
-            quote == ImportTomlQuote.Unquoted && code == 34 -> quote = ImportTomlQuote.Double
-            quote == ImportTomlQuote.Unquoted && code == 39 -> quote = ImportTomlQuote.Single
-            quote == ImportTomlQuote.Unquoted && code == 35 -> return cli_import_unquote_toml_value(String.from_bytes(bytes.slice(0, index)) ?? "")
+            quote == ImportTOMLQuote.Double && code == 34 && !escaped -> quote = ImportTOMLQuote.Unquoted
+            quote == ImportTOMLQuote.Single && code == 39 -> quote = ImportTOMLQuote.Unquoted
+            quote == ImportTOMLQuote.Unquoted && code == 34 -> quote = ImportTOMLQuote.Double
+            quote == ImportTOMLQuote.Unquoted && code == 39 -> quote = ImportTOMLQuote.Single
+            quote == ImportTOMLQuote.Unquoted && code == 35 -> return cli_import_unquote_toml_value(String.from_bytes(bytes.slice(0, index)) ?? "")
             else -> {}
         }
         escaped = code == 92 && !escaped
@@ -522,7 +522,7 @@ fn cli_import_cargo_dependency_sections(raw: String) -> [CargoDependencySection]
         section :: line.removeprefix("[").removesuffix("]").trim()
         matched := false
         found := CargoDependencyKind.Runtime
-        platform := None
+        platform := String?{None}
         loop kind in kinds {
             if matched -> break
             suffix :: kind.suffix()
@@ -637,7 +637,7 @@ fn cli_import_lock_versions(raw: String, package: String) -> [String] Never! {
 fn cli_import_lock_field(raw: String, package: String, field: String) -> String? Never! {
     in_package := false
     name := ""
-    value := None
+    value := String?{None}
     loop raw_line in raw.lines() {
         line :: raw_line.trim()
         if line == "[[package]]" {

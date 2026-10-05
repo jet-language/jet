@@ -30,7 +30,7 @@ pub enum TrustRootError {
     CacheKeyChanged(role: String, expected: String, actual: String)
     CacheKeyMissing(role: String)
     CacheBuilderRevoked(builder: String)
-    Io(detail: String)
+    IO(detail: String)
 
     fn message(self) -> String Never! {
         if self == {
@@ -56,12 +56,12 @@ pub enum TrustRootError {
             .CacheKeyChanged(role, expected, actual) -> "cache key for `{role}` changed: expected {expected}, got {actual}"
             .CacheKeyMissing(role) -> "cache key pin for `{role}` is missing"
             .CacheBuilderRevoked(builder) -> "cache builder `{builder}` is revoked"
-            .Io(detail) -> detail
+            .IO(detail) -> detail
         }
     }
 }
 
-impl IOError -> TrustRootError { TrustRootError.Io("{self}") }
+impl IOError -> TrustRootError { return TrustRootError.IO{detail: "{self}"} }
 
 // Separate trust-domain identities (D-JPK-TRUSTROOT1).
 pub enum IdentityKind {
@@ -87,13 +87,13 @@ pub enum IdentityKind {
 pub enum PublisherIdentity {
     Sigstore(identity: String, issuer: String, checkpoint_digest: String, bundle_digest: String)
     OfflineEd25519(public_key_hex: String, key_id: String)
-    KmsHsm(key_uri: String, public_key_hex: String, key_id: String)
+    KMSHSM(key_uri: String, public_key_hex: String, key_id: String)
 
     fn kind_label(self) -> String Never! {
         if self == {
             .Sigstore(_, _, _, _) -> "sigstore"
             .OfflineEd25519(_, _) -> "ed25519"
-            .KmsHsm(_, _, _) -> "kms-hsm"
+            .KMSHSM(_, _, _) -> "kms-hsm"
         }
     }
 
@@ -109,10 +109,10 @@ pub enum PublisherIdentity {
                 trust_root_require_ed25519_pub_hex("ed25519.public_key_hex", public_key_hex)
                 trust_root_require_nonempty("ed25519.key_id", key_id)
             }
-            .KmsHsm(key_uri, public_key_hex, key_id) -> {
+            .KMSHSM(key_uri, public_key_hex, key_id) -> {
                 trust_root_require_nonempty("kms.key_uri", key_uri)
                 if !(key_uri.starts_with("kms:") || key_uri.starts_with("hsm:") || key_uri.starts_with("pkcs11:")) {
-                    return Err(TrustRootError.InvalidPublisher("kms key URI must start with kms:, hsm:, or pkcs11: (got `{key_uri}`)"))
+                    return Err(TrustRootError.InvalidPublisher{detail: "kms key URI must start with kms:, hsm:, or pkcs11: (got `{key_uri}`)"})
                 }
                 trust_root_require_ed25519_pub_hex("kms.public_key_hex", public_key_hex)
                 trust_root_require_nonempty("kms.key_id", key_id)
@@ -124,46 +124,47 @@ pub enum PublisherIdentity {
 pub struct BoundIdentity {
     pub kind: IdentityKind
     pub name: String
-    pub publisher: PublisherIdentity?
+    // The hybrid publisher proof; non-publisher identities must leave it absent.
+    pub proof: PublisherIdentity?
 
     fn registry(name: String) -> BoundIdentity Never! {
-        BoundIdentity{kind: IdentityKind.Registry, name, publisher: None}
+        BoundIdentity{kind: IdentityKind.Registry, name, proof: None}
     }
 
     fn publisher(name: String, proof: PublisherIdentity) -> BoundIdentity Never! {
-        BoundIdentity{kind: IdentityKind.Publisher, name, publisher: Val(proof)}
+        BoundIdentity{kind: IdentityKind.Publisher, name, proof: Val(proof)}
     }
 
     fn cache_builder(name: String) -> BoundIdentity Never! {
-        BoundIdentity{kind: IdentityKind.CacheBuilder, name, publisher: None}
+        BoundIdentity{kind: IdentityKind.CacheBuilder, name, proof: None}
     }
 
     fn remote_executor(name: String) -> BoundIdentity Never! {
-        BoundIdentity{kind: IdentityKind.RemoteExecutor, name, publisher: None}
+        BoundIdentity{kind: IdentityKind.RemoteExecutor, name, proof: None}
     }
 
     // Only publisher identities carry, and must carry, a hybrid proof.
     fn validate(self) TrustRootError! {
         trust_root_require_nonempty("identity.name", self.name)
         if self.kind == IdentityKind.Publisher {
-            proof :: self.publisher ?? return Err(TrustRootError.InvalidPublisher("publisher identity requires a hybrid proof"))
+            proof :: self.proof ?? return Err(TrustRootError.InvalidPublisher{detail: "publisher identity requires a hybrid proof"})
             proof.validate()
             return
         }
-        if self.publisher != None -> return Err(TrustRootError.IdentityKindMismatch{kind: self.kind, detail: "only publisher identities carry hybrid publisher proofs"})
+        if self.proof != None -> return Err(TrustRootError.IdentityKindMismatch{kind: self.kind, detail: "only publisher identities carry hybrid publisher proofs"})
     }
 }
 
 fn trust_root_require_nonempty(field: String, value: String) TrustRootError! {
-    if value.trim() == "" -> return Err(TrustRootError.InvalidPublisher("{field} must be non-empty"))
+    if value.trim() == "" -> return Err(TrustRootError.InvalidPublisher{detail: "{field} must be non-empty"})
 }
 
 fn trust_root_require_sha256_hex(field: String, value: String) TrustRootError! {
-    if !trust_root_is_hex64(value) -> return Err(TrustRootError.InvalidPublisher("{field} must be 64-char sha256 hex"))
+    if !trust_root_is_hex64(value) -> return Err(TrustRootError.InvalidPublisher{detail: "{field} must be 64-char sha256 hex"})
 }
 
 fn trust_root_require_ed25519_pub_hex(field: String, value: String) TrustRootError! {
-    if !trust_root_is_hex64(value) -> return Err(TrustRootError.InvalidPublisher("{field} must be 32-byte ed25519 public key hex"))
+    if !trust_root_is_hex64(value) -> return Err(TrustRootError.InvalidPublisher{detail: "{field} must be 32-byte ed25519 public key hex"})
 }
 
 // Exactly 64 ASCII hex digits (either case).

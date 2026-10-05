@@ -9,7 +9,7 @@ impl NixDerivationStore {
     // impure derivations read no inputs, as in the reference.
     fn load_from_filesystem(&self, drv_path: String) NixError! -[FS]> {
         if self.derivations.get(drv_path) != None -> return
-        text :: files.read(drv_path) ?? return Err(NixError.DrvIo("{drv_path}: {err}"))
+        text :: files.read(drv_path) ?? return Err(NixError.DrvIO("{drv_path}: {err}"))
         drv :: NixDerivation.parse(text)
         self.derivations[drv_path] = drv
         &self.load_inputs_from_filesystem(drv)
@@ -37,7 +37,7 @@ pub struct NixCorpusReport {
 pub fn nix_differential_corpus(store_dir: String, limit: Int) -[FS]> NixCorpusReport NixError! {
     report := NixCorpusReport{checked: 0, skipped: 0, divergences: [NixError]{}}
     if !files.is_dir(store_dir) -> return Ok(report)
-    entries :: files.list_dir(store_dir) ?? return Err(NixError.DrvIo("{err}"))
+    entries :: files.list_dir(store_dir) ?? return Err(NixError.DrvIO("{err}"))
     paths := [String]{}
     loop entry in entries {
         if files.suffix(entry.name) == ".drv" -> &paths.push(entry.path)
@@ -55,7 +55,7 @@ pub fn nix_differential_corpus(store_dir: String, limit: Int) -[FS]> NixCorpusRe
                 next
             }
         }
-        drv := None
+        drv := NixDerivation?{None}
         if NixDerivation.parse(aterm) == {
             .Ok(parsed) -> drv = Val(parsed)
             .Err(error) -> {

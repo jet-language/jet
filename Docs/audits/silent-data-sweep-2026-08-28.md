@@ -16,8 +16,8 @@ finding first-hand before carding. Three read-only investigators mapped the
 source seams onto the cards so the fix burndown starts with exact owned paths.
 
 Roughly 5,000 oracle-diffed cases. Lane reports and raw protocols:
-`~/.cache/jet-luna/sweep-2026-08-28/artifacts/`, scratch repros under
-`~/.cache/jet-test-scratch/SWEEP-*` (plus `TASKCONC/`, `HASH/`, `FSPATH/`).
+`~/.cache/jet-dev/sweep-2026-08-28/artifacts/`, scratch repros under
+`~/.cache/jet-dev/scratch/SWEEP-*` (plus `TASKCONC/`, `HASH/`, `FSPATH/`).
 
 ## Severity law (ratified for this campaign)
 

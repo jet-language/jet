@@ -55,8 +55,8 @@ fn scratch_root(name: &str) -> PathBuf {
         .as_nanos();
     let base = std::env::var_os("HOME")
         .map(PathBuf::from)
-        .map(|home| home.join(".cache/jet-test-scratch"))
-        .unwrap_or_else(|| PathBuf::from(".cache/jet-test-scratch"));
+        .map(|home| home.join(".cache/jet-dev/scratch"))
+        .unwrap_or_else(|| PathBuf::from(".cache/jet-dev/scratch"));
     let root = base.join(format!(
         "project-check-{name}-{}-{stamp}",
         std::process::id()

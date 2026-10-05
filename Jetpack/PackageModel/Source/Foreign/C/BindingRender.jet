@@ -14,7 +14,7 @@ struct CBindingSkip {
 }
 
 // Render one prototype as a `#Bindgen` line, or the reason it is skipped.
-fn pkg_cbind_render_binding(p: CProto, used_names: &[String], contract: ForeignAbiContract, handles: OpaqueHandleDiscovery, catalog: CTypeCatalog) -> String CBindingSkip! {
+fn pkg_cbind_render_binding(p: CProto, used_names: &[String], contract: ForeignABIContract, handles: OpaqueHandleDiscovery, catalog: CTypeCatalog) -> String CBindingSkip! {
     managed_callback :: pkg_cbind_managed_callback_param_index(p, catalog)
     managed_unsubscribe :: p.name == "unsubscribe" && pkg_cbind_native_void_pointer_proto(p)
     managed_emit :: p.name == "emit_async"
@@ -63,7 +63,7 @@ fn pkg_cbind_render_binding(p: CProto, used_names: &[String], contract: ForeignA
 
 // The Jet type of one parameter: an out-length, a counted slice, an owned
 // handle (consumed by its close function), or a mapped value or pointer.
-fn pkg_cbind_render_param_type(p: CProto, idx: Int, ty: String, length_param: Int, contract: ForeignAbiContract, handles: OpaqueHandleDiscovery, catalog: CTypeCatalog) -> String CBindingSkip! {
+fn pkg_cbind_render_param_type(p: CProto, idx: Int, ty: String, length_param: Int, contract: ForeignABIContract, handles: OpaqueHandleDiscovery, catalog: CTypeCatalog) -> String CBindingSkip! {
     if idx == length_param {
         length :: catalog.map_length_type(ty) ?? return Err(CBindingSkip{reason: "array length type `{ty.trim()}` isn't bindable"})
         return Ok("&{length}")
@@ -85,9 +85,9 @@ fn pkg_cbind_render_param_type(p: CProto, idx: Int, ty: String, length_param: In
         .None -> {}
     }
     mapped :: pkg_cbind_map_type(ty, contract, handles, catalog)
-    if mapped != None -> return Ok(mapped ?? "")
+    if mapped != None -> return Ok(mapped)
     single :: pkg_cbind_map_single_pointer(ty, p, idx, contract, handles, catalog)
-    if single != None -> return Ok(single ?? "")
+    if single != None -> return Ok(single)
     reason :: handles.unresolved_reason_for_type(ty) ?? "type `{ty.trim()}` isn't bindable"
     Err(CBindingSkip{reason: reason})
 }
@@ -95,18 +95,18 @@ fn pkg_cbind_render_param_type(p: CProto, idx: Int, ty: String, length_param: In
 // One uncounted C object pointer with its access convention: `const T *` is
 // a Jet read parameter (`T`), a mutable `T *` a write parameter (`&T`).
 // Counted pointers were already lowered to typed list parameters.
-fn pkg_cbind_map_single_pointer(c_type: String, p: CProto, pointer_index: Int, contract: ForeignAbiContract, handles: OpaqueHandleDiscovery, catalog: CTypeCatalog) -> String? Never! {
+fn pkg_cbind_map_single_pointer(c_type: String, p: CProto, pointer_index: Int, contract: ForeignABIContract, handles: OpaqueHandleDiscovery, catalog: CTypeCatalog) -> String? Never! {
     pointer :: pkg_cbind_pointer_base(c_type)
     if pointer.depth != 1 || pkg_cbind_has_companion_count(p, pointer_index, catalog) -> return None
     layout :: catalog.map_layout_type(pointer.base)
-    mapped :: if layout != None -> layout ?? "" else -> pkg_cbind_map_type(pointer.base, contract, handles, catalog) ?? return None
+    mapped :: if layout != None -> layout else -> pkg_cbind_map_type(pointer.base, contract, handles, catalog) ?? return None
     if mapped == "String" -> return None
     if pkg_cbind_pointer_is_const(c_type) -> return Val(mapped)
     Val("&{mapped}")
 }
 
 // A C return type as a Jet type, `None` for `void`, or the skip reason.
-fn pkg_cbind_map_return_type(c_type: String, contract: ForeignAbiContract, handles: OpaqueHandleDiscovery, catalog: CTypeCatalog) -> String? CBindingSkip! {
+fn pkg_cbind_map_return_type(c_type: String, contract: ForeignABIContract, handles: OpaqueHandleDiscovery, catalog: CTypeCatalog) -> String? CBindingSkip! {
     if pkg_cbind_normalize_type(c_type) == "void" -> return Ok(None)
     if pkg_cbind_map_type(c_type, contract, handles, catalog) == {
         .Val(mapped) -> Ok(Val(mapped))
@@ -155,7 +155,7 @@ fn pkg_cbind_native_void_pointer_proto(p: CProto) -> Bool Never! {
 }
 
 // A C type as a Jet FFI type, or nothing outside the bound subset.
-fn pkg_cbind_map_type(c_type: String, contract: ForeignAbiContract, handles: OpaqueHandleDiscovery, catalog: CTypeCatalog) -> String? Never! {
+fn pkg_cbind_map_type(c_type: String, contract: ForeignABIContract, handles: OpaqueHandleDiscovery, catalog: CTypeCatalog) -> String? Never! {
     callback :: catalog.map_callback_alias(c_type)
     if callback != None -> return callback
     if handles.handle_for_type(c_type) == {
@@ -183,5 +183,5 @@ fn pkg_cbind_map_type(c_type: String, contract: ForeignAbiContract, handles: Opa
 
 // A C symbol as a quoted Jet string literal.
 fn pkg_cbind_quote(value: String) -> String Never! {
-    pkg_json_render(DataTree.Text(value))
+    pkg_json_render(DataTree.Text(~value))
 }

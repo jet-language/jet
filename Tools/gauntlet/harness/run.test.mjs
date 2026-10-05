@@ -11,7 +11,7 @@ import { promisify } from "node:util";
 
 import { probeAxisTools, stageEntry } from "./run.mjs";
 
-const scratchRoot = path.join(os.homedir(), ".cache", "jet-test-scratch");
+const scratchRoot = path.join(os.homedir(), ".cache", "jet-dev", "scratch");
 const execFileAsync = promisify(execFile);
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const parallelGrepDir = path.join(repoRoot, "Tools", "gauntlet", "entries", "parallel-grep", "jet");

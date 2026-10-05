@@ -7,7 +7,7 @@
 // builder unrelated or stale sources.
 
 // The markers that identify a Jet source root; all of them must exist.
-@SOURCE_ROOT_MARKERS :: [String]{"crates/jet-foundation/Cargo.toml", "Core", "Compiler"}
+SOURCE_ROOT_MARKERS :: prep { [String]{"crates/jet-foundation/Cargo.toml", "Core", "Compiler"} }
 
 pub fn foundation_jet_source_root() -[FS, Env]> String IOError! {
     executable :: sys.executable()
@@ -23,7 +23,7 @@ pub fn foundation_jet_source_root() -[FS, Env]> String IOError! {
 }
 
 fn foundation_is_jet_source_root(directory: String) -[FS]> Bool Never! {
-    loop marker in @SOURCE_ROOT_MARKERS {
+    loop marker in SOURCE_ROOT_MARKERS {
         if !files.exists(files.join(directory, marker)) -> return false
     }
     true

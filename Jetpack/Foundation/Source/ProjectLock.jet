@@ -11,10 +11,10 @@
 // the visible, never-unlinked name a probe inspects. File contents, PID
 // reuse, timestamps and path existence are never liveness evidence.
 
-@RUNTIME_LOCK_DIR :: ".locks"
+RUNTIME_LOCK_DIR :: prep { ".locks" }
 // Rust LOCK_WAIT: a contended acquire gives up after 30 seconds.
-@RUNTIME_LOCK_WAIT_SECONDS :: 30
-@RUNTIME_LOCK_MARKER_MODE :: 0o600
+RUNTIME_LOCK_WAIT_SECONDS :: prep { 30 }
+RUNTIME_LOCK_MARKER_MODE :: prep { 0o600 }
 
 // Kernel state of one persistent lock inode.
 pub enum RuntimeLockState {
@@ -50,7 +50,7 @@ impl RuntimeLock.Close {
 
 // Rust `lock_path_for_scope`.
 pub fn env_lock_path_for_scope(root: String, scope: String) -> String Never! {
-    files.join(files.join(root, @RUNTIME_LOCK_DIR), "{env_lock_sanitize_scope(scope)}.lock")
+    files.join(files.join(root, RUNTIME_LOCK_DIR), "{env_lock_sanitize_scope(scope)}.lock")
 }
 
 // ASCII letters, digits, `-` and `_` survive; every other scalar becomes `_`.
@@ -80,7 +80,7 @@ fn env_lock_invalid_input(path: String, cause: String) -> IOError Never! {
 
 // Rust `acquire_lock`: wait up to 30 seconds for the root's lock domain.
 pub fn env_acquire_lock(root: String, scope: String) -[FS, Env]> RuntimeLock IOError! {
-    env_acquire_lock_waiting(root, scope, time.duration_seconds(@RUNTIME_LOCK_WAIT_SECONDS))
+    env_acquire_lock_waiting(root, scope, time.duration_seconds(RUNTIME_LOCK_WAIT_SECONDS))
 }
 
 // Rust `try_acquire_lock`: claim for recovery without waiting behind a live
@@ -118,9 +118,9 @@ pub fn env_acquire_lease_lock(root: String, scope: String) -[FS, Env]> RuntimeLo
 // Create `<root>/.locks` and the scope marker (mode 0600, never through a
 // final link). An existing marker must be a regular file.
 fn env_lock_open_scope(root: String, scope: String) -[FS, Env]> String IOError! {
-    files.create_dir_all(files.join(root, @RUNTIME_LOCK_DIR))
+    files.create_dir_all(files.join(root, RUNTIME_LOCK_DIR))
     path :: env_lock_path_for_scope(root, scope)
-    if files.create(path, if_exists: .Refuse, mode: Val(@RUNTIME_LOCK_MARKER_MODE), links: .Refuse) == {
+    if files.create(path, if_exists: .Refuse, mode: Val(RUNTIME_LOCK_MARKER_MODE), links: .Refuse) == {
         .Ok(_) -> {}
         .Err(error) -> {
             if error == {
@@ -157,7 +157,6 @@ fn env_lock_validate_marker(marker: FileReader, path: String) IOError! -[FS]> {
     if !at_path.is_file || at_path.is_symlink || !held.is_file || at_path.id != held.id {
         return Err(env_lock_io_error(path, "jetpack lock ownership path `{path}` changed"))
     }
-    Ok()
 }
 
 // Rust `lock_state`: probe the kernel lock behind one marker. An absent
@@ -190,7 +189,7 @@ pub fn env_runtime_lock(root: String, scope: String) -[FS, Env]> RuntimeLock IOE
 
 // Rust `with_project_lock`: the project's managed `.jet` directory.
 pub fn env_runtime_project_lock(project: String, scope: String) -[FS, Env]> RuntimeLock IOError! {
-    env_runtime_lock(files.join(project, @SOURCE_ROOT_DIR), scope)
+    env_runtime_lock(files.join(project, SOURCE_ROOT_DIR), scope)
 }
 
 // One nested lock claim. `lock` is None when an outer claim of the same
@@ -227,7 +226,7 @@ pub struct RuntimeLockSession {
         at := self.held_roots.len() - 1
         loop at >= 0 {
             if self.held_roots[at] == guard.root {
-                _ :: self.held_roots.remove(at)
+                _ :: &self.held_roots.remove(at, .Slot)
                 break
             }
             at -= 1

@@ -9,7 +9,7 @@ candidate/plain pair that D-CORE-JSON-SELECT1 needs be measured honestly tonight
 
 ## Method
 
-- Probe `~/.cache/jet-test-scratch/Closer12/json/projection.jet`: a `#Codable Record` with `#Rename`,
+- Probe `~/.cache/jet-dev/scratch/Closer12/json/projection.jet`: a `#Codable Record` with `#Rename`,
   `#Skip`, an exact big Int (2^70), a nested object, an array and a 64-byte unselected blob. It is
   encoded whole with `json.to_string` and through the plain arm, a hand DTO `Selected` for
   `/count`, `/wire_name` and `/nested/depth`. It ran through `tiers.sh` (`jet run`, `--interpret`, AOT build+exec).

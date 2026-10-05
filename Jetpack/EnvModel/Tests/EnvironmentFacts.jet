@@ -29,7 +29,7 @@ fn envmodel_test_languages_error(value: CtValue) -> String {
 }
 
 fn envmodel_test_lang(fields: [NamedCtValue]) -> CtValue {
-    CtValue.Struct("Lang", fields)
+    CtValue.Struct{type_name: "Lang", fields: fields}
 }
 
 fn envmodel_test_field(name: String, value: CtValue) -> NamedCtValue {
@@ -107,12 +107,12 @@ fn envmodel_test_snapshot_refused(root: String, relative: String) -[FS]> Bool {
 
 #Test("package profile resolver handles its full depth budget iteratively") {
     set := PackageProfileSet{}
-    loop index in 0..<@ENVMODEL_MAX_RESOLVER_NODES {
+    loop index in 0..<ENVMODEL_MAX_RESOLVER_NODES {
         extends :: if index > 0 -> [String]{"profile-{index - 1}"} else -> [String]{}
         &set.insert_checked(PackageProfileSpec{name: "profile-{index}", extends: extends}) ?? panic("the resolver budget must admit its declared limit")
     }
-    resolved :: set.resolve("profile-{@ENVMODEL_MAX_RESOLVER_NODES - 1}") ?? panic("the deepest profile resolves")
-    assert_eq(resolved.applied.len(), @ENVMODEL_MAX_RESOLVER_NODES)
+    resolved :: set.resolve("profile-{ENVMODEL_MAX_RESOLVER_NODES - 1}") ?? panic("the deepest profile resolves")
+    assert_eq(resolved.applied.len(), ENVMODEL_MAX_RESOLVER_NODES)
     if &set.insert_checked(PackageProfileSpec{name: "profile-overflow"}) == {
         .Ok(_) -> panic("the resolver must fail closed above its scale budget")
         .Err(error) -> assert(error.message().contains("100000"))
@@ -331,18 +331,18 @@ fn envmodel_test_snapshot_refused(root: String, relative: String) -[FS]> Bool {
 }
 
 #Test("typed language map preserves options and expands enabled tools") {
-    value :: CtValue.Map([CtMapEntry]{
-        CtMapEntry{key: CtKey.Str("python"), value: envmodel_test_lang([NamedCtValue]{
-            envmodel_test_field("enable", CtValue.Bool(false)),
-            envmodel_test_field("venv", CtValue.Bool(true))
+    value :: CtValue.Map{entries: [CtMapEntry]{
+        CtMapEntry{key: CtKey.Str{value: "python"}, value: envmodel_test_lang([NamedCtValue]{
+            envmodel_test_field("enable", CtValue.Bool{value: false}),
+            envmodel_test_field("venv", CtValue.Bool{value: true})
         })},
-        CtMapEntry{key: CtKey.Str("rust"), value: envmodel_test_lang([NamedCtValue]{
-            envmodel_test_field("enable", CtValue.Bool(true)),
-            envmodel_test_field("channel", CtValue.Enum("Channel", "Stable", [CtEnumArg]{})),
-            envmodel_test_field("version", CtValue.Str("1.78")),
-            envmodel_test_field("extra", CtValue.List([CtValue]{CtValue.Str("rust-analyzer@nixpkgs")}))
+        CtMapEntry{key: CtKey.Str{value: "rust"}, value: envmodel_test_lang([NamedCtValue]{
+            envmodel_test_field("enable", CtValue.Bool{value: true}),
+            envmodel_test_field("channel", CtValue.Enum{type_name: "Channel", variant: "Stable", args: [CtEnumArg]{}}),
+            envmodel_test_field("version", CtValue.Str{value: "1.78"}),
+            envmodel_test_field("extra", CtValue.List{values: [CtValue]{CtValue.Str{value: "rust-analyzer@nixpkgs"}}})
         })}
-    })
+    }}
     selections :: envmodel_languages_from_value(value) ?? panic("typed language map reads")
     assert_eq(selections.len(), 2)
     rust := LanguageSpec{}
@@ -392,29 +392,29 @@ fn envmodel_test_snapshot_refused(root: String, relative: String) -[FS]> Bool {
 }
 
 #Test("typed language records reject unknown and malformed fields") {
-    unknown :: CtValue.Map([CtMapEntry]{
-        CtMapEntry{key: CtKey.Str("rust"), value: envmodel_test_lang([NamedCtValue]{
-            envmodel_test_field("enable", CtValue.Bool(true)),
-            envmodel_test_field("surprise", CtValue.Bool(true))
+    unknown :: CtValue.Map{entries: [CtMapEntry]{
+        CtMapEntry{key: CtKey.Str{value: "rust"}, value: envmodel_test_lang([NamedCtValue]{
+            envmodel_test_field("enable", CtValue.Bool{value: true}),
+            envmodel_test_field("surprise", CtValue.Bool{value: true})
         })}
-    })
+    }}
     assert(envmodel_test_languages_error(unknown).contains("unknown language selection field"))
-    malformed :: CtValue.Map([CtMapEntry]{
-        CtMapEntry{key: CtKey.Str("rust"), value: envmodel_test_lang([NamedCtValue]{
-            envmodel_test_field("enable", CtValue.Str("yes"))
+    malformed :: CtValue.Map{entries: [CtMapEntry]{
+        CtMapEntry{key: CtKey.Str{value: "rust"}, value: envmodel_test_lang([NamedCtValue]{
+            envmodel_test_field("enable", CtValue.Str{value: "yes"})
         })}
-    })
+    }}
     assert(envmodel_test_languages_error(malformed).contains("Lang.enable must be Bool"))
 }
 
 #Test("git hooks path is typed project relative and fingerprinted") {
     lifecycle := EnvironmentLifecycle{}
-    applied :: envmodel_lifecycle_from_field(&lifecycle, @ENV_FIELD_GIT_HOOKS_PATH, CtValue.Str("scripts/githooks")) ?? panic("git hooks path reads")
+    applied :: envmodel_lifecycle_from_field(&lifecycle, ENV_FIELD_GIT_HOOKS_PATH, CtValue.Str{value: "scripts/githooks"}) ?? panic("git hooks path reads")
     assert(applied)
     assert_eq(lifecycle.git_hooks_path, Val("scripts/githooks"))
     assert(lifecycle.fingerprint().contains("git-hooks-path\tscripts/githooks\n"))
     outside := EnvironmentLifecycle{}
-    rejected :: if envmodel_lifecycle_from_field(&outside, @ENV_FIELD_GIT_HOOKS_PATH, CtValue.Str("../outside")) == {
+    rejected :: if envmodel_lifecycle_from_field(&outside, ENV_FIELD_GIT_HOOKS_PATH, CtValue.Str{value: "../outside"}) == {
         .Ok(_) -> false
         .Err(_) -> true
     }

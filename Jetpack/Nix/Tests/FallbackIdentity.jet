@@ -2,14 +2,14 @@
 // crates/jetpack/src/NixIdentity.rs. Each claim works in its own scratch
 // directory and removes it.
 
-@NIX_TEST_FALLBACK_REVISION :: "b5aa0fbd538984f6e3d201be0005b4463d8b09f8"
+NIX_TEST_FALLBACK_REVISION :: prep { "b5aa0fbd538984f6e3d201be0005b4463d8b09f8" }
 
 fn nix_test_fallback_root(label: String) -[FS]> String {
     files.tmpdir("jetpack-nix-fallback-{label}-") ?? panic("scratch directory")
 }
 
 fn nix_test_write_project(root: String, exact: String) -[FS]> {
-    managed :: files.join(root, @SOURCE_ROOT_DIR)
+    managed :: files.join(root, SOURCE_ROOT_DIR)
     files.create_dir_all(managed) ?? panic("managed directory")
     files.write(files.join(managed, "lock"), "version = 1\n\n[[source_channel]]\nname = \"nixpkgs\"\nchannel = \"nixpkgs-unstable\"\nexact = \"{exact}\"\n\n[root]\ndependencies = []\n") ?? panic("project lock")
 }
@@ -19,7 +19,7 @@ fn nix_test_fallback_observed(root: String) -[FS, Env]> NixFallbackIdentity {
     files.write(executable, "nix-test-binary") ?? panic("test executable")
     files.set_mode(executable, 0o755) ?? panic("executable mode")
     canonical :: files.canonicalize(executable) ?? panic("canonical executable")
-    NixFallbackIdentity.from_observed(canonical, pkg_sha256_hex("nix-test-binary".bytes()), "2.35.2", @NIX_TEST_FALLBACK_REVISION, "x86_64-linux", [String]{"ripgrep"}, nix_test_repeat("a", 64)) ?? panic("observed identity")
+    NixFallbackIdentity.from_observed(canonical, pkg_sha256_hex("nix-test-binary".bytes()), "2.35.2", NIX_TEST_FALLBACK_REVISION, "x86_64-linux", [String]{"ripgrep"}, nix_test_repeat("a", 64)) ?? panic("observed identity")
 }
 
 fn nix_test_repeat(text: String, count: Int) -> String {
@@ -38,7 +38,7 @@ fn nix_test_request_refused(identity: NixFallbackIdentity, input: String, system
 #Test("nix fallback identity contains every exact input") {
     root :: nix_test_fallback_root("identity")
     identity :: nix_test_fallback_observed(root)
-    assert_eq(identity.locked_nixpkgs_input(), "{@NIX_LOCKED_NIXPKGS_PREFIX}{@NIX_TEST_FALLBACK_REVISION}")
+    assert_eq(identity.locked_nixpkgs_input(), "{NIX_LOCKED_NIXPKGS_PREFIX}{NIX_TEST_FALLBACK_REVISION}")
     assert_eq(identity.attrpath(), "ripgrep")
     provenance :: identity.provenance()
     round_trip :: NixFallbackIdentity.from_provenance(provenance) ?? panic("provenance round trip")
@@ -83,14 +83,14 @@ fn nix_test_request_refused(identity: NixFallbackIdentity, input: String, system
 #Test("nix project binding reads version from the bound executable") {
     if sys.family() == "windows" -> return
     root :: nix_test_fallback_root("bound")
-    nix_test_write_project(root, "{@NIX_LOCKED_NIXPKGS_PREFIX}{@NIX_TEST_FALLBACK_REVISION}")
+    nix_test_write_project(root, "{NIX_LOCKED_NIXPKGS_PREFIX}{NIX_TEST_FALLBACK_REVISION}")
     executable :: files.join(root, "nix")
     files.write(executable, "#!/bin/sh\nprintf 'nix (Nix) 2.35.2\\n'") ?? panic("test executable")
     files.set_mode(executable, 0o755) ?? panic("executable mode")
     identity :: NixFallbackIdentity.from_project(root, "nixpkgs", executable, "x86_64-linux", [String]{"ripgrep"}) ?? panic("bound identity")
     assert_eq(identity.version, "2.35.2")
-    assert_eq(identity.nixpkgs_revision, @NIX_TEST_FALLBACK_REVISION)
+    assert_eq(identity.nixpkgs_revision, NIX_TEST_FALLBACK_REVISION)
     assert_eq(identity.attrpath(), "ripgrep")
-    assert_eq(identity.locked_nixpkgs_input(), "{@NIX_LOCKED_NIXPKGS_PREFIX}{@NIX_TEST_FALLBACK_REVISION}")
+    assert_eq(identity.locked_nixpkgs_input(), "{NIX_LOCKED_NIXPKGS_PREFIX}{NIX_TEST_FALLBACK_REVISION}")
     files.remove_all(root) ?? panic("scratch cleanup")
 }

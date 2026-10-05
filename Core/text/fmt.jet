@@ -1,3 +1,4 @@
+use core.math as math
 use core.text as unicode
 use core.math as math
 // core.text.fmt — deterministic number, quantity, and display formatting.
@@ -71,22 +72,44 @@ pub fn sci(n: Float, frac: Int) -> String Never! {
 /// `[:]` and `[redacted]` are returned unchanged.
 pub fn pretty(value: String) -> String Never! { pretty_fragment(value.trim(), 0) }
 
-/// SI units (1000), one decimal below 10 and rounded at or above 10.
-pub fn bytes(n: Int) -> String Never! {
+/// Decimal byte display (1000-based), with the unit selected before rounding.
+pub fn bytes(n: Int) -> String Never! { bytes_scaled(n, 1000) }
+
+/// Binary byte display (1024-based), with the same signed rounding rules.
+pub fn bytes_binary(n: Int) -> String Never! { bytes_scaled(n, 1024) }
+
+fn bytes_scaled(n: Int, base: Int) -> String Never! {
+    value :: abs_int(n)
+    if value < base -> return "{n} B"
     sign :: if n < 0 -> "-" else -> ""
-    units :: ["B", "KB", "MB", "GB", "TB", "PB", "EB"]
-    size := Float{abs_int(n)}
-    unit := 0
-    loop size >= 1000.0 && unit + 1 < units.len() {
-        size /= 1000.0
-        unit += 1
+    divisor := base
+    unit := 1
+    loop unit < 6 && value >= divisor * base {
+        divisor = divisor * base
+        unit = unit + 1
     }
-    shown :: if {
-        unit == 0 -> "{abs_int(n)}"
-        size >= 10.0 -> "{math.round(size)}"
-        else -> trim_point_zero(float_fixed(size, 1))
+    suffix := if base == 1000 -> "kB" else -> "KiB"
+    if unit == 2 -> suffix = if base == 1000 -> "MB" else -> "MiB"
+    if unit == 3 -> suffix = if base == 1000 -> "GB" else -> "GiB"
+    if unit == 4 -> suffix = if base == 1000 -> "TB" else -> "TiB"
+    if unit == 5 -> suffix = if base == 1000 -> "PB" else -> "PiB"
+    if unit == 6 -> suffix = if base == 1000 -> "EB" else -> "EiB"
+    if value >= divisor * 10 {
+        rounded := value /% divisor
+        if (value % divisor) * 2 >= divisor -> rounded = rounded + 1
+        return "{sign}{rounded} {suffix}"
     }
-    "{sign}{shown} {units[unit]}"
+    // One fractional digit uses ties-to-even; whole units use half-away.
+    scaled :: value * 10
+    tenths := scaled /% divisor
+    remainder :: scaled % divisor
+    if remainder * 2 > divisor || (remainder * 2 == divisor && tenths % 2 != 0) {
+        tenths = tenths + 1
+    }
+    whole :: tenths /% 10
+    digit :: tenths % 10
+    if digit == 0 -> return "{sign}{whole} {suffix}"
+    "{sign}{whole}.{digit} {suffix}"
 }
 
 /// `n` is milliseconds. Composite output is bounded to three non-zero units.

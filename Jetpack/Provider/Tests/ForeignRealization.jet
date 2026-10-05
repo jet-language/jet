@@ -18,24 +18,25 @@ fn provider_foreign_test_write_binding(root: String, name: String) -[FS]> String
     source
 }
 
-fn provider_foreign_test_projection_error(root: String, name: String) -[FS, Env, Time]> ProviderError {
+fn provider_foreign_test_projection_error(verification: &StoreVerification, root: String, name: String) -[FS, Env, Time]> ProviderError {
     store_root :: files.join(root, "store")
     roots :: HangarRoots.at(store_root)
     ctx :: ProviderCtx{fixtures: None, store_dir: store_root, offline: true, project_dir: None, nix_index: None, nix_roots: None, allow_local_nix_catalog: false}
-    if provider_realize_foreign_one(roots, root, name, ForeignLanguage.Py, "./provider#version=1.0.0", ctx) == {
+    if provider_realize_foreign_one(&verification, roots, root, name, ForeignLanguage.Py, "./provider#version=1.0.0", ctx) == {
         .Ok(_) -> panic("the foreign projection must fail")
         .Err(error) -> error
     }
 }
 
 #Test("foreign realization rejects recursive symlink as foreign projection error") {
+    verification := StoreVerification.new()
     if sys.is_windows() -> return
     root :: provider_foreign_test_root("symlink")
     source :: provider_foreign_test_write_binding(root, "hostile")
     files.create_dir_all(files.join(source, "visible")) ?? panic("visible")
     files.write(files.join(source, "visible/value"), "stable\n") ?? panic("value")
     files.symlink(".", files.join(source, "visible/loop")) ?? panic("symlink")
-    if provider_foreign_test_projection_error(root, "hostile") == {
+    if provider_foreign_test_projection_error(&verification, root, "hostile") == {
         .ForeignProjection(reason) -> {
             assert(reason.contains("source tree"))
             assert(reason.contains("could not be hashed"))
@@ -48,14 +49,15 @@ fn provider_foreign_test_projection_error(root: String, name: String) -[FS, Env,
 }
 
 #Test("foreign realization rejects oversized recursive source as foreign projection error") {
+    verification := StoreVerification.new()
     root :: provider_foreign_test_root("depth")
     current := provider_foreign_test_write_binding(root, "hostile")
-    loop index in 0..<@MAX_TREE_DEPTH + 2 {
+    loop index in 0..<MAX_TREE_DEPTH + 2 {
         current = files.join(current, "d{index}")
         files.create_dir(current) ?? panic("nested directory")
     }
     files.write(files.join(current, "payload"), "stable\n") ?? panic("payload")
-    if provider_foreign_test_projection_error(root, "hostile") == {
+    if provider_foreign_test_projection_error(&verification, root, "hostile") == {
         .ForeignProjection(reason) -> {
             assert(reason.contains("source tree"))
             assert(reason.contains("could not be hashed"))

@@ -95,7 +95,7 @@ The implementation deliberately throws on the negative path and on a rejected ca
 
 ### Prototype commands and observations
 
-All repository commands below were run through `scripts/agent/jet-env`; scratch files are under `$HOME/.cache/jet-test-scratch/cpp-interop-2901`.
+All repository commands below were run through `scripts/agent/jet-env`; scratch files are under `$HOME/.cache/jet-dev/scratch/cpp-interop-2901`.
 
 **Native C++ archive.** The fixture was compiled as C++17 for the selected target and archived:
 
@@ -141,7 +141,7 @@ The generated projection records `CppError`, `#SingleUse` `Counter`, consuming `
 
 #### Generated projection
 
-The captured generated file is `$HOME/.cache/jet-test-scratch/cpp-interop-2901/.jet/bindings/cpp/counter.jet` in the scratch evidence, with these relevant lines:
+The captured generated file is `$HOME/.cache/jet-dev/scratch/cpp-interop-2901/.jet/bindings/cpp/counter.jet` in the scratch evidence, with these relevant lines:
 
 ```jet
 pub enum CppError { Exception InvalidHandle ResourceLimit }

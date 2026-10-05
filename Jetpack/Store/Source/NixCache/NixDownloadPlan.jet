@@ -5,8 +5,8 @@
 // signed metadata to open the dependency frontier immediately; a rejected
 // plan still acquires no payload.
 
-@STORE_NIX_INT_MAX :: 9223372036854775807
-@STORE_NIX_THROUGHPUT_CONFIG :: "config/nix-cache-v1.throughput"
+STORE_NIX_INT_MAX :: prep { 9223372036854775807 }
+STORE_NIX_THROUGHPUT_CONFIG :: prep { "config/nix-cache-v1.throughput" }
 
 pub enum NixPlanState {
     New
@@ -68,11 +68,10 @@ fn store_nix_expand_planned_closure(queue: &Rank<String>, scheduled: &Rank<Strin
             }
         }
     }
-    Ok()
 }
 
 fn store_nix_checked_add(left: Int, right: Int, overflow: String) -> Int NixCacheError! {
-    if right > 0 && left > @STORE_NIX_INT_MAX - right -> return Err(NixCacheError.new(.Metadata, overflow))
+    if right > 0 && left > STORE_NIX_INT_MAX - right -> return Err(NixCacheError.new(.Metadata, overflow))
     Ok(left + right)
 }
 
@@ -90,11 +89,11 @@ fn store_nix_take_wave(queue: &Rank<String>, limit: Int) -> [String] Never! {
 // Resolve and verify closure metadata without downloading or publishing any
 // NAR. Rust fans each wave out over OS threads; the cooperative port walks the
 // same waves in the same sorted order, so results and first failures agree.
-pub fn store_plan_nix_downloads(roots: HangarRoots, store_paths: [String], offline: Bool, progress: ProgressHandle?) -[FS, Net, Time, Time.Wait]> NixDownloadPlan NixCacheError! {
+pub fn store_plan_nix_downloads(verification: &StoreVerification, roots: HangarRoots, store_paths: [String], offline: Bool, progress: ProgressHandle?) -[IO, FS, Net, Env, Time, Time.Wait]> NixDownloadPlan NixCacheError! {
     endpoint :: CacheEndpoint.from_roots(roots)
     store_dir := "/nix/store"
     cache_info_loaded := offline
-    existing_entries :: store_nix_entries_by_store_path(store_list_checked(roots))
+    existing_entries :: store_nix_entries_by_store_path(store_list_checked(&verification, roots))
     queue := Rank<String>.new()
     loop store_path in store_paths {
         store_nix_validate_store_path(store_path, store_dir)
@@ -108,10 +107,10 @@ pub fn store_plan_nix_downloads(roots: HangarRoots, store_paths: [String], offli
     store_nix_progress_objects(progress, 0, scheduled.len())
 
     loop queue.len() > 0 {
-        wave :: store_nix_take_wave(&queue, @STORE_NIX_MAX_PARALLEL_METADATA_FETCHES)
+        wave :: store_nix_take_wave(&queue, STORE_NIX_MAX_PARALLEL_METADATA_FETCHES)
         pending := [String]{}
         loop store_path in wave {
-            if store_nix_existing_object(roots, existing_entries, store_path, store_dir) == {
+            if store_nix_existing_object(&verification, roots, existing_entries, store_path, store_dir) == {
                 .Val(existing) -> {
                     plan.cached = store_nix_checked_add(plan.cached, 1, "Nix closure cached package count overflowed")
                     plan.disk_bytes = store_nix_checked_add(plan.disk_bytes, existing.unpacked_bytes, "Nix closure on-disk size overflowed")
@@ -139,7 +138,7 @@ pub fn store_plan_nix_downloads(roots: HangarRoots, store_paths: [String], offli
         // Successful lookups are handled in path order before the first
         // failure, as Rust sorts joined results Ok-first.
         fetched := [String: FetchedInfo]{}
-        first_error := None
+        first_error := NixCacheError?{None}
         loop store_path in pending {
             lookup :: endpoint.narinfo(store_path, store_dir) ?? {
                 if first_error == None -> first_error = Val(err)
@@ -187,12 +186,12 @@ pub fn store_plan_nix_downloads(roots: HangarRoots, store_paths: [String], offli
 // Whole seconds to download `bytes` at `rate` bytes/second, rounded up.
 fn store_nix_estimated_seconds(bytes: Int, rate: Int?) -> Int? Never! {
     per_second :: rate ?? return None
-    if bytes > @STORE_NIX_INT_MAX - (per_second - 1) -> return None
+    if bytes > STORE_NIX_INT_MAX - (per_second - 1) -> return None
     Val((bytes + per_second - 1) /% per_second)
 }
 
 fn store_nix_throughput_path(roots: HangarRoots) -> String Never! {
-    files.join(roots.root, @STORE_NIX_THROUGHPUT_CONFIG)
+    files.join(roots.root, STORE_NIX_THROUGHPUT_CONFIG)
 }
 
 // Bytes per second from the last admission, when a sane value is recorded.

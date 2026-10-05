@@ -3,11 +3,11 @@
 // tag/attribute scanner. Namespaces beyond the POM's own and entity decoding
 // beyond the five predefined entities are refused, not guessed.
 
-@MAVEN_POM_NAMESPACE :: "http://maven.apache.org/POM/4.0.0"
-@MAVEN_XML_SCHEMA_NAMESPACE :: "http://www.w3.org/2001/XMLSchema-instance"
+MAVEN_POM_NAMESPACE :: prep { "http://maven.apache.org/POM/4.0.0" }
+MAVEN_XML_SCHEMA_NAMESPACE :: prep { "http://www.w3.org/2001/XMLSchema-instance" }
 
 // One XML opening (or closing) tag found in a document.
-struct XmlOpening {
+struct XMLOpening {
     start: Int
     end: Int
     text: String
@@ -247,13 +247,13 @@ fn provider_maven_xml_loss(document: String) -> String? Never! {
                 if name != "project" -> return Val("Maven POM has no project root element")
                 if provider_xml_attribute(opening, "xmlns") == {
                     .Val(namespace) -> {
-                        if namespace != @MAVEN_POM_NAMESPACE -> return Val("Maven POM uses unsupported XML namespace `{namespace}`")
+                        if namespace != MAVEN_POM_NAMESPACE -> return Val("Maven POM uses unsupported XML namespace `{namespace}`")
                     }
                     .None -> {}
                 }
                 if provider_xml_attribute(opening, "xmlns:xsi") == {
                     .Val(namespace) -> {
-                        if namespace != @MAVEN_XML_SCHEMA_NAMESPACE -> return Val("Maven POM uses unsupported XML namespace `{namespace}`")
+                        if namespace != MAVEN_XML_SCHEMA_NAMESPACE -> return Val("Maven POM uses unsupported XML namespace `{namespace}`")
                     }
                     .None -> {}
                 }
@@ -315,10 +315,10 @@ fn provider_xml_opening_name(opening: String) -> String Never! {
 }
 
 // Every `<element` opening followed by whitespace, `>`, or `/`.
-fn provider_xml_openings(document: String, element: String) -> [XmlOpening] Never! {
+fn provider_xml_openings(document: String, element: String) -> [XMLOpening] Never! {
     bytes :: document.bytes()
     needle :: "<{element}".bytes()
-    openings := [XmlOpening]{}
+    openings := [XMLOpening]{}
     cursor := 0
     loop cursor < bytes.len() {
         start :: provider_find(bytes, needle, cursor, bytes.len())
@@ -331,7 +331,7 @@ fn provider_xml_openings(document: String, element: String) -> [XmlOpening] Neve
         }
         end :: provider_xml_opening_end(bytes, start, bytes.len())
         if end < 0 -> break
-        &openings.push(XmlOpening{start: start, end: end, text: pkg_bytes_text(bytes, start, end + 1)})
+        &openings.push(XMLOpening{start: start, end: end, text: pkg_bytes_text(bytes, start, end + 1)})
         cursor = end + 1
     }
     openings

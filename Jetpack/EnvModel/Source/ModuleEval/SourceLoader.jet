@@ -46,7 +46,7 @@ impl FileSystemSourceLoader.SourceLoader {
         entries :: files.list_dir(directory) ?? return Err(envmodel_source_loader_error(directory, "{err}"))
         found := [String]{}
         loop entry in entries {
-            if !entry.name.ends_with(".{@FILE_EXT}") || entry.name == ".{@FILE_EXT}" -> next
+            if !entry.name.ends_with(".{FILE_EXT}") || entry.name == ".{FILE_EXT}" -> next
             canonical :: files.canonicalize(entry.path) ?? return Err(envmodel_source_loader_error(entry.path, "{err}"))
             if !envmodel_path_within(canonical, self.root) || !files.is_file(canonical) {
                 return Err(envmodel_source_loader_error(entry.path, "source import resolves outside the environment root"))
@@ -59,7 +59,7 @@ impl FileSystemSourceLoader.SourceLoader {
     }
 
     fn package_facts(&self) -[FS, Env]> PackageFacts? EnvModelEvalError! {
-        entry_files :: [String]{@DEFAULT_ENTRY_FILE, "src/{@DEFAULT_ENTRY_FILE}"}
+        entry_files :: [String]{DEFAULT_ENTRY_FILE, "src/{DEFAULT_ENTRY_FILE}"}
         loop relative in entry_files {
             path :: files.join(self.root, relative)
             source :: if files.read(path) == {
@@ -188,7 +188,7 @@ fn envmodel_find_dir_arg(directive: Expr) -> String EnvModelEvalError! {
         .Call(call) -> call
         else -> { return Err(envmodel_bad_import_directive(expr_span(directive))) }
     }
-    if call.name != @BUILTIN_FIND || call.args.len() != 1 -> return Err(envmodel_bad_import_directive(expr_span(directive)))
+    if call.name != BUILTIN_FIND || call.args.len() != 1 -> return Err(envmodel_bad_import_directive(expr_span(directive)))
     parts :: if call.args[0].expr == {
         .Str(parts, _) -> parts
         else -> { return Err(envmodel_bad_import_directive(expr_span(directive))) }
@@ -272,8 +272,8 @@ pub fn envmodel_build_source_table(units: [EvalUnit]) -[FS]> SourceTable EnvMode
     merged :: pkg_merge_sources(maps) ?? return Err(envmodel_merge_error_to_diagnostic(err))
     names := merged.keys().to_list()
     &names.sort()
-    declarations := [SourceDecl]{}
-    loop name in names -> { &declarations.push(SourceDecl{name: name, upstream: merged[name], via: kinds.get(name) ?? ProviderKind.Nix}) }
+    declarations := [NamedSourceDecl]{}
+    loop name in names -> { &declarations.push(NamedSourceDecl{name: name, upstream: merged[name], via: kinds.get(name) ?? ProviderKind.Nix}) }
     table := SourceTable.from_decls(declarations)
     loop name in table.declared_names() {
         policy :: policies.get(name) ?? ChannelPolicy.Pinned
@@ -293,7 +293,7 @@ fn envmodel_infer_provider_kind(reference: ProviderRef, base_dir: String) -[FS]>
         .Path -> {
             target :: pkg_split_channel_ref(reference.target).base
             directory :: if files.is_absolute(target) -> target else -> files.join(base_dir, target)
-            if files.is_file(files.join(directory, @PACKAGE_FILE)) || files.is_file(files.join(directory, @PAYLOAD_FILE)) -> ProviderKind.Core else -> ProviderKind.Nix
+            if files.is_file(files.join(directory, PACKAGE_FILE)) || files.is_file(files.join(directory, PAYLOAD_FILE)) -> ProviderKind.Core else -> ProviderKind.Nix
         }
         .Github -> ProviderKind.Infer
         .Cran -> ProviderKind.Cran

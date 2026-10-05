@@ -11,8 +11,8 @@
 // directory renames from D-CORE-FILERENAME1. The Rust reference reached this
 // through openat/mkdirat/renameat/unlinkat FFI.
 
-@PROVIDER_HELD_PRIVATE_MODE :: 0o700
-@PROVIDER_READ_CHUNK_BYTES :: 65536
+PROVIDER_HELD_PRIVATE_MODE :: prep { 0o700 }
+PROVIDER_READ_CHUNK_BYTES :: prep { 65536 }
 
 // Resolve a `core` upstream to a local checkout: `path:` sources in place,
 // the embedded batteries catalog, or a fetched git checkout. For a monorepo
@@ -24,7 +24,7 @@ pub fn provider_source_repo(upstream: String, want_package: String, ctx: Provide
         if files.is_abs(path) -> return Ok(path)
         return Ok(files.join(files.cwd() ?? "", path))
     }
-    if upstream == @BATTERIES_UPSTREAM {
+    if upstream == BATTERIES_UPSTREAM {
         materialized :: env_battery_materialize_package(ctx.store_dir, want_package) ?? return Err(ProviderError.CoreBuild(err.message()))
         return Ok(materialized)
     }
@@ -106,8 +106,8 @@ fn provider_sparse_member_fetch_in(remote: RemoteSource, want_package: String, c
     if target == "" -> return SparseOutcome.NotMonorepo
     wanted := [String]{target}
     all_dirs :: provider_all_tree_dirs(listing)
-    marker := None
-    marker_names :: [String]{@PACKAGE_FILE, @PAYLOAD_FILE}
+    marker := String?{None}
+    marker_names :: [String]{PACKAGE_FILE, PAYLOAD_FILE}
     loop name in marker_names {
         if marker == None -> marker = provider_git_output_in(tmp, [String]{"show", "FETCH_HEAD:{target}/{name}"})
     }
@@ -160,12 +160,12 @@ fn provider_publish_remote_checkout_held(source: HeldDirectoryEntry, cache: Held
     cache.validate_existing() ?? return Err(ProviderReason{message: "{err}"})
     provider_tree_fingerprint_held(source.directory)
     if source.rename_into(cache) == {
-        .Ok(_) -> Ok()
+        .Ok(_) -> {}
         .Err(rename_error) -> {
             destination :: cache.open_or_create_directory() ?? return Err(ProviderReason{message: "{err}"})
             if provider_copy_tree_held(source.directory, destination) == {
-                .Ok(_) -> Ok()
-                .Err(copy_error) -> Err(ProviderReason{message: "rename failed: {rename_error}; checked copy failed: {copy_error.message}"})
+                .Ok(_) -> {}
+                .Err(copy_error) -> return Err(ProviderReason{message: "rename failed: {rename_error}; checked copy failed: {copy_error.message}"})
             }
         }
     }
@@ -298,9 +298,9 @@ pub struct HeldCacheParent {
     // An existing non-directory cache entry must be a singly linked file.
     fn validate_existing(self) IOError! -[FS]> {
         if self.directory.open_directory(self.name) == {
-            .Ok(_) -> Ok()
+            .Ok(_) -> {}
             .Err(error) -> {
-                if store_io_is_not_found(error) -> return Ok()
+                if store_io_is_not_found(error) -> return
                 file :: self.directory.open(self.name) ?? return Err(error)
                 provider_reject_multiply_linked(file.stat())
             }
@@ -352,7 +352,7 @@ pub struct HeldDirectoryEntry {
         loop _ in 0..<16 {
             bytes :: random.bytes(16) ?? return Err(provider_io_error_other(prefix, "operating-system randomness is unavailable"))
             child :: "{prefix}-{pkg_hex_bytes(bytes)}"
-            if parent.create_directory(child, mode: Val(@PROVIDER_HELD_PRIVATE_MODE)) == {
+            if parent.create_directory(child, mode: Val(PROVIDER_HELD_PRIVATE_MODE)) == {
                 .Ok(_) -> return HeldDirectoryEntry.from_child(parent, child)
                 .Err(error) -> {
                     if !store_io_is_already_exists(error) -> return Err(error)
@@ -370,36 +370,16 @@ pub struct HeldDirectoryEntry {
     // Remove this directory tree relative to its held parent (Rust
     // `HeldTempDirectory` drop); best effort.
     fn remove(self) Never! -[FS]> {
-        provider_remove_held_tree(self.parent, self.name).drop("a temporary checkout is swept by later cleanup")
+        foundation_remove_held_tree(self.parent, self.name).drop("a temporary checkout is swept by later cleanup")
     }
 }
 
-fn provider_remove_held_tree(parent: Directory, child: String) IOError! -[FS]> {
-    if parent.open_directory(child) == {
-        .Ok(directory) -> {
-            entries :: directory.list()
-            loop entry in entries -> provider_remove_held_tree(directory, entry.name)
-            parent.remove_directory(child)
-        }
-        .Err(error) -> {
-            if store_io_is_not_found(error) -> return Ok()
-            if parent.remove(child) == {
-                .Ok(_) -> Ok()
-                .Err(remove_error) -> {
-                    if store_io_is_not_found(remove_error) -> return Ok()
-                    Err(remove_error)
-                }
-            }
-        }
-    }
-}
 
 // Multiply linked files could alias bytes outside the checkout.
 fn provider_reject_multiply_linked(info: Stat) IOError! {
     if info.links > 1 {
         return Err(IOError.PermissionDenied(IOContext{operation: .Read, resource: None, os_code: None, cause: Val("multiply linked files are not accepted in a remote checkout")}))
     }
-    Ok()
 }
 
 // The same file object: identity, length, link count, and modification time.
@@ -411,7 +391,7 @@ fn provider_same_file_identity(left: Stat, right: Stat) -> Bool Never! {
 fn provider_read_all(reader: FileReader) -[FS]> [U8] IOError! {
     bytes := [U8]{}
     loop {
-        chunk :: reader.read(@PROVIDER_READ_CHUNK_BYTES)
+        chunk :: reader.read(PROVIDER_READ_CHUNK_BYTES)
         if chunk.len() == 0 -> break
         loop byte in chunk -> &bytes.push(byte)
     }
@@ -495,7 +475,6 @@ fn provider_copy_tree_held(source: Directory, destination: Directory) ProviderRe
             return Err(ProviderReason{message: "refusing non-file in copied package tree: {source_path}"})
         }
     }
-    Ok()
 }
 
 // Copy one regular file through an exclusively created temporary sibling,
@@ -519,7 +498,7 @@ fn provider_copy_held_file(source: Directory, source_name: String, destination: 
     mode :: before.mode & 0o7777
     temporary :: provider_create_temp_file_name(destination, mode)
     if provider_fill_temp_file(reader, before, destination, temporary.name, temporary.writer, mode, destination_name) == {
-        .Ok(_) -> Ok()
+        .Ok(_) -> {}
         .Err(error) -> {
             destination.remove(temporary.name).drop("the failed copy is reported; the temporary file may already be gone")
             Err(error)
@@ -544,7 +523,7 @@ fn provider_create_temp_file_name(destination: Directory, mode: Int) -[FS, Rand]
 
 fn provider_fill_temp_file(reader: FileReader, before: Stat, destination: Directory, temporary: String, writer: FileWriter, mode: Int, destination_name: String) IOError! -[FS]> {
     loop {
-        chunk :: reader.read(@PROVIDER_READ_CHUNK_BYTES)
+        chunk :: reader.read(PROVIDER_READ_CHUNK_BYTES)
         if chunk.len() == 0 -> break
         writer.write_all(chunk)
     }
@@ -558,10 +537,10 @@ fn provider_fill_temp_file(reader: FileReader, before: Stat, destination: Direct
 
 // Create a private child directory; one that already exists is accepted.
 fn provider_create_private_child(parent: Directory, name: String) IOError! -[FS]> {
-    if parent.create_directory(name, mode: Val(@PROVIDER_HELD_PRIVATE_MODE)) == {
-        .Ok(_) -> Ok()
+    if parent.create_directory(name, mode: Val(PROVIDER_HELD_PRIVATE_MODE)) == {
+        .Ok(_) -> {}
         .Err(error) -> {
-            if store_io_is_already_exists(error) -> return Ok()
+            if store_io_is_already_exists(error) -> return
             Err(error)
         }
     }

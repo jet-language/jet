@@ -3,6 +3,8 @@
 // authority resolver, so a root is chosen from checked, revalidated
 // declarations rather than bare path probes. An authority failure is a
 // registered diagnostic; command entry points render it and exit 2.
+// Commands own one declaration cache and share it across root discovery,
+// workspace evaluation, and lock reads/writes for the whole command session.
 
 // A declaration-resolved workspace source and the resolver that opened it.
 pub struct CheckedWorkspaceSource {
@@ -18,7 +20,7 @@ pub struct WorkspaceRootSnapshot {
 
 // Resolve the fixtures dir (explicit flag, env, or none). `--offline` only
 // requires fixtures for Nix-backed refs; core refs use the source cache.
-pub fn cli_fixtures_for(flags: CliFlags) -[Env]> String? Never! {
+pub fn cli_fixtures_for(flags: CLIFlags) -[Env]> String? Never! {
     provider_fixtures_from_env(flags.fixtures)
 }
 
@@ -28,13 +30,13 @@ pub fn cli_current_dir() -[FS, Env]> String Never! {
 }
 
 // Render one authority diagnostic against `workspace.jet` and exit 2.
-pub fn cli_report_authority_error(diagnostic: Diagnostic) -[IO, Exec]> Never {
-    terminal_write_output(diagnostics_render_all(@WORKSPACE_FILE, "", [Diagnostic]{diagnostic}))
-    process.exit(@EXIT_USAGE)
+pub fn cli_report_authority_error(diagnostic: Diagnostic) -[IO, Exec, Time.Wait]> Never {
+    terminal_write_output(diagnostics_render_all(WORKSPACE_FILE, "", [Diagnostic]{diagnostic}))
+    process.exit(EXIT_USAGE)
 }
 
 // The CLI diagnostic a failed discovery carries.
-fn cli_discovery_diagnostic(error: CliError) -> Diagnostic Never! {
+fn cli_discovery_diagnostic(error: CLIError) -> Diagnostic Never! {
     if error == {
         .Diagnostic(diagnostic) -> diagnostic
         else -> diagnostic_from_registry("E1340", None, "couldn't discover the project root", error.message(), "repair the project authority files and retry")
@@ -43,8 +45,8 @@ fn cli_discovery_diagnostic(error: CliError) -> Diagnostic Never! {
 
 // The nearest Package, environment, or workspace root for a command run
 // below a project directory; `start` when none declares a project.
-pub fn cli_project_root(start: String) -[IO, FS, Env, Exec]> String Never! {
-    if cli_nearest_project_root(start) == {
+pub fn cli_project_root(cache: &WorkspaceDeclarationCache, start: String) -[IO, FS, Env, Exec, Time.Wait]> String Never! {
+    if cli_nearest_project_root(&cache, start) == {
         .Ok(found) -> found ?? start
         .Err(error) -> cli_report_authority_error(cli_discovery_diagnostic(error))
     }
@@ -52,8 +54,8 @@ pub fn cli_project_root(start: String) -[IO, FS, Env, Exec]> String Never! {
 
 // The nearest workspace declaration, so a package inside a monorepo still
 // sees the monorepo's member index.
-pub fn cli_workspace_root(start: String) -[IO, FS, Env, Exec]> String Never! {
-    if cli_nearest_workspace_source(start) == {
+pub fn cli_workspace_root(cache: &WorkspaceDeclarationCache, start: String) -[IO, FS, Env, Exec, Time.Wait]> String Never! {
+    if cli_nearest_workspace_source(&cache, start) == {
         .Ok(found) -> if found == {
             .Val(snapshot) -> snapshot.root
             .None -> start
@@ -74,12 +76,12 @@ fn cli_retired_jetpack_toml_diagnostic() -> Diagnostic Never! {
 
 // Refuse a retired `jetpack.toml` anywhere up the authority walk. The exit
 // code on refusal, or None to proceed.
-pub fn cli_reject_retired_jetpack_toml(dir: String) -[IO, FS, Env, Exec]> Int? Never! {
+pub fn cli_reject_retired_jetpack_toml(dir: String) -[IO, FS, Env, Exec, Time.Wait]> Int? Never! {
     walk := AuthorityResolver.authority_walk_root(dir) ?? cli_report_authority_error(err.diagnostic())
     loop {
-        if files.is_file(files.join(walk, @JETPACK_TOML)) {
-            terminal_write_output(diagnostics_render_all(@JETPACK_TOML, "", [Diagnostic]{cli_retired_jetpack_toml_diagnostic()}))
-            return Val(@EXIT_USAGE)
+        if files.is_file(files.join(walk, JETPACK_TOML)) {
+            terminal_write_output(diagnostics_render_all(JETPACK_TOML, "", [Diagnostic]{cli_retired_jetpack_toml_diagnostic()}))
+            return Val(EXIT_USAGE)
         }
         walk = AuthorityResolver.authority_walk_parent(walk) ?? return None
     }
@@ -87,51 +89,51 @@ pub fn cli_reject_retired_jetpack_toml(dir: String) -[IO, FS, Env, Exec]> Int? N
 
 // The resolver for `dir` when it is an authority-walk candidate; a missing
 // authority is not an error.
-fn cli_walk_resolver(dir: String) -[FS, Env]> AuthorityResolver? CliError! {
+fn cli_walk_resolver(dir: String) -[FS, Env]> AuthorityResolver? CLIError! {
     if AuthorityResolver.open_for_authority_walk(dir) == {
         .Ok(found) -> Ok(found)
-        .Err(error) -> if error.is_missing() -> Ok(None) else -> Err(CliError.Diagnostic(error.diagnostic()))
+        .Err(error) -> if error.is_missing() -> Ok(None) else -> Err(CLIError.Diagnostic(error.diagnostic()))
     }
 }
 
-fn cli_checked_workspace_source(dir: String) -[FS, Env]> CheckedWorkspaceSource? CliError! {
+fn cli_checked_workspace_source(cache: &WorkspaceDeclarationCache, dir: String) -[FS, Env]> CheckedWorkspaceSource? CLIError! {
     resolver :: cli_walk_resolver(dir) ?? return Ok(None)
-    if resolver.resolve_workspace_source() == {
+    if resolver.resolve_workspace_source(&cache) == {
         .Ok(found) -> {
             source :: found ?? return Ok(None)
             resolver.revalidate_source(source)
             Ok(Val(CheckedWorkspaceSource{resolver, source}))
         }
-        .Err(error) -> Err(CliError.Diagnostic(error.workspace_diagnostic()))
+        .Err(error) -> Err(CLIError.Diagnostic(error.workspace_diagnostic()))
     }
 }
 
-fn cli_package_manifest_present(dir: String) -[FS, Env]> Bool CliError! {
+fn cli_package_manifest_present(dir: String) -[FS, Env]> Bool CLIError! {
     resolver :: cli_walk_resolver(dir) ?? return Ok(false)
     if resolver.checked_manifest(".") == {
         .Ok(manifest) -> {
             resolver.revalidate_file(manifest.file)
             Ok(true)
         }
-        .Err(error) -> if error.is_missing() -> Ok(false) else -> Err(CliError.Diagnostic(error.diagnostic()))
+        .Err(error) -> if error.is_missing() -> Ok(false) else -> Err(CLIError.Diagnostic(error.diagnostic()))
     }
 }
 
-fn cli_env_file_present(dir: String) -[FS, Env]> Bool CliError! {
+fn cli_env_file_present(dir: String) -[FS, Env]> Bool CLIError! {
     resolver :: cli_walk_resolver(dir) ?? return Ok(false)
-    if resolver.checked_file(@ENV_FILE) == {
+    if resolver.checked_file(ENV_FILE) == {
         .Ok(file) -> {
             resolver.revalidate_file(file)
             Ok(true)
         }
-        .Err(error) -> if error.is_missing() -> Ok(false) else -> Err(CliError.Diagnostic(error.diagnostic()))
+        .Err(error) -> if error.is_missing() -> Ok(false) else -> Err(CLIError.Diagnostic(error.diagnostic()))
     }
 }
 
-fn cli_nearest_project_root(start: String) -[FS, Env]> String? CliError! {
+fn cli_nearest_project_root(cache: &WorkspaceDeclarationCache, start: String) -[FS, Env]> String? CLIError! {
     walk := AuthorityResolver.authority_walk_root(start)
     loop {
-        if cli_package_manifest_present(walk) || cli_env_file_present(walk) || cli_checked_workspace_source(walk) != None {
+        if cli_package_manifest_present(walk) || cli_env_file_present(walk) || cli_checked_workspace_source(&cache, walk) != None {
             return Ok(Val(walk))
         }
         walk = AuthorityResolver.authority_walk_parent(walk) ?? return Ok(None)
@@ -139,19 +141,19 @@ fn cli_nearest_project_root(start: String) -[FS, Env]> String? CliError! {
 }
 
 // The project's checked env file, parsed; None when the project has none.
-fn cli_checked_env_file(dir: String) -[FS, Env]> EnvFile? CliError! {
+fn cli_checked_env_file(dir: String) -[FS, Env]> EnvFile? CLIError! {
     resolver :: if AuthorityResolver.open(dir) == {
         .Ok(opened) -> opened
         .Err(error) -> {
             if error.is_missing() -> return Ok(None)
-            return Err(CliError.Diagnostic(error.diagnostic()))
+            return Err(CLIError.Diagnostic(error.diagnostic()))
         }
     }
-    file :: if resolver.checked_file(@ENV_FILE) == {
+    file :: if resolver.checked_file(ENV_FILE) == {
         .Ok(checked) -> checked
         .Err(error) -> {
             if error.is_missing() -> return Ok(None)
-            return Err(CliError.Diagnostic(error.diagnostic()))
+            return Err(CLIError.Diagnostic(error.diagnostic()))
         }
     }
     source :: file.text()
@@ -159,22 +161,22 @@ fn cli_checked_env_file(dir: String) -[FS, Env]> EnvFile? CliError! {
     Ok(Val(EnvFile.parse(source)))
 }
 
-fn cli_nearest_workspace_source(start: String) -[FS, Env]> WorkspaceRootSnapshot? CliError! {
+fn cli_nearest_workspace_source(cache: &WorkspaceDeclarationCache, start: String) -[FS, Env]> WorkspaceRootSnapshot? CLIError! {
     walk := AuthorityResolver.authority_walk_root(start)
     loop {
-        if cli_checked_workspace_source(walk) == .Val(checked) -> return Ok(Val(WorkspaceRootSnapshot{root: walk, source: Val(checked)}))
+        if cli_checked_workspace_source(&cache, walk) == .Val(checked) -> return Ok(Val(WorkspaceRootSnapshot{root: walk, source: Val(checked)}))
         walk = AuthorityResolver.authority_walk_parent(walk) ?? return Ok(None)
     }
 }
 
 // The nearest workspace root and its checked source, or `start` alone.
-pub fn cli_workspace_root_snapshot(start: String) -[FS, Env]> WorkspaceRootSnapshot CliError! {
-    found :: cli_nearest_workspace_source(start)
+pub fn cli_workspace_root_snapshot(cache: &WorkspaceDeclarationCache, start: String) -[FS, Env]> WorkspaceRootSnapshot CLIError! {
+    found :: cli_nearest_workspace_source(&cache, start)
     Ok(found ?? WorkspaceRootSnapshot{root: start, source: None})
 }
 
-pub fn cli_workspace_root_snapshot_or_exit(start: String) -[IO, FS, Env, Exec]> WorkspaceRootSnapshot Never! {
-    if cli_workspace_root_snapshot(start) == {
+pub fn cli_workspace_root_snapshot_or_exit(cache: &WorkspaceDeclarationCache, start: String) -[IO, FS, Env, Exec, Time.Wait]> WorkspaceRootSnapshot Never! {
+    if cli_workspace_root_snapshot(&cache, start) == {
         .Ok(snapshot) -> snapshot
         .Err(error) -> cli_report_authority_error(cli_discovery_diagnostic(error))
     }
@@ -184,56 +186,56 @@ pub fn cli_workspace_index_required_diagnostic() -> Diagnostic Never! {
     diagnostic_from_registry("E1239", None, "workspace build needs workspace.jet as the index", "an authority declaration is not a member index", "move members into workspace.jet and keep one workspace index")
 }
 
-fn cli_workspace_snapshot_from_source(resolver: AuthorityResolver, expected: WorkspaceSource) -[FS]> WorkspaceSnapshot CliError! {
+fn cli_workspace_snapshot_from_source(resolver: AuthorityResolver, expected: WorkspaceSource) -[FS]> WorkspaceSnapshot CLIError! {
     if envmodel_workspace_load_checked_source(resolver, expected) == {
         .Ok(snapshot) -> Ok(snapshot)
-        .Err(error) -> Err(CliError.Diagnostic(error.diagnostic))
+        .Err(error) -> Err(CLIError.Diagnostic(error.diagnostic))
     }
 }
 
 // Evaluate a checked workspace index, write its `.jet/lock` entries, and
 // return the plan. A diagnostic is rendered and reported as exit 2.
-pub fn cli_load_workspace_for_source(dir: String, checked: CheckedWorkspaceSource) -[IO, FS, Env, Exec, Time, Time.Wait]> WorkspacePlan? CliError! {
+pub fn cli_load_workspace_for_source(cache: &WorkspaceDeclarationCache, dir: String, checked: CheckedWorkspaceSource) -[IO, FS, Env, Exec, Time, Time.Wait]> WorkspacePlan? CLIError! {
     if checked.resolver.revalidate_source(checked.source) == {
-        .Err(error) -> return Err(cli_render_workspace_error(CliError.Diagnostic(error.diagnostic())))
+        .Err(error) -> return Err(cli_render_workspace_error(CLIError.Diagnostic(error.diagnostic())))
         .Ok(_) -> {}
     }
     if checked.source.role != WorkspaceSourceRole.Index {
-        return Err(cli_render_workspace_error(CliError.Diagnostic(cli_workspace_index_required_diagnostic())))
+        return Err(cli_render_workspace_error(CLIError.Diagnostic(cli_workspace_index_required_diagnostic())))
     }
     if cli_workspace_snapshot_from_source(checked.resolver, checked.source) == {
-        .Ok(snapshot) -> cli_finish_workspace_load(dir, Val(snapshot))
+        .Ok(snapshot) -> cli_finish_workspace_load(&cache, dir, Val(snapshot))
         .Err(error) -> Err(cli_render_workspace_error(error))
     }
 }
 
 // Render a workspace discovery or evaluation failure; it exits 2.
-pub fn cli_render_workspace_error(error: CliError) -[IO]> CliError Never! {
-    terminal_write_output(diagnostics_render_all(@WORKSPACE_FILE, "", [Diagnostic]{cli_discovery_diagnostic(error)}))
-    CliError.Reported(@EXIT_USAGE)
+pub fn cli_render_workspace_error(error: CLIError) -[IO, Time.Wait]> CLIError Never! {
+    terminal_write_output(diagnostics_render_all(WORKSPACE_FILE, "", [Diagnostic]{cli_discovery_diagnostic(error)}))
+    CLIError.Reported(EXIT_USAGE)
 }
 
 // Write the evaluated workspace into `.jet/lock`. None when no source
 // declares a workspace.
-pub fn cli_finish_workspace_load(dir: String, found: WorkspaceSnapshot?) -[IO, FS, Env, Exec, Time, Time.Wait]> WorkspacePlan? CliError! {
+pub fn cli_finish_workspace_load(cache: &WorkspaceDeclarationCache, dir: String, found: WorkspaceSnapshot?) -[IO, FS, Env, Exec, Time, Time.Wait]> WorkspacePlan? CLIError! {
     snapshot :: found ?? return Ok(None)
-    if env_workspace_lock_write(dir, snapshot.plan) == {
+    if env_workspace_lock_write(&cache, dir, snapshot.plan) == {
         .Ok(_) -> Ok(Val(snapshot.plan))
         .Err(error) -> {
-            lock_path :: files.join(dir, @UNIFIED_LOCK_FILE)
+            lock_path :: files.join(dir, UNIFIED_LOCK_FILE)
             diagnostic :: pkg_lock_e1202_workspace_write(lock_path, error.message())
-            terminal_write_output(diagnostics_render_all(@WORKSPACE_FILE, "", [Diagnostic]{diagnostic}))
-            Err(CliError.Reported(@EXIT_USAGE))
+            terminal_write_output(diagnostics_render_all(WORKSPACE_FILE, "", [Diagnostic]{diagnostic}))
+            Err(CLIError.Reported(EXIT_USAGE))
         }
     }
 }
 
 // The named-source table the current project's env file declares, plus the
 // built-in sources, so explicit CLI refs are project-aware.
-pub fn cli_cwd_table() -[IO, FS, Env, Exec]> SourceTable Never! {
+pub fn cli_cwd_table(cache: &WorkspaceDeclarationCache) -[IO, FS, Env, Exec, Time.Wait]> SourceTable Never! {
     cwd :: cli_current_dir()
     if cli_reject_retired_jetpack_toml(cwd) == .Val(code) -> process.exit(code)
-    dir :: cli_project_root(cwd)
+    dir :: cli_project_root(&cache, cwd)
     table := if cli_checked_env_file(dir) == {
         .Ok(found) -> if found == {
             .Val(env) -> env.source_table()
@@ -250,8 +252,8 @@ pub fn cli_cwd_table() -[IO, FS, Env, Exec]> SourceTable Never! {
 // Add the first-party source declarations after the project's, so a
 // project may override a built-in source without losing that override.
 pub fn cli_ensure_builtin_sources(table: &SourceTable) Never! {
-    &table.ensure_decl(@NATIVE_SOURCE_NAME, @NATIVE_UPSTREAM, ProviderKind.JetPackage)
-    &table.ensure_decl(@BATTERIES_SOURCE_NAME, @BATTERIES_UPSTREAM, ProviderKind.Core)
+    &table.ensure_decl(NATIVE_SOURCE_NAME, NATIVE_UPSTREAM, ProviderKind.JetPackage)
+    &table.ensure_decl(BATTERIES_SOURCE_NAME, BATTERIES_UPSTREAM, ProviderKind.Core)
 }
 
 // The built-in source table for project-independent profile commands.
@@ -265,9 +267,9 @@ pub fn cli_builtin_table() -> SourceTable Never! {
 // declaration-resolved index when present, else read from the `.jet/lock`
 // mirror, else empty. An authority source is a boundary, not an index, and
 // never falls through to a stale lock.
-pub fn cli_cwd_workspace_index() -[IO, FS, Env, Exec]> WorkspaceIndex Never! {
-    snapshot :: cli_workspace_root_snapshot_or_exit(cli_current_dir())
-    plan := None
+pub fn cli_cwd_workspace_index(cache: &WorkspaceDeclarationCache) -[IO, FS, Env, Exec, Time.Wait]> WorkspaceIndex Never! {
+    snapshot :: cli_workspace_root_snapshot_or_exit(&cache, cli_current_dir())
+    plan := WorkspacePlan?{None}
     allow_lock := true
     if snapshot.source == .Val(checked) {
         allow_lock = false
@@ -276,7 +278,7 @@ pub fn cli_cwd_workspace_index() -[IO, FS, Env, Exec]> WorkspaceIndex Never! {
             plan = Val(evaluated.plan)
         }
     }
-    if allow_lock -> plan = cli_workspace_lock_index(snapshot.root)
+    if allow_lock -> plan = cli_workspace_lock_index(&cache, snapshot.root)
     members := [WorkspaceMember]{}
     if plan == .Val(found) {
         loop member in found.members -> &members.push(WorkspaceMember{name: member.name, path: member.path})
@@ -287,9 +289,9 @@ pub fn cli_cwd_workspace_index() -[IO, FS, Env, Exec]> WorkspaceIndex Never! {
 
 // The workspace plan mirrored in `.jet/lock`, checked through the resolver.
 // A lock that looks like a workspace lock but fails to load is E1202.
-fn cli_workspace_lock_index(dir: String) -[IO, FS, Env, Exec]> WorkspacePlan? Never! {
+fn cli_workspace_lock_index(cache: &WorkspaceDeclarationCache, dir: String) -[IO, FS, Env, Exec, Time.Wait]> WorkspacePlan? Never! {
     resolver :: AuthorityResolver.open(dir) ?? cli_report_authority_error(err.diagnostic())
-    lock_file :: if resolver.checked_file(@UNIFIED_LOCK_FILE) == {
+    lock_file :: if resolver.checked_file(UNIFIED_LOCK_FILE) == {
         .Ok(file) -> file
         .Err(error) -> {
             if error.is_missing() -> return None
@@ -300,10 +302,10 @@ fn cli_workspace_lock_index(dir: String) -[IO, FS, Env, Exec]> WorkspacePlan? Ne
     source :: lock_file.text() ?? cli_report_authority_error(err.diagnostic())
     resolver.revalidate_file(lock_file) ?? cli_report_authority_error(err.diagnostic())
     looks_like_workspace_lock :: pkg_lock_looks_like_workspace_lock(source)
-    lock :: pkg_workspace_lock_load_checked_file(resolver, lock_file)
+    lock :: pkg_workspace_lock_load_checked_file(&cache, resolver, lock_file)
     if lock == None && looks_like_workspace_lock {
-        terminal_write_output(diagnostics_render_all(@WORKSPACE_FILE, "", [Diagnostic]{pkg_lock_e1202_workspace(path)}))
-        process.exit(@EXIT_USAGE)
+        terminal_write_output(diagnostics_render_all(WORKSPACE_FILE, "", [Diagnostic]{pkg_lock_e1202_workspace(path)}))
+        process.exit(EXIT_USAGE)
     }
     lock
 }

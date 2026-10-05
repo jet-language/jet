@@ -58,7 +58,7 @@ enum LockParseSection {
 
 // Parse lock text into the canonical model.
 pub fn pkg_lock_parse(raw: String) -> LockFile LockError! {
-    if raw.bytes().len() > @PKG_MAX_LOCK_BYTES -> return Err(LockError.Invalid(pkg_lock_oversized_file_message()))
+    if raw.bytes().len() > PKG_MAX_LOCK_BYTES -> return Err(LockError.Invalid(pkg_lock_oversized_file_message()))
     parser := LockParser.new()
     lines :: raw.split("\n").to_list()
     loop index in 0..<lines.len() {
@@ -66,10 +66,10 @@ pub fn pkg_lock_parse(raw: String) -> LockFile LockError! {
         if line_text.ends_with(pkg_lock_carriage_return()) -> line_text = line_text.removesuffix(pkg_lock_carriage_return())
         // Corruption handling: stop before one malformed value can allocate
         // without a bound.
-        if line_text.bytes().len() > @PKG_MAX_LOCK_VALUE_BYTES -> return Err(LockError.Invalid(pkg_lock_oversized_value_message(index + 1)))
+        if line_text.bytes().len() > PKG_MAX_LOCK_VALUE_BYTES -> return Err(LockError.Invalid(pkg_lock_oversized_value_message(index + 1)))
         &parser.accept(line_text.trim(), index + 1)
     }
-    parser.finish()
+    &parser.finish()
 }
 
 // Parse a lock read from `lock_path`. An unsupported format version is
@@ -79,7 +79,7 @@ pub fn pkg_lock_parse_with_path(raw: String, lock_path: String) -> LockFile Lock
     if pkg_lock_parse(raw) == {
         .Ok(lock) -> Ok(lock)
         .Err(error) -> if error == {
-            .UnsupportedVersion(version) -> Err(LockError.Reported(pkg_lock_e1214_lock_unsupported(lock_path, version, "{@PKG_LOCK_VERSION}")))
+            .UnsupportedVersion(version) -> Err(LockError.Reported(pkg_lock_e1214_lock_unsupported(lock_path, version, "{PKG_LOCK_VERSION}")))
             else -> Err(LockError.Reported(pkg_lock_e1205_lock_corrupt(lock_path)))
         }
     }
@@ -308,7 +308,7 @@ struct LockParser {
         &self.close_section()
         policy :: pkg_lock_build_workspace_overlay_policy(self.overlays, self.overlay_packages, self.build_grants, self.policy_allow_unfree, self.policy_build_deny)
         version :: self.version ?? return Err(LockError.Invalid("lock is missing top-level `version`"))
-        if version != @PKG_LOCK_VERSION -> return Err(LockError.UnsupportedVersion("{version}"))
+        if version != PKG_LOCK_VERSION -> return Err(LockError.UnsupportedVersion("{version}"))
         lock := LockFile{
             version: version,
             packages: self.packages,
@@ -583,8 +583,8 @@ struct PartialPackage {
     fingerprint: String?{None}
     content_hash: String?{None}
     dependencies: [String]{[String]{}}
-    layer: MirRuntimeLayer?{None}
-    inferred_layer: MirRuntimeLayer?{None}
+    layer: MIRRuntimeLayer?{None}
+    inferred_layer: MIRRuntimeLayer?{None}
     effects: [String]{[String]{}}
     effect_grants: [String]{[String]{}}
     required_effects: [String]{[String]{}}
@@ -670,24 +670,7 @@ struct PartialPackage {
             .Val(partial) -> Val(partial.finish())
             .None -> None
         }
-        if source == {
-            .Nix(_, output) -> {
-                closure :: nix_closure ?? return Err(LockError.Invalid("Nix package is missing its portable closure record"))
-                if closure.output != output -> return Err(LockError.Invalid("Nix source output disagrees with its closure record"))
-            }
-            else -> {
-                if nix_closure != None -> return Err(LockError.Invalid("portable Nix closure record attached to a non-Nix package"))
-            }
-        }
-        if self.envelope == {
-            .Val(envelope) -> if nix_closure == {
-                .Val(closure) -> {
-                    if envelope.output_hash != closure.output || envelope.platform != closure.system -> return Err(LockError.Invalid("Nix envelope identity disagrees with its closure record"))
-                }
-                .None -> {}
-            }
-            .None -> {}
-        }
+        pkg_lock_validate_package_nix(source, nix_closure, self.envelope)
         locked :: if self.locked_raw == {
             .Val(raw) -> Val(pkg_lock_parse_locked(raw))
             .None -> None
@@ -713,6 +696,30 @@ struct PartialPackage {
             receipt: self.receipt,
             provenance: self.provenance
         })
+    }
+}
+
+// Rust PartialPkg::finish validates borrowed identities before moving the
+// source, closure and envelope into the completed package. Read parameters
+// keep those same owned records reusable without cloning their payloads.
+fn pkg_lock_validate_package_nix(source: LockSource, nix_closure: NixClosureRecord?, envelope: LockEnvelope?) LockError! {
+    if source == {
+        .Nix(_, output) -> {
+            closure :: nix_closure ?? return Err(LockError.Invalid("Nix package is missing its portable closure record"))
+            if closure.output != output -> return Err(LockError.Invalid("Nix source output disagrees with its closure record"))
+        }
+        else -> {
+            if nix_closure != None -> return Err(LockError.Invalid("portable Nix closure record attached to a non-Nix package"))
+        }
+    }
+    if envelope == {
+        .Val(realized) -> if nix_closure == {
+            .Val(closure) -> {
+                if realized.output_hash != closure.output || realized.platform != closure.system -> return Err(LockError.Invalid("Nix envelope identity disagrees with its closure record"))
+            }
+            .None -> {}
+        }
+        .None -> {}
     }
 }
 

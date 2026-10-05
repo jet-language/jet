@@ -8,10 +8,10 @@ complexity and invalid UTF-8? Is the plan's one real gap (full case folding) sti
 
 ## Method
 
-- Binary: snapshot14 through `~/.cache/jet-luna/safe-jet.sh`.
+- Binary: snapshot14 through `~/.cache/jet-dev/safe-jet.sh`.
 - Witnesses (scratch; package grants `[IO, Mem.Alloc, Panic]`):
-  - `~/.cache/jet-test-scratch/Closer05/t3262/unicode_contracts.jet`
-  - `~/.cache/jet-test-scratch/Closer05/t3262/regex_probe.jet`
+  - `~/.cache/jet-dev/scratch/Closer05/t3262/unicode_contracts.jet`
+  - `~/.cache/jet-dev/scratch/Closer05/t3262/regex_probe.jet`
 - Tiers: `run`, `run --interpret`, and `build` plus the binary (`tiers.sh`).
 - Source read: `Core/text/text.jet:12-19,73-88` and `Core/regex/regex.jet:15-20,488-529,597-600`.
 

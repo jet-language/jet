@@ -5,7 +5,6 @@
 
 // The caller hook that does nothing before a start.
 fn services_no_before_start(plan: DevServicePlan) ServicesError! {
-    Ok()
 }
 
 // Enabled service indexes in dependency-first order. Unknown names,
@@ -31,9 +30,9 @@ fn services_visit_dependency(index: Int, plans: [DevServicePlan], indexes: [Stri
     plan :: plans[index]
     if !plan.enable {
         states[index] = 2
-        return Ok()
+        return
     }
-    if states[index] == 2 -> return Ok()
+    if states[index] == 2 -> return
     if states[index] == 1 {
         start := 0
         loop position in 0..<stack.len() {
@@ -58,7 +57,6 @@ fn services_visit_dependency(index: Int, plans: [DevServicePlan], indexes: [Stri
     &stack.pop().drop("the visited name leaves the path")
     states[index] = 2
     &order.push(index)
-    Ok()
 }
 
 // The canonical dependency list: `after` without repeats, in order.
@@ -146,14 +144,13 @@ pub fn services_down_ordered(host: ServiceHost, project_dir: String, plans: [Dev
             break
         }
     }
-    if errors.len() == 0 -> return Ok()
+    if errors.len() == 0 -> return
     Err(ServicesError.new(errors.join("; ")))
 }
 
 // Restart one service under its declared bounded restart budget.
 pub fn services_restart_one(host: ServiceHost, project_dir: String, env: ShellEnv, plan: DevServicePlan) ServicesError! -[FS, Env, Exec, Net, Rand, Time, Time.Wait]> {
     _ :: services_restart_ordered_with(host, project_dir, env, [DevServicePlan]{plan}, [Int]{0}, time.duration_seconds(30), services_no_before_start)
-    Ok()
 }
 
 // Restart a dependency-first selection through the `services up` lifecycle:

@@ -2,10 +2,10 @@
 // fixed-output and text paths of the Nix 2.34 `store-path.md` and `nix32.md`
 // protocols. SHA-256 is the unit's shared implementation.
 
-@NIX_DEFAULT_STORE_DIR :: "/nix/store"
-@NIX_NIX32_ALPHABET :: "0123456789abcdfghijklmnpqrsvwxyz"
-@NIX_STORE_PATH_DIGEST_CHARS :: 32
-@NIX_COMPRESSED_HASH_BYTES :: 20
+NIX_DEFAULT_STORE_DIR :: prep { "/nix/store" }
+NIX_NIX32_ALPHABET :: prep { "0123456789abcdfghijklmnpqrsvwxyz" }
+NIX_STORE_PATH_DIGEST_CHARS :: prep { 32 }
+NIX_COMPRESSED_HASH_BYTES :: prep { 20 }
 
 fn nix_sha256_digest(bytes: [U8]) -> [U8] Never! {
     mir_sha256_bytes(bytes) ?? panic("SHA-256 indexed outside its padded blocks")
@@ -18,7 +18,7 @@ fn nix_hex(bytes: [U8]) -> String Never! {
 // Nix32 of `bytes`, emitted from the most significant 5-bit group down.
 pub fn nix_nix32_encode(bytes: [U8]) -> String Never! {
     if bytes.len() == 0 -> return ""
-    alphabet :: @NIX_NIX32_ALPHABET.bytes()
+    alphabet :: NIX_NIX32_ALPHABET.bytes()
     length :: (bytes.len() * 8 - 1) /% 5 + 1
     out := [U8]{}
     group := length - 1
@@ -62,7 +62,7 @@ pub fn nix_nix32_decode(text: String) -> [U8] NixError! {
 }
 
 fn nix_nix32_digit(scalar: String) -> Int Never! {
-    alphabet :: @NIX_NIX32_ALPHABET.bytes()
+    alphabet :: NIX_NIX32_ALPHABET.bytes()
     bytes :: scalar.bytes()
     if bytes.len() != 1 -> return -1
     loop index in 0..<alphabet.len() {
@@ -72,7 +72,7 @@ fn nix_nix32_digit(scalar: String) -> Int Never! {
 }
 
 fn nix_is_nix32_byte(byte: U8) -> Bool Never! {
-    loop candidate in @NIX_NIX32_ALPHABET.bytes() {
+    loop candidate in NIX_NIX32_ALPHABET.bytes() {
         if candidate == byte -> return true
     }
     false
@@ -95,7 +95,7 @@ pub fn nix_compress_hash(hash: [U8], size: Int) -> [U8] Never! {
 // `{store}/{nix32(compress(sha256(fingerprint), 20))}-{name}`.
 pub fn nix_make_store_path(store_dir: String, type_text: String, hash_with_algo: String, name: String) -> String Never! {
     fingerprint :: "{type_text}:{hash_with_algo}:{store_dir}:{name}"
-    digest :: nix_compress_hash(nix_sha256_digest(fingerprint.bytes()), @NIX_COMPRESSED_HASH_BYTES)
+    digest :: nix_compress_hash(nix_sha256_digest(fingerprint.bytes()), NIX_COMPRESSED_HASH_BYTES)
     "{store_dir}/{nix_nix32_encode(digest)}-{name}"
 }
 
@@ -148,9 +148,9 @@ pub fn nix_scan_store_path_digests(store_dir: String, bytes: [U8]) -> [String] N
     prefix :: "{store_dir}/".bytes()
     found := [String]{}
     index := 0
-    loop index + prefix.len() + @NIX_STORE_PATH_DIGEST_CHARS <= bytes.len() {
+    loop index + prefix.len() + NIX_STORE_PATH_DIGEST_CHARS <= bytes.len() {
         if pkg_bytes_starts_with(bytes, index, prefix) && nix_is_digest_at(bytes, index + prefix.len()) {
-            end := index + prefix.len() + @NIX_STORE_PATH_DIGEST_CHARS
+            end := index + prefix.len() + NIX_STORE_PATH_DIGEST_CHARS
             if end < bytes.len() && Int.from_u8(bytes[end]) == 45 {
                 end += 1
                 loop end < bytes.len() && nix_is_store_name_byte(Int.from_u8(bytes[end])) -> end += 1
@@ -164,7 +164,7 @@ pub fn nix_scan_store_path_digests(store_dir: String, bytes: [U8]) -> [String] N
 }
 
 fn nix_is_digest_at(bytes: [U8], start: Int) -> Bool Never! {
-    loop offset in 0..<@NIX_STORE_PATH_DIGEST_CHARS {
+    loop offset in 0..<NIX_STORE_PATH_DIGEST_CHARS {
         if !nix_is_nix32_byte(bytes[start + offset]) -> return false
     }
     true

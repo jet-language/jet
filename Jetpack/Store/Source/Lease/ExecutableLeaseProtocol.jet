@@ -8,24 +8,24 @@
 // malformed or unauthenticated input is `InvalidInput` with the reference's
 // exact text.
 
-@LEASE_PROTOCOL_HEADER :: "JET-EXECUTABLE-LEASE/1"
-@LEASE_RECEIPT_HEADER :: "JET-EXECUTABLE-LEASE/1 receipt"
-@LEASE_SERVICE_DIR :: "lease-service"
-@LEASE_AUTH_KEY_FILE :: "auth.key"
-@LEASE_RECORDS_DIR :: "leases"
-@LEASE_RECEIPT_FILE :: "receipt"
-@LEASE_COMPLETE_FILE :: "complete"
-@LEASE_STATE_SCOPE :: "lease-state"
-@LEASE_MAX_FRAME_BYTES :: 65536
-@LEASE_MAX_FIELD_BYTES :: 16384
-@LEASE_MAX_MEMBERS :: 4096
-@LEASE_MAX_CONTAINER_NAME :: 256
-@LEASE_OWNER_SCOPE_PREFIX :: "executable-lease-owner-"
-@LEASE_OWNER_LOCK_SCOPE :: "owner"
-@LEASE_U32_MAX :: 4294967295
-@LEASE_U64_MAX :: 18446744073709551615
-@LEASE_REQUEST_FIELDS :: [String]{"op", "key", "request", "lease", "generation", "pid", "owner", "package", "version", "reference", "output", "previous", "snapshot", "members", "nonce", "mac"}
-@LEASE_RECEIPT_FIELDS :: [String]{"lease", "generation", "pid", "owner", "package", "version", "reference", "output", "snapshot", "members", "mac"}
+LEASE_PROTOCOL_HEADER :: prep { "JET-EXECUTABLE-LEASE/1" }
+LEASE_RECEIPT_HEADER :: prep { "JET-EXECUTABLE-LEASE/1 receipt" }
+LEASE_SERVICE_DIR :: prep { "lease-service" }
+LEASE_AUTH_KEY_FILE :: prep { "auth.key" }
+LEASE_RECORDS_DIR :: prep { "leases" }
+LEASE_RECEIPT_FILE :: prep { "receipt" }
+LEASE_COMPLETE_FILE :: prep { "complete" }
+LEASE_STATE_SCOPE :: prep { "lease-state" }
+LEASE_MAX_FRAME_BYTES :: prep { 65536 }
+LEASE_MAX_FIELD_BYTES :: prep { 16384 }
+LEASE_MAX_MEMBERS :: prep { 4096 }
+LEASE_MAX_CONTAINER_NAME :: prep { 256 }
+LEASE_OWNER_SCOPE_PREFIX :: prep { "executable-lease-owner-" }
+LEASE_OWNER_LOCK_SCOPE :: prep { "owner" }
+LEASE_U32_MAX :: prep { 4294967295 }
+LEASE_U64_MAX :: prep { 18446744073709551615 }
+LEASE_REQUEST_FIELDS :: prep { [String]{"op", "key", "request", "lease", "generation", "pid", "owner", "package", "version", "reference", "output", "previous", "snapshot", "members", "nonce", "mac"} }
+LEASE_RECEIPT_FIELDS :: prep { [String]{"lease", "generation", "pid", "owner", "package", "version", "reference", "output", "snapshot", "members", "mac"} }
 
 pub enum LeaseOperation {
     Acquire
@@ -95,11 +95,11 @@ pub struct LeaseRequest {
             (name: "members", value: store_lease_encode_members(self.members)),
             (name: "nonce", value: self.nonce)
         }
-        out := [String]{"{@LEASE_PROTOCOL_HEADER}\n"}
+        out := [String]{"{LEASE_PROTOCOL_HEADER}\n"}
         loop field in fields -> &out.push("{field.name}={field.value}\n")
         if include_mac -> &out.push("mac={self.mac}\n")
         text :: out.join("")
-        if text.bytes().len() > @LEASE_MAX_FRAME_BYTES -> return Err(store_lease_invalid("executable lease request exceeds the frame bound"))
+        if text.bytes().len() > LEASE_MAX_FRAME_BYTES -> return Err(store_lease_invalid("executable lease request exceeds the frame bound"))
         Ok(text)
     }
 }
@@ -140,7 +140,7 @@ fn store_lease_receipt_canonical(receipt: LeaseReceipt, include_mac: Bool) -> St
         (name: "snapshot", value: store_lease_encode_text(receipt.snapshot_rel)),
         (name: "members", value: store_lease_encode_members(receipt.members))
     }
-    out := [String]{"{@LEASE_RECEIPT_HEADER}\n"}
+    out := [String]{"{LEASE_RECEIPT_HEADER}\n"}
     loop field in fields -> &out.push("{field.name}={field.value}\n")
     if include_mac -> &out.push("mac={receipt.mac}\n")
     Ok(out.join(""))
@@ -170,12 +170,12 @@ fn store_lease_field(fields: [String: String], name: String, kind: String) -> St
 }
 
 pub fn store_lease_parse_receipt(text: String) -> LeaseReceipt IOError! {
-    fields :: store_lease_frame_fields(text, @LEASE_RECEIPT_HEADER, @LEASE_RECEIPT_FIELDS, "receipt")
+    fields :: store_lease_frame_fields(text, LEASE_RECEIPT_HEADER, LEASE_RECEIPT_FIELDS, "receipt")
     kind :: "receipt"
     receipt :: LeaseReceipt{
         lease_id: store_lease_field(fields, "lease", kind),
-        generation: store_lease_parse_decimal(store_lease_field(fields, "generation", kind), @LEASE_U64_MAX) ?? return Err(store_lease_invalid("executable lease generation is not numeric")),
-        owner_pid: store_lease_parse_decimal(store_lease_field(fields, "pid", kind), @LEASE_U32_MAX) ?? return Err(store_lease_invalid("executable lease owner id is not numeric")),
+        generation: store_lease_parse_decimal(store_lease_field(fields, "generation", kind), LEASE_U64_MAX) ?? return Err(store_lease_invalid("executable lease generation is not numeric")),
+        owner_pid: store_lease_parse_decimal(store_lease_field(fields, "pid", kind), LEASE_U32_MAX) ?? return Err(store_lease_invalid("executable lease owner id is not numeric")),
         owner_scope: store_lease_decode_text(store_lease_field(fields, "owner", kind), "owner scope"),
         package: store_lease_decode_text(store_lease_field(fields, "package", kind), "package"),
         version: store_lease_decode_optional_text(store_lease_field(fields, "version", kind), "version"),
@@ -201,8 +201,8 @@ fn store_lease_decode_request_fields(fields: [String: String]) -> LeaseRequest I
         key_id: store_lease_field(fields, "key", kind),
         request_id: store_lease_field(fields, "request", kind),
         lease_id: store_lease_field(fields, "lease", kind),
-        generation: store_lease_parse_decimal(store_lease_field(fields, "generation", kind), @LEASE_U64_MAX) ?? return Err(store_lease_invalid("executable lease generation is not numeric")),
-        owner_pid: store_lease_parse_decimal(store_lease_field(fields, "pid", kind), @LEASE_U32_MAX) ?? return Err(store_lease_invalid("executable lease owner id is not numeric")),
+        generation: store_lease_parse_decimal(store_lease_field(fields, "generation", kind), LEASE_U64_MAX) ?? return Err(store_lease_invalid("executable lease generation is not numeric")),
+        owner_pid: store_lease_parse_decimal(store_lease_field(fields, "pid", kind), LEASE_U32_MAX) ?? return Err(store_lease_invalid("executable lease owner id is not numeric")),
         owner_scope: store_lease_decode_text(store_lease_field(fields, "owner", kind), "owner scope"),
         package: store_lease_decode_text(store_lease_field(fields, "package", kind), "package"),
         version: store_lease_decode_optional_text(store_lease_field(fields, "version", kind), "version"),
@@ -234,7 +234,7 @@ fn store_lease_validate_request(request: LeaseRequest) IOError! {
 }
 
 pub fn store_lease_validate_members(members: [LeaseMember]) IOError! {
-    if members.len() > @LEASE_MAX_MEMBERS -> return Err(store_lease_invalid("executable lease member count exceeds the bound"))
+    if members.len() > LEASE_MAX_MEMBERS -> return Err(store_lease_invalid("executable lease member count exceeds the bound"))
     names := [String]{}
     loop member in members {
         name :: member.name
@@ -261,7 +261,7 @@ fn store_lease_is_hex_id(value: String) -> Bool Never! {
 }
 
 fn store_lease_validate_scope(value: String) IOError! {
-    canonical := value.starts_with(@LEASE_OWNER_SCOPE_PREFIX) && value.bytes().len() <= 160
+    canonical := value.starts_with(LEASE_OWNER_SCOPE_PREFIX) && value.bytes().len() <= 160
     loop byte in value.bytes() {
         code :: Int.from_u8(byte)
         word :: (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 45 || code == 95
@@ -272,15 +272,15 @@ fn store_lease_validate_scope(value: String) IOError! {
 
 fn store_lease_owner_scope(lease_id: String) -> String IOError! {
     store_lease_validate_id(lease_id, "lease id")
-    Ok("{@LEASE_OWNER_SCOPE_PREFIX}{lease_id}")
+    Ok("{LEASE_OWNER_SCOPE_PREFIX}{lease_id}")
 }
 
 // `<pid>-<sequence>-<entry id>` with a non-zero u32 pid and a u64 sequence.
 fn store_lease_valid_container_name(name: String) -> Bool Never! {
     first :: name.split_once("-") ?? return false
-    pid :: store_lease_parse_decimal(first.before, @LEASE_U32_MAX) ?? return false
+    pid :: store_lease_parse_decimal(first.before, LEASE_U32_MAX) ?? return false
     second :: first.after.split_once("-") ?? return false
-    store_lease_parse_decimal(second.before, @LEASE_U64_MAX) ?? return false
+    store_lease_parse_decimal(second.before, LEASE_U64_MAX) ?? return false
     pid != 0 && second.after != ""
 }
 
@@ -290,14 +290,14 @@ fn store_lease_validate_relative_path(value: String) IOError! {
 }
 
 fn store_lease_bounded_text(value: String, field: String) -> String IOError! {
-    if value == "" || value.bytes().len() > @LEASE_MAX_FIELD_BYTES || value.contains("\n") -> return Err(store_lease_invalid(field))
+    if value == "" || value.bytes().len() > LEASE_MAX_FIELD_BYTES || value.contains("\n") -> return Err(store_lease_invalid(field))
     Ok(value)
 }
 
 // Store identities may be unversioned, but the required wire field keeps the
 // same bounds and text protection as every other package identity.
 fn store_lease_validate_version(value: String) IOError! {
-    if value.bytes().len() > @LEASE_MAX_FIELD_BYTES || value.contains("\n") -> return Err(store_lease_invalid("version"))
+    if value.bytes().len() > LEASE_MAX_FIELD_BYTES || value.contains("\n") -> return Err(store_lease_invalid("version"))
 }
 
 fn store_lease_encode_text(value: String) -> String Never! {
@@ -339,7 +339,7 @@ fn store_lease_decode_members(value: String) -> [LeaseMember] IOError! {
 // Even-length lowercase hex within twice the field bound.
 fn store_lease_decode_hex(value: String, field: String) -> [U8] IOError! {
     raw :: value.bytes()
-    if raw.len() % 2 != 0 || raw.len() > @LEASE_MAX_FIELD_BYTES * 2 -> return Err(store_lease_invalid(field))
+    if raw.len() % 2 != 0 || raw.len() > LEASE_MAX_FIELD_BYTES * 2 -> return Err(store_lease_invalid(field))
     out := [U8]{}
     at := 0
     loop at < raw.len() {
@@ -386,7 +386,7 @@ fn store_lease_random_id(bytes: Int) -[Rand]> String IOError! {
 }
 
 fn store_lease_next_generation(previous: Int) -> Int IOError! {
-    if previous >= @LEASE_U64_MAX -> return Err(store_lease_invalid("executable lease generation overflow"))
+    if previous >= LEASE_U64_MAX -> return Err(store_lease_invalid("executable lease generation overflow"))
     Ok(previous + 1)
 }
 

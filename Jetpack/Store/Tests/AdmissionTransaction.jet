@@ -18,52 +18,55 @@ fn store_test_admission_request(roots: HangarRoots, name: String) -> IngestReque
     }
 }
 
-fn store_test_assert_no_committed_package(roots: HangarRoots) Never! {
-    assert_eq((store_list_checked(roots) ?? panic("listing")).len(), 0)
-    assert_eq((store_closure_graph(roots) ?? panic("graph")).records.len(), 0)
-    assert_eq((files.list_dir(files.join(roots.hangar_dir(), @STORE_OBJECTS_DIR)) ?? panic("object pool")).len(), 0)
+fn store_test_assert_no_committed_package(verification: &StoreVerification, roots: HangarRoots) Never! {
+    assert_eq((store_list_checked(&verification, roots) ?? panic("listing")).len(), 0)
+    assert_eq((store_closure_graph(&verification, roots) ?? panic("graph")).records.len(), 0)
+    assert_eq((files.list_dir(files.join(roots.hangar_dir(), STORE_OBJECTS_DIR)) ?? panic("object pool")).len(), 0)
 }
 
 // Run one ingest with `point` armed and report whether it failed.
-fn store_test_ingest_failing_at(roots: HangarRoots, request: IngestRequest, point: AdmissionFailurePoint) -> Bool Never! {
+fn store_test_ingest_failing_at(verification: &StoreVerification, roots: HangarRoots, request: IngestRequest, point: AdmissionFailurePoint) -> Bool Never! {
     previous :: store_begin_admission_failure(point)
-    failed :: store_ingest_tree(roots, request) == .Err(_)
+    failed :: store_ingest_tree(&verification, roots, request) == .Err(_)
     store_end_admission_failure(previous)
     failed
 }
 
 #Test("store admission failure after object publication recovers without live orphans") {
+    verification := StoreVerification.new()
     roots :: store_test_temp_roots()
     request :: store_test_admission_request(roots, "object")
-    assert(store_test_ingest_failing_at(roots, request, AdmissionFailurePoint.AfterObjectPublication))
-    store_recover_hangar(roots) ?? panic("first recovery")
-    store_recover_hangar(roots) ?? panic("second recovery")
-    store_test_assert_no_committed_package(roots)
+    assert(store_test_ingest_failing_at(&verification, roots, request, AdmissionFailurePoint.AfterObjectPublication))
+    store_recover_hangar(&verification, roots) ?? panic("first recovery")
+    store_recover_hangar(&verification, roots) ?? panic("second recovery")
+    store_test_assert_no_committed_package(&verification, roots)
     store_test_drop_roots(roots)
 }
 
 #Test("store admission failure after receipt publication recovers without half registration") {
+    verification := StoreVerification.new()
     roots :: store_test_temp_roots()
     request :: store_test_admission_request(roots, "receipt")
-    assert(store_test_ingest_failing_at(roots, request, AdmissionFailurePoint.AfterReceiptPublication))
-    store_recover_hangar(roots) ?? panic("first recovery")
-    store_recover_hangar(roots) ?? panic("second recovery")
-    store_test_assert_no_committed_package(roots)
+    assert(store_test_ingest_failing_at(&verification, roots, request, AdmissionFailurePoint.AfterReceiptPublication))
+    store_recover_hangar(&verification, roots) ?? panic("first recovery")
+    store_recover_hangar(&verification, roots) ?? panic("second recovery")
+    store_test_assert_no_committed_package(&verification, roots)
     store_test_drop_roots(roots)
 }
 
 #Test("store admission failure after closure registration recovers projection idempotently") {
+    verification := StoreVerification.new()
     roots :: store_test_temp_roots()
     request :: store_test_admission_request(roots, "closure")
-    assert(store_test_ingest_failing_at(roots, request, AdmissionFailurePoint.AfterClosureRegistration))
-    committed :: store_list_checked(roots) ?? panic("listing")
+    assert(store_test_ingest_failing_at(&verification, roots, request, AdmissionFailurePoint.AfterClosureRegistration))
+    committed :: store_list_checked(&verification, roots) ?? panic("listing")
     assert_eq(committed.len(), 1)
     files.remove(files.join(files.join(roots.hangar_dir(), committed[0].id), "meta.json")) ?? panic("remove projection")
-    store_recover_hangar(roots) ?? panic("first recovery")
-    recovered :: store_list_checked(roots) ?? panic("listing")
+    store_recover_hangar(&verification, roots) ?? panic("first recovery")
+    recovered :: store_list_checked(&verification, roots) ?? panic("listing")
     assert_eq(recovered, committed)
-    store_recover_hangar(roots) ?? panic("second recovery")
-    assert_eq(store_list_checked(roots) ?? panic("listing"), recovered)
-    assert_eq((store_closure_graph(roots) ?? panic("graph")).records.len(), 1)
+    store_recover_hangar(&verification, roots) ?? panic("second recovery")
+    assert_eq(store_list_checked(&verification, roots) ?? panic("listing"), recovered)
+    assert_eq((store_closure_graph(&verification, roots) ?? panic("graph")).records.len(), 1)
     store_test_drop_roots(roots)
 }

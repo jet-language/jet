@@ -77,6 +77,13 @@ advance it, a `tower question answer` when the owner asked something. The
 board (and the live SSE UI) is how the owner finds out — there is no
 side channel.
 
+Post Now-page context with
+`tower briefing post --file report.md --title "…" --by me` and
+`tower status post --file snapshot.json --by me`. Status snapshots
+contain milestone progress and workstreams, not an owner task queue.
+The removed `ownerActions` field is rejected with `E_INVALID`; omit it.
+Use ballots, owner verification, messages, and card closures for owner work.
+
 Cards may carry free-form **`tags[]`** (triage roles like `needs-triage` /
 `ready-for-agent`, wayfinder labels like `wayfinder:map`) and an optional
 **`parentId`** (child of a wayfinder map). These are orthogonal to `phase`
@@ -94,6 +101,10 @@ Each card has a computed `lane`: `decide` (owner), `plan`/`implement`/
 `tower next` sorts by review > building > implement > plan, then by ascending
 `workOrder` inside each lane. **Epochs** group the work; **milestones** are
 goals inside an epoch — link cards with `--milestone <id>` and progress computes itself.
+Every card lives in an epoch or is a sidequest — frozen cards included
+(frozen is a phase, not a home; the store refuses an epoch-track card with no
+epoch). The board shows frozen cards in their epoch or sidequest section with a
+Frozen badge; its Frozen filter shows only them.
 
 ## Writing
 
@@ -190,13 +201,20 @@ check that the source tree still matches it. Milestone verify requires every
 linked card `done`, every milestone criterion `verified`, and the token.
 Reopening a linked card or milestone criterion clears the token and signoff.
 
-Ballot-ready decisions carry: `gist` (one plain sentence), `lesson` (a few
+Ballot-ready decisions carry: `situation` (the headline summary every ballot
+view shows first: 4–7 plain sentences on what the thing is, what goes wrong
+today with one concrete example, who it matters to, what is being decided, and
+the recommendation; 300–1200 characters of prose, no lists, headings, or code;
+required for full ballots), `gist` (one plain sentence), `lesson` (a few
 plain sentences in one short paragraph that explain only the situation and
 stakes), `story` (a named person, why this exists), `inWild`
 (realistic code where the choice bites),
 `options[]` each with plain `{key,name,detail,code}` worked examples and optional
 hidden `technical` law, `comparisons[]` when relevant, `rec`, and structured
-`recommendation:{why,whyNot,tradeoff}`. `whyNot` covers every losing option.
+`recommendation:{why,gains,losses[{loss,mitigation}],whyNot,tradeoff}`.
+Remove recommended downsides or reduce them to negligible costs with a concrete
+plain-prose `mitigation` for each (under 24 words on the surface).
+`whyNot` covers every losing option.
 The `simple` skill applies to every user-visible field. A new full ballot
 records one- or two-sentence summaries from two fresh readers: first RLI5
 beginner, then adversarial. Neither reader helped author the ballot, and the
@@ -206,7 +224,8 @@ A short ballot is the complete base draft with no reviews and is the default
 for one mechanism with at most three options. New syntax, invariant changes,
 and owner-tagged full cards require the full profile. Plain prose uses one idea per sentence, defines
 jargon, expands acronyms, and leads with user impact. Write-time density limits
-are 32 words per sentence and 90 per paragraph. The owner decides from the ballot
+are 32 words per sentence and 90 per paragraph (`situation` takes only the
+sentence limit). The owner decides from the ballot
 alone — if they'd need to ask you something to decide, it isn't ready.
 
 ### Archive (#461) — history is separate from live
@@ -229,7 +248,10 @@ tower archive restore <id> --by owner   # bring one back to the live board
 automatically once something isn't live any more (the result carries
 `archived: true`). `card delete` still refuses while a ratified decision is
 LIVE on the card (`E_HAS_RATIFIED`) — let it retire on its own, or
-`tower archive restore` then re-detach, then delete.
+`tower archive restore` then re-detach, then delete. The one override is the
+owner's own Tower UI: the card's Delete button lists every ballot that goes
+with the card and needs a separate tick per ratified decision; the event log
+records each deleted ballot. Open ballots are always deleted with their card.
 
 ### Lint (#457) — durability sweeper
 
@@ -269,7 +291,7 @@ closeout token, criteria, command, and evidence. D-TWRGUARD1=C.
 | Owner-only ratify | `decision ratify` by a non-owner, for a non-acceptance ballot | `E_OWNER_ONLY` | `--quote "owner's words"` |
 | Owner acceptance provenance | Any generic ratify, clearance, quote, or batch attempt on `D-ACCEPT-*` | `E_ACCEPTANCE_OWNER_UI` | Owner uses the dedicated verification UI with its same-origin session and one-time challenge |
 | Frozen lane | any write to a `frozen` card | `E_OWNER_LANE` | none — owner moves it out with `tower card update --phase ... --by owner` |
-| Ratified-decision delete | `card delete` on a card with a ratified decision | `E_HAS_RATIFIED` | let it retire (`tower archive status`) or `tower archive restore` then re-detach — applies to owner too |
+| Ratified-decision delete | `card delete` on a card with a ratified decision | `E_HAS_RATIFIED` | let it retire (`tower archive status`) or `tower archive restore` then re-detach — CLI `--by owner` too; only the owner's Tower UI Delete dialog (same-origin owner session, one tick per ratified decision) deletes them with the card |
 | Outcome/option match | `decision ratify --outcome K` not one of the decision's option keys | `E_INVALID` | pass a real option key |
 | Building-release handoff | `card release` on a `building` card | `E_HANDOFF` | `--handoff "what's done, what's left, gotchas"` |
 | Card closure | non-owner closes a card with no criteria or an unsettled criterion | `E_CRITERIA` | add criteria and mark every row `met` or `verified` |
@@ -291,16 +313,24 @@ blocks the same as an unfinished card.
 ## Concurrency
 
 - Writes are serialized by a lock and applied atomically; concurrent agents
-  are safe.
-- For read-modify-write races: pass `--expect-rev N` (from `tower state`'s
-  `meta.rev`). Exit code 2 = conflict → re-read, retry.
+  are safe. Every write is field-level: it re-reads the board under the lock
+  and changes only the fields it names, so an unrelated agent write never
+  rejects or overwrites it. `tower serve` waits for the lock without
+  blocking its readers.
+- For read-modify-write races on the same field: pass `--expect-rev N` (from
+  `tower state`'s `meta.rev`). Exit code 2 = conflict → re-read, retry.
 - `tower card claim` prevents two agents double-working a card while its
   24-hour renewable lease is active. An expired lease is never a blocker.
 
 ## HTTP API (when `tower serve` is up, default :7878)
 
 ```
-GET  /api/state                     full projected state
+GET  /api/state                     board index (card summaries; ETag/304)
+GET  /api/card?id=&live=0|1         one full card; live=1 answers from memory
+GET  /api/closed                    done + archived card summaries
+GET  /api/stream?rev=&boot=         SSE: `state` (full index), then `delta`
+                                     patches per change; a client already at
+                                     rev gets `hello` and only later deltas
 GET  /api/next?agent=me&limit=5     canonical work picker
 GET  /api/lint?docs=0|1             durability sweeper findings (#457)
 GET  /api/brief?card=&agent=&claim=0|1   one-shot work packet (#462); no

@@ -4877,7 +4877,7 @@ mod a4_envelope_tests {
             .map(std::path::PathBuf::from)
             .unwrap_or_else(|| std::path::PathBuf::from("."))
             .join(".cache")
-            .join("jet-test-scratch")
+            .join("jet-dev/scratch")
             .join("ExternRust2432")
             .join("scratch")
             .join(format!("lock-rust-bridge-{}", std::process::id()));

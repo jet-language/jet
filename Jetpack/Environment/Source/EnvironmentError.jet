@@ -6,7 +6,7 @@
 
 #Error
 pub enum EnvironmentError {
-    Io(IOError)
+    IO(IOError)
     InvalidData(String)
     InvalidInput(String)
     NotFound(String)
@@ -20,7 +20,7 @@ pub enum EnvironmentError {
 
     fn message(self) -> String Never! {
         if self == {
-            .Io(error) -> "{error}"
+            .IO(error) -> "{error}"
             .InvalidData(text) -> text
             .InvalidInput(text) -> text
             .NotFound(text) -> text
@@ -37,7 +37,7 @@ pub enum EnvironmentError {
     // Rust `error.kind() == ErrorKind::NotFound` across both carriers.
     fn is_not_found(self) -> Bool Never! {
         if self == {
-            .Io(error) -> {
+            .IO(error) -> {
                 if error == {
                     .NotFound(context) -> true
                     else -> false
@@ -49,6 +49,6 @@ pub enum EnvironmentError {
     }
 }
 
-impl IOError -> EnvironmentError { EnvironmentError.Io(self) }
+impl IOError -> EnvironmentError { EnvironmentError.IO(self) }
 
 impl OverlayError -> EnvironmentError { EnvironmentError.Overlay(self) }

@@ -1,0 +1,39 @@
+// Calls in record fields preserve fixed-width bits, not exact-Int pointer tags.
+struct Word { pub value: U64 }
+struct SignedWord { pub value: I64 }
+
+fn hash2(namespace: String, identity: String) -> U64 Never! {
+    prime :: U64{0x100000001b3}
+    hash := U64{0xcbf29ce484222325}
+    loop byte in namespace.bytes() -> hash = (hash ~| U64.from_u8(byte)).wrapping_mul(prime)
+    hash = hash.wrapping_mul(prime)
+    loop byte in identity.bytes() -> hash = (hash ~| U64.from_u8(byte)).wrapping_mul(prime)
+    hash
+}
+
+fn wrap(identity: String) -> Word Never! { Word{value: hash2("mir-type", identity)} }
+fn scalar_wrap(identity: String) -> U64 Never! { hash2("mir-type", identity) }
+fn word_bits() -> U64 Never! { U64{0xffffffffffffffff} }
+fn signed_bits() -> I64 Never! { I64{-9223372036854775807} }
+
+fn run() {
+    print("wrapped: {wrap("Unit").value}")
+    print("direct: {hash2("mir-type", "Unit")}")
+    print("wrapper: {scalar_wrap("Unit")}")
+    direct_field :: Word{value: hash2("mir-type", "Unit")}
+    wrapper_field :: Word{value: scalar_wrap("Unit")}
+    print("direct field: {direct_field.value}")
+    print("wrapper field: {wrapper_field.value}")
+    copied :: ~direct_field
+    print("copy: {copied.value}")
+    assert_eq(copied.value, U64{7299585414513572552})
+    assert_eq(direct_field.value, wrapper_field.value)
+    unsigned :: Word{value: word_bits()}
+    signed :: SignedWord{value: signed_bits()}
+    unsigned_copy :: ~unsigned
+    signed_copy :: ~signed
+    print("unsigned: {unsigned_copy.value}")
+    print("signed: {signed_copy.value}")
+    constant :: Word{value: U64{0xffffffffffffffff}}
+    assert_eq(unsigned.value, constant.value)
+}

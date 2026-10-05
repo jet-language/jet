@@ -12,7 +12,7 @@
 // effect projections; it must not grow a second Core parser or renderer.
 
 import { createHash } from "node:crypto";
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
@@ -22,6 +22,7 @@ import {
   validateGeneratedViews,
   writeCoreViews,
 } from "./check-core-surface-ledger.mjs";
+import { CORE_RECORD_ROWS_PATH, generatedCoreRecordRows } from "./core-record-rows.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const EFFECT_SOURCE_PATH = "crates/jet-codegen/src/Prelude/Effects.jet";
@@ -407,6 +408,18 @@ function writeOperationContract() {
   writeFileSync(file(OPERATIONS_DOC_PATH), doc);
 }
 
+// Core record field and struct-literal rows for the Jet compiler, projected
+// from the Rust sema record tables (Tools/agent/core-record-rows.mjs).
+function checkCoreRecordRows() {
+  if (!existsSync(file(CORE_RECORD_ROWS_PATH)) || read(CORE_RECORD_ROWS_PATH) !== generatedCoreRecordRows(ROOT)) {
+    fail(`${CORE_RECORD_ROWS_PATH} is stale; run gen-core-tables.mjs --write`);
+  }
+}
+
+function writeCoreRecordRows() {
+  writeFileSync(file(CORE_RECORD_ROWS_PATH), generatedCoreRecordRows(ROOT));
+}
+
 function check() {
   const source = read(EFFECT_SOURCE_PATH);
   const facts = parseEffects(source);
@@ -416,6 +429,7 @@ function check() {
   checkOperationContract();
   const coreSource = read(CORE_SOURCE_PATH);
   validateGeneratedViews(coreSource, core);
+  checkCoreRecordRows();
   process.stdout.write("open tables: generated views are current\n");
 }
 
@@ -428,6 +442,7 @@ function write() {
   // CoreModuleExports.rs and RingLayer.rs use the existing Core generator;
   // this coordinator never reimplements that schema.
   writeCoreViews();
+  writeCoreRecordRows();
   validatePublicDispatcher(core, publicDispatcherRows());
   process.stdout.write("wrote effect and Core generated views\n");
 }

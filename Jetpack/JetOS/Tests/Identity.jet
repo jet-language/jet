@@ -1,0 +1,49 @@
+// Rust identity_tests::jetos_release_identity_pins_stable_and_prerelease_forms.
+#Test("jetos_release_identity_pins_stable_and_prerelease_forms") {
+    assert_eq(jetos_release_label(false), "jetos 26.10 (Apex)")
+    assert_eq(jetos_release_label(true), "jetos 26.10-pre (Apex)")
+    assert_eq(jetos_render_jetos_os_release(true), "NAME=jetos\nID=jetos\nVERSION=\"26.10-pre (Apex)\"\nVERSION_ID=26.10-pre\nVERSION_CODENAME=apex\nPRETTY_NAME=\"jetos 26.10-pre (Apex)\"\nHOME_URL=\"https://jet-lang.dev/jetos\"\n")
+    surfaces :: [String]{jetos_render_jetos_os_release(false), jetos_render_jetos_os_release(true)}
+    loop surface in surfaces -> assert(!surface.contains("NixOS") && !surface.contains("Yarara"))
+}
+
+#Test("JetOS stable os-release bytes and embedded Apex identity") {
+    assert_eq(jetos_render_jetos_os_release(false), "NAME=jetos\nID=jetos\nVERSION=\"26.10 (Apex)\"\nVERSION_ID=26.10\nVERSION_CODENAME=apex\nPRETTY_NAME=\"jetos 26.10 (Apex)\"\nHOME_URL=\"https://jet-lang.dev/jetos\"\n")
+    assert(JETOS_WALLPAPER_SVG.starts_with("<svg xmlns=\"http://www.w3.org/2000/svg\""))
+    assert(JETOS_WALLPAPER_SVG.contains("<title id=\"title\">jetos 26.10 Apex</title>"))
+    assert(!JETOS_WALLPAPER_SVG.contains("NixOS") && !JETOS_WALLPAPER_SVG.contains("Yarara"))
+}
+
+// Rust identity_tests::jetos_release_identity_reaches_generation_and_installer_projection.
+// Mandatory #4262: actual SystemFacts and InstallerMedia slices must provide
+// these Rust entry points; no fabricated payload copier/renderers may satisfy
+// this original acceptance case.
+#Test("jetos_release_identity_reaches_generation_and_installer_projection") {
+    root :: files.tmpdir("jetos-identity-") ?? panic("identity scratch")
+    generation :: files.join(root, "generation")
+    installer :: files.join(root, "installer/current-system")
+    system :: SystemPlan{name: "halcyon", target: "linux.x64", packages: [Pkg]{}, services: [ServicePlan]{}, options: [OptionPlan]{OptionPlan{key: "hardware.halcyon.specialisation.plasmaBeta", value: "true"}}}
+    files.create_dir_all(generation) ?? panic("generation directory")
+    jetos_write_etc_tree(generation, system) ?? panic("generation etc")
+    jetos_write_hardware_facts(generation, system) ?? panic("generation hardware")
+    generation_record :: JetOSGeneration{name: "identity-proof", host: system.name, path: generation, created_at: 0}
+    installed_limine :: jetos_render_installed_limine_conf(system, generation_record)
+    installer_limine :: jetos_render_installer_limine_conf(system, generation_record, "/dev/sda")
+    jetos_copy_generation_payload_deref(generation, installer) ?? panic("installer payload")
+    os_release :: files.read(files.join(generation, "etc/os-release")) ?? panic("generation os release")
+    usr_os_release :: files.read(files.join(generation, "usr/lib/os-release")) ?? panic("generation usr os release")
+    specialisation :: files.read(files.join(generation, "boot/specialisations/plasmaBeta.conf")) ?? panic("specialisation")
+    wallpaper :: files.read(files.join(generation, "share/backgrounds/jetos/apex.svg")) ?? panic("generation wallpaper")
+    assert_eq(os_release, jetos_render_jetos_os_release(false))
+    assert_eq(usr_os_release, os_release)
+    assert_eq(wallpaper, JETOS_WALLPAPER_SVG)
+    assert(specialisation.contains("title jetos 26.10 (Apex) — halcyon (plasmaBeta)"))
+    assert(installed_limine.contains("/jetos 26.10 (Apex) — halcyon verify"))
+    assert(installer_limine.contains("/Install jetos 26.10 (Apex) — halcyon"))
+    assert_eq(files.read(files.join(installer, "etc/os-release")) ?? panic("installer os release"), os_release)
+    assert_eq(files.read(files.join(installer, "usr/lib/os-release")) ?? panic("installer usr os release"), usr_os_release)
+    assert_eq(files.read(files.join(installer, "share/backgrounds/jetos/apex.svg")) ?? panic("installer wallpaper"), wallpaper)
+    surfaces :: [String]{os_release, usr_os_release, specialisation, wallpaper, installed_limine, installer_limine}
+    loop surface in surfaces -> assert(!surface.contains("NixOS") && !surface.contains("Yarara"))
+    files.remove_all(root) ?? panic("remove identity scratch")
+}

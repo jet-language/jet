@@ -29,11 +29,11 @@ pub struct RoleKeys {
     pub threshold: Int
 
     fn new(key_ids: [String], threshold: Int) -> RoleKeys TrustRootError! {
-        if threshold == 0 -> return Err(TrustRootError.InvalidThreshold("threshold must be >= 1"))
-        if threshold > key_ids.len() -> return Err(TrustRootError.InvalidThreshold("threshold {threshold} exceeds key count {key_ids.len()}"))
+        if threshold == 0 -> return Err(TrustRootError.InvalidThreshold{detail: "threshold must be >= 1"})
+        if threshold > key_ids.len() -> return Err(TrustRootError.InvalidThreshold{detail: "threshold {threshold} exceeds key count {key_ids.len()}"})
         seen := [String]{}
         loop id in key_ids {
-            if seen.contains(id) -> return Err(TrustRootError.InvalidThreshold("duplicate key id `{id}` in role"))
+            if seen.contains(id) -> return Err(TrustRootError.InvalidThreshold{detail: "duplicate key id `{id}` in role"})
             &seen.push(id)
         }
         Ok(RoleKeys{key_ids, threshold})
@@ -57,7 +57,7 @@ pub struct Delegation {
 
 // Root metadata. `roles` is keyed by role label; `public_key_ids` maps each
 // public key id to its algorithm (secret material stays offline).
-pub struct TufRootMetadata {
+pub struct TUFRootMetadata {
     pub version: Int
     pub expires_unix: Int
     pub consistent_snapshot: Bool
@@ -113,7 +113,7 @@ pub struct TrustRootPolicy {
     pub trusted_unix: Int?
 
     fn default() -> TrustRootPolicy Never! {
-        TrustRootPolicy{max_metadata_bytes: @TRUST_DEFAULT_MAX_METADATA_BYTES, max_clock_skew_secs: @TRUST_DEFAULT_MAX_CLOCK_SKEW_SECS, trusted_unix: None}
+        TrustRootPolicy{max_metadata_bytes: TRUST_DEFAULT_MAX_METADATA_BYTES, max_clock_skew_secs: TRUST_DEFAULT_MAX_CLOCK_SKEW_SECS, trusted_unix: None}
     }
 }
 
@@ -134,8 +134,8 @@ pub struct Keyring {
     }
 
     fn verify(self, key_id: String, message: [U8], signature: TrustSignature) TrustRootError! {
-        key :: self.keys.get(key_id) ?? return Err(TrustRootError.UnknownKey(key_id))
-        if signature.algorithm != @TRUST_ALG_HMAC_SHA256 && signature.algorithm != key.algorithm {
+        key :: self.keys.get(key_id) ?? return Err(TrustRootError.UnknownKey{key_id: key_id})
+        if signature.algorithm != TRUST_ALG_HMAC_SHA256 && signature.algorithm != key.algorithm {
             return Err(TrustRootError.SignatureInvalid{role: MetadataRole.Root, detail: "unsupported algorithm `{signature.algorithm}`"})
         }
         expected :: hex.encode(crypto.hmac_sha256(key.secret, message))
@@ -168,15 +168,15 @@ pub struct RootBootstrap {
             .Err(error) -> {
                 if error == {
                     .NotFound(_) -> return Err(TrustRootError.BootstrapMissing)
-                    else -> return Err(TrustRootError.Io("{error}"))
+                    else -> return Err(TrustRootError.IO{detail: "{error}"})
                 }
             }
         }
-        if metadata.is_symlink || !metadata.is_file -> return Err(TrustRootError.Io("trusted-root bootstrap is not a regular file"))
-        if metadata.size > @TRUST_BOOTSTRAP_MAX_BYTES -> return Err(TrustRootError.Io("trusted-root bootstrap is too large"))
-        digest := None
-        version := None
-        consistent := None
+        if metadata.is_symlink || !metadata.is_file -> return Err(TrustRootError.IO{detail: "trusted-root bootstrap is not a regular file"})
+        if metadata.size > TRUST_BOOTSTRAP_MAX_BYTES -> return Err(TrustRootError.IO{detail: "trusted-root bootstrap is too large"})
+        digest := String?{None}
+        version := Int?{None}
+        consistent := Bool?{None}
         loop line in trust_root_lines(files.read(path)) {
             if {
                 line.starts_with("digest=") -> digest = Val(line.removeprefix("digest="))
@@ -204,16 +204,16 @@ pub struct PublicTrustKey {
     // One `key-id:base64-public-key` line; the key decodes to 32 bytes.
     fn from_nix_line(role: String, value: String) -> PublicTrustKey TrustRootError! {
         known :: [String]{"index", "cache", "toolchain"}
-        if !known.contains(role) -> return Err(TrustRootError.InvalidKey("unknown public trust role `{role}`"))
-        parts :: value.trim().split_once(":") ?? return Err(TrustRootError.InvalidKey("public trust key must be key-id:base64-public-key"))
+        if !known.contains(role) -> return Err(TrustRootError.InvalidKey{detail: "unknown public trust role `{role}`"})
+        parts :: value.trim().split_once(":") ?? return Err(TrustRootError.InvalidKey{detail: "public trust key must be key-id:base64-public-key"})
         key_id :: parts.before
         encoded :: parts.after
         if key_id == "" || encoded == "" || trust_has_control(key_id) || trust_has_control(encoded) || trust_has_inner_space(encoded) {
-            return Err(TrustRootError.InvalidKey("public trust key has invalid key id or encoding"))
+            return Err(TrustRootError.InvalidKey{detail: "public trust key has invalid key id or encoding"})
         }
-        if trust_is_test_public_key_id(key_id) -> return Err(TrustRootError.InvalidKey("test public trust key `{key_id}` cannot be published"))
-        decoded :: base64.decode(encoded) ?? return Err(TrustRootError.InvalidKey("public trust key is not padded base64"))
-        if decoded.len() != 32 -> return Err(TrustRootError.InvalidKey("public trust key must decode to 32 bytes"))
+        if trust_is_test_public_key_id(key_id) -> return Err(TrustRootError.InvalidKey{detail: "test public trust key `{key_id}` cannot be published"})
+        decoded :: base64.decode(encoded) ?? return Err(TrustRootError.InvalidKey{detail: "public trust key is not padded base64"})
+        if decoded.len() != 32 -> return Err(TrustRootError.InvalidKey{detail: "public trust key must decode to 32 bytes"})
         Ok(PublicTrustKey{role, key_id, algorithm: "ed25519", public_key: encoded})
     }
 
@@ -243,11 +243,11 @@ fn trust_is_test_public_key_id(key_id: String) -> Bool Never! {
 // bootstrap pin when one exists but never a `TrustKey` secret; an empty key
 // list is intentional while the production key ceremony is pending.
 pub fn trust_public_trust_manifest(domain: String, bootstrap: RootBootstrap?, keys: [PublicTrustKey]) -> String TrustRootError! {
-    if domain == "" || trust_has_control(domain) || trust_has_inner_space(domain) -> return Err(TrustRootError.InvalidKey("public trust manifest domain is empty or contains whitespace"))
+    if domain == "" || trust_has_control(domain) || trust_has_inner_space(domain) -> return Err(TrustRootError.InvalidKey{detail: "public trust manifest domain is empty or contains whitespace"})
     sorted := keys
     &sorted.sort_by(key -> key.role)
     loop index in 1..<sorted.len() {
-        if sorted[index - 1].role == sorted[index].role -> return Err(TrustRootError.InvalidKey("public trust role `{sorted[index].role}` is duplicated"))
+        if sorted[index - 1].role == sorted[index].role -> return Err(TrustRootError.InvalidKey{detail: "public trust role `{sorted[index].role}` is duplicated"})
     }
     status :: if sorted.len() == 0 -> "awaiting-key-ceremony" else -> "prepared"
     root :: if bootstrap == {
@@ -273,7 +273,7 @@ pub fn trust_public_trust_manifest(domain: String, bootstrap: RootBootstrap?, ke
     }
     manifest := [String: DataTree]{}
     manifest["schema"] = DataTree.Int(1)
-    manifest["domain"] = DataTree.Text(domain)
+    manifest["domain"] = DataTree.Text(~domain)
     manifest["status"] = DataTree.Text(status)
     manifest["root"] = root
     manifest["keys"] = DataTree.Array(rendered)

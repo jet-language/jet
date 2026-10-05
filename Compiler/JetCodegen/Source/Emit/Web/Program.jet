@@ -229,6 +229,9 @@ fn jet_web_rustc_identity(ctx: &JetWebEmitContext) -> String Never! {
     "jet-web-rustc-v2:{mir_sha256_hex(seed)}"
 }
 
+// Web and Rust emission retain separate owned contexts while the caller keeps
+// the checked MIR for its compile result. Only context construction snapshots
+// the program; repeated function traversal must not snapshot its row list.
 fn jet_web_context(program: MIRProgram, config: JetWebEmitConfig) -> JetWebEmitContext {
     artifact :: jet_web_find_artifact(program, config.artifact)
     artifact_row :: artifact ?? MIRArtifactPlan{id: config.artifact, kind: MIRArtifactKind.WebApplication, name: "", target: MIRArtifactTarget.Web, mode: MIRArtifactBuildMode.Dev, modules: [MIRModuleID]{}, links: [MIRLinkUnitID]{}, jobs: [MIRJobID]{}, runtime_parts: [MIRRuntimePartID]{}, exports: [MIRExport]{}, provider_identity: "", closure_identity: "", artifact_identity: "", entry: None, harness: None}

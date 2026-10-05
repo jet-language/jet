@@ -6,16 +6,16 @@
 // redirect a read outside the project. The pure policy (path components,
 // regular-file and size admission) lives in ImportAuthority.jet.
 
-@NIX_IMPORT_READ_CHUNK :: 65536
+NIX_IMPORT_READ_CHUNK :: prep { 65536 }
 
 pub struct NixProjectImportAuthority {
     root: Directory
 
     // Hold `root`; its final component must be a real directory, not a link.
     fn open(root: String) -[FS]> NixProjectImportAuthority NixError! {
-        directory :: files.open_directory(root) ?? return Err(NixError.ImportIo("{err}"))
-        info :: directory.stat() ?? return Err(NixError.ImportIo("{err}"))
-        if !info.is_dir -> return Err(NixError.ImportIo("project import authority is not a directory"))
+        directory :: files.open_directory(root) ?? return Err(NixError.ImportIO("{err}"))
+        info :: directory.stat() ?? return Err(NixError.ImportIO("{err}"))
+        if !info.is_dir -> return Err(NixError.ImportIO("project import authority is not a directory"))
         Ok(NixProjectImportAuthority{root: directory})
     }
 
@@ -23,22 +23,22 @@ pub struct NixProjectImportAuthority {
     // evaluator limit. A link anywhere on the path is refused.
     fn read(self, relative: String) -[FS]> String NixError! {
         components :: nix_import_path_components(relative)
-        if components.len() == 0 -> return Err(NixError.ImportIo("import path is empty"))
+        if components.len() == 0 -> return Err(NixError.ImportIO("import path is empty"))
         directory := self.root
         loop index in 0..<components.len() - 1 {
             directory = nix_import_open_directory(directory, components[index])
         }
         name :: components[components.len() - 1]
         file :: nix_import_open_file(directory, name)
-        info :: file.stat() ?? return Err(NixError.ImportIo("{err}"))
+        info :: file.stat() ?? return Err(NixError.ImportIO("{err}"))
         NixImportMetadata{regular_file: info.is_file && !info.is_symlink, length: info.size}.admit()
         bytes := [U8]{}
-        loop bytes.len() <= @NIX_IMPORT_MAX_BYTES {
-            chunk :: file.read(@NIX_IMPORT_READ_CHUNK) ?? return Err(NixError.ImportIo("{err}"))
+        loop bytes.len() <= NIX_IMPORT_MAX_BYTES {
+            chunk :: file.read(NIX_IMPORT_READ_CHUNK) ?? return Err(NixError.ImportIO("{err}"))
             if chunk.len() == 0 -> break
             loop byte in chunk -> &bytes.push(byte)
         }
-        text :: String.from_bytes(bytes) ?? return Err(NixError.ImportIo("stream did not contain valid UTF-8"))
+        text :: String.from_bytes(bytes) ?? return Err(NixError.ImportIO("stream did not contain valid UTF-8"))
         nix_import_admit_source(text)
     }
 }
@@ -69,5 +69,5 @@ fn nix_import_open_error(parent: Directory, name: String, error: IOError) -[FS]>
         }
         .Err(_) -> {}
     }
-    NixError.ImportIo("{error}")
+    NixError.ImportIO("{error}")
 }

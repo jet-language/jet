@@ -3,7 +3,7 @@
 // first and splices the semantic text after the machine half under the
 // project lock, so machine `pkg_lock_parse`/`pkg_lock_write` keep their bytes.
 
-@SEMANTIC_LOCK_SCOPE :: "semantic-lock"
+SEMANTIC_LOCK_SCOPE :: prep { "semantic-lock" }
 
 // Rust `live_path`: the project's `.jet/lock`.
 pub fn trust_semantic_lock_live_path(project: String) -> String Never! {
@@ -24,7 +24,7 @@ pub fn trust_semantic_lock_load(project: String) -[FS]> SemanticLockFile? {
 pub fn trust_semantic_lock_atomic_commit(project: String, lock: SemanticLockFile) TrustError! -[FS, Env, Exec, Time, Time.Wait]> {
     trust_revalidate_semantic_lock(lock)
     path :: trust_semantic_lock_live_path(project)
-    _guard :: env_runtime_project_lock(project, @SEMANTIC_LOCK_SCOPE)
+    _guard :: env_runtime_project_lock(project, SEMANTIC_LOCK_SCOPE)
     existing :: files.read(path) ?? ""
     stripped :: trust_strip_semantic_sections(existing)
     machine := ~stripped

@@ -5,7 +5,7 @@
 // opened file through `NixImportMetadata.admit` and its text through
 // `nix_import_admit_source`.
 
-@NIX_IMPORT_MAX_BYTES :: 1048576
+NIX_IMPORT_MAX_BYTES :: prep { 1048576 }
 
 // The normal components of a project-relative import path, with the
 // normalization of Rust `Path::components`: repeated and trailing `/` and
@@ -40,13 +40,13 @@ pub struct NixImportMetadata {
     // limit.
     fn admit(self) NixError! {
         if !self.regular_file -> return Err(NixError.ImportNotRegularFile)
-        if self.length > @NIX_IMPORT_MAX_BYTES -> return Err(NixError.ImportTooLarge)
+        if self.length > NIX_IMPORT_MAX_BYTES -> return Err(NixError.ImportTooLarge)
     }
 }
 
 // The text read through the handle (at most one byte past the limit) must
 // still fit: the file may have grown after its metadata was read.
 pub fn nix_import_admit_source(source: String) -> String NixError! {
-    if source.bytes().len() > @NIX_IMPORT_MAX_BYTES -> return Err(NixError.ImportTooLarge)
+    if source.bytes().len() > NIX_IMPORT_MAX_BYTES -> return Err(NixError.ImportTooLarge)
     Ok(source)
 }

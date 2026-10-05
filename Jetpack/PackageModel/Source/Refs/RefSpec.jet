@@ -49,29 +49,29 @@ pub enum RefSource {
     // The source token as written after the `@` in a ref.
     fn label(self) -> String Never! {
         if self == {
-            .Jetpack -> @REF_SOURCE_JETPACK
-            .Nixpkgs -> @REF_SOURCE_NIXPKGS
-            .Github -> @REF_SOURCE_GITHUB
-            .Path -> @REF_SOURCE_PATH
-            .Cran -> @REF_SOURCE_CRAN
-            .LuaRocks -> @REF_SOURCE_LUAROCKS
-            .RubyGems -> @REF_SOURCE_RUBY
-            .Cpan -> @REF_SOURCE_PERL
-            .Packagist -> @REF_SOURCE_PHP
-            .JetRegistry -> @REF_SOURCE_JET_REGISTRY
-            .Npm -> @REF_SOURCE_NPM
-            .Cargo -> @REF_SOURCE_CARGO
-            .PyPI -> @REF_SOURCE_PYPI
-            .SwiftPM -> @REF_SOURCE_SWIFTPM
-            .Releases -> @REF_SOURCE_RELEASES
+            .Jetpack -> REF_SOURCE_JETPACK
+            .Nixpkgs -> REF_SOURCE_NIXPKGS
+            .Github -> REF_SOURCE_GITHUB
+            .Path -> REF_SOURCE_PATH
+            .Cran -> REF_SOURCE_CRAN
+            .LuaRocks -> REF_SOURCE_LUAROCKS
+            .RubyGems -> REF_SOURCE_RUBY
+            .Cpan -> REF_SOURCE_PERL
+            .Packagist -> REF_SOURCE_PHP
+            .JetRegistry -> REF_SOURCE_JET_REGISTRY
+            .Npm -> REF_SOURCE_NPM
+            .Cargo -> REF_SOURCE_CARGO
+            .PyPI -> REF_SOURCE_PYPI
+            .SwiftPM -> REF_SOURCE_SWIFTPM
+            .Releases -> REF_SOURCE_RELEASES
             .Named(name) -> name
         }
     }
 
     // Whether `name` is one of the built-in source keywords. Reads
-    // `@REF_SOURCE_PROVIDERS`, the one home for this set.
+    // `REF_SOURCE_PROVIDERS`, the one home for this set.
     fn is_builtin(name: String) -> Bool Never! {
-        @REF_SOURCE_PROVIDERS.contains(name)
+        REF_SOURCE_PROVIDERS.contains(name)
     }
 
     // Resolve the source half of a `package@source` ref: a built-in, a
@@ -93,21 +93,21 @@ pub enum RefSource {
 
     fn builtin(name: String) -> RefSource? Never! {
         if name == {
-            @REF_SOURCE_JETPACK -> Val(RefSource.Jetpack)
-            @REF_SOURCE_NIXPKGS -> Val(RefSource.Nixpkgs)
-            @REF_SOURCE_GITHUB -> Val(RefSource.Github)
-            @REF_SOURCE_PATH -> Val(RefSource.Path)
-            @REF_SOURCE_CRAN -> Val(RefSource.Cran)
-            @REF_SOURCE_LUAROCKS -> Val(RefSource.LuaRocks)
-            @REF_SOURCE_RUBY -> Val(RefSource.RubyGems)
-            @REF_SOURCE_PERL -> Val(RefSource.Cpan)
-            @REF_SOURCE_PHP -> Val(RefSource.Packagist)
-            @REF_SOURCE_JET_REGISTRY -> Val(RefSource.JetRegistry)
-            @REF_SOURCE_NPM -> Val(RefSource.Npm)
-            @REF_SOURCE_CARGO -> Val(RefSource.Cargo)
-            @REF_SOURCE_PYPI -> Val(RefSource.PyPI)
-            @REF_SOURCE_SWIFTPM -> Val(RefSource.SwiftPM)
-            @REF_SOURCE_RELEASES -> Val(RefSource.Releases)
+            REF_SOURCE_JETPACK -> Val(RefSource.Jetpack)
+            REF_SOURCE_NIXPKGS -> Val(RefSource.Nixpkgs)
+            REF_SOURCE_GITHUB -> Val(RefSource.Github)
+            REF_SOURCE_PATH -> Val(RefSource.Path)
+            REF_SOURCE_CRAN -> Val(RefSource.Cran)
+            REF_SOURCE_LUAROCKS -> Val(RefSource.LuaRocks)
+            REF_SOURCE_RUBY -> Val(RefSource.RubyGems)
+            REF_SOURCE_PERL -> Val(RefSource.Cpan)
+            REF_SOURCE_PHP -> Val(RefSource.Packagist)
+            REF_SOURCE_JET_REGISTRY -> Val(RefSource.JetRegistry)
+            REF_SOURCE_NPM -> Val(RefSource.Npm)
+            REF_SOURCE_CARGO -> Val(RefSource.Cargo)
+            REF_SOURCE_PYPI -> Val(RefSource.PyPI)
+            REF_SOURCE_SWIFTPM -> Val(RefSource.SwiftPM)
+            REF_SOURCE_RELEASES -> Val(RefSource.Releases)
             else -> None
         }
     }
@@ -230,8 +230,8 @@ pub enum ChannelPolicy {
     // The policy a channel selector declares, or None for an exact selector.
     fn for_selector(selector: String) -> ChannelPolicy? Never! {
         if selector == {
-            @REF_CHANNEL_AUTO -> Val(ChannelPolicy.Automatic)
-            @REF_CHANNEL_LATEST -> Val(ChannelPolicy.Manual)
+            REF_CHANNEL_AUTO -> Val(ChannelPolicy.Automatic)
+            REF_CHANNEL_LATEST -> Val(ChannelPolicy.Manual)
             else -> if ChannelRef.parse_selector(selector) != None -> Val(ChannelPolicy.Manual) else -> None
         }
     }
@@ -244,7 +244,7 @@ pub enum ChannelPolicy {
 }
 
 // One `(name, upstream, provider)` source declaration.
-pub struct SourceDecl {
+pub struct NamedSourceDecl {
     pub name: String
     pub upstream: String
     pub via: ProviderKind
@@ -270,7 +270,7 @@ pub struct SourceTable {
     }
 
     // Build from declarations; a repeated name keeps its last declaration.
-    fn from_decls(decls: [SourceDecl]) -> SourceTable Never! {
+    fn from_decls(decls: [NamedSourceDecl]) -> SourceTable Never! {
         table := SourceTable.empty()
         loop decl in decls {
             table.named[decl.name] = SourceTableEntry{upstream: decl.upstream, via: decl.via, policy: ChannelPolicy.for_upstream(decl.upstream), raw: decl.upstream}
@@ -320,11 +320,11 @@ pub struct SourceTable {
     }
 
     // Declared source records, sorted by name.
-    fn declarations(self) -> [SourceDecl] Never! {
-        out := [SourceDecl]{}
+    fn declarations(self) -> [NamedSourceDecl] Never! {
+        out := [NamedSourceDecl]{}
         loop name in self.declared_names() {
             entry :: self.named[name]
-            &out.push(SourceDecl{name: name, upstream: entry.upstream, via: entry.via})
+            &out.push(NamedSourceDecl{name: name, upstream: entry.upstream, via: entry.via})
         }
         out
     }
@@ -356,7 +356,7 @@ pub struct RefSpec {
 
     // A short, human display name for the package (last path segment).
     fn short_name(self) -> String Never! {
-        package :: self.package.split_once(@REF_CHANNEL_MARKER)?.before ?? self.package
+        package :: self.package.split_once(REF_CHANNEL_MARKER)?.before ?? self.package
         package.cut_last("/")?.after ?? package
     }
 
@@ -377,8 +377,8 @@ pub struct RefSpec {
             .Val(error) -> return Err(error)
             .None -> {}
         }
-        if pkg_is_bare_path(raw) && !raw.contains(@REF_PROVIDER_AT) -> return Ok(RefSpec{source: RefSource.Path, package: raw, raw: raw})
-        if raw.cut_last(@REF_PROVIDER_AT) == {
+        if pkg_is_bare_path(raw) && !raw.contains(REF_PROVIDER_AT) -> return Ok(RefSpec{source: RefSource.Path, package: raw, raw: raw})
+        if raw.cut_last(REF_PROVIDER_AT) == {
             .Val(halves) -> {
                 package :: halves.before
                 if halves.after == "" || package == "" -> return Err(RefError.EmptyHalf(raw))
@@ -386,7 +386,7 @@ pub struct RefSpec {
                 if split.empty_half -> return Err(RefError.EmptyHalf(raw))
                 source :: RefSource.resolve(split.source, package, raw, table)
                 if split.selector == {
-                    .Val(selector) -> return Ok(RefSpec{source: source, package: "{package}{@REF_CHANNEL_MARKER}{selector}", raw: raw})
+                    .Val(selector) -> return Ok(RefSpec{source: source, package: "{package}{REF_CHANNEL_MARKER}{selector}", raw: raw})
                     .None -> return Ok(RefSpec{source: source, package: package, raw: raw})
                 }
             }
@@ -421,7 +421,7 @@ pub struct RefSpec {
     // that matches more than one is `AmbiguousMember` (E1230).
     fn classify_with_workspace(input: String, table: SourceTable, index: WorkspaceIndex) -> RefSpec RefError! {
         raw :: input.trim()
-        if !raw.contains(@REF_PROVIDER_AT) && !pkg_is_bare_path(raw) && !index.is_empty() {
+        if !raw.contains(REF_PROVIDER_AT) && !pkg_is_bare_path(raw) && !index.is_empty() {
             // Preserve an explicitly declared `source.package` form before the
             // source-less workspace lookup. A bare package's Jetpack default is
             // deliberately deferred so an unknown member remains E1231.
@@ -596,27 +596,27 @@ pub fn pkg_is_bare_path(raw: String) -> Bool Never! {
 // index.
 pub fn pkg_with_default_source(input: String) -> String Never! {
     raw :: input.trim()
-    if raw.contains(@REF_PROVIDER_AT) || pkg_is_bare_path(raw) -> return raw
-    if raw.split_once(@REF_CHANNEL_MARKER) == {
+    if raw.contains(REF_PROVIDER_AT) || pkg_is_bare_path(raw) -> return raw
+    if raw.split_once(REF_CHANNEL_MARKER) == {
         .Val(parts) -> {
             if parts.before != "" && parts.after != "" {
-                return "{parts.before}{@REF_PROVIDER_AT}{@REF_SOURCE_JETPACK}{@REF_CHANNEL_MARKER}{parts.after}"
+                return "{parts.before}{REF_PROVIDER_AT}{REF_SOURCE_JETPACK}{REF_CHANNEL_MARKER}{parts.after}"
             }
         }
         .None -> {}
     }
-    "{raw}{@REF_PROVIDER_AT}{@REF_SOURCE_JETPACK}"
+    "{raw}{REF_PROVIDER_AT}{REF_SOURCE_JETPACK}"
 }
 
 fn pkg_ref_provider_first(provider: String, target: String, raw: String) -> RefError Never! {
-    replacement :: if provider == @REF_SOURCE_PATH -> target else -> "{target}{@REF_PROVIDER_AT}{provider}"
+    replacement :: if provider == REF_SOURCE_PATH -> target else -> "{target}{REF_PROVIDER_AT}{provider}"
     RefError.ProviderFirst{raw: raw, replacement: replacement}
 }
 
 // Split `source#selector`. `empty_half` reports a present `#` with an empty
 // side, which every ref classifier rejects.
 fn pkg_ref_split_selector(text: String) -> (source: String, selector: String?, empty_half: Bool) Never! {
-    parts :: text.split_once(@REF_CHANNEL_MARKER) ?? return (source: text, selector: None, empty_half: false)
+    parts :: text.split_once(REF_CHANNEL_MARKER) ?? return (source: text, selector: None, empty_half: false)
     empty_half :: parts.before == "" || parts.after == ""
     (source: parts.before, selector: Val(parts.after), empty_half: empty_half)
 }
@@ -686,16 +686,16 @@ pub enum ChannelRef {
 
     fn as_str(self) -> String Never! {
         if self == {
-            .Latest -> @REF_CHANNEL_LATEST
-            .Main -> @REF_CHANNEL_MAIN
+            .Latest -> REF_CHANNEL_LATEST
+            .Main -> REF_CHANNEL_MAIN
             .SemverMask(mask) -> mask
         }
     }
 
     fn parse_selector(selector: String) -> ChannelRef? Never! {
         if selector == {
-            @REF_CHANNEL_LATEST -> Val(ChannelRef.Latest)
-            @REF_CHANNEL_MAIN -> Val(ChannelRef.Main)
+            REF_CHANNEL_LATEST -> Val(ChannelRef.Latest)
+            REF_CHANNEL_MAIN -> Val(ChannelRef.Main)
             else -> {
                 if !pkg_is_semver_mask(selector) -> return None
                 Val(ChannelRef.SemverMask(selector))
@@ -733,10 +733,10 @@ pub struct ProviderRef {
     // so channel intent must survive the typed lowering pass.
     fn upstream(self) -> String Never! {
         channel :: if self.channel == {
-            .Val(value) -> "{@REF_CHANNEL_MARKER}{value.as_str()}"
+            .Val(value) -> "{REF_CHANNEL_MARKER}{value.as_str()}"
             .None -> ""
         }
-        "{self.provider.label()}{@REF_SEPARATOR}{self.target}{channel}"
+        "{self.provider.label()}{REF_SEPARATOR}{self.target}{channel}"
     }
 
     // Classify a `target@provider[#selector]` source ref or a bare local path.
@@ -746,10 +746,10 @@ pub struct ProviderRef {
             .Val(error) -> return Err(error)
             .None -> {}
         }
-        if pkg_is_bare_path(raw) && !raw.contains(@REF_PROVIDER_AT) {
+        if pkg_is_bare_path(raw) && !raw.contains(REF_PROVIDER_AT) {
             return Ok(ProviderRef{provider: RefSource.Path, target: raw, channel: None, policy: ChannelPolicy.Pinned, raw: raw})
         }
-        halves :: raw.cut_last(@REF_PROVIDER_AT) ?? return Err(RefError.MissingSeparator(raw))
+        halves :: raw.cut_last(REF_PROVIDER_AT) ?? return Err(RefError.MissingSeparator(raw))
         if halves.after == "" || halves.before == "" -> return Err(RefError.EmptyHalf(raw))
         if RefSource.is_builtin(halves.before) -> return Err(pkg_ref_provider_first(halves.before, halves.after, raw))
         split :: pkg_ref_split_selector(halves.after)
@@ -769,12 +769,12 @@ pub struct ProviderRef {
     fn track(target: String, selector: String?) -> (target: String, channel: ChannelRef?, policy: ChannelPolicy) Never! {
         value :: selector ?? return (target: target, channel: None, policy: ChannelPolicy.Pinned)
         if value == {
-            @REF_CHANNEL_AUTO -> (target: target, channel: Val(ChannelRef.Latest), policy: ChannelPolicy.Automatic)
-            @REF_CHANNEL_LATEST -> (target: target, channel: Val(ChannelRef.Latest), policy: ChannelPolicy.Manual)
+            REF_CHANNEL_AUTO -> (target: target, channel: Val(ChannelRef.Latest), policy: ChannelPolicy.Automatic)
+            REF_CHANNEL_LATEST -> (target: target, channel: Val(ChannelRef.Latest), policy: ChannelPolicy.Manual)
             else -> {
                 if ChannelRef.parse_selector(value) == {
                     .Val(channel) -> (target: target, channel: Val(channel), policy: ChannelPolicy.Manual)
-                    .None -> (target: "{target}{@REF_CHANNEL_MARKER}{value}", channel: None, policy: ChannelPolicy.Pinned)
+                    .None -> (target: "{target}{REF_CHANNEL_MARKER}{value}", channel: None, policy: ChannelPolicy.Pinned)
                 }
             }
         }

@@ -462,7 +462,7 @@ fn sema_call_typecheck_host_bound_arguments(callee: String, params: [SemaCallPar
         slot :: sema_call_bound_slot(binding, binding.sources[index], args[index])
         if slot < 0 || slot >= params.len() -> return None
         parameter :: params[slot]
-        required_declared :: sema_call_parameter_type(parameter) ?? {
+        required_declared :: sema_call_argument_parameter_type(parameter, args[index]) ?? {
             &diagnostics.push(sema_error("E0112", args[index].span, "this callable parameter has no checked type", "call checking cannot prove an argument safe without the declaration type", "register the complete callable signature"))
             return None
         }
@@ -551,7 +551,10 @@ fn sema_call_method_checked_from_value(state: &SemaOwnershipState, receiver: Exp
     call_receiver := receiver_value
     contract_bindings := [TStmt]{}
     contract_nodes := [TContract]{}
-    if sema_contract_function_for_symbol(environment, resolved_candidate.method.symbol) == .Val(contract) {
+    // The callee's declaration is copied only when it has `pre` clauses.
+    contract_callee := Func?{None}
+    if sema_contract_function_has_pre(environment, resolved_candidate.method.symbol) -> contract_callee = sema_contract_function_for_symbol(environment, resolved_candidate.method.symbol)
+    if contract_callee == .Val(contract) {
         receiver_arg :: TCallArg{value: receiver_value, template_items: [SymbolID]{}, borrow: resolved_candidate.receiver_convention == AccessConvention.Read && !sema_call_is_scalar(receiver_value.ty), mut_borrow: resolved_candidate.receiver_convention == AccessConvention.Write, clone: false, arc_clone: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: sema_call_box_as_trait(receiver_type, receiver_value.ty, environment), label: None, spread: false}
         all_args := [TCallArg]{receiver_arg}
         loop argument in lowered -> &all_args.push(argument)

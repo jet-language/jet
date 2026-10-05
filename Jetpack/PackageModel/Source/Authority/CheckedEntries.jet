@@ -6,11 +6,11 @@
 // Handles are the ratified Core directory/file handles (D-CORE-FILEDIR1,
 // D-CORE-FILEOPEN1); identity is the ratified Stat identity (D-CORE-FILESTAT1).
 
-@AUTHORITY_KIND_FILE :: "regular file"
-@AUTHORITY_KIND_DIRECTORY :: "directory"
-@AUTHORITY_KIND_SPECIAL :: "special file"
-@AUTHORITY_KIND_SYMLINK :: "symlink"
-@AUTHORITY_HARDLINK_DETAIL :: "authority file must have exactly one hard link"
+AUTHORITY_KIND_FILE :: prep { "regular file" }
+AUTHORITY_KIND_DIRECTORY :: prep { "directory" }
+AUTHORITY_KIND_SPECIAL :: prep { "special file" }
+AUTHORITY_KIND_SYMLINK :: prep { "symlink" }
+AUTHORITY_HARDLINK_DETAIL :: prep { "authority file must have exactly one hard link" }
 
 // The kind proven by a checked open.
 pub enum AuthorityKind {
@@ -19,8 +19,8 @@ pub enum AuthorityKind {
 
     fn name(self) -> String Never! {
         if self == {
-            .File -> @AUTHORITY_KIND_FILE
-            .Directory -> @AUTHORITY_KIND_DIRECTORY
+            .File -> AUTHORITY_KIND_FILE
+            .Directory -> AUTHORITY_KIND_DIRECTORY
         }
     }
 }
@@ -40,7 +40,7 @@ pub struct FileIdentity {
     pub device: Int
     pub inode: Int
 
-    fn from_stat(info: Stat, kind: AuthorityKind) -> FileIdentity Never! {
+    fn from_stat(info: files.Stat, kind: AuthorityKind) -> FileIdentity Never! {
         if kind == AuthorityKind.Directory {
             return FileIdentity{kind: kind, length: 0, modified_ns: None, device: info.id.device, inode: info.id.inode}
         }
@@ -97,7 +97,7 @@ pub enum AuthorityError {
     // `package.jet` parsed as text but violates the manifest vocabulary; kept
     // typed so the registered manifest diagnostics reach the user.
     ManifestParse(path: String, error: PackageParseError)
-    Io(path: String, operation: String, detail: String)
+    IO(path: String, operation: String, detail: String)
     Symlink(String)
     WrongKind(path: String, expected: String, actual: String)
     Escapes(String)
@@ -121,11 +121,11 @@ pub enum AuthorityError {
     fn message(self) -> String Never! {
         if self == {
             .Missing(path) -> "authority path `{path}` is missing"
-            .Io(path, operation, detail) -> "couldn't {operation} `{path}`: {detail}"
+            .IO(path, operation, detail) -> "couldn't {operation} `{path}`: {detail}"
             .Symlink(path) -> "authority path `{path}` is a symlink"
             .WrongKind(path, expected, actual) -> "authority path `{path}` is a {actual}, expected a {expected}"
             .Escapes(path) -> "authority path `{path}` escapes its root"
-            .AmbiguousManifest(path) -> "both `{@PACKAGE_FILE}` and `{@PAYLOAD_FILE}` exist in `{path}`"
+            .AmbiguousManifest(path) -> "both `{PACKAGE_FILE}` and `{PAYLOAD_FILE}` exist in `{path}`"
             .RetiredManifest(path) -> "retired manifest `{path}` is not accepted"
             .WorkspaceAmbiguous(paths) -> "workspace authority is declared in {paths.len()} files"
             .WorkspaceNoModule -> "canonical workspace source has no workspace module"
@@ -141,12 +141,12 @@ pub enum AuthorityError {
         if self == {
             .AmbiguousManifest(_) -> pkg_authority_error_diagnostic("E1206",
                 "the package has two manifest roots",
-                "`{@PACKAGE_FILE}` and `{@PAYLOAD_FILE}` both exist; choosing one would make package identity ambiguous",
-                "remove `{@PAYLOAD_FILE}` or migrate it into `{@PACKAGE_FILE}`")
+                "`{PACKAGE_FILE}` and `{PAYLOAD_FILE}` both exist; choosing one would make package identity ambiguous",
+                "remove `{PAYLOAD_FILE}` or migrate it into `{PACKAGE_FILE}`")
             .RetiredManifest(path) -> pkg_authority_error_diagnostic("E1226",
                 "retired manifest `{path}` is not a Package root",
-                "`{@PAYLOAD_FILE}` is retired; Package identity is read only from `{@PACKAGE_FILE}`",
-                "rename `{@PAYLOAD_FILE}` to `{@PACKAGE_FILE}`")
+                "`{PAYLOAD_FILE}` is retired; Package identity is read only from `{PACKAGE_FILE}`",
+                "rename `{PAYLOAD_FILE}` to `{PACKAGE_FILE}`")
             .WorkspaceAmbiguous(paths) -> pkg_e1239_ambiguous_workspace(paths)
             .WorkspaceNoModule -> pkg_e0995_no_workspace_module()
             .NestedMembers(root, member) -> pkg_authority_error_diagnostic("E1323",
@@ -178,7 +178,7 @@ pub enum AuthorityError {
                 "authority object `{path}` changed during resolution",
                 "the opened authority snapshot no longer matches the object at its path",
                 "restore the authority input and retry the operation")
-            .Io(path, operation, detail) -> pkg_authority_error_diagnostic("E1334",
+            .IO(path, operation, detail) -> pkg_authority_error_diagnostic("E1334",
                 "couldn't {operation} authority `{path}`",
                 detail,
                 "restore access to the authority metadata and try again")
@@ -222,7 +222,7 @@ fn pkg_authority_utf8_error(bytes: [U8]) -> String Never! {
         }
         if width == 0 -> break
         if valid + width > bytes.len() -> return "incomplete utf-8 byte sequence from index {valid}"
-        if String.from_bytes(bytes[valid..<valid + width]) == None -> break
+        if String.from_bytes(bytes[valid..<valid + width]) == .Err(_) -> break
         valid += width
     }
     "invalid utf-8 sequence of 1 bytes from index {valid}"
@@ -234,28 +234,28 @@ fn pkg_authority_limit_error(path: String, detail: String) -> AuthorityError Nev
 }
 
 // The `kind_name` of a no-follow Stat.
-fn pkg_authority_kind_name(info: Stat) -> String Never! {
+fn pkg_authority_kind_name(info: files.Stat) -> String Never! {
     if {
-        info.is_dir -> @AUTHORITY_KIND_DIRECTORY
-        info.is_file -> @AUTHORITY_KIND_FILE
-        else -> @AUTHORITY_KIND_SPECIAL
+        info.is_dir -> AUTHORITY_KIND_DIRECTORY
+        info.is_file -> AUTHORITY_KIND_FILE
+        else -> AUTHORITY_KIND_SPECIAL
     }
 }
 
 // `kind_name_from_file_type`: a directory entry kind, links included.
-fn pkg_authority_entry_kind_name(info: Stat) -> String Never! {
+fn pkg_authority_entry_kind_name(info: files.Stat) -> String Never! {
     if {
-        info.is_dir -> @AUTHORITY_KIND_DIRECTORY
-        info.is_file -> @AUTHORITY_KIND_FILE
-        info.is_symlink -> @AUTHORITY_KIND_SYMLINK
-        else -> @AUTHORITY_KIND_SPECIAL
+        info.is_dir -> AUTHORITY_KIND_DIRECTORY
+        info.is_file -> AUTHORITY_KIND_FILE
+        info.is_symlink -> AUTHORITY_KIND_SYMLINK
+        else -> AUTHORITY_KIND_SPECIAL
     }
 }
 
 // `require_single_link_file`.
-fn pkg_authority_require_single_link(path: String, info: Stat) AuthorityError! {
-    if info.links == 1 -> return Ok()
-    Err(AuthorityError.Invalid{path: path, detail: @AUTHORITY_HARDLINK_DETAIL})
+fn pkg_authority_require_single_link(path: String, info: files.Stat) AuthorityError! {
+    if info.links == 1 -> return
+    return Err(AuthorityError.Invalid{path: path, detail: AUTHORITY_HARDLINK_DETAIL})
 }
 
 // The IOContext of a provider failure, when it carries one.
@@ -305,16 +305,16 @@ fn pkg_authority_map_io(path: String, error: IOError, directory: Bool) -[Env]> A
     if pkg_io_is_not_found(error) -> return AuthorityError.Missing(path)
     if pkg_io_is_symlink_error(error) -> return AuthorityError.Symlink(path)
     if directory && pkg_io_is_not_a_directory(error) {
-        return AuthorityError.WrongKind{path: path, expected: @AUTHORITY_KIND_DIRECTORY, actual: @AUTHORITY_KIND_FILE}
+        return AuthorityError.WrongKind{path: path, expected: AUTHORITY_KIND_DIRECTORY, actual: AUTHORITY_KIND_FILE}
     }
     operation :: if directory -> "open directory" else -> "open file"
-    AuthorityError.Io{path: path, operation: operation, detail: "{error}"}
+    AuthorityError.IO{path: path, operation: operation, detail: "{error}"}
 }
 
 // `root.join(relative)`: an empty relative keeps Rust's trailing separator.
 fn pkg_authority_join(root: String, relative: String) -> String Never! {
     if relative == "" {
-        if root.ends_with("/") -> return root
+        if root.ends_with("/") -> return ~root
         return "{root}/"
     }
     files.join(root, relative)

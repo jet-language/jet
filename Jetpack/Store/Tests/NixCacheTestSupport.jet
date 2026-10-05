@@ -6,7 +6,7 @@
 // file server, so replacing the routes is rewriting that directory while the
 // endpoint (and so every recorded upstream proof) stays the same.
 
-@STORE_NIX_TEST_CACHE_INFO :: "StoreDir: /nix/store\nWantMassQuery: 1\n"
+STORE_NIX_TEST_CACHE_INFO :: prep { "StoreDir: /nix/store\nWantMassQuery: 1\n" }
 
 // A fresh private directory for one claim (Rust `unique_dir`).
 fn store_nix_test_unique_dir(label: String) -> String Never! {
@@ -116,7 +116,7 @@ fn store_nix_test_write_site(site: String, routes: [String: [U8]]) Never! {
 fn store_nix_test_configure_root(jet_root: String, endpoint: String, key_id: String, seed: [U8]) -> HangarRoots Never! {
     files.create_dir_all(files.join(jet_root, "config")) ?? panic("config directory")
     files.create_dir_all(files.join(jet_root, "trust")) ?? panic("trust directory")
-    files.write(files.join(jet_root, @STORE_NIX_ENDPOINT_CONFIG), endpoint) ?? panic("endpoint config")
-    files.write(files.join(jet_root, @STORE_NIX_TRUST_KEY_CONFIG), store_nix_test_public_key_line(key_id, seed)) ?? panic("trust key")
+    files.write(files.join(jet_root, STORE_NIX_ENDPOINT_CONFIG), endpoint) ?? panic("endpoint config")
+    files.write(files.join(jet_root, STORE_NIX_TRUST_KEY_CONFIG), store_nix_test_public_key_line(key_id, seed)) ?? panic("trust key")
     HangarRoots.at(jet_root)
 }

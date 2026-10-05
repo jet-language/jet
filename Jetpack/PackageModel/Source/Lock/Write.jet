@@ -89,10 +89,10 @@ pub fn pkg_lock_write(input: LockFile) -> String Never! {
 
     // D-CTEFFECT1 Tier-1: embed inputs. The hash is a digest and is written
     // verbatim.
-    loop input in lock.comptime_inputs {
+    loop comptime_input in lock.comptime_inputs {
         &out.push("\n[[comptime_inputs]]\n")
-        &out.push(pkg_lock_string_field("path", input.path))
-        &out.push("hash = \"{input.hash}\"\n")
+        &out.push(pkg_lock_string_field("path", comptime_input.path))
+        &out.push("hash = \"{comptime_input.hash}\"\n")
     }
 
     out.join("")
@@ -104,7 +104,7 @@ fn pkg_lock_write_package(out: &[String], package: LockedPackage) Never! {
     &out.push(pkg_lock_string_field("version", package.version))
     &out.push("source = {pkg_lock_source_value(package.source)}\n")
     if package.nix_closure == {
-        .Val(closure) -> pkg_lock_write_nix_closure(out, closure)
+        .Val(closure) -> pkg_lock_write_nix_closure(&out, closure)
         .None -> {}
     }
     if package.locked == {
@@ -141,7 +141,7 @@ fn pkg_lock_write_package(out: &[String], package: LockedPackage) Never! {
     // D-JPK-CACHE1=A (A4): the realized-output envelope, emitted once the
     // package is realized.
     if package.envelope == {
-        .Val(envelope) -> pkg_lock_write_envelope(out, envelope)
+        .Val(envelope) -> pkg_lock_write_envelope(&out, envelope)
         .None -> {}
     }
     if package.receipt == {
@@ -500,5 +500,5 @@ fn pkg_lock_bool(value: Bool) -> String Never! {
 
 // Backslash, quote, newline, carriage return, and tab escapes.
 fn pkg_lock_escape(value: String) -> String Never! {
-    &value.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace(pkg_lock_carriage_return(), "\\r").replace("\t", "\\t")
+    value.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace(pkg_lock_carriage_return(), "\\r").replace("\t", "\\t")
 }

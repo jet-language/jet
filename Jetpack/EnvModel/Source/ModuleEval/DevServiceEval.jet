@@ -26,17 +26,17 @@ enum DevServiceField {
 
     fn parse(name: String) -> DevServiceField Never! {
         if name == {
-            @SERVICE_FIELD_ENABLE -> DevServiceField.Enable
-            @DEV_SERVICE_FIELD_PORTS -> DevServiceField.Ports
-            @DEV_SERVICE_FIELD_RUN -> DevServiceField.Run
-            @DEV_SERVICE_FIELD_SHUTDOWN -> DevServiceField.Shutdown
-            @DEV_SERVICE_FIELD_DATA_DIR -> DevServiceField.DataDir
-            @DEV_SERVICE_FIELD_READY -> DevServiceField.Ready
-            @DEV_SERVICE_FIELD_RESTART -> DevServiceField.Restart
-            @DEV_SERVICE_FIELD_WATCH -> DevServiceField.Watch
-            @DEV_SERVICE_FIELD_AFTER -> DevServiceField.After
-            @DEV_SERVICE_FIELD_BEFORE_START -> DevServiceField.BeforeStart
-            @DEV_SERVICE_FIELD_SOCKETS -> DevServiceField.Sockets
+            SERVICE_FIELD_ENABLE -> DevServiceField.Enable
+            DEV_SERVICE_FIELD_PORTS -> DevServiceField.Ports
+            DEV_SERVICE_FIELD_RUN -> DevServiceField.Run
+            DEV_SERVICE_FIELD_SHUTDOWN -> DevServiceField.Shutdown
+            DEV_SERVICE_FIELD_DATA_DIR -> DevServiceField.DataDir
+            DEV_SERVICE_FIELD_READY -> DevServiceField.Ready
+            DEV_SERVICE_FIELD_RESTART -> DevServiceField.Restart
+            DEV_SERVICE_FIELD_WATCH -> DevServiceField.Watch
+            DEV_SERVICE_FIELD_AFTER -> DevServiceField.After
+            DEV_SERVICE_FIELD_BEFORE_START -> DevServiceField.BeforeStart
+            DEV_SERVICE_FIELD_SOCKETS -> DevServiceField.Sockets
             else -> DevServiceField.Other
         }
     }
@@ -45,16 +45,16 @@ enum DevServiceField {
 // The closed typed readiness probes (`ready: .exec(...)` and friends).
 enum ReadyProbeKind {
     Exec
-    Http
+    HTTP
     Notify
-    Tcp
+    TCP
 
     fn parse(name: String) -> ReadyProbeKind? Never! {
         if name == {
             "exec" -> Val(ReadyProbeKind.Exec)
-            "http" -> Val(ReadyProbeKind.Http)
+            "http" -> Val(ReadyProbeKind.HTTP)
             "notify" -> Val(ReadyProbeKind.Notify)
-            "tcp" -> Val(ReadyProbeKind.Tcp)
+            "tcp" -> Val(ReadyProbeKind.TCP)
             else -> None
         }
     }
@@ -62,9 +62,9 @@ enum ReadyProbeKind {
     fn name(self) -> String Never! {
         if self == {
             .Exec -> "exec"
-            .Http -> "http"
+            .HTTP -> "http"
             .Notify -> "notify"
-            .Tcp -> "tcp"
+            .TCP -> "tcp"
         }
     }
 
@@ -72,7 +72,7 @@ enum ReadyProbeKind {
     fn accepts_arity(self, count: Int) -> Bool Never! {
         if self == {
             .Exec | .Notify -> count == 1
-            .Http | .Tcp -> count >= 1 && count <= 2
+            .HTTP | .TCP -> count >= 1 && count <= 2
         }
     }
 }
@@ -81,7 +81,7 @@ enum ReadyProbeKind {
 // `services:` map into a `DevServicePlan`.
 pub fn envmodel_evaluate_dev_service(entry: ServiceEntry, scope: ModuleEvalScope, globals: [String: CtValue]) -> DevServicePlan EnvModelEvalError! {
     plan := DevServicePlan{name: entry.name}
-    enable := None
+    enable := Bool?{None}
     loop field in entry.fields {
         envmodel_check_build_io(field.value)
         kind :: DevServiceField.parse(field.name)
@@ -203,16 +203,16 @@ fn envmodel_ready_probe_from(value: Expr, scope: ModuleEvalScope, globals: [Stri
     probe :: if kind == {
         .Exec -> {
             command :: envmodel_probe_string_at(values, 0) ?? return Err(envmodel_probe_error("typed exec readiness needs one command", "ServiceProbe.exec carries one shell command string", "write ready: .exec(\"...\")", call.name_span))
-            ReadyProbe.Exec(command)
+            ReadyProbe.Exec{command: command}
         }
-        .Http -> {
+        .HTTP -> {
             url :: envmodel_probe_string_at(values, 0) ?? return Err(envmodel_probe_error("typed HTTP readiness needs a URL", "ServiceProbe.http carries a URL and an optional status", "write ready: .http(\"http://127.0.0.1:8080/health\", 200)", call.name_span))
-            status := None
+            status := Int?{None}
             if values.len() > 1 {
                 code :: envmodel_probe_port_at(values, 1) ?? return Err(envmodel_probe_error("typed HTTP readiness status must be an integer", "ServiceProbe.http accepts an optional HTTP status code", "write ready: .http(\"http://127.0.0.1:8080/health\", 200)", call.name_span))
                 status = Val(code)
             }
-            ReadyProbe.Http{url: url, status: status}
+            ReadyProbe.HTTP{url: url, status: status}
         }
         .Notify -> {
             path :: envmodel_probe_string_at(values, 0) ?? return Err(envmodel_probe_error("typed notify readiness needs a path", "ServiceProbe.notify observes one project-relative readiness file", "write ready: .notify(\".jet/ready/api\")", call.name_span))
@@ -221,11 +221,11 @@ fn envmodel_ready_probe_from(value: Expr, scope: ModuleEvalScope, globals: [Stri
             }
             ReadyProbe.Notify{path: path}
         }
-        .Tcp -> {
+        .TCP -> {
             host :: envmodel_probe_string_at(values, 0) ?? "127.0.0.1"
             port_index :: if values.len() > 1 -> 1 else -> 0
             port :: envmodel_probe_port_at(values, port_index) ?? return Err(envmodel_probe_error("typed TCP readiness needs a port", "ServiceProbe.tcp carries a host and port, or only a port", "write ready: .tcp(5432) or .tcp(\"127.0.0.1\", 5432)", call.name_span))
-            ReadyProbe.Tcp{host: host, port: port}
+            ReadyProbe.TCP{host: host, port: port}
         }
     }
     if !kind.accepts_arity(values.len()) {
@@ -438,5 +438,5 @@ fn envmodel_shutdown_term_args(args: [CtEnumArg]) -> ShutdownPolicy? Never! {
 // A payload label without the compiler-generated name prefix.
 fn envmodel_named_payload_field(label: String?) -> String? Never! {
     name :: label ?? return None
-    Val(name.removeprefix(@GENERATED_NAME_PREFIX))
+    Val(name.removeprefix(GENERATED_NAME_PREFIX))
 }

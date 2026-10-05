@@ -3946,7 +3946,7 @@ fn heap_cell_to_runtime(
         | MirTypeKind::InlineRange { .. }
         | MirTypeKind::Tagged { .. }
         | MirTypeKind::Quantity { .. } => match cell {
-            JetVal::Int(value) => Ok(MirRuntimeValue::Int(*value)),
+            JetVal::Int(value) | JetVal::Word { value, .. } => Ok(MirRuntimeValue::Int(*value)),
             _ => Err(format!("expected integer cell for `{}`", ty.canonical_key())),
         },
         MirTypeKind::Float | MirTypeKind::Float32 => match cell {

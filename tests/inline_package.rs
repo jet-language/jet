@@ -249,7 +249,7 @@ fn inline_scratch(label: &str) -> PathBuf {
     let base = PathBuf::from(
         std::env::var_os("HOME").expect("inline package tests require HOME"),
     )
-    .join(".cache/jet-test-scratch/inline-package");
+    .join(".cache/jet-dev/scratch/inline-package");
     let sequence = INLINE_SCRATCH_SEQ.fetch_add(1, Ordering::Relaxed);
     let root = base.join(format!("{label}-{}-{sequence}", std::process::id()));
     fs::create_dir_all(&root).unwrap();

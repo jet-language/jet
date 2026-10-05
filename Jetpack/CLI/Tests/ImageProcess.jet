@@ -5,7 +5,7 @@
 // the explicit OCI Distribution path; environment images projected from
 // verified Hangar outputs; honest refusals).
 
-@CLI_TEST_IMAGE_SERVICE_E1336 :: embed_file("../../../tests/cli/image_service_projection_e1336.txt")
+CLI_TEST_IMAGE_SERVICE_E1336 :: prep { embed_file("../../../tests/cli/image_service_projection_e1336.txt") }
 
 fn cli_test_eval_error(src: String, dir: String) -[FS, Env]> EnvModelEvalError {
     if envmodel_evaluate_env(src, dir) == {
@@ -157,7 +157,7 @@ fn cli_test_image_index(project: String) -[FS, Env, Exec, Time.Wait]> String {
     heads := 0
     posts := 0
     uploads := 0
-    manifest := None
+    manifest := RegistryTestRequest?{None}
     loop request in requests {
         if request.method == "HEAD" -> heads = heads + 1
         if request.method == "POST" -> posts = posts + 1
@@ -219,8 +219,9 @@ struct EnvironmentImageClaim {
 // Environment images consume the realized Hangar bin projection; no project
 // build directory is involved.
 #Test("image environment uses realized package output") {
+    verification := StoreVerification.new()
     claim :: EnvironmentImageClaim.new("environment-store", "module env.dev {{ packages: [\"bash@nixpkgs\"] }}\nmodule image.server {{ from: env.dev }}\n")
-    cli_test_ingest_executable(claim.root, "bash", "bash@nixpkgs", "bash")
+    cli_test_ingest_executable(&verification, claim.root, "bash", "bash@nixpkgs", "bash")
     out :: claim.build()
     assert_eq(out.code, 0, "image should use Hangar output: {out.errors}")
     report :: claim.projection()
@@ -245,10 +246,11 @@ struct EnvironmentImageClaim {
 }
 
 #Test("image environment projects explicit extra file reproducibly") {
+    verification := StoreVerification.new()
     claim :: EnvironmentImageClaim.new("environment-extra-file", "module env.dev {{ packages: [\"bash@nixpkgs\"] }}\nmodule image.server {{ from: env.dev, files: [\"config/app.toml\"] }}\n")
     files.create_dir_all(files.join(claim.project, "config")) ?? panic("create config")
     files.write(files.join(claim.project, "config/app.toml"), "port = 8080\n") ?? panic("write config")
-    cli_test_ingest_executable(claim.root, "bash", "bash@nixpkgs", "bash")
+    cli_test_ingest_executable(&verification, claim.root, "bash", "bash@nixpkgs", "bash")
     first :: cli_test_environment_image_index(claim)
     image :: claim.image_dir()
     report :: claim.projection()
@@ -269,10 +271,11 @@ fn cli_test_environment_image_index(claim: EnvironmentImageClaim) -[FS, Env, Exe
 }
 
 #Test("image environment rejects public managed extra file") {
+    verification := StoreVerification.new()
     claim :: EnvironmentImageClaim.new("environment-managed-file", "module env.dev {{\n    packages: [\"bash@nixpkgs\"]\n    files: [\"config/generated.txt\": File{{ content: \"managed\\n\", mode: .Copy }}]\n}}\nmodule image.server {{ from: env.dev, files: [\"config/generated.txt\"] }}\n")
     files.create_dir_all(files.join(claim.project, "config")) ?? panic("create config")
     files.write(files.join(claim.project, "config/generated.txt"), "project\n") ?? panic("write generated file")
-    cli_test_ingest_executable(claim.root, "bash", "bash@nixpkgs", "bash")
+    cli_test_ingest_executable(&verification, claim.root, "bash", "bash@nixpkgs", "bash")
     out :: claim.build()
     assert_eq(out.code, 2, out.errors)
     assert(out.errors.contains("E1336"), "stderr: {out.errors}")
@@ -285,10 +288,11 @@ fn cli_test_environment_image_index(claim: EnvironmentImageClaim) -[FS, Env, Exe
 }
 
 #Test("image environment rejects extra file path conflict") {
+    verification := StoreVerification.new()
     claim :: EnvironmentImageClaim.new("environment-file-conflict", "module env.dev {{ packages: [\"bash@nixpkgs\"] }}\nmodule image.server {{ from: env.dev, files: [\"bin/sh\"] }}\n")
     files.create_dir_all(files.join(claim.project, "bin")) ?? panic("create bin")
     files.write(files.join(claim.project, "bin/sh"), "project shell\n") ?? panic("write project shell")
-    cli_test_ingest_executable(claim.root, "bash", "bash@nixpkgs", "bash")
+    cli_test_ingest_executable(&verification, claim.root, "bash", "bash@nixpkgs", "bash")
     out :: claim.build()
     assert_eq(out.code, 2, out.errors)
     assert(out.errors.contains("E1336"), "stderr: {out.errors}")
@@ -301,9 +305,10 @@ fn cli_test_environment_image_index(claim: EnvironmentImageClaim) -[FS, Env, Exe
 }
 
 #Test("image environment projects named environment not default") {
+    verification := StoreVerification.new()
     claim :: EnvironmentImageClaim.new("environment-selection", "module env.dev {{ packages: [\"bash@nixpkgs\"] }}\nmodule env.full {{ packages: [\"sh@nixpkgs\"] }}\nmodule image.server {{ from: env.full, target: linux.arm64 }}\n")
-    cli_test_ingest_executable(claim.root, "bash", "bash@nixpkgs", "bash")
-    cli_test_ingest_executable_for_platform(claim.root, "sh", "sh@nixpkgs", "sh", "aarch64-linux")
+    cli_test_ingest_executable(&verification, claim.root, "bash", "bash@nixpkgs", "bash")
+    cli_test_ingest_executable_for_platform(&verification, claim.root, "sh", "sh@nixpkgs", "sh", "aarch64-linux")
     out :: claim.build()
     assert_eq(out.code, 0, out.errors)
     report :: claim.projection()
@@ -315,8 +320,9 @@ fn cli_test_environment_image_index(claim: EnvironmentImageClaim) -[FS, Env, Exe
 }
 
 #Test("image environment requires a realized shell package") {
+    verification := StoreVerification.new()
     claim :: EnvironmentImageClaim.new("environment-no-shell", "module env.dev {{ packages: [\"tool@nixpkgs\"] }}\nmodule image.server {{ from: env.dev }}\n")
-    cli_test_ingest_executable(claim.root, "tool", "tool@nixpkgs", "tool")
+    cli_test_ingest_executable(&verification, claim.root, "tool", "tool@nixpkgs", "tool")
     out :: claim.build()
     assert_eq(out.code, 2)
     assert(out.errors.contains("E1336"), "stderr: {out.errors}")
@@ -325,8 +331,9 @@ fn cli_test_environment_image_index(claim: EnvironmentImageClaim) -[FS, Env, Exe
 }
 
 #Test("image environment rejects hangar platform mismatch") {
+    verification := StoreVerification.new()
     claim :: EnvironmentImageClaim.new("environment-platform-mismatch", "module env.dev {{ packages: [\"bash@nixpkgs\"] }}\nmodule image.server {{ from: env.dev, target: linux.arm64 }}\n")
-    cli_test_ingest_executable_for_platform(claim.root, "bash", "bash@nixpkgs", "bash", "x86_64-linux")
+    cli_test_ingest_executable_for_platform(&verification, claim.root, "bash", "bash@nixpkgs", "bash", "x86_64-linux")
     out :: claim.build()
     assert_eq(out.code, 2, out.errors)
     assert(out.errors.contains("E1336"), "stderr: {out.errors}")
@@ -349,8 +356,9 @@ fn cli_test_environment_image_index(claim: EnvironmentImageClaim) -[FS, Env, Exe
 }
 
 #Test("image environment omits cloud and vault facts without secret names") {
+    verification := StoreVerification.new()
     claim :: EnvironmentImageClaim.new("environment-secret-integrations", "module env.dev {{\n    packages: [\"bash@nixpkgs\"]\n    imports: [\n        env.cloud.credentials([aws_production]),\n        env.security.vault([database_password])\n    ]\n}}\nmodule image.server {{ from: env.dev }}\n")
-    cli_test_ingest_executable(claim.root, "bash", "bash@nixpkgs", "bash")
+    cli_test_ingest_executable(&verification, claim.root, "bash", "bash@nixpkgs", "bash")
     out :: claim.build()
     assert_eq(out.code, 0, "image should project the environment successfully: {out.errors}")
     report :: claim.projection()
@@ -378,9 +386,10 @@ fn cli_test_environment_image_index(claim: EnvironmentImageClaim) -[FS, Env, Exe
 }
 
 #Test("image environment rejects secret extra file") {
+    verification := StoreVerification.new()
     claim :: EnvironmentImageClaim.new("environment-secret-file", "module env.dev {{\n    packages: [\"bash@nixpkgs\"]\n    dotenv: [Dotenv{{ file: \".env\", allow: [\"TOKEN\"], secrets: [\"TOKEN\"] }}]\n}}\nmodule image.server {{ from: env.dev, files: [\".env\"] }}\n")
     files.write(files.join(claim.project, ".env"), "TOKEN=super-secret-value\n") ?? panic("write .env")
-    cli_test_ingest_executable(claim.root, "bash", "bash@nixpkgs", "bash")
+    cli_test_ingest_executable(&verification, claim.root, "bash", "bash@nixpkgs", "bash")
     out :: claim.build()
     assert_eq(out.code, 2, out.errors)
     assert(out.errors.contains("E1336"), "stderr: {out.errors}")
@@ -396,8 +405,9 @@ fn cli_test_environment_image_index(claim: EnvironmentImageClaim) -[FS, Env, Exe
 }
 
 #Test("image environment rejects project escape layer path") {
+    verification := StoreVerification.new()
     claim :: EnvironmentImageClaim.new("environment-layer-path", "module env.dev {{ packages: [\"bash@nixpkgs\"] }}\nmodule image.server {{ from: env.dev, files: [\"../outside\"] }}\n")
-    cli_test_ingest_executable(claim.root, "bash", "bash@nixpkgs", "bash")
+    cli_test_ingest_executable(&verification, claim.root, "bash", "bash@nixpkgs", "bash")
     out :: claim.build()
     assert_eq(out.code, 2, "unsafe layer path must fail: {out.errors}")
     assert(out.errors.contains("safe project-relative paths"), "stderr: {out.errors}")
@@ -408,12 +418,13 @@ fn cli_test_environment_image_index(claim: EnvironmentImageClaim) -[FS, Env, Exe
 }
 
 #Test("image environment rejects symlinked extra file") {
+    verification := StoreVerification.new()
     if sys.is_windows() -> return
     claim :: EnvironmentImageClaim.new("environment-image-symlink-file", "module env.dev {{ packages: [\"bash@nixpkgs\"] }}\nmodule image.server {{ from: env.dev, files: [\"payload.bin\"] }}\n")
     outside :: cli_test_image_scratch("environment-image-symlink-outside")
     files.write(files.join(outside, "payload.bin"), "must not be read\n") ?? panic("write outside payload")
     files.symlink(files.join(outside, "payload.bin"), files.join(claim.project, "payload.bin")) ?? panic("link payload")
-    cli_test_ingest_executable(claim.root, "bash", "bash@nixpkgs", "bash")
+    cli_test_ingest_executable(&verification, claim.root, "bash", "bash@nixpkgs", "bash")
     out :: claim.build()
     assert_eq(out.code, 2, "symlinked image file must fail: {out.errors}")
     assert(out.errors.contains("not a symlink") || out.errors.contains("symlink"), "stderr: {out.errors}")
@@ -423,12 +434,13 @@ fn cli_test_environment_image_index(claim: EnvironmentImageClaim) -[FS, Env, Exe
 }
 
 #Test("image environment rejects hardlinked extra file") {
+    verification := StoreVerification.new()
     if sys.is_windows() -> return
     claim :: EnvironmentImageClaim.new("environment-image-hardlink-file", "module env.dev {{ packages: [\"bash@nixpkgs\"] }}\nmodule image.server {{ from: env.dev, files: [\"payload.bin\"] }}\n")
     outside :: cli_test_image_scratch("environment-image-hardlink-outside")
     files.write(files.join(outside, "payload.bin"), "must not be read\n") ?? panic("write outside payload")
     files.hard_link(files.join(outside, "payload.bin"), files.join(claim.project, "payload.bin")) ?? panic("hard link payload")
-    cli_test_ingest_executable(claim.root, "bash", "bash@nixpkgs", "bash")
+    cli_test_ingest_executable(&verification, claim.root, "bash", "bash@nixpkgs", "bash")
     out :: claim.build()
     assert_eq(out.code, 2, "hardlinked image file must fail: {out.errors}")
     assert(out.errors.contains("hard link"), "stderr: {out.errors}")
@@ -438,12 +450,13 @@ fn cli_test_environment_image_index(claim: EnvironmentImageClaim) -[FS, Env, Exe
 }
 
 #Test("image environment rejects symlinked ancestor extra file") {
+    verification := StoreVerification.new()
     if sys.is_windows() -> return
     claim :: EnvironmentImageClaim.new("environment-image-symlink-ancestor-file", "module env.dev {{ packages: [\"bash@nixpkgs\"] }}\nmodule image.server {{ from: env.dev, files: [\"nested/payload.bin\"] }}\n")
     outside :: cli_test_image_scratch("environment-image-symlink-ancestor-outside")
     files.write(files.join(outside, "payload.bin"), "must not be read\n") ?? panic("write outside payload")
     files.symlink(outside, files.join(claim.project, "nested")) ?? panic("link nested dir")
-    cli_test_ingest_executable(claim.root, "bash", "bash@nixpkgs", "bash")
+    cli_test_ingest_executable(&verification, claim.root, "bash", "bash@nixpkgs", "bash")
     out :: claim.build()
     assert_eq(out.code, 2, "symlinked ancestor image file must fail: {out.errors}")
     assert(out.errors.contains("not a symlink") || out.errors.contains("symlink") || out.errors.contains("not a directory"), "stderr: {out.errors}")
@@ -481,19 +494,20 @@ fn cli_test_e1336_block(stderr: String) -> String {
     files.write(files.join(project, "env.jet"), "module env.dev {{ services: {{ api: {{ run: [\"true\"] }} }} }}\nmodule image.server {{ from: env.dev }}\n") ?? panic("write env.jet")
     out :: cli_test_image_jetpack(project, [String]{"image", "server"}).run() ?? panic("run jetpack image")
     assert_eq(out.code, 2, "service projection must fail: {out.errors}")
-    assert_eq(cli_test_e1336_block(out.errors), @CLI_TEST_IMAGE_SERVICE_E1336.trim())
+    assert_eq(cli_test_e1336_block(out.errors), CLI_TEST_IMAGE_SERVICE_E1336.trim())
     report :: files.read(files.join(project, ".jet/images/server/projection.json")) ?? panic("rejected image projection report")
     assert(report.contains("\"rejected\":[\"services\"]"), "projection: {report}")
     files.remove_all(project).drop("scratch cleanup is best-effort")
 }
 
 #Test("image environment projects supervised services") {
+    verification := StoreVerification.new()
     project :: cli_test_image_scratch("environment-service-image")
     files.write(files.join(project, "env.jet"), "module env.dev {{\n    packages: [\"bash@nixpkgs\", \"db@nixpkgs\", \"sleep@nixpkgs\", \"worker@nixpkgs\"]\n    services: {{ db: {{ enable: true, run: [\"db\"] }}, api: {{ enable: true, ports: [8080], after: [\"db\"], run: [\"worker\", \"--port\", \"8080\"] }} }}\n}}\nmodule image.server {{ from: env.dev, services: [\"api\"] }}\n") ?? panic("write env.jet")
-    cli_test_ingest_executable(project, "bash", "bash@nixpkgs", "bash")
-    cli_test_ingest_executable(project, "db", "db@nixpkgs", "db")
-    cli_test_ingest_executable(project, "sleep", "sleep@nixpkgs", "sleep")
-    cli_test_ingest_executable(project, "worker", "worker@nixpkgs", "worker")
+    cli_test_ingest_executable(&verification, project, "bash", "bash@nixpkgs", "bash")
+    cli_test_ingest_executable(&verification, project, "db", "db@nixpkgs", "db")
+    cli_test_ingest_executable(&verification, project, "sleep", "sleep@nixpkgs", "sleep")
+    cli_test_ingest_executable(&verification, project, "worker", "worker@nixpkgs", "worker")
     out :: cli_test_image_jetpack(project, [String]{"image", "server"}).env("JETPACK_ROOT", project).run() ?? panic("run jetpack image")
     assert_eq(out.code, 0, "supervised image must build: {out.errors}")
     layer :: cli_test_image_layer(files.join(project, ".jet/images/server"))
@@ -512,8 +526,9 @@ fn cli_test_e1336_block(stderr: String) -> String {
 }
 
 #Test("image environment rejects a service without projected executable") {
+    verification := StoreVerification.new()
     claim :: EnvironmentImageClaim.new("environment-service-missing-tool", "module env.dev {{\n    packages: [\"bash@nixpkgs\"]\n    services: {{ api: {{ enable: true, run: [\"worker\"] }} }}\n}}\nmodule image.server {{ from: env.dev, services: [\"api\"] }}\n")
-    cli_test_ingest_executable(claim.root, "bash", "bash@nixpkgs", "bash")
+    cli_test_ingest_executable(&verification, claim.root, "bash", "bash@nixpkgs", "bash")
     out :: claim.build()
     assert_eq(out.code, 2, "missing service tool: {out.errors}")
     assert(out.errors.contains("E1336"), "stderr: {out.errors}")

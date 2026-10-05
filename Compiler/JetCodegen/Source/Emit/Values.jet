@@ -15,9 +15,11 @@ use jet_foundation.[
     MIRIndexKind,
     MIRInstruction,
     MIRLocalID,
+    MIRLoopSourceKind,
     MIROperation,
     MIRParam,
     MIRPayloadKind,
+    MIRPlace,
     MIRPlaceBase,
     MIRPlaceID,
     MIRPreludeCallID,
@@ -224,6 +226,9 @@ fn jet_rust_emit_body_index(function: MIRFunction) -> JetRustEmitBodyIndex Never
         write_slots: writes.slots,
         local_writes: writes.rows,
         escaped_locals: writes.escaped,
+        parameter_write_slots: writes.parameter_slots,
+        parameter_writes: writes.parameter_rows,
+        escaped_parameters: writes.parameter_escaped,
         slot_read_values: slot_read_values,
         moved_places: moved_places,
         partial_slots: partial_slots,
@@ -275,12 +280,33 @@ struct JetRustEmitLocalWrites {
     slots: [U64:Int]
     rows: [[JetRustEmitUse]]
     escaped: [U64:Bool]
+    parameter_slots: [Int:Int]
+    parameter_rows: [[JetRustEmitPlaceWrite]]
+    parameter_escaped: [Int:Bool]
 }
 
 fn jet_rust_emit_index_place_local(function: MIRFunction, place_rows: [U64:Int], place: MIRPlaceID) -> MIRLocalID? {
     row :: place_rows.get(place.value) ?? return None
     if function.places[row].base == .Local(local) -> return Val(local)
     None
+}
+
+// The parameter index of a place rooted at a parameter (`parameters`: the
+// index each `Parameter` value names).
+fn jet_rust_emit_index_place_parameter(function: MIRFunction, place_rows: [U64:Int], parameters: [U64:Int], place: MIRPlaceID) -> Int? {
+    row :: place_rows.get(place.value) ?? return None
+    if function.places[row].base == .Parameter(value) -> return parameters.get(value.value)
+    None
+}
+
+// Adds `place` to `changed` when it is rooted at a parameter.
+fn jet_rust_emit_index_parameter_change(function: MIRFunction, place_rows: [U64:Int], parameters: [U64:Int], place: MIRPlaceID, changed: &[MIRPlaceID]) Never! {
+    if jet_rust_emit_index_place_parameter(function, place_rows, parameters, place) != None -> &changed.push(place)
+}
+
+// Marks the parameter `place` is rooted at, if any, as escaping.
+fn jet_rust_emit_index_parameter_escape(function: MIRFunction, place_rows: [U64:Int], parameters: [U64:Int], place: MIRPlaceID, escaped: &[Int:Bool]) Never! {
+    if jet_rust_emit_index_place_parameter(function, place_rows, parameters, place) == .Val(index) -> _ := &escaped.add(index, true)
 }
 
 fn jet_rust_emit_index_write_borrow(function: MIRFunction, value_rows: [U64:Int], value: MIRValueID) -> Bool Never! {
@@ -308,6 +334,9 @@ fn jet_rust_emit_index_call_args(operation: MIROperation) -> [MIRCallArg] Never!
 // write borrow of one of its places, a write or move argument naming one, a
 // use of a write borrow taken from one), and the locals place-based tracking
 // cannot follow (a partial move, raw address, closure capture or entry list).
+// parameter_writes / escaped_parameters: the same per parameter index, each
+// row with the place it changes (a pattern scan advancing its receiver
+// changes it too), plus the parameters a drop action releases a place of.
 // Two passes: a write borrow's definition may sit in a block listed after one
 // of its uses.
 fn jet_rust_emit_local_writes(function: MIRFunction, place_rows: [U64:Int], value_rows: [U64:Int]) -> JetRustEmitLocalWrites Never! {
@@ -315,17 +344,35 @@ fn jet_rust_emit_local_writes(function: MIRFunction, place_rows: [U64:Int], valu
     rows := [[JetRustEmitUse]]{}
     escaped := [U64:Bool]{}
     borrow_roots := [U64:MIRLocalID]{}
+    parameters := [U64:Int]{}
+    loop block in function.blocks {
+        loop instruction in block.instructions {
+            if instruction.operation == .Parameter(index, _) {
+                if instruction.result == .Val(result) {
+                    if parameters.get(result.value) == None -> _ := &parameters.add(result.value, index)
+                }
+            }
+        }
+    }
+    parameter_slots := [Int:Int]{}
+    parameter_rows := [[JetRustEmitPlaceWrite]]{}
+    parameter_escaped := [Int:Bool]{}
+    parameter_borrow_roots := [U64:MIRPlaceID]{}
     loop pass in 0..<2 {
         slots = [U64:Int]{}
         rows = [[JetRustEmitUse]]{}
+        parameter_slots = [Int:Int]{}
+        parameter_rows = [[JetRustEmitPlaceWrite]]{}
         loop (block_position, block) in function.blocks {
             loop (position, instruction) in block.instructions {
                 touched := [MIRLocalID]{}
+                changed := [MIRPlaceID]{}
                 if instruction.operation == {
                     .ReadPlace(place) -> {
                         if instruction.result == .Val(result) {
                             if jet_rust_emit_index_write_borrow(function, value_rows, result) {
                                 if jet_rust_emit_index_place_local(function, place_rows, place) == .Val(local) -> &touched.push(local)
+                                jet_rust_emit_index_parameter_change(function, place_rows, parameters, place, &changed)
                             }
                         }
                     }
@@ -337,27 +384,40 @@ fn jet_rust_emit_local_writes(function: MIRFunction, place_rows: [U64:Int], valu
                                 &touched.push(local)
                             }
                         }
+                        if access == MIRAccess.Move {
+                            jet_rust_emit_index_parameter_escape(function, place_rows, parameters, place, &parameter_escaped)
+                        } else if access != MIRAccess.Read {
+                            jet_rust_emit_index_parameter_change(function, place_rows, parameters, place, &changed)
+                        }
                     }
                     .MovePlace(place) -> {
+                        projects :: if place_rows.get(place.value) == .Val(row) -> function.places[row].projections.len() > 0 else -> false
                         if jet_rust_emit_index_place_local(function, place_rows, place) == .Val(local) {
-                            projects :: if place_rows.get(place.value) == .Val(row) -> function.places[row].projections.len() > 0 else -> false
                             if projects {
                                 _ := &escaped.add(local.value, true)
                             } else {
                                 &touched.push(local)
                             }
                         }
+                        if projects {
+                            jet_rust_emit_index_parameter_escape(function, place_rows, parameters, place, &parameter_escaped)
+                        } else {
+                            jet_rust_emit_index_parameter_change(function, place_rows, parameters, place, &changed)
+                        }
                     }
                     .InitializeUninit(place) | .WritePlace(place, _) | .ReplacePlace(place, _) -> {
                         if jet_rust_emit_index_place_local(function, place_rows, place) == .Val(local) -> &touched.push(local)
+                        jet_rust_emit_index_parameter_change(function, place_rows, parameters, place, &changed)
                     }
                     .RawAddressOf(place) -> {
                         if jet_rust_emit_index_place_local(function, place_rows, place) == .Val(local) -> _ := &escaped.add(local.value, true)
+                        jet_rust_emit_index_parameter_escape(function, place_rows, parameters, place, &parameter_escaped)
                     }
                     .Closure(_, captures, _) -> {
                         loop capture in captures {
                             if capture == .Place(place) {
                                 if jet_rust_emit_index_place_local(function, place_rows, place) == .Val(local) -> _ := &escaped.add(local.value, true)
+                                jet_rust_emit_index_parameter_escape(function, place_rows, parameters, place, &parameter_escaped)
                             }
                         }
                     }
@@ -366,8 +426,11 @@ fn jet_rust_emit_local_writes(function: MIRFunction, place_rows: [U64:Int], valu
                             .BuiltinMethod(_, _, receiver_place, _, _) -> {
                                 if receiver_place == .Val(place) {
                                     if jet_rust_emit_index_place_local(function, place_rows, place) == .Val(local) -> &touched.push(local)
+                                    jet_rust_emit_index_parameter_change(function, place_rows, parameters, place, &changed)
                                 }
                             }
+                            // A pattern scan advances its receiver in place.
+                            .CursorTakePattern(_, place, _) | .ReaderTakePattern(_, place, _) -> jet_rust_emit_index_parameter_change(function, place_rows, parameters, place, &changed)
                             .DataEntriesToMap(_, entry_local) -> _ := &escaped.add(entry_local.value, true)
                             else -> {}
                         }
@@ -377,21 +440,37 @@ fn jet_rust_emit_local_writes(function: MIRFunction, place_rows: [U64:Int], valu
                 loop arg in jet_rust_emit_index_call_args(instruction.operation) {
                     if arg.access != MIRAccess.Read && arg.place == .Val(place) {
                         if jet_rust_emit_index_place_local(function, place_rows, place) == .Val(local) -> &touched.push(local)
+                        jet_rust_emit_index_parameter_change(function, place_rows, parameters, place, &changed)
                     }
                 }
                 loop used in mir_operation_value_uses(instruction.operation) {
                     if borrow_roots.get(used.value) == .Val(local) -> &touched.push(local)
+                    if parameter_borrow_roots.get(used.value) == .Val(root) -> &changed.push(root)
                 }
-                if touched.len() > 0 && instruction.result == .Val(result) {
-                    if jet_rust_emit_index_write_borrow(function, value_rows, result) -> borrow_roots[result.value] = touched[0]
+                if instruction.result == .Val(result) {
+                    if jet_rust_emit_index_write_borrow(function, value_rows, result) {
+                        if touched.len() > 0 -> borrow_roots[result.value] = touched[0]
+                        if changed.len() > 0 -> parameter_borrow_roots[result.value] = changed[0]
+                    }
                 }
                 if pass == 1 {
                     loop local in touched -> jet_rust_emit_index_use(&slots, &rows, local.value, JetRustEmitUse{block: block_position, instruction: position})
+                    loop place in changed {
+                        index :: jet_rust_emit_index_place_parameter(function, place_rows, parameters, place) ?? next
+                        row :: JetRustEmitPlaceWrite{block: block_position, instruction: position, place: place}
+                        if parameter_slots.get(index) == .Val(slot) {
+                            &parameter_rows[slot].push(row)
+                        } else {
+                            parameter_slots[index] = parameter_rows.len()
+                            &parameter_rows.push([JetRustEmitPlaceWrite]{row})
+                        }
+                    }
                 }
             }
         }
     }
-    JetRustEmitLocalWrites{slots: slots, rows: rows, escaped: escaped}
+    loop action in function.drops -> jet_rust_emit_index_parameter_escape(function, place_rows, parameters, action.place, &parameter_escaped)
+    JetRustEmitLocalWrites{slots: slots, rows: rows, escaped: escaped, parameter_slots: parameter_slots, parameter_rows: parameter_rows, parameter_escaped: parameter_escaped}
 }
 
 // Every use of `value` in body order: the indexed rows of the function being
@@ -512,13 +591,22 @@ fn jet_rust_emit_capture_access(function: MIRFunction, slot: Int) -> MIRAccess N
     panic("Jet Rust emitter reached a MIR capture without a checked capture row")
 }
 
-fn jet_rust_emit_value_reference(value: MIRValueID, mutable: Bool) -> String Never! {
+// MIRRust value_slot_reference: a binding (a borrowed Parameter/Capture, or a
+// read that only feeds borrows) lends the place it names (only a Write
+// binding lends it mutably); any other value lends its slot.
+fn jet_rust_emit_value_reference(ctx: JetRustEmitContext, value: MIRValueID, mutable: Bool) -> String Never! {
+    if ctx.body_index.bindings.get(value.value) == .Val(binding) {
+        if !mutable -> return "&({binding.read})"
+        place :: binding.write ?? panic("MIR parameter place is not writable")
+        return "&mut ({place})"
+    }
     if mutable -> "{jet_rust_emit_value_slot(value)}.as_mut().expect(\"MIR value\")" else -> "{jet_rust_emit_value_slot(value)}.as_ref().expect(\"MIR value\")"
 }
 
-// MIRRust value_borrow (#4318): a shared reference to the value's slot.
-// Inspecting and borrowing consumers read through it; nothing is copied.
-fn jet_rust_emit_value_borrow(value: MIRValueID) -> String Never! { jet_rust_emit_value_reference(value, false) }
+// MIRRust value_borrow (#4318): a shared reference to the value's slot, or to
+// the place a binding names. Inspecting and borrowing consumers read through
+// it; nothing is copied.
+fn jet_rust_emit_value_borrow(ctx: JetRustEmitContext, value: MIRValueID) -> String Never! { jet_rust_emit_value_reference(ctx, value, false) }
 
 // MIRRust value_copy (#4318): the copy of a MIR `Copy{fact}` operand, and the
 // only printer of a value clone. MIRRust tags the clone with `fact` under
@@ -533,7 +621,7 @@ fn jet_rust_emit_value_owned(ctx: JetRustEmitContext, function: MIRFunction, val
 // MIRRust copy_text: a value whose Rust carrier is `Copy` is read bitwise
 // through its borrow; any other value clones.
 fn jet_rust_emit_copy_text(ctx: JetRustEmitContext, function: MIRFunction, value: MIRValueID) -> String Never! {
-    borrow :: jet_rust_emit_value_borrow(value)
+    borrow :: jet_rust_emit_value_borrow(ctx, value)
     if jet_rust_emit_copy_carrier(ctx, jet_rust_emit_value_type(ctx, function, value)) -> "(*{borrow})" else -> "({borrow}).clone()"
 }
 
@@ -553,17 +641,22 @@ fn jet_rust_emit_copy_carrier(ctx: JetRustEmitContext, source: MIRType) -> Bool 
     }
 }
 
-fn jet_rust_emit_value_move(value: MIRValueID) -> String Never! { "{jet_rust_emit_value_slot(value)}.take().expect(\"MIR value\")" }
+// MIRRust value_move: a borrowed binding is never moved out of; its owned read
+// copies the place where it is read (MIRRust value_owned), not at entry.
+fn jet_rust_emit_value_move(ctx: JetRustEmitContext, value: MIRValueID) -> String Never! {
+    if ctx.body_index.bindings.get(value.value) == .Val(binding) -> return if binding.bitwise -> "(*&({binding.read}))" else -> "(&({binding.read})).clone()"
+    "{jet_rust_emit_value_slot(value)}.take().expect(\"MIR value\")"
+}
 
 // MIRRust value_transfer: an allocator view (never cloned) and an Owned/Move
 // value are consumed; a Copy/Shared/borrowed value stays readable by others.
 fn jet_rust_emit_value_transfer(ctx: JetRustEmitContext, function: MIRFunction, value: MIRValueID) -> String Never! {
     ty :: jet_rust_emit_value_type(ctx, function, value)
     if ty.kind == .Tagged(marker, _) {
-        if marker == (MIRTagMarker.Internal{internal_tag: MIRInternalTag.AllocatorView}) -> return jet_rust_emit_value_move(value)
+        if marker == (MIRTagMarker.Internal{internal_tag: MIRInternalTag.AllocatorView}) -> return jet_rust_emit_value_move(ctx, value)
     }
     mode :: jet_rust_emit_value_mode(ctx, function, value)
-    if mode == MIROwnershipMode.Owned || mode == MIROwnershipMode.Move -> jet_rust_emit_value_move(value) else -> jet_rust_emit_value_owned(ctx, function, value)
+    if mode == MIROwnershipMode.Owned || mode == MIROwnershipMode.Move -> jet_rust_emit_value_move(ctx, value) else -> jet_rust_emit_value_owned(ctx, function, value)
 }
 
 fn jet_rust_emit_place_local(ctx: &JetRustEmitContext, local: MIRLocalID, mutable: Bool) -> String Never! {
@@ -593,6 +686,217 @@ fn jet_rust_emit_binding_uses_move_slot(ctx: JetRustEmitContext, function: MIRFu
     if ty.kind == MIRTypeKind.Int -> return true
     if ty.kind == MIRTypeKind.String && ctx.program.facts.target_dossier.layer == MIRRuntimeLayer.Core -> return false
     !mir_type_is_scalar(ty)
+}
+
+// MIRRust history_binding: a Parameter/Capture result names the retained
+// place, so MIRRust never stores it at entry; its users borrow or copy that
+// place where they read it. A binding of jet_rust_emit_place_bindings or
+// jet_rust_emit_read_bindings has no slot: every operand use renders its
+// place. Any other borrowed (non-Move) binding still stores its slot, except
+// when nothing reads that slot: every operand use is the drop that releases
+// nothing (jet_rust_emit_drop_value), and nothing moves out of a place rooted
+// at the binding (jet_rust_emit_place_move, partial moves).
+fn jet_rust_emit_unread_binding(ctx: &JetRustEmitContext, function: MIRFunction, instruction: MIRInstruction, value: MIRValueID) -> Bool Never! {
+    if ctx.body_index.function != (Val(function.id)) -> return false
+    if ctx.body_index.bindings.get(value.value) != None -> return true
+    access := MIRAccess.Move
+    if instruction.operation == {
+        .Parameter(index, _) -> access = jet_rust_emit_find_parameter(function, index).access
+        .Capture(slot) -> access = jet_rust_emit_capture_access(function, slot)
+        else -> return false
+    }
+    if access == MIRAccess.Move -> return false
+    loop user in jet_rust_emit_value_users(ctx, function, value) {
+        if user.instruction < 0 -> return false
+        if function.blocks[user.block].instructions[user.instruction].operation == {
+            .Drop(_, _) -> {}
+            else -> return false
+        }
+    }
+    loop row in function.places {
+        if row.base == {
+            .Parameter(base) | .Capture(base) -> { if base == value && ctx.body_index.moved_places.get(row.id.value) != None -> return false }
+            else -> {}
+        }
+    }
+    true
+}
+
+// MIRRust history_binding / emit_slots: the borrowed (Read/Write, non-window)
+// Parameter and Capture results whose entry store would copy the referent
+// (jet_rust_emit_parameter_expression clones it), keyed by value id. Their
+// users read the parameter place itself (jet_rust_emit_value_reference,
+// jet_rust_emit_value_move), so the function never deep-copies a borrowed
+// argument on entry. A binding keeps its slot when a place rooted at it is
+// moved out of (jet_rust_emit_place_move and partial moves take the slot) or
+// when a temporary place projects it (a write through that place needs a
+// writable copy), and in a generator, whose `move` stream task owns everything
+// its body reads.
+fn jet_rust_emit_place_bindings(ctx: JetRustEmitContext, function: MIRFunction) -> [U64:JetRustEmitPlaceBinding] Never! {
+    bindings := [U64:JetRustEmitPlaceBinding]{}
+    if function.generator != None -> return bindings
+    kept := [U64:Bool]{}
+    loop row in function.places {
+        if row.base == {
+            .Parameter(base) | .Capture(base) -> { if ctx.body_index.moved_places.get(row.id.value) != None -> kept[base.value] = true }
+            .Temporary(base) -> kept[base.value] = true
+            else -> {}
+        }
+    }
+    loop block in function.blocks {
+        loop instruction in block.instructions {
+            value :: instruction.result ?? next
+            access := MIRAccess.Move
+            if instruction.operation == {
+                .Parameter(index, _) -> {
+                    parameter :: jet_rust_emit_find_parameter(function, index)
+                    // A window is a `&mut [T]` slice, read whole as an owned
+                    // copy; a by-value Read parameter (scalar ABI) is moved
+                    // into its slot, never copied.
+                    if jet_rust_emit_window_param(ctx, function.id, index) -> next
+                    if parameter.access == MIRAccess.Read && !jet_rust_emit_is_receiver(function, index) && !jet_rust_emit_type_is_borrowed(parameter.ty) -> next
+                    access = parameter.access
+                }
+                .Capture(slot) -> access = jet_rust_emit_capture_access(function, slot)
+                else -> next
+            }
+            if access == MIRAccess.Move || kept.get(value.value) != None || bindings.get(value.value) != None -> next
+            write := String?{None}
+            if access == MIRAccess.Write -> write = Val(jet_rust_emit_parameter_place(ctx, function, value, true))
+            bindings[value.value] = JetRustEmitPlaceBinding{read: jet_rust_emit_parameter_place(ctx, function, value, false), write: write, bitwise: jet_rust_emit_copy_carrier(ctx, jet_rust_emit_value_type(ctx, function, value))}
+        }
+    }
+    bindings
+}
+
+// MIRRust direct_borrow_projection / direct_borrow_only: the bindings of
+// jet_rust_emit_place_bindings plus every `ReadPlace` of a read parameter's
+// place whose users never need it stored (jet_rust_emit_place_read_use),
+// keyed by value id. Such a read is never made: its users read the parameter
+// place itself through jet_rust_emit_value_reference (display holes,
+// operator and index operands, borrowed arguments, inspected subjects), so
+// the function never copies a borrowed argument just to read it. A read
+// parameter's place cannot change while the function runs
+// (jet_rust_emit_immutable_read_place), so the place read at a use holds
+// exactly what the copy would. The place projects only fields and payloads:
+// an index projection would move its bounds check from the read to each use.
+// A generator keeps its copies: its `move` stream task owns everything its
+// body reads.
+fn jet_rust_emit_read_bindings(ctx: &JetRustEmitContext, function: MIRFunction) -> [U64:JetRustEmitPlaceBinding] Never! {
+    bindings := ctx.body_index.bindings
+    if function.generator != None -> return bindings
+    // Values named as an index inside a place projection: the place renders
+    // them through jet_rust_emit_index_operand or the value borrow. A range
+    // projection keeps its operand's slot.
+    projected := [U64:Bool]{}
+    loop row in function.places {
+        loop projection in row.projections {
+            if projection == {
+                .Index(_, index, _, _, _, _, _) -> { if projected.get(index.value) == None -> projected[index.value] = true }
+                .Range(range, _, _) -> projected[range.value] = false
+                else -> {}
+            }
+        }
+    }
+    loop block in function.blocks {
+        loop instruction in block.instructions {
+            value :: instruction.result ?? next
+            if instruction.operation == .ReadPlace(place) {
+                if bindings.get(value.value) == None {
+                    if jet_rust_emit_read_binding_place(&ctx, function, value, place, projected) == .Val(read) -> bindings[value.value] = JetRustEmitPlaceBinding{read: read, write: None, bitwise: jet_rust_emit_copy_carrier(ctx, jet_rust_emit_value_type(ctx, function, value))}
+                }
+            }
+        }
+    }
+    bindings
+}
+
+// The place expression a jet_rust_emit_read_bindings read names, or None when
+// the read must be stored.
+fn jet_rust_emit_read_binding_place(ctx: &JetRustEmitContext, function: MIRFunction, value: MIRValueID, place: MIRPlaceID, projected: [U64:Bool]) -> String? Never! {
+    if ctx.ref_bindings.payloads.get(value.value) != None || ctx.ref_bindings.collections.get(value.value) != None || ctx.ref_bindings.cursors.get(value.value) != None -> return None
+    if jet_rust_emit_immutable_read_place(&ctx, function, value) != (Val(place)) -> return None
+    row :: ctx.body_index.place_rows.get(place.value) ?? return None
+    shape :: function.places[row]
+    root := MIRValueID?{None}
+    if shape.base == .Parameter(base) -> root = Val(base)
+    parameter :: root ?? return None
+    if jet_rust_emit_parameter_access(ctx, function, parameter) != (Val(MIRAccess.Read)) -> return None
+    definition :: jet_rust_emit_find_value_instruction(ctx, function, parameter) ?? return None
+    if definition.operation == .Parameter(index, _) {
+        if jet_rust_emit_window_param(ctx, function.id, index) -> return None
+    }
+    loop projection in shape.projections {
+        if projection == {
+            .Field(_, _) | .Payload(_, _) -> {}
+            else -> return None
+        }
+    }
+    // Nothing moves out of the parameter (a moved place takes its slot), and
+    // the read is the place itself, not a widened native Int.
+    loop other in function.places {
+        if other.base == .Parameter(base) {
+            if base == parameter && ctx.body_index.moved_places.get(other.id.value) != None -> return None
+        }
+    }
+    if jet_rust_emit_partial_root_has(ctx, function, shape.base) || jet_rust_emit_native_place_int_type(&ctx, function, place) != None -> return None
+    // A place projecting from the read's own slot reads that slot.
+    if jet_rust_emit_value_slot_read(ctx, function, value) -> return None
+    if projected.get(value.value) == (Val(false)) -> return None
+    used := projected.get(value.value) != None
+    loop user in jet_rust_emit_value_users(ctx, function, value) {
+        if user.instruction < 0 {
+            if !jet_rust_emit_switch_subject_use(function, user, value) -> return None
+        } else {
+            if !jet_rust_emit_place_read_use(&ctx, function, function.blocks[user.block].instructions[user.instruction], value) -> return None
+        }
+        used = true
+    }
+    if !used -> return None
+    Val(jet_rust_emit_place(&ctx, function, place, false))
+}
+
+// A consumer of a jet_rust_emit_read_bindings read that never needs the read
+// stored: it renders the read through jet_rust_emit_value_reference (an owned
+// operand copies the place there, through jet_rust_emit_value_owned or
+// jet_rust_emit_value_move, instead of taking a copy made at the read), or
+// borrows the place the read's definition names
+// (jet_rust_emit_place_borrowing_use, a builtin receiver place), or inspects
+// a transfer of it that is never made, or drops it (the read was never made,
+// so nothing is released). No consumer borrows the read mutably.
+fn jet_rust_emit_place_read_use(ctx: &JetRustEmitContext, function: MIRFunction, instruction: MIRInstruction, value: MIRValueID) -> Bool Never! {
+    operation :: instruction.operation
+    if instruction.result == .Val(transfer) {
+        if jet_rust_emit_transparent_read(ctx, function, transfer) == (Val(value)) && jet_rust_emit_inspected_transfer(&ctx, function, transfer) -> return true
+    }
+    if operation == {
+        // An index operand renders through jet_rust_emit_index_operand; a
+        // base is borrowed for a read.
+        .Index(_, base, _, _, access, _, _) -> return base != value || access == MIRAccess.Read
+        .BuildString(_) | .Binary(_, _, _, _, _) | .Unary(_, _) | .LoopRangeInit(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _) -> return true
+        .EnumIs(_, _, _) | .EnumPayload(_, _, _, _) | .OptionIsSome(_) | .OptionValue(_) | .ResultIsOk(_) | .ResultValue(_, _) -> return true
+        .Drop(_, kind) -> return kind != MIRDropKind.ForeignHandle && !jet_rust_emit_is_stm_type(jet_rust_emit_value_type(ctx, function, value))
+        // A Core call renders each argument through
+        // jet_rust_emit_call_arg_with_borrow; a Write argument would lend the
+        // read parameter's place mutably.
+        .CoreCall(_, _, args, _, _, _) -> {
+            loop arg in args {
+                if arg.value == value && arg.access == MIRAccess.Write -> return false
+            }
+            return true
+        }
+        .Semantic(semantic) -> {
+            if semantic == {
+                .Print(_, _) -> return true
+                // A static Prelude call renders exactly as a Prelude call
+                // (jet_rust_emit_prelude_call).
+                .StaticPreludeCall(call, args, _, _) -> return jet_rust_emit_direct_borrow_call(&ctx, function, MIRCallee.Prelude{call: call}, args, value)
+                else -> {}
+            }
+        }
+        else -> {}
+    }
+    jet_rust_emit_builtin_place_receiver(operation, value) || jet_rust_emit_place_borrowing_use(&ctx, function, operation, value)
 }
 
 fn jet_rust_emit_parameter_place(ctx: JetRustEmitContext, function: MIRFunction, value: MIRValueID, mutable: Bool) -> String Never! {
@@ -860,9 +1164,10 @@ fn jet_rust_emit_partial_projection_only(ctx: &JetRustEmitContext, function: MIR
 // only inspects the value may read that place instead of a materialized copy
 // (and the copy is never emitted when every consumer does). The place
 // projects fields, payloads, and list indexes from a read parameter, which
-// cannot change while the function runs, or from an owned local that nothing
-// changes or releases between the read and any use of the value
-// (jet_rust_emit_stable_local_read; MIRRust immutable_read_place). #4318 §8:
+// cannot change while the function runs, or from a write parameter or an
+// owned local that nothing changes or releases between the read and any use
+// of the value (jet_rust_emit_stable_parameter_read,
+// jet_rust_emit_stable_local_read; MIRRust immutable_read_place). #4318 §8:
 // a transfer of such a read (jet_rust_emit_transparent_read) is inspected in
 // the same place.
 // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::immutable_read_place
@@ -902,12 +1207,12 @@ fn jet_rust_emit_immutable_read_place(ctx: &JetRustEmitContext, function: MIRFun
         }
         if row.base == {
             .Parameter(parameter) -> {
-                definition :: jet_rust_emit_find_value_instruction(ctx, function, parameter) ?? return None
-                if definition.operation == .Parameter(index, _) {
-                    loop param in function.params {
-                        if param.index == index && param.access == MIRAccess.Read -> return Val(place_id)
-                    }
-                }
+                access :: jet_rust_emit_parameter_access(ctx, function, parameter) ?? return None
+                if access == MIRAccess.Read -> return Val(place_id)
+                if access != MIRAccess.Write -> return None
+                if !jet_rust_emit_stable_parameter_read(&ctx, function, read_value, row) -> return None
+                if read_value == value -> return Val(place_id)
+                if jet_rust_emit_stable_parameter_read(&ctx, function, value, row) -> return Val(place_id)
             }
             .Local(local) -> {
                 read_stable :: jet_rust_emit_stable_local_read(&ctx, function, read_value, local)
@@ -955,7 +1260,11 @@ fn jet_rust_emit_inspected_transfer(ctx: &JetRustEmitContext, function: MIRFunct
     if jet_rust_emit_value_slot_read(ctx, function, value) -> return false
     used := false
     loop user in jet_rust_emit_value_users(ctx, function, value) {
-        if user.instruction < 0 -> return false
+        if user.instruction < 0 {
+            if !jet_rust_emit_switch_subject_use(function, user, value) -> return false
+            used = true
+            next
+        }
         operation :: function.blocks[user.block].instructions[user.instruction].operation
         inspects :: if operation == {
             .EnumIs(subject, _, _) -> subject == value
@@ -973,6 +1282,21 @@ fn jet_rust_emit_inspected_transfer(ctx: &JetRustEmitContext, function: MIRFunct
         used = true
     }
     used && jet_rust_emit_immutable_read_place(&ctx, function, value) != None
+}
+
+// MIRRust emit_switch: a Switch terminator renders only its arm conditions;
+// its subject is carried for facts only, so naming the subject reads no slot.
+// A value that is an arm condition too is read there.
+fn jet_rust_emit_switch_subject_use(function: MIRFunction, user: JetRustEmitUse, value: MIRValueID) -> Bool Never! {
+    if user.instruction >= 0 -> return false
+    if function.blocks[user.block].terminator == .Switch(subject, arms, _) {
+        if subject != value -> return false
+        loop arm in arms {
+            if arm.condition == value -> return false
+        }
+        return true
+    }
+    false
 }
 
 // MIRRust STM_TYPE: the root transaction guard (`Stm`).
@@ -997,18 +1321,119 @@ fn jet_rust_emit_stable_local_read(ctx: &JetRustEmitContext, function: MIRFuncti
     stable
 }
 
+// MIRRust stable_parameter_read: jet_rust_emit_stable_local_read for a
+// `value` that reads, or transfers a read of, `place`, a place rooted at a
+// write parameter: no operation that may change an overlapping place of that
+// parameter (jet_rust_emit_parameter_place_writes) runs between the read and
+// any use.
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::stable_parameter_read
+fn jet_rust_emit_stable_parameter_read(ctx: &JetRustEmitContext, function: MIRFunction, value: MIRValueID, place: MIRPlace) -> Bool Never! {
+    if ctx.body_index.function != (Val(function.id)) -> return false
+    if ctx.body_index.stable_reads.get(value.value) == .Val(known) -> return known
+    stable := false
+    if jet_rust_emit_parameter_place_writes(ctx, function, place) == .Val(writes) -> stable = jet_rust_emit_unchanged_until_uses(ctx, function, value, writes)
+    _ := &ctx.body_index.stable_reads.add(value.value, stable)
+    stable
+}
+
+// The access of the parameter `parameter` (a `Parameter` value) names.
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::parameter_access
+fn jet_rust_emit_parameter_access(ctx: JetRustEmitContext, function: MIRFunction, parameter: MIRValueID) -> MIRAccess? {
+    definition :: jet_rust_emit_find_value_instruction(ctx, function, parameter) ?? return None
+    if definition.operation == .Parameter(index, _) {
+        loop param in function.params {
+            if param.index == index -> return Val(param.access)
+        }
+    }
+    None
+}
+
+// MIRRust parameter_place_writes: the instructions that may change `place`,
+// a place rooted at a write parameter: those changing a place of that
+// parameter that shares storage with it (jet_rust_emit_places_overlap). None
+// when the parameter is a range window, which reads as a copied list, or
+// escapes place-based tracking.
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::parameter_place_writes
+fn jet_rust_emit_parameter_place_writes(ctx: JetRustEmitContext, function: MIRFunction, place: MIRPlace) -> [JetRustEmitUse]? {
+    parameter := MIRValueID?{None}
+    if place.base == .Parameter(value) -> parameter = Val(value)
+    parameter_value :: parameter ?? return None
+    definition :: jet_rust_emit_find_value_instruction(ctx, function, parameter_value) ?? return None
+    index := -1
+    if definition.operation == .Parameter(position, _) -> index = position
+    if index < 0 -> return None
+    if ctx.body_index.escaped_parameters.get(index) != None || jet_rust_emit_window_param(ctx, function.id, index) -> return None
+    writes := [JetRustEmitUse]{}
+    slot :: ctx.body_index.parameter_write_slots.get(index) ?? return Val(writes)
+    loop write in ctx.body_index.parameter_writes[slot] {
+        overlaps := true
+        if ctx.body_index.place_rows.get(write.place.value) == .Val(row) -> overlaps = jet_rust_emit_places_overlap(function.places[row].projections, place.projections)
+        if overlaps -> &writes.push(JetRustEmitUse{block: write.block, instruction: write.instruction})
+    }
+    Val(writes)
+}
+
+// MIRRust places_overlap: whether two places of one root, given by their
+// projections, may share storage: only a field of one record that differs
+// from the other's field at the same depth keeps them apart. An index,
+// payload or other projection is taken to overlap whatever it meets.
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::places_overlap
+fn jet_rust_emit_places_overlap(left: [MIRProjection], right: [MIRProjection]) -> Bool Never! {
+    loop (position, projection) in left {
+        if position >= right.len() -> return true
+        left_field := MIRFieldID?{None}
+        right_field := MIRFieldID?{None}
+        if projection == .Field(field, _) -> left_field = Val(field)
+        if right[position] == .Field(field, _) -> right_field = Val(field)
+        if left_field == None || right_field == None -> return true
+        if left_field != right_field -> return false
+    }
+    true
+}
+
+// MIRRust unchanged_after: whether none of `writes` may run after
+// instruction `position` of block `block`: none later in that block, none in
+// a block reachable from it.
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::unchanged_after
+fn jet_rust_emit_unchanged_after(ctx: JetRustEmitContext, function: MIRFunction, writes: [JetRustEmitUse], block: Int, position: Int) -> Bool Never! {
+    reached := [Int:Bool]{}
+    pending := [Int]{block}
+    loop pending.len() > 0 {
+        at :: &pending.pop() ?? { break }
+        loop target in mir_terminator_targets(function.blocks[at].terminator) {
+            if ctx.body_index.block_positions.get(target.value) == .Val(target_position) {
+                if reached.get(target_position) == None {
+                    _ := &reached.add(target_position, true)
+                    &pending.push(target_position)
+                }
+            }
+        }
+    }
+    loop write in writes {
+        if reached.get(write.block) != None || (write.block == block && write.instruction > position) -> return false
+    }
+    true
+}
+
 // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::local_unchanged_until_uses
 fn jet_rust_emit_local_unchanged_until_uses(ctx: JetRustEmitContext, function: MIRFunction, value: MIRValueID, local: MIRLocalID) -> Bool Never! {
     if ctx.body_index.escaped_locals.get(local.value) != None -> return false
+    write_slot :: ctx.body_index.write_slots.get(local.value) ?? -1
+    writes :: if write_slot >= 0 -> ctx.body_index.local_writes[write_slot] else -> [JetRustEmitUse]{}
+    jet_rust_emit_unchanged_until_uses(ctx, function, value, writes)
+}
+
+// MIRRust unchanged_until_uses: whether none of `writes` runs between the
+// definition of `value` and any use of it, along paths that do not pass the
+// definition again.
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::unchanged_until_uses
+fn jet_rust_emit_unchanged_until_uses(ctx: JetRustEmitContext, function: MIRFunction, value: MIRValueID, writes: [JetRustEmitUse]) -> Bool Never! {
     read_block :: ctx.body_index.definition_blocks.get(value.value) ?? return false
     read_position :: ctx.body_index.definition_positions.get(value.value) ?? return false
     use_slot :: ctx.body_index.use_slots.get(value.value) ?? return true
-    write_slot :: ctx.body_index.write_slots.get(local.value) ?? -1
     first_write := -1
-    if write_slot >= 0 {
-        loop write in ctx.body_index.local_writes[write_slot] {
-            if write.block == read_block && write.instruction > read_position && (first_write < 0 || write.instruction < first_write) -> first_write = write.instruction
-        }
+    loop write in writes {
+        if write.block == read_block && write.instruction > read_position && (first_write < 0 || write.instruction < first_write) -> first_write = write.instruction
     }
     // Blocks from which a use is reachable without passing the read.
     region := [Int:Bool]{}
@@ -1035,10 +1460,8 @@ fn jet_rust_emit_local_unchanged_until_uses(ctx: JetRustEmitContext, function: M
     // A use past the read block's end: the rest of the read block runs
     // first, then any region block may (conservatively, all of it).
     if first_write >= 0 -> return false
-    if write_slot >= 0 {
-        loop write in ctx.body_index.local_writes[write_slot] {
-            if region.get(write.block) != None -> return false
-        }
+    loop write in writes {
+        if region.get(write.block) != None -> return false
     }
     true
 }
@@ -1048,9 +1471,11 @@ fn jet_rust_emit_local_unchanged_until_uses(ctx: JetRustEmitContext, function: M
 // Every write of such a local binds, read once and earlier in the writing
 // block, a plain enum, option or result payload of a stable place, or the
 // stable place itself (`x :: p.f`). A stable place is rooted at a read
-// parameter, which nothing changes while the function runs, or at another
-// reference binding, whose referent is just as stable however that binding is
-// later rebound. Nothing else writes the local, borrows it for writing, moves
+// parameter, which nothing changes while the function runs, at a write
+// parameter whose overlapping places nothing may change once the bound read
+// is made (jet_rust_emit_parameter_place_writes), or at another reference
+// binding, whose referent is just as stable however that binding is later
+// rebound. Nothing else writes the local, borrows it for writing, moves
 // out of a projection of it, captures it or lets it escape. Its reads then
 // borrow the referent; a consuming move copies the referent, as the binding
 // did before; a whole move that only feeds a drop releases nothing.
@@ -1102,6 +1527,7 @@ fn jet_rust_emit_ref_bindings(ctx: &JetRustEmitContext, function: MIRFunction) -
         }
         loop used in mir_terminator_value_uses(block.terminator) -> _ := &use_counts.add(used.value, (use_counts.get(used.value) ?? 0) + 2)
     }
+    candidates :: jet_rust_emit_borrowed_loop_candidates(&ctx, function, use_counts)
     // MIRRust FunctionIndex local_writes: the operations that may change or
     // release a local, in two passes since a write borrow's definition may
     // sit in a block listed after one of its uses. Only a binding write from
@@ -1145,7 +1571,7 @@ fn jet_rust_emit_ref_bindings(ctx: &JetRustEmitContext, function: MIRFunction) -
                         if place_locals.get(place.value) == .Val(local) {
                             &touched.push(local)
                             if pass == 1 && whole_places.get(place.value) != None && rooted.get(value.value) == None {
-                                if jet_rust_emit_ref_binding_source(&ctx, function, value, block_position, position, use_counts, touches) == .Val(source) {
+                                if jet_rust_emit_ref_binding_source(&ctx, function, value, block_position, position, use_counts, touches, candidates) == .Val(source) {
                                     allowed = Val(local)
                                     rows := writes.get(local.value) ?? [JetRustEmitRefSource]{}
                                     if rows.len() == 0 -> &order.push(local)
@@ -1196,34 +1622,155 @@ fn jet_rust_emit_ref_bindings(ctx: &JetRustEmitContext, function: MIRFunction) -
             }
         }
     }
-    // A binding rooted at another binding needs that one to stay a reference
-    // binding too.
     live := [U64:Bool]{}
     loop local in order -> _ := &live.add(local.value, rejected.get(local.value) == None)
-    changed := true
-    loop changed {
-        changed = false
-        loop local in order {
-            if live.get(local.value) != (Val(true)) -> next
-            sources :: writes.get(local.value) ?? [JetRustEmitRefSource]{}
-            loop source in sources {
-                if source.root == .Val(root) {
-                    if root == local || live.get(root.value) != (Val(true)) {
-                        _ := &live.add(local.value, false)
-                        changed = true
-                        break
+    active := [U64:Bool]{}
+    loop candidate in candidates -> _ := &active.add(candidate.cursor.value, true)
+    loop {
+        // A binding rooted at another binding needs that one to stay a
+        // reference binding too.
+        changed := true
+        loop changed {
+            changed = false
+            loop local in order {
+                if live.get(local.value) != (Val(true)) -> next
+                sources :: writes.get(local.value) ?? [JetRustEmitRefSource]{}
+                loop source in sources {
+                    if source.root == .Val(root) {
+                        if root == local || live.get(root.value) != (Val(true)) {
+                            _ := &live.add(local.value, false)
+                            changed = true
+                            break
+                        }
                     }
                 }
             }
         }
+        // A cursor walks its list in place only when every element it yields
+        // binds a reference; otherwise its bindings copy again.
+        bound := [U64:Bool]{}
+        loop local in order {
+            if live.get(local.value) != (Val(true)) -> next
+            sources :: writes.get(local.value) ?? [JetRustEmitRefSource]{}
+            loop source in sources -> _ := &bound.add(source.value.value, true)
+        }
+        failed := [U64:Bool]{}
+        loop candidate in candidates {
+            if active.get(candidate.cursor.value) != (Val(true)) -> next
+            loop user in jet_rust_emit_value_users(ctx, function, candidate.cursor) {
+                if user.instruction < 0 -> next
+                instruction :: function.blocks[user.block].instructions[user.instruction]
+                if instruction.operation == .LoopIterValue(_, _) {
+                    element_bound := false
+                    if instruction.result == .Val(element) -> element_bound = bound.get(element.value) != None
+                    if !element_bound -> _ := &failed.add(candidate.cursor.value, true)
+                }
+            }
+        }
+        if failed.len() == 0 -> break
+        loop candidate in candidates {
+            if failed.get(candidate.cursor.value) != None -> _ := &active.add(candidate.cursor.value, false)
+        }
+        loop local in order {
+            if live.get(local.value) != (Val(true)) -> next
+            sources :: writes.get(local.value) ?? [JetRustEmitRefSource]{}
+            loop source in sources {
+                written :: jet_rust_emit_find_value_instruction(ctx, function, source.value) ?? next
+                if written.operation == .LoopIterValue(_, cursor) {
+                    if failed.get(cursor.value) != None -> _ := &live.add(local.value, false)
+                }
+            }
+        }
+    }
+    loop candidate in candidates {
+        if active.get(candidate.cursor.value) != (Val(true)) -> next
+        _ := &bindings.cursors.add(candidate.cursor.value, candidate.place)
+        _ := &bindings.collections.add(candidate.collection.value, true)
     }
     loop local in order {
         if live.get(local.value) != (Val(true)) -> next
         _ := &bindings.locals.add(local.value, true)
         sources :: writes.get(local.value) ?? [JetRustEmitRefSource]{}
-        loop source in sources -> _ := &bindings.payloads.add(source.value.value, true)
+        loop source in sources {
+            // A moved payload (`x :: p ?? return`) has no slot either.
+            if jet_rust_emit_find_value_instruction(ctx, function, source.value) == .Val(written) {
+                if written.operation == .Move(payload) -> _ := &bindings.payloads.add(payload.value, true)
+            }
+            _ := &bindings.payloads.add(source.value.value, true)
+        }
     }
     bindings
+}
+
+// MIRRust borrowed_loop_candidates (#4318): read loops that may walk their
+// list in place: a plain, unstepped `LoopIterInit` over a `Vec` collection
+// read once, from a stable place (jet_rust_emit_immutable_read_place) that
+// nothing may change while the cursor is live
+// (jet_rust_emit_unchanged_until_uses over the cursor's uses, which span the
+// whole loop), whose cursor only feeds its own has-next, value, advance and
+// drop. Each row names the cursor, its collection, the place, and the
+// reference binding the place is rooted at, if any (a rebinding of that
+// local leaves the walked referent as it was).
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::borrowed_loop_candidates
+fn jet_rust_emit_borrowed_loop_candidates(ctx: &JetRustEmitContext, function: MIRFunction, use_counts: [U64:Int]) -> [JetRustEmitLoopCandidate] Never! {
+    candidates := [JetRustEmitLoopCandidate]{}
+    if function.optimization.vector_facts.len() > 0 || function.optimization.acceleration_facts.len() > 0 -> return candidates
+    loop block in function.blocks {
+        loop instruction in block.instructions {
+            if instruction.operation == .LoopIterInit(_, collection, step, by_value, source_kind) {
+                cursor :: instruction.result ?? next
+                if step != None || by_value || source_kind != MIRLoopSourceKind.Plain -> next
+                if use_counts.get(collection.value) != (Val(1)) -> next
+                if jet_rust_emit_value_mode(ctx, function, collection) == MIROwnershipMode.WriteBorrow -> next
+                if jet_rust_emit_transparent_read(ctx, function, collection) == .Val(read) {
+                    if jet_rust_emit_value_mode(ctx, function, read) == MIROwnershipMode.WriteBorrow -> next
+                }
+                collection_type :: jet_rust_emit_value_type(ctx, function, collection)
+                if jet_rust_emit_byte_loop_collection(collection_type) || jet_rust_emit_shared_constant_value(&ctx, function, collection) -> next
+                if !jet_rust_emit_type(&ctx, collection_type).starts_with("Vec<") -> next
+                if !jet_rust_emit_loop_cursor_only(ctx, function, cursor) -> next
+                place_id :: jet_rust_emit_immutable_read_place(&ctx, function, collection) ?? next
+                row :: ctx.body_index.place_rows.get(place_id.value) ?? next
+                place :: function.places[row]
+                root := MIRLocalID?{None}
+                if place.base == {
+                    .Parameter(parameter) -> {
+                        access :: jet_rust_emit_parameter_access(ctx, function, parameter) ?? next
+                        if access == MIRAccess.Read {
+                            if jet_rust_emit_place_is_window(&ctx, function, place_id) -> next
+                        } else if access == MIRAccess.Write {
+                            writes :: jet_rust_emit_parameter_place_writes(ctx, function, place) ?? next
+                            if !jet_rust_emit_unchanged_until_uses(ctx, function, cursor, writes) -> next
+                        } else {
+                            next
+                        }
+                    }
+                    .Local(local) -> {
+                        write_slot :: ctx.body_index.write_slots.get(local.value) ?? -1
+                        writes :: if write_slot >= 0 -> ctx.body_index.local_writes[write_slot] else -> [JetRustEmitUse]{}
+                        if ctx.body_index.escaped_locals.get(local.value) != None || !jet_rust_emit_unchanged_until_uses(ctx, function, cursor, writes) -> root = Val(local)
+                    }
+                    else -> next
+                }
+                &candidates.push(JetRustEmitLoopCandidate{cursor: cursor, collection: collection, place: place_id, root: root})
+            }
+        }
+    }
+    candidates
+}
+
+// Whether `cursor` only feeds its own has-next, value, advance and drop.
+fn jet_rust_emit_loop_cursor_only(ctx: JetRustEmitContext, function: MIRFunction, cursor: MIRValueID) -> Bool Never! {
+    loop user in jet_rust_emit_value_users(ctx, function, cursor) {
+        if user.instruction < 0 -> return false
+        used :: if function.blocks[user.block].instructions[user.instruction].operation == {
+            .LoopIterHasNext(_, operand) | .LoopIterValue(_, operand) | .LoopIterAdvance(_, operand) -> operand == cursor
+            .Drop(operand, _) -> operand == cursor
+            else -> false
+        }
+        if !used -> return false
+    }
+    true
 }
 
 fn jet_rust_emit_ref_write_args(args: [MIRCallArg], place_locals: [U64:MIRLocalID], touched: &[MIRLocalID]) Never! {
@@ -1238,36 +1785,72 @@ fn jet_rust_emit_ref_write_args(args: [MIRCallArg], place_locals: [U64:MIRLocalI
 // position)` when `value` is a plain payload of a stable place, or a stable
 // place itself, used only by that write and defined earlier in the same
 // block with nothing changing the place's root in between (`touches`: the
-// writes seen so far). The root is None for a read parameter, else the local
-// that must itself be a reference binding.
+// writes seen so far). The root is None for a read parameter, or a write
+// parameter that nothing may change from the read on, else the local that
+// must itself be a reference binding. A `value` that only moves such a
+// payload, used by nothing else (the unwrap of `x :: p ?? return`), binds
+// that payload. An element of a candidate in-place loop
+// (jet_rust_emit_borrowed_loop_candidates) binds by reference into the walked
+// list, rooted as that list's place.
 // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::ref_binding_source
-fn jet_rust_emit_ref_binding_source(ctx: &JetRustEmitContext, function: MIRFunction, value: MIRValueID, block: Int, position: Int, use_counts: [U64:Int], touches: [String:Bool]) -> JetRustEmitRefSource? {
+fn jet_rust_emit_ref_binding_source(ctx: &JetRustEmitContext, function: MIRFunction, value: MIRValueID, block: Int, position: Int, use_counts: [U64:Int], touches: [String:Bool], candidates: [JetRustEmitLoopCandidate]) -> JetRustEmitRefSource? {
     if use_counts.get(value.value) != (Val(1)) -> return None
     def_block :: ctx.body_index.definition_blocks.get(value.value) ?? return None
     def_position :: ctx.body_index.definition_positions.get(value.value) ?? return None
     if def_block != block || def_position >= position -> return None
+    bound := value
+    bound_block := block
+    bound_position := def_position
+    if function.blocks[block].instructions[def_position].operation == .Move(payload) {
+        if use_counts.get(payload.value) != (Val(1)) -> return None
+        bound_block = ctx.body_index.definition_blocks.get(payload.value) ?? return None
+        bound_position = ctx.body_index.definition_positions.get(payload.value) ?? return None
+        if function.blocks[bound_block].instructions[bound_position].operation == {
+            .EnumPayload(_, _, _, _) | .OptionValue(_) | .ResultValue(_, _) -> bound = payload
+            else -> return None
+        }
+    }
     read := value
-    if function.blocks[block].instructions[def_position].operation == {
+    if function.blocks[bound_block].instructions[bound_position].operation == {
         .EnumPayload(subject, owner, variant, index) -> {
-            if ctx.move_facts.payload_subjects.get("{value.value}") != None -> return None
+            if ctx.move_facts.payload_subjects.get("{bound.value}") != None -> return None
             if jet_rust_emit_plain_payload_pattern(&ctx, owner, variant, index) == None -> return None
             read = subject
         }
         .OptionValue(subject) | .ResultValue(subject, _) -> read = subject
         .ReadPlace(_) -> {}
+        .LoopIterValue(_, cursor) -> {
+            loop candidate in candidates {
+                if candidate.cursor != cursor -> next
+                element_type :: jet_rust_emit_value_type(ctx, function, value)
+                list_type :: jet_rust_emit_value_type(ctx, function, candidate.collection)
+                element :: jet_rust_emit_type(&ctx, element_type)
+                list :: jet_rust_emit_type(&ctx, list_type)
+                if list != "Vec<{element}>" -> return None
+                return Val(JetRustEmitRefSource{value: value, root: candidate.root})
+            }
+            return None
+        }
         else -> return None
     }
     place_id :: jet_rust_emit_immutable_read_place(&ctx, function, read) ?? return None
     loop place in function.places {
         if place.id != place_id -> next
         if place.base == {
-            .Parameter(_) -> {
+            .Parameter(parameter) -> {
                 // A range-window parameter reads as a copied list, not in place.
                 if jet_rust_emit_place_is_window(&ctx, function, place_id) -> return None
+                // A write parameter's place stays as bound when nothing that
+                // may change it can run once its payload or value is read.
+                if jet_rust_emit_parameter_access(ctx, function, parameter) == (Val(MIRAccess.Write)) {
+                    writes :: jet_rust_emit_parameter_place_writes(ctx, function, place) ?? return None
+                    if !jet_rust_emit_unchanged_after(ctx, function, writes, bound_block, bound_position) -> return None
+                }
                 return Val(JetRustEmitRefSource{value: value, root: None})
             }
             .Local(root) -> {
-                loop at in (def_position + 1)..<position {
+                if bound_block != block -> return None
+                loop at in (bound_position + 1)..<position {
                     if touches.get("{root.value}:{block}:{at}") != None -> return None
                 }
                 return Val(JetRustEmitRefSource{value: value, root: Val(root)})
@@ -1305,7 +1888,7 @@ fn jet_rust_emit_ref_binding_drop(ctx: &JetRustEmitContext, function: MIRFunctio
 // A shared reference for a consumer that only inspects `value`: the stable
 // place `value` reads (jet_rust_emit_immutable_read_place), else the value slot.
 fn jet_rust_emit_inspected_value_reference(ctx: &JetRustEmitContext, function: MIRFunction, value: MIRValueID) -> String Never! {
-    place :: jet_rust_emit_immutable_read_place(&ctx, function, value) ?? return jet_rust_emit_value_reference(value, false)
+    place :: jet_rust_emit_immutable_read_place(&ctx, function, value) ?? return jet_rust_emit_value_reference(ctx, value, false)
     jet_rust_emit_place_reference(&ctx, function, place, MIRAccess.Read)
 }
 
@@ -1328,11 +1911,16 @@ fn jet_rust_emit_builtin_place_receiver(operation: MIROperation, value: MIRValue
 // arguments a builtin route borrows (jet_rust_emit_builtin_method_values), and
 // the borrowed arguments of a call or host call of any dispatch. Over a
 // `ReadPlace` that reference names the place itself, so the consumer never reads
-// the value slot (MIRRust borrowed_operation_use, direct_borrow_only).
+// the value slot (MIRRust borrowed_operation_use, direct_borrow_only). A
+// shared-guard deref reads through the guard's place (jet_rust_emit_deref), and
+// a field of a guard-origin value through the guarded place
+// (jet_rust_emit_shared_guard_borrow_place).
 fn jet_rust_emit_place_borrowing_use(ctx: &JetRustEmitContext, function: MIRFunction, operation: MIROperation, value: MIRValueID) -> Bool Never! {
     if operation == {
         .Index(_, base, index, _, access, _, _) -> return base == value && index != value && access != MIRAccess.Move
         .Call(callee, args, _) -> return jet_rust_emit_direct_borrow_call(&ctx, function, callee, args, value)
+        .Deref(operand) -> return operand == value && jet_rust_emit_is_shared_guard_type(jet_rust_emit_value_type(ctx, function, operand))
+        .Field(base, _) -> return base == value && jet_rust_emit_shared_guard_borrow_origin(&ctx, function, base)
         .Semantic(semantic) -> {
             if semantic == {
                 .BuiltinMethod(call, receiver, receiver_place, args, _) -> {
@@ -1347,6 +1935,31 @@ fn jet_rust_emit_place_borrowing_use(ctx: &JetRustEmitContext, function: MIRFunc
                     }
                     return true
                 }
+                // MIRRust borrowed_operation_use: a handle route lends every
+                // operand its mask borrows (jet_rust_emit_handle_method_values).
+                .HandleMethod(call, receiver, args, _, _) -> {
+                    row :: jet_rust_emit_prelude_route(ctx, call, false) ?? return false
+                    mask :: row.signature.borrow_mask
+                    if mask.len() != args.len() + 1 -> return false
+                    if receiver == value && !mask[0] -> return false
+                    loop (index, arg) in args {
+                        if arg == value && !mask[index + 1] -> return false
+                    }
+                    return true
+                }
+                // MIRRust borrowed_operation_use: a closure route lends its
+                // receiver and every non-moved argument its mask borrows
+                // (jet_rust_emit_prelude_receiver_call).
+                .ClosureMethod(receiver, args, call) -> {
+                    row :: jet_rust_emit_prelude_route(ctx, call, true) ?? return false
+                    mask :: row.signature.borrow_mask
+                    if mask.len() != args.len() + 1 -> return false
+                    if receiver == value && !mask[0] -> return false
+                    loop (index, arg) in args {
+                        if arg.value == value && (arg.access == MIRAccess.Move || !mask[index + 1]) -> return false
+                    }
+                    return true
+                }
                 // A host call renders exactly as a Prelude call (jet_rust_emit_prelude_call).
                 .HostCall(call, args) -> return jet_rust_emit_direct_borrow_call(&ctx, function, MIRCallee.Prelude{call: call}, args, value)
                 else -> return false
@@ -1354,6 +1967,61 @@ fn jet_rust_emit_place_borrowing_use(ctx: &JetRustEmitContext, function: MIRFunc
         }
         else -> return false
     }
+}
+
+// MIRRust shared_guard_borrow_origin: a shared-guard deref, or a field chain
+// over one, borrows the guarded value instead of owning a copy of it.
+fn jet_rust_emit_shared_guard_borrow_origin(ctx: &JetRustEmitContext, function: MIRFunction, value: MIRValueID) -> Bool Never! {
+    instruction :: jet_rust_emit_find_value_instruction(ctx, function, value) ?? return false
+    if instruction.operation == {
+        .Deref(guard) -> return jet_rust_emit_is_shared_guard_type(jet_rust_emit_value_type(ctx, function, guard))
+        .Field(base, _) -> return jet_rust_emit_shared_guard_borrow_origin(&ctx, function, base)
+        else -> return false
+    }
+}
+
+// MIRRust shared_guard_borrow_place: the guarded place a guard-origin value
+// names, `**(guard)` under its field chain, with the guard borrowed from its
+// own place when it reads or addresses one; None for any other value.
+fn jet_rust_emit_shared_guard_borrow_place(ctx: &JetRustEmitContext, function: MIRFunction, value: MIRValueID, access: MIRAccess) -> String? Never! {
+    instruction :: jet_rust_emit_find_value_instruction(ctx, function, value) ?? return None
+    if instruction.operation == {
+        .Deref(guard) -> {
+            if !jet_rust_emit_is_shared_guard_type(jet_rust_emit_value_type(ctx, function, guard)) -> return None
+            reference := jet_rust_emit_value_reference(ctx, guard, access == MIRAccess.Write)
+            if jet_rust_emit_find_value_instruction(ctx, function, guard) == .Val(definition) {
+                if definition.operation == {
+                    .AddressOf(place, _) | .ReadPlace(place) -> reference = jet_rust_emit_place_reference(&ctx, function, place, access)
+                    else -> {}
+                }
+            }
+            return Val("**({reference})")
+        }
+        .Field(base, field) -> {
+            if !jet_rust_emit_shared_guard_borrow_origin(&ctx, function, base) -> return None
+            place :: jet_rust_emit_shared_guard_borrow_place(&ctx, function, base, access) ?? return None
+            return Val("({place}).{jet_rust_emit_field_name(&ctx, field)}")
+        }
+        else -> return None
+    }
+}
+
+// MIRRust direct_borrow_projection over a guard-origin value: when every
+// consumer only borrows it (jet_rust_emit_place_borrowing_use), the value is
+// never stored in its slot, so no bitwise copy of the guarded value is made
+// (the Rust emitter's elided_shared_guard_base). Field reads and borrowed
+// references name the guarded place instead.
+fn jet_rust_emit_shared_guard_projection_only(ctx: &JetRustEmitContext, function: MIRFunction, value: MIRValueID) -> Bool Never! {
+    if !jet_rust_emit_shared_guard_borrow_origin(&ctx, function, value) -> return false
+    // A place projecting from the value's own slot reads that slot.
+    if jet_rust_emit_value_slot_read(ctx, function, value) -> return false
+    used := false
+    loop user in jet_rust_emit_value_users(ctx, function, value) {
+        if user.instruction < 0 -> return false
+        if !jet_rust_emit_place_borrowing_use(&ctx, function, function.blocks[user.block].instructions[user.instruction].operation, value) -> return false
+        used = true
+    }
+    used
 }
 
 // D-MEM-COPYSEM1: true when `value` reads a stable place and every consumer
@@ -1384,7 +2052,11 @@ fn jet_rust_emit_inspected_only(ctx: &JetRustEmitContext, function: MIRFunction,
     used := false
     place_receivers_only := true
     loop user in jet_rust_emit_value_users(ctx, function, value) {
-        if user.instruction < 0 -> return false
+        if user.instruction < 0 {
+            if !jet_rust_emit_switch_subject_use(function, user, value) -> return false
+            used = true
+            next
+        }
         operation :: function.blocks[user.block].instructions[user.instruction].operation
         used = true
         transfer :: function.blocks[user.block].instructions[user.instruction].result
@@ -2012,7 +2684,7 @@ fn jet_rust_emit_place_base(ctx: &JetRustEmitContext, function: MIRFunction, bas
             }
             .Parameter(value) -> jet_rust_emit_parameter_place(ctx, function, value, mutable)
             .Capture(value) -> jet_rust_emit_parameter_place(ctx, function, value, mutable)
-            .Temporary(value) -> "*({jet_rust_emit_value_reference(value, mutable)})"
+            .Temporary(value) -> "*({jet_rust_emit_value_reference(ctx, value, mutable)})"
             .Static(name) -> {
                 // MIRRust place_base: a persistent cell lends no mutable projection.
                 if mutable -> jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidOwnership, "E0003", "MIR mutable static projection has no canonical owning representation", "persistent places are read whole and written through their cell", None)
@@ -2035,7 +2707,7 @@ fn jet_rust_emit_place_base(ctx: &JetRustEmitContext, function: MIRFunction, bas
                 // MIRRust place projection: the fixed ref/mut index helpers
                 // borrow the projected place; the route row supplies the ABI.
                 index_expression :: if {
-                    kind == MIRIndexKind.Map && !mutable -> jet_rust_emit_value_borrow(index)
+                    kind == MIRIndexKind.Map && !mutable -> jet_rust_emit_value_borrow(ctx, index)
                     kind == MIRIndexKind.Map -> jet_rust_emit_value_owned(ctx, function, index)
                     else -> jet_rust_emit_index_operand(&ctx, function, index, location)
                 }
@@ -2339,9 +3011,9 @@ fn jet_rust_emit_place_move(ctx: &JetRustEmitContext, function: MIRFunction, id:
                     }
                     return "{jet_rust_emit_local_storage(&ctx, local)}.take().expect(\"MIR local\")"
                 }
-                .Temporary(temp) -> return jet_rust_emit_value_move(temp)
-                .Parameter(binding) -> return jet_rust_emit_value_move(binding)
-                .Capture(binding) -> return jet_rust_emit_value_move(binding)
+                .Temporary(temp) -> return jet_rust_emit_value_move(ctx, temp)
+                .Parameter(binding) -> return jet_rust_emit_value_move(ctx, binding)
+                .Capture(binding) -> return jet_rust_emit_value_move(ctx, binding)
                 .Static(name) -> return "({jet_rust_emit_static_path(&ctx, name)}).take()"
             }
         }

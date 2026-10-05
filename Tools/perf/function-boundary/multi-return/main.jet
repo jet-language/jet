@@ -1,0 +1,21 @@
+// Function-boundary cell multi-return: two named results come back as one
+// small struct (D-OUTPUT-RETURNS1=A) on every call of a hot loop.
+#CLI struct Args { n: Int }
+
+struct Parts {
+    quotient: Int
+    remainder: Int
+}
+
+fn split(n: Int, d: Int) -> Parts {
+    Parts{quotient: n /% d, remainder: n % d}
+}
+
+fn run(args: Args) {
+    acc := 0
+    loop i in 0..<args.n {
+        p :: split(i, i % 13 + 3)
+        acc += p.quotient + p.remainder
+    }
+    print(acc)
+}

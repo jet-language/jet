@@ -315,7 +315,7 @@ mod tests {
             std::env::var_os("HOME").expect("the semantic-index test needs a home directory"),
         )
         .join(".cache")
-        .join("jet-test-scratch")
+        .join("jet-dev/scratch")
         .join(format!(
             "jet_semindex_typed_callable_{}",
             std::process::id()

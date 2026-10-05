@@ -1961,7 +1961,7 @@ fn main() {{
 "#);
         let nonce = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
         let scratch = PathBuf::from(std::env::var_os("HOME").expect("disk-backed test scratch requires HOME"))
-            .join(".cache/jet-test-scratch")
+            .join(".cache/jet-dev/scratch")
             .join(format!("mir-codec-roundtrip-{}-{nonce}", std::process::id()));
         fs::create_dir_all(&scratch).unwrap();
         let source_path = scratch.join("roundtrip.rs");

@@ -35,7 +35,7 @@ fi
 
 # /tmp is RAM-backed here, and a check can fork rustc: keep scratch on disk and
 # skip incremental artifacts, which reached 24G in one target dir.
-scratch="${JET_TEST_SCRATCH:-$HOME/.cache/jet-test-scratch}"
+scratch="${JET_TEST_SCRATCH:-$HOME/.cache/jet-dev/scratch}"
 mkdir -p "$scratch"
 export TMPDIR="$scratch" TMP="$scratch" TEMP="$scratch"
 export CARGO_INCREMENTAL=0

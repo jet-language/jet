@@ -1,6 +1,6 @@
 # Probe area-gui — Desktop and mobile apps
 
-Read `~/.cache/jet-luna/dx3/COMMON.md` first; it holds the rule, the gap rubric, the working method, and the output contract. This file adds only what is specific to this probe.
+Read `~/.cache/jet-dev/dx3/COMMON.md` first; it holds the rule, the gap rubric, the working method, and the output contract. This file adds only what is specific to this probe.
 
 ## Kind
 
@@ -18,8 +18,8 @@ A desktop note-taking app as one Jet package: a native window with a menu, a sid
 
 ## Research to mine
 
-Domain census and reports: `~/.cache/jet-luna/dx2/desktop-apps/`, `~/.cache/jet-luna/dx2/typography-publishing/`, `~/.cache/jet-luna/dx2/education-teaching/`, `~/.cache/jet-luna/dx2/office-document-automation/` (report.md, census.json, claims.json). Deleted ballots with worked code: `~/.cache/jet-luna/dx2/ballots/` (grep the mechanism name). Family syntheses: `~/.cache/jet-luna/dx2/_families/*/synthesis.md`.
+Domain census and reports: `~/.cache/jet-dev/dx2/desktop-apps/`, `~/.cache/jet-dev/dx2/typography-publishing/`, `~/.cache/jet-dev/dx2/education-teaching/`, `~/.cache/jet-dev/dx2/office-document-automation/` (report.md, census.json, claims.json). Deleted ballots with worked code: `~/.cache/jet-dev/dx2/ballots/` (grep the mechanism name). Family syntheses: `~/.cache/jet-dev/dx2/_families/*/synthesis.md`.
 
 ## Output
 
-`~/.cache/jet-luna/dx3/area-gui/probe.md`, `gaps.json`, `batteries.json`, and the code under `~/.cache/jet-luna/dx3/area-gui/pkg/`. Gap ids start with `area-gui-G`.
+`~/.cache/jet-dev/dx3/area-gui/probe.md`, `gaps.json`, `batteries.json`, and the code under `~/.cache/jet-dev/dx3/area-gui/pkg/`. Gap ids start with `area-gui-G`.

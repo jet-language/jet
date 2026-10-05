@@ -1029,7 +1029,8 @@ fn jet_rust_emit_web_abi_encode(ctx: &JetRustEmitContext, ty: MIRType, value: St
 // WasmExport function. The Web ABI helpers and embedded time-zone table are
 // runtime text supplied with the rest of the runtime by the host.
 fn jet_rust_emit_web_exports(ctx: &JetRustEmitContext, lines: &[String]) Never! {
-    loop function in ctx.program.functions {
+    loop function_index in 0..<ctx.program.functions.len() {
+        function := ctx.program.functions[function_index]
         if !jet_rust_emit_module_selected(ctx, function.module_id) || !jet_rust_emit_function_target_enabled(ctx.config, function) || function.web_marker != Val(MIRWebPartitionMarker.WasmExport) -> next
         if function.form != MIRFunctionForm.TopLevel || function.capture_params.len() > 0 {
             jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "checked Web export is not a top-level callable", "Wasm exports call capture-free top-level functions", Val(function.span))

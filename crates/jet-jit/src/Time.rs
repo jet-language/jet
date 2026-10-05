@@ -870,7 +870,11 @@ fn jet_jit_calendar_timegm(
     minute: i64,
     second: i64,
 ) -> i64 {
-    time_rt::JetDateTime::from_parts(year, month, day, hour, minute, second, 0).to_unix_seconds()
+    // The kernel returns an owned exact `Int` (row not raw-word), so the host
+    // answers the carrier, never a bare machine word.
+    let seconds =
+        time_rt::JetDateTime::from_parts(year, month, day, hour, minute, second, 0).to_unix_seconds();
+    Concurrency::with_runtime_mut(|rt| rt.heap.int_from_i64(seconds))
 }
 
 

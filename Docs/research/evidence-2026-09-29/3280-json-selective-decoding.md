@@ -1,6 +1,6 @@
 # 3280 — Selective and lazy JSON decoding without hidden validation loss
 
-Date: 2026-09-29. Closer02. Binary: jet-debug-snapshot14 via `~/.cache/jet-luna/safe-jet.sh`.
+Date: 2026-09-29. Closer02. Binary: jet-debug-snapshot14 via `~/.cache/jet-dev/safe-jet.sh`.
 
 ## Question
 
@@ -9,7 +9,7 @@ Does projecting one field out of a JSON document (typed `json.decode<Small>`) va
 ## Method
 
 - Read `Core/encoding/json.jet:93-201` and `crates/jet-codegen/src/Prelude/Core.jet:94-95,749`. `json.parse` and `json.reader(text)` are Jet source. `json.decode<T>` is the host lenient decoder. The dispatcher row `core.encoding.json reader → jet_enc_json_reader(FileReader, limits)` also exists.
-- Witnesses in `~/.cache/jet-test-scratch/Closer02/`: `json_sel3.jet` (a 20-field document projected to `struct Small { a: Int }`, 8 inputs), `json_reader_min.jet`, `json_sel2/json_sel.jet` (file reader), `json_sel2/golden_stream.jet` (a copy of the committed `Examples/features/serde/encoding_json_stream.jet`), and `perf/json_sel_perf.jet`.
+- Witnesses in `~/.cache/jet-dev/scratch/Closer02/`: `json_sel3.jet` (a 20-field document projected to `struct Small { a: Int }`, 8 inputs), `json_reader_min.jet`, `json_sel2/json_sel.jet` (file reader), `json_sel2/golden_stream.jet` (a copy of the committed `Examples/features/serde/encoding_json_stream.jet`), and `perf/json_sel_perf.jet`.
 
 ## Evidence: validation boundary (JIT, `json_sel3.jet`, observed)
 

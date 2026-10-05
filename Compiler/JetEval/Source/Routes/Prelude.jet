@@ -10,7 +10,10 @@ use jet_foundation.[
     Span,
     TComptimeEnumArg,
     TComptimeField,
+    TComptimeKey,
+    TComptimeKeyField,
     TComptimeMapEntry,
+    TComptimeReport,
     TComptimeValue,
     mir_symbol_name,
     mir_type_from_kind,
@@ -297,6 +300,9 @@ fn jet_eval_route_is_mutating_member(member: String) -> Bool Never! {
     if member == {
         "map_insert" | "set_insert" | "set_remove" | "set_replace" | "set_pop" | "sorted_set_insert" | "sorted_set_remove" -> true
         "set_update" | "set_difference_update" | "set_intersection_update" | "set_symmetric_difference_update" -> true
+        "list_push" | "list_extend" | "list_reverse" | "list_sort" | "list_sort_desc" | "list_clear" | "list_try_push" | "list_try_reserve" -> true
+        "list_pop" | "list_insert" | "list_remove_value" | "list_remove_slot" | "priority_queue_pop" -> true
+        "map_add_new" | "map_setdefault" | "map_try_insert" | "map_remove" | "map_pop_first" | "string_try_push" -> true
         else -> false
     }
 }
@@ -488,10 +494,325 @@ fn jet_eval_route_mutating_rank(member: String, receiver: TComptimeValue, args: 
     Val(JetEvalRouteMutation{receiver: jet_eval_route_collection_value("Rank", updated), result: unit})
 }
 
+// MIREval `direct_absent_value`: the clean absence of the row's checked
+// Option outcome (or the Option success side of a Result row).
+fn jet_eval_route_direct_absent(result_ty: MIRType?, machine: &JetEvalMachine, span: Span) -> JetEvalRuntimeValue? {
+    option_ty :: jet_eval_route_outcome_option(result_ty) ?? {
+        jet_eval_compiler_fail(&machine, span, "MIR Prelude route absence has no checked Option outcome")
+        return None
+    }
+    Val(JetEvalRuntimeValue.Absent{element: jet_eval_option_element(option_ty)})
+}
+
+// Map writes that add a key place it at its sorted position, as every other
+// evaluator map insertion does (Rust MIREval.rs::insert_map_entry).
+fn jet_eval_route_map_put(entries: &[TComptimeMapEntry], key: TComptimeKey, value: TComptimeValue) Never! {
+    inserted :: jet_eval_insert_map_entry(entries, key, value)
+    loop index in 0..<entries.len() -> entries[index] = inserted[index]
+    &entries.push(inserted[inserted.len() - 1])
+}
+
+fn jet_eval_route_rank_order(left: Int, right: Int) -> Int Never! {
+    if left < right -> return -1
+    if left > right -> return 1
+    0
+}
+
+fn jet_eval_route_text_order(left: String, right: String) -> Int Never! {
+    if left < right -> return -1
+    if left > right -> return 1
+    0
+}
+
+fn jet_eval_route_key_rank(key: TComptimeKey) -> Int Never! {
+    if key == {
+        .Int(_) -> 0
+        .String(_) -> 1
+        .Bool(_) -> 2
+        .Char(_) -> 3
+        .Tuple(_) -> 4
+        .Struct(_, _) -> 5
+        .Enum(_, _) -> 6
+    }
+}
+
+fn jet_eval_route_key_fields_order(left: [TComptimeKeyField], right: [TComptimeKeyField]) -> Int Never! {
+    common :: if left.len() < right.len() -> left.len() else -> right.len()
+    loop index in 0..<common {
+        name :: jet_eval_route_text_order(left[index].name, right[index].name)
+        if name != 0 -> return name
+        order :: jet_eval_route_key_order(left[index].key, right[index].key)
+        if order != 0 -> return order
+    }
+    jet_eval_route_rank_order(left.len(), right.len())
+}
+
+// The derived `Ord` of MIREval's `MirConstKey` (variant order, then payload).
+fn jet_eval_route_key_order(left: TComptimeKey, right: TComptimeKey) -> Int Never! {
+    rank :: jet_eval_route_rank_order(jet_eval_route_key_rank(left), jet_eval_route_key_rank(right))
+    if rank != 0 -> return rank
+    if left == {
+        .Int(a) -> if right == .Int(b) -> return jet_eval_route_rank_order(a, b)
+        .String(a) -> if right == .String(b) -> return jet_eval_route_text_order(a, b)
+        .Bool(a) -> if right == .Bool(b) -> return jet_eval_route_rank_order(if a -> 1 else -> 0, if b -> 1 else -> 0)
+        .Char(a) -> if right == .Char(b) -> return jet_eval_route_rank_order(a, b)
+        .Tuple(a) -> if right == .Tuple(b) -> return jet_eval_route_key_fields_order(a, b)
+        .Struct(a_name, a_fields) -> if right == .Struct(b_name, b_fields) {
+            name :: jet_eval_route_text_order(a_name, b_name)
+            if name != 0 -> return name
+            return jet_eval_route_key_fields_order(a_fields, b_fields)
+        }
+        .Enum(a_name, a_variant) -> if right == .Enum(b_name, b_variant) {
+            name :: jet_eval_route_text_order(a_name, b_name)
+            if name != 0 -> return name
+            return jet_eval_route_text_order(a_variant, b_variant)
+        }
+    }
+    0
+}
+
+// Map entries in the key order MIREval's ordered maps iterate in.
+fn jet_eval_route_entries_by_key(entries: [TComptimeMapEntry]) -> [TComptimeMapEntry] Never! {
+    sorted := [TComptimeMapEntry]{}
+    loop entry in entries {
+        placed := false
+        next_sorted := [TComptimeMapEntry]{}
+        loop held in sorted {
+            if !placed && jet_eval_route_key_order(entry.key, held.key) < 0 {
+                &next_sorted.push(entry)
+                placed = true
+            }
+            &next_sorted.push(held)
+        }
+        if !placed -> &next_sorted.push(entry)
+        sorted = next_sorted
+    }
+    sorted
+}
+
+// MIREval `mir_compare` for the sort rows: numeric/text/Char/Bool order and
+// lists compared lexicographically, then by length.
+fn jet_eval_route_sort_order(left: TComptimeValue, right: TComptimeValue, machine: &JetEvalMachine, span: Span) -> Int? {
+    if left == .List(left_items) {
+        if right == .List(right_items) {
+            common :: if left_items.len() < right_items.len() -> left_items.len() else -> right_items.len()
+            loop index in 0..<common {
+                order :: jet_eval_route_sort_order(left_items[index], right_items[index], &machine, span) ?? return None
+                if order != 0 -> return Val(order)
+            }
+            if left_items.len() < right_items.len() -> return Val(-1)
+            if left_items.len() > right_items.len() -> return Val(1)
+            return Val(0)
+        }
+    }
+    jet_eval_route_order(left, right, &machine, span)
+}
+
+// Stable merge sort (Rust `sort_by`); `descending` reverses the comparator.
+fn jet_eval_route_sorted(items: [TComptimeValue], descending: Bool, machine: &JetEvalMachine, span: Span) -> [TComptimeValue]? {
+    if items.len() < 2 -> return Val(items)
+    middle :: items.len() /% 2
+    left :: jet_eval_route_sorted(items[0..<middle], descending, &machine, span) ?? return None
+    right :: jet_eval_route_sorted(items[middle..<items.len()], descending, &machine, span) ?? return None
+    merged := [TComptimeValue]{}
+    left_index := 0
+    right_index := 0
+    loop left_index < left.len() && right_index < right.len() {
+        order := jet_eval_route_sort_order(left[left_index], right[right_index], &machine, span) ?? return None
+        if descending -> order = 0 - order
+        if order > 0 {
+            &merged.push(right[right_index])
+            right_index += 1
+        } else {
+            &merged.push(left[left_index])
+            left_index += 1
+        }
+    }
+    loop left_index < left.len() {
+        &merged.push(left[left_index])
+        left_index += 1
+    }
+    loop right_index < right.len() {
+        &merged.push(right[right_index])
+        right_index += 1
+    }
+    Val(merged)
+}
+
+fn jet_eval_route_mutation_fail(member: String, detail: String, machine: &JetEvalMachine, span: Span) -> JetEvalRouteMutation? {
+    jet_eval_compiler_fail(&machine, span, "MIR {member} {detail}")
+    None
+}
+
+// MIREval `direct_mutating_collection` for the List, PriorityQueue, Map and
+// String receiver-writing rows.
+fn jet_eval_route_mutating_collection(member: String, receiver: TComptimeValue, args: [TComptimeValue], result_ty: MIRType?, machine: &JetEvalMachine, span: Span) -> JetEvalRouteMutation? {
+    unit :: JetEvalRuntimeValue.Data{value: TComptimeValue.Unit}
+    present_unit :: JetEvalRuntimeValue.Data{value: TComptimeValue.Present{value: TComptimeValue.Unit}}
+    if member == "string_try_push" {
+        text :: jet_eval_route_string(receiver) ?? return jet_eval_route_mutation_fail(member, "receiver is not a String", &machine, span)
+        if args.len() != 1 -> return jet_eval_route_mutation_fail(member, "is missing its value", &machine, span)
+        addition :: jet_eval_route_string(args[0]) ?? return jet_eval_route_mutation_fail(member, "value is not a String", &machine, span)
+        return Val(JetEvalRouteMutation{receiver: TComptimeValue.String{value: "{text}{addition}"}, result: present_unit})
+    }
+    if member == "priority_queue_pop" {
+        if receiver == .Struct(type_name, fields) {
+            if type_name == "PriorityQueue" {
+                loop index in 0..<fields.len() {
+                    if fields[index].name != "items" -> next
+                    items :: jet_eval_route_list(fields[index].value) ?? return jet_eval_route_mutation_fail(member, "has no List items field", &machine, span)
+                    if items.len() == 0 -> return Val(JetEvalRouteMutation{receiver: receiver, result: jet_eval_route_direct_absent(result_ty, &machine, span) ?? return None})
+                    updated := fields
+                    updated[index].value = TComptimeValue.List{values: items[1..<items.len()]}
+                    return Val(JetEvalRouteMutation{receiver: TComptimeValue.Struct{type_name: type_name, fields: updated}, result: JetEvalRuntimeValue.Data{value: TComptimeValue.Present{value: items[0]}}})
+                }
+                return jet_eval_route_mutation_fail(member, "has no List items field", &machine, span)
+            }
+        }
+        return jet_eval_route_mutation_fail(member, "receiver is not a PriorityQueue", &machine, span)
+    }
+    if member.starts_with("map_") {
+        entries := jet_eval_route_map_entries(receiver) ?? return jet_eval_route_mutation_fail(member, "receiver is not a Map", &machine, span)
+        if member == "map_pop_first" {
+            if entries.len() == 0 -> return Val(JetEvalRouteMutation{receiver: receiver, result: jet_eval_route_direct_absent(result_ty, &machine, span) ?? return None})
+            first := 0
+            loop index in 1..<entries.len() {
+                if jet_eval_route_key_order(entries[index].key, entries[first].key) < 0 -> first = index
+            }
+            popped :: entries[first].value
+            remaining := [TComptimeMapEntry]{}
+            loop index in 0..<entries.len() {
+                if index != first -> &remaining.push(entries[index])
+            }
+            return Val(JetEvalRouteMutation{receiver: TComptimeValue.Map{entries: remaining}, result: JetEvalRuntimeValue.Data{value: TComptimeValue.Present{value: popped}}})
+        }
+        if args.len() == 0 -> return jet_eval_route_mutation_fail(member, "is missing its key", &machine, span)
+        key :: jet_eval_data_key(args[0], &machine, span) ?? return None
+        position := -1
+        loop index in 0..<entries.len() {
+            if position < 0 && entries[index].key == key -> position = index
+        }
+        if member == "map_remove" {
+            if position < 0 -> return Val(JetEvalRouteMutation{receiver: receiver, result: jet_eval_route_direct_absent(result_ty, &machine, span) ?? return None})
+            removed :: entries[position].value
+            kept := [TComptimeMapEntry]{}
+            loop index in 0..<entries.len() {
+                if index != position -> &kept.push(entries[index])
+            }
+            return Val(JetEvalRouteMutation{receiver: TComptimeValue.Map{entries: kept}, result: JetEvalRuntimeValue.Data{value: TComptimeValue.Present{value: removed}}})
+        }
+        if args.len() != 2 -> return jet_eval_route_mutation_fail(member, "is missing its value", &machine, span)
+        value :: args[1]
+        if member == {
+            "map_add_new" -> {
+                if position >= 0 -> return Val(JetEvalRouteMutation{receiver: receiver, result: JetEvalRuntimeValue.Data{value: TComptimeValue.Bool{value: false}}})
+                jet_eval_route_map_put(&entries, key, value)
+                return Val(JetEvalRouteMutation{receiver: TComptimeValue.Map{entries: entries}, result: JetEvalRuntimeValue.Data{value: TComptimeValue.Bool{value: true}}})
+            }
+            "map_setdefault" -> {
+                if position >= 0 -> return Val(JetEvalRouteMutation{receiver: receiver, result: JetEvalRuntimeValue.Data{value: entries[position].value}})
+                jet_eval_route_map_put(&entries, key, value)
+                return Val(JetEvalRouteMutation{receiver: TComptimeValue.Map{entries: entries}, result: JetEvalRuntimeValue.Data{value: value}})
+            }
+            else -> {
+                // map_try_insert: `Present(previous?)`.
+                if position >= 0 {
+                    previous :: entries[position].value
+                    entries[position].value = value
+                    return Val(JetEvalRouteMutation{receiver: TComptimeValue.Map{entries: entries}, result: JetEvalRuntimeValue.Data{value: TComptimeValue.Present{value: TComptimeValue.Present{value: previous}}}})
+                }
+                jet_eval_route_map_put(&entries, key, value)
+                absent :: jet_eval_route_direct_absent(result_ty, &machine, span) ?? return None
+                return Val(JetEvalRouteMutation{receiver: TComptimeValue.Map{entries: entries}, result: JetEvalRuntimeValue.Result{ok: true, value: absent}})
+            }
+        }
+    }
+    if member == "list_clear" {
+        if receiver == {
+            .List(_) -> return Val(JetEvalRouteMutation{receiver: TComptimeValue.List{values: [TComptimeValue]{}}, result: unit})
+            .Map(_) -> return Val(JetEvalRouteMutation{receiver: TComptimeValue.Map{entries: [TComptimeMapEntry]{}}, result: unit})
+            else -> return jet_eval_route_mutation_fail(member, "receiver is not a collection", &machine, span)
+        }
+    }
+    items := jet_eval_route_list(receiver) ?? return jet_eval_route_mutation_fail(member, "receiver is not a List", &machine, span)
+    if member == {
+        "list_push" | "list_try_push" -> {
+            if args.len() != 1 -> return jet_eval_route_mutation_fail(member, "is missing its value", &machine, span)
+            &items.push(args[0])
+            result :: if member == "list_push" -> unit else -> present_unit
+            Val(JetEvalRouteMutation{receiver: TComptimeValue.List{values: items}, result: result})
+        }
+        "list_extend" -> {
+            if args.len() != 1 -> return jet_eval_route_mutation_fail(member, "is missing its source", &machine, span)
+            other :: jet_eval_route_list(args[0]) ?? return jet_eval_route_mutation_fail(member, "requires two Lists", &machine, span)
+            loop item in other -> &items.push(item)
+            Val(JetEvalRouteMutation{receiver: TComptimeValue.List{values: items}, result: unit})
+        }
+        "list_reverse" -> {
+            reversed := [TComptimeValue]{}
+            index := items.len() - 1
+            loop index >= 0 {
+                &reversed.push(items[index])
+                index -= 1
+            }
+            Val(JetEvalRouteMutation{receiver: TComptimeValue.List{values: reversed}, result: unit})
+        }
+        "list_sort" | "list_sort_desc" -> {
+            sorted :: jet_eval_route_sorted(items, member == "list_sort_desc", &machine, span) ?? return None
+            Val(JetEvalRouteMutation{receiver: TComptimeValue.List{values: sorted}, result: unit})
+        }
+        "list_try_reserve" -> {
+            if args.len() != 1 -> return jet_eval_route_mutation_fail(member, "amount is not a nonnegative Int", &machine, span)
+            additional :: jet_eval_route_int_value(args[0], &machine, span) ?? return None
+            if additional < 0 -> return jet_eval_route_mutation_fail(member, "amount is not a nonnegative Int", &machine, span)
+            Val(JetEvalRouteMutation{receiver: receiver, result: present_unit})
+        }
+        "list_pop" -> {
+            if items.len() == 0 -> return Val(JetEvalRouteMutation{receiver: receiver, result: jet_eval_route_direct_absent(result_ty, &machine, span) ?? return None})
+            last :: items[items.len() - 1]
+            Val(JetEvalRouteMutation{receiver: TComptimeValue.List{values: items[0..<items.len() - 1]}, result: JetEvalRuntimeValue.Data{value: TComptimeValue.Present{value: last}}})
+        }
+        "list_insert" -> {
+            if args.len() != 2 -> return jet_eval_route_mutation_fail(member, "is missing its index or value", &machine, span)
+            position :: if args[0] == .Int(number) -> number else -> { return jet_eval_route_mutation_fail(member, "index is not an Int", &machine, span) }
+            if position < 0 || position > items.len() -> return jet_eval_route_mutation_fail(member, "index is out of bounds", &machine, span)
+            inserted := [TComptimeValue]{}
+            loop index in 0..<items.len() {
+                if index == position -> &inserted.push(args[1])
+                &inserted.push(items[index])
+            }
+            if position == items.len() -> &inserted.push(args[1])
+            Val(JetEvalRouteMutation{receiver: TComptimeValue.List{values: inserted}, result: unit})
+        }
+        "list_remove_value" | "list_remove_slot" -> {
+            if args.len() != 1 -> return jet_eval_route_mutation_fail(member, "is missing its operand", &machine, span)
+            position := -1
+            if member == "list_remove_value" {
+                loop index in 0..<items.len() {
+                    if position < 0 && items[index] == args[0] -> position = index
+                }
+                if position < 0 -> return Val(JetEvalRouteMutation{receiver: receiver, result: jet_eval_route_direct_absent(result_ty, &machine, span) ?? return None})
+            } else {
+                position = if args[0] == .Int(number) -> number else -> { return jet_eval_route_mutation_fail(member, "index is not a nonnegative Int", &machine, span) }
+                if position < 0 -> return jet_eval_route_mutation_fail(member, "index is not a nonnegative Int", &machine, span)
+                if position >= items.len() -> return jet_eval_route_mutation_fail(member, "index is out of bounds", &machine, span)
+            }
+            removed :: items[position]
+            kept := [TComptimeValue]{}
+            loop index in 0..<items.len() {
+                if index != position -> &kept.push(items[index])
+            }
+            Val(JetEvalRouteMutation{receiver: TComptimeValue.List{values: kept}, result: JetEvalRuntimeValue.Data{value: TComptimeValue.Present{value: removed}}})
+        }
+        else -> jet_eval_route_mutation_fail(member, "is not a receiver-writing collection route", &machine, span)
+    }
+}
+
 fn jet_eval_route_mutating_builtin(member: String, receiver: TComptimeValue, args: [TComptimeValue], result_ty: MIRType?, machine: &JetEvalMachine, span: Span) -> JetEvalRouteMutation? {
     if member.starts_with("sorted_set_") -> return jet_eval_route_mutating_rank(member, receiver, args, &machine, span)
     if member.starts_with("set_") -> return jet_eval_route_mutating_set(member, receiver, args, result_ty, &machine, span)
-    if member != "map_insert" || args.len() != 2 {
+    if member != "map_insert" -> return jet_eval_route_mutating_collection(member, receiver, args, result_ty, &machine, span)
+    if args.len() != 2 {
         jet_eval_compiler_fail(&machine, span, "MIR receiver-writing route {member} has an invalid ABI")
         return None
     }
@@ -510,7 +831,7 @@ fn jet_eval_route_mutating_builtin(member: String, receiver: TComptimeValue, arg
             entries[index].value = args[1]
         }
     }
-    if previous == None -> &entries.push(TComptimeMapEntry{key: key, value: args[1]})
+    if previous == None -> entries = jet_eval_insert_map_entry(entries, key, args[1])
     updated :: TComptimeValue.Map{entries: entries}
     // `jet_map_insert` returns the displaced value (`replace`/`add` read it
     // as `V?`); a Unit-typed row discards it.
@@ -523,7 +844,160 @@ fn jet_eval_route_mutating_builtin(member: String, receiver: TComptimeValue, arg
     Val(JetEvalRouteMutation{receiver: updated, result: result})
 }
 
-fn jet_eval_route_builtin(member: String, args: [TComptimeValue], fallibility: MIRCallFallibility, machine: &JetEvalMachine, span: Span) -> JetEvalRuntimeValue? {
+// One UTF-8 scalar at `index` (Rust `run_utf8_validation`): its byte length
+// when valid, `-n` for an invalid sequence of `n` bytes, or 0 when the input
+// ends inside an incomplete sequence.
+fn jet_eval_route_utf8_step(bytes: [U8], index: Int) -> Int Never! {
+    first :: Int.from_u8(bytes[index])
+    if first < 128 -> return 1
+    width :: if {
+        first >= 194 && first <= 223 -> 2
+        first >= 224 && first <= 239 -> 3
+        first >= 240 && first <= 244 -> 4
+        else -> 0
+    }
+    if width == 0 -> return -1
+    if index + 1 >= bytes.len() -> return 0
+    second :: Int.from_u8(bytes[index + 1])
+    low := 128
+    high := 191
+    if first == 224 -> low = 160
+    if first == 237 -> high = 159
+    if first == 240 -> low = 144
+    if first == 244 -> high = 143
+    if second < low || second > high -> return -1
+    if width == 2 -> return 2
+    if index + 2 >= bytes.len() -> return 0
+    third :: Int.from_u8(bytes[index + 2])
+    if third < 128 || third > 191 -> return -2
+    if width == 3 -> return 3
+    if index + 3 >= bytes.len() -> return 0
+    fourth :: Int.from_u8(bytes[index + 3])
+    if fourth < 128 || fourth > 191 -> return -3
+    4
+}
+
+// `String::from_utf8(..).map_err(|error| error.to_string())`: the
+// `Utf8Error` Display text of the first invalid position, or None when valid.
+fn jet_eval_route_utf8_error(bytes: [U8]) -> String? {
+    index := 0
+    loop index < bytes.len() {
+        step :: jet_eval_route_utf8_step(bytes, index)
+        if step == 0 -> return Val("incomplete utf-8 byte sequence from index {index}")
+        if step < 0 -> return Val("invalid utf-8 sequence of {0 - step} bytes from index {index}")
+        index += step
+    }
+    None
+}
+
+// `String::from_utf8_lossy`: every invalid sequence (and a trailing
+// incomplete one) becomes one U+FFFD.
+fn jet_eval_route_utf8_lossy(bytes: [U8]) -> String Never! {
+    out := [U8]{}
+    index := 0
+    loop index < bytes.len() {
+        step :: jet_eval_route_utf8_step(bytes, index)
+        if step > 0 {
+            loop offset in 0..<step -> &out.push(bytes[index + offset])
+            index += step
+        } else {
+            &out.push(U8{239})
+            &out.push(U8{191})
+            &out.push(U8{189})
+            index = if step == 0 -> bytes.len() else -> index + (0 - step)
+        }
+    }
+    String.from_bytes(out) ?? ""
+}
+
+// Rust `str::lines`: split on `\n`, drop one `\r` before it, and no empty
+// final line after a trailing newline.
+fn jet_eval_route_lines(text: String) -> [TComptimeValue] Never! {
+    bytes :: text.bytes()
+    lines := [TComptimeValue]{}
+    start := 0
+    loop index in 0..<bytes.len() {
+        if Int.from_u8(bytes[index]) != 10 -> next
+        end := index
+        if end > start && Int.from_u8(bytes[end - 1]) == 13 -> end -= 1
+        &lines.push(TComptimeValue.String{value: String.from_bytes(bytes[start..<end]) ?? ""})
+        start = index + 1
+    }
+    if start < bytes.len() -> &lines.push(TComptimeValue.String{value: String.from_bytes(bytes[start..<bytes.len()]) ?? ""})
+    lines
+}
+
+fn jet_eval_route_byte_find(haystack: [U8], needle: [U8]) -> Int? {
+    if needle.len() > haystack.len() -> return None
+    loop start in 0..<(haystack.len() - needle.len() + 1) {
+        matched := true
+        loop offset in 0..<needle.len() {
+            if haystack[start + offset] != needle[offset] {
+                matched = false
+                break
+            }
+        }
+        if matched -> return Val(start)
+    }
+    None
+}
+
+fn jet_eval_route_string_operand(args: [TComptimeValue], index: Int, member: String, machine: &JetEvalMachine, span: Span) -> String? {
+    if index >= args.len() {
+        jet_eval_compiler_fail(&machine, span, "MIR {member} route is missing a String operand")
+        return None
+    }
+    text :: jet_eval_route_string(args[index]) ?? {
+        jet_eval_compiler_fail(&machine, span, "MIR {member} route requires String operands")
+        return None
+    }
+    Val(text)
+}
+
+fn jet_eval_route_string_result(text: String) -> JetEvalRuntimeValue? {
+    Val(JetEvalRuntimeValue.Data{value: TComptimeValue.String{value: text}})
+}
+
+fn jet_eval_route_ordering(variant: String) -> TComptimeValue Never! {
+    TComptimeValue.Enum{type_name: "Ordering", variant: variant, args: [TComptimeEnumArg]{}}
+}
+
+fn jet_eval_route_ordering_variant(value: TComptimeValue) -> String? {
+    if value == .Enum(type_name, variant, args) {
+        if type_name == "Ordering" && args.len() == 0 -> return Val(variant)
+    }
+    None
+}
+
+// Builtins `sum`/`product` over a List: an exact integer fold through the
+// canonical exact-integer adapter, or a same-width Float sum.
+fn jet_eval_route_fold(member: String, items: [TComptimeValue], machine: &JetEvalMachine, span: Span) -> JetEvalRuntimeValue? {
+    int_ty :: Val(mir_type_from_kind(MIRTypeKind.Int))
+    if member == "sum" && items.len() > 0 {
+        if items[0] == .Float(_, bits) {
+            float_total := Float{0}
+            loop item in items {
+                if item == .Float(number, item_bits) {
+                    if item_bits != bits -> return jet_eval_route_not_supported(&machine, span, "sum on mixed float widths")
+                    float_total = float_total + number
+                } else {
+                    return jet_eval_route_not_supported(&machine, span, "sum on mixed numeric types")
+                }
+            }
+            if bits == 32 -> return jet_eval_route_not_supported(&machine, span, "Float32 sum without width-preserving arithmetic")
+            return Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Float{value: float_total, bits: bits}})
+        }
+    }
+    total := JetEvalRuntimeValue.Data{value: TComptimeValue.Int{value: if member == "sum" -> 0 else -> 1}}
+    operation :: if member == "sum" -> "add" else -> "mul"
+    loop item in items {
+        if !jet_eval_route_is_exact_integer(item) -> return jet_eval_route_not_supported(&machine, span, "{member} on mixed numeric types")
+        total = jet_eval_route_exact_integer_member_host(operation, [JetEvalRuntimeValue]{total, JetEvalRuntimeValue.Data{value: item}}, &machine, int_ty, span) ?? return None
+    }
+    Val(total)
+}
+
+fn jet_eval_route_builtin(member: String, symbol: String, args: [TComptimeValue], fallibility: MIRCallFallibility, result_ty: MIRType?, machine: &JetEvalMachine, span: Span) -> JetEvalRuntimeValue? {
     if jet_eval_route_is_text_member(member) -> return jet_eval_route_text_method(member, args, &machine, span)
     if member == {
         "string_ascii_lower" | "string_ascii_upper" -> {
@@ -553,6 +1027,8 @@ fn jet_eval_route_builtin(member: String, args: [TComptimeValue], fallibility: M
             }
             Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Bool{value: text.starts_with(prefix)}})
         }
+        // MIREval `string_from_bytes`/`_lossy`: strict decoding reports the
+        // typed `UTF8Error { message }`; lossy decoding substitutes U+FFFD.
         "string_from_bytes" | "string_from_bytes_lossy" -> {
             if args.len() != 1 {
                 jet_eval_compiler_fail(&machine, span, "String.from_bytes route requires one buffer")
@@ -563,20 +1039,24 @@ fn jet_eval_route_builtin(member: String, args: [TComptimeValue], fallibility: M
                 .Bytes(values) -> bytes = values
                 .List(values) -> loop value in values {
                     number :: jet_eval_route_int_value(value, &machine, span) ?? return None
-                    if number < 0 || number > 255 -> return jet_eval_route_told_failure("byte value is outside U8", fallibility)
+                    if number < 0 || number > 255 {
+                        jet_eval_compiler_fail(&machine, span, "MIR String.from_bytes byte list contains a value outside U8")
+                        return None
+                    }
                     &bytes.push(U8{number})
                 }
                 else -> {
-                    jet_eval_compiler_fail(&machine, span, "String.from_bytes route requires Bytes or List")
+                    jet_eval_compiler_fail(&machine, span, "MIR String.from_bytes value is not [U8]")
                     return None
                 }
             }
-            decoded :: String.from_bytes(bytes) ?? {
-                if member == "string_from_bytes_lossy" -> return jet_eval_route_not_supported(&machine, span, "lossy UTF-8 decoding")
-                // Strict decoding of invalid UTF-8 is the builtin's told failure.
-                return jet_eval_route_told_failure("invalid UTF-8", fallibility)
+            if member == "string_from_bytes_lossy" -> return jet_eval_route_string_result(jet_eval_route_utf8_lossy(bytes))
+            if jet_eval_route_utf8_error(bytes) == .Val(message) {
+                error :: TComptimeValue.Struct{type_name: "UTF8Error", fields: [TComptimeField]{TComptimeField{name: "message", value: TComptimeValue.String{value: message}}}}
+                return Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Failed{report: TComptimeReport.Told{value: error}}})
             }
-            Val(jet_eval_route_success(JetEvalRuntimeValue.Data{value: TComptimeValue.String{value: decoded}}, fallibility))
+            decoded :: String.from_bytes(bytes) ?? ""
+            Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Present{value: TComptimeValue.String{value: decoded}}})
         }
         "int_parse" -> {
             if args.len() != 1 -> return jet_eval_route_told_failure("invalid integer text", fallibility)
@@ -634,12 +1114,14 @@ fn jet_eval_route_builtin(member: String, args: [TComptimeValue], fallibility: M
                 else -> jet_eval_route_not_supported(&machine, span, "is_empty on this value")
             }
         }
+        // Builtins `first`/`last`: `Present` or a clean absence of the
+        // checked element type.
         "first" | "last" -> {
             if args.len() != 1 -> return jet_eval_route_not_supported(&machine, span, "first/last without a receiver")
             values :: jet_eval_route_list(args[0]) ?? return jet_eval_route_not_supported(&machine, span, "first/last on a non-list")
-            if values.len() == 0 -> return jet_eval_route_told_failure("list is empty", fallibility)
+            if values.len() == 0 -> return jet_eval_route_direct_absent(result_ty, &machine, span)
             index :: if member == "first" -> 0 else -> values.len() - 1
-            Val(jet_eval_route_success(JetEvalRuntimeValue.Data{value: values[index]}, fallibility))
+            Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Present{value: values[index]}})
         }
         "contains" -> {
             if args.len() != 2 -> return jet_eval_route_not_supported(&machine, span, "contains without a receiver")
@@ -785,7 +1267,7 @@ fn jet_eval_route_builtin(member: String, args: [TComptimeValue], fallibility: M
                         found = true
                     }
                 }
-                if !found -> &merged.push(entry)
+                if !found -> merged = jet_eval_insert_map_entry(merged, entry.key, entry.value)
             }
             Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Map{entries: merged}})
         }
@@ -800,9 +1282,179 @@ fn jet_eval_route_builtin(member: String, args: [TComptimeValue], fallibility: M
                 loop entry in entries {
                     if entry.key == key -> found = true
                 }
-                if !found -> &entries.push(TComptimeMapEntry{key: key, value: args[1]})
+                if !found -> entries = jet_eval_insert_map_entry(entries, key, args[1])
             }
             Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Map{entries: entries}})
+        }
+        "string_ends_with" -> {
+            if symbol != "jet_string_ends_with" {
+                jet_eval_compiler_fail(&machine, span, "MIR String prefix/suffix route has an unknown checked symbol")
+                return None
+            }
+            text :: jet_eval_route_string_operand(args, 0, member, &machine, span) ?? return None
+            suffix :: jet_eval_route_string_operand(args, 1, member, &machine, span) ?? return None
+            Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Bool{value: text.ends_with(suffix)}})
+        }
+        "string_trim" | "string_upper" | "upper" | "string_lower" | "lower" -> {
+            text :: jet_eval_route_string_operand(args, 0, member, &machine, span) ?? return None
+            if member == "string_trim" -> return jet_eval_route_string_result(text.trim())
+            if member.ends_with("upper") -> return jet_eval_route_string_result(text.to_upper())
+            jet_eval_route_string_result(text.to_lower())
+        }
+        "string_replace" | "replace" -> {
+            text :: jet_eval_route_string_operand(args, 0, member, &machine, span) ?? return None
+            from :: jet_eval_route_string_operand(args, 1, member, &machine, span) ?? return None
+            to :: jet_eval_route_string_operand(args, 2, member, &machine, span) ?? return None
+            jet_eval_route_string_result(text.replace(from, to))
+        }
+        "string_repeat" -> {
+            text :: jet_eval_route_string_operand(args, 0, member, &machine, span) ?? return None
+            if args.len() != 2 -> return jet_eval_route_not_supported(&machine, span, "String.repeat without a count")
+            count :: jet_eval_route_int_value(args[1], &machine, span) ?? return None
+            jet_eval_route_string_result(text.repeat(if count < 0 -> 0 else -> count))
+        }
+        "string_lines" -> {
+            text :: jet_eval_route_string_operand(args, 0, member, &machine, span) ?? return None
+            Val(JetEvalRuntimeValue.Data{value: TComptimeValue.List{values: jet_eval_route_lines(text)}})
+        }
+        "string_chars" -> {
+            text :: jet_eval_route_string_operand(args, 0, member, &machine, span) ?? return None
+            chars :: loop character in text.chars() -> jet_eval_char_value(character)
+            Val(JetEvalRuntimeValue.Data{value: TComptimeValue.List{values: chars}})
+        }
+        // Builtins `slice` on String: scalar offsets, with the shared panic
+        // text for a range outside the text.
+        "string_slice" -> {
+            text :: jet_eval_route_string_operand(args, 0, member, &machine, span) ?? return None
+            if args.len() != 3 -> return jet_eval_route_not_supported(&machine, span, "String.slice without a start and end")
+            start :: if args[1] == .Int(number) -> number else -> { return jet_eval_route_not_supported(&machine, span, "slice with a non-Int start") }
+            end :: if args[2] == .Int(number) -> number else -> { return jet_eval_route_not_supported(&machine, span, "slice with a non-Int end") }
+            chars :: text.chars()
+            if start < 0 || end < 0 || start > end || end > chars.len() {
+                jet_eval_source_fail(&machine, span, "can't slice {chars.len()} characters from {start} to {end} (exclusive)")
+                return None
+            }
+            out := ""
+            loop index in start..<end -> out = "{out}{chars[index]}"
+            jet_eval_route_string_result(out)
+        }
+        // Builtins `split_once`: the first byte match of the separator.
+        "string_split_once" -> {
+            text :: jet_eval_route_string_operand(args, 0, member, &machine, span) ?? return None
+            separator :: jet_eval_route_string_operand(args, 1, member, &machine, span) ?? return None
+            bytes :: text.bytes()
+            needle :: separator.bytes()
+            at :: jet_eval_route_byte_find(bytes, needle) ?? return jet_eval_route_direct_absent(result_ty, &machine, span)
+            before :: String.from_bytes(bytes[0..<at]) ?? ""
+            after :: String.from_bytes(bytes[at + needle.len()..<bytes.len()]) ?? ""
+            pair :: TComptimeValue.Struct{type_name: "(before,after)", fields: [TComptimeField]{
+                TComptimeField{name: "before", value: TComptimeValue.String{value: before}},
+                TComptimeField{name: "after", value: TComptimeValue.String{value: after}},
+            }}
+            Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Present{value: pair}})
+        }
+        // Builtins `join`: every item's `jet_show` text between separators.
+        "join" | "iter_join" -> {
+            if args.len() == 0 -> return jet_eval_route_not_supported(&machine, span, "join without a receiver")
+            items :: jet_eval_route_list(args[0]) ?? return jet_eval_route_not_supported(&machine, span, "join on a non-list")
+            separator := ""
+            if args.len() > 1 -> separator = jet_eval_route_string(args[1]) ?? ""
+            parts := [String]{}
+            loop item in items {
+                shown :: jet_eval_format_jet_show(item) ?? return jet_eval_route_not_supported(&machine, span, "join of a checked nominal item")
+                &parts.push(shown)
+            }
+            jet_eval_route_string_result(parts.join(separator))
+        }
+        // Builtins `min`/`max`: the first minimum, the last maximum.
+        "min" | "min_float" | "max" | "max_float" -> {
+            if args.len() != 1 -> return jet_eval_route_not_supported(&machine, span, "{member} without a receiver")
+            items :: jet_eval_route_list(args[0]) ?? return jet_eval_route_not_supported(&machine, span, "{member} on a non-list")
+            if items.len() == 0 -> return jet_eval_route_direct_absent(result_ty, &machine, span)
+            maximum :: member.starts_with("max")
+            best := items[0]
+            loop index in 1..<items.len() {
+                order :: jet_eval_route_order(best, items[index], &machine, span) ?? return None
+                if (maximum && order <= 0) || (!maximum && order > 0) -> best = items[index]
+            }
+            Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Present{value: best}})
+        }
+        "sum" | "product" -> {
+            if args.len() != 1 -> return jet_eval_route_not_supported(&machine, span, "{member} without a receiver")
+            items :: jet_eval_route_list(args[0]) ?? return jet_eval_route_not_supported(&machine, span, "{member} on a non-list")
+            jet_eval_route_fold(member, items, &machine, span)
+        }
+        "map_has_key" -> {
+            if args.len() != 2 -> return jet_eval_route_not_supported(&machine, span, "Map.has_key without a key")
+            entries :: jet_eval_route_map_entries(args[0]) ?? return jet_eval_route_not_supported(&machine, span, "has_key on a non-map")
+            key :: jet_eval_data_key(args[1], &machine, span) ?? return None
+            found := false
+            loop entry in entries {
+                if entry.key == key -> found = true
+            }
+            Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Bool{value: found}})
+        }
+        "ordering_then" -> {
+            if args.len() != 2 -> return jet_eval_route_not_supported(&machine, span, "Ordering.then without an operand")
+            first :: jet_eval_route_ordering_variant(args[0]) ?? return jet_eval_route_not_supported(&machine, span, "Ordering.then on a non-Ordering")
+            if jet_eval_route_ordering_variant(args[1]) == None -> return jet_eval_route_not_supported(&machine, span, "Ordering.then with a non-Ordering")
+            Val(JetEvalRuntimeValue.Data{value: if first == "Equal" -> args[1] else -> args[0]})
+        }
+        // Builtins Map `min`/`max` (`extreme_ref` over values in key order)
+        // and `top_n` (value-descending, key-ascending `(key, value)` rows).
+        "map_min" | "map_max" -> {
+            if args.len() != 1 -> return jet_eval_route_not_supported(&machine, span, "{member} without a receiver")
+            unordered :: jet_eval_route_map_entries(args[0]) ?? return jet_eval_route_not_supported(&machine, span, "{member} on a non-map")
+            entries :: jet_eval_route_entries_by_key(unordered)
+            if entries.len() == 0 -> return jet_eval_route_direct_absent(result_ty, &machine, span)
+            best := entries[0].value
+            loop index in 1..<entries.len() {
+                order :: jet_eval_route_order(entries[index].value, best, &machine, span) ?? return None
+                if (member == "map_max" && order >= 0) || (member == "map_min" && order < 0) -> best = entries[index].value
+            }
+            Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Present{value: best}})
+        }
+        "map_top_n" -> {
+            if args.len() != 2 -> return jet_eval_route_not_supported(&machine, span, "Map.top_n without a count")
+            entries :: jet_eval_route_map_entries(args[0]) ?? return jet_eval_route_not_supported(&machine, span, "top_n on a non-map")
+            count := jet_eval_route_int_value(args[1], &machine, span) ?? return None
+            if count <= 0 -> return Val(JetEvalRuntimeValue.Data{value: TComptimeValue.List{values: [TComptimeValue]{}}})
+            ranked := [TComptimeMapEntry]{}
+            loop entry in entries {
+                placed := false
+                next_ranked := [TComptimeMapEntry]{}
+                loop held in ranked {
+                    if !placed {
+                        order :: jet_eval_route_order(held.value, entry.value, &machine, span) ?? return None
+                        if order < 0 || (order == 0 && jet_eval_route_key_order(entry.key, held.key) < 0) {
+                            &next_ranked.push(entry)
+                            placed = true
+                        }
+                    }
+                    &next_ranked.push(held)
+                }
+                if !placed -> &next_ranked.push(entry)
+                ranked = next_ranked
+            }
+            rows := [TComptimeValue]{}
+            loop index in 0..<ranked.len() {
+                if index >= count -> break
+                &rows.push(TComptimeValue.Struct{type_name: "", fields: [TComptimeField]{
+                    TComptimeField{name: "key", value: jet_eval_iterator_key_value(ranked[index].key)},
+                    TComptimeField{name: "value", value: ranked[index].value},
+                }})
+            }
+            Val(JetEvalRuntimeValue.Data{value: TComptimeValue.List{values: rows}})
+        }
+        "ordering_reverse" -> {
+            if args.len() != 1 -> return jet_eval_route_not_supported(&machine, span, "Ordering.reverse without a receiver")
+            variant :: jet_eval_route_ordering_variant(args[0]) ?? return jet_eval_route_not_supported(&machine, span, "Ordering.reverse on a non-Ordering")
+            reversed :: if variant == {
+                "Less" -> "Greater"
+                "Greater" -> "Less"
+                else -> variant
+            }
+            Val(JetEvalRuntimeValue.Data{value: jet_eval_route_ordering(reversed)})
         }
         "compare" | "eq" | "ne" | "lt" | "gt" | "le" | "ge" -> jet_eval_route_compare(member, args, &machine, span)
         "string_split" | "iter_to_list" | "iter_collect" -> jet_eval_route_not_supported(&machine, span, "stream-producing builtin route")
@@ -821,6 +1473,18 @@ fn jet_eval_route_prelude(machine: &JetEvalMachine, call: MIRPreludeCallID, args
     }
     symbol :: jet_eval_route_symbol_prelude(row, &machine, span) ?? return None
     data :: jet_eval_route_args(args, &machine, span) ?? return None
+    // MIREval `core.text.fmt` display/debug: the evaluator-owned structural
+    // renderers (Formatting/Values.jet), never a source target.
+    if row.family == MIRPreludeFamily.StaticPrelude && row.module_name == "core.text.fmt" && (row.member == "display" || row.member == "debug") {
+        expected :: if row.member == "display" -> "jet_fmt_display" else -> "jet_fmt_debug"
+        if symbol != expected || data.len() != 1 {
+            jet_eval_compiler_fail(&machine, span, "MIR core.text.fmt.{row.member} route has non-canonical metadata")
+            return None
+        }
+        shown :: if row.member == "display" -> jet_eval_format_display(&machine, data[0], span) else -> jet_eval_format_debug(&machine, data[0], span)
+        rendered :: shown ?? return None
+        return Val(JetEvalRuntimeValue.Data{value: TComptimeValue.String{value: rendered}})
+    }
     if row.family == MIRPreludeFamily.StaticPrelude && row.module_name == "core.host" && symbol == "jet_comptime_host_method" {
         parts :: jet_eval_compiler_value_method_owner(row.member) ?? return jet_eval_route_not_supported(&machine, span, "invalid compiler host method member")
         if jet_eval_reflection_metadata_supported(parts[0], parts[1]) -> return jet_eval_route_reflection_host(row, data, &machine, span)
@@ -833,7 +1497,7 @@ fn jet_eval_route_prelude(machine: &JetEvalMachine, call: MIRPreludeCallID, args
     }
     if row.family == MIRPreludeFamily.BuiltinMethod && row.module_name == "core.compare" && symbol == "jet_int_compare" -> return jet_eval_route_exact_compare_member_host(row.member, args, &machine, result_ty, span)
     if row.family == MIRPreludeFamily.BuiltinMethod && row.module_name == "core.numeric" && (row.member == "bit_count" || row.member == "int_bit_count") -> return jet_eval_route_numeric_conversion(row, args, &machine, result_ty, span)
-    if row.family == MIRPreludeFamily.BuiltinMethod || row.family == MIRPreludeFamily.MathBuiltin -> return jet_eval_route_builtin(row.member, data, row.fallibility, &machine, span)
+    if row.family == MIRPreludeFamily.BuiltinMethod || row.family == MIRPreludeFamily.MathBuiltin -> return jet_eval_route_builtin(row.member, symbol, data, row.fallibility, result_ty, &machine, span)
     if row.family == MIRPreludeFamily.PreciseBuiltin {
         if jet_eval_route_precise_operator(row.module_name, row.member) && jet_eval_route_precise_symbol(row.module_name, row.member, symbol) -> return jet_eval_host_row(&machine, row, args, result_ty, span)
         return jet_eval_route_not_supported(&machine, span, "PreciseBuiltin route has no canonical numeric adapter")

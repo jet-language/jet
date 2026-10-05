@@ -190,7 +190,7 @@ fn row_word(
     operation: &str,
 ) -> Result<i64, DataError> {
     match value {
-        jet_rt::JetVal::Int(value) | jet_rt::JetVal::RecordRef(value) => Ok(value),
+        jet_rt::JetVal::Int(value) | jet_rt::JetVal::Word { value, .. } | jet_rt::JetVal::RecordRef(value) => Ok(value),
         jet_rt::JetVal::Float(value) => Ok(value.to_bits() as i64),
         jet_rt::JetVal::Bool(value) => Ok(i64::from(value)),
         jet_rt::JetVal::Char(value) => Ok(i64::from(u32::from(value))),

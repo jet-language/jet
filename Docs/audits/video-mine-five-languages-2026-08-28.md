@@ -32,7 +32,7 @@ storyboards; on-screen code marked as such. One 429 on a duplicate caption track
 and JS/GORT/GOLANG lanes needed salvage/correction passes after timeouts; all deliverables
 are complete. Durable artifacts (ledgers `jet-mine-<ID>.claims.json`, findings
 `jet-mine-<ID>.findings.md`, probes `jet-probe-{RUST,PY,JS,GOLANG,GORT}.md`) live in
-`~/.cache/jet-luna/mine-2026-08-28/artifacts/`; JS probes were re-run by the orchestrator.
+`~/.cache/jet-dev/mine-2026-08-28/artifacts/`; JS probes were re-run by the orchestrator.
 
 ## Reframes — where the popular reading is wrong
 

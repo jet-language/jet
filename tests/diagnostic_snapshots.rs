@@ -105,7 +105,7 @@ impl UiFixtureScratch {
             .map(PathBuf::from)
             .unwrap_or_else(|| {
                 PathBuf::from(std::env::var_os("HOME").expect("HOME is required for test scratch"))
-                    .join(".cache/jet-test-scratch")
+                    .join(".cache/jet-dev/scratch")
             });
         fs::create_dir_all(&base).expect("create UI fixture scratch root");
         let base = fs::canonicalize(base).expect("canonicalize UI fixture scratch root");
@@ -328,7 +328,7 @@ fn ui_snapshots() {
                 .expect("system clock before Unix epoch")
                 .as_nanos();
             let tmp = PathBuf::from(std::env::var_os("HOME").expect("HOME is required for test scratch"))
-                .join(".cache/jet-test-scratch")
+                .join(".cache/jet-dev/scratch")
                 .join(format!("jet_schema_ui_{}_{}", std::process::id(), stamp));
             fs::create_dir_all(&tmp).expect("create UI schema fixture cache");
             fs::write(tmp.join(format!("{}.snapshot", type_name)), &snap_text)

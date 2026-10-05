@@ -6,7 +6,7 @@ jet=${JET:-jet}
 jet_cc=${JET_CC:-jet-cc}
 jet_cxx=${JET_CXX:-jet-c++}
 cmake=${CMAKE_COMMAND:-cmake}
-scratch_root=${HOME:?}/.cache/jet-test-scratch
+scratch_root=${HOME:?}/.cache/jet-dev/scratch
 mkdir -p "$scratch_root"
 work=$(mktemp -d "$scratch_root/jet-ffi-driver.XXXXXX")
 trap 'rm -rf "$work"' EXIT

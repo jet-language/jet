@@ -1,12 +1,14 @@
-// The Store area's one error carrier, ported from the `std::io::Error`
+// The Hangar engine's domain error carrier, ported from the `std::io::Error`
 // values the Rust Hangar engine returns. Each Rust `ErrorKind` that callers
 // branch on keeps its own variant; the message text is the Rust message
 // byte for byte. `Io` carries a Core boundary failure unchanged, so a
 // `NotFound` from the filesystem stays distinguishable from a Hangar fact.
+// Native CacheLease consumer APIs retain IOError! directly as Rust io::Result;
+// Hangar callers lift those failures through the canonical IO conversion.
 
 #Error
 pub enum StoreError {
-    Io(IOError)
+    IO(IOError)
     NotFound(String)
     InvalidData(String)
     InvalidInput(String)
@@ -21,7 +23,7 @@ pub enum StoreError {
 
     fn message(self) -> String Never! {
         if self == {
-            .Io(error) -> "{error}"
+            .IO(error) -> "{error}"
             .NotFound(text) -> text
             .InvalidData(text) -> text
             .InvalidInput(text) -> text
@@ -38,7 +40,7 @@ pub enum StoreError {
     fn is_not_found(self) -> Bool Never! {
         if self == {
             .NotFound(_) -> true
-            .Io(error) -> if error == {
+            .IO(error) -> if error == {
                 .NotFound(_) -> true
                 else -> false
             }
@@ -51,7 +53,7 @@ pub enum StoreError {
         if self == {
             .AlreadyExists(_) -> true
             .LifecycleConflict(_, _) -> true
-            .Io(error) -> if error == {
+            .IO(error) -> if error == {
                 .AlreadyExists(_) -> true
                 else -> false
             }
@@ -70,7 +72,7 @@ pub enum StoreError {
             .PermissionDenied(_) -> StoreError.PermissionDenied(text)
             .Unsupported(_) -> StoreError.Unsupported(text)
             .Interrupted(_) -> StoreError.Interrupted(text)
-            .Io(error) -> if error == {
+            .IO(error) -> if error == {
                 .NotFound(_) -> StoreError.NotFound(text)
                 .PermissionDenied(_) -> StoreError.PermissionDenied(text)
                 .InvalidInput(_) -> StoreError.InvalidInput(text)
@@ -83,13 +85,13 @@ pub enum StoreError {
     }
 }
 
-impl IOError -> StoreError { StoreError.Io(self) }
+impl IOError -> StoreError { StoreError.IO(self) }
 
 // Rust `jet_pkg_model::Store::list_checked` returns `io::Error`; its
 // InvalidData facts keep their kind.
 impl HangarReadError -> StoreError {
     if self == {
-        .Io(error) -> StoreError.Io(error)
+        .IO(error) -> StoreError.IO(error)
         .InvalidData(text) -> StoreError.InvalidData(text)
     }
 }

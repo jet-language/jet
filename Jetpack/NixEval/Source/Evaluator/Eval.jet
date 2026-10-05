@@ -6,8 +6,8 @@
 
 // Recursive thunk forcing stays below host stack limits; the public
 // expression budget remains 256 and is what the error reports.
-@NIXEVAL_MAX_THUNK_FORCE_DEPTH :: 128
-@NIXEVAL_MAX_OVERLAYS :: 64
+NIXEVAL_MAX_THUNK_FORCE_DEPTH :: prep { 128 }
+NIXEVAL_MAX_OVERLAYS :: prep { 64 }
 
 struct NixEvaluator {
     system: String
@@ -109,8 +109,8 @@ struct NixEvaluator {
             }
         }
         self.thunks[thunk] = NixEvalThunk.Evaluating
-        if self.force_depth >= @NIXEVAL_MAX_THUNK_FORCE_DEPTH {
-            error :: NixEvalError.ResourceLimit("foreign flake evaluation exceeded {@NIXEVAL_EXPRESSION_LIMIT} expression steps")
+        if self.force_depth >= NIXEVAL_MAX_THUNK_FORCE_DEPTH {
+            error :: NixEvalError.ResourceLimit("foreign flake evaluation exceeded {NIXEVAL_EXPRESSION_LIMIT} expression steps")
             self.thunks[thunk] = NixEvalThunk.Failed(error.message())
             return Err(error)
         }
@@ -155,12 +155,12 @@ struct NixEvaluator {
     fn evaluate_expr(&self, expression: Int, frame: Int, depth: Int) -> NixEvalValue NixEvalError! {
         cell :: ~self.frames[frame].fuel
         spent :: ~self.fuel[cell]
-        if spent >= @NIXEVAL_EXPRESSION_LIMIT {
-            return Err(NixEvalError.ResourceLimit("foreign flake evaluation exceeded {@NIXEVAL_EXPRESSION_LIMIT} expression steps"))
+        if spent >= NIXEVAL_EXPRESSION_LIMIT {
+            return Err(NixEvalError.ResourceLimit("foreign flake evaluation exceeded {NIXEVAL_EXPRESSION_LIMIT} expression steps"))
         }
         self.fuel[cell] = spent + 1
-        if depth > @NIXEVAL_EXPRESSION_LIMIT {
-            return Err(NixEvalError.ResourceLimit("foreign flake evaluation exceeded {@NIXEVAL_EXPRESSION_LIMIT} nested expressions"))
+        if depth > NIXEVAL_EXPRESSION_LIMIT {
+            return Err(NixEvalError.ResourceLimit("foreign flake evaluation exceeded {NIXEVAL_EXPRESSION_LIMIT} nested expressions"))
         }
         node :: ~self.exprs[expression]
         if node == {
@@ -196,11 +196,11 @@ struct NixEvaluator {
             .Apply(function, argument) -> {
                 callee :: &self.evaluate_expr(function, frame, depth + 1)
                 argument_thunk :: &self.expression_thunk(argument, frame)
-                self.apply(callee, argument_thunk)
+                &self.apply(callee, argument_thunk)
             }
             .Select(value, field) -> {
                 subject :: &self.evaluate_expr(value, frame, depth + 1)
-                selected :: self.select(subject, field)
+                selected :: &self.select(subject, field)
                 &self.force(selected)
             }
             .Let(bindings, body) -> {
@@ -248,8 +248,8 @@ struct NixEvaluator {
                     evaluated.stringify()
                 }
             }
-            if value.len() + text.value.bytes().len() > @NIXEVAL_STRING_BYTES {
-                return Err(NixEvalError.ResourceLimit("foreign flake string exceeds {@NIXEVAL_STRING_BYTES} bytes"))
+            if value.len() + text.value.bytes().len() > NIXEVAL_STRING_BYTES {
+                return Err(NixEvalError.ResourceLimit("foreign flake string exceeds {NIXEVAL_STRING_BYTES} bytes"))
             }
             nixeval_push_text(&value, text.value)
             loop context in text.contexts {
@@ -317,7 +317,7 @@ struct NixEvaluator {
                 overlays :: &self.attr_field(fields, "overlays") ?? return Ok(NixEvalValue.Packages(~base))
                 overlay_value :: &self.force(overlays)
                 items :: overlay_value.list_items() ?? return Err(NixEvalError.TypeMismatch{expected: "overlay list", actual: "non-list overlays"})
-                if items.len() > @NIXEVAL_MAX_OVERLAYS -> return Err(NixEvalError.ResourceLimit("package overlay list exceeds {@NIXEVAL_MAX_OVERLAYS} overlays"))
+                if items.len() > NIXEVAL_MAX_OVERLAYS -> return Err(NixEvalError.ResourceLimit("package overlay list exceeds {NIXEVAL_MAX_OVERLAYS} overlays"))
                 &self.apply_overlays(base, items)
             }
             .ExtendPackage(base) -> {
@@ -473,7 +473,7 @@ struct NixEvaluator {
 
     fn evaluate_import(&self, path: String) -> NixEvalValue NixEvalError! {
         if self.authority == None -> return Err(NixEvalError.Unsupported("import requires explicit project-root authority"))
-        if self.imports >= @NIXEVAL_IMPORT_LIMIT -> return Err(NixEvalError.ResourceLimit("foreign flake imports exceed {@NIXEVAL_IMPORT_LIMIT} files"))
+        if self.imports >= NIXEVAL_IMPORT_LIMIT -> return Err(NixEvalError.ResourceLimit("foreign flake imports exceed {NIXEVAL_IMPORT_LIMIT} files"))
         active_path :: if self.active_flakes.len() == 0 -> path else -> "{self.active_flakes[self.active_flakes.len() - 1]}:{path}"
         if nixeval_contains_text(self.active_imports, active_path) -> return Err(NixEvalError.Cycle)
         self.imports += 1
@@ -492,7 +492,7 @@ struct NixEvaluator {
 
     fn import_source(&self, path: String) -> NixEvalValue NixEvalError! {
         source :: self.ask(NixEvalRequest.Import{path, flake: self.active_flake()})
-        if source.bytes().len() > @NIXEVAL_STRING_BYTES -> return Err(NixEvalError.ResourceLimit("imported `{path}` exceeds {@NIXEVAL_STRING_BYTES} bytes"))
+        if source.bytes().len() > NIXEVAL_STRING_BYTES -> return Err(NixEvalError.ResourceLimit("imported `{path}` exceeds {NIXEVAL_STRING_BYTES} bytes"))
         bytes :: path.bytes()
         slash :: nixeval_last_byte(bytes, 47)
         parent :: if slash < 0 -> "" else -> nixeval_slice(bytes, 0, slash)
@@ -501,12 +501,12 @@ struct NixEvaluator {
 
     fn apply_external_flake(&self, argument: NixEvalValue) -> NixEvalValue NixEvalError! {
         reference :: argument.plain_string()
-        if reference == "" || reference.bytes().len() > @NIXEVAL_MAX_PATH_BYTES || nixeval_contains_byte(reference, 0) || nixeval_contains_byte(reference, 10) {
+        if reference == "" || reference.bytes().len() > NIXEVAL_MAX_PATH_BYTES || nixeval_contains_byte(reference, 0) || nixeval_contains_byte(reference, 10) {
             return Err(NixEvalError.Invalid("external flake reference is invalid"))
         }
         if self.authority == None -> return Err(NixEvalError.Unsupported("external flakes require explicit provider authority"))
         if nixeval_contains_text(self.active_flakes, reference) -> return Err(NixEvalError.Cycle)
-        if self.imports >= @NIXEVAL_IMPORT_LIMIT -> return Err(NixEvalError.ResourceLimit("external flake sources exceed {@NIXEVAL_IMPORT_LIMIT} files"))
+        if self.imports >= NIXEVAL_IMPORT_LIMIT -> return Err(NixEvalError.ResourceLimit("external flake sources exceed {NIXEVAL_IMPORT_LIMIT} files"))
         self.imports += 1
         &self.active_flakes.push(~reference)
         if &self.external_flake_source(reference) == {
@@ -523,7 +523,7 @@ struct NixEvaluator {
 
     fn external_flake_source(&self, reference: String) -> NixEvalValue NixEvalError! {
         source :: self.ask(NixEvalRequest.ExternalFlake(reference))
-        if source.bytes().len() > @NIXEVAL_STRING_BYTES -> return Err(NixEvalError.ResourceLimit("external flake {reference} exceeds {@NIXEVAL_STRING_BYTES} bytes"))
+        if source.bytes().len() > NIXEVAL_STRING_BYTES -> return Err(NixEvalError.ResourceLimit("external flake {reference} exceeds {NIXEVAL_STRING_BYTES} bytes"))
         root :: &self.evaluate_source(source, "")
         &self.project_external_flake(root)
     }
@@ -548,7 +548,7 @@ struct NixEvaluator {
     fn apply_flake_arguments(&self, function: NixEvalValue) -> NixEvalValue NixEvalError! {
         arguments :: &self.flake_arguments()
         argument :: &self.value_thunk(arguments)
-        self.apply(function, argument)
+        &self.apply(function, argument)
     }
 
     fn flake_arguments(&self) -> NixEvalValue Never! {
@@ -577,9 +577,9 @@ struct NixEvaluator {
     // view, and return the snapshot package set it produces.
     fn overlay_step(&self, prefix: String, final_table: Int, overlay: NixEvalValue, current: NixEvalValue) -> NixEvalValue NixEvalError! {
         final_thunk :: &self.value_thunk(NixEvalValue.Packages(NixEvalPackageSet{prefix, overlay: Val(final_table)}))
-        first :: self.apply(overlay, final_thunk)
+        first :: &self.apply(overlay, final_thunk)
         current_thunk :: &self.value_thunk(current)
-        result :: self.apply(first, current_thunk)
+        result :: &self.apply(first, current_thunk)
         if result == {
             .AttrSet(fields) -> &self.extend_overlay(final_table, fields)
             else -> return Err(NixEvalError.TypeMismatch{expected: "overlay attribute set", actual: result.type_name()})
@@ -653,7 +653,7 @@ fn nixeval_condition(value: NixEvalValue) -> Bool NixEvalError! {
 
 // Resolve a relative path literal inside the project root.
 fn nixeval_resolve_path_literal(raw: String, base: String) -> String NixEvalError! {
-    if raw.bytes().len() > @NIXEVAL_MAX_PATH_BYTES -> return Err(NixEvalError.ResourceLimit("foreign flake path exceeds {@NIXEVAL_MAX_PATH_BYTES} bytes"))
+    if raw.bytes().len() > NIXEVAL_MAX_PATH_BYTES -> return Err(NixEvalError.ResourceLimit("foreign flake path exceeds {NIXEVAL_MAX_PATH_BYTES} bytes"))
     if nixeval_has_prefix(raw, "/") -> return Err(NixEvalError.Unsupported("absolute paths require explicit project-root authority"))
     if nixeval_contains_byte(raw, 92) || nixeval_contains_byte(raw, 0) -> return Err(NixEvalError.Unsupported("path values must use bounded relative UTF-8 paths"))
     if nixeval_contains_byte(raw, 58) -> return Err(NixEvalError.Unsupported("URI paths require explicit fetch authority"))
@@ -673,6 +673,6 @@ fn nixeval_resolve_path_literal(raw: String, base: String) -> String NixEvalErro
     }
     if components.len() == 0 -> return Err(NixEvalError.Invalid("path value names the flake root directory"))
     path :: components.join("/")
-    if path.bytes().len() > @NIXEVAL_MAX_PATH_BYTES -> return Err(NixEvalError.ResourceLimit("foreign flake path exceeds {@NIXEVAL_MAX_PATH_BYTES} bytes"))
+    if path.bytes().len() > NIXEVAL_MAX_PATH_BYTES -> return Err(NixEvalError.ResourceLimit("foreign flake path exceeds {NIXEVAL_MAX_PATH_BYTES} bytes"))
     Ok(path)
 }

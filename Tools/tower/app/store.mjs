@@ -7,6 +7,8 @@
 //   decisions   — ballot-ready choices blocking a card, owner-only to ratify
 //   questions   — owner ⇄ agent notes/questions on a card
 //   ideas       — lightweight capture; promotable to cards
+//   briefings   — attributed markdown reports, newest first
+//   statusSnapshot — latest posted progress report (not a card/closure gate)
 //   events      — append-only audit trail of every mutation
 //
 // Lane state is DERIVED on every read (never stored), so a card and its
@@ -18,8 +20,9 @@ import {
   backupRequiredAt, dataFile, historyFile, projectRoot,
   readJSON, withDirectoryAuthority, writeJSON, newId, today, now,
 } from './paths.mjs';
-import { withLock } from './lock.mjs';
+import { withLock, withLockAsync } from './lock.mjs';
 import { loadConfig, publicConfig } from './config.mjs';
+import { migrateRecommendationLosses } from './migrate.mjs';
 import {
   HardeningInputError, hardeningFixtureIssue, hasHardeningPayload,
   formatHardeningEvidence, normalizeHardeningFixture, prepareHardening,
@@ -110,13 +113,14 @@ function withStorePairTransaction(dataDir, liveFile, config, work, prepare = nul
   });
 }
 
-// A board is born with one active epoch: every card must live in an epoch, be
-// a sidequest, or be frozen (owner ruling 2026-08-05), so an epoch-less board
-// would have nowhere to put epoch-track work.
+// A board is born with one active epoch: every card must live in an epoch or
+// be a sidequest (owner rulings 2026-08-05 and 2026-10-04), so an epoch-less
+// board would have nowhere to put epoch-track work.
 export const empty = (project = 'Project') => ({
   meta: { version: VERSION, project, currentEpoch: null, nextNum: 1, rev: 0, ui: { toggled: [] } },
   epochs: [{ id: 'e1', name: 'Epoch 1', goal: '', status: 'active' }],
   milestones: [], cards: [], decisions: [], questions: [], ideas: [], papercuts: [], events: [],
+  briefings: [], statusSnapshot: null,
 });
 
 // ---- store handle ---------------------------------------------------------
@@ -164,9 +168,13 @@ export function openStore(dataDir) {
     if (pair.pending) fail('E_CONFLICT', 'repair transaction is still pending; retry the operation');
     validateStoredState(pair.live.value, 'live store');
     validateStoredHistory(pair.history.value, 'history store');
+    const history = { ...emptyHistory(), ...pair.history.value };
+    let historyMigrated = false;
+    for (const decision of history.decisions)
+      historyMigrated = migrateRecommendationLosses(decision) || historyMigrated;
     return {
       state: normalize(pair.live.value, pair.history.value.cards),
-      history: { ...emptyHistory(), ...pair.history.value },
+      history, historyMigrated,
     };
   };
   let liveCache = null;
@@ -196,6 +204,8 @@ export function openStore(dataDir) {
         continue;
       validateStoredState(first.live.value, 'live store');
       validateStoredHistory(first.history.value, 'history store');
+      for (const decision of first.history.value.decisions || [])
+        migrateRecommendationLosses(decision);
       const state = normalize(first.live.value, first.history.value.cards);
       liveCache = { bytes: first.live.bytes, state };
       return {
@@ -245,7 +255,7 @@ export function openStore(dataDir) {
 
   // Read-modify-write under the cross-process lock; rev bumps on every write.
   // `expectRev` (optional) enables optimistic concurrency for API callers.
-  const mutate = (fn, { expectRev } = {}) => withLock(file, () => {
+  const mutateLocked = (fn, { expectRev } = {}) => {
     recoverPendingRepairLocked(dataDir);
     return withStorePairTransaction(dataDir, file, config, (root, pair) => {
       const s = pair.state;
@@ -254,7 +264,7 @@ export function openStore(dataDir) {
       const history = pair.history;
       const historyBefore = JSON.stringify(history);
       const result = fn(s, config, history);
-      if (JSON.stringify(history) !== historyBefore) writeJSONHeld(root, 'history.json', history);
+      if (pair.historyMigrated || JSON.stringify(history) !== historyBefore) writeJSONHeld(root, 'history.json', history);
       // #461: single chokepoint — every write gets a chance to retire aged-out
       // cards/decisions/events to history.json before tower.json is persisted.
       syncMilestones(s, undefined, history.cards);
@@ -265,7 +275,11 @@ export function openStore(dataDir) {
       writeJSONHeld(root, 'tower.json', s);
       return { result, state: s };
     }, preparedPairAt);
-  });
+  };
+  const mutate = (fn, options) => withLock(file, () => mutateLocked(fn, options));
+  // Same write, but waits for the lock without blocking the event loop
+  // (`tower serve`), and long enough that busy agents never reject it.
+  const mutateAsync = (fn, options) => withLockAsync(file, () => mutateLocked(fn, options));
 
   // Replace the whole state (undo). Guarded by expectRev so an interleaved
   // write from another agent can never be silently reverted. Undo touches
@@ -309,7 +323,7 @@ export function openStore(dataDir) {
   });
 
   return {
-    file, dataDir, config, load, loadLive, loadPair, mutate, restore, restoreArchived, loadHistory,
+    file, dataDir, config, load, loadLive, loadPair, mutate, mutateAsync, restore, restoreArchived, loadHistory,
     project: () => { const pair = loadPair(); return project(pair.state, config, pair.history); },
   };
 }
@@ -475,6 +489,7 @@ function validateStoredDecision(decision, index, source) {
   if (decision.status !== undefined && !DECISION_STATUSES.has(decision.status))
     fail('E_INVALID', `${label}.status is not a canonical decision status`);
   if (decision.visualMedia !== undefined) normalizeVisualMedia(decision.visualMedia, `${label}.visualMedia`);
+  validateStoredString(decision.situation, `${label}.situation`);
   if (decision.options !== undefined) {
     if (!Array.isArray(decision.options)) fail('E_INVALID', `${label}.options must be an array`);
     for (const [optionIndex, option] of decision.options.entries()) {
@@ -503,7 +518,7 @@ export function validateStoredState(state, source = 'live store') {
     validateStoredNumber(state.meta.nextNum, `${source}.meta.nextNum`, { integer: true, min: 1 });
     validateStoredNumber(state.meta.rev, `${source}.meta.rev`, { integer: true, min: 0 });
   }
-  for (const key of ['epochs', 'milestones', 'cards', 'decisions', 'questions', 'ideas', 'papercuts', 'events']) {
+  for (const key of ['epochs', 'milestones', 'cards', 'decisions', 'questions', 'ideas', 'papercuts', 'events', 'briefings']) {
     if (state[key] !== undefined && !Array.isArray(state[key])) fail('E_INVALID', `${source}.${key} must be an array`);
   }
   const seenNums = new Set();
@@ -512,6 +527,10 @@ export function validateStoredState(state, source = 'live store') {
   (state.milestones || []).forEach((milestone, index) => validateStoredMilestone(milestone, index, source));
   (state.cards || []).forEach((card, index) => validateStoredCard(card, index, source, seenNums, seenIds));
   (state.decisions || []).forEach((decision, index) => validateStoredDecision(decision, index, source));
+  (state.briefings || []).forEach(validateBriefing);
+  // The owner-actions report was removed 2026-10-04; a board written before then still carries the key. Drop it on read; the next write persists the board without it.
+  if (state.statusSnapshot != null) delete state.statusSnapshot.ownerActions;
+  if (state.statusSnapshot != null) validateStatusSnapshot(state.statusSnapshot);
   return state;
 }
 
@@ -527,10 +546,13 @@ export function validateStoredHistory(history, source = 'history store') {
   return history;
 }
 
-function loadHistoryRaw(dataDir) {
+// One read of history.json alone (no live-board pair check). Read-only
+// archive views use this; writes go through the locked pair transaction.
+export function loadHistoryRaw(dataDir) {
   const raw = readJSON(historyFile(dataDir), null);
   if (raw == null) return emptyHistory();
   validateStoredHistory(raw);
+  for (const decision of raw.decisions || []) migrateRecommendationLosses(decision);
   return { ...emptyHistory(), ...raw };
 }
 
@@ -686,7 +708,8 @@ export function normalize(s, historyCards = null, sync = true) {
   if (s.meta.completionCursor == null && s.meta.digestCursor != null)
     s.meta.completionCursor = s.meta.digestCursor;
   delete s.meta.digestCursor;
-  for (const k of ['epochs', 'milestones', 'cards', 'decisions', 'questions', 'ideas', 'papercuts', 'events']) s[k] ||= [];
+  for (const k of ['epochs', 'milestones', 'cards', 'decisions', 'questions', 'ideas', 'papercuts', 'events', 'briefings']) s[k] ||= [];
+  s.statusSnapshot ??= null;
   delete s.messages;   // messaging was removed; drop the legacy key on next write
   // D-TWR-OPS1=A: active epoch is derived solely from epoch.status === 'active'.
   // One-time reconcile of the retired meta.currentEpoch pointer, then drop it so
@@ -726,6 +749,7 @@ export function normalize(s, historyCards = null, sync = true) {
     }
   }
   for (const d of s.decisions) {
+    migrateRecommendationLosses(d);
     d.draft = !!d.draft;
     if (d.visualMedia !== undefined) d.visualMedia = normalizeVisualMedia(d.visualMedia);
   }
@@ -940,22 +964,47 @@ export function radarData(s, historyCards = []) {
   });
 }
 
-function projectCardRecord(c, decisions, cards, questions) {
-  const clearance = clearanceOf(c, decisions);
-  const linkedDecisions = decisions.filter(d => d.cardId === c.id);
-  const linkedQuestions = questions.filter(q => q.cardId === c.id);
+// Group records by their cardId once, so projecting many cards does not
+// rescan every decision and question per card.
+function byCardId(list) {
+  const groups = new Map();
+  for (const item of list) {
+    let group = groups.get(item.cardId);
+    if (!group) groups.set(item.cardId, group = []);
+    group.push(item);
+  }
+  return groups;
+}
+
+function projectCardRecord(c, decisions, cards, questions, groups = null) {
+  const linkedDecisions = groups?.decisions ? (groups.decisions.get(c.id) || []) : decisions.filter(d => d.cardId === c.id);
+  const linkedQuestions = groups?.questions ? (groups.questions.get(c.id) || []) : questions.filter(q => q.cardId === c.id);
+  const clearance = clearanceOf(c, linkedDecisions);
   const openQ = linkedQuestions.filter(q => q.kind !== 'message' && q.status === 'open').length;
   return { ...c, clearance, decisions: linkedDecisions, questions: linkedQuestions, openQ, lane: laneOf(c, decisions, cards) };
 }
 
+// Board index milestones: navigation and progress only. Criteria evidence,
+// verification, and closeout records stay in the store and CLI.
+function projectMilestoneSummary(m, progress) {
+  const criteria = m.criteria || [];
+  return {
+    id: m.id, epochId: m.epochId, title: m.title, goal: m.goal, status: m.status,
+    archived: m.archived, created: m.created, metAt: m.metAt, progress,
+    criteriaCount: { total: criteria.length, settled: criteria.filter(i => i.status === 'met' || i.status === 'verified').length },
+  };
+}
+
+// One board row. Question threads live once in the index's top-level
+// `questions`; refs, probes, and blockers (already reflected in `lane`) load
+// with the full card.
 function projectCardSummary(c) {
   const summary = {
     id: c.id, num: c.num, title: c.title, kind: c.kind, track: c.track,
     epoch: c.epoch, milestoneId: c.milestoneId, phase: c.phase,
     priority: c.priority, workOrder: c.workOrder, assignee: c.assignee,
-    needsAcceptance: c.needsAcceptance, visualMedia: c.visualMedia || [], probe: c.probe || null, updated: c.updated, created: c.created,
-    completedAt: c.completedAt, blockedBy: c.blockedBy, refs: c.refs,
-    lane: c.lane, openQ: c.openQ, questions: c.questions,
+    needsAcceptance: c.needsAcceptance, visualMedia: c.visualMedia || [], updated: c.updated, created: c.created,
+    completedAt: c.completedAt, lane: c.lane, openQ: c.openQ,
   };
   if (c.hardeningDedupKey) {
     summary.hardeningDedupKey = c.hardeningDedupKey;
@@ -1023,8 +1072,9 @@ export function projectBoard(s, config = null) {
   validateProjectedPhases(s);
   const active = s.cards.filter(c => c.phase !== 'done');
   const activeIds = new Set(active.map(c => c.id));
-  const cards = active.map(c => projectCardSummary(projectCardRecord(c, s.decisions, s.cards, s.questions)));
-  const milestones = s.milestones.map(m => ({ ...m, progress: milestoneProgress(m, s.cards) }));
+  const groups = { decisions: byCardId(s.decisions), questions: byCardId(s.questions) };
+  const cards = active.map(c => projectCardSummary(projectCardRecord(c, s.decisions, s.cards, s.questions, groups)));
+  const milestones = s.milestones.map(m => projectMilestoneSummary(m, milestoneProgress(m, s.cards)));
   const inLane = (lane) => cards.filter(c => c.lane.lane === lane);
   const openDecisions = s.decisions.filter(d => isBlocking(d) && !d.draft);
   const genericDecisions = openDecisions.filter(d => d.group !== 'acceptance');
@@ -1056,21 +1106,27 @@ export function projectBoard(s, config = null) {
     phases: PHASES, lanes: LANES, cards, decisions: openDecisions,
     questions: s.questions.filter(q => activeIds.has(q.cardId)), ideas: s.ideas,
     papercuts: s.papercuts, events: s.events.slice(0, 300), counts, recentlyDecided,
+    briefings: s.briefings || [], statusSnapshot: s.statusSnapshot || null,
     notices: { cards: noticeCards, messages: noticeMessages }, radar: radarData(s),
   };
 }
 
+// Closed cards for the board's "Show closed" list: the same summary rows as
+// the active board (no bodies, logs, or criteria). One card's full record
+// comes from projectCard() when it is opened.
 export function projectClosed(s, config = null, history = null) {
   validateProjectedPhases(s, history);
   const h = history || emptyHistory();
+  const liveGroups = { decisions: byCardId(s.decisions), questions: byCardId(s.questions) };
   const liveDone = s.cards.filter(c => c.phase === 'done')
-    .map(c => projectCardRecord(c, s.decisions, s.cards, s.questions));
+    .map(c => projectCardSummary(projectCardRecord(c, s.decisions, s.cards, s.questions, liveGroups)));
+  const archiveGroups = { decisions: byCardId(h.decisions) };
   const archived = h.cards.map(c => ({
     // Keep archive origin explicit for client cache/debugging. It is not used
     // for lane or board semantics.
-    ...projectCardRecord(c, h.decisions, h.cards, c.questions || []), archived: true,
+    ...projectCardSummary(projectCardRecord(c, h.decisions, h.cards, c.questions || [], archiveGroups)), archived: true,
   }));
-  const milestones = s.milestones.map(m => ({ ...m, progress: milestoneProgress(m, s.cards, h.cards) }));
+  const milestones = s.milestones.map(m => projectMilestoneSummary(m, milestoneProgress(m, s.cards, h.cards)));
   return {
     rev: s.meta.rev, cards: [...liveDone, ...archived],
     counts: { done: liveDone.length, archived: archived.length },
@@ -1197,12 +1253,13 @@ const checkEnum = (val, list, what) => {
 };
 const checkEpoch = (s, id) => { if (id != null && !s.epochs.find(e => e.id === id)) fail('E_NOT_FOUND', `no epoch ${id}`); };
 
-// Owner ruling 2026-08-05: every card lives in an epoch, is a sidequest, or is
-// frozen. An epoch-track card with no epoch is unreachable from every board
-// view, so the state is rejected at the store boundary (CLI and API alike).
-const checkCardHome = ({ track, epoch, phase }) => {
-  if (track === 'epoch' && epoch == null && phase !== 'frozen')
-    fail('E_INVALID', 'a card must live in an epoch, be a sidequest, or be frozen — pass --epoch <id> (no epoch is active to inherit) or --track sidequest');
+// Owner rulings 2026-08-05 / 2026-10-04: every card lives in an epoch or is a
+// sidequest — frozen cards included; frozen is a phase, not a home. An
+// epoch-track card with no epoch is unreachable from every board view, so the
+// state is rejected at the store boundary (CLI and API alike).
+const checkCardHome = ({ track, epoch }) => {
+  if (track === 'epoch' && epoch == null)
+    fail('E_INVALID', 'a card must live in an epoch or be a sidequest (frozen cards too) — pass --epoch <id> (no epoch is active to inherit) or --track sidequest');
 };
 const checkMilestone = (s, id) => { if (id != null && !s.milestones.find(m => m.id === id)) fail('E_NOT_FOUND', `no milestone ${id}`); };
 function checkCardMilestone(s, { epoch, track, milestoneId }) {
@@ -1317,7 +1374,7 @@ export function addCard(s, p, config, history = emptyHistory()) {
   const epoch = p.epoch ?? activeEpoch(s);
   const track = p.track || config.tracks[0];
   checkEpoch(s, epoch); checkMilestone(s, p.milestoneId);
-  checkCardHome({ track, epoch, phase: p.phase || 'planning' });
+  checkCardHome({ track, epoch });
   checkCardMilestone(s, { epoch, track, milestoneId: p.milestoneId });
   checkRefs(p.refs);
   validateStoredString(p.probe, 'card.probe', { nullable: true, nonEmpty: true });
@@ -1644,7 +1701,6 @@ export function updateCard(s, ref, patch, config) {
   checkCardHome({
     track: 'track' in patch ? patch.track : c.track,
     epoch: 'epoch' in patch ? patch.epoch : c.epoch,
-    phase: 'phase' in patch ? patch.phase : c.phase,
   });
   checkCardMilestone(s, {
     epoch: 'epoch' in patch ? patch.epoch : c.epoch,
@@ -1797,29 +1853,65 @@ export function reopenCriterion(s, ref, n, { reason, by } = {}) {
   return { ...item, cardId: c.id, cardNum: c.num };
 }
 
-// D-TWRGUARD1=C (#458): a card with any ratified decision refuses delete for
-// everyone, owner included — a ratified decision is durable record, never a
-// casualty of tidying up. #461 gives it a real way out: the decisions retire
-// to history.json on their own (`tower archive status`) once their buffer
-// window passes, or bring one back early with `tower archive restore <id>`;
-// either way, delete only once none are live on the card.
-export function deleteCard(s, ref, p = {}) {
+// D-TWRGUARD1=C (#458): a card with any ratified decision refuses delete — a
+// ratified decision is durable record, never a casualty of tidying up. The
+// only override is the owner's own Tower UI session (owner 2026-10-04): the
+// server passes `ownerUi` provenance only for a same-origin request carrying
+// the owner session cookie, and the owner must tick a separate box for every
+// ratified decision (`p.deleteRatified`). CLI and agent callers, `--by owner`
+// included, never carry that provenance, so for them the guard still holds:
+// let the decisions retire to history.json (`tower archive status`), or
+// `tower archive restore <id>` and re-detach, then delete.
+//
+// Open ballots go with the card. `p.decisions`, when given, is the ballot list
+// the caller showed for confirmation; any drift since then is E_CONFLICT so a
+// ballot added after the dialog opened is never deleted unseen. Every removed
+// ballot is written to the event log with its status and outcome.
+export function deleteCard(s, ref, p = {}, ownerUi = null) {
   const c = mustCard(s, ref);
   const oldMilestoneId = c.milestoneId;
   const openMessages = s.questions.filter(q => q.cardId === c.id && q.kind === 'message' && q.status === 'open');
   if (openMessages.length)
     fail('E_INVALID', `card #${c.num} has ${openMessages.length} open message${openMessages.length === 1 ? '' : 's'} — mark each message done before deleting the card`);
-  const ratified = s.decisions.filter(d => d.cardId === c.id && d.status === 'ratified');
-  if (ratified.length)
-    fail('E_HAS_RATIFIED', `card #${c.num} has ${ratified.length} ratified decision${ratified.length > 1 ? 's' : ''} (${ratified.map(d => d.id).join(', ')}) — they retire to \`tower archive\` on their own once the buffer window passes; delete once none are live on the card`);
+  const attached = s.decisions.filter(d => d.cardId === c.id);
+  const attachedIds = new Set(attached.map(d => d.id));
+  if (p.decisions != null) {
+    const shown = new Set(idList(p.decisions));
+    if (shown.size !== attachedIds.size || [...attachedIds].some(id => !shown.has(id)))
+      fail('E_CONFLICT', `card #${c.num} ballots changed since the delete confirmation was shown (now: ${[...attachedIds].join(', ') || 'none'}) — review them and confirm again`);
+  }
+  const ratified = attached.filter(d => d.status === 'ratified');
+  const owner = ownerUi?.kind === 'owner-ui' && !!ownerUi.session;
+  if (ratified.length) {
+    const confirmed = new Set(idList(p.deleteRatified));
+    const unconfirmed = ratified.filter(d => !confirmed.has(d.id));
+    if (!owner || unconfirmed.length) {
+      const ids = (owner ? unconfirmed : ratified).map(d => d.id).join(', ');
+      fail('E_HAS_RATIFIED', owner
+        ? `card #${c.num} still has ratified decision${unconfirmed.length > 1 ? 's' : ''} ${ids} — tick "also delete ratified decision" for each one to delete them with the card`
+        : `card #${c.num} has ${ratified.length} ratified decision${ratified.length > 1 ? 's' : ''} (${ids}) — they retire to \`tower archive\` on their own once the buffer window passes; only the owner can delete them with the card, from the card's Delete button in the Tower UI`);
+    }
+  }
+  const referencing = s.decisions.filter(d => !attachedIds.has(d.id) && attachedIds.has(d.supersededBy));
+  if (referencing.length)
+    fail('E_REFERENCED', `cannot delete card #${c.num}; its decisions are the supersession link of ${referencing.map(d => d.id).join(', ')}`);
+  const by = owner ? 'owner' : p.by;
   s.cards = s.cards.filter(x => x.id !== c.id);
   s.decisions = s.decisions.filter(d => d.cardId !== c.id);
   s.questions = s.questions.filter(q => q.cardId !== c.id);
-  for (const x of s.cards) x.blockedBy = (x.blockedBy || []).filter(id => id !== c.id);
+  for (const x of s.cards) x.blockedBy = (x.blockedBy || []).filter(id => id !== c.id && !attachedIds.has(id));
   syncMilestones(s, [oldMilestoneId]);
-  logEvent(s, { by: p.by, action: 'card.delete', ref: c.id, note: c.title });
-  return { ok: true, id: c.id, num: c.num };
+  const removed = attached.map(d => ({ id: d.id, title: d.title, status: d.status, outcome: d.outcome ?? null }));
+  for (const d of removed)
+    logEvent(s, { by, action: 'decision.delete', ref: d.id,
+      note: `deleted with card #${c.num} — ${d.status}${d.status === 'ratified' ? ` (outcome ${d.outcome})` : ''}: ${d.title}` });
+  const withBallots = removed.length ? ` — with ballot${removed.length > 1 ? 's' : ''} ${removed.map(d => `${d.id} (${d.status})`).join(', ')}` : '';
+  logEvent(s, { by, action: 'card.delete', ref: c.id, note: `${c.title}${withBallots}${owner ? ` · owner-ui session=${ownerUi.session}` : ''}` });
+  return { ok: true, id: c.id, num: c.num, decisions: removed };
 }
+
+const idList = (value) => (value == null ? [] : Array.isArray(value) ? value : String(value).split(','))
+  .map(x => String(x).trim()).filter(Boolean);
 
 // Owner-only gate used by ratify (D-TWRGUARD1=C #458). An agent may act "on
 // behalf of" the owner by quoting his words verbatim — recorded in the event
@@ -1987,6 +2079,16 @@ function proseDensityGaps(label, text) {
   return gaps;
 }
 
+function mitigationGaps(label, item) {
+  const gaps = [];
+  if (Object.hasOwn(item, 'whyUnavoidable'))
+    gaps.push(`${label} (use mitigation, not whyUnavoidable)`);
+  if (typeof item.mitigation === 'string'
+      && /^\s*(?:[-*+•]\s|\d+[.)]\s|#{1,6}\s|`{3,}|~{3,})/m.test(item.mitigation))
+    gaps.push(`${label}.mitigation (plain prose, no lists, headings, or code blocks)`);
+  return gaps;
+}
+
 function exampleProseDensityGaps(label, text) {
   if (!text || !String(text).trim()) return [];
   const gaps = [];
@@ -2024,9 +2126,9 @@ export function plainLanguageGaps(p) {
     gaps.push(...proseDensityGaps(`recommendation why not ${rejected?.key || '?'}`, rejected?.reason));
   for (const [i, item] of (Array.isArray(recommendation.losses) ? recommendation.losses : []).entries()) {
     const loss = plainObject(item) ? item.loss : item;
-    const why = plainObject(item) ? item.whyUnavoidable : '';
+    const mitigation = plainObject(item) ? item.mitigation : '';
     gaps.push(...proseDensityGaps(`recommendation loss ${i + 1}`, loss));
-    gaps.push(...proseDensityGaps(`recommendation loss ${i + 1} whyUnavoidable`, why));
+    gaps.push(...proseDensityGaps(`recommendation loss ${i + 1} mitigation`, mitigation));
   }
   gaps.push(...proseDensityGaps('hybrid synthesis', p.hybrid?.synthesis));
   for (const item of p.hybrid?.harvest || []) {
@@ -2045,7 +2147,7 @@ export function plainLanguageGaps(p) {
 // in-the-wild code trio, real gains and losses per option (never padded), why-not
 // for every losing option, no project jargon, and the recommended option is
 // always A, listed first, so it sits next to the current and in-the-wild code.
-const SURFACE_WHY_UNAVOIDABLE_WORDS = 24;
+const SURFACE_MITIGATION_WORDS = 24;
 const SURFACE_GIST_WORDS = 22;
 const SURFACE_LESSON_WORDS = 70;
 const SURFACE_WHY_WORDS = 40;
@@ -2112,22 +2214,23 @@ export function surfaceGaps(p, { requireRecFirst = false } = {}) {
       const label = `recommendation.${list}[${i + 1}]`;
       if (structuredLosses && list === 'losses') {
         const loss = text(item?.loss);
-        const why = text(item?.whyUnavoidable);
+        const mitigation = text(item?.mitigation);
         if (!plainObject(item)) {
           const shown = text(item);
-          gaps.push(`surface.${label}${shown ? ` "${shown}"` : ''} (must include whyUnavoidable)`);
+          gaps.push(`surface.${label}${shown ? ` "${shown}"` : ''} (must include mitigation)`);
         } else {
+          gaps.push(...mitigationGaps(`surface.${label}`, item));
           if (!loss) gaps.push(`surface.${label}.loss (required)`);
           else {
             prose.push([`${label}.loss`, loss]);
             if (count(loss) >= SURFACE_BULLET_WORDS)
               gaps.push(`surface.${label}.loss has ${count(loss)} words (under ${SURFACE_BULLET_WORDS} words)`);
           }
-          if (!why) gaps.push(`surface.${label}.whyUnavoidable (required for "${loss || '?'}")`);
+          if (!mitigation) gaps.push(`surface.${label}.mitigation (required for "${loss || '?'}")`);
           else {
-            prose.push([`${label}.whyUnavoidable`, why]);
-            if (count(why) >= SURFACE_WHY_UNAVOIDABLE_WORDS)
-              gaps.push(`surface.${label}.whyUnavoidable has ${count(why)} words (under ${SURFACE_WHY_UNAVOIDABLE_WORDS} words)`);
+            prose.push([`${label}.mitigation`, mitigation]);
+            if (count(mitigation) >= SURFACE_MITIGATION_WORDS)
+              gaps.push(`surface.${label}.mitigation has ${count(mitigation)} words (under ${SURFACE_MITIGATION_WORDS} words)`);
           }
         }
       } else {
@@ -2182,6 +2285,28 @@ function shortBallotGaps(p, card, processVersion) {
   return gaps;
 }
 
+// The situation summary is the first thing every ballot shows (owner ballot
+// standard, 2026-10-04): 4-7 plain sentences saying what the thing is, what
+// goes wrong today with one concrete example, why it matters and to whom, what
+// is being decided, and the recommendation in one sentence. It is prose, never
+// a list of facts, files, or IDs.
+const SITUATION_MIN_CHARS = 300;
+const SITUATION_MAX_CHARS = 1200;
+function situationGaps(situation) {
+  const text = typeof situation === 'string' ? situation.trim() : '';
+  if (!text) return ['situation'];
+  const gaps = [];
+  if (text.length < SITUATION_MIN_CHARS || text.length > SITUATION_MAX_CHARS)
+    gaps.push(`situation has ${text.length} characters (need ${SITUATION_MIN_CHARS}-${SITUATION_MAX_CHARS})`);
+  if (/^\s*(?:[-*+•]|\d+[.)])\s/m.test(text)) gaps.push('situation (plain prose, not a bullet list)');
+  if (/^\s*#{1,6}\s/m.test(text)) gaps.push('situation (plain prose, no headings)');
+  if (/^\s*(?:`{3,}|~{3,})/m.test(text)) gaps.push('situation (plain prose, no code blocks)');
+  for (const [i, sentence] of sentences(text).entries())
+    if (words(sentence).length > PLAIN_SENTENCE_WORDS)
+      gaps.push(`situation sentence ${i + 1} has ${words(sentence).length} words (max ${PLAIN_SENTENCE_WORDS})`);
+  return gaps;
+}
+
 export function ballotGaps(p, {
   requireBeginner = Number(p.ballotProcessVersion || 0) >= BEGINNER_PROCESS_VERSION,
   requireSurface = Number(p.ballotProcessVersion || 0) >= SURFACE_PROCESS_VERSION,
@@ -2193,6 +2318,8 @@ export function ballotGaps(p, {
   if (p.surface != null || requireSurface) missing.push(...surfaceGaps(p, { requireRecFirst }));
   const ballotMode = p.ballotMode || 'full';
   if (!['full', 'short'].includes(ballotMode)) missing.push('ballotMode (full or short)');
+  if (ballotMode === 'full' || (typeof p.situation === 'string' && p.situation.trim()))
+    missing.push(...situationGaps(p.situation));
   if (!p.gist || !String(p.gist).trim()) missing.push('gist');
   if (!p.lesson || !String(p.lesson).trim()) missing.push('lesson');
   else if (String(p.lesson).trim().split(/\n\s*\n/).length > 1) missing.push('lesson (one paragraph maximum)');
@@ -2230,12 +2357,13 @@ export function ballotGaps(p, {
     if (processVersion >= BALLOT_PROCESS_VERSION) {
       recommendationLosses.forEach((item, i) => {
         const loss = typeof item?.loss === 'string' ? item.loss.trim() : '';
-        const why = typeof item?.whyUnavoidable === 'string' ? item.whyUnavoidable.trim() : '';
+        const mitigation = typeof item?.mitigation === 'string' ? item.mitigation.trim() : '';
         if (!plainObject(item))
-          missing.push(`recommendation.losses[${i + 1}] "${String(item || '').trim()}" (must include whyUnavoidable)`);
+          missing.push(`recommendation.losses[${i + 1}] "${String(item || '').trim()}" (must include mitigation)`);
         else {
+          missing.push(...mitigationGaps(`recommendation.losses[${i + 1}]`, item));
           if (!loss) missing.push(`recommendation.losses[${i + 1}].loss (required)`);
-          if (!why) missing.push(`recommendation.losses[${i + 1}].whyUnavoidable (required for "${loss || '?'}")`);
+          if (!mitigation) missing.push(`recommendation.losses[${i + 1}].mitigation (required for "${loss || '?'}")`);
         }
       });
     }
@@ -2285,6 +2413,7 @@ export function addDecision(s, p) {
   const systemAcceptance = p[SYSTEM_ACCEPTANCE] === true;
   if (!systemAcceptance && (p.group === 'acceptance' || String(p.id || '').startsWith('D-ACCEPT-')))
     fail('E_INVALID', 'acceptance ballots are system-generated; use the card acceptance workflow');
+  if (p.situation != null && typeof p.situation !== 'string') fail('E_INVALID', 'decision situation must be a string');
   // Every newly authored narrative ballot is process 4. Historical process 2/3
   // records enter through the store and keep their stored version unchanged.
   const candidate = systemAcceptance ? p : { ...p, status: 'open', ballotProcessVersion: BALLOT_PROCESS_VERSION };
@@ -2304,7 +2433,7 @@ export function addDecision(s, p) {
   const supersededBy = verdictSupersededBy(s, candidate);
   const ballotMode = candidate.group === 'acceptance' ? null : (candidate.ballotMode || 'full');
   const d = { id: candidate.id || newId('D-'), cardId: card.id, group: candidate.group || 'other',
-    title: String(candidate.title).trim(), gist: candidate.gist || '', lesson: candidate.lesson || '', explainer: candidate.explainer || '', story: candidate.story || '',
+    title: String(candidate.title).trim(), situation: candidate.situation || '', gist: candidate.gist || '', lesson: candidate.lesson || '', explainer: candidate.explainer || '', story: candidate.story || '',
     inWild: candidate.inWild || '', detail: candidate.detail || '', options: candidate.options || [], comparisons: candidate.comparisons || [],
     rec: candidate.rec || null, recommendation: candidate.recommendation || null, hybrid: candidate.hybrid || null,
     ballotMode, shortAuthorizedBy: ballotMode === 'short' ? (candidate.shortAuthorizedBy || null) : null,
@@ -2422,9 +2551,10 @@ export function updateDecision(s, id, patch, by) {
     fail('E_INVALID', 'acceptance ballots are system-generated and cannot use decision update');
   if (d.status === 'ratified' && by !== 'owner')
     fail('E_OWNER_ONLY', 'updating a ratified decision is owner-only');
+  if (patch.situation != null && typeof patch.situation !== 'string') fail('E_INVALID', 'decision situation must be a string');
   const card = s.cards.find(c => c.id === d.cardId);
   const storedVersion = Number(d.ballotProcessVersion || 0);
-  for (const k of ['title', 'gist', 'lesson', 'explainer', 'story', 'inWild', 'detail', 'options', 'comparisons', 'rec', 'recommendation', 'hybrid', 'checkInstructions', 'group', 'ballotMode', 'shortAuthorizedBy', 'reviewPasses', 'supersededBy', 'surface', 'designAway'])
+  for (const k of ['title', 'situation', 'gist', 'lesson', 'explainer', 'story', 'inWild', 'detail', 'options', 'comparisons', 'rec', 'recommendation', 'hybrid', 'checkInstructions', 'group', 'ballotMode', 'shortAuthorizedBy', 'reviewPasses', 'supersededBy', 'surface', 'designAway'])
     if (k in patch) d[k] = patch[k];
   const supersededBy = verdictSupersededBy(s, d);
   if (supersededBy) d.supersededBy = supersededBy;
@@ -2476,7 +2606,7 @@ export function mintVerdict(s, ref, outcome, title, by, supersedes) {
   const supersededBy = verdictSupersededBy(s, { group: 'verdict', id, supersededBy: supersedes });
   const d = { id, cardId: c.id, group: 'verdict',
     title: title || `Verdict on #${c.num} — ${c.title}`,
-    gist: '', lesson: '', explainer: '', story: '', inWild: '', detail: '', options: [], comparisons: [],
+    situation: '', gist: '', lesson: '', explainer: '', story: '', inWild: '', detail: '', options: [], comparisons: [],
     rec: null, recommendation: null, hybrid: null, ballotMode: null, shortAuthorizedBy: null, reviewPasses: null,
     draft: false, status: 'ratified', outcome, comment: outcome, supersededBy,
     created: now(), ratifiedAt: today() };
@@ -2624,6 +2754,112 @@ export function resolvePapercut(s, id, by) {
   pc.resolvedBy = by;
   logEvent(s, { by, action: 'papercut.resolve', ref: id });
   return pc;
+}
+
+// ---- Now reports ----------------------------------------------------------
+// Reports describe progress; posting one never changes a card, milestone gate,
+// or ballot. Attribution/time are assigned here, not trusted from a file.
+function reportText(value, label) {
+  if (typeof value !== 'string' || !value.trim()) fail('E_INVALID', `${label} needs nonempty text`);
+  return value;
+}
+
+function reportArray(value, label) {
+  if (!Array.isArray(value)) fail('E_INVALID', `${label} must be an array`);
+  return value;
+}
+
+function reportTime(value, label) {
+  reportText(value, label);
+  if (!/^\d{4}-\d\d-\d\dT/.test(value) || !Number.isFinite(Date.parse(value)))
+    fail('E_INVALID', `${label} must be an ISO timestamp`);
+}
+
+function reportLinks(links = []) {
+  for (const link of reportArray(links, 'links')) {
+    if (!plainObject(link) || (link.card !== undefined) === (link.decision !== undefined))
+      fail('E_INVALID', 'each link needs exactly one card or decision reference');
+    reportText(link.card !== undefined ? link.card : link.decision, 'link reference');
+    if (link.label !== undefined) reportText(link.label, 'link label');
+  }
+}
+
+function validateBriefing(record) {
+  if (!plainObject(record)) fail('E_INVALID', 'briefing must be an object');
+  for (const key of ['id', 'title', 'body', 'by']) reportText(record[key], `briefing.${key}`);
+  reportTime(record.created, 'briefing.created');
+  for (const section of reportArray(record.sections, 'briefing.sections')) {
+    if (!plainObject(section)) fail('E_INVALID', 'briefing section must be an object');
+    reportText(section.title, 'section.title');
+    reportText(section.body, 'section.body');
+    reportLinks(section.links);
+  }
+}
+
+function validateStatusSnapshot(record) {
+  if (!plainObject(record)) fail('E_INVALID', 'status snapshot must be an object');
+  if (Object.hasOwn(record, 'ownerActions')) fail('E_INVALID', 'status.ownerActions has been removed; omit this field');
+  for (const key of ['id', 'by']) reportText(record[key], `status.${key}`);
+  reportTime(record.created, 'status.created');
+  if (record.updatedAt !== undefined) reportTime(record.updatedAt, 'status.updatedAt');
+  if (record.summary !== undefined) reportText(record.summary, 'status.summary');
+  for (const milestone of reportArray(record.milestones, 'status.milestones')) {
+    if (!plainObject(milestone)) fail('E_INVALID', 'milestone must be an object');
+    reportText(milestone.title, 'milestone.title');
+    reportText(milestone.state, 'milestone.state');
+    if (!plainObject(milestone.progress)) fail('E_INVALID', 'milestone.progress must map labels to percentages');
+    for (const [label, percent] of Object.entries(milestone.progress)) {
+      reportText(label, 'progress label');
+      if (typeof percent !== 'number' || !Number.isFinite(percent) || percent < 0 || percent > 100)
+        fail('E_INVALID', 'progress percentages must be numbers from 0 to 100');
+    }
+    reportLinks(milestone.links);
+  }
+  for (const stream of reportArray(record.workstreams, 'status.workstreams')) {
+    if (!plainObject(stream)) fail('E_INVALID', 'workstream must be an object');
+    reportText(stream.title, 'workstream.title');
+    reportText(stream.state, 'workstream.state');
+    for (const worker of reportArray(stream.workers, 'workstream.workers')) reportText(worker, 'worker');
+    for (const blocker of reportArray(stream.blockers, 'workstream.blockers')) reportText(blocker, 'blocker');
+    if (stream.updatedAt !== undefined) reportTime(stream.updatedAt, 'workstream.updatedAt');
+    reportLinks(stream.links);
+  }
+}
+
+function resolveReportLinks(s, items) {
+  for (const item of items) {
+    item.links = (item.links || []).map(link => {
+      if (link.card !== undefined) return { ...link, card: mustCard(s, link.card).id };
+      const decision = s.decisions.find(d => d.id === link.decision)
+        || fail('E_NOT_FOUND', `no decision ${link.decision}`);
+      return { ...link, cardId: decision.cardId };
+    });
+  }
+}
+
+export function postBriefing(s, p) {
+  const record = { id: newId('briefing'), title: p.title, body: p.body, by: p.by,
+    created: now(), sections: structuredClone(p.sections ?? []) };
+  validateBriefing(record);
+  resolveReportLinks(s, record.sections);
+  s.briefings ||= [];
+  s.briefings.unshift(record);
+  logEvent(s, { by: record.by, action: 'briefing.post', ref: record.id, note: record.title });
+  return record;
+}
+
+export function postStatus(s, p) {
+  if (!plainObject(p.snapshot)) fail('E_INVALID', 'status post needs a JSON snapshot object');
+  if (Object.hasOwn(p.snapshot, 'ownerActions')) fail('E_INVALID', 'status.ownerActions has been removed; omit this field');
+  const { summary, updatedAt, milestones, workstreams } = structuredClone(p.snapshot);
+  const record = { id: newId('status'), by: p.by, created: now(),
+    ...(summary !== undefined ? { summary } : {}), ...(updatedAt !== undefined ? { updatedAt } : {}),
+    milestones, workstreams };
+  validateStatusSnapshot(record);
+  resolveReportLinks(s, [...record.milestones, ...record.workstreams]);
+  s.statusSnapshot = record;
+  logEvent(s, { by: record.by, action: 'status.post', ref: record.id, note: record.summary || '' });
+  return record;
 }
 
 // ---- mutations: ideas ------------------------------------------------------
@@ -2920,7 +3156,7 @@ function decisionForBrief(d) {
     visualMedia: d.visualMedia || [],
     outcome: d.outcome ?? null, comment: d.comment ?? '', ratifiedAt: d.ratifiedAt ?? null };
   if (d.status === 'ratified') return base;
-  return { ...base, lesson: d.lesson, story: d.story, explainer: d.explainer, inWild: d.inWild, detail: d.detail, rec: d.rec,
+  return { ...base, situation: d.situation ?? '', lesson: d.lesson, story: d.story, explainer: d.explainer, inWild: d.inWild, detail: d.detail, rec: d.rec,
     recommendation: d.recommendation, hybrid: d.hybrid, reviewPasses: d.reviewPasses,
     options: d.options || [], comparisons: d.comparisons || [] };
 }

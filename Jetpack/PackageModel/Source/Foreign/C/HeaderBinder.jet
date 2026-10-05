@@ -109,7 +109,7 @@ pub fn pkg_cbind_generate_with_contract_and_plans(header_src: String, lib: Strin
         return Err(CBindError{message: "canonical foreign boundary contract is stale against the generated C source"})
     }
     previous_stamp :: result.boundary.stamp()
-    result.source = &result.source.replace(previous_stamp, contract.stamp())
+    result.source = result.source.replace(previous_stamp, contract.stamp())
     result.boundary = contract
     pkg_cbind_attach_plans(&result, plans, "canonical")
     Ok(result)
@@ -305,7 +305,7 @@ fn pkg_cbind_lower_hex(value: Int) -> String Never! {
     rest := value
     loop rest > 0 {
         out = "{pkg_bytes_text(digits, rest % 16, rest % 16 + 1)}{out}"
-        rest = rest / 16
+        rest = rest /% 16
     }
     out
 }

@@ -957,7 +957,7 @@ function measurementPairRow({ identity, sources, context, warmupOrders, warmupRo
 export function measurePair(options = {}) {
   const root = path.resolve(options.repoDir ?? repoDir);
   const artifactPath = path.resolve(options.artifactPath ?? path.join(root, "target/debug/jet"));
-  const scratchRoot = path.resolve(options.scratchRoot ?? process.env.JET_TEST_SCRATCH_DIR ?? path.join(os.homedir(), ".cache", "jet-luna", "perf-surface-pair"), "performance-surface");
+  const scratchRoot = path.resolve(options.scratchRoot ?? process.env.JET_TEST_SCRATCH_DIR ?? path.join(os.homedir(), ".cache", "jet-dev", "perf-surface-pair"), "performance-surface");
   mkdirSync(scratchRoot, { recursive: true });
   const sources = { surface: SURFACE_SOURCE, plain: PLAIN_SOURCE };
   const identity = options.identity ?? collectIdentity({ artifactPath });

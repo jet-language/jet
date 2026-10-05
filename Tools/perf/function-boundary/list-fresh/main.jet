@@ -1,0 +1,18 @@
+// Function-boundary cell list-fresh: a returned [Int] is built per call and
+// dropped every iteration (plain return spelling; pair: list-reuse).
+#CLI struct Args { n: Int }
+
+fn build(seed: Int, count: Int) -> [Int] {
+    out := [Int]{}
+    loop i in 0..<count -> &out.push(seed + i)
+    out
+}
+
+fn run(args: Args) {
+    acc := 0
+    loop i in 0..<args.n {
+        xs :: build(i, 256)
+        loop x in xs -> acc += x
+    }
+    print(acc)
+}

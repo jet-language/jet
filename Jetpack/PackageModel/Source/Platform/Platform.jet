@@ -5,15 +5,15 @@
 // handling does not drift across providers, the hangar envelope, services,
 // secrets, and trust code.
 
-@OS_LINUX :: "linux"
-@OS_MACOS :: "macos"
-@OS_WINDOWS :: "windows"
+OS_LINUX :: prep { "linux" }
+OS_MACOS :: prep { "macos" }
+OS_WINDOWS :: prep { "windows" }
 
-@ARCH_X64 :: "x86_64"
-@ARCH_ARM64 :: "aarch64"
+ARCH_X64 :: prep { "x86_64" }
+ARCH_ARM64 :: prep { "aarch64" }
 
-@TIER_ONE_OSES :: [String]{@OS_LINUX, @OS_MACOS, @OS_WINDOWS}
-@TIER_ONE_ARCHES :: [String]{@ARCH_X64, @ARCH_ARM64}
+TIER_ONE_OSES :: prep { [String]{OS_LINUX, OS_MACOS, OS_WINDOWS} }
+TIER_ONE_ARCHES :: prep { [String]{ARCH_X64, ARCH_ARM64} }
 
 // An `arch-os` target identity. The fields stay open strings because a host
 // key may name a platform outside tier one; `is_tier_one` reports that fact.
@@ -31,15 +31,15 @@ pub struct PlatformKey {
     // `linux`/`macos`/`windows` and `x86_64`/`aarch64`.
     fn host() -[Env]> PlatformKey Never! {
         os :: if {
-            sys.is_macos() -> @OS_MACOS
-            sys.is_windows() -> @OS_WINDOWS
-            sys.is_linux() -> @OS_LINUX
+            sys.is_macos() -> OS_MACOS
+            sys.is_windows() -> OS_WINDOWS
+            sys.is_linux() -> OS_LINUX
             else -> pkg_ascii_lower(sys.name())
         }
         raw_arch :: pkg_ascii_lower(sys.arch())
         arch :: if raw_arch == {
-            "amd64" | "x64" -> @ARCH_X64
-            "arm64" -> @ARCH_ARM64
+            "amd64" | "x64" -> ARCH_X64
+            "arm64" -> ARCH_ARM64
             else -> raw_arch
         }
         PlatformKey{arch: arch, os: os}
@@ -61,22 +61,22 @@ pub fn pkg_host_key() -[Env]> String Never! {
 
 fn pkg_is_tier_one(arch: String, os: String) -> Bool Never! {
     arch_ok :: if arch == {
-        @ARCH_X64 | @ARCH_ARM64 -> true
+        ARCH_X64 | ARCH_ARM64 -> true
         else -> false
     }
     os_ok :: if os == {
-        @OS_LINUX | @OS_MACOS | @OS_WINDOWS -> true
+        OS_LINUX | OS_MACOS | OS_WINDOWS -> true
         else -> false
     }
     arch_ok && os_ok
 }
 
 pub fn pkg_path_separator_for_os(os: String) -> String Never! {
-    if os == @OS_WINDOWS -> return ";"
+    if os == OS_WINDOWS -> return ";"
     ":"
 }
 
 pub fn pkg_exe_suffix_for_os(os: String) -> String Never! {
-    if os == @OS_WINDOWS -> return ".exe"
+    if os == OS_WINDOWS -> return ".exe"
     ""
 }

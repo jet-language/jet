@@ -54,7 +54,7 @@ option lists; `whyNot` covers the losing option `B`.
       "losses": [
         {
           "loss": "A price can stay stale until its timer expires.",
-          "whyUnavoidable": "Without a source event, elapsed time is the only change signal."
+          "mitigation": "Use a short timer and check the current price again before taking payment."
         }
       ],
       "whyNot": [
@@ -66,6 +66,7 @@ option lists; `whyNot` covers the losing option `B`.
       "tradeoff": "The service accepts bounded staleness to avoid a required event path."
     }
   },
+  "situation": "A cache is a saved copy of a slow answer, like writing down a phone number instead of looking it up each time. Today the pricing service saves prices with no rule for when a saved price is too old. For example, a vendor raises a rate at 9am, and customers still see the old price at noon. That costs money and trust, and a beginner cannot tell why the page is wrong. You are deciding how saved prices expire. We recommend giving each saved price a short timer, because it works without changing every writer.",
   "gist": "How should cached prices expire?",
   "lesson": "A cache keeps a reusable copy of expensive work. This choice sets how old a price may become and how quickly a new price reaches customers.",
   "story": "Dana ships a pricing page. A vendor changes a rate at 9am, and customers must see a safe result without a hidden invalidation path.",
@@ -96,6 +97,13 @@ option lists; `whyNot` covers the losing option `B`.
   "rec": "A",
   "recommendation": {
     "why": "A bounded timer works for every writer without requiring a new event path.",
+    "gains": ["It bounds staleness with one local rule."],
+    "losses": [
+      {
+        "loss": "A price can stay stale until its timer expires.",
+        "mitigation": "Use a short timer and check the current price again before taking payment."
+      }
+    ],
     "whyNot": [
       {
         "key": "B",
@@ -114,8 +122,8 @@ option lists; `whyNot` covers the losing option `B`.
 Use the scaffold as the local authoring file:
 
 ```sh
-mkdir -p ~/.cache/jet-luna
-tower decision scaffold '#12' --id D-CACHE1 --out ~/.cache/jet-luna/ballot.json
+mkdir -p ~/.cache/jet-dev
+tower decision scaffold '#12' --id D-CACHE1 --out ~/.cache/jet-dev/ballot.json
 ```
 
 Complete the fields and required reader evidence before submission, including

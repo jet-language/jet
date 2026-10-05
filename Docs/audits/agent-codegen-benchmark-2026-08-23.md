@@ -47,8 +47,8 @@ The harness treats compiler feedback and semantic feedback as separate signals. 
 Commands:
 
 ```text
-TMPDIR="$HOME/.cache/jet-test-scratch" scripts/agent/jet-env jet check <candidate.jet>
-TMPDIR="$HOME/.cache/jet-test-scratch" scripts/agent/jet-env jet run <candidate.jet>
+TMPDIR="$HOME/.cache/jet-dev/scratch" scripts/agent/jet-env jet check <candidate.jet>
+TMPDIR="$HOME/.cache/jet-dev/scratch" scripts/agent/jet-env jet run <candidate.jet>
 node --check <candidate.js>
 node <candidate.js>
 ```

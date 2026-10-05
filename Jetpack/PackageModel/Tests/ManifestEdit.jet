@@ -33,3 +33,29 @@
     }
     assert(pkg_edit_block_line_range(truncated, "deps") == None)
 }
+
+// tests/pkg.rs::cli_add_path_into_inline_empty_deps_table: the edited carrier
+// must be canonical and parseable, not merely contain the dependency name.
+#Test("add path dependency expands an empty canonical deps record") {
+    raw :: "name: \"app\"\nversion: \"0.1.0\"\n// keep this review note\ndeps: {{}}\n"
+    updated :: pkg_add_dep(raw, "mylib", DepSpec.Path{path: "./mylib"})
+    assert_eq(updated, "name: \"app\"\nversion: \"0.1.0\"\n// keep this review note\ndeps: {{\n    mylib: ./mylib,\n}}\n")
+    facts :: PackageFacts.parse(updated, "package.jet") ?? panic("the dependency edit must leave a parseable manifest")
+    assert(facts.deps.keys().to_list().contains("mylib"))
+}
+
+#Test("add path dependency creates a canonical missing deps record") {
+    raw :: "name: \"app\"\nversion: \"0.1.0\"\n"
+    updated :: pkg_add_dep(raw, "mylib", DepSpec.Path{path: "./mylib"})
+    assert_eq(updated, "name: \"app\"\nversion: \"0.1.0\"\n\ndeps: {{\n    mylib: ./mylib,\n}}\n")
+    facts :: PackageFacts.parse(updated, "package.jet") ?? panic("the appended dependency record must be parseable")
+    assert(facts.deps.keys().to_list().contains("mylib"))
+}
+
+#Test("manifest parser still rejects a retired deps record head") {
+    raw :: "name: \"app\"\nversion: \"0.1.0\"\ndeps: .{{ mylib: ./mylib }}\n"
+    if PackageFacts.parse(raw, "package.jet") == {
+        .Err(error) -> assert(error == PackageParseError.RetiredRecordHead)
+        .Ok(_) -> panic("retired record heads must not be accepted")
+    }
+}

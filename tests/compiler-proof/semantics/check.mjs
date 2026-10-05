@@ -614,7 +614,7 @@ function checkWitnessMetadata(witnesses) {
   const runner = object(witnesses.runner, "semantic witness runner");
   if (runner.launcher !== JET_RUNNER_PATH
       || runner.compiler !== JET_COMPILER_PATH
-      || runner.scratch !== "$HOME/.cache/jet-test-scratch"
+      || runner.scratch !== "$HOME/.cache/jet-dev/scratch"
       || runner.unknown_policy !== "unverified mappings never become comparison evidence; unknown resource observations remain unproved") {
     fail("invalid_oracle", "semantic witness runner policy is missing or drifted");
   }

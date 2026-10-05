@@ -4,7 +4,7 @@
 // source: every generated prompt reads `$JETPACK_PROMPT_LABEL` through a fixed
 // quoted print, so label contents stay data.
 
-@ENV_SHELL_PROMPT_LABEL_ENV :: "JETPACK_PROMPT_LABEL"
+ENV_SHELL_PROMPT_LABEL_ENV :: prep { "JETPACK_PROMPT_LABEL" }
 
 // One ASCII control byte as text. Plain Jet strings have no byte escapes, so
 // the readline invisible markers (0x01/0x02) and ESC are built here.
@@ -112,7 +112,7 @@ pub struct BrandedShell {
                 rc :: env_shell_write_temp("jetpack-bashrc", env_shell_bash_rc(label, path, strip))
                 BrandedShell{
                     command_tail: [String]{"bash", "--rcfile", rc, "-i"},
-                    env_vars: [(name: String, value: String)]{(name: @ENV_SHELL_PROMPT_LABEL_ENV, value: label)},
+                    env_vars: [(name: String, value: String)]{(name: ENV_SHELL_PROMPT_LABEL_ENV, value: label)},
                     cleanup_file: Val(rc),
                     cleanup_dir: None
                 }
@@ -124,7 +124,7 @@ pub struct BrandedShell {
                     command_tail: [String]{"zsh", "-i"},
                     env_vars: [(name: String, value: String)]{
                         (name: "ZDOTDIR", value: dir),
-                        (name: @ENV_SHELL_PROMPT_LABEL_ENV, value: label)
+                        (name: ENV_SHELL_PROMPT_LABEL_ENV, value: label)
                     },
                     cleanup_file: None,
                     cleanup_dir: Val(dir)
@@ -132,7 +132,7 @@ pub struct BrandedShell {
             }
             .Fish -> BrandedShell{
                 command_tail: [String]{"fish", "-C", env_shell_fish_init(label, path, strip), "-i"},
-                env_vars: [(name: String, value: String)]{(name: @ENV_SHELL_PROMPT_LABEL_ENV, value: label)},
+                env_vars: [(name: String, value: String)]{(name: ENV_SHELL_PROMPT_LABEL_ENV, value: label)},
                 cleanup_file: None,
                 cleanup_dir: None
             }
@@ -160,11 +160,11 @@ fn env_shell_bash_rc(label: String, path: PromptPathMode, strip: PromptStripMode
         .Full -> "\\w"
     }
     status_prefix :: if strip == PromptStripMode.On -> "$(__jetpack_status_words)\\n" else -> ""
-    accent :: @ACCENT_SGR
-    border :: @BORDER_SGR
-    success :: @SUCCESS_SGR
-    warn :: @WARN_SGR
-    error :: @ERROR_SGR
+    accent :: ACCENT_SGR
+    border :: BORDER_SGR
+    success :: SUCCESS_SGR
+    warn :: WARN_SGR
+    error :: ERROR_SGR
     lines :: [String]{
         "[ -f /etc/bash.bashrc ] && . /etc/bash.bashrc",
         "[ -f \"$HOME/.bashrc\" ] && . \"$HOME/.bashrc\"",
@@ -222,11 +222,11 @@ fn env_shell_zsh_rc(label: String, path: PromptPathMode, strip: PromptStripMode)
         .Full -> "%~"
     }
     status_prefix :: if strip == PromptStripMode.On -> "$(__jetpack_status_words)\n" else -> ""
-    accent :: @ACCENT_SGR
-    border :: @BORDER_SGR
-    success :: @SUCCESS_SGR
-    warn :: @WARN_SGR
-    error :: @ERROR_SGR
+    accent :: ACCENT_SGR
+    border :: BORDER_SGR
+    success :: SUCCESS_SGR
+    warn :: WARN_SGR
+    error :: ERROR_SGR
     lines :: [String]{
         "[ -f \"$HOME/.zshrc\" ] && source \"$HOME/.zshrc\"",
         "setopt prompt_subst",
@@ -259,11 +259,11 @@ fn env_shell_fish_init(label: String, path: PromptPathMode, strip: PromptStripMo
         .Full -> "pwd"
     }
     strip_line :: if strip == PromptStripMode.On -> "__jetpack_status_words; echo; " else -> ""
-    accent :: @ACCENT_SGR
-    border :: @BORDER_SGR
-    success :: @SUCCESS_SGR
-    warn :: @WARN_SGR
-    error :: @ERROR_SGR
+    accent :: ACCENT_SGR
+    border :: BORDER_SGR
+    success :: SUCCESS_SGR
+    warn :: WARN_SGR
+    error :: ERROR_SGR
     parts :: [String]{
         "set -g __jetpack_build_status 'never run'; set -g __jetpack_test_status 'never run'; set -g __jetpack_kind ''; set -g __jetpack_command ''; set -g __jetpack_started 0; set -g __jetpack_spinner_pid ''; ",
         "function __jetpack_git_status; if git rev-parse --is-inside-work-tree >/dev/null 2>&1; set -l branch (git branch --show-current 2>/dev/null); test -n \"$branch\"; or set branch detached; if git diff --quiet --ignore-submodules -- 2>/dev/null; and git diff --cached --quiet --ignore-submodules -- 2>/dev/null; echo -n \"$branch clean\"; else; echo -n \"$branch changed\"; end; else; echo -n 'not a git worktree'; end; end; ",

@@ -10,14 +10,14 @@ fn pkg_data_bind_json(input: String, root_name: String) -> SchemaBuilder DataBin
         .Ok(parsed) -> value = parsed
         .Err(error) -> return Err(DataBindError{message: "malformed JSON: {error.reason}"})
     }
-    if pkg_data_json_kind(value) != JsonBindKind.Object -> return Err(DataBindError{message: "JSON schema root must be an object"})
+    if pkg_data_json_kind(value) != JSONBindKind.Object -> return Err(DataBindError{message: "JSON schema root must be an object"})
     builder := SchemaBuilder.new()
     _ :: pkg_data_add_json_record(&builder, root_name, [DataTree]{value})
     Ok(builder)
 }
 
 // The JSON kinds schema inference distinguishes.
-enum JsonBindKind {
+enum JSONBindKind {
     Null
     Bool
     Number
@@ -27,16 +27,16 @@ enum JsonBindKind {
     Other
 }
 
-fn pkg_data_json_kind(value: DataTree) -> JsonBindKind Never! {
+fn pkg_data_json_kind(value: DataTree) -> JSONBindKind Never! {
     if value == {
-        .Null -> JsonBindKind.Null
-        .Bool(_) -> JsonBindKind.Bool
-        .Int(_) -> JsonBindKind.Number
-        .Float(_) -> JsonBindKind.Number
-        .Text(_) -> JsonBindKind.Text
-        .Array(_) -> JsonBindKind.Array
-        .Object(_) -> JsonBindKind.Object
-        else -> JsonBindKind.Other
+        .Null -> JSONBindKind.Null
+        .Bool(_) -> JSONBindKind.Bool
+        .Int(_) -> JSONBindKind.Number
+        .Float(_) -> JSONBindKind.Number
+        .Text(_) -> JSONBindKind.Text
+        .Array(_) -> JSONBindKind.Array
+        .Object(_) -> JSONBindKind.Object
+        else -> JSONBindKind.Other
     }
 }
 
@@ -45,7 +45,7 @@ fn pkg_data_json_values_type(builder: &SchemaBuilder, values: [DataTree], hint: 
     nullable := false
     nonnull := [DataTree]{}
     loop value in values {
-        if pkg_data_json_kind(value) == JsonBindKind.Null {
+        if pkg_data_json_kind(value) == JSONBindKind.Null {
             nullable = true
         } else {
             &nonnull.push(value)

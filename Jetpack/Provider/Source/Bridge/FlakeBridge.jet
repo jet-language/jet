@@ -11,7 +11,7 @@
 // captured provider payload may stand in for the foreign result in tests.
 
 // The one fixture a flake bridge reads in place of native evaluation.
-@BRIDGE_FIXTURE_FILE :: "flake-devshell.json"
+BRIDGE_FIXTURE_FILE :: prep { "flake-devshell.json" }
 
 // Facts pulled from a flake's devShell.
 pub struct DevShellFacts {
@@ -34,14 +34,14 @@ fn provider_read_devshell_output_facts(flake_dir: String, fixtures: String?, out
     if fixtures == {
         .Val(dir) -> {
             if output != "default" -> return Err(ProviderError.Unsupported("named devShell fixtures require a native flake source"))
-            path :: files.join(dir, @BRIDGE_FIXTURE_FILE)
+            path :: files.join(dir, BRIDGE_FIXTURE_FILE)
             stdout :: files.read(path) ?? return Err(ProviderError.FixtureMissing(path))
             return provider_parse_facts_json(stdout)
         }
         .None -> {}
     }
     flake_path := ""
-    foreign_files :: [String]{@FOREIGN_FLAKE_FILE, @FOREIGN_DEVENV_FILE}
+    foreign_files :: [String]{FOREIGN_FLAKE_FILE, FOREIGN_DEVENV_FILE}
     loop name in foreign_files {
         candidate :: files.join(flake_dir, name)
         if flake_path == "" && files.is_file(candidate) -> flake_path = candidate
@@ -161,7 +161,7 @@ fn provider_fetch_source(authority: NixProjectImportAuthority, request: String) 
         "fetchTarball" | "fetchTree" | "fetchGit" -> "r:sha256"
         else -> { return Err(NixEvalError.Denied("unsupported fixed-output fetcher {kind}")) }
     }
-    Ok(nix_make_fixed_output_path(@NIX_DEFAULT_STORE_DIR, name, method, expected))
+    Ok(nix_make_fixed_output_path(NIX_DEFAULT_STORE_DIR, name, method, expected))
 }
 
 fn provider_normalize_fetch_name(name: String) -> String NixEvalError! {
@@ -246,15 +246,15 @@ pub fn provider_l0204_unmappable(field: String, file: String) -> Diagnostic Neve
 // `jetpack bridge flake`: read the foreign flake in `dir`, commit its typed
 // graph to `.jet/lock`, print the shim to stdout and one L0204 warning per
 // unmapped field to stderr. Returns the exit code.
-pub fn provider_cmd_flake(theme: Theme, dir: String, fixtures: String?) -[IO, FS, Env]> Int Never! {
+pub fn provider_cmd_flake(theme: Theme, dir: String, fixtures: String?) -[IO, FS, Env, Time.Wait]> Int Never! {
     flake_path := ""
-    foreign_files :: [String]{@FOREIGN_FLAKE_FILE, @FOREIGN_DEVENV_FILE}
+    foreign_files :: [String]{FOREIGN_FLAKE_FILE, FOREIGN_DEVENV_FILE}
     loop name in foreign_files {
         candidate :: files.join(dir, name)
         if flake_path == "" && files.is_file(candidate) -> flake_path = candidate
     }
     if flake_path == "" {
-        theme.error("no foreign flake here", "`jet os bridge flake` translates `{@FOREIGN_FLAKE_FILE}` or `{@FOREIGN_DEVENV_FILE}` in the current directory; neither was found.", "run this from the directory that has the foreign file, or write env.* by hand.")
+        theme.error("no foreign flake here", "`jet os bridge flake` translates `{FOREIGN_FLAKE_FILE}` or `{FOREIGN_DEVENV_FILE}` in the current directory; neither was found.", "run this from the directory that has the foreign file, or write env.* by hand.")
         return 2
     }
     facts := if provider_read_devshell_facts(dir, fixtures) == {
@@ -291,7 +291,7 @@ pub fn provider_cmd_flake(theme: Theme, dir: String, fixtures: String?) -[IO, FS
 
 // Evaluate every package derivation and named devShell, merge every loss into
 // the graph, and commit the semantic lock. Some(exit code) on failure.
-fn provider_bridge_commit_graph(theme: Theme, dir: String, flake_path: String, graph: &FlakeGraph, facts: &DevShellFacts) -[IO, FS, Env]> Int? Never! {
+fn provider_bridge_commit_graph(theme: Theme, dir: String, flake_path: String, graph: &FlakeGraph, facts: &DevShellFacts) -[IO, FS, Env, Time.Wait]> Int? Never! {
     system :: provider_bridge_host_system()
     source :: if files.read(flake_path) == {
         .Ok(text) -> text

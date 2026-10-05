@@ -180,8 +180,8 @@ fn provider_import_package_name(raw: String) -> String? Never! {
 // The Nix environment file to import: the requested file or directory, else
 // the first supported file in `dir`.
 fn provider_import_source_path(dir: String, requested: String?) -[FS]> String ProviderReason! {
-    supported :: [String]{@FOREIGN_FLAKE_FILE, @FOREIGN_SHELL_FILE, @FOREIGN_DEFAULT_FILE, @FOREIGN_DEVENV_FILE}
-    found := None
+    supported :: [String]{FOREIGN_FLAKE_FILE, FOREIGN_SHELL_FILE, FOREIGN_DEFAULT_FILE, FOREIGN_DEVENV_FILE}
+    found := String?{None}
     if requested == {
         .Val(raw) -> {
             path :: if files.is_abs(raw) -> raw else -> files.join(dir, raw)
@@ -193,9 +193,9 @@ fn provider_import_source_path(dir: String, requested: String?) -[FS]> String Pr
         }
         .None -> found = provider_first_file(dir, supported)
     }
-    path :: found ?? return Err(ProviderReason{message: "no `{@FOREIGN_FLAKE_FILE}`, `{@FOREIGN_SHELL_FILE}`, or `{@FOREIGN_DEFAULT_FILE}` was found in `{dir}`"})
+    path :: found ?? return Err(ProviderReason{message: "no `{FOREIGN_FLAKE_FILE}`, `{FOREIGN_SHELL_FILE}`, or `{FOREIGN_DEFAULT_FILE}` was found in `{dir}`"})
     if !supported.contains(files.basename(path)) {
-        return Err(ProviderReason{message: "`{path}` is not a supported Nix environment file; use `{@FOREIGN_FLAKE_FILE}`, `{@FOREIGN_SHELL_FILE}`, or `{@FOREIGN_DEFAULT_FILE}`"})
+        return Err(ProviderReason{message: "`{path}` is not a supported Nix environment file; use `{FOREIGN_FLAKE_FILE}`, `{FOREIGN_SHELL_FILE}`, or `{FOREIGN_DEFAULT_FILE}`"})
     }
     Ok(path)
 }
@@ -213,7 +213,7 @@ fn provider_first_file(root: String, names: [String]) -[FS]> String? Never! {
 fn provider_read_import_devshell_facts(project_dir: String, source_path: String, fixtures: String?) -[FS, Env]> DevShellFacts ProviderError! {
     if fixtures == {
         .Val(dir) -> {
-            path :: files.join(dir, @BRIDGE_FIXTURE_FILE)
+            path :: files.join(dir, BRIDGE_FIXTURE_FILE)
             stdout :: files.read(path) ?? return Err(ProviderError.FixtureMissing(path))
             return provider_parse_facts_json(stdout)
         }
@@ -368,17 +368,17 @@ fn provider_import_nixpkgs_channel(graph: FlakeGraph) -> LockedSourceChannel? Ne
         base :: input.url.split_once("?")?.before ?? input.url
         declared :: if base.starts_with("github:NixOS/nixpkgs/") -> base.removeprefix("github:NixOS/nixpkgs/") else -> ""
         channel :: if declared == "" -> "nixos-unstable" else -> declared
-        return Val(LockedSourceChannel{name: @REF_SOURCE_JETPACK, channel, exact: "github:NixOS/nixpkgs#{input.revision}"})
+        return Val(LockedSourceChannel{name: REF_SOURCE_JETPACK, channel, exact: "github:NixOS/nixpkgs#{input.revision}"})
     }
     None
 }
 
 // Write `env.jet` through a temporary sibling and a rename.
 fn provider_write_import_env(dir: String, contents: String) ProviderReason! -[FS, Env]> {
-    path :: files.join(dir, @ENV_FILE)
+    path :: files.join(dir, ENV_FILE)
     temporary :: files.join(dir, ".env.jet.import.{sys.pid()}.tmp")
     if provider_write_then_rename(temporary, path, contents) == {
-        .Ok(_) -> Ok()
+        .Ok(_) -> {}
         .Err(error) -> {
             files.remove(temporary).drop("the failed write is reported; the temporary file may already be gone")
             Err(ProviderReason{message: "couldn't write `{path}`: {error}"})
@@ -416,7 +416,7 @@ pub fn provider_cmd_import(theme: Theme, dir: String, requested: String?, fixtur
     gaps := projection.gaps
     file :: files.basename(source_path)
     env :: provider_render_import_env(packages)
-    env_path :: files.join(dir, @ENV_FILE)
+    env_path :: files.join(dir, ENV_FILE)
     if files.read_bytes(env_path) == {
         .Ok(existing) -> {
             if existing != env.bytes() {
@@ -436,8 +436,8 @@ pub fn provider_cmd_import(theme: Theme, dir: String, requested: String?, fixtur
     fingerprint :: pkg_sha256_hex(source)
     lock := trust_semantic_lock_load(dir) ?? SemanticLockFile.empty()
     provider_clear_import_records(&lock)
-    source_channel := None
-    if file == @FOREIGN_FLAKE_FILE {
+    source_channel := LockedSourceChannel?{None}
+    if file == FOREIGN_FLAKE_FILE {
         if FlakeGraph.load(source_path) == {
             .Ok(graph) -> {
                 graph_lock :: graph.semantic_lock()
@@ -451,7 +451,7 @@ pub fn provider_cmd_import(theme: Theme, dir: String, requested: String?, fixtur
     provider_add_import_source_record(&lock, file, fingerprint)
     system :: provider_bridge_host_system()
     loop package in packages {
-        provider_ref :: "{package}{@REF_PROVIDER_AT}{@REF_SOURCE_JETPACK}"
+        provider_ref :: "{package}{REF_PROVIDER_AT}{REF_SOURCE_JETPACK}"
         hash :: pkg_sha256_hex(provider_nul_joined([String]{"catalog", provider_ref, fingerprint}))
         &lock.record_catalog_selection("env.dev", package, provider_ref, hash, system, "imported from bounded Nix devShell `{file}`")
     }
@@ -488,7 +488,7 @@ pub fn provider_cmd_import(theme: Theme, dir: String, requested: String?, fixtur
     }
     loop gap in gaps -> provider_report_import_gap(file, gap)
     plural :: if packages.len() == 1 -> "" else -> "s"
-    print("imported `{file}` into `{@ENV_FILE}`: {packages.len()} catalog package{plural}")
+    print("imported `{file}` into `{ENV_FILE}`: {packages.len()} catalog package{plural}")
     0
 }
 

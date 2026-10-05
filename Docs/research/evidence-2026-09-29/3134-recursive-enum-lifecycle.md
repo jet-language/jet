@@ -1,8 +1,8 @@
 # #3134: recursive enum ownership and storage lifecycle
 
-Closer11, 2026-09-29. Binary: `jet-debug-snapshot14` via `~/.cache/jet-luna/safe-jet.sh`.
-Scratch: `~/.cache/jet-test-scratch/Closer11/{tree,treebench}/`. Tier runner:
-`~/.cache/jet-test-scratch/Closer11/tiers.sh <file> [run interp aot]`.
+Closer11, 2026-09-29. Binary: `jet-debug-snapshot14` via `~/.cache/jet-dev/safe-jet.sh`.
+Scratch: `~/.cache/jet-dev/scratch/Closer11/{tree,treebench}/`. Tier runner:
+`~/.cache/jet-dev/scratch/Closer11/tiers.sh <file> [run interp aot]`.
 
 ## 1. Finite recursive tree (criterion 1, finite half)
 

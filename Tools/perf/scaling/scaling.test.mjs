@@ -8,7 +8,7 @@ import test from 'node:test';
 import { AXES, generate, sources } from './generate.mjs';
 import { compare, DEFAULT_BASES, DEFAULT_JET, GNU_TIME, growth, parseCounters, render, validateOverrides } from './harness.mjs';
 
-const scratch = process.env.JET_SCALING_SCRATCH ?? path.join(os.homedir(), '.cache/jet-test-scratch/sol/SolScaleGate');
+const scratch = process.env.JET_SCALING_SCRATCH ?? path.join(os.homedir(), '.cache/jet-dev/scratch/sol/SolScaleGate');
 fs.mkdirSync(scratch, { recursive: true });
 const root = fs.mkdtempSync(path.join(scratch, 'test-'));
 const here = path.dirname(fileURLToPath(import.meta.url));

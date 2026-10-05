@@ -20,12 +20,12 @@ fn cli_test_image_scratch(label: String) -[FS]> String {
     files.tmpdir("jet-image-{label}-") ?? panic("claim image scratch")
 }
 
-fn cli_test_ingest_executable(root: String, name: String, reference: String, binary: String) -[FS, Env, Time]> {
-    cli_test_ingest_executable_for_platform(root, name, reference, binary, pkg_host_platform())
+fn cli_test_ingest_executable(verification: &StoreVerification, root: String, name: String, reference: String, binary: String) -[FS, Env, Time]> {
+    cli_test_ingest_executable_for_platform(&verification, root, name, reference, binary, pkg_host_platform())
 }
 
 // Ingest one fake executable package into the Hangar under `root`.
-fn cli_test_ingest_executable_for_platform(root: String, name: String, reference: String, binary: String, platform: String) -[FS, Env, Time]> {
+fn cli_test_ingest_executable_for_platform(verification: &StoreVerification, root: String, name: String, reference: String, binary: String, platform: String) -[FS, Env, Time]> {
     source :: files.join(root, "source-{name}")
     files.create_dir_all(files.join(source, "bin")) ?? panic("create source bin")
     cli_test_write_script(files.join(files.join(source, "bin"), binary), "#!/bin/sh\necho image\n")
@@ -46,7 +46,7 @@ fn cli_test_ingest_executable_for_platform(root: String, name: String, reference
         provenance: "image-test",
         platform_artifact_kind: ""
     }
-    store_ingest_tree(roots, request) ?? panic("ingest {name}: {err.message()}")
+    store_ingest_tree(&verification, roots, request) ?? panic("ingest {name}: {err.message()}")
 }
 
 // Whether `needle` occurs in `haystack`.

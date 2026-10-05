@@ -103,9 +103,9 @@ pub struct OutputSnapshot {
 fn store_repro_invalid(detail: String) -> StoreError Never! { StoreError.InvalidData(detail) }
 
 // Verify both outputs, then compare their canonical trees and entry metadata.
-fn store_repro_compare_entries(left_roots: HangarRoots, left: StoreEntry, right_roots: HangarRoots, right: StoreEntry) -[FS, Env]> FirstDifference? StoreError! {
-    store_repro_verify_existing_output(left_roots, left)
-    store_repro_verify_existing_output(right_roots, right)
+fn store_repro_compare_entries(verification: &StoreVerification, left_roots: HangarRoots, left: StoreEntry, right_roots: HangarRoots, right: StoreEntry) -[FS, Env]> FirstDifference? StoreError! {
+    store_repro_verify_existing_output(&verification, left_roots, left)
+    store_repro_verify_existing_output(&verification, right_roots, right)
     left_snapshot :: store_repro_snapshot_for_entry(left_roots, left)
     right_snapshot :: store_repro_snapshot_for_entry(right_roots, right)
     if left_snapshot.digest != right_snapshot.digest {

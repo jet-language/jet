@@ -44,6 +44,8 @@ use jet_foundation.[
     mir_type_is_integer,
     mir_type_is_numeric,
     mir_type_is_unit,
+    mir_view_copy_kind,
+    mir_view_copy_target_matches,
 ]
 
 // One rule family of Docs/spec/mir-lint.md; its name is part of the ICE text.
@@ -90,14 +92,25 @@ pub fn mir_lint_error_text(error: MIRLintError) -> String Never! {
 // Check every function of `program` against the MIR Lint rules.
 // Rust: none (Jet-only pass)
 pub fn mir_lint_program(program: MIRProgram) -> MIRLintError? Never! {
-    if program.functions.len() == 0 -> return None
+    failures :: mir_lint_program_scan(program, false)
+    if failures.len() == 0 -> return None
+    Val(failures[0])
+}
+
+// Lint failures in program order, one per rejected function; without `all`
+// the first failure ends the scan. `all` serves the keep-going driver, which
+// traps every rejected function before one rerun.
+fn mir_lint_program_scan(program: MIRProgram, all: Bool) -> [MIRLintError] Never! {
+    failures := [MIRLintError]{}
+    if program.functions.len() == 0 -> return failures
     ctx := mir_lint_context(mir_lint_index(program), program.functions[0])
     loop position in 0..<program.functions.len() {
         if position > 0 -> mir_lint_enter(&ctx, program.functions[position])
-        failure :: mir_lint_function(ctx)
-        if failure == .Val(error) -> return Val(error)
+        failure :: mir_lint_function(ctx) ?? next
+        &failures.push(failure)
+        if !all -> return failures
     }
-    None
+    failures
 }
 
 // A broken rule before the function and span are attached.
@@ -650,7 +663,16 @@ fn mir_lint_operation(ctx: MIRLintContext, position: Int, instruction: MIRInstru
             if mir_lint_place(ctx, place) == None -> return mir_lint_problem(op, "place {place.value} does not exist")
             mir_lint_without_result(instruction, "initialization")
         }
-        .Copy(value, _) | .Move(value) | .AttachTag(value, _) -> {
+        .Copy(value, fact) -> {
+            ty :: result ?? return mir_lint_no_result(op)
+            operand :: mir_lint_type_of(ctx, value) ?? return None
+            // A view materialization (`~view`) reads a View and produces the
+            // owning collection its copy kernel builds (View<str> -> String,
+            // View<T> -> [T]); every other copy keeps the operand's type.
+            if fact == .ViewMaterialize && mir_lint_view_materializes(operand, ty) -> return None
+            mir_lint_expect(ctx, op, "result", operand, ty)
+        }
+        .Move(value) | .AttachTag(value, _) -> {
             ty :: result ?? return mir_lint_no_result(op)
             operand :: mir_lint_type_of(ctx, value) ?? return None
             mir_lint_expect(ctx, op, "result", operand, ty)
@@ -658,6 +680,14 @@ fn mir_lint_operation(ctx: MIRLintContext, position: Int, instruction: MIRInstru
         .TraitBox(_, _) | .PatternCapture(_, _) -> if result == None -> mir_lint_no_result(op) else -> None
         else -> mir_lint_operation_values(ctx, instruction)
     }
+}
+
+// `Copy{v, view_materialize}`: the result owns what the view's copy kernel
+// builds from `v`.
+// Rust: none (Jet-only pass)
+fn mir_lint_view_materializes(source: MIRType, result: MIRType) -> Bool Never! {
+    kind :: mir_view_copy_kind(source) ?? return false
+    mir_view_copy_target_matches(kind, result)
 }
 
 // `mir_lint_operation` for constants, unary and binary operators and strings.
@@ -1200,12 +1230,16 @@ fn mir_lint_semantic(ctx: MIRLintContext, instruction: MIRInstruction, semantic:
             mir_lint_declared_fields(ctx, fields)
         }
         .OptionLift2(_, function, _, _) -> mir_lint_expect_value_class(ctx, rule, "lifted function", function, mir_lint_callable())
+        // `checked_*` yields an Option of the operand; wrapping, saturating,
+        // trapping (`checked_policy`) and rotate routes yield the operand's
+        // integer type (Rust tir_to_mir_expr `OverflowOpt` types the op with the
+        // checked expression's type).
         .OverflowOption(_, _, _, _) -> {
             ty :: instruction.ty ?? return mir_lint_no_result(rule)
-            mir_lint_expect_class(ctx, rule, "checked arithmetic", ty, [MIRLintClass]{MIRLintClass.Option})
+            mir_lint_expect_class(ctx, rule, "overflow arithmetic", ty, [MIRLintClass]{MIRLintClass.Option, MIRLintClass.Integer})
         }
         .NumericMethod(_, receiver) | .NumericBinaryMethod(_, receiver, _) -> mir_lint_expect_value_class(ctx, rule, "numeric receiver", receiver, mir_lint_numeric())
-        .ClosureMethod(value, _, _) | .HostBorrowCallback(value, _) | .CCallback(_, _, value) | .HTTPRouterRegister(_, _, _, value, _, _, _, _) -> mir_lint_expect_value_class(ctx, rule, "callable operand", value, mir_lint_callable())
+        .HostBorrowCallback(value, _) | .CCallback(_, _, value) | .HTTPRouterRegister(_, _, _, value, _, _, _, _) -> mir_lint_expect_value_class(ctx, rule, "callable operand", value, mir_lint_callable())
         .CoreClosureCall(_, _, _, closure, _, _) -> {
             value :: closure ?? return None
             mir_lint_expect_value_class(ctx, rule, "callable operand", value, mir_lint_callable())
@@ -1271,6 +1305,11 @@ fn mir_lint_terminator(ctx: MIRLintContext, block: MIRBasicBlock) -> MIRLintProb
         .Return(value) -> {
             if value == .Val(returned) -> return mir_lint_expect_value(ctx, rule, "returned value", function.return_type, returned)
             if function.generator != None -> return None
+            // A fallible unit function's bare return is its implicit success
+            // (`Ok(())`), as the Rust backend's default return emits it.
+            if function.failure == .Result(success, _) {
+                if mir_lint_class(ctx.index, success) == .Unit -> return None
+            }
             mir_lint_expect_class(ctx, rule, "bare return of a function returning", function.return_type, [MIRLintClass]{MIRLintClass.Unit})
         }
         .Yield(value, resume) -> {

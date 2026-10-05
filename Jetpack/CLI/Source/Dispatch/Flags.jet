@@ -4,7 +4,7 @@
 // the child command untouched.
 
 // Parsed global flags shared by every command.
-pub struct CliFlags {
+pub struct CLIFlags {
     pub color: ColorChoice
     pub fixtures: String?
     // Explicit local unofficial nixpkgs catalog. It has no publisher
@@ -80,8 +80,8 @@ pub struct CliFlags {
     pub fmt_dry_run: Bool
     pub fmt_changed: Bool
 
-    fn empty() -> CliFlags Never! {
-        CliFlags{
+    fn empty() -> CLIFlags Never! {
+        CLIFlags{
             color: ColorChoice.Auto,
             fixtures: None,
             local_nix_catalog: None,
@@ -130,8 +130,8 @@ pub struct CliFlags {
 }
 
 // Flags, positional arguments, and the command after a `--`.
-pub struct CliParsed {
-    pub flags: CliFlags
+pub struct CLIParsed {
+    pub flags: CLIFlags
     pub positional: [String]
     // Everything after a `--`, if present.
     pub command: [String]?
@@ -159,20 +159,20 @@ fn cli_flag_argument(args: [String], index: Int) -> String? Never! {
 }
 
 // Verb-agnostic parse; the verb-aware form decides what `-p` means.
-pub fn cli_parse_args(args: [String]) -> CliParsed Never! {
+pub fn cli_parse_args(args: [String]) -> CLIParsed Never! {
     cli_parse_args_for("", args)
 }
 
 // Verb-aware parse: `-p` means ad-hoc packages on `env`/`use` and workspace
 // members on `build`/`test`/`run` (D-JPK-SELECTOR1=C).
-pub fn cli_parse_args_for(verb: String, args: [String]) -> CliParsed Never! {
+pub fn cli_parse_args_for(verb: String, args: [String]) -> CLIParsed Never! {
     workspace_select :: verb == "build" || verb == "test" || verb == "run"
-    lock_verb :: verb == @JETPACK_LOCK_VERB
-    lock_against_prefix :: "{@LOCK_DIFF_FLAG_AGAINST}="
-    affected_since_prefix :: "{@WS_FLAG_AFFECTED_SINCE}="
-    flags := CliFlags.empty()
+    lock_verb :: verb == JETPACK_LOCK_VERB
+    lock_against_prefix :: "{LOCK_DIFF_FLAG_AGAINST}="
+    affected_since_prefix :: "{WS_FLAG_AFFECTED_SINCE}="
+    flags := CLIFlags.empty()
     positional := [String]{}
-    command := None
+    command := [String]?{None}
     index := 0
     loop index < args.len() {
         arg :: args[index]
@@ -185,28 +185,28 @@ pub fn cli_parse_args_for(verb: String, args: [String]) -> CliParsed Never! {
             arg.starts_with("--color=") -> flags.color = ColorChoice.parse(cli_trim_start_matches(arg, "--color="))
             arg == "--offline" -> flags.offline = true
             arg == "--online" -> flags.online = true
-            arg == @CLI_FLAG_YES_SHORT || arg == @CLI_FLAG_YES_LONG -> flags.assume_yes = true
-            verb == "update" && arg == @UPDATE_FLAG_DEPS -> flags.update_deps = true
-            verb == "update" && arg == @UPDATE_FLAG_TOOLS -> flags.update_tools = true
-            lock_verb && arg == @LOCK_DIFF_FLAG_AGAINST -> {
+            arg == CLI_FLAG_YES_SHORT || arg == CLI_FLAG_YES_LONG -> flags.assume_yes = true
+            verb == "update" && arg == UPDATE_FLAG_DEPS -> flags.update_deps = true
+            verb == "update" && arg == UPDATE_FLAG_TOOLS -> flags.update_tools = true
+            lock_verb && arg == LOCK_DIFF_FLAG_AGAINST -> {
                 index += 1
                 flags.lock_against = Val(cli_flag_argument(args, index) ?? "")
             }
             lock_verb && arg.starts_with(lock_against_prefix) -> flags.lock_against = Val(cli_trim_start_matches(arg, lock_against_prefix))
-            arg == @TRUST_BYPASS_FLAG -> flags.trust = true
-            arg == @ENV_FLAG_FLAKE -> flags.flake = true
-            arg == @ENV_FLAG_PURE -> flags.pure = true
-            arg == @ENV_FLAG_PREP -> flags.prep = true
-            arg == @ENV_FLAG_EXPLAIN -> flags.explain_plan = true
-            arg == @ENV_FLAG_PRESET -> {
+            arg == TRUST_BYPASS_FLAG -> flags.trust = true
+            arg == ENV_FLAG_FLAKE -> flags.flake = true
+            arg == ENV_FLAG_PURE -> flags.pure = true
+            arg == ENV_FLAG_PREP -> flags.prep = true
+            arg == ENV_FLAG_EXPLAIN -> flags.explain_plan = true
+            arg == ENV_FLAG_PRESET -> {
                 index += 1
                 if cli_flag_argument(args, index) == .Val(name) -> flags.preset = Val(name)
             }
-            arg == @ENV_FLAG_ENV -> {
+            arg == ENV_FLAG_ENV -> {
                 index += 1
                 if cli_flag_argument(args, index) == .Val(name) -> flags.environment = Val(name)
             }
-            arg == @FMT_FLAG_LANG -> {
+            arg == FMT_FLAG_LANG -> {
                 index += 1
                 flags.fmt_language = Val(cli_flag_argument(args, index) ?? "")
             }
@@ -217,8 +217,8 @@ pub fn cli_parse_args_for(verb: String, args: [String]) -> CliParsed Never! {
             verb == "fmt" && arg == "--changed" -> flags.fmt_changed = true
             arg == "--adapt" -> flags.adapt = true
             arg == "--json" -> flags.json = true
-            arg == @BUILD_FLAG_SHELL_ON_FAIL -> flags.shell_on_fail = true
-            arg == @TRUST_FLAG_SCOPE -> {
+            arg == BUILD_FLAG_SHELL_ON_FAIL -> flags.shell_on_fail = true
+            arg == TRUST_FLAG_SCOPE -> {
                 scope :: cli_flag_argument(args, index + 1) ?? ""
                 if scope != "" && !scope.starts_with("-") {
                     index += 1
@@ -227,11 +227,11 @@ pub fn cli_parse_args_for(verb: String, args: [String]) -> CliParsed Never! {
                     flags.trust_scope = Val("")
                 }
             }
-            arg == @IMAGE_FLAG_PUSH -> {
+            arg == IMAGE_FLAG_PUSH -> {
                 index += 1
                 if cli_flag_argument(args, index) == .Val(reference) -> flags.push = Val(reference)
             }
-            arg == @OS_FLAG_NAME -> {
+            arg == OS_FLAG_NAME -> {
                 index += 1
                 if cli_flag_argument(args, index) == .Val(name) -> flags.name = Val(name)
             }
@@ -243,13 +243,13 @@ pub fn cli_parse_args_for(verb: String, args: [String]) -> CliParsed Never! {
                 index += 1
                 if cli_flag_argument(args, index) == .Val(dir) -> flags.local_nix_catalog = Val(dir)
             }
-            arg == @WS_FLAG_AFFECTED -> flags.affected = true
-            arg == @WS_FLAG_AFFECTED_SINCE -> {
+            arg == WS_FLAG_AFFECTED -> flags.affected = true
+            arg == WS_FLAG_AFFECTED_SINCE -> {
                 index += 1
                 flags.affected_since = Val(cli_flag_argument(args, index) ?? "")
             }
             arg.starts_with(affected_since_prefix) -> flags.affected_since = Val(arg.split_once("=")?.after ?? "")
-            arg == @ENV_FLAG_PACKAGE -> {
+            arg == ENV_FLAG_PACKAGE -> {
                 // U16 enter: `-p <pkg>...` greedily consumes bare tokens.
                 // D-JPK-SELECTOR1 build/test/run: each `-p` takes exactly one
                 // member name (cargo-style, repeatable).
@@ -270,19 +270,19 @@ pub fn cli_parse_args_for(verb: String, args: [String]) -> CliParsed Never! {
                 }
                 next
             }
-            arg == @TOOL_FLAG_AS -> {
+            arg == TOOL_FLAG_AS -> {
                 index += 1
                 if cli_flag_argument(args, index) == .Val(name) -> flags.as_name = Val(name)
             }
-            arg == @BROWSER_FLAG_BINARY -> {
+            arg == BROWSER_FLAG_BINARY -> {
                 index += 1
                 if cli_flag_argument(args, index) == .Val(path) -> flags.browser_binary = Val(path)
             }
-            arg == @BROWSER_FLAG_VERSION -> {
+            arg == BROWSER_FLAG_VERSION -> {
                 index += 1
                 if cli_flag_argument(args, index) == .Val(version) -> flags.browser_version = Val(version)
             }
-            arg == @BROWSER_FLAG_PROTOCOL -> {
+            arg == BROWSER_FLAG_PROTOCOL -> {
                 index += 1
                 if cli_flag_argument(args, index) == .Val(protocol) -> flags.browser_protocol = Val(protocol)
             }
@@ -315,7 +315,7 @@ pub fn cli_parse_args_for(verb: String, args: [String]) -> CliParsed Never! {
         }
         index += 1
     }
-    CliParsed{flags, positional, command}
+    CLIParsed{flags, positional, command}
 }
 
 // The arguments before the first `--`; retired-spelling checks never read

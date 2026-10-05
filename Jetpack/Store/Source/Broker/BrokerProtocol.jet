@@ -5,26 +5,26 @@
 // `key=hex` text ending at a blank line, and every length is checked against
 // the 1 GiB archive bound before bytes are read.
 
-@STORE_BROKER_CONFIG_MAGIC :: "jet-shared-store-v1"
-@STORE_BROKER_REQUEST_MAGIC :: "jet-shared-store-request-v1"
-@STORE_BROKER_RESPONSE_MAGIC :: "jet-shared-store-response-v1"
-@STORE_BROKER_MAX_CONFIG_BYTES :: 16384
-@STORE_BROKER_MAX_REQUEST_BYTES :: 1073741824
-@STORE_BROKER_MAX_REFERENCE_BYTES :: 4096
-@STORE_BROKER_MAX_PROVENANCE_FIELD_BYTES :: 4096
-@STORE_BROKER_MAX_HEADER_BYTES :: 4096
-@STORE_BROKER_GRANT_MAGIC :: "jet-shared-store-grant-v2"
-@STORE_BROKER_GRANT_TTL_SECS :: 900
-@STORE_BROKER_INCOMING_STALE_AFTER_SECS :: 900
-@STORE_BROKER_MAX_INCOMING_ENTRIES :: 1024
-@STORE_BROKER_STAGE_MARKER :: ".jet-shared-store-stage"
-@STORE_BROKER_SANDBOX_POLICY :: "jet-shared-store-sandbox-v1\nno-source-evaluation\nsocket-activated\n"
-@STORE_BROKER_SHARED_DIR :: "shared-store"
-@STORE_BROKER_ADMIN_CONFIG :: "/etc/jet/shared-store/config"
-@STORE_BROKER_ADMIN_BASE :: "/var/lib/jet/shared-store"
-@STORE_BROKER_ADMIN_SOCKET :: "/run/jet/shared-store.sock"
+STORE_BROKER_CONFIG_MAGIC :: prep { "jet-shared-store-v1" }
+STORE_BROKER_REQUEST_MAGIC :: prep { "jet-shared-store-request-v1" }
+STORE_BROKER_RESPONSE_MAGIC :: prep { "jet-shared-store-response-v1" }
+STORE_BROKER_MAX_CONFIG_BYTES :: prep { 16384 }
+STORE_BROKER_MAX_REQUEST_BYTES :: prep { 1073741824 }
+STORE_BROKER_MAX_REFERENCE_BYTES :: prep { 4096 }
+STORE_BROKER_MAX_PROVENANCE_FIELD_BYTES :: prep { 4096 }
+STORE_BROKER_MAX_HEADER_BYTES :: prep { 4096 }
+STORE_BROKER_GRANT_MAGIC :: prep { "jet-shared-store-grant-v2" }
+STORE_BROKER_GRANT_TTL_SECS :: prep { 900 }
+STORE_BROKER_INCOMING_STALE_AFTER_SECS :: prep { 900 }
+STORE_BROKER_MAX_INCOMING_ENTRIES :: prep { 1024 }
+STORE_BROKER_STAGE_MARKER :: prep { ".jet-shared-store-stage" }
+STORE_BROKER_SANDBOX_POLICY :: prep { "jet-shared-store-sandbox-v1\nno-source-evaluation\nsocket-activated\n" }
+STORE_BROKER_SHARED_DIR :: prep { "shared-store" }
+STORE_BROKER_ADMIN_CONFIG :: prep { "/etc/jet/shared-store/config" }
+STORE_BROKER_ADMIN_BASE :: prep { "/var/lib/jet/shared-store" }
+STORE_BROKER_ADMIN_SOCKET :: prep { "/run/jet/shared-store.sock" }
 // The credential a private (rootless) broker owner presents.
-@STORE_BROKER_PRIVATE_OWNER :: "private-owner"
+STORE_BROKER_PRIVATE_OWNER :: prep { "private-owner" }
 
 // Rust `invalid`: every broker refusal is InvalidData with this exact text.
 fn store_broker_invalid(message: String) -> StoreError Never! {
@@ -63,10 +63,9 @@ fn store_broker_decode_hex(value: String) -> [U8] StoreError! {
 
 // Non-empty, at most 4096 bytes, and free of control scalars.
 fn store_broker_validate_text_field(value: String, label: String) StoreError! {
-    if value == "" || value.bytes().len() > @STORE_BROKER_MAX_PROVENANCE_FIELD_BYTES || pkg_text_has_control(value) {
+    if value == "" || value.bytes().len() > STORE_BROKER_MAX_PROVENANCE_FIELD_BYTES || pkg_text_has_control(value) {
         return Err(store_broker_invalid("{label} is invalid"))
     }
-    Ok()
 }
 
 fn store_broker_decode_text_field(value: String, label: String) -> String StoreError! {
@@ -77,7 +76,7 @@ fn store_broker_decode_text_field(value: String, label: String) -> String StoreE
 
 // A shared-store reference: non-empty, bounded, and control-free.
 fn store_broker_valid_reference(reference: String) -> Bool Never! {
-    reference != "" && reference.bytes().len() <= @STORE_BROKER_MAX_REFERENCE_BYTES && !pkg_text_has_control(reference)
+    reference != "" && reference.bytes().len() <= STORE_BROKER_MAX_REFERENCE_BYTES && !pkg_text_has_control(reference)
 }
 
 // One labeled wire field.
@@ -114,7 +113,6 @@ pub struct ProvenanceBinding {
 
     fn validate(self) StoreError! {
         loop field in self.fields() -> store_broker_validate_text_field(field.value, "shared-store provenance {field.key}")
-        Ok()
     }
 }
 
@@ -189,7 +187,7 @@ pub struct BrokerWireReader {
             &header.push(byte[0])
             count :: header.len()
             if count >= 2 && Int.from_u8(header[count - 1]) == 10 && Int.from_u8(header[count - 2]) == 10 -> break
-            if count > @STORE_BROKER_MAX_HEADER_BYTES -> return Err(store_broker_invalid("{label} header is too large"))
+            if count > STORE_BROKER_MAX_HEADER_BYTES -> return Err(store_broker_invalid("{label} header is too large"))
         }
         Ok(header)
     }
@@ -212,10 +210,10 @@ fn store_broker_append(out: &[U8], bytes: [U8]) Never! {
 
 // Rust `write_request`: a provenance-bound write of one unsigned archive.
 pub fn store_broker_encode_write_request(binding: ProvenanceBinding, credential: String, archive: [U8]) -> [U8] StoreError! {
-    if archive.len() > @STORE_BROKER_MAX_REQUEST_BYTES -> return Err(store_broker_invalid("shared-store archive exceeds the request limit"))
+    if archive.len() > STORE_BROKER_MAX_REQUEST_BYTES -> return Err(store_broker_invalid("shared-store archive exceeds the request limit"))
     binding.validate()
     store_broker_validate_text_field(credential, "shared-store writer credential")
-    header := "{@STORE_BROKER_REQUEST_MAGIC}\nop=write\n"
+    header := "{STORE_BROKER_REQUEST_MAGIC}\nop=write\n"
     loop field in binding.fields() -> header = "{header}{field.key}={store_hex_bytes(field.value.bytes())}\n"
     header = "{header}credential={store_hex_bytes(credential.bytes())}\nbytes={archive.len()}\n\n"
     out := header.bytes()
@@ -226,7 +224,7 @@ pub fn store_broker_encode_write_request(binding: ProvenanceBinding, credential:
 // Rust `write_read_request`.
 pub fn store_broker_encode_read_request(reference: String) -> [U8] StoreError! {
     if !store_broker_valid_reference(reference) -> return Err(store_broker_invalid("shared-store reference is invalid"))
-    Ok("{@STORE_BROKER_REQUEST_MAGIC}\nop=read\nreference={store_hex_bytes(reference.bytes())}\n\n".bytes())
+    Ok("{STORE_BROKER_REQUEST_MAGIC}\nop=read\nreference={store_hex_bytes(reference.bytes())}\n\n".bytes())
 }
 
 // The fields of one bounded header after its magic line. `allowed` names
@@ -251,13 +249,13 @@ fn store_broker_header_fields(header: [U8], label: String, magic: String, allowe
 // Rust `read_request_header`.
 pub fn store_broker_read_request_header(reader: &BrokerWireReader) -> BrokerHeader StoreError! {
     header :: &reader.read_header("shared-store request")
-    fields :: store_broker_header_fields(header, "shared-store request", @STORE_BROKER_REQUEST_MAGIC, [String]{"op", "bytes", "reference", "source", "builder", "action", "output", "platform", "sandbox", "policy", "credential"})
+    fields :: store_broker_header_fields(header, "shared-store request", STORE_BROKER_REQUEST_MAGIC, [String]{"op", "bytes", "reference", "source", "builder", "action", "output", "platform", "sandbox", "policy", "credential"})
     op :: fields.get("op") ?? return Err(store_broker_invalid("shared-store request has no operation"))
     if op == {
         "write" -> {
             raw_length :: fields.get("bytes") ?? return Err(store_broker_invalid("shared-store request has no archive length"))
             length :: store_broker_parse_unsigned(raw_length) ?? return Err(store_broker_invalid("shared-store archive length is invalid"))
-            if length > @STORE_BROKER_MAX_REQUEST_BYTES -> return Err(store_broker_invalid("shared-store archive exceeds the request limit"))
+            if length > STORE_BROKER_MAX_REQUEST_BYTES -> return Err(store_broker_invalid("shared-store archive exceeds the request limit"))
             binding :: ProvenanceBinding{
                 reference: store_broker_write_field(fields, "reference"),
                 source: store_broker_write_field(fields, "source"),
@@ -303,13 +301,13 @@ pub fn store_broker_read_request(reader: &BrokerWireReader) -> BrokerRequest Sto
 
 // Rust `write_response`.
 pub fn store_broker_encode_response(status: String) -> [U8] Never! {
-    "{@STORE_BROKER_RESPONSE_MAGIC}\nstatus={status}\n\n".bytes()
+    "{STORE_BROKER_RESPONSE_MAGIC}\nstatus={status}\n\n".bytes()
 }
 
 // Rust `write_archive_response`.
 pub fn store_broker_encode_archive_response(archive: [U8]) -> [U8] StoreError! {
-    if archive.len() > @STORE_BROKER_MAX_REQUEST_BYTES -> return Err(store_broker_invalid("shared-store archive exceeds the response limit"))
-    out := "{@STORE_BROKER_RESPONSE_MAGIC}\nstatus=ok\nbytes={archive.len()}\n\n".bytes()
+    if archive.len() > STORE_BROKER_MAX_REQUEST_BYTES -> return Err(store_broker_invalid("shared-store archive exceeds the response limit"))
+    out := "{STORE_BROKER_RESPONSE_MAGIC}\nstatus=ok\nbytes={archive.len()}\n\n".bytes()
     store_broker_append(&out, archive)
     Ok(out)
 }
@@ -317,11 +315,11 @@ pub fn store_broker_encode_archive_response(archive: [U8]) -> [U8] StoreError! {
 // Rust `read_response`: a status-only response to a write. `ok` is true,
 // `missing` false.
 pub fn store_broker_read_response(reader: &BrokerWireReader) -> Bool StoreError! {
-    bytes :: &reader.read_bounded(@STORE_BROKER_MAX_HEADER_BYTES + 1)
-    if bytes.len() > @STORE_BROKER_MAX_HEADER_BYTES -> return Err(store_broker_invalid("shared-store response is too large"))
+    bytes :: &reader.read_bounded(STORE_BROKER_MAX_HEADER_BYTES + 1)
+    if bytes.len() > STORE_BROKER_MAX_HEADER_BYTES -> return Err(store_broker_invalid("shared-store response is too large"))
     text :: String.from_bytes(bytes) ?? return Err(store_broker_invalid("shared-store response is not UTF-8"))
     lines :: store_text_lines(text)
-    if lines.len() == 0 || lines[0] != @STORE_BROKER_RESPONSE_MAGIC -> return Err(store_broker_invalid("shared-store response has an unknown format"))
+    if lines.len() == 0 || lines[0] != STORE_BROKER_RESPONSE_MAGIC -> return Err(store_broker_invalid("shared-store response has an unknown format"))
     status := String?{None}
     loop index in 1..<lines.len() {
         line :: lines[index]
@@ -341,7 +339,7 @@ pub fn store_broker_read_response(reader: &BrokerWireReader) -> Bool StoreError!
 // Rust `read_archive_response`: the archive of a read, or None for missing.
 pub fn store_broker_read_archive_response(reader: &BrokerWireReader) -> [U8]? StoreError! {
     header :: &reader.read_header("shared-store response")
-    fields :: store_broker_header_fields(header, "shared-store response", @STORE_BROKER_RESPONSE_MAGIC, [String]{"status", "bytes"})
+    fields :: store_broker_header_fields(header, "shared-store response", STORE_BROKER_RESPONSE_MAGIC, [String]{"status", "bytes"})
     status :: fields.get("status") ?? return Err(store_broker_invalid("shared-store response has no status"))
     if status == {
         "missing" -> {
@@ -351,7 +349,7 @@ pub fn store_broker_read_archive_response(reader: &BrokerWireReader) -> [U8]? St
         "ok" -> {
             raw_length :: fields.get("bytes") ?? return Err(store_broker_invalid("shared-store response has no archive length"))
             length :: store_broker_parse_unsigned(raw_length) ?? return Err(store_broker_invalid("shared-store response archive length is invalid"))
-            if length > @STORE_BROKER_MAX_REQUEST_BYTES -> return Err(store_broker_invalid("shared-store archive exceeds the response limit"))
+            if length > STORE_BROKER_MAX_REQUEST_BYTES -> return Err(store_broker_invalid("shared-store archive exceeds the response limit"))
             Ok(Val(&reader.read_exact(length)))
         }
         else -> Err(store_broker_invalid("shared-store response has an unknown status"))
@@ -383,7 +381,7 @@ pub struct WriterGrant {
         grant := WriterGrant.empty()
         grant.read = true
         grant.write = true
-        grant.credential = Val(@STORE_BROKER_PRIVATE_OWNER)
+        grant.credential = Val(STORE_BROKER_PRIVATE_OWNER)
         grant
     }
 
@@ -423,7 +421,6 @@ pub struct WriterGrant {
                 &self.policies.push(value)
             }
         }
-        Ok()
     }
 
     // Allowlist and binding value per provenance label, in check order.
@@ -448,7 +445,7 @@ struct BrokerAllowlist {
 // Rust `parse_writer_grant`.
 pub fn store_broker_parse_writer_grant(text: String) -> WriterGrant StoreError! {
     lines :: store_text_lines(text)
-    if lines.len() == 0 || lines[0] != @STORE_BROKER_GRANT_MAGIC -> return Err(store_broker_invalid("shared-store peer enrollment has an unknown format"))
+    if lines.len() == 0 || lines[0] != STORE_BROKER_GRANT_MAGIC -> return Err(store_broker_invalid("shared-store peer enrollment has an unknown format"))
     seen := [String]{}
     grant := WriterGrant.empty()
     loop index in 1..<lines.len() {
@@ -493,11 +490,11 @@ pub fn store_broker_parse_writer_grant(text: String) -> WriterGrant StoreError! 
 // Rust `authorize_grant` at time `now` (Unix seconds).
 pub fn store_broker_authorize_grant(grant: WriterGrant, write: Bool, binding: ProvenanceBinding, credential: String, now: Int) StoreError! {
     if !grant.read -> return Err(store_broker_invalid("shared-store peer has no read authority"))
-    if !write -> return Ok()
+    if !write -> return
     if !grant.write -> return Err(store_broker_invalid("shared-store peer has no write authority"))
-    if grant.credential == Val(@STORE_BROKER_PRIVATE_OWNER) {
-        if credential != @STORE_BROKER_PRIVATE_OWNER -> return Err(store_broker_invalid("shared-store writer credential is invalid"))
-        return Ok()
+    if grant.credential == Val(STORE_BROKER_PRIVATE_OWNER) {
+        if credential != STORE_BROKER_PRIVATE_OWNER -> return Err(store_broker_invalid("shared-store writer credential is invalid"))
+        return
     }
     expires :: grant.expires ?? return Err(store_broker_invalid("shared-store writer grant has no expiry"))
     if now >= expires -> return Err(store_broker_invalid("shared-store writer grant is expired"))
@@ -510,7 +507,6 @@ pub fn store_broker_authorize_grant(grant: WriterGrant, write: Bool, binding: Pr
         }
         if !list.allowed.contains(value) -> return Err(store_broker_invalid("shared-store writer {list.label} is not allowlisted"))
     }
-    Ok()
 }
 
 // Rust `now_secs`: Unix seconds, saturating at zero before the epoch.

@@ -97,8 +97,8 @@ fn sema_contract_call_is_pure(fact: SemaCallSiteFact, environment: SemaScopeEnvi
         return true
     }
     target :: fact.callee ?? return false
-    declaration :: sema_contract_function_for_symbol(environment, target) ?? return false
-    declaration.is_pure
+    facts :: sema_contract_function_facts(environment, target) ?? return false
+    facts.is_pure
 }
 
 fn sema_contract_purity_diagnostic(kind: String, span: Span) -> Diagnostic {
@@ -695,6 +695,73 @@ pub fn sema_contract_function_for_symbol(environment: SemaScopeEnvironment, targ
         if method != None -> return method
     }
     None
+}
+
+// What a call needs to know about its callee's contract, read from the
+// declaration in place: a call checks `pre` clauses only when there are any,
+// so it copies the callee's declaration (and its body) only then.
+pub struct SemaContractCalleeFacts {
+    pub pre_count: Int
+    pub is_pure: Bool
+}
+
+fn sema_contract_callee_facts(func: Func) -> SemaContractCalleeFacts Never! {
+    SemaContractCalleeFacts{pre_count: func.pre.len(), is_pure: func.is_pure}
+}
+
+fn sema_contract_registered_facts(graph: SemaRegistrationGraph, target: SymbolID) -> SemaContractCalleeFacts? {
+    row :: graph.callable_rows.get(target.key) ?? return None
+    if row == {
+        .Function(module_index, index) -> Val(sema_contract_callee_facts(graph.modules[module_index].functions[index].declaration))
+        .Foreign(_, _) -> None
+        .NominalMethod(module_index, owner, index) -> Val(sema_contract_callee_facts(graph.modules[module_index].nominals[owner].methods[index].declaration))
+        .ImplMethod(module_index, owner, index) -> Val(sema_contract_callee_facts(graph.modules[module_index].impls[owner].methods[index].declaration))
+    }
+}
+
+fn sema_contract_method_facts_for_item(item: Item, target: SymbolID, module_identity: String) -> SemaContractCalleeFacts? {
+    if item == {
+        .Struct(value) -> {
+            loop method in value.methods {
+                if symbol_id(SymbolKind.Function, module_identity, value.name, method.name).key == target.key -> return Val(sema_contract_callee_facts(method))
+            }
+        }
+        .Enum(value) -> {
+            loop method in value.methods {
+                if symbol_id(SymbolKind.Function, module_identity, value.name, method.name).key == target.key -> return Val(sema_contract_callee_facts(method))
+            }
+        }
+        .Impl(value) -> {
+            loop method in value.methods {
+                if symbol_id(SymbolKind.Function, module_identity, value.type_name, method.name).key == target.key -> return Val(sema_contract_callee_facts(method))
+            }
+        }
+        else -> {}
+    }
+    None
+}
+
+// The facts of the declaration `sema_contract_function_for_symbol` resolves
+// `target` to (same lookup order), without copying it.
+pub fn sema_contract_function_facts(environment: SemaScopeEnvironment, target: SymbolID) -> SemaContractCalleeFacts? {
+    if environment.registration_graph == .Val(graph) {
+        registered :: sema_contract_registered_facts(graph, target)
+        if registered != None -> return registered
+    }
+    loop declaration in environment.declarations {
+        if declaration.symbol_id.key == target.key {
+            if declaration.item == .Func(value) -> return Val(sema_contract_callee_facts(value))
+        }
+        method :: sema_contract_method_facts_for_item(declaration.item, target, environment.module_identity)
+        if method != None -> return method
+    }
+    None
+}
+
+// True when a call to `target` has `pre` clauses to check.
+pub fn sema_contract_function_has_pre(environment: SemaScopeEnvironment, target: SymbolID) -> Bool Never! {
+    facts :: sema_contract_function_facts(environment, target) ?? return false
+    facts.pre_count > 0
 }
 
 fn sema_contract_generated_argument_symbol(environment: SemaScopeEnvironment, owner: String, index: Int, parameter_name: String, span: Span, ty: Type) -> Symbol Never! {

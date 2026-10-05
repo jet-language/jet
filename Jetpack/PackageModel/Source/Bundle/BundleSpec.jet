@@ -7,18 +7,18 @@
 // the spec before a plan lays out its target files. Game bundles use the same
 // model; `BundleKind` records the intent for receipts.
 
-@PACKAGE_BUNDLE_SCHEMA_VERSION :: 1
-@PACKAGE_BUNDLE_FORMAT :: "jet.package.bundle"
-@PACKAGE_BUNDLE_RECEIPT_SCHEMA :: "jet.package.receipt"
-@PACKAGE_UPDATE_MANIFEST_SCHEMA :: "jet.package.update"
+PACKAGE_BUNDLE_SCHEMA_VERSION :: prep { 1 }
+PACKAGE_BUNDLE_FORMAT :: prep { "jet.package.bundle" }
+PACKAGE_BUNDLE_RECEIPT_SCHEMA :: prep { "jet.package.receipt" }
+PACKAGE_UPDATE_MANIFEST_SCHEMA :: prep { "jet.package.update" }
 
 // Canonical bounds shared by the package receipt and the generated game
 // crash reporter. The reporter keeps these in memory and persists at most
 // one latest report; upload stays disabled until an adapter adds a transport.
-@GAME_CRASH_MAX_STACKS :: 32
-@GAME_CRASH_MAX_LOGS :: 256
-@GAME_CRASH_MAX_PERSISTED :: 1
-@GAME_CRASH_REPORTER_ABI :: "jet-game-crash-reporter-v1"
+GAME_CRASH_MAX_STACKS :: prep { 32 }
+GAME_CRASH_MAX_LOGS :: prep { 256 }
+GAME_CRASH_MAX_PERSISTED :: prep { 1 }
+GAME_CRASH_REPORTER_ABI :: prep { "jet-game-crash-reporter-v1" }
 
 // The explicit package target; nothing is inferred from the host process.
 pub enum BundleTarget {
@@ -80,17 +80,17 @@ pub struct BundleExecutable {
 }
 
 pub enum IconFormat {
-    Png
+    PNG
     Icns
     Ico
-    Svg
+    SVG
 
     fn as_str(self) -> String Never! {
         if self == {
-            .Png -> "png"
+            .PNG -> "png"
             .Icns -> "icns"
             .Ico -> "ico"
-            .Svg -> "svg"
+            .SVG -> "svg"
         }
     }
 
@@ -98,11 +98,25 @@ pub enum IconFormat {
         extension := value.trim()
         loop extension.starts_with(".") -> extension = extension.removeprefix(".")
         if pkg_ascii_lower(extension) == {
-            "png" -> Val(IconFormat.Png)
+            "png" -> Val(IconFormat.PNG)
             "icns" -> Val(IconFormat.Icns)
             "ico" -> Val(IconFormat.Ico)
-            "svg" -> Val(IconFormat.Svg)
+            "svg" -> Val(IconFormat.SVG)
             else -> None
+        }
+    }
+
+    fn extension(self) -> String Never! {
+        self.as_str()
+    }
+
+    // Declaration order, the reference's derived `Ord`.
+    fn rank(self) -> Int Never! {
+        if self == {
+            .PNG -> 0
+            .Icns -> 1
+            .Ico -> 2
+            .SVG -> 3
         }
     }
 }
@@ -135,6 +149,10 @@ pub struct BundleIcon {
 pub struct SigningHookInput {
     pub path: String
     pub digest: String
+
+    fn new(path: String, digest: String) -> SigningHookInput Never! {
+        SigningHookInput{path: path, digest: digest}
+    }
 }
 
 pub enum SigningPhase {
@@ -147,6 +165,14 @@ pub enum SigningPhase {
             .PreSign -> "pre-sign"
             .PostSign -> "post-sign"
             .Verify -> "verify"
+        }
+    }
+
+    fn rank(self) -> Int Never! {
+        if self == {
+            .PreSign -> 0
+            .PostSign -> 1
+            .Verify -> 2
         }
     }
 
@@ -200,6 +226,10 @@ pub struct GameBundleAsset {
     pub mode: Int
     pub bytes: [U8]
 
+    fn new(path: String, mode: Int, bytes: [U8]) -> GameBundleAsset Never! {
+        GameBundleAsset{path: path, mode: mode, bytes: bytes}
+    }
+
     fn digest(self) -> String Never! {
         pkg_sha256_hex(self.bytes)
     }
@@ -216,15 +246,15 @@ pub struct GameCrashReporterSpec {
     pub retention_limit: Int
 
     fn not_installed() -> GameCrashReporterSpec Never! {
-        GameCrashReporterSpec{installation: "not-installed", upload_policy: "never", routing: "local", memory_stacks: @GAME_CRASH_MAX_STACKS, memory_logs: @GAME_CRASH_MAX_LOGS, retention_mode: "none", retention_path: "", retention_limit: 0}
+        GameCrashReporterSpec{installation: "not-installed", upload_policy: "never", routing: "local", memory_stacks: GAME_CRASH_MAX_STACKS, memory_logs: GAME_CRASH_MAX_LOGS, retention_mode: "none", retention_path: "", retention_limit: 0}
     }
 
     fn planned() -> GameCrashReporterSpec Never! {
-        GameCrashReporterSpec{installation: "planned", upload_policy: "never", routing: "local", memory_stacks: @GAME_CRASH_MAX_STACKS, memory_logs: @GAME_CRASH_MAX_LOGS, retention_mode: "bounded-persisted", retention_path: "crash-reports", retention_limit: @GAME_CRASH_MAX_PERSISTED}
+        GameCrashReporterSpec{installation: "planned", upload_policy: "never", routing: "local", memory_stacks: GAME_CRASH_MAX_STACKS, memory_logs: GAME_CRASH_MAX_LOGS, retention_mode: "bounded-persisted", retention_path: "crash-reports", retention_limit: GAME_CRASH_MAX_PERSISTED}
     }
 
     fn installed() -> GameCrashReporterSpec Never! {
-        GameCrashReporterSpec{installation: "installed", upload_policy: "never", routing: "local", memory_stacks: @GAME_CRASH_MAX_STACKS, memory_logs: @GAME_CRASH_MAX_LOGS, retention_mode: "bounded-persisted", retention_path: "crash-reports", retention_limit: @GAME_CRASH_MAX_PERSISTED}
+        GameCrashReporterSpec{installation: "installed", upload_policy: "never", routing: "local", memory_stacks: GAME_CRASH_MAX_STACKS, memory_logs: GAME_CRASH_MAX_LOGS, retention_mode: "bounded-persisted", retention_path: "crash-reports", retention_limit: GAME_CRASH_MAX_PERSISTED}
     }
 
     // The reporter, consent, and runtime facts agree with the canonical
@@ -246,12 +276,12 @@ pub struct GameCrashReporterSpec {
         }
         if self.upload_policy != "never" -> return Err(BundleError.InvalidField{field: "game.crash_runtime.upload_policy", reason: "must be `never` until an explicit upload transport is authorized"})
         if self.routing != "local" -> return Err(BundleError.InvalidField{field: "game.crash_runtime.routing", reason: "must be `local` until an explicit upload transport is authorized"})
-        if self.memory_stacks != @GAME_CRASH_MAX_STACKS -> return Err(BundleError.InvalidField{field: "game.crash_runtime.memory_stacks", reason: "must equal the canonical bound {@GAME_CRASH_MAX_STACKS}"})
-        if self.memory_logs != @GAME_CRASH_MAX_LOGS -> return Err(BundleError.InvalidField{field: "game.crash_runtime.memory_logs", reason: "must equal the canonical bound {@GAME_CRASH_MAX_LOGS}"})
+        if self.memory_stacks != GAME_CRASH_MAX_STACKS -> return Err(BundleError.InvalidField{field: "game.crash_runtime.memory_stacks", reason: "must equal the canonical bound {GAME_CRASH_MAX_STACKS}"})
+        if self.memory_logs != GAME_CRASH_MAX_LOGS -> return Err(BundleError.InvalidField{field: "game.crash_runtime.memory_logs", reason: "must equal the canonical bound {GAME_CRASH_MAX_LOGS}"})
         if reporter != "off" && consent == "granted" {
             if self.installation != "planned" && self.installation != "installed" -> return Err(BundleError.InvalidField{field: "game.crash_runtime.installation", reason: "an active reporter must be planned or installed"})
-            if self.retention_mode != "bounded-persisted" || self.retention_limit != @GAME_CRASH_MAX_PERSISTED {
-                return Err(BundleError.InvalidField{field: "game.crash_runtime.retention", reason: "active reporter must persist exactly {@GAME_CRASH_MAX_PERSISTED} latest report"})
+            if self.retention_mode != "bounded-persisted" || self.retention_limit != GAME_CRASH_MAX_PERSISTED {
+                return Err(BundleError.InvalidField{field: "game.crash_runtime.retention", reason: "active reporter must persist exactly {GAME_CRASH_MAX_PERSISTED} latest report"})
             }
             pkg_bundle_validate_asset_path(self.retention_path)
             if self.retention_path != "crash-reports" -> return Err(BundleError.InvalidField{field: "game.crash_runtime.retention_path", reason: "must use the package-local `crash-reports` directory"})
@@ -399,7 +429,7 @@ pub struct BundleSpec {
     // Target-specific icon formats and identity rules.
     fn validate_target_metadata(self) BundleError! {
         if self.target == {
-            .LinuxAppImage -> pkg_bundle_require_icon_formats(self.icons, [IconFormat]{IconFormat.Png, IconFormat.Svg}, "is not supported by linux-appimage")
+            .LinuxAppImage -> pkg_bundle_require_icon_formats(self.icons, [IconFormat]{IconFormat.PNG, IconFormat.SVG}, "is not supported by linux-appimage")
             .MacOSApp -> pkg_bundle_require_icon_formats(self.icons, [IconFormat]{IconFormat.Icns}, "macos-app requires icns icons")
             .WindowsMsix -> {
                 if !pkg_bundle_msix_identifier(self.metadata.identifier) {
@@ -408,7 +438,7 @@ pub struct BundleSpec {
                 if !self.metadata.publisher.trim_start().starts_with("CN=") {
                     return Err(BundleError.InvalidField{field: "metadata.publisher", reason: "must be a distinguished name beginning with `CN=` for windows-msix"})
                 }
-                pkg_bundle_require_icon_formats(self.icons, [IconFormat]{IconFormat.Png, IconFormat.Ico}, "windows-msix supports png or ico icons")
+                pkg_bundle_require_icon_formats(self.icons, [IconFormat]{IconFormat.PNG, IconFormat.Ico}, "windows-msix supports png or ico icons")
             }
         }
     }

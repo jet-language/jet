@@ -12,7 +12,7 @@ PERF_DIR="$ROOT/Tools/perf"
 GATE="$PERF_DIR/source-compiler-gate.sh"
 CONTRACT="$PERF_DIR/source-compiler-contract.tsv"
 POLICY="$PERF_DIR/source-compiler-policy.tsv"
-SCRATCH_ROOT="${JET_PERF_SCRATCH_ROOT:-$HOME/.cache/jet-perf}"
+SCRATCH_ROOT="${JET_PERF_SCRATCH_ROOT:-$HOME/.cache/jet-dev/perf-bench}"
 mkdir -p "$SCRATCH_ROOT"
 case "$(realpath -m -- "$SCRATCH_ROOT")" in
   /tmp|/tmp/*|*/target|*/target/*) echo "source compiler canary scratch must be disk-backed and outside target" >&2; exit 1 ;;

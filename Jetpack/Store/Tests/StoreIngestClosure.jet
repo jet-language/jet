@@ -12,9 +12,9 @@ fn store_test_nix_producer(drv: String, output_name: String, output: String, ref
 }
 
 // Register one entry under the Hangar lock and return the result.
-fn store_test_try_register(roots: HangarRoots, entry: StoreEntry) -> Bool StoreError! {
+fn store_test_try_register(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry) -> Bool StoreError! {
     hangar_lock :: env_runtime_lock(roots.root, "hangar")
-    store_register_entry_unlocked(roots, entry)
+    store_register_entry_unlocked(&verification, roots, entry)
 }
 
 fn store_test_count_transactions(journal: String) -> Int Never! {
@@ -27,6 +27,7 @@ fn store_test_count_transactions(journal: String) -> Int Never! {
 }
 
 #Test("store ingest installs valid secondary named output with matching digest") {
+    verification := StoreVerification.new()
     roots :: store_test_temp_roots()
     out :: files.join(roots.root, "src-primary")
     dev :: files.join(roots.root, "src-dev")
@@ -34,18 +35,19 @@ fn store_test_count_transactions(journal: String) -> Int Never! {
     files.write(files.join(out, "payload"), "primary") ?? panic("payload")
     files.write(dev, "development") ?? panic("dev file")
     files.symlink("payload", files.join(out, "payload-link")) ?? panic("symlink")
-    ingested :: store_ingest_tree(roots, store_test_path_request("named-output", "path:named-output", [String: String]{"out": out, "dev": dev}, "")) ?? panic("ingest")
+    ingested :: store_ingest_tree(&verification, roots, store_test_path_request("named-output", "path:named-output", [String: String]{"out": out, "dev": dev}, "")) ?? panic("ingest")
     dev_digest :: ingested.entry.named_outputs.get("dev") ?? panic("dev output")
     installed :: files.join(files.join(roots.hangar_dir(), "objects"), dev_digest)
     assert_eq(files.read(installed) ?? panic("read dev"), "development")
     assert_eq(files.read_link(files.join(ingested.entry.out, "payload-link")) ?? panic("read link"), "payload")
     actual :: pkg_try_output_hash_of(installed) ?? panic("hash dev")
     assert_eq(dev_digest, actual)
-    store_verify_hangar_object(roots, ingested.entry) ?? panic("verify")
+    store_verify_hangar_object(&verification, roots, ingested.entry) ?? panic("verify")
     store_test_drop_roots(roots)
 }
 
 #Test("store ingest path independent digest ignores source dirname") {
+    verification := StoreVerification.new()
     roots :: store_test_temp_roots()
     left :: files.join(roots.root, "left-name")
     right :: files.join(roots.root, "right-name")
@@ -53,85 +55,89 @@ fn store_test_count_transactions(journal: String) -> Int Never! {
     files.create_dir_all(right) ?? panic("dir")
     files.write(files.join(left, "f"), "x") ?? panic("file")
     files.write(files.join(right, "f"), "x") ?? panic("file")
-    a :: store_ingest_tree(roots, store_test_path_request("a", "path:left", [String: String]{"out": left}, "")) ?? panic("ingest a")
-    b :: store_ingest_tree(roots, store_test_path_request("b", "path:right", [String: String]{"out": right}, "")) ?? panic("ingest b")
+    a :: store_ingest_tree(&verification, roots, store_test_path_request("a", "path:left", [String: String]{"out": left}, "")) ?? panic("ingest a")
+    b :: store_ingest_tree(&verification, roots, store_test_path_request("b", "path:right", [String: String]{"out": right}, "")) ?? panic("ingest b")
     assert_eq(a.entry.envelope.output_hash, b.entry.envelope.output_hash)
     assert(b.deduplicated)
     store_test_drop_roots(roots)
 }
 
 #Test("store closure graph named outputs are independent and queries are cycle safe") {
+    verification := StoreVerification.new()
     roots :: store_test_temp_roots()
-    base :: store_test_ingest_fixture(roots, "base", [String: String]{"out": "base"}, [String]{})
+    base :: store_test_ingest_fixture(&verification, roots, "base", [String: String]{"out": "base"}, [String]{})
     base_hash :: base.entry.envelope.output_hash
-    middle :: store_test_ingest_fixture(roots, "middle", [String: String]{"out": "middle"}, [String]{base_hash})
+    middle :: store_test_ingest_fixture(&verification, roots, "middle", [String: String]{"out": "middle"}, [String]{base_hash})
     middle_hash :: middle.entry.envelope.output_hash
-    consumer :: store_test_ingest_fixture(roots, "consumer", [String: String]{"out": "consumer-out", "dev": "consumer-dev"}, [String]{middle_hash})
+    consumer :: store_test_ingest_fixture(&verification, roots, "consumer", [String: String]{"out": "consumer-out", "dev": "consumer-dev"}, [String]{middle_hash})
     primary :: consumer.entry.envelope.output_hash
     dev :: consumer.entry.named_outputs.get("dev") ?? panic("dev output")
     assert(primary != dev)
-    assert_eq(store_direct_references_of(roots, primary) ?? panic("q"), [String]{middle_hash})
-    assert_eq(store_direct_references_of(roots, dev) ?? panic("q"), [String]{middle_hash})
-    assert_eq(store_transitive_references_of(roots, dev) ?? panic("q"), store_sorted_unique([String]{base_hash, middle_hash}))
-    assert_eq(store_closure_of(roots, dev) ?? panic("q"), store_sorted_unique([String]{base_hash, dev, middle_hash}))
-    assert_eq(store_referrers_of(roots, middle_hash) ?? panic("q"), store_sorted_unique([String]{dev, primary}))
+    assert_eq(store_direct_references_of(&verification, roots, primary) ?? panic("q"), [String]{middle_hash})
+    assert_eq(store_direct_references_of(&verification, roots, dev) ?? panic("q"), [String]{middle_hash})
+    assert_eq(store_transitive_references_of(&verification, roots, dev) ?? panic("q"), store_sorted_unique([String]{base_hash, middle_hash}))
+    assert_eq(store_closure_of(&verification, roots, dev) ?? panic("q"), store_sorted_unique([String]{base_hash, dev, middle_hash}))
+    assert_eq(store_referrers_of(&verification, roots, middle_hash) ?? panic("q"), store_sorted_unique([String]{dev, primary}))
     action :: store_entry_action_key(consumer.entry)
-    assert((store_action_outputs_of(roots, action) ?? panic("q")).get("dev") == Val(dev))
-    assert_eq(store_actions_for_output(roots, primary) ?? panic("q"), [String]{action})
+    assert((store_action_outputs_of(&verification, roots, action) ?? panic("q")).get("dev") == Val(dev))
+    assert_eq(store_actions_for_output(&verification, roots, primary) ?? panic("q"), [String]{action})
 
-    _ :: store_test_ingest_fixture(roots, "base", [String: String]{"out": "base"}, [String]{primary})
-    transitive :: store_transitive_references_of(roots, primary) ?? panic("q")
+    _ :: store_test_ingest_fixture(&verification, roots, "base", [String: String]{"out": "base"}, [String]{primary})
+    transitive :: store_transitive_references_of(&verification, roots, primary) ?? panic("q")
     assert(transitive.contains(base_hash))
     assert(transitive.contains(middle_hash))
     assert(!transitive.contains(primary))
-    assert_eq(store_transitive_referrers_of(roots, base_hash) ?? panic("q"), store_sorted_unique([String]{dev, middle_hash, primary}))
-    assert_eq(store_reverse_closure_of(roots, base_hash) ?? panic("q"), store_sorted_unique([String]{base_hash, dev, middle_hash, primary}))
+    assert_eq(store_transitive_referrers_of(&verification, roots, base_hash) ?? panic("q"), store_sorted_unique([String]{dev, middle_hash, primary}))
+    assert_eq(store_reverse_closure_of(&verification, roots, base_hash) ?? panic("q"), store_sorted_unique([String]{base_hash, dev, middle_hash, primary}))
     store_test_drop_roots(roots)
 }
 
 #Test("store closure refresh and delete remove stale reverse edges") {
+    verification := StoreVerification.new()
     roots :: store_test_temp_roots()
-    left :: store_test_ingest_fixture(roots, "left", [String: String]{"out": "left"}, [String]{})
-    right :: store_test_ingest_fixture(roots, "right", [String: String]{"out": "right"}, [String]{})
+    left :: store_test_ingest_fixture(&verification, roots, "left", [String: String]{"out": "left"}, [String]{})
+    right :: store_test_ingest_fixture(&verification, roots, "right", [String: String]{"out": "right"}, [String]{})
     left_hash :: left.entry.envelope.output_hash
     right_hash :: right.entry.envelope.output_hash
-    consumer :: store_test_ingest_fixture(roots, "refresh", [String: String]{"out": "same"}, [String]{left_hash})
-    assert_eq(store_referrers_of(roots, left_hash) ?? panic("q"), [String]{consumer.entry.envelope.output_hash})
-    refreshed :: store_test_ingest_fixture(roots, "refresh", [String: String]{"out": "same"}, [String]{right_hash})
-    assert_eq((store_closure_graph(roots) ?? panic("graph")).referrers(left_hash).len(), 0)
-    assert_eq((store_closure_graph(roots) ?? panic("graph")).referrers(right_hash), [String]{refreshed.entry.envelope.output_hash})
-    assert(store_remove_closure_record(roots, refreshed.entry.id) ?? panic("remove"))
+    consumer :: store_test_ingest_fixture(&verification, roots, "refresh", [String: String]{"out": "same"}, [String]{left_hash})
+    assert_eq(store_referrers_of(&verification, roots, left_hash) ?? panic("q"), [String]{consumer.entry.envelope.output_hash})
+    refreshed :: store_test_ingest_fixture(&verification, roots, "refresh", [String: String]{"out": "same"}, [String]{right_hash})
+    assert_eq((store_closure_graph(&verification, roots) ?? panic("graph")).referrers(left_hash).len(), 0)
+    assert_eq((store_closure_graph(&verification, roots) ?? panic("graph")).referrers(right_hash), [String]{refreshed.entry.envelope.output_hash})
+    assert(store_remove_closure_record(&verification, roots, refreshed.entry.id) ?? panic("remove"))
     stale_meta :: files.join(files.join(roots.hangar_dir(), refreshed.entry.id), "meta.json")
     files.write(stale_meta, refreshed.entry.meta_json()) ?? panic("stale meta")
-    assert_eq((store_closure_graph(roots) ?? panic("graph")).referrers(right_hash).len(), 0)
+    assert_eq((store_closure_graph(&verification, roots) ?? panic("graph")).referrers(right_hash).len(), 0)
     assert(!files.exists(stale_meta))
-    assert(!(store_remove_closure_record(roots, refreshed.entry.id) ?? panic("remove again")))
+    assert(!(store_remove_closure_record(&verification, roots, refreshed.entry.id) ?? panic("remove again")))
     store_test_drop_roots(roots)
 }
 
-fn store_test_record_action(roots: HangarRoots, name: String, bytes: String) -> StoreEntry StoreError! {
+fn store_test_record_action(verification: &StoreVerification, roots: HangarRoots, name: String, bytes: String) -> StoreEntry StoreError! {
     out :: files.join(roots.root, name)
     files.create_dir_all(out) ?? panic("dir")
     files.write(files.join(out, "payload"), bytes) ?? panic("payload")
     envelope :: Envelope.for_output(out, "path:same-action", "action-conflict")
-    store_record_verified(roots, name, "1", "path:same-action", out, "", "", envelope, store_test_identity())
+    store_record_verified(&verification, roots, name, "1", "path:same-action", out, "", "", envelope, store_test_identity())
 }
 
 #Test("store closure rejects one action mapping to different outputs") {
+    verification := StoreVerification.new()
     roots :: store_test_temp_roots()
-    store_test_record_action(roots, "first-action-output", "first") ?? panic("first")
-    if store_test_record_action(roots, "second-action-output", "second") == {
+    store_test_record_action(&verification, roots, "first-action-output", "first") ?? panic("first")
+    if store_test_record_action(&verification, roots, "second-action-output", "second") == {
         .Ok(_) -> panic("a second output for one action must be refused")
         .Err(error) -> assert(error.message().contains("conflicting bytes"))
     }
-    assert_eq((store_closure_graph(roots) ?? panic("graph")).records.len(), 1)
+    assert_eq((store_closure_graph(&verification, roots) ?? panic("graph")).records.len(), 1)
     store_test_drop_roots(roots)
 }
 
 #Test("store closure action key includes sorted reference digests") {
+    verification := StoreVerification.new()
     roots :: store_test_temp_roots()
-    first :: store_test_ingest_fixture(roots, "key-first", [String: String]{"out": "first"}, [String]{})
-    second :: store_test_ingest_fixture(roots, "key-second", [String: String]{"out": "second"}, [String]{})
+    first :: store_test_ingest_fixture(&verification, roots, "key-first", [String: String]{"out": "first"}, [String]{})
+    second :: store_test_ingest_fixture(&verification, roots, "key-second", [String: String]{"out": "second"}, [String]{})
     entry := first.entry
     entry.references = [String]{second.entry.envelope.output_hash, first.entry.envelope.output_hash}
     ordered :: store_entry_action_key(entry)
@@ -151,8 +157,9 @@ fn store_test_record_action(roots: HangarRoots, name: String, bytes: String) -> 
 }
 
 #Test("store closure action key excludes realized outputs but keeps action facts") {
+    verification := StoreVerification.new()
     roots :: store_test_temp_roots()
-    entry := store_test_ingest_fixture(roots, "action-projection", [String: String]{"out": "bytes"}, [String]{}).entry
+    entry := store_test_ingest_fixture(&verification, roots, "action-projection", [String: String]{"out": "bytes"}, [String]{}).entry
     original_record :: entry.producer_record
     original :: store_entry_action_key(entry)
 
@@ -178,8 +185,9 @@ fn store_test_record_action(roots: HangarRoots, name: String, bytes: String) -> 
 }
 
 #Test("store nix action key is input derivation only") {
+    verification := StoreVerification.new()
     roots :: store_test_temp_roots()
-    first := store_test_ingest_fixture(roots, "nix-action", [String: String]{"out": "bytes"}, [String]{}).entry
+    first := store_test_ingest_fixture(&verification, roots, "nix-action", [String: String]{"out": "bytes"}, [String]{}).entry
     first.reference = "first@nixpkgs"
     first.cache_identity.source_fingerprint = "sha256-first-output"
     first.producer_record = store_test_nix_producer("/nix/store/action.drv", "out", "/nix/store/first", "first@nixpkgs")
@@ -206,38 +214,40 @@ fn store_test_project_multi(original: StoreEntry, id: String, output_name: Strin
 }
 
 #Test("store nix multi projection registers recovers queries and rolls back conflict") {
+    verification := StoreVerification.new()
     roots :: store_test_temp_roots()
-    out_source :: store_test_ingest_fixture(roots, "projection-out-bytes", [String: String]{"out": "out"}, [String]{})
-    dev_source :: store_test_ingest_fixture(roots, "projection-dev-bytes", [String: String]{"out": "dev"}, [String]{})
-    conflict :: store_test_ingest_fixture(roots, "projection-bad-dev", [String: String]{"out": "bad"}, [String]{})
+    out_source :: store_test_ingest_fixture(&verification, roots, "projection-out-bytes", [String: String]{"out": "out"}, [String]{})
+    dev_source :: store_test_ingest_fixture(&verification, roots, "projection-dev-bytes", [String: String]{"out": "dev"}, [String]{})
+    conflict :: store_test_ingest_fixture(&verification, roots, "projection-bad-dev", [String: String]{"out": "bad"}, [String]{})
     out :: store_test_project_multi(out_source.entry, "projection-out", "out")
     dev :: store_test_project_multi(dev_source.entry, "projection-dev", "dev")
     bad :: store_test_project_multi(conflict.entry, "projection-bad", "dev")
     action :: store_entry_action_key(out)
     assert_eq(store_entry_action_key(dev), action)
-    store_test_try_register(roots, out) ?? panic("register out")
-    store_test_try_register(roots, dev) ?? panic("register dev")
+    store_test_try_register(&verification, roots, out) ?? panic("register out")
+    store_test_try_register(&verification, roots, dev) ?? panic("register dev")
     files.remove(files.join(files.join(roots.hangar_dir(), dev.id), "meta.json")) ?? panic("remove dev meta")
-    outputs :: store_action_outputs_of(roots, action) ?? panic("outputs")
+    outputs :: store_action_outputs_of(&verification, roots, action) ?? panic("outputs")
     assert_eq(outputs.get("out") ?? "", out.envelope.output_hash)
     assert_eq(outputs.get("dev") ?? "", dev.envelope.output_hash)
     assert(files.is_file(files.join(files.join(roots.hangar_dir(), dev.id), "meta.json")))
-    before :: store_closure_graph(roots) ?? panic("graph")
-    if store_test_try_register(roots, bad) == {
+    before :: store_closure_graph(&verification, roots) ?? panic("graph")
+    if store_test_try_register(&verification, roots, bad) == {
         .Ok(_) -> panic("a conflicting projection must be refused")
         .Err(error) -> assert(error.message().contains("conflicting bytes"))
     }
-    assert_eq(store_closure_graph(roots) ?? panic("graph"), before)
+    assert_eq(store_closure_graph(&verification, roots) ?? panic("graph"), before)
     store_test_drop_roots(roots)
 }
 
 #Test("store closure empty reference proof rejects unknown provider") {
+    verification := StoreVerification.new()
     roots :: store_test_temp_roots()
-    entry := store_test_ingest_fixture(roots, "unknown-proof", [String: String]{"out": "bytes"}, [String]{}).entry
+    entry := store_test_ingest_fixture(&verification, roots, "unknown-proof", [String: String]{"out": "bytes"}, [String]{}).entry
     entry.id = "unknown-proof-record"
     original :: ProducerRecord.decode(entry.producer_record) ?? panic("producer")
     entry.producer_record = (ProducerRecord.new("unknown-provider", original.immutable_source, original.source_digest, original.plan, original.toolchain_facts, original.policy_facts, [String: String]{"closure.authority": "hangar-cas"}) ?? panic("producer")).encode()
-    if store_test_try_register(roots, entry) == {
+    if store_test_try_register(&verification, roots, entry) == {
         .Ok(_) -> panic("an unknown provider needs a closure proof")
         .Err(error) -> assert(error.message().contains("store-validated closure proof"))
     }
@@ -245,12 +255,13 @@ fn store_test_project_multi(original: StoreEntry, id: String, output_name: Strin
 }
 
 #Test("store closure rejects named out that disagrees with primary") {
+    verification := StoreVerification.new()
     roots :: store_test_temp_roots()
-    primary :: store_test_ingest_fixture(roots, "named-out-primary", [String: String]{"out": "primary"}, [String]{})
-    other :: store_test_ingest_fixture(roots, "named-out-other", [String: String]{"out": "other"}, [String]{})
+    primary :: store_test_ingest_fixture(&verification, roots, "named-out-primary", [String: String]{"out": "primary"}, [String]{})
+    other :: store_test_ingest_fixture(&verification, roots, "named-out-other", [String: String]{"out": "other"}, [String]{})
     conflicting := primary.entry
     conflicting.named_outputs["out"] = other.entry.envelope.output_hash
-    if store_test_try_register(roots, conflicting) == {
+    if store_test_try_register(&verification, roots, conflicting) == {
         .Ok(_) -> panic("a disagreeing named out must be refused")
         .Err(error) -> assert(error.message().contains("names `out`"))
     }
@@ -258,31 +269,33 @@ fn store_test_project_multi(original: StoreEntry, id: String, output_name: Strin
 }
 
 #Test("store closure rejects same action output name with conflicting bytes") {
+    verification := StoreVerification.new()
     roots :: store_test_temp_roots()
-    primary :: store_test_ingest_fixture(roots, "same-record", [String: String]{"out": "primary"}, [String]{})
-    named :: store_test_ingest_fixture(roots, "named-source", [String: String]{"out": "named"}, [String]{})
+    primary :: store_test_ingest_fixture(&verification, roots, "same-record", [String: String]{"out": "primary"}, [String]{})
+    named :: store_test_ingest_fixture(&verification, roots, "named-source", [String: String]{"out": "named"}, [String]{})
     action :: store_entry_action_key(primary.entry)
     conflicting := primary.entry
     conflicting.id = "conflicting-projection"
     conflicting.out = named.entry.out
     conflicting.envelope.output_hash = named.entry.envelope.output_hash
     conflicting.named_outputs = [String: String]{"out": named.entry.envelope.output_hash}
-    if store_test_try_register(roots, conflicting) == {
+    if store_test_try_register(&verification, roots, conflicting) == {
         .Ok(_) -> panic("conflicting bytes must be refused")
         .Err(error) -> assert(error.message().contains("conflicting bytes"))
     }
-    outputs :: store_action_outputs_of(roots, action) ?? panic("outputs")
+    outputs :: store_action_outputs_of(&verification, roots, action) ?? panic("outputs")
     assert_eq(outputs.len(), 1)
     assert(!outputs.has_key("dev"))
     store_test_drop_roots(roots)
 }
 
 #Test("store closure journal recovers partial and rejects committed corruption") {
+    verification := StoreVerification.new()
     roots :: store_test_temp_roots()
-    _ :: store_test_ingest_fixture(roots, "journal", [String: String]{"out": "journal"}, [String]{})
+    _ :: store_test_ingest_fixture(&verification, roots, "journal", [String: String]{"out": "journal"}, [String]{})
     journal :: files.join(roots.hangar_dir(), "closure-db/journal")
     files.write(files.join(journal, "999.partial"), "torn") ?? panic("partial")
-    assert_eq(store_recover_closure_journal(roots) ?? panic("recover"), 1)
+    assert_eq(store_recover_closure_journal(&verification, roots) ?? panic("recover"), 1)
     assert(!files.exists(files.join(journal, "999.partial")))
     transaction := ""
     loop name in files.listdir(journal) ?? panic("list") {
@@ -293,63 +306,66 @@ fn store_test_project_multi(original: StoreEntry, id: String, output_name: Strin
     files.create_dir_all(legacy_referrers) ?? panic("referrers dir")
     files.write(files.join(legacy_referrers, "fake.refs"), "fallback-must-not-win\n") ?? panic("fake refs")
     files.append_all(transaction, "corrupt") ?? panic("corrupt")
-    if store_closure_graph(roots) == {
+    if store_closure_graph(&verification, roots) == {
         .Ok(_) -> panic("a corrupt journal must be refused")
         .Err(error) -> {
             assert(error == .InvalidData(_))
             assert(error.message().contains("checksum"))
         }
     }
-    assert(store_referrers_of(roots, "fake") == .Err(_))
+    assert(store_referrers_of(&verification, roots, "fake") == .Err(_))
     store_test_drop_roots(roots)
 }
 
 #Test("store committed producer transaction recovers missing package projection") {
+    verification := StoreVerification.new()
     roots :: store_test_temp_roots()
-    ingested :: store_test_ingest_fixture(roots, "producer-recovery", [String: String]{"out": "primary", "dev": "headers"}, [String]{})
+    ingested :: store_test_ingest_fixture(&verification, roots, "producer-recovery", [String: String]{"out": "primary", "dev": "headers"}, [String]{})
     meta :: files.join(files.join(roots.hangar_dir(), ingested.entry.id), "meta.json")
     expected :: files.read(meta) ?? panic("read meta")
     files.remove(meta) ?? panic("remove meta")
-    assert_eq(store_recover_closure_journal(roots) ?? panic("recover"), 1)
+    assert_eq(store_recover_closure_journal(&verification, roots) ?? panic("recover"), 1)
     listed := false
-    loop entry in store_list_checked(roots) ?? panic("listing") {
+    loop entry in store_list_checked(&verification, roots) ?? panic("listing") {
         if entry.id == ingested.entry.id -> listed = true
     }
     assert(listed)
-    graph :: store_closure_graph(roots) ?? panic("graph")
+    graph :: store_closure_graph(&verification, roots) ?? panic("graph")
     record :: graph.records.get(ingested.entry.id) ?? panic("record")
     assert_eq((ProducerRecord.decode(record.producer_record) ?? panic("producer")).provider, "hangar-ingest")
     assert_eq(record.outputs.len(), 2)
     assert_eq(files.read(meta) ?? panic("read meta"), expected)
 
     files.write(meta, "stale but parseable projection") ?? panic("stale meta")
-    assert_eq(store_recover_closure_journal(roots) ?? panic("recover"), 1)
+    assert_eq(store_recover_closure_journal(&verification, roots) ?? panic("recover"), 1)
     assert_eq(files.read(meta) ?? panic("read meta"), expected)
     files.write_bytes(meta, [U8]{U8{255}, U8{254}, U8{253}}) ?? panic("binary meta")
-    assert_eq(store_recover_closure_journal(roots) ?? panic("recover"), 1)
+    assert_eq(store_recover_closure_journal(&verification, roots) ?? panic("recover"), 1)
     assert_eq(files.read(meta) ?? panic("read meta"), expected)
     files.remove(meta) ?? panic("remove meta")
-    assert(!(store_test_try_register(roots, ingested.entry) ?? panic("register")))
+    assert(!(store_test_try_register(&verification, roots, ingested.entry) ?? panic("register")))
     assert_eq(files.read(meta) ?? panic("read meta"), expected)
     store_test_drop_roots(roots)
 }
 
 #Test("store combined recovery sweeps staging and repairs wal projection") {
+    verification := StoreVerification.new()
     roots :: store_test_temp_roots()
-    ingested :: store_test_ingest_fixture(roots, "combined-recovery", [String: String]{"out": "bytes"}, [String]{})
+    ingested :: store_test_ingest_fixture(&verification, roots, "combined-recovery", [String: String]{"out": "bytes"}, [String]{})
     abandoned :: files.join(roots.hangar_dir(), ".stage/abandoned")
     files.create_dir_all(abandoned) ?? panic("abandoned dir")
     files.write(files.join(abandoned, "payload"), "partial") ?? panic("payload")
     meta :: files.join(files.join(roots.hangar_dir(), ingested.entry.id), "meta.json")
     expected :: ingested.entry.meta_json()
     files.write(meta, "stale") ?? panic("stale meta")
-    assert_eq(store_recover_hangar(roots) ?? panic("recover"), 2)
+    assert_eq(store_recover_hangar(&verification, roots) ?? panic("recover"), 2)
     assert(!files.exists(abandoned))
     assert_eq(files.read(meta) ?? panic("read meta"), expected)
     store_test_drop_roots(roots)
 }
 
 #Test("store admission failure points hide partial metadata and recover idempotently") {
+    verification := StoreVerification.new()
     points :: [AdmissionFailurePoint]{AdmissionFailurePoint.AfterObjectPublication, AdmissionFailurePoint.AfterReceiptPublication, AdmissionFailurePoint.AfterClosureRegistration}
     loop index in 0..<points.len() {
         point :: points[index]
@@ -359,22 +375,22 @@ fn store_test_project_multi(original: StoreEntry, id: String, output_name: Strin
         files.write(files.join(source, "payload"), "failure-{index}") ?? panic("payload")
         request :: store_test_path_request("failure-{index}", "path:failure-{index}", [String: String]{"out": source}, "transaction-test")
         previous :: store_begin_admission_failure(point)
-        failed :: store_ingest_tree(roots, request) == .Err(_)
+        failed :: store_ingest_tree(&verification, roots, request) == .Err(_)
         store_end_admission_failure(previous)
         assert(failed)
         if point != AdmissionFailurePoint.AfterClosureRegistration {
-            store_recover_hangar(roots) ?? panic("recover")
-            store_recover_hangar(roots) ?? panic("recover")
-            assert_eq((store_list_checked(roots) ?? panic("listing")).len(), 0)
-            assert_eq((files.list_dir(files.join(roots.hangar_dir(), @STORE_OBJECTS_DIR)) ?? panic("objects")).len(), 0)
+            store_recover_hangar(&verification, roots) ?? panic("recover")
+            store_recover_hangar(&verification, roots) ?? panic("recover")
+            assert_eq((store_list_checked(&verification, roots) ?? panic("listing")).len(), 0)
+            assert_eq((files.list_dir(files.join(roots.hangar_dir(), STORE_OBJECTS_DIR)) ?? panic("objects")).len(), 0)
         } else {
-            committed :: store_list_checked(roots) ?? panic("listing")
+            committed :: store_list_checked(&verification, roots) ?? panic("listing")
             assert_eq(committed.len(), 1)
             files.remove(files.join(files.join(roots.hangar_dir(), committed[0].id), "meta.json")) ?? panic("remove meta")
-            store_recover_hangar(roots) ?? panic("recover")
-            recovered :: store_list_checked(roots) ?? panic("listing")
-            store_recover_hangar(roots) ?? panic("recover")
-            assert_eq(store_list_checked(roots) ?? panic("listing"), recovered)
+            store_recover_hangar(&verification, roots) ?? panic("recover")
+            recovered :: store_list_checked(&verification, roots) ?? panic("listing")
+            store_recover_hangar(&verification, roots) ?? panic("recover")
+            assert_eq(store_list_checked(&verification, roots) ?? panic("listing"), recovered)
             assert_eq(recovered, committed)
         }
         store_test_drop_roots(roots)
@@ -382,17 +398,18 @@ fn store_test_project_multi(original: StoreEntry, id: String, output_name: Strin
 }
 
 #Test("store closure legacy migration is idempotent") {
+    verification := StoreVerification.new()
     roots :: store_test_temp_roots()
-    first := store_test_ingest_fixture(roots, "legacy-first", [String: String]{"out": "first"}, [String]{}).entry
-    second := store_test_ingest_fixture(roots, "legacy-second", [String: String]{"out": "second"}, [String]{}).entry
+    first := store_test_ingest_fixture(&verification, roots, "legacy-first", [String: String]{"out": "first"}, [String]{}).entry
+    second := store_test_ingest_fixture(&verification, roots, "legacy-second", [String: String]{"out": "second"}, [String]{}).entry
     first.references = [String]{second.envelope.output_hash}
     second.references = [String]{first.envelope.output_hash}
     files.write(files.join(files.join(roots.hangar_dir(), first.id), "meta.json"), first.meta_json()) ?? panic("meta")
     files.write(files.join(files.join(roots.hangar_dir(), second.id), "meta.json"), second.meta_json()) ?? panic("meta")
     files.remove_all(files.join(roots.hangar_dir(), "closure-db")) ?? panic("remove db")
-    assert_eq(store_migrate_closure_graph(roots) ?? panic("migrate"), 2)
-    assert_eq(store_migrate_closure_graph(roots) ?? panic("migrate"), 0)
-    graph :: store_closure_graph(roots) ?? panic("graph")
+    assert_eq(store_migrate_closure_graph(&verification, roots) ?? panic("migrate"), 2)
+    assert_eq(store_migrate_closure_graph(&verification, roots) ?? panic("migrate"), 0)
+    graph :: store_closure_graph(&verification, roots) ?? panic("graph")
     assert(graph.records.has_key(first.id))
     assert(graph.records.has_key(second.id))
     assert_eq(graph.direct_references(first.envelope.output_hash), first.references)
@@ -401,12 +418,13 @@ fn store_test_project_multi(original: StoreEntry, id: String, output_name: Strin
 }
 
 #Test("store closure legacy migration rejects atomically") {
+    verification := StoreVerification.new()
     roots :: store_test_temp_roots()
-    entry := store_test_ingest_fixture(roots, "legacy-invalid", [String: String]{"out": "invalid"}, [String]{}).entry
+    entry := store_test_ingest_fixture(&verification, roots, "legacy-invalid", [String: String]{"out": "invalid"}, [String]{}).entry
     entry.references = [String]{"sha256-missing"}
     files.write(files.join(files.join(roots.hangar_dir(), entry.id), "meta.json"), entry.meta_json()) ?? panic("meta")
     files.remove_all(files.join(roots.hangar_dir(), "closure-db")) ?? panic("remove db")
-    if store_migrate_closure_graph(roots) == {
+    if store_migrate_closure_graph(&verification, roots) == {
         .Ok(_) -> panic("a missing reference must be refused")
         .Err(error) -> assert(error.message().contains("references missing object"))
     }
@@ -415,13 +433,14 @@ fn store_test_project_multi(original: StoreEntry, id: String, output_name: Strin
 }
 
 #Test("store legacy migration fails closed without immutable producer facts") {
+    verification := StoreVerification.new()
     roots :: store_test_temp_roots()
-    entry := store_test_ingest_fixture(roots, "legacy-missing-producer", [String: String]{"out": "legacy"}, [String]{}).entry
+    entry := store_test_ingest_fixture(&verification, roots, "legacy-missing-producer", [String: String]{"out": "legacy"}, [String]{}).entry
     entry.producer_record = ""
     entry.cache_identity = CacheIdentity.empty()
     files.write(files.join(files.join(roots.hangar_dir(), entry.id), "meta.json"), entry.meta_json()) ?? panic("meta")
     files.remove_all(files.join(roots.hangar_dir(), "closure-db")) ?? panic("remove db")
-    if store_migrate_closure_graph(roots) == {
+    if store_migrate_closure_graph(&verification, roots) == {
         .Ok(_) -> panic("a legacy record without producer facts must be refused")
         .Err(error) -> assert(error.message().contains("lacks immutable producer facts"))
     }
@@ -429,18 +448,19 @@ fn store_test_project_multi(original: StoreEntry, id: String, output_name: Strin
 }
 
 #Test("store provider registration moves local output into canonical objects") {
+    verification := StoreVerification.new()
     roots :: store_test_temp_roots()
     out :: files.join(roots.hangar_dir(), "provider-output")
     files.create_dir_all(files.join(out, "bin")) ?? panic("dir")
     files.write(files.join(out, "bin/tool"), "provider") ?? panic("tool")
     store_seal_local_output(out) ?? panic("seal")
     envelope :: Envelope.for_output(out, "path:provider", "provider")
-    canonical :: store_canonicalize_local_output_unlocked(roots, out, files.join(out, "bin"), "", envelope.output_hash) ?? panic("canonicalize")
-    entry :: store_record_verified_mode(roots, "provider", "1", "path:provider", canonical.out, canonical.bin, canonical.rlib, envelope, store_test_identity(), false) ?? panic("record")
+    canonical :: store_canonicalize_local_output_unlocked(&verification, roots, out, files.join(out, "bin"), "", envelope.output_hash) ?? panic("canonicalize")
+    entry :: store_record_verified_mode(&verification, roots, "provider", "1", "path:provider", canonical.out, canonical.bin, canonical.rlib, envelope, store_test_identity(), false) ?? panic("record")
     assert_eq(entry.out, files.join(files.join(roots.hangar_dir(), "objects"), entry.envelope.output_hash))
     assert(!files.exists(out))
-    store_verify_hangar_object(roots, entry) ?? panic("verify")
-    lease :: store_snapshot_lease(roots, entry) ?? panic("lease")
+    store_verify_hangar_object(&verification, roots, entry) ?? panic("verify")
+    lease :: store_snapshot_lease(&verification, roots, entry) ?? panic("lease")
     lease.release()
     store_test_drop_roots(roots)
 }

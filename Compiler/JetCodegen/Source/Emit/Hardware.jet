@@ -156,7 +156,8 @@ fn jet_rust_emit_has_hardware_interrupts(ctx: &JetRustEmitContext) -> Bool Never
 
 fn jet_rust_emit_interrupt_handler_function(ctx: &JetRustEmitContext, handler_symbol: String) -> MIRFunction? {
     found := MIRFunction?{None}
-    loop function in ctx.program.functions {
+    loop function_index in 0..<ctx.program.functions.len() {
+        function := ctx.program.functions[function_index]
         if function.key != handler_symbol -> next
         if found != None {
             jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR interrupt handler resolves to multiple function rows", "each checked interrupt binding names exactly one handler function", None)
@@ -401,7 +402,7 @@ fn jet_rust_emit_hardware_call(ctx: &JetRustEmitContext, function: MIRFunction, 
                 jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR hardware DMA wait receiver disagrees with checked buffer_ty", "DMA wait receivers are __JetDmaTransfer<buffer_ty> with no value arguments", Val(function.span))
                 return "unreachable!(\"hardware DMA wait receiver type\")"
             }
-            return "{root}jet_hardware_dma_wait_typed({jet_rust_emit_quote(profile_id)}, {jet_rust_emit_quote(channel)}, {jet_rust_emit_value_move(transfer)})"
+            return "{root}jet_hardware_dma_wait_typed({jet_rust_emit_quote(profile_id)}, {jet_rust_emit_quote(channel)}, {jet_rust_emit_value_move(ctx, transfer)})"
         }
     }
 }

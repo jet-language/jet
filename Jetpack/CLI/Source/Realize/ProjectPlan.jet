@@ -34,7 +34,7 @@ pub struct RunPlan {
             refs: [RefSpec]{},
             adapters: [AdapterPlan]{},
             table: table,
-            label: @JETPACK_PROMPT_LABEL,
+            label: JETPACK_PROMPT_LABEL,
             prompt_path: PromptPathMode.Short,
             prompt_strip: PromptStripMode.Off,
             dev_services: [DevServicePlan]{},
@@ -53,22 +53,22 @@ pub struct RunPlan {
 // Environment and workspace commands run from a project subdirectory keep
 // this one root so planning, trust, dotenv composition, managed state, and
 // explicit refs share the same project identity.
-pub fn cli_project_env_root(start: String) -[IO, FS, Env, Exec]> String Never! {
-    cli_project_root(start)
+pub fn cli_project_env_root(cache: &WorkspaceDeclarationCache, start: String) -[IO, FS, Env, Exec, Time.Wait]> String Never! {
+    cli_project_root(&cache, start)
 }
 
 // Build a plan from the project `env.jet` (the no-explicit-ref path).
-pub fn cli_load_project_plan(theme: Theme) -[IO, FS, Env, Exec]> RunPlan CliError! {
-    cli_load_project_plan_with_selections(theme, None, None)
+pub fn cli_load_project_plan(cache: &WorkspaceDeclarationCache, theme: Theme) -[IO, FS, Env, Exec, Time.Wait]> RunPlan CLIError! {
+    cli_load_project_plan_with_selections(&cache, theme, None, None)
 }
 
-pub fn cli_load_project_plan_with_selections(theme: Theme, requested_preset: String?, requested_environment: String?) -[IO, FS, Env, Exec]> RunPlan CliError! {
+pub fn cli_load_project_plan_with_selections(cache: &WorkspaceDeclarationCache, theme: Theme, requested_preset: String?, requested_environment: String?) -[IO, FS, Env, Exec, Time.Wait]> RunPlan CLIError! {
     cwd :: cli_current_dir()
-    if cli_reject_retired_jetpack_toml(cwd) == .Val(code) -> return Err(CliError.Reported(code))
-    dir :: cli_project_env_root(cwd)
+    if cli_reject_retired_jetpack_toml(cwd) == .Val(code) -> return Err(CLIError.Reported(code))
+    dir :: cli_project_env_root(&cache, cwd)
     src :: files.read(EnvFile.path_in(dir)) ?? {
-        theme.error("nothing to do", "no ref was given and there is no {@ENV_FILE} here.", "try `jet run fastfetch@jetpack`, or `jet add <ref>` first.")
-        return Err(CliError.Reported(@EXIT_USAGE))
+        theme.error("nothing to do", "no ref was given and there is no {ENV_FILE} here.", "try `jet run fastfetch@jetpack`, or `jet add <ref>` first.")
+        return Err(CLIError.Reported(EXIT_USAGE))
     }
     if envmodel_is_module_surface(src) -> return cli_typed_plan(theme, src, dir, requested_preset, requested_environment)
     if requested_environment == .Val(name) {
@@ -78,7 +78,7 @@ pub fn cli_load_project_plan_with_selections(theme: Theme, requested_preset: Str
             "the explicit selector applies to typed `env.<name>` modules",
             "select a declared `env.<name>` module with `--env <name>`, or omit `--env`"
         )
-        return Err(CliError.Reported(@EXIT_USAGE))
+        return Err(CLIError.Reported(EXIT_USAGE))
     }
     env_file :: EnvFile.parse(src)
     table := env_file.source_table()
@@ -98,10 +98,10 @@ fn cli_push_package_ref(refs: &[String], package: String) Never! {
 // Evaluate the typed `module { … }` env surface (U3/U6/U8) into a plan.
 // Source refs merge across modules, `Pkg` sugar resolves to
 // `package@source` refs, and the merged `prompt` becomes the shell label.
-fn cli_typed_plan(theme: Theme, src: String, dir: String, requested_preset: String?, requested_environment: String?) -[IO, FS, Env, Exec]> RunPlan CliError! {
+fn cli_typed_plan(theme: Theme, src: String, dir: String, requested_preset: String?, requested_environment: String?) -[IO, FS, Env, Exec, Time.Wait]> RunPlan CLIError! {
     plan :: envmodel_evaluate_env_with_selections(src, dir, requested_preset, requested_environment) ?? {
-        term.eprint(diagnostics_render_all(@ENV_FILE, src, [Diagnostic]{err.diagnostic}))
-        return Err(CliError.Reported(@EXIT_USAGE))
+        term.eprint(diagnostics_render_all(ENV_FILE, src, [Diagnostic]{err.diagnostic}))
+        return Err(CLIError.Reported(EXIT_USAGE))
     }
     table := plan.table
     cli_ensure_builtin_sources(&table)
@@ -132,7 +132,7 @@ fn cli_typed_plan(theme: Theme, src: String, dir: String, requested_preset: Stri
         refs: refs,
         adapters: plan.adapters,
         table: table,
-        label: plan.prompt ?? @JETPACK_PROMPT_LABEL,
+        label: plan.prompt ?? JETPACK_PROMPT_LABEL,
         prompt_path: plan.prompt_path,
         prompt_strip: plan.prompt_strip,
         dev_services: plan.dev_services,
@@ -161,12 +161,12 @@ fn cli_typed_plan(theme: Theme, src: String, dir: String, requested_preset: Stri
 
 // Classify a sequence of `package@source` refs against `table`, printing the
 // first failure and exiting 2.
-fn cli_classify_all(theme: Theme, raws: [String], table: SourceTable) -[IO]> [RefSpec] CliError! {
+fn cli_classify_all(theme: Theme, raws: [String], table: SourceTable) -[IO, Time.Wait]> [RefSpec] CLIError! {
     refs := [RefSpec]{}
     loop raw in raws {
         spec :: RefSpec.classify_in(raw, table) ?? {
             cli_ref_error(theme, err)
-            return Err(CliError.Reported(@EXIT_USAGE))
+            return Err(CLIError.Reported(EXIT_USAGE))
         }
         &refs.push(spec)
     }

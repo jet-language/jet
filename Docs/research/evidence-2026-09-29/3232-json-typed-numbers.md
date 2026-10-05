@@ -1,6 +1,6 @@
 # #3232 — Typed JSON numbers across execution modes
 
-Date: 2026-09-29. Binary: `jet-debug-snapshot14` (via `~/.cache/jet-luna/safe-jet.sh`).
+Date: 2026-09-29. Binary: `jet-debug-snapshot14` (via `~/.cache/jet-dev/safe-jet.sh`).
 
 ## Question
 
@@ -21,7 +21,7 @@ safe-jet.sh run --interpret Examples/features/serde/json_typed_numbers.jet
 safe-jet.sh build          Examples/features/serde/json_typed_numbers.jet && .jet/build/json_typed_numbers
 ```
 
-Outputs kept at `~/.cache/jet-test-scratch/Closer00/out/serde/json_typed_numbers.{run,int,aot}`.
+Outputs kept at `~/.cache/jet-dev/scratch/Closer00/out/serde/json_typed_numbers.{run,int,aot}`.
 Web was not run (no web runner used by this closer; `cargo test --test web_browser` is a cargo build).
 
 ## Evidence (observed)

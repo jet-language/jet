@@ -144,6 +144,15 @@ const NEVER_PLAIN_RETURN_FIXTURE_SOURCE: &str =
     include_str!("../../Examples/features/functions/never_plain_return.jet");
 const NEVER_PLAIN_RETURN_FIXTURE_EXPECTED: &str =
     include_str!("../../Examples/features/expected/functions/never_plain_return.out");
+// Registry-row shapes the stage-one ladder hit: owned temporaries fill `^`
+// and `&` parameters, plain enums compare through their derived equality,
+// and `Val(Enum.X)` / `Ok(Enum.X)` / `??` payloads reach canonical declared
+// types through tables, returns, and a `prep` row table. The unit is smaller
+// than the derive template, so derived members keep offsets past its end.
+const REGISTRY_ROWS_FIXTURE_SOURCE: &str =
+    include_str!("../../Examples/features/types/registry_rows.jet");
+const REGISTRY_ROWS_FIXTURE_EXPECTED: &str =
+    include_str!("../../Examples/features/expected/types/registry_rows.out");
 const HANDLE_LIFETIME_FIXTURE_SOURCE: &str = r#"use c.close as c
 
 #Layout(c)
@@ -2012,9 +2021,19 @@ fn bootstrap_private_self_compile_harness() {
             DERIVED_ORDER_FIXTURE_EXPECTED,
         ),
         (
+            "display_read_receiver",
+            include_str!("../../Examples/features/traits/display_read_receiver.jet"),
+            include_str!("../../Examples/features/expected/traits/display_read_receiver.out"),
+        ),
+        (
             "never_plain_return",
             NEVER_PLAIN_RETURN_FIXTURE_SOURCE,
             NEVER_PLAIN_RETURN_FIXTURE_EXPECTED,
+        ),
+        (
+            "registry_rows",
+            REGISTRY_ROWS_FIXTURE_SOURCE,
+            REGISTRY_ROWS_FIXTURE_EXPECTED,
         ),
     ] {
         let project = session.join(label);
@@ -2027,6 +2046,41 @@ fn bootstrap_private_self_compile_harness() {
             &project,
             expected,
         );
+    }
+    for receiver in ["^self", "&self"] {
+        for inline in [false, true] {
+            let method = format!("fn display({receiver}) -> String {{ \"label\" }}");
+            let source = if inline {
+                format!("struct Label {{\n    text: String\n    impl Display {{ {method} }}\n}}\nfn run() {{}}\n")
+            } else {
+                format!("struct Label {{ text: String }}\nimpl Label.Display {{ {method} }}\nfn run() {{}}\n")
+            };
+            let label = format!("display-receiver-{}-{inline}", if receiver == "^self" { "take" } else { "edit" });
+            let project = session.join(&label);
+            let entry = write_source_fixture_project(&project, SOURCE_FIXTURE_MANIFEST, &source);
+            let output = session.join(format!("{label}.rs"));
+            let receipt = session.join(format!("{label}.receipt"));
+            run_generated_artifact(
+                &stage_two_binary,
+                "runner",
+                &project,
+                SMALL_ENTRY_RELATIVE,
+                &output,
+                &receipt,
+            );
+            assert!(!output.exists(), "invalid Display receiver reached Rust emission");
+            let generated = receipt_reports(&receipt)
+                .into_iter()
+                .filter(|report| report.contains("\"code\":\"E0907\""))
+                .collect::<Vec<_>>();
+            let source_closure = vec![(entry.clone(), source.clone())];
+            let reference = rust_reference_reports(&entry, &source, &source_closure)
+                .into_iter()
+                .filter(|report| report.contains("\"code\":\"E0907\""))
+                .collect::<Vec<_>>();
+            assert_eq!(reference.len(), 1, "Display receiver must fail in sema");
+            assert_eq!(generated, reference, "Display receiver reports must agree");
+        }
     }
     let partial_move_project = session.join("core-files-partial-move-siblings");
     write_source_fixture_project(
@@ -2084,6 +2138,21 @@ fn bootstrap_private_self_compile_harness() {
         &handle_lifetime_project,
         HANDLE_LIFETIME_FIXTURE_EXPECTED,
         Some((handle_lifetime_project.as_path(), "close")),
+    );
+
+    let struct_word_project = session.join("struct_call_word");
+    write_source_fixture_project(
+        &struct_word_project,
+        SOURCE_FIXTURE_MANIFEST,
+        include_str!("../../Examples/features/basics/struct_call_word.jet"),
+    );
+    compile_and_run_source_fixture(
+        &stage_two_binary,
+        repo,
+        &session,
+        "struct_call_word",
+        &struct_word_project,
+        include_str!("../../Examples/features/expected/basics/struct_call_word.out"),
     );
 
     let provenance = session.join("bootstrap.provenance");

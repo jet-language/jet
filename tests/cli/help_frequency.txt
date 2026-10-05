@@ -1,0 +1,406 @@
+Welcome to Jet! (vVERSION)
+
+Usage:
+  jet run [<file.jet|dir>] [--no-prepare] [-- <args>] Run a program or project
+  jet build [<file.jet|dir>] | build --verify <receipt-id> Create a native executable
+  jet check [<file.jet|dir>]           Check code without creating a binary
+  jet inspect <command>                Explore code, builds, packages, and bindings
+  jet explain <CODE|FACT> [file] | explain --cost <file.jet> | explain --reload <file.jet|dir> Explain a diagnostic code, build fact, generic-module value, or typed cost
+  jet dev [<file.jet|dir>] [--canvas|--app <function>] [--share <loopback|lan>] [--token <token>] [-- <args>] Watch and run a program; optionally open Canvas or a local app
+  jet test [<file.jet|dir>] [<filter>] [--watch] [--fresh] [--docs] [--where=<expr>] [--capture=<failed|all|none>] [--browser=<chromium,firefox,webkit>] [--browser-retries=<n>] [--browser-reporter=<text|json|html>] [--browser-ui] [--browser-visual] [--browser-trace] [--browser-scaffold=<name>] [--grade=generated] [--iterations=<n>] [--time=<s>] [--seed=<n>] [--corpus=<dir>] Run tests
+  jet fmt [args]                       Format Jet and configured project files
+  jet fix <file.jet|dir>               Apply safe automatic fixes, including `fix memory`
+  jet debug [<file.jet>] [--record=NAME|--replay=NAME] [--dap] [--raw-frames] Debug a program from Jet source
+  jet self <command>                   Manage the Jet installation and editor tools
+  jet os <command>                     Manage Jetos machines and images
+  jet prove [args]                     Create a proof report for code and tests
+  jet fetch [args]                     Download locked dependencies
+  jet new <name> [--template cli|ui|web|overrides] | new service|route|job|migration <name> [--path <path>] [--route <path>] [--model <name>] [--up|--sql <SQL>] [--down <SQL>] [--risk <note>] [--lock <shared|exclusive>] [--version <n>] [--preview|--apply|--remove] Create a Jet project or backend source scaffold
+  jet registry <command>               Publish and manage packages
+  jet update [args]                    Update dependency or toolchain pins
+  jet env <command>                    Open the project development shell
+  jet perf <command>                   Collect and inspect performance traces
+  jet help [<command>] [--sort frequency|az|za] Show command help
+  jet image [args]                     Build a declared container image
+  jet eval <file.jet|expression>       Evaluate pure Jet and print the value (`--json` for JSON)
+  jet init [args]                      Create package settings in this directory
+  jet repl [<file.jet>] [--project <dir>] [--console] [--sandbox data] [--console-ttl <milliseconds>] [--allow=<RIGHTS>] [--deny=<RIGHTS>] Try Jet code interactively
+  jet jobs [--graph|--status|--explain|--watch[=<on|off>]] [<name> [<job args>...]] List, inspect, watch, or run named project jobs
+  jet budget [args]                    Check performance limits or update baselines
+  jet audit [args]                     Inspect implicit copies, exercised memory witnesses, or dependencies
+  jet package --kind <desktop|game> --target <linux-appimage|macos-app|windows-msix> [--executable <path>|<source.jet>] [--output <path>] [--profile <dev|release|name>] [--phase <build,cook,stage,package,export,deploy,run>] [--backend <aot>] [--renderer <headless|raylib>] [--cook-mode <fast|reproducible|scripts-only>] [--export-preset <default|store|headless>] [--deploy-to <path>] [--crash-reporter <off|on|opt-in>] [--crash-consent <not-requested|granted|denied>] [--dry-run] [--explain] [--resume|--cancel] [--clean|--scripts-only] [--run-now] [--package <id>] [--name <name>] [--version <version>] [--icon <path>] [--icon-format <png|icns|ico|svg>] [--icon-size <pixels>] [--publisher <name>] [--description <text>] [--update-channel <channel>] [--update-url <url>] Create a desktop or game application bundle
+  jet cc [options] <sources>           Compile and link C with the pinned Jetpack toolchain
+  jet flash --target <board.name> [--image <firmware.elf>] [--audit <target.json>] [--adapter <probe-rs|openocd|emulator>] Flash firmware to a target board
+  jet fuzz <file.jet> [<test>]         Find failing inputs for property tests
+  jet gc <command>                     Show values moved into automatic memory management
+  jet import <language> <dir> [--dry-run|--update] Convert supported source code into editable Jet
+  jet status [<file.jet|dir>]          Show what the project has proved
+  jet version [args]                   Show the Jet version
+  jet c++ [options] <sources>          Compile and link C++ with the pinned Jetpack toolchain
+  jet learn [--check] [--watch|--watch=off] [--json] [--quiet] [--color[=<mode>]] Practice Jet with offline code exercises
+  jet notebook [args]                  Open a Jet notebook (.jetnb) or Jupyter adapter
+  jet bind <name> [--shape automatic|native] [--freeze]
+bind --policy automatic|frozen
+bind <name> --update --preview
+bind <name> --update --accept <candidate-digest> Resolve and record a checked foreign binding plan
+  jet clean [args]                     Remove unused package-store data
+  jet emit [args]                      Print generated build output
+  jet lint --a11y|--complexity|--cost <file.jet> Run optional code-quality checks
+  jet add [args]                       Add and download a dependency
+  jet trust [args]                     Review or change trusted authority
+  jet review <base.jet> <head.jet>     Review meaning, authority, and proof changes
+  jet search <query>                   Search the local package catalog
+  jet cache <command>                  Manage the machine-wide artifact store
+  jet doc [--json|--check] [<file.jet|dir>] Generate reference documentation
+  jet split [args]                     Extract closed Package facts into Configs or members
+  jet diff [args]                      Compare two Jet programs by meaning
+  jet remote [args]                    Manage host-owned remote builders
+  jet merge [args]                     Merge Jet programs without losing code structure
+  jet project <command>                Inspect project files and modules
+  jet test-compare <corpus.json> [--relation=<name>] [--json] Compare one recorded observation corpus against its relation
+  jet db [PATH] [--query SQL | --script PATH] Run a bounded SQL console and manage database migrations
+  jet find [--effect <effect>] [--example <input -> output>] [<query>] [<file.jet|dir>] Find code by type, effect, or example
+  jet remove [args]                    Remove a dependency
+  jet fill <file.jet[:line]>           Propose checked code for typed goals
+  jet generate <GeneratorJob> [--apply|--dry-run] [--entry <file.jet>] [--json] Run an explicit source generator with authority and a receipt
+  jet shared-store <command>           Manage the optional shared package broker
+  jet try <plan.json>                  Speculatively apply a plan and re-check its claims
+  jet Fold [args]                      Reverse a recorded Package source transition
+
+Inspect Commands:
+  jet inspect types [TARGET] [--live PID | --replay ARTIFACT]  Show registered type and operator facts
+  jet inspect rights [TARGET] [--live PID | --replay ARTIFACT] Read required, granted, denied effects, and their authority source
+  jet inspect claims [TARGET] [--live PID | --replay ARTIFACT] Read receipt-backed claims and their current status
+  jet inspect shapes [TARGET] [--live PID | --replay ARTIFACT] Read semantic shapes and their checked projections
+  jet inspect accel [TARGET] [--live PID | --replay ARTIFACT]  Show vector proof and acceleration gate decisions
+  jet inspect decisions [TARGET] [--live PID | --replay ARTIFACT] Show compiler decisions and their evidence
+  jet inspect structure [TARGET] [--core] [--live PID | --replay ARTIFACT] Show structure and lifecycle facts
+  jet inspect build [TARGET] [--coverage] [--live PID | --replay ARTIFACT] Read build identity, inputs, and provenance
+  jet inspect gates [TARGET] [--live PID | --replay ARTIFACT]  Read gates with required, granted, denied effects, and authority
+  jet inspect graph <file.jet>                                 Show the build graph
+  jet inspect query build <file.jet>                           Search code and build information
+  jet inspect explain-build <target|action|file> <file.jet>    Explain why a target, action, or file is rebuilt
+  jet inspect compiler <lex|parse|check|source-map> <file>     Read compiler facts as versioned JSON
+  jet inspect impact <file.jet> <symbol>                       Show code affected by a symbol
+  jet inspect provenance [--json] [<dependency>]               Read dependency provenance with required, granted, denied effects, and authority
+  jet inspect digest [--json] [--list-topics] [--topic <name>] Write the one-file LLM surface digest
+  jet inspect env [--json] [<env.jet|config.jet>]              List typed environment reads in a config surface
+  jet inspect semindex <file.jet>                              Search code facts plus required, granted, denied effects, and authority
+  jet inspect output <file.jet> [<address>]                    Inspect one Output with required, granted, denied effects, and authority
+  jet inspect expand [--facts <inline|memory|web|effects|layout|derive|templates|callable-signature>] [--json] <file.jet> Show expanded meaning with required, granted, denied effects, and authority
+  jet inspect schema status                                    Inspect saved data schema versions
+  jet inspect schema squash --before <version>                 Inspect saved data schema versions
+  jet inspect codemod <plan.json> --dry-run                    Preview or apply code changes
+  jet inspect codemod apply <plan.json> [--yes]                Preview or apply code changes
+  jet inspect codemod undo <log.json>                          Preview or apply code changes
+  jet inspect audit copies [--json] [<entry.jet>]              Inspect implicit copies, exercised memory witnesses, or dependencies
+  jet inspect audit memory [--json]                            Inspect implicit copies, exercised memory witnesses, or dependencies
+  jet inspect audit [--advisory-db <path>]                     Inspect implicit copies, exercised memory witnesses, or dependencies
+  jet inspect sbom [--cyclonedx]                               Create a software bill of materials
+  jet inspect bind <header.h> --pkg <lib>                      Generate Jet bindings from a foreign header
+  jet inspect bind cpp <header.hpp> --target <triple> --clang <path> --ar <path> Generate Jet bindings from a foreign header
+  jet inspect logs <pkg>                                       Show recent package build logs
+  jet inspect info <source>.<package>                          Show package details
+  jet inspect outdated                                         List dependencies with available updates
+  jet inspect reserved [--json]                                List reserved words and sigils
+
+Self Commands:
+  jet self toolchain                                        Show the Jet version selected for this project
+  jet self update [--endpoint <url>] [--channel <name>] [--platform <target>] [--trust-key <file>] [--dry-run] [--apply] [--allow-unofficial] Verify or install a signed Jet toolchain release
+  jet self doctor                                           Find and fix toolchain problems
+  jet self completions                                      Print shell completions
+  jet self man                                              Print the Jet manual
+  jet self devtools                                         Run Jet maintenance tools
+  jet self lsp                                              Start the language server
+  jet self exec --workspace <dir> [--exec <path>] [--read <path>] [--write <path>] -- <program> [args] Execute one command in an authority-bound workspace
+
+Os Commands:
+  jet os push                                             Deploy one or more Jetos machines
+  jet os bridge                                           Convert an existing system configuration to Jet
+  jet os services                                         Manage development services
+  jet os config                                           Manage Jet settings and trust
+
+Registry Commands:
+  jet registry publish --to <registry> [--no-sign]              Publish the current package
+  jet registry yank <version> [--message <reason>]              Stop new installs of a published version
+  jet registry keygen [--registry <name>] [--force]             Create a package-signing key
+  jet registry key backup [<dest>] [--registry <name>]          Manage the package-signing key
+  jet registry vendor [--vendor-dir <path>]                     Copy dependencies into vendor/
+
+Env Commands:
+  jet env test [-- command]                                Run environment checks in a clean environment
+  jet env hook <bash|zsh|fish>                             Print the shell auto-activation hook
+  jet env sync                                             Apply typed managed environment files
+  jet env info                                             Show the typed environment plan
+
+Perf Commands:
+  jet perf run                                              Run a program and write a .jettrace
+  jet perf test                                             Run tests and write a .jettrace
+  jet perf attach                                           Attach to a running process and write a .jettrace
+  jet perf view                                             Show a .jettrace summary
+  jet perf compare                                          Compare two .jettrace artifacts
+  jet perf export                                           Export a loss-declared projection of a .jettrace
+
+Gc Commands:
+  jet gc report                                           Show values moved into automatic memory management
+
+Cache Commands:
+  jet cache status                                           Show machine-wide artifact store usage
+  jet cache prune --to <size>                                Prune the artifact store to a target size
+  jet cache limit --host <size>                              Set the host-wide artifact store limit
+
+Project Commands:
+  jet project parts                                            List loaded and skipped project modules
+
+Db Commands:
+  jet db [PATH] [--query SQL | --script PATH]          Run a bounded SQL console and manage database migrations
+  jet db migrate new <Name> --up <SQL> [--down <SQL>] [--lock shared|exclusive] [--risk <note>] Create, preview, inspect, apply, resume, and roll back versioned database migrations
+  jet db migrate preview --target <name> [--to <version>|--step <count>] Create, preview, inspect, apply, resume, and roll back versioned database migrations
+  jet db migrate status --target <name>                   Create, preview, inspect, apply, resume, and roll back versioned database migrations
+  jet db migrate target --target <name> [--database <relative-path>] [--lock shared|exclusive] Create, preview, inspect, apply, resume, and roll back versioned database migrations
+  jet db migrate apply --target <name> [--to <version>|--step <count>] [--lock exclusive] Create, preview, inspect, apply, resume, and roll back versioned database migrations
+  jet db migrate step --target <name> <count> [--lock exclusive] Create, preview, inspect, apply, resume, and roll back versioned database migrations
+  jet db migrate rollback --target <name> [<version>|--step <count>] [--lock exclusive] Create, preview, inspect, apply, resume, and roll back versioned database migrations
+  jet db migrate resume --target <name>                   Create, preview, inspect, apply, resume, and roll back versioned database migrations
+
+Shared-Store Commands:
+  jet shared-store install                                          Install the optional shared package broker
+  jet shared-store enroll <uid> [--read-only]                       Grant a user shared-store broker access
+  jet shared-store status                                           Show shared-store broker configuration
+  jet shared-store broker [--fd <n>]                                Serve one shared-store broker request
+
+Flags:
+  --live                       With inspect: Process id for a live plane scope
+  --observe                    With run: Expose bounded live runtime facts for attachment
+  --raw-frames                 With debug: Show generated Rust frames and scopes (expert)
+  --dap                        With debug: Speak the Debug Adapter Protocol over stdio
+  --gc-trace                   With run/dev: Record bounded automatic GC-promotion evidence
+  --structural                 With diff/merge: Compare checked definitions by semantic identity
+  --base-receipt               With review: Proof receipt for the base change-set side
+  --receipt                    With review: Proof receipt for the reviewed change-set side
+  --out                        With structural merge: Write the checked result to this path
+  --repo                       With merge install-driver: Git worktree to configure
+  --json                       Emit machine-readable facts or diagnostics
+  --topic                      With inspect digest: Emit one digest topic
+  --to                         With publish/cache/db migrate: Foreign registry, prune target size, or migration target version
+  --list-topics                With inspect digest: List digest topics
+  --kind                       With inspect gates/package: Filter one gate or bundle kind
+  --quiet                      Suppress non-error status output
+  --color                      Color: auto | always | never
+  --version                    With package/new: Set bundle or migration version; global flag prints compiler version
+  --endpoint                   With self-update: Signed toolchain channel endpoint
+  --channel                    With self-update: Toolchain channel name
+  --platform                   With self-update: Toolchain target triple
+  --trust-key                  With self-update: Public trust-key file
+  --apply                      With self-update/generate/new: Apply the verified artifact or planned source writes
+  --preview                    With new: Preview deterministic backend source writes without applying them
+  --remove                     With new: Remove only unchanged outputs recorded by the scaffold receipt
+  --path                       With new: Route or output path, defaulting to `/<name>`
+  --route                      With new: Alias for `--path`
+  --model                      With new: Model name recorded beside the route source
+  --allow-unofficial           With self-update: Explicitly allow a local keyless channel
+  --check                      With fmt/learn: Check without changing files (CI gate)
+  --lang                       With fmt: Delegate non-Jet files to the environment formatter for this language
+  --restore-role-files         With init: Restore the exact pre-package.jet role files
+  --diff                       With fmt --check: Also print unified diffs for each changed file
+  --simplify                   With fmt: Rewrite to the simplest ratified spelling
+  --changed                    With fmt: Format only VCS-changed .jet files (requires git)
+  --explicit-copies            With fmt: Materialize implicit read-view copies as `~`
+  --skipped                    With project parts: Show modules omitted from automatic discovery
+  --stdin-path                 With fmt -: Path label used in diagnostics when reading from stdin
+  --small                      With build/run/jobs: Favor a smaller binary
+  --lib                        With build: Emit the native Library and C header
+  --output                     With build/run/dev/jobs/package: Select a named output (build --lib selects a Library; Canvas uses it as the initial selection)
+  --locked                     With build/fetch/jobs/run: Require locked dependency and provenance facts
+  --effect                     With find: Require an effect such as FS.Read
+  --example                    With find: Search by input/output example
+  --lock                       With fetch/db migrate/new: Lock dependency fetching or choose a migration/scaffold lock policy
+  --read-only                  With shared-store enroll: Grant read-only broker access
+  --host                       With cache limit: Host-wide store cap
+  --fd                         With shared-store broker: Inherited broker socket descriptor
+  -p                           With run/dev/debug/check/build/jobs: Pick a workspace member by name
+  --annotated                  With new: Include commented example deps
+  --force                      With publish: Bypass pre-publish gate (with warning)
+  --no-sign                    With publish: Skip the optional author signature (registry metadata is still signed)
+  --registry                   With keygen/key: Registry name to generate or manage a signing key for
+  --pkg                        With bind: Library name for the generated binding module
+  --shape                      With bind: Binding facade shape: automatic or native
+  --freeze                     With bind: Record the resolved binding plan in the project lock
+  --policy                     With bind: Binding policy: automatic or frozen
+  --accept                     With bind --update: Accept exactly this candidate plan digest
+  --import                     With build: Import and inspect an existing foreign build graph
+  --clang                      With bind cpp: Path to the clang binary used to parse the header
+  --ar                         With bind cpp: Path to the ar archiver used to build the static library
+  --before                     With schema squash: Re-baseline migrations before this version
+  --spdx                       With sbom: Emit SPDX tag-value format (default)
+  --cyclonedx                  With sbom: Emit CycloneDX JSON format
+  --advisory-db                With audit: Path to advisory database file
+  --vendor-dir                 With vendor: Directory to copy dependencies into (default vendor/)
+  --sbom                       With build: Also write an SPDX SBOM next to the binary
+  --verbose                    With build/jobs: Print the bridge steps; with check: print the status line, proof rows, and receipt notices; with run/dev/test: show advisory lints; with explain: show a syntax token's registry name and decision
+  --template                   With new: Start from a named template: cli, ui, web, or overrides
+  --sort                       With help: Order commands by use (frequency, the default), A to Z (az), or Z to A (za)
+  --online                     With doctor: Allow network checks
+  --fix                        With doctor: Apply auto-fixable problems
+  --dry-run                    With package/rewrite commands/generate: Preview changes without writing
+  --entry                      With generate: Source file containing the generator job
+  --keep                       With try: Keep a clean speculative edit
+  --edition                    With fix: Apply edition migration rewrites --edition=<year>
+  --all                        With fix: Apply safety classes beyond formatting and behavior-preserving
+  --try-anyway                 With dev: Interpret past unsupported features (no guarantees)
+  --interpret                  With dev/jobs: Force the tier-0 TIR interpreter
+  --trace-tiers                With run/dev: Print per-function Cranelift vs interpreter tier selection; with test: print AOT marker
+  --restart                    With dev: Always rerun from scratch after a save
+  --swap                       With dev: Hot-swap compatible edits and restart after type changes
+  --reload                     With explain: Explain the checked reload decision for a source or project path
+  --watch                      With run/dev/learn/test/jobs: Re-run on dependency changes; test default off with r=failed, a=all, o=output; jobs accepts --watch[=<on|off>]; --watch=off runs once
+  --graph                      With jobs: Show the checked job dependency graph
+  --status                     With jobs: Show fresh or stale status for declared jobs
+  --explain                    With jobs/package: Explain dependencies, phases, cache identity, and admission facts
+  --canvas                     With dev: Open the full Canvas IDE over this dev session
+  --app                        With dev: Select a checked local-app function
+  --share                      With dev: Select local-app sharing authority: loopback or lan
+  --canvas-host                With dev: With --canvas, bind host (loopback by default)
+  --canvas-port                With dev: With --canvas, bind an explicit port
+  --canvas-transport           With dev: With --canvas, select the named transport
+  --canvas-authority           With dev: With --canvas, select loopback or remote authority
+  --canvas-audit               With dev: With --canvas, enable request/rebuild audit output
+  --project                    With repl: Load package settings and imports from this directory
+  --console                    With repl: Open the project-loaded capability-gated console
+  --sandbox                    With repl: Use the reversible data sandbox (`--sandbox data`)
+  --console-ttl                With repl: Expire console authority after this many milliseconds
+  --protocol                   With notebook: Use the bounded headless JSONL/script session
+  --headless                   With notebook: Use the bounded headless session
+  --bind                       With notebook: Bind the local HTTP client to this address
+  --token                      With notebook/dev: Require a bearer token for the session
+  --no-prepare                 With run: Refuse Jetpack project environment preparation
+  --pure                       With eval: Reject code with side effects
+  --allow                      With run/build/jobs/repl/db: Allow comma-separated effect roots or leaves as --allow=RIGHTS
+  --deny                       With run/build/jobs/repl/db: Deny comma-separated effect roots or leaves as --deny=RIGHTS
+  --offline                    With env/run/dev/test/cc/c++: Reuse only cached signed toolchain and package data
+  --fixtures                   With env/run/dev/test/cc/c++: Use an explicit fixture bundle
+  --project-root               With cc/c++: Scope source paths to a project directory
+  --build-root                 With cc/c++: Scope output paths to a build directory
+  -c                           With cc/c++: Compile sources without linking
+  -o                           With cc/c++: Choose the output path
+  -MMD                         With cc/c++: Emit user-header dependency data
+  -MD                          With cc/c++: Emit dependency data
+  -MF                          With cc/c++: Choose the dependency-file path
+  -MT                          With cc/c++: Choose the dependency target
+  --sysroot                    With cc/c++: Reserved; target selects the pinned sysroot
+  -I                           With cc/c++: Add a project-relative include path
+  -D                           With cc/c++: Define a preprocessor symbol
+  -L                           With cc/c++: Add a project-relative library path
+  -l                           With cc/c++: Link a declared library
+  -std                         With cc/c++: Select the language standard
+  -dumpmachine                 With cc/c++: Print the pinned target triple
+  -print-sysroot               With cc/c++: Print the pinned virtual sysroot
+  -dumpversion                 With cc/c++: Print the pinned compiler version
+  -v                           With cc/c++: Print pinned toolchain details or compile verbosely
+  --gate                       With build/run/dev/jobs: Allow one audited gate as --gate name=allow
+  --target                     With build/run/dev/jobs/package/cc/c++/flash: Select a target (triple, board.<name>, or named database target)
+  --up                         With db migrate/new: Checked forward SQL
+  --sql                        With db migrate/new: Alias for checked forward SQL
+  --down                       With db migrate/new: Checked inverse SQL for rollback
+  --database                   With db migrate: Project-relative database path (receipt identity is redacted)
+  --risk                       With db migrate/new: Data-risk note shown before writes
+  --step                       With db migrate: Number of ordered migrations to apply or roll back
+  --format                     With db: Output format: human, text, json, jsonl, or csv
+  --csv                        With db: Select deterministic CSV output
+  --jsonl                      With db: Emit one JSON value per row
+  --machine                    With db: Select machine-readable output
+  --human                      With db: Select human-readable output
+  --no-color                   With db: Disable color in console output
+  --force-color                With db: Force color in console output
+  --query                      With db: Execute one SQL query
+  --script                     With db: Execute SQL from a script path
+  --table                      With db: Set an explicit table identity as NAME=PATH
+  --max-rows                   With db: Bound decoded input rows
+  --max-bytes                  With db: Bound source or script bytes
+  --max-output-bytes           With db: Bound one rendered result
+  --image                      With flash: Firmware image to program
+  --audit                      With flash: Target audit JSON for the image
+  --adapter                    With flash: Flash adapter: probe-rs, openocd, or emulator
+  --package                    With package: Set the bundle package identifier
+  --name                       With package: Set the bundle executable name
+  --executable                 With package: Path to the executable to bundle
+  --icon                       With package: Path to the bundle icon
+  --icon-format                With package: Icon format: png, icns, ico, or svg
+  --icon-size                  With package: Icon size in pixels
+  --publisher                  With package: Publisher metadata
+  --description                With package: Application description metadata
+  --update-channel             With package: Updater channel
+  --update-url                 With package: Updater URL
+  --game                       With package: Build a game bundle
+  --source                     With package: Project source or package root for a game bundle
+  --phase                      With package: Comma-separated game phases: build, cook, stage, package, export, deploy, run
+  --backend                    With package: Game build backend: aot
+  --renderer                   With package: Game renderer authority: headless or raylib
+  --cook                       With package: Alias for --cook-mode
+  --cook-mode                  With package: Asset cooking mode: fast, reproducible, or scripts-only
+  --export                     With package: Export phase or named export preset
+  --export-preset              With package: Named export preset: default, store, or headless
+  --deploy                     With package: Include the deploy phase
+  --deploy-to                  With package: Explicit deployment destination
+  --crash-reporter             With package: Crash reporter policy: off, on, or opt-in
+  --crash-consent              With package: Crash reporter consent: not-requested, granted, or denied
+  --cancel                     With package: Cancel owned game staging
+  --resume                     With package: Resume an owned game stage
+  --clean                      With package: Force-clean owned game cache/staging
+  --force-clean                With package: Alias for --clean
+  --scripts-only               With package: Cook only script assets
+  --run-now                    With package: Explicitly opt into the run phase
+  --run                        With package: Include the run phase
+  --env                        With env/run/dev/test: Select one declared env.<name> module
+  --preset                     With env/run/dev/test: Select one declared environment preset
+  --explain-partition          With build --target=web: Show which code becomes JavaScript or WebAssembly
+  --fresh                      With test: Bypass only cached test results (default off); the build cache remains reusable
+  --docs                       With test: Run checked documentation examples only (default off)
+  --where                      With test: Filter recorded package, dependency, path, tag, or status facts (default all) as --where=<expr>
+  --capture                    With test: Capture output as failed, all, or none (default failed); watch key o cycles it
+  --no-capture                 With dev: Disable automatic replay capture for this session
+  --update-snapshots           With test: Replace expected snapshot output
+  --update                     With import: Merge generated Jet into an existing target
+  --coverage                   With test/inspect build: Show function or diagnostic coverage
+  --verify                     With build: Rebuild and compare one indexed receipt artifact
+  --rust                       With emit: Print generated Rust source
+  --emit-generated             With build: Copy generated Jet sources into `.jet/generated/`
+  -u                           Short form of --update-snapshots
+  --release                    With build/run/dev/jobs/test: Optimize for release
+  --profile                    With build/run/dev/jobs/package/test: How hard to optimize: release, debug, ci, hardened, or a named optimization bundle
+  --set                        With build/run/dev/jobs/test: Set one declared package setting as key=value
+  --builder                    With build/jobs: Select a previously bound remote builder
+  --a11y                       With lint: Check roles, labels, and other accessibility basics
+  --complexity                 With lint: Report per-function cognitive complexity
+  --cost                       With lint/explain: Show typed hidden-copy and fallback costs
+  --max                        With lint --complexity: Fail when a function exceeds this score
+  --scope                      With inspect: Choose a ledger or trust scope
+  --core                       With inspect structure: Show the canonical core module export facts
+  --filter                     With test: Only run claims whose name contains --filter=<substr>
+  --grade                      With test: Select the generated property-test grade as --grade=generated
+  --shuffle                    With test: Run tests in random (or --shuffle=<seed>) order
+  --serial                     With test: Run tests one at a time instead of the parallel default
+  --show-default               With run/build/dev/test: Use and report the stock default
+  --measure                    With test: Measure `.measure` claims
+  --browser                    With test/db: Select browser engines for tests or serve a loopback database inspector
+  --browser-retries            With test: Retry each browser attempt up to five times
+  --browser-reporter           With test: Browser report format: text, json, or html
+  --browser-ui                 With test: Write/open the local browser report viewer
+  --browser-visual             With test: Capture screenshots for passing browser attempts
+  --browser-trace              With test: Keep redacted BiDi trace entries for every browser attempt
+  --browser-scaffold           With test: Create an isolated browser-test project as --browser-scaffold=<name>
+  --record                     With run/dev/test/debug: Record a named replay as --record=<name>
+  --replay                     With inspect/debug: Consume a named replay artifact
+  --iterations                 With fuzz: Case budget --iterations=<n> (default 1000)
+  --time                       With fuzz: Wall-clock budget in seconds --time=<n>
+  --seed                       With fuzz: Base PRNG seed --seed=<n> (default: fixed, reproducible)
+  --corpus                     With fuzz: Corpus directory --corpus=<dir> (default: .jet/fuzz/<test>)
+  --lens                       With prove: Project the human report by an exact evidence facet
+  --facts                      With expand: Project inline, memory, web, effects, layout, derive, templates, or callable-signature facts --facts=<lens>
+  --annotations                With budget: CI annotations auto, none, or github
+  --baseline                   With budget update: Selected baseline name
+  --bootstrap                  With budget update: Create absent or stale baseline history
+  --accept-regression          With budget update: Explicitly accept a regression
+  --reason                     With exceptional budget update: Checked-in reason
+  --yes                        With budget update: Apply a valid non-interactive plan
+  -y                           Short form of --yes

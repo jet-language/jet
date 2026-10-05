@@ -44,6 +44,7 @@ use core.text.runtime.assets.unicode_extended_pictographic as text_pictographic
 use core.text.runtime.assets.unicode_emoji as text_emoji
 use core.text.runtime.assets.unicode_emoji_presentation as text_emoji_presentation
 use core.text.runtime.assets.unicode_incb as text_incb
+module catalog
 
 /// Byte-offset cursor into UTF-8 text. Line and column are 1-based.
 pub struct Cursor {
@@ -69,14 +70,9 @@ pub fn cursor_advance(text: String, cur: Cursor) -> Cursor Never! {
 }
 
 /// Byte length of UTF-8 `text`. Equal to `text.bytes().len()`.
-pub fn byte_count(text: String) -> Int Never! { text_unicode_string.utf8_bytes(text).len() }
+pub fn byte_count(text: String) -> Int Never! { core.text.byte_count(text) }
 
-pub fn is_ascii(text: String) -> Bool Never! {
-    loop b in text_unicode_string.utf8_bytes(text) {
-        if b > (U8{127}) -> return false
-    }
-    true
-}
+pub fn is_ascii(text: String) -> Bool Never! { core.text.is_ascii(text) }
 
 /// Unicode scalar count (replacement character U+FFFD counts as one).
 pub fn scalar_count(text: String) -> Int Never! { decode_scalars(text).len() }
@@ -87,12 +83,12 @@ pub fn scalars(text: String) -> [String] Never! {
     out
 }
 
-pub fn lower(text: String) -> String Never! { text_unicode_string.lower(text) }
+pub fn lower(text: String) -> String Never! { core.text.lower(text) }
 
-pub fn upper(text: String) -> String Never! { text_unicode_string.upper(text) }
+pub fn upper(text: String) -> String Never! { core.text.upper(text) }
 
 /// Unicode 17.0.0 default full C+F folding (locale-free).
-pub fn casefold(text: String) -> String Never! { text_unicode_string.casefold(text) }
+pub fn casefold(text: String) -> String Never! { core.text.casefold(text) }
 
 // Rust Text.rs:337-341: canonical default caseless matching, not fold-only.
 pub fn caseless_eq(left: String, right: String) -> Bool Never! {
@@ -111,10 +107,10 @@ pub fn nfkd(text: String) -> String Never! { normalize(text, true, false) }
 pub fn graphemes(text: String) -> [String] Never! { split_graphemes(text) }
 /// Unicode 17.0.0 UAX #29 owned word segments containing Alphabetic or Numeric.
 // Rust Text.rs:689-694; boundary/filter policy lives in kernel_text_segments.
-pub fn words(text: String) -> [String] Never! { text_segments.words(text) }
+pub fn words(text: String) -> [String] Never! { core.text.words(text) }
 /// Unicode 17.0.0 UAX #29 owned sentences, White_Space-trimmed; empty segments omitted.
 // Rust Text.rs:880-885; boundary/trim policy lives in kernel_text_segments.
-pub fn sentences(text: String) -> [String] Never! { text_segments.sentences(text) }
+pub fn sentences(text: String) -> [String] Never! { core.text.sentences(text) }
 pub fn inspect(text: String) -> [String] Never! {
     out := [String]{}
     loop cp in decode_scalars(text) -> &out.push(hex_cp(cp))
@@ -137,25 +133,21 @@ pub fn display_width(text: String) -> Int Never! {
 pub fn grapheme_views(text: String) -> [String] Never! { graphemes(text) }
 pub fn word_views(text: String) -> [String] Never! { words(text) }
 pub fn line_views(text: String) -> [String] Never! { split_lines(text) }
-pub fn byte_views(text: String) -> [String] Never! {
-    out := [String]{}
-    loop b in text_unicode_string.utf8_bytes(text) -> &out.push("{b}")
-    out
-}
+pub fn byte_views(text: String) -> [String] Never! { core.text.byte_views(text) }
 
 // Rust Text.rs:939: nonempty, all scalars have DerivedCoreProperties Alphabetic.
-pub fn is_alphabetic(text: String) -> Bool Never! { text_unicode_string.is_alphabetic(text) }
+pub fn is_alphabetic(text: String) -> Bool Never! { core.text.is_alphabetic(text) }
 
 // Rust Text.rs:940: Numeric is General_Category Nd/Nl/No, not only decimal digits.
-pub fn is_numeric(text: String) -> Bool Never! { text_unicode_string.is_numeric(text) }
+pub fn is_numeric(text: String) -> Bool Never! { core.text.is_numeric(text) }
 
-pub fn is_whitespace(text: String) -> Bool Never! { text_unicode_string.is_whitespace(text) }
+pub fn is_whitespace(text: String) -> Bool Never! { core.text.is_whitespace(text) }
 
-pub fn trim(text: String) -> String Never! { text_unicode_string.trim(text) }
+pub fn trim(text: String) -> String Never! { core.text.trim(text) }
 
-pub fn trim_start(text: String) -> String Never! { text_unicode_string.trim_start(text) }
+pub fn trim_start(text: String) -> String Never! { core.text.trim_start(text) }
 
-pub fn trim_end(text: String) -> String Never! { text_unicode_string.trim_end(text) }
+pub fn trim_end(text: String) -> String Never! { core.text.trim_end(text) }
 
 /// Pad on the left until `width` UTF-8 scalars. Empty `fill` returns text unchanged.
 pub fn pad_start(text: String, width: Int, fill: String) -> String Never! { pad_side(text, width, fill, true) }

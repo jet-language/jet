@@ -146,7 +146,7 @@ fn trust_lock_source_map_issues(lock: SemanticLockFile) -> [ValidationIssue] Nev
 // `registry:<source>:<package>` names its package after the last `:`.
 fn trust_lock_source_package(key: String) -> String Never! {
     if !key.starts_with("registry:") -> return ~key
-    if trust_text_split_last(key.removeprefix("registry:"), @TRUST_COLON) == {
+    if trust_text_split_last(key.removeprefix("registry:"), TRUST_COLON) == {
         .Val(parts) -> parts.after
         .None -> ~key
     }
@@ -156,7 +156,7 @@ fn trust_lock_source_package(key: String) -> String Never! {
 fn trust_lock_source_authority(source: String) -> String Never! {
     if !source.starts_with("registry:") -> return ~source
     rest :: source.removeprefix("registry:")
-    if trust_text_split_first(rest, @TRUST_SEMICOLON) == {
+    if trust_text_split_first(rest, TRUST_SEMICOLON) == {
         .Val(parts) -> parts.before
         .None -> rest
     }

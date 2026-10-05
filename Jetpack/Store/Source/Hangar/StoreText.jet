@@ -52,7 +52,7 @@ pub enum StoreUnhex {
     Text(String)
     OddLength
     NotLowerHex
-    NotUtf8
+    NotUTF8
 }
 
 // Decode lowercase hex text into UTF-8 text.
@@ -68,7 +68,7 @@ fn store_unhex_text(value: String) -> StoreUnhex Never! {
         &bytes.push(U8{high * 16 + low})
         index += 2
     }
-    text :: String.from_bytes(bytes) ?? return StoreUnhex.NotUtf8
+    text :: String.from_bytes(bytes) ?? return StoreUnhex.NotUTF8
     StoreUnhex.Text(text)
 }
 

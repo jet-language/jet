@@ -1,0 +1,23 @@
+// A function that takes a parameter by move (`^`) and returns it as its tail
+// hands the same value back: the parameter's scope-end release never runs,
+// because the value left through the return.
+struct Row {
+    name: String
+}
+
+fn keep(row: ^Row) -> Row Never! { row }
+
+fn keep_text(text: ^String) -> String Never! { text }
+
+fn renamed(row: ^Row, name: String) -> Row Never! {
+    out := row
+    out.name = name
+    out
+}
+
+fn run() {
+    print(keep(Row{name: "a"}).name)
+    print(keep(keep(Row{name: "b"})).name)
+    print(keep_text("c"))
+    print(renamed(keep(Row{name: "d"}), "e").name)
+}

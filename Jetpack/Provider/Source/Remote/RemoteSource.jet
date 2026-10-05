@@ -105,7 +105,7 @@ fn provider_dir_has_top_level_run(dir: String) -[FS]> Bool Never! {
         if name.starts_with(".") || name == "build" || name == "target" || name == "bin" -> next
         if files.is_dir(entry.path) {
             if provider_dir_has_top_level_run(entry.path) -> return true
-        } else if name.ends_with(".{@FILE_EXT}") {
+        } else if name.ends_with(".{FILE_EXT}") {
             source :: files.read(entry.path) ?? next
             if provider_file_has_top_level_run(source) -> return true
         }
@@ -139,10 +139,10 @@ fn provider_member_dirs_from_listing(listing: String) -> [String] Never! {
     loop line in listing.split("\n") {
         path :: line.trim()
         dir := ""
-        if path.ends_with("/{@PACKAGE_FILE}") {
-            dir = path.removesuffix("/{@PACKAGE_FILE}")
-        } else if path.ends_with("/{@PAYLOAD_FILE}") {
-            dir = path.removesuffix("/{@PAYLOAD_FILE}")
+        if path.ends_with("/{PACKAGE_FILE}") {
+            dir = path.removesuffix("/{PACKAGE_FILE}")
+        } else if path.ends_with("/{PAYLOAD_FILE}") {
+            dir = path.removesuffix("/{PAYLOAD_FILE}")
         }
         if dir != "" && !out.contains(dir) -> &out.push(dir)
     }

@@ -39,7 +39,7 @@ fn pkg_parse_boundary_pattern(field: String, raw: String) -> String PackageParse
 
 // Parse the body of `boundaries: { deny: [ … ] }`.
 pub fn pkg_parse_boundaries(body: String) -> [ImportBoundary] PackageParseError! {
-    deny := None
+    deny := String?{None}
     loop entry in pkg_key_value_entries(body) {
         if entry.key != "deny" -> return Err(PackageParseError.Composition("unknown `boundaries` field `{entry.key}`"))
         if deny != None -> return Err(PackageParseError.Composition("`boundaries.deny` is declared more than once"))
@@ -52,8 +52,8 @@ pub fn pkg_parse_boundaries(body: String) -> [ImportBoundary] PackageParseError!
         entry :: piece.trim()
         if entry == "" -> next
         record :: pkg_strip_wrapped(entry, "{{", "}}") ?? return Err(PackageParseError.Composition("each `boundaries.deny` entry must be an edge record"))
-        from := None
-        to := None
+        from := String?{None}
+        to := String?{None}
         loop field in pkg_key_value_entries(record) {
             if field.key == {
                 "from" -> {

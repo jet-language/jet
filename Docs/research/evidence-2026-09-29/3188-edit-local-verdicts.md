@@ -1,7 +1,7 @@
 # #3188 — Edit-local verdicts vs checked work
 
 Closer09, 2026-09-29. Source head `e9c708fa7`; binary via
-`~/.cache/jet-luna/safe-jet.sh` (jet-current snapshot14 → snapshot16).
+`~/.cache/jet-dev/safe-jet.sh` (jet-current snapshot14 → snapshot16).
 
 ## Question
 
@@ -34,7 +34,7 @@ impact and runtime/test reachability separate?
 | 3 / 6 checked work vs semantic impact vs reachability | The archived Rust `ReverdictReceipt.reverified_items` has no self-hosted successor; there is no receipt to label. |
 | 4 no-change / body edit vs uncached | Requires the cache under test; none exists. |
 | 5 no linear/superiority claim | Met trivially: no claim is made here. |
-| 7 harness JSON under `~/.cache/jet-luna/edit-verdicts/` | Not produced; harness case not implemented. |
+| 7 harness JSON under `~/.cache/jet-dev/edit-verdicts/` | Not produced; harness case not implemented. |
 
 ## Verdict
 

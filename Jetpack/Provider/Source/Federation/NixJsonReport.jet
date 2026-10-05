@@ -94,7 +94,7 @@ impl ProviderFactReport {
         if version == None && top_name != None -> version = provider_nix_version_suffix(top_name ?? "", facts.name)
         facts.version = version ?? ""
         top_hash :: provider_nix_hash_field(object, &losses)
-        output_hash := None
+        output_hash := String?{None}
         outputs :: pkg_json_object(object.get("outputs") ?? DataTree.Null) ?? [String: DataTree]{}
         if pkg_json_object(provider_graph_either(outputs.get("out"), outputs.get("bin")) ?? DataTree.Null) == {
             .Val(output) -> {
@@ -538,7 +538,7 @@ fn provider_nix_locked_source_identity(locked: [String: DataTree]) -> String? Ne
     kind :: provider_graph_json_string(locked, "type") ?? "flake"
     owner :: provider_graph_json_string(locked, "owner")
     repo :: provider_graph_json_string(locked, "repo")
-    revision := None
+    revision := String?{None}
     if provider_graph_json_string(locked, "rev") == {
         .Val(rev) -> {
             if ProviderSelector.parse("#revision={rev}").is_exact() -> revision = Val(rev)

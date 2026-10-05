@@ -13,7 +13,7 @@
 # rebuilds only the harness crate. --check then runs `cargo check` on
 # <keep-dir>/stage-zero with warnings capped (log: <keep-dir>/repack-check.log).
 # Heavy: run it through the memory lane, e.g.
-#   ~/.cache/jet-luna/laneB.sh 12 Tools/stage0-repack/repack.sh --check ~/.cache/jet-luna/stage0
+#   ~/.cache/jet-dev/laneB.sh 12 Tools/stage0-repack/repack.sh --check ~/.cache/jet-dev/stage0
 set -euo pipefail
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 check=0

@@ -5,12 +5,12 @@
 // builds the record: the binder or bridge builder owns the descriptor inputs,
 // while this module owns the stable encoding.
 
-@FOREIGN_BRIDGE_IDENTITY_SCHEMA :: "jet-ffi-bridge-identity-v1"
-@FOREIGN_BRIDGE_PROVENANCE_SCHEMA :: "jet-ffi-bridge-provenance-v1"
-@FOREIGN_BOUNDARY_SCHEMA :: "jet-ffi-boundary-v1"
+FOREIGN_BRIDGE_IDENTITY_SCHEMA :: prep { "jet-ffi-bridge-identity-v1" }
+FOREIGN_BRIDGE_PROVENANCE_SCHEMA :: prep { "jet-ffi-bridge-provenance-v1" }
+FOREIGN_BOUNDARY_SCHEMA :: prep { "jet-ffi-boundary-v1" }
 
 // The obligation names every foreign descriptor must expose.
-@FOREIGN_BOUNDARY_OBLIGATIONS :: [String]{"abi", "layout", "width", "alignment", "ownership", "lifetime", "cleanup", "encoding", "nullability", "errors", "exceptions", "callbacks", "task-thread", "target", "copy-cost", "effects"}
+FOREIGN_BOUNDARY_OBLIGATIONS :: prep { [String]{"abi", "layout", "width", "alignment", "ownership", "lifetime", "cleanup", "encoding", "nullability", "errors", "exceptions", "callbacks", "task-thread", "target", "copy-cost", "effects"} }
 
 // Why a bridge identity, boundary row, provenance record, or sidecar build
 // was refused. The message is the reference diagnostic text.
@@ -92,7 +92,7 @@ pub struct ForeignBoundaryIdentity {
 
     // Stable digest used by receipts and generated source comments.
     fn digest(self) -> String Never! {
-        identity := ForeignIdentityBuilder.new(@FOREIGN_BOUNDARY_SCHEMA)
+        identity := ForeignIdentityBuilder.new(FOREIGN_BOUNDARY_SCHEMA)
         &identity.field("source", self.source.bytes())
         &identity.field("overlay", self.overlay.bytes())
         &identity.field("generator", self.generator.bytes())
@@ -146,7 +146,7 @@ pub struct ForeignArtifactCoverage {
     }
 
     fn digest(self) -> String Never! {
-        identity := ForeignIdentityBuilder.new(@FOREIGN_BOUNDARY_SCHEMA)
+        identity := ForeignIdentityBuilder.new(FOREIGN_BOUNDARY_SCHEMA)
         &identity.field("loaded-artifact", self.loaded_artifact.bytes())
         &identity.field("transitive-dependencies", pkg_bridge_stable_optional_strings(self.transitive_dependencies).bytes())
         &identity.field("reachable-callbacks", pkg_bridge_stable_optional_strings(self.reachable_callbacks).bytes())
@@ -164,12 +164,12 @@ pub struct ForeignArtifactCoverage {
 // One obligation row in the canonical foreign boundary contract.
 pub struct ForeignObligationEvidence {
     pub obligation: String
-    pub basis: FfiEvidenceBasis
+    pub basis: FFIEvidenceBasis
     pub checker: String
     pub assumptions: [String]
     pub coverage_digest: String
 
-    fn new(obligation: String, basis: FfiEvidenceBasis, checker: String, assumptions: [String], coverage: ForeignArtifactCoverage) -> ForeignObligationEvidence Never! {
+    fn new(obligation: String, basis: FFIEvidenceBasis, checker: String, assumptions: [String], coverage: ForeignArtifactCoverage) -> ForeignObligationEvidence Never! {
         ForeignObligationEvidence{obligation: obligation, basis: basis, checker: checker, assumptions: pkg_bridge_sorted_strings(assumptions), coverage_digest: coverage.digest()}
     }
 
@@ -178,8 +178,7 @@ pub struct ForeignObligationEvidence {
         if self.checker.trim() == "" -> return Err(pkg_bridge_error("foreign obligation `{self.obligation}` needs an evidence checker"))
         if self.assumptions.len() == 0 -> return Err(pkg_bridge_error("foreign obligation `{self.obligation}` needs explicit assumptions"))
         if self.coverage_digest != coverage.digest() -> return Err(pkg_bridge_error("foreign obligation `{self.obligation}` is attached to stale artifact coverage"))
-        if self.basis != FfiEvidenceBasis.Unknown && !coverage.is_complete() -> return Err(pkg_bridge_error("foreign obligation `{self.obligation}` cannot claim {self.basis.as_str()} without complete artifact coverage"))
-        Ok(())
+        if self.basis != FFIEvidenceBasis.Unknown && !coverage.is_complete() -> return Err(pkg_bridge_error("foreign obligation `{self.obligation}` cannot claim {self.basis.as_str()} without complete artifact coverage"))
     }
 }
 

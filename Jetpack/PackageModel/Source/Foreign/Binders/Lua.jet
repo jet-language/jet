@@ -13,7 +13,7 @@ pub struct LuaBindResult {
 
 // The fixed C entry points every Lua binding imports; they drive both the
 // generated import block and the reserved-name check.
-@PKG_LUA_FIXED_FUNCTIONS :: [(name: String, signature: String)]{
+PKG_LUA_FIXED_FUNCTIONS :: prep { [(name: String, signature: String)]{
     (name: "open", signature: "() Int"),
     (name: "take_error", signature: "() Int"),
     (name: "cancel", signature: "(handle: Int)"),
@@ -21,9 +21,9 @@ pub struct LuaBindResult {
     (name: "view_get_int", signature: "(handle: Int, table: Int, key: String) Int"),
     (name: "view_set_int", signature: "(handle: Int, table: Int, key: String, value: Int)"),
     (name: "view_release", signature: "(handle: Int, table: Int)")
-}
+} }
 
-@PKG_LUA_RESERVED :: [String]{"Session", "TableView", "LuaError", "decode_response", "decode_status"}
+PKG_LUA_RESERVED :: prep { [String]{"Session", "TableView", "LuaError", "decode_response", "decode_status"} }
 
 // One lexical token of the discovery scan: a name or one of `(`, `)`, `,`.
 enum LuaToken {
@@ -33,13 +33,13 @@ enum LuaToken {
 
 // The verb phrase a failing Lua build tool reports; its detail is the
 // laundered stderr line (stdout is discarded).
-@PKG_LUA_TOOL_ACTION :: "rejected the Lua binding input"
+PKG_LUA_TOOL_ACTION :: prep { "rejected the Lua binding input" }
 
 // Bind the named top-level `function name(input)` declarations of `source`.
 pub fn pkg_lua_bind(path: String, source: String, lib: String, cache: String) -[FS, Env, Exec, Time.Wait]> LuaBindResult ForeignBindError! {
     pkg_binder_require_lib_name(lib)
     luac :: pkg_bridge_tool_path("luac") ?? return Err(ForeignBindError.ToolMissing("luac"))
-    if pkg_binder_run_reporting_detail([String]{luac, "-p", path}, "luac", @PKG_LUA_TOOL_ACTION) == {
+    if pkg_binder_run_reporting_detail([String]{luac, "-p", path}, "luac", PKG_LUA_TOOL_ACTION) == {
         .Ok(_) -> {}
         .Err(error) -> {
             if error == {
@@ -59,9 +59,9 @@ pub fn pkg_lua_bind(path: String, source: String, lib: String, cache: String) -[
     object :: files.join(cache, "{abi}.o")
     archive :: files.join(cache, "lib{abi}.a")
     pkg_binder_write(c, pkg_lua_render_c(abi, source, functions), "could not write Lua bridge")
-    pkg_binder_run_reporting_detail([String]{"cc", "-std=c11", "-D_POSIX_C_SOURCE=200809L", "-fPIC", "-c", "-I", include, c, "-o", object}, "cc", @PKG_LUA_TOOL_ACTION)
+    pkg_binder_run_reporting_detail([String]{"cc", "-std=c11", "-D_POSIX_C_SOURCE=200809L", "-fPIC", "-c", "-I", include, c, "-o", object}, "cc", PKG_LUA_TOOL_ACTION)
     pkg_binder_remove_file_quiet(archive)
-    pkg_binder_run_reporting_detail([String]{"ar", "rcs", archive, object}, "ar", @PKG_LUA_TOOL_ACTION)
+    pkg_binder_run_reporting_detail([String]{"ar", "rcs", archive, object}, "ar", PKG_LUA_TOOL_ACTION)
     pkg_binder_remove_file_quiet(c)
     pkg_binder_remove_file_quiet(object)
     digest :: pkg_binder_identity_digest([String]{"jet-lua-bind-v2", source, root})
@@ -79,7 +79,7 @@ fn pkg_lua_find_header_dir(root: String) -[FS]> String? Never! {
 }
 
 fn pkg_lua_find_library_dir(root: String) -[FS, Env]> String? Never! {
-    library :: BinderHostOs.current().shared_library("lua", "lua54.dll")
+    library :: BinderHostOS.current().shared_library("lua", "lua54.dll")
     candidates :: [String]{files.join(root, "lib"), files.join(root, "lib64")}
     loop candidate in candidates {
         if files.is_file(files.join(candidate, library)) -> return Val(candidate)
@@ -89,7 +89,7 @@ fn pkg_lua_find_library_dir(root: String) -[FS, Env]> String? Never! {
 
 fn pkg_lua_render_jet(abi: String, functions: [String]) -> String Never! {
     out := [String]{"#Import module c.{abi} {{\n"}
-    fixed :: @PKG_LUA_FIXED_FUNCTIONS
+    fixed :: PKG_LUA_FIXED_FUNCTIONS
     loop entry in fixed -> &out.push("    fn {entry.name}{entry.signature} = \"{abi}_{entry.name}\"\n")
     loop name in functions {
         &out.push("    fn {name}(handle: Int, input: String, deadline_ms: Int) -> String = \"{abi}_invoke_{name}\"\n")
@@ -97,9 +97,9 @@ fn pkg_lua_render_jet(abi: String, functions: [String]) -> String Never! {
     }
     &out.push("}}\nuse c.{abi} as abi\nuse core.encoding.json as json\n\npub struct Session {{ value: Int }}\npub struct TableView {{ session: Int, table: Int }}\n#Error\npub enum LuaError {{ NotRunning Timeout Cancelled Protocol CommandFailed Limit }}\n\n")
     &out.push(pkg_render_lua_decode_status("LuaError"))
-    &out.push(pkg_render_decode_response("LuaError", DecoderProtocol.LuaRawJson))
-    &out.push(@PKG_LUA_JET_SESSION)
-    loop name in functions -> &out.push(pkg_binder_fill_template(@PKG_LUA_JET_FUNCTION, [String: String]{"name": name}))
+    &out.push(pkg_render_decode_response("LuaError", DecoderProtocol.LuaRawJSON))
+    &out.push(PKG_LUA_JET_SESSION)
+    loop name in functions -> &out.push(pkg_binder_fill_template(PKG_LUA_JET_FUNCTION, [String: String]{"name": name}))
     out.join("")
 }
 
@@ -113,9 +113,9 @@ fn pkg_lua_render_c(abi: String, source: String, functions: [String]) -> String 
     loop name in functions {
         &wrappers.push("const char* {abi}_invoke_{name}(int64_t h,const char*input,int64_t deadline){{return invoke(h,\"{name}\",input,deadline);}}\nint64_t {abi}_view_{name}(int64_t h,int64_t deadline){{return view(h,\"{name}\",deadline);}}\n")
     }
-    pkg_binder_fill_template(@PKG_LUA_BRIDGE_C, [String: String]{
+    pkg_binder_fill_template(PKG_LUA_BRIDGE_C, [String: String]{
         "abi": abi,
-        "codec": pkg_binder_c_escape(@PKG_LUA_JSON_CODEC),
+        "codec": pkg_binder_c_escape(PKG_LUA_JSON_CODEC),
         "program": pkg_binder_c_escape(source),
         "wrappers": wrappers.join("")
     })
@@ -241,14 +241,14 @@ fn pkg_lua_lex(source: String) -> [LuaToken] ForeignBindError! {
 }
 
 fn pkg_lua_reserved(value: String) -> Bool Never! {
-    fixed :: @PKG_LUA_FIXED_FUNCTIONS
+    fixed :: PKG_LUA_FIXED_FUNCTIONS
     loop entry in fixed {
         if entry.name == value -> return true
     }
-    @PKG_LUA_RESERVED.contains(value) || @JET_KEYWORD_LIST.contains(value) || @JET_TYPE_LIST.contains(value)
+    PKG_LUA_RESERVED.contains(value) || JET_KEYWORD_LIST.contains(value) || JET_TYPE_LIST.contains(value)
 }
 
-@PKG_LUA_JET_SESSION :: ```impl Session.Close {
+PKG_LUA_JET_SESSION :: prep { ```impl Session.Close {
     fn close(^self) { abi.close(self.value) }
 }
 
@@ -276,10 +276,10 @@ pub fn view_set_int(view: TableView, key: String, value: Int) -> Bool LuaError! 
     return Ok(true)
 }
 
-```
+``` }
 
 // The three generated entry points per function. Hole: `name`.
-@PKG_LUA_JET_FUNCTION :: ```pub fn @@name@@(session: Session, input: DataTree, deadline_ms: Int) -> DataTree LuaError! {
+PKG_LUA_JET_FUNCTION :: prep { ```pub fn @@name@@(session: Session, input: DataTree, deadline_ms: Int) -> DataTree LuaError! {
     raw :: abi.@@name@@(session.value, json.to_string(input), deadline_ms)
     code :: abi.take_error()
     return decode_response(raw, code)
@@ -298,11 +298,11 @@ pub fn @@name@@_view(session: Session, deadline_ms: Int) -> TableView LuaError! 
     return Ok(TableView{ session: session.value, table: table })
 }
 
-```
+``` }
 
 // The embedded-VM bridge. Holes: `abi`, the c-escaped `codec` and `program`,
 // and the per-function `wrappers`.
-@PKG_LUA_BRIDGE_C :: ```#include <lua.h>
+PKG_LUA_BRIDGE_C :: prep { ```#include <lua.h>
 #include <lauxlib.h>
 #include <lualib.h>
 #include <stdint.h>
@@ -334,10 +334,10 @@ int64_t @@abi@@_take_error(void){int64_t value=failed;failed=0;return value;}
 int64_t @@abi@@_open(void){failed=0;pthread_once(&once,initialize);pthread_mutex_lock(&registry);int index=-1;for(int n=0;n<SLOTS;n++)if(!slots[n].state&&!slots[n].reserved){index=n;slots[n].reserved=1;break;}if(index<0){pthread_mutex_unlock(&registry);failed=5;return 0;}Slot*s=&slots[index];pthread_mutex_unlock(&registry);pthread_mutex_lock(&s->use);atomic_store(&s->cancelled,0);lua_State*L=fresh(s);if(!L){pthread_mutex_lock(&registry);s->reserved=0;pthread_mutex_unlock(&registry);pthread_mutex_unlock(&s->use);failed=s->hook_reason?s->hook_reason:4;return 0;}pthread_mutex_lock(&registry);s->state=L;s->reserved=0;uint32_t generation=s->generation;pthread_mutex_unlock(&registry);pthread_mutex_unlock(&s->use);return ((int64_t)generation<<6)|(index+1);}
 void @@abi@@_cancel(int64_t h){int index=(int)(h&63)-1;uint32_t generation=(uint32_t)((uint64_t)h>>6);if(index<0||index>=SLOTS)return;pthread_mutex_lock(&registry);Slot*s=&slots[index];if(s->state&&s->generation==generation)atomic_store(&s->cancelled,1);pthread_mutex_unlock(&registry);}
 void @@abi@@_close(int64_t h){failed=0;int index=(int)(h&63)-1;uint32_t generation=(uint32_t)((uint64_t)h>>6);if(index<0||index>=SLOTS){failed=1;return;}pthread_mutex_lock(&registry);Slot*s=&slots[index];if(!s->state||s->generation!=generation){pthread_mutex_unlock(&registry);failed=1;return;}pthread_mutex_lock(&s->use);lua_State*L=s->state;s->state=0;s->generation++;if(!s->generation)s->generation=1;pthread_mutex_unlock(&registry);lua_close(L);pthread_mutex_unlock(&s->use);}
-@@wrappers@@```
+@@wrappers@@``` }
 
 // The JSON codec loaded into every Lua state before the user module.
-@PKG_LUA_JSON_CODEC :: ```
+PKG_LUA_JSON_CODEC :: prep { ```
 jet = jet or {}; jet.null = jet.null or setmetatable({}, {__tostring=function() return "null" end})
 local kinds=setmetatable({}, {__mode="k"})
 local function decode(text)
@@ -364,4 +364,4 @@ local function quote(s) return '"'..s:gsub('[%z\1-\31\\"]',function(c)local m={[
 local function encode(v,seen,depth) if depth>64 then error('depth') end;local t=type(v);if v==jet.null then return 'null' elseif t=='nil' then return 'null' elseif t=='boolean' then return tostring(v) elseif t=='number' then if v~=v or v==math.huge or v==-math.huge then error('number') end;return string.format('%.17g',v) elseif t=='string' then return quote(v) elseif t~='table' then error('type') end;if seen[v] then error('cycle') end;seen[v]=true;local kind=kinds[v];if not kind then local count,max=0,0;local array=true;for k in pairs(v) do count=count+1;if type(k)~='number' or k%1~=0 or k<1 then array=false else max=math.max(max,k) end end;kind=array and max==count and 'array' or 'object' end;local out={};if kind=='array' then for i=1,#v do out[#out+1]=encode(v[i],seen,depth+1) end;seen[v]=nil;return '['..table.concat(out,',')..']' end;for k,x in pairs(v) do if type(k)~='string' then error('key') end;out[#out+1]=quote(k)..':'..encode(x,seen,depth+1) end;table.sort(out);seen[v]=nil;return '{'..table.concat(out,',')..'}' end
 function __jet_decode(text) return decode(text) end
 function __jet_encode(value) return encode(value,{},0) end
-```
+``` }

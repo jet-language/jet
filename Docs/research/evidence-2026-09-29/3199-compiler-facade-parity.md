@@ -1,8 +1,8 @@
 # #3199 — Typed, JSON and compiler-facade fact parity
 
-Closer09, 2026-09-29. Binary via `~/.cache/jet-luna/safe-jet.sh`
+Closer09, 2026-09-29. Binary via `~/.cache/jet-dev/safe-jet.sh`
 (jet-current = `jet-debug-snapshot16`). Source head `e9c708fa7`. Scratch
-`~/.cache/jet-test-scratch/Closer09/`.
+`~/.cache/jet-dev/scratch/Closer09/`.
 
 ## Question
 
@@ -136,7 +136,7 @@ state (criterion 2/8).
 ## Defects
 
 1. `core.compiler.lex/parse/check` have no loaded signature in the comptime
-   evaluator: repro `~/.cache/jet-test-scratch/Closer09/tooling2/run.jet`
+   evaluator: repro `~/.cache/jet-dev/scratch/Closer09/tooling2/run.jet`
    (copy of the shipped `Examples/features/foundations/tooling/run.jet`), `jet
    run run.jet` → E0956 x6 + E0119 `CompilerLexed`. Expected: `compiler facts:
    tokens=…; items=…; functions=…`.

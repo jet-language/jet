@@ -4,11 +4,11 @@
 
 // 2^63: the reference converts a JSON number at this bound to the largest
 // Nix integer and rejects anything beyond it.
-@NIXEVAL_JSON_INTEGER_BOUND :: 9223372036854775808
+NIXEVAL_JSON_INTEGER_BOUND :: prep { 9223372036854775808 }
 
 impl NixEvaluator {
     fn encode_json(&self, value: NixEvalValue, depth: Int) -> String NixEvalError! {
-        if depth > @NIXEVAL_EXPRESSION_LIMIT -> return Err(NixEvalError.ResourceLimit("JSON value is too deeply nested"))
+        if depth > NIXEVAL_EXPRESSION_LIMIT -> return Err(NixEvalError.ResourceLimit("JSON value is too deeply nested"))
         if value == {
             .Null -> return Ok("null")
             .Bool(flag) -> return Ok(if flag -> "true" else -> "false")
@@ -38,8 +38,8 @@ impl NixEvaluator {
         Err(NixEvalError.Unsupported("value of type {value.type_name()} cannot be encoded as JSON"))
     }
 
-    fn json_to_value(&self, document: NixEvalJson, index: Int, depth: Int) -> NixEvalValue NixEvalError! {
-        if depth > @NIXEVAL_EXPRESSION_LIMIT -> return Err(NixEvalError.ResourceLimit("JSON value is too deeply nested"))
+    fn json_to_value(&self, document: NixEvalJSON, index: Int, depth: Int) -> NixEvalValue NixEvalError! {
+        if depth > NIXEVAL_EXPRESSION_LIMIT -> return Err(NixEvalError.ResourceLimit("JSON value is too deeply nested"))
         if document.node(index) == {
             .Null -> NixEvalValue.Null
             .Bool(flag) -> NixEvalValue.Bool(flag)
@@ -67,18 +67,18 @@ impl NixEvaluator {
 
 // A JSON number as a Nix integer. The reference conversion saturates 2^63 to
 // the largest integer and rejects fractions and anything out of range.
-fn nixeval_json_integer(number: NixEvalJsonNumber) -> Int NixEvalError! {
+fn nixeval_json_integer(number: NixEvalJSONNumber) -> Int NixEvalError! {
     integer :: number.integer() ?? return Err(NixEvalError.Unsupported("fromJSON only supports Nix integer JSON numbers"))
-    if integer < -@NIXEVAL_JSON_INTEGER_BOUND || integer > @NIXEVAL_JSON_INTEGER_BOUND {
+    if integer < -NIXEVAL_JSON_INTEGER_BOUND || integer > NIXEVAL_JSON_INTEGER_BOUND {
         return Err(NixEvalError.Unsupported("fromJSON only supports Nix integer JSON numbers"))
     }
-    if integer == @NIXEVAL_JSON_INTEGER_BOUND -> return Ok(integer - 1)
+    if integer == NIXEVAL_JSON_INTEGER_BOUND -> return Ok(integer - 1)
     Ok(integer)
 }
 
 // Decimal text of the binary64 rounding of an integer.
 fn nixeval_json_integer_text(value: Int) -> String Never! {
-    number :: NixEvalJsonNumber.from_int(value)
+    number :: NixEvalJSONNumber.from_int(value)
     "{number.integer() ?? 0}"
 }
 

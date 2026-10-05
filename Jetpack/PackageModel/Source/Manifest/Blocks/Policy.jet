@@ -35,7 +35,7 @@ pub fn pkg_parse_policy(body: String, package_only_fields: Bool) -> [PolicyDecla
         name :: entry.key
         raw :: entry.value
         if name == "trust" || name == "providers" -> return Err(PackageParseError.RetiredAuthorityField{field: "policy.{name}", replacement: "authority.{name}"})
-        if package_only_fields && (name == @POLICY_FIELD_EFFECTS || name == @POLICY_FIELD_UNSAFE || name == @POLICY_FIELD_EXPERT || name == @POLICY_FIELD_DEPS || name == @POLICY_FIELD_CLAIMS) -> next
+        if package_only_fields && (name == POLICY_FIELD_EFFECTS || name == POLICY_FIELD_UNSAFE || name == POLICY_FIELD_EXPERT || name == POLICY_FIELD_DEPS || name == POLICY_FIELD_CLAIMS) -> next
         if policy_key_parse(name) == None {
             pkg_policy_unknown_key(name, raw, package_only_fields)
             next
@@ -51,7 +51,7 @@ pub fn pkg_parse_policy(body: String, package_only_fields: Bool) -> [PolicyDecla
         }
         &out.push(PolicyDeclaration{key: key, value: value, scope: PolicyScope.Package, span: Span{start: 0, end: 0}, target: None, source: "package.jet"})
     }
-    loop rule in @POLICY_RULES {
+    loop rule in POLICY_RULES {
         if policy_resolve(rule.key, out) == .Err(error) -> return Err(pkg_bad_mem("conflicting `{policy_key_name(rule.key)}` declarations: {error.debug()}"))
     }
     Ok(out)
@@ -70,11 +70,11 @@ fn pkg_policy_unknown_key(name: String, raw: String, package_only_fields: Bool) 
         else -> None
     }
     if replacement == .Val(text) -> return Err(pkg_bad_mem("`{name}` is a retired memory floor; write the denial {text}"))
-    if name == @POLICY_FIELD_LINTS -> return Ok()
-    if package_only_fields && (name == @POLICY_FIELD_CONTAIN || name == @POLICY_FIELD_HARDEN || name == @POLICY_FIELD_LICENSES || name == @POLICY_FIELD_SOURCES || name == @POLICY_FIELD_EXCEPTIONS || name == @POLICY_FIELD_CLAIMS) -> return Ok()
+    if name == POLICY_FIELD_LINTS -> return
+    if package_only_fields && (name == POLICY_FIELD_CONTAIN || name == POLICY_FIELD_HARDEN || name == POLICY_FIELD_LICENSES || name == POLICY_FIELD_SOURCES || name == POLICY_FIELD_EXCEPTIONS || name == POLICY_FIELD_CLAIMS) -> return
     auto_derive :: lint_auto_derive_name()
     if name == auto_derive -> return Err(PackageParseError.RetiredPolicyField{field: "policy.{name}", replacement: "policy: {{ lints: {{ deny: [{auto_derive}] }} }}"})
-    Err(pkg_bad_mem("`{name}` is not a registered package policy; memory floors belong in `authority.holds.deny`"))
+    return Err(pkg_bad_mem("`{name}` is not a registered package policy; memory floors belong in `authority.holds.deny`"))
 }
 
 // One `policy.sources` rule: a package pattern and its allowed sources.
@@ -109,7 +109,7 @@ pub fn pkg_parse_package_policy_surface(body: String) -> PackagePolicySurface Pa
     loop entry in pkg_key_value_entries(body) {
         raw :: entry.value
         if entry.key == {
-            @POLICY_FIELD_EFFECTS -> {
+            POLICY_FIELD_EFFECTS -> {
                 if effects_seen -> return Err(pkg_bad_policy("`policy.effects` is declared more than once"))
                 effects_seen = true
                 paths_seen := [String]{}
@@ -120,7 +120,7 @@ pub fn pkg_parse_package_policy_surface(body: String) -> PackagePolicySurface Pa
                     surface.effects[path] = pkg_parse_effect_ceiling(ceiling.value, "policy.effects.{path}")
                 }
             }
-            @POLICY_FIELD_UNSAFE -> {
+            POLICY_FIELD_UNSAFE -> {
                 if unsafe_seen -> return Err(pkg_bad_policy("`policy.unsafe` is declared more than once"))
                 unsafe_seen = true
                 value :: raw.trim()
@@ -131,7 +131,7 @@ pub fn pkg_parse_package_policy_surface(body: String) -> PackagePolicySurface Pa
                     surface.unsafe_paths = Val(pkg_parse_policy_path_list(list, "policy.unsafe"))
                 }
             }
-            @POLICY_FIELD_EXPERT -> {
+            POLICY_FIELD_EXPERT -> {
                 if expert_seen -> return Err(pkg_bad_policy("`policy.expert` is declared more than once"))
                 expert_seen = true
                 if raw.trim() == {
@@ -140,13 +140,13 @@ pub fn pkg_parse_package_policy_surface(body: String) -> PackagePolicySurface Pa
                     else -> return Err(pkg_bad_policy("`policy.expert` must be `.Deny` or `.Allow`"))
                 }
             }
-            @POLICY_FIELD_DEPS -> {
+            POLICY_FIELD_DEPS -> {
                 if deps_seen -> return Err(pkg_bad_policy("`policy.deps` is declared more than once"))
                 deps_seen = true
                 list :: pkg_strip_wrapped(raw.trim(), ".List(", ")") ?? return Err(pkg_bad_policy("`policy.deps` must use the canonical `.List([\"dependency\"])` allow-list"))
                 surface.deps = Val(pkg_parse_dependency_policy_list(list))
             }
-            @POLICY_FIELD_CLAIMS -> {
+            POLICY_FIELD_CLAIMS -> {
                 if claims_seen -> return Err(pkg_bad_policy("`policy.claims` is declared more than once"))
                 claims_seen = true
                 min_seen := false
@@ -158,7 +158,7 @@ pub fn pkg_parse_package_policy_surface(body: String) -> PackagePolicySurface Pa
                 }
                 if !min_seen -> return Err(pkg_bad_policy("`policy.claims` requires `min`"))
             }
-            @POLICY_FIELD_LICENSES -> {
+            POLICY_FIELD_LICENSES -> {
                 if surface.licenses != None -> return Err(pkg_bad_policy("`policy.licenses` is declared more than once"))
                 list :: pkg_strip_wrapped(raw.trim(), ".Allow(", ")") ?? return Err(pkg_bad_policy("`policy.licenses` must use `.Allow([\"MIT\", \"Apache-2.0\"])`"))
                 values :: pkg_parse_string_list(list) ?? return Err(pkg_bad_policy("`policy.licenses` must contain a non-empty string list"))
@@ -166,7 +166,7 @@ pub fn pkg_parse_package_policy_surface(body: String) -> PackagePolicySurface Pa
                 if pkg_policy_has_repeat(values) -> return Err(pkg_bad_policy("`policy.licenses` cannot repeat an SPDX identifier"))
                 surface.licenses = Val(values)
             }
-            @POLICY_FIELD_SOURCES -> {
+            POLICY_FIELD_SOURCES -> {
                 if sources_seen -> return Err(pkg_bad_policy("`policy.sources` is declared more than once"))
                 sources_seen = true
                 source_body :: pkg_strip_wrapped(raw.trim(), "{{", "}}") ?? return Err(pkg_bad_policy("`policy.sources` must be a record"))
@@ -182,7 +182,7 @@ pub fn pkg_parse_package_policy_surface(body: String) -> PackagePolicySurface Pa
                     &surface.source_maps.push(PolicySourceMap{pattern: pattern, sources: sources})
                 }
             }
-            @POLICY_FIELD_EXCEPTIONS -> {
+            POLICY_FIELD_EXCEPTIONS -> {
                 if exceptions_seen -> return Err(pkg_bad_policy("`policy.exceptions` is declared more than once"))
                 exceptions_seen = true
                 surface.exceptions = pkg_parse_policy_exceptions(raw)
@@ -287,32 +287,32 @@ fn pkg_parse_policy_exceptions(raw: String) -> [PackagePolicyException] PackageP
     loop piece in pkg_top_level_commas(inner) {
         entry :: piece.trim()
         if entry == "" -> next
-        body :: pkg_strip_wrapped(entry, "{@POLICY_EXCEPTION_TYPE}{{", "}}") ?? return Err(pkg_bad_policy("`policy.exceptions` entries must use `PolicyException{{ id: \"…\", scope: \"package#version\", reason: \"…\", expires: … }}`"))
-        id_value := None
-        scope_value := None
-        reason_value := None
-        expires_value := None
+        body :: pkg_strip_wrapped(entry, "{POLICY_EXCEPTION_TYPE}{{", "}}") ?? return Err(pkg_bad_policy("`policy.exceptions` entries must use `PolicyException{{ id: \"…\", scope: \"package#version\", reason: \"…\", expires: … }}`"))
+        id_value := String?{None}
+        scope_value := String?{None}
+        reason_value := String?{None}
+        expires_value := String?{None}
         loop field in pkg_key_value_entries(body) {
             duplicate :: if field.key == {
-                @POLICY_EXCEPTION_FIELD_ID -> id_value != None
-                @POLICY_EXCEPTION_FIELD_SCOPE -> scope_value != None
-                @POLICY_EXCEPTION_FIELD_REASON -> reason_value != None
-                @POLICY_EXCEPTION_FIELD_EXPIRES -> expires_value != None
+                POLICY_EXCEPTION_FIELD_ID -> id_value != None
+                POLICY_EXCEPTION_FIELD_SCOPE -> scope_value != None
+                POLICY_EXCEPTION_FIELD_REASON -> reason_value != None
+                POLICY_EXCEPTION_FIELD_EXPIRES -> expires_value != None
                 else -> {
                     return Err(pkg_bad_policy("unknown `PolicyException` field `{field.key}`"))
                 }
             }
             if duplicate -> return Err(pkg_bad_policy("`PolicyException.{field.key}` is declared more than once"))
             if field.key == {
-                @POLICY_EXCEPTION_FIELD_ID -> id_value = Val(field.value)
-                @POLICY_EXCEPTION_FIELD_SCOPE -> scope_value = Val(field.value)
-                @POLICY_EXCEPTION_FIELD_REASON -> reason_value = Val(field.value)
+                POLICY_EXCEPTION_FIELD_ID -> id_value = Val(field.value)
+                POLICY_EXCEPTION_FIELD_SCOPE -> scope_value = Val(field.value)
+                POLICY_EXCEPTION_FIELD_REASON -> reason_value = Val(field.value)
                 else -> expires_value = Val(field.value)
             }
         }
-        id :: pkg_exception_string(id_value, @POLICY_EXCEPTION_FIELD_ID)
-        scope :: pkg_exception_string(scope_value, @POLICY_EXCEPTION_FIELD_SCOPE)
-        reason :: pkg_exception_string(reason_value, @POLICY_EXCEPTION_FIELD_REASON)
+        id :: pkg_exception_string(id_value, POLICY_EXCEPTION_FIELD_ID)
+        scope :: pkg_exception_string(scope_value, POLICY_EXCEPTION_FIELD_SCOPE)
+        reason :: pkg_exception_string(reason_value, POLICY_EXCEPTION_FIELD_REASON)
         expires_raw :: expires_value ?? return Err(pkg_bad_policy("`PolicyException.expires` is required"))
         expires :: pkg_parse_policy_expiry(expires_raw)
         pkg_validate_exception_text("id", id)
@@ -359,7 +359,7 @@ fn pkg_is_exact_exception_scope(scope: String) -> Bool Never! {
 fn pkg_parse_policy_expiry(raw: String) -> Int PackageParseError! {
     value :: raw.trim()
     if pkg_parse_u64(value) == .Val(timestamp) -> return Ok(timestamp)
-    date := None
+    date := String?{None}
     if pkg_strip_wrapped(value, "Date.parse(\"", "\")?") == .Val(inner) {
         date = Val(inner)
     } else {
@@ -375,7 +375,7 @@ fn pkg_parse_policy_expiry(raw: String) -> Int PackageParseError! {
     day :: pkg_parse_i64(parts[2]) ?? return Err(pkg_bad_policy("`PolicyException.expires` has an invalid calendar date"))
     if month < 1 || month > 12 || day < 1 || day > pkg_days_in_month(year, month) -> return Err(pkg_bad_policy("`PolicyException.expires` has an invalid calendar date"))
     days :: pkg_days_from_civil(year, month, day)
-    if days < 0 || days > @PKG_MAX_U64_IN_INT / 86400 -> return Err(pkg_bad_policy("`PolicyException.expires` is outside the supported date range"))
+    if days < 0 || days > PKG_MAX_U64_IN_INT /% 86400 -> return Err(pkg_bad_policy("`PolicyException.expires` is outside the supported date range"))
     Ok(days * 86400)
 }
 
@@ -391,11 +391,11 @@ fn pkg_days_in_month(year: Int, month: Int) -> Int Never! {
 // conversion).
 fn pkg_days_from_civil(input_year: Int, input_month: Int, day: Int) -> Int Never! {
     year :: if input_month <= 2 -> input_year - 1 else -> input_year
-    era :: (if year >= 0 -> year else -> year - 399) / 400
+    era :: math.div_rem(if year >= 0 -> year else -> year - 399, 400).quot
     year_of_era :: year - era * 400
     month :: if input_month > 2 -> input_month - 3 else -> input_month + 9
-    day_of_year :: (153 * month + 2) / 5 + day - 1
-    day_of_era :: year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year
+    day_of_year :: (153 * month + 2) /% 5 + day - 1
+    day_of_era :: year_of_era * 365 + year_of_era /% 4 - year_of_era /% 100 + day_of_year
     era * 146097 + day_of_era - 719468
 }
 
@@ -411,7 +411,7 @@ pub fn pkg_parse_guarantee_policy(body: String) -> GuaranteePolicy PackageParseE
     harden_seen := false
     harden := false
     loop entry in pkg_key_value_entries(body) {
-        if entry.key == @POLICY_FIELD_CONTAIN {
+        if entry.key == POLICY_FIELD_CONTAIN {
             if contain_seen -> return Err(pkg_bad_guarantee("`policy.contain` may be declared once"))
             contain_seen = true
             values :: pkg_parse_string_list(entry.value.trim()) ?? return Err(pkg_bad_guarantee("`policy.contain` must be a list like `[\"libxml\"]`"))
@@ -420,7 +420,7 @@ pub fn pkg_parse_guarantee_policy(body: String) -> GuaranteePolicy PackageParseE
                 if contain.contains(dependency) -> return Err(pkg_bad_guarantee("`policy.contain` cannot name one dependency more than once"))
                 &contain.push(dependency)
             }
-        } else if entry.key == @POLICY_FIELD_HARDEN {
+        } else if entry.key == POLICY_FIELD_HARDEN {
             if harden_seen -> return Err(pkg_bad_guarantee("`policy.harden` may be declared once"))
             harden_seen = true
             if entry.value.trim() == {
@@ -437,8 +437,8 @@ pub fn pkg_parse_guarantee_policy(body: String) -> GuaranteePolicy PackageParseE
 // `policy: { … }` block (`JET_ORG_UNSAFE_POLICY`).
 pub fn pkg_parse_policy_document(text: String) -> [PolicyDeclaration] PackageParseError! {
     stripped :: pkg_strip_comments(text).trim()
-    if !stripped.starts_with(@MANIFEST_BLOCK_POLICY) -> return Err(pkg_bad_mem("expected only `policy: {{ … }}`"))
-    rest := stripped.removeprefix(@MANIFEST_BLOCK_POLICY).trim_start()
+    if !stripped.starts_with(MANIFEST_BLOCK_POLICY) -> return Err(pkg_bad_mem("expected only `policy: {{ … }}`"))
+    rest := stripped.removeprefix(MANIFEST_BLOCK_POLICY).trim_start()
     if !rest.starts_with(":") -> return Err(pkg_bad_mem("expected `:` after `policy`"))
     rest = rest.removeprefix(":").trim_start()
     if rest.starts_with(".") -> rest = rest.removeprefix(".").trim_start()

@@ -13,7 +13,7 @@
 // Started once, before it hides the host Nix store: the mount process keeps
 // its loaded interpreter while applying every exact Hangar bind, then the
 // script verifies each mount and replaces itself with the program.
-@ENV_SHELL_NIX_PROJECTION_SCRIPT :: `set -eu
+ENV_SHELL_NIX_PROJECTION_SCRIPT :: prep { `set -eu
 mount="$1"
 fstab="$2"
 count="$3"
@@ -54,14 +54,14 @@ if [ -n "$binary_mode" ]; then
 else
     exec "$binary" "$@"
 fi
-`
+` }
 
-@ENV_SHELL_NIX_STORE :: "/nix/store"
-@ENV_SHELL_UNSHARE_CANDIDATES :: [String]{"/run/current-system/sw/bin/unshare", "/usr/bin/unshare", "/bin/unshare"}
-@ENV_SHELL_MOUNT_CANDIDATES :: [String]{"/run/current-system/sw/bin/mount", "/usr/bin/mount", "/bin/mount"}
-@ENV_SHELL_SH_CANDIDATES :: [String]{"/run/current-system/sw/bin/sh", "/usr/bin/sh", "/bin/sh"}
-@ENV_SHELL_SYSTEM_TOOL_DIRS :: [String]{"/run/current-system/sw/bin", "/usr/bin", "/bin"}
-@ENV_SHELL_NAMESPACE_FLAGS :: [String]{"--user", "--map-root-user", "--mount", "--propagation", "private"}
+ENV_SHELL_NIX_STORE :: prep { "/nix/store" }
+ENV_SHELL_UNSHARE_CANDIDATES :: prep { [String]{"/run/current-system/sw/bin/unshare", "/usr/bin/unshare", "/bin/unshare"} }
+ENV_SHELL_MOUNT_CANDIDATES :: prep { [String]{"/run/current-system/sw/bin/mount", "/usr/bin/mount", "/bin/mount"} }
+ENV_SHELL_SH_CANDIDATES :: prep { [String]{"/run/current-system/sw/bin/sh", "/usr/bin/sh", "/bin/sh"} }
+ENV_SHELL_SYSTEM_TOOL_DIRS :: prep { [String]{"/run/current-system/sw/bin", "/usr/bin", "/bin"} }
+ENV_SHELL_NAMESPACE_FLAGS :: prep { [String]{"--user", "--map-root-user", "--mount", "--propagation", "private"} }
 
 // One tool opened before the namespace exists. The child reaches it through
 // its pinned descriptor path; `coreutils_mode` names the multicall program
@@ -108,13 +108,13 @@ fn env_shell_nix_projection_command(env: ShellEnv, program: String, rest: [Strin
     loop lease in env.cache_leases {
         if lease.executable_for(program) != None -> leased_program = true
     }
-    if !leased_program && env_shell_strip_path_prefix(program, @ENV_SHELL_NIX_STORE) == None -> return Ok(None)
+    if !leased_program && env_shell_strip_path_prefix(program, ENV_SHELL_NIX_STORE) == None -> return Ok(None)
     if !files.is_dir("/proc/self/fd") {
         return Err(EnvironmentError.Unsupported("`/proc/self/fd` is unavailable for stable projection handles"))
     }
-    unshare :: env_shell_first_file(@ENV_SHELL_UNSHARE_CANDIDATES) ?? return Err(EnvironmentError.Unsupported("rootless `/nix/store` projection needs `unshare`"))
-    mount :: env_shell_first_file(@ENV_SHELL_MOUNT_CANDIDATES) ?? return Err(EnvironmentError.Unsupported("rootless `/nix/store` projection needs `mount`"))
-    shell :: env_shell_first_file(@ENV_SHELL_SH_CANDIDATES) ?? return Err(EnvironmentError.Unsupported("rootless `/nix/store` projection needs `sh`"))
+    unshare :: env_shell_first_file(ENV_SHELL_UNSHARE_CANDIDATES) ?? return Err(EnvironmentError.Unsupported("rootless `/nix/store` projection needs `unshare`"))
+    mount :: env_shell_first_file(ENV_SHELL_MOUNT_CANDIDATES) ?? return Err(EnvironmentError.Unsupported("rootless `/nix/store` projection needs `mount`"))
+    shell :: env_shell_first_file(ENV_SHELL_SH_CANDIDATES) ?? return Err(EnvironmentError.Unsupported("rootless `/nix/store` projection needs `sh`"))
     // Probe with an absolute shell rather than a bare `true`: the projection
     // may itself run inside a sandbox with an empty PATH, where a PATH lookup
     // fails with exit 127 and looks like a refused namespace.
@@ -127,8 +127,8 @@ fn env_shell_nix_projection_command(env: ShellEnv, program: String, rest: [Strin
     if env_shell_projection_fstab(projections, &scratch) == {
         .Ok(mounts) -> {
             argv := [String]{unshare_tool.path}
-            loop flag in @ENV_SHELL_NAMESPACE_FLAGS -> &argv.push(flag)
-            script_args :: [String]{shell_tool.path, "-c", @ENV_SHELL_NIX_PROJECTION_SCRIPT, "jetpack-nix-run", mount_tool.path, mounts.fstab_path, "{mounts.bound_logicals.len()}"}
+            loop flag in ENV_SHELL_NAMESPACE_FLAGS -> &argv.push(flag)
+            script_args :: [String]{shell_tool.path, "-c", ENV_SHELL_NIX_PROJECTION_SCRIPT, "jetpack-nix-run", mount_tool.path, mounts.fstab_path, "{mounts.bound_logicals.len()}"}
             loop part in script_args -> &argv.push(part)
             loop logical in mounts.bound_logicals -> &argv.push(logical)
             &argv.push(binary.path)
@@ -194,7 +194,7 @@ fn env_shell_projection_fstab(projections: [String: String], scratch: &ShellScra
     loop logical in envmodel_sorted_keys(projections) {
         source :: projections[logical]
         env_shell_validate_projection_path(logical)
-        name :: env_shell_strip_path_prefix(logical, @ENV_SHELL_NIX_STORE) ?? ""
+        name :: env_shell_strip_path_prefix(logical, ENV_SHELL_NIX_STORE) ?? ""
         mountpoint :: files.join(empty_store, name)
         // A Nix symlink root (gcc-wrapper-info, man-page indirections) names
         // another store path that may not exist on this host; the link itself
@@ -207,7 +207,7 @@ fn env_shell_projection_fstab(projections: [String: String], scratch: &ShellScra
             next
         }
         canonical :: files.canonicalize(source) ?? return Err(EnvironmentError.InvalidData("{err}"))
-        if env_shell_strip_path_prefix(canonical, @ENV_SHELL_NIX_STORE) != None {
+        if env_shell_strip_path_prefix(canonical, ENV_SHELL_NIX_STORE) != None {
             return Err(EnvironmentError.InvalidData("Nix projection source `{canonical}` is the host store"))
         }
         node :: files.stat(canonical) ?? return Err(EnvironmentError.InvalidData("{err}"))
@@ -260,14 +260,13 @@ fn env_shell_logical_executable_path(projections: [String: String], binary: Stri
 
 fn env_shell_check_rootless_namespace(unshare: String, shell: String) EnvironmentError! -[Exec, Time.Wait]> {
     argv := [String]{unshare}
-    loop flag in @ENV_SHELL_NAMESPACE_FLAGS -> &argv.push(flag)
+    loop flag in ENV_SHELL_NAMESPACE_FLAGS -> &argv.push(flag)
     probe :: [String]{shell, "-c", ":"}
     loop part in probe -> &argv.push(part)
     receipt :: process.cmd(argv).stdout(.Capture).stderr(.Capture).run() ?? return Err(EnvironmentError.Unsupported("rootless user and mount namespaces are unavailable: {err}"))
     if !receipt.success {
         return Err(EnvironmentError.Unsupported("rootless user and mount namespaces were refused ({env_shell_exit_status_text(receipt)})"))
     }
-    Ok()
 }
 
 // Rust `ExitStatus` display.
@@ -277,7 +276,7 @@ fn env_shell_exit_status_text(receipt: ProcessReceipt) -> String Never! {
 }
 
 fn env_shell_validate_projection_path(logical: String) EnvironmentError! {
-    name :: env_shell_strip_path_prefix(logical, @ENV_SHELL_NIX_STORE) ?? return Err(EnvironmentError.InvalidData("invalid canonical Nix output path `{logical}`"))
+    name :: env_shell_strip_path_prefix(logical, ENV_SHELL_NIX_STORE) ?? return Err(EnvironmentError.InvalidData("invalid canonical Nix output path `{logical}`"))
     if name == "" || name.contains("/") || name == "." || name == ".." {
         return Err(EnvironmentError.InvalidData("invalid canonical Nix output path `{logical}`"))
     }
@@ -287,7 +286,6 @@ fn env_shell_validate_projection_path(logical: String) EnvironmentError! {
             else -> {}
         }
     }
-    Ok()
 }
 
 // Octal-escape the fstab field separators and comment marker.
@@ -314,14 +312,14 @@ fn env_shell_first_file(candidates: [String]) -[FS]> String? Never! {
 
 // A required system tool from the fixed system directories.
 fn env_shell_find_system_tool(name: String) -[FS]> String? Never! {
-    loop dir in @ENV_SHELL_SYSTEM_TOOL_DIRS {
+    loop dir in ENV_SHELL_SYSTEM_TOOL_DIRS {
         path :: files.join(dir, name)
         if files.is_file(path) -> return Val(path)
     }
     None
 }
 
-fn env_shell_report_nix_projection_error(theme: Theme, program: String, error: EnvironmentError) Never! {
+fn env_shell_report_nix_projection_error(theme: Theme, program: String, error: EnvironmentError) Never! -[IO, Time.Wait]> {
     if error == {
         .Unsupported(reason) -> theme.error_coded("E1351", "Nix closure execution is unavailable on this host.", "Jetpack could not create the isolated /nix/store projection: {reason}.", "Use a Linux host with unprivileged user and mount namespaces, or choose a native provider for this package.")
         else -> theme.error("could not project `{program}` through `/nix/store`", error.message(), "refresh the verified Hangar closure and run the command again")

@@ -12,7 +12,7 @@ The plan holds the status in a `core.reactive` `Signal`. `core.reactive` does no
 
 ## Witness
 
-`async_command.jet` is kept at `~/.cache/jet-test-scratch/Closer06/keep/cmd/async_command.jet`:
+`async_command.jet` is kept at `~/.cache/jet-dev/scratch/Closer06/keep/cmd/async_command.jet`:
 
 - a `#Error enum SaveError`;
 - `fn save(Int) -> Int SaveError!` (sleeps 10 ms, rejects negatives);
@@ -59,7 +59,7 @@ Criterion 3 ("UI commands use the existing task error, cancellation and owner-te
 
 The general glue is small: an enablement flag, a Running guard and a status value. Every other job is covered by the task contract. A command helper would bundle `can_execute`, the Running guard and a status `Signal` over a group-spawned task. It cannot be drafted honestly while `Signal` does not compile, because the status binding is the helper's whole reason to exist. **Gate: no ballot now.** Revisit after D-REACT-EFFECT-NAME lands. If a ballot follows, it must not copy RelayCommand.
 
-## Defects (repros under `~/.cache/jet-test-scratch/Closer06/keep/cmd/`)
+## Defects (repros under `~/.cache/jet-dev/scratch/Closer06/keep/cmd/`)
 
 | id | repro | tiers | observed | expected |
 |---|---|---|---|---|

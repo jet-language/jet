@@ -51,7 +51,7 @@ Apply the **deletion test** to anything you suspect is shallow: would deleting i
 
 Write a self-contained HTML file to the configured disk scratch directory so
 nothing lands in the repo or RAM-backed `/tmp`. Resolve it from `$TMPDIR`,
-which the Jet agent environment sets to `~/.cache/jet-test-scratch`, and write
+which the Jet agent environment sets to `~/.cache/jet-dev/scratch`, and write
 to `<tmpdir>/architecture-review-<timestamp>.html` so each run gets a fresh
 file. Open it for the user — `xdg-open <path>` on Linux, `open <path>` on macOS,
 `start <path>` on Windows — and tell them the absolute path.

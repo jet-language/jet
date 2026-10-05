@@ -318,13 +318,17 @@ fn sema_user_derive_expand_struct(graph: SemaRegistrationGraph, module_index: In
     }
 }
 
-fn sema_user_derive_expand_module(graph: &SemaRegistrationGraph, module_index: Int, providers: [SemaUserDeriveProvider], entry_index: Int) {
+fn sema_user_derive_collect_module(graph: SemaRegistrationGraph, module_index: Int, providers: [SemaUserDeriveProvider], entry_index: Int, generated: &[Item], diagnostics: &[Diagnostic]) {
     items :: graph.modules[module_index].program.items
-    generated := [Item]{}
-    diagnostics := [Diagnostic]{}
     loop item in items {
         if item == .Struct(definition) -> sema_user_derive_expand_struct(graph, module_index, items, definition, providers, entry_index, &generated, &diagnostics)
     }
+}
+
+fn sema_user_derive_expand_module(graph: &SemaRegistrationGraph, module_index: Int, providers: [SemaUserDeriveProvider], entry_index: Int) {
+    generated := [Item]{}
+    diagnostics := [Diagnostic]{}
+    sema_user_derive_collect_module(graph, module_index, providers, entry_index, &generated, &diagnostics)
     sema_user_template_register(&graph, module_index, generated, diagnostics)
 }
 
@@ -399,10 +403,8 @@ fn sema_user_rule_accept(items: [Item], rule: String, expanded: [Item], generate
     }
 }
 
-fn sema_user_rule_expand_module(graph: &SemaRegistrationGraph, module_index: Int, declarations: [MarkerDecl]) {
+fn sema_user_rule_collect_module(graph: SemaRegistrationGraph, module_index: Int, declarations: [MarkerDecl], generated: &[Item], diagnostics: &[Diagnostic]) {
     items :: graph.modules[module_index].program.items
-    generated := [Item]{}
-    diagnostics := [Diagnostic]{}
     loop item in items {
         if item == .Struct(definition) {
             type_info := CtValue?{None}
@@ -428,6 +430,12 @@ fn sema_user_rule_expand_module(graph: &SemaRegistrationGraph, module_index: Int
             }
         }
     }
+}
+
+fn sema_user_rule_expand_module(graph: &SemaRegistrationGraph, module_index: Int, declarations: [MarkerDecl]) {
+    generated := [Item]{}
+    diagnostics := [Diagnostic]{}
+    sema_user_rule_collect_module(graph, module_index, declarations, &generated, &diagnostics)
     sema_user_template_register(&graph, module_index, generated, diagnostics)
 }
 

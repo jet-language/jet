@@ -1,0 +1,192 @@
+// Registry name policy: Source/Publish/NamePolicy.rs (#1912).
+// Policy compares Unicode scalar values, not UTF-8 bytes or grapheme clusters.
+PUBLICATION_NAME_POLICY_WARN_DISTANCE :: prep { 2 }
+PUBLICATION_NAME_POLICY_BLOCK_DISTANCE :: prep { 1 }
+PUBLICATION_RESERVED_SUFFIXES :: prep { [String]{"-fixed", "-patched", "-bin"} }
+
+pub struct PublicationNamePolicyThresholds {
+    pub warn_distance: Int{PUBLICATION_NAME_POLICY_WARN_DISTANCE}
+    pub block_distance: Int{PUBLICATION_NAME_POLICY_BLOCK_DISTANCE}
+}
+
+pub enum PublicationNamePolicyFinding {
+    ReservedSuffix(String)
+    Confusable(existing: String)
+    EditDistance(existing: String, distance: Int)
+}
+
+pub enum PublicationNamePolicyDecision {
+    Allow
+    Warn(PublicationNamePolicyFinding)
+    Block(PublicationNamePolicyFinding)
+}
+
+pub fn publication_name_finding_reason(finding: PublicationNamePolicyFinding) -> String Never! {
+    if finding == {
+        .ReservedSuffix(suffix) -> "it ends with reserved suffix `{suffix}`"
+        .Confusable(existing) -> "it is visually confusable with existing package `{existing}`"
+        .EditDistance(existing, distance) -> "it is edit distance {distance} from existing package `{existing}`"
+    }
+}
+
+pub fn publication_name_finding_reference(finding: PublicationNamePolicyFinding) -> String Never! {
+    if finding == {
+        .ReservedSuffix(suffix) -> suffix
+        .Confusable(existing) -> existing
+        .EditDistance(existing, _) -> existing
+    }
+}
+
+pub fn publication_name_is_blocked(decision: PublicationNamePolicyDecision) -> Bool Never! {
+    if decision == {
+        .Block(_) -> true
+        else -> false
+    }
+}
+
+pub fn publication_name_finding(decision: PublicationNamePolicyDecision) -> PublicationNamePolicyFinding? Never! {
+    if decision == {
+        .Allow -> None
+        .Warn(finding) | .Block(finding) -> Val(finding)
+    }
+}
+
+pub fn publication_name_diagnostic(decision: PublicationNamePolicyDecision, name: String) -> Diagnostic? Never! {
+    code :: if decision == {
+        .Allow -> return None
+        .Warn(_) -> "L2608"
+        .Block(_) -> "E2608"
+    }
+    finding :: publication_name_finding(decision) ?? return None
+    Val(pkg_diagnostic_from_row(code, [(name: String, value: String)]{
+        (name: "name", value: name),
+        (name: "reason", value: publication_name_finding_reason(finding)),
+        (name: "reference", value: publication_name_finding_reference(finding))
+    }, None))
+}
+
+pub fn publication_assess_name(name: String, existing_names: [String]) -> PublicationNamePolicyDecision Never! {
+    publication_assess_name_with_thresholds(name, existing_names, PublicationNamePolicyThresholds{})
+}
+
+// Rust assess_name_with_thresholds: confusable matches precede nearest-distance
+// findings, and distance ties use the original name's UTF-8 lexical ordering.
+pub fn publication_assess_name_with_thresholds(name: String, existing_names: [String], thresholds: PublicationNamePolicyThresholds) -> PublicationNamePolicyDecision Never! {
+    warn_distance :: thresholds.warn_distance
+    block_distance :: math.min(thresholds.block_distance, warn_distance)
+    skeleton :: publication_confusable_skeleton(name)
+    loop suffix in PUBLICATION_RESERVED_SUFFIXES {
+        if skeleton.ends_with(suffix) -> return PublicationNamePolicyDecision.Block(PublicationNamePolicyFinding.ReservedSuffix(suffix))
+    }
+    nearest_block := PublicationNamePolicyFinding?{None}
+    nearest_warning := PublicationNamePolicyFinding?{None}
+    best_block := warn_distance + 1
+    best_warning := warn_distance + 1
+    loop existing in existing_names {
+        if existing == name -> next
+        existing_skeleton :: publication_confusable_skeleton(existing)
+        if existing_skeleton == skeleton -> return PublicationNamePolicyDecision.Block(PublicationNamePolicyFinding.Confusable{existing: existing})
+        distance :: publication_edit_distance_at_most(skeleton, existing_skeleton, warn_distance) ?? next
+        finding :: PublicationNamePolicyFinding.EditDistance{existing: existing, distance: distance}
+        if distance <= block_distance {
+            current :: if nearest_block == {
+                .Val(value) -> publication_name_finding_reference(value)
+                .None -> ""
+            }
+            if nearest_block == None || distance < best_block || (distance == best_block && existing < current) {
+                nearest_block = Val(finding)
+                best_block = distance
+            }
+        } else {
+            current :: if nearest_warning == {
+                .Val(value) -> publication_name_finding_reference(value)
+                .None -> ""
+            }
+            if nearest_warning == None || distance < best_warning || (distance == best_warning && existing < current) {
+                nearest_warning = Val(finding)
+                best_warning = distance
+            }
+        }
+    }
+    if nearest_block == .Val(finding) -> return PublicationNamePolicyDecision.Block(finding)
+    if nearest_warning == .Val(finding) -> return PublicationNamePolicyDecision.Warn(finding)
+    PublicationNamePolicyDecision.Allow
+}
+
+// Rust edit_distance / edit_distance_at_most: two rows, with a band for the
+// bounded policy query. Reuse row storage instead of allocating once per scalar.
+pub fn publication_edit_distance(left: String, right: String) -> Int Never! {
+    limit :: math.max(left.len(), right.len())
+    publication_edit_distance_at_most(left, right, limit) ?? panic("Levenshtein distance cannot exceed the maximum scalar length")
+}
+
+fn publication_edit_distance_at_most(left: String, right: String, limit: Int) -> Int? Never! {
+    if math.abs_diff(left.len(), right.len()) > limit -> return None
+    a :: left.chars()
+    b :: right.chars()
+    previous := [Int]{}
+    current := [Int]{}
+    loop column in 0..<(b.len() + 1) {
+        &previous.push(column)
+        &current.push(limit + 1)
+    }
+    loop row in 0..<a.len() {
+        loop column in 0..<(b.len() + 1) -> current[column] = limit + 1
+        current[0] = row + 1
+        start :: math.max(row - limit, 0)
+        end :: math.min(row + limit + 1, b.len())
+        loop column in start..<end {
+            current[column + 1] = if a[row] == b[column] -> previous[column] else -> 1 + math.min(math.min(previous[column], previous[column + 1]), current[column])
+        }
+        minimum := limit + 1
+        loop value in current -> minimum = math.min(minimum, value)
+        if minimum > limit -> return None
+        swap :: previous
+        previous = current
+        current = swap
+    }
+    if previous[b.len()] <= limit -> return Val(previous[b.len()])
+    None
+}
+
+pub fn publication_confusable_skeleton(name: String) -> String Never! {
+    parts := [String]{}
+    // Rust lowercases EACH scalar (not contextual whole-string casing), then
+    // maps it through one scalar match: no per-scalar text or substring scans.
+    loop original in name.chars() {
+        loop scalar in "{original}".lower().chars() {
+            if scalar >= '̀' && scalar <= 'ͯ' -> next
+            &parts.push(if scalar == {
+                '0' | 'ο' | 'о' | 'ö' | 'ø' | 'ò' | 'ó' | 'ô' | 'õ' | 'ō' -> "o"
+                '1' | 'і' | 'ı' | 'ι' -> "i"
+                'a' | 'а' | 'α' | 'à' | 'á' | 'â' | 'ã' | 'ä' | 'å' | 'ā' | 'ă' | 'ą' -> "a"
+                'b' | 'в' | 'β' -> "b"
+                'c' | 'с' | 'ç' | 'ć' | 'ĉ' | 'ċ' | 'č' -> "c"
+                'd' | 'ԁ' | 'ď' | 'đ' -> "d"
+                'e' | 'е' | 'ε' | 'è' | 'é' | 'ê' | 'ë' | 'ē' | 'ĕ' | 'ė' | 'ę' | 'ě' -> "e"
+                'f' | 'ғ' -> "f"
+                'g' | 'ɡ' | 'ğ' | 'ĝ' | 'ġ' | 'ģ' -> "g"
+                'h' | 'н' | 'һ' | 'ĥ' -> "h"
+                'i' | 'ì' | 'í' | 'î' | 'ï' | 'ī' | 'ĭ' | 'į' | 'ǐ' -> "i"
+                'j' | 'ј' | 'ĵ' -> "j"
+                'k' | 'к' | 'ĸ' | 'ķ' -> "k"
+                'l' | 'ӏ' | 'ł' | 'ĺ' | 'ļ' | 'ľ' | 'ŀ' -> "l"
+                'm' | 'м' | 'ṁ' | 'ṃ' -> "m"
+                'n' | 'ո' | 'ñ' | 'ń' | 'ņ' | 'ň' | 'ŋ' -> "n"
+                'p' | 'р' | 'ρ' | 'ƿ' | 'ṕ' -> "p"
+                'q' | 'զ' -> "q"
+                'r' | 'г' | 'ŕ' | 'ŗ' | 'ř' -> "r"
+                's' | 'ѕ' | 'š' | 'ś' | 'ŝ' | 'ş' | 'ș' -> "s"
+                't' | 'т' | 'τ' | 'ţ' | 'ť' | 'ŧ' -> "t"
+                'u' | 'υ' | 'ù' | 'ú' | 'û' | 'ü' | 'ū' | 'ŭ' | 'ů' | 'ű' | 'ų' -> "u"
+                'v' | 'ν' | 'ѵ' -> "v"
+                'w' | 'ŵ' -> "w"
+                'x' | 'х' | 'χ' -> "x"
+                'y' | 'у' | 'ү' | 'ý' | 'ÿ' | 'ŷ' -> "y"
+                'z' | 'з' | 'ž' | 'ź' | 'ż' -> "z"
+                else -> "{scalar}"
+            })
+        }
+    }
+    parts.join("")
+}

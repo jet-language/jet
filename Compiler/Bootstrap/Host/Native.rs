@@ -1190,6 +1190,24 @@ impl<'a> BootstrapCodecSymbols<'a> {
         Ok(self.symbol_or_record(symbol))
     }
 
+    /// The emitted symbol of one checked trait-object bound. A bound names its
+    /// trait by canonical key (equal to the declared name only when the
+    /// emitter keeps unqualified trait keys), so it matches the trait row by
+    /// its MIR identity, like every other trait-object bound consumer.
+    pub(crate) fn trait_bound_symbol(
+        &self,
+        bound: &jet_foundation::MIR::MirNominalRef,
+    ) -> Result<&str, BootstrapHostCodecError> {
+        let symbol = self
+            .metadata
+            .traits
+            .iter()
+            .find(|row| row.trait_id.0 == bound.id.0)
+            .map(|row| row.symbol.as_str())
+            .ok_or_else(|| BootstrapHostCodecError::MissingEntry(format!("trait `{}`", bound.name)));
+        Ok(self.symbol_or_record(symbol))
+    }
+
     pub(crate) fn trait_method_metadata(
         &self,
         trait_name: &str,
@@ -2064,12 +2082,9 @@ pub fn __jet_bootstrap_compile_with_native(
             .ok_or_else(|| "checked Source Machine parameter disappeared".to_string())?;
         // The Source projection exists only for these host-shape queries,
         // which read type, field, Core-owner and handle rows: it is converted
-        // from the body-free signature program and dropped below, so the image
-        // keeps only the native program resident.
+        // from the restored body-free signature program and dropped below.
         let mut __jet_shape_program = crate::__jet_bootstrap_mir_program_from_host(
-            &crate::compiler_bootstrap_compiler_image::compiler_image_signature_program(
-                __jet_compiler_image.program.as_ref(),
-            ),
+            __jet_compiler_image.program.as_ref(),
         )?;
         let mut __jet_shape_for = |checked_type: &::jet_foundation::MIR::MirType|
             -> Result<crate::compiler_bootstrap_entry_codec::BootstrapEntryHostTypeShape, String> {
@@ -2364,6 +2379,7 @@ fn emit_bootstrap_host_factory(
     let core_source_path = symbols.field_symbol("JetDriverCoreSource", "path")?;
     let core_source_owner = symbols.field_symbol("JetDriverCoreSource", "owner")?;
     let core_source_owned_members = symbols.field_symbol("JetDriverCoreSource", "owned_members")?;
+    let core_source_runtime = symbols.field_symbol("JetDriverCoreSource", "runtime")?;
     let core_source_text = symbols.field_symbol("JetDriverCoreSource", "source")?;
     let target_type = symbols.type_symbol("JetDriverCompileTarget")?;
     let mir_program_type = symbols.type_symbol("MIRProgram")?;
@@ -2429,10 +2445,12 @@ fn emit_bootstrap_host_factory(
             "        }}).collect::<Vec<_>>(),\n",
             "    }}).collect::<Vec<_>>();\n",
             "    // The Core library bodies the Rust loader embeds: every public source\n",
-            "    // module row plus the compiler-private parts, in table order.\n",
+            "    // module row, the compiler-private parts, then the runtime units, in\n",
+            "    // table order.\n",
             "    let mut __jet_core_sources = Vec::new();\n",
-            "    for (row, owner) in ::jet_foundation::CoreModuleExports::core_source_modules().iter().map(|row| (row, \"\"))\n",
-            "        .chain(::jet_foundation::CoreSourceParts::CORE_PRIVATE_SOURCE_PARTS.iter().map(|part| (&part.source, part.owner)))\n",
+            "    for (row, owner, runtime) in ::jet_foundation::CoreModuleExports::core_source_modules().iter().map(|row| (row, \"\", false))\n",
+            "        .chain(::jet_foundation::CoreSourceParts::CORE_PRIVATE_SOURCE_PARTS.iter().map(|part| (&part.source, part.owner, false)))\n",
+            "        .chain(::jet_foundation::CoreSourceParts::CORE_RUNTIME_PARTS.iter().map(|row| (row, \"\", true)))\n",
             "    {{\n",
             "        let text = ::jet_driver::CoreSources::core_source_text(row.module).ok_or_else(|| {{\n",
             "            crate::BootstrapHostCodecError::InvalidMetadata(format!(\"Core source module `{{}}` has no body text\", row.module))\n",
@@ -2443,6 +2461,7 @@ fn emit_bootstrap_host_factory(
             "            {core_source_path}: row.path.to_string(),\n",
             "            {core_source_owner}: owner.to_string(),\n",
             "            {core_source_owned_members}: row.owned_members.iter().map(|member| member.to_string()).collect::<Vec<_>>(),\n",
+            "            {core_source_runtime}: runtime,\n",
             "            {core_source_text}: text.to_string(),\n",
             "        }});\n",
             "    }}\n",
@@ -2508,6 +2527,7 @@ fn emit_bootstrap_host_factory(
         core_source_path = core_source_path,
         core_source_owner = core_source_owner,
         core_source_owned_members = core_source_owned_members,
+        core_source_runtime = core_source_runtime,
         core_source_text = core_source_text,
         host_compiler_identity = host_compiler_identity,
         default_symbol = default_symbol,

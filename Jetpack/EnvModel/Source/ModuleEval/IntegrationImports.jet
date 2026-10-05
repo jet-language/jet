@@ -9,7 +9,7 @@ pub fn envmodel_evaluate_integration_imports(imports: [Expr], scope: ModuleEvalS
     integrations := [EnvironmentIntegration]{}
     loop import in leaves {
         name :: envmodel_qualified_call_name(import) ?? next
-        if name == @BUILTIN_FIND -> next
+        if name == BUILTIN_FIND -> next
         kind :: IntegrationKind.from_call(name) ?? return Err(envmodel_bad_import_directive(expr_span(import)))
         call :: if import == {
             .Call(call) -> (args: call.args, name_span: call.name_span)
@@ -17,7 +17,7 @@ pub fn envmodel_evaluate_integration_imports(imports: [Expr], scope: ModuleEvalS
             else -> next
         }
         integration :: envmodel_evaluate_integration_call(name, call.args, kind, scope, globals)
-        existing := None
+        existing := EnvironmentIntegration?{None}
         loop item in integrations {
             if item.name == integration.name -> existing = Val(item)
         }
@@ -112,7 +112,7 @@ fn envmodel_evaluate_integration_call(name: String, args: [CallArg], kind: Integ
         // contain the caller's plaintext, while the only accepted secret
         // shape is a named reference already visible in the AST.
         skip_value :: envmodel_integration_takes_secrets(kind) && envmodel_integration_reference_names(arg.expr) == None
-        value :: if skip_value -> CtValue.Int(0) else -> envmodel_integration_arg_value(arg.expr, scope, globals)
+        value :: if skip_value -> CtValue.Int{value: 0} else -> envmodel_integration_arg_value(arg.expr, scope, globals)
         envmodel_lower_integration_arg(&integration, key, arg.expr, value)
     }
     Ok(integration)
@@ -120,12 +120,12 @@ fn envmodel_evaluate_integration_call(name: String, args: [CallArg], kind: Integ
 
 fn envmodel_integration_arg_value(expr: Expr, scope: ModuleEvalScope, globals: [String: CtValue]) -> CtValue EnvModelEvalError! {
     if expr == {
-        .Ident(name, _) -> Ok(CtValue.Str(name))
-        .Field(base, member, _) -> Ok(CtValue.Str("{envmodel_expression_name(base)}.{member}"))
+        .Ident(name, _) -> Ok(CtValue.Str{value: name})
+        .Field(base, member, _) -> Ok(CtValue.Str{value: "{envmodel_expression_name(base)}.{member}"})
         .ListLit(values, _) -> {
             items := [CtValue]{}
             loop value in values -> { &items.push(envmodel_integration_arg_value(value, scope, globals)) }
-            Ok(CtValue.List(items))
+            Ok(CtValue.List{values: items})
         }
         .MapLit(pairs, _) -> {
             lowered := [CtMapEntry]{}
@@ -137,7 +137,7 @@ fn envmodel_integration_arg_value(expr: Expr, scope: ModuleEvalScope, globals: [
                     return Err(envmodel_error("E1335", "integration map contains a duplicate key", "one integration fact graph cannot silently choose between two values for the same host or secret name", "remove the duplicate key or merge its values", Val(expr_span(expr))))
                 }
             }
-            Ok(CtValue.Map(lowered))
+            Ok(CtValue.Map{entries: lowered})
         }
         .StructLit(type_name, _, _, _, fields, _, _) -> {
             lowered := [NamedCtValue]{}

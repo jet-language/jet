@@ -176,7 +176,8 @@ pub fn sema_call_try_plugin_method(receiver: Expr, receiver_value: TExpr, method
         sema_plugin_infer_args(args, environment, &scopes, &state, &tail_store, &context, &diagnostics)
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    result_type := export_value.return_type.map(value -> sema_call_resolved_type(value, environment)) ?? Type.Named{name: "Unit"}
+    result_type := Type.Named{name: "Unit"}
+    if export_value.return_type == .Val(value) -> result_type = sema_call_resolved_type(value, environment)
     if !sema_plugin_record_exec(method, result_type, span, environment, &scopes, &context, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     if args.len() != export_value.params.len() {
         &diagnostics.push(sema_call_arity_diagnostic(export_value.name, export_value.params.len(), args.len(), false, span))

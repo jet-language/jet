@@ -3,6 +3,28 @@
 // cards/decisions ride along untouched.
 import { VERSION, normalize } from './store.mjs';
 
+// Owner ballot standard: stored losses now explain how we reduce them. Run on
+// every load as well as imports; normal Tower writes persist the canonical form.
+export function migrateRecommendationLosses(decision) {
+  let changed = false;
+  for (const recommendation of [decision.recommendation, decision.surface?.recommendation]) {
+    if (!Array.isArray(recommendation?.losses)) continue;
+    for (const item of recommendation.losses) {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
+      if (Object.hasOwn(item, 'whyUnavoidable')) {
+        if (!Object.hasOwn(item, 'mitigation')) item.mitigation = item.whyUnavoidable;
+        delete item.whyUnavoidable;
+        changed = true;
+      }
+      if (typeof item.mitigation === 'string' && /^Mitigation:\s*/i.test(item.mitigation)) {
+        item.mitigation = item.mitigation.replace(/^Mitigation:\s*/i, '');
+        changed = true;
+      }
+    }
+  }
+  return changed;
+}
+
 export function migrate(old, { project = 'Project' } = {}) {
   const src = old && typeof old === 'object' ? old : {};
   const meta = src.meta || {};

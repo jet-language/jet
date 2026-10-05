@@ -3,8 +3,8 @@ _jet() {
 local cur prev cmds flags
 COMPREPLY=()
 cur="${COMP_WORDS[COMP_CWORD]}"
-cmds="registry inspect project self diff merge review run jobs check fill test prove status build cc c++ dev learn try debug repl notebook import new fmt fix audit lint doc explain env shared-store cache remote trust image os add remove fetch search find update init split Fold gc clean emit eval budget perf report fuzz version help"
-flags="--attach --once --observe --raw-frames --dap --gc-trace --structural --base-receipt --receipt --out --repo --json --topic --to --list-topics --kind --quiet --color --version --endpoint --channel --platform --trust-key --apply --allow-unofficial --check --lang --restore-role-files --diff --simplify --changed --explicit-copies --skipped --stdin-path --small --lib --output --locked --effect --example --lock --read-only --host --fd -p --annotated --force --no-sign --registry --pkg --clang --ar --message --before --spdx --cyclonedx --advisory-db --vendor-dir --sbom --verbose --online --fix --dry-run --keep --edition --all --try-anyway --interpret --trace-tiers --restart --swap --watch --canvas --canvas-host --canvas-port --canvas-transport --canvas-authority --canvas-audit --project --protocol --headless --bind --token --pure --offline --fixtures --project-root --build-root -c -o -MMD -MD -MF -MT --sysroot -I -D -L -l -std -dumpmachine -print-sysroot -dumpversion -v --gate --target --env --preset --explain-partition --update-snapshots --coverage --rust --emit-generated -u --release --profile --set --builder --a11y --complexity --cost --max --scope --filter --shuffle --serial --show-default --measure --record --replay --iterations --time --seed --corpus --lens --facts --annotations --baseline --bootstrap --accept-regression --reason --yes -y --allow-net --deny-net --allow-fs --deny-fs --allow-io --deny-io --allow-db --deny-db --allow-time --deny-time --allow-rand --deny-rand --allow-env --deny-env --allow-exec --deny-exec --allow-log --deny-log --allow-gpu --deny-gpu"
+cmds="registry db inspect bind project self diff merge review run jobs generate check fill test test-compare prove status build package flash cc c++ dev learn try debug repl notebook import new fmt fix audit lint doc explain env shared-store cache remote trust image os add remove fetch search find update init split Fold gc clean emit eval budget perf fuzz version help"
+flags="--live --observe --raw-frames --dap --gc-trace --structural --base-receipt --receipt --out --repo --json --topic --to --list-topics --kind --quiet --color --version --endpoint --channel --platform --trust-key --apply --preview --remove --path --route --model --allow-unofficial --check --lang --restore-role-files --diff --simplify --changed --explicit-copies --skipped --stdin-path --small --lib --output --locked --effect --example --lock --read-only --host --fd -p --annotated --force --no-sign --registry --pkg --shape --freeze --policy --accept --import --clang --ar --before --spdx --cyclonedx --advisory-db --vendor-dir --sbom --verbose --template --sort --online --fix --dry-run --entry --keep --edition --all --try-anyway --interpret --trace-tiers --restart --swap --reload --watch --graph --status --explain --canvas --app --share --canvas-host --canvas-port --canvas-transport --canvas-authority --canvas-audit --project --console --sandbox --console-ttl --protocol --headless --bind --token --no-prepare --pure --allow --deny --offline --fixtures --project-root --build-root -c -o -MMD -MD -MF -MT --sysroot -I -D -L -l -std -dumpmachine -print-sysroot -dumpversion -v --gate --target --up --sql --down --database --risk --step --format --csv --jsonl --machine --human --no-color --force-color --query --script --table --max-rows --max-bytes --max-output-bytes --image --audit --adapter --package --name --executable --icon --icon-format --icon-size --publisher --description --update-channel --update-url --game --source --phase --backend --renderer --cook --cook-mode --export --export-preset --deploy --deploy-to --crash-reporter --crash-consent --cancel --resume --clean --force-clean --scripts-only --run-now --run --env --preset --explain-partition --fresh --docs --where --capture --no-capture --update-snapshots --update --coverage --verify --rust --emit-generated -u --release --profile --set --builder --a11y --complexity --cost --max --scope --core --filter --grade --shuffle --serial --show-default --measure --browser --browser-retries --browser-reporter --browser-ui --browser-visual --browser-trace --browser-scaffold --record --replay --iterations --time --seed --corpus --lens --facts --annotations --baseline --bootstrap --accept-regression --reason --yes -y"
 if [[ "$cur" == -* ]]; then
 COMPREPLY=( $(compgen -W "$flags" -- "$cur") )
 return 0
@@ -14,15 +14,16 @@ COMPREPLY=( $(compgen -W "$cmds" -- "$cur") )
 return 0
 fi
     if [[ $COMP_CWORD -eq 2 && "${COMP_WORDS[1]}" == "jobs" ]]; then
-        local job_names
-        job_names="$(jet jobs 2>/dev/null | awk '$1 != "No" {print $1}')"
-        COMPREPLY=( $(compgen -W "$job_names" -- "$cur") )
-        return 0
-    fi
-if [[ $COMP_CWORD -eq 2 ]]; then
+local job_names
+job_names="$(jet --json jobs 2>/dev/null | sed -n 's/.*"name":"\([^"]*\)".*/\1/p')"
+COMPREPLY=( $(compgen -W "$job_names" -- "$cur") )
+return 0
+fi
+    if [[ $COMP_CWORD -eq 2 ]]; then
 case "${COMP_WORDS[1]}" in
         registry) COMPREPLY=( $(compgen -W "publish yank keygen key vendor" -- "$cur") ); return 0 ;;
-        inspect) COMPREPLY=( $(compgen -W "live graph query explain-build compiler impact dossier guarantees provenance digest env semindex output expand unsafe gates authority schema codemod audit sbom bind logs info outdated reserved facts structure" -- "$cur") ); return 0 ;;
+        db) COMPREPLY=( $(compgen -W "migrate" -- "$cur") ); return 0 ;;
+        inspect) COMPREPLY=( $(compgen -W "types rights claims shapes accel decisions structure build gates graph query explain-build compiler impact provenance digest env semindex output expand schema codemod audit sbom bind logs info outdated reserved" -- "$cur") ); return 0 ;;
         project) COMPREPLY=( $(compgen -W "parts" -- "$cur") ); return 0 ;;
         self) COMPREPLY=( $(compgen -W "toolchain update doctor completions man devtools lsp exec" -- "$cur") ); return 0 ;;
         env) COMPREPLY=( $(compgen -W "test hook sync info" -- "$cur") ); return 0 ;;

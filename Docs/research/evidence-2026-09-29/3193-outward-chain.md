@@ -1,10 +1,10 @@
 # #3193 — BIG-F11 outward-operation contract across semantic boundaries
 
-Closer09, 2026-09-29. Binary via `~/.cache/jet-luna/safe-jet.sh`
+Closer09, 2026-09-29. Binary via `~/.cache/jet-dev/safe-jet.sh`
 (jet-current snapshot14 for v0–v5 `check`; snapshot16 for the rest). Source
-head `e9c708fa7`. Fixtures: `~/.cache/jet-test-scratch/Closer09/effects/`
+head `e9c708fa7`. Fixtures: `~/.cache/jet-dev/scratch/Closer09/effects/`
 (v0–v5, copied from the overnight ProveOther run with its
-`PREDECLARED.md`) and `~/.cache/jet-test-scratch/Closer09/free/` (v1b, v4b,
+`PREDECLARED.md`) and `~/.cache/jet-dev/scratch/Closer09/free/` (v1b, v4b,
 v6, v7, `outward_chain.jet`).
 
 ## Rules the verdicts rest on

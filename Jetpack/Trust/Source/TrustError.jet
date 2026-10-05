@@ -17,7 +17,7 @@ pub enum TrustError {
     MissingRevision(input: String)
     InvalidAssignment(String)
     StaleSemanticLock(String)
-    Io(String)
+    IO(String)
     Rejected([ValidationIssue])
     // ── Trust store grants (Trust.rs `Result<_, String>`) ──
     Grant(String)
@@ -38,7 +38,7 @@ pub enum TrustError {
             .MissingRevision(input) -> "flake input `{input}` has no exact revision in flake.nix or flake.lock"
             .InvalidAssignment(value) -> "unsupported flake assignment `{value}`"
             .StaleSemanticLock(reason) -> "semantic flake lock is stale: {reason}"
-            .Io(text) -> text
+            .IO(text) -> text
             .Rejected(issues) -> {
                 messages := [String]{}
                 loop issue in issues -> &messages.push(issue.message())
@@ -52,8 +52,8 @@ pub enum TrustError {
     }
 }
 
-impl IOError -> TrustError { TrustError.Io("{self}") }
+impl IOError -> TrustError { TrustError.IO("{self}") }
 
-impl LockError -> TrustError { TrustError.Io(self.message()) }
+impl LockError -> TrustError { TrustError.IO(self.message()) }
 
 impl TrustRootError -> TrustError { TrustError.Root(self) }

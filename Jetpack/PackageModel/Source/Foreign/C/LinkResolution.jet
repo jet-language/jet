@@ -6,9 +6,9 @@
 // set and then to provisioning from nixpkgs.
 
 // `c@nixpkgs:<attr>` selects an explicit nixpkgs attribute.
-@CFFI_NIXPKGS_TARGET_PREFIX :: "nixpkgs:"
+CFFI_NIXPKGS_TARGET_PREFIX :: prep { "nixpkgs:" }
 // Libc-family names the platform always links and that have no `.pc` file.
-@CFFI_ALWAYS_LINKED_LIBC :: [String]{"c", "m", "pthread", "dl", "rt", "util"}
+CFFI_ALWAYS_LINKED_LIBC :: prep { [String]{"c", "m", "pthread", "dl", "rt", "util"} }
 
 // Native-library link inputs for rustc.
 pub struct LinkFlags {
@@ -27,32 +27,32 @@ pub struct LinkFlags {
 
 // E3201: a C library was not found via a declared `c@…` dep or pkg-config.
 fn pkg_cffi_e3201(lib: String) -> Diagnostic Never! {
-    diagnostic_from_registry("E3201", None, "C library `{lib}` was not found.", "Jet looked for a `{lib}: {@DEP_PROVIDER_C}@…` dep in `{@PACKAGE_FILE}`, then tried `pkg-config {lib}` on the system; neither provided include/link paths.", "Install the system package (e.g. `pacman -S {lib}`), or declare it as `{lib}: {@DEP_PROVIDER_C}{@REF_PROVIDER_AT}{@SYSTEM_LIB_TARGET}` in `deps:`.")
+    diagnostic_from_registry("E3201", None, "C library `{lib}` was not found.", "Jet looked for a `{lib}: {DEP_PROVIDER_C}@…` dep in `{PACKAGE_FILE}`, then tried `pkg-config {lib}` on the system; neither provided include/link paths.", "Install the system package (e.g. `pacman -S {lib}`), or declare it as `{lib}: {DEP_PROVIDER_C}{REF_PROVIDER_AT}{SYSTEM_LIB_TARGET}` in `deps:`.")
 }
 
 // E3209: resolution produced `-l<name>` but the linker could not find it.
 // A missing system library is a user or system problem, not an ICE.
 pub fn pkg_cffi_e3209(lib: String) -> Diagnostic Never! {
-    diagnostic_from_registry("E3209", None, "The linker couldn't find C library `{lib}`.", "Your program links against `{lib}`, but the linker reported `cannot find -l{lib}` — the library isn't on the link search path.", "Declare it in `deps:` so Jet provisions it: `{lib}: {@DEP_PROVIDER_C}{@REF_PROVIDER_AT}{@SYSTEM_LIB_TARGET}` (host pkg-config, else fetched from nixpkgs), or `{lib}: {@DEP_PROVIDER_C}@nixpkgs:<attr>` to pick the nixpkgs attribute, or install the system package.")
+    diagnostic_from_registry("E3209", None, "The linker couldn't find C library `{lib}`.", "Your program links against `{lib}`, but the linker reported `cannot find -l{lib}` — the library isn't on the link search path.", "Declare it in `deps:` so Jet provisions it: `{lib}: {DEP_PROVIDER_C}{REF_PROVIDER_AT}{SYSTEM_LIB_TARGET}` (host pkg-config, else fetched from nixpkgs), or `{lib}: {DEP_PROVIDER_C}@nixpkgs:<attr>` to pick the nixpkgs attribute, or install the system package.")
 }
 
 // E3210: a declared C dep could not be provisioned from nixpkgs.
 pub fn pkg_cffi_e3210(lib: String, attr: String, reason: String) -> Diagnostic Never! {
-    diagnostic_from_registry("E3210", None, "Couldn't fetch C library `{lib}` from nixpkgs.", "`{lib}: {@DEP_PROVIDER_C}{@REF_PROVIDER_AT}{@SYSTEM_LIB_TARGET}` asked Jet to provision `nixpkgs#{attr}`, but `nix build` failed: {reason}", "Check the attr exists (`nix build nixpkgs#{attr}`), or point at a local build with `{lib}: {@DEP_PROVIDER_C}@\"<path>\"`, or install it and use `{@SYSTEM_LIB_TARGET}`.")
+    diagnostic_from_registry("E3210", None, "Couldn't fetch C library `{lib}` from nixpkgs.", "`{lib}: {DEP_PROVIDER_C}{REF_PROVIDER_AT}{SYSTEM_LIB_TARGET}` asked Jet to provision `nixpkgs#{attr}`, but `nix build` failed: {reason}", "Check the attr exists (`nix build nixpkgs#{attr}`), or point at a local build with `{lib}: {DEP_PROVIDER_C}@\"<path>\"`, or install it and use `{SYSTEM_LIB_TARGET}`.")
 }
 
 // Linker arguments for every C library this program uses, ready to append
 // to a `rustc` command; any unresolved library is an E3201.
-pub fn pkg_cffi_rustc_link_args(cffi: CFfi, project_root: String) -[FS, Env, Exec, Time, Time.Wait]> [String] CFfiError! {
+pub fn pkg_cffi_rustc_link_args(cffi: CFFI, project_root: String) -[FS, Env, Exec, Time, Time.Wait]> [String] CFFIError! {
     pkg_cffi_rustc_link_args_for_target_with_entry(cffi, project_root, pkg_ffi_host_target(), None)
 }
 
-pub fn pkg_cffi_rustc_link_args_for_target(cffi: CFfi, project_root: String, target: String) -[FS, Env, Exec, Time, Time.Wait]> [String] CFfiError! {
+pub fn pkg_cffi_rustc_link_args_for_target(cffi: CFFI, project_root: String, target: String) -[FS, Env, Exec, Time, Time.Wait]> [String] CFFIError! {
     pkg_cffi_rustc_link_args_for_target_with_entry(cffi, project_root, target, None)
 }
 
 // Link arguments using an optional entry source for an inline package.
-pub fn pkg_cffi_rustc_link_args_for_target_with_entry(cffi: CFfi, project_root: String, target: String, entry: String?) -[FS, Env, Exec, Time, Time.Wait]> [String] CFfiError! {
+pub fn pkg_cffi_rustc_link_args_for_target_with_entry(cffi: CFFI, project_root: String, target: String, entry: String?) -[FS, Env, Exec, Time, Time.Wait]> [String] CFFIError! {
     args := [String]{}
     diagnostics := [Diagnostic]{}
     direct := cffi.link_closure.direct
@@ -84,7 +84,7 @@ pub fn pkg_cffi_rustc_link_args_for_target_with_entry(cffi: CFfi, project_root: 
             }
         }
     }
-    if diagnostics.len() > 0 -> return Err(CFfiError{diagnostics: diagnostics})
+    if diagnostics.len() > 0 -> return Err(CFFIError{diagnostics: diagnostics})
     Ok(args)
 }
 
@@ -104,11 +104,11 @@ fn pkg_cffi_append_link_flags(args: &[String], flags: LinkFlags) Never! {
 }
 
 // Link flags for one library on the host target.
-pub fn pkg_cffi_resolve_link(lib: String, project_root: String) -[FS, Env, Exec, Time, Time.Wait]> LinkFlags CFfiError! {
+pub fn pkg_cffi_resolve_link(lib: String, project_root: String) -[FS, Env, Exec, Time, Time.Wait]> LinkFlags CFFIError! {
     pkg_cffi_resolve_link_for_target_with_entry(lib, project_root, pkg_ffi_host_target(), None)
 }
 
-pub fn pkg_cffi_resolve_link_for_target(lib: String, project_root: String, target: String) -[FS, Env, Exec, Time, Time.Wait]> LinkFlags CFfiError! {
+pub fn pkg_cffi_resolve_link_for_target(lib: String, project_root: String, target: String) -[FS, Env, Exec, Time, Time.Wait]> LinkFlags CFFIError! {
     pkg_cffi_resolve_link_for_target_with_entry(lib, project_root, target, None)
 }
 
@@ -127,10 +127,10 @@ fn pkg_cffi_generated_link_language(lib: String) -> ForeignLanguage? Never! {
 
 // Link flags for one library: a generated foreign binding's own archive, a
 // declared `c@…` dependency, else pkg-config, else E3201.
-pub fn pkg_cffi_resolve_link_for_target_with_entry(lib: String, project_root: String, target: String, entry: String?) -[FS, Env, Exec, Time, Time.Wait]> LinkFlags CFfiError! {
+pub fn pkg_cffi_resolve_link_for_target_with_entry(lib: String, project_root: String, target: String, entry: String?) -[FS, Env, Exec, Time, Time.Wait]> LinkFlags CFFIError! {
     if pkg_cffi_generated_link_language(lib) == .Val(language) {
         actual :: lib.removeprefix(language.bridge_prefix())
-        dir :: files.join(files.join(project_root, @SOURCE_ROOT_DIR), language.bindings_subdir())
+        dir :: files.join(files.join(project_root, SOURCE_ROOT_DIR), language.bindings_subdir())
         flags :: pkg_cffi_generated_link(language, lib, actual, dir, target) ?? return Err(pkg_cffi_error(pkg_cffi_e3201(lib)))
         return Ok(flags)
     }
@@ -225,7 +225,7 @@ fn pkg_cffi_cpp_link(lib: String, actual: String, dir: String, archive: String, 
     if !files.is_file(archive) -> return None
     record :: files.read(files.join(dir, "{actual}.link")) ?? return None
     lines :: pkg_bridge_text_lines(record)
-    bound_target := None
+    bound_target := String?{None}
     loop line in lines {
         if line.starts_with("target\t") {
             value :: line.removeprefix("target\t")
@@ -282,7 +282,12 @@ fn pkg_cffi_declared_c_dep_for_entry(lib: String, project_root: String, entry: S
 fn pkg_cffi_declared_package_facts(project_root: String, entry: String?) -[FS, Env]> PackageFacts? Never! {
     if entry == .Val(entry_path) {
         source :: files.read(entry_path) ?? return None
-        extracted :: pkg_extract_inline_package(source) ?? return None
+        extracted :: if pkg_extract_inline_package(source) == {
+            .Ok(block) -> block
+            .Err(_) -> {
+                return None
+            }
+        }
         if extracted == .Val(block) {
             // An inline package inside a project with a manifest is not the
             // declaring authority.
@@ -302,11 +307,11 @@ fn pkg_cffi_project_facts(project_root: String) -[FS, Env]> PackageFacts? Never!
 // A declared `c@<target>` dependency: `nixpkgs:<attr>` provisions that
 // attribute; `system` tries pkg-config, the always-linked libc set, then
 // nixpkgs; any other target is a local directory.
-fn pkg_cffi_clib_link(lib: String, target: String, project_root: String) -[FS, Env, Exec, Time.Wait]> LinkFlags CFfiError! {
-    if target.starts_with(@CFFI_NIXPKGS_TARGET_PREFIX) -> return pkg_cffi_provision_from_nixpkgs(lib, target.removeprefix(@CFFI_NIXPKGS_TARGET_PREFIX), project_root)
-    if target == @SYSTEM_LIB_TARGET {
+fn pkg_cffi_clib_link(lib: String, target: String, project_root: String) -[FS, Env, Exec, Time.Wait]> LinkFlags CFFIError! {
+    if target.starts_with(CFFI_NIXPKGS_TARGET_PREFIX) -> return pkg_cffi_provision_from_nixpkgs(lib, target.removeprefix(CFFI_NIXPKGS_TARGET_PREFIX), project_root)
+    if target == SYSTEM_LIB_TARGET {
         if pkg_cffi_pkg_config_link(lib) == .Found(flags) -> return Ok(flags)
-        if @CFFI_ALWAYS_LINKED_LIBC.contains(lib) {
+        if CFFI_ALWAYS_LINKED_LIBC.contains(lib) {
             flags := LinkFlags.empty()
             flags.link_names = [String]{lib}
             return Ok(flags)
@@ -322,7 +327,7 @@ fn pkg_cffi_clib_link(lib: String, target: String, project_root: String) -[FS, E
 
 // Realize `nixpkgs#<attr>` and link from its store path. The store path is
 // cached at `<root>/.jet/clinks/<lib>`; a stale or missing cache re-realizes.
-fn pkg_cffi_provision_from_nixpkgs(lib: String, attr: String, project_root: String) -[FS, Env, Exec, Time.Wait]> LinkFlags CFfiError! {
+fn pkg_cffi_provision_from_nixpkgs(lib: String, attr: String, project_root: String) -[FS, Env, Exec, Time.Wait]> LinkFlags CFFIError! {
     store := pkg_cffi_cached_store_path(lib, project_root) ?? ""
     if store == "" {
         store = pkg_cffi_realize_nixpkgs(attr) ?? return Err(pkg_cffi_error(pkg_cffi_e3210(lib, attr, err.message)))
@@ -338,7 +343,7 @@ fn pkg_cffi_provision_from_nixpkgs(lib: String, attr: String, project_root: Stri
 }
 
 fn pkg_cffi_clink_cache_file(lib: String, project_root: String) -> String Never! {
-    files.join(files.join(files.join(project_root, @SOURCE_ROOT_DIR), "clinks"), lib)
+    files.join(files.join(files.join(project_root, SOURCE_ROOT_DIR), "clinks"), lib)
 }
 
 // A cached store path that is still a directory.

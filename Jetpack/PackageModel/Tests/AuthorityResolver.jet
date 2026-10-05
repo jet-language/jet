@@ -15,7 +15,7 @@ fn pkg_test_authority_root(label: String) -[FS, Env]> String Never! {
     files.write(files.join(root, "run.jet"), "fn run() {{}}\n") ?? panic("write")
     opened :: AuthorityResolver.open_for_authority_walk(root) ?? panic("open for walk")
     resolver :: opened ?? panic("a source directory is an authority candidate")
-    assert_eq(resolver.root(), files.canonicalize(root) ?? panic("canonicalize"))
+    assert_eq(resolver.root, files.canonicalize(root) ?? panic("canonicalize"))
     if sys.is_unix() {
         // Do not assume the temp directory is world-writable: agent scratch
         // lives on disk under $HOME.
@@ -74,7 +74,7 @@ fn pkg_test_authority_root(label: String) -[FS, Env]> String Never! {
     root :: pkg_test_authority_root("deep")
     files.create_dir_all(root) ?? panic("mkdir")
     current := root
-    loop index in 0..<(@PKG_MAX_TREE_DEPTH + 2) {
+    loop index in 0..<(PKG_MAX_TREE_DEPTH + 2) {
         current = files.join(current, "d{index}")
         files.create_dir(current) ?? panic("mkdir level")
     }
@@ -92,7 +92,7 @@ fn pkg_test_authority_root(label: String) -[FS, Env]> String Never! {
     files.create_dir_all(root) ?? panic("mkdir")
     path :: files.join(root, "oversized.jet")
     // `File::set_len`: a sparse file one byte past the read bound.
-    receipt :: process.cmd([String]{"truncate", "-s", "{@PKG_MAX_TREE_FILE_BYTES + 1}", path}).run() ?? panic("truncate")
+    receipt :: process.cmd([String]{"truncate", "-s", "{PKG_MAX_TREE_FILE_BYTES + 1}", path}).run() ?? panic("truncate")
     assert(receipt.success)
     resolver :: AuthorityResolver.open(root) ?? panic("open")
     if resolver.checked_file("oversized.jet") == {

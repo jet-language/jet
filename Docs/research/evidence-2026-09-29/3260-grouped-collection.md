@@ -14,7 +14,7 @@ remove-empty-group, and observer cleanup. Is a new type needed?
   the `core.web.table` rows (`CoreCallRows.jet:1399-1430,2008`), `Examples/features/web/state_surface.jet:179-220`,
   `Core/math/combinatorics.jet:320` (`groupby` over `[Int]` runs), and the `List.group_by` law
   (`Compiler/JetFoundation/Source/Collections.jet:238,444`: Group law, eager, fresh map, source order).
-- Probe 1 (`~/.cache/jet-test-scratch/Closer12/grouped/grouped.jet`) uses a plain grouped map
+- Probe 1 (`~/.cache/jet-dev/scratch/Closer12/grouped/grouped.jet`) uses a plain grouped map
   `[String: [Item]]` built with `List.group_by` and by hand, with a move helper that can drop empty groups.
 - Probe 2 (`grouped_reactive.jet`) puts `reactive.signal` over the grouped map, adds an effect, sets
   the signal and calls `unsubscribe`.

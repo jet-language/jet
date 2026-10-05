@@ -2,6 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { mixedSources } from './mixed.mjs';
 
 export const AXES = Object.freeze([
   'functions', 'declarations', 'depth', 'modules', 'match-arms',
@@ -71,8 +72,8 @@ export function sources(axis, n) {
   return files;
 }
 
-export function generate(axis, n, directory) {
-  const files = sources(axis, n);
+// Writes the package into a new directory and returns its entry.
+function writeFiles(files, directory) {
   fs.mkdirSync(directory, { recursive: true });
   // Refuse to leave stale module files when regenerating a smaller workload.
   for (const name of Object.keys(files)) {
@@ -82,11 +83,48 @@ export function generate(axis, n, directory) {
   return path.resolve(directory, 'main.jet');
 }
 
+export function generate(axis, n, directory) {
+  return writeFiles(sources(axis, n), directory);
+}
+
+// The `mixed` profile (mixed.mjs): returns the entry, the package digest, the
+// expected stdout and the shape statistics.
+export function generateMixed(codeLines, seed, directory) {
+  const { files, expected, stats, source_sha256 } = mixedSources(codeLines, seed);
+  return { entry: writeFiles(files, directory), source_sha256, expected, stats };
+}
+
+const USAGE = `Usage: node generate.mjs AXIS N NEW_DIRECTORY
+       node generate.mjs mixed --code-lines N --seed S NEW_DIRECTORY
+Axes: ${AXES.join(', ')}
+mixed prints one JSON line: entry, source_sha256, expected output, statistics.`;
+
+function mixedArguments(args) {
+  const values = {};
+  const rest = [];
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '--code-lines' || args[i] === '--seed') {
+      if (args[i + 1] === undefined || !/^\d+$/.test(args[i + 1])) throw new Error(`${args[i]} needs a nonnegative integer\n${USAGE}`);
+      values[args[i]] = Number(args[++i]);
+    } else {
+      rest.push(args[i]);
+    }
+  }
+  if (values['--code-lines'] === undefined || values['--seed'] === undefined || rest.length !== 1) throw new Error(USAGE);
+  return { codeLines: values['--code-lines'], seed: values['--seed'], directory: rest[0] };
+}
+
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
-    const [axis, size, directory, ...extra] = process.argv.slice(2);
-    if (!directory || extra.length) throw new Error(`Usage: node generate.mjs AXIS N NEW_DIRECTORY\nAxes: ${AXES.join(', ')}`);
-    console.log(generate(axis, Number(size), directory));
+    const [axis, ...rest] = process.argv.slice(2);
+    if (axis === 'mixed') {
+      const { codeLines, seed, directory } = mixedArguments(rest);
+      console.log(JSON.stringify(generateMixed(codeLines, seed, directory)));
+    } else {
+      const [size, directory, ...extra] = rest;
+      if (!directory || extra.length) throw new Error(USAGE);
+      console.log(generate(axis, Number(size), directory));
+    }
   } catch (error) {
     console.error(error.message);
     process.exitCode = 2;

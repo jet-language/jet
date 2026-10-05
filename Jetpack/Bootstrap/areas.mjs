@@ -2,6 +2,7 @@
 // Area graph for the Jetpack Jet port. `areas.list` declares each area's direct dependencies; this
 // script validates the graph against the `# == Area ==` sections of sources.list and answers:
 //   areas.mjs closure <Area>   comma-separated area plus its transitive dependencies (bottom-up order)
+//   areas.mjs sources <Area>   canonical repository-relative source/dependency assembly list, one per line
 //   areas.mjs populated        Jetpack/<Area> folders that list at least one source, bottom-up, one per line
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -24,9 +25,9 @@ function sections(file) {
     const header = sectionHeader.exec(line.trim());
     if (header) {
       current = header[1];
-      found.set(current, 0);
+      found.set(current, []);
     } else if (current !== null && line.trim() !== "" && !line.trim().startsWith("#")) {
-      found.set(current, found.get(current) + 1);
+      found.get(current).push(line.trim());
     }
   }
   return found;
@@ -70,10 +71,13 @@ function closure(area) {
 const [command, argument] = process.argv.slice(2);
 if (command === "closure") {
   console.log(closure(argument ?? fail("closure needs an area")).join(","));
+} else if (command === "sources") {
+  const assembly = closure(argument ?? fail("sources needs an area"));
+  console.log(assembly.flatMap((area) => sourceSections.get(area)).join("\n"));
 } else if (command === "populated") {
   // Only real Jetpack/<Area> folders are checkable units; reused Compiler sections are dependencies.
-  const populated = order.filter((area) => (sourceSections.get(area) ?? 0) > 0 && existsSync(resolve(sourceRoot, "Jetpack", area)));
+  const populated = order.filter((area) => (sourceSections.get(area)?.length ?? 0) > 0 && existsSync(resolve(sourceRoot, "Jetpack", area)));
   if (populated.length > 0) console.log(populated.join("\n"));
 } else {
-  fail("usage: areas.mjs closure <Area> | populated");
+  fail("usage: areas.mjs closure <Area> | sources <Area> | populated");
 }

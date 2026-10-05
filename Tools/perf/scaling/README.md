@@ -1,13 +1,13 @@
 # Compiler scaling gate (Tower #4319)
 
 Dependency-free Node tools; GNU time measures the complete compiler process tree.
-Default Jet: `~/.cache/jet-test-scratch/jet-release-night12/jet`.
+Default Jet: `~/.cache/jet-dev/scratch/jet-release-night12/jet`.
 Default time: `/nix/store/n0wrh3vjfwcqfyswwai0zcxvkpibq34v-time-1.10/bin/time`.
 
 ```sh
 node Tools/perf/scaling/generate.mjs functions 32 /tmp/new-functions
-~/.cache/jet-luna/laneS.sh node --test Tools/perf/scaling/scaling.test.mjs
-~/.cache/jet-luna/laneB.sh 8 node Tools/perf/scaling/harness.mjs --repeats 3 --work-dir ~/.cache/jet-test-scratch/sol/SolScaleGate --receipt /tmp/scaling.json
+~/.cache/jet-dev/laneS.sh node --test Tools/perf/scaling/scaling.test.mjs
+~/.cache/jet-dev/laneB.sh 8 node Tools/perf/scaling/harness.mjs --repeats 3 --work-dir ~/.cache/jet-dev/scratch/sol/SolScaleGate --receipt /tmp/scaling.json
 ```
 
 Axes: `functions` (N helpers), `declarations` (N structs/enums/generic aliases),
@@ -19,6 +19,10 @@ Only the selected dimension scales; necessary consuming statements also scale.
 Modules contain only a constant, not additional function/type definitions.
 Generated programs have a runnable entry; no runtime timing is included.
 The generator refuses to overwrite source files; use a new output directory.
+`mixed` (`mixed.mjs`) is the compile-throughput cell's whole-program profile:
+`node Tools/perf/scaling/generate.mjs mixed --code-lines N --seed S DIR` writes
+one package of at least N code lines and prints its digest, golden stdout and
+shape as JSON (Tools/perf/throughput measures it).
 `trait-facts-fix.json` records the module allocation evidence and dual-compiler fix spec.
 Default ladders: 256/512/1024; modules 64/128/256 (8 GiB memory cap), depth
 16/32/64, match arms 48/96/192 (nesting limits), literal bytes 1/2/4 MiB.

@@ -6,11 +6,11 @@
 // objects and destinations with a rollback path. The state file records
 // ownership metadata only and never stores file contents.
 
-@ENV_FILES_DIR :: "files"
-@ENV_FILES_OBJECTS_DIR :: "objects"
-@ENV_FILES_STATE_FILE :: "state"
-@ENV_FILES_STATE_HEADER :: "jet-env-files-v1"
-@ENV_FILES_READ_CHUNK :: 65536
+ENV_FILES_DIR :: prep { "files" }
+ENV_FILES_OBJECTS_DIR :: prep { "objects" }
+ENV_FILES_STATE_FILE :: prep { "state" }
+ENV_FILES_STATE_HEADER :: prep { "jet-env-files-v1" }
+ENV_FILES_READ_CHUNK :: prep { 65536 }
 
 pub enum FileActionKind {
     Create
@@ -125,9 +125,9 @@ pub fn env_files_plan(project_dir: String, declarations: [ManagedFile]) -[FS, En
             }
         }
     }
-    files_root :: files.join(files.join(project_root, @SOURCE_ROOT_DIR), @ENV_FILES_DIR)
-    objects_dir :: files.join(files_root, @ENV_FILES_OBJECTS_DIR)
-    state_path :: files.join(files_root, @ENV_FILES_STATE_FILE)
+    files_root :: files.join(files.join(project_root, SOURCE_ROOT_DIR), ENV_FILES_DIR)
+    objects_dir :: files.join(files_root, ENV_FILES_OBJECTS_DIR)
+    state_path :: files.join(files_root, ENV_FILES_STATE_FILE)
     state_before :: env_files_load_state(state_path)
     sorted := declarations
     &sorted.sort_by(declaration -> declaration.destination)
@@ -366,7 +366,7 @@ fn env_files_apply_steps(plan: FilePlan, backup_dir: String, report: &FileSyncRe
 fn env_files_read_all(reader: FileReader) -[FS]> [U8] IOError! {
     bytes := [U8]{}
     loop {
-        chunk :: reader.read(@ENV_FILES_READ_CHUNK)
+        chunk :: reader.read(ENV_FILES_READ_CHUNK)
         if chunk.len() == 0 -> break
         loop byte in chunk -> &bytes.push(byte)
     }
@@ -455,7 +455,6 @@ fn env_files_install_file(file: PlannedFile, object: String) EnvironmentError! -
         }
         else -> {}
     }
-    Ok()
 }
 
 fn env_files_remove_destination(path: String) IOError! -[FS]> {
@@ -466,8 +465,8 @@ fn env_files_remove_destination(path: String) IOError! -[FS]> {
         }
         .Err(error) -> {
             if error == {
-                .NotFound(_) -> Ok()
-                else -> Err(error)
+                .NotFound(_) -> {}
+                else -> return Err(error)
             }
         }
     }
@@ -507,7 +506,7 @@ fn env_files_load_state(path: String) -[FS]> ManagedFileState EnvironmentError! 
     lines :: text.lines().to_list()
     loop line_number in 0..<lines.len() {
         line :: lines[line_number]
-        if line == "" || line == @ENV_FILES_STATE_HEADER -> next
+        if line == "" || line == ENV_FILES_STATE_HEADER -> next
         fields :: line.split("\t").to_list()
         if fields.len() != 7 || fields[0] != "file" {
             return Err(env_files_error("managed file state `{path}` has invalid line {line_number + 1}"))
@@ -521,7 +520,7 @@ fn env_files_load_state(path: String) -[FS]> ManagedFileState EnvironmentError! 
             "copy" -> FileMode.Copy
             else -> { return Err(env_files_error("managed file state has unknown mode `{mode_name}`")) }
         }
-        permissions := None
+        permissions := Int?{None}
         if fields[4] != "" {
             parsed :: env_files_parse_u32(fields[4]) ?? return Err(env_files_error("managed file state has invalid permissions"))
             permissions = Val(parsed)
@@ -531,7 +530,7 @@ fn env_files_load_state(path: String) -[FS]> ManagedFileState EnvironmentError! 
             "1" -> true
             else -> { return Err(env_files_error("managed file state has invalid sensitivity")) }
         }
-        generation := None
+        generation := String?{None}
         if fields[6] != "" -> generation = Val(env_files_unescape(fields[6]))
         state.entries[destination] = ManagedStateEntry{digest: digest, mode: mode, permissions: permissions, sensitive: sensitive, generation: generation}
     }
@@ -549,7 +548,7 @@ fn env_files_write_state_atomic(path: String, state: ManagedFileState) Environme
     parent :: files.dirname(path)
     files.create_dir_all(parent) ?? return Err(env_files_error("couldn't create managed file state directory: {err}"))
     temp :: files.join(parent, ".state-{sys.pid()}.tmp")
-    lines := [String]{"{@ENV_FILES_STATE_HEADER}\n"}
+    lines := [String]{"{ENV_FILES_STATE_HEADER}\n"}
     loop destination in envmodel_sorted_keys(state.entries) {
         entry :: state.entries[destination]
         permissions :: if entry.permissions == {
@@ -570,7 +569,6 @@ fn env_files_write_state_atomic(path: String, state: ManagedFileState) Environme
         }
         else -> {}
     }
-    Ok()
 }
 
 // Stage `bytes` in a new file, sync it, and rename it over `path`.

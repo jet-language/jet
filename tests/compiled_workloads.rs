@@ -9,7 +9,7 @@ mod common;
 fn compiled_workload_gate_self_check() {
     let root = env!("CARGO_MANIFEST_DIR");
     let scratch = std::env::var("TMPDIR")
-        .unwrap_or_else(|_| format!("{}/.cache/jet-test-scratch", std::env::var("HOME").unwrap()));
+        .unwrap_or_else(|_| format!("{}/.cache/jet-dev/scratch", std::env::var("HOME").unwrap()));
     let output = Command::new("bash")
         .arg("Tools/ci/test-compiled-workload-gate.sh")
         .current_dir(root)

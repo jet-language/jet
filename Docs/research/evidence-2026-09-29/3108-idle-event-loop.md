@@ -1,6 +1,6 @@
 # #3108: event-driven idle scripting loop (SCRIPT-F18)
 
-Closer10, 2026-09-29. Binary: `~/.cache/jet-luna/safe-jet.sh` →
+Closer10, 2026-09-29. Binary: `~/.cache/jet-dev/safe-jet.sh` →
 `jet-debug-snapshot14`. Host: Linux x86_64 (CachyOS 7.0.11), 32 cores.
 Verdict: **PARTIAL**: criterion 2 met; criteria 1, 3 (latency not measured) and 4 unmet.
 
@@ -12,14 +12,14 @@ wakeups cost?
 
 ## Method
 
-- Program: `~/.cache/jet-test-scratch/Closer10/idle/idle_loop.jet`, a
+- Program: `~/.cache/jet-dev/scratch/Closer10/idle/idle_loop.jet`, a
   verbatim copy of the overnight prover's probe. It has 10 × `time.sleep(1000ms)`
   ticks in a task, then `task.race {forever(), short()}`. The loser prints
   `queued work i` every 100 ms. The fd count comes from
   `files.list_dir("/proc/self/fd")` before the race and 500 ms after it.
 - AOT build: `safe-jet.sh build --allow=FS.Read,Time.Wait idle_loop.jet` →
   `.jet/build/idle_loop`.
-- rusage: `python3 ~/.cache/jet-test-scratch/Closer10/stream/measure.py 3 ./.jet/build/idle_loop`,
+- rusage: `python3 ~/.cache/jet-dev/scratch/Closer10/stream/measure.py 3 ./.jet/build/idle_loop`,
   which calls `os.wait4` and reads utime, stime, nvcsw and maxrss.
 - syscalls: `strace -f -c -o idle.strace …` in a separate run.
 

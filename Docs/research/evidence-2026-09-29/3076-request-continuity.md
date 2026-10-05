@@ -1,6 +1,6 @@
 # #3076 — Request authority, deadline and transaction continuity
 
-Closer09, 2026-09-29. Binary via `~/.cache/jet-luna/safe-jet.sh` (jet-current
+Closer09, 2026-09-29. Binary via `~/.cache/jet-dev/safe-jet.sh` (jet-current
 = `jet-debug-snapshot16`). Source head `e9c708fa7`.
 
 ## Question
@@ -14,7 +14,7 @@ and no DI scope?
 
 ## Method
 
-Drafted `~/.cache/jet-test-scratch/Closer09/net/request_continuity.jet`
+Drafted `~/.cache/jet-dev/scratch/Closer09/net/request_continuity.jet`
 (package `net/package.jet` = the repo's `Examples/features/net/package.jet`
 plus `DB`). Design: one `DBConnection`/`DBScope` and one `DbPool` (admission,
 `acquire(deadline: 100ms)`) created before `http_server.bind`; one `POST

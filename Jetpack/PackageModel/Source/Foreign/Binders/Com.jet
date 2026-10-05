@@ -4,10 +4,10 @@
 // published cache carries enough identity to reject a stale or hand-edited
 // bridge before the linker consumes it.
 
-@COM_BINDER_SCHEMA :: "jet-com-bind-v3"
-@COM_TOOL_ACTION :: "could not inspect the COM type library"
-@COM_TRANSPORT :: "windows-com-automation"
-@COM_OPERATION_FAILED :: "the Windows COM operation failed"
+COM_BINDER_SCHEMA :: prep { "jet-com-bind-v3" }
+COM_TOOL_ACTION :: prep { "could not inspect the COM type library" }
+COM_TRANSPORT :: prep { "windows-com-automation" }
+COM_OPERATION_FAILED :: prep { "the Windows COM operation failed" }
 
 // Where the type library comes from: a file, or a registered library.
 pub enum ComTypeLibraryInput {
@@ -123,13 +123,13 @@ struct ComSchema {
 // Inspect the type library on a Windows host, build the automation bridge
 // archive, and render the Jet surface with its provenance record.
 pub fn pkg_com_bind(input: ComTypeLibraryInput, lib: String, cache: String) -[FS, Env, Exec, Time, Time.Wait]> ComBindResult ForeignBindError! {
-    if BinderHostOs.current() != BinderHostOs.Windows -> return Err(ForeignBindError.UnsupportedHost("COM type libraries and IDispatch require a Windows host"))
+    if BinderHostOS.current() != BinderHostOS.Windows -> return Err(ForeignBindError.UnsupportedHost("COM type libraries and IDispatch require a Windows host"))
     if !pkg_binder_is_ident(lib) -> return Err(ForeignBindError.Source("`{lib}` is not a valid Jet library name"))
     cc_found :: pkg_bridge_tool_path("cc") ?? return Err(ForeignBindError.ToolMissing("cc"))
     cc :: files.canonicalize(cc_found) ?? return Err(ForeignBindError.ToolMissing("cc"))
     ar_found :: pkg_bridge_tool_path("ar") ?? return Err(ForeignBindError.ToolMissing("ar"))
     ar :: files.canonicalize(ar_found) ?? return Err(ForeignBindError.ToolMissing("ar"))
-    file_input := None
+    file_input := String?{None}
     if input == {
         .File(path) -> file_input = Val(pkg_binder_canonicalize(path, "could not resolve the COM type library"))
         .Registered(guid, _, _, _) -> pkg_com_validate_guid(guid)
@@ -141,7 +141,7 @@ pub fn pkg_com_bind(input: ComTypeLibraryInput, lib: String, cache: String) -[FS
     defer close(^scratch)
     inspect_c :: files.join(build, "inspect.c")
     inspect_exe :: files.join(build, "inspect.exe")
-    pkg_binder_write(inspect_c, @COM_DISCOVERY_C, "could not write COM type-library inspector")
+    pkg_binder_write(inspect_c, COM_DISCOVERY_C, "could not write COM type-library inspector")
     pkg_com_run([String]{cc, "-std=c11", "-municode", inspect_c, "-loleaut32", "-lole32", "-o", inspect_exe}, "cc")
     command := [String]{inspect_exe}
     if input == {
@@ -180,8 +180,8 @@ pub fn pkg_com_bind(input: ComTypeLibraryInput, lib: String, cache: String) -[FS
     fields := [(name: String, value: String)]{
         (name: "language", value: "com"),
         (name: "abi", value: "jet_com_{lib}"),
-        (name: "transport", value: @COM_TRANSPORT),
-        (name: "binder-schema", value: @COM_BINDER_SCHEMA),
+        (name: "transport", value: COM_TRANSPORT),
+        (name: "binder-schema", value: COM_BINDER_SCHEMA),
         (name: "descriptor", value: descriptor.stamp()),
         (name: "type-library-name", value: schema.name),
         (name: "type-library-guid", value: schema.guid),
@@ -219,14 +219,14 @@ pub fn pkg_com_bind(input: ComTypeLibraryInput, lib: String, cache: String) -[FS
 // must carry enough identity to reject a stale or hand-edited bridge.
 pub fn pkg_com_validate_provenance(provenance_path: String, generated_source: String, archive: String, lib: String) ForeignBindError! -[FS, Env, Exec, Time.Wait]> {
     provenance :: pkg_bridge_read_provenance(provenance_path)
-    if provenance.schema != @FOREIGN_BRIDGE_PROVENANCE_SCHEMA -> return Err(ForeignBindError.Source("unsupported COM binding provenance schema `{provenance.schema}`"))
+    if provenance.schema != FOREIGN_BRIDGE_PROVENANCE_SCHEMA -> return Err(ForeignBindError.Source("unsupported COM binding provenance schema `{provenance.schema}`"))
     descriptor :: pkg_binder_descriptor(ForeignLanguage.Com) ?? return Err(ForeignBindError.Source("COM binder descriptor is not registered"))
     expected_descriptor :: descriptor.stamp()
     abi :: "jet_com_{lib}"
     if pkg_com_provenance_single(provenance, "language") != "com"
         || pkg_com_provenance_single(provenance, "abi") != abi
-        || pkg_com_provenance_single(provenance, "transport") != @COM_TRANSPORT
-        || pkg_com_provenance_single(provenance, "binder-schema") != @COM_BINDER_SCHEMA
+        || pkg_com_provenance_single(provenance, "transport") != COM_TRANSPORT
+        || pkg_com_provenance_single(provenance, "binder-schema") != COM_BINDER_SCHEMA
         || pkg_com_provenance_single(provenance, "descriptor") != expected_descriptor {
         return Err(ForeignBindError.Source("COM binding provenance does not match the active ABI descriptor"))
     }
@@ -261,7 +261,6 @@ pub fn pkg_com_validate_provenance(provenance_path: String, generated_source: St
         }
     }
     if !pkg_binder_is_ident(pkg_com_provenance_single(provenance, "root-interface")) -> return Err(ForeignBindError.Source("COM provenance has an invalid root interface"))
-    Ok()
 }
 
 // A file-backed input: an absolute path whose bytes still match when the
@@ -364,7 +363,7 @@ fn pkg_com_input_record(input: ComTypeLibraryInput, file: String?) -[FS]> String
 }
 
 fn pkg_com_identity(lib: String, descriptor: String, metadata_digest: String, generated_digest: String, input_record: String, cc: String, ar: String) -> String Never! {
-    identity := ForeignIdentityBuilder.new(@COM_BINDER_SCHEMA)
+    identity := ForeignIdentityBuilder.new(COM_BINDER_SCHEMA)
     &identity.field("language", "com".bytes())
     &identity.field("library", lib.bytes())
     &identity.field("abi", "jet_com_{lib}".bytes())
@@ -379,7 +378,7 @@ fn pkg_com_identity(lib: String, descriptor: String, metadata_digest: String, ge
 
 // Nanoseconds since the Unix epoch, used to make scratch names unique.
 fn pkg_com_unique_suffix() -[Time]> Int {
-    time.instant().unix_ns
+    time.unix_ns()
 }
 
 // Swap the staged archive into place, keeping the previous archive until the
@@ -401,7 +400,6 @@ fn pkg_com_publish_archive(staged: String, archive: String) ForeignBindError! -[
         }
     }
     if had_previous -> pkg_binder_remove_file_quiet(backup)
-    Ok()
 }
 
 // Best-effort restore of the previous archive (`let _ = rename`).
@@ -412,10 +410,10 @@ fn pkg_com_rename_quiet(from: String, to: String) -[FS]> {
 // Parse the inspector's tab-separated LIB/CLASS/METHOD/SKIP records.
 fn pkg_com_parse_schema(bytes: [U8]) -> ComSchema ForeignBindError! {
     text :: String.from_bytes(bytes) ?? return Err(ForeignBindError.Source("the COM inspector returned non-UTF-8 metadata"))
-    name := None
-    guid := None
-    class := None
-    root := None
+    name := String?{None}
+    guid := String?{None}
+    class := String?{None}
+    root := String?{None}
     methods := [ComMethod]{}
     loop line in pkg_binder_lines(text) {
         fields :: line.split("\t").to_list()
@@ -547,7 +545,7 @@ fn pkg_com_render_jet(lib: String, schema: ComSchema) -> String Never! {
         head :: if unit -> ") ComError! -[FFI.Com]> {{\n    " else -> ") -[FFI.Com]> {method.result.jet()} ComError! {{\n    value :: "
         out = "{out}pub fn {name}(object: {method.interface}{params}{head}abi.{name}(object.value{args})\n    code :: abi.take_error()\n    if code != 0 {{ return Err(error(code)) }}\n"
         tail :: if method.result == {
-            .Unit -> "    return Ok()\n"
+            .Unit -> "    return\n"
             .Data -> "    value := json.parse(value) ?? return Err(ComError.TypeMismatch)\n    return Ok(value)\n"
             .Object(interface) -> "    return Ok({interface}{{ value: value }})\n"
             else -> "    return Ok(value)\n"
@@ -609,14 +607,14 @@ fn pkg_com_render_c(lib: String, schema: ComSchema) -> String Never! {
         }
         wrappers = "{wrappers}{ret}bad:VariantClear(&result);{clear}{fallback}"
     }
-    @COM_RUNTIME_C.replace("@ABI@", abi).replace("@CLASS@", schema.class_guid).replace("@WRAPPERS@", wrappers)
+    COM_RUNTIME_C.replace("@ABI@", abi).replace("@CLASS@", schema.class_guid).replace("@WRAPPERS@", wrappers)
 }
 
 // A COM name as a Jet identifier: `-` becomes `_`, and keywords and built-in
 // type names are refused (except the contextual `Err`).
 fn pkg_com_project(value: String) -> String ForeignBindError! {
     out :: value.replace("-", "_")
-    if !pkg_binder_is_ident(out) || @JET_KEYWORD_LIST.contains(out) || (@JET_TYPE_LIST.contains(out) && out != @TYPE_ERR) {
+    if !pkg_binder_is_ident(out) || JET_KEYWORD_LIST.contains(out) || (JET_TYPE_LIST.contains(out) && out != TYPE_ERR) {
         return Err(ForeignBindError.Source("COM name `{value}` cannot be projected as a Jet identifier"))
     }
     Ok(out)
@@ -633,7 +631,6 @@ fn pkg_com_validate_guid(value: String) ForeignBindError! {
         if dash && code != 45 -> return Err(invalid)
         if !dash && !pkg_com_is_hex(code) -> return Err(invalid)
     }
-    Ok()
 }
 
 fn pkg_com_is_hex(code: Int) -> Bool Never! {
@@ -643,14 +640,13 @@ fn pkg_com_is_hex(code: Int) -> Bool Never! {
 // Run a tool, returning its stdout; any failure launders to the fixed COM
 // operation message.
 fn pkg_com_run_capture(argv: [String], tool: String) -[Exec, Time.Wait]> [U8] ForeignBindError! {
-    output :: pkg_binder_capture(argv, None, tool, @COM_TOOL_ACTION)
-    if !output.success -> return Err(ForeignBindError.ToolFailed{tool: tool, action: @COM_TOOL_ACTION, detail: @COM_OPERATION_FAILED})
+    output :: pkg_binder_capture(argv, None, tool, COM_TOOL_ACTION)
+    if !output.success -> return Err(ForeignBindError.ToolFailed{tool: tool, action: COM_TOOL_ACTION, detail: COM_OPERATION_FAILED})
     Ok(output.stdout)
 }
 
 fn pkg_com_run(argv: [String], tool: String) ForeignBindError! -[Exec, Time.Wait]> {
     pkg_com_run_capture(argv, tool)
-    Ok()
 }
 
 fn pkg_com_descriptor_stamp() -> String Never! {

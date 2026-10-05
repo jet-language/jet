@@ -1,0 +1,270 @@
+// Git sparse-index port: Source/Publish/Index.rs. Fixed nine-field JSONL;
+// parsing/quoting reuse Foundation's shared protocol JSON boundary and helpers:
+// Foundation JSON::quote (not sorted/LF CanonicalJSON or RFC8785 JCS).
+// Registry verification/referrer finalization are mandatory shared dependencies.
+// Native error-kind fidelity owes Core #4409 (InvalidData); open/create/fsync,
+// Stat.modified nanoseconds, and IOContext owe #3593. No Other-kind fallback.
+pub struct PublicationIndexEntry {
+    pub name: String
+    pub version: String
+    pub content_hash: String
+    pub fingerprint: String
+    pub yanked: Bool
+    pub tier: PublicationRegistryTier
+    pub gate_status: PublicationGateStatus
+    pub public_key: String
+    pub signature: String
+}
+
+pub fn publication_index_to_jsonl(entry: PublicationIndexEntry) -> String Never! {
+    "{{\"name\":{foundation_json_quote(entry.name)},\"version\":{foundation_json_quote(entry.version)},\"content_hash\":{foundation_json_quote(entry.content_hash)},\"fingerprint\":{foundation_json_quote(entry.fingerprint)},\"yanked\":{if entry.yanked -> "true" else -> "false"},\"tier\":{foundation_json_quote(publication_tier_label(entry.tier))},\"gate_status\":{foundation_json_quote(publication_gate_summary(entry.gate_status))},\"public_key\":{foundation_json_quote(entry.public_key)},\"signature\":{foundation_json_quote(entry.signature)}}}"
+}
+
+pub fn publication_index_parse_line(line: String) -> PublicationIndexEntry? Never! {
+    tree :: foundation_parse_protocol_json(line) ?? return None
+    fields :: pkg_json_object(tree) ?? return None
+    loop key in fields.keys() {
+        if key != "name" && key != "version" && key != "content_hash" && key != "fingerprint" && key != "yanked" && key != "tier" && key != "gate_status" && key != "public_key" && key != "signature" -> return None
+    }
+    Val(PublicationIndexEntry{
+        name: publication_index_required_string(fields, "name") ?? return None,
+        version: publication_index_required_string(fields, "version") ?? return None,
+        content_hash: publication_index_optional_string(fields, "content_hash") ?? return None,
+        fingerprint: publication_index_optional_string(fields, "fingerprint") ?? return None,
+        yanked: publication_index_optional_bool(fields, "yanked") ?? return None,
+        tier: publication_parse_tier(publication_index_required_string(fields, "tier") ?? return None) ?? return None,
+        gate_status: publication_parse_gate_status(publication_index_required_string(fields, "gate_status") ?? return None) ?? return None,
+        public_key: publication_index_optional_string(fields, "public_key") ?? return None,
+        signature: publication_index_optional_string(fields, "signature") ?? return None
+    })
+}
+fn publication_index_required_string(fields: [String: DataTree], key: String) -> String? Never! {
+    text :: pkg_json_text(fields.get(key) ?? return None) ?? return None
+    if text == "" -> return None
+    Val(text)
+}
+fn publication_index_optional_string(fields: [String: DataTree], key: String) -> String? Never! {
+    value :: fields.get(key) ?? return Val("")
+    pkg_json_text(value)
+}
+fn publication_index_optional_bool(fields: [String: DataTree], key: String) -> Bool? Never! {
+    value :: fields.get(key) ?? return Val(false)
+    pkg_json_bool(value)
+}
+
+pub fn publication_pinned_public_key(entries: [PublicationIndexEntry]) -> String? Never! {
+    loop entry in entries {
+        key :: entry.public_key.trim()
+        if key != "" -> return Val(key)
+    }
+    None
+}
+pub fn publication_is_takeover(entries: [PublicationIndexEntry], candidate: PublicationIndexEntry) -> Bool Never! {
+    if candidate.public_key.trim() == "" -> return false
+    pinned :: publication_pinned_public_key(entries) ?? return false
+    pinned != candidate.public_key.trim()
+}
+pub fn publication_validate_takeover(repo: String, entries: [PublicationIndexEntry], candidate: PublicationIndexEntry) PublicationDiagnosticError! -[FS]> {
+    if !publication_is_takeover(entries, candidate) -> return
+    publication_require_takeover_review(repo, candidate.name, candidate.version)
+    all := ~entries
+    &all.push(~candidate)
+    _ :: publication_verify_index_entry(all, candidate, true, "registry")
+}
+
+fn publication_index_context(path: String, cause: String) -> IOContext Never! {
+    IOContext{operation: .Write, resource: Val(path), os_code: None, cause: Val(cause)}
+}
+pub fn publication_validate_index_component(value: String, label: String) IOError! {
+    if value == "" || value == "." || value == ".." || value.contains("/") || value.contains("\\") -> return Err(IOError.InvalidInput(publication_index_context(value, "registry {label} is not one safe path component")))
+    loop byte in value.bytes() {
+        code :: Int.from_u8(byte)
+        if code < 32 || code == 127 -> return Err(IOError.InvalidInput(publication_index_context(value, "registry {label} is not one safe path component")))
+    }
+}
+pub fn publication_index_entry_path(repo: String, name: String) -> String IOError! {
+    publication_validate_index_component(name, "package name")
+    Ok(files.join(files.join(files.join(repo, "index"), name), "{name}.jsonl"))
+}
+pub fn publication_read_entries(repo: String, name: String) -[FS]> [PublicationIndexEntry] IOError! {
+    path :: publication_index_entry_path(repo, name)
+    text :: publication_index_read_or_empty(path)
+    out := [PublicationIndexEntry]{}
+    line_number := 0
+    loop raw in text.lines() {
+        line_number += 1
+        if raw.trim() == "" -> next
+        entry :: publication_index_parse_line(raw) ?? return Err(IOError.InvalidData(publication_index_context(path, "malformed registry index record at line {line_number}")))
+        &out.push(entry)
+    }
+    Ok(out)
+}
+fn publication_index_read_or_empty(path: String) -[FS]> String IOError! {
+    if files.read(path) == {
+        .Ok(text) -> Ok(text)
+        .Err(error) -> if error == {
+            .NotFound(_) -> Ok("")
+            else -> Err(error)
+        }
+    }
+}
+pub fn publication_package_names(repo: String) -[FS]> [String] IOError! {
+    root :: files.join(repo, "index")
+    directories :: files.list_dir(root) ?? {
+        if err == .NotFound(_) -> return Ok([String]{})
+        return Err(err)
+    }
+    names := [String]{}
+    loop directory in directories {
+        metadata :: files.stat(directory.path)
+        if metadata.is_symlink -> return Err(IOError.InvalidData(publication_index_context(directory.path, "registry index package directory must not be a symlink")))
+        if !metadata.is_dir -> next
+        name :: directory.name
+        publication_validate_index_component(name, "package name")
+        path :: publication_index_entry_path(repo, name)
+        info :: files.stat(path) ?? {
+            if err == {
+                .NotFound(_) -> {}
+                else -> return Err(err)
+            }
+            next
+        }
+        if info.is_symlink || !info.is_file -> return Err(IOError.InvalidData(publication_index_context(path, "registry index for `{name}` is not a regular file")))
+        &names.push(name)
+    }
+    &names.sort()
+    Ok(names)
+}
+pub fn publication_find_entry(repo: String, name: String, version: String) -[FS]> PublicationIndexEntry? IOError! {
+    loop entry in publication_read_entries(repo, name) {
+        if entry.version == version -> return Ok(Val(entry))
+    }
+    Ok(None)
+}
+pub fn publication_non_yanked_entries(repo: String, name: String) -[FS]> [PublicationIndexEntry] IOError! {
+    out := [PublicationIndexEntry]{}
+    loop entry in publication_read_entries(repo, name) {
+        if !entry.yanked -> &out.push(entry)
+    }
+    Ok(out)
+}
+
+// Rust with_index_lock: exclusive create, 100 attempts, stale after >300s,
+// 50ms contention sleep, fsync before action, cleanup on every result.
+fn publication_with_index_lock<T>(repo: String, name: String, action: fn() -[FS, Env, Time]> T IOError!) -[FS, Env, Time]> T IOError! {
+    root :: files.join(repo, "index")
+    files.create_dir_all(root)
+    info :: files.stat(root)
+    if info.is_symlink || !info.is_dir -> return Err(IOError.InvalidData(publication_index_context(root, "registry index root is not a real directory")))
+    path :: files.join(root, ".{name}.lock")
+    loop _ in 0..<100 {
+        writer :: files.create(path, if_exists: .Refuse, links: .Refuse) ?? {
+            if err == {
+                .AlreadyExists(_) -> {}
+                else -> return Err(err)
+            }
+            if files.stat(path) == .Ok(metadata) {
+                if time.unix_ns() - metadata.modified.unix_ns > 300000000000 {
+                    files.remove(path).drop("stale index lock reclamation is best-effort; the next attempt re-races")
+                    next
+                }
+            }
+            time.sleep(time.duration_ms(50))
+            next
+        }
+        if writer.fsync() == .Err(error) {
+            close(^writer)
+            files.remove(path).drop("the unsynced lock is released; the fsync error is primary")
+            return Err(error)
+        }
+        // Rust cleans the lock up on EVERY action result; a plain call would
+        // propagate an Err before the lock file is released.
+        if action() == {
+            .Ok(value) -> {
+                close(^writer)
+                files.remove(path).drop("release the owned index lock; the action result is primary")
+                return Ok(value)
+            }
+            .Err(error) -> {
+                close(^writer)
+                files.remove(path).drop("release the owned index lock; the action error is primary")
+                return Err(error)
+            }
+        }
+    }
+    Err(IOError.TimedOut(publication_index_context(path, "registry index update for `{name}` is busy")))
+}
+
+// The canonical descriptor-relative publisher owns staging/fsync/rename and
+// temporary cleanup; no second pathname publisher. Core authority debt #3593.
+fn publication_index_atomic_replace(repo: String, path: String, bytes: [U8]) IOError! -[FS, Env, Time]> {
+    parent :: files.dirname(path)
+    if parent == "" -> return Err(IOError.InvalidInput(publication_index_context(path, "registry index has no parent")))
+    if files.stat(path) == .Ok(info) {
+        if info.is_symlink || !info.is_file -> return Err(IOError.InvalidInput(publication_index_context(path, "registry index path must be a regular file")))
+    }
+    info :: files.stat(parent)
+    if info.is_symlink || !info.is_dir -> return Err(IOError.InvalidData(publication_index_context(parent, "registry index parent is not a real directory")))
+    relative :: files.relative(path, repo)
+    foundation_write_file_nofollow_at_root(repo, relative, bytes, None)
+}
+
+pub fn publication_write_index_entry(repo: String, entry: PublicationIndexEntry) IOError! -[FS, Env, Time]> {
+    publication_validate_index_component(entry.name, "package name")
+    publication_validate_index_component(entry.version, "package version")
+    _ :: publication_with_index_lock(repo, entry.name, () -> {
+        path :: publication_index_entry_path(repo, entry.name)
+        parent :: files.dirname(path)
+        if parent != "" {
+            files.create_dir_all(parent)
+            info :: files.stat(parent)
+            if info.is_symlink || !info.is_dir -> return Err(IOError.InvalidData(publication_index_context(parent, "registry index package directory is not a real directory")))
+        }
+        text :: publication_index_read_or_empty(path)
+        entries := [PublicationIndexEntry]{}
+        loop line in text.lines() {
+            if line.trim() == "" -> next
+            existing :: publication_index_parse_line(line) ?? return Err(IOError.InvalidData(publication_index_context(path, "malformed registry index record")))
+            if existing.name == entry.name && existing.version == entry.version {
+                if existing == entry {
+                    publication_finalize_oci_referrers(repo, entry)
+                    return Ok(true)
+                }
+                return Err(IOError.AlreadyExists(publication_index_context(path, "registry version {entry.name} {entry.version} is immutable")))
+            }
+            &entries.push(existing)
+        }
+        if publication_validate_takeover(repo, entries, entry) == .Err(error) -> return Err(IOError.PermissionDenied(publication_index_context(path, "{error.diagnostic.code}: {error.diagnostic.what}")))
+        separator :: if text != "" && !text.ends_with("\n") -> "\n" else -> ""
+        // Evidence must finish BEFORE the new immutable version becomes visible.
+        publication_finalize_oci_referrers(repo, entry)
+        publication_index_atomic_replace(repo, path, "{text}{separator}{publication_index_to_jsonl(entry)}\n".bytes())
+        Ok(true)
+    })
+}
+
+pub fn publication_mark_yanked(repo: String, name: String, version: String) -[FS, Env, Time]> Bool IOError! {
+    publication_validate_index_component(name, "package name")
+    publication_validate_index_component(version, "package version")
+    publication_with_index_lock(repo, name, () -> {
+        path :: publication_index_entry_path(repo, name)
+        text :: publication_index_read_or_empty(path)
+        found := false
+        output := [String]{}
+        loop line in text.lines() {
+            if line.trim() == "" -> next
+            entry := publication_index_parse_line(line) ?? return Err(IOError.InvalidData(publication_index_context(path, "malformed registry index record")))
+            if entry.name == name && entry.version == version && !entry.yanked {
+                entry.yanked = true
+                found = true
+                &output.push(publication_index_to_jsonl(entry))
+            } else -> &output.push(line)
+        }
+        if found {
+            // A final empty item gives join the Rust trailing newline without another copy.
+            &output.push("")
+            publication_index_atomic_replace(repo, path, output.join("\n").bytes())
+        }
+        Ok(found)
+    })
+}

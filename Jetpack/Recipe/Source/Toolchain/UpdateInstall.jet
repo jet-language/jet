@@ -7,9 +7,9 @@
 // no ratified design for that yet: the call below is written against
 // `files.delete_at_reboot(path)` (needs Core).
 
-@TOOLCHAIN_WINDOWS_HELPER_ENV :: "JET_TOOLCHAIN_UPDATE_HELPER"
-@TOOLCHAIN_WINDOWS_HANDOFF_ATTEMPTS :: 600
-@TOOLCHAIN_WINDOWS_HANDOFF_WAIT_MS :: 50
+TOOLCHAIN_WINDOWS_HELPER_ENV :: prep { "JET_TOOLCHAIN_UPDATE_HELPER" }
+TOOLCHAIN_WINDOWS_HANDOFF_ATTEMPTS :: prep { 600 }
+TOOLCHAIN_WINDOWS_HANDOFF_WAIT_MS :: prep { 50 }
 
 // How a verified artifact was installed.
 enum ToolchainInstallOutcome {
@@ -62,7 +62,7 @@ fn recipe_update_resolve(options: ToolchainUpdateOptions, now: Int) -[FS, Env, N
     endpoint :: recipe_update_parse_endpoint(options.endpoint)
     is_file_endpoint :: if endpoint == {
         .File(_) -> true
-        .Http(_) -> false
+        .HTTP(_) -> false
     }
     if options.allow_unofficial && !is_file_endpoint {
         return Err(RecipeError.Update("unofficial keyless toolchain sources must use an explicit file:// endpoint"))
@@ -70,11 +70,11 @@ fn recipe_update_resolve(options: ToolchainUpdateOptions, now: Int) -[FS, Env, N
     trusted := ToolchainTrustedKey?{None}
     if !options.allow_unofficial -> trusted = Val(recipe_update_read_public_key(options.trust_key))
     manifest_path :: "v1/{options.channel}/manifest.json"
-    manifest_bytes :: recipe_update_fetch_bytes(endpoint, manifest_path, @TOOLCHAIN_MAX_MANIFEST_BYTES, "toolchain channel manifest")
+    manifest_bytes :: recipe_update_fetch_bytes(endpoint, manifest_path, TOOLCHAIN_MAX_MANIFEST_BYTES, "toolchain channel manifest")
     if trusted == {
         .Val(key) -> {
-            signature :: recipe_update_fetch_bytes(endpoint, "{manifest_path}.sig.json", @TOOLCHAIN_MAX_SIGNATURE_BYTES, "toolchain channel manifest signature")
-            recipe_update_verify_signature(key, @TOOLCHAIN_MANIFEST_DOMAIN, manifest_bytes, signature, "toolchain channel manifest")
+            signature :: recipe_update_fetch_bytes(endpoint, "{manifest_path}.sig.json", TOOLCHAIN_MAX_SIGNATURE_BYTES, "toolchain channel manifest signature")
+            recipe_update_verify_signature(key, TOOLCHAIN_MANIFEST_DOMAIN, manifest_bytes, signature, "toolchain channel manifest")
         }
         .None -> {}
     }
@@ -88,17 +88,17 @@ fn recipe_update_resolve(options: ToolchainUpdateOptions, now: Int) -[FS, Env, N
         }
     }
     selected :: artifact ?? return Err(RecipeError.Update("toolchain channel has no artifact for {options.platform}"))
-    fetch_limit :: if selected.size < @TOOLCHAIN_MAX_ARTIFACT_BYTES -> selected.size else -> @TOOLCHAIN_MAX_ARTIFACT_BYTES
+    fetch_limit :: if selected.size < TOOLCHAIN_MAX_ARTIFACT_BYTES -> selected.size else -> TOOLCHAIN_MAX_ARTIFACT_BYTES
     artifact_bytes :: recipe_update_fetch_bytes(endpoint, selected.path, fetch_limit, "toolchain artifact")
-    if selected.size > @TOOLCHAIN_MAX_ARTIFACT_BYTES || artifact_bytes.len() != selected.size {
+    if selected.size > TOOLCHAIN_MAX_ARTIFACT_BYTES || artifact_bytes.len() != selected.size {
         return Err(RecipeError.Update("toolchain artifact size disagrees with the channel manifest"))
     }
     if pkg_sha256_hex(artifact_bytes) != selected.sha256 -> return Err(RecipeError.Update("toolchain artifact digest disagrees with the channel manifest"))
     key_id := String?{None}
     if trusted == {
         .Val(key) -> {
-            signature :: recipe_update_fetch_bytes(endpoint, selected.signature, @TOOLCHAIN_MAX_SIGNATURE_BYTES, "toolchain artifact signature")
-            recipe_update_verify_signature(key, @TOOLCHAIN_ARTIFACT_DOMAIN, artifact_bytes, signature, "toolchain artifact")
+            signature :: recipe_update_fetch_bytes(endpoint, selected.signature, TOOLCHAIN_MAX_SIGNATURE_BYTES, "toolchain artifact signature")
+            recipe_update_verify_signature(key, TOOLCHAIN_ARTIFACT_DOMAIN, artifact_bytes, signature, "toolchain artifact")
             key_id = Val(key.key_id)
         }
         .None -> {}
@@ -132,7 +132,7 @@ fn recipe_update_validate_manifest_policy(manifest: ToolchainChannelManifest, op
 // Re-check the verified bytes and policy, take the update lock, and install
 // for this platform.
 fn recipe_update_install_verified(current_exe: String, bytes: [U8], plan: ToolchainUpdatePlan, state_path: String, running_version: String) -[FS, Env, Exec, Time, Time.Wait]> ToolchainInstallOutcome RecipeError! {
-    if plan.size == 0 || plan.size > @TOOLCHAIN_MAX_ARTIFACT_BYTES || bytes.len() != plan.size || pkg_sha256_hex(bytes) != plan.sha256 {
+    if plan.size == 0 || plan.size > TOOLCHAIN_MAX_ARTIFACT_BYTES || bytes.len() != plan.size || pkg_sha256_hex(bytes) != plan.sha256 {
         return Err(RecipeError.Update("verified toolchain artifact changed before installation"))
     }
     recipe_update_validate_release_policy(plan.version, plan.min_version, plan.published_at, plan.expires_at, running_version, recipe_update_now_seconds())
@@ -161,7 +161,7 @@ fn recipe_update_reject_existing(path: String, label: String) RecipeError! -[FS]
     if files.stat(path) == {
         .Ok(_) -> Err(RecipeError.Update("a previous {label} is still present"))
         .Err(error) -> {
-            if store_io_is_not_found(error) -> return Ok()
+            if store_io_is_not_found(error) -> return
             Err(RecipeError.Update("inspect {label}: {error}"))
         }
     }
@@ -266,10 +266,9 @@ fn recipe_update_restore_state(path: String, previous: ToolchainUpdateState?) Re
                     files.remove(path) ?? return Err(RecipeError.Update("remove new toolchain update state: {err}"))
                     parent :: files.dirname(path)
                     if parent != "" -> recipe_update_sync_parent(parent)
-                    Ok()
                 }
                 .Err(error) -> {
-                    if store_io_is_not_found(error) -> return Ok()
+                    if store_io_is_not_found(error) -> return
                     Err(RecipeError.Update("inspect toolchain update state during rollback: {error}"))
                 }
             }
@@ -280,13 +279,13 @@ fn recipe_update_restore_state(path: String, previous: ToolchainUpdateState?) Re
 // `<exe> --version` must exit successfully; the helper marker is removed so
 // the checked binary cannot re-enter the Windows helper.
 fn recipe_update_health_check(path: String) RecipeError! -[Exec, Time.Wait]> {
-    receipt :: process.cmd([String]{path, "--version"}).env_remove(@TOOLCHAIN_WINDOWS_HELPER_ENV).stdout(.Capture).stderr(.Capture).run() ?? return Err(RecipeError.Update("health-check staged Jet executable: {err}"))
+    receipt :: process.cmd([String]{path, "--version"}).env_remove(TOOLCHAIN_WINDOWS_HELPER_ENV).stdout(.Capture).stderr(.Capture).run() ?? return Err(RecipeError.Update("health-check staged Jet executable: {err}"))
     if !receipt.success -> return Err(RecipeError.Update("health-check staged Jet executable exited with exit status: {receipt.code}"))
 }
 
 // Whether this process was started as the deferred Windows update helper.
 pub fn recipe_toolchain_windows_update_helper_requested() -[Env]> Bool Never! {
-    sys.is_windows() && sys.get(@TOOLCHAIN_WINDOWS_HELPER_ENV) != None
+    sys.is_windows() && sys.get(TOOLCHAIN_WINDOWS_HELPER_ENV) != None
 }
 
 // Run the deferred Windows helper; the process exit code.
@@ -338,7 +337,7 @@ fn recipe_update_install_windows_deferred(current_exe: String, parent: String, b
         else -> {}
     }
     spec :: process.cmd([String]{helper})
-        .env(@TOOLCHAIN_WINDOWS_HELPER_ENV, "1")
+        .env(TOOLCHAIN_WINDOWS_HELPER_ENV, "1")
         .env("JET_TOOLCHAIN_UPDATE_CURRENT", current_exe)
         .env("JET_TOOLCHAIN_UPDATE_STAGED", staged)
         .env("JET_TOOLCHAIN_UPDATE_ROLLBACK", rollback)
@@ -369,7 +368,7 @@ fn recipe_update_stage_windows_file(staged: String, bytes: [U8]) RecipeError! -[
     recipe_update_reject_existing(staged, "self-update staging file")
     out :: files.create(staged, if_exists: .Refuse) ?? return Err(RecipeError.Update("stage Jet executable: {err}"))
     if recipe_update_write_all_synced(out, bytes) == {
-        .Ok(_) -> Ok()
+        .Ok(_) -> {}
         .Err(error) -> {
             files.remove(staged).drop("the staged executable is private")
             Err(RecipeError.Update("write staged Jet executable: {error}"))
@@ -432,7 +431,7 @@ fn recipe_update_windows_helper_run() RecipeError! -[FS, Env, Exec, Time, Time.W
     recipe_update_validate_state_transition(previous_state, state.channel, state.platform, state.sequence, state.version)
     last_error := "unknown error"
     activated := false
-    loop _ in 0..<@TOOLCHAIN_WINDOWS_HANDOFF_ATTEMPTS {
+    loop _ in 0..<TOOLCHAIN_WINDOWS_HANDOFF_ATTEMPTS {
         recipe_update_helper_regular(current, "Windows self-update current executable")
         // MoveFileExW REPLACE_EXISTING|WRITE_THROUGH (D-CORE-FILERENAME1).
         if files.rename(staged, current, if_exists: .Replace) == {
@@ -442,7 +441,7 @@ fn recipe_update_windows_helper_run() RecipeError! -[FS, Env, Exec, Time, Time.W
             }
             .Err(error) -> {
                 last_error = "{error}"
-                time.sleep(time.duration_ms(@TOOLCHAIN_WINDOWS_HANDOFF_WAIT_MS))
+                time.sleep(time.duration_ms(TOOLCHAIN_WINDOWS_HANDOFF_WAIT_MS))
             }
         }
     }
@@ -499,7 +498,7 @@ fn recipe_update_helper_sequence() -[Env]> Int RecipeError! {
 fn recipe_update_helper_size() -[Env]> Int RecipeError! {
     text :: recipe_update_helper_text("JET_TOOLCHAIN_UPDATE_SIZE")
     size :: recipe_parse_count(text) ?? return Err(RecipeError.Update("Windows helper artifact size is invalid"))
-    if size == 0 || size > @TOOLCHAIN_MAX_ARTIFACT_BYTES -> return Err(RecipeError.Update("Windows helper artifact size is outside the channel bound"))
+    if size == 0 || size > TOOLCHAIN_MAX_ARTIFACT_BYTES -> return Err(RecipeError.Update("Windows helper artifact size is outside the channel bound"))
     Ok(size)
 }
 

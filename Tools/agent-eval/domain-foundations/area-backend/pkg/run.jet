@@ -147,7 +147,7 @@ fn run() (HTTPError | IOError | NetError | TaskFailure | DBError)! {
 
     tree := service.tree("backend")
     tree.set_delivery(service.delivery_durable()) ?? panic("delivery")
-    scratch_root :: Path.from("/home/nate/.cache/jet-test-scratch").join("area-backend-{time.now()}")
+    scratch_root :: Path.from("/home/nate/.cache/jet-dev/scratch").join("area-backend-{time.now()}")
     files.create_dir_all(scratch_root) ?? panic("scratch")
     state_path :: scratch_root.join("service-state.log").to_string()
     state_store :: service.state_store(state_path) ?? panic("state store")

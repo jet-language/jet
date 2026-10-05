@@ -9,7 +9,7 @@ What exactly do source-message extraction and PO→MO compilation do, measured o
 ## Reference peer run (criterion 2)
 
 - Tools: GNU gettext-tools **1.0** from nixpkgs (`xgettext`, `msgfmt` and `msgunfmt` all report `(GNU gettext-tools) 1.0`; runtime `gettext (GNU gettext-runtime) 1.0`). Store path: `/nix/store/rb8rna9gkhs0ybl6z2p904myslh8llg8-gettext-1.0`, source `mirror://gnu/gettext/gettext-1.0.tar.gz`.
-- Fixture: `~/.cache/jet-test-scratch/Closer06/gettext/` contains `src/app.c`, `de.po` and `build.sh`. The source has two `N_` array marks, one plain literal, one `ngettext` plural, two `pgettext` contexts over the same msgid, one `gettext(key)` and one `_(user_text)` dynamic call, one unmarked literal, and a `TRANSLATORS:` comment.
+- Fixture: `~/.cache/jet-dev/scratch/Closer06/gettext/` contains `src/app.c`, `de.po` and `build.sh`. The source has two `N_` array marks, one plain literal, one `ngettext` plural, two `pgettext` contexts over the same msgid, one `gettext(key)` and one `_(user_text)` dynamic call, one unmarked literal, and a `TRANSLATORS:` comment.
 - Command, run inside `nix-shell -p gettext`:
   ```
   xgettext --language=C --from-code=UTF-8 --add-comments=TRANSLATORS \

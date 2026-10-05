@@ -74,7 +74,7 @@ const CACHE_EVENTS = Object.freeze([
 ]);
 const DEFAULT_FIXTURE = "tests/compiler-proof/comptime/fixtures/mixed-reader.jet";
 const COMPILER_PATH = "target/debug/jet";
-const DEFAULT_SCRATCH = join(homedir(), ".cache", "jet-test-scratch");
+const DEFAULT_SCRATCH = join(homedir(), ".cache", "jet-dev", "scratch");
 const TIMEOUT_MS = 120000;
 const MODES = Object.freeze(["aot", "jet_run", "interpreter"]);
 const OPERATION_ID = "mixed-reader-mutation-fallible";

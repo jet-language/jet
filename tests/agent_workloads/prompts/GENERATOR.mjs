@@ -7,7 +7,7 @@ import path from "node:path";
 
 const REPO = "/home/nate/Projects/Github/jet";
 const CORP = path.join(REPO, "tests/agent_workloads");
-const OUT = "/home/nate/.cache/jet-luna/x1876";
+const OUT = "/home/nate/.cache/jet-dev/x1876";
 
 const rows = fs.readFileSync(path.join(CORP, "manifest.tsv"), "utf8").trim().split("\n");
 const hdr = rows[0].split("\t");

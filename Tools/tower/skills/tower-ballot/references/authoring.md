@@ -10,8 +10,8 @@ Before recommending an option, attack each of its losses:
 1. Ask whether a change removes the loss without adding another.
 2. Borrow the useful part of another option or the strongest real-world design.
 3. If the change works, update the option's code, gist, gains, losses, and long form; delete the removed loss.
-4. If no change works, record one beginner-checkable `whyUnavoidable` sentence and name what was tried when useful.
-5. Repeat until every remaining loss has that reason.
+4. If a small loss remains, record one concrete, beginner-checkable `mitigation` sentence that removes or minimizes it.
+5. Repeat until losses are empty or negligible with a mitigation for each. If removing a loss is physically impossible, flag it in the summary and show how to minimize it.
 
 The required result is fixed. The order and tools used to reach it are not.
 A recommendation with an unattacked loss is still a draft. Record material
@@ -42,7 +42,7 @@ A full ballot needs two independent fresh readers. Use the canonical
 for dispatch, complete-ballot input, RLI5 tasks, receipt shape, and provenance.
 The beginner pass invokes `/rli5` and attempts explain, predict, modify, and
 derive tasks, returning a friction table. The adversarial pass attacks the
-recommendation, evidence, failure modes, and every `whyUnavoidable`.
+recommendation, evidence, failure modes, and every `mitigation`.
 
 Neither reader may have authored the ballot or performed the other pass. A
 model-family change is optional; freshness and separate agent IDs are required.

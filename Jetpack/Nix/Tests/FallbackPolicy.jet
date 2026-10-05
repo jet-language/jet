@@ -2,7 +2,7 @@
 // crates/jetpack/src/NixFallbackPolicy.rs.
 
 #Test("nix offline policy refuses before any nix invocation") {
-    receipt :: nix_fallback_decide(true, false, true, @NIX_FALLBACK_ALLOW_VALUE)
+    receipt :: nix_fallback_decide(true, false, true, NIX_FALLBACK_ALLOW_VALUE)
     assert(!receipt.allowed)
     assert_eq(receipt.mode, NixFallbackMode.Offline)
     assert_eq(receipt.invocations, 0)
@@ -16,13 +16,13 @@
         receipt :: nix_fallback_decide(false, case.ci, case.interactive, "")
         assert(!receipt.allowed)
         assert_eq(receipt.invocations, 0)
-        assert(receipt.reason.contains(@NIX_FALLBACK_POLICY_ENV))
-        assert(receipt.reason.contains(@NIX_FALLBACK_ALLOW_VALUE))
+        assert(receipt.reason.contains(NIX_FALLBACK_POLICY_ENV))
+        assert(receipt.reason.contains(NIX_FALLBACK_ALLOW_VALUE))
     }
-    ci :: nix_fallback_decide(false, true, false, @NIX_FALLBACK_ALLOW_VALUE)
+    ci :: nix_fallback_decide(false, true, false, NIX_FALLBACK_ALLOW_VALUE)
     assert(ci.allowed)
-    assert_eq(ci.mode, NixFallbackMode.Ci)
-    headless :: nix_fallback_decide(false, false, false, @NIX_FALLBACK_ALLOW_VALUE)
+    assert_eq(ci.mode, NixFallbackMode.CI)
+    headless :: nix_fallback_decide(false, false, false, NIX_FALLBACK_ALLOW_VALUE)
     assert(headless.allowed)
     assert_eq(headless.mode, NixFallbackMode.NonInteractive)
 }
@@ -35,7 +35,7 @@
     assert_eq(receipt.invocations, 1)
     facts :: receipt.facts()
     parsed :: json.parse(facts.get("nix.fallback.policy.receipt") ?? panic("policy receipt fact")) ?? panic("machine-readable policy receipt")
-    assert_eq(&parsed.field("schema") ?? panic("schema"), DataTree.Text(@NIX_FALLBACK_RECEIPT_SCHEMA))
+    assert_eq(&parsed.field("schema") ?? panic("schema"), DataTree.Text(NIX_FALLBACK_RECEIPT_SCHEMA))
     assert_eq(&parsed.field("allowed") ?? panic("allowed"), DataTree.Bool(true))
 }
 

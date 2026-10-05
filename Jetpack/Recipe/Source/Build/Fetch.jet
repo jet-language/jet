@@ -7,17 +7,17 @@
 // already holds network capability. URL userinfo and credential query or
 // fragment fields are refused before any transport sees them (E1236).
 
-@RECIPE_MAX_READ_BYTES :: 536870912
+RECIPE_MAX_READ_BYTES :: prep { 536870912 }
 
 // The credential field names a build-hook fetch URL may never carry.
-@RECIPE_CREDENTIAL_KEYS :: [String]{
+RECIPE_CREDENTIAL_KEYS :: prep { [String]{
     "auth", "authorization", "api_key", "apikey", "credential", "credentials", "password",
     "passwd", "secret", "sig", "signature", "token", "access_token", "refresh_token",
     "oauth_token", "client_secret", "private_key", "x_amz_credential", "x_amz_signature"
-}
+} }
 
 // Credential-shaped suffixes of a field name.
-@RECIPE_CREDENTIAL_SUFFIXES :: [String]{"_token", "_secret", "_credential", "_signature", "_password", "_api_key"}
+RECIPE_CREDENTIAL_SUFFIXES :: prep { [String]{"_token", "_secret", "_credential", "_signature", "_password", "_api_key"} }
 
 // A caller-injected remote transport: given a URL, the fetched bytes.
 pub struct RecipeTransport {
@@ -42,14 +42,14 @@ fn recipe_do_fetch(url: String, sha256: String, ctx: RecipeBuildContext, transpo
         .Err(error) -> { return Err(RecipeDiagnostic.e1236_fetch(url, "opening fetch cache: {error.message()}")) }
     }
     cached :: files.join(cache_root.path(), sha256)
-    if recipe_read_file_nofollow(cached, @RECIPE_MAX_READ_BYTES) == {
+    if recipe_read_file_nofollow(cached, RECIPE_MAX_READ_BYTES) == {
         .Ok(cached_bytes) -> {
             // Offline-satisfiable only after re-verifying the immutable key. A
             // corrupt or stale cache entry never becomes trusted input.
             if pkg_sha256_hex(cached_bytes) == sha256 {
                 &report.fetches.push(FetchRecord{url, sha256})
                 report.add_effect("net.fetch")
-                return Ok()
+                return
             }
             if cache_root.remove_name(sha256) == {
                 .Err(error) -> return Err(RecipeDiagnostic.e1236_fetch(url, "removing invalid cache entry: {error.message()}"))
@@ -63,7 +63,7 @@ fn recipe_do_fetch(url: String, sha256: String, ctx: RecipeBuildContext, transpo
     // Not cached: acquire the bytes. `file://` is offline-safe.
     bytes :: if {
         url.starts_with("file://") -> {
-            if recipe_read_file_nofollow(url.removeprefix("file://"), @RECIPE_MAX_READ_BYTES) == {
+            if recipe_read_file_nofollow(url.removeprefix("file://"), RECIPE_MAX_READ_BYTES) == {
                 .Ok(read) -> read
                 .Err(error) -> { return Err(RecipeDiagnostic.e1236_fetch(url, error.message())) }
             }
@@ -81,7 +81,7 @@ fn recipe_do_fetch(url: String, sha256: String, ctx: RecipeBuildContext, transpo
         // network capability. The caller must vendor or mirror the source.
         else -> { return Err(RecipeDiagnostic.e1236_no_transport(url)) }
     }
-    if bytes.len() > @RECIPE_MAX_READ_BYTES -> return Err(RecipeDiagnostic.e1236_fetch(url, "fetched content exceeds its size limit"))
+    if bytes.len() > RECIPE_MAX_READ_BYTES -> return Err(RecipeDiagnostic.e1236_fetch(url, "fetched content exceeds its size limit"))
     // Verify the locked hash before the bytes are ever used.
     got :: pkg_sha256_hex(bytes)
     if got != sha256 -> return Err(RecipeDiagnostic.e1236_mismatch(url, sha256, got))
@@ -173,8 +173,8 @@ fn recipe_credential_fields(fields: String) -> Bool Never! {
 
 fn recipe_credential_field_key(raw: String) -> Bool Never! {
     key :: pkg_ascii_lower(recipe_percent_decode_ascii(raw.trim())).replace("-", "_")
-    if @RECIPE_CREDENTIAL_KEYS.contains(key) -> return true
-    loop suffix in @RECIPE_CREDENTIAL_SUFFIXES {
+    if RECIPE_CREDENTIAL_KEYS.contains(key) -> return true
+    loop suffix in RECIPE_CREDENTIAL_SUFFIXES {
         if key.ends_with(suffix) -> return true
     }
     false

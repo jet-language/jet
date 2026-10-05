@@ -1960,10 +1960,12 @@ Explicit opt-in markers for the other derive families remain
 the `#` plane (see Serde under Core library).
 
 **D-DISPLAYDBG1 / D-DISPLAY-SHAPE — Display & Debug**: `Display` is
-user-facing — a single explicit method `fn display(self) String`, no
-default (E0915, L0520); interpolation `{}` calls it. `Debug` is dev-facing and
-auto-derived; `{value:Debug}` selects it; `#Redact` on a field renders
-`"[redacted]"` (D-DEBUG-REDACT).
+user-facing — a single explicit method `fn display(self) -> String`, no
+default (E0915, L0520). Bare `self` gives read access (D-MEM1), not ownership:
+printing and interpolation `{}` borrow the value and leave it available;
+`display(^self)` and `display(&self)` do not match this contract.
+`Debug` is dev-facing and auto-derived; `{value:Debug}` selects it;
+`#Redact` on a field renders `"[redacted]"` (D-DEBUG-REDACT).
 
 **D-ITER-HOOK / D-INDEX-HOOK — Extensibility hooks**: beginners use
 `.each`/`.to_list()` and `.get`/`.set`; experts implement

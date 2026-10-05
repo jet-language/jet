@@ -14,8 +14,8 @@ import time
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[2]
 HOME = Path.home()
-LUNA = HOME / '.cache/jet-luna'
-DEFAULT_OUT = HOME / '.cache/jet-test-scratch/sol/SolJetcBench/results'
+LUNA = HOME / '.cache/jet-dev'
+DEFAULT_OUT = HOME / '.cache/jet-dev/scratch/sol/SolJetcBench/results'
 
 
 def digest(path):
@@ -149,7 +149,7 @@ def main():
     parser.add_argument('workloads', nargs='*', help='default: hello functions-256; use --all for the full ladder')
     parser.add_argument('--all', action='store_true')
     parser.add_argument('--phase', choices=('both', 'rust', 'jetc', 'report'), default='both')
-    parser.add_argument('--rust', type=Path, default=HOME / '.cache/jet-test-scratch/jet-release-night12/jet')
+    parser.add_argument('--rust', type=Path, default=HOME / '.cache/jet-dev/scratch/jet-release-night12/jet')
     parser.add_argument('--jetc', type=Path, action='append', help='repeat to compare builds; default: loop7 when executable, otherwise loop')
     parser.add_argument('--out', type=Path, default=DEFAULT_OUT / time.strftime('%Y%m%d-%H%M%S'))
     parser.add_argument('--timeout', type=int, default=600)

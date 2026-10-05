@@ -1,13 +1,18 @@
-// Compiler-time formatting through checked Core/text/fmt source functions.
+// Compiler-time string formatting.
 //
-// Formatting rows are lowered as Prelude/Core routes, but the compiler-time
-// evaluator has no native-provider activation.  It therefore invokes the
-// corresponding source-owned Core function when that function is present in
-// the MIR program and otherwise fails closed.
+// Display and Debug interpolation port MIREval's BuildString rendering: the
+// `core.text.fmt.display`/`debug` routes render through `display_core_pure_value`
+// (CorePureParity `display`), `mir_show` for checked user nominals, the plain-enum
+// native print path, and CorePureParity `debug`. Numeric and padding selectors
+// invoke the corresponding source-owned Core/text/fmt function and otherwise
+// fail closed.
 use jet_foundation.[
     MIRStringFormat,
     MIRType,
+    MIRVariantPayload,
     Span,
+    TComptimeKey,
+    TComptimeKeyField,
     TComptimeValue,
 ]
 
@@ -15,12 +20,12 @@ pub fn jet_eval_format_string_value_full(
     machine: &JetEvalMachine,
     value: TComptimeValue,
     format: MIRStringFormat,
-    value_ty: MIRType?,
+    _value_ty: MIRType?,
     span: Span,
 ) -> String? {
     if format == {
-        .Display -> jet_eval_format_core_source_call(&machine, "display", [TComptimeValue]{value}, span)
-        .Debug -> jet_eval_format_core_source_call(&machine, "debug", [TComptimeValue]{value}, span)
+        .Display -> jet_eval_format_display(&machine, value, span)
+        .Debug -> jet_eval_format_debug(&machine, value, span)
         .Pretty -> jet_eval_format_pretty_value(&machine, value, span)
         .Fixed(digits) -> jet_eval_format_fixed_value(&machine, value, digits, false, span)
         .Grouped(digits) -> jet_eval_format_fixed_value(&machine, value, digits, true, span)
@@ -41,5 +46,484 @@ pub fn jet_eval_format_string_value_full(
             jet_eval_compiler_fail(&machine, span, "MIR string format has an unknown variant")
             None
         }
+    }
+}
+
+// One rendered value, or why CorePureParity `display` declined it: `Nominal`
+// is a checked non-Core struct/enum MIREval renders with `mir_show`;
+// `Unavailable` names a Core-owned renderer the evaluator does not carry.
+enum JetEvalFormatShown {
+    Text(value: String)
+    Nominal
+    Unavailable(reason: String)
+}
+
+// MIREval `plain_enum_display` → `display_core_pure_value` → `mir_show`. A
+// plain enum is recognized from the value's own checked declaration, which
+// is also how MIREval's native print path resolves a nominal by name.
+fn jet_eval_format_display(machine: &JetEvalMachine, value: TComptimeValue, span: Span) -> String? {
+    shown :: jet_eval_format_core_display(&machine, value)
+    if shown == {
+        .Text(text) -> Val(text)
+        .Nominal -> {
+            nominal := false
+            if value == {
+                .Struct(_, _) | .Enum(_, _, _) -> nominal = true
+                else -> {}
+            }
+            if !nominal {
+                jet_eval_unsupported(&machine, span, "Display of a collection holding a checked user nominal")
+                return None
+            }
+            rendered :: jet_eval_format_mir_show(value) ?? {
+                jet_eval_unsupported(&machine, span, "Display of a closure value")
+                return None
+            }
+            Val(rendered)
+        }
+        .Unavailable(reason) -> {
+            jet_eval_unsupported(&machine, span, reason)
+            None
+        }
+    }
+}
+
+fn jet_eval_format_debug(machine: &JetEvalMachine, value: TComptimeValue, span: Span) -> String? {
+    shown :: jet_eval_format_core_debug(value)
+    if shown == {
+        .Text(text) -> Val(text)
+        .Nominal -> {
+            jet_eval_unsupported(&machine, span, "Debug of a closure value")
+            None
+        }
+        .Unavailable(reason) -> {
+            jet_eval_unsupported(&machine, span, reason)
+            None
+        }
+    }
+}
+
+fn jet_eval_format_source_name(name: String) -> String Never! {
+    if name.starts_with("__jet_") -> return name.slice(6, name.len())
+    ~name
+}
+
+fn jet_eval_format_memo_field(name: String) -> Bool Never! {
+    name.starts_with("__jet_") && jet_eval_format_source_name(name).starts_with("__memo_")
+}
+
+// Core types whose Display/Debug is a dedicated CorePureParity renderer
+// (DB/service/time/net/numeric carriers). The evaluator fails closed rather
+// than printing their structural carrier.
+fn jet_eval_format_core_renderer(name: String) -> Bool Never! {
+    if name == {
+        "MIME" | "Path" | "Complex" | "Fraction" | "Decimal" | "DateTime" | "LocalDate" | "LocalTime" | "Date" | "Duration" -> true
+        "Period" | "Zone" | "ZonedDateTime" | "Instant" | "Envelope" | "Address" | "Message" | "Attachment" | "URL" -> true
+        "ServiceWorkflow" | "ServiceUpgradeReceipt" | "EncodingError" | "FieldError" | "DataError" | "Measurement" -> true
+        "HyperLogLog" | "TDigest" | "CountMinSketch" | "ReservoirSampler" | "DataTree" | "IOError" -> true
+        else -> false
+    }
+}
+
+fn jet_eval_format_char_text(code: Int) -> String Never! {
+    bytes := [U8]{}
+    if {
+        code < 128 -> &bytes.push(U8{code})
+        code < 2048 -> {
+            &bytes.push(U8{192 | (code >> 6)})
+            &bytes.push(U8{128 | (code & 63)})
+        }
+        code < 65536 -> {
+            &bytes.push(U8{224 | (code >> 12)})
+            &bytes.push(U8{128 | ((code >> 6) & 63)})
+            &bytes.push(U8{128 | (code & 63)})
+        }
+        else -> {
+            &bytes.push(U8{240 | (code >> 18)})
+            &bytes.push(U8{128 | ((code >> 12) & 63)})
+            &bytes.push(U8{128 | ((code >> 6) & 63)})
+            &bytes.push(U8{128 | (code & 63)})
+        }
+    }
+    String.from_bytes(bytes) ?? ""
+}
+
+fn jet_eval_format_push_text(out: &[U8], text: String) Never! {
+    loop byte in text.bytes() -> &out.push(byte)
+}
+
+// Rust `{:?}` of a str (quote 34) or char (quote 39): `char::escape_debug`
+// for the ASCII escapes; other scalars are copied through.
+fn jet_eval_format_debug_quoted(text: String, quote: Int) -> String Never! {
+    out := [U8]{}
+    &out.push(U8{quote})
+    loop byte in text.bytes() {
+        code :: Int.from_u8(byte)
+        if {
+            code == 92 -> jet_eval_format_push_text(&out, "\\\\")
+            code == quote -> {
+                &out.push(U8{92})
+                &out.push(U8{quote})
+            }
+            code == 10 -> jet_eval_format_push_text(&out, "\\n")
+            code == 13 -> jet_eval_format_push_text(&out, "\\r")
+            code == 9 -> jet_eval_format_push_text(&out, "\\t")
+            code == 0 -> jet_eval_format_push_text(&out, "\\0")
+            code < 32 || code == 127 -> {
+                hex :: code.to_radix(16)
+                jet_eval_format_push_text(&out, "\\u{{{hex}}}")
+            }
+            else -> &out.push(byte)
+        }
+    }
+    &out.push(U8{quote})
+    String.from_bytes(out) ?? text
+}
+
+fn jet_eval_format_bytes_list(bytes: [U8]) -> String Never! {
+    parts :: loop byte in bytes -> "{Int.from_u8(byte)}"
+    "[{parts.join(", ")}]"
+}
+
+// CtFloat::render (`{:?}`), which is also the compiled Float display.
+fn jet_eval_format_float_debug(number: Float, bits: Int) -> JetEvalFormatShown Never! {
+    if bits == 32 -> return JetEvalFormatShown.Unavailable{reason: "Float32 display without a width-preserving renderer"}
+    JetEvalFormatShown.Text{value: "{number}"}
+}
+
+// Rust `f64` Display (`mir_show`): the `{:?}` digits without the integral
+// `.0` and with any exponent expanded.
+fn jet_eval_format_float_plain(number: Float) -> String Never! {
+    text :: "{number}"
+    if text == "NaN" || text == "inf" || text == "-inf" -> return text
+    exponent_at := -1
+    bytes :: text.bytes()
+    loop index in 0..<bytes.len() {
+        if Int.from_u8(bytes[index]) == 101 -> exponent_at = index
+    }
+    if exponent_at < 0 {
+        if text.ends_with(".0") -> return text.slice(0, text.len() - 2)
+        return text
+    }
+    mantissa := text.slice(0, exponent_at)
+    exponent :: Int.parse(text.slice(exponent_at + 1, text.len())) ?? 0
+    sign := ""
+    if mantissa.starts_with("-") {
+        sign = "-"
+        mantissa = mantissa.slice(1, mantissa.len())
+    }
+    point := mantissa.len()
+    digits := [U8]{}
+    loop index in 0..<mantissa.bytes().len() {
+        byte :: mantissa.bytes()[index]
+        if Int.from_u8(byte) == 46 {
+            point = index
+        } else {
+            &digits.push(byte)
+        }
+    }
+    shifted :: point + exponent
+    out := [U8]{}
+    if shifted <= 0 {
+        jet_eval_format_push_text(&out, "0.")
+        loop _ in 0..<(0 - shifted) -> &out.push(U8{48})
+        loop byte in digits -> &out.push(byte)
+    } else if shifted >= digits.len() {
+        loop byte in digits -> &out.push(byte)
+        loop _ in 0..<(shifted - digits.len()) -> &out.push(U8{48})
+    } else {
+        loop index in 0..<digits.len() {
+            if index == shifted -> &out.push(U8{46})
+            &out.push(digits[index])
+        }
+    }
+    "{sign}{String.from_bytes(out) ?? text}"
+}
+
+// StructuralDebug::jet_debug_map.
+fn jet_eval_format_debug_map(entries: [String]) -> String Never! {
+    if entries.len() == 0 -> return "[:]"
+    "[{entries.join(", ")}]"
+}
+
+// CtValue::jet_show (Builtins `join`). Struct and enum items render their
+// generated Rust `{:?}` identifiers there, which the evaluator does not
+// carry, so they are None.
+fn jet_eval_format_jet_show(value: TComptimeValue) -> String? {
+    if value == {
+        .List(values) -> {
+            rendered := [String]{}
+            loop item in values -> &rendered.push(jet_eval_format_jet_show(item) ?? return None)
+            Val("[{rendered.join(", ")}]")
+        }
+        .Map(entries) -> {
+            rendered := [String]{}
+            loop entry in entries {
+                key :: jet_eval_format_jet_show(jet_eval_iterator_key_value(entry.key)) ?? return None
+                shown :: jet_eval_format_jet_show(entry.value) ?? return None
+                &rendered.push("{key}: {shown}")
+            }
+            Val("[{rendered.join(", ")}]")
+        }
+        .Present(inner) -> jet_eval_format_jet_show(inner)
+        .Struct(_, _) | .Enum(_, _, _) -> None
+        .Closure(_) -> Val("<closure>")
+        else -> {
+            shown :: jet_eval_format_scalar_show(value)
+            if shown == .Text(text) -> Val(text) else -> None
+        }
+    }
+}
+
+// CtValue::jet_show for the scalar carriers CorePureParity delegates to it.
+fn jet_eval_format_scalar_show(value: TComptimeValue) -> JetEvalFormatShown Never! {
+    if value == {
+        .Int(number) -> JetEvalFormatShown.Text{value: "{number}"}
+        .BigInt(decimal) -> JetEvalFormatShown.Text{value: decimal}
+        .Float(number, bits) -> jet_eval_format_float_debug(number, bits)
+        .Bool(flag) -> JetEvalFormatShown.Text{value: if flag -> "true" else -> "false"}
+        .Char(code) -> JetEvalFormatShown.Text{value: jet_eval_format_char_text(code)}
+        .String(text) -> JetEvalFormatShown.Text{value: text}
+        .Bytes(bytes) -> JetEvalFormatShown.Text{value: jet_eval_format_bytes_list(bytes)}
+        .Present(inner) -> jet_eval_format_scalar_show(inner)
+        .Failed(report) -> if report == {
+            .Clean(_) -> JetEvalFormatShown.Text{value: "null"}
+            .Told(_) -> JetEvalFormatShown.Text{value: "err"}
+        }
+        .Unit -> JetEvalFormatShown.Text{value: ""}
+        else -> JetEvalFormatShown.Nominal
+    }
+}
+
+// CorePureParity `display` over the carriers the evaluator owns, with
+// MIREval's plain-enum native print (`plain_enum_display`) for unit-only
+// user enums at any nesting depth.
+fn jet_eval_format_core_display(machine: &JetEvalMachine, value: TComptimeValue) -> JetEvalFormatShown Never! {
+    if value == {
+        .Struct(type_name, fields) -> {
+            name :: jet_eval_format_source_name(type_name)
+            if name == "tuple" || name.starts_with("JetTup_") {
+                if fields.len() == 0 -> return JetEvalFormatShown.Text{value: "()"}
+                labels :: loop field in fields -> jet_eval_format_source_name(field.name)
+                rendered := [String]{}
+                loop field in fields {
+                    shown :: jet_eval_format_core_display(&machine, field.value)
+                    if shown == .Text(text) {
+                        &rendered.push("{jet_eval_format_source_name(field.name)}: {text}")
+                    } else {
+                        return shown
+                    }
+                }
+                return JetEvalFormatShown.Text{value: "({labels.join(",")}) {{ {rendered.join(", ")} }}"}
+            }
+            if jet_eval_format_core_renderer(name) -> return JetEvalFormatShown.Unavailable{reason: "Display of Core type {name} through its Core renderer"}
+            JetEvalFormatShown.Nominal
+        }
+        .Enum(type_name, variant, args) -> {
+            name :: jet_eval_format_source_name(type_name)
+            if jet_eval_format_core_renderer(name) -> return JetEvalFormatShown.Unavailable{reason: "Display of Core type {name} through its Core renderer"}
+            if args.len() == 0 && jet_eval_format_plain_enum(&machine, type_name) -> return JetEvalFormatShown.Text{value: jet_eval_format_source_name(variant)}
+            JetEvalFormatShown.Nominal
+        }
+        .List(values) -> {
+            rendered := [String]{}
+            loop item in values {
+                shown :: jet_eval_format_core_display(&machine, item)
+                if shown == .Text(text) -> &rendered.push(text) else -> return shown
+            }
+            JetEvalFormatShown.Text{value: "[{rendered.join(", ")}]"}
+        }
+        .Map(entries) -> {
+            rendered := [String]{}
+            loop entry in entries {
+                key :: jet_eval_format_core_display(&machine, jet_eval_iterator_key_value(entry.key))
+                key_text :: if key == .Text(text) -> text else -> { return key }
+                shown :: jet_eval_format_core_display(&machine, entry.value)
+                if shown == .Text(text) -> &rendered.push("{key_text}: {text}") else -> return shown
+            }
+            JetEvalFormatShown.Text{value: jet_eval_format_debug_map(rendered)}
+        }
+        .Present(inner) -> jet_eval_format_core_display(&machine, inner)
+        .Closure(_) -> JetEvalFormatShown.Unavailable{reason: "Display of a closure value"}
+        else -> jet_eval_format_scalar_show(value)
+    }
+}
+
+// CorePureParity `debug` / `canonical_structural_debug`.
+fn jet_eval_format_core_debug(value: TComptimeValue) -> JetEvalFormatShown Never! {
+    if value == {
+        .Struct(type_name, fields) -> {
+            name :: jet_eval_format_source_name(type_name)
+            if jet_eval_format_core_renderer(name) -> return JetEvalFormatShown.Unavailable{reason: "Debug of Core type {name} through its Core renderer"}
+            message_field :: if name == {
+                "TextError" -> "message"
+                "RangeError" -> "reason"
+                else -> ""
+            }
+            if message_field != "" {
+                loop field in fields {
+                    if jet_eval_format_source_name(field.name) == message_field {
+                        if field.value == .String(text) -> return JetEvalFormatShown.Text{value: text}
+                    }
+                }
+            }
+            rendered := [String]{}
+            loop field in fields {
+                if jet_eval_format_memo_field(field.name) -> next
+                shown :: jet_eval_format_core_debug(field.value)
+                if shown == .Text(text) -> &rendered.push("{jet_eval_format_source_name(field.name)}: {text}") else -> return shown
+            }
+            if rendered.len() == 0 -> return JetEvalFormatShown.Text{value: "{name} {{}}"}
+            JetEvalFormatShown.Text{value: "{name} {{ {rendered.join(", ")} }}"}
+        }
+        .Enum(type_name, variant, args) -> {
+            if jet_eval_format_core_renderer(jet_eval_format_source_name(type_name)) -> return JetEvalFormatShown.Unavailable{reason: "Debug of Core type {jet_eval_format_source_name(type_name)} through its Core renderer"}
+            name :: jet_eval_format_source_name(variant)
+            if args.len() == 0 -> return JetEvalFormatShown.Text{value: name}
+            labeled := true
+            loop arg in args {
+                if arg.name == None -> labeled = false
+            }
+            rendered := [String]{}
+            loop arg in args {
+                shown :: jet_eval_format_core_debug(arg.value)
+                text :: if shown == .Text(inner) -> inner else -> { return shown }
+                if labeled {
+                    label :: arg.name ?? ""
+                    &rendered.push("{jet_eval_format_source_name(label)}: {text}")
+                } else {
+                    &rendered.push(text)
+                }
+            }
+            if labeled -> return JetEvalFormatShown.Text{value: "{name} {{ {rendered.join(", ")} }}"}
+            JetEvalFormatShown.Text{value: "{name}({rendered.join(", ")})"}
+        }
+        .Int(number) -> JetEvalFormatShown.Text{value: "{number}"}
+        .BigInt(decimal) -> JetEvalFormatShown.Text{value: decimal}
+        .Float(number, bits) -> jet_eval_format_float_debug(number, bits)
+        .Bool(flag) -> JetEvalFormatShown.Text{value: if flag -> "true" else -> "false"}
+        .Char(code) -> JetEvalFormatShown.Text{value: jet_eval_format_debug_quoted(jet_eval_format_char_text(code), 39)}
+        .String(text) -> JetEvalFormatShown.Text{value: jet_eval_format_debug_quoted(text, 34)}
+        .Bytes(bytes) -> JetEvalFormatShown.Text{value: jet_eval_format_bytes_list(bytes)}
+        .List(values) -> {
+            rendered := [String]{}
+            loop item in values {
+                shown :: jet_eval_format_core_debug(item)
+                if shown == .Text(text) -> &rendered.push(text) else -> return shown
+            }
+            JetEvalFormatShown.Text{value: "[{rendered.join(", ")}]"}
+        }
+        .Map(entries) -> {
+            rendered := [String]{}
+            loop entry in entries {
+                key :: jet_eval_format_core_debug(jet_eval_iterator_key_value(entry.key))
+                key_text :: if key == .Text(text) -> text else -> { return key }
+                shown :: jet_eval_format_core_debug(entry.value)
+                if shown == .Text(text) -> &rendered.push("{key_text}: {text}") else -> return shown
+            }
+            JetEvalFormatShown.Text{value: jet_eval_format_debug_map(rendered)}
+        }
+        .Present(inner) -> {
+            shown :: jet_eval_format_core_debug(inner)
+            if shown == .Text(text) -> JetEvalFormatShown.Text{value: "Val({text})"} else -> shown
+        }
+        .Failed(report) -> if report == {
+            .Clean(_) -> JetEvalFormatShown.Text{value: "None"}
+            .Told(inner) -> {
+                shown :: jet_eval_format_core_debug(inner)
+                if shown == .Text(text) -> JetEvalFormatShown.Text{value: "Err({text})"} else -> shown
+            }
+        }
+        .Unit -> JetEvalFormatShown.Text{value: "()"}
+        .Closure(_) -> JetEvalFormatShown.Nominal
+    }
+}
+
+// MIREval `displays_through_plain_enum` / `native_printable_type_def`: a
+// non-generic printable enum, resolved by its checked name, whose every case
+// is a unit case.
+fn jet_eval_format_plain_enum(machine: &JetEvalMachine, type_name: String) -> Bool Never! {
+    loop definition in machine.program.types {
+        if definition.key != type_name && definition.name != type_name -> next
+        if !definition.auto_printable || definition.generic_params.len() != 0 -> return false
+        if definition.kind == .Enum(variants, _) {
+            loop variant in variants {
+                if variant.payload != MIRVariantPayload.Unit -> return false
+            }
+            return true
+        }
+        return false
+    }
+    false
+}
+
+// Rust `{:?}` of MirConstKey (`mir_show` map keys).
+fn jet_eval_format_key_debug(key: TComptimeKey) -> String Never! {
+    if key == {
+        .Int(number) -> "Int({number})"
+        .String(text) -> "String({jet_eval_format_debug_quoted(text, 34)})"
+        .Bool(flag) -> if flag -> "Bool(true)" else -> "Bool(false)"
+        .Char(code) -> "Char({jet_eval_format_debug_quoted(jet_eval_format_char_text(code), 39)})"
+        .Tuple(fields) -> "Tuple([{jet_eval_format_key_fields_debug(fields)}])"
+        .Struct(type_name, fields) -> "Struct {{ type_name: {jet_eval_format_debug_quoted(type_name, 34)}, fields: [{jet_eval_format_key_fields_debug(fields)}] }}"
+        .Enum(type_name, variant) -> "Enum {{ type_name: {jet_eval_format_debug_quoted(type_name, 34)}, variant: {jet_eval_format_debug_quoted(variant, 34)} }}"
+    }
+}
+
+fn jet_eval_format_key_fields_debug(fields: [TComptimeKeyField]) -> String Never! {
+    parts :: loop field in fields -> "({jet_eval_format_debug_quoted(field.name, 34)}, {jet_eval_format_key_debug(field.key)})"
+    parts.join(", ")
+}
+
+// MIREval `mir_show` for checked user nominals and their nested values.
+fn jet_eval_format_mir_show(value: TComptimeValue) -> String? {
+    if value == {
+        .Int(number) -> Val("{number}")
+        .Float(number, _) -> Val(jet_eval_format_float_plain(number))
+        .Bool(flag) -> Val(if flag -> "true" else -> "false")
+        .Char(code) -> Val(jet_eval_format_debug_quoted(jet_eval_format_char_text(code), 39))
+        .String(text) -> Val(text)
+        .BigInt(decimal) -> Val(decimal)
+        .Bytes(bytes) -> Val(jet_eval_format_bytes_list(bytes))
+        .List(values) -> {
+            rendered := [String]{}
+            loop item in values -> &rendered.push(jet_eval_format_mir_show(item) ?? return None)
+            Val("[{rendered.join(", ")}]")
+        }
+        .Map(entries) -> {
+            rendered := [String]{}
+            loop entry in entries -> &rendered.push("{jet_eval_format_key_debug(entry.key)}: {jet_eval_format_mir_show(entry.value) ?? return None}")
+            Val("{{{rendered.join(", ")}}}")
+        }
+        .Struct(type_name, fields) -> {
+            if jet_eval_format_source_name(type_name) == "Err" {
+                loop field in fields {
+                    if field.name == "message" -> return jet_eval_format_mir_show(field.value)
+                }
+            }
+            rendered := [String]{}
+            loop field in fields {
+                if field.name == "on_click" || field.name == "on_drop" -> next
+                &rendered.push("{field.name}: {jet_eval_format_mir_show(field.value) ?? return None}")
+            }
+            if rendered.len() == 0 -> return Val(type_name)
+            Val("{type_name} {{ {rendered.join(", ")} }}")
+        }
+        .Enum(type_name, variant, args) -> {
+            rendered := [String]{}
+            loop arg in args {
+                shown :: jet_eval_format_mir_show(arg.value) ?? return None
+                if arg.name == .Val(label) -> &rendered.push("{label} = {shown}") else -> &rendered.push(shown)
+            }
+            if rendered.len() == 0 -> return Val("{type_name}::{variant}")
+            Val("{type_name}::{variant}({rendered.join(", ")})")
+        }
+        .Present(inner) -> Val("Present({jet_eval_format_mir_show(inner) ?? return None})")
+        .Failed(report) -> if report == {
+            .Clean(_) -> Val("Absent")
+            .Told(inner) -> Val("FailedTold({jet_eval_format_mir_show(inner) ?? return None})")
+        }
+        .Unit -> Val("()")
+        .Closure(_) -> None
     }
 }

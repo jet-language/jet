@@ -1,8 +1,5 @@
-// Lowercase hex SHA-256 of `bytes`, through the compiler's canonical hash
-// (the package model's `SHA256::sha256_hex`). Those helpers declare no
-// failure contract; they index only the whole 64-byte blocks they padded, so
-// a failure is a broken invariant.
+// Lowercase hex SHA-256 of `bytes`, through the compiler's canonical infallible
+// hash (the package model's `SHA256::sha256_hex`).
 fn pkg_sha256_hex(bytes: [U8]) -> String Never! {
-    digest :: mir_sha256_bytes(bytes) ?? panic("SHA-256 indexed outside its padded blocks")
-    mir_sha256_hex_bytes(digest) ?? panic("SHA-256 hex rendering failed")
+    mir_sha256_hex_bytes(mir_sha256_bytes(bytes))
 }

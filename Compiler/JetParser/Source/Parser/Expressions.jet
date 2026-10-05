@@ -2018,12 +2018,27 @@ fn parser_parse_or_fallback(state: &JetParserState, depth: Int, allow_struct_lit
         }
         return OrFallback.Return{value: value, span: token.span}
     }
+    // D-LOOP-CONTROLWORD1=B: bare `?? next` is contextual control and
+    // `break(name)` / `next(name)` exit the named loop; `?? next(value)`
+    // with anything but one name stays an ordinary call fallback.
     if token.kind == TOKEN_BREAK {
         parser_bump(&state)
+        if parser_current_kind(&state) == TOKEN_LPAREN {
+            parser_bump(&state)
+            name :: parser_expect_name(&state, "as the loop name in `break(name)`")
+            close :: parser_expect(&state, TOKEN_RPAREN, "`)` after the named break target")
+            return OrFallback.BreakLabel{name: name.payload.decoded, span: parser_cover(token.span, close.span)}
+        }
         return OrFallback.Break{span: token.span}
     }
-    if token.kind == TOKEN_IDENT && token.payload.decoded == "next" {
+    if token.kind == TOKEN_IDENT && token.payload.decoded == "next" && (parser_kind_at(&state, 1) != TOKEN_LPAREN || (parser_kind_at(&state, 2) == TOKEN_IDENT && parser_kind_at(&state, 3) == TOKEN_RPAREN)) {
         parser_bump(&state)
+        if parser_current_kind(&state) == TOKEN_LPAREN {
+            parser_bump(&state)
+            name :: parser_bump(&state)
+            close :: parser_bump(&state)
+            return OrFallback.ContinueLabel{name: name.payload.decoded, span: parser_cover(token.span, close.span)}
+        }
         return OrFallback.Continue{span: token.span}
     }
     value :: parser_parse_expression_restricted(&state, 2, depth + 1, allow_struct_lit, stop_before_comparison)

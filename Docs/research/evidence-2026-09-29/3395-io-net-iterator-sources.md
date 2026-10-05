@@ -5,7 +5,7 @@ source-specific delimiter, partial-line, error, resume, waiting and cleanup
 contracts through the one iteration boundary?
 
 Binary: `jet-debug-snapshot14` (safe-jet.sh), 2026-09-29. Probes in
-`~/.cache/jet-test-scratch/Closer04/`: `lines.jet` (file) and
+`~/.cache/jet-dev/scratch/Closer04/`: `lines.jet` (file) and
 `stdin_lines.jet` (stdin).
 
 ## c1 — delimiters, partial final line, byte errors, resume

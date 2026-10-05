@@ -2,7 +2,7 @@
 // helpers. Maps render in key order (Rust `BTreeMap`); length-framed
 // `label:len:value` lines keep every field boundary unambiguous.
 
-pub fn trust_canonical_root(root: TufRootMetadata) -> String Never! {
+pub fn trust_canonical_root(root: TUFRootMetadata) -> String Never! {
     out := [String]{"jet-tuf-root-v1\n", "version={root.version}\n", "expires={root.expires_unix}\n", "consistent_snapshot={root.consistent_snapshot}\n"}
     roles :: MetadataRole.all()
     loop role in roles {
@@ -75,8 +75,8 @@ fn trust_sign_canonical(canonical: String, keys: [TrustKey]) -> [TrustSignature]
     signatures
 }
 
-pub fn trust_sign_root(root: TufRootMetadata, keys: [TrustKey]) -> SignedMetadata<TufRootMetadata> TrustRootError! {
-    Ok(SignedMetadata<TufRootMetadata>{signed: root, signatures: trust_sign_canonical(trust_canonical_root(root), keys)})
+pub fn trust_sign_root(root: TUFRootMetadata, keys: [TrustKey]) -> SignedMetadata<TUFRootMetadata> TrustRootError! {
+    Ok(SignedMetadata<TUFRootMetadata>{signed: root, signatures: trust_sign_canonical(trust_canonical_root(root), keys)})
 }
 
 pub fn trust_sign_targets(targets: TargetsMetadata, keys: [TrustKey]) -> SignedMetadata<TargetsMetadata> TrustRootError! {

@@ -1,8 +1,8 @@
 // Bounded lexer for the supported Nix subset. Token storage is charged
 // against the evaluator memory budget before the parser can grow.
 
-@NIXEVAL_TOKEN_MEMORY_ESTIMATE_BYTES :: 256
-@NIXEVAL_MAX_STRING_PARTS :: 256
+NIXEVAL_TOKEN_MEMORY_ESTIMATE_BYTES :: prep { 256 }
+NIXEVAL_MAX_STRING_PARTS :: prep { 256 }
 
 enum NixEvalStringTokenPart {
     Literal(String)
@@ -84,9 +84,9 @@ struct NixEvalLexer {
     }
 
     fn push(&self, token: NixEvalToken) NixEvalError! {
-        estimated :: self.bytes.len() * 4 + (self.tokens.len() + 1) * @NIXEVAL_TOKEN_MEMORY_ESTIMATE_BYTES
-        if estimated > @NIXEVAL_MEMORY_BYTES -> return Err(NixEvalError.ResourceLimit("foreign flake evaluator memory budget exceeded"))
-        if self.tokens.len() >= @NIXEVAL_TOKEN_LIMIT -> return Err(NixEvalError.ResourceLimit("foreign flake has more than {@NIXEVAL_TOKEN_LIMIT} tokens"))
+        estimated :: self.bytes.len() * 4 + (self.tokens.len() + 1) * NIXEVAL_TOKEN_MEMORY_ESTIMATE_BYTES
+        if estimated > NIXEVAL_MEMORY_BYTES -> return Err(NixEvalError.ResourceLimit("foreign flake evaluator memory budget exceeded"))
+        if self.tokens.len() >= NIXEVAL_TOKEN_LIMIT -> return Err(NixEvalError.ResourceLimit("foreign flake has more than {NIXEVAL_TOKEN_LIMIT} tokens"))
         &self.tokens.push(token)
     }
 
@@ -127,7 +127,7 @@ struct NixEvalLexer {
             59 -> &self.single(NixEvalToken.Semicolon, 1)
             44 -> &self.single(NixEvalToken.Comma, 1)
             63 -> &self.single(NixEvalToken.Question, 1)
-            34 -> self.string()
+            34 -> &self.string()
             61 -> {
                 if {
                     next_byte == 61 -> &self.single(NixEvalToken.EqualEqual, 2)
@@ -141,13 +141,13 @@ struct NixEvalLexer {
             47 -> {
                 if {
                     next_byte == 47 -> &self.single(NixEvalToken.Merge, 2)
-                    else -> NixEvalToken.Path(self.path())
+                    else -> NixEvalToken.Path(&self.path())
                 }
             }
             46 -> {
                 if {
                     next_byte == 46 && self.at(2) == 46 -> &self.single(NixEvalToken.Ellipsis, 3)
-                    next_byte == 47 || (next_byte == 46 && self.at(2) == 47) -> NixEvalToken.Path(self.path())
+                    next_byte == 47 || (next_byte == 46 && self.at(2) == 47) -> NixEvalToken.Path(&self.path())
                     else -> &self.single(NixEvalToken.Dot, 1)
                 }
             }
@@ -158,7 +158,7 @@ struct NixEvalLexer {
     // Indented strings, integers and identifiers; any other byte is unsupported.
     fn word_token(&self, byte: Int, next_byte: Int) -> NixEvalToken NixEvalError! {
         if byte == 39 && next_byte == 39 -> return &self.indented_string()
-        if (byte == 45 && nixeval_is_ascii_digit(next_byte)) || nixeval_is_ascii_digit(byte) -> return Ok(NixEvalToken.Integer(self.integer()))
+        if (byte == 45 && nixeval_is_ascii_digit(next_byte)) || nixeval_is_ascii_digit(byte) -> return Ok(NixEvalToken.Integer(&self.integer()))
         if nixeval_is_ascii_alpha(byte) || byte == 95 -> return Ok(NixEvalToken.Identifier(&self.identifier()))
         Err(nixeval_unsupported_character(byte))
     }
@@ -202,7 +202,7 @@ struct NixEvalLexer {
                 expression :: nixeval_capture_interpolation(self.bytes, &position)
                 self.position = position
                 &parts.push(NixEvalStringTokenPart.Expression(expression))
-                if parts.len() > @NIXEVAL_MAX_STRING_PARTS -> return Err(NixEvalError.ResourceLimit("foreign flake string has more than {@NIXEVAL_MAX_STRING_PARTS} parts"))
+                if parts.len() > NIXEVAL_MAX_STRING_PARTS -> return Err(NixEvalError.ResourceLimit("foreign flake string has more than {NIXEVAL_MAX_STRING_PARTS} parts"))
                 next
             }
             width :: nixeval_scalar_width(self.bytes, self.position)
@@ -275,7 +275,7 @@ fn nixeval_interpolated_parts(source: String) -> [NixEvalStringTokenPart] NixEva
             }
             position += 2
             &parts.push(NixEvalStringTokenPart.Expression(nixeval_capture_interpolation(bytes, &position)))
-            if parts.len() > @NIXEVAL_MAX_STRING_PARTS -> return Err(NixEvalError.ResourceLimit("foreign flake string has more than {@NIXEVAL_MAX_STRING_PARTS} parts"))
+            if parts.len() > NIXEVAL_MAX_STRING_PARTS -> return Err(NixEvalError.ResourceLimit("foreign flake string has more than {NIXEVAL_MAX_STRING_PARTS} parts"))
             next
         }
         width :: nixeval_scalar_width(bytes, position)

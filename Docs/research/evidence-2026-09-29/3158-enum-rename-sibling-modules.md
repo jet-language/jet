@@ -8,7 +8,7 @@ Through the real LSP, does renaming an enum variant change every intended refere
 - a `#Rename("Fast")` wire name;
 - a `"Fast"` string literal.
 
-## Fixture (`~/.cache/jet-test-scratch/Closer07/lsp/probe/`)
+## Fixture (`~/.cache/jet-dev/scratch/Closer07/lsp/probe/`)
 - `modes.jet`:
   - `pub enum Mode { Fast Slow }`
   - `pub fn fast() -> Mode { Mode.Fast }`
@@ -22,13 +22,13 @@ Through the real LSP, does renaming an enum variant change every intended refere
 `safe-jet.sh run run.jet` prints `true` / `Fast` (exit 0).
 
 ## Method
-`python3 ~/.cache/jet-test-scratch/Closer07/lsp/drive.py` does the following:
+`python3 ~/.cache/jet-dev/scratch/Closer07/lsp/drive.py` does the following:
 1. `initialize`, then `didOpen` for all three files.
 2. At the `Fast` declaration in `modes.jet` (1:4): `prepareRename`, `references`, and `rename` → `Quick`.
 3. `definition` from the `.Fast` pattern in `modes.jet`.
 4. `references` on `Velocity.Fast` in `speeds.jet`.
 
-Raw responses: `~/.cache/jet-test-scratch/Closer07/lsp/result.json`.
+Raw responses: `~/.cache/jet-dev/scratch/Closer07/lsp/result.json`.
 
 ## Evidence
 - `prepareRename` returns range 1:4-1:8 with placeholder `Fast`.
@@ -43,7 +43,7 @@ Raw responses: `~/.cache/jet-test-scratch/Closer07/lsp/result.json`.
 ## What could not be exercised: cross-module variant references
 The card fixture puts `.Fast` / `Mode.Slow` in a module other than the declaring one. The current binary cannot express that:
 - `use "modes"` plus `fn describe(mode: modes.Mode)` with a `.Fast` arm → **E0305** "Pattern `Fast` doesn't match this value's type — Why: `.::modes.jet::Mode` is a struct, not an enum".
-  - The same error appears for a value returned by `modes.fast()` compared with `if m == .Fast` (`~/.cache/jet-test-scratch/Closer07/lsp/probe` variant, recorded in this session).
+  - The same error appears for a value returned by `modes.fast()` compared with `if m == .Fast` (`~/.cache/jet-dev/scratch/Closer07/lsp/probe` variant, recorded in this session).
 - `modes.Mode.Fast` / `modes.Mode.Slow` in an expression or pattern → **E0107** "Nothing named `modes` exists here".
 - `use modes.Mode` → **E0357** (alias must be snake_case) plus **E0611** "`Mode` is not defined in module `modes`".
 
@@ -53,7 +53,7 @@ A separate ICE was found while building the fixture:
 - A sibling file module `speeds.jet` declaring `pub enum Speed { … }`, imported with `use "speeds"`, fails on both `run` and `run --interpret` with `internal compiler error: checked TIR cannot lower to MIR at 13196..14575: duplicate checked type definition `.::speeds.jet::Speed``.
 - Renaming the enum to `Velocity` (no other change) compiles and runs.
 - `Speed` does not appear in `Core/` (grep).
-- Repro, as left on disk: `~/.cache/jet-test-scratch/Closer07/lsp/probe2/`. There `speeds.jet` has `pub enum Speed { Fast Slow }`, `fast()` and `speed_label()`, and `run.jet` is `use "speeds"` with `fn run() { print(speeds.speed_label(speeds.fast())) }`. Run `safe-jet.sh run run.jet` → ICE (exit 101).
+- Repro, as left on disk: `~/.cache/jet-dev/scratch/Closer07/lsp/probe2/`. There `speeds.jet` has `pub enum Speed { Fast Slow }`, `fast()` and `speed_label()`, and `run.jet` is `use "speeds"` with `fn run() { print(speeds.speed_label(speeds.fast())) }`. Run `safe-jet.sh run run.jet` → ICE (exit 101).
 
 ## Verdict
 PARTIAL:

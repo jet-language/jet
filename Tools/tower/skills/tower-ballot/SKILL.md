@@ -26,7 +26,7 @@ description: >-
 - **Return point:** Reader results return to the ballot's readiness and
   recommendation checks.
 - **Stopping condition:** Stop when the selected profile is complete, every
-  loss is removed or justified, and Tower accepts the ready ballot. Do not
+  loss is removed or reduced to a negligible cost with a mitigation, and Tower accepts the ready ballot. Do not
   implement the choice.
 
 ## Use this route only for an owner gate
@@ -81,6 +81,25 @@ identify the actual reviewer with `Fresh agent: <agent-id>.` The adversarial
 reader is separate from both the author and beginner. A different model family
 is optional. Follow the owner's requested reader and routing.
 
+## Situation summary
+
+Every full ballot opens with a top-level `situation` string (not inside
+`surface`). Tower shows it first on every ballot view, as the headline summary
+above the question and lesson. Write it for someone who has read no code, in
+4–7 plain sentences that answer, in order:
+
+1. What is the thing? Everyday words first, technical name second.
+2. What happens today, and what problem does it cause? Give one concrete
+   example of where it bites.
+3. Why does it matter, and who feels it?
+4. What exactly is the owner deciding?
+5. What do we recommend, in one sentence?
+
+Tower requires it for `ballotMode: "full"` and validates it whenever present:
+300–1200 characters, plain prose with no bullet or numbered lines, headings,
+or code blocks, and at most 32 words per sentence. It is never a list of
+facts, files, decision IDs, or card numbers; those belong in `detail`.
+
 ## Reading surface
 
 Write the surface before long-form fields. The owner decides from the surface
@@ -98,14 +117,14 @@ a ballot without a valid `surface`.
   `{key, name, gist, gains[1-3], losses[0-3], proposed: {code}}`. The proposed
   code uses the same workload as current and in-the-wild code and is at most
   14 lines. Gains and losses are concrete facts, never padding.
-- **`recommendation`** — `{rec, why, gains[], losses[{loss, whyUnavoidable}],
+- **`recommendation`** — `{rec, why, gains[], losses[{loss, mitigation}],
   whyNot[{key, reason}], tradeoff}`. `rec` equals the ballot `rec`; `why` is
   under 40 words; `whyNot` names every losing option. Every remaining loss has
-  a beginner-checkable `whyUnavoidable` reason.
+  a concrete, beginner-checkable `mitigation` in plain prose under 24 words.
 
 For every new ballot, list the recommended option as `A` first and set `rec` to
 `A`. Tower rejects another new recommendation. Existing open ballots keep
-their letters. Keep losses as plain strings in legacy `surface.options[*]`.
+their letters. Keep losses as plain strings in `surface.options[*]`.
 
 The surface has these caps: sentences under 24 words, bullets under 14 words,
 and prose under 430 words. Avoid project jargon such as "ratchet," "seam,"
@@ -121,19 +140,19 @@ Long form restates and grounds the surface. It never introduces a new choice:
 - `options[]` with `{key, name, detail, code}` for every genuine alternative;
 - optional `technical` for exact protocol, type, ABI, schema, or lowering law;
 - `comparisons[]` as `{lang, note, code}` when comparison can inform the choice;
-- `rec` and `recommendation:{why, whyNot, tradeoff}`.
+- `rec` and `recommendation:{why, gains, losses[{loss, mitigation}], whyNot, tradeoff}`.
 
 Each option has a worked example of what the person types and sees, including
 an error when that is the point. Do not offer several derivative spellings of
 one idea or a separate hybrid that is not a real final design. The
 recommendation explains why the winner serves this decision, why every other
-option loses, and which downside remains after the loss pass. `tradeoff` names
-only losses with `whyUnavoidable`; implementation difficulty never ranks an
-option.
+option loses, and how each negligible downside is reduced after the loss pass.
+`tradeoff` names only losses with concrete mitigations; implementation difficulty
+never ranks an option.
 
 A ballot is ready only when the owner can decide without asking the drafter,
 all credible options are internally cohesive, source provenance is recorded,
-and every recommended loss is removed or carries its reason. Read
+and every recommended loss is removed or negligible with a concrete mitigation. Read
 [authoring details](references/authoring.md) for the design-away acceptance
 and contextual comparison evidence. Use the [complete exemplar](references/exemplar.md)
 for the corrected JSON shape (`A` first, recommendation `A`, and `whyNot` for
@@ -148,11 +167,12 @@ provenance.
 After both fresh passes, repair material findings, re-check every loss, and
 confirm `recommendation.whyNot` still covers every loser. Each reader summary
 is evidence, not a status label: state what was tested, added, removed, or
-repaired. Preserve every loss reason after the adversarial pass. The
+repaired. Preserve every loss mitigation after the adversarial pass. The
 orchestration [closeout reference](../../../../.agents/skills/orchestration/references/closeout.md)
 applies only when a later campaign reaches milestone closeout.
 
-Tower Focus Mode and the ballot page show the question, lesson, then code
+Tower Focus Mode and the ballot page show one quiet line naming the ballot and
+its card, the `situation` summary, then the question, lesson, and code
 stacked at full width without sideways scrolling: `Current`, `In the wild`
 (side by side only when both fit), then `A` first and every option with the
 same shape: name, gist, gains, losses, and proposed code. Recommendation and
@@ -181,8 +201,8 @@ metadata validation. The scaffold retains `draft: true`; adding it does not
 expose the ballot to the owner.
 
 ```sh
-mkdir -p ~/.cache/jet-luna
-tower decision scaffold '#12' --id D-CACHE1 --out ~/.cache/jet-luna/ballot.json
+mkdir -p ~/.cache/jet-dev
+tower decision scaffold '#12' --id D-CACHE1 --out ~/.cache/jet-dev/ballot.json
 ```
 The scaffold may seed `surface.trio.current` from the card probe and
 `surface.trio.wild` from cited evidence. The author still writes and checks
@@ -192,7 +212,7 @@ After authoring and review, submit the complete draft, then explicitly make it
 ready:
 
 ```sh
-tower decision add --file ~/.cache/jet-luna/ballot.json --by <agent>
+tower decision add --file ~/.cache/jet-dev/ballot.json --by <agent>
 tower decision update D-CACHE1 --ready --by <agent>
 tower decision show D-CACHE1 --json
 tower card show '#12' --json

@@ -1,6 +1,6 @@
 # #3179 — Combined deferred-close, guard and exit-handler ordering (READ-F14)
 
-Date: 2026-09-29. Binary: `jet-debug-snapshot14` via `~/.cache/jet-luna/safe-jet.sh`
+Date: 2026-09-29. Binary: `jet-debug-snapshot14` via `~/.cache/jet-dev/safe-jet.sh`
 (the one source-matched build pinned for this card), source rev `e9c708fa7`.
 Author: Closer03 (evidence closer). No compiler, runtime or Core change was made.
 
@@ -27,7 +27,7 @@ Author: Closer03 (evidence closer). No compiler, runtime or Core change was made
   `process.cmd([os.executable(), <case>])` for return, error, panic, cancel (race loser at
   `time.sleep`), `process.exit(0)` and `os.stop(3)`; each child interleaves two deferred
   closes with two scope guards and registers two `os.atexit` handlers.
-- Move/contract probes in `~/.cache/jet-test-scratch/Closer03/`: `close_use_after.jet`,
+- Move/contract probes in `~/.cache/jet-dev/scratch/Closer03/`: `close_use_after.jet`,
   `close_fallible.jet`; UI fixture `tests/ui/defer_close_twice.jet`.
 - Default `jet run --allow=Exec,IO,Env,Time.Wait`; interpreter where it can run.
 

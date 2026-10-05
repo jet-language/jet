@@ -183,6 +183,9 @@ pub enum JetVal {
         initialized: Vec<bool>,
     },
     Int(i64),
+    /// Fixed-width integer bits, never a tagged exact-Int owner. This tag
+    /// survives erased record copies and recursive marshalling.
+    Word { value: i64, unsigned: bool },
     Float(f64),
     Bool(bool),
     Char(char),
@@ -293,6 +296,7 @@ impl JetArena {
                 }
             }
             JetVal::Float(_)
+            | JetVal::Word { .. }
             | JetVal::Bool(_)
             | JetVal::Char(_)
             | JetVal::String(_)
@@ -631,6 +635,11 @@ impl JetArena {
     fn composite_key_field(&self, field: &JetVal) -> Option<JetMapKey> {
         let fields = match field {
             JetVal::Int(value) => return Some(exact_int_map_key(*value)),
+            JetVal::Word { value, unsigned } => return Some(if *unsigned {
+                JetMapKey::UInt(*value as u64)
+            } else {
+                JetMapKey::Int(*value)
+            }),
             JetVal::String(value) => return Some(JetMapKey::String(value.clone())),
             JetVal::Bool(value) => return Some(JetMapKey::Bool(*value)),
             JetVal::Char(value) => return Some(JetMapKey::Char(*value)),
@@ -879,7 +888,7 @@ impl JetArena {
         match self.values.get(list as usize) {
             Some(JetVal::IntList(values)) => values.get(index as usize).copied(),
             Some(JetVal::List(values)) => match values.get(index as usize) {
-                Some(JetVal::Int(value)) => Some(*value),
+                Some(JetVal::Int(value) | JetVal::Word { value, .. }) => Some(*value),
                 _ => None,
             },
             Some(JetVal::UninitList {
@@ -888,7 +897,7 @@ impl JetArena {
             }) => {
                 let index = uninit_semantics::jet_uninit_read(initialized, index as usize).ok()?;
                 match values.get(index) {
-                    Some(JetVal::Int(value)) => Some(*value),
+                    Some(JetVal::Int(value) | JetVal::Word { value, .. }) => Some(*value),
                     _ => None,
                 }
             }
@@ -922,7 +931,7 @@ impl JetArena {
                 values,
                 initialized,
             })),
-            JetVal::Int(value) | JetVal::RecordRef(value) => Some(value),
+            JetVal::Int(value) | JetVal::Word { value, .. } | JetVal::RecordRef(value) => Some(value),
             JetVal::Float(value) => Some(value.to_bits() as i64),
             JetVal::Bool(value) => Some(i64::from(value)),
             JetVal::Char(value) => Some(i64::from(value as u32)),
@@ -968,7 +977,7 @@ impl JetArena {
             _ => jet_foundation::ice!(None, "proven fixed-list read of a non-list carrier"),
         };
         match value {
-            JetVal::Int(value) => *value,
+            JetVal::Int(value) | JetVal::Word { value, .. } => *value,
             _ => jet_foundation::ice!(None, "proven fixed-list integer read of a non-integer slot"),
         }
     }
@@ -1348,7 +1357,7 @@ impl JetArena {
         let field = fields.get_mut(index)?;
         let address = match kind {
             RECORD_FIELD_ADDRESS_I64 => match field {
-                JetVal::Int(value) | JetVal::RecordRef(value) => {
+                JetVal::Int(value) | JetVal::Word { value, .. } | JetVal::RecordRef(value) => {
                     value as *mut i64 as *mut u8
                 }
                 _ => return None,
@@ -1372,6 +1381,10 @@ impl JetArena {
 
     pub fn record_set_int(&mut self, record: i64, index: i64, value: i64) -> Option<()> {
         self.record_set(record, index, JetVal::Int(value))
+    }
+
+    pub fn record_set_word(&mut self, record: i64, index: i64, value: i64, unsigned: bool) -> Option<()> {
+        self.record_set(record, index, JetVal::Word { value, unsigned })
     }
 
     pub fn record_set_float(&mut self, record: i64, index: i64, value: f64) -> Option<()> {
@@ -1430,7 +1443,7 @@ impl JetArena {
 
     pub fn record_get_int(&self, record: i64, index: i64) -> Option<i64> {
         match self.record_get(record, index) {
-            Some(JetVal::Int(value)) => Some(*value),
+            Some(JetVal::Int(value) | JetVal::Word { value, .. }) => Some(*value),
             Some(JetVal::RecordRef(value)) => Some(*value),
             _ => None,
         }
@@ -1957,6 +1970,40 @@ impl JetArena {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn record_word_cells_never_retain_exact_integer_tags() {
+        let mut arena = JetArena::default();
+        let record = arena.alloc_record(3);
+        let words = [7299585414513572552, i64::MIN, -1];
+        for (index, word) in words.into_iter().enumerate() {
+            arena.record_set_word(record, index as i64, word, true).unwrap();
+        }
+        let copy = arena.alloc_record_values(arena.clone_record_values(record).unwrap());
+        for (index, word) in words.into_iter().enumerate() {
+            assert_eq!(arena.record_get_int(copy, index as i64), Some(word));
+        }
+        assert!(arena.exact_roots.is_empty());
+        assert!(arena.record_get_record(copy, 0).is_none());
+        assert_eq!(
+            arena.composite_key(copy),
+            Some(JetMapKey::Record(words.into_iter().map(|value| JetMapKey::UInt(value as u64)).collect()))
+        );
+        let signed = arena.alloc_record(1);
+        arena.record_set_word(signed, 0, i64::MIN, false).unwrap();
+        assert_eq!(arena.composite_key(signed), Some(JetMapKey::Record(vec![JetMapKey::Int(i64::MIN)])));
+    }
+
+    #[test]
+    fn record_exact_cells_still_retain_spilled_owners() {
+        let mut arena = JetArena::default();
+        let record = arena.alloc_record(1);
+        let spilled = arena.int_add(JetArena::INT_SMALL_MAX, 1);
+        let before = arena.exact_roots.len();
+        arena.record_set_int(record, 0, spilled).unwrap();
+        assert_eq!(arena.exact_roots.len(), before + 1);
+        assert_eq!(arena.int_compare(arena.record_get_int(record, 0).unwrap(), spilled), 0);
+    }
 
     #[test]
     fn display_matches_aot_float_prelude() {

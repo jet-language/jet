@@ -1,6 +1,6 @@
 // Claims ported from crates/jetpack/src/EnvFile.rs #[cfg(test)].
 
-@ENV_FILE_TEST_SAMPLE :: """
+ENV_FILE_TEST_SAMPLE :: prep { """
 use jetpack as pkg
 pub fn shell() -> [JSON] {{
     return [
@@ -9,9 +9,9 @@ pub fn shell() -> [JSON] {{
         pkg.prompt("jetpack")
     ]
 }}
-"""
+""" }
 
-@ENV_FILE_TEST_NAMED :: """
+ENV_FILE_TEST_NAMED :: prep { """
 use jetpack as pkg
 pub fn shell() -> [JSON] {{
     return [
@@ -21,9 +21,9 @@ pub fn shell() -> [JSON] {{
         pkg.prompt("jetpack")
     ]
 }}
-"""
+""" }
 
-@ENV_FILE_TEST_CORE_REPO :: """
+ENV_FILE_TEST_CORE_REPO :: prep { """
 use jetpack as pkg
 pub fn shell() -> [JSON] {{
     return [
@@ -31,7 +31,7 @@ pub fn shell() -> [JSON] {{
         pkg.packages(["hello@mine"])
     ]
 }}
-"""
+""" }
 
 fn env_file_test_scratch() -> String {
     files.tmpdir("jpk-env-") ?? panic("claim scratch dir")
@@ -52,7 +52,7 @@ fn env_file_test_sorted(values: [String]) -> [String] {
 }
 
 #Test("parses directives") {
-    file :: EnvFile.parse(@ENV_FILE_TEST_SAMPLE)
+    file :: EnvFile.parse(ENV_FILE_TEST_SAMPLE)
     assert_eq(file.default_source, Val("jetpack"))
     assert_eq(file.named.len(), 0)
     assert_eq(file.packages, [String]{"ripgrep", "fd", "claude-code"})
@@ -61,7 +61,7 @@ fn env_file_test_sorted(values: [String]) -> [String] {
 }
 
 #Test("parses named sources") {
-    file :: EnvFile.parse(@ENV_FILE_TEST_NAMED)
+    file :: EnvFile.parse(ENV_FILE_TEST_NAMED)
     assert_eq(file.named.len(), 2)
     assert_eq(file.named[0].name, "stable")
     assert_eq(file.named[0].upstream, "NixOS/nixpkgs/nixos-24.05@github")
@@ -79,7 +79,7 @@ fn env_file_test_sorted(values: [String]) -> [String] {
     // U10: `env.jet` is purely the dev-shell descriptor. A `core` named source
     // still declares its provider via `via`; the package index lives in the
     // repo's `pkg.jet`, not here.
-    file :: EnvFile.parse(@ENV_FILE_TEST_CORE_REPO)
+    file :: EnvFile.parse(ENV_FILE_TEST_CORE_REPO)
     assert_eq(file.named.len(), 1)
     assert_eq(file.named[0].via, Val("core"))
     assert_eq(file.source_table().provider("mine"), ProviderKind.Core)
@@ -87,7 +87,7 @@ fn env_file_test_sorted(values: [String]) -> [String] {
 }
 
 #Test("render roundtrips named") {
-    file :: EnvFile.parse(@ENV_FILE_TEST_NAMED)
+    file :: EnvFile.parse(ENV_FILE_TEST_NAMED)
     rendered :: file.render()
     assert(rendered.contains("pub fn shell() -> [JSON]"))
     assert(rendered.contains("pkg.packages([\"ripgrep@stable\", \"neovim@unstable\"]),"))
@@ -98,7 +98,7 @@ fn env_file_test_sorted(values: [String]) -> [String] {
 }
 
 #Test("render roundtrips") {
-    file :: EnvFile.parse(@ENV_FILE_TEST_SAMPLE)
+    file :: EnvFile.parse(ENV_FILE_TEST_SAMPLE)
     reparsed :: EnvFile.parse(file.render())
     assert_eq(file.default_source, reparsed.default_source)
     assert_eq(file.prompt, reparsed.prompt)
@@ -163,8 +163,8 @@ fn env_file_test_sorted(values: [String]) -> [String] {
 
 #Test("add named source entry keeps prefix") {
     dir :: env_file_test_scratch()
-    files.write(EnvFile.path_in(dir), EnvFile.parse(@ENV_FILE_TEST_NAMED).render()) ?? panic("write env.jet")
-    table :: EnvFile.parse(@ENV_FILE_TEST_NAMED).source_table()
+    files.write(EnvFile.path_in(dir), EnvFile.parse(ENV_FILE_TEST_NAMED).render()) ?? panic("write env.jet")
+    table :: EnvFile.parse(ENV_FILE_TEST_NAMED).source_table()
     // Adding under a declared named source stores it prefixed and preserves
     // the source declarations.
     added :: EnvFile.add(dir, env_file_test_classify_in("fd@unstable", table)) ?? panic("add fd@unstable")

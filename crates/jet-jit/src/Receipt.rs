@@ -156,7 +156,7 @@ fn word_from_slot(
     descriptor: &RuntimeTypeDescriptor,
 ) -> Result<RuntimeWord, String> {
     match value {
-        JetVal::Int(raw) | JetVal::RecordRef(raw) => word_from_raw(rt, raw, descriptor),
+        JetVal::Int(raw) | JetVal::Word { value: raw, .. } | JetVal::RecordRef(raw) => word_from_raw(rt, raw, descriptor),
         JetVal::Float(value) if descriptor.kind == RuntimeValueKind::Float => {
             Ok(RuntimeWord::Float(value))
         }

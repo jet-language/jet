@@ -4,7 +4,7 @@
 // a generic Store API; every mutation is compare-and-swap protected by the
 // root's etag.
 
-fn cli_hangar_register_external_root(theme: Theme, parsed: CliParsed) -[IO, FS, Env, Time, Time.Wait]> Int Never! {
+fn cli_hangar_register_external_root(verification: &StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Time, Time.Wait]> Int Never! {
     args :: cli_positional_values_after(parsed, "register-external-root")
     if args.len() < 2 {
         return cli_hangar_report_error(
@@ -27,13 +27,13 @@ fn cli_hangar_register_external_root(theme: Theme, parsed: CliParsed) -[IO, FS, 
     now :: cli_unix_now()
     expires_at := Int?{None}
     if expires_in == .Val(seconds) {
-        if seconds > @CLI_MAX_UNIX_SECONDS - now {
+        if seconds > CLI_MAX_UNIX_SECONDS - now {
             return cli_hangar_report_error(theme, parsed, "E1340", "external-root expiry is too far in the future", "the requested duration overflows the lifecycle timestamp.", "use a shorter duration.")
         }
         expires_at = Val(now + seconds)
     }
     roots :: pkg_resolve_roots()
-    closure_size :: store_external_root_closure_size(roots, reference) ?? return cli_external_root_error(theme, parsed, err)
+    closure_size :: store_external_root_closure_size(&verification, roots, reference) ?? return cli_external_root_error(theme, parsed, err)
     principal :: cli_external_root_principal()
     expected_etag :: cli_flag_value(parsed, "--if-etag")
     if parsed.flags.json {
@@ -45,7 +45,7 @@ fn cli_hangar_register_external_root(theme: Theme, parsed: CliParsed) -[IO, FS, 
                 .with("closure_objects", DataTree.Int(closure_size))
                 .with("expires_at", cli_optional_int_tree(expires_at))
                 .with("if_etag", cli_optional_text_tree(expected_etag)))
-            return @EXIT_OK
+            return EXIT_OK
         }
     } else {
         theme.status("Plan external root")
@@ -56,9 +56,9 @@ fn cli_hangar_register_external_root(theme: Theme, parsed: CliParsed) -[IO, FS, 
             .None -> theme.detail("expires: never")
         }
         if expected_etag == .Val(expected) -> theme.detail("if etag: {expected}")
-        if !theme.confirm_apply(parsed.flags.assume_yes) -> return @EXIT_OK
+        if !theme.confirm_apply(parsed.flags.assume_yes) -> return EXIT_OK
     }
-    view :: store_register_external_root_at(roots, principal, label, reference, expires_at, expected_etag, now) ?? return cli_external_root_error(theme, parsed, err)
+    view :: store_register_external_root_at(&verification, roots, principal, label, reference, expires_at, expected_etag, now) ?? return cli_external_root_error(theme, parsed, err)
     if parsed.flags.json {
         cli_hangar_status_json("register-external-root", StatusFields.new()
             .with("label", DataTree.Text(view.label))
@@ -66,11 +66,11 @@ fn cli_hangar_register_external_root(theme: Theme, parsed: CliParsed) -[IO, FS, 
             .with("etag", DataTree.Text(view.etag))
             .with("expires_at", cli_optional_int_tree(view.expires_at)))
     }
-    @EXIT_OK
+    EXIT_OK
 }
 
-fn cli_hangar_list_external_roots(theme: Theme, parsed: CliParsed) -[IO, FS, Env, Time]> Int Never! {
-    views :: store_list_external_roots(pkg_resolve_roots(), cli_external_root_principal()) ?? return cli_external_root_error(theme, parsed, err)
+fn cli_hangar_list_external_roots(verification: &StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Time, Time.Wait]> Int Never! {
+    views :: store_list_external_roots(&verification, pkg_resolve_roots(), cli_external_root_principal()) ?? return cli_external_root_error(theme, parsed, err)
     if parsed.flags.json {
         machine_roots := [DataTree]{}
         loop view in views {
@@ -81,11 +81,11 @@ fn cli_hangar_list_external_roots(theme: Theme, parsed: CliParsed) -[IO, FS, Env
                 .with("expires_at", cli_optional_int_tree(view.expires_at))))
         }
         cli_hangar_status_json("list-external-roots", StatusFields.new().with("roots", DataTree.Array(machine_roots)))
-        return @EXIT_OK
+        return EXIT_OK
     }
     if views.len() == 0 {
         theme.status("no external roots.")
-        return @EXIT_OK
+        return EXIT_OK
     }
     now :: cli_unix_now()
     loop view in views {
@@ -95,10 +95,10 @@ fn cli_hangar_list_external_roots(theme: Theme, parsed: CliParsed) -[IO, FS, Env
         }
         theme.detail("{view.label}  {view.reference}  {expiry}  etag {view.etag}")
     }
-    @EXIT_OK
+    EXIT_OK
 }
 
-fn cli_hangar_unregister_external_root(theme: Theme, parsed: CliParsed) -[IO, FS, Env, Time, Time.Wait]> Int Never! {
+fn cli_hangar_unregister_external_root(verification: &StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Time, Time.Wait]> Int Never! {
     args :: cli_positional_values_after(parsed, "unregister-external-root")
     if args.len() == 0 {
         return cli_hangar_report_error(
@@ -114,17 +114,17 @@ fn cli_hangar_unregister_external_root(theme: Theme, parsed: CliParsed) -[IO, FS
     etag :: cli_flag_value(parsed, "--etag") ?? {
         return cli_hangar_report_error(theme, parsed, "E1340", "`hangar unregister-external-root` needs `--etag`", "root removal is compare-and-swap protected.", "read `jetpack hangar list-external-roots`, then pass its etag.")
     }
-    if !cli_hangar_confirm_apply(theme, parsed, "unregister-external-root") -> return @EXIT_OK
-    store_unregister_external_root_at(pkg_resolve_roots(), cli_external_root_principal(), label, etag, cli_unix_now()) ?? return cli_external_root_error(theme, parsed, err)
+    if !cli_hangar_confirm_apply(theme, parsed, "unregister-external-root") -> return EXIT_OK
+    store_unregister_external_root_at(&verification, pkg_resolve_roots(), cli_external_root_principal(), label, etag, cli_unix_now()) ?? return cli_external_root_error(theme, parsed, err)
     if parsed.flags.json {
         cli_hangar_status_json("unregister-external-root", StatusFields.new().with("label", DataTree.Text(label)))
     } else {
         theme.status("Removed external root `{label}`.")
     }
-    @EXIT_OK
+    EXIT_OK
 }
 
-fn cli_external_root_error(theme: Theme, parsed: CliParsed, error: ExternalRootError) -[IO, FS, Env]> Int Never! {
+fn cli_external_root_error(theme: Theme, parsed: CLIParsed, error: ExternalRootError) -[IO, FS, Env, Time.Wait]> Int Never! {
     if error == {
         .Conflict(label, _, current) -> {
             fix :: if current == {
@@ -147,7 +147,7 @@ fn cli_external_root_principal() -[Env]> String Never! {
 }
 
 // The largest lifecycle timestamp (Rust u64 seconds, bounded by Int).
-@CLI_MAX_UNIX_SECONDS :: 9223372036854775807
+CLI_MAX_UNIX_SECONDS :: prep { 9223372036854775807 }
 
 // The failure carrier of a duration parse; the text is the Rust error.
 #Error
@@ -165,7 +165,7 @@ pub fn cli_parse_duration(value: String) -> Int DurationParseError! {
     amount :: Int.parse(number) ?? return Err(DurationParseError{message: "`{value}` is not a valid duration"})
     if amount == 0 -> return Err(DurationParseError{message: "external-root expiry must be positive"})
     multiplier :: cli_duration_unit_seconds(suffix) ?? return Err(DurationParseError{message: "`{value}` needs a unit: s, m, h, d, or w"})
-    if amount > @CLI_MAX_UNIX_SECONDS /% multiplier -> return Err(DurationParseError{message: "`{value}` is too large"})
+    if amount > CLI_MAX_UNIX_SECONDS /% multiplier -> return Err(DurationParseError{message: "`{value}` is too large"})
     Ok(amount * multiplier)
 }
 

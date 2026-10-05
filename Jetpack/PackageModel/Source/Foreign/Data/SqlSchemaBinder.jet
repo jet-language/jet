@@ -8,7 +8,7 @@ fn pkg_data_bind_sql(input: String, root_name: String?) -> SchemaBuilder DataBin
     cleaned :: pkg_data_strip_sql_comments(input)
     statements :: pkg_data_split_sql_statements(cleaned)
     if statements.len() == 0 -> return Err(DataBindError{message: "SQL input has no CREATE TABLE declaration"})
-    tables := [SqlTable]{}
+    tables := [SQLTable]{}
     table_names := [String]{}
     loop statement in statements {
         table :: pkg_data_parse_sql_table(statement)
@@ -27,7 +27,7 @@ fn pkg_data_bind_sql(input: String, root_name: String?) -> SchemaBuilder DataBin
     Ok(builder)
 }
 
-struct SqlTable {
+struct SQLTable {
     name: String
     fields: [FieldSeed]
 }
@@ -145,8 +145,8 @@ fn pkg_data_split_sql_statements(input: String) -> [String] DataBindError! {
     Ok(statements)
 }
 
-@SQL_SYMBOLS :: "(),.<>*%+=|&!~^:[]"
-@SQL_PRIMARY_KEY_MODIFIERS :: [String]{"ASC", "DESC", "AUTOINCREMENT", "AUTO_INCREMENT"}
+SQL_SYMBOLS :: prep { "(),.<>*%+=|&!~^:[]" }
+SQL_PRIMARY_KEY_MODIFIERS :: prep { [String]{"ASC", "DESC", "AUTOINCREMENT", "AUTO_INCREMENT"} }
 
 // Punctuation, quoted values (delimiters removed, doubled delimiters kept
 // once), numbers with optional fraction and exponent, and names.
@@ -158,7 +158,7 @@ fn pkg_data_sql_tokens(statement: String) -> [String] DataBindError! {
         ch :: chars[index]
         if {
             pkg_data_is_ascii_whitespace(ch) -> index += 1
-            @SQL_SYMBOLS.contains(ch) -> {
+            SQL_SYMBOLS.contains(ch) -> {
                 &tokens.push(ch)
                 index += 1
             }
@@ -226,7 +226,7 @@ fn pkg_data_sql_is_name(token: String) -> Bool Never! {
 }
 
 // A read position over one statement's (or one declaration's) tokens.
-struct SqlCursor {
+struct SQLCursor {
     tokens: [String]
     index: Int
 
@@ -267,7 +267,7 @@ struct SqlCursor {
 
     // An optional `(n)` or `(p, s)` type modifier.
     fn parenthesized_digits(&self, what: String, two: Bool) DataBindError! {
-        if !self.at("(") -> return Ok()
+        if !self.at("(") -> return
         self.index += 1
         first :: if what.contains("time precision") || what.contains("timestamp precision") -> &self.take_digits(what) else -> &self.take_positive_digits(what)
         second := -1
@@ -297,14 +297,14 @@ struct SqlCursor {
                     zerofill = true
                     self.index += 1
                 }
-                else -> return Ok()
+                else -> return
             }
         }
     }
 
     // `WITH TIME ZONE` / `WITHOUT TIME ZONE` after a time type.
     fn time_zone_modifier(&self) DataBindError! {
-        if !(self.at_word("WITH") || self.at_word("WITHOUT")) -> return Ok()
+        if !(self.at_word("WITH") || self.at_word("WITHOUT")) -> return
         self.index += 1
         if !self.at_word("TIME") -> return Err(DataBindError{message: "SQL time zone modifier needs TIME ZONE"})
         self.index += 1
@@ -386,14 +386,14 @@ struct SqlCursor {
                     if depth == 0 {
                         if self.index == start -> return Err(DataBindError{message: "SQL {what} is empty"})
                         self.index += 1
-                        return Ok()
+                        return
                     }
                 }
                 else -> {}
             }
             self.index += 1
         }
-        Err(DataBindError{message: "SQL {what} is not closed"})
+        return Err(DataBindError{message: "SQL {what} is not closed"})
     }
 
     // A parenthesized, comma-separated name list.
@@ -457,7 +457,7 @@ struct SqlCursor {
                 }
                 "DEFERRABLE" -> self.index += 1
                 "NOT" -> {
-                    following :: SqlCursor{tokens: self.tokens, index: self.index + 1}
+                    following :: SQLCursor{tokens: self.tokens, index: self.index + 1}
                     if !following.at_word("DEFERRABLE") -> break
                     self.index += 2
                 }
@@ -525,7 +525,7 @@ struct SqlCursor {
                 if !self.at_word("KEY") -> return Err(DataBindError{message: "SQL PRIMARY constraint needs KEY"})
                 self.index += 1
                 required = true
-                loop modifier in @SQL_PRIMARY_KEY_MODIFIERS {
+                loop modifier in SQL_PRIMARY_KEY_MODIFIERS {
                     if self.at_word(modifier) -> self.index += 1
                 }
             }
@@ -606,7 +606,7 @@ fn pkg_data_sql_unique_stop_word(value: String) -> Bool Never! {
 // One table constraint declaration. Returns the lower-cased columns it makes
 // required and whether it declared the table's PRIMARY KEY.
 fn pkg_data_sql_table_constraint(segment: [String], primary_seen: Bool) -> (required: [String], primary: Bool) DataBindError! {
-    cursor := SqlCursor{tokens: segment, index: 0}
+    cursor := SQLCursor{tokens: segment, index: 0}
     if cursor.at_word("CONSTRAINT") {
         cursor.index += 1
         _ :: &cursor.take_name("constraint name")
@@ -656,17 +656,17 @@ fn pkg_data_sql_table_constraint(segment: [String], primary_seen: Bool) -> (requ
 }
 
 // One `CREATE [TEMP|TEMPORARY] TABLE [IF NOT EXISTS] [schema.]name (...)`.
-fn pkg_data_parse_sql_table(statement: String) -> SqlTable DataBindError! {
+fn pkg_data_parse_sql_table(statement: String) -> SQLTable DataBindError! {
     tokens :: pkg_data_sql_tokens(statement)
-    cursor := SqlCursor{tokens: tokens, index: 0}
+    cursor := SQLCursor{tokens: tokens, index: 0}
     if !cursor.at_word("CREATE") -> return Err(DataBindError{message: "SQL input contains a non-CREATE TABLE statement"})
     cursor.index += 1
     if cursor.at_word("TEMP") || cursor.at_word("TEMPORARY") -> cursor.index += 1
     if !cursor.at_word("TABLE") -> return Err(DataBindError{message: "SQL statement is not CREATE TABLE"})
     cursor.index += 1
     if cursor.at_word("IF") {
-        after_not :: SqlCursor{tokens: tokens, index: cursor.index + 1}
-        after_exists :: SqlCursor{tokens: tokens, index: cursor.index + 2}
+        after_not :: SQLCursor{tokens: tokens, index: cursor.index + 1}
+        after_exists :: SQLCursor{tokens: tokens, index: cursor.index + 2}
         if !after_not.at_word("NOT") || !after_exists.at_word("EXISTS") -> return Err(DataBindError{message: "SQL has incomplete IF NOT EXISTS"})
         cursor.index += 3
     }
@@ -737,15 +737,15 @@ fn pkg_data_parse_sql_table(statement: String) -> SqlTable DataBindError! {
             else -> {}
         }
         if segment.len() < 2 -> return Err(DataBindError{message: "SQL column needs a name and type"})
-        column :: segment[0]
+        column :: ~segment[0]
         if !pkg_data_sql_is_name(column) -> return Err(DataBindError{message: "SQL column name is invalid"})
         key :: pkg_ascii_lower(column)
         if names.contains(key) -> return Err(DataBindError{message: "SQL has duplicate column {column}"})
         &names.push(key)
-        column_cursor := SqlCursor{tokens: segment, index: 1}
+        column_cursor := SQLCursor{tokens: segment, index: 1}
         ty :: &column_cursor.column_type(column)
         required := false
-        loop column_cursor.index < segment.len() {
+        loop column_cursor.index < column_cursor.tokens.len() {
             if &column_cursor.column_constraint() -> required = true
         }
         &fields.push(FieldSeed{wire_name: column, ty: pkg_data_bound_scalar(ty), optional: !required, note: None})
@@ -760,5 +760,5 @@ fn pkg_data_parse_sql_table(statement: String) -> SqlTable DataBindError! {
         if required_columns.contains(pkg_ascii_lower(field.wire_name)) -> seeded.optional = false
         &out.push(seeded)
     }
-    Ok(SqlTable{name: table_name, fields: out})
+    Ok(SQLTable{name: table_name, fields: out})
 }

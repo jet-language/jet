@@ -399,15 +399,15 @@ fn sema_core_generated_roots_from_used(used: [String]) -> [String] Never! {
 pub fn sema_core_generated_roots(graph: SemaRegistrationGraph, registration_module: SemaRegistrationModule) -> [String] {
     markers := [String]{}
     sema_core_generated_context_markers(graph, registration_module, &markers)
-    input := sema_core_module_input_from_registration(registration_module, false, [String]{})
+    imports :: sema_core_registration_imports(registration_module)
     used := [String]{}
     spans := [SemaCoreUsageSpan]{}
     callbacks := [String]{}
-    registered := input.registered_type_names
+    registered := sema_core_registration_type_names(registration_module)
     loop marker in markers -> &registered.push(marker)
-    sema_core_generated_direct_item_roots(input.program.items, &used, &spans)
-    sema_core_collect_items(input.program.items, input.imports, registered, &used, &spans, &callbacks)
-    sema_core_collect_stmts(input.program.script_body, input.imports, registered, &used, &spans, &callbacks)
+    sema_core_generated_direct_item_roots(registration_module.program.items, &used, &spans)
+    sema_core_collect_items(registration_module.program.items, imports, registered, &used, &spans, &callbacks)
+    sema_core_collect_stmts(registration_module.program.script_body, imports, registered, &used, &spans, &callbacks)
     sema_core_generated_roots_from_used(used)
 }
 
@@ -1213,14 +1213,20 @@ fn sema_core_switch_has_readiness(arms: [SwitchArm]) -> Bool Never! {
 }
 
 
-fn sema_core_collect_program(input: SemaCoreModuleInput, used: &[String], spans: &[SemaCoreUsageSpan], callbacks: &[String]) {
-    if input.exact_int_reachable -> sema_core_note_usage(&used, &spans, "core.math::__exact_int__", None)
-    loop root in input.generated_roots -> sema_core_note_usage(&used, &spans, root, None)
-    sema_core_collect_items(input.program.items, input.imports, input.registered_type_names, &used, &spans, &callbacks)
-    sema_core_collect_stmts(input.program.script_body, input.imports, input.registered_type_names, &used, &spans, &callbacks)
+fn sema_core_collect_program(program: Program, imports: [SemaCoreImport], registered_type_names: [String], exact_int_reachable: Bool, generated_roots: [String], used: &[String], spans: &[SemaCoreUsageSpan], callbacks: &[String]) {
+    if exact_int_reachable -> sema_core_note_usage(&used, &spans, "core.math::__exact_int__", None)
+    loop root in generated_roots -> sema_core_note_usage(&used, &spans, root, None)
+    sema_core_collect_items(program.items, imports, registered_type_names, &used, &spans, &callbacks)
+    sema_core_collect_stmts(program.script_body, imports, registered_type_names, &used, &spans, &callbacks)
 }
 
-pub fn sema_core_module_input_from_registration(registration_module: SemaRegistrationModule, exact_int_reachable: Bool, generated_roots: [String]) -> SemaCoreModuleInput Never! {
+pub fn sema_core_module_usage_from_registration(registration_module: SemaRegistrationModule, exact_int_reachable: Bool, generated_roots: [String]) -> SemaCoreModuleUsageResult {
+    sema_core_collect_source_usage(registration_module.module_identity, registration_module.program, sema_core_registration_imports(registration_module), sema_core_registration_type_names(registration_module), exact_int_reachable, generated_roots)
+}
+
+// The module's Core-visible imports, read from its registration rows without
+// copying the module's program.
+pub fn sema_core_registration_imports(registration_module: SemaRegistrationModule) -> [SemaCoreImport] Never! {
     imports := [SemaCoreImport]{}
     loop registration in registration_module.imports {
         declaration := registration.declaration
@@ -1247,9 +1253,13 @@ pub fn sema_core_module_input_from_registration(registration_module: SemaRegistr
             else -> {}
         }
     }
+    imports
+}
+
+fn sema_core_registration_type_names(registration_module: SemaRegistrationModule) -> [String] Never! {
     registered := [String]{}
     loop nominal in registration_module.nominals -> sema_core_string_add(&registered, nominal.symbol.name)
-    SemaCoreModuleInput{module_identity: registration_module.module_identity, program: registration_module.program, imports: imports, registered_type_names: registered, exact_int_reachable: exact_int_reachable, generated_roots: generated_roots}
+    registered
 }
 
 fn sema_core_usage_span_add(spans: &[SemaCoreUsageSpan], row: SemaCoreUsageSpan) Never! {
@@ -1259,15 +1269,15 @@ fn sema_core_usage_span_add(spans: &[SemaCoreUsageSpan], row: SemaCoreUsageSpan)
     &spans.push(row)
 }
 
-fn sema_core_collect_module_usage(input: SemaCoreModuleInput) -> SemaCoreModuleUsageResult {
+fn sema_core_collect_source_usage(module_identity: String, program: Program, imports: [SemaCoreImport], registered_type_names: [String], exact_int_reachable: Bool, generated_roots: [String]) -> SemaCoreModuleUsageResult {
     direct := [String]{}
     spans := [SemaCoreUsageSpan]{}
     callbacks := [String]{}
-    sema_core_collect_program(input, &direct, &spans, &callbacks)
+    sema_core_collect_program(program, imports, registered_type_names, exact_int_reachable, generated_roots, &direct, &spans, &callbacks)
     closure := sema_expand_core_reachable_closure(direct)
     layer := jet_ring_prelude_closure_layer(closure)
     SemaCoreModuleUsageResult{
-        module_identity: input.module_identity,
+        module_identity: module_identity,
         used_core: closure,
         usage_spans: spans,
         ffi_callback_keys: callbacks,
@@ -1277,19 +1287,26 @@ fn sema_core_collect_module_usage(input: SemaCoreModuleInput) -> SemaCoreModuleU
 }
 
 pub fn sema_collect_used_core(inputs: [SemaCoreModuleInput]) -> SemaCoreUsageResult {
+    modules := [SemaCoreModuleUsageResult]{}
+    loop input in inputs -> &modules.push(sema_core_collect_module_usage(input))
+    sema_core_combine_module_usage(modules)
+}
+
+pub fn sema_core_combine_module_usage(modules: [SemaCoreModuleUsageResult]) -> SemaCoreUsageResult {
     used := [String]{}
     spans := [SemaCoreUsageSpan]{}
     callbacks := [String]{}
-    modules := [SemaCoreModuleUsageResult]{}
-    loop input in inputs {
-        module_row := sema_core_collect_module_usage(input)
-        &modules.push(module_row)
+    loop module_row in modules {
         loop usage in module_row.used_core -> sema_core_string_add(&used, usage)
         loop row in module_row.usage_spans -> sema_core_usage_span_add(&spans, row)
         loop key in module_row.ffi_callback_keys -> sema_core_string_add(&callbacks, key)
     }
     layer := jet_ring_prelude_closure_layer(used)
     SemaCoreUsageResult{used_core: used, usage_spans: spans, ffi_callback_keys: callbacks, closure: used, inferred_layer: layer, modules: modules}
+}
+
+fn sema_core_collect_module_usage(input: SemaCoreModuleInput) -> SemaCoreModuleUsageResult {
+    sema_core_collect_source_usage(input.module_identity, input.program, input.imports, input.registered_type_names, input.exact_int_reachable, input.generated_roots)
 }
 
 pub fn sema_collect_used_core_module(input: SemaCoreModuleInput) -> SemaCoreModuleUsageResult {

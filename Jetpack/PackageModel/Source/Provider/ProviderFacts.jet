@@ -6,8 +6,8 @@
 // native document or hide a field it cannot prove. This record is the one
 // identity/provenance seam consumed by package profiles and semantic locks.
 
-@PROVIDER_FACTS_SCHEMA :: "jet-provider-facts-v1"
-@PROVIDER_EXACT_SELECTOR_LOSS :: "external provider references must retain an exact version, revision, or digest"
+PROVIDER_FACTS_SCHEMA :: prep { "jet-provider-facts-v1" }
+PROVIDER_EXACT_SELECTOR_LOSS :: prep { "external provider references must retain an exact version, revision, or digest" }
 
 pub enum ProviderFactValue {
     Null
@@ -72,14 +72,14 @@ pub struct ProviderLoss {
 
     fn to_json_tree(self) -> DataTree Never! {
         object := [String: DataTree]{}
-        object["key"] = DataTree.Text(self.key)
-        object["reason"] = DataTree.Text(self.reason)
-        object["source"] = DataTree.Text(self.source)
+        object["key"] = DataTree.Text(~self.key)
+        object["reason"] = DataTree.Text(~self.reason)
+        object["source"] = DataTree.Text(~self.source)
         DataTree.Object(object)
     }
 
     fn from_json_tree(value: DataTree) -> ProviderLoss ProviderFactsError! {
-        object :: pkg_json_object(value) ?? return Err(ProviderFactsError{message: @PKG_JSON_NOT_OBJECT})
+        object :: pkg_json_object(value) ?? return Err(ProviderFactsError{message: PKG_JSON_NOT_OBJECT})
         Ok(ProviderLoss{
             key: pkg_provider_required_text(object, "key", "loss lacks key"),
             reason: pkg_provider_required_text(object, "reason", "loss lacks reason"),
@@ -96,15 +96,15 @@ pub struct ProviderConflict {
 
     fn to_json_tree(self) -> DataTree Never! {
         object := [String: DataTree]{}
-        object["key"] = DataTree.Text(self.key)
-        object["left"] = DataTree.Text(self.left)
-        object["right"] = DataTree.Text(self.right)
-        object["source"] = DataTree.Text(self.source)
+        object["key"] = DataTree.Text(~self.key)
+        object["left"] = DataTree.Text(~self.left)
+        object["right"] = DataTree.Text(~self.right)
+        object["source"] = DataTree.Text(~self.source)
         DataTree.Object(object)
     }
 
     fn from_json_tree(value: DataTree) -> ProviderConflict ProviderFactsError! {
-        object :: pkg_json_object(value) ?? return Err(ProviderFactsError{message: @PKG_JSON_NOT_OBJECT})
+        object :: pkg_json_object(value) ?? return Err(ProviderFactsError{message: PKG_JSON_NOT_OBJECT})
         Ok(ProviderConflict{
             key: pkg_provider_required_text(object, "key", "conflict lacks key"),
             left: pkg_provider_required_text(object, "left", "conflict lacks left"),
@@ -185,7 +185,7 @@ pub struct ProviderFacts {
         if {
             provider == "infer" -> &facts.add_loss("provider", "ambiguous provider fact: unresolved inference", "profile-source")
             pkg_provider_is_external(provider) && authority.provider.trim() == "" -> &facts.add_loss("provider.reference", "external provider references must retain a fully qualified provider source suffix", "reference.provider")
-            pkg_provider_is_external(provider) && !details.selector.is_exact() -> &facts.add_loss("provider.selector", @PROVIDER_EXACT_SELECTOR_LOSS, "reference.selector")
+            pkg_provider_is_external(provider) && !details.selector.is_exact() -> &facts.add_loss("provider.selector", PROVIDER_EXACT_SELECTOR_LOSS, "reference.selector")
             else -> {}
         }
         loop unknown in details.unknown {
@@ -271,7 +271,7 @@ pub struct ProviderFacts {
         }
         kept := [ProviderLoss]{}
         loop loss in self.losses {
-            if loss.source == "reference.selector" && loss.key == "provider.selector" && loss.reason == @PROVIDER_EXACT_SELECTOR_LOSS -> next
+            if loss.source == "reference.selector" && loss.key == "provider.selector" && loss.reason == PROVIDER_EXACT_SELECTOR_LOSS -> next
             &kept.push(loss)
         }
         self.losses = kept
@@ -425,24 +425,24 @@ pub struct ProviderFacts {
         facts := [String: DataTree]{}
         loop key in pkg_provider_sorted_keys(self.facts.keys().to_list()) -> facts[key] = self.facts[key].to_json_tree()
         provenance := [String: DataTree]{}
-        loop key in pkg_provider_sorted_keys(self.provenance.keys().to_list()) -> provenance[key] = DataTree.Text(self.provenance[key])
+        loop key in pkg_provider_sorted_keys(self.provenance.keys().to_list()) -> provenance[key] = DataTree.Text(~self.provenance[key])
         losses := [DataTree]{}
         loop loss in self.losses -> &losses.push(loss.to_json_tree())
         conflicts := [DataTree]{}
         loop conflict in self.conflicts -> &conflicts.push(conflict.to_json_tree())
         object := [String: DataTree]{}
-        object["schema"] = DataTree.Text(@PROVIDER_FACTS_SCHEMA)
-        object["provider"] = DataTree.Text(self.provider)
-        object["reference"] = DataTree.Text(self.reference)
-        object["target"] = DataTree.Text(self.target)
+        object["schema"] = DataTree.Text(PROVIDER_FACTS_SCHEMA)
+        object["provider"] = DataTree.Text(~self.provider)
+        object["reference"] = DataTree.Text(~self.reference)
+        object["target"] = DataTree.Text(~self.target)
         object["selector"] = self.selector.to_json_tree()
-        object["resolved_source"] = DataTree.Text(self.resolved_source)
-        object["profile"] = DataTree.Text(self.profile)
-        object["profile_provenance"] = DataTree.Text(self.profile_provenance)
+        object["resolved_source"] = DataTree.Text(~self.resolved_source)
+        object["profile"] = DataTree.Text(~self.profile)
+        object["profile_provenance"] = DataTree.Text(~self.profile_provenance)
         object["facts"] = DataTree.Object(facts)
         object["provenance"] = DataTree.Object(provenance)
-        object["native_format"] = DataTree.Text(self.native_format)
-        object["native_document"] = DataTree.Text(self.native_document)
+        object["native_format"] = DataTree.Text(~self.native_format)
+        object["native_document"] = DataTree.Text(~self.native_document)
         object["losses"] = DataTree.Array(losses)
         object["conflicts"] = DataTree.Array(conflicts)
         DataTree.Object(object)
@@ -460,9 +460,9 @@ pub struct ProviderFacts {
     }
 
     fn from_json_tree(value: DataTree) -> ProviderFacts ProviderFactsError! {
-        root :: pkg_json_object(value) ?? return Err(ProviderFactsError{message: @PKG_JSON_NOT_OBJECT})
+        root :: pkg_json_object(value) ?? return Err(ProviderFactsError{message: PKG_JSON_NOT_OBJECT})
         schema :: pkg_provider_required_text(root, "schema", "provider facts lack `schema`")
-        if schema != @PROVIDER_FACTS_SCHEMA -> return Err(ProviderFactsError{message: "provider facts have an unsupported schema"})
+        if schema != PROVIDER_FACTS_SCHEMA -> return Err(ProviderFactsError{message: "provider facts have an unsupported schema"})
         selector :: ProviderSelector.from_json_tree(root.get("selector"))
         fact_fields :: pkg_json_object(root.get("facts") ?? DataTree.Null) ?? return Err(ProviderFactsError{message: "provider facts `facts` is not an object"})
         facts := [String: ProviderFactValue]{}
@@ -470,7 +470,7 @@ pub struct ProviderFacts {
         provenance_fields :: pkg_json_object(root.get("provenance") ?? DataTree.Null) ?? return Err(ProviderFactsError{message: "provider facts `provenance` is not an object"})
         provenance := [String: String]{}
         loop key in pkg_provider_sorted_keys(provenance_fields.keys().to_list()) {
-            provenance[key] = pkg_json_text(provenance_fields[key]) ?? return Err(ProviderFactsError{message: @PKG_JSON_NOT_STRING})
+            provenance[key] = pkg_json_text(provenance_fields[key]) ?? return Err(ProviderFactsError{message: PKG_JSON_NOT_STRING})
         }
         loss_values :: pkg_json_array(root.get("losses") ?? DataTree.Null) ?? return Err(ProviderFactsError{message: "provider facts `losses` is not an array"})
         losses := [ProviderLoss]{}
@@ -530,7 +530,7 @@ fn pkg_provider_check_details(details: ProviderSelectorDetails, owner: String) P
 // The text at `key`; `missing` names an absent key.
 fn pkg_provider_required_text(object: [String: DataTree], key: String, missing: String) -> String ProviderFactsError! {
     value :: object.get(key) ?? return Err(ProviderFactsError{message: missing})
-    text :: pkg_json_text(value) ?? return Err(ProviderFactsError{message: @PKG_JSON_NOT_STRING})
+    text :: pkg_json_text(value) ?? return Err(ProviderFactsError{message: PKG_JSON_NOT_STRING})
     Ok(text)
 }
 

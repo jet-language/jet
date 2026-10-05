@@ -1,0 +1,92 @@
+// Source/Publish/Registry.rs:3177-3337. Index's mandatory TOFU verifier.
+// Sign owns strict Ed25519; Index owns yank-inclusive pin and takeover policy.
+// Resolution MUST pass through the protected clone and TUF checkpoint services.
+// Those queued Registry services remain #4262/#3593/#3594; no pathname or
+// unsigned/freshness fallback is permitted. Sign entropy remains #3597.
+// Actual focused Sign/Index/Diagnostic closure is gated by #4303: borrowed
+// trim returns &str where generated String.bytes expects &String. No copy shim.
+
+pub struct PublicationVerifiedEntries {
+    pub entries: [PublicationIndexEntry]
+    pub warnings: [String]
+}
+
+pub fn publication_verify_index_entry(all: [PublicationIndexEntry], entry: PublicationIndexEntry, require_signed: Bool, registry_name: String) -> [String] PublicationDiagnosticError! {
+    takeover :: publication_is_takeover(all, entry)
+    if entry.signature.trim() == "" {
+        if require_signed || takeover -> return Err(PublicationDiagnosticError{diagnostic: publication_e1247(registry_name, entry.name, entry.version)})
+        return Ok([String]{})
+    }
+    // Do not manufacture a pin from the candidate: all is every recorded line,
+    // including yanks, and the first nonempty key establishes release authority.
+    pin :: publication_pinned_public_key(all) ?? return Err(PublicationDiagnosticError{diagnostic: publication_e1246(entry.name, entry.version)})
+    verification_key :: if takeover -> entry.public_key.trim() else -> pin
+    if !publication_verify(verification_key, entry.content_hash, entry.signature) -> return Err(PublicationDiagnosticError{diagnostic: publication_e1246(entry.name, entry.version)})
+    Ok([String]{})
+}
+
+// Rust resolve_and_verify_all. PublicationRegistryConfig and the protected
+// publication_ensure_index_clone are mandatory JP-PUB-REG-TRANSPORT and
+// JP-PUB-REG-TRUST-CACHE seams (#4262/#3593/#3594), not a checkout here.
+// Rust closure: DNS=Net, git=Exec, lock sleep=Time.Wait, suffix=Time/Env,
+// descriptor-relative clone installation=FS; TUF also uses FS/Env/Time.
+pub fn publication_resolve_and_verify_all(registry: PublicationRegistryConfig, name: String) -[FS, Env, Time, Time.Wait, Exec, Net]> PublicationVerifiedEntries PublicationDiagnosticError! {
+    repo :: publication_ensure_index_clone(registry)
+    all :: publication_verify_registry_package(repo, registry.name, name)
+    warnings := [String]{}
+    loop entry in all {
+        publication_verify_entry_tier(entry)
+        retained :: publication_verify_index_entry(all, entry, registry.require_signed || entry.tier == .Community, registry.name)
+        &warnings.extend(retained)
+    }
+    Ok(PublicationVerifiedEntries{entries: all, warnings: warnings})
+}
+
+// Rust resolve_and_verify: filter only AFTER all recorded entries have passed
+// TUF, tier and signature verification. A yank never invalidates an exact lock.
+pub fn publication_resolve_and_verify(registry: PublicationRegistryConfig, name: String) -[FS, Env, Time, Time.Wait, Exec, Net]> PublicationVerifiedEntries PublicationDiagnosticError! {
+    verified :: publication_resolve_and_verify_all(registry, name)
+    live := [PublicationIndexEntry]{}
+    loop entry in verified.entries {
+        if !entry.yanked -> &live.push(entry)
+    }
+    Ok(PublicationVerifiedEntries{entries: live, warnings: verified.warnings})
+}
+
+// Publication/Policy owns the canonical community refusal; verification supplies
+// the recorded gate evidence directly, with no Registry-local diagnostic alias.
+pub fn publication_verify_entry_tier(entry: PublicationIndexEntry) PublicationDiagnosticError! {
+    if entry.tier == .Community && !publication_community_open(entry.gate_status) -> return Err(PublicationDiagnosticError{diagnostic: publication_community_gate_error(entry.name, entry.version, entry.gate_status)})
+}
+
+pub fn publication_e1246(name: String, version: String) -> Diagnostic Never! {
+    diagnostic_from_registry("E1246", None,
+        "signature verification failed for `{name}` {version}: the signature doesn't match the recorded public key",
+        "this means the package was tampered with after signing, or the index entry is corrupt — the author's Ed25519 signature over the content hash no longer checks out.",
+        "do not use this version. Re-run `jet store fetch` after clearing the store entry; if the problem persists, report it — this should never happen for an untampered registry.")
+}
+
+pub fn publication_e1247(registry: String, name: String, version: String) -> Diagnostic Never! {
+    diagnostic_from_registry("E1247", None,
+        "registry `{registry}` requires signed packages (`require_signed: true`) but `{name}` {version} has no signature",
+        "this registry is configured to accept only author-signed releases; an unsigned entry can't be trusted under that policy.",
+        "use a different registry, or ask the package author to publish a signed release (`jet registry publish` auto-signs by default — they likely used `--no-sign`).")
+}
+
+pub fn publication_e1234(name: String, version: String) -> Diagnostic Never! {
+    diagnostic_from_registry("E1234", None,
+        "`{name}` {version} is already reserved in the registry index",
+        "published versions are immutable (D-VERSION1) — a version can never be overwritten or reused after a yank, so anyone who already locked it keeps building the exact same bytes.",
+        "bump the version in `{PACKAGE_FILE}` and publish again, or `jet registry yank {version}` the existing one first if it was a mistake (yanking hides it from new resolution; it does not free the version number for reuse).")
+}
+
+// RegistryTransport supplies publication_redact_registry_url to this unit.
+// Never expose git's raw detail; credentials have one canonical redactor.
+
+pub fn publication_e1235(url: String, detail: String) -> Diagnostic Never! {
+    safe_url :: publication_redact_registry_url(url)
+    diagnostic_from_registry("E1235", None,
+        "couldn't reach the registry index at `{safe_url}`",
+        "the git operation against the registry failed (network, auth, or a stale local clone)",
+        "check network access and credentials for `{safe_url}`, or set `JET_REGISTRY_URL` to a reachable mirror.")
+}

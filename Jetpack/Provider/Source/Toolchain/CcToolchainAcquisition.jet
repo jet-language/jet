@@ -5,22 +5,22 @@
 
 // The native provider's cache expectation for a toolchain ref: the verified
 // Hangar descriptor's identity, or None when there is none yet.
-pub fn provider_cc_toolchain_cache_expectation(spec: RefSpec, ctx: ProviderCtx) -[FS, Env]> CacheExpectation? Never! {
+pub fn provider_cc_toolchain_cache_expectation(verification: &StoreVerification, spec: RefSpec, ctx: ProviderCtx) -[FS, Env]> CacheExpectation? Never! {
     target :: provider_cc_toolchain_requested_target(spec) ?? return None
-    descriptor :: provider_cc_toolchain_resolve_for_target(ctx.store_dir, target, ctx.fixtures != None) ?? return None
+    descriptor :: provider_cc_toolchain_resolve_for_target(&verification, ctx.store_dir, target, ctx.fixtures != None) ?? return None
     Val(CacheExpectation{identity: descriptor.cache_identity(ctx), owned_output: Val(descriptor.root), allow_unsigned_local: true})
 }
 
 // The download plan for toolchain refs: cached when Hangar already holds a
 // verified descriptor, new for a fixture bundle, otherwise the signed Nix
 // closure's download plan.
-pub fn provider_cc_toolchain_plan_downloads(specs: [RefSpec], ctx: ProviderCtx) -[FS, Env, Net, Time, Time.Wait]> DownloadPlan ProviderError! {
+pub fn provider_cc_toolchain_plan_downloads(verification: &StoreVerification, specs: [RefSpec], ctx: ProviderCtx) -[IO, FS, Env, Net, Time, Time.Wait]> DownloadPlan ProviderError! {
     plan := DownloadPlan.empty()
     loop spec in specs {
         target :: provider_cc_toolchain_requested_target(spec) ?? {
             return Err(ProviderError.Unsupported(err.message()))
         }
-        if provider_cc_toolchain_resolve_for_target(ctx.store_dir, target, ctx.fixtures != None) == {
+        if provider_cc_toolchain_resolve_for_target(&verification, ctx.store_dir, target, ctx.fixtures != None) == {
             .Ok(_) -> {
                 &plan.add_item(PlanItem{package: spec.raw, state: PlanState.Cached, download_bytes: Val(0), disk_bytes: None})
                 next
@@ -53,7 +53,7 @@ pub fn provider_cc_toolchain_plan_downloads(specs: [RefSpec], ctx: ProviderCtx) 
         linker_path :: provider_cc_signed_output_path(resolved.linker, "linker") ?? {
             return Err(ProviderError.BadOutput(err.message()))
         }
-        nix :: store_plan_nix_downloads(roots, [String]{compiler_path, linker_path}, ctx.offline, ctx.progress) ?? {
+        nix :: store_plan_nix_downloads(&verification, roots, [String]{compiler_path, linker_path}, ctx.offline, ctx.progress) ?? {
             return Err(ProviderError.NixCache(err.message()))
         }
         &plan.add_nix(nix)
@@ -64,11 +64,11 @@ pub fn provider_cc_toolchain_plan_downloads(specs: [RefSpec], ctx: ProviderCtx) 
 
 // Realize a toolchain ref: the verified Hangar descriptor, else a fixture
 // bundle, else the signed Nix acquisition.
-pub fn provider_cc_toolchain_realize(spec: RefSpec, ctx: ProviderCtx) -[FS, Env, Net, Time, Time.Wait]> Realized ProviderError! {
+pub fn provider_cc_toolchain_realize(verification: &StoreVerification, spec: RefSpec, ctx: ProviderCtx) -[IO, FS, Env, Net, Time, Time.Wait]> Realized ProviderError! {
     target :: provider_cc_toolchain_requested_target(spec) ?? {
         return Err(ProviderError.Unsupported(err.message()))
     }
-    if provider_cc_toolchain_resolve_for_target(ctx.store_dir, target, ctx.fixtures != None) == {
+    if provider_cc_toolchain_resolve_for_target(&verification, ctx.store_dir, target, ctx.fixtures != None) == {
         .Ok(descriptor) -> return Ok(provider_cc_realized_from_descriptor(spec, ctx, descriptor, SourceState.Cached))
         .Err(error) -> {
             if !error.is_missing_descriptor(target) -> return Err(ProviderError.BadOutput(error.message()))
@@ -86,7 +86,7 @@ pub fn provider_cc_toolchain_realize(spec: RefSpec, ctx: ProviderCtx) -[FS, Env,
         }
         .None -> {}
     }
-    provider_cc_realize_nix(spec, ctx, target)
+    provider_cc_realize_nix(&verification, spec, ctx, target)
 }
 
 // No signed index: offline is E1276, otherwise the provider refuses to guess.
@@ -129,7 +129,7 @@ fn provider_cc_signed_output_path(record: NixVerifiedIndexRecord, role: String) 
     Ok(path)
 }
 
-fn provider_cc_realize_nix(spec: RefSpec, ctx: ProviderCtx, target: String) -[FS, Env, Net, Time, Time.Wait]> Realized ProviderError! {
+fn provider_cc_realize_nix(verification: &StoreVerification, spec: RefSpec, ctx: ProviderCtx, target: String) -[IO, FS, Env, Net, Time, Time.Wait]> Realized ProviderError! {
     record :: provider_cc_acquisition_record(target) ?? {
         return Err(ProviderError.Unsupported(err.message()))
     }
@@ -146,7 +146,7 @@ fn provider_cc_realize_nix(spec: RefSpec, ctx: ProviderCtx, target: String) -[FS
         NixOutputRequest{name: "compiler", store_path: compiler_path},
         NixOutputRequest{name: "linker", store_path: linker_path}
     }
-    admitted :: store_admit_nix_closure_with_progress(roots, requests, ctx.offline, None, ctx.progress) ?? {
+    admitted :: store_admit_nix_closure_with_progress(&verification, roots, requests, ctx.offline, None, ctx.progress) ?? {
         return Err(ProviderError.NixCache(err.message()))
     }
     descriptor :: provider_cc_nix_descriptor(record, resolved.compiler, resolved.linker, admitted, roots)
@@ -160,8 +160,8 @@ fn provider_cc_nix_descriptor(record: CcNixAcquisitionRecord, compiler_record: N
     if admitted.objects.len() == 0 {
         return Err(ProviderError.BadOutput("signed C/C++ toolchain admission returned an empty closure"))
     }
-    if admitted.objects.len() > @CC_TOOLCHAIN_MAX_NIX_OBJECTS {
-        return Err(ProviderError.BadOutput("signed C/C++ toolchain closure exceeds {@CC_TOOLCHAIN_MAX_NIX_OBJECTS} objects"))
+    if admitted.objects.len() > CC_TOOLCHAIN_MAX_NIX_OBJECTS {
+        return Err(ProviderError.BadOutput("signed C/C++ toolchain closure exceeds {CC_TOOLCHAIN_MAX_NIX_OBJECTS} objects"))
     }
     compiler_path :: provider_cc_signed_output_path(compiler_record, "compiler") ?? {
         return Err(ProviderError.BadOutput(err.message()))
@@ -203,12 +203,12 @@ fn provider_cc_nix_descriptor(record: CcNixAcquisitionRecord, compiler_record: N
     plan :: ProviderPlanFacts.from_facts(facts) ?? {
         return Err(ProviderError.BadOutput(err.message()))
     }
-    producer :: ProducerRecord.new(@CC_TOOLCHAIN_NIX_PRODUCER, record.immutable_source(), compiler.hangar_digest, plan, "jet-cc:nix-index-hangar-v1", "policy=official-signed-index+signed-nix-cache\nplatform=host", facts) ?? {
+    producer :: ProducerRecord.new(CC_TOOLCHAIN_NIX_PRODUCER, record.immutable_source(), compiler.hangar_digest, plan, "jet-cc:nix-index-hangar-v1", "policy=official-signed-index+signed-nix-cache\nplatform=host", facts) ?? {
         return Err(ProviderError.BadOutput(err.message()))
     }
     cxx_root :: provider_cc_checked_admitted_object(roots, compiler, "C++ compiler")
     Ok(CcToolchainDescriptor{
-        entry_id: "{@CC_TOOLCHAIN_PACKAGE}-{record.id}-{compiler.hangar_digest}",
+        entry_id: "{CC_TOOLCHAIN_PACKAGE}-{record.id}-{compiler.hangar_digest}",
         root: compiler_root,
         host: host,
         target: record.target,
@@ -278,7 +278,7 @@ fn provider_cc_checked_admitted_object(roots: HangarRoots, object: AdmittedNixOb
 
 // The sysroot store path named by the compiler's `nix-support` marker.
 fn provider_cc_read_store_path_marker(path: String) -[FS]> String ProviderError! {
-    bytes :: provider_cc_read_bounded_file(path, @CC_TOOLCHAIN_MAX_MARKER_BYTES, "C/C++ sysroot marker") ?? {
+    bytes :: provider_cc_read_bounded_file(path, CC_TOOLCHAIN_MAX_MARKER_BYTES, "C/C++ sysroot marker") ?? {
         return Err(ProviderError.BadOutput(err.message()))
     }
     text :: String.from_bytes(bytes) ?? return Err(ProviderError.BadOutput("C/C++ sysroot marker is not UTF-8"))
@@ -291,7 +291,7 @@ fn provider_cc_read_store_path_marker(path: String) -[FS]> String ProviderError!
 
 fn provider_cc_realized_from_descriptor(spec: RefSpec, ctx: ProviderCtx, descriptor: CcToolchainDescriptor, source_state: SourceState) -[FS, Env]> Realized Never! {
     Realized{
-        name: @CC_TOOLCHAIN_PACKAGE,
+        name: CC_TOOLCHAIN_PACKAGE,
         version: descriptor.version,
         reference: spec.raw,
         out: descriptor.root,
@@ -321,8 +321,8 @@ fn provider_cc_provision_fixture(spec: RefSpec, ctx: ProviderCtx, manifest: CcBu
     }
     digest :: manifest.bundle_sha256.removeprefix("sha256-").bytes()
     suffix :: pkg_bytes_text(digest, 0, if digest.len() < 12 -> digest.len() else -> 12)
-    staging :: files.join(ctx.store_dir, ".{@CC_TOOLCHAIN_PACKAGE}-{manifest.version}-{suffix}.partial")
-    output :: files.join(ctx.store_dir, "{@CC_TOOLCHAIN_PACKAGE}-{manifest.version}-{suffix}")
+    staging :: files.join(ctx.store_dir, ".{CC_TOOLCHAIN_PACKAGE}-{manifest.version}-{suffix}.partial")
+    output :: files.join(ctx.store_dir, "{CC_TOOLCHAIN_PACKAGE}-{manifest.version}-{suffix}")
     if provider_cc_node_exists(staging) || provider_cc_node_exists(output) {
         return Err(ProviderError.BadOutput("C toolchain Hangar publication path already exists: {output}"))
     }
@@ -351,12 +351,12 @@ fn provider_cc_publish_fixture(spec: RefSpec, ctx: ProviderCtx, manifest: CcBund
         return Err(CcToolchainError.Invalid("could not publish C toolchain bundle: {err}"))
     }
     descriptor := manifest.descriptor(output, output)
-    descriptor.envelope = Envelope.for_output(output, spec.raw, @CC_TOOLCHAIN_RECIPE_ID)
+    descriptor.envelope = Envelope.for_output(output, spec.raw, CC_TOOLCHAIN_RECIPE_ID)
     identity :: descriptor.cache_identity(ctx)
     producer := descriptor.producer
     producer.facts["cache.output"] = descriptor.bundle_sha256
     Ok(Realized{
-        name: @CC_TOOLCHAIN_PACKAGE,
+        name: CC_TOOLCHAIN_PACKAGE,
         version: descriptor.version,
         reference: spec.raw,
         out: output,
@@ -377,10 +377,10 @@ fn provider_cc_publish_fixture(spec: RefSpec, ctx: ProviderCtx, manifest: CcBund
 fn provider_cc_fixture_manifest(fixtures: String, target: String) -[FS, Env]> CcBundleManifest? CcToolchainError! {
     normalized :: provider_cc_normalize_target(target)
     host :: provider_cc_toolchain_host_target_triple()
-    exact :: files.join(fixtures, "{@CC_TOOLCHAIN_FIXTURE_MANIFEST}-{normalized}.json")
-    generic :: files.join(fixtures, "{@CC_TOOLCHAIN_FIXTURE_MANIFEST}.json")
+    exact :: files.join(fixtures, "{CC_TOOLCHAIN_FIXTURE_MANIFEST}-{normalized}.json")
+    generic :: files.join(fixtures, "{CC_TOOLCHAIN_FIXTURE_MANIFEST}.json")
     path :: provider_cc_fixture_manifest_path(exact, generic, normalized == host) ?? return Ok(None)
-    bytes :: provider_cc_read_bounded_file(path, @CC_TOOLCHAIN_MAX_MANIFEST_BYTES, "C toolchain manifest")
+    bytes :: provider_cc_read_bounded_file(path, CC_TOOLCHAIN_MAX_MANIFEST_BYTES, "C toolchain manifest")
     text :: String.from_bytes(bytes) ?? return Err(CcToolchainError.Invalid("C toolchain manifest is not UTF-8"))
     Ok(Val(CcBundleManifest.parse(text, files.basename(path), normalized, host)))
 }
@@ -420,7 +420,6 @@ fn provider_cc_verify_manifest_payload(root: String, manifest: CcBundleManifest)
     provider_cc_verify_file(root, manifest.cxx, manifest.cxx_sha256, "C++ compiler")
     provider_cc_verify_file(root, manifest.linker, manifest.linker_sha256, "linker")
     provider_cc_verify_tree(root, manifest.sysroot, manifest.sysroot_sha256, "sysroot")
-    Ok()
 }
 
 // Node and byte counts spent while copying a fixture bundle.
@@ -433,13 +432,12 @@ struct CcCopyBudget {
 // preserving permission bits, within the node and byte limits.
 fn provider_cc_copy_tree(source: String, destination: String) CcToolchainError! -[FS]> {
     _ :: provider_cc_copy_tree_node(source, destination, CcCopyBudget{nodes: 0, bytes: 0})
-    Ok()
 }
 
 fn provider_cc_copy_tree_node(source: String, destination: String, spent: CcCopyBudget) -[FS]> CcCopyBudget CcToolchainError! {
     budget := spent
     budget.nodes += 1
-    if budget.nodes > @CC_TOOLCHAIN_MAX_BUNDLE_NODES -> return Err(CcToolchainError.Invalid("C toolchain bundle has too many filesystem nodes"))
+    if budget.nodes > CC_TOOLCHAIN_MAX_BUNDLE_NODES -> return Err(CcToolchainError.Invalid("C toolchain bundle has too many filesystem nodes"))
     metadata :: files.stat(source) ?? {
         return Err(CcToolchainError.Invalid("read C toolchain bundle: {err}"))
     }
@@ -464,7 +462,7 @@ fn provider_cc_copy_tree_node(source: String, destination: String, spent: CcCopy
     }
     if metadata.is_file {
         budget.bytes += metadata.size
-        if budget.bytes > @CC_TOOLCHAIN_MAX_BUNDLE_BYTES -> return Err(CcToolchainError.Invalid("C toolchain bundle exceeds its size limit"))
+        if budget.bytes > CC_TOOLCHAIN_MAX_BUNDLE_BYTES -> return Err(CcToolchainError.Invalid("C toolchain bundle exceeds its size limit"))
         parent :: files.dirname(destination)
         if parent != "" {
             files.create_dir_all(parent) ?? {
@@ -491,7 +489,6 @@ fn provider_cc_ensure_real_directory(path: String) CcToolchainError! -[FS]> {
         return Err(CcToolchainError.Invalid("inspect Hangar directory: {err}"))
     }
     if metadata.is_symlink || !metadata.is_dir -> return Err(CcToolchainError.Invalid("Hangar path `{path}` is not a real directory"))
-    Ok()
 }
 
 // Best-effort removal of a failed staging tree; a symlink is removed itself,

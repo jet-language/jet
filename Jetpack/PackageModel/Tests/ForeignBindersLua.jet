@@ -17,7 +17,7 @@
 #Test("lua fixed function descriptors drive emission and reservation") {
     abi :: "jet_lua_test"
     jet :: pkg_lua_render_jet(abi, [String]{"probe"})
-    fixed :: @PKG_LUA_FIXED_FUNCTIONS
+    fixed :: PKG_LUA_FIXED_FUNCTIONS
     loop entry in fixed {
         assert(jet.contains("fn {entry.name}{entry.signature} = \"{abi}_{entry.name}\""))
         assert(pkg_lua_reserved(entry.name))
@@ -30,8 +30,8 @@
 }
 
 #Test("lua codec has null and cycle guards") {
-    assert(@PKG_LUA_JSON_CODEC.contains("jet.null"))
-    assert(@PKG_LUA_JSON_CODEC.contains("cycle"))
+    assert(PKG_LUA_JSON_CODEC.contains("jet.null"))
+    assert(PKG_LUA_JSON_CODEC.contains("cycle"))
 }
 
 #Test("lua response decoder centralizes raw status and payload handling") {

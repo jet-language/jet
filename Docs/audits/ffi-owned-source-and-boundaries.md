@@ -957,7 +957,7 @@ Four independent questions replace the misleading split between â€œsource ownedâ
 
 The audit read the current semantic mechanisms, adjacent build/runtime planes, ratified decisions, prior proposals, and the missing-language silhouette. Two independent read-only research tasks returned mechanism and adjacent-plane inventories. Their findings were checked against source; the main audit corrected an omitted C++ test location at [polyglot systems tests](../../tests/polyglot_systems.rs). A third research task timed out without a final report; its partial output is not counted as a completed review. The owner then directed this work to proceed locally without OMP.
 
-Recovery artifacts are at `/home/nate/.cache/jet-luna/ffi-20260905/`: `board-before.json`, `evidence-1.md`, `evidence-2.md`, `omp-research-brief.md`, `omp-research.log`, `owner-steering.txt`, and `build.log`. These are evidence, not a second work ledger. Tower owns remaining work. No successful FFI execution or benchmark is inferred from the research reports.
+Recovery artifacts are at `/home/nate/.cache/jet-dev/ffi-20260905/`: `board-before.json`, `evidence-1.md`, `evidence-2.md`, `omp-research-brief.md`, `omp-research.log`, `owner-steering.txt`, and `build.log`. These are evidence, not a second work ledger. Tower owns remaining work. No successful FFI execution or benchmark is inferred from the research reports.
 
 Primary sources informed the proposed design, not claims that Jet already implements it:
 

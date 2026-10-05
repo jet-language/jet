@@ -16,7 +16,7 @@ fn jet_dev_canvas_lifecycle_exit_reuse_and_cleanup() {
             "JET_SOURCE",
             "Examples/features/tooling/canvas_blueprint_demo.jet",
         )
-        .env("TMPDIR", "/home/nate/.cache/jet-test-scratch")
+        .env("TMPDIR", "/home/nate/.cache/jet-dev/scratch")
         .arg("Tools/canvas-test/native-lifecycle.mjs")
         .output()
         .expect("run native Canvas lifecycle probe");

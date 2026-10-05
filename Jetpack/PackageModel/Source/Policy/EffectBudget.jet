@@ -12,9 +12,9 @@
 // package (root or a dependency) whose module defines them, matching each
 // module's on-disk path against the loader's dependency roots.
 
-@EFFECT_ROOT_PACKAGE :: "root"
-@EFFECT_PANIC_EDGE :: "__jet_panic__"
-@EFFECT_BUILD_ENTRY :: "build"
+EFFECT_ROOT_PACKAGE :: prep { "root" }
+EFFECT_PANIC_EDGE :: prep { "__jet_panic__" }
+EFFECT_BUILD_ENTRY :: prep { "build" }
 
 // Sema's per-function effect summary (Rust `Sema::EffectSummary`): the
 // directly performed effects, the static call edges, and whether an open
@@ -113,7 +113,7 @@ fn pkg_effect_module_owner(program: EffectBudgetProgram, path: String) -> String
     loop name in names {
         if pkg_authority_path_within(path, program.dep_roots[name]) -> return name
     }
-    @EFFECT_ROOT_PACKAGE
+    EFFECT_ROOT_PACKAGE
 }
 
 // Attribute only functions reachable from the selected entry to the package
@@ -126,7 +126,7 @@ pub fn pkg_compute_package_effects(program: EffectBudgetProgram, solved: [String
     loop loaded in program.modules {
         owner :: pkg_effect_module_owner(program, loaded.path)
         aggregate := by_package.get(owner) ?? PackageEffects{name: owner, effects: [String]{}, effect_sites: [String: String]{}, panic_sites: [String]{}, boundary_span: None}
-        if aggregate.boundary_span == None && owner != @EFFECT_ROOT_PACKAGE {
+        if aggregate.boundary_span == None && owner != EFFECT_ROOT_PACKAGE {
             aggregate.boundary_span = pkg_dependency_boundary_span(program, owner)
         }
         loop function_key in loaded.function_keys {
@@ -171,8 +171,8 @@ fn pkg_effect_entry_candidates(program: EffectBudgetProgram, summaries: [String:
     entry_module :: program.modules[program.entry]
     candidates := [String]{"{entry_module.alias}::{default_entry}", default_entry}
     if default_entry == "run" && entry_module.has_build_entry {
-        &candidates.push("{entry_module.alias}::{@EFFECT_BUILD_ENTRY}")
-        &candidates.push(@EFFECT_BUILD_ENTRY)
+        &candidates.push("{entry_module.alias}::{EFFECT_BUILD_ENTRY}")
+        &candidates.push(EFFECT_BUILD_ENTRY)
     }
     loop candidate in candidates {
         if summaries.has_key(candidate) -> return [String]{candidate}
@@ -218,12 +218,12 @@ fn pkg_collect_effects_for_key(key: String, reachable: [String: Bool], solved: [
 // The deepest function on a static path from `key` that directly performs
 // (or maximally may perform) `effect`.
 fn pkg_effect_site(key: String, effect_name: String, solved: [String: [String]], summaries: [String: PackageEffectSummary], seen: &[String: Bool]) -> String Never! {
-    if seen.has_key(key) -> return key
+    if seen.has_key(key) -> return ~key
     seen[key] = true
-    summary :: summaries.get(key) ?? return key
-    if summary.maximal -> return key
+    summary :: summaries.get(key) ?? return ~key
+    if summary.maximal -> return ~key
     loop direct in summary.direct {
-        if authority_covers(direct, effect_name) -> return key
+        if authority_covers(direct, effect_name) -> return ~key
     }
     loop callee in authority_holds(summary.edges) {
         effects :: solved.get(callee) ?? next
@@ -231,7 +231,7 @@ fn pkg_effect_site(key: String, effect_name: String, solved: [String: [String]],
             return pkg_effect_site(callee, effect_name, solved, summaries, &seen)
         }
     }
-    key
+    ~key
 }
 
 // Whether any candidate effect covers `effect` (`effect_covers(candidate, effect)`).
@@ -248,9 +248,9 @@ fn pkg_panic_site(key: String, summaries: [String: PackageEffectSummary], seen: 
     if seen.has_key(key) -> return None
     seen[key] = true
     summary :: summaries.get(key) ?? return None
-    if summary.maximal || summary.edges.contains(@EFFECT_PANIC_EDGE) -> return Val(key)
+    if summary.maximal || summary.edges.contains(EFFECT_PANIC_EDGE) -> return Val(key)
     loop direct in summary.direct {
-        if authority_root(direct) == @AUTHORITY_PANIC_ROOT -> return Val(key)
+        if authority_root(direct) == AUTHORITY_PANIC_ROOT -> return Val(key)
     }
     loop callee in authority_holds(summary.edges) {
         site :: pkg_panic_site(callee, summaries, &seen) ?? next
@@ -269,7 +269,7 @@ pub fn pkg_effect_summary_line(entries: [PackageEffects]) -> String Never! {
     if all.len() == 0 -> return "effects: none"
     dependency_count := 0
     loop entry in entries {
-        if entry.name != @EFFECT_ROOT_PACKAGE && entry.effects.len() > 0 -> dependency_count += 1
+        if entry.name != EFFECT_ROOT_PACKAGE && entry.effects.len() > 0 -> dependency_count += 1
     }
     if dependency_count == 0 -> return "effects: {all.join(", ")}"
     suffix :: if dependency_count == 1 -> "y" else -> "ies"
@@ -311,8 +311,8 @@ pub fn pkg_effect_enforce(entries: [PackageEffects], manifest: PackageFacts) -> 
         granted :: pkg_effect_grant_for(manifest, package.name)
         loop effect_name in package.effects {
             if authority_root(effect_name) == "Mem" -> next
-            is_panic :: authority_root(effect_name) == @AUTHORITY_PANIC_ROOT
-            if !is_panic && granted != None && authority_answer(granted ?? empty, empty, effect_name) == AuthorityVerdict.Allowed -> next
+            is_panic :: authority_root(effect_name) == AUTHORITY_PANIC_ROOT
+            if !is_panic && granted != None && authority_answer(granted, empty, effect_name) == AuthorityVerdict.Allowed -> next
             outside_allow :: if allow == {
                 .Val(rights) -> !is_panic && authority_answer(rights, empty, effect_name) != AuthorityVerdict.Allowed
                 .None -> false
@@ -346,7 +346,7 @@ pub fn pkg_update_lock_provenance(lock: &LockFile, entries: [PackageEffects], ma
     loop index in 0..<lock.packages.len() {
         package := lock.packages[index]
         is_root :: package.source == LockSource.Root
-        key :: if is_root -> @EFFECT_ROOT_PACKAGE else -> package.name
+        key :: if is_root -> EFFECT_ROOT_PACKAGE else -> package.name
         package.required_effects = pkg_effect_provenance_for(entries, key)
         package.effects = package.required_effects
         granted := [String]{}
@@ -359,7 +359,7 @@ pub fn pkg_update_lock_provenance(lock: &LockFile, entries: [PackageEffects], ma
         package.granted_effects = granted
         package.effect_grants = granted
         package.denied_effects = manifest.authority.holds.deny ?? [String]{}
-        package.effect_authority = Val(if is_root || granted.len() == 0 -> @EFFECT_AUTHORITY_PACKAGE_HOLDS else -> @EFFECT_AUTHORITY_PACKAGE_GRANTS)
+        package.effect_authority = Val(if is_root || granted.len() == 0 -> EFFECT_AUTHORITY_PACKAGE_HOLDS else -> EFFECT_AUTHORITY_PACKAGE_GRANTS)
         lock.packages[index] = package
     }
 }
@@ -374,7 +374,7 @@ fn pkg_e1220_at(dependency: String, effect_name: String, site: String?) -> Diagn
         .Val(function) -> " function `{function}`"
         .None -> ""
     }
-    fix :: if dependency == @EFFECT_ROOT_PACKAGE -> "add `{effect_name}` to `authority.holds.allow` or remove the code that reaches it" else -> "add `{effect_name}` to `authority.holds.allow`, grant it to `{dependency}` in `authority.grants`, or drop the dependency"
+    fix :: if dependency == EFFECT_ROOT_PACKAGE -> "add `{effect_name}` to `authority.holds.allow` or remove the code that reaches it" else -> "add `{effect_name}` to `authority.holds.allow`, grant it to `{dependency}` in `authority.grants`, or drop the dependency"
     diagnostic_from_registry("E1220", None,
         "`{dependency}`{location} uses the `{effect_name}` effect, which this package's budget doesn't allow",
         "an `authority.holds` budget fails the build when package code or any dependency reaches an effect you didn't list — supply-chain review as a compile error",

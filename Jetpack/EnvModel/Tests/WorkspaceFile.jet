@@ -8,7 +8,7 @@ fn envmodel_test_workspace_dir(label: String) -[FS]> String {
 fn envmodel_test_write_package(root: String, relative: String, text: String) -[FS]> {
     directory :: if relative == "" -> root else -> files.join(root, relative)
     files.create_dir_all(directory) ?? panic("package directory")
-    files.write(files.join(directory, @PACKAGE_FILE), text) ?? panic("package manifest")
+    files.write(files.join(directory, PACKAGE_FILE), text) ?? panic("package manifest")
 }
 
 fn envmodel_test_eval(src: String) -[FS, Env]> WorkspacePlan {
@@ -31,15 +31,15 @@ fn envmodel_test_eval_error(src: String) -[FS, Env]> Diagnostic {
 }
 
 // The diagnostic of a present-but-failing `load`.
-fn envmodel_test_load_error(dir: String) -[FS]> Diagnostic {
-    if envmodel_workspace_load(dir) == {
+fn envmodel_test_load_error(cache: &WorkspaceDeclarationCache, dir: String) -[FS]> Diagnostic {
+    if envmodel_workspace_load(&cache, dir) == {
         .Ok(_) -> panic("the workspace source must be surfaced as an error")
         .Err(error) -> error.diagnostic
     }
 }
 
-fn envmodel_test_load_is_none(dir: String) -[FS]> Bool {
-    loaded :: envmodel_workspace_load(dir) ?? panic("load must not fail")
+fn envmodel_test_load_is_none(cache: &WorkspaceDeclarationCache, dir: String) -[FS]> Bool {
+    loaded :: envmodel_workspace_load(&cache, dir) ?? panic("load must not fail")
     loaded == None
 }
 
@@ -117,7 +117,7 @@ fn envmodel_test_member_paths(plan: WorkspacePlan) -> [String] {
     envmodel_test_write_package(tmp, "packages/app", "name: \"app\"\nmembers: [\"./child\"]\n")
     error :: envmodel_test_eval_error_in("module workspace {{ members: [\"./packages/app\"] }}\n", tmp)
     assert_eq(error.code, "E1323")
-    assert(error.what.contains(files.join(files.join(tmp, "packages/app"), @PACKAGE_FILE)))
+    assert(error.what.contains(files.join(files.join(tmp, "packages/app"), PACKAGE_FILE)))
     assert(error.span != None)
     files.remove_all(tmp) ?? panic("scratch cleanup")
 }
@@ -149,7 +149,7 @@ fn envmodel_test_member_paths(plan: WorkspacePlan) -> [String] {
     tmp :: envmodel_test_workspace_dir("comptime-list")
     envmodel_test_write_package(tmp, "packages/hello", "name: \"hello\"\n")
     envmodel_test_write_package(tmp, "packages/ranker", "name: \"ranker\"\n")
-    plan :: envmodel_test_eval_in("@PKGS :: [\"./packages/hello\", \"./packages/ranker\"]\nmodule workspace {{\n    members: PKGS\n}}\n", tmp)
+    plan :: envmodel_test_eval_in("PKGS :: prep {{ [\"./packages/hello\", \"./packages/ranker\"] }}\nmodule workspace {{\n    members: PKGS\n}}\n", tmp)
     assert_eq(envmodel_test_member_names(plan), [String]{"hello", "ranker"})
     files.remove_all(tmp) ?? panic("scratch cleanup")
 }
@@ -159,7 +159,7 @@ fn envmodel_test_member_paths(plan: WorkspacePlan) -> [String] {
     tmp :: envmodel_test_workspace_dir("comptime-strings")
     envmodel_test_write_package(tmp, "workspace-packages/a", "name: \"a\"\n")
     envmodel_test_write_package(tmp, "workspace-packages/b", "name: \"b\"\n")
-    plan :: envmodel_test_eval_in("@BASE :: \"./workspace-packages\"\nmodule workspace {{\n    members: [\"{{BASE}}/a\", \"{{BASE}}/b\"]\n}}\n", tmp)
+    plan :: envmodel_test_eval_in("BASE :: prep {{ \"./workspace-packages\" }}\nmodule workspace {{\n    members: [\"{{BASE}}/a\", \"{{BASE}}/b\"]\n}}\n", tmp)
     assert_eq(envmodel_test_member_paths(plan), [String]{"./workspace-packages/a", "./workspace-packages/b"})
     files.remove_all(tmp) ?? panic("scratch cleanup")
 }
@@ -220,24 +220,25 @@ fn envmodel_test_member_paths(plan: WorkspacePlan) -> [String] {
     tmp :: envmodel_test_workspace_dir("workspace-find-bad-metadata")
     package :: files.join(tmp, "packages/app")
     files.create_dir_all(package) ?? panic("package directory")
-    files.symlink("missing-package.jet", files.join(package, @PACKAGE_FILE)) ?? panic("dangling manifest symlink")
+    files.symlink("missing-package.jet", files.join(package, PACKAGE_FILE)) ?? panic("dangling manifest symlink")
     error :: envmodel_test_eval_error_in("module workspace {{ members: find(\"./packages\") }}\n", tmp)
     assert_eq(error.code, "E1334")
     files.remove_all(tmp) ?? panic("scratch cleanup")
 }
 
 #Test("workspace metadata must be regular and not symlinked") {
+    cache := WorkspaceDeclarationCache.new()
     if sys.family() == "windows" -> return
     symlinked :: envmodel_test_workspace_dir("workspace-source-symlink")
     target :: files.join(symlinked, "workspace-source.txt")
     files.write(target, "module workspace {{ members: [] }}\n") ?? panic("workspace source")
-    files.symlink(target, files.join(symlinked, @WORKSPACE_FILE)) ?? panic("workspace symlink")
-    assert_eq(envmodel_test_load_error(symlinked).code, "E1334")
+    files.symlink(target, files.join(symlinked, WORKSPACE_FILE)) ?? panic("workspace symlink")
+    assert_eq(envmodel_test_load_error(&cache, symlinked).code, "E1334")
     files.remove_all(symlinked) ?? panic("scratch cleanup")
 
     nonregular :: envmodel_test_workspace_dir("workspace-source-directory")
-    files.create_dir_all(files.join(nonregular, @WORKSPACE_FILE)) ?? panic("workspace directory")
-    assert_eq(envmodel_test_load_error(nonregular).code, "E1239")
+    files.create_dir_all(files.join(nonregular, WORKSPACE_FILE)) ?? panic("workspace directory")
+    assert_eq(envmodel_test_load_error(&cache, nonregular).code, "E1239")
     files.remove_all(nonregular) ?? panic("scratch cleanup")
 }
 
@@ -246,7 +247,7 @@ fn envmodel_test_member_paths(plan: WorkspacePlan) -> [String] {
     dir :: envmodel_test_workspace_dir("ws-example")
     envmodel_test_write_package(dir, "packages/hello", "name: \"hello\"\n")
     envmodel_test_write_package(dir, "packages/ranker", "name: \"ranker\"\n")
-    workspace_path :: files.join(dir, @WORKSPACE_FILE)
+    workspace_path :: files.join(dir, WORKSPACE_FILE)
     files.write(workspace_path, "module workspace {{\n    members: find(\"./packages\")\n}}\n") ?? panic("workspace source")
     src :: files.read(workspace_path) ?? panic("workspace source readable")
     plan :: envmodel_workspace_evaluate(src, dir) ?? panic("workspace fixture should evaluate clean")
@@ -259,18 +260,20 @@ fn envmodel_test_member_paths(plan: WorkspacePlan) -> [String] {
 // authority, while only `workspace.jet` provides the member index.
 
 #Test("workspace module discovered in arbitrary filename") {
+    cache := WorkspaceDeclarationCache.new()
     dir :: envmodel_test_workspace_dir("ws-arbitrary")
     files.write(files.join(dir, "repo-index.jet"), "module workspace {{ policy: {{ deny: #(Exec) }} }}\n") ?? panic("authority source")
-    assert(envmodel_test_load_is_none(dir), "authority metadata is not the index")
+    assert(envmodel_test_load_is_none(&cache, dir), "authority metadata is not the index")
     // An arbitrary authority cannot repair a malformed reserved index.
-    files.write(files.join(dir, @WORKSPACE_FILE), "module env {{}}\n") ?? panic("malformed index")
-    assert_eq(envmodel_test_load_error(dir).code, "E0995")
+    files.write(files.join(dir, WORKSPACE_FILE), "module env {{}}\n") ?? panic("malformed index")
+    assert_eq(envmodel_test_load_error(&cache, dir).code, "E0995")
 }
 
 #Test("malformed arbitrary workspace declaration is not absent") {
+    cache := WorkspaceDeclarationCache.new()
     dir :: envmodel_test_workspace_dir("ws-arbitrary-malformed")
     files.write(files.join(dir, "repo-index.jet"), "module workspace {{ members: [ }}\n") ?? panic("malformed declaration")
-    failed :: if envmodel_workspace_load(dir) == {
+    failed :: if envmodel_workspace_load(&cache, dir) == {
         .Ok(_) -> false
         .Err(_) -> true
     }
@@ -278,34 +281,38 @@ fn envmodel_test_member_paths(plan: WorkspacePlan) -> [String] {
 }
 
 #Test("workspace module discovered in pkg jet") {
+    cache := WorkspaceDeclarationCache.new()
     dir :: envmodel_test_workspace_dir("ws-in-pkg")
-    files.write(files.join(dir, @PAYLOAD_FILE), "module workspace {{ policy: {{ deny: #(FS) }} }}\n") ?? panic("payload source")
-    assert(envmodel_test_load_is_none(dir), "authority metadata is not the index")
+    files.write(files.join(dir, PAYLOAD_FILE), "module workspace {{ policy: {{ deny: #(FS) }} }}\n") ?? panic("payload source")
+    assert(envmodel_test_load_is_none(&cache, dir), "authority metadata is not the index")
 }
 
 #Test("workspace jet and discovered file are e1239") {
+    cache := WorkspaceDeclarationCache.new()
     dir :: envmodel_test_workspace_dir("ws-canonical-wins")
     envmodel_test_write_package(dir, "packages/hello", "name: \"hello\"\n")
-    files.write(files.join(dir, @WORKSPACE_FILE), "module workspace {{ members: find(\"./packages\") }}\n") ?? panic("workspace source")
+    files.write(files.join(dir, WORKSPACE_FILE), "module workspace {{ members: find(\"./packages\") }}\n") ?? panic("workspace source")
     // A canonical filename never shadows another declaration.
     files.write(files.join(dir, "other.jet"), "module workspace {{ policy: {{ deny: #(FS) }} }}\n") ?? panic("other declaration")
-    diagnostic :: envmodel_test_load_error(dir)
+    diagnostic :: envmodel_test_load_error(&cache, dir)
     assert_eq(diagnostic.code, "E1239")
-    assert(diagnostic.what.contains(@WORKSPACE_FILE))
+    assert(diagnostic.what.contains(WORKSPACE_FILE))
     assert(diagnostic.what.contains("other.jet"))
 }
 
 #Test("two discovered workspace declarations are e1239") {
+    cache := WorkspaceDeclarationCache.new()
     dir :: envmodel_test_workspace_dir("ws-ambiguous")
     files.write(files.join(dir, "a.jet"), "module workspace {{ policy: {{ deny: #(FS) }} }}\n") ?? panic("first declaration")
     files.write(files.join(dir, "b.jet"), "module workspace {{ policy: {{ deny: #(FS) }} }}\n") ?? panic("second declaration")
-    diagnostic :: envmodel_test_load_error(dir)
+    diagnostic :: envmodel_test_load_error(&cache, dir)
     assert_eq(diagnostic.code, "E1239")
     assert(diagnostic.what.contains("a.jet") && diagnostic.what.contains("b.jet"))
 }
 
 #Test("no workspace anywhere is none") {
+    cache := WorkspaceDeclarationCache.new()
     dir :: envmodel_test_workspace_dir("ws-none")
     files.write(files.join(dir, "env.jet"), "module env.dev {{ }}\n") ?? panic("env source")
-    assert(envmodel_test_load_is_none(dir))
+    assert(envmodel_test_load_is_none(&cache, dir))
 }

@@ -10,20 +10,20 @@ pub enum TrustVerb {
 
     fn parse(text: String) -> TrustVerb? Never! {
         if text == {
-            @TRUST_VERB_GRANT -> Val(TrustVerb.Grant)
-            @TRUST_VERB_LIST -> Val(TrustVerb.List)
-            @TRUST_VERB_EXPLAIN -> Val(TrustVerb.Explain)
-            @TRUST_VERB_REVOKE -> Val(TrustVerb.Revoke)
+            TRUST_VERB_GRANT -> Val(TrustVerb.Grant)
+            TRUST_VERB_LIST -> Val(TrustVerb.List)
+            TRUST_VERB_EXPLAIN -> Val(TrustVerb.Explain)
+            TRUST_VERB_REVOKE -> Val(TrustVerb.Revoke)
             else -> None
         }
     }
 }
 
-pub fn cli_cmd_trust(theme: Theme, parsed: CliParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+pub fn cli_cmd_trust(theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     store :: trust_store_path()
     verb :: TrustVerb.parse(parsed.positional.get(0) ?? "") ?? {
-        theme.error("`jet trust` needs a verb", "the trust verbs are: {@TRUST_VERBS.join(", ")}.", "try `list`, `explain`, `grant`, or `revoke`.")
-        return @EXIT_USAGE
+        theme.error("`jet trust` needs a verb", "the trust verbs are: {TRUST_VERBS.join(", ")}.", "try `list`, `explain`, `grant`, or `revoke`.")
+        return EXIT_USAGE
     }
     if verb == {
         .Grant -> cli_trust_grant(theme, parsed, store)
@@ -36,30 +36,30 @@ pub fn cli_cmd_trust(theme: Theme, parsed: CliParsed) -[IO, FS, Env, Exec, Net, 
                     loop record in records -> cli_print_trust_record(theme, record)
                 }
             }
-            @EXIT_OK
+            EXIT_OK
         }
         .Explain -> cli_trust_explain(theme, parsed, store)
         .Revoke -> {
             selector :: parsed.positional.get(1) ?? {
                 theme.error("`jet trust revoke` needs a grant selector", "revocation is exact: pass the subject, grant key, hash, pattern, or raw line shown by `jet trust list`.", "try `jet trust revoke service:postgres.service`.")
-                return @EXIT_USAGE
+                return EXIT_USAGE
             }
             removed :: trust_revoke(store, selector)
             theme.status(if removed -> "revoked: {selector}" else -> "not found: {selector}")
-            @EXIT_OK
+            EXIT_OK
         }
     }
 }
 
-fn cli_trust_grant(theme: Theme, parsed: CliParsed, store: String) -[IO, FS]> Int Never! {
+fn cli_trust_grant(theme: Theme, parsed: CLIParsed, store: String) -[IO, FS, Time.Wait]> Int Never! {
     selector :: parsed.positional.get(1) ?? {
         theme.error("`jet trust grant` needs a grant selector", "a grant selector names one package, build, env, service, image, fleet, or jetos authority.", "try `jet trust grant service:postgres --scope repo`.")
-        return @EXIT_USAGE
+        return EXIT_USAGE
     }
-    scope :: parsed.flags.trust_scope ?? @TRUST_SCOPE_USER
+    scope :: parsed.flags.trust_scope ?? TRUST_SCOPE_USER
     grant :: trust_parse_grant_selector(selector, scope) ?? {
         theme.error("couldn't parse trust grant", err.message(), "use `--scope user` or `--scope repo`.")
-        return @EXIT_USAGE
+        return EXIT_USAGE
     }
     added :: trust_add_grant(store, grant)
     if added {
@@ -67,10 +67,10 @@ fn cli_trust_grant(theme: Theme, parsed: CliParsed, store: String) -[IO, FS]> In
     } else {
         theme.status("already trusted {grant.authority} `{grant.subject}` ({grant.scope})")
     }
-    @EXIT_OK
+    EXIT_OK
 }
 
-fn cli_trust_explain(theme: Theme, parsed: CliParsed, store: String) -[IO, FS]> Int Never! {
+fn cli_trust_explain(theme: Theme, parsed: CLIParsed, store: String) -[IO, FS, Time.Wait]> Int Never! {
     selected :: parsed.positional.get(1)
     matches := [TrustRecord]{}
     loop record in trust_list_records(store) {
@@ -81,11 +81,11 @@ fn cli_trust_explain(theme: Theme, parsed: CliParsed, store: String) -[IO, FS]> 
     }
     if parsed.flags.json {
         print(trust_records_json(matches))
-        return @EXIT_OK
+        return EXIT_OK
     }
     if matches.len() == 0 {
         theme.status("no matching trust grants.")
-        return @EXIT_OK
+        return EXIT_OK
     }
     loop record in matches {
         cli_print_trust_record(theme, record)
@@ -96,10 +96,10 @@ fn cli_trust_explain(theme: Theme, parsed: CliParsed, store: String) -[IO, FS]> 
             .Raw(line) -> theme.detail("legacy/raw grant; revoke with `jet trust revoke {line}`")
         }
     }
-    @EXIT_OK
+    EXIT_OK
 }
 
-fn cli_print_trust_record(theme: Theme, record: TrustRecord) Never! -[IO]> {
+fn cli_print_trust_record(theme: Theme, record: TrustRecord) Never! -[IO, Time.Wait]> {
     if record == {
         .Hash(hash) -> theme.detail("hash     {hash}")
         .Pattern(pattern) -> theme.detail("pattern  {pattern}")

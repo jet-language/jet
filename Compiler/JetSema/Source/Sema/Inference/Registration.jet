@@ -26,9 +26,12 @@ pub fn sema_infer_registered_function(function: SemaRegistrationFunction, graph:
     }
 }
 
-pub fn sema_infer_registered_nominal(nominal: SemaRegistrationNominal, graph: SemaRegistrationGraph?, caller_module_identity: String, caller_package_identity: String, lexical_generic_params: [TGenericParam], actual: Type, explicit_type_args: [Type], expected: Type?, span: Span, diagnostics: &[Diagnostic]) -> SemaInferenceResult? {
+// `nominal_ty` is the nominal's type as the caller spells it (its declared
+// type, or that type resolved in the owner's module), so a caller never copies
+// the whole row (methods and their bodies) to swap one field.
+pub fn sema_infer_registered_nominal(nominal: SemaRegistrationNominal, nominal_ty: Type, graph: SemaRegistrationGraph?, caller_module_identity: String, caller_package_identity: String, lexical_generic_params: [TGenericParam], actual: Type, explicit_type_args: [Type], expected: Type?, span: Span, diagnostics: &[Diagnostic]) -> SemaInferenceResult? {
     context := sema_infer_context_for_registration(caller_module_identity, caller_package_identity, nominal.generic_params, lexical_generic_params, expected)
-    sema_infer_nominal(graph, &context, nominal.ty, actual, explicit_type_args, span, &diagnostics)
+    sema_infer_nominal(graph, &context, nominal_ty, actual, explicit_type_args, span, &diagnostics)
 }
 
 pub fn sema_infer_registered_method(function: SemaRegistrationFunction, graph: SemaRegistrationGraph?, caller_module_identity: String, caller_package_identity: String, lexical_generic_params: [TGenericParam], receiver: Type?, args: [Type], explicit_type_args: [Type], expected: Type?, span: Span, diagnostics: &[Diagnostic]) -> SemaInferenceResult? {

@@ -5,7 +5,7 @@ via GNU time -v of the top process plus a /proc tree sampler), binary size
 Each toolchain: one cold build (its caches cleared where it has one) and one warm."""
 import os, subprocess, time, json, shutil, threading
 
-D = os.environ.get("BENCH_DIR", os.path.expanduser("~/.cache/jet-test-scratch/bench-hello"))
+D = os.environ.get("BENCH_DIR", os.path.expanduser("~/.cache/jet-dev/scratch/bench-hello"))
 TIME = "/nix/store/n0wrh3vjfwcqfyswwai0zcxvkpibq34v-time-1.10/bin/time"
 GCC = "/nix/store/l5qkpzsr4gxvksh45b3nhxbkyr5cviar-gcc-wrapper-15.3.0/bin/gcc"
 CLANG = "/nix/store/mw4gasdvwgscgpxpzihjgchfhs3hhqhn-clang-wrapper-21.1.8/bin/clang"
@@ -13,7 +13,7 @@ ZIG = "/nix/store/kbb1kfzlvqiwbcpw4sd2j3v63vqab3vg-zig-0.16.0/bin/zig"
 GO = "/nix/store/i77g9dmcd399rmxk8688qfr4g2wzgk37-go-1.26.7/bin/go"
 RUSTC = "/nix/store/cqlx62f919g8xf2f39bmykslpjdh9z0j-rustc-1.97.1/bin/rustc"
 ODIN = "/nix/store/73b33yxdvy3fpv2x0l1l17sqa58amsxx-odin-dev-2026-05/bin/odin"
-JET = os.environ.get("JET", os.path.expanduser("~/.cache/jet-test-scratch/jet-release-night12/jet"))
+JET = os.environ.get("JET", os.path.expanduser("~/.cache/jet-dev/scratch/jet-release-night12/jet"))
 STRIP = shutil.which("strip") or "/nix/store/l5qkpzsr4gxvksh45b3nhxbkyr5cviar-gcc-wrapper-15.3.0/bin/strip"
 
 SRC = {

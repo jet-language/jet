@@ -6,7 +6,7 @@ Closer07, 2026-09-29. Binary: `jet-debug-snapshot14` (sha256 prefix `00b1e35e25e
 Can a repeated F32 op chain on a device-resident tensor report real allocation/upload/readback counts, bytes and synchronization through the public receipts? Or can placement labels fabricate residency?
 
 ## Method
-Probe `~/.cache/jet-test-scratch/Closer07/compute/residency_probe.jet`:
+Probe `~/.cache/jet-dev/scratch/Closer07/compute/residency_probe.jet`:
 1. Build an F32 tensor with `matmul_f32_tile(matrix(2,2,1.0), eye(2))` and print `placement` / `transfer_show`.
 2. Run a 16× `compute.add(x, x)` chain on CPU and print the receipts.
 3. `on_device(…, device_vulkan())` and `device_cuda()`. If accepted, repeat the chain and `transfer` back to CPU.

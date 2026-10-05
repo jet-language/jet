@@ -60,7 +60,7 @@ pub fn pkg_binder_debug_quote(value: String) -> String Never! {
 // The detail after the last `separator`, or the whole line (`rsplit_once`).
 pub fn pkg_binder_after_last(line: String, separator: String) -> String Never! {
     at :: pkg_binder_rfind(line, separator)
-    if at < 0 -> return line
+    if at < 0 -> return ~line
     pkg_binder_tail(line, at + separator.bytes().len())
 }
 
@@ -71,16 +71,16 @@ pub fn pkg_binder_host_is_unix() -[Env]> Bool {
 }
 
 // The host operating system in the binder's shared-library vocabulary.
-pub enum BinderHostOs {
+pub enum BinderHostOS {
     Linux
     MacOS
     Windows
 
-    fn current() -[Env]> BinderHostOs {
+    fn current() -[Env]> BinderHostOS Never! {
         if pkg_ascii_lower(sys.name()) == {
-            "macos" | "darwin" | "osx" -> BinderHostOs.MacOS
-            "windows" -> BinderHostOs.Windows
-            else -> BinderHostOs.Linux
+            "macos" | "darwin" | "osx" -> BinderHostOS.MacOS
+            "windows" -> BinderHostOS.Windows
+            else -> BinderHostOS.Linux
         }
     }
 
@@ -121,8 +121,8 @@ pub fn pkg_binder_descriptor_for(language: ForeignLanguage, label: String) -> Bi
 pub fn pkg_binder_append_artifact_boundary(provenance: &String, language: ForeignLanguage, label: String, lib: String, source: String, archive: String, toolchain: String) ForeignBindError! -[FS, Env, Exec, Time.Wait]> {
     descriptor :: pkg_binder_descriptor_for(language, label)
     if pkg_bridge_append_boundary_for_artifact(&provenance, descriptor, lib, source, archive, toolchain) == {
-        .Ok(_) -> Ok()
-        .Err(error) -> Err(pkg_binder_bridge_error(error))
+        .Ok(_) -> {}
+        .Err(error) -> return Err(pkg_binder_bridge_error(error))
     }
 }
 
@@ -157,7 +157,7 @@ pub fn pkg_binder_launder_last_detail(bytes: [U8]) -> String Never! {
         trimmed :: line.trim()
         if trimmed != "" -> return pkg_binder_take_chars(pkg_binder_after_last(trimmed, ": "), 160)
     }
-    @BINDER_TOOL_FAILURE_DETAIL
+    BINDER_TOOL_FAILURE_DETAIL
 }
 
 // Run one build tool; a failing status is `ToolFailed` with the laundered

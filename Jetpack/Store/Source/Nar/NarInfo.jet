@@ -4,7 +4,7 @@
 // (D-CORE-ED25519VERIFY1). Digest texts accept `sha256:<hex>`,
 // `sha256:<nix32>`, and SRI `sha256-<base64>`.
 
-@STORE_NIX_BASE32_ALPHABET :: "0123456789abcdfghijklmnpqrsvwxyz"
+STORE_NIX_BASE32_ALPHABET :: prep { "0123456789abcdfghijklmnpqrsvwxyz" }
 
 pub struct NarSignature {
     pub key_id: String
@@ -36,7 +36,7 @@ pub struct NarInfo {
         store_nar_validate_relative_url(self.url)
         if self.compression != "none" -> return Err(store_nar_invalid("only uncompressed NARs are supported by this cache"))
         if store_decode_sha256(self.nar_hash) == None -> return Err(store_nar_invalid("narinfo hash is not a SHA-256 digest"))
-        if self.file_size > @STORE_MAX_NAR_BYTES || self.nar_size > @STORE_MAX_NAR_BYTES -> return Err(store_nar_invalid("narinfo size exceeds the NAR limit"))
+        if self.file_size > STORE_MAX_NAR_BYTES || self.nar_size > STORE_MAX_NAR_BYTES -> return Err(store_nar_invalid("narinfo size exceeds the NAR limit"))
         if self.file_size != self.nar_size -> return Err(store_nar_invalid("uncompressed narinfo file and NAR sizes disagree"))
         seen := [String]{}
         loop reference in self.references {
@@ -58,7 +58,7 @@ pub struct NarInfo {
         }
         keys := [String]{}
         loop signature in self.signatures {
-            if signature.key_id == "" || signature.algorithm == "" || signature.sig_hex == "" || signature.algorithm != @TRUST_ALG_HMAC_SHA256 || signature.sig_hex.bytes().len() != 64 || !store_nar_is_any_hex(signature.sig_hex) || keys.contains(signature.key_id) {
+            if signature.key_id == "" || signature.algorithm == "" || signature.sig_hex == "" || signature.algorithm != TRUST_ALG_HMAC_SHA256 || signature.sig_hex.bytes().len() != 64 || !store_nar_is_any_hex(signature.sig_hex) || keys.contains(signature.key_id) {
                 return Err(store_nar_invalid("narinfo has an invalid or duplicate signature"))
             }
             &keys.push(signature.key_id)
@@ -96,7 +96,7 @@ pub struct NarInfo {
     }
 
     fn parse(text: String) -> NarInfo StoreError! {
-        if text.bytes().len() > @STORE_NAR_MAX_INFO_BYTES -> return Err(store_nar_invalid("narinfo is too large"))
+        if text.bytes().len() > STORE_NAR_MAX_INFO_BYTES -> return Err(store_nar_invalid("narinfo is too large"))
         if !text.ends_with("\n") -> return Err(store_nar_invalid("narinfo is missing its final newline"))
         info := NarInfo{store_path: "", url: "", compression: "", file_size: 0, nar_size: 0, nar_hash: "", references: [String]{}, deriver: None, ca: None, signatures: [NarSignature]{}}
         file_hash := ""
@@ -145,7 +145,7 @@ pub struct NarInfo {
         self.validate()
         expected :: key.sign(self.unsigned_text().bytes())
         loop signature in self.signatures {
-            if signature.key_id == expected.key_id && signature.algorithm == expected.algorithm && crypto.constant_time_equal_bytes(signature.sig_hex.bytes(), expected.sig_hex.bytes()) -> return Ok()
+            if signature.key_id == expected.key_id && signature.algorithm == expected.algorithm && crypto.constant_time_equal_bytes(signature.sig_hex.bytes(), expected.sig_hex.bytes()) -> return
         }
         Err(store_nar_invalid("narinfo signature verification failed"))
     }
@@ -215,7 +215,7 @@ pub struct NixNarInfo {
     pub signatures: [NixNarInfoSignature]
 
     fn parse(text: String) -> NixNarInfo StoreError! {
-        if text.bytes().len() > @STORE_NAR_MAX_INFO_BYTES -> return Err(store_nar_invalid("narinfo is too large"))
+        if text.bytes().len() > STORE_NAR_MAX_INFO_BYTES -> return Err(store_nar_invalid("narinfo is too large"))
         if !text.ends_with("\n") -> return Err(store_nar_invalid("narinfo is missing its final newline"))
         fields := [String: String]{}
         signatures := [NixNarInfoSignature]{}
@@ -324,7 +324,7 @@ pub struct NixNarInfo {
 }
 
 fn store_nar_ca_is_valid(ca: String) -> Bool Never! {
-    if ca == "" || ca.bytes().len() > @STORE_NAR_MAX_NAME_BYTES * 4 -> return false
+    if ca == "" || ca.bytes().len() > STORE_NAR_MAX_NAME_BYTES * 4 -> return false
     !store_nar_has_control(ca)
 }
 
@@ -402,7 +402,7 @@ fn store_nar_validate_relative_url(value: String) StoreError! {
 
 fn store_nar_validate_store_reference(value: String) StoreError! {
     if value.starts_with("/") -> return store_nar_validate_store_path(value)
-    if value == "" || value == "." || value == ".." || value == "unknown-deriver" || value.bytes().len() > @STORE_NAR_MAX_NAME_BYTES * 4 || value.contains("/") || value.contains("\\") || store_nar_has_control(value) {
+    if value == "" || value == "." || value == ".." || value == "unknown-deriver" || value.bytes().len() > STORE_NAR_MAX_NAME_BYTES * 4 || value.contains("/") || value.contains("\\") || store_nar_has_control(value) {
         return Err(store_nar_invalid("narinfo has an unsafe store reference"))
     }
 }
@@ -417,13 +417,13 @@ fn store_nar_validate_nix_field_name(value: String) StoreError! {
 }
 
 fn store_nar_validate_nix_unknown_field(value: String) StoreError! {
-    if value.bytes().len() > @STORE_NAR_MAX_NAME_BYTES * 4 || store_nar_has_control(value) {
+    if value.bytes().len() > STORE_NAR_MAX_NAME_BYTES * 4 || store_nar_has_control(value) {
         return Err(store_nar_invalid("narinfo unknown field is invalid"))
     }
 }
 
 fn store_nar_validate_nix_key_id(value: String) StoreError! {
-    if value == "" || value.bytes().len() > @STORE_NAR_MAX_NAME_BYTES || store_nar_has_control(value) || value.contains(":") {
+    if value == "" || value.bytes().len() > STORE_NAR_MAX_NAME_BYTES || store_nar_has_control(value) || value.contains(":") {
         return Err(store_nar_invalid("Nix key name is invalid"))
     }
 }
@@ -479,7 +479,7 @@ fn store_nar_validate_nix_store_basename(value: String) StoreError! {
     pair :: value.split_once("-") ?? return Err(store_nar_invalid("Nix store reference has no name separator"))
     valid := pair.before.bytes().len() == 32 && pair.after != ""
     loop byte in pair.before.bytes() {
-        if !@STORE_NIX_BASE32_ALPHABET.bytes().contains(byte) -> valid = false
+        if !STORE_NIX_BASE32_ALPHABET.bytes().contains(byte) -> valid = false
     }
     if store_nar_has_control(pair.after) || pair.after.contains("/") || pair.after.contains("\\") -> valid = false
     if !valid -> return Err(store_nar_invalid("Nix store reference is not one safe store basename"))
@@ -512,7 +512,7 @@ fn store_nar_validate_nix_url(value: String) StoreError! {
         .Val(pair) -> pair.after
         .None -> ""
     }
-    unsafe_url := value.contains("#") || path == "" || path.ends_with("/") || path.contains("\\") || path.contains("//") || path.contains("%") || store_nar_has_control(path) || path.starts_with("/") || query.bytes().len() > @STORE_NAR_MAX_NAME_BYTES * 4 || store_nar_has_control(query)
+    unsafe_url := value.contains("#") || path == "" || path.ends_with("/") || path.contains("\\") || path.contains("//") || path.contains("%") || store_nar_has_control(path) || path.starts_with("/") || query.bytes().len() > STORE_NAR_MAX_NAME_BYTES * 4 || store_nar_has_control(query)
     loop part in path.split("/") {
         if part == "." || part == ".." -> unsafe_url = true
     }
@@ -562,7 +562,7 @@ pub fn store_decode_sha256(value: String) -> [U8]? Never! {
 fn store_decode_nix_base32(value: String) -> [U8]? Never! {
     raw :: value.bytes()
     if raw.len() != 52 -> return None
-    alphabet :: @STORE_NIX_BASE32_ALPHABET.bytes()
+    alphabet :: STORE_NIX_BASE32_ALPHABET.bytes()
     output := [Int]{}
     loop _ in 0..<32 -> &output.push(0)
     loop index in 0..<52 {
@@ -589,7 +589,7 @@ fn store_decode_nix_base32(value: String) -> [U8]? Never! {
 }
 
 fn store_encode_nix_base32(value: [U8]) -> String Never! {
-    alphabet :: @STORE_NIX_BASE32_ALPHABET.bytes()
+    alphabet :: STORE_NIX_BASE32_ALPHABET.bytes()
     out := [U8]{}
     loop index in 0..<52 {
         bit :: (51 - index) * 5

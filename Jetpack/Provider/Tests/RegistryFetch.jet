@@ -39,7 +39,7 @@ fn provider_registry_test_project(manifest: String) -[FS]> String Never! {
     archive := provider_registry_test_header(120, pax.len())
     loop byte in pax -> &archive.push(byte)
     loop _ in 0..<(512 - pax.len()) -> &archive.push(U8{0})
-    loop byte in provider_registry_test_header(76, @PROVIDER_MAX_ARCHIVE_ENTRY_BYTES + 1) -> &archive.push(byte)
+    loop byte in provider_registry_test_header(76, PROVIDER_MAX_ARCHIVE_ENTRY_BYTES + 1) -> &archive.push(byte)
     loop _ in 0..<1024 -> &archive.push(U8{0})
     preflight := RegistryTarPreflight.new()
     if &preflight.feed(archive) == {

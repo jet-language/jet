@@ -14,7 +14,7 @@ fn pkg_authority_package_error(error: AuthorityError) -> PackageParseError Never
 
 // `origin: error`, or the bare error when there is no origin.
 fn pkg_format_entry_error(origin: String, error: String) -> String Never! {
-    if origin == "" -> return error
+    if origin == "" -> return ~error
     "{origin}: {error}"
 }
 
@@ -48,9 +48,12 @@ impl PackageFacts {
         }
         if resolver.revalidate_file(checked.file) == .Err(error) -> return Err(pkg_authority_package_error(error))
         facts := checked.facts
-        result :: pkg_load_compose_and_validate(&facts, resolver)
+        compose_error := PackageParseError?{None}
+        if pkg_load_compose_and_validate(&facts, resolver) == .Err(error) {
+            compose_error = Val(error)
+        }
         if resolver.revalidate_file(checked.file) == .Err(error) -> return Err(pkg_authority_package_error(error))
-        if result == .Err(error) -> return Err(error)
+        if compose_error == .Val(error) -> return Err(error)
         Ok(Val(facts))
     }
 
@@ -81,7 +84,7 @@ impl PackageFacts {
                 return Err(pkg_authority_package_error(error))
             }
         }
-        self.compose_configs_checked(resolver)
+        &self.compose_configs_checked(resolver)
     }
 
     // Resolve every declared Config before changing any fact; a failure
@@ -106,7 +109,7 @@ impl PackageFacts {
             if resolver.revalidate_file(checked) == .Err(error) -> return Err(pkg_authority_package_error(error))
             &parsed.push(config)
         }
-        if self.compose(parsed) == .Err(error) -> return Err(PackageParseError.Composition(error.message()))
+        if &self.compose(parsed) == .Err(error) -> return Err(PackageParseError.Composition(error.message()))
         self.resolved_config_paths = resolved_config_paths
     }
 
@@ -134,7 +137,7 @@ impl PackageFacts {
             }
             loop candidate in candidates {
                 if candidate.manifest.facts.members.len() > 0 -> return Err(AuthorityError.NestedMembers{root: self.origin, member: candidate.manifest.file.path})
-                package :: resolver.complete_checked_package(candidate)
+                package :: resolver.complete_checked_package(^candidate)
                 canonical :: resolver.relative_identity(package.member.directory)
                 manifest_path :: package.member.manifest.file.path
                 if canonical == "." -> return Err(AuthorityError.Invalid{path: manifest_path, detail: "member reference `{relative}` resolves to its Package root"})
@@ -172,7 +175,7 @@ impl PackageFacts {
     }
 
     // Resolve the stock runnable output's file.
-    fn resolve_run_entry(self, root: String) -[FS, Env]> String? PackageEntryError! {
+    fn resolve_run_entry(self, root: String) -[FS, Env, IO]> String? PackageEntryError! {
         resolver :: if AuthorityResolver.open(root) == {
             .Ok(opened) -> opened
             .Err(error) -> {
@@ -186,10 +189,10 @@ impl PackageFacts {
     // The canonical `run.jet` (root, then `src/`) wins; retired `main.jet`
     // is migrated once first and refused afterwards; otherwise the selected
     // runnable output's entry.
-    fn resolve_run_entry_checked(self, resolver: AuthorityResolver) -[FS, Env]> CheckedPackageEntry? PackageEntryError! {
+    fn resolve_run_entry_checked(self, resolver: AuthorityResolver) -[FS, Env, IO]> CheckedPackageEntry? PackageEntryError! {
         if self.validate_defaults() == .Err(error) -> return Err(pkg_entry_error(self.origin, error.message()))
-        if pkg_migrate_retired_entry(resolver.root(), self.origin, self.name) {
-            fresh :: if AuthorityResolver.open(resolver.root()) == {
+        if pkg_migrate_retired_entry(resolver.root, self.origin, self.name) {
+            fresh :: if AuthorityResolver.open(resolver.root) == {
                 .Ok(opened) -> opened
                 .Err(error) -> {
                     return Err(pkg_entry_error(self.origin, error.message()))
@@ -197,8 +200,8 @@ impl PackageFacts {
             }
             return self.resolve_run_entry_checked(fresh)
         }
-        run_name :: @DEFAULT_ENTRY_FILE.removesuffix(".jet")
-        candidates :: [String]{@DEFAULT_ENTRY_FILE, "src/{@DEFAULT_ENTRY_FILE}"}
+        run_name :: DEFAULT_ENTRY_FILE.removesuffix(".jet")
+        candidates :: [String]{DEFAULT_ENTRY_FILE, "src/{DEFAULT_ENTRY_FILE}"}
         loop relative in candidates {
             if resolver.checked_file(relative) == {
                 .Ok(file) -> {
@@ -210,10 +213,10 @@ impl PackageFacts {
                 }
             }
         }
-        if resolver.checked_file(@LEGACY_ENTRY_FILE) == {
+        if resolver.checked_file(LEGACY_ENTRY_FILE) == {
             .Ok(main) -> {
                 if resolver.revalidate_file(main) == .Err(error) -> return Err(pkg_entry_error(self.origin, error.message()))
-                return Err(pkg_entry_error(self.origin, "package entry requires canonical `{@DEFAULT_ENTRY_FILE}`; retired `{pkg_path_file_name(main.path)}` is not accepted"))
+                return Err(pkg_entry_error(self.origin, "package entry requires canonical `{DEFAULT_ENTRY_FILE}`; retired `{pkg_path_file_name(main.path)}` is not accepted"))
             }
             .Err(error) -> {
                 if !error.is_missing() -> return Err(pkg_entry_error(self.origin, error.message()))
@@ -264,11 +267,11 @@ impl PackageFacts {
         }
         candidates := [CheckedFile]{}
         loop file in listed {
-            is_role_file :: @COMMAND_ROLE_FILES.contains(pkg_path_file_name(file.relative))
+            is_role_file :: COMMAND_ROLE_FILES.contains(pkg_path_file_name(file.relative))
             parent :: pkg_path_parent(file.relative)
             if !is_role_file || parent == "" || parent == "." -> &candidates.push(file)
         }
-        entries :: if self.discover_function_entries_from_files(resolver, candidates, @BUILD_ENTRY_FN, true, true) == {
+        entries :: if self.discover_function_entries_from_files(resolver, candidates, BUILD_ENTRY_FN, true, true) == {
             .Ok(found) -> found
             .Err(error) -> {
                 return Err(pkg_entry_error(self.origin, error.message()))
@@ -310,9 +313,9 @@ impl PackageFacts {
         loop file in listed {
             parent :: pkg_path_parent(file.relative)
             name :: pkg_path_file_name(file.relative)
-            is_role_file :: @COMMAND_ROLE_FILES.contains(name)
+            is_role_file :: COMMAND_ROLE_FILES.contains(name)
             if parent == "" || parent == "." {
-                if requested_role != None && (requested_role ?? "") == name {
+                if requested_role == .Val(role) && role == name {
                     &role_files.push(file)
                 } else if !is_role_file {
                     &root_files.push(file)
@@ -367,9 +370,9 @@ impl PackageFacts {
         loop part in parts {
             if !pkg_is_ascii_identifier(part) -> return Ok(None)
         }
-        run_name :: @DEFAULT_ENTRY_FILE.removesuffix(".jet")
+        run_name :: DEFAULT_ENTRY_FILE.removesuffix(".jet")
         if parts.len() == 1 && parts[0] == run_name {
-            candidates :: [String]{@DEFAULT_ENTRY_FILE, "src/{@DEFAULT_ENTRY_FILE}"}
+            candidates :: [String]{DEFAULT_ENTRY_FILE, "src/{DEFAULT_ENTRY_FILE}"}
             loop relative in candidates {
                 if resolver.checked_file(relative) == {
                     .Ok(file) -> {
@@ -389,9 +392,9 @@ impl PackageFacts {
             return Ok(Val(CheckedPackageEntry{file: matches[0].file, callable: parts[0]}))
         }
         listed :: self.source_files_checked(resolver)
-        selected := None
+        selected := String?{None}
         if pkg_parse_sources(listed) == .Val(sources) {
-            targets :: pkg_reachable_import_module_targets(resolver.root(), parts[0], sources)
+            targets :: pkg_reachable_import_module_targets(resolver.root, parts[0], sources)
             if targets.len() == 1 {
                 matched := [String]{}
                 loop source in sources {
@@ -435,11 +438,11 @@ impl PackageFacts {
         if exclude_imported {
             sources_only := [CheckedFile]{}
             loop file in candidates {
-                if pkg_path_file_name(file.relative) != @PACKAGE_FILE -> &sources_only.push(file)
+                if pkg_path_file_name(file.relative) != PACKAGE_FILE -> &sources_only.push(file)
             }
             if pkg_parse_sources(sources_only) == .Val(sources) {
                 loop source in sources {
-                    loop path in pkg_imported_source_paths(resolver.root(), source, sources) {
+                    loop path in pkg_imported_source_paths(resolver.root, source, sources) {
                         normalized :: pkg_normalize_discovery_path(path)
                         if !imported.contains(normalized) -> &imported.push(normalized)
                     }
@@ -448,12 +451,12 @@ impl PackageFacts {
         }
         entries := [PackageFunctionEntry]{}
         loop file in candidates {
-            is_manifest :: pkg_path_file_name(file.relative) == @PACKAGE_FILE
+            is_manifest :: pkg_path_file_name(file.relative) == PACKAGE_FILE
             if exclude_imported && !is_manifest && imported.contains(pkg_normalize_discovery_path(file.path)) -> next
             text :: file.text()
             source :: if is_manifest -> pkg_build_entry_source(text) ?? "" else -> text
             structural :: pkg_top_level_function_lines(source, wanted)
-            lines :: if wanted == @BUILD_ENTRY_FN -> pkg_real_build_entry_lines(source, structural) ?? structural else -> structural
+            lines :: if wanted == BUILD_ENTRY_FN -> pkg_real_build_entry_lines(source, structural) ?? structural else -> structural
             loop line in lines -> &entries.push(PackageFunctionEntry{file: file, line: line})
         }
         loop file in candidates -> resolver.revalidate_file(file)
@@ -466,9 +469,10 @@ impl PackageFacts {
     // excluded; sorted by relative path.
     fn source_files_checked(self, resolver: AuthorityResolver) -[FS, Env]> [CheckedFile] AuthorityError! {
         listed :: resolver.discover_source_files()
+        src_legacy_entry :: "src/{LEGACY_ENTRY_FILE}"
         nested_packages := [String]{}
         loop file in listed {
-            if pkg_path_file_name(file.relative) != @PACKAGE_FILE -> next
+            if pkg_path_file_name(file.relative) != PACKAGE_FILE -> next
             parent :: pkg_path_parent(file.relative)
             if parent != "" && parent != "." -> &nested_packages.push(parent)
         }
@@ -476,7 +480,7 @@ impl PackageFacts {
         loop file in listed {
             if pkg_path_under_any(file.relative, nested_packages) -> next
             name :: pkg_path_file_name(file.relative)
-            reserved :: name == @PACKAGE_FILE || name == @PAYLOAD_FILE || name == @ENV_FILE || name == @CONFIG_FILE || name == @WORKSPACE_FILE || (name == @LEGACY_ENTRY_FILE && (file.relative == @LEGACY_ENTRY_FILE || file.relative == "src/{@LEGACY_ENTRY_FILE}"))
+            reserved :: name == PACKAGE_FILE || name == PAYLOAD_FILE || name == ENV_FILE || name == CONFIG_FILE || name == WORKSPACE_FILE || ((name == LEGACY_ENTRY_FILE) && ((file.relative == LEGACY_ENTRY_FILE) || file.relative == src_legacy_entry))
             if reserved || self.is_config_file(file.relative) -> next
             &kept.push(file)
         }
@@ -486,9 +490,12 @@ impl PackageFacts {
     fn is_config_file(self, relative: String) -> Bool Never! {
         names := self.resolved_config_paths
         loop name in self.configs -> &names.push(name)
-        loop name in names {
-            if relative == name -> return true
-            if !pkg_path_file_name(name).contains(".") && relative == "{name}.jet" -> return true
+        // Rust `candidate.extension().is_none()`: a leading dot alone is not
+        // an extension (`files.suffix` uses the same rule).
+        loop config_name in names {
+            with_extension :: "{config_name}.jet"
+            if relative == config_name -> return true
+            if files.suffix(config_name) == "" && relative == with_extension -> return true
         }
         false
     }
@@ -541,7 +548,7 @@ fn pkg_checked_config_file(resolver: AuthorityResolver, relative: String) -[FS, 
 }
 
 fn pkg_discover_config_path(resolver: AuthorityResolver, name: String) -[FS, Env]> CheckedFile PackageParseError! {
-    listed :: if resolver.discover_files(".", Val(@FILE_EXT)) == {
+    listed :: if resolver.discover_files(".", Val(FILE_EXT)) == {
         .Ok(found) -> found
         .Err(error) -> {
             return Err(pkg_authority_package_error(error))
@@ -568,14 +575,14 @@ fn pkg_discover_config_path(resolver: AuthorityResolver, name: String) -[FS, Env
     sorted :: pkg_sorted_checked_files(matches)
     if sorted.len() == {
         1 -> Ok(sorted[0])
-        0 -> Err(PackageParseError.Composition("Config `{name}` was not found under `{resolver.root()}`"))
-        else -> Err(PackageParseError.Composition("Config `{name}` is ambiguous under `{resolver.root()}`"))
+        0 -> Err(PackageParseError.Composition("Config `{name}` was not found under `{resolver.root}`"))
+        else -> Err(PackageParseError.Composition("Config `{name}` is ambiguous under `{resolver.root}`"))
     }
 }
 
 // Compose Configs, then guarantees, defaults, and members (the `load` path).
 fn pkg_load_compose_and_validate(facts: &PackageFacts, resolver: AuthorityResolver) PackageParseError! -[FS, Env]> {
-    facts.compose_configs_checked(resolver)
+    &facts.compose_configs_checked(resolver)
     facts.validate_guarantees()
     if facts.validate_defaults() == .Err(error) -> return Err(PackageParseError.Composition(error.message()))
     facts.validate_members_in_checked(resolver)
@@ -584,18 +591,18 @@ fn pkg_load_compose_and_validate(facts: &PackageFacts, resolver: AuthorityResolv
 // D-ONCE-RETIRE1=C / D-VERDICT-678-1: migrate one retired entry (`main.jet`,
 // `src/main.jet`, `.jet/main.jet`) to its canonical `run.jet` home before a
 // default run resolves its authority snapshot. True when a file moved.
-fn pkg_migrate_retired_entry(root: String, origin: String, package_name: String) -[FS, Env]> Bool PackageEntryError! {
+fn pkg_migrate_retired_entry(root: String, origin: String, package_name: String) -[FS, Env, IO]> Bool PackageEntryError! {
     resolver :: if AuthorityResolver.open(root) == {
         .Ok(opened) -> opened
         .Err(error) -> {
             return Err(PackageEntryError{message: pkg_format_entry_error(origin, error.message())})
         }
     }
-    olds :: [String]{@LEGACY_ENTRY_FILE, "src/{@LEGACY_ENTRY_FILE}", "{@SOURCE_ROOT_DIR}/{@LEGACY_ENTRY_FILE}"}
-    news :: [String]{@DEFAULT_ENTRY_FILE, "src/{@DEFAULT_ENTRY_FILE}", @DEFAULT_ENTRY_FILE}
-    canonical_paths := [String]{@DEFAULT_ENTRY_FILE, "src/{@DEFAULT_ENTRY_FILE}"}
+    olds :: [String]{LEGACY_ENTRY_FILE, "src/{LEGACY_ENTRY_FILE}", "{SOURCE_ROOT_DIR}/{LEGACY_ENTRY_FILE}"}
+    news :: [String]{DEFAULT_ENTRY_FILE, "src/{DEFAULT_ENTRY_FILE}", DEFAULT_ENTRY_FILE}
+    canonical_paths := [String]{DEFAULT_ENTRY_FILE, "src/{DEFAULT_ENTRY_FILE}"}
     if package_name != "" {
-        named :: "{package_name}.{@FILE_EXT}"
+        named :: "{package_name}.{FILE_EXT}"
         if !canonical_paths.contains(named) -> &canonical_paths.push(named)
     }
     canonical := [String]{}
@@ -637,7 +644,7 @@ fn pkg_migrate_retired_entry(root: String, origin: String, package_name: String)
     old :: olds[retired_index[0]]
     target :: news[retired_index[0]]
     if resolver.revalidate_file(file) == .Err(error) -> return Err(PackageEntryError{message: pkg_format_entry_error(origin, error.message())})
-    destination :: files.join(resolver.root(), target)
+    destination :: files.join(resolver.root, target)
     if files.rename(file.path, destination) == .Err(error) -> return Err(PackageEntryError{message: pkg_format_entry_error(origin, "could not migrate `{old}` to `{target}`: {error}")})
     eprint("notice: migrated retired entry `{old}` to `{target}` (D-VERDICT-678-1)")
     Ok(true)

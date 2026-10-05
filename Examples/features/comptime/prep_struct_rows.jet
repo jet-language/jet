@@ -1,0 +1,29 @@
+// A module `prep` constant may hold a struct or enum value that a helper
+// function builds before the program runs: one row, a payload-free enum
+// variant, and a typed list of rows that passed through a function taking
+// its row by move. Each value keeps its declared type at run time.
+struct Row {
+    name: String
+    bits: Int
+}
+
+enum Mode {
+    Fast
+    Slow
+}
+
+fn make(name: String, bits: Int) -> Row Never! { Row{name: name, bits: bits} }
+
+fn mode(name: String) -> Mode Never! { if name == "fast" -> Mode.Fast else -> Mode.Slow }
+
+fn keep(row: ^Row) -> Row Never! { row }
+
+ROW :: prep { make("a", 1) }
+MODE :: prep { mode("fast") }
+ROWS :: prep { [Row]{keep(make("b", 2)), keep(keep(make("c", 3)))} }
+
+fn run() {
+    print("row {ROW.name} {ROW.bits}")
+    print("mode {MODE == Mode.Fast} {MODE == Mode.Slow}")
+    print("rows {ROWS.len()} {ROWS[0].name}{ROWS[1].name} {ROWS[0].bits + ROWS[1].bits}")
+}

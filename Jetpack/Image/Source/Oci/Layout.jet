@@ -12,16 +12,16 @@
 // Layout written: `oci-layout`, `index.json`, and `blobs/sha256/<digest>` for
 // the layer tar, the image config, and the manifest.
 
-@IMAGE_OS :: "linux"
-@IMAGE_MEDIA_TYPE_MANIFEST :: "application/vnd.oci.image.manifest.v1+json"
-@IMAGE_MEDIA_TYPE_CONFIG :: "application/vnd.oci.image.config.v1+json"
-@IMAGE_MEDIA_TYPE_LAYER :: "application/vnd.oci.image.layer.v1.tar"
-@IMAGE_DEFAULT_PLATFORM :: "linux.x64"
-@IMAGE_DEFAULT_USER :: 10001
-@IMAGE_LAYOUT_VERSION :: "1.0.0"
-@IMAGE_MAX_BLOB_BYTES :: 536870912
-@IMAGE_MAX_JSON_BYTES :: 1048576
-@IMAGE_MAX_LAYER_PATH_BYTES :: 100
+IMAGE_OS :: prep { "linux" }
+IMAGE_MEDIA_TYPE_MANIFEST :: prep { "application/vnd.oci.image.manifest.v1+json" }
+IMAGE_MEDIA_TYPE_CONFIG :: prep { "application/vnd.oci.image.config.v1+json" }
+IMAGE_MEDIA_TYPE_LAYER :: prep { "application/vnd.oci.image.layer.v1.tar" }
+IMAGE_DEFAULT_PLATFORM :: prep { "linux.x64" }
+IMAGE_DEFAULT_USER :: prep { 10001 }
+IMAGE_LAYOUT_VERSION :: prep { "1.0.0" }
+IMAGE_MAX_BLOB_BYTES :: prep { 536870912 }
+IMAGE_MAX_JSON_BYTES :: prep { 1048576 }
+IMAGE_MAX_LAYER_PATH_BYTES :: prep { 100 }
 
 // One file layered into the image, relative to the image root (no leading
 // `/`), e.g. `usr/local/bin/myapp`. `mode` is the tar entry's permission bits.
@@ -33,7 +33,7 @@ pub struct LayerFile {
 
 // Everything needed to build one `.Oci` image (Rust `BuildSpec`). Pure data;
 // `files` need not be sorted because the build sorts by path.
-pub struct OciBuildSpec {
+pub struct OCIBuildSpec {
     pub files: [LayerFile]
     // The single platform represented by this OCI layout.
     pub platform: String
@@ -48,21 +48,21 @@ pub struct OciBuildSpec {
     pub healthcheck: String?
 
     // Rust `BuildSpec::default()`.
-    fn defaults() -> OciBuildSpec Never! {
-        OciBuildSpec{
+    fn defaults() -> OCIBuildSpec Never! {
+        OCIBuildSpec{
             files: [LayerFile]{},
-            platform: @IMAGE_DEFAULT_PLATFORM,
+            platform: IMAGE_DEFAULT_PLATFORM,
             entrypoint: [String]{},
             env: [ImageEnvVar]{},
             expose: [Int]{},
-            user: @IMAGE_DEFAULT_USER,
+            user: IMAGE_DEFAULT_USER,
             healthcheck: None
         }
     }
 }
 
 // Where a successful build landed and the manifest digest naming it.
-pub struct OciBuiltImage {
+pub struct OCIBuiltImage {
     pub out_dir: String
     // `sha256:<hex>`: the image manifest's own digest.
     pub manifest_digest: String
@@ -70,7 +70,7 @@ pub struct OciBuiltImage {
     pub total_bytes: Int
 }
 
-struct OciLayerDescriptor {
+struct OCILayerDescriptor {
     media_type: String
     digest: String
     size: Int
@@ -84,15 +84,15 @@ struct OciLayerDescriptor {
     }
 }
 
-struct OciBaseLayout {
+struct OCIBaseLayout {
     root: String
     platform: String
-    layers: [OciLayerDescriptor]
+    layers: [OCILayerDescriptor]
     diff_ids: [String]
 }
 
 // What a path names without following a final link (`fs::symlink_metadata`).
-enum OciNode {
+enum OCINode {
     Missing
     File(Int)
     Directory
@@ -109,13 +109,13 @@ enum OciNode {
 
 // Build the OCI layout into `out_dir` (created if absent). `ref_name` is the
 // human label recorded in `index.json`; it never enters a digest.
-pub fn image_build(spec: OciBuildSpec, out_dir: String, ref_name: String) -[FS, Env]> OciBuiltImage ImageError! {
+pub fn image_build(spec: OCIBuildSpec, out_dir: String, ref_name: String) -[FS, Env]> OCIBuiltImage ImageError! {
     image_build_with_base(spec, out_dir, ref_name, None)
 }
 
 // Build an OCI layout and append the new layer to a local OCI base layout. The
 // base is a directory obtained through a separately verified transport.
-pub fn image_build_with_base(spec: OciBuildSpec, out_dir: String, ref_name: String, base: String?) -[FS, Env]> OciBuiltImage ImageError! {
+pub fn image_build_with_base(spec: OCIBuildSpec, out_dir: String, ref_name: String, base: String?) -[FS, Env]> OCIBuiltImage ImageError! {
     image_ensure_real_layout_directory(out_dir)
     architecture :: image_oci_architecture(spec.platform)
     layer_files :: image_sorted_layer_files(spec.files)
@@ -130,7 +130,7 @@ pub fn image_build_with_base(spec: OciBuildSpec, out_dir: String, ref_name: Stri
             return Err(image_invalid("OCI base platform `{loaded.platform}` does not match image platform `{spec.platform}`"))
         }
     }
-    layers := [OciLayerDescriptor]{}
+    layers := [OCILayerDescriptor]{}
     diff_ids := [String]{}
     if base_layout == .Val(loaded) {
         &layers.extend(loaded.layers)
@@ -141,7 +141,7 @@ pub fn image_build_with_base(spec: OciBuildSpec, out_dir: String, ref_name: Stri
     config_json :: image_config_json(spec, diff_ids, architecture)
     config_digest :: pkg_sha256_hex(config_json.bytes())
 
-    &layers.push(OciLayerDescriptor{media_type: @IMAGE_MEDIA_TYPE_LAYER, digest: "sha256:{layer_digest}", size: layer_tar.len()})
+    &layers.push(OCILayerDescriptor{media_type: IMAGE_MEDIA_TYPE_LAYER, digest: "sha256:{layer_digest}", size: layer_tar.len()})
     manifest_json :: image_manifest_json(config_digest, config_json.bytes().len(), layers)
     manifest_digest :: pkg_sha256_hex(manifest_json.bytes())
 
@@ -161,9 +161,9 @@ pub fn image_build_with_base(spec: OciBuildSpec, out_dir: String, ref_name: Stri
     image_write_blob(out_dir, config_digest, config_json.bytes())
     image_write_blob(out_dir, manifest_digest, manifest_json.bytes())
     image_write_index(out_dir, manifest_digest, manifest_json.bytes().len(), ref_name)
-    image_write_layout_file(files.join(out_dir, "oci-layout"), "{{\"imageLayoutVersion\":\"{@IMAGE_LAYOUT_VERSION}\"}}".bytes())
+    image_write_layout_file(files.join(out_dir, "oci-layout"), "{{\"imageLayoutVersion\":\"{IMAGE_LAYOUT_VERSION}\"}}".bytes())
 
-    Ok(OciBuiltImage{
+    Ok(OCIBuiltImage{
         out_dir: ~out_dir,
         manifest_digest: "sha256:{manifest_digest}",
         total_bytes: layer_tar.len() + config_json.bytes().len() + manifest_json.bytes().len()
@@ -175,7 +175,7 @@ pub fn image_build_with_base(spec: OciBuildSpec, out_dir: String, ref_name: Stri
 // allowed. This is the local half of `--push`.
 pub fn image_copy_layout(source: String, destination: String) ImageError! -[FS, Env, Rand]> {
     _ :: image_load_base(source)
-    if source == destination -> return Ok()
+    if source == destination -> return
     canonical_source :: files.canonicalize(source)
     image_validate_real_path(destination)
     parent :: files.dirname(destination)
@@ -187,7 +187,7 @@ pub fn image_copy_layout(source: String, destination: String) ImageError! -[FS, 
         return Err(image_invalid("OCI copy destination cannot be inside the source layout"))
     }
     if destination_exists {
-        if image_same_layout(canonical_source, probe) -> return Ok()
+        if image_same_layout(canonical_source, probe) -> return
         return Err(ImageError.AlreadyExists("OCI copy destination is not byte-identical; refusing an in-place merge"))
     }
     name :: files.basename(destination)
@@ -198,13 +198,12 @@ pub fn image_copy_layout(source: String, destination: String) ImageError! -[FS, 
         image_remove_all_quiet(stage)
         return Err(error)
     }
-    Ok()
 }
 
 // The canonical path the destination names (or will name once created).
 fn image_copy_probe(destination: String, parent: String, destination_exists: Bool) -[FS, Env]> String ImageError! {
     if destination_exists {
-        if image_node(destination) != OciNode.Directory -> return Err(image_invalid("OCI copy destination is not a real directory"))
+        if image_node(destination) != OCINode.Directory -> return Err(image_invalid("OCI copy destination is not a real directory"))
         return Ok(files.canonicalize(destination))
     }
     name :: files.basename(destination)
@@ -215,7 +214,7 @@ fn image_copy_probe(destination: String, parent: String, destination_exists: Boo
 fn image_publish_staged_copy(source: String, stage: String, destination: String) ImageError! -[FS, Env]> {
     image_copy_layout_tree(source, stage)
     _ :: image_load_base(stage)
-    if (image_node(destination) ?? OciNode.Missing) != OciNode.Missing {
+    if (image_node(destination) ?? OCINode.Missing) != OCINode.Missing {
         return Err(ImageError.AlreadyExists("OCI copy destination appeared during staged publication"))
     }
     files.rename(stage, destination)
@@ -229,42 +228,41 @@ fn image_copy_layout_tree(source: String, destination: String) ImageError! -[FS]
         from :: files.join(source, name)
         to :: files.join(destination, name)
         from_node :: image_existing_node(from)
-        if from_node != OciNode.Directory && !from_node.is_file() {
+        if from_node != OCINode.Directory && !from_node.is_file() {
             return Err(image_invalid("OCI layout contains an unsupported filesystem node"))
         }
-        to_node :: image_node(to) ?? OciNode.Missing
-        if to_node == OciNode.Symlink -> return Err(image_invalid("OCI copy destination contains a symlink"))
+        to_node :: image_node(to) ?? OCINode.Missing
+        if to_node == OCINode.Symlink -> return Err(image_invalid("OCI copy destination contains a symlink"))
         if {
-            from_node == OciNode.Directory -> {
-                if to_node != OciNode.Missing && to_node != OciNode.Directory {
+            from_node == OCINode.Directory -> {
+                if to_node != OCINode.Missing && to_node != OCINode.Directory {
                     return Err(image_invalid("OCI copy destination has a conflicting node"))
                 }
                 files.create_dir_all(to)
                 image_copy_layout_tree(from, to)
             }
             to_node.is_file() -> {
-                if image_read_regular_bounded(from, @IMAGE_MAX_BLOB_BYTES) != image_read_regular_bounded(to, @IMAGE_MAX_BLOB_BYTES) {
+                if image_read_regular_bounded(from, IMAGE_MAX_BLOB_BYTES) != image_read_regular_bounded(to, IMAGE_MAX_BLOB_BYTES) {
                     return Err(ImageError.AlreadyExists("OCI copy destination has conflicting `{to}`"))
                 }
             }
-            to_node != OciNode.Missing -> return Err(image_invalid("OCI copy destination has a conflicting node"))
-            else -> image_write_layout_file(to, image_read_regular_bounded(from, @IMAGE_MAX_BLOB_BYTES))
+            to_node != OCINode.Missing -> return Err(image_invalid("OCI copy destination has a conflicting node"))
+            else -> image_write_layout_file(to, image_read_regular_bounded(from, IMAGE_MAX_BLOB_BYTES))
         }
     }
-    Ok()
 }
 
 fn image_same_layout(left: String, right: String) -[FS]> Bool ImageError! {
     left_node :: image_existing_node(left)
     right_node :: image_existing_node(right)
-    if left_node == OciNode.Symlink || right_node == OciNode.Symlink -> return Err(image_invalid("OCI layout contains a symlink"))
-    if (left_node == OciNode.Directory) != (right_node == OciNode.Directory) || left_node.is_file() != right_node.is_file() {
+    if left_node == OCINode.Symlink || right_node == OCINode.Symlink -> return Err(image_invalid("OCI layout contains a symlink"))
+    if (left_node == OCINode.Directory) != (right_node == OCINode.Directory) || left_node.is_file() != right_node.is_file() {
         return Ok(false)
     }
     if left_node.is_file() {
-        return Ok(image_read_regular_bounded(left, @IMAGE_MAX_BLOB_BYTES) == image_read_regular_bounded(right, @IMAGE_MAX_BLOB_BYTES))
+        return Ok(image_read_regular_bounded(left, IMAGE_MAX_BLOB_BYTES) == image_read_regular_bounded(right, IMAGE_MAX_BLOB_BYTES))
     }
-    if left_node != OciNode.Directory -> return Err(image_invalid("OCI layout contains an unsupported filesystem node"))
+    if left_node != OCINode.Directory -> return Err(image_invalid("OCI layout contains an unsupported filesystem node"))
     left_names := [String]{}
     loop entry in files.list_dir(left) -> &left_names.push(entry.name)
     right_names := [String]{}
@@ -285,12 +283,12 @@ fn image_blob_dir(root: String) -> String Never! {
 
 fn image_write_blob(out_dir: String, digest: String, data: [U8]) ImageError! -[FS, Env]> {
     path :: files.join(image_blob_dir(out_dir), image_digest_hex(digest))
-    existing :: image_node(path) ?? OciNode.Missing
-    if existing != OciNode.Missing {
+    existing :: image_node(path) ?? OCINode.Missing
+    if existing != OCINode.Missing {
         if !existing.is_file() {
             return Err(image_invalid("OCI blob destination is not a regular file"))
         }
-        if image_read_regular_bounded(path, data.len()) == data -> return Ok()
+        if image_read_regular_bounded(path, data.len()) == data -> return
         return Err(ImageError.AlreadyExists("OCI blob `{digest}` already has conflicting bytes"))
     }
     temporary :: image_with_extension(path, "partial-{sys.pid()}")
@@ -303,19 +301,18 @@ fn image_write_blob(out_dir: String, digest: String, data: [U8]) ImageError! -[F
 fn image_link_new_blob(temporary: String, path: String, digest: String, data: [U8]) ImageError! -[FS]> {
     image_write_new_file(temporary, data)
     if files.hard_link(temporary, path) == .Err(error) {
-        if (image_node(path) ?? OciNode.Missing) == OciNode.Missing -> return Err(ImageError.Io(error))
+        if (image_node(path) ?? OCINode.Missing) == OCINode.Missing -> return Err(ImageError.IO(error))
         if image_read_regular_bounded(path, data.len()) != data {
             return Err(ImageError.AlreadyExists("OCI blob `{digest}` already has conflicting bytes"))
         }
     }
-    Ok()
 }
 
 fn image_write_index(out_dir: String, manifest_digest: String, manifest_size: Int, ref_name: String) ImageError! -[FS, Env]> {
     annotations := [String: DataTree]{}
     annotations["org.opencontainers.image.ref.name"] = DataTree.Text(ref_name)
     descriptor := [String: DataTree]{}
-    descriptor["mediaType"] = DataTree.Text(@IMAGE_MEDIA_TYPE_MANIFEST)
+    descriptor["mediaType"] = DataTree.Text(IMAGE_MEDIA_TYPE_MANIFEST)
     descriptor["digest"] = DataTree.Text("sha256:{manifest_digest}")
     descriptor["size"] = DataTree.Int(manifest_size)
     descriptor["annotations"] = DataTree.Object(annotations)
@@ -327,7 +324,7 @@ fn image_write_index(out_dir: String, manifest_digest: String, manifest_size: In
 
 // The OCI image config: `architecture`/`os`/`config`/`rootfs` only. No
 // `created` or `history`, because an embedded timestamp breaks determinism.
-fn image_config_json(spec: OciBuildSpec, diff_ids: [String], architecture: String) -> String Never! {
+fn image_config_json(spec: OCIBuildSpec, diff_ids: [String], architecture: String) -> String Never! {
     env := [DataTree]{}
     loop entry in image_sorted_env(spec.env) -> &env.push(DataTree.Text("{entry.key}={entry.value}"))
     entrypoint := [DataTree]{}
@@ -351,22 +348,22 @@ fn image_config_json(spec: OciBuildSpec, diff_ids: [String], architecture: Strin
     rootfs["diff_ids"] = DataTree.Array(ids)
     document := [String: DataTree]{}
     document["architecture"] = DataTree.Text(architecture)
-    document["os"] = DataTree.Text(@IMAGE_OS)
+    document["os"] = DataTree.Text(IMAGE_OS)
     document["config"] = DataTree.Object(container)
     document["rootfs"] = DataTree.Object(rootfs)
     image_json_text(DataTree.Object(document))
 }
 
-fn image_manifest_json(config_digest: String, config_size: Int, layers: [OciLayerDescriptor]) -> String Never! {
+fn image_manifest_json(config_digest: String, config_size: Int, layers: [OCILayerDescriptor]) -> String Never! {
     config := [String: DataTree]{}
-    config["mediaType"] = DataTree.Text(@IMAGE_MEDIA_TYPE_CONFIG)
+    config["mediaType"] = DataTree.Text(IMAGE_MEDIA_TYPE_CONFIG)
     config["digest"] = DataTree.Text("sha256:{config_digest}")
     config["size"] = DataTree.Int(config_size)
     descriptors := [DataTree]{}
     loop layer in layers -> &descriptors.push(layer.tree())
     manifest := [String: DataTree]{}
     manifest["schemaVersion"] = DataTree.Int(2)
-    manifest["mediaType"] = DataTree.Text(@IMAGE_MEDIA_TYPE_MANIFEST)
+    manifest["mediaType"] = DataTree.Text(IMAGE_MEDIA_TYPE_MANIFEST)
     manifest["config"] = DataTree.Object(config)
     manifest["layers"] = DataTree.Array(descriptors)
     image_json_text(DataTree.Object(manifest))
@@ -383,7 +380,7 @@ fn image_oci_architecture(platform: String) -> String ImageError! {
 
 // The Jet platform key for an OCI config's `os` and `architecture`.
 fn image_platform_for(os: String, architecture: String) -> String ImageError! {
-    if os != @IMAGE_OS -> return Err(image_invalid("OCI base platform is unsupported"))
+    if os != IMAGE_OS -> return Err(image_invalid("OCI base platform is unsupported"))
     if architecture == {
         "amd64" -> Ok("linux.x64")
         "arm64" -> Ok("linux.arm64")
@@ -392,21 +389,21 @@ fn image_platform_for(os: String, architecture: String) -> String ImageError! {
 }
 
 // Validate a local OCI layout and return its layers and diff IDs.
-fn image_load_base(root: String) -[FS, Env]> OciBaseLayout ImageError! {
+fn image_load_base(root: String) -[FS, Env]> OCIBaseLayout ImageError! {
     image_validate_real_path(root)
     root_node :: image_existing_node(root)
-    if root_node != OciNode.Directory || !files.is_file(files.join(root, "oci-layout")) || !files.is_file(files.join(root, "index.json")) {
+    if root_node != OCINode.Directory || !files.is_file(files.join(root, "oci-layout")) || !files.is_file(files.join(root, "index.json")) {
         return Err(ImageError.InvalidInput("OCI base `{root}` is not a local OCI image layout"))
     }
     layout :: image_object(json.parse(image_read_text(files.join(root, "oci-layout"))), "OCI layout")
-    if image_string_field(layout, "imageLayoutVersion") != @IMAGE_LAYOUT_VERSION {
+    if image_string_field(layout, "imageLayoutVersion") != IMAGE_LAYOUT_VERSION {
         return Err(image_invalid("OCI layout has an unsupported version"))
     }
     index :: image_object(json.parse(image_read_text(files.join(root, "index.json"))), "OCI index")
     manifests :: image_array(index.get("manifests"), "OCI index manifests")
     if manifests.len() == 0 -> return Err(image_invalid("OCI base index has no manifest"))
     descriptor :: image_object(manifests[0], "OCI manifest descriptor")
-    if image_string_field(descriptor, "mediaType") != @IMAGE_MEDIA_TYPE_MANIFEST {
+    if image_string_field(descriptor, "mediaType") != IMAGE_MEDIA_TYPE_MANIFEST {
         return Err(image_invalid("OCI index manifest has an unsupported media type"))
     }
     manifest_digest :: image_string_field(descriptor, "digest")
@@ -417,7 +414,7 @@ fn image_load_base(root: String) -[FS, Env]> OciBaseLayout ImageError! {
     }
     manifest_text :: String.from_bytes(manifest_bytes) ?? return Err(image_invalid("OCI manifest is not UTF-8"))
     manifest :: image_object(json.parse(manifest_text), "OCI manifest")
-    layers := [OciLayerDescriptor]{}
+    layers := [OCILayerDescriptor]{}
     loop value in image_array(manifest.get("layers"), "OCI manifest layers") {
         layer :: image_object(value, "OCI layer descriptor")
         digest :: image_string_field(layer, "digest")
@@ -427,11 +424,11 @@ fn image_load_base(root: String) -[FS, Env]> OciBaseLayout ImageError! {
         if bytes.len() != size || image_digest_for(bytes) != digest {
             return Err(image_invalid("OCI base layer failed its digest or size check"))
         }
-        &layers.push(OciLayerDescriptor{media_type, digest, size})
+        &layers.push(OCILayerDescriptor{media_type, digest, size})
     }
     config_value :: manifest.get("config") ?? return Err(image_invalid("OCI manifest has no config descriptor"))
     config_descriptor :: image_object(config_value, "OCI config descriptor")
-    if image_string_field(config_descriptor, "mediaType") != @IMAGE_MEDIA_TYPE_CONFIG {
+    if image_string_field(config_descriptor, "mediaType") != IMAGE_MEDIA_TYPE_CONFIG {
         return Err(image_invalid("OCI config has an unsupported media type"))
     }
     config_digest :: image_string_field(config_descriptor, "digest")
@@ -456,7 +453,7 @@ fn image_load_base(root: String) -[FS, Env]> OciBaseLayout ImageError! {
         }
     }
     if diff_ids.len() != layers.len() -> return Err(image_invalid("OCI config diff_ids do not match manifest layers"))
-    Ok(OciBaseLayout{root: files.canonicalize(root), platform, layers, diff_ids})
+    Ok(OCIBaseLayout{root: files.canonicalize(root), platform, layers, diff_ids})
 }
 
 // Sort by path so declaration order never affects the layer (stable).
@@ -474,13 +471,13 @@ fn image_validate_layer_files(layer_files: [LayerFile]) ImageError! {
     seen := [String]{}
     loop file in layer_files {
         raw :: file.path.bytes()
-        if raw.len() == 0 || raw.len() > @IMAGE_MAX_LAYER_PATH_BYTES || file.path.starts_with("/") || file.path.contains("\\") || image_has_ascii_control(raw) {
+        if raw.len() == 0 || raw.len() > IMAGE_MAX_LAYER_PATH_BYTES || file.path.starts_with("/") || file.path.contains("\\") || image_has_ascii_control(raw) {
             return Err(image_invalid("OCI layer path is not a safe tar path"))
         }
         loop part in file.path.split("/").to_list() {
             if part == ".." -> return Err(image_invalid("OCI layer path escapes the image root"))
         }
-        if file.data.len() > @IMAGE_MAX_BLOB_BYTES -> return Err(image_invalid("OCI layer file exceeds the 512 MiB limit"))
+        if file.data.len() > IMAGE_MAX_BLOB_BYTES -> return Err(image_invalid("OCI layer file exceeds the 512 MiB limit"))
         if seen.contains(file.path) -> return Err(image_invalid("OCI layer contains duplicate paths"))
         &seen.push(file.path)
     }
@@ -489,7 +486,6 @@ fn image_validate_layer_files(layer_files: [LayerFile]) ImageError! {
             return Err(image_invalid("OCI layer contains a file/directory path collision"))
         }
     }
-    Ok()
 }
 
 fn image_has_ascii_control(raw: [U8]) -> Bool Never! {
@@ -501,18 +497,18 @@ fn image_has_ascii_control(raw: [U8]) -> Bool Never! {
 }
 
 fn image_read_text(path: String) -[FS]> String ImageError! {
-    bytes :: image_read_regular_bounded(path, @IMAGE_MAX_JSON_BYTES)
+    bytes :: image_read_regular_bounded(path, IMAGE_MAX_JSON_BYTES)
     String.from_bytes(bytes) ?? return Err(image_invalid("OCI JSON is not UTF-8"))
 }
 
 fn image_read_blob(root: String, digest: String) -[FS]> [U8] ImageError! {
-    if image_node(root) != OciNode.Directory -> return Err(image_invalid("OCI layout root is not a real directory"))
+    if image_node(root) != OCINode.Directory -> return Err(image_invalid("OCI layout root is not a real directory"))
     hex :: image_digest_hex(digest)
     cursor := ~root
     components :: [String]{"blobs", "sha256", hex}
     loop component in components {
         cursor = files.join(cursor, component)
-        if (image_node(cursor) ?? OciNode.Missing) == OciNode.Symlink {
+        if (image_node(cursor) ?? OCINode.Missing) == OCINode.Symlink {
             return Err(image_invalid("OCI layout contains a symlink in its blob path"))
         }
     }
@@ -521,8 +517,8 @@ fn image_read_blob(root: String, digest: String) -[FS]> [U8] ImageError! {
         .File(bytes) -> bytes
         else -> -1
     }
-    if size < 0 || size > @IMAGE_MAX_BLOB_BYTES -> return Err(image_invalid("OCI blob is not a regular file within its limit"))
-    bytes :: image_read_regular_bounded(cursor, @IMAGE_MAX_BLOB_BYTES)
+    if size < 0 || size > IMAGE_MAX_BLOB_BYTES -> return Err(image_invalid("OCI blob is not a regular file within its limit"))
+    bytes :: image_read_regular_bounded(cursor, IMAGE_MAX_BLOB_BYTES)
     if pkg_sha256_hex(bytes) != hex -> return Err(image_invalid("OCI blob digest mismatch"))
     Ok(bytes)
 }
@@ -597,42 +593,42 @@ fn image_read_regular_bounded(path: String, limit: Int) -[FS]> [U8] ImageError! 
     Ok(bytes)
 }
 
-fn image_node(path: String) -[FS]> OciNode ImageError! {
+fn image_node(path: String) -[FS]> OCINode ImageError! {
     if files.stat(path) == {
         .Ok(info) -> {
             if {
-                info.is_symlink -> Ok(OciNode.Symlink)
-                info.is_dir -> Ok(OciNode.Directory)
-                info.is_file -> Ok(OciNode.File(info.size))
-                else -> Ok(OciNode.Special)
+                info.is_symlink -> Ok(OCINode.Symlink)
+                info.is_dir -> Ok(OCINode.Directory)
+                info.is_file -> Ok(OCINode.File(info.size))
+                else -> Ok(OCINode.Special)
             }
         }
         .Err(error) -> {
             if error == {
-                .NotFound(_) -> Ok(OciNode.Missing)
-                else -> Err(ImageError.Io(error))
+                .NotFound(_) -> Ok(OCINode.Missing)
+                else -> Err(ImageError.IO(error))
             }
         }
     }
 }
 
 // `image_node`, but a missing path is the stat error (Rust `symlink_metadata(path)?`).
-fn image_existing_node(path: String) -[FS]> OciNode ImageError! {
+fn image_existing_node(path: String) -[FS]> OCINode ImageError! {
     node :: image_node(path)
-    if node == OciNode.Missing {
-        if files.stat(path) == .Err(error) -> return Err(ImageError.Io(error))
+    if node == OCINode.Missing {
+        if files.stat(path) == .Err(error) -> return Err(ImageError.IO(error))
     }
     Ok(node)
 }
 
-fn image_load_optional_base(base: String?) -[FS, Env]> OciBaseLayout? ImageError! {
+fn image_load_optional_base(base: String?) -[FS, Env]> OCIBaseLayout? ImageError! {
     root :: base ?? return Ok(None)
     Ok(Val(image_load_base(root)))
 }
 
 fn image_remove_stale_temporary(path: String) ImageError! -[FS]> {
     node :: image_node(path)
-    if node == OciNode.Missing -> return Ok()
+    if node == OCINode.Missing -> return
     if !node.is_file() -> return Err(image_invalid("OCI temporary output is not a regular file"))
     files.remove(path)
 }
@@ -646,8 +642,8 @@ fn image_write_new_file(path: String, bytes: [U8]) ImageError! -[FS]> {
 
 // Publish one layout metadata file through create-new, sync, rename.
 fn image_write_layout_file(path: String, bytes: [U8]) ImageError! -[FS, Env]> {
-    node :: image_node(path) ?? OciNode.Missing
-    if node != OciNode.Missing && !node.is_file() {
+    node :: image_node(path) ?? OCINode.Missing
+    if node != OCINode.Missing && !node.is_file() {
         return Err(image_invalid("OCI layout metadata is not a regular file"))
     }
     temporary :: image_with_extension(path, "tmp-{sys.pid()}")
@@ -656,7 +652,6 @@ fn image_write_layout_file(path: String, bytes: [U8]) ImageError! -[FS, Env]> {
         image_remove_quiet(temporary)
         return Err(error)
     }
-    Ok()
 }
 
 fn image_replace_through(temporary: String, path: String, bytes: [U8]) ImageError! -[FS]> {
@@ -688,23 +683,21 @@ fn image_validate_real_path(path: String) ImageError! -[FS, Env]> {
         if component == "" || component == "." -> next
         if component == ".." -> return Err(image_invalid("OCI path contains a parent component"))
         current = files.join(current, component)
-        if (image_node(current) ?? OciNode.Missing) == OciNode.Symlink {
+        if (image_node(current) ?? OCINode.Missing) == OCINode.Symlink {
             return Err(image_invalid("OCI path cannot traverse a symlink"))
         }
     }
-    Ok()
 }
 
 fn image_ensure_real_layout_directory(path: String) ImageError! -[FS, Env]> {
     image_validate_real_path(path)
     node :: image_node(path)
-    if node == OciNode.Missing {
+    if node == OCINode.Missing {
         files.create_dir_all(path)
-        if image_node(path) != OciNode.Directory -> return Err(image_invalid("OCI output path is not a real directory"))
-        return Ok()
+        if image_node(path) != OCINode.Directory -> return Err(image_invalid("OCI output path is not a real directory"))
+        return
     }
-    if node != OciNode.Directory -> return Err(image_invalid("OCI output path is not a real directory"))
-    Ok()
+    if node != OCINode.Directory -> return Err(image_invalid("OCI output path is not a real directory"))
 }
 
 // Rust `sorted_env`: key-sorted, with the last value for a repeated key.

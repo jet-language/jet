@@ -15265,6 +15265,7 @@ fn encode_core_call(writer: &mut CanonicalWriter, call: &crate::MIR::MirCoreCall
     writer.bool(call.aot_direct);
     writer.bool(call.jit_direct);
     writer.option_str(call.jit_symbol.as_deref());
+    writer.bool(call.native_int_result);
     writer.debug(&call.marker);
 }
 fn encode_authority(

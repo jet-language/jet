@@ -13,14 +13,14 @@ pub struct VerbPolicy {
 
 // The policy of `verb`; an unlisted verb reports as "unknown".
 pub fn env_verb_policy(verb: String) -> VerbPolicy Never! {
-    known :: if @JETPACK_VERBS.contains(verb) -> verb else -> "unknown"
+    known :: if JETPACK_VERBS.contains(verb) -> verb else -> "unknown"
     VerbPolicy{verb: known, resident_daemon: false, requires_root: false}
 }
 
 // One policy per Jetpack verb, in dispatch order.
 pub fn env_all_verb_policies() -> [VerbPolicy] Never! {
     policies := [VerbPolicy]{}
-    verbs :: @JETPACK_VERBS
+    verbs :: JETPACK_VERBS
     loop verb in verbs -> &policies.push(env_verb_policy(verb))
     policies
 }

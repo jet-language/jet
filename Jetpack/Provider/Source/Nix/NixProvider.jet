@@ -5,14 +5,14 @@
 pub struct NixProvider {
     // A readable project lock is the Nix cache authority.
     fn validate_cache_authority(self, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) ProviderError! -[FS]> {
-        project :: ctx.project_dir ?? return Ok()
-        if !files.is_dir(project) -> return Ok()
+        project :: ctx.project_dir ?? return
+        if !files.is_dir(project) -> return
         pkg_lock_load_strict(project) ?? return Err(ProviderError.BadOutput(err.message()))
     }
 
     // The exact identity a cached Nix output must carry: the locked closure,
     // then a lock-published local fallback, then a native catalog recipe.
-    fn cache_expectation(self, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env]> CacheExpectation? Never! {
+    fn cache_expectation(self, verification: &StoreVerification, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env]> CacheExpectation? Never! {
         if ctx.project_dir == {
             .Val(project) -> {
                 if pkg_lock_load_strict(project) == {
@@ -25,12 +25,12 @@ pub struct NixProvider {
                 }
                 if pkg_lock_registry_realization(project, "jetpackage", spec.raw) == {
                     .Val(found) -> {
-                        nix_backed :: found.repository.starts_with(@PROVIDER_NIXPKGS_EXACT_PREFIX) || found.authority.contains("jetpack-nix-fallback-v1")
+                        nix_backed :: found.repository.starts_with(PROVIDER_NIXPKGS_EXACT_PREFIX) || found.authority.contains("jetpack-nix-fallback-v1")
                         if nix_backed && found.output != "" && found.envelope.output_hash == found.output && found.envelope.platform != "" {
                             roots :: ctx.nix_roots ?? return None
                             return Val(CacheExpectation{
                                 identity: provider_nix_cache_identity(found.output, found.envelope.platform, spec, table, ctx),
-                                owned_output: Val(files.join(files.join(roots.hangar_dir(), @STORE_OBJECTS_DIR), found.output)),
+                                owned_output: Val(files.join(files.join(roots.hangar_dir(), STORE_OBJECTS_DIR), found.output)),
                                 allow_unsigned_local: true,
                             })
                         }
@@ -53,7 +53,7 @@ pub struct NixProvider {
     // Plan one shared closure for every signed-index ref; native catalog
     // recipes contribute their artifact size, and a ref the index does not
     // cover stays unknown (its fallback policy is checked at realization).
-    fn plan_downloads(self, specs: [RefSpec], table: SourceTable, ctx: ProviderCtx) -[FS, Env, Net, Time, Time.Wait]> DownloadPlan ProviderError! {
+    fn plan_downloads(self, verification: &StoreVerification, specs: [RefSpec], table: SourceTable, ctx: ProviderCtx) -[IO, FS, Env, Net, Time, Time.Wait]> DownloadPlan ProviderError! {
         first :: if specs.len() > 0 -> specs[0].raw else -> "Nix package"
         index :: ctx.nix_index ?? return Err(ProviderError.Unsupported("download planning needs a signed index for `{first}`"))
         plan := DownloadPlan.empty()
@@ -82,7 +82,7 @@ pub struct NixProvider {
         }
         if nix_paths.len() > 0 {
             roots :: ctx.nix_roots ?? return Err(ProviderError.BadOutput("download planning has no Hangar roots for closure admission"))
-            nix :: store_plan_nix_downloads(roots, nix_paths, ctx.offline, ctx.progress) ?? return Err(provider_nix_cache_error(roots, err))
+            nix :: store_plan_nix_downloads(&verification, roots, nix_paths, ctx.offline, ctx.progress) ?? return Err(provider_nix_cache_error(&verification, roots, err))
             &plan.add_nix(nix)
         }
         Ok(plan)
@@ -106,7 +106,7 @@ pub struct NixProvider {
         Ok(None)
     }
 
-    fn realize(self, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env, Exec, Net, Time, Time.Wait]> Realized ProviderError! {
+    fn realize(self, verification: &StoreVerification, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[IO, FS, Env, Exec, Net, Time, Time.Wait]> Realized ProviderError! {
         self.validate_cache_authority(spec, table, ctx)
         if ctx.project_dir == {
             .Val(project) -> {
@@ -131,9 +131,9 @@ pub struct NixProvider {
                 path :: files.join(dir, provider_fixture_name(spec))
                 stdout :: files.read(path) ?? return Err(ProviderError.FixtureMissing(path))
                 realized := provider_parse_realization(spec, stdout)
-                realized.producer.facts[@PROVIDER_NIX_NATIVE_FORMAT] = "json"
-                realized.producer.facts[@PROVIDER_NIX_NATIVE_DOCUMENT] = stdout
-                return provider_finalize_nix_realization(spec, table, ctx, realized)
+                realized.producer.facts[PROVIDER_NIX_NATIVE_FORMAT] = "json"
+                realized.producer.facts[PROVIDER_NIX_NATIVE_DOCUMENT] = stdout
+                return provider_finalize_nix_realization(&verification, spec, table, ctx, realized)
             }
             .None -> {}
         }
@@ -144,7 +144,7 @@ pub struct NixProvider {
             .Ok(record) -> record
             .Err(error) -> {
                 if provider_nix_index_not_indexed(error) && nix_fallback_allowed_from_environment(ctx.offline) {
-                    return provider_realize_from_local_nix(spec, table, ctx, key)
+                    return provider_realize_from_local_nix(&verification, spec, table, ctx, key)
                 }
                 return Err(ProviderError.NixIndex(error))
             }
@@ -153,9 +153,9 @@ pub struct NixProvider {
         roots :: ctx.nix_roots ?? return Err(ProviderError.BadOutput("index-backed Nix realization has no Hangar roots for closure admission"))
         requests := [NixOutputRequest]{}
         loop name in provider_sorted_keys(verified.record.outputs) -> &requests.push(NixOutputRequest{name, store_path: verified.record.outputs[name]})
-        admitted :: store_admit_nix_closure_with_progress(roots, requests, ctx.offline, None, ctx.progress) ?? return Err(provider_nix_cache_error(roots, err))
+        admitted :: store_admit_nix_closure_with_progress(&verification, roots, requests, ctx.offline, None, ctx.progress) ?? return Err(provider_nix_cache_error(&verification, roots, err))
         realized :: provider_realization_from_index(spec, key, verified, admitted)
-        provider_finalize_nix_realization(spec, table, ctx, realized)
+        provider_finalize_nix_realization(&verification, spec, table, ctx, realized)
     }
 }
 
@@ -168,11 +168,11 @@ fn provider_nix_locked_expectation(closure: NixClosureRecord, envelope: LockEnve
     Val(CacheExpectation{
         identity: CacheIdentity{
             source_fingerprint: envelope.output_hash,
-            recipe_fingerprint: pkg_sha256_hex(@PROVIDER_NIX_RECIPE_ID.bytes()),
+            recipe_fingerprint: pkg_sha256_hex(PROVIDER_NIX_RECIPE_ID.bytes()),
             policy_fingerprint: closure.cache_key,
             platform,
         },
-        owned_output: Val(files.join(files.join(roots.hangar_dir(), @STORE_OBJECTS_DIR), closure.output)),
+        owned_output: Val(files.join(files.join(roots.hangar_dir(), STORE_OBJECTS_DIR), closure.output)),
         allow_unsigned_local: true,
     })
 }

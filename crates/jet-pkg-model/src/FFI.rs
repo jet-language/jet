@@ -6752,7 +6752,7 @@ dependencies = [
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from("."))
             .join(".cache")
-            .join("jet-test-scratch")
+            .join("jet-dev/scratch")
             .join("ExternRust2432")
             .join("scratch")
             .join(format!("ffi-integrity-{}", std::process::id()));

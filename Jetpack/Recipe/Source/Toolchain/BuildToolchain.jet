@@ -4,7 +4,7 @@
 // A user's `extern rust` bridge crate is compiled by a pinned, realized Rust
 // toolchain: a hangar object carrying the `cargo` it builds with and, per
 // D-JPK-RINGSHIP1=C, prebuilt ring artifacts. Resolution order:
-// 1. a realized/fixture toolchain object named by `@TOOLCHAIN_OBJECT_ENV`;
+// 1. a realized/fixture toolchain object named by `TOOLCHAIN_OBJECT_ENV`;
 // 2. the host toolchain as the implicit dev toolchain (online development
 //    only; offline Core realization never takes this branch);
 // 3. otherwise none, and the caller emits E1240.
@@ -24,7 +24,7 @@ pub struct BuildToolchain {
     // The active build toolchain, or None when neither a realized object nor
     // a host toolchain is available.
     fn resolve() -[FS, Env, Exec, Time.Wait]> BuildToolchain? Never! {
-        if sys.get(@TOOLCHAIN_OBJECT_ENV) == {
+        if sys.get(TOOLCHAIN_OBJECT_ENV) == {
             .Val(dir) -> {
                 if recipe_toolchain_from_object(dir) == {
                     .Val(toolchain) -> return Val(toolchain)
@@ -39,7 +39,7 @@ pub struct BuildToolchain {
     // Only a realized toolchain: the offline Core contract. A missing pin is a
     // miss, never permission to consult host Cargo.
     fn resolve_pinned() -[FS, Env]> BuildToolchain? Never! {
-        dir :: sys.get(@TOOLCHAIN_OBJECT_ENV) ?? return None
+        dir :: sys.get(TOOLCHAIN_OBJECT_ENV) ?? return None
         recipe_toolchain_from_object(dir)
     }
 

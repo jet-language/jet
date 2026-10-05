@@ -51,13 +51,13 @@ fn store_external_root_validate_label(label: String) StoreError! {
     }
 }
 
-fn store_external_root_manual_id(principal: ProducerId, label: String) -> RootId StoreError! {
-    RootId.new("manual:{principal.as_str()}:{label}")
+fn store_external_root_manual_id(principal: ProducerID, label: String) -> RootID StoreError! {
+    RootID.new("manual:{principal.as_str()}:{label}")
 }
 
 // Rust `manual_root_witness`: length-framed principal, label and reference,
 // then the closure targets, digested.
-fn store_external_root_manual_witness(principal: ProducerId, label: String, reference: String, targets: [String]) -> RootWitness StoreError! {
+fn store_external_root_manual_witness(principal: ProducerID, label: String, reference: String, targets: [String]) -> RootWitness StoreError! {
     canonical := [String]{"jet-manual-root-v1\n"}
     framed :: [String]{principal.as_str(), label, reference}
     loop value in framed -> &canonical.push("{value.bytes().len()}\n{value}\n")
@@ -79,15 +79,15 @@ fn store_external_root_targets_unlocked(roots: HangarRoots, reference: String, g
     Err(StoreError.NotFound("no Hangar entry matches `{reference}`"))
 }
 
-fn store_external_root_targets_locked(roots: HangarRoots, reference: String) -[FS, Env]> [String] StoreError! {
-    session :: store_lifecycle_session(roots)
-    graph :: store_lifecycle_closure_graph_unlocked(roots)
+fn store_external_root_targets_locked(verification: &StoreVerification, roots: HangarRoots, reference: String) -[FS, Env]> [String] StoreError! {
+    session :: store_lifecycle_session(&verification, roots)
+    graph :: store_lifecycle_closure_graph_unlocked(&verification, roots)
     store_external_root_targets_unlocked(roots, reference, graph)
 }
 
 // Rust `external_root_targets`.
-fn store_external_root_targets(roots: HangarRoots, reference: String) -[FS, Env]> [String] ExternalRootError! {
-    if store_external_root_targets_locked(roots, reference) == {
+fn store_external_root_targets(verification: &StoreVerification, roots: HangarRoots, reference: String) -[FS, Env]> [String] ExternalRootError! {
+    if store_external_root_targets_locked(&verification, roots, reference) == {
         .Ok(targets) -> Ok(targets)
         .Err(error) -> {
             if store_external_root_is_missing_reference(error, reference) -> return Err(ExternalRootError.ReferenceNotFound(reference))
@@ -105,8 +105,8 @@ fn store_external_root_is_missing_reference(error: StoreError, reference: String
 }
 
 // Rust `external_root_closure_size`.
-pub fn store_external_root_closure_size(roots: HangarRoots, reference: String) -[FS, Env]> Int ExternalRootError! {
-    targets :: store_external_root_targets(roots, reference)
+pub fn store_external_root_closure_size(verification: &StoreVerification, roots: HangarRoots, reference: String) -[FS, Env]> Int ExternalRootError! {
+    targets :: store_external_root_targets(&verification, roots, reference)
     Ok(targets.len())
 }
 
@@ -129,9 +129,9 @@ fn store_external_root_map_error(label: String, error: StoreError) -> ExternalRo
     }
 }
 
-fn store_external_root_register_locked(roots: HangarRoots, id: RootId, producer: ProducerId, label: String, reference: String, metadata: RootMetadata, expected_etag: String?, expected: RootEtag?, at: Int) -[FS, Env, Time]> LifecycleSnapshot StoreError! {
-    session :: store_lifecycle_session(roots)
-    graph :: store_lifecycle_closure_graph_unlocked(roots)
+fn store_external_root_register_locked(verification: &StoreVerification, roots: HangarRoots, id: RootID, producer: ProducerID, label: String, reference: String, metadata: RootMetadata, expected_etag: String?, expected: RootEtag?, at: Int) -[FS, Env, Time]> LifecycleSnapshot StoreError! {
+    session :: store_lifecycle_session(&verification, roots)
+    graph :: store_lifecycle_closure_graph_unlocked(&verification, roots)
     targets :: store_external_root_targets_unlocked(roots, reference, graph)
     witness :: store_external_root_manual_witness(producer, label, reference, targets)
     identity :: RootIdentity.new(RootKind.Manual, id, producer, Incarnation.new(1), witness)
@@ -139,8 +139,8 @@ fn store_external_root_register_locked(roots: HangarRoots, id: RootId, producer:
     store_lifecycle_atomic_update_unlocked(roots, update, expected, session.known, session.closure_head)
 }
 
-fn store_external_root_register_snapshot(roots: HangarRoots, id: RootId, producer: ProducerId, label: String, reference: String, metadata: RootMetadata, expected_etag: String?, expected: RootEtag?, at: Int) -[FS, Env, Time]> LifecycleSnapshot ExternalRootError! {
-    if store_external_root_register_locked(roots, id, producer, label, reference, metadata, expected_etag, expected, at) == {
+fn store_external_root_register_snapshot(verification: &StoreVerification, roots: HangarRoots, id: RootID, producer: ProducerID, label: String, reference: String, metadata: RootMetadata, expected_etag: String?, expected: RootEtag?, at: Int) -[FS, Env, Time]> LifecycleSnapshot ExternalRootError! {
+    if store_external_root_register_locked(&verification, roots, id, producer, label, reference, metadata, expected_etag, expected, at) == {
         .Ok(snapshot) -> Ok(snapshot)
         .Err(error) -> {
             if store_external_root_is_missing_reference(error, reference) -> return Err(ExternalRootError.ReferenceNotFound(reference))
@@ -153,29 +153,29 @@ fn store_external_root_register_snapshot(roots: HangarRoots, id: RootId, produce
 // manually retained Hangar closure. Lifecycle owns the typed identity, the
 // compare-and-swap check, expiry metadata and the prepare/commit sequence;
 // this adapter resolves the reference to its complete closure.
-pub fn store_register_external_root_at(roots: HangarRoots, principal: String, label: String, reference: String, expires_at: Int?, expected_etag: String?, at: Int) -[FS, Env, Time]> ExternalRootView ExternalRootError! {
+pub fn store_register_external_root_at(verification: &StoreVerification, roots: HangarRoots, principal: String, label: String, reference: String, expires_at: Int?, expected_etag: String?, at: Int) -[FS, Env, Time]> ExternalRootView ExternalRootError! {
     store_external_root_validate_label(label)
-    producer :: ProducerId.new(principal)
+    producer :: ProducerID.new(principal)
     expiry :: if expires_at == {
         .Val(seconds) -> Val(LifecycleTimestamp.from_unix_seconds(seconds))
         .None -> None
     }
     metadata :: RootMetadata.manual(label, reference, expiry)
     id :: store_external_root_manual_id(producer, label)
-    expected := None
+    expected := RootEtag?{None}
     if expected_etag == {
         .Val(text) -> expected = Val(RootEtag.parse(text))
         .None -> {}
     }
-    snapshot :: store_external_root_register_snapshot(roots, id, producer, label, reference, metadata, expected_etag, expected, at)
+    snapshot :: store_external_root_register_snapshot(&verification, roots, id, producer, label, reference, metadata, expected_etag, expected, at)
     root :: snapshot.roots.get(id.as_str()) ?? return Err(ExternalRootError.Store(StoreError.InvalidData("manual lifecycle root `{label}` disappeared after update")))
     Ok(store_external_root_view(root))
 }
 
 // Rust `list_external_roots`: the principal's live manual roots.
-pub fn store_list_external_roots(roots: HangarRoots, principal: String) -[FS, Env, Time]> [ExternalRootView] ExternalRootError! {
-    producer :: ProducerId.new(principal)
-    snapshot :: store_lifecycle_snapshot(roots)
+pub fn store_list_external_roots(verification: &StoreVerification, roots: HangarRoots, principal: String) -[FS, Env, Time]> [ExternalRootView] ExternalRootError! {
+    producer :: ProducerID.new(principal)
+    snapshot :: store_lifecycle_snapshot(&verification, roots)
     views := [ExternalRootView]{}
     live_roots :: snapshot.root_list()
     loop root in live_roots {
@@ -185,36 +185,36 @@ pub fn store_list_external_roots(roots: HangarRoots, principal: String) -[FS, En
     Ok(views)
 }
 
-fn store_external_root_remove(roots: HangarRoots, id: RootId, label: String, expected_etag: String, at: Int) -[FS, Env, Time]> LifecycleSnapshot ExternalRootError! {
-    if store_lifecycle_atomic_remove(roots, id, expected_etag, LifecycleTimestamp.from_unix_seconds(at)) == {
+fn store_external_root_remove(verification: &StoreVerification, roots: HangarRoots, id: RootID, label: String, expected_etag: String, at: Int) -[FS, Env, Time]> LifecycleSnapshot ExternalRootError! {
+    if store_lifecycle_atomic_remove(&verification, roots, id, expected_etag, LifecycleTimestamp.from_unix_seconds(at)) == {
         .Ok(snapshot) -> Ok(snapshot)
         .Err(error) -> Err(store_external_root_map_error(label, error))
     }
 }
 
 // Rust `unregister_external_root_at`.
-pub fn store_unregister_external_root_at(roots: HangarRoots, principal: String, label: String, expected_etag: String, at: Int) ExternalRootError! -[FS, Env, Time]> {
+pub fn store_unregister_external_root_at(verification: &StoreVerification, roots: HangarRoots, principal: String, label: String, expected_etag: String, at: Int) ExternalRootError! -[FS, Env, Time]> {
     store_external_root_validate_label(label)
-    producer :: ProducerId.new(principal)
+    producer :: ProducerID.new(principal)
     id :: store_external_root_manual_id(producer, label)
-    snapshot :: store_lifecycle_snapshot(roots)
+    snapshot :: store_lifecycle_snapshot(&verification, roots)
     if !snapshot.roots.has_key(id.as_str()) -> return Err(ExternalRootError.Store(StoreError.NotFound("external root `{label}` was not found")))
     root :: snapshot.roots[id.as_str()]
     if root.identity.kind != RootKind.Manual || root.identity.producer != producer {
         return Err(ExternalRootError.Store(StoreError.PermissionDenied("external root `{label}` is owned by another producer")))
     }
-    store_external_root_remove(roots, id, label, expected_etag, at)
+    store_external_root_remove(&verification, roots, id, label, expected_etag, at)
 }
 
 // Rust `reconcile_profile_generation_root`: prepare the immutable root of
 // one profile generation; None when it is already committed, otherwise the
 // exact incarnation and witness the caller must commit.
-pub fn store_reconcile_profile_generation_root(roots: HangarRoots, owner: String, profile: String, generation: Int, witness: String, targets: [String], at: Int) -[FS, Env, Time]> PreparedProfileGenerationRoot? StoreError! {
-    id :: RootId.new("profile-generation:{owner}:{profile}:{generation}")
+pub fn store_reconcile_profile_generation_root(verification: &StoreVerification, roots: HangarRoots, owner: String, profile: String, generation: Int, witness: String, targets: [String], at: Int) -[FS, Env, Time]> PreparedProfileGenerationRoot? StoreError! {
+    id :: RootID.new("profile-generation:{owner}:{profile}:{generation}")
     incarnation :: Incarnation.new(1)
     root_witness :: RootWitness.new(witness)
-    identity :: RootIdentity.new(RootKind.ProfileGeneration, id, ProducerId.new("jetpack-profile-generation"), incarnation, root_witness)
-    snapshot :: store_lifecycle_prepare_if_absent(roots, identity, store_lifecycle_sorted_set(targets), LifecycleTimestamp.from_unix_seconds(at))
+    identity :: RootIdentity.new(RootKind.ProfileGeneration, id, ProducerID.new("jetpack-profile-generation"), incarnation, root_witness)
+    snapshot :: store_lifecycle_prepare_if_absent(&verification, roots, identity, store_lifecycle_sorted_set(targets), LifecycleTimestamp.from_unix_seconds(at))
     root :: snapshot.roots.get(id.as_str()) ?? return Err(StoreError.Other("generation root disappeared after prepare"))
     if root.phase == RootPhase.Committed -> return Ok(None)
     Ok(Val(PreparedProfileGenerationRoot{id, incarnation, witness: root_witness}))

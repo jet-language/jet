@@ -2,8 +2,8 @@
 // JetOS/user composition, tool projections, and package-generation commands.
 
 // The fail-closed scale budget of the generation resolver.
-@ENVMODEL_MAX_RESOLVER_NODES :: 100000
-@ENVMODEL_RESOLVER_BUDGET_NAME :: "__jet_resolver_budget__:"
+ENVMODEL_MAX_RESOLVER_NODES :: prep { 100000 }
+ENVMODEL_RESOLVER_BUDGET_NAME :: prep { "__jet_resolver_budget__:" }
 
 // One source-backed package-generation declaration. This is deliberately
 // separate from `PresetSpec`, which is the environment-shell preset surface
@@ -114,7 +114,7 @@ pub enum PackageProfileError {
             .Missing(name) -> "package generation '{name}' does not exist"
             .Cycle(names) -> "package generation inheritance cycle: {names.join(" -> ")}"
             .Conflict(name) -> {
-                if name.starts_with(@ENVMODEL_RESOLVER_BUDGET_NAME) -> return "package generation resolver exceeds {name.removeprefix(@ENVMODEL_RESOLVER_BUDGET_NAME)} entries"
+                if name.starts_with(ENVMODEL_RESOLVER_BUDGET_NAME) -> return "package generation resolver exceeds {name.removeprefix(ENVMODEL_RESOLVER_BUDGET_NAME)} entries"
                 "package generation fact '{name}' conflicts"
             }
         }
@@ -122,12 +122,12 @@ pub enum PackageProfileError {
 }
 
 fn envmodel_resolver_budget_error() -> PackageProfileError Never! {
-    PackageProfileError.Conflict("{@ENVMODEL_RESOLVER_BUDGET_NAME}{@ENVMODEL_MAX_RESOLVER_NODES}")
+    PackageProfileError.Conflict("{ENVMODEL_RESOLVER_BUDGET_NAME}{ENVMODEL_MAX_RESOLVER_NODES}")
 }
 
 // Resolver visit state: absent, entered (on the stack), or finished.
-@ENVMODEL_PROFILE_ENTERED :: 1
-@ENVMODEL_PROFILE_FINISHED :: 2
+ENVMODEL_PROFILE_ENTERED :: prep { 1 }
+ENVMODEL_PROFILE_FINISHED :: prep { 2 }
 
 pub struct PackageProfileSet {
     pub profiles: [String: PackageProfileSpec]{[String: PackageProfileSpec]{}}
@@ -144,9 +144,9 @@ pub struct PackageProfileSet {
                 if !merged.sources.contains(source) -> &merged.sources.push(source)
             }
             self.profiles[profile.name] = merged
-            return Ok()
+            return
         }
-        if self.profiles.len() >= @ENVMODEL_MAX_RESOLVER_NODES -> return Err(envmodel_resolver_budget_error())
+        if self.profiles.len() >= ENVMODEL_MAX_RESOLVER_NODES -> return Err(envmodel_resolver_budget_error())
         self.profiles[profile.name] = profile
     }
 
@@ -162,7 +162,7 @@ pub struct PackageProfileSet {
         loop name in names {
             if selected_seen.get(name) == None {
                 selected_seen[name] = true
-                if selected.len() >= @ENVMODEL_MAX_RESOLVER_NODES -> return Err(envmodel_resolver_budget_error())
+                if selected.len() >= ENVMODEL_MAX_RESOLVER_NODES -> return Err(envmodel_resolver_budget_error())
                 &selected.push(name)
             }
         }
@@ -175,7 +175,7 @@ pub struct PackageProfileSet {
         declared_by_seen := [String: Bool]{}
         package_indices := [String: Int]{}
         loop name in selected {
-            if (state.get(name) ?? 0) == @ENVMODEL_PROFILE_FINISHED -> next
+            if (state.get(name) ?? 0) == ENVMODEL_PROFILE_FINISHED -> next
             &frame_names.push(name)
             &frame_next.push(0)
             loop frame_names.len() > 0 {
@@ -183,8 +183,8 @@ pub struct PackageProfileSet {
                 current :: frame_names[top]
                 if state.get(current) == None {
                     if self.profiles.get(current) == None -> return Err(PackageProfileError.Missing(current))
-                    if state.len() >= @ENVMODEL_MAX_RESOLVER_NODES -> return Err(envmodel_resolver_budget_error())
-                    state[current] = @ENVMODEL_PROFILE_ENTERED
+                    if state.len() >= ENVMODEL_MAX_RESOLVER_NODES -> return Err(envmodel_resolver_budget_error())
+                    state[current] = ENVMODEL_PROFILE_ENTERED
                     &stack.push(current)
                 }
                 profile :: self.profiles[current]
@@ -194,12 +194,12 @@ pub struct PackageProfileSet {
                     _ := &frame_names.pop()
                     _ := &frame_next.pop()
                     _ := &stack.pop()
-                    state[current] = @ENVMODEL_PROFILE_FINISHED
+                    state[current] = ENVMODEL_PROFILE_FINISHED
                     &resolved.applied.push(current)
                     loop source in profile.sources {
                         if source_seen.get(source) == None {
                             source_seen[source] = true
-                            if resolved.sources.len() >= @ENVMODEL_MAX_RESOLVER_NODES -> return Err(envmodel_resolver_budget_error())
+                            if resolved.sources.len() >= ENVMODEL_MAX_RESOLVER_NODES -> return Err(envmodel_resolver_budget_error())
                             &resolved.sources.push(source)
                         }
                     }
@@ -207,7 +207,7 @@ pub struct PackageProfileSet {
                         package_index :: if package_indices.get(raw) == {
                             .Val(index) -> index
                             .None -> {
-                                if resolved.packages.len() >= @ENVMODEL_MAX_RESOLVER_NODES -> return Err(envmodel_resolver_budget_error())
+                                if resolved.packages.len() >= ENVMODEL_MAX_RESOLVER_NODES -> return Err(envmodel_resolver_budget_error())
                                 index :: resolved.packages.len()
                                 package_indices[raw] = index
                                 &resolved.packages.push(PackageProfilePackage{raw: raw})
@@ -228,7 +228,7 @@ pub struct PackageProfileSet {
                                 if existing != provider -> return Err(PackageProfileError.Conflict("{current}.collisions.{path}"))
                             }
                             .None -> {
-                                if resolved.collisions.len() >= @ENVMODEL_MAX_RESOLVER_NODES -> return Err(envmodel_resolver_budget_error())
+                                if resolved.collisions.len() >= ENVMODEL_MAX_RESOLVER_NODES -> return Err(envmodel_resolver_budget_error())
                                 resolved.collisions[path] = provider
                             }
                         }
@@ -238,7 +238,7 @@ pub struct PackageProfileSet {
                 parent :: profile.extends[parent_index]
                 parent_state :: state.get(parent) ?? 0
                 if parent_state == {
-                    @ENVMODEL_PROFILE_ENTERED -> {
+                    ENVMODEL_PROFILE_ENTERED -> {
                         cycle := [String]{}
                         started := false
                         loop item in stack {
@@ -248,7 +248,7 @@ pub struct PackageProfileSet {
                         &cycle.push(parent)
                         return Err(PackageProfileError.Cycle(cycle))
                     }
-                    @ENVMODEL_PROFILE_FINISHED -> {}
+                    ENVMODEL_PROFILE_FINISHED -> {}
                     else -> {
                         &frame_names.push(parent)
                         &frame_next.push(0)

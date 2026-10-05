@@ -6,7 +6,7 @@
 // Octave remains responsible for the foreign computation, while Jet owns the
 // shape and error checks at the typed boundary.
 
-@PKG_OCTAVE_RESERVED :: [String]{"open", "take_error", "cancel", "close", "decode_response", "abi", "compute", "json", "Session", "TensorWire", "OctaveError"}
+PKG_OCTAVE_RESERVED :: prep { [String]{"open", "take_error", "cancel", "close", "decode_response", "abi", "compute", "json", "Session", "TensorWire", "OctaveError"} }
 
 // Bind the one-matrix functions of the Octave `.m` script at `path`.
 pub fn pkg_octave_bind(path: String, source: String, lib: String, cache: String) -[FS, Env, Exec, Time.Wait]> ForeignBindResult ForeignBindError! {
@@ -95,20 +95,20 @@ fn pkg_octave_string(value: String) -> String Never! {
 fn pkg_octave_render_worker(script: String, functions: [String]) -> String Never! {
     allowed := [String]{}
     loop function in functions -> &allowed.push("'{function.replace("'", "''")}'")
-    @PKG_OCTAVE_WORKER.replace("__JET_SCRIPT__", pkg_octave_string(script)).replace("__JET_ALLOWED__", allowed.join(", "))
+    PKG_OCTAVE_WORKER.replace("__JET_SCRIPT__", pkg_octave_string(script)).replace("__JET_ALLOWED__", allowed.join(", "))
 }
 
 fn pkg_octave_render_jet(lib: String, functions: [String]) -> String Never! {
     abi :: "jet_octave_{lib}"
-    out := [String]{pkg_binder_fill_template(@PKG_OCTAVE_JET_HEAD, [String: String]{"abi": abi})}
+    out := [String]{pkg_binder_fill_template(PKG_OCTAVE_JET_HEAD, [String: String]{"abi": abi})}
     loop function in functions {
         &out.push("    fn {function}(handle: Int, input: String, deadline_ms: Int) -> String = \"{abi}_invoke_{function}\"\n")
     }
-    &out.push(@PKG_OCTAVE_JET_TYPES)
+    &out.push(PKG_OCTAVE_JET_TYPES)
     &out.push(pkg_render_decode_response("OctaveError", DecoderProtocol.StandardEnvelope))
-    &out.push(@PKG_OCTAVE_JET_SESSION)
+    &out.push(PKG_OCTAVE_JET_SESSION)
     loop function in functions {
-        &out.push(pkg_binder_fill_template(@PKG_OCTAVE_JET_FUNCTION, [String: String]{"function": function}))
+        &out.push(pkg_binder_fill_template(PKG_OCTAVE_JET_FUNCTION, [String: String]{"function": function}))
     }
     out.join("")
 }
@@ -119,11 +119,11 @@ pub fn pkg_octave_render_probe() -> String Never! {
 }
 
 fn pkg_octave_reserved(value: String) -> Bool Never! {
-    @PKG_OCTAVE_RESERVED.contains(value) || @JET_KEYWORD_LIST.contains(value) || @JET_TYPE_LIST.contains(value)
+    PKG_OCTAVE_RESERVED.contains(value) || JET_KEYWORD_LIST.contains(value) || JET_TYPE_LIST.contains(value)
 }
 
 // Generated module head. Hole: `abi`.
-@PKG_OCTAVE_JET_HEAD :: ```use c.@@abi@@ as abi
+PKG_OCTAVE_JET_HEAD :: prep { ```use c.@@abi@@ as abi
 use core.compute as compute
 use core.encoding.json as json
 
@@ -132,9 +132,9 @@ use core.encoding.json as json
     fn take_error() -> Int = "@@abi@@_take_error"
     fn cancel(handle: Int) = "@@abi@@_cancel"
     fn close(handle: Int) = "@@abi@@_close"
-```
+``` }
 
-@PKG_OCTAVE_JET_TYPES :: ```}
+PKG_OCTAVE_JET_TYPES :: prep { ```}
 
 pub struct Session {
     value: Int
@@ -152,9 +152,9 @@ pub enum OctaveError {
     Limit
 }
 
-```
+``` }
 
-@PKG_OCTAVE_JET_SESSION :: ```impl Session.Close {
+PKG_OCTAVE_JET_SESSION :: prep { ```impl Session.Close {
     fn close(^self) { abi.close(self.value) }
 }
 
@@ -168,10 +168,10 @@ pub fn open() -[FFI.Octave]> Session OctaveError! {
 
 pub fn cancel(session: Session) -[FFI.Octave]> { abi.cancel(session.value) }
 
-```
+``` }
 
 // One generated tensor call. Hole: `function`.
-@PKG_OCTAVE_JET_FUNCTION :: ```pub fn @@function@@(session: Session, input: Tensor, deadline_ms: Int) -[FFI.Octave, GPU]> Tensor OctaveError! {
+PKG_OCTAVE_JET_FUNCTION :: prep { ```pub fn @@function@@(session: Session, input: Tensor, deadline_ms: Int) -[FFI.Octave, GPU]> Tensor OctaveError! {
     if compute.rank(input) != 2 -> return Err(OctaveError.Shape)
     shape_wire := [DataTree]{}
     loop dimension in compute.shape(input) {
@@ -210,11 +210,11 @@ pub fn cancel(session: Session) -[FFI.Octave]> { abi.cancel(session.value) }
     return Err(OctaveError.Protocol)
 }
 
-```
+``` }
 
 // The persistent worker. `__JET_SCRIPT__` and `__JET_ALLOWED__` are replaced
 // in that order, exactly as the Rust binder does.
-@PKG_OCTAVE_WORKER :: ```input = fopen('/dev/stdin', 'rb');
+PKG_OCTAVE_WORKER :: prep { ```input = fopen('/dev/stdin', 'rb');
 output = fopen('/dev/stdout', 'wb');
 script_path = __JET_SCRIPT__;
 try
@@ -367,4 +367,4 @@ while true
 end
 fclose(input);
 fclose(output);
-```
+``` }

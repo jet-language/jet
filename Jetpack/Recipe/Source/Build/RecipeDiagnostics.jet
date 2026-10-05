@@ -175,7 +175,7 @@ pub struct RecipeDiagnostic {
 
 #Error
 pub enum RecipeError {
-    Io(IOError)
+    IO(IOError)
     InvalidInput(String)
     InvalidData(String)
     PermissionDenied(String)
@@ -186,7 +186,7 @@ pub enum RecipeError {
 
     fn message(self) -> String Never! {
         if self == {
-            .Io(error) -> "{error}"
+            .IO(error) -> "{error}"
             .InvalidInput(text) | .InvalidData(text) | .PermissionDenied(text) | .AlreadyExists(text) | .NotFound(text) | .Other(text) | .Update(text) -> text
         }
     }
@@ -194,7 +194,7 @@ pub enum RecipeError {
     // Rust `error.kind() == ErrorKind::NotFound` across both carriers.
     fn is_not_found(self) -> Bool Never! {
         if self == {
-            .Io(inner) -> {
+            .IO(inner) -> {
                 if inner == {
                     .NotFound(_) -> true
                     else -> false
@@ -208,7 +208,7 @@ pub enum RecipeError {
     // Rust `error.kind() == ErrorKind::AlreadyExists` across both carriers.
     fn is_already_exists(self) -> Bool Never! {
         if self == {
-            .Io(inner) -> {
+            .IO(inner) -> {
                 if inner == {
                     .AlreadyExists(_) -> true
                     else -> false
@@ -220,4 +220,4 @@ pub enum RecipeError {
     }
 }
 
-impl IOError -> RecipeError { RecipeError.Io(self) }
+impl IOError -> RecipeError { RecipeError.IO(self) }

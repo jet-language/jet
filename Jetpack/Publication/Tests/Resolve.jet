@@ -1,0 +1,291 @@
+// Original Source/Publish/Resolve.rs:513-648 and Publish/mod.rs:312-355,
+// plus every candidate-policy/proof/ordering branch. Real SemVer + Diagnostic.
+// Full closure proof retains #4313/#4403, #4303 borrowed trim ABI, and
+// #4414 String.split iterator next() returning None. No acceptance case removed.
+fn publication_resolve_test_version(text: String) -> PublicationSemVer Never! {
+    publication_parse_semver(text) ?? panic("invalid resolver fixture version: {text}")
+}
+fn publication_resolve_test_constraint(package: String, range: String, from: String) -> PublicationVersionConstraint Never! {
+    PublicationVersionConstraint{package: package, req: publication_parse_version_req(range) ?? panic("invalid resolver fixture requirement: {range}"), from: from}
+}
+fn publication_resolve_test_candidate(version: String, dependencies: [PublicationVersionConstraint]) -> PublicationSolverCandidate Never! {
+    PublicationSolverCandidate{version: publication_resolve_test_version(version), dependencies: dependencies, rejected: [String: [PublicationSemVer]]{}, preferred: [String: [PublicationVersionReq]]{}, strict: [String]{}}
+}
+fn publication_resolve_test_selected(result: PublicationSemVer PublicationDiagnosticError!) -> String Never! {
+    if result == {
+        .Ok(version) -> return publication_semver_display(version)
+        .Err(error) -> panic("unexpected selection conflict: {error.diagnostic.why}")
+    }
+}
+fn publication_resolve_test_assignments(result: [String: PublicationSemVer] PublicationDiagnosticError!) -> [String: PublicationSemVer] Never! {
+    if result == {
+        .Ok(assignments) -> return assignments
+        .Err(error) -> panic("unexpected registry conflict: {error.diagnostic.why}")
+    }
+}
+fn publication_resolve_test_error(result: [String: PublicationSemVer] PublicationDiagnosticError!) -> Diagnostic Never! {
+    if result == {
+        .Ok(_) -> panic("expected registry conflict")
+        .Err(error) -> return error.diagnostic
+    }
+}
+fn publication_resolve_test_selection_error(result: PublicationSemVer PublicationDiagnosticError!) -> Diagnostic Never! {
+    if result == {
+        .Ok(_) -> panic("expected selection conflict")
+        .Err(error) -> return error.diagnostic
+    }
+}
+fn publication_resolve_test_solve(roots: [PublicationVersionConstraint], candidates: [String: [PublicationSolverCandidate]], mode: PublicationResolveMode) -> [String: PublicationSemVer] PublicationDiagnosticError! {
+    publication_solve_registry(roots, candidates, [String: String]{}, [String]{}, mode, [String]{"app"})
+}
+
+#Test("publication registry_solver_backtracks_and_keeps_a_causal_proof") {
+    roots :: [PublicationVersionConstraint]{publication_resolve_test_constraint("app", "^1.0", "root")}
+    candidates := [String: [PublicationSolverCandidate]]{
+        "app": [PublicationSolverCandidate]{
+            publication_resolve_test_candidate("1.1.0", [PublicationVersionConstraint]{publication_resolve_test_constraint("shared", "^2.0", "app 1.1.0")}),
+            publication_resolve_test_candidate("1.0.0", [PublicationVersionConstraint]{publication_resolve_test_constraint("shared", "^1.0", "app 1.0.0")})},
+        "shared": [PublicationSolverCandidate]{publication_resolve_test_candidate("1.0.0", [PublicationVersionConstraint]{})}}
+    selected :: publication_resolve_test_assignments(publication_resolve_test_solve(roots, candidates, PublicationResolveMode.Latest))
+    assert_eq(publication_semver_display(selected["app"]), "1.0.0")
+    assert_eq(publication_semver_display(selected["shared"]), "1.0.0")
+    candidates["shared"] = [PublicationSolverCandidate]{publication_resolve_test_candidate("3.0.0", [PublicationVersionConstraint]{})}
+    error :: publication_resolve_test_error(publication_resolve_test_solve(roots, candidates, PublicationResolveMode.Latest))
+    detail :: error.detail ?? panic("conflict must carry its proof tree")
+    assert(detail.contains("PubGrub proof tree:"))
+    assert(detail.contains("PubGrub branches:"))
+    assert(detail.contains("app 1.1.0"))
+    assert(detail.contains("Smallest fixes:"))
+}
+
+#Test("publication selective_update_treats_unrelated_lock_as_exact") {
+    roots :: [PublicationVersionConstraint]{publication_resolve_test_constraint("app", "*", "root"), publication_resolve_test_constraint("shared", "*", "root")}
+    candidates :: [String: [PublicationSolverCandidate]]{
+        "app": [PublicationSolverCandidate]{publication_resolve_test_candidate("1.0.0", [PublicationVersionConstraint]{})},
+        "shared": [PublicationSolverCandidate]{publication_resolve_test_candidate("2.0.0", [PublicationVersionConstraint]{})}}
+    error :: publication_resolve_test_error(publication_solve_registry(roots, candidates, [String: String]{"shared": "1.0.0"}, [String]{"app"}, PublicationResolveMode.Conservative, [String]{"app", "shared"}))
+    assert_eq(error.code, "E2602")
+    assert((error.detail ?? "").contains("shared"))
+}
+
+#Test("publication conflict_detection_disjoint_majors") {
+    constraints :: [PublicationVersionConstraint]{publication_resolve_test_constraint("foo", "^1.0", "bar 0.1.0"), publication_resolve_test_constraint("foo", "^2.0", "baz 0.1.0")}
+    diagnostics :: publication_check_conflicts(constraints, [String: [PublicationSemVer]]{})
+    assert(diagnostics.len() > 0)
+    assert_eq(diagnostics[0].code, "E2602")
+}
+
+#Test("publication conflict_compatible_ranges_no_conflict") {
+    constraints :: [PublicationVersionConstraint]{publication_resolve_test_constraint("foo", "^1.0", "bar 0.1.0"), publication_resolve_test_constraint("foo", "^1.2", "baz 0.1.0")}
+    available :: [String: [PublicationSemVer]]{"foo": [PublicationSemVer]{publication_resolve_test_version("1.2.0"), publication_resolve_test_version("1.3.0")}}
+    assert_eq(publication_check_conflicts(constraints, available).len(), 0)
+}
+
+#Test("publication resolve mode vocabulary and default") {
+    assert_eq(publication_resolve_mode_label(publication_resolve_mode_default()), "conservative")
+    assert_eq(publication_resolve_mode_label(PublicationResolveMode.Latest), "latest")
+    assert_eq(publication_resolve_mode_label(PublicationResolveMode.Lowest), "lowest")
+    assert_eq(publication_resolve_mode_label(PublicationResolveMode.LowestDirect), "lowest-direct")
+}
+
+#Test("publication compatible selectors filter intersection and choose extrema") {
+    constraints :: [PublicationVersionConstraint]{publication_resolve_test_constraint("app", "^1.0", "root"), publication_resolve_test_constraint("app", ">=1.2.0", "other")}
+    available :: [PublicationSemVer]{publication_resolve_test_version("1.1.0"), publication_resolve_test_version("2.0.0"), publication_resolve_test_version("1.2.0"), publication_resolve_test_version("1.9.0")}
+    loop mode in ([PublicationResolveMode]{PublicationResolveMode.Conservative, PublicationResolveMode.Latest}) -> assert_eq(publication_resolve_test_selected(publication_select_compatible("app", constraints, available, mode)), "1.9.0")
+    loop mode in ([PublicationResolveMode]{PublicationResolveMode.Lowest, PublicationResolveMode.LowestDirect}) -> assert_eq(publication_resolve_test_selected(publication_select_compatible("app", constraints, available, mode)), "1.2.0")
+}
+
+#Test("publication selector equal precedence retains Rust max min tie behavior") {
+    versions :: [PublicationSemVer]{publication_resolve_test_version("1.0.0+z"), publication_resolve_test_version("1.0.0+a")}
+    assert_eq(publication_resolve_test_selected(publication_select_highest_compatible("app", [PublicationVersionConstraint]{}, versions)), "1.0.0+a")
+    assert_eq(publication_resolve_test_selected(publication_select_compatible("app", [PublicationVersionConstraint]{}, versions, PublicationResolveMode.Lowest)), "1.0.0+z")
+}
+
+#Test("publication selector all unsatisfiable reasons and conflicting pair") {
+    constraints := [PublicationVersionConstraint]{publication_resolve_test_constraint("app", "*", "uninvolved"), publication_resolve_test_constraint("app", "^1", "left"), publication_resolve_test_constraint("app", "^2", "right")}
+    error :: publication_resolve_test_selection_error(publication_select_highest_compatible("app", constraints, [PublicationSemVer]{}))
+    assert(error.why.contains("from `left`"))
+    assert(error.why.contains("from `right`"))
+    assert((error.detail ?? "").contains("two requirements have no overlapping version"))
+    constraints = [PublicationVersionConstraint]{publication_resolve_test_constraint("app", "^1", "left"), publication_resolve_test_constraint("app", "^1.2", "right")}
+    overlap :: publication_resolve_test_selection_error(publication_select_compatible("app", constraints, [PublicationSemVer]{}, PublicationResolveMode.Lowest))
+    assert((overlap.detail ?? "").contains("the registry has no candidate in the overlapping range"))
+    single :: publication_resolve_test_selection_error(publication_select_highest_compatible("app", [PublicationVersionConstraint]{constraints[0]}, [PublicationSemVer]{}))
+    assert(single.why.contains("(no compatible candidate)"))
+    assert((single.detail ?? "").contains("change `left` to a published compatible requirement"))
+    empty :: publication_resolve_test_selection_error(publication_select_highest_compatible("app", [PublicationVersionConstraint]{}, [PublicationSemVer]{}))
+    assert(empty.why.contains("from `root`"))
+    assert_eq(empty.detail ?? "", "PubGrub proof tree:\n- app: the registry has no published candidate")
+}
+
+#Test("publication graph LowestDirect lowers only roots and Lowest lowers every edge") {
+    roots :: [PublicationVersionConstraint]{publication_resolve_test_constraint("app", "*", "root")}
+    dep :: [PublicationVersionConstraint]{publication_resolve_test_constraint("shared", "*", "app")}
+    candidates :: [String: [PublicationSolverCandidate]]{
+        "app": [PublicationSolverCandidate]{publication_resolve_test_candidate("1.0.0", dep), publication_resolve_test_candidate("2.0.0", dep)},
+        "shared": [PublicationSolverCandidate]{publication_resolve_test_candidate("1.0.0", [PublicationVersionConstraint]{}), publication_resolve_test_candidate("2.0.0", [PublicationVersionConstraint]{})}}
+    direct :: publication_resolve_test_assignments(publication_resolve_test_solve(roots, candidates, PublicationResolveMode.LowestDirect))
+    assert_eq(publication_semver_display(direct["app"]), "1.0.0")
+    assert_eq(publication_semver_display(direct["shared"]), "2.0.0")
+    lowest :: publication_resolve_test_assignments(publication_resolve_test_solve(roots, candidates, PublicationResolveMode.Lowest))
+    assert_eq(publication_semver_display(lowest["shared"]), "1.0.0")
+    latest :: publication_resolve_test_assignments(publication_resolve_test_solve(roots, candidates, PublicationResolveMode.Latest))
+    assert_eq(publication_semver_display(latest["app"]), "2.0.0")
+}
+
+#Test("publication conservative lock preference fallback and scoped update") {
+    roots :: [PublicationVersionConstraint]{publication_resolve_test_constraint("app", "*", "root")}
+    candidates :: [String: [PublicationSolverCandidate]]{"app": [PublicationSolverCandidate]{publication_resolve_test_candidate("1.0.0", [PublicationVersionConstraint]{}), publication_resolve_test_candidate("2.0.0", [PublicationVersionConstraint]{})}}
+    locked :: [String: String]{"app": "1.0.0"}
+    preserved :: publication_resolve_test_assignments(publication_solve_registry(roots, candidates, locked, [String]{}, PublicationResolveMode.Conservative, [String]{}))
+    assert_eq(publication_semver_display(preserved["app"]), "1.0.0")
+    updated :: publication_resolve_test_assignments(publication_solve_registry(roots, candidates, locked, [String]{"app"}, PublicationResolveMode.Conservative, [String]{}))
+    assert_eq(publication_semver_display(updated["app"]), "2.0.0")
+    fallback :: publication_resolve_test_assignments(publication_solve_registry(roots, candidates, [String: String]{"app": "0.0.1"}, [String]{}, PublicationResolveMode.Conservative, [String]{}))
+    assert_eq(publication_semver_display(fallback["app"]), "2.0.0")
+    latest :: publication_resolve_test_assignments(publication_solve_registry(roots, candidates, locked, [String]{}, PublicationResolveMode.Latest, [String]{}))
+    assert_eq(publication_semver_display(latest["app"]), "2.0.0")
+}
+
+#Test("publication selective exact lock retains build metadata") {
+    roots :: [PublicationVersionConstraint]{publication_resolve_test_constraint("shared", "*", "root")}
+    candidates :: [String: [PublicationSolverCandidate]]{"shared": [PublicationSolverCandidate]{publication_resolve_test_candidate("1.0.0+a", [PublicationVersionConstraint]{}), publication_resolve_test_candidate("1.0.0+z", [PublicationVersionConstraint]{})}}
+    selected :: publication_resolve_test_assignments(publication_solve_registry(roots, candidates, [String: String]{"shared": "1.0.0+z"}, [String]{"app"}, PublicationResolveMode.Conservative, [String]{}))
+    assert_eq(publication_semver_display(selected["shared"]), "1.0.0+z")
+}
+
+#Test("publication graph merges rejection preference and strict candidate edges") {
+    root_candidate := publication_resolve_test_candidate("1.0.0", [PublicationVersionConstraint]{publication_resolve_test_constraint("shared", "^1", "app")})
+    root_candidate.rejected["shared"] = [PublicationSemVer]{publication_resolve_test_version("1.9.0+rejected")}
+    root_candidate.preferred["shared"] = [PublicationVersionReq]{publication_parse_version_req("=1.1.0") ?? panic("fixture")}
+    &root_candidate.strict.push("shared")
+    candidates :: [String: [PublicationSolverCandidate]]{
+        "app": [PublicationSolverCandidate]{root_candidate},
+        "shared": [PublicationSolverCandidate]{publication_resolve_test_candidate("1.9.0", [PublicationVersionConstraint]{}), publication_resolve_test_candidate("1.1.0", [PublicationVersionConstraint]{}), publication_resolve_test_candidate("1.2.0", [PublicationVersionConstraint]{}), publication_resolve_test_candidate("2.0.0", [PublicationVersionConstraint]{})}}
+    roots :: [PublicationVersionConstraint]{publication_resolve_test_constraint("app", "*", "root")}
+    selected :: publication_resolve_test_assignments(publication_solve_registry(roots, candidates, [String: String]{"shared": "1.2.0"}, [String]{}, PublicationResolveMode.Conservative, [String]{}))
+    assert_eq(publication_semver_display(selected["shared"]), "1.1.0")
+}
+
+#Test("publication backtracking isolates candidate local policies") {
+    bad := publication_resolve_test_candidate("2.0.0", [PublicationVersionConstraint]{publication_resolve_test_constraint("shared", "*", "app 2")})
+    bad.rejected["shared"] = [PublicationSemVer]{publication_resolve_test_version("1.0.0")}
+    candidates :: [String: [PublicationSolverCandidate]]{
+        "app": [PublicationSolverCandidate]{bad, publication_resolve_test_candidate("1.0.0", [PublicationVersionConstraint]{publication_resolve_test_constraint("shared", "*", "app 1")})},
+        "shared": [PublicationSolverCandidate]{publication_resolve_test_candidate("1.0.0", [PublicationVersionConstraint]{})}}
+    selected :: publication_resolve_test_assignments(publication_resolve_test_solve([PublicationVersionConstraint]{publication_resolve_test_constraint("app", "*", "root")}, candidates, PublicationResolveMode.Latest))
+    assert_eq(publication_semver_display(selected["app"]), "1.0.0")
+}
+
+#Test("publication later dependency invalidates assigned version and backtracks") {
+    roots :: [PublicationVersionConstraint]{publication_resolve_test_constraint("a", "*", "root"), publication_resolve_test_constraint("z", "*", "root")}
+    candidates :: [String: [PublicationSolverCandidate]]{
+        "a": [PublicationSolverCandidate]{publication_resolve_test_candidate("2.0.0", [PublicationVersionConstraint]{}), publication_resolve_test_candidate("1.0.0", [PublicationVersionConstraint]{})},
+        "z": [PublicationSolverCandidate]{publication_resolve_test_candidate("1.0.0", [PublicationVersionConstraint]{publication_resolve_test_constraint("a", "^1", "z 1")})}}
+    selected :: publication_resolve_test_assignments(publication_resolve_test_solve(roots, candidates, PublicationResolveMode.Latest))
+    assert_eq(publication_semver_display(selected["a"]), "1.0.0")
+    impossible :: [String: [PublicationSolverCandidate]]{"a": [PublicationSolverCandidate]{candidates["a"][0]}, "z": candidates["z"]}
+    error :: publication_resolve_test_error(publication_resolve_test_solve(roots, impossible, PublicationResolveMode.Latest))
+    assert((error.detail ?? "").contains("the selected version is incompatible with a later dependency"))
+}
+
+#Test("publication graph cycles terminate and empty graph succeeds") {
+    candidates :: [String: [PublicationSolverCandidate]]{
+        "a": [PublicationSolverCandidate]{publication_resolve_test_candidate("1.0.0", [PublicationVersionConstraint]{publication_resolve_test_constraint("b", "^1", "a")})},
+        "b": [PublicationSolverCandidate]{publication_resolve_test_candidate("1.0.0", [PublicationVersionConstraint]{publication_resolve_test_constraint("a", "^1", "b")})}}
+    selected :: publication_resolve_test_assignments(publication_resolve_test_solve([PublicationVersionConstraint]{publication_resolve_test_constraint("a", "*", "root")}, candidates, PublicationResolveMode.Latest))
+    assert_eq(selected.len(), 2)
+    assert_eq(publication_resolve_test_assignments(publication_resolve_test_solve([PublicationVersionConstraint]{}, candidates, PublicationResolveMode.Latest)).len(), 0)
+}
+
+#Test("publication graph deterministic string tie break and package proof ordering") {
+    roots :: [PublicationVersionConstraint]{publication_resolve_test_constraint("z", "*", "root z"), publication_resolve_test_constraint("a", "*", "root a")}
+    error :: publication_resolve_test_error(publication_resolve_test_solve(roots, [String: [PublicationSolverCandidate]]{}, PublicationResolveMode.Latest))
+    assert((error.detail ?? "").starts_with("PubGrub proof tree:\n- a:"))
+    candidates :: [String: [PublicationSolverCandidate]]{"app": [PublicationSolverCandidate]{publication_resolve_test_candidate("1.0.0+z", [PublicationVersionConstraint]{}), publication_resolve_test_candidate("1.0.0+a", [PublicationVersionConstraint]{})}}
+    selected :: publication_resolve_test_assignments(publication_resolve_test_solve([PublicationVersionConstraint]{publication_resolve_test_constraint("app", "*", "root")}, candidates, PublicationResolveMode.Latest))
+    assert_eq(publication_semver_display(selected["app"]), "1.0.0+a")
+}
+
+#Test("publication conflict checker candidate path skips singles and preserves pair multiplicity") {
+    constraints :: [PublicationVersionConstraint]{publication_resolve_test_constraint("single", "^9", "single"), publication_resolve_test_constraint("foo", "^1", "one"), publication_resolve_test_constraint("foo", "^2", "two"), publication_resolve_test_constraint("foo", "^3", "three")}
+    empty :: publication_check_conflicts(constraints, [String: [PublicationSemVer]]{})
+    assert_eq(empty.len(), 3)
+    available :: [String: [PublicationSemVer]]{"foo": [PublicationSemVer]{publication_resolve_test_version("1.0.0"), publication_resolve_test_version("2.0.0")}}
+    diagnostics :: publication_check_conflicts(constraints, available)
+    assert_eq(diagnostics.len(), 1)
+    assert((diagnostics[0].detail ?? "").contains("available versions cannot satisfy both requirements"))
+}
+
+#Test("publication E2602 exact canonical registered wording and proof indentation") {
+    diagnostic :: publication_e2602("foo", "^1", "bar", "^2", "baz")
+    assert_eq(diagnostic.code, "E2602")
+    assert_eq(diagnostic.what, "Dependency resolver conflict: `foo` has incompatible version requirements")
+    assert_eq(diagnostic.why, "`foo` requires `^1` from `bar`, but `^2` from `baz`; no version satisfies both.")
+    assert_eq(diagnostic.fix, "Upgrade or downgrade one of the conflicting dependents so their `foo` constraints overlap, or ask the authors to release a compatible version.")
+    assert(diagnostic.span == None)
+    assert(diagnostic.detail == None)
+    crlf :: String.from_bytes([U8]{U8{97}, U8{13}, U8{10}, U8{10}, U8{98}, U8{10}}) ?? panic("valid UTF-8 fixture")
+    assert_eq(publication_indent_proof(crlf), "    a\n    \n    b")
+    assert_eq(publication_indent_proof(""), "")
+    // Deliberate failure-control anchor: scratch assembly changes 1 to 2 only.
+    assert_eq(publication_resolve_test_version("1.0.0").major, 1)
+}
+
+#Test("publication multi edge policy unions and duplicate requirements") {
+    a := publication_resolve_test_candidate("1.0.0", [PublicationVersionConstraint]{publication_resolve_test_constraint("shared", ">=1.0.0", "a")})
+    b := publication_resolve_test_candidate("1.0.0", [PublicationVersionConstraint]{publication_resolve_test_constraint("shared", "<2.0.0", "b")})
+    a.rejected["shared"] = [PublicationSemVer]{publication_resolve_test_version("1.9.0")}
+    b.rejected["shared"] = [PublicationSemVer]{publication_resolve_test_version("1.8.0")}
+    a.preferred["shared"] = [PublicationVersionReq]{publication_parse_version_req("=1.2.0") ?? panic("fixture")}
+    b.preferred["shared"] = [PublicationVersionReq]{publication_parse_version_req("=1.3.0") ?? panic("fixture")}
+    &a.strict.push("shared")
+    &b.strict.push("shared")
+    roots :: [PublicationVersionConstraint]{publication_resolve_test_constraint("b", "*", "root"), publication_resolve_test_constraint("a", "*", "root"), publication_resolve_test_constraint("a", "^1", "duplicate root")}
+    candidates :: [String: [PublicationSolverCandidate]]{
+        "a": [PublicationSolverCandidate]{a},
+        "b": [PublicationSolverCandidate]{b},
+        "shared": [PublicationSolverCandidate]{publication_resolve_test_candidate("1.9.0", [PublicationVersionConstraint]{}), publication_resolve_test_candidate("1.8.0", [PublicationVersionConstraint]{}), publication_resolve_test_candidate("1.5.0", [PublicationVersionConstraint]{}), publication_resolve_test_candidate("1.3.0", [PublicationVersionConstraint]{}), publication_resolve_test_candidate("1.2.0", [PublicationVersionConstraint]{})}}
+    selected :: publication_resolve_test_assignments(publication_resolve_test_solve(roots, candidates, PublicationResolveMode.Latest))
+    assert_eq(publication_semver_display(selected["shared"]), "1.3.0")
+}
+
+#Test("publication exact conflict proof retains all causes and smallest fixes") {
+    constraints :: [PublicationVersionConstraint]{publication_resolve_test_constraint("foo", "*", "root"), publication_resolve_test_constraint("foo", "^1", "left"), publication_resolve_test_constraint("foo", "^2", "right")}
+    error :: publication_resolve_test_selection_error(publication_select_highest_compatible("foo", constraints, [PublicationSemVer]{}))
+    assert_eq(error.detail ?? "", "PubGrub proof tree:\n- foo: two requirements have no overlapping version\n  - `root` requires `*`\n  - `left` requires `^1`\n  - `right` requires `^2`\nSmallest fixes: change `left` or `right` so their `foo` requirements overlap.")
+}
+
+#Test("publication conflict checker rejects pairwise satisfiable three OR ranges") {
+    // Main-authorized Rust tandem regression: each pair has a live witness,
+    // but no version satisfies all three. Every cause must survive E2602.
+    constraints :: [PublicationVersionConstraint]{
+        publication_resolve_test_constraint("foo", "=1.0.0 || =2.0.0", "one"),
+        publication_resolve_test_constraint("foo", "=1.0.0 || =3.0.0", "two"),
+        publication_resolve_test_constraint("foo", "=2.0.0 || =3.0.0", "three")}
+    available :: [String: [PublicationSemVer]]{"foo": [PublicationSemVer]{publication_resolve_test_version("1.0.0"), publication_resolve_test_version("2.0.0"), publication_resolve_test_version("3.0.0")}}
+    diagnostics :: publication_check_conflicts(constraints, available)
+    assert_eq(diagnostics.len(), 1)
+    assert_eq(diagnostics[0].code, "E2602")
+    loop cause in ([String]{"one", "two", "three"}) {
+        assert(diagnostics[0].why.contains("`{cause}`"))
+        assert((diagnostics[0].detail ?? "").contains("`{cause}`"))
+    }
+    loop constraint in constraints -> assert(diagnostics[0].why.contains(publication_version_req_display(constraint.req)))
+    assert((diagnostics[0].detail ?? "").contains("no published candidate satisfies every requirement"))
+    assert_eq(publication_check_conflicts([PublicationVersionConstraint]{constraints[0], constraints[1]}, available).len(), 0)
+    absent :: publication_check_conflicts(constraints, [String: [PublicationSemVer]]{})
+    assert_eq(absent.len(), 1)
+    assert_eq(absent[0].code, "E2602")
+    loop cause in ([String]{"one", "two", "three"}) -> assert(absent[0].why.contains("`{cause}`"))
+    // No disjoint pair exists, so the proof must not claim one (lead ruling:
+    // reuse the existing Rust whole-set reason, Resolve.rs:292).
+    assert((absent[0].detail ?? "").contains("PubGrub proof tree:\n- foo: no published candidate satisfies every requirement"))
+    assert(!(absent[0].detail ?? "").contains("two requirements have no overlapping version"))
+    assert_eq(publication_check_conflicts([PublicationVersionConstraint]{constraints[0], constraints[1]}, [String: [PublicationSemVer]]{}).len(), 0)
+    // A broad first range must not hide the later genuinely disjoint pair.
+    later :: publication_check_conflicts([PublicationVersionConstraint]{publication_resolve_test_constraint("foo", "*", "root"), publication_resolve_test_constraint("foo", "=1.0.0", "left"), publication_resolve_test_constraint("foo", "=2.0.0", "right")}, available)
+    assert_eq(later.len(), 1)
+    assert(later[0].why.contains("from `left`"))
+    assert(later[0].why.contains("from `right`"))
+}

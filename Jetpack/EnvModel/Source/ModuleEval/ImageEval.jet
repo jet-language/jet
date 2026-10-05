@@ -2,7 +2,7 @@
 // capture it as an OCI `ImagePlan`. OCI realization consumes the typed plan.
 
 // The fields an `Image` record may carry besides `from:`/`format:`/`target:`.
-enum ImageField {
+enum EnvModelImageField {
     Kind
     Expose
     EnvVars
@@ -13,17 +13,17 @@ enum ImageField {
     Entrypoint
     User
 
-    fn parse(name: String) -> ImageField? Never! {
+    fn parse(name: String) -> EnvModelImageField? Never! {
         if name == {
-            @IMAGE_FIELD_KIND -> Val(ImageField.Kind)
-            @IMAGE_FIELD_EXPOSE -> Val(ImageField.Expose)
-            @IMAGE_FIELD_ENV_VARS -> Val(ImageField.EnvVars)
-            @IMAGE_FIELD_FILES -> Val(ImageField.Files)
-            @IMAGE_FIELD_BASE -> Val(ImageField.Base)
-            @IMAGE_FIELD_SERVICES -> Val(ImageField.Services)
-            @IMAGE_FIELD_HEALTH -> Val(ImageField.Health)
-            @IMAGE_FIELD_ENTRYPOINT -> Val(ImageField.Entrypoint)
-            @IMAGE_FIELD_USER -> Val(ImageField.User)
+            IMAGE_FIELD_KIND -> Val(EnvModelImageField.Kind)
+            IMAGE_FIELD_EXPOSE -> Val(EnvModelImageField.Expose)
+            IMAGE_FIELD_ENV_VARS -> Val(EnvModelImageField.EnvVars)
+            IMAGE_FIELD_FILES -> Val(EnvModelImageField.Files)
+            IMAGE_FIELD_BASE -> Val(EnvModelImageField.Base)
+            IMAGE_FIELD_SERVICES -> Val(EnvModelImageField.Services)
+            IMAGE_FIELD_HEALTH -> Val(EnvModelImageField.Health)
+            IMAGE_FIELD_ENTRYPOINT -> Val(EnvModelImageField.Entrypoint)
+            IMAGE_FIELD_USER -> Val(EnvModelImageField.User)
             else -> None
         }
     }
@@ -31,8 +31,8 @@ enum ImageField {
 
 // U13: an image `target:` must name a known OS+arch pair.
 fn envmodel_check_platform(os: String, arch: String, span: Span) -> String EnvModelEvalError! {
-    known_arch :: arch == @PLATFORM_ARCH_X64 || arch == @PLATFORM_ARCH_ARM64
-    if os != @PLATFORM_OS_LINUX || !known_arch -> return Err(envmodel_unknown_platform(os, arch, span))
+    known_arch :: arch == PLATFORM_ARCH_X64 || arch == PLATFORM_ARCH_ARM64
+    if os != PLATFORM_OS_LINUX || !known_arch -> return Err(envmodel_unknown_platform(os, arch, span))
     Ok("{os}.{arch}")
 }
 
@@ -41,21 +41,22 @@ fn envmodel_check_platform(os: String, arch: String, span: Span) -> String EnvMo
 // environment images. Every other field is rejected — `Image` stays a closed
 // record (unlike the open `Service`).
 pub fn envmodel_evaluate_image(path: String, lit: ImageLit, scope: ModuleEvalScope, globals: [String: CtValue]) -> ImagePlan EnvModelEvalError! {
-    from_name := None
+    from_name := String?{None}
     from_system := false
     from_environment := false
     from_span := lit.span
     format_written := false
-    target := None
-    kind_word := None
+    target := String?{None}
+    kind_word := String?{None}
+    kind_span := lit.span
     expose := [Int]{}
     env_vars := [ImageEnvVar]{}
     image_files := [String]{}
-    base := None
+    base := String?{None}
     services := [String]{}
-    health := None
-    entrypoint := None
-    user := None
+    health := String?{None}
+    entrypoint := String?{None}
+    user := Int?{None}
     loop field in lit.fields {
         if field.value == {
             .From(source, span) -> {
@@ -80,37 +81,40 @@ pub fn envmodel_evaluate_image(path: String, lit: ImageLit, scope: ModuleEvalSco
             .Format(_, _) -> format_written = true
             .Platform(os, arch, span) -> target = Val(envmodel_check_platform(os, arch, span))
             .Other(expr) -> {
-                known :: ImageField.parse(field.name) ?? return Err(envmodel_image_restated_field(field.name, field.name_span))
+                known :: EnvModelImageField.parse(field.name) ?? return Err(envmodel_image_restated_field(field.name, field.name_span))
                 if known == {
-                    .Kind -> kind_word = Val((word: envmodel_bare_enum_word(expr, field.name_span), span: field.name_span))
+                    .Kind -> {
+                        kind_word = Val(envmodel_bare_enum_word(expr, field.name_span))
+                        kind_span = field.name_span
+                    }
                     .Expose -> expose = envmodel_eval_expose(expr, scope, globals, field.name_span)
                     .EnvVars -> env_vars = envmodel_eval_env_vars(expr, scope, globals, field.name_span)
                     .Files -> image_files = envmodel_eval_files(expr, scope, globals, field.name_span)
                     .Base -> base = Val(envmodel_eval_base(expr, scope, globals, field.name_span))
-                    .Services -> services = envmodel_eval_names(expr, @IMAGE_FIELD_SERVICES, scope, globals, field.name_span)
-                    .Health -> health = Val(envmodel_eval_string(expr, @IMAGE_FIELD_HEALTH, scope, globals, field.name_span))
-                    .Entrypoint -> entrypoint = Val(envmodel_eval_string(expr, @IMAGE_FIELD_ENTRYPOINT, scope, globals, field.name_span))
+                    .Services -> services = envmodel_eval_names(expr, IMAGE_FIELD_SERVICES, scope, globals, field.name_span)
+                    .Health -> health = Val(envmodel_eval_string(expr, IMAGE_FIELD_HEALTH, scope, globals, field.name_span))
+                    .Entrypoint -> entrypoint = Val(envmodel_eval_string(expr, IMAGE_FIELD_ENTRYPOINT, scope, globals, field.name_span))
                     .User -> user = Val(envmodel_eval_user(expr, scope, globals, field.name_span))
                 }
             }
         }
     }
     from :: from_name ?? return Err(envmodel_image_missing_from(lit.span))
-    if from_system -> return Err(envmodel_image_kind_from_mismatch(@IMAGE_KIND_OCI, from_span))
+    if from_system -> return Err(envmodel_image_kind_from_mismatch(IMAGE_KIND_OCI, from_span))
     if kind_word == {
         .Val(written) -> {
-            if written.word == @IMAGE_KIND_ISO -> return Err(envmodel_image_kind_from_mismatch(@IMAGE_KIND_ISO, written.span))
-            if written.word != @IMAGE_KIND_OCI -> return Err(envmodel_image_unknown_kind(written.word, written.span))
+            if written == IMAGE_KIND_ISO -> return Err(envmodel_image_kind_from_mismatch(IMAGE_KIND_ISO, kind_span))
+            if written != IMAGE_KIND_OCI -> return Err(envmodel_image_unknown_kind(written, kind_span))
         }
         .None -> {}
     }
     // `.Oci` never reads `format:`, and a package image has no system to
     // cross-compile for.
-    if format_written -> return Err(envmodel_image_restated_field(@IMAGE_FIELD_FORMAT, from_span))
-    if target != None && !from_environment -> return Err(envmodel_image_restated_field(@SYSTEM_FIELD_TARGET, from_span))
+    if format_written -> return Err(envmodel_image_restated_field(IMAGE_FIELD_FORMAT, from_span))
+    if target != None && !from_environment -> return Err(envmodel_image_restated_field(SYSTEM_FIELD_TARGET, from_span))
     Ok(ImagePlan{
         name: path,
-        kind: ImageKind.Oci,
+        kind: ImageKind.OCI,
         from: from,
         from_environment: from_environment,
         target: target,
@@ -150,10 +154,10 @@ fn envmodel_eval_names(expr: Expr, field: String, scope: ModuleEvalScope, global
 fn envmodel_eval_user(expr: Expr, scope: ModuleEvalScope, globals: [String: CtValue], span: Span) -> Int EnvModelEvalError! {
     if envmodel_evaluate_expression(expr, globals, scope) == {
         .Int(number) -> {
-            if number < 0 || number > 4294967295 -> return Err(envmodel_image_field_shape(@IMAGE_FIELD_USER, "a non-negative integer", span))
+            if number < 0 || number > 4294967295 -> return Err(envmodel_image_field_shape(IMAGE_FIELD_USER, "a non-negative integer", span))
             Ok(number)
         }
-        else -> Err(envmodel_image_field_shape(@IMAGE_FIELD_USER, "a non-negative integer", span))
+        else -> Err(envmodel_image_field_shape(IMAGE_FIELD_USER, "a non-negative integer", span))
     }
 }
 
@@ -168,7 +172,7 @@ fn envmodel_bare_enum_word(expr: Expr, span: Span) -> String EnvModelEvalError! 
         }
         else -> {}
     }
-    Err(envmodel_image_field_shape(@IMAGE_FIELD_KIND, "a bare leading-dot value, e.g. `kind: .Oci`", span))
+    Err(envmodel_image_field_shape(IMAGE_FIELD_KIND, "a bare leading-dot value, e.g. `kind: .Oci`", span))
 }
 
 // D-JPK-IMAGE1: `expose: [Int]` — TCP ports, sorted + deduped so the OCI
@@ -177,15 +181,15 @@ fn envmodel_bare_enum_word(expr: Expr, span: Span) -> String EnvModelEvalError! 
 fn envmodel_eval_expose(expr: Expr, scope: ModuleEvalScope, globals: [String: CtValue], span: Span) -> [Int] EnvModelEvalError! {
     items :: if envmodel_evaluate_expression(expr, globals, scope) == {
         .List(items) -> items
-        else -> { return Err(envmodel_image_field_shape(@IMAGE_FIELD_EXPOSE, "a list of ports, e.g. `expose: [8080, 443]`", span)) }
+        else -> { return Err(envmodel_image_field_shape(IMAGE_FIELD_EXPOSE, "a list of ports, e.g. `expose: [8080, 443]`", span)) }
     }
     ports := [Int]{}
     loop item in items {
         port :: if item == {
             .Int(number) -> number
-            else -> { return Err(envmodel_image_field_shape(@IMAGE_FIELD_EXPOSE, "a list of ports, e.g. `expose: [8080, 443]`", span)) }
+            else -> { return Err(envmodel_image_field_shape(IMAGE_FIELD_EXPOSE, "a list of ports, e.g. `expose: [8080, 443]`", span)) }
         }
-        if port < 1 || port > 65535 -> return Err(envmodel_image_field_shape(@IMAGE_FIELD_EXPOSE, "a list of TCP ports from 1 through 65535", span))
+        if port < 1 || port > 65535 -> return Err(envmodel_image_field_shape(IMAGE_FIELD_EXPOSE, "a list of TCP ports from 1 through 65535", span))
         &ports.push(port)
     }
     &ports.sort()
@@ -201,17 +205,17 @@ fn envmodel_eval_expose(expr: Expr, scope: ModuleEvalScope, globals: [String: Ct
 fn envmodel_eval_env_vars(expr: Expr, scope: ModuleEvalScope, globals: [String: CtValue], span: Span) -> [ImageEnvVar] EnvModelEvalError! {
     entries :: if envmodel_evaluate_expression(expr, globals, scope) == {
         .Map(entries) -> entries
-        else -> { return Err(envmodel_image_field_shape(@IMAGE_FIELD_ENV_VARS, "a map, e.g. `env_vars: [RUST_LOG: \"info\"]`", span)) }
+        else -> { return Err(envmodel_image_field_shape(IMAGE_FIELD_ENV_VARS, "a map, e.g. `env_vars: [RUST_LOG: \"info\"]`", span)) }
     }
     out := [ImageEnvVar]{}
     loop entry in entries {
         key :: if entry.key == {
             .Str(text) -> text
-            else -> { return Err(envmodel_image_field_shape(@IMAGE_FIELD_ENV_VARS, "a map with string keys, e.g. `env_vars: [RUST_LOG: \"info\"]`", span)) }
+            else -> { return Err(envmodel_image_field_shape(IMAGE_FIELD_ENV_VARS, "a map with string keys, e.g. `env_vars: [RUST_LOG: \"info\"]`", span)) }
         }
         value :: if entry.value == {
             .Str(text) -> text
-            else -> { return Err(envmodel_image_field_shape(@IMAGE_FIELD_ENV_VARS, "a map of string values, e.g. `env_vars: [RUST_LOG: \"info\"]`", span)) }
+            else -> { return Err(envmodel_image_field_shape(IMAGE_FIELD_ENV_VARS, "a map of string values, e.g. `env_vars: [RUST_LOG: \"info\"]`", span)) }
         }
         &out.push(ImageEnvVar{key: key, value: value})
     }
@@ -223,13 +227,13 @@ fn envmodel_eval_env_vars(expr: Expr, scope: ModuleEvalScope, globals: [String: 
 fn envmodel_eval_files(expr: Expr, scope: ModuleEvalScope, globals: [String: CtValue], span: Span) -> [String] EnvModelEvalError! {
     items :: if envmodel_evaluate_expression(expr, globals, scope) == {
         .List(items) -> items
-        else -> { return Err(envmodel_image_field_shape(@IMAGE_FIELD_FILES, "a list of paths, e.g. `files: [\"config/app.toml\"]`", span)) }
+        else -> { return Err(envmodel_image_field_shape(IMAGE_FIELD_FILES, "a list of paths, e.g. `files: [\"config/app.toml\"]`", span)) }
     }
     out := [String]{}
     loop item in items {
         if item == {
             .Str(text) -> { &out.push(text) }
-            else -> { return Err(envmodel_image_field_shape(@IMAGE_FIELD_FILES, "a list of paths, e.g. `files: [\"config/app.toml\"]`", span)) }
+            else -> { return Err(envmodel_image_field_shape(IMAGE_FIELD_FILES, "a list of paths, e.g. `files: [\"config/app.toml\"]`", span)) }
         }
     }
     &out.sort()
@@ -241,12 +245,12 @@ fn envmodel_eval_files(expr: Expr, scope: ModuleEvalScope, globals: [String: CtV
 // transport diagnostic for remote refs rather than changing the requested
 // base or silently building from scratch.
 fn envmodel_eval_base(expr: Expr, scope: ModuleEvalScope, globals: [String: CtValue], span: Span) -> String EnvModelEvalError! {
-    shape :: envmodel_image_field_shape(@IMAGE_FIELD_BASE, "`oci(\"<ref>\")`, e.g. `base: oci(\"debian:12\")`", span)
+    shape :: envmodel_image_field_shape(IMAGE_FIELD_BASE, "`oci(\"<ref>\")`, e.g. `base: oci(\"debian:12\")`", span)
     call :: if expr == {
         .Call(call) -> call
         else -> { return Err(shape) }
     }
-    if call.name != @IMAGE_BASE_FN || call.args.len() != 1 -> return Err(shape)
+    if call.name != IMAGE_BASE_FN || call.args.len() != 1 -> return Err(shape)
     if envmodel_evaluate_expression(call.args[0].expr, globals, scope) == {
         .Str(text) -> Ok(text)
         else -> Err(shape)

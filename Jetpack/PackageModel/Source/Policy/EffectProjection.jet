@@ -7,9 +7,9 @@
 // the policy source. Consumers never infer one role from another. Effect sets
 // are sorted, duplicate-free `[String]` (Foundation `authority_holds`).
 
-@EFFECT_AUTHORITY_PACKAGE_HOLDS :: "package.jet authority.holds"
-@EFFECT_AUTHORITY_PACKAGE_GRANTS :: "package.jet authority.grants"
-@EFFECT_STATUS_ACTION :: "build.effects"
+EFFECT_AUTHORITY_PACKAGE_HOLDS :: prep { "package.jet authority.holds" }
+EFFECT_AUTHORITY_PACKAGE_GRANTS :: prep { "package.jet authority.grants" }
+EFFECT_STATUS_ACTION :: prep { "build.effects" }
 
 // One checked program's application-boundary view.
 pub struct EffectProjection {
@@ -67,7 +67,7 @@ pub fn pkg_project_application_effects(required_effects: [String], manifest: Pac
         required_effects: required_effects,
         granted_effects: authority_parse_rights(facts.authority.holds.allow ?? [String]{}),
         denied_effects: authority_parse_rights(facts.authority.holds.deny ?? [String]{}),
-        authority: @EFFECT_AUTHORITY_PACKAGE_HOLDS
+        authority: EFFECT_AUTHORITY_PACKAGE_HOLDS
     }
 }
 
@@ -177,7 +177,7 @@ fn pkg_effect_texts(effects: [String]) -> DataTree Never! {
 }
 
 fn pkg_render_effect_json(effects: [String]) -> String Never! {
-    StatusEnvelope.new(@EFFECT_STATUS_ACTION, true).with_field("effects", pkg_effect_texts(effects)).json()
+    StatusEnvelope.new(EFFECT_STATUS_ACTION, true).with_field("effects", pkg_effect_texts(effects)).json()
 }
 
 pub fn pkg_effect_summary_line_for_program(program: EffectBudgetProgram, summaries: [String: PackageEffectSummary], default_entry: String) -> String Never! {
@@ -220,12 +220,12 @@ pub fn pkg_effect_summary_json_for_program_with_authority(program: EffectBudgetP
 
 pub fn pkg_render_effect_projection_json(projection: EffectProjection) -> String Never! {
     required :: pkg_effect_texts(projection.required_effects)
-    StatusEnvelope.new(@EFFECT_STATUS_ACTION, true)
+    StatusEnvelope.new(EFFECT_STATUS_ACTION, true)
         .with_field("effects", required)
         .with_field("required_effects", required)
         .with_field("granted_effects", pkg_effect_texts(projection.granted_effects))
         .with_field("denied_effects", pkg_effect_texts(projection.denied_effects))
-        .with_field("authority", DataTree.Text(projection.authority))
+        .with_field("authority", DataTree.Text(~projection.authority))
         .json()
 }
 

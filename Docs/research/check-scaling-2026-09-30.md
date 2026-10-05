@@ -5,15 +5,15 @@ what was measured and why each change was made.
 
 ## Setup
 
-- Binary: `~/.cache/jet-test-scratch/jet-debug-snapshot23` (debug build,
+- Binary: `~/.cache/jet-dev/scratch/jet-debug-snapshot23` (debug build,
   built 2026-09-30 04:54, before the changes below), run through
-  `~/.cache/jet-luna/safe-jet.sh` (6 GB cap) with `JET_RECEIPT_BYPASS=1`.
+  `~/.cache/jet-dev/safe-jet.sh` (6 GB cap) with `JET_RECEIPT_BYPASS=1`.
 - Units: slices of `Compiler/Bootstrap/sources.list` built with
-  `~/.cache/jet-luna/JetCompilerRunPath/slice.mjs`. Prefixes were cut at
+  `~/.cache/jet-dev/JetCompilerRunPath/slice.mjs`. Prefixes were cut at
   source-file boundaries. The Jetpack NixEval area was assembled with
   `Jetpack/Bootstrap/assemble.mjs check`.
 - Profiling: `perf` is not installed. Profiles came from a gdb sampler
-  (`~/.cache/jet-luna/CheckerSpeed/pmp.py`), which interrupts the process
+  (`~/.cache/jet-dev/CheckerSpeed/pmp.py`), which interrupts the process
   every 0.5–1 s and records every thread's stack. With full DWARF, gdb itself
   needs about 3.6 GB. With `-readnever` it needs 0.7 GB but loses inlined
   frames.
@@ -126,25 +126,25 @@ Not done for root 7:
 
 ## Commands to measure after a build
 
-Run each check alone. The slice units live under `~/.cache/jet-luna/CheckerSpeed/`.
+Run each check alone. The slice units live under `~/.cache/jet-dev/CheckerSpeed/`.
 
 ```
-cd ~/.cache/jet-luna/CheckerSpeed
+cd ~/.cache/jet-dev/CheckerSpeed
 for d in parser fp-0.5 fp-0.75 front sema; do
   (cd $d && JET=/run/current-system/sw/bin/time JET_RECEIPT_BYPASS=1 SAFE_JET_TIMEOUT=2400 \
-    ~/.cache/jet-luna/safe-jet.sh -f "WALL %e s  USER %U  MAXRSS %M KB" \
+    ~/.cache/jet-dev/safe-jet.sh -f "WALL %e s  USER %U  MAXRSS %M KB" \
     /path/to/new/jet check unit.jet 2>&1 | tail -n 3)
 done
 (cd nixeval/check/project && JET=/run/current-system/sw/bin/time JET_RECEIPT_BYPASS=1 \
-  ~/.cache/jet-luna/safe-jet.sh -f "WALL %e s  MAXRSS %M KB" /path/to/new/jet check src/jetpack.jet 2>&1 | tail -n 3)
+  ~/.cache/jet-dev/safe-jet.sh -f "WALL %e s  MAXRSS %M KB" /path/to/new/jet check src/jetpack.jet 2>&1 | tail -n 3)
 ```
 
 Profile (0.7 GB of gdb overhead):
 
 ```
-cd ~/.cache/jet-luna/CheckerSpeed/fp-0.75 && PMP_OUT=$PWD/../after.samples PMP_INTERVAL=1 \
+cd ~/.cache/jet-dev/CheckerSpeed/fp-0.75 && PMP_OUT=$PWD/../after.samples PMP_INTERVAL=1 \
   JET=/nix/store/q0blg6512mzczxmjk40whhfc57p5p545-gdb-17.1/bin/gdb JET_RECEIPT_BYPASS=1 SAFE_JET_TIMEOUT=3000 \
-  ~/.cache/jet-luna/safe-jet.sh -readnever -q -batch -x ../pmp.py --args /path/to/new/jet check unit.jet
+  ~/.cache/jet-dev/safe-jet.sh -readnever -q -batch -x ../pmp.py --args /path/to/new/jet check unit.jet
 node ../agg.mjs ../after.samples 60; node ../callers.mjs ../after.samples 'lower_mir_fragment_program$' 8
 ```
 

@@ -7,12 +7,12 @@ Files under `pkg/`: `package.jet`, `note_app.jet`, `native_window_attempt.jet`, 
 
 ## What worked
 
-- **Package check:** works. `env JET_STORE_DIR=/home/nate/.cache/jet-luna/dx3/area-gui/store scripts/agent/jet-env jet check /home/nate/.cache/jet-luna/dx3/area-gui/pkg/note_app.jet` returned `check: passed` in 112 ms. It emitted one non-blocking `L0520` warning for `IOError` display.
-- **Release host run:** works. `env JET_STORE_DIR=/home/nate/.cache/jet-luna/dx3/area-gui/store JET_UI_HEADLESS=1 scripts/agent/jet-env jet run --release /home/nate/.cache/jet-luna/dx3/area-gui/pkg/note_app.jet` printed `loaded bytes: 54`, `focus initial: Save`, `focus after Tab: Editor`, `initial renders: 1`, `edited renders: 5`, `undo restored: true`, `redo depth: 1`, and `saved: true` in 5.56 s.
+- **Package check:** works. `env JET_STORE_DIR=/home/nate/.cache/jet-dev/dx3/area-gui/store scripts/agent/jet-env jet check /home/nate/.cache/jet-dev/dx3/area-gui/pkg/note_app.jet` returned `check: passed` in 112 ms. It emitted one non-blocking `L0520` warning for `IOError` display.
+- **Release host run:** works. `env JET_STORE_DIR=/home/nate/.cache/jet-dev/dx3/area-gui/store JET_UI_HEADLESS=1 scripts/agent/jet-env jet run --release /home/nate/.cache/jet-dev/dx3/area-gui/pkg/note_app.jet` printed `loaded bytes: 54`, `focus initial: Save`, `focus after Tab: Editor`, `initial renders: 1`, `edited renders: 5`, `undo restored: true`, `redo depth: 1`, and `saved: true` in 5.56 s.
 - **Reactive UI tree:** works. The TUI frame contained the Unicode editor text, sidebar, four buttons, settings state, shortcut labels, and visible accessibility labels. `selected`, `draft`, `mode`, and `settings` updates caused five renders.
 - **Typed roles and focus:** works. `node_role` accepts button, text-input, and label roles; `set_focus_group` and `key_event("Tab")` moved focus from `Save` to `Editor`.
 - **Unicode file persistence:** works. `core.files` wrote and read `café`, `résumé`, `naïve`, and `中文`; the final save comparison printed `saved: true`.
-- **Native artifact:** works for the headless/TUI path. `env JET_STORE_DIR=/home/nate/.cache/jet-luna/dx3/area-gui/store JET_UI_HEADLESS=1 scripts/agent/jet-env jet build --release /home/nate/.cache/jet-luna/dx3/area-gui/pkg/note_app.jet` ended `jet Built build/note_app in 8.5s ✓`.
+- **Native artifact:** works for the headless/TUI path. `env JET_STORE_DIR=/home/nate/.cache/jet-dev/dx3/area-gui/store JET_UI_HEADLESS=1 scripts/agent/jet-env jet build --release /home/nate/.cache/jet-dev/dx3/area-gui/pkg/note_app.jet` ended `jet Built build/note_app in 8.5s ✓`.
 
 Representative run output:
 
@@ -50,7 +50,7 @@ saved: true
 
 ## Friction
 
-- The default evaluator cannot execute the reactive program: `env JET_STORE_DIR=/home/nate/.cache/jet-luna/dx3/area-gui/store JET_UI_HEADLESS=1 scripts/agent/jet-env jet run /home/nate/.cache/jet-luna/dx3/area-gui/pkg/note_app.jet` returned `Error [E0956]: core.reactive.signal() isn't supported by the current evaluator yet` in 1.98 s. `jet run --release` is the working path.
+- The default evaluator cannot execute the reactive program: `env JET_STORE_DIR=/home/nate/.cache/jet-dev/dx3/area-gui/store JET_UI_HEADLESS=1 scripts/agent/jet-env jet run /home/nate/.cache/jet-dev/dx3/area-gui/pkg/note_app.jet` returned `Error [E0956]: core.reactive.signal() isn't supported by the current evaluator yet` in 1.98 s. `jet run --release` is the working path.
 - The GTK host fixture reached `Error [E3201]: C library \`gtk4\` was not found` in 2.12 s. This is external host setup, not counted as a language gap; the manifest needs the C dependency and a display-capable host.
 - The author hand-wrote four button callbacks, a focus-group list, shortcut mapping, visible accessibility text, and two undo/redo stacks. These are repeated library code, not a new type-system need.
 - The TUI backend gives deterministic frame lines and focus behavior, but no real display, native IME, system font selection, or OS dialog was available in this probe.

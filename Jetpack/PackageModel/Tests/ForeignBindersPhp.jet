@@ -1,10 +1,10 @@
 // Claims ported from jet_pkg_model::PhpBind tests. Claims that run the PHP
 // tokenizer or worker skip, as the Rust tests do, when no `php` is on PATH.
 
-@PKG_PHP_TEST_SKIP :: "skipping PhpBind test: the PHP executable is unavailable in this development environment"
+PKG_PHP_TEST_SKIP :: prep { "skipping PhpBind test: the PHP executable is unavailable in this development environment" }
 
 // Every PHP string form and nested function that discovery must ignore.
-@PKG_PHP_TEST_STATIC_SOURCE :: ```<?php
+PKG_PHP_TEST_STATIC_SOURCE :: prep { ```<?php
 // function fake($input) {}
 /* function fake_block($input) {} */
 # function fake_hash($input) {}
@@ -22,23 +22,23 @@ $anonymous = function ($input) { return $input; };
 if (false) { function nested_conditional($input) { return $input; } }
 function price_cart(array $input): array { return $input; }
 class Hidden { function method($input) {} }
-```
+``` }
 
 #Test("php discovery is static and ignores every php string form and nested function") {
     found :: pkg_binder_resolved_tool_path("php")
     if found == None {
-        print(@PKG_PHP_TEST_SKIP)
+        print(PKG_PHP_TEST_SKIP)
         return
     }
     php :: found ?? ""
-    names :: pkg_binders_test_php_discover(php, @PKG_PHP_TEST_STATIC_SOURCE, 0) ?? panic("static PHP discovery succeeds")
+    names :: pkg_binders_test_php_discover(php, PKG_PHP_TEST_STATIC_SOURCE, 0) ?? panic("static PHP discovery succeeds")
     assert_eq(names, [String]{"price_cart"})
 }
 
 #Test("php discovery rejects by reference variadic default and multiple arguments") {
     found :: pkg_binder_resolved_tool_path("php")
     if found == None {
-        print(@PKG_PHP_TEST_SKIP)
+        print(PKG_PHP_TEST_SKIP)
         return
     }
     php :: found ?? ""
@@ -77,7 +77,7 @@ class Hidden { function method($input) {} }
 #Test("php worker loads projected composer autoload before user source") {
     found :: pkg_binder_resolved_tool_path("php")
     if found == None {
-        print(@PKG_PHP_TEST_SKIP)
+        print(PKG_PHP_TEST_SKIP)
         return
     }
     php :: found ?? ""

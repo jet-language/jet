@@ -50,7 +50,7 @@ for (let i = 0; i < args.length; i++) {
 const STAGES = ["mir", "convert", "lower", "run"];
 const from = STAGES.indexOf(first);
 if (from < 0) throw new Error(`unknown stage ${first}`);
-const safeJet = `${process.env.HOME}/.cache/jet-luna/safe-jet.sh`;
+const safeJet = `${process.env.HOME}/.cache/jet-dev/safe-jet.sh`;
 const runtimeLib = process.env.JET_RUNTIME_C_LIB;
 
 const { collectGoldenEntries, loadExampleStdin } = await import(pathToFileURL(join(repo, "Tools/agent/compiler-diff.mjs")));

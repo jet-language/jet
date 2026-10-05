@@ -1,19 +1,19 @@
 // JSON reader claims, plus the fixture-navigation helpers the NixEval claims
 // share. Number claims pin the binary64 rounding the reference reader uses.
 
-fn nixeval_test_json(text: String) -> NixEvalJson {
-    NixEvalJson.parse(text) ?? panic("fixture JSON must parse")
+fn nixeval_test_json(text: String) -> NixEvalJSON {
+    NixEvalJSON.parse(text) ?? panic("fixture JSON must parse")
 }
 
-fn nixeval_test_object(document: NixEvalJson, index: Int) -> [String: Int] {
+fn nixeval_test_object(document: NixEvalJSON, index: Int) -> [String: Int] {
     document.object(index) ?? panic("expected a JSON object")
 }
 
-fn nixeval_test_array(document: NixEvalJson, index: Int) -> [Int] {
+fn nixeval_test_array(document: NixEvalJSON, index: Int) -> [Int] {
     document.array(index) ?? panic("expected a JSON array")
 }
 
-fn nixeval_test_string(document: NixEvalJson, index: Int) -> String {
+fn nixeval_test_string(document: NixEvalJSON, index: Int) -> String {
     document.string(index) ?? panic("expected a JSON string")
 }
 
@@ -21,29 +21,29 @@ fn nixeval_test_get(fields: [String: Int], key: String) -> Int {
     fields.get(key) ?? panic("missing fixture field {key}")
 }
 
-fn nixeval_test_text(document: NixEvalJson, fields: [String: Int], key: String) -> String {
+fn nixeval_test_text(document: NixEvalJSON, fields: [String: Int], key: String) -> String {
     nixeval_test_string(document, nixeval_test_get(fields, key))
 }
 
-fn nixeval_test_integer(document: NixEvalJson, index: Int) -> Int {
+fn nixeval_test_integer(document: NixEvalJSON, index: Int) -> Int {
     number :: document.number(index) ?? panic("expected a JSON number")
     number.integer() ?? panic("expected an integral JSON number")
 }
 
 // Rust `fixture_strings`: a JSON array of strings.
-fn nixeval_test_strings(document: NixEvalJson, index: Int) -> [String] {
+fn nixeval_test_strings(document: NixEvalJSON, index: Int) -> [String] {
     strings := [String]{}
     loop item in nixeval_test_array(document, index) -> &strings.push(nixeval_test_string(document, item))
     strings
 }
 
-fn nixeval_test_number(text: String) -> NixEvalJsonNumber {
+fn nixeval_test_number(text: String) -> NixEvalJSONNumber {
     document :: nixeval_test_json(text)
     document.number(document.root) ?? panic("expected a JSON number")
 }
 
 fn nixeval_test_json_error(text: String) -> String {
-    if NixEvalJson.parse(text) == {
+    if NixEvalJSON.parse(text) == {
         .Ok(_) -> panic("JSON must be rejected")
         .Err(error) -> error.message()
     }

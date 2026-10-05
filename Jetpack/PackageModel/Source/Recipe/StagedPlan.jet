@@ -6,7 +6,7 @@
 // is not an alternate graph. Validation lives in the model so evaluator and
 // engine cannot disagree about what a finite staged fragment means.
 
-@STAGED_PLAN_FORMAT :: "jet.staged-plan.v1"
+STAGED_PLAN_FORMAT :: prep { "jet.staged-plan.v1" }
 
 // One exact input made visible to a finite staged plan action.
 pub struct PlanInput {
@@ -192,7 +192,7 @@ pub struct StagedPlanAction {
     // digests and every authority fact are part of the identity.
     fn identity(self, fragment: BuildPlanFragment) -> String StagedPlanError! {
         self.validate(fragment)
-        writer := RecipeCanonicalWriter.new(@STAGED_PLAN_FORMAT)
+        writer := RecipeCanonicalWriter.new(STAGED_PLAN_FORMAT)
         self.write_canonical(&writer)
         fragment.write_canonical(&writer)
         Ok("staged-plan-sha256:{pkg_sha256_hex(writer.bytes)}")

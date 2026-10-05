@@ -74,6 +74,8 @@ export function ruleMissingAttribution(s) {
 // today — i.e. slipped in before the gate existed, or hand-restored.
 // Acceptance ballots are system-generated evidence, not narrative ballots
 // (same exemption addDecision itself makes) — excluded here too.
+// The shared validator also enforces {loss, mitigation} in both recommendation
+// layers; lint must not maintain a second loss schema.
 export function ruleBallotGaps(s) {
   const findings = [];
   for (const d of s.decisions) {
@@ -280,14 +282,14 @@ export function ruleSpecReferenceGaps(s, history, { docsRoot = join(process.cwd(
 }
 
 // ---- aggregate ---------------------------------------------------------------
-// Owner ruling 2026-08-05: every card lives in an epoch, is a sidequest, or is
-// frozen. The store rejects new violations; this rule catches any that predate
-// the guard or arrive through repair/restore paths.
+// Owner rulings 2026-08-05 / 2026-10-04: every card lives in an epoch or is a
+// sidequest — frozen cards included. The store rejects new violations; this
+// rule catches any that predate the guard or arrive through repair/restore paths.
 export function ruleUnhomedCard(s) {
   const findings = [];
-  for (const c of s.cards.filter(c => c.track === 'epoch' && c.epoch == null && c.phase !== 'frozen')) {
+  for (const c of s.cards.filter(c => c.track === 'epoch' && c.epoch == null)) {
     findings.push({ rule: 'unhomed-card', ref: `#${c.num}`,
-      detail: `epoch-track card with no epoch — assign an epoch, make it a sidequest, or freeze it` });
+      detail: `epoch-track card with no epoch — assign an epoch or make it a sidequest` });
   }
   return findings;
 }

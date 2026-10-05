@@ -6,9 +6,9 @@
 // order and files in relative-path order, as the generator emitted them.
 
 // The named source and upstream the embedded batteries resolve through.
-@BATTERIES_SOURCE_NAME :: "batteries"
-@BATTERIES_UPSTREAM :: "embedded:batteries"
-@BATTERIES_FILE_MODE :: 0o644
+BATTERIES_SOURCE_NAME :: prep { "batteries" }
+BATTERIES_UPSTREAM :: prep { "embedded:batteries" }
+BATTERIES_FILE_MODE :: prep { 0o644 }
 
 // One bundled battery file: its package-relative path, mode, and bytes.
 pub struct BatteryFile {
@@ -24,7 +24,7 @@ pub struct BatteryPackage {
 }
 
 fn env_battery_text(path: String, text: String) -> BatteryFile Never! {
-    BatteryFile{path, mode: @BATTERIES_FILE_MODE, bytes: text.bytes()}
+    BatteryFile{path, mode: BATTERIES_FILE_MODE, bytes: text.bytes()}
 }
 
 // Every bundled battery package.
@@ -48,19 +48,15 @@ pub fn env_battery_packages() -> [BatteryPackage] Never! {
         }},
         BatteryPackage{slug: "games", files: [BatteryFile]{
             env_battery_text("assets/demo.jetreplay", embed_file("../../../../crates/jetpack/batteries/games/assets/demo.jetreplay")),
-            BatteryFile{path: "assets/jump.wav", mode: @BATTERIES_FILE_MODE, bytes: env_battery_jump_wav()},
+            BatteryFile{path: "assets/jump.wav", mode: BATTERIES_FILE_MODE, bytes: env_battery_jump_wav()},
             env_battery_text("assets/player.atlas", embed_file("../../../../crates/jetpack/batteries/games/assets/player.atlas")),
-            BatteryFile{path: "assets/player.png", mode: @BATTERIES_FILE_MODE, bytes: env_battery_player_png()},
+            BatteryFile{path: "assets/player.png", mode: BATTERIES_FILE_MODE, bytes: env_battery_player_png()},
             env_battery_text("games.jet", embed_file("../../../../crates/jetpack/batteries/games/games.jet")),
             env_battery_text("package.jet", embed_file("../../../../crates/jetpack/batteries/games/package.jet")),
         }},
         BatteryPackage{slug: "gui", files: [BatteryFile]{
             env_battery_text("gui.jet", embed_file("../../../../crates/jetpack/batteries/gui/gui.jet")),
             env_battery_text("package.jet", embed_file("../../../../crates/jetpack/batteries/gui/package.jet")),
-        }},
-        BatteryPackage{slug: "ml", files: [BatteryFile]{
-            env_battery_text("ml.jet", embed_file("../../../../crates/jetpack/batteries/ml/ml.jet")),
-            env_battery_text("package.jet", embed_file("../../../../crates/jetpack/batteries/ml/package.jet")),
         }},
         BatteryPackage{slug: "web", files: [BatteryFile]{
             env_battery_text("package.jet", embed_file("../../../../crates/jetpack/batteries/web/package.jet")),

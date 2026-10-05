@@ -152,8 +152,8 @@ rows remain host-dependent; the embedded rows stay explicitly excluded pending
 ```text
 bash tools/ci/compiled-workload-gate.sh --contract
 bash tools/ci/test-compiled-workload-gate.sh
-node tools/ci/compiled-workload-runner.mjs --platform linux --report-dir "$HOME/.cache/jet-test-scratch/compiled-workload-linux"
-bash tools/ci/compiled-workload-gate.sh --check "$HOME/.cache/jet-test-scratch/compiled-workload-linux"
+node tools/ci/compiled-workload-runner.mjs --platform linux --report-dir "$HOME/.cache/jet-dev/scratch/compiled-workload-linux"
+bash tools/ci/compiled-workload-gate.sh --check "$HOME/.cache/jet-dev/scratch/compiled-workload-linux"
 cargo test --test agent_workloads compiled_workload_contract_reuses_agent_schema_and_keeps_hosted_rows
 cargo test --test release_gates compiled_workload_release_gate_uses_frozen_contract_and_canaries
 ```

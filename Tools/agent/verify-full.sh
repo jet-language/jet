@@ -28,10 +28,10 @@ fi
 node "$repo/Tools/agent/check-agent-doc-flags.mjs" >&2
 node "$repo/Tools/agent/check-unsafe-ratchet.mjs" >&2
 node "$repo/Tools/agent/core-coverage-census.mjs" --check >&2
-tmp_parent="${JET_VERIFY_TMPDIR:-${TMPDIR:-$HOME/.cache/jet-test-scratch}}"
+tmp_parent="${JET_VERIFY_TMPDIR:-${TMPDIR:-$HOME/.cache/jet-dev/scratch}}"
 case "$tmp_parent" in
   /tmp|/tmp/*)
-    echo "error: verify-full scratch must not use /tmp; use $HOME/.cache/jet-test-scratch" >&2
+    echo "error: verify-full scratch must not use /tmp; use $HOME/.cache/jet-dev/scratch" >&2
     exit 1
     ;;
 esac

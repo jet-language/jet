@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 const TOWER = join(ROOT, 'Tools/tower/tower.mjs');
-const SCRATCH_ROOT = process.env.JET_TEST_SCRATCH || '/home/nate/.cache/jet-test-scratch';
+const SCRATCH_ROOT = process.env.JET_TEST_SCRATCH || '/home/nate/.cache/jet-dev/scratch';
 mkdirSync(SCRATCH_ROOT, { recursive: true });
 
 function board(name) {

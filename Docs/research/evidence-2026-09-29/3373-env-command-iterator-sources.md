@@ -4,8 +4,8 @@ Question: do Jet's argv, environment and command-spec surfaces keep argument
 order, environment snapshot/mutation and removal rules exact, and follow
 platform law for non-Unicode OS data rather than lossy conversion?
 
-Binary: `jet-debug-snapshot14` through `~/.cache/jet-luna/safe-jet.sh`, 2026-09-29.
-Scratch: `~/.cache/jet-test-scratch/Closer04/` (`os_sources.jet`, `nonutf.jet`,
+Binary: `jet-debug-snapshot14` through `~/.cache/jet-dev/safe-jet.sh`, 2026-09-29.
+Scratch: `~/.cache/jet-dev/scratch/Closer04/` (`os_sources.jet`, `nonutf.jet`,
 `nonutf2.jet`). Only variables prefixed `JET_OS_SOURCES_` are printed, so no
 private environment data appears.
 

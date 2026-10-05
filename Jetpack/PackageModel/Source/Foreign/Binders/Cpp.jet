@@ -4,9 +4,9 @@
 // also select the archive as the implementation carrier for the canonical C
 // binder; that path emits no invented C++ facade.
 
-@CPP_BIND_SCHEMA :: "jet-cpp-bind-v3"
+CPP_BIND_SCHEMA :: prep { "jet-cpp-bind-v3" }
 // Clang AST dumps are large; the shim capture limit is 64 MiB per stream.
-@CPP_TOOL_CAPTURE_LIMIT :: 67108864
+CPP_TOOL_CAPTURE_LIMIT :: prep { 67108864 }
 
 // One explicit template instantiation the caller asks for.
 pub struct CppTemplateInstantiation {
@@ -98,7 +98,7 @@ pub fn pkg_cpp_bind_with_overlay(header: String, cache: String, options: CppBind
     boundary_identity :: ForeignBoundaryIdentity.new(
         "header:{canonical}:sha256-{pkg_sha256_hex(header_bytes)}",
         overlay.stable_identity(),
-        "cpp-clang;schema={@CPP_BIND_SCHEMA};descriptor={descriptor.stamp()}",
+        "cpp-clang;schema={CPP_BIND_SCHEMA};descriptor={descriptor.stamp()}",
         "shim:sha256-{pkg_sha256_hex(shim.bytes())};jet:sha256-{pkg_sha256_hex(jet_without_boundary.bytes())}",
         "clang={pkg_cpp_flatten_tool_version(clang_version)};ar={pkg_cpp_flatten_tool_version(archiver_version)}",
         resolved.target
@@ -130,8 +130,8 @@ pub fn pkg_cpp_bind_with_overlay(header: String, cache: String, options: CppBind
         .with_compiler_flags(compiler_flags)
     boundary = boundary.with_artifact_coverage(coverage)
     trusted_assumptions :: [String]{"native implementation is TRUSTED outside hardening", "descriptor and loaded artifact identities are exact"}
-    loop obligation in @FOREIGN_BOUNDARY_OBLIGATIONS {
-        &boundary.set_obligation(obligation, FfiEvidenceBasis.Trusted, "cpp-clang-generated-shim", trusted_assumptions) ?? return Err(ForeignBindError.Source(err.message))
+    loop obligation in FOREIGN_BOUNDARY_OBLIGATIONS {
+        &boundary.set_obligation(obligation, FFIEvidenceBasis.Trusted, "cpp-clang-generated-shim", trusted_assumptions) ?? return Err(ForeignBindError.Source(err.message))
     }
     jet :: "// jet-ffi-boundary={boundary.stamp()}\n{jet_without_boundary}"
     pkg_cpp_materialize_projection(cache, archive, resolved, boundary)
@@ -234,7 +234,6 @@ fn pkg_cpp_validate_options(options: CppBindOptions) ForeignBindError! -[FS]> {
             return Err(ForeignBindError.Source("invalid explicit template request `{template.qualified_name}`"))
         }
     }
-    Ok()
 }
 
 // One clang JSON AST dump per selected namespace (or one unfiltered dump).
@@ -272,8 +271,8 @@ fn pkg_cpp_clang_asts(header: String, options: CppBindOptions) -[Exec, Time.Wait
 
 // Every input that can change the generated shim, projection, or link.
 fn pkg_cpp_binding_identity(header: String, header_bytes: [U8], ast: [U8], clang_version: [U8], archiver_version: [U8], shim: String, jet: String, options: CppBindOptions, target: String, overlay: CppOverlay) -[FS, Env]> String Never! {
-    identity := ForeignIdentityBuilder.new(@FOREIGN_BRIDGE_IDENTITY_SCHEMA)
-    &identity.field("binder_schema", @CPP_BIND_SCHEMA.bytes())
+    identity := ForeignIdentityBuilder.new(FOREIGN_BRIDGE_IDENTITY_SCHEMA)
+    &identity.field("binder_schema", CPP_BIND_SCHEMA.bytes())
     &identity.field("descriptor", pkg_cpp_descriptor_stamp().bytes())
     &identity.field("overlay_identity", overlay.identity.bytes())
     &identity.field("overlay_source", overlay.source.bytes())
@@ -356,7 +355,6 @@ fn pkg_cpp_build_archive(shim: String, archive: String, store: String, options: 
     pkg_cpp_run(link, "clang++")
     pkg_cpp_run([String]{options.archiver, "rcs", archive, object}, "ar")
     pkg_binder_remove_tree_quiet(build)
-    Ok()
 }
 
 // Publish the archive under its stable name with a `<lib>.link` record of
@@ -380,7 +378,7 @@ fn pkg_cpp_render_provenance(header: String, digest: String, surface: CppSurface
         (name: "language", value: "cpp"),
         (name: "abi", value: "jet_cpp_{options.lib}"),
         (name: "transport", value: "clang-cxx-shim"),
-        (name: "binder-schema", value: @CPP_BIND_SCHEMA),
+        (name: "binder-schema", value: CPP_BIND_SCHEMA),
         (name: "descriptor", value: pkg_cpp_descriptor_stamp()),
         (name: "source", value: header),
         (name: "source-sha256", value: header_digest),
@@ -422,7 +420,7 @@ fn pkg_cpp_render_provenance(header: String, digest: String, surface: CppSurface
 // A supervised toolchain run: 64 MiB per stream, a missing tool is the
 // selected tool, and a timeout is a toolchain rejection.
 fn pkg_cpp_supervised(argv: [String], timeout: Duration, tool: String) -[Exec, Time.Wait]> BinderToolOutput ForeignBindError! {
-    output :: if pkg_binder_supervise(argv, None, [(name: String, value: String)]{}, @CPP_TOOL_CAPTURE_LIMIT, timeout, tool) == {
+    output :: if pkg_binder_supervise(argv, None, [(name: String, value: String)]{}, CPP_TOOL_CAPTURE_LIMIT, timeout, tool) == {
         .Ok(result) -> result
         .Err(error) -> {
             if error == {
@@ -437,8 +435,8 @@ fn pkg_cpp_supervised(argv: [String], timeout: Duration, tool: String) -[Exec, T
 
 fn pkg_cpp_run(argv: [String], tool: String) ForeignBindError! -[Exec, Time.Wait]> {
     output :: pkg_cpp_supervised(argv, 60s, tool)
-    if output.success -> return Ok()
-    Err(ForeignBindError.ToolchainRejected("{tool}: {pkg_cpp_launder(output.stderr)}"))
+    if output.success -> return
+    return Err(ForeignBindError.ToolchainRejected("{tool}: {pkg_cpp_launder(output.stderr)}"))
 }
 
 // Non-empty trimmed lines joined by ` | `, or `unknown`.

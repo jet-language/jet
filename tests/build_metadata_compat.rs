@@ -16,7 +16,7 @@ fn scratch_root() -> PathBuf {
     PathBuf::from(
         std::env::var_os("HOME").expect("HOME is required for the compatibility scratch root"),
     )
-    .join(".cache/jet-luna/build-metadata-compat-conformance")
+    .join(".cache/jet-dev/build-metadata-compat-conformance")
 }
 
 fn reset_scratch(root: &Path) {

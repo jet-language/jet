@@ -11,9 +11,9 @@
 // walk. Realization and trust gating stay with the CLI env verbs, which
 // reuse the same composition as `jet env` (I8: one env engine).
 
-@ENV_HOOK_GIT_CONFIG_COUNT :: "GIT_CONFIG_COUNT"
-@ENV_HOOK_GIT_CONFIG_KEY_0 :: "GIT_CONFIG_KEY_0"
-@ENV_HOOK_GIT_CONFIG_VALUE_0 :: "GIT_CONFIG_VALUE_0"
+ENV_HOOK_GIT_CONFIG_COUNT :: prep { "GIT_CONFIG_COUNT" }
+ENV_HOOK_GIT_CONFIG_KEY_0 :: prep { "GIT_CONFIG_KEY_0" }
+ENV_HOOK_GIT_CONFIG_VALUE_0 :: prep { "GIT_CONFIG_VALUE_0" }
 
 // Resolve the ratified `git_hooks_path` fact to the directory native Git
 // uses. The model rejects lexical escapes; this runtime check also rejects a
@@ -32,9 +32,9 @@ pub fn env_hook_git_hooks_environment(root: String, relative: String) -[FS, Env]
         return Err(EnvironmentError.Activation("git hook path `{relative}` resolves outside the project"))
     }
     Ok([String: String]{
-        @ENV_HOOK_GIT_CONFIG_COUNT: "1",
-        @ENV_HOOK_GIT_CONFIG_KEY_0: "core.hooksPath",
-        @ENV_HOOK_GIT_CONFIG_VALUE_0: hooks
+        ENV_HOOK_GIT_CONFIG_COUNT: "1",
+        ENV_HOOK_GIT_CONFIG_KEY_0: "core.hooksPath",
+        ENV_HOOK_GIT_CONFIG_VALUE_0: hooks
     })
 }
 
@@ -59,7 +59,7 @@ fn env_hook_path_within(path: String, root: String) -> Bool Never! {
 pub fn env_hook_find_env_root(start: String) -[FS]> String? Never! {
     dir := start
     loop {
-        if files.is_file(files.join(dir, @ENV_FILE)) -> return Val(dir)
+        if files.is_file(files.join(dir, ENV_FILE)) -> return Val(dir)
         parent :: files.dirname(dir)
         if parent == "" || parent == dir -> return None
         dir = parent
@@ -71,7 +71,7 @@ pub fn env_hook_find_env_root(start: String) -[FS]> String? Never! {
 // widgets so a normal shell gets the same editable-buffer behavior as a
 // branded jetpack subshell.
 pub fn env_hook_render_hook(kind: ShellKind) -> String Never! {
-    export :: @ENV_EXPORT_VERB
+    export :: ENV_EXPORT_VERB
     lines :: if kind == {
         .Bash -> [String]{
             "__jet_env_hook() {{",
@@ -127,20 +127,20 @@ pub struct EnvHookActivation {
         unset :: env_hook_render_unset(kind, self.unset)
         lines :: if kind == {
             .Bash | .Zsh -> [String]{
-                "export {@ENV_HOOK_OLD_PATH_VAR}={env_hook_sh_quote(self.base_path)}",
+                "export {ENV_HOOK_OLD_PATH_VAR}={env_hook_sh_quote(self.base_path)}",
                 "export PATH={env_hook_sh_quote(self.composed_path)}",
-                "export {@JETPACK_ENV_MARKER}=1",
-                "export {@JETPACK_REF_VAR}={env_hook_sh_quote(self.refs)}",
-                "export {@ENV_HOOK_ACTIVE_DIR_VAR}={env_hook_sh_quote(self.root)}",
-                "export {@ENV_HOOK_ACTIVE_HASH_VAR}={env_hook_sh_quote(self.plan_hash)}"
+                "export {JETPACK_ENV_MARKER}=1",
+                "export {JETPACK_REF_VAR}={env_hook_sh_quote(self.refs)}",
+                "export {ENV_HOOK_ACTIVE_DIR_VAR}={env_hook_sh_quote(self.root)}",
+                "export {ENV_HOOK_ACTIVE_HASH_VAR}={env_hook_sh_quote(self.plan_hash)}"
             }
             .Fish -> [String]{
-                "set -gx {@ENV_HOOK_OLD_PATH_VAR} {env_hook_fish_quote(self.base_path)}",
+                "set -gx {ENV_HOOK_OLD_PATH_VAR} {env_hook_fish_quote(self.base_path)}",
                 "set -gx PATH (string split : {env_hook_fish_quote(self.composed_path)})",
-                "set -gx {@JETPACK_ENV_MARKER} 1",
-                "set -gx {@JETPACK_REF_VAR} {env_hook_fish_quote(self.refs)}",
-                "set -gx {@ENV_HOOK_ACTIVE_DIR_VAR} {env_hook_fish_quote(self.root)}",
-                "set -gx {@ENV_HOOK_ACTIVE_HASH_VAR} {env_hook_fish_quote(self.plan_hash)}"
+                "set -gx {JETPACK_ENV_MARKER} 1",
+                "set -gx {JETPACK_REF_VAR} {env_hook_fish_quote(self.refs)}",
+                "set -gx {ENV_HOOK_ACTIVE_DIR_VAR} {env_hook_fish_quote(self.root)}",
+                "set -gx {ENV_HOOK_ACTIVE_HASH_VAR} {env_hook_fish_quote(self.plan_hash)}"
             }
         }
         Ok("{lines.join("\n")}\n{vars}{unset}")
@@ -153,7 +153,6 @@ pub struct EnvHookActivation {
         loop name in self.unset {
             if !envmodel_valid_env_name(name) -> return Err(env_hook_invalid_name(name))
         }
-        Ok()
     }
 }
 
@@ -165,14 +164,14 @@ fn env_hook_invalid_name(name: String) -> EnvironmentError Never! {
 // `PATH` from before the env loaded) and clear every marker.
 pub fn env_hook_render_unload(kind: ShellKind, base_path: String) -> String Never! {
     names :: [String]{
-        @JETPACK_ENV_MARKER,
-        @JETPACK_REF_VAR,
-        @ENV_HOOK_ACTIVE_DIR_VAR,
-        @ENV_HOOK_ACTIVE_HASH_VAR,
-        @ENV_HOOK_GIT_CONFIG_COUNT,
-        @ENV_HOOK_GIT_CONFIG_KEY_0,
-        @ENV_HOOK_GIT_CONFIG_VALUE_0,
-        @ENV_HOOK_OLD_PATH_VAR
+        JETPACK_ENV_MARKER,
+        JETPACK_REF_VAR,
+        ENV_HOOK_ACTIVE_DIR_VAR,
+        ENV_HOOK_ACTIVE_HASH_VAR,
+        ENV_HOOK_GIT_CONFIG_COUNT,
+        ENV_HOOK_GIT_CONFIG_KEY_0,
+        ENV_HOOK_GIT_CONFIG_VALUE_0,
+        ENV_HOOK_OLD_PATH_VAR
     }
     path_line :: if kind == {
         .Bash | .Zsh -> "export PATH={env_hook_sh_quote(base_path)}\n"

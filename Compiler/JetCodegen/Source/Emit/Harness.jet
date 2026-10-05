@@ -43,7 +43,8 @@ fn jet_rust_emit_reject_history_strategies(ctx: &JetRustEmitContext) Never! {
         if row.module_name == "core.testing" && row.member == "histories" -> has_history_row = true
     }
     if !has_history_row -> return
-    loop function in ctx.program.functions {
+    loop function_index in 0..<ctx.program.functions.len() {
+        function := ctx.program.functions[function_index]
         loop block in function.blocks {
             loop instruction in block.instructions {
                 history := false
@@ -592,7 +593,8 @@ fn jet_rust_emit_harness(ctx: &JetRustEmitContext, artifact: MIRArtifactPlan, li
     &lines.push("    jet_test_install_panic_hook();")
     &lines.push("    jet_test_trace_tier();")
     if coverage {
-        loop function in ctx.program.functions {
+        loop function_index in 0..<ctx.program.functions.len() {
+            function := ctx.program.functions[function_index]
             if !jet_rust_emit_coverage_for(&ctx, function) || !jet_rust_emit_function_target_enabled(ctx.config, function) -> next
             ordinal := 0
             loop block in function.blocks {

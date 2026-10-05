@@ -35,7 +35,7 @@ fn services_test_read_pid(dir: String) -> Int? {
     record :: persisted ?? return None
     if record == {
         .Verified(state) -> Val(state.pid)
-        .LegacyPid(pid) -> Val(pid)
+        .LegacyPID(pid) -> Val(pid)
     }
 }
 
@@ -421,11 +421,10 @@ fn services_test_has_pair(command: [String], first: String, second: String) -> B
 
     kill :: services_stop_process_with(42, None, 0, (action) -> {
         if action == StopAction.Kill -> return Err(ServicesError.new("KILL failed"))
-        Ok()
     }, () -> Ok(true))
     assert_eq(services_test_error_of(kill), "KILL failed")
 
-    alive :: services_test_error_of(services_stop_process_with(42, None, 0, (action) -> Ok(), () -> Ok(true)))
+    alive :: services_test_error_of(services_stop_process_with(42, None, 0, (action) -> {}, () -> Ok(true)))
     assert(alive.contains("still alive"), alive)
 }
 
@@ -435,7 +434,6 @@ fn services_test_has_pair(command: [String], first: String, second: String) -> B
     services_stop_process_with(42, Val(ShutdownPolicy.Term{grace_ms: 0}), 0, (action) -> {
         &actions.push(action)
         if action == StopAction.Kill -> killed = true
-        Ok()
     }, () -> Ok(!killed)) ?? panic("escalated stop")
     assert_eq(actions, [StopAction]{StopAction.Term, StopAction.Kill})
 }
@@ -446,7 +444,7 @@ fn services_test_has_pair(command: [String], first: String, second: String) -> B
     files.write(services_pid_path(dir), "version=1\npid={state.pid}\nstart={state.start_identity}\n") ?? panic("write state")
     assert_eq(services_read_process_state(dir) ?? panic("read verified"), Val(PersistedProcessState.Verified(state)))
     files.write(services_pid_path(dir), "42\n") ?? panic("write legacy")
-    assert_eq(services_read_process_state(dir) ?? panic("read legacy"), Val(PersistedProcessState.LegacyPid(42)))
+    assert_eq(services_read_process_state(dir) ?? panic("read legacy"), Val(PersistedProcessState.LegacyPID(42)))
 }
 
 #Test("incomplete process state fails closed") {
@@ -506,7 +504,6 @@ fn services_test_has_pair(command: [String], first: String, second: String) -> B
     signaled := false
     ran :: services_run_if_start_identity_matches("linux-proc-start:old", () -> Ok(Val("linux-proc-start:reused")), () -> {
         signaled = true
-        Ok()
     }) ?? panic("identity guard")
     assert(!ran)
     assert(!signaled)
@@ -589,31 +586,31 @@ fn services_test_has_pair(command: [String], first: String, second: String) -> B
         if name == {
             "redis" -> {
                 assert(services_test_has_pair(command, "--bind", "127.0.0.1"))
-                assert_eq(resolved.ready_probe, Val(ReadyProbe.Exec("redis-cli -p 6379 ping")))
+                assert_eq(resolved.ready_probe, Val(ReadyProbe.Exec{command: "redis-cli -p 6379 ping"}))
             }
             "postgres" -> {
                 assert(services_test_has_pair(command, "-h", "127.0.0.1"))
-                assert_eq(resolved.ready_probe, Val(ReadyProbe.Exec("pg_isready -h 127.0.0.1 -p 5432")))
+                assert_eq(resolved.ready_probe, Val(ReadyProbe.Exec{command: "pg_isready -h 127.0.0.1 -p 5432"}))
             }
-            "mysql" -> assert_eq(resolved.ready_probe, Val(ReadyProbe.Exec("mysqladmin ping -h 127.0.0.1 -P 3306 -u root")))
-            "mariadb" -> assert_eq(resolved.ready_probe, Val(ReadyProbe.Exec("mariadb-admin ping -h 127.0.0.1 -P 3306 -u root")))
-            "nginx" -> assert_eq(resolved.ready_probe, Val(ReadyProbe.Exec("curl -fsS http://127.0.0.1:8080/")))
+            "mysql" -> assert_eq(resolved.ready_probe, Val(ReadyProbe.Exec{command: "mysqladmin ping -h 127.0.0.1 -P 3306 -u root"}))
+            "mariadb" -> assert_eq(resolved.ready_probe, Val(ReadyProbe.Exec{command: "mariadb-admin ping -h 127.0.0.1 -P 3306 -u root"}))
+            "nginx" -> assert_eq(resolved.ready_probe, Val(ReadyProbe.Exec{command: "curl -fsS http://127.0.0.1:8080/"}))
             "minio" -> {
                 assert(services_test_has_pair(command, "--address", "127.0.0.1:9000"))
-                assert_eq(resolved.ready_probe, Val(ReadyProbe.Exec("curl -fsS http://127.0.0.1:9000/minio/health/live")))
+                assert_eq(resolved.ready_probe, Val(ReadyProbe.Exec{command: "curl -fsS http://127.0.0.1:9000/minio/health/live"}))
             }
             "mailpit" -> {
                 assert(services_test_has_pair(command, "--listen", "127.0.0.1:8025"))
                 assert(services_test_has_pair(command, "--smtp", "127.0.0.1:1025"))
-                assert_eq(resolved.ready_probe, Val(ReadyProbe.Exec("curl -fsS http://127.0.0.1:8025/api/v1/info")))
+                assert_eq(resolved.ready_probe, Val(ReadyProbe.Exec{command: "curl -fsS http://127.0.0.1:8025/api/v1/info"}))
             }
             "mailhog" -> {
                 assert(services_test_has_pair(command, "-ui-bind-addr", "127.0.0.1:8025"))
                 assert(services_test_has_pair(command, "-api-bind-addr", "127.0.0.1:8025"))
                 assert(services_test_has_pair(command, "-smtp-bind-addr", "127.0.0.1:1025"))
-                assert_eq(resolved.ready_probe, Val(ReadyProbe.Exec("curl -fsS http://127.0.0.1:8025/api/v2/messages")))
+                assert_eq(resolved.ready_probe, Val(ReadyProbe.Exec{command: "curl -fsS http://127.0.0.1:8025/api/v2/messages"}))
             }
-            "blackfire" | "tailscale" -> assert_eq(resolved.ready_probe, Val(ReadyProbe.Exec("true")))
+            "blackfire" | "tailscale" -> assert_eq(resolved.ready_probe, Val(ReadyProbe.Exec{command: "true"}))
             else -> assert_eq(resolved.ready_probe, Val(services_tcp_readiness(port)))
         }
     }

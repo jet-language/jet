@@ -11,7 +11,7 @@ source identity?
 - grep `(?i)mustache|gettext|\.mo\b|struct Template|Catalog` over `Core/` found no match.
   grep `(?i)template|catalog|gettext` over
   `Compiler/JetFoundation/Source/Registry/CoreCallRows.jet` found no match.
-- Ran the probe `~/.cache/jet-test-scratch/Closer05/t3252/probe_catalog.jet`
+- Ran the probe `~/.cache/jet-dev/scratch/Closer05/t3252/probe_catalog.jet`
   (`use core.text.catalog as catalog`) on snapshot14. It fails with
   `Error [E1001]: There is no core module 'core.text.catalog'`.
 - Read the owners: `Core/text/fmt.jet:24-27` `plural(n, singular, many)` (English two-form,

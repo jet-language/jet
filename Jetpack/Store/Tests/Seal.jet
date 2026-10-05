@@ -4,7 +4,7 @@
 // whole seconds, so fixtures first pin the payload to a whole-second mtime
 // and every restore is exact at that precision.
 
-fn store_test_seal_fixture(roots: HangarRoots, name: String, platform_artifact_kind: String) -> IngestedObject Never! {
+fn store_test_seal_fixture(verification: &StoreVerification, roots: HangarRoots, name: String, platform_artifact_kind: String) -> IngestedObject Never! {
     source :: files.join(roots.root, "seal-source-{name}")
     files.create_dir_all(source) ?? panic("fixture dir")
     files.write(files.join(source, "payload"), "trusted") ?? panic("fixture payload")
@@ -19,7 +19,7 @@ fn store_test_seal_fixture(roots: HangarRoots, name: String, platform_artifact_k
         provenance: "seal-test",
         platform_artifact_kind: platform_artifact_kind,
     }
-    store_ingest_tree(roots, request) ?? panic("fixture ingest")
+    store_ingest_tree(&verification, roots, request) ?? panic("fixture ingest")
 }
 
 fn store_test_mtime_seconds(path: String) -> Int Never! {
@@ -37,28 +37,30 @@ fn store_test_make_writable(path: String) Never! {
 }
 
 #Test("store native admission seals after shared cas hardlinking") {
+    verification := StoreVerification.new()
     roots :: store_test_temp_roots()
-    ingested :: store_test_seal_fixture(roots, "native", "")
+    ingested :: store_test_seal_fixture(&verification, roots, "native", "")
     object :: ingested.entry.out
     digest :: ingested.entry.envelope.output_hash
     assert(files.is_dir(files.join(roots.hangar_dir(), "cas")))
-    assert(store_check_seal(object, roots.hangar_dir()) ?? panic("check") == Val(digest))
-    store_reset_verified_digest_hash_count(object)
-    assert_eq(store_try_entry_output_hash(roots, ingested.entry) ?? panic("hash"), digest)
-    assert_eq(store_verified_digest_hash_count(object), 0)
+    assert(store_check_seal(&verification, object, roots.hangar_dir()) ?? panic("check") == Val(digest))
+    store_reset_verified_digest_hash_count(&verification, object)
+    assert_eq(store_try_entry_output_hash(&verification, roots, ingested.entry) ?? panic("hash"), digest)
+    assert_eq(store_verified_digest_hash_count(&verification, object), 0)
     store_test_drop_roots(roots)
 }
 
 #Test("store seal written at admission and warm verification skips content hash") {
+    verification := StoreVerification.new()
     roots :: store_test_temp_roots()
-    ingested :: store_test_seal_fixture(roots, "warm", "seal-test")
+    ingested :: store_test_seal_fixture(&verification, roots, "warm", "seal-test")
     object :: ingested.entry.out
     digest :: ingested.entry.envelope.output_hash
-    seal :: files.join(files.join(roots.hangar_dir(), @STORE_SEALS_DIR), digest)
+    seal :: files.join(files.join(roots.hangar_dir(), STORE_SEALS_DIR), digest)
     assert(files.is_file(seal))
-    store_reset_verified_digest_hash_count(object)
-    assert_eq(store_try_entry_output_hash(roots, ingested.entry) ?? panic("hash"), digest)
-    assert_eq(store_verified_digest_hash_count(object), 0)
+    store_reset_verified_digest_hash_count(&verification, object)
+    assert_eq(store_try_entry_output_hash(&verification, roots, ingested.entry) ?? panic("hash"), digest)
+    assert_eq(store_verified_digest_hash_count(&verification, object), 0)
 
     // Owner-ratified verify-once tradeoff: bytes can change without a tuple
     // change and remain trusted until an explicit `hangar verify` audit.
@@ -66,7 +68,7 @@ fn store_test_make_writable(path: String) Never! {
     store_test_make_writable(payload)
     seconds :: store_test_mtime_seconds(payload)
     store_test_set_mtime(payload, seconds)
-    store_write_seal(object, roots.hangar_dir(), digest) ?? panic("reseal at whole-second mtime")
+    store_write_seal(&verification, object, roots.hangar_dir(), digest) ?? panic("reseal at whole-second mtime")
     before :: files.stat(payload) ?? panic("stat")
     files.write(payload, "tamper!") ?? panic("tamper")
     store_test_set_mtime(payload, seconds)
@@ -74,41 +76,43 @@ fn store_test_make_writable(path: String) Never! {
     assert_eq(before.size, after.size)
     assert(before.modified == after.modified)
 
-    store_reset_verified_digest_hash_count(object)
-    assert_eq((store_list_checked(roots) ?? panic("listing")).len(), 1)
-    assert_eq(store_verified_digest_hash_count(object), 0)
-    assert(store_check_seal(object, roots.hangar_dir()) ?? panic("check") == Val(digest))
+    store_reset_verified_digest_hash_count(&verification, object)
+    assert_eq((store_list_checked(&verification, roots) ?? panic("listing")).len(), 1)
+    assert_eq(store_verified_digest_hash_count(&verification, object), 0)
+    assert(store_check_seal(&verification, object, roots.hangar_dir()) ?? panic("check") == Val(digest))
     store_test_drop_roots(roots)
 }
 
 #Test("store seal mtime drift rehashes once and reseals") {
+    verification := StoreVerification.new()
     roots :: store_test_temp_roots()
-    ingested :: store_test_seal_fixture(roots, "drift", "seal-test")
+    ingested :: store_test_seal_fixture(&verification, roots, "drift", "seal-test")
     object :: ingested.entry.out
     digest :: ingested.entry.envelope.output_hash
-    seal :: files.join(files.join(roots.hangar_dir(), @STORE_SEALS_DIR), digest)
+    seal :: files.join(files.join(roots.hangar_dir(), STORE_SEALS_DIR), digest)
     before :: files.read_bytes(seal) ?? panic("seal")
     payload :: files.join(object, "payload")
     store_test_set_mtime(payload, store_test_mtime_seconds(payload) + 1)
 
-    store_reset_verified_digest_hash_count(object)
-    assert_eq(store_try_entry_output_hash(roots, ingested.entry) ?? panic("hash"), digest)
-    assert_eq(store_verified_digest_hash_count(object), 1)
+    store_reset_verified_digest_hash_count(&verification, object)
+    assert_eq(store_try_entry_output_hash(&verification, roots, ingested.entry) ?? panic("hash"), digest)
+    assert_eq(store_verified_digest_hash_count(&verification, object), 1)
     assert(before != files.read_bytes(seal) ?? panic("seal"))
-    assert_eq(store_try_entry_output_hash(roots, ingested.entry) ?? panic("hash"), digest)
-    assert_eq(store_verified_digest_hash_count(object), 1)
+    assert_eq(store_try_entry_output_hash(&verification, roots, ingested.entry) ?? panic("hash"), digest)
+    assert_eq(store_verified_digest_hash_count(&verification, object), 1)
     store_test_drop_roots(roots)
 }
 
 #Test("store seal digest mismatch quarantines the tampered object") {
+    verification := StoreVerification.new()
     roots :: store_test_temp_roots()
-    ingested :: store_test_seal_fixture(roots, "quarantine", "seal-test")
+    ingested :: store_test_seal_fixture(&verification, roots, "quarantine", "seal-test")
     object :: ingested.entry.out
     payload :: files.join(object, "payload")
     store_test_make_writable(payload)
     files.write(payload, "tamper!") ?? panic("tamper")
     expectation :: CacheExpectation{identity: ingested.entry.cache_identity, owned_output: Val(object), allow_unsigned_local: true}
-    store_quarantine_invalid_entry(roots, ingested.entry, expectation) ?? panic("quarantine")
+    store_quarantine_invalid_entry(&verification, roots, ingested.entry, expectation) ?? panic("quarantine")
     assert(!files.exists(object))
     quarantined := false
     quarantine :: files.list_dir(files.join(roots.hangar_dir(), "quarantine")) ?? panic("quarantine dir")
@@ -116,48 +120,191 @@ fn store_test_make_writable(path: String) Never! {
         if entry.name.starts_with("output-") -> quarantined = true
     }
     assert(quarantined)
-    assert(!files.exists(files.join(files.join(roots.hangar_dir(), @STORE_SEALS_DIR), ingested.entry.envelope.output_hash)))
+    assert(!files.exists(files.join(files.join(roots.hangar_dir(), STORE_SEALS_DIR), ingested.entry.envelope.output_hash)))
     store_test_drop_roots(roots)
 }
 
 #Test("store hangar verify rehashes despite valid seal and catches content corruption") {
+    verification := StoreVerification.new()
     roots :: store_test_temp_roots()
-    ingested :: store_test_seal_fixture(roots, "audit", "seal-test")
+    ingested :: store_test_seal_fixture(&verification, roots, "audit", "seal-test")
     object :: ingested.entry.out
     digest :: ingested.entry.envelope.output_hash
-    assert(store_check_seal(object, roots.hangar_dir()) ?? panic("check") == Val(digest))
+    assert(store_check_seal(&verification, object, roots.hangar_dir()) ?? panic("check") == Val(digest))
     payload :: files.join(object, "payload")
     store_test_make_writable(payload)
     seconds :: store_test_mtime_seconds(payload)
     files.write(payload, "tamper!") ?? panic("tamper")
     store_test_set_mtime(payload, seconds)
     assert_eq(store_test_mtime_seconds(payload), seconds)
-    store_reset_verified_digest_hash_count(object)
-    assert(store_verify_hangar_object(roots, ingested.entry) == .Err(_))
-    assert_eq(store_verified_digest_hash_count(object), 1)
+    store_reset_verified_digest_hash_count(&verification, object)
+    assert(store_verify_hangar_object(&verification, roots, ingested.entry) == .Err(_))
+    assert_eq(store_verified_digest_hash_count(&verification, object), 1)
     store_test_drop_roots(roots)
 }
 
 // Rust ran the armed window on its own thread so the thread-local memo died
 // with it; the port arms, exercises, and disarms the command memo in order.
 #Test("store armed command memo checks identity once and stays scoped") {
+    verification := StoreVerification.new()
     roots :: store_test_temp_roots()
-    ingested :: store_test_seal_fixture(roots, "memo", "seal-test")
+    ingested :: store_test_seal_fixture(&verification, roots, "memo", "seal-test")
     object :: ingested.entry.out
     digest :: ingested.entry.envelope.output_hash
     hangar :: roots.hangar_dir()
-    store_arm_command_memo()
-    assert(store_check_seal(object, hangar) ?? panic("check") == Val(digest))
+    store_arm_command_memo(&verification)
+    assert(store_check_seal(&verification, object, hangar) ?? panic("check") == Val(digest))
     // Drift the tuple identity mid-command: one command holds one coherent
     // verified view (D-JPK-VERIFYONCE1=A), so the memoized verdict stands.
     payload :: files.join(object, "payload")
     store_test_set_mtime(payload, store_test_mtime_seconds(payload) + 7)
-    assert(store_check_seal(object, hangar) ?? panic("check") == Val(digest))
+    assert(store_check_seal(&verification, object, hangar) ?? panic("check") == Val(digest))
     // Forgetting the seal forgets the memo too.
-    store_remove_seal(object, hangar) ?? panic("remove seal")
-    assert(store_check_seal(object, hangar) ?? panic("check") == None)
-    store_disarm_command_memo()
+    store_remove_seal(&verification, object, hangar) ?? panic("remove seal")
+    assert(store_check_seal(&verification, object, hangar) ?? panic("check") == None)
+    store_disarm_command_memo(&verification)
     // A fresh (unarmed) command keeps strict per-use drift detection.
-    assert(store_check_seal(object, hangar) ?? panic("check") == None)
+    assert(store_check_seal(&verification, object, hangar) ?? panic("check") == None)
+    store_test_drop_roots(roots)
+}
+
+// Rust COMMAND_MEMO semantics, exercised without native filesystem leaves.
+// #4454: generated MIR takes an owner value slot twice; keep this real case.
+#Test("store verification owner keeps armed memo shared and invocation isolated") {
+    verification := StoreVerification.new()
+    other := StoreVerification.new()
+    store_seal_memo_put(&verification, "object", "ignored")
+    assert_eq(store_seal_memo_get(&verification, "object"), None)
+    store_arm_command_memo(&verification)
+    store_seal_memo_put(&verification, "object", "first")
+    store_arm_command_memo(&verification)
+    assert_eq(store_seal_memo_get(&verification, "object"), Val("first"))
+    retained := ~verification
+    store_seal_memo_put(&retained, "object", "replacement")
+    assert_eq(store_seal_memo_get(&verification, "object"), Val("replacement"))
+    store_arm_command_memo(&other)
+    assert_eq(store_seal_memo_get(&other, "object"), None)
+    store_seal_memo_forget(&retained, "object")
+    assert_eq(store_seal_memo_get(&verification, "object"), None)
+    store_seal_memo_put(&verification, "object", "last")
+    store_disarm_command_memo(&retained)
+    store_arm_command_memo(&verification)
+    assert_eq(store_seal_memo_get(&verification, "object"), None)
+}
+
+// Rust VERIFIED_DIGESTS/hash-count ownership: invalidation drops all kinds for
+// one path, while resetting observation counts never removes a cached digest.
+// #4454: generated MIR takes an owner value slot twice; keep this real case.
+#Test("store verification owner separates digest kinds counts and invalidation") {
+    verification := StoreVerification.new()
+    stamp :: DigestStamp{device: 1, inode: 2, size: 3, modified_ns: 4}
+    file_key :: store_file_digest_key("object")
+    output_key :: store_output_digest_key("object", Val("hangar"), false)
+    policy_key :: store_output_digest_key("object", Val("hangar"), true)
+    other_key :: store_file_digest_key("other")
+    keys :: [String]{file_key, output_key, policy_key}
+    loop key in keys {
+        store_verified_digest_put(&verification, key, VerifiedDigestMemo{path: "object", stamp, digest: key})
+    }
+    store_verified_digest_put(&verification, other_key, VerifiedDigestMemo{path: "other", stamp, digest: "other-digest"})
+    assert_eq((store_verified_digest_get(&verification, file_key) ?? panic("file memo")).digest, file_key)
+    assert_eq((store_verified_digest_get(&verification, output_key) ?? panic("output memo")).digest, output_key)
+    assert_eq((store_verified_digest_get(&verification, policy_key) ?? panic("policy memo")).digest, policy_key)
+    store_note_verified_digest_miss(&verification, "object")
+    store_note_verified_digest_miss(&verification, "object")
+    assert_eq(store_verified_digest_hash_count(&verification, "object"), 2)
+    store_reset_verified_digest_hash_count(&verification, "object")
+    assert_eq(store_verified_digest_hash_count(&verification, "object"), 0)
+    assert(store_verified_digest_get(&verification, file_key) == .Val(_))
+    store_invalidate_verified_digest(&verification, "object")
+    loop key in keys {
+        assert_eq(store_verified_digest_get(&verification, key), None)
+    }
+    assert_eq((store_verified_digest_get(&verification, other_key) ?? panic("unrelated memo")).digest, "other-digest")
+    other := StoreVerification.new()
+    assert_eq(store_verified_digest_get(&other, other_key), None)
+}
+
+fn store_test_set_census_enabled(verification: &StoreVerification, enabled: Bool) Never! {
+    state :: verification.state
+    permit := state.guard_edit()
+    permit.value.seal_census_enabled = enabled
+}
+
+// Rust census_note/census_report: disabled census is absent, enabled counts
+// include every check, and the rendered descending rows stop at fifteen.
+// #4454: generated MIR takes an owner value slot twice; keep this real case.
+#Test("store verification census counts checks and bounds descending report") {
+    verification := StoreVerification.new()
+    store_test_set_census_enabled(&verification, false)
+    store_seal_census_note(&verification, "disabled")
+    assert_eq(store_seal_census_report(&verification), None)
+    store_test_set_census_enabled(&verification, true)
+    loop count in 1..<19 {
+        loop _ in 0..<count -> store_seal_census_note(&verification, "object-{count}")
+    }
+    report :: store_seal_census_report(&verification) ?? panic("enabled census")
+    assert(report.starts_with("seal census: 171 checks across 18 objects\n"))
+    lines :: store_text_lines(report)
+    assert_eq(lines.len(), 16)
+    assert_eq(lines[1], "      18  object-18")
+    assert_eq(lines[15], "       4  object-4")
+    assert(!report.contains("disabled"))
+}
+
+// Rust PROVEN_MEMBERS/invalidate_proven_member: the (hangar, digest) proof is
+// shared by copies of one owner, absent from another owner, and invalidation
+// drops only the exact (hangar, digest) member.
+#Test("store verification owner shares proven closure members and invalidates exactly") {
+    verification := StoreVerification.new()
+    other := StoreVerification.new()
+    key :: store_proven_member_key("hangar", "sha256-member")
+    sibling :: store_proven_member_key("other-hangar", "sha256-member")
+    neighbor :: store_proven_member_key("hangar", "sha256-other-member")
+    assert_eq(key, "hangar\tsha256-member")
+    assert(!store_proven_member_contains(&verification, key))
+    store_proven_member_insert(&verification, key)
+    store_proven_member_insert(&verification, sibling)
+    store_proven_member_insert(&verification, neighbor)
+    retained := ~verification
+    assert(store_proven_member_contains(&retained, key))
+    assert(!store_proven_member_contains(&other, key))
+    store_invalidate_proven_member(&retained, "hangar", "sha256-member")
+    assert(!store_proven_member_contains(&verification, key))
+    assert(store_proven_member_contains(&verification, sibling))
+    assert(store_proven_member_contains(&verification, neighbor))
+    // An absent member is already invalid.
+    store_invalidate_proven_member(&other, "hangar", "sha256-member")
+    assert(!store_proven_member_contains(&other, key))
+}
+
+// Rust closure_object_rehashes + Seal::remove: a proven member stays trusted
+// for its owner inside the D-JPK-VERIFYONCE1=A window even after its bytes
+// drift, another owner re-hashes and sees the drift, and removing the seal
+// drops the owner's proof so the next check re-hashes real bytes.
+#Test("store seal removal invalidates the owner's proven closure member") {
+    verification := StoreVerification.new()
+    other := StoreVerification.new()
+    roots :: store_test_temp_roots()
+    ingested :: store_test_seal_fixture(&verification, roots, "proven", "seal-test")
+    object :: ingested.entry.out
+    digest :: ingested.entry.envelope.output_hash
+    hangar :: roots.hangar_dir()
+    key :: store_proven_member_key(hangar, digest)
+    graph :: store_closure_graph(&verification, roots) ?? panic("graph")
+    assert(store_closure_object_rehashes(&verification, roots, graph, digest))
+    assert(store_proven_member_contains(&verification, key))
+    assert(!store_proven_member_contains(&other, key))
+    payload :: files.join(object, "payload")
+    store_test_make_writable(payload)
+    files.write(payload, "drifted bytes") ?? panic("drift payload")
+    assert(store_closure_object_rehashes(&verification, roots, graph, digest))
+    assert(!store_closure_object_rehashes(&other, roots, graph, digest))
+    assert(!store_proven_member_contains(&other, key))
+    store_remove_seal(&verification, object, hangar) ?? panic("remove seal")
+    assert(!store_proven_member_contains(&verification, key))
+    assert(!files.exists(files.join(files.join(hangar, STORE_SEALS_DIR), digest)))
+    assert(!store_closure_object_rehashes(&verification, roots, graph, digest))
+    assert(!store_proven_member_contains(&verification, key))
     store_test_drop_roots(roots)
 }

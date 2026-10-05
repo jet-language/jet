@@ -1,0 +1,58 @@
+use core.text as text
+use core.text.parse as parse
+use core.text.fmt as fmt
+
+// Tab stops use decoded scalar columns, including wide and combining scalars.
+// Scientific notation needs digits on both sides of the exponent marker.
+// Normalization is not transliteration, and titlecase requires cased text.
+// Human durations use whole units, not fractional division.
+fn run() {
+    print("tabs")
+    print("|{parse.expandtabs("界\tx", 4)}|")
+    print("|{parse.expandtabs("é😀\tx", 4)}|")
+    print("|{parse.expandtabs("é\tx", 4)}|")
+    print("|{parse.expandtabs("abcd\tx", 4)}|")
+    print("|{parse.expandtabs("\t\tx", 4)}|")
+    print("|{parse.expandtabs("界\tx", 0)}|")
+    print("|{parse.expandtabs("界\tx", -4)}|")
+    print("|{parse.expandtabs("", 4)}|")
+    print(parse.expandtabs("界\tx\ny\tz", 4) == "界   x\ny   z")
+    cr :: String.from_bytes([U8]{13}) ?? ""
+    print(parse.expandtabs("界\tx{cr}y\tz", 4) == "界   x{cr}y   z")
+    print(parse.expandtabs("界\tx{cr}\ny\tz", 4) == "界   x{cr}\ny   z")
+
+    print("scientific")
+    print((parse.parse_float("2e2") ?? -1.0) == 200.0)
+    print((parse.parse_float("2E2") ?? -1.0) == 200.0)
+    print((parse.parse_float("+2e+2") ?? -1.0) == 200.0)
+    print((parse.parse_float("-2E2") ?? 1.0) == -200.0)
+    print((parse.parse_float("2e-2") ?? -1.0) == 0.02)
+    print((parse.parse_float("2.5e2") ?? -1.0) == 250.0)
+    print((parse.parse_float(".5E+1") ?? -1.0) == 5.0)
+    print((parse.parse_float("2.e2") ?? -1.0) == 200.0)
+    print((parse.parse_float("0e0") ?? -1.0) == 0.0)
+    print((parse.parse_float("12") ?? -1.0) == 12.0)
+    loop invalid in ["", "+", ".", "e2", ".e2", "2e", "2E+", "2e-", "2ee2", "2e2x", "2e2.0", "2e 2"] {
+        print((parse.parse_float(invalid) ?? -999.0) == -999.0)
+    }
+
+    print("normalization")
+    print(text.nfkc("Œœ"))
+    print(text.nfkd("Œœ"))
+    print(text.nfc("Œœ"))
+    print(text.nfd("Œœ"))
+    print(text.nfkc("ﬃ Ａ ²"))
+    print(text.nfkd("ﬃ Ａ ²"))
+    print(text.nfkc("éŒœ") == "éŒœ")
+    print(text.nfkd("éŒœ") == "éŒœ")
+
+    print("title")
+    loop uncased in ["", "456", "! ?", "界", "😀"] -> print(parse.is_title(uncased))
+    loop titled in ["Title 456", "Hello World", "Élan Vital", "123 Abc", "A1B", "Abc-Def"] -> print(parse.is_title(titled))
+    loop untitled in ["Hello world", "HeLLo", "abc", "Abc-def"] -> print(parse.is_title(untitled))
+
+    print("duration")
+    loop ms in [0, 1, 999, -999, 1000, 1999, 60000, 61000, 3600000, 3601000, 86400000, 90061001, -90061001, -1000, -61000] {
+        print(fmt.duration(ms))
+    }
+}

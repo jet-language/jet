@@ -3,7 +3,7 @@
 Closer07, 2026-09-29. Binary: `jet-debug-snapshot14`, sha256 `00b1e35e25ed941cdecb248ec8ffbfde0c1d5b48b563177443436288af2ad3fd`.
 
 ## Fixture
-`~/.cache/jet-test-scratch/Closer07/inspect3/` (`package.jet` allows IO, Log, Mem.Alloc). `safe-jet.sh run run.jet` prints `10` / `"app"`.
+`~/.cache/jet-dev/scratch/Closer07/inspect3/` (`package.jet` allows IO, Log, Mem.Alloc). `safe-jet.sh run run.jet` prints `10` / `"app"`.
 
 | file | contents | sha256 |
 |---|---|---|
@@ -26,7 +26,7 @@ Edit variants (copies):
 
 It records input and binary hashes. Outputs: `inspect3/out/base2/`, `inspect3_body/out/`, `inspect3_sig/out/`.
 
-LSP: `python3 ~/.cache/jet-test-scratch/Closer07/lsp/drive_inspect3.py ~/.cache/jet-test-scratch/Closer07/inspect3` sends references, prepareCallHierarchy, prepareTypeHierarchy, hover and definition over `safe-jet.sh self lsp`. Raw output: `~/.cache/jet-test-scratch/Closer07/result_inspect3.json`.
+LSP: `python3 ~/.cache/jet-dev/scratch/Closer07/lsp/drive_inspect3.py ~/.cache/jet-dev/scratch/Closer07/inspect3` sends references, prepareCallHierarchy, prepareTypeHierarchy, hover and definition over `safe-jet.sh self lsp`. Raw output: `~/.cache/jet-dev/scratch/Closer07/result_inspect3.json`.
 
 ## Evidence and discrepancies
 1. **Checker work vs semantic dependency (crit 1).**

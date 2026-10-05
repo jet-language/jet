@@ -1,0 +1,85 @@
+// IANA IPv4 Special-Purpose Address Space, updated 2025-10-09.
+// More-specific rows override parents. Blank global fields keep Core's policy.
+use core.net.ip as ip
+
+struct ProfileRow {
+    cidr: String
+    a: Int
+    b: Int
+    c: Int
+    d: Int
+    prefix: Int
+    global: Bool
+    before_global: Bool
+    after_global: Bool
+}
+
+fn check_address(n: Int, global: Bool) {
+    addr :: ip.ipv4_from_int(n) ?? panic("profile address")
+    assert(ip.is_global(addr) == global)
+    assert(ip.is_reserved(addr) == (addr.a >= 240))
+    assert(ip.is_private(addr) == (addr.a == 10 || (addr.a == 172 && addr.b >= 16 && addr.b <= 31) || (addr.a == 192 && addr.b == 168)))
+    assert(ip.is_loopback(addr) == (addr.a == 127))
+    assert(ip.is_link_local(addr) == (addr.a == 169 && addr.b == 254))
+    assert(ip.is_multicast(addr) == (addr.a >= 224 && addr.a <= 239))
+    assert(ip.is_unspecified(addr) == (n == 0))
+}
+
+fn run() -[IO]> {
+    // Each row checks its start, end, and both existing immediate neighbours.
+    // Neighbour expectations account for enclosing rows and adjacent exceptions.
+    rows :: [
+        ProfileRow{cidr: "0.0.0.0/8", a: 0, b: 0, c: 0, d: 0, prefix: 8, global: false, before_global: false, after_global: true},
+        ProfileRow{cidr: "0.0.0.0/32", a: 0, b: 0, c: 0, d: 0, prefix: 32, global: false, before_global: false, after_global: false},
+        ProfileRow{cidr: "10.0.0.0/8", a: 10, b: 0, c: 0, d: 0, prefix: 8, global: false, before_global: true, after_global: true},
+        ProfileRow{cidr: "100.64.0.0/10", a: 100, b: 64, c: 0, d: 0, prefix: 10, global: false, before_global: true, after_global: true},
+        ProfileRow{cidr: "127.0.0.0/8", a: 127, b: 0, c: 0, d: 0, prefix: 8, global: false, before_global: true, after_global: true},
+        ProfileRow{cidr: "169.254.0.0/16", a: 169, b: 254, c: 0, d: 0, prefix: 16, global: false, before_global: true, after_global: true},
+        ProfileRow{cidr: "172.16.0.0/12", a: 172, b: 16, c: 0, d: 0, prefix: 12, global: false, before_global: true, after_global: true},
+        ProfileRow{cidr: "192.0.0.0/24", a: 192, b: 0, c: 0, d: 0, prefix: 24, global: false, before_global: true, after_global: true},
+        ProfileRow{cidr: "192.0.0.0/29", a: 192, b: 0, c: 0, d: 0, prefix: 29, global: false, before_global: true, after_global: false},
+        ProfileRow{cidr: "192.0.0.8/32", a: 192, b: 0, c: 0, d: 8, prefix: 32, global: false, before_global: false, after_global: true},
+        ProfileRow{cidr: "192.0.0.9/32", a: 192, b: 0, c: 0, d: 9, prefix: 32, global: true, before_global: false, after_global: true},
+        ProfileRow{cidr: "192.0.0.10/32", a: 192, b: 0, c: 0, d: 10, prefix: 32, global: true, before_global: true, after_global: false},
+        ProfileRow{cidr: "192.0.0.170/32", a: 192, b: 0, c: 0, d: 170, prefix: 32, global: false, before_global: false, after_global: false},
+        ProfileRow{cidr: "192.0.0.171/32", a: 192, b: 0, c: 0, d: 171, prefix: 32, global: false, before_global: false, after_global: false},
+        ProfileRow{cidr: "192.0.2.0/24", a: 192, b: 0, c: 2, d: 0, prefix: 24, global: false, before_global: true, after_global: true},
+        ProfileRow{cidr: "192.31.196.0/24", a: 192, b: 31, c: 196, d: 0, prefix: 24, global: true, before_global: true, after_global: true},
+        ProfileRow{cidr: "192.52.193.0/24", a: 192, b: 52, c: 193, d: 0, prefix: 24, global: true, before_global: true, after_global: true},
+        ProfileRow{cidr: "192.88.99.0/24", a: 192, b: 88, c: 99, d: 0, prefix: 24, global: true, before_global: true, after_global: true},
+        ProfileRow{cidr: "192.88.99.2/32", a: 192, b: 88, c: 99, d: 2, prefix: 32, global: false, before_global: true, after_global: true},
+        ProfileRow{cidr: "192.168.0.0/16", a: 192, b: 168, c: 0, d: 0, prefix: 16, global: false, before_global: true, after_global: true},
+        ProfileRow{cidr: "192.175.48.0/24", a: 192, b: 175, c: 48, d: 0, prefix: 24, global: true, before_global: true, after_global: true},
+        ProfileRow{cidr: "198.18.0.0/15", a: 198, b: 18, c: 0, d: 0, prefix: 15, global: false, before_global: true, after_global: true},
+        ProfileRow{cidr: "198.51.100.0/24", a: 198, b: 51, c: 100, d: 0, prefix: 24, global: false, before_global: true, after_global: true},
+        ProfileRow{cidr: "203.0.113.0/24", a: 203, b: 0, c: 113, d: 0, prefix: 24, global: false, before_global: true, after_global: true},
+        ProfileRow{cidr: "240.0.0.0/4", a: 240, b: 0, c: 0, d: 0, prefix: 4, global: false, before_global: false, after_global: false},
+        ProfileRow{cidr: "255.255.255.255/32", a: 255, b: 255, c: 255, d: 255, prefix: 32, global: false, before_global: false, after_global: false},
+        // Core deliberately retains non-global multicast and ordinary global IPv4.
+        ProfileRow{cidr: "224.0.0.0/4", a: 224, b: 0, c: 0, d: 0, prefix: 4, global: false, before_global: true, after_global: false},
+        ProfileRow{cidr: "8.8.8.8/32", a: 8, b: 8, c: 8, d: 8, prefix: 32, global: true, before_global: true, after_global: true},
+    ]
+    loop row in rows {
+        start :: ip.ipv4_int(ip.ipv4(row.a, row.b, row.c, row.d) ?? panic("profile start"))
+        size := 1
+        loop _ in 0..<(32 - row.prefix) -> size = size * 2
+        end :: start + size - 1
+        check_address(start, row.global)
+        check_address(end, row.global)
+        if start > 0 -> check_address(start - 1, row.before_global)
+        if end < 4294967295 -> check_address(end + 1, row.after_global)
+        print("{row.cidr}:ok")
+    }
+    reserved_octets := 0
+    loop a in 0..<256 {
+        // Three points per first octet include both extremes and an interior host.
+        global :: a != 0 && a != 10 && a != 127 && a < 224
+        check_address(ip.ipv4_int(ip.ipv4(a, 0, 0, 0) ?? panic("octet start")), global && a != 192)
+        check_address(ip.ipv4_int(ip.ipv4(a, 1, 2, 3) ?? panic("octet host")), global)
+        check_address(ip.ipv4_int(ip.ipv4(a, 255, 255, 255) ?? panic("octet end")), global)
+        if ip.is_reserved(ip.ipv4(a, 1, 2, 3) ?? panic("reserved octet")) -> reserved_octets = reserved_octets + 1
+    }
+    assert(reserved_octets == 16)
+    print("first-octets:256:ok")
+    print("reserved-first-octets:{reserved_octets}")
+}

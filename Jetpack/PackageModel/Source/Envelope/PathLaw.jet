@@ -4,11 +4,11 @@
 // representable on every tier-one platform. Unicode normalization is never
 // implicit: NFC and NFD spellings that differ in bytes are distinct names.
 
-@PATH_LAW_RESERVED_NAMES :: [String]{
+PATH_LAW_RESERVED_NAMES :: prep { [String]{
     "CON", "PRN", "AUX", "NUL",
     "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
     "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9"
-}
+} }
 
 // Path-law failure (E1299) with a stable code the CLI and tests match on.
 #Error
@@ -47,7 +47,7 @@ pub fn pkg_validate_path_component_with_mode(name: [U8], allow_nix_store_symlink
     if name == ".".bytes() || name == "..".bytes() {
         return Err(PathLawError{code: "dot", path: pkg_lossy_text(name), detail: "`.` and `..` are not store path components"})
     }
-    if allow_nix_store_symlinks -> return Ok()
+    if allow_nix_store_symlinks -> return
     if name.contains(U8{92}) {
         return Err(PathLawError{code: "backslash", path: pkg_lossy_text(name), detail: "backslash is not a portable path component outside Nix admission"})
     }
@@ -58,7 +58,6 @@ pub fn pkg_validate_path_component_with_mode(name: [U8], allow_nix_store_symlink
     if pkg_path_law_is_windows_reserved(name) {
         return Err(PathLawError{code: "reserved", path: pkg_lossy_text(name), detail: "Windows reserved device name"})
     }
-    Ok()
 }
 
 // Validate every component of a relative store path under the native law.
@@ -82,7 +81,6 @@ pub fn pkg_validate_rel_path_with_mode(rel: String, allow_nix_store_symlinks: Bo
         if part == ".." -> return Err(PathLawError{code: "dot", path: rel, detail: "`.` and `..` are not store path components"})
         pkg_validate_path_component_with_mode(part.bytes(), allow_nix_store_symlinks)
     }
-    Ok()
 }
 
 // Reject case-fold collisions among sibling directory entry names.
@@ -99,7 +97,6 @@ pub fn pkg_reject_casefold_collisions(names: [[U8]]) PathLawError! {
             .None -> folded[key] = name
         }
     }
-    Ok()
 }
 
 fn pkg_ascii_fold(bytes: [U8]) -> [U8] Never! {
@@ -125,7 +122,7 @@ fn pkg_path_law_is_windows_reserved(name: [U8]) -> Bool Never! {
         &upper.push(if code >= 97 && code <= 122 -> U8{code - 32} else -> name[index])
     }
     text :: String.from_bytes(upper) ?? return false
-    @PATH_LAW_RESERVED_NAMES.contains(text)
+    PATH_LAW_RESERVED_NAMES.contains(text)
 }
 
 // `String::from_utf8_lossy`: each invalid byte becomes U+FFFD.
@@ -142,7 +139,7 @@ pub fn pkg_lossy_text(bytes: [U8]) -> String Never! {
                 lead >= 0xF0 && lead <= 0xF4 -> 4
                 else -> 0
             }
-            if width > 0 && index + width <= bytes.len() && String.from_bytes(bytes[index..<index + width]) != None {
+            if width > 0 && index + width <= bytes.len() && String.from_bytes(bytes[index..<index + width]) == .Ok(_) {
                 loop offset in 0..<width -> &out.push(bytes[index + offset])
                 index += width
             } else {

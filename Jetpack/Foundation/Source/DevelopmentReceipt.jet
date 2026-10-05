@@ -2,7 +2,17 @@
 // ported once from jet_codegen::development_receipt. Hosts own the durable
 // filesystem transaction; this home owns the record bytes.
 
-@JET_DEVELOPMENT_RECEIPT_HEADER :: "jet-development-receipt-v1"
+JET_DEVELOPMENT_RECEIPT_HEADER :: prep { "jet-development-receipt-v1" }
+// Rust Prelude/DevelopmentReceipt.rs:80-90: one production-receipt environment protocol.
+pub JET_DEVELOPMENT_RECEIPT_DIRECTORY_ENV :: prep { "JET_DEVELOPMENT_RECEIPT_DIRECTORY" }
+pub JET_DEVELOPMENT_RECEIPT_ENTRY_ENV :: prep { "JET_DEVELOPMENT_RECEIPT_ENTRY" }
+pub JET_DEVELOPMENT_RECEIPT_SOURCE_DIGEST_ENV :: prep { "JET_DEVELOPMENT_RECEIPT_SOURCE_DIGEST" }
+pub JET_DEVELOPMENT_RECEIPT_CLOSURE_DIGEST_ENV :: prep { "JET_DEVELOPMENT_RECEIPT_CLOSURE_DIGEST" }
+pub JET_DEVELOPMENT_RECEIPT_INPUT_DIGEST_ENV :: prep { "JET_DEVELOPMENT_RECEIPT_INPUT_DIGEST" }
+pub JET_DEVELOPMENT_RECEIPT_INPUT_COUNT_ENV :: prep { "JET_DEVELOPMENT_RECEIPT_INPUT_COUNT" }
+pub JET_DEVELOPMENT_RECEIPT_INPUT_COUNT_DIGEST_ENV :: prep { "JET_DEVELOPMENT_RECEIPT_INPUT_COUNT_DIGEST" }
+pub JET_DEVELOPMENT_RECEIPT_TARGET_ENV :: prep { "JET_DEVELOPMENT_RECEIPT_TARGET" }
+pub JET_DEVELOPMENT_RECEIPT_TARGET_DIGEST_ENV :: prep { "JET_DEVELOPMENT_RECEIPT_TARGET_DIGEST" }
 
 pub struct JetDevelopmentReceiptInput {
     pub name: String
@@ -29,7 +39,7 @@ pub struct JetDevelopmentReceipt {
     pub failure_path: JetDevelopmentReceiptPath?
 
     fn render(self) -> String Never! {
-        out := "{@JET_DEVELOPMENT_RECEIPT_HEADER}\n"
+        out := "{JET_DEVELOPMENT_RECEIPT_HEADER}\n"
         out = "{out}{jet_receipt_line("act", "", self.act)}"
         out = "{out}{jet_receipt_line("closure", "", self.locked_closure)}"
         loop input in jet_receipt_sorted_pairs(self.inputs) -> out = "{out}{jet_receipt_line("input", input.name, input.digest)}"
@@ -75,9 +85,9 @@ pub fn jet_development_receipt_render(receipt: JetDevelopmentReceipt) -> String 
 // Whether `value` is a `sha256-<64 lowercase hex>` content address.
 pub fn jet_receipt_is_content_address(value: String) -> Bool Never! {
     if !value.starts_with("sha256-") -> return false
-    hex :: value.removeprefix("sha256-").bytes()
-    if hex.len() != 64 -> return false
-    loop byte in hex {
+    digits :: value.removeprefix("sha256-").bytes()
+    if digits.len() != 64 -> return false
+    loop byte in digits {
         code :: Int.from_u8(byte)
         if !((code >= 48 && code <= 57) || (code >= 97 && code <= 102)) -> return false
     }

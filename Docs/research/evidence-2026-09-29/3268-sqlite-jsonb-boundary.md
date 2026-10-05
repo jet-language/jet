@@ -1,6 +1,6 @@
 # #3268 — SQLite JSONB stays at the database boundary (D-CORE-JSONB1=A)
 
-Date: 2026-09-29. Binary: `jet-debug-snapshot14` (via `~/.cache/jet-luna/safe-jet.sh`).
+Date: 2026-09-29. Binary: `jet-debug-snapshot14` (via `~/.cache/jet-dev/safe-jet.sh`).
 
 ## Question
 

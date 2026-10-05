@@ -30,16 +30,16 @@ pub struct TargetProfileError {
     fn message(self) -> String Never! { self.detail }
 }
 
-@TARGET_PROFILE_WEB_BROWSER :: "web.browser"
-@TARGET_PROFILE_WEB_WASI_SERVER :: "web.wasi_server"
-@TARGET_PROFILE_WEB_NO_OS :: "web.no_os"
+TARGET_PROFILE_WEB_BROWSER :: prep { "web.browser" }
+TARGET_PROFILE_WEB_WASI_SERVER :: prep { "web.wasi_server" }
+TARGET_PROFILE_WEB_NO_OS :: prep { "web.no_os" }
 
 // The exact identity selected for a package target. Built-in web identities
 // are closed; any other identity names a typed target-profile declaration.
 pub enum TargetProfileIdentity {
     WebBrowser
     WebWasiServer
-    WebNoOs
+    WebNoOS
     Named(String)
 
     // Parse one exact target-profile identity.
@@ -56,14 +56,14 @@ pub enum TargetProfileIdentity {
             return Err(TargetProfileError{detail: "target profile identity `{value}` must use non-empty dotted components"})
         }
         if value == {
-            @TARGET_PROFILE_WEB_BROWSER -> return Ok(TargetProfileIdentity.WebBrowser)
-            @TARGET_PROFILE_WEB_WASI_SERVER -> return Ok(TargetProfileIdentity.WebWasiServer)
-            @TARGET_PROFILE_WEB_NO_OS -> return Ok(TargetProfileIdentity.WebNoOs)
+            TARGET_PROFILE_WEB_BROWSER -> return Ok(TargetProfileIdentity.WebBrowser)
+            TARGET_PROFILE_WEB_WASI_SERVER -> return Ok(TargetProfileIdentity.WebWasiServer)
+            TARGET_PROFILE_WEB_NO_OS -> return Ok(TargetProfileIdentity.WebNoOS)
             else -> {}
         }
         lower :: pkg_ascii_lower(value)
         if lower == "web" || lower.starts_with("web.") {
-            return Err(TargetProfileError{detail: "unknown web target profile `{value}`; allowed identities are `{@TARGET_PROFILE_WEB_BROWSER}`, `{@TARGET_PROFILE_WEB_WASI_SERVER}`, and `{@TARGET_PROFILE_WEB_NO_OS}`"})
+            return Err(TargetProfileError{detail: "unknown web target profile `{value}`; allowed identities are `{TARGET_PROFILE_WEB_BROWSER}`, `{TARGET_PROFILE_WEB_WASI_SERVER}`, and `{TARGET_PROFILE_WEB_NO_OS}`"})
         }
         if lower == "wasm" || lower.starts_with("wasm.") || lower.starts_with("wasm32-") || lower == "no_os" || lower.starts_with("no_os.") || lower == "no-os" || lower.starts_with("no-os.") || lower == "freestanding" {
             return Err(TargetProfileError{detail: "generic Wasm/no-OS target profile `{value}` is not selectable; use an exact typed profile identity"})
@@ -73,16 +73,16 @@ pub enum TargetProfileIdentity {
 
     fn as_str(self) -> String Never! {
         if self == {
-            .WebBrowser -> @TARGET_PROFILE_WEB_BROWSER
-            .WebWasiServer -> @TARGET_PROFILE_WEB_WASI_SERVER
-            .WebNoOs -> @TARGET_PROFILE_WEB_NO_OS
+            .WebBrowser -> TARGET_PROFILE_WEB_BROWSER
+            .WebWasiServer -> TARGET_PROFILE_WEB_WASI_SERVER
+            .WebNoOS -> TARGET_PROFILE_WEB_NO_OS
             .Named(value) -> value
         }
     }
 
     fn is_web_builtin(self) -> Bool Never! {
         if self == {
-            .WebBrowser | .WebWasiServer | .WebNoOs -> true
+            .WebBrowser | .WebWasiServer | .WebNoOS -> true
             .Named(_) -> false
         }
     }
@@ -172,7 +172,7 @@ pub fn pkg_parse_target_profiles(body: String) -> PackageTargets PackageParseErr
         name :: pkg_unquote(entry.key)
         if name == "" -> return Err(PackageParseError.BadTargetField{name: "targets", detail: "target names must not be empty"})
         inner :: (pkg_strip_wrapped(entry.value.trim(), "{{", "}}") ?? return Err(PackageParseError.BadTargetField{name: name, detail: "target selection must be a record containing only `profile`"})).trim()
-        profile := None
+        profile := TargetProfileIdentity?{None}
         seen := [String]{}
         loop field in pkg_target_profile_entries(inner) {
             if seen.contains(field.key) -> return Err(PackageParseError.BadTargetField{name: name, detail: "target field `{field.key}` is declared more than once"})
@@ -220,7 +220,7 @@ pub fn pkg_parse_packages(body: String) -> [PackageEntry] PackageParseError! {
 
 fn pkg_parse_target(name: String, value: String) -> PackageTarget PackageParseError! {
     keyword := value.trim()
-    block := None
+    block := String?{None}
     if value.split_once("{{") == {
         .Val(parts) -> {
             keyword = parts.before.trim()
@@ -229,20 +229,20 @@ fn pkg_parse_target(name: String, value: String) -> PackageTarget PackageParseEr
         }
         .None -> {}
     }
-    if keyword == @TARGET_SANDBOX || keyword == @RETIRED_TARGET_PLUGIN {
+    if keyword == TARGET_SANDBOX || keyword == RETIRED_TARGET_PLUGIN {
         export :: if block == {
             .Val(body) -> pkg_validate_plugin_block(name, body)
             .None -> None
         }
-        return Ok(PackageTarget.Plugin(export))
+        return Ok(PackageTarget.Plugin{export: export})
     }
     target :: if keyword == {
-        @TARGET_LIBRARY -> PackageTarget.Library
-        @TARGET_EXECUTABLE -> PackageTarget.Executable
-        @TARGET_TEST -> PackageTarget.Test
-        @TARGET_EXAMPLE -> PackageTarget.Example
+        TARGET_LIBRARY -> PackageTarget.Library
+        TARGET_EXECUTABLE -> PackageTarget.Executable
+        TARGET_TEST -> PackageTarget.Test
+        TARGET_EXAMPLE -> PackageTarget.Example
         else -> {
-            return Err(PackageParseError.BadTarget{name: name, value: keyword, reserved: @TARGET_RESERVED.contains(keyword)})
+            return Err(PackageParseError.BadTarget{name: name, value: keyword, reserved: TARGET_RESERVED.contains(keyword)})
         }
     }
     if block == .Val(body) -> pkg_validate_target_block(name, body)
@@ -254,22 +254,22 @@ fn pkg_validate_target_block(name: String, body: String) PackageParseError! {
     loop entry in pkg_key_value_entries(body) {
         if seen.contains(entry.key) -> return Err(PackageParseError.BadTargetField{name: name, detail: "target field `{entry.key}` is declared more than once"})
         &seen.push(entry.key)
-        if entry.key != @TARGET_FIELD_ENTRY && entry.key != @TARGET_FIELD_NAME {
-            return Err(PackageParseError.BadTargetField{name: name, detail: "unknown target field `{entry.key}` (allowed: `{@TARGET_FIELD_ENTRY}`, `{@TARGET_FIELD_NAME}`)"})
+        if entry.key != TARGET_FIELD_ENTRY && entry.key != TARGET_FIELD_NAME {
+            return Err(PackageParseError.BadTargetField{name: name, detail: "unknown target field `{entry.key}` (allowed: `{TARGET_FIELD_ENTRY}`, `{TARGET_FIELD_NAME}`)"})
         }
     }
 }
 
 fn pkg_validate_plugin_block(name: String, body: String) -> String? PackageParseError! {
-    export := None
+    export := String?{None}
     seen := [String]{}
     loop entry in pkg_key_value_entries(body) {
         if seen.contains(entry.key) -> return Err(PackageParseError.BadTargetField{name: name, detail: "sandbox field `{entry.key}` is declared more than once"})
         &seen.push(entry.key)
         if entry.key == {
-            @TARGET_FIELD_ENTRY | @TARGET_FIELD_NAME -> {}
-            @TARGET_FIELD_EXPORT -> export = Val(pkg_unquote(entry.value))
-            else -> return Err(PackageParseError.BadTargetField{name: name, detail: "unknown field `{entry.key}` on `sandbox` (allowed: `{@TARGET_FIELD_ENTRY}`, `{@TARGET_FIELD_NAME}`, `{@TARGET_FIELD_EXPORT}`)"})
+            TARGET_FIELD_ENTRY | TARGET_FIELD_NAME -> {}
+            TARGET_FIELD_EXPORT -> export = Val(pkg_unquote(entry.value))
+            else -> return Err(PackageParseError.BadTargetField{name: name, detail: "unknown field `{entry.key}` on `sandbox` (allowed: `{TARGET_FIELD_ENTRY}`, `{TARGET_FIELD_NAME}`, `{TARGET_FIELD_EXPORT}`)"})
         }
     }
     Ok(export)
@@ -277,8 +277,8 @@ fn pkg_validate_plugin_block(name: String, body: String) -> String? PackageParse
 
 fn pkg_parse_package_entry_block(name: String, body: String) -> [PackageTarget] PackageParseError! {
     loop entry in pkg_key_value_entries(body) {
-        if entry.key == @PACKAGE_FIELD_KIND_REMOVED -> return Err(PackageParseError.KindFieldRemoved{name: name})
-        if entry.key == @PACKAGE_FIELD_TARGETS -> return pkg_parse_targets_list(name, entry.value.trim())
+        if entry.key == PACKAGE_FIELD_KIND_REMOVED -> return Err(PackageParseError.KindFieldRemoved{name: name})
+        if entry.key == PACKAGE_FIELD_TARGETS -> return pkg_parse_targets_list(name, entry.value.trim())
         return Err(PackageParseError.BadTargetField{name: name, detail: "unknown package field `{entry.key}`"})
     }
     Ok([PackageTarget]{})

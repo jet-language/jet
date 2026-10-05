@@ -40,7 +40,9 @@ fn sema_must_use_method(type_name: String, method: String, environment: SemaScop
     graph_option :: environment.registration_graph
     graph :: graph_option ?? return false
     loop nominal_row in sema_registration_nominal_rows_named(graph, type_name) {
-        loop function in graph.modules[nominal_row.module_index].nominals[nominal_row.row].methods {
+        methods :: graph.modules[nominal_row.module_index].nominals[nominal_row.row].methods
+        loop method_index in 0..<methods.len() {
+            function :: methods[method_index]
             if function.symbol.name == method && function.declaration.is_must_use -> return true
         }
     }
@@ -58,7 +60,10 @@ fn sema_must_use_call_target(expr: Expr, environment: SemaScopeEnvironment, scop
             if receiver == .Ident(name, _) {
                 symbol :: sema_scope_resolve(scopes, name) ?? return None
                 ty :: symbol.ty ?? return None
-                owner :: sema_expr_type_base_name(ty) ?? return None
+                // A resolved receiver type carries its canonical identity
+                // (`module::Name`); the method rows are keyed by its leaf.
+                base :: sema_expr_type_base_name(ty) ?? return None
+                owner :: sema_expr_operator_row_name(base)
                 if sema_must_use_method(owner, method, environment) -> return Val("{owner}.{method}")
             }
         }

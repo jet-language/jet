@@ -1,0 +1,21 @@
+// Rust crates/jetpack/src/JetOS/identity.rs:4-35.
+JETOS_RELEASE_VERSION :: prep { "26.10" }
+JETOS_RELEASE_CODENAME :: prep { "Apex" }
+JETOS_RELEASE_CODENAME_ID :: prep { "apex" }
+JETOS_WALLPAPER_SVG :: prep { embed_file("assets/apex-wallpaper.svg") }
+
+pub fn jetos_release_label(prerelease: Bool) -> String Never! {
+    suffix :: if prerelease -> "-pre" else -> ""
+    "jetos {JETOS_RELEASE_VERSION}{suffix} ({JETOS_RELEASE_CODENAME})"
+}
+
+pub fn jetos_render_jetos_os_release(prerelease: Bool) -> String Never! {
+    suffix :: if prerelease -> "-pre" else -> ""
+    "NAME=jetos\nID=jetos\nVERSION=\"{JETOS_RELEASE_VERSION}{suffix} ({JETOS_RELEASE_CODENAME})\"\nVERSION_ID={JETOS_RELEASE_VERSION}{suffix}\nVERSION_CODENAME={JETOS_RELEASE_CODENAME_ID}\nPRETTY_NAME=\"{jetos_release_label(prerelease)}\"\nHOME_URL=\"https://jet-lang.dev/jetos\"\n"
+}
+
+pub fn jetos_write_jetos_identity_assets(dir: String) IOError! -[FS]> {
+    backgrounds :: files.join(dir, "share/backgrounds/jetos")
+    files.create_dir_all(backgrounds)
+    files.write(files.join(backgrounds, "apex.svg"), JETOS_WALLPAPER_SVG)
+}

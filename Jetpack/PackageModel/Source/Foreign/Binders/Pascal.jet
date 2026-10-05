@@ -13,7 +13,7 @@ pub struct PascalBindResult {
     pub provenance: String
 }
 
-@PKG_PASCAL_TOOL_ACTION :: "rejected the Pascal binding source"
+PKG_PASCAL_TOOL_ACTION :: prep { "rejected the Pascal binding source" }
 
 // The cdecl value shapes the bridge accepts.
 enum PascalScalar {
@@ -88,7 +88,7 @@ pub fn pkg_pascal_bind(path: String, source: String, lib: String, cache: String)
     c_compiler :: pkg_binder_resolved_tool_path("cc") ?? return Err(ForeignBindError.ToolMissing("cc"))
     archiver :: pkg_binder_resolved_tool_path("ar") ?? return Err(ForeignBindError.ToolMissing("ar"))
     build :: pkg_worker_prepare_build(cache, "pascal", lib, "Pascal")
-    runtime :: files.join(cache, "libjet_pascal_{lib}_runtime{BinderHostOs.current().shared_ext()}")
+    runtime :: files.join(cache, "libjet_pascal_{lib}_runtime{BinderHostOS.current().shared_ext()}")
     pkg_binder_remove_file_quiet(runtime)
     pkg_pascal_run([String]{compiler, "-Mobjfpc", "-Cg", "-O2", "-FU{build}", "-FE{cache}", "-o{runtime}", path}, "fpc")
     if !files.is_file(runtime) -> return Err(ForeignBindError.Source("FreePascal did not produce the requested shared library"))
@@ -118,10 +118,10 @@ pub fn pkg_pascal_bind(path: String, source: String, lib: String, cache: String)
 // One supervised Pascal build tool; a failure reports stderr (or stdout when
 // stderr is empty), with any `Fatal:` line collapsed to "compilation failed".
 fn pkg_pascal_run(argv: [String], tool: String) ForeignBindError! -[Exec, Time.Wait]> {
-    output :: pkg_binder_capture(argv, None, tool, @PKG_PASCAL_TOOL_ACTION)
-    if output.success -> return Ok()
+    output :: pkg_binder_capture(argv, None, tool, PKG_PASCAL_TOOL_ACTION)
+    if output.success -> return
     detail :: if output.stderr.len() > 0 -> output.stderr else -> output.stdout
-    Err(ForeignBindError.ToolFailed{tool: tool, action: @PKG_PASCAL_TOOL_ACTION, detail: pkg_pascal_launder(detail)})
+    return Err(ForeignBindError.ToolFailed{tool: tool, action: PKG_PASCAL_TOOL_ACTION, detail: pkg_pascal_launder(detail)})
 }
 
 fn pkg_pascal_launder(bytes: [U8]) -> String Never! {
@@ -453,7 +453,7 @@ fn pkg_pascal_render_c(lib: String, surface: PascalSurface) -> String Never! {
     loop routine in surface.plain -> &plain.push(pkg_pascal_wrapper_c(abi, routine, None))
     methods := [String]{}
     loop routine in handle.methods -> &methods.push(pkg_pascal_wrapper_c(abi, routine, Val("jet_pascal_borrowed")))
-    pkg_binder_fill_template(@PKG_PASCAL_BRIDGE_C, [String: String]{
+    pkg_binder_fill_template(PKG_PASCAL_BRIDGE_C, [String: String]{
         "abi": abi,
         "decls": decls.join(""),
         "close": handle.close.name,
@@ -467,7 +467,7 @@ fn pkg_pascal_render_c(lib: String, surface: PascalSurface) -> String Never! {
 }
 
 // The slot-table bridge. Holes are filled once; see `pkg_pascal_render_c`.
-@PKG_PASCAL_BRIDGE_C :: ```#include <stdint.h>
+PKG_PASCAL_BRIDGE_C :: prep { ```#include <stdint.h>
 #include <pthread.h>
 #include <stdlib.h>
 #define JET_PASCAL_SLOTS 64
@@ -541,4 +541,4 @@ int64_t @@abi@@_take_error(void) { int64_t value = failed; failed = 0; return va
     if (!valid) { failed = 1; return; }
     @@close@@(value);
 }
-```
+``` }

@@ -8,19 +8,19 @@
 // toolchain redirect rule below, and a caller-chosen body cap
 // (D-CORE-HTTPBODYLIMIT1). `JETPACK_DENY_NETWORK` still gates every remote read.
 
-@TOOLCHAIN_FETCH_TIMEOUT_SECONDS :: 120
-@TOOLCHAIN_FETCH_MAX_REDIRECTS :: 5
-@TOOLCHAIN_READ_CHUNK :: 65536
+TOOLCHAIN_FETCH_TIMEOUT_SECONDS :: prep { 120 }
+TOOLCHAIN_FETCH_MAX_REDIRECTS :: prep { 5 }
+TOOLCHAIN_READ_CHUNK :: prep { 65536 }
 
 // Where a channel is published.
 enum ToolchainEndpoint {
     File(String)
-    Http(ToolchainHttpEndpoint)
+    HTTP(ToolchainHTTPEndpoint)
 }
 
-struct ToolchainHttpEndpoint {
+struct ToolchainHTTPEndpoint {
     base: String
-    origin: ToolchainHttpOrigin
+    origin: ToolchainHTTPOrigin
 
     fn url(self, relative: String) -> String Never! {
         "{self.base}/{relative}"
@@ -28,9 +28,9 @@ struct ToolchainHttpEndpoint {
 }
 
 // An HTTP origin: scheme, host and effective port.
-struct ToolchainHttpOrigin {
+struct ToolchainHTTPOrigin {
     scheme: String
-    host: ToolchainHttpHost
+    host: ToolchainHTTPHost
     port: Int
 
     fn is_loopback(self) -> Bool Never! {
@@ -51,12 +51,12 @@ struct ToolchainHttpOrigin {
         "{host}:{self.port}"
     }
 
-    fn same_as(self, other: ToolchainHttpOrigin) -> Bool Never! {
+    fn same_as(self, other: ToolchainHTTPOrigin) -> Bool Never! {
         self.scheme == other.scheme && self.authority() == other.authority()
     }
 }
 
-enum ToolchainHttpHost {
+enum ToolchainHTTPHost {
     Name(String)
     V4(IPv4)
     V6(IPv6)
@@ -65,7 +65,7 @@ enum ToolchainHttpHost {
 // Rust `configured_endpoint`: the environment override, else the Jetpack
 // config file `config/toolchain-v1.endpoint` under `root`.
 pub fn recipe_toolchain_configured_endpoint(root: String) -[FS, Env]> String? RecipeError! {
-    if sys.get(@TOOLCHAIN_ENDPOINT_ENV) == {
+    if sys.get(TOOLCHAIN_ENDPOINT_ENV) == {
         .Val(value) -> { if value != "" -> return Ok(Val(value)) }
         .None -> {}
     }
@@ -99,7 +99,7 @@ fn recipe_update_parse_endpoint(raw: String) -[FS, Env]> ToolchainEndpoint Recip
     if origin.scheme == "http" && !origin.is_loopback() -> return Err(RecipeError.Update("plain HTTP toolchain endpoints must use loopback"))
     base := raw
     loop base.ends_with("/") -> base = base.removesuffix("/")
-    Ok(ToolchainEndpoint.Http(ToolchainHttpEndpoint{base, origin}))
+    Ok(ToolchainEndpoint.HTTP(ToolchainHTTPEndpoint{base, origin}))
 }
 
 // Any whitespace scalar.
@@ -111,7 +111,7 @@ fn recipe_update_has_space(value: String) -> Bool Never! {
 }
 
 // The origin of an `http://` or `https://` URL.
-fn recipe_update_parse_http_url(raw: String) -> ToolchainHttpOrigin RecipeError! {
+fn recipe_update_parse_http_url(raw: String) -> ToolchainHTTPOrigin RecipeError! {
     split :: raw.split_once("://") ?? return Err(RecipeError.Update("toolchain URL must use http:// or https://"))
     scheme :: split.before
     rest :: split.after
@@ -129,11 +129,11 @@ fn recipe_update_parse_http_url(raw: String) -> ToolchainHttpOrigin RecipeError!
         return Err(RecipeError.Update("toolchain URL has an invalid authority or path"))
     }
     parsed :: recipe_update_parse_http_authority(authority, default_port)
-    Ok(ToolchainHttpOrigin{scheme, host: parsed.host, port: parsed.port})
+    Ok(ToolchainHTTPOrigin{scheme, host: parsed.host, port: parsed.port})
 }
 
 struct ToolchainHostPort {
-    host: ToolchainHttpHost
+    host: ToolchainHTTPHost
     port: Int
 }
 
@@ -150,7 +150,7 @@ fn recipe_update_parse_http_authority(authority: String, default_port: Int) -> T
             trailing.starts_with(":") -> recipe_update_parse_http_port(trailing.removeprefix(":"))
             else -> { return Err(RecipeError.Update("toolchain URL has an invalid IPv6 authority")) }
         }
-        return Ok(ToolchainHostPort{host: ToolchainHttpHost.V6(address), port})
+        return Ok(ToolchainHostPort{host: ToolchainHTTPHost.V6(address), port})
     }
     if authority.contains("[") || authority.contains("]") -> return Err(RecipeError.Update("toolchain URL has an invalid authority"))
     host := authority
@@ -165,7 +165,7 @@ fn recipe_update_parse_http_authority(authority: String, default_port: Int) -> T
     }
     if host == "" -> return Err(RecipeError.Update("toolchain URL has an empty host"))
     if ip.parse_ipv4(host) == {
-        .Ok(address) -> return Ok(ToolchainHostPort{host: ToolchainHttpHost.V4(address), port})
+        .Ok(address) -> return Ok(ToolchainHostPort{host: ToolchainHTTPHost.V4(address), port})
         .Err(_) -> {}
     }
     if host.bytes().len() > 253 -> return Err(RecipeError.Update("toolchain URL has an invalid host"))
@@ -174,7 +174,7 @@ fn recipe_update_parse_http_authority(authority: String, default_port: Int) -> T
         invalid :: label == "" || label.bytes().len() > 63 || label.starts_with("-") || label.ends_with("-") || !recipe_update_all_ident(label)
         if invalid -> return Err(RecipeError.Update("toolchain URL has an invalid host"))
     }
-    Ok(ToolchainHostPort{host: ToolchainHttpHost.Name(pkg_ascii_lower(host)), port})
+    Ok(ToolchainHostPort{host: ToolchainHTTPHost.Name(pkg_ascii_lower(host)), port})
 }
 
 // A decimal port in 0..=65535.
@@ -187,7 +187,7 @@ fn recipe_update_parse_http_port(raw: String) -> Int RecipeError! {
 
 // One redirect hop: the current URL and the Location target must both keep
 // the allowed scheme, host and port.
-fn recipe_update_resolve_redirect(allowed: ToolchainHttpOrigin, current: String, location: String) -> String RecipeError! {
+fn recipe_update_resolve_redirect(allowed: ToolchainHTTPOrigin, current: String, location: String) -> String RecipeError! {
     current_origin :: recipe_update_parse_http_url(current)
     if !current_origin.same_as(allowed) -> return Err(RecipeError.Update("toolchain redirect changed scheme or origin"))
     next :: if {
@@ -205,7 +205,7 @@ fn recipe_update_fetch_bytes(endpoint: ToolchainEndpoint, relative: String, limi
     recipe_update_validate_relative_path(relative)
     if endpoint == {
         .File(root) -> recipe_update_read_local_path(root, relative, limit, label)
-        .Http(http) -> {
+        .HTTP(http) -> {
             if (sys.get("JETPACK_DENY_NETWORK") ?? "") != "" {
                 return Err(RecipeError.Update("network disabled by JETPACK_DENY_NETWORK while trying to {label}"))
             }
@@ -219,16 +219,16 @@ fn recipe_update_fetch_bytes(endpoint: ToolchainEndpoint, relative: String, limi
 
 // GET with each redirect hop checked by the toolchain redirect rule, a
 // success status, and a bounded body that must agree with Content-Length.
-fn recipe_update_fetch_http(http: ToolchainHttpEndpoint, url: String, limit: Int) -[Net, Time.Wait]> [U8] RecipeError! {
+fn recipe_update_fetch_http(http: ToolchainHTTPEndpoint, url: String, limit: Int) -[Net, Time.Wait]> [U8] RecipeError! {
     client :: http_client.Client.new().redirects(.Disabled)
     current := url
     hops := 0
     loop {
-        request :: http_client.request("GET", current).total_timeout(time.duration_seconds(@TOOLCHAIN_FETCH_TIMEOUT_SECONDS))
+        request :: http_client.request("GET", current).total_timeout(time.duration_seconds(TOOLCHAIN_FETCH_TIMEOUT_SECONDS))
         response :: client.send(request) ?? return Err(RecipeError.Other("{current}: {err}"))
         status :: response.status()
         if status == 301 || status == 302 || status == 303 || status == 307 || status == 308 {
-            if hops >= @TOOLCHAIN_FETCH_MAX_REDIRECTS -> return Err(RecipeError.Other("{url}: too many redirects (limit {@TOOLCHAIN_FETCH_MAX_REDIRECTS})"))
+            if hops >= TOOLCHAIN_FETCH_MAX_REDIRECTS -> return Err(RecipeError.Other("{url}: too many redirects (limit {TOOLCHAIN_FETCH_MAX_REDIRECTS})"))
             location :: response.header("location") ?? return Err(RecipeError.Other("{current}: redirect without Location"))
             current = recipe_update_resolve_redirect(http.origin, current, location) ?? return Err(RecipeError.Other("{current}: {err.message()}"))
             hops += 1
@@ -247,7 +247,7 @@ fn recipe_update_fetch_http(http: ToolchainHttpEndpoint, url: String, limit: Int
         body :: response.body(limit: limit + 1)
         bytes := [U8]{}
         loop {
-            chunk :: body.read(@TOOLCHAIN_READ_CHUNK) ?? return Err(RecipeError.Other("{url}: could not read response: {err}"))
+            chunk :: body.read(TOOLCHAIN_READ_CHUNK) ?? return Err(RecipeError.Other("{url}: could not read response: {err}"))
             if chunk.len() == 0 -> break
             loop byte in chunk -> &bytes.push(byte)
             if bytes.len() > limit -> return Err(RecipeError.Other("{url}: response exceeds its size bound"))
@@ -264,7 +264,7 @@ fn recipe_update_fetch_http(http: ToolchainHttpEndpoint, url: String, limit: Int
 fn recipe_update_endpoint_url(endpoint: ToolchainEndpoint, relative: String) -> String Never! {
     if endpoint == {
         .File(root) -> "file://{files.join(root, relative)}"
-        .Http(http) -> http.url(relative)
+        .HTTP(http) -> http.url(relative)
     }
 }
 
@@ -290,7 +290,7 @@ fn recipe_update_read_local_file(path: String, limit: Int, label: String) -[FS, 
     file :: files.open(path, links: .Refuse) ?? return Err(RecipeError.Update("open {label}: {err}"))
     bytes := [U8]{}
     loop {
-        chunk :: file.read(@TOOLCHAIN_READ_CHUNK) ?? return Err(RecipeError.Update("read {label}: {err}"))
+        chunk :: file.read(TOOLCHAIN_READ_CHUNK) ?? return Err(RecipeError.Update("read {label}: {err}"))
         if chunk.len() == 0 -> break
         loop byte in chunk -> &bytes.push(byte)
         if bytes.len() > limit -> return Err(RecipeError.Update("{label} exceeds its bound"))
@@ -310,7 +310,7 @@ fn recipe_update_read_state(path: String) -[FS, Env]> ToolchainUpdateState? Reci
         }
     }
     if info.is_symlink || !info.is_file -> return Err(RecipeError.Update("toolchain update state is not a regular file"))
-    bytes :: recipe_update_read_local_file(path, @TOOLCHAIN_MAX_STATE_BYTES, "toolchain update state")
+    bytes :: recipe_update_read_local_file(path, TOOLCHAIN_MAX_STATE_BYTES, "toolchain update state")
     Ok(Val(ToolchainUpdateState.parse(bytes)))
 }
 

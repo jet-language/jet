@@ -225,7 +225,7 @@ pub struct SemanticLockFile {
     // Record a workspace catalog selection (E4-JP13).
     fn record_catalog_selection(&self, owner: String, logical_name: String, provider_ref: String, hash: String, platform: String, rationale: String) Never! {
         identity :: LockIdentity{kind: LockRecordKind.Package, key: logical_name, exact: provider_ref, hash, platform}
-        provider :: if trust_text_split_first(provider_ref, @TRUST_COLON) == {
+        provider :: if trust_text_split_first(provider_ref, TRUST_COLON) == {
             .Val(parts) -> parts.before
             .None -> ~provider_ref
         }

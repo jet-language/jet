@@ -161,22 +161,30 @@ pub struct MergedEntry {
 // text facts surface as settings.
 pub fn pkg_merge_entry(contribs: [EntryContribution]) -> MergedEntry MergeError! {
     lists := [[Pkg]]{}
-    loop contribution in contribs -> { &lists.push(contribution.packages) }
+    loop contribution in contribs -> &lists.push(contribution.packages)
     by_key := [String: [FactContribution]]{}
     loop contribution in contribs {
         loop key in pkg_merge_sorted_setting_keys(contribution.settings) {
             writers := by_key.get(key) ?? [FactContribution]{}
-            loop writer in contribution.settings[key] -> { &writers.push(writer) }
+            loop writer in contribution.settings[key] -> &writers.push(writer)
             by_key[key] = writers
         }
     }
     settings := [String: String]{}
     loop key in pkg_merge_sorted_setting_keys(by_key) {
-        resolved :: pkg_fact_resolve(FactKey.new(key), by_key[key]) ?? return Err(MergeError.FactConflict(err))
-        fact :: resolved ?? next
-        if fact.value == {
-            .Text(value) -> settings[key] = value
-            else -> {}
+        if pkg_fact_resolve(FactKey.new(key), by_key[key]) == {
+            .Ok(resolved) -> {
+                if resolved == {
+                    .Val(fact) -> {
+                        if fact.value == {
+                            .Text(value) -> settings[key] = value
+                            else -> {}
+                        }
+                    }
+                    .None -> {}
+                }
+            }
+            .Err(error) -> return Err(MergeError.FactConflict{error: error})
         }
     }
     Ok(MergedEntry{packages: pkg_merge_packages(lists), settings: settings})

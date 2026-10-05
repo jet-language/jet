@@ -275,7 +275,7 @@ mod production_path {
         );
         let scratch_root = env::var_os("JET_PERF_SCRATCH_ROOT")
             .map(PathBuf::from)
-            .or_else(|| env::var_os("HOME").map(|home| PathBuf::from(home).join(".cache/jet-perf")))
+            .or_else(|| env::var_os("HOME").map(|home| PathBuf::from(home).join(".cache/jet-dev/perf-bench")))
             .expect("disk-backed compiler-speed scratch root")
             .join("rust-checker-fixtures");
         Command::new(checker)

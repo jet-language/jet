@@ -13,8 +13,8 @@ cardinality, projection, missing-side, order and DataLimits contract applies?
 ## Method
 
 - Source read: `Core/data/data.jet:154-160` (`DataLimits`), `:278-281` (`DataJoin<L,R>`), `:735-761` (`inner_join`), `:763-795` (`left_join`), `:502-508` (`DataLimits.safe()`: `max_join_rows` 1_000_000).
-- Witness: `~/.cache/jet-test-scratch/Closer01/parked/data_join_matrix.jet` (parked, not blessed). It starts from the #3352 overnight draft and uses explicit `inner_join<Order, Owner>` type arguments.
-- Ran `safe-jet.sh run`, `run --interpret` and `build`. Scratch bisection files are `dj_nolimit.jet`, `dj_noprint.jet`, `lazy_filter.jet`, `lazy_filter2.jet`, `lazy_cap.jet` and `lazy_cap2.jet` under `~/.cache/jet-test-scratch/Closer01/`.
+- Witness: `~/.cache/jet-dev/scratch/Closer01/parked/data_join_matrix.jet` (parked, not blessed). It starts from the #3352 overnight draft and uses explicit `inner_join<Order, Owner>` type arguments.
+- Ran `safe-jet.sh run`, `run --interpret` and `build`. Scratch bisection files are `dj_nolimit.jet`, `dj_noprint.jet`, `lazy_filter.jet`, `lazy_filter2.jet`, `lazy_cap.jet` and `lazy_cap2.jet` under `~/.cache/jet-dev/scratch/Closer01/`.
 
 ## Evidence (observed, `jet run`)
 

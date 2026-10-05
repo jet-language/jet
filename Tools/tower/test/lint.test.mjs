@@ -11,7 +11,7 @@ import { writeJSON } from '../app/paths.mjs';
 import * as db from '../app/store.mjs';
 import { lint, ruleDoneWithoutEvidence, ruleClaimedIdle, ruleMissingAttribution,
   ruleBallotGaps, ruleStaleDraft, ruleOrphanBlockers, ruleSpecReferenceGaps,
-  ruleCriteriaEvidenceConflicts, ruleDuplicateSuspects } from '../app/lint.mjs';
+  ruleCriteriaEvidenceConflicts, ruleDuplicateSuspects, ruleUnhomedCard } from '../app/lint.mjs';
 
 const TOWER = join(dirname(fileURLToPath(import.meta.url)), '..', 'tower.mjs');
 
@@ -21,15 +21,21 @@ const fresh = () => {
   return openStore(dir);
 };
 
+const SITUATION = 'Tower is the shared project board, and a ballot is the page where the owner picks one option. '
+  + 'Today a ballot opens with a list of facts, so a reader must piece the story together. '
+  + 'For example, a new reader sees file names before learning what problem exists. '
+  + 'That slows every vote and invites mistakes from beginners and experts alike. '
+  + 'You are deciding which option this card should use. We recommend option A because it keeps behavior visible.';
+
 const ballot = (extra = {}) => ({
-  ballotMode: 'full',
+  ballotMode: 'full', situation: SITUATION,
   reviewPasses: {
     beginner: 'Fresh agent: reader-1. Skill: rli5. The beginner pass tested the complete ballot.',
     adversarial: 'Author model family: family-a. Adversarial model family: family-b. Fresh agent: reader-2. The adversarial pass attacked the recommendation.',
   },
   gist: 'a plain sentence', lesson: 'Concept, mechanics, terms, stakes, and a tiny example.', story: 'Dana hits this while shipping X.', inWild: 'real code here', rec: 'A',
   options: [{ key: 'A', name: 'Option A', detail: 'A is explicit.', code: 'a()' }, { key: 'B', name: 'Option B', detail: 'B is brief.', code: 'b()' }],
-  recommendation: { why: 'A wins here.', gains: ['Behavior stays visible'], losses: [{ loss: 'One more step', whyUnavoidable: 'The explicit step keeps behavior visible.' }], whyNot: [{ key: 'B', reason: 'B loses the needed behavior.' }], tradeoff: 'A adds one visible step.' },
+  recommendation: { why: 'A wins here.', gains: ['Behavior stays visible'], losses: [{ loss: 'One more step', mitigation: 'Provide a short example to copy.' }], whyNot: [{ key: 'B', reason: 'B loses the needed behavior.' }], tradeoff: 'A adds one visible step.' },
   hybrid: { result: 'A', synthesis: 'A combines the useful parts.', harvest: [{ key: 'A', aspect: 'A is explicit.', use: 'Keep it.' }, { key: 'B', aspect: 'B is brief.', use: 'Borrow its short names.' }] },
   surface: {
     gist: 'Which option should Jet ship?',
@@ -39,7 +45,7 @@ const ballot = (extra = {}) => ({
       { key: 'A', name: 'Option A', gist: 'Explicit call.', gains: ['Behavior stays visible'], losses: ['One more step'], proposed: { code: 'a()' } },
       { key: 'B', name: 'Option B', gist: 'Short call.', gains: ['Shortest first script'], losses: ['Loses the needed guarantee'], proposed: { code: 'b()' } },
     ],
-    recommendation: { rec: 'A', why: 'A best serves this decision.', gains: ['Behavior stays visible'], losses: [{ loss: 'One more step', whyUnavoidable: 'The explicit step keeps behavior visible.' }], whyNot: [{ key: 'B', reason: 'B loses the needed guarantee.' }], tradeoff: 'A adds one explicit step.' },
+    recommendation: { rec: 'A', why: 'A best serves this decision.', gains: ['Behavior stays visible'], losses: [{ loss: 'One more step', mitigation: 'Provide a short example to copy.' }], whyNot: [{ key: 'B', reason: 'B loses the needed guarantee.' }], tradeoff: 'A adds one explicit step.' },
   },
   ...extra,
 });
@@ -123,6 +129,17 @@ test('ballot-gaps: clean when an open decision has a complete ballot', () => {
   assert.deepEqual(ruleBallotGaps(st.load()), []);
 });
 
+test('ballot-gaps: requires a mitigation for every remaining loss in both layers', () => {
+  const decision = { id: 'D-LOSS', status: 'open', ballotProcessVersion: 4, ...ballot() };
+  assert.deepEqual(ruleBallotGaps({ decisions: [decision] }), []);
+  delete decision.recommendation.losses[0].mitigation;
+  delete decision.surface.recommendation.losses[0].mitigation;
+  const findings = ruleBallotGaps({ decisions: [decision] });
+  assert.equal(findings.length, 1);
+  assert.match(findings[0].msg, /recommendation\.losses\[1\]\.mitigation/);
+  assert.match(findings[0].msg, /surface\.recommendation\.losses\[1\]\.mitigation/);
+});
+
 test('ballot-gaps: flags an open non-draft decision missing ballot fields', () => {
   const st = fresh();
   st.mutate((s, cfg) => db.addCard(s, { title: 'A' }, cfg));
@@ -135,6 +152,15 @@ test('ballot-gaps: flags an open non-draft decision missing ballot fields', () =
   assert.equal(findings[0].rule, 'ballot-gaps');
   assert.equal(findings[0].ref, 'D-1');
   assert.match(findings[0].msg, /gist/);
+});
+
+test('ballot-gaps: flags an open full ballot that predates the situation summary', () => {
+  const st = fresh();
+  st.mutate((s, cfg) => db.addCard(s, { title: 'A' }, cfg));
+  st.mutate((s) => db.addDecision(s, { cardId: '#1', id: 'D-1', title: 't', ...ballot() }));
+  st.mutate((s) => { s.decisions[0].situation = ''; });
+  const findings = ruleBallotGaps(st.load());
+  assert.deepEqual(findings.map(f => [f.rule, f.ref, f.msg]), [['ballot-gaps', 'D-1', 'D-1 incomplete ballot — missing: situation']]);
 });
 
 test('ballot-gaps: excludes drafts and acceptance ballots', () => {
@@ -285,6 +311,24 @@ test('duplicate-suspect: flags shared test references only among open cards', ()
   assert.equal(findings[0].rule, 'duplicate-suspect');
   assert.equal(findings[0].ref, '#1,#2');
   assert.match(findings[0].msg, /tests\/parser\.rs/);
+});
+
+// Owner 2026-10-04: frozen is a phase, not a home — a frozen card lives in an
+// epoch or on the sidequest track like every other card.
+test('card home: the store refuses an epoch-less frozen card and lint flags one that predates the guard', () => {
+  const st = fresh();
+  st.mutate((s) => db.updateEpoch(s, 'e1', { status: 'planned' }));
+  assert.throws(
+    () => st.mutate((s, cfg) => db.addCard(s, { title: 'Loose frozen', phase: 'frozen', by: 'owner' }, cfg)),
+    (e) => e.code === 'E_INVALID' && /epoch or be a sidequest/.test(e.message));
+  st.mutate((s, cfg) => db.addCard(s, { title: 'Frozen JetOS', phase: 'frozen', epoch: 'e1', by: 'owner' }, cfg));
+  st.mutate((s, cfg) => db.addCard(s, { title: 'Frozen sidequest', phase: 'frozen', track: 'sidequest', by: 'owner' }, cfg));
+  assert.throws(
+    () => st.mutate((s, cfg) => db.updateCard(s, '#1', { epoch: null, by: 'owner' }, cfg)),
+    (e) => e.code === 'E_INVALID');
+  assert.deepEqual(ruleUnhomedCard(st.load()), []);
+  st.mutate((s) => { s.cards[0].epoch = null; });
+  assert.deepEqual(ruleUnhomedCard(st.load()).map(f => [f.rule, f.ref]), [['unhomed-card', '#1']]);
 });
 
 // ---- 9. lint() aggregator ------------------------------------------------------------

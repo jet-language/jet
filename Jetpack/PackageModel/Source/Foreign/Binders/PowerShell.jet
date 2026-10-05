@@ -4,15 +4,15 @@
 
 // Parses the script with the PowerShell parser and prints each top-level
 // function name; a parse error prints `ParserError` and exits 2.
-@PKG_PWSH_VALIDATOR :: ```$tokens = $null
+PKG_PWSH_VALIDATOR :: prep { ```$tokens = $null
 $errors = $null
 $ast = [System.Management.Automation.Language.Parser]::ParseFile($args[0], [ref]$tokens, [ref]$errors)
 if ($errors.Count -ne 0) { [Console]::Error.WriteLine('ParserError'); exit 2 }
 $ast.EndBlock.Statements | Where-Object { $_ -is [System.Management.Automation.Language.FunctionDefinitionAst] } | ForEach-Object { [Console]::Out.WriteLine($_.Name) }
-```
+``` }
 
 // The persistent worker. Hole: `allowed`, the quoted command allow-list.
-@PKG_PWSH_WORKER :: ```$ErrorActionPreference = 'Stop'
+PKG_PWSH_WORKER :: prep { ```$ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 $inputStream = [Console]::OpenStandardInput()
 $outputStream = [Console]::OpenStandardOutput()
@@ -60,10 +60,10 @@ while ($true) {
   $outputStream.Write($bytes, 0, $bytes.Length)
   $outputStream.Flush()
 }
-```
+``` }
 
 // The generated module's types after the import block. Hole: `abi`.
-@PKG_PWSH_JET_TYPES :: ```}
+PKG_PWSH_JET_TYPES :: prep { ```}
 use c.@@abi@@ as abi
 use core.encoding.json as json
 
@@ -81,9 +81,9 @@ pub enum PowerShellError {
     Limit
 }
 
-```
+``` }
 
-@PKG_PWSH_JET_SESSION :: ```impl Session.Close {
+PKG_PWSH_JET_SESSION :: prep { ```impl Session.Close {
     fn close(^self) { abi.close(self.value) }
 }
 
@@ -97,10 +97,10 @@ pub fn open() -> Session PowerShellError! {
 
 pub fn cancel(session: Session) { abi.cancel(session.value) }
 
-```
+``` }
 
 // Generated names a PowerShell function may not project onto.
-@PKG_PWSH_RESERVED :: [String]{"open", "take_error", "cancel", "close", "decode_response", "abi", "json", "Session", "PowerShellError"}
+PKG_PWSH_RESERVED :: prep { [String]{"open", "take_error", "cancel", "close", "decode_response", "abi", "json", "Session", "PowerShellError"} }
 
 // A discovered function: its PowerShell name (the worker's lookup key) and
 // its projected Jet name.
@@ -118,7 +118,7 @@ pub fn pkg_powershell_bind(path: String, source: String, lib: String, cache: Str
     script :: pkg_binder_canonicalize(path, "could not resolve the PowerShell script")
     build :: pkg_worker_prepare_build(cache, "pwsh", lib, "PowerShell")
     validator :: files.join(build, "validate.ps1")
-    pkg_binder_write(validator, @PKG_PWSH_VALIDATOR, "could not write PowerShell validator")
+    pkg_binder_write(validator, PKG_PWSH_VALIDATOR, "could not write PowerShell validator")
     discovered :: pkg_worker_run_tool([String]{pwsh, "-NoLogo", "-NoProfile", "-NonInteractive", "-File", validator, script}, "pwsh", language, true)
     functions :: pkg_powershell_parse_function_names(discovered)
     worker_source :: pkg_powershell_render_worker(functions)
@@ -162,7 +162,7 @@ fn pkg_powershell_parse_function_names(bytes: [U8]) -> [PwshBoundFunction] Forei
 fn pkg_powershell_render_worker(functions: [PwshBoundFunction]) -> String Never! {
     allowed := [String]{}
     loop function in functions -> &allowed.push("'{function.pwsh.replace("'", "''")}'")
-    pkg_binder_fill_template(@PKG_PWSH_WORKER, [String: String]{"allowed": allowed.join(", ")})
+    pkg_binder_fill_template(PKG_PWSH_WORKER, [String: String]{"allowed": allowed.join(", ")})
 }
 
 fn pkg_powershell_render_jet(lib: String, functions: [PwshBoundFunction]) -> String Never! {
@@ -171,9 +171,9 @@ fn pkg_powershell_render_jet(lib: String, functions: [PwshBoundFunction]) -> Str
     loop function in functions {
         &out.push("    fn {function.jet}(handle: Int, input: String, deadline_ms: Int) -> String = \"{abi}_invoke_{function.jet}\"\n")
     }
-    &out.push(pkg_binder_fill_template(@PKG_PWSH_JET_TYPES, [String: String]{"abi": abi}))
+    &out.push(pkg_binder_fill_template(PKG_PWSH_JET_TYPES, [String: String]{"abi": abi}))
     &out.push(pkg_render_decode_response("PowerShellError", DecoderProtocol.StandardEnvelope))
-    &out.push(@PKG_PWSH_JET_SESSION)
+    &out.push(PKG_PWSH_JET_SESSION)
     loop function in functions {
         &out.push("pub fn {function.jet}(session: Session, input: DataTree, deadline_ms: Int) -> DataTree PowerShellError! {{\n    raw :: abi.{function.jet}(session.value, json.to_string(input), deadline_ms)\n    code :: abi.take_error()\n    return decode_response(raw, code)\n}}\n\n")
     }
@@ -207,5 +207,5 @@ fn pkg_powershell_ident(value: String) -> Bool Never! {
 }
 
 fn pkg_powershell_reserved(value: String) -> Bool Never! {
-    @PKG_PWSH_RESERVED.contains(value) || @JET_KEYWORD_LIST.contains(value) || @JET_TYPE_LIST.contains(value)
+    PKG_PWSH_RESERVED.contains(value) || JET_KEYWORD_LIST.contains(value) || JET_TYPE_LIST.contains(value)
 }

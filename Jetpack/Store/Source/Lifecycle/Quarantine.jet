@@ -23,7 +23,7 @@ pub fn store_malformed_object_reason(path: String) -[FS, Env]> String? StoreErro
         return Ok(Val("missing-metadata"))
     }
     if metadata.is_symlink || !metadata.is_file -> return Ok(Val("metadata-not-file"))
-    if metadata.size > @STORE_MAX_GC_METADATA_BYTES -> return Ok(Val("metadata-too-large"))
+    if metadata.size > STORE_MAX_GC_METADATA_BYTES -> return Ok(Val("metadata-too-large"))
     meta :: store_read_meta(path) ?? return Ok(Val("malformed-metadata"))
     if meta.receipt != "" && !store_valid_receipt_digest(meta.receipt) -> return Ok(Val("invalid-receipt"))
     // Probe through the output link so a dangling symlink is recognized.
@@ -49,10 +49,10 @@ fn store_malformed_objects(hangar: String) -[FS, Env]> [MalformedObject] StoreEr
 // Rust `quarantine_malformed_objects`: rename each malformed record into the
 // Hangar quarantine; the number moved. Permissions opened for the renames
 // are restored on every exit.
-pub fn store_quarantine_malformed_objects(roots: HangarRoots, objects: [MalformedObject]) -[FS, Env, Time]> Int StoreError! {
+pub fn store_quarantine_malformed_objects(verification: &StoreVerification, roots: HangarRoots, objects: [MalformedObject]) -[FS, Env, Time]> Int StoreError! {
     if objects.len() == 0 -> return Ok(0)
     permissions := MovePathPermissions.default()
-    moved :: store_quarantine_move_objects(roots, objects, &permissions)
+    moved :: store_quarantine_move_objects(&verification, roots, objects, &permissions)
     restored :: permissions.restore()
     if moved == {
         .Ok(count) -> {
@@ -68,7 +68,7 @@ pub fn store_quarantine_malformed_objects(roots: HangarRoots, objects: [Malforme
     }
 }
 
-fn store_quarantine_move_objects(roots: HangarRoots, objects: [MalformedObject], permissions: &MovePathPermissions) -[FS, Env, Time]> Int StoreError! {
+fn store_quarantine_move_objects(verification: &StoreVerification, roots: HangarRoots, objects: [MalformedObject], permissions: &MovePathPermissions) -[FS, Env, Time]> Int StoreError! {
     hangar :: roots.hangar_dir()
     quarantine :: files.join(hangar, "quarantine")
     &permissions.make_writable(hangar, hangar)
@@ -81,13 +81,13 @@ fn store_quarantine_move_objects(roots: HangarRoots, objects: [MalformedObject],
         present :: store_node_stat(object.path)
         if present == None -> next
         &permissions.make_writable(object.path, hangar)
-        store_remove_seal(object.path, hangar)
+        store_remove_seal(&verification, object.path, hangar)
         sequence :: store_gc_quarantine_sequence
         store_gc_quarantine_sequence += 1
         destination :: files.join(quarantine, "gc-{object.id}-{object.reason}-{store_now_secs()}-{sequence}")
         files.rename(object.path, destination)
         &permissions.renamed(object.path, destination)
-        _ :: store_tombstone_closure_record_unlocked(roots, object.id)
+        _ :: store_tombstone_closure_record_unlocked(&verification, roots, object.id)
         moved += 1
     }
     store_sync_store_directory(quarantine)

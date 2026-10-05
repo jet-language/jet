@@ -6,7 +6,7 @@
 // query/fragment text are redacted before they cross the projection.
 
 // Version of the public package-model field matrix.
-@PACKAGE_MODEL_SCHEMA_VERSION :: 1
+PACKAGE_MODEL_SCHEMA_VERSION :: prep { 1 }
 
 // One declared dependency (source redacted by `pkg_dep_display_redacted`).
 pub struct DependencyView {
@@ -132,15 +132,15 @@ pub struct ProfileSetView {
 
     // A schema-versioned profile set that keeps profile order.
     fn from_profiles(profiles: [ProfileView]) -> ProfileSetView Never! {
-        ProfileSetView{schema_version: @PACKAGE_MODEL_SCHEMA_VERSION, file: @ENV_FILE, profiles: profiles}
+        ProfileSetView{schema_version: PACKAGE_MODEL_SCHEMA_VERSION, file: ENV_FILE, profiles: profiles}
     }
 }
 
 // Project one uncomposed package declaration into the public manifest view.
 pub fn pkg_manifest_view_from_facts(facts: PackageFacts) -> ManifestView Never! {
     ManifestView{
-        schema_version: @PACKAGE_MODEL_SCHEMA_VERSION,
-        file: @PACKAGE_FILE,
+        schema_version: PACKAGE_MODEL_SCHEMA_VERSION,
+        file: PACKAGE_FILE,
         jet: facts.jet,
         edition: facts.edition,
         description: facts.description,
@@ -158,8 +158,8 @@ pub fn pkg_manifest_view_from_facts(facts: PackageFacts) -> ManifestView Never! 
 // Project composed package facts into the public package view.
 pub fn pkg_package_view_from_facts(facts: PackageFacts) -> PackageView Never! {
     PackageView{
-        schema_version: @PACKAGE_MODEL_SCHEMA_VERSION,
-        file: @PACKAGE_FILE,
+        schema_version: PACKAGE_MODEL_SCHEMA_VERSION,
+        file: PACKAGE_FILE,
         jet: facts.jet,
         edition: facts.edition,
         description: facts.description,
@@ -196,15 +196,15 @@ pub fn pkg_lock_view_from_lock(lock: LockFile) -> LockView Never! {
         })
     }
     LockView{
-        schema_version: @PACKAGE_MODEL_SCHEMA_VERSION,
-        file: @UNIFIED_LOCK_FILE,
+        schema_version: PACKAGE_MODEL_SCHEMA_VERSION,
+        file: UNIFIED_LOCK_FILE,
         version: lock.version,
         root_dependencies: lock.root_dependencies,
         packages: packages
     }
 }
 
-fn pkg_view_layer(layer: MirRuntimeLayer?) -> String? Never! {
+fn pkg_view_layer(layer: MIRRuntimeLayer?) -> String? Never! {
     value :: layer ?? return None
     Val(jet_ring_layer_name(value))
 }
@@ -260,7 +260,6 @@ fn pkg_output_kind_name(kind: PackageOutputKind) -> String Never! {
         .Bundle -> "bundle"
         .System -> "system"
         .Fleet -> "fleet"
-        .Model -> "model"
     }
 }
 

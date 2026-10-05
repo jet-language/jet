@@ -1,6 +1,6 @@
 # #3114: ratified two-adapter embedding delivery (SCRIPT-F24)
 
-Closer10, 2026-09-29. Binary: `~/.cache/jet-luna/safe-jet.sh` →
+Closer10, 2026-09-29. Binary: `~/.cache/jet-dev/safe-jet.sh` →
 `jet-debug-snapshot14`. The host-language hosts were compiled with cc/c++
 inside `Tools/agent/jet-env`. Verdict: **PARTIAL**: criterion 1 (route inventory) met; criteria 2 and 3 unmet because of the defects below.
 
@@ -30,7 +30,7 @@ Under D-EMBED1=E and D-EMBED2=C:
 ### Native, built from the current tree
 
 The build ran in a copy of `library_loadable` with the test's authority line
-added (`~/.cache/jet-test-scratch/Closer10/embed`):
+added (`~/.cache/jet-dev/scratch/Closer10/embed`):
 
 ```
 $ safe-jet.sh build --lib library.jet          # real 1m3.9s
@@ -83,7 +83,7 @@ Component interface").
 ### Component golden `sandbox_mathkit`: stale interface snapshot
 
 Run from a golden-harness-shaped staging copy (`fixture-state/` → `.jet/`,
-`~/.cache/jet-test-scratch/Closer10/mk`), on all three tiers:
+`~/.cache/jet-dev/scratch/Closer10/mk`), on all three tiers:
 
 ```
 Error [E1257]: Plugin interface `plugin__mathkit` has no export `is_enabled`   (run.jet:20)

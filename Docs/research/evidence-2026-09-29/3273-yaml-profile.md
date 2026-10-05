@@ -1,6 +1,6 @@
 # 3273 — YAML version, trailing input, unsupported features and resource behaviour
 
-Date: 2026-09-29. Closer02. Binary: jet-debug-snapshot14 via `~/.cache/jet-luna/safe-jet.sh`.
+Date: 2026-09-29. Closer02. Binary: jet-debug-snapshot14 via `~/.cache/jet-dev/safe-jet.sh`.
 
 ## Question
 
@@ -9,7 +9,7 @@ What does `core.encoding.yaml` do with long lines, trailing content, document ma
 ## Method
 
 - Read `Core/encoding/yaml.jet:1-83` and `crates/jet-codegen/src/Prelude/Core.jet:106-107`. The Jet source module owns only `parse`. `decode<T>` and `to_string` are host (`DataFmt.rs:209-230`, `jet_std::yaml::render`).
-- Witness `~/.cache/jet-test-scratch/Closer02/yaml_probe.jet` (26 cells). Perf programs are in `~/.cache/jet-test-scratch/Closer02/perf/`: `yaml_render.jet` (host `to_string`), and `yaml_parse.jet` / `yaml_parse_{125,250,500}.jet` (Jet `parse`).
+- Witness `~/.cache/jet-dev/scratch/Closer02/yaml_probe.jet` (26 cells). Perf programs are in `~/.cache/jet-dev/scratch/Closer02/perf/`: `yaml_render.jet` (host `to_string`), and `yaml_parse.jet` / `yaml_parse_{125,250,500}.jet` (Jet `parse`).
 - Tiers. JIT via `safe-jet.sh run`. The interpreter fails with `E0956 core.collections.slice_list_range() isn't supported by the current evaluator yet`. The AOT build of any program calling `yaml.parse` fails in rustc with `error[E0308]: mismatched types … jet_std::DataEvent::Int(…) expected i64, found JetInt` (the json.jet fast-path dependency). So `yaml.parse` runs **only on the JIT**.
 
 ## Evidence: cells (JIT, observed)

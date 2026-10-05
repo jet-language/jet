@@ -5,19 +5,19 @@
 // `[UnmanagedCallersOnly]` entry points retain managed objects through bounded
 // `GCHandle` ownership; a std-only C bridge embeds CoreCLR through hostfxr.
 
-@DOTNET_BIND_SCHEMA :: "jet-dotnet-bind-v1"
-@DOTNET_TOOL_ACTION :: "rejected the .NET binding input"
+DOTNET_BIND_SCHEMA :: prep { "jet-dotnet-bind-v1" }
+DOTNET_TOOL_ACTION :: prep { "rejected the .NET binding input" }
 
-@DOTNET_PROJECT :: `<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>@OUTPUT@</OutputType><TargetFramework>net8.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable><RestoreIgnoreFailedSources>true</RestoreIgnoreFailedSources></PropertyGroup></Project>`
-@DOTNET_RUNTIME_CONFIG :: `{"runtimeOptions":{"tfm":"net8.0","framework":{"name":"Microsoft.NETCore.App","version":"8.0.0"},"rollForward":"LatestPatch"}}`
-@DOTNET_INSPECTOR :: `using System.Reflection;
+DOTNET_PROJECT :: prep { `<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>@OUTPUT@</OutputType><TargetFramework>net8.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable><RestoreIgnoreFailedSources>true</RestoreIgnoreFailedSources></PropertyGroup></Project>` }
+DOTNET_RUNTIME_CONFIG :: prep { `{"runtimeOptions":{"tfm":"net8.0","framework":{"name":"Microsoft.NETCore.App","version":"8.0.0"},"rollForward":"LatestPatch"}}` }
+DOTNET_INSPECTOR :: prep { `using System.Reflection;
 var wanted=args[0];var type=Assembly.GetExecutingAssembly().GetTypes().SingleOrDefault(t=>t.IsPublic&&t.Name==wanted)??throw new Exception("public class not found");
 static string K(Type t)=>t==typeof(long)?"int":t==typeof(double)?"float":"unsupported";
 Console.WriteLine($"CLASS\t{type.FullName}");
 foreach(var c in type.GetConstructors(BindingFlags.Public|BindingFlags.Instance)){Console.Write("CTOR");foreach(var p in c.GetParameters())Console.Write($"\t{K(p.ParameterType)}");Console.WriteLine();}
 foreach(var m in type.GetMethods(BindingFlags.Public|BindingFlags.Instance|BindingFlags.Static|BindingFlags.DeclaredOnly)){Console.Write($"METHOD\t{m.Name}\t{(m.IsStatic?"S":"I")}\t{K(m.ReturnType)}");foreach(var p in m.GetParameters())Console.Write($"\t{K(p.ParameterType)}");Console.WriteLine();}
-`
-@DOTNET_NATIVE_C :: `#include <stdint.h>
+` }
+DOTNET_NATIVE_C :: prep { `#include <stdint.h>
 #include <pthread.h>
 #include <dlfcn.h>
 typedef void* hostfxr_handle;
@@ -29,7 +29,7 @@ static pthread_once_t once=PTHREAD_ONCE_INIT;static load_assembly_and_get_functi
 static void initialize(void){void*h=dlopen("@HOSTFXR@",RTLD_NOW|RTLD_LOCAL);if(!h){failed=1;return;}hostfxr_initialize_for_runtime_config_fn init=(hostfxr_initialize_for_runtime_config_fn)dlsym(h,"hostfxr_initialize_for_runtime_config");hostfxr_get_runtime_delegate_fn get=(hostfxr_get_runtime_delegate_fn)dlsym(h,"hostfxr_get_runtime_delegate");hostfxr_close_fn close=(hostfxr_close_fn)dlsym(h,"hostfxr_close");hostfxr_handle context=0;if(!init||!get||!close||init("@CONFIG@",0,&context)!=0||!context){failed=1;return;}void*delegate=0;if(get(context,5,&delegate)!=0||!delegate)failed=1;else load=(load_assembly_and_get_function_pointer_fn)delegate;close(context);}
 static void*entry(const char*name){pthread_once(&once,initialize);if(failed||!load)return 0;void*fn=0;if(load("@ASSEMBLY@","@TYPE@",name,(const char*)-1,0,&fn)!=0)return 0;return fn;}
 @WRAPPERS@
-`
+` }
 
 enum DotNetScalar {
     Int
@@ -91,14 +91,14 @@ pub fn pkg_dotnet_bind(path: String, source: String, lib: String, cache: String)
     pkg_binder_create_dir_all(build, "could not create .NET build directory")
     pkg_binder_write(files.join(build, "{class}.cs"), source, "could not stage C# source")
     project :: files.join(build, "Inspect.csproj")
-    pkg_binder_write(project, @DOTNET_PROJECT.replace("@OUTPUT@", "Exe"), "could not write reflection project")
-    pkg_binder_write(files.join(build, "Program.cs"), @DOTNET_INSPECTOR, "could not write reflection inspector")
+    pkg_binder_write(project, DOTNET_PROJECT.replace("@OUTPUT@", "Exe"), "could not write reflection project")
+    pkg_binder_write(files.join(build, "Program.cs"), DOTNET_INSPECTOR, "could not write reflection inspector")
     pkg_dotnet_run([String]{"dotnet", "build", project, "-c", "Release", "--nologo", "-v:q", "--disable-build-servers"}, "dotnet")
     inspected :: pkg_dotnet_run([String]{"dotnet", files.join(build, "bin/Release/net8.0/Inspect.dll"), class}, "dotnet")
     surface :: pkg_dotnet_parse_surface(inspected.stdout, class)
     files.remove(files.join(build, "Program.cs")) ?? return Err(ForeignBindError.IO("could not replace reflection inspector: {err}"))
     pkg_binder_write(files.join(build, "Bridge.cs"), pkg_dotnet_render_cs(lib, surface), "could not write managed .NET bridge")
-    pkg_binder_write(project, @DOTNET_PROJECT.replace("@OUTPUT@", "Library"), "could not write managed bridge project")
+    pkg_binder_write(project, DOTNET_PROJECT.replace("@OUTPUT@", "Library"), "could not write managed bridge project")
     pkg_dotnet_run([String]{"dotnet", "build", project, "-c", "Release", "--nologo", "-v:q", "--disable-build-servers", "-p:AssemblyName=JetBinding"}, "dotnet")
     managed :: files.join(cache, "{lib}.dotnet")
     pkg_binder_remove_tree_quiet(managed)
@@ -106,7 +106,7 @@ pub fn pkg_dotnet_bind(path: String, source: String, lib: String, cache: String)
     assembly :: files.join(managed, "JetBinding.dll")
     pkg_binder_copy(files.join(build, "bin/Release/net8.0/JetBinding.dll"), assembly, "could not retain managed bridge assembly")
     runtime_config :: files.join(managed, "JetBinding.runtimeconfig.json")
-    pkg_binder_write(runtime_config, @DOTNET_RUNTIME_CONFIG, "could not write .NET runtime config")
+    pkg_binder_write(runtime_config, DOTNET_RUNTIME_CONFIG, "could not write .NET runtime config")
     hostfxr :: pkg_dotnet_find_hostfxr()
     stem :: "jet_cs_{lib}"
     bridge :: files.join(build, "{stem}.c")
@@ -118,11 +118,11 @@ pub fn pkg_dotnet_bind(path: String, source: String, lib: String, cache: String)
     pkg_dotnet_run([String]{"ar", "rcs", archive, object}, "ar")
     jet :: pkg_dotnet_render_jet(lib, surface)
     identity := [U8]{}
-    pkg_binder_append_field(&identity, @DOTNET_BIND_SCHEMA.bytes())
+    pkg_binder_append_field(&identity, DOTNET_BIND_SCHEMA.bytes())
     pkg_binder_append_field(&identity, source.bytes())
     pkg_binder_append_field(&identity, inspected.stdout)
     loop byte in hostfxr.bytes() -> &identity.push(byte)
-    provenance := "schema={@DOTNET_BIND_SCHEMA}\nsha256={pkg_sha256_hex(identity)}\nclass={surface.class}\nhostfxr={hostfxr}\n"
+    provenance := "schema={DOTNET_BIND_SCHEMA}\nsha256={pkg_sha256_hex(identity)}\nclass={surface.class}\nhostfxr={hostfxr}\n"
     pkg_binder_append_artifact_boundary(&provenance, ForeignLanguage.DotNet, ".NET", lib, path, archive, "dotnet/cc/ar")
     bound := [String]{"new"}
     loop method in surface.methods -> &bound.push(method.name)
@@ -132,8 +132,8 @@ pub fn pkg_dotnet_bind(path: String, source: String, lib: String, cache: String)
 
 fn pkg_dotnet_parse_surface(bytes: [U8], expected: String) -> DotNetSurface ForeignBindError! {
     text :: String.from_bytes(bytes) ?? return Err(ForeignBindError.Source("the .NET reflection inspector returned non-UTF-8 metadata"))
-    class := None
-    ctor := None
+    class := String?{None}
+    ctor := [DotNetScalar]?{None}
     methods := [DotNetMethod]{}
     names := [String]{}
     loop line in pkg_binder_lines(text) {
@@ -242,7 +242,7 @@ fn pkg_dotnet_render_c(lib: String, surface: DotNetSurface, hostfxr: String, ass
         zero :: if method.result == DotNetScalar.Float -> "0.0" else -> "0"
         wrappers = "{wrappers}{method.result.c()} {abi}_{method.name}({handle_param}{pkg_dotnet_c_params(method.params)}){{typedef {method.result.c()}(*F)({handle_type}{pkg_dotnet_c_types(method.params)});F f=(F)entry(\"{abi}_{method.name}\");return f?f({handle_arg}{pkg_dotnet_args(method.params.len())}):{zero};}}\n"
     }
-    @DOTNET_NATIVE_C
+    DOTNET_NATIVE_C
         .replace("@HOSTFXR@", pkg_dotnet_c_escape(hostfxr))
         .replace("@ASSEMBLY@", pkg_dotnet_c_escape(assembly))
         .replace("@CONFIG@", pkg_dotnet_c_escape(config))
@@ -282,8 +282,8 @@ fn pkg_dotnet_find_hostfxr() -[FS, Env]> String ForeignBindError! {
     entries :: files.list_dir(directory) ?? return Err(ForeignBindError.IO("could not inspect provisioned hostfxr: {err}"))
     versions := [String]{}
     loop entry in entries -> &versions.push(entry.path)
-    versions.sort()
-    name :: if BinderHostOs.current() == {
+    &versions.sort()
+    name :: if BinderHostOS.current() == {
         .MacOS -> "libhostfxr.dylib"
         .Windows -> "hostfxr.dll"
         .Linux -> "libhostfxr.so"
@@ -313,9 +313,9 @@ fn pkg_dotnet_c_escape(value: String) -> String Never! {
 
 // Every failing dotnet/cc/ar run is a `ToolFailed` with laundered detail.
 fn pkg_dotnet_run(argv: [String], tool: String) -[Exec, Time.Wait]> BinderToolOutput ForeignBindError! {
-    output :: pkg_binder_capture(argv, None, tool, @DOTNET_TOOL_ACTION)
+    output :: pkg_binder_capture(argv, None, tool, DOTNET_TOOL_ACTION)
     if output.success -> return Ok(output)
-    Err(ForeignBindError.ToolFailed{tool: tool, action: @DOTNET_TOOL_ACTION, detail: pkg_dotnet_launder(output.stdout, output.stderr)})
+    Err(ForeignBindError.ToolFailed{tool: tool, action: DOTNET_TOOL_ACTION, detail: pkg_dotnet_launder(output.stdout, output.stderr)})
 }
 
 // A C# compiler error's message, else the first meaningful build line.

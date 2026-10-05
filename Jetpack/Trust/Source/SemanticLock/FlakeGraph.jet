@@ -4,7 +4,7 @@
 // with the caller.
 
 // Declared facts that are not graph data; `checks` is an ordinary output.
-@TRUST_FLAKE_UNSUPPORTED_FIELDS :: [String]{"shellHook", "inputsFrom", "processes", "services", "nixosConfigurations", "homeConfigurations", "darwinConfigurations"}
+TRUST_FLAKE_UNSUPPORTED_FIELDS :: prep { [String]{"shellHook", "inputsFrom", "processes", "services", "nixosConfigurations", "homeConfigurations", "darwinConfigurations"} }
 
 pub struct FlakeGraph {
     pub source: String
@@ -30,7 +30,7 @@ pub struct FlakeGraph {
         stripped :: trust_nix_strip_comments(text)
         by_name := [String: FlakeInput]{}
         loop assignment in trust_nix_input_assignments(stripped) {
-            name :: trust_text_trim_byte(assignment.path, @TRUST_DOT)
+            name :: trust_text_trim_byte(assignment.path, TRUST_DOT)
             if name == "" -> return Err(TrustError.EmptyInputName)
             entry := by_name.get(name) ?? FlakeInput{name: ~name, url: "", revision: "", follows: "", provenance: "{source}:inputs.{assignment.path}.{assignment.field}"}
             if assignment.field == {
@@ -57,7 +57,7 @@ pub struct FlakeGraph {
         }
         composition :: trust_nix_flake_parts_composition(stripped)
         unsupported := [String]{}
-        loop field in @TRUST_FLAKE_UNSUPPORTED_FIELDS {
+        loop field in TRUST_FLAKE_UNSUPPORTED_FIELDS {
             if stripped.contains(field) -> &unsupported.push(field)
         }
         if stripped.contains("perSystem") && composition == None -> &unsupported.push("perSystem")
@@ -111,10 +111,10 @@ pub struct FlakeGraph {
     // data is a hard error instead of an apparently exact lock.
     fn apply_flake_lock(&self, text: String) TrustError! {
         parsed :: trust_json_parse_lenient(text)
-        document :: parsed.tree() ?? return Err(TrustError.Io("flake.lock is invalid: {parsed.reason()}"))
-        nodes :: trust_json_object_field(document, "nodes") ?? return Err(TrustError.Io("flake.lock has no nodes map"))
-        root_node :: nodes.get("root") ?? return Err(TrustError.Io("flake.lock has no nodes.root.inputs map"))
-        root_inputs :: trust_json_object_field(root_node, "inputs") ?? return Err(TrustError.Io("flake.lock has no nodes.root.inputs map"))
+        document :: parsed.tree() ?? return Err(TrustError.IO("flake.lock is invalid: {parsed.reason()}"))
+        nodes :: trust_json_object_field(document, "nodes") ?? return Err(TrustError.IO("flake.lock has no nodes map"))
+        root_node :: nodes.get("root") ?? return Err(TrustError.IO("flake.lock has no nodes.root.inputs map"))
+        root_inputs :: trust_json_object_field(root_node, "inputs") ?? return Err(TrustError.IO("flake.lock has no nodes.root.inputs map"))
         node_names :: trust_sorted_keys(nodes)
         lock_nodes := [FlakeLockNode]{}
         loop name in node_names -> &lock_nodes.push(trust_flake_read_lock_node(name, nodes[name]))
@@ -122,13 +122,13 @@ pub struct FlakeGraph {
         root_names :: trust_sorted_keys(root_inputs)
         loop input_name in root_names {
             resolved :: trust_flake_lock_node_name(Val(root_inputs[input_name]), nodes, "root")
-            node_name :: resolved ?? return Err(TrustError.Io("flake.lock root input `{input_name}` has no node reference"))
-            if !node_names.contains(node_name) -> return Err(TrustError.Io("flake.lock root input points to missing node `{node_name}`"))
+            node_name :: resolved ?? return Err(TrustError.IO("flake.lock root input `{input_name}` has no node reference"))
+            if !node_names.contains(node_name) -> return Err(TrustError.IO("flake.lock root input points to missing node `{node_name}`"))
         }
         source_names := [String]{}
         loop input in self.inputs -> &source_names.push(input.name)
         loop input_name in root_names {
-            if !source_names.contains(input_name) -> return Err(TrustError.Io("flake.lock root input `{input_name}` is not declared by flake.nix"))
+            if !source_names.contains(input_name) -> return Err(TrustError.IO("flake.lock root input `{input_name}` is not declared by flake.nix"))
         }
         registries := [FlakeRegistryEntry]{}
         loop node in self.lock_nodes {
@@ -141,10 +141,10 @@ pub struct FlakeGraph {
         self.registries = trust_flake_sorted_registries(registries)
         loop index in 0..<self.inputs.len() {
             input :: ~self.inputs[index]
-            reference :: root_inputs.get(input.name) ?? return Err(TrustError.Io("flake.lock has no root input `{input.name}`"))
+            reference :: root_inputs.get(input.name) ?? return Err(TrustError.IO("flake.lock has no root input `{input.name}`"))
             resolved :: trust_flake_lock_node_name(Val(reference), nodes, "root")
-            node_name :: resolved ?? return Err(TrustError.Io("flake.lock root input `{input.name}` has no node reference"))
-            node :: trust_flake_find_node(self.lock_nodes, node_name) ?? return Err(TrustError.Io("flake.lock root input `{input.name}` points to missing node `{node_name}`"))
+            node_name :: resolved ?? return Err(TrustError.IO("flake.lock root input `{input.name}` has no node reference"))
+            node :: trust_flake_find_node(self.lock_nodes, node_name) ?? return Err(TrustError.IO("flake.lock root input `{input.name}` points to missing node `{node_name}`"))
             trust_flake_check_root_input(input, node_name, node, root_inputs, nodes, false)
             locked :: trust_flake_node_object(node.locked, node_name)
             if trust_json_string_field(locked, "rev") == {
@@ -187,7 +187,7 @@ pub struct FlakeGraph {
         }
         lock_names := [String]{}
         loop node in self.lock_nodes {
-            if lock_names.contains(node.name) -> return Err(TrustError.Io("flake.lock has duplicate node `{node.name}`"))
+            if lock_names.contains(node.name) -> return Err(TrustError.IO("flake.lock has duplicate node `{node.name}`"))
             &lock_names.push(node.name)
         }
         node_values :: trust_flake_lock_node_values(self.lock_nodes)
@@ -195,17 +195,17 @@ pub struct FlakeGraph {
             loop edge in node.inputs {
                 reference :: trust_json_parse_or_io(edge.target, "flake.lock edge is invalid")
                 resolved :: trust_flake_lock_node_name(Val(reference), node_values, node.name)
-                target :: resolved ?? return Err(TrustError.Io("flake.lock node `{node.name}` input `{edge.name}` has an empty node reference"))
-                if !lock_names.contains(target) -> return Err(TrustError.Io("flake.lock node `{node.name}` input `{edge.name}` points to missing node `{target}`"))
+                target :: resolved ?? return Err(TrustError.IO("flake.lock node `{node.name}` input `{edge.name}` has an empty node reference"))
+                if !lock_names.contains(target) -> return Err(TrustError.IO("flake.lock node `{node.name}` input `{edge.name}` points to missing node `{target}`"))
             }
         }
         aliases := [String]{}
         loop entry in self.registries {
-            if aliases.contains(entry.alias) -> return Err(TrustError.Io("flake.lock has duplicate indirect registry aliases"))
+            if aliases.contains(entry.alias) -> return Err(TrustError.IO("flake.lock has duplicate indirect registry aliases"))
             &aliases.push(entry.alias)
         }
         loop entry in self.registries {
-            if !lock_names.contains(entry.node) -> return Err(TrustError.Io("flake registry alias `{entry.alias}` points to missing node `{entry.node}`"))
+            if !lock_names.contains(entry.node) -> return Err(TrustError.IO("flake registry alias `{entry.alias}` points to missing node `{entry.node}`"))
         }
         loop input in self.inputs {
             if input.url != "" && input.revision == "" -> return Err(TrustError.MissingRevision{input: input.name})
@@ -366,22 +366,22 @@ pub struct FlakeGraph {
     fn stable_json(self) -> String Never! {
         inputs := [String]{}
         loop input in self.inputs {
-            &inputs.push(trust_json_object_text([TrustJsonField]{
-                TrustJsonField{key: "name", value: DataTree.Text(~input.name)},
-                TrustJsonField{key: "url", value: DataTree.Text(~input.url)},
-                TrustJsonField{key: "revision", value: DataTree.Text(~input.revision)},
-                TrustJsonField{key: "follows", value: DataTree.Text(~input.follows)},
-                TrustJsonField{key: "provenance", value: DataTree.Text(~input.provenance)}
+            &inputs.push(trust_json_object_text([TrustJSONField]{
+                TrustJSONField{key: "name", value: DataTree.Text(~input.name)},
+                TrustJSONField{key: "url", value: DataTree.Text(~input.url)},
+                TrustJSONField{key: "revision", value: DataTree.Text(~input.revision)},
+                TrustJSONField{key: "follows", value: DataTree.Text(~input.follows)},
+                TrustJSONField{key: "provenance", value: DataTree.Text(~input.provenance)}
             }))
         }
         outputs := [String]{}
         loop output in self.outputs {
-            &outputs.push(trust_json_object_text([TrustJsonField]{
-                TrustJsonField{key: "name", value: DataTree.Text(~output.name)},
-                TrustJsonField{key: "kind", value: DataTree.Text(output.kind.label())},
-                TrustJsonField{key: "system", value: DataTree.Text(~output.system)},
-                TrustJsonField{key: "attribute", value: DataTree.Text(~output.attribute)},
-                TrustJsonField{key: "provenance", value: DataTree.Text(~output.provenance)}
+            &outputs.push(trust_json_object_text([TrustJSONField]{
+                TrustJSONField{key: "name", value: DataTree.Text(~output.name)},
+                TrustJSONField{key: "kind", value: DataTree.Text(output.kind.label())},
+                TrustJSONField{key: "system", value: DataTree.Text(~output.system)},
+                TrustJSONField{key: "attribute", value: DataTree.Text(~output.attribute)},
+                TrustJSONField{key: "provenance", value: DataTree.Text(~output.provenance)}
             }))
         }
         lock_nodes := [String]{}
@@ -422,7 +422,7 @@ pub struct FlakeGraph {
     // match the current source; otherwise the sibling `flake.lock` (if any)
     // supplies exact revisions.
     fn load(path: String) -[FS, Env]> FlakeGraph TrustError! {
-        text :: files.read(path) ?? return Err(TrustError.Io("couldn't read `{path}`: {err}"))
+        text :: files.read(path) ?? return Err(TrustError.IO("couldn't read `{path}`: {err}"))
         project_dir :: trust_flake_project_dir(path)
         if trust_semantic_lock_load(project_dir) == {
             .Val(lock) -> {
@@ -445,7 +445,7 @@ pub struct FlakeGraph {
                 else -> false
             }
         }
-        lock_text :: if lock_missing -> None else -> Val(lock_read ?? return Err(TrustError.Io("couldn't read `{lock_path}`: {err}")))
+        lock_text :: if lock_missing -> None else -> Val(lock_read ?? return Err(TrustError.IO("couldn't read `{lock_path}`: {err}")))
         graph := FlakeGraph.parse_with_lock(path, text, lock_text, true)
         &graph.attach_composition_sources(path)
         graph.validate()
@@ -459,7 +459,7 @@ pub struct FlakeGraph {
     fn attach_composition_sources(&self, path: String) TrustError! -[FS, Env]> {
         composition :: self.composition ?? return
         project_dir :: trust_flake_project_dir(path)
-        project_root :: files.canonicalize(project_dir) ?? return Err(TrustError.Io("couldn't resolve flake-parts project root `{project_dir}`: {err}"))
+        project_root :: files.canonicalize(project_dir) ?? return Err(TrustError.IO("couldn't resolve flake-parts project root `{project_dir}`: {err}"))
         pending := [FlakeModuleVisit]{}
         loop module_path in composition.modules -> &pending.push(FlakeModuleVisit{module_path, base_dir: project_dir, root_module: true})
         visited := [String]{}
@@ -469,16 +469,16 @@ pub struct FlakeGraph {
             visit :: &pending.pop() ?? break
             module_path :: visit.module_path
             if files.is_abs(module_path) || (visit.root_module && trust_path_has_parent_component(module_path)) {
-                return Err(TrustError.Io("flake-parts module `{module_path}` must stay inside the flake project"))
+                return Err(TrustError.IO("flake-parts module `{module_path}` must stay inside the flake project"))
             }
-            canonical :: files.canonicalize(files.join(visit.base_dir, module_path)) ?? return Err(TrustError.Io("couldn't read flake-parts module `{module_path}`: {err}"))
+            canonical :: files.canonicalize(files.join(visit.base_dir, module_path)) ?? return Err(TrustError.IO("couldn't read flake-parts module `{module_path}`: {err}"))
             if !trust_path_within(canonical, project_root) || !files.is_file(canonical) {
-                return Err(TrustError.Io("flake-parts module `{module_path}` must be a file inside the flake project"))
+                return Err(TrustError.IO("flake-parts module `{module_path}` must be a file inside the flake project"))
             }
             if visited.contains(canonical) -> next
             &visited.push(canonical)
-            bytes :: files.read_bytes(canonical) ?? return Err(TrustError.Io("couldn't read flake-parts module `{module_path}`: {err}"))
-            module_text :: String.from_bytes(bytes) ?? return Err(TrustError.Io("couldn't read flake-parts module `{module_path}` as UTF-8: invalid utf-8"))
+            bytes :: files.read_bytes(canonical) ?? return Err(TrustError.IO("couldn't read flake-parts module `{module_path}`: {err}"))
+            module_text :: String.from_bytes(bytes) ?? return Err(TrustError.IO("couldn't read flake-parts module `{module_path}` as UTF-8: invalid utf-8"))
             source_name :: if visit.root_module -> module_path else -> "./{files.relative(canonical, project_root)}"
             &module_sources.push(trust_flake_module_source(source_name, bytes))
             // flake-parts places `packages.default` and `devShells.default`
@@ -511,7 +511,7 @@ fn trust_flake_project_dir(path: String) -> String Never! {
 
 // Whether a relative path has a `..` component.
 fn trust_path_has_parent_component(path: String) -> Bool Never! {
-    loop component in trust_text_split(trust_text_replace_all(path, "\\", "/"), @TRUST_SLASH) {
+    loop component in trust_text_split(trust_text_replace_all(path, "\\", "/"), TRUST_SLASH) {
         if component == ".." -> return true
     }
     false
@@ -707,10 +707,10 @@ fn trust_flake_lock_outputs(lock: SemanticLockFile, source: String) -> [FlakeOut
         kind_text := ~exact
         system := ""
         attribute := ""
-        if trust_text_split_first(exact, @TRUST_COLON) == {
+        if trust_text_split_first(exact, TRUST_COLON) == {
             .Val(head) -> {
                 kind_text = head.before
-                if trust_text_split_first(head.after, @TRUST_COLON) == {
+                if trust_text_split_first(head.after, TRUST_COLON) == {
                     .Val(tail) -> {
                         system = tail.before
                         attribute = tail.after

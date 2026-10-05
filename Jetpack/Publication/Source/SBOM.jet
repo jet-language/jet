@@ -1,0 +1,55 @@
+// Source/Publish/SBOM.rs: deterministic SPDX 2.3 and CycloneDX 1.5.
+// Namespace/serial identity is the canonical PackageModel lock writer's bytes,
+// hashed by the Compiler-owned SHA kernel. Production never samples a clock.
+pub fn publication_emit_spdx(lock: LockFile, root_name: String, root_version: String) -> String Never! {
+    digest :: publication_lock_digest(lock)
+    root_checksum := "NOASSERTION"
+    // First matching record, even when its content hash is not SHA-256.
+    if lock.find_package(root_name) == .Val(package) {
+        root_checksum = publication_spdx_checksum(package.content_hash ?? package.fingerprint) ?? "NOASSERTION"
+    }
+    out := [String]{
+        "SPDXVersion: SPDX-2.3\nDataLicense: CC0-1.0\nSPDXID: SPDXRef-DOCUMENT\n",
+        "DocumentNamespace: https://jet-lang.dev/spdx/{root_name}-{root_version}-{digest}\n",
+        "DocumentName: {root_name}-{root_version}\nCreator: Tool: jet\nCreated: 1970-01-01T00:00:00Z\n\n",
+        "##### Root package\n\nPackageName: {root_name}\nSPDXID: SPDXRef-root\nPackageVersion: {root_version}\nFilesAnalyzed: false\n",
+        "PackageChecksum: {root_checksum}\nPackageDownloadLocation: NOASSERTION\n\n"
+    }
+    loop index in 0..<lock.packages.len() {
+        package :: lock.packages[index]
+        checksum :: publication_spdx_checksum(package.content_hash ?? package.fingerprint) ?? "NOASSERTION"
+        &out.push("##### {package.name}\n\nPackageName: {package.name}\nSPDXID: SPDXRef-pkg-{index}\nPackageVersion: {package.version}\nFilesAnalyzed: false\nPackageChecksum: {checksum}\nPackageDownloadLocation: NOASSERTION\n\nRelationship: SPDXRef-root DEPENDS_ON SPDXRef-pkg-{index}\n\n")
+    }
+    out.join("")
+}
+
+pub fn publication_emit_cyclonedx(lock: LockFile, root_name: String, root_version: String) -> String Never! {
+    digest :: publication_lock_digest(lock)
+    components := [String]{}
+    loop index in 0..<lock.packages.len() {
+        package :: lock.packages[index]
+        value :: package.content_hash ?? package.fingerprint
+        hash :: if value.starts_with("sha256-") -> value.removeprefix("sha256-") else -> value
+        &components.push("    {{\n      \"type\": \"library\",\n      \"bom-ref\": \"pkg-{index}\",\n      \"name\": {foundation_json_quote(package.name)},\n      \"version\": {foundation_json_quote(package.version)},\n      \"hashes\": [{{ \"alg\": \"SHA-256\", \"content\": {foundation_json_quote(hash)} }}]\n    }}")
+    }
+    "{{\n  \"bomFormat\": \"CycloneDX\",\n  \"specVersion\": \"1.5\",\n  \"serialNumber\": \"urn:uuid:jet-{digest}\",\n  \"version\": 1,\n  \"metadata\": {{\n    \"timestamp\": \"1970-01-01T00:00:00Z\",\n    \"tools\": [{{ \"name\": \"jet\" }}],\n    \"component\": {{\n      \"type\": \"library\",\n      \"name\": {foundation_json_quote(root_name)},\n      \"version\": {foundation_json_quote(root_version)}\n    }}\n  }},\n  \"components\": [\n{components.join(",\n")}\n  ]\n}}\n"
+}
+
+fn publication_lock_digest(lock: LockFile) -> String Never! {
+    "sha256-{pkg_sha256_hex(pkg_lock_write(lock).bytes())}"
+}
+
+fn publication_spdx_checksum(value: String) -> String? Never! {
+    if !value.starts_with("sha256-") -> return None
+    Val("SHA256: {value.removeprefix("sha256-")}")
+}
+
+// Registry referrers bind both the exact arbitrary OCI subject marker and,
+// when present, the lock identity. The absent-lock document has no heading.
+pub fn publication_registry_spdx(lock: LockFile?, root_name: String, root_version: String, subject: String) -> String Never! {
+    if lock == .Val(present) {
+        return "{publication_emit_spdx(present, root_name, root_version)}# JetSubject: {subject}\n# JetLockDigest: {publication_lock_digest(present)}\n"
+    }
+    checksum :: if subject.starts_with("sha256-") -> subject.removeprefix("sha256-") else -> subject
+    "SPDXVersion: SPDX-2.3\nDataLicense: CC0-1.0\nSPDXID: SPDXRef-DOCUMENT\nDocumentNamespace: https://jet-lang.dev/spdx/{root_name}-{root_version}-{subject}\nDocumentName: {root_name}-{root_version}\nCreator: Tool: jet\nCreated: 1970-01-01T00:00:00Z\n\nPackageName: {root_name}\nSPDXID: SPDXRef-root\nPackageVersion: {root_version}\nFilesAnalyzed: false\nPackageChecksum: SHA256: {checksum}\nPackageDownloadLocation: NOASSERTION\n# JetSubject: {subject}\n# JetLockDigest: absent\n"
+}

@@ -32,7 +32,8 @@ fn jet_rust_emit_function_target_enabled(config: JetRustEmitConfig, function: MI
 fn jet_rust_emit_foreign_target_enabled(ctx: &JetRustEmitContext, foreign: MIRForeign) -> Bool Never! {
     if !jet_rust_emit_target_enabled(ctx.config, foreign.target_applicability) -> return false
     if ctx.config.target != "web" || ctx.config.web_bucket == None -> return true
-    loop function in ctx.program.functions {
+    loop function_index in 0..<ctx.program.functions.len() {
+        function :: ctx.program.functions[function_index]
         if !jet_rust_emit_function_target_enabled(ctx.config, function) -> next
         loop block in function.blocks {
             loop instruction in block.instructions {
@@ -84,7 +85,10 @@ fn jet_rust_emit_validate_function(ctx: &JetRustEmitContext, function: MIRFuncti
 }
 
 fn jet_rust_emit_validate_program(ctx: &JetRustEmitContext) Never! {
-    loop function in ctx.program.functions -> jet_rust_emit_validate_function(&ctx, function)
+    loop function_index in 0..<ctx.program.functions.len() {
+        function := ctx.program.functions[function_index]
+        jet_rust_emit_validate_function(&ctx, function)
+    }
     jet_rust_emit_reject_history_strategies(&ctx)
 }
 
@@ -288,9 +292,30 @@ fn jet_rust_emit_program_header(ctx: &JetRustEmitContext, lines: &[String]) Neve
 
 pub fn jet_rust_emit_program(program: MIRProgram, config: JetRustEmitConfig, trace_sink: CompilerTraceSink?) -> JetRustEmitResult Never! {
     ctx := jet_rust_emit_context(program, config)
-    if ctx.failure != None -> return jet_rust_emit_result(ctx, "")
+    jet_rust_emit_program_items(&ctx, trace_sink)
+}
+
+// JET_KEEP_GOING: the program's emission with every failure kept beside the
+// function being printed. Past the emitter's own tables (whose failure still
+// stops it), a failure no longer stops emission: the result is the complete
+// text with each failed construct's placeholder, never a shippable artifact.
+pub struct JetRustEmitKeepGoing {
+    pub result: JetRustEmitResult
+    pub failures: [JetRustEmitKeptFailure]
+}
+
+pub fn jet_rust_emit_program_keep_going(program: MIRProgram, config: JetRustEmitConfig, trace_sink: CompilerTraceSink?) -> JetRustEmitKeepGoing Never! {
+    kept_config := config
+    kept_config.keep_going = true
+    ctx := jet_rust_emit_context(program, kept_config)
+    result := jet_rust_emit_program_items(&ctx, trace_sink)
+    JetRustEmitKeepGoing{result: result, failures: ctx.kept_failures}
+}
+
+fn jet_rust_emit_program_items(ctx: &JetRustEmitContext, trace_sink: CompilerTraceSink?) -> JetRustEmitResult Never! {
+    if ctx.failure != None -> return jet_rust_emit_result(&ctx, "")
     jet_rust_emit_validate_program(&ctx)
-    if ctx.failure != None -> return jet_rust_emit_result(ctx, "")
+    if ctx.failure != None && !ctx.config.keep_going -> return jet_rust_emit_result(&ctx, "")
     // Program items go to their build unit's section (jet_rust_emit_units);
     // `pieces` records the line range of each package-unit item.
     units :: jet_rust_emit_units(ctx.program)
@@ -390,7 +415,8 @@ pub fn jet_rust_emit_program(program: MIRProgram, config: JetRustEmitConfig, tra
     }
     trace_functions := false
     if trace_sink == .Val(sink) -> trace_functions = sink.functions()
-    loop (position, function) in ctx.program.functions {
+    loop position in 0..<ctx.program.functions.len() {
+        function := ctx.program.functions[position]
         if trace_sink == .Val(sink) -> sink.progress("emit", position, ctx.program.functions.len())
         if !jet_rust_emit_module_selected(ctx, function.module_id) -> next
         if jet_rust_emit_function_target_enabled(ctx.config, function) && ctx.skipped_methods.get(jet_rust_emit_id_key(function.id.value)) == None {
@@ -411,9 +437,10 @@ pub fn jet_rust_emit_program(program: MIRProgram, config: JetRustEmitConfig, tra
     // The emit phase's end closes this span on every return below.
     if trace_sink == .Val(sink) -> sink.begin("emit.assemble", "", -1, -1)
     jet_rust_emit_artifact_assembly(&ctx, &lines)
-    if ctx.failure != None -> return jet_rust_emit_result(ctx, "")
-    if units.split -> return jet_rust_emit_result(ctx, jet_rust_emit_units_layout(pieces, lines, items_end).join("\n"))
-    jet_rust_emit_result(ctx, lines.join("\n"))
+    if ctx.failure != None && !ctx.config.keep_going -> return jet_rust_emit_result(&ctx, "")
+    if ctx.config.keep_going -> ctx.failure = None
+    if units.split -> return jet_rust_emit_result(&ctx, jet_rust_emit_units_layout(pieces, lines, items_end).join("\n"))
+    jet_rust_emit_result(&ctx, lines.join("\n"))
 }
 
 // MIRRust EmissionUnits: build units of one emitted program. An item's unit

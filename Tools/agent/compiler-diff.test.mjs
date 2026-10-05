@@ -82,7 +82,7 @@ for (const [mutation, script] of [
   ["replaced", 'printf "#!/bin/sh\\necho replaced\\n" > "$0"\necho "no problems"\n'],
 ]) {
   test(`a compiler ${mutation} mid-run is unavailable, never a match`, () => {
-    const base = process.env.JET_TEST_SCRATCH_DIR || join(homedir(), ".cache/jet-test-scratch");
+    const base = process.env.JET_TEST_SCRATCH_DIR || join(homedir(), ".cache/jet-dev/scratch");
     mkdirSync(base, { recursive: true });
     const dir = mkdtempSync(join(base, "compiler-diff-test-"));
     try {

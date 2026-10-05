@@ -31,16 +31,17 @@ fn store_test_remote_expectation() -> CacheExpectation Never! {
 }
 
 #Test("store record and list roundtrip") {
+    verification := StoreVerification.new()
     roots :: store_test_temp_roots()
     out :: files.join(roots.root, "fastfetch-output")
     files.create_dir_all(files.join(out, "bin")) ?? panic("fixture dir")
     files.write(files.join(out, "bin/fastfetch"), "fixture") ?? panic("fixture file")
     envelope :: Envelope.for_output(out, "fastfetch@nixpkgs", "nix")
-    recorded := store_record_verified(roots, "fastfetch", "2.1.0", "fastfetch@nixpkgs", out, files.join(out, "bin"), "", envelope, store_test_identity()) ?? panic("record")
+    recorded := store_record_verified(&verification, roots, "fastfetch", "2.1.0", "fastfetch@nixpkgs", out, files.join(out, "bin"), "", envelope, store_test_identity()) ?? panic("record")
     recorded.named_outputs["out"] = envelope.output_hash
     // Name-and-version first, fingerprint last (D-PM1).
     assert(recorded.id.starts_with("fastfetch-2.1.0-"))
-    listed :: store_list(roots)
+    listed :: store_list(&verification, roots)
     assert_eq(listed.len(), 1)
     assert_eq(listed[0], recorded)
     store_test_drop_roots(roots)
@@ -58,16 +59,17 @@ fn store_test_remote_expectation() -> CacheExpectation Never! {
 }
 
 #Test("store verified cache rejects deleted and tampered outputs") {
+    verification := StoreVerification.new()
     roots :: store_test_temp_roots()
-    ingested :: store_test_ingest_fixture(roots, "verified-cache", [String: String]{"out": "trusted"}, [String]{})
+    ingested :: store_test_ingest_fixture(&verification, roots, "verified-cache", [String: String]{"out": "trusted"}, [String]{})
     entry :: ingested.entry
     out :: entry.out
     reference :: entry.reference
     expectation :: store_test_expectation(out)
-    proof :: store_verify_cache_entry(roots, entry, reference, expectation)
+    proof :: store_verify_cache_entry(&verification, roots, entry, reference, expectation)
     assert(!proof.signature_verified)
     assert(proof.unsigned_local_allowed)
-    assert(store_test_verified(roots, reference, expectation))
+    assert(store_test_verified(&verification, roots, reference, expectation))
 
     // Sealed verification manifests track per-file tuples, so an in-place
     // payload rewrite is drift even when the root stat identity is
@@ -77,15 +79,15 @@ fn store_test_remote_expectation() -> CacheExpectation Never! {
     files.set_mode(payload, 420) ?? panic("chmod")
     files.write(payload, "tampered") ?? panic("tamper")
     assert_eq(root_stamp, store_object_stamp(files.stat(out) ?? panic("stat")))
-    use_proof :: store_verify_cache_entry(roots, entry, reference, expectation)
+    use_proof :: store_verify_cache_entry(&verification, roots, entry, reference, expectation)
     assert(!use_proof.output_digest)
     assert(!use_proof.trusted())
-    assert(store_verify_hangar_object(roots, entry) == .Err(_))
+    assert(store_verify_hangar_object(&verification, roots, entry) == .Err(_))
 
     // Deletion removes the stamped object identity and must miss.
     store_make_tree_writable_for_removal(out) ?? panic("chmod tree")
     files.remove_all(out) ?? panic("delete")
-    assert(!store_test_verified(roots, reference, expectation))
+    assert(!store_test_verified(&verification, roots, reference, expectation))
     store_test_drop_roots(roots)
 }
 
@@ -99,13 +101,14 @@ fn store_test_remote_expectation() -> CacheExpectation Never! {
 }
 
 #Test("store nix external output projects into hangar without mutating source") {
+    verification := StoreVerification.new()
     roots :: store_test_temp_roots()
     source :: files.join(roots.root, "external-nix-output")
     files.create_dir_all(files.join(source, "bin")) ?? panic("fixture dir")
     files.write(files.join(source, "bin/tool"), "projected") ?? panic("fixture file")
     store_seal_local_output(source) ?? panic("seal source")
     digest :: pkg_try_output_hash_of(source) ?? panic("hash source")
-    projected :: store_project_external_output_unlocked(roots, source, digest) ?? panic("project")
+    projected :: store_project_external_output_unlocked(&verification, roots, source, digest) ?? panic("project")
     assert(store_path_starts_with(projected, files.join(roots.hangar_dir(), "objects")))
     assert(files.is_dir(source))
     assert_eq(pkg_try_output_hash_of_in_hangar(projected, roots.hangar_dir(), false) ?? panic("hash projection"), digest)
@@ -149,6 +152,7 @@ fn store_test_remote_expectation() -> CacheExpectation Never! {
 }
 
 #Test("store mutable replaced crypto helper is never a trust root") {
+    verification := StoreVerification.new()
     roots :: store_test_temp_roots()
     files.create_dir_all(files.join(roots.root, "trust")) ?? panic("trust dir")
     files.write(files.join(roots.root, "trust/cache.ed25519.pub"), "attacker-key") ?? panic("key file")
@@ -157,7 +161,7 @@ fn store_test_remote_expectation() -> CacheExpectation Never! {
     files.write(helper, "#!/bin/sh\ntouch '{marker}'\nexit 0\n") ?? panic("helper")
     files.set_mode(helper, 493) ?? panic("chmod")
     entry :: store_test_signed_entry(roots, "signed-output-hostile", "cache:hostile", "ed25519:forged")
-    proof :: store_verify_cache_entry(roots, entry, "cache:hostile", store_test_remote_expectation())
+    proof :: store_verify_cache_entry(&verification, roots, entry, "cache:hostile", store_test_remote_expectation())
     assert(!proof.signature_verified)
     assert(!proof.trusted())
     assert(!files.exists(marker))
@@ -172,7 +176,7 @@ fn store_test_remote_expectation() -> CacheExpectation Never! {
         actual: "sha256-bad",
         reason: "content digest verification",
         disposition: "Jetpack quarantined it instead of using or silently repairing it.",
-        fix: "Re-run `jet store fetch` after `jet clean`. If the problem persists, audit the source before rebuilding.",
+        fix_text: "Re-run `jet store fetch` after `jet clean`. If the problem persists, audit the source before rebuilding.",
     }
     assert_eq(failure.what(), "Integrity check failed for `demo` `1.2.3` — expected `sha256-good`, got `sha256-bad`.")
     assert_eq(failure.why(), "The cached artifact failed content digest verification. Jetpack quarantined it instead of using or silently repairing it.")

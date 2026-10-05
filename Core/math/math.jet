@@ -12,6 +12,7 @@ module runtime
 
 use core as core
 use core.math.runtime.kernel_float_policy as math_float_policy
+use core.math.runtime.top_math_lib_pure as math_runtime
 fn round_provider(n: Float) -> Int { core.math.round(n) }
 // Exact Int abs is not MathLibPure.rs::jet_std_math_abs_i64: that fixed-width
 // native row remains held (#4422) on the checked fixed primitive/ABI route,
@@ -120,13 +121,13 @@ pub fn exp2(n: Float) -> Float Never! { core.math.exp2(n) }
 // MathLibPure.rs::jet_std_math_exp_m1; native libm leaf, not a portable body.
 pub fn exp_m1(n: Float) -> Float Never! { core.math.exp_m1(n) }
 pub fn expm1(n: Float) -> Float Never! { exp_m1(n) }
-pub fn erf(n: Float) -> Float Never! { math_float_policy.jet_std_math_erf(n) }
-pub fn erfc(n: Float) -> Float Never! { math_float_policy.jet_std_math_erfc(n) }
+pub fn erf(n: Float) -> Float Never! { core.math.erf(n) }
+pub fn erfc(n: Float) -> Float Never! { core.math.erfc(n) }
 pub fn floor(n: Float) -> Float Never! { core.math.floor(n) }
 pub fn ceil(n: Float) -> Float Never! { core.math.ceil(n) }
 pub fn fract(n: Float) -> Float Never! { core.math.fract(n) }
-pub fn gamma(n: Float) -> Float Never! { math_float_policy.jet_std_math_gamma(n) }
-pub fn lgamma(n: Float) -> Float Never! { math_float_policy.jet_std_math_lgamma(n) }
+pub fn gamma(n: Float) -> Float Never! { core.math.gamma(n) }
+pub fn lgamma(n: Float) -> Float Never! { core.math.lgamma(n) }
 pub fn hypot(a: Float, b: Float) -> Float Never! { core.math.hypot(a, b) }
 pub fn ln(n: Float) -> Float Never! { core.math.ln(n) }
 pub fn ln_1p(n: Float) -> Float Never! { core.math.ln_1p(n) }
@@ -134,7 +135,7 @@ pub fn log1p(n: Float) -> Float Never! { ln_1p(n) }
 pub fn log(n: Float, base: Float) -> Float Never! { core.math.log(n, base) }
 pub fn log10(n: Float) -> Float Never! { core.math.log10(n) }
 pub fn log2(n: Float) -> Float Never! { core.math.log2(n) }
-pub fn logb(n: Float) -> Float Never! { math_float_policy.jet_std_math_logb(n) }
+pub fn logb(n: Float) -> Float Never! { core.math.logb(n) }
 pub fn pow(a: Float, b: Float) -> Float Never! { core.math.pow(a, b) }
 pub fn sin(n: Float) -> Float Never! { core.math.sin(n) }
 pub fn sinh(n: Float) -> Float Never! { core.math.sinh(n) }
@@ -182,24 +183,12 @@ pub fn sign_bit(n: Float) -> Bool Never! { core.math.sign_bit(n) }
 
 pub fn next_up(n: Float) -> Float Never! { core.math.next_up(n) }
 pub fn next_down(n: Float) -> Float Never! { core.math.next_down(n) }
-pub fn next_after(n: Float, toward: Float) -> Float Never! {
-    math_float_policy.jet_std_math_next_after(n, toward)
-}
+pub fn next_after(n: Float, toward: Float) -> Float Never! { core.math.next_after(n, toward) }
 pub fn nextafter(n: Float, toward: Float) -> Float Never! { next_after(n, toward) }
-pub fn significand(n: Float) -> Float Never! { math_float_policy.jet_std_math_significand(n) }
-pub fn ulp(n: Float) -> Float Never! { math_float_policy.jet_std_math_ulp(n) }
-pub fn ilogb(n: Float) -> Int? Never! {
-    exponent :: math_float_policy.jet_std_math_ilogb(n) ?? return None
-    Val(Int.from_i64(exponent))
-}
-pub fn ldexp(n: Float, exponent: Int) -> Float Never! {
-    // Keep the public exact exponent losslessly until the source clamp. Only
-    // the resulting small scalar crosses the private native powi boundary.
-    if exponent < -2099 -> return math_float_policy.jet_std_math_ldexp(n, I64{-2099})
-    if exponent > 2099 -> return math_float_policy.jet_std_math_ldexp(n, I64{2099})
-    fixed :: I64.from_int(exponent) ?? panic("clamped ldexp exponent")
-    math_float_policy.jet_std_math_ldexp(n, fixed)
-}
+pub fn significand(n: Float) -> Float Never! { core.math.significand(n) }
+pub fn ulp(n: Float) -> Float Never! { core.math.ulp(n) }
+pub fn ilogb(n: Float) -> Int? Never! { core.math.ilogb(n) }
+pub fn ldexp(n: Float, exponent: Int) -> Float Never! { core.math.ldexp(n, exponent) }
 pub fn scaleb(n: Float, exponent: Int) -> Float Never! { ldexp(n, exponent) }
 pub fn radix(n: Float) -> Int Never! { core.math.radix(n) }
 
@@ -375,7 +364,7 @@ pub fn div_rem(a: Int, b: Int) -> (quot: Int, rem: Int) Never! {
     (quot: (a - rem) /% b, rem: rem)
 }
 
-pub fn digits(n: Int) -> Int Never! { core.math.digits(n) }
+pub fn digits(n: Int) -> Int Never! { math_runtime.jet_std_math_digits(n) }
 pub fn leading_ones(n: Int) -> Int Never! { core.math.leading_ones(n) }
 pub fn trailing_ones(n: Int) -> Int Never! { core.math.trailing_ones(n) }
 pub fn cmp(a: Float, b: Float) -> Int Never! { core.math.cmp(a, b) }
@@ -408,14 +397,12 @@ pub fn prod(values: [Int]) -> Int Never! { prod_int(values) }
 // MathLibPure.rs::jet_std_math_fmod (:1425): genuine native f64/libm scalar
 // primitive, also the remainder kernel's parity leaf; not compound Jet policy.
 pub fn fmod(a: Float, b: Float) -> Float Never! { core.math.fmod(a, b) }
-pub fn remainder(a: Float, b: Float) -> Float Never! { math_float_policy.jet_std_math_remainder(a, b) }
+pub fn remainder(a: Float, b: Float) -> Float Never! { core.math.remainder(a, b) }
 pub fn isclose(a: Float, b: Float, rel_tol: Float, abs_tol: Float) -> Bool Never! {
-    math_float_policy.jet_std_math_isclose(a, b, rel_tol, abs_tol)
+    core.math.isclose(a, b, rel_tol, abs_tol)
 }
 
-pub fn dist(left: [Float], right: [Float]) -> Float Never! {
-    math_float_policy.jet_std_math_dist(left, right)
-}
+pub fn dist(left: [Float], right: [Float]) -> Float Never! { core.math.dist(left, right) }
 
 pub fn hypot3(a: Float, b: Float, c: Float) -> Float Never! {
     core.math.hypot3(a, b, c)

@@ -1,0 +1,103 @@
+// Rust Bundler.rs wire projections and PerformanceBudget.rs:2438-2450.
+// These facts intentionally exceed JCS's exact binary64 integer boundary.
+fn pkg_bundle_wire_test_plan() -> BundlePlan Never! {
+    BundlePlan{
+        schema_version: 1, kind: BundleKind.Desktop, target: BundleTarget.LinuxAppImage,
+        package: "demo", version: "1.2.3", executable_source: "/checkout/demo",
+        artifact_name: "demo.AppImage",
+        metadata: BundleMetadata{identifier: "demo", display_name: "Demo", publisher: "Example", description: "", categories: [String]{}},
+        files: [BundleFile]{}, launch: LaunchDescriptor.new("AppRun", "usr/bin/demo"),
+        inputs: [BundleInputFact]{BundleInputFact{role: "executable", path: "/checkout/demo", digest: "input-hash", bytes: 9007199254740993}},
+        signing_hooks: [SigningHook]{}, updater: None, game: None, identity: "plan-id"
+    }
+}
+
+#Test("bundle canonical wire sorts escapes hashes and terminates once") {
+    tree :: pkg_bundle_object(["z": CanonicalJSON.String("é\n"), "a": pkg_bundle_integer(123)])
+    expected :: "{{\"a\":123,\"z\":\"é\\n\"}}\n".bytes()
+    assert_eq(pkg_bundle_canonical_bytes(tree), expected)
+    assert_eq(canonical_json_sha256(tree), mir_sha256_hex_bytes(mir_sha256_bytes(expected)))
+    invalids :: [String]{"-0", "01"}
+    loop invalid in invalids {
+        if canonical_json_integer(invalid) == {
+            .Ok(_) -> panic("noncanonical integer accepted")
+            .Err(error) -> assert_eq(error.message, "non-canonical integer `{invalid}`")
+        }
+    }
+}
+
+#Test("bundle canonical wire preserves mixed nested carriers") {
+    value :: pkg_bundle_object([
+        "z": CanonicalJSON.Array([CanonicalJSON]{CanonicalJSON.Null, CanonicalJSON.Bool(false), pkg_bundle_integer(-7), CanonicalJSON.String("x")}),
+        "a": pkg_bundle_object(["b": CanonicalJSON.Bool(true)])
+    ])
+    assert_eq(pkg_bundle_canonical_text(value), "{{\"a\":{{\"b\":true}},\"z\":[null,false,-7,\"x\"]}}\n")
+    assert_eq(pkg_bundle_canonical_text(value).bytes(), pkg_bundle_canonical_bytes(value))
+}
+
+#Test("bundle canonical wire uses Rust UTF8 not UTF16 key ordering") {
+    bmp :: String.from_bytes([U8]{U8{238}, U8{128}, U8{128}}) ?? panic("U+E000")
+    astral :: String.from_bytes([U8]{U8{240}, U8{144}, U8{128}, U8{128}}) ?? panic("U+10000")
+    fields := [String: CanonicalJSON]{}
+    fields[astral] = pkg_bundle_integer(2)
+    fields[bmp] = pkg_bundle_integer(1)
+    fields["é"] = pkg_bundle_integer(0)
+    assert_eq(pkg_bundle_canonical_text(pkg_bundle_object(fields)), "{{\"é\":0,\"{bmp}\":1,\"{astral}\":2}}\n")
+}
+
+#Test("bundle canonical wire has exact C0 short escapes and raw DEL C1") {
+    raw := [U8]{}
+    loop code in 0..<32 -> &raw.push(U8{code})
+    &raw.push(U8{34})
+    &raw.push(U8{92})
+    &raw.push(U8{127})
+    &raw.push(U8{194})
+    &raw.push(U8{128})
+    &raw.push(U8{194})
+    &raw.push(U8{159})
+    text :: String.from_bytes(raw) ?? panic("control fixture is UTF-8")
+    expected := "\"\\u0000\\u0001\\u0002\\u0003\\u0004\\u0005\\u0006\\u0007\\b\\t\\n\\u000b\\f\\r\\u000e\\u000f\\u0010\\u0011\\u0012\\u0013\\u0014\\u0015\\u0016\\u0017\\u0018\\u0019\\u001a\\u001b\\u001c\\u001d\\u001e\\u001f\\\"\\\\".bytes()
+    suffix :: [U8]{U8{127}, U8{194}, U8{128}, U8{194}, U8{159}, U8{34}, U8{10}}
+    loop byte in suffix -> &expected.push(byte)
+    assert_eq(pkg_bundle_canonical_bytes(CanonicalJSON.String(text)), expected)
+}
+
+#Test("bundle artifact receipt retains above binary64 boundary byte facts") {
+    plan :: pkg_bundle_wire_test_plan()
+    receipt :: BundleReceipt.from_plan_with_bytes(plan, "artifact-hash", 9007199254740993)
+    expected :: "{{\"artifact_bytes\":9007199254740993,\"artifact_name\":\"demo.AppImage\",\"artifact_sha256\":\"artifact-hash\",\"artifact_status\":\"planned\",\"executable_source\":\"/checkout/demo\",\"files\":[],\"game\":null,\"inputs\":[{{\"bytes\":9007199254740993,\"digest\":\"input-hash\",\"path\":\"/checkout/demo\",\"role\":\"executable\"}}],\"installability\":\"not-materialized\",\"kind\":\"desktop\",\"launch\":{{\"arguments_passthrough\":true,\"executable\":\"usr/bin/demo\",\"launcher\":\"AppRun\"}},\"materializer\":null,\"package\":\"demo\",\"plan_identity\":\"plan-id\",\"schema\":\"jet.package.receipt\",\"signing\":null,\"signing_hooks\":[],\"signing_status\":\"not-requested\",\"target\":\"linux-appimage\",\"updater\":null,\"version\":\"1.2.3\"}}\n"
+    assert_eq(receipt.json(), expected)
+    assert_eq(receipt.canonical_bytes(), expected.bytes())
+    artifact :: plan.materialized_artifact("artifact-hash", 9007199254740993)
+    assert_eq(artifact.byte_count(), 9007199254740993)
+    assert_eq(artifact.receipt.canonical_bytes(), expected.bytes())
+    assert_eq(artifact.json().bytes(), artifact.canonical_bytes())
+}
+
+#Test("bundle canonical wire preserves full Rust u64 byte counts") {
+    plan :: pkg_bundle_wire_test_plan()
+    receipt :: BundleReceipt.from_plan_with_bytes(plan, "artifact-hash", 18446744073709551615)
+    assert(receipt.json().contains("\"artifact_bytes\":18446744073709551615,"))
+    file :: BundleFileFact{path: "payload", kind: BundleFileKind.Executable, mode: 493, bytes: 18446744073709551615, sha256: "file-hash"}
+    assert_eq(pkg_bundle_canonical_text(file.receipt_json_tree()), "{{\"bytes\":18446744073709551615,\"kind\":\"executable\",\"mode\":493,\"path\":\"payload\",\"sha256\":\"file-hash\"}}\n")
+}
+
+#Test("bundle updater wire preserves payload integer and nullable fields") {
+    updater :: UpdaterManifest{schema: "jet.package.update", package: "demo", version: "1.2.3", target: BundleTarget.LinuxAppImage, channel: "stable", artifact: "demo.AppImage", url: "https://example.test/demo", signature_url: None, release_notes_url: Val("https://example.test/notes"), payload_sha256: "hash", payload_bytes: 9007199254740993}
+    expected :: "{{\"artifact\":\"demo.AppImage\",\"channel\":\"stable\",\"package\":\"demo\",\"payload_bytes\":9007199254740993,\"payload_sha256\":\"hash\",\"release_notes_url\":\"https://example.test/notes\",\"schema\":\"jet.package.update\",\"signature_url\":null,\"target\":\"linux-appimage\",\"url\":\"https://example.test/demo\",\"version\":\"1.2.3\"}}\n"
+    assert_eq(updater.json(), expected)
+    assert_eq(updater.json_bytes(), expected.bytes())
+}
+
+#Test("bundle plan identity wire normalizes only identity source provenance") {
+    plan :: pkg_bundle_wire_test_plan()
+    moved := ~plan
+    moved.identity = "different-id"
+    moved.executable_source = "/other/demo"
+    moved.inputs[0].path = "/other/demo"
+    assert_eq(plan.canonical_bytes(), moved.canonical_bytes())
+    assert_eq(plan.identity_text(), moved.identity_text())
+    assert(plan.json() != moved.json())
+    assert(plan.json().contains("\"bytes\":9007199254740993,"))
+    assert_eq(plan.json().bytes(), pkg_bundle_canonical_bytes(plan.to_json_tree()))
+}

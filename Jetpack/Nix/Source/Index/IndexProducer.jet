@@ -3,7 +3,7 @@
 // build inventory, emit the canonical index, its compressed target, the
 // coverage report, and the canonical channel manifest.
 
-@NIX_INDEX_COVERAGE_SCOPE :: "off-device packages-info.nix inventory only; overlays, overrides, user Nix config, custom flakes, custom package sets, local inputs, and impure evaluation are outside the denominator"
+NIX_INDEX_COVERAGE_SCOPE :: prep { "off-device packages-info.nix inventory only; overlays, overrides, user Nix config, custom flakes, custom package sets, local inputs, and impure evaluation are outside the denominator" }
 
 // One oracle record and whether its outputs were admitted by the cache.
 pub struct NixIndexOracleCandidate {
@@ -24,7 +24,7 @@ fn nix_index_generated_document(channel: String, revision: String, system: Strin
         &indexed.push(record.attrpath)
         &wires.push(NixIndexRecordWire.from_record(record))
     }
-    document :: NixIndexDocument{schema: @NIX_INDEX_SCHEMA, channel, revision, system, released_unix, records: wires, coverage: NixIndexCoverage{indexed, not_indexed: misses}}
+    document :: NixIndexDocument{schema: NIX_INDEX_SCHEMA, channel, revision, system, released_unix, records: wires, coverage: NixIndexCoverage{indexed, not_indexed: misses}}
     document.validate()
     Ok(document)
 }
@@ -90,7 +90,7 @@ fn nix_index_parse_oracle_outputs(value: DataTree) -> [NixIndexOutputWire] NixIn
             loop entry in entries {
                 output :: nix_index_object(entry.value, "oracle output")
                 nix_index_reject_unknown(output, [String]{"path", "storePath"})
-                store_path := None
+                store_path := String?{None}
                 loop field in output {
                     store_path = Val(nix_index_string_value(field.value, "oracle output path"))
                     break
@@ -143,7 +143,7 @@ pub fn nix_index_producer_generate_with_hydra_paths(channel: String, system: Str
     document :: nix_index_generated_document(channel, revision, system, released_unix, records, not_indexed)
     decoded :: document.canonical_bytes()
     compressed :: nix_index_zstd_encode(decoded)
-    if compressed.len() > @NIX_INDEX_MAX_COMPRESSED_BYTES || decoded.len() > @NIX_INDEX_MAX_DECODED_BYTES {
+    if compressed.len() > NIX_INDEX_MAX_COMPRESSED_BYTES || decoded.len() > NIX_INDEX_MAX_DECODED_BYTES {
         return Err(NixIndexError.Invalid("generated nix index exceeds format bounds"))
     }
     Ok((decoded: decoded, compressed: compressed, report: nix_index_generation_report(decoded, compressed, document)))
@@ -197,7 +197,7 @@ pub fn nix_index_producer_coverage_report(decoded: [U8]) -> String NixIndexError
         "system": DataTree.Text(document.system),
         "indexed": DataTree.Array(indexed),
         "notIndexed": DataTree.Array(misses),
-        "scope": DataTree.Text(@NIX_INDEX_COVERAGE_SCOPE),
+        "scope": DataTree.Text(NIX_INDEX_COVERAGE_SCOPE),
     ])))
 }
 
@@ -221,7 +221,7 @@ pub fn nix_index_producer_target_measurements(bytes: [U8]) -> (decoded_length: I
 
 // The canonical channel manifest over `targets`.
 pub fn nix_index_producer_manifest_bytes(channel: String, generation: Int, issued_unix: Int, expires_unix: Int, targets: [NixIndexManifestTarget]) -> [U8] NixIndexError! {
-    manifest :: NixIndexChannelManifest{schema: @NIX_INDEX_SCHEMA, channel, generation, issued_unix, expires_unix, targets}
+    manifest :: NixIndexChannelManifest{schema: NIX_INDEX_SCHEMA, channel, generation, issued_unix, expires_unix, targets}
     manifest.canonical_bytes()
 }
 

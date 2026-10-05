@@ -2,7 +2,7 @@
 // jet_pkg_model::ComBind (`RUNTIME_C`, `DISCOVERY_C`). The runtime template's
 // `@ABI@`, `@CLASS@`, and `@WRAPPERS@` holes are filled by `pkg_com_render_c`.
 
-@COM_RUNTIME_C :: `#define COBJMACROS
+COM_RUNTIME_C :: prep { `#define COBJMACROS
 #include <windows.h>
 #include <oleauto.h>
 #include <stdint.h>
@@ -50,9 +50,9 @@ static int encode_variant(Out*o,VARIANT*v,int depth){if(depth>64){failed=6;retur
 static const char* variant_json(VARIANT*v){Out o={text,0};if(!encode_variant(&o,v,0)){text[0]=0;return text;}text[o.n]=0;return text;}
 const char* @ABI@_dynamic(int64_t h,const char*name,const char*json,int64_t flags){failed=0;text[0]=0;if(flags<1||(flags&~(DISPATCH_METHOD|DISPATCH_PROPERTYGET|DISPATCH_PROPERTYPUT|DISPATCH_PROPERTYPUTREF))){failed=3;return text;}VARIANT packed;VariantInit(&packed);if(!json_arg(json,&packed))return text;if(V_VT(&packed)!=(VT_ARRAY|VT_VARIANT)||SafeArrayGetDim(V_ARRAY(&packed))!=1){VariantClear(&packed);failed=3;return text;}LONG lo=0,hi=-1;SafeArrayGetLBound(V_ARRAY(&packed),1,&lo);SafeArrayGetUBound(V_ARRAY(&packed),1,&hi);size_t n=hi>=lo?(size_t)(hi-lo+1):0;VARIANT*args=calloc(n?n:1,sizeof(VARIANT));if(!args){VariantClear(&packed);failed=6;return text;}for(size_t i=0;i<n;i++){VariantInit(&args[i]);LONG at=hi-(LONG)i;if(FAILED(SafeArrayGetElement(V_ARRAY(&packed),&at,&args[i]))){clear_args(args,n);free(args);VariantClear(&packed);failed=4;return text;}}BSTR wide=utf8_bstr(name);IDispatch*d=get(h);DISPID id=0;HRESULT hr=(wide&&d)?IDispatch_GetIDsOfNames(d,&IID_NULL,&wide,1,LOCALE_USER_DEFAULT,&id):E_INVALIDARG;if(wide)SysFreeString(wide);if(d)IDispatch_Release(d);VARIANT result;VariantInit(&result);if(FAILED(hr)){fail_hr(hr);}else if(invoke_member(h,id,(WORD)flags,args,(UINT)n,&result)){variant_json(&result);}VariantClear(&result);clear_args(args,n);free(args);VariantClear(&packed);return text;}
 @WRAPPERS@
-`
+` }
 
-@COM_DISCOVERY_C :: `#define COBJMACROS
+COM_DISCOVERY_C :: prep { `#define COBJMACROS
 #include <windows.h>
 #include <oleauto.h>
 #include <stdio.h>
@@ -79,4 +79,4 @@ int wmain(int argc,wchar_t**argv){
  }
  ITypeLib_Release(lib);OleUninitialize();return found_class&&found_method?0:5;
 }
-`
+` }

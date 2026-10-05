@@ -5,12 +5,12 @@
 // `DataTree` in the exact Rust field order, and `json.to_string` writes it.
 // Status field values are Core `DataTree` values (Rust `StatusValue`).
 
-@REPORT_NAME :: "jet.report"
-@REPORT_VERSION :: 3
-@REPORT_SCHEMA :: "jet.report/v3"
-@STATUS_NAME :: "jet.status"
-@STATUS_VERSION :: 1
-@STATUS_SCHEMA :: "jet.status/v1"
+REPORT_NAME :: prep { "jet.report" }
+REPORT_VERSION :: prep { 3 }
+REPORT_SCHEMA :: prep { "jet.report/v3" }
+STATUS_NAME :: prep { "jet.status" }
+STATUS_VERSION :: prep { 1 }
+STATUS_SCHEMA :: prep { "jet.status/v1" }
 
 // The report model's one failure carrier; the text is the Rust error string.
 #Error
@@ -40,7 +40,7 @@ fn foundation_text_has_control(value: String) -> Bool Never! {
 
 // Compact JSON of one tree. Rendering a finite tree cannot fail.
 fn report_json(value: DataTree) -> String Never! {
-    json.to_string(value) ?? panic("compact JSON rendering of a DataTree is total")
+    json.to_string(value)
 }
 
 fn report_optional_text(value: String?) -> DataTree Never! {
@@ -106,7 +106,6 @@ pub struct NoFixReason {
     fn validate(self) ReportError! {
         if self.next.trim() == "" -> return Err(ReportError.new("no-fix reason next action must not be empty"))
         if foundation_text_has_control(self.next) -> return Err(ReportError.new("no-fix reason next action must not contain control characters"))
-        Ok()
     }
 }
 
@@ -140,12 +139,10 @@ pub struct StatusFields {
             if entry.name == name -> return Err(ReportError.new("duplicate status field `{name}`"))
         }
         &self.entries.push(StatusField{name: name, value: value})
-        Ok()
     }
 
     fn extend(&self, fields: StatusFields) ReportError! {
         loop entry in fields.entries -> &self.insert(entry.name, entry.value)
-        Ok()
     }
 
     fn is_empty(self) -> Bool Never! {
@@ -225,14 +222,13 @@ pub struct StatusEnvelope {
             }
         }
         loop report in self.reports -> report.validate()
-        Ok()
     }
 
     fn to_tree(self) -> DataTree Never! {
         self.validate() ?? panic("invalid jet.status/v1 envelope")
         object := [String: DataTree]{}
-        object["schema"] = DataTree.Text(@STATUS_SCHEMA)
-        object["action"] = DataTree.Text(self.action)
+        object["schema"] = DataTree.Text(STATUS_SCHEMA)
+        object["action"] = DataTree.Text(~self.action)
         object["ok"] = DataTree.Bool(self.ok)
         reports := [DataTree]{}
         loop report in self.reports -> &reports.push(report.to_tree())
@@ -267,7 +263,7 @@ pub fn report_render_status_with_reports(action: String, ok: Bool, reports: [Rep
 pub enum FixSafety {
     Formatting
     BehaviorPreserving
-    ApiChanging
+    APIChanging
     TargetChanging
     NeedsReview
 
@@ -275,7 +271,7 @@ pub enum FixSafety {
         if self == {
             .Formatting -> "formatting"
             .BehaviorPreserving -> "behavior-preserving"
-            .ApiChanging -> "api-changing"
+            .APIChanging -> "api-changing"
             .TargetChanging -> "target-changing"
             .NeedsReview -> "needs-review"
         }
@@ -342,7 +338,7 @@ fn report_lexically_normalize(path: String) -> String Never! {
             "" | "." -> {}
             ".." -> {
                 if parts.len() > 0 {
-                    &parts.pop()
+                    _ := &parts.pop()
                 }
             }
             else -> {
@@ -408,7 +404,7 @@ pub struct ReportCause {
 
     fn to_tree(self) -> DataTree Never! {
         object := [String: DataTree]{}
-        object["code"] = DataTree.Text(self.code)
+        object["code"] = DataTree.Text(~self.code)
         object["file"] = report_optional_path(self.file)
         object["line"] = report_optional_int(self.line)
         object["col"] = report_optional_int(self.col)
@@ -431,7 +427,7 @@ pub struct ReportEdit {
         object := [String: DataTree]{}
         object["file"] = DataTree.Text(self.file.as_str())
         object["span"] = self.span.to_tree()
-        object["new_text"] = DataTree.Text(self.new_text)
+        object["new_text"] = DataTree.Text(~self.new_text)
         object["safety"] = DataTree.Text(self.safety.as_str())
         DataTree.Object(object)
     }
@@ -479,8 +475,8 @@ pub struct ReportEnvelope {
 
     fn new(moment: String, severity: String, code: String, what: String, why: String, fix: String) -> ReportEnvelope Never! {
         ReportEnvelope{
-            schema_name: @REPORT_NAME,
-            schema_version: @REPORT_VERSION,
+            schema_name: REPORT_NAME,
+            schema_version: REPORT_VERSION,
             moment: moment,
             severity: severity,
             code: code,
@@ -505,18 +501,9 @@ pub struct ReportEnvelope {
         }
     }
 
-    fn fix_edits(self) -> [ReportEdit] Never! {
-        self.fix_edits
-    }
-
-    fn no_fix_reason(self) -> NoFixReason? Never! {
-        self.no_fix_reason
-    }
-
     fn push_fix_edit(&self, edit: ReportEdit) ReportError! {
         if self.no_fix_reason != None -> return Err(ReportError.new("a report cannot carry fix_edits and no_fix_reason"))
         &self.fix_edits.push(edit)
-        Ok()
     }
 
     fn with_fix_edits(self, edits: [ReportEdit]) -> ReportEnvelope ReportError! {
@@ -529,7 +516,6 @@ pub struct ReportEnvelope {
         reason.validate()
         if self.fix_edits.len() > 0 -> return Err(ReportError.new("a report cannot carry fix_edits and no_fix_reason"))
         self.no_fix_reason = Val(reason)
-        Ok()
     }
 
     fn with_no_fix_reason(self, reason: NoFixReason) -> ReportEnvelope ReportError! {
@@ -539,7 +525,7 @@ pub struct ReportEnvelope {
     }
 
     fn validate(self) ReportError! {
-        if self.schema_name != @REPORT_NAME || self.schema_version != @REPORT_VERSION {
+        if self.schema_name != REPORT_NAME || self.schema_version != REPORT_VERSION {
             return Err(ReportError.new("report envelope has an unsupported schema identity"))
         }
         if self.no_fix_reason == {
@@ -549,19 +535,18 @@ pub struct ReportEnvelope {
             }
             .None -> {}
         }
-        Ok()
     }
 
     fn to_tree(self) -> DataTree Never! {
         self.validate() ?? panic("invalid jet.report/v3 envelope")
         object := [String: DataTree]{}
         object["schema"] = DataTree.Text("{self.schema_name}/v{self.schema_version}")
-        object["moment"] = DataTree.Text(self.moment)
-        object["severity"] = DataTree.Text(self.severity)
-        object["code"] = DataTree.Text(self.code)
-        object["what"] = DataTree.Text(self.what)
-        object["why"] = DataTree.Text(self.why)
-        object["fix"] = DataTree.Text(self.fix)
+        object["moment"] = DataTree.Text(~self.moment)
+        object["severity"] = DataTree.Text(~self.severity)
+        object["code"] = DataTree.Text(~self.code)
+        object["what"] = DataTree.Text(~self.what)
+        object["why"] = DataTree.Text(~self.why)
+        object["fix"] = DataTree.Text(~self.fix)
         if self.applicability == {
             .Val(applicability) -> object["applicability"] = DataTree.Text(applicability.as_str())
             .None -> {}

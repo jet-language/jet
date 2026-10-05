@@ -5,11 +5,11 @@
 // ConfigFacts before any byte is written. Offsets are UTF-8 byte offsets and
 // cuts happen only at ASCII delimiters, so every slice is whole scalars.
 
-@TRANSITION_IDENTITY_FIELDS :: [String]{"name", "version", "jet", "edition", "license", "description", "repository", "target", "runtime"}
-@TRANSITION_OPTIONAL_IDENTITY_FIELDS :: [String]{"jet", "edition", "license", "description", "repository", "target", "runtime"}
-@TRANSITION_REJECTED_BLOCKS :: [String]{"packages", "build", "effects", "grants", "policy"}
-@TRANSITION_TOP_LEVEL_BLOCKS :: [String]{"payload", "identity", "deps", "packages", "build", "effects", "grants", "policy", "dev_deps", "patch", "workspace"}
-@TRANSITION_GIT_FIELDS :: [String]{"git", "tag", "branch", "rev"}
+TRANSITION_IDENTITY_FIELDS :: prep { [String]{"name", "version", "jet", "edition", "license", "description", "repository", "target", "runtime"} }
+TRANSITION_OPTIONAL_IDENTITY_FIELDS :: prep { [String]{"jet", "edition", "license", "description", "repository", "target", "runtime"} }
+TRANSITION_REJECTED_BLOCKS :: prep { [String]{"packages", "build", "effects", "grants", "policy"} }
+TRANSITION_TOP_LEVEL_BLOCKS :: prep { [String]{"payload", "identity", "deps", "packages", "build", "effects", "grants", "policy", "dev_deps", "patch", "workspace"} }
+TRANSITION_GIT_FIELDS :: prep { [String]{"git", "tag", "branch", "rev"} }
 
 // One top-level source entry: its raw text and, when it declares one, the
 // field it assigns (`name`, or `::name` for an inline `name :: Config{...}`).
@@ -317,7 +317,7 @@ fn env_transition_render_legacy_package_root(source: String) -> String Environme
     env_transition_validate_legacy_manifest_fields(source)
     entries :: env_transition_source_entries(env_transition_strip_comments(source))
     identity := [String: String]{}
-    deps_value := None
+    deps_value := String?{None}
     loop entry in entries {
         field :: entry.field ?? next
         if field == "payload" || field == "identity" {
@@ -327,11 +327,11 @@ fn env_transition_render_legacy_package_root(source: String) -> String Environme
                 nested_field :: nested.field ?? next
                 if env_transition_field_value(nested.raw, nested_field) == .Val(nested_value) -> identity[nested_field] = nested_value
             }
-        } else if @TRANSITION_IDENTITY_FIELDS.contains(field) {
+        } else if TRANSITION_IDENTITY_FIELDS.contains(field) {
             if env_transition_field_value(entry.raw, field) == .Val(value) -> identity[field] = value
         } else if field == "deps" {
             deps_value = env_transition_field_value(entry.raw, field)
-        } else if @TRANSITION_REJECTED_BLOCKS.contains(field) {
+        } else if TRANSITION_REJECTED_BLOCKS.contains(field) {
             value :: env_transition_field_value(entry.raw, field) ?? ""
             body :: env_transition_record_body(value) ?? ""
             if body.trim() != "" {
@@ -340,7 +340,7 @@ fn env_transition_render_legacy_package_root(source: String) -> String Environme
         }
     }
     lines := [String]{"name: {identity.get("name") ?? "\"\""}\n", "version: {identity.get("version") ?? "\"\""}\n"}
-    loop field in @TRANSITION_OPTIONAL_IDENTITY_FIELDS {
+    loop field in TRANSITION_OPTIONAL_IDENTITY_FIELDS {
         if identity.get(field) == .Val(value) -> &lines.push("{field}: {value}\n")
     }
     &lines.push("deps: {{\n")
@@ -366,14 +366,14 @@ fn env_transition_validate_legacy_manifest_fields(source: String) EnvironmentErr
             return Err(env_transition_error("pkg.jet declares field `{field}` more than once; migration stops before writing"))
         }
         seen_fields[field] = true
-        if @TRANSITION_IDENTITY_FIELDS.contains(field) {
+        if TRANSITION_IDENTITY_FIELDS.contains(field) {
             if identity_blocks > 0 {
                 return Err(env_transition_error("pkg.jet mixes top-level identity fields with an identity block; migration stops before writing"))
             }
             saw_top_level_identity = true
             next
         }
-        if !@TRANSITION_TOP_LEVEL_BLOCKS.contains(field) {
+        if !TRANSITION_TOP_LEVEL_BLOCKS.contains(field) {
             return Err(env_transition_error("pkg.jet contains unknown field `{field}`; migration stops before writing"))
         }
         if field == "payload" || field == "identity" {
@@ -388,7 +388,7 @@ fn env_transition_validate_legacy_manifest_fields(source: String) EnvironmentErr
             body :: env_transition_record_body(value) ?? return Err(env_transition_error("{field} is not a closed identity record; migration stops before writing"))
             loop nested in env_transition_source_entries(body) {
                 nested_field :: nested.field ?? return Err(env_transition_error("pkg.jet identity contains an unrepresentable declaration `{nested.raw.trim()}`; migration stops before writing"))
-                if !@TRANSITION_IDENTITY_FIELDS.contains(nested_field) {
+                if !TRANSITION_IDENTITY_FIELDS.contains(nested_field) {
                     return Err(env_transition_error("pkg.jet identity contains unknown field `{nested_field}`; migration stops before writing"))
                 }
             }
@@ -398,7 +398,6 @@ fn env_transition_validate_legacy_manifest_fields(source: String) EnvironmentErr
             env_transition_validate_legacy_dependency_block(value)
         }
     }
-    Ok()
 }
 
 fn env_transition_validate_legacy_identity_body(body: String) EnvironmentError! {
@@ -410,7 +409,6 @@ fn env_transition_validate_legacy_identity_body(body: String) EnvironmentError! 
         }
         seen[field] = true
     }
-    Ok()
 }
 
 fn env_transition_validate_legacy_dependency_block(value: String) EnvironmentError! {
@@ -422,7 +420,7 @@ fn env_transition_validate_legacy_dependency_block(value: String) EnvironmentErr
         seen := [String: Bool]{}
         loop nested in env_transition_source_entries(git_body) {
             field :: nested.field ?? return Err(env_transition_error("pkg.jet dependency `{name}` contains an unrepresentable declaration `{nested.raw.trim()}`; migration stops before writing"))
-            if !@TRANSITION_GIT_FIELDS.contains(field) {
+            if !TRANSITION_GIT_FIELDS.contains(field) {
                 return Err(env_transition_error("pkg.jet dependency `{name}` contains unknown field `{field}`; migration stops before writing"))
             }
             if seen.has_key(field) {
@@ -431,7 +429,6 @@ fn env_transition_validate_legacy_dependency_block(value: String) EnvironmentErr
             seen[field] = true
         }
     }
-    Ok()
 }
 
 fn env_transition_quote(value: String) -> String Never! {
@@ -445,7 +442,6 @@ fn env_transition_validate_name(name: String, role: String) EnvironmentError! {
         if !pkg_bytes_is_word(code) && code != 45 -> bad = true
     }
     if bad -> return Err(env_transition_error("invalid {role} name {name}"))
-    Ok()
 }
 
 // Drop `//` line comments outside strings, keeping each line ending.

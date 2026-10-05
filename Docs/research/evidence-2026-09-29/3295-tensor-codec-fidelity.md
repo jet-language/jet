@@ -1,6 +1,6 @@
 # #3295 — Matrix and extension-type codec adapters (CORE-F075)
 
-Date: 2026-09-29. Binary: `jet-debug-snapshot14` via `~/.cache/jet-luna/safe-jet.sh`,
+Date: 2026-09-29. Binary: `jet-debug-snapshot14` via `~/.cache/jet-dev/safe-jet.sh`,
 source rev `e9c708fa7`. Author: Closer03 (evidence closer).
 
 ## Question
@@ -20,7 +20,7 @@ external-library inclusion?
   `Core/encoding/cbor.jet:29-37` (profile comment).
 - Ran the fixture `Examples/features/serde/tensor_codec.jet` on default run, AOT and the
   interpreter, plus scratch probes `tensor_json.jet` / `tensor_cbor.jet`
-  (`~/.cache/jet-test-scratch/Closer03/`).
+  (`~/.cache/jet-dev/scratch/Closer03/`).
 
 ## Glaze v8.3.0 Eigen adapter (primary source)
 

@@ -81,6 +81,20 @@ unresolved owner gate, but do not wait for generic approval before working a
 fresh ungated card. Use the current short/full ballot profile through
 `tower-ballot`.
 
+Every ballot view opens with the decision's top-level `situation`: a 4–7
+sentence plain-prose summary of what the thing is, what goes wrong today (one
+concrete example), who it matters to, what is being decided, and the
+recommendation. Full ballots require it (300–1200 characters, no lists,
+headings, or code blocks, at most 32 words per sentence); short ballots may add
+it under the same rules. Set it in the `--file` JSON or with
+`tower decision add|update --situation "…"`. `tower brief` prints it first.
+
+Design away the recommended option's downsides. Keep `recommendation.losses`
+empty, or record each negligible remaining cost as `{loss, mitigation}` in both
+the long form and reading surface. `mitigation` is plain prose explaining how we
+reduce the cost; the surface requires fewer than 24 words. Tower migrates stored
+loss explanations on load; do not edit board JSON by hand.
+
 ## Minimal discovery
 
 Prefer the vendored CLI so state stays in this checkout:
@@ -94,6 +108,29 @@ For an installed plugin, use the directory containing `tower.mjs` and `app/`:
 ```sh
 node ${CLAUDE_PLUGIN_ROOT}/tower.mjs help
 ```
+
+## Now reports
+
+Post a markdown briefing and a JSON status snapshot; both appear at the top of
+**Now**, above the existing owner duty queue:
+
+```sh
+node Tools/tower/tower.mjs briefing post --file report.md --title "Morning report" --by Pip
+node Tools/tower/tower.mjs briefing list
+node Tools/tower/tower.mjs briefing show                 # latest; or supply its id
+node Tools/tower/tower.mjs status post --file status.json --by Pip
+node Tools/tower/tower.mjs status show
+```
+
+Use `Tools/tower/examples/status.sample.json` as the snapshot shape. Progress
+maps labels to percentages (0–100); links use `{card:"#12"}` or
+`{decision:"D-ID"}` with an optional `label`. References must exist when posted.
+`updatedAt` is optional on the snapshot and each workstream; posting always
+records its own timestamp and author. Snapshots replace the previous status,
+not card gates. Briefings keep collapsible history; `--sections sections.json`
+optionally adds an array of `{title,body,links}` markdown sections. The owner
+action list always adds live, non-draft, unratified ballots (including visual
+checks), so a snapshot never hides a new vote. Add `--json` for machine output.
 
 ## Contextual references
 

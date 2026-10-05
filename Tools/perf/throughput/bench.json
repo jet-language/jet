@@ -1,0 +1,36 @@
+{
+  "schema": "jet.compile-throughput.bench/v1",
+  "about": "Pinned identities of the compile-throughput cell's generated programs (Tower #4529) and the per-phase wall budgets of SPEED-PLAN.md section 1.3. The harness regenerates each program and fails closed when its digest or golden differs from this file; change the generator and these pins in one cutover.",
+  "programs": {
+    "bench300k": {
+      "code_lines": 300000,
+      "seed": 1,
+      "source_sha256": "3b8c2aa12bfe483d0c5b16d9ed1c992a42dee07d29bb4115315c3a9de0ca8643",
+      "expected_output": "mixed checksum 828630 sections 308\n",
+      "shape": { "physical_lines": 326278, "code_lines": 300134, "bytes": 14787336, "functions": 14456, "types": 3998, "comptime_items": 923, "sections": 308 }
+    },
+    "bench30k": {
+      "code_lines": 30000,
+      "seed": 1,
+      "source_sha256": "9d8ebbdf2f94f2c5b8abd9762b91c654dc0a9a5e2862f8e1e4cc41d762f58be4",
+      "expected_output": "mixed checksum 925996 sections 31\n",
+      "shape": { "physical_lines": 32723, "code_lines": 30100, "bytes": 1471345, "functions": 1451, "types": 401, "comptime_items": 92, "sections": 31 }
+    }
+  },
+  "phase_budgets_basis": "Wall seconds for 300,000 lines on the 16C/32T reference machine; a smaller or larger program scales each budget by its code lines / 300,000. kinds are JET_TRACE_FILE phase kinds; owners are the SPEED-PLAN cards (Tower #4529-#4552) whose work brings the row inside budget.",
+  "phase_budgets": [
+    { "row": 1, "phase": "startup and Core interface record", "measure": "startup", "kinds": null, "wall_budget_s": 0.03, "owners": ["SP12 #4542"] },
+    { "row": 2, "phase": "read, lex, parse", "measure": "kinds", "kinds": ["load"], "wall_budget_s": 0.08, "owners": ["SP08a #4536", "SP10 #4540", "SP14 #4544"] },
+    { "row": 3, "phase": "register, resolve, intern", "measure": "kinds", "kinds": ["register"], "wall_budget_s": 0.10, "owners": ["SP05 #4533", "SP08b #4537", "SP14 #4544"] },
+    { "row": 4, "phase": "declaration check", "measure": "kinds", "kinds": ["sema.check"], "wall_budget_s": 0.07, "owners": ["SP09a #4538", "SP15 #4545"] },
+    { "row": 5, "phase": "comptime", "measure": "kinds", "kinds": ["comptime", "comptime.bodies", "comptime.validate"], "wall_budget_s": 0.10, "owners": ["SP03 #4531", "SP17 #4547"] },
+    { "row": 6, "phase": "body check, one pass", "measure": "kinds", "kinds": ["sema.bodies"], "wall_budget_s": 0.35, "owners": ["SP02 #4530", "SP09a #4538", "SP10 #4540", "SP11 #4541", "SP15 #4545"] },
+    { "row": 7, "phase": "failure, effect and summary solves", "measure": "kinds", "kinds": ["sema.failure", "sema.effects"], "wall_budget_s": 0.05, "owners": ["SP02 #4530", "SP15 #4545"] },
+    { "row": 8, "phase": "lower TIR to MIR", "measure": "kinds", "kinds": ["lower"], "wall_budget_s": 0.15, "owners": ["SP04 #4532", "SP11 #4541", "SP16 #4546"] },
+    { "row": 9, "phase": "MIR assembly", "measure": "kinds", "kinds": ["assemble"], "wall_budget_s": 0.02, "owners": ["SP16 #4546"] },
+    { "row": 10, "phase": "optimize", "measure": "kinds", "kinds": ["optimize"], "wall_budget_s": 0.12, "owners": ["SP16 #4546", "SP20 #4550"] },
+    { "row": 11, "phase": "code generation (Rust emit and host decode/package until SP18)", "measure": "kinds", "kinds": ["emit", "decode", "package"], "wall_budget_s": 0.30, "owners": ["SP06 #4534", "SP18 #4548", "SP20 #4550"] },
+    { "row": 12, "phase": "link and write (the rustc backend child until SP19)", "measure": "backend", "kinds": null, "wall_budget_s": 0.10, "owners": ["SP18 #4548", "SP19 #4549"] },
+    { "row": 13, "phase": "driver glue (frontend wall outside every phase above)", "measure": "glue", "kinds": null, "wall_budget_s": 0.02, "owners": ["SP13 #4543"] }
+  ]
+}

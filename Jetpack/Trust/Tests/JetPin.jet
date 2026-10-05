@@ -9,7 +9,7 @@ fn trust_pin_test_root(label: String) -> String {
 }
 
 fn trust_pin_test_manifest(root: String, text: String) {
-    files.write(files.join(root, @PAYLOAD_FILE), text) ?? panic("write manifest")
+    files.write(files.join(root, PAYLOAD_FILE), text) ?? panic("write manifest")
 }
 
 fn trust_pin_test_code(result: String TrustError!) -> String {
@@ -94,15 +94,15 @@ fn trust_pin_test_code(result: String TrustError!) -> String {
     // and honours the exec marker and env passthrough.
     root :: trust_pin_test_root("reexec")
     object :: trust_pin_test_root("object")
-    binary_path :: files.join(object, @BINARY_NAME)
-    files.write(binary_path, "#!/bin/sh\necho pinned-jet-0.4.0\necho marker=${@TOOLCHAIN_EXEC_MARKER_ENV}\necho passthru=$JETPIN_TEST_ENV\n") ?? panic("write fixture jet")
+    binary_path :: files.join(object, BINARY_NAME)
+    files.write(binary_path, "#!/bin/sh\necho pinned-jet-0.4.0\necho marker=${TOOLCHAIN_EXEC_MARKER_ENV}\necho passthru=$JETPIN_TEST_ENV\n") ?? panic("write fixture jet")
     files.write(files.join(object, "version"), "0.4.0\n") ?? panic("write fixture version")
     if sys.is_unix() -> files.set_mode(binary_path, 493) ?? panic("chmod fixture jet")
     trust_pin_test_manifest(root, "payload: {{ name: \"x\", version: \"1\", jet: 0.4 }}\n")
     pkg_lock_record_toolchain(root, trust_pin_toolchain_record("0.4", "0.4.0")) ?? panic("valid test lock record")
 
-    sys.set(@TOOLCHAIN_OBJECT_ENV, object)
-    sys.unset(@TOOLCHAIN_EXEC_MARKER_ENV) ?? panic("unset marker")
+    sys.set(TOOLCHAIN_OBJECT_ENV, object)
+    sys.unset(TOOLCHAIN_EXEC_MARKER_ENV) ?? panic("unset marker")
 
     if trust_pin_decide(root, "9.9.9", false) == {
         .ReExec(binary, channel, version) -> {
@@ -111,7 +111,7 @@ fn trust_pin_test_code(result: String TrustError!) -> String {
             assert_eq(binary, binary_path)
             if sys.is_unix() {
                 // Perform the exec the dispatch shim would: marker + inherited env.
-                receipt :: process.cmd([String]{binary}).env(@TOOLCHAIN_EXEC_MARKER_ENV, version).env("JETPIN_TEST_ENV", "carried").stdout(.Capture).stderr(.Capture).run() ?? panic("run fixture jet")
+                receipt :: process.cmd([String]{binary}).env(TOOLCHAIN_EXEC_MARKER_ENV, version).env("JETPIN_TEST_ENV", "carried").stdout(.Capture).stderr(.Capture).run() ?? panic("run fixture jet")
                 assert(receipt.output.contains("pinned-jet-0.4.0"), "child version: {receipt.output}")
                 assert(receipt.output.contains("marker=0.4.0"), "exec marker: {receipt.output}")
                 assert(receipt.output.contains("passthru=carried"), "env passthrough: {receipt.output}")
@@ -121,22 +121,22 @@ fn trust_pin_test_code(result: String TrustError!) -> String {
     }
 
     // Re-exec guard: with the marker set, the pinned child runs natively.
-    sys.set(@TOOLCHAIN_EXEC_MARKER_ENV, "0.4.0")
+    sys.set(TOOLCHAIN_EXEC_MARKER_ENV, "0.4.0")
     assert(trust_pin_decide(root, "0.4.0", false) == .RunNative)
-    sys.unset(@TOOLCHAIN_EXEC_MARKER_ENV) ?? panic("unset marker")
-    sys.unset(@TOOLCHAIN_OBJECT_ENV) ?? panic("unset object")
+    sys.unset(TOOLCHAIN_EXEC_MARKER_ENV) ?? panic("unset marker")
+    sys.unset(TOOLCHAIN_OBJECT_ENV) ?? panic("unset object")
 }
 
 #Test("matched version runs native") {
     root :: trust_pin_test_root("native")
     trust_pin_test_manifest(root, "payload: {{ name: \"x\", version: \"1\", jet: 0.4 }}\n")
     pkg_lock_record_toolchain(root, trust_pin_toolchain_record("0.4", "0.4.0")) ?? panic("valid test lock record")
-    sys.unset(@TOOLCHAIN_EXEC_MARKER_ENV) ?? panic("unset marker")
+    sys.unset(TOOLCHAIN_EXEC_MARKER_ENV) ?? panic("unset marker")
     assert(trust_pin_decide(root, "0.4.0", false) == .RunNative)
 }
 
 #Test("platform cache miss reports E1251") {
-    sys.unset(@TOOLCHAIN_OBJECT_ENV) ?? panic("unset object")
+    sys.unset(TOOLCHAIN_OBJECT_ENV) ?? panic("unset object")
     if trust_pin_realize_jet_binary("0.4", "0.4.0") == {
         .Err(error) -> {
             if error == {
@@ -187,7 +187,7 @@ fn trust_pin_test_code(result: String TrustError!) -> String {
     // Running toolchain 0.6.1 pins channel 0.6.
     message :: trust_pin_write_init(root, "myapp", "0.6.1") ?? panic("init")
     assert(message.contains("0.6"), message)
-    text :: files.read(files.join(root, @PACKAGE_FILE)) ?? panic("read package manifest")
+    text :: files.read(files.join(root, PACKAGE_FILE)) ?? panic("read package manifest")
     identity :: trust_pin_identity_preparse(text)
     assert_eq(identity.payload_name, "myapp")
     assert_eq(identity.jet, Val("0.6"))

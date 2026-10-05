@@ -272,7 +272,6 @@ enum ServicePresetKind {
         if self.executable_name() == None {
             return Err(ServicesError.new("service preset `{name}` is owner-gated until a PHP runtime/source projection is ratified"))
         }
-        Ok()
     }
 
     // The foreground start command for `port`, keeping state in `data_dir`.
@@ -331,15 +330,15 @@ enum ServicePresetKind {
     // The typed readiness probe for `port`.
     fn readiness(self, port: Int) -> ReadyProbe Never! {
         if self == {
-            .Redis -> ReadyProbe.Exec("redis-cli -p {port} ping")
-            .Postgres -> ReadyProbe.Exec("pg_isready -h 127.0.0.1 -p {port}")
-            .Mysql -> ReadyProbe.Exec("mysqladmin ping -h 127.0.0.1 -P {port} -u root")
-            .Mariadb -> ReadyProbe.Exec("mariadb-admin ping -h 127.0.0.1 -P {port} -u root")
-            .Nginx | .Adminer -> ReadyProbe.Exec("curl -fsS http://127.0.0.1:{port}/")
-            .Minio -> ReadyProbe.Exec("curl -fsS http://127.0.0.1:{port}/minio/health/live")
-            .Mailpit -> ReadyProbe.Exec("curl -fsS http://127.0.0.1:{port}/api/v1/info")
-            .Mailhog -> ReadyProbe.Exec("curl -fsS http://127.0.0.1:{port}/api/v2/messages")
-            .Blackfire | .Tailscale -> ReadyProbe.Exec("true")
+            .Redis -> ReadyProbe.Exec{command: "redis-cli -p {port} ping"}
+            .Postgres -> ReadyProbe.Exec{command: "pg_isready -h 127.0.0.1 -p {port}"}
+            .Mysql -> ReadyProbe.Exec{command: "mysqladmin ping -h 127.0.0.1 -P {port} -u root"}
+            .Mariadb -> ReadyProbe.Exec{command: "mariadb-admin ping -h 127.0.0.1 -P {port} -u root"}
+            .Nginx | .Adminer -> ReadyProbe.Exec{command: "curl -fsS http://127.0.0.1:{port}/"}
+            .Minio -> ReadyProbe.Exec{command: "curl -fsS http://127.0.0.1:{port}/minio/health/live"}
+            .Mailpit -> ReadyProbe.Exec{command: "curl -fsS http://127.0.0.1:{port}/api/v1/info"}
+            .Mailhog -> ReadyProbe.Exec{command: "curl -fsS http://127.0.0.1:{port}/api/v2/messages"}
+            .Blackfire | .Tailscale -> ReadyProbe.Exec{command: "true"}
             else -> services_tcp_readiness(port)
         }
     }
@@ -368,7 +367,7 @@ enum ServicePresetKind {
             .OpentelemetryCollector -> services_prepare_config(files.join(data_dir, "otel-collector.yaml"), "receivers: {{}}\nprocessors: {{}}\nexporters: {{}}\nservice:\n  pipelines: {{}}\n", "OpenTelemetry")
             .Prometheus -> services_prepare_config(files.join(data_dir, "prometheus.yml"), "global:\n  scrape_interval: 15s\n", "Prometheus")
             .Varnish -> services_prepare_config(files.join(data_dir, "default.vcl"), "vcl 4.1;\nbackend default {{\n  .host = \"127.0.0.1\";\n  .port = \"8080\";\n}}\n", "Varnish")
-            else -> Ok()
+            else -> {}
         }
     }
 }
@@ -448,7 +447,7 @@ fn services_any_contains_nul(values: [String]) -> Bool Never! {
 }
 
 fn services_tcp_readiness(port: Int) -> ReadyProbe Never! {
-    ReadyProbe.Tcp{host: "127.0.0.1", port: if port >= 0 && port <= 65535 -> port else -> 0}
+    ReadyProbe.TCP{host: "127.0.0.1", port: if port >= 0 && port <= 65535 -> port else -> 0}
 }
 
 // Rust `i64::saturating_add` for the few derived preset ports.
@@ -469,7 +468,6 @@ fn services_prepare_config(path: String, contents: String, label: String) Servic
     if services_write_atomic(path, contents.bytes()) == .Err(error) {
         return Err(ServicesError.new("couldn't write {label} preset config: {error}"))
     }
-    Ok()
 }
 
 fn services_prepare_nginx(port: Int, data_dir: String) ServicesError! -[FS, Env]> {
@@ -486,13 +484,12 @@ fn services_prepare_nginx(port: Int, data_dir: String) ServicesError! -[FS, Env]
 // only gains the marker.
 fn services_prepare_database(port: Int, data_dir: String, env: ShellEnv, tool: String, args: [String]) ServicesError! -[FS, Env, Exec, Time.Wait]> {
     marker :: services_catalog_marker(data_dir)
-    if files.is_file(marker) -> return Ok()
+    if files.is_file(marker) -> return
     initialized :: files.is_file(files.join(data_dir, "PG_VERSION")) || files.is_dir(files.join(data_dir, "mysql"))
     if !initialized -> services_run_catalog_tool(env, tool, args, data_dir)
     if services_write_atomic(marker, "port={port}\n".bytes()) == .Err(error) {
         return Err(ServicesError.new("couldn't record service preset initialization: {error}"))
     }
-    Ok()
 }
 
 fn services_run_catalog_tool(env: ShellEnv, tool: String, args: [String], data_dir: String) ServicesError! -[FS, Env, Exec, Time.Wait]> {
@@ -502,7 +499,7 @@ fn services_run_catalog_tool(env: ShellEnv, tool: String, args: [String], data_d
     shell_env := env
     spec = &shell_env.apply_to(spec)
     receipt :: spec.run() ?? return Err(ServicesError.new("couldn't initialize service preset with `{tool}`: {err}"))
-    if receipt.success -> return Ok()
+    if receipt.success -> return
     detail :: receipt.errors.trim()
     if detail == "" -> return Err(ServicesError.new("service preset initializer `{tool}` exited with {env_shell_exit_status_text(receipt)}"))
     Err(ServicesError.new("service preset initializer `{tool}` failed: {detail}"))

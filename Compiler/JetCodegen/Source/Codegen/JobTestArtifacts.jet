@@ -354,7 +354,7 @@ fn jet_codegen_insert_harness(rows: &[MIRHarnessPlan], row: MIRHarnessPlan) Neve
 }
 
 pub fn jet_codegen_lower_job_test_artifacts(jobs: [TJobFact], tests: [TTestFact], harnesses: [THarnessPlanFact], functions: [TFunc], checked_functions: [MIRFunction]) -> JetCodegenJobTestArtifacts Never! {
-    function_index :: jet_codegen_function_index(functions)
+    function_index :: jet_codegen_function_index(~functions)
     lowered_jobs := [MIRJob]{}
     loop row in jobs {
         if jet_codegen_lower_job_fact(row, function_index, checked_functions) == .Val(lowered) -> jet_codegen_insert_job(&lowered_jobs, lowered)

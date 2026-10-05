@@ -4,37 +4,37 @@
 // activated broker takes its listener from the service manager (Store
 // `store_serve_shared_store`), so `broker` has no descriptor argument.
 
-pub fn cli_cmd_shared_store(theme: Theme, parsed: CliParsed) -[IO, FS, Env, Net, Time, Time.Wait]> Int Never! {
+pub fn cli_cmd_shared_store(verification: &StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Net, Time, Time.Wait]> Int Never! {
     verb :: if parsed.positional.len() == 0 -> "install" else -> parsed.positional[0]
     roots :: pkg_resolve_roots()
     if verb == {
         "install" -> {
             report :: store_install_shared_store(roots) ?? {
                 theme.error("shared-store install failed", err.message(), "check the administrator-selected Jet root and keep the broker optional.")
-                return @EXIT_USAGE
+                return EXIT_USAGE
             }
             theme.status("installed shared-store config at {report.config}")
             if report.socket_unit == .Val(socket) -> theme.detail("socket unit: {socket}")
             if report.service_unit == .Val(service) -> theme.detail("service unit: {service}")
-            @EXIT_OK
+            EXIT_OK
         }
         "broker" -> {
-            store_serve_shared_store(roots) ?? {
+            store_serve_shared_store(&verification, roots) ?? {
                 theme.error("shared-store broker failed", err.message(), "the broker verifies one provenance-bound archive request and exits; reinstall the socket unit if it is stale.")
-                return @EXIT_USAGE
+                return EXIT_USAGE
             }
-            @EXIT_OK
+            EXIT_OK
         }
         "status" -> {
             config :: store_shared_store_config(roots) ?? {
                 theme.error("shared-store status failed", err.message(), "repair the administrator-installed shared-store config.")
-                return @EXIT_USAGE
+                return EXIT_USAGE
             }
             if config == {
                 .Val(found) -> theme.status("shared-store broker configured at {found.socket}")
                 .None -> theme.status("shared-store broker is not installed.")
             }
-            @EXIT_OK
+            EXIT_OK
         }
         "enroll" -> cli_shared_store_enroll(theme, parsed, roots)
         else -> {
@@ -43,17 +43,17 @@ pub fn cli_cmd_shared_store(theme: Theme, parsed: CliParsed) -[IO, FS, Env, Net,
                 "the shared-store commands are `install`, `enroll`, `status`, and the socket-activated `broker` entrypoint.",
                 "run `jetpack hangar shared install`."
             )
-            @EXIT_USAGE
+            EXIT_USAGE
         }
     }
 }
 
 // `hangar shared enroll <uid> [--read-only]`: one uid and an optional
 // read-only grant, nothing else.
-fn cli_shared_store_enroll(theme: Theme, parsed: CliParsed, roots: HangarRoots) -[IO, FS, Env, Time]> Int Never! {
+fn cli_shared_store_enroll(theme: Theme, parsed: CLIParsed, roots: HangarRoots) -[IO, FS, Env, Time, Time.Wait]> Int Never! {
     if parsed.positional.len() < 2 {
         theme.error("shared-store enrollment needs a uid", "no user id was supplied", "run `jetpack hangar shared enroll <uid>` as the administrator.")
-        return @EXIT_USAGE
+        return EXIT_USAGE
     }
     uid :: parsed.positional[1]
     read_only :: parsed.positional.contains("--read-only")
@@ -61,13 +61,13 @@ fn cli_shared_store_enroll(theme: Theme, parsed: CliParsed, roots: HangarRoots) 
         item :: parsed.positional[index]
         if item != uid && item != "--read-only" {
             theme.error("shared-store enrollment has an unknown argument", "enrollment accepts one uid and optional `--read-only`", "run `jetpack hangar shared enroll <uid> [--read-only]`.")
-            return @EXIT_USAGE
+            return EXIT_USAGE
         }
     }
     path :: store_enroll_shared_store(roots, uid, !read_only) ?? {
         theme.error("shared-store enrollment failed", err.message(), "run the command as the administrator after installing the broker.")
-        return @EXIT_USAGE
+        return EXIT_USAGE
     }
     theme.status("enrolled shared-store user {uid} at {path}")
-    @EXIT_OK
+    EXIT_OK
 }

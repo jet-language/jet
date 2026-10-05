@@ -60,10 +60,10 @@ Files authored:
 
 ## Research mined
 
-- `~/.cache/jet-luna/dx2/mlops/report.md:103-106,113-124,155-156`: W&B/MLflow/DVC all put named runs, typed config/metrics, metadata, and run diff/search beside results; Jet's typed data and `.jettrace` are present, but run records and run diff are marked real gaps.
-- `~/.cache/jet-luna/dx2/observability-platforms/report.md:77-91,120-125`: Jet `.jettrace`, `jet perf compare`, and payload-free observation work; named replay and `why`/`when` are ratified but still need receipt-backed completion, and no extension seam is documented.
-- `~/.cache/jet-luna/dx2/proof-formal/report.md:84-94`: typed ProofReport, authority-bound replay, and `.jetproof` are the intended shared evidence shape; this current binary's `jet prove --json` smoke now passes, but it still has no user-domain facet path.
-- Deleted `~/.cache/jet-luna/dx2/ballots/D-M-RECEIPTS1.json:7-9,28-31`: the historical “one typed receipt” decision explicitly identified versioned domain facets as the missing attachment mechanism. It is archived context, not shipped API evidence.
+- `~/.cache/jet-dev/dx2/mlops/report.md:103-106,113-124,155-156`: W&B/MLflow/DVC all put named runs, typed config/metrics, metadata, and run diff/search beside results; Jet's typed data and `.jettrace` are present, but run records and run diff are marked real gaps.
+- `~/.cache/jet-dev/dx2/observability-platforms/report.md:77-91,120-125`: Jet `.jettrace`, `jet perf compare`, and payload-free observation work; named replay and `why`/`when` are ratified but still need receipt-backed completion, and no extension seam is documented.
+- `~/.cache/jet-dev/dx2/proof-formal/report.md:84-94`: typed ProofReport, authority-bound replay, and `.jetproof` are the intended shared evidence shape; this current binary's `jet prove --json` smoke now passes, but it still has no user-domain facet path.
+- Deleted `~/.cache/jet-dev/dx2/ballots/D-M-RECEIPTS1.json:7-9,28-31`: the historical “one typed receipt” decision explicitly identified versioned domain facets as the missing attachment mechanism. It is archived context, not shipped API evidence.
 
 ## Defects
 

@@ -3,7 +3,7 @@
 // to capture stdout/stderr or clear PATH; those claims assert the same facts
 // through the committed semantic lock and the projection functions instead.
 
-@PROVIDER_BRIDGE_TEST_STAGE_A_LOCK :: embed_file("../../../tests/fixtures/nix-compat/stage-a-flake.lock")
+PROVIDER_BRIDGE_TEST_STAGE_A_LOCK :: prep { embed_file("../../../tests/fixtures/nix-compat/stage-a-flake.lock") }
 
 fn provider_bridge_test_dir(label: String) -[FS]> String {
     files.tmpdir("jetpack_bridge_{label}_") ?? panic("scratch directory")
@@ -11,7 +11,7 @@ fn provider_bridge_test_dir(label: String) -[FS]> String {
 
 fn provider_bridge_test_fixture(label: String, facts: String) -[FS]> String {
     dir :: provider_bridge_test_dir(label)
-    files.write(files.join(dir, @BRIDGE_FIXTURE_FILE), facts) ?? panic("fixture")
+    files.write(files.join(dir, BRIDGE_FIXTURE_FILE), facts) ?? panic("fixture")
     dir
 }
 
@@ -140,7 +140,7 @@ fn provider_bridge_test_read_error(dir: String, fixtures: String?) -[FS, Env]> P
   };
   outputs = { ... }: { devShells.x86_64-linux.default = {}; };
 }`) ?? panic("flake")
-    files.write(files.join(dir, "flake.lock"), @PROVIDER_BRIDGE_TEST_STAGE_A_LOCK) ?? panic("flake lock")
+    files.write(files.join(dir, "flake.lock"), PROVIDER_BRIDGE_TEST_STAGE_A_LOCK) ?? panic("flake lock")
     fixtures :: provider_bridge_test_fixture("locked_graph_fx", `{"buildInputs": [], "shellHook": ""}`)
     assert_eq(provider_cmd_flake(provider_bridge_test_theme(), dir, Val(fixtures)), 0)
     graph :: FlakeGraph.load(files.join(dir, "flake.nix")) ?? panic("graph reload")

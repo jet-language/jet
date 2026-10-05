@@ -8,28 +8,28 @@
 
 // ── Palette roles (jet_foundation::Terminal::Theme) ──
 
-@ACCENT_SGR :: "1;96"
-@DIM_SGR :: "2;37"
-@SUCCESS_SGR :: "32"
-@WARN_SGR :: "33"
-@ERROR_SGR :: "31"
-@INVERT_SGR :: "48;5;24;97;1"
-@BORDER_SGR :: "90"
-@BOLD_SGR :: "1"
+ACCENT_SGR :: prep { "1;96" }
+DIM_SGR :: prep { "2;37" }
+SUCCESS_SGR :: prep { "32" }
+WARN_SGR :: prep { "33" }
+ERROR_SGR :: prep { "31" }
+INVERT_SGR :: prep { "48;5;24;97;1" }
+BORDER_SGR :: prep { "90" }
+BOLD_SGR :: prep { "1" }
 
 // Rust `Severity::Lint` in the Compiler `Diagnostic.severity` encoding.
-@TERMINAL_LINT_SEVERITY :: 2
+TERMINAL_LINT_SEVERITY :: prep { 2 }
 
 // Byte counts below this redraw a live progress line only on a structural
 // change (Rust `BYTE_REDRAW_THRESHOLD`).
-@TERMINAL_BYTE_REDRAW_THRESHOLD :: 1000000
+TERMINAL_BYTE_REDRAW_THRESHOLD :: prep { 1000000 }
 
 // The largest Int; a byte counter that would pass it has overflowed.
-@TERMINAL_INT_MAX :: 9223372036854775807
+TERMINAL_INT_MAX :: prep { 9223372036854775807 }
 
-@TERMINAL_SIZE_UNITS :: [String]{"B", "KB", "MB", "GB", "TB"}
+TERMINAL_SIZE_UNITS :: prep { [String]{"B", "KB", "MB", "GB", "TB"} }
 
-@TERMINAL_SPINNER_FRAMES :: [String]{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+TERMINAL_SPINNER_FRAMES :: prep { [String]{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"} }
 
 // ESC, which opens every ANSI control sequence. Jet string literals have no
 // hex escape, so the byte is built here once.
@@ -84,41 +84,41 @@ pub struct TerminalPalette {
     }
 
     fn paint(self, sgr: String, text: String) -> String Never! {
-        if !self.color -> return text
+        if !self.color -> return ~text
         esc :: terminal_esc()
         "{esc}[{sgr}m{text}{esc}[0m"
     }
 
     fn accent(self, text: String) -> String Never! {
-        self.paint(@ACCENT_SGR, text)
+        self.paint(ACCENT_SGR, text)
     }
 
     fn dim(self, text: String) -> String Never! {
-        self.paint(@DIM_SGR, text)
+        self.paint(DIM_SGR, text)
     }
 
     fn success(self, text: String) -> String Never! {
-        self.paint(@SUCCESS_SGR, text)
+        self.paint(SUCCESS_SGR, text)
     }
 
     fn warn(self, text: String) -> String Never! {
-        self.paint(@WARN_SGR, text)
+        self.paint(WARN_SGR, text)
     }
 
     fn error(self, text: String) -> String Never! {
-        self.paint(@ERROR_SGR, text)
+        self.paint(ERROR_SGR, text)
     }
 
     fn invert(self, text: String) -> String Never! {
-        self.paint(@INVERT_SGR, text)
+        self.paint(INVERT_SGR, text)
     }
 
     fn border(self, text: String) -> String Never! {
-        self.paint(@BORDER_SGR, text)
+        self.paint(BORDER_SGR, text)
     }
 
     fn bold(self, text: String) -> String Never! {
-        self.paint(@BOLD_SGR, text)
+        self.paint(BOLD_SGR, text)
     }
 }
 
@@ -221,27 +221,25 @@ fn terminal_live_output_enabled(color: Bool, is_terminal: Bool, ci: Bool) -> Boo
 // `COLUMNS` as a positive integer, else 80.
 fn terminal_columns() -[Env]> Int Never! {
     columns :: sys.get("COLUMNS") ?? return 80
-    if Int.parse(columns.trim()) == {
-        .Ok(value) -> if value > 0 -> value else -> 80
-        .Err(_) -> 80
-    }
+    value :: Int.parse(columns.trim()) ?? return 80
+    if value > 0 -> value else -> 80
 }
 
-// Every Jetpack stderr transition is one complete write.
-fn terminal_write_output(text: String) Never! -[IO]> {
+// Every Jetpack stderr transition is one complete write, which may wait for IO.
+fn terminal_write_output(text: String) Never! -[IO, Time.Wait]> {
     term.stderr().write(text).drop("terminal output is best-effort")
 }
 
 // The indent under the gutter that detail and ledger rows share.
 fn terminal_pad() -> String Never! {
-    " ".repeat(@JETPACK_PROMPT_LABEL.len() + 4)
+    " ".repeat(JETPACK_PROMPT_LABEL.len() + 4)
 }
 
 // Rust `{text:<width$}`: pad with spaces to `width` scalars.
 fn terminal_pad_end(text: String, width: Int) -> String Never! {
     scalars := 0
     loop _ in text.chars() -> scalars += 1
-    if scalars >= width -> return text
+    if scalars >= width -> return ~text
     "{text}{" ".repeat(width - scalars)}"
 }
 
@@ -308,7 +306,7 @@ fn terminal_ansi_visible_width(input: String) -> Int Never! {
 // columns, and a reset is restored when an active style is cut.
 pub fn terminal_fit_line(input: String, width: Int) -> String Never! {
     if width <= 0 -> return ""
-    if terminal_ansi_visible_width(input) <= width -> return input
+    if terminal_ansi_visible_width(input) <= width -> return ~input
     content_width :: width - 1
     raw :: input.bytes()
     index := 0
@@ -336,7 +334,7 @@ pub fn terminal_fit_line(input: String, width: Int) -> String Never! {
 }
 
 fn terminal_fit_live_line(input: String, columns: Int) -> String Never! {
-    pad :: @JETPACK_PROMPT_LABEL.len() + 4
+    pad :: JETPACK_PROMPT_LABEL.len() + 4
     available :: columns - (pad + 1)
     terminal_fit_line(input, if available > 1 -> available else -> 1)
 }
@@ -357,11 +355,11 @@ fn terminal_round_half_even(numerator: Int, denominator: Int) -> Int Never! {
 pub fn terminal_human_size(bytes: Int) -> String Never! {
     unit := 0
     divisor := 1
-    loop bytes >= divisor * 1000 && unit < @TERMINAL_SIZE_UNITS.len() - 1 {
+    loop bytes >= divisor * 1000 && unit < TERMINAL_SIZE_UNITS.len() - 1 {
         divisor *= 1000
         unit += 1
     }
-    name :: @TERMINAL_SIZE_UNITS[unit]
+    name :: TERMINAL_SIZE_UNITS[unit]
     if unit == 0 || bytes >= divisor * 100 -> return "{terminal_round_half_even(bytes, divisor)} {name}"
     tenths :: terminal_round_half_even(bytes * 10, divisor)
     "{tenths /% 10}.{tenths % 10} {name}"
@@ -451,30 +449,30 @@ pub struct Theme {
 
     // The aligned `jetpack` gutter every status line shares.
     fn gutter(self) -> String Never! {
-        self.cyan(@JETPACK_PROMPT_LABEL)
+        self.cyan(JETPACK_PROMPT_LABEL)
     }
 
     // A primary status line: `  jetpack  <msg>`.
-    fn status(self, msg: String) Never! -[IO]> {
+    fn status(self, msg: String) Never! -[IO, Time.Wait]> {
         terminal_write_output("  {self.gutter()}  {msg}\n")
     }
 
     // A secondary, indented detail line: `           ▸ <msg>`.
-    fn detail(self, msg: String) Never! -[IO]> {
+    fn detail(self, msg: String) Never! -[IO, Time.Wait]> {
         terminal_write_output("{terminal_pad()}{self.gray("▸")} {msg}\n")
     }
 
-    fn graph_identity(self, identity: String) Never! -[IO]> {
+    fn graph_identity(self, identity: String) Never! -[IO, Time.Wait]> {
         self.detail("package graph identity: {identity}")
     }
 
     // A success line ending in a green check.
-    fn ok(self, msg: String) Never! -[IO]> {
+    fn ok(self, msg: String) Never! -[IO, Time.Wait]> {
         terminal_write_output("  {self.gutter()}  {msg} {self.green("✓")}\n")
     }
 
     // A plain note without the gutter, e.g. the trust-prompt preamble.
-    fn note(self, msg: String) Never! -[IO]> {
+    fn note(self, msg: String) Never! -[IO, Time.Wait]> {
         terminal_write_output("\n  {self.gray(msg)}\n")
     }
 
@@ -485,7 +483,7 @@ pub struct Theme {
         "{self.green("✓")} {self.bold(terminal_pad_end(name, name_w))}  {self.gray(terminal_pad_end(shown, 8))}  {self.gray(state)}"
     }
 
-    fn row(self, name: String, name_w: Int, version: String, state: String) Never! -[IO]> {
+    fn row(self, name: String, name_w: Int, version: String, state: String) Never! -[IO, Time.Wait]> {
         terminal_write_output("{terminal_pad()}{self.render_row(name, name_w, version, state)}\n")
     }
 
@@ -500,7 +498,7 @@ pub struct Theme {
 
     // A mutation plan row. Colour carries the mark on a TTY; plain output
     // keeps the same + / - / ~ symbols.
-    fn plan_row(self, mark: PlanMark, name: String, name_w: Int, from: String, to: String) Never! -[IO]> {
+    fn plan_row(self, mark: PlanMark, name: String, name_w: Int, from: String, to: String) Never! -[IO, Time.Wait]> {
         terminal_write_output("{terminal_pad()}{self.render_plan_row(mark, name, name_w, from, to)}\n")
     }
 
@@ -538,7 +536,7 @@ pub struct Theme {
     }
 
     // Dependency-chain progress for long phases; the plain ledger floor.
-    fn progress_chain(self, phase: String, done: Int, total: Int, node: String, edge: String) Never! -[IO]> {
+    fn progress_chain(self, phase: String, done: Int, total: Int, node: String, edge: String) Never! -[IO, Time.Wait]> {
         terminal_write_output("{terminal_pad()}{self.render_progress_chain(phase, done, total, node, edge)}\n")
     }
 
@@ -548,7 +546,7 @@ pub struct Theme {
         "{self.green("✓")} {self.bold(terminal_pad_end(name, name_w))}  {self.gray(shown)}"
     }
 
-    fn ready_row(self, name: String, name_w: Int, version: String) Never! -[IO]> {
+    fn ready_row(self, name: String, name_w: Int, version: String) Never! -[IO, Time.Wait]> {
         terminal_write_output("{terminal_pad()}{self.render_ready_row(name, name_w, version)}\n")
     }
 
@@ -558,7 +556,7 @@ pub struct Theme {
         "{count} {noun} Ready {self.green("✓")}"
     }
 
-    fn ready_summary(self, count: Int) Never! -[IO]> {
+    fn ready_summary(self, count: Int) Never! -[IO, Time.Wait]> {
         terminal_write_output("  {self.gutter()}  {self.render_ready_summary(count)}\n")
     }
 
@@ -587,7 +585,7 @@ pub struct Theme {
         "Download {terminal_human_size(bytes)}"
     }
 
-    fn download_line(self, bytes: Int) Never! -[IO]> {
+    fn download_line(self, bytes: Int) Never! -[IO, Time.Wait]> {
         self.status(Theme.render_download_line(bytes))
     }
 
@@ -659,7 +657,7 @@ pub struct Theme {
     // `  ── myproj ─ temporary shell · exit to leave ──────────────`.
     // The label is bold cyan; the rest is quiet. It reads the same without
     // colour, so the threshold survives NO_COLOR.
-    fn rule(self, segments: [String]) Never! -[IO, Env]> {
+    fn rule(self, segments: [String]) Never! -[IO, Env, Time.Wait]> {
         if segments.len() == 0 -> return
         width := 64
         if sys.get("COLUMNS") == .Val(columns) {
@@ -691,7 +689,7 @@ pub struct Theme {
     fn spinner(self, msg: String) -[IO, Env, Time]> Spinner Never! {
         if !self.live_enabled() -> return Spinner{stop: None, running: None}
         stop :: shared SpinnerState{stop: false}
-        flag :: stop
+        flag :: ~stop
         pad :: terminal_pad()
         shown :: terminal_fit_live_line(msg, terminal_columns() - 1)
         esc :: terminal_esc()
@@ -699,8 +697,8 @@ pub struct Theme {
         running :: task {
             frame := 0
             loop !flag.stop {
-                glyph :: @TERMINAL_SPINNER_FRAMES[frame % @TERMINAL_SPINNER_FRAMES.len()]
-                terminal_write_output("{carriage_return}{pad}{esc}[{@ACCENT_SGR}m{glyph}{esc}[0m {shown}")
+                glyph :: TERMINAL_SPINNER_FRAMES[frame % TERMINAL_SPINNER_FRAMES.len()]
+                terminal_write_output("{carriage_return}{pad}{esc}[{ACCENT_SGR}m{glyph}{esc}[0m {shown}")
                 frame += 1
                 time.sleep(time.duration_ms(80))
             }
@@ -710,7 +708,7 @@ pub struct Theme {
     }
 
     // An operational Jet failure through the registered E1340 row.
-    fn error(self, headline: String, why: String, fix: String) Never! -[IO]> {
+    fn error(self, headline: String, why: String, fix: String) Never! -[IO, Time.Wait]> {
         shown_why :: if why == "" -> "Jet cannot finish this command without the input or valid operation named above" else -> why
         shown_fix :: if fix == "" -> "correct the named input or operation and run the command again" else -> fix
         self.error_coded("E1340", headline, shown_why, shown_fix)
@@ -718,7 +716,7 @@ pub struct Theme {
 
     fn render_error_coded(self, code: String, what: String, why: String, fix: String) -> String Never! {
         diagnostic :: diagnostic_from_registry(code, None, what, why, fix)
-        diagnostics_render_colored(diagnostic, "", "", self.color)
+        diagnostic_render(diagnostic, "", "", self.color)
     }
 
     fn render_diagnostic_group(self, code: String, what: String, why: String, fix: String, count: Int) -> String Never! {
@@ -736,11 +734,11 @@ pub struct Theme {
 
     // A coded Jetpack failure through the shared renderer. The Why text is
     // the default root-cause key when no structured cause token exists.
-    fn error_coded(self, code: String, headline: String, why: String, fix: String) Never! -[IO]> {
+    fn error_coded(self, code: String, headline: String, why: String, fix: String) Never! -[IO, Time.Wait]> {
         self.error_coded_with_root_cause(code, why, headline, why, fix)
     }
 
-    fn error_coded_with_root_cause(self, code: String, root_cause_key: String, headline: String, why: String, fix: String) Never! -[IO]> {
+    fn error_coded_with_root_cause(self, code: String, root_cause_key: String, headline: String, why: String, fix: String) Never! -[IO, Time.Wait]> {
         if self.invocation == .Val(collector) {
             permit :: collector.guard_edit()
             &permit.value.record(self.color, code, root_cause_key, headline, why, fix)
@@ -750,10 +748,10 @@ pub struct Theme {
     }
 
     // A coded Jetpack warning through the shared renderer.
-    fn warning_coded(self, code: String, headline: String, why: String, fix: String) Never! -[IO]> {
+    fn warning_coded(self, code: String, headline: String, why: String, fix: String) Never! -[IO, Time.Wait]> {
         diagnostic := diagnostic_from_registry(code, None, headline, why, fix)
-        diagnostic.severity = @TERMINAL_LINT_SEVERITY
-        terminal_write_output(diagnostics_render_colored(diagnostic, "", "", self.color))
+        diagnostic.severity = TERMINAL_LINT_SEVERITY
+        terminal_write_output(diagnostic_render(diagnostic, "", "", self.color))
     }
 }
 
@@ -765,7 +763,7 @@ pub struct SpinnerState {
 // A running spinner; closing it stops and clears it.
 pub struct Spinner {
     stop: Shared<SpinnerState>?
-    running: Task<()>?
+    running: Task<Never!>?
 }
 
 impl Spinner.Close {
@@ -853,19 +851,20 @@ pub struct ByteProgress {
         ByteProgress{state: shared ByteProgressState.new()}
     }
 
-    fn snapshot(self) -> ByteProgressSnapshot Never! {
+    // Read the byte facts under one guard; `.snapshot()` is reserved for expect.
+    fn facts(self) -> ByteProgressSnapshot Never! {
         state :: self.state
         permit :: state.guard_read()
         ByteProgressSnapshot{transferred: permit.value.transferred, total: permit.value.total}
     }
 
     fn has_facts(self) -> Bool Never! {
-        snapshot :: self.snapshot()
+        snapshot :: self.facts()
         snapshot.total != None || snapshot.transferred != Val(0)
     }
 
     fn render(self) -> String Never! {
-        snapshot :: self.snapshot()
+        snapshot :: self.facts()
         transferred :: if snapshot.transferred == {
             .Val(bytes) -> terminal_human_size(bytes)
             .None -> "?"
@@ -877,7 +876,7 @@ pub struct ByteProgress {
         "{transferred} / {total}"
     }
 
-    fn discovered_bytes(self, bytes: Int) Never! -[IO, Env]> {
+    fn discovered_bytes(self, bytes: Int) Never! -[IO, Env, Time.Wait]> {
         if self.record_discovered(bytes) -> self.render_if_needed(false)
     }
 
@@ -888,7 +887,7 @@ pub struct ByteProgress {
         if permit.value.total_overflowed -> return false
         if permit.value.total == {
             .Val(total) -> {
-                if total > @TERMINAL_INT_MAX - bytes {
+                if total > TERMINAL_INT_MAX - bytes {
                     permit.value.total_overflowed = true
                     permit.value.total = None
                 } else {
@@ -900,7 +899,7 @@ pub struct ByteProgress {
         true
     }
 
-    fn transferred_bytes(self, bytes: Int) Never! -[IO, Env]> {
+    fn transferred_bytes(self, bytes: Int) Never! -[IO, Env, Time.Wait]> {
         self.record_transferred(bytes)
         self.render_if_needed(false)
     }
@@ -909,12 +908,12 @@ pub struct ByteProgress {
         state :: self.state
         permit :: state.guard_edit()
         permit.value.transferred = if permit.value.transferred == {
-            .Val(transferred) -> if transferred > @TERMINAL_INT_MAX - bytes -> None else -> Val(transferred + bytes)
+            .Val(transferred) -> if transferred > TERMINAL_INT_MAX - bytes -> None else -> Val(transferred + bytes)
             .None -> None
         }
     }
 
-    fn phase(self, phase: String) Never! -[IO, Env]> {
+    fn phase(self, phase: String) Never! -[IO, Env, Time.Wait]> {
         self.record_phase(phase)
         self.render_if_needed(false)
     }
@@ -925,7 +924,7 @@ pub struct ByteProgress {
         permit.value.phase = phase
     }
 
-    fn object_progress(self, done: Int, total: Int) Never! -[IO, Env]> {
+    fn object_progress(self, done: Int, total: Int) Never! -[IO, Env, Time.Wait]> {
         self.record_objects(done, total)
         self.render_if_needed(false)
     }
@@ -967,7 +966,7 @@ pub struct ByteProgress {
 
     // Redraw the aggregate line on a structural change or after enough bytes.
     // Non-TTY output only ever appends structural changes.
-    fn render_if_needed(self, force: Bool) Never! -[IO, Env]> {
+    fn render_if_needed(self, force: Bool) Never! -[IO, Env, Time.Wait]> {
         state :: self.state
         permit :: state.guard_edit()
         current :: permit.value
@@ -981,11 +980,11 @@ pub struct ByteProgress {
         byte_delta :: if current.transferred == {
             .Val(now) -> if current.last_rendered_transferred == {
                 .Val(previous) -> if now > previous -> now - previous else -> 0
-                .None -> @TERMINAL_BYTE_REDRAW_THRESHOLD
+                .None -> TERMINAL_BYTE_REDRAW_THRESHOLD
             }
-            .None -> if current.last_rendered_transferred == None -> 0 else -> @TERMINAL_BYTE_REDRAW_THRESHOLD
+            .None -> if current.last_rendered_transferred == None -> 0 else -> TERMINAL_BYTE_REDRAW_THRESHOLD
         }
-        byte_redraw :: byte_delta >= @TERMINAL_BYTE_REDRAW_THRESHOLD || (current.total == current.transferred && current.transferred != Val(0))
+        byte_redraw :: byte_delta >= TERMINAL_BYTE_REDRAW_THRESHOLD || (current.total == current.transferred && current.transferred != Val(0))
         if !(structural || byte_redraw) -> return
         permit.value.last_rendered_phase = current.phase
         permit.value.last_rendered_package_done = current.package_done
@@ -1023,20 +1022,20 @@ pub struct LiveRegion {
 
     // Erase the drawn status lines, so no stale progress text sits beside
     // a diagnostic.
-    fn clear(&self) Never! -[IO]> {
+    fn clear(&self) Never! -[IO, Time.Wait]> {
         erase :: &self.clear_control()
         if erase != "" -> terminal_write_output(erase)
     }
 
     // Promote one finished row: erase the region, then print the row
     // permanently. On non-TTY this is the whole deterministic ledger.
-    fn finish(&self, line: String) Never! -[IO, Env]> {
+    fn finish(&self, line: String) Never! -[IO, Env, Time.Wait]> {
         erase :: &self.clear_control()
         terminal_write_output("{erase}{terminal_pad()}{terminal_fit_live_line(line, terminal_columns())}\n")
     }
 
     // Redraw the status lines in place; inert on non-TTY.
-    fn set_status(&self, lines: [String]) Never! -[IO, Env]> {
+    fn set_status(&self, lines: [String]) Never! -[IO, Env, Time.Wait]> {
         if !self.tty -> return
         output := &self.clear_control()
         columns :: terminal_columns()
@@ -1047,7 +1046,7 @@ pub struct LiveRegion {
 
     // Start or advance the aggregate realization line with the package-level
     // count and the current phase, before the provider begins work.
-    fn set_aggregate_status(&self, phase: String, completed_packages: Int, total_packages: Int) Never! -[IO, Env]> {
+    fn set_aggregate_status(&self, phase: String, completed_packages: Int, total_packages: Int) Never! -[IO, Env, Time.Wait]> {
         self.progress.begin_aggregate_step(phase, completed_packages, total_packages)
         self.progress.activate_renderer(self.theme, self.tty)
         self.progress.render_if_needed(true)
@@ -1055,7 +1054,7 @@ pub struct LiveRegion {
 
     // Project one dependency edge: a two-line pinned region on a TTY, one
     // stable chain line per node otherwise.
-    fn set_dependency_status(&self, phase: String, completed: Int, total: Int, source: String, node: String, state: String) Never! -[IO, Env]> {
+    fn set_dependency_status(&self, phase: String, completed: Int, total: Int, source: String, node: String, state: String) Never! -[IO, Env, Time.Wait]> {
         base_line :: self.theme.render_dependency_status(phase, completed, total, source, node, state)
         line :: if self.progress.has_facts() -> "{base_line}  {self.theme.gray(self.progress.render())}" else -> base_line
         if !self.tty {
@@ -1066,7 +1065,7 @@ pub struct LiveRegion {
     }
 
     // Close the region into one final summary line.
-    fn collapse(&self, summary: String) Never! -[IO, Env]> {
+    fn collapse(&self, summary: String) Never! -[IO, Env, Time.Wait]> {
         erase :: &self.clear_control()
         line :: terminal_fit_line("  {self.theme.gutter()}  {summary}", terminal_columns())
         terminal_write_output("{erase}{line}\n")

@@ -99,7 +99,7 @@ means the Bool class.
 | `ReadPlace(p)`, `MovePlace{p}` | Place exists; result is the place type. |
 | `WritePlace{p, v}`, `ReplacePlace{p, v}` | Place exists; `v` is compatible with the place type; no result. |
 | `InitializeUninit{p}` | Place exists; no result. |
-| `Copy{v, fact}`, `Move{v}`, `AttachTag{v}` | Result is the type of `v`. (MIR legality, not lint, checks `fact` against `v`: `scalar` needs a Copy-ABI value, `view_materialize` a view with a copy kernel; #4318.) |
+| `Copy{v, fact}`, `Move{v}`, `AttachTag{v}` | Result is the type of `v`, except `Copy{v, view_materialize}`, whose result is the owning collection `v`'s copy kernel builds (`View<str>` → `String`, `View<T>`/`[T]` → `[T]`). (MIR legality, not lint, checks `fact` against `v`: `scalar` needs a Copy-ABI value, `view_materialize` a view with a copy kernel; #4318.) |
 | `TraitBox{v, target}` | Has a result. |
 | `Constant(c)` | Int → integer, Float → float, Bool → Bool, Char → Char, String → String, Unit → unit, for a result whose type is not nominal. |
 | `Unary{Neg, v}` | `v` is numeric; result is `v`'s type. |
@@ -155,9 +155,9 @@ All operands of every semantic operation are defined (`value.typed`).
 | `CarrierFact{field}` | Field is declared. |
 | `BuiltinMethod{aggregate_fields}` | Every aggregate field is declared. |
 | `OptionLift2{function}` | Function is callable. |
-| `OverflowOption` | Result is an Option. |
+| `OverflowOption` | Result is an Option (`checked_*`) or an integer (wrapping, saturating, trapping, and rotate routes). |
 | `NumericMethod`, `NumericBinaryMethod` | Receiver is numeric. |
-| `ClosureMethod{receiver}`, `HostBorrowCallback{callable}`, `CCallback{lambda}`, `HTTPRouterRegister{handler}` | The named value is callable. |
+| `HostBorrowCallback{callable}`, `CCallback{lambda}`, `HTTPRouterRegister{handler}` | The named value is callable. `ClosureMethod{receiver}` names the collection or carrier the closure route runs over, not the closure. |
 | `CoreClosureCall{closure}` | Closure, when present, is callable. |
 | `GCEdit{index}` | Index, when present, is an integer. |
 | `TypedTextInterp` | One more literal than holes; one HTML proof flag per hole. |
@@ -174,7 +174,7 @@ All operands of every semantic operation are defined (`value.typed`).
 | `Jump`, `Continue` | Target block exists. |
 | `Branch` | Condition is Bool; both targets exist. |
 | `Switch` | Subject defined; each arm condition is Bool; every target exists. |
-| `Return{value}` | A value is compatible with the function's return type; no value only in a generator or a function returning unit or `Never`. |
+| `Return{value}` | A value is compatible with the function's return type; no value only in a generator, a function returning unit or `Never`, or a fallible function whose failure carrier is `Result` with a unit success (its implicit `Ok(())`). |
 | `Yield{value, resume}` | The function is a generator; the value is compatible with its item type; the resume target exists. |
 | `Break` | Target exists. |
 | `Unreachable` | No operands. |

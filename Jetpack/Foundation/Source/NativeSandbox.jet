@@ -7,10 +7,10 @@
 // AppContainer backend, so Windows reports the sandbox unavailable and every
 // sandboxed action fails closed.
 
-@NATIVE_SANDBOX_FAKE_ENV :: "JETPACK_FAKE_SANDBOX"
-@NATIVE_SANDBOX_MAX_OUTPUT_BYTES :: 67108864
-@NATIVE_SANDBOX_MACOS_EXEC :: "/usr/bin/sandbox-exec"
-@NATIVE_SANDBOX_NOT_ENFORCED :: "not-enforced"
+NATIVE_SANDBOX_FAKE_ENV :: prep { "JETPACK_FAKE_SANDBOX" }
+NATIVE_SANDBOX_MAX_OUTPUT_BYTES :: prep { 67108864 }
+NATIVE_SANDBOX_MACOS_EXEC :: prep { "/usr/bin/sandbox-exec" }
+NATIVE_SANDBOX_NOT_ENFORCED :: prep { "not-enforced" }
 
 pub struct NativeSandboxStatus {
     pub available: Bool
@@ -19,19 +19,19 @@ pub struct NativeSandboxStatus {
     pub reason: String
 
     fn unavailable(mechanism: String, reason: String) -> NativeSandboxStatus Never! {
-        NativeSandboxStatus{available: false, mechanism, policy: @NATIVE_SANDBOX_NOT_ENFORCED, reason}
+        NativeSandboxStatus{available: false, mechanism, policy: NATIVE_SANDBOX_NOT_ENFORCED, reason}
     }
 }
 
 #Error
 pub enum NativeSandboxError {
     Unsupported(String)
-    Io(String)
+    IO(String)
 
     fn message(self) -> String Never! {
         if self == {
             .Unsupported(detail) -> detail
-            .Io(detail) -> detail
+            .IO(detail) -> detail
         }
     }
 }
@@ -64,7 +64,7 @@ pub fn foundation_native_sandbox_policy(output_is_separate: Bool, share_network:
 
 // Probe the exact native backend before a build claims strong isolation.
 pub fn foundation_native_sandbox_status() -[FS, Env, Exec, Time.Wait]> NativeSandboxStatus Never! {
-    if sys.get(@NATIVE_SANDBOX_FAKE_ENV) != None {
+    if sys.get(NATIVE_SANDBOX_FAKE_ENV) != None {
         return NativeSandboxStatus.unavailable("test-sandbox-unavailable", "test sandbox override prevents the native backend probe")
     }
     if {
@@ -88,11 +88,11 @@ fn foundation_linux_sandbox_status() -[FS, Env, Exec, Time.Wait]> NativeSandboxS
 }
 
 fn foundation_macos_sandbox_status() -[FS, Env, Exec, Time.Wait]> NativeSandboxStatus Never! {
-    if !files.is_file(@NATIVE_SANDBOX_MACOS_EXEC) {
-        return NativeSandboxStatus.unavailable("macos-seatbelt-unavailable", "native macOS backend `{@NATIVE_SANDBOX_MACOS_EXEC}` is unavailable")
+    if !files.is_file(NATIVE_SANDBOX_MACOS_EXEC) {
+        return NativeSandboxStatus.unavailable("macos-seatbelt-unavailable", "native macOS backend `{NATIVE_SANDBOX_MACOS_EXEC}` is unavailable")
     }
     probe_profile :: "(version 1)\n(deny default)\n(import \"system.sb\")\n(allow process-exec (literal \"/usr/bin/true\"))\n(allow file-read* (subpath \"/System\") (subpath \"/usr\") (subpath \"/bin\") (subpath \"/nix/store\"))\n"
-    receipt :: process.cmd([String]{@NATIVE_SANDBOX_MACOS_EXEC, "-p", probe_profile, "/usr/bin/true"}).env_clear().stdout(.Capture).stderr(.Capture).run() ?? return NativeSandboxStatus.unavailable("macos-seatbelt-unavailable", "native macOS Seatbelt backend probe failed: {err}")
+    receipt :: process.cmd([String]{NATIVE_SANDBOX_MACOS_EXEC, "-p", probe_profile, "/usr/bin/true"}).env_clear().stdout(.Capture).stderr(.Capture).run() ?? return NativeSandboxStatus.unavailable("macos-seatbelt-unavailable", "native macOS Seatbelt backend probe failed: {err}")
     if !receipt.success -> return NativeSandboxStatus.unavailable("macos-seatbelt-unavailable", "native macOS Seatbelt backend probe exited with exit status: {receipt.code}")
     NativeSandboxStatus{available: true, mechanism: "macos-seatbelt", policy: foundation_native_sandbox_policy(true, false), reason: "native macOS Seatbelt completed the isolated backend probe"}
 }
@@ -110,13 +110,13 @@ pub fn foundation_run_native_sandboxed(executable: String, args: [String], sourc
 pub fn foundation_run_native_sandboxed_with_mounts(executable: String, args: [String], source_dir: String, output_dir: String?, env: [String: String], share_network: Bool, mounts: [NativeSandboxMount]) -[FS, Env, Exec, Time.Wait]> NativeSandboxOutput NativeSandboxError! {
     if sys.is_windows() -> return Err(NativeSandboxError.Unsupported("the native Windows AppContainer backend has no Core process-isolation API"))
     if !sys.is_linux() && !sys.is_macos() -> return Err(NativeSandboxError.Unsupported("Jetpack's native child sandbox is implemented only on Linux, macOS, and Windows"))
-    if sys.get(@NATIVE_SANDBOX_FAKE_ENV) != None -> return Err(NativeSandboxError.Unsupported("test sandbox override prevents child execution"))
+    if sys.get(NATIVE_SANDBOX_FAKE_ENV) != None -> return Err(NativeSandboxError.Unsupported("test sandbox override prevents child execution"))
     status :: foundation_native_sandbox_status()
     if !status.available -> return Err(NativeSandboxError.Unsupported(status.reason))
     program :: files.canonicalize(executable) ?? return Err(NativeSandboxError.Unsupported("sandbox executable is unavailable: {err}"))
     if !files.is_file(program) -> return Err(NativeSandboxError.Unsupported("sandbox executable `{program}` is not a file"))
     source :: foundation_sandbox_real_directory(source_dir)
-    output := None
+    output := String?{None}
     if output_dir == {
         .Val(path) -> output = Val(foundation_sandbox_real_directory(path))
         else -> {}
@@ -127,8 +127,8 @@ pub fn foundation_run_native_sandboxed_with_mounts(executable: String, args: [St
     source_writable :: !output_is_separate
 
     spec := if sys.is_linux() -> foundation_linux_sandbox_spec(source, output, env, share_network, source_writable, checked_mounts, program, args) else -> foundation_macos_sandbox_spec(source, output, env, share_network, source_writable, checked_mounts, program, args)
-    receipt :: spec.stdout(.Capture).stderr(.Capture).output_limit(@NATIVE_SANDBOX_MAX_OUTPUT_BYTES).run() ?? return Err(NativeSandboxError.Io("{err}"))
-    if receipt.limit_hit != None -> return Err(NativeSandboxError.Io("sandbox process output exceeded {@NATIVE_SANDBOX_MAX_OUTPUT_BYTES} bytes"))
+    receipt :: spec.stdout(.Capture).stderr(.Capture).output_limit(NATIVE_SANDBOX_MAX_OUTPUT_BYTES).run() ?? return Err(NativeSandboxError.IO("{err}"))
+    if receipt.limit_hit == .Val(_) -> return Err(NativeSandboxError.IO("sandbox process output exceeded {NATIVE_SANDBOX_MAX_OUTPUT_BYTES} bytes"))
     mechanism :: if sys.is_linux() -> "linux-bwrap" else -> "macos-seatbelt"
     Ok(NativeSandboxOutput{receipt, mechanism, policy: foundation_native_sandbox_policy(output_is_separate, share_network)})
 }
@@ -147,7 +147,7 @@ fn foundation_macos_sandbox_spec(source: String, output: String?, env: [String: 
     profile :: foundation_seatbelt_profile(program, source, output, share_network, true, source_writable, mounts)
     // The profile is passed inline: a temporary `-f` profile could be
     // replaced between spawn and Seatbelt reading it.
-    argv := [String]{@NATIVE_SANDBOX_MACOS_EXEC, "-p", profile, program}
+    argv := [String]{NATIVE_SANDBOX_MACOS_EXEC, "-p", profile, program}
     loop arg in args -> &argv.push(arg)
     spec := process.cmd(argv).env_clear().cwd(source)
     if output == {
@@ -253,7 +253,7 @@ fn foundation_linux_sandbox_argv(bwrap: String, source: String?, output: String?
 fn foundation_seatbelt_profile(executable: String, source: String, output: String?, share_network: Bool, source_readable: Bool, source_writable: Bool, mounts: [NativeSandboxMount]) -> String NativeSandboxError! {
     program :: foundation_sbpl_path(executable)
     source_path :: foundation_sbpl_path(source)
-    output_path := None
+    output_path := String?{None}
     if output == {
         .Val(path) -> output_path = Val(foundation_sbpl_path(path))
         else -> {}
@@ -292,8 +292,8 @@ fn foundation_sbpl_path(path: String) -> String NativeSandboxError! {
 }
 
 fn foundation_sandbox_real_directory(path: String) -[FS, Env]> String NativeSandboxError! {
-    canonical :: files.canonicalize(path) ?? return Err(NativeSandboxError.Io("sandbox directory `{path}`: {err}"))
-    if !files.is_dir(canonical) -> return Err(NativeSandboxError.Io("sandbox path `{path}` is not a directory"))
+    canonical :: files.canonicalize(path) ?? return Err(NativeSandboxError.IO("sandbox directory `{path}`: {err}"))
+    if !files.is_dir(canonical) -> return Err(NativeSandboxError.IO("sandbox path `{path}` is not a directory"))
     Ok(canonical)
 }
 
@@ -357,7 +357,7 @@ fn foundation_is_normalized_mount_destination(destination: String) -> Bool Never
 // Linux runs the executable at its path inside the mount whose relative
 // remainder is deepest (the last such mount on ties), else at its host path.
 fn foundation_mounted_executable_path(executable: String, mounts: [NativeSandboxMount]) -> String Never! {
-    best := None
+    best := String?{None}
     best_depth := -1
     loop mount in mounts {
         relative := ""

@@ -74,6 +74,39 @@ fn builtin_math_family_has_named_field_parity_on_both_lenses() {
 }
 
 #[test]
+fn user_display_reads_owned_receiver_on_every_native_tier() {
+    tir_support::assert_tiers_agree(
+        "display_read_receiver",
+        include_str!("../Examples/features/traits/display_read_receiver.jet"),
+        include_str!("../Examples/features/expected/traits/display_read_receiver.out"),
+    );
+}
+
+#[test]
+fn user_display_rejects_consuming_and_edit_receivers_in_sema() {
+    for receiver in ["^self", "&self"] {
+        for inline in [false, true] {
+            let method = format!("fn display({receiver}) -> String {{ \"label\" }}");
+            let source = if inline {
+                format!("struct Label {{\n    text: String\n    impl Display {{ {method} }}\n}}\nfn run() {{}}\n")
+            } else {
+                format!("struct Label {{ text: String }}\nimpl Label.Display {{ {method} }}\nfn run() {{}}\n")
+            };
+            let diagnostics = match tir_support::compile_source("display_bad_receiver", &source) {
+                Ok(_) => panic!("Display accepted receiver {receiver} (inline={inline})"),
+                Err(diagnostics) => diagnostics,
+            };
+            let mismatch = diagnostics
+                .iter()
+                .find(|diagnostic| diagnostic.code == "E0907")
+                .unwrap_or_else(|| panic!("expected Display contract error: {diagnostics:#?}"));
+            assert_eq!(mismatch.what, "`display` doesn't match the `Display` contract");
+            assert!(mismatch.fix.contains("`fn display(self) -> String`"), "{mismatch:#?}");
+        }
+    }
+}
+
+#[test]
 fn measured_values_propagate_first_order_uncertainty() {
     let source = r#"
 use core.math as math

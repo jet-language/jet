@@ -2,9 +2,9 @@
 // diagnostic through jet_foundation::Diagnostics; here the pinned fixture's
 // Error/Why/Fix lines are compared field by field.
 
-@MEMBER_SELECT_E1231_SNAPSHOT :: embed_file("../../../tests/fixtures/jetpack-diagnostics/E1231.stderr")
-@MEMBER_SELECT_E1295_SNAPSHOT :: embed_file("../../../tests/fixtures/jetpack-diagnostics/E1295.stderr")
-@MEMBER_SELECT_E1296_SNAPSHOT :: embed_file("../../../tests/fixtures/jetpack-diagnostics/E1296.stderr")
+MEMBER_SELECT_E1231_SNAPSHOT :: prep { embed_file("../../../tests/fixtures/jetpack-diagnostics/E1231.stderr") }
+MEMBER_SELECT_E1295_SNAPSHOT :: prep { embed_file("../../../tests/fixtures/jetpack-diagnostics/E1295.stderr") }
+MEMBER_SELECT_E1296_SNAPSHOT :: prep { embed_file("../../../tests/fixtures/jetpack-diagnostics/E1296.stderr") }
 
 fn env_select_test_snapshot(snapshot: String, diagnostic: Diagnostic) {
     expected :: "Error [{diagnostic.code}]: {diagnostic.what}\n Why: {diagnostic.why}\n Fix: {diagnostic.fix}\n"
@@ -24,7 +24,7 @@ fn env_select_test_member(root: String, name: String, path: String, deps: [Strin
         loop dep in deps -> &lines.push("    {dep}: {dep}#1.0.0,\n")
         deps_block = "deps: {{\n{lines.join("")}}}\n"
     }
-    files.write(files.join(dir, @PACKAGE_FILE), "name: \"{name}\"\nversion: \"1.0.0\"\n{deps_block}") ?? panic("member manifest")
+    files.write(files.join(dir, PACKAGE_FILE), "name: \"{name}\"\nversion: \"1.0.0\"\n{deps_block}") ?? panic("member manifest")
     // A source file so the tree hash is non-empty and change-sensitive.
     files.write(files.join(dir, "lib.jet"), "module {name} {{ }}\n") ?? panic("member source")
     canonical :: files.canonicalize(dir) ?? ""
@@ -103,7 +103,7 @@ fn env_select_test_names(members: [WorkspacePlanMember]) -> [String] {
         .Err(error) -> {
             assert_eq(error.diagnostic.code, "E1231")
             assert(error.diagnostic.fix.contains("billing"))
-            env_select_test_snapshot(@MEMBER_SELECT_E1231_SNAPSHOT, error.diagnostic)
+            env_select_test_snapshot(MEMBER_SELECT_E1231_SNAPSHOT, error.diagnostic)
         }
     }
     files.remove_all(root).drop("test cleanup")
@@ -141,7 +141,7 @@ fn env_select_test_names(members: [WorkspacePlanMember]) -> [String] {
         .Err(error) -> {
             assert_eq(error.diagnostic.code, "E1295")
             assert(error.diagnostic.fix.contains("main") || error.diagnostic.what.contains("orgin/main"))
-            env_select_test_snapshot(@MEMBER_SELECT_E1295_SNAPSHOT, error.diagnostic)
+            env_select_test_snapshot(MEMBER_SELECT_E1295_SNAPSHOT, error.diagnostic)
         }
     }
     files.remove_all(root).drop("test cleanup")
@@ -151,7 +151,7 @@ fn env_select_test_names(members: [WorkspacePlanMember]) -> [String] {
     diagnostic :: env_reject_filter_dsl([String]{"--filter=billing..."}) ?? panic("must reject")
     assert_eq(diagnostic.code, "E1296")
     assert(diagnostic.fix.contains("-p"))
-    env_select_test_snapshot(@MEMBER_SELECT_E1296_SNAPSHOT, diagnostic)
+    env_select_test_snapshot(MEMBER_SELECT_E1296_SNAPSHOT, diagnostic)
 }
 
 #Test("affected vs cache detects a changed member") {

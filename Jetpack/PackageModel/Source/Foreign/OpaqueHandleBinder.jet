@@ -6,7 +6,7 @@
 // ordinary Jet handle types. It never turns an unknown pointer into an
 // integer and never infers thread safety or transitive libraries.
 
-@OPAQUE_HANDLE_CLOSE_VERBS :: [String]{"close", "destroy", "free", "release", "unref", "deinit", "fini", "finalize", "dispose"}
+OPAQUE_HANDLE_CLOSE_VERBS :: prep { [String]{"close", "destroy", "free", "release", "unref", "deinit", "fini", "finalize", "dispose"} }
 
 // Thread safety is an explicit overlay fact. `Unspecified` is intentional:
 // the binder never infers a concurrency guarantee from C spelling.
@@ -306,7 +306,7 @@ fn pkg_opaque_conventional_close_name(function: String, typedef_name: String, st
     }
     wanted :: function.to_lower()
     loop stem in stems {
-        loop verb in @OPAQUE_HANDLE_CLOSE_VERBS {
+        loop verb in OPAQUE_HANDLE_CLOSE_VERBS {
             forms :: [String]{[String]{~stem, ~verb}.join(""), "{stem}_{verb}", "{verb}_{stem}"}
             if forms.contains(wanted) -> return true
         }

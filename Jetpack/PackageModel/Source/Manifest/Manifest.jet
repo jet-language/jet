@@ -5,21 +5,21 @@
 
 // The compiler's version string for E1208 toolchain checks (CARGO_PKG_VERSION
 // of the Rust jet-pkg-model crate).
-@COMPILER_VERSION :: "0.1.0"
+COMPILER_VERSION :: prep { "0.1.0" }
 
 // D-REL3: supported editions, oldest to newest; the last is the newest stable.
-@LATEST_EDITION :: "2028"
-@SUPPORTED_EDITIONS :: [String]{"2026", "2027", "2028"}
+LATEST_EDITION :: prep { "2028" }
+SUPPORTED_EDITIONS :: prep { [String]{"2026", "2027", "2028"} }
 
 // D-REL1: the registry-protocol version this toolchain speaks.
-@REGISTRY_COMPAT :: "1"
+REGISTRY_COMPAT :: prep { "1" }
 
-@CURRENT_RELEASE_CHANNEL :: "prerelease"
-@CURRENT_RELEASE_DISPOSITION :: "current"
-@CURRENT_RELEASE_READINESS :: "not-ready"
-@RELEASE_COMPATIBILITY_POLICY :: "future-1.0"
-@RELEASE_COMPATIBILITY_POLICY_DISPOSITION :: "planned"
-@RELEASE_COMPATIBILITY_POLICY_ACTIVE :: false
+CURRENT_RELEASE_CHANNEL :: prep { "prerelease" }
+CURRENT_RELEASE_DISPOSITION :: prep { "current" }
+CURRENT_RELEASE_READINESS :: prep { "not-ready" }
+RELEASE_COMPATIBILITY_POLICY :: prep { "future-1.0" }
+RELEASE_COMPATIBILITY_POLICY_DISPOSITION :: prep { "planned" }
+RELEASE_COMPATIBILITY_POLICY_ACTIVE :: prep { false }
 
 // The current release identity, independent of the package SemVer.
 pub struct ReleaseStatus {
@@ -34,12 +34,12 @@ pub struct ReleaseStatus {
 // One executable source for the current release/readiness projection.
 pub fn pkg_current_release_status() -> ReleaseStatus Never! {
     ReleaseStatus{
-        channel: @CURRENT_RELEASE_CHANNEL,
-        disposition: @CURRENT_RELEASE_DISPOSITION,
-        readiness: @CURRENT_RELEASE_READINESS,
-        policy: @RELEASE_COMPATIBILITY_POLICY,
-        policy_disposition: @RELEASE_COMPATIBILITY_POLICY_DISPOSITION,
-        policy_active: @RELEASE_COMPATIBILITY_POLICY_ACTIVE,
+        channel: CURRENT_RELEASE_CHANNEL,
+        disposition: CURRENT_RELEASE_DISPOSITION,
+        readiness: CURRENT_RELEASE_READINESS,
+        policy: RELEASE_COMPATIBILITY_POLICY,
+        policy_disposition: RELEASE_COMPATIBILITY_POLICY_DISPOSITION,
+        policy_active: RELEASE_COMPATIBILITY_POLICY_ACTIVE,
     }
 }
 
@@ -62,32 +62,32 @@ pub fn pkg_effective_edition(manifest: Manifest) -> String Never! {
 }
 
 pub fn pkg_latest_edition() -> String Never! {
-    @LATEST_EDITION
+    LATEST_EDITION
 }
 
 pub fn pkg_edition_is_supported(edition: String) -> Bool Never! {
-    @SUPPORTED_EDITIONS.contains(edition.trim())
+    SUPPORTED_EDITIONS.contains(edition.trim())
 }
 
 // D-REL3: a manifest asking for an edition this toolchain lacks is E2001.
 pub fn pkg_check_edition_support(manifest: Manifest, file: String) ManifestError! {
-    edition :: manifest.package.edition ?? return Ok()
-    if pkg_edition_is_supported(edition) -> return Ok()
-    Err(ManifestError{diagnostic: pkg_e2001(edition)})
+    edition :: manifest.package.edition ?? return
+    if pkg_edition_is_supported(edition) -> return
+    return Err(ManifestError{diagnostic: pkg_e2001(edition)})
 }
 
 pub fn pkg_e2001(requested: String) -> Diagnostic Never! {
     diagnostic_from_registry("E2001", None,
         "this package needs a newer Jet",
-        "editions opt a project into a specific era of Jet syntax. A newer edition can use syntax this compiler does not understand. This toolchain supports editions up to {pkg_latest_edition()}, but `{@PACKAGE_FILE}` asks for `{requested}`.",
-        "upgrade with `{@BINARY_NAME} self upgrade`, or set `{@MANIFEST_FIELD_EDITION}: \"{pkg_latest_edition()}\"` in `{@PACKAGE_FILE}`.")
+        "editions opt a project into a specific era of Jet syntax. A newer edition can use syntax this compiler does not understand. This toolchain supports editions up to {pkg_latest_edition()}, but `{PACKAGE_FILE}` asks for `{requested}`.",
+        "upgrade with `{BINARY_NAME} self upgrade`, or set `{MANIFEST_FIELD_EDITION}: \"{pkg_latest_edition()}\"` in `{PACKAGE_FILE}`.")
 }
 
 // The `jet --version` banner (E2-D1).
 pub fn pkg_version_banner() -> String Never! {
     release :: pkg_current_release_status()
     policy_state :: if release.policy_active -> "active" else -> "not active"
-    "{@LANG_NAME} {@COMPILER_VERSION}\nrelease status: {release.channel}\nrelease disposition: {release.disposition}\nrelease readiness: {release.readiness}\n1.0 compatibility policy: {release.policy} ({release.policy_disposition}; {policy_state})\nsupported editions: {@SUPPORTED_EDITIONS.join(", ")} (newest: {pkg_latest_edition()})\nregistry protocol: v{@REGISTRY_COMPAT}\n"
+    "{LANG_NAME} {COMPILER_VERSION}\nrelease status: {release.channel}\nrelease disposition: {release.disposition}\nrelease readiness: {release.readiness}\n1.0 compatibility policy: {release.policy} ({release.policy_disposition}; {policy_state})\nsupported editions: {SUPPORTED_EDITIONS.join(", ")} (newest: {pkg_latest_edition()})\nregistry protocol: v{REGISTRY_COMPAT}\n"
 }
 
 // The one error carrier of the compiler-facing manifest API: the registered
@@ -130,9 +130,9 @@ pub struct PackageMeta {
     pub license: String?
     pub repository: String?
     // D-RINGLAYER1=A: optional runtime ceiling from `runtime:`.
-    pub layer: MirRuntimeLayer?
+    pub layer: MIRRuntimeLayer?
     // D-ALLOC-PROGRAM1=A: selected hosted whole-program allocator.
-    pub allocator: MirAllocatorPolicy
+    pub allocator: MIRAllocatorPolicy
 }
 
 pub enum DepSpec {
@@ -193,7 +193,7 @@ pub fn pkg_manifest_parse(path: String, raw: String) -> Manifest ManifestError! 
 
 // The path to the one package manifest in a project directory.
 pub fn pkg_manifest_path_in(dir: String) -> String Never! {
-    files.join(dir, @PACKAGE_FILE)
+    files.join(dir, PACKAGE_FILE)
 }
 
 // Whether both the canonical manifest and a retired alias exist.
@@ -241,13 +241,13 @@ pub fn pkg_manifest_load(dir: String) -[FS, Env]> Manifest? ManifestError! {
 // by version dispatch (D-JPK-TOOLCHAIN1); only an operator constraint is
 // checked here.
 pub fn pkg_check_toolchain(manifest: Manifest, file: String) ManifestError! {
-    constraint :: manifest.package.jet_constraint ?? return Ok()
-    if !pkg_is_range_constraint(constraint) -> return Ok()
-    if pkg_satisfies_constraint(@COMPILER_VERSION, constraint) -> return Ok()
-    Err(ManifestError{diagnostic: diagnostic_from_registry("E1208", None,
-        "this project requires Jet `{constraint}` but this is Jet {@COMPILER_VERSION}",
+    constraint :: manifest.package.jet_constraint ?? return
+    if !pkg_is_range_constraint(constraint) -> return
+    if pkg_satisfies_constraint(COMPILER_VERSION, constraint) -> return
+    return Err(ManifestError{diagnostic: diagnostic_from_registry("E1208", None,
+        "this project requires Jet `{constraint}` but this is Jet {COMPILER_VERSION}",
         "the top-level `jet` field specifies a minimum toolchain version",
-        "update Jet to a newer version, or change the `jet` field in `{@PACKAGE_FILE}`")})
+        "update Jet to a newer version, or change the `jet` field in `{PACKAGE_FILE}`")})
 }
 
 fn pkg_is_range_constraint(value: String) -> Bool Never! {
@@ -299,7 +299,7 @@ pub fn pkg_remove_dependency(raw: String, name: String) -> String Never! {
 // Rust `Diagnostic::from_row(code, holes, span)`: fill the registered row's
 // `{hole}` templates and project its protocol metadata.
 pub fn pkg_manifest_diagnostic_from_row(code: String, holes: [ManifestEntry], span: Span?) -> Diagnostic Never! {
-    row :: diagnostic_registry_row(code) ?? return panic("diagnostic `{code}` has no typed row")
+    row :: diagnostic_registry_row(code) ?? panic("diagnostic `{code}` has no typed row")
     what := row.what
     why := row.why
     fix := row.fix
@@ -316,7 +316,7 @@ pub fn pkg_manifest_diagnostic_from_row(code: String, holes: [ManifestEntry], sp
 pub fn pkg_manifest_parse_diagnostic(path: String, error: PackageParseError) -> Diagnostic Never! {
     if error == {
         .UnknownField(field) -> pkg_e1206_unknown_field(field)
-        .MissingName -> pkg_e1206("`{@PACKAGE_FILE}` needs a `name` field")
+        .MissingName -> pkg_e1206("`{PACKAGE_FILE}` needs a `name` field")
         .MissingRecord(field) -> pkg_e1206("`{field}:` needs a record value")
         .MalformedField(value) -> pkg_e1206("malformed field `{value}`")
         .UnknownOutputKind(kind) -> pkg_e1206("unknown Output kind `{kind}`")
@@ -336,7 +336,7 @@ pub fn pkg_manifest_parse_diagnostic(path: String, error: PackageParseError) -> 
             if reserved -> return pkg_e1210("package `{name}` lists target `{value}`, which has no backend yet (reserved for a future increment)")
             pkg_e1210("package `{name}` lists target `{value}`, which is not a known target")
         }
-        .KindFieldRemoved(name) -> pkg_e1211("package `{name}` uses `{@PACKAGE_FIELD_KIND_REMOVED}:`, which was removed")
+        .KindFieldRemoved(name) -> pkg_e1211("package `{name}` uses `{PACKAGE_FIELD_KIND_REMOVED}:`, which was removed")
         .BadTargetField(name, detail) -> pkg_e1216("package `{name}`: {detail}")
         .ReservedSection(section) -> pkg_e1209(path, section)
         .BadEffectsBlock(detail) -> pkg_e1221(detail)
@@ -347,7 +347,7 @@ pub fn pkg_manifest_parse_diagnostic(path: String, error: PackageParseError) -> 
         .BadMemoryPolicy(detail) -> {
             if detail.contains("retired memory floor") || detail.contains("memory floors belong in `authority.holds.deny`") {
                 return diagnostic_from_registry("E1206", None,
-                    "`{@PACKAGE_FILE}` uses a retired memory floor",
+                    "`{PACKAGE_FILE}` uses a retired memory floor",
                     "{detail}; memory floors belong in `authority.holds.deny`.",
                     "write the denial in `authority.holds.deny` inside `authority: {{ holds: {{ deny: […] }} }}`")
             }
@@ -369,7 +369,7 @@ pub fn pkg_manifest_parse_diagnostic(path: String, error: PackageParseError) -> 
 // D-CONF-PLANE1/D-CONF-NAME1: an unknown top-level manifest field.
 fn pkg_e1206_unknown_field(field: String) -> Diagnostic Never! {
     diagnostic_from_registry("E1206", None,
-        "unknown field `{field}:` in `{@PACKAGE_FILE}`",
+        "unknown field `{field}:` in `{PACKAGE_FILE}`",
         "`{field}:` is not part of the Package vocabulary. Identity is bare `name:` and `version:` at the top level (D-CONF-NAME1) — there is no `identity:` or `payload:` wrapper.",
         "use `name:`, `version:`, `deps:`, `boundaries:`, `outputs:`, `settings:`, `build:`, `policy:`, or `members:`; see Docs/spec/syntax-decisions.md D-CONF-NAME1")
 }
@@ -377,56 +377,56 @@ fn pkg_e1206_unknown_field(field: String) -> Diagnostic Never! {
 // D-AUTHORITY-MANIFEST1 (E1221): a malformed `authority:` block.
 fn pkg_e1221(detail: String) -> Diagnostic Never! {
     diagnostic_from_registry("E1221", None,
-        "`{@PACKAGE_FILE}` has a malformed `{@MANIFEST_BLOCK_AUTHORITY}` block",
+        "`{PACKAGE_FILE}` has a malformed `{MANIFEST_BLOCK_AUTHORITY}` block",
         detail,
-        "`{@MANIFEST_BLOCK_AUTHORITY}: {{ holds: {{ allow: […], deny: […] }}, grants: {{ \"dep\": […] }}, trust: {{ … }}, providers: {{ … }} }}` is the one package authority block; rights use the thirteen grantable roots, `FFI` and its language leaves (`FFI.Go`, `FFI.Py`, `FFI.Octave`), plus deny-only `Panic`/`Mem`")
+        "`{MANIFEST_BLOCK_AUTHORITY}: {{ holds: {{ allow: […], deny: […] }}, grants: {{ \"dep\": […] }}, trust: {{ … }}, providers: {{ … }} }}` is the one package authority block; rights use the thirteen grantable roots, `FFI` and its language leaves (`FFI.Go`, `FFI.Py`, `FFI.Octave`), plus deny-only `Panic`/`Mem`")
 }
 
 fn pkg_e1206(detail: String) -> Diagnostic Never! {
     diagnostic_from_registry("E1206", None,
-        "`{@PACKAGE_FILE}` has a shape error",
+        "`{PACKAGE_FILE}` has a shape error",
         detail,
-        "check `{@PACKAGE_FILE}` against Docs/spec/syntax-decisions.md (U1)")
+        "check `{PACKAGE_FILE}` against Docs/spec/syntax-decisions.md (U1)")
 }
 
 pub fn pkg_e1209(file: String, section: String) -> Diagnostic Never! {
     diagnostic_from_registry("E1209", None,
         "`{section}` is reserved and not yet implemented",
         "this section name is reserved for a future Jet feature — using it now is an error",
-        "remove the `{section}` block from `{@PACKAGE_FILE}`, or leave it empty")
+        "remove the `{section}` block from `{PACKAGE_FILE}`, or leave it empty")
 }
 
 fn pkg_e1210(detail: String) -> Diagnostic Never! {
     diagnostic_from_registry("E1210", None,
-        "`{@PACKAGE_FILE}` lists an unknown target",
+        "`{PACKAGE_FILE}` lists an unknown target",
         detail,
-        "use a shipped target: `{@TARGET_LIBRARY}`, `{@TARGET_EXECUTABLE}`, `{@TARGET_TEST}`, `{@TARGET_EXAMPLE}`, or `{@TARGET_SANDBOX}`")
+        "use a shipped target: `{TARGET_LIBRARY}`, `{TARGET_EXECUTABLE}`, `{TARGET_TEST}`, `{TARGET_EXAMPLE}`, or `{TARGET_SANDBOX}`")
 }
 
 fn pkg_e1211(detail: String) -> Diagnostic Never! {
     diagnostic_from_registry("E1211", None,
-        "`{@PACKAGE_FILE}` uses the removed `kind:` field",
+        "`{PACKAGE_FILE}` uses the removed `kind:` field",
         detail,
-        "write `{@PACKAGE_FIELD_TARGETS}: [{@TARGET_EXECUTABLE}]` (or `[{@TARGET_LIBRARY}]`) instead")
+        "write `{PACKAGE_FIELD_TARGETS}: [{TARGET_EXECUTABLE}]` (or `[{TARGET_LIBRARY}]`) instead")
 }
 
 fn pkg_e1216(detail: String) -> Diagnostic Never! {
     diagnostic_from_registry("E1216", None,
-        "`{@PACKAGE_FILE}` has an invalid target field",
+        "`{PACKAGE_FILE}` has an invalid target field",
         detail,
-        "a target block accepts `{@TARGET_FIELD_ENTRY}: \"…\"` and `{@TARGET_FIELD_NAME}: \"…\"`")
+        "a target block accepts `{TARGET_FIELD_ENTRY}: \"…\"` and `{TARGET_FIELD_NAME}: \"…\"`")
 }
 
 pub fn pkg_e1212(file: String, name: String) -> Diagnostic Never! {
     diagnostic_from_registry("E1212", None,
-        "`{@PACKAGE_FILE}` declares package `{name}` but no `module {name}` was found",
-        "each `packages:` name must correspond to a `module <name> {{ … }}` declaration in a `.{@FILE_EXT}` file in the source tree",
-        "add a `.{@FILE_EXT}` file containing `module {name} {{ … }}`, or remove `{name}` from `packages:` in `{@PACKAGE_FILE}`")
+        "`{PACKAGE_FILE}` declares package `{name}` but no `module {name}` was found",
+        "each `packages:` name must correspond to a `module <name> {{ … }}` declaration in a `.{FILE_EXT}` file in the source tree",
+        "add a `.{FILE_EXT}` file containing `module {name} {{ … }}`, or remove `{name}` from `packages:` in `{PACKAGE_FILE}`")
 }
 
 pub fn pkg_e1213(file: String, name: String, paths: [String]) -> Diagnostic Never! {
     diagnostic_from_registry("E1213", None,
-        "`{@PACKAGE_FILE}` declares package `{name}` but `module {name}` is ambiguous",
+        "`{PACKAGE_FILE}` declares package `{name}` but `module {name}` is ambiguous",
         "`module {name}` was found in multiple files: {paths.join(", ")}; each package name must map to exactly one module",
         "rename one of the conflicting `module {name}` declarations so each package has a unique name")
 }

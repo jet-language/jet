@@ -5,8 +5,8 @@
 // scalar TypeScript declarations and executes the matching module through a
 // supervised Node worker. Dynamic or callback-shaped declarations fail closed.
 
-@PKG_JS_RUNTIME :: "node"
-@PKG_JS_TOOL_ACTION :: "rejected the JavaScript binding"
+PKG_JS_RUNTIME :: prep { "node" }
+PKG_JS_TOOL_ACTION :: prep { "rejected the JavaScript binding" }
 
 // Bind the scalar declarations of a `.d.ts` file to the module at `runtime_path`.
 pub fn pkg_javascript_bind(declaration_path: String, declarations: String, runtime_path: String, lib: String, cache: String) -[FS, Env, Exec, Time.Wait]> ScalarBindResult ForeignBindError! {
@@ -25,9 +25,9 @@ pub fn pkg_javascript_bind(declaration_path: String, declarations: String, runti
     worker :: pkg_binder_canonicalize(worker_file, "could not resolve JavaScript worker")
     abi :: "jet_js_{lib}"
     sources :: [BridgeSource]{BridgeSource{role: "runtime", path: runtime}, BridgeSource{role: "declaration", path: declaration}}
-    identity :: pkg_bridge_scalar_bridge_identity_with_sources(descriptor, lib, abi, @PKG_JS_RUNTIME, sources, worker, functions) ?? return Err(pkg_binder_scalar_bridge_error(err))
-    archive :: pkg_bridge_compile_scalar_sidecar_with_identity_and_sources(cache, identity, abi, @PKG_JS_RUNTIME, worker, runtime, descriptor, sources, functions) ?? return Err(pkg_binder_scalar_bridge_error(err))
-    provenance_path :: pkg_bridge_write_scalar_provenance_with_sources(cache, lib, descriptor, @PKG_JS_RUNTIME, runtime, sources, worker, archive, functions) ?? return Err(pkg_binder_scalar_bridge_error(err))
+    identity :: pkg_bridge_scalar_bridge_identity_with_sources(descriptor, lib, abi, PKG_JS_RUNTIME, sources, worker, functions) ?? return Err(pkg_binder_scalar_bridge_error(err))
+    archive :: pkg_bridge_compile_scalar_sidecar_with_identity_and_sources(cache, identity, abi, PKG_JS_RUNTIME, worker, runtime, descriptor, sources, functions) ?? return Err(pkg_binder_scalar_bridge_error(err))
+    provenance_path :: pkg_bridge_write_scalar_provenance_with_sources(cache, lib, descriptor, PKG_JS_RUNTIME, runtime, sources, worker, archive, functions) ?? return Err(pkg_binder_scalar_bridge_error(err))
     provenance :: pkg_binder_read_text(provenance_path, "could not read binding provenance")
     rendered :: pkg_bridge_render_scalar_jet(abi, descriptor, functions) ?? return Err(pkg_binder_scalar_bridge_error(err))
     bound := [String]{}
@@ -37,15 +37,15 @@ pub fn pkg_javascript_bind(declaration_path: String, declarations: String, runti
 
 // `node --check` parses the runtime module without running it.
 fn pkg_javascript_check_node(path: String) ForeignBindError! -[Exec, Time.Wait]> {
-    if process.cmd([String]{@PKG_JS_RUNTIME, "--check", path}).stdout(.Capture).stderr(.Capture).run() == {
+    if process.cmd([String]{PKG_JS_RUNTIME, "--check", path}).stdout(.Capture).stderr(.Capture).run() == {
         .Ok(receipt) -> {
-            if receipt.success -> return Ok()
-            Err(ForeignBindError.PlainToolFailed{tool: @PKG_JS_RUNTIME, action: @PKG_JS_TOOL_ACTION, detail: receipt.errors.trim()})
+            if receipt.success -> return
+            return Err(ForeignBindError.PlainToolFailed{tool: PKG_JS_RUNTIME, action: PKG_JS_TOOL_ACTION, detail: receipt.errors.trim()})
         }
         .Err(error) -> {
             if error == {
-                .NotFound(_) -> Err(ForeignBindError.PlainToolMissing(@PKG_JS_RUNTIME))
-                else -> Err(ForeignBindError.IO("could not start Node: {error}"))
+                .NotFound(_) -> return Err(ForeignBindError.PlainToolMissing(PKG_JS_RUNTIME))
+                else -> return Err(ForeignBindError.IO("could not start Node: {error}"))
             }
         }
     }
@@ -127,12 +127,12 @@ fn pkg_javascript_render_worker(functions: [ScalarBridgeFunction]) -> String Nev
     loop function in functions {
         &out.push("  {pkg_binder_debug_quote(function.name)}: {pkg_binder_debug_quote(pkg_binder_scalar_kind(function.result))},\n")
     }
-    &out.push(@PKG_JS_WORKER_TAIL)
+    &out.push(PKG_JS_WORKER_TAIL)
     out.join("")
 }
 
 // The fixed worker body after the `RESULTS` table.
-@PKG_JS_WORKER_TAIL :: ```};
+PKG_JS_WORKER_TAIL :: prep { ```};
 
 function convert(kind, value) {
   if (kind === "int") return BigInt(value);
@@ -176,4 +176,4 @@ async function main() {
 }
 
 main().catch(() => process.exitCode = 2);
-```
+``` }

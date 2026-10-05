@@ -9,9 +9,21 @@
     }
 }
 
+// Rust `extract_inline_package(source).unwrap()`: the scan succeeds and the
+// carrier may be absent. A single `??` would consume both the Result and the
+// Option rail, so absence must stay observable here.
+fn pkg_test_scan_inline_package(source: String) -> InlinePackageBlock? Never! {
+    scanned := InlinePackageBlock?{None}
+    if pkg_extract_inline_package(source) == {
+        .Ok(found) -> scanned = found
+        .Err(error) -> panic("inline Package scan failed: {error.message()}")
+    }
+    scanned
+}
+
 #Test("inline package spans and mask preserve offsets") {
     source :: "// header\npackage /* carrier */ {{\nname: \"demo\"\n}}\nfn run() {{}}\n"
-    block :: (pkg_extract_inline_package(source) ?? panic("carrier parses")) ?? panic("leading inline Package")
+    block :: pkg_test_scan_inline_package(source) ?? panic("leading inline Package")
     assert_eq(pkg_binder_slice(source, block.keyword_span.start, block.keyword_span.end), "package")
     masked :: block.mask_source(source)
     assert_eq(source.bytes().len(), masked.bytes().len())
@@ -24,20 +36,20 @@
 
 #Test("inline package scanner ignores nested words") {
     nested :: "fn run() {{ print(\"package {{ not a declaration }}\") }}\n"
-    assert((pkg_extract_inline_package(nested) ?? panic("scan")) == None)
+    assert(pkg_test_scan_inline_package(nested) == None)
     source :: "package {{ description: \"\"\"package {{ still text }}\"\"\" }}\nfn run() {{}}\n"
-    block :: (pkg_extract_inline_package(source) ?? panic("scan")) ?? panic("triple-quoted Package values stay inside the carrier")
+    block :: pkg_test_scan_inline_package(source) ?? panic("triple-quoted Package values stay inside the carrier")
     assert(block.body(source).contains("still text"))
 }
 
 #Test("inline package scanner ignores module path segments") {
     source :: "module perf.package {{\n}}\nfn run() {{}}\n"
-    assert((pkg_extract_inline_package(source) ?? panic("scan")) == None)
+    assert(pkg_test_scan_inline_package(source) == None)
 }
 
 #Test("inline package allows byte zero shebang header") {
     source :: "#!/usr/bin/env jet\npackage {{ name: \"demo\" }}\nfn run() {{}}\n"
-    assert((pkg_extract_inline_package(source) ?? panic("scan")) != None)
+    assert(pkg_test_scan_inline_package(source) != None)
 }
 
 #Test("inline package rejects not first duplicate and unbalanced") {
@@ -60,7 +72,8 @@
 fn pkg_test_insert_inline_package(source: String) -> String Never! {
     at :: pkg_inline_package_insertion_offset(source)
     out :: "{pkg_binder_slice(source, 0, at)}package {{ name: \"demo\" }}\n{pkg_binder_tail(source, at)}"
-    assert((pkg_extract_inline_package(out) ?? panic("insertion must produce a leading carrier")) != None)
+    block :: pkg_test_scan_inline_package(out) ?? panic("insertion must produce a leading carrier")
+    assert_eq(block.body(out).trim(), "name: \"demo\"")
     out
 }
 
@@ -68,4 +81,40 @@ fn pkg_test_insert_inline_package(source: String) -> String Never! {
     assert_eq(pkg_test_insert_inline_package("#!/usr/bin/env jet\n// tool header\nuse core.files as files\n"), "#!/usr/bin/env jet\n// tool header\npackage {{ name: \"demo\" }}\nuse core.files as files\n")
     assert_eq(pkg_test_insert_inline_package("// header\n\n/// Entry.\n/// More.\nfn run() {{}}\n"), "// header\n\npackage {{ name: \"demo\" }}\n/// Entry.\n/// More.\nfn run() {{}}\n")
     assert_eq(pkg_test_insert_inline_package("fn run() {{}}\n"), "package {{ name: \"demo\" }}\nfn run() {{}}\n")
+}
+
+// Package/mod.rs `source_files_checked`: interpolated suffixes compare values,
+// never bind string-pattern holes or admit an unrelated Config stem.
+#Test("declared config filenames compare exact suffix and preserve provenance") {
+    facts := PackageFacts.parse("name: \"demo\"\nconfigs: [dev, \"release.jet\"]\n", "inline-config-paths") ?? panic("package fields parse")
+    facts.resolved_config_paths = [String]{"profiles/check", "profiles/.local", "profiles/edge."}
+    assert_eq(facts.field_provenance("configs"), [String]{"inline-config-paths"})
+    assert(facts.is_config_file("dev"))
+    assert(facts.is_config_file("dev.jet"))
+    assert(facts.is_config_file("release.jet"))
+    assert(facts.is_config_file("profiles/check.jet"))
+    assert(!facts.is_config_file("ordinary.jet"))
+    assert(!facts.is_config_file("release.jet.jet"))
+    assert(!facts.is_config_file("other/check.jet"))
+    assert(facts.is_config_file("profiles/.local.jet"))
+    assert(!facts.is_config_file("profiles/edge..jet"))
+    assert(facts.is_config_file("profiles/edge."))
+}
+
+// Package/mod.rs:1581-1634: root/src retired entries are metadata, but a
+// deeper same-named module is an ordinary checked source.
+#Test("checked package sources exclude only root and src retired entries") {
+    root :: files.tmpdir("jet-inline-security-retired-entries") ?? panic("scratch")
+    files.create_dir_all(files.join(root, "src/cli")) ?? panic("source directory")
+    relatives :: [String]{LEGACY_ENTRY_FILE, "src/{LEGACY_ENTRY_FILE}", "src/cli/{LEGACY_ENTRY_FILE}", "ordinary.jet"}
+    loop relative in relatives {
+        files.write(files.join(root, relative), "fn run() {{}}\n") ?? panic("source fixture")
+    }
+    facts :: PackageFacts.default()
+    resolver :: AuthorityResolver.open(root) ?? panic("checked root")
+    selected :: facts.source_files_checked(resolver) ?? panic("checked sources")
+    names := [String]{}
+    loop file in selected -> &names.push(file.relative)
+    assert_eq(names, [String]{"ordinary.jet", "src/cli/{LEGACY_ENTRY_FILE}"})
+    files.remove_all(root) ?? panic("remove source fixtures")
 }

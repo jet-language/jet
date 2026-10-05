@@ -69,7 +69,7 @@ impl FeatureFixtureScratch {
             .map(PathBuf::from)
             .unwrap_or_else(|| {
                 PathBuf::from(std::env::var_os("HOME").expect("HOME is required for test scratch"))
-                    .join(".cache/jet-test-scratch")
+                    .join(".cache/jet-dev/scratch")
             });
         fs::create_dir_all(&base).expect("create golden fixture scratch root");
         let base = fs::canonicalize(base).expect("canonicalize golden fixture scratch root");

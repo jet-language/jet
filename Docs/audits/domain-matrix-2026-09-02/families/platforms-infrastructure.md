@@ -100,4 +100,4 @@ See defects.json for 10 evidence-backed rows, including E1001, E0981, E1803, E21
 
 ## Source ledger
 
-Census and performance sources are the 17 directories under ~/.cache/jet-luna/dx2/. Probe paths are retained verbatim in defects.json. No builds, Tower writes, or repository changes were performed.
+Census and performance sources are the 17 directories under ~/.cache/jet-dev/dx2/. Probe paths are retained verbatim in defects.json. No builds, Tower writes, or repository changes were performed.

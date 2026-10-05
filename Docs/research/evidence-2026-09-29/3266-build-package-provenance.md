@@ -1,7 +1,7 @@
 # #3266 — Core build/package/debug provenance coverage (CORE-F042)
 
 Date: 2026-09-29. Author: Closer12. No code change. Transcripts are under
-`~/.cache/jet-test-scratch/Closer12/prov/logs/NN-*.txt` (one file per command, with its exit code).
+`~/.cache/jet-dev/scratch/Closer12/prov/logs/NN-*.txt` (one file per command, with its exit code).
 
 ## Identity header (`logs/00-identity.txt`)
 

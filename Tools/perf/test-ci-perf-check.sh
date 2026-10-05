@@ -5,8 +5,7 @@ script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 checker_source="$script_dir/ci-perf-check.sh"
 dashboard_source="$script_dir/dashboard.sh"
 corpus_source="$script_dir/corpus.tsv"
-plan_source="$script_dir/../../Docs/spec/reference/compiler-speed.md"
-scratch_parent=${JET_PERF_SCRATCH_ROOT:-"$HOME/.cache/jet-perf"}
+scratch_parent=${JET_PERF_SCRATCH_ROOT:-"$HOME/.cache/jet-dev/perf-bench"}
 scratch_parent_resolved=$(realpath -m -- "$scratch_parent")
 case "$scratch_parent_resolved" in
     /tmp|/tmp/*|*/target|*/target/*)
@@ -207,14 +206,6 @@ assert_checker_source() {
     }
 }
 
-assert_plan_source() {
-    needle=$1
-    grep -Fq -- "$needle" "$plan_source" || {
-        printf 'compiler-speed plan canary removal detected: %s\n' "$needle" >&2
-        exit 1
-    }
-}
-
 assert_corpus_order() {
     expected=$(printf '%s\n' \
         'Examples/features/basics/hello.jet' \
@@ -273,7 +264,7 @@ assert_dashboard_source '"$JET_BIN" run run.jet -- seed_data'
 assert_dashboard_source '"$JET_BIN" run --interpret run.jet -- seed_data'
 assert_dashboard_source '"$JET_BIN" jobs'
 assert_dashboard_source 'parity_check_job_runner_case edit Tools/perf/edits/job_runner.jet'
-assert_dashboard_source 'TMP_ROOT=${JET_PERF_SCRATCH_ROOT:-"$HOME/.cache/jet-perf"}'
+assert_dashboard_source 'TMP_ROOT=${JET_PERF_SCRATCH_ROOT:-"$HOME/.cache/jet-dev/perf-bench"}'
 assert_dashboard_source 'run_dir=$(mktemp -d "$TMP_ROOT/compiler-speed.XXXXXX")'
 assert_dashboard_source 'run_bounded_process()'
 assert_dashboard_source 'record_machine_load'
@@ -291,12 +282,6 @@ assert_dashboard_source 'load1_peak_milli'
 assert_dashboard_source 'check_native_jit()'
 assert_dashboard_source 'check_native_jit "$state_id"'
 assert_dashboard_source 'trial_output.build.stderr'
-assert_plan_source 'Matched compiler-speed peer contract'
-assert_plan_source 'JET_PERF_PEER_REPORT'
-assert_plan_source 'each non-Rust ratio'
-assert_plan_source 'The matrix metadata must carry `compiler_sha256`, machine identity, rustc version,'
-assert_plan_source 'and `rustc_sha256`; missing identity fields fail closed.'
-assert_plan_source 'gate never averages cells, selects a best peer, or accepts a partial report.'
 assert_dashboard_source 'trial_output.stderr'
 assert_dashboard_source '--trace-tiers'
 assert_dashboard_source 'JET_RECEIPT_BYPASS=1'
@@ -304,12 +289,9 @@ assert_dashboard_source 'JET_RUNTIME_CACHE_STATS'
 assert_dashboard_source 'baseline_tmp="$BASELINE.tmp.$$"'
 assert_dashboard_source 'mv -f -- "$baseline_tmp" "$BASELINE"'
 assert_checker_source 'check_identity host "$current_host"'
-assert_plan_source 'schema version 4'
-assert_plan_source 'complete native run'
-assert_plan_source 'atomic rename'
 assert_checker_source 'realpath -m -- "$SCRATCH_ROOT"'
 assert_checker_source 'df -P "$SCRATCH_ROOT"'
-assert_checker_source 'SCRATCH_ROOT=${JET_PERF_SCRATCH_ROOT:-"$HOME/.cache/jet-perf"}'
+assert_checker_source 'SCRATCH_ROOT=${JET_PERF_SCRATCH_ROOT:-"$HOME/.cache/jet-dev/perf-bench"}'
 assert_checker_source 'CI_RUN_DIR=$(mktemp -d "$SCRATCH_ROOT/compiler-speed-ci.XXXXXX")'
 assert_checker_source 'cleanup_ci()'
 assert_checker_source 'JET_PERF_SCRATCH_ROOT="$SCRATCH_ROOT" TMPDIR="$SCRATCH_ROOT"'

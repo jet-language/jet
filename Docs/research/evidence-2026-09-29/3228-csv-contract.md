@@ -9,11 +9,11 @@ Findings: `Docs/research/mine-for-jet-2026-09-12.md#finding-core-f049`, `#findin
   `show_rows: PatternTest` at the `if err.kind == { .Syntax -> ... }` match
   (bytes 431..438). Changing that to `{err.kind:Debug}` gives
   `Cranelift cannot execute ... EncodingErrorKind<> has no checked debug carrier`.
-  My variant `~/.cache/jet-test-scratch/Closer01/csv2.jet` prints only line,
+  My variant `~/.cache/jet-dev/scratch/Closer01/csv2.jet` prints only line,
   column and reason. It ran on `jet run` and `--interpret` with identical
   output. On AOT, `jet build` (I placed the file briefly as `Examples/features/serde/closer01_csv_probe.jet`) fails with generated-Rust
   `E0308 expected Result<JetInt, JetAbsent>, found Result<i64, JetAbsent>` on `err.line`.
-- Streaming: `~/.cache/jet-test-scratch/Closer01/csv_stream.jet` (a 40-row file larger than `buffer_bytes: 64`, an early break, and a 100-byte field over `max_item_bytes: 32`).
+- Streaming: `~/.cache/jet-dev/scratch/Closer01/csv_stream.jet` (a 40-row file larger than `buffer_bytes: 64`, an early break, and a 100-byte field over `max_item_bytes: 32`).
 - Source read: `Core/encoding/csv.jet:40-101, 293-314`; `crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs:2422-2453`; `crates/jet-codegen/src/Prelude/Core.jet:753`.
 
 ## Evidence

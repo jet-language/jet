@@ -28,7 +28,7 @@ the harness; they type-check with `Tools/agent/lane-check.sh` only.
 ## Environment
 
 Run everything through `Tools/agent/jet-env`. Follow `AGENTS.md` target-dir
-laws: never use `/tmp` targets, use the shared main `target/`, and respect cap
+laws: never use `/tmp` targets, use the checkout's own `target/`, and respect cap
 checks. A missing competitor toolchain is an owner-visible flake change, not a
 silent skip.
 

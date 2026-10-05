@@ -8,8 +8,9 @@
 // Write the members of a freshly evaluated `plan` into `.jet/lock`, creating
 // `.jet/` when absent and keeping every unrelated lock record. A failed write
 // is returned to the caller.
-pub fn env_workspace_lock_write(workspace_root: String, plan: WorkspacePlan) EnvironmentError! -[FS, Env, Exec, Time, Time.Wait]> {
-    if env_workspace_lock_write_locked(workspace_root, plan) == .Err(error) {
+// Reuse the command's declaration cache when checking the plan's authority.
+pub fn env_workspace_lock_write(cache: &WorkspaceDeclarationCache, workspace_root: String, plan: WorkspacePlan) EnvironmentError! -[FS, Env, Exec, Time, Time.Wait]> {
+    if env_workspace_lock_write_locked(&cache, workspace_root, plan) == .Err(error) {
         return Err(EnvironmentError.Other("could not write workspace lock: {error.message()}"))
     }
 }
@@ -18,11 +19,11 @@ fn env_workspace_lock_invalid(text: String) -> EnvironmentError Never! {
     EnvironmentError.InvalidData(text)
 }
 
-fn env_workspace_lock_write_locked(workspace_root: String, plan: WorkspacePlan) EnvironmentError! -[FS, Env, Exec, Time, Time.Wait]> {
+fn env_workspace_lock_write_locked(cache: &WorkspaceDeclarationCache, workspace_root: String, plan: WorkspacePlan) EnvironmentError! -[FS, Env, Exec, Time, Time.Wait]> {
     guard :: env_runtime_project_lock(workspace_root, "workspace-lock")
     resolver :: AuthorityResolver.open(workspace_root) ?? return Err(env_workspace_lock_invalid("workspace authority cannot be opened: {err.message()}"))
-    existing_lock := None
-    if resolver.checked_file(@PKG_WORKSPACE_LOCK) == {
+    existing_lock := CheckedFile?{None}
+    if resolver.checked_file(PKG_WORKSPACE_LOCK) == {
         .Ok(file) -> existing_lock = Val(file)
         .Err(error) -> {
             if !error.is_missing() -> return Err(env_workspace_lock_invalid("workspace lock cannot be opened: {error.message()}"))
@@ -34,8 +35,8 @@ fn env_workspace_lock_write_locked(workspace_root: String, plan: WorkspacePlan) 
         resolver.revalidate_file(file) ?? return Err(env_workspace_lock_invalid("existing lock changed during read: {err.message()}"))
         lock = pkg_lock_parse(raw) ?? return Err(env_workspace_lock_invalid("existing lock is malformed: {err.message()}"))
     }
-    lock.version = @PKG_LOCK_VERSION
-    source :: resolver.resolve_workspace_source() ?? return Err(env_workspace_lock_invalid("workspace authority cannot be resolved: {err.message()}"))
+    lock.version = PKG_LOCK_VERSION
+    source :: resolver.resolve_workspace_source(&cache) ?? return Err(env_workspace_lock_invalid("workspace authority cannot be resolved: {err.message()}"))
     if source == {
         .Val(checked) -> {
             if checked.role != WorkspaceSourceRole.Index {
@@ -54,7 +55,7 @@ fn env_workspace_lock_write_locked(workspace_root: String, plan: WorkspacePlan) 
     source_digest :: if {
         plan.source_digest != "" -> plan.source_digest
         source == .Val(checked) -> pkg_sha256_hex(checked.source.bytes())
-        else -> @PKG_NO_WORKSPACE_SOURCE
+        else -> PKG_NO_WORKSPACE_SOURCE
     }
     members := [LockedWorkspaceMember]{}
     loop member in plan.members {
@@ -79,7 +80,7 @@ fn env_workspace_lock_write_locked(workspace_root: String, plan: WorkspacePlan) 
     if existing_lock == {
         .Val(file) -> resolver.revalidate_file(file) ?? return Err(env_workspace_lock_invalid("existing lock changed before write: {err.message()}"))
         .None -> {
-            if resolver.checked_file(@PKG_WORKSPACE_LOCK) == {
+            if resolver.checked_file(PKG_WORKSPACE_LOCK) == {
                 .Ok(file) -> return Err(env_workspace_lock_invalid("workspace lock appeared during write: {file.path}"))
                 .Err(error) -> {
                     if !error.is_missing() -> return Err(env_workspace_lock_invalid("workspace lock changed during write: {error.message()}"))

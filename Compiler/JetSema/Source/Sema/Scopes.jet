@@ -5,8 +5,11 @@ use jet_foundation.[
     AccessConvention,
     Diagnostic,
     DebugTraceSite,
+    DistinctDef,
     ElseArmSpan,
+    EnumGroup,
     Expr,
+    Field,
     Item,
     MIRTargetHardwareUse,
     PolicyDeclaration,
@@ -24,6 +27,8 @@ use jet_foundation.[
     TIntegerBounds,
     TTypeDef,
     Type,
+    TypeParam,
+    Variant,
     ViewProvenanceMap,
     ViewSourcePath,
     type_identity_equal,
@@ -363,6 +368,11 @@ pub struct SemaCheckContext {
     pub unsafe_depth: Int
     pub borrow_ctx: Bool
     pub allow_string_view_read: Bool
+    // Rust `suppress_partial_move_root_read`: the expression being checked
+    // is the base of a deeper place (`state` in `state.x`, `&s`, `s.x = v`)
+    // whose complete place the caller checks, so a bare name read here
+    // answers only for a move of the whole name.
+    pub suppress_partial_move_root_read: Bool
     pub allow_fixed_constructor: Bool
     pub generic_params: [TGenericParam]
     pub lambda_escapes: Bool?
@@ -448,6 +458,11 @@ pub struct SemaCheckContext {
     // statement and per expression level, against the limit the parser and
     // the TIR evaluator share.
     pub source_nesting: Int{0}
+    // D-LOOP-SUBJECT1=A: active bindingless collecting-loop subjects, where a
+    // bare `.member` chain reads the implicit `it`.
+    pub implicit_loop_subject_depth: Int{0}
+    // D-SUBJECT-COHERE1=A: active subject-shorthand lambda scopes (L0512).
+    pub subject_shorthand_depth: Int{0}
     // Why this body stopped without a diagnostic: a construct the checker
     // does not handle yet or a lost compiler invariant. These reach the
     // driver's internal-problem report (I2), never the user's diagnostics.
@@ -538,8 +553,7 @@ pub fn sema_scope_environment_init(graph: ^SemaRegistrationGraph?, module_identi
             &name_rows.push([Int]{index})
         }
     }
-    boxed_edges := [String:[String]]{}
-    if graph == .Val(value) -> boxed_edges = sema_checked_program_boxed_edges(value)
+    boxed_edges := sema_scope_environment_boxed_edges(graph)
     SemaScopeEnvironment{
         registration_graph: graph,
         module_identity: module_identity,
@@ -557,6 +571,13 @@ pub fn sema_scope_environment_init(graph: ^SemaRegistrationGraph?, module_identi
         generic_params: [TGenericParam]{},
         comptime_body_values: [SemaComptimeBodyValue]{},
     }
+}
+
+// The boxed field edges of `graph`, read in place: matching the owned graph
+// parameter against `.Val(…)` would copy the whole graph first.
+fn sema_scope_environment_boxed_edges(graph: SemaRegistrationGraph?) -> [String:[String]] Never! {
+    value :: graph ?? return [String:[String]]{}
+    sema_checked_program_boxed_edges(value)
 }
 
 // The first checked declaration of `name` owned by `module_identity`.
@@ -619,7 +640,9 @@ pub fn sema_scope_environment_boxed_edge(environment: SemaScopeEnvironment, owne
         row :: sema_type_graph_nominal_row(graph, owner.key) ?? return false
         module_identity :: graph.modules[row.module_index].module_identity
         if sema_scope_checked_type_row(environment, module_identity, graph.modules[row.module_index].nominals[row.row].symbol.name) == .Val(checked_row) -> return sema_checked_type_has_boxed_edge(environment.checked_types[checked_row], edge)
-        if graph.modules[row.module_index].nominals[row.row].source == .SourceAST(definition) {
+        // Matched in place: a pattern on the indexed path copies the whole item.
+        nominal :: graph.modules[row.module_index].nominals[row.row]
+        if nominal.source == .SourceAST(definition) {
             return sema_checked_boxed_edges(graph, environment.boxed_edges, module_identity, definition).contains(edge)
         }
     }
@@ -642,6 +665,7 @@ pub fn sema_check_context_init() -> SemaCheckContext Never! {
         unsafe_depth: 0,
         borrow_ctx: false,
         allow_string_view_read: false,
+        suppress_partial_move_root_read: false,
         allow_fixed_constructor: false,
         generic_params: [TGenericParam]{},
         lambda_escapes: Val(true),
@@ -696,6 +720,7 @@ pub fn sema_check_context_snapshot(source: SemaCheckContext) -> SemaCheckContext
         unsafe_depth: source.unsafe_depth,
         borrow_ctx: source.borrow_ctx,
         allow_string_view_read: source.allow_string_view_read,
+        suppress_partial_move_root_read: source.suppress_partial_move_root_read,
         allow_fixed_constructor: source.allow_fixed_constructor,
         generic_params: ~source.generic_params,
         lambda_escapes: source.lambda_escapes,
@@ -745,6 +770,8 @@ pub fn sema_check_context_snapshot(source: SemaCheckContext) -> SemaCheckContext
         failure_union_edges: ~source.failure_union_edges,
         failure_union_general: source.failure_union_general,
         source_nesting: source.source_nesting,
+        implicit_loop_subject_depth: source.implicit_loop_subject_depth,
+        subject_shorthand_depth: source.subject_shorthand_depth,
     }
 }
 
@@ -807,6 +834,7 @@ pub fn sema_check_context_save(context: SemaCheckContext) -> SemaCheckContextMar
             unsafe_depth: context.unsafe_depth,
             borrow_ctx: context.borrow_ctx,
             allow_string_view_read: context.allow_string_view_read,
+            suppress_partial_move_root_read: context.suppress_partial_move_root_read,
             allow_fixed_constructor: context.allow_fixed_constructor,
             generic_params: ~context.generic_params,
             lambda_escapes: context.lambda_escapes,
@@ -858,6 +886,8 @@ pub fn sema_check_context_save(context: SemaCheckContext) -> SemaCheckContextMar
             iter_borrowed: ~context.iter_borrowed,
             binding_initializer: context.binding_initializer,
             source_nesting: context.source_nesting,
+            implicit_loop_subject_depth: context.implicit_loop_subject_depth,
+            subject_shorthand_depth: context.subject_shorthand_depth,
         },
     }
 }
@@ -893,6 +923,7 @@ pub fn sema_check_context_rollback(context: &SemaCheckContext, mark: SemaCheckCo
     context.unsafe_depth = saved.unsafe_depth
     context.borrow_ctx = saved.borrow_ctx
     context.allow_string_view_read = saved.allow_string_view_read
+    context.suppress_partial_move_root_read = saved.suppress_partial_move_root_read
     context.allow_fixed_constructor = saved.allow_fixed_constructor
     context.generic_params = ~saved.generic_params
     context.lambda_escapes = saved.lambda_escapes
@@ -929,6 +960,8 @@ pub fn sema_check_context_rollback(context: &SemaCheckContext, mark: SemaCheckCo
     context.iter_borrowed = ~saved.iter_borrowed
     context.binding_initializer = saved.binding_initializer
     context.source_nesting = saved.source_nesting
+    context.implicit_loop_subject_depth = saved.implicit_loop_subject_depth
+    context.subject_shorthand_depth = saved.subject_shorthand_depth
 }
 
 // Records why the body being checked is incomplete when no diagnostic says so.
@@ -1464,7 +1497,17 @@ pub fn sema_scope_symbol_by_id(table: SemaScopeTable, id: SymbolID) -> Symbol? {
     None
 }
 
-pub fn sema_scope_resolve_declaration(environment: SemaScopeEnvironment, id: SymbolID) -> Item? {
+// Where sema_scope_resolve_declaration finds the declaration `id` names. A
+// checker that needs one fact of a declaration reads it at its site through
+// the readers below: copying the item copies a nominal's method bodies and
+// trait implementations on every expression that names it.
+pub enum SemaScopeDeclarationSite {
+    Function(module_index: Int, row: Int)
+    Nominal(module_index: Int, row: Int)
+    Local(index: Int)
+}
+
+pub fn sema_scope_declaration_site(environment: SemaScopeEnvironment, id: SymbolID) -> SemaScopeDeclarationSite? {
     if environment.registration_graph == .Val(graph) {
         // The first function and nominal rows by key replace the module scan
         // (earlier modules first, functions before nominals in one module).
@@ -1477,12 +1520,170 @@ pub fn sema_scope_resolve_declaration(environment: SemaScopeEnvironment, id: Sym
             }
         }
         if graph.nominal_symbol_rows.get(id.key) == .Val(nominal) {
-            if function_module < 0 || nominal.module_index < function_module -> return sema_registration_nominal_source_item(graph.modules[nominal.module_index].nominals[nominal.row].source)
+            if function_module < 0 || nominal.module_index < function_module -> return Val(SemaScopeDeclarationSite.Nominal{module_index: nominal.module_index, row: nominal.row})
         }
-        if function_module >= 0 -> return Val(Item.Func{value: graph.modules[function_module].functions[function_row].declaration})
+        if function_module >= 0 -> return Val(SemaScopeDeclarationSite.Function{module_index: function_module, row: function_row})
     }
-    loop declaration in environment.declarations {
-        if declaration.symbol_id.key == id.key -> return Val(declaration.item)
+    loop index in 0..<environment.declarations.len() {
+        if environment.declarations[index].symbol_id.key == id.key -> return Val(SemaScopeDeclarationSite.Local{index: index})
     }
     None
+}
+
+pub fn sema_scope_resolve_declaration(environment: SemaScopeEnvironment, id: SymbolID) -> Item? {
+    site :: sema_scope_declaration_site(environment, id) ?? return None
+    if site == .Local(index) -> return Val(environment.declarations[index].item)
+    graph_option :: environment.registration_graph
+    graph :: graph_option ?? return None
+    if site == .Function(module_index, row) -> return Val(Item.Func{value: graph.modules[module_index].functions[row].declaration})
+    if site == .Nominal(module_index, row) -> return sema_registration_nominal_source_item(graph.modules[module_index].nominals[row].source)
+    None
+}
+
+// The item variant of sema_scope_resolve_declaration(environment, id).
+pub enum SemaScopeDeclarationKind {
+    Func
+    Struct
+    Enum
+    Distinct
+    Other
+}
+
+fn sema_scope_item_kind(item: Item) -> SemaScopeDeclarationKind Never! {
+    if item == {
+        .Func(_) -> SemaScopeDeclarationKind.Func
+        .Struct(_) -> SemaScopeDeclarationKind.Struct
+        .Enum(_) -> SemaScopeDeclarationKind.Enum
+        .Distinct(_) -> SemaScopeDeclarationKind.Distinct
+        else -> SemaScopeDeclarationKind.Other
+    }
+}
+
+pub fn sema_scope_declaration_kind(environment: SemaScopeEnvironment, id: SymbolID) -> SemaScopeDeclarationKind? {
+    site :: sema_scope_declaration_site(environment, id) ?? return None
+    if site == .Local(index) -> return Val(sema_scope_item_kind(environment.declarations[index].item))
+    if site == .Function(_, _) -> return Val(SemaScopeDeclarationKind.Func)
+    if site == .Nominal(module_index, row) {
+        graph_option :: environment.registration_graph
+        graph :: graph_option ?? return None
+        nominal :: graph.modules[module_index].nominals[row]
+        if nominal.source == .SourceAST(item) -> return Val(sema_scope_item_kind(item))
+    }
+    None
+}
+
+pub fn sema_scope_declaration_is(environment: SemaScopeEnvironment, id: SymbolID, kind: SemaScopeDeclarationKind) -> Bool {
+    found :: sema_scope_declaration_kind(environment, id) ?? return false
+    found == kind
+}
+
+// A struct declaration's type parameters and fields, without its methods.
+pub struct SemaScopeStructShape {
+    pub type_params: [TypeParam]
+    pub fields: [Field]
+}
+
+fn sema_scope_item_struct(item: Item) -> SemaScopeStructShape? {
+    if item == .Struct(definition) -> return Val(SemaScopeStructShape{type_params: definition.type_params, fields: definition.fields})
+    None
+}
+
+// The struct shape when sema_scope_resolve_declaration(environment, id) is a struct.
+pub fn sema_scope_declaration_struct(environment: SemaScopeEnvironment, id: SymbolID) -> SemaScopeStructShape? {
+    site :: sema_scope_declaration_site(environment, id) ?? return None
+    if site == .Local(index) -> return sema_scope_item_struct(environment.declarations[index].item)
+    if site == .Nominal(module_index, row) {
+        graph_option :: environment.registration_graph
+        graph :: graph_option ?? return None
+        nominal :: graph.modules[module_index].nominals[row]
+        if nominal.source == .SourceAST(item) -> return sema_scope_item_struct(item)
+    }
+    None
+}
+
+// An enum declaration's type parameters, variants and variant groups, without
+// its methods.
+pub struct SemaScopeEnumShape {
+    pub type_params: [TypeParam]
+    pub variants: [Variant]
+    pub groups: [EnumGroup]
+}
+
+fn sema_scope_item_enum(item: Item) -> SemaScopeEnumShape? {
+    if item == .Enum(definition) -> return Val(SemaScopeEnumShape{type_params: definition.type_params, variants: definition.variants, groups: definition.groups})
+    None
+}
+
+// The enum shape when sema_scope_resolve_declaration(environment, id) is an enum.
+pub fn sema_scope_declaration_enum(environment: SemaScopeEnvironment, id: SymbolID) -> SemaScopeEnumShape? {
+    site :: sema_scope_declaration_site(environment, id) ?? return None
+    if site == .Local(index) -> return sema_scope_item_enum(environment.declarations[index].item)
+    if site == .Nominal(module_index, row) {
+        graph_option :: environment.registration_graph
+        graph :: graph_option ?? return None
+        nominal :: graph.modules[module_index].nominals[row]
+        if nominal.source == .SourceAST(item) -> return sema_scope_item_enum(item)
+    }
+    None
+}
+
+fn sema_scope_item_enum_declares(item: Item, variant: String) -> Bool Never! {
+    if item == .Enum(definition) {
+        loop candidate in definition.variants {
+            if candidate.name == variant -> return true
+        }
+    }
+    false
+}
+
+// sema_scope_resolve_declaration(environment, id) is an enum declaring `variant`.
+pub fn sema_scope_declaration_enum_declares(environment: SemaScopeEnvironment, id: SymbolID, variant: String) -> Bool {
+    site :: sema_scope_declaration_site(environment, id) ?? return false
+    if site == .Local(index) -> return sema_scope_item_enum_declares(environment.declarations[index].item, variant)
+    if site == .Nominal(module_index, row) {
+        graph_option :: environment.registration_graph
+        graph :: graph_option ?? return false
+        nominal :: graph.modules[module_index].nominals[row]
+        if nominal.source == .SourceAST(item) -> return sema_scope_item_enum_declares(item, variant)
+    }
+    false
+}
+
+fn sema_scope_item_distinct(item: Item) -> DistinctDef? {
+    if item == .Distinct(definition) -> return Val(definition)
+    None
+}
+
+// The declaration when sema_scope_resolve_declaration(environment, id) is a
+// distinct type; a distinct declaration has no methods to leave behind.
+pub fn sema_scope_declaration_distinct(environment: SemaScopeEnvironment, id: SymbolID) -> DistinctDef? {
+    site :: sema_scope_declaration_site(environment, id) ?? return None
+    if site == .Local(index) -> return sema_scope_item_distinct(environment.declarations[index].item)
+    if site == .Nominal(module_index, row) {
+        graph_option :: environment.registration_graph
+        graph :: graph_option ?? return None
+        nominal :: graph.modules[module_index].nominals[row]
+        if nominal.source == .SourceAST(item) -> return sema_scope_item_distinct(item)
+    }
+    None
+}
+
+fn sema_scope_item_function_type_params(item: Item) -> [TypeParam] Never! {
+    if item == .Func(func) -> return func.type_params
+    [TypeParam]{}
+}
+
+// The type parameters when sema_scope_resolve_declaration(environment, id) is
+// a function, else none; the function's body is never copied.
+pub fn sema_scope_declaration_function_type_params(environment: SemaScopeEnvironment, id: SymbolID) -> [TypeParam] {
+    site :: sema_scope_declaration_site(environment, id) ?? return [TypeParam]{}
+    if site == .Local(index) -> return sema_scope_item_function_type_params(environment.declarations[index].item)
+    graph_option :: environment.registration_graph
+    graph :: graph_option ?? return [TypeParam]{}
+    if site == .Function(module_index, row) -> return graph.modules[module_index].functions[row].declaration.type_params
+    if site == .Nominal(module_index, row) {
+        nominal :: graph.modules[module_index].nominals[row]
+        if nominal.source == .SourceAST(item) -> return sema_scope_item_function_type_params(item)
+    }
+    [TypeParam]{}
 }

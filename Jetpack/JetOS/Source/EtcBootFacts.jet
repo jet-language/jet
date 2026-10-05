@@ -1,0 +1,234 @@
+// Rust crates/jetpack/src/JetOS/etc_boot_facts.rs. Native generation writes
+// require canonical RootProjection/StoreRealize (#4262); no copier or realized
+// package substitute lives here. Compiler protocol JSON integration is #4262.
+pub fn jetos_write_etc_tree(dir: String, system: SystemPlan) IOError! -[FS]> {
+    etc :: files.join(dir, "etc")
+    files.create_dir_all(etc)
+    host :: jetos_option_value(system, [String]{"network.hostName", "network.hostname"}) ?? system.name
+    files.write(files.join(etc, "hostname"), "{host}\n")
+    if jetos_option_value(system, [String]{"filesystem.timeZone", "filesystem.timezone"}) == .Val(zone) {
+        files.write(files.join(etc, "timezone"), "{zone}\n")
+    }
+    root_device :: jetos_option_value(system, [String]{"filesystem.root.device"}) ?? "LABEL=jetos-root"
+    root_type :: pkg_ascii_lower(pkg_trim_start_matches(jetos_option_value(system, [String]{"filesystem.root.type"}) ?? "ext4", "."))
+    fstab := [String]{"{root_device}\t/\t{root_type}\tdefaults\t0\t1\n"}
+    loop swap in jetos_collect_names(system, "filesystem.swap") {
+        device :: jetos_option_value(system, [String]{"filesystem.swap.{swap}.device"}) ?? "LABEL=jetos-swap-{swap}"
+        priority :: if jetos_option_value(system, [String]{"filesystem.swap.{swap}.priority"}) == {
+            .Val(value) -> "pri={value}"
+            .None -> "defaults"
+        }
+        &fstab.push("{device}\tnone\tswap\t{priority}\t0\t0\n")
+    }
+    files.write(files.join(etc, "fstab"), fstab.join(""))
+    jetos_write_identity_files(dir, etc, system)
+    jetos_write_jetos_identity_assets(dir)
+}
+
+fn jetos_write_identity_files(dir: String, etc: String, system: SystemPlan) IOError! -[FS]> {
+    users :: jetos_collect_names(system, "users")
+    groups :: jetos_collect_names(system, "groups")
+    passwd := [String]{"root:x:0:0:root:/root:/bin/sh\n", "messagebus:x:81:81:D-Bus system message bus:/run/dbus:/usr/sbin/nologin\n", "gdm:x:120:120:GDM display manager:/var/lib/gdm:/usr/sbin/nologin\n"}
+    shadow := [String]{"root:!:1::::::\n"}
+    group := [String]{"root:x:0:\nmessagebus:x:81:\ngdm:x:120:\nvideo:x:44:\nrender:x:303:\ninput:x:304:\naudio:x:18:\n"}
+    sysusers := [String]{}
+    loop idx in 0..<users.len() {
+        user :: users[idx]
+        uid :: 1000 + idx
+        home :: jetos_option_value(system, [String]{"users.{user}.home"}) ?? "/home/{user}"
+        shell :: if jetos_option_value(system, [String]{"users.{user}.shell"}) == {
+            .Val(value) -> jetos_package_path_or_literal(value)
+            .None -> "/run/current-system/sw/bin/sh"
+        }
+        &passwd.push("{user}:x:{uid}:{uid}:{user}:{home}:{shell}\n")
+        &group.push("{user}:x:{uid}:{user}\n")
+        &shadow.push("{user}:!:1::::::\n")
+        &sysusers.push("u {user} {uid} \"{user}\" {home} {shell}\n")
+    }
+    loop idx in 0..<groups.len() {
+        name :: groups[idx]
+        gid :: 2000 + idx
+        members :: if jetos_option_value(system, [String]{"groups.{name}.members"}) == {
+            .Val(value) -> jetos_parse_list_items(value).join(",")
+            .None -> ""
+        }
+        &group.push("{name}:x:{gid}:{members}\n")
+        &sysusers.push("g {name} {gid}\n")
+        if members != "" -> &sysusers.push("m {members.replace(",", " ")} {name}\n")
+    }
+    files.write(files.join(etc, "passwd"), passwd.join(""))
+    files.write(files.join(etc, "group"), group.join(""))
+    files.write(files.join(etc, "shadow"), shadow.join(""))
+    os_release :: jetos_render_jetos_os_release(false)
+    files.write(files.join(etc, "os-release"), os_release)
+    usr_lib :: files.join(dir, "usr/lib")
+    files.create_dir_all(usr_lib)
+    files.write(files.join(usr_lib, "os-release"), os_release)
+    machine_id :: pkg_sha256_hex(system.name.bytes()).slice(0, 32)
+    files.write(files.join(etc, "machine-id"), "{machine_id}\n")
+    files.write(files.join(etc, "nsswitch.conf"), "passwd: files\ngroup: files\nshadow: files\nhosts: files dns\nservices: files\n")
+    jetos_write_pam_files(etc)
+    sysusers_dir :: files.join(etc, "sysusers.d")
+    files.create_dir_all(sysusers_dir)
+    files.write(files.join(sysusers_dir, "jetos.conf"), sysusers.join(""))
+}
+
+fn jetos_write_pam_files(etc: String) IOError! -[FS]> {
+    pam :: files.join(etc, "pam.d")
+    files.create_dir_all(pam)
+    login :: "auth sufficient pam_unix.so nullok\naccount sufficient pam_unix.so\npassword sufficient pam_unix.so nullok\nsession required pam_unix.so\nsession optional pam_systemd.so\n"
+    names :: [String]{"login", "gdm", "gdm-password", "gdm-launch-environment", "polkit-1", "system-local-login"}
+    loop name in names -> files.write(files.join(pam, name), login)
+}
+
+pub fn jetos_is_linux_kernel_image(path: String) -[FS]> Bool Never! {
+    bytes :: files.read_bytes(path) ?? return false
+    jetos_is_linux_kernel_image_bytes(bytes)
+}
+
+// Rust is_linux_kernel_image's byte predicate, shared with its path entry.
+pub fn jetos_is_linux_kernel_image_bytes(bytes: [U8]) -> Bool Never! {
+    if bytes.len() >= 4 && bytes[0] == 127 && bytes[1] == 69 && bytes[2] == 76 && bytes[3] == 70 -> return true
+    if bytes.len() < 4 || bytes[0] != 77 || bytes[1] != 90 -> return false
+    loop offset in 0..<(bytes.len() - 3) {
+        if bytes[offset] == 72 && bytes[offset + 1] == 100 && bytes[offset + 2] == 114 && bytes[offset + 3] == 83 -> return true
+    }
+    false
+}
+
+pub fn jetos_is_initrd_image(path: String) -[FS]> Bool Never! {
+    bytes :: files.read_bytes(path) ?? return false
+    jetos_is_initrd_image_bytes(bytes)
+}
+
+// Rust is_initrd_image's byte predicate, shared with its path entry.
+pub fn jetos_is_initrd_image_bytes(bytes: [U8]) -> Bool Never! {
+    if bytes.len() >= 2 && bytes[0] == 31 && bytes[1] == 139 -> return true
+    bytes.len() >= 6 && bytes[0] == 48 && bytes[1] == 55 && bytes[2] == 48 && bytes[3] == 55 && bytes[4] == 48 && (bytes[5] == 49 || bytes[5] == 50)
+}
+
+// Rust render_boot_facts's exact ordered wire; the caller provides the actual
+// boot profile and actual kernel_package_json (or Rust's literal null).
+fn jetos_render_boot_facts_parts(boot: JetOSBootProfile, kernel_package: String) -> String Never! {
+    "{{\"loader\":{foundation_json_quote(boot.loader)},\"kernel\":{foundation_json_quote(boot.kernel)},\"init\":{foundation_json_quote(boot.init)},\"initrd_modules\":[{jetos_strings_json(boot.initrd_modules)}],\"kernel_package\":{kernel_package}}}"
+}
+
+// Rust cachyos_kernel_entry: first match, not latest or a fallback package.
+pub fn jetos_cachyos_kernel_entry(realized: [JetOSRealizedPackage]) -> JetOSRealizedPackage? Never! {
+    loop entry in realized {
+        if entry.entry.name == JETOS_CACHYOS_KERNEL_PACKAGE -> return Val(entry)
+    }
+    None
+}
+
+fn jetos_render_boot_facts(system: SystemPlan, realized: [JetOSRealizedPackage]) -[FS]> String Never! {
+    boot :: jetos_boot_profile(system)
+    kernel_package :: if jetos_cachyos_kernel_entry(realized) == {
+        .Val(entry) -> jetos_kernel_package_json(entry)
+        .None -> "null"
+    }
+    jetos_render_boot_facts_parts(boot, kernel_package)
+}
+
+pub fn jetos_kernel_package_json(entry: JetOSRealizedPackage) -[FS]> String Never! {
+    source :: jetos_kernel_source_json(entry)
+    "{{\"name\":{foundation_json_quote(entry.entry.name)},\"reference\":{foundation_json_quote(entry.entry.reference)},\"out\":{foundation_json_quote(entry.entry.out)},\"output_hash\":{foundation_json_quote(entry.entry.envelope.output_hash)},\"provenance\":{foundation_json_quote(entry.entry.envelope.provenance)},\"bootstrap\":\"source-built\",\"source_recipe\":{source}}}"
+}
+
+// Rust kernel_source_json: original_output() is store_realize.rs:55-57's
+// original_out, NEVER the lease projection or consumption_override.
+fn jetos_kernel_source_json(entry: JetOSRealizedPackage) -[FS]> String Never! {
+    out :: entry.original_output()
+    facts :: [(name: String, relative: String)]{
+        (name: "recipe", relative: "source/recipe.jet"),
+        (name: "builder", relative: "source/build.sh"),
+        (name: "config", relative: "source/config"),
+        (name: "patches", relative: "source/patches.manifest"),
+        (name: "initrd_inputs", relative: "source/initrd-inputs.manifest")
+    }
+    files_json := [String]{}
+    loop fact in facts {
+        path :: files.join(out, fact.relative)
+        sha :: if files.read_bytes(path) == {
+            .Ok(bytes) -> pkg_sha256_hex(bytes)
+            .Err(_) -> "<missing>"
+        }
+        // Rust JSON::object_of emits its ordered fields with these newlines.
+        &files_json.push("{{\n  \"name\": {foundation_json_quote(fact.name)},\n  \"path\": {foundation_json_quote(path)},\n  \"sha256\": {foundation_json_quote(sha)}\n}}")
+    }
+    "{{\"mode\":\"source-built\",\"files\":[{files_json.join(",")}]}}"
+}
+
+// Rust boot_artifact: lease-projected consumption; projection refusal is None.
+pub fn jetos_boot_artifact(entry: JetOSRealizedPackage, candidates: [String]) -[FS, Env, Rand]> String? Never! {
+    out :: entry.consumption_path(entry.entry.out) ?? return None
+    loop relative in candidates {
+        path :: files.join(out, relative)
+        if files.is_file(path) -> return Val(path)
+    }
+    None
+}
+
+pub fn jetos_missing_kernel_source_files(entry: JetOSRealizedPackage) -[FS, Env, Rand]> String? Never! {
+    out :: entry.consumption_path(entry.entry.out) ?? return None
+    relatives :: [String]{"source/recipe.jet", "source/build.sh", "source/config", "source/patches.manifest", "source/initrd-inputs.manifest"}
+    loop relative in relatives {
+        if !files.is_file(files.join(out, relative)) -> return Val(relative)
+    }
+    None
+}
+
+// Rust write_boot_facts: copy_file_replace is the canonical RootProjection
+// service (#4262/#3593), never a private copy_kernel or weakened byte copier.
+// Required root_projection.rs:100-105 contract: best-effort remove destination,
+// native fs::copy preserving source permissions without creating parents, then
+// metadata/set_readonly(false)/set_permissions with their actual IO failures.
+// Core files.copy2 cannot provide this contract; its byte-only auto-parent
+// behavior must not be substituted while the canonical provider is #3593.
+pub fn jetos_write_boot_facts(dir: String, system: SystemPlan, realized: [JetOSRealizedPackage]) IOError! -[FS, Env, Rand]> {
+    boot :: jetos_boot_profile(system)
+    boot_dir :: files.join(dir, "boot")
+    files.create_dir_all(boot_dir)
+    kernel_entry :: jetos_cachyos_kernel_entry(realized)
+    jetos_write_boot_payload(boot_dir, system, boot, kernel_entry)
+    files.write(files.join(boot_dir, "facts.json"), jetos_render_boot_facts(system, realized))
+}
+
+// Read access keeps the same selected held package alive for kernel, initrd,
+// and modules, rather than copying a lease or moving an optional repeatedly.
+fn jetos_write_boot_payload(boot_dir: String, system: SystemPlan, boot: JetOSBootProfile, kernel_entry: JetOSRealizedPackage?) IOError! -[FS, Env, Rand]> {
+    kernel_path :: if kernel_entry == {
+        .Val(entry) -> jetos_boot_artifact(entry, [String]{"boot/vmlinuz-cachyos", "bzImage", "vmlinuz"}) ?? boot.kernel
+        .None -> boot.kernel
+    }
+    initrd_path :: if kernel_entry == {
+        .Val(entry) -> jetos_boot_artifact(entry, [String]{"boot/initrd-cachyos", "initrd", "initrd.img"})
+        .None -> None
+    }
+    files.write(files.join(boot_dir, "limine.conf"), "timeout: 5\nserial: yes\ngraphics: no\nverbose: yes\n/{jetos_release_label(false)} — {system.name}\n    protocol: linux\n    kernel_path: boot():/boot/kernel\n    module_path: boot():/boot/initrd\n    textmode: yes\n    cmdline: console=ttyS0 root=LABEL=jetos-root rw init={boot.init}\n")
+    if files.is_file(kernel_path) {
+        jetos_copy_file_replace(kernel_path, files.join(boot_dir, "kernel"))
+    } else {
+        files.write(files.join(boot_dir, "kernel"), "{kernel_path}\n")
+    }
+    if initrd_path == {
+        .Val(path) -> {
+            if files.is_file(path) {
+                jetos_copy_file_replace(path, files.join(boot_dir, "initrd"))
+            } else {
+                files.write(files.join(boot_dir, "initrd"), "{path}\nmodules={boot.initrd_modules.join(",")}\n")
+            }
+        }
+        .None -> files.write(files.join(boot_dir, "initrd"), "modules={boot.initrd_modules.join(",")}\n")
+    }
+    module_names :: [String]{"isofs.ko.xz", "bochs.ko.xz", "fat.ko.xz", "vfat.ko.xz", "nls_ascii.ko.xz", "nls_cp437.ko.xz", "serio.ko.xz", "i8042.ko.xz", "libps2.ko.xz", "atkbd.ko.xz", "hid-generic.ko.xz", "usbhid.ko.xz", "uhci-hcd.ko.xz", "ehci-hcd.ko.xz", "xhci-hcd.ko.xz"}
+    loop module_name in module_names {
+        if kernel_entry == .Val(entry) {
+            if jetos_boot_artifact(entry, [String]{"boot/modules/{module_name}"}) == .Val(module_path) {
+                modules_dir :: files.join(boot_dir, "modules")
+                files.create_dir_all(modules_dir)
+                jetos_copy_file_replace(module_path, files.join(modules_dir, module_name))
+            }
+        }
+    }
+}

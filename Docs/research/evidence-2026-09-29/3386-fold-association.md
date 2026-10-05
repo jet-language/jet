@@ -1,6 +1,6 @@
 # #3386 — association law of the existing reduction paths
 
-Date: 2026-09-29. Binary: jet-debug-snapshot14 via `~/.cache/jet-luna/safe-jet.sh`.
+Date: 2026-09-29. Binary: jet-debug-snapshot14 via `~/.cache/jet-dev/safe-jet.sh`.
 
 ## Question
 
@@ -64,7 +64,7 @@ Tier status on snapshot14:
 
 - `safe-jet.sh run` (JIT): ICE `resolved MIR Prelude symbol
   jet_list_para_fold is not registered`. Without cell (f)
-  (`~/.cache/jet-test-scratch/Closer08/fa_nopara.jet`) the JIT output equals
+  (`~/.cache/jet-dev/scratch/Closer08/fa_nopara.jet`) the JIT output equals
   the AOT lines 1-12.
 - `safe-jet.sh run --interpret`: E0956 "`core.list.fold()` isn't supported by
   the current evaluator yet" (even `[1,2,3].fold(100, (acc: Int, n: Int) ->

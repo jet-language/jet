@@ -46,18 +46,18 @@ pub struct EnvFile {
 
     // The prompt label, defaulting to `jetpack`.
     fn prompt_label(self) -> String Never! {
-        self.prompt ?? @JETPACK_PROMPT_LABEL
+        self.prompt ?? JETPACK_PROMPT_LABEL
     }
 
     // The default source label, defaulting to canonical `jetpack`.
     fn source_label(self) -> String Never! {
-        source :: self.default_source ?? return @REF_SOURCE_JETPACK
+        source :: self.default_source ?? return REF_SOURCE_JETPACK
         env_file_published_source(source)
     }
 
     // The named-source resolution table for this env (D-JPK17).
     fn source_table(self) -> SourceTable Never! {
-        decls := [SourceDecl]{}
+        decls := [NamedSourceDecl]{}
         loop source in self.named {
             via :: if source.via == {
                 .Val(name) -> ProviderKind.parse(name)
@@ -67,7 +67,7 @@ pub struct EnvFile {
                 .Ok(provider_ref) -> provider_ref.upstream()
                 .Err(_) -> source.upstream
             }
-            &decls.push(SourceDecl{name: source.name, upstream: upstream, via: via})
+            &decls.push(NamedSourceDecl{name: source.name, upstream: upstream, via: via})
         }
         table := SourceTable.from_decls(decls)
         loop source in self.named {
@@ -82,8 +82,8 @@ pub struct EnvFile {
     // source pass through; bare entries take the default.
     fn entry_ref(self, raw: String) -> String Never! {
         entry :: raw.trim()
-        if entry.contains(@REF_PROVIDER_AT) || pkg_is_bare_path(entry) -> return entry
-        "{entry}{@REF_PROVIDER_AT}{self.source_label()}"
+        if entry.contains(REF_PROVIDER_AT) || pkg_is_bare_path(entry) -> return entry
+        "{entry}{REF_PROVIDER_AT}{self.source_label()}"
     }
 
     // The canonical refs this env declares.
@@ -111,12 +111,12 @@ pub struct EnvFile {
         loop package in self.packages -> &quoted.push(env_file_quote_jet_string(package))
         &lines.push("        pkg.packages([{quoted.join(", ")}])")
         &lines.push("        pkg.prompt({prompt})")
-        "// {@ENV_FILE} — a Jetpack project environment\nuse jetpack as pkg\n\npub fn shell() -> [JSON] {{\n    return [\n{lines.join(",\n")}\n    ]\n}}\n"
+        "// {ENV_FILE} — a Jetpack project environment\nuse jetpack as pkg\n\npub fn shell() -> [JSON] {{\n    return [\n{lines.join(",\n")}\n    ]\n}}\n"
     }
 
     // Path to the env file in a project dir.
     fn path_in(dir: String) -> String Never! {
-        files.join(dir, @ENV_FILE)
+        files.join(dir, ENV_FILE)
     }
 
     // Load and parse the env file in `dir`, if present.
@@ -130,7 +130,7 @@ pub struct EnvFile {
     // the default source, two or three declare a named source (D-JPK17).
     fn parse(text: String) -> EnvFile Never! {
         file := EnvFile.empty()
-        loop call in env_file_all_call_args(text, @PACK_DIRECTIVE_SOURCE) {
+        loop call in env_file_all_call_args(text, PACK_DIRECTIVE_SOURCE) {
             args :: env_file_quoted_strings(call)
             if args.len() == {
                 0 -> {}
@@ -139,8 +139,8 @@ pub struct EnvFile {
                 else -> &file.named.push(EnvNamedSource{name: args[0], upstream: args[1], via: Val(args[2])})
             }
         }
-        loop package in env_file_list_arg(text, @PACK_DIRECTIVE_PACKAGES) -> &file.packages.push(package.trim())
-        file.prompt = env_file_string_arg(text, @PACK_DIRECTIVE_PROMPT)
+        loop package in env_file_list_arg(text, PACK_DIRECTIVE_PACKAGES) -> &file.packages.push(package.trim())
+        file.prompt = env_file_string_arg(text, PACK_DIRECTIVE_PROMPT)
         file
     }
 
@@ -165,7 +165,7 @@ pub struct EnvFile {
     // ref, so it works whether the entry was stored bare or with its source.
     fn remove(dir: String, spec: RefSpec) -[FS]> (file: EnvFile, removed: Bool) EnvironmentError! {
         file := EnvFile.load(dir) ?? EnvFile.empty()
-        target :: "{spec.package}{@REF_PROVIDER_AT}{spec.source.label()}"
+        target :: "{spec.package}{REF_PROVIDER_AT}{spec.source.label()}"
         before :: file.packages.len()
         keep := [String]{}
         loop entry in file.packages {
@@ -186,13 +186,13 @@ pub struct EnvFile {
             else -> source == self.source_label()
         }
         if is_default -> return spec.package
-        "{spec.package}{@REF_PROVIDER_AT}{source}"
+        "{spec.package}{REF_PROVIDER_AT}{source}"
     }
 }
 
 // The legacy `nixpkgs` token is published as canonical `jetpack`.
 fn env_file_published_source(source: String) -> String Never! {
-    if source == @REF_SOURCE_NIXPKGS -> return @REF_SOURCE_JETPACK
+    if source == REF_SOURCE_NIXPKGS -> return REF_SOURCE_JETPACK
     source
 }
 

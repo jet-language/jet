@@ -17,15 +17,15 @@ pub fn provider_producer_record(provider: String, immutable_source: String, sour
 // left out of that native document so cache and lock refreshes never grow it
 // recursively.
 pub fn provider_refresh_provider_facts(producer: &ProducerRecord, reference: String) ProviderError! {
-    carriers :: [String]{@PROVIDER_SHARED_FACTS, @PROVIDER_SHARED_FACTS_DIGEST}
+    carriers :: [String]{PROVIDER_SHARED_FACTS, PROVIDER_SHARED_FACTS_DIGEST}
     native := producer
     native.facts = provider_without_keys(producer.facts, carriers)
     native.plan = ProviderPlanFacts.from_facts(provider_without_keys(producer.plan.facts(), carriers)) ?? return Err(ProviderError.BadOutput(err.message()))
 
     shared := ProviderFacts.for_reference(producer.provider, reference)
     &shared.set_resolved_source(producer.immutable_source)
-    document :: producer.facts.get(@PROVIDER_NIX_NATIVE_DOCUMENT) ?? ""
-    format :: producer.facts.get(@PROVIDER_NIX_NATIVE_FORMAT) ?? ""
+    document :: producer.facts.get(PROVIDER_NIX_NATIVE_DOCUMENT) ?? ""
+    format :: producer.facts.get(PROVIDER_NIX_NATIVE_FORMAT) ?? ""
     if {
         format.trim() != "" && document.trim() != "" -> &shared.set_native_document(format, document)
         else -> &shared.set_native_document("jet-producer-record-v1", native.encode())
@@ -41,8 +41,8 @@ pub fn provider_refresh_provider_facts(producer: &ProducerRecord, reference: Str
     }
     loop extra in extras -> &shared.add_fact(extra.key, ProviderFactValue.Text(extra.value), "jet-producer-record-v1")
     shared.validate() ?? return Err(ProviderError.BadOutput(err.message))
-    producer.facts[@PROVIDER_SHARED_FACTS] = shared.to_json()
-    producer.facts[@PROVIDER_SHARED_FACTS_DIGEST] = shared.digest()
+    producer.facts[PROVIDER_SHARED_FACTS] = shared.to_json()
+    producer.facts[PROVIDER_SHARED_FACTS_DIGEST] = shared.digest()
 }
 
 // Rust `cache_identity`: the source fingerprint, the recipe's digest, the
@@ -154,12 +154,12 @@ pub struct NixIdentityParts {
 
 pub fn provider_nix_identity_parts(spec: RefSpec, table: SourceTable) -> NixIdentityParts Never! {
     source :: if spec.source == {
-        .Jetpack | .Nixpkgs -> @REF_SOURCE_JETPACK
+        .Jetpack | .Nixpkgs -> REF_SOURCE_JETPACK
         .Named(name) -> table.upstream(name) ?? name
         else -> spec.source.label()
     }
     alias :: if spec.source == {
-        .Jetpack | .Nixpkgs -> @REF_SOURCE_JETPACK
+        .Jetpack | .Nixpkgs -> REF_SOURCE_JETPACK
         else -> spec.source.label()
     }
     NixIdentityParts{
@@ -179,7 +179,7 @@ fn provider_normalize_nix_identity(value: String) -> String Never! {
 pub fn provider_nix_cache_identity(source: String, platform: String, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env]> CacheIdentity Never! {
     parts :: provider_nix_identity_parts(spec, table)
     authority :: "source={parts.source}\nnode={parts.node}\nalias={parts.alias}\nquery={parts.query}\nbuild-facts={provider_nix_build_facts_digest()}"
-    identity := provider_cache_identity(source, @PROVIDER_NIX_RECIPE_ID, ctx, authority)
+    identity := provider_cache_identity(source, PROVIDER_NIX_RECIPE_ID, ctx, authority)
     identity.platform = platform
     identity
 }

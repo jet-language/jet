@@ -1,7 +1,7 @@
 // Nix derivation compatibility claims ported from the tests of
 // crates/jetpack/src/NixDrv.rs.
 
-@NIX_TEST_EMPTY_SHA256_HEX :: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+NIX_TEST_EMPTY_SHA256_HEX :: prep { "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" }
 
 fn nix_test_hex_decode(text: String) -> [U8] {
     bytes :: text.bytes()
@@ -27,12 +27,12 @@ fn nix_test_is_parse_error(error: NixError) -> Bool {
 }
 
 #Test("nix nix32 of the empty sha256 matches nix hash") {
-    empty :: nix_test_hex_decode(@NIX_TEST_EMPTY_SHA256_HEX)
+    empty :: nix_test_hex_decode(NIX_TEST_EMPTY_SHA256_HEX)
     assert_eq(nix_nix32_encode(empty), "0mdqa9w1p6cmli6976v4wi0sw9r4p5prkj7lzfd1877wk11c9c73")
 }
 
 #Test("nix nix32 decode inverts encode and rejects foreign characters") {
-    digest :: nix_test_hex_decode(@NIX_TEST_EMPTY_SHA256_HEX)
+    digest :: nix_test_hex_decode(NIX_TEST_EMPTY_SHA256_HEX)
     decoded :: nix_nix32_decode(nix_nix32_encode(digest)) ?? panic("encoded Nix32 must decode")
     assert_eq(decoded, digest)
     if nix_nix32_decode("0e") == {
@@ -42,7 +42,7 @@ fn nix_test_is_parse_error(error: NixError) -> Bool {
 }
 
 #Test("nix fixed flat sha256 path matches known vector") {
-    path :: nix_make_fixed_output_path(@NIX_DEFAULT_STORE_DIR, "empty", "sha256", @NIX_TEST_EMPTY_SHA256_HEX)
+    path :: nix_make_fixed_output_path(NIX_DEFAULT_STORE_DIR, "empty", "sha256", NIX_TEST_EMPTY_SHA256_HEX)
     assert(path.starts_with("/nix/store/"))
     assert(path.ends_with("-empty"))
     digest :: path.removeprefix("/nix/store/").bytes()[0..<32]
@@ -53,13 +53,13 @@ fn nix_test_is_parse_error(error: NixError) -> Bool {
 #Test("nix aterm roundtrip minimal fixed") {
     placeholder :: "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-x"
     template :: `Derive([("out","/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-x","sha256","e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")],[],[],"x86_64-linux","/bin/bash",["-c","true"],[("name","x"),("out","/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-x")])`
-    real :: nix_make_fixed_output_path(@NIX_DEFAULT_STORE_DIR, "x", "sha256", @NIX_TEST_EMPTY_SHA256_HEX)
+    real :: nix_make_fixed_output_path(NIX_DEFAULT_STORE_DIR, "x", "sha256", NIX_TEST_EMPTY_SHA256_HEX)
     aterm :: &template.replace(placeholder, real)
     drv :: NixDerivation.parse(aterm) ?? panic("minimal fixed ATerm must parse")
     assert(drv.is_fixed())
     nix_verify_aterm_roundtrip(aterm, drv) ?? panic("minimal fixed ATerm must roundtrip")
     store := nix_derivation_store([String: NixDerivation]{})
-    &store.verify_output_paths(@NIX_DEFAULT_STORE_DIR, "{real}.drv", drv) ?? panic("fixed-output paths must verify")
+    &store.verify_output_paths(NIX_DEFAULT_STORE_DIR, "{real}.drv", drv) ?? panic("fixed-output paths must verify")
 }
 
 #Test("nix malformed aterm strings return parse errors") {
@@ -75,14 +75,14 @@ fn nix_test_is_parse_error(error: NixError) -> Bool {
 #Test("nix reference scan finds store paths") {
     digest :: "0123456789abcdfghijklmnpqrsvwxyz"
     assert_eq(digest.bytes().len(), 32)
-    blob :: "hello {@NIX_DEFAULT_STORE_DIR}/{digest}-foo/bin/x and done"
-    found :: nix_scan_store_path_digests(@NIX_DEFAULT_STORE_DIR, blob.bytes())
+    blob :: "hello {NIX_DEFAULT_STORE_DIR}/{digest}-foo/bin/x and done"
+    found :: nix_scan_store_path_digests(NIX_DEFAULT_STORE_DIR, blob.bytes())
     assert_eq(found, [String]{"/nix/store/0123456789abcdfghijklmnpqrsvwxyz-foo/bin/x"})
 }
 
 #Test("nix differential local store sample") {
-    if !files.is_dir(@NIX_DEFAULT_STORE_DIR) -> return
-    report :: nix_differential_corpus(@NIX_DEFAULT_STORE_DIR, 64) ?? panic("corpus")
+    if !files.is_dir(NIX_DEFAULT_STORE_DIR) -> return
+    report :: nix_differential_corpus(NIX_DEFAULT_STORE_DIR, 64) ?? panic("corpus")
     assert_eq(report.divergences, [NixError]{})
     assert(report.checked > 0)
 }

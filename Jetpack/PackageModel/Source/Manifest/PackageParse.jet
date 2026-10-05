@@ -45,7 +45,7 @@ pub struct InlinePackage {
 impl ConfigFacts {
     fn parse(text: String, origin: String) -> ConfigFacts PackageParseError! {
         stripped :: pkg_strip_comments(text)
-        declared_name := None
+        declared_name := String?{None}
         body := stripped
         if pkg_config_wrapper(stripped) == {
             .Val(wrapper) -> {
@@ -108,7 +108,7 @@ fn pkg_parse_common(text: String, origin: String, config: Bool) -> PackageFacts 
                 next
             }
         }
-        binding := None
+        binding := ManifestEntry?{None}
         if pkg_split_package_binding(entry) == .Val(split) {
             if split.operator == "::" -> binding = Val(ManifestEntry{key: split.left.trim(), value: split.right.trim()})
         }
@@ -121,7 +121,7 @@ fn pkg_parse_common(text: String, origin: String, config: Bool) -> PackageFacts 
         field :: found.key
         value :: found.value
         if seen.contains(field) {
-            if field == @MANIFEST_BLOCK_AUTHORITY -> return Err(PackageParseError.BadEffectsBlock("malformed `authority:` block: declared more than once"))
+            if field == MANIFEST_BLOCK_AUTHORITY -> return Err(PackageParseError.BadEffectsBlock("malformed `authority:` block: declared more than once"))
             return Err(PackageParseError.Composition("`{field}` is declared more than once"))
         }
         &seen.push(field)
@@ -133,7 +133,8 @@ fn pkg_parse_common(text: String, origin: String, config: Bool) -> PackageFacts 
             next
         }
         &facts.apply_field(field, value, config)
-        pkg_record_declared_provenance(&facts, field, facts.origin)
+        declared_origin :: ~facts.origin
+        pkg_record_declared_provenance(&facts, field, declared_origin)
     }
     loop declared in inline {
         if pkg_merge_config(&facts, declared.facts) == .Err(error) -> return Err(PackageParseError.Composition(error.message()))
@@ -153,8 +154,8 @@ impl PackageFacts {
     fn apply_field(&self, field: String, value: String, config: Bool) PackageParseError! {
         if config && pkg_package_only_field(field) -> return Err(PackageParseError.UnknownField(field))
         if field == {
-            @MANIFEST_FIELD_NAME -> self.name = pkg_scalar(value)
-            @MANIFEST_FIELD_VERSION -> self.version = Val(pkg_scalar(value))
+            MANIFEST_FIELD_NAME -> self.name = pkg_scalar(value)
+            MANIFEST_FIELD_VERSION -> self.version = Val(pkg_scalar(value))
             "jet" -> self.jet = Val(pkg_scalar(value))
             "source" -> self.source = Val(pkg_scalar(value))
             "edition" -> self.edition = Val(pkg_scalar(value))
@@ -168,18 +169,18 @@ impl PackageFacts {
                 raw :: pkg_scalar(value)
                 self.layer = Val(jet_ring_parse_manifest_layer(raw) ?? return Err(PackageParseError.InvalidValue{field: "runtime", value: raw}))
             }
-            @MANIFEST_BLOCK_DEPS -> self.deps = pkg_parse_deps(pkg_record_body(value, @MANIFEST_BLOCK_DEPS))
-            @MANIFEST_BLOCK_BOUNDARIES -> self.boundaries = pkg_parse_boundaries(pkg_record_body(value, @MANIFEST_BLOCK_BOUNDARIES))
+            MANIFEST_BLOCK_DEPS -> self.deps = pkg_parse_deps(pkg_record_body(value, MANIFEST_BLOCK_DEPS))
+            MANIFEST_BLOCK_BOUNDARIES -> self.boundaries = pkg_parse_boundaries(pkg_record_body(value, MANIFEST_BLOCK_BOUNDARIES))
             "packages" -> self.packages = pkg_parse_packages(pkg_record_body(value, "packages"))
             "dev" -> self.dev = pkg_parse_dev(value)
-            @MANIFEST_BLOCK_BUILD -> {
-                body :: pkg_record_body(value, @MANIFEST_BLOCK_BUILD)
+            MANIFEST_BLOCK_BUILD -> {
+                body :: pkg_record_body(value, MANIFEST_BLOCK_BUILD)
                 self.build_profiles = pkg_parse_build(body)
                 self.build_allow = pkg_parse_build_allow(body)
             }
-            @MANIFEST_BLOCK_SETTINGS -> self.settings = pkg_parse_settings(value)
+            MANIFEST_BLOCK_SETTINGS -> self.settings = pkg_parse_settings(value)
             "services" -> self.services = pkg_parse_services(value)
-            @MANIFEST_BLOCK_OUTPUTS -> {
+            MANIFEST_BLOCK_OUTPUTS -> {
                 parsed :: pkg_parse_outputs(value)
                 loop name in pkg_manifest_sorted(parsed.keys().to_list()) {
                     output :: parsed[name]
@@ -194,9 +195,9 @@ impl PackageFacts {
             "environments" -> self.environments = pkg_parse_environments(value)
             "defaults" -> self.defaults = pkg_parse_string_map("defaults", value)
             "grants" -> return Err(PackageParseError.RetiredAuthorityField{field: field, replacement: "authority.grants"})
-            "authority" -> self.apply_authority(pkg_parse_authority_value(value))
+            "authority" -> &self.apply_authority(pkg_parse_authority_value(value))
             "policy" -> self.policy = pkg_parse_package_policy(pkg_record_body(value, "policy"))
-            @MANIFEST_BLOCK_MEMBERS -> self.members = pkg_parse_members(value)
+            MANIFEST_BLOCK_MEMBERS -> self.members = pkg_parse_members(value)
             "configs" -> self.configs = pkg_parse_list(value)
             // U1/S52/E1209: reserved for a future feature; legal only empty.
             "dev_deps" | "patch" | "workspace" -> {
@@ -220,10 +221,10 @@ impl PackageFacts {
 // Fields only a Package root may declare; a Config naming one is an unknown
 // field (`members` has its own refusal).
 fn pkg_package_only_field(field: String) -> Bool PackageParseError! {
-    if field == @MANIFEST_BLOCK_MEMBERS -> return Err(PackageParseError.ConfigMembers)
+    if field == MANIFEST_BLOCK_MEMBERS -> return Err(PackageParseError.ConfigMembers)
     Ok(if field == {
         "jet" | "edition" | "description" | "license" | "repository" | "targets" | "allocator" | "runtime" | "packages" | "dev" | "grants" | "authority" | "policy" | "configs" -> true
-        @MANIFEST_BLOCK_BOUNDARIES | @MANIFEST_BLOCK_BUILD | @MANIFEST_BLOCK_SETTINGS -> true
+        MANIFEST_BLOCK_BOUNDARIES | MANIFEST_BLOCK_BUILD | MANIFEST_BLOCK_SETTINGS -> true
         else -> false
     })
 }
@@ -271,14 +272,14 @@ fn pkg_parse_output_value(key: String, raw: String) -> OutputFact PackageParseEr
         value :: field.value
         if !pkg_output_field_allowed(kind, name) -> return Err(PackageParseError.UnknownField("outputs.{key}.{name}"))
         if name == "entry" && (value.trim().starts_with("\"") || !pkg_is_identifier(pkg_scalar(value))) -> return Err(PackageParseError.InvalidValue{field: "outputs.{key}.entry", value: value})
-        if name == @OUTPUT_FIELD_LOADABLE || name == @OUTPUT_FIELD_NATIVE {
+        if name == OUTPUT_FIELD_LOADABLE || name == OUTPUT_FIELD_NATIVE {
             is_bool :: if payload_fields[name] == {
                 .Bool(_) -> true
                 else -> false
             }
             if !is_bool -> return Err(PackageParseError.InvalidValue{field: "outputs.{key}.{name}", value: value})
         }
-        if name == @OUTPUT_FIELD_BINDINGS && !pkg_payload_is_string_array(payload_fields[name]) -> return Err(PackageParseError.InvalidValue{field: "outputs.{key}.{name}", value: value})
+        if name == OUTPUT_FIELD_BINDINGS && !pkg_payload_is_string_array(payload_fields[name]) -> return Err(PackageParseError.InvalidValue{field: "outputs.{key}.{name}", value: value})
         fields[name] = pkg_scalar(value)
     }
     Ok(OutputFact{kind: kind, name: fields.get("name") ?? key, entry: fields.get("entry"), fields: fields, payload: OutputPayload.Object(payload_fields)})
@@ -434,22 +435,21 @@ fn pkg_parse_members(input: String) -> [MemberRef] PackageParseError! {
 
 fn pkg_output_field_allowed(kind: PackageOutputKind, field: String) -> Bool Never! {
     allowed :: if kind == {
-        .Library -> [String]{"name", "modules", "entry", @OUTPUT_FIELD_LOADABLE, @OUTPUT_FIELD_NATIVE, @OUTPUT_FIELD_BINDINGS}
+        .Library -> [String]{"name", "modules", "entry", OUTPUT_FIELD_LOADABLE, OUTPUT_FIELD_NATIVE, OUTPUT_FIELD_BINDINGS}
         .Executable | .Service | .Check -> [String]{"name", "entry"}
         .Environment -> [String]{"name", "tools", "services", "secrets"}
         .Image -> [String]{"name", "from", "kind", "environment"}
         .Bundle -> [String]{"name", "members"}
-        .System -> [String]{"name", @SYSTEM_FIELD_TARGET, "packages", "services", "options"}
+        .System -> [String]{"name", SYSTEM_FIELD_TARGET, "packages", "services", "options"}
         .Fleet -> [String]{"name", "hosts"}
-        .Model -> [String]{"name", "graph", "graph_sha256", "weights", "weights_sha256", "tokenizer", "tokenizer_sha256", "adapter", "adapter_sha256", "inputs", "outputs", "provider", "preprocessing", "pooling", "normalization", "output_meaning", "metric", "custom_operators", "max_context", "max_batch", "max_buffer_bytes"}
     }
     allowed.contains(field)
 }
 
-@PKG_SERVICE_FIELDS :: [String]{"enable", "from", "ports", "ready", "run", "restart", "watch", "after", "before_start", "sockets", "shutdown", "depends_on", "health", "limits", "logs"}
+PKG_SERVICE_FIELDS :: prep { [String]{"enable", "from", "ports", "ready", "run", "restart", "watch", "after", "before_start", "sockets", "shutdown", "depends_on", "health", "limits", "logs"} }
 
 fn pkg_service_field_allowed(field: String) -> Bool Never! {
-    @PKG_SERVICE_FIELDS.contains(field)
+    PKG_SERVICE_FIELDS.contains(field)
 }
 
 // `settings: { tls: Bool = true }` — a name, a Tier-0 type, and a default.
@@ -504,8 +504,8 @@ fn pkg_is_build_entry_decl(entry: String) -> Bool Never! {
     after_fn :: rest.removeprefix("fn")
     if pkg_bytes_space_width(after_fn.bytes(), 0) == 0 -> return false
     name :: after_fn.trim_start()
-    if !name.starts_with(@BUILD_ENTRY_FN) -> return false
-    tail :: name.removeprefix(@BUILD_ENTRY_FN)
+    if !name.starts_with(BUILD_ENTRY_FN) -> return false
+    tail :: name.removeprefix(BUILD_ENTRY_FN)
     if tail == "" -> return true
     first :: pkg_bytes_code(tail.bytes(), 0)
     !(pkg_bytes_is_word(first) || first >= 128)

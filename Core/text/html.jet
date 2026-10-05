@@ -11,8 +11,8 @@ package {
 
 use core.text as unicode
 
-// XML-safe escaping and bounded entity decoding. Unknown entities remain
-// unchanged; tag stripping is deliberately a span operation, not a parser.
+// XML-safe escaping and bounded entity decoding. Decoding preserves literal
+// UTF-8 and unknown entities; tag stripping is a span operation, not a parser.
 pub fn escape(text: String) -> String Never! { escape_quote(text, true) }
 
 pub fn escape_quote(text: String, quote: Bool) -> String Never! {
@@ -30,13 +30,12 @@ pub fn escape_quote(text: String, quote: Bool) -> String Never! {
 
 pub fn unescape(text: String) -> String Never! {
     raw :: text.bytes()
-    out := ""
+    out := [U8]{}
     i := 0
     loop i < raw.len() {
         if raw[i] != (U8{38}) {
-            width :: utf8_width(raw, i)
-            out = "{out}{slice_b(raw, i, i + width)}"
-            i = i + width
+            &out.push(raw[i])
+            i = i + 1
             next
         }
         semi := i + 1
@@ -47,16 +46,17 @@ pub fn unescape(text: String) -> String Never! {
         if semi < raw.len() && raw[semi] == (U8{59}) {
             name :: String.from_bytes(slice_b(raw, i + 1, semi)) ?? ""
             decoded :: entity(name)
-            if decoded.bytes().len() > 0 {
-                out = "{out}{decoded}"
+            decoded_raw :: decoded.bytes()
+            if decoded_raw.len() > 0 {
+                loop byte in decoded_raw -> &out.push(byte)
                 i = semi + 1
                 next
             }
         }
-        out = "{out}&"
+        &out.push(raw[i])
         i = i + 1
     }
-    out
+    String.from_bytes(out) ?? text
 }
 
 pub fn strip_tags(text: String) -> String Never! {
@@ -111,7 +111,9 @@ fn entity(name: String) -> String {
     loop i < raw.len() {
         digit := if base == 16 -> hex_val(raw[i]) else -> decimal_val(raw[i])
         d :: digit ?? return ""
-        n = n * base + d
+        // Saturate outside the scalar range, but still validate every digit.
+        if n > (1114111 - d) /% base -> n = 1114112
+        else -> n = n * base + d
         i = i + 1
     }
     scalar(n)
@@ -149,16 +151,6 @@ fn hex_val(b: U8) -> Int? {
     if n >= 65 && n <= 70 -> return Val(n - 55)
     if n >= 97 && n <= 102 -> return Val(n - 87)
     None
-}
-
-fn utf8_width(raw: [U8], at: Int) -> Int {
-    if at < 0 || at >= raw.len() -> return 1
-    b :: raw[at]
-    if b < 128 -> return 1
-    if b >= 194 && b <= 223 && at + 1 < raw.len() && raw[at + 1] >= 128 && raw[at + 1] <= 191 -> return 2
-    if b >= 224 && b <= 239 && at + 2 < raw.len() && raw[at + 1] >= 128 && raw[at + 1] <= 191 && raw[at + 2] >= 128 && raw[at + 2] <= 191 -> return 3
-    if b >= 240 && b <= 244 && at + 3 < raw.len() && raw[at + 1] >= 128 && raw[at + 1] <= 191 && raw[at + 2] >= 128 && raw[at + 2] <= 191 && raw[at + 3] >= 128 && raw[at + 3] <= 191 -> return 4
-    1
 }
 
 fn slice_b(raw: [U8], start: Int, end: Int) -> [U8] {

@@ -4,7 +4,7 @@
 
 // The project lock path under `project_root`.
 fn pkg_lock_file_path(project_root: String) -> String Never! {
-    files.join(project_root, @UNIFIED_LOCK_FILE)
+    files.join(project_root, UNIFIED_LOCK_FILE)
 }
 
 // Read one lock without letting a corrupt line grow the buffer without
@@ -24,8 +24,8 @@ fn pkg_lock_read_text(path: String) -[FS]> String LockError! {
             has_newline :: end < chunk.len()
             content_length :: end - offset
             take_length :: if has_newline -> content_length + 1 else -> content_length
-            if line_length + content_length > @PKG_MAX_LOCK_VALUE_BYTES -> return Err(LockError.Invalid(pkg_lock_oversized_value_message(line_number)))
-            if raw.len() + take_length > @PKG_MAX_LOCK_BYTES -> return Err(LockError.Invalid(pkg_lock_oversized_file_message()))
+            if line_length + content_length > PKG_MAX_LOCK_VALUE_BYTES -> return Err(LockError.Invalid(pkg_lock_oversized_value_message(line_number)))
+            if raw.len() + take_length > PKG_MAX_LOCK_BYTES -> return Err(LockError.Invalid(pkg_lock_oversized_file_message()))
             loop index in offset..<(offset + take_length) -> &raw.push(chunk[index])
             if {
                 has_newline -> {
@@ -101,16 +101,16 @@ fn pkg_lock_load_or_empty(project_root: String) -[FS]> LockFile {
 // rejected lock never replaces the last good lock or leaves scratch bytes.
 pub fn pkg_lock_write_atomically(project_root: String, contents: [U8]) LockError! -[FS, Env, Time]> {
     path :: pkg_lock_file_path(project_root)
-    if contents.len() > @PKG_MAX_LOCK_BYTES -> return Err(LockError.Invalid("internal error: refusing to write project lock `{path}`: serialized lock is {contents.len()} bytes, over the 1 MiB limit"))
-    if foundation_write_file_nofollow_at_root(project_root, @UNIFIED_LOCK_FILE, contents) == {
-        .Ok(_) -> Ok()
-        .Err(error) -> Err(LockError.Invalid("could not atomically publish project lock `{path}`: {error}"))
+    if contents.len() > PKG_MAX_LOCK_BYTES -> return Err(LockError.Invalid("internal error: refusing to write project lock `{path}`: serialized lock is {contents.len()} bytes, over the 1 MiB limit"))
+    if foundation_write_file_nofollow_at_root(project_root, UNIFIED_LOCK_FILE, contents, None) == {
+        .Ok(_) -> {}
+        .Err(error) -> return Err(LockError.Invalid("could not atomically publish project lock `{path}`: {error}"))
     }
 }
 
 // Keep the historical best-effort recorder APIs observable: a rejected lock
 // write is reported, never a silently successful update.
-fn pkg_lock_publish_or_report(project_root: String, contents: String) -[FS, Env, Time]> {
+fn pkg_lock_publish_or_report(project_root: String, contents: String) -[FS, Env, Time, IO]> {
     if pkg_lock_write_atomically(project_root, contents.bytes()) == {
         .Err(error) -> eprint(error.message())
         .Ok(_) -> {}
@@ -119,7 +119,7 @@ fn pkg_lock_publish_or_report(project_root: String, contents: String) -[FS, Env,
 
 // D-RINGLAYER1=A M2: persist the inferred runtime profile of the root
 // package after a build. A no-op when the lock or package is absent.
-pub fn pkg_lock_record_inferred_layer(project_root: String, package_name: String, layer: MirRuntimeLayer) -[FS, Env, Exec, Time, Time.Wait]> {
+pub fn pkg_lock_record_inferred_layer(project_root: String, package_name: String, layer: MIRRuntimeLayer) -[FS, Env, Exec, Time, Time.Wait, IO]> {
     lock := pkg_lock_load(project_root) ?? return
     loop index in 0..<lock.packages.len() {
         if lock.packages[index].name == package_name {
@@ -134,7 +134,7 @@ pub fn pkg_lock_record_inferred_layer(project_root: String, package_name: String
 // D-JPK-CACHE1=A (A4): stamp a realized package's output envelope into the
 // lock after it is built, so cache substitution can be driven off the lock.
 // A no-op when the lock or the named package is absent.
-pub fn pkg_lock_record_envelope(project_root: String, package_name: String, envelope: LockEnvelope) -[FS, Env, Exec, Time, Time.Wait]> {
+pub fn pkg_lock_record_envelope(project_root: String, package_name: String, envelope: LockEnvelope) -[FS, Env, Exec, Time, Time.Wait, IO]> {
     lock := pkg_lock_load(project_root) ?? return
     loop index in 0..<lock.packages.len() {
         if lock.packages[index].name == package_name {
@@ -147,7 +147,7 @@ pub fn pkg_lock_record_envelope(project_root: String, package_name: String, enve
 }
 
 // Replace the first package matching `matches`, or append `entry`.
-fn pkg_lock_upsert_package(lock: &LockFile, entry: LockedPackage, matches: fn(LockedPackage) -> Bool) Never! {
+fn pkg_lock_upsert_package(lock: &LockFile, entry: LockedPackage, matches: fn(LockedPackage) -> Bool Never!) Never! {
     loop index in 0..<lock.packages.len() {
         if matches(lock.packages[index]) {
             lock.packages[index] = entry
@@ -158,7 +158,7 @@ fn pkg_lock_upsert_package(lock: &LockFile, entry: LockedPackage, matches: fn(Lo
 }
 
 // The first package record satisfying `matches`.
-fn pkg_lock_find_package_where(lock: LockFile, matches: fn(LockedPackage) -> Bool) -> LockedPackage? Never! {
+fn pkg_lock_find_package_where(lock: LockFile, matches: fn(LockedPackage) -> Bool Never!) -> LockedPackage? Never! {
     loop package in lock.packages {
         if matches(package) -> return Val(package)
     }
@@ -193,9 +193,19 @@ pub fn pkg_lock_record_nix_realization(project_root: String, name: String, versi
         .Val(package) -> package.provenance
         .None -> None
     }
-    existing_receipt :: if pkg_lock_find_package_where(lock, package -> package.name == name && package.version == version && package.source == LockSource.Nix{reference: reference, output: output} && package.nix_closure == Val(nix_closure) && pkg_lock_envelope_output_is(package, envelope.output_hash)) == {
-        .Val(package) -> package.receipt
-        .None -> None
+    existing_receipt := String?{None}
+    loop package in lock.packages {
+        if package.name != name || package.version != version -> next
+        if package.source == {
+            .Nix(locked_reference, locked_output) -> {
+                if locked_reference != reference || locked_output != output -> next
+                locked_closure :: package.nix_closure ?? next
+                if locked_closure != nix_closure || !pkg_lock_envelope_output_is(package, envelope.output_hash) -> next
+                existing_receipt = package.receipt
+                break
+            }
+            else -> {}
+        }
     }
     entry :: LockedPackage{name: name, version: version, source: LockSource.Nix{reference: reference, output: output}, nix_closure: Val(nix_closure), envelope: Val(envelope), receipt: existing_receipt, provenance: existing_provenance}
     pkg_lock_upsert_package(&lock, entry, package -> package.name == name && package.is_nix())
@@ -205,9 +215,9 @@ pub fn pkg_lock_record_nix_realization(project_root: String, name: String, versi
 
 // The source token of `reference` (`…@<source>#…`), defaulting to Jetpack.
 fn pkg_lock_reference_source_name(reference: String) -> String Never! {
-    halves :: reference.cut_last(@REF_PROVIDER_AT) ?? return @REF_SOURCE_JETPACK
-    source :: halves.after.split_once(@REF_CHANNEL_MARKER)?.before ?? halves.after
-    if source == "" -> return @REF_SOURCE_JETPACK
+    halves :: reference.cut_last(REF_PROVIDER_AT) ?? return REF_SOURCE_JETPACK
+    source :: halves.after.split_once(REF_CHANNEL_MARKER)?.before ?? halves.after
+    if source == "" -> return REF_SOURCE_JETPACK
     source
 }
 
@@ -218,11 +228,14 @@ fn pkg_lock_reference_source_name(reference: String) -> String Never! {
 // receipt only when the identity and envelope are unchanged.
 pub fn pkg_lock_record_foreign_realization(project_root: String, name: String, version: String, language: ForeignLanguage, reference: String, output: String, envelope: LockEnvelope) LockError! -[FS, Env, Exec, Time, Time.Wait]> {
     lock := pkg_lock_load_for_update(project_root)
-    lock.version = @PKG_LOCK_VERSION
+    lock.version = PKG_LOCK_VERSION
     source :: LockSource.Foreign{language: language, reference: reference, output: output}
-    existing_receipt :: if pkg_lock_find_package_where(lock, package -> package.name == name && package.version == version && package.source == source && pkg_lock_envelope_output_is(package, envelope.output_hash)) == {
-        .Val(package) -> package.receipt
-        .None -> None
+    existing_receipt := String?{None}
+    loop package in lock.packages {
+        if package.name == name && package.version == version && package.source == source && pkg_lock_envelope_output_is(package, envelope.output_hash) {
+            existing_receipt = package.receipt
+            break
+        }
     }
     entry :: LockedPackage{name: name, version: version, source: source, fingerprint: envelope.output_hash, envelope: Val(envelope), receipt: existing_receipt}
     pkg_lock_upsert_package(&lock, entry, package -> package.name == name && package.is_foreign())
@@ -239,11 +252,11 @@ pub fn pkg_lock_record_rust_bridge(project_root: String, bridge_identity: String
     if bridge_identity.trim() == "" -> return Err(LockError.Invalid("Rust bridge lock identity is empty"))
     if packages.len() == 0 -> return
     lock := pkg_lock_load_for_update(project_root)
-    lock.version = @PKG_LOCK_VERSION
+    lock.version = PKG_LOCK_VERSION
     kept := [LockedPackage]{}
     loop package in lock.packages {
         if package.provenance_build() == {
-            .Val(build) -> if build.starts_with(@PKG_RUST_BRIDGE_PROVENANCE_PREFIX) -> next
+            .Val(build) -> if build.starts_with(PKG_RUST_BRIDGE_PROVENANCE_PREFIX) -> next
             .None -> {}
         }
         &kept.push(package)
@@ -307,9 +320,9 @@ pub fn pkg_lock_locked_nix_package_strict(project_root: String, reference_input:
 // provenance from a same-version record of the provider, keep the receipt
 // only when the exact source identity and envelope output are unchanged,
 // and replace the provider's record for `name`.
-fn pkg_lock_record_source_realization(project_root: String, name: String, version: String, source: LockSource, source_hash: String, dependencies: [String], envelope: LockEnvelope, same_provider: fn(LockedPackage) -> Bool) -[FS, Env, Exec, Time, Time.Wait]> {
+fn pkg_lock_record_source_realization(project_root: String, name: String, version: String, source: LockSource, source_hash: String, dependencies: [String], envelope: LockEnvelope, same_provider: fn(LockedPackage) -> Bool Never!) -[FS, Env, Exec, Time, Time.Wait, IO]> {
     lock := pkg_lock_load_or_empty(project_root)
-    lock.version = @PKG_LOCK_VERSION
+    lock.version = PKG_LOCK_VERSION
     existing_provenance :: if pkg_lock_find_package_where(lock, package -> package.name == name && package.version == version && same_provider(package)) == {
         .Val(package) -> package.provenance
         .None -> None
@@ -338,7 +351,7 @@ fn pkg_lock_same_realized_source(locked: LockSource, recorded: LockSource) -> Bo
 
 // Record an exact CRAN source closure and realized R library for offline
 // replay.
-pub fn pkg_lock_record_cran_realization(project_root: String, name: String, version: String, reference: String, output: String, source_hash: String, repository: String, authority: String, dependencies: [String], envelope: LockEnvelope) -[FS, Env, Exec, Time, Time.Wait]> {
+pub fn pkg_lock_record_cran_realization(project_root: String, name: String, version: String, reference: String, output: String, source_hash: String, repository: String, authority: String, dependencies: [String], envelope: LockEnvelope) -[FS, Env, Exec, Time, Time.Wait, IO]> {
     source :: LockSource.Cran{reference: reference, output: output, source_hash: source_hash, repository: repository, authority: authority}
     pkg_lock_record_source_realization(project_root, name, version, source, source_hash, dependencies, envelope, package -> package.is_cran())
 }
@@ -361,7 +374,7 @@ pub fn pkg_lock_cran_realization(project_root: String, reference: String) -[FS]>
 }
 
 // Record an exact LuaRocks source closure and realized module tree.
-pub fn pkg_lock_record_luarocks_realization(project_root: String, name: String, version: String, reference: String, output: String, source_hash: String, repository: String, authority: String, dependencies: [String], envelope: LockEnvelope) -[FS, Env, Exec, Time, Time.Wait]> {
+pub fn pkg_lock_record_luarocks_realization(project_root: String, name: String, version: String, reference: String, output: String, source_hash: String, repository: String, authority: String, dependencies: [String], envelope: LockEnvelope) -[FS, Env, Exec, Time, Time.Wait, IO]> {
     source :: LockSource.LuaRocks{reference: reference, output: output, source_hash: source_hash, repository: repository, authority: authority}
     pkg_lock_record_source_realization(project_root, name, version, source, source_hash, dependencies, envelope, package -> package.is_luarocks())
 }
@@ -386,7 +399,7 @@ pub fn pkg_lock_luarocks_realization(project_root: String, reference: String) -[
 
 // Record one exact RubyGems/CPAN/Packagist closure under the shared lock
 // law.
-pub fn pkg_lock_record_registry_realization(project_root: String, registry: String, name: String, version: String, reference: String, output: String, source_hash: String, repository: String, authority: String, dependencies: [String], envelope: LockEnvelope) -[FS, Env, Exec, Time, Time.Wait]> {
+pub fn pkg_lock_record_registry_realization(project_root: String, registry: String, name: String, version: String, reference: String, output: String, source_hash: String, repository: String, authority: String, dependencies: [String], envelope: LockEnvelope) -[FS, Env, Exec, Time, Time.Wait, IO]> {
     source :: LockSource.Registry{registry: registry, reference: reference, output: output, source_hash: source_hash, repository: repository, authority: authority, tier: "not-applicable", gate_status: "not-applicable"}
     pkg_lock_record_source_realization(project_root, name, version, source, source_hash, dependencies, envelope, package -> package.is_registry(registry))
 }
@@ -418,7 +431,7 @@ pub fn pkg_lock_record_toolchain(project_root: String, toolchain: LockedToolchai
     toolchain.validate_completeness()
     loaded :: pkg_lock_load_strict(project_root)
     lock := loaded ?? LockFile.empty()
-    lock.version = @PKG_LOCK_VERSION
+    lock.version = PKG_LOCK_VERSION
     replaced := false
     loop index in 0..<lock.toolchains.len() {
         if !replaced && lock.toolchains[index].channel == toolchain.channel {
@@ -430,16 +443,16 @@ pub fn pkg_lock_record_toolchain(project_root: String, toolchain: LockedToolchai
     lock.validate_completeness()
     pkg_lock_ensure_build_stamp(project_root, &lock)
     if pkg_lock_write_atomically(project_root, pkg_lock_write(lock).bytes()) == {
-        .Ok(_) -> Ok()
-        .Err(error) -> Err(LockError.Invalid("could not write `{@UNIFIED_LOCK_FILE}`: {error.message()}"))
+        .Ok(_) -> {}
+        .Err(error) -> return Err(LockError.Invalid("could not write `{UNIFIED_LOCK_FILE}`: {error.message()}"))
     }
 }
 
 // D-BROWSER-AUTO1=A (#1187): upsert a project-locked browser binary by
 // engine.
-pub fn pkg_lock_record_browser(project_root: String, browser: LockedBrowser) -[FS, Env, Exec, Time, Time.Wait]> {
+pub fn pkg_lock_record_browser(project_root: String, browser: LockedBrowser) -[FS, Env, Exec, Time, Time.Wait, IO]> {
     lock := pkg_lock_load_or_empty(project_root)
-    lock.version = @PKG_LOCK_VERSION
+    lock.version = PKG_LOCK_VERSION
     replaced := false
     loop index in 0..<lock.browsers.len() {
         if !replaced && lock.browsers[index].engine == browser.engine {
@@ -466,7 +479,7 @@ pub fn pkg_lock_record_source_channel(project_root: String, input: LockedSourceC
     source.validate_completeness()
     loaded :: pkg_lock_load_strict(project_root)
     lock := loaded ?? LockFile.empty()
-    lock.version = @PKG_LOCK_VERSION
+    lock.version = PKG_LOCK_VERSION
     replaced := false
     loop index in 0..<lock.source_channels.len() {
         if !replaced && lock.source_channels[index].name == source.name {
@@ -478,7 +491,7 @@ pub fn pkg_lock_record_source_channel(project_root: String, input: LockedSourceC
     lock.validate_completeness()
     pkg_lock_ensure_build_stamp(project_root, &lock)
     if pkg_lock_write_atomically(project_root, pkg_lock_write(lock).bytes()) == {
-        .Ok(_) -> Ok()
-        .Err(error) -> Err(LockError.Invalid("could not write `{@UNIFIED_LOCK_FILE}`: {error.message()}"))
+        .Ok(_) -> {}
+        .Err(error) -> return Err(LockError.Invalid("could not write `{UNIFIED_LOCK_FILE}`: {error.message()}"))
     }
 }

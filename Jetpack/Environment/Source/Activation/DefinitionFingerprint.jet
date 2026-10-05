@@ -7,7 +7,7 @@
 // fails closed (no fingerprint) once any bound is exceeded; it never follows
 // links it did not declare.
 
-@ENV_HOOK_RELOAD_STATE_FILE :: "env-hook-reload"
+ENV_HOOK_RELOAD_STATE_FILE :: prep { "env-hook-reload" }
 
 // One hashed input: a typed name and its bytes.
 struct DefinitionInput {
@@ -28,7 +28,7 @@ struct FingerprintBudget {
 
     fn push(&self, inputs: &[DefinitionInput], name: String, bytes: [U8]) Never! {
         length :: bytes.len()
-        if self.entries >= @MAX_TREE_FILES || self.bytes + length > @MAX_TREE_TOTAL_BYTES {
+        if self.entries >= MAX_TREE_FILES || self.bytes + length > MAX_TREE_TOTAL_BYTES {
             self.exceeded = true
             return
         }
@@ -38,7 +38,7 @@ struct FingerprintBudget {
     }
 
     fn visit(&self) -> Bool Never! {
-        if self.nodes >= @MAX_TREE_FILES {
+        if self.nodes >= MAX_TREE_FILES {
             self.exceeded = true
             return false
         }
@@ -47,7 +47,7 @@ struct FingerprintBudget {
     }
 
     fn allow_file(&self, length: Int) -> Bool Never! {
-        if length > @MAX_TREE_FILE_BYTES || self.bytes + length > @MAX_TREE_TOTAL_BYTES {
+        if length > MAX_TREE_FILE_BYTES || self.bytes + length > MAX_TREE_TOTAL_BYTES {
             self.exceeded = true
             return false
         }
@@ -63,7 +63,7 @@ pub fn env_hook_definition_fingerprint(root: String, requested_preset: String?) 
 // Hash the activation plan for both kinds of explicit selection: a named
 // preset inside `env.jet`, and one declared `env.<name>` module.
 pub fn env_hook_definition_fingerprint_with_selections(root: String, requested_preset: String?, requested_environment: String?) -[FS, Env]> String? Never! {
-    raw :: env_hook_read_nofollow(files.join(root, @ENV_FILE), @MAX_TREE_FILE_BYTES) ?? return None
+    raw :: env_hook_read_nofollow(files.join(root, ENV_FILE), MAX_TREE_FILE_BYTES) ?? return None
     bytes :: raw ?? return None
     source :: String.from_bytes(bytes) ?? return None
     if envmodel_evaluate_env_with_selections(source, root, requested_preset, requested_environment) == {
@@ -111,7 +111,7 @@ fn env_hook_fingerprint_from_inputs(root: String, requested_preset: String?, req
         if profile.name == profile_name -> declares_profile = true
     }
     if declares_profile {
-        env_hook_add_input(root, "{@SOURCE_ROOT_DIR}/profiles/{profile_name}/current", "package-profile-current", &budget, &inputs)
+        env_hook_add_input(root, "{SOURCE_ROOT_DIR}/profiles/{profile_name}/current", "package-profile-current", &budget, &inputs)
     }
     &budget.push(&inputs, "lifecycle", lifecycle.fingerprint().bytes())
     loop preset in presets {
@@ -125,7 +125,7 @@ fn env_hook_fingerprint_from_inputs(root: String, requested_preset: String?, req
 }
 
 fn env_hook_finish_definition_fingerprint(root: String, requested_preset: String?, requested_environment: String?, budget: &FingerprintBudget, inputs: &[DefinitionInput]) -[FS, Env]> String? Never! {
-    project_files :: [String]{@UNIFIED_LOCK_FILE, @PACKAGE_FILE, @PAYLOAD_FILE}
+    project_files :: [String]{UNIFIED_LOCK_FILE, PACKAGE_FILE, PAYLOAD_FILE}
     loop relative in project_files -> env_hook_add_input(root, relative, "project", budget, inputs)
     host :: sys.get("HOSTNAME") ?? ""
     user :: sys.get("USER") ?? (sys.get("USERNAME") ?? "")
@@ -134,7 +134,7 @@ fn env_hook_finish_definition_fingerprint(root: String, requested_preset: String
     if budget.exceeded -> return None
     ordered := inputs
     &ordered.sort_by((left: DefinitionInput, right: DefinitionInput) -> (left.name <=> right.name).then(left.bytes <=> right.bytes))
-    hasher := StreamingSha256.new()
+    hasher := StreamingSHA256.new()
     loop input in ordered {
         &hasher.update(input.name.bytes())
         &hasher.update([U8]{U8{0}})
@@ -188,7 +188,7 @@ fn env_hook_add_input(root: String, relative: String, kind: String, budget: &Fin
         &budget.push(inputs, "{kind}:unsafe:{relative}", [U8]{})
         return
     }
-    if env_hook_normal_component_count(relative) > @MAX_TREE_DEPTH {
+    if env_hook_normal_component_count(relative) > MAX_TREE_DEPTH {
         budget.exceeded = true
         return
     }
@@ -200,7 +200,7 @@ fn env_hook_add_input(root: String, relative: String, kind: String, budget: &Fin
 
 fn env_hook_add_input_path(root: String, path: String, relative: String, kind: String, budget: &FingerprintBudget, inputs: &[DefinitionInput], visited: &[String: Bool], depth: Int) -[FS, Env]> {
     if budget.exceeded -> return
-    if depth > @MAX_TREE_DEPTH || !&budget.visit() {
+    if depth > MAX_TREE_DEPTH || !&budget.visit() {
         budget.exceeded = true
         return
     }
@@ -231,11 +231,11 @@ fn env_hook_add_input_path(root: String, path: String, relative: String, kind: S
             &budget.push(inputs, "{kind}:unreadable:{relative}", [U8]{})
             return
         }
-        if children.len() > @MAX_TREE_FILES {
+        if children.len() > MAX_TREE_FILES {
             budget.exceeded = true
             return
         }
-        if depth >= @MAX_TREE_DEPTH {
+        if depth >= MAX_TREE_DEPTH {
             budget.exceeded = true
             return
         }
@@ -248,7 +248,7 @@ fn env_hook_add_input_path(root: String, path: String, relative: String, kind: S
     }
     if info.is_file {
         if !&budget.allow_file(info.size) -> return
-        if env_hook_read_nofollow(path, @MAX_TREE_FILE_BYTES) == {
+        if env_hook_read_nofollow(path, MAX_TREE_FILE_BYTES) == {
             .Ok(read) -> {
                 if read == {
                     .Val(bytes) -> &budget.push(inputs, "{kind}:file:{relative}", bytes)
@@ -270,29 +270,29 @@ fn env_hook_system_time_debug(modified: Instant) -> String Never! {
 }
 
 fn env_hook_collect_definition_files(root: String, current: String, budget: &FingerprintBudget, inputs: &[DefinitionInput], depth: Int) -[FS, Env]> {
-    if budget.exceeded || depth > @MAX_TREE_DEPTH || !&budget.visit() {
+    if budget.exceeded || depth > MAX_TREE_DEPTH || !&budget.visit() {
         budget.exceeded = true
         return
     }
     entries :: files.list_dir(current) ?? return
-    if entries.len() > @MAX_TREE_FILES {
+    if entries.len() > MAX_TREE_FILES {
         budget.exceeded = true
         return
     }
     loop entry in entries {
-        if entry.name == @SOURCE_ROOT_DIR -> next
+        if entry.name == SOURCE_ROOT_DIR -> next
         path :: files.join(current, entry.name)
         info :: files.stat(path) ?? next
         // Pre-trust discovery never follows attacker-controlled links;
         // declared inputs are handled by `env_hook_add_input_path`.
         if info.is_symlink -> next
         if info.is_dir {
-            if depth >= @MAX_TREE_DEPTH {
+            if depth >= MAX_TREE_DEPTH {
                 budget.exceeded = true
                 return
             }
             env_hook_collect_definition_files(root, path, budget, inputs, depth + 1)
-        } else if info.is_file && entry.name.ends_with(".{@FILE_EXT}") {
+        } else if info.is_file && entry.name.ends_with(".{FILE_EXT}") {
             relative :: env_hook_relative_to(path, root)
             env_hook_add_input(root, relative, "source", budget, inputs)
         }
@@ -315,7 +315,7 @@ pub fn env_hook_reload_policy(root: String) -[FS, Env]> ReloadPolicy Never! {
 
 // The reload policy of the selected `env.<name>` environment module.
 pub fn env_hook_reload_policy_with_environment(root: String, requested_environment: String?) -[FS, Env]> ReloadPolicy Never! {
-    raw :: env_hook_read_nofollow(files.join(root, @ENV_FILE), @MAX_TREE_FILE_BYTES) ?? return ReloadPolicy.Prompt
+    raw :: env_hook_read_nofollow(files.join(root, ENV_FILE), MAX_TREE_FILE_BYTES) ?? return ReloadPolicy.Prompt
     bytes :: raw ?? return ReloadPolicy.Prompt
     source :: String.from_bytes(bytes) ?? return ReloadPolicy.Prompt
     plan :: envmodel_evaluate_env_with_selections(source, root, None, requested_environment) ?? return ReloadPolicy.Prompt
@@ -327,8 +327,8 @@ pub fn env_hook_reload_policy_with_environment(root: String, requested_environme
 // value; it never stores environment values or secrets.
 pub fn env_hook_watch_reload_ready(root: String, hash: String, debounce_ms: Int) -[FS, Env, Time]> Bool EnvironmentError! {
     if debounce_ms == 0 -> return Ok(true)
-    state_dir :: files.join(root, @CONFIG_DEFAULT_DIR)
-    state_path :: files.join(state_dir, @ENV_HOOK_RELOAD_STATE_FILE)
+    state_dir :: files.join(root, CONFIG_DEFAULT_DIR)
+    state_path :: files.join(state_dir, ENV_HOOK_RELOAD_STATE_FILE)
     now :: time.unix_ms(time.now())
     if files.read(state_path) == .Ok(state) {
         lines :: state.lines().to_list()
@@ -348,5 +348,5 @@ pub fn env_hook_watch_reload_ready(root: String, hash: String, debounce_ms: Int)
 
 // Remove the debounce marker after a watched definition has activated.
 pub fn env_hook_clear_watch_reload(root: String) -[FS]> {
-    files.remove(files.join(files.join(root, @CONFIG_DEFAULT_DIR), @ENV_HOOK_RELOAD_STATE_FILE)).drop("an absent debounce marker needs no removal")
+    files.remove(files.join(files.join(root, CONFIG_DEFAULT_DIR), ENV_HOOK_RELOAD_STATE_FILE)).drop("an absent debounce marker needs no removal")
 }

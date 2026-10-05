@@ -3,15 +3,7 @@
 // canonical action key, legacy migration, and the one registration boundary
 // that appends a durable closure transaction.
 
-@STORE_RECEIPTS_DIR :: "receipts"
-
-// Closure members already proven against their seals in this process, as
-// `hangar\tdigest\n` lines. A 28-package env shares one toolchain closure;
-// without this each package re-stat-walks every shared member. Entry-level
-// verification never consults this memo, so the sealed drift law for package
-// outputs is unchanged; member drift is caught by the next command (the
-// trust window D-JPK-VERIFYONCE1=A ratified for stat-identical content).
-store_proven_members := ""
+STORE_RECEIPTS_DIR :: prep { "receipts" }
 
 pub struct ClosureObject {
     pub digest: String
@@ -162,8 +154,7 @@ fn store_closure_walk(index: [String: [String]], start: String) -> [String] Neve
     seen := [String: Bool]{}
     pending := index.get(start) ?? [String]{}
     loop pending.len() > 0 {
-        next_digest :: pending[pending.len() - 1]
-        pending = pending[0..<(pending.len() - 1)]
+        next_digest :: &pending.pop() ?? break
         if next_digest == start || seen.has_key(next_digest) -> next
         seen[next_digest] = true
         referenced :: index.get(next_digest) ?? [String]{}
@@ -222,29 +213,29 @@ pub fn store_validate_universe_isolation(graph: ClosureGraph, allow_legacy: Bool
     }
 }
 
-pub fn store_closure_graph(roots: HangarRoots) -> ClosureGraph StoreError! {
+pub fn store_closure_graph(verification: &StoreVerification, roots: HangarRoots) -> ClosureGraph StoreError! {
     hangar_lock :: env_runtime_lock(roots.root, "hangar")
-    migrated :: store_migrate_closure_graph_unlocked(roots)
-    store_validate_graph_store_proofs(roots, migrated.graph, false)
+    migrated :: store_migrate_closure_graph_unlocked(&verification, roots)
+    store_validate_graph_store_proofs(&verification, roots, migrated.graph, false)
     Ok(migrated.graph)
 }
 
-pub fn store_closure_graph_structure(roots: HangarRoots) -> ClosureGraph StoreError! {
+pub fn store_closure_graph_structure(verification: &StoreVerification, roots: HangarRoots) -> ClosureGraph StoreError! {
     hangar_lock :: env_runtime_lock(roots.root, "hangar")
-    store_closure_graph_structure_unlocked(roots)
+    store_closure_graph_structure_unlocked(&verification, roots)
 }
 
 // The migration + graph read is a pure function of committed journal state.
 // Rust memoized it per process on the WAL state stamp; every call here reads
 // the committed state, which the stamp would have proven equal.
-pub fn store_closure_graph_structure_unlocked(roots: HangarRoots) -> ClosureGraph StoreError! {
-    migrated :: store_migrate_closure_graph_unlocked(roots)
+pub fn store_closure_graph_structure_unlocked(verification: &StoreVerification, roots: HangarRoots) -> ClosureGraph StoreError! {
+    migrated :: store_migrate_closure_graph_unlocked(&verification, roots)
     Ok(migrated.graph)
 }
 
-pub fn store_lifecycle_closure_graph_unlocked(roots: HangarRoots) -> ClosureGraph StoreError! {
-    migrated :: store_migrate_closure_graph_unlocked(roots)
-    store_validate_graph_store_proofs(roots, migrated.graph, false)
+pub fn store_lifecycle_closure_graph_unlocked(verification: &StoreVerification, roots: HangarRoots) -> ClosureGraph StoreError! {
+    migrated :: store_migrate_closure_graph_unlocked(&verification, roots)
+    store_validate_graph_store_proofs(&verification, roots, migrated.graph, false)
     Ok(migrated.graph)
 }
 
@@ -252,9 +243,9 @@ pub fn store_lifecycle_closure_graph_unlocked(roots: HangarRoots) -> ClosureGrap
 // malformed. The plan must inspect valid legacy records without letting one
 // bad projection block the whole store, but it must not repair the bad
 // projection before the plan can name it for quarantine.
-pub fn store_lifecycle_closure_graph_unlocked_ignoring(roots: HangarRoots, ignored: [String]) -> ClosureGraph StoreError! {
-    migrated :: store_migrate_closure_graph_unlocked_ignoring(roots, ignored)
-    store_validate_graph_store_proofs(roots, migrated.graph, false)
+pub fn store_lifecycle_closure_graph_unlocked_ignoring(verification: &StoreVerification, roots: HangarRoots, ignored: [String]) -> ClosureGraph StoreError! {
+    migrated :: store_migrate_closure_graph_unlocked_ignoring(&verification, roots, ignored)
+    store_validate_graph_store_proofs(&verification, roots, migrated.graph, false)
     Ok(migrated.graph)
 }
 
@@ -270,32 +261,55 @@ pub fn store_entry_record_store_proof(graph: ClosureGraph, entry: StoreEntry) ->
 
 // Object-byte leg only; the caller must also require
 // `store_entry_record_store_proof`.
-pub fn store_entry_closure_objects_rehash(roots: HangarRoots, graph: ClosureGraph, entry: StoreEntry) -> Bool Never! {
+pub fn store_entry_closure_objects_rehash(verification: &StoreVerification, roots: HangarRoots, graph: ClosureGraph, entry: StoreEntry) -> Bool Never! {
     loop digest in graph.transitive_references(entry.envelope.output_hash) {
-        if !store_closure_object_rehashes(roots, graph, digest) -> return false
+        if !store_closure_object_rehashes(&verification, roots, graph, digest) -> return false
     }
     true
 }
 
-pub fn store_invalidate_proven_member(hangar: String, digest: String) Never! {
-    line :: "{hangar}\t{digest}"
-    kept := ""
-    loop existing in store_text_lines(store_proven_members) {
-        if existing == line -> next
-        kept = "{kept}{existing}\n"
-    }
-    store_proven_members = kept
+// Closure members already proven against their seals by this verification
+// owner (Rust process-wide `PROVEN_MEMBERS`). A 28-package env shares one
+// toolchain closure; without this each package re-stat-walks every shared
+// member. Entry-level verification never consults this memo, so the sealed
+// drift law for package outputs is unchanged; member drift is caught by the
+// next command (the trust window D-JPK-VERIFYONCE1=A ratified for
+// stat-identical content). The set is keyed by (hangar root, digest), so a
+// member replaced under a different digest never hits. A canonical digest
+// never contains a tab, so the joined key is unambiguous.
+fn store_proven_member_key(hangar: String, digest: String) -> String Never! {
+    "{hangar}\t{digest}"
 }
 
-fn store_closure_object_rehashes(roots: HangarRoots, graph: ClosureGraph, digest: String) -> Bool Never! {
-    line :: "{roots.hangar_dir()}\t{digest}"
-    if store_text_lines(store_proven_members).contains(line) -> return true
-    ok :: store_closure_object_rehashes_uncached(roots, graph, digest)
-    if ok -> store_proven_members = "{store_proven_members}{line}\n"
+pub fn store_invalidate_proven_member(verification: &StoreVerification, hangar: String, digest: String) Never! {
+    state :: verification.state
+    permit := state.guard_edit()
+    &permit.value.proven_members.remove(store_proven_member_key(hangar, digest)).drop("a member may never have been proven")
+}
+
+fn store_proven_member_contains(verification: &StoreVerification, key: String) -> Bool Never! {
+    state :: verification.state
+    permit :: state.guard_read()
+    permit.value.proven_members.has_key(key)
+}
+
+fn store_proven_member_insert(verification: &StoreVerification, key: String) Never! {
+    state :: verification.state
+    permit := state.guard_edit()
+    permit.value.proven_members[key] = true
+}
+
+// Each guard is held only inside its helper, so the uncached re-hash never
+// runs filesystem work while the shared verification state is locked.
+fn store_closure_object_rehashes(verification: &StoreVerification, roots: HangarRoots, graph: ClosureGraph, digest: String) -> Bool Never! {
+    key :: store_proven_member_key(roots.hangar_dir(), digest)
+    if store_proven_member_contains(&verification, key) -> return true
+    ok :: store_closure_object_rehashes_uncached(&verification, roots, graph, digest)
+    if ok -> store_proven_member_insert(&verification, key)
     ok
 }
 
-fn store_closure_object_rehashes_uncached(roots: HangarRoots, graph: ClosureGraph, digest: String) -> Bool Never! {
+fn store_closure_object_rehashes_uncached(verification: &StoreVerification, roots: HangarRoots, graph: ClosureGraph, digest: String) -> Bool Never! {
     object :: graph.objects.get(digest) ?? return false
     hangar :: roots.hangar_dir()
     found_owner := false
@@ -307,55 +321,54 @@ fn store_closure_object_rehashes_uncached(roots: HangarRoots, graph: ClosureGrap
         // multi-output record owns members whose digests are not its
         // primary hash.
         owner_entry :: store_entry_from_meta(record.id, meta)
-        actual :: store_verified_output_hash_persistent(object.path, Val(hangar), owner_entry.platform_artifact_kind != "") ?? return false
+        actual :: store_verified_output_hash_persistent(&verification, object.path, Val(hangar), owner_entry.platform_artifact_kind != "") ?? return false
         if actual != digest -> return false
     }
     if found_owner -> return true
     // Every admitted object (directory, regular-file, or symlink root) is
     // named by its canonical output hash and sealed at admission.
-    actual :: store_verified_output_hash_persistent(object.path, Val(hangar), false) ?? return false
+    actual :: store_verified_output_hash_persistent(&verification, object.path, Val(hangar), false) ?? return false
     actual == digest
 }
 
-pub fn store_direct_references_of(roots: HangarRoots, digest: String) -> [String] StoreError! {
-    Ok(store_closure_graph(roots).direct_references(digest))
+pub fn store_direct_references_of(verification: &StoreVerification, roots: HangarRoots, digest: String) -> [String] StoreError! {
+    Ok(store_closure_graph(&verification, roots).direct_references(digest))
 }
 
-pub fn store_transitive_references_of(roots: HangarRoots, digest: String) -> [String] StoreError! {
-    Ok(store_closure_graph(roots).transitive_references(digest))
+pub fn store_transitive_references_of(verification: &StoreVerification, roots: HangarRoots, digest: String) -> [String] StoreError! {
+    Ok(store_closure_graph(&verification, roots).transitive_references(digest))
 }
 
-pub fn store_closure_of(roots: HangarRoots, digest: String) -> [String] StoreError! {
-    Ok(store_closure_graph(roots).closure(digest))
+pub fn store_closure_of(verification: &StoreVerification, roots: HangarRoots, digest: String) -> [String] StoreError! {
+    Ok(store_closure_graph(&verification, roots).closure(digest))
 }
 
-pub fn store_referrers_of(roots: HangarRoots, digest: String) -> [String] StoreError! {
-    Ok(store_closure_graph(roots).referrers(digest))
+pub fn store_referrers_of(verification: &StoreVerification, roots: HangarRoots, digest: String) -> [String] StoreError! {
+    Ok(store_closure_graph(&verification, roots).referrers(digest))
 }
 
-pub fn store_transitive_referrers_of(roots: HangarRoots, digest: String) -> [String] StoreError! {
-    Ok(store_closure_graph(roots).transitive_referrers(digest))
+pub fn store_transitive_referrers_of(verification: &StoreVerification, roots: HangarRoots, digest: String) -> [String] StoreError! {
+    Ok(store_closure_graph(&verification, roots).transitive_referrers(digest))
 }
 
-pub fn store_reverse_closure_of(roots: HangarRoots, digest: String) -> [String] StoreError! {
-    Ok(store_closure_graph(roots).reverse_closure(digest))
+pub fn store_reverse_closure_of(verification: &StoreVerification, roots: HangarRoots, digest: String) -> [String] StoreError! {
+    Ok(store_closure_graph(&verification, roots).reverse_closure(digest))
 }
 
-pub fn store_action_outputs_of(roots: HangarRoots, action_key: String) -> [String: String] StoreError! {
-    Ok(store_closure_graph(roots).action_outputs(action_key))
+pub fn store_action_outputs_of(verification: &StoreVerification, roots: HangarRoots, action_key: String) -> [String: String] StoreError! {
+    Ok(store_closure_graph(&verification, roots).action_outputs(action_key))
 }
 
-pub fn store_actions_for_output(roots: HangarRoots, digest: String) -> [String] StoreError! {
-    Ok(store_closure_graph(roots).actions_for_output(digest))
+pub fn store_actions_for_output(verification: &StoreVerification, roots: HangarRoots, digest: String) -> [String] StoreError! {
+    Ok(store_closure_graph(&verification, roots).actions_for_output(digest))
 }
 
 // The canonical action key of a package record.
 pub fn store_entry_action_key(entry: StoreEntry) -> String Never! {
     identity :: entry.cache_identity
-    decoded :: ProducerRecord.decode(entry.producer_record)
     canonical := "jet.action-store.v5".bytes()
     &canonical.push(U8{0})
-    if decoded == {
+    if ProducerRecord.decode(entry.producer_record) == {
         .Ok(producer) -> {
             nix :: producer.provider == "nix"
             // A Nix derivation path is the canonical input/action identity.
@@ -409,9 +422,9 @@ fn store_action_replay_fact(key: String) -> Bool Never! {
     !key.starts_with("nix.output.") && !key.starts_with("output.") && key != "cache.reproducibility"
 }
 
-pub fn store_migrate_closure_graph(roots: HangarRoots) -> Int StoreError! {
+pub fn store_migrate_closure_graph(verification: &StoreVerification, roots: HangarRoots) -> Int StoreError! {
     hangar_lock :: env_runtime_lock(roots.root, "hangar")
-    migrated :: store_migrate_closure_graph_unlocked(roots)
+    migrated :: store_migrate_closure_graph_unlocked(&verification, roots)
     Ok(migrated.migrated)
 }
 
@@ -436,17 +449,17 @@ fn store_push_dir_stats(table: &[U8], dir: String) StoreError! {
     directory :: if files.stat(dir) == {
         .Ok(metadata) -> metadata
         .Err(error) -> {
-            if !StoreError.Io(error).is_not_found() -> return Err(StoreError.Io(error))
+            if !StoreError.IO(error).is_not_found() -> return Err(StoreError.IO(error))
             store_push_bytes(&table, "directory-missing".bytes())
             &table.push(U8{0})
-            return Ok()
+            return
         }
     }
     store_push_bytes(&table, "directory-present".bytes())
     &table.push(U8{0})
     if !directory.is_dir {
         store_push_stat(&table, dir, directory)
-        return Ok()
+        return
     }
     entries := files.list_dir(dir)
     &entries.sort_by(entry -> entry.name)
@@ -460,9 +473,9 @@ pub fn store_wal_state_stamp(roots: HangarRoots) -> String StoreError! {
     table := [U8]{}
     hangar :: roots.hangar_dir()
     store_push_dir_stats(&table, store_journal_dir(roots))
-    store_push_dir_stats(&table, files.join(hangar, @STORE_RECEIPTS_DIR))
-    store_push_dir_stats(&table, files.join(hangar, @STORE_SEALS_DIR))
-    store_push_dir_stats(&table, files.join(hangar, @STORE_OBJECTS_DIR))
+    store_push_dir_stats(&table, files.join(hangar, STORE_RECEIPTS_DIR))
+    store_push_dir_stats(&table, files.join(hangar, STORE_SEALS_DIR))
+    store_push_dir_stats(&table, files.join(hangar, STORE_OBJECTS_DIR))
     // Entry set: a new or deleted entry must invalidate, but the entry NAME
     // alone is enough; meta content is authenticated against its immutable
     // receipt on every load, and warm runs bump `last_used_at` (meta mtime)
@@ -481,20 +494,20 @@ pub fn store_wal_state_stamp(roots: HangarRoots) -> String StoreError! {
                 store_push_bytes(&table, name.bytes())
             }
         }
-        .Err(error) -> if !StoreError.Io(error).is_not_found() -> return Err(StoreError.Io(error))
+        .Err(error) -> if !StoreError.IO(error).is_not_found() -> return Err(StoreError.IO(error))
     }
     Ok(store_sha256_hex(table))
 }
 
-pub fn store_migrate_closure_graph_unlocked(roots: HangarRoots) -> (migrated: Int, graph: ClosureGraph) StoreError! {
-    recovered :: store_recover_closure_journal_graph_unlocked(roots)
+pub fn store_migrate_closure_graph_unlocked(verification: &StoreVerification, roots: HangarRoots) -> (migrated: Int, graph: ClosureGraph) StoreError! {
+    recovered :: store_recover_closure_journal_graph_unlocked(&verification, roots)
     entries := store_list_unlocked(roots)
     &entries.sort_by(entry -> entry.id)
-    store_migrate_closure_graph_from_entries(roots, recovered.graph, entries)
+    store_migrate_closure_graph_from_entries(&verification, roots, recovered.graph, entries)
 }
 
-fn store_migrate_closure_graph_unlocked_ignoring(roots: HangarRoots, ignored: [String]) -> (migrated: Int, graph: ClosureGraph) StoreError! {
-    graph := store_closure_graph_structure_read_only(roots)
+fn store_migrate_closure_graph_unlocked_ignoring(verification: &StoreVerification, roots: HangarRoots, ignored: [String]) -> (migrated: Int, graph: ClosureGraph) StoreError! {
+    graph := store_closure_graph_structure_read_only(&verification, roots)
     deleted := ~graph.deleted_records
     loop id in ignored {
         graph.records.remove(id).drop("an ignored id may have no record")
@@ -507,17 +520,17 @@ fn store_migrate_closure_graph_unlocked_ignoring(roots: HangarRoots, ignored: [S
         &entries.push(entry)
     }
     &entries.sort_by(entry -> entry.id)
-    store_migrate_closure_graph_from_entries(roots, graph, entries)
+    store_migrate_closure_graph_from_entries(&verification, roots, graph, entries)
 }
 
-fn store_migrate_closure_graph_from_entries(roots: HangarRoots, graph: ClosureGraph, entries: [StoreEntry]) -> (migrated: Int, graph: ClosureGraph) StoreError! {
+fn store_migrate_closure_graph_from_entries(verification: &StoreVerification, roots: HangarRoots, graph: ClosureGraph, entries: [StoreEntry]) -> (migrated: Int, graph: ClosureGraph) StoreError! {
     seen_records := [String: Bool]{}
     objects := [String: ClosureObject]{}
     records := [ClosureRecord]{}
     loop legacy in entries {
         entry :: store_normalize_legacy_entry(legacy)
         if graph.deleted_records.contains(entry.id) -> next
-        descriptor :: store_descriptor_for_entry(roots, entry)
+        descriptor :: store_descriptor_for_entry(&verification, roots, entry)
         record :: descriptor.record
         if seen_records.has_key(record.id) -> return Err(StoreError.Other("legacy migration contains duplicate record `{record.id}`"))
         seen_records[record.id] = true
@@ -542,7 +555,7 @@ fn store_migrate_closure_graph_from_entries(roots: HangarRoots, graph: ClosureGr
     if objects.len() == 0 && records.len() == 0 {
         // Steady state is exactly where an overgrown journal must fold into
         // one snapshot; skipping here meant a warm store never compacted.
-        store_compact_if_needed(roots)
+        store_compact_if_needed(&verification, roots)
         return Ok((migrated: 0, graph: graph))
     }
     migrated :: records.len()
@@ -552,12 +565,12 @@ fn store_migrate_closure_graph_from_entries(roots: HangarRoots, graph: ClosureGr
     updated := graph
     store_apply_entry(&updated, transaction)
     store_validate_graph_structure_mode(roots, updated, false)
-    loop record in transaction.records -> store_validate_record_store_proof(roots, record, false)
+    loop record in transaction.records -> store_validate_record_store_proof(&verification, roots, record, false)
     _ :: store_append_entry(roots, transaction)
     loop record in transaction.records {
         _ :: store_materialize_package_record(roots, record)
     }
-    store_compact_if_needed(roots)
+    store_compact_if_needed(&verification, roots)
     Ok((migrated: migrated, graph: updated))
 }
 
@@ -569,8 +582,8 @@ fn store_sorted_object_keys(objects: [String: ClosureObject]) -> [String] Never!
 
 // Single-entry registration seam for tests and the `test-seam` backdater,
 // which deliberately re-runs the full validation path for one entry.
-pub fn store_register_entry_unlocked(roots: HangarRoots, entry: StoreEntry) -> Bool StoreError! {
-    store_register_entries_unlocked_with_mode(roots, [StoreEntry]{entry}, RegistrationMode.Native, None)
+pub fn store_register_entry_unlocked(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry) -> Bool StoreError! {
+    store_register_entries_unlocked_with_mode(&verification, roots, [StoreEntry]{entry}, RegistrationMode.Native, None)
 }
 
 // Register a batch of already-quarantined entries as one closure
@@ -578,18 +591,18 @@ pub fn store_register_entry_unlocked(roots: HangarRoots, entry: StoreEntry) -> B
 // made every output path live before calling this function. All graph
 // conflicts and store proofs are checked before the single durable journal
 // append, so a failed batch cannot leave an earlier entry committed.
-pub fn store_register_entries_unlocked(roots: HangarRoots, entries: [StoreEntry]) -> Bool StoreError! {
-    store_register_entries_unlocked_with_mode(roots, entries, RegistrationMode.Native, None)
+pub fn store_register_entries_unlocked(verification: &StoreVerification, roots: HangarRoots, entries: [StoreEntry]) -> Bool StoreError! {
+    store_register_entries_unlocked_with_mode(&verification, roots, entries, RegistrationMode.Native, None)
 }
 
-pub fn store_register_admitted_nix_entries_unlocked(roots: HangarRoots, entries: [StoreEntry]) -> Bool StoreError! {
-    store_register_entries_unlocked_with_mode(roots, entries, RegistrationMode.AdmittedNix, None)
+pub fn store_register_admitted_nix_entries_unlocked(verification: &StoreVerification, roots: HangarRoots, entries: [StoreEntry]) -> Bool StoreError! {
+    store_register_entries_unlocked_with_mode(&verification, roots, entries, RegistrationMode.AdmittedNix, None)
 }
 
 // Shared closure-registration half of the Hangar admission transaction.
 // Format adapters choose only the output-proof law; certification, conflict
 // checks, journal append, and recoverable projection stay one mechanism.
-pub fn store_register_entries_unlocked_with_mode(roots: HangarRoots, entries: [StoreEntry], mode: RegistrationMode, fresh_action_key: String?) -> Bool StoreError! {
+pub fn store_register_entries_unlocked_with_mode(verification: &StoreVerification, roots: HangarRoots, entries: [StoreEntry], mode: RegistrationMode, fresh_action_key: String?) -> Bool StoreError! {
     if entries.len() == 0 -> return Ok(false)
     hangar :: roots.hangar_dir()
     loop entry in entries {
@@ -603,23 +616,24 @@ pub fn store_register_entries_unlocked_with_mode(roots: HangarRoots, entries: [S
         // hardlinks. Refresh only the stat manifest: the transaction already
         // checked the canonical digest before publication.
         digest :: entry.envelope.output_hash
-        if digest != "" && store_object_digest_for_path(entry.out, hangar) == Val(digest) {
-            store_write_seal(entry.out, hangar, digest)
+        canonical_digest :: store_object_digest_for_path(entry.out, hangar) ?? ""
+        if digest != "" && canonical_digest == digest {
+            store_write_seal(&verification, entry.out, hangar, digest)
         }
-        store_verify_registration_output(roots, entry)
+        store_verify_registration_output(&verification, roots, entry)
     }
-    graph :: store_migrate_closure_graph_unlocked(roots).graph
+    graph :: store_migrate_closure_graph_unlocked(&verification, roots).graph
     if fresh_action_key == {
         .Val(action_key) -> {
-            loop entry in entries -> store_certify_registration_unlocked_with_fresh_agreement(roots, entry, entries, action_key)
+            loop entry in entries -> store_certify_registration_unlocked_with_fresh_agreement(&verification, roots, entry, entries, action_key)
         }
-        .None -> store_certify_registrations_unlocked(roots, entries)
+        .None -> store_certify_registrations_unlocked(&verification, roots, entries)
     }
     object_map := [String: ClosureObject]{}
     records := [ClosureRecord]{}
     seen_records := [String: Bool]{}
     loop entry in entries {
-        descriptor :: store_descriptor_for_entry(roots, entry)
+        descriptor :: store_descriptor_for_entry(&verification, roots, entry)
         record :: descriptor.record
         if seen_records.has_key(record.id) -> return Err(StoreError.InvalidData("closure batch contains duplicate record `{record.id}`"))
         seen_records[record.id] = true
@@ -649,21 +663,21 @@ pub fn store_register_entries_unlocked_with_mode(roots: HangarRoots, entries: [S
     candidate := graph
     store_apply_entry(&candidate, transaction)
     store_validate_graph_structure_mode(roots, candidate, false)
-    loop record in transaction.records -> store_validate_record_store_proof(roots, record, false)
+    loop record in transaction.records -> store_validate_record_store_proof(&verification, roots, record, false)
     _ :: store_append_entry(roots, transaction)
     // The durable journal append is the commit point. Projection and
     // compaction are recoverable maintenance.
     loop record in transaction.records {
         store_materialize_package_record(roots, record).drop("a missing projection is recovered from the committed journal")
     }
-    store_compact_if_needed(roots).drop("compaction is recoverable maintenance after the commit point")
+    store_compact_if_needed(&verification, roots).drop("compaction is recoverable maintenance after the commit point")
     Ok(true)
 }
 
 fn store_verify_admitted_nix_output(roots: HangarRoots, entry: StoreEntry) StoreError! {
     producer :: ProducerRecord.decode(entry.producer_record)
-    expected :: files.join(files.join(roots.hangar_dir(), @STORE_OBJECTS_DIR), entry.envelope.output_hash)
-    metadata :: files.stat(expected) ?? return Err(StoreError.Other("admitted Nix entry `{entry.out}` is not its verified canonical CAS object: canonical CAS path `{expected}` could not be inspected: {StoreError.Io(err).message()}"))
+    expected :: files.join(files.join(roots.hangar_dir(), STORE_OBJECTS_DIR), entry.envelope.output_hash)
+    metadata :: files.stat(expected) ?? return Err(StoreError.Other("admitted Nix entry `{entry.out}` is not its verified canonical CAS object: canonical CAS path `{expected}` could not be inspected: {StoreError.IO(err).message()}"))
     reason :: if {
         producer.provider != "nix" -> Val("producer provider is not `nix`")
         entry.out != expected -> Val("entry output path does not equal its output-hash CAS path")
@@ -681,24 +695,24 @@ fn store_verify_admitted_nix_output(roots: HangarRoots, entry: StoreEntry) Store
 
 // Test seam: register one entry and run `after_append` right after the
 // durable journal append, before the post-commit content proof.
-pub fn store_register_entry_unlocked_with_hook(roots: HangarRoots, entry: StoreEntry, after_append: fn()) -> Bool StoreError! {
-    store_register_entry_unlocked_mode(roots, entry, Val(after_append), None)
+pub fn store_register_entry_unlocked_with_hook(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry, after_append: fn()) -> Bool StoreError! {
+    store_register_entry_unlocked_mode(&verification, roots, entry, Val(after_append), None)
 }
 
-fn store_register_entry_unlocked_mode(roots: HangarRoots, entry: StoreEntry, after_append: (fn())?, fresh_action_key: String?) -> Bool StoreError! {
+fn store_register_entry_unlocked_mode(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry, after_append: (fn())?, fresh_action_key: String?) -> Bool StoreError! {
     hangar :: roots.hangar_dir()
     store_share_tree_files(roots, entry.out, entry.platform_artifact_kind != "")
     output_hash :: entry.envelope.output_hash
     if store_object_digest_for_path(entry.out, hangar) == Val(output_hash) {
-        store_write_seal(entry.out, hangar, entry.envelope.output_hash)
+        store_write_seal(&verification, entry.out, hangar, entry.envelope.output_hash)
     }
-    store_verify_registration_output(roots, entry)
-    graph :: store_migrate_closure_graph_unlocked(roots).graph
+    store_verify_registration_output(&verification, roots, entry)
+    graph :: store_migrate_closure_graph_unlocked(&verification, roots).graph
     if fresh_action_key == {
-        .Val(action_key) -> store_certify_registration_unlocked_with_fresh_agreement(roots, entry, [StoreEntry]{}, action_key)
-        .None -> store_certify_registrations_unlocked(roots, [StoreEntry]{entry})
+        .Val(action_key) -> store_certify_registration_unlocked_with_fresh_agreement(&verification, roots, entry, [StoreEntry]{}, action_key)
+        .None -> store_certify_registrations_unlocked(&verification, roots, [StoreEntry]{entry})
     }
-    descriptor :: store_descriptor_for_entry(roots, entry)
+    descriptor :: store_descriptor_for_entry(&verification, roots, entry)
     described :: descriptor.record
     unchanged := graph.records.get(described.id) == Val(described)
     loop object in descriptor.objects {
@@ -709,13 +723,13 @@ fn store_register_entry_unlocked_mode(roots: HangarRoots, entry: StoreEntry, aft
     candidate := graph
     store_apply_entry(&candidate, transaction)
     store_validate_graph_structure_mode(roots, candidate, false)
-    store_validate_record_store_proof(roots, transaction.records[0], false)
+    store_validate_record_store_proof(&verification, roots, transaction.records[0], false)
     committed :: store_append_entry(roots, transaction)
     if after_append == {
         .Val(hook) -> hook()
         .None -> {}
     }
-    store_verify_registration_output(roots, entry) ?? {
+    store_verify_registration_output(&verification, roots, entry) ?? {
         failure :: err
         files.remove(committed)
         store_sync_store_directory(store_journal_dir(roots))
@@ -725,12 +739,12 @@ fn store_register_entry_unlocked_mode(roots: HangarRoots, entry: StoreEntry, aft
     // commit point. Projection and compaction are recoverable maintenance;
     // they must not turn a committed registration into a reported failure.
     store_materialize_package_record(roots, transaction.records[0]).drop("a missing projection is recovered from the committed journal")
-    store_compact_if_needed(roots).drop("compaction is recoverable maintenance after the commit point")
+    store_compact_if_needed(&verification, roots).drop("compaction is recoverable maintenance after the commit point")
     Ok(true)
 }
 
-fn store_verify_registration_output(roots: HangarRoots, entry: StoreEntry) StoreError! {
-    actual :: store_try_entry_output_hash(roots, entry) ?? return Err(StoreError.InvalidData("cannot register output `{entry.out}`: {err.message()}"))
+fn store_verify_registration_output(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry) StoreError! {
+    actual :: store_try_entry_output_hash(&verification, roots, entry) ?? return Err(StoreError.InvalidData("cannot register output `{entry.out}`: {err.message()}"))
     if entry.envelope.output_hash == "" {
         return Err(StoreError.InvalidData("cannot register output `{entry.out}` without a content digest"))
     }
@@ -741,7 +755,7 @@ fn store_verify_registration_output(roots: HangarRoots, entry: StoreEntry) Store
 
 // Test seam: undo a failed registration directory.
 pub fn store_rollback_registration_dir(dir: String, created_dir: Bool, had_gc_root: Bool) StoreError! {
-    gc_root :: files.join(dir, @STORE_NIX_GC_ROOT)
+    gc_root :: files.join(dir, STORE_NIX_GC_ROOT)
     if !had_gc_root && files.lexists(gc_root) -> files.remove(gc_root)
     if created_dir -> files.remove_all(dir)
 }
@@ -750,9 +764,9 @@ pub fn store_rollback_registration_dir(dir: String, created_dir: Bool, had_gc_ro
 // closure journal, not just `meta.json`, so a staleness/GC claim can
 // simulate an old entry without waiting real time. It re-registers the same
 // entry through the full validation path; only the timestamp changes.
-pub fn store_test_backdate_last_used_at(roots: HangarRoots, id: String, last_used_at: Int) StoreError! {
+pub fn store_test_backdate_last_used_at(verification: &StoreVerification, roots: HangarRoots, id: String, last_used_at: Int) StoreError! {
     hangar_lock :: env_runtime_lock(roots.root, "hangar")
-    _ :: store_recover_closure_journal_unlocked(roots)
+    _ :: store_recover_closure_journal_unlocked(&verification, roots)
     found :: store_list_unlocked(roots)
     entry := StoreEntry.empty()
     matched := false
@@ -765,56 +779,56 @@ pub fn store_test_backdate_last_used_at(roots: HangarRoots, id: String, last_use
     }
     if !matched -> return Err(StoreError.Other("no hangar entry `{id}`"))
     entry.last_used_at = last_used_at
-    _ :: store_register_entry_unlocked(roots, entry)
+    _ :: store_register_entry_unlocked(&verification, roots, entry)
 }
 
-pub fn store_remove_closure_record(roots: HangarRoots, id: String) -> Bool StoreError! {
+pub fn store_remove_closure_record(verification: &StoreVerification, roots: HangarRoots, id: String) -> Bool StoreError! {
     hangar_lock :: env_runtime_lock(roots.root, "hangar")
-    _ :: store_recover_closure_journal_unlocked(roots)
-    if !store_load_graph(roots).records.has_key(id) -> return Ok(false)
+    _ :: store_recover_closure_journal_unlocked(&verification, roots)
+    if !store_load_graph(&verification, roots).records.has_key(id) -> return Ok(false)
     _ :: store_append_entry(roots, ClosureJournalEntry{kind: ClosureJournalKind.Delta, objects: [ClosureObject]{}, records: [ClosureRecord]{}, deleted_records: [String]{id}})
     _ :: store_remove_package_record(roots, id)
-    store_compact_if_needed(roots)
+    store_compact_if_needed(&verification, roots)
     Ok(true)
 }
 
-pub fn store_tombstone_closure_record_unlocked(roots: HangarRoots, id: String) -> Bool StoreError! {
-    graph :: store_load_graph_structure_mode(roots, true)
+pub fn store_tombstone_closure_record_unlocked(verification: &StoreVerification, roots: HangarRoots, id: String) -> Bool StoreError! {
+    graph :: store_load_graph_structure_mode(&verification, roots, true)
     if !graph.records.has_key(id) -> return Ok(false)
     _ :: store_append_entry(roots, ClosureJournalEntry{kind: ClosureJournalKind.Delta, objects: [ClosureObject]{}, records: [ClosureRecord]{}, deleted_records: [String]{id}})
-    store_compact_if_needed(roots)
+    store_compact_if_needed(&verification, roots)
     Ok(true)
 }
 
-pub fn store_recover_closure_journal(roots: HangarRoots) -> Int StoreError! {
+pub fn store_recover_closure_journal(verification: &StoreVerification, roots: HangarRoots) -> Int StoreError! {
     hangar_lock :: env_runtime_lock(roots.root, "hangar")
-    store_recover_closure_journal_unlocked(roots)
+    store_recover_closure_journal_unlocked(&verification, roots)
 }
 
-pub fn store_recover_closure_journal_unlocked(roots: HangarRoots) -> Int StoreError! {
-    Ok(store_recover_closure_journal_graph_unlocked(roots).recovered)
+pub fn store_recover_closure_journal_unlocked(verification: &StoreVerification, roots: HangarRoots) -> Int StoreError! {
+    Ok(store_recover_closure_journal_graph_unlocked(&verification, roots).recovered)
 }
 
-fn store_recover_closure_journal_graph_unlocked(roots: HangarRoots) -> (recovered: Int, graph: ClosureGraph) StoreError! {
+fn store_recover_closure_journal_graph_unlocked(verification: &StoreVerification, roots: HangarRoots) -> (recovered: Int, graph: ClosureGraph) StoreError! {
     recovered := store_recover_receipt_staging(roots)
     journal :: store_journal_dir(roots)
     entries :: files.list_dir(journal) ?? return Ok((recovered: recovered, graph: ClosureGraph.empty()))
     loop entry in entries {
         if {
-            entry.name.ends_with(@STORE_JOURNAL_PARTIAL_SUFFIX) -> {
+            entry.name.ends_with(STORE_JOURNAL_PARTIAL_SUFFIX) -> {
                 if {
                     entry.is_dir -> files.remove_all(entry.path)
                     else -> files.remove(entry.path)
                 }
                 recovered += 1
             }
-            entry.name.ends_with(@STORE_JOURNAL_TXN_SUFFIX) -> {
+            entry.name.ends_with(STORE_JOURNAL_TXN_SUFFIX) -> {
                 _ :: store_parse_journal_entry(files.read(entry.path)) ?? return Err(StoreError.InvalidData("closure journal `{entry.path}`: {err.message()}"))
             }
             else -> {}
         }
     }
-    graph :: store_load_graph_structure_mode(roots, true)
+    graph :: store_load_graph_structure_mode(&verification, roots, true)
     loop record in graph.sorted_records() {
         if record.package_meta == "" -> next
         meta :: pkg_parse_meta(record.package_meta) ?? return Err(StoreError.InvalidData("closure record `{record.id}` has invalid package metadata"))
@@ -827,7 +841,7 @@ fn store_recover_closure_journal_graph_unlocked(roots: HangarRoots) -> (recovere
     Ok((recovered: recovered, graph: graph))
 }
 
-fn store_descriptor_for_entry(roots: HangarRoots, original: StoreEntry) -> (objects: [ClosureObject], record: ClosureRecord) StoreError! {
+fn store_descriptor_for_entry(verification: &StoreVerification, roots: HangarRoots, original: StoreEntry) -> (objects: [ClosureObject], record: ClosureRecord) StoreError! {
     entry := ~original
     // The package projection is a cache of the canonical receipt. Rebuild it
     // from the current facts at migration/registration boundaries; stale
@@ -837,7 +851,7 @@ fn store_descriptor_for_entry(roots: HangarRoots, original: StoreEntry) -> (obje
     primary :: entry.envelope.output_hash
     if primary == "" -> return Err(StoreError.Other("closure record `{entry.id}` has no output digest"))
     hangar :: roots.hangar_dir()
-    object_root :: files.join(hangar, @STORE_OBJECTS_DIR)
+    object_root :: files.join(hangar, STORE_OBJECTS_DIR)
     if entry.named_outputs.get("out") == {
         .Val(named_primary) -> {
             if named_primary != primary -> return Err(StoreError.Other("closure record `{entry.id}` names `out` as `{named_primary}`, not primary `{primary}`"))
@@ -846,38 +860,45 @@ fn store_descriptor_for_entry(roots: HangarRoots, original: StoreEntry) -> (obje
     }
     outputs := ~entry.named_outputs
     outputs["out"] = primary
-    decoded :: ProducerRecord.decode(entry.producer_record)
+    // Rust descriptor_for_entry treats a rejected producer as absent for
+    // path projection; the validation boundary still rejects invalid records.
+    decoded :: if ProducerRecord.decode(entry.producer_record) == {
+        .Ok(producer) -> Val(producer)
+        .Err(_) -> None
+    }
     objects := [ClosureObject]{}
-    loop name in store_sorted_keys(outputs) {
-        digest :: outputs[name]
-        path :: if decoded == {
-            .Ok(producer) -> {
-                if {
+    // Consume the decoded owner once; both projections read the same payload.
+    if decoded == {
+        .Val(producer) -> {
+            loop name in store_sorted_keys(outputs) {
+                digest :: outputs[name]
+                path :: if {
                     producer.provider == "nix" -> files.join(object_root, digest)
                     name == "out" -> entry.out
-                    else -> producer.facts.get("nix.output.{name}") ?? producer.facts.get("output.path.{name}") ?? files.join(object_root, digest)
+                    else -> producer.facts.get("nix.output.{name}") ?? (producer.facts.get("output.path.{name}") ?? files.join(object_root, digest))
                 }
+                &objects.push(ClosureObject{digest: digest, path: path, external: !store_path_starts_with(path, hangar)})
             }
-            .Err(_) -> if name == "out" -> entry.out else -> files.join(object_root, digest)
-        }
-        &objects.push(ClosureObject{digest: digest, path: path, external: !store_path_starts_with(path, hangar)})
-    }
-    if decoded == {
-        .Ok(producer) -> {
             loop digest in entry.references {
                 relative :: producer.facts.get("dependency.object.{digest}") ?? next
                 if !store_path_is_normal_relative(relative) {
                     return Err(StoreError.Other("closure record `{entry.id}` has invalid dependency object path `{relative}`"))
                 }
                 path :: files.join(entry.out, relative)
-                actual :: store_verified_file_hash(path) ?? return Err(err.with_message("reading dependency object `{path}`: {err.message()}"))
+                actual :: store_verified_file_hash(&verification, path) ?? return Err(err.with_message("reading dependency object `{path}`: {err.message()}"))
                 if actual != digest {
                     return Err(StoreError.Other("dependency object `{path}` records `{digest}`, re-hash produced `{actual}`"))
                 }
                 &objects.push(ClosureObject{digest: digest, path: path, external: !store_path_starts_with(path, hangar)})
             }
         }
-        .Err(_) -> {}
+        .None -> {
+            loop name in store_sorted_keys(outputs) {
+                digest :: outputs[name]
+                path :: if name == "out" -> entry.out else -> files.join(object_root, digest)
+                &objects.push(ClosureObject{digest: digest, path: path, external: !store_path_starts_with(path, hangar)})
+            }
+        }
     }
     &objects.sort_by(object -> object.digest)
     unique := [ClosureObject]{}

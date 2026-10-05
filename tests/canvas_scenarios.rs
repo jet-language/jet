@@ -1121,7 +1121,7 @@ fn run_browser_scenario_with_server(
     command
         .current_dir(&repo)
         .envs(environment.iter().copied())
-        .env("TMPDIR", "/home/nate/.cache/jet-test-scratch")
+        .env("TMPDIR", "/home/nate/.cache/jet-dev/scratch")
         .env("JET_BIN", cargo_target_dir(&repo).join("debug/jet"))
         .env("JETPACK_BIN", cargo_target_dir(&repo).join("debug/jetpack"))
         .arg("Tools/canvas-test/run.mjs")

@@ -10,7 +10,7 @@ pub struct TclBindResult {
     pub provenance: String
 }
 
-@PKG_TCL_TOOL_ACTION :: "rejected the Tcl binding bridge"
+PKG_TCL_TOOL_ACTION :: prep { "rejected the Tcl binding bridge" }
 
 // Build the Tcl bridge seeded with `source` and render its Jet surface.
 pub fn pkg_tcl_bind(source: String, lib: String, cache: String) -[FS, Env, Exec, Time.Wait]> TclBindResult ForeignBindError! {
@@ -19,7 +19,7 @@ pub fn pkg_tcl_bind(source: String, lib: String, cache: String) -[FS, Env, Exec,
     root :: pkg_binder_tool_root(tclsh) ?? return Err(ForeignBindError.ToolMissing("tclsh"))
     include :: files.join(root, "include")
     lib_dir :: files.join(root, "lib")
-    library :: BinderHostOs.current().shared_library("tcl", "tcl86.dll")
+    library :: BinderHostOS.current().shared_library("tcl", "tcl86.dll")
     if !files.is_file(files.join(include, "tcl.h")) || !files.is_file(files.join(lib_dir, library)) -> return Err(ForeignBindError.Source("the provisioned Tcl runtime has no embeddable headers or shared library"))
     pkg_binder_create_dir_all(cache, "could not create Tcl binding cache")
     stem :: "jet_tcl_{lib}"
@@ -27,8 +27,8 @@ pub fn pkg_tcl_bind(source: String, lib: String, cache: String) -[FS, Env, Exec,
     object :: files.join(cache, "{stem}.o")
     archive :: files.join(cache, "lib{stem}.a")
     pkg_binder_write(c, pkg_tcl_render_c(lib, source), "could not write Tcl bridge")
-    pkg_binder_run_reporting_detail([String]{"cc", "-std=c11", "-fPIC", "-c", "-I", include, c, "-o", object}, "cc", @PKG_TCL_TOOL_ACTION)
-    pkg_binder_run_reporting_detail([String]{"ar", "rcs", archive, object}, "ar", @PKG_TCL_TOOL_ACTION)
+    pkg_binder_run_reporting_detail([String]{"cc", "-std=c11", "-fPIC", "-c", "-I", include, c, "-o", object}, "cc", PKG_TCL_TOOL_ACTION)
+    pkg_binder_run_reporting_detail([String]{"ar", "rcs", archive, object}, "ar", PKG_TCL_TOOL_ACTION)
     pkg_binder_remove_file_quiet(c)
     pkg_binder_remove_file_quiet(object)
     digest :: pkg_binder_identity_digest([String]{"jet-tcl-bind-v1", source, root})
@@ -43,15 +43,15 @@ pub fn pkg_tcl_bind(source: String, lib: String, cache: String) -[FS, Env, Exec,
 }
 
 fn pkg_tcl_render_jet(lib: String) -> String Never! {
-    pkg_binder_fill_template(@PKG_TCL_JET, [String: String]{"abi": "jet_tcl_{lib}"})
+    pkg_binder_fill_template(PKG_TCL_JET, [String: String]{"abi": "jet_tcl_{lib}"})
 }
 
 fn pkg_tcl_render_c(lib: String, seed: String) -> String Never! {
-    pkg_binder_fill_template(@PKG_TCL_BRIDGE_C, [String: String]{"abi": "jet_tcl_{lib}", "seed": pkg_binder_c_escape(seed)})
+    pkg_binder_fill_template(PKG_TCL_BRIDGE_C, [String: String]{"abi": "jet_tcl_{lib}", "seed": pkg_binder_c_escape(seed)})
 }
 
 // The generated session surface. Hole: `abi`.
-@PKG_TCL_JET :: ```#Import module c.@@abi@@ {
+PKG_TCL_JET :: prep { ```#Import module c.@@abi@@ {
     fn open() -> Int = "@@abi@@_open"
     fn eval(handle: Int, code: String) -> String = "@@abi@@_eval"
     fn eval_once(code: String) -> String = "@@abi@@_eval_once"
@@ -100,10 +100,10 @@ impl Session.Close {
 }
 
 pub fn close(session: ^Session) -[FFI.Tcl]> { abi.close(session.value) }
-```
+``` }
 
 // The thread-affine interpreter bridge. Holes: `abi` and the c-escaped `seed`.
-@PKG_TCL_BRIDGE_C :: ```#include <tcl.h>
+PKG_TCL_BRIDGE_C :: prep { ```#include <tcl.h>
 #include <stdint.h>
 #include <pthread.h>
 #include <stdlib.h>
@@ -126,4 +126,4 @@ const char* @@abi@@_eval_once(const char*code){failed=0;Tcl_Interp*i=fresh();if(
 int64_t @@abi@@_eval_int(int64_t h,const char*code){failed=0;Tcl_Interp*i=get(h);Tcl_WideInt v=0;if(!i||!code){failed=1;return 0;}if(Tcl_EvalEx(i,code,-1,TCL_EVAL_DIRECT)!=TCL_OK||Tcl_GetWideIntFromObj(i,Tcl_GetObjResult(i),&v)!=TCL_OK){Tcl_ResetResult(i);failed=1;return 0;}return (int64_t)v;}
 double @@abi@@_eval_float(int64_t h,const char*code){failed=0;Tcl_Interp*i=get(h);double v=0;if(!i||!code){failed=1;return 0;}if(Tcl_EvalEx(i,code,-1,TCL_EVAL_DIRECT)!=TCL_OK||Tcl_GetDoubleFromObj(i,Tcl_GetObjResult(i),&v)!=TCL_OK){Tcl_ResetResult(i);failed=1;return 0;}return v;}
 void @@abi@@_close(int64_t h){failed=0;if(h<1||h>64){failed=1;return;}pthread_mutex_lock(&lock);Slot s=slots[h-1];if(!s.interp||!pthread_equal(s.owner,pthread_self())){pthread_mutex_unlock(&lock);failed=1;return;}slots[h-1].interp=0;pthread_mutex_unlock(&lock);Tcl_DeleteInterp(s.interp);}
-```
+``` }

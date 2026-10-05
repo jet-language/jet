@@ -12,7 +12,7 @@ pub trait CompilerExtensionGuest {
     fn analyze(self, snapshot: [U8]) -> [U8]
 }
 
-@COMPILER_EXTENSION_WORLD :: "compiler-extension-v1"
+COMPILER_EXTENSION_WORLD :: prep { "compiler-extension-v1" }
 
 // The v1 limits as the Core plugin budget: fuel is refilled and the timer
 // restarts before each call; memory and tables cap the component's life.
@@ -28,20 +28,20 @@ pub struct CompilerExtensionSlot {
 pub fn cli_run_compiler_extension_host(args: [String]) -[IO, FS, Env, Exec, Time, Time.Wait]> Int Never! {
     if args.len() != 1 {
         term.eprint("compiler-extension host requires exactly one component path")
-        return @EXIT_USAGE
+        return EXIT_USAGE
     }
     wasm_path :: args[0]
-    request :: term.take(@EXTENSION_MAX_SNAPSHOT_BYTES + 1) ?? {
+    request :: term.take(EXTENSION_MAX_SNAPSHOT_BYTES + 1) ?? {
         term.eprint("couldn't read compiler-extension snapshot: {err}")
-        return @EXIT_USAGE
+        return EXIT_USAGE
     }
-    if request.len() > @EXTENSION_MAX_SNAPSHOT_BYTES {
-        term.eprint("compiler-extension snapshot exceeds IPC limit ({@EXTENSION_MAX_SNAPSHOT_BYTES} bytes)")
-        return @EXIT_USAGE
+    if request.len() > EXTENSION_MAX_SNAPSHOT_BYTES {
+        term.eprint("compiler-extension snapshot exceeds IPC limit ({EXTENSION_MAX_SNAPSHOT_BYTES} bytes)")
+        return EXIT_USAGE
     }
-    snapshot :: TypedSnapshot.decode(request) ?? {
+    snapshot :: TypedSnapshot.decode_bytes(request) ?? {
         term.eprint(err.message)
-        return @EXIT_USAGE
+        return EXIT_USAGE
     }
     limits :: cli_compiler_extension_limits(ExtensionResourceLimits.v1_defaults())
     slot :: shared CompilerExtensionSlot{guest: None}
@@ -50,21 +50,21 @@ pub fn cli_run_compiler_extension_host(args: [String]) -[IO, FS, Env, Exec, Time
     close_guest :: (handle: Int) -> cli_compiler_extension_close(slot)
     analyzed :: pkg_extension_analyze_with_host(wasm_path, snapshot, load_guest, analyze_guest, close_guest) ?? {
         term.eprint(err.message)
-        return @EXIT_USAGE
+        return EXIT_USAGE
     }
-    response :: analyzed.encode() ?? {
+    response :: analyzed.encode_bytes() ?? {
         term.eprint(err.message)
-        return @EXIT_USAGE
+        return EXIT_USAGE
     }
     if response.len() > snapshot.limits.max_response_bytes {
         term.eprint("compiler-extension response exceeds IPC limit ({response.len()} > {snapshot.limits.max_response_bytes})")
-        return @EXIT_USAGE
+        return EXIT_USAGE
     }
     term.stdout().write_bytes(response) ?? {
         term.eprint("couldn't write compiler-extension response: {err}")
-        return @EXIT_USAGE
+        return EXIT_USAGE
     }
-    @EXIT_OK
+    EXIT_OK
 }
 
 // Load the component into the slot: `O:<handle>` or `E:<message>`. A
@@ -78,7 +78,7 @@ fn cli_compiler_extension_load(slot: Shared<CompilerExtensionSlot>, path: String
             permit.value.guest = Val(guest)
             "O:1"
         }
-        .Err(error) -> "E:couldn't load compiler-extension `{guest_name}` (world `{@COMPILER_EXTENSION_WORLD}` admits no host imports — no clock, random, filesystem, network, or process; it must export `analyze`): {error}"
+        .Err(error) -> "E:couldn't load compiler-extension `{guest_name}` (world `{COMPILER_EXTENSION_WORLD}` admits no host imports — no clock, random, filesystem, network, or process; it must export `analyze`): {error}"
     }
 }
 

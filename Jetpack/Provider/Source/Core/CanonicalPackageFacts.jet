@@ -3,7 +3,7 @@
 // package or output, the strict core source-tree fingerprint, and the core
 // recipe identity with its toolchain and normalized manifest semantics.
 
-@PROVIDER_CORE_TREE_SCHEMA :: "jet-core-source-tree-v2"
+PROVIDER_CORE_TREE_SCHEMA :: prep { "jet-core-source-tree-v2" }
 
 // The canonical Package that owns a request: its root and parsed facts.
 pub struct CanonicalPackage {
@@ -17,7 +17,7 @@ pub struct CanonicalPackage {
 // or the provider would compile the workspace root as the requested package
 // and silently lose the package boundary.
 pub fn provider_find_canonical_package(repo: String, requested: String) -[FS, Env]> CanonicalPackage? ProviderReason! {
-    root_marker :: files.join(repo, @PACKAGE_FILE)
+    root_marker :: files.join(repo, PACKAGE_FILE)
     info :: if files.stat(root_marker) == {
         .Ok(found) -> found
         .Err(error) -> {
@@ -75,9 +75,9 @@ fn provider_collect_canonical_packages(repo: String, members: [MemberRef], reque
 }
 
 fn provider_collect_one_canonical_package(path: String, requested: String, seen: &[String], out: &[CanonicalPackage]) ProviderReason! -[FS, Env]> {
-    if seen.contains(path) -> return Ok()
+    if seen.contains(path) -> return
     &seen.push(path)
-    candidates :: [String]{files.join(path, @PACKAGE_FILE), files.join(path, @PAYLOAD_FILE)}
+    candidates :: [String]{files.join(path, PACKAGE_FILE), files.join(path, PAYLOAD_FILE)}
     marker := ""
     loop candidate in candidates {
         if marker == "" && files.is_file(candidate) -> marker = candidate
@@ -85,7 +85,7 @@ fn provider_collect_one_canonical_package(path: String, requested: String, seen:
     loop candidate in candidates {
         if marker == "" && (files.exists(candidate) || files.is_symlink(candidate)) -> marker = candidate
     }
-    if marker == "" -> return Ok()
+    if marker == "" -> return
     info :: files.stat(marker) ?? return Err(ProviderReason{message: "{err}"})
     if info.is_symlink -> return Err(ProviderReason{message: "Package marker is a symlink: {marker}"})
     if !info.is_file -> return Err(ProviderReason{message: "Package marker is not a file: {marker}"})
@@ -121,7 +121,7 @@ pub fn provider_core_tree_fingerprint(root: String) -[FS]> String ProviderReason
     provider_collect_core_files(root, "", &found)
     &found.sort_by(file -> file.relative)
     input := [U8]{}
-    loop byte in @PROVIDER_CORE_TREE_SCHEMA.bytes() -> &input.push(byte)
+    loop byte in PROVIDER_CORE_TREE_SCHEMA.bytes() -> &input.push(byte)
     loop file in found {
         bytes :: files.read_bytes(file.path) ?? return Err(ProviderReason{message: "{err}"})
         relative :: file.relative.bytes()

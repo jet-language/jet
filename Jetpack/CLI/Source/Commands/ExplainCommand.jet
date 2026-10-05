@@ -3,7 +3,7 @@
 // explanations over the Hangar through an explain lens, and
 // `package-overlay:*` facts from reviewed `workspace.jet` overlay policy.
 
-fn cli_explain_error(theme: Theme, parsed: CliParsed, code: String, what: String, why: String, fix: String) -[IO, FS, Env]> Int Never! {
+fn cli_explain_error(theme: Theme, parsed: CLIParsed, code: String, what: String, why: String, fix: String) -[IO, FS, Env, Time.Wait]> Int Never! {
     cli_status_error(theme, parsed.flags.json, "explain", code, what, why, fix)
 }
 
@@ -14,9 +14,10 @@ fn cli_optional_text(value: String?) -> DataTree Never! {
     }
 }
 
-pub fn cli_cmd_explain(theme: Theme, parsed: CliParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+pub fn cli_cmd_explain(theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+    cache := WorkspaceDeclarationCache.new()
     query :: parsed.positional.get(0) ?? return cli_explain_error(theme, parsed, "E1274", "explain needs a package ref", "`jet explain <CODE>` is handled by the main compiler; `jetpack explain` explains package refs.", "write `jet explain weirdctl` after a failed build.")
-    if query.starts_with("package-overlay:") -> return cli_cmd_explain_overlay(theme, parsed, query)
+    if query.starts_with("package-overlay:") -> return cli_cmd_explain_overlay(&cache, theme, parsed, query)
     if syntax_lookup(query) != None {
         explanation :: explain_lookup(query) ?? panic("the syntax and explain dictionaries must be one table")
         if parsed.flags.json {
@@ -31,7 +32,7 @@ pub fn cli_cmd_explain(theme: Theme, parsed: CliParsed) -[IO, FS, Env, Exec, Net
         } else {
             term.stdout().write(explain_render(explanation, theme.color)).drop("explain output is best-effort")
         }
-        return @EXIT_OK
+        return EXIT_OK
     }
     if syntax_looks_like_query(query) {
         closest :: if syntax_nearest(query) == {
@@ -57,9 +58,9 @@ pub fn cli_cmd_explain(theme: Theme, parsed: CliParsed) -[IO, FS, Env, Exec, Net
                 term.stdout().write(explanation.text()).drop("explain output is best-effort")
             }
             loop report in explanation.reports {
-                if report.kind == ExplainReportKind.Conflict -> return @EXIT_USAGE
+                if report.kind == ExplainReportKind.Conflict -> return EXIT_USAGE
             }
-            @EXIT_OK
+            EXIT_OK
         }
         .Err(error) -> cli_explain_error(theme, parsed, "E1274", "couldn't read package explanation", error.message(), "repair the Hangar closure/lock record, then retry the explanation.")
     }
@@ -67,9 +68,9 @@ pub fn cli_cmd_explain(theme: Theme, parsed: CliParsed) -[IO, FS, Env, Exec, Net
 
 // `package-overlay:<overlay>:<package>`: the semantic-lock fact the
 // reviewed workspace overlay policy produces.
-fn cli_cmd_explain_overlay(theme: Theme, parsed: CliParsed, query: String) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+fn cli_cmd_explain_overlay(cache: &WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed, query: String) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     dir :: cli_current_dir()
-    source :: if pkg_resolve_workspace_source(dir) == {
+    source :: if pkg_resolve_workspace_source(&cache, dir) == {
         .Ok(found) -> found ?? return cli_explain_error(theme, parsed, "E1274", "no overlay policy for `{query}`", "`package-overlay:*` explanations come from reviewed `workspace.jet` overlay policy.", "run `jetpack override draft <ref> --patch <file>` or add an `overlay` block to `workspace.jet`.")
         .Err(error) -> {
             return cli_explain_workspace_failure(parsed, error.diagnostic)
@@ -112,7 +113,7 @@ fn cli_cmd_explain_overlay(theme: Theme, parsed: CliParsed, query: String) -[IO,
         fields = fields.with("update", DataTree.Text(fact.update_command))
         fields = fields.with("offline", DataTree.Bool(fact.offline_satisfied))
         print(StatusEnvelope.new("explain", true).with_fields(fields).json())
-        return @EXIT_OK
+        return EXIT_OK
     }
     print(fact.semantic_key)
     print("  owners: {fact.owners.join(", ")}")
@@ -127,17 +128,17 @@ fn cli_cmd_explain_overlay(theme: Theme, parsed: CliParsed, query: String) -[IO,
     print("  policy: {cli_empty_dash(fact.policy_fingerprint)}")
     print("  update: {cli_empty_dash(fact.update_command)}")
     print("  offline: {fact.offline_satisfied}")
-    @EXIT_OK
+    EXIT_OK
 }
 
 // A workspace resolution or evaluation failure: a failed status object under
 // `--json`, else the rendered diagnostic.
-fn cli_explain_workspace_failure(parsed: CliParsed, diagnostic: Diagnostic) -[IO, FS, Env]> Int Never! {
+fn cli_explain_workspace_failure(parsed: CLIParsed, diagnostic: Diagnostic) -[IO, FS, Env, Time.Wait]> Int Never! {
     if parsed.flags.json {
-        report :: cli_diagnostic_to_report(diagnostic, ReportPath.from_process(@WORKSPACE_FILE))
+        report :: cli_diagnostic_to_report(diagnostic, ReportPath.from_process(WORKSPACE_FILE))
         term.stdout().write(StatusEnvelope.new("explain", false).with_reports([ReportEnvelope]{report}).json_line()).drop("status output is best-effort")
     } else {
-        terminal_write_output(diagnostics_render_all(@WORKSPACE_FILE, "", [Diagnostic]{diagnostic}))
+        terminal_write_output(diagnostics_render_all(WORKSPACE_FILE, "", [Diagnostic]{diagnostic}))
     }
-    @EXIT_USAGE
+    EXIT_USAGE
 }

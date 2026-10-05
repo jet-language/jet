@@ -27,7 +27,7 @@ fn store_lease_test_is_err(result: LeaseReceipt IOError!) -> Bool {
 }
 
 fn store_lease_test_generation_dir(root: String, lease_id: String, generation: String) -> String {
-    files.join(files.join(files.join(files.join(files.join(root, @LEASE_SERVICE_DIR), @LEASE_RECORDS_DIR), lease_id), "generations"), generation)
+    files.join(files.join(files.join(files.join(files.join(root, LEASE_SERVICE_DIR), LEASE_RECORDS_DIR), lease_id), "generations"), generation)
 }
 
 // Publish generation 1 for a fresh lease and release its owner claim.
@@ -60,7 +60,7 @@ fn store_lease_test_publish(protocol: ExecutableLeaseProtocol, root: String, con
     loop malformed in malformed_frames {
         assert(store_lease_test_is_err(protocol.accept_snapshot(malformed.bytes(), snapshot.digest, snapshot.path)))
     }
-    oversized :: "v".repeat(@LEASE_MAX_FIELD_BYTES + 1)
+    oversized :: "v".repeat(LEASE_MAX_FIELD_BYTES + 1)
     cases :: [(package: String, version: String, reference: String, output: String)]{
         (package: "", version: "", reference: reference, output: snapshot.digest),
         (package: "demo", version: "", reference: "", output: snapshot.digest),
@@ -150,7 +150,7 @@ fn store_lease_test_publish(protocol: ExecutableLeaseProtocol, root: String, con
     receipt :: protocol.accept_snapshot(protocol.encode_request(prepared.request) ?? panic("encode"), snapshot.digest, snapshot.path) ?? panic("accept")
     incomplete :: store_lease_test_generation_dir(root, lease_id, "99")
     files.create_dir_all(incomplete) ?? panic("incomplete generation")
-    files.write(files.join(incomplete, @LEASE_RECEIPT_FILE), "partial") ?? panic("partial receipt")
+    files.write(files.join(incomplete, LEASE_RECEIPT_FILE), "partial") ?? panic("partial receipt")
     assert_eq(protocol.recover_stale_leases() ?? panic("recover while held"), 0)
     assert(files.exists(incomplete))
     owner :: prepared.owner_lock
@@ -170,7 +170,7 @@ fn store_lease_test_publish(protocol: ExecutableLeaseProtocol, root: String, con
     owner :: protocol.acquire_owner(lease_id) ?? panic("owner")
     partial :: store_lease_test_generation_dir(root, lease_id, ".1-0.partial")
     files.create_dir_all(partial) ?? panic("partial dir")
-    files.write(files.join(partial, @LEASE_RECEIPT_FILE), "in flight") ?? panic("partial receipt")
+    files.write(files.join(partial, LEASE_RECEIPT_FILE), "in flight") ?? panic("partial receipt")
     assert_eq(protocol.recover_stale_leases() ?? panic("recover while held"), 0)
     assert(files.exists(partial))
     close(^owner)
@@ -184,7 +184,7 @@ fn store_lease_test_publish(protocol: ExecutableLeaseProtocol, root: String, con
     protocol :: ExecutableLeaseProtocol.open(root) ?? panic("open")
     published :: store_lease_test_publish(protocol, root, "1-0-witness-interference", "one")
     generation :: store_lease_test_generation_dir(root, published.lease_id, "{published.receipt.generation}")
-    files.write(files.join(generation, @LEASE_COMPLETE_FILE), "antivirus-interference") ?? panic("interfere")
+    files.write(files.join(generation, LEASE_COMPLETE_FILE), "antivirus-interference") ?? panic("interfere")
     assert_eq(protocol.recover_stale_leases() ?? panic("recover"), 0)
     assert(files.exists(generation))
     assert(files.exists(published.snapshot))
@@ -208,7 +208,7 @@ fn store_lease_test_publish(protocol: ExecutableLeaseProtocol, root: String, con
     snapshot :: store_lease_test_snapshot(root, "1-0-marker-without-receipt", "one")
     live_root :: files.dirname(snapshot.path)
     live :: env_acquire_lease_lock(live_root, "live") ?? panic("live lock")
-    marker :: files.join(files.join(live_root, @RUNTIME_LOCK_DIR), "live.lock")
+    marker :: files.join(files.join(live_root, RUNTIME_LOCK_DIR), "live.lock")
     files.remove(marker) ?? panic("remove marker")
     assert_eq(protocol.recover_stale_leases() ?? panic("recover while held"), 0)
     assert(files.exists(snapshot.path))
@@ -226,7 +226,7 @@ fn store_lease_test_publish(protocol: ExecutableLeaseProtocol, root: String, con
     snapshot :: store_lease_test_snapshot(root, "1-0-lock-directory-interference", "one")
     live_root :: files.dirname(snapshot.path)
     live :: env_acquire_lease_lock(live_root, "live") ?? panic("live lock")
-    files.remove_all(files.join(live_root, @RUNTIME_LOCK_DIR)) ?? panic("remove lock dir")
+    files.remove_all(files.join(live_root, RUNTIME_LOCK_DIR)) ?? panic("remove lock dir")
     assert_eq(protocol.recover_stale_leases() ?? panic("recover while held"), 0)
     assert(files.exists(snapshot.path))
     close(^live)
@@ -258,7 +258,7 @@ fn store_lease_test_publish(protocol: ExecutableLeaseProtocol, root: String, con
     files.create_dir_all(live_root) ?? panic("container dir")
     live :: env_acquire_lease_lock(live_root, "live") ?? panic("live lock")
     published :: store_lease_test_publish(protocol, root, "1-0-marker-interference", "one")
-    marker :: files.join(files.join(live_root, @RUNTIME_LOCK_DIR), "live.lock")
+    marker :: files.join(files.join(live_root, RUNTIME_LOCK_DIR), "live.lock")
     files.remove(marker) ?? panic("remove marker")
     assert_eq(protocol.recover_stale_leases() ?? panic("recover while held"), 0)
     assert(files.exists(published.snapshot))

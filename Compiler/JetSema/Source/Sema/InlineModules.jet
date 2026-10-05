@@ -1213,7 +1213,7 @@ fn sema_inline_bind_module_imports(definition: CodeModule, surfaces: [SemaInline
 // Rust `resolve_inline_module_imports` for a file-module member, once every
 // import is bound: `use limits.[MAX]` inside a module names a declaration of
 // `limits` (E0611) that this file may see (E0609).
-pub fn sema_inline_modules_check_imports(graph: &SemaRegistrationGraph, module_index: Int) {
+fn sema_inline_modules_collect_import_diagnostics(graph: SemaRegistrationGraph, module_index: Int, diagnostics: &[Diagnostic]) {
     module_row :: graph.modules[module_index]
     loop item in module_row.program.items {
         if item == .CodeModule(definition) {
@@ -1233,15 +1233,21 @@ pub fn sema_inline_modules_check_imports(graph: &SemaRegistrationGraph, module_i
                         if declared == {
                             .Val(export) -> {
                                 fix :: if export.symbol.kind == SymbolKind.Function -> "add pub before fn {original} in the imported file" else -> "add pub before the declaration of {original} in the imported file"
-                                sema_registration_push_graph_diagnostic(&graph, module_index, sema_error("E0609", module_alias_span, "`{original}` is private in module `{module_alias}`", "only public items can be brought into scope with use", fix))
+                                &diagnostics.push(sema_error("E0609", module_alias_span, "`{original}` is private in module `{module_alias}`", "only public items can be brought into scope with use", fix))
                             }
-                            .None -> sema_registration_push_graph_diagnostic(&graph, module_index, sema_error("E0611", module_alias_span, "`{original}` is not defined in module `{module_alias}`", "check the module for the item you are importing", "make sure the name is spelled correctly"))
+                            .None -> &diagnostics.push(sema_error("E0611", module_alias_span, "`{original}` is not defined in module `{module_alias}`", "check the module for the item you are importing", "make sure the name is spelled correctly"))
                         }
                     }
                 }
             }
         }
     }
+}
+
+pub fn sema_inline_modules_check_imports(graph: &SemaRegistrationGraph, module_index: Int) {
+    diagnostics := [Diagnostic]{}
+    sema_inline_modules_collect_import_diagnostics(graph, module_index, &diagnostics)
+    loop diagnostic in diagnostics -> sema_registration_push_graph_diagnostic(&graph, module_index, diagnostic)
 }
 
 // Rust registers only a top-level module's functions, and never a module
@@ -1287,6 +1293,30 @@ fn sema_inline_rewrite_item(rewrite: &SemaInlineRewrite, item: Item) -> Item Nev
     }
 }
 
+// Rebuilding items must not first copy the old item list only to discard it.
+// Keep the remaining source metadata, and transfer the replacement list.
+fn sema_program_with_items(program: Program, items: ^[Item]) -> Program Never! {
+    Program{
+        imports: program.imports,
+        items: ^items,
+        script_body: program.script_body,
+        block_spans: program.block_spans,
+        fenced_statements: program.fenced_statements,
+        web_target_ceiling: program.web_target_ceiling,
+        pub_file: program.pub_file,
+        no_prelude: program.no_prelude,
+        default_target: program.default_target,
+        html_path: program.html_path,
+        policy_declarations: program.policy_declarations,
+        user_policy_declarations: program.user_policy_declarations,
+        applied_rules: program.applied_rules,
+        rule_facts: program.rule_facts,
+        else_arms: program.else_arms,
+        used_import_names: program.used_import_names,
+        debug_sites: program.debug_sites,
+    }
+}
+
 pub fn sema_inline_modules_lower(program: Program, diagnostics: &[Diagnostic]) -> Program {
     has_module := false
     loop item in program.items {
@@ -1295,7 +1325,6 @@ pub fn sema_inline_modules_lower(program: Program, diagnostics: &[Diagnostic]) -
         }
     }
     if !has_module -> return ~program
-    updated := program
 
     // 1. Member types, in item order, then the public qualified spellings.
     hoist := SemaInlineHoist{declarations: [Item]{}, exported: [String:Type]{}, has_exported: false}
@@ -1325,7 +1354,8 @@ pub fn sema_inline_modules_lower(program: Program, diagnostics: &[Diagnostic]) -
     }
     surfaces := [SemaInlineModuleSurface]{}
     inline_names := [String:Bool]{}
-    loop item in hoisted_items {
+    loop item_index in 0..<hoisted_items.len() {
+        item :: hoisted_items[item_index]
         if item == .CodeModule(definition) {
             if definition.body == .Val(body) {
                 inline_names[definition.name] = true
@@ -1340,7 +1370,8 @@ pub fn sema_inline_modules_lower(program: Program, diagnostics: &[Diagnostic]) -
         }
     }
     lowered_items := [Item]{}
-    loop item in hoisted_items {
+    loop item_index in 0..<hoisted_items.len() {
+        item :: hoisted_items[item_index]
         if item == .CodeModule(definition) {
             if definition.body == .Val(body) {
                 if sema_inline_module_lowerable(definition) {
@@ -1380,10 +1411,11 @@ pub fn sema_inline_modules_lower(program: Program, diagnostics: &[Diagnostic]) -
     // 3. Qualified calls and `use` bindings, in every body of the file.
     calls := sema_inline_rewrite_empty()
     calls.modules = surfaces
-    updated.imports = sema_inline_bind_imports(program, surfaces, inline_names, &calls)
+    imports :: sema_inline_bind_imports(program, surfaces, inline_names, &calls)
     rewritten := [Item]{}
     loop item in lowered_items -> &rewritten.push(sema_inline_rewrite_item(&calls, item))
-    updated.items = rewritten
+    updated := sema_program_with_items(program, ^rewritten)
+    updated.imports = imports
     loop diagnostic in calls.diagnostics -> &diagnostics.push(diagnostic)
     updated
 }

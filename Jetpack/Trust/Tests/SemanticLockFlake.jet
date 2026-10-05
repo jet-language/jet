@@ -33,7 +33,7 @@ fn trust_test_restored(graph: FlakeGraph) -> FlakeGraph {
 // The `Io` reason, or "" for any other failure.
 fn trust_test_io_reason(error: TrustError) -> String {
     if error == {
-        .Io(reason) -> reason
+        .IO(reason) -> reason
         else -> ""
     }
 }
@@ -45,7 +45,7 @@ fn trust_test_json_object(text: String) -> [String: DataTree] {
     }
 }
 
-@TRUST_TEST_STAGE_A_FLAKE :: `{
+TRUST_TEST_STAGE_A_FLAKE :: prep { `{
   inputs = {
     nixpkgs.url = "nixpkgs";
     flake-utils.url = "github:numtide/flake-utils";
@@ -54,9 +54,9 @@ fn trust_test_json_object(text: String) -> [String: DataTree] {
     packages.x86_64-linux.default = nixpkgs.legacyPackages.x86_64-linux.hello;
   };
 }
-`
+` }
 
-@TRUST_TEST_STAGE_A_LOCK :: `{
+TRUST_TEST_STAGE_A_LOCK :: prep { `{
   "nodes": {
     "flake-utils": {
       "inputs": {
@@ -115,7 +115,7 @@ fn trust_test_json_object(text: String) -> [String: DataTree] {
   "root": "root",
   "version": 7
 }
-`
+` }
 
 #Test("parses follows outputs and round trips through semantic lock") {
     graph :: trust_test_flake(`
@@ -159,7 +159,7 @@ fn trust_test_json_object(text: String) -> [String: DataTree] {
 }
 
 #Test("pinned flake lock fixture preserves nodes edges and registry resolution") {
-    graph :: FlakeGraph.parse_with_lock("tests/fixtures/nix-compat/stage-a-flake.nix", @TRUST_TEST_STAGE_A_FLAKE, Val(@TRUST_TEST_STAGE_A_LOCK), true) ?? panic("the pinned fixture should parse")
+    graph :: FlakeGraph.parse_with_lock("tests/fixtures/nix-compat/stage-a-flake.nix", TRUST_TEST_STAGE_A_FLAKE, Val(TRUST_TEST_STAGE_A_LOCK), true) ?? panic("the pinned fixture should parse")
     expected_revisions := [String: String]{}
     expected_revisions["flake-utils"] = "11707dc2f618dd54ca8739b309ec4fc024de578b"
     expected_revisions["nixpkgs"] = "148bab9c1c3c53136ecb44a6ea356a0ed5b39b06"

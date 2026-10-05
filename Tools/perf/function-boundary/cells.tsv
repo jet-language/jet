@@ -1,0 +1,21 @@
+# Function-boundary cell manifest v1 (#4566). One row per cell; each cell
+# directory holds main.jet, main.c and main.rs computing the same output for
+# argument n, and expected.out. `pair` names the two-program cell a row is
+# compared with (fresh return vs caller-reused buffer); `-` means none.
+# Gate (AGENTS performance gate): Jet/Rust <= 1.05 on every cell at O1 and O2
+# while rustc is the backend; Jet/C < 1.00. Run: Tools/perf/function-boundary/run.sh
+cell	pair	n	workload
+multi-return	-	50000000	two Int results returned as one small struct per call
+fixed-return-64	-	50000000	64-byte [Int#8] built and returned by value per call, then summed
+fixed-return-512	-	10000000	512-byte [Int#64] built and returned by value per call, then summed
+fixed-return-4k	-	2000000	4 KiB [Int#512] built and returned by value per call, then summed
+fixed-return-64k	-	100000	64 KiB [Int#8192] built and returned by value per call, then summed
+list-fresh	list-reuse	2000000	fresh 256-element [Int] returned per call and dropped each iteration
+list-reuse	list-fresh	2000000	caller-owned [Int] cleared and refilled in place per call
+string-fresh	string-reuse	1000000	fresh String of 32-63 appends returned per call and dropped each iteration
+string-reuse	string-fresh	1000000	caller-owned String cleared and refilled in place per call (Jet: no String.clear)
+destructure-move	-	2000000	two owned lists returned as one tuple and destructured per call (#4567)
+map-filter-collect	-	1000	eager map/filter/map chain over 100000 Ints collected per round
+split-join	-	2000	split a 20000-word comma text and join with ';' per round
+temp-collection	-	10000000	16-element list that never leaves the function, per call
+recursion-aggregate	-	1000	divide-and-conquer recursion returning a four-Int struct per call over 100000 values

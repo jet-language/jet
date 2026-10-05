@@ -12,9 +12,7 @@
 
 // The first descriptor number a lease pins handles at; below it are the
 // standard streams and the descriptors Core itself hands to children.
-@STORE_LEASE_FIRST_SLOT :: 64
-
-store_lease_next_slot := @STORE_LEASE_FIRST_SLOT
+store_lease_next_slot := 64
 
 // Rust `SEQ`: the per-process lease sequence used in lease names.
 store_lease_sequence := 0
@@ -38,7 +36,7 @@ fn store_lease_descriptor_path(slot: Int) -> String Never! {
 pub struct SnapshotFile {
     pub relative: String
     pub file: FileReader?
-    pub id: FileId
+    pub id: FileID
     pub slot: Int
 }
 
@@ -46,7 +44,7 @@ pub struct SnapshotFile {
 pub struct LeasedDirectory {
     pub path: String
     directory: Directory?
-    pub id: FileId
+    pub id: FileID
     pub slot: Int
 
     // The same witness without the handle, once the handle left the parent.
@@ -82,7 +80,7 @@ struct NixProjectionBinding {
     primary: Bool
     source: String
     handle: ProjectionHandle?
-    pinned_id: FileId?
+    pinned_id: FileID?
     pinned_dir: Bool
     slot: Int
     symlink_target: String?
@@ -107,6 +105,7 @@ pub enum ConsumptionStatus {
 }
 
 pub struct CacheLease {
+    verification: StoreVerification
     files: [SnapshotFile]
     executables: [SnapshotFile]
     out: String
@@ -127,18 +126,18 @@ pub struct CacheLease {
     version: String
     reference: String
     store_root: String
-    status: ConsumptionStatus
+    consumption_status_value: ConsumptionStatus
     wrapper_root: String?
     // Logical `/nix/store/<name>` paths mapped to a verified lease root or
     // canonical Hangar object; shell consumers use them only inside a
     // rootless namespace.
-    nix_store_projection: [NixProjectionPath]
+    nix_store_projection_paths: [NixProjectionPath]
     // Verified output roots accepted by `stable_path`.
     leased_output_roots: [LeasedOutputRoot]
     bin_output_root: String?
     projected_bin_root: String?
     nix_projection_bindings: [NixProjectionBinding]
-    wrapper_dir: LeasedDirectory?
+    wrapper_directory_handle: LeasedDirectory?
 
     // Record that a launched process tree may now hold the lease handles.
     fn mark_process_handoff(&self) Never! {
@@ -184,9 +183,9 @@ pub struct CacheLease {
             }
             .None -> {}
         }
-        if self.wrapper_dir == {
+        if self.wrapper_directory_handle == {
             .Val(held) -> {
-                self.wrapper_dir = Val(held.detached())
+                self.wrapper_directory_handle = Val(held.detached())
                 kept = held.keep_open_for(kept)
             }
             .None -> {}
@@ -204,7 +203,7 @@ pub struct CacheLease {
     }
 
     fn status(self) -> ConsumptionStatus Never! {
-        self.status
+        self.consumption_status_value
     }
 
     fn wrapper_dir(self) -> String? Never! {
@@ -249,17 +248,18 @@ pub struct CacheLease {
     // exits, so it may use the canonical Hangar object only while its sealed
     // object and bin directory are still immutable.
     fn parent_shell_bin_dir(self) -> String? Never! {
+        verification :: self.verification
         bin :: self.bin_relative ?? return None
         if files.is_abs(bin) || store_path_components(bin).contains("..") -> return None
-        if self.status != ConsumptionStatus.Consumable || self.expected_digest == "" || self.expected_digest.contains("/") || self.expected_digest.contains("\\") -> return None
+        if self.consumption_status_value != ConsumptionStatus.Consumable || self.expected_digest == "" || self.expected_digest.contains("/") || self.expected_digest.contains("\\") -> return None
         hangar :: files.join(self.store_root, "hangar")
-        expected :: files.join(files.join(hangar, @STORE_OBJECTS_DIR), self.expected_digest)
+        expected :: files.join(files.join(hangar, STORE_OBJECTS_DIR), self.expected_digest)
         if !store_reuse_same_path(self.out, expected) -> return None
         object_info :: files.stat(expected) ?? return None
         if object_info.is_symlink || !object_info.is_dir -> return None
         if sys.family() != "windows" && object_info.mode & 0o222 != 0 -> return None
-        seal :: files.join(files.join(hangar, @STORE_SEALS_DIR), self.expected_digest)
-        sealed :: store_check_seal(expected, hangar) ?? None
+        seal :: files.join(files.join(hangar, STORE_SEALS_DIR), self.expected_digest)
+        sealed :: store_check_seal(&verification, expected, hangar) ?? None
         if sealed != Val(self.expected_digest) -> return None
         seal_info :: files.stat(seal) ?? return None
         if !seal_info.is_file -> return None
@@ -271,7 +271,7 @@ pub struct CacheLease {
     }
 
     fn nix_store_projection(self) -> [NixProjectionPath] Never! {
-        self.nix_store_projection
+        self.nix_store_projection_paths
     }
 
     fn original_output(self) -> String Never! {
@@ -282,26 +282,26 @@ pub struct CacheLease {
         self.reference
     }
 
-    fn profile_install_receipt(self) -> ProfileInstallReceipt StoreError! {
+    fn profile_install_receipt(self) -> ProfileInstallReceipt IOError! {
         self.validate()
         members := [String]{}
         loop executable in self.executables -> &members.push(executable.relative)
         &members.sort()
-        if members.len() == 0 -> return Err(StoreError.Other("verified tool lease has no executables"))
+        if members.len() == 0 -> return Err(IOError.Other(IOContext{operation: .Read, resource: None, os_code: None, cause: Val("verified tool lease has no executables")}))
         Ok(ProfileInstallReceipt{store_root: self.store_root, package: self.package, version: self.version, reference: self.reference, output_hash: self.expected_digest, executable_members: members})
     }
 
-    fn copy_profile_executable(self, member: String, destination: String) -> ProfileExecutableProof StoreError! {
+    fn copy_profile_executable(self, member: String, destination: String) -> ProfileExecutableProof IOError! {
         self.validate()
-        source :: store_lease_find_member(self.executables, member) ?? return Err(StoreError.Other("verified receipt lost executable member"))
-        file :: source.file ?? return Err(StoreError.Other("verified receipt lost executable member"))
+        source :: store_lease_find_member(self.executables, member) ?? return Err(IOError.Other(IOContext{operation: .Read, resource: None, os_code: None, cause: Val("verified receipt lost executable member")}))
+        file :: source.file ?? return Err(IOError.Other(IOContext{operation: .Read, resource: None, os_code: None, cause: Val("verified receipt lost executable member")}))
         store_reuse_copy_open_profile_file(file, destination)
     }
 
-    fn require_consumable(self) StoreError! {
-        if self.status == {
-            .Consumable -> Ok()
-            .NonConsumable(reason) -> Err(StoreError.Other(reason))
+    fn require_consumable(self) IOError! {
+        if self.consumption_status_value == {
+            .Consumable -> {}
+            .NonConsumable(reason) -> return Err(IOError.Other(IOContext{operation: .Read, resource: None, os_code: None, cause: Val(reason)}))
         }
     }
 
@@ -321,12 +321,12 @@ pub struct CacheLease {
         self.executable(requested)
     }
 
-    fn executable_for_command(self, requested: String) -> String? StoreError! {
+    fn executable_for_command(self, requested: String) -> String? IOError! {
         caller_dir :: sys.current_dir() ?? "."
         self.executable_for_command_at(requested, caller_dir)
     }
 
-    fn executable_for_command_at(self, requested: String, caller_dir: String) -> String? StoreError! {
+    fn executable_for_command_at(self, requested: String, caller_dir: String) -> String? IOError! {
         self.require_consumable()
         resolved :: if files.is_abs(requested) -> requested else -> files.join(caller_dir, requested)
         if self.executable_file_at(requested, resolved) == {
@@ -349,7 +349,7 @@ pub struct CacheLease {
             loop root_variant in store_reuse_path_variants(root) {
                 loop resolved_variant in resolved_paths {
                     if store_path_starts_with(resolved_variant, root_variant) {
-                        return Err(StoreError.Other("caller requested a path inside an executable lease that is not a recorded member"))
+                        return Err(IOError.Other(IOContext{operation: .Read, resource: None, os_code: None, cause: Val("caller requested a path inside an executable lease that is not a recorded member")}))
                     }
                 }
             }
@@ -400,11 +400,11 @@ pub struct CacheLease {
     // The stable path of a consumer path inside a leased output: a file or
     // executable handle's descriptor path, the held snapshot directory's
     // descriptor view, or the leased root. Anything outside is refused.
-    fn stable_path(self, path: String) -> String StoreError! {
+    fn stable_path(self, path: String) -> String IOError! {
         self.validate()
-        leased :: store_lease_output_for(self.leased_output_roots, path) ?? return Err(StoreError.Other("consumer path `{path}` escapes leased output `{self.out}`"))
+        leased :: store_lease_output_for(self.leased_output_roots, path) ?? return Err(IOError.Other(IOContext{operation: .Read, resource: None, os_code: None, cause: Val("consumer path `{path}` escapes leased output `{self.out}`")}))
         relative :: leased.relative
-        if store_path_components(relative).contains("..") -> return Err(StoreError.Other("leased consumer path contains parent traversal"))
+        if store_path_components(relative).contains("..") -> return Err(IOError.Other(IOContext{operation: .Read, resource: None, os_code: None, cause: Val("leased consumer path contains parent traversal")}))
         unix :: sys.family() != "windows"
         at_out :: store_reuse_same_path(leased.output_root, self.out)
         if at_out && unix {
@@ -434,62 +434,61 @@ pub struct CacheLease {
 
     // Revalidate immediately before handing paths to a child consumer. The
     // archive reader uses no-follow handles and rejects concurrent mutation.
-    fn validate(self) StoreError! {
+    fn validate(self) IOError! {
         self.require_consumable()
         if self.direct_cas {
-            expected :: files.join(files.join(files.join(self.store_root, "hangar"), @STORE_OBJECTS_DIR), self.expected_digest)
-            if !store_reuse_same_path(self.snapshot_root, expected) -> return Err(StoreError.Other("direct CAS lease does not name its digest path"))
+            expected :: files.join(files.join(files.join(self.store_root, "hangar"), STORE_OBJECTS_DIR), self.expected_digest)
+            if !store_reuse_same_path(self.snapshot_root, expected) -> return Err(IOError.Other(IOContext{operation: .Read, resource: None, os_code: None, cause: Val("direct CAS lease does not name its digest path")}))
             info :: files.stat(self.snapshot_root)
-            if info.is_symlink || !info.is_dir -> return Err(StoreError.Other("direct CAS lease root is not a real directory"))
-            held :: self.snapshot_dir ?? return Err(StoreError.Other("direct CAS lease lost its directory handle"))
-            if sys.family() != "windows" && info.id != held.id -> return Err(StoreError.Other("direct CAS lease root changed while leased"))
+            if info.is_symlink || !info.is_dir -> return Err(IOError.Other(IOContext{operation: .Read, resource: None, os_code: None, cause: Val("direct CAS lease root is not a real directory")}))
+            held :: self.snapshot_dir ?? return Err(IOError.Other(IOContext{operation: .Read, resource: None, os_code: None, cause: Val("direct CAS lease lost its directory handle")}))
+            if sys.family() != "windows" && info.id != held.id -> return Err(IOError.Other(IOContext{operation: .Read, resource: None, os_code: None, cause: Val("direct CAS lease root changed while leased")}))
         } else {
             if self.protocol_lease_id != "" {
                 protocol :: ExecutableLeaseProtocol.open(self.store_root)
                 protocol.validate_snapshot(self.protocol_lease_id, self.protocol_generation, self.protocol_owner_scope, self.snapshot_root, self.expected_digest)
             }
-            actual :: pkg_try_output_hash_of(self.snapshot_root) ?? return Err(StoreError.Other(err.message()))
-            if actual != self.expected_digest -> return Err(StoreError.Other("leased output changed: expected {self.expected_digest}, got {actual}"))
+            actual :: pkg_try_output_hash_of(self.snapshot_root) ?? return Err(IOError.Other(IOContext{operation: .Read, resource: None, os_code: None, cause: Val(err.message())}))
+            if actual != self.expected_digest -> return Err(IOError.Other(IOContext{operation: .Read, resource: None, os_code: None, cause: Val("leased output changed: expected {self.expected_digest}, got {actual}")}))
         }
         if sys.name() == "linux" {
             loop binding in self.nix_projection_bindings -> self.validate_binding(binding)
-            if self.wrapper_dir == {
+            if self.wrapper_directory_handle == {
                 .Val(wrapper) -> store_lease_validate_wrappers(wrapper, self.executables)
                 .None -> {}
             }
         }
-        Ok()
     }
 
-    fn validate_binding(self, binding: NixProjectionBinding) StoreError! {
+    fn validate_binding(self, binding: NixProjectionBinding) IOError! {
+        verification :: self.verification
         info :: files.stat(binding.source)
-        if !info.is_symlink && !info.is_dir && !info.is_file -> return Err(StoreError.Other("Nix projection source `{binding.source}` is not a regular node"))
+        if !info.is_symlink && !info.is_dir && !info.is_file -> return Err(IOError.Other(IOContext{operation: .Read, resource: None, os_code: None, cause: Val("Nix projection source `{binding.source}` is not a regular node")}))
         if binding.pinned_id == {
             .Val(pinned) -> {
-                if info.is_symlink -> return Err(StoreError.Other("Nix projection source `{binding.source}` changed type"))
-                if info.id != pinned -> return Err(StoreError.Other("Nix projection source `{binding.source}` changed while leased"))
-                if info.is_dir != binding.pinned_dir || info.is_file == binding.pinned_dir -> return Err(StoreError.Other("Nix projection source `{binding.source}` changed type"))
+                if info.is_symlink -> return Err(IOError.Other(IOContext{operation: .Read, resource: None, os_code: None, cause: Val("Nix projection source `{binding.source}` changed type")}))
+                if info.id != pinned -> return Err(IOError.Other(IOContext{operation: .Read, resource: None, os_code: None, cause: Val("Nix projection source `{binding.source}` changed while leased")}))
+                if info.is_dir != binding.pinned_dir || info.is_file == binding.pinned_dir -> return Err(IOError.Other(IOContext{operation: .Read, resource: None, os_code: None, cause: Val("Nix projection source `{binding.source}` changed type")}))
             }
             .None -> {
-                target :: binding.symlink_target ?? return Err(StoreError.Other("Nix projection source `{binding.source}` has no stability witness"))
-                if !info.is_symlink -> return Err(StoreError.Other("Nix projection source `{binding.source}` changed while leased"))
+                target :: binding.symlink_target ?? return Err(IOError.Other(IOContext{operation: .Read, resource: None, os_code: None, cause: Val("Nix projection source `{binding.source}` has no stability witness")}))
+                if !info.is_symlink -> return Err(IOError.Other(IOContext{operation: .Read, resource: None, os_code: None, cause: Val("Nix projection source `{binding.source}` changed while leased")}))
                 current :: files.read_link(binding.source)
-                if current != target -> return Err(StoreError.Other("Nix projection source `{binding.source}` changed while leased"))
+                if current != target -> return Err(IOError.Other(IOContext{operation: .Read, resource: None, os_code: None, cause: Val("Nix projection source `{binding.source}` changed while leased")}))
             }
         }
         if binding.primary {
-            if binding.digest != self.expected_digest -> return Err(StoreError.Other("Nix primary projection `{binding.logical}` has the wrong digest"))
-            if !store_reuse_same_path(binding.source, self.snapshot_root) -> return Err(StoreError.Other("Nix primary projection `{binding.logical}` is not the private lease snapshot"))
-            return Ok()
+            if binding.digest != self.expected_digest -> return Err(IOError.Other(IOContext{operation: .Read, resource: None, os_code: None, cause: Val("Nix primary projection `{binding.logical}` has the wrong digest")}))
+            if !store_reuse_same_path(binding.source, self.snapshot_root) -> return Err(IOError.Other(IOContext{operation: .Read, resource: None, os_code: None, cause: Val("Nix primary projection `{binding.logical}` is not the private lease snapshot")}))
+            return
         }
         hangar :: files.join(self.store_root, "hangar")
-        expected :: files.join(files.join(hangar, @STORE_OBJECTS_DIR), binding.digest)
-        if !store_reuse_same_path(binding.source, expected) -> return Err(StoreError.Other("Nix projection `{binding.logical}` does not use its canonical Hangar object"))
+        expected :: files.join(files.join(hangar, STORE_OBJECTS_DIR), binding.digest)
+        if !store_reuse_same_path(binding.source, expected) -> return Err(IOError.Other(IOContext{operation: .Read, resource: None, os_code: None, cause: Val("Nix projection `{binding.logical}` does not use its canonical Hangar object")}))
         if !self.direct_cas {
-            actual :: store_verified_output_hash_persistent(binding.source, Val(hangar), false) ?? return Err(StoreError.Other(err.message()))
-            if actual != binding.digest -> return Err(StoreError.Other("Nix projection `{binding.logical}` changed: expected {binding.digest}, got {actual}"))
+            actual :: store_verified_output_hash_persistent(&verification, binding.source, Val(hangar), false) ?? return Err(IOError.Other(IOContext{operation: .Read, resource: None, os_code: None, cause: Val(err.message())}))
+            if actual != binding.digest -> return Err(IOError.Other(IOContext{operation: .Read, resource: None, os_code: None, cause: Val("Nix projection `{binding.logical}` changed: expected {binding.digest}, got {actual}")}))
         }
-        Ok()
     }
 
     fn integrity_failure(self) -> IntegrityFailure? Never! {
@@ -499,15 +498,15 @@ pub struct CacheLease {
         }
     }
 
-    fn consumption_failure(self, error: StoreError) -> IntegrityFailure Never! {
+    fn consumption_failure(self, error: IOError) -> IntegrityFailure Never! {
         IntegrityFailure{
             package: self.package,
             version: self.version,
             expected: self.expected_digest,
-            actual: error.message(),
+            actual: "{error}",
             reason: "race-safe pre-consumer revalidation",
             disposition: "Jetpack rejected it before handing any path to the consumer.",
-            fix: "Re-run `jet store fetch` after `jet clean`. If the problem persists, audit the source before rebuilding."
+            fix_text: "Re-run `jet store fetch` after `jet clean`. If the problem persists, audit the source before rebuilding."
         }
     }
 
@@ -595,7 +594,7 @@ fn store_lease_output_for(roots: [LeasedOutputRoot], path: String) -> LeasedOutp
 
 // The protected wrapper directory still holds exactly one link per
 // executable, each naming that executable's descriptor path.
-fn store_lease_validate_wrappers(wrapper: LeasedDirectory, executables: [SnapshotFile]) StoreError! {
+fn store_lease_validate_wrappers(wrapper: LeasedDirectory, executables: [SnapshotFile]) IOError! {
     actual := [String]{}
     loop entry in files.list_dir(wrapper.path) {
         target :: files.read_link(entry.path)
@@ -605,8 +604,7 @@ fn store_lease_validate_wrappers(wrapper: LeasedDirectory, executables: [Snapsho
     expected := [String]{}
     loop executable in executables -> &expected.push("{executable.relative}\t/proc/self/fd/{executable.slot}")
     &expected.sort()
-    if actual != expected -> return Err(StoreError.Other("lease executable wrappers changed"))
-    Ok()
+    if actual != expected -> return Err(IOError.Other(IOContext{operation: .Read, resource: None, os_code: None, cause: Val("lease executable wrappers changed")}))
 }
 
 // Rust `file_name`: the last normal component, or None for an empty path,

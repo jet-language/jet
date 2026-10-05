@@ -82,7 +82,7 @@ pub fn envmodel_evaluate_expression(expr: Expr, globals: [String: CtValue], scop
         .ListLit(values, _) -> {
             items := [CtValue]{}
             loop value in values -> { &items.push(envmodel_evaluate_expression(value, globals, scope)) }
-            return Ok(CtValue.List(items))
+            return Ok(CtValue.List{values: items})
         }
         .StructLit(type_name, _, _, _, fields, _, _) -> {
             lowered := [NamedCtValue]{}
@@ -109,7 +109,7 @@ pub fn envmodel_evaluate_expression(expr: Expr, globals: [String: CtValue], scop
                     return Err(envmodel_error("E1333", "module map contains a duplicate key", "one module fact cannot silently choose between two values for the same key", "remove the duplicate key or merge its values", Val(expr_span(expr))))
                 }
             }
-            return Ok(CtValue.Map(lowered))
+            return Ok(CtValue.Map{entries: lowered})
         }
         else -> {}
     }

@@ -13,7 +13,7 @@ Which policy capabilities are missing, and so become owner gates?
 
 ## Method
 
-- Witness: `~/.cache/jet-test-scratch/Closer05/t3305/http_policy_order.jet`. It writes raw
+- Witness: `~/.cache/jet-dev/scratch/Closer05/t3305/http_policy_order.jet`. It writes raw
   TCP requests (OPTIONS preflight from an allowed and a denied origin, POST with and without
   auth, 404, handler `Err`, a `Content-Length: 1048577` body, `Content-Length` plus
   `Transfer-Encoding: chunked`, and `X-Forwarded-For: 203.0.113.9`). Handlers count their

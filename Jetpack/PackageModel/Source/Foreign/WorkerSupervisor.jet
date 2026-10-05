@@ -8,7 +8,7 @@
 // The C supervisor. Holes: `abi`, the c-escaped `executable`, `worker`,
 // `script`, and `temp_prefix` paths, the execl `exec_args`, and the
 // language's `wrappers`.
-@PKG_WORKER_SUPERVISOR_C :: ```#include <errno.h>
+PKG_WORKER_SUPERVISOR_C :: prep { ```#include <errno.h>
 #include <fcntl.h>
 #include <poll.h>
 #include <pthread.h>
@@ -46,7 +46,7 @@ int64_t @@abi@@_open(void){pthread_once(&once,finish_once);failed=0;pid_t pid;in
 static const char* invoke(int64_t h,const char*command,const char*json,int64_t deadline){failed=0;result[0]=0;if(!json){failed=4;return result;}size_t json_n=strlen(json);if(json_n>LIMIT-256){failed=5;return result;}if(deadline<1||deadline>300000){failed=2;return result;}int idx,input,output;pid_t pid;if(!snapshot(h,&idx,&pid,&input,&output)){failed=1;return result;}pthread_mutex_lock(&slots[idx].io);if(!snapshot(h,&idx,&pid,&input,&output)){pthread_mutex_unlock(&slots[idx].io);failed=1;return result;}uint64_t id=__atomic_add_fetch(&request_id,1,__ATOMIC_RELAXED);char*request=malloc(json_n+256);if(!request){pthread_mutex_unlock(&slots[idx].io);failed=5;return result;}int n=snprintf(request,json_n+256,"{\"id\":%llu,\"op\":\"invoke\",\"command\":\"%s\",\"input\":%s}",(unsigned long long)id,command,json);if(n<1||(size_t)n>LIMIT){free(request);pthread_mutex_unlock(&slots[idx].io);failed=5;return result;}unsigned char header[4]={(unsigned char)n,(unsigned char)(n>>8),(unsigned char)(n>>16),(unsigned char)(n>>24)};int64_t end=now_ms()+deadline;int io=write_all(input,header,4,end);if(io>0)io=write_all(input,(unsigned char*)request,(size_t)n,end);free(request);unsigned char response_header[4],response_id[8];if(io>0)io=read_all(output,response_header,4,end);uint32_t size=0;if(io>0){size=(uint32_t)response_header[0]|((uint32_t)response_header[1]<<8)|((uint32_t)response_header[2]<<16)|((uint32_t)response_header[3]<<24);if(size>LIMIT)io=-2;}if(io>0)io=read_all(output,response_id,8,end);if(io>0){uint64_t received=0;for(int b=0;b<8;b++)received|=(uint64_t)response_id[b]<<(8*b);if(received!=id)io=-3;}if(io>0)io=read_all(output,(unsigned char*)result,size,end);if(io>0)result[size]=0;if(io<=0){pthread_mutex_lock(&lock);int cancelled=slots[idx].pid==pid&&slots[idx].cancelled;pthread_mutex_unlock(&lock);reap(pid);clear_pid(pid);failed=cancelled?3:(io==0?2:(io==-2?5:4));result[0]=0;}pthread_mutex_unlock(&slots[idx].io);return result;}
 void @@abi@@_cancel(int64_t h){failed=0;int idx,input,output;pid_t pid;if(!snapshot(h,&idx,&pid,&input,&output)){failed=1;return;}pthread_mutex_lock(&lock);if(slots[idx].pid==pid)slots[idx].cancelled=1;pthread_mutex_unlock(&lock);if(kill(-pid,SIGKILL)<0&&errno==ESRCH)kill(pid,SIGKILL);}
 void @@abi@@_close(int64_t h){failed=0;int idx,input,output;pid_t pid;if(!snapshot(h,&idx,&pid,&input,&output)){failed=1;return;}pthread_mutex_lock(&slots[idx].io);if(snapshot(h,&idx,&pid,&input,&output)){unsigned char frame[21]={17,0,0,0,'{','\"','o','p','\"',':','\"','s','h','u','t','d','o','w','n','\"','}'};int64_t end=now_ms()+250;write_all(input,frame,sizeof(frame),end);reap(pid);clear_pid(pid);}pthread_mutex_unlock(&slots[idx].io);}
-@@wrappers@@```
+@@wrappers@@``` }
 
 // The persistent-worker supervisor without a scratch directory.
 pub fn pkg_worker_render_supervisor_c(abi: String, executable: String, worker: String, script: String, wrappers: String, exec_args: String) -> String Never! {
@@ -57,7 +57,7 @@ pub fn pkg_worker_render_supervisor_c(abi: String, executable: String, worker: S
 // creates it after fork, exports it as `JET_BIND_TEMP`, and removes its one
 // declared artifact on every reap path, including timeout and cancellation.
 pub fn pkg_worker_render_supervisor_c_with_temp(abi: String, executable: String, worker: String, script: String, wrappers: String, exec_args: String, temp_prefix: String?) -> String Never! {
-    pkg_binder_fill_template(@PKG_WORKER_SUPERVISOR_C, [String: String]{
+    pkg_binder_fill_template(PKG_WORKER_SUPERVISOR_C, [String: String]{
         "abi": abi,
         "executable": pkg_binder_c_escape(executable),
         "worker": pkg_binder_c_escape(worker),
@@ -116,15 +116,15 @@ pub enum WorkerLanguage {
             }
             .Octave -> pkg_binder_launder_first_line(detail)
             .R -> "the R parser returned a failure status"
-            .Php -> @BINDER_TOOL_FAILURE_DETAIL
+            .Php -> BINDER_TOOL_FAILURE_DETAIL
         }
     }
 }
 
 // Persistent bindings need the POSIX supervisor above.
 pub fn pkg_worker_require_supported_host(language: WorkerLanguage, unix: Bool) ForeignBindError! {
-    if unix -> return Ok()
-    Err(ForeignBindError.Source("persistent {language.label()} bindings require a POSIX host process supervisor"))
+    if unix -> return
+    return Err(ForeignBindError.Source("persistent {language.label()} bindings require a POSIX host process supervisor"))
 }
 
 // Run one tool for a worker binder and return its stdout; a failing status is
@@ -161,6 +161,6 @@ pub fn pkg_worker_prepare_build(cache: String, stem: String, lib: String, label:
 
 // Validate the library name every binder accepts.
 pub fn pkg_binder_require_lib_name(lib: String) ForeignBindError! {
-    if pkg_binder_is_ident(lib) -> return Ok()
-    Err(ForeignBindError.Source("`{lib}` is not a valid Jet library name"))
+    if pkg_binder_is_ident(lib) -> return
+    return Err(ForeignBindError.Source("`{lib}` is not a valid Jet library name"))
 }

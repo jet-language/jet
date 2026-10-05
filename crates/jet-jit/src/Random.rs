@@ -128,16 +128,11 @@ fn int_arg(raw: i64) -> i64 {
     std::panic::resume_unwind(Box::new(crate::runtime_host::JitRuntimeStop));
 }
 
-/// Box a host `i64` as a JIT `Int` word; values past the inline range spill.
-fn int_result(value: i64) -> i64 {
-    Concurrency::with_runtime_mut(|rt| rt.heap.int_from_i64(value))
-}
-
 fn jet_jit_random_seed(n: i64) {
-    ambient_random_kernel::seed(int_arg(n));
+    ambient_random_kernel::seed(n);
 }
 fn jet_jit_random_getrandbits(k: i64) -> i64 {
-    int_result(ambient_random_kernel::getrandbits(int_arg(k)))
+    ambient_random_kernel::getrandbits(k)
 }
 
 fn jet_jit_random_float() -> f64 {
@@ -145,7 +140,7 @@ fn jet_jit_random_float() -> f64 {
 }
 
 fn jet_jit_random_split(seed: i64) -> i64 {
-    let state = ambient_random_kernel::split(int_arg(seed)).state;
+    let state = ambient_random_kernel::split(seed).state;
     Concurrency::with_runtime_mut(|rt| {
         rt.rngs.push(RngState { state });
         rt.rngs.len() as i64
@@ -191,7 +186,6 @@ fn with_rng<T: Default>(handle: i64, f: impl FnOnce(&mut RngState) -> T) -> T {
 }
 
 fn jet_jit_rng_new(seed: i64) -> i64 {
-    let seed = int_arg(seed);
     Concurrency::with_runtime_mut(|rt| {
         rt.rngs.push(RngState { state: seed as u64 });
         rt.rngs.len() as i64

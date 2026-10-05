@@ -5,7 +5,7 @@
 
 // Git environment that could reintroduce ambient configuration, helpers,
 // proxies, or traces. Every hardened command removes all of them.
-@PROVIDER_GIT_REMOVED_ENV :: [String]{
+PROVIDER_GIT_REMOVED_ENV :: prep { [String]{
     "GIT_CONFIG_PARAMETERS", "GIT_CONFIG", "GIT_EXEC_PATH", "GIT_TEMPLATE_DIR", "GIT_DIR", "GIT_WORK_TREE",
     "GIT_COMMON_DIR", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES",
     "GIT_CEILING_DIRECTORIES", "GIT_DISCOVERY_ACROSS_FILESYSTEM", "GIT_NAMESPACE", "GIT_NO_REPLACE_OBJECTS",
@@ -15,12 +15,12 @@
     "GIT_TRACE_PACKET", "GIT_TRACE_CURL", "GIT_TRACE_CURL_NO_DATA", "GIT_TRACE2", "GIT_TRACE2_EVENT",
     "GIT_TRACE2_PERF", "http_proxy", "https_proxy", "all_proxy", "no_proxy", "HTTP_PROXY", "HTTPS_PROXY",
     "ALL_PROXY", "NO_PROXY"
-}
+} }
 
 // Command-line configuration wins over a repository-local credential helper.
-@PROVIDER_GIT_CONFIG_ARGS :: [String]{"-c", "credential.helper=", "-c", "protocol.ext.allow=never", "-c", "protocol.file.allow=always"}
+PROVIDER_GIT_CONFIG_ARGS :: prep { [String]{"-c", "credential.helper=", "-c", "protocol.ext.allow=never", "-c", "protocol.file.allow=always"} }
 
-@PROVIDER_DENY_NETWORK_ENV :: "JETPACK_DENY_NETWORK"
+PROVIDER_DENY_NETWORK_ENV :: prep { "JETPACK_DENY_NETWORK" }
 
 // The one hardened Git subprocess policy: its fixed working directory, the
 // environment it sets, the ambient variables it removes, and the leading
@@ -45,8 +45,8 @@ pub struct HardenedGitPolicy {
                 "GIT_ASKPASS": null_device,
                 "GIT_SSH_COMMAND": provider_hardened_ssh_command(),
             },
-            removed_env: @PROVIDER_GIT_REMOVED_ENV,
-            args: @PROVIDER_GIT_CONFIG_ARGS,
+            removed_env: PROVIDER_GIT_REMOVED_ENV,
+            args: PROVIDER_GIT_CONFIG_ARGS,
         }
     }
 
@@ -125,9 +125,9 @@ fn provider_io_error_other(path: String, message: String) -> IOError Never! {
 
 // `JETPACK_DENY_NETWORK` set to any non-empty value forbids every fetch.
 pub fn provider_network_denied() -[Env]> Bool Never! {
-    (sys.get(@PROVIDER_DENY_NETWORK_ENV) ?? "") != ""
+    (sys.get(PROVIDER_DENY_NETWORK_ENV) ?? "") != ""
 }
 
 pub fn provider_ensure_network_allowed(need: String) ProviderError! -[Env]> {
-    if provider_network_denied() -> return Err(ProviderError.Offline("network disabled by {@PROVIDER_DENY_NETWORK_ENV} while trying to {need}"))
+    if provider_network_denied() -> return Err(ProviderError.Offline("network disabled by {PROVIDER_DENY_NETWORK_ENV} while trying to {need}"))
 }

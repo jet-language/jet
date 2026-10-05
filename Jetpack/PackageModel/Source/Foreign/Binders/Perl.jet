@@ -2,7 +2,7 @@
 // jet_pkg_model::PerlBind.
 
 // The persistent worker. Hole: `allowed`, one `'Name' => 1` row per sub.
-@PKG_PERL_WORKER :: ```use strict;
+PKG_PERL_WORKER :: prep { ```use strict;
 use warnings;
 use JSON::PP ();
 use IO::Handle ();
@@ -59,9 +59,9 @@ while (1) {
     print STDOUT pack('V', length($encoded)), pack('V2', $low, $high), $encoded;
     STDOUT->flush();
 }
-```
+``` }
 
-@PKG_PERL_RESERVED :: [String]{"open", "cancel", "close", "decode_response", "Session", "PerlError"}
+PKG_PERL_RESERVED :: prep { [String]{"open", "cancel", "close", "decode_response", "Session", "PerlError"} }
 
 // A discovered sub: its Perl name (the worker's lookup key) and its
 // snake-cased Jet name.
@@ -171,13 +171,12 @@ fn pkg_perl_validate_structure(source: String) ForeignBindError! {
         }
     }
     if quote != 0 || stack.len() != 0 -> return Err(ForeignBindError.Source("the script has a Perl parse error"))
-    Ok()
 }
 
 fn pkg_perl_render_worker(functions: [PerlBoundFunction]) -> String Never! {
     allowed := [String]{}
     loop function in functions -> &allowed.push("    '{function.perl.replace("'", "\\'")}' => 1")
-    pkg_binder_fill_template(@PKG_PERL_WORKER, [String: String]{"allowed": allowed.join(",\n")})
+    pkg_binder_fill_template(PKG_PERL_WORKER, [String: String]{"allowed": allowed.join(",\n")})
 }
 
 fn pkg_perl_render_jet(lib: String, functions: [PerlBoundFunction]) -> String Never! {
@@ -216,5 +215,5 @@ fn pkg_perl_snake(value: String) -> String Never! {
 }
 
 fn pkg_perl_reserved(value: String) -> Bool Never! {
-    @PKG_PERL_RESERVED.contains(value) || @JET_KEYWORD_LIST.contains(value) || @JET_TYPE_LIST.contains(value)
+    PKG_PERL_RESERVED.contains(value) || JET_KEYWORD_LIST.contains(value) || JET_TYPE_LIST.contains(value)
 }

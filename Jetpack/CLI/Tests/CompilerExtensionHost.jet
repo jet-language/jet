@@ -34,7 +34,7 @@ struct ExtensionTestHost {
         cli_compiler_extension_analyze(self.slot, snapshot)
     }
 
-    fn closer(self) -> fn(Int) -> Bool {
+    fn closer(self) -> fn(Int) -> Bool Never! {
         slot :: self.slot
         (handle: Int) -> cli_compiler_extension_close(slot)
     }
@@ -54,7 +54,7 @@ fn cli_test_sample_snapshot() -> TypedSnapshot {
 }
 
 fn cli_test_encode(snapshot: TypedSnapshot) -> [U8] {
-    snapshot.encode() ?? panic("encode snapshot")
+    snapshot.encode_bytes() ?? panic("encode snapshot")
 }
 
 fn cli_test_assert_jet_owned(error: ExtensionProtocolError) {

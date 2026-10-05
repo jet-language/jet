@@ -3,11 +3,11 @@
 // Records are written in semantic-key order, inputs and source maps in
 // field order, so equal locks always produce equal bytes.
 
-@SEMANTIC_LOCK_VERSION_KEY :: "semantic-lock-version"
-@SEMANTIC_LOCK_RECORD_HEADER :: "[[semantic_record]]"
-@SEMANTIC_LOCK_RATIONALE_HEADER :: "[[semantic_record.rationale]]"
-@SEMANTIC_LOCK_INPUT_HEADER :: "[[lock_input]]"
-@SEMANTIC_LOCK_SOURCE_MAP_HEADER :: "[[source_map]]"
+SEMANTIC_LOCK_VERSION_KEY :: prep { "semantic-lock-version" }
+SEMANTIC_LOCK_RECORD_HEADER :: prep { "[[semantic_record]]" }
+SEMANTIC_LOCK_RATIONALE_HEADER :: prep { "[[semantic_record.rationale]]" }
+SEMANTIC_LOCK_INPUT_HEADER :: prep { "[[lock_input]]" }
+SEMANTIC_LOCK_SOURCE_MAP_HEADER :: prep { "[[source_map]]" }
 
 // The block a header line opens.
 enum SemanticLockSection {
@@ -18,10 +18,10 @@ enum SemanticLockSection {
 
     fn from_header(line: String) -> SemanticLockSection? Never! {
         if line == {
-            @SEMANTIC_LOCK_RECORD_HEADER -> Val(SemanticLockSection.Record)
-            @SEMANTIC_LOCK_RATIONALE_HEADER -> Val(SemanticLockSection.Rationale)
-            @SEMANTIC_LOCK_INPUT_HEADER -> Val(SemanticLockSection.Input)
-            @SEMANTIC_LOCK_SOURCE_MAP_HEADER -> Val(SemanticLockSection.SourceMap)
+            SEMANTIC_LOCK_RECORD_HEADER -> Val(SemanticLockSection.Record)
+            SEMANTIC_LOCK_RATIONALE_HEADER -> Val(SemanticLockSection.Rationale)
+            SEMANTIC_LOCK_INPUT_HEADER -> Val(SemanticLockSection.Input)
+            SEMANTIC_LOCK_SOURCE_MAP_HEADER -> Val(SemanticLockSection.SourceMap)
             else -> None
         }
     }
@@ -60,8 +60,8 @@ fn trust_lock_string_list(raw: String) -> [String] Never! {
     loop inner.ends_with("]") -> inner = inner.removesuffix("]")
     if inner == "" -> return [String]{}
     items := [String]{}
-    loop piece in trust_text_split(inner, @TRUST_COMMA) {
-        item :: trust_text_trim_byte(piece.trim(), @TRUST_QUOTE)
+    loop piece in trust_text_split(inner, TRUST_COMMA) {
+        item :: trust_text_trim_byte(piece.trim(), TRUST_QUOTE)
         if item != "" -> &items.push(item)
     }
     items
@@ -78,7 +78,7 @@ pub fn trust_strip_semantic_sections(raw: String) -> String Never! {
             if skipping -> next
         }
         if skipping -> next
-        if trimmed.starts_with(@SEMANTIC_LOCK_VERSION_KEY) -> next
+        if trimmed.starts_with(SEMANTIC_LOCK_VERSION_KEY) -> next
         &out.push("{line}\n")
     }
     out.join("")
@@ -105,7 +105,7 @@ struct PartialSemanticRecord {
             "exact" -> self.exact = Val(value)
             "hash" -> self.hash = Val(value)
             "platform" -> self.platform = Val(value)
-            @SEMANTIC_LOCK_VERSION_KEY -> {}
+            SEMANTIC_LOCK_VERSION_KEY -> {}
             else -> self.future_fields[key] = value
         }
     }
@@ -266,9 +266,9 @@ pub fn trust_parse_semantic_lock(raw: String) -> SemanticLockFile Never! {
             }
             .None -> {}
         }
-        parts :: trust_text_split_first(line, @TRUST_EQUALS) ?? next
+        parts :: trust_text_split_first(line, TRUST_EQUALS) ?? next
         key :: parts.before.trim()
-        unquoted :: trust_text_trim_byte(parts.after.trim(), @TRUST_QUOTE)
+        unquoted :: trust_text_trim_byte(parts.after.trim(), TRUST_QUOTE)
         value :: trust_text_replace_all(trust_text_replace_all(unquoted, "\\\"", "\""), "\\\\", "\\")
         &reader.field(key, value)
     }
@@ -283,22 +283,22 @@ pub fn trust_write_semantic_lock(lock: SemanticLockFile) -> String Never! {
     inputs := lock.inputs
     &inputs.sort_by((left: LockInput, right: LockInput) -> (left.name <=> right.name).then(left.url <=> right.url).then(left.follows <=> right.follows))
     source_maps :: trust_lock_sorted_source_maps(lock.source_maps)
-    out := [String]{"{@SEMANTIC_LOCK_VERSION_KEY} = 1\n"}
+    out := [String]{"{SEMANTIC_LOCK_VERSION_KEY} = 1\n"}
     loop input in inputs {
-        &out.push("\n{@SEMANTIC_LOCK_INPUT_HEADER}\n")
+        &out.push("\n{SEMANTIC_LOCK_INPUT_HEADER}\n")
         &out.push(trust_lock_line("name", input.name))
         &out.push(trust_lock_line("url", input.url))
         &out.push(trust_lock_line("follows", input.follows))
     }
     loop map in source_maps {
-        &out.push("\n{@SEMANTIC_LOCK_SOURCE_MAP_HEADER}\n")
+        &out.push("\n{SEMANTIC_LOCK_SOURCE_MAP_HEADER}\n")
         &out.push(trust_lock_line("pattern", map.pattern))
         quoted := [String]{}
         loop source in map.sources -> &quoted.push("\"{trust_lock_escape(source)}\"")
         &out.push("sources = [{quoted.join(", ")}]\n")
     }
     loop record in records {
-        &out.push("\n{@SEMANTIC_LOCK_RECORD_HEADER}\n")
+        &out.push("\n{SEMANTIC_LOCK_RECORD_HEADER}\n")
         &out.push(trust_lock_line("kind", record.identity.kind.label()))
         &out.push(trust_lock_line("key", record.identity.key))
         &out.push(trust_lock_line("exact", record.identity.exact))
@@ -308,7 +308,7 @@ pub fn trust_write_semantic_lock(lock: SemanticLockFile) -> String Never! {
         &future_keys.sort()
         loop key in future_keys -> &out.push(trust_lock_line(key, record.future_fields[key]))
         loop rationale in record.rationales {
-            &out.push("{@SEMANTIC_LOCK_RATIONALE_HEADER}\n")
+            &out.push("{SEMANTIC_LOCK_RATIONALE_HEADER}\n")
             &out.push(trust_lock_line("owner-package", rationale.owner_package))
             &out.push(trust_lock_line("reason", rationale.reason))
             &out.push(trust_lock_line("source-ref", rationale.source_ref))

@@ -1,6 +1,6 @@
 # #3294 — metadata-driven interactive CLI selection (D-CORE-CLI-MENU1=A)
 
-Date: 2026-09-29. Binary: jet-debug-snapshot14 via `~/.cache/jet-luna/safe-jet.sh`.
+Date: 2026-09-29. Binary: jet-debug-snapshot14 via `~/.cache/jet-dev/safe-jet.sh`.
 
 ## Question
 
@@ -39,7 +39,7 @@ exists today, and what remains to build?
 
 ## Evidence (run)
 
-- `safe-jet.sh check ~/.cache/jet-test-scratch/Closer08/prompt.jet` (the
+- `safe-jet.sh check ~/.cache/jet-dev/scratch/Closer08/prompt.jet` (the
   ballot's own proposed snippet `args.spec().option_int(...)`, `spec.prompt()`):
   `Error [E0102]: ... ArgsSpec has no method option_int`. There is no public
   `prompt` operation (no `ArgsSpecPrompt` op in

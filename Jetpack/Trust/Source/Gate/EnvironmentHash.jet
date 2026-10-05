@@ -137,7 +137,7 @@ fn trust_has_env_or_build_grant(records: [TrustRecord], project_dir: String, has
     loop record in records {
         grant :: trust_record_grant(record) ?? next
         if grant.is(TrustAuthority.Env) && trust_grant_matches_project_or_hash(grant, project_dir, hash) -> return true
-        if grant.is(TrustAuthority.Build) && (grant.subject == hash || grant.subject == trust_record_line_text(@TRUST_HASH_PREFIX, hash)) -> return true
+        if grant.is(TrustAuthority.Build) && (grant.subject == hash || grant.subject == trust_record_line_text(TRUST_HASH_PREFIX, hash)) -> return true
     }
     false
 }

@@ -1,45 +1,9 @@
 // Deterministic package bundle plans, artifacts, receipts, and the target
 // layout renderers, ported from jet_pkg_model::Bundler. Every JSON document is
-// Core canonical JSON (`json.canonical`, byte-ordered keys) plus one LF, the
-// bytes the reference's `CanonicalJson::bytes` produces.
-
-impl IconFormat {
-    fn extension(self) -> String Never! {
-        self.as_str()
-    }
-
-    // Declaration order, the reference's derived `Ord`.
-    fn rank(self) -> Int Never! {
-        if self == {
-            .Png -> 0
-            .Icns -> 1
-            .Ico -> 2
-            .Svg -> 3
-        }
-    }
-}
-
-impl SigningPhase {
-    fn rank(self) -> Int Never! {
-        if self == {
-            .PreSign -> 0
-            .PostSign -> 1
-            .Verify -> 2
-        }
-    }
-}
-
-impl GameBundleAsset {
-    fn new(path: String, mode: Int, bytes: [U8]) -> GameBundleAsset Never! {
-        GameBundleAsset{path: path, mode: mode, bytes: bytes}
-    }
-}
-
-impl SigningHookInput {
-    fn new(path: String, digest: String) -> SigningHookInput Never! {
-        SigningHookInput{path: path, digest: digest}
-    }
-}
+// Foundation A-canonical JSON (arbitrary integers, Rust key order) plus one LF,
+// exactly the reference's `CanonicalJson::bytes` protocol, not RFC8785 JCS.
+// BLOCKED #4262 integration: shared Encoding/CanonicalJson.jet must land in
+// main Compiler/ after stage 2; Bootstrap never references a worktree path.
 
 pub enum BundleFileKind {
     Executable
@@ -84,13 +48,13 @@ pub struct BundleFile {
         pkg_sha256_hex(self.bytes)
     }
 
-    fn to_json_tree(self) -> DataTree Never! {
+    fn to_json_tree(self) -> CanonicalJSON Never! {
         pkg_bundle_object([
-            "bytes": DataTree.Int(self.bytes.len()),
-            "kind": DataTree.Text(self.kind.as_str()),
-            "mode": DataTree.Int(self.mode),
-            "path": DataTree.Text(self.path),
-            "sha256": DataTree.Text(self.digest())
+            "bytes": pkg_bundle_integer(self.bytes.len()),
+            "kind": CanonicalJSON.String(self.kind.as_str()),
+            "mode": pkg_bundle_integer(self.mode),
+            "path": CanonicalJSON.String(~self.path),
+            "sha256": CanonicalJSON.String(self.digest())
         ])
     }
 }
@@ -105,11 +69,11 @@ pub struct LaunchDescriptor {
         LaunchDescriptor{launcher: launcher, executable: executable, arguments_passthrough: true}
     }
 
-    fn to_json_tree(self) -> DataTree Never! {
+    fn to_json_tree(self) -> CanonicalJSON Never! {
         pkg_bundle_object([
-            "arguments_passthrough": DataTree.Bool(self.arguments_passthrough),
-            "executable": DataTree.Text(self.executable),
-            "launcher": DataTree.Text(self.launcher)
+            "arguments_passthrough": CanonicalJSON.Bool(self.arguments_passthrough),
+            "executable": CanonicalJSON.String(~self.executable),
+            "launcher": CanonicalJSON.String(~self.launcher)
         ])
     }
 }
@@ -130,7 +94,7 @@ pub struct UpdaterManifest {
 
     fn for_spec(spec: BundleSpec, updater: UpdaterSpec, payload_sha256: String) -> UpdaterManifest Never! {
         UpdaterManifest{
-            schema: @PACKAGE_UPDATE_MANIFEST_SCHEMA,
+            schema: PACKAGE_UPDATE_MANIFEST_SCHEMA,
             package: spec.package,
             version: spec.version,
             target: spec.target,
@@ -144,37 +108,37 @@ pub struct UpdaterManifest {
         }
     }
 
-    fn to_json_tree(self) -> DataTree Never! {
+    fn to_json_tree(self) -> CanonicalJSON Never! {
         pkg_bundle_object([
-            "artifact": DataTree.Text(self.artifact),
-            "channel": DataTree.Text(self.channel),
-            "package": DataTree.Text(self.package),
-            "payload_bytes": DataTree.Int(self.payload_bytes),
-            "payload_sha256": DataTree.Text(self.payload_sha256),
+            "artifact": CanonicalJSON.String(~self.artifact),
+            "channel": CanonicalJSON.String(~self.channel),
+            "package": CanonicalJSON.String(~self.package),
+            "payload_bytes": pkg_bundle_integer(self.payload_bytes),
+            "payload_sha256": CanonicalJSON.String(~self.payload_sha256),
             "release_notes_url": pkg_bundle_optional_text(self.release_notes_url),
-            "schema": DataTree.Text(self.schema),
+            "schema": CanonicalJSON.String(~self.schema),
             "signature_url": pkg_bundle_optional_text(self.signature_url),
-            "target": DataTree.Text(self.target.as_str()),
-            "url": DataTree.Text(self.url),
-            "version": DataTree.Text(self.version)
+            "target": CanonicalJSON.String(self.target.as_str()),
+            "url": CanonicalJSON.String(~self.url),
+            "version": CanonicalJSON.String(~self.version)
         ])
     }
 
     // The receipt projection: URLs with credentials, queries, or fragments
     // are redacted.
-    fn receipt_json_tree(self) -> DataTree Never! {
+    fn receipt_json_tree(self) -> CanonicalJSON Never! {
         pkg_bundle_object([
-            "artifact": DataTree.Text(self.artifact),
-            "channel": DataTree.Text(self.channel),
-            "package": DataTree.Text(self.package),
-            "payload_bytes": DataTree.Int(self.payload_bytes),
-            "payload_sha256": DataTree.Text(self.payload_sha256),
+            "artifact": CanonicalJSON.String(~self.artifact),
+            "channel": CanonicalJSON.String(~self.channel),
+            "package": CanonicalJSON.String(~self.package),
+            "payload_bytes": pkg_bundle_integer(self.payload_bytes),
+            "payload_sha256": CanonicalJSON.String(~self.payload_sha256),
             "release_notes_url": pkg_bundle_optional_receipt_url(self.release_notes_url),
-            "schema": DataTree.Text(self.schema),
+            "schema": CanonicalJSON.String(~self.schema),
             "signature_url": pkg_bundle_optional_receipt_url(self.signature_url),
-            "target": DataTree.Text(self.target.as_str()),
-            "url": DataTree.Text(pkg_bundle_receipt_source(self.url)),
-            "version": DataTree.Text(self.version)
+            "target": CanonicalJSON.String(self.target.as_str()),
+            "url": CanonicalJSON.String(pkg_bundle_receipt_source(self.url)),
+            "version": CanonicalJSON.String(~self.version)
         ])
     }
 
@@ -194,21 +158,21 @@ pub struct BundleInputFact {
     pub digest: String
     pub bytes: Int
 
-    fn to_json_tree(self) -> DataTree Never! {
+    fn to_json_tree(self) -> CanonicalJSON Never! {
         pkg_bundle_object([
-            "bytes": DataTree.Int(self.bytes),
-            "digest": DataTree.Text(self.digest),
-            "path": DataTree.Text(self.path),
-            "role": DataTree.Text(self.role)
+            "bytes": pkg_bundle_integer(self.bytes),
+            "digest": CanonicalJSON.String(~self.digest),
+            "path": CanonicalJSON.String(~self.path),
+            "role": CanonicalJSON.String(~self.role)
         ])
     }
 
-    fn receipt_json_tree(self) -> DataTree Never! {
+    fn receipt_json_tree(self) -> CanonicalJSON Never! {
         pkg_bundle_object([
-            "bytes": DataTree.Int(self.bytes),
-            "digest": DataTree.Text(self.digest),
-            "path": DataTree.Text(pkg_bundle_receipt_source(self.path)),
-            "role": DataTree.Text(self.role)
+            "bytes": pkg_bundle_integer(self.bytes),
+            "digest": CanonicalJSON.String(~self.digest),
+            "path": CanonicalJSON.String(pkg_bundle_receipt_source(self.path)),
+            "role": CanonicalJSON.String(~self.role)
         ])
     }
 }
@@ -240,10 +204,7 @@ pub struct BundlePlan {
         spec.version = if spec.target == BundleTarget.WindowsMsix -> pkg_bundle_windows_version(spec.version) else -> spec.version.trim()
         spec.validate()
         icons := spec.icons
-        &icons.sort_by(icon -> icon.digest())
-        &icons.sort_by(icon -> icon.size)
-        &icons.sort_by(icon -> icon.format.rank())
-        &icons.sort_by(icon -> icon.name)
+        &icons.sort_by((left: BundleIcon, right: BundleIcon) -> (left.name <=> right.name).then(left.format.rank() <=> right.format.rank()).then(left.size <=> right.size).then(left.digest() <=> right.digest()))
         hooks :: pkg_bundle_sorted_hooks(spec.signing_hooks)
         metadata := spec.metadata
         &metadata.categories.sort()
@@ -252,8 +213,7 @@ pub struct BundlePlan {
         if game == {
             .Val(declared) -> {
                 sorted := declared
-                &sorted.assets.sort_by(asset -> asset.digest())
-                &sorted.assets.sort_by(asset -> asset.path)
+                &sorted.assets.sort_by((left: GameBundleAsset, right: GameBundleAsset) -> (left.path <=> right.path).then(left.digest() <=> right.digest()))
                 game = Val(sorted)
             }
             .None -> {}
@@ -275,26 +235,25 @@ pub struct BundlePlan {
             }
             .None -> {}
         }
-        &inputs.sort_by(fact -> fact.path)
-        &inputs.sort_by(fact -> fact.role)
+        &inputs.sort_by((left: BundleInputFact, right: BundleInputFact) -> (left.role <=> right.role).then(left.path <=> right.path))
         identifier :: spec.metadata.identifier
         artifact_name :: [identifier, spec.target.artifact_suffix()].join("")
-        files := [BundleFile]{}
+        layout_files := [BundleFile]{}
         launch := LaunchDescriptor.new("", "")
         if spec.target == {
             .LinuxAppImage -> {
                 executable :: "usr/bin/{spec.executable.name}"
-                &files.push(BundleFile.new("AppRun", BundleFileKind.Launcher, 0o755, pkg_bundle_linux_launcher(spec.executable.name)))
-                &files.push(BundleFile.new(executable, BundleFileKind.Executable, 0o755, spec.executable.bytes))
+                &layout_files.push(BundleFile.new("AppRun", BundleFileKind.Launcher, 0o755, pkg_bundle_linux_launcher(spec.executable.name)))
+                &layout_files.push(BundleFile.new(executable, BundleFileKind.Executable, 0o755, spec.executable.bytes))
                 icon_name :: if icons.len() > 0 -> Val(icons[0].name) else -> None
-                &files.push(BundleFile.new("usr/share/applications/{identifier}.desktop", BundleFileKind.Manifest, 0o644, pkg_bundle_linux_desktop_file(metadata, icon_name)))
-                &files.push(BundleFile.new("usr/share/{identifier}/jet-bundle.json", BundleFileKind.Metadata, 0o644, metadata_bytes))
+                &layout_files.push(BundleFile.new("usr/share/applications/{identifier}.desktop", BundleFileKind.Manifest, 0o644, pkg_bundle_linux_desktop_file(metadata, icon_name)))
+                &layout_files.push(BundleFile.new("usr/share/{identifier}/jet-bundle.json", BundleFileKind.Metadata, 0o644, metadata_bytes))
                 loop icon in icons {
-                    &files.push(BundleFile.new("usr/share/icons/hicolor/{icon.size}x{icon.size}/apps/{icon.name}.{icon.format.extension()}", BundleFileKind.Icon, 0o644, icon.bytes))
+                    &layout_files.push(BundleFile.new("usr/share/icons/hicolor/{icon.size}x{icon.size}/apps/{icon.name}.{icon.format.extension()}", BundleFileKind.Icon, 0o644, icon.bytes))
                 }
-                if icons.len() > 0 -> &files.push(BundleFile.new(".DirIcon", BundleFileKind.Icon, 0o644, icons[0].bytes))
+                if icons.len() > 0 -> &layout_files.push(BundleFile.new(".DirIcon", BundleFileKind.Icon, 0o644, icons[0].bytes))
                 if spec.updater == {
-                    .Val(updater) -> &files.push(BundleFile.new("usr/share/{identifier}/jet-update.json", BundleFileKind.Updater, 0o644, UpdaterManifest.for_spec(spec, updater, executable_digest).json_bytes()))
+                    .Val(updater) -> &layout_files.push(BundleFile.new("usr/share/{identifier}/jet-update.json", BundleFileKind.Updater, 0o644, UpdaterManifest.for_spec(spec, updater, executable_digest).json_bytes()))
                     .None -> {}
                 }
                 launch = LaunchDescriptor.new("AppRun", executable)
@@ -302,31 +261,31 @@ pub struct BundlePlan {
             .MacOSApp -> {
                 root :: "{identifier}.app"
                 executable :: "{root}/Contents/MacOS/{spec.executable.name}"
-                &files.push(BundleFile.new(executable, BundleFileKind.Executable, 0o755, spec.executable.bytes))
+                &layout_files.push(BundleFile.new(executable, BundleFileKind.Executable, 0o755, spec.executable.bytes))
                 icon_name :: if icons.len() > 0 -> Val("{icons[0].name}.{icons[0].format.extension()}") else -> None
-                &files.push(BundleFile.new("{root}/Contents/Info.plist", BundleFileKind.Manifest, 0o644, pkg_bundle_mac_info_plist(spec, icon_name)))
-                &files.push(BundleFile.new("{root}/Contents/Resources/jet-bundle.json", BundleFileKind.Metadata, 0o644, metadata_bytes))
+                &layout_files.push(BundleFile.new("{root}/Contents/Info.plist", BundleFileKind.Manifest, 0o644, pkg_bundle_mac_info_plist(spec, icon_name)))
+                &layout_files.push(BundleFile.new("{root}/Contents/Resources/jet-bundle.json", BundleFileKind.Metadata, 0o644, metadata_bytes))
                 loop icon in icons {
-                    &files.push(BundleFile.new("{root}/Contents/Resources/{icon.name}.{icon.format.extension()}", BundleFileKind.Icon, 0o644, icon.bytes))
+                    &layout_files.push(BundleFile.new("{root}/Contents/Resources/{icon.name}.{icon.format.extension()}", BundleFileKind.Icon, 0o644, icon.bytes))
                 }
                 if spec.updater == {
-                    .Val(updater) -> &files.push(BundleFile.new("{root}/Contents/Resources/jet-update.json", BundleFileKind.Updater, 0o644, UpdaterManifest.for_spec(spec, updater, executable_digest).json_bytes()))
+                    .Val(updater) -> &layout_files.push(BundleFile.new("{root}/Contents/Resources/jet-update.json", BundleFileKind.Updater, 0o644, UpdaterManifest.for_spec(spec, updater, executable_digest).json_bytes()))
                     .None -> {}
                 }
                 launch = LaunchDescriptor.new(executable, executable)
             }
             .WindowsMsix -> {
                 executable :: pkg_bundle_windows_executable_name(spec.executable.name)
-                &files.push(BundleFile.new(executable, BundleFileKind.Executable, 0o755, spec.executable.bytes))
+                &layout_files.push(BundleFile.new(executable, BundleFileKind.Executable, 0o755, spec.executable.bytes))
                 logo :: if icons.len() > 0 -> Val("Assets/{icons[0].name}.{icons[0].format.extension()}") else -> None
-                &files.push(BundleFile.new("AppxManifest.xml", BundleFileKind.Manifest, 0o644, pkg_bundle_windows_manifest(spec, executable, logo)))
-                &files.push(BundleFile.new("[Content_Types].xml", BundleFileKind.ContentTypes, 0o644, pkg_bundle_windows_content_types(files)))
-                &files.push(BundleFile.new("jet/jet-bundle.json", BundleFileKind.Metadata, 0o644, metadata_bytes))
+                &layout_files.push(BundleFile.new("AppxManifest.xml", BundleFileKind.Manifest, 0o644, pkg_bundle_windows_manifest(spec, executable, logo)))
+                &layout_files.push(BundleFile.new("[Content_Types].xml", BundleFileKind.ContentTypes, 0o644, pkg_bundle_windows_content_types(layout_files)))
+                &layout_files.push(BundleFile.new("jet/jet-bundle.json", BundleFileKind.Metadata, 0o644, metadata_bytes))
                 loop icon in icons {
-                    &files.push(BundleFile.new("Assets/{icon.name}.{icon.format.extension()}", BundleFileKind.Icon, 0o644, icon.bytes))
+                    &layout_files.push(BundleFile.new("Assets/{icon.name}.{icon.format.extension()}", BundleFileKind.Icon, 0o644, icon.bytes))
                 }
                 if spec.updater == {
-                    .Val(updater) -> &files.push(BundleFile.new("jet/jet-update.json", BundleFileKind.Updater, 0o644, UpdaterManifest.for_spec(spec, updater, executable_digest).json_bytes()))
+                    .Val(updater) -> &layout_files.push(BundleFile.new("jet/jet-update.json", BundleFileKind.Updater, 0o644, UpdaterManifest.for_spec(spec, updater, executable_digest).json_bytes()))
                     .None -> {}
                 }
                 launch = LaunchDescriptor.new(executable, executable)
@@ -334,32 +293,32 @@ pub struct BundlePlan {
         }
         if game == {
             .Val(declared) -> {
-                &files.push(BundleFile.new(pkg_bundle_game_manifest_path(spec), BundleFileKind.GameManifest, 0o644, pkg_bundle_canonical_bytes(pkg_bundle_game_manifest_json(spec, declared))))
+                &layout_files.push(BundleFile.new(pkg_bundle_game_manifest_path(spec), BundleFileKind.GameManifest, 0o644, pkg_bundle_canonical_bytes(pkg_bundle_game_manifest_json(spec, declared))))
                 loop asset in declared.assets {
-                    &files.push(BundleFile.new(pkg_bundle_game_asset_path(spec, asset.path), BundleFileKind.GameAsset, asset.mode, asset.bytes))
+                    &layout_files.push(BundleFile.new(pkg_bundle_game_asset_path(spec, asset.path), BundleFileKind.GameAsset, asset.mode, asset.bytes))
                 }
             }
             .None -> {}
         }
         if spec.target == BundleTarget.WindowsMsix {
-            content_types :: pkg_bundle_windows_content_types(files)
-            loop index in 0..<files.len() {
-                if files[index].kind == BundleFileKind.ContentTypes -> files[index].bytes = content_types
+            content_types :: pkg_bundle_windows_content_types(layout_files)
+            loop index in 0..<layout_files.len() {
+                if layout_files[index].kind == BundleFileKind.ContentTypes -> layout_files[index].bytes = content_types
             }
-            &files.push(BundleFile.new("AppxBlockMap.xml", BundleFileKind.BlockMap, 0o644, pkg_bundle_windows_block_map(files)))
+            &layout_files.push(BundleFile.new("AppxBlockMap.xml", BundleFileKind.BlockMap, 0o644, pkg_bundle_windows_block_map(layout_files)))
         }
         paths := [String]{}
-        loop file in files {
+        loop file in layout_files {
             if paths.contains(file.path) -> return Err(BundleError.DuplicatePath(file.path))
             &paths.push(file.path)
         }
-        &files.sort_by(file -> file.path)
+        &layout_files.sort_by((left: BundleFile, right: BundleFile) -> left.path <=> right.path)
         updater_manifest :: if spec.updater == {
             .Val(updater) -> Val(UpdaterManifest.for_spec(spec, updater, executable_digest))
             .None -> None
         }
         plan := BundlePlan{
-            schema_version: @PACKAGE_BUNDLE_SCHEMA_VERSION,
+            schema_version: PACKAGE_BUNDLE_SCHEMA_VERSION,
             kind: spec.kind,
             target: spec.target,
             package: spec.package,
@@ -367,7 +326,7 @@ pub struct BundlePlan {
             executable_source: spec.executable.source,
             artifact_name: artifact_name,
             metadata: metadata,
-            files: files,
+            files: layout_files,
             launch: launch,
             inputs: inputs,
             signing_hooks: hooks,
@@ -442,38 +401,38 @@ pub struct BundlePlan {
         pkg_bundle_canonical_text(self.to_json_tree())
     }
 
-    fn to_json_tree(self) -> DataTree Never! {
-        files := [DataTree]{}
-        loop file in self.files -> &files.push(file.to_json_tree())
-        inputs := [DataTree]{}
+    fn to_json_tree(self) -> CanonicalJSON Never! {
+        file_values := [CanonicalJSON]{}
+        loop file in self.files -> &file_values.push(file.to_json_tree())
+        inputs := [CanonicalJSON]{}
         loop input in self.inputs -> &inputs.push(input.to_json_tree())
-        hooks := [DataTree]{}
+        hooks := [CanonicalJSON]{}
         loop hook in self.signing_hooks -> &hooks.push(pkg_bundle_signing_hook_json(hook))
         game :: if self.game == {
             .Val(declared) -> pkg_bundle_game_spec_json(declared)
-            .None -> DataTree.Null
+            .None -> CanonicalJSON.Null
         }
         updater :: if self.updater == {
             .Val(manifest) -> manifest.to_json_tree()
-            .None -> DataTree.Null
+            .None -> CanonicalJSON.Null
         }
         pkg_bundle_object([
-            "artifact_name": DataTree.Text(self.artifact_name),
-            "files": DataTree.Array(files),
+            "artifact_name": CanonicalJSON.String(~self.artifact_name),
+            "files": CanonicalJSON.Array(file_values),
             "game": game,
-            "format": DataTree.Text(@PACKAGE_BUNDLE_FORMAT),
-            "identity": DataTree.Text(self.identity),
-            "kind": DataTree.Text(self.kind.as_str()),
+            "format": CanonicalJSON.String(PACKAGE_BUNDLE_FORMAT),
+            "identity": CanonicalJSON.String(~self.identity),
+            "kind": CanonicalJSON.String(self.kind.as_str()),
             "launch": self.launch.to_json_tree(),
             "metadata": pkg_bundle_plan_metadata_json(self.metadata),
-            "package": DataTree.Text(self.package),
-            "executable_source": DataTree.Text(self.executable_source),
-            "inputs": DataTree.Array(inputs),
-            "signing_hooks": DataTree.Array(hooks),
-            "target": DataTree.Text(self.target.as_str()),
+            "package": CanonicalJSON.String(~self.package),
+            "executable_source": CanonicalJSON.String(~self.executable_source),
+            "inputs": CanonicalJSON.Array(inputs),
+            "signing_hooks": CanonicalJSON.Array(hooks),
+            "target": CanonicalJSON.String(self.target.as_str()),
             "updater": updater,
-            "version": DataTree.Text(self.version),
-            "schema_version": DataTree.Int(self.schema_version)
+            "version": CanonicalJSON.String(~self.version),
+            "schema_version": pkg_bundle_integer(self.schema_version)
         ])
     }
 }
@@ -512,17 +471,17 @@ pub struct BundleArtifact {
         pkg_bundle_canonical_text(self.to_json_tree())
     }
 
-    fn to_json_tree(self) -> DataTree Never! {
+    fn to_json_tree(self) -> CanonicalJSON Never! {
         pkg_bundle_object([
-            "artifact_name": DataTree.Text(self.artifact_name),
-            "artifact_sha256": DataTree.Text(self.digest()),
-            "format": DataTree.Text(@PACKAGE_BUNDLE_FORMAT),
-            "kind": DataTree.Text(self.kind.as_str()),
-            "package": DataTree.Text(self.package),
+            "artifact_name": CanonicalJSON.String(~self.artifact_name),
+            "artifact_sha256": CanonicalJSON.String(self.digest()),
+            "format": CanonicalJSON.String(PACKAGE_BUNDLE_FORMAT),
+            "kind": CanonicalJSON.String(self.kind.as_str()),
+            "package": CanonicalJSON.String(~self.package),
             "receipt": self.receipt.to_json_tree(),
-            "schema_version": DataTree.Int(self.schema_version),
-            "target": DataTree.Text(self.target.as_str()),
-            "version": DataTree.Text(self.version)
+            "schema_version": pkg_bundle_integer(self.schema_version),
+            "target": CanonicalJSON.String(self.target.as_str()),
+            "version": CanonicalJSON.String(~self.version)
         ])
     }
 }
@@ -583,10 +542,10 @@ pub struct BundleSigningFact {
         out
     }
 
-    fn to_json_tree(self) -> DataTree Never! {
+    fn to_json_tree(self) -> CanonicalJSON Never! {
         pkg_bundle_object([
             "diagnostic": pkg_bundle_optional_receipt_text(self.diagnostic),
-            "status": DataTree.Text(self.status.as_str()),
+            "status": CanonicalJSON.String(self.status.as_str()),
             "tool": pkg_bundle_optional_receipt_text(self.tool),
             "tool_identity": pkg_bundle_optional_receipt_text(self.tool_identity),
             "tool_version": pkg_bundle_optional_receipt_text(self.tool_version)
@@ -622,15 +581,15 @@ pub struct BundleMaterializerFact {
     pub mechanism: String
     pub policy: String
 
-    fn to_json_tree(self) -> DataTree Never! {
+    fn to_json_tree(self) -> CanonicalJSON Never! {
         pkg_bundle_object([
-            "authority": DataTree.Text(pkg_bundle_receipt_safe_text(self.authority)),
-            "executable": DataTree.Text(pkg_bundle_receipt_safe_text(self.executable)),
-            "mechanism": DataTree.Text(pkg_bundle_receipt_safe_text(self.mechanism)),
-            "policy": DataTree.Text(pkg_bundle_receipt_safe_text(self.policy)),
-            "tool": DataTree.Text(pkg_bundle_receipt_safe_text(self.tool)),
-            "tool_identity": DataTree.Text(pkg_bundle_receipt_safe_text(self.tool_identity)),
-            "tool_version": DataTree.Text(pkg_bundle_receipt_safe_text(self.tool_version))
+            "authority": CanonicalJSON.String(pkg_bundle_receipt_safe_text(self.authority)),
+            "executable": CanonicalJSON.String(pkg_bundle_receipt_safe_text(self.executable)),
+            "mechanism": CanonicalJSON.String(pkg_bundle_receipt_safe_text(self.mechanism)),
+            "policy": CanonicalJSON.String(pkg_bundle_receipt_safe_text(self.policy)),
+            "tool": CanonicalJSON.String(pkg_bundle_receipt_safe_text(self.tool)),
+            "tool_identity": CanonicalJSON.String(pkg_bundle_receipt_safe_text(self.tool_identity)),
+            "tool_version": CanonicalJSON.String(pkg_bundle_receipt_safe_text(self.tool_version))
         ])
     }
 }
@@ -642,13 +601,13 @@ pub struct BundleFileFact {
     pub bytes: Int
     pub sha256: String
 
-    fn receipt_json_tree(self) -> DataTree Never! {
+    fn receipt_json_tree(self) -> CanonicalJSON Never! {
         pkg_bundle_object([
-            "bytes": DataTree.Int(self.bytes),
-            "kind": DataTree.Text(self.kind.as_str()),
-            "mode": DataTree.Int(self.mode),
-            "path": DataTree.Text(pkg_bundle_receipt_source(self.path)),
-            "sha256": DataTree.Text(self.sha256)
+            "bytes": pkg_bundle_integer(self.bytes),
+            "kind": CanonicalJSON.String(self.kind.as_str()),
+            "mode": pkg_bundle_integer(self.mode),
+            "path": CanonicalJSON.String(pkg_bundle_receipt_source(self.path)),
+            "sha256": CanonicalJSON.String(~self.sha256)
         ])
     }
 }
@@ -679,13 +638,13 @@ pub struct BundleReceipt {
     }
 
     fn from_plan_with_bytes(plan: BundlePlan, artifact_sha256: String, artifact_bytes: Int) -> BundleReceipt Never! {
-        files := [BundleFileFact]{}
+        file_facts := [BundleFileFact]{}
         loop file in plan.files {
-            &files.push(BundleFileFact{path: file.path, kind: file.kind, mode: file.mode, bytes: file.bytes.len(), sha256: file.digest()})
+            &file_facts.push(BundleFileFact{path: file.path, kind: file.kind, mode: file.mode, bytes: file.bytes.len(), sha256: file.digest()})
         }
-        &files.sort_by(fact -> fact.path)
+        &file_facts.sort_by((left: BundleFileFact, right: BundleFileFact) -> left.path <=> right.path)
         BundleReceipt{
-            schema: @PACKAGE_BUNDLE_RECEIPT_SCHEMA,
+            schema: PACKAGE_BUNDLE_RECEIPT_SCHEMA,
             plan_identity: plan.identity,
             kind: plan.kind,
             target: plan.target,
@@ -695,7 +654,7 @@ pub struct BundleReceipt {
             artifact_name: plan.artifact_name,
             artifact_sha256: artifact_sha256,
             artifact_bytes: artifact_bytes,
-            files: files,
+            files: file_facts,
             launch: plan.launch,
             inputs: plan.inputs,
             signing_hooks: plan.signing_hooks,
@@ -748,51 +707,51 @@ pub struct BundleReceipt {
         }
     }
 
-    fn to_json_tree(self) -> DataTree Never! {
-        files := [DataTree]{}
-        loop file in self.files -> &files.push(file.receipt_json_tree())
-        inputs := [DataTree]{}
+    fn to_json_tree(self) -> CanonicalJSON Never! {
+        file_values := [CanonicalJSON]{}
+        loop file in self.files -> &file_values.push(file.receipt_json_tree())
+        inputs := [CanonicalJSON]{}
         loop input in self.inputs -> &inputs.push(input.receipt_json_tree())
-        hooks := [DataTree]{}
+        hooks := [CanonicalJSON]{}
         loop hook in self.signing_hooks -> &hooks.push(pkg_bundle_signing_hook_receipt_json(hook))
         game :: if self.game == {
             .Val(declared) -> pkg_bundle_game_spec_receipt_json(declared)
-            .None -> DataTree.Null
+            .None -> CanonicalJSON.Null
         }
         materializer :: if self.materializer == {
             .Val(fact) -> fact.to_json_tree()
-            .None -> DataTree.Null
+            .None -> CanonicalJSON.Null
         }
         signing :: if self.signing == {
             .Val(fact) -> fact.to_json_tree()
-            .None -> DataTree.Null
+            .None -> CanonicalJSON.Null
         }
         updater :: if self.updater == {
             .Val(manifest) -> manifest.receipt_json_tree()
-            .None -> DataTree.Null
+            .None -> CanonicalJSON.Null
         }
         pkg_bundle_object([
-            "artifact_bytes": DataTree.Int(self.artifact_bytes),
-            "artifact_name": DataTree.Text(self.artifact_name),
-            "artifact_sha256": DataTree.Text(self.artifact_sha256),
-            "artifact_status": DataTree.Text(self.artifact_status().as_str()),
-            "executable_source": DataTree.Text(pkg_bundle_receipt_source(self.executable_source)),
-            "files": DataTree.Array(files),
+            "artifact_bytes": pkg_bundle_integer(self.artifact_bytes),
+            "artifact_name": CanonicalJSON.String(~self.artifact_name),
+            "artifact_sha256": CanonicalJSON.String(~self.artifact_sha256),
+            "artifact_status": CanonicalJSON.String(self.artifact_status().as_str()),
+            "executable_source": CanonicalJSON.String(pkg_bundle_receipt_source(self.executable_source)),
+            "files": CanonicalJSON.Array(file_values),
             "game": game,
-            "inputs": DataTree.Array(inputs),
-            "installability": DataTree.Text(self.installability().as_str()),
-            "kind": DataTree.Text(self.kind.as_str()),
+            "inputs": CanonicalJSON.Array(inputs),
+            "installability": CanonicalJSON.String(self.installability().as_str()),
+            "kind": CanonicalJSON.String(self.kind.as_str()),
             "launch": self.launch.to_json_tree(),
             "materializer": materializer,
-            "package": DataTree.Text(self.package),
-            "plan_identity": DataTree.Text(self.plan_identity),
-            "schema": DataTree.Text(self.schema),
+            "package": CanonicalJSON.String(~self.package),
+            "plan_identity": CanonicalJSON.String(~self.plan_identity),
+            "schema": CanonicalJSON.String(~self.schema),
             "signing": signing,
-            "signing_hooks": DataTree.Array(hooks),
-            "signing_status": DataTree.Text(self.signing_status().as_str()),
-            "target": DataTree.Text(self.target.as_str()),
+            "signing_hooks": CanonicalJSON.Array(hooks),
+            "signing_status": CanonicalJSON.String(self.signing_status().as_str()),
+            "target": CanonicalJSON.String(self.target.as_str()),
             "updater": updater,
-            "version": DataTree.Text(self.version)
+            "version": CanonicalJSON.String(~self.version)
         ])
     }
 
@@ -819,11 +778,7 @@ pub fn pkg_emit_package_bundle(spec: BundleSpec) -> BundleArtifact BundleError! 
 // then inputs.
 fn pkg_bundle_sorted_hooks(hooks: [SigningHook]) -> [SigningHook] Never! {
     sorted := hooks
-    &sorted.sort_by(hook -> pkg_bundle_hook_inputs_key(hook.inputs))
-    &sorted.sort_by(hook -> hook.args.join(pkg_bundle_nul()))
-    &sorted.sort_by(hook -> hook.program)
-    &sorted.sort_by(hook -> hook.phase.rank())
-    &sorted.sort_by(hook -> hook.name)
+    &sorted.sort_by((left: SigningHook, right: SigningHook) -> (left.name <=> right.name).then(left.phase.rank() <=> right.phase.rank()).then(left.program <=> right.program).then(left.args.join(pkg_bundle_nul()) <=> right.args.join(pkg_bundle_nul())).then(pkg_bundle_hook_inputs_key(left.inputs) <=> pkg_bundle_hook_inputs_key(right.inputs)))
     sorted
 }
 
@@ -837,70 +792,77 @@ fn pkg_bundle_hook_inputs_key(inputs: [SigningHookInput]) -> String Never! {
     parts.join([pkg_bundle_nul(), pkg_bundle_nul()].join(""))
 }
 
-// Canonical JSON text: RFC 8785 JCS bytes plus one trailing LF.
-fn pkg_bundle_canonical_text(value: DataTree) -> String Never! {
-    "{json.canonical(value) ?? panic("value is not canonical JSON")}\n"
+// Rust Bundler::integer: Int's canonical decimal text is kept exactly; the
+// CanonicalJSON carrier cannot represent a Float.
+fn pkg_bundle_integer(value: Int) -> CanonicalJSON Never! {
+    CanonicalJSON.Integer("{value}")
 }
 
-fn pkg_bundle_canonical_bytes(value: DataTree) -> [U8] Never! {
-    pkg_bundle_canonical_text(value).bytes()
+fn pkg_bundle_canonical_text(value: CanonicalJSON) -> String Never! {
+    String.from_bytes(pkg_bundle_canonical_bytes(value)) ?? panic("canonical bundle JSON is UTF-8")
 }
 
-fn pkg_bundle_object(fields: [String: DataTree]) -> DataTree Never! {
-    DataTree.Object(fields)
+fn pkg_bundle_canonical_bytes(value: CanonicalJSON) -> [U8] Never! {
+    canonical_json_bytes(value)
 }
 
-fn pkg_bundle_optional_text(value: String?) -> DataTree Never! {
+fn pkg_bundle_object(values: [String: CanonicalJSON]) -> CanonicalJSON Never! {
+    fields := [CanonicalJSONField]{}
+    loop (key, value) in values -> &fields.push(CanonicalJSONField{key: key, value: value})
+    canonical_json_object(fields) ?? panic("bundle JSON keys must be unique")
+}
+
+fn pkg_bundle_optional_text(value: String?) -> CanonicalJSON Never! {
     if value == {
-        .Val(text) -> DataTree.Text(text)
-        .None -> DataTree.Null
+        .Val(text) -> CanonicalJSON.String(text)
+        .None -> CanonicalJSON.Null
     }
 }
 
-fn pkg_bundle_texts(values: [String]) -> DataTree Never! {
-    items := [DataTree]{}
-    loop value in values -> &items.push(DataTree.Text(value))
-    DataTree.Array(items)
+fn pkg_bundle_texts(values: [String]) -> CanonicalJSON Never! {
+    items := [CanonicalJSON]{}
+    loop value in values -> &items.push(CanonicalJSON.String(value))
+    CanonicalJSON.Array(items)
 }
 
-fn pkg_bundle_metadata_json(spec: BundleSpec, metadata: BundleMetadata, executable_digest: String, icons: [BundleIcon], hooks: [SigningHook]) -> DataTree Never! {
-    icon_values := [DataTree]{}
+fn pkg_bundle_metadata_json(spec: BundleSpec, metadata: BundleMetadata, executable_digest: String, icons: [BundleIcon], hooks: [SigningHook]) -> CanonicalJSON Never! {
+    icon_values := [CanonicalJSON]{}
     loop icon in icons {
         &icon_values.push(pkg_bundle_object([
-            "bytes": DataTree.Int(icon.bytes.len()),
-            "format": DataTree.Text(icon.format.as_str()),
-            "name": DataTree.Text(icon.name),
-            "sha256": DataTree.Text(icon.digest()),
-            "size": DataTree.Int(icon.size)
+            "bytes": pkg_bundle_integer(icon.bytes.len()),
+            "format": CanonicalJSON.String(icon.format.as_str()),
+            "name": CanonicalJSON.String(icon.name),
+            "sha256": CanonicalJSON.String(icon.digest()),
+            "size": pkg_bundle_integer(icon.size)
         ]))
     }
-    hook_values := [DataTree]{}
+    hook_values := [CanonicalJSON]{}
     loop hook in hooks -> &hook_values.push(pkg_bundle_signing_hook_json(hook))
     pkg_bundle_object([
         "categories": pkg_bundle_texts(metadata.categories),
-        "description": DataTree.Text(metadata.description),
-        "executable": DataTree.Text(spec.executable.name),
-        "executable_sha256": DataTree.Text(executable_digest),
-        "format": DataTree.Text(@PACKAGE_BUNDLE_FORMAT),
-        "icons": DataTree.Array(icon_values),
-        "kind": DataTree.Text(spec.kind.as_str()),
-        "identifier": DataTree.Text(metadata.identifier),
-        "name": DataTree.Text(metadata.display_name),
-        "package": DataTree.Text(spec.package),
-        "publisher": DataTree.Text(metadata.publisher),
-        "signing_hooks": DataTree.Array(hook_values),
-        "target": DataTree.Text(spec.target.as_str()),
-        "version": DataTree.Text(spec.version)
+        "description": CanonicalJSON.String(~metadata.description),
+        "executable": CanonicalJSON.String(~spec.executable.name),
+        "executable_sha256": CanonicalJSON.String(~executable_digest),
+        "format": CanonicalJSON.String(PACKAGE_BUNDLE_FORMAT),
+        "icons": CanonicalJSON.Array(icon_values),
+        "kind": CanonicalJSON.String(spec.kind.as_str()),
+        "identifier": CanonicalJSON.String(~metadata.identifier),
+        "name": CanonicalJSON.String(~metadata.display_name),
+        "package": CanonicalJSON.String(~spec.package),
+        "publisher": CanonicalJSON.String(~metadata.publisher),
+        "signing_hooks": CanonicalJSON.Array(hook_values),
+        "target": CanonicalJSON.String(spec.target.as_str()),
+        "version": CanonicalJSON.String(~spec.version)
     ])
 }
 
-fn pkg_bundle_plan_metadata_json(metadata: BundleMetadata) -> DataTree Never! {
+fn pkg_bundle_plan_metadata_json(metadata: BundleMetadata) -> CanonicalJSON Never! {
     pkg_bundle_object([
         "categories": pkg_bundle_texts(metadata.categories),
-        "description": DataTree.Text(metadata.description),
-        "display_name": DataTree.Text(metadata.display_name),
-        "identifier": DataTree.Text(metadata.identifier),
-        "publisher": DataTree.Text(metadata.publisher)
+        "description": CanonicalJSON.String(~metadata.description),
+        "display_name": CanonicalJSON.String(~metadata.display_name),
+        "identifier": CanonicalJSON.String(~metadata.identifier),
+        "publisher": CanonicalJSON.String(~metadata.publisher)
     ])
 }
 
@@ -920,131 +882,134 @@ fn pkg_bundle_game_asset_path(spec: BundleSpec, path: String) -> String Never! {
     }
 }
 
-fn pkg_bundle_game_spec_json(game: GameBundleSpec) -> DataTree Never! {
-    assets := [DataTree]{}
+fn pkg_bundle_game_spec_json(game: GameBundleSpec) -> CanonicalJSON Never! {
+    assets := [CanonicalJSON]{}
     loop asset in game.assets {
         &assets.push(pkg_bundle_object([
-            "bytes": DataTree.Int(asset.bytes.len()),
-            "mode": DataTree.Int(asset.mode),
-            "path": DataTree.Text(asset.path),
-            "sha256": DataTree.Text(asset.digest())
+            "bytes": pkg_bundle_integer(asset.bytes.len()),
+            "mode": pkg_bundle_integer(asset.mode),
+            "path": CanonicalJSON.String(asset.path),
+            "sha256": CanonicalJSON.String(asset.digest())
         ]))
     }
     pkg_bundle_object([
-        "assets": DataTree.Array(assets),
-        "backend": DataTree.Text(game.backend),
-        "build_identity": DataTree.Text(game.build_identity),
-        "cook_mode": DataTree.Text(game.cook_mode),
-        "crash_consent": DataTree.Text(game.crash_consent),
-        "crash_reporter": DataTree.Text(game.crash_reporter),
+        "assets": CanonicalJSON.Array(assets),
+        "backend": CanonicalJSON.String(~game.backend),
+        "build_identity": CanonicalJSON.String(~game.build_identity),
+        "cook_mode": CanonicalJSON.String(~game.cook_mode),
+        "crash_consent": CanonicalJSON.String(~game.crash_consent),
+        "crash_reporter": CanonicalJSON.String(~game.crash_reporter),
         "crash_runtime": pkg_bundle_crash_runtime_json(game.crash_runtime, false),
-        "development_stripping": DataTree.Bool(game.development_stripping),
-        "export_preset": DataTree.Text(game.export_preset),
-        "format": DataTree.Text("jet.game.bundle"),
-        "profile": DataTree.Text(game.profile_name),
-        "renderer": DataTree.Text(game.renderer),
-        "source_revision": DataTree.Text(game.source_revision)
+        "development_stripping": CanonicalJSON.Bool(game.development_stripping),
+        "export_preset": CanonicalJSON.String(~game.export_preset),
+        "format": CanonicalJSON.String("jet.game.bundle"),
+        "profile": CanonicalJSON.String(~game.profile_name),
+        "renderer": CanonicalJSON.String(~game.renderer),
+        "source_revision": CanonicalJSON.String(~game.source_revision)
     ])
 }
 
-fn pkg_bundle_game_spec_receipt_json(game: GameBundleSpec) -> DataTree Never! {
-    assets := [DataTree]{}
+fn pkg_bundle_game_spec_receipt_json(game: GameBundleSpec) -> CanonicalJSON Never! {
+    assets := [CanonicalJSON]{}
     loop asset in game.assets {
         &assets.push(pkg_bundle_object([
-            "bytes": DataTree.Int(asset.bytes.len()),
-            "mode": DataTree.Int(asset.mode),
-            "path": DataTree.Text(pkg_bundle_receipt_source(asset.path)),
-            "sha256": DataTree.Text(asset.digest())
+            "bytes": pkg_bundle_integer(asset.bytes.len()),
+            "mode": pkg_bundle_integer(asset.mode),
+            "path": CanonicalJSON.String(pkg_bundle_receipt_source(asset.path)),
+            "sha256": CanonicalJSON.String(asset.digest())
         ]))
     }
     pkg_bundle_object([
-        "assets": DataTree.Array(assets),
-        "backend": DataTree.Text(pkg_bundle_receipt_safe_text(game.backend)),
-        "build_identity": DataTree.Text(pkg_bundle_receipt_safe_text(game.build_identity)),
-        "cook_mode": DataTree.Text(pkg_bundle_receipt_safe_text(game.cook_mode)),
-        "crash_consent": DataTree.Text(pkg_bundle_receipt_safe_text(game.crash_consent)),
-        "crash_reporter": DataTree.Text(pkg_bundle_receipt_safe_text(game.crash_reporter)),
+        "assets": CanonicalJSON.Array(assets),
+        "backend": CanonicalJSON.String(pkg_bundle_receipt_safe_text(game.backend)),
+        "build_identity": CanonicalJSON.String(pkg_bundle_receipt_safe_text(game.build_identity)),
+        "cook_mode": CanonicalJSON.String(pkg_bundle_receipt_safe_text(game.cook_mode)),
+        "crash_consent": CanonicalJSON.String(pkg_bundle_receipt_safe_text(game.crash_consent)),
+        "crash_reporter": CanonicalJSON.String(pkg_bundle_receipt_safe_text(game.crash_reporter)),
         "crash_runtime": pkg_bundle_crash_runtime_json(game.crash_runtime, true),
-        "development_stripping": DataTree.Bool(game.development_stripping),
-        "export_preset": DataTree.Text(pkg_bundle_receipt_safe_text(game.export_preset)),
-        "format": DataTree.Text("jet.game.bundle"),
-        "profile": DataTree.Text(pkg_bundle_receipt_safe_text(game.profile_name)),
-        "renderer": DataTree.Text(pkg_bundle_receipt_safe_text(game.renderer)),
-        "source_revision": DataTree.Text(pkg_bundle_receipt_source(game.source_revision))
+        "development_stripping": CanonicalJSON.Bool(game.development_stripping),
+        "export_preset": CanonicalJSON.String(pkg_bundle_receipt_safe_text(game.export_preset)),
+        "format": CanonicalJSON.String("jet.game.bundle"),
+        "profile": CanonicalJSON.String(pkg_bundle_receipt_safe_text(game.profile_name)),
+        "renderer": CanonicalJSON.String(pkg_bundle_receipt_safe_text(game.renderer)),
+        "source_revision": CanonicalJSON.String(pkg_bundle_receipt_source(game.source_revision))
     ])
+}
+
+fn pkg_bundle_crash_runtime_text(value: String, receipt: Bool) -> String Never! {
+    if receipt -> pkg_bundle_receipt_safe_text(value) else -> ~value
 }
 
 // The crash runtime facts; the receipt form redacts sensitive text and
 // source-like paths.
-fn pkg_bundle_crash_runtime_json(runtime: GameCrashReporterSpec, receipt: Bool) -> DataTree Never! {
-    safe :: (value: String) -> if receipt -> pkg_bundle_receipt_safe_text(value) else -> value
+fn pkg_bundle_crash_runtime_json(runtime: GameCrashReporterSpec, receipt: Bool) -> CanonicalJSON Never! {
     retention_path :: if receipt -> pkg_bundle_receipt_source(runtime.retention_path) else -> runtime.retention_path
     pkg_bundle_object([
-        "abi": DataTree.Text(safe(@GAME_CRASH_REPORTER_ABI)),
-        "installation": DataTree.Text(safe(runtime.installation)),
-        "memory": pkg_bundle_object(["max_logs": DataTree.Int(runtime.memory_logs), "max_stacks": DataTree.Int(runtime.memory_stacks)]),
-        "retention": pkg_bundle_object(["max_reports": DataTree.Int(runtime.retention_limit), "mode": DataTree.Text(safe(runtime.retention_mode)), "path": DataTree.Text(retention_path)]),
-        "routing": DataTree.Text(safe(runtime.routing)),
-        "upload_policy": DataTree.Text(safe(runtime.upload_policy))
+        "abi": CanonicalJSON.String(pkg_bundle_crash_runtime_text(GAME_CRASH_REPORTER_ABI, receipt)),
+        "installation": CanonicalJSON.String(pkg_bundle_crash_runtime_text(runtime.installation, receipt)),
+        "memory": pkg_bundle_object(["max_logs": pkg_bundle_integer(runtime.memory_logs), "max_stacks": pkg_bundle_integer(runtime.memory_stacks)]),
+        "retention": pkg_bundle_object(["max_reports": pkg_bundle_integer(runtime.retention_limit), "mode": CanonicalJSON.String(pkg_bundle_crash_runtime_text(runtime.retention_mode, receipt)), "path": CanonicalJSON.String(retention_path)]),
+        "routing": CanonicalJSON.String(pkg_bundle_crash_runtime_text(runtime.routing, receipt)),
+        "upload_policy": CanonicalJSON.String(pkg_bundle_crash_runtime_text(runtime.upload_policy, receipt))
     ])
 }
 
-fn pkg_bundle_game_manifest_json(spec: BundleSpec, game: GameBundleSpec) -> DataTree Never! {
+fn pkg_bundle_game_manifest_json(spec: BundleSpec, game: GameBundleSpec) -> CanonicalJSON Never! {
     pkg_bundle_object([
         "game": pkg_bundle_game_spec_json(game),
-        "package": DataTree.Text(spec.package),
-        "target": DataTree.Text(spec.target.as_str()),
-        "version": DataTree.Text(spec.version)
+        "package": CanonicalJSON.String(~spec.package),
+        "target": CanonicalJSON.String(spec.target.as_str()),
+        "version": CanonicalJSON.String(~spec.version)
     ])
 }
 
-fn pkg_bundle_signing_hook_json(hook: SigningHook) -> DataTree Never! {
-    inputs := [DataTree]{}
-    loop input in hook.inputs -> &inputs.push(pkg_bundle_object(["digest": DataTree.Text(input.digest), "path": DataTree.Text(input.path)]))
+fn pkg_bundle_signing_hook_json(hook: SigningHook) -> CanonicalJSON Never! {
+    inputs := [CanonicalJSON]{}
+    loop input in hook.inputs -> &inputs.push(pkg_bundle_object(["digest": CanonicalJSON.String(input.digest), "path": CanonicalJSON.String(input.path)]))
     pkg_bundle_object([
         "args": pkg_bundle_texts(hook.args),
-        "inputs": DataTree.Array(inputs),
-        "name": DataTree.Text(hook.name),
-        "phase": DataTree.Text(hook.phase.as_str()),
-        "program": DataTree.Text(hook.program)
+        "inputs": CanonicalJSON.Array(inputs),
+        "name": CanonicalJSON.String(~hook.name),
+        "phase": CanonicalJSON.String(hook.phase.as_str()),
+        "program": CanonicalJSON.String(~hook.program)
     ])
 }
 
 // Hook arguments may carry a password, token, or key: the plan keeps the
 // exact declaration for the adapter, the receipt only the argument count and
 // redaction markers.
-fn pkg_bundle_signing_hook_receipt_json(hook: SigningHook) -> DataTree Never! {
-    args := [DataTree]{}
-    loop _ in hook.args -> &args.push(DataTree.Text("<redacted>"))
-    inputs := [DataTree]{}
-    loop input in hook.inputs -> &inputs.push(pkg_bundle_object(["digest": DataTree.Text(input.digest), "path": DataTree.Text(pkg_bundle_receipt_source(input.path))]))
+fn pkg_bundle_signing_hook_receipt_json(hook: SigningHook) -> CanonicalJSON Never! {
+    args := [CanonicalJSON]{}
+    loop _ in hook.args -> &args.push(CanonicalJSON.String("<redacted>"))
+    inputs := [CanonicalJSON]{}
+    loop input in hook.inputs -> &inputs.push(pkg_bundle_object(["digest": CanonicalJSON.String(input.digest), "path": CanonicalJSON.String(pkg_bundle_receipt_source(input.path))]))
     pkg_bundle_object([
-        "args": DataTree.Array(args),
-        "args_redacted": DataTree.Bool(true),
-        "inputs": DataTree.Array(inputs),
-        "name": DataTree.Text(hook.name),
-        "phase": DataTree.Text(hook.phase.as_str()),
-        "program": DataTree.Text(pkg_bundle_receipt_source(hook.program))
+        "args": CanonicalJSON.Array(args),
+        "args_redacted": CanonicalJSON.Bool(true),
+        "inputs": CanonicalJSON.Array(inputs),
+        "name": CanonicalJSON.String(~hook.name),
+        "phase": CanonicalJSON.String(hook.phase.as_str()),
+        "program": CanonicalJSON.String(pkg_bundle_receipt_source(hook.program))
     ])
 }
 
-fn pkg_bundle_optional_receipt_url(value: String?) -> DataTree Never! {
+fn pkg_bundle_optional_receipt_url(value: String?) -> CanonicalJSON Never! {
     if value == {
-        .Val(text) -> DataTree.Text(pkg_bundle_receipt_source(text))
-        .None -> DataTree.Null
+        .Val(text) -> CanonicalJSON.String(pkg_bundle_receipt_source(text))
+        .None -> CanonicalJSON.Null
     }
 }
 
-fn pkg_bundle_optional_receipt_text(value: String?) -> DataTree Never! {
+fn pkg_bundle_optional_receipt_text(value: String?) -> CanonicalJSON Never! {
     if value == {
-        .Val(text) -> DataTree.Text(pkg_bundle_receipt_safe_text(text))
-        .None -> DataTree.Null
+        .Val(text) -> CanonicalJSON.String(pkg_bundle_receipt_safe_text(text))
+        .None -> CanonicalJSON.Null
     }
 }
 
 fn pkg_bundle_receipt_safe_text(value: String) -> String Never! {
     if pkg_bundle_contains_sensitive_marker(value) -> return "<redacted>"
-    value
+    ~value
 }
 
 // A source path or URL; credentials, queries, and fragments are redacted.
@@ -1064,9 +1029,9 @@ fn pkg_bundle_contains_sensitive_marker(value: String) -> Bool Never! {
 
 // SHA-256 over the path-sorted files, each framed as path, kind, 32-bit mode,
 // and payload.
-fn pkg_bundle_artifact_digest(files: [BundleFile]) -> String Never! {
-    ordered := files
-    &ordered.sort_by(file -> file.path)
+fn pkg_bundle_artifact_digest(bundle_files: [BundleFile]) -> String Never! {
+    ordered := bundle_files
+    &ordered.sort_by((left: BundleFile, right: BundleFile) -> left.path <=> right.path)
     bytes := "jet-package-artifact-v1".bytes()
     &bytes.push(U8{0})
     loop file in ordered {
@@ -1138,7 +1103,7 @@ fn pkg_bundle_mac_info_plist(spec: BundleSpec, icon_name: String?) -> [U8] Never
 }
 
 fn pkg_bundle_windows_executable_name(name: String) -> String Never! {
-    if pkg_ascii_lower(name).ends_with(".exe") -> return name
+    if pkg_ascii_lower(name).ends_with(".exe") -> return ~name
     "{name}.exe"
 }
 
@@ -1169,9 +1134,9 @@ fn pkg_bundle_windows_manifest(spec: BundleSpec, executable: String, logo: Strin
 }
 
 // One `Default` per distinct lowercase file extension, in byte order.
-fn pkg_bundle_windows_content_types(files: [BundleFile]) -> [U8] Never! {
+fn pkg_bundle_windows_content_types(bundle_files: [BundleFile]) -> [U8] Never! {
     extensions := [String]{}
-    loop file in files {
+    loop file in bundle_files {
         name :: file.path.cut_last("/")?.after ?? file.path
         extension :: name.cut_last(".")?.after ?? ""
         lower :: pkg_ascii_lower(extension)
@@ -1203,9 +1168,9 @@ fn pkg_bundle_sha256_base64(digest: String) -> String Never! {
     base64.encode(decoded)
 }
 
-fn pkg_bundle_windows_block_map(files: [BundleFile]) -> [U8] Never! {
+fn pkg_bundle_windows_block_map(bundle_files: [BundleFile]) -> [U8] Never! {
     parts := [String]{"<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<BlockMap xmlns=\"http://schemas.microsoft.com/appx/2010/blockmap\" HashMethod=\"http://www.w3.org/2001/04/xmlenc#sha256\">"}
-    loop file in files {
+    loop file in bundle_files {
         &parts.push("<File Name=\"{pkg_bundle_xml_escape(file.path)}\" Size=\"{file.bytes.len()}\"><Block Hash=\"{pkg_bundle_sha256_base64(file.digest())}\" /></File>")
     }
     &parts.push("</BlockMap>\n")

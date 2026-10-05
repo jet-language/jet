@@ -96,7 +96,7 @@ with 22% of samples spent freeing whole AST expression trees. It needs about
    prepends the entire runtime and CoreLib (about 2.1 MB of it Unicode tables
    written as Rust literals) whether or not the program uses them. In debug
    builds nothing removes the unused code, hence the 58.8 MB binary and the
-   7.9 ms start-up. See `~/.cache/jet-luna/sol/prep/Runtime-Prefix-Plan.md`
+   7.9 ms start-up. See `~/.cache/jet-dev/sol/prep/Runtime-Prefix-Plan.md`
    for the measured breakdown.
 5. **Release builds compile the runtime with full optimization on first use**
    (41 s, 2.4 GB), because the runtime crate is built per profile rather than

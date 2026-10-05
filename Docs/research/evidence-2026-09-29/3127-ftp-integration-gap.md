@@ -1,6 +1,6 @@
 # #3127: ordinary FTP integration and placement gap (SCRIPT-F40)
 
-Closer10, 2026-09-29. Binary: `~/.cache/jet-luna/safe-jet.sh` →
+Closer10, 2026-09-29. Binary: `~/.cache/jet-dev/safe-jet.sh` →
 `jet-debug-snapshot14`. The investigation needed no repository code change.
 Verdict: **PASS**, with a no-addition outcome.
 
@@ -26,7 +26,7 @@ drops, and government bulk-data portals that still offer only FTP/FTPS.
 | Mode / proxy | Passive only (the client sits behind NAT), a fixed passive port range 60000-60009, EPSV first; no proxy in the probe |
 | Deployment | A cron/systemd job with a wall deadline per transfer, resume after interruption, a non-zero exit on auth or TLS failure |
 
-The server is `~/.cache/jet-luna/ftp-probe/server.py`: pyftpdlib 2.2.0 with
+The server is `~/.cache/jet-dev/ftp-probe/server.py`: pyftpdlib 2.2.0 with
 pyOpenSSL, run through a nix-built Python 3.13 environment. It uses
 `TLS_FTPHandler` with control and data TLS required. A
 `TLS_DTPHandler`+`ThrottledDTPHandler` data handler throttles transfers to
@@ -34,7 +34,7 @@ pyOpenSSL, run through a nix-built Python 3.13 environment. It uses
 
 ## Process composition (criterion 2): demonstrated
 
-The program is `~/.cache/jet-test-scratch/Closer10/ftp_pull.jet`, run with:
+The program is `~/.cache/jet-dev/scratch/Closer10/ftp_pull.jet`, run with:
 
 ```
 FTP_PASSWORD=s3cr3t-vendor ~/.cache/jet-luna/safe-jet.sh run --allow=Env,Exec,Time.Wait ftp_pull.jet
@@ -97,7 +97,7 @@ Using `127.0.0.1` fixed it. That is a curl/server property, not Jet's.
 
 ## Raw socket composition (criterion 2): rejected for FTPS
 
-The probe is `~/.cache/jet-test-scratch/Closer10/ftp_raw_inline.jet`. It does
+The probe is `~/.cache/jet-dev/scratch/Closer10/ftp_raw_inline.jet`. It does
 plain-FTP control/data framing over `core.net.tcp_connect`, then tries an
 `AUTH TLS` upgrade with `core.net.tls.client(^tcp, "localhost")`. Result:
 
@@ -155,7 +155,7 @@ a local FTPS fixture, so it is not added here.
 1. **ICE: "MIR place is not writable"** at `crates/jet-codegen/src/Codegen/MIRRust.rs:26391`.
    It happens when a helper takes `stream: TCPStream` by value and calls
    `stream.read_text(4096)` or `stream.write_all(bytes)`. The checker accepts
-   the program. Repro: `~/.cache/jet-test-scratch/Closer10/ftp_raw_plain.jet`
+   the program. Repro: `~/.cache/jet-dev/scratch/Closer10/ftp_raw_plain.jet`
    before the `working := stream` workaround (`ftp_raw.log`).
 2. **The workaround (`working := stream`) makes rustc reject the generated
    code**: `no method named clone found for struct JetTCPStream`

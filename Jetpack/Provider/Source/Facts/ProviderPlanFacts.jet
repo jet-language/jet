@@ -3,7 +3,7 @@
 // compiler build-plan internals: one header line, then one
 // `hex(key)\thex(value)` line per fact in key order.
 
-@PROVIDER_PLAN_FACTS_HEADER :: "jet-build-plan-replay-v1"
+PROVIDER_PLAN_FACTS_HEADER :: prep { "jet-build-plan-replay-v1" }
 
 pub struct ProviderPlanFacts {
     entries: [String: String]
@@ -20,7 +20,7 @@ pub struct ProviderPlanFacts {
 
     // The replay text (`encode`; the name is taken by the Encode derive).
     fn render(self) -> String Never! {
-        lines := [String]{@PROVIDER_PLAN_FACTS_HEADER}
+        lines := [String]{PROVIDER_PLAN_FACTS_HEADER}
         keys := self.entries.keys().to_list()
         &keys.sort()
         loop key in keys -> &lines.push("{provider_plan_hex(key)}\t{provider_plan_hex(self.entries[key])}")
@@ -31,7 +31,7 @@ pub struct ProviderPlanFacts {
     // non-lowercase hex, non-UTF-8 field, empty key, or repeated key fails.
     fn parse(raw: String) -> ProviderPlanFacts ProviderPlanFactsError! {
         lines :: provider_lines(raw)
-        if lines.len() == 0 || lines[0] != @PROVIDER_PLAN_FACTS_HEADER -> return Err(ProviderPlanFactsError.UnsupportedVersion)
+        if lines.len() == 0 || lines[0] != PROVIDER_PLAN_FACTS_HEADER -> return Err(ProviderPlanFactsError.UnsupportedVersion)
         facts := [String: String]{}
         loop index in 1..<lines.len() {
             fields :: lines[index].split_once("\t") ?? return Err(ProviderPlanFactsError.TruncatedFact)
@@ -52,7 +52,7 @@ pub enum ProviderPlanFactsError {
     TruncatedFact
     TruncatedField
     NotLowercaseHex
-    NotUtf8
+    NotUTF8
     DuplicateFact(String)
 
     fn message(self) -> String Never! {
@@ -62,7 +62,7 @@ pub enum ProviderPlanFactsError {
             .TruncatedFact -> "truncated provider plan fact"
             .TruncatedField -> "truncated provider plan fact field"
             .NotLowercaseHex -> "provider plan fact field is not lowercase hex"
-            .NotUtf8 -> "provider plan fact field is not UTF-8"
+            .NotUTF8 -> "provider plan fact field is not UTF-8"
             .DuplicateFact(key) -> "duplicate provider plan fact `{key}`"
         }
     }
@@ -110,7 +110,7 @@ fn provider_plan_unhex(value: String) -> String ProviderPlanFactsError! {
         &bytes.push(U8{high * 16 + low})
         index += 2
     }
-    text :: String.from_bytes(bytes) ?? return Err(ProviderPlanFactsError.NotUtf8)
+    text :: String.from_bytes(bytes) ?? return Err(ProviderPlanFactsError.NotUTF8)
     Ok(text)
 }
 

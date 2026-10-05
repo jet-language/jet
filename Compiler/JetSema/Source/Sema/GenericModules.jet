@@ -87,32 +87,43 @@ fn sema_generic_modules_collect(graph: SemaRegistrationGraph, inputs: [SemaRegis
     output := [[Diagnostic]]{}
     loop module_row in graph.modules {
         check := SemaGenericModuleCheck{module_identity: module_row.module_identity, diagnostics: [Diagnostic]{}, seen: [String:Bool]{}}
-        written :: sema_genmod_written_items(inputs, module_row)
-        enums :: sema_genmod_enums(written, [GenericModuleDef]{})
-        values :: sema_genmod_const_values(written, [String:Type]{}, enums)
         templates := [SemaGenericModuleTemplate]{}
-        loop item in written {
-            if item == .GenericModule(definition) {
-                &templates.push(SemaGenericModuleTemplate{name: definition.name, definition: definition, params: sema_genmod_resolve_params(definition, enums, &check), values: values})
-            }
+        if sema_genmod_written_input(inputs, module_row.module_identity) == {
+            .Val(index) -> templates = sema_genmod_collect_templates(inputs[index].program.items, &check)
+            .None -> templates = sema_genmod_collect_templates(module_row.program.items, &check)
         }
         &templates_by_module.push(templates)
         &output.push(check.diagnostics)
     }
     loop (module_index, module_row) in graph.modules {
         check := SemaGenericModuleCheck{module_identity: module_row.module_identity, diagnostics: output[module_index], seen: [String:Bool]{}}
-        sema_genmod_check_module(graph, module_row, sema_genmod_written_items(inputs, module_row), templates_by_module, &check)
+        if sema_genmod_written_input(inputs, module_row.module_identity) == {
+            .Val(index) -> sema_genmod_check_module(graph, module_row, inputs[index].program.items, templates_by_module, &check)
+            .None -> sema_genmod_check_module(graph, module_row, module_row.program.items, templates_by_module, &check)
+        }
         output[module_index] = check.diagnostics
     }
     output
 }
 
-// The module's items as written, before generic expansion.
-fn sema_genmod_written_items(inputs: [SemaRegistrationModuleInput], module_row: SemaRegistrationModule) -> [Item] {
-    loop input in inputs {
-        if input.module_identity == module_row.module_identity -> return input.program.items
+// Locate the written input without returning an owned copy of its items.
+fn sema_genmod_written_input(inputs: [SemaRegistrationModuleInput], module_identity: String) -> Int? {
+    loop index in 0..<inputs.len() {
+        if inputs[index].module_identity == module_identity -> return Val(index)
     }
-    module_row.program.items
+    None
+}
+
+fn sema_genmod_collect_templates(written: [Item], check: &SemaGenericModuleCheck) -> [SemaGenericModuleTemplate] {
+    enums :: sema_genmod_enums(written, [GenericModuleDef]{})
+    values :: sema_genmod_const_values(written, [String:Type]{}, enums)
+    templates := [SemaGenericModuleTemplate]{}
+    loop item in written {
+        if item == .GenericModule(definition) {
+            &templates.push(SemaGenericModuleTemplate{name: definition.name, definition: definition, params: sema_genmod_resolve_params(definition, enums, &check), values: values})
+        }
+    }
+    templates
 }
 
 fn sema_genmod_check_module(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, items: [Item], templates_by_module: [[SemaGenericModuleTemplate]], check: &SemaGenericModuleCheck) {
@@ -931,9 +942,7 @@ pub fn sema_generic_modules_expand(program: Program, module_identity: String, im
         &rewritten.push(item)
     }
     loop declaration in declarations -> &rewritten.push(declaration)
-    updated := program
-    updated.items = rewritten
-    updated
+    sema_program_with_items(program, ^rewritten)
 }
 
 // The last template bound to a name wins, like Rust's template map where an

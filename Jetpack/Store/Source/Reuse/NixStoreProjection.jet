@@ -97,7 +97,7 @@ fn store_nix_store_projection_for_entry_index(roots: HangarRoots, entry: StoreEn
 
 // Rust `nix_store_projection_for_entry`: the closure record in the Hangar
 // graph names every transitive runtime object.
-pub fn store_nix_store_projection_for_entry(roots: HangarRoots, entry: StoreEntry, snapshot_root: String) -> [NixStoreProjection] StoreError! {
+pub fn store_nix_store_projection_for_entry(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry, snapshot_root: String) -> [NixStoreProjection] StoreError! {
     if entry.producer_record == "" -> return Ok([NixStoreProjection]{})
     producer :: ProducerRecord.decode(entry.producer_record) ?? return Err(StoreError.Other("cache entry `{entry.id}` has an invalid producer record: {err.message()}"))
     if producer.provider != "nix" -> return Ok([NixStoreProjection]{})
@@ -112,7 +112,7 @@ pub fn store_nix_store_projection_for_entry(roots: HangarRoots, entry: StoreEntr
         store_reuse_add_nix_projection_path(&logical_digests, path, digest)
     }
     if logical_digests.len() == 0 -> return Err(StoreError.Other("Nix cache entry `{entry.id}` has no canonical output path for projection"))
-    graph :: store_closure_graph_structure_unlocked(roots) ?? return Err(StoreError.Other("Nix cache entry `{entry.id}`: a Hangar object in its recorded closure is unavailable: {err.message()}"))
+    graph :: store_closure_graph_structure_unlocked(&verification, roots) ?? return Err(StoreError.Other("Nix cache entry `{entry.id}`: a Hangar object in its recorded closure is unavailable: {err.message()}"))
     if graph.records.get(entry.id) == {
         .Val(record) -> store_reuse_add_closure_objects(roots, graph, record, entry, &logical_digests)
         .None -> {
@@ -163,7 +163,6 @@ fn store_reuse_add_closure_objects(roots: HangarRoots, graph: ClosureGraph, reco
         if unique.len() != 1 -> return Err(StoreError.Other("Nix closure object `{digest}` has {unique.len()} canonical store paths"))
         store_reuse_add_nix_projection_path(&logical_digests, unique[0], digest)
     }
-    Ok()
 }
 
 fn store_sorted_keys_of_records(records: [String: ClosureRecord]) -> [String] Never! {
@@ -228,7 +227,6 @@ fn store_reuse_add_nix_projection_path(logical_digests: &[String: String], logic
         .None -> {}
     }
     logical_digests[logical] = digest
-    Ok()
 }
 
 // The canonical Hangar object of `digest`; directory, regular file, or
@@ -240,23 +238,22 @@ fn store_reuse_hangar_projection_object(roots: HangarRoots, digest: String, logi
     Ok(object)
 }
 
-fn store_reuse_sealed_hangar_projection_object(roots: HangarRoots, digest: String, logical: String) -> String StoreError! {
+fn store_reuse_sealed_hangar_projection_object(verification: &StoreVerification, roots: HangarRoots, digest: String, logical: String) -> String StoreError! {
     object :: store_reuse_hangar_projection_object(roots, digest, logical)
     if sys.name() == "linux" {
-        sealed :: store_check_seal(object, roots.hangar_dir())
+        sealed :: store_check_seal(&verification, object, roots.hangar_dir())
         if sealed != Val(digest) -> return Err(StoreError.Other("Nix output `{logical}` Hangar object `{digest}` has no valid seal witness"))
     }
     Ok(object)
 }
 
-fn store_reuse_validate_direct_projection_seals(roots: HangarRoots, projections: [NixStoreProjection]) StoreError! {
-    if sys.name() != "linux" -> return Ok()
+fn store_reuse_validate_direct_projection_seals(verification: &StoreVerification, roots: HangarRoots, projections: [NixStoreProjection]) StoreError! {
+    if sys.name() != "linux" -> return
     loop projection in projections {
         if projection.primary -> next
-        sealed :: store_check_seal(projection.source, roots.hangar_dir())
+        sealed :: store_check_seal(&verification, projection.source, roots.hangar_dir())
         if sealed != Val(projection.digest) -> return Err(StoreError.Other("Nix output `{projection.logical}` Hangar object `{projection.digest}` has no valid seal witness"))
     }
-    Ok()
 }
 
 // The pinned projection sources and their stability witnesses.

@@ -28,7 +28,7 @@ const OBSERVER_PATH = "tests/compiler-proof/adapters/observe.mjs";
 const OBSERVATIONS_PATH = "tests/compiler-proof/adapters/observations.json";
 const RUNNER_PATH = "Tools/agent/jet-env";
 const COMPILER_PATH = "target/debug/jet";
-const DEFAULT_SCRATCH = join(homedir(), ".cache", "jet-test-scratch");
+const DEFAULT_SCRATCH = join(homedir(), ".cache", "jet-dev", "scratch");
 const MARKER = "JET_ADAPTER_OBSERVATION_V1:";
 const TIMEOUT_MS = 120000;
 const MODES = Object.freeze(["aot", "jet_run", "interpreter", "web", "comptime"]);
@@ -750,7 +750,7 @@ async function produce(options) {
       records: comparison.records,
       comparisons: comparison.comparisons,
       execution: {
-        scratch: "$HOME/.cache/jet-test-scratch",
+        scratch: "$HOME/.cache/jet-dev/scratch",
         timeout_ms: TIMEOUT_MS,
         command_policy: "Tools/agent/jet-env full; aot, jet_run, interpreter, and comptime execute independently; comptime uses a real jet run so @ bindings in the supplied program execute at compile time; web starts jet dev and captures the served page through CdpDriver; production may emit a typed comparison observation journal at JET_ADAPTER_OBSERVATION_PATH, otherwise public stdout/lifecycle capture remains explicitly dimension-limited; no dimension is synthesized",
       },

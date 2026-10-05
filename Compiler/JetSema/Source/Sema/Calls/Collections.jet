@@ -254,6 +254,13 @@ pub fn sema_call_try_builtin_collections(receiver: Expr, receiver_value: TExpr, 
     tuple_struct := sema_call_collections_tuple_struct(result_type)
     line :: sema_source_line_at(environment.source_segments, span) ?? 0
     operation := sema_collection_method_operation(contract, updated_args.len(), literal_remove_mode, line, callback_return, callback_mutable, comparator, tuple_struct)
+    // Rust builtin_methods.rs infers every collection argument without a
+    // convention check: `^` on one (`&to.push(^item)`) is neither rejected
+    // (E0203) nor recorded as a move, so the ownership walk reads it like an
+    // unmarked argument.
+    loop index in 0..<updated_args.len() {
+        if updated_args[index].convention == AccessConvention.Move -> updated_args[index].convention = AccessConvention.Read
+    }
     ownership := sema_ownership_check_method_call(&state, "collection.{method}", receiver, contract.receiver_access, sema_call_collections_ownership_params(required_types), &updated_args, scopes, span, &diagnostics)
     if !ownership.accepted || !ownership.complete -> return SemaMethodSpecialCheck{handled: true, value: None}
     effect_row := sema_collection_method_effect_row(contract, span)

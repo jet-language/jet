@@ -13,7 +13,7 @@
 // Anything else is E1253: an honest unresolved dependency, never a fake
 // success.
 
-@PKG_INLINE_DEPS_FIXTURES_ENV :: "JET_INLINE_DEPS_FIXTURES"
+PKG_INLINE_DEPS_FIXTURES_ENV :: prep { "JET_INLINE_DEPS_FIXTURES" }
 
 // One `use pkg#version;` ref collected from a manifest-less script.
 pub struct InlineDep {
@@ -156,7 +156,7 @@ pub fn pkg_inline_deps_resolve(dep: InlineDep, script_dir: String) -[FS, Env]> I
     if !pkg_inline_deps_valid_package_name(dep.name) -> return Err(InlineDepUnresolved.InvalidName)
     if pkg_inline_deps_numeric_version(dep.selector) == None -> return Err(InlineDepUnresolved.InvalidSelector)
     roots := [String]{files.join(files.join(script_dir, ".jet"), "inline-deps")}
-    if sys.get(@PKG_INLINE_DEPS_FIXTURES_ENV) == {
+    if sys.get(PKG_INLINE_DEPS_FIXTURES_ENV) == {
         .Val(fixtures) -> &roots.push(fixtures)
         .None -> {}
     }
@@ -182,7 +182,7 @@ fn pkg_inline_deps_list_versions(root: String, name: String) -[FS]> [(version: S
         .Ok(stat) -> stat
         .Err(error) -> if error == {
             .NotFound(_) -> { return Ok(None) }
-            else -> { return Err(InlineDepUnresolved.InvalidTree(TreeHashError.Io{path: root, detail: "{error}"})) }
+            else -> { return Err(InlineDepUnresolved.InvalidTree(TreeHashError.IO{path: root, detail: "{error}"})) }
         }
     }
     if root_stat.is_symlink -> return Err(InlineDepUnresolved.InvalidTree(TreeHashError.Symlink(root)))
@@ -193,7 +193,7 @@ fn pkg_inline_deps_list_versions(root: String, name: String) -[FS]> [(version: S
         .Ok(stat) -> stat
         .Err(error) -> if error == {
             .NotFound(_) -> { return Ok(None) }
-            else -> { return Err(InlineDepUnresolved.InvalidTree(TreeHashError.Io{path: package_dir, detail: "{error}"})) }
+            else -> { return Err(InlineDepUnresolved.InvalidTree(TreeHashError.IO{path: package_dir, detail: "{error}"})) }
         }
     }
     if package_stat.is_symlink -> return Err(InlineDepUnresolved.InvalidTree(TreeHashError.Symlink(package_dir)))
@@ -201,13 +201,13 @@ fn pkg_inline_deps_list_versions(root: String, name: String) -[FS]> [(version: S
 
     entries :: if files.list_dir(package_dir) == {
         .Ok(listed) -> listed
-        .Err(error) -> { return Err(InlineDepUnresolved.InvalidTree(TreeHashError.Io{path: package_dir, detail: "{error}"})) }
+        .Err(error) -> { return Err(InlineDepUnresolved.InvalidTree(TreeHashError.IO{path: package_dir, detail: "{error}"})) }
     }
     out := [(version: String, dir: String)]{}
     loop entry in entries {
         stat :: if files.stat(entry.path) == {
             .Ok(found) -> found
-            .Err(error) -> { return Err(InlineDepUnresolved.InvalidTree(TreeHashError.Io{path: entry.path, detail: "{error}"})) }
+            .Err(error) -> { return Err(InlineDepUnresolved.InvalidTree(TreeHashError.IO{path: entry.path, detail: "{error}"})) }
         }
         if stat.is_dir || stat.is_symlink -> &out.push((version: entry.name, dir: entry.path))
     }
@@ -273,12 +273,12 @@ fn pkg_inline_deps_valid_package_name(name: String) -> Bool Never! {
 // A big-endian 64-bit length prefix, then the UTF-8 bytes.
 fn pkg_inline_deps_framed(bytes: &[U8], value: String) Never! {
     raw :: value.bytes()
-    pkg_inline_deps_framed_count(bytes, raw.len())
+    pkg_inline_deps_framed_count(&bytes, raw.len())
     loop byte in raw -> &bytes.push(byte)
 }
 
 fn pkg_inline_deps_framed_count(bytes: &[U8], count: Int) Never! {
-    loop shift in @FOUNDATION_U64_SHIFTS -> &bytes.push(U8{(count >> shift) & 255})
+    loop shift in FOUNDATION_U64_SHIFTS -> &bytes.push(U8{(count >> shift) & 255})
 }
 
 // E1253 (D-JPK-SCRIPTDEP1=A): an inline `use pkg#version;` ref that cannot

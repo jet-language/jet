@@ -1,0 +1,315 @@
+// Loader.rs:77-91,237-386,3034-3198. Entry and directory views share the
+// existing inline extractor, Package parser, Config composer and no-follow
+// authority resolver. The caller owns one declaration cache per operation.
+
+fn pkg_entry_authority_error(error: AuthorityError) -> ManifestError Never! {
+    ManifestError{diagnostic: error.diagnostic()}
+}
+
+fn pkg_entry_workspace_error(error: AuthorityError) -> ManifestError Never! {
+    ManifestError{diagnostic: error.workspace_diagnostic()}
+}
+
+fn pkg_inline_body_error(error: PackageParseError, span: Span) -> ManifestError Never! {
+    ManifestError{diagnostic: diagnostic_from_registry("E1362", Val(span),
+        "the inline Package body is malformed",
+        error.message(),
+        "fix the inline Package fields, then retry")}
+}
+
+fn pkg_inline_manifest_conflict(span: Span?) -> ManifestError Never! {
+    ManifestError{diagnostic: diagnostic_from_registry("E1363", span,
+        "an inline Package conflicts with package.jet",
+        "one project cannot carry both an inline Package block and a package.jet manifest",
+        "remove package.jet or remove the inline Package block")}
+}
+
+// #4394: checked authority currently discards the original native detail for
+// Missing/UTF-8 failures. Keep the original exact-detail regression enabled;
+// never reopen the pathname or invent an errno to hide that dependency.
+fn pkg_unreadable_entry(entry: String, error: AuthorityError) -> ManifestError Never! {
+    detail :: if error == {
+        .IO(_, _, detail) -> detail
+        else -> error.message()
+    }
+    ManifestError{diagnostic: diagnostic_from_registry("E1331", None,
+        "entry `{entry}` cannot be read", detail,
+        "restore the entry source, then retry")}
+}
+
+// Preserve no-follow authority refusals rather than reporting a linked entry
+// as ordinary absence. Missing/read/decode failures retain E1331.
+fn pkg_entry_read_error(entry: String, error: AuthorityError) -> ManifestError Never! {
+    if error == {
+        .Missing(_) | .IO(_, _, _) -> pkg_unreadable_entry(entry, error)
+        else -> pkg_entry_authority_error(error)
+    }
+}
+
+// Loader.rs `manifest_path_checked`: only a missing canonical manifest is
+// absence; retired, malformed, linked and unreadable metadata stay errors.
+pub fn pkg_manifest_path_checked(root: String) -[FS, Env]> String? ManifestError! {
+    resolver :: if AuthorityResolver.open(root) == {
+        .Ok(opened) -> opened
+        .Err(error) -> {
+            if error.is_missing() -> return Ok(None)
+            return Err(pkg_entry_authority_error(error))
+        }
+    }
+    if resolver.checked_manifest(".") == {
+        .Ok(manifest) -> {
+            resolver.revalidate_file(manifest.file) ?? return Err(pkg_entry_authority_error(err))
+            Ok(Val(manifest.file.path))
+        }
+        .Err(error) -> {
+            if error.is_missing() -> return Ok(None)
+            Err(pkg_entry_authority_error(error))
+        }
+    }
+}
+
+// Loader.rs `find_manifest_root_checked`. Declaration-resolved workspaces
+// stop discovery even when their filenames are not workspace.jet.
+pub fn pkg_find_manifest_root_checked(cache: &WorkspaceDeclarationCache, start: String) -[FS, Env]> String? ManifestError! {
+    dir := AuthorityResolver.authority_walk_root(start) ?? return Err(pkg_entry_authority_error(err))
+    loop {
+        authority :: AuthorityResolver.open_for_authority_walk(dir) ?? return Err(pkg_entry_authority_error(err))
+        if authority == {
+            .Val(resolver) -> {
+                workspace :: resolver.resolve_workspace_source(&cache) ?? return Err(pkg_entry_workspace_error(err))
+                if resolver.checked_manifest(".") == {
+                    .Ok(manifest) -> {
+                        resolver.revalidate_file(manifest.file) ?? return Err(pkg_entry_authority_error(err))
+                        return Ok(Val(dir))
+                    }
+                    .Err(error) -> {
+                        if !error.is_missing() -> return Err(pkg_entry_authority_error(error))
+                    }
+                }
+                if workspace != None -> return Ok(None)
+            }
+            .None -> {
+                // Explicit shared-directory boundaries are still inspected;
+                // upward traversal itself remains pruned by the resolver.
+                resolver :: AuthorityResolver.open(dir) ?? return Err(pkg_entry_authority_error(err))
+                if resolver.checked_manifest(".") == {
+                    .Ok(manifest) -> {
+                        resolver.resolve_workspace_source(&cache) ?? return Err(pkg_entry_workspace_error(err))
+                        resolver.revalidate_file(manifest.file) ?? return Err(pkg_entry_authority_error(err))
+                        return Ok(Val(dir))
+                    }
+                    .Err(error) -> {
+                        if !error.is_missing() -> return Err(pkg_entry_authority_error(error))
+                    }
+                }
+            }
+        }
+        parent :: AuthorityResolver.authority_walk_parent(dir) ?? return Ok(None)
+        dir = parent
+    }
+}
+
+// Loader.rs `checked_inline_package_entry`: run.jet, then src/run.jet. A
+// stock entry with no carrier does not hide the second candidate's carrier.
+pub fn pkg_checked_inline_package_entry(resolver: AuthorityResolver) -[FS, Env]> CheckedFile? ManifestError! {
+    candidates :: [String]{DEFAULT_ENTRY_FILE, "src/{DEFAULT_ENTRY_FILE}"}
+    loop relative in candidates {
+        file :: if resolver.checked_file(relative) == {
+            .Ok(checked) -> checked
+            .Err(error) -> {
+                if error.is_missing() -> next
+                return Err(pkg_entry_authority_error(error))
+            }
+        }
+        source :: file.text() ?? return Err(pkg_entry_authority_error(err))
+        block :: if pkg_extract_inline_package(source) == {
+            .Ok(found) -> found
+            .Err(error) -> {
+                resolver.revalidate_file(file) ?? return Err(pkg_entry_authority_error(err))
+                return Err(ManifestError{diagnostic: error.diagnostic()})
+            }
+        }
+        resolver.revalidate_file(file) ?? return Err(pkg_entry_authority_error(err))
+        if block != None -> return Ok(Val(file))
+    }
+    Ok(None)
+}
+
+// Loader.rs `find_inline_package_root_checked`. A nearer manifest or a
+// checked workspace prevents a parent stock entry from becoming authority.
+pub fn pkg_find_inline_package_root_checked(cache: &WorkspaceDeclarationCache, start: String) -[FS, Env]> String? ManifestError! {
+    dir := AuthorityResolver.authority_walk_root(start) ?? return Err(pkg_entry_authority_error(err))
+    loop {
+        authority :: AuthorityResolver.open_for_authority_walk(dir) ?? return Err(pkg_entry_authority_error(err))
+        resolver :: if authority == {
+            .Val(opened) -> opened
+            .None -> AuthorityResolver.open(dir) ?? return Err(pkg_entry_authority_error(err))
+        }
+        workspace := false
+        if authority != None {
+            source :: resolver.resolve_workspace_source(&cache) ?? return Err(pkg_entry_workspace_error(err))
+            workspace = source != None
+        }
+        has_manifest :: if resolver.checked_manifest(".") == {
+            .Ok(_) -> true
+            .Err(error) -> {
+                if !error.is_missing() -> return Err(pkg_entry_authority_error(error))
+                false
+            }
+        }
+        inline :: pkg_checked_inline_package_entry(resolver)
+        if authority == None && (has_manifest || inline != None) {
+            resolver.resolve_workspace_source(&cache) ?? return Err(pkg_entry_workspace_error(err))
+        }
+        if inline != None -> return Ok(Val(dir))
+        if workspace || has_manifest -> return Ok(None)
+        parent :: AuthorityResolver.authority_walk_parent(dir) ?? return Ok(None)
+        dir = parent
+    }
+}
+
+// Both carrier forms complete through PackageLoad's transactional Config
+// composition followed by guarantees, defaults and flat member validation.
+fn pkg_entry_load_conventional(root: String) -[FS, Env]> PackageFacts? ManifestError! {
+    resolver :: if AuthorityResolver.open(root) == {
+        .Ok(opened) -> opened
+        .Err(error) -> {
+            if error.is_missing() -> return Ok(None)
+            return Err(pkg_entry_authority_error(error))
+        }
+    }
+    manifest :: if resolver.checked_manifest(".") == {
+        .Ok(checked) -> checked
+        .Err(error) -> {
+            if error.is_missing() -> return Ok(None)
+            return Err(pkg_entry_authority_error(error))
+        }
+    }
+    resolver.revalidate_file(manifest.file) ?? return Err(pkg_entry_authority_error(err))
+    facts := manifest.facts
+    compose_error := PackageParseError?{None}
+    if pkg_load_compose_and_validate(&facts, resolver) == .Err(error) -> compose_error = Val(error)
+    resolver.revalidate_file(manifest.file) ?? return Err(pkg_entry_authority_error(err))
+    if compose_error == .Val(error) {
+        authority_error :: if error == {
+            .NestedMembers(root, member) -> AuthorityError.NestedMembers{root: root, member: member}
+            else -> AuthorityError.Invalid{path: manifest.file.path, detail: error.message()}
+        }
+        return Err(pkg_entry_authority_error(authority_error))
+    }
+    Ok(Val(facts))
+}
+
+// Loader.rs `package_facts_from_entry_source` and
+// `complete_inline_package_facts`. Never reopen the held entry by pathname.
+fn pkg_package_facts_from_checked_entry(resolver: AuthorityResolver, entry: CheckedFile, origin: String, manifest_root: String?) -[FS, Env]> PackageFacts? ManifestError! {
+    resolver.revalidate_file(entry) ?? return Err(pkg_entry_authority_error(err))
+    source :: entry.text() ?? return Err(pkg_entry_authority_error(err))
+    block :: if pkg_extract_inline_package(source) == {
+        .Ok(found) -> found
+        .Err(error) -> {
+            resolver.revalidate_file(entry) ?? return Err(pkg_entry_authority_error(err))
+            return Err(ManifestError{diagnostic: error.diagnostic()})
+        }
+    }
+    resolver.revalidate_file(entry) ?? return Err(pkg_entry_authority_error(err))
+    if block == .Val(inline) {
+        if manifest_root != None -> return Err(pkg_inline_manifest_conflict(Val(inline.span)))
+        facts := if PackageFacts.parse_uncomposed(inline.body(source), origin) == {
+            .Ok(parsed) -> parsed
+            .Err(error) -> {
+                resolver.revalidate_file(entry) ?? return Err(pkg_entry_authority_error(err))
+                return Err(pkg_inline_body_error(error, inline.body_span))
+            }
+        }
+        compose_error := PackageParseError?{None}
+        if pkg_load_compose_and_validate(&facts, resolver) == .Err(error) -> compose_error = Val(error)
+        resolver.revalidate_file(entry) ?? return Err(pkg_entry_authority_error(err))
+        if compose_error == .Val(error) -> return Err(pkg_inline_body_error(error, inline.body_span))
+        return Ok(Val(facts))
+    }
+    root :: manifest_root ?? return Ok(None)
+    loaded :: if pkg_entry_load_conventional(root) == {
+        .Ok(found) -> found
+        .Err(error) -> {
+            resolver.revalidate_file(entry) ?? return Err(pkg_entry_authority_error(err))
+            return Err(error)
+        }
+    }
+    resolver.revalidate_file(entry) ?? return Err(pkg_entry_authority_error(err))
+    Ok(loaded)
+}
+
+// Loader.rs `inline_manifest_conflict_loader_error`: retain the stock
+// carrier's whole-block span when a different entry exposed the conflict.
+fn pkg_inline_root_conflict(root: String) -[FS, Env]> ManifestError ManifestError! {
+    resolver :: AuthorityResolver.open(root) ?? return Err(pkg_entry_authority_error(err))
+    found :: pkg_checked_inline_package_entry(resolver)
+    entry :: found ?? return Ok(pkg_inline_manifest_conflict(None))
+    source :: entry.text() ?? return Err(pkg_entry_authority_error(err))
+    block :: if pkg_extract_inline_package(source) == {
+        .Ok(inline) -> inline
+        .Err(error) -> {
+            resolver.revalidate_file(entry) ?? return Err(pkg_entry_authority_error(err))
+            return Err(ManifestError{diagnostic: error.diagnostic()})
+        }
+    }
+    resolver.revalidate_file(entry) ?? return Err(pkg_entry_authority_error(err))
+    inline :: block ?? return Ok(pkg_inline_manifest_conflict(None))
+    Ok(pkg_inline_manifest_conflict(Val(inline.span)))
+}
+
+// Loader.rs `package_facts_for_root`. The supplied root is the explicit
+// authority boundary; stock inline entry takes precedence only in the
+// absence of a discovered conventional carrier.
+pub fn pkg_package_facts_for_root(cache: &WorkspaceDeclarationCache, root: String) -[FS, Env]> PackageFacts? ManifestError! {
+    resolver :: AuthorityResolver.open(root) ?? return Err(pkg_entry_authority_error(err))
+    manifest_root :: pkg_find_manifest_root_checked(&cache, resolver.root)
+    stock :: pkg_checked_inline_package_entry(resolver)
+    entry :: stock ?? {
+        found :: manifest_root ?? return Ok(None)
+        return pkg_entry_load_conventional(found)
+    }
+    facts :: if pkg_package_facts_from_checked_entry(resolver, entry, entry.path, manifest_root) == {
+        .Ok(found) -> found
+        .Err(error) -> {
+            resolver.revalidate_file(entry) ?? return Err(pkg_entry_authority_error(err))
+            return Err(error)
+        }
+    }
+    resolver.revalidate_file(entry) ?? return Err(pkg_entry_authority_error(err))
+    Ok(facts)
+}
+
+// Loader.rs `package_facts_for_entry`. A non-stock entry may inherit a
+// parent's stock inline Package only when it has no carrier of its own.
+pub fn pkg_package_facts_for_entry(cache: &WorkspaceDeclarationCache, entry: String) -[FS, Env]> PackageFacts? ManifestError! {
+    parent :: pkg_authority_effective_root(pkg_path_parent(entry))
+    resolver :: AuthorityResolver.open(parent) ?? return Err(pkg_entry_read_error(entry, err))
+    checked :: resolver.checked_file(pkg_path_file_name(entry)) ?? return Err(pkg_entry_read_error(entry, err))
+    checked.text() ?? return Err(pkg_unreadable_entry(entry, err))
+    manifest_root :: pkg_find_manifest_root_checked(&cache, resolver.root)
+    inline_root :: pkg_find_inline_package_root_checked(&cache, resolver.root)
+    loaded :: if pkg_package_facts_from_checked_entry(resolver, checked, entry, manifest_root) == {
+        .Ok(found) -> found
+        .Err(error) -> {
+            resolver.revalidate_file(checked) ?? return Err(pkg_entry_authority_error(err))
+            return Err(error)
+        }
+    }
+    resolver.revalidate_file(checked) ?? return Err(pkg_entry_authority_error(err))
+    if manifest_root != None && inline_root == .Val(root) {
+        return Err(pkg_inline_root_conflict(root))
+    }
+    if loaded != None || inline_root == None -> return Ok(loaded)
+    root :: inline_root ?? return Ok(None)
+    inherited :: if pkg_package_facts_for_root(&cache, root) == {
+        .Ok(found) -> found
+        .Err(error) -> {
+            resolver.revalidate_file(checked) ?? return Err(pkg_entry_authority_error(err))
+            return Err(error)
+        }
+    }
+    resolver.revalidate_file(checked) ?? return Err(pkg_entry_authority_error(err))
+    Ok(inherited)
+}

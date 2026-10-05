@@ -2,10 +2,10 @@
 // jet_pkg_model::RBind. Each function binds three ways: a DataTree call, a
 // typed table call, and a sanitized SVG plot call.
 
-@PKG_R_RESERVED :: [String]{"open", "cancel", "close", "decode_response", "Session", "RError"}
+PKG_R_RESERVED :: prep { [String]{"open", "cancel", "close", "decode_response", "Session", "RError"} }
 
 // The private scratch prefix the supervisor creates per worker for plots.
-@PKG_R_PLOT_TEMP_PREFIX :: "/tmp/jet-r-plot-"
+PKG_R_PLOT_TEMP_PREFIX :: prep { "/tmp/jet-r-plot-" }
 
 // Bind the top-level one-argument functions of the R script at `path`.
 pub fn pkg_r_bind(path: String, source: String, lib: String, cache: String) -[FS, Env, Exec, Time.Wait]> ForeignBindResult ForeignBindError! {
@@ -16,7 +16,7 @@ pub fn pkg_r_bind(path: String, source: String, lib: String, cache: String) -[FS
     script :: pkg_binder_canonicalize(path, "could not resolve the R script")
     build :: pkg_worker_prepare_build(cache, "r", lib, "R")
     discoverer :: files.join(build, "jet_discover.R")
-    pkg_binder_write(discoverer, @PKG_R_DISCOVERER, "could not write R binding inspector")
+    pkg_binder_write(discoverer, PKG_R_DISCOVERER, "could not write R binding inspector")
     metadata :: pkg_worker_run_tool([String]{rscript, "--vanilla", discoverer, script}, "Rscript", language, true)
     functions :: pkg_r_parse_function_names(metadata)
     worker_source :: pkg_r_render_worker(functions)
@@ -30,7 +30,7 @@ pub fn pkg_r_bind(path: String, source: String, lib: String, cache: String) -[FS
         &wrappers.push(pkg_worker_invoke_wrapper(abi, "{name}_table", "invoke", "__jet_table__{name}"))
         &wrappers.push(pkg_worker_invoke_wrapper(abi, "{name}_plot", "invoke", "__jet_plot__{name}"))
     }
-    bridge :: pkg_worker_render_supervisor_c_with_temp(abi, rscript, worker, script, wrappers.join(""), "\"--vanilla\",worker_path,script_path", Val(@PKG_R_PLOT_TEMP_PREFIX))
+    bridge :: pkg_worker_render_supervisor_c_with_temp(abi, rscript, worker, script, wrappers.join(""), "\"--vanilla\",worker_path,script_path", Val(PKG_R_PLOT_TEMP_PREFIX))
     archive :: pkg_worker_build_archive(language, abi, build, cache, bridge, "could not write R process bridge")
     digest :: pkg_binder_identity_digest([String]{"jet-r-bind-v1", source, script, rscript, worker_source})
     provenance := "schema=jet-r-bind-v1\nsha256={digest}\nrscript={rscript}\nscript={script}\nworker={worker}\nworkers_per_session=1\nmax_sessions=32\ntransport=jsonlite\n"
@@ -69,7 +69,7 @@ fn pkg_r_parse_function_names(bytes: [U8]) -> [String] ForeignBindError! {
 fn pkg_r_render_worker(functions: [String]) -> String Never! {
     allowed := [String]{}
     loop name in functions -> &allowed.push("  {name} = TRUE")
-    pkg_binder_fill_template(@PKG_R_WORKER, [String: String]{"allowed": allowed.join(",\n"), "svg_runtime": @PKG_R_SVG_RUNTIME})
+    pkg_binder_fill_template(PKG_R_WORKER, [String: String]{"allowed": allowed.join(",\n"), "svg_runtime": PKG_R_SVG_RUNTIME})
 }
 
 fn pkg_r_render_jet(lib: String, functions: [String]) -> String Never! {
@@ -82,7 +82,7 @@ fn pkg_r_render_jet(lib: String, functions: [String]) -> String Never! {
     }
     &out.push("}}\nuse c.{abi} as abi\nuse core.encoding.json as json\n\npub struct Session {{ value: Int }}\n#Error\npub enum RError {{ NotRunning Timeout Cancelled Protocol CommandFailed Limit }}\n\n")
     &out.push(pkg_render_decode_response("RError", DecoderProtocol.StandardEnvelope))
-    &out.push(@PKG_R_JET_SESSION)
+    &out.push(PKG_R_JET_SESSION)
     loop name in functions {
         &out.push("pub fn {name}(session: Session, input: DataTree, deadline_ms: Int) -> DataTree RError! {{\n    raw :: abi.{name}(session.value, json.to_string(input), deadline_ms)\n    code :: abi.take_error()\n    return decode_response(raw, code)\n}}\n\n")
         &out.push("pub fn {name}_table<T: [Encode, Decode]>(session: Session, rows: [T], deadline_ms: Int) -> [T] RError! {{\n    raw :: abi.{name}_table(session.value, json.to_string(~rows), deadline_ms)\n    code :: abi.take_error()\n    value :: decode_response(raw, code)\n    return Ok(json.decode<[T]>(json.to_string(value)) ?? return Err(RError.Protocol))\n}}\n\n")
@@ -97,10 +97,10 @@ pub fn pkg_r_render_probe() -> String Never! {
 }
 
 fn pkg_r_reserved(value: String) -> Bool Never! {
-    @PKG_R_RESERVED.contains(value) || @JET_KEYWORD_LIST.contains(value) || @JET_TYPE_LIST.contains(value)
+    PKG_R_RESERVED.contains(value) || JET_KEYWORD_LIST.contains(value) || JET_TYPE_LIST.contains(value)
 }
 
-@PKG_R_JET_SESSION :: ```impl Session.Close {
+PKG_R_JET_SESSION :: prep { ```impl Session.Close {
     fn close(^self) { abi.close(self.value) }
 }
 
@@ -114,11 +114,11 @@ pub fn open() -> Session RError! {
 
 pub fn cancel(session: Session) { abi.cancel(session.value) }
 
-```
+``` }
 
 // Parses the script without evaluating it and prints `N\t<name>` per
 // top-level one-argument function or `E\tARG\t<name>` for an unsupported one.
-@PKG_R_DISCOVERER :: ```args <- commandArgs(trailingOnly = TRUE)
+PKG_R_DISCOVERER :: prep { ```args <- commandArgs(trailingOnly = TRUE)
 expressions <- parse(file = args[[1]], keep.source = FALSE)
 for (expression in expressions) {
   if (!is.call(expression) || !(as.character(expression[[1]]) %in% c("<-", "="))) next
@@ -129,12 +129,12 @@ for (expression in expressions) {
   if (!valid) { cat("E\tARG\t", name, "\n", sep = ""); quit(status = 0) }
   cat("N\t", name, "\n", sep = "")
 }
-```
+``` }
 
 // Generated into each worker so plot output is checked where it crosses the
 // process boundary. This is a structural XML tokenizer/canonicalizer: regexes
 // are used only for scalar value checks after elements and attributes parse.
-@PKG_R_SVG_RUNTIME :: ```
+PKG_R_SVG_RUNTIME :: prep { ```
 svg_error <- function() stop("invalid SVG plot")
 svg_name_char <- function(ch, first = FALSE) {
   if (length(ch) == 0 || is.na(ch)) return(FALSE)
@@ -337,11 +337,11 @@ plot_to_svg <- function(fn, input) {
   unlink(path)
   sanitize_svg(rawToChar(bytes))
 }
-```
+``` }
 
 // The persistent worker. Holes: `allowed` (one `name = TRUE` row per
 // function) and `svg_runtime`.
-@PKG_R_WORKER :: ```suppressPackageStartupMessages(library(jsonlite))
+PKG_R_WORKER :: prep { ```suppressPackageStartupMessages(library(jsonlite))
 input <- file("/dev/stdin", "rb")
 output <- file("/dev/stdout", "wb")
 script <- new.env(parent = baseenv())
@@ -420,4 +420,4 @@ repeat {
   writeBin(c(little(length(encoded), 4), little(response$id, 8), encoded), output)
   flush(output)
 }
-```
+``` }

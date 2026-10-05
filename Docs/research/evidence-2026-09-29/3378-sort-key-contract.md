@@ -1,6 +1,6 @@
 # #3378 — sort-key evaluation, stability and tie policies
 
-Date: 2026-09-29. Binary: jet-debug-snapshot14 via `~/.cache/jet-luna/safe-jet.sh`.
+Date: 2026-09-29. Binary: jet-debug-snapshot14 via `~/.cache/jet-dev/safe-jet.sh`.
 
 ## Question
 
@@ -65,4 +65,4 @@ law row is a possible follow-up. It is not done here.
    `Ordering` crashes with "closure method without a checked operation"
    (`cmp_ice.jet`).
 
-Repros are in `~/.cache/jet-test-scratch/Closer08/`.
+Repros are in `~/.cache/jet-dev/scratch/Closer08/`.

@@ -7,7 +7,7 @@ these defect classes become structurally impossible, without bloat.
 
 Evidence: complete 232-member Temporal API extraction from TC39 primary sources; exhaustive
 both-tier probe of Jet's datetime surface; a 926-function registry census on the default tier;
-a testing-architecture seam map. Artifacts in `~/.cache/jet-luna/mine-2026-08-28/artifacts/`
+a testing-architecture seam map. Artifacts in `~/.cache/jet-dev/mine-2026-08-28/artifacts/`
 (`jet-dt-temporal.md`, `jet-dt-probe.md`, `jet-tier-census.{md,tsv}`, `jet-harness-map.md`).
 Every load-bearing finding below was re-run first-hand.
 
@@ -126,7 +126,7 @@ implementation step should verify the union before trusting the count of 926.
 Owner: "stress test the date stuff for accuracy not just look at what it should do."
 First run executed: 689 scenarios / ~2100 lines, Jet vs Python 3.13 `zoneinfo` (IANA) and
 GNU date, fixed seed, oracle-side-only normalizations. Report:
-`~/.cache/jet-luna/mine-2026-08-28/artifacts/jet-dtacc.md`.
+`~/.cache/jet-dev/mine-2026-08-28/artifacts/jet-dtacc.md`.
 
 | Family | Verdict |
 |---|---|

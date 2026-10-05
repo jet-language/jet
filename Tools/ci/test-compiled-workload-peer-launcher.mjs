@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const source = path.join(root, "Tools", "ci", "compiled-workload-peer-launcher.rs");
-const scratchBase = path.join(os.homedir(), ".cache", "jet-test-scratch");
+const scratchBase = path.join(os.homedir(), ".cache", "jet-dev", "scratch");
 fs.mkdirSync(scratchBase, { recursive: true });
 const runRoot = fs.mkdtempSync(path.join(scratchBase, "compiled-workload-peer-launcher-"));
 const launcher = path.join(

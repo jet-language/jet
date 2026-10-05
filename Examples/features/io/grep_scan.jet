@@ -2,6 +2,7 @@
 // Core `WalkEntry` fields `path`, `relative`, `is_dir` and `depth`.
 package {
     name: "grep_scan"
+    // Walks and reads need FS.Read; fixture creation needs FS.Write.
     authority: { holds: { allow: [FS.Read, FS.Write, IO, Mem.Alloc] } }
 }
 
@@ -15,9 +16,14 @@ fn run() {
     fs.write(Path.from(root).join("notes.txt"), "needle in notes\n")
     fs.write(src.join("alpha.txt"), "needle in alpha\n")
     fs.write(src.join("beta.txt"), "no match\n")
+    ignored :: Path.from(root).join("ignored")
+    fs.create_dir_all(ignored)
+    fs.write(ignored.join("hidden.txt"), "needle must stay ignored\n")
+    fs.write(Path.from(root).join(".gitignore"), "ignored/\n")
 
-    parallel :: fs.walk_parallel(root)
-    sequential :: fs.walk(root)
+    // Both walks opt into the same ignore file; omission means no ignore rules.
+    parallel :: fs.walk_parallel(root, ignore: ".gitignore")
+    sequential :: fs.walk(root, ignore: ".gitignore")
     parallel_set := [String]{}
     sequential_set := [String]{}
     loop entry in parallel -> &parallel_set.push("{entry.relative}:{entry.is_dir}:{entry.depth}")

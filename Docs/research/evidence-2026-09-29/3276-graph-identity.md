@@ -1,6 +1,6 @@
 # 3276 — Object identity, cycles and typed graph coding
 
-Date: 2026-09-29. Closer02. Binary: jet-debug-snapshot14 via `~/.cache/jet-luna/safe-jet.sh`.
+Date: 2026-09-29. Closer02. Binary: jet-debug-snapshot14 via `~/.cache/jet-dev/safe-jet.sh`.
 
 ## Question
 
@@ -9,7 +9,7 @@ How does Jet's data and typed-codec model treat object identity, aliases, cycles
 ## Method
 
 - Source: `DataTree` is `Null|Bool|Int|Float|Text|Array|Object` (`crates/jet-codegen/src/Prelude/Core.jet:78`; the host adds `Bytes`, `Number` and `TypedText` carriers, `EncodingCodecs.rs:410-440`). None of these is an identity, reference or type-tag node. CBOR tags, including 28/29, are rejected by the host kernel (see `3271-cbor-profile.md`).
-- Witness `~/.cache/jet-test-scratch/Closer02/graph_probe.jet` (JSON cells plus CBOR tag 28/29) and `graph_nocbor.jet` (the JSON cells only), run on JIT, interpreter and AOT with `tiers.sh`.
+- Witness `~/.cache/jet-dev/scratch/Closer02/graph_probe.jet` (JSON cells plus CBOR tag 28/29) and `graph_nocbor.jet` (the JSON cells only), run on JIT, interpreter and AOT with `tiers.sh`.
 
 ## Evidence (`graph_nocbor.jet`: JIT exit 0, AOT exit 0, `SAME jit/aot`)
 
@@ -52,7 +52,7 @@ Interpreter, JSON cells: `E0956 MIR typed codec decode has no builtin decoder fo
 2. Reject unsafe instantiation from untrusted input: **met on JIT and AOT.** The type is chosen by the program's target type, never by the input.
 3. Keep identity, cycle and alias behaviour as an explicit profile: **met as a record.** The profile is "explicit IDs only; aliases duplicate; cycles only through IDs; tags 28/29 refused".
 4. Graph or API additions need a ballot: **met.** No addition is proposed. If the owner wants a graph profile, it needs a ballot (for example, an opt-in `#Identity` Codable metadata with explicit ID and reference encoding). Nothing is drafted here, because no need was demonstrated.
-5. Golden `serde/graph_identity` on AOT and default run with all four cells: **not met.** The three JSON cells agree on JIT and AOT, but the CBOR tag 28/29 cell crashes the JIT and does not compile on AOT (the CBOR error-type defect, D1/D2 in 3271). The interpreter cannot decode `[Node]`. No golden was blessed. The witness is ready at `~/.cache/jet-test-scratch/Closer02/graph_probe.jet` for when CBOR errors work.
+5. Golden `serde/graph_identity` on AOT and default run with all four cells: **not met.** The three JSON cells agree on JIT and AOT, but the CBOR tag 28/29 cell crashes the JIT and does not compile on AOT (the CBOR error-type defect, D1/D2 in 3271). The interpreter cannot decode `[Node]`. No golden was blessed. The witness is ready at `~/.cache/jet-dev/scratch/Closer02/graph_probe.jet` for when CBOR errors work.
 
 ## Verdict
 

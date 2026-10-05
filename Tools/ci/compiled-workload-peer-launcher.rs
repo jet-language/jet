@@ -363,7 +363,7 @@ fn probe_root() -> Result<PathBuf, String> {
     let base = env::var_os("JET_COMPILED_WORKLOAD_PEER_PROBE_ROOT")
         .map(PathBuf::from)
         .or_else(|| {
-            env::var_os("HOME").map(|home| PathBuf::from(home).join(".cache/jet-test-scratch"))
+            env::var_os("HOME").map(|home| PathBuf::from(home).join(".cache/jet-dev/scratch"))
         })
         .ok_or_else(|| "cannot locate a disk-backed capability probe directory".to_string())?;
     fs::create_dir_all(&base).map_err(|error| {

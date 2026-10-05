@@ -39,7 +39,7 @@ CORE_SOURCE = ROOT / "Core"
 JET_ENV = ROOT / "Tools/agent/jet-env"
 LEDGER_CHECK = ROOT / "Tools/agent/check-core-surface-ledger.mjs"
 CONFORMANCE = ROOT / "Tools/agent/core-conformance.mjs"
-SCRATCH_ROOT = Path.home() / ".cache" / "jet-luna" / "corelib-parity"
+SCRATCH_ROOT = Path.home() / ".cache" / "jet-dev" / "corelib-parity"
 
 
 # These are compiler-owned surfaces with no source-level declaration shape.

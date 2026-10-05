@@ -10,9 +10,9 @@ pub enum BuildOptimize {
 
     fn as_str(self) -> String Never! {
         if self == {
-            .Off -> @BUILD_OPTIMIZE_NONE
-            .Basic -> @BUILD_OPTIMIZE_BASIC
-            .Full -> @BUILD_OPTIMIZE_FULL
+            .Off -> BUILD_OPTIMIZE_NONE
+            .Basic -> BUILD_OPTIMIZE_BASIC
+            .Full -> BUILD_OPTIMIZE_FULL
         }
     }
 
@@ -179,7 +179,7 @@ fn pkg_parse_dev_record_bytes(value: String) -> Int PackageParseError! {
     }
     count :: pkg_parse_u64(pkg_without_whitespace(digits.replace("_", ""))) ?? return Err(PackageParseError.Composition("dev.records.budget.size must be a positive whole-byte quantity"))
     if count == 0 -> return Err(PackageParseError.Composition("dev.records.budget.size must be a positive whole-byte quantity"))
-    if count > @PKG_MAX_U64_IN_INT / multiplier -> return Err(PackageParseError.Composition("dev.records.budget.size does not fit in 64 bits"))
+    if count > PKG_MAX_U64_IN_INT /% multiplier -> return Err(PackageParseError.Composition("dev.records.budget.size does not fit in 64 bits"))
     Ok(count * multiplier)
 }
 
@@ -191,16 +191,16 @@ pub fn pkg_parse_build(body: String) -> [BuildProfileDef] PackageParseError! {
         name :: entry.key
         if seen.contains(name) -> return Err(PackageParseError.Composition("build field `{name}` is declared more than once"))
         &seen.push(name)
-        if name == @BUILD_FIELD_ALLOW -> next
+        if name == BUILD_FIELD_ALLOW -> next
         &profiles.push(pkg_parse_build_profile(name, entry.value.trim()))
     }
     Ok(profiles)
 }
 
 fn pkg_parse_build_profile(name: String, value: String) -> BuildProfileDef PackageParseError! {
-    inner_block := None
-    if value.starts_with(@BUILD_CTOR) {
-        rest :: pkg_trim_start_matches(value.removeprefix(@BUILD_CTOR), ".").trim()
+    inner_block := String?{None}
+    if value.starts_with(BUILD_CTOR) {
+        rest :: pkg_trim_start_matches(value.removeprefix(BUILD_CTOR), ".").trim()
         if pkg_strip_wrapped(rest, "{{", "}}") == .Val(inner) -> inner_block = Val(inner.trim())
     } else if value.starts_with("{{") {
         rest :: value.removeprefix("{{")
@@ -209,7 +209,7 @@ fn pkg_parse_build_profile(name: String, value: String) -> BuildProfileDef Packa
         return Err(PackageParseError.Composition("build profile `{name}` needs a `Build.{{ optimize: none|basic|full, … }}` value"))
     }
     inner :: inner_block ?? ""
-    optimize_value := None
+    optimize_value := String?{None}
     profile := BuildProfileDef{
         name: name,
         optimize: BuildOptimize.Off,
@@ -227,22 +227,22 @@ fn pkg_parse_build_profile(name: String, value: String) -> BuildProfileDef Packa
         if seen_fields.contains(key) -> return Err(PackageParseError.Composition("build profile `{name}.{key}` is declared more than once"))
         &seen_fields.push(key)
         if key == {
-            @BUILD_FIELD_OPTIMIZE -> optimize_value = Val(pkg_unquote(field.value))
-            @BUILD_FIELD_DEBUG_INFO -> profile.debug_info = pkg_parse_build_bool(name, field.value)
-            @BUILD_FIELD_SMALL -> profile.small = pkg_parse_build_bool(name, field.value)
-            @BUILD_FIELD_PANIC -> {
+            BUILD_FIELD_OPTIMIZE -> optimize_value = Val(pkg_unquote(field.value))
+            BUILD_FIELD_DEBUG_INFO -> profile.debug_info = pkg_parse_build_bool(name, field.value)
+            BUILD_FIELD_SMALL -> profile.small = pkg_parse_build_bool(name, field.value)
+            BUILD_FIELD_PANIC -> {
                 spelled :: pkg_unquote(field.value)
-                if spelled == @BUILD_PANIC_ABORT {
+                if spelled == BUILD_PANIC_ABORT {
                     profile.panic = Val(BuildPanic.Abort)
-                } else if spelled == @BUILD_PANIC_UNWIND {
+                } else if spelled == BUILD_PANIC_UNWIND {
                     profile.panic = Val(BuildPanic.Unwind)
                 } else {
                     return Err(PackageParseError.Composition("build profile `{name}` has an unknown `panic:` value — use `abort` or `unwind`"))
                 }
             }
-            @RELEASE_INSPECT_FIELD -> {
-                if name != @BUILD_PROFILE_RELEASE -> return Err(PackageParseError.Composition("build profile `{name}` may declare `inspect:` only on `release`"))
-                profile.inspect = pkg_release_inspect_parse(field.value) ?? return Err(PackageParseError.Composition("build profile `{name}` has an invalid `inspect:` value `{field.value.trim()}` — {@RELEASE_INSPECT_EXPECTED}"))
+            RELEASE_INSPECT_FIELD -> {
+                if name != BUILD_PROFILE_RELEASE -> return Err(PackageParseError.Composition("build profile `{name}` may declare `inspect:` only on `release`"))
+                profile.inspect = pkg_release_inspect_parse(field.value) ?? return Err(PackageParseError.Composition("build profile `{name}` has an invalid `inspect:` value `{field.value.trim()}` — {RELEASE_INSPECT_EXPECTED}"))
             }
             "game_development_stripping" -> profile.game_development_stripping = Val(pkg_parse_build_bool(name, field.value))
             "game_cook_mode" -> {
@@ -250,23 +250,23 @@ fn pkg_parse_build_profile(name: String, value: String) -> BuildProfileDef Packa
                 if mode != "fast" && mode != "reproducible" && mode != "scripts-only" -> return Err(PackageParseError.Composition("build profile `{name}` has an unknown `game_cook_mode:` value `{mode}`"))
                 profile.game_cook_mode = Val(mode)
             }
-            @BUILD_FIELD_SETTINGS -> {
+            BUILD_FIELD_SETTINGS -> {
                 settings_body :: pkg_strip_wrapped(pkg_trim_start_matches(field.value, ".").trim(), "{{", "}}") ?? return Err(PackageParseError.Composition("build profile `{name}` needs `settings: {{ key: value, … }}`"))
                 loop setting in pkg_key_value_entries(settings_body.trim()) {
                     if profile.settings.has_key(setting.key) -> return Err(PackageParseError.Composition("build profile `{name}.settings.{setting.key}` is declared more than once"))
                     profile.settings[setting.key] = pkg_unquote(setting.value)
                 }
             }
-            @RETIRED_BUILD_FIELD_FEATURES | @RETIRED_BUILD_FIELD_ENV -> return Err(PackageParseError.Composition("build profile `{name}` uses retired `{key}:`; declare a typed `settings: {{ key: Type = default }}` entry and override it with `--set key=value`"))
+            RETIRED_BUILD_FIELD_FEATURES | RETIRED_BUILD_FIELD_ENV -> return Err(PackageParseError.Composition("build profile `{name}` uses retired `{key}:`; declare a typed `settings: {{ key: Type = default }}` entry and override it with `--set key=value`"))
             else -> return Err(PackageParseError.Composition("build profile `{name}` has an unknown field `{key}` (allowed: optimize, debug_info, small, panic, inspect, game_development_stripping, game_cook_mode, settings)"))
         }
     }
     selected :: optimize_value ?? return Err(PackageParseError.Composition("build profile `{name}` is missing `optimize: none|basic|full`"))
-    if selected == @BUILD_OPTIMIZE_NONE {
+    if selected == BUILD_OPTIMIZE_NONE {
         profile.optimize = BuildOptimize.Off
-    } else if selected == @BUILD_OPTIMIZE_BASIC {
+    } else if selected == BUILD_OPTIMIZE_BASIC {
         profile.optimize = BuildOptimize.Basic
-    } else if selected == @BUILD_OPTIMIZE_FULL {
+    } else if selected == BUILD_OPTIMIZE_FULL {
         profile.optimize = BuildOptimize.Full
     } else {
         return Err(PackageParseError.Composition("build profile `{name}` is missing `optimize: none|basic|full`"))
@@ -279,7 +279,7 @@ pub fn pkg_parse_build_allow(body: String) -> [String] PackageParseError! {
     allow := [String]{}
     seen_allow := false
     loop entry in pkg_key_value_entries(body) {
-        if entry.key != @BUILD_FIELD_ALLOW -> next
+        if entry.key != BUILD_FIELD_ALLOW -> next
         if seen_allow -> return Err(PackageParseError.BadEffectsBlock("`build.allow:` is declared more than once"))
         seen_allow = true
         inner :: pkg_strip_wrapped(entry.value.trim(), "#(", ")") ?? return Err(PackageParseError.BadEffectsBlock("`build.allow:` must be an effect tuple like `#(FS, Exec)`"))

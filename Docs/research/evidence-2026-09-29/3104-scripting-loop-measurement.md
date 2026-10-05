@@ -1,6 +1,6 @@
 # #3104: whole scripting-loop measurement (SCRIPT-F09)
 
-Closer10, 2026-09-29. Current binary: `~/.cache/jet-luna/safe-jet.sh` →
+Closer10, 2026-09-29. Current binary: `~/.cache/jet-dev/safe-jet.sh` →
 `jet-debug-snapshot14` (debug build). Verdict: **BLOCKED**.
 
 ## Question
@@ -16,7 +16,7 @@ Environment identity, observed in `Tools/agent/jet-env`:
 
 | Tool | Identity (observed) |
 |---|---|
-| jet (current) | `~/.cache/jet-test-scratch/jet-debug-snapshot14`, a debug build (1.69 GB) |
+| jet (current) | `~/.cache/jet-dev/scratch/jet-debug-snapshot14`, a debug build (1.69 GB) |
 | jet release | `target/release/jet`, 2026-09-28 11:15, sha256 prefix `3b8d8e9b09c891d4` |
 | CPython | 3.14.7 (`/nix/store/b5bpi6…-python3-3.14.7`) |
 | Node | v22.23.2 |

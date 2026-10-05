@@ -1,0 +1,78 @@
+// Registry-row shapes the self-hosted compiler checks the way the Rust
+// reference does: owned temporaries fill consuming and write parameters,
+// plain enums compare by their derived equality, and optional enum values
+// flow through tables, returns, fallbacks, and struct fields.
+enum Effect {
+    Time
+    Rand
+}
+
+enum Route {
+    NoRoute
+    Pure(kind: Effect)
+}
+
+struct Row {
+    name: String
+    kind: Effect?
+    pure: Bool
+    route: Route
+}
+
+fn kind_for(name: String) -> Effect? {
+    if {
+        name == "now" -> Val(Effect.Time)
+        name == "roll" -> Val(Effect.Rand)
+        else -> None
+    }
+}
+
+fn kind_returned(name: String) -> Effect? {
+    if {
+        name == "now" -> return Val(Effect.Time)
+        else -> return None
+    }
+}
+
+fn kind_named(name: String) -> Effect Err! {
+    if name == "time" -> return Ok(Effect.Time)
+    Err("unknown kind `{name}`")
+}
+
+fn row_new(name: String) -> Row Never! {
+    kind :: kind_for(name)
+    Row{name: name, kind: kind, pure: kind == None, route: Route.NoRoute}
+}
+
+fn with_route(row: ^Row, kind: Effect) -> Row Never! {
+    updated := row
+    updated.route = Route.Pure{kind: kind}
+    updated
+}
+
+fn routed(route: Route) -> Bool Never! {
+    if route == {
+        .Pure(kind) -> kind != Effect.Rand
+        else -> false
+    }
+}
+
+fn stamp(names: &[String]) -> Int Never! {
+    &names.push("stamped")
+    names.len()
+}
+
+fn fresh_names() -> [String] Never! { [String]{"a", "b"} }
+
+ROWS :: prep { [Row]{row_new("now"), with_route(row_new("roll"), Effect.Time), row_new("idle")} }
+
+fn run() {
+    loop row in ROWS {
+        has_kind :: row.kind != None
+        print("{row.name} {row.pure} {has_kind} {routed(row.route)}")
+    }
+    now :: kind_returned("now") ?? Effect.Rand
+    print("{now == Effect.Time} {kind_returned("x") == None}")
+    print("{(kind_for("idle") ?? Effect.Rand) == Effect.Rand} {(kind_named("time") ?? Effect.Rand) == Effect.Time} {(kind_named("x") ?? Effect.Rand) == Effect.Rand}")
+    print("{stamp(fresh_names())}")
+}

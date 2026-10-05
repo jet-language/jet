@@ -177,7 +177,8 @@ fn jet_web_emit_wasm_export_bridge(ctx: &JetWebEmitContext, function: MIRFunctio
 
 fn jet_web_emit_wasm_export_bridges(ctx: &JetWebEmitContext, out: &[String]) {
     names := [String]{}
-    loop function in ctx.functions {
+    loop function_index in 0..<ctx.functions.len() {
+        function := ctx.functions[function_index]
         if !jet_web_is_wasm_export(function) || !jet_web_function_in_bucket(function, MIRWebBucket.Wasm) -> next
         loop name in names {
             if name == function.name {

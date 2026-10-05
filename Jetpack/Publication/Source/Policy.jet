@@ -1,0 +1,282 @@
+// Source/Publish/Policy.rs: package metadata evidence before Hangar ingest.
+// SPDX operators bind WITH > AND > OR. Identifiers include WITH exceptions.
+#Error
+pub struct PublicationSpdxError {
+    pub detail: String
+}
+struct PublicationSpdxParser {
+    tokens: [String]
+    index: Int
+}
+
+pub fn publication_parse_spdx_expression(raw: String) -> [String] PublicationSpdxError! {
+    tokens :: publication_tokenize_spdx(raw)
+    if tokens.len() == 0 -> return Err(PublicationSpdxError{detail: "the expression is empty"})
+    parser := PublicationSpdxParser{tokens: tokens, index: 0}
+    ids := publication_spdx_or(&parser)
+    if parser.index != parser.tokens.len() -> return Err(PublicationSpdxError{detail: "expected an SPDX operator or closing parenthesis"})
+    &ids.sort()
+    unique := [String]{}
+    loop id in ids {
+        if unique.len() == 0 || unique[unique.len() - 1] != id -> &unique.push(id)
+    }
+    Ok(unique)
+}
+fn publication_tokenize_spdx(raw: String) -> [String] PublicationSpdxError! {
+    bytes :: raw.bytes()
+    tokens := [String]{}
+    cursor := 0
+    loop cursor < bytes.len() {
+        width :: pkg_bytes_space_width(bytes, cursor)
+        if width > 0 {
+            cursor += width
+            next
+        }
+        delimiter_code :: pkg_bytes_code(bytes, cursor)
+        if delimiter_code == 40 || delimiter_code == 41 {
+            &tokens.push(if delimiter_code == 40 -> "(" else -> ")")
+            cursor += 1
+            next
+        }
+        start :: cursor
+        loop cursor < bytes.len() {
+            code :: pkg_bytes_code(bytes, cursor)
+            if pkg_bytes_space_width(bytes, cursor) > 0 || code == 40 || code == 41 -> break
+            if !((code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 46 || code == 45 || code == 43 || code == 58) {
+                scalar_width :: if code >= 240 -> 4 else if code >= 224 -> 3 else if code >= 128 -> 2 else -> 1
+                character :: pkg_bytes_text(bytes, cursor, cursor + scalar_width)
+                return Err(PublicationSpdxError{detail: "unsupported character `{character}`"})
+            }
+            cursor += 1
+        }
+        if cursor == start -> return Err(PublicationSpdxError{detail: "empty SPDX token"})
+        &tokens.push(pkg_bytes_text(bytes, start, cursor))
+    }
+    Ok(tokens)
+}
+fn publication_spdx_take(parser: &PublicationSpdxParser, expected: String) -> Bool Never! {
+    if parser.index < parser.tokens.len() && parser.tokens[parser.index] == expected {
+        parser.index += 1
+        return true
+    }
+    false
+}
+fn publication_spdx_or(parser: &PublicationSpdxParser) -> [String] PublicationSpdxError! {
+    ids := publication_spdx_and(&parser)
+    loop publication_spdx_take(&parser, "OR") {
+        more :: publication_spdx_and(&parser)
+        loop id in more -> &ids.push(id)
+    }
+    Ok(ids)
+}
+fn publication_spdx_and(parser: &PublicationSpdxParser) -> [String] PublicationSpdxError! {
+    ids := publication_spdx_with(&parser)
+    loop publication_spdx_take(&parser, "AND") {
+        more :: publication_spdx_with(&parser)
+        loop id in more -> &ids.push(id)
+    }
+    Ok(ids)
+}
+fn publication_spdx_with(parser: &PublicationSpdxParser) -> [String] PublicationSpdxError! {
+    ids := publication_spdx_primary(&parser)
+    if publication_spdx_take(&parser, "WITH") {
+        if parser.index >= parser.tokens.len() -> return Err(PublicationSpdxError{detail: "`WITH` must be followed by an SPDX exception identifier"})
+        token :: parser.tokens[parser.index]
+        if token == "AND" || token == "OR" || token == "WITH" || token == "(" || token == ")" -> return Err(PublicationSpdxError{detail: "`WITH` must be followed by an SPDX exception identifier"})
+        parser.index += 1
+        &ids.push(token)
+    }
+    Ok(ids)
+}
+fn publication_spdx_primary(parser: &PublicationSpdxParser) -> [String] PublicationSpdxError! {
+    if parser.index >= parser.tokens.len() -> return Err(PublicationSpdxError{detail: "expected an SPDX license identifier"})
+    if parser.tokens[parser.index] == "(" {
+        parser.index += 1
+        ids :: publication_spdx_or(&parser)
+        if !publication_spdx_take(&parser, ")") -> return Err(PublicationSpdxError{detail: "missing closing parenthesis"})
+        return Ok(ids)
+    }
+    token :: parser.tokens[parser.index]
+    if token == ")" -> return Err(PublicationSpdxError{detail: "unexpected closing parenthesis"})
+    if token == "AND" || token == "OR" || token == "WITH" -> return Err(PublicationSpdxError{detail: "expected an SPDX license identifier"})
+    parser.index += 1
+    Ok([String]{token})
+}
+
+// Package policy carriers are shared with the manifest; only evidence lives here.
+pub struct PublicationPackagePolicyReceipt {
+    pub package: String
+    pub version: String
+    pub license: String
+    pub source: String
+    pub source_rule: String
+    pub exception: String?
+    pub fingerprint: String
+}
+#Error
+pub struct PublicationPackagePolicyError {
+    pub detail: String
+    pub fix: String
+}
+pub fn publication_policy_receipt_summary(receipt: PublicationPackagePolicyReceipt) -> String Never! {
+    rule :: if receipt.source_rule == "" -> "default" else -> receipt.source_rule
+    exception :: if receipt.exception == .Val(value) -> ";exception={value}" else -> ""
+    "package={receipt.package}#{receipt.version};license={receipt.license};source={receipt.source};source-rule={rule};fingerprint={receipt.fingerprint}{exception}"
+}
+// The real Advisory/Core clock ABI retains #4438; never substitute a clock.
+pub fn publication_active_source_exception(exceptions: [PackagePolicyException], package: String, version: String) -[Env, Time]> PackagePolicyException? Never! {
+    publication_active_source_exception_at(exceptions, package, version, publication_advisory_now())
+}
+// Explicit clock seam preserves strict expiry, and allows boundary proofs.
+pub fn publication_active_source_exception_at(exceptions: [PackagePolicyException], package: String, version: String, now: Int) -> PackagePolicyException? Never! {
+    loop exception in exceptions {
+        if exception.matches(package, version) && exception.expires_at > now -> return Val(exception)
+    }
+    None
+}
+pub fn publication_authorize_package_candidate(policy: PackagePolicy, package: String, version: String, license: String?, source: String) -[Env, Time]> PublicationPackagePolicyReceipt PublicationPackagePolicyError! {
+    raw :: license ?? return Err(PublicationPackagePolicyError{
+        detail: "`{package}#{version}` has no SPDX license expression",
+        fix: "add a valid SPDX expression to the dependency's `license:` field, or use a reviewed source with complete metadata"})
+    text :: raw.trim()
+    if text == "" -> return Err(PublicationPackagePolicyError{
+        detail: "`{package}#{version}` has no SPDX license expression",
+        fix: "add a valid SPDX expression to the dependency's `license:` field, or use a reviewed source with complete metadata"})
+    identifiers :: if publication_parse_spdx_expression(text) == {
+        .Ok(ids) -> ids
+        .Err(error) -> {
+            return Err(PublicationPackagePolicyError{
+                detail: "`{package}#{version}` has invalid SPDX metadata: {error.detail}",
+                fix: "publish a valid SPDX expression such as `MIT` or `MIT OR Apache-2.0`, then refresh the trusted registry metadata"})
+        }
+    }
+    loop id in identifiers {
+        if id == "NONE" || id == "NOASSERTION" -> return Err(PublicationPackagePolicyError{
+            detail: "`{package}#{version}` does not make a usable SPDX license claim",
+            fix: "publish a concrete SPDX license expression; `NONE` and `NOASSERTION` cannot satisfy package policy"})
+    }
+    if policy.licenses == .Val(allowed) {
+        allowed_ids := [String]{}
+        loop entry in allowed {
+            ids :: if publication_parse_spdx_expression(entry) == {
+                .Ok(values) -> values
+                .Err(error) -> {
+                    return Err(PublicationPackagePolicyError{
+                        detail: "package policy has invalid SPDX allow-list entry `{entry}`: {error.detail}",
+                        fix: "use SPDX identifiers in `policy.licenses: .Allow([...])`"})
+                }
+            }
+            loop id in ids -> &allowed_ids.push(id)
+        }
+        loop identifier in identifiers {
+            if !allowed_ids.contains(identifier) -> return Err(PublicationPackagePolicyError{
+                detail: "`{package}#{version}` license `{identifier}` is outside the SPDX allow-list",
+                fix: "add `{identifier}` to `policy.licenses: .Allow([...])`, or use a package whose license is already allowed"})
+        }
+    }
+    source_rule := ""
+    if policy.source_maps.len() > 0 {
+        index :: publication_matching_source_rule(policy.source_maps, package) ?? return Err(PublicationPackagePolicyError{
+            detail: "`{package}#{version}` has no source mapping for authority `{source}`",
+            fix: "add a `policy.sources` rule for `{package}` that names `{source}`"})
+        rule :: policy.source_maps[index]
+        if !rule.sources.contains(source) -> return Err(PublicationPackagePolicyError{
+            detail: "`{package}#{version}` source authority `{source}` is not allowed by its source mapping",
+            fix: "use an allowed source for `{package}`, or add `{source}` to its `policy.sources` rule"})
+        source_rule = "{rule.pattern} => [{rule.sources.join(", ")}]"
+    }
+    exception := String?{None}
+    if publication_active_source_exception(policy.exceptions, package, version) == .Val(active) -> exception = Val(active.summary())
+    Ok(PublicationPackagePolicyReceipt{package: package, version: version, license: text, source: source, source_rule: source_rule, exception: exception, fingerprint: publication_policy_fingerprint(policy)})
+}
+pub fn publication_validate_spdx_license(license: String?) PublicationPackagePolicyError! -[Env, Time]> {
+    _ :: publication_validate_published_license("published-package", "unknown", license)
+}
+pub fn publication_validate_published_license(package: String, version: String, license: String?) -[Env, Time]> PublicationPackagePolicyReceipt PublicationPackagePolicyError! {
+    publication_authorize_package_candidate(PackagePolicy.default(), package, version, license, "local")
+}
+pub fn publication_package_policy_diagnostic(error: PublicationPackagePolicyError) -> Diagnostic Never! {
+    diagnostic_from_registry("E2607", None,
+        "source-owned package policy rejected the candidate: {error.detail}",
+        "the package source owns the requested license and source policy; this security-sensitive evidence is rejected before ingest",
+        error.fix)
+}
+pub fn publication_package_policy_edge_diagnostic(owner: String, edge: String, source: String, error: PublicationPackagePolicyError) -> Diagnostic Never! {
+    diagnostic_from_registry("E1207", None,
+        "source-owned package policy rejected dependency edge `{edge}`: {error.detail}",
+        "package `{owner}` requested source authority `{source}`; policy evidence is evaluated after registry identity and before Hangar ingest",
+        error.fix)
+}
+pub fn publication_policy_fingerprint_text(policy: PackagePolicy) -> String Never! {
+    licenses := [String]?{None}
+    if policy.licenses == .Val(values) {
+        sorted := ~values
+        &sorted.sort()
+        licenses = Val(sorted)
+    }
+    source_maps := ~policy.source_maps
+    loop index in 0..<source_maps.len() -> &source_maps[index].sources.sort()
+    &source_maps.sort_by((left: PolicySourceMap, right: PolicySourceMap) -> left.pattern <=> right.pattern)
+    exceptions := ~policy.exceptions
+    &exceptions.sort_by((left: PackagePolicyException, right: PackagePolicyException) -> publication_policy_exception_order(left, right))
+    "licenses={pkg_debug_opt_str_list(licenses)};sources={pkg_debug_source_maps(source_maps)};exceptions={pkg_debug_exceptions(exceptions)}"
+}
+fn publication_policy_exception_order(left: PackagePolicyException, right: PackagePolicyException) -> Ordering Never! {
+    (left.id <=> right.id).then(left.scope <=> right.scope).then(left.reason <=> right.reason).then(left.expires_at <=> right.expires_at)
+}
+pub fn publication_policy_fingerprint(policy: PackagePolicy) -> String Never! {
+    "sha256-{pkg_sha256_hex(publication_policy_fingerprint_text(policy).bytes())}"
+}
+pub fn publication_pattern_matches(pattern: String, package: String) -> Bool Never! {
+    if pattern.ends_with("*") -> package.starts_with(pattern.slice(0, pattern.len() - 1)) else -> pattern == package
+}
+// Rust max_by_key chooses the LAST equal key; key length counts UTF-8 bytes.
+pub fn publication_matching_source_rule(rules: [PolicySourceMap], package: String) -> Int? Never! {
+    winner := Int?{None}
+    best_length := -1
+    best_exact := false
+    loop index in 0..<rules.len() {
+        pattern :: rules[index].pattern
+        if !publication_pattern_matches(pattern, package) -> next
+        exact :: !pattern.ends_with("*")
+        length :: pattern.bytes().len() - (if exact -> 0 else -> 1)
+        if length > best_length || (length == best_length && (exact || !best_exact)) {
+            winner = Val(index)
+            best_length = length
+            best_exact = exact
+        }
+    }
+    winner
+}
+
+// Tier.rs:233-309. Signature errors close the gate, never bypass it.
+// Native closure retains #3593 filesystem/error variants and #3598 parser
+// providers; canonical Lock Parse codec fallible defaults retain #4326.
+pub fn publication_community_gate_status(project_root: String, all_entries: [PublicationIndexEntry], candidate: PublicationIndexEntry, registry_name: String, live_signature_chain: Bool, name_policy: PublicationNamePolicyDecision) -[FS, Env, Time]> PublicationGateStatus Never! {
+    signature := PublicationGateState.Blocked
+    if live_signature_chain {
+        if publication_verify_index_entry(all_entries, candidate, true, registry_name) == .Ok(_) -> signature = .Passed
+    }
+    name :: if publication_name_is_blocked(name_policy) -> PublicationGateState.Blocked else -> PublicationGateState.Passed
+    publication_community_with_name(signature, publication_advisory_gate_status(project_root), name)
+}
+pub fn publication_advisory_gate_status(project_root: String) -[FS, Env, Time]> PublicationGateState Never! {
+    lock_text :: files.read(files.join(files.join(project_root, ".jet"), "lock")) ?? return PublicationGateState.Blocked
+    lock :: pkg_lock_parse(lock_text) ?? return PublicationGateState.Blocked
+    path :: publication_advisory_feed_path(project_root) ?? return PublicationGateState.Blocked
+    text :: files.read(path) ?? return PublicationGateState.Blocked
+    feed :: publication_parse_advisory_feed(text) ?? return PublicationGateState.Blocked
+    trust_text :: files.read(publication_advisory_trust_path(project_root)) ?? return PublicationGateState.Blocked
+    trust :: publication_parse_advisory_trust(trust_text) ?? return PublicationGateState.Blocked
+    report :: publication_audit_advisory_feed(lock, feed, trust, publication_advisory_now()) ?? return PublicationGateState.Blocked
+    if report.matches.len() == 0 && report.maturity.len() == 0 -> PublicationGateState.Passed else -> PublicationGateState.Blocked
+}
+// Canonical community refusal MOVE from Registry/Verify: Tier.rs:257-273.
+pub fn publication_community_gate_error(package: String, version: String, status: PublicationGateStatus) -> Diagnostic Never! {
+    reasons :: publication_blocked_reasons(status).join(", ")
+    required :: "#935 live signature chain, #431 advisory audit, #1912 name policy, #1913 maintainer liveness"
+    diagnostic_from_registry("E2105", None,
+        "community-tier package `{package}` {version} is refused: {reasons} gate(s) are closed",
+        "the community tier requires all four gates ({required}); a package is accepted only after live signature, advisory, name, and maintainer checks pass",
+        "complete the closed gates ({reasons}); verify all four gates ({required}), then publish `{package}` {version} again")
+}

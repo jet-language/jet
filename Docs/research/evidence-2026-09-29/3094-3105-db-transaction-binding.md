@@ -1,6 +1,6 @@
 # #3094 migration/transaction ownership and #3105 SQL binding/scope — evidence
 
-Date: 2026-09-29. Binary: `jet-debug-snapshot14` (via `~/.cache/jet-luna/safe-jet.sh`).
+Date: 2026-09-29. Binary: `jet-debug-snapshot14` (via `~/.cache/jet-dev/safe-jet.sh`).
 
 ## Status: BLOCKED (core.db compile)
 

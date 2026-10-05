@@ -7,7 +7,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { AXES, generate, sources } from './generate.mjs';
 
-export const DEFAULT_JET = path.join(os.homedir(), '.cache/jet-test-scratch/jet-release-night12/jet');
+export const DEFAULT_JET = path.join(os.homedir(), '.cache/jet-dev/scratch/jet-release-night12/jet');
 export const GNU_TIME = '/nix/store/n0wrh3vjfwcqfyswwai0zcxvkpibq34v-time-1.10/bin/time';
 // No exemptions currently. An exemption must name an axis and explain its bound.
 export const EXEMPTIONS = Object.freeze({});
