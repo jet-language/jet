@@ -4029,7 +4029,21 @@ fn jet_rust_emit_raw_address_of(ctx: &JetRustEmitContext, function: MIRFunction,
     if as_int -> "{ctx.config.root_prefix}jet_std::jet_int_owned_from_native_result({address})" else -> "({address} as usize as *mut {pointee})"
 }
 
+// Native reference carriers own no payload; cleanup must not turn their
+// checked last use into a scope-end borrow of the owner.
+fn jet_rust_emit_is_nonowning_reference_type(ty: MIRType) -> Bool Never! {
+    if ty.kind == {
+        .Tagged(marker, inner) -> {
+            if marker == (MIRTagMarker.Internal{internal_tag: MIRInternalTag.AllocatorView}) -> return true
+            return jet_rust_emit_is_nonowning_reference_type(inner)
+        }
+        .Apply(name, args) -> return args.len() == 1 && (name.name == "View" || name.name == "ViewMut" || name.name == "Pin")
+        else -> return false
+    }
+}
+
 fn jet_rust_emit_drop_value(ctx: &JetRustEmitContext, function: MIRFunction, value: MIRValueID, kind: MIRDropKind) -> String Never! {
+    if jet_rust_emit_is_nonowning_reference_type(jet_rust_emit_value_type(ctx, function, value)) -> return "()"
     // MIRRust drop_expression: a reference binding releases nothing.
     if jet_rust_emit_ref_binding_drop(&ctx, function, value) == .Val(local) -> return "{{ {jet_rust_emit_local_slot(local)} = None; () }}"
     // MIRRust drop_expression (#4318 §8): an inspected-only transfer of a

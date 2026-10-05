@@ -1861,6 +1861,40 @@ fn jet_rust_emit_ref_binding_source(ctx: &JetRustEmitContext, function: MIRFunct
     None
 }
 
+// MIRRust nonowning_drop_value: omit a cleanup-only move of a reference,
+// as well as its Drop, so scope cleanup does not extend the owner's borrow.
+fn jet_rust_emit_nonowning_drop_value(ctx: &JetRustEmitContext, function: MIRFunction, value: MIRValueID) -> Bool Never! {
+    if !jet_rust_emit_is_nonowning_reference_type(jet_rust_emit_value_type(ctx, function, value)) -> return false
+    producer :: jet_rust_emit_find_value_instruction(ctx, function, value) ?? return false
+    if producer.operation == {
+        .MovePlace(_) -> return jet_rust_emit_value_dropped_only(ctx, function, value)
+        else -> return false
+    }
+}
+
+// MIRRust unused_place_read: a discarded root read needs no owned copy.
+// Projected reads and operands retained outside the value-use rows stay live.
+fn jet_rust_emit_unused_place_read(ctx: &JetRustEmitContext, function: MIRFunction, value: MIRValueID) -> Bool Never! {
+    producer :: jet_rust_emit_find_value_instruction(ctx, function, value) ?? return false
+    place_id := MIRPlaceID?{None}
+    if producer.operation == {
+        .ReadPlace(place) -> place_id = Val(place)
+        else -> return false
+    }
+    if jet_rust_emit_value_users(ctx, function, value).len() != 0 -> return false
+    loop scope in function.scopes {
+        if scope.deadline == Val(value) -> return false
+    }
+    loop place in function.places {
+        if place.base == .Temporary(value) -> return false
+    }
+    id :: place_id ?? return false
+    loop place in function.places {
+        if place.id == id -> return place.projections.len() == 0
+    }
+    false
+}
+
 // MIRRust ref_binding_drop: a whole move out of a reference binding whose
 // every user drops it; the binding owns nothing, so neither copies.
 // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::ref_binding_drop

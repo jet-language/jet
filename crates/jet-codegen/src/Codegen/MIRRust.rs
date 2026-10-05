@@ -141,6 +141,22 @@ fn is_view_type(ty: &MirType) -> bool {
     }
 }
 
+/// These carriers are native references, not owners of their referents.
+/// Reading them at scope cleanup would extend a borrow past its checked last use.
+fn is_nonowning_reference_type(ty: &MirType) -> bool {
+    match ty.kind() {
+        MirTypeKind::Tagged {
+            marker: MirTagMarker::Internal(MirInternalTag::AllocatorView),
+            ..
+        } => true,
+        MirTypeKind::Tagged { inner, .. } => is_nonowning_reference_type(inner),
+        MirTypeKind::Apply { name, args } => {
+            args.len() == 1 && matches!(name.name.as_str(), "View" | "ViewMut" | "Pin")
+        }
+        _ => false,
+    }
+}
+
 /// Formatting-only policy for the MIR Rust adapter.
 ///
 /// All semantic choices are MIR facts.  The adapter may choose the generated
@@ -19041,6 +19057,32 @@ impl<'a> RustEmitter<'a> {
         dropped.then_some(*local)
     }
 
+    fn nonowning_drop_value(&self, function: &MirFunction, value: MirValueId) -> bool {
+        is_nonowning_reference_type(self.value_type(function, value))
+            && matches!(self.value_definition(function, value), Some(MirOperation::MovePlace { .. }))
+            && self.function_index(function).uses.get(&value).is_some_and(|users| {
+                !users.is_empty() && users.iter().all(|(block, position)| {
+                    position.is_some_and(|position| {
+                        matches!(function.blocks[*block].instructions[position].operation,
+                            MirOperation::Drop { value: operand, .. } if operand == value)
+                    })
+                })
+            })
+    }
+
+    /// A discarded root-place read (for example a lexical allocator context
+    /// input) needs no owned SSA copy. Projected reads still perform their
+    /// checked access, and deadline/temporary-place consumers retain their slot.
+    fn unused_place_read(&self, function: &MirFunction, value: MirValueId) -> bool {
+        let Some(MirOperation::ReadPlace(place)) = self.value_definition(function, value) else {
+            return false;
+        };
+        self.place_row(function, *place).is_some_and(|place| place.projections.is_empty())
+            && self.function_index(function).uses.get(&value).is_none_or(Vec::is_empty)
+            && !function.scopes.iter().any(|scope| scope.deadline == Some(value))
+            && !function.places.iter().any(|place| place.base == MirPlaceBase::Temporary(value))
+    }
+
     fn prepare_partial_read(&self, node: &PartialMoveNode, fields: &[MirFieldId]) -> String {
         let Some(field) = fields.first() else {
             return self.restore_partial_node(node);
@@ -19066,6 +19108,8 @@ impl<'a> RustEmitter<'a> {
             self.partial_drop_node(function, value).is_some()
                 || self.uninit_fixed_drop_local(function, value).is_some()
                 || self.ref_binding_drop(function, value).is_some()
+                || self.nonowning_drop_value(function, value)
+                || self.unused_place_read(function, value)
         }) {
             // The sole consumer drops the backing storage without reconstructing
             // a complete fixed-list value.
@@ -19552,6 +19596,9 @@ impl<'a> RustEmitter<'a> {
                     .unwrap_or_else(|| panic!("MIR drop place {:?} has no row", action.place));
                 // A reference binding owns nothing to release.
                 if matches!(place.base, MirPlaceBase::Local(local) if self.ref_binding_local(function, local)) {
+                    continue;
+                }
+                if is_nonowning_reference_type(&place.ty) {
                     continue;
                 }
                 let expression = if let Some(handle) = self.handle_for_type(&place.ty) {
@@ -27150,6 +27197,11 @@ impl<'a> RustEmitter<'a> {
         value: MirValueId,
         kind: MirDropKind,
     ) -> String {
+        // A native reference has no destructor. Do not manufacture a use of
+        // either its slot or referent after the last checked access.
+        if is_nonowning_reference_type(self.value_type(function, value)) {
+            return "()".to_string();
+        }
         if let Some(local) = self.ref_binding_drop(function, value) {
             return format!("{{ {} = None; () }}", local_slot(local));
         }

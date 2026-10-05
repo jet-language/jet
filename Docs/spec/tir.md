@@ -66,6 +66,14 @@ The freeze example is a lowering rule, not an engine-side capture check. A
 self-host implementation must carry the same already-proved ownership facts to
 each lens.
 
+Native reference carriers (`View`, `ViewMut`, `Pin`, and the internal
+allocator-view tag) do not own their referents. Their synthetic scope cleanup
+must not read or move the reference after its last checked use: doing so would
+extend the native borrow and reject a legal later reset or owner borrow. The
+allocator or collection remains responsible for dropping its owned payload.
+A discarded root-place read likewise needs no owned SSA copy; projected
+accesses and retained context operands still keep their checked evaluation.
+
 ## Core keepers
 
 Engines must handle literals (`IntLit`, `FloatLit`, `BoolLit`, `CharLit`, and
