@@ -10390,7 +10390,7 @@ fn lower_method_call_impl(
         }
     }
     if let Some(handle) = recv_type {
-        if matches!(handle, "__DynOp__" | "__DynField__")
+        if matches!(handle.as_str(), "__DynOp__" | "__DynField__")
             || (handle == "Dyn" && matches!(method, "get" | "has" | "keys" | "remove" | "len"))
         {
             let recv = lower_expr(receiver, cx, env);

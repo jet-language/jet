@@ -1161,7 +1161,7 @@ pub(crate) fn method_call_in_subset(
         }
     }
     if let Some(handle) = recv_type {
-        if matches!(handle, "__DynOp__" | "__DynField__")
+        if matches!(handle.as_str(), "__DynOp__" | "__DynField__")
             || (handle == "Dyn" && matches!(method, "get" | "has" | "keys" | "remove" | "len"))
         {
             return expr_in_subset(receiver, cx, locals)
