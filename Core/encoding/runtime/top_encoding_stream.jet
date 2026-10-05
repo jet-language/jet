@@ -179,7 +179,7 @@ fn jet_json_jcs_number(value: F64) -> String {
     digits := mantissa.bytes().filter(fn(byte) { byte != U8{46} }).collect<[U8]>()
     leading :: digits.iter().take_while(fn(byte) { byte == U8{48} }).count()
     _ :: digits.drain(0..<leading)
-    while digits.len() > 1 && digits.last() == Val(U8{48}) { _ :: digits.pop() }
+    while digits.len() > 1 && digits.last() == U8{48} { _ :: digits.pop() }
     n :: decimal + exponent - leading as I32
     out := String.new()
     if negative -> out.push('-')
@@ -629,8 +629,8 @@ impl JSONReader {
         }
         valid :: {
             b :: text.as_bytes()
-            i := if b.first() == Val(U8{45}) { USize{1} } else { USize{0} }
-            int_ok :: if b.get(i) == Val(U8{48}) {
+            i := if b.first() == U8{45} { USize{1} } else { USize{0} }
+            int_ok :: if b.get(i) == U8{48} {
                 i += 1
                 true
             } else if b.get(i).is_some_and(fn(c) { c >= 49 && c <= 57 }) {
@@ -638,7 +638,7 @@ impl JSONReader {
                 while b.get(i).is_some_and(fn(c) { c >= 48 && c <= 57 }) { i += 1 }
                 true
             } else { false }
-            if int_ok && b.get(i) == Val(U8{46}) {
+            if int_ok && b.get(i) == U8{46} {
                 i += 1
                 fraction_start :: i
                 while b.get(i).is_some_and(fn(c) { c >= 48 && c <= 57 }) { i += 1 }
@@ -748,7 +748,7 @@ impl JSONReader {
             })
             match state {
                 Val(.ArrayValueOrEnd(first, index)) -> {
-                    if self.fill()? == Val(U8{93}) {
+                    if self.fill()? == U8{93} {
                         if !first -> return self.fail(jet_encoding_error(.Syntax, self.offset, self.line, self.column, "expected a JSON value after `,`"))
                         _ :: self.take()?
                         _ :: self.frames.pop()
@@ -772,14 +772,14 @@ impl JSONReader {
                     None -> return self.fail(jet_encoding_error(.Truncated, self.offset, self.line, self.column, "unterminated JSON array")),
                 },
                 Val(.ObjectKeyOrEnd(first)) -> {
-                    if self.fill()? == Val(U8{125}) {
+                    if self.fill()? == U8{125} {
                         if !first -> return self.fail(jet_encoding_error(.Syntax, self.offset, self.line, self.column, "expected an object key after `,`"))
                         _ :: self.take()?
                         _ :: self.frames.pop()
                         return Ok(Val(.ObjectEnd))
                     }
                     if !first && self.fill()?.is_none() -> return self.fail(jet_encoding_error(.Truncated, self.offset, self.line, self.column, "unterminated JSON object"))
-                    if self.fill()? != Val(U8{34}) -> return self.fail(jet_encoding_error(.Syntax, self.offset, self.line, self.column, "expected a quoted object key"))
+                    if self.fill()? != U8{34} -> return self.fail(jet_encoding_error(.Syntax, self.offset, self.line, self.column, "expected a quoted object key"))
                     key :: match self.read_string() { Ok(v) -> v, Err(e) -> return self.fail(e) }
                     (frame_key, key_heap) :: match self.clone_key_for_frame(&key) { Ok(v) -> v, Err(e) -> return self.fail(e) }
                     self.frames.last_mut().unwrap() = .ObjectColonValue(frame_key, key_heap)
@@ -823,7 +823,7 @@ impl JSONReader {
                     },
                     Val(13) -> {
                         _ :: self.take()?
-                        if self.fill()? != Val(U8{10}) -> return self.fail(jet_encoding_error(.Syntax, self.offset - 1, self.line, self.column.saturating_sub(1), "JSONL records use LF or CRLF; bare CR is not a record ending"))
+                        if self.fill()? != U8{10} -> return self.fail(jet_encoding_error(.Syntax, self.offset - 1, self.line, self.column.saturating_sub(1), "JSONL records use LF or CRLF; bare CR is not a record ending"))
                         _ :: self.take()?
                         self.root_started = false
                         self.root_done = false

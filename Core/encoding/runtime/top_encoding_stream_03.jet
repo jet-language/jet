@@ -64,14 +64,14 @@ impl CBORReader {
             Val(.Object{remaining: Val(0), expecting_key: true, ..}) -> Val(true)
             Val(.Array{remaining: None, ..}) -> {
                 b :: self.raw()?
-                if b == Val(0xff) -> Val(false) else -> {
+                if b == 0xff -> Val(false) else -> {
                     self.lookahead = b
                     None
                 }
             }
             Val(.Object{remaining: None, expecting_key: true, ..}) -> {
                 b :: self.raw()?
-                if b == Val(0xff) -> Val(true) else -> {
+                if b == 0xff -> Val(true) else -> {
                     self.lookahead = b
                     None
                 }

@@ -126,7 +126,7 @@ impl JSONLReader {
         first :: self.json.next_event() ?? return self.fail(^err)
         event :: if first == {
             .Val(event) -> ^event
-            None -> return self.fail(jet_encoding_error(.Truncated, self.json.offset, self.json.line, self.json.column, "JSONL record ended before a complete value"))
+            None -> { return self.fail(jet_encoding_error(.Truncated, self.json.offset, self.json.line, self.json.column, "JSONL record ended before a complete value")) }
         }
         value :: jet_json_fold_from_event(&self.json, ^event, &heap) ?? return self.fail(^err)
         next :: self.json.next_event() ?? return self.fail(^err)
@@ -403,7 +403,7 @@ impl CSVReader {
             0xc2..0xdf -> 2
             0xe0..0xef -> 3
             0xf0..0xf4 -> 4
-            else -> return Err(jet_csv_error(.Syntax, self.offset.saturating_sub(1), self.line, self.column, jet_csv_path(self.record_index, field), "CSV input is not valid UTF-8"))
+            else -> { return Err(jet_csv_error(.Syntax, self.offset.saturating_sub(1), self.line, self.column, jet_csv_path(self.record_index, field), "CSV input is not valid UTF-8")) }
         }
         loop self.utf8_len < expected {
             next :: self.byte(field) ?? return Err(^err)
@@ -1005,13 +1005,13 @@ impl CBORReader {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs:3458
     fn arg(self: &CBORReader, add: U8, start: I64) -> U64? EncodingError! {
         need :: if add == {
-            0..23 -> return Ok(Val(U64.from_u8(add)))
+            0..23 -> { return Ok(Val(U64.from_u8(add))) }
             24 -> 1
             25 -> 2
             26 -> 4
             27 -> 8
-            31 -> return Ok(None)
-            else -> return Err(jet_cbor_stream_error(.Syntax, start, self.path(), "reserved CBOR additional value {add}"))
+            31 -> { return Ok(None) }
+            else -> { return Err(jet_cbor_stream_error(.Syntax, start, self.path(), "reserved CBOR additional value {add}")) }
         }
         value := U64{0}
         loop _ in 0..<need {

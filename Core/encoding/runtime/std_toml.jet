@@ -222,7 +222,7 @@ impl Parser {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/TOML.rs:286
     fn finish_line(self: &Parser) -> () ParseError! {
         self.skip_inline_ws()
-        if self.peek() == Val('#') -> self.skip_comment()
+        if self.peek() == '#' -> self.skip_comment()
         match self.peek() {
             None | Val('\n' | '\r') -> Ok(())
             Val(c) -> Err(self.err(errors.toml_unexpected_after_value(c)))
@@ -235,15 +235,15 @@ impl Parser {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/TOML.rs:302
     fn header(self: &Parser) -> Item ParseError! {
         _ :: self.bump()
-        array :: self.peek() == Val('[')
+        array :: self.peek() == '['
         if array -> _ :: self.bump()
         self.skip_inline_ws()
         path :: self.key_path()?
         self.skip_inline_ws()
-        if self.peek() != Val(']') -> return Err(self.err(errors.TOML_EXPECTED_TABLE_CLOSE))
+        if self.peek() != ']' -> return Err(self.err(errors.TOML_EXPECTED_TABLE_CLOSE))
         _ :: self.bump()
         if array {
-            if self.peek() != Val(']') -> return Err(self.err(errors.TOML_EXPECTED_ARRAY_TABLE_CLOSE))
+            if self.peek() != ']' -> return Err(self.err(errors.TOML_EXPECTED_ARRAY_TABLE_CLOSE))
             _ :: self.bump()
         }
         if path.is_empty() -> return Err(self.err(errors.TOML_TABLE_NAME_REQUIRED))
@@ -258,7 +258,7 @@ impl Parser {
             return Err(self.err("TOML key path is nested too deeply"))
         }
         self.skip_inline_ws()
-        if self.peek() != Val('=') -> return Err(self.err(errors.toml_expected_equals_after_key(path.join("."))))
+        if self.peek() != '=' -> return Err(self.err(errors.toml_expected_equals_after_key(path.join("."))))
         _ :: self.bump()
         self.skip_inline_ws()
         value :: self.value(0)?
@@ -273,7 +273,7 @@ impl Parser {
             if path.len() >= MAX_TOML_DEPTH -> return Err(self.err("TOML key path is nested too deeply"))
             path.push(self.simple_key()?)
             self.skip_inline_ws()
-            if self.peek() == Val('.') { _ :: self.bump() } else { break }
+            if self.peek() == '.' { _ :: self.bump() } else { break }
         }
         Ok(^path)
     }
@@ -330,7 +330,7 @@ impl Parser {
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/TOML.rs:431
     fn basic_string(self: &Parser) -> String ParseError! {
-        if self.peek() == Val('"') && self.peek_at(1) == Val('"') && self.peek_at(2) == Val('"') {
+        if self.peek() == '"' && self.peek_at(1) == '"' && self.peek_at(2) == '"' {
             return self.multiline_basic_string()
         }
         _ :: self.bump()
@@ -350,11 +350,11 @@ impl Parser {
         _ :: self.bump()
         _ :: self.bump()
         _ :: self.bump()
-        if self.peek() == Val('\r') -> _ :: self.bump()
-        if self.peek() == Val('\n') -> _ :: self.bump()
+        if self.peek() == '\r' -> _ :: self.bump()
+        if self.peek() == '\n' -> _ :: self.bump()
         out := String.new()
         loop {
-            if self.peek() == Val('"') && self.peek_at(1) == Val('"') && self.peek_at(2) == Val('"') {
+            if self.peek() == '"' && self.peek_at(1) == '"' && self.peek_at(2) == '"' {
                 _ :: self.bump()
                 _ :: self.bump()
                 _ :: self.bump()
@@ -368,7 +368,7 @@ impl Parser {
                         save :: self.pos
                         saveline :: self.line
                         loop self.peek() == .Val(' ' | '\t' | '\r' | '\n') {
-                            if self.peek() == Val('\n') -> sawline = true
+                            if self.peek() == '\n' -> sawline = true
                             _ :: self.bump()
                         }
                         if !sawline {
@@ -411,7 +411,7 @@ impl Parser {
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/TOML.rs:540
     fn literal_string(self: &Parser) -> String ParseError! {
-        if self.peek() == Val('\'') && self.peek_at(1) == Val('\'') && self.peek_at(2) == Val('\'') {
+        if self.peek() == '\'' && self.peek_at(1) == '\'' && self.peek_at(2) == '\'' {
             return self.multiline_literal_string()
         }
         _ :: self.bump()
@@ -429,11 +429,11 @@ impl Parser {
         _ :: self.bump()
         _ :: self.bump()
         _ :: self.bump()
-        if self.peek() == Val('\r') -> _ :: self.bump()
-        if self.peek() == Val('\n') -> _ :: self.bump()
+        if self.peek() == '\r' -> _ :: self.bump()
+        if self.peek() == '\n' -> _ :: self.bump()
         out := String.new()
         loop {
-            if self.peek() == Val('\'') && self.peek_at(1) == Val('\'') && self.peek_at(2) == Val('\'') {
+            if self.peek() == '\'' && self.peek_at(1) == '\'' && self.peek_at(2) == '\'' {
                 _ :: self.bump()
                 _ :: self.bump()
                 _ :: self.bump()
@@ -487,7 +487,7 @@ impl Parser {
         _ :: self.bump()
         entries := [(String, Value)]{}
         self.skip_inline_ws()
-        if self.peek() == Val('}') {
+        if self.peek() == '}' {
             _ :: self.bump()
             return Ok(Value.InlineTable(^entries))
         }
@@ -495,7 +495,7 @@ impl Parser {
             self.skip_inline_ws()
             path :: self.key_path()?
             self.skip_inline_ws()
-            if self.bump() != Val('=') -> return Err(self.err(errors.TOML_EXPECTED_INLINE_EQUALS))
+            if self.bump() != '=' -> return Err(self.err(errors.TOML_EXPECTED_INLINE_EQUALS))
             self.skip_inline_ws()
             value :: self.value(depth + 1)?
             entries.push((path.join("."), ^value))
@@ -516,13 +516,13 @@ impl Parser {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/TOML.rs:675
     fn looks_like_date(self) -> Bool {
         d :: n -> self.peek_at(n).map_or(false, c -> c.is_ascii_digit())
-        d(0) && d(1) && d(2) && d(3) && self.peek_at(4) == Val('-')
-            && d(5) && d(6) && self.peek_at(7) == Val('-') && d(8) && d(9)
+        d(0) && d(1) && d(2) && d(3) && self.peek_at(4) == '-'
+            && d(5) && d(6) && self.peek_at(7) == '-' && d(8) && d(9)
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/TOML.rs:687
     fn looks_like_time(self) -> Bool {
         d :: n -> self.peek_at(n).map_or(false, c -> c.is_ascii_digit())
-        d(0) && d(1) && self.peek_at(2) == Val(':') && d(3) && d(4)
+        d(0) && d(1) && self.peek_at(2) == ':' && d(3) && d(4)
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/TOML.rs:691
     fn datetime(self: &Parser) -> Value ParseError! {
@@ -533,7 +533,7 @@ impl Parser {
                 s.push(c)
                 self.pos += 1
             }
-            else if c == ' ' && self.peek_at(1).map_or(false, n -> n.is_ascii_digit()) && self.peek_at(3) == Val(':') {
+            else if c == ' ' && self.peek_at(1).map_or(false, n -> n.is_ascii_digit()) && self.peek_at(3) == ':' {
                 s.push(' ')
                 self.pos += 1
             } else { break }
@@ -551,7 +551,7 @@ impl Parser {
             if self.try_keyword("inf") -> return Ok(Value.Float(if sign == '-' { F64.NEG_INFINITY } else { F64.INFINITY }))
             if self.try_keyword("nan") -> return Ok(Value.Float(F64.NAN))
         }
-        if self.peek() == Val('0') {
+        if self.peek() == '0' {
             if self.peek_at(1) == .Val(r) {
                 if r == ('x' | 'o' | 'b') && tok.is_empty() -> return self.radix_integer()
             }
