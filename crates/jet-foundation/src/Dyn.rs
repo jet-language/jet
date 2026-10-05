@@ -137,7 +137,6 @@ pub enum Dyn {
     Bool(bool),
     Int(i64),
     Float(f64),
-    /// Exact numeric lexeme retained until a typed read checks its range.
     Number(String),
     Text(String),
     Bytes(Vec<u8>),
