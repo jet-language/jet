@@ -372,6 +372,7 @@ fn semindex_projects_arithmetic_policy_and_exact_scope() {
         r#"fn run() {
     #Arithmetic(.Wrapping) {
         value :: U8{250} + U8{10}
+        print(value)
     }
 }
 "#,
@@ -457,8 +458,8 @@ fn semindex_hover_projects_terminal_and_reachability_facts() {
     state { Closed, Open, Orphan }
 }
 impl Door {
-    #Transition(_, Closed) fn new() -[]> Door { return Door{} }
-    #Transition(Closed, Open) fn open(self: ^Door) -[]> Door { return self }
+    #Transition(_, Closed) fn new() -[]> Door { Door{} }
+    #Transition(Closed, Open) fn open(self: ^Door) -[]> Door { self }
 }
 fn run() {}
 "#,
@@ -819,7 +820,7 @@ fn semindex_identity_stable_across_reorder() {
     let a = r#"
 module math {
     pub fn double(n: Int) -> Int {
-        return n * 2
+        n * 2
     }
 }
 
@@ -828,13 +829,13 @@ struct Point {
     y: Int
 
     fn sum(self) -> Int {
-        return self.x + self.y
+        self.x + self.y
     }
 }
 
 impl Point {
     fn origin() -> Point {
-        return Point.{x: 0, y: 0}
+        Point{x: 0, y: 0}
     }
 }
 
@@ -844,7 +845,7 @@ enum Light {
 }
 
 fn helper(p: Point) -> Int {
-    return p.sum()
+    p.sum()
 }
 
 fn run() {
@@ -859,7 +860,7 @@ enum Light {
 }
 
 fn helper(p: Point) -> Int {
-    return p.sum()
+    p.sum()
 }
 
 struct Point {
@@ -867,19 +868,19 @@ struct Point {
     y: Int
 
     fn sum(self) -> Int {
-        return self.x + self.y
+        self.x + self.y
     }
 }
 
 module math {
     pub fn double(n: Int) -> Int {
-        return n * 2
+        n * 2
     }
 }
 
 impl Point {
     fn origin() -> Point {
-        return Point.{x: 0, y: 0}
+        Point{x: 0, y: 0}
     }
 }
 
@@ -989,7 +990,7 @@ struct Pair {{ left: View<Int>, right: View<Int> }}
 fn pair(left: [Int], right: [Int]) -> Pair {{
     left_view :: left[0..1]
     right_view :: {right_owner}[0..1]
-    return Pair.{{ left: left_view, right: right_view }}
+    Pair{{ left: left_view, right: right_view }}
 }}
 
 fn run() {{}}
@@ -1389,24 +1390,24 @@ struct Widget {
     title: String
 
     fn label(self) -> String {
-        return ~self.title
+        ~self.title
     }
 }
 
 impl Widget {
     fn size(self) -> Int {
-        return 1
+        1
     }
 }
 
 impl Widget.DrawThing {
     fn render(self) -> String {
-        return self.label()
+        self.label()
     }
 }
 
 fn run() {
-    w :: Widget.{title: "ok"}
+    w :: Widget{title: "ok"}
     print(w.render())
 }
 "#;
@@ -1444,7 +1445,7 @@ struct Client {
 
 impl Client {
     fn connect(self, host: String, /, timeout seconds: Int{30}, *, tls enabled: Bool{true}, rest: ...String) -> String {
-        return host
+        ~host
     }
 }
 
