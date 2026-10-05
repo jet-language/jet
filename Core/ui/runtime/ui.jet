@@ -10,7 +10,7 @@ use core.fmt.[JetShow]
 impl JetTuiBackend {
     // Rust: crates/jet-codegen/src/Prelude/Ui.rs:1802
     pub fn paint_node(self: &JetTuiBackend, node: JetUiNode) -> {
-        state := self.state.lock().unwrap()
+        state := self.state.lock() ?? panic("unwrap failed")
         JetBackend.paint(&state, &node)
     }
     // Rust: crates/jet-codegen/src/Prelude/Ui.rs:1808
@@ -25,12 +25,12 @@ impl JetTuiBackend {
     }
     // Rust: crates/jet-codegen/src/Prelude/Ui.rs:1824
     pub fn dispatch_event(self: &JetTuiBackend, event: JetInputEvent) -> JetEventResult {
-        state := self.state.lock().unwrap()
+        state := self.state.lock() ?? panic("unwrap failed")
         JetBackend.on_event(&state, event)
     }
     // Rust: crates/jet-codegen/src/Prelude/Ui.rs:1829
     pub fn frame_lines(self: &JetTuiBackend) -> [String] {
-        state :: self.state.lock().unwrap()
+        state :: self.state.lock() ?? panic("unwrap failed")
         state.grid.map(fn(row) {
             text :: row.collect_string()
             trimmed := text.trim_end() // #4303
@@ -150,7 +150,7 @@ impl JetTuiRenderTarget for JetNullBackend {
     fn dispatch_tui(self: &JetNullBackend, event: JetInputEvent) -> JetEventResult { self.dispatch_event(event) }
     // Rust: crates/jet-codegen/src/Prelude/Ui.rs:1990
     fn dispatch_tui_event(self: &JetNullBackend, event: JetTuiEvent) -> JetEventResult {
-        state := self.state.lock().unwrap()
+        state := self.state.lock() ?? panic("unwrap failed")
         JetBackend.on_tui_event(&state, event)
     }
     // Rust: crates/jet-codegen/src/Prelude/Ui.rs:1995
@@ -164,7 +164,7 @@ impl JetTuiRenderTarget for JetTuiBackend {
     fn dispatch_tui(self: &JetTuiBackend, event: JetInputEvent) -> JetEventResult { self.dispatch_event(event) }
     // Rust: crates/jet-codegen/src/Prelude/Ui.rs:2008
     fn dispatch_tui_event(self: &JetTuiBackend, event: JetTuiEvent) -> JetEventResult {
-        state := self.state.lock().unwrap()
+        state := self.state.lock() ?? panic("unwrap failed")
         JetBackend.on_tui_event(&state, event)
     }
     // Rust: crates/jet-codegen/src/Prelude/Ui.rs:2013

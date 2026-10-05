@@ -830,39 +830,39 @@ impl JetNullBackend {
     // Rust: crates/jet-codegen/src/Prelude/Ui.rs:1528
     pub fn set_focus_group(self: &Self, nodes: ^[JetUiNode]) -> {
         // GATE #4565: kernel primitive
-        state := #Unsafe("hold null-backend focus state mutex") { self.state.lock().unwrap() }
+        state := #Unsafe("hold null-backend focus state mutex") { self.state.lock() ?? panic("unwrap failed") }
         state.focused_index = if nodes.is_empty() { None } else { Val(0) }
         state.focus_nodes = ^nodes
     }
     // Rust: crates/jet-codegen/src/Prelude/Ui.rs:1536
     pub fn focused_label(self: &Self) -> String {
         // GATE #4565: kernel primitive
-        state :: #Unsafe("hold null-backend focus state mutex for label snapshot") { self.state.lock().unwrap() }
+        state :: #Unsafe("hold null-backend focus state mutex for label snapshot") { self.state.lock() ?? panic("unwrap failed") }
         state.focused_index.and_then(fn(i) { state.focus_nodes.get(i) }).map(fn(n) { n.label.clone() }).unwrap_or_default()
     }
     // Rust: crates/jet-codegen/src/Prelude/Ui.rs:1545
     pub fn measure_node(self: &Self, node: JetUiNode, constraint: JetSizeConstraint) -> JetSize {
         // GATE #4565: kernel primitive
-        state := #Unsafe("hold null-backend state across measurement") { self.state.lock().unwrap() }
+        state := #Unsafe("hold null-backend state across measurement") { self.state.lock() ?? panic("unwrap failed") }
         JetBackend.measure(&state, &node, constraint)
     }
     // Rust: crates/jet-codegen/src/Prelude/Ui.rs:1554
     pub fn layout_node(self: &Self, node: JetUiNode, frame: JetRect) -> {
         // GATE #4565: kernel primitive
-        state := #Unsafe("hold null-backend state across layout") { self.state.lock().unwrap() }
+        state := #Unsafe("hold null-backend state across layout") { self.state.lock() ?? panic("unwrap failed") }
         JetBackend.layout(&state, &node, frame)
     }
     // Rust: crates/jet-codegen/src/Prelude/Ui.rs:1559
     pub fn paint_node(self: &Self, node: JetUiNode) -> {
         // GATE #4565: kernel primitive
-        state := #Unsafe("hold null-backend state across paint") { self.state.lock().unwrap() }
+        state := #Unsafe("hold null-backend state across paint") { self.state.lock() ?? panic("unwrap failed") }
         JetBackend.paint(&state, &node)
     }
     // Rust: crates/jet-codegen/src/Prelude/Ui.rs:1565
     pub fn mount_node(self: &Self, node: ^JetUiNode, constraint: JetSizeConstraint) -> {
         {
             // GATE #4565: kernel primitive
-            state := #Unsafe("clear previous null-backend commands under mutex") { self.state.lock().unwrap() }
+            state := #Unsafe("clear previous null-backend commands under mutex") { self.state.lock() ?? panic("unwrap failed") }
             state.commands.clear()
         }
         size :: self.measure_node(node.clone(), constraint)
@@ -874,13 +874,13 @@ impl JetNullBackend {
     // Rust: crates/jet-codegen/src/Prelude/Ui.rs:1586
     pub fn dispatch_event(self: &Self, event: ^JetInputEvent) -> JetEventResult {
         // GATE #4565: kernel primitive
-        state := #Unsafe("hold null-backend state while routing event") { self.state.lock().unwrap() }
+        state := #Unsafe("hold null-backend state while routing event") { self.state.lock() ?? panic("unwrap failed") }
         JetBackend.on_event(&state, ^event)
     }
     // Rust: crates/jet-codegen/src/Prelude/Ui.rs:1591
     pub fn paint_commands(self: &Self) -> [String] {
         // GATE #4565: kernel primitive
-        state :: #Unsafe("hold null-backend state while snapshotting paint commands") { self.state.lock().unwrap() }
+        state :: #Unsafe("hold null-backend state while snapshotting paint commands") { self.state.lock() ?? panic("unwrap failed") }
         state.commands.iter().map(fn(cmd) {
             match cmd { .FillRect(rect, color) -> "fill({rect.jet_show()}, {color})", .Text(rect, text, _) -> "text({rect.jet_show()}, {text})" }
         }).collect<[String]>()
@@ -979,14 +979,14 @@ impl JetTuiBackend {
     // Rust: crates/jet-codegen/src/Prelude/Ui.rs:1764
     pub fn set_focus_group(self: &Self, nodes: ^[JetUiNode]) -> {
         // GATE #4565: kernel primitive
-        state := #Unsafe("hold TUI focus state mutex") { self.state.lock().unwrap() }
+        state := #Unsafe("hold TUI focus state mutex") { self.state.lock() ?? panic("unwrap failed") }
         state.focused_index = if nodes.is_empty() { None } else { Val(0) }
         state.focus_nodes = ^nodes
     }
     // Rust: crates/jet-codegen/src/Prelude/Ui.rs:1772
     pub fn focused_label(self: &Self) -> String {
         // GATE #4565: kernel primitive
-        state :: #Unsafe("hold TUI focus state mutex for label snapshot") { self.state.lock().unwrap() }
+        state :: #Unsafe("hold TUI focus state mutex for label snapshot") { self.state.lock() ?? panic("unwrap failed") }
         state.focused_index.and_then(fn(i) { state.focus_nodes.get(i) }).map(fn(n) { n.label.clone() }).unwrap_or_default()
     }
     // Rust: crates/jet-codegen/src/Prelude/Ui.rs:1780
@@ -1002,13 +1002,13 @@ impl JetTuiBackend {
     // Rust: crates/jet-codegen/src/Prelude/Ui.rs:1788
     pub fn measure_node(self: &Self, node: JetUiNode, constraint: JetSizeConstraint) -> JetSize {
         // GATE #4565: kernel primitive
-        state := #Unsafe("hold TUI state across measurement") { self.state.lock().unwrap() }
+        state := #Unsafe("hold TUI state across measurement") { self.state.lock() ?? panic("unwrap failed") }
         JetBackend.measure(&state, &node, constraint)
     }
     // Rust: crates/jet-codegen/src/Prelude/Ui.rs:1797
     pub fn layout_node(self: &Self, node: JetUiNode, frame: JetRect) -> {
         // GATE #4565: kernel primitive
-        state := #Unsafe("hold TUI state across layout") { self.state.lock().unwrap() }
+        state := #Unsafe("hold TUI state across layout") { self.state.lock() ?? panic("unwrap failed") }
         JetBackend.layout(&state, &node, frame)
     }
 }

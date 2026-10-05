@@ -894,7 +894,7 @@ impl GtkState {
         if controller.is_null() -> return
         // GATE #4565: kernel primitive
         #Unsafe("window owns controller; callback data points at stable Arc-backed state") {
-            signal :: CString.new("key-pressed").expect("static GTK signal name")
+            signal :: CString.new("key-pressed") ?? panic("static GTK signal name")
             _ :: g_signal_connect_data(controller.cast<c_void>(), signal.as_ptr(),
                 jet_gtk_shortcut_trampoline as gpointer, Ptr.from_ref(self).cast<c_void>(), None, 0)
             gtk_widget_add_controller(self.window, controller)
@@ -911,12 +911,12 @@ impl GtkState {
                 binding :: Box.into_raw(Box.new(GtkImeBinding{
                     state: Ptr.from_ref(self), target: identity.clone(), path: path.to_string()
                 }))
-                signal :: CString.new("insert-text").expect("static GTK signal name")
+                signal :: CString.new("insert-text") ?? panic("static GTK signal name")
                 _ :: g_signal_connect_data(widget.cast<c_void>(), signal.as_ptr(),
                     jet_gtk_insert_text_trampoline as gpointer, binding.cast<c_void>(), Val(jet_gtk_binding_drop), 0)
             }
             if node.on_drop.is_some() {
-                type_name :: CString.new("gchararray").expect("static GType name")
+                type_name :: CString.new("gchararray") ?? panic("static GType name")
                 value_type :: g_type_from_name(type_name.as_ptr())
                 controller :: gtk_drop_target_new(value_type, 7)
                 if controller.is_null() -> return
@@ -929,7 +929,7 @@ impl GtkState {
                 ]
                 for (signal_name, callback) in signals {
                     binding :: Box.into_raw(Box.new(GtkDragBinding{state: Ptr.from_ref(self), target: identity.clone()}))
-                    signal :: CString.new(signal_name).expect("static GTK signal name")
+                    signal :: CString.new(signal_name) ?? panic("static GTK signal name")
                     _ :: g_signal_connect_data(controller.cast<c_void>(), signal.as_ptr(), callback,
                         binding.cast<c_void>(), Val(jet_gtk_drag_binding_drop), 0)
                 }
@@ -994,7 +994,7 @@ impl GtkState {
         } else {
             // GATE #4565: kernel primitive
             widget :: #Unsafe("temporary C label is borrowed only by GTK constructors; parent owns child") {
-                text :: CString.new(node.label.as_str()).unwrap_or_else(fn(_) { CString.new("").unwrap() })
+                text :: CString.new(node.label.as_str()).unwrap_or_else(fn(_) { CString.new("") ?? panic("unwrap failed") })
                 if self.display_ok {
                     child :: when kind {
                         .Box -> gtk_box_new(GTK_ORIENTATION_VERTICAL, 8)
@@ -1025,7 +1025,7 @@ impl GtkState {
         if self.display_ok && !widget.is_null() {
             // GATE #4565: kernel primitive
             #Unsafe("borrow C text while updating live retained GTK widget") {
-                text :: CString.new(node.label.as_str()).unwrap_or_else(fn(_) { CString.new("").unwrap() })
+                text :: CString.new(node.label.as_str()).unwrap_or_else(fn(_) { CString.new("") ?? panic("unwrap failed") })
                 when kind {
                     .Label -> gtk_label_set_text(widget, text.as_ptr())
                     .Button -> gtk_button_set_label(widget, text.as_ptr())
@@ -1098,7 +1098,7 @@ impl GtkState {
         // GATE #4565: kernel primitive
         #Unsafe("live GTK button owns this boxed callback; notifier consumes it exactly once") {
             boxed :: Box.into_raw(Box.new(^callback))
-            signal :: CString.new("clicked").unwrap()
+            signal :: CString.new("clicked") ?? panic("unwrap failed")
             _ :: g_signal_connect_data(widget.cast<c_void>(), signal.as_ptr(),
                 jet_gtk_click_trampoline as gpointer, boxed.cast<c_void>(), Val(jet_gtk_drop_callback), 0)
         }
@@ -1236,7 +1236,7 @@ impl JetGtkBackend {
                 return id
             }
             widget :: if state.display_ok {
-                ctext :: CString.new(text).unwrap_or_else(fn(_) { CString.new("").unwrap() })
+                ctext :: CString.new(text).unwrap_or_else(fn(_) { CString.new("") ?? panic("unwrap failed") })
                 child :: if is_button { gtk_button_new_with_label(ctext.as_ptr()) } else { gtk_label_new(ctext.as_ptr()) }
                 gtk_box_append(state.vbox, child)
                 child
@@ -1251,7 +1251,7 @@ impl JetGtkBackend {
         #Unsafe("borrow widget and C text under retained state lock") {
             state :: self.state.lock().unwrap_or_else(fn(error) { error.into_inner() })
             if state.resolve_widget_handle(id) == .Val((widget, kind)) {
-                ctext :: CString.new(text).unwrap_or_else(fn(_) { CString.new("").unwrap() })
+                ctext :: CString.new(text).unwrap_or_else(fn(_) { CString.new("") ?? panic("unwrap failed") })
                 if kind == .Button { gtk_button_set_label(widget, ctext.as_ptr()) } else { gtk_label_set_text(widget, ctext.as_ptr()) }
                 state.trace("handle-set-text {id} {text}")
             } else { state.trace("handle-miss {id}") }
