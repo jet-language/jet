@@ -1478,7 +1478,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 98e104e050c9d1b658761cfa5ef30ce56987717d51598d7a9f14c58d7a803d72
+// Source SHA-256: 8af6ab64471c706423c4f0643e60d3f40e133ee694e315a3e99ac7ba56387cb6
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -1847,7 +1847,6 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new( "core.math", "fraction", "jet_fraction_new", true, &[false, false], ) .with_pure_route(CoreCallPureRoute::Math),
     CoreCallRecord::new( "core.math", "decimal", "jet_decimal_from_str", true, &[true], ) .with_pure_route(CoreCallPureRoute::Math),
     CoreCallRecord::new("core.files", "read", "jet_std_fs_read", true, &[true]),
-    CoreCallRecord::new("core.files", "scope", "jet_std_fs_scope", true, &[true]),
     CoreCallRecord::new( "core.files", "read_bytes", "jet_std_fs_read_bytes", true, &[true], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.files", "map", "jet_std_fs_map", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.files", "write", "jet_std_fs_write", true, &[true, true], ),
@@ -1894,7 +1893,6 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.watcher", "set", "jet_watcher_set", true, &[]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.args", "decode", "jet_args_decode", true, &[]) .without_direct_jit(),
     CoreCallRecord::new("core.args", "merge", "jet_config_merge", true, &[true, true]) .without_direct_jit(),
-    CoreCallRecord::new("core.args", "spec", "jet_args_spec", true, &[]),
     CoreCallRecord::new("core.term", "confirm", "jet_std_io_confirm", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.term", "choose", "jet_std_io_choose", true, &[true, true], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.term", "eprint", "jet_std_io_eprint", true, &[true]) .with_jit_symbol("jet_jit_eprint_str"),
@@ -1983,7 +1981,6 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new( "core.testing", "fixture", "jet_testing_fixture", true, &[true], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.testing", "temp_dir", "jet_testing_temp_dir", true, &[true], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.testing", "corpus", "jet_testing_corpus", true, &[true], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new( "core.testing", "fake_clock", "jet_std_clock_new", true, &[false], ),
     CoreCallRecord::new( "core.testing", "fake_rng", "jet_std_rng_new", true, &[false], ),
     CoreCallRecord::new( "core.testing", "fake_data", "jet_testing_fake_new", true, &[false], ) .with_jit_symbol("jet_jit_fake_new"),
     CoreCallRecord::new( "core.testing", "test_suite", "jet_test_suite_new", true, &[], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
@@ -2278,12 +2275,7 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.files", "open", "jet_std_files_open", true, &[true]) .with_jit_symbol("jet_jit_fs_open").with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.files", "create", "jet_std_files_create", true, &[true], ) .with_jit_symbol("jet_jit_fs_create").with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.files", "append", "jet_std_files_append", true, &[true], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .with_jit_symbol("jet_jit_fs_append"),
-    CoreCallRecord::new("core.email", "address", "jet_email::address", true, &[true]) .with_pure_route(CoreCallPureRoute::Email),
     CoreCallRecord::new("core.email", "limits_safe", "jet_email::Limits::safe", true, &[]) .with_jit_symbol("jet_jit_email_limits_safe"),
-    CoreCallRecord::new( "core.email", "attachment", "jet_email::attachment", true, &[true, true, true], ) .with_pure_route(CoreCallPureRoute::Email),
-    CoreCallRecord::new( "core.email", "message", "jet_email::message", true, &[true, true, true, true, true, true, true], ) .with_pure_route(CoreCallPureRoute::Email),
-    CoreCallRecord::new( "core.email", "envelope", "jet_email::envelope", true, &[true, true], ) .with_pure_route(CoreCallPureRoute::Email),
-    CoreCallRecord::new( "core.email", "serialize", "jet_email::serialize", true, &[true], ) .with_pure_route(CoreCallPureRoute::Email),
     CoreCallRecord::new("core.text", "byte_views", "jet_text_byte_views", true, &[true]),
     CoreCallRecord::new("core.log", "info", "jet_ring_log_info", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.log", "warn", "jet_ring_log_warn", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
@@ -2404,11 +2396,7 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.http", "router", "jet_http_router_new", true, &[]) .with_jit_symbol("jet_jit_http_router_new"),
     CoreCallRecord::new( "core.http", "parse", "jet_http_parse_request", true, &[true], ),
     CoreCallRecord::new( "core.http", "dispatch", "jet_http_router_dispatch", true, &[true, false], ),
-    CoreCallRecord::new("core.http", "reason_phrase", "jet_http_reason_phrase", true, &[false]).with_jit_symbol("jet_jit_http_reason_phrase"),
-    CoreCallRecord::new("core.http", "basic_auth", "jet_http_basic_auth", true, &[true, true]).with_jit_symbol("jet_jit_http_basic_auth"),
-    CoreCallRecord::new("core.http", "bearer_auth", "jet_http_bearer_auth", true, &[true]).with_jit_symbol("jet_jit_http_bearer_auth"),
     CoreCallRecord::new( "core.http", "serve", "jet_http_server_default", true, &[true, true], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new( "core.http", "get", "jet_http_client_get", true, &[true], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .with_jit_symbol("jet_jit_http_client_get"),
     CoreCallRecord::new( "core.http.client", "get", "jet_http_client_get", true, &[true], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .with_jit_symbol("jet_jit_http_client_get"),
     CoreCallRecord::new( "core.http.client", "post", "jet_http_client_post", true, &[true, true], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .with_jit_symbol("jet_jit_http_client_post"),
     CoreCallRecord::new( "core.http.client", "request", "jet_http_client_request_new", true, &[true, true], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .with_jit_symbol("jet_jit_http_client_request_new"),
@@ -2464,7 +2452,6 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new( "core.db", "migrate", "jet_db_scope_migrate", false, &[true, true, true], ) .without_direct_aot() .without_direct_jit() .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .with_jit_symbol("jet_jit_db_migrate") .with_native_int_result(),
     CoreCallRecord::new("core.term", "read_key", "jet_term_read_key", true, &[]),
     CoreCallRecord::new("core.perf", "fidelity", "jet_perf_fidelity", false, &[]),
-    CoreCallRecord::new( "core.perf", "default_fidelity", "jet_perf_default_fidelity", false, &[], ),
     CoreCallRecord::new( "core.perf", "override_fidelity", "jet_perf_override_fidelity", false, &[false], ),
     CoreCallRecord::new( "core.perf", "reset_fidelity", "jet_perf_reset_fidelity", false, &[], ),
     CoreCallRecord::new("core.ui", "null_backend", "jet_ui_null", true, &[]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
@@ -2480,9 +2467,6 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new( "core.ui", "playground", "jet_ui_playground_with_viewport", true, &[true, false, false], ) .with_max_arity(3) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.ui", "previews", "jet_ui_previews", true, &[true]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.ui", "playgrounds", "jet_ui_playgrounds", true, &[true]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new("core.ui", "phone", "jet_ui_phone", true, &[]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new("core.ui", "tablet", "jet_ui_tablet", true, &[]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new("core.ui", "desktop", "jet_ui_desktop", true, &[]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.ui", "button", "jet_ui_button", true, &[true]) .with_max_arity(4) .with_pure_route(CoreCallPureRoute::Ui) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.ui", "key_event", "jet_ui_key_event", true, &[true]) .with_pure_route(CoreCallPureRoute::Ui) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.ui", "resize_event", "jet_ui_resize_event", true, &[false, false], ) .with_pure_route(CoreCallPureRoute::Ui) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
@@ -2995,7 +2979,6 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new( "core.data", "inner_join", "jet_data_inner_join_checked_default", true, &[true, true, false, false], ) .without_direct_aot() .with_jit_symbol("jet_jit_data_inner_join").with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.data.arrow", "import", "jet_data_arrow_import", true, &[false]).with_jit_symbol("jet_jit_data_arrow_import"),
     CoreCallRecord::new("core.data.arrow", "query", "jet_data_query_arrow", true, &[false]).with_jit_symbol("jet_jit_data_query_arrow"),
-    CoreCallRecord::new("core.auth", "verify_jwt", "jet_auth_verify_jwt_defaulted", true, &[true, true, true, true, true]).with_max_arity(5).with_jit_symbol("jet_jit_auth_verify_jwt"),
     CoreCallRecord::new("core.data", "mean", "jet_data_mean_checked", true, &[true]).without_direct_jit().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.encoding.toml", "to_string", "jet_enc_toml_to_string", true, &[true]).with_jit_symbol("jet_jit_toml_to_string"),
     CoreCallRecord::new("core.encoding.yaml", "to_string", "jet_enc_yaml_to_string", true, &[true]).with_jit_symbol("jet_jit_yaml_to_string"),
