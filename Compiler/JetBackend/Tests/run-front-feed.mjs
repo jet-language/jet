@@ -202,6 +202,11 @@ function compareFacts(rust, jet, stem) {
       else if (left.length && right.length) gap('observation', `${table}.${name}: ambiguous semantic pairing`, stem, 'raw field-complete MIR retained; do not pair by unstable IDs');
     }
   }
+  // Artifact entry/ABI facts, C-FFI boundaries, package/runtime requirements,
+  // constants, traits and every other canonical field remain observable too.
+  for (const field of new Set([...Object.keys(rust), ...Object.keys(jet)])) {
+    if (!tables.includes(field)) diff(rust[field], jet[field], field);
+  }
   function symbolic(program) {
     const refs = new Map();
     for (const table of tables) {
