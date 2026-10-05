@@ -44,7 +44,7 @@ impl ReactiveObserver {
             deps := self.dependencies.lock().unwrap_or_else(fn(e) { e.into_inner() })
             mem.take(&*deps)
         }
-        for cleanup in cleanups { cleanup() }
+        loop cleanup in cleanups { cleanup() }
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/ReactiveEventWatch.rs:50
     // GATE #4565: kernel primitive
@@ -81,7 +81,7 @@ impl Drop for ReactiveObserver {
     #Unsafe("final observer owner drains mutex storage before cleanup callbacks")
     fn drop(self: &Self) -> {
         cleanups :: self.dependencies.get_mut().unwrap_or_else(fn(e) { e.into_inner() }).drain(..).collect<[DependencyCleanup]>()
-        for cleanup in cleanups { cleanup() }
+        loop cleanup in cleanups { cleanup() }
     }
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/ReactiveEventWatch.rs:109
@@ -218,7 +218,7 @@ impl<T: Clone + Send + Sync> JetSignal<T> {
             c.subs.retain(fn((_, weak)) { weak.strong_count() > 0 })
             c.subs.iter().filter_map(fn((_, weak)) { weak.upgrade() }).collect<[Observer]>()
         }
-        for s in subs { s.run() }
+        loop s in subs { s.run() }
     }
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/ReactiveEventWatch.rs:298
@@ -271,7 +271,7 @@ impl<T: Clone + Send + Sync> JetDerived<T> {
                 c.subs.retain(fn((_, weak)) { weak.strong_count() > 0 })
                 c.subs.iter().filter_map(fn((_, weak)) { weak.upgrade() }).collect<[Observer]>()
             }
-            for s in subs { s.run() }
+            loop s in subs { s.run() }
         }))
         observer.run()
         JetDerived{cell: ^cell, _observer: ^observer}
@@ -432,7 +432,7 @@ impl JetEventScope {
     pub fn cancel(self: &Self) -> {
         if self.cancelled.replace(true) { return }
         subs :: mem.take(&*self.subs.borrow_mut())
-        for sub in subs { sub.unsubscribe() }
+        loop sub in subs { sub.unsubscribe() }
         cancellers :: mem.take(&*self.hard_cancellers.borrow_mut())
         for (_, cancel) in cancellers { cancel() }
     }
@@ -846,9 +846,9 @@ impl<T: Clone + Send, E: Clone + Send> JetAsyncEvent<T, E> {
             state.cancelled = true
             (state.queued.drain(..).collect(), state.blocked.drain(..).collect(), state.running_entries.clone())
         }
-        for entry in queued { _ :: Self.complete_entry(&entry, JET_EVENT_QUEUED, true, .Cancelled) }
-        for entry in blocked { _ :: Self.complete_entry(&entry, JET_EVENT_PENDING, false, .Cancelled) }
-        for entry in running {
+        loop entry in queued { _ :: Self.complete_entry(&entry, JET_EVENT_QUEUED, true, .Cancelled) }
+        loop entry in blocked { _ :: Self.complete_entry(&entry, JET_EVENT_PENDING, false, .Cancelled) }
+        loop entry in running {
             if entry.phase.load(Ordering.Acquire) == JET_EVENT_RUNNING { entry.control.cancel() }
         }
     }
@@ -955,7 +955,7 @@ impl<T: Clone + Send, E: Clone + Send> JetAsyncEvent<T, E> {
                 report := JetDispatchReport{accepted: true, state: .Delivered, delivered_handlers: 0, failures: [], trace: entry.trace.lock().unwrap().clone()}
                 for (handler_index, (priority, subscription_id, owner_id, once, active, handler)) in handlers.into_iter().enumerate() {
                     // Reserved once snapshot invokes despite clearing active; later snapshots cannot reserve it.
-                    if not once && not active.load(Ordering.Acquire) { continue }
+                    if not once && not active.load(Ordering.Acquire) { next }
                     report.delivered_handlers += 1
                     jet_event_observe("AsyncEvent", self.owner_id, owner_id, subscription_id, entry.id, "HandlerStarted",
                         -1, -1, -1, self.policy.capacity, self.policy.overflow.observation(), priority, "None", "None")
@@ -1012,7 +1012,7 @@ impl<T: Clone + Send, E: Clone + Send> JetAsyncEvent<T, E> {
                     state.listeners.retain(fn(listener) { listener.active.load(Ordering.Acquire) })
                     state.queued.front().into_iter().chain(state.blocked.iter()).map(fn(item) { item.wake.clone() }).collect()
                 }
-                for wake in wakes { wake.wake() }
+                loop wake in wakes { wake.wake() }
                 return entry.terminal.lock().unwrap().clone().unwrap_or(^report)
             }
             jet_scheduler_yield("async event dispatch", &entry.wake, None)
@@ -1031,7 +1031,7 @@ impl<T: Clone + Send, E: Clone + Send> JetAsyncEvent<T, E> {
             if state.running_entries.len() != before { state.running = state.running.saturating_sub(1) }
             state.queued.front().into_iter().chain(state.blocked.iter()).map(fn(item) { item.wake.clone() }).collect()
         }
-        for wake in wakes { wake.wake() }
+        loop wake in wakes { wake.wake() }
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/ReactiveEventWatch.rs:1590
     // GATE #4565: kernel primitive
@@ -1043,7 +1043,7 @@ impl<T: Clone + Send, E: Clone + Send> JetAsyncEvent<T, E> {
             state.closed = true
             state.blocked.drain(..).collect()
         }
-        for entry in blocked { _ :: Self.complete_entry(&entry, JET_EVENT_PENDING, false, .Closed) }
+        loop entry in blocked { _ :: Self.complete_entry(&entry, JET_EVENT_PENDING, false, .Closed) }
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/ReactiveEventWatch.rs:1601
     // GATE #4565: kernel primitive
@@ -1175,7 +1175,7 @@ impl<T: Clone, E: Clone> JetDecisionHook<T, E> {
         entries.sort_by(fn(a, b) { b.0.cmp(&a.0).then_with(fn() { a.1.cmp(&b.1) }) })
         current := ^payload
         for (priority, subscription_id, owner_id, once, sub, handler) in entries {
-            if not sub.active() { continue }
+            if not sub.active() { next }
             if once { sub.unsubscribe() }
             jet_event_observe("DecisionHook", self.id, owner_id, subscription_id, dispatch_id, "HandlerStarted", 0, 0, 0, 0, "None", priority, "None", "None")
             match handler(current.clone()) {
@@ -1235,7 +1235,7 @@ fn jet_watch_topology_now() -> U64 {
 fn jet_watch_json_string(value: &String) -> String {
     escaped := String.with_capacity(value.len() + 2)
     escaped.push('"')
-    for character in value.chars() {
+    loop character in value.chars() {
         match character {
             '"' -> escaped.push_str("\\\"")
             '\\' -> escaped.push_str("\\\\")
@@ -1396,7 +1396,7 @@ fn jet_watch_snapshot(root: &String) -> JetWatchSnapshot IOError! {
         is_dir :: meta.is_dir()
         out[^path_s] = (modified, meta.len() as I64, is_dir)
         if is_dir {
-            for entry in fs.read_dir(&path).map_err(fn(e) { io_error_at(.Read, path.to_string_lossy().as_ref(), ^e) })? {
+            loop entry in fs.read_dir(&path).map_err(fn(e) { io_error_at(.Read, path.to_string_lossy().as_ref(), ^e) })? {
                 entry :: entry.map_err(fn(e) { io_error_at(.Read, path.to_string_lossy().as_ref(), ^e) })?
                 stack.push(entry.path())
             }
@@ -1410,7 +1410,7 @@ fn jet_watch_diff(old: &JetWatchSnapshot, new: &JetWatchSnapshot) -> [WatchEvent
     // Rust BTreeMap order: sorted new additions/modifications, then sorted removals.
     new_keys := new.keys().cloned().collect<[String]>()
     new_keys.sort()
-    for path in new_keys {
+    loop path in new_keys {
         facts :: new[&path]
         match old.get(&path) {
             None -> out.push(jet_watch_event(.Created, &path, facts.2))
@@ -1420,7 +1420,7 @@ fn jet_watch_diff(old: &JetWatchSnapshot, new: &JetWatchSnapshot) -> [WatchEvent
     }
     old_keys := old.keys().cloned().collect<[String]>()
     old_keys.sort()
-    for path in old_keys {
+    loop path in old_keys {
         if not new.contains_key(&path) { out.push(jet_watch_event(.Removed, &path, old[&path].2)) }
     }
     ^out
