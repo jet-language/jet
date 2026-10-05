@@ -670,6 +670,8 @@ Core registry.
 and filesystem metadata. Path-taking calls accept `String` and the checked
 `Path` value. Filesystem calls carry the `FS` effect; current-directory and
 environment-derived helpers also carry `Env` (D-FILES-WRITE1).
+`read_bytes` also borrows a String view (for example, `path.trim()`); the
+runtime does not materialize an owned path just to perform the read.
 
 A relative path is resolved from the process working directory. An entry-local
 file can be opened directly with `fs.read("input.txt")`; do not read the

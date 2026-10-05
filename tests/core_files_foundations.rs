@@ -53,9 +53,9 @@ use core.files as files
 
 fn run() {
     root :: "__FIXTURE__"
-    bytes_path :: files.join(root, "bytes.bin")
+    bytes_path :: " {files.join(root, "bytes.bin")} "
     empty_path :: files.join(root, "empty.bin")
-    bytes :: files.read_bytes(bytes_path) ?? panic("read bytes")
+    bytes :: files.read_bytes(bytes_path.trim()) ?? panic("read bytes")
     loop byte in bytes {
         print(byte)
     }
@@ -65,6 +65,8 @@ fn run() {
         print(byte)
     }
     print(empty.len())
+    missing_path :: " {files.join(root, "missing.bin")} "
+    print(files.read_bytes(missing_path.trim()) == .Err(_))
     loop value in [7, 13] {
         print(value)
     }
@@ -74,7 +76,7 @@ fn run() {
     tir_support::assert_tiers_agree(
         "core_files_byte_iteration",
         &source,
-        "0\n1\n127\n128\n255\n5\n0\n7\n13\n",
+        "0\n1\n127\n128\n255\n5\n0\ntrue\n7\n13\n",
     );
 }
 
