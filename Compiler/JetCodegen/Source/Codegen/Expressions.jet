@@ -6305,7 +6305,15 @@ fn jet_codegen_task_group_result_tasks(ty: Type) -> Bool Never! {
     }
 }
 
+// Rust `lower_consuming_task_value`: a task handle in a local moves out of
+// the local's own place row (retained at Move, as `.Move(Local)` does), so its
+// drop flag clears and scope exit does not move it a second time.
 fn jet_codegen_lower_consuming_task_value(builder: &JetCodegenBuilder, value: TExpr) -> MIRValueID {
+    if value.kind == .Local(local) {
+        place := jet_codegen_lower_local_place(&builder, local)
+        if !jet_codegen_unmovable_place(builder, place) -> jet_codegen_retain_place_access(&builder, place, MIRAccess.Move)
+        return jet_codegen_emit_value(&builder, value.span, value.ty, MIROperation.MovePlace{place: place})
+    }
     if jet_codegen_lower_expression_place(&builder, value, MIRAccess.Move) == .Val(place) {
         return jet_codegen_emit_value(&builder, value.span, value.ty, MIROperation.MovePlace{place: place})
     }
