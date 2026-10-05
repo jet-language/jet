@@ -1,0 +1,37 @@
+use core.web.runtime.top_web_virtual.*
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebVirtual.rs:98
+#Test("virtual_window_signed_overscan_and_short_content") {
+    w :: jet_web_virtual_window(100, 0, 30, 10, 2)
+    assert(w.start == -2 && w.end == 5 && w.visible_count() == 7)
+    assert(jet_web_virtual_indices(&w) == [-2, -1, 0, 1, 2, 3, 4])
+    short :: jet_web_virtual_window(1, 0, 30, 10, 0)
+    assert(short.scroll_offset == -20 && short.start == -2 && short.end == 1)
+    assert(jet_web_virtual_slice(&[10, 20, 30], &short) == [10])
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebVirtual.rs:218
+#Test("virtual_window_positive_measurement_estimate") {
+    w :: jet_web_virtual_window_measured(100, 0, 60, 99, 0, &[0, 10, -4, 30])
+    assert(w.estimated_item_size == 20 && w.measured_count == 2 && w.end == 3)
+    assert(w.with_measurement(-1, 100).facts_json() == w.facts_json())
+    measured :: w.with_measurement(2, 50)
+    assert(measured.estimated_item_size == 30 && measured.measured_count == 3)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebVirtual.rs:501
+#Test("virtual_sparse_plan_duplicate_and_anchor_exchange") {
+    p :: jet_web_virtual_plan_measured(100, 30, 200, 30, 10, 0, &[(0, 10), (0, 20), (1, 10), (-1, 7), (100, 8)])
+    assert(p.measurements == [(0, 20), (1, 10)])
+    assert(p.estimated_item_size == 15 && p.measured_count == 2)
+    assert(p.row_size(0) == 20 && p.row_size(2) == 15)
+    assert(p.offset_for(2) == 30 && p.anchor_index == 2 && p.anchor_offset == 0)
+    exchanged :: p.measurement_exchange(&[(0, 40), (0, 50), (2, 20), (200, 40)])
+    assert(exchanged.row_size(0) == 50 && exchanged.row_size(2) == 20)
+    assert(exchanged.anchor_index == 2 && exchanged.anchor_offset == 0 && exchanged.scroll_offset == 60)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebVirtual.rs:627
+#Test("virtual_large_plan_is_bounded") {
+    p :: jet_web_virtual_plan(100000, 50000, 80, 100000, 1, 4096)
+    assert(p.visible_count() <= 4096 && p.measurements.is_empty())
+    assert(p.indices().len() <= 4096)
+    assert(!p.within_frame_budget(-1))
+}

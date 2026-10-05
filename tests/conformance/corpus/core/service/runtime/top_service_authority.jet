@@ -1,0 +1,67 @@
+use core.service.runtime.top_service_authority.*
+use std.sync.Arc
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:39-103
+#Test("service_authority_bounded_fifo_drains_before_closed") {
+    assert(JetServiceChannel<I64>.new(0,[]).is_err())
+    assert(JetServiceChannel<I64>.new(1,[1,2]).is_err())
+    channel :: JetServiceChannel<I64>.new(2,[1]).unwrap()
+    channel.try_send(2).unwrap()
+    assert(channel.try_send(3).is_err())
+    assert(channel.snapshot() == [1,2])
+    channel.close()
+    assert(channel.try_send(4).is_err())
+    assert(channel.try_recv().unwrap() == 1)
+    assert(channel.try_recv().unwrap() == 2)
+    assert(channel.try_recv().is_err())
+    assert(channel.depth() == 0)
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:446-516
+#Test("service_authority_text_and_retention_policy") {
+    assert(service_authority_validate_text("","key",4,false).is_err())
+    assert(service_authority_validate_text("","message",4,true).is_ok())
+    assert(service_authority_validate_text("abcde","key",4,false).is_err())
+    assert(service_authority_validate_text("a\nb","key",4,false).is_err())
+    assert(service_authority_retention_deadline(10,0) == I64.MAX)
+    assert(service_authority_retention_deadline(10,5) == 15)
+    assert(service_authority_retention_deadline(I64.MAX,1) == I64.MAX)
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:575-1255,1391-1471
+#Test("service_authority_issued_rights_partition_drain_and_rotation") {
+    authority :: service_authority_provider_issue().unwrap()
+    endpoint := jet_services_authority_endpoint("test-tree","test-worker",1,authority.clone()).unwrap()
+    assert(jet_services_authority_validate(&endpoint).is_err())
+    // GATE #4565: kernel primitive
+    #Unsafe("test owns one real native mailbox shared through the issued registry") {
+        endpoint.channel = Some(Arc.new(JetServiceChannel<String>.new(2,[]).unwrap()))
+    }
+    service_authority_register(&endpoint,true).unwrap()
+    signature :: service_authority_sign_directory(&authority,"test-tree","worker",&endpoint).unwrap()
+    service_authority_validate_directory(&authority,"test-tree","worker",&endpoint,&signature).unwrap()
+    assert(service_authority_validate_directory(&authority,"test-tree","other",&endpoint,&signature).is_err())
+    jet_services_endpoint_send(&endpoint,"first").unwrap()
+    jet_services_authority_update_draining(&endpoint,true).unwrap()
+    assert(jet_services_endpoint_send(&endpoint,"blocked").is_err())
+    assert(jet_services_endpoint_receive(&endpoint).unwrap() == "first")
+    jet_services_authority_update_partitioned(&endpoint,true).unwrap()
+    assert(jet_services_authority_validate(&endpoint).is_err())
+    jet_services_authority_update_partitioned(&endpoint,false).unwrap()
+    jet_services_authority_update(&endpoint,true).unwrap()
+    replacement :: jet_services_authority_endpoint("test-tree","test-worker",2,authority).unwrap()
+    service_authority_rotate(&endpoint,&replacement,true,false).unwrap()
+    assert(jet_services_authority_validate(&endpoint).is_err())
+    assert(jet_services_authority_validate(&replacement).is_ok())
+    jet_services_endpoint_send(&replacement,"after-rotation").unwrap()
+    assert(jet_services_endpoint_receive(&replacement).unwrap() == "after-rotation")
+    jet_services_authority_update(&replacement,false).unwrap()
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:288-327
+#Test("service_authority_empty_execution_scope_is_not_started") {
+    match jet_services_active_execution_endpoint() {
+        Err(JetServiceError.NotStarted(message)) -> assert(message == "job queue requires an active issued service endpoint"),
+        _ -> assert(false)
+    }
+}

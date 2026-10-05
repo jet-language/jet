@@ -26,6 +26,16 @@ use std.rc.Rc
 use std.cell.RefCell
 use std.collections.HashSet
 use std.io as io
+use core.prelude.runtime.std_common_types.[TerminalMode, TerminalSession, ConPtyControl, ProcessReader, ProcessOutputState, ProcessOutputBuffer]
+use core.prelude.runtime.kernel_values.[JetAbsent, jet_outcome_of]
+use core.tasks.runtime.scheduler.[jet_scheduler_current_task_control, jet_scheduler_shielded, jet_task_deliver_cancel]
+use std.sync.[Mutex, Condvar]
+use std.sync.atomic.Ordering
+use std.thread.[JoinHandle, spawn]
+use std.panic.[catch_unwind, AssertUnwindSafe, resume_unwind]
+use std.mem.[take, drop]
+use std.os.unix.process.ExitStatusExt
+use std.process.ChildStdout
 
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:1
 const JET_PROCESS_TOPOLOGY_SOURCE: String = "process-runtime"
@@ -457,1072 +467,542 @@ fn jet_process_spec_spawn(spec: &ProcessSpec) -> ProcessChild IOError! {
     }
 }
 
-// PORT-PENDING 0295 crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:753-1818
-//RS #[cfg(unix)]
-//RS fn jet_process_terminal_spawn(
-//RS     spec: &jet_std::ProcessSpec,
-//RS     executable_identity: Option<&str>,
-//RS     plan: Option<&jet_std::ProcessPlan>,
-//RS ) -> Result<jet_std::ProcessChild, jet_std::IOError> {
-//RS     if spec.detached {
-//RS         return Err(jet_std::IOError::other(
-//RS             jet_std::IOOperation::Resolve,
-//RS             spec.cmd.first().cloned(),
-//RS             "terminal sessions cannot be detached",
-//RS         ));
-//RS     }
-//RS     let policy = spec.terminal.as_ref().expect("terminal spawn needs policy");
-//RS     let config = jet_process_pty::PtyConfig {
-//RS         cols: policy.size.cols,
-//RS         rows: policy.size.rows,
-//RS         raw: matches!(policy.mode, jet_std::TerminalMode::Raw),
-//RS     };
-//RS     let pair = jet_process_pty::open(config).map_err(|error| {
-//RS         jet_std::IOError::other(
-//RS             jet_std::IOOperation::Resolve,
-//RS             spec.cmd.first().cloned(),
-//RS             error,
-//RS         )
-//RS     })?;
-//RS     let stdin = pair.slave.try_clone().map_err(|error| {
-//RS         jet_std::IOError::other(
-//RS             jet_std::IOOperation::Resolve,
-//RS             Some("process terminal".to_string()),
-//RS             error,
-//RS         )
-//RS     })?;
-//RS     let stdout = pair.slave.try_clone().map_err(|error| {
-//RS         jet_std::IOError::other(
-//RS             jet_std::IOOperation::Resolve,
-//RS             Some("process terminal".to_string()),
-//RS             error,
-//RS         )
-//RS     })?;
-//RS     let stderr = pair.slave.try_clone().map_err(|error| {
-//RS         jet_std::IOError::other(
-//RS             jet_std::IOOperation::Resolve,
-//RS             Some("process terminal".to_string()),
-//RS             error,
-//RS         )
-//RS     })?;
-//RS     #[cfg(any(target_os = "linux", target_os = "macos"))]
-//RS     let child = if spec.policy_wire.is_some() {
-//RS         let executable =
-//RS             executable_identity.expect("authority terminal launch must have a resolved executable");
-//RS         let cwd = jet_process_policy_sandbox_cwd(spec)?;
-//RS         let sandbox_scope = jet_process_policy_sandbox_scope(spec, executable)?;
-//RS         let output_dir = if sandbox_scope.output_writable {
-//RS             Some(
-//RS                 jet_process_sandbox::agent_output_dir(cwd)
-//RS                     .map_err(|error| jet_process_sandbox_error(spec, error))?,
-//RS             )
-//RS         } else {
-//RS             None
-//RS         };
-//RS         let environment = jet_process_sandbox_env(spec)?;
-//RS         jet_process_sandbox::spawn(
-//RS             std::path::Path::new(executable),
-//RS             &spec.cmd[1..],
-//RS             cwd,
-//RS             output_dir.as_deref(),
-//RS             &environment,
-//RS             sandbox_scope.share_network,
-//RS             sandbox_scope.source_readable,
-//RS             false,
-//RS             spec.cmd
-//RS                 .first()
-//RS                 .map(|word| std::ffi::OsStr::new(word.as_str())),
-//RS             |command| {
-//RS                 command.stdin(std::process::Stdio::from(stdin));
-//RS                 command.stdout(std::process::Stdio::from(stdout));
-//RS                 command.stderr(std::process::Stdio::from(stderr));
-//RS                 jet_process_pty::attach_command(command, jet_process_native_limits(spec))
-//RS                     .map_err(|error| jet_process_sandbox::Error::Io(error.to_string()))
-//RS             },
-//RS         )
-//RS         .map_err(|error| jet_process_sandbox_error(spec, error))?
-//RS     } else {
-//RS         let mut command = jet_process_command_base_with_identity(spec, executable_identity)?;
-//RS         command.stdin(std::process::Stdio::from(stdin));
-//RS         command.stdout(std::process::Stdio::from(stdout));
-//RS         command.stderr(std::process::Stdio::from(stderr));
-//RS         jet_process_pty::attach_command(&mut command, jet_process_native_limits(spec)).map_err(|error| {
-//RS             jet_std::IOError::other(
-//RS                 jet_std::IOOperation::Resolve,
-//RS                 Some("process terminal".to_string()),
-//RS                 error,
-//RS             )
-//RS         })?;
-//RS         command.spawn().map_err(|error| {
-//RS             jet_std::IOError::other(
-//RS                 jet_std::IOOperation::Resolve,
-//RS                 spec.cmd.first().cloned(),
-//RS                 error,
-//RS             )
-//RS         })?
-//RS     };
-//RS     #[cfg(not(any(target_os = "linux", target_os = "macos")))]
-//RS     let child = {
-//RS         let mut command = jet_process_command_base_with_identity(spec, executable_identity)?;
-//RS         command.stdin(std::process::Stdio::from(stdin));
-//RS         command.stdout(std::process::Stdio::from(stdout));
-//RS         command.stderr(std::process::Stdio::from(stderr));
-//RS         jet_process_pty::attach_command(&mut command, jet_process_native_limits(spec)).map_err(|error| {
-//RS             jet_std::IOError::other(
-//RS                 jet_std::IOOperation::Resolve,
-//RS                 Some("process terminal".to_string()),
-//RS                 error,
-//RS             )
-//RS         })?;
-//RS         command.spawn().map_err(|error| {
-//RS             jet_std::IOError::other(
-//RS                 jet_std::IOOperation::Resolve,
-//RS                 spec.cmd.first().cloned(),
-//RS                 error,
-//RS             )
-//RS         })?
-//RS     };
-//RS     drop(pair.slave);
-//RS     let master = std::rc::Rc::new(pair.master);
-//RS     let stdin = master.as_ref().try_clone().map_err(|error| {
-//RS         jet_std::IOError::other(
-//RS             jet_std::IOOperation::Resolve,
-//RS             Some("process terminal".to_string()),
-//RS             error,
-//RS         )
-//RS     })?;
-//RS     let stdout = master.as_ref().try_clone().map_err(|error| {
-//RS         jet_std::IOError::other(
-//RS             jet_std::IOOperation::Resolve,
-//RS             Some("process terminal".to_string()),
-//RS             error,
-//RS         )
-//RS     })?;
-//RS     let output_limit = spec.output_limit.map(|limit| limit.max(0) as usize);
-//RS     let output_budget =
-//RS         output_limit.map(|_| std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)));
-//RS     let output_limit_hit = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-//RS     let output_read_error = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-//RS     let pid = child.id();
-//RS     let (stdout, stdout_state, stdout_worker) = jet_process_spawn_output_reader(
-//RS         Some(stdout),
-//RS         true,
-//RS         output_limit,
-//RS         output_budget,
-//RS         output_limit_hit.clone(),
-//RS         output_read_error.clone(),
-//RS         Some(pid),
-//RS     );
-//RS     jet_process_publish_topology(pid, JetDevtoolsTopologyProcessState::Starting);
-//RS     jet_process_publish_topology(pid, JetDevtoolsTopologyProcessState::Running);
-//RS     Ok(jet_std::ProcessChild {
-//RS         wait_result: std::rc::Rc::new(std::cell::RefCell::new(None)),
-//RS         cleanup_error: std::rc::Rc::new(std::cell::RefCell::new(None)),
-//RS         stdin: std::rc::Rc::new(std::cell::RefCell::new(Some(
-//RS             jet_std::ProcessStdin::Terminal(stdin),
-//RS         ))),
-//RS         stdout: std::rc::Rc::new(std::cell::RefCell::new(stdout)),
-//RS         // A PTY has one combined output stream. Do not create a second reader
-//RS         // on the same master: stderr is represented by the unified stdout
-//RS         // stream, matching native terminal behavior.
-//RS         stderr: std::rc::Rc::new(std::cell::RefCell::new(None)),
-//RS         stdout_state,
-//RS         stderr_state: None,
-//RS         stdout_worker: std::rc::Rc::new(std::cell::RefCell::new(stdout_worker)),
-//RS         stderr_worker: std::rc::Rc::new(std::cell::RefCell::new(None)),
-//RS         output_limit_hit,
-//RS         output_read_error,
-//RS         terminal: Ok(jet_std::TerminalSession { master }),
-//RS         process_group: true,
-//RS         detached: spec.detached,
-//RS         inner: std::rc::Rc::new(std::cell::RefCell::new(Some(jet_std::ProcessHandle::Std {
-//RS             child,
-//RS             job: None,
-//RS         }))),
-//RS         timeout_ms: spec.timeout_ms,
-//RS         output_limit: spec.output_limit,
-//RS         audit_spec: std::rc::Rc::new(spec.clone()),
-//RS         audit_plan: plan.cloned().map(std::rc::Rc::new),
-//RS         started: std::time::Instant::now(),
-//RS     })
-//RS }
-//RS 
-//RS #[cfg(windows)]
-//RS fn jet_process_terminal_spawn(
-//RS     spec: &jet_std::ProcessSpec,
-//RS     executable_identity: Option<&str>,
-//RS     plan: Option<&jet_std::ProcessPlan>,
-//RS ) -> Result<jet_std::ProcessChild, jet_std::IOError> {
-//RS     if spec.detached {
-//RS         return Err(jet_std::IOError::other(
-//RS             jet_std::IOOperation::Resolve,
-//RS             spec.cmd.first().cloned(),
-//RS             "terminal sessions cannot be detached",
-//RS         ));
-//RS     }
-//RS     let policy = spec.terminal.as_ref().expect("terminal spawn needs policy");
-//RS     let environment = jet_process_environment(spec)?;
-//RS     let executable = executable_identity
-//RS         .or_else(|| spec.cmd.first().map(String::as_str))
-//RS         .ok_or_else(|| {
-//RS             jet_std::IOError::InvalidInput(jet_std::IOContext::new(
-//RS                 jet_std::IOOperation::Resolve,
-//RS                 None,
-//RS                 None,
-//RS                 Some("process command needs at least one word".to_string()),
-//RS             ))
-//RS         })?;
-//RS     let native = jet_process_pty::spawn(
-//RS         jet_process_pty::PtyConfig {
-//RS             cols: policy.size.cols,
-//RS             rows: policy.size.rows,
-//RS             raw: matches!(policy.mode, jet_std::TerminalMode::Raw),
-//RS         },
-//RS         executable,
-//RS         &spec.cmd[1..],
-//RS         spec.cwd.as_deref(),
-//RS         &environment,
-//RS         jet_process_native_limits(spec),
-//RS     )
-//RS     .map_err(|error| {
-//RS         jet_std::IOError::other(
-//RS             jet_std::IOOperation::Resolve,
-//RS             spec.cmd.first().cloned(),
-//RS             error,
-//RS         )
-//RS     })?;
-//RS     let control = std::rc::Rc::new(jet_std::ConPtyControl::new(native.console));
-//RS     let output_limit = spec.output_limit.map(|limit| limit.max(0) as usize);
-//RS     let output_budget =
-//RS         output_limit.map(|_| std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)));
-//RS     let output_limit_hit = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-//RS     let output_read_error = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-//RS     let (stdout, stdout_state, stdout_worker) = jet_process_spawn_output_reader(
-//RS         Some(native.output),
-//RS         true,
-//RS         output_limit,
-//RS         output_budget,
-//RS         output_limit_hit.clone(),
-//RS         output_read_error.clone(),
-//RS         Some(native.pid),
-//RS     );
-//RS     let pid = native.pid;
-//RS     jet_process_publish_topology(pid, JetDevtoolsTopologyProcessState::Starting);
-//RS     jet_process_publish_topology(pid, JetDevtoolsTopologyProcessState::Running);
-//RS     Ok(jet_std::ProcessChild {
-//RS         wait_result: std::rc::Rc::new(std::cell::RefCell::new(None)),
-//RS         cleanup_error: std::rc::Rc::new(std::cell::RefCell::new(None)),
-//RS         stdin: std::rc::Rc::new(std::cell::RefCell::new(Some(
-//RS             jet_std::ProcessStdin::Terminal(native.input),
-//RS         ))),
-//RS         stdout: std::rc::Rc::new(std::cell::RefCell::new(stdout)),
-//RS         stderr: std::rc::Rc::new(std::cell::RefCell::new(None)),
-//RS         stdout_state,
-//RS         stderr_state: None,
-//RS         stdout_worker: std::rc::Rc::new(std::cell::RefCell::new(stdout_worker)),
-//RS         stderr_worker: std::rc::Rc::new(std::cell::RefCell::new(None)),
-//RS         output_limit_hit,
-//RS         output_read_error,
-//RS         terminal: Ok(jet_std::TerminalSession { control }),
-//RS         process_group: true,
-//RS         detached: false,
-//RS         inner: std::rc::Rc::new(std::cell::RefCell::new(Some(
-//RS             jet_std::ProcessHandle::Native {
-//RS                 process: native.process,
-//RS                 job: std::rc::Rc::new(native.job),
-//RS                 pid: native.pid,
-//RS             },
-//RS         ))),
-//RS         timeout_ms: spec.timeout_ms,
-//RS         output_limit: spec.output_limit,
-//RS         audit_spec: std::rc::Rc::new(spec.clone()),
-//RS         audit_plan: plan.cloned().map(std::rc::Rc::new),
-//RS         started: std::time::Instant::now(),
-//RS     })
-//RS }
-//RS 
-//RS #[cfg(not(any(unix, windows)))]
-//RS fn jet_process_terminal_spawn(
-//RS     spec: &jet_std::ProcessSpec,
-//RS     _executable_identity: Option<&str>,
-//RS     _plan: Option<&jet_std::ProcessPlan>,
-//RS ) -> Result<jet_std::ProcessChild, jet_std::IOError> {
-//RS     jet_process_terminal_backend_check(spec)?;
-//RS     Err(jet_std::IOError::other(
-//RS         jet_std::IOOperation::Resolve,
-//RS         spec.cmd.first().cloned(),
-//RS         "terminal sessions need a native PTY or ConPTY backend, and this build has none",
-//RS     ))
-//RS }
-//RS 
-//RS fn jet_process_output_state_read(
-//RS     state: &std::sync::Arc<jet_std::ProcessOutputState>,
-//RS     bytes: &mut [u8],
-//RS ) -> std::io::Result<usize> {
-//RS     if bytes.is_empty() {
-//RS         return Ok(0);
-//RS     }
-//RS     let mut buffer = state
-//RS         .bytes
-//RS         .lock()
-//RS         .unwrap_or_else(|poisoned| poisoned.into_inner());
-//RS     loop {
-//RS         if buffer.cursor < buffer.bytes.len() {
-//RS             let available = &buffer.bytes[buffer.cursor..];
-//RS             let count = available.len().min(bytes.len());
-//RS             bytes[..count].copy_from_slice(&available[..count]);
-//RS             buffer.cursor += count;
-//RS             return Ok(count);
-//RS         }
-//RS         if let Some((kind, message)) = &buffer.error {
-//RS             return Err(std::io::Error::new(*kind, message.clone()));
-//RS         }
-//RS         if buffer.closed {
-//RS             return Ok(0);
-//RS         }
-//RS         buffer = state
-//RS             .ready
-//RS             .wait(buffer)
-//RS             .unwrap_or_else(|poisoned| poisoned.into_inner());
-//RS     }
-//RS }
-//RS 
-//RS fn jet_process_output_state_snapshot(
-//RS     state: Option<&std::sync::Arc<jet_std::ProcessOutputState>>,
-//RS     stream: &'static str,
-//RS ) -> Result<String, jet_std::IOError> {
-//RS     let Some(state) = state else {
-//RS         return Ok(String::new());
-//RS     };
-//RS     let mut buffer = state
-//RS         .bytes
-//RS         .lock()
-//RS         .unwrap_or_else(|poisoned| poisoned.into_inner());
-//RS     if let Some((kind, message)) = &buffer.error {
-//RS         return Err(jet_std::IOError::other(
-//RS             jet_std::IOOperation::Read,
-//RS             Some(stream.to_string()),
-//RS             std::io::Error::new(*kind, message.clone()),
-//RS         ));
-//RS     }
-//RS     let bytes = std::mem::take(&mut buffer.bytes);
-//RS     String::from_utf8(bytes).map_err(|error| {
-//RS         jet_std::IOError::other(jet_std::IOOperation::Read, Some(stream.to_string()), error)
-//RS     })
-//RS }
-//RS 
-//RS fn jet_process_output_reserve(
-//RS     limit: usize,
-//RS     budget: &std::sync::atomic::AtomicUsize,
-//RS     count: usize,
-//RS ) -> usize {
-//RS     let mut used = budget.load(std::sync::atomic::Ordering::Acquire);
-//RS     loop {
-//RS         let kept = limit.saturating_sub(used).min(count);
-//RS         let Some(next) = used.checked_add(kept) else {
-//RS             return 0;
-//RS         };
-//RS         match budget.compare_exchange(
-//RS             used,
-//RS             next,
-//RS             std::sync::atomic::Ordering::AcqRel,
-//RS             std::sync::atomic::Ordering::Acquire,
-//RS         ) {
-//RS             Ok(_) => return kept,
-//RS             Err(next) => used = next,
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn jet_process_output_worker<R>(
-//RS     mut reader: R,
-//RS     state: std::sync::Arc<jet_std::ProcessOutputState>,
-//RS     terminal_eof: bool,
-//RS     limit: Option<usize>,
-//RS     budget: Option<std::sync::Arc<std::sync::atomic::AtomicUsize>>,
-//RS     limit_hit: std::sync::Arc<std::sync::atomic::AtomicBool>,
-//RS     read_error: std::sync::Arc<std::sync::atomic::AtomicBool>,
-//RS     group_pid: Option<u32>,
-//RS ) -> std::io::Result<()>
-//RS where
-//RS     R: std::io::Read + Send + 'static,
-//RS {
-//RS     let result = (|| {
-//RS         let mut chunk = [0u8; JET_PROCESS_IO_CHUNK_BYTES];
-//RS         loop {
-//RS             let count = match std::io::Read::read(&mut reader, &mut chunk) {
-//RS                 Ok(count) => count,
-//RS                 Err(error) if terminal_eof && jet_process_pty::is_terminal_eof(&error) => 0,
-//RS                 Err(error) => return Err(error),
-//RS             };
-//RS             if count == 0 {
-//RS                 return Ok(());
-//RS             }
-//RS             let kept = match limit {
-//RS                 None => count,
-//RS                 Some(limit) => {
-//RS                     let budget = budget
-//RS                         .as_ref()
-//RS                         .expect("bounded process output needs a shared budget");
-//RS                     jet_process_output_reserve(limit, budget, count)
-//RS                 }
-//RS             };
-//RS             if kept != 0 {
-//RS                 let mut buffer = state
-//RS                     .bytes
-//RS                     .lock()
-//RS                     .unwrap_or_else(|poisoned| poisoned.into_inner());
-//RS                 buffer.bytes.extend_from_slice(&chunk[..kept]);
-//RS                 state.ready.notify_all();
-//RS             }
-//RS             if kept < count {
-//RS                 limit_hit.store(true, std::sync::atomic::Ordering::Release);
-//RS                 jet_process_stop_output(None, group_pid);
-//RS                 return Ok(());
-//RS             }
-//RS         }
-//RS     })();
-//RS     if let Err(error) = &result {
-//RS         read_error.store(true, std::sync::atomic::Ordering::Release);
-//RS         jet_process_stop_output(None, group_pid);
-//RS         let mut buffer = state
-//RS             .bytes
-//RS             .lock()
-//RS             .unwrap_or_else(|poisoned| poisoned.into_inner());
-//RS         if buffer.error.is_none() {
-//RS             buffer.error = Some((error.kind(), error.to_string()));
-//RS         }
-//RS     }
-//RS     let mut buffer = state
-//RS         .bytes
-//RS         .lock()
-//RS         .unwrap_or_else(|poisoned| poisoned.into_inner());
-//RS     buffer.closed = true;
-//RS     state.ready.notify_all();
-//RS     result
-//RS }
-//RS 
-//RS fn jet_process_spawn_output_reader<R>(
-//RS     reader: Option<R>,
-//RS     terminal_eof: bool,
-//RS     limit: Option<usize>,
-//RS     budget: Option<std::sync::Arc<std::sync::atomic::AtomicUsize>>,
-//RS     limit_hit: std::sync::Arc<std::sync::atomic::AtomicBool>,
-//RS     read_error: std::sync::Arc<std::sync::atomic::AtomicBool>,
-//RS     group_pid: Option<u32>,
-//RS ) -> (
-//RS     Option<std::io::BufReader<jet_std::ProcessReader>>,
-//RS     Option<std::sync::Arc<jet_std::ProcessOutputState>>,
-//RS     Option<std::thread::JoinHandle<std::io::Result<()>>>,
-//RS )
-//RS where
-//RS     R: std::io::Read + Send + 'static,
-//RS {
-//RS     let Some(reader) = reader else {
-//RS         return (None, None, None);
-//RS     };
-//RS     let state = std::sync::Arc::new(jet_std::ProcessOutputState {
-//RS         bytes: std::sync::Mutex::new(jet_std::ProcessOutputBuffer {
-//RS             bytes: Vec::with_capacity(jet_process_output_buffer_capacity(limit)),
-//RS             cursor: 0,
-//RS             closed: false,
-//RS             error: None,
-//RS         }),
-//RS         ready: std::sync::Condvar::new(),
-//RS     });
-//RS     let worker_state = state.clone();
-//RS     let worker = std::thread::spawn(move || {
-//RS         jet_process_output_worker(
-//RS             reader,
-//RS             worker_state,
-//RS             terminal_eof,
-//RS             limit,
-//RS             budget,
-//RS             limit_hit,
-//RS             read_error,
-//RS             group_pid,
-//RS         )
-//RS     });
-//RS     (
-//RS         Some(std::io::BufReader::new(jet_std::ProcessReader::Shared(
-//RS             state.clone(),
-//RS         ))),
-//RS         Some(state),
-//RS         Some(worker),
-//RS     )
-//RS }
-//RS 
-//RS struct JetProcessOutput {
-//RS     text: String,
-//RS     exceeded: bool,
-//RS }
-//RS 
-//RS fn jet_process_drain_reader<R>(
-//RS     reader: Option<R>,
-//RS     limit: Option<usize>,
-//RS     budget: Option<std::sync::Arc<std::sync::atomic::AtomicUsize>>,
-//RS     limit_hit: std::sync::Arc<std::sync::atomic::AtomicBool>,
-//RS     cancel: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
-//RS     groups: Option<std::sync::Arc<std::sync::Mutex<Vec<u32>>>>,
-//RS     group_pid: Option<u32>,
-//RS ) -> Option<std::thread::JoinHandle<std::io::Result<JetProcessOutput>>>
-//RS where
-//RS     R: std::io::Read + Send + 'static,
-//RS {
-//RS     reader.map(|mut reader| {
-//RS         std::thread::spawn(move || {
-//RS             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-//RS                 let mut bytes = Vec::with_capacity(jet_process_output_buffer_capacity(limit));
-//RS                 let mut exceeded = false;
-//RS                 let mut chunk = [0u8; JET_PROCESS_IO_CHUNK_BYTES];
-//RS                 loop {
-//RS                     let count = std::io::Read::read(&mut reader, &mut chunk)?;
-//RS                     if count == 0 {
-//RS                         break;
-//RS                     }
-//RS                     let kept = match limit {
-//RS                         None => {
-//RS                             bytes.extend_from_slice(&chunk[..count]);
-//RS                             count
-//RS                         }
-//RS                         Some(limit) => {
-//RS                             let budget = budget
-//RS                                 .as_ref()
-//RS                                 .expect("bounded process output needs a shared budget");
-//RS                             let kept = jet_process_output_reserve(limit, budget, count);
-//RS                             if kept != 0 {
-//RS                                 bytes.extend_from_slice(&chunk[..kept]);
-//RS                             }
-//RS                             kept
-//RS                         }
-//RS                     };
-//RS                     if kept < count {
-//RS                         exceeded = true;
-//RS                         limit_hit.store(true, std::sync::atomic::Ordering::Release);
-//RS                         jet_process_stop_output(groups.as_ref(), group_pid);
-//RS                         break;
-//RS                     }
-//RS                 }
-//RS                 let text = String::from_utf8(bytes).map_err(|error| {
-//RS                     std::io::Error::new(std::io::ErrorKind::InvalidData, error)
-//RS                 })?;
-//RS                 Ok(JetProcessOutput { text, exceeded })
-//RS             }));
-//RS             match result {
-//RS                 Ok(result) => {
-//RS                     if result.is_err() {
-//RS                         if let Some(cancel) = cancel.as_ref() {
-//RS                             cancel.store(true, std::sync::atomic::Ordering::Release);
-//RS                         }
-//RS                         jet_process_stop_output(groups.as_ref(), group_pid);
-//RS                     }
-//RS                     result
-//RS                 }
-//RS                 Err(payload) => {
-//RS                     if let Some(cancel) = cancel.as_ref() {
-//RS                         cancel.store(true, std::sync::atomic::Ordering::Release);
-//RS                     }
-//RS                     jet_process_stop_output(groups.as_ref(), group_pid);
-//RS                     std::panic::resume_unwind(payload);
-//RS                 }
-//RS             }
-//RS         })
-//RS     })
-//RS }
-//RS fn jet_process_finish_output_drain(
-//RS     drain: Option<std::thread::JoinHandle<std::io::Result<JetProcessOutput>>>,
-//RS     stream: &'static str,
-//RS ) -> Result<JetProcessOutput, jet_std::IOError> {
-//RS     let Some(drain) = drain else {
-//RS         return Ok(JetProcessOutput {
-//RS             text: String::new(),
-//RS             exceeded: false,
-//RS         });
-//RS     };
-//RS     drain
-//RS         .join()
-//RS         .map_err(|_| {
-//RS             jet_std::IOError::other(
-//RS                 jet_std::IOOperation::Read,
-//RS                 Some(stream.to_string()),
-//RS                 "process output reader panicked",
-//RS             )
-//RS         })?
-//RS         .map_err(|error| {
-//RS             jet_std::IOError::other(jet_std::IOOperation::Read, Some(stream.to_string()), error)
-//RS         })
-//RS }
-//RS 
-//RS fn jet_process_collect_pipeline_drains(
-//RS     output_drain: Option<std::thread::JoinHandle<std::io::Result<JetProcessOutput>>>,
-//RS     stderr_drains: Vec<Option<std::thread::JoinHandle<std::io::Result<JetProcessOutput>>>>,
-//RS ) -> Result<(JetProcessOutput, String), jet_std::IOError> {
-//RS     let mut first_error = None;
-//RS     let mut output = JetProcessOutput {
-//RS         text: String::new(),
-//RS         exceeded: false,
-//RS     };
-//RS     match jet_process_finish_output_drain(output_drain, "pipeline stdout") {
-//RS         Ok(result) => output = result,
-//RS         Err(error) => first_error = Some(error),
-//RS     }
-//RS     let mut output_exceeded = output.exceeded;
-//RS     let mut errors = String::new();
-//RS     for drain in stderr_drains {
-//RS         match jet_process_finish_output_drain(drain, "pipeline stderr") {
-//RS             Ok(result) => {
-//RS                 output_exceeded |= result.exceeded;
-//RS                 errors.push_str(&result.text);
-//RS             }
-//RS             Err(error) => {
-//RS                 if first_error.is_none() {
-//RS                     first_error = Some(error);
-//RS                 }
-//RS             }
-//RS         }
-//RS     }
-//RS     if let Some(error) = first_error {
-//RS         return Err(error);
-//RS     }
-//RS     output.exceeded = output_exceeded;
-//RS     Ok((output, errors))
-//RS }
-//RS 
-//RS fn jet_process_collect_output(
-//RS     drains: (
-//RS         Option<std::thread::JoinHandle<std::io::Result<JetProcessOutput>>>,
-//RS         Option<std::thread::JoinHandle<std::io::Result<JetProcessOutput>>>,
-//RS     ),
-//RS ) -> Result<(String, String, bool), jet_std::IOError> {
-//RS     // Always join both readers. A malformed/closed stdout must not return
-//RS     // before the stderr reader is reaped; otherwise its thread can outlive
-//RS     // the child wait and retain a pipe/error path indefinitely.
-//RS     let output = jet_process_finish_output_drain(drains.0, "process stdout");
-//RS     let errors = jet_process_finish_output_drain(drains.1, "process stderr");
-//RS     match (output, errors) {
-//RS         (Ok(output), Ok(errors)) => {
-//RS             Ok((output.text, errors.text, output.exceeded || errors.exceeded))
-//RS         }
-//RS         (Err(error), _) | (_, Err(error)) => Err(error),
-//RS     }
-//RS }
-//RS 
-//RS fn jet_process_finish_output_worker(
-//RS     worker: Option<std::thread::JoinHandle<std::io::Result<()>>>,
-//RS     stream: &'static str,
-//RS ) -> Result<(), jet_std::IOError> {
-//RS     let Some(worker) = worker else {
-//RS         return Ok(());
-//RS     };
-//RS     worker
-//RS         .join()
-//RS         .map_err(|_| {
-//RS             jet_std::IOError::other(
-//RS                 jet_std::IOOperation::Read,
-//RS                 Some(stream.to_string()),
-//RS                 "process output reader panicked",
-//RS             )
-//RS         })?
-//RS         .map_err(|error| {
-//RS             jet_std::IOError::other(jet_std::IOOperation::Read, Some(stream.to_string()), error)
-//RS         })
-//RS }
-//RS 
-//RS fn jet_process_collect_child_output(
-//RS     child: &jet_std::ProcessChild,
-//RS ) -> Result<(String, String), jet_std::IOError> {
-//RS     jet_process_join_child_output_workers(child)?;
-//RS     let output = jet_process_output_state_snapshot(child.stdout_state.as_ref(), "process stdout")?;
-//RS     let errors = jet_process_output_state_snapshot(child.stderr_state.as_ref(), "process stderr")?;
-//RS     Ok((output, errors))
-//RS }
-//RS 
-//RS fn jet_process_join_child_output_workers(
-//RS     child: &jet_std::ProcessChild,
-//RS ) -> Result<(), jet_std::IOError> {
-//RS     // The worker owns the native pipe. Dropping the public reader releases its
-//RS     // local buffering before the worker handles are joined, while the shared
-//RS     // state retains every byte for the receipt, including bytes read live.
-//RS     *child.stdout.borrow_mut() = None;
-//RS     *child.stderr.borrow_mut() = None;
-//RS     let stdout_worker = child.stdout_worker.borrow_mut().take();
-//RS     let stderr_worker = child.stderr_worker.borrow_mut().take();
-//RS     let stdout_result = jet_process_finish_output_worker(stdout_worker, "process stdout");
-//RS     let stderr_result = jet_process_finish_output_worker(stderr_worker, "process stderr");
-//RS     if let Err(error) = stdout_result {
-//RS         return Err(error);
-//RS     }
-//RS     if let Err(error) = stderr_result {
-//RS         return Err(error);
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS #[cfg(target_os = "windows")]
-//RS fn jet_process_spec_run_windows(
-//RS     spec: &jet_std::ProcessSpec,
-//RS ) -> Result<jet_std::ProcessReceipt, jet_std::IOError> {
-//RS     if spec.detached
-//RS         || spec.terminal.is_some()
-//RS         || spec.stdin.is_some()
-//RS         || spec.stdout != jet_std::ProcessStreamMode::Capture
-//RS         || spec.stderr != jet_std::ProcessStreamMode::Capture
-//RS     {
-//RS         return Err(jet_std::IOError::other(
-//RS             jet_std::IOOperation::Resolve,
-//RS             spec.cmd.first().cloned(),
-//RS             "authority-bound Windows execution requires non-detached capture streams and closed stdin",
-//RS         ));
-//RS     }
-//RS     let plan = jet_process_spec_plan(spec)?;
-//RS     jet_process_verify_launch_plan(spec, &plan)?;
-//RS     let cwd = jet_process_policy_sandbox_cwd(spec)?;
-//RS     let sandbox_scope =
-//RS         jet_process_policy_sandbox_scope(spec, &plan.executable_identity)?;
-//RS     let output_dir = if sandbox_scope.output_writable {
-//RS         Some(
-//RS             jet_process_sandbox::agent_output_dir(cwd)
-//RS                 .map_err(|error| jet_process_sandbox_error_windows(spec, error))?,
-//RS         )
-//RS     } else {
-//RS         None
-//RS     };
-//RS     let environment = jet_process_sandbox_env(spec)?;
-//RS     let result = jet_process_sandbox::windows_output(
-//RS         std::path::Path::new(&plan.executable_identity),
-//RS         &spec.cmd[1..],
-//RS         cwd,
-//RS         output_dir.as_deref(),
-//RS         &environment,
-//RS         sandbox_scope.share_network,
-//RS         sandbox_scope.source_readable,
-//RS         false,
-//RS         spec.timeout_ms,
-//RS         spec.output_limit,
-//RS     )
-//RS     .map_err(|error| jet_process_sandbox_error_windows(spec, error))?;
-//RS     if result.mechanism != plan.backend {
-//RS         return Err(jet_std::IOError::other(
-//RS             jet_std::IOOperation::Resolve,
-//RS             spec.cmd.first().cloned(),
-//RS             "authority-bound Windows launch returned a different isolation backend",
-//RS         ));
-//RS     }
-//RS     let output = String::from_utf8(result.output.stdout).map_err(|error| {
-//RS         jet_std::IOError::other(
-//RS             jet_std::IOOperation::Read,
-//RS             Some("process stdout".to_string()),
-//RS             error,
-//RS         )
-//RS     })?;
-//RS     let errors = String::from_utf8(result.output.stderr).map_err(|error| {
-//RS         jet_std::IOError::other(
-//RS             jet_std::IOOperation::Read,
-//RS             Some("process stderr".to_string()),
-//RS             error,
-//RS         )
-//RS     })?;
-//RS     Ok(jet_process_receipt(
-//RS         spec,
-//RS         Some(&plan),
-//RS         true,
-//RS         result.pid,
-//RS         result.output.status.code().unwrap_or(-1) as i64,
-//RS         result.output.status.success(),
-//RS         Err(JetAbsent),
-//RS         result.timed_out,
-//RS         output,
-//RS         errors,
-//RS         None,
-//RS     ))
-//RS }
-//RS 
-//RS #[cfg(target_os = "windows")]
-//RS fn jet_process_sandbox_error_windows(
-//RS     spec: &jet_std::ProcessSpec,
-//RS     error: jet_process_sandbox::WindowsSandboxError,
-//RS ) -> jet_std::IOError {
-//RS     let detail = match error {
-//RS         jet_process_sandbox::WindowsSandboxError::Unsupported(detail)
-//RS         | jet_process_sandbox::WindowsSandboxError::Io(detail) => detail,
-//RS     };
-//RS     jet_std::IOError::other(
-//RS         jet_std::IOOperation::Resolve,
-//RS         spec.cmd.first().cloned(),
-//RS         detail,
-//RS     )
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS fn jet_process_direct_group_cleanup(pid: u32) -> Option<jet_std::IOError> {
-//RS     match jet_process_pty::signal_group(pid, jet_process_signal_kill()) {
-//RS         Ok(()) => None,
-//RS         Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
-//RS         Err(error) => Some(jet_process_cleanup_io_error(error)),
-//RS     }
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS fn jet_process_spec_run_direct(
-//RS     spec: &jet_std::ProcessSpec,
-//RS ) -> Result<jet_std::ProcessReceipt, jet_std::IOError> {
-//RS     let mut command = jet_process_command_base_with_identity(spec, None)?;
-//RS     jet_process_attach_process_group(&mut command, spec).map_err(|error| {
-//RS         jet_std::IOError::other(
-//RS             jet_std::IOOperation::Resolve,
-//RS             spec.cmd.first().cloned(),
-//RS             error,
-//RS         )
-//RS     })?;
-//RS     let mut child = command.spawn().map_err(|error| {
-//RS         jet_std::IOError::other(
-//RS             jet_std::IOOperation::Resolve,
-//RS             spec.cmd.first().cloned(),
-//RS             error,
-//RS         )
-//RS     })?;
-//RS     let child_pid = child.id();
-//RS     let pid = i64::from(child_pid);
-//RS 
-//RS     // The ordinary run has no public child or live stream. Let the existing
-//RS     // bounded drain workers own the pipes while the parent blocks in wait.
-//RS     // They terminate the process group on overflow/read failure, so this
-//RS     // avoids the 10 ms supervisor poll without weakening output limits.
-//RS     let output_limit = spec.output_limit.map(|limit| limit.max(0) as usize);
-//RS     let output_budget =
-//RS         output_limit.map(|_| std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)));
-//RS     let output_limit_hit = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-//RS     let output_drain = jet_process_drain_reader(
-//RS         child.stdout.take(),
-//RS         output_limit,
-//RS         output_budget.clone(),
-//RS         output_limit_hit.clone(),
-//RS         None,
-//RS         None,
-//RS         Some(child_pid),
-//RS     );
-//RS     let stderr_drain = jet_process_drain_reader(
-//RS         child.stderr.take(),
-//RS         output_limit,
-//RS         output_budget,
-//RS         output_limit_hit.clone(),
-//RS         None,
-//RS         None,
-//RS         Some(child_pid),
-//RS     );
-//RS     let cancel_control = jet_scheduler_current_task_control();
-//RS     let cancel_guard = cancel_control.as_ref().map(|control| {
-//RS         control.register_cancel_callback(std::sync::Arc::new(move || {
-//RS             jet_process_pipeline_stop_group(child_pid);
-//RS         }))
-//RS     });
-//RS     jet_process_publish_topology_id(pid, JetDevtoolsTopologyProcessState::Starting);
-//RS     jet_process_publish_topology_id(pid, JetDevtoolsTopologyProcessState::Running);
-//RS     let wait = match child.wait() {
-//RS         Ok(status) => Ok(status),
-//RS         Err(error) => {
-//RS             jet_process_pipeline_stop_group(child_pid);
-//RS             let _ = child.kill();
-//RS             let _ = child.wait();
-//RS             Err(error)
-//RS         }
-//RS     };
-//RS     drop(cancel_guard);
-//RS     let cleanup_error = wait
-//RS         .as_ref()
-//RS         .ok()
-//RS         .and_then(|_| jet_process_direct_group_cleanup(child_pid));
-//RS     let drained = jet_process_collect_output((output_drain, stderr_drain));
-//RS     let cancellation_pending = cancel_control.as_ref().is_some_and(|control| {
-//RS         control
-//RS             .cancelled
-//RS             .load(std::sync::atomic::Ordering::Acquire)
-//RS     });
-//RS     let (output, errors, output_exceeded) = match drained {
-//RS         Ok(drained) => drained,
-//RS         Err(error) => {
-//RS             jet_process_publish_topology_id(pid, JetDevtoolsTopologyProcessState::Failed);
-//RS             if cancellation_pending && !jet_scheduler_shielded() {
-//RS                 jet_task_deliver_cancel();
-//RS             }
-//RS             return Err(error);
-//RS         }
-//RS     };
-//RS     if cancellation_pending && !jet_scheduler_shielded() {
-//RS         jet_process_publish_topology_id(pid, JetDevtoolsTopologyProcessState::Failed);
-//RS         jet_task_deliver_cancel();
-//RS     }
-//RS     let status = match wait {
-//RS         Ok(status) => status,
-//RS         Err(error) => {
-//RS             jet_process_publish_topology_id(pid, JetDevtoolsTopologyProcessState::Failed);
-//RS             return Err(jet_std::IOError::other(
-//RS                 jet_std::IOOperation::Close,
-//RS                 Some("process".to_string()),
-//RS                 error,
-//RS             ));
-//RS         }
-//RS     };
-//RS     if let Some(error) = cleanup_error {
-//RS         jet_process_publish_topology_id(pid, JetDevtoolsTopologyProcessState::Failed);
-//RS         return Err(error);
-//RS     }
-//RS     if output_exceeded || output_limit_hit.load(std::sync::atomic::Ordering::Acquire) {
-//RS         jet_process_publish_topology_id(pid, JetDevtoolsTopologyProcessState::Failed);
-//RS         return Err(jet_std::IOError::ResourceLimit(
-//RS             jet_std::ProcessResourceLimit::Output,
-//RS         ));
-//RS     }
-//RS     let signal = jet_outcome_of(
-//RS         std::os::unix::process::ExitStatusExt::signal(&status)
-//RS             .map(i64::from)
-//RS             .map(jet_foundation::Numeric::JetInt::from_i64),
-//RS     );
-//RS     let result = jet_process_receipt(
-//RS         spec,
-//RS         None,
-//RS         true,
-//RS         pid,
-//RS         status.code().unwrap_or(-1) as i64,
-//RS         status.success(),
-//RS         signal,
-//RS         false,
-//RS         output,
-//RS         errors,
-//RS         None,
-//RS     );
-//RS     jet_process_publish_topology_id(
-//RS         pid,
-//RS         if status.success() {
-//RS             JetDevtoolsTopologyProcessState::Exited
-//RS         } else {
-//RS             JetDevtoolsTopologyProcessState::Failed
-//RS         },
-//RS     );
-//RS     Ok(result)
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS fn jet_process_spec_can_run_direct(spec: &jet_std::ProcessSpec) -> bool {
-//RS     spec.policy_wire.is_none()
-//RS         && spec.terminal.is_none()
-//RS         && !spec.detached
-//RS         && spec.stdin.is_none()
-//RS         && spec.stdout == jet_std::ProcessStreamMode::Capture
-//RS         && spec.stderr == jet_std::ProcessStreamMode::Capture
-//RS         && spec.timeout_ms.is_none()
-//RS         && spec.cpu_time_limit_ms.is_none()
-//RS         && spec.memory_limit_bytes.is_none()
-//RS         && spec.open_file_limit.is_none()
-//RS }
-//RS 
-//RS fn jet_process_spec_run_inner(
-//RS     spec: &jet_std::ProcessSpec,
-//RS ) -> Result<jet_std::ProcessReceipt, jet_std::IOError> {
-//RS     #[cfg(target_os = "windows")]
-//RS     if spec.policy_wire.is_some() {
-//RS         return jet_process_spec_run_windows(spec);
-//RS     }
-//RS     #[cfg(unix)]
-//RS     if jet_process_spec_can_run_direct(spec) {
-//RS         return jet_process_spec_run_direct(spec);
-//RS     }
-//RS     let child = jet_process_spec_spawn(spec)?;
-//RS     jet_process_child_wait(&child)
-//RS }
-//RS fn jet_process_spec_run(
-//RS     spec: &jet_std::ProcessSpec,
-//RS ) -> Result<jet_std::ProcessReceipt, jet_std::IOError> {
-//RS     jet_process_spec_run_inner(spec)
-//RS }
-//RS fn jet_process_checked_stderr(errors: &str) -> String {
-//RS     const LIMIT: usize = 4096;
-//RS     if errors.len() <= LIMIT {
-//RS         return errors.to_string();
-//RS     }
-//RS     let mut end = LIMIT;
-//RS     while !errors.is_char_boundary(end) {
-//RS         end -= 1;
-//RS     }
-//RS     errors[..end].to_string()
-//RS }
-//RS fn jet_process_spec_run_checked(
-//RS     spec: &jet_std::ProcessSpec,
-//RS ) -> Result<jet_std::ProcessReceipt, jet_std::IOError> {
-//RS     let result = jet_process_spec_run(spec)?;
-//RS     if result.success {
-//RS         return Ok(result);
-//RS     }
-//RS     let mut cause = format!("process exited unsuccessfully: code={}", result.code);
-//RS     if let Ok(signal) = result.signal {
-//RS         cause.push_str(&format!(", signal={signal}"));
-//RS     }
-//RS     cause.push_str(&format!(
-//RS         ", stderr={}",
-//RS         jet_process_checked_stderr(&result.errors)
-//RS     ));
-//RS     Err(jet_std::IOError::other(
-//RS         jet_std::IOOperation::Close,
-//RS         spec.cmd.first().cloned(),
-//RS         cause,
-//RS     ))
-//RS }
-//RS 
-//RS #[cfg(any(target_os = "linux", target_os = "macos"))]
-//RS fn jet_process_sandbox_pipeline_spawn(
-//RS     spec: &jet_std::ProcessSpec,
-//RS     launch_plan: &jet_std::ProcessPlan,
-//RS     input: Option<std::process::ChildStdout>,
-//RS ) -> Result<std::process::Child, jet_std::IOError> {
-//RS     if spec.terminal.is_some() {
-//RS         return Err(jet_std::IOError::other(
-//RS             jet_std::IOOperation::Resolve,
-//RS             spec.cmd.first().cloned(),
-//RS             "terminal sessions cannot be used as pipeline stages; spawn the session directly",
-//RS         ));
-//RS     }
-//RS     let cwd = jet_process_policy_sandbox_cwd(spec)?;
-//RS     let sandbox_scope =
-//RS         jet_process_policy_sandbox_scope(spec, &launch_plan.executable_identity)?;
-//RS     let output_dir = if sandbox_scope.output_writable {
-//RS         Some(
-//RS             jet_process_sandbox::agent_output_dir(cwd)
-//RS                 .map_err(|error| jet_process_sandbox_error(spec, error))?,
-//RS         )
-//RS     } else {
-//RS         None
-//RS     };
-//RS     let environment = jet_process_sandbox_env(spec)?;
-//RS     jet_process_sandbox::spawn(
-//RS         std::path::Path::new(&launch_plan.executable_identity),
-//RS         &spec.cmd[1..],
-//RS         cwd,
-//RS         output_dir.as_deref(),
-//RS         &environment,
-//RS         sandbox_scope.share_network,
-//RS         sandbox_scope.source_readable,
-//RS         false,
-//RS         spec.cmd
-//RS             .first()
-//RS             .map(|word| std::ffi::OsStr::new(word.as_str())),
-//RS         |command| {
-//RS             if let Some(stdout) = input {
-//RS                 command.stdin(std::process::Stdio::from(stdout));
-//RS             } else {
-//RS                 command.stdin(match &spec.stdin {
-//RS                     Some(mode) => jet_process_stdio(mode),
-//RS                     None => std::process::Stdio::null(),
-//RS                 });
-//RS             }
-//RS             command.stdout(std::process::Stdio::piped());
-//RS             command.stderr(std::process::Stdio::piped());
-//RS             jet_process_pty::attach_process_group(command, jet_process_native_limits(spec))
-//RS                 .map_err(|error| jet_process_sandbox::Error::Io(error.to_string()))?;
-//RS             Ok(())
-//RS         },
-//RS     )
-//RS     .map_err(|error| jet_process_sandbox_error(spec, error))
-//RS }
-//RS 
-// END-PORT-PENDING 0295 crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:1-1818
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:754/943/1037
+fn jet_process_terminal_spawn(spec: &ProcessSpec, executable_identity: String?, plan: &ProcessPlan?) -> ProcessChild IOError! {
+    family :: target.selected_family()
+    if family != .Unix && family != .Windows {
+        jet_process_terminal_backend_check(spec)?
+        return Err(IOError.other(IOOperation.Resolve, spec.cmd.first().cloned(),
+            "terminal sessions need a native PTY or ConPTY backend, and this build has none"))
+    }
+    if spec.detached {
+        return Err(IOError.other(IOOperation.Resolve, spec.cmd.first().cloned(), "terminal sessions cannot be detached"))
+    }
+    policy :: spec.terminal.as_ref().expect("terminal spawn needs policy")
+    // GATE #4565: kernel primitive
+    #Unsafe("launch actual selected-native PTY or ConPTY, retain owned terminal handles and one combined output reader") {
+        if family == .Unix {
+            config :: jet_process_pty.PtyConfig{cols: policy.size.cols, rows: policy.size.rows, raw: policy.mode == TerminalMode.Raw}
+            pair :: jet_process_pty.open(config).map_err(fn(error) {
+                IOError.other(IOOperation.Resolve, spec.cmd.first().cloned(), error)
+            })?
+            stdin :: pair.slave.try_clone().map_err(fn(error) { IOError.other(IOOperation.Resolve, Some("process terminal"), error) })?
+            stdout :: pair.slave.try_clone().map_err(fn(error) { IOError.other(IOOperation.Resolve, Some("process terminal"), error) })?
+            stderr :: pair.slave.try_clone().map_err(fn(error) { IOError.other(IOOperation.Resolve, Some("process terminal"), error) })?
+            os :: target.selected_os()
+            child :: if (os == .Linux || os == .MacOS) && spec.policy_wire.is_some() {
+                executable :: executable_identity.expect("authority terminal launch must have a resolved executable")
+                cwd :: jet_process_policy_sandbox_cwd(spec)?
+                sandbox_scope :: jet_process_policy_sandbox_scope(spec, executable)?
+                output_dir :: if sandbox_scope.output_writable {
+                    Some(jet_process_sandbox.agent_output_dir(cwd).map_err(fn(error) { jet_process_sandbox_error(spec, error) })?)
+                } else { None }
+                environment :: jet_process_sandbox_env(spec)?
+                jet_process_sandbox.spawn(OSPath.new(executable), &spec.cmd[1..], cwd, output_dir.as_ref(),
+                    &environment, sandbox_scope.share_network, sandbox_scope.source_readable, false,
+                    spec.cmd.first().map(fn(word) { OsStr.new(word.as_str()) }), fn(command) {
+                        command.stdin(Stdio.from(^stdin))
+                        command.stdout(Stdio.from(^stdout))
+                        command.stderr(Stdio.from(^stderr))
+                        jet_process_pty.attach_command(command, jet_process_native_limits(spec))
+                            .map_err(fn(error) { jet_process_sandbox.Error.Io(error.to_string()) })
+                    }).map_err(fn(error) { jet_process_sandbox_error(spec, error) })?
+            } else {
+                command := jet_process_command_base_with_identity(spec, executable_identity)?
+                command.stdin(Stdio.from(^stdin))
+                command.stdout(Stdio.from(^stdout))
+                command.stderr(Stdio.from(^stderr))
+                jet_process_pty.attach_command(&command, jet_process_native_limits(spec))
+                    .map_err(fn(error) { IOError.other(IOOperation.Resolve, Some("process terminal"), error) })?
+                command.spawn().map_err(fn(error) { IOError.other(IOOperation.Resolve, spec.cmd.first().cloned(), error) })?
+            }
+            drop(^pair.slave)
+            master :: Rc.new(^pair.master)
+            stdin :: master.as_ref().try_clone().map_err(fn(error) { IOError.other(IOOperation.Resolve, Some("process terminal"), error) })?
+            stdout :: master.as_ref().try_clone().map_err(fn(error) { IOError.other(IOOperation.Resolve, Some("process terminal"), error) })?
+            output_limit :: spec.output_limit.map(fn(limit) { limit.max(0) as Usize })
+            output_budget :: output_limit.map(fn(_) { Arc.new(AtomicUsize.new(0)) })
+            output_limit_hit :: Arc.new(AtomicBool.new(false))
+            output_read_error :: Arc.new(AtomicBool.new(false))
+            pid :: child.id()
+            (stdout, stdout_state, stdout_worker) :: jet_process_spawn_output_reader(Some(^stdout), true, output_limit,
+                ^output_budget, output_limit_hit.clone(), output_read_error.clone(), Some(pid))
+            jet_process_publish_topology(pid, JetDevtoolsTopologyProcessState.Starting)
+            jet_process_publish_topology(pid, JetDevtoolsTopologyProcessState.Running)
+            return Ok(ProcessChild{
+                wait_result: Rc.new(RefCell.new(None)), cleanup_error: Rc.new(RefCell.new(None)),
+                stdin: Rc.new(RefCell.new(Some(ProcessStdin.Terminal(^stdin)))),
+                stdout: Rc.new(RefCell.new(^stdout)),
+                // A PTY has one combined stream; a second reader would steal bytes.
+                stderr: Rc.new(RefCell.new(None)), stdout_state: ^stdout_state, stderr_state: None,
+                stdout_worker: Rc.new(RefCell.new(^stdout_worker)), stderr_worker: Rc.new(RefCell.new(None)),
+                output_limit_hit: ^output_limit_hit, output_read_error: ^output_read_error,
+                terminal: Ok(TerminalSession{master: Some(^master), control: None}),
+                process_group: true, detached: spec.detached,
+                inner: Rc.new(RefCell.new(Some(ProcessHandle.Std{child: ^child, job: None}))),
+                timeout_ms: spec.timeout_ms, output_limit: spec.output_limit,
+                audit_spec: Rc.new(spec.clone()), audit_plan: plan.cloned().map(Rc.new), started: Instant.now()
+            })
+        }
+        environment :: jet_process_environment(spec)?
+        executable :: executable_identity.or_else(fn() { spec.cmd.first().map(fn(word) { word.as_str() }) })
+            .ok_or_else(fn() { IOError.InvalidInput(IOContext.new(IOOperation.Resolve, None, None,
+                Some("process command needs at least one word"))) })?
+        native :: jet_process_pty.spawn(jet_process_pty.PtyConfig{cols: policy.size.cols, rows: policy.size.rows,
+                raw: policy.mode == TerminalMode.Raw}, executable, &spec.cmd[1..], spec.cwd.as_ref(), &environment,
+                jet_process_native_limits(spec))
+            .map_err(fn(error) { IOError.other(IOOperation.Resolve, spec.cmd.first().cloned(), error) })?
+        control :: Rc.new(ConPtyControl.new(^native.console))
+        output_limit :: spec.output_limit.map(fn(limit) { limit.max(0) as Usize })
+        output_budget :: output_limit.map(fn(_) { Arc.new(AtomicUsize.new(0)) })
+        output_limit_hit :: Arc.new(AtomicBool.new(false))
+        output_read_error :: Arc.new(AtomicBool.new(false))
+        (stdout, stdout_state, stdout_worker) :: jet_process_spawn_output_reader(Some(^native.output), true, output_limit,
+            ^output_budget, output_limit_hit.clone(), output_read_error.clone(), Some(native.pid))
+        pid :: native.pid
+        jet_process_publish_topology(pid, JetDevtoolsTopologyProcessState.Starting)
+        jet_process_publish_topology(pid, JetDevtoolsTopologyProcessState.Running)
+        Ok(ProcessChild{
+            wait_result: Rc.new(RefCell.new(None)), cleanup_error: Rc.new(RefCell.new(None)),
+            stdin: Rc.new(RefCell.new(Some(ProcessStdin.Terminal(^native.input)))),
+            stdout: Rc.new(RefCell.new(^stdout)), stderr: Rc.new(RefCell.new(None)),
+            stdout_state: ^stdout_state, stderr_state: None,
+            stdout_worker: Rc.new(RefCell.new(^stdout_worker)), stderr_worker: Rc.new(RefCell.new(None)),
+            output_limit_hit: ^output_limit_hit, output_read_error: ^output_read_error,
+            terminal: Ok(TerminalSession{master: None, control: Some(^control)}),
+            process_group: true, detached: false,
+            inner: Rc.new(RefCell.new(Some(ProcessHandle.Native{process: ^native.process, job: Rc.new(^native.job), pid: native.pid}))),
+            timeout_ms: spec.timeout_ms, output_limit: spec.output_limit,
+            audit_spec: Rc.new(spec.clone()), audit_plan: plan.cloned().map(Rc.new), started: Instant.now()
+        })
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:1050
+fn jet_process_output_state_read(state: &Arc<ProcessOutputState>, bytes: &[U8]) -> Usize io.Error! {
+    if bytes.is_empty() -> return Ok(0)
+    // GATE #4565: kernel primitive
+    #Unsafe("hold native output mutex and condition-wait until bytes, first read error, or EOF is observable") {
+        buffer := state.bytes.lock().unwrap_or_else(fn(poisoned) { poisoned.into_inner() })
+        loop {
+            if buffer.cursor < buffer.bytes.len() {
+                available :: &buffer.bytes[buffer.cursor..]
+                count :: available.len().min(bytes.len())
+                bytes[..count].copy_from_slice(&available[..count])
+                buffer.cursor += count
+                return Ok(count)
+            }
+            if Some((kind, message)) :: &buffer.error -> return Err(io.Error.new(kind, message.clone()))
+            if buffer.closed -> return Ok(0)
+            buffer = state.ready.wait(^buffer).unwrap_or_else(fn(poisoned) { poisoned.into_inner() })
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:1082
+fn jet_process_output_state_snapshot(state: &Arc<ProcessOutputState>?, stream: String) -> String IOError! {
+    if state.is_none() -> return Ok("")
+    state :: state.unwrap()
+    // GATE #4565: kernel primitive
+    #Unsafe("consume retained receipt bytes under native output mutex, preserving error kind and complete live-read history") {
+        buffer := state.bytes.lock().unwrap_or_else(fn(poisoned) { poisoned.into_inner() })
+        if Some((kind, message)) :: &buffer.error {
+            return Err(IOError.other(IOOperation.Read, Some(stream.to_string()), io.Error.new(kind, message.clone())))
+        }
+        bytes :: take(&buffer.bytes)
+        String.from_utf8(^bytes).map_err(fn(error) { IOError.other(IOOperation.Read, Some(stream.to_string()), error) })
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:1106
+fn jet_process_output_reserve(limit: Usize, budget: &AtomicUsize, count: Usize) -> Usize {
+    // GATE #4565: kernel primitive
+    #Unsafe("reserve one shared stdout/stderr byte budget by acquire/release CAS without overflow") {
+        used := budget.load(Ordering.Acquire)
+        loop {
+            kept :: limit.saturating_sub(used).min(count)
+            next :: used.checked_add(kept)
+            if next.is_none() -> return 0
+            match budget.compare_exchange(used, next.unwrap(), Ordering.AcqRel, Ordering.Acquire) {
+                Ok(_) -> return kept
+                Err(next) -> used = next
+            }
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:1129
+fn jet_process_output_worker<R: io.Read + Send>(reader: R, state: Arc<ProcessOutputState>, terminal_eof: Bool,
+    limit: Usize?, budget: Arc<AtomicUsize>?, limit_hit: Arc<AtomicBool>, read_error: Arc<AtomicBool>, group_pid: U32?) -> () io.Error! {
+    // GATE #4565: kernel primitive
+    #Unsafe("drain real owned process pipe on native worker; publish retained bytes and first failure before closing shared state") {
+        reader := ^reader
+        result :: (fn() -> () io.Error! {
+            chunk := [U8; JET_PROCESS_IO_CHUNK_BYTES].filled(0)
+            loop {
+                count :: match io.Read.read(&reader, &chunk) {
+                    Ok(count) -> count
+                    Err(error) -> {
+                        if terminal_eof && jet_process_pty.is_terminal_eof(&error) { 0 } else { return Err(error) }
+                    }
+                }
+                if count == 0 -> return Ok(())
+                kept :: match limit {
+                    None -> count
+                    Some(limit) -> jet_process_output_reserve(limit, budget.as_ref().expect("bounded process output needs a shared budget"), count)
+                }
+                if kept != 0 {
+                    buffer := state.bytes.lock().unwrap_or_else(fn(poisoned) { poisoned.into_inner() })
+                    buffer.bytes.extend_from_slice(&chunk[..kept])
+                    state.ready.notify_all()
+                }
+                if kept < count {
+                    limit_hit.store(true, Ordering.Release)
+                    jet_process_stop_output(None, group_pid)
+                    return Ok(())
+                }
+            }
+        })()
+        if Err(error) :: &result {
+            read_error.store(true, Ordering.Release)
+            jet_process_stop_output(None, group_pid)
+            buffer := state.bytes.lock().unwrap_or_else(fn(poisoned) { poisoned.into_inner() })
+            if buffer.error.is_none() -> buffer.error = Some((error.kind(), error.to_string()))
+        }
+        buffer := state.bytes.lock().unwrap_or_else(fn(poisoned) { poisoned.into_inner() })
+        buffer.closed = true
+        state.ready.notify_all()
+        ^result
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:1197
+fn jet_process_spawn_output_reader<R: io.Read + Send>(reader: R?, terminal_eof: Bool, limit: Usize?,
+    budget: Arc<AtomicUsize>?, limit_hit: Arc<AtomicBool>, read_error: Arc<AtomicBool>, group_pid: U32?)
+    -> (io.BufReader<ProcessReader>?, Arc<ProcessOutputState>?, JoinHandle<() io.Error!>?) {
+    if reader.is_none() -> return (None, None, None)
+    reader :: reader.unwrap()
+    // GATE #4565: kernel primitive
+    #Unsafe("transfer static native pipe reader to thread and share synchronized output state with public buffered reader") {
+        state :: Arc.new(ProcessOutputState{
+            bytes: Mutex.new(ProcessOutputBuffer{bytes: [U8].with_capacity(jet_process_output_buffer_capacity(limit)),
+                cursor: 0, closed: false, error: None}), ready: Condvar.new()
+        })
+        worker_state :: state.clone()
+        worker :: spawn(fn() {
+            jet_process_output_worker(^reader, ^worker_state, terminal_eof, limit, ^budget, ^limit_hit, ^read_error, group_pid)
+        })
+        (Some(io.BufReader.new(ProcessReader.Shared(state.clone()))), Some(^state), Some(^worker))
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:1247
+struct JetProcessOutput { text: String, exceeded: Bool }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:1252
+fn jet_process_drain_reader<R: io.Read + Send>(reader: R?, limit: Usize?, budget: Arc<AtomicUsize>?,
+    limit_hit: Arc<AtomicBool>, cancel: Arc<AtomicBool>?, groups: Arc<Mutex<[U32]>>?, group_pid: U32?)
+    -> JoinHandle<JetProcessOutput io.Error!>? {
+    // GATE #4565: kernel primitive
+    #Unsafe("native drain owns the pipe, bounded shared budget and unwind cleanup; kill groups on malformed data, read failure, overflow or panic") {
+        reader.map(fn(reader) {
+            reader := ^reader
+            spawn(fn() {
+                result :: catch_unwind(AssertUnwindSafe(fn() -> JetProcessOutput io.Error! {
+                    bytes := [U8].with_capacity(jet_process_output_buffer_capacity(limit))
+                    exceeded := false
+                    chunk := [U8; JET_PROCESS_IO_CHUNK_BYTES].filled(0)
+                    loop {
+                        count :: io.Read.read(&reader, &chunk)?
+                        if count == 0 -> break
+                        kept :: match limit {
+                            None -> { bytes.extend_from_slice(&chunk[..count]); count }
+                            Some(limit) -> {
+                                budget :: budget.as_ref().expect("bounded process output needs a shared budget")
+                                kept :: jet_process_output_reserve(limit, budget, count)
+                                if kept != 0 -> bytes.extend_from_slice(&chunk[..kept])
+                                kept
+                            }
+                        }
+                        if kept < count {
+                            exceeded = true
+                            limit_hit.store(true, Ordering.Release)
+                            jet_process_stop_output(groups.as_ref(), group_pid)
+                            break
+                        }
+                    }
+                    text :: String.from_utf8(^bytes).map_err(fn(error) { io.Error.new(io.ErrorKind.InvalidData, error) })?
+                    Ok(JetProcessOutput{text: ^text, exceeded})
+                }))
+                match result {
+                    Ok(result) -> {
+                        if result.is_err() {
+                            if Some(cancel) :: cancel.as_ref() -> cancel.store(true, Ordering.Release)
+                            jet_process_stop_output(groups.as_ref(), group_pid)
+                        }
+                        ^result
+                    }
+                    Err(payload) -> {
+                        if Some(cancel) :: cancel.as_ref() -> cancel.store(true, Ordering.Release)
+                        jet_process_stop_output(groups.as_ref(), group_pid)
+                        resume_unwind(^payload)
+                    }
+                }
+            })
+        })
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:1324
+fn jet_process_finish_output_drain(drain: JoinHandle<JetProcessOutput io.Error!>?, stream: String) -> JetProcessOutput IOError! {
+    if drain.is_none() -> return Ok(JetProcessOutput{text: "", exceeded: false})
+    // GATE #4565: kernel primitive
+    #Unsafe("join native output drain and map panic/read failure at the stream's read context") {
+        drain.unwrap().join()
+            .map_err(fn(_) { IOError.other(IOOperation.Read, Some(stream.to_string()), "process output reader panicked") })?
+            .map_err(fn(error) { IOError.other(IOOperation.Read, Some(stream.to_string()), error) })
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:1348
+fn jet_process_collect_pipeline_drains(output_drain: JoinHandle<JetProcessOutput io.Error!>?,
+    stderr_drains: [JoinHandle<JetProcessOutput io.Error!>?]) -> (JetProcessOutput, String) IOError! {
+    first_error := None
+    output := JetProcessOutput{text: "", exceeded: false}
+    match jet_process_finish_output_drain(^output_drain, "pipeline stdout") {
+        Ok(result) -> output = ^result
+        Err(error) -> first_error = Some(^error)
+    }
+    output_exceeded := output.exceeded
+    errors := ""
+    loop drain in ^stderr_drains {
+        match jet_process_finish_output_drain(^drain, "pipeline stderr") {
+            Ok(result) -> {
+                output_exceeded |= result.exceeded
+                errors.push_str(&result.text)
+            }
+            Err(error) -> if first_error.is_none() -> first_error = Some(^error)
+        }
+    }
+    if Some(error) :: first_error -> return Err(^error)
+    output.exceeded = output_exceeded
+    Ok((^output, ^errors))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:1383
+fn jet_process_collect_output(drains: (JoinHandle<JetProcessOutput io.Error!>?, JoinHandle<JetProcessOutput io.Error!>?))
+    -> (String, String, Bool) IOError! {
+    // Both workers are joined even when stdout fails; retain stdout error precedence.
+    output :: jet_process_finish_output_drain(^drains.0, "process stdout")
+    errors :: jet_process_finish_output_drain(^drains.1, "process stderr")
+    match (output, errors) {
+        (Ok(output), Ok(errors)) -> Ok((^output.text, ^errors.text, output.exceeded || errors.exceeded))
+        (Err(error), _) | (_, Err(error)) -> Err(^error)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:1402
+fn jet_process_finish_output_worker(worker: JoinHandle<() io.Error!>?, stream: String) -> () IOError! {
+    if worker.is_none() -> return Ok(())
+    // GATE #4565: kernel primitive
+    #Unsafe("reap native shared-output worker and preserve panic/read failure") {
+        worker.unwrap().join()
+            .map_err(fn(_) { IOError.other(IOOperation.Read, Some(stream.to_string()), "process output reader panicked") })?
+            .map_err(fn(error) { IOError.other(IOOperation.Read, Some(stream.to_string()), error) })
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:1423
+fn jet_process_collect_child_output(child: &ProcessChild) -> (String, String) IOError! {
+    jet_process_join_child_output_workers(child)?
+    output :: jet_process_output_state_snapshot(child.stdout_state.as_ref(), "process stdout")?
+    errors :: jet_process_output_state_snapshot(child.stderr_state.as_ref(), "process stderr")?
+    Ok((^output, ^errors))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:1432
+fn jet_process_join_child_output_workers(child: &ProcessChild) -> () IOError! {
+    // GATE #4565: kernel primitive
+    #Unsafe("drop local reader buffers before reaping both pipe-owning threads; retained state keeps every receipt byte") {
+        _ :: child.stdout.borrow_mut().take()
+        _ :: child.stderr.borrow_mut().take()
+        stdout_worker :: child.stdout_worker.borrow_mut().take()
+        stderr_worker :: child.stderr_worker.borrow_mut().take()
+        stdout_result :: jet_process_finish_output_worker(^stdout_worker, "process stdout")
+        stderr_result :: jet_process_finish_output_worker(^stderr_worker, "process stderr")
+        if Err(error) :: stdout_result -> return Err(^error)
+        if Err(error) :: stderr_result -> return Err(^error)
+        Ok(())
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:1454
+fn jet_process_spec_run_windows(spec: &ProcessSpec) -> ProcessReceipt IOError! {
+    if spec.detached || spec.terminal.is_some() || spec.stdin.is_some()
+        || spec.stdout != ProcessStreamMode.Capture || spec.stderr != ProcessStreamMode.Capture {
+        return Err(IOError.other(IOOperation.Resolve, spec.cmd.first().cloned(),
+            "authority-bound Windows execution requires non-detached capture streams and closed stdin"))
+    }
+    plan :: jet_process_spec_plan(spec)?
+    jet_process_verify_launch_plan(spec, &plan)?
+    cwd :: jet_process_policy_sandbox_cwd(spec)?
+    sandbox_scope :: jet_process_policy_sandbox_scope(spec, &plan.executable_identity)?
+    output_dir :: if sandbox_scope.output_writable {
+        Some(jet_process_sandbox.agent_output_dir(cwd).map_err(fn(error) { jet_process_sandbox_error_windows(spec, error) })?)
+    } else { None }
+    environment :: jet_process_sandbox_env(spec)?
+    // GATE #4565: kernel primitive
+    #Unsafe("execute captured authority-bound native Windows runner with timeout, byte limits and backend identity verification") {
+        result :: jet_process_sandbox.windows_output(OSPath.new(&plan.executable_identity), &spec.cmd[1..], cwd,
+            output_dir.as_ref(), &environment, sandbox_scope.share_network, sandbox_scope.source_readable, false,
+            spec.timeout_ms, spec.output_limit).map_err(fn(error) { jet_process_sandbox_error_windows(spec, error) })?
+        if result.mechanism != plan.backend {
+            return Err(IOError.other(IOOperation.Resolve, spec.cmd.first().cloned(),
+                "authority-bound Windows launch returned a different isolation backend"))
+        }
+        output :: String.from_utf8(^result.output.stdout)
+            .map_err(fn(error) { IOError.other(IOOperation.Read, Some("process stdout"), error) })?
+        errors :: String.from_utf8(^result.output.stderr)
+            .map_err(fn(error) { IOError.other(IOOperation.Read, Some("process stderr"), error) })?
+        Ok(jet_process_receipt(spec, Some(&plan), true, result.pid, result.output.status.code().unwrap_or(-1) as I64,
+            result.output.status.success(), Err(JetAbsent{}), result.timed_out, ^output, ^errors, None))
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:1533
+fn jet_process_sandbox_error_windows(spec: &ProcessSpec, error: jet_process_sandbox.WindowsSandboxError) -> IOError {
+    detail :: match error {
+        jet_process_sandbox.WindowsSandboxError.Unsupported(detail) | jet_process_sandbox.WindowsSandboxError.Io(detail) -> ^detail
+    }
+    IOError.other(IOOperation.Resolve, spec.cmd.first().cloned(), ^detail)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:1549
+fn jet_process_direct_group_cleanup(pid: U32) -> IOError? {
+    // GATE #4565: kernel primitive
+    #Unsafe("kill remaining real Unix descendants after leader wait; already absent group is successful cleanup") {
+        match jet_process_pty.signal_group(pid, jet_process_signal_kill()) {
+            Ok(()) -> None
+            Err(error) -> if error.kind() == io.ErrorKind.NotFound { None } else { Some(jet_process_cleanup_io_error(^error)) }
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:1558
+fn jet_process_spec_run_direct(spec: &ProcessSpec) -> ProcessReceipt IOError! {
+    command := jet_process_command_base_with_identity(spec, None)?
+    // GATE #4565: kernel primitive
+    #Unsafe("ordinary Unix blocking wait owns process group and two bounded drains; cancellation and all failure paths reap child and readers") {
+        jet_process_attach_process_group(&command, spec)
+            .map_err(fn(error) { IOError.other(IOOperation.Resolve, spec.cmd.first().cloned(), error) })?
+        child := command.spawn().map_err(fn(error) { IOError.other(IOOperation.Resolve, spec.cmd.first().cloned(), error) })?
+        child_pid :: child.id()
+        pid :: child_pid as I64
+        // Pipe-owning drain workers stop the group; no supervisor polling needed.
+        output_limit :: spec.output_limit.map(fn(limit) { limit.max(0) as Usize })
+        output_budget :: output_limit.map(fn(_) { Arc.new(AtomicUsize.new(0)) })
+        output_limit_hit :: Arc.new(AtomicBool.new(false))
+        output_drain :: jet_process_drain_reader(child.stdout.take(), output_limit, output_budget.clone(),
+            output_limit_hit.clone(), None, None, Some(child_pid))
+        stderr_drain :: jet_process_drain_reader(child.stderr.take(), output_limit, ^output_budget,
+            output_limit_hit.clone(), None, None, Some(child_pid))
+        cancel_control :: jet_scheduler_current_task_control()
+        cancel_guard :: cancel_control.as_ref().map(fn(control) {
+            control.register_cancel_callback(Arc.new(fn() { jet_process_pipeline_stop_group(child_pid) }))
+        })
+        jet_process_publish_topology_id(pid, JetDevtoolsTopologyProcessState.Starting)
+        jet_process_publish_topology_id(pid, JetDevtoolsTopologyProcessState.Running)
+        wait :: match child.wait() {
+            Ok(status) -> Ok(^status)
+            Err(error) -> {
+                jet_process_pipeline_stop_group(child_pid)
+                _ :: child.kill()
+                _ :: child.wait()
+                Err(^error)
+            }
+        }
+        drop(^cancel_guard)
+        cleanup_error :: wait.as_ref().ok().and_then(fn(_) { jet_process_direct_group_cleanup(child_pid) })
+        drained :: jet_process_collect_output((^output_drain, ^stderr_drain))
+        cancellation_pending :: cancel_control.as_ref().is_some_and(fn(control) { control.cancelled.load(Ordering.Acquire) })
+        (output, errors, output_exceeded) :: match drained {
+            Ok(drained) -> ^drained
+            Err(error) -> {
+                jet_process_publish_topology_id(pid, JetDevtoolsTopologyProcessState.Failed)
+                if cancellation_pending && !jet_scheduler_shielded() -> jet_task_deliver_cancel()
+                return Err(^error)
+            }
+        }
+        if cancellation_pending && !jet_scheduler_shielded() {
+            jet_process_publish_topology_id(pid, JetDevtoolsTopologyProcessState.Failed)
+            jet_task_deliver_cancel()
+        }
+        status :: match wait {
+            Ok(status) -> ^status
+            Err(error) -> {
+                jet_process_publish_topology_id(pid, JetDevtoolsTopologyProcessState.Failed)
+                return Err(IOError.other(IOOperation.Close, Some("process"), ^error))
+            }
+        }
+        if Some(error) :: cleanup_error {
+            jet_process_publish_topology_id(pid, JetDevtoolsTopologyProcessState.Failed)
+            return Err(^error)
+        }
+        if output_exceeded || output_limit_hit.load(Ordering.Acquire) {
+            jet_process_publish_topology_id(pid, JetDevtoolsTopologyProcessState.Failed)
+            return Err(IOError.ResourceLimit(ProcessResourceLimit.Output))
+        }
+        signal :: jet_outcome_of(ExitStatusExt.signal(&status).map(fn(value) { value as I64 }).map(JetInt.from_i64))
+        result :: jet_process_receipt(spec, None, true, pid, status.code().unwrap_or(-1) as I64,
+            status.success(), ^signal, false, ^output, ^errors, None)
+        jet_process_publish_topology_id(pid, if status.success() { JetDevtoolsTopologyProcessState.Exited } else { JetDevtoolsTopologyProcessState.Failed })
+        Ok(^result)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:1698
+fn jet_process_spec_can_run_direct(spec: &ProcessSpec) -> Bool {
+    spec.policy_wire.is_none() && spec.terminal.is_none() && !spec.detached && spec.stdin.is_none()
+        && spec.stdout == ProcessStreamMode.Capture && spec.stderr == ProcessStreamMode.Capture
+        && spec.timeout_ms.is_none() && spec.cpu_time_limit_ms.is_none()
+        && spec.memory_limit_bytes.is_none() && spec.open_file_limit.is_none()
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:1711
+fn jet_process_spec_run_inner(spec: &ProcessSpec) -> ProcessReceipt IOError! {
+    if target.selected_os() == .Windows && spec.policy_wire.is_some() -> return jet_process_spec_run_windows(spec)
+    if target.selected_family() == .Unix && jet_process_spec_can_run_direct(spec) -> return jet_process_spec_run_direct(spec)
+    child :: jet_process_spec_spawn(spec)?
+    jet_process_child_wait(&child)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:1725
+fn jet_process_spec_run(spec: &ProcessSpec) -> ProcessReceipt IOError! { jet_process_spec_run_inner(spec) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:1730
+fn jet_process_checked_stderr(errors: String) -> String {
+    const LIMIT: Usize = 4096
+    if errors.len() <= LIMIT -> return errors.to_string()
+    end := LIMIT
+    loop !errors.is_char_boundary(end) -> end -= 1
+    errors[..end].to_string()
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:1741
+fn jet_process_spec_run_checked(spec: &ProcessSpec) -> ProcessReceipt IOError! {
+    result :: jet_process_spec_run(spec)?
+    if result.success -> return Ok(^result)
+    cause := "process exited unsuccessfully: code={result.code}"
+    if Ok(signal) :: result.signal -> cause.push_str(", signal={signal}")
+    cause.push_str(", stderr={jet_process_checked_stderr(&result.errors)}")
+    Err(IOError.other(IOOperation.Close, spec.cmd.first().cloned(), ^cause))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:1764
+fn jet_process_sandbox_pipeline_spawn(spec: &ProcessSpec, launch_plan: &ProcessPlan, input: ChildStdout?) -> Child IOError! {
+    if spec.terminal.is_some() {
+        return Err(IOError.other(IOOperation.Resolve, spec.cmd.first().cloned(),
+            "terminal sessions cannot be used as pipeline stages; spawn the session directly"))
+    }
+    cwd :: jet_process_policy_sandbox_cwd(spec)?
+    sandbox_scope :: jet_process_policy_sandbox_scope(spec, &launch_plan.executable_identity)?
+    output_dir :: if sandbox_scope.output_writable {
+        Some(jet_process_sandbox.agent_output_dir(cwd).map_err(fn(error) { jet_process_sandbox_error(spec, error) })?)
+    } else { None }
+    environment :: jet_process_sandbox_env(spec)?
+    // GATE #4565: kernel primitive
+    #Unsafe("spawn real confined pipeline stage with inherited upstream pipe and enforced descendant group limits") {
+        jet_process_sandbox.spawn(OSPath.new(&launch_plan.executable_identity), &spec.cmd[1..], cwd,
+            output_dir.as_ref(), &environment, sandbox_scope.share_network, sandbox_scope.source_readable, false,
+            spec.cmd.first().map(fn(word) { OsStr.new(word.as_str()) }), fn(command) {
+                if Some(stdout) :: input {
+                    command.stdin(Stdio.from(^stdout))
+                } else {
+                    command.stdin(match &spec.stdin { Some(mode) -> jet_process_stdio(mode), None -> Stdio.null() })
+                }
+                command.stdout(Stdio.piped())
+                command.stderr(Stdio.piped())
+                jet_process_pty.attach_process_group(command, jet_process_native_limits(spec))
+                    .map_err(fn(error) { jet_process_sandbox.Error.Io(error.to_string()) })?
+                Ok(())
+            }).map_err(fn(error) { jet_process_sandbox_error(spec, error) })
+    }
+}
 

@@ -1,492 +1,374 @@
-// PORT-PENDING 2143 crates-jet-codegen-src-prelude-core-atomic: crates/jet-codegen/src/Prelude/Core/Atomic.rs:1-488
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS // D-PLACE1=A: one scalar carrier for every execution tier.
-//RS //
-//RS // The checked `Atomic<T>` surface is deliberately closed to the scalar set
-//RS // represented by this module. The compiler lowers every tier to this same
-//RS // carrier; no tier supplies a lock or a target-specific fallback. `T` remains
-//RS // a type parameter so generated records retain their source-facing shape while
-//RS // the cell stores one carrier word.
-//RS use core::marker::PhantomData;
-//RS use core::sync::atomic::{AtomicU64, Ordering};
-//RS use jet_foundation::Outcome::AllocError;
-//RS 
-//RS /// Marker for Jet's exact `Int` atomic lane.
-//RS ///
-//RS /// Jet's source `Int` and fixed-width `I64` both use an `i64` ABI word, but
-//RS /// they have different arithmetic and comparison laws. Keeping this marker
-//RS /// distinct makes that difference part of the generated Rust type rather than
-//RS /// a convention hidden in an adapter.
-//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-//RS pub struct JetAtomicInt;
-//RS 
-//RS /// Scalar representation accepted by the checked `Atomic<T>` surface.
-//RS ///
-//RS /// `Wire` is the one-word value handed to the atomic cell. Fixed-width lanes
-//RS /// use their native scalar. Exact `Int` uses a raw i64 ABI word backed by the
-//RS /// Foundation's owned `JetInt` nodes.
-//RS pub trait JetAtomicValue: Send + Sync + 'static {
-//RS     type Wire: Send + Sync + 'static;
-//RS     type Guard: Default;
-//RS     /// Clone a borrowed wire before publishing it in the cell.
-//RS     fn jet_atomic_clone_value(value: &Self::Wire) -> Self::Wire;
-//RS     /// Encode the independently owned publication value into one word.
-//RS     fn jet_atomic_into_bits(value: Self::Wire) -> u64;
-//RS     /// Drop a publication word that still owns a spilled exact node. Copy
-//RS     /// lanes leave the word untouched.
-//RS     fn jet_atomic_drop_bits(_bits: u64) {}
-//RS 
-//RS     /// Clone a value observed in an atomic word. The reload callback validates
-//RS     /// that the word is still current while the exact carrier retains it.
-//RS     fn jet_atomic_clone_from_bits<F>(bits: u64, reload: F) -> Self::Wire
-//RS     where
-//RS         F: FnMut() -> u64;
-//RS     /// Drop an owned wire value that has not been published. Copy lanes are
-//RS     /// no-ops; the exact lane releases its spilled node reference.
-//RS     fn jet_atomic_drop_value(value: Self::Wire) {
-//RS         let bits = Self::jet_atomic_into_bits(value);
-//RS         Self::jet_atomic_drop_bits(bits);
-//RS     }
-//RS 
-//RS     fn jet_atomic_equal(left: &Self::Wire, right: &Self::Wire) -> bool;
-//RS     fn jet_atomic_equal_bits<F>(bits: u64, right: &Self::Wire, reload: F) -> bool
-//RS     where
-//RS         F: FnMut() -> u64,
-//RS     {
-//RS         let left = Self::jet_atomic_clone_from_bits(bits, reload);
-//RS         Self::jet_atomic_equal(&left, right)
-//RS     }
-//RS     /// Compare while retaining any owner cloned from the publication word.
-//RS     /// The guard must live through the following CAS so pointer reuse cannot
-//RS     /// turn a value comparison into an ABA match.
-//RS     fn jet_atomic_equal_and_hold_bits<F>(
-//RS         bits: u64,
-//RS         right: &Self::Wire,
-//RS         reload: F,
-//RS     ) -> (bool, Self::Guard)
-//RS     where
-//RS         F: FnMut() -> u64,
-//RS     {
-//RS         (
-//RS             Self::jet_atomic_equal_bits(bits, right, reload),
-//RS             Self::Guard::default(),
-//RS         )
-//RS     }
-//RS }
-//RS 
-//RS macro_rules! impl_copy_atomic_value {
-//RS     ($ty:ty, $encode:expr, $decode:expr) => {
-//RS         impl JetAtomicValue for $ty {
-//RS             type Wire = $ty;
-//RS             type Guard = ();
-//RS 
-//RS             #[inline(always)]
-//RS             fn jet_atomic_clone_value(value: &Self::Wire) -> Self::Wire {
-//RS                 *value
-//RS             }
-//RS             fn jet_atomic_into_bits(value: Self::Wire) -> u64 {
-//RS                 ($encode)(value)
-//RS             }
-//RS 
-//RS             #[inline(always)]
-//RS             fn jet_atomic_clone_from_bits<F>(bits: u64, _reload: F) -> Self::Wire
-//RS             where
-//RS                 F: FnMut() -> u64,
-//RS             {
-//RS                 ($decode)(bits)
-//RS             }
-//RS 
-//RS             #[inline(always)]
-//RS             fn jet_atomic_drop_bits(_bits: u64) {}
-//RS 
-//RS             #[inline(always)]
-//RS             fn jet_atomic_equal(left: &Self::Wire, right: &Self::Wire) -> bool {
-//RS                 left == right
-//RS             }
-//RS         }
-//RS     };
-//RS }
-//RS 
-//RS impl_copy_atomic_value!(bool, |value: bool| if value { 1 } else { 0 }, |bits: u64| {
-//RS     bits != 0
-//RS });
-//RS impl_copy_atomic_value!(i32, |value: i32| u64::from(value as u32), |bits: u64| {
-//RS     bits as u32 as i32
-//RS });
-//RS impl_copy_atomic_value!(u32, |value: u32| u64::from(value), |bits: u64| {
-//RS     bits as u32
-//RS });
-//RS impl_copy_atomic_value!(i64, |value: i64| value as u64, |bits: u64| {
-//RS     bits as i64
-//RS });
-//RS impl_copy_atomic_value!(u64, |value: u64| value, |bits: u64| bits);
-//RS impl JetAtomicValue for JetAtomicInt {
-//RS     type Wire = i64;
-//RS     type Guard = Option<jet_foundation::Numeric::JetInt>;
-//RS 
-//RS     // The generated Rust and C ABI already carry source `Int` as one i64
-//RS     // word. Each publication clones its borrowed exact owner; the cell then
-//RS     // releases that clone independently.
-//RS     fn jet_atomic_clone_value(value: &Self::Wire) -> Self::Wire {
-//RS         // SAFETY: adapters borrow an owned raw word and retain its node.
-//RS         unsafe { jet_foundation::Numeric::JetInt::clone_from_raw(*value) }.into_raw()
-//RS     }
-//RS 
-//RS     #[inline(always)]
-//RS     fn jet_atomic_into_bits(value: Self::Wire) -> u64 {
-//RS         value as u64
-//RS     }
-//RS 
-//RS     #[inline(always)]
-//RS     fn jet_atomic_clone_from_bits<F>(bits: u64, reload: F) -> Self::Wire
-//RS     where
-//RS         F: FnMut() -> u64,
-//RS     {
-//RS         jet_foundation::Numeric::JetInt::clone_from_atomic(bits, reload).into_raw()
-//RS     }
-//RS 
-//RS     #[inline(always)]
-//RS     fn jet_atomic_drop_bits(bits: u64) {
-//RS         // SAFETY: the cell owns exactly one reference for its publication
-//RS         // word, and this function consumes that reference.
-//RS         unsafe {
-//RS             drop(jet_foundation::Numeric::JetInt::from_raw_owned(bits as i64));
-//RS         }
-//RS     }
-//RS 
-//RS     #[inline(always)]
-//RS     fn jet_atomic_equal(left: &Self::Wire, right: &Self::Wire) -> bool {
-//RS         let left = unsafe { jet_foundation::Numeric::JetInt::clone_from_raw(*left) };
-//RS         let right = unsafe { jet_foundation::Numeric::JetInt::clone_from_raw(*right) };
-//RS         left == right
-//RS     }
-//RS 
-//RS     #[inline(always)]
-//RS     fn jet_atomic_equal_bits<F>(bits: u64, right: &Self::Wire, reload: F) -> bool
-//RS     where
-//RS         F: FnMut() -> u64,
-//RS     {
-//RS         let left = jet_foundation::Numeric::JetInt::clone_from_atomic(bits, reload);
-//RS         let right = unsafe { jet_foundation::Numeric::JetInt::clone_from_raw(*right) };
-//RS         left == right
-//RS     }
-//RS 
-//RS     #[inline(always)]
-//RS     fn jet_atomic_equal_and_hold_bits<F>(
-//RS         bits: u64,
-//RS         right: &Self::Wire,
-//RS         reload: F,
-//RS     ) -> (bool, Self::Guard)
-//RS     where
-//RS         F: FnMut() -> u64,
-//RS     {
-//RS         let left = jet_foundation::Numeric::JetInt::clone_from_atomic(bits, reload);
-//RS         let right = unsafe { jet_foundation::Numeric::JetInt::clone_from_raw(*right) };
-//RS         let equal = left == right;
-//RS         (equal, Some(left))
-//RS     }
-//RS }
-//RS 
-//RS /// Numeric subset for which `Atomic<T>.add(delta)` is meaningful.
-//RS ///
-//RS /// `Bool` intentionally implements `JetAtomicValue` but not this trait: the
-//RS /// checker rejects `add` on a boolean atomic instead of inventing arithmetic
-//RS /// semantics for a predicate value. Fixed-width lanes use their ratified
-//RS /// wrapping arithmetic. Exact `Int` delegates to the surrounding tier's
-//RS /// canonical exact-integer operation.
-//RS pub trait JetAtomicAdd: JetAtomicValue {
-//RS     fn jet_atomic_add(left: &Self::Wire, delta: &Self::Wire) -> Self::Wire;
-//RS }
-//RS 
-//RS impl JetAtomicAdd for i32 {
-//RS     #[inline(always)]
-//RS     fn jet_atomic_add(left: &Self::Wire, delta: &Self::Wire) -> Self::Wire {
-//RS         left.wrapping_add(*delta)
-//RS     }
-//RS }
-//RS 
-//RS impl JetAtomicAdd for u32 {
-//RS     #[inline(always)]
-//RS     fn jet_atomic_add(left: &Self::Wire, delta: &Self::Wire) -> Self::Wire {
-//RS         left.wrapping_add(*delta)
-//RS     }
-//RS }
-//RS 
-//RS impl JetAtomicAdd for i64 {
-//RS     #[inline(always)]
-//RS     fn jet_atomic_add(left: &Self::Wire, delta: &Self::Wire) -> Self::Wire {
-//RS         left.wrapping_add(*delta)
-//RS     }
-//RS }
-//RS 
-//RS impl JetAtomicAdd for u64 {
-//RS     #[inline(always)]
-//RS     fn jet_atomic_add(left: &Self::Wire, delta: &Self::Wire) -> Self::Wire {
-//RS         left.wrapping_add(*delta)
-//RS     }
-//RS }
-//RS 
-//RS impl JetAtomicAdd for JetAtomicInt {
-//RS     #[inline(always)]
-//RS     fn jet_atomic_add(left: &Self::Wire, delta: &Self::Wire) -> Self::Wire {
-//RS         let left = unsafe { jet_foundation::Numeric::JetInt::clone_from_raw(*left) };
-//RS         let delta = unsafe { jet_foundation::Numeric::JetInt::clone_from_raw(*delta) };
-//RS         left.add(&delta)
-//RS             .unwrap_or_else(|_| std::process::abort())
-//RS             .into_raw()
-//RS     }
-//RS }
-//RS 
-//RS /// A non-copyable scalar cell with lock-free word operations.
-//RS ///
-//RS /// The cell is inline so it remains one machine word in compiler-owned
-//RS /// `#Layout(c)` records. Cloning the cell would create a different
-//RS /// synchronization location, so this type intentionally does not implement
-//RS /// `Clone`.
-//RS #[repr(transparent)]
-//RS pub struct JetAtomic<T: JetAtomicValue> {
-//RS     bits: AtomicU64,
-//RS     marker: PhantomData<T>,
-//RS }
-//RS 
-//RS /// Fallible operations for scalar lanes whose update may need ordinary
-//RS /// numeric storage. Fixed-width lanes never allocate; exact `Int` returns the
-//RS /// canonical allocator's structured refusal before publication.
-//RS pub trait JetAtomicFallible: JetAtomicValue {
-//RS     fn jet_atomic_try_new(value: Self::Wire) -> Result<Self::Wire, AllocError> {
-//RS         Ok(value)
-//RS     }
-//RS 
-//RS     fn jet_atomic_try_add(
-//RS         left: &Self::Wire,
-//RS         delta: &Self::Wire,
-//RS     ) -> Result<Self::Wire, AllocError>;
-//RS }
-//RS 
-//RS impl JetAtomicFallible for i32 {
-//RS     #[inline(always)]
-//RS     fn jet_atomic_try_add(left: &Self::Wire, delta: &Self::Wire) -> Result<Self::Wire, AllocError> {
-//RS         Ok(left.wrapping_add(*delta))
-//RS     }
-//RS }
-//RS 
-//RS impl JetAtomicFallible for u32 {
-//RS     #[inline(always)]
-//RS     fn jet_atomic_try_add(left: &Self::Wire, delta: &Self::Wire) -> Result<Self::Wire, AllocError> {
-//RS         Ok(left.wrapping_add(*delta))
-//RS     }
-//RS }
-//RS 
-//RS impl JetAtomicFallible for i64 {
-//RS     #[inline(always)]
-//RS     fn jet_atomic_try_add(left: &Self::Wire, delta: &Self::Wire) -> Result<Self::Wire, AllocError> {
-//RS         Ok(left.wrapping_add(*delta))
-//RS     }
-//RS }
-//RS 
-//RS impl JetAtomicFallible for u64 {
-//RS     #[inline(always)]
-//RS     fn jet_atomic_try_add(left: &Self::Wire, delta: &Self::Wire) -> Result<Self::Wire, AllocError> {
-//RS         Ok(left.wrapping_add(*delta))
-//RS     }
-//RS }
-//RS 
-//RS impl JetAtomicFallible for JetAtomicInt {
-//RS     #[inline(always)]
-//RS     fn jet_atomic_try_new(value: Self::Wire) -> Result<Self::Wire, AllocError> {
-//RS         Ok(value)
-//RS     }
-//RS 
-//RS     #[inline(always)]
-//RS     fn jet_atomic_try_add(
-//RS         left: &Self::Wire,
-//RS         delta: &Self::Wire,
-//RS     ) -> Result<Self::Wire, AllocError> {
-//RS         let left = unsafe { jet_foundation::Numeric::JetInt::clone_from_raw(*left) };
-//RS         let delta = unsafe { jet_foundation::Numeric::JetInt::clone_from_raw(*delta) };
-//RS         left.try_add(&delta)
-//RS             .map(jet_foundation::Numeric::JetInt::into_raw)
-//RS     }
-//RS }
-//RS 
-//RS impl<T: JetAtomicValue> JetAtomic<T> {
-//RS     pub fn new(value: T::Wire) -> Self {
-//RS         Self {
-//RS             bits: AtomicU64::new(T::jet_atomic_into_bits(value)),
-//RS             marker: PhantomData,
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn try_new(value: T::Wire) -> Result<Self, AllocError>
-//RS     where
-//RS         T: JetAtomicFallible,
-//RS     {
-//RS         Ok(Self::new(T::jet_atomic_try_new(value)?))
-//RS     }
-//RS 
-//RS     pub fn load(&self) -> T::Wire {
-//RS         let bits = self.bits.load(Ordering::SeqCst);
-//RS         T::jet_atomic_clone_from_bits(bits, || self.bits.load(Ordering::SeqCst))
-//RS     }
-//RS 
-//RS     pub fn observe(&self) -> T::Wire {
-//RS         self.load()
-//RS     }
-//RS 
-//RS     pub fn store(&self, value: T::Wire) {
-//RS         let next = T::jet_atomic_into_bits(value);
-//RS         let previous = self.bits.swap(next, Ordering::SeqCst);
-//RS         T::jet_atomic_drop_bits(previous);
-//RS     }
-//RS 
-//RS     pub fn publish(&self, next: T::Wire) {
-//RS         self.store(next);
-//RS     }
-//RS 
-//RS     pub fn add(&self, delta: T::Wire) -> T::Wire
-//RS     where
-//RS         T: JetAtomicAdd,
-//RS     {
-//RS         loop {
-//RS             let bits = self.bits.load(Ordering::SeqCst);
-//RS             let current = T::jet_atomic_clone_from_bits(bits, || self.bits.load(Ordering::SeqCst));
-//RS             let next = T::jet_atomic_add(&current, &delta);
-//RS             let published = T::jet_atomic_into_bits(T::jet_atomic_clone_value(&next));
-//RS             match self.bits.compare_exchange_weak(
-//RS                 bits,
-//RS                 published,
-//RS                 Ordering::SeqCst,
-//RS                 Ordering::SeqCst,
-//RS             ) {
-//RS                 Ok(_) => {
-//RS                     T::jet_atomic_drop_bits(bits);
-//RS                     T::jet_atomic_drop_value(next);
-//RS                     T::jet_atomic_drop_value(delta);
-//RS                     return current;
-//RS                 }
-//RS                 Err(_) => {
-//RS                     T::jet_atomic_drop_bits(published);
-//RS                     T::jet_atomic_drop_value(current);
-//RS                     T::jet_atomic_drop_value(next);
-//RS                 }
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn try_add(&self, delta: T::Wire) -> Result<T::Wire, AllocError>
-//RS     where
-//RS         T: JetAtomicFallible + JetAtomicAdd,
-//RS     {
-//RS         loop {
-//RS             let bits = self.bits.load(Ordering::SeqCst);
-//RS             let current = T::jet_atomic_clone_from_bits(bits, || self.bits.load(Ordering::SeqCst));
-//RS             let next = match T::jet_atomic_try_add(&current, &delta) {
-//RS                 Ok(next) => next,
-//RS                 Err(error) => {
-//RS                     T::jet_atomic_drop_value(current);
-//RS                     T::jet_atomic_drop_value(delta);
-//RS                     return Err(error);
-//RS                 }
-//RS             };
-//RS             let published = T::jet_atomic_into_bits(T::jet_atomic_clone_value(&next));
-//RS             match self.bits.compare_exchange_weak(
-//RS                 bits,
-//RS                 published,
-//RS                 Ordering::SeqCst,
-//RS                 Ordering::SeqCst,
-//RS             ) {
-//RS                 Ok(_) => {
-//RS                     T::jet_atomic_drop_bits(bits);
-//RS                     T::jet_atomic_drop_value(next);
-//RS                     T::jet_atomic_drop_value(delta);
-//RS                     return Ok(current);
-//RS                 }
-//RS                 Err(_) => {
-//RS                     T::jet_atomic_drop_bits(published);
-//RS                     T::jet_atomic_drop_value(current);
-//RS                     T::jet_atomic_drop_value(next);
-//RS                 }
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn compare_exchange(&self, expected: T::Wire, replacement: T::Wire) -> bool {
-//RS         loop {
-//RS             let bits = self.bits.load(Ordering::SeqCst);
-//RS             let (equal, guard) = T::jet_atomic_equal_and_hold_bits(bits, &expected, || {
-//RS                 self.bits.load(Ordering::SeqCst)
-//RS             });
-//RS             if !equal {
-//RS                 T::jet_atomic_drop_value(expected);
-//RS                 T::jet_atomic_drop_value(replacement);
-//RS                 drop(guard);
-//RS                 return false;
-//RS             }
-//RS             let published = T::jet_atomic_into_bits(T::jet_atomic_clone_value(&replacement));
-//RS             match self.bits.compare_exchange(bits, published, Ordering::SeqCst, Ordering::SeqCst) {
-//RS                 Ok(_) => {
-//RS                     T::jet_atomic_drop_bits(bits);
-//RS                     T::jet_atomic_drop_value(expected);
-//RS                     T::jet_atomic_drop_value(replacement);
-//RS                     drop(guard);
-//RS                     return true;
-//RS                 }
-//RS                 Err(_) => {
-//RS                     T::jet_atomic_drop_bits(published);
-//RS                     drop(guard);
-//RS                 }
-//RS             }
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS impl<T: JetAtomicValue> Drop for JetAtomic<T> {
-//RS     fn drop(&mut self) {
-//RS         T::jet_atomic_drop_bits(self.bits.load(Ordering::SeqCst));
-//RS     }
-//RS }
-//RS 
-//RS #[inline(always)]
-//RS pub fn jet_atomic_load<T: JetAtomicValue>(value: &JetAtomic<T>) -> T::Wire {
-//RS     value.load()
-//RS }
-//RS 
-//RS #[inline(always)]
-//RS pub fn jet_atomic_store<T: JetAtomicValue>(value: &JetAtomic<T>, next: T::Wire) {
-//RS     value.store(next)
-//RS }
-//RS 
-//RS #[inline(always)]
-//RS pub fn jet_atomic_add<T: JetAtomicAdd>(value: &JetAtomic<T>, delta: T::Wire) -> T::Wire {
-//RS     value.add(delta)
-//RS }
-//RS 
-//RS #[inline(always)]
-//RS pub fn jet_atomic_try_add<T: JetAtomicFallible + JetAtomicAdd>(
-//RS     value: &JetAtomic<T>,
-//RS     delta: T::Wire,
-//RS ) -> Result<T::Wire, AllocError> {
-//RS     value.try_add(delta)
-//RS }
-//RS 
-//RS #[inline(always)]
-//RS pub fn jet_atomic_compare_exchange<T: JetAtomicValue>(
-//RS     value: &JetAtomic<T>,
-//RS     expected: T::Wire,
-//RS     replacement: T::Wire,
-//RS ) -> bool {
-//RS     value.compare_exchange(expected, replacement)
-//RS }
-//RS 
-//RS #[inline(always)]
-//RS pub fn jet_atomic_publish<T: JetAtomicValue>(value: &JetAtomic<T>, next: T::Wire) {
-//RS     value.publish(next)
-//RS }
-//RS 
-//RS #[inline(always)]
-//RS pub fn jet_atomic_observe<T: JetAtomicValue>(value: &JetAtomic<T>) -> T::Wire {
-//RS     value.observe()
-//RS }
-//RS 
-// END-PORT-PENDING 2143 crates/jet-codegen/src/Prelude/Core/Atomic.rs:1-488
+// D-PLACE1=A: one inline scalar publication carrier for all execution tiers.
+// No locks or target-specific cell fallbacks. Fixed I64 and exact Int have distinct laws.
+use core.marker.PhantomData
+use core.sync.atomic.[AtomicU64, Ordering]
+use core.mem as atomic_mem
+use core.mem.runtime.kernel_atomic as scalar
+use jet_foundation.Numeric.JetInt
+use std.process
+use std.mem.drop
 
+// Rust: crates/jet-codegen/src/Prelude/Core/Atomic.rs:18
+#Derive(Clone, Copy, Debug, Eq, PartialEq)
+pub struct JetAtomicInt {}
+// Rust: crates/jet-codegen/src/Prelude/Core/Atomic.rs:26
+pub trait JetAtomicValue: Send + Sync {
+    type Wire: Send + Sync
+    type Guard: Default
+    // Rust: crates/jet-codegen/src/Prelude/Core/Atomic.rs:30
+    fn jet_atomic_clone_value(value: &Self.Wire) -> Self.Wire
+    // Rust: crates/jet-codegen/src/Prelude/Core/Atomic.rs:32
+    fn jet_atomic_into_bits(value: Self.Wire) -> U64
+    // Rust: crates/jet-codegen/src/Prelude/Core/Atomic.rs:35
+    fn jet_atomic_drop_bits(bits: U64) -> {}
+    // Rust: crates/jet-codegen/src/Prelude/Core/Atomic.rs:39
+    fn jet_atomic_clone_from_bits(bits: U64, reload: fn() -> U64) -> Self.Wire
+    // Rust: crates/jet-codegen/src/Prelude/Core/Atomic.rs:44
+    fn jet_atomic_drop_value(value: Self.Wire) -> {
+        bits :: Self.jet_atomic_into_bits(^value)
+        Self.jet_atomic_drop_bits(bits)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Atomic.rs:49
+    fn jet_atomic_equal(left: &Self.Wire, right: &Self.Wire) -> Bool
+    // Rust: crates/jet-codegen/src/Prelude/Core/Atomic.rs:50
+    fn jet_atomic_equal_bits(bits: U64, right: &Self.Wire, reload: fn() -> U64) -> Bool {
+        left :: Self.jet_atomic_clone_from_bits(bits, reload)
+        Self.jet_atomic_equal(&left, right)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Atomic.rs:60
+    // Guard retains the publication owner through CAS, preventing address-reuse ABA.
+    fn jet_atomic_equal_and_hold_bits(bits: U64, right: &Self.Wire, reload: fn() -> U64) -> (Bool, Self.Guard) {
+        (Self.jet_atomic_equal_bits(bits, right, reload), Self.Guard.default())
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Atomic.rs:75
+// Macro expansion uses the existing canonical copy-lane value policy, not another cell.
+// Rust: crates/jet-codegen/src/Prelude/Core/Atomic.rs:108
+impl JetAtomicValue for Bool {
+    type Wire = Bool
+    type Guard = ()
+    // Rust: crates/jet-codegen/src/Prelude/Core/Atomic.rs:82
+    fn jet_atomic_clone_value(value: &Bool) -> Bool { scalar.atomic_bool_clone_value(*value) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Atomic.rs:85
+    fn jet_atomic_into_bits(value: Bool) -> U64 { scalar.atomic_bool_into_bits(value) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Atomic.rs:90
+    fn jet_atomic_clone_from_bits(bits: U64, reload: fn() -> U64) -> Bool { scalar.atomic_bool_clone_from_bits(bits) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Atomic.rs:98
+    fn jet_atomic_drop_bits(bits: U64) -> { scalar.atomic_bool_drop_bits(bits) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Atomic.rs:101
+    fn jet_atomic_equal(left: &Bool, right: &Bool) -> Bool { scalar.atomic_bool_equal(*left, *right) }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Atomic.rs:111
+impl JetAtomicValue for I32 {
+    type Wire = I32
+    type Guard = ()
+    // Rust: crates/jet-codegen/src/Prelude/Core/Atomic.rs:82
+    fn jet_atomic_clone_value(value: &I32) -> I32 { scalar.atomic_i32_clone_value(*value) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Atomic.rs:85
+    fn jet_atomic_into_bits(value: I32) -> U64 { (value as U32) as U64 }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Atomic.rs:90
+    fn jet_atomic_clone_from_bits(bits: U64, reload: fn() -> U64) -> I32 { bits as U32 as I32 }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Atomic.rs:98
+    fn jet_atomic_drop_bits(bits: U64) -> { scalar.atomic_i32_drop_bits(bits) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Atomic.rs:101
+    fn jet_atomic_equal(left: &I32, right: &I32) -> Bool { scalar.atomic_i32_equal(*left, *right) }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Atomic.rs:114
+impl JetAtomicValue for U32 {
+    type Wire = U32
+    type Guard = ()
+    // Rust: crates/jet-codegen/src/Prelude/Core/Atomic.rs:82
+    fn jet_atomic_clone_value(value: &U32) -> U32 { scalar.atomic_u32_clone_value(*value) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Atomic.rs:85
+    fn jet_atomic_into_bits(value: U32) -> U64 { scalar.atomic_u32_into_bits(value) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Atomic.rs:90
+    fn jet_atomic_clone_from_bits(bits: U64, reload: fn() -> U64) -> U32 { scalar.atomic_u32_clone_from_bits(bits) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Atomic.rs:98
+    fn jet_atomic_drop_bits(bits: U64) -> { scalar.atomic_u32_drop_bits(bits) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Atomic.rs:101
+    fn jet_atomic_equal(left: &U32, right: &U32) -> Bool { scalar.atomic_u32_equal(*left, *right) }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Atomic.rs:117
+impl JetAtomicValue for I64 {
+    type Wire = I64
+    type Guard = ()
+    // Rust: crates/jet-codegen/src/Prelude/Core/Atomic.rs:82
+    fn jet_atomic_clone_value(value: &I64) -> I64 { scalar.atomic_i64_clone_value(*value) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Atomic.rs:85
+    fn jet_atomic_into_bits(value: I64) -> U64 { value as U64 }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Atomic.rs:90
+    fn jet_atomic_clone_from_bits(bits: U64, reload: fn() -> U64) -> I64 { bits as I64 }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Atomic.rs:98
+    fn jet_atomic_drop_bits(bits: U64) -> { scalar.atomic_i64_drop_bits(bits) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Atomic.rs:101
+    fn jet_atomic_equal(left: &I64, right: &I64) -> Bool { scalar.atomic_i64_equal(*left, *right) }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Atomic.rs:120
+impl JetAtomicValue for U64 {
+    type Wire = U64
+    type Guard = ()
+    // Rust: crates/jet-codegen/src/Prelude/Core/Atomic.rs:82
+    fn jet_atomic_clone_value(value: &U64) -> U64 { scalar.atomic_u64_clone_value(*value) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Atomic.rs:85
+    fn jet_atomic_into_bits(value: U64) -> U64 { scalar.atomic_u64_into_bits(value) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Atomic.rs:90
+    fn jet_atomic_clone_from_bits(bits: U64, reload: fn() -> U64) -> U64 { scalar.atomic_u64_clone_from_bits(bits) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Atomic.rs:98
+    fn jet_atomic_drop_bits(bits: U64) -> { scalar.atomic_u64_drop_bits(bits) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Atomic.rs:101
+    fn jet_atomic_equal(left: &U64, right: &U64) -> Bool { scalar.atomic_u64_equal(*left, *right) }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Atomic.rs:121
+impl JetAtomicValue for JetAtomicInt {
+    type Wire = I64
+    type Guard = JetInt?
+    // Rust: crates/jet-codegen/src/Prelude/Core/Atomic.rs:128
+    fn jet_atomic_clone_value(value: &I64) -> I64 {
+        // GATE #4565: kernel primitive
+        #Unsafe("borrowed exact ABI word owns its node; clone independently retains publication ownership") { JetInt.clone_from_raw(*value) }.into_raw()
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Atomic.rs:134
+    fn jet_atomic_into_bits(value: I64) -> U64 { value as U64 }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Atomic.rs:139
+    fn jet_atomic_clone_from_bits(bits: U64, reload: fn() -> U64) -> I64 {
+        // GATE #4565: kernel primitive
+        #Unsafe("canonical exact-node hazard retain reload-validates the observed publication word") { JetInt.clone_from_atomic(bits, reload) }.into_raw()
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Atomic.rs:147
+    fn jet_atomic_drop_bits(bits: U64) -> {
+        // GATE #4565: kernel primitive
+        #Unsafe("consume exactly the cell's one owned exact publication reference") { drop(JetInt.from_raw_owned(bits as I64)) }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Atomic.rs:156
+    fn jet_atomic_equal(left: &I64, right: &I64) -> Bool {
+        // GATE #4565: kernel primitive
+        #Unsafe("both raw operands are borrowed owners; temporary clones retain nodes for value comparison") {
+            left :: JetInt.clone_from_raw(*left)
+            right :: JetInt.clone_from_raw(*right)
+            left == right
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Atomic.rs:163
+    fn jet_atomic_equal_bits(bits: U64, right: &I64, reload: fn() -> U64) -> Bool {
+        // GATE #4565: kernel primitive
+        #Unsafe("hazard-retain observed publication and clone borrowed right operand before exact comparison") {
+            left :: JetInt.clone_from_atomic(bits, reload)
+            right :: JetInt.clone_from_raw(*right)
+            left == right
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Atomic.rs:173
+    fn jet_atomic_equal_and_hold_bits(bits: U64, right: &I64, reload: fn() -> U64) -> (Bool, JetInt?) {
+        // GATE #4565: kernel primitive
+        #Unsafe("return observed node owner as a guard held through CAS so address reuse cannot produce ABA") {
+            left :: JetInt.clone_from_atomic(bits, reload)
+            right :: JetInt.clone_from_raw(*right)
+            equal :: left == right
+            (equal, Val(^left))
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Atomic.rs:195
+// Bool deliberately has no add: fixed-width lanes wrap, exact Int uses Foundation arithmetic.
+pub trait JetAtomicAdd: JetAtomicValue {
+    // Rust: crates/jet-codegen/src/Prelude/Core/Atomic.rs:196
+    fn jet_atomic_add(left: &Self.Wire, delta: &Self.Wire) -> Self.Wire
+}
+impl JetAtomicAdd for I32 {
+    // Rust: crates/jet-codegen/src/Prelude/Core/Atomic.rs:201
+    fn jet_atomic_add(left: &I32, delta: &I32) -> I32 { scalar.atomic_i32_add_value(*left, *delta) }
+}
+impl JetAtomicAdd for U32 {
+    // Rust: crates/jet-codegen/src/Prelude/Core/Atomic.rs:208
+    fn jet_atomic_add(left: &U32, delta: &U32) -> U32 { scalar.atomic_u32_add_value(*left, *delta) }
+}
+impl JetAtomicAdd for I64 {
+    // Rust: crates/jet-codegen/src/Prelude/Core/Atomic.rs:215
+    fn jet_atomic_add(left: &I64, delta: &I64) -> I64 { scalar.atomic_i64_add_value(*left, *delta) }
+}
+impl JetAtomicAdd for U64 {
+    // Rust: crates/jet-codegen/src/Prelude/Core/Atomic.rs:222
+    fn jet_atomic_add(left: &U64, delta: &U64) -> U64 { scalar.atomic_u64_add_value(*left, *delta) }
+}
+impl JetAtomicAdd for JetAtomicInt {
+    // Rust: crates/jet-codegen/src/Prelude/Core/Atomic.rs:229
+    // GATE #4565: kernel primitive
+    #Unsafe("clone owned raw exact operands and abort on infallible-lane allocation refusal, never publish a fake value")
+    fn jet_atomic_add(left: &I64, delta: &I64) -> I64 {
+        left :: JetInt.clone_from_raw(*left)
+        delta :: JetInt.clone_from_raw(*delta)
+        left.add(&delta).unwrap_or_else(fn(_) { process.abort() }).into_raw()
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Atomic.rs:244
+// Inline and non-copyable: cloning would create a distinct synchronization location.
+// GATE #4565: kernel primitive — native AtomicU64 plus zero-sized marker must retain the Rust transparent one-word ABI.
+#Layout(c)
+pub struct JetAtomic<T: JetAtomicValue> { bits: AtomicU64, marker: PhantomData<T> }
+// Rust: crates/jet-codegen/src/Prelude/Core/Atomic.rs:253
+pub trait JetAtomicFallible: JetAtomicValue {
+    // Rust: crates/jet-codegen/src/Prelude/Core/Atomic.rs:254
+    fn jet_atomic_try_new(value: Self.Wire) -> Self.Wire atomic_mem.AllocError! { Ok(^value) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Atomic.rs:258
+    fn jet_atomic_try_add(left: &Self.Wire, delta: &Self.Wire) -> Self.Wire atomic_mem.AllocError!
+}
+impl JetAtomicFallible for I32 {
+    // Rust: crates/jet-codegen/src/Prelude/Core/Atomic.rs:266
+    fn jet_atomic_try_add(left: &I32, delta: &I32) -> I32 atomic_mem.AllocError! { scalar.atomic_i32_try_add_value(*left, *delta) }
+}
+impl JetAtomicFallible for U32 {
+    // Rust: crates/jet-codegen/src/Prelude/Core/Atomic.rs:273
+    fn jet_atomic_try_add(left: &U32, delta: &U32) -> U32 atomic_mem.AllocError! { scalar.atomic_u32_try_add_value(*left, *delta) }
+}
+impl JetAtomicFallible for I64 {
+    // Rust: crates/jet-codegen/src/Prelude/Core/Atomic.rs:280
+    fn jet_atomic_try_add(left: &I64, delta: &I64) -> I64 atomic_mem.AllocError! { scalar.atomic_i64_try_add_value(*left, *delta) }
+}
+impl JetAtomicFallible for U64 {
+    // Rust: crates/jet-codegen/src/Prelude/Core/Atomic.rs:287
+    fn jet_atomic_try_add(left: &U64, delta: &U64) -> U64 atomic_mem.AllocError! { scalar.atomic_u64_try_add_value(*left, *delta) }
+}
+impl JetAtomicFallible for JetAtomicInt {
+    // Rust: crates/jet-codegen/src/Prelude/Core/Atomic.rs:294
+    fn jet_atomic_try_new(value: I64) -> I64 atomic_mem.AllocError! { Ok(value) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Atomic.rs:299
+    // GATE #4565: kernel primitive
+    #Unsafe("temporary exact owner clones retain raw operands; structured allocation refusal precedes publication")
+    fn jet_atomic_try_add(left: &I64, delta: &I64) -> I64 atomic_mem.AllocError! {
+        left :: JetInt.clone_from_raw(*left)
+        delta :: JetInt.clone_from_raw(*delta)
+        left.try_add(&delta).map(JetInt.into_raw)
+    }
+}
+impl<T: JetAtomicValue> JetAtomic<T> {
+    // Rust: crates/jet-codegen/src/Prelude/Core/Atomic.rs:311
+    pub fn new(value: T.Wire) -> Self {
+        // GATE #4565: kernel primitive
+        Self{bits: #Unsafe("initialize inline native ordered word with one owned publication") { AtomicU64.new(T.jet_atomic_into_bits(^value)) }, marker: PhantomData{}}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Atomic.rs:318
+    pub fn try_new(value: T.Wire) -> Self atomic_mem.AllocError! where T: JetAtomicFallible {
+        Ok(Self.new(T.jet_atomic_try_new(^value)?))
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Atomic.rs:325
+    // GATE #4565: kernel primitive
+    #Unsafe("SeqCst load and canonical retain reload protect observed exact owners")
+    pub fn load(self: &Self) -> T.Wire {
+        bits :: self.bits.load(Ordering.SeqCst)
+        T.jet_atomic_clone_from_bits(bits, fn() { self.bits.load(Ordering.SeqCst) })
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Atomic.rs:330
+    pub fn observe(self: &Self) -> T.Wire { self.load() }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Atomic.rs:334
+    // GATE #4565: kernel primitive
+    #Unsafe("SeqCst exchange transfers new owner to cell and releases previous publication exactly once")
+    pub fn store(self: &Self, value: T.Wire) -> {
+        next :: T.jet_atomic_into_bits(^value)
+        previous :: self.bits.swap(next, Ordering.SeqCst)
+        T.jet_atomic_drop_bits(previous)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Atomic.rs:340
+    pub fn publish(self: &Self, next: T.Wire) -> { self.store(^next) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Atomic.rs:344
+    // GATE #4565: kernel primitive
+    #Unsafe("SeqCst CAS loop retains current owner; release unpublished candidates on retry and return old value")
+    pub fn add(self: &Self, delta: T.Wire) -> T.Wire where T: JetAtomicAdd {
+        loop {
+            bits :: self.bits.load(Ordering.SeqCst)
+            current :: T.jet_atomic_clone_from_bits(bits, fn() { self.bits.load(Ordering.SeqCst) })
+            next :: T.jet_atomic_add(&current, &delta)
+            published :: T.jet_atomic_into_bits(T.jet_atomic_clone_value(&next))
+            match self.bits.compare_exchange_weak(bits, published, Ordering.SeqCst, Ordering.SeqCst) {
+                Ok(_) -> {
+                    T.jet_atomic_drop_bits(bits)
+                    T.jet_atomic_drop_value(^next)
+                    T.jet_atomic_drop_value(^delta)
+                    return ^current
+                }
+                Err(_) -> {
+                    T.jet_atomic_drop_bits(published)
+                    T.jet_atomic_drop_value(^current)
+                    T.jet_atomic_drop_value(^next)
+                }
+            }
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Atomic.rs:374
+    // GATE #4565: kernel primitive
+    #Unsafe("fallible SeqCst CAS loop releases all candidates; numeric allocation refusal returns without publication")
+    pub fn try_add(self: &Self, delta: T.Wire) -> T.Wire atomic_mem.AllocError! where T: JetAtomicFallible + JetAtomicAdd {
+        loop {
+            bits :: self.bits.load(Ordering.SeqCst)
+            current :: T.jet_atomic_clone_from_bits(bits, fn() { self.bits.load(Ordering.SeqCst) })
+            next :: match T.jet_atomic_try_add(&current, &delta) {
+                Ok(next) -> ^next
+                Err(error) -> {
+                    T.jet_atomic_drop_value(^current)
+                    T.jet_atomic_drop_value(^delta)
+                    return Err(^error)
+                }
+            }
+            published :: T.jet_atomic_into_bits(T.jet_atomic_clone_value(&next))
+            match self.bits.compare_exchange_weak(bits, published, Ordering.SeqCst, Ordering.SeqCst) {
+                Ok(_) -> {
+                    T.jet_atomic_drop_bits(bits)
+                    T.jet_atomic_drop_value(^next)
+                    T.jet_atomic_drop_value(^delta)
+                    return Ok(^current)
+                }
+                Err(_) -> {
+                    T.jet_atomic_drop_bits(published)
+                    T.jet_atomic_drop_value(^current)
+                    T.jet_atomic_drop_value(^next)
+                }
+            }
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Atomic.rs:411
+    // GATE #4565: kernel primitive
+    #Unsafe("exact equality guard survives SeqCst CAS; retry releases candidate and guard, consuming operands only on final outcome")
+    pub fn compare_exchange(self: &Self, expected: T.Wire, replacement: T.Wire) -> Bool {
+        loop {
+            bits :: self.bits.load(Ordering.SeqCst)
+            (equal, guard) :: T.jet_atomic_equal_and_hold_bits(bits, &expected, fn() { self.bits.load(Ordering.SeqCst) })
+            if !equal {
+                T.jet_atomic_drop_value(^expected)
+                T.jet_atomic_drop_value(^replacement)
+                drop(^guard)
+                return false
+            }
+            published :: T.jet_atomic_into_bits(T.jet_atomic_clone_value(&replacement))
+            match self.bits.compare_exchange(bits, published, Ordering.SeqCst, Ordering.SeqCst) {
+                Ok(_) -> {
+                    T.jet_atomic_drop_bits(bits)
+                    T.jet_atomic_drop_value(^expected)
+                    T.jet_atomic_drop_value(^replacement)
+                    drop(^guard)
+                    return true
+                }
+                Err(_) -> { T.jet_atomic_drop_bits(published); drop(^guard) }
+            }
+        }
+    }
+}
+impl<T: JetAtomicValue> Drop for JetAtomic<T> {
+    // Rust: crates/jet-codegen/src/Prelude/Core/Atomic.rs:442
+    fn drop(self: &Self) -> {
+        // GATE #4565: kernel primitive
+        #Unsafe("exclusive destruction consumes the cell's final owned publication word") { T.jet_atomic_drop_bits(self.bits.load(Ordering.SeqCst)) }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Atomic.rs:448
+pub fn jet_atomic_load<T: JetAtomicValue>(value: &JetAtomic<T>) -> T.Wire { value.load() }
+// Rust: crates/jet-codegen/src/Prelude/Core/Atomic.rs:453
+pub fn jet_atomic_store<T: JetAtomicValue>(value: &JetAtomic<T>, next: T.Wire) -> { value.store(^next) }
+// Rust: crates/jet-codegen/src/Prelude/Core/Atomic.rs:458
+pub fn jet_atomic_add<T: JetAtomicAdd>(value: &JetAtomic<T>, delta: T.Wire) -> T.Wire { value.add(^delta) }
+// Rust: crates/jet-codegen/src/Prelude/Core/Atomic.rs:463
+pub fn jet_atomic_try_add<T: JetAtomicFallible + JetAtomicAdd>(value: &JetAtomic<T>, delta: T.Wire) -> T.Wire atomic_mem.AllocError! { value.try_add(^delta) }
+// Rust: crates/jet-codegen/src/Prelude/Core/Atomic.rs:471
+pub fn jet_atomic_compare_exchange<T: JetAtomicValue>(value: &JetAtomic<T>, expected: T.Wire, replacement: T.Wire) -> Bool { value.compare_exchange(^expected, ^replacement) }
+// Rust: crates/jet-codegen/src/Prelude/Core/Atomic.rs:480
+pub fn jet_atomic_publish<T: JetAtomicValue>(value: &JetAtomic<T>, next: T.Wire) -> { value.publish(^next) }
+// Rust: crates/jet-codegen/src/Prelude/Core/Atomic.rs:485
+pub fn jet_atomic_observe<T: JetAtomicValue>(value: &JetAtomic<T>) -> T.Wire { value.observe() }

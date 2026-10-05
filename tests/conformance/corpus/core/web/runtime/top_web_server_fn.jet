@@ -1,0 +1,86 @@
+use core.web.runtime.top_web_server_fn.*
+use std.sync.Arc
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebServerFn.rs:20-113,1338-1524
+#Test("server_function_form_codec_typed_fields_and_error_order") {
+    assert(jet_web_server_fn_clean("  a\nb  ", 128) == "a b")
+    assert(jet_web_server_fn_json_string("\"\\\n\r\t") == "\"\\\"\\\\\\n\\r\\t\"")
+    assert(jet_web_server_fn_valid_token("a-b_c.d/e", 128))
+    assert(!jet_web_server_fn_valid_token("bad key", 128))
+    assert(jet_web_server_fn_origin_matches_host("https://EXAMPLE.com/path", Some("example.com")))
+    assert(!jet_web_server_fn_origin_matches_host("https://other.test", Some("example.com")))
+    assert(jet_web_server_fn_form_decode("a+b%2B%C3%A9").unwrap() == "a b+é")
+    assert(jet_web_server_fn_form_decode("%").unwrap_err().public_message() == "form input contains an incomplete escape")
+    assert(jet_web_server_fn_form_decode("%GG").unwrap_err().public_message() == "form input contains an invalid escape")
+    assert(jet_web_server_fn_form_decode("%FF").is_err())
+    assert(jet_web_server_fn_form_json("z=1&a=x&a=y").unwrap() == "{\"a\":[\"x\",\"y\"],\"z\":\"1\"}")
+    binding :: "s=json:count=Int,flag=Bool,label=String?"
+    assert(jet_web_server_fn_form_json_typed("count=0012&flag=1", binding).unwrap() == "{\"count\":12,\"flag\":true}")
+    assert(jet_web_server_fn_form_json_typed("count=1&flag=0&flag=1", binding).is_err())
+    assert(jet_web_server_fn_form_json_typed("count=1&flag=0&unknown=x", binding).is_err())
+    assert(jet_web_server_fn_form_json_typed("count=1", binding).is_err())
+    assert(jet_web_server_fn_form_json_typed("n=NaN", "s=json:n=Float").is_err())
+    assert(jet_web_server_fn_form_json_typed("n=1", "s=json:n=Int,n=Int").is_err())
+    assert(jet_web_server_fn_form_field("%GG=x&__jet_csrf=token", "__jet_csrf").unwrap() == "token")
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebServerFn.rs:234-292,524-588,794-967
+#Test("server_function_checked_context_policy_and_cached_dispatch") {
+    handler :: #Unsafe("retain source-control handler closure") { Arc.new(fn(_context, body) { Ok(body.to_string()) }) }
+    function :: JetWebServerFunction.new("save", "source/save", handler).unwrap()
+        .with_idempotency(true).with_csrf(.SameOrigin{expected_origin: Some("https://example.com"), token: Some("token")})
+    context :: JetWebServerFnRequestContext.checked("request-1", "source/save", "/actions/save", "POST",
+        Some("https://example.com"), Some("example.com"), None, [:], Some("token"), Some("same-key"), None).unwrap()
+    bad := context.clone()
+    bad.origin = Some("https://evil.test")
+    assert(function.dispatch(JetWebServerFnRequest.json("POST", "/actions/save", "{}", bad)).status == 403)
+    response :: function.dispatch(JetWebServerFnRequest.json("POST", "/actions/save", "{\"a\":1}", context.clone()))
+    assert(response.status == 200)
+    cached :: function.dispatch(JetWebServerFnRequest.json("POST", "/actions/save", "{\"a\":2}", context.clone()))
+    assert(cached.body == "{\"a\":1}")
+    assert(function.state().status == JetWebServerFnCallStatus.Success)
+    assert(function.dispatch(JetWebServerFnRequest.json("GET", "/actions/save", "{}", context.clone())).status == 405)
+    assert(function.dispatch(JetWebServerFnRequest.json("POST", "/missing", "{}", context.clone())).status == 404)
+    context.cancel()
+    assert(function.dispatch(JetWebServerFnRequest.json("POST", "/actions/save", "{}", context)).status == 499)
+    assert(JetWebServerFnRequestContext.checked("bad id", "source", "/actions/save", "POST", None, None, None, [:], None, None, None).is_err())
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebServerFn.rs:832-900,1016-1113
+#Test("server_function_unit_and_typed_progressive_input") {
+    handler :: #Unsafe("retain progressive-control handler") { Arc.new(fn(_context, body) { Ok(body.to_string()) }) }
+    unit :: JetWebServerFunction.typed("ping", "source/ping", "POST", "Unit", "Unit", "Error", handler.clone()).unwrap()
+    assert(unit.normalize_input("text/plain", "").unwrap() == "null")
+    assert(unit.progressive_form("").unwrap().body == "null")
+    form :: JetWebServerFunction.typed("form", "source/form", "POST", "Input", "Output", "Error", handler).unwrap()
+        .with_form_binding("s=json:n=Int")
+    assert(form.normalize_input("application/x-www-form-urlencoded", "n=0012").unwrap() == "{\"n\":12}")
+    assert(form.normalize_input("application/json;charset=utf-8", "{\"n\":12}").is_ok())
+    assert(form.normalize_input("application/json", "bad json").is_err())
+    assert(form.normalize_input("text/plain", "data").unwrap_err() == JetWebServerFnError.UnsupportedMediaType)
+    restricted :: form.with_capability("write")
+    context :: restricted.synthetic_client_request("{}", None).unwrap().context
+    assert(restricted.authorize(&context).unwrap_err() == JetWebServerFnError.Unauthorized)
+    assert(restricted.progressive_submission("n=1").pending)
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebServerFn.rs:1115-1229
+#Test("server_function_retry_policy_and_uncertain_dispatch") {
+    handler :: #Unsafe("retain retry-control handler") { Arc.new(fn(_context, body) { Ok(body.to_string()) }) }
+    safe :: JetWebServerFunction.typed("read", "source/read", "GET", "Input", "Output", "Error", handler.clone()).unwrap()
+        .with_retry(.Safe{max_attempts: 2})
+    assert(safe.can_retry(1, None, &JetWebServerFnError.TimedOut))
+    assert(!safe.can_retry(2, None, &JetWebServerFnError.TimedOut))
+    assert(!safe.can_retry(1, None, &JetWebServerFnError.InvalidOutput))
+    assert(safe.call_encoded("{}", None, fn(request) { Ok(JetWebServerFnResponse{status: 200, body: "{}", content_type: "application/json", request_id: request.context.request_id, middleware: []}) }).unwrap() == "{}")
+    mutating :: JetWebServerFunction.new("save", "source/save", handler).unwrap().with_retry(.Idempotent{max_attempts: 3})
+    assert(mutating.call_encoded("{}", None, fn(_request) { Err(.TimedOut) }).is_err())
+    mutating :: mutating.with_idempotency(true)
+    assert(mutating.can_retry(1, Some("key"), &JetWebServerFnError.TimedOut))
+    assert(!mutating.can_retry(1, Some(""), &JetWebServerFnError.TimedOut))
+    result :: mutating.call_encoded("{}", Some("key"), fn(_request) { Err(.Transport{code: "lost", message: "lost reply", dispatched: true}) })
+    assert(result.is_err())
+    assert(mutating.state().status == JetWebServerFnCallStatus.Uncertain)
+    assert(mutating.state().attempts == 1)
+    assert(mutating.state().error == "uncertain_completion")
+}

@@ -1,850 +1,318 @@
-// PORT-PENDING 0315 crates-jet-codegen-src-prelude-corelib-top-webvirtual: crates/jet-codegen/src/Prelude/CoreLib/Top/WebVirtual.rs:1-846
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS // D-DX-SUITE1=C / #2475: headless viewport virtualization.
-//RS //
-//RS // A virtual window is a compact layout fact.  It never allocates one entry per
-//RS // source row: even a 100,000-row table produces only the bounded visible range.
-//RS // Renderers consume the range and choose their own DOM/TUI representation.
-//RS 
-//RS const JET_WEB_VIRTUAL_MAX_MEASUREMENTS: usize = 4_096;
-//RS const JET_WEB_VIRTUAL_MAX_VISIBLE: i64 = 4_096;
-//RS #[derive(Clone)]
-//RS pub struct JetWebVirtualViewport {
-//RS     window: jet_std::JetSignal<JetWebVirtualWindow>,
-//RS }
-//RS #[derive(Clone, Copy)]
-//RS pub struct JetWebVirtualWindow {
-//RS     pub total_count: i64,
-//RS     pub scroll_offset: i64,
-//RS     pub viewport_size: i64,
-//RS     pub estimated_item_size: i64,
-//RS     pub overscan: i64,
-//RS     /// Inclusive start and exclusive end row indices.
-//RS     pub start: i64,
-//RS     pub end: i64,
-//RS     /// Estimated full content extent in the same units as `viewport_size`.
-//RS     pub total_size: i64,
-//RS     /// Number of positive measurements used for the estimate.
-//RS     pub measured_count: i64,
-//RS }
-//RS 
-//RS impl JetWebVirtualWindow {
-//RS     pub fn visible_count(&self) -> i64 {
-//RS         self.end.saturating_sub(self.start)
-//RS     }
-//RS 
-//RS     pub fn is_empty(&self) -> bool {
-//RS         self.start >= self.end
-//RS     }
-//RS 
-//RS     pub fn contains(&self, index: i64) -> bool {
-//RS         index >= self.start && index < self.end
-//RS     }
-//RS 
-//RS     pub fn range(&self) -> (i64, i64) {
-//RS         (self.start, self.end)
-//RS     }
-//RS 
-//RS     /// Recompute the estimate after one measured row.  The window remains a
-//RS     /// value, so a renderer can replace it atomically after measuring a frame.
-//RS     pub fn with_measurement(&self, index: i64, size: i64) -> Self {
-//RS         if index < 0 || index >= self.total_count || size <= 0 {
-//RS             return *self;
-//RS         }
-//RS         let measured_count = self.measured_count.saturating_add(1);
-//RS         let measured_total = self
-//RS             .estimated_item_size
-//RS             .saturating_mul(self.measured_count)
-//RS             .saturating_add(size);
-//RS         let estimate = measured_total
-//RS             .checked_div(measured_count)
-//RS             .unwrap_or(self.estimated_item_size)
-//RS             .max(1);
-//RS         jet_web_virtual_window(
-//RS             self.total_count,
-//RS             self.scroll_offset,
-//RS             self.viewport_size,
-//RS             estimate,
-//RS             self.overscan,
-//RS         )
-//RS         .with_measured_count(measured_count)
-//RS     }
-//RS 
-//RS     fn with_measured_count(mut self, measured_count: i64) -> Self {
-//RS         self.measured_count = measured_count.max(0);
-//RS         self
-//RS     }
-//RS 
-//RS     pub fn within_frame_budget(&self, max_visible_items: i64) -> bool {
-//RS         self.visible_count() <= max_visible_items.max(0)
-//RS     }
-//RS 
-//RS     pub fn facts_json(&self) -> String {
-//RS         format!(
-//RS             "{{\"total_count\":{},\"scroll_offset\":{},\"viewport_size\":{},\"estimated_item_size\":{},\"overscan\":{},\"start\":{},\"end\":{},\"total_size\":{},\"measured_count\":{}}}",
-//RS             self.total_count,
-//RS             self.scroll_offset,
-//RS             self.viewport_size,
-//RS             self.estimated_item_size,
-//RS             self.overscan,
-//RS             self.start,
-//RS             self.end,
-//RS             self.total_size,
-//RS             self.measured_count,
-//RS         )
-//RS     }
-//RS }
-//RS 
-//RS /// Build one bounded virtual range.  `overscan` is measured in rows; size and
-//RS /// offsets are in the renderer's units (normally CSS pixels or terminal rows).
-//RS pub fn jet_web_virtual_window(
-//RS     total_count: i64,
-//RS     scroll_offset: i64,
-//RS     viewport_size: i64,
-//RS     estimated_item_size: i64,
-//RS     overscan: i64,
-//RS ) -> JetWebVirtualWindow {
-//RS     let total_count = total_count.max(0);
-//RS     let viewport_size = viewport_size.max(0);
-//RS     let estimated_item_size = estimated_item_size.max(1);
-//RS     let overscan = overscan.clamp(0, JET_WEB_VIRTUAL_MAX_VISIBLE);
-//RS     let total_size = total_count.saturating_mul(estimated_item_size);
-//RS     let max_offset = total_size.saturating_sub(viewport_size);
-//RS     let scroll_offset = scroll_offset.max(0).min(max_offset);
-//RS     let first_visible = if total_count == 0 {
-//RS         0
-//RS     } else {
-//RS         (scroll_offset / estimated_item_size).min(total_count)
-//RS     };
-//RS     let visible_rows = if viewport_size == 0 {
-//RS         0
-//RS     } else {
-//RS         viewport_size
-//RS             .saturating_add(estimated_item_size.saturating_sub(1))
-//RS             .checked_div(estimated_item_size)
-//RS             .unwrap_or(0)
-//RS             .min(JET_WEB_VIRTUAL_MAX_VISIBLE)
-//RS     };
-//RS     let last_visible = first_visible
-//RS         .saturating_add(visible_rows)
-//RS         .min(total_count);
-//RS     let requested_start = first_visible.saturating_sub(overscan);
-//RS     let requested_end = last_visible.saturating_add(overscan).min(total_count);
-//RS     let (start, end) =
-//RS         if requested_end.saturating_sub(requested_start) > JET_WEB_VIRTUAL_MAX_VISIBLE {
-//RS             let start = first_visible
-//RS                 .saturating_sub(JET_WEB_VIRTUAL_MAX_VISIBLE / 2)
-//RS                 .min(total_count);
-//RS             (
-//RS                 start,
-//RS                 start
-//RS                     .saturating_add(JET_WEB_VIRTUAL_MAX_VISIBLE)
-//RS                     .min(total_count),
-//RS             )
-//RS         } else {
-//RS             (requested_start, requested_end)
-//RS         };
-//RS     JetWebVirtualWindow {
-//RS         total_count,
-//RS         scroll_offset,
-//RS         viewport_size,
-//RS         estimated_item_size,
-//RS         overscan,
-//RS         start,
-//RS         end,
-//RS         total_size,
-//RS         measured_count: 0,
-//RS     }
-//RS }
-//RS 
-//RS impl JetWebVirtualViewport {
-//RS     pub fn new(window: JetWebVirtualWindow) -> Self {
-//RS         Self {
-//RS             window: jet_std::JetSignal::new(window),
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn window(&self) -> JetWebVirtualWindow {
-//RS         self.window.get()
-//RS     }
-//RS 
-//RS     pub fn signal(&self) -> jet_std::JetSignal<JetWebVirtualWindow> {
-//RS         self.window.clone()
-//RS     }
-//RS 
-//RS     pub fn set_window(&self, window: JetWebVirtualWindow) {
-//RS         self.window.set(window);
-//RS     }
-//RS 
-//RS     pub fn scroll_to(&self, scroll_offset: i64) {
-//RS         let current = self.window();
-//RS         self.set_window(
-//RS             jet_web_virtual_window(
-//RS                 current.total_count,
-//RS                 scroll_offset,
-//RS                 current.viewport_size,
-//RS                 current.estimated_item_size,
-//RS                 current.overscan,
-//RS             )
-//RS             .with_measured_count(current.measured_count),
-//RS         );
-//RS     }
-//RS 
-//RS     pub fn resize(&self, viewport_size: i64) {
-//RS         let current = self.window();
-//RS         self.set_window(
-//RS             jet_web_virtual_window(
-//RS                 current.total_count,
-//RS                 current.scroll_offset,
-//RS                 viewport_size,
-//RS                 current.estimated_item_size,
-//RS                 current.overscan,
-//RS             )
-//RS             .with_measured_count(current.measured_count),
-//RS         );
-//RS     }
-//RS 
-//RS     pub fn measure(&self, index: i64, size: i64) {
-//RS         let current = self.window();
-//RS         self.set_window(current.with_measurement(index, size));
-//RS     }
-//RS 
-//RS     pub fn facts_json(&self) -> String {
-//RS         self.window().facts_json()
-//RS     }
-//RS }
-//RS 
-//RS /// Build a window with a dynamic estimate from positive measured row sizes.
-//RS /// Invalid measurements are ignored.  The source vector can stay sparse; no
-//RS /// per-row layout allocation is required.
-//RS pub fn jet_web_virtual_window_measured(
-//RS     total_count: i64,
-//RS     scroll_offset: i64,
-//RS     viewport_size: i64,
-//RS     fallback_item_size: i64,
-//RS     overscan: i64,
-//RS     measurements: &Vec<i64>,
-//RS ) -> JetWebVirtualWindow {
-//RS     let (measured_total, measured_count) = measurements
-//RS         .iter()
-//RS         .copied()
-//RS         .filter(|size| *size > 0)
-//RS         .take(JET_WEB_VIRTUAL_MAX_MEASUREMENTS)
-//RS         .fold((0_i64, 0_i64), |(total, count), size| {
-//RS             (total.saturating_add(size), count.saturating_add(1))
-//RS         });
-//RS     let estimate = if measured_count == 0 {
-//RS         fallback_item_size.max(1)
-//RS     } else {
-//RS         measured_total
-//RS             .checked_div(measured_count)
-//RS             .unwrap_or(fallback_item_size.max(1))
-//RS             .max(1)
-//RS     };
-//RS     let mut window = jet_web_virtual_window(
-//RS         total_count,
-//RS         scroll_offset,
-//RS         viewport_size,
-//RS         estimate,
-//RS         overscan,
-//RS     );
-//RS     window.measured_count = measured_count;
-//RS     window
-//RS }
-//RS 
-//RS /// Copy only rows in the virtual range.  The returned length is bounded by the
-//RS /// window, not by the source list, and malformed/stale ranges clamp safely.
-//RS pub fn jet_web_virtual_slice<T: Clone>(
-//RS     rows: &Vec<T>,
-//RS     window: &JetWebVirtualWindow,
-//RS ) -> Vec<T> {
-//RS     let start = window.start.max(0).try_into().unwrap_or(usize::MAX).min(rows.len());
-//RS     let end = window
-//RS         .end
-//RS         .max(window.start)
-//RS         .try_into()
-//RS         .unwrap_or(usize::MAX)
-//RS         .min(rows.len())
-//RS         .min(start.saturating_add(JET_WEB_VIRTUAL_MAX_VISIBLE as usize));
-//RS     if start >= end {
-//RS         Vec::new()
-//RS     } else {
-//RS         rows[start..end].to_vec()
-//RS     }
-//RS }
-//RS 
-//RS pub fn jet_web_virtual_indices(window: &JetWebVirtualWindow) -> Vec<i64> {
-//RS     if window.start >= window.end {
-//RS         return Vec::new();
-//RS     }
-//RS     let end = window
-//RS         .end
-//RS         .min(window.start.saturating_add(JET_WEB_VIRTUAL_MAX_VISIBLE));
-//RS     (window.start..end).collect()
-//RS }
-//RS 
-//RS pub fn jet_web_virtual_viewport(window: JetWebVirtualWindow) -> JetWebVirtualViewport {
-//RS     JetWebVirtualViewport::new(window)
-//RS }
-//RS 
-//RS /// A bounded, renderer-independent virtualization plan. Measurements are
-//RS /// sparse `(row_index, size)` pairs, so a 100,000-row source never allocates a
-//RS /// 100,000-entry layout table.
-//RS #[derive(Clone, Debug, PartialEq)]
-//RS pub struct JetWebVirtualPlan {
-//RS     pub total_count: i64,
-//RS     pub scroll_offset: i64,
-//RS     pub viewport_width: i64,
-//RS     pub viewport_height: i64,
-//RS     pub estimated_item_size: i64,
-//RS     pub overscan: i64,
-//RS     /// Inclusive start and exclusive end row indices.
-//RS     pub start: i64,
-//RS     pub end: i64,
-//RS     pub total_size: i64,
-//RS     pub measured_count: i64,
-//RS     /// The first visible row and its offset from the viewport origin. Keeping
-//RS     /// this pair makes a measurement update preserve the user's anchor.
-//RS     pub anchor_index: i64,
-//RS     pub anchor_offset: i64,
-//RS     pub measurements: Vec<(i64, i64)>,
-//RS }
-//RS 
-//RS impl JetWebVirtualPlan {
-//RS     pub fn visible_count(&self) -> i64 {
-//RS         self.end.saturating_sub(self.start)
-//RS     }
-//RS 
-//RS     pub fn is_empty(&self) -> bool {
-//RS         self.start >= self.end
-//RS     }
-//RS 
-//RS     pub fn contains(&self, index: i64) -> bool {
-//RS         index >= self.start && index < self.end
-//RS     }
-//RS 
-//RS     pub fn range(&self) -> (i64, i64) {
-//RS         (self.start, self.end)
-//RS     }
-//RS 
-//RS     pub fn row_size(&self, index: i64) -> i64 {
-//RS         self.measurements
-//RS             .binary_search_by_key(&index, |(row, _)| *row)
-//RS             .ok()
-//RS             .and_then(|position| self.measurements.get(position).map(|(_, size)| *size))
-//RS             .unwrap_or(self.estimated_item_size)
-//RS     }
-//RS 
-//RS     pub fn offset_for(&self, index: i64) -> i64 {
-//RS         jet_web_virtual_plan_offset(
-//RS             self.total_count,
-//RS             self.estimated_item_size,
-//RS             &self.measurements,
-//RS             index,
-//RS         )
-//RS     }
-//RS 
-//RS     pub fn indices(&self) -> Vec<i64> {
-//RS         jet_web_virtual_plan_indices(self)
-//RS     }
-//RS 
-//RS     /// Accept a bounded measurement exchange from a renderer. Invalid or
-//RS     /// out-of-range measurements are ignored, duplicate indices are updated in
-//RS     /// place, and the old anchor remains at the same viewport offset.
-//RS     pub fn measurement_exchange(&self, updates: &[(i64, i64)]) -> Self {
-//RS         let mut measurements = self.measurements.clone();
-//RS         for &(index, size) in updates.iter().take(JET_WEB_VIRTUAL_MAX_MEASUREMENTS) {
-//RS             jet_web_virtual_upsert_measurement(
-//RS                 &mut measurements,
-//RS                 self.total_count,
-//RS                 index,
-//RS                 size,
-//RS             );
-//RS         }
-//RS         let estimated_item_size =
-//RS             jet_web_virtual_plan_estimate(self.estimated_item_size, &measurements);
-//RS         jet_web_virtual_plan_reflow(
-//RS             self.total_count,
-//RS             self.scroll_offset,
-//RS             self.viewport_width,
-//RS             self.viewport_height,
-//RS             estimated_item_size,
-//RS             self.overscan,
-//RS             measurements,
-//RS             Some((self.anchor_index, self.anchor_offset)),
-//RS         )
-//RS     }
-//RS 
-//RS     pub fn with_measurement(&self, index: i64, size: i64) -> Self {
-//RS         self.measurement_exchange(&[(index, size)])
-//RS     }
-//RS 
-//RS     pub fn with_measurements(&self, measurements: &[(i64, i64)]) -> Self {
-//RS         self.measurement_exchange(measurements)
-//RS     }
-//RS 
-//RS     pub fn within_frame_budget(&self, max_visible_items: i64) -> bool {
-//RS         self.visible_count() <= max_visible_items.max(0)
-//RS     }
-//RS 
-//RS     pub fn facts_json(&self) -> String {
-//RS         let measurements = self
-//RS             .measurements
-//RS             .iter()
-//RS             .map(|(index, size)| format!("{{\"index\":{index},\"size\":{size}}}"))
-//RS             .collect::<Vec<_>>()
-//RS             .join(",");
-//RS         format!(
-//RS             "{{\"total_count\":{},\"scroll_offset\":{},\"viewport_width\":{},\"viewport_height\":{},\"estimated_item_size\":{},\"overscan\":{},\"start\":{},\"end\":{},\"total_size\":{},\"measured_count\":{},\"anchor_index\":{},\"anchor_offset\":{},\"measurements\":[{}]}}",
-//RS             self.total_count,
-//RS             self.scroll_offset,
-//RS             self.viewport_width,
-//RS             self.viewport_height,
-//RS             self.estimated_item_size,
-//RS             self.overscan,
-//RS             self.start,
-//RS             self.end,
-//RS             self.total_size,
-//RS             self.measured_count,
-//RS             self.anchor_index,
-//RS             self.anchor_offset,
-//RS             measurements,
-//RS         )
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Clone)]
-//RS pub struct JetWebVirtualPlanViewport {
-//RS     plan: jet_std::JetSignal<JetWebVirtualPlan>,
-//RS }
-//RS 
-//RS impl JetWebVirtualPlanViewport {
-//RS     pub fn new(plan: JetWebVirtualPlan) -> Self {
-//RS         Self {
-//RS             plan: jet_std::JetSignal::new(plan),
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn plan(&self) -> JetWebVirtualPlan {
-//RS         self.plan.get()
-//RS     }
-//RS 
-//RS     pub fn signal(&self) -> jet_std::JetSignal<JetWebVirtualPlan> {
-//RS         self.plan.clone()
-//RS     }
-//RS 
-//RS     pub fn set_plan(&self, plan: JetWebVirtualPlan) {
-//RS         self.plan.set(plan);
-//RS     }
-//RS 
-//RS     pub fn scroll_to(&self, scroll_offset: i64) {
-//RS         let plan = self.plan();
-//RS         self.set_plan(jet_web_virtual_plan_reflow(
-//RS             plan.total_count,
-//RS             scroll_offset,
-//RS             plan.viewport_width,
-//RS             plan.viewport_height,
-//RS             plan.estimated_item_size,
-//RS             plan.overscan,
-//RS             plan.measurements,
-//RS             None,
-//RS         ));
-//RS     }
-//RS 
-//RS     pub fn resize(&self, viewport_width: i64, viewport_height: i64) {
-//RS         let plan = self.plan();
-//RS         self.set_plan(jet_web_virtual_plan_reflow(
-//RS             plan.total_count,
-//RS             plan.scroll_offset,
-//RS             viewport_width,
-//RS             viewport_height,
-//RS             plan.estimated_item_size,
-//RS             plan.overscan,
-//RS             plan.measurements,
-//RS             Some((plan.anchor_index, plan.anchor_offset)),
-//RS         ));
-//RS     }
-//RS 
-//RS     pub fn measure(&self, index: i64, size: i64) {
-//RS         let plan = self.plan();
-//RS         self.set_plan(plan.with_measurement(index, size));
-//RS     }
-//RS 
-//RS     pub fn measure_exchange(&self, measurements: &[(i64, i64)]) {
-//RS         let plan = self.plan();
-//RS         self.set_plan(plan.with_measurements(measurements));
-//RS     }
-//RS 
-//RS     pub fn facts_json(&self) -> String {
-//RS         self.plan().facts_json()
-//RS     }
-//RS }
-//RS 
-//RS pub fn jet_web_virtual_plan(
-//RS     total_count: i64,
-//RS     scroll_offset: i64,
-//RS     viewport_width: i64,
-//RS     viewport_height: i64,
-//RS     estimated_item_size: i64,
-//RS     overscan: i64,
-//RS ) -> JetWebVirtualPlan {
-//RS     jet_web_virtual_plan_reflow(
-//RS         total_count,
-//RS         scroll_offset,
-//RS         viewport_width,
-//RS         viewport_height,
-//RS         estimated_item_size,
-//RS         overscan,
-//RS         Vec::new(),
-//RS         None,
-//RS     )
-//RS }
-//RS 
-//RS pub fn jet_web_virtual_plan_measured(
-//RS     total_count: i64,
-//RS     scroll_offset: i64,
-//RS     viewport_width: i64,
-//RS     viewport_height: i64,
-//RS     fallback_item_size: i64,
-//RS     overscan: i64,
-//RS     measurements: &Vec<(i64, i64)>,
-//RS ) -> JetWebVirtualPlan {
-//RS     let mut measurements = measurements
-//RS         .iter()
-//RS         .copied()
-//RS         .filter(|(index, size)| *index >= 0 && *index < total_count.max(0) && *size > 0)
-//RS         .take(JET_WEB_VIRTUAL_MAX_MEASUREMENTS)
-//RS         .collect::<Vec<_>>();
-//RS     jet_web_virtual_normalize_measurements(total_count, &mut measurements);
-//RS     let estimate = jet_web_virtual_plan_estimate(fallback_item_size, &measurements);
-//RS     jet_web_virtual_plan_reflow(
-//RS         total_count,
-//RS         scroll_offset,
-//RS         viewport_width,
-//RS         viewport_height,
-//RS         estimate,
-//RS         overscan,
-//RS         measurements,
-//RS         None,
-//RS     )
-//RS }
-//RS 
-//RS /// Convenience form for a renderer that reports sizes for consecutive rows.
-//RS pub fn jet_web_virtual_plan_from_sizes(
-//RS     total_count: i64,
-//RS     scroll_offset: i64,
-//RS     viewport_width: i64,
-//RS     viewport_height: i64,
-//RS     fallback_item_size: i64,
-//RS     overscan: i64,
-//RS     sizes: &Vec<i64>,
-//RS ) -> JetWebVirtualPlan {
-//RS     let measurements = sizes
-//RS         .iter()
-//RS         .enumerate()
-//RS         .filter_map(|(index, size)| {
-//RS             (*size > 0).then_some((i64::try_from(index).unwrap_or(i64::MAX), *size))
-//RS         })
-//RS         .take(JET_WEB_VIRTUAL_MAX_MEASUREMENTS)
-//RS         .collect::<Vec<_>>();
-//RS     jet_web_virtual_plan_measured(
-//RS         total_count,
-//RS         scroll_offset,
-//RS         viewport_width,
-//RS         viewport_height,
-//RS         fallback_item_size,
-//RS         overscan,
-//RS         &measurements,
-//RS     )
-//RS }
-//RS 
-//RS pub fn jet_web_virtual_plan_indices(plan: &JetWebVirtualPlan) -> Vec<i64> {
-//RS     if plan.start >= plan.end {
-//RS         return Vec::new();
-//RS     }
-//RS     let end = plan
-//RS         .end
-//RS         .min(plan.start.saturating_add(JET_WEB_VIRTUAL_MAX_VISIBLE as i64));
-//RS     (plan.start..end).collect()
-//RS }
-//RS 
-//RS pub fn jet_web_virtual_plan_slice<T: Clone>(
-//RS     rows: &Vec<T>,
-//RS     plan: &JetWebVirtualPlan,
-//RS ) -> Vec<T> {
-//RS     let start = plan.start.max(0).try_into().unwrap_or(usize::MAX).min(rows.len());
-//RS     let end = plan
-//RS         .end
-//RS         .max(plan.start)
-//RS         .try_into()
-//RS         .unwrap_or(usize::MAX)
-//RS         .min(rows.len())
-//RS         .min(start.saturating_add(JET_WEB_VIRTUAL_MAX_VISIBLE as usize));
-//RS     if start >= end {
-//RS         Vec::new()
-//RS     } else {
-//RS         rows[start..end].to_vec()
-//RS     }
-//RS }
-//RS 
-//RS fn jet_web_virtual_normalize_measurements(
-//RS     total_count: i64,
-//RS     measurements: &mut Vec<(i64, i64)>,
-//RS ) {
-//RS     let total_count = total_count.max(0);
-//RS     measurements.retain(|(index, size)| {
-//RS         *index >= 0 && *index < total_count && *size > 0
-//RS     });
-//RS     measurements.sort_by_key(|(index, _)| *index);
-//RS     // Keep the newest value when an exchange contains the same row more than
-//RS     // once. The reverse/dedup/reverse sequence preserves that value while
-//RS     // restoring ascending order for binary-search offset calculations.
-//RS     measurements.reverse();
-//RS     measurements.dedup_by_key(|(index, _)| *index);
-//RS     measurements.reverse();
-//RS     measurements.truncate(JET_WEB_VIRTUAL_MAX_MEASUREMENTS);
-//RS }
-//RS 
-//RS fn jet_web_virtual_plan_estimate(
-//RS     fallback_item_size: i64,
-//RS     measurements: &[(i64, i64)],
-//RS ) -> i64 {
-//RS     let (total, count) = measurements
-//RS         .iter()
-//RS         .take(JET_WEB_VIRTUAL_MAX_MEASUREMENTS)
-//RS         .filter(|(_, size)| *size > 0)
-//RS         .fold((0_i64, 0_i64), |(total, count), (_, size)| {
-//RS             (total.saturating_add(*size), count.saturating_add(1))
-//RS         });
-//RS     if count == 0 {
-//RS         fallback_item_size.max(1)
-//RS     } else {
-//RS         total
-//RS             .checked_div(count)
-//RS             .unwrap_or(fallback_item_size.max(1))
-//RS             .max(1)
-//RS     }
-//RS }
-//RS 
-//RS fn jet_web_virtual_plan_reflow(
-//RS     total_count: i64,
-//RS     scroll_offset: i64,
-//RS     viewport_width: i64,
-//RS     viewport_height: i64,
-//RS     estimated_item_size: i64,
-//RS     overscan: i64,
-//RS     measurements: Vec<(i64, i64)>,
-//RS     anchor: Option<(i64, i64)>,
-//RS ) -> JetWebVirtualPlan {
-//RS     let total_count = total_count.max(0);
-//RS     let viewport_width = viewport_width.max(0);
-//RS     let viewport_height = viewport_height.max(0);
-//RS     let estimated_item_size = estimated_item_size.max(1);
-//RS     let overscan = overscan.clamp(0, JET_WEB_VIRTUAL_MAX_VISIBLE);
-//RS     let mut measurements = measurements;
-//RS     jet_web_virtual_normalize_measurements(total_count, &mut measurements);
-//RS 
-//RS     let total_size = jet_web_virtual_plan_total_size(
-//RS         total_count,
-//RS         estimated_item_size,
-//RS         &measurements,
-//RS     );
-//RS     let max_offset = total_size.saturating_sub(viewport_height);
-//RS     let requested_offset = if let Some((anchor_index, anchor_offset)) = anchor {
-//RS         jet_web_virtual_plan_offset(
-//RS             total_count,
-//RS             estimated_item_size,
-//RS             &measurements,
-//RS             anchor_index,
-//RS         )
-//RS         .saturating_add(anchor_offset.max(0))
-//RS     } else {
-//RS         scroll_offset
-//RS     };
-//RS     let scroll_offset = requested_offset.max(0).min(max_offset);
-//RS     let (first_visible, last_visible) = jet_web_virtual_plan_visible_range(
-//RS         total_count,
-//RS         viewport_height,
-//RS         scroll_offset,
-//RS         estimated_item_size,
-//RS         &measurements,
-//RS     );
-//RS     let requested_start = first_visible.saturating_sub(overscan);
-//RS     let requested_end = last_visible.saturating_add(overscan).min(total_count);
-//RS     let (start, end) = if requested_end.saturating_sub(requested_start)
-//RS         > JET_WEB_VIRTUAL_MAX_VISIBLE
-//RS     {
-//RS         let start = first_visible
-//RS             .saturating_sub(JET_WEB_VIRTUAL_MAX_VISIBLE / 2)
-//RS             .min(total_count);
-//RS         (
-//RS             start,
-//RS             start
-//RS                 .saturating_add(JET_WEB_VIRTUAL_MAX_VISIBLE)
-//RS                 .min(total_count),
-//RS         )
-//RS     } else {
-//RS         (requested_start, requested_end)
-//RS     };
-//RS     let anchor_index = first_visible.min(total_count);
-//RS     let anchor_offset = scroll_offset
-//RS         .saturating_sub(jet_web_virtual_plan_offset(
-//RS             total_count,
-//RS             estimated_item_size,
-//RS             &measurements,
-//RS             anchor_index,
-//RS         ));
-//RS     JetWebVirtualPlan {
-//RS         total_count,
-//RS         scroll_offset,
-//RS         viewport_width,
-//RS         viewport_height,
-//RS         estimated_item_size,
-//RS         overscan,
-//RS         start,
-//RS         end,
-//RS         total_size,
-//RS         measured_count: i64::try_from(measurements.len()).unwrap_or(i64::MAX),
-//RS         anchor_index,
-//RS         anchor_offset,
-//RS         measurements,
-//RS     }
-//RS }
-//RS 
-//RS fn jet_web_virtual_plan_total_size(
-//RS     total_count: i64,
-//RS     estimated_item_size: i64,
-//RS     measurements: &[(i64, i64)],
-//RS ) -> i64 {
-//RS     let mut total = total_count.saturating_mul(estimated_item_size);
-//RS     for (_, size) in measurements {
-//RS         if *size >= estimated_item_size {
-//RS             total = total.saturating_add(size.saturating_sub(estimated_item_size));
-//RS         } else {
-//RS             total = total.saturating_sub(estimated_item_size.saturating_sub(*size));
-//RS         }
-//RS     }
-//RS     total
-//RS }
-//RS 
-//RS fn jet_web_virtual_plan_offset(
-//RS     total_count: i64,
-//RS     estimated_item_size: i64,
-//RS     measurements: &[(i64, i64)],
-//RS     index: i64,
-//RS ) -> i64 {
-//RS     let index = index.max(0).min(total_count);
-//RS     let mut offset = index.saturating_mul(estimated_item_size);
-//RS     for (row, size) in measurements {
-//RS         if *row >= index {
-//RS             break;
-//RS         }
-//RS         if *size >= estimated_item_size {
-//RS             offset = offset.saturating_add(size.saturating_sub(estimated_item_size));
-//RS         } else {
-//RS             offset = offset.saturating_sub(estimated_item_size.saturating_sub(*size));
-//RS         }
-//RS     }
-//RS     offset
-//RS }
-//RS 
-//RS fn jet_web_virtual_plan_visible_range(
-//RS     total_count: i64,
-//RS     viewport_height: i64,
-//RS     scroll_offset: i64,
-//RS     estimated_item_size: i64,
-//RS     measurements: &[(i64, i64)],
-//RS ) -> (i64, i64) {
-//RS     if total_count == 0 || viewport_height == 0 {
-//RS         return (0, 0);
-//RS     }
-//RS     let first_visible = jet_web_virtual_plan_first_row(
-//RS         total_count,
-//RS         scroll_offset,
-//RS         estimated_item_size,
-//RS         measurements,
-//RS     );
-//RS     let viewport_end = scroll_offset.saturating_add(viewport_height);
-//RS     let last_visible = jet_web_virtual_plan_first_start_at_or_after(
-//RS         total_count,
-//RS         viewport_end,
-//RS         estimated_item_size,
-//RS         measurements,
-//RS     )
-//RS     .max(first_visible.saturating_add(1))
-//RS     .min(total_count);
-//RS     (first_visible, last_visible)
-//RS }
-//RS 
-//RS fn jet_web_virtual_plan_first_row(
-//RS     total_count: i64,
-//RS     offset: i64,
-//RS     estimated_item_size: i64,
-//RS     measurements: &[(i64, i64)],
-//RS ) -> i64 {
-//RS     let mut low = 0_i64;
-//RS     let mut high = total_count;
-//RS     while low < high {
-//RS         let middle = low.saturating_add(high).checked_div(2).unwrap_or(low);
-//RS         let end = jet_web_virtual_plan_offset(
-//RS             total_count,
-//RS             estimated_item_size,
-//RS             measurements,
-//RS             middle.saturating_add(1),
-//RS         );
-//RS         if end <= offset {
-//RS             low = middle.saturating_add(1);
-//RS         } else {
-//RS             high = middle;
-//RS         }
-//RS     }
-//RS     low.min(total_count)
-//RS }
-//RS 
-//RS fn jet_web_virtual_plan_first_start_at_or_after(
-//RS     total_count: i64,
-//RS     offset: i64,
-//RS     estimated_item_size: i64,
-//RS     measurements: &[(i64, i64)],
-//RS ) -> i64 {
-//RS     let mut low = 0_i64;
-//RS     let mut high = total_count;
-//RS     while low < high {
-//RS         let middle = low.saturating_add(high).checked_div(2).unwrap_or(low);
-//RS         let start = jet_web_virtual_plan_offset(
-//RS             total_count,
-//RS             estimated_item_size,
-//RS             measurements,
-//RS             middle,
-//RS         );
-//RS         if start < offset {
-//RS             low = middle.saturating_add(1);
-//RS         } else {
-//RS             high = middle;
-//RS         }
-//RS     }
-//RS     low.min(total_count)
-//RS }
-//RS 
-//RS fn jet_web_virtual_upsert_measurement(
-//RS     measurements: &mut Vec<(i64, i64)>,
-//RS     total_count: i64,
-//RS     index: i64,
-//RS     size: i64,
-//RS ) {
-//RS     if index < 0 || index >= total_count || size <= 0 {
-//RS         return;
-//RS     }
-//RS     if let Some((_, existing)) = measurements
-//RS         .iter_mut()
-//RS         .find(|(row, _)| *row == index)
-//RS     {
-//RS         *existing = size;
-//RS         return;
-//RS     }
-//RS     if measurements.len() < JET_WEB_VIRTUAL_MAX_MEASUREMENTS {
-//RS         measurements.push((index, size));
-//RS     }
-//RS }
-// END-PORT-PENDING 0315 crates/jet-codegen/src/Prelude/CoreLib/Top/WebVirtual.rs:1-846
+// Headless viewport virtualization; bounded sparse geometry, no per-source-row layout table.
+use core.web.virtual.[WebVirtualWindow, WebVirtualPlan, WebVirtualPlanViewport]
+use core.reactive.runtime.std_reactive_event_watch.JetSignal
 
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebVirtual.rs:7
+const JET_WEB_VIRTUAL_MAX_MEASUREMENTS: USize = 4096
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebVirtual.rs:8
+const JET_WEB_VIRTUAL_MAX_VISIBLE: Int = 4096
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebVirtual.rs:10
+#Derive(Clone)
+pub struct JetWebVirtualViewport { window: JetSignal<WebVirtualWindow> }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebVirtual.rs:14
+// Canonical window carrier: core.web.virtual.WebVirtualWindow.
+impl WebVirtualWindow {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebVirtual.rs:30
+    pub fn visible_count(self: &Self) -> Int { self.end.saturating_sub(self.start) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebVirtual.rs:34
+    pub fn is_empty(self: &Self) -> Bool { self.start >= self.end }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebVirtual.rs:38
+    pub fn contains(self: &Self, index: Int) -> Bool { index >= self.start && index < self.end }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebVirtual.rs:42
+    pub fn range(self: &Self) -> (Int, Int) { (self.start, self.end) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebVirtual.rs:48
+    pub fn with_measurement(self: &Self, index: Int, size: Int) -> Self {
+        if index < 0 || index >= self.total_count || size <= 0 { return self.clone() }
+        measured_count :: self.measured_count.saturating_add(1)
+        measured_total :: self.estimated_item_size.saturating_mul(self.measured_count).saturating_add(size)
+        estimate :: measured_total.checked_div(measured_count).unwrap_or(self.estimated_item_size).max(1)
+        jet_web_virtual_window(self.total_count, self.scroll_offset, self.viewport_size, estimate, self.overscan).with_measured_count(measured_count)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebVirtual.rs:71
+    fn with_measured_count(self: Self, measured_count: Int) -> Self {
+        out := ^self
+        out.measured_count = measured_count.max(0)
+        ^out
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebVirtual.rs:76
+    pub fn within_frame_budget(self: &Self, max_visible_items: Int) -> Bool { self.visible_count() <= max_visible_items.max(0) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebVirtual.rs:80
+    pub fn facts_json(self: &Self) -> String {
+        "{{\"total_count\":{self.total_count},\"scroll_offset\":{self.scroll_offset},\"viewport_size\":{self.viewport_size},\"estimated_item_size\":{self.estimated_item_size},\"overscan\":{self.overscan},\"start\":{self.start},\"end\":{self.end},\"total_size\":{self.total_size},\"measured_count\":{self.measured_count}}}"
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebVirtual.rs:98
+pub fn jet_web_virtual_window(total_count: Int, scroll_offset: Int, viewport_size: Int, estimated_item_size: Int, overscan: Int) -> WebVirtualWindow {
+    total_count :: total_count.max(0)
+    viewport_size :: viewport_size.max(0)
+    estimated_item_size :: estimated_item_size.max(1)
+    overscan :: overscan.clamp(0, JET_WEB_VIRTUAL_MAX_VISIBLE)
+    total_size :: total_count.saturating_mul(estimated_item_size)
+    max_offset :: total_size.saturating_sub(viewport_size)
+    scroll_offset :: scroll_offset.max(0).min(max_offset)
+    first_visible :: if total_count == 0 { 0 } else { (scroll_offset /% estimated_item_size).min(total_count) }
+    visible_rows :: if viewport_size == 0 { 0 } else {
+        viewport_size.saturating_add(estimated_item_size.saturating_sub(1)).checked_div(estimated_item_size).unwrap_or(0).min(JET_WEB_VIRTUAL_MAX_VISIBLE)
+    }
+    last_visible :: first_visible.saturating_add(visible_rows).min(total_count)
+    requested_start :: first_visible.saturating_sub(overscan)
+    requested_end :: last_visible.saturating_add(overscan).min(total_count)
+    (start, end) :: if requested_end.saturating_sub(requested_start) > JET_WEB_VIRTUAL_MAX_VISIBLE {
+        start :: first_visible.saturating_sub(JET_WEB_VIRTUAL_MAX_VISIBLE /% 2).min(total_count)
+        (start, start.saturating_add(JET_WEB_VIRTUAL_MAX_VISIBLE).min(total_count))
+    } else { (requested_start, requested_end) }
+    WebVirtualWindow{total_count: total_count, scroll_offset: scroll_offset, viewport_size: viewport_size, estimated_item_size: estimated_item_size, overscan: overscan, start: start, end: end, total_size: total_size, measured_count: 0}
+}
+impl JetWebVirtualViewport {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebVirtual.rs:159
+    pub fn new(window: WebVirtualWindow) -> Self { Self{window: JetSignal.new(^window)} }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebVirtual.rs:165
+    pub fn window(self: &Self) -> WebVirtualWindow { self.window.get() }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebVirtual.rs:169
+    pub fn signal(self: &Self) -> JetSignal<WebVirtualWindow> { self.window.clone() }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebVirtual.rs:173
+    pub fn set_window(self: &Self, window: WebVirtualWindow) -> () { self.window.set(^window) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebVirtual.rs:177
+    pub fn scroll_to(self: &Self, scroll_offset: Int) -> () {
+        current :: self.window()
+        self.set_window(jet_web_virtual_window(current.total_count, scroll_offset, current.viewport_size, current.estimated_item_size, current.overscan).with_measured_count(current.measured_count))
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebVirtual.rs:191
+    pub fn resize(self: &Self, viewport_size: Int) -> () {
+        current :: self.window()
+        self.set_window(jet_web_virtual_window(current.total_count, current.scroll_offset, viewport_size, current.estimated_item_size, current.overscan).with_measured_count(current.measured_count))
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebVirtual.rs:205
+    pub fn measure(self: &Self, index: Int, size: Int) -> () { self.set_window(self.window().with_measurement(index, size)) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebVirtual.rs:210
+    pub fn facts_json(self: &Self) -> String { self.window().facts_json() }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebVirtual.rs:218
+pub fn jet_web_virtual_window_measured(total_count: Int, scroll_offset: Int, viewport_size: Int, fallback_item_size: Int, overscan: Int, measurements: &[Int]) -> WebVirtualWindow {
+    measured_total := 0
+    measured_count := 0
+    loop size in measurements {
+        if size <= 0 { continue }
+        if measured_count >= JET_WEB_VIRTUAL_MAX_MEASUREMENTS as Int { break }
+        measured_total = measured_total.saturating_add(size)
+        measured_count = measured_count.saturating_add(1)
+    }
+    estimate :: if measured_count == 0 { fallback_item_size.max(1) } else { measured_total.checked_div(measured_count).unwrap_or(fallback_item_size.max(1)).max(1) }
+    jet_web_virtual_window(total_count, scroll_offset, viewport_size, estimate, overscan).with_measured_count(measured_count)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebVirtual.rs:255
+pub fn jet_web_virtual_slice<T: Clone>(rows: &[T], window: &WebVirtualWindow) -> [T] {
+    start :: USize.try_from(window.start.max(0)).unwrap_or(USize.MAX).min(rows.len())
+    end :: USize.try_from(window.end.max(window.start)).unwrap_or(USize.MAX).min(rows.len()).min(start.saturating_add(JET_WEB_VIRTUAL_MAX_VISIBLE as USize))
+    if start >= end { [] } else { rows[start..<end].to_vec() }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebVirtual.rs:274
+pub fn jet_web_virtual_indices(window: &WebVirtualWindow) -> [Int] {
+    if window.start >= window.end { return [] }
+    end :: window.end.min(window.start.saturating_add(JET_WEB_VIRTUAL_MAX_VISIBLE))
+    (window.start..<end).collect<[Int]>()
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebVirtual.rs:284
+pub fn jet_web_virtual_viewport(window: WebVirtualWindow) -> JetWebVirtualViewport { JetWebVirtualViewport.new(^window) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebVirtual.rs:292
+// Canonical plan carrier: core.web.virtual.WebVirtualPlan, with sparse measurements.
+impl WebVirtualPlan {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebVirtual.rs:312
+    pub fn visible_count(self: &Self) -> Int { self.end.saturating_sub(self.start) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebVirtual.rs:316
+    pub fn is_empty(self: &Self) -> Bool { self.start >= self.end }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebVirtual.rs:320
+    pub fn contains(self: &Self, index: Int) -> Bool { index >= self.start && index < self.end }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebVirtual.rs:324
+    pub fn range(self: &Self) -> (Int, Int) { (self.start, self.end) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebVirtual.rs:328
+    pub fn row_size(self: &Self, index: Int) -> Int {
+        self.measurements.binary_search_by_key(&index, fn(entry) { entry.0 }).ok()
+            .and_then(fn(position) { self.measurements.get(position).map(fn(entry) { entry.1 }) }).unwrap_or(self.estimated_item_size)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebVirtual.rs:336
+    pub fn offset_for(self: &Self, index: Int) -> Int { jet_web_virtual_plan_offset(self.total_count, self.estimated_item_size, &self.measurements, index) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebVirtual.rs:345
+    pub fn indices(self: &Self) -> [Int] { jet_web_virtual_plan_indices(self) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebVirtual.rs:352
+    pub fn measurement_exchange(self: &Self, updates: &[(Int, Int)]) -> Self {
+        measurements := self.measurements.clone()
+        loop (index, size) in updates.iter().take(JET_WEB_VIRTUAL_MAX_MEASUREMENTS) {
+            jet_web_virtual_upsert_measurement(&measurements, self.total_count, index, size)
+        }
+        estimate :: jet_web_virtual_plan_estimate(self.estimated_item_size, &measurements)
+        jet_web_virtual_plan_reflow(self.total_count, self.scroll_offset, self.viewport_width, self.viewport_height, estimate, self.overscan, ^measurements, Val((self.anchor_index, self.anchor_offset)))
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebVirtual.rs:376
+    pub fn with_measurement(self: &Self, index: Int, size: Int) -> Self { self.measurement_exchange(&[(index, size)]) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebVirtual.rs:380
+    pub fn with_measurements(self: &Self, measurements: &[(Int, Int)]) -> Self { self.measurement_exchange(measurements) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebVirtual.rs:384
+    pub fn within_frame_budget(self: &Self, max_visible_items: Int) -> Bool { self.visible_count() <= max_visible_items.max(0) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebVirtual.rs:388
+    pub fn facts_json(self: &Self) -> String {
+        measurements :: self.measurements.iter().map(fn(entry) { "{{\"index\":{entry.0},\"size\":{entry.1}}}" }).collect<[String]>().join(",")
+        "{{\"total_count\":{self.total_count},\"scroll_offset\":{self.scroll_offset},\"viewport_width\":{self.viewport_width},\"viewport_height\":{self.viewport_height},\"estimated_item_size\":{self.estimated_item_size},\"overscan\":{self.overscan},\"start\":{self.start},\"end\":{self.end},\"total_size\":{self.total_size},\"measured_count\":{self.measured_count},\"anchor_index\":{self.anchor_index},\"anchor_offset\":{self.anchor_offset},\"measurements\":[{measurements}]}}"
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebVirtual.rs:415
+// Canonical viewport carrier: core.web.virtual.WebVirtualPlanViewport; plan is a JetSignal<WebVirtualPlan>.
+impl WebVirtualPlanViewport {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebVirtual.rs:420
+    pub fn new(plan: WebVirtualPlan) -> Self { Self{plan: JetSignal.new(^plan)} }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebVirtual.rs:426
+    pub fn plan(self: &Self) -> WebVirtualPlan { self.plan.get() }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebVirtual.rs:430
+    pub fn signal(self: &Self) -> JetSignal<WebVirtualPlan> { self.plan.clone() }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebVirtual.rs:434
+    pub fn set_plan(self: &Self, plan: WebVirtualPlan) -> () { self.plan.set(^plan) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebVirtual.rs:438
+    pub fn scroll_to(self: &Self, scroll_offset: Int) -> () {
+        plan :: self.plan()
+        self.set_plan(jet_web_virtual_plan_reflow(plan.total_count, scroll_offset, plan.viewport_width, plan.viewport_height, plan.estimated_item_size, plan.overscan, ^plan.measurements, None))
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebVirtual.rs:452
+    pub fn resize(self: &Self, viewport_width: Int, viewport_height: Int) -> () {
+        plan :: self.plan()
+        self.set_plan(jet_web_virtual_plan_reflow(plan.total_count, plan.scroll_offset, viewport_width, viewport_height, plan.estimated_item_size, plan.overscan, ^plan.measurements, Val((plan.anchor_index, plan.anchor_offset))))
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebVirtual.rs:466
+    pub fn measure(self: &Self, index: Int, size: Int) -> () { self.set_plan(self.plan().with_measurement(index, size)) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebVirtual.rs:471
+    pub fn measure_exchange(self: &Self, measurements: &[(Int, Int)]) -> () { self.set_plan(self.plan().with_measurements(measurements)) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebVirtual.rs:476
+    pub fn facts_json(self: &Self) -> String { self.plan().facts_json() }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebVirtual.rs:481
+pub fn jet_web_virtual_plan(total_count: Int, scroll_offset: Int, viewport_width: Int, viewport_height: Int, estimated_item_size: Int, overscan: Int) -> WebVirtualPlan {
+    jet_web_virtual_plan_reflow(total_count, scroll_offset, viewport_width, viewport_height, estimated_item_size, overscan, [], None)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebVirtual.rs:501
+pub fn jet_web_virtual_plan_measured(total_count: Int, scroll_offset: Int, viewport_width: Int, viewport_height: Int, fallback_item_size: Int, overscan: Int, measurements: &[(Int, Int)]) -> WebVirtualPlan {
+    measurements := measurements.iter().copied().filter(fn(entry) { entry.0 >= 0 && entry.0 < total_count.max(0) && entry.1 > 0 }).take(JET_WEB_VIRTUAL_MAX_MEASUREMENTS).collect<[(Int, Int)]>()
+    jet_web_virtual_normalize_measurements(total_count, &measurements)
+    estimate :: jet_web_virtual_plan_estimate(fallback_item_size, &measurements)
+    jet_web_virtual_plan_reflow(total_count, scroll_offset, viewport_width, viewport_height, estimate, overscan, ^measurements, None)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebVirtual.rs:531
+pub fn jet_web_virtual_plan_from_sizes(total_count: Int, scroll_offset: Int, viewport_width: Int, viewport_height: Int, fallback_item_size: Int, overscan: Int, sizes: &[Int]) -> WebVirtualPlan {
+    measurements :: sizes.iter().enumerate().filter_map(fn(entry) {
+        if entry.1 > 0 { Val((Int.try_from(entry.0).unwrap_or(I64.MAX), entry.1)) } else { None }
+    }).take(JET_WEB_VIRTUAL_MAX_MEASUREMENTS).collect<[(Int, Int)]>()
+    jet_web_virtual_plan_measured(total_count, scroll_offset, viewport_width, viewport_height, fallback_item_size, overscan, &measurements)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebVirtual.rs:559
+pub fn jet_web_virtual_plan_indices(plan: &WebVirtualPlan) -> [Int] {
+    if plan.start >= plan.end { return [] }
+    end :: plan.end.min(plan.start.saturating_add(JET_WEB_VIRTUAL_MAX_VISIBLE))
+    (plan.start..<end).collect<[Int]>()
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebVirtual.rs:569
+pub fn jet_web_virtual_plan_slice<T: Clone>(rows: &[T], plan: &WebVirtualPlan) -> [T] {
+    start :: USize.try_from(plan.start.max(0)).unwrap_or(USize.MAX).min(rows.len())
+    end :: USize.try_from(plan.end.max(plan.start)).unwrap_or(USize.MAX).min(rows.len()).min(start.saturating_add(JET_WEB_VIRTUAL_MAX_VISIBLE as USize))
+    if start >= end { [] } else { rows[start..<end].to_vec() }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebVirtual.rs:588
+fn jet_web_virtual_normalize_measurements(total_count: Int, measurements: &[(Int, Int)]) -> () {
+    total_count :: total_count.max(0)
+    measurements.retain(fn(entry) { entry.0 >= 0 && entry.0 < total_count && entry.1 > 0 })
+    measurements.sort_by_key(fn(entry) { entry.0 })
+    // Stable sorting plus reverse/dedup/reverse keeps the newest duplicate.
+    measurements.reverse()
+    measurements.dedup_by_key(fn(entry) { entry.0 })
+    measurements.reverse()
+    measurements.truncate(JET_WEB_VIRTUAL_MAX_MEASUREMENTS)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebVirtual.rs:606
+fn jet_web_virtual_plan_estimate(fallback_item_size: Int, measurements: &[(Int, Int)]) -> Int {
+    total := 0
+    count := 0
+    loop (_, size) in measurements.iter().take(JET_WEB_VIRTUAL_MAX_MEASUREMENTS) {
+        if size > 0 { total = total.saturating_add(size); count = count.saturating_add(1) }
+    }
+    if count == 0 { fallback_item_size.max(1) } else { total.checked_div(count).unwrap_or(fallback_item_size.max(1)).max(1) }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebVirtual.rs:627
+fn jet_web_virtual_plan_reflow(total_count: Int, scroll_offset: Int, viewport_width: Int, viewport_height: Int, estimated_item_size: Int, overscan: Int, measurements: [(Int, Int)], anchor: (Int, Int)?) -> WebVirtualPlan {
+    total_count :: total_count.max(0)
+    viewport_width :: viewport_width.max(0)
+    viewport_height :: viewport_height.max(0)
+    estimated_item_size :: estimated_item_size.max(1)
+    overscan :: overscan.clamp(0, JET_WEB_VIRTUAL_MAX_VISIBLE)
+    measurements := ^measurements
+    jet_web_virtual_normalize_measurements(total_count, &measurements)
+    total_size :: jet_web_virtual_plan_total_size(total_count, estimated_item_size, &measurements)
+    max_offset :: total_size.saturating_sub(viewport_height)
+    requested_offset :: match anchor {
+        Val((anchor_index, anchor_offset)) -> jet_web_virtual_plan_offset(total_count, estimated_item_size, &measurements, anchor_index).saturating_add(anchor_offset.max(0))
+        None -> scroll_offset
+    }
+    scroll_offset :: requested_offset.max(0).min(max_offset)
+    (first_visible, last_visible) :: jet_web_virtual_plan_visible_range(total_count, viewport_height, scroll_offset, estimated_item_size, &measurements)
+    requested_start :: first_visible.saturating_sub(overscan)
+    requested_end :: last_visible.saturating_add(overscan).min(total_count)
+    (start, end) :: if requested_end.saturating_sub(requested_start) > JET_WEB_VIRTUAL_MAX_VISIBLE {
+        start :: first_visible.saturating_sub(JET_WEB_VIRTUAL_MAX_VISIBLE /% 2).min(total_count)
+        (start, start.saturating_add(JET_WEB_VIRTUAL_MAX_VISIBLE).min(total_count))
+    } else { (requested_start, requested_end) }
+    anchor_index :: first_visible.min(total_count)
+    anchor_offset :: scroll_offset.saturating_sub(jet_web_virtual_plan_offset(total_count, estimated_item_size, &measurements, anchor_index))
+    WebVirtualPlan{total_count: total_count, scroll_offset: scroll_offset, viewport_width: viewport_width, viewport_height: viewport_height, estimated_item_size: estimated_item_size, overscan: overscan, start: start, end: end, total_size: total_size, measured_count: Int.try_from(measurements.len()).unwrap_or(I64.MAX), anchor_index: anchor_index, anchor_offset: anchor_offset, measurements: ^measurements}
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebVirtual.rs:712
+fn jet_web_virtual_plan_total_size(total_count: Int, estimated_item_size: Int, measurements: &[(Int, Int)]) -> Int {
+    total := total_count.saturating_mul(estimated_item_size)
+    loop (_, size) in measurements {
+        if size >= estimated_item_size { total = total.saturating_add(size.saturating_sub(estimated_item_size)) }
+        else { total = total.saturating_sub(estimated_item_size.saturating_sub(size)) }
+    }
+    total
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebVirtual.rs:728
+fn jet_web_virtual_plan_offset(total_count: Int, estimated_item_size: Int, measurements: &[(Int, Int)], index: Int) -> Int {
+    index :: index.max(0).min(total_count)
+    offset := index.saturating_mul(estimated_item_size)
+    loop (row, size) in measurements {
+        if row >= index { break }
+        if size >= estimated_item_size { offset = offset.saturating_add(size.saturating_sub(estimated_item_size)) }
+        else { offset = offset.saturating_sub(estimated_item_size.saturating_sub(size)) }
+    }
+    offset
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebVirtual.rs:749
+fn jet_web_virtual_plan_visible_range(total_count: Int, viewport_height: Int, scroll_offset: Int, estimated_item_size: Int, measurements: &[(Int, Int)]) -> (Int, Int) {
+    if total_count == 0 || viewport_height == 0 { return (0, 0) }
+    first_visible :: jet_web_virtual_plan_first_row(total_count, scroll_offset, estimated_item_size, measurements)
+    viewport_end :: scroll_offset.saturating_add(viewport_height)
+    last_visible :: jet_web_virtual_plan_first_start_at_or_after(total_count, viewport_end, estimated_item_size, measurements).max(first_visible.saturating_add(1)).min(total_count)
+    (first_visible, last_visible)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebVirtual.rs:777
+fn jet_web_virtual_plan_first_row(total_count: Int, offset: Int, estimated_item_size: Int, measurements: &[(Int, Int)]) -> Int {
+    low := 0
+    high := total_count
+    loop low < high {
+        middle :: low.saturating_add(high).checked_div(2).unwrap_or(low)
+        end :: jet_web_virtual_plan_offset(total_count, estimated_item_size, measurements, middle.saturating_add(1))
+        if end <= offset { low = middle.saturating_add(1) } else { high = middle }
+    }
+    low.min(total_count)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebVirtual.rs:802
+fn jet_web_virtual_plan_first_start_at_or_after(total_count: Int, offset: Int, estimated_item_size: Int, measurements: &[(Int, Int)]) -> Int {
+    low := 0
+    high := total_count
+    loop low < high {
+        middle :: low.saturating_add(high).checked_div(2).unwrap_or(low)
+        start :: jet_web_virtual_plan_offset(total_count, estimated_item_size, measurements, middle)
+        if start < offset { low = middle.saturating_add(1) } else { high = middle }
+    }
+    low.min(total_count)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebVirtual.rs:827
+fn jet_web_virtual_upsert_measurement(measurements: &[(Int, Int)], total_count: Int, index: Int, size: Int) -> () {
+    if index < 0 || index >= total_count || size <= 0 { return }
+    if Val(existing) :: measurements.iter_mut().find(fn(entry) { entry.0 == index }) { existing.1 = size; return }
+    if measurements.len() < JET_WEB_VIRTUAL_MAX_MEASUREMENTS { measurements.push((index, size)) }
+}

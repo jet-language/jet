@@ -508,863 +508,463 @@ pub fn jet_std_math_clamp_f32(value: F32, low: F32, high: F32) -> F32 { value.cl
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:881
 // Canonical owner: core.math.runtime.kernel_fixed_count.jet_std_math_factorial.
 
-// PORT-PENDING 0288 crates-jet-codegen-src-prelude-corelib-top-mathlibpure-module-group: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:893-1749
-//RS 
-//RS pub fn jet_std_math_gcd(mut a: i64, mut b: i64) -> i64 {
-//RS     a = a.abs();
-//RS     b = b.abs();
-//RS     while b != 0 {
-//RS         let r = a % b;
-//RS         a = b;
-//RS         b = r;
-//RS     }
-//RS     a
-//RS }
-//RS pub fn jet_std_math_lcm(a: i64, b: i64) -> i64 {
-//RS     if a == 0 || b == 0 {
-//RS         0
-//RS     } else {
-//RS         (a / jet_std_math_gcd(a, b)).saturating_mul(b).abs()
-//RS     }
-//RS }
-//RS 
-//RS /// Ways to choose `k` items from `n`, or absent when the product leaves the
-//RS /// range or either side is negative.
-//RS pub fn jet_std_math_binomial(n: i64, k: i64) -> Option<i64> {
-//RS     if n < 0 || k < 0 || k > n {
-//RS         return None;
-//RS     }
-//RS     let k = k.min(n - k);
-//RS     let mut out: i64 = 1;
-//RS     let mut i: i64 = 1;
-//RS     while i <= k {
-//RS         out = out.checked_mul(n - k + i)?.checked_div(i)?;
-//RS         i += 1;
-//RS     }
-//RS     Some(out)
-//RS }
-//RS pub fn jet_std_math_perm(n: i64, k: i64) -> Option<i64> {
-//RS     if n < 0 || k < 0 || k > n {
-//RS         return None;
-//RS     }
-//RS     let mut out = 1i64;
-//RS     let mut i = 0i64;
-//RS     while i < k {
-//RS         out = out.checked_mul(n - i)?;
-//RS         i += 1;
-//RS     }
-//RS     Some(out)
-//RS }
-//RS pub fn jet_std_math_rising_factorial(n: i64, k: i64) -> Option<i64> {
-//RS     if k < 0 {
-//RS         return None;
-//RS     }
-//RS     let mut out = 1i64;
-//RS     let mut step = 0i64;
-//RS     while step < k {
-//RS         out = out.checked_mul(n.checked_add(step)?)?;
-//RS         step += 1;
-//RS     }
-//RS     Some(out)
-//RS }
-//RS 
-//RS pub fn jet_std_math_multinomial(parts: Vec<i64>) -> Option<i64> {
-//RS     let mut remaining = 0i64;
-//RS     for part in &parts {
-//RS         if *part < 0 {
-//RS             return None;
-//RS         }
-//RS         remaining = remaining.checked_add(*part)?;
-//RS     }
-//RS     let mut out = 1i64;
-//RS     for part in parts {
-//RS         let factor = jet_std_math_binomial(remaining, part)?;
-//RS         out = out.checked_mul(factor)?;
-//RS         remaining -= part;
-//RS     }
-//RS     Some(out)
-//RS }
-//RS pub fn jet_comb_chain(left: Vec<i64>, right: Vec<i64>) -> Vec<i64> {
-//RS     left.into_iter().chain(right).collect()
-//RS }
-//RS 
-//RS pub fn jet_comb_compress(items: Vec<i64>, mask: Vec<bool>) -> Vec<i64> {
-//RS     items
-//RS         .into_iter()
-//RS         .enumerate()
-//RS         .filter_map(|(index, value)| mask.get(index).copied().filter(|selected| *selected).map(|_| value))
-//RS         .collect()
-//RS }
-//RS 
-//RS pub fn jet_comb_drop(items: Vec<i64>, count: i64) -> Vec<i64> {
-//RS     items
-//RS         .into_iter()
-//RS         .enumerate()
-//RS         .filter_map(|(index, value)| (index as i64 >= count).then_some(value))
-//RS         .collect()
-//RS }
-//RS 
-//RS pub fn jet_comb_takewhile(items: Vec<i64>, pred_nonneg: bool) -> Vec<i64> {
-//RS     items
-//RS         .into_iter()
-//RS         .take_while(|value| (*value >= 0) == pred_nonneg)
-//RS         .collect()
-//RS }
-//RS 
-//RS pub fn jet_comb_dropwhile(items: Vec<i64>, pred_nonneg: bool) -> Vec<i64> {
-//RS     let mut iter = items.into_iter();
-//RS     while let Some(value) = iter.next() {
-//RS         if (value >= 0) != pred_nonneg {
-//RS             return std::iter::once(value).chain(iter).collect();
-//RS         }
-//RS     }
-//RS     Vec::new()
-//RS }
-//RS 
-//RS pub fn jet_comb_filterfalse(items: Vec<i64>, pred_nonneg: bool) -> Vec<i64> {
-//RS     items
-//RS         .into_iter()
-//RS         .filter(|value| (*value >= 0) != pred_nonneg)
-//RS         .collect()
-//RS }
-//RS 
-//RS pub fn jet_comb_islice(items: Vec<i64>, start: i64, stop: i64, step: i64) -> Vec<i64> {
-//RS     if step <= 0 {
-//RS         return Vec::new();
-//RS     }
-//RS     let start = start.max(0) as usize;
-//RS     let stop = stop.max(0) as usize;
-//RS     items
-//RS         .into_iter()
-//RS         .skip(start)
-//RS         .take(stop.saturating_sub(start))
-//RS         .step_by(step as usize)
-//RS         .collect()
-//RS }
-//RS 
-//RS pub fn jet_comb_unique(items: Vec<i64>) -> Vec<i64> {
-//RS     let mut out = Vec::new();
-//RS     for value in items {
-//RS         if !out.contains(&value) {
-//RS             out.push(value);
-//RS         }
-//RS     }
-//RS     out
-//RS }
-//RS 
-//RS pub fn jet_comb_repeat(value: i64, times: i64) -> Vec<i64> {
-//RS     if times <= 0 {
-//RS         return Vec::new();
-//RS     }
-//RS     vec![value; times as usize]
-//RS }
-//RS 
-//RS pub fn jet_comb_count_from(start: i64, step: i64, count: i64) -> Vec<i64> {
-//RS     (0..count.max(0))
-//RS         .map(|index| start.saturating_add(step.saturating_mul(index)))
-//RS         .collect()
-//RS }
-//RS 
-//RS pub fn jet_comb_cycle(items: Vec<i64>, times: i64) -> Vec<i64> {
-//RS     if times <= 0 {
-//RS         return Vec::new();
-//RS     }
-//RS     items
-//RS         .iter()
-//RS         .copied()
-//RS         .cycle()
-//RS         .take(items.len().saturating_mul(times as usize))
-//RS         .collect()
-//RS }
-//RS 
-//RS pub fn jet_comb_accumulate(items: Vec<i64>) -> Vec<i64> {
-//RS     let mut total = 0i64;
-//RS     items
-//RS         .into_iter()
-//RS         .map(|value| {
-//RS             total = total.saturating_add(value);
-//RS             total
-//RS         })
-//RS         .collect()
-//RS }
-//RS 
-//RS pub fn jet_comb_reverse(mut items: Vec<i64>) -> Vec<i64> {
-//RS     items.reverse();
-//RS     items
-//RS }
-//RS pub fn jet_comb_permutations(items: Vec<i64>, k: i64) -> Vec<Vec<i64>> {
-//RS     if k < 0 || k as usize > items.len() {
-//RS         return Vec::new();
-//RS     }
-//RS     let mut out = Vec::new();
-//RS     let mut used = vec![false; items.len()];
-//RS     let mut current = Vec::new();
-//RS     jet_comb_permutations_rec(&items, k as usize, &mut used, &mut current, &mut out);
-//RS     out
-//RS }
-//RS 
-//RS fn jet_comb_permutations_rec(
-//RS     items: &[i64],
-//RS     target: usize,
-//RS     used: &mut [bool],
-//RS     current: &mut Vec<i64>,
-//RS     out: &mut Vec<Vec<i64>>,
-//RS ) {
-//RS     if current.len() == target {
-//RS         out.push(current.clone());
-//RS         return;
-//RS     }
-//RS     for (index, value) in items.iter().copied().enumerate() {
-//RS         if !used[index] {
-//RS             used[index] = true;
-//RS             current.push(value);
-//RS             jet_comb_permutations_rec(items, target, used, current, out);
-//RS             current.pop();
-//RS             used[index] = false;
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS pub fn jet_comb_combinations(items: Vec<i64>, k: i64) -> Vec<Vec<i64>> {
-//RS     if k < 0 || k as usize > items.len() {
-//RS         return Vec::new();
-//RS     }
-//RS     let mut out = Vec::new();
-//RS     let mut current = Vec::new();
-//RS     jet_comb_combinations_rec(&items, k as usize, 0, &mut current, &mut out);
-//RS     out
-//RS }
-//RS 
-//RS fn jet_comb_combinations_rec(
-//RS     items: &[i64],
-//RS     target: usize,
-//RS     start: usize,
-//RS     current: &mut Vec<i64>,
-//RS     out: &mut Vec<Vec<i64>>,
-//RS ) {
-//RS     if current.len() == target {
-//RS         out.push(current.clone());
-//RS         return;
-//RS     }
-//RS     for index in start..items.len() {
-//RS         current.push(items[index]);
-//RS         jet_comb_combinations_rec(items, target, index + 1, current, out);
-//RS         current.pop();
-//RS     }
-//RS }
-//RS 
-//RS pub fn jet_comb_combinations_with_replacement(items: Vec<i64>, k: i64) -> Vec<Vec<i64>> {
-//RS     if k < 0 {
-//RS         return Vec::new();
-//RS     }
-//RS     let mut out = Vec::new();
-//RS     let mut current = Vec::new();
-//RS     jet_comb_combinations_replacement_rec(&items, k as usize, 0, &mut current, &mut out);
-//RS     out
-//RS }
-//RS 
-//RS fn jet_comb_combinations_replacement_rec(
-//RS     items: &[i64],
-//RS     target: usize,
-//RS     start: usize,
-//RS     current: &mut Vec<i64>,
-//RS     out: &mut Vec<Vec<i64>>,
-//RS ) {
-//RS     if current.len() == target {
-//RS         out.push(current.clone());
-//RS         return;
-//RS     }
-//RS     for index in start..items.len() {
-//RS         current.push(items[index]);
-//RS         jet_comb_combinations_replacement_rec(items, target, index, current, out);
-//RS         current.pop();
-//RS     }
-//RS }
-//RS 
-//RS pub fn jet_comb_product(items: Vec<i64>, repeat: i64) -> Vec<Vec<i64>> {
-//RS     if repeat <= 0 {
-//RS         return vec![Vec::new()];
-//RS     }
-//RS     let mut out = vec![Vec::new()];
-//RS     for _ in 0..repeat {
-//RS         let mut next = Vec::new();
-//RS         for row in &out {
-//RS             for value in &items {
-//RS                 let mut expanded = row.clone();
-//RS                 expanded.push(*value);
-//RS                 next.push(expanded);
-//RS             }
-//RS         }
-//RS         out = next;
-//RS     }
-//RS     out
-//RS }
-//RS 
-//RS pub fn jet_comb_cartesian(left: Vec<i64>, right: Vec<i64>) -> Vec<Vec<i64>> {
-//RS     left.into_iter()
-//RS         .flat_map(|a| right.iter().copied().map(move |b| vec![a, b]))
-//RS         .collect()
-//RS }
-//RS 
-//RS pub fn jet_comb_pairwise(items: Vec<i64>) -> Vec<Vec<i64>> {
-//RS     items
-//RS         .windows(2)
-//RS         .map(|window| window.to_vec())
-//RS         .collect()
-//RS }
-//RS 
-//RS pub fn jet_comb_batched(items: Vec<i64>, size: i64) -> Vec<Vec<i64>> {
-//RS     if size <= 0 {
-//RS         return Vec::new();
-//RS     }
-//RS     items
-//RS         .chunks(size as usize)
-//RS         .map(|chunk| chunk.to_vec())
-//RS         .collect()
-//RS }
-//RS 
-//RS pub fn jet_comb_groupby(items: Vec<i64>) -> Vec<Vec<i64>> {
-//RS     let mut out: Vec<Vec<i64>> = Vec::new();
-//RS     for value in items {
-//RS         if out.last().is_some_and(|group| group.last() == Some(&value)) {
-//RS             out.last_mut().expect("last group exists").push(value);
-//RS         } else {
-//RS             out.push(vec![value]);
-//RS         }
-//RS     }
-//RS     out
-//RS }
-//RS 
-//RS pub fn jet_comb_tee(items: Vec<i64>, copies: i64) -> Vec<Vec<i64>> {
-//RS     if copies <= 0 {
-//RS         return Vec::new();
-//RS     }
-//RS     (0..copies).map(|_| items.clone()).collect()
-//RS }
-//RS 
-//RS pub fn jet_comb_zip_longest(left: Vec<i64>, right: Vec<i64>, fill: i64) -> Vec<Vec<i64>> {
-//RS     let length = left.len().max(right.len());
-//RS     (0..length)
-//RS         .map(|index| {
-//RS             vec![
-//RS                 left.get(index).copied().unwrap_or(fill),
-//RS                 right.get(index).copied().unwrap_or(fill),
-//RS             ]
-//RS         })
-//RS         .collect()
-//RS }
-//RS 
-//RS pub fn jet_comb_powerset(items: Vec<i64>) -> Vec<Vec<i64>> {
-//RS     let mut out = vec![Vec::new()];
-//RS     for value in items {
-//RS         let mut next = out.clone();
-//RS         for mut row in out {
-//RS             row.push(value);
-//RS             next.push(row);
-//RS         }
-//RS         out = next;
-//RS     }
-//RS     out
-//RS }
-//RS 
-//RS pub fn jet_comb_windows(items: Vec<i64>, size: i64) -> Vec<Vec<i64>> {
-//RS     if size <= 0 || size as usize > items.len() {
-//RS         return Vec::new();
-//RS     }
-//RS     items
-//RS         .windows(size as usize)
-//RS         .map(|window| window.to_vec())
-//RS         .collect()
-//RS }
-//RS 
-//RS pub fn jet_comb_flatten(groups: Vec<Vec<i64>>) -> Vec<i64> {
-//RS     groups.into_iter().flatten().collect()
-//RS }
-//RS 
-//RS pub fn jet_comb_starmap(rows: Vec<Vec<i64>>) -> Vec<i64> {
-//RS     rows.into_iter()
-//RS         .map(|row| row.into_iter().fold(0i64, |total, value| total.saturating_add(value)))
-//RS         .collect()
-//RS }
-//RS fn jet_coll_sift_down(values: &mut [i64], mut index: usize) {
-//RS     loop {
-//RS         let left = index.saturating_mul(2).saturating_add(1);
-//RS         if left >= values.len() {
-//RS             return;
-//RS         }
-//RS         let mut smallest = index;
-//RS         if values[left] < values[smallest] {
-//RS             smallest = left;
-//RS         }
-//RS         let right = left + 1;
-//RS         if right < values.len() && values[right] < values[smallest] {
-//RS             smallest = right;
-//RS         }
-//RS         if smallest == index {
-//RS             return;
-//RS         }
-//RS         values.swap(index, smallest);
-//RS         index = smallest;
-//RS     }
-//RS }
-//RS 
-//RS fn jet_coll_sift_up(values: &mut [i64], mut index: usize) {
-//RS     while index > 0 {
-//RS         let parent = (index - 1) / 2;
-//RS         if values[index] >= values[parent] {
-//RS             return;
-//RS         }
-//RS         values.swap(index, parent);
-//RS         index = parent;
-//RS     }
-//RS }
-//RS 
-//RS pub fn jet_coll_heapify(values: &[i64]) -> Vec<i64> {
-//RS     let mut values = values.to_vec();
-//RS     if values.len() > 1 {
-//RS         let mut index = values.len() / 2;
-//RS         loop {
-//RS             jet_coll_sift_down(&mut values, index);
-//RS             if index == 0 {
-//RS                 break;
-//RS             }
-//RS             index -= 1;
-//RS         }
-//RS     }
-//RS     values
-//RS }
-//RS 
-//RS pub fn jet_coll_heappush(values: &[i64], value: i64) -> Vec<i64> {
-//RS     let mut values = values.to_vec();
-//RS     values.push(value);
-//RS     let index = values.len() - 1;
-//RS     jet_coll_sift_up(&mut values, index);
-//RS     values
-//RS }
-//RS pub fn jet_coll_heappop_pure(values: &[i64]) -> (Vec<i64>, Option<i64>) {
-//RS     if values.is_empty() {
-//RS         return (Vec::new(), None);
-//RS     }
-//RS     if values.len() == 1 {
-//RS         return (Vec::new(), Some(values[0]));
-//RS     }
-//RS     let mut heap = Vec::with_capacity(values.len() - 1);
-//RS     heap.push(values[values.len() - 1]);
-//RS     heap.extend_from_slice(&values[1..values.len() - 1]);
-//RS     let value = values[0];
-//RS     jet_coll_sift_down(&mut heap, 0);
-//RS     (heap, Some(value))
-//RS }
-//RS 
-//RS pub fn jet_coll_heappushpop_pure(values: &[i64], value: i64) -> (Vec<i64>, i64) {
-//RS     if values.is_empty() || value <= values[0] {
-//RS         return (values.to_vec(), value);
-//RS     }
-//RS     let popped = values[0];
-//RS     let mut heap = Vec::with_capacity(values.len());
-//RS     heap.push(value);
-//RS     heap.extend_from_slice(&values[1..]);
-//RS     jet_coll_sift_down(&mut heap, 0);
-//RS     (heap, popped)
-//RS }
-//RS 
-//RS pub fn jet_coll_heapreplace_pure(values: &[i64], value: i64) -> (Vec<i64>, Option<i64>) {
-//RS     if values.is_empty() {
-//RS         return (vec![value], None);
-//RS     }
-//RS     let popped = values[0];
-//RS     let mut heap = Vec::with_capacity(values.len());
-//RS     heap.push(value);
-//RS     heap.extend_from_slice(&values[1..]);
-//RS     jet_coll_sift_down(&mut heap, 0);
-//RS     (heap, Some(popped))
-//RS }
-//RS 
-//RS pub fn jet_coll_bisect_left(values: &[i64], value: i64) -> i64 {
-//RS     values.partition_point(|item| *item < value) as i64
-//RS }
-//RS 
-//RS pub fn jet_coll_bisect_right(values: &[i64], value: i64) -> i64 {
-//RS     values.partition_point(|item| *item <= value) as i64
-//RS }
-//RS 
-//RS pub fn jet_coll_insort_left(values: &[i64], value: i64) -> Vec<i64> {
-//RS     let index = values.partition_point(|item| *item < value);
-//RS     let mut values = values.to_vec();
-//RS     values.insert(index, value);
-//RS     values
-//RS }
-//RS 
-//RS pub fn jet_coll_insort_right(values: &[i64], value: i64) -> Vec<i64> {
-//RS     let index = values.partition_point(|item| *item <= value);
-//RS     let mut values = values.to_vec();
-//RS     values.insert(index, value);
-//RS     values
-//RS }
-//RS 
-//RS pub fn jet_coll_merge_sorted(left: &[i64], right: &[i64]) -> Vec<i64> {
-//RS     let mut out = Vec::with_capacity(left.len() + right.len());
-//RS     let mut left_index = 0;
-//RS     let mut right_index = 0;
-//RS     while left_index < left.len() && right_index < right.len() {
-//RS         if left[left_index] <= right[right_index] {
-//RS             out.push(left[left_index]);
-//RS             left_index += 1;
-//RS         } else {
-//RS             out.push(right[right_index]);
-//RS             right_index += 1;
-//RS         }
-//RS     }
-//RS     out.extend_from_slice(&left[left_index..]);
-//RS     out.extend_from_slice(&right[right_index..]);
-//RS     out
-//RS }
-//RS 
-//RS pub fn jet_coll_nsmallest(n: i64, values: &[i64]) -> Vec<i64> {
-//RS     if n <= 0 {
-//RS         return Vec::new();
-//RS     }
-//RS     let mut values = values.to_vec();
-//RS     values.sort_unstable();
-//RS     values.truncate(n as usize);
-//RS     values
-//RS }
-//RS 
-//RS pub fn jet_coll_nlargest(n: i64, values: &[i64]) -> Vec<i64> {
-//RS     if n <= 0 {
-//RS         return Vec::new();
-//RS     }
-//RS     let mut values = values.to_vec();
-//RS     values.sort_unstable_by(|left, right| right.cmp(left));
-//RS     values.truncate(n as usize);
-//RS     values
-//RS }
-//RS 
-//RS 
-//RS pub fn jet_std_math_fmod(value: f64, divisor: f64) -> f64 {
-//RS     value % divisor
-//RS }
-//RS 
-//RS pub fn jet_std_math_remainder(value: f64, divisor: f64) -> f64 {
-//RS     if !value.is_finite() || !divisor.is_finite() || divisor == 0.0 {
-//RS         return f64::NAN;
-//RS     }
-//RS     let quotient = value / divisor;
-//RS     let lower = quotient.floor();
-//RS     let fraction = quotient - lower;
-//RS     let nearest = if fraction < 0.5 {
-//RS         lower
-//RS     } else if fraction > 0.5 || lower % 2.0 != 0.0 {
-//RS         lower + 1.0
-//RS     } else {
-//RS         lower
-//RS     };
-//RS     value - nearest * divisor
-//RS }
-//RS 
-//RS pub fn jet_std_math_isclose(
-//RS     left: f64,
-//RS     right: f64,
-//RS     relative_tolerance: f64,
-//RS     absolute_tolerance: f64,
-//RS ) -> bool {
-//RS     if relative_tolerance < 0.0 || absolute_tolerance < 0.0 {
-//RS         return false;
-//RS     }
-//RS     if left == right {
-//RS         return true;
-//RS     }
-//RS     if !left.is_finite() || !right.is_finite() {
-//RS         return false;
-//RS     }
-//RS     (left - right).abs()
-//RS         <= (relative_tolerance * left.abs().max(right.abs())).max(absolute_tolerance)
-//RS }
-//RS 
-//RS pub fn jet_std_math_dist(left: Vec<f64>, right: Vec<f64>) -> f64 {
-//RS     if left.len() != right.len() {
-//RS         return f64::NAN;
-//RS     }
-//RS     left.into_iter()
-//RS         .zip(right)
-//RS         .map(|(a, b)| {
-//RS             let delta = a - b;
-//RS             delta * delta
-//RS         })
-//RS         .sum::<f64>()
-//RS         .sqrt()
-//RS }
-//RS 
-//RS 
-//RS pub fn jet_std_math_digits(value: i64) -> i64 {
-//RS     if value == 0 {
-//RS         return 1;
-//RS     }
-//RS     let mut n = value.unsigned_abs();
-//RS     let mut count = 0i64;
-//RS     while n > 0 {
-//RS         count += 1;
-//RS         n /= 10;
-//RS     }
-//RS     count
-//RS }
-//RS 
-//RS pub fn jet_std_math_leading_ones(value: i64) -> i64 {
-//RS     (value as u64).leading_ones() as i64
-//RS }
-//RS 
-//RS pub fn jet_std_math_trailing_ones(value: i64) -> i64 {
-//RS     (value as u64).trailing_ones() as i64
-//RS }
-//RS 
-//RS pub fn jet_std_math_cmp(a: f64, b: f64) -> i64 {
-//RS     match a.partial_cmp(&b) {
-//RS         Some(std::cmp::Ordering::Less) => -1,
-//RS         Some(std::cmp::Ordering::Equal) => 0,
-//RS         Some(std::cmp::Ordering::Greater) => 1,
-//RS         None => {
-//RS             // NaN sorts after every finite value, matching a stable total order
-//RS             // for audit output: NaN vs NaN is equal; NaN vs number is greater.
-//RS             if a.is_nan() && b.is_nan() {
-//RS                 0
-//RS             } else if a.is_nan() {
-//RS                 1
-//RS             } else {
-//RS                 -1
-//RS             }
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS pub fn jet_std_math_ulp(x: f64) -> f64 {
-//RS     if x.is_nan() {
-//RS         return f64::NAN;
-//RS     }
-//RS     if x.is_infinite() {
-//RS         return f64::INFINITY;
-//RS     }
-//RS     let x = x.abs();
-//RS     if x == 0.0 {
-//RS         return f64::from_bits(1);
-//RS     }
-//RS     let bits = x.to_bits();
-//RS     let next = f64::from_bits(bits + 1);
-//RS     next - x
-//RS }
-//RS 
-//RS pub fn jet_std_math_significand(x: f64) -> f64 {
-//RS     if x == 0.0 || !x.is_finite() {
-//RS         return x;
-//RS     }
-//RS     let bits = x.to_bits();
-//RS     let exp = ((bits >> 52) & 0x7ff) as i32;
-//RS     if exp == 0 {
-//RS         // Subnormal: scale into the normal significand range.
-//RS         let mut v = x.abs();
-//RS         while v < 1.0 {
-//RS             v *= 2.0;
-//RS         }
-//RS         return if x.is_sign_negative() { -v } else { v };
-//RS     }
-//RS     let frac_bits = bits & ((1u64 << 52) - 1);
-//RS     let sig = f64::from_bits((0x3ffu64 << 52) | frac_bits);
-//RS     if x.is_sign_negative() {
-//RS         -sig
-//RS     } else {
-//RS         sig
-//RS     }
-//RS }
-//RS 
-//RS pub fn jet_std_math_ilogb(x: f64) -> Option<i64> {
-//RS     if x == 0.0 || !x.is_finite() {
-//RS         return None;
-//RS     }
-//RS     Some(x.abs().log2().floor() as i64)
-//RS }
-//RS 
-//RS pub fn jet_std_math_logb(x: f64) -> f64 {
-//RS     match jet_std_math_ilogb(x) {
-//RS         Some(e) => e as f64,
-//RS         None if x == 0.0 => f64::NEG_INFINITY,
-//RS         None => f64::INFINITY,
-//RS     }
-//RS }
-//RS 
-//RS pub fn jet_std_math_ldexp(x: f64, exp: i64) -> f64 {
-//RS     if !x.is_finite() || x == 0.0 || exp == 0 {
-//RS         return x;
-//RS     }
-//RS     x * 2f64.powi(exp.clamp(-2099, 2099) as i32)
-//RS }
-//RS 
-//RS pub fn jet_std_math_next_after(x: f64, toward: f64) -> f64 {
-//RS     if x.is_nan() || toward.is_nan() {
-//RS         return f64::NAN;
-//RS     }
-//RS     if x == toward {
-//RS         return toward;
-//RS     }
-//RS     if x == 0.0 {
-//RS         return if toward > 0.0 {
-//RS             f64::from_bits(1)
-//RS         } else {
-//RS             -f64::from_bits(1)
-//RS         };
-//RS     }
-//RS     let bits = x.to_bits();
-//RS     let next = if (toward > x) == x.is_sign_positive() {
-//RS         bits + 1
-//RS     } else {
-//RS         bits - 1
-//RS     };
-//RS     f64::from_bits(next)
-//RS }
-//RS 
-//RS /// Abramowitz & Stegun 7.1.26 — max error under 1.5e-7 on the real line.
-//RS pub fn jet_std_math_erf(x: f64) -> f64 {
-//RS     if x.is_nan() {
-//RS         return f64::NAN;
-//RS     }
-//RS     if x.is_infinite() {
-//RS         return x.signum();
-//RS     }
-//RS     let sign = if x < 0.0 { -1.0 } else { 1.0 };
-//RS     let ax = x.abs();
-//RS     let t = 1.0 / (1.0 + 0.3275911 * ax);
-//RS     let poly = t
-//RS         * (0.254829592
-//RS             + t * (-0.284496736
-//RS                 + t * (1.421413741 + t * (-1.453152027 + t * 1.061405429))));
-//RS     sign * (1.0 - poly * (-ax * ax).exp())
-//RS }
-//RS 
-//RS pub fn jet_std_math_erfc(x: f64) -> f64 {
-//RS     1.0 - jet_std_math_erf(x)
-//RS }
-//RS 
-//RS /// Lanczos approximation for Γ(x) on positive reals; reflected for (0,1).
-//RS pub fn jet_std_math_gamma(x: f64) -> f64 {
-//RS     if x.is_nan() {
-//RS         return f64::NAN;
-//RS     }
-//RS     if x <= 0.0 {
-//RS         if x == x.floor() {
-//RS             return f64::NAN;
-//RS         }
-//RS         // Reflection: Γ(z)Γ(1−z) = π / sin(πz)
-//RS         return std::f64::consts::PI / ((std::f64::consts::PI * x).sin() * jet_std_math_gamma(1.0 - x));
-//RS     }
-//RS     // Lanczos g=7, n=9
-//RS     const G: f64 = 7.0;
-//RS     const C: [f64; 9] = [
-//RS         0.99999999999980993,
-//RS         676.5203681218851,
-//RS         -1259.1392167224028,
-//RS         771.32342877765313,
-//RS         -176.61502916214059,
-//RS         12.507343278686905,
-//RS         -0.13857109526572012,
-//RS         9.984369654078991e-6,
-//RS         1.5056327351493116e-7,
-//RS     ];
-//RS     let mut z = x;
-//RS     if z < 0.5 {
-//RS         return std::f64::consts::PI / ((std::f64::consts::PI * z).sin() * jet_std_math_gamma(1.0 - z));
-//RS     }
-//RS     z -= 1.0;
-//RS     let mut xacc = C[0];
-//RS     for i in 1..9 {
-//RS         xacc += C[i] / (z + i as f64);
-//RS     }
-//RS     let t = z + G + 0.5;
-//RS     (2.0 * std::f64::consts::PI).sqrt() * t.powf(z + 0.5) * (-t).exp() * xacc
-//RS }
-//RS 
-//RS pub fn jet_std_math_lgamma(x: f64) -> f64 {
-//RS     let g = jet_std_math_gamma(x);
-//RS     if g.is_nan() || g <= 0.0 {
-//RS         f64::NAN
-//RS     } else {
-//RS         g.ln()
-//RS     }
-//RS }
-//RS 
-//RS 
-//RS pub fn jet_std_math_checked_sub(left: i64, right: i64) -> Option<i64> {
-//RS     left.checked_sub(right)
-//RS }
-//RS 
-//RS pub fn jet_std_math_checked_mul(left: i64, right: i64) -> Option<i64> {
-//RS     left.checked_mul(right)
-//RS }
-//RS 
-//RS pub fn jet_std_math_saturating_sub(left: i64, right: i64) -> i64 {
-//RS     left.saturating_sub(right)
-//RS }
-//RS 
-//RS pub fn jet_std_math_saturating_mul(left: i64, right: i64) -> i64 {
-//RS     left.saturating_mul(right)
-//RS }
-//RS 
-//RS pub fn jet_std_math_tau() -> f64 {
-//RS     std::f64::consts::TAU
-//RS }
-//RS 
-//RS pub fn jet_std_math_hypot3(a: f64, b: f64, c: f64) -> f64 {
-//RS     a.hypot(b).hypot(c)
-//RS }
-//RS 
-//RS pub fn jet_std_math_midpoint(a: f64, b: f64) -> f64 {
-//RS     a + (b - a) * 0.5
-//RS }
-//RS 
-//RS pub fn jet_std_math_gcd_many(values: &[i64]) -> i64 {
-//RS     values.iter().copied().fold(0, jet_std_math_gcd)
-//RS }
-//RS 
-//RS pub fn jet_std_math_lcm_many(values: &[i64]) -> i64 {
-//RS     let mut values = values.iter().copied();
-//RS     let Some(first) = values.next() else {
-//RS         return 0;
-//RS     };
-//RS     values.fold(first, jet_std_math_lcm)
-//RS }
-//RS 
-//RS pub fn jet_std_math_powmod(base: i64, exp: i64, modulus: i64) -> Option<i64> {
-//RS     if modulus <= 0 || exp < 0 {
-//RS         return None;
-//RS     }
-//RS     let mut result = 1i64 % modulus;
-//RS     let mut factor = base.rem_euclid(modulus);
-//RS     let mut power = exp;
-//RS     while power > 0 {
-//RS         if power & 1 == 1 {
-//RS             result = result.checked_mul(factor)?.rem_euclid(modulus);
-//RS         }
-//RS         factor = factor.checked_mul(factor)?.rem_euclid(modulus);
-//RS         power >>= 1;
-//RS     }
-//RS     Some(result)
-//RS }
-//RS 
-//RS pub fn jet_std_math_sum_int(values: &[i64]) -> i64 {
-//RS     values.iter().copied().sum()
-//RS }
-//RS 
-//RS pub fn jet_std_math_prod_int_ref(values: &[i64]) -> i64 {
-//RS     values.iter().copied().product()
-//RS }
-//RS 
-//RS pub fn jet_std_math_abs_diff(left: i64, right: i64) -> i64 {
-//RS     left.abs_diff(right) as i64
-//RS }
-//RS 
-//RS pub fn jet_std_math_in_range(value: i64, low: i64, high: i64) -> bool {
-//RS     value >= low && value < high
-//RS }
-//RS 
-//RS pub fn jet_std_math_xor(left: i64, right: i64) -> i64 {
-//RS     left ^ right
-//RS }
-// END-PORT-PENDING 0288 crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:1-1749
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:894
+pub fn jet_std_math_gcd(a: I64, b: I64) -> I64 {
+    a := a.abs()
+    b := b.abs()
+    loop b != 0 {
+        remainder :: a % b
+        a = b
+        b = remainder
+    }
+    a
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:904
+pub fn jet_std_math_lcm(a: I64, b: I64) -> I64 {
+    if a == 0 || b == 0 -> 0 else -> (a / jet_std_math_gcd(a, b)).saturating_mul(b).abs()
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:914
+// Canonical owner: core.math.runtime.kernel_fixed_count.jet_std_math_binomial.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:927
+// Canonical owner: core.math.runtime.kernel_fixed_count.jet_std_math_perm.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:939
+// Canonical owner: core.math.runtime.kernel_fixed_count.jet_std_math_rising_factorial.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:952
+// Canonical owner: core.math.runtime.kernel_fixed_count.jet_std_math_multinomial.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:968
+pub fn jet_comb_chain(left: [I64], right: [I64]) -> [I64] { left.into_iter().chain(right).collect() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:972
+pub fn jet_comb_compress(items: [I64], mask: [Bool]) -> [I64] {
+    items.into_iter().enumerate().filter_map(fn(pair) {
+        if mask.get(pair.0).copied().unwrap_or(false) -> Val(pair.1) else -> None
+    }).collect()
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:980
+pub fn jet_comb_drop(items: [I64], count: I64) -> [I64] {
+    items.into_iter().enumerate().filter_map(fn(pair) { if pair.0 as I64 >= count -> Val(pair.1) else -> None }).collect()
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:988
+pub fn jet_comb_takewhile(items: [I64], pred_nonneg: Bool) -> [I64] {
+    items.into_iter().take_while(fn(value) { (*value >= 0) == pred_nonneg }).collect()
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:995
+pub fn jet_comb_dropwhile(items: [I64], pred_nonneg: Bool) -> [I64] {
+    iter := items.into_iter()
+    loop {
+        value :: iter.next() ?? return []
+        if (value >= 0) != pred_nonneg -> return std.iter.once(value).chain(iter).collect()
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:1005
+pub fn jet_comb_filterfalse(items: [I64], pred_nonneg: Bool) -> [I64] {
+    items.into_iter().filter(fn(value) { (*value >= 0) != pred_nonneg }).collect()
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:1012
+pub fn jet_comb_islice(items: [I64], start: I64, stop: I64, step: I64) -> [I64] {
+    if step <= 0 -> return []
+    start :: start.max(0) as USize
+    stop :: stop.max(0) as USize
+    items.into_iter().skip(start).take(stop.saturating_sub(start)).step_by(step as USize).collect()
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:1026
+pub fn jet_comb_unique(items: [I64]) -> [I64] {
+    out: [I64] := []
+    for value in items {
+        if !out.contains(&value) -> out.push(value)
+    }
+    out
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:1036
+pub fn jet_comb_repeat(value: I64, times: I64) -> [I64] {
+    if times <= 0 -> return []
+    [I64].repeat(value, times as USize)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:1043
+pub fn jet_comb_count_from(start: I64, step: I64, count: I64) -> [I64] {
+    (0..<count.max(0)).map(fn(index) { start.saturating_add(step.saturating_mul(index)) }).collect()
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:1049
+pub fn jet_comb_cycle(items: [I64], times: I64) -> [I64] {
+    if times <= 0 -> return []
+    items.iter().copied().cycle().take(items.len().saturating_mul(times as USize)).collect()
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:1061
+pub fn jet_comb_accumulate(items: [I64]) -> [I64] {
+    total := I64{0}
+    items.into_iter().map(fn(value) { total = total.saturating_add(value); total }).collect()
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:1072
+pub fn jet_comb_reverse(items: [I64]) -> [I64] {
+    items := ^items
+    items.reverse()
+    items
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:1076
+pub fn jet_comb_permutations(items: [I64], k: I64) -> [[I64]] {
+    if k < 0 || k as USize > items.len() -> return []
+    out: [[I64]] := []
+    used :: [Bool].repeat(false, items.len())
+    current: [I64] := []
+    jet_comb_permutations_rec(&items, k as USize, &used, &current, &out)
+    out
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:1087
+fn jet_comb_permutations_rec(items: &[I64], target: USize, used: &[Bool], current: &[I64], out: &[[I64]]) -> {
+    if current.len() == target {
+        out.push(current.clone())
+        return
+    }
+    for (index, value) in items.iter().copied().enumerate() {
+        if !used[index] {
+            used[index] = true
+            current.push(value)
+            jet_comb_permutations_rec(items, target, used, current, out)
+            _ :: current.pop()
+            used[index] = false
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:1109
+pub fn jet_comb_combinations(items: [I64], k: I64) -> [[I64]] {
+    if k < 0 || k as USize > items.len() -> return []
+    out: [[I64]] := []
+    current: [I64] := []
+    jet_comb_combinations_rec(&items, k as USize, 0, &current, &out)
+    out
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:1119
+fn jet_comb_combinations_rec(items: &[I64], target: USize, start: USize, current: &[I64], out: &[[I64]]) -> {
+    if current.len() == target {
+        out.push(current.clone())
+        return
+    }
+    for index in start..<items.len() {
+        current.push(items[index])
+        jet_comb_combinations_rec(items, target, index + 1, current, out)
+        _ :: current.pop()
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:1137
+pub fn jet_comb_combinations_with_replacement(items: [I64], k: I64) -> [[I64]] {
+    if k < 0 -> return []
+    out: [[I64]] := []
+    current: [I64] := []
+    jet_comb_combinations_replacement_rec(&items, k as USize, 0, &current, &out)
+    out
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:1147
+fn jet_comb_combinations_replacement_rec(items: &[I64], target: USize, start: USize, current: &[I64], out: &[[I64]]) -> {
+    if current.len() == target {
+        out.push(current.clone())
+        return
+    }
+    for index in start..<items.len() {
+        current.push(items[index])
+        jet_comb_combinations_replacement_rec(items, target, index, current, out)
+        _ :: current.pop()
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:1165
+pub fn jet_comb_product(items: [I64], repeat: I64) -> [[I64]] {
+    if repeat <= 0 -> return [[]]
+    out: [[I64]] := [[]]
+    for _ in 0..<repeat {
+        next: [[I64]] := []
+        for row in &out {
+            for value in &items {
+                expanded := row.clone()
+                expanded.push(*value)
+                next.push(^expanded)
+            }
+        }
+        out = ^next
+    }
+    out
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:1184
+pub fn jet_comb_cartesian(left: [I64], right: [I64]) -> [[I64]] {
+    left.into_iter().flat_map(fn(a) { right.iter().copied().map(fn(b) { [a, b] }) }).collect()
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:1190
+pub fn jet_comb_pairwise(items: [I64]) -> [[I64]] { items.windows(2).map(fn(window) { window.to_vec() }).collect() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:1197
+pub fn jet_comb_batched(items: [I64], size: I64) -> [[I64]] {
+    if size <= 0 -> return []
+    items.chunks(size as USize).map(fn(chunk) { chunk.to_vec() }).collect()
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:1207
+pub fn jet_comb_groupby(items: [I64]) -> [[I64]] {
+    out: [[I64]] := []
+    for value in items {
+        if out.last().is_some_and(fn(group) { group.last() == Val(&value) }) {
+            out.last_mut().expect("last group exists").push(value)
+        } else {
+            out.push([value])
+        }
+    }
+    out
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:1219
+pub fn jet_comb_tee(items: [I64], copies: I64) -> [[I64]] {
+    if copies <= 0 -> return []
+    (0..<copies).map(fn(_) { items.clone() }).collect()
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:1226
+pub fn jet_comb_zip_longest(left: [I64], right: [I64], fill: I64) -> [[I64]] {
+    (0..<left.len().max(right.len())).map(fn(index) {
+        [left.get(index).copied().unwrap_or(fill), right.get(index).copied().unwrap_or(fill)]
+    }).collect()
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:1238
+pub fn jet_comb_powerset(items: [I64]) -> [[I64]] {
+    out: [[I64]] := [[]]
+    for value in items {
+        next := out.clone()
+        for row in out {
+            row := ^row
+            row.push(value)
+            next.push(^row)
+        }
+        out = ^next
+    }
+    out
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:1251
+pub fn jet_comb_windows(items: [I64], size: I64) -> [[I64]] {
+    if size <= 0 || size as USize > items.len() -> return []
+    items.windows(size as USize).map(fn(window) { window.to_vec() }).collect()
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:1261
+pub fn jet_comb_flatten(groups: [[I64]]) -> [I64] { groups.into_iter().flatten().collect() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:1265
+pub fn jet_comb_starmap(rows: [[I64]]) -> [I64] {
+    rows.into_iter().map(fn(row) { row.into_iter().fold(I64{0}, fn(total, value) { total.saturating_add(value) }) }).collect()
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:1270
+fn jet_coll_sift_down(values: &[I64], index: USize) -> {
+    index := index
+    loop {
+        left :: index.saturating_mul(2).saturating_add(1)
+        if left >= values.len() -> return
+        smallest := index
+        if values[left] < values[smallest] -> smallest = left
+        right :: left + 1
+        if right < values.len() && values[right] < values[smallest] -> smallest = right
+        if smallest == index -> return
+        values.swap(index, smallest)
+        index = smallest
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:1292
+fn jet_coll_sift_up(values: &[I64], index: USize) -> {
+    index := index
+    loop index > 0 {
+        parent :: (index - 1) / 2
+        if values[index] >= values[parent] -> return
+        values.swap(index, parent)
+        index = parent
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:1303
+pub fn jet_coll_heapify(values: &[I64]) -> [I64] {
+    values := values.to_vec()
+    if values.len() > 1 {
+        index := values.len() / 2
+        loop {
+            jet_coll_sift_down(&values, index)
+            if index == 0 -> break
+            index -= 1
+        }
+    }
+    values
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:1318
+pub fn jet_coll_heappush(values: &[I64], value: I64) -> [I64] {
+    values := values.to_vec()
+    values.push(value)
+    index :: values.len() - 1
+    jet_coll_sift_up(&values, index)
+    values
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:1325
+pub fn jet_coll_heappop_pure(values: &[I64]) -> ([I64], I64?) {
+    if values.is_empty() -> return ([], None)
+    if values.len() == 1 -> return ([], Val(values[0]))
+    heap := [I64].with_capacity(values.len() - 1)
+    heap.push(values[values.len() - 1])
+    heap.extend_from_slice(&values[1..<values.len() - 1])
+    value :: values[0]
+    jet_coll_sift_down(&heap, 0)
+    (heap, Val(value))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:1340
+pub fn jet_coll_heappushpop_pure(values: &[I64], value: I64) -> ([I64], I64) {
+    if values.is_empty() || value <= values[0] -> return (values.to_vec(), value)
+    popped :: values[0]
+    heap := [I64].with_capacity(values.len())
+    heap.push(value)
+    heap.extend_from_slice(&values[1..])
+    jet_coll_sift_down(&heap, 0)
+    (heap, popped)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:1352
+pub fn jet_coll_heapreplace_pure(values: &[I64], value: I64) -> ([I64], I64?) {
+    if values.is_empty() -> return ([value], None)
+    popped :: values[0]
+    heap := [I64].with_capacity(values.len())
+    heap.push(value)
+    heap.extend_from_slice(&values[1..])
+    jet_coll_sift_down(&heap, 0)
+    (heap, Val(popped))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:1364
+pub fn jet_coll_bisect_left(values: &[I64], value: I64) -> I64 {
+    values.partition_point(fn(item) { *item < value }) as I64
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:1368
+pub fn jet_coll_bisect_right(values: &[I64], value: I64) -> I64 {
+    values.partition_point(fn(item) { *item <= value }) as I64
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:1372
+pub fn jet_coll_insort_left(values: &[I64], value: I64) -> [I64] {
+    index :: values.partition_point(fn(item) { *item < value })
+    values := values.to_vec()
+    values.insert(index, value)
+    values
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:1379
+pub fn jet_coll_insort_right(values: &[I64], value: I64) -> [I64] {
+    index :: values.partition_point(fn(item) { *item <= value })
+    values := values.to_vec()
+    values.insert(index, value)
+    values
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:1386
+pub fn jet_coll_merge_sorted(left: &[I64], right: &[I64]) -> [I64] {
+    out := [I64].with_capacity(left.len() + right.len())
+    left_index := USize{0}
+    right_index := USize{0}
+    loop left_index < left.len() && right_index < right.len() {
+        if left[left_index] <= right[right_index] {
+            out.push(left[left_index])
+            left_index += 1
+        } else {
+            out.push(right[right_index])
+            right_index += 1
+        }
+    }
+    out.extend_from_slice(&left[left_index..])
+    out.extend_from_slice(&right[right_index..])
+    out
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:1404
+pub fn jet_coll_nsmallest(n: I64, values: &[I64]) -> [I64] {
+    if n <= 0 -> return []
+    values := values.to_vec()
+    values.sort_unstable()
+    values.truncate(n as USize)
+    values
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:1414
+pub fn jet_coll_nlargest(n: I64, values: &[I64]) -> [I64] {
+    if n <= 0 -> return []
+    values := values.to_vec()
+    values.sort_unstable_by(fn(left, right) { right.cmp(left) })
+    values.truncate(n as USize)
+    values
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:1425
+pub fn jet_std_math_fmod(value: F64, divisor: F64) -> F64 { value % divisor }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:1429
+// Canonical owner: core.math.runtime.kernel_float_policy.jet_std_math_remainder.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:1446
+// Canonical owner: core.math.runtime.kernel_float_policy.jet_std_math_isclose.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:1465
+// Canonical owner: core.math.runtime.kernel_float_policy.jet_std_math_dist.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:1480
+pub fn jet_std_math_digits(value: I64) -> I64 {
+    if value == 0 -> return 1
+    n := value.unsigned_abs()
+    count := I64{0}
+    loop n > 0 {
+        count += 1
+        n /= 10
+    }
+    count
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:1493
+pub fn jet_std_math_leading_ones(value: I64) -> I64 { (value as U64).leading_ones() as I64 }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:1497
+pub fn jet_std_math_trailing_ones(value: I64) -> I64 { (value as U64).trailing_ones() as I64 }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:1501
+// Canonical owner: core.math.runtime.kernel_float_ordering.jet_float_sort_cmp_code.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:1520
+// Canonical owner: core.math.runtime.kernel_float_policy.jet_std_math_ulp.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:1536
+// Canonical owner: core.math.runtime.kernel_float_policy.jet_std_math_significand.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:1559
+// Canonical owner: core.math.runtime.kernel_float_policy.jet_std_math_ilogb.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:1566
+// Canonical owner: core.math.runtime.kernel_float_policy.jet_std_math_logb.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:1574
+// Canonical owner: core.math.runtime.kernel_float_policy.jet_std_math_ldexp.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:1581
+// Canonical owner: core.math.runtime.kernel_float_policy.jet_std_math_next_after.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:1605
+// Canonical owner: core.math.runtime.kernel_float_policy.jet_std_math_erf.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:1622
+// Canonical owner: core.math.runtime.kernel_float_policy.jet_std_math_erfc.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:1627
+// Canonical owner: core.math.runtime.kernel_float_policy.jet_std_math_gamma.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:1664
+// Canonical owner: core.math.runtime.kernel_float_policy.jet_std_math_lgamma.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:1674
+pub fn jet_std_math_checked_sub(left: I64, right: I64) -> I64? { left.checked_sub(right) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:1678
+pub fn jet_std_math_checked_mul(left: I64, right: I64) -> I64? { left.checked_mul(right) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:1682
+pub fn jet_std_math_saturating_sub(left: I64, right: I64) -> I64 { left.saturating_sub(right) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:1686
+pub fn jet_std_math_saturating_mul(left: I64, right: I64) -> I64 { left.saturating_mul(right) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:1690
+pub fn jet_std_math_tau() -> F64 { std.f64.consts.TAU }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:1694
+pub fn jet_std_math_hypot3(a: F64, b: F64, c: F64) -> F64 { a.hypot(b).hypot(c) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:1698
+pub fn jet_std_math_midpoint(a: F64, b: F64) -> F64 { a + (b - a) * 0.5 }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:1702
+pub fn jet_std_math_gcd_many(values: &[I64]) -> I64 { values.iter().copied().fold(I64{0}, jet_std_math_gcd) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:1706
+pub fn jet_std_math_lcm_many(values: &[I64]) -> I64 {
+    values := values.iter().copied()
+    first :: values.next() ?? return 0
+    values.fold(first, jet_std_math_lcm)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:1714
+pub fn jet_std_math_powmod(base: I64, exp: I64, modulus: I64) -> I64? {
+    if modulus <= 0 || exp < 0 -> return None
+    result := I64{1} % modulus
+    factor := base.rem_euclid(modulus)
+    power := exp
+    loop power > 0 {
+        if power & 1 == 1 {
+            product :: result.checked_mul(factor) ?? return None
+            result = product.rem_euclid(modulus)
+        }
+        square :: factor.checked_mul(factor) ?? return None
+        factor = square.rem_euclid(modulus)
+        power >>= 1
+    }
+    Val(result)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:1731
+pub fn jet_std_math_sum_int(values: &[I64]) -> I64 { values.iter().copied().sum() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:1735
+pub fn jet_std_math_prod_int_ref(values: &[I64]) -> I64 { values.iter().copied().product() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:1739
+pub fn jet_std_math_abs_diff(left: I64, right: I64) -> I64 { left.abs_diff(right) as I64 }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:1743
+pub fn jet_std_math_in_range(value: I64, low: I64, high: I64) -> Bool { value >= low && value < high }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:1747
+pub fn jet_std_math_xor(left: I64, right: I64) -> I64 { left ^ right }
 

@@ -1,0 +1,52 @@
+use core.process.runtime.top_process_02.*
+use core.prelude.runtime.std_open.[IOError, IOOperation]
+use core.prelude.runtime.std_common_types.ProcessStdin
+use std.io.[Cursor, BufReader, Error, ErrorKind]
+use std.rc.Rc
+use std.cell.RefCell
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:1999
+#Test("process_empty_pipeline_refuses_before_launch") {
+    match jet_process_spec_pipeline(&[]) {
+        Err(IOError.InvalidInput(_)) -> {}
+        _ -> assert(false)
+    }
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:3150
+#Test("process_stdin_native_closed_kinds_share_closed_rail") {
+    for kind in [ErrorKind.BrokenPipe, ErrorKind.NotConnected, ErrorKind.UnexpectedEof] {
+        match jet_process_stdin_error(Error.new(kind, "closed")) {
+            IOError.Closed(_) -> {}
+            _ -> assert(false)
+        }
+    }
+    match jet_process_stdin_error(Error.new(ErrorKind.PermissionDenied, "denied")) {
+        IOError.Closed(_) -> assert(false)
+        _ -> {}
+    }
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:3170
+#Test("process_stdin_close_is_idempotent_and_write_observes_closed") {
+    input: Rc<RefCell<ProcessStdin?>> :: Rc.new(RefCell.new(None))
+    jet_process_stdin_close(&input)
+    jet_process_stdin_close(&input)
+    assert(input.borrow().is_none())
+    match jet_process_stdin_write(&input, &"payload") {
+        Err(IOError.Closed(_)) -> {}
+        _ -> assert(false)
+    }
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:3286
+#Test("process_output_line_reader_only_strips_terminal_newlines") {
+    reader := Val(BufReader.new(Cursor.new("one\r\n\nthree\rfour\nlast".as_bytes())))
+    assert(jet_process_child_read_line(&reader).unwrap() == Val("one"))
+    assert(jet_process_child_read_line(&reader).unwrap() == Val(""))
+    assert(jet_process_child_read_line(&reader).unwrap() == Val("three\rfour"))
+    assert(jet_process_child_read_line(&reader).unwrap() == Val("last"))
+    assert(jet_process_child_read_line(&reader).unwrap().is_none())
+    reader: BufReader<Cursor<[U8]>>? := None
+    assert(jet_process_child_read_line(&reader).unwrap().is_none())
+}

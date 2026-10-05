@@ -1,388 +1,280 @@
-// PORT-PENDING 2153 crates-jet-codegen-src-prelude-core-cabi: crates/jet-codegen/src/Prelude/Core/CAbi.rs:1-384
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS // D-EXEC1: the C-ABI export surface of the one compiled runtime.
-//RS //
-//RS // The Jet-native backend (Compiler/JetBackend, contract in
-//RS // Docs/research/jet-backend-design-2026-10-01.md, "Calls into the compiled
-//RS // runtime") calls the runtime by symbol with the System V convention. Every
-//RS // export below is a carrier adapter over the Prelude function AOT already
-//RS // calls: no export decides meaning of its own (I9).
-//RS //
-//RS // Carrier rules, one machine word each:
-//RS // - `Int` is the exact-Int carrier word (inline, or a tagged big-integer
-//RS //   owner). Kernels that take native `i64` are adapted the way generated
-//RS //   Rust adapts them (`native_int_input` / `native_int_result`).
-//RS // - `String` is an owned `Box<String>` handle. `jet_rt_string_drop` and
-//RS //   `jet_rt_string_builder_finish` consume their argument; every other
-//RS //   String parameter is borrowed and stays owned by the caller.
-//RS // - `Bool` parameters are a word holding 0 or 1; `Bool` results are returned
-//RS //   in the low byte.
-//RS // - A cursor handle is an owned `Box<JetLoopRangeCursor>`.
-//RS //
-//RS // Generated code has no unwind tables, so no unwind may leave an export. A
-//RS // stop renders and exits the process exactly as the AOT entry boundary does.
-//RS #[cfg(not(target_arch = "wasm32"))]
-//RS mod jet_c_abi {
-//RS     use std::panic::{catch_unwind, resume_unwind, AssertUnwindSafe};
-//RS 
-//RS     type JetCString = *mut String;
-//RS 
-//RS     /// Run one export body; a caught unwind ends the process through the AOT
-//RS     /// entry boundary's report carriers instead of entering generated frames.
-//RS     #[inline(always)]
-//RS     fn guard<T>(run: impl FnOnce() -> T) -> T {
-//RS         match catch_unwind(AssertUnwindSafe(run)) {
-//RS             Ok(value) => value,
-//RS             Err(payload) => stop(payload),
-//RS         }
-//RS     }
-//RS 
-//RS     #[cold]
-//RS     fn stop(payload: Box<dyn std::any::Any + Send>) -> ! {
-//RS         // The boundary renders a runtime report and exits; any other payload
-//RS         // is a host fault, which ends like a panic leaving an AOT `main` (the
-//RS         // panic hook has already printed it).
-//RS         let _ = catch_unwind(AssertUnwindSafe(move || {
-//RS             super::jet_runtime_boundary(move || -> () { resume_unwind(payload) })
-//RS         }));
-//RS         std::process::exit(101)
-//RS     }
-//RS 
-//RS     fn bytes<'a>(ptr: *const u8, len: usize) -> &'a [u8] {
-//RS         if len == 0 {
-//RS             return &[];
-//RS         }
-//RS         // SAFETY: the caller passes `len` initialized bytes at `ptr` (static
-//RS         // data emitted by the backend) that outlive this call.
-//RS         unsafe { std::slice::from_raw_parts(ptr, len) }
-//RS     }
-//RS 
-//RS     fn text(ptr: *const u8, len: usize) -> std::borrow::Cow<'static, str> {
-//RS         String::from_utf8_lossy(bytes(ptr, len))
-//RS     }
-//RS 
-//RS     fn handle(value: String) -> JetCString {
-//RS         Box::into_raw(Box::new(value))
-//RS     }
-//RS 
-//RS     fn view<'a>(value: JetCString) -> &'a str {
-//RS         // SAFETY: `value` is a live handle from `handle` that the caller owns
-//RS         // for the duration of this call.
-//RS         unsafe { (*value).as_str() }
-//RS     }
-//RS 
-//RS     fn builder<'a>(value: JetCString) -> &'a mut String {
-//RS         // SAFETY: `value` is a live builder from `jet_rt_string_builder_new`;
-//RS         // the caller owns it exclusively for the duration of this call.
-//RS         unsafe { &mut *value }
-//RS     }
-//RS 
-//RS     fn take(value: JetCString) -> String {
-//RS         // SAFETY: the caller transfers its owned handle from `handle`.
-//RS         *unsafe { Box::from_raw(value) }
-//RS     }
-//RS 
-//RS     fn line_of(line: i64) -> u32 {
-//RS         u32::try_from(line).unwrap_or(0)
-//RS     }
-//RS 
-//RS     /// `native_int_input`: an exact Int a native kernel receives as `i64`.
-//RS     fn native(value: i64) -> i64 {
-//RS         crate::jet_std::jet_int_to_i64(value).unwrap_or_else(|| {
-//RS             super::jet_arithmetic_stop("<core.prelude>", 0, "native Int argument exceeds host range")
-//RS         })
-//RS     }
-//RS 
-//RS     // Process entry.
-//RS 
-//RS     #[no_mangle]
-//RS     pub extern "C" fn jet_rt_main(entry: extern "C" fn()) -> i32 {
-//RS         guard(|| {
-//RS             super::jet_std_env_init();
-//RS             super::jet_runtime_boundary(|| entry());
-//RS             0
-//RS         })
-//RS     }
-//RS 
-//RS     // Memory for boxes owned by generated code.
-//RS 
-//RS     #[no_mangle]
-//RS     pub extern "C" fn jet_rt_alloc(size: usize, align: usize) -> *mut u8 {
-//RS         guard(|| {
-//RS             let layout = std::alloc::Layout::from_size_align(size.max(1), align)
-//RS                 .unwrap_or_else(|_| super::jet_panic("<core.prelude>", 0, "invalid box layout"));
-//RS             // SAFETY: the layout has a non-zero size.
-//RS             let ptr = unsafe { std::alloc::alloc(layout) };
-//RS             if ptr.is_null() {
-//RS                 std::alloc::handle_alloc_error(layout);
-//RS             }
-//RS             ptr
-//RS         })
-//RS     }
-//RS 
-//RS     #[no_mangle]
-//RS     pub extern "C" fn jet_rt_free(ptr: *mut u8, size: usize, align: usize) {
-//RS         guard(|| {
-//RS             if ptr.is_null() {
-//RS                 return;
-//RS             }
-//RS             let layout = std::alloc::Layout::from_size_align(size.max(1), align)
-//RS                 .unwrap_or_else(|_| super::jet_panic("<core.prelude>", 0, "invalid box layout"));
-//RS             // SAFETY: `ptr` came from `jet_rt_alloc` with this size and align.
-//RS             unsafe { std::alloc::dealloc(ptr, layout) }
-//RS         })
-//RS     }
-//RS 
-//RS     // Strings.
-//RS 
-//RS     #[no_mangle]
-//RS     pub extern "C" fn jet_rt_string_from_static(ptr: *const u8, len: usize) -> JetCString {
-//RS         guard(|| handle(text(ptr, len).into_owned()))
-//RS     }
-//RS 
-//RS     #[no_mangle]
-//RS     pub extern "C" fn jet_rt_string_clone(value: JetCString) -> JetCString {
-//RS         guard(|| handle(view(value).to_owned()))
-//RS     }
-//RS 
-//RS     #[no_mangle]
-//RS     pub extern "C" fn jet_rt_string_drop(value: JetCString) {
-//RS         guard(|| {
-//RS             if !value.is_null() {
-//RS                 drop(take(value));
-//RS             }
-//RS         })
-//RS     }
-//RS 
-//RS     #[no_mangle]
-//RS     pub extern "C" fn jet_rt_string_eq(left: JetCString, right: JetCString) -> bool {
-//RS         guard(|| view(left) == view(right))
-//RS     }
-//RS 
-//RS     #[no_mangle]
-//RS     pub extern "C" fn jet_rt_string_compare(left: JetCString, right: JetCString) -> i64 {
-//RS         guard(|| match view(left).as_bytes().cmp(view(right).as_bytes()) {
-//RS             std::cmp::Ordering::Less => -1,
-//RS             std::cmp::Ordering::Equal => 0,
-//RS             std::cmp::Ordering::Greater => 1,
-//RS         })
-//RS     }
-//RS 
-//RS     #[no_mangle]
-//RS     pub extern "C" fn jet_char_len(value: JetCString) -> i64 {
-//RS         guard(|| crate::jet_std::jet_int_from_i64(super::jet_char_len(unsafe { &*value })))
-//RS     }
-//RS 
-//RS     #[no_mangle]
-//RS     pub extern "C" fn jet_string_is_empty(value: JetCString) -> bool {
-//RS         guard(|| super::jet_string_is_empty(unsafe { &*value }))
-//RS     }
-//RS 
-//RS     #[no_mangle]
-//RS     pub extern "C" fn jet_string_contains(value: JetCString, needle: JetCString) -> bool {
-//RS         guard(|| super::jet_string_contains(view(value), view(needle)))
-//RS     }
-//RS 
-//RS     #[no_mangle]
-//RS     pub extern "C" fn jet_string_starts_with(value: JetCString, needle: JetCString) -> bool {
-//RS         guard(|| super::jet_string_starts_with(unsafe { &*value }, unsafe { &*needle }))
-//RS     }
-//RS 
-//RS     #[no_mangle]
-//RS     pub extern "C" fn jet_string_ends_with(value: JetCString, needle: JetCString) -> bool {
-//RS         guard(|| super::jet_string_ends_with(unsafe { &*value }, unsafe { &*needle }))
-//RS     }
-//RS 
-//RS     #[no_mangle]
-//RS     pub extern "C" fn jet_rt_string_builder_new() -> JetCString {
-//RS         guard(|| handle(String::new()))
-//RS     }
-//RS 
-//RS     #[no_mangle]
-//RS     pub extern "C" fn jet_rt_string_builder_push_static(target: JetCString, ptr: *const u8, len: usize) {
-//RS         guard(|| builder(target).push_str(&text(ptr, len)))
-//RS     }
-//RS 
-//RS     #[no_mangle]
-//RS     pub extern "C" fn jet_rt_string_builder_push(target: JetCString, value: JetCString) {
-//RS         guard(|| builder(target).push_str(view(value)))
-//RS     }
-//RS 
-//RS     /// The builder box becomes the String handle; no bytes are copied.
-//RS     #[no_mangle]
-//RS     pub extern "C" fn jet_rt_string_builder_finish(target: JetCString) -> JetCString {
-//RS         target
-//RS     }
-//RS 
-//RS     // Display text, as generated Rust renders `print` and interpolation.
-//RS 
-//RS     #[no_mangle]
-//RS     pub extern "C" fn jet_rt_int_to_string(value: i64) -> JetCString {
-//RS         guard(|| handle(crate::jet_std::jet_int_to_string(value)))
-//RS     }
-//RS 
-//RS     #[no_mangle]
-//RS     pub extern "C" fn jet_rt_i64_to_string(value: i64) -> JetCString {
-//RS         guard(|| handle(value.to_string()))
-//RS     }
-//RS 
-//RS     #[no_mangle]
-//RS     pub extern "C" fn jet_rt_u64_to_string(value: u64) -> JetCString {
-//RS         guard(|| handle(value.to_string()))
-//RS     }
-//RS 
-//RS     #[no_mangle]
-//RS     pub extern "C" fn jet_rt_char_to_string(value: i64) -> JetCString {
-//RS         guard(|| {
-//RS             let scalar = u32::try_from(value).ok().and_then(char::from_u32);
-//RS             handle(scalar.unwrap_or(char::REPLACEMENT_CHARACTER).to_string())
-//RS         })
-//RS     }
-//RS 
-//RS     #[no_mangle]
-//RS     pub extern "C" fn jet_rt_bool_to_string(value: u8) -> JetCString {
-//RS         guard(|| handle((value != 0).to_string()))
-//RS     }
-//RS 
-//RS     /// A Float arrives in xmm0 as the double itself.
-//RS     #[no_mangle]
-//RS     pub extern "C" fn jet_rt_float_to_string(value: f64) -> JetCString {
-//RS         guard(|| handle(super::jet_fmt_display(&value)))
-//RS     }
-//RS 
-//RS     // Stops raised by generated code itself.
-//RS 
-//RS     #[no_mangle]
-//RS     pub extern "C" fn jet_rt_panic_overflow() {
-//RS         guard(|| {
-//RS             super::jet_arithmetic_stop(
-//RS                 "<core.prelude>",
-//RS                 0,
-//RS                 "This arithmetic overflows the value's type (the result is outside its range)",
-//RS             )
-//RS         })
-//RS     }
-//RS 
-//RS     #[no_mangle]
-//RS     pub extern "C" fn jet_rt_panic_division_by_zero() {
-//RS         guard(|| super::jet_fixed_error_stop(super::JetFixedArithmeticError::DivideZero, "<core.prelude>", 0))
-//RS     }
-//RS 
-//RS     #[no_mangle]
-//RS     pub extern "C" fn jet_rt_panic_list_bounds(len: i64, index: i64) {
-//RS         guard(|| super::jet_arithmetic_stop("<core.prelude>", 0, &super::jet_list_bounds_message(len, native(index))))
-//RS     }
-//RS 
-//RS     #[no_mangle]
-//RS     pub extern "C" fn jet_rt_unreachable(ptr: *const u8, len: usize) {
-//RS         let reason = text(ptr, len).into_owned();
-//RS         // Generated Rust spells MIR `Never` as `unreachable!(reason)`.
-//RS         guard(move || -> () { unreachable!("{}", reason) })
-//RS     }
-//RS 
-//RS     /// A Prelude `jet_panic("<core.prelude>", 0, message)` stop that generated
-//RS     /// code checks inline (e.g. an iterator loop stride, Collections.rs:1518).
-//RS     #[no_mangle]
-//RS     pub extern "C" fn jet_rt_panic_message(ptr: *const u8, len: usize) {
-//RS         let message = text(ptr, len).into_owned();
-//RS         guard(move || -> () { super::jet_panic("<core.prelude>", 0, &message) })
-//RS     }
-//RS 
-//RS     // Prelude routes: the C name is the last `::` segment of the MIR symbol.
-//RS 
-//RS     macro_rules! exact_int_binary {
-//RS         ($($name:ident),* $(,)?) => {$(
-//RS             #[no_mangle]
-//RS             pub extern "C" fn $name(left: i64, right: i64) -> i64 {
-//RS                 guard(|| crate::jet_std::$name(left, right))
-//RS             }
-//RS         )*};
-//RS     }
-//RS 
-//RS     macro_rules! exact_int_located {
-//RS         ($($name:ident),* $(,)?) => {$(
-//RS             #[no_mangle]
-//RS             pub extern "C" fn $name(left: i64, right: i64, file_ptr: *const u8, file_len: usize, line: i64) -> i64 {
-//RS                 guard(|| crate::jet_std::$name(left, right, &text(file_ptr, file_len), line_of(line)))
-//RS             }
-//RS         )*};
-//RS     }
-//RS 
-//RS     exact_int_binary!(jet_int_add, jet_int_sub, jet_int_mul, jet_int_bit_and, jet_int_bit_or, jet_int_bit_xor, jet_int_compare);
-//RS     exact_int_located!(jet_int_div, jet_int_rem, jet_int_floor_div, jet_int_mod, jet_int_pow, jet_int_shl, jet_int_shr);
-//RS 
-//RS     #[no_mangle]
-//RS     pub extern "C" fn jet_int_owned_from_i64(value: i64) -> i64 {
-//RS         guard(|| crate::jet_std::jet_int_owned_from_i64(value).into_raw())
-//RS     }
-//RS 
-//RS     #[no_mangle]
-//RS     pub extern "C" fn jet_int_owned_to_i64(value: i64) -> i64 {
-//RS         guard(|| native(value))
-//RS     }
-//RS 
-//RS     #[no_mangle]
-//RS     pub extern "C" fn jet_int_owned_to_f64(value: i64) -> f64 {
-//RS         guard(|| crate::jet_std::jet_int_to_f64(value))
-//RS     }
-//RS 
-//RS     #[no_mangle]
-//RS     pub extern "C" fn jet_term_write_stdout_line(value: JetCString, flush: u8) {
-//RS         // Generated Rust ignores the stream result of `print` the same way.
-//RS         guard(|| {
-//RS             let _ = super::jet_term_write_stdout_line(view(value), flush != 0);
-//RS         })
-//RS     }
-//RS 
-//RS     #[no_mangle]
-//RS     pub extern "C" fn jet_loop_range_init(
-//RS         start: i64,
-//RS         end: i64,
-//RS         step: i64,
-//RS         has_step: u8,
-//RS         exclusive: u8,
-//RS     ) -> *mut super::JetLoopRangeCursor {
-//RS         guard(|| {
-//RS             let step = if has_step != 0 { native(step) } else { 1 };
-//RS             Box::into_raw(Box::new(super::jet_loop_range_init(
-//RS                 native(start),
-//RS                 native(end),
-//RS                 step,
-//RS                 has_step != 0,
-//RS                 exclusive != 0,
-//RS             )))
-//RS         })
-//RS     }
-//RS 
-//RS     fn cursor<'a>(value: *mut super::JetLoopRangeCursor) -> &'a mut super::JetLoopRangeCursor {
-//RS         // SAFETY: `value` is a live cursor from `jet_loop_range_init` that the
-//RS         // caller owns for the duration of this call.
-//RS         unsafe { &mut *value }
-//RS     }
-//RS 
-//RS     #[no_mangle]
-//RS     pub extern "C" fn jet_loop_range_has_next(value: *mut super::JetLoopRangeCursor) -> bool {
-//RS         guard(|| super::jet_loop_range_has_next(cursor(value)))
-//RS     }
-//RS 
-//RS     #[no_mangle]
-//RS     pub extern "C" fn jet_loop_range_value(value: *mut super::JetLoopRangeCursor) -> i64 {
-//RS         guard(|| crate::jet_std::jet_int_from_i64(super::jet_loop_range_value(cursor(value))))
-//RS     }
-//RS 
-//RS     #[no_mangle]
-//RS     pub extern "C" fn jet_loop_range_advance(value: *mut super::JetLoopRangeCursor) {
-//RS         guard(|| super::jet_loop_range_advance(cursor(value)))
-//RS     }
-//RS 
-//RS     #[no_mangle]
-//RS     pub extern "C" fn jet_loop_cursor_drop(value: *mut super::JetLoopRangeCursor) {
-//RS         if !value.is_null() {
-//RS             // SAFETY: the caller transfers its owned cursor.
-//RS             drop(unsafe { Box::from_raw(value) });
-//RS         }
-//RS     }
-//RS }
-//RS 
-// END-PORT-PENDING 2153 crates/jet-codegen/src/Prelude/Core/CAbi.rs:1-384
+// C-ABI carrier adapters for the single compiled runtime. No adapter owns semantics.
+// Main publishes this module only when selected_arch() != wasm32.
+module jet_c_abi {
+    use std.panic.[catch_unwind, resume_unwind, AssertUnwindSafe]
+    use std.any.Any
+    use std.boxed.Box
+    use std.slice
+    use std.borrow.Cow
+    use std.alloc.[Layout, alloc, dealloc, handle_alloc_error]
+    use std.process
+    use core.mem.host.kernel_c_abi.[c_abi_line_of, c_abi_char_scalar, c_abi_bool_input]
+    use core.prelude.runtime.core as runtime
+    use core.prelude.runtime.core_02 as strings
+    use core.prelude.runtime.std_common_types_03 as exact
+    use core.prelude.runtime.kernel_values.jet_fmt_display
+    use core.prelude.runtime.kernel_fixed_arithmetic.JetFixedArithmeticError
+    use core.collections.runtime.kernel_collections as ranges
+    use core.term.runtime.term as terminal
+    use core.sys.runtime.env_init.jet_std_env_init
+    use jet_foundation.Outcome.jet_list_bounds_message
 
+    // Rust: crates/jet-codegen/src/Prelude/Core/CAbi.rs:26
+    type JetCString = *mut String
+    // Rust: crates/jet-codegen/src/Prelude/Core/CAbi.rs:31
+    #Inline(Always)
+    // GATE #4565: kernel primitive
+    #Unsafe("catch every unwind before returning to generated frames, which have no unwind tables")
+    fn guard<T>(run: fn() -> T) -> T {
+        match catch_unwind(AssertUnwindSafe(^run)) { Ok(value) -> ^value, Err(payload) -> stop(^payload) }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/CAbi.rs:39
+    // GATE #4565: kernel primitive
+    #Unsafe("render runtime-stop payload through the AOT boundary; host faults terminate with status101")
+    fn stop(payload: Box<Any + Send>) -> Never {
+        _ :: catch_unwind(AssertUnwindSafe(fn() { runtime.jet_runtime_boundary(fn() { resume_unwind(^payload) }) }))
+        process.exit(101)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/CAbi.rs:49
+    // GATE #4565: kernel primitive
+    #Unsafe("caller supplies initialized static bytes which outlive this borrowed span")
+    fn bytes(pointer: *const U8, length: USize) -> &[U8] {
+        if length == 0 { return &[] }
+        slice.from_raw_parts(pointer, length)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/CAbi.rs:58
+    fn text(pointer: *const U8, length: USize) -> Cow<String> { String.from_utf8_lossy(bytes(pointer, length)) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/CAbi.rs:62
+    // GATE #4565: kernel primitive
+    #Unsafe("transfer one owned canonical String box into an opaque C handle")
+    fn handle(value: String) -> JetCString { Box.into_raw(Box.new(^value)) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/CAbi.rs:66
+    // GATE #4565: kernel primitive
+    #Unsafe("caller retains a live canonical String box for the entire synchronous borrow")
+    fn view(value: JetCString) -> &String { (*value).as_str() }
+    // Rust: crates/jet-codegen/src/Prelude/Core/CAbi.rs:72
+    // GATE #4565: kernel primitive
+    #Unsafe("caller exclusively owns the live builder box during this mutable borrow")
+    fn builder(value: JetCString) -> &String { &*value }
+    // Rust: crates/jet-codegen/src/Prelude/Core/CAbi.rs:78
+    // GATE #4565: kernel primitive
+    #Unsafe("consume the caller's owned canonical String handle exactly once")
+    fn take(value: JetCString) -> String { *Box.from_raw(value) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/CAbi.rs:83
+    // line_of uses canonical kernel_c_abi.c_abi_line_of without a compatibility alias.
+    // Rust: crates/jet-codegen/src/Prelude/Core/CAbi.rs:88
+    fn native(value: I64) -> I64 {
+        exact.jet_int_to_i64(value).unwrap_or_else(fn() { runtime.jet_arithmetic_stop("<core.prelude>", 0, "native Int argument exceeds host range") })
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/CAbi.rs:97
+    #FFI(c)
+    pub fn jet_rt_main(entry: fn() -> ()) -> I32 {
+        guard(fn() {
+            // GATE #4565: kernel primitive
+            #Unsafe("initialize canonical environment table and reporters before user entry") { jet_std_env_init() }
+            runtime.jet_runtime_boundary(fn() { entry() })
+            0
+        })
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/CAbi.rs:108
+    #FFI(c)
+    pub fn jet_rt_alloc(size: USize, align: USize) -> *mut U8 {
+        guard(fn() {
+            layout :: Layout.from_size_align(size.max(1), align).unwrap_or_else(fn(_) { runtime.jet_panic("<core.prelude>", 0, "invalid box layout") })
+            // GATE #4565: kernel primitive
+            pointer :: #Unsafe("allocate a nonzero checked target-width layout") { alloc(layout) }
+            if pointer.is_null() { handle_alloc_error(layout) }
+            pointer
+        })
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/CAbi.rs:122
+    #FFI(c)
+    pub fn jet_rt_free(pointer: *mut U8, size: USize, align: USize) -> () {
+        guard(fn() {
+            if pointer.is_null() { return }
+            layout :: Layout.from_size_align(size.max(1), align).unwrap_or_else(fn(_) { runtime.jet_panic("<core.prelude>", 0, "invalid box layout") })
+            // GATE #4565: kernel primitive
+            #Unsafe("pointer came from jet_rt_alloc with identical size and alignment") { dealloc(pointer, layout) }
+        })
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/CAbi.rs:137
+    #FFI(c)
+    pub fn jet_rt_string_from_static(pointer: *const U8, length: USize) -> JetCString { guard(fn() { handle(text(pointer, length).into_owned()) }) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/CAbi.rs:142
+    #FFI(c)
+    pub fn jet_rt_string_clone(value: JetCString) -> JetCString { guard(fn() { handle(view(value).to_owned()) }) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/CAbi.rs:147
+    #FFI(c)
+    pub fn jet_rt_string_drop(value: JetCString) -> () { guard(fn() { if !value.is_null() { drop(take(value)) } }) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/CAbi.rs:156
+    #FFI(c)
+    pub fn jet_rt_string_eq(left: JetCString, right: JetCString) -> Bool { guard(fn() { view(left) == view(right) }) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/CAbi.rs:161
+    #FFI(c)
+    pub fn jet_rt_string_compare(left: JetCString, right: JetCString) -> I64 {
+        guard(fn() { match view(left).as_bytes().cmp(view(right).as_bytes()) { .Less -> -1, .Equal -> 0, .Greater -> 1 } })
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/CAbi.rs:170
+    // GATE #4565: kernel primitive
+    #FFI(c)
+    #Unsafe("borrow live canonical String handle and pack native scalar count into exact Int")
+    pub fn jet_char_len(value: JetCString) -> I64 { guard(fn() { exact.jet_int_from_i64(strings.jet_char_len(&*value)) }) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/CAbi.rs:175
+    // GATE #4565: kernel primitive
+    #FFI(c)
+    #Unsafe("borrow live canonical String handle for empty predicate")
+    pub fn jet_string_is_empty(value: JetCString) -> Bool { guard(fn() { strings.jet_string_is_empty(&*value) }) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/CAbi.rs:180
+    #FFI(c)
+    pub fn jet_string_contains(value: JetCString, needle: JetCString) -> Bool { guard(fn() { strings.jet_string_contains(view(value), view(needle)) }) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/CAbi.rs:185
+    // GATE #4565: kernel primitive
+    #FFI(c)
+    #Unsafe("borrow both live canonical String handles for prefix predicate")
+    pub fn jet_string_starts_with(value: JetCString, needle: JetCString) -> Bool { guard(fn() { strings.jet_string_starts_with(&*value, &*needle) }) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/CAbi.rs:190
+    // GATE #4565: kernel primitive
+    #FFI(c)
+    #Unsafe("borrow both live canonical String handles for suffix predicate")
+    pub fn jet_string_ends_with(value: JetCString, needle: JetCString) -> Bool { guard(fn() { strings.jet_string_ends_with(&*value, &*needle) }) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/CAbi.rs:195
+    #FFI(c)
+    pub fn jet_rt_string_builder_new() -> JetCString { guard(fn() { handle(String.new()) }) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/CAbi.rs:200
+    #FFI(c)
+    pub fn jet_rt_string_builder_push_static(target: JetCString, pointer: *const U8, length: USize) -> () { guard(fn() { builder(target).push_str(&text(pointer, length)) }) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/CAbi.rs:205
+    #FFI(c)
+    pub fn jet_rt_string_builder_push(target: JetCString, value: JetCString) -> () { guard(fn() { builder(target).push_str(view(value)) }) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/CAbi.rs:211
+    // Transfer the SAME box: no byte copy, allocation, or fallible operation.
+    #FFI(c)
+    pub fn jet_rt_string_builder_finish(target: JetCString) -> JetCString { target }
+    // Rust: crates/jet-codegen/src/Prelude/Core/CAbi.rs:218
+    #FFI(c)
+    pub fn jet_rt_int_to_string(value: I64) -> JetCString { guard(fn() { handle(exact.jet_int_to_string(value)) }) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/CAbi.rs:223
+    #FFI(c)
+    pub fn jet_rt_i64_to_string(value: I64) -> JetCString { guard(fn() { handle(value.to_string()) }) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/CAbi.rs:228
+    #FFI(c)
+    pub fn jet_rt_u64_to_string(value: U64) -> JetCString { guard(fn() { handle(value.to_string()) }) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/CAbi.rs:233
+    #FFI(c)
+    pub fn jet_rt_char_to_string(value: I64) -> JetCString { guard(fn() { handle(Char.from_u32(c_abi_char_scalar(value)).unwrap().to_string()) }) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/CAbi.rs:241
+    #FFI(c)
+    pub fn jet_rt_bool_to_string(value: U8) -> JetCString { guard(fn() { handle(c_abi_bool_input(value).to_string()) }) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/CAbi.rs:247
+    #FFI(c)
+    pub fn jet_rt_float_to_string(value: F64) -> JetCString { guard(fn() { handle(jet_fmt_display(&value)) }) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/CAbi.rs:254
+    #FFI(c)
+    pub fn jet_rt_panic_overflow() -> () {
+        guard(fn() { runtime.jet_arithmetic_stop("<core.prelude>", 0, "This arithmetic overflows the value's type (the result is outside its range)") })
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/CAbi.rs:265
+    #FFI(c)
+    pub fn jet_rt_panic_division_by_zero() -> () { guard(fn() { runtime.jet_fixed_error_stop(JetFixedArithmeticError.DivideZero, "<core.prelude>", 0) }) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/CAbi.rs:270
+    #FFI(c)
+    pub fn jet_rt_panic_list_bounds(length: I64, index: I64) -> () { guard(fn() { runtime.jet_arithmetic_stop("<core.prelude>", 0, &jet_list_bounds_message(length, native(index))) }) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/CAbi.rs:275
+    #FFI(c)
+    pub fn jet_rt_unreachable(pointer: *const U8, length: USize) -> () {
+        reason :: text(pointer, length).into_owned()
+        guard(fn() { unreachable("{reason}") })
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/CAbi.rs:284
+    #FFI(c)
+    pub fn jet_rt_panic_message(pointer: *const U8, length: USize) -> () {
+        message :: text(pointer, length).into_owned()
+        guard(fn() { runtime.jet_panic("<core.prelude>", 0, &message) })
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/CAbi.rs:291
+    // exact_int_binary expansion: every route delegates to the canonical exact-Int owner.
+    // Rust: crates/jet-codegen/src/Prelude/Core/CAbi.rs:309
+    #FFI(c)
+    pub fn jet_int_add(left: I64, right: I64) -> I64 { guard(fn() { exact.jet_int_add(left, right) }) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/CAbi.rs:309
+    #FFI(c)
+    pub fn jet_int_sub(left: I64, right: I64) -> I64 { guard(fn() { exact.jet_int_sub(left, right) }) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/CAbi.rs:309
+    #FFI(c)
+    pub fn jet_int_mul(left: I64, right: I64) -> I64 { guard(fn() { exact.jet_int_mul(left, right) }) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/CAbi.rs:309
+    #FFI(c)
+    pub fn jet_int_bit_and(left: I64, right: I64) -> I64 { guard(fn() { exact.jet_int_bit_and(left, right) }) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/CAbi.rs:309
+    #FFI(c)
+    pub fn jet_int_bit_or(left: I64, right: I64) -> I64 { guard(fn() { exact.jet_int_bit_or(left, right) }) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/CAbi.rs:309
+    #FFI(c)
+    pub fn jet_int_bit_xor(left: I64, right: I64) -> I64 { guard(fn() { exact.jet_int_bit_xor(left, right) }) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/CAbi.rs:309
+    #FFI(c)
+    pub fn jet_int_compare(left: I64, right: I64) -> I64 { guard(fn() { exact.jet_int_compare(left, right) }) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/CAbi.rs:300
+    // exact_int_located expansion: file borrows and U32 source-line projection stay intact.
+    // Rust: crates/jet-codegen/src/Prelude/Core/CAbi.rs:310
+    #FFI(c)
+    pub fn jet_int_div(left: I64, right: I64, file_pointer: *const U8, file_length: USize, line: I64) -> I64 { guard(fn() { exact.jet_int_div(left, right, &text(file_pointer, file_length), c_abi_line_of(line)) }) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/CAbi.rs:310
+    #FFI(c)
+    pub fn jet_int_rem(left: I64, right: I64, file_pointer: *const U8, file_length: USize, line: I64) -> I64 { guard(fn() { exact.jet_int_rem(left, right, &text(file_pointer, file_length), c_abi_line_of(line)) }) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/CAbi.rs:310
+    #FFI(c)
+    pub fn jet_int_floor_div(left: I64, right: I64, file_pointer: *const U8, file_length: USize, line: I64) -> I64 { guard(fn() { exact.jet_int_floor_div(left, right, &text(file_pointer, file_length), c_abi_line_of(line)) }) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/CAbi.rs:310
+    #FFI(c)
+    pub fn jet_int_mod(left: I64, right: I64, file_pointer: *const U8, file_length: USize, line: I64) -> I64 { guard(fn() { exact.jet_int_mod(left, right, &text(file_pointer, file_length), c_abi_line_of(line)) }) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/CAbi.rs:310
+    #FFI(c)
+    pub fn jet_int_pow(left: I64, right: I64, file_pointer: *const U8, file_length: USize, line: I64) -> I64 { guard(fn() { exact.jet_int_pow(left, right, &text(file_pointer, file_length), c_abi_line_of(line)) }) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/CAbi.rs:310
+    #FFI(c)
+    pub fn jet_int_shl(left: I64, right: I64, file_pointer: *const U8, file_length: USize, line: I64) -> I64 { guard(fn() { exact.jet_int_shl(left, right, &text(file_pointer, file_length), c_abi_line_of(line)) }) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/CAbi.rs:310
+    #FFI(c)
+    pub fn jet_int_shr(left: I64, right: I64, file_pointer: *const U8, file_length: USize, line: I64) -> I64 { guard(fn() { exact.jet_int_shr(left, right, &text(file_pointer, file_length), c_abi_line_of(line)) }) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/CAbi.rs:313
+    #FFI(c)
+    pub fn jet_int_owned_from_i64(value: I64) -> I64 { guard(fn() { exact.jet_int_owned_from_i64(value).into_raw() }) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/CAbi.rs:318
+    #FFI(c)
+    pub fn jet_int_owned_to_i64(value: I64) -> I64 { guard(fn() { native(value) }) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/CAbi.rs:323
+    #FFI(c)
+    pub fn jet_int_owned_to_f64(value: I64) -> F64 { guard(fn() { exact.jet_int_to_f64(value) }) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/CAbi.rs:328
+    #FFI(c)
+    pub fn jet_term_write_stdout_line(value: JetCString, flush: U8) -> () { guard(fn() { _ :: terminal.jet_term_write_stdout_line(view(value), c_abi_bool_input(flush)) }) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/CAbi.rs:336
+    #FFI(c)
+    pub fn jet_loop_range_init(start: I64, end: I64, step: I64, has_step: U8, exclusive: U8) -> *mut ranges.JetLoopRangeCursor {
+        guard(fn() {
+            step :: if has_step != 0 { native(step) } else { 1 }
+            value :: ranges.jet_loop_range_init(native(start), native(end), step, has_step != 0, exclusive != 0)
+            // GATE #4565: kernel primitive
+            #Unsafe("transfer one owned canonical range cursor box to generated code") { Box.into_raw(Box.new(^value)) }
+        })
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/CAbi.rs:355
+    // GATE #4565: kernel primitive
+    #Unsafe("caller owns this live canonical cursor exclusively for the synchronous call")
+    fn cursor(value: *mut ranges.JetLoopRangeCursor) -> &ranges.JetLoopRangeCursor { &*value }
+    // Rust: crates/jet-codegen/src/Prelude/Core/CAbi.rs:362
+    #FFI(c)
+    pub fn jet_loop_range_has_next(value: *mut ranges.JetLoopRangeCursor) -> Bool { guard(fn() { ranges.jet_loop_range_has_next(cursor(value)) }) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/CAbi.rs:367
+    #FFI(c)
+    pub fn jet_loop_range_value(value: *mut ranges.JetLoopRangeCursor) -> I64 { guard(fn() { exact.jet_int_from_i64(ranges.jet_loop_range_value(cursor(value))) }) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/CAbi.rs:372
+    #FFI(c)
+    pub fn jet_loop_range_advance(value: *mut ranges.JetLoopRangeCursor) -> () { guard(fn() { ranges.jet_loop_range_advance(cursor(value)) }) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/CAbi.rs:377
+    // GATE #4565: kernel primitive
+    #FFI(c)
+    #Unsafe("consume caller-owned range cursor box exactly once; null is a no-op")
+    pub fn jet_loop_cursor_drop(value: *mut ranges.JetLoopRangeCursor) -> () { if !value.is_null() { drop(Box.from_raw(value)) } }
+}

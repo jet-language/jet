@@ -1,0 +1,139 @@
+use core.web.runtime.top_web_router.*
+use core.web.router.[WebRouterValueType,WebRouterSearchCodec,WebRouterCacheStatus,WebNavigationStatus]
+use core.web.runtime.kernel_web_pending.JetWebHydrationTrigger
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:162-213/275-299
+#Test("web_router_url_query_and_component_error_precedence") {
+    assert(jet_web_router_decode("a+b%2Bc",true).unwrap() == "a b+c")
+    assert(jet_web_router_decode("a+b",false).unwrap() == "a+b")
+    assert(jet_web_router_decode("%00",false).unwrap_err() == "URL component contains a control character")
+    assert(jet_web_router_split_url("/path?q=x").unwrap() == ("/path","q=x"))
+    assert(jet_web_router_split_url("relative").unwrap_err() == "navigation URL must be an absolute path beginning with `/`")
+    assert(jet_web_router_split_url("/path?q=x#fragment").unwrap_err() == "URL fragments are not accepted by the server navigation contract")
+    assert(jet_web_router_parse_query("x=1&x=%GG").unwrap_err() == "search parameter `x` is repeated")
+    assert(jet_web_router_parse_query("x=1&&y=a+b").unwrap()["y"] == "a b")
+    assert(jet_web_router_parse_query("bad-name=1").is_err())
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:215-273/301-382
+#Test("web_router_json_search_and_typed_defaults") {
+    assert(jet_web_router_parse_search("search=%7B%22x%22%3Atrue%7D",WebRouterSearchCodec.JSON).unwrap()["x"] == "true")
+    assert(jet_web_router_parse_json_search("other=1").unwrap_err() == "JSON search codec accepts only the `search` query parameter, got `other`")
+    assert(jet_web_router_parse_json_search("search=%7B%7D&search=%7B%7D").unwrap_err() == "JSON search parameter `search` is repeated")
+    assert(jet_web_router_parse_json_search("search=%5B%5D").unwrap_err() == "JSON search value must be an object")
+    field :: JetWebRouterField.new("count",WebRouterValueType.Int).optional(Some("7"))
+    assert(jet_web_router_parse_value(&field,None).unwrap().unwrap() == "7")
+    assert(jet_web_router_parse_value(&field,Some("bad")).unwrap_err() == "parameter `count` expects Int, got `bad`")
+    flag :: JetWebRouterField.new("flag",WebRouterValueType.Bool)
+    assert(jet_web_router_parse_value(&flag,Some("1")).unwrap().unwrap() == "true")
+    float_field :: JetWebRouterField.new("ratio",WebRouterValueType.Float)
+    assert(jet_web_router_parse_value(&float_field,Some("NaN")).unwrap_err() == "parameter `ratio` expects a finite Float")
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:384-469
+#Test("web_router_exact_typed_route_declarations") {
+    pattern :: jet_web_router_parse_pattern("/items/:id").unwrap()
+    id :: JetWebRouterField.new("id",WebRouterValueType.Int)
+    assert(jet_web_router_validate_fields(&pattern,&[id.clone()],&[]).is_ok())
+    assert(jet_web_router_validate_fields(&pattern,&[],&[]).unwrap_err() == "route pattern parameter `id` has no typed declaration")
+    assert(jet_web_router_validate_fields(&pattern,&[id.clone(),id.clone()],&[]).unwrap_err() == "route parameter `id` is declared more than once")
+    assert(jet_web_router_validate_fields(&pattern,&[id.clone()],&[id.clone()]).unwrap_err() == "parameter `id` is declared more than once")
+    required_default :: JetWebRouterField{name: "id",value_type: WebRouterValueType.Int,required: true,default: Some("1")}
+    assert(jet_web_router_validate_fields(&pattern,&[required_default],&[]).unwrap_err() == "required route parameter `id` cannot have a default")
+    assert(jet_web_router_validate_search(&[],&["undeclared":"1"]).unwrap_err() == "search parameter `undeclared` is not declared for this route")
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:506-619
+#Test("web_router_boundary_identity_and_initial_state") {
+    assert(JetWebRouteBoundaries.new(None,None,None,None).is_ok())
+    assert(JetWebRouteBoundaries.new(Some("pending"),None,None,None).unwrap_err() == "web route boundary IDs and hydration require an island identity")
+    assert(JetWebRouteBoundaries.new(None,None,None,Some(JetWebHydrationTrigger.Idle)).unwrap_err() == "web route boundary IDs and hydration require an island identity")
+    initial :: JetWebNavigationState.default()
+    assert(initial.status == WebNavigationStatus.Idle)
+    assert(initial.current.is_none())
+    assert(initial.pending_boundary_id.is_none())
+    assert(initial.data.is_empty())
+    assert(initial.error.is_empty())
+    next :: jet_web_router_navigation_state(WebNavigationStatus.Error,None,"fallback","failed",&JetWebRouteBoundaries.default())
+    assert(next.status.name() == "error")
+    assert(next.data == "fallback" && next.error == "failed")
+    assert(jet_web_router_identity("/items") == jet_web_router_identity("/items"))
+    assert(jet_web_router_identity("/items") != jet_web_router_identity("/other"))
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:811-984,1304-1377
+#Test("web_router_registration_resolution_and_encoded_links") {
+    router :: JetWebRouter.new()
+    router.route("/items/:id", [JetWebRouterField.new("id", WebRouterValueType.Int)],
+        [JetWebRouterField.new("q", WebRouterValueType.String).optional(None)],
+        fn(navigation) { Ok("item:{navigation.params[\"id\"]}") }).unwrap()
+    assert(router.route("/items/:id", [JetWebRouterField.new("id", WebRouterValueType.Int)], [], fn(_navigation) { Ok("") }).is_err())
+    link :: router.link("/items/:id", ["id":"0012"], ["q":"a b&é"]).unwrap()
+    assert(link == "/items/12?q=a+b%26%C3%A9")
+    assert(router.resolve(&link).unwrap().1.params["id"] == "12")
+    assert(router.link("/missing", [:], [:]).is_err())
+    assert(router.resolve("/items/not-int").is_err())
+    selector :: JetWebRouter.new()
+    selector.route("/items/:id", [JetWebRouterField.new("id", WebRouterValueType.String)], [], fn(_navigation) { Ok("item") }).unwrap()
+    selector.route("/items/new", [], [], fn(_navigation) { Ok("new") }).unwrap()
+    assert(selector.resolve("/items/new").unwrap().1.route == "/items/new")
+    json_router :: JetWebRouter.new()
+    json_router.route_with_search_codec("/search", [],
+        [JetWebRouterField.new("flag", WebRouterValueType.Bool)], WebRouterSearchCodec.JSON,
+        fn(_navigation) { Ok("search") }).unwrap()
+    json_link :: json_router.link("/search", [:], ["flag":"1"]).unwrap()
+    assert(json_router.resolve(&json_link).unwrap().1.search["flag"] == "true")
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:985-1267
+#Test("web_router_preload_navigation_cache_lifecycle_and_errors") {
+    router :: JetWebRouter.new()
+    router.route("/ok", [], [], fn(_navigation) { Ok("loaded") }).unwrap()
+    router.preload("/ok").unwrap()
+    assert(router.current().status == WebNavigationStatus.Idle)
+    assert(router.current().current.is_none())
+    identity :: jet_web_router_identity("/ok")
+    assert(router.cache_state(identity.clone()).status == WebRouterCacheStatus.Fresh)
+    assert(router.cache_state(identity.clone()).generation == 1)
+    router.navigate("/ok").unwrap()
+    assert(router.current().status == WebNavigationStatus.Ready)
+    assert(router.current().data == "loaded")
+    assert(router.stale(identity.clone()) == 1)
+    assert(router.cache_value(&jet_web_router_cache_key(&router.resolve("/ok").unwrap().0, &router.current().current.unwrap())).is_none())
+    router.navigate("/ok").unwrap()
+    assert(router.cache_state(identity.clone()).generation == 2)
+    assert(router.invalidate(identity.clone()) == 1)
+    assert(router.collect(identity.clone()) == 1)
+    assert(router.cache_state(identity).status == WebRouterCacheStatus.Collected)
+    router.route_with_boundaries("/fail", [], [], fn(_navigation) { Err("loader failed") },
+        Some(fn(_navigation) { "pending" }), Some(fn(_navigation, error) { "fallback:{error}" })).unwrap()
+    assert(router.preload("/fail").unwrap_err() == "loader failed")
+    assert(router.current().status == WebNavigationStatus.Ready)
+    assert(router.current().current.unwrap().route == "/ok")
+    assert(router.navigate("/fail").unwrap_err() == "loader failed")
+    assert(router.current().status == WebNavigationStatus.Error)
+    assert(router.current().data == "fallback:loader failed")
+    router.not_found(fn(error) { "missing:{error}" }).unwrap()
+    assert(router.navigate("/missing").is_err())
+    assert(router.current().data.starts_with("missing:"))
+    assert(router.show().contains("status=error"))
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:668-810
+#Test("web_router_navigation_tokens_abort_and_supersession") {
+    router :: JetWebRouter.new()
+    assert(!router.abort())
+    (first_id, first_token, _, _) :: router.start_navigation().unwrap()
+    assert(router.navigation_active(first_id, &first_token))
+    (second_id, second_token, _, _) :: router.start_navigation().unwrap()
+    assert(second_id == first_id + 1)
+    assert(!router.navigation_active(first_id, &first_token))
+    assert(router.navigation_active(second_id, &second_token))
+    router.finish_navigation(first_id, &first_token)
+    assert(router.navigation_active(second_id, &second_token))
+    assert(router.abort())
+    assert(router.current().status == WebNavigationStatus.Aborted)
+    assert(router.current().error == "navigation aborted")
+    assert(!router.navigation_active(second_id, &second_token))
+    assert(!router.abort())
+}

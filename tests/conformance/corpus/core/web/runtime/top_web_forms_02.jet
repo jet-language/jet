@@ -1,0 +1,88 @@
+use core.web.runtime.top_web_forms.*
+use core.web.runtime.top_web_forms_02.*
+use core.web.forms.WebFormValueType
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebForms.rs:2341-2389
+#Test("typed_form_text_labels_type_names_and_field_ids") {
+    assert(jet_web_form_validate_text("","label").unwrap_err() == "label must not be empty")
+    assert(jet_web_form_validate_text("bad\nlabel","label").unwrap_err() == "label contains a control character")
+    assert(jet_web_form_validate_text("visible","label").is_ok())
+    assert(jet_web_form_human_label("first_name") == "First Name")
+    assert(jet_web_form_human_label("_name") == " Name")
+    assert(jet_web_form_valid_type_name("app::Signup"))
+    assert(!jet_web_form_valid_type_name("app::::Signup"))
+    assert(jet_web_form_field_id("app::Signup","display_name") == "app--Signup-display_name")
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebForms.rs:2391-2433
+#Test("typed_form_percent_decode_utf8_and_error_precedence") {
+    assert(jet_web_form_decode_component("a+b%2Bc%3D%C3%A9").unwrap() == "a b+c=é")
+    assert(jet_web_form_decode_component("%").unwrap_err() == "form body contains an incomplete percent escape")
+    assert(jet_web_form_decode_component("%G0").unwrap_err() == "form body contains an invalid percent escape")
+    assert(jet_web_form_decode_component("%FF").unwrap_err() == "form body contains invalid UTF-8")
+    assert(jet_web_form_decode_component("%00").unwrap_err() == "form value contains a control character")
+    assert(jet_web_form_hex(b'0').unwrap() == 0)
+    assert(jet_web_form_hex(b'f').unwrap() == 15)
+    assert(jet_web_form_hex(b'A').unwrap() == 10)
+    assert(jet_web_form_hex(b'g').is_none())
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebForms.rs:1899-2080/2442-2499
+#Test("typed_form_no_script_success_and_cancel_lifecycle") {
+    spec :: JetWebFormFieldSpec.new("name",WebFormValueType.String,true).unwrap()
+    input :: jet_web_forms_input("app::Signup",[spec]).unwrap()
+    form :: jet_web_forms_typed(&input,"signup").unwrap()
+    assert(form.state().action == "/actions/signup")
+    jet_web_forms_typed_set(&form,"name","é +&").unwrap()
+    body :: jet_web_forms_typed_no_script(&form).unwrap()
+    assert(jet_web_forms_typed_decode_post(&form,body).unwrap().values["name"] == "é +&")
+    jet_web_forms_typed_set_action(&form,fn(decoded) { Ok(decoded.values["name"].clone()) })
+    assert(jet_web_forms_typed_submit(&form).unwrap() == "é +&")
+    assert(jet_web_forms_typed_lifecycle(&form).status == JetWebFormLifecycleStatus.Success)
+    jet_web_forms_typed_focus(&form,"name").unwrap()
+    assert(jet_web_forms_typed_html(&form).contains(" autofocus"))
+    assert(jet_web_forms_typed_focus(&form,"missing").is_err())
+    jet_web_forms_typed_cancel(&form)
+    assert(jet_web_forms_typed_lifecycle(&form).status == JetWebFormLifecycleStatus.Cancelled)
+    assert(jet_web_forms_typed_submit(&form).unwrap_err() == "form submission was cancelled")
+    assert(jet_web_forms_typed_submit(&form).unwrap() == "é +&")
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebForms.rs:1826-1845/2066-2182/2651-2668
+#Test("typed_form_action_errors_escape_and_accessible_render") {
+    spec :: JetWebFormFieldSpec.new("name",WebFormValueType.String,true).unwrap().with_label("Name <label>").unwrap().in_group("Group <legend>").unwrap()
+    input :: jet_web_forms_input("Signup",[spec]).unwrap()
+    form :: jet_web_forms_typed(&input,"/signup").unwrap()
+    jet_web_forms_typed_set(&form,"name","<value>").unwrap()
+    jet_web_forms_typed_set_action(&form,fn(_) {
+        Err(jet_web_forms_action_form_error(jet_web_forms_action_field_error(jet_web_forms_action_error(),"name","<field error>"),"<form error>"))
+    })
+    assert(jet_web_forms_typed_submit(&form).is_err())
+    errors :: jet_web_forms_typed_errors(&form)
+    assert(errors.fields["name"] == ["<field error>"])
+    assert(errors.form == ["<form error>"])
+    html :: jet_web_forms_typed_html(&form)
+    assert(html.contains("<fieldset><legend>Group &lt;legend&gt;</legend>"))
+    assert(html.contains("aria-invalid=\"true\" aria-describedby=\"Signup-name-error\""))
+    assert(html.contains("Name &lt;label&gt;"))
+    assert(html.contains("value=\"&lt;value&gt;\""))
+    assert(html.contains("&lt;field error&gt;"))
+    assert(html.contains("role=\"alert\" class=\"form-error\" aria-live=\"assertive\""))
+    assert(!html.contains("<field error>"))
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebForms.rs:2267-2337
+#Test("typed_form_async_validation_and_submission_real_join") {
+    spec :: JetWebFormFieldSpec.new("name",WebFormValueType.String,true).unwrap()
+    input :: jet_web_forms_input("Signup",[spec]).unwrap()
+    form :: jet_web_forms_typed(&input,"/signup").unwrap()
+    jet_web_forms_typed_set(&form,"name","alice").unwrap()
+    assert(jet_web_forms_typed_validation_wait(jet_web_forms_typed_validate_async(&form)).is_ok())
+    assert(form.lifecycle().status == JetWebFormLifecycleStatus.Idle)
+    jet_web_forms_typed_set_action(&form,fn(decoded) { Ok(decoded.values["name"].clone()) })
+    assert(jet_web_forms_typed_submission_wait(jet_web_forms_typed_submit_async(&form)).unwrap() == "alice")
+    missing_validation :: JetWebFormTypedValidation{validation: None,form: form.clone()}
+    assert(missing_validation.wait().unwrap_err() == "form validation worker is unavailable")
+    missing_submission :: JetWebFormTypedSubmission{join: None,form: form.clone()}
+    assert(missing_submission.wait().unwrap_err() == "form submission worker is unavailable")
+}

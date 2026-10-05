@@ -1,200 +1,153 @@
-// PORT-PENDING 0307 crates-jet-codegen-src-prelude-corelib-top-testinghistory-module-group: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingShared.rs:1-196
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS // Core testing adapters keep typed evidence errors at the host seam.  The AOT
-//RS // wrappers convert those errors into the canonical E3001 test diagnostics;
-//RS // JIT calls the result functions and applies the same conversion.
-//RS 
-//RS const JET_TESTING_DIFF_MAX_BYTES: usize = 64 * 1024;
-//RS const JET_TESTING_DIFF_MAX_LINES: usize = 256;
-//RS const JET_TESTING_DIFF_MAX_OUTPUT: usize = 32 * 1024;
-//RS 
-//RS struct JetTestingDiffLines<'a> {
-//RS     lines: Vec<&'a str>,
-//RS     truncated: bool,
-//RS }
-//RS 
-//RS fn jet_testing_diff_lines(input: &str) -> JetTestingDiffLines<'_> {
-//RS     let mut end = input.len().min(JET_TESTING_DIFF_MAX_BYTES);
-//RS     while end > 0 && !input.is_char_boundary(end) {
-//RS         end -= 1;
-//RS     }
-//RS     let prefix = &input[..end];
-//RS     let mut lines = Vec::new();
-//RS     let mut truncated_by_lines = false;
-//RS     for line in prefix.split_inclusive('\n') {
-//RS         if lines.len() == JET_TESTING_DIFF_MAX_LINES {
-//RS             truncated_by_lines = true;
-//RS             break;
-//RS         }
-//RS         lines.push(line);
-//RS     }
-//RS     JetTestingDiffLines {
-//RS         lines,
-//RS         truncated: end < input.len() || truncated_by_lines,
-//RS     }
-//RS }
-//RS 
-//RS fn jet_testing_diff_push(output: &mut String, truncated: &mut bool, text: &str) {
-//RS     if *truncated {
-//RS         return;
-//RS     }
-//RS     if output.len() + text.len() <= JET_TESTING_DIFF_MAX_OUTPUT {
-//RS         output.push_str(text);
-//RS         return;
-//RS     }
-//RS     let marker = "\n... diff output truncated ...\n";
-//RS     let available = JET_TESTING_DIFF_MAX_OUTPUT.saturating_sub(output.len());
-//RS     if available >= marker.len() {
-//RS         let mut text_len = available - marker.len();
-//RS         while text_len > 0 && !text.is_char_boundary(text_len) {
-//RS             text_len -= 1;
-//RS         }
-//RS         output.push_str(&text[..text_len]);
-//RS         output.push_str(marker);
-//RS     } else if available > 0 {
-//RS         let mut marker_len = available;
-//RS         while marker_len > 0 && !marker.is_char_boundary(marker_len) {
-//RS             marker_len -= 1;
-//RS         }
-//RS         output.push_str(&marker[..marker_len]);
-//RS     }
-//RS     *truncated = true;
-//RS }
-//RS 
-//RS fn jet_testing_diff_line(output: &mut String, truncated: &mut bool, marker: char, line: &str) {
-//RS     let mut text = String::with_capacity(line.len() + 2);
-//RS     text.push(marker);
-//RS     text.push_str(line);
-//RS     if !line.ends_with('\n') {
-//RS         text.push('\n');
-//RS     }
-//RS     jet_testing_diff_push(output, truncated, &text);
-//RS }
-//RS 
-//RS fn jet_testing_unified_diff(path: &str, expected: &str, actual: &str) -> String {
-//RS     let expected_lines = jet_testing_diff_lines(expected);
-//RS     let actual_lines = jet_testing_diff_lines(actual);
-//RS     let rows = expected_lines.lines.len() + 1;
-//RS     let cols = actual_lines.lines.len() + 1;
-//RS     let mut lcs = vec![0usize; rows * cols];
-//RS     for row in (0..expected_lines.lines.len()).rev() {
-//RS         for col in (0..actual_lines.lines.len()).rev() {
-//RS             let index = row * cols + col;
-//RS             lcs[index] = if expected_lines.lines[row] == actual_lines.lines[col] {
-//RS                 1 + lcs[(row + 1) * cols + col + 1]
-//RS             } else {
-//RS                 lcs[(row + 1) * cols + col].max(lcs[row * cols + col + 1])
-//RS             };
-//RS         }
-//RS     }
-//RS 
-//RS     let mut output = String::new();
-//RS     let mut truncated = false;
-//RS     jet_testing_diff_push(
-//RS         &mut output,
-//RS         &mut truncated,
-//RS         &format!("--- expected {path}\n+++ actual {path}\n"),
-//RS     );
-//RS     if expected_lines.truncated {
-//RS         jet_testing_diff_push(&mut output, &mut truncated, "# expected input truncated\n");
-//RS     }
-//RS     if actual_lines.truncated {
-//RS         jet_testing_diff_push(&mut output, &mut truncated, "# actual input truncated\n");
-//RS     }
-//RS     jet_testing_diff_push(
-//RS         &mut output,
-//RS         &mut truncated,
-//RS         &format!(
-//RS             "@@ -1,{} +1,{} @@\n",
-//RS             expected_lines.lines.len(),
-//RS             actual_lines.lines.len()
-//RS         ),
-//RS     );
-//RS 
-//RS     let mut row = 0;
-//RS     let mut col = 0;
-//RS     while row < expected_lines.lines.len() || col < actual_lines.lines.len() {
-//RS         if row < expected_lines.lines.len()
-//RS             && col < actual_lines.lines.len()
-//RS             && expected_lines.lines[row] == actual_lines.lines[col]
-//RS         {
-//RS             jet_testing_diff_line(&mut output, &mut truncated, ' ', expected_lines.lines[row]);
-//RS             row += 1;
-//RS             col += 1;
-//RS         } else if col < actual_lines.lines.len()
-//RS             && (row == expected_lines.lines.len()
-//RS                 || lcs[row * cols + col + 1] > lcs[(row + 1) * cols + col])
-//RS         {
-//RS             jet_testing_diff_line(&mut output, &mut truncated, '+', actual_lines.lines[col]);
-//RS             col += 1;
-//RS         } else if row < expected_lines.lines.len() {
-//RS             jet_testing_diff_line(&mut output, &mut truncated, '-', expected_lines.lines[row]);
-//RS             row += 1;
-//RS         }
-//RS     }
-//RS     output
-//RS }
-//RS 
-//RS pub(crate) fn jet_testing_golden_result(
-//RS     path: &String,
-//RS     actual: &String,
-//RS ) -> Result<bool, TestEvidenceError> {
-//RS     match std::fs::read_to_string(path) {
-//RS         Ok(expected) if expected == *actual => Ok(true),
-//RS         Ok(expected) => Err(TestEvidenceError::GoldenMismatch {
-//RS             path: path.clone(),
-//RS             diff: jet_testing_unified_diff(path, &expected, actual),
-//RS         }),
-//RS         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-//RS             Err(TestEvidenceError::GoldenMissing { path: path.clone() })
-//RS         }
-//RS         Err(_) => Err(TestEvidenceError::GoldenUnreadable { path: path.clone() }),
-//RS     }
-//RS }
-//RS 
-//RS pub(crate) fn jet_testing_fixture_result(path: &String) -> Result<String, TestEvidenceError> {
-//RS     match std::fs::read_to_string(path) {
-//RS         Ok(contents) => Ok(contents),
-//RS         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-//RS             Err(TestEvidenceError::FixtureMissing { path: path.clone() })
-//RS         }
-//RS         Err(_) => Err(TestEvidenceError::FixtureUnreadable { path: path.clone() }),
-//RS     }
-//RS }
-//RS 
-//RS pub(crate) fn jet_testing_temp_dir_path(
-//RS     prefix: &str,
-//RS ) -> Result<String, TestEvidenceError> {
-//RS     let safe: String = prefix
-//RS         .chars()
-//RS         .map(|c| if c.is_ascii_alphanumeric() || c == '_' || c == '-' { c } else { '_' })
-//RS         .collect();
-//RS     let tid: String = format!("{:?}", std::thread::current().id())
-//RS         .chars()
-//RS         .filter(|c| c.is_ascii_alphanumeric())
-//RS         .collect();
-//RS     let path = std::env::temp_dir().join(format!(
-//RS         "jet_test_{}_{}_{}",
-//RS         safe,
-//RS         std::process::id(),
-//RS         tid
-//RS     ));
-//RS     let path_string = path.to_string_lossy().into_owned();
-//RS     match std::fs::remove_dir_all(&path) {
-//RS         Ok(()) => {}
-//RS         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-//RS         Err(error) => {
-//RS             return Err(TestEvidenceError::io(
-//RS                 "remove_temp_dir",
-//RS                 &path_string,
-//RS                 error.to_string(),
-//RS             ));
-//RS         }
-//RS     }
-//RS     std::fs::create_dir_all(&path).map_err(|error| {
-//RS         TestEvidenceError::io("create_temp_dir", &path_string, error.to_string())
-//RS     })?;
-//RS     Ok(path_string)
-//RS }
-// END-PORT-PENDING 0307 crates/jet-codegen/src/Prelude/CoreLib/Top/TestingShared.rs:1-196
+use core.testing.runtime.kernel_test_evidence.TestEvidenceError
+use std.fs as native_fs
+use std.io.ErrorKind
+use std.env as native_env
+use std.thread as native_thread
+use std.process as native_process
 
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingShared.rs:1
+// Core testing adapters keep typed evidence errors at the host seam.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingShared.rs:5
+const JET_TESTING_DIFF_MAX_BYTES: USize = 64 * 1024
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingShared.rs:6
+const JET_TESTING_DIFF_MAX_LINES: USize = 256
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingShared.rs:7
+const JET_TESTING_DIFF_MAX_OUTPUT: USize = 32 * 1024
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingShared.rs:9
+struct JetTestingDiffLines { lines: [String], truncated: Bool }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingShared.rs:14
+fn jet_testing_diff_lines(input: String) -> JetTestingDiffLines {
+    end := input.len().min(JET_TESTING_DIFF_MAX_BYTES)
+    loop while end > 0 && !input.is_char_boundary(end) { end -= 1 }
+    prefix := input[..end] // #4303
+    lines := [String]{}
+    truncated_by_lines := false
+    loop line in prefix.split_inclusive('\n') {
+        if lines.len() == JET_TESTING_DIFF_MAX_LINES {
+            truncated_by_lines = true
+            break
+        }
+        &lines.push(line)
+    }
+    JetTestingDiffLines{lines: ^lines, truncated: end < input.len() || truncated_by_lines}
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingShared.rs:35
+fn jet_testing_diff_push(output: &String, truncated: &Bool, text: String) -> Unit {
+    if *truncated -> return
+    if output.len() + text.len() <= JET_TESTING_DIFF_MAX_OUTPUT {
+        &output.push_str(text)
+        return
+    }
+    marker :: "\n... diff output truncated ...\n"
+    available :: JET_TESTING_DIFF_MAX_OUTPUT.saturating_sub(output.len())
+    if available >= marker.len() {
+        text_len := available - marker.len()
+        loop while text_len > 0 && !text.is_char_boundary(text_len) { text_len -= 1 }
+        prefix := text[..text_len] // #4303
+        &output.push_str(prefix)
+        &output.push_str(marker)
+    } else if available > 0 {
+        marker_len := available
+        loop while marker_len > 0 && !marker.is_char_boundary(marker_len) { marker_len -= 1 }
+        prefix := marker[..marker_len] // #4303
+        &output.push_str(prefix)
+    }
+    *truncated = true
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingShared.rs:62
+fn jet_testing_diff_line(output: &String, truncated: &Bool, marker: Char, line: String) -> Unit {
+    text := String.with_capacity(line.len() + 2)
+    &text.push(marker)
+    &text.push_str(line)
+    if !line.ends_with('\n') -> &text.push('\n')
+    jet_testing_diff_push(output, truncated, text)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingShared.rs:72
+fn jet_testing_unified_diff(path: String, expected: String, actual: String) -> String {
+    expected_lines :: jet_testing_diff_lines(expected)
+    actual_lines :: jet_testing_diff_lines(actual)
+    rows :: expected_lines.lines.len() + 1
+    cols :: actual_lines.lines.len() + 1
+    lcs := [USize].filled(rows * cols, 0)
+    loop row in (0..expected_lines.lines.len()).rev() {
+        loop col in (0..actual_lines.lines.len()).rev() {
+            index :: row * cols + col
+            lcs[index] = if expected_lines.lines[row] == actual_lines.lines[col] {
+                1 + lcs[(row + 1) * cols + col + 1]
+            } else { lcs[(row + 1) * cols + col].max(lcs[row * cols + col + 1]) }
+        }
+    }
+    output := String.new()
+    truncated := false
+    jet_testing_diff_push(&output, &truncated, "--- expected {path}\n+++ actual {path}\n")
+    if expected_lines.truncated -> jet_testing_diff_push(&output, &truncated, "# expected input truncated\n")
+    if actual_lines.truncated -> jet_testing_diff_push(&output, &truncated, "# actual input truncated\n")
+    jet_testing_diff_push(&output, &truncated, "@@ -1,{expected_lines.lines.len()} +1,{actual_lines.lines.len()} @@\n")
+    row := USize{0}
+    col := USize{0}
+    loop while row < expected_lines.lines.len() || col < actual_lines.lines.len() {
+        if row < expected_lines.lines.len() && col < actual_lines.lines.len() && expected_lines.lines[row] == actual_lines.lines[col] {
+            jet_testing_diff_line(&output, &truncated, ' ', expected_lines.lines[row])
+            row += 1
+            col += 1
+        } else if col < actual_lines.lines.len() && (row == expected_lines.lines.len() || lcs[row * cols + col + 1] > lcs[(row + 1) * cols + col]) {
+            jet_testing_diff_line(&output, &truncated, '+', actual_lines.lines[col])
+            col += 1
+        } else if row < expected_lines.lines.len() {
+            jet_testing_diff_line(&output, &truncated, '-', expected_lines.lines[row])
+            row += 1
+        }
+    }
+    ^output
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingShared.rs:136
+pub fn jet_testing_golden_result(path: &String, actual: &String) -> Bool TestEvidenceError! {
+    // GATE #4565: kernel primitive
+    expected :: #Unsafe("read caller-selected golden file as UTF-8; retain actual I/O errors") { native_fs.read_to_string(OSPath.from(path)) }
+    match expected {
+        Ok(expected) -> {
+            if expected == *actual -> Ok(true)
+            else -> Err(TestEvidenceError.GoldenMismatch{path: path.clone(), diff: jet_testing_unified_diff(path, expected, actual)})
+        }
+        Err(error) -> {
+            if error.kind() == ErrorKind.NotFound -> Err(TestEvidenceError.GoldenMissing{path: path.clone()})
+            else -> Err(TestEvidenceError.GoldenUnreadable{path: path.clone()})
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingShared.rs:153
+pub fn jet_testing_fixture_result(path: &String) -> String TestEvidenceError! {
+    // GATE #4565: kernel primitive
+    contents :: #Unsafe("read caller-selected fixture as UTF-8; missing differs from unreadable") { native_fs.read_to_string(OSPath.from(path)) }
+    match contents {
+        Ok(contents) -> Ok(^contents)
+        Err(error) -> {
+            if error.kind() == ErrorKind.NotFound -> Err(TestEvidenceError.FixtureMissing{path: path.clone()})
+            else -> Err(TestEvidenceError.FixtureUnreadable{path: path.clone()})
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingShared.rs:163
+pub fn jet_testing_temp_dir_path(prefix: String) -> String TestEvidenceError! {
+    safe :: prefix.chars().map(fn(c) { if c.is_ascii_alphanumeric() || c == '_' || c == '-' { c } else { '_' } }).collect<String>()
+    // GATE #4565: kernel primitive
+    (thread_id, pid, root) :: #Unsafe("derive per-process and per-thread temporary directory identity from native OS") {
+        ("{native_thread.current().id():?}", native_process.id(), native_env.temp_dir())
+    }
+    tid :: thread_id.chars().filter(fn(c) { c.is_ascii_alphanumeric() }).collect<String>()
+    path :: root.join("jet_test_{safe}_{pid}_{tid}")
+    path_string :: path.to_string_lossy().into_owned()
+    // GATE #4565: kernel primitive
+    removed :: #Unsafe("remove only the derived test temporary directory; NotFound is already clean") { native_fs.remove_dir_all(&path) }
+    match removed {
+        Ok(_) -> {}
+        Err(error) -> {
+            if error.kind() != ErrorKind.NotFound {
+                return Err(TestEvidenceError.io("remove_temp_dir", path_string, error.to_string()))
+            }
+        }
+    }
+    // GATE #4565: kernel primitive
+    #Unsafe("create actual derived test directory and propagate failure") { native_fs.create_dir_all(&path) }.map_err(fn(error) { TestEvidenceError.io("create_temp_dir", path_string, error.to_string()) })?
+    Ok(^path_string)
+}

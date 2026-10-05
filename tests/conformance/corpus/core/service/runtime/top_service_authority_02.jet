@@ -1,0 +1,110 @@
+use core.service.runtime.top_service_authority_02.*
+use core.service.runtime.top_service_authority.[JetDeliveryState, JetServiceError]
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:1922
+#Test("service_authority_hex_retains_every_byte_and_accepts_uppercase") {
+    bytes :: [0u8, 1u8, 15u8, 16u8, 127u8, 128u8, 255u8]
+    encoded :: service_authority_hex(&bytes)
+    assert(encoded == "00010f107f80ff")
+    assert(service_authority_unhex(&encoded).unwrap() == bytes)
+    assert(service_authority_unhex("AF10").unwrap() == [175u8, 16u8])
+    assert(service_authority_unhex("").unwrap().is_empty())
+    assert(service_authority_unhex("f").is_none())
+    assert(service_authority_unhex("0g").is_none())
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:1962
+#Test("service_authority_records_length_frame_delimiters_and_unicode") {
+    fields :: ["", "a|b:c\n", "é"]
+    record :: service_authority_record('A', &fields)
+    assert(record == "A|0:|6:617c623a630a|2:c3a9\n")
+    line := record.trim_end_matches('\n') // #4303
+    (op, decoded) :: service_authority_parse_record(line).unwrap()
+    assert(op == 'A' && decoded == fields)
+    assert(service_authority_parse_record("").is_err())
+    assert(service_authority_parse_record("A|missing-colon").is_err())
+    assert(service_authority_parse_record("A|x:00").is_err())
+    assert(service_authority_parse_record("A|2:00").is_err())
+    assert(service_authority_parse_record("A|1:ff").is_err())
+    // A syntactically complete record remains parseable without its newline;
+    // store read/append separately refuse this as a truncated durable record.
+    assert(service_authority_parse_record("A|1:61").is_ok())
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:2150
+#Test("service_delivery_lifecycle_spelling_is_exact") {
+    states :: [JetDeliveryState.Pending, JetDeliveryState.Accepted, JetDeliveryState.Delivering,
+        JetDeliveryState.Delivered, JetDeliveryState.DeadLettered, JetDeliveryState.Cancelled]
+    for state in states {
+        name :: service_delivery_state_name(state)
+        assert(service_delivery_state_parse(&name).unwrap() == state)
+    }
+    assert(service_delivery_state_parse("pending").is_err())
+    assert(service_delivery_state_parse("Unknown").is_err())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3155-3170
+#Test("job_queue_rows_retain_typed_values_and_first_duplicate_column") {
+    row :: JetJobQueueRow.new([("id", JetJobQueueValue.Text("first")), ("attempts", JetJobQueueValue.Int(3)), ("payload", JetJobQueueValue.Blob([U8{0}, U8{255}])), ("id", JetJobQueueValue.Null)])
+    assert_eq(row.get("id"), Val(&JetJobQueueValue.Text("first")))
+    assert_eq(row.get("attempts"), Val(&JetJobQueueValue.Int(3)))
+    assert_eq(row.get("payload"), Val(&JetJobQueueValue.Blob([U8{0}, U8{255}])))
+    assert(row.get("missing").is_none())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3193-3242
+#Test("job_queue_delivery_is_at_least_once_and_state_spellings_are_exact") {
+    assert_eq(JetJobQueueDeliveryPolicy.AtLeastOnce.as_str(), "at_least_once")
+    loop state in [JetJobQueueState.Queued, JetJobQueueState.Running, JetJobQueueState.Retrying, JetJobQueueState.Completed, JetJobQueueState.Failed, JetJobQueueState.DeadLettered, JetJobQueueState.Cancelled] {
+        assert_eq(JetJobQueueState.parse(state.as_str())!, state)
+    }
+    assert(JetJobQueueState.parse("Queued").is_err())
+    assert(JetJobQueueState.parse("dead-lettered").is_err())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3341-3391
+#Test("job_queue_policy_defaults_and_each_bounded_dimension") {
+    defaults :: JetJobQueuePolicy.default()
+    defaults.validate()!
+    assert_eq(defaults.max_attempts, U32{3})
+    assert_eq(defaults.lease_ms, I64{30000})
+    assert_eq(defaults.capacity, USize{1024})
+    assert(!defaults.publish_payload)
+    attempts := defaults.clone()
+    attempts.max_attempts = 0
+    assert(attempts.validate().is_err())
+    attempts.max_attempts = JET_JOB_QUEUE_MAX_ATTEMPTS
+    attempts.validate()!
+    attempts.max_attempts = JET_JOB_QUEUE_MAX_ATTEMPTS + 1
+    assert(attempts.validate().is_err())
+    lease := defaults.clone()
+    lease.lease_ms = 0
+    assert(lease.validate().is_err())
+    lease.lease_ms = JET_JOB_QUEUE_MAX_LEASE_MS + 1
+    assert(lease.validate().is_err())
+    retry := defaults.clone()
+    retry.max_retry_delay_ms = retry.retry_delay_ms - 1
+    assert(retry.validate().is_err())
+    capacity := defaults.clone()
+    capacity.capacity = 0
+    assert(capacity.validate().is_err())
+    retention := defaults.clone()
+    retention.retention_ms = -1
+    assert(retention.validate().is_err())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3472-3490
+#Test("job_queue_worker_validates_name_concurrency_and_heartbeat") {
+    worker :: JetJobQueueWorker.new("worker-1", 2, 1000)!
+    assert_eq(worker.id, "worker-1")
+    assert_eq(worker.concurrency, USize{2})
+    assert(JetJobQueueWorker.new("", 2, 1000).is_err())
+    assert(JetJobQueueWorker.new("worker", 0, 1000).is_err())
+    assert(JetJobQueueWorker.new("worker", JET_JOB_QUEUE_MAX_INSPECT + 1, 1000).is_err())
+    assert(JetJobQueueWorker.new("worker", 1, 0).is_err())
+    assert(JetJobQueueWorker.new("worker", 1, JET_JOB_QUEUE_MAX_LEASE_MS + 1).is_err())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:2660-2840
+#Test("service_authority_replay_rejects_unknown_shapes_and_orphan_events") {
+    runtime :: jet_services_runtime("unused-log", 0)
+    assert(service_authority_entries(&runtime, &[('Z', [])]).is_err())
+    assert(service_authority_entries(&runtime, &[('K', ["unknown", "1000", "00"])]).is_err())
+    assert(service_authority_entries(&runtime, &[('E', ["unknown", "2", "Accepted", "1", "1000", "00"])]).is_err())
+    assert(service_authority_entries(&runtime, &[])!.is_empty())
+}

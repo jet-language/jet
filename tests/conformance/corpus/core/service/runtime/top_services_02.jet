@@ -1,0 +1,105 @@
+use core.service.runtime.top_services.[jet_services_tree, JetServiceStateAdapter, JetServiceDelivery, JetServiceRolloutState, JetServiceUpgradeReceipt]
+use core.service.runtime.top_service_authority.[JetServiceEndpoint, JetDeliveryState, JetServiceError]
+use core.service.runtime.top_services_02.[jet_services_generation_is_pinned, jet_services_endpoint_generation_allowed, jet_services_validate_endpoint, jet_services_validate_tree, jet_services_set_delivery, jet_services_set_state_empty, jet_services_state_record, jet_services_state_frame, jet_services_state_adapter_name, jet_services_rollout_encode, jet_services_rollout_decode, jet_services_rollout_frame, jet_services_rollout_read_frame, jet_services_rollout_read_count, jet_services_rollout_read_bool, jet_services_drain_dead_letters, jet_services_dead_letter_count, jet_services_delivery_state_show]
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:2011/2172/2180
+#Test("service_endpoint_generation_pinning_and_authority_error_precedence") {
+    tree := jet_services_tree("control")
+    tree.authority = "issued"
+    tree.generation = 2
+    tree.previous_generation = 1
+    tree.last_upgrade = Some(JetServiceUpgradeReceipt{from_generation: 1, to_generation: 2,
+        migration: "reversible", rollback_store: "store", rollback_available: true, pinned_shards: ["old"]})
+    assert(jet_services_generation_is_pinned(&tree, &"old", 1))
+    assert(!jet_services_generation_is_pinned(&tree, &"other", 1))
+    endpoint := JetServiceEndpoint{tree: "control", worker: "old", generation: 1, authority: "issued"}
+    assert(jet_services_endpoint_generation_allowed(&tree, &endpoint))
+    endpoint.worker = "other"
+    assert(!jet_services_endpoint_generation_allowed(&tree, &endpoint))
+    endpoint.authority = "foreign"
+    match jet_services_validate_endpoint(&tree, &endpoint) {
+        Err(JetServiceError.Revoked(_)) -> {}
+        _ -> assert(false)
+    }
+    endpoint.authority = "issued"
+    match jet_services_validate_endpoint(&tree, &endpoint) {
+        Err(JetServiceError.Stale(_)) -> {}
+        _ -> assert(false)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:2200/3110/3245/3249/3260
+#Test("service_tree_metadata_and_state_changes_refuse_invalid_lifecycle") {
+    tree := jet_services_tree("control")
+    assert(jet_services_validate_tree(&tree).is_ok())
+    assert(jet_services_set_delivery(&tree, JetServiceDelivery.DurableAtLeastOnce).is_ok())
+    tree.snapshot = Some("v1:0:")
+    assert(jet_services_set_state_empty(&tree).is_err())
+    assert(tree.snapshot.is_some())
+    tree.snapshot = None
+    tree.started = true
+    assert(jet_services_set_delivery(&tree, JetServiceDelivery.AtMostOnce).is_err())
+    tree.dead_letters = ["one", "two"]
+    assert_eq(jet_services_dead_letter_count(&tree), I64{2})
+    assert_eq(jet_services_drain_dead_letters(&tree).unwrap(), I64{2})
+    tree.started = false
+    assert(jet_services_drain_dead_letters(&tree).is_err())
+    tree.name = "bad\nname"
+    assert(jet_services_validate_tree(&tree).is_err())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:3102/3330/3334/3342/3382/3448
+#Test("service_state_and_rollout_frames_use_utf8_byte_length_not_character_count") {
+    assert_eq(jet_services_state_record(&"v1:", &"é"), "v1:2:é")
+    assert_eq(jet_services_state_frame(&"é"), "2:é".into_bytes())
+    assert_eq(jet_services_state_adapter_name(&JetServiceStateAdapter.EventLog), "event-log")
+    assert_eq(jet_services_delivery_state_show(&JetDeliveryState.Delivered), "Delivered")
+    bytes := []
+    assert(jet_services_rollout_frame(&bytes, &"name", &"é").is_ok())
+    assert_eq(bytes, "name:2:é\n".into_bytes())
+    lines := "name:2:é\n".lines()
+    assert_eq(jet_services_rollout_read_frame(&lines, &"name").unwrap(), "é")
+    lines := "name:1:é\n".lines()
+    assert(jet_services_rollout_read_frame(&lines, &"name").is_err())
+    assert(jet_services_rollout_frame(&bytes, &"name", &"bad\ntext").is_err())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:3420/3435
+#Test("service_rollout_count_and_boolean_are_strict_and_bounded") {
+    lines := "count:4096\n".lines()
+    assert_eq(jet_services_rollout_read_count(&lines, &"count").unwrap(), Usize{4096})
+    lines := "count:4097\n".lines()
+    assert(jet_services_rollout_read_count(&lines, &"count").is_err())
+    lines := "flag:true\n".lines()
+    assert(jet_services_rollout_read_bool(&lines, &"flag").is_err())
+    lines := "flag:0\nflag:1\n".lines()
+    assert(!jet_services_rollout_read_bool(&lines, &"flag").unwrap())
+    assert(jet_services_rollout_read_bool(&lines, &"flag").unwrap())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:3504/3562
+#Test("service_rollout_checksum_roundtrip_and_rejection_preserve_generation_receipt") {
+    state :: JetServiceRolloutState{generation: 2, previous_generation: 1,
+        last_upgrade: Some(JetServiceUpgradeReceipt{from_generation: 1, to_generation: 2, migration: "reversible",
+            rollback_store: "rollback", rollback_available: true, pinned_shards: ["old"]}),
+        workers: [("old", 1), ("new", 2)], draining: ["old"], partitioned: ["new"], directory: [("entry", "old", 1)]}
+    bytes := jet_services_rollout_encode(&"control", &state).unwrap()
+    decoded :: jet_services_rollout_decode(&"control", &bytes).unwrap()
+    assert_eq(decoded.generation, I64{2})
+    assert_eq(decoded.previous_generation, I64{1})
+    assert_eq(decoded.workers, state.workers)
+    assert_eq(decoded.directory, state.directory)
+    assert_eq(decoded.last_upgrade.unwrap().pinned_shards, ["old"])
+    assert(jet_services_rollout_decode(&"other", &bytes).is_err())
+    bytes[0] = U8{88}
+    assert(jet_services_rollout_decode(&"control", &bytes).is_err())
+    assert(jet_services_rollout_decode(&"control", &[]).is_err())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:3562
+#Test("service_rollout_rejects_duplicate_workers_and_overlapping_state_after_checksum_validation") {
+    state := JetServiceRolloutState{generation: 1, previous_generation: 0, last_upgrade: None,
+        workers: [("worker", 1), ("worker", 1)], draining: [], partitioned: [], directory: []}
+    bytes :: jet_services_rollout_encode(&"control", &state).unwrap()
+    assert(jet_services_rollout_decode(&"control", &bytes).is_err())
+    state.workers = [("worker", 1)]
+    state.draining = ["worker"]
+    state.partitioned = ["worker"]
+    bytes :: jet_services_rollout_encode(&"control", &state).unwrap()
+    assert(jet_services_rollout_decode(&"control", &bytes).is_err())
+}

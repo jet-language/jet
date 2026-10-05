@@ -1,0 +1,94 @@
+use core.service.runtime.top_services.*
+use core.devtools.runtime.kernel_devtools_topology_panel.*
+use jet_codegen.task_group.JetTaskFailure
+use core.service.runtime.top_service_authority.JetServiceError
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:58/65/72/79/86
+#Test("service_restart_budget_uses_one_strict_saturating_window") {
+    budget :: JetServiceRestartBudget.ratified_default()
+    assert_eq(budget.max, I64{5})
+    assert_eq(budget.per_ms, I64{60_000})
+    assert(budget.is_valid())
+    restarts := [I64{39_999}, I64{40_000}, I64{40_001}, I64{100_000}]
+    assert_eq(budget.spent(&restarts, 100_000), I64{2})
+    budget.prune(&restarts, 100_000)
+    assert_eq(restarts, [I64{40_001}, I64{100_000}])
+    assert_eq(budget.window_start(I64.MIN), I64.MIN)
+    assert(!JetServiceRestartBudget{max: 0, per_ms: 1}.is_valid())
+    assert(!JetServiceRestartBudget{max: 1_001, per_ms: 1}.is_valid())
+    assert(!JetServiceRestartBudget{max: 1, per_ms: 0}.is_valid())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:212/229/236/270
+#Test("service_topology_keeps_identity_domains_and_first_finish_duration") {
+    assert_eq(jet_services_topology_root_id("tree"), "service:supervisor:tree")
+    assert_eq(jet_services_topology_worker_id("tree", "worker"), "service:task:tree:worker")
+    assert_eq(jet_services_topology_address("tree", "worker"), "tree/worker")
+    long_tree :: "x".repeat(300)
+    root :: jet_services_topology_root_id(&long_tree)
+    assert(root.starts_with("service:supervisor:"))
+    assert(root.len() <= 256)
+    assert_eq(root, jet_services_topology_root_id(&long_tree))
+    failure :: JetTaskFailure.Cancelled
+    assert_eq(jet_services_topology_failure(&JetServiceSupervisorStatus.Escalated, Val(&failure)), Val(JetDevtoolsTopologyFailureKind.Escalated))
+    assert_eq(jet_services_topology_failure(&JetServiceSupervisorStatus.Partitioned, None), Val(JetDevtoolsTopologyFailureKind.WorkerLost))
+    assert_eq(jet_services_topology_failure(&JetServiceSupervisorStatus.Stopped, None), None)
+    state := JetServiceSupervisorState.new(JetServiceSupervisorStatus.Running)
+    state.topology_started_at_ms = Val(U64{100})
+    jet_services_topology_finish(&state, 90)
+    assert_eq(state.topology_duration_ms, Val(U64{0}))
+    jet_services_topology_finish(&state, 200)
+    assert_eq(state.topology_duration_ms, Val(U64{0}))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:696/717/732
+#Test("service_escalated_failure_survives_cancel_and_join") {
+    // GATE #4565: kernel primitive — exercise the same real native state guard.
+    task :: #Unsafe("allocate native service state for cancellation and join policy") {
+        std.sync.Arc.new(std.sync.Mutex.new(JetServiceSupervisorState.new(JetServiceSupervisorStatus.Starting)))
+    }
+    jet_services_task_escalate(&task, "restart budget spent")?
+    jet_services_cancel_task(&task)
+    jet_services_join_task(task.clone())
+    // GATE #4565: kernel primitive
+    state :: #Unsafe("inspect joined native service state under its own guard") { task.lock() }?
+    assert_eq(state.status, JetServiceSupervisorStatus.Escalated)
+    assert_eq(state.failure, Val(JetTaskFailure.Panicked("restart budget spent")))
+    assert(state.joined)
+    assert_eq(state.topology_wait_target, None)
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:1018/1038/1042
+#Test("service_outcome_wire_preserves_utf8_and_rejects_invalid_panic") {
+    loop outcome in [JetTaskOutcome.Finished, JetTaskOutcome.Cancelled, JetTaskOutcome.DeadlineBlown, JetTaskOutcome.Panicked("é:panic")] {
+        assert_eq(JetTaskOutcome.from_wire(&outcome.wire())?, outcome)
+    }
+    assert(!JetTaskOutcome.Finished.is_retryable_failure())
+    assert(JetTaskOutcome.Cancelled.is_retryable_failure())
+    assert(JetTaskOutcome.from_wire("unknown").is_err())
+    assert(JetTaskOutcome.from_wire("Panicked:2:x").is_err())
+    assert(!JetTaskOutcome.Panicked(" ").is_valid())
+    assert(!JetTaskOutcome.Panicked("bad\nreason").is_valid())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:1345/1356/1396
+#Test("service_state_authority_keeps_checked_migration_and_adapter") {
+    authority :: jet_services_state_authority_with_migration("state", "schema", 1, JetServiceMigration.DualWrite)?
+    snapshot :: jet_services_attach_state_authority(&authority, JetServiceStateAdapter.Snapshot)?
+    assert_eq(snapshot.migration, "dual_write")
+    assert_eq(snapshot.adapter, JetServiceStateAdapter.Snapshot)
+    assert(jet_services_attach_state_authority(&snapshot, JetServiceStateAdapter.EventLog).is_err())
+    assert(jet_services_state_authority_with_migration("state", "schema", 0, JetServiceMigration.Reversible).is_err())
+    assert(jet_services_migration_from_name("unknown").is_err())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:1444/1460/1542/1678
+#Test("service_prestart_validation_has_source_error_precedence") {
+    tree := jet_services_tree("tree")
+    assert(jet_services_worker(&tree, "", jet_services_noop_worker, "", 0).is_err())
+    tree.started = true
+    assert_eq(jet_services_set_restart(&tree, JetServiceRestart.OneForAll).unwrap_err(),
+        JetServiceError.Policy("cannot change restart policy after start"))
+    assert_eq(jet_services_worker(&tree, "", jet_services_noop_worker, "", 0).unwrap_err(),
+        JetServiceError.Policy("cannot add workers after start"))
+    assert_eq(jet_services_group(&tree, "", []).unwrap_err(), JetServiceError.Policy("cannot add groups after start"))
+    assert_eq(jet_services_start_with_worker_dispatcher(&tree, fn(_name, _handler, _endpoint) { Ok(()) }).unwrap_err(),
+        JetServiceError.Policy("service tree is already started"))
+    tree.started = false
+}

@@ -1,19 +1,21 @@
-// PORT-PENDING 0296 crates-jet-codegen-src-prelude-corelib-top-process-slice-1819: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:1819-3316
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
 use core.process.runtime.top_process.*
 use core.process.host.process_pty as jet_process_pty
 use core.sys.target
-use core.prelude.runtime.std_common_types.[ProcessSpec, ProcessReceipt, ProcessChild, ProcessHandle, ProcessResourceLimit]
-use core.prelude.runtime.std_open.[IOError, IOOperation, IOContext]
-use core.prelude.runtime.kernel_values.[JetAbsent, JetOutcome, jet_outcome_of]
-use core.tasks.runtime.scheduler.[jet_scheduler_current_task_control, jet_scheduler_park_ms, jet_scheduler_shielded, jet_task_deliver_cancel]
+use core.prelude.runtime.std_common_types.[ProcessSpec, ProcessChild, ProcessHandle, ProcessReader, ProcessStdin, TerminalSession, TerminalSize]
+use core.prelude.runtime.std_open.[IOError, IOOperation, IOContext, ProcessReceipt, ProcessResourceLimit]
+use core.tasks.runtime.scheduler.[jet_scheduler_current_task_control, jet_scheduler_park_ms, jet_scheduler_shielded, jet_task_deliver_cancel, JetSchedulerWait, jet_scheduler_wait_without_unwind]
+use core.tasks.runtime.scheduler_02.[jet_scheduler_raw_io_set_nonblocking, jet_scheduler_raw_io_handle, jet_scheduler_raw_io_write_wait]
+use core.mem.runtime.portable_core.[JetAbsent, JetOutcome]
+use core.mem.runtime.portable_alloc.jet_outcome_of
+use std.rc.Rc
+use std.cell.RefCell
 use std.process.[Child, ChildStdout, ChildStdin, ExitStatus, Stdio]
 use std.sync.[Arc, Mutex]
 use std.sync.atomic.[AtomicUsize, AtomicBool, Ordering]
 use std.thread.JoinHandle
 use std.time.[Instant, Duration]
 use std.io as io
-use std.io.[Read, Write]
+use std.io.[Read, Write, BufRead, BufReader]
 use std.fs.File
 use core.devtools.runtime.kernel_devtools_topology_panel.JetDevtoolsTopologyProcessState
 use jet_foundation.Numeric.JetInt
@@ -137,7 +139,7 @@ fn jet_process_join_pipeline_forwarders(forwarders: &[JoinHandle<() io.Error!>])
     }
     first_error.map_or(Ok(()), Err)
 }
-//RS 
+
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:1999
 // GATE #4565: kernel primitive
 #Unsafe("pipeline transaction owns native children, bounded relays, cancellation guard and all joined drains until receipt publication")
@@ -390,7 +392,7 @@ fn jet_process_spec_pipeline(specs: &[ProcessSpec]) -> ProcessReceipt IOError! {
     Ok(jet_process_receipt(specs.last().expect("nonempty pipeline"), None, true, 0, code, success,
         Err(JetAbsent{}), timed_out, ^output_text, ^errors, Val(&secret_values)))
 }
-//RS 
+
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:2403
 // GATE #4565: kernel primitive
 #Unsafe("read PID from the retained selected child handle")
@@ -634,462 +636,246 @@ fn jet_process_child_wait(child: &ProcessChild) -> ProcessReceipt IOError! {
     *child.wait_result.borrow_mut() = Val(result.clone())
     Ok(^result)
 }
-//RS // #1481 core.process: a non-blocking companion to `wait()` — reports whether
-//RS // the child has already exited without draining its output pipes or
-//RS // blocking. Peeks the same underlying handle `id`/`kill` already borrow.
-//RS fn jet_process_child_exited(child: &jet_std::ProcessChild) -> Result<bool, jet_std::IOError> {
-//RS     let mut slot = child.inner.borrow_mut();
-//RS     let Some(inner) = slot.as_mut() else {
-//RS         return Ok(true);
-//RS     };
-//RS     jet_process_inner_try_wait(inner)
-//RS         .map(|status| status.is_some())
-//RS         .map_err(|error| {
-//RS             jet_std::IOError::other(
-//RS                 jet_std::IOOperation::Close,
-//RS                 Some("process".to_string()),
-//RS                 error,
-//RS             )
-//RS         })
-//RS }
-//RS 
-//RS fn jet_process_child_kill(child: &jet_std::ProcessChild) -> Result<(), jet_std::IOError> {
-//RS     jet_process_child_signal(child, jet_process_signal_kill())
-//RS }
-//RS fn jet_process_child_terminate(child: &jet_std::ProcessChild) -> Result<(), jet_std::IOError> {
-//RS     jet_process_child_signal(child, jet_process_signal_terminate())
-//RS }
-//RS fn jet_process_child_interrupt(child: &jet_std::ProcessChild) -> Result<(), jet_std::IOError> {
-//RS     jet_process_child_signal(child, jet_process_signal_interrupt())
-//RS }
-//RS fn jet_terminal_session_resize(
-//RS     session: &jet_std::TerminalSession,
-//RS     size: &jet_std::TerminalSize,
-//RS ) -> Result<(), jet_std::IOError> {
-//RS     let result = {
-//RS         #[cfg(unix)]
-//RS         {
-//RS             jet_process_pty::resize(
-//RS                 session.master.as_ref(),
-//RS                 jet_process_pty::PtyConfig {
-//RS                     cols: size.cols,
-//RS                     rows: size.rows,
-//RS                     raw: false,
-//RS                 },
-//RS             )
-//RS         }
-//RS         #[cfg(windows)]
-//RS         {
-//RS             jet_process_pty::resize_console(
-//RS                 session.control.raw(),
-//RS                 jet_process_pty::PtyConfig {
-//RS                     cols: size.cols,
-//RS                     rows: size.rows,
-//RS                     raw: false,
-//RS                 },
-//RS             )
-//RS         }
-//RS         #[cfg(not(any(unix, windows)))]
-//RS         {
-//RS             Err(std::io::Error::new(
-//RS                 std::io::ErrorKind::Unsupported,
-//RS                 "terminal resize is unavailable on this target",
-//RS             ))
-//RS         }
-//RS     };
-//RS     result.map_err(|error| {
-//RS         jet_std::IOError::other(
-//RS             jet_std::IOOperation::Resolve,
-//RS             Some("process terminal".to_string()),
-//RS             error,
-//RS         )
-//RS     })
-//RS }
-//RS 
-//RS impl std::io::Read for jet_std::ProcessReader {
-//RS     fn read(&mut self, bytes: &mut [u8]) -> std::io::Result<usize> {
-//RS         let result = match self {
-//RS             Self::Stdout(reader) => std::io::Read::read(reader, bytes),
-//RS             Self::Stderr(reader) => std::io::Read::read(reader, bytes),
-//RS             Self::Terminal(reader) => std::io::Read::read(reader, bytes),
-//RS             Self::Shared(state) => jet_process_output_state_read(state, bytes),
-//RS         };
-//RS         match result {
-//RS             Err(error)
-//RS                 if matches!(self, Self::Terminal(_))
-//RS                     && jet_process_pty::is_terminal_eof(&error) =>
-//RS             {
-//RS                 Ok(0)
-//RS             }
-//RS             other => other,
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS impl std::io::Write for jet_std::ProcessStdin {
-//RS     fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
-//RS         match self {
-//RS             Self::Pipe(writer) => std::io::Write::write(writer, bytes),
-//RS             Self::Terminal(writer) => std::io::Write::write(writer, bytes),
-//RS         }
-//RS     }
-//RS 
-//RS     fn flush(&mut self) -> std::io::Result<()> {
-//RS         match self {
-//RS             Self::Pipe(writer) => std::io::Write::flush(writer),
-//RS             Self::Terminal(writer) => std::io::Write::flush(writer),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS fn jet_process_signal_interrupt() -> i32 {
-//RS     jet_process_pty::SIGINT
-//RS }
-//RS 
-//RS #[cfg(windows)]
-//RS fn jet_process_signal_interrupt() -> i32 {
-//RS     2
-//RS }
-//RS 
-//RS #[cfg(not(any(unix, windows)))]
-//RS fn jet_process_signal_interrupt() -> i32 {
-//RS     0
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS fn jet_process_signal_terminate() -> i32 {
-//RS     jet_process_pty::SIGTERM
-//RS }
-//RS 
-//RS #[cfg(windows)]
-//RS fn jet_process_signal_terminate() -> i32 {
-//RS     15
-//RS }
-//RS 
-//RS #[cfg(not(any(unix, windows)))]
-//RS fn jet_process_signal_terminate() -> i32 {
-//RS     0
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS fn jet_process_signal_kill() -> i32 {
-//RS     jet_process_pty::SIGKILL
-//RS }
-//RS 
-//RS #[cfg(windows)]
-//RS fn jet_process_signal_kill() -> i32 {
-//RS     9
-//RS }
-//RS 
-//RS #[cfg(not(any(unix, windows)))]
-//RS fn jet_process_signal_kill() -> i32 {
-//RS     0
-//RS }
-//RS 
-//RS fn jet_process_child_signal(
-//RS     child: &jet_std::ProcessChild,
-//RS     signal: i32,
-//RS ) -> Result<(), jet_std::IOError> {
-//RS     let pid = jet_process_child_id(child);
-//RS     if let Some(inner) = child.inner.borrow_mut().as_mut() {
-//RS         #[cfg(windows)]
-//RS         if signal == jet_process_signal_interrupt() {
-//RS             if let jet_std::ProcessHandle::Native {
-//RS                 pid: native_pid,
-//RS                 job,
-//RS                 ..
-//RS             } = inner {
-//RS                 let input = child.stdin.borrow();
-//RS                 let input = input.as_ref().and_then(|input| match input {
-//RS                     jet_std::ProcessStdin::Terminal(input) => Some(input),
-//RS                     jet_std::ProcessStdin::Pipe(_) => None,
-//RS                 });
-//RS                 let result =
-//RS                     jet_process_pty::interrupt(*native_pid, job, input).map_err(|error| {
-//RS                     jet_std::IOError::other(
-//RS                         jet_std::IOOperation::Close,
-//RS                         Some("process".to_string()),
-//RS                         error,
-//RS                     )
-//RS                 });
-//RS                 if result.is_ok() {
-//RS                     jet_process_publish_topology_id(
-//RS                         pid,
-//RS                         JetDevtoolsTopologyProcessState::Stopping,
-//RS                     );
-//RS                 }
-//RS                 return result;
-//RS             }
-//RS         }
-//RS         jet_process_tree_signal(inner, child.terminal.is_ok() || child.process_group, signal)
-//RS             .map_err(|error| {
-//RS                 jet_std::IOError::other(
-//RS                     jet_std::IOOperation::Close,
-//RS                     Some("process".to_string()),
-//RS                     error,
-//RS                 )
-//RS             })?;
-//RS     }
-//RS     jet_process_publish_topology_id(pid, JetDevtoolsTopologyProcessState::Stopping);
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn jet_process_reap_unfinished(child: &jet_std::ProcessChild) -> Result<(), jet_std::IOError> {
-//RS     if child.detached
-//RS         || child
-//RS             .wait_result
-//RS             .try_borrow()
-//RS             .map_or(false, |result| result.is_some())
-//RS     {
-//RS         return Ok(());
-//RS     }
-//RS     let mut slot = child.inner.try_borrow_mut().map_err(|_| {
-//RS         jet_std::IOError::other(
-//RS             jet_std::IOOperation::Close,
-//RS             Some("process".to_string()),
-//RS             "process child cleanup is already in progress",
-//RS         )
-//RS     })?;
-//RS     let Some(inner) = slot.as_mut() else {
-//RS         drop(slot);
-//RS         return jet_process_join_child_output_workers(child);
-//RS     };
-//RS     let signal_error =
-//RS         jet_process_tree_signal(inner, child.process_group, jet_process_signal_kill())
-//RS             .err()
-//RS             .map(jet_process_cleanup_io_error);
-//RS     #[cfg(windows)]
-//RS     if let Some(session) = child.terminal.as_ref().ok() {
-//RS         session.control.close();
-//RS     }
-//RS     let wait_error = jet_process_inner_wait(inner)
-//RS         .err()
-//RS         .map(jet_process_cleanup_io_error);
-//RS     drop(slot);
-//RS     let output_error = jet_process_join_child_output_workers(child).err();
-//RS     if let Some(error) = signal_error {
-//RS         Err(error)
-//RS     } else if let Some(error) = wait_error {
-//RS         Err(error)
-//RS     } else if let Some(error) = output_error {
-//RS         Err(error)
-//RS     } else {
-//RS         Ok(())
-//RS     }
-//RS }
-//RS /// Close a shared ProcessChild carrier by terminating/reaping any unfinished
-//RS /// native child, then make every clone observe the inert state.
-//RS ///
-//RS /// The MIR evaluator keeps one resident clone in its handle registry. Clearing
-//RS /// the shared native slots is therefore the close operation; the registry slot
-//RS /// itself remains until the surrounding interpreter scope is torn down.
-//RS fn jet_process_child_close(child: &jet_std::ProcessChild) {
-//RS     if let Err(error) = jet_process_reap_unfinished(child) {
-//RS         jet_process_record_cleanup_error(child, error);
-//RS     }
-//RS     child.inner.borrow_mut().take();
-//RS     *child.stdin.borrow_mut() = None;
-//RS }
-//RS 
-//RS 
-//RS struct JetProcessWaitCleanup<'a> {
-//RS     child: &'a jet_std::ProcessChild,
-//RS }
-//RS 
-//RS impl Drop for JetProcessWaitCleanup<'_> {
-//RS     fn drop(&mut self) {
-//RS         if let Err(error) = jet_process_reap_unfinished(self.child) {
-//RS             jet_process_record_cleanup_error(self.child, error);
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS impl Drop for jet_std::ProcessChild {
-//RS     fn drop(&mut self) {
-//RS         if std::rc::Rc::strong_count(&self.inner) == 1 {
-//RS             if let Err(error) = jet_process_reap_unfinished(self) {
-//RS                 jet_process_record_cleanup_error(self, error);
-//RS             }
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn jet_process_stdin_closed() -> jet_std::IOError {
-//RS     jet_std::IOError::Closed(jet_std::IOContext::new(
-//RS         jet_std::IOOperation::Write,
-//RS         Some("process stdin".to_string()),
-//RS         None,
-//RS         Some("process stdin closed".to_string()),
-//RS     ))
-//RS }
-//RS 
-//RS fn jet_process_stdin_error(error: std::io::Error) -> jet_std::IOError {
-//RS     if matches!(
-//RS         error.kind(),
-//RS         std::io::ErrorKind::BrokenPipe
-//RS             | std::io::ErrorKind::NotConnected
-//RS             | std::io::ErrorKind::UnexpectedEof
-//RS     ) {
-//RS         jet_process_stdin_closed()
-//RS     } else {
-//RS         jet_std::IOError::other(
-//RS             jet_std::IOOperation::Write,
-//RS             Some("process stdin".to_string()),
-//RS             error,
-//RS         )
-//RS     }
-//RS }
-//RS 
-//RS // Closing the sole option drops ChildStdin (or the terminal input file), which
-//RS // closes the native descriptor and sends EOF. `take` makes repeated close calls
-//RS // harmless while guaranteeing that the owned writer is dropped exactly once.
-//RS fn jet_process_stdin_close(
-//RS     handle: &std::rc::Rc<std::cell::RefCell<Option<jet_std::ProcessStdin>>>,
-//RS ) {
-//RS     let _ = handle.borrow_mut().take();
-//RS }
-//RS 
-//RS // `child.stdin` is a writer handle (`.write(text)`); `child.stdout`/
-//RS // `child.stderr` are streaming reader handles consumed only via
-//RS // `loop line in child.stdout.lines() { ... }` (mirrors `FileReader`/`StdinHandle`
-//RS // — sema restricts the field access + `.lines()` result to that position, E2502).
-//RS #[cfg(unix)]
-//RS fn jet_process_stdin_write(
-//RS     handle: &std::rc::Rc<std::cell::RefCell<Option<jet_std::ProcessStdin>>>,
-//RS     text: &String,
-//RS ) -> Result<(), jet_std::IOError> {
-//RS     use std::io::ErrorKind;
-//RS     use std::os::fd::AsRawFd;
-//RS 
-//RS     let bytes = text.as_bytes();
-//RS     {
-//RS         let mut stdin = handle.borrow_mut();
-//RS         if let Some(jet_std::ProcessStdin::Terminal(writer)) = stdin.as_mut() {
-//RS             // PTY input and output are independent File clones of one master
-//RS             // open file description. Setting O_NONBLOCK on the input clone
-//RS             // would also make the output drain observe EAGAIN. Keep the PTY
-//RS             // master blocking; terminal writes are byte-stream writes, while
-//RS             // pipe writes below retain scheduler-aware nonblocking behavior.
-//RS             std::io::Write::write_all(writer, bytes).map_err(jet_process_stdin_error)?;
-//RS             return Ok(());
-//RS         }
-//RS     }
-//RS     let mut offset = 0;
-//RS     while offset < bytes.len() {
-//RS         let wait_fd = {
-//RS             let mut stdin = handle.borrow_mut();
-//RS             let Some(stdin) = stdin.as_mut() else {
-//RS                 return Err(jet_process_stdin_closed());
-//RS             };
-//RS             let (fd, nonblocking) = match stdin {
-//RS                 jet_std::ProcessStdin::Pipe(writer) => (writer.as_raw_fd(), true),
-//RS                 // PTY input/output clones share one open-file description.
-//RS                 // Do not set O_NONBLOCK on the input clone: it would also
-//RS                 // make the terminal output reader return WouldBlock.
-//RS                 jet_std::ProcessStdin::Terminal(writer) => (writer.as_raw_fd(), false),
-//RS             };
-//RS             if nonblocking {
-//RS                 jet_scheduler_raw_io_set_nonblocking(fd).map_err(|error| {
-//RS                     jet_std::IOError::other(
-//RS                         jet_std::IOOperation::Write,
-//RS                         Some("process stdin".to_string()),
-//RS                         error,
-//RS                     )
-//RS                 })?;
-//RS             }
-//RS             match std::io::Write::write(stdin, &bytes[offset..]) {
-//RS                 Ok(0) => {
-//RS                     return Err(jet_process_stdin_closed());
-//RS                 }
-//RS                 Ok(written) => {
-//RS                     offset += written;
-//RS                     None
-//RS                 }
-//RS                 Err(error) if error.kind() == ErrorKind::Interrupted => continue,
-//RS                 Err(error) if error.kind() == ErrorKind::WouldBlock => Some(fd),
-//RS                 Err(error) => {
-//RS                     return Err(jet_process_stdin_error(error));
-//RS                 }
-//RS             }
-//RS         };
-//RS         let Some(fd) = wait_fd else {
-//RS             continue;
-//RS         };
-//RS         let scheduler = jet_scheduler_raw_io_handle(fd);
-//RS         match jet_scheduler_wait_without_unwind(|| {
-//RS             jet_scheduler_raw_io_write_wait(&scheduler, "process stdin")
-//RS         }) {
-//RS             JetSchedulerWait::Ready(()) => {}
-//RS             JetSchedulerWait::Cancelled => {
-//RS                 return Err(jet_std::IOError::Cancelled(jet_std::IOContext::new(
-//RS                     jet_std::IOOperation::Write,
-//RS                     Some("process stdin".to_string()),
-//RS                     None,
-//RS                     Some("process stdin cancelled".to_string()),
-//RS                 )));
-//RS             }
-//RS             JetSchedulerWait::Deadline(_) => {
-//RS                 return Err(jet_std::IOError::TimedOut(jet_std::IOContext::new(
-//RS                     jet_std::IOOperation::Write,
-//RS                     Some("process stdin".to_string()),
-//RS                     None,
-//RS                     Some("deadline exceeded while waiting in process stdin".to_string()),
-//RS                 )));
-//RS             }
-//RS             JetSchedulerWait::Panicked(message) => {
-//RS                 return Err(jet_std::IOError::other(
-//RS                     jet_std::IOOperation::Write,
-//RS                     Some("process stdin".to_string()),
-//RS                     format!("process stdin scheduler wait failed: {message}"),
-//RS                 ));
-//RS             }
-//RS         }
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS #[cfg(not(unix))]
-//RS fn jet_process_stdin_write(
-//RS     handle: &std::rc::Rc<std::cell::RefCell<Option<jet_std::ProcessStdin>>>,
-//RS     text: &String,
-//RS ) -> Result<(), jet_std::IOError> {
-//RS     let mut handle = handle.borrow_mut();
-//RS     let Some(stdin) = handle.as_mut() else {
-//RS         return Err(jet_process_stdin_closed());
-//RS     };
-//RS     std::io::Write::write_all(stdin, text.as_bytes()).map_err(jet_process_stdin_error)
-//RS }
-//RS fn jet_process_child_read_line<R: std::io::Read>(
-//RS     reader: &mut Option<std::io::BufReader<R>>,
-//RS ) -> Result<Option<String>, jet_std::IOError> {
-//RS     let Some(reader) = reader.as_mut() else {
-//RS         return Ok(None);
-//RS     };
-//RS     let mut line = String::new();
-//RS     let n = std::io::BufRead::read_line(reader, &mut line).map_err(|error| {
-//RS         jet_std::IOError::other(
-//RS             jet_std::IOOperation::Read,
-//RS             Some("process output".to_string()),
-//RS             error,
-//RS         )
-//RS     })?;
-//RS     if n == 0 {
-//RS         Ok(None)
-//RS     } else {
-//RS         if line.ends_with('\n') {
-//RS             line.pop();
-//RS             if line.ends_with('\r') {
-//RS                 line.pop();
-//RS             }
-//RS         }
-//RS         Ok(Some(line))
-//RS     }
-//RS }
-//RS fn jet_process_stream_next_line<R: std::io::Read>(
-//RS     handle: &std::rc::Rc<std::cell::RefCell<Option<std::io::BufReader<R>>>>,
-//RS ) -> Result<Option<String>, jet_std::IOError> {
-//RS     jet_process_child_read_line(&mut handle.borrow_mut())
-//RS }
-// END-PORT-PENDING 0296 crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:1819-3316
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:2863
+// #1481: nonblocking peek does not drain output pipes.
+// GATE #4565: kernel primitive
+#Unsafe("peek retained child status through borrow-checked slot without waiting or consuming pipes")
+fn jet_process_child_exited(child: &ProcessChild) -> Bool IOError! {
+    slot := child.inner.borrow_mut()
+    inner := slot.as_mut() ?? return Ok(true)
+    jet_process_inner_try_wait(inner).map(fn(status) { status.is_some() }).map_err(jet_process_cleanup_io_error)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:2879
+fn jet_process_child_kill(child: &ProcessChild) -> () IOError! { jet_process_child_signal(child, jet_process_signal_kill()) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:2882
+fn jet_process_child_terminate(child: &ProcessChild) -> () IOError! { jet_process_child_signal(child, jet_process_signal_terminate()) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:2885
+fn jet_process_child_interrupt(child: &ProcessChild) -> () IOError! { jet_process_child_signal(child, jet_process_signal_interrupt()) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:2888
+// GATE #4565: kernel primitive
+#Unsafe("resize selected PTY or ConPTY using its retained master/control handle")
+fn jet_terminal_session_resize(session: &TerminalSession, size: &TerminalSize) -> () IOError! {
+    result :: if target.selected_family() == "unix" {
+        jet_process_pty.resize(session.master.as_ref(), jet_process_pty.PtyConfig{cols:size.cols, rows:size.rows, raw:false})
+    } else if target.selected_os() == .Windows {
+        jet_process_pty.resize_console(session.control.raw(), jet_process_pty.PtyConfig{cols:size.cols, rows:size.rows, raw:false})
+    } else { Err(io.Error.new(io.ErrorKind.Unsupported, "terminal resize is unavailable on this target")) }
+    result.map_err(fn(error) { IOError.other(IOOperation.Resolve, Val("process terminal"), ^error) })
+}
+impl Read for ProcessReader {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:2933
+    // GATE #4565: kernel primitive
+    #Unsafe("read the retained native pipe/terminal or shared output state; only terminal-native EOF errors become zero")
+    fn read(self, bytes: &[U8]) -> USize io.Error! {
+        result :: match self {
+            Self.Stdout(reader) -> reader.read(bytes)
+            Self.Stderr(reader) -> reader.read(bytes)
+            Self.Terminal(reader) -> reader.read(bytes)
+            Self.Shared(state) -> jet_process_output_state_read(state, bytes)
+        }
+        match result {
+            Err(error) if matches!(self, Self.Terminal(_)) && jet_process_pty.is_terminal_eof(&error) -> Ok(0)
+            other -> ^other
+        }
+    }
+}
+impl Write for ProcessStdin {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:2953
+    // GATE #4565: kernel primitive
+    #Unsafe("write bytes to retained pipe or terminal input handle")
+    fn write(self, bytes: &[U8]) -> USize io.Error! {
+        match self { Self.Pipe(writer) -> writer.write(bytes), Self.Terminal(writer) -> writer.write(bytes) }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:2960
+    // GATE #4565: kernel primitive
+    #Unsafe("flush retained pipe or terminal writer")
+    fn flush(self) -> () io.Error! {
+        match self { Self.Pipe(writer) -> writer.flush(), Self.Terminal(writer) -> writer.flush() }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:2969
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:2974
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:2979
+fn jet_process_signal_interrupt() -> I32 {
+    if target.selected_family() == "unix" { jet_process_pty.SIGINT }
+    else if target.selected_os() == .Windows { 2 } else { 0 }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:2984
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:2989
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:2994
+fn jet_process_signal_terminate() -> I32 {
+    if target.selected_family() == "unix" { jet_process_pty.SIGTERM }
+    else if target.selected_os() == .Windows { 15 } else { 0 }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:2999
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:3004
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:3009
+fn jet_process_signal_kill() -> I32 {
+    if target.selected_family() == "unix" { jet_process_pty.SIGKILL }
+    else if target.selected_os() == .Windows { 9 } else { 0 }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:3013
+// GATE #4565: kernel primitive
+#Unsafe("interrupt ConPTY through retained terminal input; otherwise signal the owned tree and publish stopping after success")
+fn jet_process_child_signal(child: &ProcessChild, signal: I32) -> () IOError! {
+    pid :: jet_process_child_id(child)
+    slot := child.inner.borrow_mut()
+    if Val(inner) :: slot.as_mut() {
+        if target.selected_os() == .Windows && signal == jet_process_signal_interrupt() {
+            if ProcessHandle.Native{pid:native_pid, job, ..} :: inner {
+                input :: child.stdin.borrow()
+                input := input.as_ref().and_then(fn(input) {
+                    match input { ProcessStdin.Terminal(input) -> Val(input), ProcessStdin.Pipe(_) -> None }
+                })
+                result :: jet_process_pty.interrupt(*native_pid, job, input).map_err(jet_process_cleanup_io_error)
+                if result.is_ok() { jet_process_publish_topology_id(pid, JetDevtoolsTopologyProcessState.Stopping) }
+                return ^result
+            }
+        }
+        jet_process_tree_signal(inner, child.terminal.is_ok() || child.process_group, signal).map_err(jet_process_cleanup_io_error)?
+    }
+    jet_process_publish_topology_id(pid, JetDevtoolsTopologyProcessState.Stopping)
+    Ok(())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:3061
+// GATE #4565: kernel primitive
+#Unsafe("unfinished shared child cleanup signals then waits, releases borrow before joining output, and returns first error")
+fn jet_process_reap_unfinished(child: &ProcessChild) -> () IOError! {
+    if child.detached || child.wait_result.try_borrow().map_or(false, fn(result) { result.is_some() }) { return Ok(()) }
+    slot := child.inner.try_borrow_mut().map_err(fn(_) {
+        IOError.other(IOOperation.Close, Val("process"), "process child cleanup is already in progress")
+    })?
+    inner := match slot.as_mut() {
+        Val(inner) -> inner
+        None -> { drop(^slot); return jet_process_join_child_output_workers(child) }
+    }
+    signal_error :: jet_process_tree_signal(inner, child.process_group, jet_process_signal_kill()).err().map(jet_process_cleanup_io_error)
+    if target.selected_os() == .Windows {
+        if Val(session) :: child.terminal.as_ref().ok() { session.control.close() }
+    }
+    wait_error :: jet_process_inner_wait(inner).err().map(jet_process_cleanup_io_error)
+    drop(^slot)
+    output_error :: jet_process_join_child_output_workers(child).err()
+    if Val(error) :: signal_error { Err(^error) }
+    else if Val(error) :: wait_error { Err(^error) }
+    else if Val(error) :: output_error { Err(^error) }
+    else { Ok(()) }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:3110
+// Shared close terminates/reaps unfinished child and makes all clones inert.
+// GATE #4565: kernel primitive
+#Unsafe("clear the sole shared native slots after reap so every retained clone observes closed state")
+fn jet_process_child_close(child: &ProcessChild) -> () {
+    if Err(error) :: jet_process_reap_unfinished(child) { jet_process_record_cleanup_error(child, ^error) }
+    child.inner.borrow_mut().take()
+    *child.stdin.borrow_mut() = None
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:3120
+struct JetProcessWaitCleanup { child: &ProcessChild }
+impl Drop for JetProcessWaitCleanup {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:3124
+    fn drop(self) -> () {
+        if Err(error) :: jet_process_reap_unfinished(self.child) { jet_process_record_cleanup_error(self.child, ^error) }
+    }
+}
+impl Drop for ProcessChild {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:3132
+    // GATE #4565: kernel primitive
+    #Unsafe("last shared native child owner reaps unfinished child and records first cleanup error")
+    fn drop(self) -> () {
+        if Rc.strong_count(&self.inner) == 1 {
+            if Err(error) :: jet_process_reap_unfinished(self) { jet_process_record_cleanup_error(self, ^error) }
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:3141
+fn jet_process_stdin_closed() -> IOError {
+    IOError.Closed(IOContext.new(IOOperation.Write, Val("process stdin"), None, Val("process stdin closed")))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:3150
+fn jet_process_stdin_error(error: io.Error) -> IOError {
+    if error.kind() == io.ErrorKind.BrokenPipe || error.kind() == io.ErrorKind.NotConnected || error.kind() == io.ErrorKind.UnexpectedEof {
+        jet_process_stdin_closed()
+    } else { IOError.other(IOOperation.Write, Val("process stdin"), ^error) }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:3170
+// Sole option owns native descriptor; take sends EOF exactly once.
+// GATE #4565: kernel primitive
+#Unsafe("take shared stdin slot so repeated close is harmless and owned writer closes once")
+fn jet_process_stdin_close(handle: &Rc<RefCell<ProcessStdin?>>) -> () { _ :: handle.borrow_mut().take() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:3181
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:3276
+// GATE #4565: kernel primitive
+#Unsafe("scheduler-aware Unix pipe writes release borrow before waits; PTY master stays blocking because its clones share flags")
+fn jet_process_stdin_write(handle: &Rc<RefCell<ProcessStdin?>>, text: &String) -> () IOError! {
+    if target.selected_family() != "unix" {
+        handle := handle.borrow_mut()
+        stdin := handle.as_mut() ?? return Err(jet_process_stdin_closed())
+        return stdin.write_all(text.as_bytes()).map_err(jet_process_stdin_error)
+    }
+    bytes := text.as_bytes()
+    {
+        stdin := handle.borrow_mut()
+        if Val(ProcessStdin.Terminal(writer)) :: stdin.as_mut() {
+            // PTY clones share one open-file description: nonblocking input
+            // would make the independent output worker see EAGAIN.
+            writer.write_all(bytes).map_err(jet_process_stdin_error)?
+            return Ok(())
+        }
+    }
+    offset := 0usize
+    loop while offset < bytes.len() {
+        wait_fd :: {
+            stdin := handle.borrow_mut()
+            stdin := stdin.as_mut() ?? return Err(jet_process_stdin_closed())
+            (fd, nonblocking) :: match stdin {
+                ProcessStdin.Pipe(writer) -> (writer.as_raw_fd(), true)
+                ProcessStdin.Terminal(writer) -> (writer.as_raw_fd(), false)
+            }
+            if nonblocking {
+                jet_scheduler_raw_io_set_nonblocking(fd).map_err(fn(error) { IOError.other(IOOperation.Write, Val("process stdin"), ^error) })?
+            }
+            match stdin.write(&bytes[offset..]) {
+                Ok(0) -> return Err(jet_process_stdin_closed())
+                Ok(written) -> { offset += written; None }
+                Err(error) if error.kind() == io.ErrorKind.Interrupted -> continue
+                Err(error) if error.kind() == io.ErrorKind.WouldBlock -> Val(fd)
+                Err(error) -> return Err(jet_process_stdin_error(^error))
+            }
+        }
+        fd :: wait_fd ?? continue
+        scheduler :: jet_scheduler_raw_io_handle(fd)
+        match jet_scheduler_wait_without_unwind(fn() { jet_scheduler_raw_io_write_wait(&scheduler, "process stdin") }) {
+            JetSchedulerWait.Ready(()) -> {}
+            JetSchedulerWait.Cancelled -> return Err(IOError.Cancelled(IOContext.new(
+                IOOperation.Write, Val("process stdin"), None, Val("process stdin cancelled"))))
+            JetSchedulerWait.Deadline(_) -> return Err(IOError.TimedOut(IOContext.new(
+                IOOperation.Write, Val("process stdin"), None, Val("deadline exceeded while waiting in process stdin"))))
+            JetSchedulerWait.Panicked(message) -> return Err(IOError.other(
+                IOOperation.Write, Val("process stdin"), "process stdin scheduler wait failed: {message}"))
+        }
+    }
+    Ok(())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:3286
+// GATE #4565: kernel primitive
+#Unsafe("read a native buffered line preserving IO kind and removing only final LF and its optional preceding CR")
+fn jet_process_child_read_line<R: Read>(reader: &BufReader<R>?) -> String? IOError! {
+    reader := reader.as_mut() ?? return Ok(None)
+    line := String.new()
+    n :: reader.read_line(&line).map_err(fn(error) { IOError.other(IOOperation.Read, Val("process output"), ^error) })?
+    if n == 0 { Ok(None) } else {
+        if line.ends_with('\n') {
+            line.pop()
+            if line.ends_with('\r') { line.pop() }
+        }
+        Ok(Val(^line))
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:3312
+// GATE #4565: kernel primitive
+#Unsafe("borrow shared stream slot for a complete buffered line read")
+fn jet_process_stream_next_line<R: Read>(handle: &Rc<RefCell<BufReader<R>?>>) -> String? IOError! {
+    jet_process_child_read_line(&handle.borrow_mut())
+}
 

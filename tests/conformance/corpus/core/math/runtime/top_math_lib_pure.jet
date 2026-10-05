@@ -52,3 +52,61 @@ use core.math.runtime.top_math_lib_pure.*
     assert(jet_std_math_from_bits(I64.MIN).is_sign_negative())
     assert_eq(jet_std_math_to_bits(jet_std_math_from_bits(I64{0x3ff0000000000000})), I64{0x3ff0000000000000})
 }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:894/904/1714
+#Test("integer_number_theory_preserves_checked_intermediate_failures") {
+    assert_eq(jet_std_math_gcd(-18, 24), I64{6})
+    assert_eq(jet_std_math_lcm(6, -8), I64{24})
+    assert_eq(jet_std_math_gcd_many(&[I64{18}, I64{24}, I64{30}]), I64{6})
+    assert_eq(jet_std_math_lcm_many(&[]), I64{0})
+    assert_eq(jet_std_math_powmod(-2, 3, 5), Val(I64{2}))
+    assert_eq(jet_std_math_powmod(2, 0, 1), Val(I64{0}))
+    assert_eq(jet_std_math_powmod(2, -1, 5), None)
+    // The source squares the factor even on the final iteration.
+    assert_eq(jet_std_math_powmod(I64.MAX - 1, 1, I64.MAX), None)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:972/980/988/995/1012/1061
+#Test("combinator_sequence_filters_keep_original_boundaries") {
+    assert_eq(jet_comb_compress([1, 2, 3], [true, false]), [I64{1}])
+    assert_eq(jet_comb_drop([1, 2], -1), [I64{1}, I64{2}])
+    assert_eq(jet_comb_takewhile([1, 2, -1, 3], true), [I64{1}, I64{2}])
+    assert_eq(jet_comb_dropwhile([1, 2, -1, 3], true), [I64{-1}, I64{3}])
+    assert_eq(jet_comb_islice([0, 1, 2, 3, 4], 1, 5, 2), [I64{1}, I64{3}])
+    assert(jet_comb_islice([1, 2], 0, 2, 0).is_empty())
+    assert_eq(jet_comb_accumulate([I64.MAX, 1, -1]), [I64.MAX, I64.MAX, I64.MAX - 1])
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:1076/1109/1137/1165/1238
+#Test("combinator_enumeration_keeps_position_duplicates_and_empty_identity") {
+    assert_eq(jet_comb_permutations([1, 1], 2), [[I64{1}, I64{1}], [I64{1}, I64{1}]])
+    assert_eq(jet_comb_combinations([1, 2, 3], 2), [[I64{1}, I64{2}], [I64{1}, I64{3}], [I64{2}, I64{3}]])
+    assert_eq(jet_comb_combinations_with_replacement([1, 2], 2), [[I64{1}, I64{1}], [I64{1}, I64{2}], [I64{2}, I64{2}]])
+    assert_eq(jet_comb_product([], 0), [[]])
+    assert(jet_comb_product([], 1).is_empty())
+    assert_eq(jet_comb_powerset([1, 2]), [[], [I64{1}], [I64{2}], [I64{1}, I64{2}]])
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:1303/1325/1340/1352/1364/1368/1386
+#Test("pure_heap_and_bisection_keep_input_owners_and_tie_rules") {
+    input :: [I64{3}, I64{1}, I64{2}]
+    heap :: jet_coll_heapify(&input)
+    assert_eq(input, [I64{3}, I64{1}, I64{2}])
+    assert_eq(heap[0], I64{1})
+    (rest, popped) :: jet_coll_heappop_pure(&heap)
+    assert_eq(popped, Val(I64{1}))
+    assert_eq(rest, [I64{2}, I64{3}])
+    assert_eq(jet_coll_heappushpop_pure(&heap, 0), (heap.clone(), I64{0}))
+    assert_eq(jet_coll_heapreplace_pure(&[], 7), ([I64{7}], None))
+    sorted :: [I64{1}, I64{2}, I64{2}, I64{3}]
+    assert_eq(jet_coll_bisect_left(&sorted, 2), I64{1})
+    assert_eq(jet_coll_bisect_right(&sorted, 2), I64{3})
+    assert_eq(jet_coll_merge_sorted(&[I64{1}, I64{3}], &[I64{1}, I64{2}]), [I64{1}, I64{1}, I64{2}, I64{3}])
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:1480/1493/1497/1674/1739/1743
+#Test("fixed_width_word_helpers_cover_minimum_value_and_half_open_ranges") {
+    assert_eq(jet_std_math_digits(I64.MIN), I64{19})
+    assert_eq(jet_std_math_digits(0), I64{1})
+    assert_eq(jet_std_math_leading_ones(-1), I64{64})
+    assert_eq(jet_std_math_trailing_ones(-1), I64{64})
+    assert_eq(jet_std_math_checked_sub(I64.MIN, 1), None)
+    assert_eq(jet_std_math_abs_diff(I64.MIN, I64.MAX), I64{-1})
+    assert(jet_std_math_in_range(2, 2, 3))
+    assert(!jet_std_math_in_range(3, 2, 3))
+}

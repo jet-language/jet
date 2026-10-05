@@ -1,20 +1,11 @@
-// PORT-PENDING 2178 crates-jet-codegen-src-prelude-core-fmtaot: crates/jet-codegen/src/Prelude/Core/FmtAot.rs:1-16
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS // D-FMT-INTERP3=B: AOT adapts the packed exact-Int carrier to the shared
-//RS // formatting kernel. The conversion is carrier marshalling; the formatting
-//RS // algorithms remain in Core/Fmt.rs.
-//RS 
-//RS pub(crate) fn jet_fmt_hex(value: i64, width: i64) -> String {
-//RS     jet_fmt_hex_decimal(&jet_std::jet_int_to_string(value), width)
-//RS }
-//RS 
-//RS pub(crate) fn jet_fmt_bin(value: i64) -> String {
-//RS     jet_fmt_bin_decimal(&jet_std::jet_int_to_string(value))
-//RS }
-//RS 
-//RS pub(crate) fn jet_fmt_oct(value: i64) -> String {
-//RS     jet_fmt_oct_decimal(&jet_std::jet_int_to_string(value))
-//RS }
-//RS 
-// END-PORT-PENDING 2178 crates/jet-codegen/src/Prelude/Core/FmtAot.rs:1-16
+use core.text.runtime.kernel_fmt.[jet_fmt_hex_decimal, jet_fmt_bin_decimal, jet_fmt_oct_decimal]
+use core.prelude.runtime.std_common_types_03.jet_int_to_string
 
+// Rust: crates/jet-codegen/src/Prelude/Core/FmtAot.rs:1
+// Marshal packed exact Int to decimal text; shared kernel owns radix formatting.
+// Rust: crates/jet-codegen/src/Prelude/Core/FmtAot.rs:5
+pub fn jet_fmt_hex(value: I64, width: I64) -> String { jet_fmt_hex_decimal(&jet_int_to_string(value), width) }
+// Rust: crates/jet-codegen/src/Prelude/Core/FmtAot.rs:9
+pub fn jet_fmt_bin(value: I64) -> String { jet_fmt_bin_decimal(&jet_int_to_string(value)) }
+// Rust: crates/jet-codegen/src/Prelude/Core/FmtAot.rs:13
+pub fn jet_fmt_oct(value: I64) -> String { jet_fmt_oct_decimal(&jet_int_to_string(value)) }

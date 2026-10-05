@@ -1,1804 +1,1519 @@
-// PORT-PENDING 2090 crates-jet-codegen-src-prelude-corelib-top-text-slice-1: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:1-1800
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS // ── core.text helpers (D-TEXTUNICODE1) ───────────────────────────────
-//RS // ── D-FOUND-VIEW1: borrowed one-pass iterator carrier ───────────────────────
-//RS // `JetIter<T>` is intentionally `'static` because ordinary adapters own their
-//RS // source. Text, byte, and mapped-file scans keep their source alive while
-//RS // yielding `&str`/`&[u8]` windows, so their lifetime must remain explicit.
-//RS pub(crate) struct JetViewIter<'a, T: 'a>(Box<dyn Iterator<Item = T> + 'a>);
-//RS 
-//RS impl<'a, T: 'a> JetViewIter<'a, T> {
-//RS     fn to_list(self) -> Vec<T> {
-//RS         self.0.collect()
-//RS     }
-//RS     fn collect(self) -> Vec<T> {
-//RS         self.0.collect()
-//RS     }
-//RS     fn len(self) -> i64 {
-//RS         self.0.count() as i64
-//RS     }
-//RS     fn is_empty(mut self) -> bool {
-//RS         self.0.next().is_none()
-//RS     }
-//RS }
-//RS 
-//RS impl<'a, T: 'a> IntoIterator for JetViewIter<'a, T> {
-//RS     type Item = T;
-//RS     type IntoIter = Box<dyn Iterator<Item = T> + 'a>;
-//RS 
-//RS     fn into_iter(self) -> Self::IntoIter {
-//RS         self.0
-//RS     }
-//RS }
-//RS 
-//RS pub(crate) fn jet_view_iter_from_iter<'a, I, T>(iter: I) -> JetViewIter<'a, T>
-//RS where
-//RS     I: Iterator<Item = T> + 'a,
-//RS     T: 'a,
-//RS {
-//RS     JetViewIter(Box::new(iter))
-//RS }
-//RS 
-//RS fn jet_bytes_view_iter<'a>(bytes: &'a [u8]) -> JetViewIter<'a, &'a [u8]> {
-//RS     jet_view_iter_from_iter(bytes.iter().map(std::slice::from_ref))
-//RS }
-//RS 
-//RS fn jet_text_unicode_scalar_count(s: &String) -> i64 {
-//RS     s.chars().count() as i64
-//RS }
-//RS fn jet_text_unicode_byte_count(s: &String) -> i64 {
-//RS     s.len() as i64
-//RS }
-//RS fn jet_text_unicode_is_ascii(s: &String) -> bool {
-//RS     s.is_ascii()
-//RS }
-//RS fn jet_text_unicode_lower(s: &String) -> String {
-//RS     jet_text_lower(s)
-//RS }
-//RS fn jet_text_unicode_upper(s: &String) -> String {
-//RS     jet_text_upper(s)
-//RS }
-//RS fn jet_text_unicode_scalars(s: &String) -> Vec<String> {
-//RS     s.chars().map(|c| c.to_string()).collect()
-//RS }
-//RS fn jet_text_unicode_name(cp: u32) -> &'static str {
-//RS     UNICODE_NAME_INDEX
-//RS         .binary_search_by_key(&cp, |&(source, _)| source)
-//RS         .map(|at| UNICODE_NAME_INDEX[at].1)
-//RS         .unwrap_or("UNASSIGNED")
-//RS }
-//RS fn jet_text_inspect(s: &String) -> Vec<String> {
-//RS     s.chars()
-//RS         .map(|c| format!("U+{:04X} {}", c as u32, jet_text_unicode_name(c as u32)))
-//RS         .collect()
-//RS }
-//RS 
-//RS // ── card #298: table-driven NFC/NFD/NFKC/NFKD + full case folding ──────────
-//RS // Real Unicode 16.0.0 algorithms over the generated tables in
-//RS // `UnicodeTables.rs` (pinned UCD, see Tools/agent/gen-unicode-tables.mjs):
-//RS // canonical/compatibility decomposition, canonical-combining-class ordering,
-//RS // Hangul algorithmic (de)composition, composition exclusions, and full
-//RS // (C+F) case folding. Replaces the old ~18-entry hand-written match table.
-//RS const HANGUL_SBASE: u32 = 0xAC00;
-//RS const HANGUL_LBASE: u32 = 0x1100;
-//RS const HANGUL_VBASE: u32 = 0x1161;
-//RS const HANGUL_TBASE: u32 = 0x11A7;
-//RS const HANGUL_LCOUNT: u32 = 19;
-//RS const HANGUL_VCOUNT: u32 = 21;
-//RS const HANGUL_TCOUNT: u32 = 28;
-//RS const HANGUL_NCOUNT: u32 = HANGUL_VCOUNT * HANGUL_TCOUNT; // 588
-//RS const HANGUL_SCOUNT: u32 = HANGUL_LCOUNT * HANGUL_NCOUNT; // 11172
-//RS 
-//RS fn jet_text_ccc(cp: u32) -> u8 {
-//RS     UNICODE_CCC
-//RS         .binary_search_by(|&(a, b, _)| {
-//RS             if cp < a { std::cmp::Ordering::Greater }
-//RS             else if cp > b { std::cmp::Ordering::Less }
-//RS             else { std::cmp::Ordering::Equal }
-//RS         })
-//RS         .map(|i| UNICODE_CCC[i].2)
-//RS         .unwrap_or(0)
-//RS }
-//RS 
-//RS fn jet_text_hangul_decompose(cp: u32) -> Option<[u32; 3]> {
-//RS     if cp < HANGUL_SBASE || cp >= HANGUL_SBASE + HANGUL_SCOUNT {
-//RS         return None;
-//RS     }
-//RS     let s_index = cp - HANGUL_SBASE;
-//RS     let l = HANGUL_LBASE + s_index / HANGUL_NCOUNT;
-//RS     let v = HANGUL_VBASE + (s_index % HANGUL_NCOUNT) / HANGUL_TCOUNT;
-//RS     let t_index = s_index % HANGUL_TCOUNT;
-//RS     if t_index == 0 {
-//RS         Some([l, v, 0])
-//RS     } else {
-//RS         Some([l, v, HANGUL_TBASE + t_index])
-//RS     }
-//RS }
-//RS 
-//RS fn jet_text_decomp_lookup(cp: u32, compat: bool) -> Option<&'static [u32]> {
-//RS     let idx = UNICODE_DECOMP_INDEX
-//RS         .binary_search_by_key(&cp, |&(c, _, _, _)| c)
-//RS         .ok()?;
-//RS     let (_, start, len, is_canon) = UNICODE_DECOMP_INDEX[idx];
-//RS     if !compat && is_canon == 0 {
-//RS         return None;
-//RS     }
-//RS     Some(&UNICODE_DECOMP_POOL[start as usize..(start + len) as usize])
-//RS }
-//RS 
-//RS // Recursive: UnicodeData.txt decomposition mappings are only one step, not
-//RS // maximal (e.g. U+1E14 -> U+0112 U+0300, and U+0112 itself further
-//RS // decomposes to U+0045 U+0304) — each produced codepoint must be expanded
-//RS // again until stable (conformance-verified against NormalizationTest.txt).
-//RS fn jet_text_expand_char(cp: u32, compat: bool, seq: &mut Vec<u32>) {
-//RS     if let Some([l, v, t]) = jet_text_hangul_decompose(cp) {
-//RS         seq.push(l);
-//RS         seq.push(v);
-//RS         if t != 0 {
-//RS             seq.push(t);
-//RS         }
-//RS         return;
-//RS     }
-//RS     if let Some(expansion) = jet_text_decomp_lookup(cp, compat) {
-//RS         for &sub in expansion {
-//RS             jet_text_expand_char(sub, compat, seq);
-//RS         }
-//RS         return;
-//RS     }
-//RS     seq.push(cp);
-//RS }
-//RS 
-//RS fn jet_text_canonical_order(seq: &mut [u32]) {
-//RS     // Stable linear counting sort of each non-starter run by u8 CCC.
-//RS     let mut start = 0usize;
-//RS     while start < seq.len() {
-//RS         if jet_text_ccc(seq[start]) == 0 { start += 1; }
-//RS         let mut end = start;
-//RS         let mut ordered = true;
-//RS         let mut previous = 0u8;
-//RS         while end < seq.len() {
-//RS             let class = jet_text_ccc(seq[end]);
-//RS             if class == 0 { break; }
-//RS             ordered &= class >= previous;
-//RS             previous = class;
-//RS             end += 1;
-//RS         }
-//RS         if !ordered {
-//RS             let mut counts = [0usize; 256];
-//RS             for &cp in &seq[start..end] { counts[jet_text_ccc(cp) as usize] += 1; }
-//RS             let mut offsets = [0usize; 256];
-//RS             let mut next = start;
-//RS             for class in 1..256 {
-//RS                 offsets[class] = next;
-//RS                 next += counts[class];
-//RS             }
-//RS             let mut sorted = vec![0u32; end - start];
-//RS             for &cp in &seq[start..end] {
-//RS                 let class = jet_text_ccc(cp) as usize;
-//RS                 let at = offsets[class] - start;
-//RS                 sorted[at] = cp;
-//RS                 offsets[class] += 1;
-//RS             }
-//RS             seq[start..end].copy_from_slice(&sorted);
-//RS         }
-//RS         start = end;
-//RS     }
-//RS }
-//RS 
-//RS fn jet_text_nfd_inner(s: &String, compat: bool) -> String {
-//RS     let mut seq: Vec<u32> = Vec::with_capacity(s.len());
-//RS     for c in s.chars() {
-//RS         jet_text_expand_char(c as u32, compat, &mut seq);
-//RS     }
-//RS     jet_text_canonical_order(&mut seq);
-//RS     seq.into_iter()
-//RS         .filter_map(char::from_u32)
-//RS         .collect()
-//RS }
-//RS fn jet_text_nfd(s: &String) -> String { jet_text_nfd_inner(s, false) }
-//RS fn jet_text_nfkd(s: &String) -> String { jet_text_nfd_inner(s, true) }
-//RS 
-//RS fn jet_text_compose_pair_cp(a: u32, b: u32) -> Option<u32> {
-//RS     UNICODE_COMPOSE_PAIRS
-//RS         .binary_search_by(|&(x, y, _)| (x, y).cmp(&(a, b)))
-//RS         .ok()
-//RS         .map(|i| UNICODE_COMPOSE_PAIRS[i].2)
-//RS }
-//RS 
-//RS fn jet_text_hangul_compose_pair(a: u32, b: u32) -> Option<u32> {
-//RS     // L + V -> LV
-//RS     if a >= HANGUL_LBASE && a < HANGUL_LBASE + HANGUL_LCOUNT
-//RS         && b >= HANGUL_VBASE && b < HANGUL_VBASE + HANGUL_VCOUNT
-//RS     {
-//RS         let l_index = a - HANGUL_LBASE;
-//RS         let v_index = b - HANGUL_VBASE;
-//RS         return Some(HANGUL_SBASE + (l_index * HANGUL_VCOUNT + v_index) * HANGUL_TCOUNT);
-//RS     }
-//RS     // LV + T -> LVT
-//RS     if a >= HANGUL_SBASE && a < HANGUL_SBASE + HANGUL_SCOUNT
-//RS         && (a - HANGUL_SBASE) % HANGUL_TCOUNT == 0
-//RS         && b > HANGUL_TBASE && b < HANGUL_TBASE + HANGUL_TCOUNT
-//RS     {
-//RS         return Some(a + (b - HANGUL_TBASE));
-//RS     }
-//RS     None
-//RS }
-//RS 
-//RS fn jet_text_compose(s: String) -> String {
-//RS     // UAX#15 canonical composition ("blocked" rule): a character C composes
-//RS     // with the tracked starter only if no character since that starter has
-//RS     // combining class >= ccc(C). `last_class` uses -1 (not 0) as the
-//RS     // "nothing has intervened yet" sentinel — a ccc=0 character (many Indic
-//RS     // vowel signs compose with ccc=0) is only unblocked immediately after
-//RS     // the starter itself, not after any intervening combining mark.
-//RS     let seq: Vec<u32> = s.chars().map(|c| c as u32).collect();
-//RS     let mut out: Vec<u32> = Vec::with_capacity(seq.len());
-//RS     let mut starter_idx: Option<usize> = None;
-//RS     let mut last_class: i32 = -1;
-//RS     for cp in seq {
-//RS         let cls = jet_text_ccc(cp) as i32;
-//RS         if let Some(si) = starter_idx {
-//RS             let starter = out[si];
-//RS             let composed = jet_text_hangul_compose_pair(starter, cp)
-//RS                 .or_else(|| jet_text_compose_pair_cp(starter, cp));
-//RS             if let (Some(composed_cp), true) = (composed, last_class < cls) {
-//RS                 out[si] = composed_cp;
-//RS                 continue;
-//RS             }
-//RS         }
-//RS         if cls == 0 {
-//RS             out.push(cp);
-//RS             starter_idx = Some(out.len() - 1);
-//RS             last_class = -1;
-//RS         } else {
-//RS             out.push(cp);
-//RS             last_class = cls;
-//RS         }
-//RS     }
-//RS     out.into_iter().filter_map(char::from_u32).collect()
-//RS }
-//RS fn jet_text_nfc(s: &String) -> String { jet_text_compose(jet_text_nfd(s)) }
-//RS fn jet_text_nfkc(s: &String) -> String { jet_text_compose(jet_text_nfkd(s)) }
-//RS 
-//RS fn jet_text_fold_lookup(cp: u32) -> Option<&'static [u32]> {
-//RS     let idx = UNICODE_FOLD_INDEX
-//RS         .binary_search_by_key(&cp, |&(c, _, _)| c)
-//RS         .ok()?;
-//RS     let (_, start, len) = UNICODE_FOLD_INDEX[idx];
-//RS     Some(&UNICODE_FOLD_POOL[start as usize..(start + len) as usize])
-//RS }
-//RS fn jet_text_casefold(s: &String) -> String {
-//RS     let mut out = String::with_capacity(s.len());
-//RS     for c in s.chars() {
-//RS         match jet_text_fold_lookup(c as u32) {
-//RS             Some(seq) => {
-//RS                 for &cp in seq {
-//RS                     if let Some(fc) = char::from_u32(cp) {
-//RS                         out.push(fc);
-//RS                     }
-//RS                 }
-//RS             }
-//RS             None => out.push(c),
-//RS         }
-//RS     }
-//RS     out
-//RS }
-//RS fn jet_text_simple_fold(cp: u32) -> u32 {
-//RS     UNICODE_SIMPLE_FOLD
-//RS         .binary_search_by_key(&cp, |&(source, _)| source)
-//RS         .map(|at| UNICODE_SIMPLE_FOLD[at].1)
-//RS         .unwrap_or(cp)
-//RS }
-//RS fn jet_text_property(table: &[(u32, u32)], cp: u32) -> bool {
-//RS     jet_text_bsearch_pair(table, cp)
-//RS }
-//RS fn jet_text_alphabetic(cp: u32) -> bool { jet_text_property(UNICODE_ALPHABETIC, cp) }
-//RS fn jet_text_numeric(cp: u32) -> bool { jet_text_property(UNICODE_NUMERIC, cp) }
-//RS fn jet_text_whitespace(cp: u32) -> bool { jet_text_property(UNICODE_WHITE_SPACE, cp) }
-//RS fn jet_text_letter(cp: u32) -> bool { jet_text_property(UNICODE_LETTER, cp) }
-//RS fn jet_text_lower(s: &String) -> String {
-//RS     jet_unicode_lower(s)
-//RS }
-//RS fn jet_text_upper(s: &String) -> String {
-//RS     jet_unicode_upper(s)
-//RS }
-//RS fn jet_text_title_mapping(cp: u32) -> Option<&'static [u32]> {
-//RS     let at = UNICODE_TITLE_INDEX
-//RS         .binary_search_by_key(&cp, |&(source, _, _)| source)
-//RS         .ok()?;
-//RS     let (_, start, len) = UNICODE_TITLE_INDEX[at];
-//RS     Some(&UNICODE_TITLE_POOL[start as usize..(start + len) as usize])
-//RS }
-//RS fn jet_text_append_title_mapping(out: &mut String, cp: u32) {
-//RS     if let Some(mapped) = jet_text_title_mapping(cp) {
-//RS         out.extend(mapped.iter().filter_map(|&mapped_cp| char::from_u32(mapped_cp)));
-//RS     } else if let Some(ch) = char::from_u32(cp) {
-//RS         out.push(ch);
-//RS     }
-//RS }
-//RS fn jet_text_title(s: &String) -> String {
-//RS     let mut out = String::with_capacity(s.len());
-//RS     let mut word_start = true;
-//RS     for ch in s.chars() {
-//RS         let cp = ch as u32;
-//RS         if jet_text_alphabetic(cp) || jet_text_numeric(cp) {
-//RS             if word_start {
-//RS                 jet_text_append_title_mapping(&mut out, cp);
-//RS             } else {
-//RS                 let one = ch.to_string();
-//RS                 out.push_str(&jet_text_lower(&one));
-//RS             }
-//RS             word_start = false;
-//RS         } else {
-//RS             out.push(ch);
-//RS             word_start = true;
-//RS         }
-//RS     }
-//RS     out
-//RS }
-//RS // Unicode Default Caseless Matching: NFD(toCasefold(NFD(text))).
-//RS fn jet_text_caseless_eq(a: &String, b: &String) -> bool {
-//RS     jet_text_nfd(&jet_text_casefold(&jet_text_nfd(a)))
-//RS         == jet_text_nfd(&jet_text_casefold(&jet_text_nfd(b)))
-//RS }
-//RS // Card #298: real UAX#29 grapheme/word/sentence segmentation over the
-//RS // generated break-property tables, mirroring the comptime twin byte-for-byte
-//RS // (R12 parity) — see crates/jet-comptime/src/Comptime/TextLite.rs for the
-//RS // identical algorithm and the conformance tests (this AOT copy is validated
-//RS // by that mirror, not a separate compiled test — it is spliced flat into the
-//RS // user's generated program, not compiled as part of this crate).
-//RS // parity: guard tests/text_unicode.rs::pinned_unicode_tables_regenerate_byte_identically
-//RS 
-//RS fn jet_text_bsearch_triple(table: &[(u32, u32, u8)], cp: u32) -> u8 {
-//RS     table
-//RS         .binary_search_by(|&(a, b, _)| {
-//RS             if cp < a { std::cmp::Ordering::Greater }
-//RS             else if cp > b { std::cmp::Ordering::Less }
-//RS             else { std::cmp::Ordering::Equal }
-//RS         })
-//RS         .map(|i| table[i].2)
-//RS         .unwrap_or(0)
-//RS }
-//RS fn jet_text_bsearch_pair(table: &[(u32, u32)], cp: u32) -> bool {
-//RS     table
-//RS         .binary_search_by(|&(a, b)| {
-//RS             if cp < a { std::cmp::Ordering::Greater }
-//RS             else if cp > b { std::cmp::Ordering::Less }
-//RS             else { std::cmp::Ordering::Equal }
-//RS         })
-//RS         .is_ok()
-//RS }
-//RS fn jet_text_grapheme_class(cp: u32) -> u8 { jet_text_bsearch_triple(UNICODE_GRAPHEME_BREAK, cp) }
-//RS fn jet_text_word_class(cp: u32) -> u8 { jet_text_bsearch_triple(UNICODE_WORD_BREAK, cp) }
-//RS fn jet_text_sentence_class(cp: u32) -> u8 { jet_text_bsearch_triple(UNICODE_SENTENCE_BREAK, cp) }
-//RS fn jet_text_is_ext_pictographic(cp: u32) -> bool { jet_text_bsearch_pair(UNICODE_EXTENDED_PICTOGRAPHIC, cp) }
-//RS fn jet_text_is_emoji_presentation(cp: u32) -> bool { jet_text_bsearch_pair(UNICODE_EMOJI_PRESENTATION, cp) }
-//RS fn jet_text_is_emoji(cp: u32) -> bool { jet_text_bsearch_pair(UNICODE_EMOJI, cp) }
-//RS fn jet_text_is_default_ignorable(cp: u32) -> bool { jet_text_bsearch_pair(UNICODE_DEFAULT_IGNORABLE, cp) }
-//RS fn jet_text_general_category(cp: u32) -> u8 {
-//RS     UNICODE_GENERAL_CATEGORY
-//RS         .binary_search_by(|&(start, end, _)| {
-//RS             if cp < start { std::cmp::Ordering::Greater }
-//RS             else if cp > end { std::cmp::Ordering::Less }
-//RS             else { std::cmp::Ordering::Equal }
-//RS         })
-//RS         .map(|at| UNICODE_GENERAL_CATEGORY[at].2)
-//RS         .unwrap_or(8)
-//RS }
-//RS fn jet_text_is_control(cp: u32) -> bool { jet_text_general_category(cp) == 0 }
-//RS fn jet_text_is_zero_width_scalar(cp: u32) -> bool {
-//RS     matches!(jet_text_general_category(cp), 2 | 3) || jet_text_is_default_ignorable(cp)
-//RS }
-//RS /// East Asian Width: 0=narrow(N/Na/H) 1=Ambiguous 2=wide(W/F).
-//RS fn jet_text_eaw_class(cp: u32) -> u8 { jet_text_bsearch_triple(UNICODE_EAST_ASIAN_WIDTH, cp) }
-//RS /// Indic_Conjunct_Break (GB9c): 0=None 1=Linker 2=Consonant 3=Extend.
-//RS fn jet_text_incb_class(cp: u32) -> u8 { jet_text_bsearch_triple(UNICODE_INCB, cp) }
-//RS const JET_INCB_LINKER: u8 = 1;
-//RS const JET_INCB_CONSONANT: u8 = 2;
-//RS const JET_INCB_EXTEND: u8 = 3;
-//RS 
-//RS // ---- GB1-GB13 grapheme cluster boundaries -----------------------------------
-//RS const JET_GB_CR: u8 = 1;
-//RS const JET_GB_LF: u8 = 2;
-//RS const JET_GB_CONTROL: u8 = 3;
-//RS const JET_GB_EXTEND: u8 = 4;
-//RS const JET_GB_ZWJ: u8 = 5;
-//RS const JET_GB_RI: u8 = 6;
-//RS const JET_GB_PREPEND: u8 = 7;
-//RS const JET_GB_SPACINGMARK: u8 = 8;
-//RS const JET_GB_L: u8 = 9;
-//RS const JET_GB_V: u8 = 10;
-//RS const JET_GB_T: u8 = 11;
-//RS const JET_GB_LV: u8 = 12;
-//RS const JET_GB_LVT: u8 = 13;
-//RS 
-//RS /// GB3-GB9b/GB999 (class-pair rules only — GB11's Extended_Pictographic
-//RS /// lookup, GB12/13's regional-indicator parity, and GB9c's Indic conjunct
-//RS /// scan are stateful, handled by the caller).
-//RS fn jet_text_grapheme_break_classes(pc: u8, cc: u8) -> bool {
-//RS     if pc == JET_GB_CR && cc == JET_GB_LF { return false; } // GB3
-//RS     if matches!(pc, JET_GB_CR | JET_GB_LF | JET_GB_CONTROL) { return true; } // GB4
-//RS     if matches!(cc, JET_GB_CR | JET_GB_LF | JET_GB_CONTROL) { return true; } // GB5
-//RS     if pc == JET_GB_L && matches!(cc, JET_GB_L | JET_GB_V | JET_GB_LV | JET_GB_LVT) { return false; } // GB6
-//RS     if matches!(pc, JET_GB_LV | JET_GB_V) && matches!(cc, JET_GB_V | JET_GB_T) { return false; } // GB7
-//RS     if matches!(pc, JET_GB_LVT | JET_GB_T) && cc == JET_GB_T { return false; } // GB8
-//RS     if matches!(cc, JET_GB_EXTEND | JET_GB_ZWJ) { return false; } // GB9
-//RS     if cc == JET_GB_SPACINGMARK { return false; } // GB9a
-//RS     if pc == JET_GB_PREPEND { return false; } // GB9b
-//RS     true // GB999
-//RS }
-//RS 
-//RS fn jet_text_graphemes(s: &String) -> Vec<String> {
-//RS     let cps: Vec<char> = s.chars().collect();
-//RS     if cps.is_empty() { return Vec::new(); }
-//RS     let mut out = Vec::new();
-//RS     let mut cur = String::new();
-//RS     cur.push(cps[0]);
-//RS     let mut ri_run: usize = if jet_text_grapheme_class(cps[0] as u32) == JET_GB_RI { 1 } else { 0 };
-//RS     let mut saw_pic = jet_text_is_ext_pictographic(cps[0] as u32);
-//RS     let mut incb_pending = jet_text_incb_class(cps[0] as u32) == JET_INCB_CONSONANT;
-//RS     let mut incb_linker = false;
-//RS     for i in 1..cps.len() {
-//RS         let prev = cps[i - 1];
-//RS         let curc = cps[i];
-//RS         let pc = jet_text_grapheme_class(prev as u32);
-//RS         let cc = jet_text_grapheme_class(curc as u32);
-//RS         let brk = if pc == JET_GB_ZWJ && saw_pic && jet_text_is_ext_pictographic(curc as u32) {
-//RS             false // GB11
-//RS         } else if pc == JET_GB_RI && cc == JET_GB_RI {
-//RS             ri_run % 2 == 0 // GB12/GB13
-//RS         } else if incb_pending && incb_linker && jet_text_incb_class(curc as u32) == JET_INCB_CONSONANT {
-//RS             false // GB9c
-//RS         } else {
-//RS             jet_text_grapheme_break_classes(pc, cc)
-//RS         };
-//RS         if brk { out.push(std::mem::take(&mut cur)); }
-//RS         cur.push(curc);
-//RS         ri_run = if cc == JET_GB_RI { ri_run + 1 } else { 0 };
-//RS         saw_pic = if matches!(cc, JET_GB_EXTEND | JET_GB_ZWJ) { saw_pic } else { jet_text_is_ext_pictographic(curc as u32) };
-//RS         match jet_text_incb_class(curc as u32) {
-//RS             JET_INCB_CONSONANT => { incb_pending = true; incb_linker = false; }
-//RS             JET_INCB_LINKER => { if incb_pending { incb_linker = true; } }
-//RS             JET_INCB_EXTEND => {}
-//RS             _ => { incb_pending = false; incb_linker = false; }
-//RS         }
-//RS     }
-//RS     out.push(cur);
-//RS     out
-//RS }
-//RS /// Borrowed grapheme iterator for D-FOUND-VIEW1. The source is scanned with
-//RS /// `CharIndices`, so every yielded item is an exact UTF-8 subslice and no
-//RS /// grapheme-sized `String` is allocated.
-//RS struct JetTextGraphemeViewIter<'a> {
-//RS     source: &'a str,
-//RS     chars: std::str::CharIndices<'a>,
-//RS     pending: Option<(usize, char)>,
-//RS     ri_run: usize,
-//RS }
-//RS 
-//RS impl<'a> Iterator for JetTextGraphemeViewIter<'a> {
-//RS     type Item = &'a str;
-//RS 
-//RS     fn next(&mut self) -> Option<Self::Item> {
-//RS         let (start, first) = self.pending.take().or_else(|| self.chars.next())?;
-//RS         let mut previous = first;
-//RS         let mut end = start + first.len_utf8();
-//RS         let mut ri_run = if jet_text_grapheme_class(first as u32) == JET_GB_RI {
-//RS             self.ri_run.saturating_add(1)
-//RS         } else {
-//RS             0
-//RS         };
-//RS         let mut saw_pic = jet_text_is_ext_pictographic(first as u32);
-//RS         let mut incb_pending = jet_text_incb_class(first as u32) == JET_INCB_CONSONANT;
-//RS         let mut incb_linker = false;
-//RS 
-//RS         while let Some((index, current)) = self.chars.next() {
-//RS             let previous_class = jet_text_grapheme_class(previous as u32);
-//RS             let current_class = jet_text_grapheme_class(current as u32);
-//RS             let breaks = if previous_class == JET_GB_ZWJ
-//RS                 && saw_pic
-//RS                 && jet_text_is_ext_pictographic(current as u32)
-//RS             {
-//RS                 false
-//RS             } else if previous_class == JET_GB_RI && current_class == JET_GB_RI {
-//RS                 ri_run % 2 == 0
-//RS             } else if incb_pending
-//RS                 && incb_linker
-//RS                 && jet_text_incb_class(current as u32) == JET_INCB_CONSONANT
-//RS             {
-//RS                 false
-//RS             } else {
-//RS                 jet_text_grapheme_break_classes(previous_class, current_class)
-//RS             };
-//RS             if breaks {
-//RS                 self.pending = Some((index, current));
-//RS                 self.ri_run = ri_run;
-//RS                 return Some(&self.source[start..index]);
-//RS             }
-//RS 
-//RS             previous = current;
-//RS             end = index + current.len_utf8();
-//RS             ri_run = if current_class == JET_GB_RI {
-//RS                 ri_run.saturating_add(1)
-//RS             } else {
-//RS                 0
-//RS             };
-//RS             saw_pic = if matches!(current_class, JET_GB_EXTEND | JET_GB_ZWJ) {
-//RS                 saw_pic
-//RS             } else {
-//RS                 jet_text_is_ext_pictographic(current as u32)
-//RS             };
-//RS             match jet_text_incb_class(current as u32) {
-//RS                 JET_INCB_CONSONANT => {
-//RS                     incb_pending = true;
-//RS                     incb_linker = false;
-//RS                 }
-//RS                 JET_INCB_LINKER => {
-//RS                     if incb_pending {
-//RS                         incb_linker = true;
-//RS                     }
-//RS                 }
-//RS                 JET_INCB_EXTEND => {}
-//RS                 _ => {
-//RS                     incb_pending = false;
-//RS                     incb_linker = false;
-//RS                 }
-//RS             }
-//RS         }
-//RS 
-//RS         self.ri_run = ri_run;
-//RS         Some(&self.source[start..end])
-//RS     }
-//RS }
-//RS 
-//RS pub(crate) fn jet_text_grapheme_views<'a>(s: &'a str) -> JetViewIter<'a, &'a str> {
-//RS     let source = s;
-//RS     jet_view_iter_from_iter(JetTextGraphemeViewIter {
-//RS         source,
-//RS         chars: source.char_indices(),
-//RS         pending: None,
-//RS         ri_run: 0,
-//RS     })
-//RS }
-//RS 
-//RS 
-//RS // ---- WB1-WB16 word boundaries ------------------------------------------------
-//RS const JET_WB_CR: u8 = 1;
-//RS const JET_WB_LF: u8 = 2;
-//RS const JET_WB_NEWLINE: u8 = 3;
-//RS const JET_WB_EXTEND: u8 = 4;
-//RS const JET_WB_ZWJ: u8 = 5;
-//RS const JET_WB_RI: u8 = 6;
-//RS const JET_WB_FORMAT: u8 = 7;
-//RS const JET_WB_KATAKANA: u8 = 8;
-//RS const JET_WB_HEBREW: u8 = 9;
-//RS const JET_WB_ALETTER: u8 = 10;
-//RS const JET_WB_SINGLEQUOTE: u8 = 11;
-//RS const JET_WB_DOUBLEQUOTE: u8 = 12;
-//RS const JET_WB_MIDNUMLET: u8 = 13;
-//RS const JET_WB_MIDLETTER: u8 = 14;
-//RS const JET_WB_MIDNUM: u8 = 15;
-//RS const JET_WB_NUMERIC: u8 = 16;
-//RS const JET_WB_EXTENDNUMLET: u8 = 17;
-//RS const JET_WB_WSEGSPACE: u8 = 18;
-//RS 
-//RS fn jet_text_word_reduce<I>(chars: I) -> (Vec<(u8, char)>, Vec<usize>)
-//RS where
-//RS     I: IntoIterator<Item = char>,
-//RS {
-//RS     let mut units: Vec<(u8, char)> = Vec::new();
-//RS     let mut ends: Vec<usize> = Vec::new();
-//RS     for (idx, c) in chars.into_iter().enumerate() {
-//RS         let cl = jet_text_word_class(c as u32);
-//RS         if matches!(cl, JET_WB_EXTEND | JET_WB_FORMAT | JET_WB_ZWJ) {
-//RS             if let Some(&(last_cl, _)) = units.last() {
-//RS                 if !matches!(last_cl, JET_WB_CR | JET_WB_LF | JET_WB_NEWLINE) {
-//RS                     *ends.last_mut().unwrap() = idx;
-//RS                     continue;
-//RS                 }
-//RS             }
-//RS         }
-//RS         units.push((cl, c));
-//RS         ends.push(idx);
-//RS     }
-//RS     (units, ends)
-//RS }
-//RS 
-//RS fn jet_text_word_break_at<F>(
-//RS     units: &[(u8, char)],
-//RS     ends: &[usize],
-//RS     char_at: F,
-//RS     i: usize,
-//RS ) -> bool
-//RS where
-//RS     F: Fn(usize) -> char,
-//RS {
-//RS     let (pc, _) = units[i];
-//RS     let (cc, _) = units[i + 1];
-//RS     if pc == JET_WB_CR && cc == JET_WB_LF { return false; } // WB3
-//RS     if matches!(pc, JET_WB_NEWLINE | JET_WB_CR | JET_WB_LF) { return true; } // WB3a
-//RS     if matches!(cc, JET_WB_NEWLINE | JET_WB_CR | JET_WB_LF) { return true; } // WB3b
-//RS     if jet_text_word_class(char_at(ends[i]) as u32) == JET_WB_ZWJ && jet_text_is_ext_pictographic(units[i + 1].1 as u32) {
-//RS         return false; // WB3c
-//RS     }
-//RS     if pc == JET_WB_WSEGSPACE && cc == JET_WB_WSEGSPACE && jet_text_word_class(char_at(ends[i]) as u32) == JET_WB_WSEGSPACE {
-//RS         return false; // WB3d
-//RS     }
-//RS     if matches!(pc, JET_WB_ALETTER | JET_WB_HEBREW) && matches!(cc, JET_WB_ALETTER | JET_WB_HEBREW) { return false; } // WB5
-//RS     if matches!(pc, JET_WB_ALETTER | JET_WB_HEBREW) && matches!(cc, JET_WB_MIDLETTER | JET_WB_MIDNUMLET | JET_WB_SINGLEQUOTE) {
-//RS         if let Some(&(nc, _)) = units.get(i + 2) { if matches!(nc, JET_WB_ALETTER | JET_WB_HEBREW) { return false; } } // WB6
-//RS     }
-//RS     if matches!(cc, JET_WB_ALETTER | JET_WB_HEBREW) && matches!(pc, JET_WB_MIDLETTER | JET_WB_MIDNUMLET | JET_WB_SINGLEQUOTE) {
-//RS         if i >= 1 { let (pp, _) = units[i - 1]; if matches!(pp, JET_WB_ALETTER | JET_WB_HEBREW) { return false; } } // WB7
-//RS     }
-//RS     if pc == JET_WB_HEBREW && cc == JET_WB_SINGLEQUOTE { return false; } // WB7a
-//RS     if pc == JET_WB_HEBREW && cc == JET_WB_DOUBLEQUOTE {
-//RS         if let Some(&(nc, _)) = units.get(i + 2) { if nc == JET_WB_HEBREW { return false; } } // WB7b
-//RS     }
-//RS     if pc == JET_WB_DOUBLEQUOTE && cc == JET_WB_HEBREW {
-//RS         if i >= 1 { let (pp, _) = units[i - 1]; if pp == JET_WB_HEBREW { return false; } } // WB7c
-//RS     }
-//RS     if pc == JET_WB_NUMERIC && cc == JET_WB_NUMERIC { return false; } // WB8
-//RS     if matches!(pc, JET_WB_ALETTER | JET_WB_HEBREW) && cc == JET_WB_NUMERIC { return false; } // WB9
-//RS     if pc == JET_WB_NUMERIC && matches!(cc, JET_WB_ALETTER | JET_WB_HEBREW) { return false; } // WB10
-//RS     if cc == JET_WB_NUMERIC && matches!(pc, JET_WB_MIDNUM | JET_WB_MIDNUMLET | JET_WB_SINGLEQUOTE) {
-//RS         if i >= 1 { let (pp, _) = units[i - 1]; if pp == JET_WB_NUMERIC { return false; } } // WB11
-//RS     }
-//RS     if pc == JET_WB_NUMERIC && matches!(cc, JET_WB_MIDNUM | JET_WB_MIDNUMLET | JET_WB_SINGLEQUOTE) {
-//RS         if let Some(&(nc, _)) = units.get(i + 2) { if nc == JET_WB_NUMERIC { return false; } } // WB12
-//RS     }
-//RS     if pc == JET_WB_KATAKANA && cc == JET_WB_KATAKANA { return false; } // WB13
-//RS     if matches!(pc, JET_WB_ALETTER | JET_WB_HEBREW | JET_WB_NUMERIC | JET_WB_KATAKANA | JET_WB_EXTENDNUMLET) && cc == JET_WB_EXTENDNUMLET { return false; } // WB13a
-//RS     if pc == JET_WB_EXTENDNUMLET && matches!(cc, JET_WB_ALETTER | JET_WB_HEBREW | JET_WB_NUMERIC | JET_WB_KATAKANA) { return false; } // WB13b
-//RS     true // WB999
-//RS }
-//RS 
-//RS fn jet_text_word_segments(s: &String) -> Vec<String> {
-//RS     let cps: Vec<char> = s.chars().collect();
-//RS     if cps.is_empty() { return Vec::new(); }
-//RS     let (units, ends) = jet_text_word_reduce(cps.iter().copied());
-//RS     let n = units.len();
-//RS     let mut brk = vec![true; n.saturating_sub(1)];
-//RS     let mut ri_run: usize = 0;
-//RS     for i in 0..n {
-//RS         let (cl, _) = units[i];
-//RS         ri_run = if cl == JET_WB_RI { ri_run + 1 } else { 0 };
-//RS         if i + 1 < n {
-//RS             let (nc, _) = units[i + 1];
-//RS             brk[i] = if cl == JET_WB_RI && nc == JET_WB_RI {
-//RS                 ri_run % 2 == 0 // WB15/WB16
-//RS             } else {
-//RS                 jet_text_word_break_at(&units, &ends, |index| cps[index], i)
-//RS             };
-//RS         }
-//RS     }
-//RS     let mut out = Vec::new();
-//RS     let mut cur = String::new();
-//RS     let mut ui = 0usize;
-//RS     for (idx, &c) in cps.iter().enumerate() {
-//RS         cur.push(c);
-//RS         if idx == ends[ui] {
-//RS             if ui + 1 < n {
-//RS                 if brk[ui] { out.push(std::mem::take(&mut cur)); }
-//RS                 ui += 1;
-//RS             }
-//RS         }
-//RS     }
-//RS     if !cur.is_empty() { out.push(cur); }
-//RS     out
-//RS }
-//RS 
-//RS fn jet_text_words(s: &String) -> Vec<String> {
-//RS     jet_text_word_segments(s)
-//RS         .into_iter()
-//RS         .filter(|w| w.chars().any(|c| jet_text_alphabetic(c as u32) || jet_text_numeric(c as u32)))
-//RS         .collect()
-//RS }
-//RS /// Return byte spans for the existing UAX word segmentation, retaining the
-//RS /// exact source boundaries instead of materialising each segment. The
-//RS /// temporary tables are per-source metadata; the yielded words themselves are
-//RS /// borrowed slices and therefore remain zero-copy.
-//RS fn jet_text_word_view_spans(s: &str) -> Vec<(usize, usize)> {
-//RS     let indexed: Vec<(usize, char)> = s.char_indices().collect();
-//RS     if indexed.is_empty() {
-//RS         return Vec::new();
-//RS     }
-//RS     let (units, ends) = jet_text_word_reduce(indexed.iter().map(|(_, c)| *c));
-//RS     let n = units.len();
-//RS     let mut breaks = vec![true; n.saturating_sub(1)];
-//RS     let mut ri_run = 0usize;
-//RS     for i in 0..n {
-//RS         let (class, _) = units[i];
-//RS         ri_run = if class == JET_WB_RI {
-//RS             ri_run.saturating_add(1)
-//RS         } else {
-//RS             0
-//RS         };
-//RS         if i + 1 < n {
-//RS             let (next_class, _) = units[i + 1];
-//RS             breaks[i] = if class == JET_WB_RI && next_class == JET_WB_RI {
-//RS                 ri_run % 2 == 0
-//RS             } else {
-//RS                 jet_text_word_break_at(&units, &ends, |index| indexed[index].1, i)
-//RS             };
-//RS         }
-//RS     }
-//RS 
-//RS     let mut out = Vec::new();
-//RS     let mut start_byte = 0usize;
-//RS     let mut unit_index = 0usize;
-//RS     for (char_index, (byte, current)) in indexed.iter().enumerate() {
-//RS         if char_index != ends[unit_index] || unit_index + 1 >= n || !breaks[unit_index] {
-//RS             continue;
-//RS         }
-//RS         let end_byte = byte + current.len_utf8();
-//RS         let segment = &s[start_byte..end_byte];
-//RS         if segment
-//RS             .chars()
-//RS             .any(|c| jet_text_alphabetic(c as u32) || jet_text_numeric(c as u32))
-//RS         {
-//RS             out.push((start_byte, end_byte));
-//RS         }
-//RS         start_byte = end_byte;
-//RS         unit_index += 1;
-//RS     }
-//RS     if start_byte < s.len() {
-//RS         let segment = &s[start_byte..];
-//RS         if segment
-//RS             .chars()
-//RS             .any(|c| jet_text_alphabetic(c as u32) || jet_text_numeric(c as u32))
-//RS         {
-//RS             out.push((start_byte, s.len()));
-//RS         }
-//RS     }
-//RS     out
-//RS }
-//RS 
-//RS pub(crate) fn jet_text_word_views<'a>(s: &'a str) -> JetViewIter<'a, &'a str> {
-//RS     let source = s;
-//RS     let spans = jet_text_word_view_spans(source);
-//RS     jet_view_iter_from_iter(
-//RS         spans
-//RS             .into_iter()
-//RS             .map(move |(start, end)| &source[start..end]),
-//RS     )
-//RS }
-//RS 
-//RS /// Borrowed line views use Rust's Unicode line semantics: terminators are
-//RS /// excluded, CRLF is one terminator, and a trailing newline has no extra item.
-//RS pub(crate) fn jet_text_line_views<'a>(s: &'a str) -> JetViewIter<'a, &'a str> {
-//RS     jet_view_iter_from_iter(s.lines())
-//RS }
-//RS 
-//RS /// Text bytes are exposed as one-byte windows over the original UTF-8 buffer.
-//RS /// The byte API is intentionally independent of scalar/grapheme boundaries.
-//RS pub(crate) fn jet_text_byte_views<'a>(s: &'a str) -> JetViewIter<'a, &'a [u8]> {
-//RS     jet_bytes_view_iter(s.as_bytes())
-//RS }
-//RS 
-//RS 
-//RS // ---- SB1-SB11 sentence boundaries -------------------------------------------
-//RS const JET_SB_CR: u8 = 1;
-//RS const JET_SB_LF: u8 = 2;
-//RS const JET_SB_EXTEND: u8 = 3;
-//RS const JET_SB_SEP: u8 = 4;
-//RS const JET_SB_FORMAT: u8 = 5;
-//RS const JET_SB_SP: u8 = 6;
-//RS const JET_SB_LOWER: u8 = 7;
-//RS const JET_SB_UPPER: u8 = 8;
-//RS const JET_SB_OLETTER: u8 = 9;
-//RS const JET_SB_NUMERIC: u8 = 10;
-//RS const JET_SB_ATERM: u8 = 11;
-//RS const JET_SB_SCONTINUE: u8 = 12;
-//RS const JET_SB_STERM: u8 = 13;
-//RS const JET_SB_CLOSE: u8 = 14;
-//RS 
-//RS /// SB999's default is "do NOT break" (`Any x Any`) — unlike GB999/WB999,
-//RS /// which default to breaking; see the comptime twin for the full rationale.
-//RS fn jet_text_sentence_breaks(units: &[u8]) -> Vec<bool> {
-//RS     let n = units.len();
-//RS     let mut brk = vec![false; n.saturating_sub(1)];
-//RS     let mut i = 0usize;
-//RS     while i + 1 < n {
-//RS         let cc0 = units[i];
-//RS         if cc0 == JET_SB_CR && units[i + 1] == JET_SB_LF { i += 1; continue; } // SB3
-//RS         if matches!(cc0, JET_SB_SEP | JET_SB_CR | JET_SB_LF) { brk[i] = true; i += 1; continue; } // SB4
-//RS         if matches!(cc0, JET_SB_ATERM | JET_SB_STERM) {
-//RS             if cc0 == JET_SB_ATERM && units[i + 1] == JET_SB_NUMERIC { i += 1; continue; } // SB6
-//RS             if cc0 == JET_SB_ATERM
-//RS                 && i > 0
-//RS                 && matches!(units[i - 1], JET_SB_UPPER | JET_SB_LOWER)
-//RS                 && i + 1 < n
-//RS                 && units[i + 1] == JET_SB_UPPER
-//RS             {
-//RS                 i += 1; continue; // SB7
-//RS             }
-//RS             let mut j = i + 1;
-//RS             while j < n && units[j] == JET_SB_CLOSE { j += 1; }
-//RS             let close_end = j;
-//RS             while j < n && units[j] == JET_SB_SP { j += 1; }
-//RS             let sp_end = j;
-//RS             let sb9 = close_end < n && matches!(units[close_end], JET_SB_SEP | JET_SB_CR | JET_SB_LF);
-//RS             let sb10 = sp_end < n && matches!(units[sp_end], JET_SB_SP | JET_SB_SEP | JET_SB_CR | JET_SB_LF);
-//RS             let sb8a = sp_end < n && matches!(units[sp_end], JET_SB_SCONTINUE | JET_SB_STERM | JET_SB_ATERM);
-//RS             let sb8 = cc0 == JET_SB_ATERM && {
-//RS                 let mut k = sp_end;
-//RS                 let mut found_lower = false;
-//RS                 while k < n {
-//RS                     let kc = units[k];
-//RS                     if kc == JET_SB_LOWER { found_lower = true; break; }
-//RS                     if matches!(kc, JET_SB_OLETTER | JET_SB_UPPER | JET_SB_SEP | JET_SB_CR | JET_SB_LF | JET_SB_STERM | JET_SB_ATERM) { break; }
-//RS                     k += 1;
-//RS                 }
-//RS                 found_lower
-//RS             };
-//RS             if !(sb9 || sb10 || sb8a || sb8) && sp_end > 0 && sp_end - 1 < brk.len() {
-//RS                 brk[sp_end - 1] = true; // SB11
-//RS             }
-//RS             i = if sp_end > i { sp_end } else { i + 1 };
-//RS             continue;
-//RS         }
-//RS         i += 1;
-//RS     }
-//RS     brk
-//RS }
-//RS 
-//RS fn jet_text_sentence_segments(s: &String) -> Vec<String> {
-//RS     let cps: Vec<char> = s.chars().collect();
-//RS     if cps.is_empty() { return Vec::new(); }
-//RS     let mut units: Vec<u8> = Vec::new();
-//RS     let mut ends: Vec<usize> = Vec::new();
-//RS     for (idx, &c) in cps.iter().enumerate() {
-//RS         let cl = jet_text_sentence_class(c as u32);
-//RS         if matches!(cl, JET_SB_EXTEND | JET_SB_FORMAT) {
-//RS             if let Some(&last_cl) = units.last() {
-//RS                 if !matches!(last_cl, JET_SB_CR | JET_SB_LF | JET_SB_SEP) {
-//RS                     *ends.last_mut().unwrap() = idx;
-//RS                     continue;
-//RS                 }
-//RS             }
-//RS         }
-//RS         units.push(cl);
-//RS         ends.push(idx);
-//RS     }
-//RS     let brk = jet_text_sentence_breaks(&units);
-//RS     let n = units.len();
-//RS     let mut out = Vec::new();
-//RS     let mut cur = String::new();
-//RS     let mut ui = 0usize;
-//RS     for (idx, &c) in cps.iter().enumerate() {
-//RS         cur.push(c);
-//RS         if idx == ends[ui] {
-//RS             if ui + 1 < n {
-//RS                 if brk[ui] { out.push(std::mem::take(&mut cur)); }
-//RS                 ui += 1;
-//RS             }
-//RS         }
-//RS     }
-//RS     if !cur.is_empty() { out.push(cur); }
-//RS     out
-//RS }
-//RS 
-//RS fn jet_text_sentences(s: &String) -> Vec<String> {
-//RS     jet_text_sentence_segments(s)
-//RS         .into_iter()
-//RS         .filter_map(|seg| { let t = jet_text_trim(&seg); if t.is_empty() { None } else { Some(t) } })
-//RS         .collect()
-//RS }
-//RS 
-//RS // ---- D-TEXTWIDTH1=B: portable-default + explicit-policy display width ------
-//RS fn jet_text_cluster_is_wide(cluster: &str) -> bool {
-//RS     let codepoints: Vec<char> = cluster.chars().collect();
-//RS     let keycap = matches!(codepoints.as_slice(),
-//RS         ['0'..='9' | '#' | '*', '\u{20E3}']
-//RS         | ['0'..='9' | '#' | '*', '\u{FE0F}', '\u{20E3}']);
-//RS     let mut chars = cluster.chars();
-//RS     let ri_pair = if let Some(a) = chars.next() {
-//RS         if jet_text_grapheme_class(a as u32) == JET_GB_RI {
-//RS             matches!(chars.next(), Some(b) if jet_text_grapheme_class(b as u32) == JET_GB_RI)
-//RS         } else { false }
-//RS     } else { false };
-//RS     let emoji_style = cluster.contains('\u{FE0F}') && cluster.chars().any(|c| jet_text_is_emoji(c as u32));
-//RS     keycap || ri_pair || emoji_style || cluster.chars().any(|c| jet_text_eaw_class(c as u32) == 2 || jet_text_is_emoji_presentation(c as u32))
-//RS }
-//RS fn jet_text_cluster_width(cluster: &str, ambiguous_wide: bool, controls_reject: bool) -> Result<i64, String> {
-//RS     let base = match cluster.chars().next() { Some(c) => c, None => return Ok(0) };
-//RS     if jet_text_is_control(base as u32) {
-//RS         return if controls_reject {
-//RS             Err(format!("control character U+{:04X} rejected by TextWidth policy", base as u32))
-//RS         } else {
-//RS             Ok(0)
-//RS         };
-//RS     }
-//RS     if jet_text_cluster_is_wide(cluster) { return Ok(2); }
-//RS     if cluster.chars().all(|c| jet_text_is_zero_width_scalar(c as u32)) { return Ok(0); }
-//RS     if jet_text_eaw_class(base as u32) == 1 { return Ok(if ambiguous_wide { 2 } else { 1 }); }
-//RS     Ok(1)
-//RS }
-//RS fn jet_text_display_width_default(s: &String) -> i64 {
-//RS     jet_text_grapheme_views(s.as_str())
-//RS         .into_iter()
-//RS         .map(|g| jet_text_cluster_width(g, false, false).unwrap_or(0))
-//RS         .sum()
-//RS }
-//RS fn jet_text_display_width_policy(
-//RS     s: &String,
-//RS     ambiguous_wide: bool,
-//RS     controls_reject: bool,
-//RS ) -> Result<i64, String> {
-//RS     let mut total = 0i64;
-//RS     for g in jet_text_grapheme_views(s.as_str()) {
-//RS         total += jet_text_cluster_width(g, ambiguous_wide, controls_reject)?;
-//RS     }
-//RS     Ok(total)
-//RS }
-//RS fn jet_text_display_width(s: &String, policy: &jet_std::TextWidth) -> Result<i64, jet_std::TextError> {
-//RS     let ambiguous_wide = matches!(policy.ambiguous, jet_std::TextWidthAmbiguous::Wide);
-//RS     let controls_reject = matches!(policy.controls, jet_std::TextWidthControls::Reject);
-//RS     jet_text_display_width_policy(s, ambiguous_wide, controls_reject)
-//RS         .map_err(|message| jet_std::TextError { message })
-//RS }
-//RS fn jet_text_is_alphabetic(s: &String) -> bool { !s.is_empty() && s.chars().all(|c| jet_text_alphabetic(c as u32)) }
-//RS fn jet_text_is_numeric(s: &String) -> bool { !s.is_empty() && s.chars().all(|c| jet_text_numeric(c as u32)) }
-//RS fn jet_text_is_whitespace(s: &String) -> bool { !s.is_empty() && s.chars().all(|c| jet_text_whitespace(c as u32)) }
-//RS // #1476: cased-char predicates (Python islower/isupper shape — at least one
-//RS // cased scalar, every cased scalar has the named case). Uses pinned case maps.
-//RS fn jet_text_char_is_lower(c: char) -> bool {
-//RS     if !jet_unicode_contains(UNICODE_CASED, c as u32) {
-//RS         return false;
-//RS     }
-//RS     let one = c.to_string();
-//RS     jet_unicode_upper(&one) != one
-//RS }
-//RS fn jet_text_char_is_upper(c: char) -> bool {
-//RS     if !jet_unicode_contains(UNICODE_CASED, c as u32) {
-//RS         return false;
-//RS     }
-//RS     let one = c.to_string();
-//RS     jet_unicode_lower(&one) != one
-//RS }
-//RS fn jet_text_is_lower(s: &String) -> bool {
-//RS     let mut saw = false;
-//RS     for c in s.chars() {
-//RS         if jet_unicode_contains(UNICODE_CASED, c as u32) {
-//RS             if !jet_text_char_is_lower(c) {
-//RS                 return false;
-//RS             }
-//RS             saw = true;
-//RS         }
-//RS     }
-//RS     saw
-//RS }
-//RS fn jet_text_is_upper(s: &String) -> bool {
-//RS     let mut saw = false;
-//RS     for c in s.chars() {
-//RS         if jet_unicode_contains(UNICODE_CASED, c as u32) {
-//RS             if !jet_text_char_is_upper(c) {
-//RS                 return false;
-//RS             }
-//RS             saw = true;
-//RS         }
-//RS     }
-//RS     saw
-//RS }
-//RS fn jet_text_capitalize(s: &String) -> String {
-//RS     let mut chars = s.chars();
-//RS     let Some(first) = chars.next() else {
-//RS         return String::new();
-//RS     };
-//RS     let mut out = String::with_capacity(s.len());
-//RS     jet_text_append_title_mapping(&mut out, first as u32);
-//RS     let rest: String = chars.collect();
-//RS     out.push_str(&jet_text_lower(&rest));
-//RS     out
-//RS }
-//RS fn jet_text_swapcase(s: &String) -> String {
-//RS     let mut out = String::with_capacity(s.len());
-//RS     for c in s.chars() {
-//RS         if !jet_unicode_contains(UNICODE_CASED, c as u32) {
-//RS             out.push(c);
-//RS             continue;
-//RS         }
-//RS         let one = c.to_string();
-//RS         let upper = jet_unicode_upper(&one);
-//RS         if upper != one {
-//RS             out.push_str(&upper);
-//RS             continue;
-//RS         }
-//RS         let lower = jet_unicode_lower(&one);
-//RS         if lower != one {
-//RS             out.push_str(&lower);
-//RS         } else {
-//RS             out.push(c);
-//RS         }
-//RS     }
-//RS     out
-//RS }
-//RS fn jet_text_remove_prefix(s: &String, prefix: &String) -> String {
-//RS     match s.strip_prefix(prefix.as_str()) {
-//RS         Some(rest) => rest.to_string(),
-//RS         None => s.clone(),
-//RS     }
-//RS }
-//RS fn jet_text_remove_suffix(s: &String, suffix: &String) -> String {
-//RS     match s.strip_suffix(suffix.as_str()) {
-//RS         Some(rest) => rest.to_string(),
-//RS         None => s.clone(),
-//RS     }
-//RS }
-//RS fn jet_text_compare(a: &str, b: &str) -> i64 {
-//RS     match a.cmp(b) {
-//RS         std::cmp::Ordering::Less => -1,
-//RS         std::cmp::Ordering::Equal => 0,
-//RS         std::cmp::Ordering::Greater => 1,
-//RS     }
-//RS }
-//RS fn jet_text_reverse(s: &String) -> String {
-//RS     s.chars().rev().collect()
-//RS }
-//RS fn jet_text_normalize_nfc(s: &String) -> String {
-//RS     jet_text_nfc(s)
-//RS }
-//RS fn jet_text_trim_start(s: &String) -> String { jet_unicode_trim_start(s) }
-//RS fn jet_text_trim_end(s: &String) -> String { jet_unicode_trim_end(s) }
-//RS fn jet_text_trim(s: &String) -> String { jet_unicode_trim(s) }
-//RS fn jet_text_splitn(s: &String, pat: &String, n: i64) -> Vec<String> {
-//RS     let limit = n.max(0) as usize;
-//RS     let mut out = Vec::with_capacity(limit.min(s.len().saturating_add(1)));
-//RS     out.extend(s.splitn(limit, pat).map(|x| x.to_string()));
-//RS     out
-//RS }
-//RS fn jet_text_rsplitn(s: &String, pat: &String, n: i64) -> Vec<String> {
-//RS     let limit = n.max(0) as usize;
-//RS     let mut out = Vec::with_capacity(limit.min(s.len().saturating_add(1)));
-//RS     out.extend(s.rsplitn(limit, pat).map(|x| x.to_string()));
-//RS     out
-//RS }
-//RS fn jet_text_fill_columns(fill: &String, columns: i64) -> String {
-//RS     let Some(unit) = jet_text_grapheme_views(fill.as_str()).into_iter().next() else {
-//RS         return " ".repeat(columns.max(0) as usize);
-//RS     };
-//RS     let width = jet_text_cluster_width(unit, false, false).unwrap_or(0);
-//RS     if width <= 0 || width > columns {
-//RS         return " ".repeat(columns.max(0) as usize);
-//RS     }
-//RS     let repeats = columns / width;
-//RS     let remainder = columns % width;
-//RS     let repeats = repeats as usize;
-//RS     let remainder = remainder as usize;
-//RS     let mut out = String::with_capacity(
-//RS         unit.len()
-//RS             .saturating_mul(repeats)
-//RS             .saturating_add(remainder),
-//RS     );
-//RS     for _ in 0..repeats {
-//RS         out.push_str(unit);
-//RS     }
-//RS     out.extend(std::iter::repeat(' ').take(remainder));
-//RS     out
-//RS }
-//RS fn jet_text_pad_start(
-//RS     s: &String,
-//RS     width: jet_foundation::Numeric::JetInt,
-//RS     fill: &String,
-//RS ) -> String {
-//RS     let width = width
-//RS         .to_i64()
-//RS         .unwrap_or_else(|| panic!("text padding width does not fit native i64"));
-//RS     let mut out = jet_text_fill_columns(fill, (width - jet_text_display_width_default(s)).max(0));
-//RS     out.push_str(s);
-//RS     out
-//RS }
-//RS fn jet_text_pad_end(
-//RS     s: &String,
-//RS     width: jet_foundation::Numeric::JetInt,
-//RS     fill: &String,
-//RS ) -> String {
-//RS     let width = width
-//RS         .to_i64()
-//RS         .unwrap_or_else(|| panic!("text padding width does not fit native i64"));
-//RS     let mut out = s.clone();
-//RS     out.push_str(&jet_text_fill_columns(fill, (width - jet_text_display_width_default(s)).max(0)));
-//RS     out
-//RS }
-//RS fn jet_text_center(
-//RS     s: &String,
-//RS     width: jet_foundation::Numeric::JetInt,
-//RS     fill: &String,
-//RS ) -> String {
-//RS     let width = width
-//RS         .to_i64()
-//RS         .unwrap_or_else(|| panic!("text padding width does not fit native i64"));
-//RS     let gap = (width - jet_text_display_width_default(s)).max(0);
-//RS     let left = gap / 2;
-//RS     let right = gap - left;
-//RS     format!("{}{}{}", jet_text_fill_columns(fill, left), s, jet_text_fill_columns(fill, right))
-//RS }
-//RS fn jet_text_pad_start_i64(s: &String, width: i64, fill: &String) -> String {
-//RS     jet_text_pad_start(
-//RS         s,
-//RS         jet_foundation::Numeric::JetInt::from_i64(width),
-//RS         fill,
-//RS     )
-//RS }
-//RS fn jet_text_pad_end_i64(s: &String, width: i64, fill: &String) -> String {
-//RS     jet_text_pad_end(
-//RS         s,
-//RS         jet_foundation::Numeric::JetInt::from_i64(width),
-//RS         fill,
-//RS     )
-//RS }
-//RS fn jet_text_center_i64(s: &String, width: i64, fill: &String) -> String {
-//RS     jet_text_center(
-//RS         s,
-//RS         jet_foundation::Numeric::JetInt::from_i64(width),
-//RS         fill,
-//RS     )
-//RS }
-//RS fn jet_text_pad_start_ref(s: &String, width: &jet_foundation::Numeric::JetInt, fill: &String) -> String {
-//RS     jet_text_pad_start(s, width.clone(), fill)
-//RS }
-//RS fn jet_text_pad_end_ref(s: &String, width: &jet_foundation::Numeric::JetInt, fill: &String) -> String {
-//RS     jet_text_pad_end(s, width.clone(), fill)
-//RS }
-//RS fn jet_text_center_ref(s: &String, width: &jet_foundation::Numeric::JetInt, fill: &String) -> String {
-//RS     jet_text_center(s, width.clone(), fill)
-//RS }
-//RS fn jet_text_starts_any(s: &String, prefixes: &Vec<String>) -> bool {
-//RS     prefixes.iter().any(|p| s.starts_with(p))
-//RS }
-//RS pub(crate) fn jet_text_parse_split(text: &String, separator: &String) -> Vec<String> {
-//RS     if separator.is_empty() {
-//RS         return text.chars().map(|character| character.to_string()).collect();
-//RS     }
-//RS     text.split(separator.as_str())
-//RS         .map(str::to_string)
-//RS         .collect()
-//RS }
-//RS pub(crate) fn jet_text_parse_rsplit(
-//RS     text: &String,
-//RS     separator: &String,
-//RS     maxsplit: i64,
-//RS ) -> Vec<String> {
-//RS     if separator.is_empty() {
-//RS         return text.chars().map(|character| character.to_string()).collect();
-//RS     }
-//RS     if maxsplit < 0 {
-//RS         return text.split(separator.as_str()).map(str::to_string).collect();
-//RS     }
-//RS     let mut parts = text
-//RS         .rsplitn(maxsplit.saturating_add(1) as usize, separator.as_str())
-//RS         .map(str::to_string)
-//RS         .collect::<Vec<_>>();
-//RS     parts.reverse();
-//RS     parts
-//RS }
-//RS pub(crate) fn jet_text_parse_split_once(
-//RS     text: &String,
-//RS     separator: &String,
-//RS ) -> (bool, String, String) {
-//RS     match text.find(separator.as_str()) {
-//RS         Some(index) => (
-//RS             true,
-//RS             text[..index].to_string(),
-//RS             text[index + separator.len()..].to_string(),
-//RS         ),
-//RS         None => (false, text.clone(), String::new()),
-//RS     }
-//RS }
-//RS pub(crate) fn jet_text_parse_partition(
-//RS     text: &String,
-//RS     separator: &String,
-//RS ) -> (String, String, String) {
-//RS     match text.find(separator.as_str()) {
-//RS         Some(index) => (
-//RS             text[..index].to_string(),
-//RS             separator.clone(),
-//RS             text[index + separator.len()..].to_string(),
-//RS         ),
-//RS         None => (text.clone(), String::new(), String::new()),
-//RS     }
-//RS }
-//RS pub(crate) fn jet_text_parse_rpartition(
-//RS     text: &String,
-//RS     separator: &String,
-//RS ) -> (String, String, String) {
-//RS     match text.rfind(separator.as_str()) {
-//RS         Some(index) => (
-//RS             text[..index].to_string(),
-//RS             separator.clone(),
-//RS             text[index + separator.len()..].to_string(),
-//RS         ),
-//RS         None => (String::new(), String::new(), text.clone()),
-//RS     }
-//RS }
-//RS pub(crate) fn jet_text_parse_split_ws(text: &String) -> Vec<String> {
-//RS     text.split_whitespace().map(str::to_string).collect()
-//RS }
-//RS pub(crate) fn jet_text_parse_bool(text: &String) -> Option<bool> {
-//RS     match text.trim().to_ascii_lowercase().as_str() {
-//RS         "true" | "1" | "yes" | "on" => Some(true),
-//RS         "false" | "0" | "no" | "off" => Some(false),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS pub(crate) fn jet_text_parse_int(text: &String) -> Option<i64> {
-//RS     text.trim().parse::<i64>().ok()
-//RS }
-//RS pub(crate) fn jet_text_parse_int_base(text: &String, base: i64) -> Option<i64> {
-//RS     if !(2..=36).contains(&base) {
-//RS         return None;
-//RS     }
-//RS     let text = text.trim();
-//RS     let (negative, digits) = match text.strip_prefix('-') {
-//RS         Some(rest) => (true, rest),
-//RS         None => (false, text.strip_prefix('+').unwrap_or(text)),
-//RS     };
-//RS     let parsed = i64::from_str_radix(digits, base as u32).ok()?;
-//RS     Some(if negative { -parsed } else { parsed })
-//RS }
-//RS pub(crate) fn jet_text_parse_float(text: &String) -> Option<f64> {
-//RS     text.trim().parse::<f64>().ok()
-//RS }
-//RS pub(crate) fn jet_text_parse_find(text: &String, needle: &String) -> i64 {
-//RS     text.find(needle.as_str()).map_or(-1, |index| index as i64)
-//RS }
-//RS pub(crate) fn jet_text_parse_rfind(text: &String, needle: &String) -> i64 {
-//RS     text.rfind(needle.as_str()).map_or(-1, |index| index as i64)
-//RS }
-//RS pub(crate) fn jet_text_parse_count(text: &String, needle: &String) -> i64 {
-//RS     if needle.is_empty() {
-//RS         return text.chars().count() as i64 + 1;
-//RS     }
-//RS     text.match_indices(needle.as_str()).count() as i64
-//RS }
-//RS pub(crate) fn jet_text_parse_replace_n(
-//RS     text: &String,
-//RS     old: &String,
-//RS     new: &String,
-//RS     count: i64,
-//RS ) -> String {
-//RS     if old.is_empty() {
-//RS         return text.clone();
-//RS     }
-//RS     if count < 0 {
-//RS         text.replace(old.as_str(), new.as_str())
-//RS     } else {
-//RS         text.replacen(old.as_str(), new.as_str(), count as usize)
-//RS     }
-//RS }
-//RS pub(crate) fn jet_text_parse_kv(
-//RS     text: &String,
-//RS     separator: &String,
-//RS ) -> (String, bool, String) {
-//RS     if separator.is_empty() {
-//RS         return (text.trim().to_string(), false, String::new());
-//RS     }
-//RS     match text.find(separator.as_str()) {
-//RS         Some(index) => (
-//RS             text[..index].trim().to_string(),
-//RS             true,
-//RS             text[index + separator.len()..].trim().to_string(),
-//RS         ),
-//RS         None => (text.trim().to_string(), false, String::new()),
-//RS     }
-//RS }
-//RS pub(crate) fn jet_text_parse_join(parts: &Vec<String>, separator: &String) -> String {
-//RS     parts.join(separator.as_str())
-//RS }
-//RS pub(crate) fn jet_text_parse_splitlines(text: &String, keepends: bool) -> Vec<String> {
-//RS     let mut out = Vec::new();
-//RS     let mut start = 0usize;
-//RS     let bytes = text.as_bytes();
-//RS     let mut index = 0usize;
-//RS     while index < bytes.len() {
-//RS         let width = match bytes[index] {
-//RS             b'\n' => 1,
-//RS             b'\r' if bytes.get(index + 1) == Some(&b'\n') => 2,
-//RS             b'\r' => 1,
-//RS             _ => {
-//RS                 index += 1;
-//RS                 continue;
-//RS             }
-//RS         };
-//RS         let end = index + width;
-//RS         out.push(
-//RS             text.get(start..if keepends { end } else { index })
-//RS                 .unwrap_or_default()
-//RS                 .to_string(),
-//RS         );
-//RS         start = end;
-//RS         index = end;
-//RS     }
-//RS     if start < bytes.len() || (start == 0 && !text.is_empty()) {
-//RS         out.push(text.get(start..).unwrap_or_default().to_string());
-//RS     }
-//RS     out
-//RS }
-//RS pub(crate) fn jet_text_wrap(text: &String, width: i64) -> Vec<String> {
-//RS     if width <= 0 {
-//RS         return vec![text.clone()];
-//RS     }
-//RS     let mut out = Vec::new();
-//RS     let mut line = String::new();
-//RS     for word in text.split_whitespace() {
-//RS         if line.is_empty() {
-//RS             line.push_str(word);
-//RS         } else {
-//RS             let trial = format!("{line} {word}");
-//RS             if trial.len() <= width as usize {
-//RS                 line = trial;
-//RS             } else {
-//RS                 out.push(std::mem::take(&mut line));
-//RS                 line.push_str(word);
-//RS             }
-//RS         }
-//RS     }
-//RS     if !line.is_empty() {
-//RS         out.push(line);
-//RS     }
-//RS     out
-//RS }
-//RS pub(crate) fn jet_text_fill(text: &String, width: i64) -> String {
-//RS     jet_text_wrap(text, width).join("\n")
-//RS }
-//RS pub(crate) fn jet_text_indent_with(
-//RS     text: &String,
-//RS     prefix: &String,
-//RS     predicate_nonblank: bool,
-//RS ) -> String {
-//RS     text.split('\n')
-//RS         .map(|line| {
-//RS             if !predicate_nonblank || !line.trim_matches([' ', '\t']).is_empty() {
-//RS                 format!("{prefix}{line}")
-//RS             } else {
-//RS                 line.to_string()
-//RS             }
-//RS         })
-//RS         .collect::<Vec<_>>()
-//RS         .join("\n")
-//RS }
-//RS pub(crate) fn jet_text_wrap_paragraphs(text: &String, width: i64) -> String {
-//RS     text.split("\n\n")
-//RS         .filter(|paragraph| !paragraph.trim().is_empty())
-//RS         .map(|paragraph| jet_text_fill(&paragraph.to_string(), width))
-//RS         .collect::<Vec<_>>()
-//RS         .join("\n\n")
-//RS }
-//RS pub(crate) fn jet_text_hanging_indent(
-//RS     text: &String,
-//RS     first: &String,
-//RS     rest: &String,
-//RS     width: i64,
-//RS ) -> String {
-//RS     let words = text.split_whitespace().collect::<Vec<_>>();
-//RS     if words.is_empty() {
-//RS         return String::new();
-//RS     }
-//RS     let mut lines = Vec::new();
-//RS     let mut current = String::new();
-//RS     let mut prefix = first.as_str();
-//RS     for word in words {
-//RS         let limit = (width - prefix.len() as i64).max(1) as usize;
-//RS         let trial = if current.is_empty() {
-//RS             word.to_string()
-//RS         } else {
-//RS             format!("{current} {word}")
-//RS         };
-//RS         if !current.is_empty() && trial.len() > limit {
-//RS             lines.push(format!("{prefix}{current}"));
-//RS             prefix = rest.as_str();
-//RS             current = word.to_string();
-//RS         } else {
-//RS             current = trial;
-//RS         }
-//RS     }
-//RS     if !current.is_empty() {
-//RS         lines.push(format!("{prefix}{current}"));
-//RS     }
-//RS     lines.join("\n")
-//RS }
-//RS pub(crate) fn jet_text_shorten(text: &String, width: i64, placeholder: &String) -> String {
-//RS     if width < 0 || text.len() <= width as usize {
-//RS         return text.clone();
-//RS     }
-//RS     let keep = (width as usize).saturating_sub(placeholder.len());
-//RS     let end = text
-//RS         .char_indices()
-//RS         .take_while(|(index, _)| *index < keep)
-//RS         .map(|(index, character)| index + character.len_utf8())
-//RS         .last()
-//RS         .unwrap_or(0)
-//RS         .min(keep);
-//RS     format!("{}{}", &text[..end], placeholder)
-//RS }
-//RS pub(crate) fn jet_text_indent(text: &String, prefix: &String) -> String {
-//RS     text.split('\n')
-//RS         .map(|line| format!("{prefix}{line}"))
-//RS         .collect::<Vec<_>>()
-//RS         .join("\n")
-//RS }
-//RS pub(crate) fn jet_text_dedent(text: &String) -> String {
-//RS     let lines = text.split('\n').collect::<Vec<_>>();
-//RS     let margin = lines
-//RS         .iter()
-//RS         .filter(|line| !line.trim_matches([' ', '\t']).is_empty())
-//RS         .map(|line| line.len() - line.trim_start_matches([' ', '\t']).len())
-//RS         .min()
-//RS         .unwrap_or(0);
-//RS     if margin == 0 {
-//RS         return text.clone();
-//RS     }
-//RS     lines
-//RS         .iter()
-//RS         .map(|line| {
-//RS             if line.trim_matches([' ', '\t']).is_empty() {
-//RS                 (*line).to_string()
-//RS             } else {
-//RS                 line.get(margin..).unwrap_or("").to_string()
-//RS             }
-//RS         })
-//RS         .collect::<Vec<_>>()
-//RS         .join("\n")
-//RS }
-//RS pub(crate) fn jet_text_expand_tabs(text: &String, tabsize: i64) -> String {
-//RS     let tabsize = if tabsize <= 0 { 8 } else { tabsize as usize };
-//RS     let mut out = String::with_capacity(text.len());
-//RS     let mut column = 0usize;
-//RS     for character in text.chars() {
-//RS         match character {
-//RS             '\t' => {
-//RS                 let spaces = tabsize - (column % tabsize);
-//RS                 out.extend(std::iter::repeat_n(' ', spaces));
-//RS                 column += spaces;
-//RS             }
-//RS             '\n' => {
-//RS                 out.push('\n');
-//RS                 column = 0;
-//RS             }
-//RS             _ => {
-//RS                 out.push(character);
-//RS                 column += 1;
-//RS             }
-//RS         }
-//RS     }
-//RS     out
-//RS }
-//RS fn jet_text_html_entity(name: &str) -> Option<String> {
-//RS     let named = match name {
-//RS         "amp" => Some('&'),
-//RS         "lt" => Some('<'),
-//RS         "gt" => Some('>'),
-//RS         "quot" => Some('"'),
-//RS         "apos" => Some('\''),
-//RS         "nbsp" => Some(' '),
-//RS         "copy" => Some('©'),
-//RS         "reg" => Some('®'),
-//RS         "trade" => Some('™'),
-//RS         "mdash" => Some('—'),
-//RS         "ndash" => Some('–'),
-//RS         "hellip" => Some('…'),
-//RS         _ => None,
-//RS     };
-//RS     if let Some(character) = named {
-//RS         return Some(character.to_string());
-//RS     }
-//RS     let number = if let Some(hex) = name.strip_prefix("#x").or_else(|| name.strip_prefix("#X")) {
-//RS         u32::from_str_radix(hex, 16).ok()
-//RS     } else {
-//RS         name.strip_prefix('#').and_then(|decimal| decimal.parse().ok())
-//RS     };
-//RS     number.and_then(char::from_u32).map(|character| character.to_string())
-//RS }
-//RS pub(crate) fn jet_text_html_escape(text: &String, quote: bool) -> String {
-//RS     let mut out = String::with_capacity(text.len());
-//RS     for character in text.chars() {
-//RS         match character {
-//RS             '&' => out.push_str("&amp;"),
-//RS             '<' => out.push_str("&lt;"),
-//RS             '>' => out.push_str("&gt;"),
-//RS             '"' if quote => out.push_str("&quot;"),
-//RS             '\'' if quote => out.push_str("&#x27;"),
-//RS             _ => out.push(character),
-//RS         }
-//RS     }
-//RS     out
-//RS }
-//RS pub(crate) fn jet_text_html_unescape(text: &String) -> String {
-//RS     let mut out = String::with_capacity(text.len());
-//RS     let mut rest = text.as_str();
-//RS     while let Some(start) = rest.find('&') {
-//RS         out.push_str(&rest[..start]);
-//RS         let after = &rest[start + 1..];
-//RS         let Some(end) = after.find(';').filter(|end| *end <= 31) else {
-//RS             out.push('&');
-//RS             rest = after;
-//RS             continue;
-//RS         };
-//RS         let name = &after[..end];
-//RS         if let Some(decoded) = jet_text_html_entity(name) {
-//RS             out.push_str(&decoded);
-//RS             rest = &after[end + 1..];
-//RS         } else {
-//RS             out.push('&');
-//RS             rest = after;
-//RS         }
-//RS     }
-//RS     out.push_str(rest);
-//RS     out
-//RS }
-//RS pub(crate) fn jet_text_html_strip_tags(text: &String) -> String {
-//RS     let mut out = String::with_capacity(text.len());
-//RS     let mut in_tag = false;
-//RS     for character in text.chars() {
-//RS         match character {
-//RS             '<' => in_tag = true,
-//RS             '>' if in_tag => in_tag = false,
-//RS             _ if !in_tag => out.push(character),
-//RS             _ => {}
-//RS         }
-//RS     }
-//RS     out
-//RS }
-//RS pub(crate) fn jet_text_html_escape_quoted(text: &String) -> String {
-//RS     jet_text_html_escape(text, true)
-//RS }
-//RS pub(crate) fn jet_text_html_escape_text(text: &String) -> String {
-//RS     jet_text_html_escape(text, false)
-//RS }
-//RS pub(crate) fn jet_text_html_unescape_and_strip(text: &String) -> String {
-//RS     jet_text_html_unescape(&jet_text_html_strip_tags(text))
-//RS }
-//RS pub(crate) fn jet_text_parse_capwords(text: &String) -> String {
-//RS     text.split_whitespace()
-//RS         .map(|word| jet_text_capitalize(&word.to_string()))
-//RS         .collect::<Vec<_>>()
-//RS         .join(" ")
-//RS }
-//RS pub(crate) fn jet_text_parse_find_from(text: &String, needle: &String, start: i64) -> i64 {
-//RS     let start = start.max(0) as usize;
-//RS     let Some(rest) = text.get(start..) else {
-//RS         return -1;
-//RS     };
-//RS     rest.find(needle.as_str())
-//RS         .map_or(-1, |index| (start + index) as i64)
-//RS }
-//RS pub(crate) fn jet_text_parse_rfind_from(text: &String, needle: &String, end: i64) -> i64 {
-//RS     let end = end.clamp(0, text.len() as i64) as usize;
-//RS     let Some(prefix) = text.get(..end) else {
-//RS         return -1;
-//RS     };
-//RS     prefix.rfind(needle.as_str()).map_or(-1, |index| index as i64)
-//RS }
-//RS pub(crate) fn jet_text_parse_index(text: &String, needle: &String) -> i64 {
-//RS     jet_text_parse_find(text, needle)
-//RS }
-//RS pub(crate) fn jet_text_parse_contains(text: &String, needle: &String) -> bool {
-//RS     text.contains(needle.as_str())
-//RS }
-//RS pub(crate) fn jet_text_parse_lstrip(text: &String) -> String {
-//RS     text.trim_start().to_string()
-//RS }
-//RS pub(crate) fn jet_text_parse_rstrip(text: &String) -> String {
-//RS     text.trim_end().to_string()
-//RS }
-//RS pub(crate) fn jet_text_parse_strip(text: &String) -> String {
-//RS     text.trim().to_string()
-//RS }
-//RS pub(crate) fn jet_text_parse_escape_c(text: &String) -> String {
-//RS     let mut out = String::with_capacity(text.len());
-//RS     for character in text.chars() {
-//RS         match character {
-//RS             '\n' => out.push_str("\\n"),
-//RS             '\t' => out.push_str("\\t"),
-//RS             '\r' => out.push_str("\\r"),
-//RS             '\\' => out.push_str("\\\\"),
-//RS             '"' => out.push_str("\\\""),
-//RS             other => out.push(other),
-//RS         }
-//RS     }
-//RS     out
-//RS }
-//RS pub(crate) fn jet_text_parse_unescape_c(text: &String) -> String {
-//RS     let mut out = String::with_capacity(text.len());
-//RS     let mut chars = text.chars();
-//RS     while let Some(character) = chars.next() {
-//RS         if character != '\\' {
-//RS             out.push(character);
-//RS             continue;
-//RS         }
-//RS         match chars.next() {
-//RS             Some('n') => out.push('\n'),
-//RS             Some('t') => out.push('\t'),
-//RS             Some('r') => out.push('\r'),
-//RS             Some('\\') => out.push('\\'),
-//RS             Some('"') => out.push('"'),
-//RS             Some(other) => out.push(other),
-//RS             None => out.push('\\'),
-//RS         }
-//RS     }
-//RS     out
-//RS }
-//RS fn jet_text_ends_any(s: &String, suffixes: &Vec<String>) -> bool {
-//RS     suffixes.iter().any(|p| s.ends_with(p))
-//RS }
-//RS fn jet_text_rindex(s: &String, needle: &String) -> i64 {
-//RS     s.rfind(needle).map(|index| index as i64).unwrap_or(-1)
-//RS }
-//RS fn jet_text_isidentifier(s: &String) -> bool {
-//RS     let mut chars = s.chars();
-//RS     let Some(first) = chars.next() else {
-//RS         return false;
-//RS     };
-//RS     (first == '_' || first.is_alphabetic())
-//RS         && chars.all(|character| character == '_' || character.is_alphanumeric())
-//RS }
-//RS fn jet_text_encode(s: &String) -> Vec<u8> {
-//RS     s.as_bytes().to_vec()
-//RS }
-//RS fn jet_text_isdecimal(s: &String) -> bool {
-//RS     !s.is_empty() && s.chars().all(|character| character.is_ascii_digit())
-//RS }
-//RS fn jet_text_isnumeric(s: &String) -> bool {
-//RS     !s.is_empty() && s.chars().all(char::is_numeric)
-//RS }
-//RS fn jet_text_isalnum(s: &String) -> bool {
-//RS     !s.is_empty() && s.chars().all(char::is_alphanumeric)
-//RS }
-//RS fn jet_text_isdigit(s: &String) -> bool {
-//RS     !s.is_empty() && s.chars().all(|character| character.is_ascii_digit())
-//RS }
-//RS fn jet_text_istitle(s: &String) -> bool {
-//RS     let mut has_cased = false;
-//RS     let mut expect_upper = true;
-//RS     for character in s.chars() {
-//RS         if character.is_uppercase() {
-//RS             has_cased = true;
-//RS             expect_upper = false;
-//RS         } else if character.is_lowercase() {
-//RS             has_cased = true;
-//RS             if expect_upper {
-//RS                 return false;
-//RS             }
-//RS         } else if character.is_alphabetic() {
-//RS             return false;
-//RS         } else {
-//RS             expect_upper = true;
-//RS         }
-//RS     }
-//RS     has_cased
-//RS }
-//RS fn jet_text_isprintable(s: &String) -> bool {
-//RS     s.chars().all(|character| !character.is_control())
-//RS }
-//RS fn jet_text_expandtabs(
-//RS     s: &String,
-//RS     tabsize: jet_foundation::Numeric::JetInt,
-//RS ) -> String {
-//RS     let width = tabsize
-//RS         .to_i64()
-//RS         .unwrap_or_else(|| panic!("text tab size does not fit native i64"))
-//RS         .max(0);
-//RS     let mut column = 0i64;
-//RS     let mut out = String::with_capacity(s.len());
-//RS     for character in s.chars() {
-//RS         match character {
-//RS             '\t' if width > 0 => {
-//RS                 let spaces = width - column.rem_euclid(width);
-//RS                 out.extend(std::iter::repeat_n(' ', spaces as usize));
-//RS                 column += spaces;
-//RS             }
-//RS             '\t' => {}
-//RS             '\n' | '\r' => {
-//RS                 out.push(character);
-//RS                 column = 0;
-//RS             }
-//RS             _ => {
-//RS                 out.push(character);
-//RS                 column += 1;
-//RS             }
-//RS         }
-//RS     }
-//RS     out
-//RS }
-//RS fn jet_text_zfill(s: &String, width: i64) -> String {
-//RS     let length = s.chars().count() as i64;
-//RS     if width <= length {
-//RS         return s.clone();
-//RS     }
-//RS     let (sign, body) = if let Some(rest) = s.strip_prefix('+') {
-//RS         ("+", rest)
-//RS     } else if let Some(rest) = s.strip_prefix('-') {
-//RS         ("-", rest)
-//RS     } else {
-//RS         ("", s.as_str())
-//RS     };
-//RS     format!("{sign}{}{}", "0".repeat((width - length) as usize), body)
-//RS }
-//RS fn jet_text_zfill_int(
-//RS     s: &String,
-//RS     width: jet_foundation::Numeric::JetInt,
-//RS ) -> String {
-//RS     jet_text_zfill(
-//RS         s,
-//RS         width
-//RS             .to_i64()
-//RS             .unwrap_or_else(|| panic!("text zfill width does not fit native i64")),
-//RS     )
-//RS }
-//RS fn jet_text_zfill_ref(s: &String, width: &jet_foundation::Numeric::JetInt) -> String {
-//RS     jet_text_zfill(
-//RS         s,
-//RS         width
-//RS             .to_i64()
-//RS             .unwrap_or_else(|| panic!("text zfill width does not fit native i64")),
-//RS     )
-//RS }
-//RS fn jet_text_char_indices(s: &String) -> Vec<String> {
-//RS     s.char_indices().map(|(i, c)| format!("{}:{}", i, c)).collect()
-//RS }
-//RS 
-//RS fn jet_std_fs_read(path: &String) -> Result<String, jet_std::IOError> {
-//RS     if jet_fault_should_fail("FS.Read") {
-//RS         return Err(jet_std::IOError::other(
-//RS             jet_std::IOOperation::Read,
-//RS             Some(path.clone()),
-//RS             "fault injected: FS.Read",
-//RS         ));
-//RS     }
-//RS     std::fs::read_to_string(path).map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Read, path, e))
-//RS }
-//RS fn jet_std_fs_write(path: &String, text: &String) -> Result<(), jet_std::IOError> {
-//RS     if jet_fault_should_fail("FS.Write") {
-//RS         return Err(jet_std::IOError::other(
-//RS             jet_std::IOOperation::Write,
-//RS             Some(path.clone()),
-//RS             "fault injected: FS.Write",
-//RS         ));
-//RS     }
-//RS     std::fs::write(path, text).map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Write, path, e))
-//RS }
-//RS fn jet_std_fs_append(path: &String, text: &String) -> Result<(), jet_std::IOError> {
-//RS     if jet_fault_should_fail("FS.Write") {
-//RS         return Err(jet_std::IOError::other(
-//RS             jet_std::IOOperation::Write,
-//RS             Some(path.clone()),
-//RS             "fault injected: FS.Write",
-//RS         ));
-//RS     }
-//RS     use std::io::Write;
-//RS     let mut f = std::fs::OpenOptions::new()
-//RS         .create(true)
-//RS         .append(true)
-//RS         .open(path)
-//RS         .map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Write, path, e))?;
-//RS     f.write_all(text.as_bytes())
-//RS         .map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Write, path, e))
-//RS }
-//RS fn jet_std_fs_exists(path: &String) -> bool {
-//RS     std::path::Path::new(path).exists()
-//RS }
-//RS pub(crate) fn jet_fs_remove_entry(path: &str) -> std::io::Result<()> {
-//RS     let metadata = std::fs::symlink_metadata(path)?;
-//RS     if metadata.file_type().is_dir() {
-//RS         std::fs::remove_dir(path)
-//RS     } else {
-//RS         std::fs::remove_file(path)
-//RS     }
-//RS }
-//RS 
-//RS fn jet_std_fs_remove(path: &String) -> Result<(), jet_std::IOError> {
-//RS     if jet_fault_should_fail("FS.Write") {
-//RS         return Err(jet_std::IOError::other(
-//RS             jet_std::IOOperation::Write,
-//RS             Some(path.clone()),
-//RS             "fault injected: FS.Write",
-//RS         ));
-//RS     }
-//RS     jet_fs_remove_entry(path)
-//RS         .map_err(|error| jet_std::io_error_at(jet_std::IOOperation::Write, path, error))
-//RS }
-//RS // D-LSDIR1=A: returns DirEntry values with name, full path, and is_dir flag.
-//RS fn jet_std_fs_list_dir(path: &String) -> Result<Vec<jet_std::DirEntry>, jet_std::IOError> {
-// END-PORT-PENDING 2090 crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:1-1800
+use std.iter.[Iterator, IntoIterator]
+use std.[Box]
+use core.text.runtime.unicode_assets as text_asset
+use core.text.runtime.kernel_unicode_string as text_string
+use core.text.runtime.top_unicode_tables as text_tables
+use core.text.runtime.assets.unicode_name_index.UNICODE_NAME_INDEX
+use core.text.runtime.assets.unicode_ccc.UNICODE_CCC
+use core.text.runtime.assets.unicode_decomp_index.UNICODE_DECOMP_INDEX
+use core.text.runtime.assets.unicode_decomp_pool.UNICODE_DECOMP_POOL
+use core.text.runtime.assets.unicode_compose_pairs.UNICODE_COMPOSE_PAIRS
+use core.text.runtime.assets.unicode_fold_index.UNICODE_FOLD_INDEX
+use core.text.runtime.assets.unicode_fold_pool.UNICODE_FOLD_POOL
+use core.text.runtime.assets.unicode_simple_fold.UNICODE_SIMPLE_FOLD
+use core.text.runtime.assets.unicode_alphabetic.UNICODE_ALPHABETIC
+use core.text.runtime.assets.unicode_numeric.UNICODE_NUMERIC
+use core.text.runtime.assets.unicode_white_space.UNICODE_WHITE_SPACE
+use core.text.runtime.assets.unicode_letter.UNICODE_LETTER
+use core.text.runtime.assets.unicode_title_index.UNICODE_TITLE_INDEX
+use core.text.runtime.assets.unicode_title_pool.UNICODE_TITLE_POOL
+use core.text.runtime.assets.unicode_grapheme_break.UNICODE_GRAPHEME_BREAK
+use core.text.runtime.assets.unicode_word_break.UNICODE_WORD_BREAK
+use core.text.runtime.assets.unicode_sentence_break.UNICODE_SENTENCE_BREAK
+use core.text.runtime.assets.unicode_extended_pictographic.UNICODE_EXTENDED_PICTOGRAPHIC
+use core.text.runtime.assets.unicode_emoji_presentation.UNICODE_EMOJI_PRESENTATION
+use core.text.runtime.assets.unicode_emoji.UNICODE_EMOJI
+use core.text.runtime.assets.unicode_default_ignorable.UNICODE_DEFAULT_IGNORABLE
+use core.text.runtime.assets.unicode_general_category.UNICODE_GENERAL_CATEGORY
+use core.text.runtime.assets.unicode_east_asian_width.UNICODE_EAST_ASIAN_WIDTH
+use core.text.runtime.assets.unicode_incb.UNICODE_INCB
+use core.text.runtime.assets.unicode_cased.UNICODE_CASED
+use core.prelude.runtime.std_open.[TextWidth, TextWidthAmbiguous, TextWidthControls, TextError, IOError, IOOperation, DirEntry]
+use core.encoding.runtime.std_data_tree.io_error_at
+use core.testing.runtime.fault_injection.jet_fault_should_fail
+use std.fs as fs
+use std.io as io
+use std.io.Write
+use jet_foundation.Numeric.[JetInt]
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:6
+// Borrowed items retain their source; unlike JetIter this carrier is not static.
+struct JetViewIter<T> { source: Box<Iterator<Item=T>> }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:8
+impl<T> JetViewIter<T> {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:9
+    fn to_list(^self) -> [T] { self.source.collect() }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:12
+    fn collect(^self) -> [T] { self.source.collect() }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:15
+    fn len(^self) -> I64 { self.source.count() as I64 }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:18
+    fn is_empty(self: &JetViewIter<T>) -> Bool { self.source.next().is_none() }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:23
+impl<T> IntoIterator for JetViewIter<T> {
+    type Item = T
+    type IntoIter = Box<Iterator<Item=T>>
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:27
+    fn into_iter(^self) -> Self.IntoIter { ^self.source }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:32
+fn jet_view_iter_from_iter<T, I: Iterator<Item=T>>(iter: I) -> JetViewIter<T> {
+    JetViewIter{source: Box.new(^iter)}
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:40
+fn jet_bytes_view_iter(bytes: View<U8>) -> JetViewIter<View<U8>> {
+    jet_view_iter_from_iter(bytes.iter().map(fn(byte) -> std.slice.from_ref(byte)))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:44
+fn jet_text_unicode_scalar_count(s: &String) -> I64 { s.chars().count() as I64 }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:47
+fn jet_text_unicode_byte_count(s: &String) -> I64 { s.len() as I64 }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:50
+fn jet_text_unicode_is_ascii(s: &String) -> Bool { s.is_ascii() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:53
+fn jet_text_unicode_lower(s: &String) -> String { jet_text_lower(s) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:56
+fn jet_text_unicode_upper(s: &String) -> String { jet_text_upper(s) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:59
+fn jet_text_unicode_scalars(s: &String) -> [String] {
+    s.chars().map(fn(c) -> c.to_string()).collect()
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:62
+fn jet_text_unicode_name(cp: U32) -> View<str> {
+    index :: text_asset.records(UNICODE_NAME_INDEX, 8, 11)
+    names :: text_asset.pool(UNICODE_NAME_INDEX, 8, 11)
+    span :: text_tables.name_span(index, names, Int.from_u32(cp)) ?? return "UNASSIGNED"
+    // #4392: keep the static asset's validated UTF-8 window borrowed.
+    std.str.from_utf8(names[span.start..<(span.start + span.length)]).unwrap()
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:68
+fn jet_text_inspect(s: &String) -> [String] {
+    s.chars().map(fn(c) -> format("U+{:04X} {}", c as U32, jet_text_unicode_name(c as U32))).collect()
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:80
+HANGUL_SBASE: U32 :: 0xAC00
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:81
+HANGUL_LBASE: U32 :: 0x1100
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:82
+HANGUL_VBASE: U32 :: 0x1161
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:83
+HANGUL_TBASE: U32 :: 0x11A7
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:84
+HANGUL_LCOUNT: U32 :: 19
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:85
+HANGUL_VCOUNT: U32 :: 21
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:86
+HANGUL_TCOUNT: U32 :: 28
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:87
+HANGUL_NCOUNT: U32 :: HANGUL_VCOUNT * HANGUL_TCOUNT
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:88
+HANGUL_SCOUNT: U32 :: HANGUL_LCOUNT * HANGUL_NCOUNT
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:90
+fn jet_text_ccc(cp: U32) -> U8 { text_asset.asset_tag(UNICODE_CCC, Int.from_u32(cp), 0) as U8 }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:101
+fn jet_text_hangul_decompose(cp: U32) -> [U32; 3]? {
+    if cp < HANGUL_SBASE || cp >= HANGUL_SBASE + HANGUL_SCOUNT -> return None
+    s_index :: cp - HANGUL_SBASE
+    l :: HANGUL_LBASE + s_index / HANGUL_NCOUNT
+    v :: HANGUL_VBASE + (s_index % HANGUL_NCOUNT) / HANGUL_TCOUNT
+    t_index :: s_index % HANGUL_TCOUNT
+    if t_index == 0 -> Val([l, v, 0]) else -> Val([l, v, HANGUL_TBASE + t_index])
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:116
+fn jet_text_decomp_lookup(cp: U32, compat: Bool) -> View<U8>? {
+    index :: text_asset.records(UNICODE_DECOMP_INDEX, 5, 7)
+    row :: text_asset.mapping_row(index, Int.from_u32(cp), 7)?
+    start :: text_asset.uint(index, row + 3, 2)
+    len :: text_asset.uint(index, row + 5, 1)
+    is_canon :: text_asset.uint(index, row + 6, 1)
+    if !compat && is_canon == 0 -> return None
+    pool :: text_asset.records(UNICODE_DECOMP_POOL, 1, 3)
+    Val(pool[start * 3..<(start + len) * 3])
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:131
+// Decomposition mappings are one step; recursively expand until stable.
+fn jet_text_expand_char(cp: U32, compat: Bool, seq: &[U32]) {
+    if jet_text_hangul_decompose(cp) == .Val(parts) {
+        &seq.push(parts[0])
+        &seq.push(parts[1])
+        if parts[2] != 0 -> &seq.push(parts[2])
+        return
+    }
+    if jet_text_decomp_lookup(cp, compat) == .Val(expansion) {
+        loop i in 0..<(expansion.len() /% 3) -> jet_text_expand_char(text_asset.scalar(expansion, i) as U32, compat, &seq)
+        return
+    }
+    &seq.push(cp)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:149
+fn jet_text_canonical_order(seq: &[U32]) {
+    // Stable linear counting sort of every non-starter run by u8 CCC.
+    start := 0
+    loop start < seq.len() {
+        if jet_text_ccc(seq[start]) == 0 -> start += 1
+        end := start
+        ordered := true
+        previous: U8 := 0
+        loop end < seq.len() {
+            class :: jet_text_ccc(seq[end])
+            if class == 0 -> break
+            ordered = ordered && class >= previous
+            previous = class
+            end += 1
+        }
+        if !ordered {
+            counts := [USize; 256].filled(0)
+            loop cp in seq[start..<end] -> counts[jet_text_ccc(cp) as USize] += 1
+            offsets := [USize; 256].filled(0)
+            next_at := start
+            loop class in 1..<256 {
+                offsets[class] = next_at
+                next_at += counts[class]
+            }
+            sorted := [U32].with_capacity(end - start)
+            &sorted.resize(end - start, 0)
+            loop cp in seq[start..<end] {
+                class :: jet_text_ccc(cp) as USize
+                at :: offsets[class] - start
+                sorted[at] = cp
+                offsets[class] += 1
+            }
+            &seq[start..<end].copy_from_slice(sorted)
+        }
+        start = end
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:186
+fn jet_text_nfd_inner(s: &String, compat: Bool) -> String {
+    seq := [U32].with_capacity(s.len())
+    loop c in s.chars() -> jet_text_expand_char(c as U32, compat, &seq)
+    jet_text_canonical_order(&seq)
+    seq.into_iter().filter_map(Char.from_u32).collect()
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:196
+fn jet_text_nfd(s: &String) -> String { jet_text_nfd_inner(s, false) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:197
+fn jet_text_nfkd(s: &String) -> String { jet_text_nfd_inner(s, true) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:199
+fn jet_text_compose_pair_cp(a: U32, b: U32) -> U32? {
+    table :: text_asset.records(UNICODE_COMPOSE_PAIRS, 6, 9)
+    low := 0
+    high := table.len() /% 9
+    needle :: (Int.from_u32(a), Int.from_u32(b))
+    loop low < high {
+        mid :: (low + high) /% 2
+        row :: mid * 9
+        key :: (text_asset.uint(table, row, 3), text_asset.uint(table, row + 3, 3))
+        if key < needle -> low = mid + 1
+        else if key > needle -> high = mid
+        else -> return Val(text_asset.uint(table, row + 6, 3) as U32)
+    }
+    None
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:206
+fn jet_text_hangul_compose_pair(a: U32, b: U32) -> U32? {
+    // L + V -> LV
+    if a >= HANGUL_LBASE && a < HANGUL_LBASE + HANGUL_LCOUNT
+        && b >= HANGUL_VBASE && b < HANGUL_VBASE + HANGUL_VCOUNT {
+        l_index :: a - HANGUL_LBASE
+        v_index :: b - HANGUL_VBASE
+        return Val(HANGUL_SBASE + (l_index * HANGUL_VCOUNT + v_index) * HANGUL_TCOUNT)
+    }
+    // LV + T -> LVT
+    if a >= HANGUL_SBASE && a < HANGUL_SBASE + HANGUL_SCOUNT
+        && (a - HANGUL_SBASE) % HANGUL_TCOUNT == 0
+        && b > HANGUL_TBASE && b < HANGUL_TBASE + HANGUL_TCOUNT {
+        return Val(a + (b - HANGUL_TBASE))
+    }
+    None
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:225
+fn jet_text_compose(s: String) -> String {
+    // UAX #15 blocking: -1 means no intervening character, including CCC=0.
+    seq: [U32] :: s.chars().map(fn(c) -> c as U32).collect()
+    out := [U32].with_capacity(seq.len())
+    starter_idx: USize? := None
+    last_class: I32 := -1
+    loop cp in seq {
+        cls :: jet_text_ccc(cp) as I32
+        if starter_idx == .Val(si) {
+            starter :: out[si]
+            composed :: jet_text_hangul_compose_pair(starter, cp)
+                .or_else(fn() -> jet_text_compose_pair_cp(starter, cp))
+            if composed == .Val(composed_cp) && last_class < cls {
+                out[si] = composed_cp
+                next
+            }
+        }
+        if cls == 0 {
+            &out.push(cp)
+            starter_idx = Val(out.len() - 1)
+            last_class = -1
+        } else {
+            &out.push(cp)
+            last_class = cls
+        }
+    }
+    out.into_iter().filter_map(Char.from_u32).collect()
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:258
+fn jet_text_nfc(s: &String) -> String { jet_text_compose(jet_text_nfd(s)) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:259
+fn jet_text_nfkc(s: &String) -> String { jet_text_compose(jet_text_nfkd(s)) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:261
+fn jet_text_fold_lookup(cp: U32) -> View<U8>? {
+    index :: text_asset.records(UNICODE_FOLD_INDEX, 4, 11)
+    pool :: text_asset.records(UNICODE_FOLD_POOL, 1, 3)
+    span :: text_asset.mapping(index, pool, Int.from_u32(cp))?
+    Val(pool[span.start * 3..<(span.start + span.length) * 3])
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:268
+fn jet_text_casefold(s: &String) -> String {
+    out := String.with_capacity(s.len())
+    loop c in s.chars() {
+        match jet_text_fold_lookup(c as U32) {
+            .Val(seq) -> loop i in 0..<(seq.len() /% 3) {
+                cp :: text_asset.scalar(seq, i) as U32
+                if Char.from_u32(cp) == .Val(fc) -> &out.push(fc)
+            }
+            .None -> &out.push(c)
+        }
+    }
+    ^out
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:284
+fn jet_text_simple_fold(cp: U32) -> U32 {
+    table :: text_asset.records(UNICODE_SIMPLE_FOLD, 7, 6)
+    text_tables.simple_fold(table, Int.from_u32(cp)) as U32
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:290
+fn jet_text_property(table: [U8], cp: U32) -> Bool { jet_text_bsearch_pair(table, cp) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:293
+fn jet_text_alphabetic(cp: U32) -> Bool { jet_text_property(UNICODE_ALPHABETIC, cp) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:294
+fn jet_text_numeric(cp: U32) -> Bool { jet_text_property(UNICODE_NUMERIC, cp) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:295
+fn jet_text_whitespace(cp: U32) -> Bool { jet_text_property(UNICODE_WHITE_SPACE, cp) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:296
+fn jet_text_letter(cp: U32) -> Bool { jet_text_property(UNICODE_LETTER, cp) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:297
+fn jet_text_lower(s: &String) -> String { text_string.lower(s) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:300
+fn jet_text_upper(s: &String) -> String { text_string.upper(s) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:303
+fn jet_text_title_mapping(cp: U32) -> View<U8>? {
+    index :: text_asset.records(UNICODE_TITLE_INDEX, 4, 11)
+    pool :: text_asset.records(UNICODE_TITLE_POOL, 1, 3)
+    span :: text_asset.mapping(index, pool, Int.from_u32(cp))?
+    Val(pool[span.start * 3..<(span.start + span.length) * 3])
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:310
+fn jet_text_append_title_mapping(out: &String, cp: U32) {
+    if jet_text_title_mapping(cp) == .Val(mapped) {
+        loop i in 0..<(mapped.len() /% 3) {
+            if Char.from_u32(text_asset.scalar(mapped, i) as U32) == .Val(ch) -> &out.push(ch)
+        }
+    } else if Char.from_u32(cp) == .Val(ch) {
+        &out.push(ch)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:317
+fn jet_text_title(s: &String) -> String {
+    out := String.with_capacity(s.len())
+    word_start := true
+    loop ch in s.chars() {
+        cp :: ch as U32
+        if jet_text_alphabetic(cp) || jet_text_numeric(cp) {
+            if word_start {
+                jet_text_append_title_mapping(&out, cp)
+            } else {
+                one :: ch.to_string()
+                &out.push_str(jet_text_lower(&one))
+            }
+            word_start = false
+        } else {
+            &out.push(ch)
+            word_start = true
+        }
+    }
+    ^out
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:338
+fn jet_text_caseless_eq(a: &String, b: &String) -> Bool {
+    jet_text_nfd(jet_text_casefold(jet_text_nfd(a))) == jet_text_nfd(jet_text_casefold(jet_text_nfd(b)))
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:350
+fn jet_text_bsearch_triple(table: [U8], cp: U32) -> U8 { text_asset.asset_tag(table, Int.from_u32(cp), 0) as U8 }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:360
+fn jet_text_bsearch_pair(table: [U8], cp: U32) -> Bool { text_asset.asset_contains(table, Int.from_u32(cp)) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:369
+fn jet_text_grapheme_class(cp: U32) -> U8 { jet_text_bsearch_triple(UNICODE_GRAPHEME_BREAK, cp) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:370
+fn jet_text_word_class(cp: U32) -> U8 { jet_text_bsearch_triple(UNICODE_WORD_BREAK, cp) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:371
+fn jet_text_sentence_class(cp: U32) -> U8 { jet_text_bsearch_triple(UNICODE_SENTENCE_BREAK, cp) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:372
+fn jet_text_is_ext_pictographic(cp: U32) -> Bool { jet_text_bsearch_pair(UNICODE_EXTENDED_PICTOGRAPHIC, cp) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:373
+fn jet_text_is_emoji_presentation(cp: U32) -> Bool { jet_text_bsearch_pair(UNICODE_EMOJI_PRESENTATION, cp) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:374
+fn jet_text_is_emoji(cp: U32) -> Bool { jet_text_bsearch_pair(UNICODE_EMOJI, cp) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:375
+fn jet_text_is_default_ignorable(cp: U32) -> Bool { jet_text_bsearch_pair(UNICODE_DEFAULT_IGNORABLE, cp) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:376
+fn jet_text_general_category(cp: U32) -> U8 { text_asset.asset_tag(UNICODE_GENERAL_CATEGORY, Int.from_u32(cp), 8) as U8 }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:386
+fn jet_text_is_control(cp: U32) -> Bool { jet_text_general_category(cp) == 0 }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:387
+fn jet_text_is_zero_width_scalar(cp: U32) -> Bool {
+    category :: jet_text_general_category(cp)
+    category == 2 || category == 3 || jet_text_is_default_ignorable(cp)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:391
+fn jet_text_eaw_class(cp: U32) -> U8 { jet_text_bsearch_triple(UNICODE_EAST_ASIAN_WIDTH, cp) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:393
+fn jet_text_incb_class(cp: U32) -> U8 { jet_text_bsearch_triple(UNICODE_INCB, cp) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:394
+JET_INCB_LINKER: U8 :: 1
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:395
+JET_INCB_CONSONANT: U8 :: 2
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:396
+JET_INCB_EXTEND: U8 :: 3
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:399
+JET_GB_CR: U8 :: 1
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:400
+JET_GB_LF: U8 :: 2
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:401
+JET_GB_CONTROL: U8 :: 3
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:402
+JET_GB_EXTEND: U8 :: 4
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:403
+JET_GB_ZWJ: U8 :: 5
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:404
+JET_GB_RI: U8 :: 6
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:405
+JET_GB_PREPEND: U8 :: 7
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:406
+JET_GB_SPACINGMARK: U8 :: 8
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:407
+JET_GB_L: U8 :: 9
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:408
+JET_GB_V: U8 :: 10
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:409
+JET_GB_T: U8 :: 11
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:410
+JET_GB_LV: U8 :: 12
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:411
+JET_GB_LVT: U8 :: 13
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:416
+fn jet_text_grapheme_break_classes(pc: U8, cc: U8) -> Bool {
+    if pc == JET_GB_CR && cc == JET_GB_LF -> return false // GB3
+    if pc == JET_GB_CR || pc == JET_GB_LF || pc == JET_GB_CONTROL -> return true // GB4
+    if cc == JET_GB_CR || cc == JET_GB_LF || cc == JET_GB_CONTROL -> return true // GB5
+    if pc == JET_GB_L && (cc == JET_GB_L || cc == JET_GB_V || cc == JET_GB_LV || cc == JET_GB_LVT) -> return false // GB6
+    if (pc == JET_GB_LV || pc == JET_GB_V) && (cc == JET_GB_V || cc == JET_GB_T) -> return false // GB7
+    if (pc == JET_GB_LVT || pc == JET_GB_T) && cc == JET_GB_T -> return false // GB8
+    if cc == JET_GB_EXTEND || cc == JET_GB_ZWJ -> return false // GB9
+    if cc == JET_GB_SPACINGMARK -> return false // GB9a
+    if pc == JET_GB_PREPEND -> return false // GB9b
+    true // GB999
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:429
+fn jet_text_graphemes(s: &String) -> [String] {
+    cps: [Char] :: s.chars().collect()
+    if cps.is_empty() -> return []
+    out := [String]{}
+    cur := String.new()
+    &cur.push(cps[0])
+    ri_run := if jet_text_grapheme_class(cps[0] as U32) == JET_GB_RI -> 1 else -> 0
+    saw_pic := jet_text_is_ext_pictographic(cps[0] as U32)
+    incb_pending := jet_text_incb_class(cps[0] as U32) == JET_INCB_CONSONANT
+    incb_linker := false
+    loop i in 1..<cps.len() {
+        prev :: cps[i - 1]
+        curc :: cps[i]
+        pc :: jet_text_grapheme_class(prev as U32)
+        cc :: jet_text_grapheme_class(curc as U32)
+        brk :: if pc == JET_GB_ZWJ && saw_pic && jet_text_is_ext_pictographic(curc as U32) -> false
+            else if pc == JET_GB_RI && cc == JET_GB_RI -> ri_run % 2 == 0
+            else if incb_pending && incb_linker && jet_text_incb_class(curc as U32) == JET_INCB_CONSONANT -> false
+            else -> jet_text_grapheme_break_classes(pc, cc)
+        if brk {
+            &out.push(^cur)
+            cur = String.new()
+        }
+        &cur.push(curc)
+        ri_run = if cc == JET_GB_RI -> ri_run + 1 else -> 0
+        saw_pic = if cc == JET_GB_EXTEND || cc == JET_GB_ZWJ -> saw_pic else -> jet_text_is_ext_pictographic(curc as U32)
+        match jet_text_incb_class(curc as U32) {
+            JET_INCB_CONSONANT -> { incb_pending = true; incb_linker = false }
+            JET_INCB_LINKER -> if incb_pending -> incb_linker = true
+            JET_INCB_EXTEND -> {}
+            _ -> { incb_pending = false; incb_linker = false }
+        }
+    }
+    &out.push(^cur)
+    ^out
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:470
+// CharIndices yields exact UTF-8 source windows, never grapheme-sized copies.
+struct JetTextGraphemeViewIter {
+    source: View<str>
+    chars: std.str.CharIndices
+    pending: (USize, Char)?
+    ri_run: USize
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:477
+impl JetTextGraphemeViewIter.Iterator {
+    type Item = View<str>
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:480
+    fn next(self: &JetTextGraphemeViewIter) -> View<str>? {
+        (start, first) :: self.pending.take().or_else(fn() -> &self.chars.next())?
+        previous := first
+        end := start + first.len_utf8()
+        ri_run := if jet_text_grapheme_class(first as U32) == JET_GB_RI -> self.ri_run.saturating_add(1) else -> 0
+        saw_pic := jet_text_is_ext_pictographic(first as U32)
+        incb_pending := jet_text_incb_class(first as U32) == JET_INCB_CONSONANT
+        incb_linker := false
+        loop {
+            item :: &self.chars.next()
+            if item == .None -> break
+            (index, current) :: item.unwrap()
+            previous_class :: jet_text_grapheme_class(previous as U32)
+            current_class :: jet_text_grapheme_class(current as U32)
+            breaks :: if previous_class == JET_GB_ZWJ && saw_pic && jet_text_is_ext_pictographic(current as U32) -> false
+                else if previous_class == JET_GB_RI && current_class == JET_GB_RI -> ri_run % 2 == 0
+                else if incb_pending && incb_linker && jet_text_incb_class(current as U32) == JET_INCB_CONSONANT -> false
+                else -> jet_text_grapheme_break_classes(previous_class, current_class)
+            if breaks {
+                self.pending = Val((index, current))
+                self.ri_run = ri_run
+                return Val(self.source[start..<index])
+            }
+            previous = current
+            end = index + current.len_utf8()
+            ri_run = if current_class == JET_GB_RI -> ri_run.saturating_add(1) else -> 0
+            saw_pic = if current_class == JET_GB_EXTEND || current_class == JET_GB_ZWJ -> saw_pic else -> jet_text_is_ext_pictographic(current as U32)
+            match jet_text_incb_class(current as U32) {
+                JET_INCB_CONSONANT -> { incb_pending = true; incb_linker = false }
+                JET_INCB_LINKER -> if incb_pending -> incb_linker = true
+                JET_INCB_EXTEND -> {}
+                _ -> { incb_pending = false; incb_linker = false }
+            }
+        }
+        self.ri_run = ri_run
+        Val(self.source[start..<end])
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:552
+fn jet_text_grapheme_views(s: View<str>) -> JetViewIter<View<str>> {
+    source :: s
+    jet_view_iter_from_iter(JetTextGraphemeViewIter{
+        source: source, chars: source.char_indices(), pending: None, ri_run: 0
+    })
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:564
+JET_WB_CR: U8 :: 1
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:565
+JET_WB_LF: U8 :: 2
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:566
+JET_WB_NEWLINE: U8 :: 3
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:567
+JET_WB_EXTEND: U8 :: 4
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:568
+JET_WB_ZWJ: U8 :: 5
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:569
+JET_WB_RI: U8 :: 6
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:570
+JET_WB_FORMAT: U8 :: 7
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:571
+JET_WB_KATAKANA: U8 :: 8
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:572
+JET_WB_HEBREW: U8 :: 9
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:573
+JET_WB_ALETTER: U8 :: 10
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:574
+JET_WB_SINGLEQUOTE: U8 :: 11
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:575
+JET_WB_DOUBLEQUOTE: U8 :: 12
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:576
+JET_WB_MIDNUMLET: U8 :: 13
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:577
+JET_WB_MIDLETTER: U8 :: 14
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:578
+JET_WB_MIDNUM: U8 :: 15
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:579
+JET_WB_NUMERIC: U8 :: 16
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:580
+JET_WB_EXTENDNUMLET: U8 :: 17
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:581
+JET_WB_WSEGSPACE: U8 :: 18
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:583
+fn jet_text_word_reduce<I: IntoIterator<Item=Char>>(chars: I) -> ([(U8, Char)], [USize]) {
+    units := [(U8, Char)]{}
+    ends := [USize]{}
+    loop (idx, c) in chars.into_iter().enumerate() {
+        cl :: jet_text_word_class(c as U32)
+        if cl == JET_WB_EXTEND || cl == JET_WB_FORMAT || cl == JET_WB_ZWJ {
+            if units.last() == .Val(last) {
+                last_cl :: last.0
+                if last_cl != JET_WB_CR && last_cl != JET_WB_LF && last_cl != JET_WB_NEWLINE {
+                    ends[ends.len() - 1] = idx
+                    next
+                }
+            }
+        }
+        &units.push((cl, c))
+        &ends.push(idx)
+    }
+    (^units, ^ends)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:605
+fn jet_text_word_break_at(units: View<(U8, Char)>, ends: View<USize>, char_at: fn(USize) -> Char, i: USize) -> Bool {
+    pc :: units[i].0
+    cc :: units[i + 1].0
+    if pc == JET_WB_CR && cc == JET_WB_LF -> return false // WB3
+    if pc == JET_WB_NEWLINE || pc == JET_WB_CR || pc == JET_WB_LF -> return true // WB3a
+    if cc == JET_WB_NEWLINE || cc == JET_WB_CR || cc == JET_WB_LF -> return true // WB3b
+    if jet_text_word_class(char_at(ends[i]) as U32) == JET_WB_ZWJ && jet_text_is_ext_pictographic(units[i + 1].1 as U32) -> return false // WB3c
+    if pc == JET_WB_WSEGSPACE && cc == JET_WB_WSEGSPACE && jet_text_word_class(char_at(ends[i]) as U32) == JET_WB_WSEGSPACE -> return false // WB3d
+    if (pc == JET_WB_ALETTER || pc == JET_WB_HEBREW) && (cc == JET_WB_ALETTER || cc == JET_WB_HEBREW) -> return false // WB5
+    if (pc == JET_WB_ALETTER || pc == JET_WB_HEBREW) && (cc == JET_WB_MIDLETTER || cc == JET_WB_MIDNUMLET || cc == JET_WB_SINGLEQUOTE) {
+        if i + 2 < units.len() {
+            nc :: units[i + 2].0
+            if nc == JET_WB_ALETTER || nc == JET_WB_HEBREW -> return false // WB6
+        }
+    }
+    if (cc == JET_WB_ALETTER || cc == JET_WB_HEBREW) && (pc == JET_WB_MIDLETTER || pc == JET_WB_MIDNUMLET || pc == JET_WB_SINGLEQUOTE) {
+        if i >= 1 {
+            pp :: units[i - 1].0
+            if pp == JET_WB_ALETTER || pp == JET_WB_HEBREW -> return false // WB7
+        }
+    }
+    if pc == JET_WB_HEBREW && cc == JET_WB_SINGLEQUOTE -> return false // WB7a
+    if pc == JET_WB_HEBREW && cc == JET_WB_DOUBLEQUOTE && i + 2 < units.len() && units[i + 2].0 == JET_WB_HEBREW -> return false // WB7b
+    if pc == JET_WB_DOUBLEQUOTE && cc == JET_WB_HEBREW && i >= 1 && units[i - 1].0 == JET_WB_HEBREW -> return false // WB7c
+    if pc == JET_WB_NUMERIC && cc == JET_WB_NUMERIC -> return false // WB8
+    if (pc == JET_WB_ALETTER || pc == JET_WB_HEBREW) && cc == JET_WB_NUMERIC -> return false // WB9
+    if pc == JET_WB_NUMERIC && (cc == JET_WB_ALETTER || cc == JET_WB_HEBREW) -> return false // WB10
+    if cc == JET_WB_NUMERIC && (pc == JET_WB_MIDNUM || pc == JET_WB_MIDNUMLET || pc == JET_WB_SINGLEQUOTE) && i >= 1 && units[i - 1].0 == JET_WB_NUMERIC -> return false // WB11
+    if pc == JET_WB_NUMERIC && (cc == JET_WB_MIDNUM || cc == JET_WB_MIDNUMLET || cc == JET_WB_SINGLEQUOTE) && i + 2 < units.len() && units[i + 2].0 == JET_WB_NUMERIC -> return false // WB12
+    if pc == JET_WB_KATAKANA && cc == JET_WB_KATAKANA -> return false // WB13
+    if (pc == JET_WB_ALETTER || pc == JET_WB_HEBREW || pc == JET_WB_NUMERIC || pc == JET_WB_KATAKANA || pc == JET_WB_EXTENDNUMLET) && cc == JET_WB_EXTENDNUMLET -> return false // WB13a
+    if pc == JET_WB_EXTENDNUMLET && (cc == JET_WB_ALETTER || cc == JET_WB_HEBREW || cc == JET_WB_NUMERIC || cc == JET_WB_KATAKANA) -> return false // WB13b
+    true // WB999
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:654
+fn jet_text_word_segments(s: &String) -> [String] {
+    cps: [Char] :: s.chars().collect()
+    if cps.is_empty() -> return []
+    (units, ends) :: jet_text_word_reduce(cps.iter().copied())
+    n :: units.len()
+    brk := [Bool].with_capacity(n.saturating_sub(1))
+    &brk.resize(n.saturating_sub(1), true)
+    ri_run := 0
+    loop i in 0..<n {
+        cl :: units[i].0
+        ri_run = if cl == JET_WB_RI -> ri_run + 1 else -> 0
+        if i + 1 < n {
+            nc :: units[i + 1].0
+            brk[i] = if cl == JET_WB_RI && nc == JET_WB_RI -> ri_run % 2 == 0
+                else -> jet_text_word_break_at(units, ends, fn(index) -> cps[index], i)
+        }
+    }
+    out := [String]{}
+    cur := String.new()
+    ui := 0
+    loop (idx, c) in cps.iter().enumerate() {
+        &cur.push(c)
+        if idx == ends[ui] && ui + 1 < n {
+            if brk[ui] { &out.push(^cur); cur = String.new() }
+            ui += 1
+        }
+    }
+    if !cur.is_empty() -> &out.push(^cur)
+    ^out
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:689
+fn jet_text_words(s: &String) -> [String] {
+    jet_text_word_segments(s).into_iter()
+        .filter(fn(w) -> w.chars().any(fn(c) -> jet_text_alphabetic(c as U32) || jet_text_numeric(c as U32))).collect()
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:699
+fn jet_text_word_view_spans(s: View<str>) -> [(USize, USize)] {
+    indexed: [(USize, Char)] :: s.char_indices().collect()
+    if indexed.is_empty() -> return []
+    (units, ends) :: jet_text_word_reduce(indexed.iter().map(fn(row) -> row.1))
+    n :: units.len()
+    breaks := [Bool].with_capacity(n.saturating_sub(1))
+    &breaks.resize(n.saturating_sub(1), true)
+    ri_run: USize := 0
+    loop i in 0..<n {
+        class :: units[i].0
+        ri_run = if class == JET_WB_RI -> ri_run.saturating_add(1) else -> 0
+        if i + 1 < n {
+            next_class :: units[i + 1].0
+            breaks[i] = if class == JET_WB_RI && next_class == JET_WB_RI -> ri_run % 2 == 0
+                else -> jet_text_word_break_at(units, ends, fn(index) -> indexed[index].1, i)
+        }
+    }
+    out := [(USize, USize)]{}
+    start_byte := 0
+    unit_index := 0
+    loop (char_index, row) in indexed.iter().enumerate() {
+        (byte, current) :: row
+        if char_index != ends[unit_index] || unit_index + 1 >= n || !breaks[unit_index] -> next
+        end_byte :: byte + current.len_utf8()
+        segment :: s[start_byte..<end_byte]
+        if segment.chars().any(fn(c) -> jet_text_alphabetic(c as U32) || jet_text_numeric(c as U32)) -> &out.push((start_byte, end_byte))
+        start_byte = end_byte
+        unit_index += 1
+    }
+    if start_byte < s.len() {
+        segment :: s[start_byte..]
+        if segment.chars().any(fn(c) -> jet_text_alphabetic(c as U32) || jet_text_numeric(c as U32)) -> &out.push((start_byte, s.len()))
+    }
+    ^out
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:755
+fn jet_text_word_views(s: View<str>) -> JetViewIter<View<str>> {
+    source :: s
+    spans :: jet_text_word_view_spans(source)
+    jet_view_iter_from_iter(spans.into_iter().map(fn(span) -> source[span.0..<span.1]))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:767
+fn jet_text_line_views(s: View<str>) -> JetViewIter<View<str>> { jet_view_iter_from_iter(s.lines()) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:773
+fn jet_text_byte_views(s: View<str>) -> JetViewIter<View<U8>> { jet_bytes_view_iter(s.as_bytes()) }
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:779
+JET_SB_CR: U8 :: 1
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:780
+JET_SB_LF: U8 :: 2
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:781
+JET_SB_EXTEND: U8 :: 3
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:782
+JET_SB_SEP: U8 :: 4
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:783
+JET_SB_FORMAT: U8 :: 5
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:784
+JET_SB_SP: U8 :: 6
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:785
+JET_SB_LOWER: U8 :: 7
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:786
+JET_SB_UPPER: U8 :: 8
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:787
+JET_SB_OLETTER: U8 :: 9
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:788
+JET_SB_NUMERIC: U8 :: 10
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:789
+JET_SB_ATERM: U8 :: 11
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:790
+JET_SB_SCONTINUE: U8 :: 12
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:791
+JET_SB_STERM: U8 :: 13
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:792
+JET_SB_CLOSE: U8 :: 14
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:796
+fn jet_text_sentence_breaks(units: View<U8>) -> [Bool] {
+    n :: units.len()
+    brk := [Bool].with_capacity(n.saturating_sub(1))
+    &brk.resize(n.saturating_sub(1), false) // SB999 defaults to no break.
+    i := 0
+    loop i + 1 < n {
+        cc0 :: units[i]
+        if cc0 == JET_SB_CR && units[i + 1] == JET_SB_LF { i += 1; next } // SB3
+        if cc0 == JET_SB_SEP || cc0 == JET_SB_CR || cc0 == JET_SB_LF { brk[i] = true; i += 1; next } // SB4
+        if cc0 == JET_SB_ATERM || cc0 == JET_SB_STERM {
+            if cc0 == JET_SB_ATERM && units[i + 1] == JET_SB_NUMERIC { i += 1; next } // SB6
+            if cc0 == JET_SB_ATERM && i > 0 && (units[i - 1] == JET_SB_UPPER || units[i - 1] == JET_SB_LOWER) && i + 1 < n && units[i + 1] == JET_SB_UPPER { i += 1; next } // SB7
+            j := i + 1
+            loop j < n && units[j] == JET_SB_CLOSE -> j += 1
+            close_end :: j
+            loop j < n && units[j] == JET_SB_SP -> j += 1
+            sp_end :: j
+            sb9 :: close_end < n && (units[close_end] == JET_SB_SEP || units[close_end] == JET_SB_CR || units[close_end] == JET_SB_LF)
+            sb10 :: sp_end < n && (units[sp_end] == JET_SB_SP || units[sp_end] == JET_SB_SEP || units[sp_end] == JET_SB_CR || units[sp_end] == JET_SB_LF)
+            sb8a :: sp_end < n && (units[sp_end] == JET_SB_SCONTINUE || units[sp_end] == JET_SB_STERM || units[sp_end] == JET_SB_ATERM)
+            sb8 := false
+            if cc0 == JET_SB_ATERM {
+                k := sp_end
+                loop k < n {
+                    kc :: units[k]
+                    if kc == JET_SB_LOWER { sb8 = true; break }
+                    if kc == JET_SB_OLETTER || kc == JET_SB_UPPER || kc == JET_SB_SEP || kc == JET_SB_CR || kc == JET_SB_LF || kc == JET_SB_STERM || kc == JET_SB_ATERM -> break
+                    k += 1
+                }
+            }
+            if !(sb9 || sb10 || sb8a || sb8) && sp_end > 0 && sp_end - 1 < brk.len() -> brk[sp_end - 1] = true // SB11
+            i = if sp_end > i -> sp_end else -> i + 1
+            next
+        }
+        i += 1
+    }
+    ^brk
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:844
+fn jet_text_sentence_segments(s: &String) -> [String] {
+    cps: [Char] :: s.chars().collect()
+    if cps.is_empty() -> return []
+    units := [U8]{}
+    ends := [USize]{}
+    loop (idx, c) in cps.iter().enumerate() {
+        cl :: jet_text_sentence_class(c as U32)
+        if cl == JET_SB_EXTEND || cl == JET_SB_FORMAT {
+            if units.last() == .Val(last_cl) {
+                if last_cl != JET_SB_CR && last_cl != JET_SB_LF && last_cl != JET_SB_SEP {
+                    ends[ends.len() - 1] = idx
+                    next
+                }
+            }
+        }
+        &units.push(cl)
+        &ends.push(idx)
+    }
+    brk :: jet_text_sentence_breaks(units)
+    n :: units.len()
+    out := [String]{}
+    cur := String.new()
+    ui := 0
+    loop (idx, c) in cps.iter().enumerate() {
+        &cur.push(c)
+        if idx == ends[ui] && ui + 1 < n {
+            if brk[ui] { &out.push(^cur); cur = String.new() }
+            ui += 1
+        }
+    }
+    if !cur.is_empty() -> &out.push(^cur)
+    ^out
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:880
+fn jet_text_sentences(s: &String) -> [String] {
+    jet_text_sentence_segments(s).into_iter().filter_map(fn(seg) -> {
+        t :: jet_text_trim(&seg)
+        if t.is_empty() -> None else -> Val(t)
+    }).collect()
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:888
+fn jet_text_cluster_is_wide(cluster: View<str>) -> Bool {
+    codepoints: [Char] :: cluster.chars().collect()
+    keycap := false
+    if codepoints.len() == 2 || codepoints.len() == 3 {
+        first :: codepoints[0]
+        starter :: (first >= '0' && first <= '9') || first == '#' || first == '*'
+        keycap = starter && codepoints[codepoints.len() - 1] == '\u{20E3}'
+            && (codepoints.len() == 2 || codepoints[1] == '\u{FE0F}')
+    }
+    chars := cluster.chars()
+    ri_pair := false
+    if &chars.next() == .Val(a) {
+        if jet_text_grapheme_class(a as U32) == JET_GB_RI {
+            if &chars.next() == .Val(b) -> ri_pair = jet_text_grapheme_class(b as U32) == JET_GB_RI
+        }
+    }
+    emoji_style :: cluster.contains('\u{FE0F}') && cluster.chars().any(fn(c) -> jet_text_is_emoji(c as U32))
+    keycap || ri_pair || emoji_style || cluster.chars().any(fn(c) -> jet_text_eaw_class(c as U32) == 2 || jet_text_is_emoji_presentation(c as U32))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:902
+fn jet_text_cluster_width(cluster: View<str>, ambiguous_wide: Bool, controls_reject: Bool) -> I64 Err! {
+    base :: cluster.chars().next() ?? return Ok(0)
+    if jet_text_is_control(base as U32) {
+        if controls_reject -> return Err(format("control character U+{:04X} rejected by TextWidth policy", base as U32))
+        return Ok(0)
+    }
+    if jet_text_cluster_is_wide(cluster) -> return Ok(2)
+    if cluster.chars().all(fn(c) -> jet_text_is_zero_width_scalar(c as U32)) -> return Ok(0)
+    if jet_text_eaw_class(base as U32) == 1 -> return Ok(if ambiguous_wide -> 2 else -> 1)
+    Ok(1)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:916
+fn jet_text_display_width_default(s: &String) -> I64 {
+    jet_text_grapheme_views(s.as_str()).into_iter()
+        .map(fn(g) -> jet_text_cluster_width(g, false, false).unwrap_or(0)).sum()
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:922
+fn jet_text_display_width_policy(s: &String, ambiguous_wide: Bool, controls_reject: Bool) -> I64 Err! {
+    total: I64 := 0
+    loop g in jet_text_grapheme_views(s.as_str()) -> total += jet_text_cluster_width(g, ambiguous_wide, controls_reject)?
+    Ok(total)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:933
+fn jet_text_display_width(s: &String, policy: &TextWidth) -> I64 TextError! {
+    ambiguous_wide :: policy.ambiguous == TextWidthAmbiguous.Wide
+    controls_reject :: policy.controls == TextWidthControls.Reject
+    jet_text_display_width_policy(s, ambiguous_wide, controls_reject).map_err(fn(message) -> TextError{message: message})
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:939
+fn jet_text_is_alphabetic(s: &String) -> Bool { !s.is_empty() && s.chars().all(fn(c) -> jet_text_alphabetic(c as U32)) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:940
+fn jet_text_is_numeric(s: &String) -> Bool { !s.is_empty() && s.chars().all(fn(c) -> jet_text_numeric(c as U32)) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:941
+fn jet_text_is_whitespace(s: &String) -> Bool { !s.is_empty() && s.chars().all(fn(c) -> jet_text_whitespace(c as U32)) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:944
+fn jet_text_char_is_lower(c: Char) -> Bool {
+    if !text_asset.asset_contains(UNICODE_CASED, Int.from_u32(c as U32)) -> return false
+    one :: c.to_string()
+    text_string.upper(one) != one
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:951
+fn jet_text_char_is_upper(c: Char) -> Bool {
+    if !text_asset.asset_contains(UNICODE_CASED, Int.from_u32(c as U32)) -> return false
+    one :: c.to_string()
+    text_string.lower(one) != one
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:958
+fn jet_text_is_lower(s: &String) -> Bool {
+    saw := false
+    loop c in s.chars() {
+        if text_asset.asset_contains(UNICODE_CASED, Int.from_u32(c as U32)) {
+            if !jet_text_char_is_lower(c) -> return false
+            saw = true
+        }
+    }
+    saw
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:970
+fn jet_text_is_upper(s: &String) -> Bool {
+    saw := false
+    loop c in s.chars() {
+        if text_asset.asset_contains(UNICODE_CASED, Int.from_u32(c as U32)) {
+            if !jet_text_char_is_upper(c) -> return false
+            saw = true
+        }
+    }
+    saw
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:982
+fn jet_text_capitalize(s: &String) -> String {
+    chars := s.chars()
+    first :: &chars.next() ?? return String.new()
+    out := String.with_capacity(s.len())
+    jet_text_append_title_mapping(&out, first as U32)
+    rest: String :: chars.collect()
+    &out.push_str(jet_text_lower(&rest))
+    ^out
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:993
+fn jet_text_swapcase(s: &String) -> String {
+    out := String.with_capacity(s.len())
+    loop c in s.chars() {
+        if !text_asset.asset_contains(UNICODE_CASED, Int.from_u32(c as U32)) { &out.push(c); next }
+        one :: c.to_string()
+        upper :: text_string.upper(one)
+        if upper != one { &out.push_str(upper); next }
+        lower :: text_string.lower(one)
+        if lower != one -> &out.push_str(lower) else -> &out.push(c)
+    }
+    ^out
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:1015
+fn jet_text_remove_prefix(s: &String, prefix: &String) -> String {
+    match s.strip_prefix(prefix.as_str()) { .Val(rest) -> rest.to_string(); .None -> s.clone() }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:1021
+fn jet_text_remove_suffix(s: &String, suffix: &String) -> String {
+    match s.strip_suffix(suffix.as_str()) { .Val(rest) -> rest.to_string(); .None -> s.clone() }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:1027
+fn jet_text_compare(a: View<str>, b: View<str>) -> I64 {
+    match a.cmp(b) { .Less -> -1; .Equal -> 0; .Greater -> 1 }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:1034
+fn jet_text_reverse(s: &String) -> String { s.chars().rev().collect() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:1037
+fn jet_text_normalize_nfc(s: &String) -> String { jet_text_nfc(s) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:1040
+fn jet_text_trim_start(s: &String) -> String { text_string.trim_start(s) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:1041
+fn jet_text_trim_end(s: &String) -> String { text_string.trim_end(s) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:1042
+fn jet_text_trim(s: &String) -> String { text_string.trim(s) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:1043
+fn jet_text_splitn(s: &String, pat: &String, n: I64) -> [String] {
+    limit :: n.max(0) as USize
+    out := [String].with_capacity(limit.min(s.len().saturating_add(1)))
+    &out.extend(s.splitn(limit, pat).map(fn(x) -> x.to_string()))
+    ^out
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:1049
+fn jet_text_rsplitn(s: &String, pat: &String, n: I64) -> [String] {
+    limit :: n.max(0) as USize
+    out := [String].with_capacity(limit.min(s.len().saturating_add(1)))
+    &out.extend(s.rsplitn(limit, pat).map(fn(x) -> x.to_string()))
+    ^out
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:1055
+fn jet_text_fill_columns(fill: &String, columns: I64) -> String {
+    unit :: jet_text_grapheme_views(fill.as_str()).into_iter().next() ?? return " ".repeat(columns.max(0) as USize)
+    width :: jet_text_cluster_width(unit, false, false).unwrap_or(0)
+    if width <= 0 || width > columns -> return " ".repeat(columns.max(0) as USize)
+    repeats :: (columns / width) as USize
+    remainder :: (columns % width) as USize
+    out := String.with_capacity(unit.len().saturating_mul(repeats).saturating_add(remainder))
+    loop _ in 0..<repeats -> &out.push_str(unit)
+    &out.extend(std.iter.repeat(' ').take(remainder))
+    ^out
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:1078
+fn jet_text_pad_start(s: &String, width: JetInt, fill: &String) -> String {
+    native_width :: width.to_i64().unwrap_or_else(fn() -> panic("text padding width does not fit native i64"))
+    out := jet_text_fill_columns(fill, (native_width - jet_text_display_width_default(s)).max(0))
+    &out.push_str(s)
+    ^out
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:1090
+fn jet_text_pad_end(s: &String, width: JetInt, fill: &String) -> String {
+    native_width :: width.to_i64().unwrap_or_else(fn() -> panic("text padding width does not fit native i64"))
+    out := s.clone()
+    &out.push_str(jet_text_fill_columns(fill, (native_width - jet_text_display_width_default(s)).max(0)))
+    ^out
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:1102
+fn jet_text_center(s: &String, width: JetInt, fill: &String) -> String {
+    native_width :: width.to_i64().unwrap_or_else(fn() -> panic("text padding width does not fit native i64"))
+    gap :: (native_width - jet_text_display_width_default(s)).max(0)
+    left :: gap / 2
+    right :: gap - left
+    format("{}{}{}", jet_text_fill_columns(fill, left), s, jet_text_fill_columns(fill, right))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:1115
+fn jet_text_pad_start_i64(s: &String, width: I64, fill: &String) -> String { jet_text_pad_start(s, JetInt.from_i64(width), fill) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:1122
+fn jet_text_pad_end_i64(s: &String, width: I64, fill: &String) -> String { jet_text_pad_end(s, JetInt.from_i64(width), fill) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:1129
+fn jet_text_center_i64(s: &String, width: I64, fill: &String) -> String { jet_text_center(s, JetInt.from_i64(width), fill) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:1136
+fn jet_text_pad_start_ref(s: &String, width: &JetInt, fill: &String) -> String { jet_text_pad_start(s, width.clone(), fill) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:1139
+fn jet_text_pad_end_ref(s: &String, width: &JetInt, fill: &String) -> String { jet_text_pad_end(s, width.clone(), fill) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:1142
+fn jet_text_center_ref(s: &String, width: &JetInt, fill: &String) -> String { jet_text_center(s, width.clone(), fill) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:1145
+fn jet_text_starts_any(s: &String, prefixes: &[String]) -> Bool { prefixes.iter().any(fn(p) -> s.starts_with(p)) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:1148
+fn jet_text_parse_split(text: &String, separator: &String) -> [String] {
+    if separator.is_empty() -> return text.chars().map(fn(character) -> character.to_string()).collect()
+    text.split(separator.as_str()).map(fn(part) -> part.to_string()).collect()
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:1156
+fn jet_text_parse_rsplit(text: &String, separator: &String, maxsplit: I64) -> [String] {
+    if separator.is_empty() -> return text.chars().map(fn(c) -> c.to_string()).collect()
+    if maxsplit < 0 -> return text.split(separator.as_str()).map(fn(part) -> part.to_string()).collect()
+    parts: [String] := text.rsplitn(maxsplit.saturating_add(1) as USize, separator.as_str()).map(fn(part) -> part.to_string()).collect()
+    &parts.reverse()
+    ^parts
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:1174
+fn jet_text_parse_split_once(text: &String, separator: &String) -> (Bool, String, String) {
+    match text.find(separator.as_str()) {
+        .Val(index) -> (true, text[..<index].to_string(), text[index + separator.len()..].to_string())
+        .None -> (false, text.clone(), String.new())
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:1187
+fn jet_text_parse_partition(text: &String, separator: &String) -> (String, String, String) {
+    match text.find(separator.as_str()) {
+        .Val(index) -> (text[..<index].to_string(), separator.clone(), text[index + separator.len()..].to_string())
+        .None -> (text.clone(), String.new(), String.new())
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:1200
+fn jet_text_parse_rpartition(text: &String, separator: &String) -> (String, String, String) {
+    match text.rfind(separator.as_str()) {
+        .Val(index) -> (text[..<index].to_string(), separator.clone(), text[index + separator.len()..].to_string())
+        .None -> (String.new(), String.new(), text.clone())
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:1213
+fn jet_text_parse_split_ws(text: &String) -> [String] { text.split_whitespace().map(fn(part) -> part.to_string()).collect() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:1216
+fn jet_text_parse_bool(text: &String) -> Bool? {
+    trimmed := text.trim() // #4303
+    match trimmed.to_ascii_lowercase().as_str() {
+        "true" | "1" | "yes" | "on" -> Val(true)
+        "false" | "0" | "no" | "off" -> Val(false)
+        _ -> None
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:1223
+fn jet_text_parse_int(text: &String) -> I64? {
+    trimmed := text.trim() // #4303
+    trimmed.parse<I64>().ok()
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:1226
+fn jet_text_parse_int_base(text: &String, base: I64) -> I64? {
+    if base < 2 || base > 36 -> return None
+    trimmed := text.trim() // #4303
+    (negative, digits) :: match trimmed.strip_prefix('-') {
+        .Val(rest) -> (true, rest)
+        .None -> (false, trimmed.strip_prefix('+').unwrap_or(trimmed))
+    }
+    parsed :: I64.from_str_radix(digits, base as U32).ok()?
+    Val(if negative -> -parsed else -> parsed)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:1238
+fn jet_text_parse_float(text: &String) -> F64? {
+    trimmed := text.trim() // #4303
+    trimmed.parse<F64>().ok()
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:1241
+fn jet_text_parse_find(text: &String, needle: &String) -> I64 { text.find(needle.as_str()).map_or(-1, fn(index) -> index as I64) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:1244
+fn jet_text_parse_rfind(text: &String, needle: &String) -> I64 { text.rfind(needle.as_str()).map_or(-1, fn(index) -> index as I64) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:1247
+fn jet_text_parse_count(text: &String, needle: &String) -> I64 {
+    if needle.is_empty() -> return text.chars().count() as I64 + 1
+    text.match_indices(needle.as_str()).count() as I64
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:1253
+fn jet_text_parse_replace_n(text: &String, old: &String, new: &String, count: I64) -> String {
+    if old.is_empty() -> return text.clone()
+    if count < 0 -> text.replace(old.as_str(), new.as_str())
+        else -> text.replacen(old.as_str(), new.as_str(), count as USize)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:1268
+fn jet_text_parse_kv(text: &String, separator: &String) -> (String, Bool, String) {
+    if separator.is_empty() {
+        trimmed := text.trim() // #4303
+        return (trimmed.to_string(), false, String.new())
+    }
+    match text.find(separator.as_str()) {
+        .Val(index) -> {
+            key := text[..<index].trim() // #4303
+            value := text[index + separator.len()..].trim() // #4303
+            (key.to_string(), true, value.to_string())
+        }
+        .None -> {
+            trimmed := text.trim() // #4303
+            (trimmed.to_string(), false, String.new())
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:1284
+fn jet_text_parse_join(parts: &[String], separator: &String) -> String { parts.join(separator.as_str()) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:1287
+fn jet_text_parse_splitlines(text: &String, keepends: Bool) -> [String] {
+    out := [String]{}
+    start := 0
+    bytes :: text.as_bytes()
+    index := 0
+    loop index < bytes.len() {
+        width := 0
+        if bytes[index] == U8{10} -> width = 1
+        else if bytes[index] == U8{13} -> width = if bytes.get(index + 1) == .Val(U8{10}) -> 2 else -> 1
+        else { index += 1; next }
+        end :: index + width
+        stop :: if keepends -> end else -> index
+        &out.push(text.get(start..<stop).unwrap_or_default().to_string())
+        start = end
+        index = end
+    }
+    if start < bytes.len() || (start == 0 && !text.is_empty()) -> &out.push(text.get(start..).unwrap_or_default().to_string())
+    ^out
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:1316
+fn jet_text_wrap(text: &String, width: I64) -> [String] {
+    if width <= 0 -> return [text.clone()]
+    out := [String]{}
+    line := String.new()
+    loop word in text.split_whitespace() {
+        if line.is_empty() {
+            &line.push_str(word)
+        } else {
+            trial :: format("{} {}", line, word)
+            if trial.len() <= width as USize -> line = trial
+            else {
+                &out.push(^line)
+                line = String.new()
+                &line.push_str(word)
+            }
+        }
+    }
+    if !line.is_empty() -> &out.push(^line)
+    ^out
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:1340
+fn jet_text_fill(text: &String, width: I64) -> String { jet_text_wrap(text, width).join("\n") }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:1343
+fn jet_text_indent_with(text: &String, prefix: &String, predicate_nonblank: Bool) -> String {
+    parts: [String] :: text.split('\n').map(fn(line) -> {
+        if !predicate_nonblank || !line.trim_matches([' ', '\t']).is_empty() -> format("{}{}", prefix, line)
+        else -> line.to_string()
+    }).collect()
+    parts.join("\n")
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:1359
+fn jet_text_wrap_paragraphs(text: &String, width: I64) -> String {
+    parts: [String] :: text.split("\n\n").filter(fn(paragraph) -> !paragraph.trim().is_empty())
+        .map(fn(paragraph) -> jet_text_fill(paragraph.to_string(), width)).collect()
+    parts.join("\n\n")
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:1366
+fn jet_text_hanging_indent(text: &String, first: &String, rest: &String, width: I64) -> String {
+    words: [View<str>] :: text.split_whitespace().collect()
+    if words.is_empty() -> return String.new()
+    lines := [String]{}
+    current := String.new()
+    prefix := first.as_str()
+    loop word in words {
+        limit :: (width - prefix.len() as I64).max(1) as USize
+        trial :: if current.is_empty() -> word.to_string() else -> format("{} {}", current, word)
+        if !current.is_empty() && trial.len() > limit {
+            &lines.push(format("{}{}", prefix, current))
+            prefix = rest.as_str()
+            current = word.to_string()
+        } else -> current = trial
+    }
+    if !current.is_empty() -> &lines.push(format("{}{}", prefix, current))
+    lines.join("\n")
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:1399
+fn jet_text_shorten(text: &String, width: I64, placeholder: &String) -> String {
+    if width < 0 || text.len() <= width as USize -> return text.clone()
+    keep :: (width as USize).saturating_sub(placeholder.len())
+    end :: text.char_indices().take_while(fn(row) -> row.0 < keep)
+        .map(fn(row) -> row.0 + row.1.len_utf8()).last().unwrap_or(0).min(keep)
+    format("{}{}", text[..<end], placeholder)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:1413
+fn jet_text_indent(text: &String, prefix: &String) -> String {
+    lines: [String] :: text.split('\n').map(fn(line) -> format("{}{}", prefix, line)).collect()
+    lines.join("\n")
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:1419
+fn jet_text_dedent(text: &String) -> String {
+    lines: [View<str>] :: text.split('\n').collect()
+    margin :: lines.iter().filter(fn(line) -> !line.trim_matches([' ', '\t']).is_empty())
+        .map(fn(line) -> line.len() - line.trim_start_matches([' ', '\t']).len()).min().unwrap_or(0)
+    if margin == 0 -> return text.clone()
+    parts: [String] :: lines.iter().map(fn(line) -> {
+        if line.trim_matches([' ', '\t']).is_empty() -> line.to_string()
+        else -> line.get(margin..).unwrap_or("").to_string()
+    }).collect()
+    parts.join("\n")
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:1442
+fn jet_text_expand_tabs(text: &String, tabsize: I64) -> String {
+    size :: if tabsize <= 0 -> USize{8} else -> tabsize as USize
+    out := String.with_capacity(text.len())
+    column: USize := 0
+    loop character in text.chars() {
+        match character {
+            '\t' -> {
+                spaces :: size - (column % size)
+                &out.extend(std.iter.repeat_n(' ', spaces))
+                column += spaces
+            }
+            '\n' -> { &out.push('\n'); column = 0 }
+            _ -> { &out.push(character); column += 1 }
+        }
+    }
+    ^out
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:1465
+fn jet_text_html_entity(name: View<str>) -> String? {
+    named: Char? :: match name {
+        "amp" -> Val('&')
+        "lt" -> Val('<')
+        "gt" -> Val('>')
+        "quot" -> Val('"')
+        "apos" -> Val('\'')
+        "nbsp" -> Val(' ')
+        "copy" -> Val('©')
+        "reg" -> Val('®')
+        "trade" -> Val('™')
+        "mdash" -> Val('—')
+        "ndash" -> Val('–')
+        "hellip" -> Val('…')
+        _ -> None
+    }
+    if named == .Val(character) -> return Val(character.to_string())
+    number :: if name.strip_prefix("#x").or_else(fn() -> name.strip_prefix("#X")) == .Val(hex) {
+        U32.from_str_radix(hex, 16).ok()
+    } else {
+        name.strip_prefix('#').and_then(fn(decimal) -> decimal.parse<U32>().ok())
+    }
+    number.and_then(Char.from_u32).map(fn(character) -> character.to_string())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:1491
+fn jet_text_html_escape(text: &String, quote: Bool) -> String {
+    out := String.with_capacity(text.len())
+    loop character in text.chars() {
+        match character {
+            '&' -> &out.push_str("&amp;")
+            '<' -> &out.push_str("&lt;")
+            '>' -> &out.push_str("&gt;")
+            '"' if quote -> &out.push_str("&quot;")
+            '\'' if quote -> &out.push_str("&#x27;")
+            _ -> &out.push(character)
+        }
+    }
+    ^out
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:1505
+fn jet_text_html_unescape(text: &String) -> String {
+    out := String.with_capacity(text.len())
+    rest := text.as_str()
+    loop {
+        start :: rest.find('&') ?? break
+        &out.push_str(rest[..<start])
+        after :: rest[start + 1..]
+        end_option :: after.find(';').filter(fn(end) -> end <= 31)
+        if end_option == .None {
+            &out.push('&')
+            rest = after
+            next
+        }
+        end :: end_option.unwrap()
+        name :: after[..<end]
+        if jet_text_html_entity(name) == .Val(decoded) {
+            &out.push_str(decoded)
+            rest = after[end + 1..]
+        } else {
+            &out.push('&')
+            rest = after
+        }
+    }
+    &out.push_str(rest)
+    ^out
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:1528
+fn jet_text_html_strip_tags(text: &String) -> String {
+    out := String.with_capacity(text.len())
+    in_tag := false
+    loop character in text.chars() {
+        match character {
+            '<' -> in_tag = true
+            '>' if in_tag -> in_tag = false
+            _ if !in_tag -> &out.push(character)
+            _ -> {}
+        }
+    }
+    ^out
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:1541
+fn jet_text_html_escape_quoted(text: &String) -> String { jet_text_html_escape(text, true) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:1544
+fn jet_text_html_escape_text(text: &String) -> String { jet_text_html_escape(text, false) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:1547
+fn jet_text_html_unescape_and_strip(text: &String) -> String { jet_text_html_unescape(jet_text_html_strip_tags(text)) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:1550
+fn jet_text_parse_capwords(text: &String) -> String {
+    words: [String] :: text.split_whitespace().map(fn(word) -> jet_text_capitalize(word.to_string())).collect()
+    words.join(" ")
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:1556
+fn jet_text_parse_find_from(text: &String, needle: &String, start: I64) -> I64 {
+    offset :: start.max(0) as USize
+    rest :: text.get(offset..) ?? return -1
+    rest.find(needle.as_str()).map_or(-1, fn(index) -> (offset + index) as I64)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:1564
+fn jet_text_parse_rfind_from(text: &String, needle: &String, end: I64) -> I64 {
+    stop :: end.clamp(0, text.len() as I64) as USize
+    prefix :: text.get(..<stop) ?? return -1
+    prefix.rfind(needle.as_str()).map_or(-1, fn(index) -> index as I64)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:1571
+fn jet_text_parse_index(text: &String, needle: &String) -> I64 { jet_text_parse_find(text, needle) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:1574
+fn jet_text_parse_contains(text: &String, needle: &String) -> Bool { text.contains(needle.as_str()) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:1577
+fn jet_text_parse_lstrip(text: &String) -> String {
+    trimmed := text.trim_start() // #4303
+    trimmed.to_string()
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:1580
+fn jet_text_parse_rstrip(text: &String) -> String {
+    trimmed := text.trim_end() // #4303
+    trimmed.to_string()
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:1583
+fn jet_text_parse_strip(text: &String) -> String {
+    trimmed := text.trim() // #4303
+    trimmed.to_string()
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:1586
+fn jet_text_parse_escape_c(text: &String) -> String {
+    out := String.with_capacity(text.len())
+    loop character in text.chars() {
+        match character {
+            '\n' -> &out.push_str("\\n")
+            '\t' -> &out.push_str("\\t")
+            '\r' -> &out.push_str("\\r")
+            '\\' -> &out.push_str("\\\\")
+            '"' -> &out.push_str("\\\"")
+            other -> &out.push(other)
+        }
+    }
+    ^out
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:1600
+fn jet_text_parse_unescape_c(text: &String) -> String {
+    out := String.with_capacity(text.len())
+    chars := text.chars()
+    loop {
+        character :: &chars.next() ?? break
+        if character != '\\' { &out.push(character); next }
+        match &chars.next() {
+            .Val('n') -> &out.push('\n')
+            .Val('t') -> &out.push('\t')
+            .Val('r') -> &out.push('\r')
+            .Val('\\') -> &out.push('\\')
+            .Val('"') -> &out.push('"')
+            .Val(other) -> &out.push(other)
+            .None -> &out.push('\\')
+        }
+    }
+    ^out
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:1620
+fn jet_text_ends_any(s: &String, suffixes: &[String]) -> Bool { suffixes.iter().any(fn(p) -> s.ends_with(p)) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:1623
+fn jet_text_rindex(s: &String, needle: &String) -> I64 { s.rfind(needle).map(fn(index) -> index as I64).unwrap_or(-1) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:1626
+fn jet_text_isidentifier(s: &String) -> Bool {
+    chars := s.chars()
+    first :: &chars.next() ?? return false
+    (first == '_' || first.is_alphabetic()) && chars.all(fn(character) -> character == '_' || character.is_alphanumeric())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:1634
+fn jet_text_encode(s: &String) -> [U8] { s.as_bytes().to_vec() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:1637
+fn jet_text_isdecimal(s: &String) -> Bool { !s.is_empty() && s.chars().all(fn(character) -> character.is_ascii_digit()) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:1640
+fn jet_text_isnumeric(s: &String) -> Bool { !s.is_empty() && s.chars().all(Char.is_numeric) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:1643
+fn jet_text_isalnum(s: &String) -> Bool { !s.is_empty() && s.chars().all(Char.is_alphanumeric) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:1646
+fn jet_text_isdigit(s: &String) -> Bool { !s.is_empty() && s.chars().all(fn(character) -> character.is_ascii_digit()) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:1649
+fn jet_text_istitle(s: &String) -> Bool {
+    has_cased := false
+    expect_upper := true
+    loop character in s.chars() {
+        if character.is_uppercase() {
+            has_cased = true
+            expect_upper = false
+        } else if character.is_lowercase() {
+            has_cased = true
+            if expect_upper -> return false
+        } else if character.is_alphabetic() -> return false
+        else -> expect_upper = true
+    }
+    has_cased
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:1669
+fn jet_text_isprintable(s: &String) -> Bool { s.chars().all(fn(character) -> !character.is_control()) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:1672
+fn jet_text_expandtabs(s: &String, tabsize: JetInt) -> String {
+    width :: tabsize.to_i64().unwrap_or_else(fn() -> panic("text tab size does not fit native i64")).max(0)
+    column: I64 := 0
+    out := String.with_capacity(s.len())
+    loop character in s.chars() {
+        match character {
+            '\t' if width > 0 -> {
+                spaces :: width - column.rem_euclid(width)
+                &out.extend(std.iter.repeat_n(' ', spaces as USize))
+                column += spaces
+            }
+            '\t' -> {}
+            '\n' | '\r' -> { &out.push(character); column = 0 }
+            _ -> { &out.push(character); column += 1 }
+        }
+    }
+    ^out
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:1702
+fn jet_text_zfill(s: &String, width: I64) -> String {
+    length :: s.chars().count() as I64
+    if width <= length -> return s.clone()
+    (sign, body) :: if s.strip_prefix('+') == .Val(rest) -> ("+", rest)
+        else if s.strip_prefix('-') == .Val(rest) -> ("-", rest)
+        else -> ("", s.as_str())
+    format("{}{}{}", sign, "0".repeat((width - length) as USize), body)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:1716
+fn jet_text_zfill_int(s: &String, width: JetInt) -> String {
+    jet_text_zfill(s, width.to_i64().unwrap_or_else(fn() -> panic("text zfill width does not fit native i64")))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:1727
+fn jet_text_zfill_ref(s: &String, width: &JetInt) -> String {
+    jet_text_zfill(s, width.to_i64().unwrap_or_else(fn() -> panic("text zfill width does not fit native i64")))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:1735
+fn jet_text_char_indices(s: &String) -> [String] {
+    s.char_indices().map(fn(row) -> format("{}:{}", row.0, row.1)).collect()
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:1739
+fn jet_std_fs_read(path: &OSPath) -> String IOError! {
+    if jet_fault_should_fail("FS.Read") -> return Err(IOError.other(IOOperation.Read, Val(path.to_string()), "fault injected: FS.Read"))
+    // GATE #4565: kernel primitive
+    #Unsafe("native filesystem reads only the retained path and returns owned UTF-8 or an OS error") {
+        fs.read_to_string(path).map_err(fn(e) -> io_error_at(IOOperation.Read, path.to_string(), e))
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:1749
+fn jet_std_fs_write(path: &OSPath, text: &String) -> Unit IOError! {
+    if jet_fault_should_fail("FS.Write") -> return Err(IOError.other(IOOperation.Write, Val(path.to_string()), "fault injected: FS.Write"))
+    // GATE #4565: kernel primitive
+    #Unsafe("native filesystem write borrows the retained path and text through completion") {
+        fs.write(path, text).map_err(fn(e) -> io_error_at(IOOperation.Write, path.to_string(), e))
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:1759
+fn jet_std_fs_append(path: &OSPath, text: &String) -> Unit IOError! {
+    if jet_fault_should_fail("FS.Write") -> return Err(IOError.other(IOOperation.Write, Val(path.to_string()), "fault injected: FS.Write"))
+    // GATE #4565: kernel primitive
+    #Unsafe("native append handle owns its descriptor and borrows text only during write_all") {
+        f := fs.OpenOptions.new().create(true).append(true).open(path)
+            .map_err(fn(e) -> io_error_at(IOOperation.Write, path.to_string(), e))?
+        f.write_all(text.as_bytes()).map_err(fn(e) -> io_error_at(IOOperation.Write, path.to_string(), e))
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:1776
+fn jet_std_fs_exists(path: &OSPath) -> Bool {
+    // GATE #4565: kernel primitive
+    #Unsafe("native existence query borrows a retained OSPath without following owner memory") { path.exists() }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:1779
+fn jet_fs_remove_entry(path: &OSPath) -> Unit io.Error! {
+    // GATE #4565: kernel primitive
+    #Unsafe("symlink metadata decides directory removal without following a link to its target") {
+        metadata :: fs.symlink_metadata(path)?
+        if metadata.file_type().is_dir() -> fs.remove_dir(path) else -> fs.remove_file(path)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:1788
+fn jet_std_fs_remove(path: &OSPath) -> Unit IOError! {
+    if jet_fault_should_fail("FS.Write") -> return Err(IOError.other(IOOperation.Write, Val(path.to_string()), "fault injected: FS.Write"))
+    jet_fs_remove_entry(path).map_err(fn(error) -> io_error_at(IOOperation.Write, path.to_string(), error))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:1800
+fn jet_std_fs_list_dir(path: &OSPath) -> [DirEntry] IOError! {
+    if jet_fault_should_fail("FS.Read") -> return Err(IOError.other(IOOperation.Read, Val(path.to_string()), "fault injected: FS.Read"))
+    out := [DirEntry]{}
+    // GATE #4565: kernel primitive
+    #Unsafe("native directory iterator owns its handle; names and joined paths are materialized before release") {
+        rd :: fs.read_dir(path).map_err(fn(e) -> io_error_at(IOOperation.Read, path.to_string(), e))?
+        loop entry_result in rd {
+            entry :: entry_result.map_err(fn(e) -> io_error_at(IOOperation.Read, path.to_string(), e))?
+            name :: entry.file_name().to_string_lossy().to_string()
+            full_path :: path.join(name).to_string_lossy().to_string()
+            is_dir :: entry.file_type().map(fn(ft) -> ft.is_dir()).unwrap_or(false)
+            &out.push(DirEntry{name: name, path: full_path, is_dir: is_dir})
+        }
+    }
+    &out.sort_by(fn(a, b) -> a.name.cmp(b.name))
+    Ok(^out)
+}
 

@@ -1,16 +1,20 @@
-// PORT-PENDING 0291 crates-jet-codegen-src-prelude-corelib-top-nethttp-slice-1: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:1-1811
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
 use std.net as native_net
 use std.sync.[Arc, Mutex]
 use std.sync.atomic.AtomicBool
 use std.os.unix.net as native_unix
 use std.os.fd.AsRawFd
 use core.sys.target as target
-use jet_std.[IOError, IOContext, IOOperation]
+use core.prelude.runtime.std_open.[IOError, IOContext, IOOperation]
 use std.io as native_io
-use std.time.[Duration, Instant]
+use std.time.Duration
 use core.net.runtime.kernel_net_error.jet_net_error_kernel_show
-use core.crypto.runtime.top_crypto.JetCryptoSecretBytes
+use core.crypto.runtime.top_crypto_entropy.JetCryptoSecretBytes
+use core.crypto.runtime.kernel_sha256.sha256_bytes
+use core.prelude.runtime.std_common_types_02.Duration as JetDuration
+use core.time.runtime.deadline.[JetDeadlineGuard, jet_std_time_now, jet_ctx_deadline_ms, jet_ctx_push_deadline, jet_deadline_remaining_ms]
+use core.tasks.runtime.scheduler.[JetSchedulerWait, jet_scheduler_wait_without_unwind, jet_scheduler_park_ms, jet_scheduler_world_reject_uncontrolled, jet_scheduler_wait_point_cancelled]
+use core.tasks.runtime.scheduler_02.[JetSchedulerRawIoHandle, jet_scheduler_raw_io_handle, jet_scheduler_tcp_stream_ready_wait, jet_scheduler_io_wait, jet_scheduler_unix_stream_io_wait, jet_scheduler_unix_stream_ready_wait, jet_scheduler_tcp_listener_io_wait, jet_scheduler_unix_listener_io_wait, jet_scheduler_udp_io_wait, jet_scheduler_udp_ready_wait]
+use core.net.runtime.top_net_http_02.[jet_net_tcp_read_bytes, jet_net_tcp_write_bytes, jet_net_tcp_write_all_bytes, jet_net_unix_read_bytes, jet_net_unix_write_bytes, jet_net_unix_write_all_bytes]
 
 // Networking shares the OS socket substrate. TLS callbacks carry one policy.
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:8
@@ -162,7 +166,7 @@ pub struct JetUDPSocket {
     inner: Arc<native_net.UdpSocket>
     timeout_ms: Arc<Mutex<I64?>>
     closed: Arc<AtomicBool>
-    // Unix-only raw readiness registration; non-Unix native layout omits it.
+    // GATE #4483/#4565: target-native layout must omit this Unix-only field on non-Unix.
     scheduler: Arc<JetSchedulerRawIoHandle>
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:223
@@ -172,7 +176,7 @@ pub struct JetUDPPacket { data: [U8], addr: JetSocketAddr, original_len: I64, tr
 #Derive(Clone, Debug)
 pub struct JetDNSSrv { priority: I64, weight: I64, port: I64, target: String }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:238
-// Native layout has these fields on Unix; Rust:273 has the non-Unix unit layout.
+// GATE #4483/#4565: Unix native carrier; non-Unix unit layout is Rust:273.
 pub struct JetUnixListener { inner: Arc<native_unix.UnixListener>, scheduler: Arc<JetSchedulerRawIoHandle> }
 impl Clone for JetUnixListener {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:246
@@ -184,7 +188,7 @@ impl Clone for JetUnixListener {
     }
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:254
-// Native layout is a unit carrier on non-Unix (Rust:276).
+// GATE #4483/#4565: Unix native carrier; non-Unix unit layout is Rust:276.
 pub struct JetUnixStream {
     inner: native_unix.UnixStream
     scheduler: Arc<JetSchedulerRawIoHandle>
@@ -539,7 +543,7 @@ fn jet_net_error_surface_parts(error: JetNetError) -> JetNetErrorSurfaceParts {
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:879
 fn jet_net_tcp_stream(inner: native_net.TcpStream) -> JetTCPStream JetNetError! {
     // GATE #4483: exact selected WASI Preview 2 target facts.
-    if target.selected_os() == .Wasi && target.selected_env() == "p2" && target.selected_arch() == "wasm32" {
+    if target.selected_os() == "wasi" && target.selected_env() == "p2" && target.selected_arch() == "wasm32" {
         // GATE #4565: kernel primitive
         #Unsafe("WASI sockets use their shared blocking adapter, not the native scheduler") {
             inner.set_nonblocking(false)
@@ -560,7 +564,7 @@ fn jet_net_operation_deadline(timeout_ms: I64?) -> JetDeadlineGuard? {
     Val(jet_ctx_push_deadline(deadline))
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:908
-fn jet_net_explicit_deadline(deadline: &jet_std.Duration, operation: String) -> JetDeadlineGuard? JetNetError! {
+fn jet_net_explicit_deadline(deadline: &JetDuration, operation: String) -> JetDeadlineGuard? JetNetError! {
     jet_net_timeout(deadline.as_millis()).map_err(fn(message) -> JetNetError.InvalidInput(jet_net_detail(operation, None, None, ^message, None)))?
     Ok(jet_net_operation_deadline(Val(deadline.as_millis())))
 }
@@ -602,7 +606,7 @@ fn jet_net_connect_addr_worker(addr: native_net.SocketAddr) -> JetTCPStream JetN
     if jet_deadline_remaining_ms() == Val(ms) && ms <= 0 -> return Err(jet_net_deadline_timeout("tcp connect"))
     timeout :: jet_deadline_remaining_ms().map(fn(ms) -> Duration.from_millis(ms.max(1) as U64))
     // GATE #4483: exact selected WASI Preview 2 target facts.
-    if target.selected_os() == .Wasi && target.selected_env() == "p2" && target.selected_arch() == "wasm32" {
+    if target.selected_os() == "wasi" && target.selected_env() == "p2" && target.selected_arch() == "wasm32" {
         address :: addr.to_string()
         // GATE #4565: kernel primitive
         result :: #Unsafe("perform connect through the shared WASI socket adapter, honoring the remaining deadline") {
@@ -812,364 +816,168 @@ fn jet_net_tls_client_scheduler(stream: JetTCPStream, server_name: &String,
     jet_net_tls_client_scheduler_with_begin(^stream, fn(inner) -> begin(^inner, server_name),
         handshake_step, abort, wants, read_ready, read_step, write_step, close_step, close_write_step, peer_snapshot)
 }
-//RS 
-//RS fn jet_net_tls_client_scheduler_with_begin<F>(
-//RS     stream: JetTCPStream,
-//RS     begin: F,
-//RS     handshake_step: fn(i64) -> Result<bool, String>,
-//RS     abort: fn(i64),
-//RS     wants: fn(i64) -> Result<(bool, bool), String>,
-//RS     read_ready: fn(i64) -> Result<bool, String>,
-//RS     read_step: fn(i64, i64) -> Result<Option<Vec<u8>>, String>,
-//RS     write_step: fn(i64, &Vec<u8>) -> Result<Option<i64>, String>,
-//RS     close_step: fn(i64) -> Result<bool, String>,
-//RS     close_write_step: fn(i64) -> Result<bool, String>,
-//RS     peer_snapshot: fn(i64) -> Result<JetTLSPeerSnapshot, String>,
-//RS ) -> Result<JetTLSStream, JetNetError>
-//RS where
-//RS     F: FnOnce(std::net::TcpStream) -> Result<i64, String>,
-//RS {
-//RS     let socket = stream
-//RS         .inner
-//RS         .try_clone()
-//RS         .map_err(|error| jet_net_io_error("tls scheduler registration", None, error))?;
-//RS     let read_timeout_ms = stream.read_timeout_ms;
-//RS     let write_timeout_ms = stream.write_timeout_ms;
-//RS     let handshake_timeout_ms = match (read_timeout_ms, write_timeout_ms) {
-//RS         (Some(read), Some(write)) => Some(read.min(write)),
-//RS         (read, write) => read.or(write),
-//RS     };
-//RS     let id = jet_net_tls_result(begin(stream.inner), "tls handshake")?;
-//RS     let mut tls = JetTLSStream {
-//RS         id,
-//RS         socket,
-//RS         read_timeout_ms,
-//RS         write_timeout_ms,
-//RS         wants,
-//RS         read_ready,
-//RS         read_step,
-//RS         write_step,
-//RS         close_step,
-//RS         close_write_step,
-//RS         peer_snapshot,
-//RS         peer_identity: None,
-//RS     };
-//RS     let result = (|| {
-//RS         let _deadline = jet_net_operation_deadline(handshake_timeout_ms);
-//RS         loop {
-//RS             if jet_net_tls_result(handshake_step(id), "tls handshake")? {
-//RS                 let peer = jet_net_tls_peer_identity_from_snapshot(jet_net_tls_result(
-//RS                     (tls.peer_snapshot)(id),
-//RS                     "tls peer identity",
-//RS                 )?)?;
-//RS                 tls.peer_identity = Some(peer);
-//RS                 return Ok(tls);
-//RS             }
-//RS             jet_net_tls_scheduler_wait(&tls, true, true, "tls handshake")?;
-//RS         }
-//RS     })();
-//RS     if result.is_err() {
-//RS         abort(id);
-//RS     }
-//RS     result
-//RS }
-//RS 
-//RS fn jet_net_tls_client_scheduler_deadline(
-//RS     stream: JetTCPStream,
-//RS     server_name: &String,
-//RS     deadline: &jet_std::Duration,
-//RS     begin: fn(std::net::TcpStream, &String) -> Result<i64, String>,
-//RS     handshake_step: fn(i64) -> Result<bool, String>,
-//RS     abort: fn(i64),
-//RS     wants: fn(i64) -> Result<(bool, bool), String>,
-//RS     read_ready: fn(i64) -> Result<bool, String>,
-//RS     read_step: fn(i64, i64) -> Result<Option<Vec<u8>>, String>,
-//RS     write_step: fn(i64, &Vec<u8>) -> Result<Option<i64>, String>,
-//RS     close_step: fn(i64) -> Result<bool, String>,
-//RS     close_write_step: fn(i64) -> Result<bool, String>,
-//RS     peer_snapshot: fn(i64) -> Result<JetTLSPeerSnapshot, String>,
-//RS ) -> Result<JetTLSStream, JetNetError> {
-//RS     let _deadline = jet_net_explicit_deadline(deadline, "tls handshake")?;
-//RS     jet_net_tls_client_scheduler(
-//RS         stream,
-//RS         server_name,
-//RS         begin,
-//RS         handshake_step,
-//RS         abort,
-//RS         wants,
-//RS         read_ready,
-//RS         read_step,
-//RS         write_step,
-//RS         close_step,
-//RS         close_write_step,
-//RS         peer_snapshot,
-//RS     )
-//RS }
-//RS 
-//RS fn jet_net_tls_client_scheduler_config_deadline(
-//RS     stream: JetTCPStream,
-//RS     server_name: &String,
-//RS     config: &JetTLSClientConfig,
-//RS     deadline: &jet_std::Duration,
-//RS     begin: fn(
-//RS         std::net::TcpStream,
-//RS         &String,
-//RS         i64,
-//RS         &Vec<u8>,
-//RS         &Vec<u8>,
-//RS         &Vec<u8>,
-//RS         i64,
-//RS         i64,
-//RS         &Vec<String>,
-//RS     ) -> Result<i64, String>,
-//RS     handshake_step: fn(i64) -> Result<bool, String>,
-//RS     abort: fn(i64),
-//RS     wants: fn(i64) -> Result<(bool, bool), String>,
-//RS     read_ready: fn(i64) -> Result<bool, String>,
-//RS     read_step: fn(i64, i64) -> Result<Option<Vec<u8>>, String>,
-//RS     write_step: fn(i64, &Vec<u8>) -> Result<Option<i64>, String>,
-//RS     close_step: fn(i64) -> Result<bool, String>,
-//RS     close_write_step: fn(i64) -> Result<bool, String>,
-//RS     peer_snapshot: fn(i64) -> Result<JetTLSPeerSnapshot, String>,
-//RS ) -> Result<JetTLSStream, JetNetError> {
-//RS     let _deadline = jet_net_explicit_deadline(deadline, "tls handshake")?;
-//RS     let (trust_mode, roots) = match &config.trust {
-//RS         JetTLSTrust::System => (0, Vec::new()),
-//RS         JetTLSTrust::SystemPlus(roots) => (1, roots.pem.clone()),
-//RS         JetTLSTrust::CustomOnly(roots) => (2, roots.pem.clone()),
-//RS     };
-//RS     let empty = Vec::new();
-//RS     let (cert_chain, private_key) = config
-//RS         .identity
-//RS         .as_ref()
-//RS         .map(|identity| (&identity.cert_chain, identity.private_key.as_vec()))
-//RS         .unwrap_or((&empty, &empty));
-//RS     let version = |version| match version {
-//RS         JetTLSVersion::TLS12 => 12,
-//RS         JetTLSVersion::TLS13 => 13,
-//RS     };
-//RS     jet_net_tls_client_scheduler_with_begin(
-//RS         stream,
-//RS         |inner| {
-//RS             begin(
-//RS                 inner,
-//RS                 server_name,
-//RS                 trust_mode,
-//RS                 &roots,
-//RS                 cert_chain,
-//RS                 private_key,
-//RS                 version(config.min_version),
-//RS                 version(config.max_version),
-//RS                 &config.alpn,
-//RS             )
-//RS         },
-//RS         handshake_step,
-//RS         abort,
-//RS         wants,
-//RS         read_ready,
-//RS         read_step,
-//RS         write_step,
-//RS         close_step,
-//RS         close_write_step,
-//RS         peer_snapshot,
-//RS     )
-//RS }
-//RS 
-//RS fn jet_net_tls_read_bytes(
-//RS     stream: &mut JetTLSStream,
-//RS     limit: i64,
-//RS ) -> Result<Vec<u8>, jet_std::IOError> {
-//RS     if limit <= 0 {
-//RS         return Err(jet_std::IOError::InvalidInput(jet_std::IOContext::new(
-//RS             jet_std::IOOperation::Read,
-//RS             Some("TLS stream".to_string()),
-//RS             None,
-//RS             Some("tls read limit must be positive".to_string()),
-//RS         )));
-//RS     }
-//RS     let _deadline = jet_net_operation_deadline(stream.read_timeout_ms);
-//RS     loop {
-//RS         match jet_net_tls_io_result(
-//RS             (stream.read_step)(stream.id, limit),
-//RS             jet_std::IOOperation::Read,
-//RS         )? {
-//RS             Some(bytes) => return Ok(bytes),
-//RS             None => jet_net_tls_io_scheduler_wait(stream, true, false, jet_std::IOOperation::Read)?,
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn jet_net_tls_read_bytes_deadline(
-//RS     stream: &mut JetTLSStream,
-//RS     limit: i64,
-//RS     deadline: &jet_std::Duration,
-//RS ) -> Result<Vec<u8>, jet_std::IOError> {
-//RS     let _deadline = jet_net_explicit_deadline(deadline, "tls read").map_err(jet_net_to_io_error)?;
-//RS     jet_net_tls_read_bytes(stream, limit)
-//RS }
-//RS 
-//RS fn jet_net_tls_read_text(stream: &mut JetTLSStream) -> Result<String, jet_std::IOError> {
-//RS     let bytes = jet_net_tls_read_bytes(stream, 8192)?;
-//RS     String::from_utf8(bytes).map_err(|error| {
-//RS         jet_std::IOError::InvalidInput(jet_std::IOContext::new(
-//RS             jet_std::IOOperation::Read,
-//RS             Some("TLS stream".to_string()),
-//RS             None,
-//RS             Some(format!("tls read text failed: invalid UTF-8: {}", error)),
-//RS         ))
-//RS     })
-//RS }
-//RS 
-//RS fn jet_net_tls_write_bytes_with_current_deadline(
-//RS     stream: &mut JetTLSStream,
-//RS     data: &Vec<u8>,
-//RS ) -> Result<i64, jet_std::IOError> {
-//RS     loop {
-//RS         match jet_net_tls_io_result(
-//RS             (stream.write_step)(stream.id, data),
-//RS             jet_std::IOOperation::Write,
-//RS         )? {
-//RS             Some(count) => return Ok(count),
-//RS             None => {
-//RS                 jet_net_tls_io_scheduler_wait(stream, false, true, jet_std::IOOperation::Write)?
-//RS             }
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn jet_net_tls_write_bytes(
-//RS     stream: &mut JetTLSStream,
-//RS     data: &Vec<u8>,
-//RS ) -> Result<i64, jet_std::IOError> {
-//RS     let _deadline = jet_net_operation_deadline(stream.write_timeout_ms);
-//RS     jet_net_tls_write_bytes_with_current_deadline(stream, data)
-//RS }
-//RS 
-//RS fn jet_net_tls_write_all_bytes(
-//RS     stream: &mut JetTLSStream,
-//RS     data: &Vec<u8>,
-//RS ) -> Result<(), jet_std::IOError> {
-//RS     let _deadline = jet_net_operation_deadline(stream.write_timeout_ms);
-//RS     let mut offset = 0usize;
-//RS     while offset < data.len() {
-//RS         let chunk = data[offset..].to_vec();
-//RS         let count = jet_net_tls_write_bytes_with_current_deadline(stream, &chunk)? as usize;
-//RS         if count == 0 {
-//RS             return Err(jet_std::IOError::Other(jet_std::IOContext::new(
-//RS                 jet_std::IOOperation::Write,
-//RS                 Some("TLS stream".to_string()),
-//RS                 None,
-//RS                 Some("tls write all failed: zero bytes written".to_string()),
-//RS             )));
-//RS         }
-//RS         offset += count;
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn jet_net_tls_write_all_bytes_deadline(
-//RS     stream: &mut JetTLSStream,
-//RS     data: &Vec<u8>,
-//RS     deadline: &jet_std::Duration,
-//RS ) -> Result<(), jet_std::IOError> {
-//RS     let _deadline =
-//RS         jet_net_explicit_deadline(deadline, "tls write all").map_err(jet_net_to_io_error)?;
-//RS     jet_net_tls_write_all_bytes(stream, data)
-//RS }
-//RS 
-//RS fn jet_net_tls_write_text(
-//RS     stream: &mut JetTLSStream,
-//RS     text: &String,
-//RS ) -> Result<(), jet_std::IOError> {
-//RS     jet_net_tls_write_all_bytes(stream, &text.as_bytes().to_vec())
-//RS }
-//RS 
-//RS fn jet_net_tls_close(stream: &mut JetTLSStream) -> Result<(), jet_std::IOError> {
-//RS     let _deadline = jet_net_operation_deadline(stream.write_timeout_ms);
-//RS     loop {
-//RS         if jet_net_tls_io_result((stream.close_step)(stream.id), jet_std::IOOperation::Close)? {
-//RS             return Ok(());
-//RS         }
-//RS         jet_net_tls_io_scheduler_wait(stream, false, true, jet_std::IOOperation::Close)?;
-//RS     }
-//RS }
-//RS 
-//RS fn jet_net_tls_close_write(
-//RS     stream: &mut JetTLSStream,
-//RS     deadline: &jet_std::Duration,
-//RS ) -> Result<(), jet_std::IOError> {
-//RS     let _deadline =
-//RS         jet_net_explicit_deadline(deadline, "tls close write").map_err(jet_net_to_io_error)?;
-//RS     loop {
-//RS         if jet_net_tls_io_result(
-//RS             (stream.close_write_step)(stream.id),
-//RS             jet_std::IOOperation::Close,
-//RS         )? {
-//RS             return Ok(());
-//RS         }
-//RS         jet_net_tls_io_scheduler_wait(stream, false, true, jet_std::IOOperation::Close)?;
-//RS     }
-//RS }
-//RS 
-//RS fn jet_net_tls_peer_identity_from_snapshot(
-//RS     snapshot: JetTLSPeerSnapshot,
-//RS ) -> Result<JetTLSPeerIdentity, JetNetError> {
-//RS     let (
-//RS         verified_server_name,
-//RS         ders,
-//RS         spkis,
-//RS         dns_names,
-//RS         valid_from,
-//RS         valid_until,
-//RS         subjects,
-//RS         issuers,
-//RS         cipher_suite,
-//RS         tls_version,
-//RS     ) = snapshot;
-//RS     let mut certificate_chain = Vec::with_capacity(ders.len());
-//RS     for index in 0..ders.len() {
-//RS         let der = ders[index].clone();
-//RS         certificate_chain.push(JetTLSCertificate {
-//RS             sha256: jet_sha256_raw(&der).to_vec(),
-//RS             spki_sha256: jet_sha256_raw(&spkis[index]).to_vec(),
-//RS             der,
-//RS             dns_names: dns_names[index].clone(),
-//RS             valid_from_unix_ms: valid_from[index],
-//RS             valid_until_unix_ms: valid_until[index],
-//RS             subject: subjects[index].clone(),
-//RS             issuer: issuers[index].clone(),
-//RS         });
-//RS     }
-//RS     let leaf = certificate_chain.first().cloned().ok_or_else(|| {
-//RS         JetNetError::TLS(jet_net_detail(
-//RS             "tls peer identity",
-//RS             None,
-//RS             None,
-//RS             "verified TLS peer chain is empty".to_string(),
-//RS             None,
-//RS         ))
-//RS     })?;
-//RS     let tls_version = match tls_version {
-//RS         12 => JetTLSVersion::TLS12,
-//RS         13 => JetTLSVersion::TLS13,
-//RS         other => {
-//RS             return Err(JetNetError::TLS(jet_net_detail(
-//RS                 "tls peer identity",
-//RS                 None,
-//RS                 None,
-//RS                 format!("TLS peer negotiated unsupported protocol version `{other}`"),
-//RS                 None,
-//RS             )))
-//RS         }
-//RS     };
-//RS     Ok(JetTLSPeerIdentity {
-//RS         verified_server_name,
-//RS         leaf,
-//RS         certificate_chain,
-//RS         cipher_suite,
-//RS         tls_version,
-//RS     })
-//RS }
-//RS 
-// END-PORT-PENDING 0291 crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:1-1811
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:1454
+fn jet_net_tls_client_scheduler_with_begin(stream: JetTCPStream,
+    begin: fn(native_net.TcpStream) -> I64 Err!,
+    handshake_step: fn(I64) -> Bool Err!, abort: fn(I64) -> (),
+    wants: fn(I64) -> (Bool, Bool) Err!, read_ready: fn(I64) -> Bool Err!,
+    read_step: fn(I64, I64) -> [U8]? Err!, write_step: fn(I64, &[U8]) -> I64? Err!,
+    close_step: fn(I64) -> Bool Err!, close_write_step: fn(I64) -> Bool Err!,
+    peer_snapshot: fn(I64) -> JetTLSPeerSnapshot Err!) -> JetTLSStream JetNetError! {
+    // GATE #4565: kernel primitive
+    socket :: #Unsafe("duplicate the TCP descriptor for scheduler readiness before transferring the original into TLS") {
+        stream.inner.try_clone()
+    }.map_err(fn(error) -> jet_net_io_error("tls scheduler registration", None, error))?
+    read_timeout_ms :: stream.read_timeout_ms
+    write_timeout_ms :: stream.write_timeout_ms
+    handshake_timeout_ms :: match (read_timeout_ms, write_timeout_ms) {
+        (Val(read), Val(write)) -> Val(read.min(write))
+        (read, write) -> read.or(write)
+    }
+    id :: jet_net_tls_result(begin(^stream.inner), "tls handshake")?
+    tls := JetTLSStream{id: id, socket: ^socket, read_timeout_ms: read_timeout_ms, write_timeout_ms: write_timeout_ms,
+        wants: wants, read_ready: read_ready, read_step: read_step, write_step: write_step,
+        close_step: close_step, close_write_step: close_write_step, peer_snapshot: peer_snapshot, peer_identity: None}
+    result :: (fn() -> JetTLSStream JetNetError! {
+        _deadline :: jet_net_operation_deadline(handshake_timeout_ms)
+        loop {
+            if jet_net_tls_result(handshake_step(id), "tls handshake")? {
+                peer :: jet_net_tls_peer_identity_from_snapshot(jet_net_tls_result(tls.peer_snapshot(id), "tls peer identity")?)?
+                tls.peer_identity = Val(^peer)
+                return Ok(^tls)
+            }
+            jet_net_tls_scheduler_wait(&tls, true, true, "tls handshake")?
+        }
+    })()
+    if result.is_err() { abort(id) }
+    ^result
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:1515
+fn jet_net_tls_client_scheduler_deadline(stream: JetTCPStream, server_name: &String, deadline: &JetDuration,
+    begin: fn(native_net.TcpStream, &String) -> I64 Err!,
+    handshake_step: fn(I64) -> Bool Err!, abort: fn(I64) -> (),
+    wants: fn(I64) -> (Bool, Bool) Err!, read_ready: fn(I64) -> Bool Err!,
+    read_step: fn(I64, I64) -> [U8]? Err!, write_step: fn(I64, &[U8]) -> I64? Err!,
+    close_step: fn(I64) -> Bool Err!, close_write_step: fn(I64) -> Bool Err!,
+    peer_snapshot: fn(I64) -> JetTLSPeerSnapshot Err!) -> JetTLSStream JetNetError! {
+    _deadline :: jet_net_explicit_deadline(deadline, "tls handshake")?
+    jet_net_tls_client_scheduler(^stream, server_name, begin, handshake_step, abort, wants, read_ready,
+        read_step, write_step, close_step, close_write_step, peer_snapshot)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:1547
+fn jet_net_tls_client_scheduler_config_deadline(stream: JetTCPStream, server_name: &String,
+    config: &JetTLSClientConfig, deadline: &JetDuration,
+    begin: fn(native_net.TcpStream, &String, I64, &[U8], &[U8], &[U8], I64, I64, &[String]) -> I64 Err!,
+    handshake_step: fn(I64) -> Bool Err!, abort: fn(I64) -> (),
+    wants: fn(I64) -> (Bool, Bool) Err!, read_ready: fn(I64) -> Bool Err!,
+    read_step: fn(I64, I64) -> [U8]? Err!, write_step: fn(I64, &[U8]) -> I64? Err!,
+    close_step: fn(I64) -> Bool Err!, close_write_step: fn(I64) -> Bool Err!,
+    peer_snapshot: fn(I64) -> JetTLSPeerSnapshot Err!) -> JetTLSStream JetNetError! {
+    _deadline :: jet_net_explicit_deadline(deadline, "tls handshake")?
+    (trust_mode, roots) :: match config.trust {
+        .System -> (0, [U8]{})
+        .SystemPlus(roots) -> (1, roots.pem.clone())
+        .CustomOnly(roots) -> (2, roots.pem.clone())
+    }
+    empty :: [U8]{}
+    (cert_chain, private_key) :: config.identity.as_ref().map(fn(identity) -> (&identity.cert_chain, identity.private_key.as_vec())).unwrap_or((&empty, &empty))
+    version :: fn(version) -> match version { .TLS12 -> 12, .TLS13 -> 13 }
+    jet_net_tls_client_scheduler_with_begin(^stream,
+        fn(inner) -> begin(^inner, server_name, trust_mode, &roots, cert_chain, private_key,
+            version(config.min_version), version(config.max_version), &config.alpn),
+        handshake_step, abort, wants, read_ready, read_step, write_step, close_step, close_write_step, peer_snapshot)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:1616
+fn jet_net_tls_read_bytes(stream: &JetTLSStream, limit: I64) -> [U8] IOError! {
+    if limit <= 0 -> return Err(IOError.InvalidInput(IOContext.new(IOOperation.Read, Val("TLS stream"), None, Val("tls read limit must be positive"))))
+    _deadline :: jet_net_operation_deadline(stream.read_timeout_ms)
+    loop {
+        match jet_net_tls_io_result(stream.read_step(stream.id, limit), IOOperation.Read)? {
+            Val(bytes) -> return Ok(^bytes)
+            None -> { jet_net_tls_io_scheduler_wait(stream, true, false, IOOperation.Read)? }
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:1640
+fn jet_net_tls_read_bytes_deadline(stream: &JetTLSStream, limit: I64, deadline: &JetDuration) -> [U8] IOError! {
+    _deadline :: jet_net_explicit_deadline(deadline, "tls read").map_err(jet_net_to_io_error)?
+    jet_net_tls_read_bytes(stream, limit)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:1649
+fn jet_net_tls_read_text(stream: &JetTLSStream) -> String IOError! {
+    bytes :: jet_net_tls_read_bytes(stream, 8192)?
+    String.from_utf8(^bytes).map_err(fn(error) -> IOError.InvalidInput(IOContext.new(IOOperation.Read, Val("TLS stream"), None, Val("tls read text failed: invalid UTF-8: {error}"))))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:1661
+fn jet_net_tls_write_bytes_with_current_deadline(stream: &JetTLSStream, data: &[U8]) -> I64 IOError! {
+    loop {
+        match jet_net_tls_io_result(stream.write_step(stream.id, data), IOOperation.Write)? {
+            Val(count) -> return Ok(count)
+            None -> { jet_net_tls_io_scheduler_wait(stream, false, true, IOOperation.Write)? }
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:1678
+fn jet_net_tls_write_bytes(stream: &JetTLSStream, data: &[U8]) -> I64 IOError! {
+    _deadline :: jet_net_operation_deadline(stream.write_timeout_ms)
+    jet_net_tls_write_bytes_with_current_deadline(stream, data)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:1686
+fn jet_net_tls_write_all_bytes(stream: &JetTLSStream, data: &[U8]) -> () IOError! {
+    _deadline :: jet_net_operation_deadline(stream.write_timeout_ms)
+    offset: USize := 0
+    loop offset < data.len() {
+        chunk :: data[offset..].to_vec()
+        count :: jet_net_tls_write_bytes_with_current_deadline(stream, &chunk)? as USize
+        if count == 0 -> return Err(IOError.Other(IOContext.new(IOOperation.Write, Val("TLS stream"), None, Val("tls write all failed: zero bytes written"))))
+        offset += count
+    }
+    Ok(())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:1708
+fn jet_net_tls_write_all_bytes_deadline(stream: &JetTLSStream, data: &[U8], deadline: &JetDuration) -> () IOError! {
+    _deadline :: jet_net_explicit_deadline(deadline, "tls write all").map_err(jet_net_to_io_error)?
+    jet_net_tls_write_all_bytes(stream, data)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:1718
+fn jet_net_tls_write_text(stream: &JetTLSStream, text: &String) -> () IOError! {
+    jet_net_tls_write_all_bytes(stream, &text.as_bytes().to_vec())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:1725
+fn jet_net_tls_close(stream: &JetTLSStream) -> () IOError! {
+    _deadline :: jet_net_operation_deadline(stream.write_timeout_ms)
+    loop {
+        if jet_net_tls_io_result(stream.close_step(stream.id), IOOperation.Close)? -> return Ok(())
+        jet_net_tls_io_scheduler_wait(stream, false, true, IOOperation.Close)?
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:1735
+fn jet_net_tls_close_write(stream: &JetTLSStream, deadline: &JetDuration) -> () IOError! {
+    _deadline :: jet_net_explicit_deadline(deadline, "tls close write").map_err(jet_net_to_io_error)?
+    loop {
+        if jet_net_tls_io_result(stream.close_write_step(stream.id), IOOperation.Close)? -> return Ok(())
+        jet_net_tls_io_scheduler_wait(stream, false, true, IOOperation.Close)?
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:1752
+fn jet_net_tls_peer_identity_from_snapshot(snapshot: JetTLSPeerSnapshot) -> JetTLSPeerIdentity JetNetError! {
+    (verified_server_name, ders, spkis, dns_names, valid_from, valid_until, subjects, issuers, cipher_suite, tls_version) :: ^snapshot
+    certificate_chain := [JetTLSCertificate].with_capacity(ders.len())
+    loop index in 0..ders.len() {
+        der :: ders[index].clone()
+        certificate_chain.push(JetTLSCertificate{
+            sha256: sha256_bytes(der), spki_sha256: sha256_bytes(spkis[index]),
+            der: ^der, dns_names: dns_names[index].clone(), valid_from_unix_ms: valid_from[index],
+            valid_until_unix_ms: valid_until[index], subject: subjects[index].clone(), issuer: issuers[index].clone()})
+    }
+    leaf :: certificate_chain.first().cloned().ok_or_else(fn() ->
+        JetNetError.TLS(jet_net_detail("tls peer identity", None, None, "verified TLS peer chain is empty", None)))?
+    tls_version :: match tls_version {
+        12 -> JetTLSVersion.TLS12
+        13 -> JetTLSVersion.TLS13
+        other -> return Err(JetNetError.TLS(jet_net_detail("tls peer identity", None, None, "TLS peer negotiated unsupported protocol version `{other}`", None)))
+    }
+    Ok(JetTLSPeerIdentity{verified_server_name: ^verified_server_name, leaf: ^leaf,
+        certificate_chain: ^certificate_chain, cipher_suite: ^cipher_suite, tls_version: tls_version})
+}
 

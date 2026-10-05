@@ -1,1884 +1,1089 @@
-// PORT-PENDING 0307 crates-jet-codegen-src-prelude-corelib-top-testinghistory-module-group: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:1-1880
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS // D-TEST-HISTORY1=A: typed operation histories share the Foundation runner,
-//RS // comparison record, and shrinker with host-side evidence.
-//RS 
-//RS type JetHistoryCaptureReader<'a> = dyn Fn() -> Result<jet_std::DataTree, String> + 'a;
-//RS type JetHistorySendCaptureReader<'a> = dyn Fn() -> Result<jet_std::DataTree, String> + Send + Sync + 'a;
-//RS type JetHistoryWeakReader = crate::jet_testing_history_foundation::HistoryCallbackReader<Result<jet_std::DataTree, String>>;
-//RS type JetHistoryWeakSendReader = crate::jet_testing_history_foundation::HistorySendCallbackReader<Result<jet_std::DataTree, String>>;
-//RS 
-//RS // A generic call carries the codecs of its checked type arguments. Factories
-//RS // retain this dictionary with their environment, so invocation after return
-//RS // still encodes the actual instantiation. Any is only a checked downcast; its
-//RS // address, TypeId and Rust type name never become provenance.
-//RS #[derive(Clone)]
-//RS struct JetHistoryTypeCodec {
-//RS     checked_type: String,
-//RS     encode: std::sync::Arc<dyn Fn(&dyn std::any::Any, usize) -> Result<jet_std::DataTree, String> + Send + Sync>,
-//RS }
-//RS type JetHistoryTypes = std::collections::BTreeMap<String, JetHistoryTypeCodec>;
-//RS thread_local! {
-//RS     static JET_HISTORY_TYPES: std::cell::RefCell<JetHistoryTypes> = std::cell::RefCell::new(JetHistoryTypes::new());
-//RS }
-//RS fn jet_history_current_types() -> JetHistoryTypes {
-//RS     JET_HISTORY_TYPES.with(|types| types.borrow().clone())
-//RS }
-//RS fn jet_history_with_types<R>(types: JetHistoryTypes, body: impl FnOnce() -> R) -> R {
-//RS     struct Scope(JetHistoryTypes);
-//RS     impl Drop for Scope {
-//RS         fn drop(&mut self) {
-//RS             JET_HISTORY_TYPES.with(|types| *types.borrow_mut() = std::mem::take(&mut self.0));
-//RS         }
-//RS     }
-//RS     let _scope = Scope(JET_HISTORY_TYPES.with(|current| current.replace(types)));
-//RS     body()
-//RS }
-//RS fn jet_history_type_codec<T: 'static>(
-//RS     checked_type: String,
-//RS     encode: impl Fn(&T, usize) -> Result<jet_std::DataTree, String> + Send + Sync + 'static,
-//RS ) -> JetHistoryTypeCodec {
-//RS     JetHistoryTypeCodec { checked_type, encode: std::sync::Arc::new(move |value, depth| {
-//RS         let value = value.downcast_ref::<T>().ok_or_else(|| "history capture type does not match its checked instantiation".to_string())?;
-//RS         encode(value, depth)
-//RS     }) }
-//RS }
-//RS fn jet_history_encode_type<T: 'static>(
-//RS     types: &JetHistoryTypes, name: &str, value: &T, depth: usize,
-//RS ) -> Result<jet_std::DataTree, String> {
-//RS     if depth >= 64 { return Err("history capture exceeds the nesting bound".to_string()); }
-//RS     (types.get(name).ok_or_else(|| "history capture type is unresolved".to_string())?.encode)(value, depth)
-//RS }
-//RS 
-//RS // Ordinary boxed callables stay callable through the Fn supertrait. Cloning
-//RS // their generated shared environment also preserves its live metadata reader.
-//RS // Rust host boundaries can upcast this private trait to their existing dyn Fn.
-//RS // A mode-bearing instantiation keeps borrowed inputs late-bound, so a callback
-//RS // can borrow each host argument for one invocation without owning its referent.
-//RS macro_rules! jet_history_callable_argument {
-//RS     (owned, $arg:ident, $lifetime:lifetime) => { $arg };
-//RS     (read, $arg:ident, $lifetime:lifetime) => { &$lifetime $arg };
-//RS     (write, $arg:ident, $lifetime:lifetime) => { &$lifetime mut $arg };
-//RS }
-//RS 
-//RS macro_rules! jet_history_callable {
-//RS     ($name:ident $(, $arg:ident)*) => {
-//RS         jet_history_callable!($name; $($arg => owned),*);
-//RS     };
-//RS     ($name:ident; $($arg:ident => $mode:ident),* $(,)?) => {
-//RS         trait $name<'capture, $($arg,)* R>:
-//RS             for<'__jet_history_arg>
-//RS                 Fn($(jet_history_callable_argument!($mode, $arg, '__jet_history_arg)),*) -> R
-//RS                 + 'capture
-//RS         {
-//RS             fn clone_box(&self) -> Box<dyn $name<'capture, $($arg,)* R> + 'capture>;
-//RS         }
-//RS         impl<'capture, F, $($arg,)* R> $name<'capture, $($arg,)* R> for F
-//RS         where
-//RS             F: for<'__jet_history_arg>
-//RS                     Fn($(jet_history_callable_argument!($mode, $arg, '__jet_history_arg)),*) -> R
-//RS                 + Clone
-//RS                 + 'capture,
-//RS         {
-//RS             fn clone_box(&self) -> Box<dyn $name<'capture, $($arg,)* R> + 'capture> {
-//RS                 let (cloned, life) = jet_history_clone_callable(self);
-//RS                 let key = self as *const F as *const () as usize;
-//RS                 let reader = JET_HISTORY_CALLBACKS.with(|callbacks| {
-//RS                     callbacks.borrow().get(&key).and_then(|(life, reader)| {
-//RS                         life.upgrade().map(|_| reader.clone())
-//RS                     })
-//RS                 });
-//RS                 let callback: Box<dyn $name<'capture, $($arg,)* R> + 'capture> = Box::new(cloned);
-//RS                 match (reader, life) {
-//RS                     // The clone shares the exact typed environment/reader and
-//RS                     // owns its new ticket. No referent lifetime is extended.
-//RS                     (Some(reader), Some(life)) => jet_history_register_callback_reader(callback, reader, &life),
-//RS                     _ => callback,
-//RS                 }
-//RS             }
-//RS         }
-//RS         impl<'capture, $($arg,)* R> Clone
-//RS             for Box<dyn $name<'capture, $($arg,)* R> + 'capture>
-//RS         where
-//RS             $($arg: 'capture,)*
-//RS             R: 'capture,
-//RS         {
-//RS             fn clone(&self) -> Self { self.as_ref().clone_box() }
-//RS         }
-//RS         impl<'capture, $($arg,)* R> std::fmt::Debug
-//RS             for dyn $name<'capture, $($arg,)* R> + 'capture
-//RS         {
-//RS             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-//RS                 f.debug_struct("Function").finish_non_exhaustive()
-//RS             }
-//RS         }
-//RS     };
-//RS }
-//RS 
-//RS jet_history_callable!(JetHistoryFn1, A0);
-//RS jet_history_callable!(JetHistoryFn3, A0, A1, A2);
-//RS jet_history_callable!(JetHistoryFn0);
-//RS 
-//RS #[derive(Clone)]
-//RS struct JetHistoryStrategy<Command: 'static> {
-//RS     generate: Box<dyn JetHistoryFn3<'static, JetHistoryRng, usize, usize,
-//RS         JetOutcome<crate::jet_testing_history_foundation::TypedHistoryCase<Command>, JetAbsent>>>,
-//RS     rebuild: Box<dyn JetHistoryFn1<'static, crate::jet_testing_history_foundation::HistoryCase,
-//RS         JetOutcome<crate::jet_testing_history_foundation::TypedHistoryCase<Command>, JetAbsent>>>,
-//RS     valid: Box<dyn JetHistoryFn1<'static, crate::jet_testing_history_foundation::TypedHistoryCase<Command>, bool>>,
-//RS     bounds: crate::jet_testing_history_foundation::HistoryBounds,
-//RS     distributions: Vec<crate::jet_testing_history_foundation::HistoryDistribution>,
-//RS }
-//RS 
-//RS // A scoped owner of the actual Foundation RNG. All source-level copies share
-//RS // this cell. Closing the callback returns that same RNG to the runner and
-//RS // invalidates escaped handles; no second draw implementation or state snapshot.
-//RS #[derive(Clone)]
-//RS struct JetHistoryRng(std::rc::Rc<std::cell::RefCell<Option<crate::jet_testing_history_foundation::HistoryRng>>>);
-//RS 
-//RS struct JetHistoryRngLoan<'a> {
-//RS     destination: &'a mut crate::jet_testing_history_foundation::HistoryRng,
-//RS     value: JetHistoryRng,
-//RS }
-//RS 
-//RS impl<'a> JetHistoryRngLoan<'a> {
-//RS     fn new(destination: &'a mut crate::jet_testing_history_foundation::HistoryRng) -> Self {
-//RS         let rng = std::mem::replace(destination, crate::jet_testing_history_foundation::HistoryRng::new(0));
-//RS         Self { destination, value: JetHistoryRng(std::rc::Rc::new(std::cell::RefCell::new(Some(rng)))) }
-//RS     }
-//RS }
-//RS 
-//RS impl Drop for JetHistoryRngLoan<'_> {
-//RS     fn drop(&mut self) {
-//RS         if let Some(rng) = self.value.0.borrow_mut().take() {
-//RS             *self.destination = rng;
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Default)]
-//RS struct JetHistoryLocalTicket(std::rc::Rc<()>);
-//RS impl Clone for JetHistoryLocalTicket {
-//RS     fn clone(&self) -> Self {
-//RS         let ticket = Self::default();
-//RS         JET_HISTORY_CLONED_LIFE.with(|life| *life.borrow_mut() = Some(ticket.0.clone()));
-//RS         ticket
-//RS     }
-//RS }
-//RS 
-//RS // Cloning an erased Fn keeps its concrete closure type. The generated closure
-//RS // owns one ticket; capture environments are shared, so cloning them cannot
-//RS // register a nested callable's ticket as this allocation's lifetime.
-//RS fn jet_history_clone_callable<F: Clone>(value: &F) -> (F, Option<std::rc::Rc<()>>) {
-//RS     struct Scope(Option<std::rc::Rc<()>>);
-//RS     impl Drop for Scope {
-//RS         fn drop(&mut self) {
-//RS             JET_HISTORY_CLONED_LIFE.with(|life| *life.borrow_mut() = self.0.take());
-//RS         }
-//RS     }
-//RS     let _scope = Scope(JET_HISTORY_CLONED_LIFE.with(|life| life.borrow_mut().take()));
-//RS     let value = value.clone();
-//RS     let life = JET_HISTORY_CLONED_LIFE.with(|life| life.borrow_mut().take());
-//RS     (value, life)
-//RS }
-//RS #[derive(Default)]
-//RS struct JetHistorySendTicket(std::sync::Arc<()>);
-//RS impl Clone for JetHistorySendTicket {
-//RS     fn clone(&self) -> Self { Self::default() }
-//RS }
-//RS 
-//RS thread_local! {
-//RS     static JET_HISTORY_CLONED_LIFE: std::cell::RefCell<Option<std::rc::Rc<()>>> = const { std::cell::RefCell::new(None) };
-//RS     static JET_HISTORY_CALLBACKS: std::cell::RefCell<std::collections::BTreeMap<usize, (std::rc::Weak<()>, JetHistoryWeakReader)>> =
-//RS         const { std::cell::RefCell::new(std::collections::BTreeMap::new()) };
-//RS     static JET_HISTORY_CAPTURE_DEPTH: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
-//RS }
-//RS static JET_HISTORY_SEND_CALLBACKS: std::sync::Mutex<std::collections::BTreeMap<usize, (std::sync::Weak<()>, JetHistoryWeakSendReader)>> =
-//RS     std::sync::Mutex::new(std::collections::BTreeMap::new());
-//RS 
-//RS // The callable owns its reader and environment. These weak indexes retain no
-//RS // captures and never use an address as artifact identity. Moving a Box or
-//RS // cloning a SendFn Arc leaves its allocation (and this lookup) intact.
-//RS // ponytail: prune dead weak rows at registration; use drop tickets if peak
-//RS // simultaneous callable count makes the index scan material.
-//RS fn jet_history_register_callback<'a, F: ?Sized + 'a>(
-//RS     callback: Box<F>,
-//RS     reader: &std::rc::Rc<JetHistoryCaptureReader<'a>>,
-//RS     life: &std::rc::Rc<()>,
-//RS ) -> Box<F> {
-//RS     // SAFETY: generated callbacks own this typed reader and their allocation
-//RS     // ticket. Lookup borrows the registered callable before invoking a reader.
-//RS     let reader = unsafe { JetHistoryWeakReader::new(reader) };
-//RS     jet_history_register_callback_reader(callback, reader, life)
-//RS }
-//RS 
-//RS fn jet_history_register_callback_reader<F: ?Sized>(
-//RS     callback: Box<F>,
-//RS     reader: JetHistoryWeakReader,
-//RS     life: &std::rc::Rc<()>,
-//RS ) -> Box<F> {
-//RS     let key = callback.as_ref() as *const F as *const () as usize;
-//RS     JET_HISTORY_CALLBACKS.with(|callbacks| {
-//RS         let mut callbacks = callbacks.borrow_mut();
-//RS         callbacks.retain(|_, (life, _)| life.strong_count() != 0);
-//RS         callbacks.insert(key, (std::rc::Rc::downgrade(life), reader));
-//RS     });
-//RS     callback
-//RS }
-//RS 
-//RS fn jet_history_register_send_callback<'a, F: ?Sized + 'a>(
-//RS     callback: std::sync::Arc<F>,
-//RS     reader: &std::sync::Arc<JetHistorySendCaptureReader<'a>>,
-//RS     life: &std::sync::Arc<()>,
-//RS ) -> std::sync::Arc<F> {
-//RS     let key = callback.as_ref() as *const F as *const () as usize;
-//RS     let mut callbacks = JET_HISTORY_SEND_CALLBACKS.lock().unwrap_or_else(|error| error.into_inner());
-//RS     callbacks.retain(|_, (life, _)| life.strong_count() != 0);
-//RS     // SAFETY: the SendFn owns its typed, Send + Sync reader. A lookup borrows
-//RS     // that same Arc allocation until encoding completes.
-//RS     callbacks.insert(key, (std::sync::Arc::downgrade(life), unsafe { JetHistoryWeakSendReader::new(reader) }));
-//RS     callback
-//RS }
-//RS 
-//RS fn jet_history_callback_captures<F: ?Sized>(callback: &F) -> Result<jet_std::DataTree, String> {
-//RS     struct Depth;
-//RS     impl Drop for Depth {
-//RS         fn drop(&mut self) {
-//RS             JET_HISTORY_CAPTURE_DEPTH.with(|depth| depth.set(depth.get() - 1));
-//RS         }
-//RS     }
-//RS     JET_HISTORY_CAPTURE_DEPTH.with(|depth| {
-//RS         if depth.get() >= 64 {
-//RS             return Err("history callback captures are cyclic or exceed the nesting bound".to_string());
-//RS         }
-//RS         depth.set(depth.get() + 1);
-//RS         Ok(())
-//RS     })?;
-//RS     let _depth = Depth;
-//RS     let key = callback as *const F as *const () as usize;
-//RS     let local = JET_HISTORY_CALLBACKS.with(|callbacks| {
-//RS         callbacks.borrow().get(&key).and_then(|(life, reader)| {
-//RS                         life.upgrade().map(|_| reader.clone())
-//RS                     })
-//RS     });
-//RS     if let Some(reader) = local {
-//RS         // SAFETY: callback is borrowed for this entire call, and its ticket
-//RS         // identifies the exact live allocation that owns the typed reader.
-//RS         return unsafe { reader.read() }.ok_or_else(|| "history callback has no live checked metadata".to_string())?;
-//RS     }
-//RS     let reader = JET_HISTORY_SEND_CALLBACKS.lock()
-//RS         .unwrap_or_else(|error| error.into_inner())
-//RS         .get(&key).and_then(|(life, reader)| life.upgrade().map(|_| reader.clone()));
-//RS     let reader = reader.ok_or_else(|| "history callback has no live checked metadata".to_string())?;
-//RS     // SAFETY: the borrowed SendFn keeps its typed environment and reader alive.
-//RS     unsafe { reader.read() }.ok_or_else(|| "history callback has no live checked metadata".to_string())?
-//RS }
-//RS 
-//RS fn jet_history_callback_fingerprint<F: ?Sized>(callback: &F) -> Result<String, String> {
-//RS     let metadata = jet_history_callback_captures(callback)?;
-//RS     let identity = metadata.get("function_identity")?.as_str()?;
-//RS     let captures = metadata.get("captures")?;
-//RS     let bytes = jet_std::render_datatree_json(captures, false, 0).into_bytes();
-//RS     crate::jet_testing_history_foundation::history_callback_value_fingerprint(identity, &bytes)
-//RS         .map_err(|error| error.to_string())
-//RS }
-//RS 
-//RS fn jet_history_data_tree_capture(value: &jet_std::DataTree, depth: usize) -> Result<jet_std::DataTree, String> {
-//RS     use jet_std::DataTree as Tree;
-//RS     if depth >= 64 {
-//RS         return Err("history capture exceeds the nesting bound".to_string());
-//RS     }
-//RS     let (kind, value) = match value {
-//RS         Tree::Null => ("null", Tree::Null),
-//RS         Tree::Bool(value) => ("bool", Tree::Bool(*value)),
-//RS         Tree::Int(value) => ("int", Tree::Text(value.to_string())),
-//RS         Tree::Float(value) => ("float", Tree::Text(value.to_bits().to_string())),
-//RS         Tree::Number(value) => ("number", Tree::Text(value.clone())),
-//RS         Tree::Text(value) => ("text", Tree::Text(value.clone())),
-//RS         Tree::TypedText(value) => ("typed_text", Tree::Text(value.clone())),
-//RS         Tree::Bytes(value) => ("bytes", Tree::Array(value.iter().map(|value| Tree::Int(i64::from(*value))).collect())),
-//RS         Tree::Array(values) => ("array", Tree::Array(values.iter().map(|value| {
-//RS             jet_history_data_tree_capture(value, depth + 1)
-//RS         }).collect::<Result<_, _>>()?)),
-//RS         Tree::Object(fields) => ("object", Tree::Object(fields.iter().map(|(name, value)| {
-//RS             Ok((name.clone(), jet_history_data_tree_capture(value, depth + 1)?))
-//RS         }).collect::<Result<_, String>>()?)),
-//RS     };
-//RS     Ok(Tree::Array(vec![Tree::Text(kind.to_string()), value]))
-//RS }
-//RS 
-//RS fn jet_testing_history_observation(
-//RS     value: &jet_std::DataTree,
-//RS ) -> crate::jet_testing_comparison_foundation::ComparisonObservation {
-//RS     crate::jet_testing_comparison_foundation::ComparisonObservation::value(
-//RS         jet_std::render_datatree_json(value, false, 0),
-//RS     )
-//RS }
-//RS 
-//RS fn jet_testing_history_apply<Input>(
-//RS     callback: &dyn Fn(&Input) -> JetOutcome<jet_std::DataTree, JetErr>,
-//RS     input: Input,
-//RS     role: &str,
-//RS ) -> Result<jet_std::DataTree, String> {
-//RS     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| callback(&input)))
-//RS         .map_err(|_| format!("{role} callback crashed while replaying a typed history"))?;
-//RS     result.map_err(|error| format!("{role} callback failed: {error}"))
-//RS }
-//RS 
-//RS pub(crate) fn jet_testing_history_rng_next_u64(
-//RS     rng: &JetHistoryRng,
-//RS ) -> u64 {
-//RS     rng.0.borrow_mut().as_mut().expect("history RNG scope has ended").next_u64()
-//RS }
-//RS 
-//RS pub(crate) fn jet_testing_history_rng_below(
-//RS     rng: &JetHistoryRng,
-//RS     bound: u64,
-//RS ) -> u64 {
-//RS     rng.0.borrow_mut().as_mut().expect("history RNG scope has ended").below(bound)
-//RS }
-//RS 
-//RS fn jet_testing_history_execute<Command>(
-//RS     model: &dyn Fn(&Vec<Command>) -> JetOutcome<jet_std::DataTree, JetErr>,
-//RS     actual: &dyn Fn(&Vec<Command>) -> JetOutcome<jet_std::DataTree, JetErr>,
-//RS     observe: &dyn Fn(&jet_std::DataTree) -> JetOutcome<jet_std::DataTree, JetErr>,
-//RS     commands: &[Command],
-//RS ) -> Result<
-//RS     (
-//RS         jet_std::DataTree,
-//RS         jet_std::DataTree,
-//RS         crate::jet_testing_comparison_foundation::ComparisonObservation,
-//RS         crate::jet_testing_comparison_foundation::ComparisonObservation,
-//RS     ),
-//RS     String,
-//RS >
-//RS where
-//RS     Command: Clone,
-//RS {
-//RS     let reference_value =
-//RS         jet_testing_history_apply(model, commands.to_vec(), "model")?;
-//RS     let candidate_value =
-//RS         jet_testing_history_apply(actual, commands.to_vec(), "actual")?;
-//RS     let reference_observed =
-//RS         jet_testing_history_apply(observe, reference_value.clone(), "observe")
-//RS             .map(|value| jet_testing_history_observation(&value))?;
-//RS     let candidate_observed =
-//RS         jet_testing_history_apply(observe, candidate_value.clone(), "observe")
-//RS             .map(|value| jet_testing_history_observation(&value))?;
-//RS     Ok((
-//RS         reference_value,
-//RS         candidate_value,
-//RS         reference_observed,
-//RS         candidate_observed,
-//RS     ))
-//RS }
-//RS fn jet_testing_history_record(
-//RS     record: crate::jet_testing_comparison_foundation::ComparisonRecord,
-//RS     inputs: Vec<jet_std::DataTree>,
-//RS     reference: Vec<jet_std::DataTree>,
-//RS     candidate: Vec<jet_std::DataTree>,
-//RS     seed: Option<i64>,
-//RS     provenance: Option<&crate::jet_testing_history_foundation::HistoryProvenance>,
-//RS ) -> jet_std::JetTestComparison {
-//RS     let (source, tool, target) = provenance
-//RS         .map(|provenance| {
-//RS             (
-//RS                 provenance.source.clone(),
-//RS                 provenance.tool.clone(),
-//RS                 provenance.target.clone(),
-//RS             )
-//RS         })
-//RS         .unwrap_or_else(|| (String::new(), String::new(), String::new()));
-//RS     jet_std::JetTestComparison {
-//RS         status: record.status.as_str().to_string(),
-//RS         relation: record.relation.as_str().to_string(),
-//RS         source,
-//RS         tool,
-//RS         target,
-//RS         seed,
-//RS         case_ids: record
-//RS             .samples
-//RS             .iter()
-//RS             .map(|sample| sample.identity.case_id.clone())
-//RS             .collect(),
-//RS         inputs,
-//RS         reference,
-//RS         candidate,
-//RS         first_difference: record
-//RS             .first_difference
-//RS             .map(|index| index as i64)
-//RS             .unwrap_or(-1),
-//RS         reason: record
-//RS             .reason
-//RS             .unwrap_or_else(|| "history comparison has no reason".to_string()),
-//RS         universal_proof: record.universal_proof,
-//RS     }
-//RS }
-//RS pub(crate) fn jet_testing_histories<Command>(
-//RS     seed: i64,
-//RS     cases: i64,
-//RS     strategy: Option<JetHistoryStrategy<Command>>,
-//RS     model: Box<dyn Fn(Vec<Command>) -> jet_std::DataTree>,
-//RS     actual: Box<dyn Fn(Vec<Command>) -> jet_std::DataTree>,
-//RS     observe: Box<dyn Fn(jet_std::DataTree) -> jet_std::DataTree>,
-//RS ) -> Result<jet_std::JetTestComparison, String>
-//RS where
-//RS     Command: crate::jet_testing_history_foundation::HistoryCommand + 'static,
-//RS {
-//RS     let model = Box::new(move |commands: &Vec<Command>| {
-//RS         Ok::<_, JetErr>(model(commands.clone()))
-//RS     });
-//RS     let actual = Box::new(move |commands: &Vec<Command>| {
-//RS         Ok::<_, JetErr>(actual(commands.clone()))
-//RS     });
-//RS     let observe = Box::new(move |value: &jet_std::DataTree| {
-//RS         Ok::<_, JetErr>(observe(value.clone()))
-//RS     });
-//RS     jet_testing_histories_with_provenance(
-//RS         seed,
-//RS         cases,
-//RS         strategy,
-//RS         model,
-//RS         actual,
-//RS         observe,
-//RS         None,
-//RS     )
-//RS }
-//RS 
-//RS /// Compiler-private entrypoint used when the checked caller carries selected
-//RS /// artifact/callback provenance outside the six Jet-visible history values.
-//RS pub(crate) fn jet_testing_histories_with_provenance<'callback, Command>(
-//RS     seed: i64,
-//RS     cases: i64,
-//RS     strategy: Option<JetHistoryStrategy<Command>>,
-//RS     model: Box<
-//RS         dyn Fn(&Vec<Command>) -> JetOutcome<jet_std::DataTree, JetErr> + 'callback,
-//RS     >,
-//RS     actual: Box<
-//RS         dyn Fn(&Vec<Command>) -> JetOutcome<jet_std::DataTree, JetErr> + 'callback,
-//RS     >,
-//RS     observe: Box<
-//RS         dyn Fn(&jet_std::DataTree) -> JetOutcome<jet_std::DataTree, JetErr> + 'callback,
-//RS     >,
-//RS     provenance: Option<crate::jet_testing_history_foundation::HistoryProvenance>,
-//RS ) -> Result<jet_std::JetTestComparison, String>
-//RS where
-//RS     Command: crate::jet_testing_history_foundation::HistoryCommand + 'static,
-//RS {
-//RS     let provenance = provenance.and_then(|base| {
-//RS         let bind = || -> Result<crate::jet_testing_history_foundation::HistoryProvenance, String> {
-//RS             let mut callbacks = vec![
-//RS                 ("model", jet_history_callback_fingerprint(model.as_ref())?),
-//RS                 ("actual", jet_history_callback_fingerprint(actual.as_ref())?),
-//RS                 ("observe", jet_history_callback_fingerprint(observe.as_ref())?),
-//RS             ];
-//RS             if let Some(strategy) = strategy.as_ref() {
-//RS                 callbacks.extend([
-//RS                     ("generate", jet_history_callback_fingerprint(strategy.generate.as_ref())?),
-//RS                     ("rebuild", jet_history_callback_fingerprint(strategy.rebuild.as_ref())?),
-//RS                     ("valid", jet_history_callback_fingerprint(strategy.valid.as_ref())?),
-//RS                 ]);
-//RS             } else {
-//RS                 let identity = format!("derived:{}", Command::history_command_type());
-//RS                 callbacks.push(("strategy",
-//RS                     crate::jet_testing_history_foundation::history_callback_value_fingerprint(
-//RS                         &identity, b"[]",
-//RS                     ).map_err(|error| error.to_string())?,
-//RS                 ));
-//RS             }
-//RS             let callbacks = callbacks.iter().map(|(role, identity)| (*role, identity.as_str()))
-//RS                 .collect::<Vec<_>>();
-//RS             base.bind_callbacks(&callbacks).map_err(|error| error.to_string())
-//RS         };
-//RS         bind().ok()
-//RS     });
-//RS     match strategy {
-//RS         Some(strategy) => {
-//RS             let JetHistoryStrategy { generate, rebuild, valid, bounds, distributions } = strategy;
-//RS             let strategy = crate::jet_testing_history_foundation::HistoryStrategy {
-//RS                 generate: Box::new(move |rng, index, steps| {
-//RS                     let loan = JetHistoryRngLoan::new(rng);
-//RS                     generate(loan.value.clone(), index, steps).ok()
-//RS                 }),
-//RS                 rebuild: Box::new(move |case| rebuild(case.clone()).ok()),
-//RS                 valid: Box::new(move |case| valid(case.clone())),
-//RS                 bounds,
-//RS                 distributions,
-//RS             };
-//RS             jet_testing_histories_result_with_strategy(
-//RS                 seed, cases, model, actual, observe, strategy, provenance,
-//RS             )
-//RS         }
-//RS         None => {
-//RS             let strategy =
-//RS                 <Command as crate::jet_testing_history_foundation::HistoryCommand>::history_strategy();
-//RS             jet_testing_histories_result_with_strategy(
-//RS                 seed, cases, model, actual, observe, strategy, provenance,
-//RS             )
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS 
-//RS fn jet_testing_histories_result_with_strategy<'callback, Command, Strategy>(
-//RS     seed: i64,
-//RS     cases: i64,
-//RS     model: Box<
-//RS         dyn Fn(&Vec<Command>) -> JetOutcome<jet_std::DataTree, JetErr> + 'callback,
-//RS     >,
-//RS     actual: Box<
-//RS         dyn Fn(&Vec<Command>) -> JetOutcome<jet_std::DataTree, JetErr> + 'callback,
-//RS     >,
-//RS     observe: Box<
-//RS         dyn Fn(&jet_std::DataTree) -> JetOutcome<jet_std::DataTree, JetErr> + 'callback,
-//RS     >,
-//RS     strategy: Strategy,
-//RS     provenance: Option<crate::jet_testing_history_foundation::HistoryProvenance>,
-//RS ) -> Result<jet_std::JetTestComparison, String>
-//RS where
-//RS     Command: crate::jet_testing_history_foundation::HistoryCommand + 'static,
-//RS     Strategy: crate::jet_testing_history_foundation::HistoryStrategyBehavior<Command>,
-//RS {
-//RS     let (seed, cases) =
-//RS         crate::jet_testing_history_foundation::validate_history_bounds(seed, cases)
-//RS             .map_err(|message| message.to_string())?;
-//RS     let bounds = strategy.bounds();
-//RS     let relation =
-//RS         crate::jet_testing_comparison_foundation::ObservationRelation::TypedEquality;
-//RS     let Some(provenance) = provenance else {
-//RS         let record = crate::jet_testing_comparison_foundation::ComparisonRecord::terminal(
-//RS             relation,
-//RS             crate::jet_testing_comparison_foundation::ComparisonStatus::Unavailable,
-//RS             "history provenance is unavailable",
-//RS         );
-//RS         return Ok(jet_testing_history_record(
-//RS             record,
-//RS             Vec::new(),
-//RS             Vec::new(),
-//RS             Vec::new(),
-//RS             Some(seed as i64),
-//RS             None,
-//RS         ));
-//RS     };
-//RS     if let Some(reason) = strategy.unsupported_reason() {
-//RS         let record = crate::jet_testing_comparison_foundation::ComparisonRecord::terminal(
-//RS             relation.clone(),
-//RS             crate::jet_testing_comparison_foundation::ComparisonStatus::Unsupported,
-//RS             reason,
-//RS         );
-//RS         return Ok(jet_testing_history_record(
-//RS             record,
-//RS             Vec::new(),
-//RS             Vec::new(),
-//RS             Vec::new(),
-//RS             Some(seed as i64),
-//RS             Some(&provenance),
-//RS         ));
-//RS     }
-//RS     let config = crate::jet_testing_history_foundation::HistoryConfig::new(
-//RS         seed,
-//RS         cases,
-//RS         bounds,
-//RS         provenance.source.clone(),
-//RS         provenance.tool.clone(),
-//RS         provenance.target.clone(),
-//RS         relation.clone(),
-//RS         crate::jet_testing_history_foundation::OracleDeclaration::independent(
-//RS             "testing.histories.model",
-//RS         ),
-//RS     )
-//RS     .with_command_type(strategy.command_type());
-//RS     let config = strategy
-//RS         .distributions()
-//RS         .into_iter()
-//RS         .fold(config, |config, distribution| config.with_distribution(distribution));
-//RS     let runner =
-//RS         crate::jet_testing_history_foundation::HistoryRunner::new(config).map_err(|error| error.to_string())?;
-//RS 
-//RS     let mut inputs = Vec::new();
-//RS     let mut reference_values = Vec::new();
-//RS     let mut candidate_values = Vec::new();
-//RS     let mut samples = Vec::new();
-//RS     let run = runner
-//RS         .run_strategy::<Command, _, _>(&strategy, |typed| {
-//RS             let case = &typed.case;
-//RS             let input = match jet_std::parse_json_datatree(&case.json()) {
-//RS                 Ok(input) => input,
-//RS                 Err(error) => {
-//RS                     return crate::jet_testing_comparison_foundation::ComparisonRecord::terminal(
-//RS                         relation.clone(),
-//RS                         crate::jet_testing_comparison_foundation::ComparisonStatus::Unavailable,
-//RS                         format!("history input could not be decoded: {}", error.reason),
-//RS                     );
-//RS                 }
-//RS             };
-//RS             let (
-//RS                 reference_value,
-//RS                 candidate_value,
-//RS                 reference_observed,
-//RS                 candidate_observed,
-//RS             ) = match jet_testing_history_execute(
-//RS                 model.as_ref(),
-//RS                 actual.as_ref(),
-//RS                 observe.as_ref(),
-//RS                 &typed.commands,
-//RS             ) {
-//RS                 Ok(values) => values,
-//RS                 Err(reason) => {
-//RS                     return crate::jet_testing_comparison_foundation::ComparisonRecord::terminal(
-//RS                         relation.clone(),
-//RS                         crate::jet_testing_comparison_foundation::ComparisonStatus::Unavailable,
-//RS                         reason,
-//RS                     );
-//RS                 }
-//RS             };
-//RS             let (
-//RS                 _reference_replay_value,
-//RS                 _candidate_replay_value,
-//RS                 reference_replay,
-//RS                 candidate_replay,
-//RS             ) = match jet_testing_history_execute(
-//RS                 model.as_ref(),
-//RS                 actual.as_ref(),
-//RS                 observe.as_ref(),
-//RS                 &typed.commands,
-//RS             ) {
-//RS                 Ok(values) => values,
-//RS                 Err(reason) => {
-//RS                     return crate::jet_testing_comparison_foundation::ComparisonRecord::terminal(
-//RS                         relation.clone(),
-//RS                         crate::jet_testing_comparison_foundation::ComparisonStatus::Unavailable,
-//RS                         reason,
-//RS                     );
-//RS                 }
-//RS             };
-//RS             let mut identity = crate::jet_testing_comparison_foundation::ComparisonIdentity::new(
-//RS                 case.case_id.clone(),
-//RS                 case.input_id(),
-//RS                 provenance.source.clone(),
-//RS                 provenance.tool.clone(),
-//RS                 provenance.target.clone(),
-//RS             );
-//RS             identity.seed = Some(case.seed);
-//RS             let sample = crate::jet_testing_comparison_foundation::ComparisonSample::new(
-//RS                 identity,
-//RS                 reference_observed,
-//RS                 candidate_observed,
-//RS             )
-//RS             .with_replays(reference_replay, candidate_replay);
-//RS             inputs.push(input);
-//RS             reference_values.push(reference_value);
-//RS             candidate_values.push(candidate_value);
-//RS             samples.push(sample.clone());
-//RS             crate::jet_testing_comparison_foundation::compare_samples(relation.clone(), [sample])
-//RS         })
-//RS         .map_err(|error| error.to_string())?;
-//RS     if let Some(artifact) = run.failure {
-//RS         return Err(format!("history-artifact {}", artifact.json()));
-//RS     }
-//RS     let mut record = crate::jet_testing_comparison_foundation::compare_samples_with_discarded(
-//RS         relation,
-//RS         samples,
-//RS         run.discarded_cases,
-//RS     );
-//RS     if run.explored_cases == 0 {
-//RS         record.status =
-//RS             crate::jet_testing_comparison_foundation::ComparisonStatus::Unavailable;
-//RS         record.reason = Some("no history case produced an observation".to_string());
-//RS     }
-//RS     Ok(jet_testing_history_record(
-//RS         record,
-//RS         inputs,
-//RS         reference_values,
-//RS         candidate_values,
-//RS         Some(seed as i64),
-//RS         Some(&provenance),
-//RS     ))
-//RS }
-//RS #[cfg(target_arch = "wasm32")]
-//RS mod jet_testing_history_web {
-//RS     use super::{jet_testing_history_observation, jet_testing_history_record};
-//RS     use crate::jet_std;
-//RS     use crate::jet_testing_history_foundation::{
-//RS         HistoryBounds, HistoryCase, HistoryDistribution, HistoryOperation, HistoryPrecondition,
-//RS         HistoryProvenance, HistoryRng, HistoryScheduleChoice, HistoryStrategyBehavior, HistoryValue,
-//RS         TypedHistoryCase,
-//RS     };
-//RS     use crate::jet_testing_comparison_foundation::{
-//RS         compare_samples, compare_samples_with_discarded, ComparisonIdentity,
-//RS         ComparisonRecord, ComparisonSample, ComparisonStatus, ObservationRelation,
-//RS     };
-//RS     use std::cell::RefCell;
-//RS 
-//RS     type Tree = jet_std::DataTree;
-//RS     const MAX_WIRE_BYTES: usize = 8 * 1024 * 1024;
-//RS 
-//RS     thread_local! {
-//RS         static INPUT: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
-//RS         static OUTPUT: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
-//RS         static RNGS: RefCell<Vec<Option<HistoryRng>>> = const { RefCell::new(Vec::new()) };
-//RS         static STRATEGIES: RefCell<Vec<(&'static str, fn(&Tree) -> Result<jet_std::JetTestComparison, String>)>> =
-//RS             const { RefCell::new(Vec::new()) };
-//RS     }
-//RS 
-//RS     #[link(wasm_import_module = "env")]
-//RS     unsafe extern "C" {
-//RS         fn jet_testing_history_web_callback(callback: u32, pointer: u32, length: u32) -> u64;
-//RS     }
-//RS 
-//RS     fn history_rng_slot(handle: u64) -> Option<usize> {
-//RS         let slot = handle.checked_sub(1)?;
-//RS         usize::try_from(slot).ok()
-//RS     }
-//RS 
-//RS     fn with_history_rng<R>(handle: u64, operation: impl FnOnce(&mut HistoryRng) -> R) -> Option<R> {
-//RS         let slot = history_rng_slot(handle)?;
-//RS         RNGS.with(|cell| {
-//RS             let mut rngs = cell.borrow_mut();
-//RS             let rng = rngs.get_mut(slot)?.as_mut()?;
-//RS             Some(operation(rng))
-//RS         })
-//RS     }
-//RS 
-//RS     #[no_mangle]
-//RS     pub extern "C" fn jet_testing_history_web_rng_alloc(state: u64) -> u64 {
-//RS         RNGS.with(|cell| {
-//RS             let mut rngs = cell.borrow_mut();
-//RS             if let Some((index, slot)) = rngs.iter_mut().enumerate().find(|(_, slot)| slot.is_none()) {
-//RS                 *slot = Some(HistoryRng::new(state));
-//RS                 return u64::try_from(index + 1).unwrap_or(0);
-//RS             }
-//RS             rngs.push(Some(HistoryRng::new(state)));
-//RS             u64::try_from(rngs.len()).unwrap_or(0)
-//RS         })
-//RS     }
-//RS 
-//RS     #[no_mangle]
-//RS     pub extern "C" fn jet_testing_history_web_rng_release(handle: u64) {
-//RS         let Some(slot) = history_rng_slot(handle) else {
-//RS             return;
-//RS         };
-//RS         RNGS.with(|cell| {
-//RS             if let Some(rng) = cell.borrow_mut().get_mut(slot) {
-//RS                 *rng = None;
-//RS             }
-//RS         });
-//RS     }
-//RS     #[no_mangle]
-//RS     pub extern "C" fn jet_testing_history_web_rng_state(handle: u64) -> u64 {
-//RS         with_history_rng(handle, |rng| rng.state()).unwrap_or(0)
-//RS     }
-//RS 
-//RS 
-//RS     #[no_mangle]
-//RS     pub extern "C" fn jet_testing_history_web_rng_next_u64(handle: u64) -> u64 {
-//RS         with_history_rng(handle, HistoryRng::next_u64).unwrap_or(0)
-//RS     }
-//RS 
-//RS     #[no_mangle]
-//RS     pub extern "C" fn jet_testing_history_web_rng_below(handle: u64, bound: u64) -> u64 {
-//RS         with_history_rng(handle, |rng| rng.below(bound)).unwrap_or(0)
-//RS     }
-//RS 
-//RS     fn field<'a>(value: &'a Tree, name: &str) -> Option<&'a Tree> {
-//RS         value.get_opt(name)
-//RS     }
-//RS 
-//RS     fn field_any<'a>(value: &'a Tree, names: &[&str]) -> Option<&'a Tree> {
-//RS         names.iter().find_map(|name| field(value, name))
-//RS     }
-//RS 
-//RS     fn integer(value: &Tree, name: &str) -> Result<i64, String> {
-//RS         match value {
-//RS             Tree::Int(value) => Ok(*value),
-//RS             Tree::Number(value) => value
-//RS                 .parse::<i64>()
-//RS                 .map_err(|_| format!("{name} must be an exact integer")),
-//RS             _ => Err(format!("{name} must be an exact integer")),
-//RS         }
-//RS     }
-//RS 
-//RS     fn unsigned(value: &Tree, name: &str) -> Result<u64, String> {
-//RS         match value {
-//RS             Tree::Int(value) => u64::try_from(*value)
-//RS                 .map_err(|_| format!("{name} must be a non-negative exact integer")),
-//RS             Tree::Number(value) => value
-//RS                 .parse::<u64>()
-//RS                 .map_err(|_| format!("{name} must be a non-negative exact integer")),
-//RS             _ => Err(format!("{name} must be an exact integer")),
-//RS         }
-//RS     }
-//RS 
-//RS     fn required_integer(root: &Tree, name: &str) -> Result<i64, String> {
-//RS         integer(
-//RS             field(root, name).ok_or_else(|| format!("history wire field `{name}` is missing"))?,
-//RS             name,
-//RS         )
-//RS     }
-//RS 
-//RS     fn required_text(root: &Tree, name: &str) -> Result<String, String> {
-//RS         match field(root, name) {
-//RS             Some(Tree::Text(value) | Tree::TypedText(value)) => Ok(value.clone()),
-//RS             Some(_) => Err(format!("{name} must be text")),
-//RS             None => Err(format!("history wire field `{name}` is missing")),
-//RS         }
-//RS     }
-//RS 
-//RS     fn callback_id(root: &Tree, name: &str) -> Result<u32, String> {
-//RS         u32::try_from(required_integer(root, name)?)
-//RS             .map_err(|_| format!("{name} is not a valid callback id"))
-//RS     }
-//RS     fn object(entries: Vec<(&str, Tree)>) -> Tree {
-//RS         Tree::Object(
-//RS             entries
-//RS                 .into_iter()
-//RS                 .map(|(name, value)| (name.to_string(), value))
-//RS                 .collect(),
-//RS         )
-//RS     }
-//RS 
-//RS     fn integer_tree(value: i64) -> Tree {
-//RS         Tree::Int(value)
-//RS     }
-//RS 
-//RS     fn unsigned_tree(value: u64) -> Tree {
-//RS         Tree::Number(value.to_string())
-//RS     }
-//RS 
-//RS     fn id_tree(value: u32) -> Tree {
-//RS         object(vec![("value", integer_tree(i64::from(value)))])
-//RS     }
-//RS 
-//RS     fn option_id_tree(value: Option<u32>) -> Tree {
-//RS         match value {
-//RS             Some(value) => object(vec![("tag", Tree::Text("Some".to_string())), ("values", Tree::Array(vec![id_tree(value)]))]),
-//RS             None => object(vec![("tag", Tree::Text("None".to_string())), ("values", Tree::Array(Vec::new()))]),
-//RS         }
-//RS     }
-//RS 
-//RS     fn history_value_tree(value: &HistoryValue) -> Tree {
-//RS         let (tag, values) = match value {
-//RS             HistoryValue::Integer(value) => ("Integer", vec![integer_tree(*value)]),
-//RS             HistoryValue::Boolean(value) => ("Boolean", vec![Tree::Bool(*value)]),
-//RS             HistoryValue::Text(value) => ("Text", vec![Tree::Text(value.clone())]),
-//RS             HistoryValue::Handle(value) => ("Handle", vec![id_tree(value.value)]),
-//RS             HistoryValue::Redacted(value) => ("Redacted", vec![Tree::Text(value.clone())]),
-//RS         };
-//RS         object(vec![("tag", Tree::Text(tag.to_string())), ("values", Tree::Array(values))])
-//RS     }
-//RS 
-//RS     fn history_precondition_tree(value: &HistoryPrecondition) -> Tree {
-//RS         let (tag, values) = match value {
-//RS             HistoryPrecondition::HandleLive(handle) => ("HandleLive", vec![id_tree(handle.value)]),
-//RS             HistoryPrecondition::HandleState { handle, state } => (
-//RS                 "HandleState",
-//RS                 vec![id_tree(handle.value), Tree::Text(state.clone())],
-//RS             ),
-//RS             HistoryPrecondition::TaskCompleted(task) => ("TaskCompleted", vec![id_tree(task.value)]),
-//RS             HistoryPrecondition::EventAvailable(event) => ("EventAvailable", vec![id_tree(event.value)]),
-//RS         };
-//RS         object(vec![("tag", Tree::Text(tag.to_string())), ("values", Tree::Array(values))])
-//RS     }
-//RS 
-//RS     fn history_operation_tree(operation: &HistoryOperation) -> Tree {
-//RS         object(vec![
-//RS             ("index", unsigned_tree(u64::from(operation.index))),
-//RS             ("name", Tree::Text(operation.name.clone())),
-//RS             (
-//RS                 "arguments",
-//RS                 Tree::Array(operation.arguments.iter().map(history_value_tree).collect()),
-//RS             ),
-//RS             (
-//RS                 "creates",
-//RS                 Tree::Array(operation.creates.iter().map(|value| id_tree(value.value)).collect()),
-//RS             ),
-//RS             (
-//RS                 "consumes",
-//RS                 Tree::Array(operation.consumes.iter().map(|value| id_tree(value.value)).collect()),
-//RS             ),
-//RS             (
-//RS                 "preconditions",
-//RS                 Tree::Array(
-//RS                     operation
-//RS                         .preconditions
-//RS                         .iter()
-//RS                         .map(history_precondition_tree)
-//RS                         .collect(),
-//RS                 ),
-//RS             ),
-//RS             (
-//RS                 "depends_on",
-//RS                 Tree::Array(
-//RS                     operation
-//RS                         .depends_on
-//RS                         .iter()
-//RS                         .map(|value| unsigned_tree(u64::from(*value)))
-//RS                         .collect(),
-//RS                 ),
-//RS             ),
-//RS             ("task", option_id_tree(operation.task.map(|value| value.value))),
-//RS             ("event", option_id_tree(operation.event.map(|value| value.value))),
-//RS         ])
-//RS     }
-//RS 
-//RS     fn history_schedule_tree(choice: &HistoryScheduleChoice) -> Tree {
-//RS         object(vec![
-//RS             ("operation", unsigned_tree(u64::from(choice.operation))),
-//RS             ("task", option_id_tree(choice.task.map(|value| value.value))),
-//RS             ("event", option_id_tree(choice.event.map(|value| value.value))),
-//RS             ("choice", Tree::Text(choice.choice.clone())),
-//RS         ])
-//RS     }
-//RS 
-//RS     fn history_case_tree(case: &HistoryCase) -> Tree {
-//RS         object(vec![
-//RS             ("case_id", Tree::Text(case.case_id.clone())),
-//RS             ("seed", unsigned_tree(case.seed)),
-//RS             (
-//RS                 "operations",
-//RS                 Tree::Array(case.operations.iter().map(history_operation_tree).collect()),
-//RS             ),
-//RS             (
-//RS                 "schedule",
-//RS                 Tree::Array(case.schedule.iter().map(history_schedule_tree).collect()),
-//RS             ),
-//RS         ])
-//RS     }
-//RS 
-//RS     fn typed_history_case_tree(case: &TypedHistoryCase<Tree>) -> Tree {
-//RS         object(vec![
-//RS             ("case", history_case_tree(&case.case)),
-//RS             ("commands", Tree::Array(case.commands.clone())),
-//RS         ])
-//RS     }
-//RS 
-//RS     fn required_any<'a>(root: &'a Tree, names: &[&str], label: &str) -> Result<&'a Tree, String> {
-//RS         field_any(root, names).ok_or_else(|| format!("{label} is missing"))
-//RS     }
-//RS 
-//RS     fn required_text_any(root: &Tree, names: &[&str], label: &str) -> Result<String, String> {
-//RS         match required_any(root, names, label)? {
-//RS             Tree::Text(value) | Tree::TypedText(value) => Ok(value.clone()),
-//RS             _ => Err(format!("{label} must be text")),
-//RS         }
-//RS     }
-//RS 
-//RS     fn unsigned_any(root: &Tree, names: &[&str], label: &str) -> Result<u64, String> {
-//RS         unsigned(required_any(root, names, label)?, label)
-//RS     }
-//RS 
-//RS     fn u32_any(root: &Tree, names: &[&str], label: &str) -> Result<u32, String> {
-//RS         u32::try_from(unsigned_any(root, names, label)?)
-//RS             .map_err(|_| format!("{label} is outside the u32 range"))
-//RS     }
-//RS 
-//RS     fn array_any<'a>(root: &'a Tree, names: &[&str], label: &str) -> Result<&'a [Tree], String> {
-//RS         match required_any(root, names, label)? {
-//RS             Tree::Array(values) => Ok(values),
-//RS             _ => Err(format!("{label} must be an array")),
-//RS         }
-//RS     }
-//RS 
-//RS     fn history_id(value: &Tree, label: &str) -> Result<u32, String> {
-//RS         match value {
-//RS             Tree::Object(_) if field(value, "value").is_some() => u32_any(value, &["value"], label),
-//RS             _ => u32::try_from(unsigned(value, label)?)
-//RS                 .map_err(|_| format!("{label} is outside the u32 range")),
-//RS         }
-//RS     }
-//RS 
-//RS     fn tagged<'a>(value: &'a Tree, label: &str) -> Result<(&'a str, &'a [Tree]), String> {
-//RS         let tag = match field(value, "tag") {
-//RS             Some(Tree::Text(tag) | Tree::TypedText(tag)) => tag.as_str(),
-//RS             _ => return Err(format!("{label}.tag must be text")),
-//RS         };
-//RS         let values = match required_any(value, &["values"], label)? {
-//RS             Tree::Array(values) => values.as_slice(),
-//RS             _ => return Err(format!("{label}.values must be an array")),
-//RS         };
-//RS         Ok((tag, values))
-//RS     }
-//RS 
-//RS     fn history_value(value: &Tree, label: &str) -> Result<HistoryValue, String> {
-//RS         let Tree::Object(_) = value else {
-//RS             return match value {
-//RS                 Tree::Int(value) => Ok(HistoryValue::Integer(*value)),
-//RS                 Tree::Number(value) => value
-//RS                     .parse::<i64>()
-//RS                     .map(HistoryValue::Integer)
-//RS                     .map_err(|_| format!("{label} integer is out of range")),
-//RS                 Tree::Bool(value) => Ok(HistoryValue::Boolean(*value)),
-//RS                 Tree::Text(value) | Tree::TypedText(value) => Ok(HistoryValue::Text(value.clone())),
-//RS                 _ => Err(format!("{label} is not a HistoryValue")),
-//RS             };
-//RS         };
-//RS         let (tag, values) = tagged(value, label)?;
-//RS         match (tag, values) {
-//RS             ("Integer", [value]) => Ok(HistoryValue::Integer(integer(value, label)?)),
-//RS             ("Boolean", [Tree::Bool(value)]) => Ok(HistoryValue::Boolean(*value)),
-//RS             ("Text", [Tree::Text(value) | Tree::TypedText(value)]) => Ok(HistoryValue::Text(value.clone())),
-//RS             ("Handle", [value]) => Ok(HistoryValue::Handle(crate::jet_testing_history_foundation::HandleId {
-//RS                 value: history_id(value, label)?,
-//RS             })),
-//RS             ("Redacted", [Tree::Text(value) | Tree::TypedText(value)]) => Ok(HistoryValue::Redacted(value.clone())),
-//RS             _ => Err(format!("{label} has an invalid HistoryValue variant")),
-//RS         }
-//RS     }
-//RS 
-//RS     fn option_id(value: &Tree, label: &str) -> Result<Option<u32>, String> {
-//RS         if matches!(value, Tree::Null) {
-//RS             return Ok(None);
-//RS         }
-//RS         if let Tree::Object(_) = value {
-//RS             if let Some(Tree::Text(tag) | Tree::TypedText(tag)) = field(value, "tag") {
-//RS                 let values = match required_any(value, &["values"], label)? {
-//RS                     Tree::Array(values) => values,
-//RS                     _ => return Err(format!("{label}.values must be an array")),
-//RS                 };
-//RS                 return match (tag.as_str(), values.as_slice()) {
-//RS                     ("None", []) => Ok(None),
-//RS                     ("Some", [value]) => history_id(value, label).map(Some),
-//RS                     _ => Err(format!("{label} has an invalid option")),
-//RS                 };
-//RS             }
-//RS         }
-//RS         history_id(value, label).map(Some)
-//RS     }
-//RS 
-//RS     fn history_precondition(value: &Tree, label: &str) -> Result<HistoryPrecondition, String> {
-//RS         if let Tree::Object(_) = value {
-//RS             if let Some(Tree::Text(kind) | Tree::TypedText(kind)) = field(value, "kind") {
-//RS                 return match kind.as_str() {
-//RS                     "handle_live" => Ok(HistoryPrecondition::HandleLive(
-//RS                         crate::jet_testing_history_foundation::HandleId {
-//RS                             value: u32_any(value, &["handle"], label)?,
-//RS                         },
-//RS                     )),
-//RS                     "handle_state" => Ok(HistoryPrecondition::HandleState {
-//RS                         handle: crate::jet_testing_history_foundation::HandleId {
-//RS                             value: u32_any(value, &["handle"], label)?,
-//RS                         },
-//RS                         state: required_text_any(value, &["state"], label)?,
-//RS                     }),
-//RS                     "task_completed" => Ok(HistoryPrecondition::TaskCompleted(
-//RS                         crate::jet_testing_history_foundation::TaskId {
-//RS                             value: u32_any(value, &["task"], label)?,
-//RS                         },
-//RS                     )),
-//RS                     "event_available" => Ok(HistoryPrecondition::EventAvailable(
-//RS                         crate::jet_testing_history_foundation::EventId {
-//RS                             value: u32_any(value, &["event"], label)?,
-//RS                         },
-//RS                     )),
-//RS                     _ => Err(format!("{label} has an unknown precondition kind")),
-//RS                 };
-//RS             }
-//RS         }
-//RS         let (tag, values) = tagged(value, label)?;
-//RS         match (tag, values) {
-//RS             ("HandleLive", [value]) => Ok(HistoryPrecondition::HandleLive(
-//RS                 crate::jet_testing_history_foundation::HandleId {
-//RS                     value: history_id(value, label)?,
-//RS                 },
-//RS             )),
-//RS             ("HandleState", [handle, Tree::Text(state) | Tree::TypedText(state)]) => {
-//RS                 Ok(HistoryPrecondition::HandleState {
-//RS                     handle: crate::jet_testing_history_foundation::HandleId {
-//RS                         value: history_id(handle, label)?,
-//RS                     },
-//RS                     state: state.clone(),
-//RS                 })
-//RS             }
-//RS             ("TaskCompleted", [value]) => Ok(HistoryPrecondition::TaskCompleted(
-//RS                 crate::jet_testing_history_foundation::TaskId {
-//RS                     value: history_id(value, label)?,
-//RS                 },
-//RS             )),
-//RS             ("EventAvailable", [value]) => Ok(HistoryPrecondition::EventAvailable(
-//RS                 crate::jet_testing_history_foundation::EventId {
-//RS                     value: history_id(value, label)?,
-//RS                 },
-//RS             )),
-//RS             _ => Err(format!("{label} has an invalid precondition variant")),
-//RS         }
-//RS     }
-//RS 
-//RS     fn history_operation(value: &Tree, label: &str) -> Result<HistoryOperation, String> {
-//RS         let mut operation = HistoryOperation::new(
-//RS             u32_any(value, &["index"], &format!("{label}.index"))?,
-//RS             required_text_any(value, &["name"], &format!("{label}.name"))?,
-//RS         );
-//RS         operation.arguments = array_any(value, &["arguments"], &format!("{label}.arguments"))?
-//RS             .iter()
-//RS             .enumerate()
-//RS             .map(|(index, value)| history_value(value, &format!("{label}.arguments[{index}]")))
-//RS             .collect::<Result<_, _>>()?;
-//RS         operation.creates = array_any(value, &["creates"], &format!("{label}.creates"))?
-//RS             .iter()
-//RS             .enumerate()
-//RS             .map(|(index, value)| {
-//RS                 history_id(value, &format!("{label}.creates[{index}]")).map(
-//RS                     |value| crate::jet_testing_history_foundation::HandleId { value },
-//RS                 )
-//RS             })
-//RS             .collect::<Result<_, _>>()?;
-//RS         operation.consumes = array_any(value, &["consumes"], &format!("{label}.consumes"))?
-//RS             .iter()
-//RS             .enumerate()
-//RS             .map(|(index, value)| {
-//RS                 history_id(value, &format!("{label}.consumes[{index}]")).map(
-//RS                     |value| crate::jet_testing_history_foundation::HandleId { value },
-//RS                 )
-//RS             })
-//RS             .collect::<Result<_, _>>()?;
-//RS         operation.preconditions = array_any(value, &["preconditions"], &format!("{label}.preconditions"))?
-//RS             .iter()
-//RS             .enumerate()
-//RS             .map(|(index, value)| history_precondition(value, &format!("{label}.preconditions[{index}]")))
-//RS             .collect::<Result<_, _>>()?;
-//RS         operation.depends_on = array_any(value, &["depends_on", "dependsOn"], &format!("{label}.depends_on"))?
-//RS             .iter()
-//RS             .enumerate()
-//RS             .map(|(index, value)| u32::try_from(unsigned(value, &format!("{label}.depends_on[{index}]"))?)
-//RS                 .map_err(|_| format!("{label}.depends_on[{index}] is outside the u32 range")))
-//RS             .collect::<Result<_, _>>()?;
-//RS         operation.task = option_id(
-//RS             required_any(value, &["task"], &format!("{label}.task"))?,
-//RS             &format!("{label}.task"),
-//RS         )?
-//RS         .map(|value| crate::jet_testing_history_foundation::TaskId { value });
-//RS         operation.event = option_id(
-//RS             required_any(value, &["event"], &format!("{label}.event"))?,
-//RS             &format!("{label}.event"),
-//RS         )?
-//RS         .map(|value| crate::jet_testing_history_foundation::EventId { value });
-//RS         Ok(operation)
-//RS     }
-//RS 
-//RS     fn history_schedule(value: &Tree, label: &str) -> Result<HistoryScheduleChoice, String> {
-//RS         let mut choice = HistoryScheduleChoice::new(
-//RS             u32_any(value, &["operation"], &format!("{label}.operation"))?,
-//RS             required_text_any(value, &["choice"], &format!("{label}.choice"))?,
-//RS         );
-//RS         choice.task = option_id(
-//RS             required_any(value, &["task"], &format!("{label}.task"))?,
-//RS             &format!("{label}.task"),
-//RS         )?
-//RS         .map(|value| crate::jet_testing_history_foundation::TaskId { value });
-//RS         choice.event = option_id(
-//RS             required_any(value, &["event"], &format!("{label}.event"))?,
-//RS             &format!("{label}.event"),
-//RS         )?
-//RS         .map(|value| crate::jet_testing_history_foundation::EventId { value });
-//RS         Ok(choice)
-//RS     }
-//RS 
-//RS     fn history_case(value: &Tree, label: &str) -> Result<HistoryCase, String> {
-//RS         let mut case = HistoryCase::new(
-//RS             required_text_any(value, &["case_id", "caseId"], &format!("{label}.case_id"))?,
-//RS             unsigned_any(value, &["seed"], &format!("{label}.seed"))?,
-//RS         );
-//RS         case.operations = array_any(value, &["operations"], &format!("{label}.operations"))?
-//RS             .iter()
-//RS             .enumerate()
-//RS             .map(|(index, value)| history_operation(value, &format!("{label}.operations[{index}]")))
-//RS             .collect::<Result<_, _>>()?;
-//RS         case.schedule = array_any(value, &["schedule"], &format!("{label}.schedule"))?
-//RS             .iter()
-//RS             .enumerate()
-//RS             .map(|(index, value)| history_schedule(value, &format!("{label}.schedule[{index}]")))
-//RS             .collect::<Result<_, _>>()?;
-//RS         Ok(case)
-//RS     }
-//RS 
-//RS     fn typed_history_case(value: &Tree, label: &str) -> Result<TypedHistoryCase<Tree>, String> {
-//RS         let case = history_case(
-//RS             required_any(value, &["case"], &format!("{label}.case"))?,
-//RS             &format!("{label}.case"),
-//RS         )?;
-//RS         let commands = array_any(value, &["commands"], &format!("{label}.commands"))?.to_vec();
-//RS         TypedHistoryCase::new(case, commands)
-//RS             .ok_or_else(|| format!("{label} command count does not match operation count"))
-//RS     }
-//RS 
-//RS     fn optional_typed_history_case(
-//RS         value: &Tree,
-//RS         label: &str,
-//RS     ) -> Result<Option<TypedHistoryCase<Tree>>, String> {
-//RS         if matches!(value, Tree::Null) {
-//RS             return Ok(None);
-//RS         }
-//RS         if let Tree::Object(_) = value {
-//RS             if let Some(Tree::Text(tag) | Tree::TypedText(tag)) = field(value, "tag") {
-//RS                 let values = match required_any(value, &["values"], label)? {
-//RS                     Tree::Array(values) => values,
-//RS                     _ => return Err(format!("{label}.values must be an array")),
-//RS                 };
-//RS                 return match (tag.as_str(), values.as_slice()) {
-//RS                     ("None", []) => Ok(None),
-//RS                     ("Some", [value]) => typed_history_case(value, label).map(Some),
-//RS                     _ => Err(format!("{label} has an invalid option")),
-//RS                 };
-//RS             }
-//RS         }
-//RS         typed_history_case(value, label).map(Some)
-//RS     }
-//RS 
-//RS     fn history_bounds(value: &Tree) -> Result<HistoryBounds, String> {
-//RS         Ok(HistoryBounds {
-//RS             max_steps: usize::try_from(unsigned_any(value, &["max_steps", "maxSteps"], "strategy.bounds.max_steps")?)
-//RS                 .map_err(|_| "strategy.bounds.max_steps is outside usize range".to_string())?,
-//RS             max_resources: usize::try_from(unsigned_any(value, &["max_resources", "maxResources"], "strategy.bounds.max_resources")?)
-//RS                 .map_err(|_| "strategy.bounds.max_resources is outside usize range".to_string())?,
-//RS             max_shrink_attempts: usize::try_from(unsigned_any(
-//RS                 value,
-//RS                 &["max_shrink_attempts", "maxShrinkAttempts"],
-//RS                 "strategy.bounds.max_shrink_attempts",
-//RS             )?)
-//RS             .map_err(|_| "strategy.bounds.max_shrink_attempts is outside usize range".to_string())?,
-//RS             max_discarded_cases: usize::try_from(unsigned_any(
-//RS                 value,
-//RS                 &["max_discarded_cases", "maxDiscardedCases"],
-//RS                 "strategy.bounds.max_discarded_cases",
-//RS             )?)
-//RS             .map_err(|_| "strategy.bounds.max_discarded_cases is outside usize range".to_string())?,
-//RS         })
-//RS     }
-//RS 
-//RS     fn history_distributions(value: &Tree) -> Result<Vec<HistoryDistribution>, String> {
-//RS         array_any(value, &["distributions"], "strategy.distributions")?
-//RS             .iter()
-//RS             .enumerate()
-//RS             .map(|(index, value)| {
-//RS                 Ok(HistoryDistribution {
-//RS                     operation: required_text_any(
-//RS                         value,
-//RS                         &["operation"],
-//RS                         &format!("strategy.distributions[{index}].operation"),
-//RS                     )?,
-//RS                     weight: usize::try_from(unsigned_any(
-//RS                         value,
-//RS                         &["weight"],
-//RS                         &format!("strategy.distributions[{index}].weight"),
-//RS                     )?)
-//RS                     .map_err(|_| format!("strategy.distributions[{index}].weight is outside usize range"))?,
-//RS                 })
-//RS             })
-//RS             .collect()
-//RS     }
-//RS 
-//RS     struct WebHistoryStrategy {
-//RS         command_type: String,
-//RS         generate: u32,
-//RS         rebuild: u32,
-//RS         valid: u32,
-//RS         bounds: HistoryBounds,
-//RS         distributions: Vec<HistoryDistribution>,
-//RS     }
-//RS 
-//RS     impl WebHistoryStrategy {
-//RS         fn from_wire(command_type: String, value: &Tree) -> Result<Self, String> {
-//RS             let bounds = history_bounds(required_any(value, &["bounds"], "strategy.bounds")?)?;
-//RS             let distributions = history_distributions(value)?;
-//RS             Ok(Self {
-//RS                 command_type,
-//RS                 generate: callback_id(value, "generate")?,
-//RS                 rebuild: callback_id(value, "rebuild")?,
-//RS                 valid: callback_id(value, "valid")?,
-//RS                 bounds,
-//RS                 distributions,
-//RS             })
-//RS         }
-//RS     }
-//RS 
-//RS     impl HistoryStrategyBehavior<Tree> for WebHistoryStrategy {
-//RS         fn command_type(&self) -> &str {
-//RS             &self.command_type
-//RS         }
-//RS 
-//RS         fn bounds(&self) -> HistoryBounds {
-//RS             self.bounds
-//RS         }
-//RS 
-//RS         fn distributions(&self) -> Vec<HistoryDistribution> {
-//RS             self.distributions.clone()
-//RS         }
-//RS 
-//RS         fn generate(
-//RS             &self,
-//RS             rng: &mut HistoryRng,
-//RS             case_index: usize,
-//RS             max_steps: usize,
-//RS         ) -> Option<TypedHistoryCase<Tree>> {
-//RS             let handle = jet_testing_history_web_rng_alloc(rng.state());
-//RS             if handle == 0 {
-//RS                 return None;
-//RS             }
-//RS             let input = object(vec![
-//RS                 ("rng_handle", unsigned_tree(handle)),
-//RS                 ("case_index", unsigned_tree(case_index as u64)),
-//RS                 ("max_steps", unsigned_tree(max_steps as u64)),
-//RS             ]);
-//RS             let response = callback(self.generate, &input, "strategy.generate");
-//RS             let state = jet_testing_history_web_rng_state(handle);
-//RS             jet_testing_history_web_rng_release(handle);
-//RS             rng.replace_state(state);
-//RS             let response = response.ok()?;
-//RS             optional_typed_history_case(&response, "strategy.generate.value")
-//RS                 .ok()
-//RS                 .flatten()
-//RS         }
-//RS 
-//RS         fn rebuild(&self, case: &HistoryCase) -> Option<TypedHistoryCase<Tree>> {
-//RS             let response = callback(
-//RS                 self.rebuild,
-//RS                 &history_case_tree(case),
-//RS                 "strategy.rebuild",
-//RS             )
-//RS             .ok()?;
-//RS             optional_typed_history_case(&response, "strategy.rebuild.value")
-//RS                 .ok()
-//RS                 .flatten()
-//RS         }
-//RS 
-//RS         fn valid(&self, case: &TypedHistoryCase<Tree>) -> bool {
-//RS             let response = callback(
-//RS                 self.valid,
-//RS                 &typed_history_case_tree(case),
-//RS                 "strategy.valid",
-//RS             )
-//RS             .ok();
-//RS             matches!(response, Some(Tree::Bool(true)))
-//RS         }
-//RS 
-//RS         fn commands_to_data_tree(&self, commands: &[Tree]) -> Option<Tree> {
-//RS             Some(Tree::Array(commands.to_vec()))
-//RS         }
-//RS     }
-//RS 
-//RS 
-//RS     fn set_output(value: Tree) {
-//RS         OUTPUT.with(|cell| {
-//RS             *cell.borrow_mut() = jet_std::render_datatree_json(&value, false, 0).into_bytes();
-//RS         });
-//RS     }
-//RS 
-//RS     fn result_tree(result: Result<jet_std::JetTestComparison, String>) -> Tree {
-//RS         match result {
-//RS             Ok(value) => Tree::Object(vec![
-//RS                 ("tag".to_string(), Tree::Text("Ok".to_string())),
-//RS                 (
-//RS                     "values".to_string(),
-//RS                     Tree::Array(vec![comparison_tree(value)]),
-//RS                 ),
-//RS             ]),
-//RS             Err(reason) => Tree::Object(vec![
-//RS                 ("tag".to_string(), Tree::Text("Err".to_string())),
-//RS                 ("values".to_string(), Tree::Array(vec![Tree::Text(reason)])),
-//RS             ]),
-//RS         }
-//RS     }
-//RS 
-//RS     fn option_integer(value: Option<i64>) -> Tree {
-//RS         match value {
-//RS             Some(value) => Tree::Object(vec![
-//RS                 ("tag".to_string(), Tree::Text("Some".to_string())),
-//RS                 (
-//RS                     "values".to_string(),
-//RS                     Tree::Array(vec![Tree::Int(value)]),
-//RS                 ),
-//RS             ]),
-//RS             None => Tree::Object(vec![
-//RS                 ("tag".to_string(), Tree::Text("None".to_string())),
-//RS                 ("values".to_string(), Tree::Array(Vec::new())),
-//RS             ]),
-//RS         }
-//RS     }
-//RS 
-//RS     fn text_array(values: Vec<String>) -> Tree {
-//RS         Tree::Array(values.into_iter().map(Tree::Text).collect())
-//RS     }
-//RS 
-//RS     fn comparison_tree(value: jet_std::JetTestComparison) -> Tree {
-//RS         Tree::Object(vec![
-//RS             ("status".to_string(), Tree::Text(value.status)),
-//RS             ("relation".to_string(), Tree::Text(value.relation)),
-//RS             ("source".to_string(), Tree::Text(value.source)),
-//RS             ("tool".to_string(), Tree::Text(value.tool)),
-//RS             ("target".to_string(), Tree::Text(value.target)),
-//RS             ("seed".to_string(), option_integer(value.seed)),
-//RS             ("case_ids".to_string(), text_array(value.case_ids)),
-//RS             ("inputs".to_string(), Tree::Array(value.inputs)),
-//RS             ("reference".to_string(), Tree::Array(value.reference)),
-//RS             ("candidate".to_string(), Tree::Array(value.candidate)),
-//RS             (
-//RS                 "first_difference".to_string(),
-//RS                 Tree::Int(value.first_difference),
-//RS             ),
-//RS             ("reason".to_string(), Tree::Text(value.reason)),
-//RS             (
-//RS                 "universal_proof".to_string(),
-//RS                 Tree::Bool(value.universal_proof),
-//RS             ),
-//RS         ])
-//RS     }
-//RS 
-//RS     fn output_is_current(pointer: u32, length: u32) -> bool {
-//RS         OUTPUT.with(|cell| {
-//RS             let output = cell.borrow();
-//RS             pointer != 0
-//RS                 && pointer as usize == output.as_ptr() as usize
-//RS                 && usize::try_from(length)
-//RS                     .ok()
-//RS                     .is_some_and(|length| length <= output.len())
-//RS         })
-//RS     }
-//RS 
-//RS     fn callback(
-//RS         callback: u32,
-//RS         input: &Tree,
-//RS         role: &str,
-//RS     ) -> Result<Tree, String> {
-//RS         let encoded = jet_std::render_datatree_json(input, false, 0).into_bytes();
-//RS         if encoded.len() > MAX_WIRE_BYTES {
-//RS             return Err(format!("{role} history callback input exceeds the Web limit"));
-//RS         }
-//RS         let pointer = u32::try_from(encoded.as_ptr() as usize)
-//RS             .map_err(|_| format!("{role} history callback input pointer is invalid"))?;
-//RS         let packed = unsafe {
-//RS             jet_testing_history_web_callback(
-//RS                 callback,
-//RS                 pointer,
-//RS                 u32::try_from(encoded.len())
-//RS                     .map_err(|_| format!("{role} history callback input is too large"))?,
-//RS             )
-//RS         };
-//RS         if packed == 0 {
-//RS             return Err(format!("{role} history callback returned no response"));
-//RS         }
-//RS         let output_pointer = (packed >> 32) as u32;
-//RS         let output_length = packed as u32;
-//RS         if !output_is_current(output_pointer, output_length) {
-//RS             OUTPUT.with(|cell| cell.borrow_mut().clear());
-//RS             return Err(format!("{role} history callback returned an invalid response"));
-//RS         }
-//RS         let parsed = OUTPUT.with(|cell| {
-//RS             let output = cell.borrow();
-//RS             let bytes = unsafe {
-//RS                 std::slice::from_raw_parts(
-//RS                     output_pointer as usize as *const u8,
-//RS                     output_length as usize,
-//RS                 )
-//RS             };
-//RS             std::str::from_utf8(bytes)
-//RS                 .ok()
-//RS                 .and_then(|value| jet_std::parse_json_typed_datatree(value).ok())
-//RS         });
-//RS         OUTPUT.with(|cell| cell.borrow_mut().clear());
-//RS         let parsed = parsed.ok_or_else(|| format!("{role} callback returned invalid JSON"))?;
-//RS         let ok = match field(&parsed, "ok") {
-//RS             Some(Tree::Bool(value)) => *value,
-//RS             _ => return Err(format!("{role} callback returned an invalid response envelope")),
-//RS         };
-//RS         if ok {
-//RS             field(&parsed, "value")
-//RS                 .cloned()
-//RS                 .ok_or_else(|| format!("{role} callback omitted its value"))
-//RS         } else {
-//RS             match field(&parsed, "reason") {
-//RS                 Some(Tree::Text(reason) | Tree::TypedText(reason)) => Err(format!(
-//RS                     "{role} callback failed: {reason}"
-//RS                 )),
-//RS                 _ => Err(format!("{role} callback failed without a reason")),
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     fn wire_provenance(root: &Tree) -> Result<Option<HistoryProvenance>, String> {
-//RS         let Some(value) = field(root, "provenance") else {
-//RS             return Ok(None);
-//RS         };
-//RS         if matches!(value, Tree::Null) {
-//RS             return Ok(None);
-//RS         }
-//RS         let base = HistoryProvenance {
-//RS             source: required_text(value, "source")?,
-//RS             tool: required_text(value, "tool")?,
-//RS             target: required_text(value, "target")?,
-//RS         };
-//RS         let rows = field(root, "callback_provenance")
-//RS             .ok_or_else(|| "history callback provenance is missing".to_string())?
-//RS             .as_array()?;
-//RS         let explicit = field(root, "strategy").is_some_and(|value| !matches!(value, Tree::Null));
-//RS         let expected: &[&str] = if explicit {
-//RS             &["model", "actual", "observe", "generate", "rebuild", "valid"]
-//RS         } else {
-//RS             &["model", "actual", "observe", "strategy"]
-//RS         };
-//RS         if rows.len() != expected.len() {
-//RS             return Err("history callback provenance has an invalid role count".to_string());
-//RS         }
-//RS         let mut callbacks = Vec::with_capacity(rows.len());
-//RS         for row in rows {
-//RS             let role = required_text(row, "role")?;
-//RS             if !expected.contains(&role.as_str()) {
-//RS                 return Err("history callback provenance has an unknown role".to_string());
-//RS             }
-//RS             let identity = required_text(row, "function_identity")?;
-//RS             let captures = field(row, "captures")
-//RS                 .ok_or_else(|| "history callback captures are missing".to_string())?;
-//RS             captures.as_array()?;
-//RS             if role == "strategy" && (
-//RS                 identity != format!("derived:{}", required_text(root, "command_type")?)
-//RS                 || !captures.as_array()?.is_empty()
-//RS             ) {
-//RS                 return Err("history derived strategy provenance does not match its descriptor".to_string());
-//RS             }
-//RS             // The typed JSON parser retains exact integer lexemes and ordered
-//RS             // nested DataTree values. The emitter's capture type tags travel
-//RS             // inside this existing wire tree, never through an f64 conversion.
-//RS             let bytes = jet_std::render_datatree_json(captures, false, 0).into_bytes();
-//RS             let fingerprint = crate::jet_testing_history_foundation::history_callback_value_fingerprint(
-//RS                 &identity, &bytes,
-//RS             ).map_err(|error| error.to_string())?;
-//RS             callbacks.push((role, fingerprint));
-//RS         }
-//RS         let callbacks = callbacks.iter().map(|(role, identity)| (role.as_str(), identity.as_str()))
-//RS             .collect::<Vec<_>>();
-//RS         base.bind_callbacks(&callbacks).map(Some).map_err(|error| error.to_string())
-//RS     }
-//RS 
-//RS     fn command_type_matches(descriptor: &str, name: &str) -> bool {
-//RS         descriptor == name
-//RS             || descriptor
-//RS                 .strip_prefix(name)
-//RS                 .is_some_and(|suffix| suffix.starts_with(':'))
-//RS     }
-//RS 
-//RS     pub(crate) fn register_strategy(
-//RS         command_type: &'static str,
-//RS         dispatch: fn(&Tree) -> Result<jet_std::JetTestComparison, String>,
-//RS     ) {
-//RS         STRATEGIES.with(|strategies| {
-//RS             let mut strategies = strategies.borrow_mut();
-//RS             if let Some(row) = strategies
-//RS                 .iter_mut()
-//RS                 .find(|(name, _)| *name == command_type)
-//RS             {
-//RS                 row.1 = dispatch;
-//RS             } else {
-//RS                 strategies.push((command_type, dispatch));
-//RS             }
-//RS         });
-//RS     }
-//RS 
-//RS     fn execute<Command, Strategy>(
-//RS         model: u32,
-//RS         actual: u32,
-//RS         observe: u32,
-//RS         strategy: &Strategy,
-//RS         commands: &[Command],
-//RS     ) -> Result<
-//RS         (
-//RS             Tree,
-//RS             Tree,
-//RS             crate::jet_testing_comparison_foundation::ComparisonObservation,
-//RS             crate::jet_testing_comparison_foundation::ComparisonObservation,
-//RS         ),
-//RS         String,
-//RS     >
-//RS     where
-//RS         Command: crate::jet_testing_history_foundation::HistoryCommand + 'static,
-//RS         Strategy: crate::jet_testing_history_foundation::HistoryStrategyBehavior<Command>,
-//RS     {
-//RS         let input = strategy
-//RS             .commands_to_data_tree(commands)
-//RS             .ok_or_else(|| "history command codec is unavailable on Web".to_string())?;
-//RS         let reference_value = callback(model, &input, "model")?;
-//RS         let candidate_value = callback(actual, &input, "actual")?;
-//RS         let reference_observed = callback(observe, &reference_value, "observe")
-//RS             .map(|value| jet_testing_history_observation(&value))?;
-//RS         let candidate_observed = callback(observe, &candidate_value, "observe")
-//RS             .map(|value| jet_testing_history_observation(&value))?;
-//RS         Ok((
-//RS             reference_value,
-//RS             candidate_value,
-//RS             reference_observed,
-//RS             candidate_observed,
-//RS         ))
-//RS     }
-//RS 
-//RS 
-//RS     fn run_wire(root: &Tree) -> Result<jet_std::JetTestComparison, String> {
-//RS         let command_type = required_text(root, "command_type")?;
-//RS         if let Some(strategy) = field(root, "strategy") {
-//RS             if !matches!(strategy, Tree::Null) {
-//RS                 let strategy = WebHistoryStrategy::from_wire(command_type.clone(), strategy)?;
-//RS                 return run_wire_with_strategy::<Tree, WebHistoryStrategy>(root, strategy);
-//RS             }
-//RS         }
-//RS         let dispatch = STRATEGIES.with(|strategies| {
-//RS             strategies
-//RS                 .borrow()
-//RS                 .iter()
-//RS                 .find(|(name, _)| command_type_matches(&command_type, name))
-//RS                 .map(|(_, dispatch)| *dispatch)
-//RS         });
-//RS         if let Some(dispatch) = dispatch {
-//RS             return dispatch(root);
-//RS         }
-//RS         if command_type_matches(&command_type, "DataTree") {
-//RS             return run_wire_with_strategy::<
-//RS                 jet_std::DataTree,
-//RS                 crate::jet_testing_history_foundation::HistorySchemaStrategy,
-//RS             >(
-//RS                 root,
-//RS                 <jet_std::DataTree as crate::jet_testing_history_foundation::HistoryCommand>::history_strategy(),
-//RS             );
-//RS         }
-//RS         Err(crate::jet_testing_history_foundation::history_unsupported_type_reason(
-//RS             &command_type,
-//RS         ))
-//RS     }
-//RS 
-//RS     pub(crate) fn run_wire_with_strategy<Command, Strategy>(
-//RS         root: &Tree,
-//RS         strategy: Strategy,
-//RS     ) -> Result<jet_std::JetTestComparison, String>
-//RS     where
-//RS         Command: crate::jet_testing_history_foundation::HistoryCommand + 'static,
-//RS         Strategy: crate::jet_testing_history_foundation::HistoryStrategyBehavior<Command>,
-//RS     {
-//RS         let seed = u64::try_from(required_integer(root, "seed")?)
-//RS             .map_err(|_| "history seed is invalid".to_string())?;
-//RS         let cases = usize::try_from(required_integer(root, "cases")?)
-//RS             .map_err(|_| "history case bound is invalid".to_string())?;
-//RS         let command_type = required_text(root, "command_type")?;
-//RS         if !command_type_matches(&command_type, strategy.command_type()) {
-//RS             return Err(format!(
-//RS                 "history command descriptor `{command_type}` does not match generated strategy `{}`",
-//RS                 strategy.command_type(),
-//RS             ));
-//RS         }
-//RS         let relation = ObservationRelation::TypedEquality;
-//RS         let Some(provenance) = wire_provenance(root)? else {
-//RS             let record = ComparisonRecord::terminal(
-//RS                 relation,
-//RS                 ComparisonStatus::Unavailable,
-//RS                 "history provenance is unavailable",
-//RS             );
-//RS             return Ok(jet_testing_history_record(
-//RS                 record,
-//RS                 Vec::new(),
-//RS                 Vec::new(),
-//RS                 Vec::new(),
-//RS                 Some(seed as i64),
-//RS                 None,
-//RS             ));
-//RS         };
-//RS         let model = callback_id(root, "model")?;
-//RS         let actual = callback_id(root, "actual")?;
-//RS         let observe = callback_id(root, "observe")?;
-//RS         let bounds = strategy.bounds();
-//RS         if let Some(reason) = strategy.unsupported_reason() {
-//RS             let record = ComparisonRecord::terminal(
-//RS                 relation.clone(),
-//RS                 ComparisonStatus::Unsupported,
-//RS                 reason,
-//RS             );
-//RS             return Ok(jet_testing_history_record(
-//RS                 record,
-//RS                 Vec::new(),
-//RS                 Vec::new(),
-//RS                 Vec::new(),
-//RS                 Some(seed as i64),
-//RS                 Some(&provenance),
-//RS             ));
-//RS         }
-//RS         let config = crate::jet_testing_history_foundation::HistoryConfig::new(
-//RS             seed,
-//RS             cases,
-//RS             bounds,
-//RS             provenance.source.clone(),
-//RS             provenance.tool.clone(),
-//RS             provenance.target.clone(),
-//RS             relation.clone(),
-//RS             crate::jet_testing_history_foundation::OracleDeclaration::independent(
-//RS                 "testing.histories.model",
-//RS             ),
-//RS         )
-//RS         .with_command_type(strategy.command_type());
-//RS         let config = strategy
-//RS             .distributions()
-//RS             .into_iter()
-//RS             .fold(config, |config, distribution| config.with_distribution(distribution));
-//RS         let runner = crate::jet_testing_history_foundation::HistoryRunner::new(config)
-//RS             .map_err(|error| error.to_string())?;
-//RS         let mut inputs = Vec::new();
-//RS         let mut reference_values = Vec::new();
-//RS         let mut candidate_values = Vec::new();
-//RS         let mut samples = Vec::new();
-//RS         let run = runner
-//RS             .run_strategy::<Command, _, _>(&strategy, |typed| {
-//RS                 let case = &typed.case;
-//RS                 let input = match jet_std::parse_json_typed_datatree(&case.json()) {
-//RS                     Ok(input) => input,
-//RS                     Err(error) => {
-//RS                         return ComparisonRecord::terminal(
-//RS                             relation.clone(),
-//RS                             ComparisonStatus::Unavailable,
-//RS                             format!("history input could not be decoded: {}", error.reason),
-//RS                         );
-//RS                     }
-//RS                 };
-//RS                 let (
-//RS                     reference_value,
-//RS                     candidate_value,
-//RS                     reference_observed,
-//RS                     candidate_observed,
-//RS                 ) = match execute(model, actual, observe, &strategy, &typed.commands) {
-//RS                     Ok(values) => values,
-//RS                     Err(reason) => {
-//RS                         return ComparisonRecord::terminal(
-//RS                             relation.clone(),
-//RS                             ComparisonStatus::Unavailable,
-//RS                             reason,
-//RS                         );
-//RS                     }
-//RS                 };
-//RS                 let (
-//RS                     _reference_replay_value,
-//RS                     _candidate_replay_value,
-//RS                     reference_replay,
-//RS                     candidate_replay,
-//RS                 ) = match execute(model, actual, observe, &strategy, &typed.commands) {
-//RS                     Ok(values) => values,
-//RS                     Err(reason) => {
-//RS                         return ComparisonRecord::terminal(
-//RS                             relation.clone(),
-//RS                             ComparisonStatus::Unavailable,
-//RS                             reason,
-//RS                         );
-//RS                     }
-//RS                 };
-//RS                 let mut identity = ComparisonIdentity::new(
-//RS                     case.case_id.clone(),
-//RS                     case.input_id(),
-//RS                     provenance.source.clone(),
-//RS                     provenance.tool.clone(),
-//RS                     provenance.target.clone(),
-//RS                 );
-//RS                 identity.seed = Some(case.seed);
-//RS                 let sample = ComparisonSample::new(
-//RS                     identity,
-//RS                     reference_observed,
-//RS                     candidate_observed,
-//RS                 )
-//RS                 .with_replays(reference_replay, candidate_replay);
-//RS                 inputs.push(input);
-//RS                 reference_values.push(reference_value);
-//RS                 candidate_values.push(candidate_value);
-//RS                 samples.push(sample.clone());
-//RS                 compare_samples(relation.clone(), [sample])
-//RS             })
-//RS             .map_err(|error| error.to_string())?;
-//RS         if let Some(artifact) = run.failure {
-//RS             return Err(format!("history-artifact {}", artifact.json()));
-//RS         }
-//RS         let mut record =
-//RS             compare_samples_with_discarded(relation, samples, run.discarded_cases);
-//RS         if run.explored_cases == 0 {
-//RS             record.status = ComparisonStatus::Unavailable;
-//RS             record.reason = Some("no history case produced an observation".to_string());
-//RS         }
-//RS         Ok(jet_testing_history_record(
-//RS             record,
-//RS             inputs,
-//RS             reference_values,
-//RS             candidate_values,
-//RS             Some(seed as i64),
-//RS             Some(&provenance),
-//RS         ))
-//RS     }
-//RS 
-//RS     #[no_mangle]
-//RS     pub extern "C" fn jet_testing_history_web_input_alloc(length: u32) -> u32 {
-//RS         let Ok(length) = usize::try_from(length) else {
-//RS             return 0;
-//RS         };
-//RS         if length == 0 || length > MAX_WIRE_BYTES {
-//RS             return 0;
-//RS         }
-//RS         INPUT.with(|cell| {
-//RS             let mut input = cell.borrow_mut();
-//RS             input.resize(length, 0);
-//RS             u32::try_from(input.as_mut_ptr() as usize).unwrap_or(0)
-//RS         })
-//RS     }
-//RS 
-//RS     #[no_mangle]
-//RS     pub extern "C" fn jet_testing_history_web_input_free(_pointer: u32) {
-//RS         INPUT.with(|cell| cell.borrow_mut().clear());
-//RS     }
-//RS 
-//RS     #[no_mangle]
-//RS     pub extern "C" fn jet_testing_history_web_output_alloc(length: u32) -> u32 {
-//RS         let Ok(length) = usize::try_from(length) else {
-//RS             return 0;
-//RS         };
-//RS         if length == 0 || length > MAX_WIRE_BYTES {
-//RS             return 0;
-//RS         }
-//RS         OUTPUT.with(|cell| {
-//RS             let mut output = cell.borrow_mut();
-//RS             output.resize(length, 0);
-//RS             u32::try_from(output.as_mut_ptr() as usize).unwrap_or(0)
-//RS         })
-//RS     }
-//RS 
-//RS     #[no_mangle]
-//RS     pub extern "C" fn jet_testing_history_web_output_ptr() -> u32 {
-//RS         OUTPUT.with(|cell| u32::try_from(cell.borrow().as_ptr() as usize).unwrap_or(0))
-//RS     }
-//RS 
-//RS     #[no_mangle]
-//RS     pub extern "C" fn jet_testing_history_web_output_len() -> u32 {
-//RS         OUTPUT.with(|cell| u32::try_from(cell.borrow().len()).unwrap_or(u32::MAX))
-//RS     }
-//RS 
-//RS     #[no_mangle]
-//RS     pub extern "C" fn jet_testing_history_web_output_clear() {
-//RS         OUTPUT.with(|cell| cell.borrow_mut().clear());
-//RS     }
-//RS 
-//RS     #[no_mangle]
-//RS     pub extern "C" fn jet_testing_history_web_call(pointer: u32, length: u32) -> i32 {
-//RS         OUTPUT.with(|cell| cell.borrow_mut().clear());
-//RS         let input = INPUT.with(|cell| {
-//RS             let input = cell.borrow();
-//RS             let valid = pointer != 0
-//RS                 && pointer as usize == input.as_ptr() as usize
-//RS                 && usize::try_from(length)
-//RS                     .ok()
-//RS                     .is_some_and(|length| length <= input.len());
-//RS             if !valid {
-//RS                 return None;
-//RS             }
-//RS             let bytes = unsafe {
-//RS                 std::slice::from_raw_parts(pointer as usize as *const u8, length as usize)
-//RS             };
-//RS             Some(bytes.to_vec())
-//RS         });
-//RS         let result = input
-//RS             .and_then(|bytes| std::str::from_utf8(&bytes).ok().map(str::to_string))
-//RS             .and_then(|wire| jet_std::parse_json_typed_datatree(&wire).ok())
-//RS             .map_or_else(
-//RS                 || Err("invalid testing history WebWasm wire JSON".to_string()),
-//RS                 |wire| run_wire(&wire),
-//RS             );
-//RS         set_output(result_tree(result));
-//RS         0
-//RS     }
-//RS }
-// END-PORT-PENDING 0307 crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:1-1880
+use core.encoding.runtime.std_data_tree.[DataTree, render_datatree_json, parse_json_datatree]
+use jet_testing_history_foundation.[HistoryCallbackReader, HistorySendCallbackReader, HistoryRng, TypedHistoryCase, HistoryCase, HistoryBounds, HistoryDistribution, history_callback_value_fingerprint]
+use jet_foundation.TestingComparison.ComparisonObservation
+use core.mem.runtime.portable_core.[JetOutcome, JetAbsent]
+use core.mem.runtime.portable_alloc.JetErr
+use core.cell.[Cell, RefCell, ThreadLocal]
+use core.rc.[Rc, Weak]
+use std.sync.[Arc, Mutex]
+use std.sync.Weak as SendWeak
+use std.any.Any
+use std.fmt.[Debug, Formatter]
+use std.panic.[catch_unwind, AssertUnwindSafe]
+use core.mem
+use core.ptr
+use core.testing.runtime.std_testing_comparison.JetTestComparison
+use jet_testing_history_foundation.[HistoryProvenance, HistoryCommand, HistoryStrategy, HistoryStrategyBehavior, HistoryConfig, HistoryRunner, OracleDeclaration, validate_history_bounds]
+use jet_foundation.TestingComparison.[ComparisonRecord, ComparisonStatus, ObservationRelation, ComparisonIdentity, ComparisonSample, compare_samples, compare_samples_with_discarded]
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:1
+// Typed operation histories share the Foundation runner, comparison record and shrinker.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:4
+type JetHistoryCaptureReader = fn() -> DataTree Err!
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:5
+type JetHistorySendCaptureReader = Fn() -> DataTree Err! + Send + Sync
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:6
+type JetHistoryWeakReader = HistoryCallbackReader<DataTree Err!>
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:7
+type JetHistoryWeakSendReader = HistorySendCallbackReader<DataTree Err!>
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:13
+#Derive(Clone)
+struct JetHistoryTypeCodec {
+    checked_type: String
+    encode: Arc<Fn(&Any, USize) -> DataTree Err! + Send + Sync>
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:18
+type JetHistoryTypes = [String: JetHistoryTypeCodec]
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:19
+// GATE #4565: kernel primitive
+static JET_HISTORY_TYPES: ThreadLocal<RefCell<JetHistoryTypes>> = #Unsafe("checked codec dictionary is scoped to the invoking thread") { ThreadLocal.new(fn() { RefCell.new([String: JetHistoryTypeCodec]{}) }) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:22
+#Unsafe("clone current checked dictionary from owning-thread slot")
+fn jet_history_current_types() -> JetHistoryTypes {
+    JET_HISTORY_TYPES.with(fn(types) { types.borrow().clone() })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:25
+#Unsafe("restore checked type dictionary through lexical scope drop even when callback unwinds")
+fn jet_history_with_types<R>(types: JetHistoryTypes, body: FnOnce() -> R) -> R {
+    struct Scope { types: JetHistoryTypes }
+    impl Drop for Scope {
+        // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:28
+        fn drop(self: &Self) -> Unit {
+            JET_HISTORY_TYPES.with(fn(types) { *types.borrow_mut() = mem.take(&self.types) })
+        }
+    }
+    _scope :: Scope{types: JET_HISTORY_TYPES.with(fn(current) { current.replace(^types) })}
+    body()
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:35
+fn jet_history_type_codec<T>(checked_type: String, encode: Fn(&T, USize) -> DataTree Err! + Send + Sync) -> JetHistoryTypeCodec {
+    JetHistoryTypeCodec{checked_type: ^checked_type, encode: Arc.new(fn(value, depth) {
+        value :: value.downcast_ref<T>().ok_or_else(fn() { "history capture type does not match its checked instantiation" })?
+        encode(value, depth)
+    })}
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:44
+fn jet_history_encode_type<T>(types: &JetHistoryTypes, name: String, value: &T, depth: USize) -> DataTree Err! {
+    if depth >= 64 -> return Err("history capture exceeds the nesting bound")
+    (types.get(name).ok_or_else(fn() { "history capture type is unresolved" })?.encode)(value, depth)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:56-118
+// Expand the three used owned-argument macro instantiations; each clone retains its live reader.
+trait JetHistoryFn1<A0, R>: Fn(A0) -> R {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:72
+    fn clone_box(self: &Self) -> Box<JetHistoryFn1<A0, R>>
+}
+impl<F: Fn(A0) -> R + Clone, A0, R> JetHistoryFn1<A0, R> for F {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:81
+    // GATE #4565: kernel primitive
+    #Unsafe("clone callback environment and retain weak reader by live allocation identity only")
+    fn clone_box(self: &Self) -> Box<JetHistoryFn1<A0, R>> {
+        (cloned, life) :: jet_history_clone_callable(self)
+        key :: ptr.from_ref(self).addr()
+        reader :: JET_HISTORY_CALLBACKS.with(fn(callbacks) {
+            callbacks.borrow().get(key).and_then(fn((life, reader)) { life.upgrade().map(fn(_) { reader.clone() }) })
+        })
+        callback :: Box.new(^cloned) as Box<JetHistoryFn1<A0, R>>
+        match (reader, life) {
+            (Val(reader), Val(life)) -> jet_history_register_callback_reader(^callback, ^reader, &life)
+            _ -> ^callback
+        }
+    }
+}
+impl<A0, R> Clone for Box<JetHistoryFn1<A0, R>> {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:104
+    fn clone(self: &Self) -> Self { self.as_ref().clone_box() }
+}
+impl<A0, R> Debug for JetHistoryFn1<A0, R> {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:109
+    fn fmt(self: &Self, f: &Formatter) -> Unit std.fmt.Error! { f.debug_struct("Function").finish_non_exhaustive() }
+}
+trait JetHistoryFn3<A0, A1, A2, R>: Fn(A0, A1, A2) -> R {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:72
+    fn clone_box(self: &Self) -> Box<JetHistoryFn3<A0, A1, A2, R>>
+}
+impl<F: Fn(A0, A1, A2) -> R + Clone, A0, A1, A2, R> JetHistoryFn3<A0, A1, A2, R> for F {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:81
+    // GATE #4565: kernel primitive
+    #Unsafe("clone callback environment and retain weak reader by live allocation identity only")
+    fn clone_box(self: &Self) -> Box<JetHistoryFn3<A0, A1, A2, R>> {
+        (cloned, life) :: jet_history_clone_callable(self)
+        key :: ptr.from_ref(self).addr()
+        reader :: JET_HISTORY_CALLBACKS.with(fn(callbacks) {
+            callbacks.borrow().get(key).and_then(fn((life, reader)) { life.upgrade().map(fn(_) { reader.clone() }) })
+        })
+        callback :: Box.new(^cloned) as Box<JetHistoryFn3<A0, A1, A2, R>>
+        match (reader, life) {
+            (Val(reader), Val(life)) -> jet_history_register_callback_reader(^callback, ^reader, &life)
+            _ -> ^callback
+        }
+    }
+}
+impl<A0, A1, A2, R> Clone for Box<JetHistoryFn3<A0, A1, A2, R>> {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:104
+    fn clone(self: &Self) -> Self { self.as_ref().clone_box() }
+}
+impl<A0, A1, A2, R> Debug for JetHistoryFn3<A0, A1, A2, R> {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:109
+    fn fmt(self: &Self, f: &Formatter) -> Unit std.fmt.Error! { f.debug_struct("Function").finish_non_exhaustive() }
+}
+trait JetHistoryFn0<R>: Fn() -> R {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:72
+    fn clone_box(self: &Self) -> Box<JetHistoryFn0<R>>
+}
+impl<F: Fn() -> R + Clone, R> JetHistoryFn0<R> for F {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:81
+    // GATE #4565: kernel primitive
+    #Unsafe("clone callback environment and retain weak reader by live allocation identity only")
+    fn clone_box(self: &Self) -> Box<JetHistoryFn0<R>> {
+        (cloned, life) :: jet_history_clone_callable(self)
+        key :: ptr.from_ref(self).addr()
+        reader :: JET_HISTORY_CALLBACKS.with(fn(callbacks) {
+            callbacks.borrow().get(key).and_then(fn((life, reader)) { life.upgrade().map(fn(_) { reader.clone() }) })
+        })
+        callback :: Box.new(^cloned) as Box<JetHistoryFn0<R>>
+        match (reader, life) {
+            (Val(reader), Val(life)) -> jet_history_register_callback_reader(^callback, ^reader, &life)
+            _ -> ^callback
+        }
+    }
+}
+impl<R> Clone for Box<JetHistoryFn0<R>> {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:104
+    fn clone(self: &Self) -> Self { self.as_ref().clone_box() }
+}
+impl<R> Debug for JetHistoryFn0<R> {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:109
+    fn fmt(self: &Self, f: &Formatter) -> Unit std.fmt.Error! { f.debug_struct("Function").finish_non_exhaustive() }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:120
+#Derive(Clone)
+struct JetHistoryStrategy<Command> {
+    generate: Box<JetHistoryFn3<JetHistoryRng, USize, USize, JetOutcome<TypedHistoryCase<Command>, JetAbsent>>>
+    rebuild: Box<JetHistoryFn1<HistoryCase, JetOutcome<TypedHistoryCase<Command>, JetAbsent>>>
+    valid: Box<JetHistoryFn1<TypedHistoryCase<Command>, Bool>>
+    bounds: HistoryBounds
+    distributions: [HistoryDistribution]
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:134
+#Derive(Clone)
+struct JetHistoryRng { value: Rc<RefCell<HistoryRng?>> }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:137
+struct JetHistoryRngLoan { destination: &HistoryRng, value: JetHistoryRng }
+impl JetHistoryRngLoan {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:143
+    fn new(destination: &HistoryRng) -> Self {
+        rng :: mem.replace(destination, HistoryRng.new(0))
+        Self{destination: destination, value: JetHistoryRng{value: Rc.new(RefCell.new(Val(^rng)))}}
+    }
+}
+impl Drop for JetHistoryRngLoan {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:150
+    fn drop(self: &Self) -> Unit {
+        if self.value.value.borrow_mut().take() == Val(rng) { *self.destination = ^rng }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:157
+#Derive(Default)
+struct JetHistoryLocalTicket { life: Rc<Unit> }
+impl Clone for JetHistoryLocalTicket {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:160
+    // GATE #4565: kernel primitive
+    #Unsafe("record fresh ticket only in current clone scope; cloned capture environment is shared")
+    fn clone(self: &Self) -> Self {
+        ticket :: Self.default()
+        JET_HISTORY_CLONED_LIFE.with(fn(life) { *life.borrow_mut() = Val(ticket.life.clone()) })
+        ^ticket
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:170
+// GATE #4565: kernel primitive
+#Unsafe("nested clone scopes restore outer ticket without extending any referent lifetime")
+fn jet_history_clone_callable<F: Clone>(value: &F) -> (F, Rc<Unit>?) {
+    struct Scope { life: Rc<Unit>? }
+    impl Drop for Scope {
+        // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:173
+        fn drop(self: &Self) -> Unit { JET_HISTORY_CLONED_LIFE.with(fn(life) { *life.borrow_mut() = self.life.take() }) }
+    }
+    _scope :: Scope{life: JET_HISTORY_CLONED_LIFE.with(fn(life) { life.borrow_mut().take() })}
+    cloned :: value.clone()
+    life :: JET_HISTORY_CLONED_LIFE.with(fn(life) { life.borrow_mut().take() })
+    (^cloned, ^life)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:182
+#Derive(Default)
+struct JetHistorySendTicket { life: Arc<Unit> }
+impl Clone for JetHistorySendTicket {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:185
+    fn clone(self: &Self) -> Self { Self.default() }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:188
+// GATE #4565: kernel primitive
+static JET_HISTORY_CLONED_LIFE: ThreadLocal<RefCell<Rc<Unit>?>> = #Unsafe("per-thread nested callable clone ticket") { ThreadLocal.new(fn() { RefCell.new(None) }) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:190
+// GATE #4565: kernel primitive
+static JET_HISTORY_CALLBACKS: ThreadLocal<RefCell<[USize: (Weak<Unit>, JetHistoryWeakReader)]>> = #Unsafe("per-thread weak callback index never owns captured environments") { ThreadLocal.new(fn() { RefCell.new([USize: (Weak<Unit>, JetHistoryWeakReader)]{}) }) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:192
+// GATE #4565: kernel primitive
+static JET_HISTORY_CAPTURE_DEPTH: ThreadLocal<Cell<USize>> = #Unsafe("per-thread checked nesting depth") { ThreadLocal.new(fn() { Cell.new(0) }) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:194
+// GATE #4565: kernel primitive
+static JET_HISTORY_SEND_CALLBACKS: Mutex<[USize: (SendWeak<Unit>, JetHistoryWeakSendReader)]> = #Unsafe("shared weak send-reader registry protects lookup and prune under mutex") { Mutex.new([USize: (SendWeak<Unit>, JetHistoryWeakSendReader)]{}) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:202
+fn jet_history_register_callback<F>(callback: Box<F>, reader: &Rc<JetHistoryCaptureReader>, life: &Rc<Unit>) -> Box<F> {
+    // GATE #4565: kernel primitive
+    weak :: #Unsafe("generated callback owns typed reader and allocation ticket; metadata lookup borrows same callable") { JetHistoryWeakReader.new(reader) }
+    jet_history_register_callback_reader(^callback, ^weak, life)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:213
+// GATE #4565: kernel primitive
+#Unsafe("use allocation address only as live metadata lookup key; never as artifact identity")
+fn jet_history_register_callback_reader<F>(callback: Box<F>, reader: JetHistoryWeakReader, life: &Rc<Unit>) -> Box<F> {
+    key :: ptr.from_ref(callback.as_ref()).addr()
+    JET_HISTORY_CALLBACKS.with(fn(callbacks) {
+        registry := callbacks.borrow_mut()
+        &registry.retain(fn(_, entry) { entry.0.strong_count() != 0 })
+        &registry.insert(key, (Rc.downgrade(life), ^reader))
+    })
+    ^callback
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:227
+// GATE #4565: kernel primitive
+#Unsafe("SendFn owns Send+Sync reader; weak lookup borrows exact Arc allocation until encoding completes")
+fn jet_history_register_send_callback<F>(callback: Arc<F>, reader: &Arc<JetHistorySendCaptureReader>, life: &Arc<Unit>) -> Arc<F> {
+    key :: ptr.from_ref(callback.as_ref()).addr()
+    callbacks := JET_HISTORY_SEND_CALLBACKS.lock().unwrap_or_else(fn(error) { error.into_inner() })
+    &callbacks.retain(fn(_, entry) { entry.0.strong_count() != 0 })
+    &callbacks.insert(key, (Arc.downgrade(life), JetHistoryWeakSendReader.new(reader)))
+    ^callback
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:241
+// GATE #4565: kernel primitive
+#Unsafe("callback loan pins exact environment during weak-reader invocation; depth scope restores even on unwind")
+fn jet_history_callback_captures<F>(callback: &F) -> DataTree Err! {
+    struct Depth {}
+    impl Drop for Depth {
+        // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:244
+        fn drop(self: &Self) -> Unit { JET_HISTORY_CAPTURE_DEPTH.with(fn(depth) { depth.set(depth.get() - 1) }) }
+    }
+    JET_HISTORY_CAPTURE_DEPTH.with(fn(depth) {
+        if depth.get() >= 64 -> return Err("history callback captures are cyclic or exceed the nesting bound")
+        depth.set(depth.get() + 1)
+        Ok(())
+    })?
+    _depth :: Depth{}
+    key :: ptr.from_ref(callback).addr()
+    local :: JET_HISTORY_CALLBACKS.with(fn(callbacks) {
+        callbacks.borrow().get(key).and_then(fn((life, reader)) { life.upgrade().map(fn(_) { reader.clone() }) })
+    })
+    if local == Val(reader) {
+        return reader.read().ok_or_else(fn() { "history callback has no live checked metadata" })?
+    }
+    reader :: JET_HISTORY_SEND_CALLBACKS.lock().unwrap_or_else(fn(error) { error.into_inner() }).get(key).and_then(fn((life, reader)) { life.upgrade().map(fn(_) { reader.clone() }) })
+    reader :: reader.ok_or_else(fn() { "history callback has no live checked metadata" })?
+    reader.read().ok_or_else(fn() { "history callback has no live checked metadata" })?
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:275
+fn jet_history_callback_fingerprint<F>(callback: &F) -> String Err! {
+    metadata :: jet_history_callback_captures(callback)?
+    identity :: metadata.get("function_identity")?.as_str()?
+    captures :: metadata.get("captures")?
+    bytes :: render_datatree_json(captures, false, 0).into_bytes()
+    history_callback_value_fingerprint(identity, &bytes).map_err(fn(error) { error.to_string() })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:284
+fn jet_history_data_tree_capture(value: &DataTree, depth: USize) -> DataTree Err! {
+    if depth >= 64 -> return Err("history capture exceeds the nesting bound")
+    (kind, encoded) :: match value {
+        .Null -> ("null", DataTree.Null)
+        .Bool(value) -> ("bool", DataTree.Bool(*value))
+        .Int(value) -> ("int", DataTree.Text(value.to_string()))
+        .Float(value) -> ("float", DataTree.Text(value.to_bits().to_string()))
+        .Number(value) -> ("number", DataTree.Text(value.clone()))
+        .Text(value) -> ("text", DataTree.Text(value.clone()))
+        .TypedText(value) -> ("typed_text", DataTree.Text(value.clone()))
+        .Bytes(value) -> ("bytes", DataTree.Array(value.iter().map(fn(value) { DataTree.Int(*value as I64) }).collect()))
+        .Array(values) -> ("array", DataTree.Array(values.iter().map(fn(value) { jet_history_data_tree_capture(value, depth + 1) }).collect<[DataTree] Err!>()?))
+        .Object(fields) -> ("object", DataTree.Object(fields.iter().map(fn((name, value)) { Ok((name.clone(), jet_history_data_tree_capture(value, depth + 1)?)) }).collect<[(String, DataTree)] Err!>()?))
+    }
+    Ok(DataTree.Array([DataTree.Text(kind.to_string()), ^encoded]))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:308
+fn jet_testing_history_observation(value: &DataTree) -> ComparisonObservation {
+    ComparisonObservation.value(render_datatree_json(value, false, 0))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:316
+fn jet_testing_history_apply<Input>(callback: &Fn(&Input) -> JetOutcome<DataTree, JetErr>, input: Input, role: String) -> DataTree Err! {
+    // GATE #4565: kernel primitive
+    result :: #Unsafe("catch callback unwind while input loan stays inside replay scope") { catch_unwind(AssertUnwindSafe(fn() { callback(&input) })) }.map_err(fn(_) { "{role} callback crashed while replaying a typed history" })?
+    result.map_err(fn(error) { "{role} callback failed: {error}" })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:326
+pub fn jet_testing_history_rng_next_u64(rng: &JetHistoryRng) -> U64 {
+    rng.value.borrow_mut().as_mut().expect("history RNG scope has ended").next_u64()
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:332
+pub fn jet_testing_history_rng_below(rng: &JetHistoryRng, bound: U64) -> U64 {
+    rng.value.borrow_mut().as_mut().expect("history RNG scope has ended").below(bound)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:339
+fn jet_testing_history_execute<Command: Clone>(model: &Fn(&[Command]) -> JetOutcome<DataTree, JetErr>, actual: &Fn(&[Command]) -> JetOutcome<DataTree, JetErr>, observe: &Fn(&DataTree) -> JetOutcome<DataTree, JetErr>, commands: &[Command]) -> (DataTree, DataTree, ComparisonObservation, ComparisonObservation) Err! {
+    reference_value :: jet_testing_history_apply(model, commands.to_vec(), "model")?
+    candidate_value :: jet_testing_history_apply(actual, commands.to_vec(), "actual")?
+    reference_observed :: jet_testing_history_apply(observe, reference_value.clone(), "observe").map(fn(value) { jet_testing_history_observation(&value) })?
+    candidate_observed :: jet_testing_history_apply(observe, candidate_value.clone(), "observe").map(fn(value) { jet_testing_history_observation(&value) })?
+    Ok((^reference_value, ^candidate_value, ^reference_observed, ^candidate_observed))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:373
+fn jet_testing_history_record(record: ComparisonRecord, inputs: [DataTree], reference: [DataTree], candidate: [DataTree], seed: I64?, provenance: (&HistoryProvenance)?) -> JetTestComparison {
+    (source, tool, target) :: provenance.map(fn(provenance) { (provenance.source.clone(), provenance.tool.clone(), provenance.target.clone()) }).unwrap_or_else(fn() { (String.new(), String.new(), String.new()) })
+    JetTestComparison{
+        status: record.status.as_str().to_string(), relation: record.relation.as_str().to_string(),
+        source: ^source, tool: ^tool, target: ^target, seed: seed,
+        case_ids: record.samples.iter().map(fn(sample) { sample.identity.case_id.clone() }).collect(),
+        inputs: ^inputs, reference: ^reference, candidate: ^candidate,
+        first_difference: record.first_difference.map(fn(index) { index as I64 }).unwrap_or(-1),
+        reason: record.reason.unwrap_or_else(fn() { "history comparison has no reason" }),
+        universal_proof: record.universal_proof
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:415
+pub fn jet_testing_histories<Command: HistoryCommand>(seed: I64, cases: I64, strategy: JetHistoryStrategy<Command>?, model: Box<Fn([Command]) -> DataTree>, actual: Box<Fn([Command]) -> DataTree>, observe: Box<Fn(DataTree) -> DataTree>) -> JetTestComparison Err! {
+    model_adapter :: Box.new(fn(commands: &[Command]) { Ok(model(commands.clone())) as JetOutcome<DataTree, JetErr> })
+    actual_adapter :: Box.new(fn(commands: &[Command]) { Ok(actual(commands.clone())) as JetOutcome<DataTree, JetErr> })
+    observe_adapter :: Box.new(fn(value: &DataTree) { Ok(observe(value.clone())) as JetOutcome<DataTree, JetErr> })
+    jet_testing_histories_with_provenance(seed, cases, ^strategy, ^model_adapter, ^actual_adapter, ^observe_adapter, None)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:448
+// Compiler-private checked provenance stays outside the six Jet-visible history values.
+pub fn jet_testing_histories_with_provenance<Command: HistoryCommand>(seed: I64, cases: I64, strategy: JetHistoryStrategy<Command>?, model: Box<Fn(&[Command]) -> JetOutcome<DataTree, JetErr>>, actual: Box<Fn(&[Command]) -> JetOutcome<DataTree, JetErr>>, observe: Box<Fn(&DataTree) -> JetOutcome<DataTree, JetErr>>, provenance: HistoryProvenance?) -> JetTestComparison Err! {
+    bound_provenance :: provenance.and_then(fn(base) {
+        bind :: fn() -> HistoryProvenance Err! {
+            callbacks := [("model", jet_history_callback_fingerprint(model.as_ref())?), ("actual", jet_history_callback_fingerprint(actual.as_ref())?), ("observe", jet_history_callback_fingerprint(observe.as_ref())?)]
+            if strategy.as_ref() == Val(strategy) {
+                &callbacks.extend([("generate", jet_history_callback_fingerprint(strategy.generate.as_ref())?), ("rebuild", jet_history_callback_fingerprint(strategy.rebuild.as_ref())?), ("valid", jet_history_callback_fingerprint(strategy.valid.as_ref())?)])
+            } else {
+                identity :: "derived:{Command.history_command_type()}"
+                &callbacks.push(("strategy", history_callback_value_fingerprint(identity, "[]".as_bytes()).map_err(fn(error) { error.to_string() })?))
+            }
+            references :: callbacks.iter().map(fn((role, identity)) { (*role, identity.as_str()) }).collect<[(String, String)]>()
+            base.bind_callbacks(&references).map_err(fn(error) { error.to_string() })
+        }
+        bind().ok()
+    })
+    match strategy {
+        Val(strategy) -> {
+            generate :: ^strategy.generate
+            rebuild :: ^strategy.rebuild
+            valid :: ^strategy.valid
+            foundation_strategy :: HistoryStrategy{
+                generate: Box.new(fn(rng, index, steps) {
+                    loan :: JetHistoryRngLoan.new(rng)
+                    generate(loan.value.clone(), index, steps).ok()
+                }),
+                rebuild: Box.new(fn(case) { rebuild(case.clone()).ok() }),
+                valid: Box.new(fn(case) { valid(case.clone()) }),
+                bounds: ^strategy.bounds, distributions: ^strategy.distributions
+            }
+            jet_testing_histories_result_with_strategy(seed, cases, ^model, ^actual, ^observe, ^foundation_strategy, ^bound_provenance)
+        }
+        None -> jet_testing_histories_result_with_strategy(seed, cases, ^model, ^actual, ^observe, Command.history_strategy(), ^bound_provenance)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:521
+fn jet_testing_histories_result_with_strategy<Command: HistoryCommand, Strategy: HistoryStrategyBehavior<Command>>(seed: I64, cases: I64, model: Box<Fn(&[Command]) -> JetOutcome<DataTree, JetErr>>, actual: Box<Fn(&[Command]) -> JetOutcome<DataTree, JetErr>>, observe: Box<Fn(&DataTree) -> JetOutcome<DataTree, JetErr>>, strategy: Strategy, provenance: HistoryProvenance?) -> JetTestComparison Err! {
+    (checked_seed, checked_cases) :: validate_history_bounds(seed, cases).map_err(fn(message) { message.to_string() })?
+    bounds :: strategy.bounds()
+    relation :: ObservationRelation.TypedEquality
+    if provenance.is_none() {
+        record :: ComparisonRecord.terminal(relation, .Unavailable, "history provenance is unavailable")
+        return Ok(jet_testing_history_record(^record, [], [], [], Val(checked_seed as I64), None))
+    }
+    provenance :: provenance.unwrap()
+    if strategy.unsupported_reason() == Val(reason) {
+        record :: ComparisonRecord.terminal(relation.clone(), .Unsupported, reason)
+        return Ok(jet_testing_history_record(^record, [], [], [], Val(checked_seed as I64), Val(&provenance)))
+    }
+    config :: HistoryConfig.new(checked_seed, checked_cases, bounds, provenance.source.clone(), provenance.tool.clone(), provenance.target.clone(), relation.clone(), OracleDeclaration.independent("testing.histories.model")).with_command_type(strategy.command_type())
+    configured :: strategy.distributions().into_iter().fold(^config, fn(config, distribution) { config.with_distribution(^distribution) })
+    runner :: HistoryRunner.new(^configured).map_err(fn(error) { error.to_string() })?
+    inputs := [DataTree]{}
+    reference_values := [DataTree]{}
+    candidate_values := [DataTree]{}
+    samples := [ComparisonSample]{}
+    run :: runner.run_strategy<Command>(&strategy, fn(typed) {
+        case :: &typed.case
+        input :: match parse_json_datatree(case.json()) {
+            Ok(input) -> ^input
+            Err(error) -> return ComparisonRecord.terminal(relation.clone(), .Unavailable, "history input could not be decoded: {error.reason}")
+        }
+        (reference_value, candidate_value, reference_observed, candidate_observed) :: match jet_testing_history_execute(model.as_ref(), actual.as_ref(), observe.as_ref(), &typed.commands) {
+            Ok(values) -> ^values
+            Err(reason) -> return ComparisonRecord.terminal(relation.clone(), .Unavailable, ^reason)
+        }
+        (_reference_replay_value, _candidate_replay_value, reference_replay, candidate_replay) :: match jet_testing_history_execute(model.as_ref(), actual.as_ref(), observe.as_ref(), &typed.commands) {
+            Ok(values) -> ^values
+            Err(reason) -> return ComparisonRecord.terminal(relation.clone(), .Unavailable, ^reason)
+        }
+        identity := ComparisonIdentity.new(case.case_id.clone(), case.input_id(), provenance.source.clone(), provenance.tool.clone(), provenance.target.clone())
+        identity.seed = Val(case.seed)
+        sample :: ComparisonSample.new(^identity, ^reference_observed, ^candidate_observed).with_replays(^reference_replay, ^candidate_replay)
+        &inputs.push(^input)
+        &reference_values.push(^reference_value)
+        &candidate_values.push(^candidate_value)
+        &samples.push(sample.clone())
+        compare_samples(relation.clone(), [^sample])
+    }).map_err(fn(error) { error.to_string() })?
+    if run.failure == Val(artifact) -> return Err("history-artifact {artifact.json()}")
+    record := compare_samples_with_discarded(relation, ^samples, run.discarded_cases)
+    if run.explored_cases == 0 {
+        record.status = .Unavailable
+        record.reason = Val("no history case produced an observation")
+    }
+    Ok(jet_testing_history_record(^record, ^inputs, ^reference_values, ^candidate_values, Val(checked_seed as I64), Val(&provenance)))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:696
+// Selected wasm32 publication uses the same audited native boundary as the data Web runtime.
+module jet_testing_history_web {
+    use super.*
+    use jet_testing_history_foundation.[HistoryOperation, HistoryPrecondition, HistoryScheduleChoice, HistoryValue, HandleId, TaskId, EventId, HistorySchemaStrategy, history_unsupported_type_reason]
+    use core.encoding.runtime.std_data_tree.parse_json_typed_datatree
+    use std.[slice, str]
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:711
+    type Tree = DataTree
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:712
+    const MAX_WIRE_BYTES: USize = 8 * 1024 * 1024
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:714-720
+    // GATE #4565: kernel primitive
+    static INPUT: ThreadLocal<RefCell<[U8]>> = #Unsafe("retain wasm input on its invoking thread") { ThreadLocal.new(fn() { RefCell.new([U8]{}) }) }
+    static OUTPUT: ThreadLocal<RefCell<[U8]>> = #Unsafe("retain wasm callback and result output on its invoking thread") { ThreadLocal.new(fn() { RefCell.new([U8]{}) }) }
+    static RNGS: ThreadLocal<RefCell<[HistoryRng?]>> = #Unsafe("own RNG handles on the invoking wasm thread") { ThreadLocal.new(fn() { RefCell.new([HistoryRng?]{}) }) }
+    static STRATEGIES: ThreadLocal<RefCell<[(String, fn(&Tree) -> JetTestComparison Err!)]>> = #Unsafe("retain generated strategy dispatch on its invoking thread") { ThreadLocal.new(fn() { RefCell.new([(String, fn(&Tree) -> JetTestComparison Err!)]{}) }) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:724
+    // GATE #4565: kernel primitive — selected wasm env import.
+    #FFI(c)
+    fn jet_testing_history_web_callback(callback: U32, pointer: U32, length: U32) -> U64
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:727
+    fn history_rng_slot(handle: U64) -> USize? {
+        slot :: handle.checked_sub(1)?
+        USize.try_from(slot).ok()
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:732
+    // GATE #4565: kernel primitive
+    #Unsafe("borrow only a live RNG in the owning-thread handle table")
+    fn with_history_rng<R>(handle: U64, operation: FnOnce(&HistoryRng) -> R) -> R? {
+        slot :: history_rng_slot(handle)?
+        RNGS.with(fn(cell) {
+            rngs := cell.borrow_mut()
+            rng :: rngs.get_mut(slot)?.as_mut()?
+            Val(operation(rng))
+        })
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:742
+    // GATE #4565: kernel primitive
+    #FFI(c)
+    #Unsafe("allocate or reuse only an empty owned RNG slot")
+    pub fn jet_testing_history_web_rng_alloc(state: U64) -> U64 {
+        RNGS.with(fn(cell) {
+            rngs := cell.borrow_mut()
+            if rngs.iter_mut().enumerate().find(fn((_, slot)) { slot.is_none() }) == Val((index, slot)) {
+                *slot = Val(HistoryRng.new(state))
+                return U64.try_from(index + 1).unwrap_or(0)
+            }
+            &rngs.push(Val(HistoryRng.new(state)))
+            U64.try_from(rngs.len()).unwrap_or(0)
+        })
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:755
+    // GATE #4565: kernel primitive
+    #FFI(c)
+    #Unsafe("release only an in-range owned RNG handle")
+    pub fn jet_testing_history_web_rng_release(handle: U64) -> Unit {
+        slot :: history_rng_slot(handle) ?? return
+        RNGS.with(fn(cell) { if cell.borrow_mut().get_mut(slot) == Val(rng) { *rng = None } })
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:766
+    #FFI(c)
+    pub fn jet_testing_history_web_rng_state(handle: U64) -> U64 { with_history_rng(handle, fn(rng) { rng.state() }).unwrap_or(0) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:772
+    #FFI(c)
+    pub fn jet_testing_history_web_rng_next_u64(handle: U64) -> U64 { with_history_rng(handle, HistoryRng.next_u64).unwrap_or(0) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:777
+    #FFI(c)
+    pub fn jet_testing_history_web_rng_below(handle: U64, bound: U64) -> U64 { with_history_rng(handle, fn(rng) { rng.below(bound) }).unwrap_or(0) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:781
+    fn field(value: &Tree, name: String) -> &Tree? { value.get_opt(name) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:785
+    fn field_any(value: &Tree, names: &[String]) -> &Tree? { names.iter().find_map(fn(name) { field(value, name) }) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:789
+    fn integer(value: &Tree, name: String) -> I64 Err! {
+        match value {
+            Tree.Int(value) -> Ok(*value)
+            Tree.Number(value) -> value.parse<I64>().map_err(fn(_) { "{name} must be an exact integer" })
+            _ -> Err("{name} must be an exact integer")
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:799
+    fn unsigned(value: &Tree, name: String) -> U64 Err! {
+        match value {
+            Tree.Int(value) -> U64.try_from(*value).map_err(fn(_) { "{name} must be a non-negative exact integer" })
+            Tree.Number(value) -> value.parse<U64>().map_err(fn(_) { "{name} must be a non-negative exact integer" })
+            _ -> Err("{name} must be an exact integer")
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:810
+    fn required_integer(root: &Tree, name: String) -> I64 Err! { integer(field(root, name).ok_or_else(fn() { "history wire field `{name}` is missing" })?, name) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:817
+    fn required_text(root: &Tree, name: String) -> String Err! {
+        match field(root, name) {
+            Val(Tree.Text(value) | Tree.TypedText(value)) -> Ok(value.clone())
+            Val(_) -> Err("{name} must be text")
+            None -> Err("history wire field `{name}` is missing")
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:825
+    fn callback_id(root: &Tree, name: String) -> U32 Err! { U32.try_from(required_integer(root, name)?).map_err(fn(_) { "{name} is not a valid callback id" }) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:829
+    fn object(entries: [(String, Tree)]) -> Tree { Tree.Object(entries.into_iter().map(fn((name, value)) { (name.to_string(), ^value) }).collect()) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:838
+    fn integer_tree(value: I64) -> Tree { Tree.Int(value) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:842
+    fn unsigned_tree(value: U64) -> Tree { Tree.Number(value.to_string()) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:846
+    fn id_tree(value: U32) -> Tree { object([("value", integer_tree(value as I64))]) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:850
+    fn option_id_tree(value: U32?) -> Tree {
+        match value {
+            Val(value) -> object([("tag", Tree.Text("Some")), ("values", Tree.Array([id_tree(value)]))])
+            None -> object([("tag", Tree.Text("None")), ("values", Tree.Array([]))])
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:857
+    fn history_value_tree(value: &HistoryValue) -> Tree {
+        (tag, values) :: match value {
+            HistoryValue.Integer(value) -> ("Integer", [integer_tree(*value)])
+            HistoryValue.Boolean(value) -> ("Boolean", [Tree.Bool(*value)])
+            HistoryValue.Text(value) -> ("Text", [Tree.Text(value.clone())])
+            HistoryValue.Handle(value) -> ("Handle", [id_tree(value.value)])
+            HistoryValue.Redacted(value) -> ("Redacted", [Tree.Text(value.clone())])
+        }
+        object([("tag", Tree.Text(tag)), ("values", Tree.Array(^values))])
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:868
+    fn history_precondition_tree(value: &HistoryPrecondition) -> Tree {
+        (tag, values) :: match value {
+            HistoryPrecondition.HandleLive(handle) -> ("HandleLive", [id_tree(handle.value)])
+            HistoryPrecondition.HandleState{handle, state} -> ("HandleState", [id_tree(handle.value), Tree.Text(state.clone())])
+            HistoryPrecondition.TaskCompleted(task) -> ("TaskCompleted", [id_tree(task.value)])
+            HistoryPrecondition.EventAvailable(event) -> ("EventAvailable", [id_tree(event.value)])
+        }
+        object([("tag", Tree.Text(tag)), ("values", Tree.Array(^values))])
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:881
+    fn history_operation_tree(operation: &HistoryOperation) -> Tree {
+        object([
+            ("index", unsigned_tree(operation.index as U64)), ("name", Tree.Text(operation.name.clone())),
+            ("arguments", Tree.Array(operation.arguments.iter().map(history_value_tree).collect())),
+            ("creates", Tree.Array(operation.creates.iter().map(fn(value) { id_tree(value.value) }).collect())),
+            ("consumes", Tree.Array(operation.consumes.iter().map(fn(value) { id_tree(value.value) }).collect())),
+            ("preconditions", Tree.Array(operation.preconditions.iter().map(history_precondition_tree).collect())),
+            ("depends_on", Tree.Array(operation.depends_on.iter().map(fn(value) { unsigned_tree(*value as U64) }).collect())),
+            ("task", option_id_tree(operation.task.map(fn(value) { value.value }))),
+            ("event", option_id_tree(operation.event.map(fn(value) { value.value })))
+        ])
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:922
+    fn history_schedule_tree(choice: &HistoryScheduleChoice) -> Tree {
+        object([("operation", unsigned_tree(choice.operation as U64)), ("task", option_id_tree(choice.task.map(fn(value) { value.value }))), ("event", option_id_tree(choice.event.map(fn(value) { value.value }))), ("choice", Tree.Text(choice.choice.clone()))])
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:931
+    fn history_case_tree(case: &HistoryCase) -> Tree {
+        object([("case_id", Tree.Text(case.case_id.clone())), ("seed", unsigned_tree(case.seed)), ("operations", Tree.Array(case.operations.iter().map(history_operation_tree).collect())), ("schedule", Tree.Array(case.schedule.iter().map(history_schedule_tree).collect()))])
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:946
+    fn typed_history_case_tree(case: &TypedHistoryCase<Tree>) -> Tree { object([("case", history_case_tree(&case.case)), ("commands", Tree.Array(case.commands.clone()))]) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:953
+    fn required_any(root: &Tree, names: &[String], label: String) -> &Tree Err! { field_any(root, names).ok_or_else(fn() { "{label} is missing" }) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:957
+    fn required_text_any(root: &Tree, names: &[String], label: String) -> String Err! {
+        match required_any(root, names, label)? {
+            Tree.Text(value) | Tree.TypedText(value) -> Ok(value.clone())
+            _ -> Err("{label} must be text")
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:964
+    fn unsigned_any(root: &Tree, names: &[String], label: String) -> U64 Err! { unsigned(required_any(root, names, label)?, label) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:968
+    fn u32_any(root: &Tree, names: &[String], label: String) -> U32 Err! { U32.try_from(unsigned_any(root, names, label)?).map_err(fn(_) { "{label} is outside the u32 range" }) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:973
+    fn array_any(root: &Tree, names: &[String], label: String) -> &[Tree] Err! {
+        match required_any(root, names, label)? {
+            Tree.Array(values) -> Ok(values)
+            _ -> Err("{label} must be an array")
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:980
+    fn history_id(value: &Tree, label: String) -> U32 Err! {
+        match value {
+            Tree.Object(_) if field(value, "value").is_some() -> u32_any(value, &["value"], label)
+            _ -> U32.try_from(unsigned(value, label)?).map_err(fn(_) { "{label} is outside the u32 range" })
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:988
+    fn tagged(value: &Tree, label: String) -> (String, &[Tree]) Err! {
+        tag :: match field(value, "tag") {
+            Val(Tree.Text(tag) | Tree.TypedText(tag)) -> tag.as_str()
+            _ -> return Err("{label}.tag must be text")
+        }
+        values :: match required_any(value, &["values"], label)? {
+            Tree.Array(values) -> values.as_slice()
+            _ -> return Err("{label}.values must be an array")
+        }
+        Ok((tag, values))
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:1000
+    fn history_value(value: &Tree, label: String) -> HistoryValue Err! {
+        if !(value is Tree.Object(_)) {
+            return match value {
+                Tree.Int(value) -> Ok(HistoryValue.Integer(*value))
+                Tree.Number(value) -> value.parse<I64>().map(HistoryValue.Integer).map_err(fn(_) { "{label} integer is out of range" })
+                Tree.Bool(value) -> Ok(HistoryValue.Boolean(*value))
+                Tree.Text(value) | Tree.TypedText(value) -> Ok(HistoryValue.Text(value.clone()))
+                _ -> Err("{label} is not a HistoryValue")
+            }
+        }
+        (tag, values) :: tagged(value, label)?
+        match (tag, values) {
+            ("Integer", [value]) -> Ok(HistoryValue.Integer(integer(value, label)?))
+            ("Boolean", [Tree.Bool(value)]) -> Ok(HistoryValue.Boolean(*value))
+            ("Text", [Tree.Text(value) | Tree.TypedText(value)]) -> Ok(HistoryValue.Text(value.clone()))
+            ("Handle", [value]) -> Ok(HistoryValue.Handle(HandleId{value: history_id(value, label)?}))
+            ("Redacted", [Tree.Text(value) | Tree.TypedText(value)]) -> Ok(HistoryValue.Redacted(value.clone()))
+            _ -> Err("{label} has an invalid HistoryValue variant")
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:1026
+    fn option_id(value: &Tree, label: String) -> U32? Err! {
+        if value is Tree.Null -> return Ok(None)
+        if value is Tree.Object(_) {
+            if field(value, "tag") == Val(Tree.Text(tag) | Tree.TypedText(tag)) {
+                values :: match required_any(value, &["values"], label)? {
+                    Tree.Array(values) -> values
+                    _ -> return Err("{label}.values must be an array")
+                }
+                return match (tag.as_str(), values.as_slice()) {
+                    ("None", []) -> Ok(None)
+                    ("Some", [value]) -> history_id(value, label).map(Val)
+                    _ -> Err("{label} has an invalid option")
+                }
+            }
+        }
+        history_id(value, label).map(Val)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:1046
+    fn history_precondition(value: &Tree, label: String) -> HistoryPrecondition Err! {
+        if value is Tree.Object(_) {
+            if field(value, "kind") == Val(Tree.Text(kind) | Tree.TypedText(kind)) {
+                return match kind.as_str() {
+                    "handle_live" -> Ok(HistoryPrecondition.HandleLive(HandleId{value: u32_any(value, &["handle"], label)?}))
+                    "handle_state" -> Ok(HistoryPrecondition.HandleState{handle: HandleId{value: u32_any(value, &["handle"], label)?}, state: required_text_any(value, &["state"], label)?})
+                    "task_completed" -> Ok(HistoryPrecondition.TaskCompleted(TaskId{value: u32_any(value, &["task"], label)?}))
+                    "event_available" -> Ok(HistoryPrecondition.EventAvailable(EventId{value: u32_any(value, &["event"], label)?}))
+                    _ -> Err("{label} has an unknown precondition kind")
+                }
+            }
+        }
+        (tag, values) :: tagged(value, label)?
+        match (tag, values) {
+            ("HandleLive", [value]) -> Ok(HistoryPrecondition.HandleLive(HandleId{value: history_id(value, label)?}))
+            ("HandleState", [handle, Tree.Text(state) | Tree.TypedText(state)]) -> Ok(HistoryPrecondition.HandleState{handle: HandleId{value: history_id(handle, label)?}, state: state.clone()})
+            ("TaskCompleted", [value]) -> Ok(HistoryPrecondition.TaskCompleted(TaskId{value: history_id(value, label)?}))
+            ("EventAvailable", [value]) -> Ok(HistoryPrecondition.EventAvailable(EventId{value: history_id(value, label)?}))
+            _ -> Err("{label} has an invalid precondition variant")
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:1104
+    fn history_operation(value: &Tree, label: String) -> HistoryOperation Err! {
+        operation := HistoryOperation.new(u32_any(value, &["index"], "{label}.index")?, required_text_any(value, &["name"], "{label}.name")?)
+        operation.arguments = array_any(value, &["arguments"], "{label}.arguments")?.iter().enumerate().map(fn((index, value)) { history_value(value, "{label}.arguments[{index}]") }).collect_results()?
+        operation.creates = array_any(value, &["creates"], "{label}.creates")?.iter().enumerate().map(fn((index, value)) { history_id(value, "{label}.creates[{index}]").map(fn(value) { HandleId{value: value} }) }).collect_results()?
+        operation.consumes = array_any(value, &["consumes"], "{label}.consumes")?.iter().enumerate().map(fn((index, value)) { history_id(value, "{label}.consumes[{index}]").map(fn(value) { HandleId{value: value} }) }).collect_results()?
+        operation.preconditions = array_any(value, &["preconditions"], "{label}.preconditions")?.iter().enumerate().map(fn((index, value)) { history_precondition(value, "{label}.preconditions[{index}]") }).collect_results()?
+        operation.depends_on = array_any(value, &["depends_on", "dependsOn"], "{label}.depends_on")?.iter().enumerate().map(fn((index, value)) {
+            U32.try_from(unsigned(value, "{label}.depends_on[{index}]")?).map_err(fn(_) { "{label}.depends_on[{index}] is outside the u32 range" })
+        }).collect_results()?
+        operation.task = option_id(required_any(value, &["task"], "{label}.task")?, "{label}.task")?.map(fn(value) { TaskId{value: value} })
+        operation.event = option_id(required_any(value, &["event"], "{label}.event")?, "{label}.event")?.map(fn(value) { EventId{value: value} })
+        Ok(^operation)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:1156
+    fn history_schedule(value: &Tree, label: String) -> HistoryScheduleChoice Err! {
+        choice := HistoryScheduleChoice.new(u32_any(value, &["operation"], "{label}.operation")?, required_text_any(value, &["choice"], "{label}.choice")?)
+        choice.task = option_id(required_any(value, &["task"], "{label}.task")?, "{label}.task")?.map(fn(value) { TaskId{value: value} })
+        choice.event = option_id(required_any(value, &["event"], "{label}.event")?, "{label}.event")?.map(fn(value) { EventId{value: value} })
+        Ok(^choice)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:1174
+    fn history_case(value: &Tree, label: String) -> HistoryCase Err! {
+        case := HistoryCase.new(required_text_any(value, &["case_id", "caseId"], "{label}.case_id")?, unsigned_any(value, &["seed"], "{label}.seed")?)
+        case.operations = array_any(value, &["operations"], "{label}.operations")?.iter().enumerate().map(fn((index, value)) { history_operation(value, "{label}.operations[{index}]") }).collect_results()?
+        case.schedule = array_any(value, &["schedule"], "{label}.schedule")?.iter().enumerate().map(fn((index, value)) { history_schedule(value, "{label}.schedule[{index}]") }).collect_results()?
+        Ok(^case)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:1192
+    fn typed_history_case(value: &Tree, label: String) -> TypedHistoryCase<Tree> Err! {
+        case :: history_case(required_any(value, &["case"], "{label}.case")?, "{label}.case")?
+        commands :: array_any(value, &["commands"], "{label}.commands")?.to_vec()
+        TypedHistoryCase.new(^case, ^commands).ok_or_else(fn() { "{label} command count does not match operation count" })
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:1202
+    fn optional_typed_history_case(value: &Tree, label: String) -> TypedHistoryCase<Tree>? Err! {
+        if value is Tree.Null -> return Ok(None)
+        if value is Tree.Object(_) {
+            if field(value, "tag") == Val(Tree.Text(tag) | Tree.TypedText(tag)) {
+                values :: match required_any(value, &["values"], label)? {
+                    Tree.Array(values) -> values
+                    _ -> return Err("{label}.values must be an array")
+                }
+                return match (tag.as_str(), values.as_slice()) {
+                    ("None", []) -> Ok(None)
+                    ("Some", [value]) -> typed_history_case(value, label).map(Val)
+                    _ -> Err("{label} has an invalid option")
+                }
+            }
+        }
+        typed_history_case(value, label).map(Val)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:1225
+    fn history_bounds(value: &Tree) -> HistoryBounds Err! {
+        Ok(HistoryBounds{
+            max_steps: USize.try_from(unsigned_any(value, &["max_steps", "maxSteps"], "strategy.bounds.max_steps")?).map_err(fn(_) { "strategy.bounds.max_steps is outside usize range" })?,
+            max_resources: USize.try_from(unsigned_any(value, &["max_resources", "maxResources"], "strategy.bounds.max_resources")?).map_err(fn(_) { "strategy.bounds.max_resources is outside usize range" })?,
+            max_shrink_attempts: USize.try_from(unsigned_any(value, &["max_shrink_attempts", "maxShrinkAttempts"], "strategy.bounds.max_shrink_attempts")?).map_err(fn(_) { "strategy.bounds.max_shrink_attempts is outside usize range" })?,
+            max_discarded_cases: USize.try_from(unsigned_any(value, &["max_discarded_cases", "maxDiscardedCases"], "strategy.bounds.max_discarded_cases")?).map_err(fn(_) { "strategy.bounds.max_discarded_cases is outside usize range" })?
+        })
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:1246
+    fn history_distributions(value: &Tree) -> [HistoryDistribution] Err! {
+        array_any(value, &["distributions"], "strategy.distributions")?.iter().enumerate().map(fn((index, value)) {
+            Ok(HistoryDistribution{
+                operation: required_text_any(value, &["operation"], "strategy.distributions[{index}].operation")?,
+                weight: USize.try_from(unsigned_any(value, &["weight"], "strategy.distributions[{index}].weight")?).map_err(fn(_) { "strategy.distributions[{index}].weight is outside usize range" })?
+            })
+        }).collect_results()
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:1268
+    struct WebHistoryStrategy {
+        command_type: String
+        generate: U32
+        rebuild: U32
+        valid: U32
+        bounds: HistoryBounds
+        distributions: [HistoryDistribution]
+    }
+    impl WebHistoryStrategy {
+        // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:1278
+        fn from_wire(command_type: String, value: &Tree) -> Self Err! {
+            bounds :: history_bounds(required_any(value, &["bounds"], "strategy.bounds")?)?
+            distributions :: history_distributions(value)?
+            Ok(Self{command_type: ^command_type, generate: callback_id(value, "generate")?, rebuild: callback_id(value, "rebuild")?, valid: callback_id(value, "valid")?, bounds: ^bounds, distributions: ^distributions})
+        }
+    }
+    impl HistoryStrategyBehavior<Tree> for WebHistoryStrategy {
+        // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:1293
+        fn command_type(self: &Self) -> String { self.command_type }
+        // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:1297
+        fn bounds(self: &Self) -> HistoryBounds { self.bounds }
+        // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:1301
+        fn distributions(self: &Self) -> [HistoryDistribution] { self.distributions.clone() }
+        // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:1305
+        fn generate(self: &Self, rng: &HistoryRng, case_index: USize, max_steps: USize) -> TypedHistoryCase<Tree>? {
+            handle :: jet_testing_history_web_rng_alloc(rng.state())
+            if handle == 0 -> return None
+            input :: object([("rng_handle", unsigned_tree(handle)), ("case_index", unsigned_tree(case_index as U64)), ("max_steps", unsigned_tree(max_steps as U64))])
+            response :: callback(self.generate, &input, "strategy.generate")
+            state :: jet_testing_history_web_rng_state(handle)
+            jet_testing_history_web_rng_release(handle)
+            &rng.replace_state(state)
+            response :: response.ok()?
+            optional_typed_history_case(&response, "strategy.generate.value").ok().flatten()
+        }
+        // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:1330
+        fn rebuild(self: &Self, case: &HistoryCase) -> TypedHistoryCase<Tree>? {
+            response :: callback(self.rebuild, &history_case_tree(case), "strategy.rebuild").ok()?
+            optional_typed_history_case(&response, "strategy.rebuild.value").ok().flatten()
+        }
+        // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:1342
+        fn valid(self: &Self, case: &TypedHistoryCase<Tree>) -> Bool {
+            response :: callback(self.valid, &typed_history_case_tree(case), "strategy.valid").ok()
+            response is Val(Tree.Bool(true))
+        }
+        // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:1352
+        fn commands_to_data_tree(self: &Self, commands: &[Tree]) -> Tree? { Val(Tree.Array(commands.to_vec())) }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:1358
+    // GATE #4565: kernel primitive
+    #Unsafe("retain encoded result in the owning-thread output buffer")
+    fn set_output(value: Tree) -> Unit { OUTPUT.with(fn(cell) { *cell.borrow_mut() = render_datatree_json(&value, false, 0).into_bytes() }) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:1364
+    fn result_tree(result: JetTestComparison Err!) -> Tree {
+        match result {
+            Ok(value) -> object([("tag", Tree.Text("Ok")), ("values", Tree.Array([comparison_tree(^value)]))])
+            Err(reason) -> object([("tag", Tree.Text("Err")), ("values", Tree.Array([Tree.Text(^reason)]))])
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:1380
+    fn option_integer(value: I64?) -> Tree {
+        match value {
+            Val(value) -> object([("tag", Tree.Text("Some")), ("values", Tree.Array([Tree.Int(value)]))])
+            None -> object([("tag", Tree.Text("None")), ("values", Tree.Array([]))])
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:1396
+    fn text_array(values: [String]) -> Tree { Tree.Array(values.into_iter().map(Tree.Text).collect()) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:1400
+    fn comparison_tree(value: JetTestComparison) -> Tree {
+        object([
+            ("status", Tree.Text(^value.status)), ("relation", Tree.Text(^value.relation)),
+            ("source", Tree.Text(^value.source)), ("tool", Tree.Text(^value.tool)), ("target", Tree.Text(^value.target)),
+            ("seed", option_integer(value.seed)), ("case_ids", text_array(^value.case_ids)),
+            ("inputs", Tree.Array(^value.inputs)), ("reference", Tree.Array(^value.reference)),
+            ("candidate", Tree.Array(^value.candidate)), ("first_difference", Tree.Int(value.first_difference)),
+            ("reason", Tree.Text(^value.reason)), ("universal_proof", Tree.Bool(value.universal_proof))
+        ])
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:1424
+    // GATE #4565: kernel primitive
+    #Unsafe("validate pointer and length against the retained output allocation before decoding")
+    fn output_is_current(pointer: U32, length: U32) -> Bool {
+        OUTPUT.with(fn(cell) {
+            output :: cell.borrow()
+            pointer != 0 && pointer as USize == output.as_ptr() as USize && USize.try_from(length).ok().is_some_and(fn(length) { length <= output.len() })
+        })
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:1435
+    // GATE #4565: kernel primitive
+    #Unsafe("synchronous wasm host callback borrows encoded input; decode only a current retained output span and clear it")
+    fn callback(callback: U32, input: &Tree, role: String) -> Tree Err! {
+        encoded :: render_datatree_json(input, false, 0).into_bytes()
+        if encoded.len() > MAX_WIRE_BYTES -> return Err("{role} history callback input exceeds the Web limit")
+        pointer :: U32.try_from(encoded.as_ptr() as USize).map_err(fn(_) { "{role} history callback input pointer is invalid" })?
+        packed :: jet_testing_history_web_callback(callback, pointer, U32.try_from(encoded.len()).map_err(fn(_) { "{role} history callback input is too large" })?)
+        if packed == 0 -> return Err("{role} history callback returned no response")
+        output_pointer :: (packed >> 32) as U32
+        output_length :: packed as U32
+        if !output_is_current(output_pointer, output_length) {
+            OUTPUT.with(fn(cell) { &cell.borrow_mut().clear() })
+            return Err("{role} history callback returned an invalid response")
+        }
+        parsed :: OUTPUT.with(fn(cell) {
+            output :: cell.borrow()
+            bytes :: slice.from_raw_parts(output_pointer as USize as *const U8, output_length as USize)
+            str.from_utf8(bytes).ok().and_then(fn(value) { parse_json_typed_datatree(value).ok() })
+        })
+        OUTPUT.with(fn(cell) { &cell.borrow_mut().clear() })
+        parsed :: parsed.ok_or_else(fn() { "{role} callback returned invalid JSON" })?
+        ok :: match field(&parsed, "ok") {
+            Val(Tree.Bool(value)) -> *value
+            _ -> return Err("{role} callback returned an invalid response envelope")
+        }
+        if ok { field(&parsed, "value").cloned().ok_or_else(fn() { "{role} callback omitted its value" }) }
+        else {
+            match field(&parsed, "reason") {
+                Val(Tree.Text(reason) | Tree.TypedText(reason)) -> Err("{role} callback failed: {reason}")
+                _ -> Err("{role} callback failed without a reason")
+            }
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:1495
+    fn wire_provenance(root: &Tree) -> HistoryProvenance? Err! {
+        value :: field(root, "provenance") ?? return Ok(None)
+        if value is Tree.Null -> return Ok(None)
+        base :: HistoryProvenance{source: required_text(value, "source")?, tool: required_text(value, "tool")?, target: required_text(value, "target")?}
+        rows :: field(root, "callback_provenance").ok_or_else(fn() { "history callback provenance is missing" })?.as_array()?
+        explicit :: field(root, "strategy").is_some_and(fn(value) { !(value is Tree.Null) })
+        expected :: if explicit { ["model", "actual", "observe", "generate", "rebuild", "valid"] } else { ["model", "actual", "observe", "strategy"] }
+        if rows.len() != expected.len() -> return Err("history callback provenance has an invalid role count")
+        callbacks := [(String, String)].with_capacity(rows.len())
+        loop row in rows {
+            role :: required_text(row, "role")?
+            if !expected.contains(&role.as_str()) -> return Err("history callback provenance has an unknown role")
+            identity :: required_text(row, "function_identity")?
+            captures :: field(row, "captures").ok_or_else(fn() { "history callback captures are missing" })?
+            _ :: captures.as_array()?
+            if role == "strategy" && (identity != "derived:{required_text(root, "command_type")?}" || !captures.as_array()?.is_empty()) {
+                return Err("history derived strategy provenance does not match its descriptor")
+            }
+            // Exact integer lexemes and ordered nested trees stay in typed JSON; no f64 conversion.
+            bytes :: render_datatree_json(captures, false, 0).into_bytes()
+            fingerprint :: history_callback_value_fingerprint(&identity, &bytes).map_err(fn(error) { error.to_string() })?
+            &callbacks.push((^role, ^fingerprint))
+        }
+        callbacks :: callbacks.iter().map(fn((role, identity)) { (role.as_str(), identity.as_str()) }).collect<[(String, String)]>()
+        base.bind_callbacks(&callbacks).map(Val).map_err(fn(error) { error.to_string() })
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:1549
+    fn command_type_matches(descriptor: String, name: String) -> Bool {
+        descriptor == name || descriptor.strip_prefix(name).is_some_and(fn(suffix) { suffix.starts_with(':') })
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:1556
+    // GATE #4565: kernel primitive
+    #Unsafe("replace or append generated strategy dispatch on the owning thread")
+    pub fn register_strategy(command_type: String, dispatch: fn(&Tree) -> JetTestComparison Err!) -> Unit {
+        STRATEGIES.with(fn(strategies) {
+            strategies := strategies.borrow_mut()
+            if strategies.iter_mut().find(fn((name, _)) { *name == command_type }) == Val(row) { row.1 = dispatch }
+            else { &strategies.push((command_type, dispatch)) }
+        })
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:1573
+    fn execute<Command: HistoryCommand, Strategy: HistoryStrategyBehavior<Command>>(model: U32, actual: U32, observe: U32, strategy: &Strategy, commands: &[Command]) -> (Tree, Tree, ComparisonObservation, ComparisonObservation) Err! {
+        input :: strategy.commands_to_data_tree(commands).ok_or_else(fn() { "history command codec is unavailable on Web" })?
+        reference_value :: callback(model, &input, "model")?
+        candidate_value :: callback(actual, &input, "actual")?
+        reference_observed :: callback(observe, &reference_value, "observe").map(fn(value) { jet_testing_history_observation(&value) })?
+        candidate_observed :: callback(observe, &candidate_value, "observe").map(fn(value) { jet_testing_history_observation(&value) })?
+        Ok((^reference_value, ^candidate_value, ^reference_observed, ^candidate_observed))
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:1610
+    // GATE #4565: kernel primitive
+    #Unsafe("resolve registered strategy on the invoking wasm thread")
+    fn run_wire(root: &Tree) -> JetTestComparison Err! {
+        command_type :: required_text(root, "command_type")?
+        if field(root, "strategy") == Val(strategy) {
+            if !(strategy is Tree.Null) {
+                strategy :: WebHistoryStrategy.from_wire(command_type.clone(), strategy)?
+                return run_wire_with_strategy<Tree, WebHistoryStrategy>(root, ^strategy)
+            }
+        }
+        dispatch :: STRATEGIES.with(fn(strategies) { strategies.borrow().iter().find(fn((name, _)) { command_type_matches(command_type, name) }).map(fn((_, dispatch)) { *dispatch }) })
+        if dispatch == Val(dispatch) -> return dispatch(root)
+        if command_type_matches(command_type, "DataTree") {
+            return run_wire_with_strategy<Tree, HistorySchemaStrategy>(root, Tree.history_strategy())
+        }
+        Err(history_unsupported_type_reason(command_type))
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:1642
+    pub fn run_wire_with_strategy<Command: HistoryCommand, Strategy: HistoryStrategyBehavior<Command>>(root: &Tree, strategy: Strategy) -> JetTestComparison Err! {
+        seed :: U64.try_from(required_integer(root, "seed")?).map_err(fn(_) { "history seed is invalid" })?
+        cases :: USize.try_from(required_integer(root, "cases")?).map_err(fn(_) { "history case bound is invalid" })?
+        command_type :: required_text(root, "command_type")?
+        if !command_type_matches(command_type, strategy.command_type()) {
+            return Err("history command descriptor `{command_type}` does not match generated strategy `{strategy.command_type()}`")
+        }
+        relation :: ObservationRelation.TypedEquality
+        provenance :: wire_provenance(root)? ?? {
+            record :: ComparisonRecord.terminal(relation, .Unavailable, "history provenance is unavailable")
+            return Ok(jet_testing_history_record(^record, [], [], [], Val(seed as I64), None))
+        }
+        model :: callback_id(root, "model")?
+        actual :: callback_id(root, "actual")?
+        observe :: callback_id(root, "observe")?
+        bounds :: strategy.bounds()
+        if strategy.unsupported_reason() == Val(reason) {
+            record :: ComparisonRecord.terminal(relation.clone(), .Unsupported, ^reason)
+            return Ok(jet_testing_history_record(^record, [], [], [], Val(seed as I64), Val(&provenance)))
+        }
+        config :: HistoryConfig.new(seed, cases, bounds, provenance.source.clone(), provenance.tool.clone(), provenance.target.clone(), relation.clone(), OracleDeclaration.independent("testing.histories.model")).with_command_type(strategy.command_type())
+        config :: strategy.distributions().into_iter().fold(config, fn(config, distribution) { config.with_distribution(distribution) })
+        runner :: HistoryRunner.new(^config).map_err(fn(error) { error.to_string() })?
+        inputs := [Tree]{}
+        reference_values := [Tree]{}
+        candidate_values := [Tree]{}
+        samples := [ComparisonSample]{}
+        run :: runner.run_strategy<Command>(&strategy, fn(typed) {
+            case :: &typed.case
+            input :: match parse_json_typed_datatree(&case.json()) {
+                Ok(input) -> ^input
+                Err(error) -> return ComparisonRecord.terminal(relation.clone(), .Unavailable, "history input could not be decoded: {error.reason}")
+            }
+            (reference_value, candidate_value, reference_observed, candidate_observed) :: match execute(model, actual, observe, &strategy, &typed.commands) {
+                Ok(values) -> ^values
+                Err(reason) -> return ComparisonRecord.terminal(relation.clone(), .Unavailable, ^reason)
+            }
+            (_reference_replay_value, _candidate_replay_value, reference_replay, candidate_replay) :: match execute(model, actual, observe, &strategy, &typed.commands) {
+                Ok(values) -> ^values
+                Err(reason) -> return ComparisonRecord.terminal(relation.clone(), .Unavailable, ^reason)
+            }
+            identity := ComparisonIdentity.new(case.case_id.clone(), case.input_id(), provenance.source.clone(), provenance.tool.clone(), provenance.target.clone())
+            identity.seed = Val(case.seed)
+            sample :: ComparisonSample.new(^identity, ^reference_observed, ^candidate_observed).with_replays(^reference_replay, ^candidate_replay)
+            &inputs.push(^input)
+            &reference_values.push(^reference_value)
+            &candidate_values.push(^candidate_value)
+            &samples.push(sample.clone())
+            compare_samples(relation.clone(), [^sample])
+        }).map_err(fn(error) { error.to_string() })?
+        if run.failure == Val(artifact) -> return Err("history-artifact {artifact.json()}")
+        record := compare_samples_with_discarded(relation, ^samples, run.discarded_cases)
+        if run.explored_cases == 0 {
+            record.status = .Unavailable
+            record.reason = Val("no history case produced an observation")
+        }
+        Ok(jet_testing_history_record(^record, ^inputs, ^reference_values, ^candidate_values, Val(seed as I64), Val(&provenance)))
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:1803
+    // GATE #4565: kernel primitive
+    #FFI(c)
+    #Unsafe("resize retained input within the Web bound and publish its borrowed address")
+    pub fn jet_testing_history_web_input_alloc(length: U32) -> U32 {
+        length :: match USize.try_from(length) { Ok(length) -> length, Err(_) -> return 0 }
+        if length == 0 || length > MAX_WIRE_BYTES -> return 0
+        INPUT.with(fn(cell) {
+            input := cell.borrow_mut()
+            &input.resize(length, 0)
+            U32.try_from(input.as_mut_ptr() as USize).unwrap_or(0)
+        })
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:1818
+    // GATE #4565: kernel primitive
+    #FFI(c)
+    #Unsafe("host relinquishes input address before clearing its retained allocation")
+    pub fn jet_testing_history_web_input_free(_pointer: U32) -> Unit { INPUT.with(fn(cell) { &cell.borrow_mut().clear() }) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:1823
+    // GATE #4565: kernel primitive
+    #FFI(c)
+    #Unsafe("resize retained callback output within the Web bound and publish its borrowed address")
+    pub fn jet_testing_history_web_output_alloc(length: U32) -> U32 {
+        length :: match USize.try_from(length) { Ok(length) -> length, Err(_) -> return 0 }
+        if length == 0 || length > MAX_WIRE_BYTES -> return 0
+        OUTPUT.with(fn(cell) {
+            output := cell.borrow_mut()
+            &output.resize(length, 0)
+            U32.try_from(output.as_mut_ptr() as USize).unwrap_or(0)
+        })
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:1838
+    // GATE #4565: kernel primitive
+    #FFI(c)
+    #Unsafe("borrow retained output address until the next clear or resize")
+    pub fn jet_testing_history_web_output_ptr() -> U32 { OUTPUT.with(fn(cell) { U32.try_from(cell.borrow().as_ptr() as USize).unwrap_or(0) }) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:1843
+    // GATE #4565: kernel primitive
+    #FFI(c)
+    #Unsafe("read retained output length through its owning-thread borrow")
+    pub fn jet_testing_history_web_output_len() -> U32 { OUTPUT.with(fn(cell) { U32.try_from(cell.borrow().len()).unwrap_or(U32.MAX) }) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:1848
+    // GATE #4565: kernel primitive
+    #FFI(c)
+    #Unsafe("host relinquishes output address before clearing its retained allocation")
+    pub fn jet_testing_history_web_output_clear() -> Unit { OUTPUT.with(fn(cell) { &cell.borrow_mut().clear() }) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingHistory.rs:1853
+    // GATE #4565: kernel primitive
+    #FFI(c)
+    #Unsafe("validate host input against its retained allocation, copy for reentrant callbacks, retain encoded result")
+    pub fn jet_testing_history_web_call(pointer: U32, length: U32) -> I32 {
+        OUTPUT.with(fn(cell) { &cell.borrow_mut().clear() })
+        input :: INPUT.with(fn(cell) {
+            input :: cell.borrow()
+            valid :: pointer != 0 && pointer as USize == input.as_ptr() as USize && USize.try_from(length).ok().is_some_and(fn(length) { length <= input.len() })
+            if !valid -> return None
+            bytes :: slice.from_raw_parts(pointer as USize as *const U8, length as USize)
+            Val(bytes.to_vec())
+        })
+        result :: input.and_then(fn(bytes) { str.from_utf8(&bytes).ok().map(str.to_string) }).and_then(fn(wire) { parse_json_typed_datatree(&wire).ok() }).map_or_else(fn() { Err("invalid testing history WebWasm wire JSON") }, fn(wire) { run_wire(&wire) })
+        set_output(result_tree(^result))
+        0
+    }
+}
 

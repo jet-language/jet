@@ -1,0 +1,115 @@
+use core.service.runtime.top_services.*
+use core.service.runtime.top_services_03.*
+use core.service.runtime.top_service_authority.JetServiceError
+use std.sync.[Arc, Mutex]
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:4006-4059
+#Test("service_state_byte_framing_and_truncation") {
+    offset := 0
+    assert(jet_services_state_read_line(&[65, 10, 50, 58, 195, 169], &offset, "line").unwrap() == "A")
+    assert(offset == 2)
+    assert(jet_services_state_read_frame(&[65, 10, 50, 58, 195, 169], &offset, "frame").unwrap() == "é")
+    assert(offset == 6)
+    assert(jet_services_state_read_frame(&[65, 10, 50, 58, 195, 169], &offset, "frame").is_err())
+    offset = 0
+    assert(jet_services_state_read_frame(&[49, 58, 195, 169], &offset, "frame").is_err())
+    assert(offset == 0)
+    assert(jet_services_state_read_line(&[65], &offset, "line").is_err())
+    assert(offset == 0)
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:4061-4187
+#Test("service_state_encode_decode_preserves_schema_and_record_bounds") {
+    authority := JetServiceStateAuthority{store: "unused", schema: "schema-é", version: 3, migration: "none", adapter: JetServiceStateAdapter.EventLog}
+    records :: ["v3:2:é", "v3:0:"]
+    bytes :: jet_services_state_encode(&authority, &JetServiceStateAdapter.EventLog, &records).unwrap()
+    assert(jet_services_state_decode(&authority, &JetServiceStateAdapter.EventLog, &bytes).unwrap() == records)
+    assert(jet_services_state_decode(&authority, &JetServiceStateAdapter.Snapshot, &bytes).is_err())
+    assert(jet_services_state_encode(&authority, &JetServiceStateAdapter.Snapshot, &records).is_err())
+    assert(jet_services_state_encode(&authority, &JetServiceStateAdapter.EventLog, &["v3:1:é"]).is_err())
+    authority.version = 4
+    assert(jet_services_state_decode(&authority, &JetServiceStateAdapter.EventLog, &bytes).is_err())
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:4414-4433
+#Test("service_state_record_error_precedence") {
+    assert(jet_services_read_state_record("v2:", "v2:2:é").unwrap() == "é")
+    match jet_services_read_state_record("v2:", "v1:") {
+        Err(JetServiceError.Policy(message)) -> assert(message == "state record schema is incompatible")
+        _ -> assert(false)
+    }
+    assert(jet_services_read_state_record("v2:", "v2:bad").is_err())
+    assert(jet_services_read_state_record("v2:", "v2:x:a").is_err())
+    assert(jet_services_read_state_record("v2:", "v2:1:é").is_err())
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:4667-4691,4903-5308
+#Test("service_workflow_apply_start_waits_and_terminal_order") {
+    workflows := [JetServiceWorkflow].new()
+    jet_services_workflow_apply(&workflows, "workflow-start:1:2:3:run").unwrap()
+    assert(jet_services_workflow_apply(&workflows, "workflow-start:1:2:3:run").is_err())
+    jet_services_workflow_apply(&workflows, "workflow-step:1:7:compute").unwrap()
+    jet_services_workflow_apply(&workflows, "workflow-wait-activity:1:4:work3:arg").unwrap()
+    jet_services_workflow_apply(&workflows, "workflow-wait-all:1:2:1:a2:é").unwrap()
+    jet_services_workflow_apply(&workflows, "workflow-wait-sleep:1:20").unwrap()
+    jet_services_workflow_apply(&workflows, "workflow-wait-sleep-cancelled:1").unwrap()
+    assert(workflows[0].status == JetTaskStatus.CancelRequested)
+    assert(workflows[0].outcome == Some(JetTaskOutcome.Cancelled))
+    assert(workflows[0].history == ["start@v2", "step:compute", "activity:work:arg", "all:a,é", "sleep:20", "sleep-cancelled"])
+    assert(jet_services_workflow_apply(&workflows, "workflow-step:1:7:compute").is_err())
+    assert(jet_services_workflow_apply(&workflows, "workflow-wait-sleep-deadline:1").is_err())
+    assert(jet_services_workflow_take_field("1:é", "value").is_err())
+    assert(jet_services_workflow_apply(&workflows, "unknown").is_err())
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:4710-4784,4903-5308
+#Test("service_workflow_activity_retry_and_completion") {
+    workflows := [JetServiceWorkflow].new()
+    jet_services_workflow_apply(&workflows, "workflow-start:1:1:3:run").unwrap()
+    jet_services_workflow_apply(&workflows, "workflow-activity:1:1:3:4:work3:key").unwrap()
+    assert(jet_services_workflow_apply(&workflows, "workflow-activity:1:1:3:4:work3:key").is_err())
+    failure :: JetTaskOutcome.Panicked("failure")
+    retry :: "workflow-activity-retry:1:2:3:key{jet_services_workflow_frame(&failure.wire())}"
+    jet_services_workflow_apply(&workflows, &retry).unwrap()
+    assert(workflows[0].status == JetTaskStatus.Paused)
+    assert(jet_services_workflow_activity_index(&workflows[0], "key").unwrap().2 == 2)
+    assert(jet_services_workflow_apply(&workflows, &retry).is_err())
+    done :: "workflow-activity-done:1:3:key{jet_services_workflow_frame(&JetTaskOutcome.Finished.wire())}"
+    jet_services_workflow_apply(&workflows, &done).unwrap()
+    assert(workflows[0].outcome == Some(JetTaskOutcome.Finished))
+    assert(jet_services_workflow_apply(&workflows, &done).is_err())
+    assert(jet_services_workflow_apply(&workflows, &retry).is_err())
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:4802-4901
+#Test("service_workflow_replay_mismatch_does_not_advance_cursor") {
+    workflow := JetServiceWorkflow{id: "run", run_id: 1, version: 1, steps: [], history: ["start@v1", "step:compute", "activity-retry:key@2/3:Panicked(failure)"], replay_cursor: 1, status: JetTaskStatus.Running, activity_outcomes: [], outcome: None}
+    assert(jet_services_workflow_replay_event(&workflow, "step:other").is_err())
+    assert(workflow.replay_cursor == 1)
+    assert(jet_services_workflow_replay_event(&workflow, "step:compute").unwrap())
+    assert(jet_services_workflow_replay_retry(&workflow, "key", 2, &JetTaskOutcome.Panicked("failure")).is_err())
+    assert(workflow.replay_cursor == 2)
+    assert(jet_services_workflow_replay_retry(&workflow, "key", 3, &JetTaskOutcome.Panicked("failure")).unwrap())
+    assert(workflow.replay_cursor == 3)
+    assert(!jet_services_workflow_replay_event(&workflow, "step:new").unwrap())
+    assert(jet_services_workflow_validate_step("time.now()").is_err())
+    assert(jet_services_workflow_validate_step("compute").is_ok())
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:5453-5560
+#Test("service_workflow_sleep_replays_cancellation_without_wait_or_append") {
+    authority :: JetServiceStateAuthority{store: "", schema: "", version: 1, migration: "", adapter: JetServiceStateAdapter.EventLog}
+    workflow :: JetServiceWorkflow{id: "run", run_id: 1, version: 1, steps: [], history: ["start@v1", "sleep:20", "sleep-cancelled"], replay_cursor: 1, status: JetTaskStatus.Running, activity_outcomes: [], outcome: None}
+    // GATE #4565: kernel primitive
+    handle :: #Unsafe("test owns real synchronized workflow state; replay performs no IO or scheduler wait") { JetWorkflowHandle{authority, state: Arc.new(Mutex.new(workflow))} }
+    match jet_services_workflow_sleep(&handle, 20) {
+        Err(JetServiceError.Policy(message)) -> assert(message == "workflow sleep was cancelled")
+        _ -> assert(false)
+    }
+    // GATE #4565: kernel primitive
+    #Unsafe("inspect replayed cancellation under the same handle mutex") {
+        state :: handle.state.lock().unwrap()
+        assert(state.replay_cursor == 3)
+        assert(state.outcome == Some(JetTaskOutcome.Cancelled))
+    }
+}

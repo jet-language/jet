@@ -1,0 +1,77 @@
+use core.web.runtime.top_web_store.[JetWebStore, JetWebStoreEvent, JetWebStoreEventKind, JetWebStoreTransaction, jet_web_store_with_history, jet_web_store_jump, jet_web_store_scrub, jet_web_store_events_since]
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebStore.rs:456-632
+#Test("store_transaction_receipt_and_signal_share_one_value") {
+    store :: JetWebStore<I64>.new("", 1, 0)
+    transaction :: store.transact("increment", ["z", "a", "a", "", "bad\nfield"], fn(state) { *state += 2 })
+    assert_eq(transaction.before, 1)
+    assert_eq(transaction.after, 3)
+    assert_eq(transaction.generation, 1)
+    assert_eq(transaction.changed_fields, ["a", "z"])
+    assert_eq(store.value(), 3)
+    assert_eq(store.signal().get(), 3)
+    assert_eq(store.state_signal().get(), 3)
+    assert_eq(store.current_generation(), 1)
+    assert(store.history().is_empty())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebStore.rs:602-692
+#Test("store_optimistic_rollback_consumes_current_ticket_and_rejects_stale_patch") {
+    store :: JetWebStore<I64>.new("", 10, 0)
+    patch :: store.optimistic("increment", [], fn(state) { *state += 1 })
+    assert(patch.active())
+    assert_eq(patch.generation(), 1)
+    assert_eq(store.value(), 11)
+    assert_eq(patch.rollback(), Val(10))
+    assert_eq(store.value(), 10)
+    stale :: store.patch("old", [], fn(state) { *state += 1 })
+    _ :: store.set(99)
+    assert_eq(stale.rollback(), None)
+    assert_eq(store.value(), 99)
+    committed :: store.patch("commit", [], fn(state) { *state += 1 })
+    receipt :: committed.commit()
+    assert_eq(receipt.after, 100)
+    assert_eq(store.value(), 100)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebStore.rs:495-521,738-760
+#Test("store_limit_clamping_and_clear_preserve_live_generation") {
+    store :: JetWebStore<I64>.new("", 0, -1)
+    assert_eq(store.history_limit(), 0)
+    store.set_history_limit(5000)
+    assert_eq(store.history_limit(), 1000)
+    _ :: store.set(9)
+    generation :: store.current_generation()
+    store.clear_history()
+    assert_eq(store.value(), 9)
+    assert_eq(store.current_generation(), generation)
+    assert_eq(store.cursor(), 0)
+    assert(store.history().is_empty())
+    assert(store.events().is_empty())
+    store.set_history_limit(-1)
+    assert_eq(store.history_limit(), 0)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebStore.rs:206-272,1331-1347
+#Test("store_event_metadata_escapes_controls_without_serializing_typed_state") {
+    event :: JetWebStoreEvent{sequence: 7, generation: 3, action: "say\"\n", changed_fields: ["a\t", "\\"], cursor: 2, kind: JetWebStoreEventKind.Rollback}
+    assert_eq(event.transaction_label(), "say\"\n#3")
+    assert_eq(event.diff_json(), "\{\"kind\":\"rollback\",\"generation\":3,\"action\":\"say\\\"\\n\",\"changed_fields\":[\"a\\t\",\"\\\\\"]\}")
+    transaction :: JetWebStoreTransaction{generation: U64{3}, action: "set", changed_fields: ["a"], before: I64{1}, after: I64{2}}
+    assert_eq(transaction.diff_json(), "\{\"generation\":3,\"action\":\"set\",\"changed_fields\":[\"a\"]\}")
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebStore.rs:969-994
+#Test("store_named_registry_reuses_only_compatible_row_type") {
+    first :: jet_web_store_with_history<I64>("port0313_named_store", 1, 0)
+    _ :: first.set(8)
+    reloaded :: jet_web_store_with_history<I64>("port0313_named_store", 999, 1000)
+    assert_eq(reloaded.value(), 8)
+    assert_eq(reloaded.history_limit(), 0)
+    other :: jet_web_store_with_history<String>("port0313_named_store", "typed", 0)
+    assert_eq(other.value(), "typed")
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebStore.rs:1085-1135
+#Test("store_negative_timeline_wrappers_reject_without_mutating_live_value") {
+    store :: JetWebStore<I64>.new("", 42, 0)
+    assert_eq(jet_web_store_jump(&store, -1), None)
+    assert_eq(jet_web_store_scrub(&store, -1), None)
+    assert(jet_web_store_events_since(&store, -1).is_empty())
+    assert_eq(store.value(), 42)
+}

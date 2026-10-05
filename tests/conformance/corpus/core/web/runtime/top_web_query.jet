@@ -1,0 +1,39 @@
+use core.web.runtime.top_web_query.[JetWebQuery, jet_web_query_hex, jet_web_query_unhex, jet_web_query_targets]
+use core.web.query.[WebQueryStatus, WebMutationStatus, WebQueryNetworkMode]
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebQuery.rs:67-94/246-273
+#Test("query_queue_hex_preserves_utf8_and_targets_normalize_without_reordering") {
+    text :: "héllo\t\n"
+    assert_eq(jet_web_query_unhex(jet_web_query_hex(text)), Val(text))
+    assert_eq(jet_web_query_unhex("Ff"), None)
+    assert_eq(jet_web_query_unhex("0"), None)
+    assert_eq(jet_web_query_unhex("gg"), None)
+    assert_eq(jet_web_query_targets([" db.users ", "key:users", "db.users"]).unwrap(), ["db.users", "key:users"])
+    assert(jet_web_query_targets(["key: "]).is_err())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebQuery.rs:692-720/1018-1231
+#Test("query_failed_optimistic_mutation_restores_previous_value_and_settles") {
+    query :: JetWebQuery.new("conformance-query-rollback", "before")
+    before :: query.state()
+    settled :: query.mutate("request", Val("optimistic"), fn(_) -> String Err! { Err("rejected") })
+    assert_eq(settled.status, WebMutationStatus.Settled)
+    assert_eq(settled.error, "rejected")
+    assert(settled.rollback)
+    assert(settled.optimistic)
+    assert_eq(query.state(), before)
+    assert_eq(query.get(), "before")
+    assert_eq(settled.generation, U64{1})
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebQuery.rs:960-993/1018-1231/1309-1364
+#Test("query_online_policy_rejects_offline_action_and_refresh_requires_fetcher") {
+    query :: JetWebQuery.new("conformance-query-offline", "cached")
+    query.set_mode(WebQueryNetworkMode.Online)
+    query.set_online(false)
+    settled :: query.mutate("request", None, fn(_) -> String Err! { panic("offline action must not execute") })
+    assert_eq(settled.status, WebMutationStatus.Settled)
+    assert_eq(settled.error, "query is offline")
+    assert(!settled.rollback)
+    assert_eq(query.get(), "cached")
+    assert_eq(query.state().status, WebQueryStatus.Offline)
+    assert_eq(query.refresh(), Err("query has no fetcher"))
+}

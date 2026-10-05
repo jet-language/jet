@@ -1,0 +1,10 @@
+use core.service.runtime.service.workflow_wait
+use core.service.runtime.workflow_wait.JetServiceWorkflowWait
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WorkflowSleep.rs:4-11
+#Test("service_workflow_zero_duration_uses_real_scheduler_adapter") {
+    match workflow_wait(0) {
+        JetServiceWorkflowWait.Ready(()) -> {},
+        _ -> assert(false)
+    }
+}

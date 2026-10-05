@@ -1,15 +1,5 @@
-// PORT-PENDING 0305 crates-jet-codegen-src-prelude-corelib-top-services-module-group-slice-5561: crates/jet-codegen/src/Prelude/CoreLib/Top/WorkflowSleep.rs:1-11
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS /// D-SERVICE-WORKFLOW1=D / I9: the workflow Prelude records the wait before
-//RS /// calling this one scheduler adapter. AOT and resident engines marshal their
-//RS /// scheduler result into the shared workflow carrier.
-//RS fn jet_services_workflow_sleep_wait(nanos: i64) -> JetServiceWorkflowWait<()> {
-//RS     match jet_scheduler_wait_without_unwind(|| jet_std_time_sleep_duration_ns(nanos)) {
-//RS         JetSchedulerWait::Ready(()) => JetServiceWorkflowWait::Ready(()),
-//RS         JetSchedulerWait::Cancelled => JetServiceWorkflowWait::Cancelled,
-//RS         JetSchedulerWait::Deadline(reason) => JetServiceWorkflowWait::Deadline(reason),
-//RS         JetSchedulerWait::Panicked(reason) => JetServiceWorkflowWait::Panicked(reason),
-//RS     }
-//RS }
-// END-PORT-PENDING 0305 crates/jet-codegen/src/Prelude/CoreLib/Top/WorkflowSleep.rs:1-11
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WorkflowSleep.rs:1-11
+// jet_services_workflow_sleep_wait maps directly to the existing audited
+// core.service.runtime.service.workflow_wait (Service.rs:10), whose four
+// scheduler result arms match this adapter exactly. No duplicate wrapper.
 

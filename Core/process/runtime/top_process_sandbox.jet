@@ -1,1059 +1,482 @@
-// PORT-PENDING 0297 crates-jet-codegen-src-prelude-corelib-top-processsandbox-module-group: crates/jet-codegen/src/Prelude/CoreLib/Top/ProcessSandbox.rs:1-1055
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS // Shared native child boundary used by #398 and authority-bound Core process.
-//RS //
-//RS // This is a Prelude fragment: generated AOT code, the resident JIT, and the
-//RS // interpreter compile the same backend source. Build execution includes the
-//RS // same fragment instead of maintaining a second platform implementation.
-//RS 
-//RS use std::collections::BTreeMap;
-//RS use std::fs;
-//RS use std::io::{self, Read};
-//RS use std::path::{Path, PathBuf};
-//RS use std::process::{Child, Command, Output, Stdio};
-//RS use std::sync::{
-//RS     atomic::{AtomicBool, Ordering},
-//RS     Arc,
-//RS };
-//RS use std::thread;
-//RS use std::time::{Duration, Instant};
-//RS 
-//RS const MAX_CAPTURED_OUTPUT_BYTES: usize = 64 * 1024 * 1024;
-//RS // Build actions must have a finite wall-clock budget in every native backend.
-//RS pub const DEFAULT_ACTION_TIMEOUT: Duration = Duration::from_secs(30);
-//RS 
-//RS #[cfg(target_os = "macos")]
-//RS const MACOS_SANDBOX_EXEC: &str = "/usr/bin/sandbox-exec";
-//RS 
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct Status {
-//RS     pub available: bool,
-//RS     pub mechanism: String,
-//RS     pub policy: String,
-//RS     pub reason: String,
-//RS }
-//RS 
-//RS /// One immutable host directory exposed to a child process. The native
-//RS /// adapters validate the source and project it read-only at the declared
-//RS /// destination; no adapter adds an implicit host search path.
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct ReadOnlyMount {
-//RS     pub source: PathBuf,
-//RS     pub destination: PathBuf,
-//RS }
-//RS 
-//RS impl ReadOnlyMount {
-//RS     pub fn new(source: impl Into<PathBuf>, destination: impl Into<PathBuf>) -> Self {
-//RS         ReadOnlyMount {
-//RS             source: source.into(),
-//RS             destination: destination.into(),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Debug)]
-//RS pub enum Error {
-//RS     Unsupported(String),
-//RS     Io(String),
-//RS }
-//RS 
-//RS pub fn policy(output_is_separate: bool, share_network: bool) -> String {
-//RS     #[cfg(target_os = "linux")]
-//RS     {
-//RS         return format!(
-//RS             "filesystem={};process=private-pid,parent-death;network={};environment=clear;devices=private-dev;privilege=no-new-privs+cap-drop-all;resources=tmpfs-64MiB",
-//RS             if output_is_separate {
-//RS                 "source-readonly,output-private-copy"
-//RS             } else {
-//RS                 "private-workspace-readwrite"
-//RS             },
-//RS             if share_network {
-//RS                 "declared-shared"
-//RS             } else {
-//RS                 "isolated"
-//RS             },
-//RS         );
-//RS     }
-//RS 
-//RS     #[cfg(not(target_os = "linux"))]
-//RS     format!(
-//RS         "filesystem={};process=declared-tool-and-fork;network={};environment=clear;devices=denied;resources=none-declared",
-//RS         if output_is_separate {
-//RS             "source-readonly,output-readwrite"
-//RS         } else {
-//RS             "private-workspace-readwrite"
-//RS         },
-//RS         if share_network {
-//RS             "declared-shared"
-//RS         } else {
-//RS             "denied"
-//RS         },
-//RS     )
-//RS }
-//RS 
-//RS pub fn status() -> Status {
-//RS     #[cfg(target_os = "linux")]
-//RS     {
-//RS         if std::env::var_os("JETPACK_FAKE_SANDBOX").is_some() {
-//RS             return Status {
-//RS                 available: false,
-//RS                 mechanism: "linux-bwrap-unavailable".to_string(),
-//RS                 policy: "not-enforced".to_string(),
-//RS                 reason: "test sandbox override prevents the native Linux backend probe".to_string(),
-//RS             };
-//RS         }
-//RS         let Some(bwrap) = find_program_path("bwrap") else {
-//RS             return Status {
-//RS                 available: false,
-//RS                 mechanism: "linux-bwrap-unavailable".to_string(),
-//RS                 policy: "not-enforced".to_string(),
-//RS                 reason: "bubblewrap (`bwrap`) is not available on PATH".to_string(),
-//RS             };
-//RS         };
-//RS         let Some(probe) = find_program_path("sh") else {
-//RS             return Status {
-//RS                 available: false,
-//RS                 mechanism: "linux-bwrap-unavailable".to_string(),
-//RS                 policy: "not-enforced".to_string(),
-//RS                 reason: "bubblewrap is present but no immutable shell probe is available"
-//RS                     .to_string(),
-//RS             };
-//RS         };
-//RS         let policy = policy(false, false);
-//RS         let mut command = linux_sandbox_command(
-//RS             &bwrap,
-//RS             None,
-//RS             None,
-//RS             &BTreeMap::new(),
-//RS             false,
-//RS             false,
-//RS             false,
-//RS             &[],
-//RS             None,
-//RS         );
-//RS         command.args([probe.as_os_str(), std::ffi::OsStr::new("-c")]);
-//RS         command.arg("exit 0");
-//RS         return match command.status() {
-//RS             Ok(status) if status.success() => Status {
-//RS                 available: true,
-//RS                 mechanism: "linux-bwrap".to_string(),
-//RS                 policy,
-//RS                 reason: "bubblewrap completed the isolated backend probe".to_string(),
-//RS             },
-//RS             Ok(status) => Status {
-//RS                 available: false,
-//RS                 mechanism: "linux-bwrap-unavailable".to_string(),
-//RS                 policy: "not-enforced".to_string(),
-//RS                 reason: format!("bubblewrap backend probe exited with {status}"),
-//RS             },
-//RS             Err(error) => Status {
-//RS                 available: false,
-//RS                 mechanism: "linux-bwrap-unavailable".to_string(),
-//RS                 policy: "not-enforced".to_string(),
-//RS                 reason: format!("bubblewrap backend probe failed: {error}"),
-//RS             },
-//RS         };
-//RS     }
-//RS 
-//RS     #[cfg(target_os = "macos")]
-//RS     {
-//RS         if std::env::var_os("JETPACK_FAKE_SANDBOX").is_some() {
-//RS             return Status {
-//RS                 available: false,
-//RS                 mechanism: "macos-seatbelt-unavailable".to_string(),
-//RS                 policy: "not-enforced".to_string(),
-//RS                 reason: "test sandbox override prevents the native macOS backend probe".to_string(),
-//RS             };
-//RS         }
-//RS         if !Path::new(MACOS_SANDBOX_EXEC).is_file() {
-//RS             return Status {
-//RS                 available: false,
-//RS                 mechanism: "macos-seatbelt-unavailable".to_string(),
-//RS                 policy: "not-enforced".to_string(),
-//RS                 reason: format!("native macOS backend `{MACOS_SANDBOX_EXEC}` is unavailable"),
-//RS             };
-//RS         }
-//RS         let result = Command::new(MACOS_SANDBOX_EXEC)
-//RS             .arg("-p")
-//RS             .arg(probe_profile())
-//RS             .arg("/usr/bin/true")
-//RS             .env_clear()
-//RS             .stdin(Stdio::null())
-//RS             .stdout(Stdio::null())
-//RS             .stderr(Stdio::null())
-//RS             .status();
-//RS         return match result {
-//RS             Ok(status) if status.success() => Status {
-//RS                 available: true,
-//RS                 mechanism: "macos-seatbelt".to_string(),
-//RS                 policy: policy(true, false),
-//RS                 reason: "native macOS Seatbelt completed the isolated backend probe".to_string(),
-//RS             },
-//RS             Ok(status) => Status {
-//RS                 available: false,
-//RS                 mechanism: "macos-seatbelt-unavailable".to_string(),
-//RS                 policy: "not-enforced".to_string(),
-//RS                 reason: format!("native macOS Seatbelt backend probe exited with {status}"),
-//RS             },
-//RS             Err(error) => Status {
-//RS                 available: false,
-//RS                 mechanism: "macos-seatbelt-unavailable".to_string(),
-//RS                 policy: "not-enforced".to_string(),
-//RS                 reason: format!("native macOS Seatbelt backend probe failed: {error}"),
-//RS             },
-//RS         };
-//RS     }
-//RS 
-//RS     #[cfg(target_os = "windows")]
-//RS     {
-//RS         let native = windows_status();
-//RS         return Status {
-//RS             available: native.available,
-//RS             mechanism: native.mechanism,
-//RS             policy: native.policy,
-//RS             reason: native.reason,
-//RS         };
-//RS     }
-//RS 
-//RS     #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
-//RS     {
-//RS         Status {
-//RS             available: false,
-//RS             mechanism: "unsupported".to_string(),
-//RS             policy: "not-enforced".to_string(),
-//RS             reason: "native child sandbox backend is unavailable on this target".to_string(),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS pub fn agent_output_dir(cwd: &Path) -> Result<PathBuf, Error> {
-//RS     let cwd = real_directory(cwd)?;
-//RS     let jet_dir = secure_child_directory(&cwd, ".jet")?;
-//RS     let output = secure_child_directory(&jet_dir, "build")?;
-//RS     if !output.starts_with(&cwd) {
-//RS         return Err(Error::Unsupported(
-//RS             "authority-bound process output escaped its workspace".to_string(),
-//RS         ));
-//RS     }
-//RS     Ok(output)
-//RS }
-//RS 
-//RS pub fn spawn<F>(
-//RS     executable: &Path,
-//RS     args: &[String],
-//RS     source_dir: &Path,
-//RS     output_dir: Option<&Path>,
-//RS     env: &BTreeMap<String, String>,
-//RS     share_network: bool,
-//RS     source_readable: bool,
-//RS     source_writable: bool,
-//RS     argv0: Option<&std::ffi::OsStr>,
-//RS     configure: F,
-//RS ) -> Result<Child, Error>
-//RS where
-//RS     F: FnOnce(&mut Command) -> Result<(), Error>,
-//RS {
-//RS     spawn_with_read_only_mounts(
-//RS         executable,
-//RS         args,
-//RS         source_dir,
-//RS         output_dir,
-//RS         env,
-//RS         share_network,
-//RS         source_readable,
-//RS         source_writable,
-//RS         &[],
-//RS         argv0,
-//RS         configure,
-//RS     )
-//RS }
-//RS 
-//RS pub fn spawn_with_read_only_mounts<F>(
-//RS     executable: &Path,
-//RS     args: &[String],
-//RS     source_dir: &Path,
-//RS     output_dir: Option<&Path>,
-//RS     env: &BTreeMap<String, String>,
-//RS     share_network: bool,
-//RS     source_readable: bool,
-//RS     source_writable: bool,
-//RS     mounts: &[ReadOnlyMount],
-//RS     argv0: Option<&std::ffi::OsStr>,
-//RS     configure: F,
-//RS ) -> Result<Child, Error>
-//RS where
-//RS     F: FnOnce(&mut Command) -> Result<(), Error>,
-//RS {
-//RS     #[cfg(any(target_os = "linux", target_os = "macos"))]
-//RS     {
-//RS         if std::env::var_os("JETPACK_FAKE_SANDBOX").is_some() {
-//RS             return Err(Error::Unsupported(
-//RS                 "test sandbox override prevents child execution".to_string(),
-//RS             ));
-//RS         }
-//RS         let status = status();
-//RS         if !status.available {
-//RS             return Err(Error::Unsupported(status.reason));
-//RS         }
-//RS         let executable = executable.canonicalize().map_err(|error| {
-//RS             Error::Unsupported(format!("sandbox executable is unavailable: {error}"))
-//RS         })?;
-//RS         if !executable.is_file() {
-//RS             return Err(Error::Unsupported(format!(
-//RS                 "sandbox executable `{}` is not a file",
-//RS                 executable.display()
-//RS             )));
-//RS         }
-//RS         let source_dir = real_directory(source_dir)?;
-//RS         let output_dir = output_dir.map(real_directory).transpose()?;
-//RS         let mounts = validate_read_only_mounts(mounts)?;
-//RS         let command_executable = mounted_executable_path(&executable, &mounts);
-//RS         #[cfg(target_os = "macos")]
-//RS         {
-//RS             let profile = build_profile(
-//RS                 &command_executable,
-//RS                 &source_dir,
-//RS                 output_dir.as_deref(),
-//RS                 share_network,
-//RS                 source_readable,
-//RS                 source_writable,
-//RS                 &mounts,
-//RS             )?;
-//RS             let mut command = Command::new(MACOS_SANDBOX_EXEC);
-//RS             command
-//RS                 // Pass the profile inline. A temporary `-f` profile could be
-//RS                 // replaced after `spawn()` returns but before Seatbelt reads
-//RS                 // it, creating a launch race.
-//RS                 .arg("-p")
-//RS                 .arg(&profile)
-//RS                 .arg(&command_executable)
-//RS                 .args(args)
-//RS                 .env_clear()
-//RS                 .current_dir(&source_dir);
-//RS             if let Some(output_dir) = output_dir.as_deref() {
-//RS                 command.env("JET_BUILD_OUTPUT", output_dir);
-//RS             }
-//RS             let _ = argv0;
-//RS             for (key, value) in env {
-//RS                 command.env(key, value);
-//RS             }
-//RS             configure(&mut command)?;
-//RS             return command
-//RS                 .spawn()
-//RS                 .map_err(|error| Error::Io(error.to_string()));
-//RS         }
-//RS 
-//RS         #[cfg(target_os = "linux")]
-//RS         {
-//RS             let bwrap = find_program_path("bwrap").ok_or_else(|| {
-//RS                 Error::Unsupported("bubblewrap (`bwrap`) is not available on PATH".to_string())
-//RS             })?;
-//RS             let mut command = linux_sandbox_command(
-//RS                 &bwrap,
-//RS                 Some(&source_dir),
-//RS                 output_dir.as_deref(),
-//RS                 env,
-//RS                 share_network,
-//RS                 source_readable,
-//RS                 source_writable,
-//RS                 &mounts,
-//RS                 argv0,
-//RS             );
-//RS             command.arg(&command_executable).args(args);
-//RS             configure(&mut command)?;
-//RS             return command
-//RS                 .spawn()
-//RS                 .map_err(|error| Error::Io(error.to_string()));
-//RS         }
-//RS     }
-//RS 
-//RS     #[cfg(not(any(target_os = "linux", target_os = "macos")))]
-//RS     {
-//RS         let _ = (
-//RS             executable,
-//RS             args,
-//RS             source_dir,
-//RS             output_dir,
-//RS             env,
-//RS             share_network,
-//RS             source_readable,
-//RS             source_writable,
-//RS             mounts,
-//RS             argv0,
-//RS             configure,
-//RS         );
-//RS         Err(Error::Unsupported(
-//RS             "native Windows AppContainer backend does not expose streaming spawn; use captured run()"
-//RS                 .to_string(),
-//RS         ))
-//RS     }
-//RS }
-//RS 
-//RS pub fn output(
-//RS     executable: &Path,
-//RS     args: &[String],
-//RS     source_dir: &Path,
-//RS     output_dir: Option<&Path>,
-//RS     env: &BTreeMap<String, String>,
-//RS     share_network: bool,
-//RS ) -> Result<Output, Error> {
-//RS     output_with_timeout(
-//RS         executable,
-//RS         args,
-//RS         source_dir,
-//RS         output_dir,
-//RS         env,
-//RS         share_network,
-//RS         None,
-//RS     )
-//RS }
-//RS 
-//RS pub fn output_with_timeout(
-//RS     executable: &Path,
-//RS     args: &[String],
-//RS     source_dir: &Path,
-//RS     output_dir: Option<&Path>,
-//RS     env: &BTreeMap<String, String>,
-//RS     share_network: bool,
-//RS     timeout: Option<Duration>,
-//RS ) -> Result<Output, Error> {
-//RS     output_with_read_only_mounts(
-//RS         executable,
-//RS         args,
-//RS         source_dir,
-//RS         output_dir,
-//RS         env,
-//RS         share_network,
-//RS         &[],
-//RS         timeout,
-//RS     )
-//RS }
-//RS 
-//RS pub fn output_with_read_only_mounts(
-//RS     executable: &Path,
-//RS     args: &[String],
-//RS     source_dir: &Path,
-//RS     output_dir: Option<&Path>,
-//RS     env: &BTreeMap<String, String>,
-//RS     share_network: bool,
-//RS     mounts: &[ReadOnlyMount],
-//RS     timeout: Option<Duration>,
-//RS ) -> Result<Output, Error> {
-//RS     let argv0 = executable.file_name().map(std::ffi::OsStr::to_owned);
-//RS     let child = spawn_with_read_only_mounts(
-//RS         executable,
-//RS         args,
-//RS         source_dir,
-//RS         output_dir,
-//RS         env,
-//RS         share_network,
-//RS         true,
-//RS         output_dir.is_none(),
-//RS         mounts,
-//RS         argv0.as_deref(),
-//RS         |command| {
-//RS             command
-//RS                 .stdin(Stdio::null())
-//RS                 .stdout(Stdio::piped())
-//RS                 .stderr(Stdio::piped());
-//RS             #[cfg(unix)]
-//RS             {
-//RS                 use std::os::unix::process::CommandExt;
-//RS                 // One process group for the sandbox wrapper so output-limit
-//RS                 // and timeout SIGKILL the wrapper and every descendant.
-//RS                 command.process_group(0);
-//RS             }
-//RS             Ok(())
-//RS         },
-//RS     )?;
-//RS     wait_with_limited_output(child, timeout)
-//RS }
-//RS 
-//RS fn read_output_limited<R: Read>(mut reader: R) -> io::Result<(Vec<u8>, bool)> {
-//RS     let mut output = Vec::with_capacity(64 * 1024);
-//RS     let mut buffer = [0u8; 64 * 1024];
-//RS     loop {
-//RS         let count = reader.read(&mut buffer)?;
-//RS         if count == 0 {
-//RS             return Ok((output, false));
-//RS         }
-//RS         let remaining = MAX_CAPTURED_OUTPUT_BYTES.saturating_sub(output.len());
-//RS         let keep = count.min(remaining);
-//RS         output.extend_from_slice(&buffer[..keep]);
-//RS         if keep < count {
-//RS             return Ok((output, true));
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS const PROCESS_GROUP_SIGKILL: i32 = 9;
-//RS #[cfg(unix)]
-//RS const PROCESS_GROUP_ESRCH: i32 = 3;
-//RS 
-//RS #[cfg(unix)]
-//RS unsafe extern "C" {
-//RS     fn kill(pid: i32, signal: i32) -> i32;
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS fn terminate_process_group(pid: u32) -> io::Result<()> {
-//RS     let pid = i32::try_from(pid)
-//RS         .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "process id is out of range"))?;
-//RS     // SAFETY: the negative PID targets only the process group assigned to the
-//RS     // child by CommandExt::process_group(0).
-//RS     if unsafe { kill(-pid, PROCESS_GROUP_SIGKILL) } == 0 {
-//RS         return Ok(());
-//RS     }
-//RS     let error = io::Error::last_os_error();
-//RS     if error.raw_os_error() == Some(PROCESS_GROUP_ESRCH) {
-//RS         return Ok(());
-//RS     }
-//RS     Err(error)
-//RS }
-//RS 
-//RS #[cfg(target_os = "linux")]
-//RS fn collect_descendant_pids(root: u32) -> Vec<u32> {
-//RS     let mut out = Vec::new();
-//RS     let mut stack = vec![root];
-//RS     let mut seen = std::collections::BTreeSet::new();
-//RS     while let Some(pid) = stack.pop() {
-//RS         if !seen.insert(pid) {
-//RS             continue;
-//RS         }
-//RS         if pid != root {
-//RS             out.push(pid);
-//RS         }
-//RS         let Ok(tasks) = fs::read_dir(format!("/proc/{pid}/task")) else {
-//RS             continue;
-//RS         };
-//RS         for task in tasks.flatten() {
-//RS             let Ok(text) = fs::read_to_string(task.path().join("children")) else {
-//RS                 continue;
-//RS             };
-//RS             for token in text.split_whitespace() {
-//RS                 if let Ok(child) = token.parse::<u32>() {
-//RS                     stack.push(child);
-//RS                 }
-//RS             }
-//RS         }
-//RS     }
-//RS     out
-//RS }
-//RS 
-//RS #[cfg(target_os = "linux")]
-//RS fn terminate_descendants(pids: &[u32]) {
-//RS     for pid in pids {
-//RS         let Ok(pid) = i32::try_from(*pid) else {
-//RS             continue;
-//RS         };
-//RS         // SAFETY: these PIDs were children of the sandbox wrapper at the
-//RS         // moment we walked /proc. SIGKILL is the same signal used for the
-//RS         // wrapper process group.
-//RS         let _ = unsafe { kill(pid, PROCESS_GROUP_SIGKILL) };
-//RS     }
-//RS }
-//RS 
-//RS fn terminate_process_tree(
-//RS     child: &mut Child,
-//RS     child_reaped: bool,
-//RS     extra_descendants: &[u32],
-//RS ) -> io::Result<()> {
-//RS     let _ = extra_descendants;
-//RS     #[cfg(target_os = "linux")]
-//RS     let mut descendants = collect_descendant_pids(child.id());
-//RS     #[cfg(target_os = "linux")]
-//RS     descendants.extend_from_slice(extra_descendants);
-//RS     #[cfg(unix)]
-//RS     let group_error = terminate_process_group(child.id()).err();
-//RS     #[cfg(not(unix))]
-//RS     let group_error = child.kill().err();
-//RS     #[cfg(target_os = "linux")]
-//RS     terminate_descendants(&descendants);
-//RS 
-//RS     #[cfg(unix)]
-//RS     if group_error.is_some() {
-//RS         // Keep the direct-child fallback for a failed group signal. The group
-//RS         // path is authoritative; this only preserves the old best effort if a
-//RS         // platform rejects the group operation.
-//RS         let _ = child.kill();
-//RS     }
-//RS 
-//RS     let wait_error = if child_reaped {
-//RS         None
-//RS     } else {
-//RS         child.wait().err()
-//RS     };
-//RS     match (wait_error, group_error) {
-//RS         (Some(error), _) => Err(error),
-//RS         (None, Some(error)) => Err(error),
-//RS         (None, None) => Ok(()),
-//RS     }
-//RS }
-//RS 
-//RS fn wait_with_limited_output(mut child: Child, timeout: Option<Duration>) -> Result<Output, Error> {
-//RS     let stdout = match child.stdout.take() {
-//RS         Some(stdout) => stdout,
-//RS         None => {
-//RS             let error = Error::Io("sandbox child stdout was not piped".to_string());
-//RS             let _ = terminate_process_tree(&mut child, false, &[]);
-//RS             return Err(error);
-//RS         }
-//RS     };
-//RS     let stderr = match child.stderr.take() {
-//RS         Some(stderr) => stderr,
-//RS         None => {
-//RS             let error = Error::Io("sandbox child stderr was not piped".to_string());
-//RS             let _ = terminate_process_tree(&mut child, false, &[]);
-//RS             return Err(error);
-//RS         }
-//RS     };
-//RS     let exceeded = Arc::new(AtomicBool::new(false));
-//RS     #[cfg(unix)]
-//RS     let child_pid = child.id();
-//RS     let reader_failed = Arc::new(AtomicBool::new(false));
-//RS     let stdout_exceeded = Arc::clone(&exceeded);
-//RS     let stdout_reader_failed = Arc::clone(&reader_failed);
-//RS     let stderr_exceeded = Arc::clone(&exceeded);
-//RS     let stderr_reader_failed = Arc::clone(&reader_failed);
-//RS     let stdout_thread = thread::spawn(move || {
-//RS         let result = read_output_limited(stdout);
-//RS         if result.as_ref().is_ok_and(|(_, exceeded)| *exceeded) {
-//RS             stdout_exceeded.store(true, Ordering::Release);
-//RS         }
-//RS         if result.is_err() {
-//RS             stdout_reader_failed.store(true, Ordering::Release);
-//RS         }
-//RS         #[cfg(unix)]
-//RS         if result.as_ref().is_ok_and(|(_, exceeded)| *exceeded) || result.is_err() {
-//RS             let _ = terminate_process_group(child_pid);
-//RS         }
-//RS         result
-//RS     });
-//RS     let stderr_thread = thread::spawn(move || {
-//RS         let result = read_output_limited(stderr);
-//RS         if result.as_ref().is_ok_and(|(_, exceeded)| *exceeded) {
-//RS             stderr_exceeded.store(true, Ordering::Release);
-//RS         }
-//RS         if result.is_err() {
-//RS             stderr_reader_failed.store(true, Ordering::Release);
-//RS         }
-//RS         #[cfg(unix)]
-//RS         if result.as_ref().is_ok_and(|(_, exceeded)| *exceeded) || result.is_err() {
-//RS             let _ = terminate_process_group(child_pid);
-//RS         }
-//RS         result
-//RS     });
-//RS 
-//RS     // Unix sandbox commands are placed in their own process group. Reader
-//RS     // workers kill that group on cap/read failure, so ordinary no-timeout
-//RS     // collection can block in the native wait without a polling tax.
-//RS     #[cfg(unix)]
-//RS     let direct_wait = timeout.is_none();
-//RS     #[cfg(not(unix))]
-//RS     let direct_wait = false;
-//RS     let deadline = timeout.map(|limit| Instant::now() + limit);
-//RS     let mut timed_out = false;
-//RS     let mut child_reaped = false;
-//RS     let mut wait_error = None;
-//RS     let mut status = None;
-//RS     let mut known_descendants = Vec::new();
-//RS     if direct_wait {
-//RS         match child.wait() {
-//RS             Ok(child_status) => {
-//RS                 child_reaped = true;
-//RS                 status = Some(child_status);
-//RS             }
-//RS             Err(error) => wait_error = Some(error),
-//RS         }
-//RS     } else {
-//RS         loop {
-//RS             #[cfg(target_os = "linux")]
-//RS             known_descendants.extend(collect_descendant_pids(child.id()));
-//RS             match child.try_wait() {
-//RS                 Ok(Some(child_status)) => {
-//RS                     child_reaped = true;
-//RS                     status = Some(child_status);
-//RS                     break;
-//RS                 }
-//RS                 Ok(None) => {
-//RS                     if exceeded.load(Ordering::Acquire) || reader_failed.load(Ordering::Acquire) {
-//RS                         break;
-//RS                     }
-//RS                     if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
-//RS                         timed_out = true;
-//RS                         break;
-//RS                     }
-//RS                     thread::sleep(Duration::from_millis(5));
-//RS                 }
-//RS                 Err(error) => {
-//RS                     wait_error = Some(error);
-//RS                     break;
-//RS                 }
-//RS             }
-//RS         }
-//RS     }
-//RS     let cleanup_error = terminate_process_tree(&mut child, child_reaped, &known_descendants).err();
-//RS     let stdout = stdout_thread
-//RS         .join()
-//RS         .map_err(|_| Error::Io("sandbox stdout reader panicked".to_string()))?
-//RS         .map_err(|error| Error::Io(error.to_string()))?;
-//RS     let stderr = stderr_thread
-//RS         .join()
-//RS         .map_err(|_| Error::Io("sandbox stderr reader panicked".to_string()))?
-//RS         .map_err(|error| Error::Io(error.to_string()))?;
-//RS     if let Some(error) = wait_error {
-//RS         return Err(Error::Io(error.to_string()));
-//RS     }
-//RS     if exceeded.load(Ordering::Acquire) {
-//RS         return Err(Error::Io(format!(
-//RS             "sandbox process output exceeded {MAX_CAPTURED_OUTPUT_BYTES} bytes"
-//RS         )));
-//RS     }
-//RS     if timed_out {
-//RS         let timeout = timeout.expect("timeout flag requires a timeout");
-//RS         return Err(Error::Io(format!(
-//RS             "sandbox process timed out after {}ms",
-//RS             timeout.as_millis()
-//RS         )));
-//RS     }
-//RS     if let Some(error) = cleanup_error {
-//RS         return Err(Error::Io(error.to_string()));
-//RS     }
-//RS     let status = status.expect("sandbox child must exit or have a cleanup reason");
-//RS     Ok(Output {
-//RS         status,
-//RS         stdout: stdout.0,
-//RS         stderr: stderr.0,
-//RS     })
-//RS }
-//RS 
-//RS fn real_directory(path: &Path) -> Result<PathBuf, Error> {
-//RS     let canonical = path
-//RS         .canonicalize()
-//RS         .map_err(|error| Error::Io(format!("sandbox directory `{}`: {error}", path.display())))?;
-//RS     if !canonical.is_dir() {
-//RS         return Err(Error::Io(format!(
-//RS             "sandbox path `{}` is not a directory",
-//RS             path.display()
-//RS         )));
-//RS     }
-//RS     Ok(canonical)
-//RS }
-//RS 
-//RS fn validate_read_only_mounts(mounts: &[ReadOnlyMount]) -> Result<Vec<ReadOnlyMount>, Error> {
-//RS     mounts
-//RS         .iter()
-//RS         .map(|mount| {
-//RS             let metadata = fs::symlink_metadata(&mount.source).map_err(|error| {
-//RS                 Error::Unsupported(format!(
-//RS                     "sandbox mount source `{}` is unavailable: {error}",
-//RS                     mount.source.display()
-//RS                 ))
-//RS             })?;
-//RS             if metadata.file_type().is_symlink() || !metadata.is_dir() {
-//RS                 return Err(Error::Unsupported(format!(
-//RS                     "sandbox mount source `{}` is not a real directory",
-//RS                     mount.source.display()
-//RS                 )));
-//RS             }
-//RS             let source = real_directory(&mount.source)?;
-//RS             let destination = &mount.destination;
-//RS             if !destination.is_absolute()
-//RS                 || destination == Path::new("/")
-//RS                 || destination.components().any(|component| {
-//RS                     matches!(component, std::path::Component::CurDir | std::path::Component::ParentDir)
-//RS                 })
-//RS             {
-//RS                 return Err(Error::Unsupported(format!(
-//RS                     "sandbox mount destination `{}` is not an absolute, normalized directory",
-//RS                     destination.display()
-//RS                 )));
-//RS             }
-//RS             Ok(ReadOnlyMount::new(source, destination.clone()))
-//RS         })
-//RS         .collect()
-//RS }
-//RS 
-//RS #[cfg(target_os = "linux")]
-//RS fn mounted_executable_path(executable: &Path, mounts: &[ReadOnlyMount]) -> PathBuf {
-//RS     mounts
-//RS         .iter()
-//RS         .filter_map(|mount| {
-//RS             executable
-//RS                 .strip_prefix(&mount.source)
-//RS                 .ok()
-//RS                 .map(|relative| (relative.components().count(), mount, relative))
-//RS         })
-//RS         .max_by_key(|(depth, _, _)| *depth)
-//RS         .map_or_else(
-//RS             || executable.to_path_buf(),
-//RS             |(_, mount, relative)| mount.destination.join(relative),
-//RS         )
-//RS }
-//RS 
-//RS #[cfg(target_os = "macos")]
-//RS fn mounted_executable_path(executable: &Path, _mounts: &[ReadOnlyMount]) -> PathBuf {
-//RS     // Seatbelt restricts the real host path; it does not create the virtual
-//RS     // mount namespace that Bubblewrap gives Linux actions.
-//RS     executable.to_path_buf()
-//RS }
-//RS 
-//RS fn find_program_path(program: &str) -> Option<PathBuf> {
-//RS     let direct = Path::new(program);
-//RS     if direct.components().count() > 1 && direct.is_file() {
-//RS         return fs::canonicalize(direct).ok();
-//RS     }
-//RS     std::env::var_os("PATH").and_then(|paths| {
-//RS         std::env::split_paths(&paths).find_map(|directory| {
-//RS             let candidate = directory.join(program);
-//RS             candidate
-//RS                 .is_file()
-//RS                 .then(|| fs::canonicalize(candidate).ok())
-//RS                 .flatten()
-//RS         })
-//RS     })
-//RS }
-//RS 
-//RS #[cfg(target_os = "linux")]
-//RS fn linux_sandbox_command(
-//RS     bwrap: &Path,
-//RS     source_dir: Option<&Path>,
-//RS     output_dir: Option<&Path>,
-//RS     env: &BTreeMap<String, String>,
-//RS     share_network: bool,
-//RS     source_readable: bool,
-//RS     source_writable: bool,
-//RS     mounts: &[ReadOnlyMount],
-//RS     argv0: Option<&std::ffi::OsStr>,
-//RS ) -> Command {
-//RS     let mut command = Command::new(bwrap);
-//RS     command
-//RS         .arg("--die-with-parent")
-//RS         .arg("--new-session")
-//RS         .arg("--unshare-all")
-//RS         .arg("--unshare-user")
-//RS         .arg("--disable-userns")
-//RS         .arg("--assert-userns-disabled")
-//RS         .arg("--cap-drop")
-//RS         .arg("ALL")
-//RS         .arg("--ro-bind-try")
-//RS         .arg("/nix/store")
-//RS         .arg("/nix/store")
-//RS         .arg("--proc")
-//RS         .arg("/proc")
-//RS         .arg("--dev")
-//RS         .arg("/dev")
-//RS         .arg("--size")
-//RS         .arg("67108864")
-//RS         .arg("--tmpfs")
-//RS         .arg("/tmp")
-//RS         .arg("--dir")
-//RS         .arg("/homeless-shelter")
-//RS         .arg("--clearenv")
-//RS         .arg("--setenv")
-//RS         .arg("PATH")
-//RS         .arg("/nix/store")
-//RS         .arg("--setenv")
-//RS         .arg("HOME")
-//RS         .arg("/homeless-shelter");
-//RS     match (source_dir, output_dir) {
-//RS         (Some(source), Some(output)) => {
-//RS             command.arg("--dir").arg("/work");
-//RS             if source_writable {
-//RS                 command.arg("--bind").arg(source).arg("/work/source");
-//RS             } else if source_readable {
-//RS                 command.arg("--ro-bind").arg(source).arg("/work/source");
-//RS             } else {
-//RS                 command.arg("--dir").arg("/work/source");
-//RS             }
-//RS             command
-//RS                 .arg("--bind")
-//RS                 .arg(output)
-//RS                 .arg("/work/output")
-//RS                 .arg("--chdir")
-//RS                 .arg("/work/source")
-//RS                 .arg("--setenv")
-//RS                 .arg("JET_BUILD_OUTPUT")
-//RS                 .arg("/work/output");
-//RS         }
-//RS         (Some(source), None) => {
-//RS             if source_writable {
-//RS                 command.arg("--bind").arg(source).arg("/work");
-//RS             } else if source_readable {
-//RS                 command.arg("--ro-bind").arg(source).arg("/work");
-//RS             } else {
-//RS                 command.arg("--dir").arg("/work");
-//RS             }
-//RS             command.arg("--chdir").arg("/work");
-//RS         }
-//RS         (None, None) => {
-//RS             command
-//RS                 .arg("--dir")
-//RS                 .arg("/work")
-//RS                 .arg("--chdir")
-//RS                 .arg("/work");
-//RS         }
-//RS         (None, Some(output)) => {
-//RS             command
-//RS                 .arg("--bind")
-//RS                 .arg(output)
-//RS                 .arg("/work")
-//RS                 .arg("--chdir")
-//RS                 .arg("/work");
-//RS         }
-//RS     }
-//RS     for mount in mounts {
-//RS         let mut destination = PathBuf::from("/");
-//RS         for component in mount.destination.components() {
-//RS             if let std::path::Component::Normal(part) = component {
-//RS                 destination.push(part);
-//RS                 command.arg("--dir").arg(&destination);
-//RS             }
-//RS         }
-//RS         command
-//RS             .arg("--ro-bind")
-//RS             .arg(&mount.source)
-//RS             .arg(&mount.destination);
-//RS     }
-//RS     if share_network {
-//RS         command.arg("--share-net");
-//RS     }
-//RS     for (key, value) in env {
-//RS         command.arg("--setenv").arg(key).arg(value);
-//RS     }
-//RS     if let Some(argv0) = argv0 {
-//RS         command.arg("--argv0").arg(argv0);
-//RS     }
-//RS     // Bubblewrap accepts options until `--`; keep the user-selected
-//RS     // executable and argv in the command position even if their text starts
-//RS     // with a dash.
-//RS     command.arg("--");
-//RS     command
-//RS }
-//RS 
-//RS fn secure_child_directory(parent: &Path, name: &str) -> Result<PathBuf, Error> {
-//RS     let path = parent.join(name);
-//RS     match fs::symlink_metadata(&path) {
-//RS         Ok(metadata) if metadata.file_type().is_symlink() => {
-//RS             return Err(Error::Unsupported(format!(
-//RS                 "sandbox directory `{}` is a symlink",
-//RS                 path.display()
-//RS             )));
-//RS         }
-//RS         Ok(metadata) if !metadata.is_dir() => {
-//RS             return Err(Error::Unsupported(format!(
-//RS                 "sandbox directory `{}` is not a directory",
-//RS                 path.display()
-//RS             )));
-//RS         }
-//RS         Ok(_) => {}
-//RS         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-//RS             fs::create_dir(&path).map_err(|error| Error::Io(error.to_string()))?;
-//RS         }
-//RS         Err(error) => return Err(Error::Io(error.to_string())),
-//RS     }
-//RS     real_directory(&path)
-//RS }
-//RS 
-//RS #[cfg(target_os = "macos")]
-//RS fn probe_profile() -> &'static str {
-//RS     concat!(
-//RS         "(version 1)\n",
-//RS         "(deny default)\n",
-//RS         "(import \"system.sb\")\n",
-//RS         "(allow process-exec (literal \"/usr/bin/true\"))\n",
-//RS         "(allow file-read* (subpath \"/System\") (subpath \"/usr\") (subpath \"/bin\") (subpath \"/nix/store\"))\n",
-//RS     )
-//RS }
-//RS 
-//RS #[cfg(target_os = "macos")]
-//RS fn build_profile(
-//RS     executable: &Path,
-//RS     source_dir: &Path,
-//RS     output_dir: Option<&Path>,
-//RS     share_network: bool,
-//RS     source_readable: bool,
-//RS     source_writable: bool,
-//RS     mounts: &[ReadOnlyMount],
-//RS ) -> Result<String, Error> {
-//RS     let executable = sbpl_path(executable)?;
-//RS     let source_dir = sbpl_path(source_dir)?;
-//RS     let output_dir = output_dir.map(sbpl_path).transpose()?;
-//RS     let mut profile = String::from(
-//RS         "(version 1)\n(deny default)\n(import \"system.sb\")\n(allow process-fork)\n(allow process-exec\n",
-//RS     );
-//RS     profile.push_str(&format!("  (literal \"{executable}\")\n"));
-//RS     for mount in mounts {
-//RS         profile.push_str(&format!(
-//RS             "  (subpath \"{}\")\n",
-//RS             sbpl_path(&mount.source)?
-//RS         ));
-//RS     }
-//RS     profile.push_str(")\n");
-//RS     profile.push_str("(allow file-read*\n");
-//RS     if source_readable {
-//RS         profile.push_str(&format!("  (subpath \"{source_dir}\")\n"));
-//RS     }
-//RS     if let Some(output_dir) = output_dir.as_deref() {
-//RS         profile.push_str(&format!("  (subpath \"{output_dir}\")\n"));
-//RS     }
-//RS     profile.push_str(&format!("  (literal \"{executable}\")\n"));
-//RS     profile.push_str("  (subpath \"/System\")\n");
-//RS     profile.push_str("  (subpath \"/usr/lib\")\n");
-//RS     profile.push_str("  (subpath \"/usr/bin\")\n");
-//RS     profile.push_str("  (subpath \"/bin\")\n");
-//RS     profile.push_str("  (subpath \"/sbin\")\n");
-//RS     profile.push_str("  (subpath \"/nix/store\")\n");
-//RS     for mount in mounts {
-//RS         profile.push_str(&format!(
-//RS             "  (subpath \"{}\")\n",
-//RS             sbpl_path(&mount.source)?
-//RS         ));
-//RS         if mount.destination != mount.source {
-//RS             profile.push_str(&format!(
-//RS                 "  (subpath \"{}\")\n",
-//RS                 sbpl_path(&mount.destination)?
-//RS             ));
-//RS         }
-//RS     }
-//RS     profile.push(')');
-//RS     if let Some(output_dir) = output_dir.as_deref() {
-//RS         profile.push_str(&format!("(allow file-write* (subpath \"{output_dir}\"))\n"));
-//RS     } else if source_writable {
-//RS         profile.push_str(&format!("(allow file-write* (subpath \"{source_dir}\"))\n"));
-//RS     }
-//RS     if share_network {
-//RS         profile.push_str("(allow network*)\n");
-//RS     } else {
-//RS         profile.push_str("(deny network*)\n");
-//RS     }
-//RS     profile.push_str("(deny device*)\n");
-//RS     Ok(profile)
-//RS }
-//RS 
-//RS #[cfg(target_os = "macos")]
-//RS fn sbpl_path(path: &Path) -> Result<String, Error> {
-//RS     let value = path.to_str().ok_or_else(|| {
-//RS         Error::Unsupported(format!(
-//RS             "sandbox path is not valid UTF-8: {}",
-//RS             path.display()
-//RS         ))
-//RS     })?;
-//RS     let mut escaped = String::with_capacity(value.len());
-//RS     for character in value.chars() {
-//RS         match character {
-//RS             '\\' => escaped.push_str("\\\\"),
-//RS             '"' => escaped.push_str("\\\""),
-//RS             character if character.is_control() => {
-//RS                 return Err(Error::Unsupported(
-//RS                     "sandbox path contains a control character".to_string(),
-//RS                 ));
-//RS             }
-//RS             character => escaped.push(character),
-//RS         }
-//RS     }
-//RS     Ok(escaped)
-//RS }
-// END-PORT-PENDING 0297 crates/jet-codegen/src/Prelude/CoreLib/Top/ProcessSandbox.rs:1-1055
+// Shared native child sandbox boundary; policy stays in this sole owner.
+use core.sys.target as target
+use std.fs
+use std.env as native_env
+use std.io.[Read, Error as NativeIOError, ErrorKind]
+use std.process.[Child, Command, Output, Stdio]
+use std.sync.[Arc]
+use std.sync.atomic.[AtomicBool, Ordering]
+use std.thread
+use std.time.[Duration, Instant]
+use c.c as os
+prep if target.selected_family() == .Unix { use core.sys.host.process_control }
+prep if target.selected_os() == .Windows { use core.process.host.top_process_windows_sandbox.[windows_status] }
 
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ProcessSandbox.rs:19
+const MAX_CAPTURED_OUTPUT_BYTES: USize = 64 * 1024 * 1024
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ProcessSandbox.rs:21
+pub const DEFAULT_ACTION_TIMEOUT: Duration = Duration.from_secs(30)
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ProcessSandbox.rs:24
+const MACOS_SANDBOX_EXEC: String = "/usr/bin/sandbox-exec"
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ProcessSandbox.rs:26
+#Clone
+#Debug
+#Equatable
+pub struct Status { pub available: Bool, pub mechanism: String, pub policy: String, pub reason: String }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ProcessSandbox.rs:34
+#Clone
+#Debug
+#Equatable
+pub struct ReadOnlyMount { pub source: OSPath, pub destination: OSPath }
+impl ReadOnlyMount {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ProcessSandbox.rs:44
+    pub fn new(source: OSPath, destination: OSPath) -> ReadOnlyMount { ReadOnlyMount{source: ^source, destination: ^destination} }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ProcessSandbox.rs:52
+#Error
+#Debug
+pub enum Error { Unsupported(String), Io(String) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ProcessSandbox.rs:58
+pub fn policy(output_is_separate: Bool, share_network: Bool) -> String {
+    if target.selected_os() == .Linux {
+        filesystem :: if output_is_separate -> "source-readonly,output-private-copy" else -> "private-workspace-readwrite"
+        network :: if share_network -> "declared-shared" else -> "isolated"
+        return "filesystem={filesystem};process=private-pid,parent-death;network={network};environment=clear;devices=private-dev;privilege=no-new-privs+cap-drop-all;resources=tmpfs-64MiB"
+    }
+    filesystem :: if output_is_separate -> "source-readonly,output-readwrite" else -> "private-workspace-readwrite"
+    network :: if share_network -> "declared-shared" else -> "denied"
+    "filesystem={filesystem};process=declared-tool-and-fork;network={network};environment=clear;devices=denied;resources=none-declared"
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ProcessSandbox.rs:92
+pub fn status() -> Status {
+    // GATE #4565: kernel primitive
+    #Unsafe("probe actual sandbox provider without claiming unsupported targets are enforced") {
+        if target.selected_os() == .Linux {
+            if native_env.var_os("JETPACK_FAKE_SANDBOX").is_some() {
+                return Status{available: false, mechanism: "linux-bwrap-unavailable", policy: "not-enforced", reason: "test sandbox override prevents the native Linux backend probe"}
+            }
+            bwrap :: match find_program_path("bwrap") {
+                Val(path) -> path, None -> return Status{available: false, mechanism: "linux-bwrap-unavailable", policy: "not-enforced", reason: "bubblewrap (`bwrap`) is not available on PATH"},
+            }
+            probe :: match find_program_path("sh") {
+                Val(path) -> path, None -> return Status{available: false, mechanism: "linux-bwrap-unavailable", policy: "not-enforced", reason: "bubblewrap is present but no immutable shell probe is available"},
+            }
+            policy :: policy(false, false)
+            command := linux_sandbox_command(bwrap, None, None, [String:String]{}, false, false, false, [ReadOnlyMount]{}, None)
+            &command.arg(probe).arg("-c").arg("exit 0")
+            return match &command.status() {
+                Ok(status) if status.success() -> Status{available: true, mechanism: "linux-bwrap", policy: ^policy, reason: "bubblewrap completed the isolated backend probe"},
+                Ok(status) -> Status{available: false, mechanism: "linux-bwrap-unavailable", policy: "not-enforced", reason: "bubblewrap backend probe exited with {status}"},
+                Err(error) -> Status{available: false, mechanism: "linux-bwrap-unavailable", policy: "not-enforced", reason: "bubblewrap backend probe failed: {error}"},
+            }
+        }
+        if target.selected_os() == .MacOS {
+            if native_env.var_os("JETPACK_FAKE_SANDBOX").is_some() {
+                return Status{available: false, mechanism: "macos-seatbelt-unavailable", policy: "not-enforced", reason: "test sandbox override prevents the native macOS backend probe"}
+            }
+            if !OSPath.new(MACOS_SANDBOX_EXEC).is_file() {
+                return Status{available: false, mechanism: "macos-seatbelt-unavailable", policy: "not-enforced", reason: "native macOS backend `{MACOS_SANDBOX_EXEC}` is unavailable"}
+            }
+            result :: Command.new(MACOS_SANDBOX_EXEC).arg("-p").arg(probe_profile()).arg("/usr/bin/true")
+                .env_clear().stdin(Stdio.null()).stdout(Stdio.null()).stderr(Stdio.null()).status()
+            return match result {
+                Ok(status) if status.success() -> Status{available: true, mechanism: "macos-seatbelt", policy: policy(true, false), reason: "native macOS Seatbelt completed the isolated backend probe"},
+                Ok(status) -> Status{available: false, mechanism: "macos-seatbelt-unavailable", policy: "not-enforced", reason: "native macOS Seatbelt backend probe exited with {status}"},
+                Err(error) -> Status{available: false, mechanism: "macos-seatbelt-unavailable", policy: "not-enforced", reason: "native macOS Seatbelt backend probe failed: {error}"},
+            }
+        }
+        if target.selected_os() == .Windows {
+            native :: windows_status()
+            return Status{available: native.available, mechanism: ^native.mechanism, policy: ^native.policy, reason: ^native.reason}
+        }
+        Status{available: false, mechanism: "unsupported", policy: "not-enforced", reason: "native child sandbox backend is unavailable on this target"}
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ProcessSandbox.rs:227
+pub fn agent_output_dir(cwd: OSPath) -> OSPath Error! {
+    cwd :: real_directory(cwd) ?? return Err(err)
+    jet_dir :: secure_child_directory(cwd, ".jet") ?? return Err(err)
+    output :: secure_child_directory(jet_dir, "build") ?? return Err(err)
+    if !output.starts_with(cwd) -> return Err(.Unsupported("authority-bound process output escaped its workspace"))
+    Ok(^output)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ProcessSandbox.rs:239
+pub fn spawn(executable: OSPath, args: [String], source_dir: OSPath, output_dir: OSPath?, env: [String:String], share_network: Bool, source_readable: Bool, source_writable: Bool, argv0: OSPath?, configure: fn(&Command) -> () Error!) -> Child Error! {
+    spawn_with_read_only_mounts(executable, args, source_dir, output_dir, env, share_network, source_readable, source_writable, [ReadOnlyMount]{}, argv0, ^configure)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ProcessSandbox.rs:269
+pub fn spawn_with_read_only_mounts(executable: OSPath, args: [String], source_dir: OSPath, output_dir: OSPath?, env: [String:String], share_network: Bool, source_readable: Bool, source_writable: Bool, mounts: [ReadOnlyMount], argv0: OSPath?, configure: fn(&Command) -> () Error!) -> Child Error! {
+    if target.selected_os() != .Linux && target.selected_os() != .MacOS {
+        return Err(.Unsupported("native Windows AppContainer backend does not expose streaming spawn; use captured run()"))
+    }
+    // GATE #4565: kernel primitive — configure is the original once-only synchronous mutable Command callback.
+    #Unsafe("validate authority paths and configure actual native sandbox command before spawn") {
+        if native_env.var_os("JETPACK_FAKE_SANDBOX").is_some() -> return Err(.Unsupported("test sandbox override prevents child execution"))
+        status :: status()
+        if !status.available -> return Err(.Unsupported(^status.reason))
+        executable :: executable.canonicalize().map_err(error -> Error.Unsupported("sandbox executable is unavailable: {error}")) ?? return Err(err)
+        if !executable.is_file() -> return Err(.Unsupported("sandbox executable `{executable.display()}` is not a file"))
+        source_dir :: real_directory(source_dir) ?? return Err(err)
+        output_dir :: output_dir.map(real_directory).transpose() ?? return Err(err)
+        mounts :: validate_read_only_mounts(mounts) ?? return Err(err)
+        command_executable :: mounted_executable_path(executable, mounts)
+        if target.selected_os() == .MacOS {
+            profile :: build_profile(command_executable, source_dir, output_dir.as_ref(), share_network, source_readable, source_writable, mounts) ?? return Err(err)
+            command := Command.new(MACOS_SANDBOX_EXEC)
+            // Inline profile avoids replacement between spawn and Seatbelt read.
+            &command.arg("-p").arg(profile).arg(command_executable).args(args).env_clear().current_dir(source_dir)
+            if output_dir is Val(output_dir) { &command.env("JET_BUILD_OUTPUT", output_dir) }
+            keys := env.keys().to_list()
+            &keys.sort()
+            loop key in keys { &command.env(key, env[key]) }
+            configure(&command) ?? return Err(err)
+            return command.spawn().map_err(error -> Error.Io(error.to_string()))
+        }
+        bwrap :: find_program_path("bwrap").ok_or_else(() -> Error.Unsupported("bubblewrap (`bwrap`) is not available on PATH")) ?? return Err(err)
+        command := linux_sandbox_command(bwrap, Val(source_dir), output_dir.as_ref(), env, share_network, source_readable, source_writable, mounts, argv0)
+        &command.arg(command_executable).args(args)
+        configure(&command) ?? return Err(err)
+        command.spawn().map_err(error -> Error.Io(error.to_string()))
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ProcessSandbox.rs:390
+pub fn output(executable: OSPath, args: [String], source_dir: OSPath, output_dir: OSPath?, env: [String:String], share_network: Bool) -> Output Error! {
+    output_with_timeout(executable, args, source_dir, output_dir, env, share_network, None)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ProcessSandbox.rs:409
+pub fn output_with_timeout(executable: OSPath, args: [String], source_dir: OSPath, output_dir: OSPath?, env: [String:String], share_network: Bool, timeout: Duration?) -> Output Error! {
+    output_with_read_only_mounts(executable, args, source_dir, output_dir, env, share_network, [ReadOnlyMount]{}, timeout)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ProcessSandbox.rs:430
+pub fn output_with_read_only_mounts(executable: OSPath, args: [String], source_dir: OSPath, output_dir: OSPath?, env: [String:String], share_network: Bool, mounts: [ReadOnlyMount], timeout: Duration?) -> Output Error! {
+    argv0 :: executable.file_name().map(name -> name.to_owned())
+    child :: spawn_with_read_only_mounts(executable, args, source_dir, output_dir, env, share_network, true, output_dir.is_none(), mounts, argv0.as_ref(), command -> {
+        // GATE #4565: kernel primitive
+        #Unsafe("close stdin and pipe both outputs, creating one Unix child process group") {
+            &command.stdin(Stdio.null()).stdout(Stdio.piped()).stderr(Stdio.piped())
+            if target.selected_family() == .Unix { &command.process_group(0) }
+        }
+        Ok(())
+    }) ?? return Err(err)
+    wait_with_limited_output(^child, timeout)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ProcessSandbox.rs:470
+pub fn read_output_limited<R: Read>(reader: ^R) -> ([U8], Bool) NativeIOError! {
+    reader := ^reader
+    output := [U8]{}.with_capacity(64 * 1024)
+    // GATE #4565: kernel primitive — native inline array, not a growable allocation.
+    buffer := #Unsafe("zero-initialize all65536 inline byte slots") { std.mem.zeroed<[U8#65536]>() }
+    loop {
+        // GATE #4565: kernel primitive
+        count :: #Unsafe("read actual pipe into inline initialized64KiB buffer") { &reader.read(&buffer) } ?? return Err(err)
+        if count == 0 -> return Ok((^output, false))
+        remaining :: MAX_CAPTURED_OUTPUT_BYTES.saturating_sub(output.len())
+        keep :: count.min(remaining)
+        &output.extend_from_slice(buffer[0..<keep])
+        if keep < count -> return Ok((^output, true))
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ProcessSandbox.rs:487
+const PROCESS_GROUP_SIGKILL: I32 = 9
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ProcessSandbox.rs:490
+const PROCESS_GROUP_ESRCH: I32 = 3
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ProcessSandbox.rs:494
+// Native kill declaration is the existing core.sys.host.process_control c.c.kill.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ProcessSandbox.rs:498
+fn terminate_process_group(pid: U32) -> () NativeIOError! {
+    pid :: I32.try_from(pid).map_err(_ -> NativeIOError.new(ErrorKind.InvalidInput, "process id is out of range")) ?? return Err(err)
+    // GATE #4565: kernel primitive
+    #Unsafe("negative pid targets only the child-assigned process group; capture native errno immediately") {
+        if os.kill(-pid, PROCESS_GROUP_SIGKILL) == 0 -> return Ok(())
+        error :: NativeIOError.last_os_error()
+        if error.raw_os_error() == Val(PROCESS_GROUP_ESRCH) -> return Ok(())
+        Err(^error)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ProcessSandbox.rs:514
+fn collect_descendant_pids(root: U32) -> [U32] {
+    out := [U32]{}
+    stack := [U32]{root}
+    seen := [U32:Bool]{}
+    // GATE #4565: kernel primitive
+    #Unsafe("walk real /proc child task lists, ignoring unavailable task records as Rust") {
+        loop {
+            pid :: match &stack.pop() { Val(pid) -> pid, None -> break }
+            if seen.has_key(pid) -> continue
+            seen[pid] = true
+            if pid != root { &out.push(pid) }
+            tasks :: match fs.read_dir(OSPath.new("/proc/{pid}/task")) { Ok(tasks) -> tasks, Err(_) -> continue }
+            loop task in tasks.flatten() {
+                text :: match fs.read_to_string(task.path().join("children")) { Ok(text) -> text, Err(_) -> continue }
+                loop token in text.split_whitespace() { if token.parse<U32>() is Ok(child) { &stack.push(child) } }
+            }
+        }
+    }
+    ^out
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ProcessSandbox.rs:543
+fn terminate_descendants(pids: [U32]) -> {
+    // GATE #4565: kernel primitive
+    #Unsafe("SIGKILL actual pids collected from sandbox wrapper /proc descendants") {
+        loop raw in pids {
+            pid :: match I32.try_from(raw) { Ok(pid) -> pid, Err(_) -> continue }
+            _ :: os.kill(pid, PROCESS_GROUP_SIGKILL)
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ProcessSandbox.rs:555
+fn terminate_process_tree(child: &Child, child_reaped: Bool, extra_descendants: [U32]) -> () NativeIOError! {
+    // GATE #4565: kernel primitive
+    #Unsafe("terminate child group and discovered descendants before reaping; wait error outranks group error") {
+        descendants := [U32]{}
+        if target.selected_os() == .Linux {
+            descendants = collect_descendant_pids(child.id())
+            &descendants.extend_from_slice(extra_descendants)
+        }
+        group_error :: if target.selected_family() == .Unix -> terminate_process_group(child.id()).err()
+            else -> &child.kill().err()
+        if target.selected_os() == .Linux { terminate_descendants(descendants) }
+        if target.selected_family() == .Unix && group_error.is_some() { _ :: &child.kill() }
+        wait_error :: if child_reaped -> None else -> &child.wait().err()
+        match (wait_error, group_error) {
+            (Val(error), _) -> Err(^error), (None, Val(error)) -> Err(^error), (None, None) -> Ok(()),
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ProcessSandbox.rs:592
+pub fn wait_with_limited_output(child: ^Child, timeout: Duration?) -> Output Error! {
+    child := ^child
+    // GATE #4565: kernel primitive — reader workers retain native Send+static pipe and Arc ownership.
+    #Unsafe("drain both real child pipes concurrently with bounded capture, release/acquire failure signals and process-tree cleanup") {
+        stdout :: match &child.stdout.take() {
+            Val(stdout) -> stdout, None -> {
+                error :: Error.Io("sandbox child stdout was not piped")
+                _ :: terminate_process_tree(&child, false, [U32]{})
+                return Err(^error)
+            },
+        }
+        stderr :: match &child.stderr.take() {
+            Val(stderr) -> stderr, None -> {
+                error :: Error.Io("sandbox child stderr was not piped")
+                _ :: terminate_process_tree(&child, false, [U32]{})
+                return Err(^error)
+            },
+        }
+        exceeded :: Arc.new(AtomicBool.new(false))
+        child_pid :: child.id()
+        reader_failed :: Arc.new(AtomicBool.new(false))
+        stdout_exceeded :: exceeded.clone()
+        stdout_reader_failed :: reader_failed.clone()
+        stderr_exceeded :: exceeded.clone()
+        stderr_reader_failed :: reader_failed.clone()
+        stdout_thread :: thread.spawn(() -> {
+            result :: read_output_limited(^stdout)
+            if result.as_ref().is_ok_and(pair -> pair.1) { stdout_exceeded.store(true, Ordering.Release) }
+            if result.is_err() { stdout_reader_failed.store(true, Ordering.Release) }
+            if target.selected_family() == .Unix && (result.as_ref().is_ok_and(pair -> pair.1) || result.is_err()) { _ :: terminate_process_group(child_pid) }
+            ^result
+        })
+        stderr_thread :: thread.spawn(() -> {
+            result :: read_output_limited(^stderr)
+            if result.as_ref().is_ok_and(pair -> pair.1) { stderr_exceeded.store(true, Ordering.Release) }
+            if result.is_err() { stderr_reader_failed.store(true, Ordering.Release) }
+            if target.selected_family() == .Unix && (result.as_ref().is_ok_and(pair -> pair.1) || result.is_err()) { _ :: terminate_process_group(child_pid) }
+            ^result
+        })
+        // With no Unix timeout, reader workers kill the group on cap/read failure.
+        direct_wait :: target.selected_family() == .Unix && timeout.is_none()
+        deadline :: timeout.map(limit -> Instant.now() + limit)
+        timed_out := false
+        child_reaped := false
+        wait_error := None as NativeIOError?
+        status := None as std.process.ExitStatus?
+        known_descendants := [U32]{}
+        if direct_wait {
+            match &child.wait() {
+                Ok(child_status) -> { child_reaped = true; status = Val(child_status) },
+                Err(error) -> wait_error = Val(^error),
+            }
+        } else {
+            loop {
+                if target.selected_os() == .Linux { &known_descendants.extend(collect_descendant_pids(child.id())) }
+                match &child.try_wait() {
+                    Ok(Val(child_status)) -> { child_reaped = true; status = Val(child_status); break },
+                    Ok(None) -> {
+                        if exceeded.load(Ordering.Acquire) || reader_failed.load(Ordering.Acquire) -> break
+                        if deadline.is_some_and(deadline -> Instant.now() >= deadline) { timed_out = true; break }
+                        thread.sleep(Duration.from_millis(5))
+                    },
+                    Err(error) -> { wait_error = Val(^error); break },
+                }
+            }
+        }
+        cleanup_error :: terminate_process_tree(&child, child_reaped, known_descendants).err()
+        stdout :: stdout_thread.join().map_err(_ -> Error.Io("sandbox stdout reader panicked")) ?? return Err(err)
+        stdout :: stdout.map_err(error -> Error.Io(error.to_string())) ?? return Err(err)
+        stderr :: stderr_thread.join().map_err(_ -> Error.Io("sandbox stderr reader panicked")) ?? return Err(err)
+        stderr :: stderr.map_err(error -> Error.Io(error.to_string())) ?? return Err(err)
+        if wait_error is Val(error) -> return Err(.Io(error.to_string()))
+        if exceeded.load(Ordering.Acquire) -> return Err(.Io("sandbox process output exceeded {MAX_CAPTURED_OUTPUT_BYTES} bytes"))
+        if timed_out {
+            timeout :: timeout.expect("timeout flag requires a timeout")
+            return Err(.Io("sandbox process timed out after {timeout.as_millis()}ms"))
+        }
+        if cleanup_error is Val(error) -> return Err(.Io(error.to_string()))
+        status :: status.expect("sandbox child must exit or have a cleanup reason")
+        Ok(Output{status: status, stdout: ^stdout.0, stderr: ^stderr.0})
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ProcessSandbox.rs:729
+fn real_directory(path: OSPath) -> OSPath Error! {
+    // GATE #4565: kernel primitive
+    #Unsafe("canonicalize actual directory and reject non-directory native path") {
+        canonical :: path.canonicalize().map_err(error -> Error.Io("sandbox directory `{path.display()}`: {error}")) ?? return Err(err)
+        if !canonical.is_dir() -> return Err(.Io("sandbox path `{path.display()}` is not a directory"))
+        Ok(^canonical)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ProcessSandbox.rs:742
+fn validate_read_only_mounts(mounts: [ReadOnlyMount]) -> [ReadOnlyMount] Error! {
+    out := [ReadOnlyMount]{}
+    // GATE #4565: kernel primitive
+    #Unsafe("validate source without following symlinks and reject non-normalized mount destination") {
+        loop mount in mounts {
+            metadata :: fs.symlink_metadata(mount.source).map_err(error -> Error.Unsupported("sandbox mount source `{mount.source.display()}` is unavailable: {error}")) ?? return Err(err)
+            if metadata.file_type().is_symlink() || !metadata.is_dir() -> return Err(.Unsupported("sandbox mount source `{mount.source.display()}` is not a real directory"))
+            source :: real_directory(mount.source) ?? return Err(err)
+            destination :: mount.destination
+            if !destination.is_absolute() || destination == OSPath.new("/") || destination.components().any(component -> component is .CurDir || component is .ParentDir) {
+                return Err(.Unsupported("sandbox mount destination `{destination.display()}` is not an absolute, normalized directory"))
+            }
+            &out.push(ReadOnlyMount.new(^source, ~destination))
+        }
+    }
+    Ok(^out)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ProcessSandbox.rs:777,794
+pub fn mounted_executable_path(executable: OSPath, mounts: [ReadOnlyMount]) -> OSPath {
+    if target.selected_os() != .Linux -> return ~executable
+    best := None as (USize, USize, @OSPath)? // #4303: relative path loan retains executable owner.
+    loop i in 0..<mounts.len() {
+        if executable.strip_prefix(mounts[i].source) is Ok(relative) {
+            depth :: relative.components().count()
+            // Rust max_by_key selects the last equal key, not the most-specific source.
+            if best.is_none() || depth >= best.unwrap().0 { best = Val((depth, i, relative)) }
+        }
+    }
+    match best { Val((_, i, relative)) -> mounts[i].destination.join(relative), None -> ~executable }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ProcessSandbox.rs:800
+fn find_program_path(program: String) -> OSPath? {
+    // GATE #4565: kernel primitive
+    #Unsafe("search actual native PATH entries preserving OS bytes and canonicalize first existing file") {
+        direct :: OSPath.new(program)
+        if direct.components().count() > 1 && direct.is_file() -> return fs.canonicalize(direct).ok()
+        native_env.var_os("PATH").and_then(paths -> native_env.split_paths(paths).find_map(directory -> {
+            candidate :: directory.join(program)
+            if candidate.is_file() -> fs.canonicalize(candidate).ok() else -> None
+        }))
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ProcessSandbox.rs:817
+pub fn linux_sandbox_command(bwrap: OSPath, source_dir: OSPath?, output_dir: OSPath?, env: [String:String], share_network: Bool, source_readable: Bool, source_writable: Bool, mounts: [ReadOnlyMount], argv0: OSPath?) -> Command {
+    // GATE #4565: kernel primitive
+    #Unsafe("assemble actual bubblewrap native argv with exact bind/environment/namespace policy") {
+        command := Command.new(bwrap)
+        &command.args([String#28]{"--die-with-parent", "--new-session", "--unshare-all", "--unshare-user", "--disable-userns", "--assert-userns-disabled", "--cap-drop", "ALL", "--ro-bind-try", "/nix/store", "/nix/store", "--proc", "/proc", "--dev", "/dev", "--size", "67108864", "--tmpfs", "/tmp", "--dir", "/homeless-shelter", "--clearenv", "--setenv", "PATH", "/nix/store", "--setenv", "HOME", "/homeless-shelter"})
+        match (source_dir, output_dir) {
+            (Val(source), Val(output)) -> {
+                &command.arg("--dir").arg("/work")
+                if source_writable { &command.arg("--bind").arg(source).arg("/work/source") }
+                else if source_readable { &command.arg("--ro-bind").arg(source).arg("/work/source") }
+                else { &command.arg("--dir").arg("/work/source") }
+                &command.arg("--bind").arg(output).arg("/work/output").arg("--chdir").arg("/work/source").arg("--setenv").arg("JET_BUILD_OUTPUT").arg("/work/output")
+            },
+            (Val(source), None) -> {
+                if source_writable { &command.arg("--bind").arg(source).arg("/work") }
+                else if source_readable { &command.arg("--ro-bind").arg(source).arg("/work") }
+                else { &command.arg("--dir").arg("/work") }
+                &command.arg("--chdir").arg("/work")
+            },
+            (None, None) -> { &command.arg("--dir").arg("/work").arg("--chdir").arg("/work") },
+            (None, Val(output)) -> { &command.arg("--bind").arg(output).arg("/work").arg("--chdir").arg("/work") },
+        }
+        loop mount in mounts {
+            destination := OSPath.new("/")
+            loop component in mount.destination.components() {
+                if component is .Normal(part) { &destination.push(part); &command.arg("--dir").arg(destination) }
+            }
+            &command.arg("--ro-bind").arg(mount.source).arg(mount.destination)
+        }
+        if share_network { &command.arg("--share-net") }
+        keys := env.keys().to_list()
+        &keys.sort()
+        loop key in keys { &command.arg("--setenv").arg(key).arg(env[key]) }
+        if argv0 is Val(argv0) { &command.arg("--argv0").arg(argv0) }
+        // User executable/argv cannot be parsed as wrapper options.
+        &command.arg("--")
+        ^command
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ProcessSandbox.rs:933
+fn secure_child_directory(parent: OSPath, name: String) -> OSPath Error! {
+    // GATE #4565: kernel primitive
+    #Unsafe("inspect child without following symlinks, create absent directory, then canonicalize") {
+        path :: parent.join(name)
+        match fs.symlink_metadata(path) {
+            Ok(metadata) if metadata.file_type().is_symlink() -> return Err(.Unsupported("sandbox directory `{path.display()}` is a symlink")),
+            Ok(metadata) if !metadata.is_dir() -> return Err(.Unsupported("sandbox directory `{path.display()}` is not a directory")),
+            Ok(_) -> {},
+            Err(error) if error.kind() == ErrorKind.NotFound -> { fs.create_dir(path).map_err(error -> Error.Io(error.to_string())) ?? return Err(err) },
+            Err(error) -> return Err(.Io(error.to_string())),
+        }
+        real_directory(path)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ProcessSandbox.rs:958
+pub fn probe_profile() -> String {
+    "(version 1)\n(deny default)\n(import \"system.sb\")\n(allow process-exec (literal \"/usr/bin/true\"))\n(allow file-read* (subpath \"/System\") (subpath \"/usr\") (subpath \"/bin\") (subpath \"/nix/store\"))\n"
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ProcessSandbox.rs:969
+pub fn build_profile(executable: OSPath, source_dir: OSPath, output_dir: OSPath?, share_network: Bool, source_readable: Bool, source_writable: Bool, mounts: [ReadOnlyMount]) -> String Error! {
+    executable :: sbpl_path(executable) ?? return Err(err)
+    source_dir :: sbpl_path(source_dir) ?? return Err(err)
+    output_dir :: output_dir.map(sbpl_path).transpose() ?? return Err(err)
+    profile := "(version 1)\n(deny default)\n(import \"system.sb\")\n(allow process-fork)\n(allow process-exec\n"
+    &profile.push_str("  (literal \"{executable}\")\n")
+    loop mount in mounts {
+        path :: sbpl_path(mount.source) ?? return Err(err)
+        &profile.push_str("  (subpath \"{path}\")\n")
+    }
+    &profile.push_str(")\n(allow file-read*\n")
+    if source_readable { &profile.push_str("  (subpath \"{source_dir}\")\n") }
+    if output_dir is Val(output_dir) { &profile.push_str("  (subpath \"{output_dir}\")\n") }
+    &profile.push_str("  (literal \"{executable}\")\n  (subpath \"/System\")\n  (subpath \"/usr/lib\")\n  (subpath \"/usr/bin\")\n  (subpath \"/bin\")\n  (subpath \"/sbin\")\n  (subpath \"/nix/store\")\n")
+    loop mount in mounts {
+        source :: sbpl_path(mount.source) ?? return Err(err)
+        &profile.push_str("  (subpath \"{source}\")\n")
+        if mount.destination != mount.source {
+            destination :: sbpl_path(mount.destination) ?? return Err(err)
+            &profile.push_str("  (subpath \"{destination}\")\n")
+        }
+    }
+    &profile.push(')')
+    if output_dir is Val(output_dir) { &profile.push_str("(allow file-write* (subpath \"{output_dir}\"))\n") }
+    else if source_writable { &profile.push_str("(allow file-write* (subpath \"{source_dir}\"))\n") }
+    if share_network { &profile.push_str("(allow network*)\n") } else { &profile.push_str("(deny network*)\n") }
+    &profile.push_str("(deny device*)\n")
+    Ok(^profile)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ProcessSandbox.rs:1034
+pub fn sbpl_path(path: OSPath) -> String Error! {
+    value :: path.to_str().ok_or_else(() -> Error.Unsupported("sandbox path is not valid UTF-8: {path.display()}")) ?? return Err(err)
+    escaped := String.with_capacity(value.len())
+    loop character in value.chars() {
+        match character {
+            '\\' -> &escaped.push_str("\\\\"), '"' -> &escaped.push_str("\\\""),
+            character if character.is_control() -> return Err(.Unsupported("sandbox path contains a control character")),
+            character -> &escaped.push(character),
+        }
+    }
+    Ok(^escaped)
+}

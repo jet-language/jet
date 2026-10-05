@@ -1,0 +1,28 @@
+use core.net.runtime.top_ws_client.[JetWsError, JetWsMessage, jet_ws_accept_key_public, jet_ws_message_is_text, jet_ws_message_is_binary, jet_ws_message_is_close, jet_ws_message_text, jet_ws_message_bytes]
+use core.prelude.runtime.kernel_values.JetShow
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WsClient.rs:209
+#Test("websocket RFC6455 accept key") {
+    assert(jet_ws_accept_key_public("dGhlIHNhbXBsZSBub25jZQ==") == "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=")
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WsClient.rs:665
+#Test("websocket message variants and accessors") {
+    text :: JetWsMessage.Text("hello")
+    binary :: JetWsMessage.Binary([U8{0}, U8{255}])
+    close :: JetWsMessage.Close{code: 1000, reason: "done"}
+    assert(jet_ws_message_is_text(&text))
+    assert(!jet_ws_message_is_binary(&text))
+    assert(!jet_ws_message_is_close(&text))
+    assert(jet_ws_message_is_binary(&binary))
+    assert(jet_ws_message_is_close(&close))
+    assert(jet_ws_message_text(&text) == Ok("hello"))
+    assert(jet_ws_message_bytes(&binary) == Ok([U8{0}, U8{255}]))
+    assert(jet_ws_message_text(&binary) == Err(JetWsError.Protocol))
+    assert(jet_ws_message_bytes(&text) == Err(JetWsError.Protocol))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WsClient.rs:23
+#Test("websocket error display preserves details") {
+    assert(JetWsError.MessageTooLarge{limit: 1048576}.jet_show() == "websocket message exceeds 1048576 bytes")
+    assert(JetWsError.IO{operation: "read"}.jet_show() == "websocket I/O failed during read")
+    assert(JetWsError.UnsupportedTarget.jet_show() == "this build target lacks websocket client connect")
+}

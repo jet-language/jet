@@ -1,5 +1,3 @@
-// PORT-PENDING 0289 crates-jet-codegen-src-prelude-corelib-top-mathrandomtime-module-group: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1-1831
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
 // D-TIME-INSTANT-SPLIT1=A: Instant traits remain beside the Core-owned carrier.
 use core.time.runtime.kernel_time_instant.[JetInstant]
 use core.time.runtime.top_time_sleep.[jet_std_time_duration_to_millis, jet_std_time_sleep_duration_ns]
@@ -851,180 +849,143 @@ fn jet_decimal_compare(a: &JetDecimal, b: &JetDecimal) -> __jet_Ordering {
 fn jet_decimal_to_string(a: &JetDecimal) -> String { precise.decimal_to_string(&jet_std_decimal_to_exact(a)) }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1650
 fn jet_decimal_to_float(a: &JetDecimal) -> F64 { precise.decimal_to_float(&jet_std_decimal_to_exact(a)) }
-//RS // D-ENC-DYN1=A+: the dynamic `parse` returns the one rich `Data` value (the
-//RS // user-facing face of `DataTree`). JSON text parses directly to the canonical
-//RS // ordered `DataTree` carrier.
-//RS fn jet_std_json_parse(text: &String) -> Result<jet_std::DataTree, jet_std::EncodingError> {
-//RS     jet_std::parse_json_datatree(text)
-//RS }
-//RS fn jet_std_json_render(d: &jet_std::DataTree) -> String {
-//RS     jet_std::render_datatree_json(d, false, 0)
-//RS }
-//RS fn jet_std_json_render_pretty(d: &jet_std::DataTree) -> String {
-//RS     jet_std::render_datatree_json(d, true, 0)
-//RS }
-//RS fn jet_quote_json_local(s: &str) -> String {
-//RS     let mut out = String::from("\"");
-//RS     for ch in s.chars() {
-//RS         match ch {
-//RS             '"' => out.push_str("\\\""),
-//RS             '\\' => out.push_str("\\\\"),
-//RS             '\n' => out.push_str("\\n"),
-//RS             '\r' => out.push_str("\\r"),
-//RS             '\t' => out.push_str("\\t"),
-//RS             c if c.is_control() => out.push_str(&format!("\\u{:04x}", c as u32)),
-//RS             c => out.push(c),
-//RS         }
-//RS     }
-//RS     out.push('"');
-//RS     out
-//RS }
-//RS fn jet_std_json_render_canonical(d: &jet_std::DataTree) -> String {
-//RS     fn render(t: &jet_std::DataTree) -> String {
-//RS         match t {
-//RS             jet_std::DataTree::Null => "null".to_string(),
-//RS             jet_std::DataTree::Bool(b) => b.to_string(),
-//RS             jet_std::DataTree::Int(n) => jet_std::jet_int_to_string(*n),
-//RS             jet_std::DataTree::Float(f) => format!("{:?}", f),
-//RS             jet_std::DataTree::Number(_) | jet_std::DataTree::TypedText(_) => {
-//RS                 unreachable!("internal JSON carrier escaped typed decode")
-//RS             }
-//RS             jet_std::DataTree::Text(s) => jet_quote_json_local(s),
-//RS             jet_std::DataTree::Bytes(bs) => {
-//RS                 format!("[{}]", bs.iter().map(|b| b.to_string()).collect::<Vec<_>>().join(","))
-//RS             }
-//RS             jet_std::DataTree::Array(xs) => {
-//RS                 format!("[{}]", xs.iter().map(render).collect::<Vec<_>>().join(","))
-//RS             }
-//RS             jet_std::DataTree::Object(entries) => {
-//RS                 let mut sorted = entries.clone();
-//RS                 sorted.sort_by(|a, b| a.0.cmp(&b.0));
-//RS                 let parts: Vec<String> = sorted
-//RS                     .iter()
-//RS                     .map(|(k, v)| format!("{}:{}", jet_quote_json_local(k), render(v)))
-//RS                     .collect();
-//RS                 format!("{{{}}}", parts.join(","))
-//RS             }
-//RS         }
-//RS     }
-//RS     render(d)
-//RS }
-//RS fn jet_std_json_events(d: &jet_std::DataTree) -> String {
-//RS     fn walk(path: String, t: &jet_std::DataTree, out: &mut Vec<String>) {
-//RS         let here = if path.is_empty() { "$".to_string() } else { path };
-//RS         match t {
-//RS             jet_std::DataTree::Object(entries) => {
-//RS                 out.push(format!("object_start {here}"));
-//RS                 for (k, v) in entries {
-//RS                     walk(format!("{}.{}", here, k), v, out);
-//RS                 }
-//RS                 out.push(format!("object_end {here}"));
-//RS             }
-//RS             jet_std::DataTree::Array(items) => {
-//RS                 out.push(format!("array_start {here}"));
-//RS                 for (i, v) in items.iter().enumerate() {
-//RS                     walk(format!("{}[{}]", here, i), v, out);
-//RS                 }
-//RS                 out.push(format!("array_end {here}"));
-//RS             }
-//RS             _ => out.push(format!("value {here} {}", jet_std_json_render_canonical(t))),
-//RS         }
-//RS     }
-//RS     let mut out = Vec::new();
-//RS     walk(String::new(), d, &mut out);
-//RS     out.join("\n")
-//RS }
-//RS fn jet_std_jsonl_parse(text: &String) -> Result<Vec<jet_std::DataTree>, jet_std::EncodingError> {
-//RS     let mut out = Vec::new();
-//RS     for (idx, line) in text.lines().enumerate() {
-//RS         let trimmed = line.trim();
-//RS         if trimmed.is_empty() {
-//RS             continue;
-//RS         }
-//RS         match jet_std_json_parse(&trimmed.to_string()) {
-//RS             Ok(v) => out.push(v),
-//RS             Err(mut error) => {
-//RS                 error.format = jet_std::EncodingFormat::JSONL;
-//RS                 error.line = error.line.map(|line| idx as i64 + line);
-//RS                 return Err(error);
-//RS             }
-//RS         }
-//RS     }
-//RS     Ok(out)
-//RS }
-//RS fn jet_std_jsonl_render(rows: &Vec<jet_std::DataTree>) -> String {
-//RS     let mut out = rows
-//RS         .iter()
-//RS         .map(jet_std_json_render_canonical)
-//RS         .collect::<Vec<_>>()
-//RS         .join("\n");
-//RS     if !out.is_empty() {
-//RS         out.push('\n');
-//RS     }
-//RS     out
-//RS }
-//RS fn jet_std_jsonl_count_rows(text: &String) -> jet_foundation::Numeric::JetInt {
-//RS     jet_std::jet_int_owned_from_i64(
-//RS         text.lines().filter(|line| !line.trim().is_empty()).count() as i64,
-//RS     )
-//RS }
-//RS fn jet_std_jsonl_append_line(text: &String, value: &jet_std::DataTree) -> String {
-//RS     let rendered = jet_std_json_render_canonical(value);
-//RS     if text.is_empty() {
-//RS         return format!("{rendered}\n");
-//RS     }
-//RS     if text.ends_with('\n') {
-//RS         format!("{text}{rendered}\n")
-//RS     } else {
-//RS         format!("{text}\n{rendered}\n")
-//RS     }
-//RS }
-//RS fn jet_std_jsonl_first(
-//RS     text: &String,
-//RS ) -> Result<Option<jet_std::DataTree>, jet_std::EncodingError> {
-//RS     for (idx, line) in text.lines().enumerate() {
-//RS         let trimmed = line.trim();
-//RS         if trimmed.is_empty() {
-//RS             continue;
-//RS         }
-//RS         match jet_std_json_parse(&trimmed.to_string()) {
-//RS             Ok(value) => return Ok(Some(value)),
-//RS             Err(mut error) => {
-//RS                 error.format = jet_std::EncodingFormat::JSONL;
-//RS                 error.line = error.line.map(|line| idx as i64 + line);
-//RS                 return Err(error);
-//RS             }
-//RS         }
-//RS     }
-//RS     Ok(None)
-//RS }
-//RS 
-//RS // D-JSON1-decode + D-JSON3: lenient JSON decode with coercion surfacing. The
-//RS // walk, the coercion message and the audit-line shape are ONE policy in
-//RS // `CoreLib/JetStd/JSONDataTree.rs`, shared with the resident JIT host that
-//RS // used to carry a byte-equivalent copy (I8/I9). AOT supplies only the sink it
-//RS // owns: the process's own stderr.
-//RS fn jet_std_json_decode_lenient(text: &String) -> Result<jet_std::DataTree, jet_std::EncodingError> {
-//RS     jet_std::jet_std_json_decode_lenient(text, &mut |line| eprintln!("{}", line))
-//RS }
-//RS 
-//RS fn jet_string_bytes(s: &String) -> Vec<u8> {
-//RS     s.as_bytes().to_vec()
-//RS }
-//RS fn jet_string_from_bytes(bs: &Vec<u8>) -> Result<String, jet_std::UTF8Error> {
-//RS     jet_string_decode_utf8(bs).map_err(|message| jet_std::UTF8Error {
-//RS         message,
-//RS     })
-//RS }
-//RS fn jet_string_from_bytes_lossy(bs: &Vec<u8>) -> String {
-//RS     jet_string_decode_utf8_lossy(bs)
-//RS }
-//RS fn jet_int_to_u8(n: i64) -> Result<u8, String> {
-//RS     if (0..=255).contains(&n) {
-//RS         Ok(n as u8)
-//RS     } else {
-//RS         Err("a U8 holds 0..255".to_string())
-//RS     }
-//RS }
-// END-PORT-PENDING 0289 crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1-1831
+use core.encoding.runtime.std_data_tree as json
+use jet_std.[DataTree, EncodingError, EncodingFormat, UTF8Error]
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1660
+fn jet_std_json_parse(text: &String) -> DataTree EncodingError! { json.parse_json_datatree(text) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1663
+fn jet_std_json_render(d: &DataTree) -> String { json.render_datatree_json(d, false, 0) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1666
+fn jet_std_json_render_pretty(d: &DataTree) -> String { json.render_datatree_json(d, true, 0) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1669
+fn jet_quote_json_local(s: String) -> String {
+    out := "\""
+    for ch in s.chars() {
+        match ch {
+            '"' -> out.push_str("\\\"")
+            '\\' -> out.push_str("\\\\")
+            '\n' -> out.push_str("\\n")
+            '\r' -> out.push_str("\\r")
+            '\t' -> out.push_str("\\t")
+            c if c.is_control() -> out.push_str("\\u{c as U32:04x}")
+            c -> out.push(c)
+        }
+    }
+    out.push('"')
+    ^out
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1685
+fn jet_std_json_render_canonical(d: &DataTree) -> String {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1686
+    fn render(t: &DataTree) -> String {
+        match t {
+            DataTree.Null -> "null"
+            DataTree.Bool(b) -> b.to_string()
+            DataTree.Int(n) -> jet_int_to_string(n)
+            DataTree.Float(f) -> "{f:?}"
+            DataTree.Number(_) | DataTree.TypedText(_) -> panic("internal JSON carrier escaped typed decode")
+            DataTree.Text(s) -> jet_quote_json_local(s)
+            DataTree.Bytes(bs) -> "[{bs.iter().map(b -> b.to_string()).collect<[String]>().join(\",\")}]"
+            DataTree.Array(xs) -> "[{xs.iter().map(render).collect<[String]>().join(\",\")}]"
+            DataTree.Object(entries) -> {
+                sorted := entries.iter().collect<[&(String, DataTree)]>()
+                sorted.sort_by((a, b) -> a.0.cmp(&b.0))
+                parts :: sorted.iter().map((k, v) -> "{jet_quote_json_local(k)}:{render(v)}").collect<[String]>()
+                "{{{parts.join(\",\")}}}"
+            }
+        }
+    }
+    render(d)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1715
+fn jet_std_json_events(d: &DataTree) -> String {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1716
+    fn walk(path: String, t: &DataTree, out: &[String]) -> Unit {
+        here :: if path.is_empty() -> "$" else -> path
+        match t {
+            DataTree.Object(entries) -> {
+                out.push("object_start {here}")
+                for (k, v) in entries { walk("{here}.{k}", v, out) }
+                out.push("object_end {here}")
+            }
+            DataTree.Array(items) -> {
+                out.push("array_start {here}")
+                for (i, v) in items.iter().enumerate() { walk("{here}[{i}]", v, out) }
+                out.push("array_end {here}")
+            }
+            _ -> out.push("value {here} {jet_std_json_render_canonical(t)}")
+        }
+    }
+    out := [String]{}
+    walk("", d, &out)
+    out.join("\n")
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1740
+fn jet_std_jsonl_parse(text: &String) -> [DataTree] EncodingError! {
+    out := [DataTree]{}
+    for (idx, line) in text.lines().enumerate() {
+        trimmed := line.trim() // #4303
+        if trimmed.is_empty() -> continue
+        match jet_std_json_parse(&trimmed.to_string()) {
+            Ok(v) -> out.push(v)
+            Err(error) -> {
+                failure := error
+                failure.format = EncodingFormat.JSONL
+                failure.line = failure.line.map(line -> idx as I64 + line)
+                return Err(^failure)
+            }
+        }
+    }
+    Ok(^out)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1758
+fn jet_std_jsonl_render(rows: &[DataTree]) -> String {
+    out := rows.iter().map(jet_std_json_render_canonical).collect<[String]>().join("\n")
+    if !out.is_empty() { out.push('\n') }
+    ^out
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1769
+fn jet_std_jsonl_count_rows(text: &String) -> JetInt {
+    jet_int_owned_from_i64(text.lines().filter(line -> !line.trim().is_empty()).count() as I64)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1774
+fn jet_std_jsonl_append_line(text: &String, value: &DataTree) -> String {
+    rendered :: jet_std_json_render_canonical(value)
+    if text.is_empty() -> return "{rendered}\n"
+    if text.ends_with('\n') -> "{text}{rendered}\n" else -> "{text}\n{rendered}\n"
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1785
+fn jet_std_jsonl_first(text: &String) -> DataTree? EncodingError! {
+    for (idx, line) in text.lines().enumerate() {
+        trimmed := line.trim() // #4303
+        if trimmed.is_empty() -> continue
+        match jet_std_json_parse(&trimmed.to_string()) {
+            Ok(value) -> return Ok(Val(value))
+            Err(error) -> {
+                failure := error
+                failure.format = EncodingFormat.JSONL
+                failure.line = failure.line.map(line -> idx as I64 + line)
+                return Err(^failure)
+            }
+        }
+    }
+    Ok(None)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1810
+fn jet_std_json_decode_lenient(text: &String) -> DataTree EncodingError! {
+    json.jet_std_json_decode_lenient(text, line -> {
+        // GATE #4565: kernel primitive
+        #Unsafe("write the actual lenient JSON coercion audit line to process stderr") { std.io.stderr().write_all("{line}\n".as_bytes()).unwrap() }
+    })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1814
+fn jet_string_bytes(s: &String) -> [U8] { s.as_bytes().to_vec() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1817
+fn jet_string_from_bytes(bs: &[U8]) -> String UTF8Error! { jet_string_decode_utf8(bs).map_err(message -> UTF8Error{message}) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1822
+fn jet_string_from_bytes_lossy(bs: &[U8]) -> String { jet_string_decode_utf8_lossy(bs) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1825
+fn jet_int_to_u8(n: I64) -> U8 Err! {
+    if n >= 0 && n <= 255 -> Ok(n as U8) else -> Err("a U8 holds 0..255")
+}
 

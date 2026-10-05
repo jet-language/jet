@@ -1,0 +1,111 @@
+use core.web.runtime.top_web_table.[JetWebTableState, JetWebTablePage, JetWebTableStatus]
+use core.web.table.WebTablePageMode
+use core.web.runtime.top_web_table.[jet_web_table_with_key, jet_web_table_column, jet_web_table_page]
+use core.web.table.WebTableSortDirection
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:123-135
+#Test("table_default_state_has_no_selection_focus_sort_or_filter") {
+    state :: JetWebTableState.default()
+    assert_eq(state.page_index, 0)
+    assert_eq(state.page_size, 25)
+    assert_eq(state.page_mode, WebTablePageMode.Client)
+    assert_eq(state.sort, None)
+    assert_eq(state.filter, None)
+    assert(state.selected_keys.is_empty())
+    assert_eq(state.selection_anchor, None)
+    assert_eq(state.focus_key, None)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:188-221
+#Test("table_page_navigation_preserves_explicit_row_key_alignment") {
+    page :: JetWebTablePage{rows: [I64{20}, I64{10}], row_keys: ["second", "first"], total_rows: I64{5}, page_index: I64{1}, page_size: I64{2}, page_count: I64{3}}
+    assert(page.has_previous())
+    assert(page.has_next())
+    assert_eq(page.first_page(), 0)
+    assert_eq(page.last_page(), 2)
+    assert_eq(page.previous_page(), Val(0))
+    assert_eq(page.next_page(), Val(2))
+    rows :: page.keyed_rows()
+    assert_eq(rows[0].key, "second")
+    assert_eq(rows[0].value, 20)
+    assert_eq(rows[1].key, "first")
+    assert_eq(rows[1].value, 10)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:188-209
+#Test("table_terminal_page_uses_saturating_next_boundary") {
+    page :: JetWebTablePage<I64>{rows: [], row_keys: [], total_rows: 0, page_index: I64.MAX, page_size: 25, page_count: I64.MAX}
+    assert(!page.has_next())
+    assert_eq(page.next_page(), None)
+    empty :: JetWebTablePage<I64>{rows: [], row_keys: [], total_rows: 0, page_index: 0, page_size: 25, page_count: 0}
+    assert(!empty.has_previous())
+    assert(!empty.has_next())
+    assert_eq(empty.previous_page(), None)
+    assert_eq(empty.last_page(), -1)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:82-90
+#Test("table_status_names_are_renderer_neutral_protocol_values") {
+    assert_eq(JetWebTableStatus.Idle.name(), "idle")
+    assert_eq(JetWebTableStatus.Loading.name(), "loading")
+    assert_eq(JetWebTableStatus.Ready.name(), "ready")
+    assert_eq(JetWebTableStatus.Error.name(), "error")
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:695-886
+#Test("table_mutation_reconciles_stable_identity_selection_and_focus") {
+    table :: jet_web_table_with_key("mutations", [I64{1}, I64{2}], fn(row) { "row:{row}" })
+    _ :: table.set_selected("row:2", true).unwrap()
+    table.replace_rows([I64{2}, I64{1}]).unwrap()
+    assert_eq(table.selected_keys(), ["row:2"])
+    assert_eq(table.focused_key(), Val("row:2"))
+    assert_eq(table.row_keys().unwrap(), ["row:2", "row:1"])
+    assert_eq(table.remove_row("row:2").unwrap(), 2)
+    assert(table.selected_keys().is_empty())
+    assert_eq(table.focused_key(), None)
+    assert_eq(table.insert_row(1).unwrap_err(), "table row key `row:1` is duplicated")
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:849-874
+#Test("table_update_cannot_change_identity_and_failure_leaves_rows_unchanged") {
+    table :: jet_web_table_with_key("updates", [I64{1}], fn(row) { "row:{row}" })
+    result :: table.update_row("row:1", fn(row) { *row = 2 })
+    assert_eq(result.unwrap_err(), "table row updates cannot change the row key")
+    assert_eq(table.rows(), [I64{1}])
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:1440-1477
+#Test("table_materialization_filters_before_stable_sort_and_paging") {
+    table :: jet_web_table_with_key("ordering", [I64{3}, I64{1}, I64{2}], fn(row) { "row:{row}" })
+        .with_column(jet_web_table_column("value", "I64", fn(row) { "{row}" }))
+    _ :: table.sort_by("value", WebTableSortDirection.Ascending)
+    _ :: table.paginate(1, 2)
+    page :: table.page().unwrap()
+    assert_eq(page.rows, [I64{3}])
+    assert_eq(page.row_keys, ["row:3"])
+    assert_eq(page.total_rows, 3)
+    _ :: table.filter_by("value", "2")
+    page :: table.page().unwrap()
+    assert_eq(page.rows, [I64{2}])
+    assert_eq(page.page_index, 0)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:1371-1438
+#Test("server_table_derives_canonical_keys_and_rejects_incomplete_pages") {
+    table :: jet_web_table_with_key("server", [], fn(row: &I64) { "row:{row}" })
+        .with_server_page(fn(state) {
+            Ok(JetWebTablePage{rows: [I64{7}], row_keys: ["stale"], total_rows: 1, page_index: state.page_index, page_size: state.page_size, page_count: 1})
+        })
+    assert_eq(table.status(), JetWebTableStatus.Idle)
+    assert_eq(table.projection().page, None)
+    assert_eq(table.page().unwrap().row_keys, ["row:7"])
+    assert_eq(table.status(), JetWebTableStatus.Ready)
+    bad :: table.with_server_page(fn(state) {
+        Ok(JetWebTablePage{rows: [I64{7}], row_keys: [], total_rows: 30, page_index: state.page_index, page_size: state.page_size, page_count: 2})
+    })
+    assert_eq(bad.page().unwrap_err(), "non-final server table pages must be full")
+    assert_eq(bad.status(), JetWebTableStatus.Error)
+    assert_eq(bad.loaded_page(), None)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:1333-1369
+#Test("table_page_clamps_bounds_without_overflow") {
+    page :: jet_web_table_page(&[I64{1}, I64{2}], I64.MAX, I64.MAX)
+    assert_eq(page.page_index, 0)
+    assert_eq(page.page_size, 10_000)
+    assert_eq(page.rows, [I64{1}, I64{2}])
+    assert_eq(page.row_keys, ["index:0", "index:1"])
+}

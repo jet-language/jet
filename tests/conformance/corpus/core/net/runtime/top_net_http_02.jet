@@ -1,4 +1,5 @@
 use core.net.runtime.top_net_http_02.[jet_net_ip_addr, jet_net_ip_to_string, jet_net_ip_is_ipv4, jet_net_socket_addr, jet_net_socket_addr_parse, jet_net_socket_host, jet_net_socket_port, jet_net_socket_to_string, jet_net_tcp_listen_addr, jet_net_listener_local_socket_addr]
+use core.net.runtime.top_net_http_02.[jet_net_getservbyname, jet_net_getservbyport, jet_net_dns_encode_name, jet_net_dns_read_name, jet_net_dns_parse_response, jet_net_udp_bind, jet_net_udp_local_addr, jet_net_udp_send_bytes_to, jet_net_udp_receive, jet_net_udp_set_timeout, jet_net_udp_packet_bytes, jet_net_udp_packet_original_len, jet_net_udp_packet_truncated, jet_net_udp_close]
 
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:1885-1905
 #Test("net_ip_projection_reuses_pure_ipv4_and_ipv6_address_semantics") {
@@ -42,4 +43,67 @@ use core.net.runtime.top_net_http_02.[jet_net_ip_addr, jet_net_ip_to_string, jet
     assert_eq(jet_net_socket_host(&bound), "127.0.0.1")
     assert(jet_net_socket_port(&bound) > 0)
     assert(jet_net_socket_port(&bound) <= 65535)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:2647-2678
+#Test("net_service_lookup_preserves_alias_order_and_ascii_case") {
+    assert_eq(jet_net_getservbyname(&"HTTPS")!, I64{443})
+    assert_eq(jet_net_getservbyname(&"domain")!, I64{53})
+    assert_eq(jet_net_getservbyport(53)!, "dns")
+    match jet_net_getservbyname(&"missing-service") {
+        Err(.InvalidInput(detail)) -> assert_eq(detail.message, "unknown service `missing-service`")
+        _ -> assert(false)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:3544-3640
+#Test("net_dns_names_round_trip_and_reject_reserved_forward_and_cyclic_encoding") {
+    wire := [U8]{}
+    jet_net_dns_encode_name(&wire, "www.example.test.")!
+    pos := USize{0}
+    assert_eq(jet_net_dns_read_name(&wire, &pos)!, "www.example.test")
+    assert_eq(pos, wire.len())
+    root := [U8]{}
+    jet_net_dns_encode_name(&root, ".")!
+    root_pos := USize{0}
+    assert_eq(jet_net_dns_read_name(&root, &root_pos)!, ".")
+    loop bytes in [[U8{0x40}], [U8{0xc0}, U8{0}], [U8{3}, U8{97}, U8{0xc0}, U8{0}]] {
+        bad_pos := USize{0}
+        assert(jet_net_dns_read_name(&bytes, &bad_pos).is_err())
+    }
+    invalid := [U8]{}
+    assert(jet_net_dns_encode_name(&invalid, "bad..name").is_err())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:3666-3756
+#Test("net_dns_response_authenticates_question_before_truncation_retry") {
+    packet := [U8{0x12}, U8{0x34}, U8{0x83}, U8{0}, U8{0}, U8{1}, U8{0}, U8{1}, U8{0}, U8{0}, U8{0}, U8{0}]
+    jet_net_dns_encode_name(&packet, "example.test")!
+    &packet.extend_from_slice(&[U8{0}, U8{1}, U8{0}, U8{1}])
+    (truncated, records) :: jet_net_dns_parse_response(packet.clone(), U16{0x1234}, "EXAMPLE.TEST.", U16{1})!
+    assert(truncated)
+    assert(records.is_empty())
+    assert(jet_net_dns_parse_response(packet.clone(), U16{0x5678}, "example.test", U16{1}).is_err())
+    assert(jet_net_dns_parse_response(packet.clone(), U16{0x1234}, "other.test", U16{1}).is_err())
+    packet[2] = U8{0x81}
+    assert(jet_net_dns_parse_response(^packet, U16{0x1234}, "example.test", U16{1}).is_err())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:2870-2937
+#Test("net_udp_real_datagram_preserves_original_length_and_zero_limit_consumption") {
+    sender :: jet_net_udp_bind(&"127.0.0.1:0")!
+    receiver :: jet_net_udp_bind(&"127.0.0.1:0")!
+    jet_net_udp_set_timeout(&receiver, 1000)!
+    addr :: jet_net_udp_local_addr(&receiver)!
+    data :: [U8{1}, U8{2}, U8{3}, U8{4}]
+    assert_eq(jet_net_udp_send_bytes_to(&sender, &data, &addr)!, I64{4})
+    packet :: jet_net_udp_receive(&receiver, 2)!
+    assert_eq(jet_net_udp_packet_bytes(&packet), [U8{1}, U8{2}])
+    assert_eq(jet_net_udp_packet_original_len(&packet), I64{4})
+    assert(jet_net_udp_packet_truncated(&packet))
+    assert_eq(jet_net_udp_send_bytes_to(&sender, &data, &addr)!, I64{4})
+    empty :: jet_net_udp_receive(&receiver, 0)!
+    assert(jet_net_udp_packet_bytes(&empty).is_empty())
+    assert_eq(jet_net_udp_packet_original_len(&empty), I64{4})
+    assert(jet_net_udp_packet_truncated(&empty))
+    jet_net_udp_close(&receiver)!
+    jet_net_udp_close(&receiver)!
+    assert(jet_net_udp_local_addr(&receiver).is_err())
+    jet_net_udp_close(&sender)!
 }

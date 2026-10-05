@@ -5,6 +5,10 @@ use core.process.runtime.top_process_spec.JET_PROCESS_DEFAULT_OUTPUT_LIMIT_BYTES
 use core.sys.target
 use jet_foundation.Numeric.JetInt
 use jet_foundation.Syntax.TEXT_NUL
+use core.process.runtime.top_process.[jet_process_checked_stderr, jet_process_output_reserve, jet_process_drain_reader, jet_process_collect_output, jet_process_spec_can_run_direct, jet_process_terminal_spawn]
+use std.sync.Arc
+use std.sync.atomic.[AtomicUsize, AtomicBool, Ordering]
+use std.io as io
 
 fn process_spec_control() -> ProcessSpec {
     ProcessSpec{
@@ -90,4 +94,64 @@ fn process_spec_control() -> ProcessSpec {
     assert(jet_process_environment(&spec).is_err())
     spec.cmd = []
     assert(jet_process_command_builder_with_identity(&spec, None).is_err())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:1106
+#Test("process_output_reservation_keeps_shared_budget_exact_and_saturates") {
+    // GATE #4565: kernel primitive
+    #Unsafe("exercise real shared native atomic reservation with zero budget and overflow boundary") {
+        budget :: AtomicUsize.new(0)
+        assert_eq(jet_process_output_reserve(7, &budget, 5), Usize{5})
+        assert_eq(jet_process_output_reserve(7, &budget, 5), Usize{2})
+        assert_eq(jet_process_output_reserve(7, &budget, 1), Usize{0})
+        assert_eq(budget.load(Ordering.Acquire), Usize{7})
+        assert_eq(jet_process_output_reserve(0, &budget, 9), Usize{0})
+        saturated :: AtomicUsize.new(Usize.MAX)
+        assert_eq(jet_process_output_reserve(Usize.MAX, &saturated, 9), Usize{0})
+        assert_eq(saturated.load(Ordering.Acquire), Usize.MAX)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:1252/1383
+#Test("process_output_drains_share_one_budget_and_join_even_after_invalid_utf8") {
+    // GATE #4565: kernel primitive
+    #Unsafe("exercise actual worker threads and atomic output budget; in-memory readers isolate output handling from process launch") {
+        budget :: Arc.new(AtomicUsize.new(0))
+        hit :: Arc.new(AtomicBool.new(false))
+        stdout :: jet_process_drain_reader(Some(io.Cursor.new([U8{97}, U8{98}, U8{99}])), Some(4),
+            Some(budget.clone()), hit.clone(), None, None, None)
+        stderr :: jet_process_drain_reader(Some(io.Cursor.new([U8{100}, U8{101}, U8{102}])), Some(4),
+            Some(budget.clone()), hit.clone(), None, None, None)
+        (output, errors, exceeded) :: jet_process_collect_output((^stdout, ^stderr)).unwrap()
+        assert_eq(output.len() + errors.len(), Usize{4})
+        assert(exceeded)
+        assert(hit.load(Ordering.Acquire))
+        assert_eq(budget.load(Ordering.Acquire), Usize{4})
+        hit :: Arc.new(AtomicBool.new(false))
+        bad :: jet_process_drain_reader(Some(io.Cursor.new([U8{255}])), None, None, hit.clone(), None, None, None)
+        good :: jet_process_drain_reader(Some(io.Cursor.new([U8{120}])), None, None, hit, None, None, None)
+        assert(jet_process_collect_output((^bad, ^good)).is_err())
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:1698/1730
+#Test("process_direct_run_predicate_and_stderr_truncation_preserve_exact_conditions") {
+    spec := process_spec_control()
+    assert(jet_process_spec_can_run_direct(&spec))
+    spec.timeout_ms = Some(0)
+    assert(!jet_process_spec_can_run_direct(&spec))
+    spec.timeout_ms = None
+    spec.stdin = Some(ProcessStreamMode.Capture)
+    assert(!jet_process_spec_can_run_direct(&spec))
+    spec.stdin = None
+    spec.detached = true
+    assert(!jet_process_spec_can_run_direct(&spec))
+    assert_eq(jet_process_checked_stderr("short"), "short")
+    text := "a".repeat(4095)
+    text.push_str("é-tail")
+    assert_eq(jet_process_checked_stderr(text), "a".repeat(4095))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:754/943
+#Test("process_terminal_spawn_refuses_detached_before_opening_native_terminal") {
+    if target.selected_family() == .Unix || target.selected_family() == .Windows {
+        spec :: jet_process_spec_terminal(jet_process_spec_detached(process_spec_control()))
+        assert(jet_process_terminal_spawn(&spec, None, None).is_err())
+    }
 }

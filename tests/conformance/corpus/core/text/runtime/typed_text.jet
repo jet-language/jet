@@ -1,0 +1,21 @@
+use core.text.runtime.typed_text.[jet_typed_html_interpolate, jet_typed_path_interpolate, jet_validate_typed_path_literal]
+use jet_foundation.Text.TEXT_NUL
+
+// Rust: crates/jet-codegen/src/Prelude/TypedText.rs:172
+#Test("html_interpolation_escapes_text_and_composes_html") {
+    assert_eq(jet_typed_html_interpolate(&["<p>", "</p>", ""], ["<script>&", "<strong>safe</strong>"], &[false, true]), "<p>&lt;script&gt;&amp;</p><strong>safe</strong>")
+}
+// Rust: crates/jet-codegen/src/Prelude/TypedText.rs:184
+#Test("missing_html_trust_flags_default_to_escaped") {
+    assert_eq(jet_typed_html_interpolate(&["", ""], ["<em>text</em>"], &[]), "&lt;em&gt;text&lt;/em&gt;")
+}
+// Rust: crates/jet-codegen/src/Prelude/TypedText.rs:192
+#Test("path_holes_are_one_component") {
+    assert_eq(jet_typed_path_interpolate(&["/data/", ".json"], &["ada/../etc"]), "/data/ada%2F..%2Fetc.json")
+    assert_eq(jet_typed_path_interpolate(&["/data/", ""], &[".."]), "/data/%2E%2E")
+}
+// Rust: crates/jet-codegen/src/Prelude/TypedText.rs:204
+#Test("path_literal_validation_rejects_nul") {
+    assert(jet_validate_typed_path_literal(&["/data/log"]).is_ok())
+    assert(jet_validate_typed_path_literal(&["/data/{TEXT_NUL}log"]).is_err())
+}

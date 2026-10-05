@@ -1,2366 +1,1102 @@
-// PORT-PENDING 0301 crates-jet-codegen-src-prelude-corelib-top-serviceauthority-slice-3593: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3593-5954
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS fn jet_job_queue_panel_state(state: JetJobQueueState) -> &'static str {
-//RS     match state {
-//RS         JetJobQueueState::Queued => "enqueued",
-//RS         JetJobQueueState::Running => "started",
-//RS         JetJobQueueState::Retrying => "retrying",
-//RS         JetJobQueueState::Completed => "completed",
-//RS         JetJobQueueState::Failed
-//RS         | JetJobQueueState::DeadLettered
-//RS         | JetJobQueueState::Cancelled => "failed",
-//RS     }
-//RS }
-//RS 
-//RS fn jet_job_queue_panel_failure(
-//RS     state: JetJobQueueState,
-//RS     reason: Option<&str>,
-//RS ) -> Option<&'static str> {
-//RS     match state {
-//RS         JetJobQueueState::Cancelled => Some("cancelled"),
-//RS         JetJobQueueState::Failed | JetJobQueueState::DeadLettered => {
-//RS             if reason.map_or(false, |value| value.starts_with("lease_expired")) {
-//RS                 Some("worker_lost")
-//RS             } else {
-//RS                 Some("error")
-//RS             }
-//RS         }
-//RS         JetJobQueueState::Queued
-//RS         | JetJobQueueState::Running
-//RS         | JetJobQueueState::Retrying
-//RS         | JetJobQueueState::Completed => None,
-//RS     }
-//RS }
-//RS 
-//RS fn jet_job_queue_json_text(value: &str) -> String {
-//RS     let mut output = String::with_capacity(value.len().saturating_add(2));
-//RS     output.push('"');
-//RS     for character in value.chars() {
-//RS         match character {
-//RS             '"' => output.push_str("\\\""),
-//RS             '\\' => output.push_str("\\\\"),
-//RS             '\u{08}' => output.push_str("\\b"),
-//RS             '\u{0c}' => output.push_str("\\f"),
-//RS             '\n' => output.push_str("\\n"),
-//RS             '\r' => output.push_str("\\r"),
-//RS             '\t' => output.push_str("\\t"),
-//RS             character if character.is_control() => {
-//RS                 output.push_str(&format!("\\u{:04x}", character as u32));
-//RS             }
-//RS             character => output.push(character),
-//RS         }
-//RS     }
-//RS     output.push('"');
-//RS     output
-//RS }
-//RS 
-//RS fn jet_job_queue_json_optional_text(value: Option<&str>) -> String {
-//RS     value
-//RS         .map(jet_job_queue_json_text)
-//RS         .unwrap_or_else(|| "null".to_string())
-//RS }
-//RS 
-//RS fn jet_job_queue_event_time(timestamp_ms: i64) -> u64 {
-//RS     timestamp_ms.max(0) as u64
-//RS }
-//RS 
-//RS fn jet_job_queue_publish_transition(observation: &JetJobQueueDevtoolsTransition) {
-//RS     let duration = observation
-//RS         .duration_ms
-//RS         .map(|value| value.to_string())
-//RS         .unwrap_or_else(|| "null".to_string());
-//RS     let worker = jet_job_queue_json_optional_text(observation.worker.as_deref());
-//RS     let request_id = jet_job_queue_json_optional_text(observation.request_id.as_deref());
-//RS     let failure = jet_job_queue_json_optional_text(jet_job_queue_panel_failure(
-//RS         observation.state,
-//RS         observation.reason.as_deref(),
-//RS     ));
-//RS     let reason = jet_job_queue_json_optional_text(observation.reason.as_deref());
-//RS     let fields = format!(
-//RS         "{{\"event\":{},\"state\":{},\"job_id\":{},\"name\":{},\"queue\":{},\"attempts\":{},\"duration_ms\":{},\"worker\":{},\"request_id\":{},\"failure\":{},\"reason\":{},\"sequence\":{},\"authority\":{},\"labels\":{{}}}}",
-//RS         jet_job_queue_json_text(observation.event),
-//RS         jet_job_queue_json_text(jet_job_queue_panel_state(observation.state)),
-//RS         jet_job_queue_json_text(&observation.job_id),
-//RS         jet_job_queue_json_text(&observation.job_type),
-//RS         jet_job_queue_json_text(&observation.queue),
-//RS         observation.attempts,
-//RS         duration,
-//RS         worker,
-//RS         request_id,
-//RS         failure,
-//RS         reason,
-//RS         observation.sequence,
-//RS         jet_job_queue_json_text(&observation.authority),
-//RS     );
-//RS     if let Ok(event) = JetDevtoolsEvent::from_parts(
-//RS         jet_job_queue_event_time(observation.timestamp_ms),
-//RS         JET_JOB_QUEUE_DEVTOOLS_SOURCE,
-//RS         "Job",
-//RS         observation.job_id.clone(),
-//RS         fields,
-//RS     ) {
-//RS         jet_devtools_publish_event(event);
-//RS     }
-//RS }
-//RS 
-//RS fn jet_job_queue_publish_transitions(
-//RS     observations: impl IntoIterator<Item = JetJobQueueDevtoolsTransition>,
-//RS ) {
-//RS     for observation in observations {
-//RS         jet_job_queue_publish_transition(&observation);
-//RS     }
-//RS }
-//RS 
-//RS fn jet_job_queue_publish_status(status: &JetJobQueueStatus) {
-//RS     let entity = format!("{}:{}", status.authority, status.queue);
-//RS     let fields = format!(
-//RS         "{{\"event\":\"status\",\"state\":\"status\",\"job_id\":{},\"name\":{},\"queue\":{},\"attempts\":0,\"duration_ms\":null,\"worker\":null,\"request_id\":null,\"failure\":null,\"reason\":null,\"sequence\":0,\"authority\":{},\"queued\":{},\"running\":{},\"retrying\":{},\"completed\":{},\"failed\":{},\"dead_lettered\":{},\"cancelled\":{},\"depth\":{},\"wait_ms\":{},\"throughput\":{},\"capacity\":{},\"paused\":{},\"freshness_ms\":{},\"labels\":{{}}}}",
-//RS         jet_job_queue_json_text(&entity),
-//RS         jet_job_queue_json_text(&status.queue),
-//RS         jet_job_queue_json_text(&status.queue),
-//RS         jet_job_queue_json_text(&status.authority),
-//RS         status.queued,
-//RS         status.running,
-//RS         status.retrying,
-//RS         status.completed,
-//RS         status.failed,
-//RS         status.dead_lettered,
-//RS         status.cancelled,
-//RS         status.depth,
-//RS         status.wait_ms,
-//RS         status.throughput,
-//RS         status.capacity,
-//RS         status.paused,
-//RS         status.freshness_ms,
-//RS     );
-//RS     if let Ok(event) = JetDevtoolsEvent::from_parts(
-//RS         jet_job_queue_event_time(service_authority_now()),
-//RS         JET_JOB_QUEUE_DEVTOOLS_SOURCE,
-//RS         "Job",
-//RS         entity,
-//RS         fields,
-//RS     ) {
-//RS         jet_devtools_publish_event(event);
-//RS     }
-//RS }
-//RS 
-//RS 
-//RS const JET_JOB_QUEUE_SELECT: &str = "SELECT id, authority, queue, job_type, payload_type, payload, payload_public, idempotency_key, request_id, sequence, state, due_at_ms, accepted_at_ms, started_at_ms, finished_at_ms, attempts, lease_owner, lease_token, lease_until_ms, result_type, result, result_public, error_type, error_reason, error_detail, retry_at_ms, updated_at_ms, signature, event_sequence FROM jet_job_queue_jobs";
-//RS const JET_JOB_QUEUE_CREATE_META: &str = "CREATE TABLE IF NOT EXISTS jet_job_queue_meta (authority TEXT NOT NULL, queue TEXT NOT NULL, capacity INTEGER NOT NULL, paused INTEGER NOT NULL DEFAULT 0, updated_at_ms INTEGER NOT NULL, PRIMARY KEY (authority, queue))";
-//RS const JET_JOB_QUEUE_CREATE_JOBS: &str = "CREATE TABLE IF NOT EXISTS jet_job_queue_jobs (id TEXT PRIMARY KEY, authority TEXT NOT NULL, queue TEXT NOT NULL, job_type TEXT NOT NULL, payload_type TEXT NOT NULL, payload BLOB NOT NULL, payload_public INTEGER NOT NULL, idempotency_key TEXT, request_id TEXT, sequence INTEGER NOT NULL, state TEXT NOT NULL, due_at_ms INTEGER NOT NULL, accepted_at_ms INTEGER NOT NULL, started_at_ms INTEGER, finished_at_ms INTEGER, attempts INTEGER NOT NULL, lease_owner TEXT, lease_token TEXT, lease_until_ms INTEGER, result_type TEXT, result BLOB, result_public INTEGER NOT NULL DEFAULT 0, error_type TEXT, error_reason TEXT, error_detail TEXT, retry_at_ms INTEGER, updated_at_ms INTEGER NOT NULL, signature TEXT NOT NULL, event_sequence INTEGER NOT NULL, UNIQUE(authority, queue, idempotency_key))";
-//RS const JET_JOB_QUEUE_CREATE_EVENTS: &str = "CREATE TABLE IF NOT EXISTS jet_job_queue_events (authority TEXT NOT NULL, queue TEXT NOT NULL, job_id TEXT NOT NULL, event_sequence INTEGER NOT NULL, state TEXT NOT NULL, attempts INTEGER NOT NULL, timestamp_ms INTEGER NOT NULL, reason TEXT, duration_ms INTEGER, worker TEXT, PRIMARY KEY (authority, queue, job_id, event_sequence))";
-//RS const JET_JOB_QUEUE_CREATE_DUE_INDEX: &str = "CREATE INDEX IF NOT EXISTS jet_job_queue_due ON jet_job_queue_jobs (authority, queue, state, due_at_ms, sequence)";
-//RS const JET_JOB_QUEUE_CREATE_EVENT_INDEX: &str = "CREATE INDEX IF NOT EXISTS jet_job_queue_events_time ON jet_job_queue_events (authority, queue, state, timestamp_ms)";
-//RS 
-//RS pub type JetJobQueueStoreFactory =
-//RS     fn(&str, &str) -> Result<Box<dyn JetJobQueueStore>, JetServiceError>;
-//RS 
-//RS static JET_JOB_QUEUE_STORE_FACTORY: std::sync::LazyLock<
-//RS     std::sync::Mutex<Option<JetJobQueueStoreFactory>>,
-//RS > = std::sync::LazyLock::new(std::sync::Mutex::default);
-//RS 
-//RS fn jet_job_queue_store_factory(
-//RS ) -> &'static std::sync::Mutex<Option<JetJobQueueStoreFactory>> {
-//RS     &JET_JOB_QUEUE_STORE_FACTORY
-//RS }
-//RS 
-//RS /// A provider owns only opening/marshalling a durable database connection.
-//RS /// Queue transitions never dispatch through this trait.
-//RS pub trait JetJobQueueStoreProvider: Send + Sync {
-//RS     fn open(
-//RS         &self,
-//RS         path: &str,
-//RS         authority: &str,
-//RS     ) -> Result<Box<dyn JetJobQueueStore>, JetServiceError>;
-//RS }
-//RS 
-//RS static JET_JOB_QUEUE_STORE_PROVIDER: std::sync::LazyLock<
-//RS     std::sync::Mutex<Option<Box<dyn JetJobQueueStoreProvider>>>,
-//RS > = std::sync::LazyLock::new(std::sync::Mutex::default);
-//RS 
-//RS /// Install the built-in provider only when no explicit provider or factory
-//RS /// has already been selected.  A configured provider remains authoritative;
-//RS /// the default bridge must not silently replace it during first use.
-//RS pub fn jet_job_queue_install_store_provider_if_absent(
-//RS     provider: Box<dyn JetJobQueueStoreProvider>,
-//RS ) -> bool {
-//RS     let Ok(mut current) = JET_JOB_QUEUE_STORE_PROVIDER.lock() else {
-//RS         return false;
-//RS     };
-//RS     if current.is_some() {
-//RS         return true;
-//RS     }
-//RS     let Ok(factory) = jet_job_queue_store_factory().lock() else {
-//RS         return false;
-//RS     };
-//RS     if factory.is_some() {
-//RS         return true;
-//RS     }
-//RS     *current = Some(provider);
-//RS     true
-//RS }
-//RS 
-//RS pub fn jet_job_queue_default_path() -> String {
-//RS     std::env::var("JET_JOB_QUEUE_DB")
-//RS         .ok()
-//RS         .filter(|path| !path.is_empty())
-//RS         .unwrap_or_else(|| ".jet/state/jobs.db".to_string())
-//RS }
-//RS 
-//RS fn jet_job_queue_validate_name(value: &str, label: &str) -> Result<(), JetServiceError> {
-//RS     service_authority_validate_text(value, label, JET_JOB_QUEUE_MAX_NAME, false)
-//RS }
-//RS 
-//RS fn jet_job_queue_validate_payload(payload: &JetJobPayload) -> Result<(), JetServiceError> {
-//RS     service_authority_validate_text(
-//RS         &payload.type_id,
-//RS         "job payload type",
-//RS         JET_JOB_QUEUE_MAX_TYPE,
-//RS         false,
-//RS     )?;
-//RS     if payload.bytes.len() > JET_JOB_QUEUE_MAX_PAYLOAD {
-//RS         return Err(JetServiceError::Policy(
-//RS             "job payload exceeds the bounded queue payload limit".to_string(),
-//RS         ));
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn jet_job_queue_validate_result(result: &JetJobResult) -> Result<(), JetServiceError> {
-//RS     service_authority_validate_text(
-//RS         &result.type_id,
-//RS         "job result type",
-//RS         JET_JOB_QUEUE_MAX_TYPE,
-//RS         false,
-//RS     )?;
-//RS     if result.bytes.len() > JET_JOB_QUEUE_MAX_PAYLOAD {
-//RS         return Err(JetServiceError::Policy(
-//RS             "job result exceeds the bounded queue payload limit".to_string(),
-//RS         ));
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn jet_job_queue_validate_error(error: &JetJobError) -> Result<(), JetServiceError> {
-//RS     service_authority_validate_text(
-//RS         &error.type_id,
-//RS         "job error type",
-//RS         JET_JOB_QUEUE_MAX_TYPE,
-//RS         false,
-//RS     )?;
-//RS     service_authority_validate_text(
-//RS         &error.reason,
-//RS         "job error reason",
-//RS         JET_JOB_QUEUE_MAX_REASON,
-//RS         false,
-//RS     )?;
-//RS     if let Some(detail) = &error.detail {
-//RS         service_authority_validate_text(detail, "job error detail", JET_JOB_QUEUE_MAX_DETAIL, true)?;
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn jet_job_queue_validate_enqueue(
-//RS     request: &JetJobEnqueue,
-//RS ) -> Result<(), JetServiceError> {
-//RS     service_authority_validate_text(
-//RS         &request.job_type,
-//RS         "job type",
-//RS         JET_JOB_QUEUE_MAX_TYPE,
-//RS         false,
-//RS     )?;
-//RS     jet_job_queue_validate_payload(&request.payload)?;
-//RS     if request.delay_ms < 0 || request.delay_ms > JET_JOB_QUEUE_MAX_DELAY_MS {
-//RS         return Err(JetServiceError::Policy(
-//RS             "job delay must be non-negative and bounded".to_string(),
-//RS         ));
-//RS     }
-//RS     if let Some(key) = &request.idempotency_key {
-//RS         service_authority_validate_text(key, "job idempotency key", JET_JOB_QUEUE_MAX_KEY, false)?;
-//RS     }
-//RS     if let Some(request_id) = &request.request_id {
-//RS         service_authority_validate_text(
-//RS             request_id,
-//RS             "job request id",
-//RS             JET_JOB_QUEUE_MAX_REQUEST,
-//RS             false,
-//RS         )?;
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn jet_job_queue_now_ms() -> i64 {
-//RS     service_authority_now()
-//RS }
-//RS 
-//RS fn jet_job_queue_value_text(value: &JetJobQueueValue, label: &str) -> Result<String, JetServiceError> {
-//RS     match value {
-//RS         JetJobQueueValue::Text(value) => Ok(value.clone()),
-//RS         _ => Err(service_authority_error(format!(
-//RS             "queue column `{label}` is not text"
-//RS         ))),
-//RS     }
-//RS }
-//RS 
-//RS fn jet_job_queue_value_i64(value: &JetJobQueueValue, label: &str) -> Result<i64, JetServiceError> {
-//RS     match value {
-//RS         JetJobQueueValue::Int(value) => Ok(*value),
-//RS         _ => Err(service_authority_error(format!(
-//RS             "queue column `{label}` is not an integer"
-//RS         ))),
-//RS     }
-//RS }
-//RS 
-//RS fn jet_job_queue_value_blob(value: &JetJobQueueValue, label: &str) -> Result<Vec<u8>, JetServiceError> {
-//RS     match value {
-//RS         JetJobQueueValue::Blob(value) => Ok(value.clone()),
-//RS         _ => Err(service_authority_error(format!(
-//RS             "queue column `{label}` is not a blob"
-//RS         ))),
-//RS     }
-//RS }
-//RS 
-//RS fn jet_job_queue_row_value<'a>(
-//RS     row: &'a JetJobQueueRow,
-//RS     name: &str,
-//RS ) -> Result<&'a JetJobQueueValue, JetServiceError> {
-//RS     row.get(name)
-//RS         .ok_or_else(|| service_authority_error(format!("queue row has no `{name}` column")))
-//RS }
-//RS 
-//RS fn jet_job_queue_row_text(row: &JetJobQueueRow, name: &str) -> Result<String, JetServiceError> {
-//RS     jet_job_queue_value_text(jet_job_queue_row_value(row, name)?, name)
-//RS }
-//RS 
-//RS fn jet_job_queue_row_i64(row: &JetJobQueueRow, name: &str) -> Result<i64, JetServiceError> {
-//RS     jet_job_queue_value_i64(jet_job_queue_row_value(row, name)?, name)
-//RS }
-//RS 
-//RS fn jet_job_queue_row_blob(row: &JetJobQueueRow, name: &str) -> Result<Vec<u8>, JetServiceError> {
-//RS     jet_job_queue_value_blob(jet_job_queue_row_value(row, name)?, name)
-//RS }
-//RS 
-//RS fn jet_job_queue_row_optional_text(
-//RS     row: &JetJobQueueRow,
-//RS     name: &str,
-//RS ) -> Result<Option<String>, JetServiceError> {
-//RS     match jet_job_queue_row_value(row, name)? {
-//RS         JetJobQueueValue::Null => Ok(None),
-//RS         JetJobQueueValue::Text(value) => Ok(Some(value.clone())),
-//RS         _ => Err(service_authority_error(format!(
-//RS             "queue column `{name}` is neither text nor null"
-//RS         ))),
-//RS     }
-//RS }
-//RS 
-//RS fn jet_job_queue_row_optional_i64(
-//RS     row: &JetJobQueueRow,
-//RS     name: &str,
-//RS ) -> Result<Option<i64>, JetServiceError> {
-//RS     match jet_job_queue_row_value(row, name)? {
-//RS         JetJobQueueValue::Null => Ok(None),
-//RS         JetJobQueueValue::Int(value) => Ok(Some(*value)),
-//RS         _ => Err(service_authority_error(format!(
-//RS             "queue column `{name}` is neither integer nor null"
-//RS         ))),
-//RS     }
-//RS }
-//RS 
-//RS fn jet_job_queue_row_bool(row: &JetJobQueueRow, name: &str) -> Result<bool, JetServiceError> {
-//RS     match jet_job_queue_row_i64(row, name)? {
-//RS         0 => Ok(false),
-//RS         1 => Ok(true),
-//RS         _ => Err(service_authority_error(format!(
-//RS             "queue column `{name}` is not a boolean integer"
-//RS         ))),
-//RS     }
-//RS }
-//RS 
-//RS fn jet_job_queue_row_optional_blob(
-//RS     row: &JetJobQueueRow,
-//RS     name: &str,
-//RS ) -> Result<Option<Vec<u8>>, JetServiceError> {
-//RS     match jet_job_queue_row_value(row, name)? {
-//RS         JetJobQueueValue::Null => Ok(None),
-//RS         JetJobQueueValue::Blob(value) => Ok(Some(value.clone())),
-//RS         _ => Err(service_authority_error(format!(
-//RS             "queue column `{name}` is neither blob nor null"
-//RS         ))),
-//RS     }
-//RS }
-//RS 
-//RS fn jet_job_queue_u32(value: i64, label: &str) -> Result<u32, JetServiceError> {
-//RS     u32::try_from(value).map_err(|_| {
-//RS         service_authority_error(format!("queue {label} is outside the supported range"))
-//RS     })
-//RS }
-//RS 
-//RS fn jet_job_queue_usize(value: i64, label: &str) -> Result<usize, JetServiceError> {
-//RS     usize::try_from(value).map_err(|_| {
-//RS         service_authority_error(format!("queue {label} is outside the supported range"))
-//RS     })
-//RS }
-//RS 
-//RS fn jet_job_queue_state_from_row(
-//RS     row: &JetJobQueueRow,
-//RS ) -> Result<JetJobQueueState, JetServiceError> {
-//RS     JetJobQueueState::parse(&jet_job_queue_row_text(row, "state")?)
-//RS }
-//RS 
-//RS fn jet_job_queue_stored_record(
-//RS     row: &JetJobQueueRow,
-//RS ) -> Result<JetJobQueueStoredRecord, JetServiceError> {
-//RS     Ok(JetJobQueueStoredRecord {
-//RS         id: jet_job_queue_row_text(row, "id")?,
-//RS         authority: jet_job_queue_row_text(row, "authority")?,
-//RS         queue: jet_job_queue_row_text(row, "queue")?,
-//RS         job_type: jet_job_queue_row_text(row, "job_type")?,
-//RS         payload_type: jet_job_queue_row_text(row, "payload_type")?,
-//RS         payload: jet_job_queue_row_blob(row, "payload")?,
-//RS         payload_public: jet_job_queue_row_bool(row, "payload_public")?,
-//RS         idempotency_key: jet_job_queue_row_optional_text(row, "idempotency_key")?,
-//RS         request_id: jet_job_queue_row_optional_text(row, "request_id")?,
-//RS         sequence: jet_job_queue_row_i64(row, "sequence")?,
-//RS         state: jet_job_queue_state_from_row(row)?,
-//RS         due_at_ms: jet_job_queue_row_i64(row, "due_at_ms")?,
-//RS         accepted_at_ms: jet_job_queue_row_i64(row, "accepted_at_ms")?,
-//RS         started_at_ms: jet_job_queue_row_optional_i64(row, "started_at_ms")?,
-//RS         finished_at_ms: jet_job_queue_row_optional_i64(row, "finished_at_ms")?,
-//RS         attempts: jet_job_queue_u32(jet_job_queue_row_i64(row, "attempts")?, "attempts")?,
-//RS         lease_owner: jet_job_queue_row_optional_text(row, "lease_owner")?,
-//RS         lease_token: jet_job_queue_row_optional_text(row, "lease_token")?,
-//RS         lease_until_ms: jet_job_queue_row_optional_i64(row, "lease_until_ms")?,
-//RS         result_type: jet_job_queue_row_optional_text(row, "result_type")?,
-//RS         result: jet_job_queue_row_optional_blob(row, "result")?,
-//RS         result_public: jet_job_queue_row_bool(row, "result_public")?,
-//RS         error_type: jet_job_queue_row_optional_text(row, "error_type")?,
-//RS         error_reason: jet_job_queue_row_optional_text(row, "error_reason")?,
-//RS         error_detail: jet_job_queue_row_optional_text(row, "error_detail")?,
-//RS         retry_at_ms: jet_job_queue_row_optional_i64(row, "retry_at_ms")?,
-//RS         updated_at_ms: jet_job_queue_row_i64(row, "updated_at_ms")?,
-//RS         signature: jet_job_queue_row_text(row, "signature")?,
-//RS         event_sequence: jet_job_queue_row_i64(row, "event_sequence")?,
-//RS     })
-//RS }
-//RS 
-//RS fn jet_job_queue_framed(input: &mut Vec<u8>, field: &[u8]) {
-//RS     input.extend_from_slice(&(field.len() as u64).to_be_bytes());
-//RS     input.extend_from_slice(field);
-//RS }
-//RS 
-//RS fn jet_job_queue_record_signature(
-//RS     authority: &str,
-//RS     id: &str,
-//RS     queue: &str,
-//RS     job_type: &str,
-//RS     sequence: i64,
-//RS     due_at_ms: i64,
-//RS     payload: &[u8],
-//RS ) -> Result<String, JetServiceError> {
-//RS     let key = service_authority_signing_key(authority)?;
-//RS     let payload_digest = jet_sha256_raw(payload);
-//RS     let mut input = Vec::with_capacity(128);
-//RS     jet_job_queue_framed(&mut input, b"jet-job-queue-v1");
-//RS     jet_job_queue_framed(&mut input, authority.as_bytes());
-//RS     jet_job_queue_framed(&mut input, id.as_bytes());
-//RS     jet_job_queue_framed(&mut input, queue.as_bytes());
-//RS     jet_job_queue_framed(&mut input, job_type.as_bytes());
-//RS     jet_job_queue_framed(&mut input, sequence.to_string().as_bytes());
-//RS     jet_job_queue_framed(&mut input, due_at_ms.to_string().as_bytes());
-//RS     jet_job_queue_framed(&mut input, &payload_digest);
-//RS     Ok(service_authority_hex(&jet_hmac_sha256(&key, &input)))
-//RS }
-//RS 
-//RS fn jet_job_queue_id(
-//RS     authority: &str,
-//RS     queue: &str,
-//RS     sequence: i64,
-//RS     job_type: &str,
-//RS     payload: &[u8],
-//RS ) -> String {
-//RS     let payload_digest = jet_sha256_raw(payload);
-//RS     let mut input = Vec::with_capacity(128);
-//RS     jet_job_queue_framed(&mut input, b"jet-job-id-v1");
-//RS     jet_job_queue_framed(&mut input, authority.as_bytes());
-//RS     jet_job_queue_framed(&mut input, queue.as_bytes());
-//RS     jet_job_queue_framed(&mut input, sequence.to_string().as_bytes());
-//RS     jet_job_queue_framed(&mut input, job_type.as_bytes());
-//RS     jet_job_queue_framed(&mut input, &payload_digest);
-//RS     format!("jq-{}", service_authority_hex(&jet_sha256_raw(&input)))
-//RS }
-//RS 
-//RS fn jet_job_queue_make_receipt(
-//RS     record: &JetJobQueueStoredRecord,
-//RS     delivery: JetJobQueueDeliveryPolicy,
-//RS     duplicate: bool,
-//RS ) -> JetJobQueueReceipt {
-//RS     JetJobQueueReceipt {
-//RS         id: record.id.clone(),
-//RS         authority: record.authority.clone(),
-//RS         queue: record.queue.clone(),
-//RS         job_type: record.job_type.clone(),
-//RS         state: record.state,
-//RS         sequence: record.sequence,
-//RS         attempts: record.attempts,
-//RS         due_at_ms: record.due_at_ms,
-//RS         accepted_at_ms: record.accepted_at_ms,
-//RS         request_id: record.request_id.clone(),
-//RS         idempotency_key: record.idempotency_key.clone(),
-//RS         lease_until_ms: record.lease_until_ms,
-//RS         duration_ms: record
-//RS             .started_at_ms
-//RS             .zip(record.finished_at_ms)
-//RS             .map(|(started, finished)| finished.saturating_sub(started)),
-//RS         error_reason: record.error_reason.clone(),
-//RS         delivery,
-//RS         duplicate,
-//RS         signature: record.signature.clone(),
-//RS }
-//RS }
-//RS 
-//RS fn jet_job_queue_record(
-//RS     record: &JetJobQueueStoredRecord,
-//RS     delivery: JetJobQueueDeliveryPolicy,
-//RS     include_payload: bool,
-//RS ) -> JetJobQueueRecord {
-//RS     let payload = include_payload && record.payload_public;
-//RS     let payload = payload.then(|| JetJobPayload {
-//RS         type_id: record.payload_type.clone(),
-//RS         bytes: record.payload.clone(),
-//RS         publish: true,
-//RS     });
-//RS     let result = if include_payload && record.result_public {
-//RS         record.result.as_ref().zip(record.result_type.as_ref()).map(|(bytes, type_id)| {
-//RS             JetJobResult {
-//RS                 type_id: type_id.clone(),
-//RS                 bytes: bytes.clone(),
-//RS                 publish: true,
-//RS             }
-//RS         })
-//RS     } else {
-//RS         None
-//RS     };
-//RS     let error = record
-//RS         .error_type
-//RS         .as_ref()
-//RS         .zip(record.error_reason.as_ref())
-//RS         .map(|(type_id, reason)| JetJobError {
-//RS             type_id: type_id.clone(),
-//RS             reason: reason.clone(),
-//RS             detail: record.error_detail.clone(),
-//RS         });
-//RS     JetJobQueueRecord {
-//RS         receipt: jet_job_queue_make_receipt(record, delivery, false),
-//RS         payload,
-//RS         result,
-//RS         error,
-//RS         started_at_ms: record.started_at_ms,
-//RS         finished_at_ms: record.finished_at_ms,
-//RS     }
-//RS }
-//RS 
-//RS fn jet_job_queue_backoff(policy: &JetJobQueuePolicy, attempts: u32) -> i64 {
-//RS     let exponent = attempts.saturating_sub(1).min(20);
-//RS     let multiplier = 1_i64.checked_shl(exponent).unwrap_or(i64::MAX);
-//RS     policy
-//RS         .retry_delay_ms
-//RS         .saturating_mul(multiplier)
-//RS         .min(policy.max_retry_delay_ms)
-//RS }
-//RS 
-//RS fn jet_job_queue_token(id: &str, worker: &str) -> Result<String, JetServiceError> {
-//RS     let mut entropy = jet_crypto_entropy_bytes(24).map_err(|_| {
-//RS         JetServiceError::Policy("queue lease token could not obtain cryptographic entropy".to_string())
-//RS     })?;
-//RS     let mut input = Vec::with_capacity(64);
-//RS     jet_job_queue_framed(&mut input, id.as_bytes());
-//RS     jet_job_queue_framed(&mut input, worker.as_bytes());
-//RS     jet_job_queue_framed(&mut input, &jet_job_queue_now_ms().to_string().into_bytes());
-//RS     input.append(&mut entropy);
-//RS     Ok(format!("lease-{}", service_authority_hex(&jet_sha256_raw(&input))))
-//RS }
-//RS 
-//RS fn jet_job_queue_sql_error(operation: &str, detail: JetServiceError) -> JetServiceError {
-//RS     match detail {
-//RS         JetServiceError::Unavailable(message) => {
-//RS             JetServiceError::Unavailable(format!("queue {operation}: {message}"))
-//RS         }
-//RS         JetServiceError::Policy(message) => {
-//RS             JetServiceError::Policy(format!("queue {operation}: {message}"))
-//RS         }
-//RS         JetServiceError::Revoked(message) => {
-//RS             JetServiceError::Revoked(format!("queue {operation}: {message}"))
-//RS         }
-//RS         JetServiceError::Stale(message) => {
-//RS             JetServiceError::Stale(format!("queue {operation}: {message}"))
-//RS         }
-//RS         other => other,
-//RS     }
-//RS }
-//RS 
-//RS pub struct JetJobQueue<'a> {
-//RS     store: Box<dyn JetJobQueueStore + 'a>,
-//RS     authority: String,
-//RS     name: String,
-//RS     policy: JetJobQueuePolicy,
-//RS     endpoint: JetServiceEndpoint,
-//RS }
-//RS 
-//RS impl<'a> JetJobQueue<'a> {
-//RS     fn with_store_validated(
-//RS         store: Box<dyn JetJobQueueStore + 'a>,
-//RS         name: String,
-//RS         policy: JetJobQueuePolicy,
-//RS         endpoint: JetServiceEndpoint,
-//RS     ) -> Result<Self, JetServiceError> {
-//RS         jet_job_queue_validate_name(&name, "job queue")?;
-//RS         policy.validate()?;
-//RS         let mut queue = Self {
-//RS             store,
-//RS             authority: endpoint.authority.clone(),
-//RS             name,
-//RS             policy,
-//RS             endpoint,
-//RS         };
-//RS         queue.initialize()?;
-//RS         Ok(queue)
-//RS     }
-//RS 
-//RS     /// Construct a queue around an explicit provider and an already-issued
-//RS     /// service endpoint.  The provider is the only replaceable layer; all
-//RS     /// state transitions below remain shared.
-//RS     pub fn with_store(
-//RS         store: Box<dyn JetJobQueueStore + 'a>,
-//RS         endpoint: &JetServiceEndpoint,
-//RS         name: String,
-//RS         policy: JetJobQueuePolicy,
-//RS     ) -> Result<Self, JetServiceError> {
-//RS         jet_services_authority_validate(endpoint)?;
-//RS         Self::with_store_validated(store, name, policy, endpoint.clone())
-//RS     }
-//RS 
-//RS     pub fn open_default(
-//RS         endpoint: &JetServiceEndpoint,
-//RS         name: String,
-//RS         policy: JetJobQueuePolicy,
-//RS     ) -> Result<JetJobQueue<'static>, JetServiceError> {
-//RS         jet_services_authority_validate(endpoint)?;
-//RS         Self::open_default_validated(endpoint.clone(), name, policy)
-//RS     }
-//RS 
-//RS     fn open_default_validated(
-//RS         endpoint: JetServiceEndpoint,
-//RS         name: String,
-//RS         policy: JetJobQueuePolicy,
-//RS     ) -> Result<JetJobQueue<'static>, JetServiceError> {
-//RS         let path = jet_job_queue_default_path();
-//RS         let authority = endpoint.authority.clone();
-//RS         let provider_store = JET_JOB_QUEUE_STORE_PROVIDER
-//RS             .lock()
-//RS             .map_err(|_| service_authority_error("queue provider registry is poisoned"))?
-//RS             .as_ref()
-//RS             .map(|provider| provider.open(&path, &authority))
-//RS             .transpose()?;
-//RS         if let Some(store) = provider_store {
-//RS             return JetJobQueue::<'static>::with_store_validated(
-//RS                 store,
-//RS                 name,
-//RS                 policy,
-//RS                 endpoint.clone(),
-//RS             );
-//RS         }
-//RS         let factory = jet_job_queue_store_factory()
-//RS             .lock()
-//RS             .map_err(|_| service_authority_error("queue provider registry is poisoned"))?
-//RS             .ok_or_else(|| {
-//RS                 JetServiceError::Unavailable(
-//RS                     "no SQLite queue provider is installed; select a provider explicitly"
-//RS                         .to_string(),
-//RS                 )
-//RS             })?;
-//RS         let store = factory(&path, &authority)?;
-//RS         JetJobQueue::<'static>::with_store_validated(store, name, policy, endpoint)
-//RS     }
-//RS 
-//RS     pub fn authority(&self) -> &str {
-//RS         &self.authority
-//RS     }
-//RS 
-//RS     pub fn name(&self) -> &str {
-//RS         &self.name
-//RS     }
-//RS 
-//RS     pub fn policy(&self) -> &JetJobQueuePolicy {
-//RS         &self.policy
-//RS     }
-//RS     fn validate_endpoint(&self) -> Result<(), JetServiceError> {
-//RS         jet_services_authority_validate(&self.endpoint)
-//RS     }
-//RS 
-//RS     fn initialize(&mut self) -> Result<(), JetServiceError> {
-//RS         self.transaction(|queue, store| {
-//RS             for statement in [
-//RS                 JET_JOB_QUEUE_CREATE_META,
-//RS                 JET_JOB_QUEUE_CREATE_JOBS,
-//RS                 JET_JOB_QUEUE_CREATE_EVENTS,
-//RS                 JET_JOB_QUEUE_CREATE_DUE_INDEX,
-//RS                 JET_JOB_QUEUE_CREATE_EVENT_INDEX,
-//RS             ] {
-//RS                 store
-//RS                     .execute(statement, &[])
-//RS                     .map_err(|error| jet_job_queue_sql_error("schema", error))?;
-//RS             }
-//RS             let now = jet_job_queue_now_ms();
-//RS             store
-//RS                 .execute(
-//RS                     "INSERT OR IGNORE INTO jet_job_queue_meta (authority, queue, capacity, paused, updated_at_ms) VALUES (?, ?, ?, 0, ?)",
-//RS                     &[
-//RS                         JetJobQueueValue::Text(queue.authority.clone()),
-//RS                         JetJobQueueValue::Text(queue.name.clone()),
-//RS                         JetJobQueueValue::Int(queue.policy.capacity as i64),
-//RS                         JetJobQueueValue::Int(now),
-//RS                     ],
-//RS                 )
-//RS                 .map_err(|error| jet_job_queue_sql_error("metadata", error))?;
-//RS             store
-//RS                 .execute(
-//RS                     "UPDATE jet_job_queue_meta SET capacity = ?, updated_at_ms = ? WHERE authority = ? AND queue = ?",
-//RS                     &[
-//RS                         JetJobQueueValue::Int(queue.policy.capacity as i64),
-//RS                         JetJobQueueValue::Int(now),
-//RS                         JetJobQueueValue::Text(queue.authority.clone()),
-//RS                         JetJobQueueValue::Text(queue.name.clone()),
-//RS                     ],
-//RS                 )
-//RS                 .map_err(|error| jet_job_queue_sql_error("metadata", error))?;
-//RS             Ok(())
-//RS         })?;
-//RS         let _ = self.status()?;
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     fn transaction<T>(
-//RS         &mut self,
-//RS         operation: impl FnOnce(&mut Self, &mut dyn JetJobQueueStore) -> Result<T, JetServiceError>,
-//RS     ) -> Result<T, JetServiceError> {
-//RS         self.validate_endpoint()?;
-//RS         let mut store = std::mem::replace(
-//RS             &mut self.store,
-//RS             Box::new(JetJobQueueNoopStore),
-//RS         );
-//RS         if let Err(error) = store.begin() {
-//RS             self.store = store;
-//RS             return Err(jet_job_queue_sql_error("begin", error));
-//RS         }
-//RS         let result = operation(self, store.as_mut());
-//RS         let result = match result {
-//RS             Ok(value) => match store.commit() {
-//RS                 Ok(()) => Ok(value),
-//RS                 Err(error) => {
-//RS                     let _ = store.rollback();
-//RS                     Err(jet_job_queue_sql_error("commit", error))
-//RS                 }
-//RS             },
-//RS             Err(error) => {
-//RS                 store.rollback();
-//RS                 Err(error)
-//RS             }
-//RS         };
-//RS         self.store = store;
-//RS         result
-//RS     }
-//RS 
-//RS     fn queue_params(&self) -> [JetJobQueueValue; 2] {
-//RS         [
-//RS             JetJobQueueValue::Text(self.authority.clone()),
-//RS             JetJobQueueValue::Text(self.name.clone()),
-//RS         ]
-//RS     }
-//RS 
-//RS     fn next_sequence(
-//RS         &self,
-//RS         store: &mut dyn JetJobQueueStore,
-//RS     ) -> Result<i64, JetServiceError> {
-//RS         let rows = store
-//RS             .query(
-//RS                 "SELECT COALESCE(MAX(sequence), 0) AS sequence FROM jet_job_queue_jobs WHERE authority = ? AND queue = ?",
-//RS                 &self.queue_params(),
-//RS             )
-//RS             .map_err(|error| jet_job_queue_sql_error("sequence", error))?;
-//RS         let next = rows
-//RS             .first()
-//RS             .map(|row| jet_job_queue_row_i64(row, "sequence"))
-//RS             .transpose()?
-//RS             .unwrap_or(0)
-//RS             .checked_add(1)
-//RS             .ok_or_else(|| JetServiceError::Full("queue sequence exhausted".to_string()))?;
-//RS         Ok(next)
-//RS     }
-//RS 
-//RS     fn find_by_key(
-//RS         &self,
-//RS         store: &mut dyn JetJobQueueStore,
-//RS         key: &str,
-//RS     ) -> Result<Option<JetJobQueueStoredRecord>, JetServiceError> {
-//RS         let rows = store
-//RS             .query(
-//RS                 &format!(
-//RS                     "{JET_JOB_QUEUE_SELECT} WHERE authority = ? AND queue = ? AND idempotency_key = ? LIMIT 1"
-//RS                 ),
-//RS                 &[
-//RS                     JetJobQueueValue::Text(self.authority.clone()),
-//RS                     JetJobQueueValue::Text(self.name.clone()),
-//RS                     JetJobQueueValue::Text(key.to_string()),
-//RS                 ],
-//RS             )
-//RS             .map_err(|error| jet_job_queue_sql_error("idempotency lookup", error))?;
-//RS         rows.first().map(jet_job_queue_stored_record).transpose()
-//RS     }
-//RS 
-//RS     fn insert_event(
-//RS         &self,
-//RS         store: &mut dyn JetJobQueueStore,
-//RS         record: &JetJobQueueStoredRecord,
-//RS         state: JetJobQueueState,
-//RS         attempts: u32,
-//RS         timestamp_ms: i64,
-//RS         reason: Option<&str>,
-//RS         duration_ms: Option<i64>,
-//RS         worker: Option<&str>,
-//RS     ) -> Result<(), JetServiceError> {
-//RS         store
-//RS             .execute(
-//RS                 "INSERT INTO jet_job_queue_events (authority, queue, job_id, event_sequence, state, attempts, timestamp_ms, reason, duration_ms, worker) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-//RS                 &[
-//RS                     JetJobQueueValue::Text(self.authority.clone()),
-//RS                     JetJobQueueValue::Text(self.name.clone()),
-//RS                     JetJobQueueValue::Text(record.id.clone()),
-//RS                     JetJobQueueValue::Int(record.event_sequence.saturating_add(1)),
-//RS                     JetJobQueueValue::Text(state.as_str().to_string()),
-//RS                     JetJobQueueValue::Int(i64::from(attempts)),
-//RS                     JetJobQueueValue::Int(timestamp_ms),
-//RS                     reason.map_or(JetJobQueueValue::Null, |value| {
-//RS                         JetJobQueueValue::Text(value.to_string())
-//RS                     }),
-//RS                     duration_ms.map_or(JetJobQueueValue::Null, JetJobQueueValue::Int),
-//RS                     worker.map_or(JetJobQueueValue::Null, |value| {
-//RS                         JetJobQueueValue::Text(value.to_string())
-//RS                     }),
-//RS                 ],
-//RS             )
-//RS             .map_err(|error| jet_job_queue_sql_error("event", error))?;
-//RS         Ok(())
-//RS     }
-//RS }
-//RS 
-//RS impl<'a> JetJobQueue<'a> {
-//RS     pub fn enqueue(&mut self, request: JetJobEnqueue) -> Result<JetJobQueueReceipt, JetServiceError> {
-//RS         let mut receipts = self.enqueue_bulk(vec![request])?;
-//RS         receipts
-//RS             .pop()
-//RS             .ok_or_else(|| service_authority_error("queue enqueue returned no receipt"))
-//RS     }
-//RS 
-//RS     pub fn enqueue_delayed(
-//RS         &mut self,
-//RS         job_type: impl Into<String>,
-//RS         payload: JetJobPayload,
-//RS         delay_ms: i64,
-//RS         idempotency_key: Option<String>,
-//RS         request_id: Option<String>,
-//RS     ) -> Result<JetJobQueueReceipt, JetServiceError> {
-//RS         self.enqueue(
-//RS             JetJobEnqueue {
-//RS                 job_type: job_type.into(),
-//RS                 payload,
-//RS                 idempotency_key,
-//RS                 request_id,
-//RS                 delay_ms,
-//RS             },
-//RS         )
-//RS     }
-//RS 
-//RS     pub fn enqueue_bulk(
-//RS         &mut self,
-//RS         requests: Vec<JetJobEnqueue>,
-//RS     ) -> Result<Vec<JetJobQueueReceipt>, JetServiceError> {
-//RS         if requests.is_empty() {
-//RS             return Err(JetServiceError::Policy(
-//RS                 "queue bulk enqueue requires at least one job".to_string(),
-//RS             ));
-//RS         }
-//RS         if requests.len() > JET_JOB_QUEUE_MAX_BULK {
-//RS             return Err(JetServiceError::Full(format!(
-//RS                 "queue bulk enqueue is limited to {JET_JOB_QUEUE_MAX_BULK} jobs"
-//RS             )));
-//RS         }
-//RS         for request in &requests {
-//RS             jet_job_queue_validate_enqueue(request)?;
-//RS             if request.payload.type_id != request.job_type {
-//RS                 return Err(JetServiceError::Policy(
-//RS                     "job payload type must match the declared job type".to_string(),
-//RS                 ));
-//RS             }
-//RS         }
-//RS         let now = jet_job_queue_now_ms();
-//RS         self.transaction(|queue, store| {
-//RS             let mut next_sequence = queue.next_sequence(store)?;
-//RS             let mut receipts = Vec::with_capacity(requests.len());
-//RS             let mut observations = Vec::with_capacity(requests.len());
-//RS             for request in requests {
-//RS                 if let Some(key) = request.idempotency_key.as_deref() {
-//RS                     if let Some(existing) = queue.find_by_key(store, key)? {
-//RS                         if existing.job_type != request.job_type
-//RS                             || existing.payload_type != request.payload.type_id
-//RS                             || existing.payload != request.payload.bytes
-//RS                         {
-//RS                             return Err(JetServiceError::Policy(
-//RS                                 "job idempotency key was already used by another job".to_string(),
-//RS                             ));
-//RS                         }
-//RS                         receipts.push(jet_job_queue_make_receipt(
-//RS                             &existing,
-//RS                             queue.policy.delivery,
-//RS                             true,
-//RS                         ));
-//RS                         continue;
-//RS                     }
-//RS                 }
-//RS                 let depth_rows = store
-//RS                     .query(
-//RS                         "SELECT COUNT(*) AS depth FROM jet_job_queue_jobs WHERE authority = ? AND queue = ? AND state IN ('queued', 'running', 'retrying')",
-//RS                         &queue.queue_params(),
-//RS                     )
-//RS                     .map_err(|error| jet_job_queue_sql_error("capacity", error))?;
-//RS                 let depth = depth_rows
-//RS                     .first()
-//RS                     .map(|row| jet_job_queue_u64(jet_job_queue_row_i64(row, "depth")?, "depth"))
-//RS                     .transpose()?
-//RS                     .unwrap_or(0);
-//RS                 if depth >= queue.policy.capacity as u64 {
-//RS                     return Err(JetServiceError::Full(
-//RS                         "queue capacity has been reached".to_string(),
-//RS                     ));
-//RS                 }
-//RS                 let due_at_ms = now
-//RS                     .checked_add(request.delay_ms)
-//RS                     .ok_or_else(|| JetServiceError::Policy("job due time overflowed".to_string()))?;
-//RS                 let sequence = next_sequence;
-//RS                 next_sequence = next_sequence
-//RS                     .checked_add(1)
-//RS                     .ok_or_else(|| JetServiceError::Full("queue sequence exhausted".to_string()))?;
-//RS                 let id = jet_job_queue_id(
-//RS                     &queue.authority,
-//RS                     &queue.name,
-//RS                     sequence,
-//RS                     &request.job_type,
-//RS                     &request.payload.bytes,
-//RS                 );
-//RS                 let signature = jet_job_queue_record_signature(
-//RS                     &queue.authority,
-//RS                     &id,
-//RS                     &queue.name,
-//RS                     &request.job_type,
-//RS                     sequence,
-//RS                     due_at_ms,
-//RS                     &request.payload.bytes,
-//RS                 )?;
-//RS                 let payload_public = request.payload.publish && queue.policy.publish_payload;
-//RS                 let record = JetJobQueueStoredRecord {
-//RS                     id: id.clone(),
-//RS                     authority: queue.authority.clone(),
-//RS                     queue: queue.name.clone(),
-//RS                     job_type: request.job_type.clone(),
-//RS                     payload_type: request.payload.type_id.clone(),
-//RS                     payload: request.payload.bytes.clone(),
-//RS                     payload_public,
-//RS                     idempotency_key: request.idempotency_key.clone(),
-//RS                     request_id: request.request_id.clone(),
-//RS                     sequence,
-//RS                     state: JetJobQueueState::Queued,
-//RS                     due_at_ms,
-//RS                     accepted_at_ms: now,
-//RS                     started_at_ms: None,
-//RS                     finished_at_ms: None,
-//RS                     attempts: 0,
-//RS                     lease_owner: None,
-//RS                     lease_token: None,
-//RS                     lease_until_ms: None,
-//RS                     result_type: None,
-//RS                     result: None,
-//RS                     result_public: false,
-//RS                     error_type: None,
-//RS                     error_reason: None,
-//RS                     error_detail: None,
-//RS                     retry_at_ms: None,
-//RS                     updated_at_ms: now,
-//RS                     signature,
-//RS                     event_sequence: 0,
-//RS                 };
-//RS                 store
-//RS                     .execute(
-//RS                         "INSERT INTO jet_job_queue_jobs (id, authority, queue, job_type, payload_type, payload, payload_public, idempotency_key, request_id, sequence, state, due_at_ms, accepted_at_ms, started_at_ms, finished_at_ms, attempts, lease_owner, lease_token, lease_until_ms, result_type, result, result_public, error_type, error_reason, error_detail, retry_at_ms, updated_at_ms, signature, event_sequence) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-//RS                         &[
-//RS                             JetJobQueueValue::Text(record.id.clone()),
-//RS                             JetJobQueueValue::Text(record.authority.clone()),
-//RS                             JetJobQueueValue::Text(record.queue.clone()),
-//RS                             JetJobQueueValue::Text(record.job_type.clone()),
-//RS                             JetJobQueueValue::Text(record.payload_type.clone()),
-//RS                             JetJobQueueValue::Blob(record.payload.clone()),
-//RS                             JetJobQueueValue::Int(if record.payload_public { 1 } else { 0 }),
-//RS                             record.idempotency_key.clone().map_or(JetJobQueueValue::Null, JetJobQueueValue::Text),
-//RS                             record.request_id.clone().map_or(JetJobQueueValue::Null, JetJobQueueValue::Text),
-//RS                             JetJobQueueValue::Int(record.sequence),
-//RS                             JetJobQueueValue::Text(record.state.as_str().to_string()),
-//RS                             JetJobQueueValue::Int(record.due_at_ms),
-//RS                             JetJobQueueValue::Int(record.accepted_at_ms),
-//RS                             JetJobQueueValue::Null,
-//RS                             JetJobQueueValue::Null,
-//RS                             JetJobQueueValue::Int(i64::from(record.attempts)),
-//RS                             JetJobQueueValue::Null,
-//RS                             JetJobQueueValue::Null,
-//RS                             JetJobQueueValue::Null,
-//RS                             JetJobQueueValue::Null,
-//RS                             JetJobQueueValue::Null,
-//RS                             JetJobQueueValue::Int(0),
-//RS                             JetJobQueueValue::Null,
-//RS                             JetJobQueueValue::Null,
-//RS                             JetJobQueueValue::Null,
-//RS                             JetJobQueueValue::Null,
-//RS                             JetJobQueueValue::Int(record.updated_at_ms),
-//RS                             JetJobQueueValue::Text(record.signature.clone()),
-//RS                             JetJobQueueValue::Int(1),
-//RS                         ],
-//RS                     )
-//RS                     .map_err(|error| jet_job_queue_sql_error("enqueue", error))?;
-//RS                 queue.insert_event(
-//RS                     store,
-//RS                     &record,
-//RS                     JetJobQueueState::Queued,
-//RS                     0,
-//RS                     now,
-//RS                     Some("accepted"),
-//RS                     None,
-//RS                     None,
-//RS                 )?;
-//RS                 observations.push(JetJobQueueDevtoolsTransition::from_record(
-//RS                     &record,
-//RS                     JetJobQueueState::Queued,
-//RS                     0,
-//RS                     now,
-//RS                     Some("accepted"),
-//RS                     None,
-//RS                     None,
-//RS                 ));
-//RS                 receipts.push(jet_job_queue_make_receipt(
-//RS                     &record,
-//RS                     queue.policy.delivery,
-//RS                     false,
-//RS                 ));
-//RS             }
-//RS             Ok((receipts, observations))
-//RS         })
-//RS         .map(|(receipts, observations)| {
-//RS             jet_job_queue_publish_transitions(observations);
-//RS             receipts
-//RS         })
-//RS     }
-//RS 
-//RS     pub fn receipt(&mut self, id: &str) -> Result<JetJobQueueReceipt, JetServiceError> {
-//RS         self.validate_endpoint()?;
-//RS         service_authority_validate_text(id, "queue job id", JET_JOB_QUEUE_MAX_KEY, false)?;
-//RS         let record =
-//RS             jet_job_queue_find_stored(self.store.as_mut(), &self.authority, &self.name, id)?;
-//RS         Ok(jet_job_queue_make_receipt(&record, self.policy.delivery, false))
-//RS     }
-//RS 
-//RS     pub fn inspect(
-//RS         &mut self,
-//RS         limit: usize,
-//RS         include_payload: bool,
-//RS     ) -> Result<Vec<JetJobQueueRecord>, JetServiceError> {
-//RS         self.validate_endpoint()?;
-//RS         if limit == 0 || limit > JET_JOB_QUEUE_MAX_INSPECT {
-//RS             return Err(JetServiceError::Policy(
-//RS                 "queue inspection limit must be positive and bounded".to_string(),
-//RS             ));
-//RS         }
-//RS         let rows = self
-//RS             .store
-//RS             .query(
-//RS                 &format!(
-//RS                     "{JET_JOB_QUEUE_SELECT} WHERE authority = ? AND queue = ? ORDER BY sequence LIMIT ?"
-//RS                 ),
-//RS                 &[
-//RS                     JetJobQueueValue::Text(self.authority.clone()),
-//RS                     JetJobQueueValue::Text(self.name.clone()),
-//RS                     JetJobQueueValue::Int(limit as i64),
-//RS                 ],
-//RS             )
-//RS             .map_err(|error| jet_job_queue_sql_error("inspection", error))?;
-//RS         rows.iter()
-//RS             .map(jet_job_queue_stored_record)
-//RS             .map(|record| {
-//RS                 record.map(|record| {
-//RS                     jet_job_queue_record(
-//RS                         &record,
-//RS                         self.policy.delivery,
-//RS                         include_payload && self.policy.publish_payload,
-//RS                     )
-//RS                 })
-//RS             })
-//RS             .collect()
-//RS     }
-//RS 
-//RS     pub fn events(&mut self, id: &str) -> Result<Vec<JetJobQueueEvent>, JetServiceError> {
-//RS         self.validate_endpoint()?;
-//RS         service_authority_validate_text(id, "queue job id", JET_JOB_QUEUE_MAX_KEY, false)?;
-//RS         let record =
-//RS             jet_job_queue_find_stored(self.store.as_mut(), &self.authority, &self.name, id)?;
-//RS         let rows = self
-//RS             .store
-//RS             .query(
-//RS                 "SELECT event_sequence, state, attempts, timestamp_ms, reason, duration_ms, worker FROM jet_job_queue_events WHERE authority = ? AND queue = ? AND job_id = ? ORDER BY event_sequence",
-//RS                 &[
-//RS                     JetJobQueueValue::Text(self.authority.clone()),
-//RS                     JetJobQueueValue::Text(self.name.clone()),
-//RS                     JetJobQueueValue::Text(record.id.clone()),
-//RS                 ],
-//RS             )
-//RS             .map_err(|error| jet_job_queue_sql_error("events", error))?;
-//RS         rows.iter()
-//RS             .map(|row| {
-//RS                 Ok(JetJobQueueEvent {
-//RS                     sequence: jet_job_queue_row_i64(row, "event_sequence")?,
-//RS                     state: JetJobQueueState::parse(&jet_job_queue_row_text(row, "state")?)?,
-//RS                     attempts: jet_job_queue_u32(
-//RS                         jet_job_queue_row_i64(row, "attempts")?,
-//RS                         "event attempts",
-//RS                     )?,
-//RS                     timestamp_ms: jet_job_queue_row_i64(row, "timestamp_ms")?,
-//RS                     reason: jet_job_queue_row_optional_text(row, "reason")?,
-//RS                     duration_ms: jet_job_queue_row_optional_i64(row, "duration_ms")?,
-//RS                     worker: jet_job_queue_row_optional_text(row, "worker")?,
-//RS                 })
-//RS             })
-//RS             .collect()
-//RS     }
-//RS }
-//RS 
-//RS fn jet_job_queue_insert_event(
-//RS     store: &mut dyn JetJobQueueStore,
-//RS     record: &JetJobQueueStoredRecord,
-//RS     state: JetJobQueueState,
-//RS     attempts: u32,
-//RS     timestamp_ms: i64,
-//RS     reason: Option<&str>,
-//RS     duration_ms: Option<i64>,
-//RS     worker: Option<&str>,
-//RS ) -> Result<(), JetServiceError> {
-//RS     store
-//RS         .execute(
-//RS             "INSERT INTO jet_job_queue_events (authority, queue, job_id, event_sequence, state, attempts, timestamp_ms, reason, duration_ms, worker) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-//RS             &[
-//RS                 JetJobQueueValue::Text(record.authority.clone()),
-//RS                 JetJobQueueValue::Text(record.queue.clone()),
-//RS                 JetJobQueueValue::Text(record.id.clone()),
-//RS                 JetJobQueueValue::Int(record.event_sequence.saturating_add(1)),
-//RS                 JetJobQueueValue::Text(state.as_str().to_string()),
-//RS                 JetJobQueueValue::Int(i64::from(attempts)),
-//RS                 JetJobQueueValue::Int(timestamp_ms),
-//RS                 reason.map_or(JetJobQueueValue::Null, |value| {
-//RS                     JetJobQueueValue::Text(value.to_string())
-//RS                 }),
-//RS                 duration_ms.map_or(JetJobQueueValue::Null, JetJobQueueValue::Int),
-//RS                 worker.map_or(JetJobQueueValue::Null, |value| {
-//RS                     JetJobQueueValue::Text(value.to_string())
-//RS                 }),
-//RS             ],
-//RS         )
-//RS         .map_err(|error| jet_job_queue_sql_error("event", error))?;
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn jet_job_queue_update_event(
-//RS     store: &mut dyn JetJobQueueStore,
-//RS     record: &JetJobQueueStoredRecord,
-//RS     state: JetJobQueueState,
-//RS     attempts: u32,
-//RS     now: i64,
-//RS     reason: Option<&str>,
-//RS     duration_ms: Option<i64>,
-//RS     worker: Option<&str>,
-//RS     extra: &[(&str, JetJobQueueValue)],
-//RS ) -> Result<(), JetServiceError> {
-//RS     let event_sequence = record.event_sequence.saturating_add(1);
-//RS     let mut assignments = String::from(
-//RS         "state = ?, attempts = ?, event_sequence = ?, updated_at_ms = ?",
-//RS     );
-//RS     for (column, _) in extra {
-//RS         assignments.push_str(", ");
-//RS         assignments.push_str(column);
-//RS         assignments.push_str(" = ?");
-//RS     }
-//RS     let mut params = vec![
-//RS         JetJobQueueValue::Text(state.as_str().to_string()),
-//RS         JetJobQueueValue::Int(i64::from(attempts)),
-//RS         JetJobQueueValue::Int(event_sequence),
-//RS         JetJobQueueValue::Int(now),
-//RS     ];
-//RS     params.extend(extra.iter().map(|(_, value)| value.clone()));
-//RS     params.extend([
-//RS         JetJobQueueValue::Text(record.authority.clone()),
-//RS         JetJobQueueValue::Text(record.queue.clone()),
-//RS         JetJobQueueValue::Text(record.id.clone()),
-//RS     ]);
-//RS     let updated = store
-//RS         .execute(
-//RS             &format!("UPDATE jet_job_queue_jobs SET {assignments} WHERE authority = ? AND queue = ? AND id = ?"),
-//RS             &params,
-//RS         )
-//RS         .map_err(|error| jet_job_queue_sql_error("transition", error))?;
-//RS     if updated != 1 {
-//RS         return Err(JetServiceError::Stale(
-//RS             "queue job changed before its transition was committed".to_string(),
-//RS         ));
-//RS     }
-//RS     jet_job_queue_insert_event(
-//RS         store,
-//RS         record,
-//RS         state,
-//RS         attempts,
-//RS         now,
-//RS         reason,
-//RS         duration_ms,
-//RS         worker,
-//RS     )
-//RS }
-//RS 
-//RS /// Temporary move sentinel used only while a queue transaction owns its store.
-//RS /// It is never wrapped in a `JetJobQueue` or used for a transition.
-//RS struct JetJobQueueNoopStore;
-//RS 
-//RS impl JetJobQueueStore for JetJobQueueNoopStore {
-//RS     fn begin(&mut self) -> Result<(), JetServiceError> {
-//RS         Err(service_authority_error("queue transaction sentinel cannot begin"))
-//RS     }
-//RS 
-//RS     fn commit(&mut self) -> Result<(), JetServiceError> {
-//RS         Err(service_authority_error("queue transaction sentinel cannot commit"))
-//RS     }
-//RS 
-//RS     fn rollback(&mut self) {}
-//RS 
-//RS     fn execute(
-//RS         &mut self,
-//RS         _sql: &str,
-//RS         _params: &[JetJobQueueValue],
-//RS     ) -> Result<i64, JetServiceError> {
-//RS         Err(service_authority_error("queue transaction sentinel cannot execute"))
-//RS     }
-//RS 
-//RS     fn query(
-//RS         &mut self,
-//RS         _sql: &str,
-//RS         _params: &[JetJobQueueValue],
-//RS     ) -> Result<Vec<JetJobQueueRow>, JetServiceError> {
-//RS         Err(service_authority_error("queue transaction sentinel cannot query"))
-//RS     }
-//RS }
-//RS 
-//RS fn jet_job_queue_recover_expired_on_store(
-//RS     store: &mut dyn JetJobQueueStore,
-//RS     authority: &str,
-//RS     name: &str,
-//RS     policy: &JetJobQueuePolicy,
-//RS     now: i64,
-//RS ) -> Result<Vec<JetJobQueueDevtoolsTransition>, JetServiceError> {
-//RS     let rows = store
-//RS         .query(
-//RS             &format!(
-//RS                 "{JET_JOB_QUEUE_SELECT} WHERE authority = ? AND queue = ? AND state = 'running' AND lease_until_ms IS NOT NULL AND lease_until_ms <= ? ORDER BY sequence"
-//RS             ),
-//RS             &[
-//RS                 JetJobQueueValue::Text(authority.to_string()),
-//RS                 JetJobQueueValue::Text(name.to_string()),
-//RS                 JetJobQueueValue::Int(now),
-//RS 
-//RS             ],
-//RS         )
-//RS         .map_err(|error| jet_job_queue_sql_error("lease recovery", error))?;
-//RS     let mut observations = Vec::with_capacity(rows.len());
-//RS     for row in &rows {
-//RS         let record = jet_job_queue_stored_record(row)?;
-//RS         let terminal = record.attempts >= policy.max_attempts;
-//RS         let state = if terminal {
-//RS             JetJobQueueState::DeadLettered
-//RS         } else {
-//RS             JetJobQueueState::Retrying
-//RS         };
-//RS         let reason = if terminal {
-//RS             "lease_expired_max_attempts"
-//RS         } else {
-//RS             "lease_expired"
-//RS         };
-//RS         let duration_ms = record
-//RS             .started_at_ms
-//RS             .map(|started| now.saturating_sub(started));
-//RS         let extra = [
-//RS             ("finished_at_ms", JetJobQueueValue::Int(now)),
-//RS             ("due_at_ms", JetJobQueueValue::Int(now)),
-//RS             ("retry_at_ms", JetJobQueueValue::Int(now)),
-//RS             ("lease_owner", JetJobQueueValue::Null),
-//RS             ("lease_token", JetJobQueueValue::Null),
-//RS             ("lease_until_ms", JetJobQueueValue::Null),
-//RS             ("error_type", JetJobQueueValue::Text("jet.queue.lease".to_string())),
-//RS             ("error_reason", JetJobQueueValue::Text(reason.to_string())),
-//RS             ("error_detail", JetJobQueueValue::Null),
-//RS         ];
-//RS         jet_job_queue_update_event(
-//RS             store,
-//RS             &record,
-//RS             state,
-//RS             record.attempts,
-//RS             now,
-//RS             Some(reason),
-//RS             duration_ms,
-//RS             record.lease_owner.as_deref(),
-//RS             &extra,
-//RS         )?;
-//RS         observations.push(JetJobQueueDevtoolsTransition::from_record(
-//RS             &record,
-//RS             state,
-//RS             record.attempts,
-//RS             now,
-//RS             Some(reason),
-//RS             duration_ms,
-//RS             record.lease_owner.as_deref(),
-//RS         ));
-//RS     }
-//RS     Ok(observations)
-//RS }
-//RS 
-//RS impl<'a> JetJobQueue<'a> {
-//RS     pub fn claim(
-//RS         &mut self,
-//RS         worker: &str,
-//RS         limit: usize,
-//RS     ) -> Result<Vec<JetJobQueueClaim>, JetServiceError> {
-//RS         jet_job_queue_validate_name(worker, "queue worker")?;
-//RS         if limit == 0 || limit > self.policy.capacity {
-//RS             return Err(JetServiceError::Policy(
-//RS                 "queue claim limit must be positive and within capacity".to_string(),
-//RS             ));
-//RS         }
-//RS         let authority = self.authority.clone();
-//RS         let name = self.name.clone();
-//RS         let policy = self.policy.clone();
-//RS         self.transaction(|_, store| {
-//RS             let now = jet_job_queue_now_ms();
-//RS             let rows = store
-//RS                 .query(
-//RS                     "SELECT paused FROM jet_job_queue_meta WHERE authority = ? AND queue = ?",
-//RS                     &[
-//RS                         JetJobQueueValue::Text(authority.clone()),
-//RS                         JetJobQueueValue::Text(name.clone()),
-//RS                     ],
-//RS                 )
-//RS                 .map_err(|error| jet_job_queue_sql_error("pause lookup", error))?;
-//RS             let paused = rows
-//RS                 .first()
-//RS                 .map(|row| jet_job_queue_row_bool(row, "paused"))
-//RS                 .transpose()?
-//RS                 .unwrap_or(false);
-//RS             if paused {
-//RS                 return Ok((Vec::new(), Vec::new()));
-//RS             }
-//RS             let mut observations = jet_job_queue_recover_expired_on_store(
-//RS                 store,
-//RS                 &authority,
-//RS                 &name,
-//RS                 &policy,
-//RS                 now,
-//RS             )?;
-//RS             let candidates = store
-//RS                 .query(
-//RS                     &format!(
-//RS                         "{JET_JOB_QUEUE_SELECT} WHERE authority = ? AND queue = ? AND state IN ('queued', 'retrying') AND due_at_ms <= ? ORDER BY sequence LIMIT ?"
-//RS                     ),
-//RS                     &[
-//RS                         JetJobQueueValue::Text(authority.clone()),
-//RS                         JetJobQueueValue::Text(name.clone()),
-//RS                         JetJobQueueValue::Int(now),
-//RS                         JetJobQueueValue::Int(limit as i64),
-//RS                     ],
-//RS                 )
-//RS                 .map_err(|error| jet_job_queue_sql_error("claim lookup", error))?;
-//RS             let mut claims = Vec::with_capacity(candidates.len());
-//RS             for row in &candidates {
-//RS                 let record = jet_job_queue_stored_record(row)?;
-//RS                 if record.attempts >= policy.max_attempts {
-//RS                     let extra = [
-//RS                         ("finished_at_ms", JetJobQueueValue::Int(now)),
-//RS                         ("due_at_ms", JetJobQueueValue::Int(now)),
-//RS                         ("retry_at_ms", JetJobQueueValue::Int(now)),
-//RS                         ("lease_owner", JetJobQueueValue::Null),
-//RS                         ("lease_token", JetJobQueueValue::Null),
-//RS                         ("lease_until_ms", JetJobQueueValue::Null),
-//RS                         ("error_type", JetJobQueueValue::Text("jet.queue.attempts".to_string())),
-//RS                         ("error_reason", JetJobQueueValue::Text("max_attempts".to_string())),
-//RS                         ("error_detail", JetJobQueueValue::Null),
-//RS                     ];
-//RS                     jet_job_queue_update_event(
-//RS                         store,
-//RS                         &record,
-//RS                         JetJobQueueState::DeadLettered,
-//RS                         record.attempts,
-//RS                         now,
-//RS                         Some("max_attempts"),
-//RS                         None,
-//RS                         None,
-//RS                         &extra,
-//RS                     )?;
-//RS                     observations.push(JetJobQueueDevtoolsTransition::from_record(
-//RS                         &record,
-//RS                         JetJobQueueState::DeadLettered,
-//RS                         record.attempts,
-//RS                         now,
-//RS                         Some("max_attempts"),
-//RS                         None,
-//RS                         None,
-//RS                     ));
-//RS                     continue;
-//RS                 }
-//RS                 let attempts = record.attempts.saturating_add(1);
-//RS                 let lease_until_ms = now.saturating_add(policy.lease_ms);
-//RS                 let lease_token = jet_job_queue_token(&record.id, worker)?;
-//RS                 let extra = [
-//RS                     ("started_at_ms", JetJobQueueValue::Int(now)),
-//RS                     ("finished_at_ms", JetJobQueueValue::Null),
-//RS                     ("lease_owner", JetJobQueueValue::Text(worker.to_string())),
-//RS                     ("lease_token", JetJobQueueValue::Text(lease_token.clone())),
-//RS                     ("lease_until_ms", JetJobQueueValue::Int(lease_until_ms)),
-//RS                     ("retry_at_ms", JetJobQueueValue::Null),
-//RS                     ("result_type", JetJobQueueValue::Null),
-//RS                     ("result", JetJobQueueValue::Null),
-//RS                     ("result_public", JetJobQueueValue::Int(0)),
-//RS                     ("error_type", JetJobQueueValue::Null),
-//RS                     ("error_reason", JetJobQueueValue::Null),
-//RS                     ("error_detail", JetJobQueueValue::Null),
-//RS                 ];
-//RS                 jet_job_queue_update_event(
-//RS                     store,
-//RS                     &record,
-//RS                     JetJobQueueState::Running,
-//RS                     attempts,
-//RS                     now,
-//RS                     Some("claimed"),
-//RS                     None,
-//RS                     Some(worker),
-//RS                     &extra,
-//RS                 )?;
-//RS                 let mut claimed = record.clone();
-//RS                 claimed.state = JetJobQueueState::Running;
-//RS                 claimed.attempts = attempts;
-//RS                 claimed.started_at_ms = Some(now);
-//RS                 claimed.finished_at_ms = None;
-//RS                 claimed.lease_owner = Some(worker.to_string());
-//RS                 claimed.lease_token = Some(lease_token.clone());
-//RS                 claimed.lease_until_ms = Some(lease_until_ms);
-//RS                 claimed.retry_at_ms = None;
-//RS                 claimed.result_type = None;
-//RS                 claimed.result = None;
-//RS                 claimed.result_public = false;
-//RS                 claimed.error_type = None;
-//RS                 claimed.error_reason = None;
-//RS                 claimed.error_detail = None;
-//RS                 claimed.updated_at_ms = now;
-//RS                 claimed.event_sequence = claimed.event_sequence.saturating_add(1);
-//RS                 claims.push(JetJobQueueClaim {
-//RS                     receipt: jet_job_queue_make_receipt(&claimed, policy.delivery, false),
-//RS                     payload: JetJobPayload {
-//RS                         type_id: claimed.payload_type.clone(),
-//RS                         bytes: claimed.payload.clone(),
-//RS                         publish: claimed.payload_public,
-//RS                     },
-//RS                     worker: worker.to_string(),
-//RS                     lease_token,
-//RS                     lease_until_ms,
-//RS                 });
-//RS                 observations.push(JetJobQueueDevtoolsTransition::from_record(
-//RS                     &record,
-//RS                     JetJobQueueState::Running,
-//RS                     attempts,
-//RS                     now,
-//RS                     Some("claimed"),
-//RS                     None,
-//RS                     Some(worker),
-//RS                 ));
-//RS             }
-//RS             Ok((claims, observations))
-//RS         })
-//RS         .map(|(claims, observations)| {
-//RS             jet_job_queue_publish_transitions(observations);
-//RS             claims
-//RS         })
-//RS     }
-//RS }
-//RS 
-//RS fn jet_job_queue_find_stored(
-//RS     store: &mut dyn JetJobQueueStore,
-//RS     authority: &str,
-//RS     queue: &str,
-//RS     id: &str,
-//RS ) -> Result<JetJobQueueStoredRecord, JetServiceError> {
-//RS     let rows = store
-//RS         .query(
-//RS             &format!(
-//RS                 "{JET_JOB_QUEUE_SELECT} WHERE authority = ? AND queue = ? AND id = ? LIMIT 1"
-//RS             ),
-//RS             &[
-//RS                 JetJobQueueValue::Text(authority.to_string()),
-//RS                 JetJobQueueValue::Text(queue.to_string()),
-//RS                 JetJobQueueValue::Text(id.to_string()),
-//RS             ],
-//RS         )
-//RS         .map_err(|error| jet_job_queue_sql_error("receipt lookup", error))?;
-//RS     rows.first()
-//RS         .ok_or_else(|| JetServiceError::Unknown(format!("queue job `{id}` is unknown")))
-//RS         .and_then(jet_job_queue_stored_record)
-//RS }
-//RS 
-//RS fn jet_job_queue_u64(value: i64, label: &str) -> Result<u64, JetServiceError> {
-//RS     u64::try_from(value).map_err(|_| {
-//RS         service_authority_error(format!("queue {label} is outside the supported range"))
-//RS     })
-//RS }
-//RS 
-//RS impl<'a> JetJobQueue<'a> {
-//RS     fn require_claim(
-//RS         record: &JetJobQueueStoredRecord,
-//RS         claim: &JetJobQueueClaim,
-//RS     ) -> Result<(), JetServiceError> {
-//RS         if record.id != claim.receipt.id
-//RS             || record.authority != claim.receipt.authority
-//RS             || record.queue != claim.receipt.queue
-//RS         {
-//RS             return Err(JetServiceError::Revoked(
-//RS                 "queue lease belongs to another job authority".to_string(),
-//RS             ));
-//RS         }
-//RS         if record.state != JetJobQueueState::Running {
-//RS             return Err(JetServiceError::Stale(
-//RS                 "queue job is no longer running under this lease".to_string(),
-//RS             ));
-//RS         }
-//RS         if record.lease_owner.as_deref() != Some(claim.worker.as_str())
-//RS             || record.lease_token.as_deref() != Some(claim.lease_token.as_str())
-//RS         {
-//RS             return Err(JetServiceError::Revoked(
-//RS                 "queue lease token or worker does not match".to_string(),
-//RS             ));
-//RS         }
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     pub fn heartbeat(
-//RS         &mut self,
-//RS         claim: &JetJobQueueClaim,
-//RS     ) -> Result<JetJobQueueReceipt, JetServiceError> {
-//RS         service_authority_validate_text(
-//RS             &claim.lease_token,
-//RS             "queue lease token",
-//RS             JET_JOB_QUEUE_MAX_KEY,
-//RS             false,
-//RS         )?;
-//RS         let authority = self.authority.clone();
-//RS         let name = self.name.clone();
-//RS         let policy = self.policy.clone();
-//RS         let (receipt, observation) = self.transaction(|_, store| {
-//RS             let record = jet_job_queue_find_stored(store, &authority, &name, &claim.receipt.id)?;
-//RS             if record.state == JetJobQueueState::Completed {
-//RS                 return Ok((
-//RS                     jet_job_queue_make_receipt(&record, policy.delivery, false),
-//RS                     None,
-//RS                 ));
-//RS             }
-//RS             Self::require_claim(&record, claim)?;
-//RS             let now = jet_job_queue_now_ms();
-//RS             let lease_until_ms = now.saturating_add(policy.lease_ms);
-//RS             let extra = [(
-//RS                 "lease_until_ms",
-//RS                 JetJobQueueValue::Int(lease_until_ms),
-//RS             )];
-//RS             jet_job_queue_update_event(
-//RS                 store,
-//RS                 &record,
-//RS                 JetJobQueueState::Running,
-//RS                 record.attempts,
-//RS                 now,
-//RS                 Some("heartbeat"),
-//RS                 None,
-//RS                 Some(&claim.worker),
-//RS                 &extra,
-//RS             )?;
-//RS             let observation = JetJobQueueDevtoolsTransition::from_record(
-//RS                 &record,
-//RS                 JetJobQueueState::Running,
-//RS                 record.attempts,
-//RS                 now,
-//RS                 Some("heartbeat"),
-//RS                 None,
-//RS                 Some(&claim.worker),
-//RS             )
-//RS             .with_event("heartbeat");
-//RS             let mut updated = record;
-//RS             updated.lease_until_ms = Some(lease_until_ms);
-//RS             updated.updated_at_ms = now;
-//RS             updated.event_sequence = updated.event_sequence.saturating_add(1);
-//RS             Ok((
-//RS                 jet_job_queue_make_receipt(&updated, policy.delivery, false),
-//RS                 Some(observation),
-//RS             ))
-//RS         })?;
-//RS         if let Some(observation) = observation {
-//RS             jet_job_queue_publish_transition(&observation);
-//RS         }
-//RS         Ok(receipt)
-//RS     }
-//RS 
-//RS     pub fn acknowledge(
-//RS         &mut self,
-//RS         claim: &JetJobQueueClaim,
-//RS         result: JetJobResult,
-//RS     ) -> Result<JetJobQueueReceipt, JetServiceError> {
-//RS         jet_job_queue_validate_result(&result)?;
-//RS         let authority = self.authority.clone();
-//RS         let name = self.name.clone();
-//RS         let policy = self.policy.clone();
-//RS         let (receipt, observation) = self.transaction(|_, store| {
-//RS             let record = jet_job_queue_find_stored(store, &authority, &name, &claim.receipt.id)?;
-//RS             if record.state == JetJobQueueState::Completed {
-//RS                 return Ok((
-//RS                     jet_job_queue_make_receipt(&record, policy.delivery, false),
-//RS                     None,
-//RS                 ));
-//RS             }
-//RS             Self::require_claim(&record, claim)?;
-//RS             let now = jet_job_queue_now_ms();
-//RS             let duration_ms = record
-//RS                 .started_at_ms
-//RS                 .map(|started| now.saturating_sub(started));
-//RS             let extra = [
-//RS                 ("finished_at_ms", JetJobQueueValue::Int(now)),
-//RS                 ("lease_owner", JetJobQueueValue::Null),
-//RS                 ("lease_token", JetJobQueueValue::Null),
-//RS                 ("lease_until_ms", JetJobQueueValue::Null),
-//RS                 ("retry_at_ms", JetJobQueueValue::Null),
-//RS                 ("result_type", JetJobQueueValue::Text(result.type_id.clone())),
-//RS                 ("result", JetJobQueueValue::Blob(result.bytes.clone())),
-//RS                 (
-//RS                     "result_public",
-//RS                     JetJobQueueValue::Int(if result.publish { 1 } else { 0 }),
-//RS                 ),
-//RS                 ("error_type", JetJobQueueValue::Null),
-//RS                 ("error_reason", JetJobQueueValue::Null),
-//RS                 ("error_detail", JetJobQueueValue::Null),
-//RS             ];
-//RS             jet_job_queue_update_event(
-//RS                 store,
-//RS                 &record,
-//RS                 JetJobQueueState::Completed,
-//RS                 record.attempts,
-//RS                 now,
-//RS                 Some("acknowledged"),
-//RS                 duration_ms,
-//RS                 Some(&claim.worker),
-//RS                 &extra,
-//RS             )?;
-//RS             let observation = JetJobQueueDevtoolsTransition::from_record(
-//RS                 &record,
-//RS                 JetJobQueueState::Completed,
-//RS                 record.attempts,
-//RS                 now,
-//RS                 Some("acknowledged"),
-//RS                 duration_ms,
-//RS                 Some(&claim.worker),
-//RS             );
-//RS             let mut updated = record;
-//RS             updated.state = JetJobQueueState::Completed;
-//RS             updated.finished_at_ms = Some(now);
-//RS             updated.lease_owner = None;
-//RS             updated.lease_token = None;
-//RS             updated.lease_until_ms = None;
-//RS             updated.retry_at_ms = None;
-//RS             updated.result_type = Some(result.type_id);
-//RS             updated.result = Some(result.bytes);
-//RS             updated.result_public = result.publish;
-//RS             updated.error_type = None;
-//RS             updated.error_reason = None;
-//RS             updated.error_detail = None;
-//RS             updated.updated_at_ms = now;
-//RS             updated.event_sequence = updated.event_sequence.saturating_add(1);
-//RS             Ok((
-//RS                 jet_job_queue_make_receipt(&updated, policy.delivery, false),
-//RS                 Some(observation),
-//RS             ))
-//RS         })?;
-//RS         if let Some(observation) = observation {
-//RS             jet_job_queue_publish_transition(&observation);
-//RS         }
-//RS         Ok(receipt)
-//RS     }
-//RS 
-//RS     pub fn fail(
-//RS         &mut self,
-//RS         claim: &JetJobQueueClaim,
-//RS         error: JetJobError,
-//RS     ) -> Result<JetJobQueueReceipt, JetServiceError> {
-//RS         jet_job_queue_validate_error(&error)?;
-//RS         let authority = self.authority.clone();
-//RS         let name = self.name.clone();
-//RS         let policy = self.policy.clone();
-//RS         let (receipt, observation) = self.transaction(|_, store| {
-//RS             let record = jet_job_queue_find_stored(store, &authority, &name, &claim.receipt.id)?;
-//RS             if record.state == JetJobQueueState::DeadLettered
-//RS                 || record.state == JetJobQueueState::Failed
-//RS             {
-//RS                 return Ok((
-//RS                     jet_job_queue_make_receipt(&record, policy.delivery, false),
-//RS                     None,
-//RS                 ));
-//RS             }
-//RS             Self::require_claim(&record, claim)?;
-//RS             let now = jet_job_queue_now_ms();
-//RS             let terminal = record.attempts >= policy.max_attempts;
-//RS             let state = if terminal {
-//RS                 JetJobQueueState::DeadLettered
-//RS             } else {
-//RS                 JetJobQueueState::Retrying
-//RS             };
-//RS             let due_at_ms = if terminal {
-//RS                 record.due_at_ms
-//RS             } else {
-//RS                 now.saturating_add(jet_job_queue_backoff(&policy, record.attempts))
-//RS             };
-//RS             let duration_ms = record
-//RS                 .started_at_ms
-//RS                 .map(|started| now.saturating_sub(started));
-//RS             let extra = [
-//RS                 ("finished_at_ms", JetJobQueueValue::Int(now)),
-//RS                 ("due_at_ms", JetJobQueueValue::Int(due_at_ms)),
-//RS                 (
-//RS                     "retry_at_ms",
-//RS                     if terminal {
-//RS                         JetJobQueueValue::Null
-//RS                     } else {
-//RS                         JetJobQueueValue::Int(due_at_ms)
-//RS                     },
-//RS                 ),
-//RS                 ("lease_owner", JetJobQueueValue::Null),
-//RS                 ("lease_token", JetJobQueueValue::Null),
-//RS                 ("lease_until_ms", JetJobQueueValue::Null),
-//RS                 ("result_type", JetJobQueueValue::Null),
-//RS                 ("result", JetJobQueueValue::Null),
-//RS                 ("result_public", JetJobQueueValue::Int(0)),
-//RS                 ("error_type", JetJobQueueValue::Text(error.type_id.clone())),
-//RS                 (
-//RS                     "error_reason",
-//RS                     JetJobQueueValue::Text(error.reason.clone()),
-//RS                 ),
-//RS                 (
-//RS                     "error_detail",
-//RS                     error
-//RS                         .detail
-//RS                         .clone()
-//RS                         .map_or(JetJobQueueValue::Null, JetJobQueueValue::Text),
-//RS                 ),
-//RS             ];
-//RS             jet_job_queue_update_event(
-//RS                 store,
-//RS                 &record,
-//RS                 state,
-//RS                 record.attempts,
-//RS                 now,
-//RS                 Some(&error.reason),
-//RS                 duration_ms,
-//RS                 Some(&claim.worker),
-//RS                 &extra,
-//RS             )?;
-//RS             let observation = JetJobQueueDevtoolsTransition::from_record(
-//RS                 &record,
-//RS                 state,
-//RS                 record.attempts,
-//RS                 now,
-//RS                 Some(&error.reason),
-//RS                 duration_ms,
-//RS                 Some(&claim.worker),
-//RS             );
-//RS             let mut updated = record;
-//RS             updated.state = state;
-//RS             updated.finished_at_ms = Some(now);
-//RS             updated.due_at_ms = due_at_ms;
-//RS             updated.retry_at_ms = (!terminal).then_some(due_at_ms);
-//RS             updated.lease_owner = None;
-//RS             updated.lease_token = None;
-//RS             updated.lease_until_ms = None;
-//RS             updated.result_type = None;
-//RS             updated.result = None;
-//RS             updated.result_public = false;
-//RS             updated.error_type = Some(error.type_id);
-//RS             updated.error_reason = Some(error.reason);
-//RS             updated.error_detail = error.detail;
-//RS             updated.updated_at_ms = now;
-//RS             updated.event_sequence = updated.event_sequence.saturating_add(1);
-//RS             Ok((
-//RS                 jet_job_queue_make_receipt(&updated, policy.delivery, false),
-//RS                 Some(observation),
-//RS             ))
-//RS         })?;
-//RS         if let Some(observation) = observation {
-//RS             jet_job_queue_publish_transition(&observation);
-//RS         }
-//RS         Ok(receipt)
-//RS     }
-//RS 
-//RS     pub fn cancel(
-//RS         &mut self,
-//RS         id: &str,
-//RS         reason: impl Into<String>,
-//RS         lease_token: Option<&str>,
-//RS     ) -> Result<JetJobQueueReceipt, JetServiceError> {
-//RS         service_authority_validate_text(id, "queue job id", JET_JOB_QUEUE_MAX_KEY, false)?;
-//RS         let reason = reason.into();
-//RS         service_authority_validate_text(&reason, "queue cancellation reason", JET_JOB_QUEUE_MAX_REASON, false)?;
-//RS         let authority = self.authority.clone();
-//RS         let name = self.name.clone();
-//RS         let policy = self.policy.clone();
-//RS         let (receipt, observation) = self.transaction(|_, store| {
-//RS             let record = jet_job_queue_find_stored(store, &authority, &name, id)?;
-//RS             if record.state == JetJobQueueState::Cancelled
-//RS                 || record.state == JetJobQueueState::Completed
-//RS                 || record.state == JetJobQueueState::DeadLettered
-//RS             {
-//RS                 return Ok((
-//RS                     jet_job_queue_make_receipt(&record, policy.delivery, false),
-//RS                     None,
-//RS                 ));
-//RS             }
-//RS             if record.state == JetJobQueueState::Running
-//RS                 && record.lease_token.as_deref() != lease_token
-//RS             {
-//RS                 return Err(JetServiceError::Revoked(
-//RS                     "running queue cancellation requires its active lease token".to_string(),
-//RS                 ));
-//RS             }
-//RS             let now = jet_job_queue_now_ms();
-//RS             let duration_ms = record
-//RS                 .started_at_ms
-//RS                 .map(|started| now.saturating_sub(started));
-//RS             let extra = [
-//RS                 ("finished_at_ms", JetJobQueueValue::Int(now)),
-//RS                 ("lease_owner", JetJobQueueValue::Null),
-//RS                 ("lease_token", JetJobQueueValue::Null),
-//RS                 ("lease_until_ms", JetJobQueueValue::Null),
-//RS                 ("retry_at_ms", JetJobQueueValue::Null),
-//RS                 ("error_type", JetJobQueueValue::Text("jet.queue.cancel".to_string())),
-//RS                 ("error_reason", JetJobQueueValue::Text(reason.clone())),
-//RS                 ("error_detail", JetJobQueueValue::Null),
-//RS             ];
-//RS             jet_job_queue_update_event(
-//RS                 store,
-//RS                 &record,
-//RS                 JetJobQueueState::Cancelled,
-//RS                 record.attempts,
-//RS                 now,
-//RS                 Some(&reason),
-//RS                 duration_ms,
-//RS                 record.lease_owner.as_deref(),
-//RS                 &extra,
-//RS             )?;
-//RS             let observation = JetJobQueueDevtoolsTransition::from_record(
-//RS                 &record,
-//RS                 JetJobQueueState::Cancelled,
-//RS                 record.attempts,
-//RS                 now,
-//RS                 Some(&reason),
-//RS                 duration_ms,
-//RS                 record.lease_owner.as_deref(),
-//RS             );
-//RS             let mut updated = record;
-//RS             updated.state = JetJobQueueState::Cancelled;
-//RS             updated.finished_at_ms = Some(now);
-//RS             updated.lease_owner = None;
-//RS             updated.lease_token = None;
-//RS             updated.lease_until_ms = None;
-//RS             updated.retry_at_ms = None;
-//RS             updated.error_type = Some("jet.queue.cancel".to_string());
-//RS             updated.error_reason = Some(reason);
-//RS             updated.error_detail = None;
-//RS             updated.updated_at_ms = now;
-//RS             updated.event_sequence = updated.event_sequence.saturating_add(1);
-//RS             Ok((
-//RS                 jet_job_queue_make_receipt(&updated, policy.delivery, false),
-//RS                 Some(observation),
-//RS             ))
-//RS         })?;
-//RS         if let Some(observation) = observation {
-//RS             jet_job_queue_publish_transition(&observation);
-//RS         }
-//RS         Ok(receipt)
-//RS     }
-//RS 
-//RS     pub fn dead_letter(
-//RS         &mut self,
-//RS         id: &str,
-//RS         reason: impl Into<String>,
-//RS         lease_token: Option<&str>,
-//RS     ) -> Result<JetJobQueueReceipt, JetServiceError> {
-//RS         service_authority_validate_text(id, "queue job id", JET_JOB_QUEUE_MAX_KEY, false)?;
-//RS         let reason = reason.into();
-//RS         service_authority_validate_text(&reason, "queue dead-letter reason", JET_JOB_QUEUE_MAX_REASON, false)?;
-//RS         let authority = self.authority.clone();
-//RS         let name = self.name.clone();
-//RS         let policy = self.policy.clone();
-//RS         let (receipt, observation) = self.transaction(|_, store| {
-//RS             let record = jet_job_queue_find_stored(store, &authority, &name, id)?;
-//RS             if record.state == JetJobQueueState::DeadLettered {
-//RS                 return Ok((
-//RS                     jet_job_queue_make_receipt(&record, policy.delivery, false),
-//RS                     None,
-//RS                 ));
-//RS             }
-//RS             if record.state == JetJobQueueState::Completed
-//RS                 || record.state == JetJobQueueState::Cancelled
-//RS             {
-//RS                 return Err(JetServiceError::Policy(
-//RS                     "completed or cancelled queue work cannot be dead-lettered".to_string(),
-//RS                 ));
-//RS             }
-//RS             if record.state == JetJobQueueState::Running
-//RS                 && record.lease_token.as_deref() != lease_token
-//RS             {
-//RS                 return Err(JetServiceError::Revoked(
-//RS                     "running queue dead-lettering requires its active lease token".to_string(),
-//RS                 ));
-//RS             }
-//RS             let now = jet_job_queue_now_ms();
-//RS             let duration_ms = record
-//RS                 .started_at_ms
-//RS                 .map(|started| now.saturating_sub(started));
-//RS             let extra = [
-//RS                 ("finished_at_ms", JetJobQueueValue::Int(now)),
-//RS                 ("lease_owner", JetJobQueueValue::Null),
-//RS                 ("lease_token", JetJobQueueValue::Null),
-//RS                 ("lease_until_ms", JetJobQueueValue::Null),
-//RS                 ("retry_at_ms", JetJobQueueValue::Null),
-//RS                 ("error_type", JetJobQueueValue::Text("jet.queue.dead_letter".to_string())),
-//RS                 ("error_reason", JetJobQueueValue::Text(reason.clone())),
-//RS                 ("error_detail", JetJobQueueValue::Null),
-//RS             ];
-//RS             jet_job_queue_update_event(
-//RS                 store,
-//RS                 &record,
-//RS                 JetJobQueueState::DeadLettered,
-//RS                 record.attempts,
-//RS                 now,
-//RS                 Some(&reason),
-//RS                 duration_ms,
-//RS                 record.lease_owner.as_deref(),
-//RS                 &extra,
-//RS             )?;
-//RS             let observation = JetJobQueueDevtoolsTransition::from_record(
-//RS                 &record,
-//RS                 JetJobQueueState::DeadLettered,
-//RS                 record.attempts,
-//RS                 now,
-//RS                 Some(&reason),
-//RS                 duration_ms,
-//RS                 record.lease_owner.as_deref(),
-//RS             );
-//RS             let mut updated = record;
-//RS             updated.state = JetJobQueueState::DeadLettered;
-//RS             updated.finished_at_ms = Some(now);
-//RS             updated.lease_owner = None;
-//RS             updated.lease_token = None;
-//RS             updated.lease_until_ms = None;
-//RS             updated.retry_at_ms = None;
-//RS             updated.error_type = Some("jet.queue.dead_letter".to_string());
-//RS             updated.error_reason = Some(reason);
-//RS             updated.error_detail = None;
-//RS             updated.updated_at_ms = now;
-//RS             updated.event_sequence = updated.event_sequence.saturating_add(1);
-//RS             Ok((
-//RS                 jet_job_queue_make_receipt(&updated, policy.delivery, false),
-//RS                 Some(observation),
-//RS             ))
-//RS         })?;
-//RS         if let Some(observation) = observation {
-//RS             jet_job_queue_publish_transition(&observation);
-//RS         }
-//RS         Ok(receipt)
-//RS     }
-//RS }
-//RS 
-//RS impl<'a> JetJobQueue<'a> {
-//RS     pub fn recover_expired(&mut self) -> Result<(), JetServiceError> {
-//RS         let authority = self.authority.clone();
-//RS         let name = self.name.clone();
-//RS         let policy = self.policy.clone();
-//RS         let observations = self.transaction(|_, store| {
-//RS             jet_job_queue_recover_expired_on_store(
-//RS                 store,
-//RS                 &authority,
-//RS                 &name,
-//RS                 &policy,
-//RS                 jet_job_queue_now_ms(),
-//RS             )
-//RS         })?;
-//RS         jet_job_queue_publish_transitions(observations);
-//RS         Ok(())
-//RS     }
-//RS }
-//RS 
-//RS impl<'a> JetJobQueue<'a> {
-//RS     pub fn status(&mut self) -> Result<JetJobQueueStatus, JetServiceError> {
-//RS         self.validate_endpoint()?;
-//RS         let queue_params = self.queue_params();
-//RS         let rows = self
-//RS             .store
-//RS             .query(
-//RS                 "SELECT COALESCE(SUM(CASE WHEN state = 'queued' THEN 1 ELSE 0 END), 0) AS queued, COALESCE(SUM(CASE WHEN state = 'running' THEN 1 ELSE 0 END), 0) AS running, COALESCE(SUM(CASE WHEN state = 'retrying' THEN 1 ELSE 0 END), 0) AS retrying, COALESCE(SUM(CASE WHEN state = 'completed' THEN 1 ELSE 0 END), 0) AS completed, COALESCE(SUM(CASE WHEN state = 'failed' THEN 1 ELSE 0 END), 0) AS failed, COALESCE(SUM(CASE WHEN state = 'dead_lettered' THEN 1 ELSE 0 END), 0) AS dead_lettered, COALESCE(SUM(CASE WHEN state = 'cancelled' THEN 1 ELSE 0 END), 0) AS cancelled, MIN(CASE WHEN state IN ('queued', 'retrying') THEN accepted_at_ms END) AS oldest_accepted, MAX(updated_at_ms) AS latest_update FROM jet_job_queue_jobs WHERE authority = ? AND queue = ?",
-//RS                 &queue_params,
-//RS             )
-//RS             .map_err(|error| jet_job_queue_sql_error("status", error))?;
-//RS         let row = rows
-//RS             .first()
-//RS             .ok_or_else(|| service_authority_error("queue status returned no aggregate row"))?;
-//RS         let queued = jet_job_queue_u64(jet_job_queue_row_i64(row, "queued")?, "queued")?;
-//RS         let running = jet_job_queue_u64(jet_job_queue_row_i64(row, "running")?, "running")?;
-//RS         let retrying = jet_job_queue_u64(jet_job_queue_row_i64(row, "retrying")?, "retrying")?;
-//RS         let completed = jet_job_queue_u64(jet_job_queue_row_i64(row, "completed")?, "completed")?;
-//RS         let failed = jet_job_queue_u64(jet_job_queue_row_i64(row, "failed")?, "failed")?;
-//RS         let dead_lettered =
-//RS             jet_job_queue_u64(jet_job_queue_row_i64(row, "dead_lettered")?, "dead-lettered")?;
-//RS         let cancelled =
-//RS             jet_job_queue_u64(jet_job_queue_row_i64(row, "cancelled")?, "cancelled")?;
-//RS         let now = jet_job_queue_now_ms();
-//RS         let wait_ms = jet_job_queue_row_optional_i64(row, "oldest_accepted")?
-//RS             .map(|accepted| now.saturating_sub(accepted).max(0) as u64)
-//RS             .unwrap_or(0);
-//RS         let freshness_ms = jet_job_queue_row_optional_i64(row, "latest_update")?
-//RS             .map(|updated| now.saturating_sub(updated).max(0) as u64)
-//RS             .unwrap_or(0);
-//RS         let meta = self
-//RS             .store
-//RS             .query(
-//RS                 "SELECT capacity, paused FROM jet_job_queue_meta WHERE authority = ? AND queue = ? LIMIT 1",
-//RS                 &queue_params,
-//RS             )
-//RS             .map_err(|error| jet_job_queue_sql_error("metadata status", error))?;
-//RS         let meta = meta
-//RS             .first()
-//RS             .ok_or_else(|| service_authority_error("queue metadata is missing"))?;
-//RS         let capacity = jet_job_queue_usize(jet_job_queue_row_i64(meta, "capacity")?, "capacity")?;
-//RS         let paused = jet_job_queue_row_bool(meta, "paused")?;
-//RS         let throughput_rows = self
-//RS             .store
-//RS             .query(
-//RS                 "SELECT COUNT(*) AS throughput FROM jet_job_queue_events WHERE authority = ? AND queue = ? AND state = 'completed' AND timestamp_ms >= ?",
-//RS                 &[
-//RS                     JetJobQueueValue::Text(self.authority.clone()),
-//RS                     JetJobQueueValue::Text(self.name.clone()),
-//RS                     JetJobQueueValue::Int(now.saturating_sub(60_000)),
-//RS                 ],
-//RS             )
-//RS             .map_err(|error| jet_job_queue_sql_error("throughput status", error))?;
-//RS         let throughput = throughput_rows
-//RS             .first()
-//RS             .map(|row| jet_job_queue_u64(jet_job_queue_row_i64(row, "throughput")?, "throughput"))
-//RS             .transpose()?
-//RS             .unwrap_or(0);
-//RS         let status = JetJobQueueStatus {
-//RS             queue: self.name.clone(),
-//RS             authority: self.authority.clone(),
-//RS             queued,
-//RS             running,
-//RS             retrying,
-//RS             completed,
-//RS             failed,
-//RS             dead_lettered,
-//RS             cancelled,
-//RS             depth: queued.saturating_add(retrying),
-//RS             wait_ms,
-//RS             throughput,
-//RS             capacity,
-//RS             paused,
-//RS             freshness_ms,
-//RS         };
-//RS         jet_job_queue_publish_status(&status);
-//RS         Ok(status)
-//RS     }
-//RS 
-//RS     fn set_paused(&mut self, paused: bool) -> Result<JetJobQueueStatus, JetServiceError> {
-//RS         let now = jet_job_queue_now_ms();
-//RS         let authority = self.authority.clone();
-//RS         let name = self.name.clone();
-//RS         self.transaction(|_, store| {
-//RS             let changed = store
-//RS                 .execute(
-//RS                     "UPDATE jet_job_queue_meta SET paused = ?, updated_at_ms = ? WHERE authority = ? AND queue = ?",
-//RS                     &[
-//RS                         JetJobQueueValue::Int(if paused { 1 } else { 0 }),
-//RS                         JetJobQueueValue::Int(now),
-//RS                         JetJobQueueValue::Text(authority),
-//RS                         JetJobQueueValue::Text(name),
-//RS                     ],
-//RS                 )
-//RS                 .map_err(|error| jet_job_queue_sql_error("pause", error))?;
-//RS             if changed != 1 {
-//RS                 return Err(service_authority_error("queue metadata is missing"));
-//RS             }
-//RS             Ok(())
-//RS         })?;
-//RS         self.status()
-//RS     }
-//RS 
-//RS     pub fn pause(&mut self) -> Result<JetJobQueueStatus, JetServiceError> {
-//RS         self.set_paused(true)
-//RS     }
-//RS 
-//RS     pub fn resume(&mut self) -> Result<JetJobQueueStatus, JetServiceError> {
-//RS         self.set_paused(false)
-//RS     }
-//RS 
-//RS     /// Wait only on durable metadata.  No payload is read or published while
-//RS     /// waiting, and the timeout is an explicit caller decision.
-//RS     pub fn wait(&mut self, timeout_ms: i64) -> Result<JetJobQueueStatus, JetServiceError> {
-//RS         if timeout_ms < 0 || timeout_ms > JET_JOB_QUEUE_MAX_DELAY_MS {
-//RS             return Err(JetServiceError::Policy(
-//RS                 "queue wait timeout is outside the supported range".to_string(),
-//RS             ));
-//RS         }
-//RS         let deadline = jet_job_queue_now_ms().saturating_add(timeout_ms);
-//RS         loop {
-//RS             let status = self.status()?;
-//RS             if status.depth > 0 || jet_job_queue_now_ms() >= deadline {
-//RS                 return Ok(status);
-//RS             }
-//RS             let remaining = deadline.saturating_sub(jet_job_queue_now_ms());
-//RS             std::thread::sleep(std::time::Duration::from_millis(
-//RS                 remaining.clamp(1, 25) as u64,
-//RS             ));
-//RS         }
-//RS     }
-//RS 
-//RS     /// Retention is explicit in the queue policy.  Pruning only removes
-//RS     /// terminal records older than that policy; active work is never deleted.
-//RS     pub fn prune(&mut self) -> Result<u64, JetServiceError> {
-//RS         let cutoff = jet_job_queue_now_ms().saturating_sub(self.policy.retention_ms);
-//RS         let authority = self.authority.clone();
-//RS         let name = self.name.clone();
-//RS         self.transaction(|_, store| {
-//RS             let events = store
-//RS                 .execute(
-//RS                     "DELETE FROM jet_job_queue_events WHERE authority = ? AND queue = ? AND job_id IN (SELECT id FROM jet_job_queue_jobs WHERE authority = ? AND queue = ? AND state IN ('completed', 'failed', 'dead_lettered', 'cancelled') AND finished_at_ms IS NOT NULL AND finished_at_ms <= ?)",
-//RS                     &[
-//RS                         JetJobQueueValue::Text(authority.clone()),
-//RS                         JetJobQueueValue::Text(name.clone()),
-//RS                         JetJobQueueValue::Text(authority.clone()),
-//RS                         JetJobQueueValue::Text(name.clone()),
-//RS                         JetJobQueueValue::Int(cutoff),
-//RS                     ],
-//RS                 )
-//RS                 .map_err(|error| jet_job_queue_sql_error("event retention", error))?;
-//RS             let jobs = store
-//RS                 .execute(
-//RS                     "DELETE FROM jet_job_queue_jobs WHERE authority = ? AND queue = ? AND state IN ('completed', 'failed', 'dead_lettered', 'cancelled') AND finished_at_ms IS NOT NULL AND finished_at_ms <= ?",
-//RS                     &[
-//RS                         JetJobQueueValue::Text(authority),
-//RS                         JetJobQueueValue::Text(name),
-//RS                         JetJobQueueValue::Int(cutoff),
-//RS                     ],
-//RS                 )
-//RS 
-//RS                 .map_err(|error| jet_job_queue_sql_error("job retention", error))?;
-//RS             Ok(jet_job_queue_u64(events.saturating_add(jobs), "pruned records")?)
-//RS         })
-//RS     }
-//RS }
-//RS 
-//RS pub fn jet_job_queue_receipt(
-//RS     queue: &mut JetJobQueue<'static>,
-//RS     id: &str,
-//RS ) -> Result<JetJobQueueReceipt, JetServiceError> {
-//RS     queue.receipt(id)
-//RS }
-//RS 
-//RS pub fn jet_job_queue_inspect(
-//RS     queue: &mut JetJobQueue<'static>,
-//RS     limit: i64,
-//RS     include_payload: bool,
-//RS ) -> Result<Vec<JetJobQueueRecord>, JetServiceError> {
-//RS     queue.inspect(jet_job_queue_usize(limit, "inspection limit")?, include_payload)
-//RS }
-//RS 
-//RS pub fn jet_job_queue_events(
-//RS     queue: &mut JetJobQueue<'static>,
-//RS     id: &str,
-//RS ) -> Result<Vec<JetJobQueueEvent>, JetServiceError> {
-//RS     queue.events(id)
-//RS }
-//RS 
-//RS pub fn jet_job_queue_claim(
-//RS     queue: &mut JetJobQueue<'static>,
-//RS     worker: &str,
-//RS     limit: i64,
-//RS ) -> Result<Vec<JetJobQueueClaim>, JetServiceError> {
-//RS     queue.claim(worker, jet_job_queue_usize(limit, "claim limit")?)
-//RS }
-//RS 
-//RS pub fn jet_job_queue_heartbeat(
-//RS     queue: &mut JetJobQueue<'static>,
-//RS     claim: &JetJobQueueClaim,
-//RS ) -> Result<JetJobQueueReceipt, JetServiceError> {
-//RS     queue.heartbeat(claim)
-//RS }
-//RS 
-//RS pub fn jet_job_queue_acknowledge(
-//RS     queue: &mut JetJobQueue<'static>,
-//RS     claim: &JetJobQueueClaim,
-//RS     result: JetJobResult,
-//RS ) -> Result<JetJobQueueReceipt, JetServiceError> {
-//RS     queue.acknowledge(claim, result)
-//RS }
-//RS 
-//RS pub fn jet_job_queue_fail(
-//RS     queue: &mut JetJobQueue<'static>,
-//RS     claim: &JetJobQueueClaim,
-//RS     error: JetJobError,
-//RS ) -> Result<JetJobQueueReceipt, JetServiceError> {
-//RS     queue.fail(claim, error)
-//RS }
-//RS const JET_JOB_SERVICE_CLAIM_LIMIT: usize = 16;
-//RS 
-//RS /// Run one bounded queue tick under the endpoint that issued the worker.
-//RS /// Engines provide only checked identity lookup and typed invocation; claim,
-//RS /// lease, validation, and settlement stay here.
-//RS pub fn jet_job_service_queue_tick_dispatch<F>(
-//RS     endpoint: &JetServiceEndpoint,
-//RS     limit: usize,
-//RS     mut dispatch: F,
-//RS ) -> Result<usize, JetServiceError>
-//RS where
-//RS     F: FnMut(&str, &JetJobPayload) -> Result<JetJobResult, JetJobError>,
-//RS {
-//RS     if limit == 0 {
-//RS         return Ok(0);
-//RS     }
-//RS     let mut queue = JetJobQueue::open_default(
-//RS         endpoint,
-//RS         "default".to_string(),
-//RS         JetJobQueuePolicy::default(),
-//RS     )?;
-//RS     let claims = queue.claim(
-//RS         &endpoint.worker,
-//RS         limit.min(JET_JOB_SERVICE_CLAIM_LIMIT),
-//RS     )?;
-//RS     let mut settled = 0usize;
-//RS     for claim in claims {
-//RS         let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-//RS             dispatch(claim.receipt.job_type.as_str(), &claim.payload)
-//RS         }))
-//RS         .map_err(|_| JetJobError {
-//RS             type_id: claim.payload.type_id.clone(),
-//RS             reason: "panic".to_string(),
-//RS             detail: Some(format!(
-//RS                 "checked #Job `{}` dispatcher panicked",
-//RS                 claim.receipt.job_type
-//RS             )),
-//RS         })
-//RS         .and_then(|result| result);
-//RS         match outcome {
-//RS             Ok(result) => {
-//RS                 let result = JetJobResult::new(result.type_id, result.bytes, result.publish)
-//RS                     .map_err(|error| JetJobError {
-//RS                         type_id: claim.payload.type_id.clone(),
-//RS                         reason: "invalid_result".to_string(),
-//RS                         detail: Some(error.jet_show()),
-//RS                     });
-//RS                 match result {
-//RS                     Ok(result) => {
-//RS                         queue.acknowledge(&claim, result)?;
-//RS                     }
-//RS                     Err(error) => {
-//RS                         queue.fail(&claim, error)?;
-//RS                     }
-//RS                 }
-//RS             }
-//RS             Err(error) => {
-//RS                 queue.fail(&claim, error)?;
-//RS             }
-//RS         }
-//RS         settled += 1;
-//RS     }
-//RS     Ok(settled)
-//RS }
-//RS 
-//RS pub fn jet_job_queue_cancel(
-//RS     queue: &mut JetJobQueue<'static>,
-//RS     id: &str,
-//RS     reason: &str,
-//RS     lease_token: &Option<String>,
-//RS ) -> Result<JetJobQueueReceipt, JetServiceError> {
-//RS     queue.cancel(id, reason, lease_token.as_deref())
-//RS }
-//RS 
-//RS pub fn jet_job_queue_dead_letter(
-//RS     queue: &mut JetJobQueue<'static>,
-//RS     id: &str,
-//RS     reason: &str,
-//RS     lease_token: &Option<String>,
-//RS ) -> Result<JetJobQueueReceipt, JetServiceError> {
-//RS     queue.dead_letter(id, reason, lease_token.as_deref())
-//RS }
-//RS 
-//RS pub fn jet_job_queue_recover_expired(
-//RS     queue: &mut JetJobQueue<'static>,
-//RS ) -> Result<(), JetServiceError> {
-//RS     queue.recover_expired()
-//RS }
-//RS 
-//RS pub fn jet_job_queue_status(
-//RS     queue: &mut JetJobQueue<'static>,
-//RS ) -> Result<JetJobQueueStatus, JetServiceError> {
-//RS     queue.status()
-//RS }
-//RS 
-//RS pub fn jet_job_queue_pause(
-//RS     queue: &mut JetJobQueue<'static>,
-//RS ) -> Result<JetJobQueueStatus, JetServiceError> {
-//RS     queue.pause()
-//RS }
-//RS 
-//RS pub fn jet_job_queue_resume(
-//RS     queue: &mut JetJobQueue<'static>,
-//RS ) -> Result<JetJobQueueStatus, JetServiceError> {
-//RS     queue.resume()
-//RS }
-//RS 
-//RS pub fn jet_job_queue_wait(
-//RS     queue: &mut JetJobQueue<'static>,
-//RS     duration: Duration,
-//RS ) -> Result<JetJobQueueStatus, JetServiceError> {
-//RS     let milliseconds = i64::try_from(duration.as_millis())
-//RS         .map_err(|_| service_authority_error("queue wait duration is outside the supported range"))?;
-//RS     queue.wait(milliseconds)
-//RS }
-//RS 
-//RS pub fn jet_job_queue_prune(queue: &mut JetJobQueue<'static>) -> Result<i64, JetServiceError> {
-//RS     queue.prune().and_then(|count| {
-//RS         i64::try_from(count)
-//RS             .map_err(|_| service_authority_error("queue pruned count is outside the supported range"))
-//RS     })
-//RS }
-// END-PORT-PENDING 0301 crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3593-5954
+use core.service.runtime.top_service_authority.[JetServiceError, service_authority_now, service_authority_validate_text, service_authority_error]
+use core.service.runtime.top_service_authority_02.[JetJobQueueState, JetJobQueueDevtoolsTransition, JetJobQueueStatus, JET_JOB_QUEUE_DEVTOOLS_SOURCE, JetJobQueueStore, JetJobEnqueue, JET_JOB_QUEUE_MAX_NAME, JET_JOB_QUEUE_MAX_TYPE, JET_JOB_QUEUE_MAX_PAYLOAD, JET_JOB_QUEUE_MAX_REASON, JET_JOB_QUEUE_MAX_DETAIL, JET_JOB_QUEUE_MAX_DELAY_MS, JET_JOB_QUEUE_MAX_KEY, JET_JOB_QUEUE_MAX_REQUEST, JET_JOB_QUEUE_MAX_INSPECT, JetJobQueueEvent]
+use core.service.runtime.top_service_authority_02.[JetJobQueueValue, JetJobQueueRow, JetJobQueueStoredRecord]
+use core.service.runtime.top_service_authority.[service_authority_signing_key, service_authority_hex]
+use core.service.runtime.top_service_authority_02.[JetJobQueueDeliveryPolicy, JetJobQueueReceipt, JetJobQueueRecord, JetJobQueuePolicy]
+use core.crypto.runtime.kernel_sha256.sha256_bytes
+use core.crypto.hmac_sha256_raw
+use core.crypto.runtime.top_crypto_entropy.jet_crypto_entropy_bytes
+use jet_std.[JetDevtoolsEvent, jet_devtools_publish_event]
+use std.sync.[LazyLock, Mutex]
+use std.env as native_env
+use core.jobs.runtime.job_queue_types.[JetJobPayload, JetJobResult, JetJobError]
+use core.service.runtime.top_service_authority_02.JetJobQueueClaim
+use std.time.Duration
+use std.thread as native_thread
+use std.panic.[catch_unwind, AssertUnwindSafe]
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3593
+fn jet_job_queue_panel_state(state: JetJobQueueState) -> String {
+    match state {
+        .Queued -> "enqueued"
+        .Running -> "started"
+        .Retrying -> "retrying"
+        .Completed -> "completed"
+        .Failed | .DeadLettered | .Cancelled -> "failed"
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3605
+fn jet_job_queue_panel_failure(state: JetJobQueueState, reason: String?) -> String? {
+    match state {
+        .Cancelled -> Val("cancelled")
+        .Failed | .DeadLettered -> {
+            if reason.map_or(false, fn(value) -> value.starts_with("lease_expired")) -> Val("worker_lost")
+            else -> Val("error")
+        }
+        .Queued | .Running | .Retrying | .Completed -> None
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3625
+fn jet_job_queue_json_text(value: String) -> String {
+    output := String.with_capacity(value.len().saturating_add(2))
+    output.push('"')
+    loop character in value.chars() {
+        match character {
+            '"' -> output.push_str("\\\"")
+            '\\' -> output.push_str("\\\\")
+            '\u{08}' -> output.push_str("\\b")
+            '\u{0c}' -> output.push_str("\\f")
+            '\n' -> output.push_str("\\n")
+            '\r' -> output.push_str("\\r")
+            '\t' -> output.push_str("\\t")
+            character -> {
+                if character.is_control() {
+                    scalar :: character as U32
+                    output.push_str("\\u{scalar:04x}")
+                } else { output.push(character) }
+            }
+        }
+    }
+    output.push('"')
+    ^output
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3647
+fn jet_job_queue_json_optional_text(value: String?) -> String {
+    value.map(jet_job_queue_json_text).unwrap_or_else(fn() -> "null")
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3653
+fn jet_job_queue_event_time(timestamp_ms: I64) -> U64 { timestamp_ms.max(0) as U64 }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3657
+fn jet_job_queue_publish_transition(observation: &JetJobQueueDevtoolsTransition) -> () {
+    duration :: observation.duration_ms.map(fn(value) -> value.to_string()).unwrap_or_else(fn() -> "null")
+    worker :: jet_job_queue_json_optional_text(observation.worker.as_ref())
+    request_id :: jet_job_queue_json_optional_text(observation.request_id.as_ref())
+    failure :: jet_job_queue_json_optional_text(jet_job_queue_panel_failure(observation.state, observation.reason.as_ref()))
+    reason :: jet_job_queue_json_optional_text(observation.reason.as_ref())
+    event_text :: jet_job_queue_json_text(observation.event)
+    state_text :: jet_job_queue_json_text(jet_job_queue_panel_state(observation.state))
+    job_id :: jet_job_queue_json_text(observation.job_id)
+    name :: jet_job_queue_json_text(observation.job_type)
+    queue :: jet_job_queue_json_text(observation.queue)
+    authority :: jet_job_queue_json_text(observation.authority)
+    fields :: "{{\"event\":{event_text},\"state\":{state_text},\"job_id\":{job_id},\"name\":{name},\"queue\":{queue},\"attempts\":{observation.attempts},\"duration_ms\":{duration},\"worker\":{worker},\"request_id\":{request_id},\"failure\":{failure},\"reason\":{reason},\"sequence\":{observation.sequence},\"authority\":{authority},\"labels\":{{}}}}"
+    if JetDevtoolsEvent.from_parts(jet_job_queue_event_time(observation.timestamp_ms), JET_JOB_QUEUE_DEVTOOLS_SOURCE, "Job", observation.job_id.clone(), ^fields) == Ok(event) {
+        jet_devtools_publish_event(^event)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3696
+fn jet_job_queue_publish_transitions<I: IntoIterator<Item=JetJobQueueDevtoolsTransition>>(observations: I) -> () {
+    loop observation in observations { jet_job_queue_publish_transition(&observation) }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3704
+fn jet_job_queue_publish_status(status: &JetJobQueueStatus) -> () {
+    entity :: "{status.authority}:{status.queue}"
+    job_id :: jet_job_queue_json_text(entity)
+    queue :: jet_job_queue_json_text(status.queue)
+    authority :: jet_job_queue_json_text(status.authority)
+    fields :: "{{\"event\":\"status\",\"state\":\"status\",\"job_id\":{job_id},\"name\":{queue},\"queue\":{queue},\"attempts\":0,\"duration_ms\":null,\"worker\":null,\"request_id\":null,\"failure\":null,\"reason\":null,\"sequence\":0,\"authority\":{authority},\"queued\":{status.queued},\"running\":{status.running},\"retrying\":{status.retrying},\"completed\":{status.completed},\"failed\":{status.failed},\"dead_lettered\":{status.dead_lettered},\"cancelled\":{status.cancelled},\"depth\":{status.depth},\"wait_ms\":{status.wait_ms},\"throughput\":{status.throughput},\"capacity\":{status.capacity},\"paused\":{status.paused},\"freshness_ms\":{status.freshness_ms},\"labels\":{{}}}}"
+    if JetDevtoolsEvent.from_parts(jet_job_queue_event_time(service_authority_now()), JET_JOB_QUEUE_DEVTOOLS_SOURCE, "Job", entity, ^fields) == Ok(event) {
+        jet_devtools_publish_event(^event)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3738
+const JET_JOB_QUEUE_SELECT: String = "SELECT id, authority, queue, job_type, payload_type, payload, payload_public, idempotency_key, request_id, sequence, state, due_at_ms, accepted_at_ms, started_at_ms, finished_at_ms, attempts, lease_owner, lease_token, lease_until_ms, result_type, result, result_public, error_type, error_reason, error_detail, retry_at_ms, updated_at_ms, signature, event_sequence FROM jet_job_queue_jobs"
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3739
+const JET_JOB_QUEUE_CREATE_META: String = "CREATE TABLE IF NOT EXISTS jet_job_queue_meta (authority TEXT NOT NULL, queue TEXT NOT NULL, capacity INTEGER NOT NULL, paused INTEGER NOT NULL DEFAULT 0, updated_at_ms INTEGER NOT NULL, PRIMARY KEY (authority, queue))"
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3740
+const JET_JOB_QUEUE_CREATE_JOBS: String = "CREATE TABLE IF NOT EXISTS jet_job_queue_jobs (id TEXT PRIMARY KEY, authority TEXT NOT NULL, queue TEXT NOT NULL, job_type TEXT NOT NULL, payload_type TEXT NOT NULL, payload BLOB NOT NULL, payload_public INTEGER NOT NULL, idempotency_key TEXT, request_id TEXT, sequence INTEGER NOT NULL, state TEXT NOT NULL, due_at_ms INTEGER NOT NULL, accepted_at_ms INTEGER NOT NULL, started_at_ms INTEGER, finished_at_ms INTEGER, attempts INTEGER NOT NULL, lease_owner TEXT, lease_token TEXT, lease_until_ms INTEGER, result_type TEXT, result BLOB, result_public INTEGER NOT NULL DEFAULT 0, error_type TEXT, error_reason TEXT, error_detail TEXT, retry_at_ms INTEGER, updated_at_ms INTEGER NOT NULL, signature TEXT NOT NULL, event_sequence INTEGER NOT NULL, UNIQUE(authority, queue, idempotency_key))"
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3741
+const JET_JOB_QUEUE_CREATE_EVENTS: String = "CREATE TABLE IF NOT EXISTS jet_job_queue_events (authority TEXT NOT NULL, queue TEXT NOT NULL, job_id TEXT NOT NULL, event_sequence INTEGER NOT NULL, state TEXT NOT NULL, attempts INTEGER NOT NULL, timestamp_ms INTEGER NOT NULL, reason TEXT, duration_ms INTEGER, worker TEXT, PRIMARY KEY (authority, queue, job_id, event_sequence))"
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3742
+const JET_JOB_QUEUE_CREATE_DUE_INDEX: String = "CREATE INDEX IF NOT EXISTS jet_job_queue_due ON jet_job_queue_jobs (authority, queue, state, due_at_ms, sequence)"
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3743
+const JET_JOB_QUEUE_CREATE_EVENT_INDEX: String = "CREATE INDEX IF NOT EXISTS jet_job_queue_events_time ON jet_job_queue_events (authority, queue, state, timestamp_ms)"
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3745
+pub type JetJobQueueStoreFactory = fn(String, String) -> Box<JetJobQueueStore> JetServiceError!
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3748
+// GATE #4565: kernel primitive
+JET_JOB_QUEUE_STORE_FACTORY :: #Unsafe("initialize the single lazy factory mutex once; retain its poison state") {
+    LazyLock.new(fn() -> Mutex<JetJobQueueStoreFactory?>.default())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3752
+fn jet_job_queue_store_factory() -> &Mutex<JetJobQueueStoreFactory?> { &JET_JOB_QUEUE_STORE_FACTORY }
+// A provider opens/marshals a durable connection; transitions never dispatch here.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3759
+pub trait JetJobQueueStoreProvider: Send + Sync {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3760
+    fn open(self: &Self, path: String, authority: String) -> Box<JetJobQueueStore> JetServiceError!
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3767
+// GATE #4565: kernel primitive
+JET_JOB_QUEUE_STORE_PROVIDER :: #Unsafe("initialize the one authoritative lazy store provider mutex") {
+    LazyLock.new(fn() -> Mutex<Box<JetJobQueueStoreProvider>?>.default())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3774
+pub fn jet_job_queue_install_store_provider_if_absent(provider: Box<JetJobQueueStoreProvider>) -> Bool {
+    // GATE #4565: kernel primitive
+    selected :: #Unsafe("hold provider selection lock through factory check and installation; do not recover poisoning") {
+        JET_JOB_QUEUE_STORE_PROVIDER.lock()
+    }
+    current := match selected { Ok(current) -> current, Err(_) -> return false }
+    if current.is_some() -> return true
+    // GATE #4565: kernel primitive
+    selected_factory :: #Unsafe("hold factory lock after provider lock, preserving selection lock order") {
+        jet_job_queue_store_factory().lock()
+    }
+    factory :: match selected_factory { Ok(factory) -> factory, Err(_) -> return false }
+    if factory.is_some() -> return true
+    _ :: current.replace(^provider)
+    true
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3793
+pub fn jet_job_queue_default_path() -> String {
+    // GATE #4565: kernel primitive
+    configured :: #Unsafe("read the logical environment as Unicode; invalid Unicode or absence selects the original default") {
+        native_env.var("JET_JOB_QUEUE_DB")
+    }
+    configured.ok().filter(fn(path) -> !path.is_empty()).unwrap_or_else(fn() -> ".jet/state/jobs.db")
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3800
+fn jet_job_queue_validate_name(value: String, label: String) -> () JetServiceError! {
+    service_authority_validate_text(value, label, JET_JOB_QUEUE_MAX_NAME, false)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3804
+fn jet_job_queue_validate_payload(payload: &JetJobPayload) -> () JetServiceError! {
+    service_authority_validate_text(payload.type_id, "job payload type", JET_JOB_QUEUE_MAX_TYPE, false)?
+    if payload.bytes.len() > JET_JOB_QUEUE_MAX_PAYLOAD -> return Err(JetServiceError.Policy("job payload exceeds the bounded queue payload limit"))
+    Ok(())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3819
+fn jet_job_queue_validate_result(result: &JetJobResult) -> () JetServiceError! {
+    service_authority_validate_text(result.type_id, "job result type", JET_JOB_QUEUE_MAX_TYPE, false)?
+    if result.bytes.len() > JET_JOB_QUEUE_MAX_PAYLOAD -> return Err(JetServiceError.Policy("job result exceeds the bounded queue payload limit"))
+    Ok(())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3834
+fn jet_job_queue_validate_error(error: &JetJobError) -> () JetServiceError! {
+    service_authority_validate_text(error.type_id, "job error type", JET_JOB_QUEUE_MAX_TYPE, false)?
+    service_authority_validate_text(error.reason, "job error reason", JET_JOB_QUEUE_MAX_REASON, false)?
+    if error.detail == Val(detail) {
+        service_authority_validate_text(detail, "job error detail", JET_JOB_QUEUE_MAX_DETAIL, true)?
+    }
+    Ok(())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3853
+fn jet_job_queue_validate_enqueue(request: &JetJobEnqueue) -> () JetServiceError! {
+    service_authority_validate_text(request.job_type, "job type", JET_JOB_QUEUE_MAX_TYPE, false)?
+    jet_job_queue_validate_payload(&request.payload)?
+    if request.delay_ms < 0 || request.delay_ms > JET_JOB_QUEUE_MAX_DELAY_MS -> return Err(JetServiceError.Policy("job delay must be non-negative and bounded"))
+    if request.idempotency_key == Val(key) {
+        service_authority_validate_text(key, "job idempotency key", JET_JOB_QUEUE_MAX_KEY, false)?
+    }
+    if request.request_id == Val(request_id) {
+        service_authority_validate_text(request_id, "job request id", JET_JOB_QUEUE_MAX_REQUEST, false)?
+    }
+    Ok(())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3882
+fn jet_job_queue_now_ms() -> I64 { service_authority_now() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3886
+fn jet_job_queue_value_text(value: &JetJobQueueValue, label: String) -> String JetServiceError! {
+    match value {
+        .Text(value) -> Ok(value.clone())
+        _ -> Err(service_authority_error("queue column `{label}` is not text"))
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3895
+fn jet_job_queue_value_i64(value: &JetJobQueueValue, label: String) -> I64 JetServiceError! {
+    match value {
+        .Int(value) -> Ok(value)
+        _ -> Err(service_authority_error("queue column `{label}` is not an integer"))
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3904
+fn jet_job_queue_value_blob(value: &JetJobQueueValue, label: String) -> [U8] JetServiceError! {
+    match value {
+        .Blob(value) -> Ok(value.clone())
+        _ -> Err(service_authority_error("queue column `{label}` is not a blob"))
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3913
+fn jet_job_queue_row_value(row: &JetJobQueueRow, name: String) -> &JetJobQueueValue JetServiceError! {
+    row.get(name).ok_or_else(fn() -> service_authority_error("queue row has no `{name}` column"))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3921
+fn jet_job_queue_row_text(row: &JetJobQueueRow, name: String) -> String JetServiceError! {
+    jet_job_queue_value_text(jet_job_queue_row_value(row, name)?, name)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3925
+fn jet_job_queue_row_i64(row: &JetJobQueueRow, name: String) -> I64 JetServiceError! {
+    jet_job_queue_value_i64(jet_job_queue_row_value(row, name)?, name)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3929
+fn jet_job_queue_row_blob(row: &JetJobQueueRow, name: String) -> [U8] JetServiceError! {
+    jet_job_queue_value_blob(jet_job_queue_row_value(row, name)?, name)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3933
+fn jet_job_queue_row_optional_text(row: &JetJobQueueRow, name: String) -> String? JetServiceError! {
+    match jet_job_queue_row_value(row, name)? {
+        .Null -> Ok(None)
+        .Text(value) -> Ok(Val(value.clone()))
+        _ -> Err(service_authority_error("queue column `{name}` is neither text nor null"))
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3946
+fn jet_job_queue_row_optional_i64(row: &JetJobQueueRow, name: String) -> I64? JetServiceError! {
+    match jet_job_queue_row_value(row, name)? {
+        .Null -> Ok(None)
+        .Int(value) -> Ok(Val(value))
+        _ -> Err(service_authority_error("queue column `{name}` is neither integer nor null"))
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3959
+fn jet_job_queue_row_bool(row: &JetJobQueueRow, name: String) -> Bool JetServiceError! {
+    match jet_job_queue_row_i64(row, name)? {
+        0 -> Ok(false)
+        1 -> Ok(true)
+        _ -> Err(service_authority_error("queue column `{name}` is not a boolean integer"))
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3969
+fn jet_job_queue_row_optional_blob(row: &JetJobQueueRow, name: String) -> [U8]? JetServiceError! {
+    match jet_job_queue_row_value(row, name)? {
+        .Null -> Ok(None)
+        .Blob(value) -> Ok(Val(value.clone()))
+        _ -> Err(service_authority_error("queue column `{name}` is neither blob nor null"))
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3982
+fn jet_job_queue_u32(value: I64, label: String) -> U32 JetServiceError! {
+    U32.try_from(value).map_err(fn(_) -> service_authority_error("queue {label} is outside the supported range"))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3988
+fn jet_job_queue_usize(value: I64, label: String) -> USize JetServiceError! {
+    USize.try_from(value).map_err(fn(_) -> service_authority_error("queue {label} is outside the supported range"))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3994
+fn jet_job_queue_state_from_row(row: &JetJobQueueRow) -> JetJobQueueState JetServiceError! {
+    JetJobQueueState.parse(jet_job_queue_row_text(row, "state")?)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:4000
+fn jet_job_queue_stored_record(row: &JetJobQueueRow) -> JetJobQueueStoredRecord JetServiceError! {
+    Ok(JetJobQueueStoredRecord{
+        id: jet_job_queue_row_text(row, "id")?,
+        authority: jet_job_queue_row_text(row, "authority")?,
+        queue: jet_job_queue_row_text(row, "queue")?,
+        job_type: jet_job_queue_row_text(row, "job_type")?,
+        payload_type: jet_job_queue_row_text(row, "payload_type")?,
+        payload: jet_job_queue_row_blob(row, "payload")?,
+        payload_public: jet_job_queue_row_bool(row, "payload_public")?,
+        idempotency_key: jet_job_queue_row_optional_text(row, "idempotency_key")?,
+        request_id: jet_job_queue_row_optional_text(row, "request_id")?,
+        sequence: jet_job_queue_row_i64(row, "sequence")?,
+        state: jet_job_queue_state_from_row(row)?,
+        due_at_ms: jet_job_queue_row_i64(row, "due_at_ms")?,
+        accepted_at_ms: jet_job_queue_row_i64(row, "accepted_at_ms")?,
+        started_at_ms: jet_job_queue_row_optional_i64(row, "started_at_ms")?,
+        finished_at_ms: jet_job_queue_row_optional_i64(row, "finished_at_ms")?,
+        attempts: jet_job_queue_u32(jet_job_queue_row_i64(row, "attempts")?, "attempts")?,
+        lease_owner: jet_job_queue_row_optional_text(row, "lease_owner")?,
+        lease_token: jet_job_queue_row_optional_text(row, "lease_token")?,
+        lease_until_ms: jet_job_queue_row_optional_i64(row, "lease_until_ms")?,
+        result_type: jet_job_queue_row_optional_text(row, "result_type")?,
+        result: jet_job_queue_row_optional_blob(row, "result")?,
+        result_public: jet_job_queue_row_bool(row, "result_public")?,
+        error_type: jet_job_queue_row_optional_text(row, "error_type")?,
+        error_reason: jet_job_queue_row_optional_text(row, "error_reason")?,
+        error_detail: jet_job_queue_row_optional_text(row, "error_detail")?,
+        retry_at_ms: jet_job_queue_row_optional_i64(row, "retry_at_ms")?,
+        updated_at_ms: jet_job_queue_row_i64(row, "updated_at_ms")?,
+        signature: jet_job_queue_row_text(row, "signature")?,
+        event_sequence: jet_job_queue_row_i64(row, "event_sequence")?
+    })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:4036
+fn jet_job_queue_framed(input: &[U8], field: &[U8]) -> () {
+    input.extend_from_slice(&(field.len() as U64).to_be_bytes())
+    input.extend_from_slice(field)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:4041
+fn jet_job_queue_record_signature(authority: String, id: String, queue: String, job_type: String,
+    sequence: I64, due_at_ms: I64, payload: &[U8]) -> String JetServiceError! {
+    key :: service_authority_signing_key(authority)?
+    payload_digest :: sha256_bytes(payload)
+    input := [U8].with_capacity(128)
+    jet_job_queue_framed(&input, "jet-job-queue-v1".as_bytes())
+    jet_job_queue_framed(&input, authority.as_bytes())
+    jet_job_queue_framed(&input, id.as_bytes())
+    jet_job_queue_framed(&input, queue.as_bytes())
+    jet_job_queue_framed(&input, job_type.as_bytes())
+    jet_job_queue_framed(&input, sequence.to_string().as_bytes())
+    jet_job_queue_framed(&input, due_at_ms.to_string().as_bytes())
+    jet_job_queue_framed(&input, &payload_digest)
+    Ok(service_authority_hex(hmac_sha256_raw(key, input)))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:4064
+fn jet_job_queue_id(authority: String, queue: String, sequence: I64, job_type: String, payload: &[U8]) -> String {
+    payload_digest :: sha256_bytes(payload)
+    input := [U8].with_capacity(128)
+    jet_job_queue_framed(&input, "jet-job-id-v1".as_bytes())
+    jet_job_queue_framed(&input, authority.as_bytes())
+    jet_job_queue_framed(&input, queue.as_bytes())
+    jet_job_queue_framed(&input, sequence.to_string().as_bytes())
+    jet_job_queue_framed(&input, job_type.as_bytes())
+    jet_job_queue_framed(&input, &payload_digest)
+    "jq-{service_authority_hex(sha256_bytes(input))}"
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:4082
+fn jet_job_queue_make_receipt(record: &JetJobQueueStoredRecord, delivery: JetJobQueueDeliveryPolicy, duplicate: Bool) -> JetJobQueueReceipt {
+    JetJobQueueReceipt{
+        id: record.id.clone(), authority: record.authority.clone(), queue: record.queue.clone(),
+        job_type: record.job_type.clone(), state: record.state, sequence: record.sequence,
+        attempts: record.attempts, due_at_ms: record.due_at_ms, accepted_at_ms: record.accepted_at_ms,
+        request_id: record.request_id.clone(), idempotency_key: record.idempotency_key.clone(),
+        lease_until_ms: record.lease_until_ms,
+        duration_ms: record.started_at_ms.zip(record.finished_at_ms).map(fn((started, finished)) -> finished.saturating_sub(started)),
+        error_reason: record.error_reason.clone(), delivery: delivery, duplicate: duplicate, signature: record.signature.clone()
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:4111
+fn jet_job_queue_record(record: &JetJobQueueStoredRecord, delivery: JetJobQueueDeliveryPolicy, include_payload: Bool) -> JetJobQueueRecord {
+    payload :: if include_payload && record.payload_public -> Val(JetJobPayload{type_id: record.payload_type.clone(), bytes: record.payload.clone(), publish: true}) else -> None
+    result :: if include_payload && record.result_public {
+        record.result.as_ref().zip(record.result_type.as_ref()).map(fn((bytes, type_id)) ->
+            JetJobResult{type_id: type_id.clone(), bytes: bytes.clone(), publish: true})
+    } else { None }
+    error :: record.error_type.as_ref().zip(record.error_reason.as_ref()).map(fn((type_id, reason)) ->
+        JetJobError{type_id: type_id.clone(), reason: reason.clone(), detail: record.error_detail.clone()})
+    JetJobQueueRecord{receipt: jet_job_queue_make_receipt(record, delivery, false), payload: ^payload,
+        result: ^result, error: ^error, started_at_ms: record.started_at_ms, finished_at_ms: record.finished_at_ms}
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:4152
+fn jet_job_queue_backoff(policy: &JetJobQueuePolicy, attempts: U32) -> I64 {
+    exponent :: attempts.saturating_sub(1).min(20)
+    multiplier :: I64{1}.checked_shl(exponent).unwrap_or(I64.MAX)
+    policy.retry_delay_ms.saturating_mul(multiplier).min(policy.max_retry_delay_ms)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:4161
+fn jet_job_queue_token(id: String, worker: String) -> String JetServiceError! {
+    entropy := jet_crypto_entropy_bytes(24).map_err(fn(_) -> JetServiceError.Policy("queue lease token could not obtain cryptographic entropy"))?
+    input := [U8].with_capacity(64)
+    jet_job_queue_framed(&input, id.as_bytes())
+    jet_job_queue_framed(&input, worker.as_bytes())
+    jet_job_queue_framed(&input, &jet_job_queue_now_ms().to_string().into_bytes())
+    input.append(&entropy)
+    Ok("lease-{service_authority_hex(sha256_bytes(input))}")
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:4173
+fn jet_job_queue_sql_error(operation: String, detail: JetServiceError) -> JetServiceError {
+    match detail {
+        .Unavailable(message) -> JetServiceError.Unavailable("queue {operation}: {message}")
+        .Policy(message) -> JetServiceError.Policy("queue {operation}: {message}")
+        .Revoked(message) -> JetServiceError.Revoked("queue {operation}: {message}")
+        .Stale(message) -> JetServiceError.Stale("queue {operation}: {message}")
+        other -> ^other
+    }
+}
+use core.service.runtime.top_service_authority.[JetServiceEndpoint, jet_services_authority_validate]
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:4191
+pub struct JetJobQueue {
+    store: Box<JetJobQueueStore>
+    authority: String
+    name: String
+    policy: JetJobQueuePolicy
+    endpoint: JetServiceEndpoint
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:4199
+impl JetJobQueue {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:4200
+    fn with_store_validated(store: Box<JetJobQueueStore>, name: String, policy: JetJobQueuePolicy, endpoint: JetServiceEndpoint) -> Self JetServiceError! {
+        jet_job_queue_validate_name(name, "job queue")?
+        policy.validate()?
+        queue := Self{store: ^store, authority: endpoint.authority.clone(), name: ^name, policy: ^policy, endpoint: ^endpoint}
+        queue.initialize()?
+        Ok(^queue)
+    }
+    // Provider is replaceable; all queue transitions remain the shared policy.
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:4222
+    pub fn with_store(store: Box<JetJobQueueStore>, endpoint: &JetServiceEndpoint, name: String, policy: JetJobQueuePolicy) -> Self JetServiceError! {
+        jet_services_authority_validate(endpoint)?
+        Self.with_store_validated(^store, ^name, ^policy, endpoint.clone())
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:4232
+    pub fn open_default(endpoint: &JetServiceEndpoint, name: String, policy: JetJobQueuePolicy) -> JetJobQueue JetServiceError! {
+        jet_services_authority_validate(endpoint)?
+        Self.open_default_validated(endpoint.clone(), ^name, ^policy)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:4241
+    fn open_default_validated(endpoint: JetServiceEndpoint, name: String, policy: JetJobQueuePolicy) -> JetJobQueue JetServiceError! {
+        path :: jet_job_queue_default_path()
+        authority :: endpoint.authority.clone()
+        // GATE #4565: kernel primitive
+        provider_store :: #Unsafe("open the selected provider under its authoritative registry lock; refuse lock poisoning") {
+            JET_JOB_QUEUE_STORE_PROVIDER.lock().map_err(_ -> service_authority_error("queue provider registry is poisoned"))?
+                .as_ref().map(provider -> provider.open(path, authority)).transpose()?
+        }
+        if Val(store) = provider_store -> return JetJobQueue.with_store_validated(^store, ^name, ^policy, endpoint.clone())
+        // GATE #4565: kernel primitive
+        factory :: #Unsafe("read the factory after releasing provider lock; refuse registry poisoning or absent SQLite provider") {
+            jet_job_queue_store_factory().lock().map_err(_ -> service_authority_error("queue provider registry is poisoned"))?
+                .ok_or_else(() -> JetServiceError.Unavailable("no SQLite queue provider is installed; select a provider explicitly"))?
+        }
+        store :: factory(path, authority)?
+        JetJobQueue.with_store_validated(^store, ^name, ^policy, ^endpoint)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:4275
+    pub fn authority(self) -> String { self.authority }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:4279
+    pub fn name(self) -> String { self.name }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:4283
+    pub fn policy(self) -> &JetJobQueuePolicy from self { &self.policy }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:4286
+    fn validate_endpoint(self) -> () JetServiceError! { jet_services_authority_validate(&self.endpoint) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:4290
+    fn initialize(self: &Self) -> () JetServiceError! {
+        self.transaction((queue, store) -> {
+            for statement in [JET_JOB_QUEUE_CREATE_META, JET_JOB_QUEUE_CREATE_JOBS, JET_JOB_QUEUE_CREATE_EVENTS,
+                JET_JOB_QUEUE_CREATE_DUE_INDEX, JET_JOB_QUEUE_CREATE_EVENT_INDEX] {
+                _ :: store.execute(statement, []).map_err(error -> jet_job_queue_sql_error("schema", error))?
+            }
+            now :: jet_job_queue_now_ms()
+            _ :: store.execute("INSERT OR IGNORE INTO jet_job_queue_meta (authority, queue, capacity, paused, updated_at_ms) VALUES (?, ?, ?, 0, ?)",
+                [JetJobQueueValue.Text(queue.authority.clone()), JetJobQueueValue.Text(queue.name.clone()),
+                    JetJobQueueValue.Int(queue.policy.capacity as I64), JetJobQueueValue.Int(now)])
+                .map_err(error -> jet_job_queue_sql_error("metadata", error))?
+            _ :: store.execute("UPDATE jet_job_queue_meta SET capacity = ?, updated_at_ms = ? WHERE authority = ? AND queue = ?",
+                [JetJobQueueValue.Int(queue.policy.capacity as I64), JetJobQueueValue.Int(now),
+                    JetJobQueueValue.Text(queue.authority.clone()), JetJobQueueValue.Text(queue.name.clone())])
+                .map_err(error -> jet_job_queue_sql_error("metadata", error))?
+            Ok(())
+        })?
+        _ :: self.status()?
+        Ok(())
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:4332
+    fn transaction<T>(self: &Self, operation: fn(&Self, &JetJobQueueStore) -> T JetServiceError!) -> T JetServiceError! {
+        self.validate_endpoint()?
+        store := std.mem.replace(&self.store, Box.new(JetJobQueueNoopStore))
+        if Err(error) = store.begin() {
+            self.store = ^store
+            return Err(jet_job_queue_sql_error("begin", error))
+        }
+        operated :: operation(self, store.as_mut())
+        result :: match operated {
+            Ok(value) -> match store.commit() {
+                Ok(()) -> Ok(value)
+                Err(error) -> {
+                    _ :: store.rollback()
+                    Err(jet_job_queue_sql_error("commit", error))
+                }
+            }
+            Err(error) -> { _ :: store.rollback(); Err(error) }
+        }
+        self.store = ^store
+        result
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:4363
+    fn queue_params(self) -> Array<JetJobQueueValue, 2> { [JetJobQueueValue.Text(self.authority.clone()), JetJobQueueValue.Text(self.name.clone())] }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:4370
+    fn next_sequence(self, store: &JetJobQueueStore) -> I64 JetServiceError! {
+        rows :: store.query("SELECT COALESCE(MAX(sequence), 0) AS sequence FROM jet_job_queue_jobs WHERE authority = ? AND queue = ?",
+            self.queue_params()).map_err(error -> jet_job_queue_sql_error("sequence", error))?
+        next :: rows.first().map(row -> jet_job_queue_row_i64(row, "sequence")).transpose()?.unwrap_or(0)
+            .checked_add(1).ok_or_else(() -> JetServiceError.Full("queue sequence exhausted"))?
+        Ok(next)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:4390
+    fn find_by_key(self, store: &JetJobQueueStore, key: String) -> JetJobQueueStoredRecord? JetServiceError! {
+        rows :: store.query("{JET_JOB_QUEUE_SELECT} WHERE authority = ? AND queue = ? AND idempotency_key = ? LIMIT 1",
+            [JetJobQueueValue.Text(self.authority.clone()), JetJobQueueValue.Text(self.name.clone()), JetJobQueueValue.Text(key.to_string())])
+            .map_err(error -> jet_job_queue_sql_error("idempotency lookup", error))?
+        rows.first().map(jet_job_queue_stored_record).transpose()
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:4410
+    fn insert_event(self, store: &JetJobQueueStore, record: &JetJobQueueStoredRecord, state: JetJobQueueState,
+        attempts: U32, timestamp_ms: I64, reason: String?, duration_ms: I64?, worker: String?) -> () JetServiceError! {
+        _ :: store.execute("INSERT INTO jet_job_queue_events (authority, queue, job_id, event_sequence, state, attempts, timestamp_ms, reason, duration_ms, worker) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [JetJobQueueValue.Text(self.authority.clone()), JetJobQueueValue.Text(self.name.clone()), JetJobQueueValue.Text(record.id.clone()),
+                JetJobQueueValue.Int(record.event_sequence.saturating_add(1)), JetJobQueueValue.Text(state.as_str().to_string()),
+                JetJobQueueValue.Int(attempts as I64), JetJobQueueValue.Int(timestamp_ms),
+                reason.map_or(JetJobQueueValue.Null, value -> JetJobQueueValue.Text(value.to_string())),
+                duration_ms.map_or(JetJobQueueValue.Null, JetJobQueueValue.Int),
+                worker.map_or(JetJobQueueValue.Null, value -> JetJobQueueValue.Text(value.to_string()))])
+            .map_err(error -> jet_job_queue_sql_error("event", error))?
+        Ok(())
+    }
+}
+use core.service.runtime.top_service_authority_02.[JET_JOB_QUEUE_MAX_BULK]
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:4446
+impl JetJobQueue {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:4447
+    pub fn enqueue(self: &Self, request: JetJobEnqueue) -> JetJobQueueReceipt JetServiceError! {
+        receipts := self.enqueue_bulk([request])?
+        receipts.pop().ok_or_else(() -> service_authority_error("queue enqueue returned no receipt"))
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:4454
+    pub fn enqueue_delayed(self: &Self, job_type: String, payload: JetJobPayload, delay_ms: I64,
+        idempotency_key: String?, request_id: String?) -> JetJobQueueReceipt JetServiceError! {
+        self.enqueue(JetJobEnqueue{job_type: ^job_type, payload: ^payload, idempotency_key: ^idempotency_key, request_id: ^request_id, delay_ms})
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:4473
+    pub fn enqueue_bulk(self: &Self, requests: [JetJobEnqueue]) -> [JetJobQueueReceipt] JetServiceError! {
+        if requests.is_empty() -> return Err(JetServiceError.Policy("queue bulk enqueue requires at least one job"))
+        if requests.len() > JET_JOB_QUEUE_MAX_BULK -> return Err(JetServiceError.Full("queue bulk enqueue is limited to {JET_JOB_QUEUE_MAX_BULK} jobs"))
+        for request in requests {
+            jet_job_queue_validate_enqueue(&request)?
+            if request.payload.type_id != request.job_type -> return Err(JetServiceError.Policy("job payload type must match the declared job type"))
+        }
+        now :: jet_job_queue_now_ms()
+        self.transaction((queue, store) -> {
+            next_sequence := queue.next_sequence(store)?
+            receipts := [JetJobQueueReceipt].with_capacity(requests.len())
+            observations := [JetJobQueueDevtoolsTransition].with_capacity(requests.len())
+            for request in requests {
+                if Val(key) = request.idempotency_key.as_ref() {
+                    if Val(existing) = queue.find_by_key(store, key)? {
+                        if existing.job_type != request.job_type || existing.payload_type != request.payload.type_id || existing.payload != request.payload.bytes {
+                            return Err(JetServiceError.Policy("job idempotency key was already used by another job"))
+                        }
+                        receipts.push(jet_job_queue_make_receipt(&existing, queue.policy.delivery, true))
+                        continue
+                    }
+                }
+                depth_rows :: store.query("SELECT COUNT(*) AS depth FROM jet_job_queue_jobs WHERE authority = ? AND queue = ? AND state IN ('queued', 'running', 'retrying')",
+                    queue.queue_params()).map_err(error -> jet_job_queue_sql_error("capacity", error))?
+                depth :: depth_rows.first().map(row -> jet_job_queue_u64(jet_job_queue_row_i64(row, "depth")?, "depth")).transpose()?.unwrap_or(0)
+                if depth >= queue.policy.capacity as U64 -> return Err(JetServiceError.Full("queue capacity has been reached"))
+                due_at_ms :: now.checked_add(request.delay_ms).ok_or_else(() -> JetServiceError.Policy("job due time overflowed"))?
+                sequence :: next_sequence
+                next_sequence = next_sequence.checked_add(1).ok_or_else(() -> JetServiceError.Full("queue sequence exhausted"))?
+                id :: jet_job_queue_id(queue.authority, queue.name, sequence, request.job_type, request.payload.bytes)
+                signature :: jet_job_queue_record_signature(queue.authority, id, queue.name, request.job_type, sequence, due_at_ms, request.payload.bytes)?
+                payload_public :: request.payload.publish && queue.policy.publish_payload
+                record :: JetJobQueueStoredRecord{id: id.clone(), authority: queue.authority.clone(), queue: queue.name.clone(),
+                    job_type: request.job_type.clone(), payload_type: request.payload.type_id.clone(), payload: request.payload.bytes.clone(),
+                    payload_public, idempotency_key: request.idempotency_key.clone(), request_id: request.request_id.clone(),
+                    sequence, state: JetJobQueueState.Queued, due_at_ms, accepted_at_ms: now, started_at_ms: None,
+                    finished_at_ms: None, attempts: 0, lease_owner: None, lease_token: None, lease_until_ms: None,
+                    result_type: None, result: None, result_public: false, error_type: None, error_reason: None,
+                    error_detail: None, retry_at_ms: None, updated_at_ms: now, signature, event_sequence: 0}
+                _ :: store.execute("INSERT INTO jet_job_queue_jobs (id, authority, queue, job_type, payload_type, payload, payload_public, idempotency_key, request_id, sequence, state, due_at_ms, accepted_at_ms, started_at_ms, finished_at_ms, attempts, lease_owner, lease_token, lease_until_ms, result_type, result, result_public, error_type, error_reason, error_detail, retry_at_ms, updated_at_ms, signature, event_sequence) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    [JetJobQueueValue.Text(record.id.clone()), JetJobQueueValue.Text(record.authority.clone()),
+                        JetJobQueueValue.Text(record.queue.clone()), JetJobQueueValue.Text(record.job_type.clone()),
+                        JetJobQueueValue.Text(record.payload_type.clone()), JetJobQueueValue.Blob(record.payload.clone()),
+                        JetJobQueueValue.Int(if record.payload_public -> 1 else -> 0),
+                        record.idempotency_key.clone().map_or(JetJobQueueValue.Null, JetJobQueueValue.Text),
+                        record.request_id.clone().map_or(JetJobQueueValue.Null, JetJobQueueValue.Text),
+                        JetJobQueueValue.Int(record.sequence), JetJobQueueValue.Text(record.state.as_str().to_string()),
+                        JetJobQueueValue.Int(record.due_at_ms), JetJobQueueValue.Int(record.accepted_at_ms),
+                        JetJobQueueValue.Null, JetJobQueueValue.Null, JetJobQueueValue.Int(record.attempts as I64),
+                        JetJobQueueValue.Null, JetJobQueueValue.Null, JetJobQueueValue.Null, JetJobQueueValue.Null, JetJobQueueValue.Null,
+                        JetJobQueueValue.Int(0), JetJobQueueValue.Null, JetJobQueueValue.Null, JetJobQueueValue.Null, JetJobQueueValue.Null,
+                        JetJobQueueValue.Int(record.updated_at_ms), JetJobQueueValue.Text(record.signature.clone()), JetJobQueueValue.Int(1)])
+                    .map_err(error -> jet_job_queue_sql_error("enqueue", error))?
+                queue.insert_event(store, &record, JetJobQueueState.Queued, 0, now, Val("accepted"), None, None)?
+                observations.push(JetJobQueueDevtoolsTransition.from_record(&record, JetJobQueueState.Queued, 0, now, Val("accepted"), None, None))
+                receipts.push(jet_job_queue_make_receipt(&record, queue.policy.delivery, false))
+            }
+            Ok((^receipts, ^observations))
+        }).map((receipts, observations) -> {
+            jet_job_queue_publish_transitions(observations)
+            receipts
+        })
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:4659
+impl JetJobQueue {
+    fn receipt(self: &Self, id: String) -> JetJobQueueReceipt JetServiceError! {
+        self.validate_endpoint()?
+        service_authority_validate_text(id, "queue job id", JET_JOB_QUEUE_MAX_KEY, false)?
+        record :: jet_job_queue_find_stored(self.store.as_mut(), &self.authority, &self.name, id)?
+        Ok(jet_job_queue_make_receipt(&record, self.policy.delivery, false))
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:4667
+    fn inspect(self: &Self, limit: USize, include_payload: Bool) -> [JetJobQueueRecord] JetServiceError! {
+        self.validate_endpoint()?
+        if limit == 0 || limit > JET_JOB_QUEUE_MAX_INSPECT -> return Err(JetServiceError.Policy("queue inspection limit must be positive and bounded"))
+        rows :: self.store.query("{JET_JOB_QUEUE_SELECT} WHERE authority = ? AND queue = ? ORDER BY sequence LIMIT ?", &[JetJobQueueValue.Text(self.authority.clone()), JetJobQueueValue.Text(self.name.clone()), JetJobQueueValue.Int(limit as I64)]).map_err(fn(error) { jet_job_queue_sql_error("inspection", error) })?
+        out := [JetJobQueueRecord].with_capacity(rows.len())
+        loop row in &rows {
+            record :: jet_job_queue_stored_record(row)?
+            &out.push(jet_job_queue_record(&record, self.policy.delivery, include_payload && self.policy.publish_payload))
+        }
+        Ok(^out)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:4705
+    fn events(self: &Self, id: String) -> [JetJobQueueEvent] JetServiceError! {
+        self.validate_endpoint()?
+        service_authority_validate_text(id, "queue job id", JET_JOB_QUEUE_MAX_KEY, false)?
+        record :: jet_job_queue_find_stored(self.store.as_mut(), &self.authority, &self.name, id)?
+        rows :: self.store.query("SELECT event_sequence, state, attempts, timestamp_ms, reason, duration_ms, worker FROM jet_job_queue_events WHERE authority = ? AND queue = ? AND job_id = ? ORDER BY event_sequence", &[JetJobQueueValue.Text(self.authority.clone()), JetJobQueueValue.Text(self.name.clone()), JetJobQueueValue.Text(record.id.clone())]).map_err(fn(error) { jet_job_queue_sql_error("events", error) })?
+        out := [JetJobQueueEvent].with_capacity(rows.len())
+        loop row in &rows {
+            &out.push(JetJobQueueEvent{sequence: jet_job_queue_row_i64(row, "event_sequence")?, state: JetJobQueueState.parse(jet_job_queue_row_text(row, "state")?)?, attempts: jet_job_queue_u32(jet_job_queue_row_i64(row, "attempts")?, "event attempts")?, timestamp_ms: jet_job_queue_row_i64(row, "timestamp_ms")?, reason: jet_job_queue_row_optional_text(row, "reason")?, duration_ms: jet_job_queue_row_optional_i64(row, "duration_ms")?, worker: jet_job_queue_row_optional_text(row, "worker")?})
+        }
+        Ok(^out)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:4740
+fn jet_job_queue_insert_event(store: &JetJobQueueStore, record: &JetJobQueueStoredRecord, state: JetJobQueueState, attempts: U32, timestamp_ms: I64, reason: String?, duration_ms: I64?, worker: String?) -> Unit JetServiceError! {
+    store.execute("INSERT INTO jet_job_queue_events (authority, queue, job_id, event_sequence, state, attempts, timestamp_ms, reason, duration_ms, worker) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", &[JetJobQueueValue.Text(record.authority.clone()), JetJobQueueValue.Text(record.queue.clone()), JetJobQueueValue.Text(record.id.clone()), JetJobQueueValue.Int(record.event_sequence.saturating_add(1)), JetJobQueueValue.Text(state.as_str().to_string()), JetJobQueueValue.Int(attempts as I64), JetJobQueueValue.Int(timestamp_ms), reason.map_or(JetJobQueueValue.Null, fn(value) { JetJobQueueValue.Text(value.to_string()) }), duration_ms.map_or(JetJobQueueValue.Null, JetJobQueueValue.Int), worker.map_or(JetJobQueueValue.Null, fn(value) { JetJobQueueValue.Text(value.to_string()) })]).map_err(fn(error) { jet_job_queue_sql_error("event", error) })?
+    Ok(())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:4774
+fn jet_job_queue_update_event(store: &JetJobQueueStore, record: &JetJobQueueStoredRecord, state: JetJobQueueState, attempts: U32, now: I64, reason: String?, duration_ms: I64?, worker: String?, extra: &[(String, JetJobQueueValue)]) -> Unit JetServiceError! {
+    event_sequence :: record.event_sequence.saturating_add(1)
+    assignments := "state = ?, attempts = ?, event_sequence = ?, updated_at_ms = ?"
+    loop (column, _) in extra {
+        &assignments.push_str(", ")
+        &assignments.push_str(column)
+        &assignments.push_str(" = ?")
+    }
+    params := [JetJobQueueValue.Text(state.as_str().to_string()), JetJobQueueValue.Int(attempts as I64), JetJobQueueValue.Int(event_sequence), JetJobQueueValue.Int(now)]
+    &params.extend(extra.iter().map(fn(entry) { entry.1.clone() }))
+    &params.extend([JetJobQueueValue.Text(record.authority.clone()), JetJobQueueValue.Text(record.queue.clone()), JetJobQueueValue.Text(record.id.clone())])
+    updated :: store.execute("UPDATE jet_job_queue_jobs SET {assignments} WHERE authority = ? AND queue = ? AND id = ?", &params).map_err(fn(error) { jet_job_queue_sql_error("transition", error) })?
+    if updated != 1 -> return Err(JetServiceError.Stale("queue job changed before its transition was committed"))
+    jet_job_queue_insert_event(store, record, state, attempts, now, reason, duration_ms, worker)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:4831
+// Temporary move sentinel while transaction owns the real store; never performs a transition.
+struct JetJobQueueNoopStore {}
+impl JetJobQueueStore for JetJobQueueNoopStore {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:4834
+    fn begin(self: &Self) -> Unit JetServiceError! { Err(service_authority_error("queue transaction sentinel cannot begin")) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:4838
+    fn commit(self: &Self) -> Unit JetServiceError! { Err(service_authority_error("queue transaction sentinel cannot commit")) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:4842
+    fn rollback(self: &Self) -> Unit {}
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:4844
+    fn execute(self: &Self, sql: String, params: &[JetJobQueueValue]) -> I64 JetServiceError! { Err(service_authority_error("queue transaction sentinel cannot execute")) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:4852
+    fn query(self: &Self, sql: String, params: &[JetJobQueueValue]) -> [JetJobQueueRow] JetServiceError! { Err(service_authority_error("queue transaction sentinel cannot query")) }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:4861
+fn jet_job_queue_recover_expired_on_store(store: &JetJobQueueStore, authority: String, name: String, policy: &JetJobQueuePolicy, now: I64) -> [JetJobQueueDevtoolsTransition] JetServiceError! {
+    rows :: store.query("{JET_JOB_QUEUE_SELECT} WHERE authority = ? AND queue = ? AND state = 'running' AND lease_until_ms IS NOT NULL AND lease_until_ms <= ? ORDER BY sequence", &[JetJobQueueValue.Text(authority.to_string()), JetJobQueueValue.Text(name.to_string()), JetJobQueueValue.Int(now)]).map_err(fn(error) { jet_job_queue_sql_error("lease recovery", error) })?
+    observations := [JetJobQueueDevtoolsTransition].with_capacity(rows.len())
+    loop row in &rows {
+        record :: jet_job_queue_stored_record(row)?
+        terminal :: record.attempts >= policy.max_attempts
+        state :: if terminal { JetJobQueueState.DeadLettered } else { JetJobQueueState.Retrying }
+        reason :: if terminal { "lease_expired_max_attempts" } else { "lease_expired" }
+        duration_ms :: record.started_at_ms.map(fn(started) { now.saturating_sub(started) })
+        extra :: [("finished_at_ms", JetJobQueueValue.Int(now)), ("due_at_ms", JetJobQueueValue.Int(now)), ("retry_at_ms", JetJobQueueValue.Int(now)), ("lease_owner", JetJobQueueValue.Null), ("lease_token", JetJobQueueValue.Null), ("lease_until_ms", JetJobQueueValue.Null), ("error_type", JetJobQueueValue.Text("jet.queue.lease")), ("error_reason", JetJobQueueValue.Text(reason.to_string())), ("error_detail", JetJobQueueValue.Null)]
+        jet_job_queue_update_event(store, &record, state, record.attempts, now, Val(reason), duration_ms, record.lease_owner.as_deref(), &extra)?
+        &observations.push(JetJobQueueDevtoolsTransition.from_record(&record, state, record.attempts, now, Val(reason), duration_ms, record.lease_owner.as_deref()))
+    }
+    Ok(^observations)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:4933
+impl JetJobQueue {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:4934
+    fn claim(self: &Self, worker: String, limit: USize) -> [JetJobQueueClaim] JetServiceError! {
+        jet_job_queue_validate_name(worker, "queue worker")?
+        if limit == 0 || limit > self.policy.capacity {
+            return Err(JetServiceError.Policy("queue claim limit must be positive and within capacity"))
+        }
+        authority :: self.authority.clone()
+        name :: self.name.clone()
+        policy :: self.policy.clone()
+        self.transaction(fn(_, store) {
+            now :: jet_job_queue_now_ms()
+            rows :: store.query("SELECT paused FROM jet_job_queue_meta WHERE authority = ? AND queue = ?", &[JetJobQueueValue.Text(authority.clone()), JetJobQueueValue.Text(name.clone())]).map_err(fn(error) { jet_job_queue_sql_error("pause lookup", error) })?
+            paused :: rows.first().map(fn(row) { jet_job_queue_row_bool(row, "paused") }).transpose()?.unwrap_or(false)
+            if paused -> return Ok(([], []))
+            observations := jet_job_queue_recover_expired_on_store(store, authority, name, &policy, now)?
+            candidates :: store.query("{JET_JOB_QUEUE_SELECT} WHERE authority = ? AND queue = ? AND state IN ('queued', 'retrying') AND due_at_ms <= ? ORDER BY sequence LIMIT ?", &[JetJobQueueValue.Text(authority.clone()), JetJobQueueValue.Text(name.clone()), JetJobQueueValue.Int(now), JetJobQueueValue.Int(limit as I64)]).map_err(fn(error) { jet_job_queue_sql_error("claim lookup", error) })?
+            claims := [JetJobQueueClaim].with_capacity(candidates.len())
+            loop row in &candidates {
+                record :: jet_job_queue_stored_record(row)?
+                if record.attempts >= policy.max_attempts {
+                    extra :: [("finished_at_ms", JetJobQueueValue.Int(now)), ("due_at_ms", JetJobQueueValue.Int(now)), ("retry_at_ms", JetJobQueueValue.Int(now)), ("lease_owner", JetJobQueueValue.Null), ("lease_token", JetJobQueueValue.Null), ("lease_until_ms", JetJobQueueValue.Null), ("error_type", JetJobQueueValue.Text("jet.queue.attempts")), ("error_reason", JetJobQueueValue.Text("max_attempts")), ("error_detail", JetJobQueueValue.Null)]
+                    jet_job_queue_update_event(store, &record, .DeadLettered, record.attempts, now, Val("max_attempts"), None, None, &extra)?
+                    &observations.push(JetJobQueueDevtoolsTransition.from_record(&record, .DeadLettered, record.attempts, now, Val("max_attempts"), None, None))
+                    continue
+                }
+                attempts :: record.attempts.saturating_add(1)
+                lease_until_ms :: now.saturating_add(policy.lease_ms)
+                lease_token :: jet_job_queue_token(record.id, worker)?
+                extra :: [("started_at_ms", JetJobQueueValue.Int(now)), ("finished_at_ms", JetJobQueueValue.Null), ("lease_owner", JetJobQueueValue.Text(worker.to_string())), ("lease_token", JetJobQueueValue.Text(lease_token.clone())), ("lease_until_ms", JetJobQueueValue.Int(lease_until_ms)), ("retry_at_ms", JetJobQueueValue.Null), ("result_type", JetJobQueueValue.Null), ("result", JetJobQueueValue.Null), ("result_public", JetJobQueueValue.Int(0)), ("error_type", JetJobQueueValue.Null), ("error_reason", JetJobQueueValue.Null), ("error_detail", JetJobQueueValue.Null)]
+                jet_job_queue_update_event(store, &record, .Running, attempts, now, Val("claimed"), None, Val(worker), &extra)?
+                claimed := record.clone()
+                claimed.state = .Running
+                claimed.attempts = attempts
+                claimed.started_at_ms = Val(now)
+                claimed.finished_at_ms = None
+                claimed.lease_owner = Val(worker.to_string())
+                claimed.lease_token = Val(lease_token.clone())
+                claimed.lease_until_ms = Val(lease_until_ms)
+                claimed.retry_at_ms = None
+                claimed.result_type = None
+                claimed.result = None
+                claimed.result_public = false
+                claimed.error_type = None
+                claimed.error_reason = None
+                claimed.error_detail = None
+                claimed.updated_at_ms = now
+                claimed.event_sequence = claimed.event_sequence.saturating_add(1)
+                &claims.push(JetJobQueueClaim{receipt: jet_job_queue_make_receipt(&claimed, policy.delivery, false), payload: JetJobPayload{type_id: claimed.payload_type.clone(), bytes: claimed.payload.clone(), publish: claimed.payload_public}, worker: worker.to_string(), lease_token: ^lease_token, lease_until_ms: lease_until_ms})
+                &observations.push(JetJobQueueDevtoolsTransition.from_record(&record, .Running, attempts, now, Val("claimed"), None, Val(worker)))
+            }
+            Ok((^claims, ^observations))
+        }).map(fn((claims, observations)) {
+            jet_job_queue_publish_transitions(^observations)
+            ^claims
+        })
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:5099
+fn jet_job_queue_find_stored(store: &JetJobQueueStore, authority: String, queue: String, id: String) -> JetJobQueueStoredRecord JetServiceError! {
+    rows :: store.query("{JET_JOB_QUEUE_SELECT} WHERE authority = ? AND queue = ? AND id = ? LIMIT 1", &[JetJobQueueValue.Text(authority.to_string()), JetJobQueueValue.Text(queue.to_string()), JetJobQueueValue.Text(id.to_string())]).map_err(fn(error) { jet_job_queue_sql_error("receipt lookup", error) })?
+    rows.first().ok_or_else(fn() { JetServiceError.Unknown("queue job `{id}` is unknown") }).and_then(jet_job_queue_stored_record)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:5122
+fn jet_job_queue_u64(value: I64, label: String) -> U64 JetServiceError! {
+    U64.try_from(value).map_err(fn(_) { service_authority_error("queue {label} is outside the supported range") })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:5128
+impl JetJobQueue {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:5129
+    fn require_claim(record: &JetJobQueueStoredRecord, claim: &JetJobQueueClaim) -> Unit JetServiceError! {
+        if record.id != claim.receipt.id || record.authority != claim.receipt.authority || record.queue != claim.receipt.queue {
+            return Err(JetServiceError.Revoked("queue lease belongs to another job authority"))
+        }
+        if record.state != JetJobQueueState.Running {
+            return Err(JetServiceError.Stale("queue job is no longer running under this lease"))
+        }
+        if record.lease_owner.as_deref() != Val(claim.worker.as_str()) || record.lease_token.as_deref() != Val(claim.lease_token.as_str()) {
+            return Err(JetServiceError.Revoked("queue lease token or worker does not match"))
+        }
+        Ok(())
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:5156
+    fn heartbeat(self: &Self, claim: &JetJobQueueClaim) -> JetJobQueueReceipt JetServiceError! {
+        service_authority_validate_text(claim.lease_token, "queue lease token", JET_JOB_QUEUE_MAX_KEY, false)?
+        authority :: self.authority.clone()
+        name :: self.name.clone()
+        policy :: self.policy.clone()
+        (receipt, observation) :: self.transaction(fn(_, store) {
+            record :: jet_job_queue_find_stored(store, authority, name, claim.receipt.id)?
+            if record.state == JetJobQueueState.Completed -> return Ok((jet_job_queue_make_receipt(&record, policy.delivery, false), None))
+            Self.require_claim(&record, claim)?
+            now :: jet_job_queue_now_ms()
+            lease_until_ms :: now.saturating_add(policy.lease_ms)
+            extra :: [("lease_until_ms", JetJobQueueValue.Int(lease_until_ms))]
+            jet_job_queue_update_event(store, &record, .Running, record.attempts, now, Val("heartbeat"), None, Val(claim.worker), &extra)?
+            observation :: JetJobQueueDevtoolsTransition.from_record(&record, .Running, record.attempts, now, Val("heartbeat"), None, Val(claim.worker)).with_event("heartbeat")
+            updated := ^record
+            updated.lease_until_ms = Val(lease_until_ms)
+            updated.updated_at_ms = now
+            updated.event_sequence = updated.event_sequence.saturating_add(1)
+            Ok((jet_job_queue_make_receipt(&updated, policy.delivery, false), Val(^observation)))
+        })?
+        if observation == Val(value) -> jet_job_queue_publish_transition(&value)
+        Ok(^receipt)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:5220
+    fn acknowledge(self: &Self, claim: &JetJobQueueClaim, result: JetJobResult) -> JetJobQueueReceipt JetServiceError! {
+        jet_job_queue_validate_result(&result)?
+        authority :: self.authority.clone()
+        name :: self.name.clone()
+        policy :: self.policy.clone()
+        (receipt, observation) :: self.transaction(fn(_, store) {
+            record :: jet_job_queue_find_stored(store, authority, name, claim.receipt.id)?
+            if record.state == JetJobQueueState.Completed -> return Ok((jet_job_queue_make_receipt(&record, policy.delivery, false), None))
+            Self.require_claim(&record, claim)?
+            now :: jet_job_queue_now_ms()
+            duration_ms :: record.started_at_ms.map(fn(started) { now.saturating_sub(started) })
+            extra :: [("finished_at_ms", JetJobQueueValue.Int(now)), ("lease_owner", JetJobQueueValue.Null), ("lease_token", JetJobQueueValue.Null), ("lease_until_ms", JetJobQueueValue.Null), ("retry_at_ms", JetJobQueueValue.Null), ("result_type", JetJobQueueValue.Text(result.type_id.clone())), ("result", JetJobQueueValue.Blob(result.bytes.clone())), ("result_public", JetJobQueueValue.Int(if result.publish { 1 } else { 0 })), ("error_type", JetJobQueueValue.Null), ("error_reason", JetJobQueueValue.Null), ("error_detail", JetJobQueueValue.Null)]
+            jet_job_queue_update_event(store, &record, .Completed, record.attempts, now, Val("acknowledged"), duration_ms, Val(claim.worker), &extra)?
+            observation :: JetJobQueueDevtoolsTransition.from_record(&record, .Completed, record.attempts, now, Val("acknowledged"), duration_ms, Val(claim.worker))
+            updated := ^record
+            updated.state = .Completed
+            updated.finished_at_ms = Val(now)
+            updated.lease_owner = None
+            updated.lease_token = None
+            updated.lease_until_ms = None
+            updated.retry_at_ms = None
+            updated.result_type = Val(^result.type_id)
+            updated.result = Val(^result.bytes)
+            updated.result_public = result.publish
+            updated.error_type = None
+            updated.error_reason = None
+            updated.error_detail = None
+            updated.updated_at_ms = now
+            updated.event_sequence = updated.event_sequence.saturating_add(1)
+            Ok((jet_job_queue_make_receipt(&updated, policy.delivery, false), Val(^observation)))
+        })?
+        if observation == Val(value) -> jet_job_queue_publish_transition(&value)
+        Ok(^receipt)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:5304
+    fn fail(self: &Self, claim: &JetJobQueueClaim, error: JetJobError) -> JetJobQueueReceipt JetServiceError! {
+        jet_job_queue_validate_error(&error)?
+        authority :: self.authority.clone()
+        name :: self.name.clone()
+        policy :: self.policy.clone()
+        (receipt, observation) :: self.transaction(fn(_, store) {
+            record :: jet_job_queue_find_stored(store, authority, name, claim.receipt.id)?
+            if record.state == JetJobQueueState.DeadLettered || record.state == JetJobQueueState.Failed {
+                return Ok((jet_job_queue_make_receipt(&record, policy.delivery, false), None))
+            }
+            Self.require_claim(&record, claim)?
+            now :: jet_job_queue_now_ms()
+            terminal :: record.attempts >= policy.max_attempts
+            state :: if terminal { JetJobQueueState.DeadLettered } else { JetJobQueueState.Retrying }
+            due_at_ms :: if terminal { record.due_at_ms } else { now.saturating_add(jet_job_queue_backoff(&policy, record.attempts)) }
+            duration_ms :: record.started_at_ms.map(fn(started) { now.saturating_sub(started) })
+            extra :: [("finished_at_ms", JetJobQueueValue.Int(now)), ("due_at_ms", JetJobQueueValue.Int(due_at_ms)), ("retry_at_ms", if terminal { JetJobQueueValue.Null } else { JetJobQueueValue.Int(due_at_ms) }), ("lease_owner", JetJobQueueValue.Null), ("lease_token", JetJobQueueValue.Null), ("lease_until_ms", JetJobQueueValue.Null), ("result_type", JetJobQueueValue.Null), ("result", JetJobQueueValue.Null), ("result_public", JetJobQueueValue.Int(0)), ("error_type", JetJobQueueValue.Text(error.type_id.clone())), ("error_reason", JetJobQueueValue.Text(error.reason.clone())), ("error_detail", error.detail.clone().map_or(JetJobQueueValue.Null, JetJobQueueValue.Text))]
+            jet_job_queue_update_event(store, &record, state, record.attempts, now, Val(error.reason), duration_ms, Val(claim.worker), &extra)?
+            observation :: JetJobQueueDevtoolsTransition.from_record(&record, state, record.attempts, now, Val(error.reason), duration_ms, Val(claim.worker))
+            updated := ^record
+            updated.state = state
+            updated.finished_at_ms = Val(now)
+            updated.due_at_ms = due_at_ms
+            updated.retry_at_ms = if terminal { None } else { Val(due_at_ms) }
+            updated.lease_owner = None
+            updated.lease_token = None
+            updated.lease_until_ms = None
+            updated.result_type = None
+            updated.result = None
+            updated.result_public = false
+            updated.error_type = Val(^error.type_id)
+            updated.error_reason = Val(^error.reason)
+            updated.error_detail = ^error.detail
+            updated.updated_at_ms = now
+            updated.event_sequence = updated.event_sequence.saturating_add(1)
+            Ok((jet_job_queue_make_receipt(&updated, policy.delivery, false), Val(^observation)))
+        })?
+        if observation == Val(value) -> jet_job_queue_publish_transition(&value)
+        Ok(^receipt)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:5416
+    fn cancel(self: &Self, id: String, reason: String, lease_token: String?) -> JetJobQueueReceipt JetServiceError! {
+        service_authority_validate_text(id, "queue job id", JET_JOB_QUEUE_MAX_KEY, false)?
+        service_authority_validate_text(reason, "queue cancellation reason", JET_JOB_QUEUE_MAX_REASON, false)?
+        authority :: self.authority.clone()
+        name :: self.name.clone()
+        policy :: self.policy.clone()
+        (receipt, observation) :: self.transaction(fn(_, store) {
+            record :: jet_job_queue_find_stored(store, authority, name, id)?
+            if record.state == JetJobQueueState.Cancelled || record.state == JetJobQueueState.Completed || record.state == JetJobQueueState.DeadLettered {
+                return Ok((jet_job_queue_make_receipt(&record, policy.delivery, false), None))
+            }
+            if record.state == JetJobQueueState.Running && record.lease_token.as_deref() != lease_token {
+                return Err(JetServiceError.Revoked("running queue cancellation requires its active lease token"))
+            }
+            now :: jet_job_queue_now_ms()
+            duration_ms :: record.started_at_ms.map(fn(started) { now.saturating_sub(started) })
+            extra :: [("finished_at_ms", JetJobQueueValue.Int(now)), ("lease_owner", JetJobQueueValue.Null), ("lease_token", JetJobQueueValue.Null), ("lease_until_ms", JetJobQueueValue.Null), ("retry_at_ms", JetJobQueueValue.Null), ("error_type", JetJobQueueValue.Text("jet.queue.cancel")), ("error_reason", JetJobQueueValue.Text(reason.clone())), ("error_detail", JetJobQueueValue.Null)]
+            jet_job_queue_update_event(store, &record, .Cancelled, record.attempts, now, Val(reason), duration_ms, record.lease_owner.as_deref(), &extra)?
+            observation :: JetJobQueueDevtoolsTransition.from_record(&record, .Cancelled, record.attempts, now, Val(reason), duration_ms, record.lease_owner.as_deref())
+            updated := ^record
+            updated.state = .Cancelled
+            updated.finished_at_ms = Val(now)
+            updated.lease_owner = None
+            updated.lease_token = None
+            updated.lease_until_ms = None
+            updated.retry_at_ms = None
+            updated.error_type = Val("jet.queue.cancel")
+            updated.error_reason = Val(^reason)
+            updated.error_detail = None
+            updated.updated_at_ms = now
+            updated.event_sequence = updated.event_sequence.saturating_add(1)
+            Ok((jet_job_queue_make_receipt(&updated, policy.delivery, false), Val(^observation)))
+        })?
+        if observation == Val(value) -> jet_job_queue_publish_transition(&value)
+        Ok(^receipt)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:5503
+    fn dead_letter(self: &Self, id: String, reason: String, lease_token: String?) -> JetJobQueueReceipt JetServiceError! {
+        service_authority_validate_text(id, "queue job id", JET_JOB_QUEUE_MAX_KEY, false)?
+        service_authority_validate_text(reason, "queue dead-letter reason", JET_JOB_QUEUE_MAX_REASON, false)?
+        authority :: self.authority.clone()
+        name :: self.name.clone()
+        policy :: self.policy.clone()
+        (receipt, observation) :: self.transaction(fn(_, store) {
+            record :: jet_job_queue_find_stored(store, authority, name, id)?
+            if record.state == JetJobQueueState.DeadLettered -> return Ok((jet_job_queue_make_receipt(&record, policy.delivery, false), None))
+            if record.state == JetJobQueueState.Completed || record.state == JetJobQueueState.Cancelled {
+                return Err(JetServiceError.Policy("completed or cancelled queue work cannot be dead-lettered"))
+            }
+            if record.state == JetJobQueueState.Running && record.lease_token.as_deref() != lease_token {
+                return Err(JetServiceError.Revoked("running queue dead-lettering requires its active lease token"))
+            }
+            now :: jet_job_queue_now_ms()
+            duration_ms :: record.started_at_ms.map(fn(started) { now.saturating_sub(started) })
+            extra :: [("finished_at_ms", JetJobQueueValue.Int(now)), ("lease_owner", JetJobQueueValue.Null), ("lease_token", JetJobQueueValue.Null), ("lease_until_ms", JetJobQueueValue.Null), ("retry_at_ms", JetJobQueueValue.Null), ("error_type", JetJobQueueValue.Text("jet.queue.dead_letter")), ("error_reason", JetJobQueueValue.Text(reason.clone())), ("error_detail", JetJobQueueValue.Null)]
+            jet_job_queue_update_event(store, &record, .DeadLettered, record.attempts, now, Val(reason), duration_ms, record.lease_owner.as_deref(), &extra)?
+            observation :: JetJobQueueDevtoolsTransition.from_record(&record, .DeadLettered, record.attempts, now, Val(reason), duration_ms, record.lease_owner.as_deref())
+            updated := ^record
+            updated.state = .DeadLettered
+            updated.finished_at_ms = Val(now)
+            updated.lease_owner = None
+            updated.lease_token = None
+            updated.lease_until_ms = None
+            updated.retry_at_ms = None
+            updated.error_type = Val("jet.queue.dead_letter")
+            updated.error_reason = Val(^reason)
+            updated.error_detail = None
+            updated.updated_at_ms = now
+            updated.event_sequence = updated.event_sequence.saturating_add(1)
+            Ok((jet_job_queue_make_receipt(&updated, policy.delivery, false), Val(^observation)))
+        })?
+        if observation == Val(value) -> jet_job_queue_publish_transition(&value)
+        Ok(^receipt)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:5595
+impl JetJobQueue {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:5596
+    fn recover_expired(self: &Self) -> Unit JetServiceError! {
+        authority :: self.authority.clone()
+        name :: self.name.clone()
+        policy :: self.policy.clone()
+        observations :: self.transaction(fn(_, store) {
+            jet_job_queue_recover_expired_on_store(store, authority, name, &policy, jet_job_queue_now_ms())
+        })?
+        jet_job_queue_publish_transitions(^observations)
+        Ok(())
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:5614
+impl JetJobQueue {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:5615
+    fn status(self: &Self) -> JetJobQueueStatus JetServiceError! {
+        self.validate_endpoint()?
+        queue_params :: self.queue_params()
+        rows :: self.store.query("SELECT COALESCE(SUM(CASE WHEN state = 'queued' THEN 1 ELSE 0 END), 0) AS queued, COALESCE(SUM(CASE WHEN state = 'running' THEN 1 ELSE 0 END), 0) AS running, COALESCE(SUM(CASE WHEN state = 'retrying' THEN 1 ELSE 0 END), 0) AS retrying, COALESCE(SUM(CASE WHEN state = 'completed' THEN 1 ELSE 0 END), 0) AS completed, COALESCE(SUM(CASE WHEN state = 'failed' THEN 1 ELSE 0 END), 0) AS failed, COALESCE(SUM(CASE WHEN state = 'dead_lettered' THEN 1 ELSE 0 END), 0) AS dead_lettered, COALESCE(SUM(CASE WHEN state = 'cancelled' THEN 1 ELSE 0 END), 0) AS cancelled, MIN(CASE WHEN state IN ('queued', 'retrying') THEN accepted_at_ms END) AS oldest_accepted, MAX(updated_at_ms) AS latest_update FROM jet_job_queue_jobs WHERE authority = ? AND queue = ?", &queue_params).map_err(fn(error) { jet_job_queue_sql_error("status", error) })?
+        row :: rows.first().ok_or_else(fn() { service_authority_error("queue status returned no aggregate row") })?
+        queued :: jet_job_queue_u64(jet_job_queue_row_i64(row, "queued")?, "queued")?
+        running :: jet_job_queue_u64(jet_job_queue_row_i64(row, "running")?, "running")?
+        retrying :: jet_job_queue_u64(jet_job_queue_row_i64(row, "retrying")?, "retrying")?
+        completed :: jet_job_queue_u64(jet_job_queue_row_i64(row, "completed")?, "completed")?
+        failed :: jet_job_queue_u64(jet_job_queue_row_i64(row, "failed")?, "failed")?
+        dead_lettered :: jet_job_queue_u64(jet_job_queue_row_i64(row, "dead_lettered")?, "dead-lettered")?
+        cancelled :: jet_job_queue_u64(jet_job_queue_row_i64(row, "cancelled")?, "cancelled")?
+        now :: jet_job_queue_now_ms()
+        wait_ms :: jet_job_queue_row_optional_i64(row, "oldest_accepted")?.map(fn(accepted) { now.saturating_sub(accepted).max(0) as U64 }).unwrap_or(0)
+        freshness_ms :: jet_job_queue_row_optional_i64(row, "latest_update")?.map(fn(updated) { now.saturating_sub(updated).max(0) as U64 }).unwrap_or(0)
+        meta_rows :: self.store.query("SELECT capacity, paused FROM jet_job_queue_meta WHERE authority = ? AND queue = ? LIMIT 1", &queue_params).map_err(fn(error) { jet_job_queue_sql_error("metadata status", error) })?
+        meta :: meta_rows.first().ok_or_else(fn() { service_authority_error("queue metadata is missing") })?
+        capacity :: jet_job_queue_usize(jet_job_queue_row_i64(meta, "capacity")?, "capacity")?
+        paused :: jet_job_queue_row_bool(meta, "paused")?
+        throughput_rows :: self.store.query("SELECT COUNT(*) AS throughput FROM jet_job_queue_events WHERE authority = ? AND queue = ? AND state = 'completed' AND timestamp_ms >= ?", &[JetJobQueueValue.Text(self.authority.clone()), JetJobQueueValue.Text(self.name.clone()), JetJobQueueValue.Int(now.saturating_sub(60_000))]).map_err(fn(error) { jet_job_queue_sql_error("throughput status", error) })?
+        throughput :: throughput_rows.first().map(fn(row) { jet_job_queue_u64(jet_job_queue_row_i64(row, "throughput")?, "throughput") }).transpose()?.unwrap_or(0)
+        status :: JetJobQueueStatus{queue: self.name.clone(), authority: self.authority.clone(), queued: queued, running: running, retrying: retrying, completed: completed, failed: failed, dead_lettered: dead_lettered, cancelled: cancelled, depth: queued.saturating_add(retrying), wait_ms: wait_ms, throughput: throughput, capacity: capacity, paused: paused, freshness_ms: freshness_ms}
+        jet_job_queue_publish_status(&status)
+        Ok(^status)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:5693
+    fn set_paused(self: &Self, paused: Bool) -> JetJobQueueStatus JetServiceError! {
+        now :: jet_job_queue_now_ms()
+        authority :: self.authority.clone()
+        name :: self.name.clone()
+        self.transaction(fn(_, store) {
+            changed :: store.execute("UPDATE jet_job_queue_meta SET paused = ?, updated_at_ms = ? WHERE authority = ? AND queue = ?", &[JetJobQueueValue.Int(if paused { 1 } else { 0 }), JetJobQueueValue.Int(now), JetJobQueueValue.Text(^authority), JetJobQueueValue.Text(^name)]).map_err(fn(error) { jet_job_queue_sql_error("pause", error) })?
+            if changed != 1 -> return Err(service_authority_error("queue metadata is missing"))
+            Ok(())
+        })?
+        self.status()
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:5717
+    fn pause(self: &Self) -> JetJobQueueStatus JetServiceError! { self.set_paused(true) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:5721
+    fn resume(self: &Self) -> JetJobQueueStatus JetServiceError! { self.set_paused(false) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:5727
+    // Wait only on durable metadata: no payload is read or published.
+    fn wait(self: &Self, timeout_ms: I64) -> JetJobQueueStatus JetServiceError! {
+        if timeout_ms < 0 || timeout_ms > JET_JOB_QUEUE_MAX_DELAY_MS {
+            return Err(JetServiceError.Policy("queue wait timeout is outside the supported range"))
+        }
+        deadline :: jet_job_queue_now_ms().saturating_add(timeout_ms)
+        loop {
+            status :: self.status()?
+            if status.depth > 0 || jet_job_queue_now_ms() >= deadline -> return Ok(^status)
+            remaining :: deadline.saturating_sub(jet_job_queue_now_ms())
+            // GATE #4565: kernel primitive
+            #Unsafe("bounded native sleep uses remaining durable-metadata deadline and holds no store transaction") {
+                native_thread.sleep(Duration.from_millis(remaining.clamp(1, 25) as U64))
+            }
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:5748
+    // Explicit retention removes terminal records only; active work survives.
+    fn prune(self: &Self) -> U64 JetServiceError! {
+        cutoff :: jet_job_queue_now_ms().saturating_sub(self.policy.retention_ms)
+        authority :: self.authority.clone()
+        name :: self.name.clone()
+        self.transaction(fn(_, store) {
+            events :: store.execute("DELETE FROM jet_job_queue_events WHERE authority = ? AND queue = ? AND job_id IN (SELECT id FROM jet_job_queue_jobs WHERE authority = ? AND queue = ? AND state IN ('completed', 'failed', 'dead_lettered', 'cancelled') AND finished_at_ms IS NOT NULL AND finished_at_ms <= ?)", &[JetJobQueueValue.Text(authority.clone()), JetJobQueueValue.Text(name.clone()), JetJobQueueValue.Text(authority.clone()), JetJobQueueValue.Text(name.clone()), JetJobQueueValue.Int(cutoff)]).map_err(fn(error) { jet_job_queue_sql_error("event retention", error) })?
+            jobs :: store.execute("DELETE FROM jet_job_queue_jobs WHERE authority = ? AND queue = ? AND state IN ('completed', 'failed', 'dead_lettered', 'cancelled') AND finished_at_ms IS NOT NULL AND finished_at_ms <= ?", &[JetJobQueueValue.Text(^authority), JetJobQueueValue.Text(^name), JetJobQueueValue.Int(cutoff)]).map_err(fn(error) { jet_job_queue_sql_error("job retention", error) })?
+            Ok(jet_job_queue_u64(events.saturating_add(jobs), "pruned records")?)
+        })
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:5781
+pub fn jet_job_queue_receipt(queue: &JetJobQueue, id: String) -> JetJobQueueReceipt JetServiceError! { queue.receipt(id) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:5788
+pub fn jet_job_queue_inspect(queue: &JetJobQueue, limit: I64, include_payload: Bool) -> [JetJobQueueRecord] JetServiceError! { queue.inspect(jet_job_queue_usize(limit, "inspection limit")?, include_payload) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:5796
+pub fn jet_job_queue_events(queue: &JetJobQueue, id: String) -> [JetJobQueueEvent] JetServiceError! { queue.events(id) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:5803
+pub fn jet_job_queue_claim(queue: &JetJobQueue, worker: String, limit: I64) -> [JetJobQueueClaim] JetServiceError! { queue.claim(worker, jet_job_queue_usize(limit, "claim limit")?) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:5811
+pub fn jet_job_queue_heartbeat(queue: &JetJobQueue, claim: &JetJobQueueClaim) -> JetJobQueueReceipt JetServiceError! { queue.heartbeat(claim) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:5818
+pub fn jet_job_queue_acknowledge(queue: &JetJobQueue, claim: &JetJobQueueClaim, result: JetJobResult) -> JetJobQueueReceipt JetServiceError! { queue.acknowledge(claim, ^result) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:5826
+pub fn jet_job_queue_fail(queue: &JetJobQueue, claim: &JetJobQueueClaim, error: JetJobError) -> JetJobQueueReceipt JetServiceError! { queue.fail(claim, ^error) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:5833
+const JET_JOB_SERVICE_CLAIM_LIMIT: USize = 16
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:5838
+// Engines supply checked identity lookup and typed invocation; lease and settlement remain here.
+pub fn jet_job_service_queue_tick_dispatch<F: FnMut(String, &JetJobPayload) -> JetJobResult JetJobError!>(endpoint: &JetServiceEndpoint, limit: USize, dispatch: F) -> USize JetServiceError! {
+    if limit == 0 -> return Ok(0)
+    queue := JetJobQueue.open_default(endpoint, "default", JetJobQueuePolicy.default())?
+    claims :: queue.claim(endpoint.worker, limit.min(JET_JOB_SERVICE_CLAIM_LIMIT))?
+    settled := USize{0}
+    loop claim in claims {
+        // GATE #4565: kernel primitive
+        outcome :: #Unsafe("catch native unwind only around typed dispatcher; queue claims settle outside the panic boundary") {
+            catch_unwind(AssertUnwindSafe(fn() { dispatch(claim.receipt.job_type.as_str(), &claim.payload) }))
+        }.map_err(fn(_) { JetJobError{type_id: claim.payload.type_id.clone(), reason: "panic", detail: Val("checked #Job `{claim.receipt.job_type}` dispatcher panicked")} }).and_then(fn(result) { ^result })
+        match outcome {
+            Ok(result) -> {
+                checked :: JetJobResult.new(^result.type_id, ^result.bytes, result.publish).map_err(fn(error) {
+                    JetJobError{type_id: claim.payload.type_id.clone(), reason: "invalid_result", detail: Val(error.jet_show())}
+                })
+                match checked {
+                    Ok(result) -> { _ :: queue.acknowledge(&claim, ^result)? }
+                    Err(error) -> { _ :: queue.fail(&claim, ^error)? }
+                }
+            }
+            Err(error) -> { _ :: queue.fail(&claim, ^error)? }
+        }
+        settled += 1
+    }
+    Ok(settled)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:5898
+pub fn jet_job_queue_cancel(queue: &JetJobQueue, id: String, reason: String, lease_token: &String?) -> JetJobQueueReceipt JetServiceError! { queue.cancel(id, reason, lease_token.as_deref()) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:5907
+pub fn jet_job_queue_dead_letter(queue: &JetJobQueue, id: String, reason: String, lease_token: &String?) -> JetJobQueueReceipt JetServiceError! { queue.dead_letter(id, reason, lease_token.as_deref()) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:5916
+pub fn jet_job_queue_recover_expired(queue: &JetJobQueue) -> Unit JetServiceError! { queue.recover_expired() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:5922
+pub fn jet_job_queue_status(queue: &JetJobQueue) -> JetJobQueueStatus JetServiceError! { queue.status() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:5928
+pub fn jet_job_queue_pause(queue: &JetJobQueue) -> JetJobQueueStatus JetServiceError! { queue.pause() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:5934
+pub fn jet_job_queue_resume(queue: &JetJobQueue) -> JetJobQueueStatus JetServiceError! { queue.resume() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:5940
+pub fn jet_job_queue_wait(queue: &JetJobQueue, duration: Duration) -> JetJobQueueStatus JetServiceError! {
+    milliseconds :: I64.try_from(duration.as_millis()).map_err(fn(_) { service_authority_error("queue wait duration is outside the supported range") })?
+    queue.wait(milliseconds)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:5949
+pub fn jet_job_queue_prune(queue: &JetJobQueue) -> I64 JetServiceError! {
+    queue.prune().and_then(fn(count) { I64.try_from(count).map_err(fn(_) { service_authority_error("queue pruned count is outside the supported range") }) })
+}
 

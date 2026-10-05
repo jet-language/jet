@@ -1,0 +1,127 @@
+use core.sync.runtime.top_sync.*
+use core.encoding.runtime.top_encoding_traits.[__jet_Encode,__jet_Decode]
+use core.encoding.runtime.std_data_tree.DataTree
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Sync.rs:262/302/364
+#Test("sync_text_scalar_edits_converge_and_deletions_win") {
+    base :: jet_sync_text_new("origin", "éx")
+    left :: jet_sync_text_edit(base.clone(), "left", 1, 0, "L")
+    right :: jet_sync_text_edit(base.clone(), "right", 1, 1, "R")
+    lr :: jet_sync_text_merge(&left, &right)
+    rl :: jet_sync_text_merge(&right, &left)
+    assert_eq(jet_sync_text_show(&lr), "SyncText(éRL)")
+    assert_eq(jet_sync_text_show(&lr), jet_sync_text_show(&rl))
+    assert_eq(jet_sync_text_show(&jet_sync_text_merge(&lr, &lr)), jet_sync_text_show(&lr))
+    assert_eq(jet_sync_text_show(&jet_sync_text_edit(base.clone(), "left", -1, 0, "bad")), "SyncText(éx)")
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Sync.rs:302/374
+#Test("sync_text_collision_orphan_and_metadata_order") {
+    a :: jet_sync_text_new("writer", "a")
+    b :: jet_sync_text_new("writer", "b")
+    assert_eq(jet_sync_text_show(&jet_sync_text_merge(&a, &b)), "SyncError(invalid SyncText)")
+    orphan :: JetSyncText{atoms: [JetSyncTextAtom{replica: "writer", counter: 1, after: Val(("missing", U64{1})), ch: 'a', deleted: false}], valid: true}
+    assert(!jet_sync_text_merge(&orphan, &orphan).valid)
+    merged :: jet_sync_text_merge(&jet_sync_text_new("z", "z"), &jet_sync_text_new("a", "a"))
+    assert_eq(jet_sync_text_metadata(&merged), "LamportClock(a=1,z=1)")
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Sync.rs:393/417/455/465/503
+#Test("sync_counter_checked_limits_and_componentwise_merge") {
+    minimum :: jet_sync_counter_new("a", I64.MIN)
+    assert_eq(jet_sync_counter_value(&minimum), I64.MIN)
+    assert(!jet_sync_counter_inc(jet_sync_counter_new("a", I64.MAX), "a", 1).valid)
+    a :: jet_sync_counter_inc(jet_sync_counter_new("a", 5), "a", -2)
+    b :: jet_sync_counter_new("b", -4)
+    merged :: jet_sync_counter_merge(&a, &b)
+    assert_eq(jet_sync_counter_value(&merged), I64{-1})
+    assert_eq(jet_sync_counter_metadata(&merged), "PNCounter(a=+5/-2,b=+0/-4)")
+    assert_eq(jet_sync_counter_metadata(&jet_sync_counter_merge(&merged, &merged)), jet_sync_counter_metadata(&merged))
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Sync.rs:530-678
+#Test("sync_map_observed_clock_ties_and_absorbing_denial") {
+    remote :: JetSyncMap{entries: [("key","remote",99,"z")],valid: true}
+    local :: jet_sync_map_set_replica(remote.clone(),"a","key","new")
+    assert(local.entries[0].2 == 100)
+    assert(jet_sync_map_get(&jet_sync_map_merge(&remote,&local),"key").unwrap() == "new")
+    a :: JetSyncMap{entries: [("key","a",1,"x")],valid: true}
+    b :: JetSyncMap{entries: [("key","b",1,"x")],valid: true}
+    assert(jet_sync_map_get(&jet_sync_map_merge(&a,&b),"key").unwrap() == "b")
+    assert(jet_sync_map_show(&jet_sync_map_merge(&a,&b)) == jet_sync_map_show(&jet_sync_map_merge(&b,&a)))
+    denied :: JetSyncMap{entries: [("key","secret",1,"x")],valid: false}
+    assert(jet_sync_map_get(&denied,"key").is_none())
+    assert(!jet_sync_map_merge(&a,&denied).valid)
+    assert(!jet_sync_map_set_replica(JetSyncMap{entries: [("key","v",U64.MAX,"x")],valid: true},"x","key","next").valid)
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Sync.rs:698-868
+#Test("sync_generic_map_codable_identity_and_roundtrip") {
+    a :: jet_sync_map_set_generic(jet_sync_map_new_generic::<I64,String>(),"a",7,"first")
+    b :: jet_sync_map_set_generic(jet_sync_map_new_generic::<I64,String>(),"b",7,"second")
+    merged :: jet_sync_map_merge_generic(&a,&b)
+    assert(merged.entries.len() == 1)
+    assert(jet_sync_map_get_generic(&merged,&I64{7}).unwrap() == "second")
+    decoded :: JetSyncMapGeneric<I64,String>.jet_decode(&merged.jet_encode()).unwrap()
+    assert(jet_sync_map_show_generic(&decoded) == jet_sync_map_show_generic(&merged))
+    assert(jet_sync_map_metadata_generic(&decoded) == jet_sync_map_metadata_generic(&merged))
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Sync.rs:870-925
+#Test("sync_row_policy_compiles_canonical_predicate_and_denies_invalid_tokens") {
+    policy :: jet_db_policy_new("records","owner == user").unwrap()
+    assert(jet_db_policy_allows(&policy,"alice","alice"))
+    assert(!jet_db_policy_allows(&policy,"alice","bob"))
+    assert(!jet_db_policy_allows(&policy,"alice\n","alice\n"))
+    from_compiled :: jet_db_policy_from_compiled("records",jet_db_policy_compiled(&policy)).unwrap()
+    assert(jet_db_policy_show(&policy) == jet_db_policy_show(&from_compiled))
+    assert(jet_db_policy_new("","owner == user").is_err())
+    assert(jet_db_policy_new("records","invented").is_err())
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Sync.rs:927-1132
+#Test("sync_list_membership_deduplication_and_deterministic_order") {
+    a :: jet_sync_list_push(jet_sync_list_push(jet_sync_list_new(),"z","item"),"z","item")
+    b :: jet_sync_list_push(jet_sync_list_new(),"a","item")
+    merged :: jet_sync_list_merge(&a,&b)
+    assert(merged.items.len() == 2)
+    assert(jet_sync_list_show(&merged) == "SyncList(a:item|z:item)")
+    assert(jet_sync_list_show(&merged) == jet_sync_list_show(&jet_sync_list_merge(&b,&a)))
+    typed :: jet_sync_list_push_generic(jet_sync_list_push_generic(jet_sync_list_new_generic::<I64>(),"a",7),"a",7)
+    assert(typed.items.len() == 1)
+    assert(jet_sync_list_metadata_generic(&typed) == "GSet(items=1)")
+    assert(jet_sync_list_show_generic(&typed) == jet_sync_list_show_generic(&JetSyncListGeneric<I64>.jet_decode(&typed.jet_encode()).unwrap()))
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Sync.rs:1212-1330
+#Test("sync_codec_exact_shapes_and_canonical_unsigned_clock") {
+    assert(jet_sync_decode_u64(&DataTree.Text("18446744073709551615"),"clock").unwrap() == U64.MAX)
+    assert(jet_sync_decode_u64(&DataTree.Text("01"),"clock").is_err())
+    assert(jet_sync_decode_u64(&DataTree.Text("18446744073709551616"),"clock").is_err())
+    assert(jet_sync_decode_u64(&DataTree.Int(-1),"clock").is_err())
+    assert(jet_sync_object(&DataTree.Object([("key",DataTree.Null),("key",DataTree.Null)]),&["key","value"],"entry").is_err())
+    marker :: DataTree.Object([("invalid",DataTree.Bool(true))])
+    assert(!JetSyncText.jet_decode(&marker).unwrap().valid)
+    assert(!JetSyncCounter.jet_decode(&marker).unwrap().valid)
+    assert(!JetSyncMap.jet_decode(&marker).unwrap().valid)
+    assert(!JetSyncList.jet_decode(&marker).unwrap().valid)
+    assert(!JetSyncMapGeneric<I64,String>.jet_decode(&marker).unwrap().valid)
+    assert(!JetSyncListGeneric<I64>.jet_decode(&marker).unwrap().valid)
+    assert(jet_sync_is_invalid_marker(&JetSyncMap.jet_decode(&marker).unwrap().jet_encode()))
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Sync.rs:1376-1837
+#Test("sync_codec_roundtrip_reachability_duplicates_and_signed_counter_bound") {
+    text :: jet_sync_text_new("writer","éx")
+    assert(jet_sync_text_show(&JetSyncText.jet_decode(&text.jet_encode()).unwrap()) == jet_sync_text_show(&text))
+    cycle :: JetSyncText{atoms: [JetSyncTextAtom{replica: "a",counter: 1,after: Some(("a",U64{1})),ch: 'a',deleted: false}],valid: true}
+    assert(JetSyncText.jet_decode(&cycle.jet_encode()).is_err())
+    duplicate :: JetSyncText{atoms: [text.atoms[0].clone(),text.atoms[0].clone()],valid: true}
+    assert(JetSyncText.jet_decode(&duplicate.jet_encode()).is_err())
+    minimum :: jet_sync_counter_new("writer",I64.MIN)
+    assert(jet_sync_counter_value(&JetSyncCounter.jet_decode(&minimum.jet_encode()).unwrap()) == I64.MIN)
+    overflow :: JetSyncCounter{counts: [("writer",U64.MAX,0)],valid: true}
+    assert(JetSyncCounter.jet_decode(&overflow.jet_encode()).is_err())
+    duplicate_map :: JetSyncMap{entries: [("k","a",1,"w"),("k","b",2,"w")],valid: true}
+    assert(JetSyncMap.jet_decode(&duplicate_map.jet_encode()).is_err())
+    duplicate_list :: JetSyncList{items: [("w","a"),("w","a")],valid: true}
+    assert(JetSyncList.jet_decode(&duplicate_list.jet_encode()).is_err())
+}

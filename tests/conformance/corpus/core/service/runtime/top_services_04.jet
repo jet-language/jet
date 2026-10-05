@@ -1,0 +1,121 @@
+use core.service.runtime.top_services.*
+use core.service.runtime.top_services_04.*
+use core.service.runtime.top_service_authority.[JetServiceError,service_authority_provider_issue,jet_services_authority_endpoint]
+use std.sync.[Arc,Mutex]
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:5599-5813
+#Test("service_workflow_stopped_tree_precedes_step_and_activity_validation") {
+    tree := jet_services_tree("workflow-test")
+    match jet_services_workflow_step(&tree,I64{1},"") {
+        Err(JetServiceError.NotStarted(message)) -> assert(message == "service tree is not started"),
+        _ -> assert(false)
+    }
+    assert(jet_services_workflow_activity(&tree,I64{1},"","",0).is_err())
+    assert(jet_services_workflow_activity_retry(&tree,I64{1},"",JetTaskOutcome.Finished).is_err())
+    assert(jet_services_workflow_activity_complete(&tree,I64{1},"",JetTaskOutcome.Finished).is_err())
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:5561-5597
+#Test("service_workflow_all_replays_recorded_wait_without_append") {
+    authority :: JetServiceStateAuthority{store: "",schema: "",version: 1,migration: "",adapter: JetServiceStateAdapter.Empty}
+    workflow :: JetServiceWorkflow{id: "replay",run_id: 1,version: 1,steps: [],history: ["step:initial","all:a,b"],replay_cursor: 1,status: JetTaskStatus.Running,activity_outcomes: [],outcome: None}
+    // GATE #4565: kernel primitive
+    handle :: #Unsafe("test owns real synchronized workflow state; replay requires no durable append") { JetWorkflowHandle{authority,state: Arc.new(Mutex.new(workflow))} }
+    assert(jet_services_workflow_all(&handle,["a","b"]).unwrap() == ["a","b"])
+    // GATE #4565: kernel primitive
+    #Unsafe("inspect real workflow cursor under the same handle mutex") { assert(handle.state.lock().unwrap().replay_cursor == 2) }
+    assert(jet_services_workflow_all(&handle,["bad\nvalue"]).is_err())
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:5991-6057
+#Test("service_directory_missing_entry_and_generation") {
+    tree :: jet_services_tree("directory-test")
+    assert(jet_services_directory_generation(&tree) == tree.generation)
+    match jet_services_directory_resolve(&tree,"absent") {
+        Err(JetServiceError.Unknown(message)) -> assert(message == "directory has no entry `absent`"),
+        _ -> assert(false)
+    }
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:6059-6239
+#Test("service_drain_and_partition_require_started_tree") {
+    tree := jet_services_tree("stopped-routing-test")
+    authority :: service_authority_provider_issue().unwrap()
+    endpoint :: jet_services_authority_endpoint("stopped-routing-test","worker",1,authority).unwrap()
+    match jet_services_drain_worker(&tree,&endpoint) {
+        Err(JetServiceError.NotStarted(message)) -> assert(message == "service tree is not started"),
+        _ -> assert(false)
+    }
+    match jet_services_partition_worker(&tree,&endpoint) {
+        Err(JetServiceError.NotStarted(message)) -> assert(message == "service tree is not started"),
+        _ -> assert(false)
+    }
+    assert(tree.draining.is_empty())
+    assert(tree.partitioned.is_empty())
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:6323-6380
+#Test("service_rollback_empty_authority_and_recovery_error_order") {
+    tree :: jet_services_tree("rollback-empty")
+    assert(jet_services_prepare_rollback(&tree).unwrap() == ("",false,"none"))
+    assert(jet_services_discard_rollback_store("").is_ok())
+    primary :: JetServiceError.Unknown("primary")
+    assert(jet_services_rollout_failure(primary.clone(),Ok(()),Ok(()),Ok(())) == primary)
+    combined :: jet_services_rollout_failure(primary.clone(),Err(JetServiceError.Policy("authority")),Err(JetServiceError.Policy("tasks")),Err(JetServiceError.Policy("cleanup")))
+    expected :: "{primary.jet_show()}; authority rollback failed: {JetServiceError.Policy(\"authority\").jet_show()}; handoff task recovery failed: {JetServiceError.Policy(\"tasks\").jet_show()}; rollback store cleanup failed: {JetServiceError.Policy(\"cleanup\").jet_show()}"
+    match combined { JetServiceError.Policy(message) -> assert(message == expected), _ -> assert(false) }
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:6562-6952
+#Test("service_handoff_and_rollback_validation_precedence") {
+    tree := jet_services_tree("rollout-validation")
+    match jet_services_handoff_generation(&tree) {
+        Err(JetServiceError.NotStarted(message)) -> assert(message == "service tree is not started"),
+        _ -> assert(false)
+    }
+    assert(jet_services_rollback_generation(&tree).is_err())
+    assert(jet_services_upgrade_receipt(&tree).is_err())
+    tree.started = true
+    match jet_services_rollback_generation(&tree) {
+        Err(JetServiceError.Policy(message)) -> assert(message == "no previous generation to roll back to"),
+        _ -> assert(false)
+    }
+    tree.previous_generation = 1
+    match jet_services_rollback_generation(&tree) {
+        Err(JetServiceError.Policy(message)) -> assert(message == "service tree has no rollback receipt"),
+        _ -> assert(false)
+    }
+    tree.last_upgrade = Some(JetServiceUpgradeReceipt{from_generation: 1,to_generation: tree.generation+1,migration: "forward_only",rollback_store: "",rollback_available: false,pinned_shards: []})
+    match jet_services_rollback_generation(&tree) {
+        Err(JetServiceError.Stale(message)) -> assert(message == "service rollback receipt does not match the active generation"),
+        _ -> assert(false)
+    }
+    tree.last_upgrade.as_mut().unwrap().to_generation = tree.generation
+    match jet_services_rollback_generation(&tree) {
+        Err(JetServiceError.Policy(message)) -> assert(message == "forward-only state migration cannot roll back; publish a forward recovery generation"),
+        _ -> assert(false)
+    }
+    tree.last_upgrade.as_mut().unwrap().pinned_shards.push("pinned")
+    match jet_services_handoff_generation(&tree) {
+        Err(JetServiceError.Policy(message)) -> assert(message == "cannot start another handoff while pinned shards are draining"),
+        _ -> assert(false)
+    }
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:6954-7023
+#Test("service_chaos_counter_failure_and_empty_observation") {
+    tree := jet_services_tree("observe")
+    match jet_services_chaos_fail(&tree) {
+        Err(JetServiceError.NotStarted(message)) -> assert(message == "service tree is not started"),
+        _ -> assert(false)
+    }
+    assert(tree.chaos_fails == 0)
+    tree.started = true
+    match jet_services_chaos_fail(&tree) {
+        Err(JetServiceError.Partitioned(message)) -> assert(message == "chaos failure has no reachable service worker"),
+        _ -> assert(false)
+    }
+    assert(tree.chaos_fails == 1)
+    assert(jet_services_workflow_observation(&[]) == "workflows=0,statuses={running:0,paused:0,cancel_requested:0},outcomes={pending:0,finished:0,panicked:0,cancelled:0,deadline_blown:0}")
+    assert(jet_services_observe(&tree) == "Observe(workers=0, started=true, generation={tree.generation}, dead_letters=0, events=0, chaos=1, draining=0, partitions=0, rollback=false, {jet_services_workflow_observation(&[])})")
+}

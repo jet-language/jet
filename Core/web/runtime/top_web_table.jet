@@ -1,1689 +1,902 @@
-// PORT-PENDING 0314 crates-jet-codegen-src-prelude-corelib-top-webtable: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:1-1685
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS // D-DX-SUITE1=C / #2475: headless typed web tables.
-//RS //
-//RS // The table owns only row and view state.  It emits no markup or styles.  The
-//RS // row type stays generic, while the checked compiler supplies the column
-//RS // accessor and cell type.  Runtime sorting/filtering is deliberately stable
-//RS // and deterministic so every renderer sees the same page.
-//RS 
-//RS use std::collections::{BTreeMap as JetWebTablePages, BTreeSet as JetWebTableSet};
-//RS use std::sync::{Arc as JetWebTableArc, Mutex as JetWebTableMutex};
-//RS 
-//RS const JET_WEB_TABLE_DEFAULT_PAGE_SIZE: i64 = 25;
-//RS const JET_WEB_TABLE_MAX_PAGE_SIZE: i64 = 10_000;
-//RS const JET_WEB_TABLE_MAX_KEY_BYTES: usize = 256;
-//RS 
-//RS /// Page requests use the same explicit-key/generation identity as #2473's
-//RS /// keyed LiveQuery registry.  The table keeps typed pages, while LiveQuery
-//RS /// owns the stale-response rule instead of this feature inventing one.
-//RS fn jet_web_table_page_generation(name: &str, advance: bool) -> u64 {
-//RS     let mut hash = 14_695_981_039_346_656_037_u64;
-//RS     for byte in name.as_bytes() {
-//RS         hash ^= u64::from(*byte);
-//RS         hash = hash.wrapping_mul(1_099_511_628_211);
-//RS     }
-//RS     let identity = format!("web.table.page.{hash:016x}");
-//RS     if advance {
-//RS         let _ = jet_app_invalidate_key(identity.clone());
-//RS     }
-//RS     jet_app_live_keyed(
-//RS         identity.clone(),
-//RS         identity,
-//RS         String::new(),
-//RS         None,
-//RS         None,
-//RS     )
-//RS     .lifecycle.generation
-//RS }
-//RS 
-//RS #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-//RS pub enum JetWebTableSortDirection {
-//RS     Ascending,
-//RS     Descending,
-//RS }
-//RS 
-//RS impl JetWebTableSortDirection {
-//RS     fn is_descending(self) -> bool {
-//RS         matches!(self, Self::Descending)
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Clone, Debug, PartialEq, Eq)]
-//RS pub struct JetWebTableSort {
-//RS     pub column: String,
-//RS     pub direction: JetWebTableSortDirection,
-//RS }
-//RS 
-//RS #[derive(Clone, Debug, PartialEq, Eq)]
-//RS pub struct JetWebTableFilter {
-//RS     pub column: String,
-//RS     pub value: String,
-//RS 
-//RS }
-//RS #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-//RS pub enum JetWebTablePageMode {
-//RS     Client,
-//RS     Server,
-//RS }
-//RS 
-//RS impl JetWebTablePageMode {
-//RS     fn is_server(self) -> bool {
-//RS         matches!(self, Self::Server)
-//RS     }
-//RS }
-//RS #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-//RS pub enum JetWebTableStatus {
-//RS     Idle,
-//RS     Loading,
-//RS     Ready,
-//RS     Error,
-//RS }
-//RS 
-//RS impl JetWebTableStatus {
-//RS     pub fn name(self) -> &'static str {
-//RS         match self {
-//RS             Self::Idle => "idle",
-//RS             Self::Loading => "loading",
-//RS             Self::Ready => "ready",
-//RS             Self::Error => "error",
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// Renderer-neutral table facts. The page and keyed rows are optional because
-//RS /// a server table has no data until its loader succeeds. DOM, TUI, and native
-//RS /// hosts consume this carrier and decide markup, colors, and layout themselves.
-//RS #[derive(Clone)]
-//RS pub struct JetWebTableProjection<T> {
-//RS     pub key: String,
-//RS     pub state: JetWebTableState,
-//RS     pub columns: Vec<(String, String)>,
-//RS     pub page: Option<JetWebTablePage<T>>,
-//RS     pub rows: Vec<JetWebTableRow<T>>,
-//RS     pub status: JetWebTableStatus,
-//RS     pub loading: bool,
-//RS     pub error: String,
-//RS }
-//RS 
-//RS 
-//RS #[derive(Clone, Debug, PartialEq, Eq)]
-//RS pub struct JetWebTableState {
-//RS     pub sort: Option<JetWebTableSort>,
-//RS     pub filter: Option<JetWebTableFilter>,
-//RS     pub page_index: i64,
-//RS     pub page_size: i64,
-//RS     /// Focus is keyed too, so virtual-window changes do not move keyboard
-//RS     /// focus to a different row when the visible slice is remeasured.
-//RS     pub selected_keys: Vec<String>,
-//RS     pub selection_anchor: Option<String>,
-//RS     pub focus_key: Option<String>,
-//RS     pub page_mode: JetWebTablePageMode,
-//RS }
-//RS 
-//RS impl Default for JetWebTableState {
-//RS     fn default() -> Self {
-//RS         Self {
-//RS             sort: None,
-//RS             filter: None,
-//RS             page_index: 0,
-//RS             page_size: JET_WEB_TABLE_DEFAULT_PAGE_SIZE,
-//RS             selected_keys: Vec::new(),
-//RS             selection_anchor: None,
-//RS             focus_key: None,
-//RS             page_mode: JetWebTablePageMode::Client,
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// A checked column carries its source cell type for renderer/devtools facts.
-//RS /// The accessor is the only erased part of the runtime boundary; sema rejects
-//RS /// a missing accessor before this value can be constructed from Jet.
-//RS pub struct JetWebTableColumn<T> {
-//RS     pub name: String,
-//RS     pub cell_type: String,
-//RS     accessor: JetWebTableArc<dyn Fn(&T) -> String + Send + Sync + 'static>,
-//RS }
-//RS 
-//RS impl<T> Clone for JetWebTableColumn<T> {
-//RS     fn clone(&self) -> Self {
-//RS         Self {
-//RS             name: self.name.clone(),
-//RS             cell_type: self.cell_type.clone(),
-//RS             accessor: self.accessor.clone(),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS impl<T> JetWebTableColumn<T> {
-//RS     fn value(&self, row: &T) -> String {
-//RS         (self.accessor)(row)
-//RS     }
-//RS 
-//RS     pub fn cell_type(&self) -> String {
-//RS         self.cell_type.clone()
-//RS     }
-//RS }
-//RS 
-//RS /// One materialized page. `rows` contains only the requested page; the
-//RS /// `total_rows` and `page_count` facts remain available to an accessible
-//RS /// paginator and to the devtools panel.
-//RS #[derive(Clone, Debug, PartialEq)]
-//RS pub struct JetWebTableRow<T> {
-//RS     pub key: String,
-//RS     pub value: T,
-//RS }
-//RS 
-//RS #[derive(Clone, Debug, PartialEq)]
-//RS pub struct JetWebTablePage<T> {
-//RS     pub rows: Vec<T>,
-//RS     /// Keys align one-for-one with `rows`; consumers must never infer identity
-//RS     /// from the row's page position.
-//RS     pub row_keys: Vec<String>,
-//RS     pub total_rows: i64,
-//RS     pub page_index: i64,
-//RS     pub page_size: i64,
-//RS     pub page_count: i64,
-//RS }
-//RS 
-//RS impl<T> JetWebTablePage<T> {
-//RS     pub fn has_previous(&self) -> bool {
-//RS         self.page_index > 0
-//RS     }
-//RS     pub fn has_next(&self) -> bool {
-//RS         self.page_index.saturating_add(1) < self.page_count
-//RS     }
-//RS 
-//RS     pub fn first_page(&self) -> i64 {
-//RS         0
-//RS     }
-//RS 
-//RS     pub fn last_page(&self) -> i64 {
-//RS         self.page_count.saturating_sub(1)
-//RS     }
-//RS 
-//RS     pub fn next_page(&self) -> Option<i64> {
-//RS         self.has_next().then_some(self.page_index + 1)
-//RS     }
-//RS 
-//RS     pub fn previous_page(&self) -> Option<i64> {
-//RS         self.has_previous().then_some(self.page_index - 1)
-//RS     }
-//RS 
-//RS     pub fn keyed_rows(&self) -> Vec<JetWebTableRow<T>>
-//RS     where
-//RS         T: Clone,
-//RS     {
-//RS         self.rows
-//RS             .iter()
-//RS             .cloned()
-//RS             .zip(self.row_keys.iter().cloned())
-//RS             .map(|(value, key)| JetWebTableRow { key, value })
-//RS             .collect()
-//RS     }
-//RS }
-//RS 
-//RS type JetWebTablePageLoader<T> =
-//RS     JetWebTableArc<dyn Fn(JetWebTableState) -> Result<JetWebTablePage<T>, String> + Send + Sync>;
-//RS type JetWebTableRowKey<T> =
-//RS     JetWebTableArc<dyn Fn(&T) -> String + Send + Sync + 'static>;
-//RS 
-//RS #[derive(Clone)]
-//RS pub struct JetWebTable<T> {
-//RS     pub name: String,
-//RS     rows: jet_std::JetSignal<Vec<T>>,
-//RS     state: jet_std::JetSignal<JetWebTableState>,
-//RS     columns: JetWebTableArc<Vec<JetWebTableColumn<T>>>,
-//RS     row_key: Option<JetWebTableRowKey<T>>,
-//RS     server_page: Option<JetWebTablePageLoader<T>>,
-//RS     loading: jet_std::JetSignal<bool>,
-//RS     error: jet_std::JetSignal<String>,
-//RS     /// The last successful page is the only data snapshot exposed to a
-//RS     /// renderer for a server-backed table. It is invalidated whenever the
-//RS     /// page-driving state changes.
-//RS     loaded_page: jet_std::JetSignal<Option<JetWebTablePage<T>>>,
-//RS     /// Accepted row keys by page for the current sort/filter boundary. A
-//RS     /// duplicate key on a different page is rejected instead of silently
-//RS     /// rendering one row twice.
-//RS     server_key_pages: JetWebTableArc<JetWebTableMutex<JetWebTablePages<i64, Vec<String>>>>,
-//RS }
-//RS 
-//RS impl<T: Clone + Send + Sync + 'static> JetWebTable<T> {
-//RS     pub fn new(name: String, rows: Vec<T>) -> Self {
-//RS         Self::new_with_key_arc(name, rows, None)
-//RS     }
-//RS 
-//RS     pub fn new_with_key<F>(name: String, rows: Vec<T>, key: F) -> Self
-//RS     where
-//RS         F: Fn(&T) -> String + Send + Sync + 'static,
-//RS     {
-//RS         Self::new_with_key_arc(name, rows, Some(JetWebTableArc::new(key)))
-//RS     }
-//RS 
-//RS     fn new_with_key_arc(
-//RS         name: String,
-//RS         rows: Vec<T>,
-//RS         row_key: Option<JetWebTableRowKey<T>>,
-//RS     ) -> Self {
-//RS         Self {
-//RS             name,
-//RS             rows: jet_std::JetSignal::new(rows),
-//RS             state: jet_std::JetSignal::new(JetWebTableState::default()),
-//RS             columns: JetWebTableArc::new(Vec::new()),
-//RS             row_key,
-//RS             server_page: None,
-//RS             loading: jet_std::JetSignal::new(false),
-//RS             error: jet_std::JetSignal::new(String::new()),
-//RS             loaded_page: jet_std::JetSignal::new(None),
-//RS             server_key_pages: JetWebTableArc::new(JetWebTableMutex::new(
-//RS                 JetWebTablePages::new(),
-//RS             )),
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn rows(&self) -> Vec<T> {
-//RS         self.rows.get()
-//RS     }
-//RS 
-//RS     pub fn rows_signal(&self) -> jet_std::JetSignal<Vec<T>> {
-//RS         self.rows.clone()
-//RS     }
-//RS 
-//RS     fn clear_server_key_pages(&self) {
-//RS         if let Ok(mut pages) = self.server_key_pages.lock() {
-//RS             pages.clear();
-//RS         }
-//RS     }
-//RS 
-//RS     fn accept_server_page_keys(&self, page: &JetWebTablePage<T>) -> Result<(), String> {
-//RS         let Ok(mut pages) = self.server_key_pages.lock() else {
-//RS             return Err("server table page identity registry is unavailable".to_string());
-//RS         };
-//RS         for (other_page, keys) in pages.iter() {
-//RS             if *other_page != page.page_index
-//RS                 && page
-//RS                     .row_keys
-//RS                     .iter()
-//RS                     .any(|key| keys.iter().any(|other| other == key))
-//RS             {
-//RS                 return Err("server table response duplicates a row key across pages".to_string());
-//RS             }
-//RS         }
-//RS         pages.insert(page.page_index, page.row_keys.clone());
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     pub fn set_rows(&self, rows: Vec<T>) {
-//RS         let state = jet_web_table_reconcile_state(
-//RS             self.state(),
-//RS             &rows,
-//RS             self.row_key.as_ref(),
-//RS         );
-//RS         self.rows.set(rows);
-//RS         self.state.set(state);
-//RS         self.loaded_page.set(None);
-//RS         self.error.set(String::new());
-//RS         self.loading.set(false);
-//RS         if self.server_page.is_some() {
-//RS             self.clear_server_key_pages();
-//RS             let _ = jet_web_table_page_generation(&self.name, true);
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn with_key<F>(mut self, key: F) -> Self
-//RS     where
-//RS         F: Fn(&T) -> String + Send + Sync + 'static,
-//RS     {
-//RS         self.row_key = Some(JetWebTableArc::new(key));
-//RS         let state = jet_web_table_reconcile_state(
-//RS             self.state(),
-//RS             &self.rows(),
-//RS             self.row_key.as_ref(),
-//RS         );
-//RS         self.state.set(state);
-//RS         self.loaded_page.set(None);
-//RS         self.loading.set(false);
-//RS         if self.server_page.is_some() {
-//RS             self.clear_server_key_pages();
-//RS             let _ = jet_web_table_page_generation(&self.name, true);
-//RS         }
-//RS         self
-//RS     }
-//RS 
-//RS     pub fn has_explicit_key(&self) -> bool {
-//RS         self.row_key.is_some()
-//RS     }
-//RS 
-//RS     pub fn state(&self) -> JetWebTableState {
-//RS         self.state.get()
-//RS     }
-//RS 
-//RS     pub fn state_signal(&self) -> jet_std::JetSignal<JetWebTableState> {
-//RS         self.state.clone()
-//RS     }
-//RS 
-//RS     pub fn set_state(&self, state: JetWebTableState) {
-//RS         let previous = self.state();
-//RS         let normalized = jet_web_table_normalize_state(state);
-//RS         if jet_web_table_page_state_changed(&previous, &normalized) {
-//RS             self.loaded_page.set(None);
-//RS             if self.server_page.is_some() {
-//RS                 if jet_web_table_query_boundary_changed(&previous, &normalized) {
-//RS                     self.clear_server_key_pages();
-//RS                 }
-//RS                 self.loading.set(false);
-//RS                 let _ = jet_web_table_page_generation(&self.name, true);
-//RS             }
-//RS         }
-//RS         self.state.set(normalized);
-//RS     }
-//RS 
-//RS     /// Add a checked column without mutating existing table handles.  The
-//RS     /// table's signals remain shared, so adding a column is configuration only.
-//RS     pub fn with_column(mut self, column: JetWebTableColumn<T>) -> Self {
-//RS         let mut columns = (*self.columns).clone();
-//RS         columns.push(column);
-//RS         self.columns = JetWebTableArc::new(columns);
-//RS         self
-//RS     }
-//RS     pub fn with_server_page<F>(mut self, loader: F) -> Self
-//RS     where
-//RS         F: Fn(JetWebTableState) -> Result<JetWebTablePage<T>, String>
-//RS             + Send
-//RS             + Sync
-//RS             + 'static,
-//RS     {
-//RS         let was_server = self.state().page_mode.is_server();
-//RS         self.server_page = Some(JetWebTableArc::new(loader));
-//RS         let mut state = self.state();
-//RS         state.page_mode = JetWebTablePageMode::Server;
-//RS         if was_server {
-//RS             self.clear_server_key_pages();
-//RS             self.loading.set(false);
-//RS             let _ = jet_web_table_page_generation(&self.name, true);
-//RS         }
-//RS         self.set_state(state);
-//RS         self.loaded_page.set(None);
-//RS         self.error.set(String::new());
-//RS         self
-//RS     }
-//RS 
-//RS     pub fn loading(&self) -> bool {
-//RS         self.loading.get()
-//RS     }
-//RS 
-//RS     pub fn loading_signal(&self) -> jet_std::JetSignal<bool> {
-//RS         self.loading.clone()
-//RS     }
-//RS 
-//RS     pub fn loaded_page(&self) -> Option<JetWebTablePage<T>> {
-//RS         self.loaded_page.get()
-//RS     }
-//RS 
-//RS     pub fn status(&self) -> JetWebTableStatus {
-//RS         if self.loading() {
-//RS             JetWebTableStatus::Loading
-//RS         } else if !self.error().is_empty() {
-//RS             JetWebTableStatus::Error
-//RS         } else if self.loaded_page().is_some() {
-//RS             JetWebTableStatus::Ready
-//RS         } else {
-//RS             JetWebTableStatus::Idle
-//RS         }
-//RS     }
-//RS 
-//RS     /// Return one renderer-neutral snapshot. Local tables materialize their
-//RS     /// current page on first projection; server tables never invoke a loader
-//RS     /// implicitly and therefore remain idle until `page()` succeeds.
-//RS     pub fn projection(&self) -> JetWebTableProjection<T> {
-//RS         let state = self.state();
-//RS         let page = match self.loaded_page() {
-//RS             Some(page) => Some(page),
-//RS             None if !state.page_mode.is_server() => self.page().ok(),
-//RS             None => None,
-//RS         };
-//RS         let rows = page
-//RS             .as_ref()
-//RS             .map(JetWebTablePage::keyed_rows)
-//RS             .unwrap_or_default();
-//RS         JetWebTableProjection {
-//RS             key: self.name.clone(),
-//RS             state: self.state(),
-//RS             columns: self.columns(),
-//RS             page,
-//RS             rows,
-//RS             status: self.status(),
-//RS             loading: self.loading(),
-//RS             error: self.error(),
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn error(&self) -> String {
-//RS         self.error.get()
-//RS     }
-//RS 
-//RS     pub fn error_signal(&self) -> jet_std::JetSignal<String> {
-//RS         self.error.clone()
-//RS     }
-//RS 
-//RS     pub fn columns(&self) -> Vec<(String, String)> {
-//RS         self.columns
-//RS             .iter()
-//RS             .map(|column| (column.name.clone(), column.cell_type.clone()))
-//RS             .collect()
-//RS     }
-//RS 
-//RS     pub fn sort_by(&self, column: String, direction: JetWebTableSortDirection) -> Self {
-//RS         let mut state = self.state();
-//RS         state.sort = Some(JetWebTableSort { column, direction });
-//RS         state.page_index = 0;
-//RS         self.set_state(state);
-//RS         self.clone()
-//RS     }
-//RS 
-//RS     pub fn clear_sort(&self) -> Self {
-//RS         let mut state = self.state();
-//RS         state.sort = None;
-//RS         state.page_index = 0;
-//RS         self.set_state(state);
-//RS         self.clone()
-//RS     }
-//RS 
-//RS     pub fn filter_by(&self, column: String, value: String) -> Self {
-//RS         let mut state = self.state();
-//RS         state.filter = Some(JetWebTableFilter { column, value });
-//RS         state.page_index = 0;
-//RS         self.set_state(state);
-//RS         self.clone()
-//RS     }
-//RS 
-//RS     pub fn clear_filter(&self) -> Self {
-//RS         let mut state = self.state();
-//RS         state.filter = None;
-//RS         state.page_index = 0;
-//RS         self.set_state(state);
-//RS         self.clone()
-//RS     }
-//RS 
-//RS     pub fn paginate(&self, page_index: i64, page_size: i64) -> Self {
-//RS         let mut state = self.state();
-//RS         state.page_index = page_index.max(0);
-//RS         state.page_size = page_size.clamp(1, JET_WEB_TABLE_MAX_PAGE_SIZE);
-//RS         self.set_state(state);
-//RS         self.clone()
-//RS     }
-//RS 
-//RS     pub fn page(&self) -> Result<JetWebTablePage<T>, String> {
-//RS         let state = self.state();
-//RS         if state.page_mode.is_server() && self.server_page.is_none() {
-//RS             let error = "server table state requires a page loader".to_string();
-//RS             self.loading.set(false);
-//RS             self.loaded_page.set(None);
-//RS             self.error.set(error.clone());
-//RS             return Err(error);
-//RS         }
-//RS         if let Some(loader) = self.server_page.as_ref() {
-//RS             // The keyed LiveQuery registry owns request generations. Advancing
-//RS             // before every loader call means a later page request supersedes
-//RS             // this one even when both requests have identical table state.
-//RS             let request_generation = jet_web_table_page_generation(&self.name, true);
-//RS             self.loading.set(true);
-//RS             self.error.set(String::new());
-//RS             let loaded = loader(state.clone());
-//RS             let current_generation = jet_web_table_page_generation(&self.name, false);
-//RS             if current_generation != request_generation || self.state() != state {
-//RS                 if current_generation == request_generation {
-//RS                     self.loading.set(false);
-//RS                 }
-//RS                 return Err("server table page response is stale".to_string());
-//RS             }
-//RS             let result = loaded
-//RS                 .and_then(|page| {
-//RS                     if page.page_index != state.page_index || page.page_size != state.page_size {
-//RS                         return Err(
-//RS                             "server table page response does not match the requested boundary"
-//RS                                 .to_string(),
-//RS                         );
-//RS                     }
-//RS                     jet_web_table_validate_server_page(page, self.row_key.as_ref())
-//RS                 });
-//RS             match result {
-//RS                 Ok(page) => {
-//RS                     if jet_web_table_page_generation(&self.name, false) != request_generation
-//RS                         || self.state() != state
-//RS                     {
-//RS                         return Err("server table page response is stale".to_string());
-//RS                     }
-//RS                     if let Err(error) = self.accept_server_page_keys(&page) {
-//RS                         self.loading.set(false);
-//RS                         self.loaded_page.set(None);
-//RS                         self.error.set(error.clone());
-//RS                         return Err(error);
-//RS                     }
-//RS                     self.loading.set(false);
-//RS                     let mut canonical = state;
-//RS                     canonical.page_index = page.page_index;
-//RS                     canonical.page_size = page.page_size;
-//RS                     self.state.set(canonical);
-//RS                     self.loaded_page.set(Some(page.clone()));
-//RS                     self.error.set(String::new());
-//RS                     Ok(page)
-//RS                 }
-//RS                 Err(error) => {
-//RS                     if jet_web_table_page_generation(&self.name, false) != request_generation
-//RS                         || self.state() != state
-//RS                     {
-//RS                         return Err("server table page response is stale".to_string());
-//RS                     }
-//RS                     self.loading.set(false);
-//RS                     self.loaded_page.set(None);
-//RS                     self.error.set(error.clone());
-//RS                     Err(error)
-//RS                 }
-//RS             }
-//RS         } else {
-//RS             let result = jet_web_table_materialize(
-//RS                 &self.rows(),
-//RS                 &state,
-//RS                 &self.columns,
-//RS                 self.row_key.as_ref(),
-//RS             );
-//RS             match result {
-//RS                 Ok(page) => {
-//RS                     let mut canonical = state;
-//RS                     canonical.page_index = page.page_index;
-//RS                     canonical.page_size = page.page_size;
-//RS                     self.state.set(canonical);
-//RS                     self.loaded_page.set(Some(page.clone()));
-//RS                     self.error.set(String::new());
-//RS                     Ok(page)
-//RS                 }
-//RS                 Err(error) => {
-//RS                     self.loaded_page.set(None);
-//RS                     self.error.set(error.clone());
-//RS                     Err(error)
-//RS                 }
-//RS             }
-//RS         }
-//RS     }
-//RS     pub fn derived_page(&self) -> jet_std::JetDerived<Result<JetWebTablePage<T>, String>> {
-//RS         let rows = self.rows.clone();
-//RS         let state = self.state.clone();
-//RS         let columns = self.columns.clone();
-//RS         let row_key = self.row_key.clone();
-//RS         let server = self.server_page.is_some();
-//RS         jet_std::JetDerived::new(move || {
-//RS             if server || state.get().page_mode.is_server() {
-//RS                 Err("server table pages require explicit page()".to_string())
-//RS             } else {
-//RS                 jet_web_table_materialize(&rows.get(), &state.get(), &columns, row_key.as_ref())
-//RS             }
-//RS         })
-//RS     }
-//RS 
-//RS     pub fn facts_json(&self) -> String {
-//RS         let state = self.state();
-//RS         let columns = self.columns();
-//RS         let column_json = columns
-//RS             .iter()
-//RS             .map(|(name, cell_type)| {
-//RS                 format!(
-//RS                     "{{\"name\":\"{}\",\"type\":\"{}\"}}",
-//RS                     jet_web_table_json_escape(name),
-//RS                     jet_web_table_json_escape(cell_type)
-//RS                 )
-//RS             })
-//RS             .collect::<Vec<_>>()
-//RS             .join(",");
-//RS         let page = self.loaded_page();
-//RS         let total_rows = page.as_ref().map(|page| page.total_rows).unwrap_or(0);
-//RS         let page_count = page.as_ref().map(|page| page.page_count).unwrap_or(0);
-//RS         let status = self.status();
-//RS         let error = self.error();
-//RS         format!(
-//RS             "{{\"name\":\"{}\",\"identity\":\"{}\",\"key\":\"{}\",\"columns\":[{}],\"page_index\":{},\"page_size\":{},\"page_mode\":\"{}\",\"selected_keys\":[{}],\"selection_anchor\":{},\"focus_key\":{},\"has_explicit_key\":{},\"sort\":{},\"filter\":{},\"loaded_page\":{},\"total_rows\":{},\"page_count\":{},\"status\":\"{}\",\"loading\":{},\"error\":\"{}\"}}",
-//RS             jet_web_table_json_escape(&self.name),
-//RS             jet_web_table_json_escape(&self.name),
-//RS             jet_web_table_json_escape(&self.name),
-//RS             column_json,
-//RS             state.page_index.max(0),
-//RS             state.page_size.clamp(1, JET_WEB_TABLE_MAX_PAGE_SIZE),
-//RS             if state.page_mode.is_server() { "server" } else { "client" },
-//RS             jet_web_table_string_list_json(&state.selected_keys),
-//RS             state
-//RS                 .selection_anchor
-//RS                 .as_ref()
-//RS                 .map(|key| format!("\"{}\"", jet_web_table_json_escape(key)))
-//RS                 .unwrap_or_else(|| "null".to_string()),
-//RS             state
-//RS                 .focus_key
-//RS                 .as_ref()
-//RS                 .map(|key| format!("\"{}\"", jet_web_table_json_escape(key)))
-//RS                 .unwrap_or_else(|| "null".to_string()),
-//RS             self.has_explicit_key(),
-//RS             state
-//RS                 .sort
-//RS                 .as_ref()
-//RS                 .map(|sort| {
-//RS                     format!(
-//RS                         "{{\"column\":\"{}\",\"direction\":\"{}\"}}",
-//RS                         jet_web_table_json_escape(&sort.column),
-//RS                         if sort.direction.is_descending() { "desc" } else { "asc" }
-//RS                     )
-//RS                 })
-//RS                 .unwrap_or_else(|| "null".to_string()),
-//RS             state
-//RS                 .filter
-//RS                 .as_ref()
-//RS                 .map(|filter| {
-//RS                     format!(
-//RS                         "{{\"column\":\"{}\",\"value\":\"{}\"}}",
-//RS                         jet_web_table_json_escape(&filter.column),
-//RS                         jet_web_table_json_escape(&filter.value)
-//RS                     )
-//RS                 })
-//RS                 .unwrap_or_else(|| "null".to_string()),
-//RS             page.is_some(),
-//RS             total_rows,
-//RS             page_count,
-//RS             status.name(),
-//RS             self.loading(),
-//RS             jet_web_table_json_escape(&error),
-//RS         )
-//RS     }
-//RS }
-//RS 
-//RS impl<T: Clone + Send + Sync + 'static> JetWebTable<T> {
-//RS     pub fn row_keys(&self) -> Result<Vec<String>, String> {
-//RS         if self.server_page.is_some() {
-//RS             if let Some(page) = self.loaded_page() {
-//RS                 return Ok(page.row_keys);
-//RS             }
-//RS         }
-//RS         Ok(jet_web_table_rows_with_keys(
-//RS             &self.rows(),
-//RS             self.row_key.as_ref(),
-//RS         )?
-//RS         .into_iter()
-//RS         .map(|row| row.key)
-//RS         .collect())
-//RS     }
-//RS 
-//RS     pub fn rows_with_keys(&self) -> Result<Vec<JetWebTableRow<T>>, String> {
-//RS         if self.server_page.is_some() {
-//RS             if let Some(page) = self.loaded_page() {
-//RS                 return Ok(page.keyed_rows());
-//RS             }
-//RS         }
-//RS         jet_web_table_rows_with_keys(&self.rows(), self.row_key.as_ref())
-//RS     }
-//RS 
-//RS     pub fn selected_keys(&self) -> Vec<String> {
-//RS         self.state().selected_keys
-//RS     }
-//RS     pub fn focused_key(&self) -> Option<String> {
-//RS         self.state().focus_key
-//RS     }
-//RS 
-//RS     pub fn focus(&self, key: String) -> Result<Self, String> {
-//RS         if !jet_web_table_key_is_valid(&key) {
-//RS             return Err("table focus key must be non-empty, bounded, and printable".to_string());
-//RS         }
-//RS         let mut state = self.state();
-//RS         state.focus_key = Some(key);
-//RS         self.set_state(state);
-//RS         Ok(self.clone())
-//RS     }
-//RS 
-//RS     pub fn clear_focus(&self) -> Self {
-//RS         let mut state = self.state();
-//RS         state.focus_key = None;
-//RS         self.set_state(state);
-//RS         self.clone()
-//RS     }
-//RS 
-//RS 
-//RS     pub fn set_selected(&self, key: String, selected: bool) -> Result<Self, String> {
-//RS         if !jet_web_table_key_is_valid(&key) {
-//RS             return Err("table selection key must be non-empty, bounded, and printable".to_string());
-//RS         }
-//RS         let mut state = self.state();
-//RS         if selected {
-//RS             state.selected_keys.push(key.clone());
-//RS         } else {
-//RS             state.selected_keys.retain(|existing| existing != &key);
-//RS         }
-//RS         if selected {
-//RS             state.selection_anchor = Some(key.clone());
-//RS             state.focus_key = Some(key);
-//RS         } else if state.selection_anchor.as_deref() == Some(key.as_str()) {
-//RS             state.selection_anchor = state.selected_keys.first().cloned();
-//RS         }
-//RS         self.set_state(state);
-//RS         Ok(self.clone())
-//RS     }
-//RS 
-//RS     pub fn toggle_selection(&self, key: String) -> Result<Self, String> {
-//RS         let selected = self.state().selected_keys.iter().any(|value| value == &key);
-//RS         self.set_selected(key, !selected)
-//RS     }
-//RS 
-//RS     pub fn clear_selection(&self) -> Self {
-//RS         let mut state = self.state();
-//RS         state.selected_keys.clear();
-//RS         state.selection_anchor = None;
-//RS         self.set_state(state);
-//RS         self.clone()
-//RS     }
-//RS 
-//RS     pub fn selected_rows(&self) -> Result<Vec<JetWebTableRow<T>>, String> {
-//RS         let selected = self
-//RS             .state()
-//RS             .selected_keys
-//RS             .into_iter()
-//RS             .collect::<JetWebTableSet<_>>();
-//RS         let rows = if self.server_page.is_some() {
-//RS             match self.loaded_page() {
-//RS                 Some(page) => page.keyed_rows(),
-//RS                 None => self.rows_with_keys()?,
-//RS             }
-//RS         } else {
-//RS             self.rows_with_keys()?
-//RS         };
-//RS         Ok(rows
-//RS             .into_iter()
-//RS             .filter(|row| selected.contains(&row.key))
-//RS             .collect())
-//RS     }
-//RS 
-//RS     pub fn replace_rows(&self, rows: Vec<T>) -> Result<(), String> {
-//RS         jet_web_table_rows_with_keys(&rows, self.row_key.as_ref())?;
-//RS         self.set_rows(rows);
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     pub fn insert_row(&self, row: T) -> Result<String, String> {
-//RS         if self.row_key.is_none() {
-//RS             return Err("table insertion requires an explicit row key".to_string());
-//RS         }
-//RS         let key = self
-//RS             .row_key
-//RS             .as_ref()
-//RS             .map(|key| key(&row))
-//RS             .unwrap_or_default();
-//RS         if !jet_web_table_key_is_valid(&key) {
-//RS             return Err("table row key must be non-empty, bounded, and printable".to_string());
-//RS         }
-//RS         let mut rows = self.rows();
-//RS         let existing = jet_web_table_rows_with_keys(&rows, self.row_key.as_ref())?;
-//RS         if existing.iter().any(|existing| existing.key == key) {
-//RS             return Err(format!("table row key `{key}` is duplicated"));
-//RS         }
-//RS         rows.push(row);
-//RS         self.set_rows(rows);
-//RS         Ok(key)
-//RS     }
-//RS 
-//RS     pub fn replace_row(&self, key: &str, row: T) -> Result<(), String> {
-//RS         if !jet_web_table_key_is_valid(key) {
-//RS             return Err("table row key must be non-empty, bounded, and printable".to_string());
-//RS         }
-//RS         let mut rows = self.rows();
-//RS         let keyed = jet_web_table_rows_with_keys(&rows, self.row_key.as_ref())?;
-//RS         let index = keyed
-//RS             .iter()
-//RS             .position(|existing| existing.key == key)
-//RS             .ok_or_else(|| format!("table row key `{key}` was not found"))?;
-//RS         let replacement_key = self
-//RS             .row_key
-//RS             .as_ref()
-//RS             .map(|row_key| row_key(&row))
-//RS             .unwrap_or_else(|| format!("index:{index}"));
-//RS         if replacement_key != key {
-//RS             return Err("table row replacement cannot change the row key".to_string());
-//RS         }
-//RS         rows[index] = row;
-//RS         jet_web_table_rows_with_keys(&rows, self.row_key.as_ref())?;
-//RS         self.set_rows(rows);
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     pub fn update_row<F>(&self, key: &str, update: F) -> Result<(), String>
-//RS     where
-//RS         F: FnOnce(&mut T),
-//RS     {
-//RS         if !jet_web_table_key_is_valid(key) {
-//RS             return Err("table row key must be non-empty, bounded, and printable".to_string());
-//RS         }
-//RS         let mut rows = self.rows();
-//RS         let keyed = jet_web_table_rows_with_keys(&rows, self.row_key.as_ref())?;
-//RS         let index = keyed
-//RS             .iter()
-//RS             .position(|row| row.key == key)
-//RS             .ok_or_else(|| format!("table row key `{key}` was not found"))?;
-//RS         update(&mut rows[index]);
-//RS         let updated_key = self
-//RS             .row_key
-//RS             .as_ref()
-//RS             .map(|row_key| row_key(&rows[index]))
-//RS             .unwrap_or_else(|| format!("index:{index}"));
-//RS         if updated_key != key {
-//RS             return Err("table row updates cannot change the row key".to_string());
-//RS         }
-//RS         jet_web_table_rows_with_keys(&rows, self.row_key.as_ref())?;
-//RS         self.set_rows(rows);
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     pub fn remove_row(&self, key: &str) -> Result<T, String> {
-//RS         let mut rows = self.rows();
-//RS         let keyed = jet_web_table_rows_with_keys(&rows, self.row_key.as_ref())?;
-//RS         let index = keyed
-//RS             .iter()
-//RS             .position(|row| row.key == key)
-//RS             .ok_or_else(|| format!("table row key `{key}` was not found"))?;
-//RS         let removed = rows.remove(index);
-//RS         self.set_rows(rows);
-//RS         Ok(removed)
-//RS     }
-//RS 
-//RS     pub fn first_page(&self) -> Self {
-//RS         self.paginate(0, self.state().page_size)
-//RS     }
-//RS     pub fn next_page(&self) -> Self {
-//RS         let page = match self.loaded_page() {
-//RS             Some(page) => page,
-//RS             None => {
-//RS                 let Ok(page) = self.page() else {
-//RS                     return self.clone();
-//RS                 };
-//RS                 page
-//RS             }
-//RS         };
-//RS         let Some(next_index) = page.next_page() else {
-//RS             return self.clone();
-//RS         };
-//RS         self.paginate(next_index, page.page_size)
-//RS     }
-//RS 
-//RS     pub fn last_page(&self) -> Result<Self, String> {
-//RS         let page = if let Some(page) = self.loaded_page() {
-//RS             page
-//RS         } else {
-//RS             self.page()?
-//RS         };
-//RS         Ok(self.paginate(page.last_page(), page.page_size))
-//RS     }
-//RS 
-//RS     pub fn visible_rows(
-//RS         &self,
-//RS         plan: &JetWebVirtualPlan,
-//RS     ) -> Result<Vec<JetWebTableRow<T>>, String> {
-//RS         if self.server_page.is_some() {
-//RS             let page = self
-//RS                 .loaded_page()
-//RS                 .ok_or_else(|| "server table visible rows require a loaded page".to_string())?;
-//RS             let rows = page.keyed_rows();
-//RS             let loaded_count = i64::try_from(rows.len()).unwrap_or(i64::MAX);
-//RS             let global_indices =
-//RS                 plan.total_count == page.total_rows && plan.total_count > loaded_count;
-//RS             let page_start = page
-//RS                 .page_index
-//RS                 .saturating_mul(page.page_size)
-//RS                 .max(0);
-//RS             // A plan over the complete server result uses global indices. A
-//RS             // plan over the loaded page uses local indices; both remain
-//RS             // bounded by the plan's canonical visible range.
-//RS             return Ok(plan
-//RS                 .indices()
-//RS                 .into_iter()
-//RS                 .filter_map(|index| {
-//RS                     let local = if global_indices {
-//RS                         index.checked_sub(page_start)?
-//RS                     } else {
-//RS                         index
-//RS                     };
-//RS                     usize::try_from(local).ok().and_then(|local| rows.get(local).cloned())
-//RS                 })
-//RS                 .collect());
-//RS         }
-//RS         let state = self.state();
-//RS         let rows = jet_web_table_rows_with_keys(&self.rows(), self.row_key.as_ref())?;
-//RS         let mut visible = rows;
-//RS         if let Some(filter) = &state.filter {
-//RS             let column = self
-//RS                 .columns
-//RS                 .iter()
-//RS                 .find(|column| column.name == filter.column)
-//RS                 .ok_or_else(|| format!("table filter column `{}` has no accessor", filter.column))?;
-//RS             visible.retain(|row| column.value(&row.value).contains(filter.value.as_str()));
-//RS         }
-//RS         if let Some(sort) = &state.sort {
-//RS             let column = self
-//RS                 .columns
-//RS                 .iter()
-//RS                 .find(|column| column.name == sort.column)
-//RS                 .ok_or_else(|| format!("table sort column `{}` has no accessor", sort.column))?;
-//RS             let descending = sort.direction.is_descending();
-//RS             visible.sort_by(|left, right| {
-//RS                 let ordering = column.value(&left.value).cmp(&column.value(&right.value));
-//RS                 if descending {
-//RS                     ordering.reverse()
-//RS                 } else {
-//RS                     ordering
-//RS                 }
-//RS             });
-//RS         }
-//RS         Ok(plan
-//RS             .indices()
-//RS             .into_iter()
-//RS             .filter_map(|index| usize::try_from(index).ok())
-//RS             .filter_map(|index| visible.get(index).cloned())
-//RS             .collect())
-//RS     }
-//RS 
-//RS     /// Renderers provide the node type. The table only supplies keyed rows, so
-//RS     /// DOM, TUI, and native adapters consume one semantic result without
-//RS     /// introducing a markup or style policy here.
-//RS     pub fn render_page<R, F>(&self, render: F) -> Result<Vec<R>, String>
-//RS     where
-//RS         F: Fn(&T, &str) -> R,
-//RS     {
-//RS         Ok(self
-//RS             .page()?
-//RS             .keyed_rows()
-//RS             .iter()
-//RS             .map(|row| render(&row.value, &row.key))
-//RS             .collect())
-//RS     }
-//RS 
-//RS     pub fn render_virtual<R, F>(
-//RS         &self,
-//RS         plan: &JetWebVirtualPlan,
-//RS         render: F,
-//RS     ) -> Result<Vec<R>, String>
-//RS     where
-//RS         F: Fn(&T, &str) -> R,
-//RS     {
-//RS         Ok(self
-//RS             .visible_rows(plan)?
-//RS             .iter()
-//RS             .map(|row| render(&row.value, &row.key))
-//RS             .collect())
-//RS     }
-//RS }
-//RS 
-//RS /// Core-call adapters for table methods. They keep the table value as the
-//RS /// semantic receiver while each host decides how to marshal the result.
-//RS pub fn jet_web_table_new_keyed<T, F>(
-//RS     name: String,
-//RS     rows: Vec<T>,
-//RS     key: F,
-//RS ) -> JetWebTable<T>
-//RS where
-//RS     T: Clone + Send + Sync + 'static,
-//RS     F: Fn(&T) -> String + Send + Sync + 'static,
-//RS {
-//RS     jet_web_table_with_key(name, rows, key)
-//RS }
-//RS 
-//RS pub fn jet_web_table_with_column<T: Clone + Send + Sync + 'static>(
-//RS     table: &JetWebTable<T>,
-//RS     column: JetWebTableColumn<T>,
-//RS ) -> JetWebTable<T> {
-//RS     table.clone().with_column(column)
-//RS }
-//RS 
-//RS pub fn jet_web_table_with_server_page<T, F>(
-//RS     table: &JetWebTable<T>,
-//RS     loader: F,
-//RS ) -> JetWebTable<T>
-//RS where
-//RS     T: Clone + Send + Sync + 'static,
-//RS     F: Fn(JetWebTableState) -> Result<JetWebTablePage<T>, String>
-//RS         + Send
-//RS         + Sync
-//RS         + 'static,
-//RS {
-//RS     table.clone().with_server_page(loader)
-//RS }
-//RS 
-//RS pub fn jet_web_table_state<T: Clone + Send + Sync + 'static>(
-//RS     table: &JetWebTable<T>,
-//RS ) -> JetWebTableState {
-//RS     table.state()
-//RS }
-//RS 
-//RS pub fn jet_web_table_facts<T: Clone + Send + Sync + 'static>(
-//RS     table: &JetWebTable<T>,
-//RS ) -> String {
-//RS     table.facts_json()
-//RS }
-//RS 
-//RS /// Host-only projection adapter for DOM, TUI, and native consumers. It
-//RS /// returns keyed page rows and state facts without choosing a renderer.
-//RS pub fn jet_web_table_projection<T: Clone + Send + Sync + 'static>(
-//RS     table: &JetWebTable<T>,
-//RS ) -> JetWebTableProjection<T> {
-//RS     table.projection()
-//RS }
-//RS 
-//RS pub fn jet_web_table_keys<T: Clone + Send + Sync + 'static>(
-//RS     table: &JetWebTable<T>,
-//RS ) -> Result<Vec<String>, String> {
-//RS     table.row_keys()
-//RS }
-//RS 
-//RS pub fn jet_web_table_page_state<T: Clone + Send + Sync + 'static>(
-//RS     table: &JetWebTable<T>,
-//RS ) -> Result<JetWebTablePage<T>, String> {
-//RS     table.page()
-//RS }
-//RS 
-//RS pub fn jet_web_table_sort_by<T: Clone + Send + Sync + 'static>(
-//RS     table: &JetWebTable<T>,
-//RS     column: String,
-//RS     direction: JetWebTableSortDirection,
-//RS ) -> JetWebTable<T> {
-//RS     table.sort_by(column, direction)
-//RS }
-//RS 
-//RS pub fn jet_web_table_filter_by<T: Clone + Send + Sync + 'static>(
-//RS     table: &JetWebTable<T>,
-//RS     column: String,
-//RS     value: String,
-//RS ) -> JetWebTable<T> {
-//RS     table.filter_by(column, value)
-//RS }
-//RS 
-//RS pub fn jet_web_table_paginate<T: Clone + Send + Sync + 'static>(
-//RS     table: &JetWebTable<T>,
-//RS     page_index: i64,
-//RS     page_size: i64,
-//RS ) -> JetWebTable<T> {
-//RS     table.paginate(page_index, page_size)
-//RS }
-//RS 
-//RS pub fn jet_web_table_set_rows<T: Clone + Send + Sync + 'static>(
-//RS     table: &JetWebTable<T>,
-//RS     rows: Vec<T>,
-//RS ) -> Result<(), String> {
-//RS     table.replace_rows(rows)
-//RS }
-//RS 
-//RS pub fn jet_web_table_set_selected<T: Clone + Send + Sync + 'static>(
-//RS     table: &JetWebTable<T>,
-//RS     key: String,
-//RS     selected: bool,
-//RS ) -> Result<JetWebTable<T>, String> {
-//RS     table.set_selected(key, selected)
-//RS }
-//RS 
-//RS pub fn jet_web_table_toggle_selection<T: Clone + Send + Sync + 'static>(
-//RS     table: &JetWebTable<T>,
-//RS     key: String,
-//RS ) -> Result<JetWebTable<T>, String> {
-//RS     table.toggle_selection(key)
-//RS }
-//RS pub fn jet_web_table_focus<T: Clone + Send + Sync + 'static>(
-//RS     table: &JetWebTable<T>,
-//RS     key: String,
-//RS ) -> Result<JetWebTable<T>, String> {
-//RS     table.focus(key)
-//RS }
-//RS 
-//RS pub fn jet_web_table_clear_focus<T: Clone + Send + Sync + 'static>(
-//RS     table: &JetWebTable<T>,
-//RS ) -> JetWebTable<T> {
-//RS     table.clear_focus()
-//RS }
-//RS 
-//RS pub fn jet_web_table_focused_key<T: Clone + Send + Sync + 'static>(
-//RS     table: &JetWebTable<T>,
-//RS ) -> Option<String> {
-//RS     table.focused_key()
-//RS }
-//RS 
-//RS 
-//RS pub fn jet_web_table_clear_selection<T: Clone + Send + Sync + 'static>(
-//RS     table: &JetWebTable<T>,
-//RS ) -> JetWebTable<T> {
-//RS     table.clear_selection()
-//RS }
-//RS 
-//RS pub fn jet_web_table_selected_keys<T: Clone + Send + Sync + 'static>(
-//RS     table: &JetWebTable<T>,
-//RS ) -> Vec<String> {
-//RS     table.selected_keys()
-//RS }
-//RS 
-//RS pub fn jet_web_table_selected_rows<T: Clone + Send + Sync + 'static>(
-//RS     table: &JetWebTable<T>,
-//RS ) -> Result<Vec<JetWebTableRow<T>>, String> {
-//RS     table.selected_rows()
-//RS }
-//RS 
-//RS pub fn jet_web_table_insert_row<T: Clone + Send + Sync + 'static>(
-//RS     table: &JetWebTable<T>,
-//RS     row: T,
-//RS ) -> Result<String, String> {
-//RS     table.insert_row(row)
-//RS }
-//RS 
-//RS pub fn jet_web_table_replace_row<T: Clone + Send + Sync + 'static>(
-//RS     table: &JetWebTable<T>,
-//RS     key: String,
-//RS     row: T,
-//RS ) -> Result<(), String> {
-//RS     table.replace_row(&key, row)
-//RS }
-//RS 
-//RS pub fn jet_web_table_update_row<T: Clone + Send + Sync + 'static, F>(
-//RS     table: &JetWebTable<T>,
-//RS     key: String,
-//RS     update: F,
-//RS ) -> Result<(), String>
-//RS where
-//RS     F: FnOnce(&mut T),
-//RS {
-//RS     table.update_row(&key, update)
-//RS }
-//RS 
-//RS pub fn jet_web_table_remove_row<T: Clone + Send + Sync + 'static>(
-//RS     table: &JetWebTable<T>,
-//RS     key: String,
-//RS ) -> Result<T, String> {
-//RS     table.remove_row(&key)
-//RS }
-//RS 
-//RS pub fn jet_web_table_first_page<T: Clone + Send + Sync + 'static>(
-//RS     table: &JetWebTable<T>,
-//RS ) -> JetWebTable<T> {
-//RS     table.first_page()
-//RS }
-//RS 
-//RS pub fn jet_web_table_next_page<T: Clone + Send + Sync + 'static>(
-//RS     table: &JetWebTable<T>,
-//RS ) -> JetWebTable<T> {
-//RS     table.next_page()
-//RS }
-//RS 
-//RS pub fn jet_web_table_last_page<T: Clone + Send + Sync + 'static>(
-//RS     table: &JetWebTable<T>,
-//RS ) -> Result<JetWebTable<T>, String> {
-//RS     table.last_page()
-//RS }
-//RS 
-//RS pub fn jet_web_table_visible_rows<T: Clone + Send + Sync + 'static>(
-//RS     table: &JetWebTable<T>,
-//RS     plan: &JetWebVirtualPlan,
-//RS ) -> Result<Vec<JetWebTableRow<T>>, String> {
-//RS     table.visible_rows(plan)
-//RS }
-//RS 
-//RS pub fn jet_web_virtual_plan_viewport(plan: JetWebVirtualPlan) -> JetWebVirtualPlanViewport {
-//RS     JetWebVirtualPlanViewport::new(plan)
-//RS }
-//RS 
-//RS /// Core-call adapters for the stateful virtual plan viewport.
-//RS pub fn jet_web_virtual_plan_measure(
-//RS     plan: &JetWebVirtualPlan,
-//RS     index: i64,
-//RS     size: i64,
-//RS ) -> JetWebVirtualPlan {
-//RS     plan.with_measurement(index, size)
-//RS }
-//RS 
-//RS pub fn jet_web_virtual_plan_viewport_state(
-//RS     viewport: &JetWebVirtualPlanViewport,
-//RS ) -> JetWebVirtualPlan {
-//RS     viewport.plan()
-//RS }
-//RS 
-//RS pub fn jet_web_virtual_plan_scroll_to(
-//RS     viewport: &JetWebVirtualPlanViewport,
-//RS     scroll_offset: i64,
-//RS ) {
-//RS     viewport.scroll_to(scroll_offset);
-//RS }
-//RS 
-//RS pub fn jet_web_virtual_plan_resize(
-//RS     viewport: &JetWebVirtualPlanViewport,
-//RS     viewport_width: i64,
-//RS     viewport_height: i64,
-//RS ) {
-//RS     viewport.resize(viewport_width, viewport_height);
-//RS }
-//RS 
-//RS pub fn jet_web_virtual_plan_viewport_measure(
-//RS     viewport: &JetWebVirtualPlanViewport,
-//RS     index: i64,
-//RS     size: i64,
-//RS ) {
-//RS     viewport.measure(index, size);
-//RS }
-//RS 
-//RS pub fn jet_web_virtual_plan_facts(plan: &JetWebVirtualPlan) -> String {
-//RS     plan.facts_json()
-//RS }
-//RS 
-//RS /// Construct a table over a checked row list.  `name` is a panel identity, not
-//RS /// an HTML element; renderers decide how to present the headless result.
-//RS pub fn jet_web_table<T: Clone + Send + Sync + 'static>(
-//RS     name: String,
-//RS     rows: Vec<T>,
-//RS ) -> JetWebTable<T> {
-//RS     JetWebTable::new(name, rows)
-//RS }
-//RS 
-//RS /// Construct a table with the explicit stable row identity required for
-//RS /// reorder, insertion, and selection reconciliation.
-//RS pub fn jet_web_table_with_key<T, F>(
-//RS     name: String,
-//RS     rows: Vec<T>,
-//RS     key: F,
-//RS ) -> JetWebTable<T>
-//RS where
-//RS     T: Clone + Send + Sync + 'static,
-//RS     F: Fn(&T) -> String + Send + Sync + 'static,
-//RS {
-//RS     JetWebTable::new_with_key(name, rows, key)
-//RS }
-//RS 
-//RS pub fn jet_web_table_column<T, F>(
-//RS     name: String,
-//RS     cell_type: String,
-//RS     accessor: F,
-//RS ) -> JetWebTableColumn<T>
-//RS where
-//RS     F: Fn(&T) -> String + Send + Sync + 'static,
-//RS {
-//RS     JetWebTableColumn {
-//RS         name,
-//RS         cell_type,
-//RS         accessor: JetWebTableArc::new(accessor),
-//RS     }
-//RS }
-//RS 
-//RS pub fn jet_web_table_sort<T: Clone, F>(
-//RS     rows: &Vec<T>,
-//RS     descending: bool,
-//RS     key: F,
-//RS ) -> Vec<T>
-//RS where
-//RS     F: Fn(&T) -> String,
-//RS {
-//RS     let mut sorted = rows.clone();
-//RS     sorted.sort_by(|left, right| {
-//RS         let ordering = key(left).cmp(&key(right));
-//RS         if descending {
-//RS             ordering.reverse()
-//RS         } else {
-//RS             ordering
-//RS         }
-//RS     });
-//RS     sorted
-//RS }
-//RS 
-//RS pub fn jet_web_table_filter<T: Clone, F>(rows: &Vec<T>, predicate: F) -> Vec<T>
-//RS where
-//RS     F: Fn(&T) -> bool,
-//RS {
-//RS     rows.iter().filter(|row| predicate(row)).cloned().collect()
-//RS }
-//RS 
-//RS pub fn jet_web_table_page<T: Clone>(
-//RS     rows: &Vec<T>,
-//RS     page_index: i64,
-//RS     page_size: i64,
-//RS ) -> JetWebTablePage<T> {
-//RS     let page_size = page_size.clamp(1, JET_WEB_TABLE_MAX_PAGE_SIZE);
-//RS     let total_rows = i64::try_from(rows.len()).unwrap_or(i64::MAX);
-//RS     let page_count = if total_rows == 0 {
-//RS         0
-//RS     } else {
-//RS         total_rows
-//RS             .saturating_add(page_size.saturating_sub(1))
-//RS             .checked_div(page_size)
-//RS             .unwrap_or(0)
-//RS     };
-//RS     let page_index = if page_count == 0 {
-//RS         0
-//RS     } else {
-//RS         page_index.max(0).min(page_count - 1)
-//RS     };
-//RS     let start = page_index
-//RS         .saturating_mul(page_size)
-//RS         .min(total_rows)
-//RS         .try_into()
-//RS         .unwrap_or(usize::MAX)
-//RS         .min(rows.len());
-//RS     let end = start
-//RS         .saturating_add(page_size.try_into().unwrap_or(usize::MAX))
-//RS         .min(rows.len());
-//RS     JetWebTablePage {
-//RS         rows: rows[start..end].to_vec(),
-//RS         row_keys: (start..end).map(|index| format!("index:{index}")).collect(),
-//RS         total_rows,
-//RS         page_index,
-//RS         page_size,
-//RS         page_count,
-//RS     }
-//RS }
-//RS fn jet_web_table_validate_server_page<T>(
-//RS     mut page: JetWebTablePage<T>,
-//RS     row_key: Option<&JetWebTableRowKey<T>>,
-//RS ) -> Result<JetWebTablePage<T>, String> {
-//RS     if page.total_rows < 0 {
-//RS         return Err("server table page has negative total_rows".to_string());
-//RS     }
-//RS     if page.page_size < 1 || page.page_size > JET_WEB_TABLE_MAX_PAGE_SIZE {
-//RS         return Err(format!(
-//RS             "server table page_size must be between 1 and {}",
-//RS             JET_WEB_TABLE_MAX_PAGE_SIZE
-//RS         ));
-//RS     }
-//RS     if page.page_index < 0 {
-//RS         return Err("server table page has negative page_index".to_string());
-//RS     }
-//RS     if page.rows.len() > page.page_size as usize {
-//RS         return Err("server table returned more rows than page_size".to_string());
-//RS     }
-//RS     let expected_count = if page.total_rows == 0 {
-//RS         0
-//RS     } else {
-//RS         page.total_rows
-//RS             .saturating_add(page.page_size - 1)
-//RS             .checked_div(page.page_size)
-//RS             .unwrap_or(0)
-//RS     };
-//RS     if page.page_count != expected_count {
-//RS         return Err("server table page_count does not match total_rows".to_string());
-//RS     }
-//RS     if expected_count == 0 {
-//RS         if page.page_index != 0 || !page.rows.is_empty() || !page.row_keys.is_empty() {
-//RS             return Err("empty server table page has invalid page_index, rows, or keys".to_string());
-//RS         }
-//RS     } else if page.page_index >= expected_count {
-//RS         return Err("server table page_index is out of range".to_string());
-//RS     }
-//RS     if page.total_rows > 0 && page.rows.is_empty() {
-//RS         return Err("non-empty server table result returned an empty page".to_string());
-//RS     }
-//RS     if expected_count > 0
-//RS         && page.page_index.saturating_add(1) < expected_count
-//RS         && page.rows.len() != page.page_size as usize
-//RS     {
-//RS         return Err("non-final server table pages must be full".to_string());
-//RS     }
-//RS     if let Some(key) = row_key {
-//RS         // An explicit table key is canonical. Ignore positional or stale
-//RS         // loader keys and derive identity from the checked row accessor.
-//RS         page.row_keys = page.rows.iter().map(|row| key(row)).collect();
-//RS     } else if page.row_keys.is_empty() && !page.rows.is_empty() {
-//RS         let page_start = page
-//RS             .page_index
-//RS             .saturating_mul(page.page_size)
-//RS             .max(0);
-//RS         page.row_keys = page
-//RS             .rows
-//RS             .iter()
-//RS             .enumerate()
-//RS             .map(|(offset, _)| format!("index:{}", page_start.saturating_add(offset as i64)))
-//RS             .collect();
-//RS     }
-//RS     if page.row_keys.len() != page.rows.len() {
-//RS         return Err("server table row_keys must align with rows".to_string());
-//RS     }
-//RS     jet_web_table_validate_keys(&page.row_keys)?;
-//RS     Ok(page)
-//RS }
-//RS 
-//RS fn jet_web_table_materialize<T: Clone>(
-//RS     rows: &Vec<T>,
-//RS     state: &JetWebTableState,
-//RS     columns: &[JetWebTableColumn<T>],
-//RS     row_key: Option<&JetWebTableRowKey<T>>,
-//RS ) -> Result<JetWebTablePage<T>, String> {
-//RS     jet_web_table_validate_columns(columns)?;
-//RS     let mut selected = jet_web_table_rows_with_keys(rows, row_key)?;
-//RS     if let Some(filter) = &state.filter {
-//RS         let column = columns
-//RS             .iter()
-//RS             .find(|column| column.name == filter.column)
-//RS             .ok_or_else(|| format!("table filter column `{}` has no accessor", filter.column))?;
-//RS         selected.retain(|entry| column.value(&entry.value).contains(filter.value.as_str()));
-//RS     }
-//RS     if let Some(sort) = &state.sort {
-//RS         let column = columns
-//RS             .iter()
-//RS             .find(|column| column.name == sort.column)
-//RS             .ok_or_else(|| format!("table sort column `{}` has no accessor", sort.column))?;
-//RS         let descending = sort.direction.is_descending();
-//RS         // `sort_by` is stable. Equal cell values retain source order, while
-//RS         // the key remains attached to the row through the reorder.
-//RS         selected.sort_by(|left, right| {
-//RS             let ordering = column.value(&left.value).cmp(&column.value(&right.value));
-//RS             if descending {
-//RS                 ordering.reverse()
-//RS             } else {
-//RS                 ordering
-//RS             }
-//RS         });
-//RS     }
-//RS     Ok(jet_web_table_page_keyed(
-//RS         &selected,
-//RS         state.page_index,
-//RS         state.page_size,
-//RS     ))
-//RS }
-//RS 
-//RS fn jet_web_table_page_state_changed(
-//RS     previous: &JetWebTableState,
-//RS     next: &JetWebTableState,
-//RS ) -> bool {
-//RS     previous.sort != next.sort
-//RS         || previous.filter != next.filter
-//RS         || previous.page_index != next.page_index
-//RS         || previous.page_size != next.page_size
-//RS         || previous.page_mode != next.page_mode
-//RS }
-//RS fn jet_web_table_query_boundary_changed(
-//RS     previous: &JetWebTableState,
-//RS     next: &JetWebTableState,
-//RS ) -> bool {
-//RS     previous.sort != next.sort
-//RS         || previous.filter != next.filter
-//RS         || previous.page_size != next.page_size
-//RS         || previous.page_mode != next.page_mode
-//RS }
-//RS 
-//RS fn jet_web_table_normalize_state(mut state: JetWebTableState) -> JetWebTableState {
-//RS     state.page_index = state.page_index.max(0);
-//RS     state.page_size = state
-//RS         .page_size
-//RS         .clamp(1, JET_WEB_TABLE_MAX_PAGE_SIZE);
-//RS     state.selected_keys.retain(|key| jet_web_table_key_is_valid(key));
-//RS     state.selected_keys.sort();
-//RS     state.selected_keys.dedup();
-//RS     if state
-//RS         .selection_anchor
-//RS         .as_ref()
-//RS         .is_some_and(|key| !state.selected_keys.iter().any(|selected| selected == key))
-//RS     {
-//RS         state.selection_anchor = None;
-//RS     }
-//RS     if state
-//RS         .focus_key
-//RS         .as_ref()
-//RS         .is_some_and(|key| !jet_web_table_key_is_valid(key))
-//RS     {
-//RS         state.focus_key = None;
-//RS     }
-//RS     state
-//RS }
-//RS 
-//RS fn jet_web_table_reconcile_state<T>(
-//RS     state: JetWebTableState,
-//RS     rows: &[T],
-//RS     row_key: Option<&JetWebTableRowKey<T>>,
-//RS ) -> JetWebTableState {
-//RS     let mut state = jet_web_table_normalize_state(state);
-//RS     let Ok(keys) = jet_web_table_row_keys(rows, row_key) else {
-//RS         return state;
-//RS     };
-//RS     let keys = keys.into_iter().collect::<JetWebTableSet<_>>();
-//RS     state.selected_keys.retain(|key| keys.contains(key));
-//RS     if state
-//RS         .selection_anchor
-//RS         .as_ref()
-//RS         .is_some_and(|key| !keys.contains(key))
-//RS     {
-//RS         state.selection_anchor = None;
-//RS     }
-//RS     if state
-//RS         .focus_key
-//RS         .as_ref()
-//RS         .is_some_and(|key| !keys.contains(key))
-//RS     {
-//RS         state.focus_key = None;
-//RS     }
-//RS     state
-//RS }
-//RS 
-//RS fn jet_web_table_key_is_valid(key: &str) -> bool {
-//RS     !key.is_empty()
-//RS         && key.len() <= JET_WEB_TABLE_MAX_KEY_BYTES
-//RS         && !key.chars().any(|character| character.is_control())
-//RS }
-//RS 
-//RS fn jet_web_table_validate_keys(keys: &[String]) -> Result<(), String> {
-//RS     let mut seen = JetWebTableSet::new();
-//RS     for key in keys {
-//RS         if !jet_web_table_key_is_valid(key) {
-//RS             return Err("table row key must be non-empty, bounded, and printable".to_string());
-//RS         }
-//RS         if !seen.insert(key.clone()) {
-//RS             return Err(format!("table row key `{key}` is duplicated"));
-//RS         }
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn jet_web_table_validate_columns<T>(
-//RS     columns: &[JetWebTableColumn<T>],
-//RS ) -> Result<(), String> {
-//RS     let mut seen = JetWebTableSet::new();
-//RS     for column in columns {
-//RS         if !jet_web_table_key_is_valid(&column.name) {
-//RS             return Err("table column name must be non-empty, bounded, and printable".to_string());
-//RS         }
-//RS         if !jet_web_table_key_is_valid(&column.cell_type) {
-//RS             return Err("table column cell type must be non-empty, bounded, and printable".to_string());
-//RS         }
-//RS         if !seen.insert(column.name.clone()) {
-//RS             return Err(format!("table column `{}` is duplicated", column.name));
-//RS         }
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn jet_web_table_row_keys<T>(
-//RS     rows: &[T],
-//RS     row_key: Option<&JetWebTableRowKey<T>>,
-//RS ) -> Result<Vec<String>, String> {
-//RS     let keys = rows
-//RS         .iter()
-//RS         .enumerate()
-//RS         .map(|(index, row)| {
-//RS             row_key.map(|key| key(row)).unwrap_or_else(|| format!("index:{index}"))
-//RS         })
-//RS         .collect::<Vec<_>>();
-//RS     jet_web_table_validate_keys(&keys)?;
-//RS     Ok(keys)
-//RS }
-//RS 
-//RS fn jet_web_table_rows_with_keys<T: Clone>(
-//RS     rows: &[T],
-//RS     row_key: Option<&JetWebTableRowKey<T>>,
-//RS ) -> Result<Vec<JetWebTableRow<T>>, String> {
-//RS     Ok(rows
-//RS         .iter()
-//RS         .cloned()
-//RS         .zip(jet_web_table_row_keys(rows, row_key)?)
-//RS         .map(|(value, key)| JetWebTableRow { value, key })
-//RS         .collect())
-//RS }
-//RS 
-//RS fn jet_web_table_page_keyed<T: Clone>(
-//RS     rows: &[JetWebTableRow<T>],
-//RS     page_index: i64,
-//RS     page_size: i64,
-//RS ) -> JetWebTablePage<T> {
-//RS     let page_size = page_size.clamp(1, JET_WEB_TABLE_MAX_PAGE_SIZE);
-//RS     let total_rows = i64::try_from(rows.len()).unwrap_or(i64::MAX);
-//RS     let page_count = if total_rows == 0 {
-//RS         0
-//RS     } else {
-//RS         total_rows
-//RS             .saturating_add(page_size.saturating_sub(1))
-//RS             .checked_div(page_size)
-//RS             .unwrap_or(0)
-//RS     };
-//RS     let page_index = if page_count == 0 {
-//RS         0
-//RS     } else {
-//RS         page_index.max(0).min(page_count - 1)
-//RS     };
-//RS     let start = page_index
-//RS         .saturating_mul(page_size)
-//RS         .min(total_rows)
-//RS         .try_into()
-//RS         .unwrap_or(usize::MAX)
-//RS         .min(rows.len());
-//RS     let end = start
-//RS         .saturating_add(page_size.try_into().unwrap_or(usize::MAX))
-//RS         .min(rows.len());
-//RS     JetWebTablePage {
-//RS         rows: rows[start..end]
-//RS             .iter()
-//RS             .map(|row| row.value.clone())
-//RS             .collect(),
-//RS         row_keys: rows[start..end]
-//RS             .iter()
-//RS             .map(|row| row.key.clone())
-//RS             .collect(),
-//RS         total_rows,
-//RS         page_index,
-//RS         page_size,
-//RS         page_count,
-//RS     }
-//RS }
-//RS 
-//RS fn jet_web_table_string_list_json(values: &[String]) -> String {
-//RS     values
-//RS         .iter()
-//RS         .map(|value| format!("\"{}\"", jet_web_table_json_escape(value)))
-//RS         .collect::<Vec<_>>()
-//RS         .join(",")
-//RS }
-//RS 
-//RS fn jet_web_table_json_escape(value: &str) -> String {
-//RS     let mut escaped = String::with_capacity(value.len());
-//RS     for character in value.chars() {
-//RS         match character {
-//RS             '"' => escaped.push_str("\\\""),
-//RS             '\\' => escaped.push_str("\\\\"),
-//RS             '\n' => escaped.push_str("\\n"),
-//RS             '\r' => escaped.push_str("\\r"),
-//RS             '\t' => escaped.push_str("\\t"),
-//RS             character if character.is_control() => {
-//RS                 escaped.push_str(&format!("\\u{:04x}", character as u32));
-//RS             }
-//RS             character => escaped.push(character),
-//RS         }
-//RS     }
-//RS     escaped
-//RS }
-// END-PORT-PENDING 0314 crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:1-1685
+use std.sync.[Arc, Mutex]
+use core.web.table.[WebTableSortDirection, WebTablePageMode, WebTableFilter, WebTableRow]
+use core.reactive.runtime.std_reactive_event_watch.[JetSignal, JetDerived]
+use core.web.runtime.top_live_query.[jet_app_invalidate_key, jet_app_live_keyed]
+use core.web.runtime.top_web_virtual.[JetWebVirtualPlan, JetWebVirtualPlanViewport]
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:1
+// Headless typed table: no markup/styles; checked accessors retain cell types.
+// Stable sorting/filtering yields the same projection for every renderer.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:11
+const JET_WEB_TABLE_DEFAULT_PAGE_SIZE: I64 = 25
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:12
+const JET_WEB_TABLE_MAX_PAGE_SIZE: I64 = 10_000
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:13
+const JET_WEB_TABLE_MAX_KEY_BYTES: USize = 256
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:18
+fn jet_web_table_page_generation(name: String, advance: Bool) -> U64 {
+    hash := U64{14_695_981_039_346_656_037}
+    loop byte in name.as_bytes() {
+        hash ^= *byte as U64
+        hash = hash.wrapping_mul(1_099_511_628_211)
+    }
+    identity :: "web.table.page.{hash:016x}"
+    if advance { _ :: jet_app_invalidate_key(identity.clone()) }
+    jet_app_live_keyed(identity.clone(), ^identity, "", None, None).lifecycle.generation
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:38
+// Canonical sort-direction carrier: core.web.table.WebTableSortDirection.
+impl WebTableSortDirection {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:45
+    fn is_descending(self: Self) -> Bool { self is .Descending }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:50
+#Derive(Clone, Debug, PartialEq, Eq)
+pub struct JetWebTableSort { pub column: String, pub direction: WebTableSortDirection }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:56
+// Canonical filter carrier: core.web.table.WebTableFilter.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:62
+// Canonical page-mode carrier: core.web.table.WebTablePageMode.
+impl WebTablePageMode {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:69
+    fn is_server(self: Self) -> Bool { self is .Server }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:73
+#Derive(Clone, Copy, Debug, PartialEq, Eq)
+pub enum JetWebTableStatus { Idle, Loading, Ready, Error }
+impl JetWebTableStatus {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:82
+    pub fn name(self: Self) -> String {
+        match self { .Idle -> "idle", .Loading -> "loading", .Ready -> "ready", .Error -> "error" }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:95
+#Derive(Clone)
+pub struct JetWebTableProjection<T> {
+    pub key: String
+    pub state: JetWebTableState
+    pub columns: [(String, String)]
+    pub page: JetWebTablePage<T>?
+    pub rows: [WebTableRow<T>]
+    pub status: JetWebTableStatus
+    pub loading: Bool
+    pub error: String
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:108
+#Derive(Clone, Debug, PartialEq, Eq)
+pub struct JetWebTableState {
+    pub sort: JetWebTableSort?
+    pub filter: WebTableFilter?
+    pub page_index: I64
+    pub page_size: I64
+    pub selected_keys: [String]
+    pub selection_anchor: String?
+    pub focus_key: String?
+    pub page_mode: WebTablePageMode
+}
+impl Default for JetWebTableState {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:123
+    fn default() -> Self {
+        Self{sort: None, filter: None, page_index: 0, page_size: JET_WEB_TABLE_DEFAULT_PAGE_SIZE, selected_keys: [], selection_anchor: None, focus_key: None, page_mode: .Client}
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:140
+pub struct JetWebTableColumn<T> {
+    pub name: String
+    pub cell_type: String
+    accessor: Arc<Fn(&T) -> String + Send + Sync>
+}
+impl<T> Clone for JetWebTableColumn<T> {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:147
+    fn clone(self: &Self) -> Self { Self{name: self.name.clone(), cell_type: self.cell_type.clone(), accessor: self.accessor.clone()} }
+}
+impl<T> JetWebTableColumn<T> {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:157
+    fn value(self: &Self, row: &T) -> String { (self.accessor)(row) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:161
+    pub fn cell_type(self: &Self) -> String { self.cell_type.clone() }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:169
+// Canonical row carrier: core.web.table.WebTableRow<T>.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:175
+#Derive(Clone, Debug, PartialEq)
+pub struct JetWebTablePage<T> {
+    pub rows: [T]
+    // Keys align one-for-one; row position never defines identity.
+    pub row_keys: [String]
+    pub total_rows: I64
+    pub page_index: I64
+    pub page_size: I64
+    pub page_count: I64
+}
+impl<T> JetWebTablePage<T> {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:188
+    pub fn has_previous(self: &Self) -> Bool { self.page_index > 0 }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:191
+    pub fn has_next(self: &Self) -> Bool { self.page_index.saturating_add(1) < self.page_count }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:195
+    pub fn first_page(self: &Self) -> I64 { 0 }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:199
+    pub fn last_page(self: &Self) -> I64 { self.page_count.saturating_sub(1) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:203
+    pub fn next_page(self: &Self) -> I64? { self.has_next().then_some(self.page_index + 1) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:207
+    pub fn previous_page(self: &Self) -> I64? { self.has_previous().then_some(self.page_index - 1) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:211
+    pub fn keyed_rows(self: &Self) -> [WebTableRow<T>] where T: Clone {
+        self.rows.iter().cloned().zip(self.row_keys.iter().cloned()).map(fn((value, key)) { WebTableRow{key: ^key, value: ^value} }).collect()
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:224
+type JetWebTablePageLoader<T> = Arc<Fn(JetWebTableState) -> JetWebTablePage<T> Err! + Send + Sync>
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:226
+type JetWebTableRowKey<T> = Arc<Fn(&T) -> String + Send + Sync>
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:229
+#Derive(Clone)
+pub struct JetWebTable<T> {
+    pub name: String
+    rows: JetSignal<[T]>
+    state: JetSignal<JetWebTableState>
+    columns: Arc<[JetWebTableColumn<T>]>
+    row_key: JetWebTableRowKey<T>?
+    server_page: JetWebTablePageLoader<T>?
+    loading: JetSignal<Bool>
+    error: JetSignal<String>
+    loaded_page: JetSignal<JetWebTablePage<T>?>
+    // Accepted page keys in current sort/filter boundary; reject cross-page duplicates.
+    server_key_pages: Arc<Mutex<[I64: [String]]>>
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:249
+impl<T: Clone + Send + Sync> JetWebTable<T> {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:250
+    pub fn new(name: String, rows: [T]) -> Self { Self.new_with_key_arc(^name, ^rows, None) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:254
+    pub fn new_with_key<F: Fn(&T) -> String + Send + Sync>(name: String, rows: [T], key: F) -> Self {
+        Self.new_with_key_arc(^name, ^rows, Val(Arc.new(^key)))
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:261
+    // GATE #4565: kernel primitive
+    #Unsafe("own synchronized accepted server-page identity map; signal cells retain typed row/view state")
+    fn new_with_key_arc(name: String, rows: [T], row_key: JetWebTableRowKey<T>?) -> Self {
+        Self{name: ^name, rows: JetSignal.new(^rows), state: JetSignal.new(JetWebTableState.default()), columns: Arc.new([]), row_key: ^row_key, server_page: None, loading: JetSignal.new(false), error: JetSignal.new(""), loaded_page: JetSignal.new(None), server_key_pages: Arc.new(Mutex.new([I64: [String]]{}))}
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:282
+impl<T: Clone + Send + Sync> JetWebTable<T> {
+    pub fn rows(self: &Self) -> [T] { self.rows.get() }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:286
+    pub fn rows_signal(self: &Self) -> JetSignal<[T]> { self.rows.clone() }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:290
+    // GATE #4565: kernel primitive
+    #Unsafe("lock shared accepted server-page identity registry")
+    fn clear_server_key_pages(self: &Self) -> Unit {
+        if self.server_key_pages.lock() is Ok(pages) { pages.clear() }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:296
+    // GATE #4565: kernel primitive
+    #Unsafe("lock shared accepted server-page identity registry")
+    fn accept_server_page_keys(self: &Self, page: &JetWebTablePage<T>) -> Unit Err! {
+        pages := match self.server_key_pages.lock() {
+            Ok(pages) -> pages
+            Err(_) -> return Err("server table page identity registry is unavailable")
+        }
+        loop (other_page, keys) in pages.iter() {
+            if *other_page != page.page_index && page.row_keys.iter().any(fn(key) { keys.iter().any(fn(other) { other == key }) }) {
+                return Err("server table response duplicates a row key across pages")
+            }
+        }
+        pages.insert(page.page_index, page.row_keys.clone())
+        Ok(())
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:314
+    pub fn set_rows(self: &Self, rows: [T]) -> Unit {
+        state :: jet_web_table_reconcile_state(self.state(), &rows, self.row_key.as_ref())
+        self.rows.set(^rows)
+        self.state.set(^state)
+        self.loaded_page.set(None)
+        self.error.set("")
+        self.loading.set(false)
+        if self.server_page.is_some() {
+            self.clear_server_key_pages()
+            _ :: jet_web_table_page_generation(&self.name, true)
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:331
+    pub fn with_key<F: Fn(&T) -> String + Send + Sync>(self: Self, key: F) -> Self {
+        self.row_key = Val(Arc.new(^key))
+        state :: jet_web_table_reconcile_state(self.state(), &self.rows(), self.row_key.as_ref())
+        self.state.set(^state)
+        self.loaded_page.set(None)
+        self.loading.set(false)
+        if self.server_page.is_some() {
+            self.clear_server_key_pages()
+            _ :: jet_web_table_page_generation(&self.name, true)
+        }
+        self
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:351
+    pub fn has_explicit_key(self: &Self) -> Bool { self.row_key.is_some() }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:355
+    pub fn state(self: &Self) -> JetWebTableState { self.state.get() }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:359
+    pub fn state_signal(self: &Self) -> JetSignal<JetWebTableState> { self.state.clone() }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:363
+    pub fn set_state(self: &Self, state: JetWebTableState) -> Unit {
+        previous :: self.state()
+        normalized :: jet_web_table_normalize_state(^state)
+        if jet_web_table_page_state_changed(&previous, &normalized) {
+            self.loaded_page.set(None)
+            if self.server_page.is_some() {
+                if jet_web_table_query_boundary_changed(&previous, &normalized) { self.clear_server_key_pages() }
+                self.loading.set(false)
+                _ :: jet_web_table_page_generation(&self.name, true)
+            }
+        }
+        self.state.set(^normalized)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:381
+    // Column configuration is copied; existing handles retain their shared signals.
+    pub fn with_column(self: Self, column: JetWebTableColumn<T>) -> Self {
+        columns := (*self.columns).clone()
+        columns.push(^column)
+        self.columns = Arc.new(^columns)
+        self
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:387
+    pub fn with_server_page<F: Fn(JetWebTableState) -> JetWebTablePage<T> Err! + Send + Sync>(self: Self, loader: F) -> Self {
+        was_server :: self.state().page_mode.is_server()
+        self.server_page = Val(Arc.new(^loader))
+        state := self.state()
+        state.page_mode = .Server
+        if was_server {
+            self.clear_server_key_pages()
+            self.loading.set(false)
+            _ :: jet_web_table_page_generation(&self.name, true)
+        }
+        self.set_state(^state)
+        self.loaded_page.set(None)
+        self.error.set("")
+        self
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:409
+    pub fn loading(self: &Self) -> Bool { self.loading.get() }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:413
+    pub fn loading_signal(self: &Self) -> JetSignal<Bool> { self.loading.clone() }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:417
+    pub fn loaded_page(self: &Self) -> JetWebTablePage<T>? { self.loaded_page.get() }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:421
+    pub fn status(self: &Self) -> JetWebTableStatus {
+        if self.loading() { .Loading }
+        else if !self.error().is_empty() { .Error }
+        else if self.loaded_page().is_some() { .Ready }
+        else { .Idle }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:436
+    // Local projection materializes on demand; server projection never invokes a loader.
+    pub fn projection(self: &Self) -> JetWebTableProjection<T> {
+        state :: self.state()
+        page :: match self.loaded_page() {
+            Val(page) -> Val(^page)
+            None if !state.page_mode.is_server() -> self.page().ok()
+            None -> None
+        }
+        rows :: page.as_ref().map(fn(page) { page.keyed_rows() }).unwrap_or_default()
+        JetWebTableProjection{key: self.name.clone(), state: self.state(), columns: self.columns(), page: ^page, rows: ^rows, status: self.status(), loading: self.loading(), error: self.error()}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:459
+    pub fn error(self: &Self) -> String { self.error.get() }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:463
+    pub fn error_signal(self: &Self) -> JetSignal<String> { self.error.clone() }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:467
+    pub fn columns(self: &Self) -> [(String, String)] {
+        self.columns.iter().map(fn(column) { (column.name.clone(), column.cell_type.clone()) }).collect()
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:474
+    pub fn sort_by(self: &Self, column: String, direction: WebTableSortDirection) -> Self {
+        state := self.state()
+        state.sort = Val(JetWebTableSort{column: ^column, direction: ^direction})
+        state.page_index = 0
+        self.set_state(^state)
+        self.clone()
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:482
+    pub fn clear_sort(self: &Self) -> Self {
+        state := self.state()
+        state.sort = None
+        state.page_index = 0
+        self.set_state(^state)
+        self.clone()
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:490
+    pub fn filter_by(self: &Self, column: String, value: String) -> Self {
+        state := self.state()
+        state.filter = Val(WebTableFilter{column: ^column, value: ^value})
+        state.page_index = 0
+        self.set_state(^state)
+        self.clone()
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:498
+    pub fn clear_filter(self: &Self) -> Self {
+        state := self.state()
+        state.filter = None
+        state.page_index = 0
+        self.set_state(^state)
+        self.clone()
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:506
+    pub fn paginate(self: &Self, page_index: I64, page_size: I64) -> Self {
+        state := self.state()
+        state.page_index = page_index.max(0)
+        state.page_size = page_size.clamp(1, JET_WEB_TABLE_MAX_PAGE_SIZE)
+        self.set_state(^state)
+        self.clone()
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:514
+    pub fn page(self: &Self) -> JetWebTablePage<T> Err! {
+        state :: self.state()
+        if state.page_mode.is_server() && self.server_page.is_none() {
+            error :: "server table state requires a page loader"
+            self.loading.set(false)
+            self.loaded_page.set(None)
+            self.error.set(error.clone())
+            return Err(^error)
+        }
+        if self.server_page.as_ref() is Val(loader) {
+            // Every request supersedes prior requests even with the same table state.
+            request_generation :: jet_web_table_page_generation(&self.name, true)
+            self.loading.set(true)
+            self.error.set("")
+            loaded :: loader(state.clone())
+            current_generation :: jet_web_table_page_generation(&self.name, false)
+            if current_generation != request_generation || self.state() != state {
+                if current_generation == request_generation { self.loading.set(false) }
+                return Err("server table page response is stale")
+            }
+            result :: loaded.and_then(fn(page) {
+                if page.page_index != state.page_index || page.page_size != state.page_size {
+                    return Err("server table page response does not match the requested boundary")
+                }
+                jet_web_table_validate_server_page(^page, self.row_key.as_ref())
+            })
+            match result {
+                Ok(page) -> {
+                    if jet_web_table_page_generation(&self.name, false) != request_generation || self.state() != state {
+                        return Err("server table page response is stale")
+                    }
+                    if self.accept_server_page_keys(&page) is Err(error) {
+                        self.loading.set(false)
+                        self.loaded_page.set(None)
+                        self.error.set(error.clone())
+                        return Err(^error)
+                    }
+                    self.loading.set(false)
+                    canonical := state
+                    canonical.page_index = page.page_index
+                    canonical.page_size = page.page_size
+                    self.state.set(^canonical)
+                    self.loaded_page.set(Val(page.clone()))
+                    self.error.set("")
+                    Ok(^page)
+                }
+                Err(error) -> {
+                    if jet_web_table_page_generation(&self.name, false) != request_generation || self.state() != state {
+                        return Err("server table page response is stale")
+                    }
+                    self.loading.set(false)
+                    self.loaded_page.set(None)
+                    self.error.set(error.clone())
+                    Err(^error)
+                }
+            }
+        } else {
+            result :: jet_web_table_materialize(&self.rows(), &state, &self.columns, self.row_key.as_ref())
+            match result {
+                Ok(page) -> {
+                    canonical := state
+                    canonical.page_index = page.page_index
+                    canonical.page_size = page.page_size
+                    self.state.set(^canonical)
+                    self.loaded_page.set(Val(page.clone()))
+                    self.error.set("")
+                    Ok(^page)
+                }
+                Err(error) -> {
+                    self.loaded_page.set(None)
+                    self.error.set(error.clone())
+                    Err(^error)
+                }
+            }
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:607
+    pub fn derived_page(self: &Self) -> JetDerived<JetWebTablePage<T> Err!> {
+        rows :: self.rows.clone()
+        state :: self.state.clone()
+        columns :: self.columns.clone()
+        row_key :: self.row_key.clone()
+        server :: self.server_page.is_some()
+        JetDerived.new(fn() {
+            if server || state.get().page_mode.is_server() {
+                Err("server table pages require explicit page()")
+            } else {
+                jet_web_table_materialize(&rows.get(), &state.get(), &columns, row_key.as_ref())
+            }
+        })
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:622
+    pub fn facts_json(self: &Self) -> String {
+        state :: self.state()
+        columns :: self.columns()
+        column_json :: columns.iter().map(fn((name, cell_type)) {
+            format("{{\"name\":\"{}\",\"type\":\"{}\"}}", jet_web_table_json_escape(name), jet_web_table_json_escape(cell_type))
+        }).collect<[String]>().join(",")
+        page :: self.loaded_page()
+        total_rows :: page.as_ref().map(fn(page) { page.total_rows }).unwrap_or(0)
+        page_count :: page.as_ref().map(fn(page) { page.page_count }).unwrap_or(0)
+        status :: self.status()
+        error :: self.error()
+        format(
+            "{{\"name\":\"{}\",\"identity\":\"{}\",\"key\":\"{}\",\"columns\":[{}],\"page_index\":{},\"page_size\":{},\"page_mode\":\"{}\",\"selected_keys\":[{}],\"selection_anchor\":{},\"focus_key\":{},\"has_explicit_key\":{},\"sort\":{},\"filter\":{},\"loaded_page\":{},\"total_rows\":{},\"page_count\":{},\"status\":\"{}\",\"loading\":{},\"error\":\"{}\"}}",
+            jet_web_table_json_escape(&self.name), jet_web_table_json_escape(&self.name), jet_web_table_json_escape(&self.name),
+            column_json, state.page_index.max(0), state.page_size.clamp(1, JET_WEB_TABLE_MAX_PAGE_SIZE),
+            if state.page_mode.is_server() { "server" } else { "client" },
+            jet_web_table_string_list_json(&state.selected_keys),
+            state.selection_anchor.as_ref().map(fn(key) { format("\"{}\"", jet_web_table_json_escape(key)) }).unwrap_or_else(fn() { "null" }),
+            state.focus_key.as_ref().map(fn(key) { format("\"{}\"", jet_web_table_json_escape(key)) }).unwrap_or_else(fn() { "null" }),
+            self.has_explicit_key(),
+            state.sort.as_ref().map(fn(sort) {
+                format("{{\"column\":\"{}\",\"direction\":\"{}\"}}", jet_web_table_json_escape(&sort.column), if sort.direction.is_descending() { "desc" } else { "asc" })
+            }).unwrap_or_else(fn() { "null" }),
+            state.filter.as_ref().map(fn(filter) {
+                format("{{\"column\":\"{}\",\"value\":\"{}\"}}", jet_web_table_json_escape(&filter.column), jet_web_table_json_escape(&filter.value))
+            }).unwrap_or_else(fn() { "null" }),
+            page.is_some(), total_rows, page_count, status.name(), self.loading(), jet_web_table_json_escape(&error)
+        )
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:694
+impl<T: Clone + Send + Sync> JetWebTable<T> {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:695
+    pub fn row_keys(self: &Self) -> [String] Err! {
+        if self.server_page.is_some() {
+            if self.loaded_page() is Val(page) { return Ok(^page.row_keys) }
+        }
+        Ok(jet_web_table_rows_with_keys(&self.rows(), self.row_key.as_ref())?.into_iter().map(fn(row) { ^row.key }).collect())
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:710
+    pub fn rows_with_keys(self: &Self) -> [WebTableRow<T>] Err! {
+        if self.server_page.is_some() {
+            if self.loaded_page() is Val(page) { return Ok(page.keyed_rows()) }
+        }
+        jet_web_table_rows_with_keys(&self.rows(), self.row_key.as_ref())
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:719
+    pub fn selected_keys(self: &Self) -> [String] { self.state().selected_keys }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:722
+    pub fn focused_key(self: &Self) -> String? { self.state().focus_key }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:726
+    pub fn focus(self: &Self, key: String) -> Self Err! {
+        if !jet_web_table_key_is_valid(&key) {
+            return Err("table focus key must be non-empty, bounded, and printable")
+        }
+        state := self.state()
+        state.focus_key = Val(^key)
+        self.set_state(^state)
+        Ok(self.clone())
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:736
+    pub fn clear_focus(self: &Self) -> Self {
+        state := self.state()
+        state.focus_key = None
+        self.set_state(^state)
+        self.clone()
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:744
+    pub fn set_selected(self: &Self, key: String, selected: Bool) -> Self Err! {
+        if !jet_web_table_key_is_valid(&key) {
+            return Err("table selection key must be non-empty, bounded, and printable")
+        }
+        state := self.state()
+        if selected { state.selected_keys.push(key.clone()) }
+        else { state.selected_keys.retain(fn(existing) { existing != &key }) }
+        if selected {
+            state.selection_anchor = Val(key.clone())
+            state.focus_key = Val(^key)
+        } else if state.selection_anchor.as_deref() == Val(key.as_str()) {
+            state.selection_anchor = state.selected_keys.first().cloned()
+        }
+        self.set_state(^state)
+        Ok(self.clone())
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:764
+    pub fn toggle_selection(self: &Self, key: String) -> Self Err! {
+        selected :: self.state().selected_keys.iter().any(fn(value) { value == &key })
+        self.set_selected(^key, !selected)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:769
+    pub fn clear_selection(self: &Self) -> Self {
+        state := self.state()
+        state.selected_keys.clear()
+        state.selection_anchor = None
+        self.set_state(^state)
+        self.clone()
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:777
+    pub fn selected_rows(self: &Self) -> [WebTableRow<T>] Err! {
+        selected :: self.state().selected_keys.into_iter().map(fn(key) { (^key, true) }).collect<[String: Bool]>()
+        rows :: if self.server_page.is_some() {
+            match self.loaded_page() { Val(page) -> page.keyed_rows(), None -> self.rows_with_keys()? }
+        } else { self.rows_with_keys()? }
+        Ok(rows.into_iter().filter(fn(row) { selected.contains_key(&row.key) }).collect())
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:797
+    pub fn replace_rows(self: &Self, rows: [T]) -> Unit Err! {
+        _ :: jet_web_table_rows_with_keys(&rows, self.row_key.as_ref())?
+        self.set_rows(^rows)
+        Ok(())
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:803
+    pub fn insert_row(self: &Self, row: T) -> String Err! {
+        if self.row_key.is_none() { return Err("table insertion requires an explicit row key") }
+        key :: self.row_key.as_ref().map(fn(key) { key(&row) }).unwrap_or_default()
+        if !jet_web_table_key_is_valid(&key) { return Err("table row key must be non-empty, bounded, and printable") }
+        rows := self.rows()
+        existing :: jet_web_table_rows_with_keys(&rows, self.row_key.as_ref())?
+        if existing.iter().any(fn(existing) { existing.key == key }) { return Err("table row key `{key}` is duplicated") }
+        rows.push(^row)
+        self.set_rows(^rows)
+        Ok(^key)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:825
+    pub fn replace_row(self: &Self, key: String, row: T) -> Unit Err! {
+        if !jet_web_table_key_is_valid(key) { return Err("table row key must be non-empty, bounded, and printable") }
+        rows := self.rows()
+        keyed :: jet_web_table_rows_with_keys(&rows, self.row_key.as_ref())?
+        index :: keyed.iter().position(fn(existing) { existing.key == key }).ok_or_else(fn() { "table row key `{key}` was not found" })?
+        replacement_key :: self.row_key.as_ref().map(fn(row_key) { row_key(&row) }).unwrap_or_else(fn() { "index:{index}" })
+        if replacement_key != key { return Err("table row replacement cannot change the row key") }
+        rows[index] = ^row
+        _ :: jet_web_table_rows_with_keys(&rows, self.row_key.as_ref())?
+        self.set_rows(^rows)
+        Ok(())
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:849
+    pub fn update_row<F: FnOnce(&T)>(self: &Self, key: String, update: F) -> Unit Err! {
+        if !jet_web_table_key_is_valid(key) { return Err("table row key must be non-empty, bounded, and printable") }
+        rows := self.rows()
+        keyed :: jet_web_table_rows_with_keys(&rows, self.row_key.as_ref())?
+        index :: keyed.iter().position(fn(row) { row.key == key }).ok_or_else(fn() { "table row key `{key}` was not found" })?
+        update(&rows[index])
+        updated_key :: self.row_key.as_ref().map(fn(row_key) { row_key(&rows[index]) }).unwrap_or_else(fn() { "index:{index}" })
+        if updated_key != key { return Err("table row updates cannot change the row key") }
+        _ :: jet_web_table_rows_with_keys(&rows, self.row_key.as_ref())?
+        self.set_rows(^rows)
+        Ok(())
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:876
+    pub fn remove_row(self: &Self, key: String) -> T Err! {
+        rows := self.rows()
+        keyed :: jet_web_table_rows_with_keys(&rows, self.row_key.as_ref())?
+        index :: keyed.iter().position(fn(row) { row.key == key }).ok_or_else(fn() { "table row key `{key}` was not found" })?
+        removed :: rows.remove(index)
+        self.set_rows(^rows)
+        Ok(^removed)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:888
+    pub fn first_page(self: &Self) -> Self { self.paginate(0, self.state().page_size) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:891
+    pub fn next_page(self: &Self) -> Self {
+        page :: match self.loaded_page() {
+            Val(page) -> page
+            None -> match self.page() { Ok(page) -> page, Err(_) -> return self.clone() }
+        }
+        next_index :: match page.next_page() { Val(index) -> index, None -> return self.clone() }
+        self.paginate(next_index, page.page_size)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:907
+    pub fn last_page(self: &Self) -> Self Err! {
+        page :: match self.loaded_page() { Val(page) -> page, None -> self.page()? }
+        Ok(self.paginate(page.last_page(), page.page_size))
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:916
+    pub fn visible_rows(self: &Self, plan: &JetWebVirtualPlan) -> [WebTableRow<T>] Err! {
+        if self.server_page.is_some() {
+            page :: self.loaded_page().ok_or_else(fn() { "server table visible rows require a loaded page" })?
+            rows :: page.keyed_rows()
+            loaded_count :: I64.try_from(rows.len()).unwrap_or(I64.MAX)
+            global_indices :: plan.total_count == page.total_rows && plan.total_count > loaded_count
+            page_start :: page.page_index.saturating_mul(page.page_size).max(0)
+            // Whole-result plans use global indices; loaded-page plans use local indices.
+            return Ok(plan.indices().into_iter().filter_map(fn(index) {
+                local :: if global_indices { index.checked_sub(page_start)? } else { index }
+                USize.try_from(local).ok().and_then(fn(local) { rows.get(local).cloned() })
+            }).collect())
+        }
+        state :: self.state()
+        visible := jet_web_table_rows_with_keys(&self.rows(), self.row_key.as_ref())?
+        if &state.filter is Val(filter) {
+            column :: self.columns.iter().find(fn(column) { column.name == filter.column }).ok_or_else(fn() { "table filter column `{filter.column}` has no accessor" })?
+            visible.retain(fn(row) { column.value(&row.value).contains(filter.value.as_str()) })
+        }
+        if &state.sort is Val(sort) {
+            column :: self.columns.iter().find(fn(column) { column.name == sort.column }).ok_or_else(fn() { "table sort column `{sort.column}` has no accessor" })?
+            descending :: sort.direction.is_descending()
+            visible.sort_by(fn(left, right) {
+                ordering :: column.value(&left.value).cmp(&column.value(&right.value))
+                if descending { ordering.reverse() } else { ordering }
+            })
+        }
+        Ok(plan.indices().into_iter().filter_map(fn(index) { USize.try_from(index).ok() }).filter_map(fn(index) { visible.get(index).cloned() }).collect())
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:986
+    // Renderers supply nodes; this headless table supplies keyed semantic rows only.
+    pub fn render_page<R, F: Fn(&T, String) -> R>(self: &Self, render: F) -> [R] Err! {
+        Ok(self.page()?.keyed_rows().iter().map(fn(row) { render(&row.value, &row.key) }).collect())
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:998
+    pub fn render_virtual<R, F: Fn(&T, String) -> R>(self: &Self, plan: &JetWebVirtualPlan, render: F) -> [R] Err! {
+        Ok(self.visible_rows(plan)?.iter().map(fn(row) { render(&row.value, &row.key) }).collect())
+    }
+}
+
+// Core-call adapters retain the table as semantic receiver; hosts marshal results.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:1016
+pub fn jet_web_table_new_keyed<T: Clone + Send + Sync, F: Fn(&T) -> String + Send + Sync>(name: String, rows: [T], key: F) -> JetWebTable<T> {
+    jet_web_table_with_key(^name, ^rows, ^key)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:1028
+pub fn jet_web_table_with_column<T: Clone + Send + Sync>(table: &JetWebTable<T>, column: JetWebTableColumn<T>) -> JetWebTable<T> { table.clone().with_column(^column) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:1035
+pub fn jet_web_table_with_server_page<T: Clone + Send + Sync, F: Fn(JetWebTableState) -> JetWebTablePage<T> Err! + Send + Sync>(table: &JetWebTable<T>, loader: F) -> JetWebTable<T> { table.clone().with_server_page(^loader) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:1049
+pub fn jet_web_table_state<T: Clone + Send + Sync>(table: &JetWebTable<T>) -> JetWebTableState { table.state() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:1055
+pub fn jet_web_table_facts<T: Clone + Send + Sync>(table: &JetWebTable<T>) -> String { table.facts_json() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:1063
+pub fn jet_web_table_projection<T: Clone + Send + Sync>(table: &JetWebTable<T>) -> JetWebTableProjection<T> { table.projection() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:1069
+pub fn jet_web_table_keys<T: Clone + Send + Sync>(table: &JetWebTable<T>) -> [String] Err! { table.row_keys() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:1075
+pub fn jet_web_table_page_state<T: Clone + Send + Sync>(table: &JetWebTable<T>) -> JetWebTablePage<T> Err! { table.page() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:1081
+pub fn jet_web_table_sort_by<T: Clone + Send + Sync>(table: &JetWebTable<T>, column: String, direction: WebTableSortDirection) -> JetWebTable<T> { table.sort_by(^column, ^direction) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:1089
+pub fn jet_web_table_filter_by<T: Clone + Send + Sync>(table: &JetWebTable<T>, column: String, value: String) -> JetWebTable<T> { table.filter_by(^column, ^value) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:1097
+pub fn jet_web_table_paginate<T: Clone + Send + Sync>(table: &JetWebTable<T>, page_index: I64, page_size: I64) -> JetWebTable<T> { table.paginate(page_index, page_size) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:1105
+pub fn jet_web_table_set_rows<T: Clone + Send + Sync>(table: &JetWebTable<T>, rows: [T]) -> Unit Err! { table.replace_rows(^rows) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:1112
+pub fn jet_web_table_set_selected<T: Clone + Send + Sync>(table: &JetWebTable<T>, key: String, selected: Bool) -> JetWebTable<T> Err! { table.set_selected(^key, selected) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:1120
+pub fn jet_web_table_toggle_selection<T: Clone + Send + Sync>(table: &JetWebTable<T>, key: String) -> JetWebTable<T> Err! { table.toggle_selection(^key) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:1126
+pub fn jet_web_table_focus<T: Clone + Send + Sync>(table: &JetWebTable<T>, key: String) -> JetWebTable<T> Err! { table.focus(^key) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:1133
+pub fn jet_web_table_clear_focus<T: Clone + Send + Sync>(table: &JetWebTable<T>) -> JetWebTable<T> { table.clear_focus() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:1139
+pub fn jet_web_table_focused_key<T: Clone + Send + Sync>(table: &JetWebTable<T>) -> String? { table.focused_key() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:1146
+pub fn jet_web_table_clear_selection<T: Clone + Send + Sync>(table: &JetWebTable<T>) -> JetWebTable<T> { table.clear_selection() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:1152
+pub fn jet_web_table_selected_keys<T: Clone + Send + Sync>(table: &JetWebTable<T>) -> [String] { table.selected_keys() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:1158
+pub fn jet_web_table_selected_rows<T: Clone + Send + Sync>(table: &JetWebTable<T>) -> [WebTableRow<T>] Err! { table.selected_rows() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:1164
+pub fn jet_web_table_insert_row<T: Clone + Send + Sync>(table: &JetWebTable<T>, row: T) -> String Err! { table.insert_row(^row) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:1171
+pub fn jet_web_table_replace_row<T: Clone + Send + Sync>(table: &JetWebTable<T>, key: String, row: T) -> Unit Err! { table.replace_row(&key, ^row) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:1179
+pub fn jet_web_table_update_row<T: Clone + Send + Sync, F: FnOnce(&T)>(table: &JetWebTable<T>, key: String, update: F) -> Unit Err! { table.update_row(&key, ^update) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:1190
+pub fn jet_web_table_remove_row<T: Clone + Send + Sync>(table: &JetWebTable<T>, key: String) -> T Err! { table.remove_row(&key) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:1197
+pub fn jet_web_table_first_page<T: Clone + Send + Sync>(table: &JetWebTable<T>) -> JetWebTable<T> { table.first_page() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:1203
+pub fn jet_web_table_next_page<T: Clone + Send + Sync>(table: &JetWebTable<T>) -> JetWebTable<T> { table.next_page() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:1209
+pub fn jet_web_table_last_page<T: Clone + Send + Sync>(table: &JetWebTable<T>) -> JetWebTable<T> Err! { table.last_page() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:1215
+pub fn jet_web_table_visible_rows<T: Clone + Send + Sync>(table: &JetWebTable<T>, plan: &JetWebVirtualPlan) -> [WebTableRow<T>] Err! { table.visible_rows(plan) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:1222
+pub fn jet_web_virtual_plan_viewport(plan: JetWebVirtualPlan) -> JetWebVirtualPlanViewport { JetWebVirtualPlanViewport.new(^plan) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:1227
+pub fn jet_web_virtual_plan_measure(plan: &JetWebVirtualPlan, index: I64, size: I64) -> JetWebVirtualPlan { plan.with_measurement(index, size) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:1235
+pub fn jet_web_virtual_plan_viewport_state(viewport: &JetWebVirtualPlanViewport) -> JetWebVirtualPlan { viewport.plan() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:1241
+pub fn jet_web_virtual_plan_scroll_to(viewport: &JetWebVirtualPlanViewport, scroll_offset: I64) -> Unit { viewport.scroll_to(scroll_offset) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:1248
+pub fn jet_web_virtual_plan_resize(viewport: &JetWebVirtualPlanViewport, viewport_width: I64, viewport_height: I64) -> Unit { viewport.resize(viewport_width, viewport_height) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:1256
+pub fn jet_web_virtual_plan_viewport_measure(viewport: &JetWebVirtualPlanViewport, index: I64, size: I64) -> Unit { viewport.measure(index, size) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:1264
+pub fn jet_web_virtual_plan_facts(plan: &JetWebVirtualPlan) -> String { plan.facts_json() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:1270
+// Name is panel identity, not markup; presentation belongs to renderers.
+pub fn jet_web_table<T: Clone + Send + Sync>(name: String, rows: [T]) -> JetWebTable<T> { JetWebTable.new(^name, ^rows) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:1279
+pub fn jet_web_table_with_key<T: Clone + Send + Sync, F: Fn(&T) -> String + Send + Sync>(name: String, rows: [T], key: F) -> JetWebTable<T> { JetWebTable.new_with_key(^name, ^rows, ^key) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:1291
+pub fn jet_web_table_column<T, F: Fn(&T) -> String + Send + Sync>(name: String, cell_type: String, accessor: F) -> JetWebTableColumn<T> {
+    JetWebTableColumn{name: ^name, cell_type: ^cell_type, accessor: Arc.new(^accessor)}
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:1306
+pub fn jet_web_table_sort<T: Clone, F: Fn(&T) -> String>(rows: &[T], descending: Bool, key: F) -> [T] {
+    sorted := rows.clone()
+    sorted.sort_by(fn(left, right) {
+        ordering :: key(left).cmp(&key(right))
+        if descending { ordering.reverse() } else { ordering }
+    })
+    sorted
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:1326
+pub fn jet_web_table_filter<T: Clone, F: Fn(&T) -> Bool>(rows: &[T], predicate: F) -> [T] {
+    rows.iter().filter(fn(row) { predicate(row) }).cloned().collect()
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:1333
+pub fn jet_web_table_page<T: Clone>(rows: &[T], page_index: I64, page_size: I64) -> JetWebTablePage<T> {
+    page_size :: page_size.clamp(1, JET_WEB_TABLE_MAX_PAGE_SIZE)
+    total_rows :: I64.try_from(rows.len()).unwrap_or(I64.MAX)
+    page_count :: if total_rows == 0 { 0 } else {
+        total_rows.saturating_add(page_size.saturating_sub(1)).checked_div(page_size).unwrap_or(0)
+    }
+    page_index :: if page_count == 0 { 0 } else { page_index.max(0).min(page_count - 1) }
+    start :: USize.try_from(page_index.saturating_mul(page_size).min(total_rows)).unwrap_or(USize.MAX).min(rows.len())
+    end :: start.saturating_add(USize.try_from(page_size).unwrap_or(USize.MAX)).min(rows.len())
+    JetWebTablePage{rows: rows[start..<end].to_vec(), row_keys: (start..<end).map(fn(index) { "index:{index}" }).collect(), total_rows: total_rows, page_index: page_index, page_size: page_size, page_count: page_count}
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:1371
+fn jet_web_table_validate_server_page<T>(page: JetWebTablePage<T>, row_key: JetWebTableRowKey<T>?) -> JetWebTablePage<T> Err! {
+    if page.total_rows < 0 { return Err("server table page has negative total_rows") }
+    if page.page_size < 1 || page.page_size > JET_WEB_TABLE_MAX_PAGE_SIZE {
+        return Err("server table page_size must be between 1 and {JET_WEB_TABLE_MAX_PAGE_SIZE}")
+    }
+    if page.page_index < 0 { return Err("server table page has negative page_index") }
+    if page.rows.len() > page.page_size as USize { return Err("server table returned more rows than page_size") }
+    expected_count :: if page.total_rows == 0 { 0 } else {
+        page.total_rows.saturating_add(page.page_size - 1).checked_div(page.page_size).unwrap_or(0)
+    }
+    if page.page_count != expected_count { return Err("server table page_count does not match total_rows") }
+    if expected_count == 0 {
+        if page.page_index != 0 || !page.rows.is_empty() || !page.row_keys.is_empty() {
+            return Err("empty server table page has invalid page_index, rows, or keys")
+        }
+    } else if page.page_index >= expected_count { return Err("server table page_index is out of range") }
+    if page.total_rows > 0 && page.rows.is_empty() { return Err("non-empty server table result returned an empty page") }
+    if expected_count > 0 && page.page_index.saturating_add(1) < expected_count && page.rows.len() != page.page_size as USize {
+        return Err("non-final server table pages must be full")
+    }
+    if row_key is Val(key) {
+        // Explicit accessor keys are canonical, ignoring stale/positional loader keys.
+        page.row_keys = page.rows.iter().map(fn(row) { key(row) }).collect()
+    } else if page.row_keys.is_empty() && !page.rows.is_empty() {
+        page_start :: page.page_index.saturating_mul(page.page_size).max(0)
+        page.row_keys = page.rows.iter().enumerate().map(fn((offset, _)) { "index:{page_start.saturating_add(offset as I64)}" }).collect()
+    }
+    if page.row_keys.len() != page.rows.len() { return Err("server table row_keys must align with rows") }
+    jet_web_table_validate_keys(&page.row_keys)?
+    Ok(^page)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:1440
+fn jet_web_table_materialize<T: Clone>(rows: &[T], state: &JetWebTableState, columns: &[JetWebTableColumn<T>], row_key: JetWebTableRowKey<T>?) -> JetWebTablePage<T> Err! {
+    jet_web_table_validate_columns(columns)?
+    selected := jet_web_table_rows_with_keys(rows, row_key)?
+    if &state.filter is Val(filter) {
+        column :: columns.iter().find(fn(column) { column.name == filter.column }).ok_or_else(fn() { "table filter column `{filter.column}` has no accessor" })?
+        selected.retain(fn(entry) { column.value(&entry.value).contains(filter.value.as_str()) })
+    }
+    if &state.sort is Val(sort) {
+        column :: columns.iter().find(fn(column) { column.name == sort.column }).ok_or_else(fn() { "table sort column `{sort.column}` has no accessor" })?
+        descending :: sort.direction.is_descending()
+        // Stable sorting retains source order for equal cells, with identity attached.
+        selected.sort_by(fn(left, right) {
+            ordering :: column.value(&left.value).cmp(&column.value(&right.value))
+            if descending { ordering.reverse() } else { ordering }
+        })
+    }
+    Ok(jet_web_table_page_keyed(&selected, state.page_index, state.page_size))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:1479
+fn jet_web_table_page_state_changed(previous: &JetWebTableState, next: &JetWebTableState) -> Bool {
+    previous.sort != next.sort || previous.filter != next.filter || previous.page_index != next.page_index || previous.page_size != next.page_size || previous.page_mode != next.page_mode
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:1489
+fn jet_web_table_query_boundary_changed(previous: &JetWebTableState, next: &JetWebTableState) -> Bool {
+    previous.sort != next.sort || previous.filter != next.filter || previous.page_size != next.page_size || previous.page_mode != next.page_mode
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:1499
+fn jet_web_table_normalize_state(state: JetWebTableState) -> JetWebTableState {
+    state.page_index = state.page_index.max(0)
+    state.page_size = state.page_size.clamp(1, JET_WEB_TABLE_MAX_PAGE_SIZE)
+    state.selected_keys.retain(fn(key) { jet_web_table_key_is_valid(key) })
+    state.selected_keys.sort()
+    state.selected_keys.dedup()
+    if state.selection_anchor.as_ref().is_some_and(fn(key) { !state.selected_keys.iter().any(fn(selected) { selected == key }) }) {
+        state.selection_anchor = None
+    }
+    if state.focus_key.as_ref().is_some_and(fn(key) { !jet_web_table_key_is_valid(key) }) { state.focus_key = None }
+    state
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:1524
+fn jet_web_table_reconcile_state<T>(state: JetWebTableState, rows: &[T], row_key: JetWebTableRowKey<T>?) -> JetWebTableState {
+    state := jet_web_table_normalize_state(^state)
+    keys :: match jet_web_table_row_keys(rows, row_key) { Ok(keys) -> keys, Err(_) -> return state }
+    keys :: keys.into_iter().map(fn(key) { (^key, true) }).collect<[String: Bool]>()
+    state.selected_keys.retain(fn(key) { keys.contains_key(key) })
+    if state.selection_anchor.as_ref().is_some_and(fn(key) { !keys.contains_key(key) }) { state.selection_anchor = None }
+    if state.focus_key.as_ref().is_some_and(fn(key) { !keys.contains_key(key) }) { state.focus_key = None }
+    state
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:1552
+fn jet_web_table_key_is_valid(key: String) -> Bool {
+    !key.is_empty() && key.len() <= JET_WEB_TABLE_MAX_KEY_BYTES && !key.chars().any(fn(character) { character.is_control() })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:1558
+fn jet_web_table_validate_keys(keys: &[String]) -> Unit Err! {
+    seen := [String: Bool]{}
+    loop key in keys {
+        if !jet_web_table_key_is_valid(key) { return Err("table row key must be non-empty, bounded, and printable") }
+        if seen.insert(key.clone(), true).is_some() { return Err("table row key `{key}` is duplicated") }
+    }
+    Ok(())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:1571
+fn jet_web_table_validate_columns<T>(columns: &[JetWebTableColumn<T>]) -> Unit Err! {
+    seen := [String: Bool]{}
+    loop column in columns {
+        if !jet_web_table_key_is_valid(&column.name) { return Err("table column name must be non-empty, bounded, and printable") }
+        if !jet_web_table_key_is_valid(&column.cell_type) { return Err("table column cell type must be non-empty, bounded, and printable") }
+        if seen.insert(column.name.clone(), true).is_some() { return Err("table column `{column.name}` is duplicated") }
+    }
+    Ok(())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:1589
+fn jet_web_table_row_keys<T>(rows: &[T], row_key: JetWebTableRowKey<T>?) -> [String] Err! {
+    keys :: rows.iter().enumerate().map(fn((index, row)) {
+        row_key.map(fn(key) { key(row) }).unwrap_or_else(fn() { "index:{index}" })
+    }).collect<[String]>()
+    jet_web_table_validate_keys(&keys)?
+    Ok(^keys)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:1604
+fn jet_web_table_rows_with_keys<T: Clone>(rows: &[T], row_key: JetWebTableRowKey<T>?) -> [WebTableRow<T>] Err! {
+    Ok(rows.iter().cloned().zip(jet_web_table_row_keys(rows, row_key)?).map(fn((value, key)) { WebTableRow{value: ^value, key: ^key} }).collect())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:1616
+fn jet_web_table_page_keyed<T: Clone>(rows: &[WebTableRow<T>], page_index: I64, page_size: I64) -> JetWebTablePage<T> {
+    page_size :: page_size.clamp(1, JET_WEB_TABLE_MAX_PAGE_SIZE)
+    total_rows :: I64.try_from(rows.len()).unwrap_or(I64.MAX)
+    page_count :: if total_rows == 0 { 0 } else {
+        total_rows.saturating_add(page_size.saturating_sub(1)).checked_div(page_size).unwrap_or(0)
+    }
+    page_index :: if page_count == 0 { 0 } else { page_index.max(0).min(page_count - 1) }
+    start :: USize.try_from(page_index.saturating_mul(page_size).min(total_rows)).unwrap_or(USize.MAX).min(rows.len())
+    end :: start.saturating_add(USize.try_from(page_size).unwrap_or(USize.MAX)).min(rows.len())
+    JetWebTablePage{
+        rows: rows[start..<end].iter().map(fn(row) { row.value.clone() }).collect(),
+        row_keys: rows[start..<end].iter().map(fn(row) { row.key.clone() }).collect(),
+        total_rows: total_rows, page_index: page_index, page_size: page_size, page_count: page_count
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:1661
+fn jet_web_table_string_list_json(values: &[String]) -> String {
+    values.iter().map(fn(value) { format("\"{}\"", jet_web_table_json_escape(value)) }).collect<[String]>().join(",")
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:1669
+fn jet_web_table_json_escape(value: String) -> String {
+    escaped := String.with_capacity(value.len())
+    loop character in value.chars() {
+        match character {
+            '"' -> escaped.push_str("\\\"")
+            '\\' -> escaped.push_str("\\\\")
+            '\n' -> escaped.push_str("\\n")
+            '\r' -> escaped.push_str("\\r")
+            '\t' -> escaped.push_str("\\t")
+            character if character.is_control() -> escaped.push_str(&format("\\u{:04x}", character as U32))
+            character -> escaped.push(character)
+        }
+    }
+    escaped
+}
 

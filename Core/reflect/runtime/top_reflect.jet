@@ -1,123 +1,70 @@
-// PORT-PENDING 0297 crates-jet-codegen-src-prelude-corelib-top-processsandbox-module-group: crates/jet-codegen/src/Prelude/CoreLib/Top/Reflect.rs:1-119
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS // D-METAREFLECT1 / D-ANY-JAI1: `reflect.of(x)` is a runtime projection of
-//RS // registered field rows. A field carries another `JetReflectValue`; text is a
-//RS // projection (`display()`), never the semantic field storage. There is no
-//RS // runtime type registry or raw-pointer/audited-region casting (I1).
-//RS 
-//RS #[derive(Clone)]
-//RS struct JetReflectValue {
-//RS     type_name: String,
-//RS     path: String,
-//RS     display: String,
-//RS     fields: Vec<JetReflectField>,
-//RS }
-//RS 
-//RS #[derive(Clone)]
-//RS struct JetReflectField {
-//RS     name: String,
-//RS     value: JetReflectValue,
-//RS }
-//RS 
-//RS impl JetReflectValue {
-//RS     fn from_field<T: JetShow>(value: &T, type_name: &str, path: &str) -> Self {
-//RS         Self {
-//RS             type_name: type_name.to_string(),
-//RS             path: path.to_string(),
-//RS             // A reflected outer value is checked for `Display`; an individual
-//RS             // field is not. Keep the typed Value total by using the universal
-//RS             // show projection for the field's display text.
-//RS             display: value.jet_show(),
-//RS             fields: Vec::new(),
-//RS         }
-//RS     }
-//RS 
-//RS     fn type_name(&self) -> String {
-//RS         self.type_name.clone()
-//RS     }
-//RS     fn path(&self) -> String {
-//RS         self.path.clone()
-//RS     }
-//RS     fn display(&self) -> String {
-//RS         self.display.clone()
-//RS     }
-//RS     fn fields(&self) -> Vec<JetReflectField> {
-//RS         self.fields.clone()
-//RS     }
-//RS }
-//RS 
-//RS impl JetReflectField {
-//RS     fn name(&self) -> String {
-//RS         self.name.clone()
-//RS     }
-//RS     fn value(&self) -> JetReflectValue {
-//RS         self.value.clone()
-//RS     }
-//RS }
-//RS 
-//RS impl JetShow for JetReflectValue {
-//RS     fn jet_show(&self) -> String {
-//RS         format!("Value({})", self.type_name)
-//RS     }
-//RS }
-//RS impl JetDisplay for JetReflectValue {
-//RS     fn jet_display(&self) -> String {
-//RS         self.display()
-//RS     }
-//RS }
-//RS impl JetShow for JetReflectField {
-//RS     fn jet_show(&self) -> String {
-//RS         format!("Field({}: {})", self.name, self.value.display())
-//RS     }
-//RS }
-//RS fn jet_reflect_value_finish(
-//RS     type_name: String,
-//RS     path: String,
-//RS     display: String,
-//RS     fields: Vec<JetReflectField>,
-//RS ) -> JetReflectValue {
-//RS     JetReflectValue {
-//RS         type_name,
-//RS         path,
-//RS         display,
-//RS         fields,
-//RS     }
-//RS }
-//RS 
-//RS fn jet_reflect_value_from_field<T: JetShow>(
-//RS     value: &T,
-//RS     type_name: &str,
-//RS     path: &str,
-//RS ) -> JetReflectValue {
-//RS     JetReflectValue::from_field(value, type_name, path)
-//RS }
-//RS 
-//RS fn jet_reflect_field_new(name: String, value: JetReflectValue) -> JetReflectField {
-//RS     JetReflectField { name, value }
-//RS }
-//RS 
-//RS fn jet_reflect_value_type_name(value: &JetReflectValue) -> String {
-//RS     value.type_name()
-//RS }
-//RS 
-//RS fn jet_reflect_value_path(value: &JetReflectValue) -> String {
-//RS     value.path()
-//RS }
-//RS 
-//RS fn jet_reflect_value_display(value: &JetReflectValue) -> String {
-//RS     value.display()
-//RS }
-//RS 
-//RS fn jet_reflect_value_fields(value: &JetReflectValue) -> Vec<JetReflectField> {
-//RS     value.fields()
-//RS }
-//RS 
-//RS fn jet_reflect_field_name(value: &JetReflectField) -> String {
-//RS     value.name()
-//RS }
-//RS 
-//RS fn jet_reflect_field_value(value: &JetReflectField) -> JetReflectValue {
-//RS     value.value()
-//RS }
-// END-PORT-PENDING 0297 crates/jet-codegen/src/Prelude/CoreLib/Top/Reflect.rs:1-119
+// Runtime projection of registered typed field rows; display text is not field storage.
+// No second runtime type registry, raw-pointer cast, or textual classifier.
+use core.prelude.runtime.kernel_values.[JetShow, JetDisplay]
 
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Reflect.rs:6
+#Clone
+pub struct JetReflectValue {
+    type_name: String
+    path: String
+    display: String
+    fields: [JetReflectField]
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Reflect.rs:14
+#Clone
+pub struct JetReflectField { name: String, value: JetReflectValue }
+impl JetReflectValue {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Reflect.rs:21
+    pub fn from_field<T: JetShow>(value: T, type_name: String, path: String) -> JetReflectValue {
+        // Outer reflection requires Display; individual fields use total Show.
+        JetReflectValue{type_name: ~type_name, path: ~path, display: value.jet_show(), fields: [JetReflectField]{}}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Reflect.rs:33
+    pub fn type_name(self) -> String { ~self.type_name }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Reflect.rs:36
+    pub fn path(self) -> String { ~self.path }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Reflect.rs:39
+    pub fn display(self) -> String { ~self.display }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Reflect.rs:42
+    pub fn fields(self) -> [JetReflectField] { ~self.fields }
+}
+impl JetReflectField {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Reflect.rs:48
+    pub fn name(self) -> String { ~self.name }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Reflect.rs:51
+    pub fn value(self) -> JetReflectValue { ~self.value }
+}
+impl JetShow for JetReflectValue {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Reflect.rs:57
+    pub fn jet_show(self) -> String { "Value({self.type_name})" }
+}
+impl JetDisplay for JetReflectValue {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Reflect.rs:62
+    pub fn jet_display(self) -> String { self.display() }
+}
+impl JetShow for JetReflectField {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Reflect.rs:67
+    pub fn jet_show(self) -> String { "Field({self.name}: {self.value.display()})" }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Reflect.rs:71
+pub fn jet_reflect_value_finish(type_name: ^String, path: ^String, display: ^String, fields: ^[JetReflectField]) -> JetReflectValue {
+    JetReflectValue{type_name: ^type_name, path: ^path, display: ^display, fields: ^fields}
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Reflect.rs:85
+pub fn jet_reflect_value_from_field<T: JetShow>(value: T, type_name: String, path: String) -> JetReflectValue {
+    JetReflectValue.from_field(value, type_name, path)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Reflect.rs:93
+pub fn jet_reflect_field_new(name: ^String, value: ^JetReflectValue) -> JetReflectField { JetReflectField{name: ^name, value: ^value} }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Reflect.rs:97
+pub fn jet_reflect_value_type_name(value: JetReflectValue) -> String { value.type_name() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Reflect.rs:101
+pub fn jet_reflect_value_path(value: JetReflectValue) -> String { value.path() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Reflect.rs:105
+pub fn jet_reflect_value_display(value: JetReflectValue) -> String { value.display() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Reflect.rs:109
+pub fn jet_reflect_value_fields(value: JetReflectValue) -> [JetReflectField] { value.fields() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Reflect.rs:113
+pub fn jet_reflect_field_name(value: JetReflectField) -> String { value.name() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Reflect.rs:117
+pub fn jet_reflect_field_value(value: JetReflectField) -> JetReflectValue { value.value() }

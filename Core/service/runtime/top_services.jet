@@ -1,1913 +1,1192 @@
-// PORT-PENDING 0302 crates-jet-codegen-src-prelude-corelib-top-services-slice-1: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:1-1909
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS // ── D-SERVICE1=D (#444): sema-known structured service tree over supervisor groups ─
-//RS // Beginner topology: named tree → workers with typed mailboxes → OneForOne
-//RS // restart policy. Delivery is at-most-once with Full under capacity (D-SERVICE-
-//RS // DELIVERY1). Engines marshal into these Prelude symbols only (I9).
-//RS //
-//RS // Supervision reuses the ratified concurrency substrate rather than restating
-//RS // it: a supervisor is a task that owns a `JetTaskGroupRuntime` child group
-//RS // (D-CONC-GROUP1/D-CONC-SCHED1), a restart rule is data on that group, and a
-//RS // failure is the one `JetTaskFailure` rail from Prelude/TaskGroup.rs.
-//RS // Workflow activity attempts have their own recorded service result row:
-//RS // `TaskOutcome` is the attempt/run result and `TaskStatus` is the wait state.
-//RS // They are typed values at the API and replay boundary, never status strings.
-//RS 
-//RS const MAX_SERVICE_NAME: usize = 256;
-//RS const MAX_SERVICE_MESSAGE: usize = 1024 * 1024;
-//RS const MAX_SERVICE_WORKERS: usize = 4096;
-//RS const MAX_SERVICE_CAPACITY: i64 = 1_000_000;
-//RS const MAX_SERVICE_IDEMPOTENCY: usize = 100_000;
-//RS const MAX_SERVICE_DEAD_LETTERS: usize = 100_000;
-//RS const MAX_SERVICE_STATE_RECORDS: usize = 100_000;
-//RS const MAX_SERVICE_STATE_SCHEMA: usize = 256;
-//RS const MAX_SERVICE_STATE_STORE: usize = 4096;
-//RS const MAX_SERVICE_STATE_BYTES: usize = 128 * 1024 * 1024;
-//RS const MAX_SERVICE_ROLLOUT_BYTES: usize = 4 * 1024 * 1024;
-//RS const MAX_SERVICE_WORKFLOW_STEPS: usize = 100_000;
-//RS const MAX_SERVICE_ACTIVITY_ATTEMPTS: i64 = 1_000;
-//RS const MAX_SERVICE_MESSAGES: usize = 100_000;
-//RS /// D-SERVICE1=D's ratified default restart policy: `OneForOne` with a bounded
-//RS /// budget of five restarts per minute, escalating to the parent group when the
-//RS /// budget is spent. These are the *default* values of a policy row a group
-//RS /// carries as data (D-CONC-SCHED1: "a restart rule is data on that group, no
-//RS /// new mechanism") — not a global ceiling read at the one failure site.
-//RS const SERVICE_RESTART_MAX: i64 = 5;
-//RS const SERVICE_RESTART_WINDOW_MS: i64 = 60_000;
-//RS /// The largest restart budget a group may declare. It bounds the retained
-//RS /// restart-instant window, so supervision cannot grow unbounded state.
-//RS const MAX_SERVICE_RESTART_BUDGET: i64 = 1_000;
-//RS 
-//RS #[derive(Clone, Debug, PartialEq, Eq)]
-//RS enum JetServiceRestart {
-//RS     OneForOne,
-//RS     OneForAll,
-//RS     RestForOne,
-//RS }
-//RS 
-//RS /// D-SERVICE1=D: the restart budget is typed data carried by the group that
-//RS /// supervises a worker, so the supervisor decides from its own policy row
-//RS /// instead of a global ceiling. `max` restarts are allowed inside a `per_ms`
-//RS /// window; spending the budget escalates to the parent group.
-//RS #[derive(Clone, Debug, PartialEq, Eq)]
-//RS struct JetServiceRestartBudget {
-//RS     max: i64,
-//RS     per_ms: i64,
-//RS }
-//RS 
-//RS impl JetServiceRestartBudget {
-//RS     /// The ratified default: `.OneForOne(max: 5, per: time.minutes(1))`.
-//RS     fn ratified_default() -> Self {
-//RS         Self {
-//RS             max: SERVICE_RESTART_MAX,
-//RS             per_ms: SERVICE_RESTART_WINDOW_MS,
-//RS         }
-//RS     }
-//RS 
-//RS     fn is_valid(&self) -> bool {
-//RS         self.max >= 1 && self.max <= MAX_SERVICE_RESTART_BUDGET && self.per_ms >= 1
-//RS     }
-//RS 
-//RS     /// The one place the window boundary is computed. `spent` and `prune` both
-//RS     /// read it, so the number the supervisor checks and the number it keeps
-//RS     /// cannot disagree.
-//RS     fn window_start(&self, now: i64) -> i64 {
-//RS         now.saturating_sub(self.per_ms)
-//RS     }
-//RS 
-//RS     /// How much of the budget is spent at `now`. A restart older than the
-//RS     /// window no longer spends budget, which is what "bounded restart budget
-//RS     /// per window" means.
-//RS     fn spent(&self, restarts: &[i64], now: i64) -> i64 {
-//RS         let start = self.window_start(now);
-//RS         restarts.iter().filter(|at| **at > start).count() as i64
-//RS     }
-//RS 
-//RS     /// Drop the instants the window no longer counts, so the list length is
-//RS     /// always the spent budget.
-//RS     fn prune(&self, restarts: &mut Vec<i64>, now: i64) {
-//RS         let start = self.window_start(now);
-//RS         restarts.retain(|at| *at > start);
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Clone, Debug, PartialEq, Eq)]
-//RS enum JetServiceDelivery {
-//RS     AtMostOnce,
-//RS     DurableAtLeastOnce,
-//RS }
-//RS 
-//RS /// D-SERVICE-WORKFLOW1=D / D-CONC-OUTCOME1: the closed result of a recorded
-//RS /// activity attempt or workflow run.  The wire form is only a framed replay
-//RS /// encoding; callers and the Prelude operate on this enum.
-//RS #[derive(Clone, Debug, PartialEq, Eq)]
-//RS enum JetTaskOutcome {
-//RS     Finished,
-//RS     Panicked(String),
-//RS     Cancelled,
-//RS     DeadlineBlown,
-//RS }
-//RS 
-//RS /// D-SERVICE-WORKFLOW1=D / D-CONC-OUTCOME1: the non-terminal state of a
-//RS /// workflow activity between recorded wait points.
-//RS #[derive(Clone, Debug, PartialEq, Eq)]
-//RS enum JetTaskStatus {
-//RS     Running,
-//RS     Paused,
-//RS     CancelRequested,
-//RS }
-//RS 
-//RS /// D-CONC-UNIT1=A: the supervised unit's lifecycle row. `Escalated` is the
-//RS /// supervisor-level terminal state that D-SERVICE1=D's "escalation to the
-//RS /// parent group on exhaustion" names; every other row is the ordinary task
-//RS /// lifecycle.
-//RS #[derive(Clone, Debug, PartialEq, Eq)]
-//RS enum JetServiceSupervisorStatus {
-//RS     Starting,
-//RS     Running,
-//RS     Failed,
-//RS     Cancelling,
-//RS     Stopped,
-//RS     Escalated,
-//RS     Partitioned,
-//RS }
-//RS 
-//RS #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-//RS enum JetServiceTopologyKind {
-//RS     Supervisor,
-//RS     Task,
-//RS }
-//RS 
-//RS #[derive(Clone, Debug, PartialEq, Eq)]
-//RS struct JetServiceSupervisorState {
-//RS     status: JetServiceSupervisorStatus,
-//RS     /// D-CONC-FAIL1=A: the one typed failure rail, owned by
-//RS     /// `Prelude/TaskGroup.rs`. `None` is a clean finish; a failure is
-//RS     /// `.Cancelled`, `.DeadlineBlown`, or `.Panicked(reason)`. The retired
-//RS     /// D-CONC-OUTCOME1 `TaskOutcome`/`TaskStatus` surface has no rows, and a
-//RS     /// supervisor never reads a `trace()`/`exception()` string.
-//RS     failure: Option<JetTaskFailure>,
-//RS     joined: bool,
-//RS     topology_kind: Option<JetServiceTopologyKind>,
-//RS     topology_id: Option<String>,
-//RS     topology_parent_id: Option<String>,
-//RS     topology_restart_history: Vec<JetDevtoolsTopologyRestartFact>,
-//RS     topology_owner: Option<String>,
-//RS     topology_restart_policy: Option<JetDevtoolsTopologyRestartPolicy>,
-//RS     topology_wait_target: Option<String>,
-//RS     topology_started_at_ms: Option<u64>,
-//RS     topology_duration_ms: Option<u64>,
-//RS }
-//RS 
-//RS #[derive(Clone, Debug)]
-//RS struct JetServiceSupervisorTask {
-//RS     state: std::sync::Arc<std::sync::Mutex<JetServiceSupervisorState>>,
-//RS     child: std::sync::Arc<
-//RS         JetTaskGroupRuntime<std::sync::Arc<std::sync::Mutex<JetServiceSupervisorState>>>,
-//RS     >,
-//RS }
-//RS 
-//RS impl JetServiceSupervisorState {
-//RS     fn new(status: JetServiceSupervisorStatus) -> Self {
-//RS         Self {
-//RS             status,
-//RS             failure: None,
-//RS             joined: false,
-//RS             topology_kind: None,
-//RS             topology_id: None,
-//RS             topology_parent_id: None,
-//RS             topology_owner: None,
-//RS             topology_restart_policy: None,
-//RS             topology_wait_target: None,
-//RS             topology_started_at_ms: None,
-//RS             topology_duration_ms: None,
-//RS             topology_restart_history: Vec::new(),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS const JET_SERVICES_TOPOLOGY_MAX_ID: usize = 256;
-//RS const JET_SERVICES_TOPOLOGY_SOURCE: &str = "service-runtime";
-//RS 
-//RS fn jet_services_topology_now() -> u64 {
-//RS     std::time::SystemTime::now()
-//RS         .duration_since(std::time::UNIX_EPOCH)
-//RS         .ok()
-//RS         .and_then(|duration| u64::try_from(duration.as_millis()).ok())
-//RS         .unwrap_or(0)
-//RS }
-//RS 
-//RS fn jet_services_topology_restart_policy(
-//RS     restart: &JetServiceRestart,
-//RS     budget: &JetServiceRestartBudget,
-//RS ) -> Option<JetDevtoolsTopologyRestartPolicy> {
-//RS     let strategy = match restart {
-//RS         JetServiceRestart::OneForOne => JetDevtoolsTopologyRestartStrategy::OneForOne,
-//RS         JetServiceRestart::OneForAll => JetDevtoolsTopologyRestartStrategy::OneForAll,
-//RS         JetServiceRestart::RestForOne => JetDevtoolsTopologyRestartStrategy::RestForOne,
-//RS     };
-//RS     let max_restarts = u32::try_from(budget.max).ok()?;
-//RS     let window_ms = u64::try_from(budget.per_ms).ok()?;
-//RS     JetDevtoolsTopologyRestartPolicy::new(strategy, max_restarts, window_ms).ok()
-//RS }
-//RS 
-//RS fn jet_services_topology_failure(
-//RS     status: &JetServiceSupervisorStatus,
-//RS     failure: Option<&JetTaskFailure>,
-//RS ) -> Option<JetDevtoolsTopologyFailureKind> {
-//RS     match status {
-//RS         JetServiceSupervisorStatus::Escalated => Some(JetDevtoolsTopologyFailureKind::Escalated),
-//RS         JetServiceSupervisorStatus::Partitioned => {
-//RS             Some(JetDevtoolsTopologyFailureKind::WorkerLost)
-//RS         }
-//RS         _ => failure.map(|failure| match failure {
-//RS             JetTaskFailure::Cancelled => JetDevtoolsTopologyFailureKind::Cancelled,
-//RS             JetTaskFailure::DeadlineBlown => JetDevtoolsTopologyFailureKind::TimedOut,
-//RS             JetTaskFailure::Panicked(_) => JetDevtoolsTopologyFailureKind::Failed,
-//RS         }),
-//RS     }
-//RS }
-//RS 
-//RS fn jet_services_topology_finish(state: &mut JetServiceSupervisorState, at_ms: u64) {
-//RS     if state.topology_duration_ms.is_none() {
-//RS         state.topology_duration_ms = state
-//RS             .topology_started_at_ms
-//RS             .map(|started| at_ms.saturating_sub(started));
-//RS     }
-//RS }
-//RS fn jet_services_topology_id(kind: &str, tree: &str, member: Option<&str>) -> String {
-//RS     let value = match member {
-//RS         Some(member) => format!("service:{kind}:{tree}:{member}"),
-//RS         None => format!("service:{kind}:{tree}"),
-//RS     };
-//RS     if value.len() <= JET_SERVICES_TOPOLOGY_MAX_ID {
-//RS         return value;
-//RS     }
-//RS     format!(
-//RS         "service:{kind}:{}",
-//RS         service_authority_hex(&jet_sha256_raw(value.as_bytes()))
-//RS     )
-//RS }
-//RS 
-//RS fn jet_services_topology_root_id(tree: &str) -> String {
-//RS     jet_services_topology_id("supervisor", tree, None)
-//RS }
-//RS 
-//RS fn jet_services_topology_group_id(tree: &str, group: &str) -> String {
-//RS     jet_services_topology_id("group", tree, Some(group))
-//RS }
-//RS 
-//RS fn jet_services_topology_worker_id(tree: &str, worker: &str) -> String {
-//RS     jet_services_topology_id("task", tree, Some(worker))
-//RS }
-//RS 
-//RS fn jet_services_topology_endpoint_id(tree: &str, worker: &str) -> String {
-//RS     jet_services_topology_id("endpoint", tree, Some(worker))
-//RS }
-//RS 
-//RS fn jet_services_topology_readiness_id(tree: &str, worker: &str) -> String {
-//RS     jet_services_topology_id("readiness", tree, Some(worker))
-//RS }
-//RS 
-//RS fn jet_services_topology_address(tree: &str, worker: &str) -> String {
-//RS     let value = format!("{tree}/{worker}");
-//RS     if value.len() <= JET_SERVICES_TOPOLOGY_MAX_ID {
-//RS         return value;
-//RS     }
-//RS     format!(
-//RS         "service:{}",
-//RS         service_authority_hex(&jet_sha256_raw(value.as_bytes()))
-//RS     )
-//RS }
-//RS 
-//RS fn jet_services_topology_publish_fact(fact: JetDevtoolsTopologyFact) {
-//RS     if let Ok(event) = fact.to_protocol_event(JET_SERVICES_TOPOLOGY_SOURCE) {
-//RS         jet_devtools_publish_event(event);
-//RS     }
-//RS }
-//RS 
-//RS fn jet_services_topology_publish_state(state: &JetServiceSupervisorState) {
-//RS     let (Some(kind), Some(id)) = (state.topology_kind, state.topology_id.as_ref()) else {
-//RS         return;
-//RS     };
-//RS     let observed_at_ms = jet_services_topology_now();
-//RS     let freshness = JetDevtoolsTopologyFreshness::fresh(observed_at_ms);
-//RS     let parent_id = state.topology_parent_id.clone();
-//RS     let owner = state.topology_owner.clone();
-//RS     let restart_policy = state.topology_restart_policy.clone();
-//RS     let duration_ms = state
-//RS         .topology_duration_ms
-//RS         .or_else(|| {
-//RS             state
-//RS                 .topology_started_at_ms
-//RS                 .map(|started| observed_at_ms.saturating_sub(started))
-//RS         });
-//RS     let failure = jet_services_topology_failure(&state.status, state.failure.as_ref());
-//RS     let wait_target = state.topology_wait_target.clone();
-//RS     let history = state.topology_restart_history.clone();
-//RS     let fact = match kind {
-//RS         JetServiceTopologyKind::Supervisor => {
-//RS             let state = match state.status {
-//RS                 JetServiceSupervisorStatus::Starting => {
-//RS                     JetDevtoolsTopologySupervisorState::Starting
-//RS                 }
-//RS                 JetServiceSupervisorStatus::Running => {
-//RS                     JetDevtoolsTopologySupervisorState::Running
-//RS                 }
-//RS                 JetServiceSupervisorStatus::Failed => JetDevtoolsTopologySupervisorState::Failed,
-//RS                 JetServiceSupervisorStatus::Cancelling => {
-//RS                     JetDevtoolsTopologySupervisorState::Stopping
-//RS                 }
-//RS                 JetServiceSupervisorStatus::Stopped => JetDevtoolsTopologySupervisorState::Stopped,
-//RS                 JetServiceSupervisorStatus::Escalated => {
-//RS                     JetDevtoolsTopologySupervisorState::Escalated
-//RS                 }
-//RS                 JetServiceSupervisorStatus::Partitioned => {
-//RS                     JetDevtoolsTopologySupervisorState::Failed
-//RS                 }
-//RS             };
-//RS             JetDevtoolsTopologySupervisorFact::new(
-//RS                 id.clone(),
-//RS                 JET_SERVICES_TOPOLOGY_SOURCE,
-//RS                 parent_id,
-//RS                 state,
-//RS                 history,
-//RS                 freshness,
-//RS             )
-//RS             .map(|fact| {
-//RS                 let mut fact = fact;
-//RS                 if let Some(owner) = owner.clone() {
-//RS                     fact = fact.with_owner(owner);
-//RS                 }
-//RS                 if let Some(restart_policy) = restart_policy.clone() {
-//RS                     fact = fact.with_restart_policy(restart_policy);
-//RS                 }
-//RS                 if let Some(failure) = failure {
-//RS                     fact = fact.with_failure(failure);
-//RS                 }
-//RS                 if let Some(duration_ms) = duration_ms {
-//RS                     fact = fact.with_duration_ms(duration_ms);
-//RS                 }
-//RS                 JetDevtoolsTopologyFact::Supervisor(fact)
-//RS             })
-//RS         }
-//RS         JetServiceTopologyKind::Task => {
-//RS             let state = match state.status {
-//RS                 JetServiceSupervisorStatus::Starting => JetDevtoolsTopologyTaskState::Created,
-//RS                 JetServiceSupervisorStatus::Running if wait_target.is_some() => {
-//RS                     JetDevtoolsTopologyTaskState::Waiting
-//RS                 }
-//RS                 JetServiceSupervisorStatus::Running => JetDevtoolsTopologyTaskState::Running,
-//RS                 JetServiceSupervisorStatus::Failed
-//RS                 | JetServiceSupervisorStatus::Escalated
-//RS                 | JetServiceSupervisorStatus::Partitioned => {
-//RS                     JetDevtoolsTopologyTaskState::Failed
-//RS                 }
-//RS                 JetServiceSupervisorStatus::Cancelling
-//RS                 | JetServiceSupervisorStatus::Stopped => JetDevtoolsTopologyTaskState::Cancelled,
-//RS             };
-//RS             JetDevtoolsTopologyTaskFact::new(
-//RS                 id.clone(),
-//RS                 JET_SERVICES_TOPOLOGY_SOURCE,
-//RS                 parent_id,
-//RS                 state,
-//RS                 history,
-//RS                 freshness,
-//RS             )
-//RS             .map(|fact| {
-//RS                 let mut fact = fact;
-//RS                 if let Some(owner) = owner.clone() {
-//RS                     fact = fact.with_owner(owner);
-//RS                 }
-//RS                 if let Some(wait_target) = wait_target.clone() {
-//RS                     fact = fact.with_wait_target(wait_target);
-//RS                 }
-//RS                 if let Some(duration_ms) = duration_ms {
-//RS                     fact = fact.with_duration_ms(duration_ms);
-//RS                 }
-//RS                 if let Some(failure) = failure {
-//RS                     fact = fact.with_failure(failure);
-//RS                 }
-//RS                 if let Some(restart_policy) = restart_policy.clone() {
-//RS                     fact = fact.with_restart_policy(restart_policy);
-//RS                 }
-//RS                 JetDevtoolsTopologyFact::Task(fact)
-//RS             })
-//RS         }
-//RS     };
-//RS     if let Ok(fact) = fact {
-//RS         jet_services_topology_publish_fact(fact);
-//RS     }
-//RS }
-//RS 
-//RS fn jet_services_bind_topology(
-//RS     task: &std::sync::Arc<std::sync::Mutex<JetServiceSupervisorState>>,
-//RS     kind: JetServiceTopologyKind,
-//RS     id: String,
-//RS     parent_id: Option<String>,
-//RS ) -> Result<(), JetServiceError> {
-//RS     let mut state = task
-//RS         .lock()
-//RS         .map_err(|_| JetServiceError::Policy("service task state lock is poisoned".to_string()))?;
-//RS     state.topology_kind = Some(kind);
-//RS     state.topology_id = Some(id);
-//RS     state.topology_owner = parent_id.clone();
-//RS     state.topology_parent_id = parent_id;
-//RS     state.topology_wait_target = None;
-//RS     state.topology_started_at_ms = Some(jet_services_topology_now());
-//RS     state.topology_duration_ms = None;
-//RS     Ok(())
-//RS }
-//RS fn jet_services_reparent_topology(
-//RS     task: &std::sync::Arc<std::sync::Mutex<JetServiceSupervisorState>>,
-//RS     parent_id: Option<String>,
-//RS ) -> Result<(), JetServiceError> {
-//RS     let mut state = task
-//RS         .lock()
-//RS         .map_err(|_| JetServiceError::Policy("service task state lock is poisoned".to_string()))?;
-//RS     state.topology_owner = parent_id.clone();
-//RS     state.topology_parent_id = parent_id;
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn jet_services_set_topology_policy(
-//RS     task: &std::sync::Arc<std::sync::Mutex<JetServiceSupervisorState>>,
-//RS     restart: &JetServiceRestart,
-//RS     budget: &JetServiceRestartBudget,
-//RS ) -> Result<(), JetServiceError> {
-//RS     let policy = jet_services_topology_restart_policy(restart, budget).ok_or_else(|| {
-//RS         JetServiceError::Policy("service restart policy cannot cross the topology boundary".to_string())
-//RS     })?;
-//RS     let mut state = task
-//RS         .lock()
-//RS         .map_err(|_| JetServiceError::Policy("service task state lock is poisoned".to_string()))?;
-//RS     state.topology_restart_policy = Some(policy);
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn jet_services_record_topology_restart(
-//RS     task: &std::sync::Arc<std::sync::Mutex<JetServiceSupervisorState>>,
-//RS     at_ms: u64,
-//RS     reason: JetDevtoolsTopologyRestartReason,
-//RS ) -> Result<(), JetServiceError> {
-//RS     let mut state = task
-//RS         .lock()
-//RS         .map_err(|_| JetServiceError::Policy("service task state lock is poisoned".to_string()))?;
-//RS     if state.topology_restart_history.len() >= JET_DEVTOOLS_TOPOLOGY_MAX_RESTARTS {
-//RS         state.topology_restart_history.remove(0);
-//RS     }
-//RS     state
-//RS         .topology_restart_history
-//RS         .push(JetDevtoolsTopologyRestartFact {
-//RS             at_ms,
-//RS             duration_ms: 0,
-//RS             reason,
-//RS         });
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn jet_services_publish_endpoint_fact(
-//RS     endpoint: &JetServiceEndpoint,
-//RS     authority_state: JetDevtoolsTopologyEndpointAuthorityState,
-//RS ) {
-//RS     jet_services_publish_endpoint_fact_with_transport(
-//RS         endpoint,
-//RS         authority_state,
-//RS         None,
-//RS         JetDevtoolsTopologyEndpointConnectionState::Unknown,
-//RS         None,
-//RS         None,
-//RS         None,
-//RS     );
-//RS }
-//RS 
-//RS fn jet_services_publish_endpoint_fact_with_transport(
-//RS     endpoint: &JetServiceEndpoint,
-//RS     authority_state: JetDevtoolsTopologyEndpointAuthorityState,
-//RS     owner: Option<String>,
-//RS     connection: JetDevtoolsTopologyEndpointConnectionState,
-//RS     bytes_in: Option<u64>,
-//RS     bytes_out: Option<u64>,
-//RS     restart_policy: Option<JetDevtoolsTopologyRestartPolicy>,
-//RS ) {
-//RS     let worker_id = jet_services_topology_worker_id(&endpoint.tree, &endpoint.worker);
-//RS     let fact = JetDevtoolsTopologyEndpointFact::new(
-//RS         jet_services_topology_endpoint_id(&endpoint.tree, &endpoint.worker),
-//RS         JET_SERVICES_TOPOLOGY_SOURCE,
-//RS         Some(worker_id),
-//RS         JetDevtoolsTopologyEndpointScheme::Unix,
-//RS         jet_services_topology_address(&endpoint.tree, &endpoint.worker),
-//RS         None,
-//RS         authority_state,
-//RS         JetDevtoolsTopologyFreshness::fresh(jet_services_topology_now()),
-//RS     )
-//RS     .map(|fact| {
-//RS         let mut fact = fact.with_connection(connection);
-//RS         if let Some(owner) = owner {
-//RS             fact = fact.with_owner(owner);
-//RS         }
-//RS         if let Some(bytes_in) = bytes_in {
-//RS             fact.bytes_in = Some(bytes_in);
-//RS         }
-//RS         if let Some(bytes_out) = bytes_out {
-//RS             fact.bytes_out = Some(bytes_out);
-//RS         }
-//RS         if let Some(restart_policy) = restart_policy {
-//RS             fact = fact.with_restart_policy(restart_policy);
-//RS         }
-//RS         fact
-//RS     });
-//RS     if let Ok(fact) = fact {
-//RS         jet_services_topology_publish_fact(fact.into());
-//RS     }
-//RS }
-//RS 
-//RS fn jet_services_publish_readiness_fact(
-//RS     endpoint: &JetServiceEndpoint,
-//RS     state: JetDevtoolsTopologyReadinessState,
-//RS     reason: JetDevtoolsTopologyReadinessReason,
-//RS ) {
-//RS     let worker_id = jet_services_topology_worker_id(&endpoint.tree, &endpoint.worker);
-//RS     let fact = JetDevtoolsTopologyReadinessFact::new(
-//RS         jet_services_topology_readiness_id(&endpoint.tree, &endpoint.worker),
-//RS         JET_SERVICES_TOPOLOGY_SOURCE,
-//RS         Some(worker_id),
-//RS         state,
-//RS         reason,
-//RS         JetDevtoolsTopologyFreshness::fresh(jet_services_topology_now()),
-//RS     );
-//RS     if let Ok(fact) = fact {
-//RS         jet_services_topology_publish_fact(fact.into());
-//RS     }
-//RS }
-//RS fn jet_services_publish_supervisor_fact(
-//RS     id: String,
-//RS     parent_id: Option<String>,
-//RS     state: JetDevtoolsTopologySupervisorState,
-//RS     restart_history: Vec<JetDevtoolsTopologyRestartFact>,
-//RS ) {
-//RS     let fact = JetDevtoolsTopologySupervisorFact::new(
-//RS         id,
-//RS         JET_SERVICES_TOPOLOGY_SOURCE,
-//RS         parent_id,
-//RS         state,
-//RS         restart_history,
-//RS         JetDevtoolsTopologyFreshness::fresh(jet_services_topology_now()),
-//RS     );
-//RS     if let Ok(fact) = fact {
-//RS         jet_services_topology_publish_fact(fact.into());
-//RS     }
-//RS }
-//RS 
-//RS fn jet_services_publish_root_state(
-//RS     tree: &JetServiceTree,
-//RS     state: JetDevtoolsTopologySupervisorState,
-//RS ) {
-//RS     jet_services_publish_supervisor_fact(
-//RS         jet_services_topology_root_id(&tree.name),
-//RS         None,
-//RS         state,
-//RS         Vec::new(),
-//RS     );
-//RS }
-//RS 
-//RS fn jet_services_publish_tree_topology(
-//RS     tree: &JetServiceTree,
-//RS     root_state: JetDevtoolsTopologySupervisorState,
-//RS ) {
-//RS     jet_services_publish_root_state(tree, root_state);
-//RS     for supervisor in &tree.supervisor_tasks {
-//RS         if let Ok(state) = supervisor.lock() {
-//RS             jet_services_topology_publish_state(&state);
-//RS         }
-//RS     }
-//RS     for worker in &tree.workers {
-//RS         let restart_policy = worker
-//RS             .task
-//RS             .lock()
-//RS             .ok()
-//RS             .and_then(|state| state.topology_restart_policy.clone());
-//RS         if let Ok(state) = worker.task.lock() {
-//RS             jet_services_topology_publish_state(&state);
-//RS         }
-//RS         let partitioned = tree.partitioned.iter().any(|name| name == &worker.name);
-//RS         let draining = tree.draining.iter().any(|name| name == &worker.name);
-//RS         let authority_state = if partitioned {
-//RS             JetDevtoolsTopologyEndpointAuthorityState::Revoked
-//RS         } else if worker.running || draining {
-//RS             JetDevtoolsTopologyEndpointAuthorityState::Verified
-//RS         } else {
-//RS             JetDevtoolsTopologyEndpointAuthorityState::Unverified
-//RS         };
-//RS         let connection = if partitioned {
-//RS             JetDevtoolsTopologyEndpointConnectionState::Closed
-//RS         } else if draining {
-//RS             JetDevtoolsTopologyEndpointConnectionState::Draining
-//RS         } else if worker.running && worker.endpoint.channel.is_some() {
-//RS             JetDevtoolsTopologyEndpointConnectionState::Connected
-//RS         } else {
-//RS             JetDevtoolsTopologyEndpointConnectionState::Unknown
-//RS         };
-//RS         let worker_id = jet_services_topology_worker_id(&worker.endpoint.tree, &worker.name);
-//RS         jet_services_publish_endpoint_fact_with_transport(
-//RS             &worker.endpoint,
-//RS             authority_state,
-//RS             Some(worker_id),
-//RS             connection,
-//RS             Some(worker.received_bytes),
-//RS             Some(worker.sent_bytes),
-//RS             restart_policy,
-//RS         );
-//RS         let (readiness, reason) = if partitioned {
-//RS             (
-//RS                 JetDevtoolsTopologyReadinessState::NotReady,
-//RS                 JetDevtoolsTopologyReadinessReason::AuthorityRevoked,
-//RS             )
-//RS         } else if worker.running {
-//RS             (
-//RS                 JetDevtoolsTopologyReadinessState::Ready,
-//RS                 JetDevtoolsTopologyReadinessReason::ProbePassed,
-//RS             )
-//RS         } else {
-//RS             (
-//RS                 JetDevtoolsTopologyReadinessState::NotReady,
-//RS                 JetDevtoolsTopologyReadinessReason::Stopped,
-//RS             )
-//RS         };
-//RS         jet_services_publish_readiness_fact(&worker.endpoint, readiness, reason);
-//RS     }
-//RS }
-//RS 
-//RS 
-//RS fn jet_services_task_start(
-//RS     task: &std::sync::Arc<std::sync::Mutex<JetServiceSupervisorState>>,
-//RS ) -> Result<(), JetServiceError> {
-//RS     let snapshot = {
-//RS         let mut state = task.lock().map_err(|_| {
-//RS             JetServiceError::Policy("service task state lock is poisoned".to_string())
-//RS         })?;
-//RS         state.status = JetServiceSupervisorStatus::Running;
-//RS         state.failure = None;
-//RS         state.joined = false;
-//RS         state.topology_wait_target = None;
-//RS         state.topology_started_at_ms = Some(jet_services_topology_now());
-//RS         state.topology_duration_ms = None;
-//RS         state.clone()
-//RS     };
-//RS     jet_services_topology_publish_state(&snapshot);
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn jet_services_task_fail(
-//RS     task: &std::sync::Arc<std::sync::Mutex<JetServiceSupervisorState>>,
-//RS     reason: String,
-//RS ) -> Result<(), JetServiceError> {
-//RS     let snapshot = {
-//RS         let mut state = task.lock().map_err(|_| {
-//RS             JetServiceError::Policy("service task state lock is poisoned".to_string())
-//RS         })?;
-//RS         state.status = JetServiceSupervisorStatus::Failed;
-//RS         state.failure = Some(JetTaskFailure::Panicked(reason));
-//RS         state.topology_wait_target = None;
-//RS         jet_services_topology_finish(&mut state, jet_services_topology_now());
-//RS         state.clone()
-//RS     };
-//RS     jet_services_topology_publish_state(&snapshot);
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn jet_services_task_restart(
-//RS     task: &std::sync::Arc<std::sync::Mutex<JetServiceSupervisorState>>,
-//RS ) -> Result<(), JetServiceError> {
-//RS     let snapshot = {
-//RS         let mut state = task.lock().map_err(|_| {
-//RS             JetServiceError::Policy("service task state lock is poisoned".to_string())
-//RS         })?;
-//RS         state.status = JetServiceSupervisorStatus::Running;
-//RS         state.failure = None;
-//RS         state.joined = false;
-//RS         state.topology_wait_target = None;
-//RS         state.topology_started_at_ms = Some(jet_services_topology_now());
-//RS         state.topology_duration_ms = None;
-//RS         state.clone()
-//RS     };
-//RS     jet_services_topology_publish_state(&snapshot);
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn jet_services_task_escalate(
-//RS     task: &std::sync::Arc<std::sync::Mutex<JetServiceSupervisorState>>,
-//RS     reason: String,
-//RS ) -> Result<(), JetServiceError> {
-//RS     let snapshot = {
-//RS         let mut state = task.lock().map_err(|_| {
-//RS             JetServiceError::Policy("service task state lock is poisoned".to_string())
-//RS         })?;
-//RS         // Escalation is a supervisor failure on the one rail: the supervisor task
-//RS         // itself fails so the parent group observes it, and `Escalated` records
-//RS         // that the failure came from a spent restart budget rather than a child.
-//RS         state.status = JetServiceSupervisorStatus::Escalated;
-//RS         state.failure = Some(JetTaskFailure::Panicked(reason));
-//RS         state.topology_wait_target = None;
-//RS         jet_services_topology_finish(&mut state, jet_services_topology_now());
-//RS         state.clone()
-//RS     };
-//RS     jet_services_topology_publish_state(&snapshot);
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn jet_services_cancel_task(task: &std::sync::Arc<std::sync::Mutex<JetServiceSupervisorState>>) {
-//RS     let snapshot = task.lock().ok().map(|mut state| {
-//RS         if !state.joined && state.status != JetServiceSupervisorStatus::Escalated {
-//RS             state.status = JetServiceSupervisorStatus::Cancelling;
-//RS             state.failure = Some(JetTaskFailure::Cancelled);
-//RS             state.topology_wait_target = None;
-//RS             jet_services_topology_finish(&mut state, jet_services_topology_now());
-//RS         }
-//RS         state.clone()
-//RS     });
-//RS     if let Some(snapshot) = snapshot.as_ref() {
-//RS         jet_services_topology_publish_state(snapshot);
-//RS     }
-//RS }
-//RS 
-//RS fn jet_services_join_task(task: std::sync::Arc<std::sync::Mutex<JetServiceSupervisorState>>) {
-//RS     let snapshot = task.lock().ok().map(|mut state| {
-//RS         if state.status != JetServiceSupervisorStatus::Escalated {
-//RS             state.status = JetServiceSupervisorStatus::Stopped;
-//RS             // A clean finish carries no failure; `None` is the completed row.
-//RS         }
-//RS         state.topology_wait_target = None;
-//RS         jet_services_topology_finish(&mut state, jet_services_topology_now());
-//RS         state.joined = true;
-//RS         state.clone()
-//RS     });
-//RS     if let Some(snapshot) = snapshot.as_ref() {
-//RS         jet_services_topology_publish_state(snapshot);
-//RS     }
-//RS }
-//RS 
-//RS fn jet_services_cancel_supervisor(task: &JetServiceSupervisorTask) {
-//RS     jet_services_cancel_task(&task.state);
-//RS }
-//RS 
-//RS fn jet_services_join_supervisor(task: JetServiceSupervisorTask) {
-//RS     task.child
-//RS         .close_with_cancel(jet_services_cancel_task, jet_services_join_task);
-//RS     jet_services_join_task(task.state);
-//RS }
-//RS 
-//RS struct JetServiceMailbox {
-//RS     endpoint: JetServiceEndpoint,
-//RS     capacity: i64,
-//RS     channel: std::sync::Arc<JetServiceChannel<String>>,
-//RS }
-//RS 
-//RS impl Clone for JetServiceMailbox {
-//RS     fn clone(&self) -> Self {
-//RS         let messages = self.channel.snapshot();
-//RS         let channel = std::sync::Arc::new(
-//RS             JetServiceChannel::new(
-//RS                 usize::try_from(self.capacity.max(1)).unwrap_or(1),
-//RS                 messages,
-//RS             )
-//RS             .expect("validated service mailbox must fit its bounded channel"),
-//RS         );
-//RS         let mut endpoint = self.endpoint.clone();
-//RS         endpoint.channel = Some(channel.clone());
-//RS         Self {
-//RS             endpoint,
-//RS             capacity: self.capacity,
-//RS             channel,
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS impl std::fmt::Debug for JetServiceMailbox {
-//RS     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-//RS         formatter
-//RS             .debug_struct("JetServiceMailbox")
-//RS             .field("endpoint", &self.endpoint)
-//RS             .field("capacity", &self.capacity)
-//RS             .field("depth", &self.channel.depth())
-//RS             .field("messages", &self.channel.snapshot())
-//RS             .finish()
-//RS     }
-//RS }
-//RS 
-//RS fn jet_services_new_mailbox(
-//RS     endpoint: JetServiceEndpoint,
-//RS     capacity: i64,
-//RS     messages: Vec<String>,
-//RS ) -> Result<JetServiceMailbox, JetServiceError> {
-//RS     let channel_capacity = usize::try_from(capacity).map_err(|_| {
-//RS         JetServiceError::Policy("mailbox capacity is outside the platform range".to_string())
-//RS     })?;
-//RS     if messages.len() > channel_capacity {
-//RS         return Err(JetServiceError::Policy(
-//RS             "mailbox messages exceed the bounded channel capacity".to_string(),
-//RS         ));
-//RS     }
-//RS     let channel = std::sync::Arc::new(JetServiceChannel::new(channel_capacity, messages).map_err(|_| {
-//RS         JetServiceError::Policy("mailbox channel could not restore its queued messages".to_string())
-//RS     })?);
-//RS     let mut endpoint = endpoint;
-//RS     endpoint.channel = Some(channel.clone());
-//RS     Ok(JetServiceMailbox {
-//RS         endpoint,
-//RS         capacity,
-//RS         channel,
-//RS     })
-//RS }
-//RS 
-//RS type JetServiceWorkerHandler = fn();
-//RS fn jet_services_noop_worker() {}
-//RS 
-//RS #[derive(Clone, Debug)]
-//RS struct JetServiceWorker {
-//RS     name: String,
-//RS     /// The checked source identity retained for topology and adapter lookup.
-//RS     handler_name: String,
-//RS     /// AOT emits the checked function item here. Resident adapters may leave
-//RS     /// this as the no-op bridge and invoke through their typed adapter.
-//RS     handler: JetServiceWorkerHandler,
-//RS     endpoint: JetServiceEndpoint,
-//RS     mailbox: JetServiceMailbox,
-//RS     /// The restart instants this worker has spent, oldest first. This list is
-//RS     /// the one restart fact: `services.restarts` and the supervisor's escalation
-//RS     /// check both read it through `JetServiceRestartBudget::spent`, and a restart
-//RS     /// prunes it through `prune`, so no separate counter can drift from the
-//RS     /// policy window.
-//RS     restarts: Vec<i64>,
-//RS     running: bool,
-//RS     /// Bytes accepted into and delivered from the bounded endpoint mailbox.
-//RS     /// These counters are transport facts; message contents never cross the
-//RS     /// topology protocol boundary.
-//RS     received_bytes: u64,
-//RS     sent_bytes: u64,
-//RS     task: std::sync::Arc<std::sync::Mutex<JetServiceSupervisorState>>,
-//RS }
-//RS 
-//RS #[derive(Clone, Debug)]
-//RS struct JetServiceGroup {
-//RS     name: String,
-//RS     restart: JetServiceRestart,
-//RS     /// D-CONC-SCHED1=A: the restart rule is data on the group.
-//RS     budget: JetServiceRestartBudget,
-//RS     workers: Vec<String>,
-//RS }
-//RS 
-//RS #[derive(Clone, Debug, PartialEq, Eq)]
-//RS enum JetServiceStateAdapter {
-//RS     Empty,
-//RS     Snapshot,
-//RS     EventLog,
-//RS }
-//RS 
-//RS #[derive(Clone, Debug, PartialEq, Eq)]
-//RS enum JetServiceMigration {
-//RS     Reversible,
-//RS     DualWrite,
-//RS     ForwardOnly,
-//RS }
-//RS 
-//RS /// D-SERVICE-UPGRADE1=D: a drain either keeps the shard on its current
-//RS /// generation until it is empty or cancels it after the drain completes. The
-//RS /// decision is typed so the lifecycle path cannot silently discard a worker
-//RS /// handle while choosing a rollout outcome.
-//RS #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-//RS enum JetServiceDrainDisposition {
-//RS     PinShard,
-//RS     Cancel,
-//RS }
-//RS 
-//RS #[derive(Clone, Debug, PartialEq, Eq)]
-//RS pub struct JetServiceStateStore {
-//RS     path: String,
-//RS }
-//RS 
-//RS #[derive(Clone, Debug, PartialEq, Eq)]
-//RS pub struct JetServiceStateAuthority {
-//RS     store: String,
-//RS     schema: String,
-//RS     version: i64,
-//RS     migration: String,
-//RS     adapter: JetServiceStateAdapter,
-//RS }
-//RS 
-//RS #[derive(Clone, Debug, PartialEq, Eq)]
-//RS pub struct JetServiceUpgradeReceipt {
-//RS     from_generation: i64,
-//RS     to_generation: i64,
-//RS     migration: String,
-//RS     rollback_store: String,
-//RS     rollback_available: bool,
-//RS     pinned_shards: Vec<String>,
-//RS }
-//RS 
-//RS /// Rollout facts are deployment state, not application state. Keep them in a
-//RS /// separate journal beside the injected state authority so a fresh process
-//RS /// cannot silently fall back to generation one or reopen a drained shard.
-//RS #[derive(Clone, Debug, PartialEq, Eq)]
-//RS struct JetServiceRolloutState {
-//RS     generation: i64,
-//RS     previous_generation: i64,
-//RS     last_upgrade: Option<JetServiceUpgradeReceipt>,
-//RS     workers: Vec<(String, i64)>,
-//RS     draining: Vec<String>,
-//RS     partitioned: Vec<String>,
-//RS     directory: Vec<(String, String, i64)>,
-//RS }
-//RS 
-//RS #[derive(Clone, Debug, PartialEq, Eq)]
-//RS struct JetServiceWorkflow {
-//RS     id: String,
-//RS     run_id: i64,
-//RS     version: i64,
-//RS     steps: Vec<String>,
-//RS     history: Vec<String>,
-//RS     /// Runtime-only replay position. The durable log remains the source of
-//RS     /// truth; this cursor lets a rerun consume recorded decisions in order.
-//RS     replay_cursor: usize,
-//RS     status: JetTaskStatus,
-//RS     activity_outcomes: Vec<(String, JetTaskOutcome)>,
-//RS     outcome: Option<JetTaskOutcome>,
-//RS }
-//RS 
-//RS /// D-SERVICE-WORKFLOW1=D: a workflow handle is the only value that may issue
-//RS /// recorded wait points. The state is shared so cloning a handle cannot create
-//RS /// a second replay cursor or a second delivery path.
-//RS #[derive(Clone, Debug)]
-//RS struct JetWorkflowHandle {
-//RS     authority: JetServiceStateAuthority,
-//RS     state: std::sync::Arc<std::sync::Mutex<JetServiceWorkflow>>,
-//RS }
-//RS 
-//RS #[derive(Clone, Debug)]
-//RS struct JetServiceTree {
-//RS     name: String,
-//RS     authority: String,
-//RS     generation: i64,
-//RS     delivery: JetServiceDelivery,
-//RS     restart: JetServiceRestart,
-//RS     /// The root default a declared group inherits, in the same shape as
-//RS     /// `restart` above: one root policy row, copied onto each group.
-//RS     restart_budget: JetServiceRestartBudget,
-//RS     workers: Vec<JetServiceWorker>,
-//RS     groups: Vec<JetServiceGroup>,
-//RS     started: bool,
-//RS     state_adapter: JetServiceStateAdapter,
-//RS     state_authority: Option<JetServiceStateAuthority>,
-//RS     snapshot: Option<String>,
-//RS     event_log: Vec<String>,
-//RS     dead_letters: Vec<String>,
-//RS     idempotency_seen: Vec<(String, JetServiceEndpoint, String)>,
-//RS     directory: Vec<(String, JetServiceEndpoint, String)>,
-//RS     draining: Vec<String>,
-//RS     partitioned: Vec<String>,
-//RS     workflows: Vec<JetServiceWorkflow>,
-//RS     /// Root supervisor owns one child group per declared service group. The
-//RS     /// handles are joined on stop/drop; worker state lives behind the same
-//RS     /// Arc held by the worker record and supervisor group.
-//RS     task_group: std::sync::Arc<JetTaskGroupRuntime<JetServiceSupervisorTask>>,
-//RS     supervisor_tasks: Vec<std::sync::Arc<std::sync::Mutex<JetServiceSupervisorState>>>,
-//RS     chaos_fails: i64,
-//RS     previous_generation: i64,
-//RS     last_upgrade: Option<JetServiceUpgradeReceipt>,
-//RS }
-//RS 
-//RS impl JetShow for JetServiceRestart {
-//RS     fn jet_show(&self) -> String {
-//RS         match self {
-//RS             JetServiceRestart::OneForOne => "OneForOne".to_string(),
-//RS             JetServiceRestart::OneForAll => "OneForAll".to_string(),
-//RS             JetServiceRestart::RestForOne => "RestForOne".to_string(),
-//RS         }
-//RS     }
-//RS }
-//RS impl JetDisplay for JetServiceRestart {
-//RS     fn jet_display(&self) -> String {
-//RS         self.jet_show()
-//RS     }
-//RS }
-//RS 
-//RS impl JetShow for JetServiceDelivery {
-//RS     fn jet_show(&self) -> String {
-//RS         match self {
-//RS             JetServiceDelivery::AtMostOnce => "AtMostOnce".to_string(),
-//RS             JetServiceDelivery::DurableAtLeastOnce => "DurableAtLeastOnce".to_string(),
-//RS         }
-//RS     }
-//RS }
-//RS impl JetDisplay for JetServiceDelivery {
-//RS     fn jet_display(&self) -> String {
-//RS         self.jet_show()
-//RS     }
-//RS }
-//RS 
-//RS impl JetTaskOutcome {
-//RS     fn wire(&self) -> String {
-//RS         match self {
-//RS             Self::Finished => "Finished".to_string(),
-//RS             Self::Panicked(reason) => {
-//RS                 format!("Panicked:{}", jet_services_workflow_frame(reason))
-//RS             }
-//RS             Self::Cancelled => "Cancelled".to_string(),
-//RS             Self::DeadlineBlown => "DeadlineBlown".to_string(),
-//RS         }
-//RS     }
-//RS 
-//RS     fn from_wire(value: &str) -> Result<Self, JetServiceError> {
-//RS         match value {
-//RS             "Finished" => Ok(Self::Finished),
-//RS             "Cancelled" => Ok(Self::Cancelled),
-//RS             "DeadlineBlown" => Ok(Self::DeadlineBlown),
-//RS             value => {
-//RS                 let reason = value
-//RS                     .strip_prefix("Panicked:")
-//RS                     .ok_or_else(|| jet_services_state_error("unknown task outcome"))?;
-//RS                 let outcome = Self::Panicked(
-//RS                     jet_services_workflow_field(reason, "panic reason")?.to_string(),
-//RS                 );
-//RS                 outcome
-//RS                     .is_valid()
-//RS                     .then_some(outcome)
-//RS                     .ok_or_else(|| jet_services_state_error("invalid task outcome"))
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     fn is_retryable_failure(&self) -> bool {
-//RS         !matches!(self, Self::Finished)
-//RS     }
-//RS 
-//RS     fn is_valid(&self) -> bool {
-//RS         match self {
-//RS             Self::Panicked(reason) => {
-//RS                 !reason.trim().is_empty()
-//RS                     && reason.len() <= MAX_SERVICE_MESSAGE
-//RS                     && !reason.chars().any(char::is_control)
-//RS             }
-//RS             _ => true,
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS impl JetShow for JetTaskOutcome {
-//RS     fn jet_show(&self) -> String {
-//RS         match self {
-//RS             Self::Finished => "Finished".to_string(),
-//RS             Self::Panicked(reason) => format!("Panicked({reason})"),
-//RS             Self::Cancelled => "Cancelled".to_string(),
-//RS             Self::DeadlineBlown => "DeadlineBlown".to_string(),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS impl JetDisplay for JetTaskOutcome {
-//RS     fn jet_display(&self) -> String {
-//RS         self.jet_show()
-//RS     }
-//RS }
-//RS 
-//RS impl JetDebug for JetTaskOutcome {
-//RS     fn jet_debug(&self) -> String {
-//RS         match self {
-//RS             Self::Panicked(reason) => format!("Panicked({reason:?})"),
-//RS             _ => self.jet_show(),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS impl JetShow for JetTaskStatus {
-//RS     fn jet_show(&self) -> String {
-//RS         match self {
-//RS             Self::Running => "Running".to_string(),
-//RS             Self::Paused => "Paused".to_string(),
-//RS             Self::CancelRequested => "CancelRequested".to_string(),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS impl JetShow for JetWorkflowHandle {
-//RS     fn jet_show(&self) -> String {
-//RS         self.state
-//RS             .lock()
-//RS             .map(|workflow| workflow.run_id.to_string())
-//RS             .unwrap_or_else(|_| "<workflow-poisoned>".to_string())
-//RS     }
-//RS }
-//RS 
-//RS impl JetDisplay for JetWorkflowHandle {
-//RS     fn jet_display(&self) -> String {
-//RS         self.jet_show()
-//RS     }
-//RS }
-//RS 
-//RS impl JetDebug for JetWorkflowHandle {
-//RS     fn jet_debug(&self) -> String {
-//RS         self.jet_show()
-//RS     }
-//RS }
-//RS 
-//RS impl JetDisplay for JetTaskStatus {
-//RS     fn jet_display(&self) -> String {
-//RS         self.jet_show()
-//RS     }
-//RS }
-//RS 
-//RS impl JetDebug for JetTaskStatus {
-//RS     fn jet_debug(&self) -> String {
-//RS         self.jet_show()
-//RS     }
-//RS }
-//RS 
-//RS impl JetShow for JetServiceMigration {
-//RS     fn jet_show(&self) -> String {
-//RS         jet_services_migration_name(self).to_string()
-//RS     }
-//RS }
-//RS 
-//RS impl JetShow for JetServiceStateAuthority {
-//RS     fn jet_show(&self) -> String {
-//RS         format!(
-//RS             "ServiceStateAuthority(store={}, schema={}, version={}, migration={}, adapter={})",
-//RS             self.store,
-//RS             self.schema,
-//RS             self.version,
-//RS             self.migration,
-//RS             jet_services_state_adapter_name(&self.adapter),
-//RS         )
-//RS     }
-//RS }
-//RS 
-//RS impl JetShow for JetServiceStateStore {
-//RS     fn jet_show(&self) -> String {
-//RS         format!("ServiceStateStore({})", self.path)
-//RS     }
-//RS }
-//RS impl JetDisplay for JetServiceStateStore {
-//RS     fn jet_display(&self) -> String {
-//RS         self.jet_show()
-//RS     }
-//RS }
-//RS 
-//RS impl JetShow for JetServiceUpgradeReceipt {
-//RS     fn jet_show(&self) -> String {
-//RS         format!(
-//RS             "ServiceUpgradeReceipt(from={}, to={}, migration={}, rollback_available={}, pinned={})",
-//RS             self.from_generation,
-//RS             self.to_generation,
-//RS             self.migration,
-//RS             self.rollback_available,
-//RS             self.pinned_shards.join(","),
-//RS         )
-//RS     }
-//RS }
-//RS 
-//RS impl JetDisplay for JetServiceUpgradeReceipt {
-//RS     fn jet_display(&self) -> String {
-//RS         self.jet_show()
-//RS     }
-//RS }
-//RS 
-//RS impl JetDebug for JetServiceUpgradeReceipt {
-//RS     fn jet_debug(&self) -> String {
-//RS         self.jet_show()
-//RS     }
-//RS }
-//RS 
-//RS impl JetShow for JetServiceEndpoint {
-//RS     fn jet_show(&self) -> String {
-//RS         format!(
-//RS             "Endpoint({}/{}@g{})",
-//RS             self.tree, self.worker, self.generation
-//RS         )
-//RS     }
-//RS }
-//RS 
-//RS impl JetShow for JetServiceRuntime {
-//RS     fn jet_show(&self) -> String {
-//RS         format!("ServiceRuntime(store={}, retention_ms={})", self.store, self.retention_ms)
-//RS     }
-//RS }
-//RS impl JetDisplay for JetServiceRuntime {
-//RS     fn jet_display(&self) -> String {
-//RS         self.jet_show()
-//RS     }
-//RS }
-//RS 
-//RS impl JetShow for JetDeliveryState {
-//RS     fn jet_show(&self) -> String {
-//RS         match self {
-//RS             JetDeliveryState::Pending => "Pending".to_string(),
-//RS             JetDeliveryState::Accepted => "Accepted".to_string(),
-//RS             JetDeliveryState::Delivering => "Delivering".to_string(),
-//RS             JetDeliveryState::Delivered => "Delivered".to_string(),
-//RS             JetDeliveryState::DeadLettered => "DeadLettered".to_string(),
-//RS             JetDeliveryState::Cancelled => "Cancelled".to_string(),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS impl JetShow for JetDelivery {
-//RS     fn jet_show(&self) -> String {
-//RS         format!("Delivery({})", self.id)
-//RS     }
-//RS }
-//RS 
-//RS impl JetShow for JetDeliveryReceipt {
-//RS     fn jet_show(&self) -> String {
-//RS         format!(
-//RS             "DeliveryReceipt(id={}, state={}, attempts={}, retention_until={}, deadline={}, key={}, duplicate={}, authority={}, generation={}, signature={})",
-//RS             self.id,
-//RS             self.state.jet_show(),
-//RS             self.attempts,
-//RS             self.retention_until,
-//RS             self.deadline,
-//RS             self.idempotency_key,
-//RS             self.duplicate,
-//RS             self.authority,
-//RS             self.generation,
-//RS             self.signature,
-//RS         )
-//RS     }
-//RS }
-//RS 
-//RS impl JetShow for JetDeliveryEvent {
-//RS     fn jet_show(&self) -> String {
-//RS         format!(
-//RS             "DeliveryEvent(sequence={}, state={}, attempts={}, timestamp={}, signature={})",
-//RS             self.sequence,
-//RS             self.state.jet_show(),
-//RS             self.attempts,
-//RS             self.timestamp,
-//RS             self.signature,
-//RS         )
-//RS     }
-//RS }
-//RS 
-//RS impl JetShow for JetServiceError {
-//RS     fn jet_show(&self) -> String {
-//RS         match self {
-//RS             JetServiceError::Full(m)
-//RS             | JetServiceError::Ambiguous(m)
-//RS             | JetServiceError::Unknown(m)
-//RS             | JetServiceError::NotStarted(m)
-//RS             | JetServiceError::Policy(m)
-//RS             | JetServiceError::Unavailable(m)
-//RS             | JetServiceError::Partitioned(m)
-//RS             | JetServiceError::Revoked(m)
-//RS             | JetServiceError::Stale(m)
-//RS             | JetServiceError::Expired(m) => m.clone(),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS impl JetShow for JetServiceTree {
-//RS     fn jet_show(&self) -> String {
-//RS         let handlers = self
-//RS             .workers
-//RS             .iter()
-//RS             .map(|worker| format!("{}:{}", worker.name, worker.handler_name))
-//RS             .collect::<Vec<_>>()
-//RS             .join(",");
-//RS         format!(
-//RS             "ServiceTree(name={}, workers={}, handlers=[{}], started={}, restart={}, budget={}/{}ms, delivery={})",
-//RS             self.name,
-//RS             self.workers.len(),
-//RS             handlers,
-//RS             self.started,
-//RS             self.restart.jet_show(),
-//RS             self.restart_budget.max,
-//RS             self.restart_budget.per_ms,
-//RS             self.delivery.jet_show()
-//RS         )
-//RS     }
-//RS }
-//RS 
-//RS impl Drop for JetServiceTree {
-//RS     fn drop(&mut self) {
-//RS         jet_services_close_runtime_groups(self);
-//RS     }
-//RS }
-//RS 
-//RS fn jet_services_tree(name: String) -> JetServiceTree {
-//RS     JetServiceTree {
-//RS         authority: String::new(),
-//RS         name,
-//RS         generation: 1,
-//RS         delivery: JetServiceDelivery::AtMostOnce,
-//RS         restart: JetServiceRestart::OneForOne,
-//RS         restart_budget: JetServiceRestartBudget::ratified_default(),
-//RS         workers: Vec::new(),
-//RS         groups: Vec::new(),
-//RS         started: false,
-//RS         state_adapter: JetServiceStateAdapter::Empty,
-//RS         state_authority: None,
-//RS         snapshot: None,
-//RS         event_log: Vec::new(),
-//RS         dead_letters: Vec::new(),
-//RS         idempotency_seen: Vec::new(),
-//RS         directory: Vec::new(),
-//RS         draining: Vec::new(),
-//RS         partitioned: Vec::new(),
-//RS         workflows: Vec::new(),
-//RS         task_group: std::sync::Arc::new(JetTaskGroupRuntime::new()),
-//RS         supervisor_tasks: Vec::new(),
-//RS         chaos_fails: 0,
-//RS         previous_generation: 0,
-//RS         last_upgrade: None,
-//RS     }
-//RS }
-//RS 
-//RS pub fn jet_services_state_store(path: String) -> Result<JetServiceStateStore, JetServiceError> {
-//RS     service_authority_validate_text(
-//RS         &path,
-//RS         "service state store",
-//RS         MAX_SERVICE_STATE_STORE,
-//RS         false,
-//RS     )?;
-//RS     jet_services_state_validate_path(std::path::Path::new(&path))?;
-//RS     Ok(JetServiceStateStore { path })
-//RS }
-//RS 
-//RS fn jet_services_state_authority(
-//RS     store: &JetServiceStateStore,
-//RS     schema: String,
-//RS     version: i64,
-//RS     migration: JetServiceMigration,
-//RS ) -> Result<JetServiceStateAuthority, JetServiceError> {
-//RS     jet_services_state_authority_with_migration(store.path.clone(), schema, version, migration)
-//RS }
-//RS 
-//RS /// The migration policy a state adapter is opened under, named the way the
-//RS /// author writes it. An unknown name is a policy error rather than a silent
-//RS /// default, because the default decides whether a rollback is possible at all.
-//RS fn jet_services_migration_from_name(name: &str) -> Result<JetServiceMigration, JetServiceError> {
-//RS     match name {
-//RS         "reversible" => Ok(JetServiceMigration::Reversible),
-//RS         "dual_write" => Ok(JetServiceMigration::DualWrite),
-//RS         "forward_only" => Ok(JetServiceMigration::ForwardOnly),
-//RS         _ => Err(JetServiceError::Policy(format!(
-//RS             "unknown migration policy {name:?}; write \"reversible\", \"dual_write\", or \"forward_only\""
-//RS         ))),
-//RS     }
-//RS }
-//RS 
-//RS fn jet_services_state_authority_with_migration(
-//RS     store: String,
-//RS     schema: String,
-//RS     version: i64,
-//RS     migration: JetServiceMigration,
-//RS ) -> Result<JetServiceStateAuthority, JetServiceError> {
-//RS     service_authority_validate_text(
-//RS         &store,
-//RS         "service state store",
-//RS         MAX_SERVICE_STATE_STORE,
-//RS         false,
-//RS     )?;
-//RS     service_authority_validate_text(
-//RS         &schema,
-//RS         "service state schema",
-//RS         MAX_SERVICE_STATE_SCHEMA,
-//RS         false,
-//RS     )?;
-//RS     if version < 1 {
-//RS         return Err(JetServiceError::Policy(
-//RS             "service state schema version must be positive".to_string(),
-//RS         ));
-//RS     }
-//RS     Ok(JetServiceStateAuthority {
-//RS         store,
-//RS         schema,
-//RS         version,
-//RS         migration: jet_services_migration_name(&migration).to_string(),
-//RS         adapter: JetServiceStateAdapter::Empty,
-//RS     })
-//RS }
-//RS 
-//RS fn jet_services_migration_name(migration: &JetServiceMigration) -> &'static str {
-//RS     match migration {
-//RS         JetServiceMigration::Reversible => "reversible",
-//RS         JetServiceMigration::DualWrite => "dual_write",
-//RS         JetServiceMigration::ForwardOnly => "forward_only",
-//RS     }
-//RS }
-//RS 
-//RS fn jet_services_attach_state_authority(
-//RS     authority: &JetServiceStateAuthority,
-//RS     adapter: JetServiceStateAdapter,
-//RS ) -> Result<JetServiceStateAuthority, JetServiceError> {
-//RS     let migration = match authority.migration.as_str() {
-//RS         "reversible" => JetServiceMigration::Reversible,
-//RS         "dual_write" => JetServiceMigration::DualWrite,
-//RS         "forward_only" => JetServiceMigration::ForwardOnly,
-//RS         _ => {
-//RS             return Err(JetServiceError::Policy(
-//RS                 "service state authority has an incompatible migration policy".to_string(),
-//RS             ))
-//RS         }
-//RS     };
-//RS     if authority.adapter != JetServiceStateAdapter::Empty && authority.adapter != adapter {
-//RS         return Err(JetServiceError::Policy(
-//RS             "service state authority has an incompatible adapter".to_string(),
-//RS         ));
-//RS     }
-//RS     let checked = jet_services_state_authority_with_migration(
-//RS         authority.store.clone(),
-//RS         authority.schema.clone(),
-//RS         authority.version,
-//RS         migration,
-//RS     )?;
-//RS     Ok(JetServiceStateAuthority { adapter, ..checked })
-//RS }
-//RS 
-//RS fn jet_services_restart_one_for_one() -> JetServiceRestart {
-//RS     JetServiceRestart::OneForOne
-//RS }
-//RS 
-//RS fn jet_services_restart_one_for_all() -> JetServiceRestart {
-//RS     JetServiceRestart::OneForAll
-//RS }
-//RS 
-//RS fn jet_services_restart_rest_for_one() -> JetServiceRestart {
-//RS     JetServiceRestart::RestForOne
-//RS }
-//RS 
-//RS fn jet_services_delivery_at_most_once() -> JetServiceDelivery {
-//RS     JetServiceDelivery::AtMostOnce
-//RS }
-//RS 
-//RS fn jet_services_delivery_durable() -> JetServiceDelivery {
-//RS     JetServiceDelivery::DurableAtLeastOnce
-//RS }
-//RS 
-//RS fn jet_services_set_restart(
-//RS     tree: &mut JetServiceTree,
-//RS     restart: JetServiceRestart,
-//RS ) -> Result<(), JetServiceError> {
-//RS     if tree.started {
-//RS         return Err(JetServiceError::Policy(
-//RS             "cannot change restart policy after start".to_string(),
-//RS         ));
-//RS     }
-//RS     tree.restart = restart;
-//RS     for group in &mut tree.groups {
-//RS         group.restart = tree.restart.clone();
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn jet_services_worker(
-//RS     tree: &mut JetServiceTree,
-//RS     name: String,
-//RS     handler: JetServiceWorkerHandler,
-//RS     handler_name: String,
-//RS     capacity: i64,
-//RS ) -> Result<JetServiceEndpoint, JetServiceError> {
-//RS     if tree.started {
-//RS         return Err(JetServiceError::Policy(
-//RS             "cannot add workers after start".to_string(),
-//RS         ));
-//RS     }
-//RS     if capacity <= 0 || capacity > MAX_SERVICE_CAPACITY {
-//RS         return Err(JetServiceError::Policy(
-//RS             "mailbox capacity must be positive and bounded".to_string(),
-//RS         ));
-//RS     }
-//RS     if name.trim().is_empty()
-//RS         || name.chars().any(char::is_control)
-//RS         || name.len() > MAX_SERVICE_NAME
-//RS     {
-//RS         return Err(JetServiceError::Policy(
-//RS             "worker name must be non-empty and visible".to_string(),
-//RS         ));
-//RS     }
-//RS     if handler_name.trim().is_empty()
-//RS         || handler_name.chars().any(char::is_control)
-//RS         || handler_name.len() > MAX_SERVICE_NAME
-//RS     {
-//RS         return Err(JetServiceError::Policy(
-//RS             "worker handler name must be non-empty and visible".to_string(),
-//RS         ));
-//RS     }
-//RS     if tree.workers.len() >= MAX_SERVICE_WORKERS {
-//RS         return Err(JetServiceError::Policy(
-//RS             "service tree worker limit exceeded".to_string(),
-//RS         ));
-//RS     }
-//RS     if tree.workers.iter().any(|w| w.name == name) {
-//RS         return Err(JetServiceError::Unknown(format!(
-//RS             "worker `{name}` already exists in tree `{}`",
-//RS             tree.name
-//RS         )));
-//RS     }
-//RS     if tree.authority.is_empty() {
-//RS         tree.authority = service_authority_provider_issue()?;
-//RS     }
-//RS     let endpoint = service_authority_endpoint_unchecked(
-//RS         tree.name.clone(),
-//RS         name.clone(),
-//RS         tree.generation,
-//RS         tree.authority.clone(),
-//RS     )?;
-//RS     let mailbox = jet_services_new_mailbox(endpoint, capacity, Vec::new())?;
-//RS     let endpoint = mailbox.endpoint.clone();
-//RS     // Build the local mailbox before publishing the endpoint.  A failed
-//RS     // channel allocation must not leave a ghost authority in the registry.
-//RS     service_authority_register(&endpoint, false)?;
-//RS     let task = std::sync::Arc::new(std::sync::Mutex::new(JetServiceSupervisorState::new(
-//RS         JetServiceSupervisorStatus::Stopped,
-//RS     )));
-//RS     jet_services_bind_topology(
-//RS         &task,
-//RS         JetServiceTopologyKind::Task,
-//RS         jet_services_topology_worker_id(&tree.name, &name),
-//RS         Some(jet_services_topology_root_id(&tree.name)),
-//RS     )?;
-//RS     tree.workers.push(JetServiceWorker {
-//RS         handler_name,
-//RS         handler,
-//RS         name,
-//RS         endpoint: endpoint.clone(),
-//RS         mailbox,
-//RS         restarts: Vec::new(),
-//RS         running: false,
-//RS         received_bytes: 0,
-//RS         sent_bytes: 0,
-//RS         task,
-//RS     });
-//RS     Ok(endpoint)
-//RS }
-//RS 
-//RS fn jet_services_group(
-//RS     tree: &mut JetServiceTree,
-//RS     name: String,
-//RS     workers: Vec<String>,
-//RS ) -> Result<(), JetServiceError> {
-//RS     if tree.started {
-//RS         return Err(JetServiceError::Policy(
-//RS             "cannot add groups after start".to_string(),
-//RS         ));
-//RS     }
-//RS     if name.trim().is_empty()
-//RS         || name.chars().any(char::is_control)
-//RS         || name.len() > MAX_SERVICE_NAME
-//RS         || workers.is_empty()
-//RS         || workers.len() > MAX_SERVICE_WORKERS
-//RS     {
-//RS         return Err(JetServiceError::Policy(
-//RS             "service group needs a visible name and at least one worker".to_string(),
-//RS         ));
-//RS     }
-//RS     if tree.groups.iter().any(|group| group.name == name) {
-//RS         return Err(JetServiceError::Policy(format!(
-//RS             "group `{name}` already exists"
-//RS         )));
-//RS     }
-//RS     for w in &workers {
-//RS         if !tree.workers.iter().any(|worker| &worker.name == w) {
-//RS             return Err(JetServiceError::Unknown(format!(
-//RS                 "group `{name}` references unknown worker `{w}`"
-//RS             )));
-//RS         }
-//RS     }
-//RS     if workers.iter().any(|worker| {
-//RS         tree.groups
-//RS             .iter()
-//RS             .any(|group| group.workers.iter().any(|member| member == worker))
-//RS     }) {
-//RS         return Err(JetServiceError::Policy(
-//RS             "a worker can belong to only one service supervisor group".to_string(),
-//RS         ));
-//RS     }
-//RS     if workers
-//RS         .iter()
-//RS         .enumerate()
-//RS         .any(|(index, worker)| workers[..index].iter().any(|seen| seen == worker))
-//RS     {
-//RS         return Err(JetServiceError::Policy(format!(
-//RS             "group `{name}` lists a worker more than once"
-//RS         )));
-//RS     }
-//RS     let parent_id = jet_services_topology_group_id(&tree.name, &name);
-//RS     for worker_name in &workers {
-//RS         if let Some(worker) = tree.workers.iter().find(|worker| &worker.name == worker_name) {
-//RS             jet_services_reparent_topology(&worker.task, Some(parent_id.clone()))?;
-//RS         }
-//RS     }
-//RS     tree.groups.push(JetServiceGroup {
-//RS         name,
-//RS         restart: tree.restart.clone(),
-//RS         budget: tree.restart_budget.clone(),
-//RS         workers,
-//RS     });
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn jet_services_build_runtime_groups(tree: &mut JetServiceTree) -> Result<(), JetServiceError> {
-//RS     let group = std::sync::Arc::new(JetTaskGroupRuntime::new());
-//RS     let mut supervisor_tasks = Vec::new();
-//RS     let mut assigned = vec![false; tree.workers.len()];
-//RS     for definition in tree.groups.clone() {
-//RS         let child = std::sync::Arc::new(JetTaskGroupRuntime::new());
-//RS         let supervisor = std::sync::Arc::new(std::sync::Mutex::new(JetServiceSupervisorState::new(
-//RS             JetServiceSupervisorStatus::Starting,
-//RS         )));
-//RS         jet_services_bind_topology(
-//RS             &supervisor,
-//RS             JetServiceTopologyKind::Supervisor,
-//RS             jet_services_topology_group_id(&tree.name, &definition.name),
-//RS             Some(jet_services_topology_root_id(&tree.name)),
-//RS         )?;
-//RS         jet_services_set_topology_policy(&supervisor, &definition.restart, &definition.budget)?;
-//RS         for worker_name in definition.workers {
-//RS             let index = tree
-//RS                 .workers
-//RS                 .iter()
-//RS                 .position(|worker| worker.name == worker_name)
-//RS                 .ok_or_else(|| JetServiceError::Unknown(format!("worker `{worker_name}` disappeared")))?;
-//RS             assigned[index] = true;
-//RS             child.register(tree.workers[index].task.clone());
-//RS         }
-//RS         group.register(JetServiceSupervisorTask {
-//RS             state: supervisor.clone(),
-//RS             child: child.clone(),
-//RS         });
-//RS         jet_services_task_start(&supervisor)?;
-//RS         supervisor_tasks.push(supervisor);
-//RS     }
-//RS     // Workers without an explicit lexical group still have a supervisor
-//RS     // boundary. This keeps every task handle owned and joined on close.
-//RS     let mut ungrouped: Option<
-//RS         std::sync::Arc<
-//RS             JetTaskGroupRuntime<std::sync::Arc<std::sync::Mutex<JetServiceSupervisorState>>>,
-//RS         >,
-//RS     > = None;
-//RS     for (index, worker) in tree.workers.iter().enumerate() {
-//RS         if assigned[index] {
-//RS             continue;
-//RS         }
-//RS         let child = ungrouped
-//RS             .get_or_insert_with(|| std::sync::Arc::new(JetTaskGroupRuntime::new()));
-//RS         child.register(worker.task.clone());
-//RS     }
-//RS     if let Some(child) = ungrouped {
-//RS         let supervisor = std::sync::Arc::new(std::sync::Mutex::new(JetServiceSupervisorState::new(
-//RS             JetServiceSupervisorStatus::Starting,
-//RS         )));
-//RS         jet_services_bind_topology(
-//RS             &supervisor,
-//RS             JetServiceTopologyKind::Supervisor,
-//RS             jet_services_topology_group_id(&tree.name, "ungrouped"),
-//RS             Some(jet_services_topology_root_id(&tree.name)),
-//RS         )?;
-//RS         jet_services_set_topology_policy(&supervisor, &tree.restart, &tree.restart_budget)?;
-//RS         group.register(JetServiceSupervisorTask {
-//RS             state: supervisor.clone(),
-//RS             child: child.clone(),
-//RS         });
-//RS         jet_services_task_start(&supervisor)?;
-//RS         supervisor_tasks.push(supervisor);
-//RS     }
-//RS     tree.task_group = group;
-//RS     tree.supervisor_tasks = supervisor_tasks;
-//RS     Ok(())
-//RS }
-//RS 
-//RS 
-//RS fn jet_services_start_with_worker_dispatcher<F>(
-//RS     tree: &mut JetServiceTree,
-//RS     mut dispatch: F,
-//RS ) -> Result<(), JetServiceError>
-//RS where
-//RS     F: FnMut(
-//RS         &str,
-//RS         JetServiceWorkerHandler,
-//RS         &JetServiceEndpoint,
-//RS     ) -> Result<(), JetServiceError>,
-//RS {
-//RS 
-//RS     if tree.started {
-//RS         return Err(JetServiceError::Policy(
-//RS             "service tree is already started".to_string(),
-//RS         ));
-//RS     }
-//RS     let _rollout_lock = jet_services_rollout_operation_lock(tree)?;
-//RS     jet_services_restore_rollout_state(tree)?;
-//RS     jet_services_validate_tree(tree)?;
-//RS     if tree.name.trim().is_empty()
-//RS         || tree.name.chars().any(char::is_control)
-//RS         || tree.name.len() > MAX_SERVICE_NAME
-//RS     {
-//RS         return Err(JetServiceError::Policy(
-//RS             "service tree name must be non-empty and visible".to_string(),
-//RS         ));
-//RS     }
-//RS     if tree.workers.is_empty() {
-//RS         return Err(JetServiceError::Policy(
-//RS             "service tree has no workers".to_string(),
-//RS         ));
-//RS     }
-//RS     let durable_records = match (&tree.state_adapter, &tree.state_authority) {
-//RS         (JetServiceStateAdapter::Empty, None) => Vec::new(),
-//RS         (JetServiceStateAdapter::Snapshot, Some(authority)) => {
-//RS             jet_services_state_store_load(authority, &JetServiceStateAdapter::Snapshot)?
-//RS         }
-//RS         (JetServiceStateAdapter::EventLog, Some(authority)) => {
-//RS             jet_services_state_store_load(authority, &JetServiceStateAdapter::EventLog)?
-//RS         }
-//RS         (JetServiceStateAdapter::Empty, Some(_))
-//RS         | (JetServiceStateAdapter::Snapshot, None)
-//RS         | (JetServiceStateAdapter::EventLog, None) => {
-//RS             return Err(JetServiceError::Policy(
-//RS                 "durable service state needs its injected authority".to_string(),
-//RS             ));
-//RS         }
-//RS     };
-//RS     match &tree.state_adapter {
-//RS         JetServiceStateAdapter::Empty => {
-//RS             if tree.snapshot.is_some() || !tree.event_log.is_empty() {
-//RS                 return Err(JetServiceError::Policy(
-//RS                     "Empty state adapter cannot contain durable records".to_string(),
-//RS                 ));
-//RS             }
-//RS         }
-//RS         JetServiceStateAdapter::Snapshot => {
-//RS             if !tree.event_log.is_empty() {
-//RS                 return Err(JetServiceError::Policy(
-//RS                     "Snapshot state adapter cannot contain event-log records".to_string(),
-//RS                 ));
-//RS             }
-//RS             if durable_records.len() > 1 {
-//RS                 return Err(jet_services_state_error(
-//RS                     "snapshot store contains more than one record",
-//RS                 ));
-//RS             }
-//RS         }
-//RS         JetServiceStateAdapter::EventLog => {
-//RS             if tree.snapshot.is_some() {
-//RS                 return Err(JetServiceError::Policy(
-//RS                     "EventLog state adapter cannot contain a snapshot".to_string(),
-//RS                 ));
-//RS             }
-//RS             if tree.event_log.len() > MAX_SERVICE_STATE_RECORDS {
-//RS                 return Err(JetServiceError::Policy(
-//RS                     "event-log record limit exceeded".to_string(),
-//RS                 ));
-//RS             }
-//RS         }
-//RS     }
-//RS     match &tree.state_adapter {
-//RS         JetServiceStateAdapter::Snapshot => {
-//RS             tree.snapshot = durable_records.into_iter().next();
-//RS         }
-//RS         JetServiceStateAdapter::EventLog => {
-//RS             tree.event_log = durable_records;
-//RS         }
-//RS         JetServiceStateAdapter::Empty => {}
-//RS     }
-//RS     if tree.state_authority.is_some() {
-//RS         let mut durable_workflows = jet_services_workflow_store_load(tree)?;
-//RS         // `replay_cursor` is a live execution position, not durable state.
-//RS         // A stop/start of the same tree must compare materialized histories,
-//RS         // then begin the next body invocation from the durable beginning.
-//RS         let mut materialized_workflows = tree.workflows.clone();
-//RS         for workflow in &mut materialized_workflows {
-//RS             workflow.replay_cursor = 0;
-//RS         }
-//RS         if !materialized_workflows.is_empty() && materialized_workflows != durable_workflows {
-//RS             return Err(jet_services_state_error(
-//RS                 "in-memory workflow history does not match the durable workflow log",
-//RS             ));
-//RS         }
-//RS         for workflow in &mut durable_workflows {
-//RS             workflow.replay_cursor = 0;
-//RS         }
-//RS         tree.workflows = durable_workflows;
-//RS     }
-//RS     // A stopped tree owns closed channels. Reopen each mailbox from its one
-//RS     // durable queue before publishing the new supervisor generation.
-//RS     let preserve_mailboxes = tree.delivery == JetServiceDelivery::DurableAtLeastOnce;
-//RS     for worker in &mut tree.workers {
-//RS         let messages = if preserve_mailboxes {
-//RS             worker.mailbox.channel.snapshot()
-//RS         } else {
-//RS             Vec::new()
-//RS         };
-//RS         worker.mailbox = jet_services_new_mailbox(
-//RS             worker.mailbox.endpoint.clone(),
-//RS             worker.mailbox.capacity,
-//RS             messages,
-//RS         )?;
-//RS         worker.endpoint = worker.mailbox.endpoint.clone();
-//RS     }
-//RS 
-//RS     jet_services_build_runtime_groups(tree)?;
-//RS     let mut activated = Vec::with_capacity(tree.workers.len());
-//RS     for index in 0..tree.workers.len() {
-//RS         let draining = tree
-//RS             .draining
-//RS             .iter()
-//RS             .any(|name| name == &tree.workers[index].name);
-//RS         let partitioned = tree
-//RS             .partitioned
-//RS             .iter()
-//RS             .any(|name| name == &tree.workers[index].name);
-//RS         let running = !partitioned
-//RS             && (!draining || tree.workers[index].mailbox.channel.depth() > 0);
-//RS         // A drained worker keeps its authority gate published while its task
-//RS         // is stopped. This lets already-accepted durable receipts finish the
-//RS         // drain without reopening ordinary endpoint sends.
-//RS         let authority_started = !partitioned && (running || draining);
-//RS         tree.workers[index].running = running;
-//RS         if !running {
-//RS             if let Ok(mut state) = tree.workers[index].task.lock() {
-//RS                 state.status = if partitioned {
-//RS                     JetServiceSupervisorStatus::Partitioned
-//RS                 } else {
-//RS                     JetServiceSupervisorStatus::Stopped
-//RS                 };
-//RS                 state.failure = partitioned.then_some(JetTaskFailure::Cancelled);
-//RS             }
-//RS         } else {
-//RS             jet_services_task_start(&tree.workers[index].task)?;
-//RS         }
-//RS         let endpoint = tree.workers[index].endpoint.clone();
-//RS         let result = match jet_services_authority_update(&endpoint, authority_started) {
-//RS             Ok(()) => Ok(()),
-//RS             Err(JetServiceError::Partitioned(_)) | Err(JetServiceError::Unavailable(_)) => {
-//RS                 service_authority_register(&endpoint, authority_started)
-//RS             }
-//RS             Err(error) => Err(error),
-//RS         }
-//RS         .and_then(|()| {
-//RS             if running {
-//RS                 jet_services_bind_delivery_endpoint(
-//RS                     &tree.delivery,
-//RS                     tree.state_authority.as_ref(),
-//RS                     &endpoint,
-//RS                 )
-//RS             } else {
-//RS                 Ok(())
-//RS             }
-//RS         })
-//RS         .and_then(|()| {
-//RS             if running {
-//RS                 dispatch(
-//RS                     &tree.workers[index].handler_name,
-//RS                     tree.workers[index].handler,
-//RS                     &endpoint,
-//RS                 )
-//RS             } else {
-//RS                 Ok(())
-//RS             }
-//RS         });
-//RS         if let Err(error) = result {
-//RS             let mut rollback_error = None;
-//RS             let _ = jet_services_authority_update(&endpoint, false);
-//RS             for endpoint in &activated {
-//RS                 if let Err(error) = jet_services_authority_update(endpoint, false) {
-//RS                     rollback_error = Some(error);
-//RS                     break;
-//RS                 }
-//RS             }
-//RS             for worker in &mut tree.workers {
-//RS                 worker.running = false;
-//RS             }
-//RS             jet_services_close_runtime_groups(tree);
-//RS             return Err(match rollback_error {
-//RS                 Some(rollback_error) => JetServiceError::Policy(format!(
-//RS                     "{}; service authority activation rollback failed: {}",
-//RS                     error.jet_show(),
-//RS                     rollback_error.jet_show()
-//RS                 )),
-//RS                 None => error,
-//RS             });
-//RS         }
-//RS         activated.push(endpoint);
-//RS     }
-//RS     tree.started = true;
-//RS     if let Err(error) = jet_services_rollout_store_write(tree) {
-//RS         tree.started = false;
-//RS         jet_services_close_runtime_groups(tree);
-//RS         for worker in &mut tree.workers {
-//RS             worker.running = false;
-//RS             let _ = jet_services_authority_update(&worker.endpoint, false);
-//RS             let _ = jet_services_authority_update_draining(&worker.endpoint, false);
-//RS         }
-//RS         jet_services_publish_root_state(tree, JetDevtoolsTopologySupervisorState::Failed);
-//RS         return Err(error);
-//RS     }
-//RS     jet_services_publish_tree_topology(tree, JetDevtoolsTopologySupervisorState::Running);
-//RS     Ok(())
-//RS }
-//RS 
-//RS 
-//RS /// Start a service tree with an engine-owned worker/queue dispatcher. The
-//RS /// lifecycle, authority, rollback, and bounded queue settlement remain in
-//RS /// this canonical service implementation; the caller only supplies checked
-//RS /// callback invocation for its execution tier.
-// END-PORT-PENDING 0302 crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:1-1909
+use std.sync.[Arc, Mutex]
+use std.time.[SystemTime, UNIX_EPOCH]
+use core.tasks.runtime.task_group.[JetTaskGroupRuntime]
+use jet_codegen.task_group.[JetTaskFailure]
+use core.devtools.runtime.kernel_devtools_topology_panel.*
+use jet_std.[jet_devtools_publish_event]
+use core.service.runtime.top_service_authority.[JetServiceError, JetServiceEndpoint, JetServiceChannel, JetServiceRuntime, JetDeliveryState, JetDelivery, JetDeliveryReceipt, JetDeliveryEvent, service_authority_validate_text, service_authority_provider_issue, service_authority_endpoint_unchecked, service_authority_register, jet_services_authority_update, jet_services_authority_update_draining]
+use core.service.runtime.top_services_02.[jet_services_close_runtime_groups, jet_services_validate_tree, jet_services_state_error, jet_services_state_adapter_name]
+use core.service.runtime.top_services_03.[jet_services_rollout_operation_lock, jet_services_restore_rollout_state, jet_services_rollout_store_write, jet_services_state_validate_path, jet_services_state_store_load, jet_services_workflow_store_load, jet_services_workflow_frame, jet_services_workflow_field, jet_services_bind_delivery_endpoint]
+use jet_std.[JetShow, JetDisplay, JetDebug]
+use std.fmt.[Debug, Formatter]
+use core.service.runtime.top_service_authority_02.[service_authority_hex]
+use core.crypto.runtime.kernel_sha256.[sha256_bytes]
+
+// D-SERVICE1=D: structured service trees reuse the task-group supervision
+// substrate; restart rules are group data and failure uses JetTaskFailure.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:14
+const MAX_SERVICE_NAME: USize = 256
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:15
+const MAX_SERVICE_MESSAGE: USize = 1024 * 1024
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:16
+const MAX_SERVICE_WORKERS: USize = 4096
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:17
+const MAX_SERVICE_CAPACITY: I64 = 1_000_000
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:18
+const MAX_SERVICE_IDEMPOTENCY: USize = 100_000
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:19
+const MAX_SERVICE_DEAD_LETTERS: USize = 100_000
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:20
+const MAX_SERVICE_STATE_RECORDS: USize = 100_000
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:21
+const MAX_SERVICE_STATE_SCHEMA: USize = 256
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:22
+const MAX_SERVICE_STATE_STORE: USize = 4096
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:23
+const MAX_SERVICE_STATE_BYTES: USize = 128 * 1024 * 1024
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:24
+const MAX_SERVICE_ROLLOUT_BYTES: USize = 4 * 1024 * 1024
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:25
+const MAX_SERVICE_WORKFLOW_STEPS: USize = 100_000
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:26
+const MAX_SERVICE_ACTIVITY_ATTEMPTS: I64 = 1_000
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:27
+const MAX_SERVICE_MESSAGES: USize = 100_000
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:33
+const SERVICE_RESTART_MAX: I64 = 5
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:34
+const SERVICE_RESTART_WINDOW_MS: I64 = 60_000
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:37
+const MAX_SERVICE_RESTART_BUDGET: I64 = 1_000
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:39
+#Derive(Clone, Debug, PartialEq, Eq)
+enum JetServiceRestart { OneForOne, OneForAll, RestForOne }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:50
+#Derive(Clone, Debug, PartialEq, Eq)
+struct JetServiceRestartBudget { max: I64, per_ms: I64 }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:56
+impl JetServiceRestartBudget {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:58
+    fn ratified_default() -> Self { Self{max: SERVICE_RESTART_MAX, per_ms: SERVICE_RESTART_WINDOW_MS} }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:65
+    fn is_valid(self: &Self) -> Bool { self.max >= 1 && self.max <= MAX_SERVICE_RESTART_BUDGET && self.per_ms >= 1 }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:72
+    fn window_start(self: &Self, now: I64) -> I64 { now.saturating_sub(self.per_ms) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:79
+    fn spent(self: &Self, restarts: &[I64], now: I64) -> I64 {
+        start :: self.window_start(now)
+        restarts.iter().filter(fn(at) { **at > start }).count() as I64
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:86
+    fn prune(self: &Self, restarts: &[I64], now: I64) -> {
+        start :: self.window_start(now)
+        restarts.retain(fn(at) { *at > start })
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:92
+#Derive(Clone, Debug, PartialEq, Eq)
+enum JetServiceDelivery { AtMostOnce, DurableAtLeastOnce }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:101
+#Derive(Clone, Debug, PartialEq, Eq)
+enum JetTaskOutcome { Finished, Panicked(String), Cancelled, DeadlineBlown }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:111
+#Derive(Clone, Debug, PartialEq, Eq)
+enum JetTaskStatus { Running, Paused, CancelRequested }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:122
+#Derive(Clone, Debug, PartialEq, Eq)
+enum JetServiceSupervisorStatus { Starting, Running, Failed, Cancelling, Stopped, Escalated, Partitioned }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:133
+#Derive(Clone, Copy, Debug, PartialEq, Eq)
+enum JetServiceTopologyKind { Supervisor, Task }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:139
+#Derive(Clone, Debug, PartialEq, Eq)
+struct JetServiceSupervisorState {
+    status: JetServiceSupervisorStatus
+    failure: JetTaskFailure?
+    joined: Bool
+    topology_kind: JetServiceTopologyKind?
+    topology_id: String?
+    topology_parent_id: String?
+    topology_restart_history: [JetDevtoolsTopologyRestartFact]
+    topology_owner: String?
+    topology_restart_policy: JetDevtoolsTopologyRestartPolicy?
+    topology_wait_target: String?
+    topology_started_at_ms: U64?
+    topology_duration_ms: U64?
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:160
+#Derive(Clone, Debug)
+struct JetServiceSupervisorTask {
+    state: Arc<Mutex<JetServiceSupervisorState>>
+    child: Arc<JetTaskGroupRuntime<Arc<Mutex<JetServiceSupervisorState>>>>
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:168
+impl JetServiceSupervisorState {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:169
+    fn new(status: JetServiceSupervisorStatus) -> Self {
+        Self{status, failure: None, joined: false, topology_kind: None,
+            topology_id: None, topology_parent_id: None, topology_owner: None,
+            topology_restart_policy: None, topology_wait_target: None,
+            topology_started_at_ms: None, topology_duration_ms: None,
+            topology_restart_history: []}
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:187
+const JET_SERVICES_TOPOLOGY_MAX_ID: USize = 256
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:188
+const JET_SERVICES_TOPOLOGY_SOURCE: String = "service-runtime"
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:190
+fn jet_services_topology_now() -> U64 {
+    // GATE #4565: kernel primitive — actual epoch clock, source's zero on error.
+    #Unsafe("read native wall clock and retain checked epoch and millisecond conversion") {
+        SystemTime.now().duration_since(UNIX_EPOCH).ok()
+            .and_then(fn(duration) { U64.try_from(duration.as_millis()).ok() }).unwrap_or(0)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:198
+fn jet_services_topology_restart_policy(restart: &JetServiceRestart, budget: &JetServiceRestartBudget) -> JetDevtoolsTopologyRestartPolicy? {
+    strategy :: match restart {
+        .OneForOne -> JetDevtoolsTopologyRestartStrategy.OneForOne
+        .OneForAll -> JetDevtoolsTopologyRestartStrategy.OneForAll
+        .RestForOne -> JetDevtoolsTopologyRestartStrategy.RestForOne
+    }
+    max_restarts :: U32.try_from(budget.max).ok() ?? return None
+    window_ms :: U64.try_from(budget.per_ms).ok() ?? return None
+    JetDevtoolsTopologyRestartPolicy.new(strategy, max_restarts, window_ms).ok()
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:212
+fn jet_services_topology_failure(status: &JetServiceSupervisorStatus, failure: (&JetTaskFailure)?) -> JetDevtoolsTopologyFailureKind? {
+    match status {
+        .Escalated -> Val(JetDevtoolsTopologyFailureKind.Escalated)
+        .Partitioned -> Val(JetDevtoolsTopologyFailureKind.WorkerLost)
+        _ -> failure.map(fn(failure) {
+            match failure {
+                .Cancelled -> JetDevtoolsTopologyFailureKind.Cancelled
+                .DeadlineBlown -> JetDevtoolsTopologyFailureKind.TimedOut
+                .Panicked(_) -> JetDevtoolsTopologyFailureKind.Failed
+            }
+        })
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:229
+fn jet_services_topology_finish(state: &JetServiceSupervisorState, at_ms: U64) -> {
+    if state.topology_duration_ms.is_none() {
+        state.topology_duration_ms = state.topology_started_at_ms.map(fn(started) { at_ms.saturating_sub(started) })
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:236
+fn jet_services_topology_id(kind: &String, tree: &String, member: (&String)?) -> String {
+    value :: match member { Val(member) -> format!("service:{kind}:{tree}:{member}"), None -> format!("service:{kind}:{tree}") }
+    if value.len() <= JET_SERVICES_TOPOLOGY_MAX_ID -> return value
+    format!("service:{kind}:{}", service_authority_hex(&sha256_bytes(value.as_bytes())))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:250
+fn jet_services_topology_root_id(tree: &String) -> String { jet_services_topology_id("supervisor", tree, None) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:254
+fn jet_services_topology_group_id(tree: &String, group: &String) -> String { jet_services_topology_id("group", tree, Val(group)) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:258
+fn jet_services_topology_worker_id(tree: &String, worker: &String) -> String { jet_services_topology_id("task", tree, Val(worker)) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:262
+fn jet_services_topology_endpoint_id(tree: &String, worker: &String) -> String { jet_services_topology_id("endpoint", tree, Val(worker)) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:266
+fn jet_services_topology_readiness_id(tree: &String, worker: &String) -> String { jet_services_topology_id("readiness", tree, Val(worker)) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:270
+fn jet_services_topology_address(tree: &String, worker: &String) -> String {
+    value :: format!("{tree}/{worker}")
+    if value.len() <= JET_SERVICES_TOPOLOGY_MAX_ID -> return value
+    format!("service:{}", service_authority_hex(&sha256_bytes(value.as_bytes())))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:281
+fn jet_services_topology_publish_fact(fact: JetDevtoolsTopologyFact) -> {
+    match fact.to_protocol_event(JET_SERVICES_TOPOLOGY_SOURCE) {
+        Ok(event) -> jet_devtools_publish_event(^event)
+        Err(_) -> {}
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:287
+fn jet_services_topology_publish_state(state: &JetServiceSupervisorState) -> {
+    kind :: state.topology_kind ?? return
+    id :: state.topology_id.as_ref() ?? return
+    observed_at_ms :: jet_services_topology_now()
+    freshness :: JetDevtoolsTopologyFreshness.fresh(observed_at_ms)
+    parent_id :: state.topology_parent_id.clone()
+    owner :: state.topology_owner.clone()
+    restart_policy :: state.topology_restart_policy.clone()
+    duration_ms :: state.topology_duration_ms.or_else(fn() {
+        state.topology_started_at_ms.map(fn(started) { observed_at_ms.saturating_sub(started) })
+    })
+    failure :: jet_services_topology_failure(&state.status, state.failure.as_ref())
+    wait_target :: state.topology_wait_target.clone()
+    history :: state.topology_restart_history.clone()
+    fact :: match kind {
+        .Supervisor -> {
+            status :: match state.status {
+                .Starting -> JetDevtoolsTopologySupervisorState.Starting
+                .Running -> JetDevtoolsTopologySupervisorState.Running
+                .Failed | .Partitioned -> JetDevtoolsTopologySupervisorState.Failed
+                .Cancelling -> JetDevtoolsTopologySupervisorState.Stopping
+                .Stopped -> JetDevtoolsTopologySupervisorState.Stopped
+                .Escalated -> JetDevtoolsTopologySupervisorState.Escalated
+            }
+            JetDevtoolsTopologySupervisorFact.new(id.clone(), JET_SERVICES_TOPOLOGY_SOURCE, parent_id, status, history, freshness).map(fn(fact) {
+                fact := ^fact
+                if owner :: owner.clone() -> fact = fact.with_owner(^owner)
+                if restart_policy :: restart_policy.clone() -> fact = fact.with_restart_policy(^restart_policy)
+                if failure :: failure -> fact = fact.with_failure(failure)
+                if duration_ms :: duration_ms -> fact = fact.with_duration_ms(duration_ms)
+                JetDevtoolsTopologyFact.Supervisor(^fact)
+            })
+        }
+        .Task -> {
+            status :: match state.status {
+                .Starting -> JetDevtoolsTopologyTaskState.Created
+                .Running -> if wait_target.is_some() -> JetDevtoolsTopologyTaskState.Waiting else -> JetDevtoolsTopologyTaskState.Running
+                .Failed | .Escalated | .Partitioned -> JetDevtoolsTopologyTaskState.Failed
+                .Cancelling | .Stopped -> JetDevtoolsTopologyTaskState.Cancelled
+            }
+            JetDevtoolsTopologyTaskFact.new(id.clone(), JET_SERVICES_TOPOLOGY_SOURCE, parent_id, status, history, freshness).map(fn(fact) {
+                fact := ^fact
+                if owner :: owner.clone() -> fact = fact.with_owner(^owner)
+                if wait_target :: wait_target.clone() -> fact = fact.with_wait_target(^wait_target)
+                if duration_ms :: duration_ms -> fact = fact.with_duration_ms(duration_ms)
+                if failure :: failure -> fact = fact.with_failure(failure)
+                if restart_policy :: restart_policy.clone() -> fact = fact.with_restart_policy(^restart_policy)
+                JetDevtoolsTopologyFact.Task(^fact)
+            })
+        }
+    }
+    match fact { Ok(fact) -> jet_services_topology_publish_fact(^fact), Err(_) -> {} }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:401
+fn jet_services_bind_topology(task: &Arc<Mutex<JetServiceSupervisorState>>, kind: JetServiceTopologyKind, id: String, parent_id: String?) -> () JetServiceError! {
+    // GATE #4565: kernel primitive
+    state := #Unsafe("hold the native service state guard; preserve poison failure") { task.lock() }
+        .map_err(fn(_) { JetServiceError.Policy("service task state lock is poisoned") })?
+    state.topology_kind = Val(kind)
+    state.topology_id = Val(^id)
+    state.topology_owner = parent_id.clone()
+    state.topology_parent_id = ^parent_id
+    state.topology_wait_target = None
+    state.topology_started_at_ms = Val(jet_services_topology_now())
+    state.topology_duration_ms = None
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:419
+fn jet_services_reparent_topology(task: &Arc<Mutex<JetServiceSupervisorState>>, parent_id: String?) -> () JetServiceError! {
+    // GATE #4565: kernel primitive
+    state := #Unsafe("hold the native service state guard; preserve poison failure") { task.lock() }
+        .map_err(fn(_) { JetServiceError.Policy("service task state lock is poisoned") })?
+    state.topology_owner = parent_id.clone()
+    state.topology_parent_id = ^parent_id
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:431
+fn jet_services_set_topology_policy(task: &Arc<Mutex<JetServiceSupervisorState>>, restart: &JetServiceRestart, budget: &JetServiceRestartBudget) -> () JetServiceError! {
+    policy :: jet_services_topology_restart_policy(restart, budget).ok_or_else(fn() {
+        JetServiceError.Policy("service restart policy cannot cross the topology boundary")
+    })?
+    // GATE #4565: kernel primitive
+    state := #Unsafe("hold the native service state guard; preserve poison failure") { task.lock() }
+        .map_err(fn(_) { JetServiceError.Policy("service task state lock is poisoned") })?
+    state.topology_restart_policy = Val(^policy)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:446
+fn jet_services_record_topology_restart(task: &Arc<Mutex<JetServiceSupervisorState>>, at_ms: U64, reason: JetDevtoolsTopologyRestartReason) -> () JetServiceError! {
+    // GATE #4565: kernel primitive
+    state := #Unsafe("hold the native service state guard; preserve poison failure") { task.lock() }
+        .map_err(fn(_) { JetServiceError.Policy("service task state lock is poisoned") })?
+    if state.topology_restart_history.len() >= JET_DEVTOOLS_TOPOLOGY_MAX_RESTARTS -> _ :: state.topology_restart_history.remove(0)
+    state.topology_restart_history.push(JetDevtoolsTopologyRestartFact{at_ms, duration_ms: 0, reason})
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:467
+fn jet_services_publish_endpoint_fact(endpoint: &JetServiceEndpoint, authority_state: JetDevtoolsTopologyEndpointAuthorityState) -> {
+    jet_services_publish_endpoint_fact_with_transport(endpoint, authority_state, None, JetDevtoolsTopologyEndpointConnectionState.Unknown, None, None, None)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:482
+fn jet_services_publish_endpoint_fact_with_transport(endpoint: &JetServiceEndpoint, authority_state: JetDevtoolsTopologyEndpointAuthorityState, owner: String?, connection: JetDevtoolsTopologyEndpointConnectionState, bytes_in: U64?, bytes_out: U64?, restart_policy: JetDevtoolsTopologyRestartPolicy?) -> {
+    worker_id :: jet_services_topology_worker_id(&endpoint.tree, &endpoint.worker)
+    fact :: JetDevtoolsTopologyEndpointFact.new(
+        jet_services_topology_endpoint_id(&endpoint.tree, &endpoint.worker),
+        JET_SERVICES_TOPOLOGY_SOURCE, Val(^worker_id), JetDevtoolsTopologyEndpointScheme.Unix,
+        jet_services_topology_address(&endpoint.tree, &endpoint.worker), None, authority_state,
+        JetDevtoolsTopologyFreshness.fresh(jet_services_topology_now())
+    ).map(fn(fact) {
+        fact := fact.with_connection(connection)
+        if owner :: owner -> fact = fact.with_owner(^owner)
+        if bytes_in :: bytes_in -> fact.bytes_in = Val(bytes_in)
+        if bytes_out :: bytes_out -> fact.bytes_out = Val(bytes_out)
+        if restart_policy :: restart_policy -> fact = fact.with_restart_policy(^restart_policy)
+        fact
+    })
+    match fact { Ok(fact) -> jet_services_topology_publish_fact(JetDevtoolsTopologyFact.Endpoint(^fact)), Err(_) -> {} }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:523
+fn jet_services_publish_readiness_fact(endpoint: &JetServiceEndpoint, state: JetDevtoolsTopologyReadinessState, reason: JetDevtoolsTopologyReadinessReason) -> {
+    worker_id :: jet_services_topology_worker_id(&endpoint.tree, &endpoint.worker)
+    fact :: JetDevtoolsTopologyReadinessFact.new(
+        jet_services_topology_readiness_id(&endpoint.tree, &endpoint.worker),
+        JET_SERVICES_TOPOLOGY_SOURCE, Val(^worker_id), state, reason,
+        JetDevtoolsTopologyFreshness.fresh(jet_services_topology_now())
+    )
+    match fact { Ok(fact) -> jet_services_topology_publish_fact(JetDevtoolsTopologyFact.Readiness(^fact)), Err(_) -> {} }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:541
+fn jet_services_publish_supervisor_fact(id: String, parent_id: String?, state: JetDevtoolsTopologySupervisorState, restart_history: [JetDevtoolsTopologyRestartFact]) -> {
+    fact :: JetDevtoolsTopologySupervisorFact.new(^id, JET_SERVICES_TOPOLOGY_SOURCE, ^parent_id, state, ^restart_history, JetDevtoolsTopologyFreshness.fresh(jet_services_topology_now()))
+    match fact { Ok(fact) -> jet_services_topology_publish_fact(JetDevtoolsTopologyFact.Supervisor(^fact)), Err(_) -> {} }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:560
+fn jet_services_publish_root_state(tree: &JetServiceTree, state: JetDevtoolsTopologySupervisorState) -> {
+    jet_services_publish_supervisor_fact(jet_services_topology_root_id(&tree.name), None, state, [])
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:572
+fn jet_services_publish_tree_topology(tree: &JetServiceTree, root_state: JetDevtoolsTopologySupervisorState) -> {
+    jet_services_publish_root_state(tree, root_state)
+    for supervisor in &tree.supervisor_tasks {
+        // GATE #4565: kernel primitive
+        match #Unsafe("borrow each native supervisor state for topology publication") { supervisor.lock() } {
+            Ok(state) -> jet_services_topology_publish_state(&state)
+            Err(_) -> {}
+        }
+    }
+    for worker in &tree.workers {
+        // GATE #4565: kernel primitive
+        restart_policy :: #Unsafe("borrow the worker's real restart policy under its native guard") {
+            worker.task.lock().ok().and_then(fn(state) { state.topology_restart_policy.clone() })
+        }
+        // GATE #4565: kernel primitive
+        match #Unsafe("borrow the worker state for topology publication") { worker.task.lock() } {
+            Ok(state) -> jet_services_topology_publish_state(&state)
+            Err(_) -> {}
+        }
+        partitioned :: tree.partitioned.iter().any(fn(name) { name == &worker.name })
+        draining :: tree.draining.iter().any(fn(name) { name == &worker.name })
+        authority_state :: if partitioned -> JetDevtoolsTopologyEndpointAuthorityState.Revoked
+            else if worker.running || draining -> JetDevtoolsTopologyEndpointAuthorityState.Verified
+            else -> JetDevtoolsTopologyEndpointAuthorityState.Unverified
+        connection :: if partitioned -> JetDevtoolsTopologyEndpointConnectionState.Closed
+            else if draining -> JetDevtoolsTopologyEndpointConnectionState.Draining
+            else if worker.running && worker.endpoint.channel.is_some() -> JetDevtoolsTopologyEndpointConnectionState.Connected
+            else -> JetDevtoolsTopologyEndpointConnectionState.Unknown
+        worker_id :: jet_services_topology_worker_id(&worker.endpoint.tree, &worker.name)
+        jet_services_publish_endpoint_fact_with_transport(&worker.endpoint, authority_state, Val(^worker_id), connection, Val(worker.received_bytes), Val(worker.sent_bytes), ^restart_policy)
+        (readiness, reason) :: if partitioned -> (JetDevtoolsTopologyReadinessState.NotReady, JetDevtoolsTopologyReadinessReason.AuthorityRevoked)
+            else if worker.running -> (JetDevtoolsTopologyReadinessState.Ready, JetDevtoolsTopologyReadinessReason.ProbePassed)
+            else -> (JetDevtoolsTopologyReadinessState.NotReady, JetDevtoolsTopologyReadinessReason.Stopped)
+        jet_services_publish_readiness_fact(&worker.endpoint, readiness, reason)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:640
+fn jet_services_task_start(task: &Arc<Mutex<JetServiceSupervisorState>>) -> () JetServiceError! {
+    snapshot :: {
+        // GATE #4565: kernel primitive
+        state := #Unsafe("mutate native service task state and release the guard before publishing") { task.lock() }
+            .map_err(fn(_) { JetServiceError.Policy("service task state lock is poisoned") })?
+        state.status = JetServiceSupervisorStatus.Running
+        state.failure = None
+        state.joined = false
+        state.topology_wait_target = None
+        state.topology_started_at_ms = Val(jet_services_topology_now())
+        state.topology_duration_ms = None
+        state.clone()
+    }
+    jet_services_topology_publish_state(&snapshot)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:659
+fn jet_services_task_fail(task: &Arc<Mutex<JetServiceSupervisorState>>, reason: String) -> () JetServiceError! {
+    snapshot :: {
+        // GATE #4565: kernel primitive
+        state := #Unsafe("mutate native service task state and release the guard before publishing") { task.lock() }
+            .map_err(fn(_) { JetServiceError.Policy("service task state lock is poisoned") })?
+        state.status = JetServiceSupervisorStatus.Failed
+        state.failure = Val(JetTaskFailure.Panicked(^reason))
+        state.topology_wait_target = None
+        jet_services_topology_finish(&state, jet_services_topology_now())
+        state.clone()
+    }
+    jet_services_topology_publish_state(&snapshot)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:677
+fn jet_services_task_restart(task: &Arc<Mutex<JetServiceSupervisorState>>) -> () JetServiceError! {
+    snapshot :: {
+        // GATE #4565: kernel primitive
+        state := #Unsafe("mutate native service task state and release the guard before publishing") { task.lock() }
+            .map_err(fn(_) { JetServiceError.Policy("service task state lock is poisoned") })?
+        state.status = JetServiceSupervisorStatus.Running
+        state.failure = None
+        state.joined = false
+        state.topology_wait_target = None
+        state.topology_started_at_ms = Val(jet_services_topology_now())
+        state.topology_duration_ms = None
+        state.clone()
+    }
+    jet_services_topology_publish_state(&snapshot)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:696
+fn jet_services_task_escalate(task: &Arc<Mutex<JetServiceSupervisorState>>, reason: String) -> () JetServiceError! {
+    snapshot :: {
+        // GATE #4565: kernel primitive
+        state := #Unsafe("mutate native service task state and release the guard before publishing") { task.lock() }
+            .map_err(fn(_) { JetServiceError.Policy("service task state lock is poisoned") })?
+        // Escalation fails the supervisor on the same rail the parent observes.
+        state.status = JetServiceSupervisorStatus.Escalated
+        state.failure = Val(JetTaskFailure.Panicked(^reason))
+        state.topology_wait_target = None
+        jet_services_topology_finish(&state, jet_services_topology_now())
+        state.clone()
+    }
+    jet_services_topology_publish_state(&snapshot)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:717
+fn jet_services_cancel_task(task: &Arc<Mutex<JetServiceSupervisorState>>) -> {
+    // GATE #4565: kernel primitive
+    snapshot :: #Unsafe("cancel under the native service state guard; publish after its release") {
+        task.lock().ok().map(fn(state) {
+            state := ^state
+            if !state.joined && state.status != JetServiceSupervisorStatus.Escalated {
+                state.status = JetServiceSupervisorStatus.Cancelling
+                state.failure = Val(JetTaskFailure.Cancelled)
+                state.topology_wait_target = None
+                jet_services_topology_finish(&state, jet_services_topology_now())
+            }
+            state.clone()
+        })
+    }
+    if snapshot :: snapshot.as_ref() -> jet_services_topology_publish_state(snapshot)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:732
+fn jet_services_join_task(task: Arc<Mutex<JetServiceSupervisorState>>) -> {
+    // GATE #4565: kernel primitive
+    snapshot :: #Unsafe("join under the native service state guard; publish after its release") {
+        task.lock().ok().map(fn(state) {
+            state := ^state
+            if state.status != JetServiceSupervisorStatus.Escalated -> state.status = JetServiceSupervisorStatus.Stopped
+            state.topology_wait_target = None
+            jet_services_topology_finish(&state, jet_services_topology_now())
+            state.joined = true
+            state.clone()
+        })
+    }
+    if snapshot :: snapshot.as_ref() -> jet_services_topology_publish_state(snapshot)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:748
+fn jet_services_cancel_supervisor(task: &JetServiceSupervisorTask) -> { jet_services_cancel_task(&task.state) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:752
+fn jet_services_join_supervisor(task: JetServiceSupervisorTask) -> {
+    task.child.close_with_cancel(jet_services_cancel_task, jet_services_join_task)
+    jet_services_join_task(^task.state)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:758
+struct JetServiceMailbox {
+    endpoint: JetServiceEndpoint
+    capacity: I64
+    channel: Arc<JetServiceChannel<String>>
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:764
+impl Clone for JetServiceMailbox {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:765
+    fn clone(self: &Self) -> Self {
+        // GATE #4565: kernel primitive
+        channel :: #Unsafe("snapshot the bounded native FIFO and allocate an independent clone") {
+            messages :: self.channel.snapshot()
+            Arc.new(JetServiceChannel.new(USize.try_from(self.capacity.max(1)).unwrap_or(1), ^messages)
+                .expect("validated service mailbox must fit its bounded channel"))
+        }
+        endpoint := self.endpoint.clone()
+        endpoint.channel = Val(channel.clone())
+        Self{endpoint: ^endpoint, capacity: self.capacity, channel: ^channel}
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:784
+impl Debug for JetServiceMailbox {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:785
+    fn fmt(self: &Self, formatter: &Formatter) -> () std.fmt.Error! {
+        // GATE #4565: kernel primitive
+        #Unsafe("inspect the bounded native mailbox under its own FIFO guard") {
+            formatter.debug_struct("JetServiceMailbox").field("endpoint", &self.endpoint)
+                .field("capacity", &self.capacity).field("depth", &self.channel.depth())
+                .field("messages", &self.channel.snapshot()).finish()
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:796
+fn jet_services_new_mailbox(endpoint: JetServiceEndpoint, capacity: I64, messages: [String]) -> JetServiceMailbox JetServiceError! {
+    channel_capacity :: USize.try_from(capacity).map_err(fn(_) {
+        JetServiceError.Policy("mailbox capacity is outside the platform range")
+    })?
+    if messages.len() > channel_capacity {
+        return Err(JetServiceError.Policy("mailbox messages exceed the bounded channel capacity"))
+    }
+    // GATE #4565: kernel primitive
+    channel :: #Unsafe("allocate real bounded native channel with restored queue; preserve allocation failure") {
+        Arc.new(JetServiceChannel.new(channel_capacity, ^messages).map_err(fn(_) {
+            JetServiceError.Policy("mailbox channel could not restore its queued messages")
+        })?)
+    }
+    endpoint := ^endpoint
+    endpoint.channel = Val(channel.clone())
+    Ok(JetServiceMailbox{endpoint: ^endpoint, capacity, channel: ^channel})
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:821
+type JetServiceWorkerHandler = fn() -> ()
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:822
+// The source deliberately uses a no-op function item for resident typed adapters.
+fn jet_services_noop_worker() -> {}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:824
+#Derive(Clone, Debug)
+struct JetServiceWorker {
+    name: String
+    // Checked source identity retained for topology and adapter lookup.
+    handler_name: String
+    handler: JetServiceWorkerHandler
+    endpoint: JetServiceEndpoint
+    mailbox: JetServiceMailbox
+    // One oldest-first history serves both restart counts and escalation.
+    restarts: [I64]
+    running: Bool
+    // Transport counters only; message contents never cross topology.
+    received_bytes: U64
+    sent_bytes: U64
+    task: Arc<Mutex<JetServiceSupervisorState>>
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:849
+#Derive(Clone, Debug)
+struct JetServiceGroup {
+    name: String
+    restart: JetServiceRestart
+    // D-CONC-SCHED1=A: restart rule is group data.
+    budget: JetServiceRestartBudget
+    workers: [String]
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:858
+#Derive(Clone, Debug, PartialEq, Eq)
+enum JetServiceStateAdapter { Empty, Snapshot, EventLog }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:865
+#Derive(Clone, Debug, PartialEq, Eq)
+enum JetServiceMigration { Reversible, DualWrite, ForwardOnly }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:872
+// D-SERVICE-UPGRADE1=D: retain shard generation until empty, or cancel on drain.
+#Derive(Clone, Copy, Debug, PartialEq, Eq)
+enum JetServiceDrainDisposition { PinShard, Cancel }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:882
+#Derive(Clone, Debug, PartialEq, Eq)
+pub struct JetServiceStateStore { path: String }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:887
+#Derive(Clone, Debug, PartialEq, Eq)
+pub struct JetServiceStateAuthority {
+    store: String
+    schema: String
+    version: I64
+    migration: String
+    adapter: JetServiceStateAdapter
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:896
+#Derive(Clone, Debug, PartialEq, Eq)
+pub struct JetServiceUpgradeReceipt {
+    from_generation: I64
+    to_generation: I64
+    migration: String
+    rollback_store: String
+    rollback_available: Bool
+    pinned_shards: [String]
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:906
+// Deployment journal is separate from application state to retain generations.
+#Derive(Clone, Debug, PartialEq, Eq)
+struct JetServiceRolloutState {
+    generation: I64
+    previous_generation: I64
+    last_upgrade: JetServiceUpgradeReceipt?
+    workers: [(String, I64)]
+    draining: [String]
+    partitioned: [String]
+    directory: [(String, String, I64)]
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:920
+#Derive(Clone, Debug, PartialEq, Eq)
+struct JetServiceWorkflow {
+    id: String
+    run_id: I64
+    version: I64
+    steps: [String]
+    history: [String]
+    // Runtime-only replay position; the durable log is authoritative.
+    replay_cursor: USize
+    status: JetTaskStatus
+    activity_outcomes: [(String, JetTaskOutcome)]
+    outcome: JetTaskOutcome?
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:935
+// D-SERVICE-WORKFLOW1=D: clones share one cursor and one recorded delivery path.
+#Derive(Clone, Debug)
+struct JetWorkflowHandle {
+    authority: JetServiceStateAuthority
+    state: Arc<Mutex<JetServiceWorkflow>>
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:944
+#Derive(Clone, Debug)
+struct JetServiceTree {
+    name: String
+    authority: String
+    generation: I64
+    delivery: JetServiceDelivery
+    restart: JetServiceRestart
+    // Root policy inherited by each declared group.
+    restart_budget: JetServiceRestartBudget
+    workers: [JetServiceWorker]
+    groups: [JetServiceGroup]
+    started: Bool
+    state_adapter: JetServiceStateAdapter
+    state_authority: JetServiceStateAuthority?
+    snapshot: String?
+    event_log: [String]
+    dead_letters: [String]
+    idempotency_seen: [(String, JetServiceEndpoint, String)]
+    directory: [(String, JetServiceEndpoint, String)]
+    draining: [String]
+    partitioned: [String]
+    workflows: [JetServiceWorkflow]
+    // Root retains every child group; stop/drop joins every handle.
+    task_group: Arc<JetTaskGroupRuntime<JetServiceSupervisorTask>>
+    supervisor_tasks: [Arc<Mutex<JetServiceSupervisorState>>]
+    chaos_fails: I64
+    previous_generation: I64
+    last_upgrade: JetServiceUpgradeReceipt?
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:977
+impl JetShow for JetServiceRestart {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:978
+    fn jet_show(self: &Self) -> String {
+        match self { .OneForOne -> "OneForOne", .OneForAll -> "OneForAll", .RestForOne -> "RestForOne" }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:986
+impl JetDisplay for JetServiceRestart {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:987
+    fn jet_display(self: &Self) -> String { self.jet_show() }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:992
+impl JetShow for JetServiceDelivery {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:993
+    fn jet_show(self: &Self) -> String {
+        match self { .AtMostOnce -> "AtMostOnce", .DurableAtLeastOnce -> "DurableAtLeastOnce" }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:1000
+impl JetDisplay for JetServiceDelivery {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:1001
+    fn jet_display(self: &Self) -> String { self.jet_show() }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:1006
+impl JetTaskOutcome {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:1007
+    fn wire(self: &Self) -> String {
+        match self {
+            .Finished -> "Finished"
+            .Panicked(reason) -> format!("Panicked:{}", jet_services_workflow_frame(reason))
+            .Cancelled -> "Cancelled"
+            .DeadlineBlown -> "DeadlineBlown"
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:1018
+    fn from_wire(value: &String) -> Self JetServiceError! {
+        match value {
+            "Finished" -> Ok(Self.Finished)
+            "Cancelled" -> Ok(Self.Cancelled)
+            "DeadlineBlown" -> Ok(Self.DeadlineBlown)
+            value -> {
+                reason :: value.strip_prefix("Panicked:").ok_or_else(fn() { jet_services_state_error("unknown task outcome") })?
+                outcome :: Self.Panicked(jet_services_workflow_field(reason, "panic reason")?.to_string())
+                if outcome.is_valid() { Ok(^outcome) }
+                else { Err(jet_services_state_error("invalid task outcome")) }
+            }
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:1038
+    fn is_retryable_failure(self: &Self) -> Bool { !matches!(self, Self.Finished) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:1042
+    fn is_valid(self: &Self) -> Bool {
+        match self {
+            .Panicked(reason) -> !reason.trim().is_empty() && reason.len() <= MAX_SERVICE_MESSAGE
+                && !reason.chars().any(fn(c) { c.is_control() })
+            _ -> true
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:1054
+impl JetShow for JetTaskOutcome {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:1055
+    fn jet_show(self: &Self) -> String {
+        match self {
+            .Finished -> "Finished", .Panicked(reason) -> format!("Panicked({reason})")
+            .Cancelled -> "Cancelled", .DeadlineBlown -> "DeadlineBlown"
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:1065
+impl JetDisplay for JetTaskOutcome {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:1066
+    fn jet_display(self: &Self) -> String { self.jet_show() }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:1071
+impl JetDebug for JetTaskOutcome {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:1072
+    fn jet_debug(self: &Self) -> String {
+        match self { .Panicked(reason) -> format!("Panicked({reason:?})"), _ -> self.jet_show() }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:1080
+impl JetShow for JetTaskStatus {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:1081
+    fn jet_show(self: &Self) -> String {
+        match self { .Running -> "Running", .Paused -> "Paused", .CancelRequested -> "CancelRequested" }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:1090
+impl JetShow for JetWorkflowHandle {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:1091
+    fn jet_show(self: &Self) -> String {
+        // GATE #4565: kernel primitive
+        #Unsafe("read the shared workflow run identity under its native mutex; preserve poison display") {
+            self.state.lock().map(fn(workflow) { workflow.run_id.to_string() })
+                .unwrap_or_else(fn(_) { "<workflow-poisoned>" })
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:1099
+impl JetDisplay for JetWorkflowHandle {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:1100
+    fn jet_display(self: &Self) -> String { self.jet_show() }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:1105
+impl JetDebug for JetWorkflowHandle {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:1106
+    fn jet_debug(self: &Self) -> String { self.jet_show() }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:1111
+impl JetDisplay for JetTaskStatus {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:1112
+    fn jet_display(self: &Self) -> String { self.jet_show() }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:1117
+impl JetDebug for JetTaskStatus {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:1118
+    fn jet_debug(self: &Self) -> String { self.jet_show() }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:1123
+impl JetShow for JetServiceMigration {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:1124
+    fn jet_show(self: &Self) -> String { jet_services_migration_name(self).to_string() }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:1129
+impl JetShow for JetServiceStateAuthority {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:1130
+    fn jet_show(self: &Self) -> String {
+        format!("ServiceStateAuthority(store={}, schema={}, version={}, migration={}, adapter={})",
+            self.store, self.schema, self.version, self.migration, jet_services_state_adapter_name(&self.adapter))
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:1142
+impl JetShow for JetServiceStateStore {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:1143
+    fn jet_show(self: &Self) -> String { format!("ServiceStateStore({})", self.path) }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:1147
+impl JetDisplay for JetServiceStateStore {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:1148
+    fn jet_display(self: &Self) -> String { self.jet_show() }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:1153
+impl JetShow for JetServiceUpgradeReceipt {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:1154
+    fn jet_show(self: &Self) -> String {
+        format!("ServiceUpgradeReceipt(from={}, to={}, migration={}, rollback_available={}, pinned={})",
+            self.from_generation, self.to_generation, self.migration, self.rollback_available, self.pinned_shards.join(","))
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:1166
+impl JetDisplay for JetServiceUpgradeReceipt {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:1167
+    fn jet_display(self: &Self) -> String { self.jet_show() }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:1172
+impl JetDebug for JetServiceUpgradeReceipt {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:1173
+    fn jet_debug(self: &Self) -> String { self.jet_show() }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:1178
+impl JetShow for JetServiceEndpoint {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:1179
+    fn jet_show(self: &Self) -> String { format!("Endpoint({}/{}@g{})", self.tree, self.worker, self.generation) }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:1187
+impl JetShow for JetServiceRuntime {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:1188
+    fn jet_show(self: &Self) -> String { format!("ServiceRuntime(store={}, retention_ms={})", self.store, self.retention_ms) }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:1192
+impl JetDisplay for JetServiceRuntime {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:1193
+    fn jet_display(self: &Self) -> String { self.jet_show() }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:1198
+impl JetShow for JetDeliveryState {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:1199
+    fn jet_show(self: &Self) -> String {
+        match self {
+            .Pending -> "Pending", .Accepted -> "Accepted", .Delivering -> "Delivering"
+            .Delivered -> "Delivered", .DeadLettered -> "DeadLettered", .Cancelled -> "Cancelled"
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:1211
+impl JetShow for JetDelivery {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:1212
+    fn jet_show(self: &Self) -> String { format!("Delivery({})", self.id) }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:1217
+impl JetShow for JetDeliveryReceipt {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:1218
+    fn jet_show(self: &Self) -> String {
+        format!("DeliveryReceipt(id={}, state={}, attempts={}, retention_until={}, deadline={}, key={}, duplicate={}, authority={}, generation={}, signature={})",
+            self.id, self.state.jet_show(), self.attempts, self.retention_until, self.deadline,
+            self.idempotency_key, self.duplicate, self.authority, self.generation, self.signature)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:1235
+impl JetShow for JetDeliveryEvent {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:1236
+    fn jet_show(self: &Self) -> String {
+        format!("DeliveryEvent(sequence={}, state={}, attempts={}, timestamp={}, signature={})",
+            self.sequence, self.state.jet_show(), self.attempts, self.timestamp, self.signature)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:1248
+impl JetShow for JetServiceError {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:1249
+    fn jet_show(self: &Self) -> String {
+        match self {
+            .Full(m) | .Ambiguous(m) | .Unknown(m) | .NotStarted(m) | .Policy(m)
+            | .Unavailable(m) | .Partitioned(m) | .Revoked(m) | .Stale(m) | .Expired(m) -> m.clone()
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:1265
+impl JetShow for JetServiceTree {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:1266
+    fn jet_show(self: &Self) -> String {
+        handlers :: self.workers.iter().map(fn(worker) { format!("{}:{}", worker.name, worker.handler_name) }).collect::<[String]>().join(",")
+        format!("ServiceTree(name={}, workers={}, handlers=[{}], started={}, restart={}, budget={}/{}ms, delivery={})",
+            self.name, self.workers.len(), handlers, self.started, self.restart.jet_show(),
+            self.restart_budget.max, self.restart_budget.per_ms, self.delivery.jet_show())
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:1287
+impl Drop for JetServiceTree {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:1288
+    fn drop(self: &Self) -> { jet_services_close_runtime_groups(self) }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:1293
+fn jet_services_tree(name: String) -> JetServiceTree {
+    // GATE #4565: kernel primitive
+    task_group :: #Unsafe("retain the real native root task-group handle until stop/drop") { Arc.new(JetTaskGroupRuntime.new()) }
+    JetServiceTree{authority: "", name: ^name, generation: 1,
+        delivery: JetServiceDelivery.AtMostOnce, restart: JetServiceRestart.OneForOne,
+        restart_budget: JetServiceRestartBudget.ratified_default(), workers: [], groups: [], started: false,
+        state_adapter: JetServiceStateAdapter.Empty, state_authority: None, snapshot: None,
+        event_log: [], dead_letters: [], idempotency_seen: [], directory: [], draining: [],
+        partitioned: [], workflows: [], task_group: ^task_group, supervisor_tasks: [],
+        chaos_fails: 0, previous_generation: 0, last_upgrade: None}
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:1322
+pub fn jet_services_state_store(path: String) -> JetServiceStateStore JetServiceError! {
+    service_authority_validate_text(&path, "service state store", MAX_SERVICE_STATE_STORE, false)?
+    jet_services_state_validate_path(&OSPath.new(&path))?
+    Ok(JetServiceStateStore{path: ^path})
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:1333
+fn jet_services_state_authority(store: &JetServiceStateStore, schema: String, version: I64, migration: JetServiceMigration) -> JetServiceStateAuthority JetServiceError! {
+    jet_services_state_authority_with_migration(store.path.clone(), ^schema, version, ^migration)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:1342
+// Unknown migration cannot silently choose rollback availability.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:1345
+fn jet_services_migration_from_name(name: &String) -> JetServiceMigration JetServiceError! {
+    match name {
+        "reversible" -> Ok(JetServiceMigration.Reversible)
+        "dual_write" -> Ok(JetServiceMigration.DualWrite)
+        "forward_only" -> Ok(JetServiceMigration.ForwardOnly)
+        _ -> Err(JetServiceError.Policy(format!("unknown migration policy {name:?}; write \"reversible\", \"dual_write\", or \"forward_only\"")))
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:1356
+fn jet_services_state_authority_with_migration(store: String, schema: String, version: I64, migration: JetServiceMigration) -> JetServiceStateAuthority JetServiceError! {
+    service_authority_validate_text(&store, "service state store", MAX_SERVICE_STATE_STORE, false)?
+    service_authority_validate_text(&schema, "service state schema", MAX_SERVICE_STATE_SCHEMA, false)?
+    if version < 1 -> return Err(JetServiceError.Policy("service state schema version must be positive"))
+    Ok(JetServiceStateAuthority{store: ^store, schema: ^schema, version,
+        migration: jet_services_migration_name(&migration).to_string(), adapter: JetServiceStateAdapter.Empty})
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:1388
+fn jet_services_migration_name(migration: &JetServiceMigration) -> &String {
+    match migration { .Reversible -> "reversible", .DualWrite -> "dual_write", .ForwardOnly -> "forward_only" }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:1396
+fn jet_services_attach_state_authority(authority: &JetServiceStateAuthority, adapter: JetServiceStateAdapter) -> JetServiceStateAuthority JetServiceError! {
+    migration :: match authority.migration.as_str() {
+        "reversible" -> JetServiceMigration.Reversible
+        "dual_write" -> JetServiceMigration.DualWrite
+        "forward_only" -> JetServiceMigration.ForwardOnly
+        _ -> return Err(JetServiceError.Policy("service state authority has an incompatible migration policy"))
+    }
+    if authority.adapter != JetServiceStateAdapter.Empty && authority.adapter != adapter {
+        return Err(JetServiceError.Policy("service state authority has an incompatible adapter"))
+    }
+    checked :: jet_services_state_authority_with_migration(authority.store.clone(), authority.schema.clone(), authority.version, ^migration)?
+    Ok(JetServiceStateAuthority{adapter: ^adapter, ..checked})
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:1424
+fn jet_services_restart_one_for_one() -> JetServiceRestart { JetServiceRestart.OneForOne }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:1428
+fn jet_services_restart_one_for_all() -> JetServiceRestart { JetServiceRestart.OneForAll }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:1432
+fn jet_services_restart_rest_for_one() -> JetServiceRestart { JetServiceRestart.RestForOne }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:1436
+fn jet_services_delivery_at_most_once() -> JetServiceDelivery { JetServiceDelivery.AtMostOnce }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:1440
+fn jet_services_delivery_durable() -> JetServiceDelivery { JetServiceDelivery.DurableAtLeastOnce }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:1444
+fn jet_services_set_restart(tree: &JetServiceTree, restart: JetServiceRestart) -> () JetServiceError! {
+    if tree.started -> return Err(JetServiceError.Policy("cannot change restart policy after start"))
+    tree.restart = ^restart
+    loop group in &tree.groups -> group.restart = tree.restart.clone()
+    Ok(())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:1460
+fn jet_services_worker(tree: &JetServiceTree, name: String, handler: JetServiceWorkerHandler, handler_name: String, capacity: I64) -> JetServiceEndpoint JetServiceError! {
+    if tree.started -> return Err(JetServiceError.Policy("cannot add workers after start"))
+    if capacity <= 0 || capacity > MAX_SERVICE_CAPACITY {
+        return Err(JetServiceError.Policy("mailbox capacity must be positive and bounded"))
+    }
+    if name.trim().is_empty() || name.chars().any(fn(c) { c.is_control() }) || name.len() > MAX_SERVICE_NAME {
+        return Err(JetServiceError.Policy("worker name must be non-empty and visible"))
+    }
+    if handler_name.trim().is_empty() || handler_name.chars().any(fn(c) { c.is_control() }) || handler_name.len() > MAX_SERVICE_NAME {
+        return Err(JetServiceError.Policy("worker handler name must be non-empty and visible"))
+    }
+    if tree.workers.len() >= MAX_SERVICE_WORKERS -> return Err(JetServiceError.Policy("service tree worker limit exceeded"))
+    if tree.workers.iter().any(fn(w) { w.name == name }) {
+        return Err(JetServiceError.Unknown(format!("worker `{name}` already exists in tree `{}`", tree.name)))
+    }
+    if tree.authority.is_empty() -> tree.authority = service_authority_provider_issue()?
+    endpoint :: service_authority_endpoint_unchecked(tree.name.clone(), name.clone(), tree.generation, tree.authority.clone())?
+    mailbox :: jet_services_new_mailbox(^endpoint, capacity, [])?
+    endpoint :: mailbox.endpoint.clone()
+    // Allocate the mailbox first: channel failure must not publish ghost authority.
+    service_authority_register(&endpoint, false)?
+    // GATE #4565: kernel primitive
+    task :: #Unsafe("retain one real native worker state shared by worker and supervisor") {
+        Arc.new(Mutex.new(JetServiceSupervisorState.new(JetServiceSupervisorStatus.Stopped)))
+    }
+    jet_services_bind_topology(&task, JetServiceTopologyKind.Task, jet_services_topology_worker_id(&tree.name, &name), Val(jet_services_topology_root_id(&tree.name)))?
+    tree.workers.push(JetServiceWorker{handler_name: ^handler_name, handler, name: ^name,
+        endpoint: endpoint.clone(), mailbox: ^mailbox, restarts: [], running: false,
+        received_bytes: 0, sent_bytes: 0, task: ^task})
+    Ok(^endpoint)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:1542
+fn jet_services_group(tree: &JetServiceTree, name: String, workers: [String]) -> () JetServiceError! {
+    if tree.started -> return Err(JetServiceError.Policy("cannot add groups after start"))
+    if name.trim().is_empty() || name.chars().any(fn(c) { c.is_control() }) || name.len() > MAX_SERVICE_NAME
+        || workers.is_empty() || workers.len() > MAX_SERVICE_WORKERS {
+        return Err(JetServiceError.Policy("service group needs a visible name and at least one worker"))
+    }
+    if tree.groups.iter().any(fn(group) { group.name == name }) {
+        return Err(JetServiceError.Policy(format!("group `{name}` already exists")))
+    }
+    loop w in &workers {
+        if !tree.workers.iter().any(fn(worker) { &worker.name == w }) {
+            return Err(JetServiceError.Unknown(format!("group `{name}` references unknown worker `{w}`")))
+        }
+    }
+    if workers.iter().any(fn(worker) {
+        tree.groups.iter().any(fn(group) { group.workers.iter().any(fn(member) { member == worker }) })
+    }) -> return Err(JetServiceError.Policy("a worker can belong to only one service supervisor group"))
+    if workers.iter().enumerate().any(fn((index, worker)) { workers[..index].iter().any(fn(seen) { seen == worker }) }) {
+        return Err(JetServiceError.Policy(format!("group `{name}` lists a worker more than once")))
+    }
+    parent_id :: jet_services_topology_group_id(&tree.name, &name)
+    loop worker_name in &workers {
+        if Val(worker) :: tree.workers.iter().find(fn(worker) { &worker.name == worker_name }) {
+            jet_services_reparent_topology(&worker.task, Val(parent_id.clone()))?
+        }
+    }
+    tree.groups.push(JetServiceGroup{name: ^name, restart: tree.restart.clone(), budget: tree.restart_budget.clone(), workers: ^workers})
+    Ok(())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:1607
+fn jet_services_build_runtime_groups(tree: &JetServiceTree) -> () JetServiceError! {
+    // GATE #4565: kernel primitive
+    #Unsafe("retain native root and child task groups, register each worker exactly once, and own every join boundary") {
+        group :: Arc.new(JetTaskGroupRuntime.new())
+        supervisor_tasks := []
+        assigned := [false; tree.workers.len()]
+        loop definition in &tree.groups {
+            child :: Arc.new(JetTaskGroupRuntime.new())
+            supervisor :: Arc.new(Mutex.new(JetServiceSupervisorState.new(JetServiceSupervisorStatus.Starting)))
+            jet_services_bind_topology(&supervisor, JetServiceTopologyKind.Supervisor,
+                jet_services_topology_group_id(&tree.name, &definition.name), Val(jet_services_topology_root_id(&tree.name)))?
+            jet_services_set_topology_policy(&supervisor, &definition.restart, &definition.budget)?
+            loop worker_name in &definition.workers {
+                index :: tree.workers.iter().position(fn(worker) { &worker.name == worker_name })
+                    .ok_or_else(fn() { JetServiceError.Unknown(format!("worker `{worker_name}` disappeared")) })?
+                assigned[index] = true
+                child.register(tree.workers[index].task.clone())
+            }
+            group.register(JetServiceSupervisorTask{state: supervisor.clone(), child: child.clone()})
+            jet_services_task_start(&supervisor)?
+            supervisor_tasks.push(^supervisor)
+        }
+        // Ungrouped workers still own a supervisor boundary and join on close.
+        ungrouped: Arc<JetTaskGroupRuntime<Arc<Mutex<JetServiceSupervisorState>>>>? := None
+        loop (index, worker) in tree.workers.iter().enumerate() {
+            if assigned[index] -> continue
+            child :: ungrouped.get_or_insert_with(fn() { Arc.new(JetTaskGroupRuntime.new()) })
+            child.register(worker.task.clone())
+        }
+        if Val(child) :: ungrouped {
+            supervisor :: Arc.new(Mutex.new(JetServiceSupervisorState.new(JetServiceSupervisorStatus.Starting)))
+            jet_services_bind_topology(&supervisor, JetServiceTopologyKind.Supervisor,
+                jet_services_topology_group_id(&tree.name, "ungrouped"), Val(jet_services_topology_root_id(&tree.name)))?
+            jet_services_set_topology_policy(&supervisor, &tree.restart, &tree.restart_budget)?
+            group.register(JetServiceSupervisorTask{state: supervisor.clone(), child: child.clone()})
+            jet_services_task_start(&supervisor)?
+            supervisor_tasks.push(^supervisor)
+        }
+        tree.task_group = ^group
+        tree.supervisor_tasks = ^supervisor_tasks
+        Ok(())
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:1678
+fn jet_services_start_with_worker_dispatcher<F: FnMut(&String, JetServiceWorkerHandler, &JetServiceEndpoint) -> () JetServiceError!>(
+    tree: &JetServiceTree, dispatch: F) -> () JetServiceError! {
+    dispatch := ^dispatch
+    if tree.started -> return Err(JetServiceError.Policy("service tree is already started"))
+    _rollout_lock :: jet_services_rollout_operation_lock(tree)?
+    jet_services_restore_rollout_state(tree)?
+    jet_services_validate_tree(tree)?
+    if tree.name.trim().is_empty() || tree.name.chars().any(fn(c) { c.is_control() }) || tree.name.len() > MAX_SERVICE_NAME {
+        return Err(JetServiceError.Policy("service tree name must be non-empty and visible"))
+    }
+    if tree.workers.is_empty() -> return Err(JetServiceError.Policy("service tree has no workers"))
+    durable_records :: match (&tree.state_adapter, &tree.state_authority) {
+        (JetServiceStateAdapter.Empty, None) -> []
+        (JetServiceStateAdapter.Snapshot, Val(authority)) -> jet_services_state_store_load(authority, &JetServiceStateAdapter.Snapshot)?
+        (JetServiceStateAdapter.EventLog, Val(authority)) -> jet_services_state_store_load(authority, &JetServiceStateAdapter.EventLog)?
+        (JetServiceStateAdapter.Empty, Val(_)) | (JetServiceStateAdapter.Snapshot, None) | (JetServiceStateAdapter.EventLog, None) -> {
+            return Err(JetServiceError.Policy("durable service state needs its injected authority"))
+        }
+    }
+    match &tree.state_adapter {
+        .Empty -> {
+            if tree.snapshot.is_some() || !tree.event_log.is_empty() {
+                return Err(JetServiceError.Policy("Empty state adapter cannot contain durable records"))
+            }
+        }
+        .Snapshot -> {
+            if !tree.event_log.is_empty() {
+                return Err(JetServiceError.Policy("Snapshot state adapter cannot contain event-log records"))
+            }
+            if durable_records.len() > 1 -> return Err(jet_services_state_error("snapshot store contains more than one record"))
+        }
+        .EventLog -> {
+            if tree.snapshot.is_some() -> return Err(JetServiceError.Policy("EventLog state adapter cannot contain a snapshot"))
+            if tree.event_log.len() > MAX_SERVICE_STATE_RECORDS -> return Err(JetServiceError.Policy("event-log record limit exceeded"))
+        }
+    }
+    match &tree.state_adapter {
+        .Snapshot -> tree.snapshot = durable_records.into_iter().next()
+        .EventLog -> tree.event_log = ^durable_records
+        .Empty -> {}
+    }
+    if tree.state_authority.is_some() {
+        durable_workflows := jet_services_workflow_store_load(tree)?
+        // Replay position is live state; compare histories at durable beginning.
+        materialized_workflows := tree.workflows.clone()
+        loop workflow in &materialized_workflows -> workflow.replay_cursor = 0
+        if !materialized_workflows.is_empty() && materialized_workflows != durable_workflows {
+            return Err(jet_services_state_error("in-memory workflow history does not match the durable workflow log"))
+        }
+        loop workflow in &durable_workflows -> workflow.replay_cursor = 0
+        tree.workflows = ^durable_workflows
+    }
+    // Reopen stopped channels from the one durable queue before publication.
+    preserve_mailboxes :: tree.delivery == JetServiceDelivery.DurableAtLeastOnce
+    loop worker in &tree.workers {
+        // GATE #4565: kernel primitive
+        messages :: if preserve_mailboxes {
+            #Unsafe("snapshot the actual bounded FIFO before replacing a closed mailbox") { worker.mailbox.channel.snapshot() }
+        } else { [] }
+        worker.mailbox = jet_services_new_mailbox(worker.mailbox.endpoint.clone(), worker.mailbox.capacity, ^messages)?
+        worker.endpoint = worker.mailbox.endpoint.clone()
+    }
+    jet_services_build_runtime_groups(tree)?
+    activated := [JetServiceEndpoint].with_capacity(tree.workers.len())
+    loop index in 0..tree.workers.len() {
+        draining :: tree.draining.iter().any(fn(name) { name == &tree.workers[index].name })
+        partitioned :: tree.partitioned.iter().any(fn(name) { name == &tree.workers[index].name })
+        // GATE #4565: kernel primitive
+        running :: !partitioned && (!draining || #Unsafe("inspect the native queue depth under its FIFO mutex") {
+            tree.workers[index].mailbox.channel.depth() > 0
+        })
+        // Keep the drain authority gate for accepted receipts while its task stops.
+        authority_started :: !partitioned && (running || draining)
+        tree.workers[index].running = running
+        if !running {
+            // GATE #4565: kernel primitive
+            #Unsafe("update stopped/partitioned native worker state under its own mutex") {
+                if Ok(state) :: tree.workers[index].task.lock() {
+                    state.status = if partitioned { JetServiceSupervisorStatus.Partitioned } else { JetServiceSupervisorStatus.Stopped }
+                    state.failure = partitioned.then_some(JetTaskFailure.Cancelled)
+                }
+            }
+        } else { jet_services_task_start(&tree.workers[index].task)? }
+        endpoint :: tree.workers[index].endpoint.clone()
+        result :: match jet_services_authority_update(&endpoint, authority_started) {
+            Ok(()) -> Ok(())
+            Err(JetServiceError.Partitioned(_)) | Err(JetServiceError.Unavailable(_)) -> service_authority_register(&endpoint, authority_started)
+            Err(error) -> Err(^error)
+        }.and_then(fn(()) {
+            if running { jet_services_bind_delivery_endpoint(&tree.delivery, tree.state_authority.as_ref(), &endpoint) }
+            else { Ok(()) }
+        }).and_then(fn(()) {
+            if running { dispatch(&tree.workers[index].handler_name, tree.workers[index].handler, &endpoint) }
+            else { Ok(()) }
+        })
+        if Err(error) :: result {
+            rollback_error := None
+            _ :: jet_services_authority_update(&endpoint, false)
+            loop endpoint in &activated {
+                if Err(error) :: jet_services_authority_update(endpoint, false) {
+                    rollback_error = Val(^error)
+                    break
+                }
+            }
+            loop worker in &tree.workers -> worker.running = false
+            jet_services_close_runtime_groups(tree)
+            return Err(match rollback_error {
+                Val(rollback_error) -> JetServiceError.Policy(format!("{}; service authority activation rollback failed: {}", error.jet_show(), rollback_error.jet_show()))
+                None -> ^error
+            })
+        }
+        activated.push(^endpoint)
+    }
+    tree.started = true
+    if Err(error) :: jet_services_rollout_store_write(tree) {
+        tree.started = false
+        jet_services_close_runtime_groups(tree)
+        loop worker in &tree.workers {
+            worker.running = false
+            _ :: jet_services_authority_update(&worker.endpoint, false)
+            _ :: jet_services_authority_update_draining(&worker.endpoint, false)
+        }
+        jet_services_publish_root_state(tree, JetDevtoolsTopologySupervisorState.Failed)
+        return Err(^error)
+    }
+    jet_services_publish_tree_topology(tree, JetDevtoolsTopologySupervisorState.Running)
+    Ok(())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:1905
+// Engine-owned dispatcher supplies checked callback invocation only; lifecycle,
+// authority, rollback and bounded settlement stay in the canonical implementation.
 
