@@ -57,7 +57,7 @@ impl GameDevRunMode {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:62
     pub fn as_str(self) -> String { match self { .PlayInEditor -> "play_in_editor", .SimulateInEditor -> "simulate_in_editor", .Headless -> "headless" } }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:70
-    pub fn is_headless(self) -> Bool { self is .Headless }
+    pub fn is_headless(self) -> Bool { self == .Headless }
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:75
 #Derive(Clone, Copy, Debug, Eq, PartialEq)
@@ -68,7 +68,7 @@ impl GameDevPhase {
         match self { .Editing -> "editing", .Playing -> "playing", .Simulating -> "simulating", .Paused -> "paused", .FrameAdvance -> "frame_advance" }
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:95
-    pub fn is_running(self) -> Bool { self is .Playing || self is .Simulating }
+    pub fn is_running(self) -> Bool { self == .Playing || self == .Simulating }
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:100
 #Derive(Clone, Copy, Debug, Eq, PartialEq)
@@ -244,7 +244,7 @@ impl GameDevEvent {
     pub fn to_devtools_event<T: Into<String>>(self: &Self,
         timestamp_ms: U64, source: T) -> JetDevtoolsEvent Err! {
         source :: source.into()
-        if game_dev_typed_trace_body(self) == Some(body) {
+        if game_dev_typed_trace_body(self) == .Val(body) {
             return JetDevtoolsEvent.try_new(timestamp_ms, ^source, ^body)
         }
         if game_dev_swap_body(self) == Some(body) {
@@ -264,12 +264,12 @@ impl GameDevEvent {
             .Transition(transition) -> (
                 "game",
                 "{{\"operation\":{game_dev_json_string(transition.operation.as_str())},\"before\":{game_dev_json_string(transition.before.as_str())},\"after\":{game_dev_json_string(transition.after.as_str())},\"status\":{game_dev_json_string(transition.status.as_str())},\"run_mode\":{game_dev_json_string(transition.run_mode.as_str())},\"frame_index\":{transition.frame_index},\"source_revision\":{game_dev_json_string(&transition.source_revision)}}}",
-                Some(transition.render_json()))
+                Val(transition.render_json()))
             .Control(control) -> ("game", control.render_json(), None)
             .GameplayDebugger(extension) -> (
                 "game.gameplay_debugger",
                 "{{\"category\":{game_dev_json_string(extension.category())},\"extension\":{game_dev_json_string(extension.extension())},\"profile\":{game_dev_json_string(extension.profile())},\"development_only\":true}}",
-                Some(extension.render_json()))
+                Val(extension.render_json()))
             .Profile(receipt) -> (
                 receipt.frame.as_ref().map(fn(frame) { frame.scene.clone() }).unwrap_or_else(fn() { "game" }),
                 "{{\"sequence\":{receipt.sequence},\"kind\":{game_dev_json_string(receipt.kind.as_str())},\"before\":{game_dev_json_string(receipt.before.as_str())},\"after\":{game_dev_json_string(receipt.after.as_str())},\"dropped_samples\":{receipt.dropped_samples}}}",
@@ -277,21 +277,21 @@ impl GameDevEvent {
             .ReloadStatus(fact) -> (
                 "game.reload",
                 "{{\"frame_id\":{fact.frame.frame_id},\"domain\":{game_dev_json_string(&fact.domain)},\"status\":{game_dev_json_string(fact.status.as_str())},\"reason\":{game_dev_json_string(&fact.reason)}}}",
-                Some(fact.render_json()))
+                Val(fact.render_json()))
             .ProfileComparison(comparison) -> (
                 comparison.left.identity.scene.clone(),
                 "{{\"scene\":{game_dev_json_string(&comparison.left.identity.scene)},\"target\":{game_dev_json_string(&comparison.left.identity.target)},\"delta_function_ns\":{comparison.total_function_ns_delta},\"regression\":{comparison.is_regression()}}}",
-                Some("{{\"left\":{game_profile_snapshot_json(&comparison.left)},\"right\":{game_profile_snapshot_json(&comparison.right)}}}"))
+                Val("{{\"left\":{game_profile_snapshot_json(&comparison.left)},\"right\":{game_profile_snapshot_json(&comparison.right)}}}"))
             .Overlay(fact) -> {
                 frame :: fact.frame.as_ref().map(game_dev_frame_identity_json).unwrap_or_else(fn() { "null" })
                 ("game.overlay",
                     "{{\"sequence\":{fact.sequence},\"kind\":{game_dev_json_string(fact.kind.as_str())},\"before\":{game_dev_json_string(fact.before.as_str())},\"after\":{game_dev_json_string(fact.after.as_str())},\"visible\":{fact.visibility.visible},\"input_capture\":{game_dev_json_string(fact.visibility.input_capture.as_str())},\"filter\":{game_dev_json_string(fact.filter.as_str())},\"error_pause_enabled\":{fact.error_pause_enabled},\"frame\":{frame}}}",
-                    Some(fact.render_json()))
+                    Val(fact.render_json()))
             }
             .OverlayAutocomplete(fact) -> (
                 "game.overlay",
                 "{{\"query\":{game_dev_json_string(&fact.query)},\"match_count\":{fact.matches.len()}}}",
-                Some(fact.render_json()))
+                Val(fact.render_json()))
             .OverlayCommand(command) -> (
                 "game.overlay",
                 "{{\"id\":{command.id},\"timestamp_ns\":{command.timestamp_ns},\"text\":{game_dev_json_string(&command.text)}}}",
@@ -311,49 +311,49 @@ impl GameDevEvent {
             .World(world) -> (
                 world.world_id.clone(),
                 "{{\"world_id\":{game_dev_json_string(&world.world_id)},\"frame_id\":{world.frame_id},\"source_id\":{game_dev_json_string(&world.source_id)},\"revision\":{game_dev_json_string(&world.revision)}}}",
-                Some(world.render_json()))
+                Val(world.render_json()))
             .WorldSelection(selection) -> (
                 selection.world_id.clone(),
                 "{{\"world_id\":{game_dev_json_string(&selection.world_id)},\"frame_id\":{selection.frame_id},\"source_id\":{game_dev_json_string(&selection.source_id)},\"revision\":{game_dev_json_string(&selection.revision)}}}",
-                Some(selection.render_json()))
+                Val(selection.render_json()))
             .WorldEdit(request) -> (
                 "game.world",
                 "{{\"field\":{game_dev_json_string(&request.field_patch.field)},\"target_count\":{request.targets.len()}}}",
-                Some(request.render_json()))
+                Val(request.render_json()))
             .WorldEvaluation(result) -> (
                 "game.world",
                 "{{\"request_id\":{game_dev_json_string(&result.request_id)},\"status\":{game_dev_json_string(&result.status)},\"type_name\":{game_dev_json_string(&result.type_name)}}}",
-                Some(result.render_json()))
+                Val(result.render_json()))
             .AssetWatch(facts) -> (
                 "game.assets",
                 "{{\"created\":{facts.created.len()},\"changed\":{facts.changed.len()},\"deleted\":{facts.deleted.len()},\"events\":{facts.events.len()},\"skipped_count\":{facts.skipped_count}}}",
-                Some(facts.render_json()))
+                Val(facts.render_json()))
             .AssetImportReport(report) -> (
                 "game.assets",
                 "{{\"imported\":{report.imported.len()},\"dependencies\":{report.dependencies.len()},\"created\":{report.created.len()},\"deleted\":{report.deleted.len()},\"skipped\":{report.skipped.len()},\"skipped_count\":{report.skipped_count},\"diagnostics\":{report.diagnostics.len()}}}",
-                Some(report.render_json()))
+                Val(report.render_json()))
             .AssetReload(receipt) -> (
                 "game.assets",
                 "{{\"transaction_id\":{receipt.transaction_id},\"status\":{game_dev_json_string(receipt.status.as_str())},\"entries\":{receipt.entries.len()},\"revision_before\":{receipt.revision_before},\"revision_after\":{receipt.revision_after}}}",
-                Some(receipt.render_json()))
+                Val(receipt.render_json()))
             .HotSwap(receipt) -> (
                 "game.hotswap",
                 "{{\"transaction_id\":{receipt.transaction_id},\"phase\":{game_dev_json_string(receipt.phase.as_str())},\"committed\":{receipt.is_committed()},\"rolled_back\":{receipt.is_rolled_back()},\"from\":{receipt.from_identity.render_json()},\"to\":{receipt.to_identity.render_json()}}}",
-                Some(receipt.render_json()))
+                Val(receipt.render_json()))
             .HotSwapExplanation(explanation) -> {
                 transaction_id :: explanation.transaction_id.map(fn(value) { value.to_string() }).unwrap_or_else(fn() { "null" })
                 ("game.hotswap",
                     "{{\"compatible\":{explanation.compatible},\"code\":{game_dev_json_string(&explanation.code)},\"message\":{game_dev_json_string(&explanation.message)},\"transaction_id\":{transaction_id}}}",
-                    Some(explanation.render_json()))
+                    Val(explanation.render_json()))
             }
             .Crash(bundle) -> (
                 "game.crash",
                 "{{\"frame_id\":{bundle.frame.frame_id},\"reason\":{game_dev_json_string(&bundle.reason)},\"target\":{game_dev_json_string(&bundle.target)},\"upload_policy\":{game_dev_json_string(bundle.upload_policy.as_str())}}}",
-                Some(bundle.render_json()))
+                Val(bundle.render_json()))
             .Stopped(stopped) -> (
                 "game",
                 "{{\"reason\":{game_dev_json_string(&stopped.reason)},\"frame_index\":{stopped.frame_index}}}",
-                Some(stopped.render_json()))
+                Val(stopped.render_json()))
         }
         JetDevtoolsEvent.from_parts_with_payload(timestamp_ms, ^source, self.kind(), ^entity, ^fields, ^payload)
     }
@@ -736,10 +736,10 @@ fn jet_game_install_devtools_callback() -> {
 fn jet_game_control_request(request: JetDevtoolsGameControlRequest, session: &GameDevSession) -> GameDevControl Err! {
     identity :: session.profiler.identity()
     if request.session_id != identity.session -> return Err("game control request session identity mismatch")
-    if request.source_id is Val(source_id) {
+    if request.source_id == .Val(source_id) {
         if source_id != identity.source -> return Err("game control request source identity mismatch")
     }
-    if request.revision is Val(revision) {
+    if request.revision == .Val(revision) {
         if revision != identity.revision -> return Err("game control request revision identity mismatch")
     }
     match request.kind {
@@ -788,7 +788,7 @@ fn jet_game_control_request(request: JetDevtoolsGameControlRequest, session: &Ga
             target :: JetGameWorldEditTarget.new(^source_id, ^revision, ^authored_instance_id, ^span).map_err(fn(error) { error.to_string() })?
                 .with_session_identity(identity.session.clone(), "game").map_err(fn(error) { error.to_string() })?
             edit :: JetGameWorldEditRequest.new([^target], ^field, ^value).map_err(fn(error) { error.to_string() })?
-            if request.kind is .Keep { Ok(GameDevControl.Keep(^edit)) } else { Ok(GameDevControl.EditWorld(^edit)) }
+            if request.kind == .Keep { Ok(GameDevControl.Keep(^edit)) } else { Ok(GameDevControl.EditWorld(^edit)) }
         }
     }
 }

@@ -18,7 +18,10 @@ impl GameDevSession {
     pub fn record_and_publish(self: &Self, fact: JetGameSampleFact) -> JetGameFrameReceipt Err! {
         if self.lifecycle == JetDevtoolsLifecycleState.Stopped { return Err("game dev session is stopped") }
         frame :: fact.frame_identity().clone()
-        frame_sample :: match &fact { JetGameSampleFact.Frame(sample) -> Val(sample.clone()); _ -> None }
+        frame_sample :: match &fact {
+            .Frame(sample) -> Val(sample.clone())
+            _ -> None
+        }
         timestamp_ms :: fact.timestamp_ns() / 1_000_000
         receipt :: self.record(^fact).map_err(fn(error) { error.to_string() })?
         self.overlay.set_frame_identity(frame.clone())
@@ -149,7 +152,10 @@ impl GameDevSession {
         match self.phase {
             GameDevPhase.Playing | GameDevPhase.Simulating -> true
             GameDevPhase.FrameAdvance -> {
-                if self.frame_advance_pending { self.frame_advance_pending = false; true } else { false }
+                if self.frame_advance_pending {
+                    self.frame_advance_pending = false
+                    true
+                } else { false }
             }
             _ -> false
         }
@@ -174,13 +180,13 @@ impl GameDevSession {
         allowed :: match control {
             GameDevControl.Play | GameDevControl.Simulate -> self.phase == GameDevPhase.Editing || self.phase == GameDevPhase.Paused
             GameDevControl.Pause -> self.phase == GameDevPhase.Playing || self.phase == GameDevPhase.Simulating
-            GameDevControl.Resume | GameDevControl.FrameAdvance | GameDevControl.Step | GameDevControl.SelectWorld(_)
-                | GameDevControl.EditWorld(_) | GameDevControl.EvaluateWorld(_) | GameDevControl.Eject{..}
-                | GameDevControl.Keep(_) | GameDevControl.Discard -> self.phase == GameDevPhase.Paused || self.phase == GameDevPhase.FrameAdvance
-            GameDevControl.Edit | GameDevControl.SelectGameplayCategory(_) | GameDevControl.Input(_) | GameDevControl.Console(_)
-                | GameDevControl.Autocomplete{..} | GameDevControl.ToggleOverlay | GameDevControl.SetOverlayVisible(_)
-                | GameDevControl.SetInputCapture(_) | GameDevControl.SetErrorPauseEnabled(_) | GameDevControl.SetFilter(_)
-                | GameDevControl.ToggleFilter(_) | GameDevControl.SelectMetric(_) | GameDevControl.DeselectMetric(_) -> true
+            GameDevControl.Resume | GameDevControl.FrameAdvance | GameDevControl.Step | .SelectWorld(_)
+                | .EditWorld(_) | .EvaluateWorld(_) | .Eject{..}
+                | .Keep(_) | GameDevControl.Discard -> self.phase == GameDevPhase.Paused || self.phase == GameDevPhase.FrameAdvance
+            GameDevControl.Edit | .SelectGameplayCategory(_) | .Input(_) | .Console(_)
+                | .Autocomplete{..} | GameDevControl.ToggleOverlay | .SetOverlayVisible(_)
+                | .SetInputCapture(_) | .SetErrorPauseEnabled(_) | .SetFilter(_)
+                | .ToggleFilter(_) | .SelectMetric(_) | .DeselectMetric(_) -> true
         }
         if allowed { Ok(()) } else { Err("game control `{control.render_json()}` is not valid during `{self.phase.as_str()}`") }
     }
@@ -190,7 +196,10 @@ impl GameDevSession {
         self.validate_control_phase(&control)?
         source :: self.profiler.identity().source.clone()
         sequences := [self.push_game_event(timestamp_ms, source.clone(), GameDevEvent.Control(control.clone()))?]
-        is_play :: match &control { GameDevControl.Play -> true; _ -> false }
+        is_play :: match &control {
+            GameDevControl.Play -> true
+            _ -> false
+        }
         match control {
             GameDevControl.Play | GameDevControl.Simulate -> {
                 before :: self.phase
@@ -226,7 +235,7 @@ impl GameDevSession {
                 self.selected_actor_id = Val(^actor_id)
                 sequences.push(self.publish_transition(timestamp_ms, GameDevTransitionOperation.Eject, before, before, GameDevTransitionStatus.Applied, "live actor selected")?)
             }
-            GameDevControl.Keep(request) -> {
+            .Keep(request) -> {
                 before :: self.phase
                 if before != GameDevPhase.Paused && before != GameDevPhase.FrameAdvance { return Err("keep requires a paused game state") }
                 self.inspector.validate_edit_request(&request).map_err(fn(error) { error.to_string() })?
@@ -239,7 +248,7 @@ impl GameDevSession {
                 self.pending_world_edits.clear()
                 sequences.push(self.publish_transition(timestamp_ms, GameDevTransitionOperation.Discard, before, before, GameDevTransitionStatus.Applied, "runtime changes discarded; authored source unchanged")?)
             }
-            GameDevControl.SelectGameplayCategory(category) -> {
+            .SelectGameplayCategory(category) -> {
                 if !self.policy.game_debug_data_enabled() { return Err("Gameplay Debugger categories are unavailable outside a development profile") }
                 if category.trim().is_empty() || category.chars().any(fn(ch) { ch.is_control() }) { return Err("gameplay debugger category must be printable") }
                 before :: self.phase
@@ -289,8 +298,8 @@ impl GameDevSession {
                 sequences.push(self.push_game_event(timestamp_ms, source.clone(), GameDevEvent.Profile(^profile))?)
                 sequences.push(self.publish_transition(timestamp_ms, GameDevTransitionOperation.FrameAdvance, before, GameDevPhase.FrameAdvance, GameDevTransitionStatus.Applied, "one simulation frame requested")?)
             }
-            GameDevControl.Input(input) -> self.last_input = Val(^input)
-            GameDevControl.Console(command) -> sequences.push(self.publish_overlay_command(timestamp_ms, ^command)?)
+            .Input(input) -> self.last_input = Val(^input)
+            .Console(command) -> sequences.push(self.publish_overlay_command(timestamp_ms, ^command)?)
             GameDevControl.Autocomplete{query, commands} -> {
                 fact :: self.overlay.autocomplete(^query, &commands).map_err(fn(error) { error.message() })?
                 sequences.push(self.push_game_event(timestamp_ms, ^source, GameDevEvent.OverlayAutocomplete(^fact))?)
@@ -299,47 +308,47 @@ impl GameDevSession {
                 fact :: self.overlay.set_visible(!self.overlay.visibility().visible)
                 sequences.push(self.push_game_event(timestamp_ms, ^source, GameDevEvent.Overlay(^fact))?)
             }
-            GameDevControl.SetOverlayVisible(visible) -> {
+            .SetOverlayVisible(visible) -> {
                 fact :: self.overlay.set_visible(visible)
                 sequences.push(self.push_game_event(timestamp_ms, ^source, GameDevEvent.Overlay(^fact))?)
             }
-            GameDevControl.SetInputCapture(capture) -> {
+            .SetInputCapture(capture) -> {
                 fact :: self.overlay.set_input_capture(capture)
                 sequences.push(self.push_game_event(timestamp_ms, ^source, GameDevEvent.Overlay(^fact))?)
             }
-            GameDevControl.SetErrorPauseEnabled(enabled) -> {
+            .SetErrorPauseEnabled(enabled) -> {
                 fact :: self.overlay.set_error_pause_enabled(enabled)
                 sequences.push(self.push_game_event(timestamp_ms, ^source, GameDevEvent.Overlay(^fact))?)
             }
-            GameDevControl.SetFilter(filter) -> {
+            .SetFilter(filter) -> {
                 fact :: self.overlay.set_filter(^filter)
                 sequences.push(self.push_game_event(timestamp_ms, ^source, GameDevEvent.Overlay(^fact))?)
             }
-            GameDevControl.ToggleFilter(category) -> {
+            .ToggleFilter(category) -> {
                 fact :: self.overlay.toggle_filter(category)
                 sequences.push(self.push_game_event(timestamp_ms, ^source, GameDevEvent.Overlay(^fact))?)
             }
-            GameDevControl.SelectMetric(metric) -> {
+            .SelectMetric(metric) -> {
                 fact :: self.overlay.select_metric(metric).map_err(fn(error) { error.message() })?
                 sequences.push(self.push_game_event(timestamp_ms, ^source, GameDevEvent.Overlay(^fact))?)
             }
-            GameDevControl.DeselectMetric(metric) -> {
+            .DeselectMetric(metric) -> {
                 fact :: self.overlay.deselect_metric(metric)
                 sequences.push(self.push_game_event(timestamp_ms, ^source, GameDevEvent.Overlay(^fact))?)
             }
-            GameDevControl.SelectWorld(selection) -> {
+            .SelectWorld(selection) -> {
                 self.selected_world_id = Val(selection.world_id.clone())
                 self.selected_actor_id = selection.entity_id.clone()
                 self.inspector.select(^selection).map_err(fn(error) { error.to_string() })?
                 if self.inspector.project() == Val(projection) { sequences.push(self.push_game_event(timestamp_ms, ^source, GameDevEvent.WorldSelection(^projection))?) }
             }
-            GameDevControl.EditWorld(request) -> {
+            .EditWorld(request) -> {
                 self.inspector.validate_edit_request(&request).map_err(fn(error) { error.to_string() })?
                 if self.pending_world_edits.len() >= 256 { _ :: self.pending_world_edits.remove(0) }
                 self.pending_world_edits.push(request.clone())
                 sequences.push(self.push_game_event(timestamp_ms, ^source, GameDevEvent.WorldEdit(^request))?)
             }
-            GameDevControl.EvaluateWorld(request) -> {
+            .EvaluateWorld(request) -> {
                 result :: self.evaluate_world_request(^request)
                 sequences.push(self.push_game_event(timestamp_ms, ^source, GameDevEvent.WorldEvaluation(^result))?)
             }
@@ -495,7 +504,10 @@ impl GameDevSession {
         live := self.hot_swap_live.take().ok_or_else(fn() { "game hot swap has no live snapshot" })?
         plan :: match self.hot_swap_plan(&live, candidate, link_mode) {
             Ok(plan) -> ^plan
-            Err(error) -> { self.hot_swap_live = Val(^live); return Err(error.message()) }
+            Err(error) -> {
+                self.hot_swap_live = Val(^live)
+                return Err(error.message())
+            }
         }
         result :: plan.execute(&live)
         self.hot_swap_live = Val(^live)
@@ -511,7 +523,7 @@ impl GameDevSession {
         self.envelope.events().filter_map(fn(event) {
             body :: event.body()?
             match body {
-                JetDevtoolsEventBody.GameFrameSample{..} | JetDevtoolsEventBody.GameDrawEvent{..} -> Val(body.clone())
+                .GameFrameSample{..} | .GameDrawEvent{..} -> Val(body.clone())
                 _ -> None
             }
         }).collect()
@@ -530,9 +542,15 @@ module jet_game_wasm_bridge {
         // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:2974
         fn new() -> Self { Self{policy: GameDevPolicy.new(JET_GAME_DEBUG_DATA_ENABLED), session: None, input: [], output: [], error: [], sent_sequence: 0} }
         // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:2985
-        fn set_error(self: &Self, error: String) -> { self.error = error.into_bytes(); self.output.clear() }
+        fn set_error(self: &Self, error: String) -> {
+            self.error = error.into_bytes()
+            self.output.clear()
+        }
         // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:2990
-        fn set_error_with_wire(self: &Self, error: String) -> { self.set_error(^error); _ :: self.take_wire() }
+        fn set_error_with_wire(self: &Self, error: String) -> {
+            self.set_error(^error)
+            _ :: self.take_wire()
+        }
         // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:2995
         fn take_wire(self: &Self) -> () Err! {
             session :: self.session.as_ref().ok_or_else(fn() { "game devtools Wasm bridge is not initialized" })?
@@ -580,22 +598,22 @@ module jet_game_wasm_bridge {
         skipped_count :: USize.try_from(skipped_count).map_err(fn(error) { "game asset watch frame skipped count is outside usize" })?
         if skipped_count > JET_GAME_ASSET_MAX_SKIPPED { return Err("game asset watch frame exceeds skipped count limit") }
         values :: match jet_game_control_field(fields, "events") {
-            Val(DataTree.Array(values)) -> values
+            Val(.Array(values)) -> values
             _ -> return Err("game asset watch frame requires events")
         }
         if values.len() > JET_GAME_ASSET_MAX_EVENTS { return Err("game asset watch frame exceeds event limit") }
         events :: values.iter().map(fn(value) {
             fields :: jet_game_control_object(value)?
             root :: match jet_game_control_field(fields, "root") {
-                Val(DataTree.Object(root)) -> root
+                Val(.Object(root)) -> root
                 _ -> return Err("game asset watch event requires root")
             }
             root_id :: match jet_game_control_field(root, "id") {
-                Val(DataTree.Text(value)) | Val(DataTree.TypedText(value)) -> value.clone()
+                Val(.Text(value)) | Val(.TypedText(value)) -> value.clone()
                 _ -> return Err("game asset watch root requires id")
             }
             root_path :: match jet_game_control_field(root, "path") {
-                Val(DataTree.Text(value)) | Val(DataTree.TypedText(value)) -> value.clone()
+                Val(.Text(value)) | Val(.TypedText(value)) -> value.clone()
                 _ -> return Err("game asset watch root requires path")
             }
             logical_path :: jet_game_control_required_text(fields, "logical_path")?
@@ -627,7 +645,10 @@ module jet_game_wasm_bridge {
         pending :: jet_devtools_command_count(session.envelope.session_id).min(MAX_CONTROLS_PER_TICK)
         dispatched := 0
         for _ in 0..pending {
-            request :: match jet_devtools_poll_game_control(session.envelope.session_id) { Val(request) -> request; None -> break }
+            request :: match jet_devtools_poll_game_control(session.envelope.session_id) {
+                Val(request) -> request
+                None -> break
+            }
             control :: jet_game_control_request(^request, session)?
             _ :: session.dispatch_control(timestamp_ms, ^control)?
             dispatched = dispatched.saturating_add(1)
@@ -663,7 +684,11 @@ module jet_game_wasm_bridge {
     #Unsafe("export selected wasm32 input buffer address until the next resize; host writes only initialized allocated bytes")
     pub fn jet_game_devtools_wasm_input_alloc(length: U32) -> U32 {
         if !jet_game_wasm_debug_data_enabled() { return 0 }
-        JET_GAME_WASM_BRIDGE.with(fn(cell) { bridge :: cell.borrow_mut(); bridge.input.resize(length as USize, 0); bridge.input.as_mut_ptr() as USize as U32 })
+        JET_GAME_WASM_BRIDGE.with(fn(cell) {
+            bridge :: cell.borrow_mut()
+            bridge.input.resize(length as USize, 0)
+            bridge.input.as_mut_ptr() as USize as U32
+        })
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:3197
     // GATE #4565: kernel primitive
@@ -674,7 +699,13 @@ module jet_game_wasm_bridge {
         result :: jet_game_wasm_bridge_init(timestamp_ms)
         JET_GAME_WASM_BRIDGE.with(fn(cell) {
             bridge :: cell.borrow_mut()
-            match result { Ok(()) -> 1; Err(error) -> { bridge.set_error(^error); 0 } }
+            match result {
+                Ok(()) -> 1
+                Err(error) -> {
+                    bridge.set_error(^error)
+                    0
+                }
+            }
         })
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:3216
@@ -685,11 +716,17 @@ module jet_game_wasm_bridge {
         if !jet_game_wasm_debug_data_enabled() { return 0 }
         bytes :: match jet_game_wasm_bridge_input() {
             Ok(bytes) -> ^bytes
-            Err(error) -> { JET_GAME_WASM_BRIDGE.with(fn(cell) { cell.borrow_mut().set_error_with_wire(^error) }); return 0 }
+            Err(error) -> {
+                JET_GAME_WASM_BRIDGE.with(fn(cell) { cell.borrow_mut().set_error_with_wire(^error) })
+                return 0
+            }
         }
         frame :: match String.from_utf8(^bytes) {
             Ok(frame) -> ^frame
-            Err(_) -> { JET_GAME_WASM_BRIDGE.with(fn(cell) { cell.borrow_mut().set_error_with_wire("game devtools command frame must be UTF-8") }); return 0 }
+            Err(_) -> {
+                JET_GAME_WASM_BRIDGE.with(fn(cell) { cell.borrow_mut().set_error_with_wire("game devtools command frame must be UTF-8") })
+                return 0
+            }
         }
         result :: JET_GAME_WASM_BRIDGE.with(fn(cell) {
             bridge :: cell.borrow_mut()
@@ -700,7 +737,13 @@ module jet_game_wasm_bridge {
         })
         JET_GAME_WASM_BRIDGE.with(fn(cell) {
             bridge :: cell.borrow_mut()
-            match result { Ok(()) -> 1; Err(error) -> { bridge.set_error_with_wire(^error); 0 } }
+            match result {
+                Ok(()) -> 1
+                Err(error) -> {
+                    bridge.set_error_with_wire(^error)
+                    0
+                }
+            }
         })
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:3263
@@ -711,11 +754,17 @@ module jet_game_wasm_bridge {
         if !jet_game_wasm_debug_data_enabled() { return 0 }
         bytes :: match jet_game_wasm_bridge_input() {
             Ok(bytes) -> ^bytes
-            Err(error) -> { JET_GAME_WASM_BRIDGE.with(fn(cell) { cell.borrow_mut().set_error_with_wire(^error) }); return 0 }
+            Err(error) -> {
+                JET_GAME_WASM_BRIDGE.with(fn(cell) { cell.borrow_mut().set_error_with_wire(^error) })
+                return 0
+            }
         }
         frame :: match String.from_utf8(^bytes) {
             Ok(frame) -> ^frame
-            Err(_) -> { JET_GAME_WASM_BRIDGE.with(fn(cell) { cell.borrow_mut().set_error_with_wire("game asset watch frame must be UTF-8") }); return 0 }
+            Err(_) -> {
+                JET_GAME_WASM_BRIDGE.with(fn(cell) { cell.borrow_mut().set_error_with_wire("game asset watch frame must be UTF-8") })
+                return 0
+            }
         }
         result :: JET_GAME_WASM_BRIDGE.with(fn(cell) {
             bridge :: cell.borrow_mut()
@@ -726,7 +775,13 @@ module jet_game_wasm_bridge {
         })
         JET_GAME_WASM_BRIDGE.with(fn(cell) {
             bridge :: cell.borrow_mut()
-            match result { Ok(()) -> 1; Err(error) -> { bridge.set_error_with_wire(^error); 0 } }
+            match result {
+                Ok(()) -> 1
+                Err(error) -> {
+                    bridge.set_error_with_wire(^error)
+                    0
+                }
+            }
         })
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:3316
@@ -739,7 +794,10 @@ module jet_game_wasm_bridge {
             bridge :: cell.borrow_mut()
             session :: match bridge.session.as_mut() {
                 Val(session) -> session
-                None -> { bridge.set_error("game devtools Wasm bridge is not initialized"); return 0 }
+                None -> {
+                    bridge.set_error("game devtools Wasm bridge is not initialized")
+                    return 0
+                }
             }
             if session.begin_simulation_frame() { 1 } else { 0 }
         })
@@ -758,7 +816,13 @@ module jet_game_wasm_bridge {
         })
         JET_GAME_WASM_BRIDGE.with(fn(cell) {
             bridge :: cell.borrow_mut()
-            match result { Ok(()) -> 1; Err(error) -> { bridge.set_error_with_wire(^error); 0 } }
+            match result {
+                Ok(()) -> 1
+                Err(error) -> {
+                    bridge.set_error_with_wire(^error)
+                    0
+                }
+            }
         })
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:3364
@@ -769,11 +833,17 @@ module jet_game_wasm_bridge {
         if !jet_game_wasm_debug_data_enabled() { return 0 }
         bytes :: match jet_game_wasm_bridge_input() {
             Ok(bytes) -> ^bytes
-            Err(error) -> { JET_GAME_WASM_BRIDGE.with(fn(cell) { cell.borrow_mut().set_error_with_wire(^error) }); return 0 }
+            Err(error) -> {
+                JET_GAME_WASM_BRIDGE.with(fn(cell) { cell.borrow_mut().set_error_with_wire(^error) })
+                return 0
+            }
         }
         reason :: match String.from_utf8(^bytes) {
             Ok(reason) -> ^reason
-            Err(_) -> { JET_GAME_WASM_BRIDGE.with(fn(cell) { cell.borrow_mut().set_error_with_wire("game devtools stop reason must be UTF-8") }); return 0 }
+            Err(_) -> {
+                JET_GAME_WASM_BRIDGE.with(fn(cell) { cell.borrow_mut().set_error_with_wire("game devtools stop reason must be UTF-8") })
+                return 0
+            }
         }
         result :: JET_GAME_WASM_BRIDGE.with(fn(cell) {
             bridge :: cell.borrow_mut()
@@ -783,7 +853,13 @@ module jet_game_wasm_bridge {
         })
         JET_GAME_WASM_BRIDGE.with(fn(cell) {
             bridge :: cell.borrow_mut()
-            match result { Ok(()) -> 1; Err(error) -> { bridge.set_error_with_wire(^error); 0 } }
+            match result {
+                Ok(()) -> 1
+                Err(error) -> {
+                    bridge.set_error_with_wire(^error)
+                    0
+                }
+            }
         })
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:3410
@@ -794,14 +870,23 @@ module jet_game_wasm_bridge {
         if !jet_game_wasm_debug_data_enabled() { return 0 }
         bytes :: match jet_game_wasm_bridge_input() {
             Ok(bytes) -> ^bytes
-            Err(error) -> { JET_GAME_WASM_BRIDGE.with(fn(cell) { cell.borrow_mut().set_error_with_wire(^error) }); return 0 }
+            Err(error) -> {
+                JET_GAME_WASM_BRIDGE.with(fn(cell) { cell.borrow_mut().set_error_with_wire(^error) })
+                return 0
+            }
         }
         scene :: match String.from_utf8(^bytes) {
             Ok(scene) -> {
-                if scene.is_empty() { JET_GAME_WASM_BRIDGE.with(fn(cell) { cell.borrow_mut().set_error_with_wire("game frame scene must be non-empty") }); return 0 }
+                if scene.is_empty() {
+                    JET_GAME_WASM_BRIDGE.with(fn(cell) { cell.borrow_mut().set_error_with_wire("game frame scene must be non-empty") })
+                    return 0
+                }
                 ^scene
             }
-            Err(_) -> { JET_GAME_WASM_BRIDGE.with(fn(cell) { cell.borrow_mut().set_error_with_wire("game frame scene must be UTF-8") }); return 0 }
+            Err(_) -> {
+                JET_GAME_WASM_BRIDGE.with(fn(cell) { cell.borrow_mut().set_error_with_wire("game frame scene must be UTF-8") })
+                return 0
+            }
         }
         result :: JET_GAME_WASM_BRIDGE.with(fn(cell) {
             bridge :: cell.borrow_mut()
@@ -814,7 +899,13 @@ module jet_game_wasm_bridge {
         })
         JET_GAME_WASM_BRIDGE.with(fn(cell) {
             bridge :: cell.borrow_mut()
-            match result { Ok(()) -> 1; Err(error) -> { bridge.set_error_with_wire(^error); 0 } }
+            match result {
+                Ok(()) -> 1
+                Err(error) -> {
+                    bridge.set_error_with_wire(^error)
+                    0
+                }
+            }
         })
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:3479
@@ -867,12 +958,12 @@ fn game_dev_function_identity_body(function: &JetGameFunctionIdentity) -> JetDev
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:3539
 fn game_dev_typed_trace_body(event: &GameDevEvent) -> JetDevtoolsEventBody? {
     match event {
-        GameDevEvent.FrameSample(sample) -> Val(JetDevtoolsEventBody.GameFrameSample{
+        .FrameSample(sample) -> Val(JetDevtoolsEventBody.GameFrameSample{
             sequence: sample.sequence, frame_id: sample.frame.frame_id, scene: sample.frame.scene.clone(),
             frame_index: sample.frame.frame_index, build: sample.frame.build.clone(), revision: sample.frame.revision.clone(),
             trace_id: sample.frame.trace_id.clone(), start_ns: sample.start_ns, cpu_ns: sample.cpu_ns, gpu_ns: sample.gpu_ns,
             responsible_function: sample.responsible_function.as_ref().map(game_dev_function_identity_body)})
-        GameDevEvent.DrawEvent(event) -> Val(JetDevtoolsEventBody.GameDrawEvent{
+        .DrawEvent(event) -> Val(JetDevtoolsEventBody.GameDrawEvent{
             sequence: event.sequence, frame_id: event.frame.frame_id, scene: event.frame.scene.clone(),
             frame_index: event.frame.frame_index, build: event.frame.build.clone(), revision: event.frame.revision.clone(),
             trace_id: event.frame.trace_id.clone(), event_index: event.event_index, event_id: event.event_id,
@@ -883,7 +974,10 @@ fn game_dev_typed_trace_body(event: &GameDevEvent) -> JetDevtoolsEventBody? {
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:3579
 fn game_dev_swap_body(event: &GameDevEvent) -> JetDevtoolsEventBody? {
-    outcome :: match event { GameDevEvent.GameSwap(outcome) -> outcome; _ -> return None }
+    outcome :: match event {
+        .GameSwap(outcome) -> outcome
+        _ -> return None
+    }
     Val(JetDevtoolsEventBody.GameSwap{sequence: outcome.sequence, path: outcome.fact.path.clone(),
         kind: outcome.fact.kind.as_str(), status: outcome.status.as_str(), old_schema_id: outcome.fact.old_schema_id.clone(),
         new_schema_id: outcome.fact.new_schema_id.clone(), migration: outcome.fact.migration.as_str(), reason: outcome.fact.reason.clone()})

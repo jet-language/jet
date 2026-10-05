@@ -119,10 +119,17 @@ pub struct JetGameWorldRevisionFact {
         jet_game_hot_swap_validate_revision(schema_revision, "world.schema_revision") ?? return Err(err)
         Ok(JetGameWorldRevisionFact{identity: identity, schema_revision: schema_revision})
     }
-    pub fn render_json(self) -> String Never! { out := [U8]{}; self.write_json(&out); finish_json(out) }
+    pub fn render_json(self) -> String Never! {
+        out := [U8]{}
+        self.write_json(&out)
+        finish_json(out)
+    }
     fn write_json(self, out: &[U8]) Never! {
-        append(out, "{{\"identity\":"); self.identity.write_json(out)
-        append(out, ",\"schema_revision\":"); json_string(out, self.schema_revision); append(out, "}}")
+        append(out, "{{\"identity\":")
+        self.identity.write_json(out)
+        append(out, ",\"schema_revision\":")
+        json_string(out, self.schema_revision)
+        append(out, "}}")
     }
 }
 pub struct JetGameScriptRevisionFact {
@@ -136,12 +143,21 @@ pub struct JetGameScriptRevisionFact {
         jet_game_hot_swap_validate_revision(body_revision, "script.body_revision") ?? return Err(err)
         Ok(JetGameScriptRevisionFact{name: name, identity: identity, type_revision: type_revision, body_revision: body_revision})
     }
-    pub fn render_json(self) -> String Never! { out := [U8]{}; self.write_json(&out); finish_json(out) }
+    pub fn render_json(self) -> String Never! {
+        out := [U8]{}
+        self.write_json(&out)
+        finish_json(out)
+    }
     fn write_json(self, out: &[U8]) Never! {
-        append(out, "{{\"name\":"); json_string(out, self.name)
-        append(out, ",\"identity\":"); self.identity.write_json(out)
-        append(out, ",\"type_revision\":"); json_string(out, self.type_revision)
-        append(out, ",\"body_revision\":"); json_string(out, self.body_revision); append(out, "}}")
+        append(out, "{{\"name\":")
+        json_string(out, self.name)
+        append(out, ",\"identity\":")
+        self.identity.write_json(out)
+        append(out, ",\"type_revision\":")
+        json_string(out, self.type_revision)
+        append(out, ",\"body_revision\":")
+        json_string(out, self.body_revision)
+        append(out, "}}")
     }
 }
 pub struct JetGameAssetRevisionFact {
@@ -153,11 +169,19 @@ pub struct JetGameAssetRevisionFact {
         jet_game_hot_swap_validate_revision(output_revision, "asset.output_revision") ?? return Err(err)
         Ok(JetGameAssetRevisionFact{logical_path: logical_path, identity: identity, output_revision: output_revision})
     }
-    pub fn render_json(self) -> String Never! { out := [U8]{}; self.write_json(&out); finish_json(out) }
+    pub fn render_json(self) -> String Never! {
+        out := [U8]{}
+        self.write_json(&out)
+        finish_json(out)
+    }
     fn write_json(self, out: &[U8]) Never! {
-        append(out, "{{\"logical_path\":"); json_string(out, self.logical_path)
-        append(out, ",\"identity\":"); self.identity.write_json(out)
-        append(out, ",\"output_revision\":"); json_string(out, self.output_revision); append(out, "}}")
+        append(out, "{{\"logical_path\":")
+        json_string(out, self.logical_path)
+        append(out, ",\"identity\":")
+        self.identity.write_json(out)
+        append(out, ",\"output_revision\":")
+        json_string(out, self.output_revision)
+        append(out, "}}")
     }
 }
 pub enum JetGameHotSwapValue {
@@ -199,7 +223,11 @@ pub enum JetGameHotSwapValue {
         }
         Ok()
     }
-    pub fn render_json(self) -> String Never! { out := [U8]{}; self.write_json(&out); finish_json(out) }
+    pub fn render_json(self) -> String Never! {
+        out := [U8]{}
+        self.write_json(&out)
+        finish_json(out)
+    }
     fn write_json(self, out: &[U8]) Never! {
         if self == {
             .Bool(value) -> append(out, "{value}")
@@ -209,19 +237,27 @@ pub enum JetGameHotSwapValue {
             .Text(value) -> json_string(out, value)
             .Bytes(values) -> {
                 append(out, "[")
-                loop i in 0..<values.len() { if i > 0 -> append(out, ","); append(out, "{values[i]}") }
+                loop i in 0..<values.len() {
+                    if i > 0 -> append(out, ",")
+                    append(out, "{values[i]}")
+                }
                 append(out, "]")
             }
             .List(values) -> {
                 append(out, "[")
-                loop i in 0..<values.len() { if i > 0 -> append(out, ","); values[i].write_json(out) }
+                loop i in 0..<values.len() {
+                    if i > 0 -> append(out, ",")
+                    values[i].write_json(out)
+                }
                 append(out, "]")
             }
             .Record(fields) -> {
                 append(out, "{{")
                 loop i in 0..<fields.len() {
                     if i > 0 -> append(out, ",")
-                    json_string(out, fields[i].0); append(out, ":"); fields[i].1.write_json(out)
+                    json_string(out, fields[i].0)
+                    append(out, ":")
+                    fields[i].1.write_json(out)
                 }
                 append(out, "}}")
             }
@@ -239,12 +275,21 @@ pub struct JetGameHotSwapPersistState {
         Ok(JetGameHotSwapPersistState{key: key, schema_revision: schema_revision, value: value})
     }
     pub fn value_type(self) -> String Never! { self.value.type_tag() }
-    pub fn render_json(self) -> String Never! { out := [U8]{}; self.write_json(&out); finish_json(out) }
+    pub fn render_json(self) -> String Never! {
+        out := [U8]{}
+        self.write_json(&out)
+        finish_json(out)
+    }
     fn write_json(self, out: &[U8]) Never! {
-        append(out, "{{\"key\":"); json_string(out, self.key)
-        append(out, ",\"schema_revision\":"); json_string(out, self.schema_revision)
-        append(out, ",\"value_type\":"); json_string(out, self.value.type_tag())
-        append(out, ",\"value\":"); self.value.write_json(out); append(out, "}}")
+        append(out, "{{\"key\":")
+        json_string(out, self.key)
+        append(out, ",\"schema_revision\":")
+        json_string(out, self.schema_revision)
+        append(out, ",\"value_type\":")
+        json_string(out, self.value.type_tag())
+        append(out, ",\"value\":")
+        self.value.write_json(out)
+        append(out, "}}")
     }
 }
 pub struct JetGameHotSwapSnapshot {
@@ -254,7 +299,9 @@ pub struct JetGameHotSwapSnapshot {
     pub scripts: [JetGameScriptRevisionFact]
     pub assets: [JetGameAssetRevisionFact]
     pub fn new(identity: JetGameHotSwapIdentity, world: JetGameWorldRevisionFact, persist: ^[JetGameHotSwapPersistState], scripts: ^[JetGameScriptRevisionFact], assets: ^[JetGameAssetRevisionFact]) -> JetGameHotSwapSnapshot JetGameHotSwapError! {
-        p := ^persist; s := ^scripts; a := ^assets
+        p := ^persist
+        s := ^scripts
+        a := ^assets
         &p.sort_by((left: JetGameHotSwapPersistState, right: JetGameHotSwapPersistState) -> left.key <=> right.key)
         &s.sort_by((left: JetGameScriptRevisionFact, right: JetGameScriptRevisionFact) -> left.name <=> right.name)
         &a.sort_by((left: JetGameAssetRevisionFact, right: JetGameAssetRevisionFact) -> left.logical_path <=> right.logical_path)
@@ -294,16 +341,31 @@ pub struct JetGameHotSwapSnapshot {
         loop asset in self.assets -> if asset.logical_path == logical_path -> return Val(@asset)
         None
     }
-    pub fn render_json(self) -> String Never! { out := [U8]{}; self.write_json(&out); finish_json(out) }
+    pub fn render_json(self) -> String Never! {
+        out := [U8]{}
+        self.write_json(&out)
+        finish_json(out)
+    }
     fn write_json(self, out: &[U8]) Never! {
-        append(out, "{{\"identity\":"); self.identity.write_json(out)
-        append(out, ",\"world\":"); self.world.write_json(out)
+        append(out, "{{\"identity\":")
+        self.identity.write_json(out)
+        append(out, ",\"world\":")
+        self.world.write_json(out)
         append(out, ",\"persist\":[")
-        loop i in 0..<self.persist.len() { if i > 0 -> append(out, ","); self.persist[i].write_json(out) }
+        loop i in 0..<self.persist.len() {
+            if i > 0 -> append(out, ",")
+            self.persist[i].write_json(out)
+        }
         append(out, "],\"scripts\":[")
-        loop i in 0..<self.scripts.len() { if i > 0 -> append(out, ","); self.scripts[i].write_json(out) }
+        loop i in 0..<self.scripts.len() {
+            if i > 0 -> append(out, ",")
+            self.scripts[i].write_json(out)
+        }
         append(out, "],\"assets\":[")
-        loop i in 0..<self.assets.len() { if i > 0 -> append(out, ","); self.assets[i].write_json(out) }
+        loop i in 0..<self.assets.len() {
+            if i > 0 -> append(out, ",")
+            self.assets[i].write_json(out)
+        }
         append(out, "]}}")
     }
 }
@@ -333,24 +395,37 @@ pub struct JetGameHotSwapReceipt {
     pub fn is_rolled_back(self) -> Bool Never! { self.phase == .RolledBack }
     pub fn render_json(self) -> String Never! {
         out := [U8]{}
-        append(&out, "{{\"transaction_id\":{self.transaction_id},\"phase\":"); json_string(&out, self.phase.as_str())
-        append(&out, ",\"from\":"); self.from_identity.write_json(&out)
-        append(&out, ",\"to\":"); self.to_identity.write_json(&out)
-        append(&out, ",\"link_mode\":"); json_string(&out, self.link_mode.as_str())
-        append(&out, ",\"kept_values\":"); json_list(&out, self.kept_values)
-        append(&out, ",\"reset_values\":"); json_list(&out, self.reset_values)
-        append(&out, ",\"fresh_values\":"); json_list(&out, self.fresh_values)
-        append(&out, ",\"changed_scripts\":"); json_list(&out, self.changed_scripts)
-        append(&out, ",\"changed_assets\":"); json_list(&out, self.changed_assets)
+        append(&out, "{{\"transaction_id\":{self.transaction_id},\"phase\":")
+        json_string(&out, self.phase.as_str())
+        append(&out, ",\"from\":")
+        self.from_identity.write_json(&out)
+        append(&out, ",\"to\":")
+        self.to_identity.write_json(&out)
+        append(&out, ",\"link_mode\":")
+        json_string(&out, self.link_mode.as_str())
+        append(&out, ",\"kept_values\":")
+        json_list(&out, self.kept_values)
+        append(&out, ",\"reset_values\":")
+        json_list(&out, self.reset_values)
+        append(&out, ",\"fresh_values\":")
+        json_list(&out, self.fresh_values)
+        append(&out, ",\"changed_scripts\":")
+        json_list(&out, self.changed_scripts)
+        append(&out, ",\"changed_assets\":")
+        json_list(&out, self.changed_assets)
         append(&out, ",\"incompatibility\":")
         if self.incompatibility == {
             .None -> append(&out, "null")
             .Val(reason) -> {
-                append(&out, "{{\"code\":"); json_string(&out, reason.code())
-                append(&out, ",\"message\":"); json_string(&out, reason.message()); append(&out, "}}")
+                append(&out, "{{\"code\":")
+                json_string(&out, reason.code())
+                append(&out, ",\"message\":")
+                json_string(&out, reason.message())
+                append(&out, "}}")
             }
         }
-        append(&out, "}}"); finish_json(out)
+        append(&out, "}}")
+        finish_json(out)
     }
 }
 pub struct JetGameHotSwapPlan {
@@ -368,7 +443,9 @@ pub struct JetGameHotSwapPlan {
     pub fn new(current: JetGameHotSwapSnapshot, candidate: JetGameHotSwapSnapshot, link_mode: JetGameLinkMode) -> JetGameHotSwapPlan JetGameHotSwapError! {
         current.validate() ?? return Err(err)
         candidate.validate() ?? return Err(err)
-        kept := [String]{}; reset := [String]{}; fresh := [String]{}
+        kept := [String]{}
+        reset := [String]{}
+        fresh := [String]{}
         // Sorted checked String-key facts admit monotone joins; no temporary
         // maps and no per-item whole-array search. Preserve Rust error order.
         j := 0
@@ -401,15 +478,19 @@ pub struct JetGameHotSwapPlan {
             if j == current.scripts.len() || current.scripts[j].name != script.name || current.scripts[j].body_revision != script.body_revision -> &changed_scripts.push(~script.name)
         }
         changed_assets := [String]{}
-        i := 0; j = 0
+        i := 0
+        j = 0
         loop i < current.assets.len() || j < candidate.assets.len() {
             if j == candidate.assets.len() || (i < current.assets.len() && current.assets[i].logical_path < candidate.assets[j].logical_path) {
-                &changed_assets.push(~current.assets[i].logical_path); i += 1
+                &changed_assets.push(~current.assets[i].logical_path)
+                i += 1
             } else if i == current.assets.len() || candidate.assets[j].logical_path < current.assets[i].logical_path {
-                &changed_assets.push(~candidate.assets[j].logical_path); j += 1
+                &changed_assets.push(~candidate.assets[j].logical_path)
+                j += 1
             } else {
                 if current.assets[i].output_revision != candidate.assets[j].output_revision -> &changed_assets.push(~current.assets[i].logical_path)
-                i += 1; j += 1
+                i += 1
+                j += 1
             }
         }
         if changed_scripts.len() > 0 && !link_mode.scripts_enabled() && !link_mode.is_restart() -> return Err(.Incompatible(.ScriptSyncDisabled(link_mode)))
@@ -429,7 +510,10 @@ pub struct JetGameHotSwapPlan {
         // Commit consumes the returned stage. On failure the retained checked
         // stage remains available for rollback, so success needs no spare copy.
         if &transaction.commit(^applied.0, id) == {
-            .Ok(result) -> { live = result.0; Ok(result.1) }
+            .Ok(result) -> {
+                live = result.0
+                Ok(result.1)
+            }
             .Err(error) -> {
                 if transaction.staged == .Val(staged) -> _ :: &transaction.rollback(~staged, id)
                 Err(error)
@@ -479,13 +563,19 @@ pub struct JetGameHotSwapExplanation {
     }
     pub fn render_json(self) -> String Never! {
         out := [U8]{}
-        append(&out, "{{\"current\":"); self.current_identity.write_json(&out)
-        append(&out, ",\"candidate\":"); self.candidate_identity.write_json(&out)
-        append(&out, ",\"link_mode\":"); json_string(&out, self.link_mode.as_str())
+        append(&out, "{{\"current\":")
+        self.current_identity.write_json(&out)
+        append(&out, ",\"candidate\":")
+        self.candidate_identity.write_json(&out)
+        append(&out, ",\"link_mode\":")
+        json_string(&out, self.link_mode.as_str())
         append(&out, ",\"compatible\":{self.compatible},\"transaction_id\":")
         if self.transaction_id == { .None -> append(&out, "null"), .Val(id) -> append(&out, "{id}") }
-        append(&out, ",\"code\":"); json_string(&out, self.code)
-        append(&out, ",\"message\":"); json_string(&out, self.message); append(&out, "}}")
+        append(&out, ",\"code\":")
+        json_string(&out, self.code)
+        append(&out, ",\"message\":")
+        json_string(&out, self.message)
+        append(&out, "}}")
         finish_json(out)
     }
 }
@@ -631,7 +721,10 @@ fn json_string(out: &[U8], value: String) Never! {
 }
 fn json_list(out: &[U8], values: [String]) Never! {
     append(out, "[")
-    loop i in 0..<values.len() { if i > 0 -> append(out, ","); json_string(out, values[i]) }
+    loop i in 0..<values.len() {
+        if i > 0 -> append(out, ",")
+        json_string(out, values[i])
+    }
     append(out, "]")
 }
 fn append(out: &[U8], value: String) Never! {

@@ -394,7 +394,10 @@ pub struct JetGameOverlayState {
     pub fn observe_metric(&self, metric: JetGameOverlayMetric, value: I64, sampled_at_ns: U64) Never! {
         sample :: JetGameOverlayMetricValue.new(metric, value, sampled_at_ns)
         loop i in 0..<self.samples.len() {
-            if self.samples[i].metric == metric { self.samples[i] = sample; return }
+            if self.samples[i].metric == metric {
+                self.samples[i] = sample
+                return
+            }
         }
         if self.samples.len() < JET_GAME_OVERLAY_MAX_METRIC_VALUES -> &self.samples.push(sample)
     }

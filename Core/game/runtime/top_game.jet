@@ -48,7 +48,7 @@ impl GameState {
             jet_game_install_devtools_callback()
             dev_session.register_gameplay_debugger(0, "dev").expect("the built-in gameplay debugger extension is valid")
             dev_session.configure_asset_roots(asset_roots.clone()).expect("the built-in game asset roots are valid")
-            Some(^dev_session)
+            Val(^dev_session)
         } else { None }
         GameState{assets: [], bindings: [], components: [], asset_bytes: 0, asset_roots: ^asset_roots,
             asset_handles: [String:GameAssetRuntimeHandle]{}, dev_session: ^dev_session}
@@ -334,7 +334,10 @@ fn jet_game_assets_reload(assets: &GameAssets, timestamp_ms: U64, plan: JetGameA
         payload :: GameAssetRuntimePayload{artifact: ^fact.artifact, bytes: Arc.from(^fact.bytes), metadata: ^fact.metadata}
         state := assets.state.borrow_mut()
         previous_len :: if Val(existing) :: state.asset_handles.get(&asset_key) { existing.replace(^payload) }
-        else { state.asset_handles.insert(^asset_key, GameAssetRuntimeHandle.new(^payload)); 0 }
+        else {
+            state.asset_handles.insert(^asset_key, GameAssetRuntimeHandle.new(^payload))
+            0
+        }
         state.asset_bytes = state.asset_bytes.saturating_sub(previous_len).saturating_add(byte_len)
         Ok(^receipt)
     }
@@ -424,7 +427,7 @@ fn jet_game_run(scene: &GameScene, replay: &GameReplay?, backend: &GameBackend?,
         replay_cursor: I64 := 0
         transcript := JetGameTranscriptHasher.new()
         loop {
-            index :: match frame_plan.next_frame() { Some(index) -> index, None -> break }
+            index :: match frame_plan.next_frame() { .Val(index) -> index, None -> break }
             loop {
                 admitted :: if JET_GAME_DEBUG_DATA_ENABLED {
                     state := scene.assets.state.borrow_mut()

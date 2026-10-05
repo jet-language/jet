@@ -225,7 +225,7 @@ impl JetGameWorldFact {
                 if self.entities[cursor].parent_id == .Val(parent) {
                     if !parents.has_key(parent) -> return Err(JetGameWorldInspectorError.MissingParent(~self.entities[root].entity_id, ~parent))
                     cursor = parents[parent]
-                } else -> break
+                } else { break }
             }
             cursor = root
             loop colors[cursor] != 2 {
@@ -473,7 +473,10 @@ impl JetGameWorldInspector {
         }
         true
     }
-    pub fn set_session_identity(&self, session_id: ^String, tier: ^String) Never! { self.session_id = Val(^session_id); self.tier = Val(^tier) }
+    pub fn set_session_identity(&self, session_id: ^String, tier: ^String) Never! {
+        self.session_id = Val(^session_id)
+        self.tier = Val(^tier)
+    }
     pub fn session_identity(self) -> (session_id: @String, tier: @String)? Never! from self {
         if self.session_id == .Val(session) {
             if self.tier == .Val(tier) -> return Val((session_id: @session, tier: @tier))
@@ -578,7 +581,10 @@ impl JetGameWorldInspector {
         loop offset > 0 {
             offset = offset - 1
             i :: (self.head + offset) %% self.frames.len()
-            if self.frames[i].world_id == request.world_id && self.frames[i].frame_id == request.frame_id { frame = i; break }
+            if self.frames[i].world_id == request.world_id && self.frames[i].frame_id == request.frame_id {
+                frame = i
+                break
+            }
         }
         if frame < 0 -> return world_eval_invalid(request.request_id, JET_GAME_PAUSED_EVAL_STALE)
         if self.frames[frame].source_id != self.frames[current].source_id || self.frames[frame].revision != self.frames[current].revision -> return world_eval_invalid(request.request_id, JET_GAME_PAUSED_EVAL_STALE)
@@ -705,21 +711,44 @@ fn jet_game_world_json_string(value: String) -> String Never! {
     out := [U8]{U8{34}}
     hex :: [U8]{48,49,50,51,52,53,54,55,56,57,97,98,99,100,101,102}
     loop byte in world_text.utf8_bytes(value) {
-        if byte == U8{34} { &out.push(U8{92}); &out.push(U8{34}) }
-        else if byte == U8{92} { &out.push(U8{92}); &out.push(U8{92}) }
-        else if byte == U8{10} { &out.push(U8{92}); &out.push(U8{110}) }
-        else if byte == U8{13} { &out.push(U8{92}); &out.push(U8{114}) }
-        else if byte == U8{9} { &out.push(U8{92}); &out.push(U8{116}) }
+        if byte == U8{34} {
+            &out.push(U8{92})
+            &out.push(U8{34})
+        }
+        else if byte == U8{92} {
+            &out.push(U8{92})
+            &out.push(U8{92})
+        }
+        else if byte == U8{10} {
+            &out.push(U8{92})
+            &out.push(U8{110})
+        }
+        else if byte == U8{13} {
+            &out.push(U8{92})
+            &out.push(U8{114})
+        }
+        else if byte == U8{9} {
+            &out.push(U8{92})
+            &out.push(U8{116})
+        }
         else if byte < U8{32} {
-            &out.push(U8{92}); &out.push(U8{117}); &out.push(U8{48}); &out.push(U8{48})
-            &out.push(hex[Int.from_u8(byte) /% 16]); &out.push(hex[Int.from_u8(byte) %% 16])
+            &out.push(U8{92})
+            &out.push(U8{117})
+            &out.push(U8{48})
+            &out.push(U8{48})
+            &out.push(hex[Int.from_u8(byte) /% 16])
+            &out.push(hex[Int.from_u8(byte) %% 16])
         } else -> &out.push(byte)
     }
     &out.push(U8{34})
     String.from_bytes(^out) ?? panic("game world JSON must be UTF-8")
 }
 // Internal scalar/index helpers, not alternative fact or provider owners.
-fn world_indices(count: Int) -> [Int] Never! { out := [Int]{}; loop i in 0..<count -> &out.push(i); ^out }
+fn world_indices(count: Int) -> [Int] Never! {
+    out := [Int]{}
+    loop i in 0..<count -> &out.push(i)
+    ^out
+}
 fn world_current_index(inspector: JetGameWorldInspector) -> Int Never! { (inspector.head + inspector.frames.len() - 1) %% inspector.frames.len() }
 fn world_selection_hierarchy(selection: JetGameWorldSelection) -> Bool Never! { !(selection.property_id != None && selection.component_id == None || selection.component_id != None && selection.entity_id == None) }
 fn world_entity_index(world: JetGameWorldFact, id: String) -> Int? Never! {
@@ -734,7 +763,10 @@ fn world_property_index(component: JetGameWorldComponentFact, id: String) -> Int
     loop i in 0..<component.properties.len() { if component.properties[i].field == id -> return Val(i) }
     None
 }
-fn world_optional_or_empty(value: String?) -> String Never! { if value == .Val(text) -> return ~text; "" }
+fn world_optional_or_empty(value: String?) -> String Never! {
+    if value == .Val(text) -> return ~text
+    ""
+}
 // A scalar index of authored properties in the current snapshot, never another
 // fact universe or encoded composite map key. Sort once, binary-search targets.
 struct WorldProvenanceIndex { entity: Int, component: Int, property: Int }

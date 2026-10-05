@@ -66,17 +66,17 @@ fn jet_raylib_parse_texture_atlas(path: &String, text: String?, fallback_name: S
     name := fallback_name
     texture_path: String? = None
     regions := []
-    if text is Val(text) {
+    if text == .Val(text) {
         for raw in text.lines() {
             line := raw.trim() // #4303
             if line.is_empty() -> continue
-            if line.strip_prefix("atlas:") is Val(value) {
+            if line.strip_prefix("atlas:") == .Val(value) {
                 value := value.trim() // #4303
                 if not value.is_empty() { name = value.to_string() }
-            } else if line.strip_prefix("texture:") is Val(value) {
+            } else if line.strip_prefix("texture:") == .Val(value) {
                 value := value.trim() // #4303
                 if not value.is_empty() { texture_path = Val(jet_raylib_atlas_texture_path(path, &value)) }
-            } else if jet_raylib_atlas_region(&line) is Val(region) { regions.push(^region) }
+            } else if jet_raylib_atlas_region(&line) == .Val(region) { regions.push(^region) }
         }
     }
     if texture_path.is_none() {
