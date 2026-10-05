@@ -550,6 +550,12 @@ is not supplied in a `Type{ … }` literal. Arguments to bare `#Memo` are E0382.
 See [`computed_field.jet`](../../Examples/features/memory/computed_field.jet)
 (D-FIELDPOL1, D-FIELDMEMO1).
 
+A pure function marked `#Memo` retains completed results by its argument tuple.
+Its default bound is 128 entries; `#Memo(bound: none)` makes it unbounded.
+`name.cache()` reads hits, misses, size, and bound from that same result store,
+including before the first call. The shared Prelude owns eviction and counters;
+emitters only marshal the checked function identity, argument key, and bound.
+
 `tag Name { deny: [Net] }` declares an erased dataflow fact and its policy.
 `deny` is required and nonempty; `from` is optional. Direct `#Name` tags attach
 to values, fields, parameters, and returns. `#Scrub(Name)` removes exactly that

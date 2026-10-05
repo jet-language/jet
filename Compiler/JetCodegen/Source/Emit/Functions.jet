@@ -2203,6 +2203,33 @@ fn jet_rust_emit_associated_type_name(name: String) -> String Never! {
     jet_rust_emit_mangle(name)
 }
 
+fn jet_rust_emit_function_memoized(function: MIRFunction) -> Bool Never! {
+    function.memo_bound != None || function.memo_unbounded
+}
+
+fn jet_rust_emit_memo_bound(function: MIRFunction) -> String Never! {
+    if function.memo_bound == .Val(bound) -> return "Some({bound}usize)"
+    "None"
+}
+
+fn jet_rust_emit_memo_key_type(ctx: &JetRustEmitContext, function: MIRFunction) -> String Never! {
+    fields := [String]{}
+    loop parameter in function.params -> &fields.push(jet_rust_emit_type(&ctx, parameter.ty))
+    if fields.len() == 0 -> return "()"
+    "({fields.join(", ")},)"
+}
+
+fn jet_rust_emit_memo_key_value(ctx: &JetRustEmitContext, function: MIRFunction) -> String Never! {
+    fields := [String]{}
+    loop parameter in function.params {
+        name :: jet_rust_emit_parameter_name(function, parameter.index)
+        rendered :: jet_rust_emit_callable_param_type(&ctx, parameter.ty, parameter.access)
+        &fields.push(if rendered.starts_with("&") -> "(*{name}).clone()" else -> "{name}.clone()")
+    }
+    if fields.len() == 0 -> return "()"
+    "({fields.join(", ")},)"
+}
+
 fn jet_rust_emit_function(ctx: &JetRustEmitContext, function: MIRFunction) -> [String] Never! {
     previous_function := ctx.current_function
     previous_generic_params := ctx.current_generic_params
@@ -2230,6 +2257,10 @@ fn jet_rust_emit_function(ctx: &JetRustEmitContext, function: MIRFunction) -> [S
     read_bindings :: jet_rust_emit_read_bindings(&ctx, function)
     ctx.body_index.bindings = read_bindings
     lines := [String]{jet_rust_emit_function_signature(&ctx, function)}
+    if jet_rust_emit_function_memoized(function) {
+        &lines.push("    let __jet_memo_key: {jet_rust_emit_memo_key_type(&ctx, function)} = {jet_rust_emit_memo_key_value(&ctx, function)};")
+        &lines.push("    {ctx.config.root_prefix}jet_memo_call(__jet_memo_store_{function.id.value}.get_or_init(|| std::sync::Mutex::new({ctx.config.root_prefix}JetMemo::with_bound({jet_rust_emit_memo_bound(function)}))), __jet_memo_key, || {{")
+    }
     partial_lines :: jet_rust_emit_partial_declarations(&ctx, function)
     loop line in partial_lines -> &lines.push("    {line}")
     loop local in function.locals -> &lines.push("    {jet_rust_emit_local_declaration(&ctx, local)}")
@@ -2295,7 +2326,18 @@ fn jet_rust_emit_function(ctx: &JetRustEmitContext, function: MIRFunction) -> [S
     lines = jet_rust_emit_unwrap_value_slots(lines, values_start)
     lines = jet_rust_emit_compact_function_text(lines, 1)
     if generator -> &lines.push("    }})")
+    if jet_rust_emit_function_memoized(function) -> &lines.push("    }})")
     &lines.push("}}")
+    memo_header := [String]{}
+    if jet_rust_emit_function_memoized(function) {
+        root :: ~ctx.config.root_prefix
+        key :: jet_rust_emit_memo_key_type(&ctx, function)
+        value :: jet_rust_emit_callable_return(&ctx, function)
+        bound :: jet_rust_emit_memo_bound(function)
+        id :: function.id.value
+        &memo_header.push("static __jet_memo_store_{id}: std::sync::OnceLock<std::sync::Mutex<{root}JetMemo<{key}, {value}>>> = std::sync::OnceLock::new();")
+        &memo_header.push("fn __jet_memo_stats_{id}() -> {root}JetMemoStats {{ {root}jet_memo_stats(__jet_memo_store_{id}.get_or_init(|| std::sync::Mutex::new({root}JetMemo::with_bound({bound})))) }}")
+    }
     ctx.current_function = previous_function
     ctx.current_generic_params = previous_generic_params
     ctx.move_facts = previous_move_facts
@@ -2303,8 +2345,10 @@ fn jet_rust_emit_function(ctx: &JetRustEmitContext, function: MIRFunction) -> [S
     ctx.body_index = previous_body_index
     ctx.expected_test_exits = previous_expected_exits
     // MIRRust emit_callable_named: the inline attributes precede the item.
-    if !function.is_inline_always && !function.is_inline -> return lines
-    out := [String]{if function.is_inline_always -> "#[inline(always)]" else -> "#[inline]"}
+    out := ^memo_header
+    if function.is_inline_always -> &out.push("#[inline(always)]") else {
+        if function.is_inline -> &out.push("#[inline]")
+    }
     loop line in lines -> &out.push(line)
     out
 }

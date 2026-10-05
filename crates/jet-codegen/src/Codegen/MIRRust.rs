@@ -13592,7 +13592,35 @@ impl<'a> RustEmitter<'a> {
     }
 
     fn emit_function(&self, function: &MirFunction, out: &mut String) {
+        if let Some(bound) = function.memo_bound {
+            let key = self.memo_key_type(function);
+            let value = self.rust_type(&function.return_type);
+            let id = function.id.0;
+            let root = &self.config.root_prefix;
+            let bound = bound.map(|bound| format!("Some({bound}usize)")).unwrap_or_else(|| "None".to_string());
+            let _ = writeln!(out, "static __jet_memo_store_{id}: std::sync::OnceLock<std::sync::Mutex<{root}JetMemo<{key}, {value}>>> = std::sync::OnceLock::new();");
+            let _ = writeln!(out, "fn __jet_memo_stats_{id}() -> {root}JetMemoStats {{ {root}jet_memo_stats(__jet_memo_store_{id}.get_or_init(|| std::sync::Mutex::new({root}JetMemo::with_bound({bound})))) }}");
+        }
         self.emit_callable(function, out, None);
+    }
+
+    fn memo_key_type(&self, function: &MirFunction) -> String {
+        let fields = self.declared_params(function).iter()
+            .map(|param| self.rust_type(&param.ty))
+            .collect::<Vec<_>>();
+        if fields.is_empty() { "()".to_string() } else { format!("({},)", fields.join(", ")) }
+    }
+
+    fn memo_key_value(&self, function: &MirFunction) -> String {
+        let fields = self.declared_params(function).iter().map(|param| {
+            let name = mangle(&param.name);
+            if self.function_parameter_type(function, param).starts_with('&') {
+                format!("(*{name}).clone()")
+            } else {
+                format!("{name}.clone()")
+            }
+        }).collect::<Vec<_>>();
+        if fields.is_empty() { "()".to_string() } else { format!("({},)", fields.join(", ")) }
     }
 
     fn emit_method(&self, function: &MirFunction, out: &mut String) {
@@ -13611,7 +13639,7 @@ impl<'a> RustEmitter<'a> {
         out: &mut String,
         method_form: Option<&MirFunctionForm>,
     ) {
-        if self.native_dispatch_eligible(function, method_form, None, None) {
+        if function.memo_bound.is_none() && self.native_dispatch_eligible(function, method_form, None, None) {
             self.emit_native_dispatch(function, out);
         } else {
             self.emit_callable_named(function, out, method_form, None, None, None);
@@ -13792,6 +13820,15 @@ impl<'a> RustEmitter<'a> {
             out,
             "{visibility}{unsafe_prefix}fn {name}{generics}({params}) -> {ret} {{"
         );
+        if let Some(bound) = function.memo_bound {
+            let bound = bound.map(|bound| format!("Some({bound}usize)")).unwrap_or_else(|| "None".to_string());
+            let root = &self.config.root_prefix;
+            let key = self.memo_key_type(function);
+            let value = self.memo_key_value(function);
+            let id = function.id.0;
+            let _ = writeln!(out, "    let __jet_memo_key: {key} = {value};");
+            let _ = writeln!(out, "    {root}jet_memo_call(__jet_memo_store_{id}.get_or_init(|| std::sync::Mutex::new({root}JetMemo::with_bound({bound}))), __jet_memo_key, || {{");
+        }
         if self.arithmetic_trait_method(function) {
             for param in declared.iter().filter(|param| self.is_scalar(&param.ty)) {
                 let name = mangle(&param.name);
@@ -13977,6 +14014,9 @@ impl<'a> RustEmitter<'a> {
         }
         compact_function_text(out, slots_start);
         if generator {
+            let _ = writeln!(out, "    }})");
+        }
+        if function.memo_bound.is_some() {
             let _ = writeln!(out, "    }})");
         }
         let _ = writeln!(out, "}}\n");
@@ -26395,6 +26435,14 @@ impl<'a> RustEmitter<'a> {
             }
         }
         self.validate_prelude_count(route, args.len());
+        if route.symbol.name() == "jet_memo_stats" {
+            let Some(MirOperation::Constant(MirConstant::String(id))) =
+                args.first().and_then(|arg| self.value_definition(function, arg.value))
+            else {
+                panic!("MIR memo statistics must retain their checked function identity");
+            };
+            return format!("__jet_memo_stats_{id}()");
+        }
         // The Shared callback kernels (`jet_shared_read<F: FnOnce(&T) -> R>`,
         // `jet_shared_edit<F: FnOnce(&mut T) -> R>`, their `_txn` forms and the
         // capture projections) call a host closure, not the Rc callable carrier.

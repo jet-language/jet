@@ -4690,7 +4690,8 @@ fn jet_codegen_numeric_bound_constant(ty: Type, member: String) -> MIRConstant? 
 }
 
 fn jet_codegen_lower_memo_stats(builder: &JetCodegenBuilder, expression: TExpr, name: String) -> MIRValueID Never! {
-    name_value := jet_codegen_emit_value(&builder, expression.span, Type.String, MIROperation.Constant{value: MIRConstant.String{value: name}})
+    function :: jet_codegen_function_id_for_name(builder, name)
+    name_value := jet_codegen_emit_value(&builder, expression.span, Type.String, MIROperation.Constant{value: MIRConstant.String{value: "{function.value}"}})
     bound_value := jet_codegen_emit_value(&builder, expression.span, Type.Int, MIROperation.Constant{value: MIRConstant.Int{value: -1, width: None, spelling: None}})
     carrier := jet_codegen_failure_carrier_for_type(expression.ty)
     call := jet_codegen_intern_route(&builder, MIRPreludeFamily.StaticPrelude, "core.memo", "stats", "jet_memo_stats", 2, [Bool]{false, false}, None, carrier, MIRPreludeABI.Value)

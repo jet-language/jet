@@ -356,14 +356,15 @@ pub(crate) mod collection_semantics {
         }
 
         #[test]
-        fn memo_stats_takes_the_owned_bound() {
-            let unbounded: JetMemoStats =
-                jet_memo_stats("owned_int_abi_unbounded".to_string(), JetInt::from_i64(-1));
-            assert_eq!(unbounded.bound, "none");
-            let bounded = jet_memo_stats("owned_int_abi_bounded".to_string(), JetInt::from_i64(2));
-            assert_eq!(bounded.bound, "2");
-            let past = jet_memo_stats("owned_int_abi_past_word".to_string(), past_word(1));
-            assert_eq!(past.bound, "none");
+        fn memo_stats_projects_the_function_result_store() {
+            let store = std::sync::Mutex::new(JetMemo::<i64, i64>::with_bound(Some(2)));
+            assert_eq!(jet_memo_stats(&store).bound, "2");
+            assert_eq!(jet_memo_call(&store, 7, || 49), 49);
+            assert_eq!(jet_memo_call(&store, 7, || panic!("cache hit recomputed")), 49);
+            let stats = jet_memo_stats(&store);
+            assert_eq!((stats.hits, stats.misses, stats.size), (1, 1, 1));
+            let unbounded = std::sync::Mutex::new(JetMemo::<i64, i64>::with_bound(None));
+            assert_eq!(jet_memo_stats(&unbounded).bound, "none");
         }
     }
 

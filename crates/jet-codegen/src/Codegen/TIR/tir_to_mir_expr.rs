@@ -7667,10 +7667,11 @@ fn lower_host_call(
             )
         }
         THostCall::MemoStats { name } => {
+            let function = ctx.function_id_for(name)?;
             let name_value = ctx.emit(
                 "memo-stats-name",
                 Some(Type::String),
-                MirOperation::Constant(MirConstant::String(name.clone())),
+                MirOperation::Constant(MirConstant::String(function.0.to_string())),
             )?;
             let bound_value = ctx.emit(
                 "memo-stats-bound",
