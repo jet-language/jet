@@ -665,7 +665,7 @@ impl JetSharedTransaction {
             }
         }
         permits := [Arc<JetSharedCanonicalPermit>?].with_capacity(parts.len())
-        loop _ in 0..parts.len() { permits.push(None) }
+        loop _ in 0..<parts.len() { permits.push(None) }
         loop (index, _, permit) in leases { permits[index] = Val(^permit) }
         loop part in &parts { loop delta in part.deltas.drain(..) { delta() } }
         stage_result :: (fn() -> () Err! {

@@ -105,7 +105,7 @@ pub fn string_after(s: String, sep: String) -> String {
 }
 // Rust: crates/jet-rt/src/lib.rs:170
 pub fn string_before(s: String, sep: String) -> String {
-    match s.find(sep) { Val(i) -> s[..i].to_string(), None -> s.to_string() }
+    match s.find(sep) { Val(i) -> s[0..<i].to_string(), None -> s.to_string() }
 }
 
 // Rust: crates/jet-rt/src/lib.rs:178
@@ -196,7 +196,7 @@ impl JetArena {
             Val(.String(value)) -> Val(value.as_str())
             Val(.StringView{owner, start, end}) -> {
                 match self.values.get(USize{owner}) {
-                    Val(.String(value)) -> value.get(start..end)
+                    Val(.String(value)) -> value.get(start..<end)
                     _ -> None
                 }
             }
@@ -216,7 +216,7 @@ impl JetArena {
         start :: base.checked_add(start)?
         end :: base.checked_add(end)?
         match self.values.get(USize{owner})? {
-            .String(value) -> { _ :: value.get(start..end)? }
+            .String(value) -> { _ :: value.get(start..<end)? }
             _ -> return None
         }
         id :: I64{self.values.len()}
@@ -606,7 +606,7 @@ impl JetArena {
             .Char(v) -> Val(I64{U32{v}})
             .String(v) -> Val(self.alloc_string(^v))
             .StringView{owner, start, end} -> {
-                text :: self.get_string(owner)?.get(start..end)?.to_string()
+                text :: self.get_string(owner)?.get(start..<end)?.to_string()
                 Val(self.alloc_string(^text))
             }
             .IntList(v) -> Val(self.alloc_int_list(^v))
@@ -762,8 +762,8 @@ impl JetArena {
     pub fn list_slice(self: &JetArena, list: I64, start: I64, end: I64) -> I64? {
         if start < I64{0} or end < start -> return None
         slice :: match self.values.get(USize{list}) {
-            Val(.IntList(values)) if end <= I64{values.len()} -> JetVal.IntList(values[USize{start}..USize{end}].to_vec())
-            Val(.List(values)) if end <= I64{values.len()} -> JetVal.List(values[USize{start}..USize{end}].to_vec())
+            Val(.IntList(values)) if end <= I64{values.len()} -> JetVal.IntList(values[USize{start}..<USize{end}].to_vec())
+            Val(.List(values)) if end <= I64{values.len()} -> JetVal.List(values[USize{start}..<USize{end}].to_vec())
             _ -> return None
         }
         cells :: self.int_cells(list)
