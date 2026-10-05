@@ -9978,13 +9978,38 @@ impl<'a> LowerCtx<'a> {
 
     fn bind_captures(&mut self, lambda: &TLambda) -> Result<(), LowerError> {
         let facts = self.capture_facts_for(lambda);
-        self.bind_capture_specs(&lambda.captures, facts, lambda.source_span)
+        self.bind_capture_specs(
+            &lambda.captures,
+            facts,
+            &lambda.capture_facts.taken,
+            lambda.source_span,
+        )
+    }
+
+    /// A `^name` capture the body only reads: the closure owns its slot,
+    /// filled by moving the binding in (the scope never uses it again), and
+    /// lends each call a read of it. The closure construction
+    /// (`closure.capture.{slot}.move`) and the capture parameter
+    /// (`bind_capture_specs`) must agree, so both ask here.
+    fn taken_read_capture(
+        &self,
+        taken: &BTreeSet<String>,
+        source: &str,
+        ty: &Type,
+        access: MirAccess,
+        cloned: bool,
+    ) -> bool {
+        access == MirAccess::Read
+            && !cloned
+            && taken.contains(source)
+            && matches!(self.ownership_for(ty), MirOwnership::Owned)
     }
 
     fn bind_capture_specs(
         &mut self,
         captures: &[(String, String, Type)],
         facts: MirCaptureFacts,
+        taken: &BTreeSet<String>,
         span: Span,
     ) -> Result<(), LowerError> {
         self.capture_facts = Some(facts.clone());
@@ -10013,9 +10038,11 @@ impl<'a> LowerCtx<'a> {
             } else {
                 MirAccess::Read
             };
+            // A taken read capture owns its slot like a clone does; only the
+            // construction differs (a move instead of a copy).
             let ownership = if moved {
                 MirOwnership::from_access(MirAccess::Move)
-            } else if cloned {
+            } else if cloned || self.taken_read_capture(taken, source, ty, access, cloned) {
                 MirOwnership::Owned
             } else {
                 MirOwnership::from_access(access)
@@ -10421,14 +10448,15 @@ impl<'a> LowerCtx<'a> {
             } else {
                 MirAccess::Read
             };
-            // A `^name` capture the body only reads: the closure takes the
-            // binding (the scope never uses it again), so its owning slot is
-            // filled by moving the binding in, never by a copy; each call
-            // still lends the body a read of that slot.
-            let taken = access == MirAccess::Read
-                && !cloned
-                && lambda.capture_facts.taken.contains(source)
-                && matches!(self.ownership_for(ty), MirOwnership::Owned);
+            // A taken read capture (`taken_read_capture`) moves the binding
+            // into the closure's owning slot, never copies it.
+            let taken = self.taken_read_capture(
+                &lambda.capture_facts.taken,
+                source,
+                ty,
+                access,
+                cloned,
+            );
             let borrowed = matches!(access, MirAccess::Read | MirAccess::Write) && !cloned && !taken;
             // `runtime` is the canonical TIR slot used by the lambda body and,
             // for borrowed and moved captures, the exact enclosing slot (which
