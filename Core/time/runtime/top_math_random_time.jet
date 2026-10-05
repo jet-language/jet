@@ -2,12 +2,28 @@
 use core.time.runtime.kernel_time_instant.[JetInstant]
 use core.time.runtime.top_time_sleep.[jet_std_time_duration_to_millis, jet_std_time_sleep_duration_ns]
 use core.time.runtime.kernel_duration as duration_kernel
-use core.time.runtime.kernel_time.*
-use jet_std.[Clock, Rng, Stopwatch, Duration, DurationUnit, RangeError, TextError]
-use jet_std.[JetShow, JetDisplay, JetDebug, JetOutcome, JetAbsent, JetDeadlineUnwind]
-use jet_std.[JetDate, JetLocalTime, JetPeriod, JetDateTime, JetZone, JetZonedDateTime]
-use jet_foundation.Numeric.[JetInt]
-use jet_std.*
+use core.prelude.runtime.std_common_types_02.[Clock, Rng, Stopwatch, Duration, DurationUnit, RangeError]
+use core.prelude.runtime.std_common_types_03.[JetFraction]
+use core.prelude.runtime.std_common_types_04.[JetDecimal, jet_std_decimal_from_exact, jet_std_decimal_to_exact,
+    jet_std_fraction_from_exact, jet_std_fraction_to_exact, jet_std_exact_to_raw, jet_std_raw_to_exact]
+use core.prelude.runtime.std_open.[TextError, UTF8Error]
+use core.prelude.runtime.kernel_values.[JetShow, JetDisplay, JetDebug]
+use core.prelude.runtime.kernel_contracts.[jet_c_int_range_message]
+use core.prelude.runtime.kernel_string_bytes.[jet_string_decode_utf8, jet_string_decode_utf8_lossy]
+use core.prelude.runtime.core.[jet_interrupt_handler_should_unwind, jet_panic, jet_runtime_diagnostic, jet_runtime_stop]
+use core.tasks.runtime.scheduler.[JetDeadlineUnwind, jet_scheduler_wait_boundary_should_unwind,
+    jet_scheduler_world_reject_uncontrolled, jet_typed_deadline_boundary_should_unwind]
+use core.tasks.runtime.task_group.[jet_task_deadline, jet_task_deadline_mark_pending]
+use core.math.runtime.kernel_seeded_random.[jet_seeded_rng_next, jet_seeded_rng_int_checked, jet_seeded_rng_float,
+    jet_seeded_rng_float_open, jet_seeded_rng_float_range, jet_seeded_rng_bool, jet_seeded_rng_bool_p,
+    jet_seeded_rng_normal, jet_seeded_rng_exponential, jet_seeded_rng_split]
+use core.net.runtime.std_mime as mime_table
+use core.text.runtime.typed_text.[jet_typed_datetime_interpolate]
+// No Jet home yet: the Rust Core/Time.rs date family and RFC3339 parser
+// (kernel_civil/kernel_time hold part of it as Civil*), JetURL, and the
+// storage-backed seeded draws held on TANDEM-BATCH (kernel_seeded_random).
+use jet_std.[JetDate, JetLocalTime, JetPeriod, JetDateTime, JetZone, JetZonedDateTime, jet_time_parse_rfc3339, JetURL,
+    jet_seeded_rng_bytes, jet_seeded_rng_pick, jet_seeded_rng_weighted_pick, jet_seeded_rng_sample, jet_seeded_rng_shuffle]
 
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:4
 impl JetInstant.JetShow {
@@ -39,8 +55,11 @@ fn jet_deadline_exceeded(wait_kind: String) -> Never {
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:34
 fn jet_std_time_start() -> Stopwatch {
     jet_scheduler_world_reject_uncontrolled("clock")
-    // GATE #4565: kernel primitive
-    Stopwatch{start: #Unsafe("sample host monotonic clock for the stopwatch") { std.time.Instant.now() }}
+    Stopwatch{start: host_instant_now()}
+}
+// GATE #4565: kernel primitive — sample the host monotonic clock.
+fn host_instant_now() -> std.time.Instant {
+    #Unsafe("sample host monotonic clock for the stopwatch") { std.time.Instant.now() }
 }
 // Deterministic injected Clock/Rng capabilities never read ambient time/randomness.
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:45
@@ -48,7 +67,7 @@ fn jet_std_clock_new(seed: I64) -> Clock { Clock.manual(seed) }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:48
 fn jet_std_clock_system() -> Clock { Clock.system() }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:51
-fn jet_clock_now(c: &Clock) -> I64 { c.now() }
+fn jet_clock_now(c: Clock) -> I64 { c.now() }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:54
 fn jet_clock_tick(c: &Clock, ms: I64) -> I64 {
     now :: c.now().saturating_add(ms)
@@ -58,7 +77,7 @@ fn jet_clock_tick(c: &Clock, ms: I64) -> I64 {
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:61
 fn jet_clock_advance(c: &Clock, to_ms: I64) -> I64 { c.set(to_ms); c.now() }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:65
-fn jet_clock_wait(c: &Clock, d: &Duration) -> I64 {
+fn jet_clock_wait(c: &Clock, d: Duration) -> I64 {
     now :: c.now().saturating_add(jet_std_time_duration_to_millis(d.ns))
     c.set(now)
     c.now()
@@ -68,14 +87,18 @@ fn jet_std_rng_new(seed: I64) -> Rng { Rng{state: seed as U64} }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:74
 fn jet_det_rng_next(r: &Rng) -> U64 { jet_seeded_rng_next(&r.state) }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:77
-fn jet_rng_int(r: &Rng, lo: I64, hi: I64) -> I64 {
-    low :: jet_int_to_i64(lo).unwrap_or_else(() -> jet_runtime_stop("E1003", file!(), line!(), jet_c_int_range_message()))
-    high :: jet_int_to_i64(hi).unwrap_or_else(() -> jet_runtime_stop("E1003", file!(), line!(), jet_c_int_range_message()))
-    match jet_seeded_rng_int_checked(&r.state, low, high) {
-        Ok(value) -> jet_int_from_i64(value)
-        Err(message) -> jet_runtime_stop("E3010", "", 0, message)
+// Rust decodes the AOT exact-Int words; the draw itself stays I64.
+fn jet_rng_int(r: &Rng, lo: Int, hi: Int) -> Int {
+    low :: I64.from_int(lo) ?? int_range_stop()
+    high :: I64.from_int(hi) ?? int_range_stop()
+    if jet_seeded_rng_int_checked(&r.state, low, high) == {
+        .Ok(value) -> Int{value}
+        .Err(message) -> jet_runtime_stop("E3010", "", 0, message)
     }
 }
+// Rust file!()/line!() name the Rust source; jet_runtime_stop routes the
+// C-Int range code to the entry report without them.
+fn int_range_stop() -> Never { jet_runtime_stop("E1003", "", 0, jet_c_int_range_message()) }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:89
 fn jet_rng_float(r: &Rng) -> F64 { jet_seeded_rng_float(&r.state) }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:92
@@ -95,18 +118,18 @@ fn jet_rng_bytes(r: &Rng, n: I64) -> [U8] { jet_seeded_rng_bytes(&r.state, n) }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:116
 fn jet_rng_split(r: &Rng) -> Rng { Rng{state: jet_seeded_rng_split(&r.state)} }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:121
-fn jet_rng_pick<T: Clone>(r: &Rng, xs: &[T]) -> T JetAbsent! { jet_seeded_rng_pick(&r.state, xs).ok_or(JetAbsent) }
+fn jet_rng_pick<T: Clone>(r: &Rng, xs: [T]) -> T? { jet_seeded_rng_pick(&r.state, xs) }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:124
-fn jet_rng_weighted_pick<T: Clone>(r: &Rng, xs: &[T], weights: &[F64]) -> T JetAbsent! {
-    jet_seeded_rng_weighted_pick(&r.state, xs, weights).ok_or(JetAbsent)
+fn jet_rng_weighted_pick<T: Clone>(r: &Rng, xs: [T], weights: [F64]) -> T? {
+    jet_seeded_rng_weighted_pick(&r.state, xs, weights)
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:131
-fn jet_rng_sample<T: Clone>(r: &Rng, xs: &[T], k: I64) -> [T] { jet_seeded_rng_sample(&r.state, xs, k) }
+fn jet_rng_sample<T: Clone>(r: &Rng, xs: [T], k: I64) -> [T] { jet_seeded_rng_sample(&r.state, xs, k) }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:134
-fn jet_rng_shuffle<T>(r: &Rng, xs: &[T]) -> Unit { jet_seeded_rng_shuffle(&r.state, xs) }
+fn jet_rng_shuffle<T>(r: &Rng, xs: &[T]) { jet_seeded_rng_shuffle(&r.state, &xs) }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:139
-fn jet_duration_from_int(n: JetInt, unit: DurationUnit) -> Duration RangeError! {
-    value :: jet_int_owned_to_i64(&n) ?? return Err(RangeError{reason: duration_kernel.INT_ERROR_REASON})
+fn jet_duration_from_int(n: Int, unit: DurationUnit) -> Duration RangeError! {
+    value :: I64.from_int(n) ?? return Err(RangeError{reason: duration_kernel.INT_ERROR_REASON})
     ns :: duration_kernel.scale(value, unit.nanoseconds()) ?? return Err(RangeError{reason: duration_kernel.INT_ERROR_REASON})
     Ok(Duration{ns})
 }
@@ -116,40 +139,40 @@ fn jet_duration_from_float(n: F64, unit: DurationUnit) -> Duration RangeError! {
     Ok(Duration{ns})
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:162
-fn jet_duration_in(d: &Duration, unit: &DurationUnit) -> I64 RangeError! { Ok(duration_kernel.whole_units(d.ns, unit.nanoseconds())) }
+fn jet_duration_in(d: Duration, unit: DurationUnit) -> I64 RangeError! { Ok(duration_kernel.whole_units(d.ns, unit.nanoseconds())) }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:168
-fn jet_duration_ms_value(d: &Duration) -> I64 { d.as_millis() }
+fn jet_duration_ms_value(d: Duration) -> I64 { d.as_millis() }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:171
-fn jet_duration_ns_value(d: &Duration) -> I64 { d.ns }
+fn jet_duration_ns_value(d: Duration) -> I64 { d.ns }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:176
-fn jet_std_time_sleep_duration(duration: &Duration) -> Unit { jet_std_time_sleep_duration_ns(duration.ns) }
+fn jet_std_time_sleep_duration(duration: Duration) { jet_std_time_sleep_duration_ns(duration.ns) }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:179
-fn jet_duration_is_zero(d: &Duration) -> Bool { duration_kernel.is_zero(d.ns) }
+fn jet_duration_is_zero(d: Duration) -> Bool { duration_kernel.is_zero(d.ns) }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:182
-fn jet_duration_total_seconds(d: &Duration) -> I64 { duration_kernel.total_seconds(d.ns) }
+fn jet_duration_total_seconds(d: Duration) -> I64 { duration_kernel.total_seconds(d.ns) }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:185
-fn jet_duration_seconds_value(d: &Duration) -> F64 { duration_kernel.seconds_value(d.ns) }
+fn jet_duration_seconds_value(d: Duration) -> F64 { duration_kernel.seconds_value(d.ns) }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:188
-fn jet_duration_difference(a: &Duration, b: &Duration) -> Duration { Duration{ns: duration_kernel.sub(a.ns, b.ns)} }
+fn jet_duration_difference(a: Duration, b: Duration) -> Duration { Duration{ns: duration_kernel.sub(a.ns, b.ns)} }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:193
-fn jet_duration_abs(d: &Duration) -> Duration { Duration{ns: duration_kernel.abs(d.ns)} }
+fn jet_duration_abs(d: Duration) -> Duration { Duration{ns: duration_kernel.abs(d.ns)} }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:198
-fn jet_duration_negated(d: &Duration) -> Duration { Duration{ns: duration_kernel.negated(d.ns)} }
+fn jet_duration_negated(d: Duration) -> Duration { Duration{ns: duration_kernel.negated(d.ns)} }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:203
-fn jet_duration_sign(d: &Duration) -> I64 { duration_kernel.sign(d.ns) }
+fn jet_duration_sign(d: Duration) -> I64 { duration_kernel.sign(d.ns) }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:206
-fn jet_duration_total_in(d: &Duration, unit: &String) -> F64 { duration_kernel.total_in(d.ns, unit) }
+fn jet_duration_total_in(d: Duration, unit: String) -> F64 { duration_kernel.total_in(d.ns, unit) }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:209
 // HELD #4262: kernel_duration has no round until the native signed128 carrier lands.
-fn jet_duration_round(d: &Duration, unit: &String, increment: &I64, mode: &String) -> Duration {
+fn jet_duration_round(d: Duration, unit: String, increment: I64, mode: String) -> Duration {
     Duration{ns: duration_kernel.round(d.ns, unit, increment, mode) ?? d.ns}
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:218
-fn jet_duration_scale(d: &Duration, factor: &I64) -> Duration {
+fn jet_duration_scale(d: Duration, factor: I64) -> Duration {
     Duration{ns: duration_kernel.scale(d.ns, factor) ?? panic(duration_kernel.SCALE_ERROR_REASON)}
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:224
-fn jet_duration_divide(d: &Duration, factor: &I64) -> Duration {
+fn jet_duration_divide(d: Duration, factor: I64) -> Duration {
     Duration{ns: duration_kernel.divide(d.ns, factor) ?? panic(duration_kernel.SCALE_ERROR_REASON)}
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:231
@@ -162,358 +185,161 @@ impl Duration.Sub {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:244
     fn sub(self, rhs: Duration) -> Duration { Duration{ns: duration_kernel.sub(self.ns, rhs.ns)} }
 }
-// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:251
-impl JetInstant.Add<Duration> {
-    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:254
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:251,277: Instant + Duration
+// and Duration + Instant are one shift; #Commutative derives the reverse.
+impl JetInstant.Add(Duration) #Commutative {
     fn add(self, rhs: Duration) -> JetInstant { self.plus_duration_ns(rhs.ns) }
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:259
-impl JetInstant.Sub<Duration> {
+impl JetInstant.Sub(Duration) {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:262
     fn sub(self, rhs: Duration) -> JetInstant { self.minus_duration_ns(rhs.ns) }
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:267
 impl JetInstant.Sub {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:270
-    fn sub(self, rhs: JetInstant) -> Duration { Duration{ns: self.difference_ns(&rhs)} }
-}
-// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:277
-impl Duration.Add<JetInstant> {
-    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:280
-    fn add(self, rhs: JetInstant) -> JetInstant { rhs.plus_duration_ns(self.ns) }
-}
-// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:285
-impl Duration.__jet_Equatable {
-    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:286
-    fn equal(self, rhs: &Duration) -> Bool { self.ns == rhs.ns }
-}
-// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:291
-impl Duration.__jet_Comparable {
-    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:292
-    fn compare(self, rhs: &Duration) -> __jet_Ordering { jet_time_ordering(self.ns.cmp(&rhs.ns)) }
-}
-// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:297
-impl JetInstant.__jet_Equatable {
-    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:298
-    fn equal(self, rhs: &JetInstant) -> Bool { self == rhs }
-}
-// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:303
-impl JetInstant.__jet_Comparable {
-    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:304
-    fn compare(self, rhs: &JetInstant) -> __jet_Ordering { jet_time_ordering(self.cmp(rhs)) }
+    fn sub(self, rhs: JetInstant) -> Duration { Duration{ns: self.difference_ns(rhs)} }
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:309
 fn jet_time_instant_now() -> JetInstant { JetInstant.now() }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:312
-fn jet_instant_elapsed_millis(i: &JetInstant) -> I64 { i.elapsed_millis() }
+fn jet_instant_elapsed_millis(i: JetInstant) -> I64 { i.elapsed_millis() }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:315
-fn jet_instant_elapsed(i: &JetInstant) -> Duration { Duration{ns: i.elapsed_nanos()} }
-// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:323
-fn jet_time_unix_input(value: I64) -> I64 {
-    jet_int_to_i64(value).unwrap_or_else(() -> jet_runtime_stop("E1003", file!(), line!(), jet_c_int_range_message()))
-}
-// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:328
-fn jet_time_owned_input(value: &JetInt) -> I64 {
-    jet_int_owned_to_i64(value).unwrap_or_else(_ -> jet_runtime_stop("E1003", file!(), line!(), jet_c_int_range_message()))
-}
+fn jet_instant_elapsed(i: JetInstant) -> Duration { Duration{ns: i.elapsed_nanos()} }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:323,328
+// D-TIME-INT-ADAPTER1: the temporal kernel takes I64; exact Int arguments
+// narrow once here (the packed-word and owned decoders are one Int in Jet).
+fn jet_time_int_input(value: Int) -> I64 { I64.from_int(value) ?? int_range_stop() }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:333
-fn jet_local_date_owned(year: &JetInt, month: &JetInt, day: &JetInt) -> JetDate {
-    JetDate.new(jet_time_owned_input(year), jet_time_owned_input(month), jet_time_owned_input(day))
+fn jet_local_date_owned(year: Int, month: Int, day: Int) -> JetDate {
+    JetDate.new(jet_time_int_input(year), jet_time_int_input(month), jet_time_int_input(day))
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:344
-fn jet_local_time_owned(hour: &JetInt, minute: &JetInt, second: &JetInt) -> JetLocalTime {
-    JetLocalTime.new(jet_time_owned_input(hour), jet_time_owned_input(minute), jet_time_owned_input(second))
+fn jet_local_time_owned(hour: Int, minute: Int, second: Int) -> JetLocalTime {
+    JetLocalTime.new(jet_time_int_input(hour), jet_time_int_input(minute), jet_time_int_input(second))
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:355
-fn jet_period_owned(years: &JetInt, months: &JetInt, days: &JetInt) -> JetPeriod {
-    JetPeriod.new(jet_time_owned_input(years), jet_time_owned_input(months), jet_time_owned_input(days))
+fn jet_period_owned(years: Int, months: Int, days: Int) -> JetPeriod {
+    JetPeriod.new(jet_time_int_input(years), jet_time_int_input(months), jet_time_int_input(days))
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:366
-fn jet_time_datetime(year: I64, month: I64, day: I64, hour: I64, minute: I64, second: I64) -> JetDateTime {
-    JetDateTime.from_parts(jet_time_unix_input(year), jet_time_unix_input(month), jet_time_unix_input(day),
-        jet_time_unix_input(hour), jet_time_unix_input(minute), jet_time_unix_input(second), 0)
+fn jet_time_datetime(year: Int, month: Int, day: Int, hour: Int, minute: Int, second: Int) -> JetDateTime {
+    JetDateTime.from_parts(jet_time_int_input(year), jet_time_int_input(month), jet_time_int_input(day),
+        jet_time_int_input(hour), jet_time_int_input(minute), jet_time_int_input(second), 0)
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:384
-fn jet_time_time(hour: I64, minute: I64, second: I64) -> JetLocalTime {
-    JetLocalTime.new(jet_time_unix_input(hour), jet_time_unix_input(minute), jet_time_unix_input(second))
+fn jet_time_time(hour: Int, minute: Int, second: Int) -> JetLocalTime {
+    JetLocalTime.new(jet_time_int_input(hour), jet_time_int_input(minute), jet_time_int_input(second))
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:391
-fn jet_time_days_in_month(year: I64, month: I64) -> I64 { JetDate.days_in_month_of(jet_time_unix_input(year), jet_time_unix_input(month)) }
+fn jet_time_days_in_month(year: Int, month: Int) -> I64 { JetDate.days_in_month_of(jet_time_int_input(year), jet_time_int_input(month)) }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:394
-fn jet_time_is_leap_year(year: I64) -> Bool { JetDate.is_leap(jet_time_unix_input(year)) }
-// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:397
-fn jet_calendar_isleap(year: I64) -> Bool { jet_time_is_leap_year(year) }
-// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:400
-fn jet_calendar_leapdays(first: I64, second: I64) -> JetInt {
-    (start, end) :: if first <= second -> (first, second) else -> (second, first)
-    count := I64{0}
-    for year in start..end { if JetDate.is_leap(year) { count += 1 } }
-    jet_int_owned_from_i64(count)
+fn jet_time_is_leap_year(year: Int) -> Bool { JetDate.is_leap(jet_time_int_input(year)) }
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:397-792
+// core.time.calendar is the one calendar implementation (as core.text.fmt is
+// for formatting); these adapters keep the compiler-referenced jet_calendar_*
+// names and carriers until the compiler routes core.time.calendar itself.
+use core.time.calendar as calendar
+fn jet_calendar_isleap(year: Int) -> Bool { calendar.isleap(year) }
+fn jet_calendar_leapdays(first: I64, second: I64) -> Int { calendar.leapdays(Int{first}, Int{second}) }
+fn jet_calendar_weekday(year: I64, month: I64, day: I64) -> Int { calendar.weekday(Int{year}, Int{month}, Int{day}) }
+fn jet_calendar_monthrange(year: I64, month: I64) -> (days: Int, weekday: Int) { calendar.monthrange(Int{year}, Int{month}) }
+fn jet_calendar_monthcalendar(year: I64, month: I64) -> [[Int]] { calendar.monthcalendar(Int{year}, Int{month}) }
+fn jet_calendar_monthcalendar_start(year: I64, month: I64, firstweekday: I64) -> [[Int]] {
+    calendar.monthcalendar_start(Int{year}, Int{month}, Int{firstweekday})
 }
-// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:415
-fn jet_calendar_weekday_i64(year: I64, month: I64, day: I64) -> I64 {
-    adjusted_year :: if month < 3 -> year - 1 else -> year
-    offsets :: [0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4]
-    month_index :: month.saturating_sub(1).clamp(0, 11) as USize
-    sunday_zero :: (adjusted_year + adjusted_year.div_euclid(4) - adjusted_year.div_euclid(100)
-        + adjusted_year.div_euclid(400) + offsets[month_index] + day).rem_euclid(7)
-    (sunday_zero + 6).rem_euclid(7)
+fn jet_calendar_yearcalendar(year: I64) -> [[[Int]]] { calendar.yearcalendar(Int{year}) }
+fn jet_calendar_weekheader(width: I64, firstweekday: I64) -> [String] { calendar.weekheader(Int{width}, Int{firstweekday}) }
+fn jet_calendar_formatmonth(year: I64, month: I64, width: I64) -> String { calendar.formatmonth(Int{year}, Int{month}, Int{width}) }
+fn jet_calendar_formatyear(year: I64) -> String { calendar.formatyear(Int{year}) }
+fn jet_calendar_day_name(weekday: I64) -> String { calendar.day_name(Int{weekday}) }
+fn jet_calendar_day_abbr(weekday: I64) -> String { calendar.day_abbr(Int{weekday}) }
+fn jet_calendar_month_name(month: I64) -> String { calendar.month_name(Int{month}) }
+fn jet_calendar_month_abbr(month: I64) -> String { calendar.month_abbr(Int{month}) }
+fn jet_calendar_timegm(year: I64, month: I64, day: I64, hour: I64, minute: I64, second: I64) -> Int {
+    calendar.timegm(Int{year}, Int{month}, Int{day}, Int{hour}, Int{minute}, Int{second})
 }
-// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:428
-fn jet_coll_owned_values(values: [I64]) -> [JetInt] { values.into_iter().map(jet_int_owned_from_i64).collect() }
-// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:437
-fn jet_coll_sift_down_aot(values: &[I64], index: USize) -> Unit {
-    cursor := index
-    loop {
-        left :: cursor.saturating_mul(2).saturating_add(1)
-        if left >= values.len() -> break
-        right :: left + 1
-        child :: if right < values.len() && values[right] < values[left] -> right else -> left
-        if values[cursor] <= values[child] -> break
-        values.swap(cursor, child)
-        cursor = child
-    }
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:428-617
+// core.collections owns the binary-heap operations (same sift order: the
+// parent stays on ties, then the left child). The named result tuples print
+// as the Rust JetShow impls did: "(heap,value) { heap: [...], value: ... }".
+use core.collections as collections
+fn jet_coll_ints(values: [I64]) -> [Int] {
+    ints :: loop value in values -> Int{value}
+    ints
 }
-// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:457
-fn jet_coll_heappop_aot(values: View<I64>) -> ([I64], I64?) {
-    if values.is_empty() -> return ([], None)
-    if values.len() == 1 -> return ([], Val(values[0]))
-    heap := [I64].with_capacity(values.len() - 1)
-    heap.push(values[values.len() - 1])
-    heap.extend_from_slice(values[1..values.len() - 1])
-    value :: values[0]
-    jet_coll_sift_down_aot(&heap, 0)
-    (^heap, Val(value))
+fn jet_coll_heappop(values: [I64]) -> (heap: [Int], value: Int?) { collections.heappop(jet_coll_ints(values)) }
+fn jet_coll_heappushpop(values: [I64], value: I64) -> (heap: [Int], value: Int) {
+    collections.heappushpop(jet_coll_ints(values), Int{value})
 }
-// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:472
-fn jet_coll_heappushpop_aot(values: View<I64>, value: I64) -> ([I64], I64) {
-    if values.is_empty() || value <= values[0] -> return (values.to_vec(), value)
-    popped :: values[0]
-    heap := [I64].with_capacity(values.len())
-    heap.push(value)
-    heap.extend_from_slice(values[1..])
-    jet_coll_sift_down_aot(&heap, 0)
-    (^heap, popped)
-}
-// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:484
-fn jet_coll_heapreplace_aot(values: View<I64>, value: I64) -> ([I64], I64?) {
-    if values.is_empty() -> return ([value], None)
-    popped :: values[0]
-    heap := [I64].with_capacity(values.len())
-    heap.push(value)
-    heap.extend_from_slice(values[1..])
-    jet_coll_sift_down_aot(&heap, 0)
-    (^heap, Val(popped))
-}
-// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:496
-fn jet_coll_heappop(values: View<I64>) -> ([JetInt], JetInt JetAbsent!) {
-    (heap, value) :: jet_coll_heappop_aot(values)
-    (jet_coll_owned_values(^heap), value.map(jet_int_owned_from_i64).ok_or(JetAbsent))
-}
-// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:511
-fn jet_coll_heappushpop(values: View<I64>, value: I64) -> ([JetInt], JetInt) {
-    (heap, popped) :: jet_coll_heappushpop_aot(values, value)
-    (jet_coll_owned_values(^heap), jet_int_owned_from_i64(popped))
-}
-// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:525
-fn jet_coll_heapreplace(values: View<I64>, value: I64) -> ([JetInt], JetInt JetAbsent!) {
-    (heap, popped) :: jet_coll_heapreplace_aot(values, value)
-    (jet_coll_owned_values(^heap), popped.map(jet_int_owned_from_i64).ok_or(JetAbsent))
-}
-// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:540
-impl ([JetInt], JetInt JetAbsent!).JetShow {
-    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:544
-    fn jet_show(self) -> String { "(heap,value) {{ heap: {self.0.jet_show()}, value: {self.1.jet_show()} }}" }
-}
-// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:553
-impl ([JetInt], JetInt JetAbsent!).JetDisplay {
-    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:557
-    fn jet_display(self) -> String { self.jet_show() }
-}
-// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:562
-impl ([JetInt], JetInt JetAbsent!).JetDebug {
-    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:566
-    fn jet_debug(self) -> String { self.jet_show() }
-}
-// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:571
-impl ([JetInt], JetInt).JetShow {
-    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:575
-    fn jet_show(self) -> String { "(heap,value) {{ heap: {self.0.jet_show()}, value: {self.1.jet_show()} }}" }
-}
-// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:584
-impl ([JetInt], JetInt).JetDisplay {
-    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:588
-    fn jet_display(self) -> String { self.jet_show() }
-}
-// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:593
-impl ([JetInt], JetInt).JetDebug {
-    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:597
-    fn jet_debug(self) -> String { self.jet_show() }
-}
-// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:601
-impl (String, String).JetShow {
-    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:602
-    fn jet_show(self) -> String { "({self.0.jet_show()}, {self.1.jet_show()})" }
-}
-// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:607
-impl (String, String).JetDisplay {
-    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:608
-    fn jet_display(self) -> String { self.jet_show() }
-}
-// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:613
-impl (String, String).JetDebug {
-    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:614
-    fn jet_debug(self) -> String { self.jet_show() }
-}
-// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:619
-fn jet_calendar_weekday(year: I64, month: I64, day: I64) -> JetInt { jet_int_owned_from_i64(jet_calendar_weekday_i64(year, month, day)) }
-// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:626
-fn jet_calendar_monthrange(year: I64, month: I64) -> (JetInt, JetInt) {
-    (jet_int_owned_from_i64(jet_time_days_in_month(year, month)), jet_int_owned_from_i64(jet_calendar_weekday_i64(year, month, 1)))
-}
-// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:638
-fn jet_calendar_monthcalendar(year: I64, month: I64) -> [[JetInt]] { jet_calendar_monthcalendar_start(year, month, 0) }
-// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:644
-fn jet_calendar_monthcalendar_start(year: I64, month: I64, firstweekday: I64) -> [[JetInt]] {
-    days :: jet_time_days_in_month(year, month)
-    start :: (jet_calendar_weekday_i64(year, month, 1) - firstweekday).rem_euclid(7)
-    weeks := [[JetInt]]{}
-    week := [JetInt]{}
-    for _ in 0..start { week.push(jet_int_owned_from_i64(0)) }
-    for day in 1..=days {
-        week.push(jet_int_owned_from_i64(day))
-        if week.len() == 7 { weeks.push(^week); week = [] }
-    }
-    if !week.is_empty() {
-        while week.len() < 7 { week.push(jet_int_owned_from_i64(0)) }
-        weeks.push(^week)
-    }
-    ^weeks
-}
-// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:671
-fn jet_calendar_yearcalendar(year: I64) -> [[[JetInt]]] { (1..=12).map(month -> jet_calendar_monthcalendar(year, month)).collect() }
-// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:678
-fn jet_calendar_weekheader(width: I64, firstweekday: I64) -> [String] {
-    cell_width :: width.max(1) as USize
-    (0..7).map(index -> {
-        text :: jet_calendar_day_abbr((index + firstweekday).rem_euclid(7))
-        bytes :: text.as_bytes()
-        if bytes.len() >= cell_width -> String.from_utf8_lossy(bytes[..cell_width]).into_owned()
-        else -> "{text}{\" \".repeat(cell_width - bytes.len())}"
-    }).collect()
-}
-// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:692
-fn jet_calendar_formatmonth(year: I64, month: I64, width: I64) -> String {
-    cell_width :: width.max(2) as USize
-    heading :: "{jet_calendar_month_name(month)} {year}"
-    title_width :: cell_width.saturating_mul(7).saturating_add(6)
-    title_bytes :: heading.as_bytes()
-    title :: if title_bytes.len() >= title_width -> String.from_utf8_lossy(title_bytes[..title_width]).into_owned()
-    else -> {
-        left :: (title_width - title_bytes.len()) / 2
-        right :: title_width - title_bytes.len() - left
-        "{\" \".repeat(left)}{heading}{\" \".repeat(right)}"
-    }
-    cells :: jet_calendar_weekheader(cell_width as I64, 0)
-    out := "{title}\n{cells.join(\" \")}\n"
-    for week in jet_calendar_monthcalendar(year, month) {
-        row :: week.into_iter().map(day -> {
-            text :: day.to_raw().to_string()
-            cell :: if text == "0" -> "" else -> text
-            if cell.len() >= cell_width -> cell[..cell_width].to_string()
-            else -> "{\" \".repeat(cell_width - cell.len())}{cell}"
-        }).collect<[String]>().join(" ")
-        out.push_str(row)
-        out.push('\n')
-    }
-    ^out
-}
-// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:725
-fn jet_calendar_formatyear(year: I64) -> String {
-    out := String.new()
-    for month in 1..=12 { out.push_str(jet_calendar_formatmonth(year, month, 3)); out.push('\n') }
-    ^out
-}
-// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:733
-fn jet_calendar_day_name(weekday: I64) -> String {
-    ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"][weekday.clamp(0, 6) as USize].to_string()
-}
-// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:747
-fn jet_calendar_day_abbr(weekday: I64) -> String { ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][weekday.clamp(0, 6) as USize].to_string() }
-// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:753
-fn jet_calendar_month_name(month: I64) -> String {
-    ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"][month.saturating_sub(1).clamp(0, 11) as USize].to_string()
-}
-// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:772
-fn jet_calendar_month_abbr(month: I64) -> String {
-    ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][month.saturating_sub(1).clamp(0, 11) as USize].to_string()
-}
-// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:781
-fn jet_calendar_timegm(year: I64, month: I64, day: I64, hour: I64, minute: I64, second: I64) -> JetInt {
-    jet_int_owned_from_i64(JetDateTime.from_parts(year, month, day, hour, minute, second, 0).to_unix_seconds())
+fn jet_coll_heapreplace(values: [I64], value: I64) -> (heap: [Int], value: Int?) {
+    collections.heapreplace(jet_coll_ints(values), Int{value})
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:793
-fn jet_time_period(years: I64, months: I64, days: I64) -> JetPeriod { JetPeriod.new(jet_time_unix_input(years), jet_time_unix_input(months), jet_time_unix_input(days)) }
+fn jet_time_period(years: Int, months: Int, days: Int) -> JetPeriod { JetPeriod.new(jet_time_int_input(years), jet_time_int_input(months), jet_time_int_input(days)) }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:800
-fn jet_time_period_days(days: I64) -> JetPeriod { JetPeriod.days(jet_time_unix_input(days)) }
+fn jet_time_period_days(days: Int) -> JetPeriod { JetPeriod.days(jet_time_int_input(days)) }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:803
-fn jet_time_period_months(months: I64) -> JetPeriod { JetPeriod.months(jet_time_unix_input(months)) }
+fn jet_time_period_months(months: Int) -> JetPeriod { JetPeriod.months(jet_time_int_input(months)) }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:806
-fn jet_time_period_years(years: I64) -> JetPeriod { JetPeriod.years(jet_time_unix_input(years)) }
+fn jet_time_period_years(years: Int) -> JetPeriod { JetPeriod.years(jet_time_int_input(years)) }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:809
-fn jet_time_from_unix_ms(value: I64) -> JetDateTime { JetDateTime.from_unix_ms(jet_time_unix_input(value)) }
+fn jet_time_from_unix_ms(value: Int) -> JetDateTime { JetDateTime.from_unix_ms(jet_time_int_input(value)) }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:812
-fn jet_time_from_unix_seconds(value: I64) -> JetDateTime { JetDateTime.from_unix_seconds(jet_time_unix_input(value)) }
+fn jet_time_from_unix_seconds(value: Int) -> JetDateTime { JetDateTime.from_unix_seconds(jet_time_int_input(value)) }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:815
-fn jet_time_from_unix_microseconds(value: I64) -> JetDateTime { JetDateTime.from_unix_microseconds(jet_time_unix_input(value)) }
+fn jet_time_from_unix_microseconds(value: Int) -> JetDateTime { JetDateTime.from_unix_microseconds(jet_time_int_input(value)) }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:818
-fn jet_time_from_unix_nanoseconds(value: I64) -> JetDateTime { JetDateTime.from_unix_nanoseconds(jet_time_unix_input(value)) }
+fn jet_time_from_unix_nanoseconds(value: Int) -> JetDateTime { JetDateTime.from_unix_nanoseconds(jet_time_int_input(value)) }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:822
 fn jet_time_now_utc() -> JetDateTime { JetDateTime.now() }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:825
 fn jet_time_today() -> JetDate { JetDate.today_utc() }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:828
-fn jet_time_zone_named(name: &String) -> JetZone Err! { JetZone.named(name) }
+fn jet_time_zone_named(name: String) -> JetZone Err! { JetZone.named(name) }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:831
 fn jet_time_zone_utc() -> JetZone { JetZone.utc() }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:834
-fn jet_time_zoned(dt: &JetDateTime, zone: &JetZone) -> JetZonedDateTime { dt.in_zone(zone) }
+fn jet_time_zoned(dt: JetDateTime, zone: JetZone) -> JetZonedDateTime { dt.in_zone(zone) }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:837
-fn jet_time_zoned_local(date: &JetDate, time: &JetLocalTime, zone: &JetZone, disambiguation: &String) -> JetZonedDateTime Err! {
+fn jet_time_zoned_local(date: JetDate, time: JetLocalTime, zone: JetZone, disambiguation: String) -> JetZonedDateTime Err! {
     JetZonedDateTime.from_local_with_disambiguation(date, time, zone, disambiguation)
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:845
-fn jet_datetime_plus_duration(dt: &JetDateTime, d: &Duration) -> JetDateTime { dt.plus_duration_ns(d.ns) }
+fn jet_datetime_plus_duration(dt: JetDateTime, d: Duration) -> JetDateTime { dt.plus_duration_ns(d.ns) }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:848
-fn jet_datetime_difference(a: &JetDateTime, b: &JetDateTime) -> Duration { Duration{ns: a.difference_ns(b)} }
+fn jet_datetime_difference(a: JetDateTime, b: JetDateTime) -> Duration { Duration{ns: a.difference_ns(b)} }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:853
-fn jet_zoned_add_duration(z: &JetZonedDateTime, d: &Duration) -> JetZonedDateTime { z.add_duration_ns(d.ns) }
-// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:856
-fn jet_time_text_error(message: String) -> TextError { TextError{message} }
-// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:860
-fn jet_time_range_error(reason: String) -> RangeError { RangeError{reason} }
+fn jet_zoned_add_duration(z: JetZonedDateTime, d: Duration) -> JetZonedDateTime { z.add_duration_ns(d.ns) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:856,860 (jet_time_text_error,
+// jet_time_range_error): the kernels' failure messages become TextError/RangeError
+// at each `?? return Err(...)` below.
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:864
 impl JetDate {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:865
-    fn diff_days_value(self, other: JetDate) -> I64 { self.diff_days(&other) }
+    fn diff_days_value(self, other: JetDate) -> I64 { self.diff_days(other) }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:869
-    fn add_period_value(self, period: JetPeriod) -> JetDate { self.add_period(&period) }
+    fn add_period_value(self, period: JetPeriod) -> JetDate { self.add_period(period) }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:873
-    fn subtract_period_value(self, period: JetPeriod) -> JetDate { self.subtract_period(&period) }
+    fn subtract_period_value(self, period: JetPeriod) -> JetDate { self.subtract_period(period) }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:877
-    fn until_duration(self, other: JetDate, largest_unit: &String, smallest_unit: &String, rounding_mode: &String, increment: I64) -> Duration {
-        Duration{ns: self.until_ns(&other, largest_unit, smallest_unit, rounding_mode, increment)}
+    fn until_duration(self, other: JetDate, largest_unit: String, smallest_unit: String, rounding_mode: String, increment: I64) -> Duration {
+        Duration{ns: self.until_ns(other, largest_unit, smallest_unit, rounding_mode, increment)}
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:896
-    fn since_duration(self, other: JetDate, largest_unit: &String, smallest_unit: &String, rounding_mode: &String, increment: I64) -> Duration {
-        Duration{ns: self.since_ns(&other, largest_unit, smallest_unit, rounding_mode, increment)}
+    fn since_duration(self, other: JetDate, largest_unit: String, smallest_unit: String, rounding_mode: String, increment: I64) -> Duration {
+        Duration{ns: self.since_ns(other, largest_unit, smallest_unit, rounding_mode, increment)}
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:915
-    fn format_checked_text(self, pattern: &String) -> String TextError! { self.format_checked(pattern).map_err(jet_time_text_error) }
+    fn format_checked_text(self, pattern: String) -> String TextError! {
+        Ok(self.format_checked(pattern) ?? return Err(TextError{message: err.message}))
+    }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:919
     fn equal_value(self, other: JetDate) -> Bool { self == other }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:923
-    fn compare_value(self, other: JetDate) -> __jet_Ordering { jet_time_ordering(self.cmp(&other)) }
+    fn compare_value(self, other: JetDate) -> Ordering { self <=> other }
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:928
 impl JetLocalTime {
@@ -522,56 +348,64 @@ impl JetLocalTime {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:933
     fn subtract_duration_value(self, duration: Duration) -> JetLocalTime { self.subtract_duration_ns(duration.ns) }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:937
-    fn until_duration(self, other: JetLocalTime, largest_unit: &String, smallest_unit: &String, rounding_mode: &String, increment: I64) -> Duration {
-        Duration{ns: self.until_ns(&other, largest_unit, smallest_unit, rounding_mode, increment)}
+    fn until_duration(self, other: JetLocalTime, largest_unit: String, smallest_unit: String, rounding_mode: String, increment: I64) -> Duration {
+        Duration{ns: self.until_ns(other, largest_unit, smallest_unit, rounding_mode, increment)}
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:956
-    fn since_duration(self, other: JetLocalTime, largest_unit: &String, smallest_unit: &String, rounding_mode: &String, increment: I64) -> Duration {
-        Duration{ns: self.since_ns(&other, largest_unit, smallest_unit, rounding_mode, increment)}
+    fn since_duration(self, other: JetLocalTime, largest_unit: String, smallest_unit: String, rounding_mode: String, increment: I64) -> Duration {
+        Duration{ns: self.since_ns(other, largest_unit, smallest_unit, rounding_mode, increment)}
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:975
-    fn format_checked_text(self, pattern: &String) -> String TextError! { self.format_checked(pattern).map_err(jet_time_text_error) }
+    fn format_checked_text(self, pattern: String) -> String TextError! {
+        Ok(self.format_checked(pattern) ?? return Err(TextError{message: err.message}))
+    }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:979
     fn equal_value(self, other: JetLocalTime) -> Bool { self == other }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:983
-    fn compare_value(self, other: JetLocalTime) -> __jet_Ordering { jet_time_ordering(self.cmp(&other)) }
+    fn compare_value(self, other: JetLocalTime) -> Ordering { self <=> other }
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:988
 impl JetDateTime {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:989
-    fn to_unix_ms_value(self) -> JetInt { jet_int_owned_from_i64(self.to_unix_ms()) }
+    fn to_unix_ms_value(self) -> Int { Int{self.to_unix_ms()} }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:993
-    fn to_unix_seconds_value(self) -> JetInt { jet_int_owned_from_i64(self.to_unix_seconds()) }
+    fn to_unix_seconds_value(self) -> Int { Int{self.to_unix_seconds()} }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:997
-    fn to_unix_microseconds_value(self) -> JetInt RangeError! { self.to_unix_microseconds().map(jet_int_owned_from_i64).map_err(jet_time_range_error) }
+    fn to_unix_microseconds_value(self) -> Int RangeError! {
+        Ok(Int{self.to_unix_microseconds() ?? return Err(RangeError{reason: err.message})})
+    }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1005
-    fn to_unix_nanoseconds_value(self) -> JetInt RangeError! { self.to_unix_nanoseconds().map(jet_int_owned_from_i64).map_err(jet_time_range_error) }
+    fn to_unix_nanoseconds_value(self) -> Int RangeError! {
+        Ok(Int{self.to_unix_nanoseconds() ?? return Err(RangeError{reason: err.message})})
+    }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1013
     fn plus_duration_value(self, duration: Duration) -> JetDateTime { self.plus_duration_ns(duration.ns) }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1017
     fn subtract_duration_value(self, duration: Duration) -> JetDateTime { self.subtract_duration_ns(duration.ns) }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1021
-    fn difference_duration(self, other: JetDateTime) -> Duration { Duration{ns: self.difference_ns(&other)} }
+    fn difference_duration(self, other: JetDateTime) -> Duration { Duration{ns: self.difference_ns(other)} }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1027
-    fn add_period_value(self, period: JetPeriod) -> JetDateTime { self.add_period(&period) }
+    fn add_period_value(self, period: JetPeriod) -> JetDateTime { self.add_period(period) }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1031
-    fn subtract_period_value(self, period: JetPeriod) -> JetDateTime { self.subtract_period(&period) }
+    fn subtract_period_value(self, period: JetPeriod) -> JetDateTime { self.subtract_period(period) }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1035
-    fn until_duration(self, other: JetDateTime, largest_unit: &String, smallest_unit: &String, rounding_mode: &String, increment: I64) -> Duration {
-        Duration{ns: self.until_ns(&other, largest_unit, smallest_unit, rounding_mode, increment)}
+    fn until_duration(self, other: JetDateTime, largest_unit: String, smallest_unit: String, rounding_mode: String, increment: I64) -> Duration {
+        Duration{ns: self.until_ns(other, largest_unit, smallest_unit, rounding_mode, increment)}
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1054
-    fn since_duration(self, other: JetDateTime, largest_unit: &String, smallest_unit: &String, rounding_mode: &String, increment: I64) -> Duration {
-        Duration{ns: self.since_ns(&other, largest_unit, smallest_unit, rounding_mode, increment)}
+    fn since_duration(self, other: JetDateTime, largest_unit: String, smallest_unit: String, rounding_mode: String, increment: I64) -> Duration {
+        Duration{ns: self.since_ns(other, largest_unit, smallest_unit, rounding_mode, increment)}
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1073
-    fn in_zone_value(self, zone: JetZone) -> JetZonedDateTime { self.in_zone(&zone) }
+    fn in_zone_value(self, zone: JetZone) -> JetZonedDateTime { self.in_zone(zone) }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1077
-    fn format_checked_text(self, pattern: &String) -> String TextError! { self.format_checked(pattern).map_err(jet_time_text_error) }
+    fn format_checked_text(self, pattern: String) -> String TextError! {
+        Ok(self.format_checked(pattern) ?? return Err(TextError{message: err.message}))
+    }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1081
     fn equal_value(self, other: JetDateTime) -> Bool { self == other }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1085
-    fn compare_value(self, other: JetDateTime) -> __jet_Ordering { jet_time_ordering(self.cmp(&other)) }
+    fn compare_value(self, other: JetDateTime) -> Ordering { self <=> other }
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1090
 impl JetInstant {
@@ -580,42 +414,42 @@ impl JetInstant {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1097
     fn equal_value(self, other: JetInstant) -> Bool { self == other }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1101
-    fn compare_value(self, other: JetInstant) -> __jet_Ordering { jet_time_ordering(self.cmp(&other)) }
+    fn compare_value(self, other: JetInstant) -> Ordering { self <=> other }
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1106
 impl JetPeriod {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1107
-    fn add_value(self, other: JetPeriod) -> JetPeriod { self.add(&other) }
+    fn add_value(self, other: JetPeriod) -> JetPeriod { self.add(other) }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1111
-    fn sub_value(self, other: JetPeriod) -> JetPeriod { self.sub(&other) }
+    fn sub_value(self, other: JetPeriod) -> JetPeriod { self.sub(other) }
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1116
-trait JetPeriodAnchor { fn period_total_in(self, period: &JetPeriod, unit: &String) -> F64 }
+trait JetPeriodAnchor { fn period_total_in(self, period: JetPeriod, unit: String) -> F64 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1120
 impl JetDate.JetPeriodAnchor {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1121
-    fn period_total_in(self, period: &JetPeriod, unit: &String) -> F64 { period.total_in_date(unit, self) }
+    fn period_total_in(self, period: JetPeriod, unit: String) -> F64 { period.total_in_date(unit, self) }
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1126
 impl JetDateTime.JetPeriodAnchor {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1127
-    fn period_total_in(self, period: &JetPeriod, unit: &String) -> F64 { period.total_in_datetime(unit, self) }
+    fn period_total_in(self, period: JetPeriod, unit: String) -> F64 { period.total_in_datetime(unit, self) }
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1132
 impl JetPeriod {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1133
-    fn total_in_value<A: JetPeriodAnchor>(self, unit: &String, anchor: &A) -> F64 { anchor.period_total_in(self, unit) }
+    fn total_in_value<A: JetPeriodAnchor>(self, unit: String, anchor: A) -> F64 { anchor.period_total_in(self, unit) }
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1138
 impl JetZone {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1139
-    fn next_transition_value(self, utc_seconds: I64) -> I64 JetAbsent! { jet_outcome_of(self.next_transition(utc_seconds)) }
+    fn next_transition_value(self, utc_seconds: I64) -> I64? { self.next_transition(utc_seconds) }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1143
-    fn previous_transition_value(self, utc_seconds: I64) -> I64 JetAbsent! { jet_outcome_of(self.previous_transition(utc_seconds)) }
+    fn previous_transition_value(self, utc_seconds: I64) -> I64? { self.previous_transition(utc_seconds) }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1147
-    fn start_of_day_value(self, date: JetDate) -> JetZonedDateTime { self.start_of_day_zoned(&date) }
+    fn start_of_day_value(self, date: JetDate) -> JetZonedDateTime { self.start_of_day_zoned(date) }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1151
-    fn hours_in_day_value(self, date: JetDate) -> I64 { self.hours_in_day(&date) }
+    fn hours_in_day_value(self, date: JetDate) -> I64 { self.hours_in_day(date) }
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1156
 impl JetZonedDateTime {
@@ -624,368 +458,367 @@ impl JetZonedDateTime {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1161
     fn subtract_duration_value(self, duration: Duration) -> JetZonedDateTime { self.subtract_duration_ns(duration.ns) }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1165
-    fn add_period_value(self, period: JetPeriod) -> JetZonedDateTime { self.add_period(&period) }
+    fn add_period_value(self, period: JetPeriod) -> JetZonedDateTime { self.add_period(period) }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1169
-    fn subtract_period_value(self, period: JetPeriod) -> JetZonedDateTime { self.subtract_period(&period) }
+    fn subtract_period_value(self, period: JetPeriod) -> JetZonedDateTime { self.subtract_period(period) }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1173
-    fn until_duration(self, other: JetZonedDateTime, largest_unit: &String, smallest_unit: &String, rounding_mode: &String, increment: I64) -> Duration {
-        Duration{ns: self.until_ns(&other, largest_unit, smallest_unit, rounding_mode, increment)}
+    fn until_duration(self, other: JetZonedDateTime, largest_unit: String, smallest_unit: String, rounding_mode: String, increment: I64) -> Duration {
+        Duration{ns: self.until_ns(other, largest_unit, smallest_unit, rounding_mode, increment)}
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1192
-    fn since_duration(self, other: JetZonedDateTime, largest_unit: &String, smallest_unit: &String, rounding_mode: &String, increment: I64) -> Duration {
-        Duration{ns: self.since_ns(&other, largest_unit, smallest_unit, rounding_mode, increment)}
+    fn since_duration(self, other: JetZonedDateTime, largest_unit: String, smallest_unit: String, rounding_mode: String, increment: I64) -> Duration {
+        Duration{ns: self.since_ns(other, largest_unit, smallest_unit, rounding_mode, increment)}
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1211
-    fn next_transition_value(self) -> I64 JetAbsent! { jet_outcome_of(self.next_transition()) }
+    fn next_transition_value(self) -> I64? { self.next_transition() }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1215
-    fn previous_transition_value(self) -> I64 JetAbsent! { jet_outcome_of(self.previous_transition()) }
+    fn previous_transition_value(self) -> I64? { self.previous_transition() }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1219
-    fn format_checked_text(self, pattern: &String) -> String TextError! { self.format_checked(pattern).map_err(jet_time_text_error) }
+    fn format_checked_text(self, pattern: String) -> String TextError! {
+        Ok(self.format_checked(pattern) ?? return Err(TextError{message: err.message}))
+    }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1223
     fn equal_value(self, other: JetZonedDateTime) -> Bool { self == other }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1227
-    fn compare_value(self, other: JetZonedDateTime) -> __jet_Ordering { jet_time_ordering(self.cmp(&other)) }
+    fn compare_value(self, other: JetZonedDateTime) -> Ordering { self <=> other }
 }
 use core.net.runtime.kernel_net.[JetURLParts, JetMIME]
 use core.net.runtime.std_url_mime as url
 use core.prelude.runtime.kernel_precise_numeric as precise
-use jet_std.[JetURL, JetDecimal, JetFraction]
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1233
-fn jet_url_parse(s: &String) -> JetURL Err! { JetURLParts.parse(s).map(JetURL.from_url_parts) }
+fn jet_url_parse(s: String) -> JetURL Err! { Ok(JetURL.from_url_parts(JetURLParts.parse(s))) }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1239
-fn jet_typed_datetime_literal(literals: View<String>, holes: [String]) -> JetDateTime {
-    text :: jet_typed_datetime_interpolate(literals, &holes)
-    match jet_time_parse_rfc3339(&text) {
-        Ok(value) -> value
-        Err(error) -> panic("sema accepted an invalid DateTime typed head: {error}")
-    }
+// D-BOUND-HEAD1=A: sema already rejected holes that could make the head invalid.
+fn jet_typed_datetime_literal(literals: [String], holes: [String]) -> JetDateTime {
+    text :: jet_typed_datetime_interpolate(literals, holes)
+    jet_time_parse_rfc3339(text) ?? panic("sema accepted an invalid DateTime typed head: {err.message}")
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1247
-fn jet_url_from_parts(scheme: &String, host: &String, path: &String, query: &[[String]], fragment: &String) -> JetURL Err! {
-    JetURLParts.from_parts(scheme, host, path, query, fragment).map(JetURL.from_url_parts)
+fn jet_url_from_parts(scheme: String, host: String, path: String, query: [[String]], fragment: String) -> JetURL Err! {
+    Ok(JetURL.from_url_parts(JetURLParts.from_parts(scheme, host, path, query, fragment)))
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1257
-fn jet_url_file(path: &String) -> JetURL { JetURL.from_url_parts(JetURLParts.file(path)) }
+fn jet_url_file(path: String) -> JetURL { JetURL.from_url_parts(JetURLParts.file(path)) }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1260
-fn jet_url_data(mime: &JetMIME, text: &String) -> JetURL { JetURL.from_url_parts(JetURLParts.data(mime, text)) }
-// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1263
-fn jet_url_query(pairs: &[[String]]) -> String {
-    pairs.iter().filter(r -> !r.is_empty()).map(r -> {
-        k :: r.get(0).cloned().unwrap_or_default()
-        v :: r.get(1).cloned().unwrap_or_default()
-        "{url.jet_url_percent_encode(k, false)}={url.jet_url_percent_encode(v, false)}"
-    }).collect<[String]>().join("&")
-}
+fn jet_url_data(mime: JetMIME, text: String) -> JetURL { JetURL.from_url_parts(JetURLParts.data(mime, text)) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1263,1297: the
+// query builder and urlencode are the same rows encoder.
+fn jet_url_query(pairs: [[String]]) -> String { url.jet_url_query_rows(pairs) }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1285
-fn jet_url_percent_encode_component(s: &String) -> String { url.jet_url_percent_encode(s, false) }
+fn jet_url_percent_encode_component(s: String) -> String { url.jet_url_percent_encode(s, false) }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1288
-fn jet_url_percent_decode_component(s: &String) -> String Err! { url.jet_url_percent_decode_str(s) }
+fn jet_url_percent_decode_component(s: String) -> String Err! { url.jet_url_percent_decode_str(s) }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1291
-fn jet_url_join(base: &String, rel: &String) -> String { url.jet_url_join_text(base, rel) }
+fn jet_url_join(base: String, rel: String) -> String { url.jet_url_join_text(base, rel) }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1294
-fn jet_url_parse_qsl(query: &String) -> [[String]] { url.jet_url_parse_qsl_rows(query) }
+fn jet_url_parse_qsl(query: String) -> [[String]] { url.jet_url_parse_qsl_rows(query) }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1297
-fn jet_url_urlencode(pairs: &[[String]]) -> String { url.jet_url_query_rows(pairs) }
-// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1300
-fn jet_url_split_fragment(text: &String) -> (String, String) {
-    (value, fragment) :: url.jet_url_split_fragment(text)
-    (fragment, value)
-}
+fn jet_url_urlencode(pairs: [[String]]) -> String { url.jet_url_query_rows(pairs) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1300,1325. core.net.url
+// owns the split at the first '#'; its named tuples replace the Rust
+// (String, String) pairs and their hand-written JetShow impls.
+use core.net.url as public_url
+fn jet_url_split_fragment(text: String) -> (fragment: String, url: String) { public_url.split_fragment(text) }
+fn jet_url_urldefrag(text: String) -> (url: String, fragment: String) { public_url.urldefrag(text) }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1304
-fn jet_url_quote(text: &String) -> String { url.jet_url_quote(text) }
+fn jet_url_quote(text: String) -> String { url.jet_url_quote(text) }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1307
-fn jet_url_quote_from_bytes(data: &[U8]) -> String { url.jet_url_quote_from_bytes(data) }
+fn jet_url_quote_from_bytes(data: [U8]) -> String { url.jet_url_quote_from_bytes(data) }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1310
-fn jet_url_quote_plus(text: &String) -> String { url.jet_url_quote_plus(text) }
+fn jet_url_quote_plus(text: String) -> String { url.jet_url_quote_plus(text) }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1313
-fn jet_url_unquote(text: &String) -> String Err! { url.jet_url_unquote(text) }
+fn jet_url_unquote(text: String) -> String Err! { url.jet_url_unquote(text) }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1316
-fn jet_url_unquote_to_bytes(text: &String) -> [U8] Err! { url.jet_url_unquote_to_bytes(text) }
+fn jet_url_unquote_to_bytes(text: String) -> [U8] Err! { url.jet_url_unquote_to_bytes(text) }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1319
-fn jet_url_unquote_plus(text: &String) -> String Err! { url.jet_url_unquote_plus(text) }
+fn jet_url_unquote_plus(text: String) -> String Err! { url.jet_url_unquote_plus(text) }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1322
-fn jet_url_to_string(value: &JetURL) -> String { value.to_string_value() }
-// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1325
-fn jet_url_urldefrag(text: &String) -> (String, String) { url.jet_url_split_fragment(text) }
+fn jet_url_to_string(value: JetURL) -> String { value.to_string_value() }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1329
-fn jet_mime_parse(s: &String) -> JetMIME Err! { JetMIME.parse(s) }
+fn jet_mime_parse(s: String) -> JetMIME Err! { JetMIME.parse(s) }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1332
-fn jet_mime_from_extension(ext: &String) -> String? { jet_std.jet_mime_from_extension(ext).map(s -> s.to_string()) }
+fn jet_mime_from_extension(ext: String) -> String? { mime_table.jet_mime_from_extension(ext) }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1335
-fn jet_mime_extension(mime: &String) -> String? { jet_extension_from_mime(mime).map(s -> s.to_string()) }
+fn jet_mime_extension(mime: String) -> String? { mime_table.jet_extension_from_mime(mime) }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1340
-fn jet_decimal_from_str(s: &String) -> JetDecimal {
-    precise.decimal_from_str(s).map(jet_std_decimal_from_exact)
-        .unwrap_or_else(_ -> jet_panic("", 0, precise.failure_message("Decimal", "from_str")))
+fn jet_decimal_from_str(s: String) -> JetDecimal {
+    jet_std_decimal_from_exact(precise.decimal_from_str(s) ?? jet_panic("", 0, precise.failure_message("Decimal", "from_str")))
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1353
-impl JetDecimal.__jet_Comparable {
+impl JetDecimal.Comparable {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1355
-    fn compare(self, rhs: &JetDecimal) -> __jet_Ordering {
-        jet_time_ordering(precise.decimal_compare(&jet_std_decimal_to_exact(self), &jet_std_decimal_to_exact(rhs)))
-    }
+    fn compare(self, rhs: JetDecimal) -> Ordering { jet_decimal_compare(self, rhs) }
 }
+// Rust panic!(failure_message(...)) for the Fraction/Decimal operations below.
+fn fraction_stop(member: String) -> Never { panic(precise.failure_message("Fraction", member)) }
+fn decimal_stop(member: String) -> Never { panic(precise.failure_message("Decimal", member)) }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1365
 fn jet_fraction_new(numerator: I64, denominator: I64) -> JetFraction? {
-    precise.fraction_new(jet_std_raw_to_exact(numerator), jet_std_raw_to_exact(denominator)).map(jet_std_fraction_from_exact)
+    exact :: precise.fraction_new(jet_std_raw_to_exact(numerator), jet_std_raw_to_exact(denominator)) ?? return None
+    Val(jet_std_fraction_from_exact(exact))
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1372
 fn jet_fraction_from_parts(numerator: I64, denominator: I64) -> JetFraction {
-    jet_fraction_new(numerator, denominator).unwrap_or_else(() -> panic(precise.failure_message("Fraction", "from_parts")))
+    jet_fraction_new(numerator, denominator) ?? fraction_stop("from_parts")
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1380
-fn jet_fraction_from_owned_parts(numerator: &JetInt, denominator: &JetInt) -> JetFraction {
+fn jet_fraction_from_owned_parts(numerator: Int, denominator: Int) -> JetFraction {
     jet_fraction_from_parts(numerator.to_raw(), denominator.to_raw())
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1386
-fn jet_fraction_add(a: &JetFraction, b: &JetFraction) -> JetFraction {
-    value :: precise.fraction_add(&jet_std_fraction_to_exact(a), &jet_std_fraction_to_exact(b))
-        .unwrap_or_else(() -> panic(precise.failure_message("Fraction", "add")))
-    jet_std_fraction_from_exact(value)
+fn jet_fraction_add(a: JetFraction, b: JetFraction) -> JetFraction {
+    jet_std_fraction_from_exact(precise.fraction_add(jet_std_fraction_to_exact(a), jet_std_fraction_to_exact(b)) ?? fraction_stop("add"))
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1399
-fn jet_fraction_sub(a: &JetFraction, b: &JetFraction) -> JetFraction {
-    value :: precise.fraction_sub(&jet_std_fraction_to_exact(a), &jet_std_fraction_to_exact(b))
-        .unwrap_or_else(() -> panic(precise.failure_message("Fraction", "sub")))
-    jet_std_fraction_from_exact(value)
+fn jet_fraction_sub(a: JetFraction, b: JetFraction) -> JetFraction {
+    jet_std_fraction_from_exact(precise.fraction_sub(jet_std_fraction_to_exact(a), jet_std_fraction_to_exact(b)) ?? fraction_stop("sub"))
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1412
-fn jet_fraction_mul(a: &JetFraction, b: &JetFraction) -> JetFraction {
-    value :: precise.fraction_mul(&jet_std_fraction_to_exact(a), &jet_std_fraction_to_exact(b))
-        .unwrap_or_else(() -> panic(precise.failure_message("Fraction", "mul")))
-    jet_std_fraction_from_exact(value)
+fn jet_fraction_mul(a: JetFraction, b: JetFraction) -> JetFraction {
+    jet_std_fraction_from_exact(precise.fraction_mul(jet_std_fraction_to_exact(a), jet_std_fraction_to_exact(b)) ?? fraction_stop("mul"))
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1425
-fn jet_fraction_div(a: &JetFraction, b: &JetFraction) -> JetFraction {
-    value :: precise.fraction_div(&jet_std_fraction_to_exact(a), &jet_std_fraction_to_exact(b))
-        .unwrap_or_else(() -> panic(precise.failure_message("Fraction", "div")))
-    jet_std_fraction_from_exact(value)
+fn jet_fraction_div(a: JetFraction, b: JetFraction) -> JetFraction {
+    jet_std_fraction_from_exact(precise.fraction_div(jet_std_fraction_to_exact(a), jet_std_fraction_to_exact(b)) ?? fraction_stop("div"))
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1438
 fn jet_fraction_from_int(value: I64) -> JetFraction {
-    precise.fraction_from_int(jet_std_raw_to_exact(value)).map(jet_std_fraction_from_exact)
-        .unwrap_or_else(() -> panic(precise.failure_message("Fraction", "from_int")))
+    jet_std_fraction_from_exact(precise.fraction_from_int(jet_std_raw_to_exact(value)) ?? fraction_stop("from_int"))
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1448
 fn jet_fraction_from_float(value: F64) -> JetFraction {
-    precise.fraction_from_float(value).map(jet_std_fraction_from_exact)
-        .unwrap_or_else(() -> panic(precise.failure_message("Fraction", "from_float")))
+    jet_std_fraction_from_exact(precise.fraction_from_float(value) ?? fraction_stop("from_float"))
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1458
 fn jet_fraction_from_decimal(value: JetDecimal) -> JetFraction {
-    precise.fraction_from_decimal(&jet_std_decimal_to_exact(&value)).map(jet_std_fraction_from_exact)
-        .unwrap_or_else(() -> panic(precise.failure_message("Fraction", "from_decimal")))
+    jet_std_fraction_from_exact(precise.fraction_from_decimal(jet_std_decimal_to_exact(value)) ?? fraction_stop("from_decimal"))
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1470
-fn jet_fraction_equal(a: &JetFraction, b: &JetFraction) -> Bool { precise.fraction_equal(&jet_std_fraction_to_exact(a), &jet_std_fraction_to_exact(b)) }
+fn jet_fraction_equal(a: JetFraction, b: JetFraction) -> Bool { precise.fraction_equal(jet_std_fraction_to_exact(a), jet_std_fraction_to_exact(b)) }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1476
-fn jet_fraction_numerator(a: &JetFraction) -> I64 { jet_std_exact_to_raw(precise.fraction_numerator(&jet_std_fraction_to_exact(a))) }
+fn jet_fraction_numerator(a: JetFraction) -> I64 { jet_std_exact_to_raw(precise.fraction_numerator(jet_std_fraction_to_exact(a))) }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1481
-fn jet_fraction_denominator(a: &JetFraction) -> I64 { jet_std_exact_to_raw(precise.fraction_denominator(&jet_std_fraction_to_exact(a))) }
+fn jet_fraction_denominator(a: JetFraction) -> I64 { jet_std_exact_to_raw(precise.fraction_denominator(jet_std_fraction_to_exact(a))) }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1486
-fn jet_fraction_to_string(a: &JetFraction) -> String { precise.fraction_to_string(&jet_std_fraction_to_exact(a)) }
+fn jet_fraction_to_string(a: JetFraction) -> String { precise.fraction_to_string(jet_std_fraction_to_exact(a)) }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1491
-fn jet_fraction_to_float(a: &JetFraction) -> F64 { precise.fraction_to_float(&jet_std_fraction_to_exact(a)) }
+fn jet_fraction_to_float(a: JetFraction) -> F64 { precise.fraction_to_float(jet_std_fraction_to_exact(a)) }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1496
-fn jet_fraction_is_zero(a: &JetFraction) -> Bool { precise.fraction_is_zero(&jet_std_fraction_to_exact(a)) }
+fn jet_fraction_is_zero(a: JetFraction) -> Bool { precise.fraction_is_zero(jet_std_fraction_to_exact(a)) }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1501
-fn jet_fraction_to_int(a: &JetFraction) -> I64 {
-    value :: precise.fraction_to_int(&jet_std_fraction_to_exact(a))
-        .unwrap_or_else(() -> panic(precise.failure_message("Fraction", "to_int")))
-    jet_std_exact_to_raw(value)
+fn jet_fraction_to_int(a: JetFraction) -> I64 {
+    jet_std_exact_to_raw(precise.fraction_to_int(jet_std_fraction_to_exact(a)) ?? fraction_stop("to_int"))
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1513
-fn jet_fraction_to_decimal(a: &JetFraction) -> JetDecimal {
-    precise.fraction_to_decimal(&jet_std_fraction_to_exact(a)).map(jet_std_decimal_from_exact)
-        .unwrap_or_else(() -> panic(precise.failure_message("Fraction", "to_decimal")))
+fn jet_fraction_to_decimal(a: JetFraction) -> JetDecimal {
+    jet_std_decimal_from_exact(precise.fraction_to_decimal(jet_std_fraction_to_exact(a)) ?? fraction_stop("to_decimal"))
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1525
 fn jet_decimal_from_int(value: I64) -> JetDecimal { jet_std_decimal_from_exact(precise.decimal_from_int(jet_std_raw_to_exact(value))) }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1530
 fn jet_decimal_from_float(value: F64) -> JetDecimal {
-    precise.decimal_from_float(value).map(jet_std_decimal_from_exact)
-        .unwrap_or_else(() -> panic(precise.failure_message("Decimal", "from_float")))
+    jet_std_decimal_from_exact(precise.decimal_from_float(value) ?? decimal_stop("from_float"))
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1540
 fn jet_decimal_from_fraction(value: JetFraction) -> JetDecimal {
-    precise.decimal_from_fraction(&jet_std_fraction_to_exact(&value)).map(jet_std_decimal_from_exact)
-        .unwrap_or_else(() -> panic(precise.failure_message("Decimal", "from_fraction")))
+    jet_std_decimal_from_exact(precise.decimal_from_fraction(jet_std_fraction_to_exact(value)) ?? decimal_stop("from_fraction"))
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1552
-fn jet_decimal_div(a: &JetDecimal, b: &JetDecimal) -> JetFraction {
-    precise.decimal_div(&jet_std_decimal_to_exact(a), &jet_std_decimal_to_exact(b)).map(jet_std_fraction_from_exact)
-        .unwrap_or_else(() -> panic(precise.failure_message("Decimal", "div")))
+fn jet_decimal_div(a: JetDecimal, b: JetDecimal) -> JetFraction {
+    jet_std_fraction_from_exact(precise.decimal_div(jet_std_decimal_to_exact(a), jet_std_decimal_to_exact(b)) ?? decimal_stop("div"))
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1565
-fn jet_decimal_round(a: &JetDecimal) -> JetDecimal { jet_std_decimal_from_exact(precise.decimal_round(&jet_std_decimal_to_exact(a))) }
+fn jet_decimal_round(a: JetDecimal) -> JetDecimal { jet_std_decimal_from_exact(precise.decimal_round(jet_std_decimal_to_exact(a))) }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1570
-fn jet_decimal_floor(a: &JetDecimal) -> JetDecimal { jet_std_decimal_from_exact(precise.decimal_floor(&jet_std_decimal_to_exact(a))) }
+fn jet_decimal_floor(a: JetDecimal) -> JetDecimal { jet_std_decimal_from_exact(precise.decimal_floor(jet_std_decimal_to_exact(a))) }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1575
-fn jet_decimal_ceil(a: &JetDecimal) -> JetDecimal { jet_std_decimal_from_exact(precise.decimal_ceil(&jet_std_decimal_to_exact(a))) }
+fn jet_decimal_ceil(a: JetDecimal) -> JetDecimal { jet_std_decimal_from_exact(precise.decimal_ceil(jet_std_decimal_to_exact(a))) }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1580
-fn jet_decimal_to_int(a: &JetDecimal) -> I64 {
-    value :: precise.decimal_to_int(&jet_std_decimal_to_exact(a))
-        .unwrap_or_else(() -> panic(precise.failure_message("Decimal", "to_int")))
-    jet_std_exact_to_raw(value)
+fn jet_decimal_to_int(a: JetDecimal) -> I64 {
+    jet_std_exact_to_raw(precise.decimal_to_int(jet_std_decimal_to_exact(a)) ?? decimal_stop("to_int"))
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1592
-fn jet_decimal_to_fraction(a: &JetDecimal) -> JetFraction {
-    precise.decimal_to_fraction(&jet_std_decimal_to_exact(a)).map(jet_std_fraction_from_exact)
-        .unwrap_or_else(() -> panic(precise.failure_message("Decimal", "to_fraction")))
+fn jet_decimal_to_fraction(a: JetDecimal) -> JetFraction {
+    jet_std_fraction_from_exact(precise.decimal_to_fraction(jet_std_decimal_to_exact(a)) ?? decimal_stop("to_fraction"))
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1604
-fn jet_decimal_add(a: &JetDecimal, b: &JetDecimal) -> JetDecimal { jet_std_decimal_from_exact(precise.decimal_add(&jet_std_decimal_to_exact(a), &jet_std_decimal_to_exact(b))) }
+fn jet_decimal_add(a: JetDecimal, b: JetDecimal) -> JetDecimal { jet_std_decimal_from_exact(precise.decimal_add(jet_std_decimal_to_exact(a), jet_std_decimal_to_exact(b))) }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1611
-fn jet_decimal_sub(a: &JetDecimal, b: &JetDecimal) -> JetDecimal { jet_std_decimal_from_exact(precise.decimal_sub(&jet_std_decimal_to_exact(a), &jet_std_decimal_to_exact(b))) }
+fn jet_decimal_sub(a: JetDecimal, b: JetDecimal) -> JetDecimal { jet_std_decimal_from_exact(precise.decimal_sub(jet_std_decimal_to_exact(a), jet_std_decimal_to_exact(b))) }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1618
-fn jet_decimal_mul(a: &JetDecimal, b: &JetDecimal) -> JetDecimal { jet_std_decimal_from_exact(precise.decimal_mul(&jet_std_decimal_to_exact(a), &jet_std_decimal_to_exact(b))) }
+fn jet_decimal_mul(a: JetDecimal, b: JetDecimal) -> JetDecimal { jet_std_decimal_from_exact(precise.decimal_mul(jet_std_decimal_to_exact(a), jet_std_decimal_to_exact(b))) }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1624
-fn jet_decimal_equal(a: &JetDecimal, b: &JetDecimal) -> Bool { precise.decimal_equal(&jet_std_decimal_to_exact(a), &jet_std_decimal_to_exact(b)) }
+fn jet_decimal_equal(a: JetDecimal, b: JetDecimal) -> Bool { precise.decimal_equal(jet_std_decimal_to_exact(a), jet_std_decimal_to_exact(b)) }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1630
-fn jet_decimal_compare(a: &JetDecimal, b: &JetDecimal) -> __jet_Ordering {
-    jet_time_ordering(precise.decimal_compare(&jet_std_decimal_to_exact(a), &jet_std_decimal_to_exact(b)))
+fn jet_decimal_compare(a: JetDecimal, b: JetDecimal) -> Ordering {
+    precise.decimal_compare(jet_std_decimal_to_exact(a), jet_std_decimal_to_exact(b))
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1640
-fn jet_decimal_to_string(a: &JetDecimal) -> String { precise.decimal_to_string(&jet_std_decimal_to_exact(a)) }
+fn jet_decimal_to_string(a: JetDecimal) -> String { precise.decimal_to_string(jet_std_decimal_to_exact(a)) }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1650
-fn jet_decimal_to_float(a: &JetDecimal) -> F64 { precise.decimal_to_float(&jet_std_decimal_to_exact(a)) }
+fn jet_decimal_to_float(a: JetDecimal) -> F64 { precise.decimal_to_float(jet_std_decimal_to_exact(a)) }
 use core.encoding.runtime.std_data_tree as json
-use jet_std.[DataTree, EncodingError, EncodingFormat, UTF8Error]
+use core.text.runtime.kernel_float_format as float_format
+use core.term as term
+use core.encoding.[DataTree, EncodingError, EncodingFormat]
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1660
-fn jet_std_json_parse(text: &String) -> DataTree EncodingError! { json.parse_json_datatree(text) }
+fn jet_std_json_parse(text: String) -> DataTree EncodingError! { json.parse_json_datatree(text) }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1663
-fn jet_std_json_render(d: &DataTree) -> String { json.render_datatree_json(d, false, 0) }
+fn jet_std_json_render(d: DataTree) -> String { json.render_datatree_json(d, false, 0) }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1666
-fn jet_std_json_render_pretty(d: &DataTree) -> String { json.render_datatree_json(d, true, 0) }
+fn jet_std_json_render_pretty(d: DataTree) -> String { json.render_datatree_json(d, true, 0) }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1669
+// Escapes `char::is_control` (C0, DEL, and the C1 range U+0080-U+009F, whose
+// UTF-8 form is C2 80-9F) as \u00xx; \b and \f stay \u0008/\u000c here.
 fn jet_quote_json_local(s: String) -> String {
-    out := "\""
-    for ch in s.chars() {
-        match ch {
-            '"' -> out.push_str("\\\"")
-            '\\' -> out.push_str("\\\\")
-            '\n' -> out.push_str("\\n")
-            '\r' -> out.push_str("\\r")
-            '\t' -> out.push_str("\\t")
-            c if c.is_control() -> out.push_str("\\u{c as U32:04x}")
-            c -> out.push(c)
+    raw :: s.bytes()
+    out := [U8]{34}
+    i := 0
+    loop i < raw.len() {
+        b :: raw[i]
+        // A C1 control is the two-byte sequence C2 80..C2 9F.
+        c1 :: b == 194 && i + 1 < raw.len() && c1_control(raw[i + 1])
+        if {
+            b == 34 -> push_ascii(&out, "\\\"")
+            b == 92 -> push_ascii(&out, "\\\\")
+            b == 10 -> push_ascii(&out, "\\n")
+            b == 13 -> push_ascii(&out, "\\r")
+            b == 9 -> push_ascii(&out, "\\t")
+            b < 32 || b == 127 -> push_ascii(&out, unicode_escape(b))
+            c1 -> {
+                push_ascii(&out, unicode_escape(raw[i + 1]))
+                i += 1
+            }
+            else -> &out.push(b)
         }
+        i += 1
     }
-    out.push('"')
-    ^out
+    &out.push(U8{34})
+    String.from_bytes(out) ?? ~s
+}
+fn push_ascii(out: &[U8], text: String) { loop b in text.bytes() -> &out.push(b) }
+fn c1_control(second: U8) -> Bool { second >= 128 && second <= 159 }
+fn unicode_escape(code: U8) -> String {
+    digits :: "0123456789abcdef"
+    n :: Int.from_u8(code)
+    "\\u00{digits.slice(n /% 16, n /% 16 + 1)}{digits.slice(n %% 16, n %% 16 + 1)}"
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1685
-fn jet_std_json_render_canonical(d: &DataTree) -> String {
-    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1686
-    fn render(t: &DataTree) -> String {
-        match t {
-            DataTree.Null -> "null"
-            DataTree.Bool(b) -> b.to_string()
-            DataTree.Int(n) -> jet_int_to_string(n)
-            DataTree.Float(f) -> "{f:?}"
-            DataTree.Number(_) | DataTree.TypedText(_) -> panic("internal JSON carrier escaped typed decode")
-            DataTree.Text(s) -> jet_quote_json_local(s)
-            DataTree.Bytes(bs) -> "[{bs.iter().map(b -> b.to_string()).collect<[String]>().join(\",\")}]"
-            DataTree.Array(xs) -> "[{xs.iter().map(render).collect<[String]>().join(\",\")}]"
-            DataTree.Object(entries) -> {
-                sorted := entries.iter().collect<[&(String, DataTree)]>()
-                sorted.sort_by((a, b) -> a.0.cmp(&b.0))
-                parts :: sorted.iter().map((k, v) -> "{jet_quote_json_local(k)}:{render(v)}").collect<[String]>()
-                "{{{parts.join(\",\")}}}"
-            }
+// Object keys sort by byte order; Float uses the Rust Debug spelling.
+fn jet_std_json_render_canonical(d: DataTree) -> String {
+    if d == {
+        .Null -> "null"
+        .Bool(b) -> "{b}"
+        .Int(n) -> "{n}"
+        .Float(f) -> float_format.debug(f)
+        .Number(_) | .TypedText(_) -> panic("internal JSON carrier escaped typed decode")
+        .Text(s) -> jet_quote_json_local(s)
+        .Bytes(bs) -> {
+            parts :: loop b in bs -> "{b}"
+            "[{parts.join(",")}]"
+        }
+        .Array(xs) -> {
+            parts :: loop x in xs -> jet_std_json_render_canonical(x)
+            "[{parts.join(",")}]"
+        }
+        .Object(entries) -> {
+            pairs :: loop pair in entries -> pair
+            sorted := pairs
+            &sorted.sort_by(pair -> pair.key)
+            parts :: loop pair in sorted -> "{jet_quote_json_local(pair.key)}:{jet_std_json_render_canonical(pair.value)}"
+            "{{{parts.join(",")}}}"
         }
     }
-    render(d)
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1715
-fn jet_std_json_events(d: &DataTree) -> String {
-    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1716
-    fn walk(path: String, t: &DataTree, out: &[String]) -> Unit {
-        here :: if path.is_empty() -> "$" else -> path
-        match t {
-            DataTree.Object(entries) -> {
-                out.push("object_start {here}")
-                for (k, v) in entries { walk("{here}.{k}", v, out) }
-                out.push("object_end {here}")
-            }
-            DataTree.Array(items) -> {
-                out.push("array_start {here}")
-                for (i, v) in items.iter().enumerate() { walk("{here}[{i}]", v, out) }
-                out.push("array_end {here}")
-            }
-            _ -> out.push("value {here} {jet_std_json_render_canonical(t)}")
-        }
-    }
+fn jet_std_json_events(d: DataTree) -> String {
     out := [String]{}
-    walk("", d, &out)
+    json_event_walk("", d, &out)
     out.join("\n")
 }
-// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1740
-fn jet_std_jsonl_parse(text: &String) -> [DataTree] EncodingError! {
-    out := [DataTree]{}
-    for (idx, line) in text.lines().enumerate() {
-        trimmed := line.trim() // #4303
-        if trimmed.is_empty() -> continue
-        match jet_std_json_parse(&trimmed.to_string()) {
-            Ok(v) -> out.push(v)
-            Err(error) -> {
-                failure := error
-                failure.format = EncodingFormat.JSONL
-                failure.line = failure.line.map(line -> idx as I64 + line)
-                return Err(^failure)
-            }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1716 (walk)
+fn json_event_walk(path: String, t: DataTree, out: &[String]) {
+    here :: if path == "" -> "$" else -> path
+    if t == {
+        .Object(entries) -> {
+            &out.push("object_start {here}")
+            loop pair in entries -> json_event_walk("{here}.{pair.key}", pair.value, &out)
+            &out.push("object_end {here}")
         }
+        .Array(items) -> {
+            &out.push("array_start {here}")
+            loop i in 0..<items.len() -> json_event_walk("{here}[{i}]", items[i], &out)
+            &out.push("array_end {here}")
+        }
+        else -> &out.push("value {here} {jet_std_json_render_canonical(t)}")
     }
-    Ok(^out)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1740
+// Lines are trimmed before parsing; a record error is re-labelled JSONL with
+// its line counted from the record's zero-based index, as in Rust.
+fn jet_std_jsonl_parse(text: String) -> [DataTree] EncodingError! {
+    out := [DataTree]{}
+    lines :: text.lines()
+    loop idx in 0..<lines.len() {
+        trimmed :: lines[idx].trim()
+        if trimmed == "" -> next
+        &out.push(jet_std_json_parse(trimmed) ?? return Err(jsonl_error(err, idx)))
+    }
+    Ok(out)
+}
+fn jsonl_error(error: EncodingError, index: Int) -> EncodingError {
+    failure := error
+    failure.format = EncodingFormat.JSONL
+    failure.line = if error.line == .Val(line) -> Val(index + line) else -> None
+    failure
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1758
-fn jet_std_jsonl_render(rows: &[DataTree]) -> String {
-    out := rows.iter().map(jet_std_json_render_canonical).collect<[String]>().join("\n")
-    if !out.is_empty() { out.push('\n') }
-    ^out
+fn jet_std_jsonl_render(rows: [DataTree]) -> String {
+    out := ""
+    loop row in rows -> out = "{out}{jet_std_json_render_canonical(row)}\n"
+    out
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1769
-fn jet_std_jsonl_count_rows(text: &String) -> JetInt {
-    jet_int_owned_from_i64(text.lines().filter(line -> !line.trim().is_empty()).count() as I64)
+fn jet_std_jsonl_count_rows(text: String) -> Int {
+    count := 0
+    loop line in text.lines() {
+        if line.trim() != "" -> count += 1
+    }
+    count
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1774
-fn jet_std_jsonl_append_line(text: &String, value: &DataTree) -> String {
+fn jet_std_jsonl_append_line(text: String, value: DataTree) -> String {
     rendered :: jet_std_json_render_canonical(value)
-    if text.is_empty() -> return "{rendered}\n"
-    if text.ends_with('\n') -> "{text}{rendered}\n" else -> "{text}\n{rendered}\n"
+    if {
+        text == "" -> "{rendered}\n"
+        text.ends_with("\n") -> "{text}{rendered}\n"
+        else -> "{text}\n{rendered}\n"
+    }
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1785
-fn jet_std_jsonl_first(text: &String) -> DataTree? EncodingError! {
-    for (idx, line) in text.lines().enumerate() {
-        trimmed := line.trim() // #4303
-        if trimmed.is_empty() -> continue
-        match jet_std_json_parse(&trimmed.to_string()) {
-            Ok(value) -> return Ok(Val(value))
-            Err(error) -> {
-                failure := error
-                failure.format = EncodingFormat.JSONL
-                failure.line = failure.line.map(line -> idx as I64 + line)
-                return Err(^failure)
-            }
-        }
+fn jet_std_jsonl_first(text: String) -> DataTree? EncodingError! {
+    lines :: text.lines()
+    loop idx in 0..<lines.len() {
+        trimmed :: lines[idx].trim()
+        if trimmed == "" -> next
+        return Ok(Val(jet_std_json_parse(trimmed) ?? return Err(jsonl_error(err, idx))))
     }
     Ok(None)
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1810
-fn jet_std_json_decode_lenient(text: &String) -> DataTree EncodingError! {
-    json.jet_std_json_decode_lenient(text, line -> {
-        // GATE #4565: kernel primitive
-        #Unsafe("write the actual lenient JSON coercion audit line to process stderr") { std.io.stderr().write_all("{line}\n".as_bytes()).unwrap() }
-    })
+// D-JSON1-decode + D-JSON3: the walk and audit-line shape live in
+// std_data_tree; this route supplies only the sink, the process stderr.
+fn jet_std_json_decode_lenient(text: String) -> DataTree EncodingError! {
+    json.jet_std_json_decode_lenient(text, line -> term.eprint("{line}\n"))
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1814
-fn jet_string_bytes(s: &String) -> [U8] { s.as_bytes().to_vec() }
+fn jet_string_bytes(s: String) -> [U8] { s.bytes() }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1817
-fn jet_string_from_bytes(bs: &[U8]) -> String UTF8Error! { jet_string_decode_utf8(bs).map_err(message -> UTF8Error{message}) }
-// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1822
-fn jet_string_from_bytes_lossy(bs: &[U8]) -> String { jet_string_decode_utf8_lossy(bs) }
-// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1825
-fn jet_int_to_u8(n: I64) -> U8 Err! {
-    if n >= 0 && n <= 255 -> Ok(n as U8) else -> Err("a U8 holds 0..255")
+fn jet_string_from_bytes(bs: [U8]) -> String UTF8Error! {
+    Ok(jet_string_decode_utf8(bs) ?? return Err(UTF8Error{message: err.message}))
 }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1822
+fn jet_string_from_bytes_lossy(bs: [U8]) -> String { jet_string_decode_utf8_lossy(bs) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1825
+fn jet_int_to_u8(n: I64) -> U8 Err! { Ok(U8.from_i64(n) ?? return Err("a U8 holds 0..255")) }
 
