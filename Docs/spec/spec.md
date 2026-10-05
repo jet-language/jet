@@ -762,6 +762,11 @@ identity. `partition(f)` returns `(false_: [T], true_: [T])`. These adapters
 are lazy on `Iter`, while concrete list, map, and set `map` and `filter` are
 eager.
 
+Collection result builders cross a native kernel as host callbacks while
+retaining the checked Jet parameter conventions. A split builder receives
+owned halves; map conflict builders borrow the key and receive owned values.
+Static and receiver routes use the same adapter.
+
 `first()` is the consuming positional terminal. Use `skip(n).first()` for a
 zero-based selection; an out-of-range selection returns `None`. There is no
 `nth` adapter. `min_by` and `max_by` retain the last source item when keys

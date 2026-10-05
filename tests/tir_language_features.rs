@@ -236,6 +236,24 @@ fn run() {
     assert_eq!(stdout, "42\n");
 }
 
+#[test]
+fn static_split_builder_preserves_owned_halves_across_tiers() {
+    let source = r#"
+fn run() {
+    values :: [1, 2, 3, 4]
+    halves :: values.split(2)
+    print(halves.left)
+    print(halves.right)
+    print(values)
+}
+"#;
+    tir_support::assert_tiers_agree(
+        "static_split_builder",
+        source,
+        "[1, 2]\n[3, 4]\n[1, 2, 3, 4]\n",
+    );
+}
+
 /// c109 Phase 23: default parameter values (S61/D-NARG-D2). Sema fills omitted trailing
 /// args at the call site (substituting earlier-param refs), so the defaulted fn lowers
 /// byte-identically and the call routes through the TIR.

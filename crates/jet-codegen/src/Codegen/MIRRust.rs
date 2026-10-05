@@ -26539,6 +26539,9 @@ impl<'a> RustEmitter<'a> {
             .iter()
             .enumerate()
             .map(|(index, arg)| {
+                if let Some(inputs) = Self::native_kernel_callback_inputs(&symbol, index) {
+                    return self.host_callback_with_inputs(function, arg.value, inputs);
+                }
                 let borrowed = borrow_mask
                     .and_then(|mask| mask.get(index))
                     .copied()
@@ -27003,6 +27006,15 @@ impl<'a> RustEmitter<'a> {
             "{{ let __jet_callback = {callback}; {wrapper}(move |{parameters}| {invocation}) }}"
         )
     }
+    fn native_kernel_callback_inputs(symbol: &str, index: usize) -> Option<&'static [bool]> {
+        match (symbol.rsplit("::").next().unwrap_or(symbol), index) {
+            ("jet_map_merge_with", 2) => Some(&[true, false, false]),
+            ("jet_iter_split_at", 2) => Some(&[false, false]),
+            ("jet_expiring_secret_with", 1) => Some(&[true]),
+            _ => None,
+        }
+    }
+
     /// A closure value as the host Rust closure a generic Prelude kernel calls
     /// directly: parameter `i` arrives as `&T` when `host_refs[i]`, else as `T`,
     /// and is adapted to the callable's own convention (`callable_parameter_*`).
@@ -29779,11 +29791,7 @@ impl<'a> RustEmitter<'a> {
                 || adapter.is_some_and(|(_, positions)| positions.contains(&(index + 1)));
             // These generic kernels invoke a native closure, not the Jet
             // callable carrier. Their input ownership is part of the host ABI.
-            let host_inputs: Option<&[bool]> = match (row.symbol.name(), index) {
-                ("jet_map_merge_with", 1) => Some(&[true, false, false]),
-                ("jet_iter_split_at", 1) => Some(&[false, false]),
-                _ => None,
-            };
+            let host_inputs = Self::native_kernel_callback_inputs(row.symbol.name(), index + 1);
             if let Some(host_inputs) = host_inputs {
                 return self.host_callback_with_inputs(function, *value_id, host_inputs);
             }
