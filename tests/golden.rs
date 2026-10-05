@@ -508,8 +508,9 @@ fn examples_compile_and_run() {
 }
 
 /// I1's one exception: the examples that TEACH the audited `#Unsafe` tier, so
-/// their generated Rust must carry `unsafe` — in gated `unsafe { … }` /
-/// `unsafe fn` / `unsafe extern` form only. Every other stem must generate none.
+/// their generated Rust must keep the gate — a sentry scope or a gated
+/// `unsafe { … }` / `unsafe fn` / `unsafe extern` — and any `unsafe` must be in
+/// gated form. Every other stem must generate none.
 ///
 /// DERIVED, never hand-typed: the repository already keeps exactly one registry
 /// of approved user-written unsafe regions — the `unsafe-ratchet` baseline in
@@ -665,11 +666,18 @@ fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
     let user_code = strip_vetted_prelude_modules(&rust_code);
 
     if GATED_UNSAFE_STEMS.contains(stem) {
+        // An audited region is exercised when its lowering keeps the source
+        // gate: a gated Rust `unsafe` (a `#Unsafe fn`, FFI, or inline asm), or
+        // the gate's sentry scope. Raw pointer reads/writes and `{ uninit }`
+        // storage lower to the vetted `jet_mem` sentry kernel and
+        // `JetUninit`, so their only generated witness is that scope.
         assert!(
-            user_code
-                .lines()
-                .any(|line| !unsafe_keyword_columns(line).is_empty()),
-            "the audited example {} should exercise the gated `unsafe` tier",
+            user_code.lines().any(|line| {
+                !unsafe_keyword_columns(line).is_empty()
+                    || line.contains("jet_mem::jet_sentry_scope(")
+                    || line.contains("jet_mem::jet_sentry_fenced_scope(")
+            }),
+            "the audited example {} should exercise its gated `#Unsafe` region",
             stem
         );
         for (i, line) in user_code.lines().enumerate() {
@@ -1066,7 +1074,19 @@ fn has_package_build_entry(path: &Path, source: &str) -> bool {
 /// I5 for card #502: each managed-runtime example binds its checked foreign
 /// source through the public CLI, then runs the generated project binding.
 /// Generated caches and native archives stay temp-only and host-specific.
+/// The front end needs the generated binding cache (E3208), so it is checked
+/// after the bind step, never against the bare example directory.
 fn check_polyglot_binder_example(entry: &GoldenEntry, env: &GoldenEnv) {
+    if entry.stem == "lowlevel/polyglot_com" {
+        // COM binds a host-compiled Windows type library and the example
+        // claims no Windows execution; `tests/ffi_com.rs` proves its E3260
+        // gate on every other host.
+        eprintln!(
+            "note: skipping Examples/features/{} golden (COM needs a Windows host and a compiled type library)",
+            entry.stem
+        );
+        return;
+    }
     let (language, package, foreign_source) = match entry.stem.as_str() {
         "lowlevel/polyglot_go" => ("go", "handles", "handles.go"),
         "lowlevel/polyglot_java" => ("java", "counter", "Counter.java"),
@@ -1078,13 +1098,9 @@ fn check_polyglot_binder_example(entry: &GoldenEntry, env: &GoldenEnv) {
         "lowlevel/polyglot_dart" => ("dart", "callbacks", "callbacks.dart"),
         other => panic!("unknown polyglot golden `{other}`"),
     };
-    let src = fs::read_to_string(&entry.path).unwrap();
-    if language != "dart" {
-        assert_front_end(entry, &src);
-    }
     if !env.have_rustc || !env.have_cargo {
         eprintln!(
-            "note: front end checked; skipping Examples/features/{} golden (need provisioned compiler toolchain)",
+            "note: skipping Examples/features/{} golden (need provisioned compiler toolchain)",
             entry.stem
         );
         return;
@@ -1112,7 +1128,7 @@ fn check_polyglot_binder_example(entry: &GoldenEntry, env: &GoldenEnv) {
         .unwrap_or(false);
     if !have_tool {
         eprintln!(
-            "note: front end checked; skipping Examples/features/{} golden (need provisioned {})",
+            "note: skipping Examples/features/{} golden (need provisioned {})",
             entry.stem, tool
         );
         return;
@@ -1145,19 +1161,18 @@ fn check_polyglot_binder_example(entry: &GoldenEntry, env: &GoldenEnv) {
         language,
         String::from_utf8_lossy(&bind.stderr)
     );
-    if language == "dart" {
-        let check = Command::new(env!("CARGO_BIN_EXE_jet"))
-            .args(["check", "run.jet"])
-            .current_dir(&dir)
-            .env("NO_COLOR", "1")
-            .output()
-            .unwrap();
-        assert!(
-            check.status.success(),
-            "Dart generated binding failed its front end:\n{}",
-            String::from_utf8_lossy(&check.stderr)
-        );
-    }
+    let check = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["check", "run.jet"])
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(
+        check.status.success(),
+        "{} generated binding failed its front end:\n{}",
+        language,
+        String::from_utf8_lossy(&check.stderr)
+    );
 
     let run = if language == "dart" {
         Command::new("dart")

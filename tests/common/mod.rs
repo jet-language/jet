@@ -843,6 +843,13 @@ const STDIN_READLINE_STDIN: ExampleStdin = ExampleStdin {
     tty_only: "",
 };
 
+/// `loops/read_sentinel` answers: two lines, the blank sentinel, then a line
+/// the loop must never print because the sentinel already stopped it.
+const READ_SENTINEL_STDIN: ExampleStdin = ExampleStdin {
+    piped: "alpha\nbeta\n\nafter-sentinel\n",
+    tty_only: "",
+};
+
 /// The stdin an example needs, or `None` for the examples that read nothing.
 ///
 /// Keyed by example stem (`<topic>/<name>`) so a harness that already walks
@@ -858,6 +865,7 @@ pub fn example_stdin(stem: &str) -> Option<&'static ExampleStdin> {
         "io/stdin_input" => Some(&STDIN_INPUT_STDIN),
         "io/stdin_read_all" => Some(&STDIN_READ_ALL_STDIN),
         "io/stdin_readline" => Some(&STDIN_READLINE_STDIN),
+        "loops/read_sentinel" => Some(&READ_SENTINEL_STDIN),
         _ => None,
     }
 }
