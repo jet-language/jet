@@ -5685,9 +5685,9 @@ fn encoding_next(
     }
 }
 
-fn dyn_datetime_payload(value: jet_foundation::Dyn::DynDateTime) -> MirRuntimeValue {
-    jet_comptime::Comptime::MirBridge::ct_to_mir_value(
-        &jet_comptime::Comptime::dyn_datetime_value(value),
+pub(crate) fn dyn_datetime_payload(value: jet_foundation::Dyn::DynDateTime) -> MirRuntimeValue {
+    jet_codegen::Comptime::MirBridge::ct_to_mir_value(
+        &jet_codegen::Comptime::dyn_datetime_value(value),
         jet_foundation::Diagnostics::Span::new(0, 0),
     )
     .expect("Dyn DateTime payload contains only canonical scalar fields")
@@ -5706,7 +5706,16 @@ fn data_event_value(event: crate::enc_stream::runtime::jet_std::DataEvent) -> Re
         DataEvent::Number(value) => ("Number", vec![MirRuntimeValue::String(value)]),
         DataEvent::Text(value) => ("Text", vec![MirRuntimeValue::String(value)]),
         DataEvent::Bytes(value) => ("Bytes", vec![MirRuntimeValue::Bytes(value)]),
-        DataEvent::DateTime(value) => ("DateTime", vec![dyn_datetime_payload(value)]),
+        DataEvent::DateTime(value) => {
+            let instant = value.to_datetime();
+            let payload = jet_foundation::Dyn::DynDateTime {
+                unix_seconds: instant.unix_seconds_anchor(),
+                nanos: instant.nanosecond() as u32,
+                leap_second: instant.is_leap_second(),
+                offset_seconds: value.zone().offset_at_utc(instant.unix_seconds_anchor()) as i32,
+            };
+            ("DateTime", vec![dyn_datetime_payload(payload)])
+        }
         DataEvent::ArrayStart => ("ArrayStart", Vec::new()),
         DataEvent::ArrayEnd => ("ArrayEnd", Vec::new()),
         DataEvent::ObjectStart => ("ObjectStart", Vec::new()),

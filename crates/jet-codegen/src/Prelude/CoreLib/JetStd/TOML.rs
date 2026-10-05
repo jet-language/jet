@@ -824,7 +824,7 @@
                 let huge = "12345678901234567890123456789012345678901234567890";
                 for token in [huge, "1e400"] {
                     let tree = parse_to_tree(&format!("a = {token}")).expect("host TOML number");
-                    assert!(matches!(tree.get("a"), Some(super::Dyn::Number(value)) if value == token));
+                    assert!(matches!(&tree, super::Dyn::Object(fields) if fields.iter().any(|(key, value)| key == "a" && matches!(value, super::Dyn::Number(text) if text == token))));
                 }
             }
 

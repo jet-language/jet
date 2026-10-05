@@ -370,6 +370,7 @@ fn http_tree_runtime(value: &HttpTree) -> MirRuntimeValue {
             MirRuntimeValue::String(value.clone())
         }
         HttpTree::Bytes(value) => MirRuntimeValue::Bytes(value.clone()),
+        HttpTree::DateTime(value) => crate::SourceResources::dyn_datetime_payload(*value),
         HttpTree::Array(values) => {
             MirRuntimeValue::List(values.iter().map(http_tree_runtime).collect())
         }
