@@ -493,6 +493,19 @@ fn examples_compile_and_run() {
             .join()
             .expect("golden worker panicked outside harness");
     }
+    // Written straight to the process stderr, past libtest's output capture,
+    // so a passing run still shows every polyglot example it could not run.
+    let unavailable = POLYGLOT_UNAVAILABLE.lock().unwrap();
+    if !unavailable.is_empty() {
+        use std::io::Write;
+        let _ = writeln!(
+            std::io::stderr(),
+            "golden polyglot UNAVAILABLE: {} — {}",
+            unavailable.len(),
+            unavailable.join(", ")
+        );
+    }
+    drop(unavailable);
     let failures = failures.lock().unwrap();
     assert!(
         failures.is_empty(),
@@ -1071,6 +1084,30 @@ fn has_package_build_entry(path: &Path, source: &str) -> bool {
         .is_some()
 }
 
+/// Polyglot examples this host could not run, as `stem (missing tool)`. The
+/// run reports their count as UNAVAILABLE; an unavailable example is never a
+/// silent pass.
+static POLYGLOT_UNAVAILABLE: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+/// Record one polyglot example this host cannot run. A tool named in
+/// `JET_REQUIRE_POLYGLOT` (comma-separated tool names, or `all`) is required
+/// on this machine, so its absence fails the example instead.
+fn polyglot_unavailable(stem: &str, tool: &str) {
+    let required = std::env::var("JET_REQUIRE_POLYGLOT").unwrap_or_default();
+    let required = required
+        .split(',')
+        .map(str::trim)
+        .any(|name| name == "all" || name == tool);
+    assert!(
+        !required,
+        "Examples/features/{stem}: required polyglot toolchain `{tool}` is unavailable on this machine (JET_REQUIRE_POLYGLOT)"
+    );
+    POLYGLOT_UNAVAILABLE
+        .lock()
+        .unwrap()
+        .push(format!("{stem} ({tool})"));
+}
+
 /// I5 for card #502: each managed-runtime example binds its checked foreign
 /// source through the public CLI, then runs the generated project binding.
 /// Generated caches and native archives stay temp-only and host-specific.
@@ -1081,11 +1118,11 @@ fn check_polyglot_binder_example(entry: &GoldenEntry, env: &GoldenEnv) {
         // COM binds a host-compiled Windows type library and the example
         // claims no Windows execution; `tests/ffi_com.rs` proves its E3260
         // gate on every other host.
-        eprintln!(
-            "note: skipping Examples/features/{} golden (COM needs a Windows host and a compiled type library)",
-            entry.stem
-        );
-        return;
+        if !cfg!(windows) {
+            polyglot_unavailable(&entry.stem, "windows-com");
+            return;
+        }
+        panic!("Examples/features/lowlevel/polyglot_com: the Windows COM golden has no host runner yet");
     }
     let (language, package, foreign_source) = match entry.stem.as_str() {
         "lowlevel/polyglot_go" => ("go", "handles", "handles.go"),
@@ -1099,17 +1136,12 @@ fn check_polyglot_binder_example(entry: &GoldenEntry, env: &GoldenEnv) {
         other => panic!("unknown polyglot golden `{other}`"),
     };
     if !env.have_rustc || !env.have_cargo {
-        eprintln!(
-            "note: skipping Examples/features/{} golden (need provisioned compiler toolchain)",
-            entry.stem
-        );
+        polyglot_unavailable(&entry.stem, "rustc+cargo");
         return;
     }
-    // These examples exercise the real foreign-language inspection path. The
-    // source fixture is still valid when a host does not provision that
-    // language tool, so use the same capability-gated skip shape as the GTK
-    // and raylib examples instead of turning an environmental absence into a
-    // golden failure.
+    // These examples exercise the real foreign-language inspection path. A
+    // host without the language tool reports the example UNAVAILABLE, or
+    // fails it when JET_REQUIRE_POLYGLOT names that tool.
     let tool = match language {
         "go" => "go",
         "fortran" => "gfortran",
@@ -1127,10 +1159,7 @@ fn check_polyglot_binder_example(entry: &GoldenEntry, env: &GoldenEnv) {
         .map(|output| output.status.success())
         .unwrap_or(false);
     if !have_tool {
-        eprintln!(
-            "note: skipping Examples/features/{} golden (need provisioned {})",
-            entry.stem, tool
-        );
+        polyglot_unavailable(&entry.stem, tool);
         return;
     }
 
