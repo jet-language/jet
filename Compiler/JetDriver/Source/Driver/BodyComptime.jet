@@ -231,7 +231,7 @@ fn jet_driver_comptime_body_pass(
     known := [String:Bool]{}
     loop source in pending -> jet_driver_comptime_body_source_add(&body_sources, &known, source)
     run := jet_driver_run_comptime(
-        graph, body_sources, current_graph.names, values, functions,
+        graph, None, body_sources, current_graph.names, values, functions,
         load, request, &diagnostics,
     )
     jet_driver_comptime_trace_append(&trace, run.trace)
@@ -247,8 +247,12 @@ fn jet_driver_comptime_body_pass(
     }
     values = ^run.values
     functions = ^run.functions
+    // The run's graph already carries every value: the recheck finalizes it
+    // in place instead of copying the registration graph.
+    run_graph := ^run.graph
+    run.graph = None
     rechecked := jet_driver_recheck_comptime_bodies(
-        graph, stage, ^current_graph, ^body_sources,
+        graph, ^run_graph, stage, ^current_graph, ^body_sources,
         values, functions, request,
     )
     jet_driver_comptime_body_pass(
@@ -282,6 +286,7 @@ pub fn jet_driver_validate_checked_text(
     resolved_registration := sema_comptime_graph_with_values(graph, initial_values)
     run := jet_driver_run_comptime(
         resolved_registration,
+        None,
         sources,
         initial_graph.names,
         initial_values,
@@ -318,6 +323,7 @@ pub fn jet_driver_validate_checked_text(
 
 pub fn jet_driver_recheck_comptime_bodies(
     graph: SemaRegistrationGraph,
+    resolved: ^SemaRegistrationGraph?,
     stage: SemaComptimeDeclarationStage,
     semantic_graph: ^SemaGraphResult,
     body_sources: ^[SemaComptimeItemSource],
@@ -326,5 +332,5 @@ pub fn jet_driver_recheck_comptime_bodies(
     request: JetDriverCompileRequest,
 ) -> SemaGraphResult {
     body_stage := jet_driver_comptime_body_stage(stage, ^semantic_graph, ^body_sources)
-    sema_finalize_registration_graph(graph, body_stage, values, comptime_functions, request.eval_config.host_hooks, request.compiler_threads, request.trace_sink)
+    sema_finalize_registration_graph(graph, ^resolved, body_stage, values, comptime_functions, request.eval_config.host_hooks, request.compiler_threads, request.trace_sink)
 }

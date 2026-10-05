@@ -215,6 +215,10 @@ pub struct SemaComptimeDeclarationStage {
     pub sources: [SemaComptimeItemSource]
     pub diagnostics: [Diagnostic]
     pub complete: Bool
+    // The declaration pass environment's own copy of the registration graph,
+    // handed to the comptime run (jet_driver_run_comptime `staged`) so the run
+    // does not copy the graph again; None once taken.
+    pub graph: SemaRegistrationGraph?{None}
 }
 
 pub struct SemaComptimeItemCheck {
@@ -3401,6 +3405,11 @@ pub fn sema_collect_comptime_declarations(graph: SemaRegistrationGraph, package_
         }
     }
     names :: sema_name_build_facts(graph, modules)
+    // The pass environment's graph copy leaves with the stage for the
+    // comptime run (its probes changed only the environment's module state).
+    pass_environment := sema_comptime_probe_shared_take_environment(shared_state)
+    pass_graph := ^pass_environment.registration_graph
+    pass_environment.registration_graph = None
     SemaComptimeDeclarationStage{
         modules: ^modules,
         imports: graph.imports,
@@ -3409,6 +3418,7 @@ pub fn sema_collect_comptime_declarations(graph: SemaRegistrationGraph, package_
         sources: sources,
         diagnostics: diagnostics,
         complete: complete,
+        graph: ^pass_graph,
     }
 }
 
@@ -3459,12 +3469,13 @@ pub fn sema_comptime_staged_constant_rows(resolved_graph: SemaRegistrationGraph,
     rows
 }
 
-// The one environment of a staging run: it owns the graph with `values`
-// applied, and every comptime item and function check re-targets it
-// (sema_scope_environment_enter_probe_module) instead of copying the graph.
-// The caller applies each later value to its graph in place.
-pub fn sema_comptime_environment(graph: SemaRegistrationGraph, values: [SemaComptimeItemValue]) -> SemaScopeEnvironment Never! {
-    resolved := graph
+// The one environment of a staging run: it owns `graph` (moved in, never
+// copied here) with `values` applied, and every comptime item and function
+// check re-targets it (sema_scope_environment_enter_probe_module) instead of
+// copying the graph. The caller applies each later value to its graph in
+// place.
+pub fn sema_comptime_environment(graph: ^SemaRegistrationGraph, values: [SemaComptimeItemValue]) -> SemaScopeEnvironment Never! {
+    resolved := ^graph
     sema_comptime_graph_apply_values(&resolved, values)
     sema_scope_environment_init(Val(^resolved), "", "", "", "", SemaSourceOrigin.Snapshot, [SemaSourceSegment]{}, [TTypeDef]{}, [SemaScopeDeclaration]{})
 }
@@ -3899,9 +3910,12 @@ fn sema_check_script_entries(graph: SemaRegistrationGraph, diagnostics: &[Diagno
 }
 
 // `host_hooks` are the driver's host callbacks; `threads` admits the
-// compiler threads of the body pass (sema_finalize_check_modules).
-pub fn sema_finalize_registration_graph(graph: SemaRegistrationGraph, stage: SemaComptimeDeclarationStage, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], host_hooks: Shared<SemaRegistrationHostHooks>, threads: CompilerThreads, trace_sink: CompilerTraceSink?) -> SemaGraphResult {
-    resolved_graph := sema_comptime_graph_with_values(graph, values)
+// compiler threads of the body pass (sema_finalize_check_modules). `resolved`
+// is `graph` with `values` already applied when the caller owns one (the
+// comptime run's graph, JetDriverComptimeRunResult.graph); None copies `graph`.
+pub fn sema_finalize_registration_graph(graph: SemaRegistrationGraph, resolved: ^SemaRegistrationGraph?, stage: SemaComptimeDeclarationStage, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], host_hooks: Shared<SemaRegistrationHostHooks>, threads: CompilerThreads, trace_sink: CompilerTraceSink?) -> SemaGraphResult {
+    owned := ^resolved
+    resolved_graph := ^owned ?? sema_comptime_graph_with_values(graph, values)
     // #4319 lookup counters are traced through `sema.check` only; counting
     // here would serialize the body-check threads on the shared counters.
     resolved_graph.counting = false
