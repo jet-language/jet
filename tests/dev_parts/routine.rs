@@ -1923,7 +1923,8 @@ fn run() {
     print("{lower_tie:Fixed(2)}|{upper_tie:Fixed(2)}|{grouped:Fixed(2)}|{grouped:Grouped(2)}|{integer:Fixed(2)}|{integer:Grouped(2)}")
 }
 "#;
-    let expected = ProgramOutput::ran("1.12|1.38|1234.57|1,234.57|1234.00|1,234.00\n".into(), String::new(), 0);
+    // Rulings #4588: fixed decimals round half away from zero on every tier.
+    let expected = ProgramOutput::ran("1.13|1.38|1234.57|1,234.57|1234.00|1,234.00\n".into(), String::new(), 0);
     let file = std::env::temp_dir().join("jet_fixed_interpolation_parity.jet");
     fs::write(&file, src).unwrap();
     let shown = file.to_string_lossy().to_string();
