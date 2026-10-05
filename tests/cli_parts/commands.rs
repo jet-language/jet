@@ -1151,7 +1151,7 @@ fn threads_flag_is_the_compiler_thread_cap() {
         let (code, _, stderr) = run(&["build", "run.jet", flag, "2"]);
         assert_eq!(code, Some(2), "{stderr}");
         assert!(stderr.contains(&format!("Error [E2102]: `{flag}` isn't a flag jet understands")), "{stderr}");
-        assert!(stderr.contains("write `--threads N` to cap the compiler at N threads"), "{stderr}");
+        assert!(stderr.contains("Fix: Write `--threads N` to cap the compiler at N threads"), "{stderr}");
     }
     for value in ["0", "x"] {
         let (code, _, stderr) = run(&["check", "run.jet", "--threads", value]);
