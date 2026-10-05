@@ -240,7 +240,7 @@ fn jet_oauth_json_skip_value(chars: [Char], position: &USize) -> Bool {
                 continue
             }
             if character == '}' || character == ']' {
-                if closers.last().copied() != Val(character) { return false }
+                if closers.last() != character { return false }
                 _ :: closers.pop()
                 *position += 1
                 if closers.is_empty() { return true }
@@ -349,8 +349,8 @@ fn jet_auth_oauth_verify(entry: &JetAuthOAuthState, assertion: String, now_ms: I
     if !jet_ct_eq(&expected, &signature) { return Err("OAuth assertion signature is invalid") }
     claims :: jet_oauth_parse_claims(payload)?
     if claims.nonce.as_deref().is_none_or(fn(nonce) { !jet_auth_constant_time_text_eq(nonce, entry.nonce) }) { return Err("OAuth assertion nonce is invalid") }
-    if claims.issuer.as_deref() != Val(issuer) { return Err("OAuth assertion issuer is invalid") }
-    if claims.audience.as_deref() != Val(audience) { return Err("OAuth assertion audience is invalid") }
+    if claims.issuer != issuer { return Err("OAuth assertion issuer is invalid") }
+    if claims.audience != audience { return Err("OAuth assertion audience is invalid") }
     now_s :: now_ms.checked_div(1000).ok_or_else(fn() { "OAuth clock is invalid" })?
     expires_at :: claims.expires_at.ok_or_else(fn() { "OAuth assertion expiry is missing" })?
     if expires_at <= now_s { return Err("OAuth assertion is expired") }
