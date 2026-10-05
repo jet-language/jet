@@ -146,7 +146,7 @@ fn jet_fault_run_once_with_cleanup(selectors: View<String>, active: Int?, fail_n
     if not scheduler_clean -> return Err("fault scheduler cleanup did not complete")
     outcome :: if result == {
         Ok(outcome) -> outcome
-        Err(_) -> return Err("test panicked during fault injection")
+        Err(_) -> { return Err("test panicked during fault injection") }
     }
     Ok(JetFaultRun{result: outcome, injected: injected, counts: counts, scheduler_clean: scheduler_clean})
 }
