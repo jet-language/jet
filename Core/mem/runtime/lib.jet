@@ -80,7 +80,7 @@ fn exact_int_map_key(raw: I64) -> JetMapKey {
     value :: #Unsafe("retain borrowed exact map key") { JetInt.clone_from_raw(raw) }
     if value.is_inline() -> return .Int(raw)
     big := value.to_big()
-    if big.try_i64() is Val(small) -> return .Int(small)
+    if big.try_i64() == .Val(small) -> return .Int(small)
     limbs := ^big.limbs
     loop limbs.last() == Val(U32{0}) { _ :: &limbs.pop() }
     .BigInt{negative: big.negative, limbs: ^limbs}
@@ -237,13 +237,13 @@ impl JetArena {
     pub fn string_slots(self) -> [(USize, String)] {
         out := [(USize, String)]{}
         loop (i, value) in self.values.iter().enumerate() {
-            if value is .String(text) { &out.push((USize{i}, text.clone())) }
+            if value == .String(text) { &out.push((USize{i}, text.clone())) }
         }
         out
     }
     // Rust: crates/jet-rt/src/lib.rs:402
     pub fn has_non_string_state(self) -> Bool {
-        not self.exact_roots.is_empty() or self.values.iter().any(|v| -> not (v is .String(_)))
+        not self.exact_roots.is_empty() or self.values.iter().any(|v| -> not (v == .String(_)))
     }
     // Rust: crates/jet-rt/src/lib.rs:408
     pub fn install_string_slots(self: &JetArena, slots: [(USize, String)]) -> {
@@ -257,7 +257,10 @@ impl JetArena {
         value :: self.values.get(USize{list})?
         match value {
             .IntList(_) | .List(_) -> Val(value)
-            .UninitList{initialized, ..} -> { _ :: uninit_semantics.jet_uninit_all(initialized).ok()?; Val(value) }
+            .UninitList{initialized, ..} -> {
+                _ :: uninit_semantics.jet_uninit_all(initialized).ok()?
+                Val(value)
+            }
             _ -> None
         }
     }
@@ -500,7 +503,10 @@ impl JetArena {
     }
     // Rust: crates/jet-rt/src/lib.rs:759
     pub fn list_push_float(self: &JetArena, list: I64, value: F64) -> ()? {
-        match self.values.get_mut(USize{list}) { Val(.List(values)) -> { &values.push(.Float(value)); Val(()) }, _ -> None }
+        match self.values.get_mut(USize{list}) { Val(.List(values)) -> {
+            &values.push(.Float(value))
+            Val(())
+        }, _ -> None }
     }
     // Rust: crates/jet-rt/src/lib.rs:769
     pub fn replace_int_list(self: &JetArena, list: I64, values: [I64]) -> ()? {
@@ -512,15 +518,24 @@ impl JetArena {
     // Rust: crates/jet-rt/src/lib.rs:798
     pub fn list_clear(self: &JetArena, list: I64) -> ()? {
         match self.values.get_mut(USize{list})? {
-            .IntList(values) -> { &values.clear(); Val(()) }
-            .List(values) -> { &values.clear(); Val(()) }
+            .IntList(values) -> {
+                &values.clear()
+                Val(())
+            }
+            .List(values) -> {
+                &values.clear()
+                Val(())
+            }
             _ -> None
         }
     }
     // Rust: crates/jet-rt/src/lib.rs:813
     pub fn replace_float_list(self: &JetArena, list: I64, values: [F64]) -> ()? {
         match self.values.get_mut(USize{list}) {
-            Val(.List(target)) -> { target = values.into_iter().map(|v| -> JetVal.Float(v)).collect(); Val(()) }
+            Val(.List(target)) -> {
+                target = values.into_iter().map(|v| -> JetVal.Float(v)).collect()
+                Val(())
+            }
             _ -> None
         }
     }
@@ -530,7 +545,10 @@ impl JetArena {
         JetArena.retain_exact_raw(&self.exact_roots, start)
         JetArena.retain_exact_raw(&self.exact_roots, end)
         match self.values.get_mut(USize{list}) {
-            Val(.List(values)) -> { &values.push(.Range{start: start, end: end, exclusive: exclusive}); Val(()) }
+            Val(.List(values)) -> {
+                &values.push(.Range{start: start, end: end, exclusive: exclusive})
+                Val(())
+            }
             _ -> None
         }
     }
@@ -548,7 +566,7 @@ impl JetArena {
     }
     // Rust: crates/jet-rt/src/lib.rs:870
     pub fn list_values_mut(self: &JetArena, list: I64) -> (&[JetVal])? {
-        if self.values.get(USize{list}) is Val(.IntList(_)) {
+        if self.values.get(USize{list}) == .Val(.IntList(_)) {
             dense :: match self.values.get_mut(USize{list})? { .IntList(values) -> mem.take(&values), _ -> unreachable() }
             self.values[USize{list}] = .List(dense.into_iter().map(|v| -> JetVal.Int(v)).collect())
         }
@@ -688,7 +706,7 @@ impl JetArena {
             }
             Val(.List(values)) -> {
                 slot :: values.get_mut(USize{index})?
-                if not (slot is .Int(_)) -> return None
+                if not (slot == .Int(_)) -> return None
                 if exact { JetArena.retain_exact_raw(&self.exact_roots, value) }
                 slot = .Int(value)
                 Val(())
@@ -708,7 +726,7 @@ impl JetArena {
         match self.values.get_mut(USize{list}) {
             Val(.List(values)) -> {
                 slot :: values.get_mut(USize{index})?
-                if not (slot is .Float(_)) -> return None
+                if not (slot == .Float(_)) -> return None
                 slot = .Float(value)
                 Val(())
             }
@@ -760,7 +778,10 @@ impl JetArena {
         values :: match self.values.get(USize{list}) {
             Val(.IntList(values)) -> return Val(values.clone())
             Val(.List(values)) -> values
-            Val(.UninitList{values, initialized}) -> { _ :: uninit_semantics.jet_uninit_all(initialized).ok()?; values }
+            Val(.UninitList{values, initialized}) -> {
+                _ :: uninit_semantics.jet_uninit_all(initialized).ok()?
+                values
+            }
             _ -> return None
         }
         out := [I64]{}.with_capacity(values.len())
@@ -808,7 +829,10 @@ impl JetArena {
         }
         JetArena.retain_value_roots(&self.exact_roots, value)
         match self.values.get_mut(USize{record}) {
-            Val(.Record(fields)) -> { fields[USize{index}] = ^value; Val(()) }
+            Val(.Record(fields)) -> {
+                fields[USize{index}] = ^value
+                Val(())
+            }
             _ -> None
         }
     }
@@ -893,7 +917,10 @@ impl JetArena {
     // Rust: crates/jet-rt/src/lib.rs:1466
     pub fn record_assign_from(self: &JetArena, dst: I64, src: I64) -> ()? {
         src_fields :: match self.values.get(USize{src})? { .Record(fields) -> fields.clone(), _ -> return None }
-        match self.values.get_mut(USize{dst})? { .Record(fields) -> { fields = ^src_fields; Val(()) }, _ -> None }
+        match self.values.get_mut(USize{dst})? { .Record(fields) -> {
+            fields = ^src_fields
+            Val(())
+        }, _ -> None }
     }
     // Rust: crates/jet-rt/src/lib.rs:1480
     pub fn record_get_float(self, record: I64, index: I64) -> F64? { match self.record_get(record, index) { Val(.Float(v)) -> Val(v), _ -> None } }
@@ -976,21 +1003,21 @@ impl JetArena {
     // Rust: crates/jet-rt/src/lib.rs:1652
     pub fn int_add(self: &JetArena, left: I64, right: I64) -> I64 {
         if JetArena.int_is_small(left) and JetArena.int_is_small(right) {
-            if left.checked_add(right) is Val(value) { if JetArena.int_is_small(value) -> return value }
+            if left.checked_add(right) == .Val(value) { if JetArena.int_is_small(value) -> return value }
         }
         self.int_pack(self.int_value(left).add(self.int_value(right)))
     }
     // Rust: crates/jet-rt/src/lib.rs:1663
     pub fn int_sub(self: &JetArena, left: I64, right: I64) -> I64 {
         if JetArena.int_is_small(left) and JetArena.int_is_small(right) {
-            if left.checked_sub(right) is Val(value) { if JetArena.int_is_small(value) -> return value }
+            if left.checked_sub(right) == .Val(value) { if JetArena.int_is_small(value) -> return value }
         }
         self.int_pack(self.int_value(left).sub(self.int_value(right)))
     }
     // Rust: crates/jet-rt/src/lib.rs:1674
     pub fn int_mul(self: &JetArena, left: I64, right: I64) -> I64 {
         if JetArena.int_is_small(left) and JetArena.int_is_small(right) {
-            if left.checked_mul(right) is Val(value) { if JetArena.int_is_small(value) -> return value }
+            if left.checked_mul(right) == .Val(value) { if JetArena.int_is_small(value) -> return value }
         }
         self.int_pack(self.int_value(left).mul(self.int_value(right)))
     }
@@ -1012,7 +1039,7 @@ impl JetArena {
     // Rust: crates/jet-rt/src/lib.rs:1714
     pub fn int_neg(self: &JetArena, value: I64) -> I64 {
         if JetArena.int_is_small(value) {
-            if value.checked_neg() is Val(negated) { if JetArena.int_is_small(negated) -> return negated }
+            if value.checked_neg() == .Val(negated) { if JetArena.int_is_small(negated) -> return negated }
         }
         self.int_pack(self.int_value(value).neg())
     }

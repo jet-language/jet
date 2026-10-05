@@ -586,7 +586,7 @@ pub fn jet_hardware_dispatch_pending(registry: &JetHardwareInterruptRegistry) ->
             tail :: JET_HARDWARE_PENDING_TAIL.load(Ordering.Acquire)
             while head != tail && callbacks.len < callbacks.callbacks.len() {
                 vector :: JET_HARDWARE_PENDING_VECTORS[head % JET_HARDWARE_PENDING_CAPACITY].load(Ordering.Acquire)
-                if registry.handler(vector) is Val(handler) {
+                if registry.handler(vector) == .Val(handler) {
                     callbacks.callbacks[callbacks.len] = Val(handler)
                     callbacks.len += 1
                 }
@@ -597,8 +597,8 @@ pub fn jet_hardware_dispatch_pending(registry: &JetHardwareInterruptRegistry) ->
             if not jet_hardware_has_pending() -> return callbacks
             queue := JET_HARDWARE_PENDING_INTERRUPTS.lock().unwrap_or_else(fn(error) { error.into_inner() })
             undelivered := VecDeque<U16>.new()
-            while queue.pop_front() is Val(vector) {
-                if registry.handler(vector) is Val(handler) {
+            while queue.pop_front() == .Val(vector) {
+                if registry.handler(vector) == .Val(handler) {
                     callbacks.hosted_callbacks.push(handler)
                 } else { undelivered.push_back(vector) }
             }
@@ -1001,7 +1001,7 @@ pub fn jet_hardware_with_current_host<R>(body: fn(&JetHardwareHost) -> R) -> R {
     #Unsafe("scope keeps the host alive; holding TLS mutable borrow excludes reentrant mutable aliases") {
         JET_HARDWARE_CURRENT_HOST.with(fn(slot) {
             current :: slot.borrow_mut()
-            if *current is Val(pointer) {
+            if *current == .Val(pointer) {
                 body(pointer.as_mut())
             } else {
                 JET_HARDWARE_DEFAULT_HOST.with(fn(host) { body(&*host.borrow_mut()) })
@@ -1015,7 +1015,7 @@ pub fn jet_hardware_with_current_erased_host<R>(body: fn(&JetHardwareErasedHost)
     #Unsafe("erased scope keeps host alive; TLS mutable borrow excludes reentrant mutable aliases") {
         JET_HARDWARE_CURRENT_ERASED_HOST.with(fn(slot) {
             current :: slot.borrow_mut()
-            if *current is Val(pointer) {
+            if *current == .Val(pointer) {
                 body(pointer.as_mut())
             } else {
                 JET_HARDWARE_DEFAULT_HOST.with(fn(host) { body(&*host.borrow_mut()) })

@@ -82,11 +82,20 @@ module jet_numeric_web_bridge {
         I128_RESULT.with(fn(cell) { cell.set(std.i128.from(value).to_le_bytes()) })
     }
     // Rust: crates/jet-codegen/src/Prelude/Core/NumericWeb.rs:59
-    fn result_ok_i128(value: Int) -> I32 Never! { store_i128(value); OK }
+    fn result_ok_i128(value: Int) -> I32 Never! {
+        store_i128(value)
+        OK
+    }
     // Rust: crates/jet-codegen/src/Prelude/Core/NumericWeb.rs:64
-    fn result_err(error: String) -> I32 Never! { set_error(error); ABSENT_OR_NONE }
+    fn result_err(error: String) -> I32 Never! {
+        set_error(error)
+        ABSENT_OR_NONE
+    }
     // Rust: crates/jet-codegen/src/Prelude/Core/NumericWeb.rs:69
-    fn bridge_error(error: String) -> I32 Never! { set_error(error); BRIDGE_ERROR }
+    fn bridge_error(error: String) -> I32 Never! {
+        set_error(error)
+        BRIDGE_ERROR
+    }
 
     // Rust: crates/jet-codegen/src/Prelude/Core/NumericWeb.rs:74
     fn text_slot(slot: U32) -> Int Err! {
@@ -188,7 +197,10 @@ module jet_numeric_web_bridge {
     pub fn jet_numeric_web_float_narrow(value: Float) -> I32 Never! {
         begin_result()
         match jet_numeric_float_narrow(value) {
-            Val(value) => { F32_RESULT.with(fn(cell) { cell.set(value) }); OK },
+            Val(value) => {
+                F32_RESULT.with(fn(cell) { cell.set(value) })
+                OK
+            },
             Err(error) => result_err(error),
         }
     }
@@ -238,7 +250,10 @@ module jet_numeric_web_bridge {
         begin_result()
         file :: match read_file(file_ptr, file_len) {
             Val(file) => file,
-            Err(error) => { set_error(error); return 0.0 },
+            Err(error) => {
+                set_error(error)
+                return 0.0
+            },
         }
         jet_numeric_checked_widen_at(raw, signed != U32{0}, target_f32 != U32{0}, file, line)
     }
@@ -248,11 +263,17 @@ module jet_numeric_web_bridge {
         begin_result()
         value :: match read_int(value_ptr, value_len) {
             Val(value) => value,
-            Err(error) => { set_error(error); return 0.0 },
+            Err(error) => {
+                set_error(error)
+                return 0.0
+            },
         }
         file :: match read_file(file_ptr, file_len) {
             Val(file) => file,
-            Err(error) => { set_error(error); return 0.0 },
+            Err(error) => {
+                set_error(error)
+                return 0.0
+            },
         }
         jet_int_checked_widen(value, target_f32 != U32{0}, file, line)
     }
@@ -274,7 +295,10 @@ module jet_numeric_web_bridge {
             Val(value) => value, Err(error) => return bridge_error(error),
         }
         match jet_unit_conversion_exact(value, scale_num, scale_den, offset_num, offset_den) {
-            Val(value) => { F64_RESULT.with(fn(cell) { cell.set(value) }); OK },
+            Val(value) => {
+                F64_RESULT.with(fn(cell) { cell.set(value) })
+                OK
+            },
             None => ABSENT_OR_NONE,
         }
     }
@@ -298,7 +322,10 @@ module jet_numeric_web_bridge {
             Val(value) => value, Err(error) => return bridge_error(error),
         }
         match jet_unit_conversion_rounded(value, scale_num, scale_den, offset_num, offset_den, mode, digits) {
-            Val(value) => { F64_RESULT.with(fn(cell) { cell.set(value) }); OK },
+            Val(value) => {
+                F64_RESULT.with(fn(cell) { cell.set(value) })
+                OK
+            },
             Err(error) => result_err(error),
         }
     }

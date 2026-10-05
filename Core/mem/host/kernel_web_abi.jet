@@ -108,7 +108,10 @@ pub fn jet_abi_string_alloc(len: U32) -> U32 {
 // Rust: crates/jet-codegen/src/Prelude/Core/WebAbi.rs:115
 #FFI(c)
 pub fn jet_abi_string_free(pointer: U32, len: U32) -> {
-    if pointer == 0 { assert(len == 0, "null Wasm string allocation with length"); return }
+    if pointer == 0 {
+        assert(len == 0, "null Wasm string allocation with length")
+        return
+    }
     jet_abi_require(JET_ABI_STRING_KIND, pointer, len)
     // GATE #4565: kernel primitive
     #Unsafe("registry consumption permits one final drop of the original exact byte span") { _ :: Box.from_raw(ptr.slice_from_raw_parts_mut(ptr.from_addr<U8>(pointer as USize), len as USize)) }
@@ -128,7 +131,10 @@ fn jet_abi_list_i64_ret(v: [I64]) -> U64 {
 fn jet_abi_list_i64_arg(packed: U64) -> [I64] {
     pointer :: (packed >> 32) as U32
     len :: (packed & 0xffff_ffff) as U32
-    if len == 0 { assert(pointer == 0, "non-null empty Wasm list-i64 allocation"); return [] }
+    if len == 0 {
+        assert(pointer == 0, "non-null empty Wasm list-i64 allocation")
+        return []
+    }
     byte_len :: len.checked_mul(size_of<I64>() as U32).expect("list-i64 byte length overflow")
     jet_abi_require(JET_ABI_LIST_I64_KIND, pointer, byte_len)
     // GATE #4565: kernel primitive
@@ -151,7 +157,10 @@ pub fn jet_abi_list_i64_alloc(len: U32) -> U32 {
 // Rust: crates/jet-codegen/src/Prelude/Core/WebAbi.rs:160
 #FFI(c)
 pub fn jet_abi_list_i64_free(pointer: U32, len: U32) -> {
-    if pointer == 0 { assert(len == 0, "null Wasm list-i64 allocation with length"); return }
+    if pointer == 0 {
+        assert(len == 0, "null Wasm list-i64 allocation with length")
+        return
+    }
     byte_len :: len.checked_mul(size_of<I64>() as U32).expect("list-i64 byte length overflow")
     jet_abi_require(JET_ABI_LIST_I64_KIND, pointer, byte_len)
     // GATE #4565: kernel primitive
@@ -178,7 +187,10 @@ fn jet_abi_list_int_ret(v: [JetInt]) -> U64 {
 fn jet_abi_list_int_arg(packed: U64) -> [JetInt] {
     pointer :: (packed >> 32) as U32
     len :: (packed & 0xffff_ffff) as U32
-    if len == 0 { assert(pointer == 0, "non-null empty Wasm list-int allocation"); return [] }
+    if len == 0 {
+        assert(pointer == 0, "non-null empty Wasm list-int allocation")
+        return []
+    }
     jet_abi_require(JET_ABI_LIST_INT_KIND, pointer, len)
     // GATE #4565: kernel primitive
     boxed :: #Unsafe("consume the registered exact byte allocation once before parsing") { Box.from_raw(ptr.slice_from_raw_parts_mut(ptr.from_addr<U8>(pointer as USize), len as USize)) }
@@ -215,7 +227,10 @@ pub fn jet_abi_list_int_alloc(byte_len: U32) -> U32 {
 // Rust: crates/jet-codegen/src/Prelude/Core/WebAbi.rs:228
 #FFI(c)
 pub fn jet_abi_list_int_free(pointer: U32, byte_len: U32) -> {
-    if pointer == 0 { assert(byte_len == 0, "null Wasm list-int allocation with length"); return }
+    if pointer == 0 {
+        assert(byte_len == 0, "null Wasm list-int allocation with length")
+        return
+    }
     jet_abi_require(JET_ABI_LIST_INT_KIND, pointer, byte_len)
     // GATE #4565: kernel primitive
     #Unsafe("consume registered decimal-list bytes before exactly one final drop") { _ :: Box.from_raw(ptr.slice_from_raw_parts_mut(ptr.from_addr<U8>(pointer as USize), byte_len as USize)) }
@@ -243,7 +258,10 @@ fn jet_abi_list_string_ret(v: [String]) -> U64 {
 fn jet_abi_list_string_arg(packed: U64) -> [String] {
     pointer :: (packed >> 32) as U32
     byte_len :: (packed & 0xffff_ffff) as U32
-    if byte_len == 0 { assert(pointer == 0, "non-null empty Wasm list-string allocation"); return [] }
+    if byte_len == 0 {
+        assert(pointer == 0, "non-null empty Wasm list-string allocation")
+        return []
+    }
     jet_abi_require(JET_ABI_LIST_STRING_KIND, pointer, byte_len)
     // GATE #4565: kernel primitive
     boxed :: #Unsafe("consume the registered UTF-8 list allocation once") { Box.from_raw(ptr.slice_from_raw_parts_mut(ptr.from_addr<U8>(pointer as USize), byte_len as USize)) }
@@ -278,7 +296,10 @@ pub fn jet_abi_list_string_alloc(byte_len: U32) -> U32 {
 // Rust: crates/jet-codegen/src/Prelude/Core/WebAbi.rs:296
 #FFI(c)
 pub fn jet_abi_list_string_free(pointer: U32, byte_len: U32) -> {
-    if pointer == 0 { assert(byte_len == 0, "null Wasm list-string allocation with length"); return }
+    if pointer == 0 {
+        assert(byte_len == 0, "null Wasm list-string allocation with length")
+        return
+    }
     jet_abi_require(JET_ABI_LIST_STRING_KIND, pointer, byte_len)
     // GATE #4565: kernel primitive
     #Unsafe("registry consumption permits exactly one final drop of list-string bytes") { _ :: Box.from_raw(ptr.slice_from_raw_parts_mut(ptr.from_addr<U8>(pointer as USize), byte_len as USize)) }
@@ -310,7 +331,10 @@ fn jet_abi_map_string_int_ret(m: JetMap<String, JetInt>) -> U64 {
 fn jet_abi_map_string_int_arg(packed: U64) -> JetMap<String, JetInt> {
     pointer :: (packed >> 32) as U32
     byte_len :: (packed & 0xffff_ffff) as U32
-    if byte_len == 0 { assert(pointer == 0, "non-null empty Wasm map-string-int allocation"); return JetMap.new() }
+    if byte_len == 0 {
+        assert(pointer == 0, "non-null empty Wasm map-string-int allocation")
+        return JetMap.new()
+    }
     jet_abi_require(JET_ABI_MAP_STRING_INT_KIND, pointer, byte_len)
     // GATE #4565: kernel primitive
     boxed :: #Unsafe("consume exact registered map byte span once before parsing") { Box.from_raw(ptr.slice_from_raw_parts_mut(ptr.from_addr<U8>(pointer as USize), byte_len as USize)) }
@@ -353,7 +377,10 @@ pub fn jet_abi_map_string_int_alloc(byte_len: U32) -> U32 {
 // Rust: crates/jet-codegen/src/Prelude/Core/WebAbi.rs:378
 #FFI(c)
 pub fn jet_abi_map_string_int_free(pointer: U32, byte_len: U32) -> {
-    if pointer == 0 { assert(byte_len == 0, "null Wasm map-string-int allocation with length"); return }
+    if pointer == 0 {
+        assert(byte_len == 0, "null Wasm map-string-int allocation with length")
+        return
+    }
     jet_abi_require(JET_ABI_MAP_STRING_INT_KIND, pointer, byte_len)
     // GATE #4565: kernel primitive
     #Unsafe("registry consumption permits exactly one final drop of map bytes") { _ :: Box.from_raw(ptr.slice_from_raw_parts_mut(ptr.from_addr<U8>(pointer as USize), byte_len as USize)) }

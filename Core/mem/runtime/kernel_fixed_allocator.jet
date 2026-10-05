@@ -108,7 +108,7 @@ impl FixedState {
         value_offset := U64{0}
         end := U64{0}
         if value_bytes == U64{0} {
-            if word_add(self.used, reserved_bytes) is Val(next) {
+            if word_add(self.used, reserved_bytes) == .Val(next) {
                 end = next
             } else { return Err(^value) }
             // ZST reserves a cursor byte but uses its correctly aligned dangling
@@ -118,15 +118,15 @@ impl FixedState {
             }
         } else {
             value_align :: U64{mem.align_of<T>()}.max(U64{1})
-            if Self.aligned_offset(base, self.used, value_align) is Val(offset) {
+            if Self.aligned_offset(base, self.used, value_align) == .Val(offset) {
                 value_offset = offset
             } else { return Err(^value) }
-            if word_add(value_offset, reserved_bytes) is Val(next) {
+            if word_add(value_offset, reserved_bytes) == .Val(next) {
                 end = next
             } else { return Err(^value) }
         }
         header_offset := U64{0}
-        if Self.aligned_down_offset(base, self.metadata_start, header_bytes, header_align) is Val(offset) {
+        if Self.aligned_down_offset(base, self.metadata_start, header_bytes, header_align) == .Val(offset) {
             header_offset = offset
         } else { return Err(^value) }
         if end > header_offset -> return Err(^value)
@@ -167,7 +167,7 @@ impl FixedState {
             value_ptr :: if header.bytes == U64{0} {
                 mem.Ptr<U8>.from_addr(Int{header.value_offset})
             } else { base.add(Int{header.value_offset}) }
-            if header.drop_fn is Val(drop_fn) -> drop_fn(value_ptr)
+            if header.drop_fn == .Val(drop_fn) -> drop_fn(value_ptr)
             after_drop(value_ptr, header.bytes)
             header_offset = header.previous
         }

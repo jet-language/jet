@@ -70,7 +70,7 @@ fn jet_sentry_runtime_stop(fault: sentry_kernel.JetSentryFault) -> Never {
 fn jet_sentry_check<T>(ptr: Ptr<T>, operation: String, obligation: String) -> {
     // GATE #4565: kernel primitive
     #Unsafe("observe selected typed layout and provenance before raw access") {
-        if sentry_kernel.jet_sentry_check(ptr.addr(), memory.size_of<T>(), memory.align_of<T>(), operation, obligation) is Val(fault) {
+        if sentry_kernel.jet_sentry_check(ptr.addr(), memory.size_of<T>(), memory.align_of<T>(), operation, obligation) == .Val(fault) {
             jet_sentry_runtime_stop(^fault)
         }
     }
@@ -79,7 +79,7 @@ fn jet_sentry_check<T>(ptr: Ptr<T>, operation: String, obligation: String) -> {
 fn jet_sentry_check_foreign<T>(ptr: Ptr<T>, operation: String, obligation: String, component: String) -> {
     // GATE #4565: kernel primitive
     #Unsafe("foreign storage is admitted by the shared sentry's component policy") {
-        if sentry_kernel.jet_sentry_check_foreign_with_component(ptr.addr(), memory.size_of<T>(), memory.align_of<T>(), operation, obligation, component) is Val(fault) {
+        if sentry_kernel.jet_sentry_check_foreign_with_component(ptr.addr(), memory.size_of<T>(), memory.align_of<T>(), operation, obligation, component) == .Val(fault) {
             jet_sentry_runtime_stop(^fault)
         }
     }
@@ -88,7 +88,7 @@ fn jet_sentry_check_foreign<T>(ptr: Ptr<T>, operation: String, obligation: Strin
 fn jet_sentry_check_foreign_strict<T>(ptr: Ptr<T>, operation: String, obligation: String, component: String) -> {
     // GATE #4565: kernel primitive
     #Unsafe("apply strict shared provenance policy to the foreign component") {
-        if sentry_kernel.jet_sentry_check_foreign_strict(ptr.addr(), memory.size_of<T>(), memory.align_of<T>(), operation, obligation, component) is Val(fault) {
+        if sentry_kernel.jet_sentry_check_foreign_strict(ptr.addr(), memory.size_of<T>(), memory.align_of<T>(), operation, obligation, component) == .Val(fault) {
             jet_sentry_runtime_stop(^fault)
         }
     }
@@ -220,7 +220,7 @@ impl Drop for RawBlock {
 // Rust: crates/jet-codegen/src/Prelude/Mem.rs:285
 fn drop_entries(entries: &[DropEntry]) -> {
     loop entry in entries.drain(..).rev() {
-        if entry.drop_fn is Val(drop_fn) {
+        if entry.drop_fn == .Val(drop_fn) {
             // GATE #4565: kernel primitive
             #Unsafe("each drained entry owns one initialized still-live value; reverse creation order") { drop_fn(entry.ptr) }
         }
@@ -332,7 +332,10 @@ impl JetArena {
 }
 impl Drop for JetArena {
     // Rust: crates/jet-codegen/src/Prelude/Mem.rs:441
-    fn drop(self: &Self) -> { self.reset(); jet_observe_arena_close() }
+    fn drop(self: &Self) -> {
+        self.reset()
+        jet_observe_arena_close()
+    }
 }
 // Rust: crates/jet-codegen/src/Prelude/Mem.rs:447
 struct BumpState { block: RawBlock, drops: [DropEntry], live_allocations: USize, live_bytes: USize, high_water_bytes: USize }
@@ -394,7 +397,10 @@ impl JetBump {
 }
 impl Drop for JetBump {
     // Rust: crates/jet-codegen/src/Prelude/Mem.rs:531
-    fn drop(self: &Self) -> { self.reset(); jet_observe_arena_close() }
+    fn drop(self: &Self) -> {
+        self.reset()
+        jet_observe_arena_close()
+    }
 }
 // Rust: crates/jet-codegen/src/Prelude/Mem.rs:537
 struct PoolSlot { block: RawBlock?, occupied: Bool }
@@ -479,7 +485,7 @@ impl JetPool {
         jet_observe_arena_reset(allocations, state.live_bytes)
         loop slot in &state.slots {
             slot.occupied = false
-            if slot.block is Val(block) -> block.rewind()
+            if slot.block == .Val(block) -> block.rewind()
         }
         state.live_bytes = 0
         state.generation = state.generation.wrapping_add(1).max(1)
@@ -487,7 +493,10 @@ impl JetPool {
 }
 impl Drop for JetPool {
     // Rust: crates/jet-codegen/src/Prelude/Mem.rs:685
-    fn drop(self: &Self) -> { self.reset(); jet_observe_arena_close() }
+    fn drop(self: &Self) -> {
+        self.reset()
+        jet_observe_arena_close()
+    }
 }
 // Rust: crates/jet-codegen/src/Prelude/Mem.rs:695
 // FixedState remains the canonical header/state/reverse-drop mechanism.

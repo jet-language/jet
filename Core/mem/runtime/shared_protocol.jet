@@ -400,8 +400,14 @@ impl JetSharedTransactionGate {
             owner := JET_SHARED_TRANSACTION_GATE_OWNER.lock().unwrap_or_else(fn(error) { error.into_inner() })
             loop {
                 match owner.as_mut() {
-                    None -> { *owner = Val((me, 1)); return Self{} }
-                    Val((holder, depth)) if *holder == me -> { *depth += 1; return Self{} }
+                    None -> {
+                        *owner = Val((me, 1))
+                        return Self{}
+                    }
+                    Val((holder, depth)) if *holder == me -> {
+                        *depth += 1
+                        return Self{}
+                    }
                     Val(_) -> {
                         owner = JET_SHARED_TRANSACTION_GATE_RELEASED.wait(^owner)
                             .unwrap_or_else(fn(error) { error.into_inner() })
@@ -749,7 +755,10 @@ impl JetSharedPermit {
                 available :: if self.editable { !state.writer && state.readers == 0 }
                     else { !state.writer && state.writers_waiting == 0 }
                 if available {
-                    if self.editable { state.writers_waiting -= 1; state.writer = true }
+                    if self.editable {
+                        state.writers_waiting -= 1
+                        state.writer = true
+                    }
                     else { state.readers += 1 }
                     self.held.store(true, Ordering.Release)
                     return true
@@ -1018,9 +1027,15 @@ struct JetConditionWaitCleanup {
 // Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1561
 impl JetConditionWaitCleanup {
     // Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1562
-    fn release(self: &Self) -> { self.permit.release_during_drop(); self.released = true }
+    fn release(self: &Self) -> {
+        self.permit.release_during_drop()
+        self.released = true
+    }
     // Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1567
-    fn abandon(self: &Self) -> { drop(self.registration.take()); self.released = false }
+    fn abandon(self: &Self) -> {
+        drop(self.registration.take())
+        self.released = false
+    }
     // Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1572
     fn finish(self: &Self) -> () ()! {
         drop(self.registration.take())

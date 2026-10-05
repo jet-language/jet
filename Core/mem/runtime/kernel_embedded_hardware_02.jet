@@ -97,7 +97,7 @@ impl<const N: USize> JetRegisterBackend for JetRegisterReplay<N> {
     fn read(self, address: U64, width: JetRegisterWidth, _volatile_access: Bool) -> U64 Never! { self.value(address, width).unwrap_or(U64{0}) }
     // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1973
     fn write(self, address: U64, width: JetRegisterWidth, value: U64, _volatile_access: Bool) -> Never! {
-        if self.cells.iter().find(cell -> cell.defined && cell.address == address && cell.width == width) is Val(cell) -> cell.value.set(value)
+        if self.cells.iter().find(cell -> cell.defined && cell.address == address && cell.width == width) == .Val(cell) -> cell.value.set(value)
     }
 }
 // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1986
@@ -241,7 +241,7 @@ impl<C, const BINDINGS: USize, const PENDING: USize> JetInterruptController<C, B
         vector :: self.pending[self.head]
         self.head = ring_next(self.head, PENDING)
         self.pending_len -= USize{1}
-        if self.binding(vector) is Val(binding) {
+        if self.binding(vector) == .Val(binding) {
             match binding.handler { .Context(handler) -> handler(context), .Bare(handler) -> handler() }
         }
         .Dispatched(vector)
@@ -401,8 +401,8 @@ impl<T> JetDmaTransfer<T> {
     // Only the real provider completion or deterministic replay can release the retained frame resource.
     pub fn mark_complete(self: &JetDmaTransfer<T>) -> Never! {
         self.state = .Complete
-        if self.completion_handle is Val(handle) {
-            if handle.signal() is Err(error) -> jet_panic("<core.hardware>", 0, error)
+        if self.completion_handle == .Val(handle) {
+            if handle.signal() == .Err(error) -> jet_panic("<core.hardware>", 0, error)
         } else if current_frame_completion_state().is_some() {
             jet_panic("<core.hardware>", 0, "checked DMA completion is missing its submission binding")
         }
@@ -416,7 +416,7 @@ impl<T> JetDmaTransfer<T> {
     // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:2555
     pub fn state(self) -> JetDmaTransferState Never! { self.state }
     // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:2559
-    pub fn is_complete(self) -> Bool Never! { self.state is .Complete }
+    pub fn is_complete(self) -> Bool Never! { self.state == .Complete }
     // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:2566
     // An incomplete wait returns the same owning transfer for a later retry.
     pub fn wait(^self) -> JetDmaBuffer<T> JetDmaWaitError<T>! {
