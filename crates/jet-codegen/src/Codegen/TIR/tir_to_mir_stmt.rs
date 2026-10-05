@@ -2591,16 +2591,17 @@ fn lower_scope_member(
 ) -> Result<(), LowerError> {
     match kind {
         ScopeMemberKind::Setup => lower_stmts(ctx, body),
-        ScopeMemberKind::ExpectFail(code) => {
+        ScopeMemberKind::ExpectFail { code, message } => {
             let scope = ctx.enter_scope(MirScopeKind::ScopeMember, ctx.span(), code.clone())?;
             attach_scope_member(
                 ctx,
                 scope,
                 MirTestScopeMember::ExpectFail {
                     expected_code: code.clone(),
+                    expected_message: message.clone(),
                 },
             )?;
-            lower_scope_member_body(ctx, scope, body)
+            lower_scope_member_body(ctx, scope, body, true)
         }
         ScopeMemberKind::Timeout(duration) => {
             let value = lower_expr(ctx, duration)?;
@@ -2610,7 +2611,7 @@ fn lower_scope_member(
                 Some("timeout".to_string()),
             )?;
             attach_scope_member(ctx, scope, MirTestScopeMember::Timeout { duration: value })?;
-            lower_scope_member_body(ctx, scope, body)
+            lower_scope_member_body(ctx, scope, body, false)
         }
         ScopeMemberKind::Measure => {
             let scope = ctx.enter_scope(
@@ -2619,7 +2620,7 @@ fn lower_scope_member(
                 Some("measure".to_string()),
             )?;
             attach_scope_member(ctx, scope, MirTestScopeMember::Measure)?;
-            lower_scope_member_body(ctx, scope, body)
+            lower_scope_member_body(ctx, scope, body, false)
         }
         ScopeMemberKind::Skip => {
             let whole_test = ctx.scopes.is_empty()
@@ -2810,18 +2811,24 @@ fn lower_scope_member_body(
     ctx: &mut LowerCtx,
     scope: MirScopeId,
     body: &[TStmt],
+    expect_fail: bool,
 ) -> Result<(), LowerError> {
     let body_entry = ctx.current_block();
     let body_block_start = ctx.blocks.len();
     lower_stmts(ctx, body)?;
     emit_scope_exits_on_early_paths(ctx, scope, body_entry, body_block_start)?;
-    if ctx.is_terminated() {
-        ctx.exit_scope(scope)?;
-        return Ok(());
-    }
     let exit = ctx.new_block(ctx.span(), "scope-member.exit")?;
     let join = ctx.new_block(ctx.span(), "scope-member.join")?;
-    ctx.terminate(MirTerminator::Jump { target: exit });
+    // An `.expect_fail` body that ends in an unconditional stop (`panic(…)`)
+    // jumps to its exit after the stop. The stop never returns, so the jump
+    // never runs; it keeps the exit reachable, which is where a caught stop
+    // resumes and which gives the backend's catch match an arm for the scope.
+    let ends_in_stop = ctx.block_by_id(ctx.current_block()).is_some_and(|block| {
+        matches!(&block.terminator, MirTerminator::Unreachable { reason } if reason == "checked unconditional stop")
+    });
+    if !ctx.is_terminated() || (expect_fail && ends_in_stop) {
+        ctx.terminate(MirTerminator::Jump { target: exit });
+    }
     ctx.switch_to(exit);
     ctx.exit_scope(scope)?;
     if !ctx.is_terminated() {

@@ -21,6 +21,7 @@ pub const LEXICAL_LEDGER: &[LexicalEntry] = &[
     LexicalEntry { spelling: "::", meaning: "immutable binding", decision: "D-BIND1" },
     LexicalEntry { spelling: ":=", meaning: "mutable binding", decision: "D-BIND1" },
     LexicalEntry { spelling: "#", meaning: "attached marker; #[A, B] stacks", decision: "D-VERDICT-732-1; D-MARK-STACK1" },
+    LexicalEntry { spelling: ".expect_fail(message: \"text\")", meaning: "test region requires a stop with an optional E30xx code and non-empty case-sensitive raw-message substring", decision: "D-TEST-STOPMSG1=A" },
     LexicalEntry { spelling: "#DevPanel", meaning: "exported typed devtools panel marker", decision: "D-DX-PLUGIN1=D" },
     LexicalEntry { spelling: "web.form(Model, action: handler)", meaning: "struct-derived headless form with progressive action", decision: "D-DX-FORM1" },
     LexicalEntry { spelling: "#Layout(c, align(N)) / #Layout(c, align(target, N))", meaning: "C layout with portable or target-supported explicit alignment", decision: "D-PLACE1=A; D-LAYOUT-ALIGN1=A" },
@@ -53,6 +54,7 @@ pub const LEXICAL_LEDGER: &[LexicalEntry] = &[
     LexicalEntry { spelling: "Name{\"…\"}", meaning: "checked text head", decision: "S8; D-CHECKED-TEXT1" },
     LexicalEntry { spelling: ".{ … }", meaning: "typed anonymous value", decision: "D-POLICY-WORD1" },
     LexicalEntry { spelling: "`", meaning: "raw ordinary String fence", decision: "D-RAWSTR1" },
+    LexicalEntry { spelling: "\"\"\"", meaning: "multi-line string; only spaces or tabs on the delimiter lines (raw foreign bodies excepted)", decision: "D-SG5; D-TRIPLE-DELIM1=A; D-FFI-RAWBODY1=A" },
     LexicalEntry { spelling: ",", meaning: "separator with optional trailing item in every comma list", decision: "D-TRAILCOMMA1" },
     LexicalEntry { spelling: "r\"…\", raw\"…\", $\"…\"", meaning: "unclaimed raw-string prefixes", decision: "" },
     LexicalEntry { spelling: ";", meaning: "retired explicit statement terminator", decision: "D-SEMI1" },
@@ -145,6 +147,8 @@ pub const MARKER_ALIGN_LEGACY: &str = "Align";
 // `--replay=`; D-RUN-SESSION1=A claims the exact `r/R/t/f/q` session keys.
 // Their canonical rows live in the private surface modules below and are
 // re-exported through this file; no parser or execution engine owns a copy.
+// D-TEST-STOPMSG1=A (card #4510): SCOPE_TEST_EXPECT_FAIL accepts an optional
+// E30xx code and `message: "text"`; SCOPE_TEST_EXPECT_MESSAGE names that label.
 // D-FAIL-EXIT1=A / D-FAIL-EDGE1=A (ratified 2026-08-06, cards #1533/#1536)
 // add no token: `fn run()` is the default-fallible entry, and the build target
 // selects the final report boundary. CLI, web, wasm, and service adapters
@@ -262,8 +266,8 @@ pub const MARKER_ALIGN_LEGACY: &str = "Align";
 // D-CALLABLE-ONE1=A is amended: the plain arrow is present when a non-unit
 // success result is declared; unit bodies keep bare braces.
 // D-EFFECT-ROW2=B (ratified 2026-08-21, card #2144): effect ceilings keep the
-// `-[` / `]>` spelling, including pure `-[]>`; D-LAMBDA-IFACE1=A gives lambdas
-// the same interface suffixes.
+// `-[` / `]>` spelling, including pure `-[]>`; D-LAMBDA-IFACE2=A limits
+// lambda interfaces to parameters and that optional effect row.
 // D-ARMHEAD-PAREN1=A, D-SUBJECT-COHERE1=A, and D-DEFAULT-SHAPE1=B (ratified
 // 2026-08-21, card #2144) add no token: arm grouping, subject chains, and
 // declaration defaults reuse the existing parentheses, dot, and typed-value
@@ -298,9 +302,9 @@ pub const MARKER_ALIGN_LEGACY: &str = "Align";
 // existing function surface. `--show-default` selects the stock behavior.
 // D-CMD-OVERRIDE1=C (card #1451) remains the older test-suite API detail.
 // D-JOB-NAME1=A (ratified 2026-08-05, card #1448) adds no token: the marker
-// and every command use `job`. Canonical CLI is `jet run <entry> -- <name>`
-// and `jet jobs`. Retired spellings have no alias or fallback. Help,
-// completions, diagnostics, docs, examples, and tests use the same word.
+// and every command use `job`. D-JET-VERBS1=A runs project jobs as `jet <name>`;
+// `jet run <entry> -- <name>` runs the explicit entry and `jet jobs` lists jobs.
+// Help, completions, diagnostics, docs, examples, and tests use the same word.
 // KW_JOB / JOB_SCOPE_VARIANTS live in math_layout and are re-exported here.
 // EFFECT_ARROW_OPEN/CLOSE (`-[` / `]>`) add effect ceilings. The unified
 // arrow selects dispatch/guard values, yields finite-loop items, and marks a
@@ -376,6 +380,9 @@ pub const MARKER_ALIGN_LEGACY: &str = "Align";
 // D-HTTP-ROUTE-SYNTAX2=A owns the two route-pattern markers carried inside
 // ordinary String values. They are not lexer tokens; the HTTP router consumes
 // them after String evaluation.
+// D-PATTERN-HOLE-NAME1=A adds no token: a text or byte pattern hole must
+// introduce a new name, not reuse a local, parameter, or module constant
+// (E0118). Parenthesize the right-hand literal for interpolated equality.
 // D-FLOWTYPE1=A adds no token: after a stable immutable `?T` name is checked
 // with `x != None` (true) or `x == None` (false/else), sema refines that name
 // to `T` for the proven branch and records an S31 Present unwrap for TIR.

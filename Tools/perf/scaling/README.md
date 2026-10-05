@@ -42,3 +42,6 @@ There are no built-in exemptions; every override requires a reason and bound.
 `JET_PHASE_COUNTERS {"phase":"parse","visits":42,"bytes_copied":64}` lines on
 stdout/stderr are summed by phase/key; nested numeric objects also work.
 Counter ratios gate independently; no counter lines means timing/RSS-only data.
+The self-hosted compiler (a jetc runner, via `--command`) writes them when run
+with both `JET_TRACE_FILE` and `JET_PHASE_COUNTERS=1`: per phase (`register`,
+`sema.check`), the registration graph's `module_lookups` and `name_lookups`.

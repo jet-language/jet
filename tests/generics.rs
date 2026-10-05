@@ -27,7 +27,7 @@ build: {
     let source = r#"
 module cache<K>(capacity: Int) {
     pub struct Buffer { items: [K#capacity] }
-    pub fn slots() -> Int -> capacity
+    pub fn slots() -> Int { capacity }
 }
 PROFILE_SLOTS :: prep { $build.settings.cache_slots }
 module tuned :: cache<Int>($build.settings.cache_slots)
@@ -250,13 +250,13 @@ BASE :: prep { 40 }
 module cache<K>(capacity: Int) {
     COMPUTED_SIZE :: prep { BASE + capacity }
     pub struct Entry { items: [K#capacity] }
-    pub fn size() -> Int -> COMPUTED_SIZE
+    pub fn size() -> Int { COMPUTED_SIZE }
 }
 
 module x :: cache<Int>(64)
 
 module plain_template<K> {
-    pub fn identity(value: K) -> K -> value
+    pub fn identity(value: K) -> K { value }
 }
 module plain :: plain_template<Int>
 

@@ -1,5 +1,5 @@
 Error [E1102]: `cell` can't cross into a task because `Cell<Int>` isn't sendable
-  --> tests/ui/local_cell_crossing.jet:4:20
+  --> local_cell_crossing.jet:4:20
     |
   4 |     worker :: task {
     |                    ^
@@ -8,7 +8,7 @@ Error [E1102]: `cell` can't cross into a task because `Cell<Int>` isn't sendable
 More: jet-lang.dev/e/E1102
 
 Error [E1102]: `Cell`<Int> cannot be stored in `Shared<T>`
-  --> tests/ui/local_cell_crossing.jet:11:17
+  --> local_cell_crossing.jet:11:17
     |
  11 |     _ :: shared cell
     |                 ^^^^
@@ -17,7 +17,7 @@ Error [E1102]: `Cell`<Int> cannot be stored in `Shared<T>`
 More: jet-lang.dev/e/E1102
 
 Error [E1102]: `LocalCache` cannot be stored in `Shared<T>`
-  --> tests/ui/local_cell_crossing.jet:19:17
+  --> local_cell_crossing.jet:19:17
     |
  19 |     _ :: shared cache
     |                 ^^^^^
@@ -26,10 +26,10 @@ Error [E1102]: `LocalCache` cannot be stored in `Shared<T>`
 More: jet-lang.dev/e/E1102
 
 Error [E1102]: `cell` can't be captured by an HTTP handler because `Cell<Int>` isn't sendable
-  --> tests/ui/local_cell_crossing.jet:25:18
+  --> local_cell_crossing.jet:25:18
     |
- 25 |     mux.get("/", (req: HTTPRequest) HTTPResponse !HTTPError -> {
-    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ 25 |     mux.get("/", (req: HTTPRequest) -> {
+    |                  ^^^^^^^^^^^^^^^^^^^^^^^
  Why: HTTP handlers are retained by the server and invoked on request workers, so their captured state must be owned and thread-safe
  Fix: Capture only owned sendable values in the HTTP handler, or use `Shared<T>` for synchronized state
 More: jet-lang.dev/e/E1102

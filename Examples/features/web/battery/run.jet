@@ -125,17 +125,17 @@ fn run() (HTTPError | NetError | TaskFailure)! {
     listener :: net.tcp_listen("127.0.0.1:0")
     addr :: listener.local_addr()
     mux :: server.mux()
-    mux.get("/", (req: HTTPRequest) HTTPResponse HTTPError! -> {
+    mux.get("/", (req: HTTPRequest) -> {
         return Ok(battery.ok_response("<h1>Orders</h1><a href=\"/orders\">list</a>"))
     })
-    mux.get("/old", (_req: HTTPRequest) HTTPResponse HTTPError! -> {
+    mux.get("/old", (_req: HTTPRequest) -> {
         return Ok(battery.redirect_response("/orders"))
     })
-    mux.get("/orders", (req: HTTPRequest) HTTPResponse HTTPError! -> list_orders(db_path, cache_version, req))
-    mux.get("/orders/:id", (id: Int) HTTPResponse HTTPError! -> detail_order(id))
-    mux.post("/orders", (req: HTTPRequest) HTTPResponse HTTPError! -> create_order(db_path, cache_version, req))
-    mux.post("/login", (req: HTTPRequest) HTTPResponse HTTPError! -> login(session_cell, req))
-    mux.get("/protected", (req: HTTPRequest) HTTPResponse HTTPError! -> protected(session_cell, req))
+    mux.get("/orders", (req: HTTPRequest) -> list_orders(db_path, cache_version, req))
+    mux.get("/orders/:id", (id: Int) -> detail_order(id))
+    mux.post("/orders", (req: HTTPRequest) -> create_order(db_path, cache_version, req))
+    mux.post("/login", (req: HTTPRequest) -> login(session_cell, req))
+    mux.get("/protected", (req: HTTPRequest) -> protected(session_cell, req))
 
     task_handle :: task {
         server.serve_once_listener(listener, mux)

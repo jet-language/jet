@@ -752,9 +752,32 @@ fn jet_rust_emit_debug_only_block_states(function: MIRFunction, positions: [U64:
     states
 }
 
+// The canonical exit block is a join, never an early-return cleanup path.
+fn jet_rust_emit_expected_scope_exits(ctx: &JetRustEmitContext, function: MIRFunction) -> [U64:U64] Never! {
+    exits := [U64:U64]{}
+    loop pass in 0..<2 {
+        loop block in function.blocks {
+            if pass == 0 {
+                if block.terminator == { .Jump(_) -> {} else -> next }
+            }
+            loop instruction in block.instructions {
+                if instruction.operation == .ScopeExit(scope) {
+                    member :: jet_rust_emit_scope_member(ctx, function, scope)
+                    if member == .Val(.ExpectFail(_, _)) && exits.get(scope.value) == None {
+                        &exits.add(scope.value, block.id.value).drop("first canonical exit wins")
+                    }
+                }
+            }
+        }
+    }
+    exits
+}
+
 fn jet_rust_emit_block(ctx: &JetRustEmitContext, function: MIRFunction, plan: JetRustEmitCFGPlan, position: Int, indent: String, items: &[JetRustEmitCFGItem]) Never! {
     block :: function.blocks[position]
     active := plan.debug[position]
+    expects_fail :: ctx.expected_test_exits.len() > 0
+    if expects_fail -> &items.push(jet_rust_emit_cfg_line("{indent}let __jet_scope_step = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {{"))
     loop instruction in block.instructions {
         skip := false
         if instruction.operation == {
@@ -785,6 +808,21 @@ fn jet_rust_emit_block(ctx: &JetRustEmitContext, function: MIRFunction, plan: Je
             loop line in instruction_lines -> &items.push(jet_rust_emit_cfg_line("{indent}{line}"))
             }
         }
+    }
+    if expects_fail {
+        &items.push(jet_rust_emit_cfg_line("{indent}}}));"))
+        &items.push(jet_rust_emit_cfg_line("{indent}if let Err(__jet_payload) = __jet_scope_step {{"))
+        &items.push(jet_rust_emit_cfg_line("{indent}    if __jet_payload.is::<JetRenderedRuntimeStop>() {{"))
+        &items.push(jet_rust_emit_cfg_line("{indent}        if let Some(__jet_scope) = {ctx.config.root_prefix}jet_test_expect_fail_stopped_scope() {{"))
+        &items.push(jet_rust_emit_cfg_line("{indent}            match __jet_scope {{"))
+        loop (scope, exit) in ctx.expected_test_exits {
+            &items.push(jet_rust_emit_cfg_line("{indent}                {scope} => {{ {ctx.config.root_prefix}jet_test_expect_fail_catch_scope(); __jet_mir_dispatch_pc = {exit}; continue 'mir_dispatch; }},"))
+        }
+        &items.push(jet_rust_emit_cfg_line("{indent}                _ => std::panic::resume_unwind(__jet_payload),"))
+        &items.push(jet_rust_emit_cfg_line("{indent}            }}"))
+        &items.push(jet_rust_emit_cfg_line("{indent}        }} else {{ std::panic::resume_unwind(__jet_payload); }}"))
+        &items.push(jet_rust_emit_cfg_line("{indent}    }} else {{ std::panic::resume_unwind(__jet_payload); }}"))
+        &items.push(jet_rust_emit_cfg_line("{indent}}}"))
     }
     jet_rust_emit_terminator(&ctx, function, plan, block.id, block.terminator, indent, &items)
 }

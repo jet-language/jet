@@ -1,7 +1,7 @@
 use super::helpers::is_pod_uninit_type;
 use crate::AST::{
-    AccessConvention, BindPattern, Binding, CallArg, Expr, Lambda, MetaAttr, MetaField, Stmt,
-    StrPart, Type,
+    AccessConvention, BindPattern, Binding, CallArg, Expr, Lambda, MetaAttr, MetaField, Pattern,
+    Stmt, StrPart, Type,
 };
 use crate::Diagnostics::{Diagnostic, Severity, TextEdit};
 use crate::Sema::Captures::{lambda_body_refs_name, lambda_collect_captures, stmt_refs_name};
@@ -1470,7 +1470,7 @@ impl<'a> Checker<'a> {
         let subject = std::mem::replace(&mut b.init, Expr::Absent(subject_span));
         let mut subject = Box::new(subject);
         let (subject_ty, bindings) =
-            self.check_pattern_test_typed(&mut subject, &mut pattern, span);
+            self.check_pattern_test_typed(&mut subject, &mut pattern, span, true);
         b.init = *subject;
         let Some(subject_ty) = subject_ty else {
             for name in names.iter() {
@@ -1480,6 +1480,10 @@ impl<'a> Checker<'a> {
         };
 
         self.check_diverging_fallback(&mut fallback, &subject_ty, span);
+        // Rejected text/byte holes have no binding fact. Do not install a
+        // recovery declaration over the value E0118 already protects.
+        let text_or_byte_holes =
+            matches!(&pattern, Pattern::StrMatch { .. } | Pattern::BinMatch { .. });
         if let Some(BindPattern::Refutable {
             pattern: stored_pattern,
             fallback: stored_fallback,
@@ -1490,6 +1494,13 @@ impl<'a> Checker<'a> {
             *stored_fallback = fallback;
         }
         for name in names.iter() {
+            if text_or_byte_holes
+                && !bindings.contains_key(name.local_name())
+                && (self.lookup(name.local_name()).is_some()
+                    || self.consts.contains_key(name.local_name()))
+            {
+                continue;
+            }
             let ty = bindings
                 .get(name.local_name())
                 .or_else(|| bindings.get(&name.name))

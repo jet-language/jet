@@ -86,6 +86,7 @@ thread_local! {
     static PENDING_TASK_GROUP_PERMIT: RefCell<Option<JetTaskGroupPermit>> = const { RefCell::new(None) };
     static RICH_PANIC_REASON: RefCell<Option<String>> = const { RefCell::new(None) };
     static RICH_PANIC_REPORT: RefCell<Option<String>> = const { RefCell::new(None) };
+    static RICH_STREAM_STOP: RefCell<Option<(String, String)>> = const { RefCell::new(None) };
     static WAIT_VALUE: std::cell::Cell<i64> = const { std::cell::Cell::new(0) };
     /// A native task owns its trap until the parent observes its join result.
     /// Keeping this in task-local storage prevents a failing child from
@@ -377,7 +378,19 @@ pub(crate) fn set_rich_panic_report(report: String) {
 }
 
 pub(crate) fn take_rich_panic_report() -> Option<String> {
+    RICH_STREAM_STOP.with(|slot| slot.borrow_mut().take());
     RICH_PANIC_REPORT.with(|slot| slot.borrow_mut().take())
+}
+
+pub(crate) fn set_stream_failure(code: &str, message: &str) {
+    RICH_STREAM_STOP.with(|slot| *slot.borrow_mut() = Some((code.to_string(), message.to_string())));
+}
+
+fn take_stream_failure() -> Option<jet_foundation::Outcome::JetStreamFailure> {
+    let raw = RICH_STREAM_STOP.with(|slot| slot.borrow_mut().take());
+    raw.zip(take_rich_panic_report()).map(|((code, message), rendered)| {
+        jet_foundation::Outcome::JetStreamFailure { code, message, rendered }
+    })
 }
 
 fn take_rich_panic_reason() -> Option<String> {
@@ -1150,7 +1163,7 @@ fn jet_jit_sender_close(s: i64, failed: i64) {
         let sender = with_runtime_mut(|rt| rt.stream_senders.remove(&s));
         if failed != 0 {
             if let Some(sender) = sender.as_ref() {
-                if let Some(report) = take_rich_panic_report() {
+                if let Some(report) = take_stream_failure() {
                     sender.fail_with(report);
                 } else {
                     sender.fail();
@@ -1203,7 +1216,7 @@ fn jet_jit_generator_channel_receive_status(ch: i64) -> i64 {
         // dispatch the EOF branch before observing the trap.
         if let Some(report) = consumer.failure_report() {
             with_runtime_mut(|rt| {
-                rt.set_rendered_runtime_stop(report, jet_foundation::ExitCodes::RUNTIME_PANIC)
+                rt.set_stream_runtime_stop(report)
             });
         } else {
             trap_panic("stream producer failed");

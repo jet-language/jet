@@ -54,7 +54,7 @@ A bare command must feel obvious without hiding its choice. The resolver applies
 
 The resolver never searches deeper than `src/`. The ratified override order does not change for shipped packages: a package with both `@run.jet` and `defaults.run` keeps running `@run.jet`. `jet test` keeps the package `#Test` runner as its stock fallback. `--show-default` bypasses overrides and reports the stock entry.
 
-Jobs stay ordinary functions. `#Job` supplies typed visibility and arguments, `jet jobs` lists name, scope, documentation, typed arguments, and schedule, and the ballot's recommended runner `jet jobs <name> [-- <args>]` runs one job of the resolved entry. `jet run <entry> -- <name>` stays the canonical ratified form, `.Internal` jobs never reach argv, and a name that matches no job reports E1294 with the entry's job list. Bare `jet run <name>` never guesses between a file and a job.
+Jobs stay ordinary functions. `#Job` supplies typed visibility and arguments; `jet jobs` lists name, scope, documentation, typed arguments, and schedule. D-JET-VERBS1=A runs a visible project job as `jet <name> [args]`, with Jet flags before the name. Commands win, then project jobs, retired/moved teaching, paths, and PATH programs. Jobs cannot reuse a registered command name (E0928). `.Internal` jobs never reach argv; an unknown top-level word reports E2101 and suggests commands and jobs. `jet run <entry> -- <name>` stays explicit, and `jet run <name>` never guesses between a file and a job.
 
 A worked package keeps its entry, sources, tests, and output fact visible:
 
@@ -102,7 +102,7 @@ $ jet jobs
 Seed  [Dev]  Load 1,000 sample orders
 Lint  [Dev]  Run policy lints on the package
 
-$ jet jobs Seed
+$ jet Seed
 run: job Seed [Dev]
 seeded
 
@@ -110,15 +110,15 @@ $ jet run ./@run.jet -- Seed
 run: job Seed [Dev]
 seeded
 
-$ jet jobs Sed
-error E1294: No job named `Sed`
-declared jobs: Seed, Lint
+$ jet Sed
+error E2101: `Sed` isn't a jet command.
+did you mean `jet Seed`?
 ```
 
 | rung | default path | what the rung teaches |
 |---|---|---|
 | beginner | `jet dev` or `jet run` | A package needs one command; Jet finds the written entry and reports the result. |
-| intermediate | `jet dev ./@run.jet`, `jet jobs`, and `jet jobs Seed` | An explicit file, the job list, and a named job are all available without learning a second task language. |
+| intermediate | `jet dev ./@run.jet`, `jet jobs`, and `jet Seed` | An explicit file, the job list, and a named job are all available without learning a second task language. |
 | expert | `defaults: { run: app };`, `jet run ./@run.jet -- Seed`, and `--show-default` | The project can pin the stock entry, the invocation can name the entry and job, and the resolver can be audited. |
 
 **Exits.** See the choice with the real command `jet run --show-default`; spell it with the real explicit path `jet run ./@run.jet` or the real manifest form `defaults: { run: app };`; refuse file inference for a project by removing role files and pinning that manifest default. See jobs with the real command `jet jobs`; spell a job with the real canonical form `jet run ./@run.jet -- Seed`; refuse the named runner by always using an explicit entry path and separator.
@@ -572,7 +572,7 @@ Today versus the proposed loop:
 | `fn run() App` builds a checked graph with explicit CSR, island, action, mount, security, cache, accessibility, and adapter facts. | The same graph derives a mode and reason for every route, with one explicit expert override and a serializable island boundary. |
 | `jet dev` uses a dependency-aware watcher, last-good artifact, status pill, and browser reload. | `jet dev` keeps compatible web state inside the module swap and shows kept or reset values in every host. |
 | `jet inspect live <pid>` gives payload-free snapshots and `app.live` gives effect-tracked query invalidation. | `jet.devtools.v1` joins Build, Route, Query, Form, Table, Store, Trace, Cost, Gate, Test, Job, and runtime facts in one stream. |
-| `jet jobs` lists typed jobs and canonical invocation uses `jet run <entry> -- <name>`. | `jet jobs <name>` runs one job of the resolved entry with completions and a Jobs panel, while the canonical form remains explicit and unchanged. |
+| `jet jobs` lists typed jobs and explicit invocation uses `jet run <entry> -- <name>`. | D-JET-VERBS1=A runs a project job as `jet <name>` with completions and a Jobs panel; command names cannot clash and the explicit entry form remains available. |
 | Native UI uses one `UiNode` tree with `JetBackend`, `TuiBackend`, DOM, GTK, and Null consumers. | The same public panel definition renders in browser, workbench, terminal, editor, and native overlay. |
 | Web, native, game, backend, live, mobile, data, and CLI loops have different missing pieces and separate inspection habits. | Each domain has the same loop depth, panel contract, live-state law, scaffold, probe, benchmark, and proof receipt. |
 
@@ -581,7 +581,7 @@ Today versus the proposed loop:
 | id | card | choice | options (one line) | recommendation | prototype path where relevant |
 |---|---|---|---|---|---|
 | D-DX-ENTRY1 | #2421 | Bare command entry precedence | A role file then one root function then `src/` then error; B keep canonical `run.jet` and Outputs; C the ratified override order (`@run.jet`, then one root `fn run` file, then `src/`), then the stock default (`defaults`, a sole Output, `run.jet`), then a candidate-listing diagnostic with a `jet fix` pin | C | — |
-| D-DX-JOBS-UX1 | #2422 | Job invocation and discovery | A status quo plus completions; B `jet <job>`; C explicit verb from a naming menu; D `jet run <name>` after file resolution (namespace merge, typo and `.Internal` risks stated); E `jet jobs <name> [-- <args>]` as the explicit runner beside the ratified `jet run <entry> -- <name>` | E (the adversarial pass moved the recommendation off D) | — |
+| D-JET-VERBS1 | #4140 | Job invocation and discovery (amends D-DX-JOBS-UX1) | A top-level jobs, names cannot clash; B keep the namespaced runner; C top-level jobs, clashes allowed | A, ratified | — |
 | D-DX-DEVTOOLS-UX1 | #2423 | Devtools UX archetype | A Dock; B Lens; C Workbench; D Pill to Lens to Workbench, with F12 (proposed) as the native overlay toggle | D | `docs/proposals/prototypes/devtools-ux/A-dock.html`, `B-lens.html`, `C-workbench.html`, `D-pill-lens-workbench.html` |
 | D-DX-PLUGIN1 | #2424 | Panel and plugin registration spelling | A marker on panel function; B runtime registration call; C manifest field; D marker plus typed fact publishing with a written value form at the site, and a panel-specific release rule | D, with marker naming menu | — |
 | D-DX-PROD1 | #2425 | Devtools in release builds | A always compiled out; B compiled out by default, a proposed `build.release.inspect` profile fact plus deploy-time `JET_INSPECT=1` and `JET_INSPECT_TOKEN` enable a read-only endpoint; C always present behind auth | B | — |

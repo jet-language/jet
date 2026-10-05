@@ -13,7 +13,7 @@ use core.email as email
 fn run() {
     label_63 := "a".repeat(63)
     valid :: email.address("person@{label_63}.example") ?? panic("valid 63-byte domain label rejected")
-    print(valid.mailbox == "person@{label_63}.example")
+    print(valid.mailbox == ("person@{label_63}.example"))
     label_64 := "a".repeat(64)
     if email.address("person@{label_64}.example") == {
         .Ok(_) -> panic("64-byte domain label accepted")

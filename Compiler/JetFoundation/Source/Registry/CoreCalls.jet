@@ -85,6 +85,9 @@ pub struct CoreCallRecord {
     pub aot_direct: Bool
     pub jit_direct: Bool
     pub jit_symbol: String?
+    // Rust: CoreCallRecord::native_int_result. The kernel returns its `Int`
+    // results as raw machine words; engines widen them into the carrier.
+    pub native_int_result: Bool
     pub ui_capabilities: [String]
     pub marker: CoreMarkerApplication?
     pub authority: MIRAuthorityDecision?
@@ -302,6 +305,7 @@ pub fn core_call_new(module_name: String, member: String, symbol: String, prelud
         aot_direct: true,
         jit_direct: true,
         jit_symbol: None,
+        native_int_result: false,
         ui_capabilities: [String]{},
         marker: None,
         authority: None,
@@ -334,6 +338,7 @@ pub fn core_call_receiver(receiver_types: [String], member: String, borrow_mask:
         aot_direct: false,
         jit_direct: false,
         jit_symbol: None,
+        native_int_result: false,
         ui_capabilities: [String]{},
         marker: None,
         authority: None,
@@ -412,6 +417,12 @@ pub fn core_call_with_jit_symbol(row: ^CoreCallRecord, symbol: String) -> CoreCa
     updated := row
     updated.jit_direct = true
     updated.jit_symbol = Val(symbol)
+    updated
+}
+
+pub fn core_call_with_native_int_result(row: ^CoreCallRecord) -> CoreCallRecord Never! {
+    updated := row
+    updated.native_int_result = true
     updated
 }
 

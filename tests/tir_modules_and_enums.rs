@@ -472,7 +472,7 @@ pub fn checked(value: Int) -> Int Err! {
 fn message(value: Int) -> String {
     return \"bad {value}\"
 }
-pub fn ready() -> Bool -> true
+pub fn ready() -> Bool { true }
 ";
     let files = [("main.jet", main_src), ("math.jet", math_src)];
     let expected = "10\nx:5\n7\n-2\ntrue\n";
@@ -625,7 +625,7 @@ fn run() {
 }
 ";
     let helper_src = "\
-pub fn sum(left: Int, right: Int) -> Int -> left + right
+pub fn sum(left: Int, right: Int) -> Int { left + right }
 #Error
 pub enum HelperError {
     Negative

@@ -2302,27 +2302,6 @@ impl<'a> Fmt<'a> {
         if !bare_param {
             self.write(")");
         }
-        match (&lam.result_type, &lam.error_type) {
-            (Some(result), Some(error)) if Self::is_unit_type(result) => {
-                self.write(" ");
-                self.fmt_error_contract(error);
-            }
-            (Some(result), Some(error)) => {
-                self.write(" ");
-                self.fmt_type(result);
-                self.write(" ");
-                self.fmt_error_contract(error);
-            }
-            (Some(result), None) => {
-                self.write(" ");
-                self.fmt_type(result);
-            }
-            (None, None) => {}
-            (None, Some(error)) => {
-                self.write(" ");
-                self.fmt_error_contract(error);
-            }
-        }
         if let Some(effects) = &lam.effects {
             self.write(" ");
             self.write(Syntax::EFFECT_ARROW_OPEN);

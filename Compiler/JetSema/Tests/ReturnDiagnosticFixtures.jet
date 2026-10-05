@@ -1,0 +1,21 @@
+// Exercise the production E0113 builder after the failure solver adds its
+// uninhabited rail. No checker/emitter substitutes are used by the assembler.
+fn rd_expect(name: String, wanted: Type, offered: Type, fix: String) {
+    span :: Span{start: 0, end: 1}
+    inferred :: Type.Result{ok: wanted, err: Type.Named{name: "Never"}}
+    diagnostic :: sema_return_value_mismatch(name, inferred, offered, span)
+    if diagnostic.code != "E0113" || diagnostic.span != (Val(span)) -> panic("return diagnostic lost its identity or span")
+    if diagnostic.what.contains("Never!") || diagnostic.why.contains("Never!") -> panic("erased failure rail leaked into return advice")
+    if diagnostic.fix != fix -> panic("wrong return repair: {diagnostic.fix}")
+    if diagnostic.fix.contains("change the return type") -> panic("return repair changes the written contract")
+    print("{name}: {diagnostic.fix}")
+}
+
+fn run() {
+    rd_expect("average", Type.Int, Type.Named{name: "Fraction"}, "`/` on whole numbers makes an exact Fraction; divide with `/%` to get a whole number rounded down")
+    rd_expect("names", Type.List{element: Type.String}, Type.String, "Wrap the value in a list: `[value]`")
+    rd_expect("label", Type.String, Type.Int, "Put the value in text with interpolation: \"{{value}}\"")
+    rd_expect("first", Type.Int, Type.List{element: Type.Int}, "This is a whole list; hand back one element, or combine the elements into one value")
+    rd_expect("answer", Type.Int, Type.String, "Hand back a Int value: convert this value to Int, or return the value you meant")
+    print("E0113 return repairs: passed")
+}

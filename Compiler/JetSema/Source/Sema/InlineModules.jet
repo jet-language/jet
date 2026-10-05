@@ -488,7 +488,6 @@ fn sema_inline_rewrite_lambda(rewrite: &SemaInlineRewrite, lambda: Lambda) -> La
         &rewrite.locals.push(param.name)
     }
     updated.params = params
-    updated.result_type = sema_inline_rewrite_optional_type(rewrite, lambda.result_type)
     updated.body = if lambda.body == {
         .Expr(value) -> LambdaBody.Expr{value: sema_inline_rewrite_expr(&rewrite, value)}
         .Block(body) -> LambdaBody.Block{body: sema_inline_rewrite_stmts(&rewrite, body)}
@@ -1317,14 +1316,16 @@ fn sema_program_with_items(program: Program, items: ^[Item]) -> Program Never! {
     }
 }
 
-pub fn sema_inline_modules_lower(program: Program, diagnostics: &[Diagnostic]) -> Program {
+// Lowers `program`'s inline modules in place; a program without one is left
+// untouched (not copied).
+pub fn sema_inline_modules_lower(program: &Program, diagnostics: &[Diagnostic]) {
     has_module := false
     loop item in program.items {
         if item == .CodeModule(definition) {
             if definition.body != None -> has_module = true
         }
     }
-    if !has_module -> return ~program
+    if !has_module -> return
 
     // 1. Member types, in item order, then the public qualified spellings.
     hoist := SemaInlineHoist{declarations: [Item]{}, exported: [String:Type]{}, has_exported: false}
@@ -1414,8 +1415,7 @@ pub fn sema_inline_modules_lower(program: Program, diagnostics: &[Diagnostic]) -
     imports :: sema_inline_bind_imports(program, surfaces, inline_names, &calls)
     rewritten := [Item]{}
     loop item in lowered_items -> &rewritten.push(sema_inline_rewrite_item(&calls, item))
-    updated := sema_program_with_items(program, ^rewritten)
-    updated.imports = imports
+    program.items = rewritten
+    program.imports = imports
     loop diagnostic in calls.diagnostics -> &diagnostics.push(diagnostic)
-    updated
 }

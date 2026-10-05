@@ -1403,7 +1403,7 @@ fn run() {
 #UnitFamily(Length, dimension, base: meter) { meter }
 
 impl Meter.Display {
-    fn display(self) -> String -> "custom length"
+    fn display(self) -> String { "custom length" }
 }
 
 fn run() {
@@ -1445,7 +1445,7 @@ fn run() {
 #UnitFamily(Length, dimension, base: meter) { meter }
 
 impl Meter.Display {
-    fn display(self) -> String -> "custom length"
+    fn display(self) -> String { "custom length" }
 }
 
 fn show(distance: Meter) {
@@ -1553,7 +1553,7 @@ fn imported_public_units_keep_display_metadata_across_tiers() {
 pub #UnitFamily(Length, dimension, base: meter) { meter }
 
 impl Meter.Display {
-    fn display(self) -> String -> "defined in units"
+    fn display(self) -> String { "defined in units" }
 }
 
 pub fn distance() -> Meter { return 12meter }
@@ -1612,7 +1612,7 @@ fn run() {
 pub #UnitFamily(Length, dimension, base: meter) { meter }
 
 impl Meter.Display {
-    fn display(self) -> String -> "defined in units"
+    fn display(self) -> String { "defined in units" }
 }
 "#;
     let web_main = r#"
@@ -2214,9 +2214,9 @@ fn unit_scalar_rewrap_lint_requires_the_direct_policy_free_identity() {
     kelvin
     celsius(scale: 1, offset: 27315/100)
 }
-fn external_scale(value: Float) -> Float -> calibrate(value)
+fn external_scale(value: Float) -> Float { calibrate(value) }
 
-fn calibrate(value: Float) -> Float -> value * 2
+fn calibrate(value: Float) -> Float { value * 2 }
 
 fn run() {
     value :: Meter.from_float(Float{4.0})

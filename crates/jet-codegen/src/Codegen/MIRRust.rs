@@ -3396,6 +3396,11 @@ struct RustEmitter<'a> {
     /// Lowest `visiting` index a cycle assumption reached in the current
     /// `type_derive_capability` frame (`usize::MAX` when none).
     derive_capability_cycle_floor: std::cell::Cell<usize>,
+    /// Closed rows found capable only under a cycle assumption on a frame
+    /// still open; each is cached once that frame settles capable, and
+    /// dropped when it settles incapable. Every entry belongs to the current
+    /// top-level query's trait (a depth-0 frame always settles them).
+    derive_capability_pending: std::cell::RefCell<Vec<MirTypeId>>,
     history_callback_lifetime: std::cell::Cell<&'static str>,
     partial_moves: BTreeMap<MirFunctionId, Vec<PartialMoveRoot>>,
     shared_capture_locals: BTreeMap<MirFunctionId, BTreeSet<MirLocalId>>,
@@ -3587,6 +3592,7 @@ impl<'a> RustEmitter<'a> {
             history_runtime_metadata: std::cell::OnceCell::new(),
             derive_capability_cache: std::cell::RefCell::new(BTreeMap::new()),
             derive_capability_cycle_floor: std::cell::Cell::new(usize::MAX),
+            derive_capability_pending: std::cell::RefCell::new(Vec::new()),
             history_callback_lifetime: std::cell::Cell::new("'static"),
             partial_moves: BTreeMap::new(),
             shared_capture_locals: BTreeMap::new(),
@@ -4073,13 +4079,16 @@ impl<'a> RustEmitter<'a> {
         let member = self.test_scope_member(function, scope_id);
         if enter {
             return match member {
-                Some(MirTestScopeMember::ExpectFail { expected_code }) => {
+                Some(MirTestScopeMember::ExpectFail { expected_code, expected_message }) => {
                     let expected = expected_code
                         .as_deref()
                         .map(|code| format!("Some({code:?})"))
                         .unwrap_or_else(|| "None".to_string());
+                    let message = expected_message.as_deref()
+                        .map(|message| format!("Some({message:?})"))
+                        .unwrap_or_else(|| "None".to_string());
                     format!(
-                        "{root}jet_test_expect_fail_enter_scope({}, {expected})",
+                        "{root}jet_test_expect_fail_enter_scope({}, {expected}, {message})",
                         scope_id.0
                     )
                 }
@@ -4094,13 +4103,16 @@ impl<'a> RustEmitter<'a> {
             };
         }
         match member {
-            Some(MirTestScopeMember::ExpectFail { expected_code }) => {
+            Some(MirTestScopeMember::ExpectFail { expected_code, expected_message }) => {
                 let expected = expected_code
                     .as_deref()
                     .map(|code| format!("Some({code:?})"))
                     .unwrap_or_else(|| "None".to_string());
+                let message = expected_message.as_deref()
+                    .map(|message| format!("Some({message:?})"))
+                    .unwrap_or_else(|| "None".to_string());
                 format!(
-                    "if {root}jet_test_expect_fail_leave_scope({}).is_none() {{ {root}jet_test_expect_fail_unmet({expected}); }}",
+                    "if {root}jet_test_expect_fail_leave_scope({}).is_none() {{ {root}jet_test_expect_fail_unmet({expected}, {message}); }}",
                     scope_id.0
                 )
             }
@@ -4961,6 +4973,16 @@ impl<'a> RustEmitter<'a> {
 
     fn is_default_err_type(&self, id: MirTypeId) -> bool {
         self.type_def(id).key == jet_foundation::Syntax::TYPE_ERR
+    }
+
+    /// `Err.cause`: a field named `cause` on the default `Err` row. A field of
+    /// a structural tuple (or any owner with no definition row) is never it.
+    fn is_default_err_cause_field(&self, id: MirFieldId) -> bool {
+        let row = &self.program.fields[self.field_positions[&id]];
+        row.field.name == "cause"
+            && self
+                .try_type_def(row.owner)
+                .is_some_and(|definition| definition.key == jet_foundation::Syntax::TYPE_ERR)
     }
 
     fn named_struct_field_value(
@@ -7995,7 +8017,13 @@ impl<'a> RustEmitter<'a> {
                 }
                 // A closed row's answer depends on the row alone: `false` means
                 // an incapable leaf is reachable, and `true` is final once no
-                // cycle assumption above this frame was used.
+                // cycle assumption above this frame was used. A `true` that
+                // used such an assumption waits in `derive_capability_pending`
+                // until the frame it assumed settles: every frame between
+                // returned `true`, so a capable settled frame proves them all
+                // (a greatest fixed point); an incapable one drops them.
+                // Without this, every row of a recursive type family
+                // re-expanded the whole family per query.
                 let cacheable = args.is_empty()
                     && def.generic_params.is_empty()
                     && bindings.is_empty()
@@ -8011,6 +8039,7 @@ impl<'a> RustEmitter<'a> {
                     }
                 }
                 let depth = visiting.len();
+                let pending_start = self.derive_capability_pending.borrow().len();
                 let outer_floor = self.derive_capability_cycle_floor.replace(usize::MAX);
                 let mut next_bindings = bindings.clone();
                 let mut next_generic_params = generic_params.clone();
@@ -8089,6 +8118,20 @@ impl<'a> RustEmitter<'a> {
                         .entry(trait_name.to_string())
                         .or_default()
                         .insert(def.id, result);
+                }
+                let mut pending = self.derive_capability_pending.borrow_mut();
+                if !result {
+                    pending.truncate(pending_start);
+                } else if floor >= depth {
+                    if pending.len() > pending_start {
+                        let mut cache = self.derive_capability_cache.borrow_mut();
+                        let rows = cache.entry(trait_name.to_string()).or_default();
+                        for settled in pending.drain(pending_start..) {
+                            rows.insert(settled, true);
+                        }
+                    }
+                } else if cacheable {
+                    pending.push(def.id);
                 }
                 result
             }
@@ -11135,6 +11178,16 @@ impl<'a> RustEmitter<'a> {
                             input.name
                         ),
                         Some(MirCliDefault::TypeDefault) => "Default::default()".to_string(),
+                        // A job or recorded default is rendered text; a
+                        // non-text input decodes it as the same argv word.
+                        Some(MirCliDefault::Value(MirConstant::String(text)))
+                            if !matches!(input.ty.kind(), MirTypeKind::String) =>
+                        {
+                            format!(
+                                "{{ let __d = {text:?}.to_string(); {} }}",
+                                self.cli_scalar_expr(input, "__d")
+                            )
+                        }
                         Some(MirCliDefault::Value(value)) => self.constant_for_type(value, &input.ty),
                     };
                     let ty = self.rust_type(&input.ty);
@@ -12459,21 +12512,33 @@ impl<'a> RustEmitter<'a> {
                     )
                 } else {
                     match function.return_type.kind() {
+                        // A fallible job settles its failure as a job error
+                        // instead of encoding it; a Unit success carries no
+                        // bytes, exactly as an infallible Unit job does.
                         MirTypeKind::Result { ok, .. } => {
-                            let ok_type = ok.display_name();
-                            format!(
-                                "    let __job_result = {}({argument});\n\
-                                 match __job_result {{\n\
-                                     Ok(__ok) => {{\n\
+                            let ok_arm = if ok.is_unit() {
+                                format!(
+                                    "Ok(()) => Ok({root}JetJobResult {{ type_id: \"Unit\".to_string(), bytes: Vec::new(), publish: false }}),\n"
+                                )
+                            } else {
+                                format!(
+                                    "Ok(__ok) => {{\n\
                                          let __bytes = match {root}jet_enc_cbor_to_bytes_canonical(&__ok) {{\n\
                                              Ok(__bytes) => __bytes,\n\
                                              Err(__error) => return Err({root}JetJobError {{ type_id: __payload.type_id.clone(), reason: \"encode\".to_string(), detail: Some(format!(\"{{:?}}\", __error)) }}),\n\
                                          }};\n\
                                          Ok({root}JetJobResult {{ type_id: {:?}.to_string(), bytes: __bytes, publish: false }})\n\
-                                     }}\n\
+                                     }}\n",
+                                    ok.display_name()
+                                )
+                            };
+                            format!(
+                                "    let __job_result = {}({argument});\n\
+                                 match __job_result {{\n\
+                                     {ok_arm}\
+                                     Err(__error) => Err({root}JetJobError {{ type_id: __payload.type_id.clone(), reason: \"failed\".to_string(), detail: Some(format!(\"{{:?}}\", __error)) }}),\n\
                                  }}\n",
                                 self.function_name(function.id),
-                                ok_type
                             )
                         }
                         _ => {
@@ -13547,6 +13612,23 @@ impl<'a> RustEmitter<'a> {
         };
         let unsafe_prefix = if function.is_unsafe { "unsafe " } else { "" };
         let generics = self.generic_params(function);
+        // Rust cannot elide a returned view's owner when other parameters also
+        // borrow. Preserve the checked root-view provenance in the signature.
+        let view_provenance = if is_view_type(&function.return_type) {
+            function.return_view_provenance.as_ref().and_then(|slots| slots.get(&Vec::new()))
+        } else {
+            None
+        };
+        let view_lifetime = view_provenance.map(|view| {
+            if view.sources.iter().all(|path| matches!(path.source, MirViewSource::Static { .. })) {
+                "'static"
+            } else {
+                "'__jet_view"
+            }
+        });
+        let receiver_owns_view = view_provenance.is_some_and(|view| {
+            view.sources.iter().any(|path| matches!(path.source, MirViewSource::Receiver))
+        });
         let previous_lifetime = self.history_callback_lifetime.replace("'__jet_callback");
         let mut params = Vec::new();
         if let Some(form) = method_form {
@@ -13555,6 +13637,8 @@ impl<'a> RustEmitter<'a> {
                 | MirFunctionForm::TraitMethod { self_access, .. } => {
                     if let Some(access) = self_access {
                         params.push(match access {
+                            MirAccess::Read if receiver_owns_view => "&'__jet_view self".to_string(),
+                            MirAccess::Write if receiver_owns_view => "&'__jet_view mut self".to_string(),
                             MirAccess::Read => "&self".to_string(),
                             MirAccess::Write => "&mut self".to_string(),
                             MirAccess::Move => "mut self".to_string(),
@@ -13599,6 +13683,19 @@ impl<'a> RustEmitter<'a> {
             );
         }
         params.extend(declared.iter().map(|param| {
+            let parameter_type = self.function_parameter_type(function, param);
+            let owns_view = view_provenance.is_some_and(|view| {
+                view.sources.iter().any(|path| {
+                    matches!(path.source, MirViewSource::Parameter(index) if index == param.index)
+                })
+            });
+            let parameter_type = if owns_view {
+                let referent = parameter_type.strip_prefix('&')
+                    .expect("checked returned view owner must be a borrowed parameter");
+                format!("&'__jet_view {referent}")
+            } else {
+                parameter_type
+            };
             let name = mangle(&param.name);
             if serde_codec == Some(MirSerdeCodec::Decode) {
                 format!("{name}: &{}jet_std::DataTree", self.config.root_prefix)
@@ -13612,12 +13709,21 @@ impl<'a> RustEmitter<'a> {
                     } else {
                         ""
                     },
-                    self.function_parameter_type(function, param)
+                    parameter_type
                 )
             }
         }));
         let params = params.join(", ");
-        let ret = return_override.unwrap_or_else(|| self.rust_type(&function.return_type));
+        let ret = return_override.unwrap_or_else(|| {
+            let rendered = self.rust_type(&function.return_type);
+            if let Some(lifetime) = view_lifetime {
+                let referent = rendered.strip_prefix('&')
+                    .expect("checked returned view must have a Rust reference representation");
+                format!("&{lifetime} {referent}")
+            } else {
+                rendered
+            }
+        });
         self.history_callback_lifetime.set(previous_lifetime);
         // Forwarding or returning a callable preserves its capture lifetime.
         // Owned factories can instantiate this lifetime without borrowing.
@@ -13626,6 +13732,15 @@ impl<'a> RustEmitter<'a> {
                 "<'__jet_callback>".to_string()
             } else {
                 format!("<'__jet_callback, {}", &generics[1..])
+            }
+        } else {
+            generics
+        };
+        let generics = if view_lifetime == Some("'__jet_view") {
+            if generics.is_empty() {
+                "<'__jet_view>".to_string()
+            } else {
+                format!("<'__jet_view, {}", &generics[1..])
             }
         } else {
             generics
@@ -13946,7 +14061,7 @@ impl<'a> RustEmitter<'a> {
                 );
                 let _ = writeln!(
                     out,
-                    "{:indent$}if let Some(__jet_scope) = {}jet_test_expect_fail_matching_scope() {{",
+                    "{:indent$}if let Some(__jet_scope) = {}jet_test_expect_fail_stopped_scope() {{",
                     "",
                     self.config.root_prefix,
                     indent = body_indent + 24
@@ -27716,8 +27831,8 @@ impl<'a> RustEmitter<'a> {
         let MirTypeKind::Result { ok, err } = result_ty.kind() else {
             panic!("MIR plugin export `{export_name}` result is not a checked Result")
         };
-        if !matches!(self.plugin_unwrap_type(err).kind(), MirTypeKind::String) {
-            panic!("MIR plugin export `{export_name}` result error is not checked String")
+        if !matches!(self.plugin_unwrap_type(err).kind(), MirTypeKind::Apply { name, .. } if crate::Codegen::core_rust_type_name(&name.name) == Some("PluginError")) {
+            panic!("MIR plugin export `{export_name}` result error is not checked PluginError")
         }
         let params = signature
             .params
@@ -27754,7 +27869,7 @@ impl<'a> RustEmitter<'a> {
              Ok(__jet_plugin_result_value) => \
              (|__jet_plugin_result_value: {wire}PluginValue| -> Result<{result_type}, String> {{ \
              {decoded} \
-             }})(__jet_plugin_result_value), \
+             }})(__jet_plugin_result_value).map_err(|message| {wire}PluginError::defect({export_name:?}, message)), \
              Err(__jet_plugin_error) => Err(__jet_plugin_error), \
              }} \
              }}"
@@ -27795,6 +27910,13 @@ impl<'a> RustEmitter<'a> {
             return projected;
         }
         let field_name = self.field_name(field);
+        // Runtime Err stores a boxed cause, but the checked projection is ?Err.
+        if self.is_default_err_cause_field(field) {
+            let source = self.elided_shared_guard_base(function, base)
+                .map(|place| format!("&({place})"))
+                .unwrap_or_else(|| self.value_slot_reference(base, false));
+            return format!("{}jet_err_cause({source})", self.config.root_prefix);
+        }
         let value = if let Some(reference) = self.partial_projected_value(function, base, field) {
             if self.boxed_field(field) {
                 format!("({reference}).as_ref().clone()")
@@ -29473,7 +29595,19 @@ impl<'a> RustEmitter<'a> {
             }
             self.place_reference(function, place, MirAccess::Write)
         } else if row.signature.borrow_mask[0] {
-            self.borrowed_value_reference(function, receiver, MirAccess::Read)
+            if is_view_type(self.value_type(function, receiver_value))
+                && !matches!(
+                    self.value_definition(function, receiver_value),
+                    Some(MirOperation::AddressOf { .. } | MirOperation::ReadPlace(_)
+                        | MirOperation::Parameter { .. } | MirOperation::Capture { .. })
+                )
+            {
+                // A returned view's slot stores a reference already. Builtin
+                // container kernels borrow the referent, not that reference.
+                format!("&**({})", self.value_slot_reference(receiver_value, false))
+            } else {
+                self.borrowed_value_reference(function, receiver, MirAccess::Read)
+            }
         } else {
             self.value_move(receiver)
         };
@@ -29901,6 +30035,9 @@ impl<'a> RustEmitter<'a> {
         }
 
         let value = self.place_base(function, &place.base, false, &place.projections);
+        if matches!(place.projections.last(), Some(MirProjection::Field { field, .. }) if self.is_default_err_cause_field(*field)) {
+            return format!("{}jet_err_cause_projection(&({value}))", self.config.root_prefix);
+        }
         // A native host record's Int slot widens on every read, exactly as the
         // value-level field read does, including a payload projected out of
         // that slot (`limits.max_total_bytes` matched as `.Val(max)`).

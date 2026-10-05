@@ -85,7 +85,6 @@ fn backend_release_profile() -> Option<&'static str> {
 }
 const BOOTSTRAP_ENTRY_RELATIVE: &str = "src/compiler.jet";
 const SMALL_ENTRY_RELATIVE: &str = "main.jet";
-const TASK_ROOTS_FIXTURE_SOURCE: &str = include_str!("../JetEval/Tests/TaskRoots.jet");
 const CORE_FILES_PARTIAL_MOVE_SIBLINGS_SOURCE: &str =
     include_str!("../../tests/fixtures/core_files_partial_move_siblings.jet");
 const UNINIT_FIXED_PARTIAL_EXIT_SOURCE: &str =
@@ -1792,6 +1791,50 @@ fn bootstrap_private_self_compile_harness() {
     assert_optional_codec_roundtrip(&stage_two_binary, &small_project, &session, "stage-two");
     assert_mir_optimizer_compiler_source(&stage_two_binary, &compiler_project, &session);
     assert_mir_optimizer_fixtures(&stage_two_binary, repo, &session);
+    // D-PATTERN-HOLE-NAME1=A: both checkers publish the same hole refusal,
+    // source span, and contextual repair, before choosing an execution tier.
+    for position in ["if", "value", "route", "bytes", "or", "and", "optional", "constant", "typed"] {
+        let source = fs::read_to_string(repo.join(format!(
+            "tests/ui/pattern_hole_reuse_{position}.jet"
+        ))).unwrap();
+        let project = session.join(format!("pattern-hole-reuse-{position}"));
+        let entry = write_source_fixture_project(&project, SOURCE_FIXTURE_MANIFEST, &source);
+        let output = session.join(format!("pattern-hole-reuse-{position}.rs"));
+        let receipt = session.join(format!("pattern-hole-reuse-{position}.receipt"));
+        run_generated_artifact(
+            &stage_two_binary,
+            "runner",
+            &project,
+            SMALL_ENTRY_RELATIVE,
+            &output,
+            &receipt,
+        );
+        assert!(!output.exists(), "a reused hole must not produce backend source");
+        let generated = receipt_reports(&receipt)
+            .into_iter()
+            .filter(|report| report.contains("\"code\":\"E0118\""))
+            .collect::<Vec<_>>();
+        let reference = rust_reference_reports(&entry, &source, &[(entry.clone(), source.clone())])
+            .into_iter()
+            .filter(|report| report.contains("\"code\":\"E0118\""))
+            .collect::<Vec<_>>();
+        assert_eq!(reference.len(), 1, "{position}: {reference:?}");
+        assert_eq!(generated, reference, "{position}: checker report parity");
+    }
+    let pattern_project = session.join("pattern-hole-new-names");
+    write_source_fixture_project(
+        &pattern_project,
+        SOURCE_FIXTURE_MANIFEST,
+        include_str!("../../Examples/features/basics/pattern_matching.jet"),
+    );
+    compile_and_run_source_fixture(
+        &stage_two_binary,
+        repo,
+        &session,
+        "pattern_hole_new_names",
+        &pattern_project,
+        include_str!("../../Examples/features/expected/basics/pattern_matching.out"),
+    );
 
     let invalid_project = session.join("invalid-imported-source");
     let (invalid_entry, invalid_entry_source, imported_source_path, imported_source) =
@@ -2035,6 +2078,26 @@ fn bootstrap_private_self_compile_harness() {
             REGISTRY_ROWS_FIXTURE_SOURCE,
             REGISTRY_ROWS_FIXTURE_EXPECTED,
         ),
+        (
+            "annotated_tuple_empty_list",
+            include_str!("../../Examples/features/basics/tuple_empty_list.jet"),
+            include_str!("../../Examples/features/expected/basics/tuple_empty_list.out"),
+        ),
+        (
+            "prelude_assert_eq_shadow",
+            include_str!("../../Examples/features/traits/prelude_assert_eq_shadow.jet"),
+            include_str!("../../Examples/features/expected/traits/prelude_assert_eq_shadow.out"),
+        ),
+        (
+            "user_read_dir",
+            include_str!("../../Examples/features/traits/user_read_dir.jet"),
+            include_str!("../../Examples/features/expected/traits/user_read_dir.out"),
+        ),
+        (
+            "math_copy",
+            include_str!("../../Examples/features/math/copy.jet"),
+            include_str!("../../Examples/features/expected/math/copy.out"),
+        ),
     ] {
         let project = session.join(label);
         write_source_fixture_project(&project, SOURCE_FIXTURE_MANIFEST, source);
@@ -2046,6 +2109,78 @@ fn bootstrap_private_self_compile_harness() {
             &project,
             expected,
         );
+    }
+    let scoped_files_project = session.join("scoped-mapped-files");
+    let scoped_files_path = scoped_files_project.join("inside.txt");
+    let scoped_files_source = format!(r#"
+use core.files as files
+fn scoped_read(scope: files.FileScope) -> String {{
+    scope.read("inside.txt") ?? panic("scope")
+}}
+fn run() {{
+    scope :: files.scope(Authority.from_rights(["FS.Read:{}"]))
+    print(scoped_read(scope))
+    mapped :: files.map(Path.from("{}")) ?? panic("map")
+    window :: mapped.window_len(0, 1) ?? panic("window")
+    print(Int.from_u8(window[0]))
+    loop line in mapped.lines() {{
+        print(Int.from_u8(line[0]))
+        print(String.from_bytes(~line) ?? panic("utf8"))
+    }}
+}}
+"#, scoped_files_project.display(), scoped_files_path.display());
+    write_source_fixture_project(&scoped_files_project, SOURCE_FIXTURE_MANIFEST, &scoped_files_source);
+    fs::write(&scoped_files_path, "mapped\n").expect("write scoped mapped fixture");
+    compile_and_run_source_fixture(
+        &stage_two_binary,
+        repo,
+        &session,
+        "scoped-mapped-files",
+        &scoped_files_project,
+        "mapped\n\n109\n109\nmapped\n",
+    );
+    for (label, source, code) in [
+        (
+            "generic-concrete-bound-report",
+            "trait Shape { fn area(self) -> Int }\nstruct Token {}\nfn area<T: Shape>(value: T) -> Int { value.area() }\nfn run() { _ :: area<Token>(Token{}) }\n",
+            "E0905",
+        ),
+        (
+            "generic-forward-bound-report",
+            include_str!("../../tests/ui/generic_bound_forward_missing.jet"),
+            "E0905",
+        ),
+        (
+            "retired-raw-directory-report",
+            include_str!("../../tests/ui/path_raw_string_error.jet"),
+            "E0340",
+        ),
+    ] {
+        let code_field = format!("\"code\":\"{code}\"");
+        let project = session.join(label);
+        let entry = write_source_fixture_project(&project, SOURCE_FIXTURE_MANIFEST, source);
+        let output = session.join(format!("{label}.rs"));
+        let receipt = session.join(format!("{label}.receipt"));
+        run_generated_artifact(
+            &stage_two_binary,
+            "runner",
+            &project,
+            SMALL_ENTRY_RELATIVE,
+            &output,
+            &receipt,
+        );
+        assert!(!output.exists(), "invalid fixture reached Rust emission");
+        let generated = receipt_reports(&receipt)
+            .into_iter()
+            .filter(|report| report.contains(&code_field))
+            .collect::<Vec<_>>();
+        let source_closure = vec![(entry.clone(), source.to_string())];
+        let reference = rust_reference_reports(&entry, source, &source_closure)
+            .into_iter()
+            .filter(|report| report.contains(&code_field))
+            .collect::<Vec<_>>();
+        assert_eq!(reference.len(), 1, "{code} fixture must fail in sema");
+        assert_eq!(generated, reference, "{code} registry reports must agree");
     }
     for receiver in ["^self", "&self"] {
         for inline in [false, true] {
@@ -2193,33 +2328,18 @@ fn bootstrap_session_root() -> PathBuf {
 fn assemble_compiler_sources(repo: &Path, task_roots: bool) {
     // The assembler runs only node; the test's own CARGO_TARGET_DIR may lie
     // outside `repo`, which jet-env rejects for cargo commands.
-    let output = Command::new(repo.join("Tools/agent/jet-env"))
+    let mut command = Command::new(repo.join("Tools/agent/jet-env"));
+    command
         .current_dir(repo)
         .env_remove("CARGO_TARGET_DIR")
-        .args(["node", "Compiler/Bootstrap/assemble.mjs"])
+        .args(["node", "Compiler/Bootstrap/assemble.mjs"]);
+    if task_roots {
+        command.arg("--task-roots");
+    }
+    let output = command
         .output()
         .unwrap_or_else(|error| panic!("cannot run bootstrap assembler: {error}"));
     assert_command_success("bootstrap assembler", &output);
-    if !task_roots {
-        return;
-    }
-    let compiler_entry = home_path()
-        .join(BOOTSTRAP_PROJECT_RELATIVE)
-        .join(BOOTSTRAP_ENTRY_RELATIVE);
-    let mut compiler_source = fs::read_to_string(&compiler_entry).unwrap_or_else(|error| {
-        panic!(
-            "cannot read assembled compiler fixture `{}`: {error}",
-            compiler_entry.display()
-        )
-    });
-    compiler_source.push_str("\n\n");
-    compiler_source.push_str(TASK_ROOTS_FIXTURE_SOURCE);
-    fs::write(&compiler_entry, compiler_source).unwrap_or_else(|error| {
-        panic!(
-            "cannot add task-root fixture to the private compiler unit `{}`: {error}",
-            compiler_entry.display()
-        )
-    });
 }
 
 fn write_small_program(project: &Path) -> PathBuf {
@@ -2749,17 +2869,11 @@ fn main() {{
     fs::write(manifest_dir.join(".bootstrap-artifact-id"), &identity)
         .expect("generated compiler identity receipt must be writable");
     println!("cargo:rustc-env=JET_COMPILER_BUILD_ID={{identity}}");
-    // The identity of the compiler *sources* (the root build.rs formula, no
-    // generated extras): every stage built from one source tree reports it as
-    // its compiler identity to the programs it compiles, so the compiler image
-    // a self-compile archives does not change from stage to stage.
-    let source_identity = BuildIdentity::semantic_id(
-        root,
-        BuildIdentity::COMPILER_DOMAIN,
-        BuildIdentity::COMPILER_SOURCES,
-        &facts,
-    )
-    .expect("generated compiler source identity must be computable");
+    // Compiler-authored MIR records the source identity, not this binary's
+    // backend profile, rustc flags, or generated extras. BUILD_ID above keeps
+    // all of those facts for artifact receipts and build/cache invalidation.
+    let source_identity = BuildIdentity::compiler_source_id(root)
+        .expect("generated compiler source identity must be computable");
     println!("cargo:rustc-env=JET_COMPILER_SOURCE_ID={{source_identity}}");
     println!("cargo::rustc-check-cfg=cfg(jet_bootstrap_compiler_artifact)");
     println!("cargo:rustc-cfg=jet_bootstrap_compiler_artifact");

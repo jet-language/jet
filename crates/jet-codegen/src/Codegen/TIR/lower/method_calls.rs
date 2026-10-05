@@ -1155,8 +1155,6 @@ fn lower_plot_column(
             ty: Some(row_ty.clone()),
             ty_span: None,
         }],
-        result_type: Some(value_type.clone()),
-        error_type: None,
         effects: None,
         body: LambdaBody::Expr(Box::new(Expr::EnumLit {
             type_name: value_type.name(),

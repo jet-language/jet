@@ -17,7 +17,7 @@ test('six phases use functions, never generic registration type arguments', () =
     ['JetEval::jet_eval_machine', 'comptime'],
     ['JetCodegen::jet_codegen_lower_type_definition', 'lowering'],
     ['JetCodegen::jet_codegen_emit_value', 'lowering'],
-    ['JetOptimizer::mir_pass_fold_exact_constants', 'optimization'],
+    ['JetOptimizer::mir_pass_fold_function_constants', 'optimization'],
     ['JetCodegen::jet_rust_emit_program', 'emission'],
   ];
   for (const [frame, phase] of cases) assert.equal(classify(['malloc', frame]), phase);

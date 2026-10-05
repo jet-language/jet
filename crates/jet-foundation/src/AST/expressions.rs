@@ -491,13 +491,7 @@ pub struct Lambda {
     /// emits migration diagnostics.
     pub take_names: Vec<(String, Span)>,
     pub params: Vec<LambdaParam>,
-    /// D-LAMBDA-IFACE1=A: optional success result written before the lambda
-    /// body arrow. `None` keeps result inference from the expected fn slot.
-    pub result_type: Option<Type>,
-    /// D-LAMBDA-IFACE1=A: optional failure type paired with `result_type`.
-    /// An error-only annotation means a unit success result.
-    pub error_type: Option<Type>,
-    /// D-LAMBDA-IFACE1=A / D-EFFECT-ROW2=B: the lambda's explicit effect row.
+    /// D-LAMBDA-IFACE2=A / D-EFFECT-ROW2=B: the only optional interface suffix.
     pub effects: Option<Vec<(String, Span)>>,
     pub body: LambdaBody,
     pub span: Span,

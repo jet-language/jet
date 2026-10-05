@@ -24,10 +24,12 @@ fn elf64_u64(bytes: &[U8], value: Int) Never! {
     loop shift in 0..<8 -> &bytes.push(U8{(value >> (8 * shift)) & 255})
 }
 
-// The file: ELF header, one program header, then `text`; execution starts at
-// `entry_offset` within `text`.
-pub fn elf64_static_executable(text: [U8], entry_offset: Int) -> [U8] Never! {
-    text_offset :: ELF64_HEADER_SIZE + ELF64_PROGRAM_HEADER_SIZE
+// The file: ELF header, one program header, alignment padding, then `text`;
+// execution starts at `entry_offset` within `text`. The origin preserves the
+// linker's relative function and data alignments at their absolute addresses.
+pub fn elf64_static_executable(text: [U8], entry_offset: Int, text_align: Int) -> [U8] Never! {
+    header_size :: ELF64_HEADER_SIZE + ELF64_PROGRAM_HEADER_SIZE
+    text_offset :: header_size + (text_align - (ELF64_BASE_ADDRESS + header_size) % text_align) % text_align
     file_size :: text_offset + text.len()
     bytes := [U8]{}
     // e_ident: magic, ELFCLASS64, ELFDATA2LSB, EV_CURRENT, System V ABI, padding.
@@ -55,6 +57,7 @@ pub fn elf64_static_executable(text: [U8], entry_offset: Int) -> [U8] Never! {
     elf64_u64(&bytes, file_size)
     elf64_u64(&bytes, file_size)
     elf64_u64(&bytes, 0x1000)
+    loop bytes.len() < text_offset -> &bytes.push(U8{0})
     loop byte in text -> &bytes.push(byte)
     bytes
 }
@@ -90,5 +93,7 @@ pub fn x64_static_executable(program: LIRModule, entry: LIRFunctionID) -> X64Exe
     loop function in compiled.functions -> &functions.push(function)
     linked :: x64_link_text(functions, x64_image_runtime(), program.data)
     if linked.errors.len() > 0 -> return X64ExecutableResult{bytes: [U8]{}, errors: linked.errors}
-    X64ExecutableResult{bytes: elf64_static_executable(linked.text, linked.offsets[0]), errors: [String]{}}
+    text_align := X64_FUNCTION_ALIGN
+    loop object in program.data { if object.align > text_align -> text_align = object.align }
+    X64ExecutableResult{bytes: elf64_static_executable(linked.text, linked.offsets[0], text_align), errors: [String]{}}
 }

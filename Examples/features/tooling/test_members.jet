@@ -22,6 +22,14 @@ fn run() { print("{double(3)}") }
     assert_eq(double(2), 4)
 }
 
+// The optional message checks the reason, not merely the panic's E3001 code.
+#Test("expect_fail checks the raw message") {
+    .expect_fail(E3001, message: "fingerprint collision") {
+        panic("internal compiler error: E0859 generic module instance fingerprint collision")
+    }
+    assert_eq(double(3), 6)
+}
+
 // `.timeout` accepts the same canonical Time value in a literal or binding.
 #Test("timeout bounds a region") {
     .setup {

@@ -555,8 +555,37 @@ fn plugin_value_to_raw(
     }
 }
 
-fn plugin_error(rt: &mut JitRuntime, message: impl Into<String>) -> i64 {
-    let error = rt.heap.alloc_string(message.into());
+fn plugin_error(rt: &mut JitRuntime, error: plugin_wire::PluginError) -> i64 {
+    use plugin_wire::{PluginError, PluginLimit};
+    let (tag, limit, fault) = match error {
+        PluginError::Guest(fault) => (0, None, fault),
+        PluginError::Denied(fault) => (1, None, fault),
+        PluginError::Budget { limit, fault } => (2, Some(limit), fault),
+        PluginError::Defect(fault) => (3, None, fault),
+    };
+    // String fields stay inline cells (`JetVal::String`), as for every other
+    // host-built record: an `Int` cell is read back as a raw word, not text.
+    let frames = fault.frames.into_iter().map(|frame| {
+        JetVal::RecordRef(rt.heap.alloc_record_values(vec![
+            JetVal::String(frame.function), JetVal::String(frame.component), JetVal::Int(frame.offset),
+        ]))
+    }).collect();
+    let frames = rt.heap.alloc_list_values(frames);
+    let fault = rt.heap.alloc_record_values(vec![
+        JetVal::String(fault.export), JetVal::String(fault.message), JetVal::Int(frames),
+    ]);
+    let mut slots = vec![JetVal::Int(tag)];
+    if let Some(limit) = limit {
+        // A unit variant is a one-cell enum record holding its discriminant,
+        // in the compiler-owned `PluginLimit` row order.
+        let discriminant = match limit {
+            PluginLimit::Fuel => 0, PluginLimit::Memory => 1, PluginLimit::Table => 2,
+            PluginLimit::Time => 3, PluginLimit::Wire => 4,
+        };
+        slots.push(JetVal::RecordRef(rt.heap.alloc_record_values(vec![JetVal::Int(discriminant)])));
+    }
+    slots.push(JetVal::RecordRef(fault));
+    let error = rt.heap.alloc_record_values(slots);
     alloc_jit_result(rt, false, error as u64)
 }
 
@@ -647,16 +676,49 @@ pub(crate) fn jet_jit_plugin_call(
         };
         match plugin_value_to_raw(rt, &value, &signature.result) {
             Ok(bits) => alloc_jit_result(rt, true, bits as u64),
-            Err(error) => plugin_error(rt, error),
+            Err(error) => plugin_error(rt, plugin_wire::PluginError::defect(&name, error)),
         }
     })
 }
-fn plugin_interpreter_error(
-    message: impl Into<String>,
-) -> Result<AmbientMirHandleResult, Diagnostic> {
-    Ok(AmbientMirHandleResult::Value(MirRuntimeValue::FailedTold(
-        Box::new(MirRuntimeValue::String(message.into())),
-    )))
+fn plugin_interpreter_error(error: plugin_wire::PluginError) -> Result<AmbientMirHandleResult, Diagnostic> {
+    use plugin_wire::{PluginError, PluginLimit};
+    let (variant, limit, fault) = match error {
+        PluginError::Guest(fault) => ("Guest", None, fault),
+        PluginError::Denied(fault) => ("Denied", None, fault),
+        PluginError::Budget { limit, fault } => ("Budget", Some(limit), fault),
+        PluginError::Defect(fault) => ("Defect", None, fault),
+    };
+    let fault = MirRuntimeValue::Struct {
+        type_name: "PluginFault".to_string(),
+        fields: vec![
+            ("export".to_string(), MirRuntimeValue::String(fault.export)),
+            ("message".to_string(), MirRuntimeValue::String(fault.message)),
+            ("frames".to_string(), MirRuntimeValue::List(fault.frames.into_iter().map(|frame| MirRuntimeValue::Struct {
+                type_name: "PluginFrame".to_string(),
+                fields: vec![
+                    ("function".to_string(), MirRuntimeValue::String(frame.function)),
+                    ("component".to_string(), MirRuntimeValue::String(frame.component)),
+                    ("offset".to_string(), MirRuntimeValue::Int(frame.offset)),
+                ],
+            }).collect())),
+        ],
+    };
+    let args = if let Some(limit) = limit {
+        vec![
+            (Some("limit".to_string()), MirRuntimeValue::Enum {
+                type_name: "PluginLimit".to_string(),
+                variant: match limit {
+                    PluginLimit::Fuel => "Fuel", PluginLimit::Memory => "Memory",
+                    PluginLimit::Table => "Table", PluginLimit::Time => "Time", PluginLimit::Wire => "Wire",
+                }.to_string(),
+                args: Vec::new(),
+            }),
+            (Some("fault".to_string()), fault),
+        ]
+    } else { vec![(None, fault)] };
+    Ok(AmbientMirHandleResult::Value(MirRuntimeValue::FailedTold(Box::new(MirRuntimeValue::Enum {
+        type_name: "PluginError".to_string(), variant: variant.to_string(), args,
+    }))))
 }
 
 fn plugin_interpreter_string(
@@ -779,7 +841,7 @@ pub(crate) fn ambient_mir_handle(
                 Ok(value) => Some(Ok(AmbientMirHandleResult::Value(
                     MirRuntimeValue::Present(Box::new(value)),
                 ))),
-                Err(error) => Some(plugin_interpreter_error(error)),
+                Err(error) => Some(plugin_interpreter_error(plugin_wire::PluginError::defect(&name, error))),
             }
         }
         _ => None,
@@ -811,4 +873,82 @@ host_fns! {
     }
     load: "jet_plugin_load" => jet_jit_plugin_load: sig_load;
     call: "jet_plugin_call" => jet_jit_plugin_call: sig_call;
+}
+
+#[cfg(test)]
+mod failure_tests {
+    use super::*;
+    use plugin_wire::{PluginError, PluginLimit, PluginValue};
+
+    struct Fixture(std::path::PathBuf);
+    impl Drop for Fixture {
+        fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.0); }
+    }
+
+    #[test]
+    fn plugin_failure_transport_retains_typed_cause_export_and_frames() {
+        let home = std::env::var_os("HOME").expect("HOME is set for the bounded fixture");
+        let root = std::path::PathBuf::from(home).join(".cache/jet-dev/scratch").join(format!(
+            "plugin-failure-{}-{}", std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos(),
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let fixture = Fixture(root);
+        let path = fixture.0.join("failure_guest.wat");
+        std::fs::write(&path, include_str!("../../../Examples/features/packages/plugin_failure/failure_guest.wat")).unwrap();
+        let authority = format!("FS.Read:{}", fixture.0.display());
+        let load = runtime::jet_plugin_load_declared(path.to_str().unwrap(), &authority, &["FS.Read".to_string()]);
+        let handle: u64 = load.strip_prefix("O:").expect("load returns a handle").parse().unwrap();
+        let trap = plugin_wire::plugin_decode_result(&runtime::jet_plugin_call(handle, "trap", "0:")).unwrap_err();
+        let PluginError::Guest(fault) = trap else { panic!("expected Guest, got {trap:?}"); };
+        assert_eq!(fault.export, "trap", "{}", fault.message);
+        assert!(!fault.frames.is_empty());
+        assert!(fault.frames.len() <= plugin_wire::PLUGIN_MAX_FRAMES);
+        assert_eq!(fault.frames[0].function, "trap");
+        assert_eq!(fault.frames[0].component, "failure_guest");
+        assert!(fault.frames[0].offset > 0);
+
+        assert!(runtime::jet_plugin_close(handle));
+        let load = runtime::jet_plugin_load_declared(path.to_str().unwrap(), &authority, &["FS.Read".to_string()]);
+        let handle = load.strip_prefix("O:").unwrap().parse().unwrap();
+        let denied = plugin_wire::plugin_decode_result(&runtime::jet_plugin_call(handle, "read", "0:")).unwrap_err();
+        assert!(matches!(denied, PluginError::Denied(ref fault) if fault.export == "read" && fault.frames.is_empty()));
+        assert!(runtime::jet_plugin_close(handle));
+        let load = runtime::jet_plugin_load_declared(path.to_str().unwrap(), &authority, &["FS.Read".to_string()]);
+        let handle = load.strip_prefix("O:").unwrap().parse().unwrap();
+        let budget = plugin_wire::plugin_decode_result(&runtime::jet_plugin_call(handle, "spin", "0:")).unwrap_err();
+        assert!(matches!(budget, PluginError::Budget { limit: PluginLimit::Fuel, ref fault } if fault.export == "spin" && !fault.frames.is_empty()));
+        assert!(runtime::jet_plugin_close(handle));
+        let load = runtime::jet_plugin_load_declared(path.to_str().unwrap(), &authority, &["FS.Read".to_string()]);
+        let handle = load.strip_prefix("O:").unwrap().parse().unwrap();
+        assert!(matches!(
+            plugin_wire::plugin_decode_result(&runtime::jet_plugin_call(handle, "normal", "0:")),
+            Ok(PluginValue::Int(42)),
+        ));
+
+        // All admitted rights have real adapters today. This test-only host
+        // state removal reaches the exact absent-adapter Defect branch.
+        runtime::plugin_test_remove_adapter(handle, "read");
+        let defect = plugin_wire::plugin_decode_result(&runtime::jet_plugin_call(handle, "read", "0:")).unwrap_err();
+        assert!(matches!(defect, PluginError::Defect(ref fault) if fault.export == "read" && fault.frames.is_empty()));
+        let interpreted = plugin_interpreter_error(defect.clone()).unwrap();
+        assert!(matches!(interpreted, AmbientMirHandleResult::Value(MirRuntimeValue::FailedTold(error))
+            if matches!(*error, MirRuntimeValue::Enum { ref type_name, ref variant, .. } if type_name == "PluginError" && variant == "Defect")));
+        assert_eq!(plugin_wire::plugin_decode_result(&plugin_wire::plugin_encode_error(&defect)).unwrap_err(), defect);
+        assert!(runtime::jet_plugin_close(handle));
+
+        let malformed = fixture.0.join("malformed.wasm");
+        std::fs::write(&malformed, b"not a Component").unwrap();
+        let load = runtime::jet_plugin_load_declared(malformed.to_str().unwrap(), &authority, &["FS.Read".to_string()]);
+        let handle = load.strip_prefix("O:").expect("bad load still returns a handle").parse().unwrap();
+        let error = plugin_wire::plugin_decode_result(&runtime::jet_plugin_call(handle, "normal", "0:")).unwrap_err();
+        assert!(matches!(error, PluginError::Guest(ref fault) if fault.export == "load" && fault.frames.is_empty()));
+        let load = runtime::jet_plugin_load_declared(path.to_str().unwrap(), &authority, &["FS.Read".to_string()]);
+        let handle = load.strip_prefix("O:").unwrap().parse().unwrap();
+        assert!(matches!(plugin_wire::plugin_decode_result(&runtime::jet_plugin_call(handle, "normal", "0:")), Ok(PluginValue::Int(42))));
+        assert!(runtime::jet_plugin_close(handle));
+
+        let failure = PluginError::defect("utf8:export", "message:\n雪");
+        assert_eq!(plugin_wire::plugin_decode_result(&plugin_wire::plugin_encode_error(&failure)).unwrap_err(), failure);
+    }
 }

@@ -2,19 +2,8 @@
 use jet_foundation.[
     MIRBoundsFact,
     MIRFunction,
-    MIRProgram,
     mir_operation_place_uses,
 ]
-
-fn mir_pass_derive_bounds(program: &MIRProgram) -> Int Never! {
-    total := 0
-    loop function_index in 0..<program.functions.len() {
-        facts :: mir_pass_function_bounds_facts(program.functions[function_index])
-        total += facts.len()
-        program.functions[function_index].optimization.bounds_facts = facts
-    }
-    total
-}
 
 // Rust: crates/jet-foundation/src/MIROptimization.rs::derive_bounds_facts
 fn mir_pass_function_bounds_facts(function: MIRFunction) -> [MIRBoundsFact] Never! {

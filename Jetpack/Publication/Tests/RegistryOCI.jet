@@ -251,7 +251,7 @@ fn publication_oci_test_evidence(repo: String, entry: PublicationIndexEntry) -[F
     repo :: publication_index_test_root("oci-create-new-collision")
     path :: files.join(repo, "blob")
     authority :: foundation_open_directory_authority(repo)
-    collide :: () IOError! -[FS, Env]> {
+    collide :: () -[FS, Env]> {
         files.write(path, "winner")
     }
     error :: if foundation_write_file_nofollow_at_root(repo, "blob", "loser".bytes(), Val(collide), FoundationPublicationPolicy{create: .CreateNew}) == {
@@ -280,8 +280,7 @@ fn publication_oci_test_evidence(repo: String, entry: PublicationIndexEntry) -[F
         assert_eq("{actual}", "{failure}")
     }
     files.remove(path) ?? panic("remove winner")
-    refuse :: () IOError! -[FS, Env]> { return Err(IOError.Other(publication_oci_context(path, "validation refused after fsync"))) }
-    assert(foundation_write_file_nofollow_at_root(repo, "blob", "winner".bytes(), Val(refuse), FoundationPublicationPolicy{create: .CreateNew}) == .Err(.Other(_)))
+    assert(foundation_write_file_nofollow_at_root(repo, "blob", "winner".bytes(), Val(() -[FS, Env]> { return Err(IOError.Other(publication_oci_context(path, "validation refused after fsync"))) }), FoundationPublicationPolicy{create: .CreateNew}) == .Err(.Other(_)))
     assert(!files.lexists(path))
     files.remove_all(repo) ?? panic("cleanup")
 }

@@ -7511,6 +7511,24 @@ fn gc_edit_callback(ctx: &LowerCtx, edit: &TExpr, root_ty: Type) -> TLambda {
     }
 }
 
+/// The payload tuple of a text/binary scan carrier. An `IsSome` probe reads
+/// no capture, so its carrier keeps the empty tuple. An `Unwrap` probe reads
+/// every hole, so its carrier holds each hole at its checked type, named by
+/// position: the canonical capture tuple each `PatternCapture` indexes. AOT
+/// can only read a capture the carrier's type keeps.
+fn pattern_scan_captures(expr: &TExpr, probe: &super::TMatchProbe) -> Type {
+    match (probe, &expr.ty) {
+        (super::TMatchProbe::Unwrap, Type::Tuple(fields)) => Type::Tuple(
+            fields
+                .iter()
+                .enumerate()
+                .map(|(index, (_, ty))| (index.to_string(), ty.clone()))
+                .collect(),
+        ),
+        _ => Type::Tuple(Vec::new()),
+    }
+}
+
 fn lower_pattern_probe(
     ctx: &mut LowerCtx,
     expr: &TExpr,
@@ -7850,7 +7868,7 @@ fn lower_host_call(
                 })
                 .collect::<Result<Vec<_>, LowerError>>()?;
             let shape = MirPatternShape::Text(pattern, ctx.span());
-            let matched = ctx.lower_pattern_match(subject, &shape)?;
+            let matched = ctx.lower_pattern_match(subject, &shape, pattern_scan_captures(expr, probe))?;
             lower_pattern_probe(ctx, expr, matched, probe)
         }
         THostCall::BinMatchScan {
@@ -7889,7 +7907,7 @@ fn lower_host_call(
                 })
                 .collect::<Result<Vec<_>, LowerError>>()?;
             let shape = MirPatternShape::Binary(pattern, ctx.span());
-            let matched = ctx.lower_pattern_match(subject, &shape)?;
+            let matched = ctx.lower_pattern_match(subject, &shape, pattern_scan_captures(expr, probe))?;
             lower_pattern_probe(ctx, expr, matched, probe)
         }
         THostCall::SwitchSubjectField { field } => {

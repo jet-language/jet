@@ -124,6 +124,13 @@ pub fn semantic_id(
     semantic_id_with_extra(root, domain, roots, facts, &[])
 }
 
+/// Identity of what the compiler sources mean, independent of how a host
+/// binary was built. Build/cache receipts still use `COMPILER_DOMAIN` with
+/// the complete build facts; only compiler-authored MIR uses this identity.
+pub fn compiler_source_id(root: &Path) -> io::Result<String> {
+    semantic_id(root, "jet.compiler-source.v1", COMPILER_SOURCES, &[])
+}
+
 /// Compute one canonical identity over rooted files plus explicit generated
 /// inputs. The extra rows use the same sorted path/length framing rather than
 /// a second artifact-specific hash convention.
@@ -221,4 +228,56 @@ pub fn collect_files(path: PathBuf, files: &mut Vec<PathBuf>) -> io::Result<()> 
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn source_identity_is_relocatable_and_build_identity_keeps_profiles() {
+        struct Fixture(PathBuf);
+        impl Drop for Fixture {
+            fn drop(&mut self) {
+                std::fs::remove_dir_all(&self.0).unwrap();
+            }
+        }
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let fixture = Fixture(std::env::temp_dir().join(format!(
+            "jet-compiler-source-id-{}-{unique}",
+            std::process::id()
+        )));
+        let left = fixture.0.join("left");
+        let right = fixture.0.join("right");
+        for root in [&left, &right] {
+            for input in COMPILER_SOURCES {
+                let path = root.join(input);
+                std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+                std::fs::write(path, input).unwrap();
+            }
+        }
+        let source = compiler_source_id(&left).unwrap();
+        assert_eq!(source, compiler_source_id(&right).unwrap());
+        assert_eq!(
+            source,
+            semantic_id(&left, "jet.compiler-source.v1", COMPILER_SOURCES, &[]).unwrap()
+        );
+        let dev = vec![("PROFILE".to_string(), "debug".to_string())];
+        let release = vec![("PROFILE".to_string(), "release".to_string())];
+        assert_ne!(
+            semantic_id(&left, COMPILER_DOMAIN, COMPILER_SOURCES, &dev).unwrap(),
+            semantic_id(&left, COMPILER_DOMAIN, COMPILER_SOURCES, &release).unwrap()
+        );
+        std::fs::write(right.join("Compiler"), "changed compiler source").unwrap();
+        assert_ne!(source, compiler_source_id(&right).unwrap());
+        let extra = vec![("generated.rs".to_string(), b"generated compiler".to_vec())];
+        assert_ne!(
+            semantic_id(&left, COMPILER_DOMAIN, COMPILER_SOURCES, &dev).unwrap(),
+            semantic_id_with_extra(&left, COMPILER_DOMAIN, COMPILER_SOURCES, &dev, &extra)
+                .unwrap()
+        );
+    }
 }

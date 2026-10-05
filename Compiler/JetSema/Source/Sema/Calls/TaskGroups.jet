@@ -19,10 +19,12 @@ use jet_foundation.[
     TCapture,
     TCaptureFacts,
     TCoreClosureKind,
+    TDeclarationOwnership,
     TEffectFacts,
     TEffectSpan,
     TExpr,
     TExprKind,
+    THandleOp,
     TLambda,
     TLambdaBody,
     TStmt,
@@ -689,7 +691,7 @@ fn sema_taskgroup_check_spawn(args: [CallArg], span: Span, expected: Type?, envi
         &diagnostics.push(sema_error("E0112", args[0].span, "`task` needs a callable body, not `{type_name(body.ty)}`", "a spawned task executes one zero-parameter callable on a worker thread", "pass a zero-parameter lambda or function"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    lambda := if body.kind == {.LambdaValue(value) -> value else -> sema_taskgroup_callable_wrapper(body, body.ty, args[0].span) ?? {
+    lambda := if body.kind == {.Lambda(value) | .LambdaValue(value) -> value else -> sema_taskgroup_callable_wrapper(body, body.ty, args[0].span) ?? {
         &diagnostics.push(sema_error("E0112", args[0].span, "`task` needs a callable body that can be captured for execution", "the worker closure must retain the callable until the task runs", "use a lambda or a direct function value"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }}
@@ -697,7 +699,7 @@ fn sema_taskgroup_check_spawn(args: [CallArg], span: Span, expected: Type?, envi
         &diagnostics.push(sema_error("E0104", args[0].span, "`task` needs a zero-parameter body, got {lambda.param_types.len()} parameters", "a task body captures values from the enclosing scope instead of taking arguments", "move or capture data rather than declaring lambda parameters"))
     }
     if body.kind == {
-        .LambdaValue(_) -> { sema_function_reactive_note_task_lambda(&context, lambda) }
+        .Lambda(_) | .LambdaValue(_) -> { sema_function_reactive_note_task_lambda(&context, lambda) }
         else -> {}
     }
     sema_taskgroup_check_lambda_captures(lambda, args[0].span, environment, scopes, &state, &context, &diagnostics)
@@ -762,4 +764,40 @@ pub fn sema_taskgroup_check_group_method(receiver: Expr, receiver_ty: Type, meth
     &diagnostics.push(sema_error("E0102", span, message, why, fix))
     sema_taskgroup_check_discarded_arguments(args, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     SemaMethodSpecialCheck{handled: true, value: None}
+}
+
+fn sema_taskgroup_task_payload(ty: Type) -> Type? {
+    if ty == {
+        .Apply(name, args) -> if name == "Task" && args.len() == 1 -> Val(args[0]) else -> None
+        .Tagged(_, inner) -> sema_taskgroup_task_payload(inner)
+        else -> None
+    }
+}
+
+// The core `Task<T>` handle, not a user type that shadows the name.
+fn sema_taskgroup_is_canonical_task(ty: Type, environment: SemaScopeEnvironment) -> Bool Never! {
+    graph_option :: environment.registration_graph
+    graph :: graph_option ?? return false
+    if sema_type_resolve_nominal_row(graph, ty, environment.module_identity) != None -> return false
+    owner :: sema_registration_core_builtin_owner(graph, "Task") ?? return false
+    owner.ownership == TDeclarationOwnership.Owned
+}
+
+// `Task<T>.join()` and `.detach()` consume the handle. D-CONC-FAIL1=A: a join
+// waits on the one fallible task rail, `T !TaskFailure`, and blocks
+// (`Time.Wait`); a fallible body's own failure joins that rail, as in the
+// combinators (`jet_task_join_result`). D-DETACH1: a detach returns nothing.
+pub fn sema_taskgroup_check_task_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    if (method != "join" && method != "detach") || args.len() != 0 -> return SemaMethodSpecialCheck{handled: false, value: None}
+    payload :: sema_taskgroup_task_payload(receiver_value.ty) ?? return SemaMethodSpecialCheck{handled: false, value: None}
+    if !sema_taskgroup_is_canonical_task(receiver_value.ty, environment) -> return SemaMethodSpecialCheck{handled: false, value: None}
+    if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Move, scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+    join := method == "join"
+    result_type := if join -> sema_taskgroup_failure_result(sema_taskgroup_success_type(payload)) else -> Type.Named{name: "Unit"}
+    operation := if join -> THandleOp.TaskJoin else -> THandleOp.TaskDetach
+    value := sema_tir_expr(result_type, TExprKind.HandleMethod{receiver: receiver_value, operation: operation, args: [TExpr]{}}, span)
+    checked :: sema_expression_call_expected(value, expected, environment, context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    effect_name := if join -> "Time.Wait" else -> ""
+    if !sema_stream_handle_effect_fact(environment, &scopes, &context, "Task.{method}", span, result_type, effect_name, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+    SemaMethodSpecialCheck{handled: true, value: Val(checked)}
 }

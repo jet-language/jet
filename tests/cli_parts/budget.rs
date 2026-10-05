@@ -1216,7 +1216,7 @@ fn gc_report_missing_trace_has_registered_human_and_json_diagnostics() {
         "{stderr}"
     );
     assert!(
-        stderr.contains("run `jet run --gc-trace <file.jet>`"),
+        stderr.contains("Run `jet run --gc-trace <file.jet>`"),
         "{stderr}"
     );
     assert!(!stderr.contains('\u{1b}'), "{stderr}");

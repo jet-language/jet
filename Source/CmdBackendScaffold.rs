@@ -1935,7 +1935,7 @@ pub fn run() {{
 
 fn route_source(name: &str, route: &str) -> String {
     format!(
-        "use core.web as web\n\nfn page() -> WebPage -> web.page(\"{name}\", \"<main><h1>{name}</h1></main>\")\n\n// route: {route}\n"
+        "use core.web as web\n\nfn page() -> WebPage {{ web.page(\"{name}\", \"<main><h1>{name}</h1></main>\") }}\n\n// route: {route}\n"
     )
 }
 

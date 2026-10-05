@@ -1,8 +1,4 @@
-Warning [L0104] (unused_private_fn): Private function `answer` is never called or used as a value.
-  --> tests/ui/ffi_inline_c_mismatch.jet:1:53
-    |
-  1 | #[Unsafe("deliberate mismatch fixture"), FFI(c)] fn answer() Int -> {
-    |                                                     ^^^^^^
- Why: A private function with no reachable reference is dead code; public functions stay exempt because other modules may use them.
- Fix: Remove the function, or rename `answer` to `_answer` when it is intentional.
-More: jet-lang.dev/e/L0104
+Error [E3222]: The foreign body doesn't match the Jet signature at `#FFI(c) fn answer`
+ Why: Jet compiled and linked the body against the declared scalar ABI contract, and the foreign toolchain rejected that contract
+ Fix: Make the foreign function name, parameter types, return type, operands, and target match the Jet signature
+More: jet-lang.dev/e/E3222
