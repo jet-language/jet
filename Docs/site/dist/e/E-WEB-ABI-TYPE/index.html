@@ -40,7 +40,7 @@
 <pre class="diag">Error [E-WEB-ABI-TYPE]: `Fn { params: [Int], ret: Some(Int), effect_bound: None }` cannot cross the JS/WASM boundary on a `#WasmExport` parameter
   --&gt; tests/ui/web_abi_callback.jet:4:4
     |
-  4 | fn apply(cb: fn(Int) -&gt; Int, n: Int) -&gt; Int { cb(n) }
+  4 | fn apply(cb: fn(Int) Int, n: Int) Int -&gt; cb(n)
     |    ^^^^^
  Why: Web exports and imports only admit ABI-safe types (scalars, `String`, `List`/`Map` of ABI-safe values, and `#[Codable]` structs/enums)
  Fix: Use a scalar, `String`, a `List`/`Map` of ABI-safe values, or a `#[Codable]` struct/enum whose fields are ABI-safe

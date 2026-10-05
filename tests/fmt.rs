@@ -1087,7 +1087,7 @@ fn fmt_preserves_named_tuples() {
 
 fn run() {
     p :: (x: 1, y: 2)
-    { x: a, y: b } :: p
+    (a, b) :: p
     print("{p.x}{a}{b}")
 }
 "#;
@@ -1101,7 +1101,7 @@ fn run() {
         "expected canonical named tuple return type preserved, got:\n{out}"
     );
     assert!(
-        out.contains("{x: a, y: b} :: p"),
+        out.contains("(a, b) :: p"),
         "expected tuple destructuring preserved, got:\n{out}"
     );
     let twice = jet::format_source(&out).expect("named tuple output should re-fmt");

@@ -354,11 +354,8 @@ impl<'a> Parser<'a> {
             }
             // Destructuring targets: scan ahead to a `::`/`:=` after the matching
             // close. Cheap bounded lookahead. `[ … ] ::`, `( … ) ::`,
-            // `{ … } ::` (the inferred record form), and `Type{ … } ::` (plus the
-            // retired dotted migration form).
-            TokKind::LBracket | TokKind::LParen | TokKind::LBrace => {
-                self.pattern_target_is_binding()
-            }
+            // and `Type{ … } ::` (plus the retired dotted migration form).
+            TokKind::LBracket | TokKind::LParen => self.pattern_target_is_binding(),
             TokKind::Ident(_) if matches!(self.peek2().kind, TokKind::LBrace) => {
                 self.pattern_target_is_binding()
             }
@@ -445,11 +442,8 @@ impl<'a> Parser<'a> {
     }
 
     /// S74: parse a destructuring binding target if one starts here.
-    /// `[ a, b ]` is a list pattern; `Ident { x, y }` is a struct pattern;
-    /// `{ x, y: local, .. }` is the inferred record pattern, which reads the
-    /// fields of a struct or the members of a tuple by name; `( a, b )` binds
-    /// tuple members by name. A bare `name` (followed by `=` or `:`) is not a
-    /// pattern.
+    /// `[ a, b ]` is a list pattern; `Ident { x, y }` is a struct pattern.
+    /// A bare `name` (followed by `=` or `:`) is not a pattern.
     pub(super) fn try_bind_pattern(&mut self) -> Result<Option<BindPattern>, Diagnostic> {
         match &self.peek().kind {
             TokKind::LBracket => {
@@ -475,22 +469,6 @@ impl<'a> Parser<'a> {
                 Ok(Some(BindPattern::List {
                     elems,
                     span: Span::new(start.start, end.end),
-                }))
-            }
-            // S74 / #4605: the inferred record pattern `{ field, field: local, .. }`.
-            // No type is written; sema reads the fields (or tuple members) from the
-            // value's checked type. An empty `type_name` marks this form.
-            TokKind::LBrace => {
-                let open = self.bump().span;
-                let (fields, rest) = self.struct_pattern_fields()?;
-                let end = self.peek().span;
-                self.expect(TokKind::RBrace, "to close the record pattern")?;
-                Ok(Some(BindPattern::Struct {
-                    type_name: String::new(),
-                    type_span: open,
-                    fields,
-                    rest,
-                    span: Span::new(open.start, end.end),
                 }))
             }
             // Retired `Type.{ x, y }`. Fmt rewrites; compile rejects.

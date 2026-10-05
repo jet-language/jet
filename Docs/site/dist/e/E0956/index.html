@@ -34,17 +34,26 @@
 <h2>Why</h2>
 <p class="diag-copy why" data-registry-field="why">The canonical TIR evaluator doesn&#39;t cover this construct yet</p>
 <h2>Fix</h2>
-<p class="diag-copy fix" data-registry-field="fix">Report this unsupported construct as a compiler bug</p>
+<p class="diag-copy fix" data-registry-field="fix">Use a simpler form, or use `jet build` for the full evaluator</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E0956</code>: <code>tests/ui/template_loop_noncomptime_source.stderr</code>.</p>
-<pre class="diag">Error [E0956]: An `@loop` source is not a compile-time list
-  --&gt; tests/ui/template_loop_noncomptime_source.jet:1:12
+<p>First UI snapshot mentioning <code>E0956</code>: <code>tests/ui/comptime_panic.stderr</code>.</p>
+<pre class="diag">Error [E0956]: `require/panic stop` isn&#39;t supported by the current evaluator yet
+  --&gt; tests/ui/comptime_panic.jet:2:5
     |
-  1 | @loop T in 1 {
-    |            ^
- Why: `@loop` expands one item template for each value in its source list
- Fix: Use a reflected/comptime list such as `T.@fields`, or a closed type list like `[TypeA, TypeB]`
+  2 |     assert((n &gt; 100), &quot;n must be over 100&quot;)
+    |     ^^^^^^
+ Why: The canonical TIR evaluator doesn&#39;t cover this construct yet
+ Fix: Use a simpler form, or use `jet build` for the full evaluator
 More: jet-lang.dev/e/E0956
+
+Error [E0107]: Nothing named `@x` exists here
+  --&gt; tests/ui/comptime_panic.jet:8:20
+    |
+  8 | fn run() { print(&quot;{@x}&quot;) }
+    |                    ^^
+ Why: A name must be declared before it&#39;s used
+ Fix: Declare it first: `@x :: ...`
+More: jet-lang.dev/e/E0107
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>
 </article>

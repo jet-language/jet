@@ -4,7 +4,7 @@ use core.net as net
 use core.tasks as tasks
 
 fn run() {
-    { sender, receiver: ch } :: channel<String>()
+    (sender, ch) :: channel<String>()
     t :: task {
         listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
         sender.send(listener.local_addr() ?? panic("address"))

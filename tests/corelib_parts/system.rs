@@ -831,7 +831,7 @@ fn scheduler_spawn_1000_tasks() {
 use core.tasks as tasks
 
 fn run() {
-{ sender, receiver: ch } :: channel<Int>()
+(sender, ch) :: channel<Int>()
     loop i in 1..1000 {
         dup :: ~sender
         task {
@@ -870,7 +870,7 @@ fn scheduler_spawn_10000_tasks() {
 use core.tasks as tasks
 
 fn run() {
-{ sender, receiver: ch } :: channel<Int>()
+(sender, ch) :: channel<Int>()
     loop i in 1..10000 {
         dup :: ~sender
         task {
@@ -910,7 +910,7 @@ fn scheduler_spawn_100000_tasks_bench() {
 use core.tasks as tasks
 
 fn run() {
-{ sender, receiver: ch } :: channel<Int>()
+(sender, ch) :: channel<Int>()
     loop i in 1..100000 {
         dup :: ~sender
         task {

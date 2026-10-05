@@ -1,8 +1,17 @@
-Warning [L1141] (inline_autodiff): An autodiff transform result is called inline
-  --> compute_transform_inline.jet:8:33
+Warning [L0530] (redundant_final_return): An explicit `return` is used on the final value line
+  --> compute_transform_inline.jet:3:50
     |
-  8 |     { w: dw, x: dx } :: compute.gradient(loss).call(w, x)
-    |                                 ^^^^^^^^^^^^^^^^^^^^^^^^
+  3 | fn loss(w: Tensor, x: Tensor) -> Tensor Never! { return compute.mul(w, x) ?? panic("loss") }
+    |                                                  ^^^^^^
+ Why: An unadorned expression on the final value line is Jet's implicit return; `return` is for early exits
+ Fix: Remove the final `return` and leave the expression as the block tail
+More: jet-lang.dev/e/L0530
+
+Warning [L1141] (inline_autodiff): An autodiff transform result is called inline
+  --> compute_transform_inline.jet:8:25
+    |
+  8 |     (dw, dx) :: compute.gradient(loss).call(w, x)
+    |                         ^^^^^^^^^^^^^^^^^^^^^^^^
  Why: The transform arity returns a callable; inline calls make it unclear whether a direct gradient or a derivative function was requested
  Fix: Bind the derivative first, then call the binding: `d_loss :: compute.gradient(loss)`
 More: jet-lang.dev/e/L1141

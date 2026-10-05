@@ -211,10 +211,8 @@ pub struct BindName {
     pub name: String,
     pub span: Span,
     /// D-DESTRUCT1: `severity: sev` — the local binding name when the struct
-    /// field (or tuple member) is renamed. `None` means bind under the field's
-    /// own name (`self.name`). Always `None` for `List` patterns; a `Tuple`
-    /// pattern carries renames only after sema normalizes an inferred record
-    /// pattern `{ member: local } :: tuple` into it.
+    /// field is renamed. `None` means bind under the field's own name
+    /// (`self.name`). Always `None` for `List`/`Tuple` patterns.
     pub rename: Option<(String, Span)>,
 }
 
@@ -231,17 +229,13 @@ impl BindName {
 
 /// S74: the destructuring target on the left of a `val`/`var` binding.
 /// Reuses the existing bracket conventions — `Type { fields }` for structs,
-/// `{ fields }` for the inferred record form, `[ elems ]` for lists, and
-/// `( a, b )` for named tuples (S73/S74).
+/// `[ elems ]` for lists, `( a, b )` for named tuples (S73/S74).
 #[derive(Debug, Clone)]
 pub enum BindPattern {
-    /// `Point{ x, y } :: p` — binds a subset of the struct's fields.
+    /// `Point.{ x, y } :: p;` — binds a subset of the struct's fields.
     /// D-DESTRUCT1: `rest` is `Some(span)` of a trailing `..` — MANDATORY
     /// whenever `fields` doesn't name every field of the struct (E0326); a
     /// `..` on a pattern that already names every field is E0327.
-    /// An empty `type_name` is the inferred record form `{ x, y: local } :: v`:
-    /// sema reads the fields from `v`'s checked type, and rewrites the pattern
-    /// into `Tuple` when `v` is a tuple (#4605).
     Struct {
         type_name: String,
         type_span: Span,
@@ -251,9 +245,7 @@ pub enum BindPattern {
     },
     /// `[a, b] :: xs` — binds list elements by position.
     List { elems: Vec<BindName>, span: Span },
-    /// `(x, y) :: p` — binds named tuple members BY NAME (#4605): every
-    /// element names a member of the tuple type, in any order. A positional
-    /// destructure whose names are not members is E0314.
+    /// `(x, y) :: p` — binds named tuple fields in canonical (sorted) order.
     Tuple { elems: Vec<BindName>, span: Span },
     /// D-CHOOSE-TEST1=A: `subject == pattern ?? route` binds the captures from
     /// the successful pattern match after the route has been checked to

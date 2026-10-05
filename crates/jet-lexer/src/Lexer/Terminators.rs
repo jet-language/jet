@@ -401,33 +401,6 @@ fn scope_member_starts_at(toks: &[Token], i: usize) -> bool {
     }
 }
 
-/// S74: a brace followed by a binding sigil starts a record-pattern
-/// statement, not the block body of the preceding callable header.
-fn record_binding_starts_at(toks: &[Token], i: usize) -> bool {
-    if !matches!(toks.get(i).map(|token| &token.kind), Some(TokKind::LBrace)) {
-        return false;
-    }
-    let mut depth = 0usize;
-    for (index, token) in toks.iter().enumerate().skip(i) {
-        match token.kind {
-            TokKind::LBrace => depth += 1,
-            TokKind::RBrace => {
-                depth -= 1;
-                if depth == 0 {
-                    let after = skip_comment_tokens(toks, index + 1);
-                    return matches!(
-                        toks.get(after).map(|token| &token.kind),
-                        Some(TokKind::ColonColon | TokKind::ColonEq)
-                    );
-                }
-            }
-            TokKind::Eof => return false,
-            _ => {}
-        }
-    }
-    false
-}
-
 /// True when `kind` can start a leading-dot enum/group pattern (D-ENUMDOT1 /
 /// D-TAG1): PascalCase ident or `null`.
 fn leading_dot_variant_token(kind: &TokKind) -> bool {
@@ -667,7 +640,6 @@ fn insert_terminators_reference(src: &str, toks: &mut Vec<Token>, diags: &mut Ve
                         | TokKind::MinusMinus
                         | TokKind::LBrace
                 ) && matches!(prev.kind, TokKind::RParen)
-                    && !record_binding_starts_at(toks, i)
                 {
                     diags.push(split_header_diagnostic(cur).expect("checked split-header kind"));
                     // Do not insert a terminator; let the parser keep going.

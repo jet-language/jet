@@ -394,7 +394,7 @@ use core.tasks as tasks
 use core.time as time
 
 fn run() {{
-    {{ sender: ready_tx, receiver: ready_rx }} :: channel<Int>()
+    (ready_tx, ready_rx) :: channel<Int>()
     lookup :: task {{
         ready_tx.send(1)
         if net.dns_a_at("{}", "service.example.test", 5000) == {{
@@ -490,7 +490,7 @@ fn run() {
     listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
     typed_address :: net.listener_local_socket_addr(listener) ?? panic("address")
     address :: net.socket_to_string(typed_address)
-    { sender: ready_tx, receiver: ready_rx } :: channel<Int>()
+    (ready_tx, ready_rx) :: channel<Int>()
     server :: task {
         stream := net.tcp_accept(listener) ?? panic("accept")
         ready_tx.send(1)
@@ -533,7 +533,7 @@ use core.time as time
 fn run() {
     cancelled_listener :: net.tcp_listen("127.0.0.1:0") ?? panic("cancel listen")
     cancelled_address :: net.socket_to_string(net.listener_local_socket_addr(cancelled_listener) ?? panic("cancel address"))
-    { sender: accept_tx, receiver: accept_rx } :: channel<Int>()
+    (accept_tx, accept_rx) :: channel<Int>()
     cancelled_accept :: task {
         accept_tx.send(1)
         if &cancelled_listener.accept() == {
@@ -558,7 +558,7 @@ fn run() {
     print(net.ready_readable(write_ready))
     print(net.ready_writable(write_ready))
     interest :: NetReadyInterest.Read
-    { sender: wait_tx, receiver: wait_rx } :: channel<Int>()
+    (wait_tx, wait_rx) :: channel<Int>()
     ready_wait :: task ^ready_server {
         wait_tx.send(1)
         if ready_server.ready(interest, deadline: Duration.milliseconds(1000) ?? panic("ready deadline")) == {
@@ -634,7 +634,7 @@ use core.time as time
 fn run() {
     socket :: net.udp_bind("127.0.0.1:0") ?? panic("bind")
     interest :: NetReadyInterest.Read
-    { sender: ready_tx, receiver: ready_rx } :: channel<Int>()
+    (ready_tx, ready_rx) :: channel<Int>()
     waiter :: task {
         ready_tx.send(1)
         if socket.ready(interest, deadline: Duration.seconds(1) ?? panic("deadline")) == {
@@ -942,7 +942,7 @@ fn run() {{
     }}
 
     udp :: net.udp_bind("127.0.0.1:0") ?? panic("udp bind")
-    {{ sender: udp_ready_tx, receiver: udp_ready_rx }} :: channel<Int>()
+    (udp_ready_tx, udp_ready_rx) :: channel<Int>()
     udp_wait :: task {{
         udp_ready_tx.send(1)
         if net.udp_receive(udp, 8) == {{
@@ -955,7 +955,7 @@ fn run() {{
     udp_wait.join() ?? panic("udp wait task failed")
 
     listener :: net.unix_listen("{socket}") ?? panic("unix listen")
-    {{ sender: unix_ready_tx, receiver: unix_ready_rx }} :: channel<Int>()
+    (unix_ready_tx, unix_ready_rx) :: channel<Int>()
     unix_wait :: task {{
         unix_ready_tx.send(1)
         if net.unix_accept(listener) == {{

@@ -82,7 +82,7 @@ fn run() {}
         r#"
 use core.tasks as tasks
 fn cross(cell: Cell<Int>) {
-    { sender: tx, receiver: rx } :: channel<Cell<Int>>()
+    (tx, rx) :: channel<Cell<Int>>()
     tx.send(^cell)
 }
 fn run() {}
@@ -221,7 +221,7 @@ use core.reactive as reactive
 use core.tasks as tasks
 fn run() {
     pending := reactive.signal(0)
-    { sender: tx, receiver: rx } :: channel<Signal<Int>>()
+    (tx, rx) :: channel<Signal<Int>>()
     tx.send(~pending)
     got :: rx.receive() ?? panic("recv")
     print(got.get())
@@ -289,7 +289,7 @@ use core.tasks as tasks
 fn run() {
     base := reactive.signal(1)
     twice := reactive.computed(() -> (base.get() * 2))
-    { sender: tx, receiver: rx } :: channel<Computed<Int>>()
+    (tx, rx) :: channel<Computed<Int>>()
     tx.send(~twice)
     got :: rx.receive() ?? panic("recv")
     print(got.get())

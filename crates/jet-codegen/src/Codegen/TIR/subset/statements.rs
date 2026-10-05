@@ -59,12 +59,18 @@ fn stmt_in_subset_inner(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) -> bool
             // branch (the init is a covered `arena.alloc(v)` handle call). The escape/
             // use-after-reset rules (E0631/E0632) are enforced entirely in sema.
             match &b.pattern {
-                // Checked tuple members are projected by name. Sema also
-                // normalizes inferred record patterns into this tuple form.
+                // c109 Phase 23: a TUPLE-destructuring binding `(a, b) :: <init>` (S74,
+                // `BindPattern::Tuple`). The AST `emit_stmt` borrows the init into a temp,
+                // then binds each name from `(tmp).__jet_<canonical-field>.clone()` (pairing
+                // elems to the type's canonical fields BY POSITION). Covered when the init
+                // is in-subset (its lowered `.ty` is a `Type::Tuple` — sema guarantees a
+                // tuple pattern destructures a tuple value, so the canonical field names
+                // are total at lowering). The Struct/List destructure forms stay on the
+                // AST path (no live-suite use; can be a later slice).
                 Some(BindPattern::Tuple { elems, .. }) => {
                     let ok = !b.is_comptime && !b.uninit && expr_in_subset(&b.init, cx, locals);
                     for e in elems {
-                        locals.insert(e.local_name().to_string());
+                        locals.insert(e.name.clone());
                     }
                     ok
                 }

@@ -32,8 +32,8 @@ fn response(command: String, jobs: Sender<Int>, results: Receiver<Int>) -> Strin
 }
 
 fn run(args: Args) {
-    { sender: jobs_sender, receiver: jobs_receiver } :: channel<Int>(capacity: 32)
-    { sender: results_sender, receiver: results_receiver } :: channel<Int>(capacity: 32)
+    (jobs_sender, jobs_receiver) :: channel<Int>(capacity: 32)
+    (results_sender, results_receiver) :: channel<Int>(capacity: 32)
     task.group _workers(limit: 4) {
         <: worker1..worker4 :> :: task worker(~jobs_receiver, ~results_sender)
         listener :: net.tcp_listen("127.0.0.1:{args.port}")

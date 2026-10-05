@@ -32,9 +32,9 @@
 <h2>What</h2>
 <p class="diag-copy what" data-registry-field="what">`{pure_fn}` calls the impure function `{call}`.</p>
 <h2>Why</h2>
-<p class="diag-copy why" data-registry-field="why">A `fn … -[]&gt;` may only call functions whose effect row is empty, declared or inferred, and pure builtins. Impure calls make the result non-deterministic (D-PURE2). In `jet eval --pure` the whole call graph from `run` is checked transitively; the why-line shows the full chain (`run → a → b calls \`print\``) so the user can find the leak. Compile-time work (`prep` blocks and prepared values) shares this same call-graph walk (D-META-EFFECT1 c3): the message reads `{call}` is not allowed in comptime code instead, since there is no enclosing `-[]&gt;` function name to report.</p>
+<p class="diag-copy why" data-registry-field="why">A `fn … -[]&gt;` may only call other `fn … -[]&gt;`s and pure builtins. Impure calls make the result non-deterministic (D-PURE2). In `jet eval --pure` the whole call graph from `run` is checked transitively; the why-line shows the full chain (`run → a → b calls \`print\``) so the user can find the leak. Compile-time (`@` blocks, `@name :: expr` bindings) shares this same call-graph walk (D-META-EFFECT1 c3): the message reads `{call}` is not allowed in comptime code instead, since there is no enclosing `-[]&gt;` function name to report.</p>
 <h2>Fix</h2>
-<p class="diag-copy fix" data-registry-field="fix">Remove the call from `{pure_fn}`, or drop the `-[]&gt;` bound from `{pure_fn}` so its effects are inferred; at compile time, compute the value at runtime instead.</p>
+<p class="diag-copy fix" data-registry-field="fix">Mark `{call}` as `fn … -[]&gt;`, or remove the call from `{pure_fn}`; at compile time, compute the value at runtime instead.</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E3401</code>: <code>tests/ui/comptime_impure.stderr</code>.</p>
 <pre class="diag">Error [E3401]: `print` is not allowed in comptime code

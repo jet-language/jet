@@ -40,7 +40,7 @@
 <pre class="diag">Error [E0918]: `triple` cannot be inlined: its address is taken
   --&gt; tests/ui/inline_always_address_taken.jet:4:1
     |
-  4 | #Inline(Always) fn triple(x: Int) -&gt; Int { return x * 3 }
+  4 | #Inline(Always) fn triple(x: Int) Int -&gt; { return x * 3 }
     | ^^^^^^^^^^^^^^^
  Why: `#Inline(Always)` promises every call to `triple` expands in place — but `triple` is also used as a plain value somewhere (stored, returned, or passed as a callback), and a value needs a real function to point at.
  Fix: Drop `#Inline(Always)`, or call `triple` directly instead of through a value.

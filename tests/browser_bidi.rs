@@ -681,7 +681,7 @@ fn run() {
     timeout :: browser.timeout(10) ?? return
     session :: browser.connect_profile("ws://127.0.0.1:1", profile, timeout) ?? return
     handle :: task session.close()
-    { sender, receiver: channel } :: channel<Browser>()
+    (sender, channel) :: channel<Browser>()
     sender.send(session)
 }
 "#;

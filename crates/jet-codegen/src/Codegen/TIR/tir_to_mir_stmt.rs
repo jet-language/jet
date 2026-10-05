@@ -1007,9 +1007,10 @@ fn lower_tuple_destructure(
     };
     let mutable = kw.contains("mut");
     if !move_fields {
-        for (local_name, field_name) in binds {
-            let field_ty = ctx.checked_field_type(&init.ty, field_name)?;
-            let field_id = ctx.field_id_for_type(&init.ty, field_name)?;
+        for (index, (local_name, _)) in binds.iter().enumerate() {
+            let field_name = ctx.field_name_for_type(&init.ty, index)?;
+            let field_ty = ctx.checked_field_type(&init.ty, &field_name)?;
+            let field_id = ctx.field_id_for_type(&init.ty, &field_name)?;
             let projected = ctx.emit(
                 "stmt.tuple.field",
                 Some(field_ty.clone()),
@@ -1045,10 +1046,11 @@ fn lower_tuple_destructure(
             value: subject,
         },
     )?;
-    for (local_name, field_name) in binds {
-        let field_ty = ctx.checked_field_type(&init.ty, field_name)?;
+    for (index, (local_name, _)) in binds.iter().enumerate() {
+        let field_name = ctx.field_name_for_type(&init.ty, index)?;
+        let field_ty = ctx.checked_field_type(&init.ty, &field_name)?;
         let field_place =
-            ctx.project_field_place(temp_place, field_name, field_ty.clone(), ctx.span())?;
+            ctx.project_field_place(temp_place, &field_name, field_ty.clone(), ctx.span())?;
         let value = ctx.emit(
             "stmt.tuple.move-field",
             Some(field_ty.clone()),

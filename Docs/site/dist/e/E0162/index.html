@@ -5,9 +5,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>E0162 — Jet diagnostic</title>
-<meta name="description" content="*Retired with D-INCR1 (2026-09-28)* (was: `++`/`--` on a non-integer type)">
+<meta name="description" content="`` `++`/`--` is not defined for {type} ``.">
 <meta property="og:title" content="E0162 — Jet diagnostic">
-<meta property="og:description" content="*Retired with D-INCR1 (2026-09-28)* (was: `++`/`--` on a non-integer type)">
+<meta property="og:description" content="`` `++`/`--` is not defined for {type} ``.">
 <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
 <link rel="stylesheet" href="../../assets/site.css">
 </head>
@@ -25,18 +25,27 @@
 <div class="page-header">
 <p class="eyebrow">// diagnostic</p>
 <h1>E0162</h1>
-<p>*Retired with D-INCR1 (2026-09-28)* (was: `++`/`--` on a non-integer type)</p>
+<p>`` `++`/`--` is not defined for {type} ``.</p>
 </div>
 </section>
 <article class="wrap article">
 <h2>What</h2>
-<p class="diag-copy what" data-registry-field="what">*Retired with D-INCR1 (2026-09-28)* (was: `++`/`--` on a non-integer type)</p>
+<p class="diag-copy what" data-registry-field="what">`` `++`/`--` is not defined for {type} ``.</p>
 <h2>Why</h2>
-<p class="diag-copy why" data-registry-field="why">`++` and `--` are retired; E0160 teaches `+= 1` / `-= 1`</p>
+<p class="diag-copy why" data-registry-field="why">Increment and decrement work on integer types only (D-INCR1).</p>
 <h2>Fix</h2>
-<p class="diag-copy fix" data-registry-field="fix">Do not use E0162</p>
+<p class="diag-copy fix" data-registry-field="fix">On `Float`, use `+= 1.0` / `-= 1.0`; otherwise use `+= 1` / `-= 1` on an integer binding.</p>
 <h2>Worked example</h2>
-<p>No UI snapshot currently mentions this code.</p>
+<p>First UI snapshot mentioning <code>E0162</code>: <code>tests/ui/incr_float.stderr</code>.</p>
+<pre class="diag">Error [E0162]: `++`/`--` is not defined for Decimal (an exact base-10 number)
+  --&gt; tests/ui/incr_float.jet:3:5
+    |
+  3 |     f++
+    |     ^^^
+ Why: Increment and decrement work on integer types only
+ Fix: Use `f += 1` / `f -= 1` on an integer binding
+More: jet-lang.dev/e/E0162
+</pre>
 <p><a href="../index.html">Back to all error codes</a></p>
 </article>
 </main>

@@ -4,10 +4,10 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>E0432 — Jet diagnostic</title>
-<meta name="description" content="`` `Error` is retired ``.">
-<meta property="og:title" content="E0432 — Jet diagnostic">
-<meta property="og:description" content="`` `Error` is retired ``.">
+<title>E-ERR-SUFFIX — Jet diagnostic</title>
+<meta name="description" content="`Error!` is a retired suffix failure contract.">
+<meta property="og:title" content="E-ERR-SUFFIX — Jet diagnostic">
+<meta property="og:description" content="`Error!` is a retired suffix failure contract.">
 <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
 <link rel="stylesheet" href="../../assets/site.css">
 </head>
@@ -24,33 +24,24 @@
 <section class="wrap page">
 <div class="page-header">
 <p class="eyebrow">// diagnostic</p>
-<h1>E0432</h1>
-<p>`` `Error` is retired ``.</p>
+<h1>E-ERR-SUFFIX</h1>
+<p>`Error!` is a retired suffix failure contract.</p>
 </div>
 </section>
 <article class="wrap article">
 <h2>What</h2>
-<p class="diag-copy what" data-registry-field="what">`` `Error` is retired ``.</p>
+<p class="diag-copy what" data-registry-field="what">`Error!` is a retired suffix failure contract.</p>
 <h2>Why</h2>
-<p class="diag-copy why" data-registry-field="why">The default error type and its constructor now use the same name.</p>
+<p class="diag-copy why" data-registry-field="why">Jet puts the error contract before its type so the success role and error role stay distinct in every type position.</p>
 <h2>Fix</h2>
-<p class="diag-copy fix" data-registry-field="fix">Replace `Error` with `Err`.</p>
+<p class="diag-copy fix" data-registry-field="fix">Write `!Error`, or write `?Success !Error` when the success can be absent.</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E0432</code>: <code>tests/ui/retired_error_type.stderr</code>.</p>
-<pre class="diag">Error [E0432]: `Error` is retired
-  --&gt; tests/ui/retired_error_type.jet:1:15
+<p>First UI snapshot mentioning <code>E-ERR-SUFFIX</code>: <code>tests/ui/cffi_callback_nullable.stderr</code>.</p>
+<pre class="diag">Error [E-ERR-SUFFIX]: `Error!` is a retired suffix failure contract.
+  --&gt; tests/ui/cffi_callback_nullable.jet:4:17
     |
-  1 | fn load() Int Error! -&gt; { return Ok(1) }
-    |               ^^^^^
- Why: The default error type and its constructor now use the same name
- Fix: Replace `Error` with `Err`
-More: jet-lang.dev/e/E0432
-
-Error [E-ERR-SUFFIX]: `Error!` is a retired suffix failure contract.
-  --&gt; tests/ui/retired_error_type.jet:1:15
-    |
-  1 | fn load() Int Error! -&gt; { return Ok(1) }
-    |               ^^^^^^
+  4 |     fn call(cb: fn(I32) I32 -[]&gt;?, x: I32) I32 = &quot;call&quot;
+    |                 ^^^^^^^^^^^^^^^^^
  Why: Jet puts the error contract before its type so the success role and error role stay distinct in every type position.
  Fix: Write `!Error`, or write `?Success !Error` when the success can be absent.
 More: jet-lang.dev/e/E-ERR-SUFFIX
