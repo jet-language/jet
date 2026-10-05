@@ -28471,12 +28471,14 @@ impl<'a> RustEmitter<'a> {
                 // borrows it straight from the guard's place.
                 let row = self.prelude_row(*call);
                 self.validate_prelude_count(row, 3);
+                let params = self.closure_callback_params(function, *predicate)
+                    .unwrap_or_else(|| panic!("MIR wait predicate has no callable signature"));
                 format!(
                     "{}({}, {}, {})",
                     self.prelude_symbol(*call),
                     self.borrowed_value_reference(function, *guard, MirAccess::Read),
                     self.value_slot_reference(*condition, false),
-                    self.value_owned(*predicate)
+                    self.host_callback(function, *predicate, &params, true, false)
                 )
             }
             MirSemanticOp::ConditionNotify {

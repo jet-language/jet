@@ -22049,7 +22049,7 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                 predicate,
             } => {
                 // AOT `JetSharedGuard::wait`: `loop { if ready(&*guard) { return
-                // Ok(()) } jet_shared_guard_wait_once(state, condition)? }`.
+                // Ok(()) } jet_shared_guard_wait_once_with_handoff(state, condition)? }`.
                 // The predicate is the checked callable value; the wait kernel
                 // owns release, park, reacquire, and cancellation, and its
                 // failure carrier is returned as-is.

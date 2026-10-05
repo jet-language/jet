@@ -2973,16 +2973,27 @@ macro_rules! jet_lane_show {
             )
         }
 
-        pub fn wait<F>(&mut self, condition: &JetCondition, ready: F) -> Result<(), String>
+        /// The canonical `SharedGuard.wait` (MIREval `eval_shared_guard_wait`
+        /// and the JIT `jet_jit_shared_guard_wait_once` mirror it): an invalid
+        /// or released guard traps, a read guard reports edit-required before
+        /// the predicate runs, and an interrupted park reports cancellation.
+        pub fn wait<F>(&self, condition: &JetCondition, mut ready: F) -> Result<(), String>
         where
-            F: Fn(&T) -> bool,
+            F: FnMut(&T) -> bool,
         {
             let state = self.state.clone();
-            if !state.held() {
-                return Err(crate::JET_SHARED_GUARD_INVALID.to_string());
+            let capability = if state.held() {
+                crate::jet_shared_guard_require_edit_capability(self.editable, state.permit())
+            } else {
+                Err(crate::JET_SHARED_GUARD_INVALID)
+            };
+            match capability {
+                Ok(()) => {}
+                Err(message) if message == crate::JET_SHARED_GUARD_INVALID => {
+                    super::jet_runtime_stop_with_context("E3001", "", 0, "", "", message)
+                }
+                Err(message) => return Err(message.to_string()),
             }
-            crate::jet_shared_guard_require_edit_capability(self.editable, state.permit())
-                .map_err(|message| message.to_string())?;
             loop {
                 if ready(self) {
                     return Ok(());
@@ -2991,12 +3002,21 @@ macro_rules! jet_lane_show {
                     std::sync::Arc::new(JetSchedulerConditionWaiter {
                         slot: super::ParkSlot::new(),
                     });
-                match crate::jet_shared_guard_wait_once(
+                match crate::jet_shared_guard_wait_once_with_handoff(
                     Some(state.as_ref()),
                     Some(&condition.inner),
                     waiter,
+                    None,
                 ) {
                     Ok(()) => {}
+                    Err(error) if error.traps() => super::jet_runtime_stop_with_context(
+                        "E3001",
+                        "",
+                        0,
+                        "",
+                        "",
+                        error.message(),
+                    ),
                     Err(error) => return Err(error.message().to_string()),
                 }
             }

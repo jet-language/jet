@@ -26809,7 +26809,12 @@ impl MirSharedGuardLease {
             return Ok(Err(message));
         }
         self.publish(span)?;
-        match shared_protocol::jet_shared_guard_wait_once(Some(state), Some(condition), waiter) {
+        match shared_protocol::jet_shared_guard_wait_once_with_handoff(
+            Some(state),
+            Some(condition),
+            waiter,
+            None,
+        ) {
             Ok(()) => self.storage.sync_transfer_shadow(span).map(Ok),
             Err(error) if error.traps() => Err(mir_error_at(error.message(), span)),
             Err(error) => Ok(Err(error.message())),
@@ -32185,10 +32190,11 @@ mod shared_transfer_tests {
             peer_condition.notify_one();
         });
 
-        let waited = shared_protocol::jet_shared_guard_wait_once(
+        let waited = shared_protocol::jet_shared_guard_wait_once_with_handoff(
             Some(guard.as_ref()),
             Some(&condition),
             waiter,
+            None,
         );
         peer.join().expect("peer thread");
         assert!(waited.is_ok(), "guard wait should reacquire its edit permit");

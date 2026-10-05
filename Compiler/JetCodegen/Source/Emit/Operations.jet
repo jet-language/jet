@@ -5180,7 +5180,13 @@ fn jet_rust_emit_operation(ctx: &JetRustEmitContext, function: MIRFunction, oper
                     return "jet_reflect_value_finish({jet_rust_emit_quote(type_name)}.to_string(), {jet_rust_emit_quote(path)}.to_string(), {jet_rust_emit_value_owned(ctx, function, display)}, vec![{rendered.join(", ")}])"
                 }
                 .RequireStop(call, kind, condition, stop_location, context, values, _) -> return jet_rust_emit_require_stop(&ctx, function, call, kind, condition, stop_location, context, values)
-                .SharedGuardWait(call, guard, condition, predicate) -> return jet_rust_emit_semantic_values(&ctx, function, call, [MIRValueID]{guard, condition, predicate})
+                .SharedGuardWait(call, guard, condition, predicate) -> {
+                    params :: jet_rust_emit_closure_callback_params(ctx, function, predicate) ?? [MIRType]{}
+                    callback :: jet_rust_emit_host_callback(&ctx, function, predicate, params, true, false)
+                    guard_text :: jet_rust_emit_borrowed_value_reference(&ctx, function, guard, MIRAccess.Read)
+                    condition_text :: jet_rust_emit_value_reference(ctx, condition, false)
+                    return "{jet_rust_emit_prelude_symbol(&ctx, call)}({guard_text}, {condition_text}, {callback})"
+                }
                 .CellGuardProject(map_call, split_call, guard, paths, editable, disjoint) -> {
                     if paths.len() == 1 -> return jet_rust_emit_shared_guard_map(&ctx, function, map_call, guard, paths[0], editable)
                     if paths.len() == 2 {
