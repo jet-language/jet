@@ -768,7 +768,7 @@ impl JetJobQueue {
         if record.state != JetJobQueueState.Running {
             return Err(JetServiceError.Stale("queue job is no longer running under this lease"))
         }
-        if record.lease_owner.as_deref() != Val(claim.worker.as_str()) || record.lease_token.as_deref() != Val(claim.lease_token.as_str()) {
+        if record.lease_owner.as_deref() != claim.worker.as_str() || record.lease_token.as_deref() != claim.lease_token.as_str() {
             return Err(JetServiceError.Revoked("queue lease token or worker does not match"))
         }
         Ok(())
