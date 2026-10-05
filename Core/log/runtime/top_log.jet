@@ -97,7 +97,7 @@ pub fn jet_ring_log_flush() -> {
         JET_LOG_SINK_PATH.with(path -> {
             path :: path.borrow()
             if path.is_empty() -> return
-            if OpenOptions.new().append(true).create(true).open(OSPath.new(path)) is Ok(file) {
+            if OpenOptions.new().append(true).create(true).open(OSPath.new(path)) == .Ok(file) {
                 _ :: &file.flush()
             }
         })
@@ -166,7 +166,11 @@ pub fn jet_ring_log_counter(name: String, value: I64) -> LogField {
 pub fn jet_ring_log_span(name: String) -> LogSpan {
     // GATE #4565: kernel primitive
     id :: #Unsafe("advance thread-local span identifier") {
-        JET_LOG_NEXT_SPAN.with(n -> { id :: n.get(); n.set(id + 1); id })
+        JET_LOG_NEXT_SPAN.with(n -> {
+            id :: n.get()
+            n.set(id + 1)
+            id
+        })
     }
     LogSpan{id: id, name: ~name}
 }
@@ -194,14 +198,14 @@ pub fn jet_ring_log_close(span: LogSpan) -> {
     observation :: #Unsafe("remove last matching span from both thread-owned stacks") {
         JET_LOG_SPANS.with(s -> {
             spans := s.borrow_mut()
-            if spans.iter().rposition(x -> x.id == span.id) is Val(pos) { _ :: &spans.remove(pos) }
+            if spans.iter().rposition(x -> x.id == span.id) == .Val(pos) { _ :: &spans.remove(pos) }
         })
         JET_LOG_SPAN_OBSERVATIONS.with(spans -> {
             spans := spans.borrow_mut()
             spans.iter().rposition(state -> state.id == span.id).map(pos -> &spans.remove(pos))
         })
     }
-    if observation is Val(observation) -> jet_log_publish_span(observation, jet_log_telemetry_monotonic_now_ns())
+    if observation == .Val(observation) -> jet_log_publish_span(observation, jet_log_telemetry_monotonic_now_ns())
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Log.rs:241
 pub fn jet_log_telemetry_text(value: String) -> String {
@@ -291,14 +295,14 @@ fn jet_log_publish_metric(name: String, value: I64) -> {
     timestamp_ns :: jet_log_telemetry_wall_now_ns()
     if first {
         fields :: "{{\"name\":{jet_log_telemetry_json_string(name)},\"kind\":\"counter\",\"unit\":\"count\",\"description\":\"core.log counter\",\"source_id\":{jet_log_telemetry_json_string(JET_LOG_TELEMETRY_SOURCE)},\"source_file\":{jet_log_telemetry_json_string(JET_LOG_TELEMETRY_FILE)},\"source_line\":179,\"source_column\":1,\"source_function\":\"jet_ring_log_counter\"}}"
-        if JetDevtoolsEvent.from_parts(0, JET_LOG_TELEMETRY_SOURCE, "Metric", name, ^fields) is Ok(event) { jet_devtools_publish_event(^event) }
+        if JetDevtoolsEvent.from_parts(0, JET_LOG_TELEMETRY_SOURCE, "Metric", name, ^fields) == .Ok(event) { jet_devtools_publish_event(^event) }
     }
     span :: jet_log_current_span()
     span_id :: span.as_ref().map(span -> span.id.to_string())
     trace_id :: span.as_ref().and_then(span -> span.trace_id.as_ref())
     fields :: "{{\"index\":{index},\"timestamp_ns\":{timestamp_ns},\"instrument\":{jet_log_telemetry_json_string(name)},\"source_id\":{jet_log_telemetry_json_string(JET_LOG_TELEMETRY_SOURCE)},\"source_file\":{jet_log_telemetry_json_string(JET_LOG_TELEMETRY_FILE)},\"source_line\":179,\"source_column\":1,\"source_function\":\"jet_ring_log_counter\",\"tags\":[]{jet_log_telemetry_context_json(trace_id, span_id.as_ref())} }}"
     payload :: "{{\"value\":{value}}}"
-    if JetDevtoolsEvent.from_parts_with_payload(timestamp_ns / 1_000_000, JET_LOG_TELEMETRY_SOURCE, "Metric", name, ^fields, Val(^payload)) is Ok(event) { jet_devtools_publish_event(^event) }
+    if JetDevtoolsEvent.from_parts_with_payload(timestamp_ns / 1_000_000, JET_LOG_TELEMETRY_SOURCE, "Metric", name, ^fields, Val(^payload)) == .Ok(event) { jet_devtools_publish_event(^event) }
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Log.rs:402
 pub fn jet_log_telemetry_log_fields(fields: [LogField]) -> String {
@@ -306,7 +310,7 @@ pub fn jet_log_telemetry_log_fields(fields: [LogField]) -> String {
     loop field in fields.iter().take(JET_LOG_TELEMETRY_MAX_FIELDS) {
         key :: jet_log_telemetry_text(field.key)
         if key.is_empty() -> continue
-        if metadata.iter().position(pair -> pair.0 == key) is Val(pos) {
+        if metadata.iter().position(pair -> pair.0 == key) == .Val(pos) {
             metadata[pos].1 = metadata[pos].1 || field.redacted
         } else { &metadata.push((^key, field.redacted)) }
     }
@@ -330,7 +334,7 @@ pub fn jet_log_telemetry_payload_fields(fields: [LogField]) -> String {
             "bool" if field.value == "true" || field.value == "false" -> Val(~field.value),
             _ -> Val(jet_log_telemetry_json_string(field.value)),
         }
-        if value is Val(value) -> &values.push("{{\"key\":{jet_log_telemetry_json_string(key)},\"value\":{value}}}")
+        if value == .Val(value) -> &values.push("{{\"key\":{jet_log_telemetry_json_string(key)},\"value\":{value}}}")
     }
     "[{values.join(",")}]"
 }
@@ -364,7 +368,7 @@ fn jet_log_note_active_span(span_id: I64, log_index: U64) -> JetLogSpanObservati
 fn jet_log_publish_link(span: JetLogSpanObservation, level: String, timestamp_ns: U64, log_index: U64) -> {
     trace_id :: match span.trace_id.as_ref() { Val(trace) -> trace, None -> return }
     fields :: "{{\"span_index\":{span.id.max(0)},\"log_index\":{log_index},\"trace_id\":{jet_log_telemetry_json_string(trace_id)},\"span_id\":{jet_log_telemetry_json_string(span.id.to_string())},\"span_source_id\":{jet_log_telemetry_json_string(JET_LOG_TELEMETRY_SOURCE)},\"log_source_id\":{jet_log_telemetry_json_string(JET_LOG_TELEMETRY_SOURCE)},\"timestamp_ns\":{timestamp_ns},\"level\":{jet_log_telemetry_json_string(level)}}}"
-    if JetDevtoolsEvent.from_parts(timestamp_ns / 1_000_000, JET_LOG_TELEMETRY_SOURCE, "TraceLink", "{span.id.max(0)}:{log_index}", ^fields) is Ok(event) { jet_devtools_publish_event(^event) }
+    if JetDevtoolsEvent.from_parts(timestamp_ns / 1_000_000, JET_LOG_TELEMETRY_SOURCE, "TraceLink", "{span.id.max(0)}:{log_index}", ^fields) == .Ok(event) { jet_devtools_publish_event(^event) }
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Log.rs:553
 fn jet_log_publish_span(span: JetLogSpanObservation, end_ns: U64) -> {
@@ -377,12 +381,12 @@ fn jet_log_publish_span(span: JetLogSpanObservation, end_ns: U64) -> {
     parent_span_id :: span.parent_id.map(parent -> parent.to_string())
     parent_field :: parent_span_id.as_ref().map(jet_log_telemetry_json_string).unwrap_or_else(() -> "null")
     fields :: "{{\"index\":{span_index},\"name\":{jet_log_telemetry_json_string(span.name)},\"kind\":\"internal\",\"parent_span_id\":{parent_field},\"start_ns\":{span.start_ns},\"status\":\"ok\",\"trace_id\":{jet_log_telemetry_json_string(trace_id)},\"span_id\":{jet_log_telemetry_json_string(span_id)},\"source_id\":{jet_log_telemetry_json_string(JET_LOG_TELEMETRY_SOURCE)},\"source_file\":{jet_log_telemetry_json_string(JET_LOG_TELEMETRY_FILE)},\"source_line\":201,\"source_column\":1,\"source_function\":\"jet_ring_log_enter\",\"linked_log_indexes\":[{linked_logs}],\"end_ns\":{end_ns},\"duration_ns\":{duration_ns}}}"
-    if JetDevtoolsEvent.from_parts(span.start_ns / 1_000_000, JET_LOG_TELEMETRY_SOURCE, "Trace", span_id, ^fields) is Ok(event) { jet_devtools_publish_event(^event) }
+    if JetDevtoolsEvent.from_parts(span.start_ns / 1_000_000, JET_LOG_TELEMETRY_SOURCE, "Trace", span_id, ^fields) == .Ok(event) { jet_devtools_publish_event(^event) }
     if duration_ns < JET_LOG_TELEMETRY_SLOW_WORK_NS -> return
     // GATE #4565: kernel primitive
     slow_index :: #Unsafe("advance relaxed process-wide slow-work sequence") { JET_LOG_TELEMETRY_NEXT_SLOW_INDEX.fetch_add(1, Ordering.Relaxed) }
     slow_fields :: "{{\"index\":{slow_index},\"operation\":{jet_log_telemetry_json_string(span.name)},\"threshold_ns\":{JET_LOG_TELEMETRY_SLOW_WORK_NS},\"duration_ns\":{duration_ns},\"start_ns\":{span.start_ns},\"end_ns\":{end_ns},\"trace_id\":{jet_log_telemetry_json_string(trace_id)},\"span_id\":{jet_log_telemetry_json_string(span_id)},\"source_id\":{jet_log_telemetry_json_string(JET_LOG_TELEMETRY_SOURCE)},\"source_file\":{jet_log_telemetry_json_string(JET_LOG_TELEMETRY_FILE)},\"source_line\":201,\"source_column\":1,\"source_function\":\"jet_ring_log_enter\"}}"
-    if JetDevtoolsEvent.from_parts(end_ns / 1_000_000, JET_LOG_TELEMETRY_SOURCE, "SlowWork", slow_index.to_string(), ^slow_fields) is Ok(event) { jet_devtools_publish_event(^event) }
+    if JetDevtoolsEvent.from_parts(end_ns / 1_000_000, JET_LOG_TELEMETRY_SOURCE, "SlowWork", slow_index.to_string(), ^slow_fields) == .Ok(event) { jet_devtools_publish_event(^event) }
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Log.rs:624
 fn jet_log_format_active() -> U8 {
@@ -440,7 +444,7 @@ fn jet_log_write(line: String) -> {
     #Unsafe("write actual stderr provider or create/append selected native file; preserve ignored IO errors") {
         path :: JET_LOG_SINK_PATH.with(p -> p.borrow().clone())
         if path.is_empty() { jet_log_write_line(line) }
-        else if OpenOptions.new().create(true).append(true).open(OSPath.new(path)) is Ok(file) {
+        else if OpenOptions.new().create(true).append(true).open(OSPath.new(path)) == .Ok(file) {
             _ :: &file.write_all("{line}\n".as_bytes())
         }
     }
@@ -488,8 +492,8 @@ fn jet_log_emit(level: String, msg: String, fields: [LogField]) -> {
     index :: #Unsafe("advance relaxed process log sequence") { JET_LOG_TELEMETRY_NEXT_LOG_INDEX.fetch_add(1, Ordering.Relaxed) }
     span :: jet_log_current_span()
     if jet_log_publish_record(level, msg, timestamp_ns, fields, index, span.as_ref()) {
-        if span is Val(span) {
-            if jet_log_note_active_span(span.id, index) is Val(updated) -> jet_log_publish_link(updated, level, timestamp_ns, index)
+        if span == .Val(span) {
+            if jet_log_note_active_span(span.id, index) == .Val(updated) -> jet_log_publish_link(updated, level, timestamp_ns, index)
         }
     }
     if jet_log_format_active() == 2 -> jet_log_emit_text(level, msg, ts, fields)
