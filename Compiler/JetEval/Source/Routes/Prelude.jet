@@ -478,7 +478,7 @@ fn jet_eval_route_mutating_rank(member: String, receiver: TComptimeValue, args: 
         }
         return Val(JetEvalRouteMutation{receiver: jet_eval_route_collection_value("Rank", updated), result: unit})
     }
-    if present -> return Val(JetEvalRouteMutation{receiver: receiver, result: unit})
+    if present -> return Val(JetEvalRouteMutation{receiver: receiver, result: JetEvalRuntimeValue.Data{value: TComptimeValue.Bool{value: false}}})
     placed := false
     loop item in items {
         if !placed {
@@ -491,7 +491,7 @@ fn jet_eval_route_mutating_rank(member: String, receiver: TComptimeValue, args: 
         &updated.push(item)
     }
     if !placed -> &updated.push(value)
-    Val(JetEvalRouteMutation{receiver: jet_eval_route_collection_value("Rank", updated), result: unit})
+    Val(JetEvalRouteMutation{receiver: jet_eval_route_collection_value("Rank", updated), result: JetEvalRuntimeValue.Data{value: TComptimeValue.Bool{value: true}}})
 }
 
 // MIREval `direct_absent_value`: the clean absence of the row's checked

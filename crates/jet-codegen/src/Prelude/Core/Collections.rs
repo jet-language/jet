@@ -40,7 +40,9 @@ struct JetCache<K, V> {
 }
 
 impl<K: Eq + Clone, V: Clone> JetCache<K, V> {
-    fn new(capacity: i64) -> Self {
+    fn new(capacity: jet_foundation::Numeric::JetInt) -> Self {
+        let capacity = jet_std::jet_int_owned_to_i64(&capacity)
+            .unwrap_or_else(|error| jet_arithmetic_stop("<core.collections>", 0, &error));
         Self {
             lru: JetLru::new(Some(capacity.max(0) as usize)),
         }
@@ -340,6 +342,15 @@ impl<T> JetListPushSurface for Vec<T> {
         self.push(value);
     }
 }
+impl<T: Ord> JetListPushSurface for std::collections::BinaryHeap<T> {
+    type Item = T;
+
+    #[inline(always)]
+    fn jet_push(&mut self, value: Self::Item) {
+        self.push(value);
+    }
+}
+
 
 
 #[inline(always)]
@@ -646,6 +657,32 @@ fn jet_lru_keys<K: Eq + Clone, V: Clone>(cache: &JetCache<K, V>) -> Vec<K> {
 }
 
 #[inline(always)]
+fn jet_lru_put<K: Eq + Clone, V: Clone>(
+    cache: &mut JetCache<K, V>,
+    key: K,
+    value: V,
+) -> JetOutcome<V, JetAbsent> {
+    jet_outcome_of(cache.put(key, value))
+}
+
+#[inline(always)]
+fn jet_lru_get<K: Eq + Clone, V: Clone>(
+    cache: &mut JetCache<K, V>,
+    key: &K,
+) -> JetOutcome<V, JetAbsent> {
+    jet_outcome_of(cache.get(key))
+}
+
+#[inline(always)]
+fn jet_lru_add_new<K: Eq + Clone, V: Clone>(
+    cache: &mut JetCache<K, V>,
+    key: K,
+    value: V,
+) -> bool {
+    cache.add_new(key, value)
+}
+
+#[inline(always)]
 fn jet_bag_len<T>(bag: &std::collections::HashMap<T, usize>) -> i64 {
     bag.values().sum::<usize>() as i64
 }
@@ -665,7 +702,9 @@ fn jet_bit_set_is_empty(bits: &JetBitSet) -> bool {
     bits.is_empty()
 }
 #[inline(always)]
-fn jet_bit_set_has(bits: &JetBitSet, bit: i64) -> bool {
+fn jet_bit_set_has(bits: &JetBitSet, bit: jet_foundation::Numeric::JetInt) -> bool {
+    let bit = jet_std::jet_int_owned_to_i64(&bit)
+        .unwrap_or_else(|error| jet_arithmetic_stop("<core.collections>", 0, &error));
     bits.contains(&bit)
 }
 #[inline(always)]
@@ -675,6 +714,20 @@ fn jet_bit_set_to_list(bits: &JetBitSet) -> Vec<i64> {
 #[inline(always)]
 fn jet_bit_set_count(bits: &JetBitSet) -> i64 {
     bits.count()
+}
+
+#[inline(always)]
+fn jet_bitset_add(bits: &mut JetBitSet, bit: jet_foundation::Numeric::JetInt) -> bool {
+    let bit = jet_std::jet_int_owned_to_i64(&bit)
+        .unwrap_or_else(|error| jet_arithmetic_stop("<core.collections>", 0, &error));
+    bits.add(bit)
+}
+
+#[inline(always)]
+fn jet_bitset_remove(bits: &mut JetBitSet, bit: jet_foundation::Numeric::JetInt) {
+    let bit = jet_std::jet_int_owned_to_i64(&bit)
+        .unwrap_or_else(|error| jet_arithmetic_stop("<core.collections>", 0, &error));
+    bits.remove(&bit);
 }
 #[inline(always)]
 fn jet_deque_len<T>(queue: &std::collections::VecDeque<T>) -> i64 {

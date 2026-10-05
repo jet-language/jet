@@ -3540,8 +3540,15 @@ pub(super) fn lower_expr(
                 .map(|(index, arg)| {
                     let widen = widen_to_vec.get(index).copied().unwrap_or(false);
                     let mut lowered = ctx.lower_core_call_arg(arg, index, record, widen)?;
+                    // A volatile store writes T through Ptr<T>. Keep that
+                    // checked carrier intact instead of narrowing exact Int
+                    // as though this were a bounded native Core argument.
+                    let typed_pointer_value = record.module == "core.mem"
+                        && record.member == "volatile_write"
+                        && index == 1;
                     if record.signature.borrow_mask.get(index).copied() == Some(false)
                         && matches!(arg.ty.without_user_tags(), Type::Int)
+                        && !typed_pointer_value
                     {
                         lowered.value = lower_builtin_native_int(ctx, lowered.value, &arg.ty)?;
                     }

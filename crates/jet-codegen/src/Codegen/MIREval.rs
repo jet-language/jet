@@ -25949,7 +25949,11 @@ fn direct_mutating_collection(
                 }
                 _ => {}
             }
-            Ok(Some(MirEvalValue::Unit))
+            Ok(Some(if member == "sorted_set_insert" {
+                MirEvalValue::Bool(position.is_none())
+            } else {
+                MirEvalValue::Unit
+            }))
         }
         "set_update"
         | "set_difference_update"

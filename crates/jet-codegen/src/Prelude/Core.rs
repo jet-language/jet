@@ -3299,6 +3299,19 @@ fn jet_priority_queue_remove_value<T: Ord>(
     jet_priority_queue_remove_value_kernel(pq, value)
 }
 
+#[inline(always)]
+fn jet_priority_queue_remove_slot_canonical<T: Ord>(
+    pq: &mut std::collections::BinaryHeap<T>,
+    index: jet_foundation::Numeric::JetInt,
+) -> JetOutcome<T, JetAbsent> {
+    let index = jet_std::jet_int_owned_to_i64(&index)
+        .unwrap_or_else(|error| jet_arithmetic_stop("<core.collections>", 0, &error));
+    match jet_priority_queue_remove_slot_kernel(pq, index, "<core.collections>", 0) {
+        Ok(value) => value,
+        Err(message) => jet_arithmetic_stop("<core.collections>", 0, &message),
+    }
+}
+
 fn jet_list_count<T: PartialEq>(xs: &[T], value: &T) -> i64 {
     jet_list_count_kernel(xs, value)
 }

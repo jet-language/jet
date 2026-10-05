@@ -204,7 +204,7 @@ fn jet_codegen_builtin_route_for_receiver(operation: TBuiltinOp, receiver: Type,
             }
             if ty == {
                 .Apply(name, _) -> {
-                    if name == "Cache" -> return jet_codegen_builtin_route("lru_has", "jet_lru_has", 2, [Bool]{true, false}, None)
+                    if name == "Cache" -> return jet_codegen_builtin_route("lru_has", "jet_lru_has", 2, [Bool]{true, true}, None)
                 }
                 else -> {}
             }
@@ -420,7 +420,7 @@ fn jet_codegen_builtin_container_route(operation: TBuiltinOp) -> JetCodegenBuilt
         }
         .LRUPut -> return jet_codegen_builtin_route("lru_put", "jet_lru_put", 3, [Bool]{true, false, false}, Val(Effect.Mem))
         .LRUAddNew -> return jet_codegen_builtin_route("lru_add_new", "jet_lru_add_new", 3, [Bool]{true, false, false}, Val(Effect.Mem))
-        .LRUGet -> return jet_codegen_builtin_route("lru_get", "jet_lru_get", 2, [Bool]{true, false}, Val(Effect.Mem))
+        .LRUGet -> return jet_codegen_builtin_route("lru_get", "jet_lru_get", 2, [Bool]{true, true}, Val(Effect.Mem))
         .LRUKeys -> return jet_codegen_builtin_route("lru_keys", "jet_lru_keys", 1, [Bool]{true}, None)
         .BitSetAdd -> return jet_codegen_builtin_route("bitset_add", "jet_bitset_add", 2, [Bool]{true, false}, Val(Effect.Mem))
         .LRUCapacity -> return jet_codegen_builtin_route("lru_capacity", "JetCache::capacity", 1, [Bool]{true}, None)
@@ -593,7 +593,7 @@ fn jet_codegen_builtin_route_plan(operation: TBuiltinOp, receiver: Type, result:
         .TryCollect | .IterToList | .IterCollect | .ListLazy | .Take | .Skip | .StepBy | .Dedup | .Chunks | .Windows | .IterRepeat | .IterCycle | .IterDropLast | .IterShuffle | .IterIsSorted | .IterLastIndexOf | .IterAverage(_) | .IterCompare -> return jet_codegen_builtin_iter_route(operation, receiver, carrier)
         .StringMethod(method) -> return jet_codegen_builtin_string_method_route(method, result, carrier)
         .ByteBufferMethod(method) -> return jet_codegen_builtin_byte_buffer_method_route(method)
-        .ByteBufferWrite(method) -> return jet_codegen_builtin_route("byte_buffer_{method}", "JetByteBuffer::{method}", 2, [Bool]{true, false}, Val(Effect.Mem))
+        .ByteBufferWrite(method) -> return jet_codegen_builtin_route("byte_buffer_{method}", "JetByteBuffer::{method}", 2, [Bool]{true, method == "write_bytes"}, Val(Effect.Mem))
         .ByteBufferToBytes -> return jet_codegen_builtin_route("byte_buffer_to_bytes", "JetByteBuffer::to_bytes", 1, [Bool]{true}, None)
         .ByteBufferFrom -> return jet_codegen_builtin_route("byte_buffer_from", "JetByteBuffer::from", 1, [Bool]{true}, None)
         .ByteBufferWithCapacity -> return jet_codegen_builtin_route("byte_buffer_with_capacity", "JetByteBuffer::with_capacity", 1, [Bool]{false}, None)

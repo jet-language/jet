@@ -5164,7 +5164,16 @@ fn jet_rust_emit_operation(ctx: &JetRustEmitContext, function: MIRFunction, oper
                     loop arg in args -> &rendered.push(jet_rust_emit_call_arg(&ctx, function, arg))
                     return jet_rust_emit_route_call(&ctx, call, rendered)
                 }
-                .StaticPreludeCall(call, args, _, type_args) -> return jet_rust_emit_prelude_call(&ctx, function, call, args, type_args)
+                .StaticPreludeCall(call, args, _, type_args) -> {
+                    emitted :: jet_rust_emit_prelude_call(&ctx, function, call, args, type_args)
+                    row :: jet_rust_emit_prelude_route(ctx, call, false)
+                    if row == .Val(route) {
+                        if route.member == "Shared.strong_count" && result == .Val(value) {
+                            return jet_rust_emit_native_int_result(&ctx, emitted, jet_rust_emit_value_type(ctx, function, value)) ?? emitted
+                        }
+                    }
+                    return emitted
+                }
                 .DecodeUnder(call, segment, inner) -> return jet_rust_emit_semantic_values(&ctx, function, call, [MIRValueID]{segment, inner})
                 .HardwareCall(call, op, receiver, args) -> return jet_rust_emit_hardware_call(&ctx, function, call, op, receiver, args)
                 .BuiltinMethod(call, receiver, receiver_place, args, _) -> return jet_rust_emit_builtin_method_values(&ctx, function, call, receiver, receiver_place, args, result)

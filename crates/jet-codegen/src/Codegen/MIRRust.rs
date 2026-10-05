@@ -28463,7 +28463,15 @@ impl<'a> RustEmitter<'a> {
                 args,
                 owner_type_args,
                 type_args,
-            } => self.static_prelude_call(function, *call, args, owner_type_args, type_args),
+            } => {
+                let emitted = self.static_prelude_call(function, *call, args, owner_type_args, type_args);
+                if self.prelude_row(*call).member == "Shared.strong_count" {
+                    return result
+                        .and_then(|value| self.native_int_result(&emitted, self.value_type(function, value)))
+                        .unwrap_or(emitted);
+                }
+                emitted
+            }
             MirSemanticOp::DecodeUnder {
                 call,
                 segment,

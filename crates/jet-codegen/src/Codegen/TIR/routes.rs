@@ -4940,7 +4940,7 @@ fn builtin_collection_route(
             row("map_has_key", "jet_map_has_key", 2, &[true, true])
         }
         (TBuiltinOp::ContainsKey, Type::Apply { name, .. }) if name == crate::Syntax::TYPE_LRU => {
-            row("lru_has", "jet_lru_has", 2, &[true, false])
+            row("lru_has", "jet_lru_has", 2, &[true, true])
         }
         (TBuiltinOp::LenList, Type::Apply { name, .. }) if name == "Set" => {
             row("len", "jet_set_len", 1, &[true])
@@ -6103,7 +6103,7 @@ impl TBuiltinOp {
                 "jet_lru_get",
                 2,
                 2,
-                &[true, false],
+                &[true, true],
                 Some(Effect::Mem),
                 carrier,
             ),
@@ -6901,7 +6901,7 @@ fn byte_buffer_write_route(
         &symbol,
         2,
         2,
-        &[true, false],
+        &[true, method == "write_bytes"],
         Some(Effect::Mem),
         carrier,
     ))
