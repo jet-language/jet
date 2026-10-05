@@ -344,7 +344,7 @@ fn jet_auth_oauth_verify(entry: &JetAuthOAuthState, assertion: String, now_ms: I
     payload :: String.from_utf8(jet_oauth_b64url_decode(payload_part)?).map_err(fn(error) { "OAuth assertion payload is not UTF-8" })?
     signature :: jet_oauth_b64url_decode(signature_part)?
     header_claims :: jet_oauth_parse_claims(header)?
-    if header_claims.algorithm.as_deref() != Val("HS256") { return Err("OAuth assertion algorithm is not allowed") }
+    if header_claims.algorithm.as_deref() != "HS256" { return Err("OAuth assertion algorithm is not allowed") }
     expected :: jet_hmac_sha256(secret, "{header_part}.{payload_part}".as_bytes())
     if !jet_ct_eq(&expected, &signature) { return Err("OAuth assertion signature is invalid") }
     claims :: jet_oauth_parse_claims(payload)?
@@ -422,7 +422,7 @@ fn jet_auth_magic_link_issue(user_id: String, now_ms: I64, ttl_ms: I64) -> Strin
     // GATE #4565: kernel primitive
     #Unsafe("bind token to registered delivery identity and insert atomically under store mutex") {
         store := jet_auth_store().lock().map_err(fn(error) { "auth store is unavailable" })?
-        if !store.users.iter().any(fn(user) { user.user_id == user_id && user.delivery_capability.as_deref() == Val(delivery_capability.as_str()) }) {
+        if !store.users.iter().any(fn(user) { user.user_id == user_id && user.delivery_capability.as_deref() == delivery_capability.as_str() }) {
             return Err("magic link requires a registered delivery identity")
         }
         token :: jet_auth_opaque_token("magic")?
@@ -441,7 +441,7 @@ pub fn jet_auth_magic_link_consume(token: String, now_ms: I64, ttl_ms: I64) -> J
             .ok_or_else(fn() { "token expired" })?
         entry :: store.magic_tokens[idx].clone()
         user :: store.users.iter().find(fn(user) { user.user_id == entry.user_id }).ok_or_else(fn() { "magic link identity is no longer registered" })?
-        if user.delivery_capability.as_deref() != Val(entry.delivery_capability.as_str()) { return Err("magic link delivery identity is unavailable") }
+        if user.delivery_capability.as_deref() != entry.delivery_capability.as_str() { return Err("magic link delivery identity is unavailable") }
         id :: jet_auth_opaque_token("sess")?
         _ :: store.magic_tokens.remove(idx)
         expires_at :: jet_auth_expiry(now_ms, ttl_ms)?

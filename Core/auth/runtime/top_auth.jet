@@ -92,7 +92,7 @@ fn jet_auth_json_hex4(chars: [Char], pos: &USize) -> U32? {
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Auth.rs:119
 fn jet_auth_json_string(chars: [Char], pos: &USize) -> String? {
-    if chars.get(pos) != Val('"') -> return None
+    if chars.get(pos) != '"' -> return None
     pos += 1
     out := String.new()
     while chars.get(pos) == .Val(character) {
@@ -114,9 +114,9 @@ fn jet_auth_json_string(chars: [Char], pos: &USize) -> String? {
                     'u' -> {
                         high :: jet_auth_json_hex4(chars, &pos)?
                         if (U32{0xD800}..U32{0xDBFF}).contains(high) {
-                            if chars.get(pos) != Val('\\') -> return None
+                            if chars.get(pos) != '\\' -> return None
                             pos += 1
-                            if chars.get(pos) != Val('u') -> return None
+                            if chars.get(pos) != 'u' -> return None
                             pos += 1
                             low :: jet_auth_json_hex4(chars, &pos)?
                             if !(U32{0xDC00}..U32{0xDFFF}).contains(low) -> return None
@@ -171,14 +171,14 @@ fn jet_auth_number_lexeme(text: String, name: String) -> String? {
     chars :: text.chars().collect::<[Char]>()
     pos := USize{0}
     while chars.get(pos).is_some_and(is_json_structural_whitespace) -> pos += 1
-    if chars.get(pos) != Val('{') -> return None
+    if chars.get(pos) != '{' -> return None
     pos += 1
     loop {
         while chars.get(pos).is_some_and(is_json_structural_whitespace) -> pos += 1
-        if chars.get(pos) == Val('}') -> return None
+        if chars.get(pos) == '}' -> return None
         key :: jet_auth_json_string(chars, &pos)?
         while chars.get(pos).is_some_and(is_json_structural_whitespace) -> pos += 1
-        if chars.get(pos) != Val(':') -> return None
+        if chars.get(pos) != ':' -> return None
         pos += 1
         while chars.get(pos).is_some_and(is_json_structural_whitespace) -> pos += 1
         value_start :: pos
