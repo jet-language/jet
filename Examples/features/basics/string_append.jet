@@ -1,0 +1,78 @@
+// `text += piece` appends to a String place: a local, a struct field, a
+// field reached through a list element, or a `&String` parameter. The
+// right side is a String or a borrowed text view. A copy taken before the
+// append keeps its own text.
+struct Entry {
+    label: String
+    hits: Int
+}
+
+fn shout(text: &String) {
+    text += "!"
+}
+
+fn run() {
+    greeting := "p"
+    greeting += "q"
+    print(greeting)
+
+    before :: ~greeting
+    greeting += greeting
+    print("{before} {greeting}")
+
+    out := ""
+    loop i in 0..<3 {
+        out += "{i};"
+    }
+    print(out)
+
+    words :: ["alpha", "beta", "gamma"]
+    joined := ""
+    loop word in words {
+        if joined != "" -> joined += ","
+        joined += word
+    }
+    print(joined)
+    sizes := ""
+    loop word in words {
+        sizes += "{word.len()}"
+    }
+    print(sizes)
+
+    line :: "  padded  "
+    framed := "["
+    framed += line.trim()
+    framed += "]"
+    print(framed)
+
+    entry := Entry{label: "count", hits: 2}
+    entry.label += ":"
+    entry.label += "{entry.hits}"
+    print(entry.label)
+
+    rows := [Entry]{{label: "a", hits: 1}, {label: "b", hits: 2}}
+    loop i in 0..<rows.len() {
+        rows[i].label += "+"
+    }
+    print("{rows[0].label} {rows[1].label}")
+
+    names := ["x", "y"]
+    first := ~names[0]
+    first += "1"
+    names[0] = first
+    print("{names[0]} {names[1]}")
+
+    shout(&greeting)
+    print(greeting)
+}
+// --- expected output --------------------------------------------------
+// pq
+// pq pqpq
+// 0;1;2;
+// alpha,beta,gamma
+// 545
+// [padded]
+// count:2
+// a+ b+
+// x1 y
+// pqpq!

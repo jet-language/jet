@@ -11619,6 +11619,25 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                 return Ok(self.compare(builder, op, left, right));
             }
         }
+        // A String left operand of `Add` is text append: the checked
+        // compound `out += piece` lowers to `ReadPlace + piece; WritePlace`,
+        // and the evaluator and the AOT emitter concatenate the same pair.
+        // JIT Strings are shared heap handles (a String copy keeps the
+        // handle), so the append builds a fresh buffer instead of writing
+        // into the left handle another owner may still read.
+        if op == MirBinaryOp::Add && matches!(left_ty.kind(), MirTypeKind::String) {
+            let right = if matches!(right_ty.kind(), MirTypeKind::String) {
+                right
+            } else if is_text_view_type(right_ty) {
+                self.text_view_string(builder, right)?
+            } else {
+                return Err(format!(
+                    "MIR text append has no checked right operand `{}`",
+                    right_ty.display_name()
+                ));
+            };
+            return self.string_append(builder, left, right);
+        }
         // D-TIME-INSTANT1=A: an Instant is a resident time handle and a
         // Duration is its raw nanosecond carrier. Point arithmetic runs through
         // the time hosts, never as integer arithmetic on the handle.
@@ -13367,6 +13386,25 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                     let _ = self.call_host(builder, host, &[buffer, value])?;
                 }
             }
+        }
+        Ok(buffer)
+    }
+    /// `left + right` for two String handles: one fresh buffer holding both
+    /// texts; neither operand handle is written.
+    fn string_append(
+        &mut self,
+        builder: &mut FunctionBuilder<'_>,
+        left: Value,
+        right: Value,
+    ) -> Result<Value, String> {
+        let buffer = self
+            .call_host(builder, self.host.str_begin, &[])?
+            .first()
+            .copied()
+            .ok_or_else(|| "MIR string host returned no buffer".to_string())?;
+        for part in [left, right] {
+            let part = self.cast(builder, part, types::I64)?;
+            let _ = self.call_host(builder, self.host.str_push_str, &[buffer, part])?;
         }
         Ok(buffer)
     }

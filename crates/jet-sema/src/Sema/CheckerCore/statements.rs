@@ -473,9 +473,15 @@ impl<'a> Checker<'a> {
         })
     }
 
-    /// True when compound assign on `target` is rejected (E0164 / E0362), so
-    /// L0503 must not recommend it.
+    /// True when compound assign on `target` is rejected (E0109 / E0164 /
+    /// E0362), so L0503 must not recommend it.
     fn compound_assign_rejected(&self, target: &LValue, op: crate::AST::BinOp) -> bool {
+        if self
+            .lvalue_type(target)
+            .is_some_and(|place| compound_operator_undefined(op, &place))
+        {
+            return true;
+        }
         match target {
             LValue::Index { .. } => true,
             LValue::Local { .. } => false,
@@ -1342,7 +1348,7 @@ impl<'a> Checker<'a> {
             Stmt::Assign {
                 target,
                 op,
-                op_span: _,
+                op_span,
                 value,
             } => {
                 let is_compound = op.is_some();
@@ -1385,6 +1391,13 @@ impl<'a> Checker<'a> {
                         let source = source.clone();
                         self.widen_numeric_expr(value, &source, target_ty);
                         vt = Some(target_ty.clone());
+                    }
+                }
+                if let (Some(compound_op), Some(place), Some(source)) =
+                    (op.as_ref(), place_ty.as_ref(), vt.as_ref())
+                {
+                    if compound_operator_undefined(*compound_op, place) {
+                        self.op_mismatch(*compound_op, place, source, *op_span);
                     }
                 }
                 if !is_compound {
@@ -4023,6 +4036,28 @@ fn expr_indexes_root_with(expr: &Expr, root: &str, index_var: &str) -> bool {
                 || stmts_index_root_with(else_body, root, index_var)
                 || expr_indexes_root_with(else_value, root, index_var)
         }
+        _ => false,
+    }
+}
+
+/// S17: `place op= rhs` means `place = place op rhs`, so the update needs
+/// the operator its binary form has. These built-in carriers have no
+/// arithmetic or bit operator (their binary form is E0109); `String +=` is
+/// the one text append. Numeric, nominal, and generic places keep their
+/// own rules (widening, precise routes, and D-OPDEF1 hooks).
+fn compound_operator_undefined(op: crate::AST::BinOp, place: &Type) -> bool {
+    match place {
+        Type::Tagged { inner, .. } => compound_operator_undefined(op, inner),
+        Type::String => op != crate::AST::BinOp::Add,
+        Type::Bool
+        | Type::Char
+        | Type::List(_)
+        | Type::FixedList { .. }
+        | Type::Map { .. }
+        | Type::Option(_)
+        | Type::Result { .. }
+        | Type::Tuple(_)
+        | Type::Fn { .. } => true,
         _ => false,
     }
 }
