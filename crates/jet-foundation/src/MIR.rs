@@ -8583,6 +8583,9 @@ fn validate_function(
                             )
                                 && declared_values.get(value).copied() == Some(&capture.ty)
                         }
+                        // Place access is the strongest any operation needs
+                        // (`Move` covers `Write`): a local whose scope-end
+                        // cleanup moves it still lends a write capture.
                         MirCaptureOperand::Place(place) => place_rows
                             .get(place)
                             .is_some_and(|row| {
@@ -8593,7 +8596,7 @@ fn validate_function(
                                     )
                                     && row.ty == capture.ty
                                     && (capture.access != MirAccess::Write
-                                        || row.access == MirAccess::Write)
+                                        || row.access != MirAccess::Read)
                             }),
                     };
                     if !matches {

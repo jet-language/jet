@@ -14,8 +14,9 @@ use crate::Codegen::TIR::{
 use jet_foundation::CanonicalPass;
 use jet_foundation::MIR::{
     MirAccess, MirBinaryDispatch, MirBlockId, MirCallSignature, MirConstant, MirDropKind,
-    MirIndexKind, MirLoopSourceKind, MirOperation, MirPreludeAbi, MirPreludeFamily, MirScopeId,
-    MirScopeKind, MirSemanticOp, MirSymbol, MirTerminator, MirTestScopeMember, MirValueId,
+    MirIndexKind, MirLoopSourceKind, MirOperation, MirPlaceId, MirPreludeAbi, MirPreludeFamily,
+    MirScopeId, MirScopeKind, MirSemanticOp, MirSymbol, MirTerminator, MirTestScopeMember,
+    MirValueId,
 };
 
 /// Lower a sequence of checked TIR statements in the current MIR block.
@@ -1046,6 +1047,7 @@ fn lower_tuple_destructure(
             value: subject,
         },
     )?;
+    let mut moved = Vec::with_capacity(binds.len());
     for (index, (local_name, _)) in binds.iter().enumerate() {
         let field_name = ctx.field_name_for_type(&init.ty, index)?;
         let field_ty = ctx.checked_field_type(&init.ty, &field_name)?;
@@ -1067,7 +1069,45 @@ fn lower_tuple_destructure(
             None,
             MirOperation::WritePlace { place, value },
         )?;
+        moved.push(field_name);
     }
+    release_emptied_destructure_temp(ctx, &init.ty, temp_place, &moved)
+}
+
+/// A move destructure takes the bound fields out of its temp one by one. Once
+/// every field is out, nothing of the temp is left to release: its drop flag
+/// clears exactly as a whole move clears it, so its scope-end cleanup never
+/// moves the emptied temp a second time. No enumerable field means the owner
+/// is not a resolvable record, and the temp keeps its cleanup.
+fn release_emptied_destructure_temp(
+    ctx: &mut LowerCtx,
+    ty: &Type,
+    temp_place: MirPlaceId,
+    moved: &[String],
+) -> Result<(), LowerError> {
+    let mut index = 0;
+    while let Ok(field) = ctx.field_name_for_type(ty, index) {
+        if !moved.contains(&field) {
+            return Ok(());
+        }
+        index += 1;
+    }
+    if index == 0 {
+        return Ok(());
+    }
+    let Some(flag) = ctx.drop_live_places.get(&temp_place).copied() else {
+        return Ok(());
+    };
+    let emptied = ctx.emit(
+        "stmt.destructure.temp.emptied",
+        Some(Type::Bool),
+        MirOperation::Constant(MirConstant::Bool(false)),
+    )?;
+    ctx.emit(
+        "stmt.destructure.temp.emptied.update",
+        None,
+        MirOperation::WritePlace { place: flag, value: emptied },
+    )?;
     Ok(())
 }
 
@@ -1134,6 +1174,7 @@ fn lower_struct_destructure(
             value: subject,
         },
     )?;
+    let mut moved = Vec::with_capacity(binds.len());
     for (local_name, field_name) in binds {
         let field_ty = ctx.checked_field_type(&init.ty, field_name)?;
         let field_place =
@@ -1154,8 +1195,9 @@ fn lower_struct_destructure(
             None,
             MirOperation::WritePlace { place, value },
         )?;
+        moved.push(field_name.clone());
     }
-    Ok(())
+    release_emptied_destructure_temp(ctx, &init.ty, temp_place, &moved)
 }
 
 fn lower_list_destructure(
