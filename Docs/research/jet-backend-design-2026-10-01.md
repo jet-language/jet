@@ -495,8 +495,10 @@ return carrier. `lir_lower_callable` preserves failure carriers instead of
 normalizing them as program entries do. Compiler-value marshaling borrows
 runtime String bytes through `jet_rt_string_data` and
 `jet_rt_string_byte_len`, copies before dropping the native owner, and never
-depends on Rust's private String representation. Runtime effects, stop
-recovery, execution limits and composite ownership are compiler-call
+depends on Rust's private String representation.
+Signed and unsigned 64-bit compiler values preserve their full bit patterns;
+unsigned values above `i64::MAX` detach as decimal `BigInt` compiler values.
+Runtime effects, stop recovery, execution limits and composite ownership are compiler-call
 prerequisites, not properties inferred from a successful memory mapping.
 
 ## In-process linking

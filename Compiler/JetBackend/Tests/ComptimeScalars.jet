@@ -36,6 +36,8 @@ fn ci_scalar(kind: MIRTypeKind, value: TComptimeValue, layout: LIRLayout, runtim
 fn ci_comptime_scalars() {
     runtime :: x64_runtime_current()
     ci_scalar(MIRTypeKind.Int, TComptimeValue.Int{value: -42}, lir_layout_word(), runtime)
+    ci_scalar(MIRTypeKind.IntN{signed: true, bits: 64}, TComptimeValue.Int{value: -9223372036854775808}, lir_layout_word(), runtime)
+    ci_scalar(MIRTypeKind.IntN{signed: false, bits: 64}, TComptimeValue.BigInt{decimal: "18446744073709551615"}, lir_layout_word(), runtime)
     ci_scalar(MIRTypeKind.Bool, TComptimeValue.Bool{value: true}, lir_layout_bool(), runtime)
     ci_scalar(MIRTypeKind.Char, TComptimeValue.Char{value: 128512}, lir_layout_word(), runtime)
     ci_scalar(MIRTypeKind.Float, TComptimeValue.Float{value: -0.0, bits: 64}, lir_layout_float(), runtime)

@@ -65,8 +65,22 @@ pub fn x64_comptime_encode_scalar(runtime: X64Runtime, ty: MIRType, value: TComp
             }
             if value == .BigInt(decimal) -> return x64_comptime_runtime_text(runtime, decimal, "jet_rt_int_from_static")
         }
-        .IntN(_, bits) -> {
-            if bits == 64 && value == .Int(number) -> return X64ComptimeWord{word: number, errors: [String]{}}
+        .IntN(signed, bits) -> {
+            if bits == 64 {
+                number := 0
+                if value == {
+                    .Int(integer) -> number = integer
+                    .BigInt(decimal) -> number = Int.parse(decimal) ?? return x64_comptime_word_failure("native 64-bit value is not an integer")
+                    else -> return x64_comptime_word_failure("native 64-bit value is not an integer")
+                }
+                if signed {
+                    if number < -9223372036854775808 || number >= 9223372036854775808 -> return x64_comptime_word_failure("native signed value is outside 64 bits")
+                } else {
+                    if number < 0 || number >= 18446744073709551616 -> return x64_comptime_word_failure("native unsigned value is outside 64 bits")
+                    if number >= 9223372036854775808 -> number -= 18446744073709551616
+                }
+                return X64ComptimeWord{word: number, errors: [String]{}}
+            }
         }
         .Bool -> {
             if value == .Bool(flag) -> return X64ComptimeWord{word: if flag -> 1 else -> 0, errors: [String]{}}
@@ -138,8 +152,11 @@ pub fn x64_comptime_decode_scalar(runtime: X64Runtime, ty: MIRType, word: Int) -
             text :: decoded.value ?? return x64_comptime_value_failure("runtime exact-Int projection returned no String")
             if text == .String(decimal) -> return X64ComptimeValue{value: Val(TComptimeValue.BigInt{decimal: decimal}), errors: [String]{}}
         }
-        .IntN(_, bits) -> {
-            if bits == 64 -> return X64ComptimeValue{value: Val(TComptimeValue.Int{value: word}), errors: [String]{}}
+        .IntN(signed, bits) -> {
+            if bits == 64 {
+                if !signed && word < 0 -> return X64ComptimeValue{value: Val(TComptimeValue.BigInt{decimal: (word + 18446744073709551616).to_string()}), errors: [String]{}}
+                return X64ComptimeValue{value: Val(TComptimeValue.Int{value: word}), errors: [String]{}}
+            }
         }
         .Bool -> {
             if word != 0 && word != 1 -> return x64_comptime_value_failure("native Bool result is not 0 or 1")
