@@ -27,7 +27,10 @@ fn jet_web_router_bound_data(value: String,fallback: &String) -> String { if val
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:24
 fn jet_web_router_identity(pattern: &String) -> String {
     hash: U64 := 0xcbf29ce484222325
-    for byte in pattern.as_bytes() { hash ^= U64.from(*byte); hash = hash.wrapping_mul(0x100000001b3) }
+    for byte in pattern.as_bytes() {
+        hash ^= U64.from(*byte)
+        hash = hash.wrapping_mul(0x100000001b3)
+    }
     "route-{hash:016x}"
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:32
@@ -37,15 +40,27 @@ fn jet_web_router_cache_key(route: &JetWebRoute,navigation: &JetWebNavigation) -
     param_names :: navigation.params.keys().cloned().collect::<[String]>().sorted()
     for name in &param_names {
         value :: &navigation.params[name]
-        key.push('|'); key.push_str(&name.len().to_string()); key.push(':'); key.push_str(name)
-        key.push('='); key.push_str(&value.len().to_string()); key.push(':'); key.push_str(value)
+        key.push('|')
+        key.push_str(&name.len().to_string())
+        key.push(':')
+        key.push_str(name)
+        key.push('=')
+        key.push_str(&value.len().to_string())
+        key.push(':')
+        key.push_str(value)
     }
     key.push_str("|s")
     search_names :: navigation.search.keys().cloned().collect::<[String]>().sorted()
     for name in &search_names {
         value :: &navigation.search[name]
-        key.push('|'); key.push_str(&name.len().to_string()); key.push(':'); key.push_str(name)
-        key.push('='); key.push_str(&value.len().to_string()); key.push(':'); key.push_str(value)
+        key.push('|')
+        key.push_str(&name.len().to_string())
+        key.push(':')
+        key.push_str(name)
+        key.push('=')
+        key.push_str(&value.len().to_string())
+        key.push(':')
+        key.push_str(value)
     }
     ^key
 }
@@ -74,7 +89,11 @@ impl JetWebRouterField {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:101
     pub fn new(name: String,value_type: WebRouterValueType) -> Self { Self{name,value_type,required: true,default: None} }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:110
-    pub fn optional(self: Self,default: String?) -> Self { self.required = false; self.default = ^default; ^self }
+    pub fn optional(self: Self,default: String?) -> Self {
+        self.required = false
+        self.default = ^default
+        ^self
+    }
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:116
 // Search codec is canonically core.web.router.WebRouterSearchCodec.
@@ -135,7 +154,7 @@ fn jet_web_router_parse_json_search(query: &String) -> [String:String] Err! {
     if encoded.is_none() { return Ok([:]) }
     value :: parse_json_strict(&encoded.unwrap()).map_err(fn(error) { "invalid JSON search value: {error.reason}" })?
     match value {
-        DataTree.Object(entries) -> {
+        .Object(entries) -> {
             if entries.len() > JET_WEB_ROUTER_MAX_PARAMS { return Err("navigation has too many search parameters") }
             entries.into_iter().map(fn((key,value)) {
                 if !jet_http_route_name(&key) { return Err("search parameter `{key}` has an invalid name") }
@@ -148,13 +167,13 @@ fn jet_web_router_parse_json_search(query: &String) -> [String:String] Err! {
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:259
 fn jet_web_router_json_value_text(value: &DataTree) -> String Err! {
     match value {
-        DataTree.Text(text) | DataTree.TypedText(text) -> Ok(text.clone()),
-        DataTree.Bool(value) -> Ok(value.to_string()),
-        DataTree.Int(value) -> Ok(value.to_string()),
-        DataTree.Float(value) if value.is_finite() -> Ok(value.to_string()),
-        DataTree.Float(_) -> Err("JSON search number must be finite"),
-        DataTree.Number(value) -> Ok(value.clone()),
-        DataTree.Null | DataTree.Array(_) | DataTree.Object(_) | DataTree.Bytes(_) -> Ok(render_json(value,false,0))
+        .Text(text) | .TypedText(text) -> Ok(text.clone()),
+        .Bool(value) -> Ok(value.to_string()),
+        .Int(value) -> Ok(value.to_string()),
+        .Float(value) if value.is_finite() -> Ok(value.to_string()),
+        .Float(_) -> Err("JSON search number must be finite"),
+        .Number(value) -> Ok(value.clone()),
+        DataTree.Null | .Array(_) | .Object(_) | .Bytes(_) -> Ok(render_json(value,false,0))
     }
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:275
@@ -195,7 +214,7 @@ fn jet_web_router_parse_value(field: &JetWebRouterField,raw: (&String)?) -> Stri
             raw.clone()
         }
     }
-    Ok(Some(^normalized))
+    Ok(Val(^normalized))
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:344
 fn jet_web_router_json_value_for_field(field: &JetWebRouterField,raw: &String) -> DataTree Err! {
@@ -212,7 +231,7 @@ fn jet_web_router_typed_values(fields: &[JetWebRouterField],values: &[String:Str
     typed: [String:String] := [:]
     for field in fields {
         value :: jet_web_router_parse_value(field,values.get(&field.name))?
-        if Some(value) :: value { typed.insert(field.name.clone(),^value) }
+        if Val(value) :: value { typed.insert(field.name.clone(),^value) }
     }
     Ok(^typed)
 }
@@ -230,14 +249,14 @@ fn jet_web_router_validate_search(fields: &[JetWebRouterField],values: &[String:
 fn jet_web_router_validate_fields(pattern: &JetHTTPRoutePattern,params: &[JetWebRouterField],search: &[JetWebRouterField]) -> () Err! {
     path_names: [String:Bool] := [:]
     for segment in &pattern.segments {
-        match segment { JetHTTPRouteSegment.Param(name) | JetHTTPRouteSegment.CatchAll(name) -> { path_names.insert(name.clone(),true) }, JetHTTPRouteSegment.Static(_) -> {} }
+        match segment { .Param(name) | .CatchAll(name) -> { path_names.insert(name.clone(),true) }, JetHTTPRouteSegment.Static(_) -> {} }
     }
     declared: [String:Bool] := [:]
     for field in params {
         if !jet_http_route_name(&field.name) { return Err("route parameter `{field.name}` has an invalid name") }
         if !path_names.contains_key(&field.name) { return Err("route parameter `{field.name}` is not present in the route pattern") }
         if field.required && field.default.is_some() { return Err("required route parameter `{field.name}` cannot have a default") }
-        if Some(default) :: field.default.as_ref() { _ :: jet_web_router_parse_value(field,Some(default))? }
+        if Val(default) :: field.default.as_ref() { _ :: jet_web_router_parse_value(field,Val(default))? }
         if declared.insert(field.name.clone(),true).is_some() { return Err("route parameter `{field.name}` is declared more than once") }
     }
     names :: path_names.keys().cloned().collect::<[String]>().sorted()
@@ -247,7 +266,7 @@ fn jet_web_router_validate_fields(pattern: &JetHTTPRoutePattern,params: &[JetWeb
     for field in search {
         if !jet_http_route_name(&field.name) { return Err("search parameter `{field.name}` has an invalid name") }
         if field.required && field.default.is_some() { return Err("required search parameter `{field.name}` cannot have a default") }
-        if Some(default) :: field.default.as_ref() { _ :: jet_web_router_parse_value(field,Some(default))? }
+        if Val(default) :: field.default.as_ref() { _ :: jet_web_router_parse_value(field,Val(default))? }
         if declared.insert(field.name.clone(),true).is_some() { return Err("parameter `{field.name}` is declared more than once") }
     }
     Ok(())
@@ -275,12 +294,12 @@ impl JetWebRouteBoundaries {
         pending :: pending_boundary_id.map(JetWebBoundaryId.new).transpose().map_err(fn(error) { error.to_string() })?
         error :: error_boundary_id.map(JetWebBoundaryId.new).transpose().map_err(fn(error) { error.to_string() })?
         if (pending.is_some() || error.is_some() || hydration_trigger.is_some()) && identity.is_none() { return Err("web route boundary IDs and hydration require an island identity") }
-        if Some(identity) :: identity.as_ref() { identity.validate().map_err(fn(error) { error.to_string() })? }
+        if Val(identity) :: identity.as_ref() { identity.validate().map_err(fn(error) { error.to_string() })? }
         Ok(Self{pending,error,identity,hydration_trigger})
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:536
     pub fn pending(boundary_id: String,identity: JetWebIslandIdentity,hydration_trigger: JetWebHydrationTrigger) -> Self Err! {
-        Self.new(Some(boundary_id.clone()),Some(^boundary_id),Some(^identity),Some(hydration_trigger))
+        Self.new(Val(boundary_id.clone()),Val(^boundary_id),Val(^identity),Val(hydration_trigger))
     }
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:549
@@ -363,7 +382,7 @@ impl JetWebRouter {
         // GATE #4565: kernel primitive
         #Unsafe("supersede prior navigation and allocate checked generation and shared cancellation token under mutex") {
             state :: self.inner.lock().map_err(fn(_) { "router is unavailable" })?
-            if Some((_, previous)) :: state.active_navigation.take() {
+            if Val((_, previous)) :: state.active_navigation.take() {
                 previous.store(true, Ordering.Release)
                 superseded := state.state.get()
                 superseded.status = WebNavigationStatus.Aborted
@@ -375,7 +394,7 @@ impl JetWebRouter {
             token :: Arc.new(AtomicBool.new(false))
             signal :: state.state.clone()
             previous :: state.state.get()
-            state.active_navigation = Some((id, token.clone()))
+            state.active_navigation = Val((id, token.clone()))
             Ok((id, token, signal, previous))
         }
     }
@@ -429,7 +448,7 @@ impl JetWebRouter {
             generation :: state.cache_generation
             if state.cache.len() >= JET_WEB_ROUTER_MAX_PRELOADED && !state.cache.contains_key(&key) {
                 oldest :: state.cache.keys().min().cloned()
-                if Some(oldest) :: oldest -> state.cache.remove(&oldest)
+                if Val(oldest) :: oldest -> state.cache.remove(&oldest)
             }
             state.cache.insert(key, JetWebRouterCacheState{identity, status, data, dependencies, generation})
             Ok(())
@@ -455,7 +474,7 @@ impl JetWebRouter {
         #Unsafe("take active navigation while retaining its signal snapshot under mutex") {
             state :: self.inner.lock().ok()?
             (id, token) :: state.active_navigation.take()?
-            Some((id, token, state.state.clone(), state.state.get()))
+            Val((id, token, state.state.clone(), state.state.get()))
         }
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:811
@@ -487,12 +506,12 @@ impl JetWebRouter {
             state :: self.inner.lock().map_err(fn(_) { "router is unavailable" })?
             if state.routes.len() >= JET_WEB_ROUTER_MAX_ROUTES -> return Err("router route table is full")
             if state.routes.iter().any(fn(route) { route.pattern_text == pattern }) -> return Err("duplicate route `{pattern}`")
-            if Some(identity) :: boundaries.identity.as_ref() {
-                if Some(boundary_id) :: boundaries.pending.as_ref() {
+            if Val(identity) :: boundaries.identity.as_ref() {
+                if Val(boundary_id) :: boundaries.pending.as_ref() {
                     jet_web_stream_register(boundary_id.as_str().to_string(), identity.clone()).map_err(fn(error) { error.to_string() })?
                 }
                 if boundaries.error.as_ref() != boundaries.pending.as_ref() {
-                    if Some(boundary_id) :: boundaries.error.as_ref() {
+                    if Val(boundary_id) :: boundaries.error.as_ref() {
                         jet_web_stream_register(boundary_id.as_str().to_string(), identity.clone()).map_err(fn(error) { error.to_string() })?
                     }
                 }
@@ -508,7 +527,7 @@ impl JetWebRouter {
     pub fn not_found(self: &Self, handler: fn(&String) -> String) -> Self Err! {
         // GATE #4565: kernel primitive
         #Unsafe("retain shared not-found projection under router mutex") {
-            self.inner.lock().map_err(fn(_) { "router is unavailable" })?.not_found = Some(Arc.new(handler))
+            self.inner.lock().map_err(fn(_) { "router is unavailable" })?.not_found = Val(Arc.new(handler))
         }
         Ok(self.clone())
     }
@@ -520,13 +539,13 @@ impl JetWebRouter {
             state :: self.inner.lock().map_err(fn(_) { "router is unavailable" })?
             selected: (USize, JetWebRoute, JetWebNavigation)? := None
             loop (index, route) in state.routes.iter().enumerate() {
-                raw_params :: match jet_web_router_match(&route.pattern, path)? { Some(raw_params) -> raw_params, None -> continue }
+                raw_params :: match jet_web_router_match(&route.pattern, path)? { .Val(raw_params) -> raw_params, None -> continue }
                 raw_search :: jet_web_router_parse_search(query, route.search_codec)?
                 params :: jet_web_router_typed_values(&route.params, &raw_params)?
                 jet_web_router_validate_search(&route.search, &raw_search)?
                 search :: jet_web_router_typed_values(&route.search, &raw_search)?
                 candidate :: (index, route.clone(), JetWebNavigation{url: url.to_string(), route: route.pattern_text.clone(), params, search})
-                if selected.as_ref().map(fn(current) { jet_http_route_selection_cmp(&candidate.1.pattern, candidate.0, &current.1.pattern, current.0) == CmpOrdering.Greater }).unwrap_or(true) -> selected = Some(candidate)
+                if selected.as_ref().map(fn(current) { jet_http_route_selection_cmp(&candidate.1.pattern, candidate.0, &current.1.pattern, current.0) == CmpOrdering.Greater }).unwrap_or(true) -> selected = Val(candidate)
             }
             selected.map(fn((_, route, navigation)) { (route, navigation) }).ok_or_else(fn() { "no web route matches `{url}`" })
         }
@@ -535,7 +554,10 @@ impl JetWebRouter {
     pub fn preload(self: &Self, url: String) -> JetWebNavigation Err! {
         (route, navigation) :: match self.resolve(&url) {
             Ok(value) -> value
-            Err(error) -> { self.set_resolution_error(&error); return Err(error) }
+            Err(error) -> {
+                self.set_resolution_error(&error)
+                return Err(error)
+            }
         }
         cache_key :: jet_web_router_cache_key(&route, &navigation)
         if self.cache_value(&cache_key).is_some() -> return Ok(navigation)
@@ -573,14 +595,17 @@ impl JetWebRouter {
     pub fn navigate(self: &Self, url: String) -> JetWebNavigation Err! {
         (route, navigation) :: match self.resolve(&url) {
             Ok(value) -> value
-            Err(error) -> { self.set_resolution_error(&error); return Err(error) }
+            Err(error) -> {
+                self.set_resolution_error(&error)
+                return Err(error)
+            }
         }
         cache_key :: jet_web_router_cache_key(&route, &navigation)
         (id, token, signal, _) :: self.start_navigation()?
         cached :: self.cache_value(&cache_key)
         from_cache :: cached.is_some()
         pending_data :: route.pending.as_ref().map(fn(pending) { pending(&navigation) }).unwrap_or_default()
-        signal.set(jet_web_router_navigation_state(WebNavigationStatus.Pending, Some(navigation.clone()), pending_data, "", &route.boundaries))
+        signal.set(jet_web_router_navigation_state(WebNavigationStatus.Pending, Val(navigation.clone()), pending_data, "", &route.boundaries))
         loaded :: cached.map(Ok).unwrap_or_else(fn() { (route.loader)(&navigation) })
         if !self.navigation_active(id, &token) {
             // GATE #4565: kernel primitive
@@ -595,14 +620,14 @@ impl JetWebRouter {
         match loaded {
             Ok(data) -> {
                 if !from_cache -> _ :: self.cache_store(cache_key, route.identity.clone(), WebRouterCacheStatus.Fresh, data.clone(), [route.identity.clone()])
-                signal.set(jet_web_router_navigation_state(WebNavigationStatus.Ready, Some(navigation.clone()), data, "", &route.boundaries))
+                signal.set(jet_web_router_navigation_state(WebNavigationStatus.Ready, Val(navigation.clone()), data, "", &route.boundaries))
                 self.finish_navigation(id, &token)
                 Ok(navigation)
             }
             Err(error) -> {
                 rendered :: jet_web_router_bound_data(route.error.as_ref().map(fn(boundary) { boundary(&navigation, &error) }).unwrap_or_else(fn() { error.clone() }), &error)
                 _ :: self.cache_store(cache_key, route.identity, WebRouterCacheStatus.Invalidated, "", [])
-                signal.set(jet_web_router_navigation_state(WebNavigationStatus.Error, Some(navigation.clone()), rendered, error.clone(), &route.boundaries))
+                signal.set(jet_web_router_navigation_state(WebNavigationStatus.Error, Val(navigation.clone()), rendered, error.clone(), &route.boundaries))
                 self.finish_navigation(id, &token)
                 Err(error)
             }
@@ -619,7 +644,10 @@ impl JetWebRouter {
             state :: match self.inner.lock() { Ok(state) -> state, Err(_) -> return 0 }
             updated := 0
             loop entry in state.cache.values_mut() {
-                if entry.identity == identity { entry.status = status; updated += 1 }
+                if entry.identity == identity {
+                    entry.status = status
+                    updated += 1
+                }
             }
             updated
         }

@@ -28,7 +28,7 @@ fn jet_web_table_page_generation(name: String, advance: Bool) -> U64 {
 // Canonical sort-direction carrier: core.web.table.WebTableSortDirection.
 impl WebTableSortDirection {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:45
-    fn is_descending(self: Self) -> Bool { self is .Descending }
+    fn is_descending(self: Self) -> Bool { self == .Descending }
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:50
 #Derive(Clone, Debug, PartialEq, Eq)
@@ -39,7 +39,7 @@ pub struct JetWebTableSort { pub column: String, pub direction: WebTableSortDire
 // Canonical page-mode carrier: core.web.table.WebTablePageMode.
 impl WebTablePageMode {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:69
-    fn is_server(self: Self) -> Bool { self is .Server }
+    fn is_server(self: Self) -> Bool { self == .Server }
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:73
 #Derive(Clone, Copy, Debug, PartialEq, Eq)
@@ -170,7 +170,7 @@ impl<T: Clone + Send + Sync> JetWebTable<T> {
     // GATE #4565: kernel primitive
     #Unsafe("lock shared accepted server-page identity registry")
     fn clear_server_key_pages(self: &Self) -> Unit {
-        if self.server_key_pages.lock() is Ok(pages) { pages.clear() }
+        if self.server_key_pages.lock() == .Ok(pages) { pages.clear() }
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:296
     // GATE #4565: kernel primitive
@@ -341,7 +341,7 @@ impl<T: Clone + Send + Sync> JetWebTable<T> {
             self.error.set(error.clone())
             return Err(^error)
         }
-        if self.server_page.as_ref() is Val(loader) {
+        if self.server_page.as_ref() == .Val(loader) {
             // Every request supersedes prior requests even with the same table state.
             request_generation :: jet_web_table_page_generation(&self.name, true)
             self.loading.set(true)
@@ -363,7 +363,7 @@ impl<T: Clone + Send + Sync> JetWebTable<T> {
                     if jet_web_table_page_generation(&self.name, false) != request_generation || self.state() != state {
                         return Err("server table page response is stale")
                     }
-                    if self.accept_server_page_keys(&page) is Err(error) {
+                    if self.accept_server_page_keys(&page) == .Err(error) {
                         self.loading.set(false)
                         self.loaded_page.set(None)
                         self.error.set(error.clone())
@@ -459,14 +459,14 @@ impl<T: Clone + Send + Sync> JetWebTable<T> {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:695
     pub fn row_keys(self: &Self) -> [String] Err! {
         if self.server_page.is_some() {
-            if self.loaded_page() is Val(page) { return Ok(^page.row_keys) }
+            if self.loaded_page() == .Val(page) { return Ok(^page.row_keys) }
         }
         Ok(jet_web_table_rows_with_keys(&self.rows(), self.row_key.as_ref())?.into_iter().map(fn(row) { ^row.key }).collect())
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs:710
     pub fn rows_with_keys(self: &Self) -> [WebTableRow<T>] Err! {
         if self.server_page.is_some() {
-            if self.loaded_page() is Val(page) { return Ok(page.keyed_rows()) }
+            if self.loaded_page() == .Val(page) { return Ok(page.keyed_rows()) }
         }
         jet_web_table_rows_with_keys(&self.rows(), self.row_key.as_ref())
     }
@@ -614,11 +614,11 @@ impl<T: Clone + Send + Sync> JetWebTable<T> {
         }
         state :: self.state()
         visible := jet_web_table_rows_with_keys(&self.rows(), self.row_key.as_ref())?
-        if &state.filter is Val(filter) {
+        if &state.filter == .Val(filter) {
             column :: self.columns.iter().find(fn(column) { column.name == filter.column }).ok_or_else(fn() { "table filter column `{filter.column}` has no accessor" })?
             visible.retain(fn(row) { column.value(&row.value).contains(filter.value.as_str()) })
         }
-        if &state.sort is Val(sort) {
+        if &state.sort == .Val(sort) {
             column :: self.columns.iter().find(fn(column) { column.name == sort.column }).ok_or_else(fn() { "table sort column `{sort.column}` has no accessor" })?
             descending :: sort.direction.is_descending()
             visible.sort_by(fn(left, right) {
@@ -767,7 +767,7 @@ fn jet_web_table_validate_server_page<T>(page: JetWebTablePage<T>, row_key: JetW
     if expected_count > 0 && page.page_index.saturating_add(1) < expected_count && page.rows.len() != page.page_size as USize {
         return Err("non-final server table pages must be full")
     }
-    if row_key is Val(key) {
+    if row_key == .Val(key) {
         // Explicit accessor keys are canonical, ignoring stale/positional loader keys.
         page.row_keys = page.rows.iter().map(fn(row) { key(row) }).collect()
     } else if page.row_keys.is_empty() && !page.rows.is_empty() {
@@ -782,11 +782,11 @@ fn jet_web_table_validate_server_page<T>(page: JetWebTablePage<T>, row_key: JetW
 fn jet_web_table_materialize<T: Clone>(rows: &[T], state: &JetWebTableState, columns: &[JetWebTableColumn<T>], row_key: JetWebTableRowKey<T>?) -> JetWebTablePage<T> Err! {
     jet_web_table_validate_columns(columns)?
     selected := jet_web_table_rows_with_keys(rows, row_key)?
-    if &state.filter is Val(filter) {
+    if &state.filter == .Val(filter) {
         column :: columns.iter().find(fn(column) { column.name == filter.column }).ok_or_else(fn() { "table filter column `{filter.column}` has no accessor" })?
         selected.retain(fn(entry) { column.value(&entry.value).contains(filter.value.as_str()) })
     }
-    if &state.sort is Val(sort) {
+    if &state.sort == .Val(sort) {
         column :: columns.iter().find(fn(column) { column.name == sort.column }).ok_or_else(fn() { "table sort column `{sort.column}` has no accessor" })?
         descending :: sort.direction.is_descending()
         // Stable sorting retains source order for equal cells, with identity attached.

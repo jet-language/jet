@@ -232,7 +232,7 @@ fn jet_browser_test_glob_match(pattern_text: String, value_text: String) -> Bool
             p = star_position + 1
             star_value += 1
             v = star_value
-        } else -> return false
+        } else { return false }
     }
     while p < pattern.len() && pattern[p] == 42 -> p += 1
     p == pattern.len()
@@ -415,7 +415,10 @@ fn jet_browser_test_write_bytes(path: &OSPath, bytes: &[U8]) -> Unit JetBrowserE
 // Rust: crates/jet-codegen/src/Prelude/BrowserTest.rs:597
 fn jet_browser_test_capture_text_snapshot(session: &JetBrowserTestSession, kind: String,
     result: String JetBrowserError!, snapshots: &[JetBrowserTestSnapshot], path: OSPath?) -> Unit {
-    value :: if result == { .Ok(value) -> value; .Err(_) -> return }
+    value :: if result == {
+        .Ok(value) -> value
+        .Err(_) -> return
+    }
     full_hash :: jet_browser_fact_hash(value)
     bytes :: value.len()
     retained :: if bytes > JET_BROWSER_TEST_MAX_SNAPSHOT_BYTES {
@@ -433,8 +436,14 @@ fn jet_browser_test_capture_text_snapshot(session: &JetBrowserTestSession, kind:
 // Rust: crates/jet-codegen/src/Prelude/BrowserTest.rs:629
 fn jet_browser_test_capture_binary_artifact(session: &JetBrowserTestSession, name: String, mime: String,
     result: String JetBrowserError!, artifacts: &[JetBrowserTestArtifact]) -> Unit {
-    encoded :: if result == { .Ok(value) -> value; .Err(_) -> return }
-    bytes :: if jet_browser_test_base64_decode(encoded) == { .Ok(value) -> value; .Err(_) -> return }
+    encoded :: if result == {
+        .Ok(value) -> value
+        .Err(_) -> return
+    }
+    bytes :: if jet_browser_test_base64_decode(encoded) == {
+        .Ok(value) -> value
+        .Err(_) -> return
+    }
     if bytes.len() > JET_BROWSER_TEST_MAX_ARTIFACT_BYTES -> return
     path :: jet_browser_test_attempt_dir(session).join(jet_browser_test_safe_component(name, "artifact"))
     if jet_browser_test_write_bytes(&path, &bytes).is_err() -> return
@@ -654,7 +663,11 @@ summary.textContent=`${data.summary} · exit ${data.exitCode}`;filter.addEventLi
 }
 // Rust: crates/jet-codegen/src/Prelude/BrowserTest.rs:1136
 fn jet_browser_test_render(report: &JetBrowserTestReport) -> String {
-    if report.reporter == { "json" -> jet_browser_test_json(report); "html" -> jet_browser_test_html(report); _ -> jet_browser_test_text(report) }
+    if report.reporter == {
+        "json" -> jet_browser_test_json(report)
+        "html" -> jet_browser_test_html(report)
+        _ -> jet_browser_test_text(report)
+    }
 }
 // Rust: crates/jet-codegen/src/Prelude/BrowserTest.rs:1144
 pub fn jet_browser_test_write_report(report: &JetBrowserTestReport, path: &String) -> Unit JetBrowserError! {

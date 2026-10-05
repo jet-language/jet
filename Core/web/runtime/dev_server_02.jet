@@ -117,7 +117,7 @@ fn create_publication_journal(root_path: &OSPath, root_final: String, root: &Fil
 // Rust: crates/jet-codegen/src/Prelude/DevServer.rs:1950
 fn clear_publication_journal(path: &OSPath, final_path: String, directory: &File, names: &[String]) -> {
     for value in names {
-        if open_file_in_parent(path, final_path, OsStr.new(value), true, directory) is Ok((file, _)) {
+        if open_file_in_parent(path, final_path, OsStr.new(value), true, directory) == .Ok((file, _)) {
             _ :: delete_handle(&file)
         }
     }
@@ -128,12 +128,12 @@ fn rollback_publication(root_path: &OSPath, root_final: String, root: &File,
     journal_path: &OSPath, journal_final: String, journal: &File,
     backed_up: &[String], published: &[String]) -> {
     for value in published.iter().rev() {
-        if open_file_in_parent(root_path, root_final, OsStr.new(value), true, root) is Ok((file, _)) {
+        if open_file_in_parent(root_path, root_final, OsStr.new(value), true, root) == .Ok((file, _)) {
             _ :: delete_handle(&file)
         }
     }
     for value in backed_up.iter().rev() {
-        if open_file_in_parent(journal_path, journal_final, OsStr.new(value), true, journal) is Ok((file, _)) {
+        if open_file_in_parent(journal_path, journal_final, OsStr.new(value), true, journal) == .Ok((file, _)) {
             _ :: rename_into(&file, root, OsStr.new(value))
         }
     }
@@ -192,7 +192,7 @@ fn replace_file_in_parent(parent_path: &OSPath, parent_final: String, parent: &F
         temporary_name :: ".jet-devserver-output-{process_id()}-{JET_DEVSERVER_STAGING_COUNTER.fetch_add(1, Ordering.Relaxed)}"
         temporary_path :: parent_path.join(temporary_name)
         temporary := open_existing(&temporary_path, GENERIC_READ | GENERIC_WRITE | DELETE, true, true, false)?
-        if verify_parent(parent_path, parent_final, parent) is Err(error) {
+        if verify_parent(parent_path, parent_final, parent) == .Err(error) {
             _ :: delete_handle(&temporary)
             return Err(^error)
         }
@@ -217,7 +217,7 @@ fn replace_file_in_parent(parent_path: &OSPath, parent_final: String, parent: &F
             }
             Ok(())
         })()
-        if result is Err(error) {
+        if result == .Err(error) {
             _ :: delete_handle(&temporary)
             return Err(^error)
         }
@@ -291,7 +291,7 @@ fn publish_build(root: &JetDevServerOutputRoot, staging: &JetDevServerStaging, h
     staging_final :: normalize(final_path(&staging.directory)?)
     build_path :: staging.path.join("build")
     (build, build_final) :: open_dir_in_parent(&staging.path, staging_final, OsStr.new("build"), false, &staging.directory)?
-    if html is Val(bytes) {
+    if html == .Val(bytes) {
         replace_file_in_parent(&build_path, build_final, &build, OsStr.new("index.html"), bytes)?
     }
     for value in JET_DEVSERVER_OUTPUT_FILES {
@@ -327,7 +327,7 @@ fn publish_build(root: &JetDevServerOutputRoot, staging: &JetDevServerStaging, h
         }
         flush(&root.directory)
     })()
-    if result is Err(error) {
+    if result == .Err(error) {
         rollback_publication(&root_path, root_final, &root.directory, &journal_path,
             journal_final, &journal, &backed_up, &published)
         clear_publication_journal(&journal_path, journal_final, &journal, &JET_DEVSERVER_OUTPUT_FILES)
@@ -341,14 +341,14 @@ fn cleanup(root: &JetDevServerOutputRoot, staging: &JetDevServerStaging) -> () i
     root_path :: OSPath.from(final_path(&root.directory)?)
     root_final :: normalize(final_path(&root.directory)?)
     staging_final :: normalize(final_path(&staging.directory)?)
-    if open_dir_in_parent(&staging.path, staging_final, OsStr.new("build"), true, &staging.directory) is Ok((build, build_final)) {
+    if open_dir_in_parent(&staging.path, staging_final, OsStr.new("build"), true, &staging.directory) == .Ok((build, build_final)) {
         for value in JET_DEVSERVER_STAGING_FILES {
-            if open_file_in_parent(&staging.path.join("build"), build_final, OsStr.new(value), true, &build) is Ok((file, _)) {
+            if open_file_in_parent(&staging.path.join("build"), build_final, OsStr.new(value), true, &build) == .Ok((file, _)) {
                 _ :: delete_handle(&file)
             }
         }
         source :: "{staging.source_stem}.rs"
-        if open_file_in_parent(&staging.path.join("build"), build_final, OsStr.new(source), true, &build) is Ok((file, _)) {
+        if open_file_in_parent(&staging.path.join("build"), build_final, OsStr.new(source), true, &build) == .Ok((file, _)) {
             _ :: delete_handle(&file)
         }
         _ :: delete_handle(&build)

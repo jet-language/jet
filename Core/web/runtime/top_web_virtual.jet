@@ -229,7 +229,10 @@ fn jet_web_virtual_plan_estimate(fallback_item_size: Int, measurements: &[(Int, 
     total := 0
     count := 0
     loop (_, size) in measurements.iter().take(JET_WEB_VIRTUAL_MAX_MEASUREMENTS) {
-        if size > 0 { total = total.saturating_add(size); count = count.saturating_add(1) }
+        if size > 0 {
+            total = total.saturating_add(size)
+            count = count.saturating_add(1)
+        }
     }
     if count == 0 { fallback_item_size.max(1) } else { total.checked_div(count).unwrap_or(fallback_item_size.max(1)).max(1) }
 }
@@ -313,6 +316,9 @@ fn jet_web_virtual_plan_first_start_at_or_after(total_count: Int, offset: Int, e
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebVirtual.rs:827
 fn jet_web_virtual_upsert_measurement(measurements: &[(Int, Int)], total_count: Int, index: Int, size: Int) -> () {
     if index < 0 || index >= total_count || size <= 0 { return }
-    if Val(existing) :: measurements.iter_mut().find(fn(entry) { entry.0 == index }) { existing.1 = size; return }
+    if Val(existing) :: measurements.iter_mut().find(fn(entry) { entry.0 == index }) {
+        existing.1 = size
+        return
+    }
     if measurements.len() < JET_WEB_VIRTUAL_MAX_MEASUREMENTS { measurements.push((index, size)) }
 }

@@ -150,7 +150,7 @@ fn jet_app_live_keyed(key: String, footprint: String, initial: String, rerun: Je
             record := state.queries.get_mut(&id) ?? return jet_live_error_query(0, ^footprint, "live registry entry disappeared")
             if record.footprint != footprint -> return jet_live_conflict_query(id, ^key, ^footprint, &record.footprint)
             if record.rerun.is_none() -> record.rerun = ^rerun
-            if sink is Val(callback) -> record.sink = Val(^callback)
+            if sink == .Val(callback) -> record.sink = Val(^callback)
             return jet_live_query(id, &record)
         }
     }
@@ -158,7 +158,7 @@ fn jet_app_live_keyed(key: String, footprint: String, initial: String, rerun: Je
     state.next_id = id
     if state.queries.len() >= JET_LIVE_MAX_QUERIES {
         oldest :: ids.iter().min().copied()
-        if oldest is Val(oldest_id) {
+        if oldest == .Val(oldest_id) {
             _ :: &state.queries.remove(&oldest_id)
             state.evictions = state.evictions.saturating_add(1)
         }
@@ -226,8 +226,8 @@ fn jet_app_live_refresh(query: &JetLiveQuery) -> I64 {
 // GATE #4565: kernel primitive
 #Unsafe("cancel canonical query lifecycle under native registry guard")
 fn jet_app_live_cancel(query: &JetLiveQuery) -> JetLiveQuery {
-    if jet_live_registry().lock() is Ok(state) {
-        if state.queries.get_mut(&query.id) is Val(record) {
+    if jet_live_registry().lock() == .Ok(state) {
+        if state.queries.get_mut(&query.id) == .Val(record) {
             if &record.lifecycle.cancel() -> return jet_live_query(query.id, &record)
         }
     }
@@ -297,7 +297,7 @@ fn jet_app_ws_register(sink: JetLiveSink) -> U64 {
 #Unsafe("unregister real WebSocket callback under native registry guard")
 fn jet_app_ws_unregister(id: U64) -> {
     if id == 0 -> return
-    if jet_live_registry().lock() is Ok(state) { _ :: &state.ws_sinks.remove(&id) }
+    if jet_live_registry().lock() == .Ok(state) { _ :: &state.ws_sinks.remove(&id) }
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LiveQuery.rs:511
 // GATE #4565: kernel primitive
@@ -350,9 +350,12 @@ fn jet_live_mark_footprint(state: &JetLiveRegistry, footprint: &JetLiveFootprint
     }).collect<[U64]>()
     &ids.sort()
     loop id in ids {
-        schedule :: if state.queries.get_mut(&id) is Val(query) {
+        schedule :: if state.queries.get_mut(&id) == .Val(query) {
             was_refreshing :: query.lifecycle.refreshing
-            if &query.lifecycle.invalidate(cause) { hit = hit.saturating_add(1); !was_refreshing } else { false }
+            if &query.lifecycle.invalidate(cause) {
+                hit = hit.saturating_add(1)
+                !was_refreshing
+            } else { false }
         } else { false }
         if schedule -> jet_live_schedule_latest(state, id, reruns)
     }
@@ -367,9 +370,12 @@ fn jet_live_mark_key(state: &JetLiveRegistry, key: String, cause: String, reruns
     }).collect<[U64]>()
     &ids.sort()
     loop id in ids {
-        schedule :: if state.queries.get_mut(&id) is Val(query) {
+        schedule :: if state.queries.get_mut(&id) == .Val(query) {
             was_refreshing :: query.lifecycle.refreshing
-            if &query.lifecycle.invalidate(cause) { hit = hit.saturating_add(1); !was_refreshing } else { false }
+            if &query.lifecycle.invalidate(cause) {
+                hit = hit.saturating_add(1)
+                !was_refreshing
+            } else { false }
         } else { false }
         if schedule -> jet_live_schedule_latest(state, id, reruns)
     }
@@ -389,12 +395,12 @@ fn jet_live_mark_id(state: &JetLiveRegistry, id: U64, cause: String, reruns: &[(
 #Unsafe("execute static Arc callbacks outside native registry guard; only newest generation may publish")
 fn jet_live_run_refreshes(reruns: [(U64, U64, JetLiveRerun)]) -> {
     runs := 0
-    loop while &reruns.pop() is Val((id, generation, rerun)) {
+    loop while &reruns.pop() == .Val((id, generation, rerun)) {
         if runs >= JET_LIVE_MAX_REFRESHES_PER_INVALIDATION {
-            if jet_live_registry().lock() is Ok(state) {
-                if state.queries.get_mut(&id) is Val(query) -> query.lifecycle.refreshing = false
+            if jet_live_registry().lock() == .Ok(state) {
+                if state.queries.get_mut(&id) == .Val(query) -> query.lifecycle.refreshing = false
                 loop (pending_id, _, _) in &reruns.drain(..) {
-                    if state.queries.get_mut(&pending_id) is Val(query) -> query.lifecycle.refreshing = false
+                    if state.queries.get_mut(&pending_id) == .Val(query) -> query.lifecycle.refreshing = false
                 }
             }
             break
@@ -403,9 +409,9 @@ fn jet_live_run_refreshes(reruns: [(U64, U64, JetLiveRerun)]) -> {
         result :: rerun()
         delivery: (JetLiveQuery, JetLiveSink?, String)? := None
         next: (U64, U64, JetLiveRerun)? := None
-        if jet_live_registry().lock() is Ok(state) {
+        if jet_live_registry().lock() == .Ok(state) {
             schedule_latest := false
-            if state.queries.get_mut(&id) is Val(query) {
+            if state.queries.get_mut(&id) == .Val(query) {
                 match result {
                     Ok(value) -> match jet_live_payload(^value) {
                         Ok(value) -> {
@@ -437,8 +443,8 @@ fn jet_live_run_refreshes(reruns: [(U64, U64, JetLiveRerun)]) -> {
                 next = &pending.pop()
             }
         }
-        if delivery is Val((updated, sink, value)) {
-            if sink is Val(callback) -> callback(value.clone())
+        if delivery == .Val((updated, sink, value)) {
+            if sink == .Val(callback) -> callback(value.clone())
             jet_live_publish_ws(updated.id, updated.lifecycle.generation, &updated.footprint, ^value)
         }
         if next is Val(refresh) -> &reruns.push(^refresh)
@@ -507,7 +513,7 @@ fn jet_app_signal_push(query: &JetLiveQuery, payload: String) -> JetLiveQuery {
     sink :: updated.sink.clone()
     result :: jet_live_query(query.id, &updated)
     drop(^state)
-    if sink is Val(callback) -> callback(payload.clone())
+    if sink == .Val(callback) -> callback(payload.clone())
     jet_live_publish_ws(result.id, result.lifecycle.generation, &result.footprint, ^payload)
     ^result
 }

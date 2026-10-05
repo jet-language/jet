@@ -425,7 +425,7 @@ impl JetWebServerFunction {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebServerFn.rs:598
     pub fn with_capability(self: Self, capability: String) -> Self {
         self := ^self
-        if !capability.is_empty() -> self.spec.capability = Some(^capability)
+        if !capability.is_empty() -> self.spec.capability = Val(^capability)
         self
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebServerFn.rs:605
@@ -445,7 +445,7 @@ impl JetWebServerFunction {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebServerFn.rs:626
     pub fn with_timeout_ms(self: Self, timeout_ms: U64) -> Self {
         self := ^self
-        self.spec.timeout_ms = Some(timeout_ms.clamp(1, 86_400_000))
+        self.spec.timeout_ms = Val(timeout_ms.clamp(1, 86_400_000))
         self
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebServerFn.rs:631
@@ -466,14 +466,14 @@ impl JetWebServerFunction {
     pub fn with_form_binding(self: Self, binding: String) -> Self {
         self := ^self
         binding := binding.trim() // #4303
-        if !binding.is_empty() -> self.form_binding = Some(binding.to_string())
+        if !binding.is_empty() -> self.form_binding = Val(binding.to_string())
         self
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebServerFn.rs:652
     pub fn with_validator(self: Self, validator: fn(&String) -> () Err!) -> Self {
         self := ^self
         // GATE #4565: kernel primitive
-        #Unsafe("retain shared validator closure") { self.validator = Some(Arc.new(validator)) }
+        #Unsafe("retain shared validator closure") { self.validator = Val(Arc.new(validator)) }
         self
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebServerFn.rs:660
@@ -520,7 +520,7 @@ impl JetWebServerFunction {
         auth_subject :: request.headers.first("authorization").filter(fn(value) { !value.trim().is_empty() }).map(fn(_) { "authorization" })
             .or_else(fn() { request.headers.first("cookie").filter(fn(value) { !value.trim().is_empty() }).map(fn(_) { "cookie" }) })
         capabilities: [String:Bool] := [:]
-        if Some(value) :: request.headers.first("x-jet-capability") {
+        if Val(value) :: request.headers.first("x-jet-capability") {
             loop capability in value.split(',') {
                 capability := capability.trim() // #4303
                 if !capability.is_empty() -> capabilities.insert(capability.to_string(), true)
@@ -537,13 +537,13 @@ impl JetWebServerFunction {
             .Disabled -> Ok(())
             .SameOrigin{expected_origin, token} -> {
                 same_origin :: match (expected_origin.as_ref(), context.origin.as_ref()) {
-                    (Some(expected), Some(actual)) -> expected == actual
-                    (Some(_), None) -> false
-                    (None, Some(actual)) -> jet_web_server_fn_origin_matches_host(actual, context.host.as_ref())
+                    (Val(expected), Val(actual)) -> expected == actual
+                    (Val(_), None) -> false
+                    (None, Val(actual)) -> jet_web_server_fn_origin_matches_host(actual, context.host.as_ref())
                     (None, None) -> true
                 }
                 if !same_origin -> return Err(.Csrf("the request origin is not same-origin"))
-                if Some(expected) :: token {
+                if Val(expected) :: token {
                     if context.csrf_token.as_ref() != Some(expected) -> return Err(.Csrf("the request CSRF token is invalid"))
                 }
                 Ok(())
@@ -564,7 +564,7 @@ impl JetWebServerFunction {
             return Ok(body.to_string())
         }
         if content_type.to_ascii_lowercase().starts_with("application/x-www-form-urlencoded") {
-            if Some(binding) :: self.form_binding.as_ref() {
+            if Val(binding) :: self.form_binding.as_ref() {
                 normalized :: jet_web_server_fn_form_json_typed(body, binding)?
                 if self.spec.input_type == "String" || self.spec.input_type.ends_with("::String") -> return Ok(jet_web_server_fn_json_string(&normalized))
                 return Ok(normalized)
@@ -576,7 +576,7 @@ impl JetWebServerFunction {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebServerFn.rs:887
     fn authorize(self: &Self, context: &JetWebServerFnRequestContext) -> () JetWebServerFnError! {
         if self.spec.capability.is_some() && context.auth_subject.is_none() -> return Err(.Unauthorized)
-        if Some(required) :: &self.spec.capability {
+        if Val(required) :: &self.spec.capability {
             if !context.capabilities.contains_key(required) -> return Err(.Forbidden("the request lacks the required capability"))
         }
         Ok(())
@@ -591,7 +591,7 @@ impl JetWebServerFunction {
         self.check_csrf(&request.context)?
         self.authorize(&request.context)?
         body :: self.normalize_input(&request.content_type, &request.body)?
-        if Some(validator) :: &self.validator -> validator(&body).map_err(fn(message) { JetWebServerFnError.InvalidInput(jet_web_server_fn_clean(&message, 512)) })?
+        if Val(validator) :: &self.validator -> validator(&body).map_err(fn(message) { JetWebServerFnError.InvalidInput(jet_web_server_fn_clean(&message, 512)) })?
         middleware := [String].with_capacity(self.middleware.len())
         loop entry in &self.middleware {
             request.context.check_live()?
@@ -599,23 +599,23 @@ impl JetWebServerFunction {
             middleware.push(entry.name.clone())
         }
         if self.spec.idempotency_declared {
-            if Some(key) :: request.context.idempotency_key.as_ref() {
+            if Val(key) :: request.context.idempotency_key.as_ref() {
                 // GATE #4565: kernel primitive
                 cached :: #Unsafe("read completed idempotent result under cache mutex") { self.idempotency_results.lock().ok().and_then(fn(results) { results.get(key).cloned() }) }
-                if Some(output) :: cached -> return Ok((output, middleware))
+                if Val(output) :: cached -> return Ok((output, middleware))
             }
         }
         request.context.check_live()?
         output :: (self.handler)(&request.context, &body)?
         if output.len() > JET_WEB_SERVER_FN_MAX_BODY || parse_json_typed_datatree(output.clone()).is_err() -> return Err(.InvalidOutput)
         if self.spec.idempotency_declared {
-            if Some(key) :: request.context.idempotency_key.as_ref() {
+            if Val(key) :: request.context.idempotency_key.as_ref() {
                 // GATE #4565: kernel primitive
                 #Unsafe("evict lexicographically first entry at capacity, then cache completed result") {
                     if Ok(results) :: self.idempotency_results.lock() {
                         if results.len() >= 1024 {
                             first :: results.keys().min().cloned()
-                            if Some(first) :: first -> results.remove(&first)
+                            if Val(first) :: first -> results.remove(&first)
                         }
                         results.insert(key.to_string(), output.clone())
                     }
@@ -627,10 +627,20 @@ impl JetWebServerFunction {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebServerFn.rs:968
     pub fn dispatch(self: &Self, request: JetWebServerFnRequest) -> JetWebServerFnResponse {
         request_id :: request.context.request_id.clone()
-        self.set_state(fn(state) { state.status = .Pending; state.request_id = request_id.clone(); state.attempts = state.attempts.saturating_add(1); state.error.clear(); state.result.clear() })
+        self.set_state(fn(state) {
+            state.status = .Pending
+            state.request_id = request_id.clone()
+            state.attempts = state.attempts.saturating_add(1)
+            state.error.clear()
+            state.result.clear()
+        })
         match self.dispatch_checked(^request) {
             Ok((body, middleware)) -> {
-                self.set_state(fn(state) { state.status = .Success; state.result = body.clone(); state.middleware = middleware.clone() })
+                self.set_state(fn(state) {
+                    state.status = .Success
+                    state.result = body.clone()
+                    state.middleware = middleware.clone()
+                })
                 JetWebServerFnResponse{status: 200, body, content_type: "application/json", request_id, middleware}
             }
             Err(error) -> {
@@ -648,7 +658,7 @@ impl JetWebServerFunction {
         request_id :: jet_web_server_fn_next_request_id()
         context := JetWebServerFnRequestContext.checked(request_id.clone(), self.spec.source_id.clone(), self.spec.endpoint.clone(),
             self.spec.method.clone(), None, None, None, [:], None, None, self.spec.timeout_ms)?
-        context.origin = Some("same-origin")
+        context.origin = Val("same-origin")
         response :: self.dispatch(JetWebServerFnRequest.progressive(self.spec.method.clone(), self.spec.endpoint.clone(), ^body, ^context))
         if response.status >= 400 -> return Err(.Handler{code: "progressive_submission", message: response.body.to_string()})
         Ok(response)
@@ -663,11 +673,11 @@ impl JetWebServerFunction {
         context := JetWebServerFnRequestContext.checked(jet_web_server_fn_next_request_id(), self.spec.source_id.clone(),
             self.spec.endpoint.clone(), self.spec.method.clone(), self.spec.csrf.expected_origin().map(fn(value) { value.to_string() }),
             None, None, [:], self.spec.csrf.token().map(fn(value) { value.to_string() }), idempotency_key.clone(), self.spec.timeout_ms)?
-        context.origin = self.spec.csrf.expected_origin().map(fn(value) { value.to_string() }).or_else(fn() { Some("same-origin") })
+        context.origin = self.spec.csrf.expected_origin().map(fn(value) { value.to_string() }).or_else(fn() { Val("same-origin") })
         request := JetWebServerFnRequest.json(self.spec.method.clone(), self.spec.endpoint.clone(), ^body, ^context)
-        if Some(key) :: idempotency_key -> request.headers.insert("idempotency-key", ^key)
-        if Some(origin) :: self.spec.csrf.expected_origin() -> request.headers.insert("origin", origin.to_string())
-        if Some(token) :: self.spec.csrf.token() -> request.headers.insert("x-csrf-token", token.to_string())
+        if Val(key) :: idempotency_key -> request.headers.insert("idempotency-key", ^key)
+        if Val(origin) :: self.spec.csrf.expected_origin() -> request.headers.insert("origin", origin.to_string())
+        if Val(token) :: self.spec.csrf.token() -> request.headers.insert("x-csrf-token", token.to_string())
         Ok(request)
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebServerFn.rs:1115
@@ -690,9 +700,19 @@ impl JetWebServerFunction {
         loop attempt in 1..=self.spec.retry.bounded_attempts() {
             request :: self.synthetic_client_request(body.clone(), idempotency_key.clone())?
             request_id :: request.context.request_id.clone()
-            self.set_state(fn(state) { state.status = .Pending; state.request_id = request_id.clone(); state.attempts = attempt; state.idempotency_key = idempotency_key.clone(); state.error.clear(); state.result.clear() })
+            self.set_state(fn(state) {
+                state.status = .Pending
+                state.request_id = request_id.clone()
+                state.attempts = attempt
+                state.idempotency_key = idempotency_key.clone()
+                state.error.clear()
+                state.result.clear()
+            })
             if Err(error) :: request.context.check_live() {
-                self.set_state(fn(state) { state.status = match &error { .Cancelled -> .Cancelled, _ -> .TimedOut }; state.error = error.to_string() })
+                self.set_state(fn(state) {
+                    state.status = match &error { .Cancelled -> .Cancelled, _ -> .TimedOut }
+                    state.error = error.to_string()
+                })
                 return Err(error)
             }
             // GATE #4565: kernel primitive
@@ -713,7 +733,10 @@ impl JetWebServerFunction {
             }
             match outcome {
                 Ok(body) -> {
-                    self.set_state(fn(state) { state.status = .Success; state.result = body.clone() })
+                    self.set_state(fn(state) {
+                        state.status = .Success
+                        state.result = body.clone()
+                    })
                     return Ok(body)
                 }
                 Err(error) -> {
@@ -723,7 +746,7 @@ impl JetWebServerFunction {
                         state.error = error.to_string()
                     })
                     if !retry -> return Err(error)
-                    last_error = Some(error)
+                    last_error = Val(error)
                 }
             }
         }
@@ -777,7 +800,7 @@ impl JetWebServerFunction {
 impl JetWebServerFnCsrfPolicy {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebServerFn.rs:1320
     fn expected_origin(self: &Self) -> (&String)? {
-        match self { .SameOrigin{expected_origin: Some(origin), ..} -> Some(origin), _ -> None }
+        match self { .SameOrigin{expected_origin: Val(origin), ..} -> Val(origin), _ -> None }
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebServerFn.rs:1330
     fn token(self: &Self) -> (&String)? {
@@ -787,9 +810,9 @@ impl JetWebServerFnCsrfPolicy {
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebServerFn.rs:1338
 fn jet_web_server_fn_hex(value: U8) -> U8? {
     match value {
-        48..=57 -> Some(value - 48)
-        97..=102 -> Some(value - 97 + 10)
-        65..=70 -> Some(value - 65 + 10)
+        48..=57 -> Val(value - 48)
+        97..=102 -> Val(value - 97 + 10)
+        65..=70 -> Val(value - 65 + 10)
         _ -> None
     }
 }
@@ -867,7 +890,7 @@ fn jet_web_server_fn_form_json_typed(body: &String, binding: &String) -> String 
     loop name in names {
         (field_type, optional) :: &schema_fields[&name]
         values :: match posted.get(&name) {
-            Some(values) -> values
+            .Val(values) -> values
             None if *optional -> continue
             None -> return Err(.InvalidInput("form input is missing required field `{name}`"))
         }

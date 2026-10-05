@@ -19,23 +19,43 @@ pub JET_WEB_PENDING_MAX_BOUNDARY_BYTES :: 256
 pub JET_WEB_STREAM_REGISTRY_MAX :: 256
 
 #[Equatable, Comparable]
-pub enum JetWebPendingState { Pending; Ready; Failed }
+pub enum JetWebPendingState {
+    Pending
+    Ready
+    Failed
+}
 impl JetWebPendingState {
     pub fn default() -> JetWebPendingState Never! { .Pending }
-    pub fn as_str(self) -> String Never! { if self == { .Pending -> "pending"; .Ready -> "ready"; .Failed -> "failed" } }
+    pub fn as_str(self) -> String Never! { if self == {
+        .Pending -> "pending"
+        .Ready -> "ready"
+        .Failed -> "failed"
+    } }
     pub fn is_pending(self) -> Bool Never! { self == .Pending }
     pub fn is_ready(self) -> Bool Never! { self == .Ready }
     pub fn is_failed(self) -> Bool Never! { self == .Failed }
 }
 #[Equatable, Comparable]
-pub enum JetWebPendingBackpressureDimension { Chunks; Bytes }
+pub enum JetWebPendingBackpressureDimension {
+    Chunks
+    Bytes
+}
 impl JetWebPendingBackpressureDimension {
-    pub fn as_str(self) -> String Never! { if self == { .Chunks -> "chunks"; .Bytes -> "bytes" } }
+    pub fn as_str(self) -> String Never! { if self == {
+        .Chunks -> "chunks"
+        .Bytes -> "bytes"
+    } }
 }
 #[Equatable, Comparable]
-pub enum JetWebPendingProjectionTarget { Server; Client }
+pub enum JetWebPendingProjectionTarget {
+    Server
+    Client
+}
 impl JetWebPendingProjectionTarget {
-    pub fn as_str(self) -> String Never! { if self == { .Server -> "server"; .Client -> "client" } }
+    pub fn as_str(self) -> String Never! { if self == {
+        .Server -> "server"
+        .Client -> "client"
+    } }
 }
 #[Equatable, Comparable]
 pub enum JetWebPendingTransactionKind {
@@ -186,13 +206,32 @@ impl JetWebStreamId {
     }
 }
 #[Equatable, Comparable]
-pub enum JetWebHydrationTrigger { Immediate; Load; Idle; Visible; Manual }
+pub enum JetWebHydrationTrigger {
+    Immediate
+    Load
+    Idle
+    Visible
+    Manual
+}
 impl JetWebHydrationTrigger {
     pub fn as_str(self) -> String Never! {
-        if self == { .Immediate -> "immediate"; .Load -> "client-load"; .Idle -> "client-idle"; .Visible -> "client-visible"; .Manual -> "manual" }
+        if self == {
+            .Immediate -> "immediate"
+            .Load -> "client-load"
+            .Idle -> "client-idle"
+            .Visible -> "client-visible"
+            .Manual -> "manual"
+        }
     }
     pub fn parse(value: String) -> JetWebHydrationTrigger? Never! {
-        if value == { "immediate" -> Val(.Immediate); "client-load" -> Val(.Load); "client-idle" -> Val(.Idle); "client-visible" -> Val(.Visible); "manual" -> Val(.Manual); else -> None }
+        if value == {
+            "immediate" -> Val(.Immediate)
+            "client-load" -> Val(.Load)
+            "client-idle" -> Val(.Idle)
+            "client-visible" -> Val(.Visible)
+            "manual" -> Val(.Manual)
+            else -> None
+        }
     }
 }
 // Rust:419-521. No Int/floating timestamp conversion.
@@ -903,9 +942,18 @@ fn jet_web_pending_validate_limit(actual: Int, maximum: Int, field: String) JetW
     if actual <= 0 || actual > maximum -> return Err(.InvalidLimit(field, actual, maximum))
     Ok()
 }
-fn optional_u64_json(value: U64?) -> String Never! { if value == .Val(n) -> return "{n}"; "null" }
-fn optional_error_json(value: JetWebPendingError?) -> String Never! { if value == .Val(error) -> return error.render_json(); "null" }
-fn optional_hydration_json(value: JetWebHydrationTiming?) -> String Never! { if value == .Val(timing) -> return timing.render_json(); "null" }
+fn optional_u64_json(value: U64?) -> String Never! {
+    if value == .Val(n) -> return "{n}"
+    "null"
+}
+fn optional_error_json(value: JetWebPendingError?) -> String Never! {
+    if value == .Val(error) -> return error.render_json()
+    "null"
+}
+fn optional_hydration_json(value: JetWebHydrationTiming?) -> String Never! {
+    if value == .Val(timing) -> return timing.render_json()
+    "null"
+}
 // Rust:2125-2145. Exact compact byte-preserving JSON (including C1 controls,
 // backspace and formfeed); a general JSON codec has different escaping law.
 fn jet_web_pending_json_string(value: String) -> String Never! {
@@ -916,15 +964,37 @@ fn jet_web_pending_json_string(value: String) -> String Never! {
         cp :: text.scalar_at(raw, at)
         width :: text.utf8_width_at(raw, at)
         if {
-            cp == 34 -> { &out.push(U8{92}); &out.push(U8{34}) }
-            cp == 92 -> { &out.push(U8{92}); &out.push(U8{92}) }
-            cp == 10 -> { &out.push(U8{92}); &out.push(U8{110}) }
-            cp == 13 -> { &out.push(U8{92}); &out.push(U8{114}) }
-            cp == 9 -> { &out.push(U8{92}); &out.push(U8{116}) }
-            cp == 8 -> { &out.push(U8{92}); &out.push(U8{98}) }
-            cp == 12 -> { &out.push(U8{92}); &out.push(U8{102}) }
+            cp == 34 -> {
+                &out.push(U8{92})
+                &out.push(U8{34})
+            }
+            cp == 92 -> {
+                &out.push(U8{92})
+                &out.push(U8{92})
+            }
+            cp == 10 -> {
+                &out.push(U8{92})
+                &out.push(U8{110})
+            }
+            cp == 13 -> {
+                &out.push(U8{92})
+                &out.push(U8{114})
+            }
+            cp == 9 -> {
+                &out.push(U8{92})
+                &out.push(U8{116})
+            }
+            cp == 8 -> {
+                &out.push(U8{92})
+                &out.push(U8{98})
+            }
+            cp == 12 -> {
+                &out.push(U8{92})
+                &out.push(U8{102})
+            }
             cp < 32 || (cp >= 127 && cp <= 159) -> {
-                &out.push(U8{92}); &out.push(U8{117})
+                &out.push(U8{92})
+                &out.push(U8{117})
                 loop shift in [Int]{12, 8, 4, 0} {
                     digit :: (cp >> shift) & 15
                     &out.push(U8{if digit < 10 -> 48 + digit else -> 87 + digit})

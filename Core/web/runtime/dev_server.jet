@@ -146,7 +146,7 @@ fn jet_devserver_mtime(path: OSPath) -> SystemTime? { fs.metadata(path).and_then
 // GATE #4565: kernel primitive
 #Unsafe("bind only loopback sockets; preserve address-in-use fallback and actual failure diagnostics")
 fn jet_devserver_bind(port: U16?) -> TcpListener {
-    if port is Val(port) {
+    if port == .Val(port) {
         return match TcpListener.bind(("127.0.0.1", port)) {
             Ok(listener) -> ^listener
             Err(e) -> {
@@ -160,7 +160,10 @@ fn jet_devserver_bind(port: U16?) -> TcpListener {
         match TcpListener.bind(("127.0.0.1", port)) {
             Ok(listener) -> return ^listener
             Err(e) if e.kind() == ErrorKind.AddrInUse -> next
-            Err(e) -> { eprintln("error: couldn't start the dev server: {e}"); process.exit(1) }
+            Err(e) -> {
+                eprintln("error: couldn't start the dev server: {e}")
+                process.exit(1)
+            }
         }
     }
     eprintln("error: every port from 8080 to 8089 is already in use")
@@ -171,7 +174,7 @@ fn jet_devserver_bind(port: U16?) -> TcpListener {
 // GATE #4565: kernel primitive
 #Unsafe("forward exact indexed environment settings into the owned build command")
 fn jet_devserver_forward_build_profile_and_settings(command: &Command) -> {
-    if env.var("JET_DEV_PROFILE") is Ok(profile) {
+    if env.var("JET_DEV_PROFILE") == .Ok(profile) {
         if !profile.is_empty() -> _ :: command.arg("--profile={profile}")
     }
     if env.var_os("JET_DEV_SMALL").is_some() -> _ :: command.arg("--small")
@@ -179,7 +182,7 @@ fn jet_devserver_forward_build_profile_and_settings(command: &Command) -> {
     loop index in 0..<count {
         key :: env.var("JET_DEV_SETTING_{index}_KEY").ok()
         value :: env.var("JET_DEV_SETTING_{index}_VALUE").ok()
-        if (key, value) is (Val(key), Val(value)) -> _ :: command.arg("--set={key}={value}")
+        if (key, value) == (Val(key), Val(value)) -> _ :: command.arg("--set={key}={value}")
     }
 }
 // Rust: crates/jet-codegen/src/Prelude/DevServer.rs:293
@@ -188,24 +191,36 @@ fn jet_devserver_forward_build_profile_and_settings(command: &Command) -> {
 fn jet_devserver_rebuild(app_file: String, html_override: String?, is_rebuild: Bool, held_output_root: JetDevServerOutputRoot?) -> JetDevServerOutputRoot? {
     abs_file :: match fs.canonicalize(OSPath.from_text(app_file)) {
         Ok(p) -> ^p
-        Err(e) -> { eprintln("error: couldn't resolve `{app_file}`: {e}"); return None }
+        Err(e) -> {
+            eprintln("error: couldn't resolve `{app_file}`: {e}")
+            return None
+        }
     }
-    if jet_devserver_validate_source(abs_file) is Err(e) {
+    if jet_devserver_validate_source(abs_file) == .Err(e) {
         eprintln("error: source file is not safe to compile: {e}")
         return None
     }
     out_dir :: match jet_devserver_build_dir() {
         Ok(path) -> ^path
-        Err(e) -> { eprintln("error: web output directory is not safe: {e}"); return None }
+        Err(e) -> {
+            eprintln("error: web output directory is not safe: {e}")
+            return None
+        }
     }
     output_root :: match held_output_root {
         Val(root) -> match root.clone_directory() {
             Ok(root) -> ^root
-            Err(e) -> { eprintln("error: couldn't clone the held web output directory: {e}"); return None }
+            Err(e) -> {
+                eprintln("error: couldn't clone the held web output directory: {e}")
+                return None
+            }
         }
         None -> match jet_devserver_open_output_root(out_dir) {
             Ok(root) -> ^root
-            Err(e) -> { eprintln("error: web output directory is not safe: {e}"); return None }
+            Err(e) -> {
+                eprintln("error: web output directory is not safe: {e}")
+                return None
+            }
         }
     }
     staging_name :: ".jet-devserver-staging-{process.id()}-{JET_DEVSERVER_STAGING_COUNTER.fetch_add(U64{1}, Ordering.Relaxed)}"
@@ -213,7 +228,10 @@ fn jet_devserver_rebuild(app_file: String, html_override: String?, is_rebuild: B
     source_stem :: jet_devserver_source_stem(abs_file)
     staging :: match jet_devserver_create_staging(output_root, staging_root, source_stem) {
         Ok(staging) -> ^staging
-        Err(e) -> { eprintln("error: couldn't create a staging folder for the rebuild: {e}"); return None }
+        Err(e) -> {
+            eprintln("error: couldn't create a staging folder for the rebuild: {e}")
+            return None
+        }
     }
     jet_bin :: env.var("JET_BIN").unwrap_or_else(_ -> "jet")
     command := Command.new(jet_bin)
@@ -246,7 +264,7 @@ fn jet_devserver_rebuild(app_file: String, html_override: String?, is_rebuild: B
         return None
     }
     html_bytes := None
-    if html_override is Val(html_path) {
+    if html_override == .Val(html_path) {
         source_dir :: OSPath.from_text(app_file).parent().unwrap_or(OSPath.from_text("."))
         match jet_devserver_read_inside(source_dir, html_path) {
             Ok(bytes) -> html_bytes = Val(^bytes)
@@ -257,7 +275,7 @@ fn jet_devserver_rebuild(app_file: String, html_override: String?, is_rebuild: B
             }
         }
     }
-    if jet_devserver_publish_build(output_root, staging, html_bytes.as_deref()) is Err(e) {
+    if jet_devserver_publish_build(output_root, staging, html_bytes.as_deref()) == .Err(e) {
         eprintln("error: couldn't finalize web build: {e}")
         _ :: jet_devserver_cleanup_staging(output_root, staging)
         return None
@@ -309,7 +327,10 @@ fn jet_devserver_spawn_output_reader<R: Read + Send>(reader: ^R, limit: USize, b
         loop {
             count :: match reader.read(&chunk) {
                 Ok(count) -> count
-                Err(error) -> { read_failed.store(true, Ordering.Release); return Err(^error) }
+                Err(error) -> {
+                    read_failed.store(true, Ordering.Release)
+                    return Err(^error)
+                }
             }
             if count == 0 -> return Ok(^bytes)
             used := budget.load(Ordering.Acquire)
@@ -322,7 +343,10 @@ fn jet_devserver_spawn_output_reader<R: Read + Send>(reader: ^R, limit: USize, b
                     Err(next_used) -> used = next_used
                 }
             }
-            if kept < count { exceeded.store(true, Ordering.Release); return Ok(^bytes) }
+            if kept < count {
+                exceeded.store(true, Ordering.Release)
+                return Ok(^bytes)
+            }
             bytes.extend_from_slice(chunk[0..<count])
         }
     })
@@ -353,7 +377,7 @@ fn jet_devserver_ensure_directory(path: OSPath) -> () Error! {
         Ok(metadata) if metadata.is_dir() -> Ok(())
         Ok(_) -> Err(Error.new(ErrorKind.AlreadyExists, "path is not a directory"))
         Err(error) if error.kind() == ErrorKind.NotFound -> {
-            if path.parent().filter(parent -> !parent.as_os_str().is_empty()) is Val(parent) -> jet_devserver_ensure_directory(parent)?
+            if path.parent().filter(parent -> !parent.as_os_str().is_empty()) == .Val(parent) -> jet_devserver_ensure_directory(parent)?
             fs.create_dir(path)
         }
         Err(error) -> Err(^error)
@@ -465,7 +489,10 @@ module jet_devserver_unix_output {
     // Rust: crates/jet-codegen/src/Prelude/DevServer.rs:755
     fn check_existing(parent: File, value: OsStr) -> Bool Error! {
         match open_file_at(parent, value, false) {
-            Ok(file) -> { _ :: check_regular(file)?; Ok(true) }
+            Ok(file) -> {
+                _ :: check_regular(file)?
+                Ok(true)
+            }
             Err(error) if error.kind() == ErrorKind.NotFound -> Ok(false)
             Err(error) -> Err(^error)
         }
@@ -491,7 +518,10 @@ module jet_devserver_unix_output {
             if mkdirat(parent.as_raw_fd(), cname.as_ptr(), U32{0o700}) == 0 {
                 return match open_dir_at(parent, OsStr.new(value)) {
                     Ok(directory) -> Ok((^value, ^directory))
-                    Err(error) -> { _ :: unlink_at(parent, OsStr.new(value), AT_REMOVEDIR); Err(^error) }
+                    Err(error) -> {
+                        _ :: unlink_at(parent, OsStr.new(value), AT_REMOVEDIR)
+                        Err(^error)
+                    }
                 }
             }
             error :: Error.last_os_error()
@@ -533,7 +563,7 @@ module jet_devserver_unix_output {
             }
             Ok(())
         })()
-        if result is Err(error) {
+        if result == .Err(error) {
             _ :: unlink_at(parent, OsStr.new(temporary), I32{0})
             return Err(^error)
         }
@@ -556,13 +586,13 @@ module jet_devserver_unix_output {
         if components.is_empty() -> return Err(Error.new(ErrorKind.InvalidInput, "empty relative path"))
         for component in components[..components.len() - 1] {
             value :: match component {
-                Component.Normal(value) -> value
+                .Normal(value) -> value
                 _ -> return Err(Error.new(ErrorKind.InvalidInput, "devserver path is not relative"))
             }
             current = open_dir_at(current, value)?
         }
         value :: match components.last().unwrap() {
-            Component.Normal(value) -> value
+            .Normal(value) -> value
             _ -> return Err(Error.new(ErrorKind.InvalidInput, "devserver path is not relative"))
         }
         file :: open_file_at(current, value, false)?
@@ -580,7 +610,7 @@ module jet_devserver_unix_output {
     #Unsafe("publish through descriptor-relative journaled renames and fsync; roll back every partial failure")
     pub fn publish_build(root: JetDevServerOutputRoot, staging: JetDevServerStaging, html: [U8]?) -> () Error! {
         build :: open_dir_at(staging.directory, OsStr.new("build"))?
-        if html is Val(bytes) -> replace_file_at(build, OsStr.new("index.html"), bytes)?
+        if html == .Val(bytes) -> replace_file_at(build, OsStr.new("index.html"), bytes)?
         for value in JET_DEVSERVER_OUTPUT_FILES {
             source :: open_file_at(build, OsStr.new(value), false)?
             _ :: check_regular(source)?
@@ -608,7 +638,7 @@ module jet_devserver_unix_output {
             }
             root.directory.sync_all()
         })()
-        if result is Err(error) {
+        if result == .Err(error) {
             rollback_publication(root.directory, journal, backed_up, published)
             clear_publication_journal(root.directory, journal, journal_name, JET_DEVSERVER_OUTPUT_FILES)
             return Err(^error)
@@ -618,7 +648,7 @@ module jet_devserver_unix_output {
     }
     // Rust: crates/jet-codegen/src/Prelude/DevServer.rs:1021
     pub fn cleanup(root: JetDevServerOutputRoot, staging: JetDevServerStaging) -> () Error! {
-        if open_dir_at(staging.directory, OsStr.new("build")) is Ok(build) {
+        if open_dir_at(staging.directory, OsStr.new("build")) == .Ok(build) {
             for value in JET_DEVSERVER_STAGING_FILES -> _ :: unlink_at(build, OsStr.new(value), I32{0})
             source :: "{staging.source_stem}.rs"
             _ :: unlink_at(build, OsStr.new(source), I32{0})
@@ -655,7 +685,7 @@ fn jet_devserver_read_inside(root: OSPath, relative: String) -> [U8] Error! {
 fn jet_devserver_serve_forever(listener: ^TcpListener, version: ^Arc<AtomicU64>, output_root: ^Arc<JetDevServerOutputRoot>) -> {
     active_connections :: Arc.new(AtomicUsize.new(USize{0}))
     for stream in listener.incoming() {
-        if stream is Ok(stream) {
+        if stream == .Ok(stream) {
             if !jet_devserver_try_acquire(active_connections) {
                 drop(^stream)
                 continue
@@ -771,11 +801,31 @@ fn jet_devserver_handle_connection(stream: ^TcpStream, version: AtomicU64, outpu
             return Err(Error.new(ErrorKind.InvalidData, "malformed devserver header name"))
         }
         duplicate :: match name.as_str() {
-            "authorization" -> { duplicate :: saw_authorization; saw_authorization = true; duplicate }
-            "content-length" -> { duplicate :: saw_content_length; saw_content_length = true; duplicate }
-            "host" -> { duplicate :: saw_host; saw_host = true; duplicate }
-            "origin" -> { duplicate :: saw_origin; saw_origin = true; duplicate }
-            "transfer-encoding" -> { duplicate :: saw_transfer_encoding; saw_transfer_encoding = true; duplicate }
+            "authorization" -> {
+                duplicate :: saw_authorization
+                saw_authorization = true
+                duplicate
+            }
+            "content-length" -> {
+                duplicate :: saw_content_length
+                saw_content_length = true
+                duplicate
+            }
+            "host" -> {
+                duplicate :: saw_host
+                saw_host = true
+                duplicate
+            }
+            "origin" -> {
+                duplicate :: saw_origin
+                saw_origin = true
+                duplicate
+            }
+            "transfer-encoding" -> {
+                duplicate :: saw_transfer_encoding
+                saw_transfer_encoding = true
+                duplicate
+            }
             _ -> false
         }
         if duplicate -> return Err(Error.new(ErrorKind.InvalidData, "duplicate devserver security header"))
@@ -835,12 +885,12 @@ fn jet_devserver_serve_static<W: Write>(stream: &W, path: String, output_root: J
             }
         }
     }
-    if script is Val(script) {
+    if script == .Val(script) {
         if std.str.from_utf8(bytes).is_err() {
             body :: "not found: {path}"
             return jet_devserver_write_response(&stream, "404 Not Found", "text/plain; charset=utf-8", body.as_bytes())
         }
-        if jet_devserver_find_body_end(bytes) is Val(index) {
+        if jet_devserver_find_body_end(bytes) == .Val(index) {
             parts :: [bytes[..index], script.as_bytes(), bytes[index..]]
             return jet_devserver_write_response_parts(&stream, "200 OK", content_type, parts)
         }
@@ -934,7 +984,7 @@ module jet_devserver_windows_output {
     // Rust: crates/jet-codegen/src/Prelude/DevServer.rs:1577
     pub fn normalize(path: String) -> String {
         path :: path.replace('/', "\\")
-        path :: if path.strip_prefix("\\\\?\\UNC\\") is Val(tail) { "\\\\{tail}" } else { path.strip_prefix("\\\\?\\").unwrap_or(path).to_string() }
+        path :: if path.strip_prefix("\\\\?\\UNC\\") == .Val(tail) { "\\\\{tail}" } else { path.strip_prefix("\\\\?\\").unwrap_or(path).to_string() }
         path.trim_end_matches(['\\', '/']).to_ascii_lowercase()
     }
     // Rust: crates/jet-codegen/src/Prelude/DevServer.rs:1587
@@ -1018,9 +1068,9 @@ module jet_devserver_windows_output {
         current := OSPath.new()
         for component in path.components() {
             match component {
-                Component.Prefix(_) | Component.RootDir -> current.push(component.as_os_str())
+                .Prefix(_) | Component.RootDir -> current.push(component.as_os_str())
                 Component.CurDir -> {}
-                Component.Normal(value) -> {
+                .Normal(value) -> {
                     if !jet_devserver_windows_component_is_safe(value) {
                         return Err(Error.new(ErrorKind.PermissionDenied, "devserver path contains an ADS, reserved, or invalid Windows name"))
                     }

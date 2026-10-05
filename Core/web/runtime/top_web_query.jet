@@ -63,7 +63,7 @@ fn jet_web_query_now_ms() -> U64 {
 // GATE #4565: kernel primitive
 #Unsafe("select durable queue location from the actual OS environment")
 fn jet_web_query_queue_path() -> OSPath? {
-    if env.var_os("JET_WEB_QUERY_QUEUE_PATH") is Val(path) {
+    if env.var_os("JET_WEB_QUERY_QUEUE_PATH") == .Val(path) {
         if !path.is_empty() -> return Val(OSPath.from(path))
     }
     base :: env.var_os("XDG_STATE_HOME").map(OSPath.from)
@@ -145,7 +145,7 @@ fn jet_web_query_queue_load(queue: &JetWebQueryQueueState) -> () Err! {
         }
         Ok(())
     }()
-    if parsed is Err(error) {
+    if parsed == .Err(error) {
         queue.load_error = Val(error.clone())
         return Err(error)
     }
@@ -161,10 +161,10 @@ fn jet_web_query_queue_persist(queue: &JetWebQueryQueueState) -> () Err! {
         invalidations :: entry.invalidations.iter().map(jet_web_query_hex).collect<[String]>().join(",")
         contents.push_str("entry\t{entry.sequence}\t{jet_web_query_hex(entry.key)}\t{jet_web_query_hex(entry.payload)}\t{invalidations}\n")
     }
-    if path.parent() is Val(parent) -> fs.create_dir_all(parent).map_err(jet_web_query_durability_error)?
+    if path.parent() == .Val(parent) -> fs.create_dir_all(parent).map_err(jet_web_query_durability_error)?
     temp :: path.with_extension("v1.tmp.{process.id()}")
     fs.write(&temp, contents).map_err(jet_web_query_durability_error)?
-    if fs.rename(&temp, &path) is Err(error) {
+    if fs.rename(&temp, &path) == .Err(error) {
         _ :: fs.remove_file(&temp)
         return Err(jet_web_query_durability_error(error))
     }
@@ -290,7 +290,7 @@ static JET_WEB_QUERY_PANEL_FACTS: LazyLock<JetWebQueryMutex<[JetWebQueryPanelFac
 #Unsafe("hold query panel registry mutex across identity lookup and retained signal replacement")
 fn jet_web_query_register_panel_fact(query: &JetWebQuery) -> {
     facts := JET_WEB_QUERY_PANEL_FACTS.lock() ?? return
-    if facts.iter_mut().find(fn(fact) { fact.key == query.key }) is Val(fact) {
+    if facts.iter_mut().find(fn(fact) { fact.key == query.key }) == .Val(fact) {
         fact.footprint = query.footprint.clone()
         fact.state = query.state.clone()
         fact.mutation = query.mutation.clone()
@@ -347,7 +347,7 @@ fn jet_web_query_publish_state(key: String, footprint: String, state: &JetWebQue
     if !jet_web_runtime_devtools_enabled() -> return
     state_name :: jet_web_query_dev_state(state.status)
     fields :: "\{\"name\":{jet_web_query_json(key)},\"state\":{jet_web_query_json(state_name)},\"footprint\":{jet_web_query_json(footprint)},\"freshness_ms\":{freshness_ms},\"observers\":{observers.max(0)},\"invalidation_cause\":{jet_web_query_json(cause)},\"mutation_state\":{jet_web_query_json(mutation.name())}\}"
-    if JetDevtoolsEvent.from_parts(jet_web_query_now_ms(), "core.web.query", "Query", key.to_string(), fields) is Ok(event) -> jet_devtools_publish_event(event)
+    if JetDevtoolsEvent.from_parts(jet_web_query_now_ms(), "core.web.query", "Query", key.to_string(), fields) == .Ok(event) -> jet_devtools_publish_event(event)
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebQuery.rs:585
 fn jet_web_query_publish_mutation(key: String, lifecycle: JetDevtoolsMutationLifecycle, rollback: Bool) -> {
@@ -359,7 +359,7 @@ fn jet_web_query_publish_mutation(key: String, lifecycle: JetDevtoolsMutationLif
         JetDevtoolsMutationLifecycle.RolledBack -> "rolled_back"
     }
     fields :: "\{\"name\":{jet_web_query_json(key)},\"lifecycle\":{jet_web_query_json(lifecycle_name)},\"rollback\":{rollback}\}"
-    if JetDevtoolsEvent.from_parts(jet_web_query_now_ms(), "core.web.query", "Mutation", key.to_string(), fields) is Ok(event) -> jet_devtools_publish_event(event)
+    if JetDevtoolsEvent.from_parts(jet_web_query_now_ms(), "core.web.query", "Mutation", key.to_string(), fields) == .Ok(event) -> jet_devtools_publish_event(event)
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebQuery.rs:616
 // GATE #4565: kernel primitive
@@ -381,7 +381,7 @@ fn jet_web_query_enqueue(key: String, payload: String, invalidations: [String]) 
     queue.next_sequence = queue.next_sequence.saturating_add(1).max(1)
     sequence :: queue.next_sequence
     queue.entries.push_back(JetWebQueryQueuedMutation{sequence, key: key.to_string(), payload, invalidations})
-    if jet_web_query_queue_persist(&queue) is Err(error) {
+    if jet_web_query_queue_persist(&queue) == .Err(error) {
         _ :: queue.entries.pop_back()
         queue.next_sequence = previous_sequence
         return Err(error)
@@ -404,8 +404,8 @@ fn jet_web_query_remove_queued(key: String, sequence: U64) -> () Err! {
     jet_web_query_queue_load(&queue)?
     index :: queue.entries.iter().position(fn(entry) { entry.key == key && entry.sequence == sequence }) ?? return Ok(())
     removed :: queue.entries.remove(index)
-    if jet_web_query_queue_persist(&queue) is Err(error) {
-        if removed is Val(removed) -> queue.entries.insert(index, removed)
+    if jet_web_query_queue_persist(&queue) == .Err(error) {
+        if removed == .Val(removed) -> queue.entries.insert(index, removed)
         return Err(error)
     }
     Ok(())
@@ -561,7 +561,7 @@ impl JetWebQuery {
     // GATE #4565: kernel primitive
     #Unsafe("update shared policy under native guard before publishing policy facts")
     pub fn set_mode(self: &Self, mode: WebQueryNetworkMode) -> {
-        if self.mode.lock() is Ok(current) -> *current = mode
+        if self.mode.lock() == .Ok(current) -> *current = mode
         state :: self.state()
         self.publish_state(&state, "policy-changed")
     }
@@ -573,7 +573,7 @@ impl JetWebQuery {
     // GATE #4565: kernel primitive
     #Unsafe("update shared connectivity under native guard, then reconcile durable queue and live lifecycle")
     pub fn set_online(self: &Self, online: Bool) -> {
-        if self.online.lock() is Ok(current) -> *current = online
+        if self.online.lock() == .Ok(current) -> *current = online
         state := self.state.get()
         queued :: jet_web_query_queue_count(&self.key)
         state.queued = queued
@@ -594,7 +594,7 @@ impl JetWebQuery {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebQuery.rs:995
     fn invalidate_targets(self: &Self, targets: &[String]) -> {
         for target in targets {
-            if target.strip_prefix("key:") is Val(key) -> _ :: jet_app_invalidate_key(key.to_string())
+            if target.strip_prefix("key:") == .Val(key) -> _ :: jet_app_invalidate_key(key.to_string())
             else -> _ :: jet_app_invalidate(target.clone())
         }
     }
@@ -611,7 +611,7 @@ impl JetWebQuery {
         generation :: self.mutation.get().generation.saturating_add(1)
         optimistic_present :: optimistic.is_some()
         if payload.len() > JET_WEB_QUERY_MAX_VALUE -> return self.finish_mutation_error(generation, false, "", "mutation payload exceeds the payload limit", false, 0)
-        if optimistic.as_ref() is Val(value) {
+        if optimistic.as_ref() == .Val(value) {
             if value.len() > JET_WEB_QUERY_MAX_VALUE -> return self.finish_mutation_error(generation, false, "", "optimistic query value exceeds the payload limit", false, 0)
         }
         // The declared footprint is the default dependency set; plain handles fall back to explicit key.
@@ -630,7 +630,7 @@ impl JetWebQuery {
                 Ok(count) -> count
                 Err(error) -> return self.finish_mutation_error(generation, false, "", error, false, 0)
             }
-            if optimistic.clone() is Val(value) {
+            if optimistic.clone() == .Val(value) {
                 state :: JetWebQueryState{status: WebQueryStatus.Offline, value, error: "",
                     generation: previous.generation.saturating_add(1), queued: queue_count, offline: true}
                 self.set_state(state, "optimistic-paused")
@@ -650,7 +650,7 @@ impl JetWebQuery {
             value: optimistic_value, result: "", error: "", context: context.clone(), rollback: false, paused: false,
             queued: 0, replayed: self.mutation.get().replayed}
         self.set_mutation(pending)
-        if optimistic.clone() is Val(value) {
+        if optimistic.clone() == .Val(value) {
             state :: JetWebQueryState{status: if previous.offline { WebQueryStatus.Offline } else { WebQueryStatus.Stale },
                 value, error: "", generation: previous.generation.saturating_add(1), ..previous.clone()}
             self.set_state(state, "optimistic-applied")
@@ -778,7 +778,7 @@ impl JetWebQuery {
         entries :: jet_web_query_queued(&self.key)?
         sent: Int := 0
         for entry in entries {
-            if send(entry.payload.clone()) is Err(error) {
+            if send(entry.payload.clone()) == .Err(error) {
                 error :: jet_web_query_bound_error(error)
                 mutation := self.mutation.get()
                 mutation.status = WebMutationStatus.Error
@@ -797,7 +797,7 @@ impl JetWebQuery {
                 self.set_state(state, "replay-error")
                 return Err(error)
             }
-            if jet_web_query_remove_queued(&self.key, entry.sequence) is Err(error) {
+            if jet_web_query_remove_queued(&self.key, entry.sequence) == .Err(error) {
                 error :: jet_web_query_bound_error(error)
                 mutation := self.mutation.get()
                 mutation.status = WebMutationStatus.Error

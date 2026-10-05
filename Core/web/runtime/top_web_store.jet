@@ -72,8 +72,15 @@ impl JetWebStoreGate {
         state := self.state.lock().unwrap_or_else(fn(error) { error.into_inner() })
         loop {
             match state.owner {
-                None -> { state.owner = Val(owner); state.depth = 1; break }
-                Val(current) if current == owner -> { state.depth += 1; break }
+                None -> {
+                    state.owner = Val(owner)
+                    state.depth = 1
+                    break
+                }
+                Val(current) if current == owner -> {
+                    state.depth += 1
+                    break
+                }
                 Val(_) -> { state = self.wake.wait(^state).unwrap_or_else(fn(error) { error.into_inner() }) }
             }
         }
@@ -98,7 +105,10 @@ impl Drop for JetWebStoreGateGuard {
         events :: {
             state := self.gate.state.lock().unwrap_or_else(fn(error) { error.into_inner() })
             debug_assert_eq(state.owner, Val(owner))
-            if state.depth > 1 { state.depth -= 1; [(String, JetWebStoreEvent)]{} }
+            if state.depth > 1 {
+                state.depth -= 1
+                [(String, JetWebStoreEvent)]{}
+            }
             else {
                 state.owner = None
                 state.depth = 0
@@ -256,7 +266,10 @@ impl<T: Clone + Send + Sync> JetWebStorePatch<T> {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebStore.rs:432
     pub fn active(self: &Self) -> Bool { self.active }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebStore.rs:438
-    pub fn commit(self: Self) -> JetWebStoreTransaction<T> { self.active = false; ^self.transaction }
+    pub fn commit(self: Self) -> JetWebStoreTransaction<T> {
+        self.active = false
+        ^self.transaction
+    }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebStore.rs:445
     pub fn rollback(self: Self) -> T? {
         if !self.active -> return None
@@ -275,7 +288,10 @@ impl<T: Clone + Send + Sync> JetWebStore<T> {
         Self{name: ^name, signal: JetSignal.new(initial.clone()), shared: JetShared.new(initial.clone()), ledger: Arc.new(Mutex.new(JetWebStoreLedger.new(^initial, history_limit))), transaction_lock: Arc.new(JetWebStoreGate.new())}
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebStore.rs:472
-    pub fn value(self: &Self) -> T { _transaction_lock :: self.transaction_lock.lock(); self.signal.get() }
+    pub fn value(self: &Self) -> T {
+        _transaction_lock :: self.transaction_lock.lock()
+        self.signal.get()
+    }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebStore.rs:477
     pub fn signal(self: &Self) -> JetSignal<T> { self.signal.clone() }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebStore.rs:481

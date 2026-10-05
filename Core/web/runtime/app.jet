@@ -285,12 +285,12 @@ fn jet_app_search_field(item: String) -> JetAppSearchField Err! {
 pub fn jet_app_route_binding(spec: String) -> [JetAppRouteBinding] Never! {
     spec.split(';').filter(item -> not item.is_empty()).map(item -> {
         if item == "d" -> return Ok(JetAppRouteBinding.Data)
-        if item.strip_prefix("p:") is Val(rest) {
+        if item.strip_prefix("p:") == .Val(rest) {
             (name, ty) :: rest.split_once('=').ok_or_else(() -> "invalid path binding `{item}`")?
             if name.is_empty() || ty.is_empty() -> return Err("invalid path binding `{item}`")
             return Ok(JetAppRouteBinding.Path{name: name.to_string(), ty: ty.to_string()})
         }
-        if item.strip_prefix("s=") is Val(rest) {
+        if item.strip_prefix("s=") == .Val(rest) {
             (codec, field_text) :: rest.split_once(':').ok_or_else(() -> "invalid search binding `{item}`")?
             fields :: field_text.split(',').filter(field -> not field.is_empty()).map(jet_app_search_field)
                 .collect<[JetAppSearchField] Err!>()?
@@ -460,7 +460,7 @@ fn jet_app_loader_binding_check(identity: String, arity: Int, binding: [JetAppRo
     if binding.len() != arity {
         jet_app_invalid("app loader `{identity}` takes {arity} inputs but the checked binding has {binding.len()}")
     }
-    if binding.iter().any(binding -> binding is .Data) {
+    if binding.iter().any(binding -> binding == .Data) {
         jet_app_invalid("app loader `{identity}` cannot consume its own route data")
     }
 }
@@ -641,9 +641,9 @@ impl JetApp {
     fn register_action<F: JetAppActionHandler>(self, name: String, handler: F,
         kind: String, binding: String?) -> JetApp Never! {
         function := handler.into_server_function(~name)
-        if binding is Val(value) -> function = function.with_form_binding(value)
+        if binding == .Val(value) -> function = function.with_form_binding(value)
         state := self.lock()
-        if &state.routes.last_mut() is Val(route) {
+        if &state.routes.last_mut() == .Val(route) {
             if (kind == "form" || kind == "action") && route.facts.form.is_none() -> route.facts.form = Val(~name)
         }
         &state.actions.push((name, Val(^function), kind.to_string(), false))
@@ -745,23 +745,63 @@ impl JetApp {
     // Rust: crates/jet-codegen/src/Prelude/App.rs:1323
     pub fn island(self) -> JetApp Never! { self.set_route_mode(.Island) }
     // Rust: crates/jet-codegen/src/Prelude/App.rs:1326
-    pub fn hydration_dev(self) -> JetApp Never! { state := self.lock(); state.hydration = "dev-overlay"; drop(^state); ~self }
+    pub fn hydration_dev(self) -> JetApp Never! {
+        state := self.lock()
+        state.hydration = "dev-overlay"
+        drop(^state)
+        ~self
+    }
     // Rust: crates/jet-codegen/src/Prelude/App.rs:1330
-    pub fn hydration_release(self) -> JetApp Never! { state := self.lock(); state.hydration = "release-keep-server"; drop(^state); ~self }
+    pub fn hydration_release(self) -> JetApp Never! {
+        state := self.lock()
+        state.hydration = "release-keep-server"
+        drop(^state)
+        ~self
+    }
     // Rust: crates/jet-codegen/src/Prelude/App.rs:1334
-    pub fn security(self, policy: String) -> JetApp Never! { state := self.lock(); &state.security.push(policy); drop(^state); ~self }
+    pub fn security(self, policy: String) -> JetApp Never! {
+        state := self.lock()
+        &state.security.push(policy)
+        drop(^state)
+        ~self
+    }
     // Rust: crates/jet-codegen/src/Prelude/App.rs:1338
-    pub fn assets(self, path: String) -> JetApp Never! { state := self.lock(); &state.assets.push(path); drop(^state); ~self }
+    pub fn assets(self, path: String) -> JetApp Never! {
+        state := self.lock()
+        &state.assets.push(path)
+        drop(^state)
+        ~self
+    }
     // Rust: crates/jet-codegen/src/Prelude/App.rs:1342
-    pub fn split(self, name: String) -> JetApp Never! { state := self.lock(); &state.split.push(name); drop(^state); ~self }
+    pub fn split(self, name: String) -> JetApp Never! {
+        state := self.lock()
+        &state.split.push(name)
+        drop(^state)
+        ~self
+    }
     // Rust: crates/jet-codegen/src/Prelude/App.rs:1346
     pub fn code_split(self, name: String) -> JetApp Never! { self.split(name) }
     // Rust: crates/jet-codegen/src/Prelude/App.rs:1349
-    pub fn cache(self, policy: String) -> JetApp Never! { state := self.lock(); &state.cache.push(policy); drop(^state); ~self }
+    pub fn cache(self, policy: String) -> JetApp Never! {
+        state := self.lock()
+        &state.cache.push(policy)
+        drop(^state)
+        ~self
+    }
     // Rust: crates/jet-codegen/src/Prelude/App.rs:1353
-    pub fn a11y(self, policy: String) -> JetApp Never! { state := self.lock(); &state.a11y.push(policy); drop(^state); ~self }
+    pub fn a11y(self, policy: String) -> JetApp Never! {
+        state := self.lock()
+        &state.a11y.push(policy)
+        drop(^state)
+        ~self
+    }
     // Rust: crates/jet-codegen/src/Prelude/App.rs:1357
-    pub fn adapter(self, name: String) -> JetApp Never! { state := self.lock(); &state.adapters.push(name); drop(^state); ~self }
+    pub fn adapter(self, name: String) -> JetApp Never! {
+        state := self.lock()
+        &state.adapters.push(name)
+        drop(^state)
+        ~self
+    }
     // Rust: crates/jet-codegen/src/Prelude/App.rs:1362
     pub fn facts_json(self) -> String Never! {
         s :: self.lock()
@@ -838,7 +878,7 @@ impl JetApp {
                 JetWebRouteBoundaries.default()).unwrap_or_else(error ->
                     jet_app_invalid("app route `{route.path}` is not a valid router route: {error}"))
         }
-        if state.not_found is Val(not_found) {
+        if state.not_found == .Val(not_found) {
             retained :: ~not_found
             router = router.not_found(message -> retained().map(page -> page.body).unwrap_or_else(_ -> message.to_string()))
                 .unwrap_or_else(error -> jet_app_invalid("app not-found boundary is invalid: {error}"))
@@ -965,7 +1005,7 @@ impl JetApp {
             })
         }
         loop (_, function, _, _) in state.actions {
-            if function is Val(function) -> jet_web_server_fn_register_http(mux, ~function)
+            if function == .Val(function) -> jet_web_server_fn_register_http(mux, ~function)
         }
         loop (prefix, handler, _, _) in state.mounts {
             retained :: ~handler
