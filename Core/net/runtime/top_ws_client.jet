@@ -109,13 +109,13 @@ fn jet_ws_sha1(data: &[U8]) -> [U8; 20] {
     for chunk in msg.chunks_exact(64) {
         w := [U32; 80].filled(0)
         for (i, word) in chunk.chunks_exact(4).enumerate() { w[i] = U32.from_be_bytes([word[0], word[1], word[2], word[3]]) }
-        for i in 16..<80 { w[i] = rotl(w[i - 3] ^ w[i - 8] ^ w[i - 14] ^ w[i - 16], 1) }
+        loop i in 16..<80 { w[i] = rotl(w[i - 3] ^ w[i - 8] ^ w[i - 14] ^ w[i - 16], 1) }
         a := h0
         b := h1
         c := h2
         d := h3
         e := h4
-        for i in 0..<80 {
+        loop i in 0..<80 {
             (f, k) :: match i {
                 0..19 -> ((b & c) | ((!b) & d), U32{0x5A827999})
                 20..39 -> (b ^ c ^ d, U32{0x6ED9EBA1})
@@ -426,8 +426,8 @@ pub fn jet_ws_connect(url: &String) -> JetWsConn JetWsError! {
             connection_ok := false
             accept_ok := false
             expected :: jet_ws_accept_key(&key)
-            for line in lines {
-                (name, value) :: line.split_once(':') ?? continue
+            loop line in lines {
+                (name, value) :: line.split_once(':') ?? next
                 value := value.trim() // #4303
                 if name.eq_ignore_ascii_case("upgrade") && value.eq_ignore_ascii_case("websocket") { upgrade_ok = true }
                 else if name.eq_ignore_ascii_case("connection") && value.split(',').any(fn(part) { part.trim().eq_ignore_ascii_case("Upgrade") }) { connection_ok = true }

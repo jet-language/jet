@@ -929,7 +929,7 @@ fn jet_net_dns_read_name(packet: &[U8], pos: &USize) -> String Err! {
             if !jumped -> *pos = p + 2
             p = ptr
             jumped = true
-            continue
+            next
         }
         if len & 0xc0 != 0 -> return Err("network protocol error: reserved DNS label encoding")
         p = p + 1
@@ -1038,7 +1038,7 @@ fn jet_net_dns_tcp_exchange(server_addr: SocketAddr, request: &[U8], deadline: I
         match &stream.write(&framed[written..]) {
             Ok(0) -> return Err("network protocol error: DNS TCP connection closed while sending query")
             Ok(n) -> written = written + n
-            Err(error) if error.kind() == .TimedOut || error.kind() == .WouldBlock || error.kind() == .Interrupted -> continue
+            Err(error) if error.kind() == .TimedOut || error.kind() == .WouldBlock || error.kind() == .Interrupted -> next
             Err(error) -> return Err("DNS TCP query send failed: {error}")
         }
     }
@@ -1049,7 +1049,7 @@ fn jet_net_dns_tcp_exchange(server_addr: SocketAddr, request: &[U8], deadline: I
         match &stream.read(&prefix[prefix_read..]) {
             Ok(0) -> return Err("network protocol error: DNS TCP connection closed before response length")
             Ok(n) -> prefix_read = prefix_read + n
-            Err(error) if error.kind() == .TimedOut || error.kind() == .WouldBlock || error.kind() == .Interrupted -> continue
+            Err(error) if error.kind() == .TimedOut || error.kind() == .WouldBlock || error.kind() == .Interrupted -> next
             Err(error) -> return Err("DNS TCP response length failed: {error}")
         }
     }
@@ -1062,7 +1062,7 @@ fn jet_net_dns_tcp_exchange(server_addr: SocketAddr, request: &[U8], deadline: I
         match &stream.read(&packet[read..]) {
             Ok(0) -> return Err("network protocol error: DNS TCP response is truncated")
             Ok(n) -> read = read + n
-            Err(error) if error.kind() == .TimedOut || error.kind() == .WouldBlock || error.kind() == .Interrupted -> continue
+            Err(error) if error.kind() == .TimedOut || error.kind() == .WouldBlock || error.kind() == .Interrupted -> next
             Err(error) -> return Err("DNS TCP response truncated: {error}")
         }
     }
@@ -1168,7 +1168,7 @@ fn jet_net_dns_system_lookup(name: &String, ms: I64) -> [SocketAddr] Err! {
         slice :: jet_net_dns_io_slice(deadline, name)?
         match rx.recv_timeout(slice) {
             Ok(result) -> return result.map_err(fn(error) { "DNS lookup for `{name}` failed: {error}" })
-            Err(.Timeout) -> continue
+            Err(.Timeout) -> next
             Err(.Disconnected) -> return Err("DNS lookup worker for `{name}` failed")
         }
     }

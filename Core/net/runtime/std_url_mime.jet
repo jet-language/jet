@@ -466,11 +466,11 @@ fn jet_url_render_typed_data_parts(parts: [(String, Bool)]) -> String {
     loop (part, hole) in parts {
         if payload {
             if hole -> &out.push_str(jet_url_percent_encode(part, false)) else -> &out.push_str(part)
-            continue
+            next
         }
         if hole {
             &out.push_str(jet_url_percent_encode(part, false))
-            continue
+            next
         }
         if Val(comma) = part.find(',') {
             &out.push_str(jet_url_render_data_mime_literal(part[0..<comma]))
@@ -508,7 +508,7 @@ fn jet_url_normalize_typed_path(parts: [(String, Bool)]) -> [(String, Bool)] {
     loop (part, hole) in ^parts {
         if hole {
             if Val(current) = &segments.last_mut() -> &current.push((part, true))
-            continue
+            next
         }
         loop (index, piece) in part.split('/').enumerate() {
             if index > 0 -> &segments.push([])
@@ -519,10 +519,10 @@ fn jet_url_normalize_typed_path(parts: [(String, Bool)]) -> [(String, Bool)] {
     }
     normalized := [[(String, Bool)]]{}
     loop segment in ^segments {
-        if segment.is_empty() -> continue
+        if segment.is_empty() -> next
         has_hole :: segment.iter().any((_, hole) -> hole)
         value :: segment.iter().map((part, _) -> part.as_str()).collect<String>()
-        if !has_hole && value == "." -> continue
+        if !has_hole && value == "." -> next
         if !has_hole && value == ".." {
             match normalized.last() {
                 Val(previous) -> {
@@ -531,7 +531,7 @@ fn jet_url_normalize_typed_path(parts: [(String, Bool)]) -> [(String, Bool)] {
                 }
                 None -> {}
             }
-            continue
+            next
         }
         &normalized.push(segment)
     }
@@ -562,7 +562,7 @@ fn jet_url_typed_path_segments(parts: [(String, Bool)]) -> [String] {
     loop (part, hole) in parts {
         if hole {
             &current.push_str(part)
-            continue
+            next
         }
         loop (index, piece) in part.split('/').enumerate() {
             if index > 0 && !current.is_empty() {
