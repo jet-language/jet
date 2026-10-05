@@ -35,6 +35,11 @@ the exact harness failure in the handoff before a bounded fallback. A fallback
 still uses the assigned in-repository worktree, explicit timeout, complete
 brief, no Tower writes, and no sibling worktree access.
 
+At most five Opus agents run concurrently, or ten in an owner-authorized sprint.
+Reserve that budget for judgment and coordination. Heavy, long, or token-hungry
+work uses Sol (`task` agents). Select this through the host's actual routing,
+not a model name in a prompt. Workers never spawn workers.
+
 Workers do not write Tower, close cards, or start `tower serve`. The completion
 owner uses the non-serve CLI against the main board; no agent hand-edits Tower
 data.

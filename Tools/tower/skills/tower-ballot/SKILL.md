@@ -47,6 +47,12 @@ an executable candidate/plain two-program cell in the canonical gauntlet
 matrix before ratification. Apply the standing comparator and keep every loss
 carded.
 
+All owner decisions, including choices awaiting approval, live in Tower
+ballots. A card log or briefing may link one, never record a substitute decision.
+Apply the [nine clarity rules](references/clarity.md) before drafting; these
+owner rules are stricter than schema maxima, not permission to omit required
+fields. Research the proven approaches and failures first.
+
 ## Write user-visible prose simply
 
 Use the `simple` skill for every user-visible word: headings, context, stories,
@@ -86,7 +92,7 @@ is optional. Follow the owner's requested reader and routing.
 Every full ballot opens with a top-level `situation` string (not inside
 `surface`). Tower shows it first on every ballot view, as the headline summary
 above the question and lesson. Write it for someone who has read no code, in
-4–7 plain sentences that answer, in order:
+at most four short plain sentences that cover:
 
 1. What is the thing? Everyday words first, technical name second.
 2. What happens today, and what problem does it cause? Give one concrete
@@ -114,9 +120,10 @@ a ballot without a valid `surface`.
 - **`trio.wild`** — `{lang, note, code}` showing a real tool doing the same
   job. Cite the source in a code comment or note.
 - **`options[]`** — each option has the same ordered keys:
-  `{key, name, gist, gains[1-3], losses[0-3], proposed: {code}}`. The proposed
-  code uses the same workload as current and in-the-wild code and is at most
-  14 lines. Gains and losses are concrete facts, never padding.
+  `{key, name, gist, gains[1-3], losses[0-3], proposed: {code}}`. Show one tiny
+  before/after per option using the same workload as current and in-the-wild
+  code, at most six lines per snippet. Gains and losses are concrete facts,
+  never padding. The recommendation keeps at most two mitigated losses.
 - **`recommendation`** — `{rec, why, gains[], losses[{loss, mitigation}],
   whyNot[{key, reason}], tradeoff}`. `rec` equals the ballot `rec`; `why` is
   under 40 words; `whyNot` names every losing option. Every remaining loss has
@@ -126,10 +133,14 @@ For every new ballot, list the recommended option as `A` first and set `rec` to
 `A`. Tower rejects another new recommendation. Existing open ballots keep
 their letters. Keep losses as plain strings in `surface.options[*]`.
 
-The surface has these caps: sentences under 24 words, bullets under 14 words,
-and prose under 430 words. Avoid project jargon such as "ratchet," "seam,"
-"facet," "substrate," "tier parity," or "Ring 0/1." Say the plain thing,
-such as "core owns the meaning" or "field group." Exemplar: `D-M-SIGNAL1`.
+Keep the complete short surface around 250 words, even though Tower's schema
+allows more: sentences under 24 words and bullets under 14 words. At most three
+genuine options; narrow or split a larger question. Avoid project jargon such
+as "ratchet," "seam," "facet," "substrate," "tier parity," or "Ring 0/1."
+Say the plain thing, such as "core owns the meaning" or "field group."
+File paths, decision IDs, and citations belong only in `detail` and `technical`;
+keep situation, gist, story, option names/gists, and recommendation free of them.
+Exemplar: `D-M-SIGNAL1`.
 
 ## Long form and readiness
 

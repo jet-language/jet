@@ -14,10 +14,10 @@ matches the work:
 | Need | Read |
 |---|---|
 | Brief a worker, dispatch a slice, or harvest a receipt | [`references/dispatch.md`](references/dispatch.md) |
-| Card proof and linked-card milestone cadence | [`references/closeout.md`](references/closeout.md) |
+| Diagnose and batch failures, integrate to `dev`, or gate `master` | [`references/closeout.md`](references/closeout.md) |
 | Review a new, draft, or changed full ballot | [`references/ballot-review.md`](references/ballot-review.md) |
 | Recover after a crash, timeout, or tangled integration | [`references/recovery.md`](references/recovery.md) |
-| Bound time, disk, memory, and process liveness | [`references/resources.md`](references/resources.md) |
+| Agent budget, shared artifacts, proof queue, disk, or memory | [`references/resources.md`](references/resources.md) |
 
 ## Authority and outcome
 

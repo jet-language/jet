@@ -4,6 +4,7 @@
 set -euo pipefail
 
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+source "$repo/Tools/agent/host-env.sh"
 profile="core"
 if [ "${1:-}" = "full" ]; then
   profile="full"
@@ -40,7 +41,7 @@ check_target_dir() {
     case "$resolved" in
       /tmp|/tmp/*)
         echo "jet-env: $name=$value is on tmpfs /tmp (RAM-backed)." >&2
-        echo "jet-env: artifacts there cause OOM crashes; use a disk path under the checkout." >&2
+        echo "jet-env: artifacts there cause OOM crashes; use the configured disk-backed scratch filesystem." >&2
         exit 64
         ;;
     esac
@@ -61,31 +62,37 @@ check_target_dir() {
   # the other checkout's binary with its embedded assets. Per-checkout caches
   # only (card 1640).
   if [ -n "${CARGO_TARGET_DIR:-}" ]; then
-    local target
+    local target scratch_targets=""
     target="$(realpath -m -- "$CARGO_TARGET_DIR")"
-    case "$target" in
-      "$checkout"/*) ;;
-      /mnt/jetscratch/targets/*)
-        # Off-drive target dirs are allowed only when owned by exactly one
-        # checkout: the first use stamps the owner, any other checkout is
-        # refused, so card 1640's stale cross-checkout binaries cannot happen.
-        mkdir -p -- "$target"
+    if [ -n "${JET_SCRATCH_ROOT:-}" ]; then
+      case "$JET_SCRATCH_ROOT" in
+        /*) ;;
+        *) echo "jet-env: JET_SCRATCH_ROOT must be absolute." >&2; exit 64 ;;
+      esac
+      reject_tmpfs_path JET_SCRATCH_ROOT "$JET_SCRATCH_ROOT"
+      scratch_targets="$(realpath -m -- "$JET_SCRATCH_ROOT/targets")"
+    fi
+    if [[ "$target" == "$checkout/"* ]]; then
+      :
+    elif [ -n "$scratch_targets" ] && [[ "$target" == "$scratch_targets/"* ]]; then
+      # Off-drive targets retain card 1640's one-checkout ownership rule.
+      mkdir -p -- "$target"
+      (
+        flock -x 9
         if [ -f "$target/.jet-checkout" ]; then
           if [ "$(cat -- "$target/.jet-checkout")" != "$checkout" ]; then
             echo "jet-env: $CARGO_TARGET_DIR belongs to $(cat -- "$target/.jet-checkout"), not $checkout." >&2
-            echo "jet-env: use a target dir of your own under /mnt/jetscratch/targets/." >&2
             exit 64
           fi
         else
           printf '%s\n' "$checkout" > "$target/.jet-checkout"
         fi
-        ;;
-      *)
-        echo "jet-env: CARGO_TARGET_DIR=$CARGO_TARGET_DIR lies outside this checkout." >&2
-        echo "jet-env: shared caches serve stale cross-checkout binaries; use $checkout/target-<name> or /mnt/jetscratch/targets/<name>." >&2
-        exit 64
-        ;;
-    esac
+      ) 9>"$target/.jet-checkout.lock" || exit 64
+    else
+      echo "jet-env: CARGO_TARGET_DIR=$CARGO_TARGET_DIR is not checkout-owned." >&2
+      echo "jet-env: configure JET_SCRATCH_ROOT and use its targets/<name> directory." >&2
+      exit 64
+    fi
   fi
 }
 

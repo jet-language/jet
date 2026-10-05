@@ -190,9 +190,9 @@ One implementer owns each coherent patch. Concurrent writers need disjoint
 paths and one named close owner. Default to a single delivery stream, and add
 streams only when paths, integration, tests, and resources stay clean. Use only
 in-repository worktrees under `.claude/worktrees/<name>` or
-`.agent-worktrees/<name>`, keep each checkout's Cargo target inside that
-checkout (`jet-env` rejects a `CARGO_TARGET_DIR` outside it), integrate
-promptly, and remove finished worktrees and temporary branches. Never overwrite
+`.agent-worktrees/<name>`, use checkout-owned external Cargo targets configured
+through `jet-env` (see the orchestration resource reference), integrate promptly,
+and remove finished worktrees and temporary branches. Never overwrite
 another task's paths. Never run `git add -A`, a broad `git commit -a`,
 `git restore .`, or any equivalent broad operation. Never hand-edit
 `Tools/tower/.tower/`.
@@ -217,11 +217,10 @@ under `.agents/skills` and `Tools/tower/skills`.
 ## Environment and proof
 
 Run repository commands through `Tools/agent/jet-env`. Keep scratch and logs on
-disk under `~/.cache/jet-dev/scratch` and `~/.cache/jet-dev`, never in
-`/tmp`, which is RAM-backed. Use the checkout's own bounded Cargo target
-(`<checkout>/target` by default) and respect the default
-`JET_TARGET_CAP_GB=120`. Keep `CARGO_INCREMENTAL=0`, except in the
-orchestrator's lock-serialized build targets, which opt in with
+disk at the configured external paths, never in RAM-backed `/tmp`. Follow the
+orchestration resource reference for target placement, disk gates, and shared
+artifacts; respect `JET_TARGET_CAP_GB=120`. Keep `CARGO_INCREMENTAL=0`, except
+in the orchestrator's lock-serialized build targets, which opt in with
 `JET_CARGO_INCREMENTAL=1` and are pruned between builds.
 Rebuild before compiler smoke tests. After integration, run the exact narrow
 proof the criteria name. Broad suites, unfiltered censuses, and
