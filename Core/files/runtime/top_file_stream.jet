@@ -20,7 +20,7 @@ pub fn jet_std_files_open(path: &String) -> JetFileReader IOError! {
 pub fn jet_std_files_create(path: &String) -> JetFileWriter IOError! {
     if jet_fault_should_fail("FS.Write") ->
         return Err(IOError.other(.Write, Val(path.clone()), "fault injected: FS.Write"))
-    if jet_std_files_writer_refusal(path) is Val(error) -> return Err(^error)
+    if jet_std_files_writer_refusal(path) == .Val(error) -> return Err(^error)
     // GATE #4565: kernel primitive
     file :: #Unsafe("create/truncate native file only after injected fault and mapped-writer refusal checks") {
         fs.File.create(OSPath.from(path))
@@ -31,7 +31,7 @@ pub fn jet_std_files_create(path: &String) -> JetFileWriter IOError! {
 pub fn jet_std_files_append(path: &String) -> JetFileWriter IOError! {
     if jet_fault_should_fail("FS.Write") ->
         return Err(IOError.other(.Write, Val(path.clone()), "fault injected: FS.Write"))
-    if jet_std_files_writer_refusal(path) is Val(error) -> return Err(^error)
+    if jet_std_files_writer_refusal(path) == .Val(error) -> return Err(^error)
     // GATE #4565: kernel primitive
     file :: #Unsafe("open/create append-only native file after shared fault/refusal policy") {
         fs.OpenOptions.new().create(true).append(true).open(OSPath.from(path))

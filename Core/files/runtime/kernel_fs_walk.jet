@@ -36,7 +36,7 @@ pub fn jet_fs_walk_parallel_filtered_with_ignore<T, E>(path: String, shown: Stri
         error_path: OSPath?
     }
     root :: OSPath.from(path)
-    if jet_fs_validate_walk_root(root) is Err(error) -> return Err(make_error(shown, error))
+    if jet_fs_validate_walk_root(root) == .Err(error) -> return Err(make_error(shown, error))
     initial_matcher :: if ignore_name == None -> None else -> Val(JetFSIgnoreMatcher.new())
     // GATE #4565: kernel primitive — real Arc/Mutex/Condvar, native worker spawn,
     // filesystem iteration, poison/unwind and native available_parallelism.
@@ -67,7 +67,7 @@ pub fn jet_fs_walk_parallel_filtered_with_ignore<T, E>(path: String, shown: Stri
                         (queue_cell, wake) :: state.deref()
                         queue := queue_cell.lock() ?? panic("filesystem walk queue poisoned")
                         loop {
-                            if queue.directories.pop_front() is Val(task) {
+                            if queue.directories.pop_front() == .Val(task) {
                                 queue.active_workers += USize{1}
                                 break task
                             }
@@ -79,8 +79,8 @@ pub fn jet_fs_walk_parallel_filtered_with_ignore<T, E>(path: String, shown: Stri
                         }
                     }
                     result :: (fn() -> ([T], [(OSPath, I64, JetFSIgnoreMatcher?)]) E! {
-                        if jet_fs_validate_walk_root(dir) is Err(error) -> return Err(make_error(shown.deref(), error))
-                        matcher :: if ignore_name is Val(filename) {
+                        if jet_fs_validate_walk_root(dir) == .Err(error) -> return Err(make_error(shown.deref(), error))
+                        matcher :: if ignore_name == .Val(filename) {
                             inherited :: inherited_matcher ?? panic("ignore selector always carries a matcher")
                             error_path :: dir.to_string_lossy().to_string()
                             // Rust FSIgnore.rs30-65 native half: supply the canonical
@@ -110,11 +110,11 @@ pub fn jet_fs_walk_parallel_filtered_with_ignore<T, E>(path: String, shown: Stri
                             entry :: entry_result ?? return Err(make_error(shown.deref(), err))
                             child :: entry.path()
                             file_type :: entry.file_type()
-                            is_dir :: if file_type is Ok(kind) -> kind.is_dir() else -> false
-                            is_file :: if file_type is Ok(kind) -> kind.is_file() else -> false
+                            is_dir :: if file_type == .Ok(kind) -> kind.is_dir() else -> false
+                            is_file :: if file_type == .Ok(kind) -> kind.is_file() else -> false
                             relative :: (child.strip_prefix(root) ?? child).to_string_lossy().to_string()
-                            is_ignore_file :: if ignore_name is Val(filename) -> entry.file_name() == OSPath.from(filename).as_os_str() else -> false
-                            ignored :: if matcher is Val(matcher) -> is_ignore_file || matcher.is_ignored(relative, is_dir) else -> false
+                            is_ignore_file :: if ignore_name == .Val(filename) -> entry.file_name() == OSPath.from(filename).as_os_str() else -> false
+                            ignored :: if matcher == .Val(matcher) -> is_ignore_file || matcher.is_ignored(relative, is_dir) else -> false
                             if not ignored && keep(relative, is_dir, is_file) -> &batch.push(make_entry(child.to_string_lossy().to_string(), relative, is_dir, depth))
                             if is_dir && not ignored -> &children.push((child, depth + I64{1}, matcher.clone()))
                         }
@@ -131,7 +131,7 @@ pub fn jet_fs_walk_parallel_filtered_with_ignore<T, E>(path: String, shown: Stri
                             &output.extend(^batch)
                         }
                         Err(error) -> {
-                            earlier :: if queue.error_path is Val(current) -> dir < current else -> true
+                            earlier :: if queue.error_path == .Val(current) -> dir < current else -> true
                             if earlier {
                                 queue.error_path = Val(dir.clone())
                                 queue.error = Val(error)
@@ -143,7 +143,7 @@ pub fn jet_fs_walk_parallel_filtered_with_ignore<T, E>(path: String, shown: Stri
             }))
         }
         loop handle in ^handles {
-            if handle.join() is Err(_) {
+            if handle.join() == .Err(_) {
                 (queue_cell, _) :: state.deref()
                 queue := queue_cell.lock() ?? panic("filesystem walk queue poisoned")
                 if queue.error == None {
@@ -154,7 +154,7 @@ pub fn jet_fs_walk_parallel_filtered_with_ignore<T, E>(path: String, shown: Stri
         }
         (queue_cell, _) :: state.deref()
         queue := queue_cell.lock() ?? panic("filesystem walk queue poisoned")
-        if queue.error.take() is Val(error) -> return Err(error)
+        if queue.error.take() == .Val(error) -> return Err(error)
         owned_sink :: Arc.try_unwrap(^sink) ?? panic("filesystem walk sink still referenced")
         Ok(owned_sink.into_inner() ?? panic("filesystem walk sink poisoned"))
     }

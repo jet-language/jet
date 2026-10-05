@@ -47,7 +47,10 @@ fn jet_fs_scope_relative(path: OSPath) -> OSPath io.Error! {
     has_component := false
     loop component in path.components() {
         if component == {
-            .Normal(name) -> { &relative.push(name); has_component = true }
+            .Normal(name) -> {
+                &relative.push(name)
+                has_component = true
+            }
             .CurDir -> {}
             .ParentDir | .RootDir | .Prefix(_) -> return Err(jet_fs_scope_denied())
         }

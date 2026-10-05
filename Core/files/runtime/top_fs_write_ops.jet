@@ -11,7 +11,7 @@ use std.io.[Seek, SeekFrom, Write]
 // Shared filesystem write/fault policy; native paths remain OSPath at the kernel boundary.
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/FSWriteOps.rs:5
 pub fn jet_std_fs_write_bytes(path: &String, bytes: &[U8]) -> () IOError! {
-    if jet_std_files_writer_refusal(path) is Val(error) -> return Err(^error)
+    if jet_std_files_writer_refusal(path) == .Val(error) -> return Err(^error)
     if jet_fault_should_fail("FS.Write") ->
         return Err(IOError.other(.Write, Val(path.clone()), "fault injected: FS.Write"))
     // GATE #4565: kernel primitive
@@ -21,7 +21,7 @@ pub fn jet_std_fs_write_bytes(path: &String, bytes: &[U8]) -> () IOError! {
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/FSWriteOps.rs:23
 pub fn jet_std_fs_write_at(path: &String, offset: I64, bytes: &[U8]) -> () IOError! {
-    if jet_std_files_writer_refusal(path) is Val(error) -> return Err(^error)
+    if jet_std_files_writer_refusal(path) == .Val(error) -> return Err(^error)
     if jet_fault_should_fail("FS.Write") ->
         return Err(IOError.other(.Write, Val(path.clone()), "fault injected: FS.Write"))
     // GATE #4565: kernel primitive
@@ -37,7 +37,7 @@ pub fn jet_std_fs_write_at(path: &String, offset: I64, bytes: &[U8]) -> () IOErr
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/FSWriteOps.rs:50
 pub fn jet_std_fs_write_atomic(path: &String, bytes: &[U8]) -> () IOError! {
-    if jet_std_files_writer_refusal(path) is Val(error) -> return Err(^error)
+    if jet_std_files_writer_refusal(path) == .Val(error) -> return Err(^error)
     if jet_fault_should_fail("FS.Write") ->
         return Err(IOError.other(.Write, Val(path.clone()), "fault injected: FS.Write"))
     target_path :: OSPath.from(path)
@@ -51,7 +51,11 @@ pub fn jet_std_fs_write_atomic(path: &String, bytes: &[U8]) -> () IOError! {
         match #Unsafe("create-new reserves one real sibling file exclusively without overwriting another writer") {
             fs.OpenOptions.new().create_new(true).write(true).open(&candidate)
         } {
-            Ok(file) -> { temp_path = Val(^candidate); temp_file = Val(^file); break }
+            Ok(file) -> {
+                temp_path = Val(^candidate)
+                temp_file = Val(^file)
+                break
+            }
             Err(error) -> {
                 if error.kind() == .AlreadyExists -> continue
                 return Err(io_error_at(.Write, path, ^error))
@@ -70,7 +74,7 @@ pub fn jet_std_fs_write_atomic(path: &String, bytes: &[U8]) -> () IOError! {
         }
         Ok(_) -> {}
     }
-    if existing_permissions is Val(permissions) {
+    if existing_permissions == .Val(permissions) {
         match #Unsafe("preserve target permissions on the atomic replacement sibling") { temp_file.set_permissions(^permissions) } {
             Err(error) -> {
                 #Unsafe("best-effort removal of our reserved sibling after permission failure") { _ :: fs.remove_file(&temp_path) }

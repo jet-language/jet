@@ -166,7 +166,10 @@ impl JetMappedStorage {
         (pointer, mapping) :: if family == .Unix {
             pointer :: if jet_mapped_unix_map(&file, length) == {
                 .Ok(pointer) -> pointer
-                .Err(error) -> { jet_mapped_unix_shared_unlock(&file); return Err(error) }
+                .Err(error) -> {
+                    jet_mapped_unix_shared_unlock(&file)
+                    return Err(error)
+                }
             }
             (pointer, ptr.null_mut())
         } else -> jet_mapped_windows_map(&file, length)?
@@ -180,8 +183,14 @@ impl JetMappedStorage {
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MappedFile.rs:275
     fn checked_window(self: &JetMappedStorage, start_value: I64, end_value: I64) -> (Usize, Usize) IOError! {
-        start :: if Usize.try_from(start_value).ok() == { .Val(value) -> value; .None -> return Err(self.invalid_window(start_value, end_value)) }
-        end :: if Usize.try_from(end_value).ok() == { .Val(value) -> value; .None -> return Err(self.invalid_window(start as I64, end_value)) }
+        start :: if Usize.try_from(start_value).ok() == {
+            .Val(value) -> value
+            .None -> return Err(self.invalid_window(start_value, end_value))
+        }
+        end :: if Usize.try_from(end_value).ok() == {
+            .Val(value) -> value
+            .None -> return Err(self.invalid_window(start as I64, end_value))
+        }
         if start > end || end > self.length -> return Err(self.invalid_window(start as I64, end as I64))
         Ok((start, end))
     }
@@ -223,7 +232,10 @@ impl JetMappedFile {
     pub fn is_empty(self: &JetMappedFile) -> Bool { self.storage.length == 0 }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MappedFile.rs:345
     pub fn window_len(self: &JetMappedFile, offset: I64, length: I64) -> JetMappedByteView IOError! {
-        end :: if offset.checked_add(length) == { .Val(end) -> end; .None -> return Err(self.storage.invalid_window(offset, length)) }
+        end :: if offset.checked_add(length) == {
+            .Val(end) -> end
+            .None -> return Err(self.storage.invalid_window(offset, length))
+        }
         self.window(offset, end)
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MappedFile.rs:356
@@ -240,7 +252,10 @@ impl JetMappedFile {
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MappedFile.rs:378
     pub fn window_len_view(self: &JetMappedFile, offset: I64, length: I64) -> View<U8> IOError! {
-        end :: if offset.checked_add(length) == { .Val(end) -> end; .None -> return Err(self.storage.invalid_window(offset, length)) }
+        end :: if offset.checked_add(length) == {
+            .Val(end) -> end
+            .None -> return Err(self.storage.invalid_window(offset, length))
+        }
         self.window_view(offset, end)
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MappedFile.rs:387
@@ -264,7 +279,10 @@ impl JetMappedByteView {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MappedFile.rs:435
     pub fn to_vec(self: &JetMappedByteView) -> [U8] { self.as_bytes().to_vec() }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MappedFile.rs:439
-    pub fn get(self: &JetMappedByteView, index_value: I64) -> U8? { index :: Usize.try_from(index_value).ok()?; self.as_bytes().get(index).copied() }
+    pub fn get(self: &JetMappedByteView, index_value: I64) -> U8? {
+        index :: Usize.try_from(index_value).ok()?
+        self.as_bytes().get(index).copied()
+    }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MappedFile.rs:444
     pub fn starts_with(self: &JetMappedByteView, prefix: View<U8>) -> Bool { self.as_bytes().starts_with(prefix) }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MappedFile.rs:448
@@ -273,24 +291,42 @@ impl JetMappedByteView {
     pub fn iter(self: &JetMappedByteView) -> slice.Iter<U8> { self.as_bytes().iter() }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MappedFile.rs:456
     pub fn window(self: &JetMappedByteView, start_value: I64, end_value: I64) -> JetMappedByteView IOError! {
-        start :: if Usize.try_from(start_value).ok() == { .Val(value) -> value; .None -> return Err(self.storage.invalid_window(start_value, end_value)) }
-        end :: if Usize.try_from(end_value).ok() == { .Val(value) -> value; .None -> return Err(self.storage.invalid_window(start as I64, end_value)) }
+        start :: if Usize.try_from(start_value).ok() == {
+            .Val(value) -> value
+            .None -> return Err(self.storage.invalid_window(start_value, end_value))
+        }
+        end :: if Usize.try_from(end_value).ok() == {
+            .Val(value) -> value
+            .None -> return Err(self.storage.invalid_window(start as I64, end_value))
+        }
         relative_len :: self.end - self.start
         if start > end || end > relative_len -> return Err(self.storage.invalid_window(start as I64, end as I64))
-        absolute_start :: if self.start.checked_add(start) == { .Val(value) -> value; .None -> return Err(self.storage.invalid_window(start as I64, end as I64)) }
-        absolute_end :: if self.start.checked_add(end) == { .Val(value) -> value; .None -> return Err(self.storage.invalid_window(start as I64, end as I64)) }
+        absolute_start :: if self.start.checked_add(start) == {
+            .Val(value) -> value
+            .None -> return Err(self.storage.invalid_window(start as I64, end as I64))
+        }
+        absolute_end :: if self.start.checked_add(end) == {
+            .Val(value) -> value
+            .None -> return Err(self.storage.invalid_window(start as I64, end as I64))
+        }
         Ok(JetMappedByteView { storage: self.storage.clone(), start: absolute_start, end: absolute_end })
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MappedFile.rs:481
     pub fn window_len(self: &JetMappedByteView, offset: I64, length: I64) -> JetMappedByteView IOError! {
-        end :: if offset.checked_add(length) == { .Val(end) -> end; .None -> return Err(self.storage.invalid_window(offset, length)) }
+        end :: if offset.checked_add(length) == {
+            .Val(end) -> end
+            .None -> return Err(self.storage.invalid_window(offset, length))
+        }
         self.window(offset, end)
     }
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MappedFile.rs:489,490
 impl JetMappedByteView.AsRef<View<U8>> { fn as_ref(self: &JetMappedByteView) -> View<U8> { self.as_bytes() } }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MappedFile.rs:495,498
-impl JetMappedByteView.Deref { type Target = View<U8>; fn deref(self: &JetMappedByteView) -> View<U8> { self.as_bytes() } }
+impl JetMappedByteView.Deref {
+    type Target = View<U8>
+    fn deref(self: &JetMappedByteView) -> View<U8> { self.as_bytes() }
+}
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MappedFile.rs:503,507
 impl (&JetMappedByteView).IntoIterator {
     type Item = &U8
