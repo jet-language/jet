@@ -8,7 +8,10 @@ pub fn max_pow10(x: U64) -> (k: Int, ten: U64) Never! {
     assert(x > (U64{0}) && x <= (U64{0xffffffff}))
     k := 0
     ten := U64{1}
-    loop k < 9 && ten * U64{10} <= x { ten *= U64{10}; k += 1 }
+    loop k < 9 && ten * U64{10} <= x {
+        ten *= U64{10}
+        k += 1
+    }
     (k: k, ten: ten)
 }
 fn weed(buf: &[U8#N], len: Int, exp: Int, remainder: U64, threshold: U64, plus1v: U64, ten: U64, ulp: U64) -> dec.Digits? Never! {
@@ -51,13 +54,16 @@ pub fn shortest_opt(d: &dec.Decoded, buf: &[U8#N]) -> dec.Digits? Never! {
         residual :: (r << e) + fraction
         if residual < delta -> return weed(buf, len, exp, residual, delta, p - v.f, ten << e, U64{1})
         if len > powers.k -> break
-        ten /= U64{10}; rem = r
+        ten /= U64{10}
+        rem = r
     }
     rem = fraction
     threshold := delta & mask
     ulp := U64{1}
     loop {
-        rem *= U64{10}; threshold *= U64{10}; ulp *= U64{10}
+        rem *= U64{10}
+        threshold *= U64{10}
+        ulp *= U64{10}
         q :: rem >> e
         r :: rem & mask
         buf[len] = U8{48} + (U8.from_u64(q) ?? panic("Grisu digit"))
@@ -112,12 +118,14 @@ pub fn exact_opt(d: &dec.Decoded, buf: &[U8#N], capacity: Int, limit: Int) -> de
         i += 1
         if i == len -> return possibly_round(buf, len, exp, capacity, limit, (r << e) + fraction, ten << e, err << e)
         if i > powers.k -> break
-        ten /= U64{10}; rem = r
+        ten /= U64{10}
+        rem = r
     }
     rem = fraction
     maxerr :: U64{1} << (e - 1)
     loop err < maxerr {
-        rem *= U64{10}; err *= U64{10}
+        rem *= U64{10}
+        err *= U64{10}
         q :: rem >> e
         r :: rem & mask
         buf[i] = U8{48} + (U8.from_u64(q) ?? panic("Grisu digit"))

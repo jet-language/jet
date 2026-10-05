@@ -451,10 +451,16 @@ fn jet_text_graphemes(s: &String) -> [String] {
         ri_run = if cc == JET_GB_RI -> ri_run + 1 else -> 0
         saw_pic = if cc == JET_GB_EXTEND || cc == JET_GB_ZWJ -> saw_pic else -> jet_text_is_ext_pictographic(curc as U32)
         match jet_text_incb_class(curc as U32) {
-            JET_INCB_CONSONANT -> { incb_pending = true; incb_linker = false }
+            JET_INCB_CONSONANT -> {
+                incb_pending = true
+                incb_linker = false
+            }
             JET_INCB_LINKER -> if incb_pending -> incb_linker = true
             JET_INCB_EXTEND -> {}
-            _ -> { incb_pending = false; incb_linker = false }
+            _ -> {
+                incb_pending = false
+                incb_linker = false
+            }
         }
     }
     &out.push(^cur)
@@ -500,10 +506,16 @@ impl JetTextGraphemeViewIter.Iterator {
             ri_run = if current_class == JET_GB_RI -> ri_run.saturating_add(1) else -> 0
             saw_pic = if current_class == JET_GB_EXTEND || current_class == JET_GB_ZWJ -> saw_pic else -> jet_text_is_ext_pictographic(current as U32)
             match jet_text_incb_class(current as U32) {
-                JET_INCB_CONSONANT -> { incb_pending = true; incb_linker = false }
+                JET_INCB_CONSONANT -> {
+                    incb_pending = true
+                    incb_linker = false
+                }
                 JET_INCB_LINKER -> if incb_pending -> incb_linker = true
                 JET_INCB_EXTEND -> {}
-                _ -> { incb_pending = false; incb_linker = false }
+                _ -> {
+                    incb_pending = false
+                    incb_linker = false
+                }
             }
         }
         self.ri_run = ri_run
@@ -634,7 +646,10 @@ fn jet_text_word_segments(s: &String) -> [String] {
     loop (idx, c) in cps.iter().enumerate() {
         &cur.push(c)
         if idx == ends[ui] && ui + 1 < n {
-            if brk[ui] { &out.push(^cur); cur = String.new() }
+            if brk[ui] {
+                &out.push(^cur)
+                cur = String.new()
+            }
             ui += 1
         }
     }
@@ -729,11 +744,24 @@ fn jet_text_sentence_breaks(units: View<U8>) -> [Bool] {
     i := 0
     loop i + 1 < n {
         cc0 :: units[i]
-        if cc0 == JET_SB_CR && units[i + 1] == JET_SB_LF { i += 1; next } // SB3
-        if cc0 == JET_SB_SEP || cc0 == JET_SB_CR || cc0 == JET_SB_LF { brk[i] = true; i += 1; next } // SB4
+        if cc0 == JET_SB_CR && units[i + 1] == JET_SB_LF {
+            i += 1
+            next
+        } // SB3
+        if cc0 == JET_SB_SEP || cc0 == JET_SB_CR || cc0 == JET_SB_LF {
+            brk[i] = true
+            i += 1
+            next
+        } // SB4
         if cc0 == JET_SB_ATERM || cc0 == JET_SB_STERM {
-            if cc0 == JET_SB_ATERM && units[i + 1] == JET_SB_NUMERIC { i += 1; next } // SB6
-            if cc0 == JET_SB_ATERM && i > 0 && (units[i - 1] == JET_SB_UPPER || units[i - 1] == JET_SB_LOWER) && i + 1 < n && units[i + 1] == JET_SB_UPPER { i += 1; next } // SB7
+            if cc0 == JET_SB_ATERM && units[i + 1] == JET_SB_NUMERIC {
+                i += 1
+                next
+            } // SB6
+            if cc0 == JET_SB_ATERM && i > 0 && (units[i - 1] == JET_SB_UPPER || units[i - 1] == JET_SB_LOWER) && i + 1 < n && units[i + 1] == JET_SB_UPPER {
+                i += 1
+                next
+            } // SB7
             j := i + 1
             loop j < n && units[j] == JET_SB_CLOSE -> j += 1
             close_end :: j
@@ -747,7 +775,10 @@ fn jet_text_sentence_breaks(units: View<U8>) -> [Bool] {
                 k := sp_end
                 loop k < n {
                     kc :: units[k]
-                    if kc == JET_SB_LOWER { sb8 = true; break }
+                    if kc == JET_SB_LOWER {
+                        sb8 = true
+                        break
+                    }
                     if kc == JET_SB_OLETTER || kc == JET_SB_UPPER || kc == JET_SB_SEP || kc == JET_SB_CR || kc == JET_SB_LF || kc == JET_SB_STERM || kc == JET_SB_ATERM -> break
                     k += 1
                 }
@@ -787,7 +818,10 @@ fn jet_text_sentence_segments(s: &String) -> [String] {
     loop (idx, c) in cps.iter().enumerate() {
         &cur.push(c)
         if idx == ends[ui] && ui + 1 < n {
-            if brk[ui] { &out.push(^cur); cur = String.new() }
+            if brk[ui] {
+                &out.push(^cur)
+                cur = String.new()
+            }
             ui += 1
         }
     }
@@ -905,10 +939,16 @@ fn jet_text_capitalize(s: &String) -> String {
 fn jet_text_swapcase(s: &String) -> String {
     out := String.with_capacity(s.len())
     loop c in s.chars() {
-        if !text_asset.asset_contains(UNICODE_CASED, Int.from_u32(c as U32)) { &out.push(c); next }
+        if !text_asset.asset_contains(UNICODE_CASED, Int.from_u32(c as U32)) {
+            &out.push(c)
+            next
+        }
         one :: c.to_string()
         upper :: text_string.upper(one)
-        if upper != one { &out.push_str(upper); next }
+        if upper != one {
+            &out.push_str(upper)
+            next
+        }
         lower :: text_string.lower(one)
         if lower != one -> &out.push_str(lower) else -> &out.push(c)
     }
@@ -916,15 +956,25 @@ fn jet_text_swapcase(s: &String) -> String {
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:1015
 fn jet_text_remove_prefix(s: &String, prefix: &String) -> String {
-    match s.strip_prefix(prefix.as_str()) { .Val(rest) -> rest.to_string(); .None -> s.clone() }
+    match s.strip_prefix(prefix.as_str()) {
+        .Val(rest) -> rest.to_string()
+        .None -> s.clone()
+    }
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:1021
 fn jet_text_remove_suffix(s: &String, suffix: &String) -> String {
-    match s.strip_suffix(suffix.as_str()) { .Val(rest) -> rest.to_string(); .None -> s.clone() }
+    match s.strip_suffix(suffix.as_str()) {
+        .Val(rest) -> rest.to_string()
+        .None -> s.clone()
+    }
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:1027
 fn jet_text_compare(a: View<str>, b: View<str>) -> I64 {
-    match a.cmp(b) { .Less -> -1; .Equal -> 0; .Greater -> 1 }
+    match a.cmp(b) {
+        .Less -> -1
+        .Equal -> 0
+        .Greater -> 1
+    }
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:1034
 fn jet_text_reverse(s: &String) -> String { s.chars().rev().collect() }
@@ -1109,7 +1159,10 @@ fn jet_text_parse_splitlines(text: &String, keepends: Bool) -> [String] {
         width := 0
         if bytes[index] == U8{10} -> width = 1
         else if bytes[index] == U8{13} -> width = if bytes.get(index + 1) == .Val(U8{10}) -> 2 else -> 1
-        else { index += 1; next }
+        else {
+            index += 1
+            next
+        }
         end :: index + width
         stop :: if keepends -> end else -> index
         &out.push(text.get(start..<stop).unwrap_or_default().to_string())
@@ -1212,8 +1265,14 @@ fn jet_text_expand_tabs(text: &String, tabsize: I64) -> String {
                 &out.extend(std.iter.repeat_n(' ', spaces))
                 column += spaces
             }
-            '\n' -> { &out.push('\n'); column = 0 }
-            _ -> { &out.push(character); column += 1 }
+            '\n' -> {
+                &out.push('\n')
+                column = 0
+            }
+            _ -> {
+                &out.push(character)
+                column += 1
+            }
         }
     }
     ^out
@@ -1362,7 +1421,10 @@ fn jet_text_parse_unescape_c(text: &String) -> String {
     chars := text.chars()
     loop {
         character :: &chars.next() ?? break
-        if character != '\\' { &out.push(character); next }
+        if character != '\\' {
+            &out.push(character)
+            next
+        }
         match &chars.next() {
             .Val('n') -> &out.push('\n')
             .Val('t') -> &out.push('\t')
@@ -1426,8 +1488,14 @@ fn jet_text_expandtabs(s: &String, tabsize: JetInt) -> String {
                 column += spaces
             }
             '\t' -> {}
-            '\n' | '\r' -> { &out.push(character); column = 0 }
-            _ -> { &out.push(character); column += 1 }
+            '\n' | '\r' -> {
+                &out.push(character)
+                column = 0
+            }
+            _ -> {
+                &out.push(character)
+                column += 1
+            }
         }
     }
     ^out

@@ -44,7 +44,7 @@ pub fn jet_typed_html_interpolate(literals: &[String], holes: [String], trusted_
     holes := holes.into_iter()
     loop (index, literal) in literals.iter().enumerate() {
         out.push_str(literal)
-        if holes.next() is Val(hole) {
+        if holes.next() == .Val(hole) {
             if trusted_html.get(index).copied().unwrap_or(false) { out.push_str(&hole) }
             else { out.push_str(&jet_typed_html_escape(&hole)) }
         }
@@ -61,7 +61,7 @@ pub fn jet_typed_sh_interpolate(literals: &[String], holes: [String]) -> [String
     holes := holes.into_iter()
     loop literal in literals {
         argv.extend(literal.split_whitespace().map(fn(word) { word.to_string() }))
-        if holes.next() is Val(hole) { argv.push(^hole) }
+        if holes.next() == .Val(hole) { argv.push(^hole) }
     }
     argv
 }
@@ -86,7 +86,7 @@ fn interpolate_typed_head<F: Fn(String) -> String>(literals: &[String], holes: &
     out := String.with_capacity(capacity)
     loop (index, literal) in literals.iter().enumerate() {
         out.push_str(literal)
-        if holes.get(index) is Val(hole) { out.push_str(&encode_hole(hole)) }
+        if holes.get(index) == .Val(hole) { out.push_str(&encode_hole(hole)) }
     }
     out
 }

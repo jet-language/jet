@@ -44,11 +44,11 @@ fn jet_vault_decomposition(cp: U32) -> ([U32]View)? {
 }
 // Rust: crates/jet-pkg-model/src/Prelude/VaultNfc.rs:50
 fn jet_vault_decompose(cp: U32, output: &[U32]) -> {
-    if jet_vault_hangul_decompose(cp) is Val(parts) {
+    if jet_vault_hangul_decompose(cp) == .Val(parts) {
         &output.push(parts[0])
         &output.push(parts[1])
         if parts[2] != U32{0} { &output.push(parts[2]) }
-    } else if jet_vault_decomposition(cp) is Val(decomposition) {
+    } else if jet_vault_decomposition(cp) == .Val(decomposition) {
         loop part in decomposition { jet_vault_decompose(part, &output) }
     } else { &output.push(cp) }
 }
@@ -83,13 +83,19 @@ pub fn jet_vault_nfc(input: String) -> String {
     last_class := I32{-1}
     loop codepoint in decomposed {
         class :: I32{jet_vault_ccc(codepoint)}
-        if starter is Val(starter_index) {
-            if jet_vault_compose_pair(composed[starter_index], codepoint) is Val(result) {
-                if last_class < class { composed[starter_index] = result; continue }
+        if starter == .Val(starter_index) {
+            if jet_vault_compose_pair(composed[starter_index], codepoint) == .Val(result) {
+                if last_class < class {
+                    composed[starter_index] = result
+                    continue
+                }
             }
         }
         &composed.push(codepoint)
-        if class == I32{0} { starter = Val(composed.len() - 1); last_class = I32{-1} }
+        if class == I32{0} {
+            starter = Val(composed.len() - 1)
+            last_class = I32{-1}
+        }
         else { last_class = class }
     }
     composed.into_iter().filter_map(|cp| -> Char.from_u32(cp)).collect()

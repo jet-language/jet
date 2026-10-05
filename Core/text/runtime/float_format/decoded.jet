@@ -21,11 +21,26 @@ pub fn leading_zeros(word: U64) -> Int Never! {
     n := 0
     value := word
     if value == (U64{0}) -> return 64
-    if value < (U64{1} << 32) { value = value << 32; n += 32 }
-    if value < (U64{1} << 48) { value = value << 16; n += 16 }
-    if value < (U64{1} << 56) { value = value << 8; n += 8 }
-    if value < (U64{1} << 60) { value = value << 4; n += 4 }
-    if value < (U64{1} << 62) { value = value << 2; n += 2 }
+    if value < (U64{1} << 32) {
+        value = value << 32
+        n += 32
+    }
+    if value < (U64{1} << 48) {
+        value = value << 16
+        n += 16
+    }
+    if value < (U64{1} << 56) {
+        value = value << 8
+        n += 8
+    }
+    if value < (U64{1} << 60) {
+        value = value << 4
+        n += 4
+    }
+    if value < (U64{1} << 62) {
+        value = value << 2
+        n += 2
+    }
     if value < (U64{1} << 63) -> n += 1
     n
 }
@@ -35,7 +50,10 @@ pub fn estimate(mant: U64, exp: Int) -> Int Never! {
     product :: (I64.from_int(nbits + exp) ?? panic("float exponent")) * I64{1292913986}
     Int.from_i64(product >> 32)
 }
-pub struct Fp { pub f: U64; pub e: Int }
+pub struct Fp {
+    pub f: U64
+    pub e: Int
+}
 pub fn normalize(f: U64, e: Int) -> Fp Never! {
     n :: leading_zeros(f)
     Fp{f: f << n, e: e - n}
@@ -69,4 +87,7 @@ pub fn round_up(buf: &[U8#N], len: Int) -> U8? Never! {
     loop j in 1..<len -> buf[j] = U8{48}
     Val(U8{48})
 }
-pub struct Digits { pub len: Int; pub exp: Int }
+pub struct Digits {
+    pub len: Int
+    pub exp: Int
+}

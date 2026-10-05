@@ -161,7 +161,11 @@ module jet_text_wasm {
     #FFI(c)
     #Unsafe("release retained output allocation only after host relinquishes the address")
     pub fn jet_text_wasm_output_clear() -> () {
-        JET_TEXT_WASM_OUTPUT.with(fn(cell) { output := cell.borrow_mut(); output.clear(); output.shrink_to_fit() })
+        JET_TEXT_WASM_OUTPUT.with(fn(cell) {
+            output := cell.borrow_mut()
+            output.clear()
+            output.shrink_to_fit()
+        })
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:2063
     #FFI(c)

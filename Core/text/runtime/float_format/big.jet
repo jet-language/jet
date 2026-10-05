@@ -134,7 +134,10 @@ pub fn mul_digits(a: &Big, digits: &[U64#N]) Never! {
 pub fn pow10(a: &Big, n: Int) Never! {
     assert(n >= 0 && n < 512)
     powers :: [U64#10]{1,10,100,1000,10000,100000,1000000,10000000,100000000,1000000000}
-    if n < 8 { mul_small(a, powers[n]); return }
+    if n < 8 {
+        mul_small(a, powers[n])
+        return
+    }
     if (n & 7) != 0 -> mul_small(a, powers[n & 7] >> (n & 7))
     if (n & 8) != 0 -> mul_small(a, U64{390625})
     if (n & 16) != 0 {
@@ -161,7 +164,10 @@ pub fn pow10(a: &Big, n: Int) Never! {
 }
 pub fn div_2pow10(a: &Big, n: Int) Never! {
     remaining := n
-    loop remaining > 9 { div_small(a, U64{1000000000}); remaining -= 9 }
+    loop remaining > 9 {
+        div_small(a, U64{1000000000})
+        remaining -= 9
+    }
     powers :: [U64#10]{1,10,100,1000,10000,100000,1000000,10000000,100000000,1000000000}
     div_small(a, powers[remaining] * U64{2})
 }

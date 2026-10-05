@@ -44,7 +44,10 @@ fn render_zero(raw: U64, precision: Int) -> String Never! {
     &out.try_reserve(length) ?? panic("float string allocation failed")
     sign(&out, raw)
     &out.push(U8{48})
-    if precision > 0 { &out.push(U8{46}); zeroes(&out, precision) }
+    if precision > 0 {
+        &out.push(U8{46})
+        zeroes(&out, precision)
+    }
     owned(^out)
 }
 // digits_to_dec_str, with four source pieces written into ONE reserved owner.
@@ -62,14 +65,24 @@ fn decimal(raw: U64, buf: &[U8#N], digits: dec.Digits, precision: Int) -> String
     &out.try_reserve(length) ?? panic("float string allocation failed")
     sign(&out, raw)
     if exp <= 0 {
-        &out.push(U8{48}); &out.push(U8{46})
-        zeroes(&out, -exp); bytes(&out, buf, 0, len); zeroes(&out, trailing)
+        &out.push(U8{48})
+        &out.push(U8{46})
+        zeroes(&out, -exp)
+        bytes(&out, buf, 0, len)
+        zeroes(&out, trailing)
     } else {
         if exp < len {
-            bytes(&out, buf, 0, exp); &out.push(U8{46}); bytes(&out, buf, exp, len); zeroes(&out, trailing)
+            bytes(&out, buf, 0, exp)
+            &out.push(U8{46})
+            bytes(&out, buf, exp, len)
+            zeroes(&out, trailing)
         } else {
-            bytes(&out, buf, 0, len); zeroes(&out, exp - len)
-            if precision > 0 { &out.push(U8{46}); zeroes(&out, precision) }
+            bytes(&out, buf, 0, len)
+            zeroes(&out, exp - len)
+            if precision > 0 {
+                &out.push(U8{46})
+                zeroes(&out, precision)
+            }
         }
     }
     owned(^out)
