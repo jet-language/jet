@@ -1151,7 +1151,7 @@ fn regex_scan(program: &RegexProgram, flags: &RegexFlags, groups: Usize, text: &
             last_match = None
             prefilter_pos = resume
             pos = resume
-            continue
+            next
         }
         (ch, next_pos) :: regex_next_char(text, pos) ?? return
         {
@@ -1162,7 +1162,7 @@ fn regex_scan(program: &RegexProgram, flags: &RegexFlags, groups: Usize, text: &
             loop thread in &current.threads {
                 match &program.insts[thread.pc] {
                     .Consume(matcher, Val(target)) -> {
-                        if !regex_matcher_matches(matcher, ch, flags) -> continue
+                        if !regex_matcher_matches(matcher, ch, flags) -> next
                         if capture {
                             regex_add_thread(next, program, flags,
                                 RegexThread{pc: target, start: thread.start, caps: thread.caps},
@@ -1173,7 +1173,7 @@ fn regex_scan(program: &RegexProgram, flags: &RegexFlags, groups: Usize, text: &
                                 next_pos, text, capture, capture_arena)
                         }
                     }
-                    _ -> continue
+                    _ -> next
                 }
             }
             std.mem.swap(current, next)
@@ -1199,7 +1199,7 @@ fn regex_scan(program: &RegexProgram, flags: &RegexFlags, groups: Usize, text: &
                 last_match = None
                 prefilter_pos = resume
                 pos = resume
-                continue
+                next
             }
         }
         pos = next_pos
@@ -1212,7 +1212,7 @@ fn regex_add_thread(state: &RegexState, program: &RegexProgram, flags: &RegexFla
     state.stack.push(thread)
     loop {
         thread := state.stack.pop() ?? break
-        if state.seen[thread.pc] == state.epoch -> continue
+        if state.seen[thread.pc] == state.epoch -> next
         state.seen[thread.pc] = state.epoch
         match &program.insts[thread.pc] {
             .Save(slot, Val(next)) -> {
@@ -1333,7 +1333,7 @@ fn regex_required_literals(node: &RegexNode) -> [[U8]] {
             loop piece in pieces {
                 if !regex_quant_required(&piece.quant) {
                     regex_push_required_literal(&candidates, std.mem.take(&run))
-                    continue
+                    next
                 }
                 match (&piece.atom, &piece.quant) {
                     (.Literal(ch), .One) -> {
@@ -1575,7 +1575,7 @@ fn expand_regex_replacement(repl: &String, mat: &JetRegexMatch) -> String {
         ch :: chars.next() ?? break
         if ch != '$' {
             out.push(ch)
-            continue
+            next
         }
         match chars.peek().copied() {
             Val('$') -> {
