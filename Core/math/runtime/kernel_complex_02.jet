@@ -221,7 +221,7 @@ impl TraitRegistry {
             if !subst.contains_key(p.name) -> return Err(p.name)
             if check_bounds {
                 loop b in p.bounds {
-                    if !self.type_implements_trait(subst.get(p.name).unwrap(), b) -> return Err(p.name)
+                    if !self.type_implements_trait(subst.get(p.name) ?? panic("unwrap failed"), b) -> return Err(p.name)
                 }
             }
         }

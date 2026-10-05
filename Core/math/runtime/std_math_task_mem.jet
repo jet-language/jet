@@ -362,14 +362,14 @@ impl<T: Send> JetTaskGroupChild for JetTaskState<T> {
     fn cancel(self: &JetTaskState<T>) -> () {
         // GATE #4565: kernel primitive
         #Unsafe("inspect scheduler handle under mutex before cancelling an unfinished child") {
-            if self.handle.lock().unwrap().is_some() { self.control.cancel() }
+            if (self.handle.lock() ?? panic("unwrap failed")).is_some() { self.control.cancel() }
         }
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:505
     fn join(self: &JetTaskState<T>) -> () {
         // GATE #4565: kernel primitive
         #Unsafe("take the sole child handle and drain without parent wait policy during unwinding") {
-            if self.handle.lock().unwrap().take() == .Val(handle) { handle.drain() }
+            if (self.handle.lock() ?? panic("unwrap failed")).take() == .Val(handle) { handle.drain() }
         }
     }
 }
@@ -405,7 +405,7 @@ impl JetTaskGroup {
             permit :: self.children.acquire_with(^waiter, (waiter) -> {
                 jet_scheduler_task_group_wait(waiter)
                 Ok(())
-            }).expect("task-group admission wait cannot fail")
+            }) ?? panic("task-group admission wait cannot fail")
             task :: JetTask<T>.spawn_at(spawn_site, label, () -> {
                 _permit :: ^permit
                 erased()
@@ -494,8 +494,8 @@ impl<T: Send> JetTask<T> {
         if !skip { jet_task_join_deadline_check() }
         // GATE #4565: kernel primitive
         result :: #Unsafe("serialize the sole consuming join and remove its handle regardless of typed result") {
-            handle := state.handle.lock().unwrap()
-            result :: handle.as_mut().expect("task already joined").join()
+            handle := state.handle.lock() ?? panic("unwrap failed")
+            result :: (handle.as_mut() ?? panic("task already joined")).join()
             _ :: handle.take()
             ^result
         }
@@ -520,7 +520,7 @@ fn jet_task_entries<T: Send>(tasks: [JetTask<T>], operation: String) -> [(JetSch
     tasks.into_iter().map((task) -> {
         // GATE #4565: kernel primitive
         #Unsafe("transfer each task's sole join and retain its cancellation control") {
-            (task.state.handle.lock().unwrap().take().unwrap_or_else(() -> panic("{operation}: task already joined")),
+            ((task.state.handle.lock() ?? panic("unwrap failed")).take().unwrap_or_else(() -> panic("{operation}: task already joined")),
                 task.state.control.clone())
         }
     }).collect<[(JetSchedulerJoin<T>, Arc<JetTaskControl>)]>()
@@ -871,7 +871,7 @@ impl<T> JetSharedCell<T> {
         #Unsafe("increment only a live logical root under lifetime mutex") {
             lifetime := self.owner_lifetime.lock().unwrap_or_else((poisoned) -> poisoned.into_inner())
             if lifetime.logical_owners == 0 { return false }
-            lifetime.logical_owners = lifetime.logical_owners.checked_add(1).expect("Shared owner count exhausted")
+            lifetime.logical_owners = lifetime.logical_owners.checked_add(1) ?? panic("Shared owner count exhausted")
             true
         }
     }
@@ -881,7 +881,7 @@ impl<T> JetSharedCell<T> {
         #Unsafe("guard may retain a root while an active borrow keeps the retired root payload alive") {
             lifetime := self.owner_lifetime.lock().unwrap_or_else((poisoned) -> poisoned.into_inner())
             if lifetime.logical_owners == 0 && lifetime.active_borrows == 0 { return false }
-            lifetime.logical_owners = lifetime.logical_owners.checked_add(1).expect("Shared owner count exhausted")
+            lifetime.logical_owners = lifetime.logical_owners.checked_add(1) ?? panic("Shared owner count exhausted")
             true
         }
     }
@@ -891,7 +891,7 @@ impl<T> JetSharedCell<T> {
         #Unsafe("admit physical borrow only while a live logical root exists") {
             lifetime := self.owner_lifetime.lock().unwrap_or_else((poisoned) -> poisoned.into_inner())
             if lifetime.logical_owners == 0 { return false }
-            lifetime.active_borrows = lifetime.active_borrows.checked_add(1).expect("Shared active borrow count exhausted")
+            lifetime.active_borrows = lifetime.active_borrows.checked_add(1) ?? panic("Shared active borrow count exhausted")
             true
         }
     }
@@ -921,11 +921,11 @@ impl<T> JetSharedCell<T> {
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:1437
     fn with_read<R>(self: &Self, f: fn(&T) -> R) -> R {
-        permit :: jet_shared_acquire(&self.protocol, false, () -> false).expect("uncancelled Shared read acquires")
+        permit :: jet_shared_acquire(&self.protocol, false, () -> false) ?? panic("uncancelled Shared read acquires")
         if self.scalar_snapshot() == .Val(value) { return f(&value) }
         // GATE #4565: kernel primitive
         #Unsafe("read permit remains held through the entire payload callback") {
-            f((&*self.value.get()).as_ref().expect("Shared payload was retired"))
+            f((&*self.value.get()).as_ref() ?? panic("Shared payload was retired"))
         }
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:1456
@@ -936,17 +936,17 @@ impl<T> JetSharedCell<T> {
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:1465
     fn commit_revision(self: &Self) -> () {
-        next :: self.next_revision().expect("Shared revision generation exhausted")
+        next :: self.next_revision() ?? panic("Shared revision generation exhausted")
         // GATE #4565: kernel primitive
         #Unsafe("caller holds edit permit; release publishes the next generation") { self.revision.store(next, Ordering.Release) }
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:1473
     fn commit_guard(self: &Self) -> () {
-        next :: self.next_revision().expect("Shared revision generation exhausted")
+        next :: self.next_revision() ?? panic("Shared revision generation exhausted")
         // GATE #4565: kernel primitive
         #Unsafe("editable guard still holds exclusive permit while committing shadow and generation") {
             if self.scalar.is_some() {
-                value :: (&*self.value.get()).as_ref().expect("Shared payload was retired")
+                value :: (&*self.value.get()).as_ref() ?? panic("Shared payload was retired")
                 self.store_scalar_value(value)
             }
             self.revision.store(next, Ordering.Release)
@@ -1001,8 +1001,8 @@ impl<T> JetShared<T> {
     pub fn get(self: &Self) -> T where T: Clone { self.read((value) -> value.clone()) }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:1556
     pub fn set(self: &Self, value: T) -> () {
-        permit :: jet_shared_acquire(&self.0.protocol, true, () -> false).expect("uncancelled Shared set acquires")
-        next :: self.0.next_revision().expect("Shared revision generation exhausted")
+        permit :: jet_shared_acquire(&self.0.protocol, true, () -> false) ?? panic("uncancelled Shared set acquires")
+        next :: self.0.next_revision() ?? panic("Shared revision generation exhausted")
         // GATE #4565: kernel primitive
         #Unsafe("exclusive permit covers payload write and release publication") {
             if self.0.scalar.is_some() { self.0.store_scalar_value(&value) }
@@ -1012,15 +1012,15 @@ impl<T> JetShared<T> {
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:1576
     pub fn replace(self: &Self, value: T) -> T {
-        permit :: jet_shared_acquire(&self.0.protocol, true, () -> false).expect("uncancelled Shared replace acquires")
-        next :: self.0.next_revision().expect("Shared revision generation exhausted")
+        permit :: jet_shared_acquire(&self.0.protocol, true, () -> false) ?? panic("uncancelled Shared replace acquires")
+        next :: self.0.next_revision() ?? panic("Shared revision generation exhausted")
         // GATE #4565: kernel primitive
         #Unsafe("exclusive permit covers atomic swap or structured replacement and revision publication") {
             old :: if self.0.scalar.as_ref() == .Val(scalar) {
                 bits :: scalar.swap(jet_shared_scalar_bits(&value, scalar.kind()))
                 jet_shared_scalar_from_bits<T>(bits, scalar.kind())
             } else {
-                mem.replace(&*self.0.value.get(), Val(^value)).expect("Shared payload was retired")
+                mem.replace(&*self.0.value.get(), Val(^value)) ?? panic("Shared payload was retired")
             }
             self.0.revision.store(next, Ordering.Release)
             ^old
@@ -1060,7 +1060,7 @@ impl<T> JetShared<T> {
                 owner :: self.0.clone()
                 valid :: Arc.new(AtomicBool.new(true))
                 consumed :: Arc.new(AtomicBool.new(false))
-                revision :: stm.snapshot_revision(&protocol, owner.revision.load(Ordering.Acquire)).expect("SharedRevisionError.GenerationExhausted")
+                revision :: stm.snapshot_revision(&protocol, owner.revision.load(Ordering.Acquire)) ?? panic("SharedRevisionError.GenerationExhausted")
                 value :: project(&staged.borrow())
                 assert(owner.retain_logical_owner(), "snapshot requires a live Shared owner")
                 JetSharedSnapshot<T,U>{owner: ^owner, revision: revision, valid: ^valid, consumed: ^consumed, value: Val(^value)}
@@ -1072,7 +1072,7 @@ impl<T> JetShared<T> {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:1696
     // Consume ticket under the same exclusive permit as revision comparison/publication.
     pub fn try_replace<U>(self: &Self, snapshot: JetSharedSnapshot<T,U>, value: T) -> Bool JetSharedRevisionError! {
-        permit :: jet_shared_acquire(&self.0.protocol, true, () -> false).expect("uncancelled Shared try_replace acquires")
+        permit :: jet_shared_acquire(&self.0.protocol, true, () -> false) ?? panic("uncancelled Shared try_replace acquires")
         // GATE #4565: kernel primitive
         #Unsafe("owner-bound linear ticket and exclusive permit make optimistic publication single-winner") {
             if !Arc.ptr_eq(&self.0, &snapshot.owner) { return Err(JetSharedRevisionError.WrongOwner) }
@@ -1098,10 +1098,10 @@ impl<T> JetShared<T> {
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:1759
     pub fn edit<R>(self: &Self, f: fn(&T) -> R) -> R {
-        permit :: jet_shared_acquire(&self.0.protocol, true, () -> false).expect("uncancelled Shared edit acquires")
-        next :: self.0.next_revision().expect("Shared revision generation exhausted")
+        permit :: jet_shared_acquire(&self.0.protocol, true, () -> false) ?? panic("uncancelled Shared edit acquires")
+        next :: self.0.next_revision() ?? panic("Shared revision generation exhausted")
         if self.0.scalar.is_some() {
-            value := self.0.scalar_snapshot().expect("scalar Shared payload disappeared")
+            value := self.0.scalar_snapshot() ?? panic("scalar Shared payload disappeared")
             result :: f(&value)
             self.0.store_scalar_value(&value)
             // GATE #4565: kernel primitive
@@ -1110,7 +1110,7 @@ impl<T> JetShared<T> {
         }
         // GATE #4565: kernel primitive
         #Unsafe("exclusive permit remains held through structured payload callback and revision publication") {
-            payload := (&*self.0.value.get()).as_mut().expect("Shared payload was retired")
+            payload := (&*self.0.value.get()).as_mut() ?? panic("Shared payload was retired")
             result :: f(payload)
             self.0.revision.store(next, Ordering.Release)
             ^result

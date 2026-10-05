@@ -24,19 +24,18 @@ use std.hash.[Hash, Hasher]
 impl<T> JetShared<T> {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:1798
     fn try_edit_with<R, E>(self: &Self, f: fn(&T) -> (T, R) E!) -> R E! {
-        permit :: jet_shared_acquire(&self.0.protocol, true, fn() { false })
-            .expect("uncancelled Shared edit acquires")
-        next :: self.0.next_revision().expect("Shared revision generation exhausted")
+        permit :: jet_shared_acquire(&self.0.protocol, true, fn() { false }) ?? panic("uncancelled Shared edit acquires")
+        next :: self.0.next_revision() ?? panic("Shared revision generation exhausted")
         // GATE #4565: kernel primitive
         #Unsafe("exclusive protocol permit remains held across preparation and payload publication") {
             if self.0.scalar.is_some() {
-                current :: self.0.scalar_snapshot().expect("scalar Shared payload disappeared")
+                current :: self.0.scalar_snapshot() ?? panic("scalar Shared payload disappeared")
                 (replacement, result) :: f(&current)?
                 self.0.store_scalar_value(&replacement)
                 self.0.revision.store(next, Ordering.Release)
                 return Ok(^result)
             }
-            current :: (&*self.0.value.get()).as_ref().expect("Shared payload was retired")
+            current :: (&*self.0.value.get()).as_ref() ?? panic("Shared payload was retired")
             (replacement, result) :: f(current)?
             *self.0.value.get() = Val(^replacement)
             self.0.revision.store(next, Ordering.Release)
@@ -46,8 +45,7 @@ impl<T> JetShared<T> {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:1839
     fn try_replace_if_revision(self: &Self, expected_revision: U64,
         replacement: T) -> (Bool, U64) JetSharedRevisionError! {
-        permit :: jet_shared_acquire(&self.0.protocol, true, fn() { false })
-            .expect("uncancelled Shared conditional replace acquires")
+        permit :: jet_shared_acquire(&self.0.protocol, true, fn() { false }) ?? panic("uncancelled Shared conditional replace acquires")
         // GATE #4565: kernel primitive
         #Unsafe("revision compare and replacement share one exclusive protocol permit") {
             current :: self.0.revision.load(Ordering.Acquire)
@@ -90,7 +88,7 @@ impl<T: Clone> JetShared<T> {
         stm.record_edit_with_commit(^protocol, Box.new(fn() {}),
             Box.new(fn(_) {
                 value :: commit_staged.borrow().clone()
-                next :: commit_cell.next_revision().expect("Shared revision generation exhausted")
+                next :: commit_cell.next_revision() ?? panic("Shared revision generation exhausted")
                 // GATE #4565: kernel primitive
                 #Unsafe("transaction commit owns participant permit while publishing staged value and revision") {
                     if commit_cell.scalar.is_some() { commit_cell.store_scalar_value(&value) }
@@ -107,7 +105,7 @@ impl<T, U: Clone> JetSharedSnapshot<T, U> {
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:1927
     fn into_value_and_revision(self: Self) -> (U, U64) {
-        (self.value.take().expect("snapshot projection was consumed"), self.revision)
+        (self.value.take() ?? panic("snapshot projection was consumed"), self.revision)
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:1932
     fn revision(self: &Self) -> U64 { self.revision }
@@ -137,7 +135,7 @@ impl<T> Clone for JetShared<T> {
         #Unsafe("logical alias count is incremented under lifetime mutex before shared physical carrier clones") {
             lifetime := self.0.owner_lifetime.lock().unwrap_or_else(fn(poisoned) { poisoned.into_inner() })
             assert(lifetime.logical_owners > 0, "cannot clone a retired Shared owner")
-            lifetime.logical_owners = lifetime.logical_owners.checked_add(1).expect("Shared owner count exhausted")
+            lifetime.logical_owners = lifetime.logical_owners.checked_add(1) ?? panic("Shared owner count exhausted")
             drop(^lifetime)
             JetShared(self.0.clone(), true)
         }
@@ -657,10 +655,10 @@ impl<T> JetSharedGuard<T> {
         state :: jet_shared_guard_acquire(&cell.protocol, false, fn() { false })
             .unwrap_or_else(fn() { jet_runtime_stop_with_context("E3001", "", 0, "", "", JET_SHARED_GUARD_INVALID) })
         logical_owner :: if logical_owner {
-            Val(JetSharedLogicalGuardOwner.acquire(cell.clone()).expect("Shared guard requires a live owner"))
+            Val(JetSharedLogicalGuardOwner.acquire(cell.clone()) ?? panic("Shared guard requires a live owner"))
         } else { None }
         physical_borrow :: if physical_borrow {
-            Val(JetSharedActiveGuardBorrow.acquire(cell.clone()).expect("Shared guard requires a live owner"))
+            Val(JetSharedActiveGuardBorrow.acquire(cell.clone()) ?? panic("Shared guard requires a live owner"))
         } else { None }
         cell.refresh_scalar_shadow()
         permit :: state.permit_arc()
@@ -677,10 +675,10 @@ impl<T> JetSharedGuard<T> {
         state :: jet_shared_guard_acquire(&cell.protocol, true, fn() { false })
             .unwrap_or_else(fn() { jet_runtime_stop_with_context("E3001", "", 0, "", "", JET_SHARED_GUARD_INVALID) })
         logical_owner :: if logical_owner {
-            Val(JetSharedLogicalGuardOwner.acquire(cell.clone()).expect("Shared guard requires a live owner"))
+            Val(JetSharedLogicalGuardOwner.acquire(cell.clone()) ?? panic("Shared guard requires a live owner"))
         } else { None }
         physical_borrow :: if physical_borrow {
-            Val(JetSharedActiveGuardBorrow.acquire(cell.clone()).expect("Shared guard requires a live owner"))
+            Val(JetSharedActiveGuardBorrow.acquire(cell.clone()) ?? panic("Shared guard requires a live owner"))
         } else { None }
         cell.refresh_scalar_shadow()
         permit :: state.permit_arc()
