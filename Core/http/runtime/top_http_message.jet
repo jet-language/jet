@@ -385,7 +385,7 @@ impl JetHTTPBody {
     #Unsafe("retain Send reader and synchronized body state")
     fn reader_with_content_type<R: Read + Send>(reader: R, length: USize?, content_type: String?) -> Self {
         // GATE #4565: kernel primitive
-        drained :: Arc.new(AtomicBool.new(length == Val(0)))
+        drained :: Arc.new(AtomicBool.new(length == 0))
         Self{state: Arc.new(Mutex.new(JetHTTPBodyState{
             source: Val(.Reader{reader: Box.new(^reader), closer: None}), length: length,
             content_type: ^content_type, source_kind: None, source_payload: None, drained: ^drained}))}
@@ -395,7 +395,7 @@ impl JetHTTPBody {
     #Unsafe("retain cancellable reader and synchronized body state")
     fn reader_cancellable<R: Read + Send>(reader: R, length: USize?, close: fn() -> ()) -> Self {
         // GATE #4565: kernel primitive
-        drained :: Arc.new(AtomicBool.new(length == Val(0)))
+        drained :: Arc.new(AtomicBool.new(length == 0))
         Self{state: Arc.new(Mutex.new(JetHTTPBodyState{
             source: Val(.Reader{reader: Box.new(^reader), closer: Val(JetHTTPBodyCloser.new(close))}),
             length: length, content_type: None, source_kind: None, source_payload: None, drained: ^drained}))}
@@ -422,7 +422,7 @@ impl JetHTTPBody {
     #Unsafe("retain native read and close callbacks without a Rust bridge")
     fn bridge(handle: I64, length: USize?, read: fn(I64, USize) -> Result<[U8]?, HTTPError>, close: fn(I64) -> ()) -> Self {
         // GATE #4565: kernel primitive
-        drained :: Arc.new(AtomicBool.new(length == Val(0)))
+        drained :: Arc.new(AtomicBool.new(length == 0))
         closer :: JetHTTPBodyCloser.new(fn() { close(handle) })
         Self{state: Arc.new(Mutex.new(JetHTTPBodyState{
             source: Val(.Bridge{handle: handle, read: read, closer: ^closer}), length: length,
@@ -449,7 +449,7 @@ impl JetHTTPBody {
         self.state.lock().map(fn(state) { state.drained.load(Ordering.Acquire) }).unwrap_or(false)
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:631
-    fn is_empty(self: &Self) -> Bool { self.length() == Val(0) }
+    fn is_empty(self: &Self) -> Bool { self.length() == 0 }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:635
     #Unsafe("lock native source kind metadata")
     fn source_kind(self: &Self) -> JetHTTPBodyKind? {
