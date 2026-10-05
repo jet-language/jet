@@ -53,7 +53,7 @@ pub(crate) struct AuthorizedSourceSnapshot {
 struct AuthorizedSourceRootLease {
     resolver: AuthorityResolver,
     root: crate::Authority::CheckedDirectory,
-    manifest: CheckedFile,
+    manifest: Option<CheckedFile>,
     files: Vec<CheckedFile>,
     foreign_cache_files: Vec<CheckedFile>,
 }
@@ -76,7 +76,9 @@ impl AuthorizedSourceLease {
     pub(crate) fn revalidate(&self) -> Result<(), AuthorityError> {
         for root in &self.roots {
             root.resolver.revalidate_directory(&root.root)?;
-            root.resolver.revalidate_file(&root.manifest)?;
+            if let Some(manifest) = &root.manifest {
+                root.resolver.revalidate_file(manifest)?;
+            }
             for file in &root.files {
                 root.resolver.revalidate_file(file)?;
             }
@@ -127,9 +129,13 @@ pub(crate) fn open_authorized_source_candidates(
     for (root_index, root_path) in roots.iter().enumerate() {
         let resolver = AuthorityResolver::open(root_path)?;
         let root_directory = resolver.checked_directory(Path::new("."))?;
-        // This checks both the canonical package.jet and the retired jet.toml
-        // marker before either can enter the source snapshot.
-        let manifest = resolver.checked_manifest(Path::new("."))?.file;
+        // Match the Rust driver's loose-root authorization: absence is valid,
+        // but retired manifests and every other authority failure remain fatal.
+        let manifest = match resolver.checked_manifest(Path::new(".")) {
+            Ok(manifest) => Some(manifest.file),
+            Err(error) if error.is_missing() => None,
+            Err(error) => return Err(error),
+        };
         let mut files = resolver.discover_source_files()?;
         let checked_entry = if root_index == entry_root_index {
             Some(resolver.checked_file(entry)?)
@@ -153,12 +159,11 @@ pub(crate) fn open_authorized_source_candidates(
             None
         };
 
-        if !files
-            .iter()
-            .any(|file| file.relative == manifest.relative)
-        {
-            files.push(manifest.clone());
-            files.sort_by(|left, right| left.relative.cmp(&right.relative));
+        if let Some(manifest) = &manifest {
+            if !files.iter().any(|file| file.relative == manifest.relative) {
+                files.push(manifest.clone());
+                files.sort_by(|left, right| left.relative.cmp(&right.relative));
+            }
         }
         let foreign_cache_files =
             collect_authorized_foreign_cache_files(&resolver, &files)?;
@@ -173,7 +178,9 @@ pub(crate) fn open_authorized_source_candidates(
             resolver.revalidate_file(file)?;
             authorized_foreign_cache_files.push(authorized_source_file(file)?);
         }
-        resolver.revalidate_file(&manifest)?;
+        if let Some(manifest) = &manifest {
+            resolver.revalidate_file(manifest)?;
+        }
         resolver.revalidate_root()?;
 
         let root_identity = identity_key(&root_directory.identity);

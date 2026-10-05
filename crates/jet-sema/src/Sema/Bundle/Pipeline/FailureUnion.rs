@@ -292,7 +292,7 @@ fn probe_functions(
                 false,
                 true,
             );
-            checker.canonicalize_function_return_type(&mut clone);
+            checker.canonicalize_function_signature(&mut clone);
             checker.ret = crate::Sema::checked_body_return_type(&clone, false);
             checker.failure_union_probe = Some(FailureUnionProbe::default());
             checker.check_params_and_body(&mut clone, None);
