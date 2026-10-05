@@ -3462,6 +3462,14 @@ fn jet_codegen_stability_access(access: AccessConvention) -> JetCodegenStability
     JetCodegenStabilityUse.Write
 }
 
+// How a place projection (index, slice) checked with `access` uses its base:
+// a write, move or write borrow of `a.b[i].c[j]` writes through every base
+// down to the root, whatever access the inner index was checked with.
+fn jet_codegen_stability_base(use_kind: JetCodegenStabilityUse, access: AccessConvention) -> JetCodegenStabilityUse Never! {
+    if use_kind == JetCodegenStabilityUse.Write -> return JetCodegenStabilityUse.Write
+    jet_codegen_stability_access(access)
+}
+
 fn jet_codegen_stability_expr(state: &JetCodegenLetStability, expression: TExpr, use_kind: JetCodegenStabilityUse) Never! {
     inspect :: JetCodegenStabilityUse.Inspect
     value :: JetCodegenStabilityUse.Value
@@ -3473,17 +3481,17 @@ fn jet_codegen_stability_expr(state: &JetCodegenLetStability, expression: TExpr,
         .Field(receiver, _) -> jet_codegen_stability_expr(&state, receiver, use_kind)
         .Index(base, index, _, access, _, _) -> {
             jet_codegen_stability_expr(&state, index, value)
-            jet_codegen_stability_expr(&state, base, jet_codegen_stability_access(access))
+            jet_codegen_stability_expr(&state, base, jet_codegen_stability_base(use_kind, access))
         }
         .IndexRead(base, index, _, _, _) -> {
             jet_codegen_stability_expr(&state, index, value)
-            jet_codegen_stability_expr(&state, base, inspect)
+            jet_codegen_stability_expr(&state, base, jet_codegen_stability_base(use_kind, AccessConvention.Read))
         }
         .Slice(base, start, end, range, _) | .SliceOwned(base, start, end, range, _) -> {
             jet_codegen_stability_expr(&state, start, value)
             jet_codegen_stability_expr(&state, end, value)
             if range == .Val(range_value) -> jet_codegen_stability_expr(&state, range_value, value)
-            jet_codegen_stability_expr(&state, base, inspect)
+            jet_codegen_stability_expr(&state, base, jet_codegen_stability_base(use_kind, AccessConvention.Read))
         }
         .Clone(copied, _) | .ExplicitCopy(copied) | .MaterializeView(copied) -> jet_codegen_stability_expr(&state, copied, inspect)
         .Borrow(place, access) -> jet_codegen_stability_expr(&state, place, jet_codegen_stability_access(access))
