@@ -61,18 +61,18 @@ pub fn jet_production_failure_receipt_write(code: String, file: String, line: U3
         if not ensure_receipt_directory(directory) -> return None
         path :: directory.join("receipt")
         if fs.symlink_metadata(path) == {
-            Ok(metadata) -> {
+            .Ok(metadata) -> {
                 if metadata.file_type().is_symlink() || not metadata.is_file() -> return None
                 return Val(path.to_string_lossy().to_string())
             }
-            Err(error) -> if error.kind() != .NotFound -> return None
+            .Err(error) -> if error.kind() != .NotFound -> return None
         }
         options := fs.OpenOptions.new()
         &options.write(true).create_new(true)
         if target.selected_family() == "unix" -> &options.mode(0o600)
         output := if options.open(path) == {
-            Ok(output) -> output
-            Err(error) -> {
+            .Ok(output) -> output
+            .Err(error) -> {
                 if error.kind() == .AlreadyExists -> return Val(path.to_string_lossy().to_string())
                 return None
             }
@@ -97,17 +97,17 @@ pub fn ensure_receipt_directory(path: OSPath) -> Bool Never! {
             &current.push(component.as_os_str())
             loop {
                 if fs.symlink_metadata(current) == {
-                    Ok(metadata) -> {
+                    .Ok(metadata) -> {
                         if metadata.file_type().is_symlink() || not metadata.is_dir() -> return false
                         break
                     }
-                    Err(error) -> {
+                    .Err(error) -> {
                         if error.kind() != .NotFound -> return false
                         builder := fs.DirBuilder.new()
                         if target.selected_family() == "unix" -> &builder.mode(0o700)
                         if builder.create(current) == {
-                            Ok(_) -> {}
-                            Err(error) -> {
+                            .Ok(_) -> {}
+                            .Err(error) -> {
                                 if error.kind() == .AlreadyExists -> next
                                 return false
                             }
