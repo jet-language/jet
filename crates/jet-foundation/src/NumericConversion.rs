@@ -1,11 +1,3 @@
-/// Narrow the owned exact-Int carrier at a native ABI boundary. All hosts use
-/// the same range check and failure text; only the stop transport differs.
-pub fn jet_int_owned_to_i64(value: &crate::Numeric::JetInt) -> Result<i64, &'static str> {
-    value
-        .to_i64()
-        .ok_or("exact Int does not fit the native i64 ABI")
-}
-
 /// D-NUMWIDEN-CROSS1=E: canonical checked integer-to-float widening policy.
 ///
 /// A binary float with `precision` significant bits holds an integer exactly
@@ -169,23 +161,6 @@ pub fn jet_numeric_try_from_fixed(
 #[cfg(test)]
 mod numeric_widen_tests {
     use super::jet_numeric_checked_widen;
-
-    #[test]
-    fn owned_int_native_abi_checks_both_boundaries() {
-        use super::jet_int_owned_to_i64;
-        use crate::Numeric::{CtBigInt, JetInt};
-
-        for value in [i64::MIN, -1, 0, 1, i64::MAX] {
-            assert_eq!(jet_int_owned_to_i64(&JetInt::from_i64(value)), Ok(value));
-        }
-        for text in ["-9223372036854775809", "9223372036854775808"] {
-            let value = JetInt::from_big(CtBigInt::from_str(text).expect("exact integer"));
-            assert_eq!(
-                jet_int_owned_to_i64(&value),
-                Err("exact Int does not fit the native i64 ABI")
-            );
-        }
-    }
 
     #[test]
     fn checked_widen_accepts_exact_runtime_values_and_rejects_rounding() {

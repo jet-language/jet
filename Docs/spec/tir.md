@@ -84,8 +84,11 @@ its stored fields uses it. Such parameters are carried by a zero-sized
 is not a source field or a serialized/displayed value. Native/runtime-owned
 records retain their existing layouts rather than receiving emitter fields.
 
-Shared collection kernels narrow owned exact `Int` arguments through the same
-Foundation numeric ABI check on every host. A native-width overflow uses the
+Shared collection kernels narrow owned exact `Int` arguments through
+Foundation's borrowed `JetInt::to_native_i64` ABI check on every host. The seam
+belongs to the carrier, so it also works when Foundation is embedded beneath
+a generated program's crate root; the flat primitive-conversion fragment has
+no dependency on that root's module layout. A native-width overflow uses the
 registry-backed `E3010` stop; an include host supplies only the stop transport,
 not another conversion rule or runtime dependency.
 

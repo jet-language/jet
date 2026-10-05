@@ -1,7 +1,7 @@
 // ── D-ITERTOOLS1=A: expanded collection/runtime handles ─────────────────────
 #[inline(always)]
 fn jet_collection_native_int(value: &jet_foundation::Numeric::JetInt) -> i64 {
-    jet_foundation::NumericConversion::jet_int_owned_to_i64(value).unwrap_or_else(|error| {
+    value.to_native_i64().unwrap_or_else(|error| {
         jet_panic_rich_code(
             "E3010", "<core.collections>", 0, "", "", 0, 0, error, "",
         )
