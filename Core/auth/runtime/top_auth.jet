@@ -154,7 +154,7 @@ fn jet_auth_json_skip_value(chars: [Char], pos: &USize) -> {
             match character {
                 '{' -> closers.push('}')
                 '[' -> closers.push(']')
-                '}' | ']' if closers.last() == Val(character) -> {
+                '}' | ']' if closers.last() == character -> {
                     _ :: closers.pop()
                     if closers.is_empty() -> return
                 }
@@ -289,7 +289,7 @@ fn jet_auth_claims_at(payload: [U8], audience: String, issuer: String?, clock_sk
     not_before :: jet_auth_optional_i64(fields, text, "nbf")?
     issued_at :: jet_auth_optional_i64(fields, text, "iat")?
     if issuer == .Val(expected) {
-        if actual_issuer.as_deref() != Val(expected) -> return Err(JetAuthError.WrongIssuer{expected: expected.to_string(), actual: ^actual_issuer})
+        if actual_issuer != expected -> return Err(JetAuthError.WrongIssuer{expected: expected.to_string(), actual: ^actual_issuer})
     }
     expiry_deadline_ns :: jet_auth_expiry_deadline_ns(expires_at, clock_skew_ns)?
     if now_ns >= expiry_deadline_ns -> return Err(JetAuthError.TokenExpired)
