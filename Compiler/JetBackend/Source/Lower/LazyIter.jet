@@ -57,8 +57,10 @@ fn lower_lazy_slot_helper(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LI
 
 fn lower_lazy_equal_helper(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
     f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer(), lir_layout_pointer()}, Val(lir_layout_bool()))
-    left :: lower_read_at(p, &f, ~f.open_params[0], 0, glue.ty)
-    right :: lower_read_at(p, &f, ~f.open_params[1], 0, glue.ty)
+    left_slot :: ~f.open_params[0]
+    right_slot :: ~f.open_params[1]
+    left :: lower_read_at(p, &f, left_slot, 0, glue.ty)
+    right :: lower_read_at(p, &f, right_slot, 0, glue.ty)
     result :: lower_equal_values(p, &m, &f, glue.ty, left, right)
     lower_seal(&f, LIRTerminator.Return{value: result})
     lir_builder_finish(f.builder)
@@ -67,7 +69,8 @@ fn lower_lazy_equal_helper(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> L
 fn lower_lazy_show_helper(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
     f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer()}, Val(lir_layout_pointer()))
     result :: lower_pointer(&f)
-    value :: lower_read_at(p, &f, ~f.open_params[0], 0, glue.ty)
+    slot :: ~f.open_params[0]
+    value :: lower_read_at(p, &f, slot, 0, glue.ty)
     if value == .Val(operand) {
         lower_call_helper(&m, &f, "show", glue.ty, [LIRValueID]{operand}, Val(result))
     } else {
@@ -116,7 +119,8 @@ fn lower_lazy_callback_helper(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -
         }
         arg :: lower_read_at(p, &f, source, 0, ty) ?? next
         if access == .Move && !owned_inputs && (lower_is_inline(p, ty) || lower_needs_drop(p, ty)) {
-            copied :: lower_new_value(&f, lower_value_layout(f, arg), LIRDrop.Trivial, ty.identity)
+            layout :: lower_value_layout(f, arg)
+            copied :: lower_new_value(&f, layout, LIRDrop.Trivial, ty.identity)
             lower_clone_into(p, &m, &f, arg, copied, ty)
             &args.push(copied)
         } else {
@@ -142,7 +146,8 @@ fn lower_lazy_callback_helper(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -
 
 fn lower_lazy_callback_drop_helper(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
     f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer()}, None)
-    lower_map_drop_value(p, &m, &f, ~f.open_params[0], glue.ty)
+    env :: ~f.open_params[0]
+    lower_map_drop_value(p, &m, &f, env, glue.ty)
     lower_seal(&f, LIRTerminator.Return{value: None})
     lir_builder_finish(f.builder)
 }
@@ -231,7 +236,9 @@ fn lower_lazy_meta_trait(m: &LowerModule, f: &LowerFunction, meta: LIRValueID, t
 
 fn lower_lazy_compare_helper(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
     f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer(), lir_layout_pointer()}, Val(lir_layout_word()))
-    a :: lower_read_at(p, &f, ~f.open_params[0], 0, glue.ty) ?? {
+    left_slot :: ~f.open_params[0]
+    right_slot :: ~f.open_params[1]
+    a :: lower_read_at(p, &f, left_slot, 0, glue.ty) ?? {
         result :: lower_const(&f, 0)
         lower_seal(&f, LIRTerminator.Return{value: Val(result)})
         return lir_builder_finish(f.builder)
@@ -241,7 +248,7 @@ fn lower_lazy_compare_helper(p: MIRProgram, m: &LowerModule, glue: LowerGlue) ->
         lower_seal(&f, LIRTerminator.Unreachable)
         return lir_builder_finish(f.builder)
     }
-    b :: lower_read_at(p, &f, ~f.open_params[1], 0, glue.ty) ?? panic("comparison operands have different layouts")
+    b :: lower_read_at(p, &f, right_slot, 0, glue.ty) ?? panic("comparison operands have different layouts")
     less :: lower_flag(&f)
     greater :: lower_flag(&f)
     if lower_is_exact_int(glue.ty) {
@@ -449,10 +456,10 @@ fn lower_lazy_closure_method(p: MIRProgram, c: LowerContext, m: &LowerModule, f:
         else -> None
     }
     result_ty :: lower_checked_type(c, instruction) ?? return true
-    output_ty :: returned ?? lower_lazy_element(result_ty) ?? {
+    output_ty :: returned ?? (lower_lazy_element(result_ty) ?? {
         lower_fail(&m, &f, "Iter closure adapter {symbol} has no checked callback result")
         return true
-    }
+    })
     source := lower_use(&m, &f, receiver) ?? return true
     if list_source {
         elem :: lower_list_element(receiver_ty) ?? return true
@@ -477,8 +484,8 @@ fn lower_lazy_closure_method(p: MIRProgram, c: LowerContext, m: &LowerModule, f:
     runtime :: if symbol == "jet_list_take_while_iter" -> "jet_rt_native_iter_take_while" else if symbol == "jet_list_skip_while_iter" -> "jet_rt_native_iter_skip_while" else if symbol == "jet_list_filter_map_iter" -> "jet_rt_native_iter_filter_map" else -> lower_lazy_runtime_symbol(symbol)
     call_args := [LIRValueID]{source, closure, callback, release, meta}
     if symbol == "jet_iter_chunk_while" {
-        result_ty :: lower_checked_type(c, instruction) ?? return true
-        output :: lower_lazy_element(result_ty) ?? return true
+        chunks_ty :: lower_checked_type(c, instruction) ?? return true
+        output :: lower_lazy_element(chunks_ty) ?? return true
         &call_args.push(lower_lazy_meta(p, &m, &f, output))
     }
     lower_call_runtime(&m, &f, runtime, call_args, Val(dst))

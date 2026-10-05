@@ -372,12 +372,13 @@ fn lower_repr(p: MIRProgram, ty: MIRType) -> LowerRepr Never! {
         .List(elem) -> lower_list_repr(p, ty, elem)
         .Map(key, value) -> lower_map_repr(p, ty, key, value)
         .Result(_, _) -> LowerRepr.Boxed{ty: ty}
-        .Fn(_) -> LowerRepr.Boxed{ty: ty}
+        .Fn(_) | .SendFn(_, _, _) -> LowerRepr.Boxed{ty: ty}
         .Tuple(_) -> LowerRepr.Inline{ty: ty}
         .Apply(name, args) -> {
             if args.len() == 0 && (name.name == "Unit" || name.name == "Never") -> return LowerRepr.Absent
             if args.len() == 0 && name.name == "RangeCursor" -> return LowerRepr.Handle{drop: "jet_loop_cursor_drop", clone: ""}
             if lower_lazy_element(ty) == .Val(elem) -> return lower_lazy_repr(p, ty, elem)
+            if lower_task_handle_repr(ty) == .Val(handle) -> return handle
             if lower_is_iter_cursor(ty) -> return LowerRepr.Boxed{ty: ty}
             if lower_string_view(ty) -> return LowerRepr.Handle{drop: "jet_rt_string_drop", clone: "jet_rt_string_clone"}
             if lower_view_element(ty) == .Val(elem) -> return lower_list_repr(p, ty, elem)
@@ -911,6 +912,7 @@ fn lower_context(p: MIRProgram, m: &LowerModule, f: &LowerFunction, function: MI
             loop stored in lower_stored_operands(instruction.operation) -> _ := &sunk.add(stored.value, true)
             loop stored in lower_map_stored_operands(p, instruction.operation) -> _ := &sunk.add(stored.value, true)
             loop stored in lower_lazy_stored_operands(p, instruction.operation) -> _ := &sunk.add(stored.value, true)
+            loop stored in lower_task_stored_operands(p, instruction.operation) -> _ := &sunk.add(stored.value, true)
             result_value :: instruction.result ?? next
             if instruction.operation == {
                 .ReadPlace(place) | .MovePlace(place) -> {
@@ -1499,6 +1501,7 @@ fn lower_instruction(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
         .Semantic(semantic) -> lower_semantic(p, c, &m, &f, instruction, semantic)
         .CoreCall(_, route, args, type_args, _, _) -> {
             if lower_lazy_call(p, c, &m, &f, instruction, route, args) -> return
+            if lower_channel_call(p, c, &m, &f, instruction, route, args) -> return
             if type_args.len() > 0 -> return lower_fail(&m, &f, "generic CoreCall {lower_route_name(p, route)} is not lowered at O0 yet")
             values :: lower_route_values(p, &m, &f, route, args, "CoreCall") ?? return
             lower_route_call(p, c, &m, &f, instruction, route, values, "CoreCall")
@@ -2338,7 +2341,12 @@ fn lower_semantic(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunc
     // native word, which the generated adapter does. Frame-scheduled methods
     // and kernels that also take a source location are reported (the
     // route's arity check rejects the latter).
+    if semantic == .TaskGroup(call, kind, tasks) -> return lower_task_group(p, c, &m, &f, instruction, call, kind, tasks)
+    if semantic == .CoreClosureCall(call, kind, values, closure, _, _) {
+        if kind == .Spawn -> return lower_task_spawn(p, c, &m, &f, instruction, call, values, closure)
+    }
     if semantic == .HandleMethod(call, receiver, args, frame_schedule, _) {
+        if lower_task_method(p, c, &m, &f, instruction, call, receiver, args) -> return
         if frame_schedule != None -> return lower_fail(&m, &f, "frame-scheduled HandleMethod {lower_route_name(p, call)} is not lowered at O0 yet")
         values := [MIRValueID]{receiver}
         loop arg in args -> &values.push(arg)
@@ -2627,7 +2635,7 @@ fn lower_glue_function(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFu
     if lower_is_iter_cursor(glue.ty) -> return lower_iter_drop_glue(p, &m, glue)
     if glue.ty.kind == .List(elem) -> return lower_list_drop_glue(p, &m, glue, elem)
     if lower_map_entry(glue.ty) == .Val(entry) -> return lower_list_drop_glue(p, &m, glue, entry)
-    if glue.ty.kind == .Fn(_) -> return lower_closure_drop_glue(&m, glue)
+    if glue.ty.kind == .Fn(_) | .SendFn(_, _, _) -> return lower_closure_drop_glue(&m, glue)
     if lower_is_inline(p, glue.ty) -> return lower_inline_drop_glue(p, &m, glue)
     signature :: lower_signature(&m, [LIRLayout]{lir_layout_pointer()}, None)
     f := lower_new_function(glue.id, "drop.{glue.key}", signature, MIRBlockID{value: U64.MAX})
@@ -2692,7 +2700,7 @@ fn lower_clone_glue_function(p: MIRProgram, m: &LowerModule, glue: LowerGlue) ->
     if lower_is_iter_cursor(glue.ty) -> return lower_iter_clone_glue(p, &m, glue)
     if glue.ty.kind == .List(elem) -> return lower_list_clone_glue(p, &m, glue, elem)
     if lower_map_entry(glue.ty) == .Val(entry) -> return lower_list_clone_glue(p, &m, glue, entry)
-    if glue.ty.kind == .Fn(_) -> return lower_closure_clone_glue(&m, glue)
+    if glue.ty.kind == .Fn(_) | .SendFn(_, _, _) -> return lower_closure_clone_glue(&m, glue)
     if lower_is_inline(p, glue.ty) -> return lower_inline_clone_glue(p, &m, glue)
     signature :: lower_signature(&m, [LIRLayout]{lir_layout_pointer()}, Val(lir_layout_pointer()))
     f := lower_new_function(glue.id, "clone.{glue.key}", signature, MIRBlockID{value: U64.MAX})
@@ -2809,6 +2817,9 @@ fn lower_helper_function(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIR
     if glue.helper == "callable.init" -> return lower_callable_init(&m, glue)
     if glue.helper == "record.in" -> return lower_helper_record_in(p, &m, glue)
     if glue.helper == "record.out" -> return lower_helper_record_out(p, &m, glue)
+    if glue.helper == "task.body" -> return lower_helper_task_body(p, &m, glue)
+    if glue.helper == "task.release" -> return lower_helper_task_release(p, &m, glue)
+    if glue.helper == "task.debug" -> return lower_helper_task_debug(p, &m, glue)
     if glue.helper == "closure.release" -> return lower_closure_release(p, &m, glue)
     if glue.helper == "iter.release" -> return lower_helper_iter_typed(p, &m, glue, false)
     if glue.helper == "iter.advance.typed" -> return lower_helper_iter_typed(p, &m, glue, true)
