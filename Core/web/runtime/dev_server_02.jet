@@ -68,7 +68,7 @@ fn open_dir_in_parent(parent_path: &OSPath, parent_final: String, value: &OsStr,
     check_directory(&directory)?
     actual :: normalize(final_path(&directory)?)
     verify_parent(parent_path, parent_final, parent)?
-    if parent_of(actual) != Val(parent_final) {
+    if parent_of(actual) != parent_final {
         return Err(io.Error.new(.PermissionDenied, "devserver directory escaped its held parent"))
     }
     Ok((^directory, ^actual))
@@ -83,7 +83,7 @@ fn open_file_in_parent(parent_path: &OSPath, parent_final: String, value: &OsStr
     identity :: check_regular(&file)?
     actual :: normalize(final_path(&file)?)
     verify_parent(parent_path, parent_final, parent)?
-    if parent_of(actual) != Val(parent_final) {
+    if parent_of(actual) != parent_final {
         return Err(io.Error.new(.PermissionDenied, "devserver file escaped its held parent"))
     }
     Ok((^file, identity))
