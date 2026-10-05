@@ -1691,8 +1691,10 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
             &diagnostics.push(sema_error("E0801", parameter.name_span, "tell me the type of `{parameter.name}`", "this lambda parameter has no type to go on", "write `({parameter.name}: Int) -> …` (or whatever type fits)"))
             return None
         }
+        // A written `(item: Item)` and an expected `module::Item` (resolved
+        // by the generic slot that supplied it) name one declaration.
         if parameter.ty != None && expected_params == .Val(required_params) {
-            if index < required_params.len() && !type_identity_equal(parameter_type, required_params[index]) {
+            if index < required_params.len() && !type_identity_equal(sema_expr_expected_type(parameter_type, environment), sema_expr_expected_type(required_params[index], environment)) {
                 &diagnostics.push(sema_type_mismatch(required_params[index], parameter_type, parameter.ty_span ?? parameter.name_span))
                 return None
             }
