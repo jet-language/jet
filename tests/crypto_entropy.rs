@@ -463,9 +463,9 @@ fn crypto_runtime_sources_contain_no_predictable_fallback() {
         );
     }
     let host_sources = [
-        include_str!("../crates/jet-jit/src/Crypto.rs"),
-        include_str!("../crates/jet-jit/src/Encoding.rs"),
-        include_str!("../crates/jet-jit/src/net_http_rt.rs"),
+        include_str!("../crates/jet-evalhost/src/Crypto.rs"),
+        include_str!("../crates/jet-evalhost/src/Encoding.rs"),
+        include_str!("../crates/jet-evalhost/src/net_http_rt.rs"),
     ]
     .join("\n");
     for forbidden in [
@@ -478,7 +478,7 @@ fn crypto_runtime_sources_contain_no_predictable_fallback() {
     ] {
         assert!(
             !host_sources.contains(forbidden),
-            "JIT/runtime adapter contains forbidden fallback marker {forbidden}"
+            "evaluator host adapter contains forbidden fallback marker {forbidden}"
         );
     }
 }

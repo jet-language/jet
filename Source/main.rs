@@ -24,7 +24,7 @@ use jet_foundation::Report::{
 };
 
 // D-ALLOC-PROGRAM1=A: the CLI executable installs the resident instance once.
-// JIT/interpreter entry points only marshal the checked package fact into the
+// Interpreter entry points only marshal the checked package fact into the
 // same Prelude kernel; they never implement allocation policy.
 #[global_allocator]
 static JET_HOST_ALLOCATOR: jet::program_allocator::JetHostProgramAllocator =
@@ -6279,7 +6279,7 @@ impl ResolvedEntry {
 /// its own for `--json`.
 ///
 /// A relative entry runs the whole pipeline: `jet dev` already hands its raw
-/// argument to the loader, sema, the JIT, the watcher, and the cache, and
+/// argument to the loader, sema, the build, the watcher, and the cache, and
 /// `find_manifest_root` canonicalizes its start before walking up.
 ///
 /// The canonical-equality guard is what makes this safe rather than merely

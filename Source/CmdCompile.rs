@@ -1649,7 +1649,7 @@ fn authority_confirmation_prompt(file: &str, undecided: &jet::Sema::EffectSet) -
 }
 
 /// Apply the complete application effect policy before any native adapter can
-/// execute. This is shared by AOT, JIT, and interpreter paths; the only tier
+/// execute. This is shared by AOT and interpreter paths; the only tier
 /// input is the checked semantic effect view.
 fn apply_native_effect_policy(
     cmd: &str,
@@ -2601,7 +2601,7 @@ fn delegated_run_arguments(raw: &[String], start: &Path) -> Vec<String> {
     child
 }
 
-fn takes_separate_run_value(argument: &str) -> bool {
+pub(crate) fn takes_separate_run_value(argument: &str) -> bool {
     matches!(
         argument,
         "-p" | "--fixtures"
@@ -16055,14 +16055,14 @@ mod missing_c_lib_tests {
     fn driver_brands_runtime_host_fault_without_rust_text() {
         let diagnostic = jet::Diagnostics::Diagnostic::runtime_host_fault(
             "before\n".to_string(),
-            "the JIT runtime helper failed".to_string(),
+            "the runtime helper failed".to_string(),
         );
         let (stdout, what) = diagnostic
             .runtime_host_fault_parts()
             .expect("typed runtime host fault");
         let report = render_internal_fault(what);
         assert_eq!(stdout, "before\n");
-        assert!(report.starts_with("internal compiler error: the JIT runtime helper failed\n"));
+        assert!(report.starts_with("internal compiler error: the runtime helper failed\n"));
         assert!(report.contains("This is a bug in jet, NOT in your program."));
         assert!(!report.contains("thread 'main' panicked"));
         assert!(!report.contains("runtime_host.rs"));

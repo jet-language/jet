@@ -1212,9 +1212,9 @@ fn compile_latency_samples(
     // 20 wasted compiles per collection — and let every sample start from an
     // independently produced state. Prime one fixed trial path once, snapshot
     // its cache, and restore that snapshot before each edit. The fixed path is
-    // required because the JIT cache key includes the watched absolute paths;
-    // copying a warm cache into a different path would silently turn every
-    // purported incremental sample into a cold miss.
+    // required because the build cache key includes the watched absolute
+    // paths; copying a warm cache into a different path would silently turn
+    // every purported incremental sample into a cold miss.
     let warm = scratch.join("warm-cache");
     let edit_trial = scratch.join("edit-trial");
     if mode == "Edit" {

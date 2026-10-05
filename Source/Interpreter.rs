@@ -174,7 +174,7 @@ pub fn run_checked(
     );
     let config = mir_eval_config(program, try_anyway, invocation, release_devtools_policy);
     // Edition-gated Core kernels read the package edition at runtime; bind the
-    // program's edition like AOT (`__JET_PACKAGE_EDITION`) and the JIT do.
+    // program's edition like AOT (`__JET_PACKAGE_EDITION`) does.
     jet_foundation::PackageEdition::with_package_edition(&program.facts.edition, || {
         append_parked_task_report(mir_eval_outcome(
             crate::Codegen::MIREval::evaluate_mir_program_with_config(program, artifact, &config),

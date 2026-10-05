@@ -4332,7 +4332,6 @@ fn lower_mir_fragment_program(
         effects: TEffectFacts::default(),
         target_applicability: TTargetApplicability {
             rust_aot: false,
-            cranelift: false,
             interpreter: true,
             web: false,
         },
@@ -12762,7 +12761,6 @@ impl TFailureCarrier {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct TTargetApplicability {
     pub rust_aot: bool,
-    pub cranelift: bool,
     pub interpreter: bool,
     pub web: bool,
 }
@@ -12850,7 +12848,6 @@ pub(crate) fn function_target_applicability(f: &crate::AST::Func) -> TTargetAppl
     let Some(foreign) = f.inline_foreign.as_ref() else {
         return TTargetApplicability {
             rust_aot: true,
-            cranelift: true,
             interpreter: true,
             web: true,
         };
@@ -12859,11 +12856,10 @@ pub(crate) fn function_target_applicability(f: &crate::AST::Func) -> TTargetAppl
         foreign.lang.to_ascii_lowercase().as_str(),
         "c" | "cpp" | "c++" | "asm" | "assembly"
     ) {
-        // Native inline bodies share the checked bridge across AOT, Cranelift,
-        // and the resident interpreter; Web has no native provider.
+        // Native inline bodies share the checked bridge across AOT and the
+        // interpreter; Web has no native provider.
         return TTargetApplicability {
             rust_aot: true,
-            cranelift: true,
             interpreter: true,
             web: false,
         };
@@ -12871,7 +12867,6 @@ pub(crate) fn function_target_applicability(f: &crate::AST::Func) -> TTargetAppl
     let web = foreign.lang.eq_ignore_ascii_case("js") || foreign.lang.eq_ignore_ascii_case("web");
     TTargetApplicability {
         rust_aot: true,
-        cranelift: false,
         interpreter: false,
         web,
     }

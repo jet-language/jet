@@ -105,7 +105,7 @@ each gate-bearing fact once with its source span and provenance. The CLI command
 that ledger. Its JSON form has the same data; it does not create an inspection
 ledger of its own.
 
-The structure plane ends before TIR. AOT emit, Cranelift, the interpreter, and
+The structure plane ends before TIR. AOT emit, the interpreter, and
 web codegen receive the checked program after structure facts and gates have
 been erased. This preserves I2 and I3 (rustc and engines do not decide policy),
 I8 (one registry and one gate mechanism), and I9 (one meaning across applicable
@@ -374,7 +374,7 @@ snapshots):
   that form). Crossing sites are recorded for the upgrade report.
 
 `freeze` does not add a backend policy rail. Its `Frozen` flow fact is lowered
-to the existing owned clone/materialization TIR nodes, so AOT, Cranelift,
+to the existing owned clone/materialization TIR nodes, so AOT, the
 interpreter, and any applicable web path consume one checked meaning. The
 REPL remains an interpreter-only surface and rejects task execution with E1802;
 pure `freeze(x)` evaluation is still a value operation.

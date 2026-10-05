@@ -981,7 +981,7 @@ fn compiler_sources_reject_retired_jet_ring_keys() {
         "crates/jet-sema/src",
         "crates/jet-codegen/src",
         "crates/jet-comptime/src",
-        "crates/jet-jit/src",
+        "crates/jet-evalhost/src",
         "crates/jet-repl/src",
     ];
     let retired = [

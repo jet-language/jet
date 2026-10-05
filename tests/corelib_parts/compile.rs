@@ -938,31 +938,18 @@ fn core_os_interrupt_runtime_failures_use_the_boundary_aware_helpers() {
     assert!(core.contains("if jet_interrupt_handler_should_unwind()"));
 }
 
-#[test]
-fn resident_jit_terminal_helpers_do_not_bypass_the_runtime_boundary() {
-    let collections = include_str!("../../crates/jet-jit/src/Collections.rs");
-    let core_host = include_str!("../../crates/jet-jit/src/CoreHost.rs");
-    let runtime = include_str!("../../crates/jet-jit/src/jit/runtime_host.rs");
-    assert!(collections.contains("runtime_host::runtime_stop_unwind(\"E3001\""));
-    assert!(!collections.contains("std::process::exit"));
-    assert!(core_host.contains("super::jet_jit_process_exit(code)"));
-    assert!(core_host.contains("jet_jit_process_exit(1);"));
-    assert!(!core_host.contains("std::process::exit"));
-    assert!(runtime.contains("pub(crate) fn runtime_stop_unwind"));
-}
-
 /// #2027 criterion 3: one signal mechanism means one observable answer.
 ///
-/// The same program, the same real `SIGINT`, on all three tiers — AOT, default
-/// `jet run` (resident Cranelift) and `jet run --interpret`. The assertion is
+/// The same program, the same real `SIGINT`, on all three paths — AOT, default
+/// `jet run` (build + execute) and `jet run --interpret`. The assertion is
 /// cross-tier EQUALITY first, then the pinned value, because the failure this
 /// guards against is precisely two tiers disagreeing about a delivered signal.
 ///
 /// Only the unified part is asserted: that the interrupt is counted once, and
 /// that both handlers run in registration order. A handler's *failure* shape is
 /// the one thing that is still per-tier by design (AOT catches the unwind at the
-/// dispatcher boundary, the resident host sets a runtime trap, the evaluator
-/// returns a diagnostic), so no handler here fails.
+/// dispatcher boundary, the evaluator returns a diagnostic), so no handler here
+/// fails.
 #[cfg(unix)]
 #[test]
 fn core_os_interrupt_delivery_matches_aot_jit_and_interpreter() {

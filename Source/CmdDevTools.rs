@@ -825,7 +825,7 @@ pub(crate) fn run_dev(
 ) {
     crate::CmdCompile::require_project_environment("dev", Path::new(file), mode);
     if !use_interpreter && !canvas {
-        run_dev_restart(file, policy, mode);
+        run_dev_restart(file, entry_fn, policy, mode);
     }
     let mut runtime_args = Vec::with_capacity(program_args.len() + 1);
     runtime_args.push(file.to_string());
@@ -850,42 +850,74 @@ pub(crate) fn run_dev(
     });
 }
 
-/// The `jet run` argv of one restart generation: this same invocation with
-/// its command word spelled `run` and the watch-only flags removed, so the
+/// The argv of one restart generation: this same invocation with the
+/// watch-only flags removed. Ordinarily the command word becomes `run`, so the
 /// child resolves the same entry, member, profile, settings, and program
-/// arguments as the session that started it.
-fn dev_restart_run_argv(args: impl Iterator<Item = String>) -> Vec<String> {
+/// arguments as the session that started it. A package `dev` command override
+/// is not a `jet run` entry: its generation is a one-shot `jet dev` of the
+/// resolved override file, so every generation runs the dev callable.
+fn dev_restart_argv(mut args: impl Iterator<Item = String>, dev_override: Option<&str>) -> Vec<String> {
+    let mut argv = Vec::new();
     let mut command_seen = false;
-    let mut passthrough = false;
-    args.filter_map(|arg| {
-        if passthrough {
-            return Some(arg);
+    let mut target_seen = false;
+    let mut separate_value = false;
+    let finish_dev_override = |argv: &mut Vec<String>, target_seen: bool| {
+        if let Some(file) = dev_override {
+            if !target_seen {
+                argv.push(file.to_string());
+            }
+            argv.push("--watch=off".to_string());
+        }
+    };
+    while let Some(arg) = args.next() {
+        if separate_value {
+            separate_value = false;
+            argv.push(arg);
+            continue;
         }
         if arg == "--" {
-            passthrough = true;
-            return Some(arg);
+            finish_dev_override(&mut argv, target_seen);
+            argv.push(arg);
+            argv.extend(args);
+            return argv;
         }
         if !command_seen && (arg == "dev" || arg == "run") {
             command_seen = true;
-            return Some("run".to_string());
+            argv.push(if dev_override.is_some() { "dev" } else { "run" }.to_string());
+            continue;
         }
         let watch_only = arg == "--watch"
             || arg.starts_with("--watch=")
             || matches!(arg.as_str(), "--restart" | "--swap" | "--try-anyway" | "--no-capture");
-        (!watch_only).then_some(arg)
-    })
-    .collect()
+        if watch_only {
+            continue;
+        }
+        if crate::CmdCompile::takes_separate_run_value(&arg) {
+            separate_value = !arg.contains('=');
+            argv.push(arg);
+            continue;
+        }
+        if command_seen && !target_seen && !arg.starts_with('-') {
+            target_seen = true;
+            argv.push(dev_override.map_or(arg, str::to_string));
+            continue;
+        }
+        argv.push(arg);
+    }
+    finish_dev_override(&mut argv, target_seen);
+    argv
 }
 
 /// D-EXEC2=A: the default `jet dev` / `jet run --watch` engine. Each
 /// generation is a child `jet run` (normal build path + execute); an
 /// invalidation stops the running program and starts the next generation.
-fn run_dev_restart(file: &str, policy: WatchPolicy, mode: OutputMode) -> ! {
+fn run_dev_restart(file: &str, entry_fn: Option<&str>, policy: WatchPolicy, mode: OutputMode) -> ! {
     let exe = std::env::current_exe().unwrap_or_else(|error| {
         crate::cli_error!("E2105", "couldn't locate the running Jet executable: {error}");
         exit(ExitCodes::USER_ERROR);
     });
-    let argv = dev_restart_run_argv(std::env::args().skip(1));
+    let dev_override = (entry_fn == Some("dev")).then_some(file);
+    let argv = dev_restart_argv(std::env::args().skip(1), dev_override);
     let start = || {
         Command::new(&exe).args(&argv).spawn().unwrap_or_else(|error| {
             crate::cli_error!("E2105", "couldn't run the program: {error}");
@@ -9658,6 +9690,36 @@ mod schedule_tests {
             clock.due_at(&jobs, day1_in_window),
             vec!["nightly".to_string()],
             "must fire again the next day's matching window"
+        );
+    }
+}
+
+#[cfg(test)]
+mod dev_restart_tests {
+    use super::dev_restart_argv;
+
+    fn argv(args: &[&str], dev_override: Option<&str>) -> Vec<String> {
+        dev_restart_argv(args.iter().map(|arg| arg.to_string()), dev_override)
+    }
+
+    #[test]
+    fn ordinary_generation_is_jet_run_without_watch_flags() {
+        assert_eq!(
+            argv(&["dev", "app.jet", "--watch", "--profile", "fast", "--", "--watch"], None),
+            ["run", "app.jet", "--profile", "fast", "--", "--watch"]
+        );
+        assert_eq!(argv(&["run", "--watch=on", "-p", "web"], None), ["run", "-p", "web"]);
+    }
+
+    #[test]
+    fn dev_override_generation_runs_the_override_file_once() {
+        assert_eq!(
+            argv(&["--json", "dev", "--profile", "fast"], Some("/pkg/dev.jet")),
+            ["--json", "dev", "--profile", "fast", "/pkg/dev.jet", "--watch=off"]
+        );
+        assert_eq!(
+            argv(&["dev", "pkg", "--", "a"], Some("/pkg/dev.jet")),
+            ["dev", "/pkg/dev.jet", "--watch=off", "--", "a"]
         );
     }
 }

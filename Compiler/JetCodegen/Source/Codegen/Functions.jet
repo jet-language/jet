@@ -807,7 +807,7 @@ fn jet_codegen_lower_impl_definition(definition: TImplDef, functions: JetCodegen
         operator_marker: operator_marker,
         operator_rhs: operator_rhs,
         target_os: jet_codegen_lower_target_os(definition.target_os),
-        target_applicability: MIRTargetApplicability{rust_aot: true, cranelift: true, interpreter: true, web: true},
+        target_applicability: MIRTargetApplicability{rust_aot: true, interpreter: true, web: true},
     }
 }
 
@@ -1300,8 +1300,6 @@ fn jet_codegen_core_call_row(record: CoreCallRecord) -> MIRCoreCall Never! {
         symbol: record.symbol,
         coverage_bits: record.coverage.bits,
         aot_direct: record.aot_direct,
-        jit_direct: record.jit_direct,
-        jit_symbol: record.jit_symbol,
         native_int_result: record.native_int_result,
         marker: record.marker,
     }
@@ -1384,7 +1382,7 @@ fn jet_codegen_core_records_match(left: CoreCallRecord, right: CoreCallRecord) -
     if left.signature.arity != right.signature.arity || left.signature.max_arity != right.signature.max_arity || !jet_codegen_bool_rows_equal(left.signature.borrow_mask, right.signature.borrow_mask) -> return false
     if left.fallibility != right.fallibility || left.effect_kind != right.effect_kind || left.effect_leaf != right.effect_leaf || left.sink_class != right.sink_class -> return false
     if left.pure_route != right.pure_route || left.interpreter_route != right.interpreter_route || left.symbol != right.symbol -> return false
-    if left.coverage.bits != right.coverage.bits || left.aot_direct != right.aot_direct || left.jit_direct != right.jit_direct || left.jit_symbol != right.jit_symbol || left.native_int_result != right.native_int_result -> return false
+    if left.coverage.bits != right.coverage.bits || left.aot_direct != right.aot_direct || left.native_int_result != right.native_int_result -> return false
     if !jet_codegen_core_access_rows_equal(left.frame_accesses, right.frame_accesses) || !jet_codegen_core_completion_equal(left.frame_completion, right.frame_completion) || !jet_codegen_core_capability_equal(left.capability, right.capability) || !jet_codegen_string_rows_equal(left.ui_capabilities, right.ui_capabilities) -> return false
     jet_codegen_authority_decisions_equal(left.authority, right.authority) && jet_codegen_core_markers_equal(left.marker, right.marker)
 }
@@ -1782,7 +1780,6 @@ fn jet_codegen_lower_function(builder: &JetCodegenBuilder, function: TFunc, stat
         visibility: jet_codegen_lower_visibility(function.visibility),
         target_applicability: MIRTargetApplicability{
             rust_aot: function.target_applicability.rust_aot,
-            cranelift: function.target_applicability.cranelift,
             interpreter: function.target_applicability.interpreter,
             web: function.target_applicability.web,
         },
@@ -2055,7 +2052,7 @@ fn jet_codegen_lower_lambda(builder: &JetCodegenBuilder, lambda: TLambda, send: 
         source_span: lambda.source_span,
         failure_carrier: lambda.failure_carrier,
         effects: jet_codegen_lambda_effects(builder.function_index, lambda.effects),
-        target_applicability: TTargetApplicability{rust_aot: true, cranelift: true, interpreter: true, web: true},
+        target_applicability: TTargetApplicability{rust_aot: true, interpreter: true, web: true},
         web_bucket: builder.function.web_bucket,
         web_marker: None,
         visibility: TVisibility.Private,
@@ -2208,7 +2205,7 @@ fn jet_codegen_comptime_item_tfunc(module_identity: String, module_name: String,
         source_span: span,
         failure_carrier: TFailureCarrier.Infallible,
         effects: TEffectFacts{direct: [String]{}, solved: [String]{}, call_edges: [String]{}, maximal: false, direct_spans: [TEffectSpan]{}},
-        target_applicability: TTargetApplicability{rust_aot: false, cranelift: false, interpreter: true, web: false},
+        target_applicability: TTargetApplicability{rust_aot: false, interpreter: true, web: false},
         web_bucket: None,
         web_marker: None,
         visibility: TVisibility.Private,
@@ -3095,7 +3092,7 @@ fn jet_codegen_attach_orphan_methods(impls: &[MIRImplDef], functions: [MIRFuncti
             operator_marker: None,
             operator_rhs: None,
             target_os: None,
-            target_applicability: MIRTargetApplicability{rust_aot: true, cranelift: true, interpreter: true, web: true},
+            target_applicability: MIRTargetApplicability{rust_aot: true, interpreter: true, web: true},
         })
         jet_codegen_index_impl_owner(&owner_index, impls[impls.len() - 1], impls.len() - 1)
     }
@@ -3487,10 +3484,9 @@ fn jet_codegen_lower_constant_rows(modules: [SemaGraphModuleResult]) -> [MIRCons
 }
 fn jet_codegen_foreign_target_applicability(target: MIRArtifactTarget) -> MIRTargetApplicability Never! {
     if target == {
-        .RustAOT -> MIRTargetApplicability{rust_aot: true, cranelift: false, interpreter: false, web: false}
-        .Cranelift -> MIRTargetApplicability{rust_aot: false, cranelift: true, interpreter: false, web: false}
-        .Interpreter -> MIRTargetApplicability{rust_aot: false, cranelift: false, interpreter: true, web: false}
-        .Web -> MIRTargetApplicability{rust_aot: false, cranelift: false, interpreter: false, web: true}
+        .RustAOT -> MIRTargetApplicability{rust_aot: true, interpreter: false, web: false}
+        .Interpreter -> MIRTargetApplicability{rust_aot: false, interpreter: true, web: false}
+        .Web -> MIRTargetApplicability{rust_aot: false, interpreter: false, web: true}
     }
 }
 

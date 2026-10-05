@@ -1409,16 +1409,10 @@ fn select_artifact(
     let target_ok = match (target, plan.target) {
         (MirRustTarget::Native, MirArtifactTarget::RustAot) => true,
         (MirRustTarget::WebWasm, MirArtifactTarget::Web) => true,
-        (
-            MirRustTarget::Native,
-            MirArtifactTarget::Cranelift | MirArtifactTarget::Interpreter | MirArtifactTarget::Web,
-        )
-        | (
-            MirRustTarget::WebWasm,
-            MirArtifactTarget::RustAot
-            | MirArtifactTarget::Cranelift
-            | MirArtifactTarget::Interpreter,
-        ) => false,
+        (MirRustTarget::Native, MirArtifactTarget::Interpreter | MirArtifactTarget::Web)
+        | (MirRustTarget::WebWasm, MirArtifactTarget::RustAot | MirArtifactTarget::Interpreter) => {
+            false
+        }
     };
     let kind_ok = match (target, plan.kind) {
         (
