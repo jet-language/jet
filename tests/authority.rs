@@ -1297,6 +1297,7 @@ fn run() {{
     hostile :: plugin.load("{plugin_path}", policy)
     _result :: hostile.zero() ?? {{
         print("rejected")
+        print(err)
         return
     }}
     print("guest-executed")
@@ -1319,11 +1320,14 @@ fn run() {{
             &link,
             &api,
         );
-        assert_ne!(code, 0, "{tier} followed a plugin symlink outside its root");
-        assert_eq!(stdout, "", "{tier} emitted output before symlink rejection");
+        // D-PLUGIN-FAILURE1=A: a failed load is not a host stop; the first
+        // call reports the load fault and the guest never runs.
+        assert_eq!(code, 0, "{tier} stopped the host on a rejected plugin load: {stderr}");
+        assert!(stdout.starts_with("rejected\n"), "{tier} followed a plugin symlink outside its root: {stdout}");
+        assert!(!stdout.contains("guest-executed"), "{tier} executed a guest outside its root: {stdout}");
         assert!(
-            stderr.contains("file authority path contains a symlink"),
-            "{tier} did not report the symlink rejection: {stderr}"
+            stdout.contains("file authority path contains a symlink"),
+            "{tier} did not report the symlink rejection: {stdout}"
         );
     }
 }

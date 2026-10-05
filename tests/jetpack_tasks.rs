@@ -442,7 +442,9 @@ fn jet_build_job_dispatch_matches_default_and_interpreter() {
 #[test]
 fn top_level_job_example_uses_one_argv_meaning() {
     let scratch = Scratch::new("top-level-job");
-    // The example carries its own inline package block and authority.
+    // The example carries its own inline package block and authority, so the
+    // scratch root's default package.jet would be a second manifest (E1363).
+    fs::remove_file(scratch.path.join("package.jet")).unwrap();
     fs::write(
         scratch.path.join("run.jet"),
         include_str!("../Examples/features/script_job/top_level/run.jet"),

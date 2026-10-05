@@ -16,31 +16,9 @@ package {
 // frozen Component interface; source must not project a generic or fake
 // handle, and the provider retains authority and error checks.
 
-// D-PLUGIN-FAILURE1=A. The shared host returns these carriers on every call.
-pub struct PluginFrame {
-    pub function: String
-    pub component: String
-    pub offset: Int
-}
-
-pub struct PluginFault {
-    pub export: String
-    pub message: String
-    pub frames: [PluginFrame]
-}
-
-pub enum PluginLimit {
-    Fuel
-    Memory
-    Table
-    Time
-    Wire
-}
-
-#Error
-pub enum PluginError {
-    Guest(PluginFault)
-    Denied(PluginFault)
-    Budget(limit: PluginLimit, fault: PluginFault)
-    Defect(PluginFault)
-}
+// D-PLUGIN-FAILURE1=A. Every export call fails with the compiler-owned
+// `PluginError` (`Guest`, `Denied`, `Budget(limit: PluginLimit, fault)`,
+// `Defect`); each case carries a `PluginFault { export, message, frames }`
+// whose frames are `PluginFrame { function, component, offset }`. The host,
+// sema rows and every tier share that one carrier, so this module declares
+// no second copy of it.

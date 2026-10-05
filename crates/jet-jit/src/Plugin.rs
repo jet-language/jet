@@ -578,10 +578,13 @@ fn plugin_error(rt: &mut JitRuntime, error: plugin_wire::PluginError) -> i64 {
     ]);
     let mut slots = vec![JetVal::Int(tag)];
     if let Some(limit) = limit {
-        slots.push(JetVal::Int(match limit {
+        // A unit variant is a one-cell enum record holding its discriminant,
+        // in the compiler-owned `PluginLimit` row order.
+        let discriminant = match limit {
             PluginLimit::Fuel => 0, PluginLimit::Memory => 1, PluginLimit::Table => 2,
             PluginLimit::Time => 3, PluginLimit::Wire => 4,
-        }));
+        };
+        slots.push(JetVal::RecordRef(rt.heap.alloc_record_values(vec![JetVal::Int(discriminant)])));
     }
     slots.push(JetVal::RecordRef(fault));
     let error = rt.heap.alloc_record_values(slots);

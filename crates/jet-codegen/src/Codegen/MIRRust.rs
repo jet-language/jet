@@ -11178,6 +11178,16 @@ impl<'a> RustEmitter<'a> {
                             input.name
                         ),
                         Some(MirCliDefault::TypeDefault) => "Default::default()".to_string(),
+                        // A job or recorded default is rendered text; a
+                        // non-text input decodes it as the same argv word.
+                        Some(MirCliDefault::Value(MirConstant::String(text)))
+                            if !matches!(input.ty.kind(), MirTypeKind::String) =>
+                        {
+                            format!(
+                                "{{ let __d = {text:?}.to_string(); {} }}",
+                                self.cli_scalar_expr(input, "__d")
+                            )
+                        }
                         Some(MirCliDefault::Value(value)) => self.constant_for_type(value, &input.ty),
                     };
                     let ty = self.rust_type(&input.ty);

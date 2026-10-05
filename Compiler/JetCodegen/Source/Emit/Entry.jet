@@ -274,7 +274,12 @@ fn jet_rust_emit_cli_decode_lines(ctx: &JetRustEmitContext, inputs: [MIRCLIInput
                     .Val(row) -> {
                         if row == {
                             .TypeDefault -> "Default::default()"
-                            .Value(constant) -> jet_rust_emit_constant(&ctx, constant, input.ty)
+                            // A job or recorded default is rendered text; a
+                            // non-text input decodes it as the same argv word.
+                            .Value(constant) -> if constant == {
+                                .String(text) -> if input.ty.kind != MIRTypeKind.String -> "{{ let __d = {jet_rust_emit_quote(text)}.to_string(); {jet_rust_emit_cli_scalar_expr(&ctx, input, input.ty, "__d")} }}" else -> jet_rust_emit_constant(&ctx, constant, input.ty)
+                                else -> jet_rust_emit_constant(&ctx, constant, input.ty)
+                            }
                         }
                     }
                     None -> "return Err(format!(\"missing required argument --{{}}\\n\\n{{}}\", {jet_rust_emit_quote(input.name)}, __spec.help()))"
