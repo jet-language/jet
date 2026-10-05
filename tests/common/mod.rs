@@ -147,12 +147,22 @@ pub fn run_interpreted(
 
 /// One run of `file` on the tier a test names. `use_interpreter` selects the
 /// in-process evaluator — what `jet dev --interpret` iterates on. Otherwise the
-/// default `jet run` (build, then execute) runs as a child process, because
-/// the default tier only exists behind the binary. `try_anyway` is an
+/// default `jet run` (build, then execute): its front end is the build front
+/// end, so a rejected program comes back as `Problems` carrying the same
+/// diagnostics `jet run` renders, and an accepted one runs as a child process
+/// (the default tier only exists behind the binary). `try_anyway` is an
 /// evaluator-only knob.
 pub fn dev_run(file: &str, try_anyway: bool, use_interpreter: bool) -> jet::Interpreter::RunOutcome {
     if use_interpreter {
         return jet::Interpreter::dev_iteration(file, try_anyway);
+    }
+    if let Err(diagnostics) = jet::compile_with_path("", file) {
+        if diagnostics
+            .iter()
+            .any(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
+        {
+            return jet::Interpreter::RunOutcome::Problems(diagnostics);
+        }
     }
     let scratch = Scratch::new("jet_default_run");
     let output = Command::new(env!("CARGO_BIN_EXE_jet"))
