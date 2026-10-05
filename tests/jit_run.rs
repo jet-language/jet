@@ -209,6 +209,36 @@ fn struct_call_word_preserves_bits_on_every_native_tier() {
     }
 }
 
+/// #4572: `text += piece` is text append on every tier. The resident JIT
+/// lowered the MIR `String + String` as integer addition of the two heap
+/// handles, so `s := "p"; s += "q"` printed an empty line under `jet run`.
+#[test]
+fn string_append_matches_golden_on_every_native_tier() {
+    assert!(jet_jit::cranelift_host_supported(), "#4572 requires the resident JIT");
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let file = root.join("Examples/features/basics/string_append.jet");
+    let expected = fs::read_to_string(root.join("Examples/features/expected/basics/string_append.out"))
+        .expect("string_append golden");
+    let shown = file.to_string_lossy();
+    for interpret in [true, false] {
+        jet_jit::reset_jit_trace_for_test();
+        match dev_iteration(&shown, false, interpret) {
+            RunOutcome::Ran { stdout, stderr, exit_code } => {
+                assert_eq!(exit_code, 0, "interpret={interpret}: {stderr}");
+                assert_eq!(stdout, expected, "interpret={interpret}");
+                assert!(stderr.is_empty(), "interpret={interpret}: {stderr}");
+            }
+            RunOutcome::Problems(diags) => panic!("string_append: {diags:?}"),
+        }
+        assert_eq!(jet_jit::jit_executed_for_test(), !interpret);
+        assert!(!jet_jit::fallback_invoked_for_test());
+        assert!(!jet_jit::deopt_invoked_for_test());
+    }
+    let aot = run_jet(&file, true);
+    assert_eq!(aot.status.code(), Some(0), "{}", String::from_utf8_lossy(&aot.stderr));
+    assert_eq!(aot.stdout, expected.as_bytes());
+}
+
 #[test]
 fn map_word_keys_and_values_are_never_exact_int_pointers() {
     assert!(jet_jit::cranelift_host_supported(), "#4576 requires the resident JIT");

@@ -451,6 +451,27 @@ impl<'a> Checker<'a> {
             }))
     }
 
+    /// Only concrete records need E0360 here. Distincts and closed numeric
+    /// families retain their own arithmetic rules; hooked places are rewritten
+    /// to the binary expression before assignment checking.
+    fn compound_missing_struct_hook(&self, op: crate::AST::BinOp, place: &Type) -> bool {
+        let trait_name = match op {
+            crate::AST::BinOp::Add => Syntax::TRAIT_ADD,
+            crate::AST::BinOp::Sub => Syntax::TRAIT_SUB,
+            crate::AST::BinOp::Mul => Syntax::TRAIT_MUL,
+            crate::AST::BinOp::Div => Syntax::TRAIT_DIV,
+            _ => return false,
+        };
+        let Type::Named(name) = place.without_user_tags() else {
+            return false;
+        };
+        let (import_ns, leaf) = self.struct_type_name_parts(name);
+        self.struct_owner_module(leaf, import_ns)
+            .and_then(|owner| self.struct_fields_of(owner, leaf))
+            .is_some()
+            && !self.type_implements_trait_for_name(name, trait_name)
+    }
+
     /// E0362: a compound update of a nested field whose type dispatches the
     /// operator through a hook trait. Builtin numerics update natively, so a
     /// nested numeric field (`guard.value.count += 1`) is never a hook place.
@@ -473,9 +494,18 @@ impl<'a> Checker<'a> {
         })
     }
 
-    /// True when compound assign on `target` is rejected (E0164 / E0362), so
-    /// L0503 must not recommend it.
+    /// True when compound assign on `target` is rejected (E0109 / E0164 /
+    /// E0360 / E0362), so L0503 must not recommend it.
     fn compound_assign_rejected(&self, target: &LValue, op: crate::AST::BinOp) -> bool {
+        if self
+            .lvalue_type(target)
+            .is_some_and(|place| {
+                compound_operator_undefined(op, &place)
+                    || self.compound_missing_struct_hook(op, &place)
+            })
+        {
+            return true;
+        }
         match target {
             LValue::Index { .. } => true,
             LValue::Local { .. } => false,
@@ -1343,7 +1373,7 @@ impl<'a> Checker<'a> {
             Stmt::Assign {
                 target,
                 op,
-                op_span: _,
+                op_span,
                 value,
             } => {
                 let is_compound = op.is_some();
@@ -1386,6 +1416,17 @@ impl<'a> Checker<'a> {
                         let source = source.clone();
                         self.widen_numeric_expr(value, &source, target_ty);
                         vt = Some(target_ty.clone());
+                    }
+                }
+                if let (Some(compound_op), Some(place), Some(source)) =
+                    (op.as_ref(), place_ty.as_ref(), vt.as_ref())
+                {
+                    if compound_operator_undefined(*compound_op, place) {
+                        self.op_mismatch(*compound_op, place, source, *op_span);
+                    } else if self.compound_missing_struct_hook(*compound_op, place) {
+                        if let Type::Named(name) = place.without_user_tags() {
+                            self.report_missing_operator_hook(*compound_op, name, *op_span);
+                        }
                     }
                 }
                 if !is_compound {
@@ -4024,6 +4065,28 @@ fn expr_indexes_root_with(expr: &Expr, root: &str, index_var: &str) -> bool {
                 || stmts_index_root_with(else_body, root, index_var)
                 || expr_indexes_root_with(else_value, root, index_var)
         }
+        _ => false,
+    }
+}
+
+/// S17: `place op= rhs` means `place = place op rhs`, so the update needs
+/// the operator its binary form has. These built-in carriers have no
+/// arithmetic or bit operator (their binary form is E0109); `String +=` is
+/// the one text append. Numeric, nominal, and generic places keep their
+/// own rules (widening, precise routes, and D-OPDEF1 hooks).
+fn compound_operator_undefined(op: crate::AST::BinOp, place: &Type) -> bool {
+    match place {
+        Type::Tagged { inner, .. } => compound_operator_undefined(op, inner),
+        Type::String => op != crate::AST::BinOp::Add,
+        Type::Bool
+        | Type::Char
+        | Type::List(_)
+        | Type::FixedList { .. }
+        | Type::Map { .. }
+        | Type::Option(_)
+        | Type::Result { .. }
+        | Type::Tuple(_)
+        | Type::Fn { .. } => true,
         _ => false,
     }
 }

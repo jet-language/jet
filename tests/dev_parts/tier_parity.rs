@@ -22,6 +22,9 @@ fn language_callables_and_types_match_interpreter_jit_and_aot() {
         "basics/callbacks",
         "basics/pattern_matching",
         "basics/variadics_spread",
+        // #4572: `text += piece` on locals, fields, list-element fields,
+        // and `&String` parameters must append on every tier.
+        "basics/string_append",
         "effects/effect_higher_order",
         "memory/parameter_modes",
         "patterns/struct_destructure",
