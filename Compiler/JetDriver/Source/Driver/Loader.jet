@@ -2086,12 +2086,21 @@ fn jet_driver_parse_authorized_source(core_sources: [JetDriverCoreSource], sourc
 }
 
 // The runtime unit row (`core.<area>.runtime.<unit>`) a Core import path
-// names, itself or one member of it (`core.a.runtime.u.f`).
+// names, itself or one member of it (`core.a.runtime.u.f`). The longest unit
+// wins, so nested `core.text.runtime.assets.x` is never member `x` of a
+// sibling unit `core.text.runtime.assets` (Rust `core_runtime_import`).
 fn jet_driver_core_runtime_row(core_sources: [JetDriverCoreSource], path: String) -> Int? {
+    best := Int?{None}
+    best_len := 0
     loop (row_index, row) in core_sources {
-        if row.runtime && (path == row.module_name || path.starts_with("{row.module_name}.")) -> return Val(row_index)
+        if !row.runtime || !(path == row.module_name || path.starts_with("{row.module_name}.")) -> next
+        length :: row.module_name.bytes().len()
+        if length > best_len {
+            best = Val(row_index)
+            best_len = length
+        }
     }
-    None
+    best
 }
 
 // Rust `bind_core_runtime_imports`: in a Core source, `use core.a.runtime.u.f
