@@ -10743,7 +10743,7 @@ impl<'a> LowerCtx<'a> {
             owned_last_use: matches!(access, MirAccess::Move) || box_as_trait.is_some(),
             authority_boundary: false,
             fn_coercion: None,
-            widen_fixed_to_list: false,
+            widen_fixed_to_list: arg.widen_to_vec,
             widen_to_union: match &arg.widen_to_union {
                 Some(ty) => {
                     let union = self.mir_type(ty)?.identity.ok_or_else(|| {

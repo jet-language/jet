@@ -47,6 +47,10 @@ type parameters and canonical trait bounds into inference, including explicit
 type arguments. Lowering consumes the checked substitutions and bound evidence;
 it must not reconstruct a forwarded parameter's bounds from its spelling.
 
+Fixed-array-to-list widening is a checked call-argument fact. MIR retains it
+even when the argument comes from a place, so native emission widens the
+array before lending the callee its growable-list borrow.
+
 Both executable lenses consume the channel read-only. A missing field means
 “not proven”; it never authorizes codegen to re-derive sema policy. An optimized
 lens may derive a private SSA form internally, but that form is not a third

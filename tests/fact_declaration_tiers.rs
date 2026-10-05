@@ -264,6 +264,23 @@ fn run() {
         "vector:1\nmatrix:2\n",
     );
 }
+#[test]
+fn fixed_array_argument_widens_before_the_read_borrow_on_all_tiers() {
+    let source = r#"
+fn sum(values: [Int]) -> Int {
+    total := 0
+    loop value in values -> total += value
+    total
+}
+fn run() {
+    values :: [Int#3]{3, 1, 4}
+    print(sum(values))
+    print(values[1])
+}
+"#;
+    tir_support::assert_tiers_agree("fixed_array_call_boundary", source, "8\n1\n");
+}
+
 
 #[test]
 fn measure_rows_share_one_registry_and_all_tiers_examples() {
