@@ -109,17 +109,17 @@ fn jet_ws_sha1(data: &[U8]) -> [U8; 20] {
     for chunk in msg.chunks_exact(64) {
         w := [U32; 80].filled(0)
         for (i, word) in chunk.chunks_exact(4).enumerate() { w[i] = U32.from_be_bytes([word[0], word[1], word[2], word[3]]) }
-        for i in 16..80 { w[i] = rotl(w[i - 3] ^ w[i - 8] ^ w[i - 14] ^ w[i - 16], 1) }
+        for i in 16..<80 { w[i] = rotl(w[i - 3] ^ w[i - 8] ^ w[i - 14] ^ w[i - 16], 1) }
         a := h0
         b := h1
         c := h2
         d := h3
         e := h4
-        for i in 0..80 {
+        for i in 0..<80 {
             (f, k) :: match i {
-                0..=19 -> ((b & c) | ((!b) & d), U32{0x5A827999})
-                20..=39 -> (b ^ c ^ d, U32{0x6ED9EBA1})
-                40..=59 -> ((b & c) | (b & d) | (c & d), U32{0x8F1BBCDC})
+                0..19 -> ((b & c) | ((!b) & d), U32{0x5A827999})
+                20..39 -> (b ^ c ^ d, U32{0x6ED9EBA1})
+                40..59 -> ((b & c) | (b & d) | (c & d), U32{0x8F1BBCDC})
                 _ -> (b ^ c ^ d, U32{0xCA62C1D6})
             }
             temp :: rotl(a, 5).wrapping_add(f).wrapping_add(e).wrapping_add(k).wrapping_add(w[i])
@@ -137,7 +137,7 @@ fn jet_ws_sha1(data: &[U8]) -> [U8; 20] {
     }
     out := [U8; 20].filled(0)
     for (index, value) in [h0, h1, h2, h3, h4].into_iter().enumerate() {
-        out[index * 4..(index + 1) * 4].copy_from_slice(&value.to_be_bytes())
+        out[index * 4..<(index + 1) * 4].copy_from_slice(&value.to_be_bytes())
     }
     out
 }
@@ -328,7 +328,7 @@ pub fn jet_ws_close(conn: &JetWsConn, code: I64, reason: &String) -> () JetWsErr
     if conn.closed.get() -> return Ok(())
     code :: if code >= 1000 && code <= 4999 { code as U16 } else { U16{1000} }
     reason_bytes :: reason.as_bytes()
-    reason_bytes :: if reason_bytes.len() > 123 { &reason_bytes[..123] } else { reason_bytes }
+    reason_bytes :: if reason_bytes.len() > 123 { &reason_bytes[0..<123] } else { reason_bytes }
     payload := [U8].with_capacity(2 + reason_bytes.len())
     payload.extend_from_slice(&code.to_be_bytes())
     payload.extend_from_slice(reason_bytes)
@@ -415,10 +415,10 @@ pub fn jet_ws_connect(url: &String) -> JetWsConn JetWsError! {
     loop {
         read :: stream.read(&chunk).map_err(fn(error) { jet_ws_io_kind(&error) })?
         if read == 0 -> return Err(JetWsError.InvalidHandshake)
-        response.extend_from_slice(&chunk[..read])
+        response.extend_from_slice(&chunk[0..<read])
         if response.len() > 16 * 1024 -> return Err(JetWsError.InvalidHandshake)
         if response.windows(4).position(fn(window) { window == b"\r\n\r\n" }) == .Val(end) {
-            header :: str.from_utf8(&response[..end]).map_err(fn(_) { JetWsError.InvalidHandshake })?
+            header :: str.from_utf8(&response[0..<end]).map_err(fn(_) { JetWsError.InvalidHandshake })?
             lines := header.split("\r\n")
             status :: lines.next().ok_or(JetWsError.InvalidHandshake)?
             if !status.starts_with("HTTP/1.1 101") && !status.starts_with("HTTP/1.0 101") -> return Err(JetWsError.InvalidHandshake)

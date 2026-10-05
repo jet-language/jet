@@ -401,7 +401,7 @@ pub fn get_stream_follow_redirects(url: String,timeout: Duration,max_redirects: 
 pub fn get_stream_follow_redirects_with(url: String,timeout: Duration,max_redirects: Int,
     redirect: fn(String,String) -> String Err!) -> StreamResponse FoundationFetchError! {
     current := url.clone()
-    loop hop in 0..=max_redirects {
+    loop hop in 0..max_redirects {
         response :: get_stream_with_timeout(current,timeout)?
         if response.status() < U16{300} || response.status() >= U16{400} -> return Ok(^response)
         location :: response.location().ok_or_else(fn() { policy.foundation_fetch_http_error(current,"redirect response has no Location header") })?

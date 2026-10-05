@@ -21,7 +21,7 @@ impl JetURLParts {
     fn parse_without_normalization_with_marker(input: String, typed_marker: String?) -> Self Err! {
         raw := input.trim() // #4303
         colon :: raw.find(':').ok_or("URL needs a scheme")?
-        scheme_raw :: raw[..colon]
+        scheme_raw :: raw[0..<colon]
         marker_scheme :: typed_marker.is_some_and(marker -> scheme_raw.contains(marker))
         if !marker_scheme && !jet_url_valid_scheme(scheme_raw) -> return Err("invalid URL scheme `{scheme_raw}`")
         scheme :: scheme_raw.to_ascii_lowercase()
@@ -29,12 +29,12 @@ impl JetURLParts {
         fragment := None
         if Val(i) = rest.find('#') {
             fragment = Val(jet_url_percent_decode_str(rest[i + 1..])?)
-            rest = rest[..i]
+            rest = rest[0..<i]
         }
         query := [(String, String)]{}
         if Val(i) = rest.find('?') {
             query = jet_url_parse_query(rest[i + 1..])?
-            rest = rest[..i]
+            rest = rest[0..<i]
         }
         host := None
         port := None
@@ -43,7 +43,7 @@ impl JetURLParts {
         path := ""
         if Val(after_slashes) = rest.strip_prefix("//") {
             auth_end :: after_slashes.find('/').unwrap_or(after_slashes.len())
-            authority :: after_slashes[..auth_end]
+            authority :: after_slashes[0..<auth_end]
             path_raw :: after_slashes[auth_end..]
             (user, pass, h, p) :: jet_url_parse_authority(authority, typed_marker)?
             username = user
@@ -161,7 +161,7 @@ impl JetURLParts {
     pub fn join(self, rel: String) -> Self Err! {
         if Val(colon) = rel.find(':') {
             before_slash :: rel.find('/').map_or(true, slash -> colon < slash)
-            if before_slash && jet_url_valid_scheme(rel[..colon]) -> return JetURLParts.parse(rel)
+            if before_slash && jet_url_valid_scheme(rel[0..<colon]) -> return JetURLParts.parse(rel)
         }
         if rel.starts_with("//") -> return JetURLParts.parse("{self.scheme}:{rel}")
         out := ~self
@@ -169,12 +169,12 @@ impl JetURLParts {
         out.fragment = None
         if Val(i) = rest.find('#') {
             out.fragment = Val(jet_url_percent_decode_str(rest[i + 1..])?)
-            rest = rest[..i]
+            rest = rest[0..<i]
         }
         &out.query.clear()
         if Val(i) = rest.find('?') {
             out.query = jet_url_parse_query(rest[i + 1..])?
-            rest = rest[..i]
+            rest = rest[0..<i]
         }
         path :: jet_url_percent_decode_str(rest)?
         path_is_empty :: path.is_empty()
@@ -271,12 +271,12 @@ pub fn jet_validate_typed_url_literal(literals: [String]) -> Unit Err! {
     marker :: jet_typed_url_marker_name(literals)
     skeleton :: jet_typed_url_skeleton(literals, marker)
     if Val(colon) = skeleton.find(':') {
-        scheme_raw :: skeleton[..colon]
+        scheme_raw :: skeleton[0..<colon]
         if scheme_raw.contains(marker) -> return Err("URL scheme cannot contain interpolation")
         if scheme_raw.eq_ignore_ascii_case("data") {
             data_body :: skeleton[colon + 1..].split(ch -> ch == '?' || ch == '#').next().unwrap_or_default()
             match data_body.find(',') {
-                Val(comma) -> if data_body[..comma].contains(marker) -> return Err("data URL MIME metadata cannot contain interpolation")
+                Val(comma) -> if data_body[0..<comma].contains(marker) -> return Err("data URL MIME metadata cannot contain interpolation")
                 None -> if data_body.contains(marker) -> return Err("data URL payload needs a MIME separator")
             }
         }
@@ -417,7 +417,7 @@ fn jet_typed_url_marker(literals: [String]) -> (String, JetURLParts) Err! {
 fn jet_url_typed_authority(rest: String) -> String? {
     authority :: rest.strip_prefix("//")?
     end :: authority.char_indices().find_map((index, ch) -> if ch == '/' || ch == '?' || ch == '#' -> Val(index) else -> None).unwrap_or(authority.len())
-    Val(authority[..end])
+    Val(authority[0..<end])
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/UrlMime.rs:684
 fn jet_typed_url_skeleton(literals: [String], marker: String) -> String {
@@ -436,7 +436,7 @@ fn jet_url_apply_typed_holes(value: String, marker: String, holes: [String], hol
         offset :: value[cursor..].find(marker)
         if offset.is_none() -> break
         start :: cursor + offset.unwrap()
-        literal :: value[cursor..start]
+        literal :: value[cursor..<start]
         if !literal.is_empty() || parts.is_empty() -> &parts.push((literal.to_string(), false))
         hole :: holes.get(hole_index).ok_or("typed URL holes do not match its literal skeleton")?.clone()
         &parts.push((hole, true))
@@ -473,7 +473,7 @@ fn jet_url_render_typed_data_parts(parts: [(String, Bool)]) -> String {
             continue
         }
         if Val(comma) = part.find(',') {
-            &out.push_str(jet_url_render_data_mime_literal(part[..comma]))
+            &out.push_str(jet_url_render_data_mime_literal(part[0..<comma]))
             &out.push(',')
             payload = true
             &out.push_str(part[comma + 1..])
@@ -550,9 +550,9 @@ fn jet_url_typed_path_directory(parts: [(String, Bool)]) -> [(String, Bool)] {
         if !hole -> part.rfind('/').map(slash -> (index, slash)) else -> None)
     if found.is_none() -> return []
     (last_index, slash) :: found.unwrap()
-    directory := parts[..last_index].to_vec()
+    directory := parts[0..<last_index].to_vec()
     literal :: parts[last_index].0
-    &directory.push((literal[..=slash].to_string(), false))
+    &directory.push((literal[0..slash].to_string(), false))
     directory
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/UrlMime.rs:901
@@ -597,13 +597,13 @@ fn jet_url_parse_authority(authority: String, typed_marker: String?) -> (String?
     if host_port.starts_with('[') {
         end :: host_port.find(']').ok_or("IPv6 host is missing `]`")?
         suffix :: host_port[end + 1..]
-        (host, port) :: if suffix.is_empty() -> (host_port[..=end].to_ascii_lowercase(), None)
+        (host, port) :: if suffix.is_empty() -> (host_port[0..end].to_ascii_lowercase(), None)
         else if Val(marker) = typed_marker -> {
             if suffix.starts_with(':') && jet_url_only_typed_markers(suffix[1..], marker) -> (host_port.to_ascii_lowercase(), None)
             else if jet_url_only_typed_markers(suffix, marker) -> (host_port.to_ascii_lowercase(), None)
-            else if suffix.starts_with(':') -> (host_port[..=end].to_ascii_lowercase(), Val(jet_url_parse_port(suffix[1..])?))
+            else if suffix.starts_with(':') -> (host_port[0..end].to_ascii_lowercase(), Val(jet_url_parse_port(suffix[1..])?))
             else -> return Err("invalid text after IPv6 host")
-        } else if suffix.starts_with(':') -> (host_port[..=end].to_ascii_lowercase(), Val(jet_url_parse_port(suffix[1..])?))
+        } else if suffix.starts_with(':') -> (host_port[0..end].to_ascii_lowercase(), Val(jet_url_parse_port(suffix[1..])?))
         else -> return Err("invalid text after IPv6 host")
         return Ok((username, password, host, port))
     }
@@ -714,7 +714,7 @@ pub fn jet_url_join_text(base: String, rel: String) -> String {
     if rel.is_empty() -> return base.to_string()
     if Val(colon) = rel.find(':') {
         before_slash :: rel.find('/').map_or(true, slash -> colon < slash)
-        if before_slash && jet_url_valid_scheme(rel[..colon]) -> return rel.to_string()
+        if before_slash && jet_url_valid_scheme(rel[0..<colon]) -> return rel.to_string()
     }
     parsed :: match JetURLParts.parse(base.to_string()) { Ok(value) -> value, Err(_) -> return rel.to_string() }
     if rel.starts_with("//") -> return JetURLParts.parse("{parsed.scheme}:{rel}").map(url -> url.to_string_value()).unwrap_or_else(_ -> rel.to_string())
@@ -753,7 +753,7 @@ pub fn jet_url_unquote_to_bytes(text: String) -> [U8] Err! { jet_url_percent_dec
 pub fn jet_url_unquote_plus(text: String) -> String Err! { jet_url_percent_decode_str(text.replace('+', " ")) }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/UrlMime.rs:1201
 pub fn jet_url_split_fragment(text: String) -> (String, String) {
-    text.find('#').map(index -> (text[..index].to_string(), text[index + 1..].to_string())).unwrap_or_else(() -> (text.to_string(), ""))
+    text.find('#').map(index -> (text[0..<index].to_string(), text[index + 1..].to_string())).unwrap_or_else(() -> (text.to_string(), ""))
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/UrlMime.rs:1207
 fn jet_url_parse_query(q: String) -> [(String, String)] Err! {
@@ -790,7 +790,7 @@ pub fn jet_url_percent_decode_str(s: String) -> String Err! {
     loop i < bytes.len() {
         if bytes[i] == U8{37} {
             if i + 2 >= bytes.len() -> return Err("truncated percent escape")
-            hex :: s[i + 1..i + 3]
+            hex :: s[i + 1..<i + 3]
             byte :: U8.from_str_radix(hex, 16).map_err(_ -> "invalid percent escape `%{hex}`")?
             &out.push(byte)
             i += 3

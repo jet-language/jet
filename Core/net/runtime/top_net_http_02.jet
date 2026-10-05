@@ -505,7 +505,7 @@ fn jet_net_sendfile(stream: &JetTCPStream, path: &String) -> I64 JetNetError! {
     loop {
         n :: &file.read(&buf).map_err(fn(error) { jet_net_io_error("tcp sendfile read", Val(path.clone()), ^error) })?
         if n == 0 -> break
-        jet_net_tcp_write_all_bytes(&stream, &buf[..n])?
+        jet_net_tcp_write_all_bytes(&stream, &buf[0..<n])?
         written = written + n as U64
     }
     Ok(min(written, I64.MAX as U64) as I64)
@@ -942,7 +942,7 @@ fn jet_net_dns_read_name(packet: &[U8], pos: &USize) -> String Err! {
         if end > packet.len() -> return Err("network protocol error: truncated DNS label")
         wire_len = wire_len + len as USize + 1
         if wire_len > 255 -> return Err("network protocol error: DNS name exceeds 255 bytes")
-        label :: from_utf8(&packet[p..end]).map_err(fn(_) { "network protocol error: DNS label is not valid UTF-8" })?
+        label :: from_utf8(&packet[p..<end]).map_err(fn(_) { "network protocol error: DNS label is not valid UTF-8" })?
         &labels.push(label.to_string())
         p = end
         if !jumped -> *pos = p
@@ -966,7 +966,7 @@ fn jet_net_dns_txid() -> U16 Err! {
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:3659
 fn jet_net_dns_read_u16(packet: &[U8], at: USize, what: String) -> U16 Err! {
-    bytes :: packet.get(at..at + 2).ok_or_else(fn() { "network protocol error: truncated DNS {what}" })?
+    bytes :: packet.get(at..<at + 2).ok_or_else(fn() { "network protocol error: truncated DNS {what}" })?
     Ok(U16.from_be_bytes([bytes[0], bytes[1]]))
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:3666
@@ -997,7 +997,7 @@ fn jet_net_dns_parse_response(packet: [U8], txid: U16, name: String, qtype: U16)
     if minimum_record_bytes > packet.len().saturating_sub(pos) -> return Err("network protocol error: DNS record counts exceed packet bounds")
     packet :: Arc.new(^packet)
     records := [JetDNSWireRecord].with_capacity(total_records)
-    loop _ in 0..total_records {
+    loop _ in 0..<total_records {
         owner :: jet_net_dns_read_name(packet.as_slice(), &pos)?
         ty :: jet_net_dns_read_u16(packet.as_slice(), pos, "record type")?
         class :: jet_net_dns_read_u16(packet.as_slice(), pos + 2, "record class")?
@@ -1128,7 +1128,7 @@ fn jet_net_dns_matching_records(records: &[JetDNSWireRecord], name: String, qtyp
     trimmed := name.trim_end_matches('.') // #4303
     current := trimmed.to_string()
     visited := [String:Bool]{}
-    loop _ in 0..16 {
+    loop _ in 0..<16 {
         key :: current.to_ascii_lowercase()
         if visited.contains_key(&key) -> return Err("network protocol error: cyclic DNS CNAME chain")
         _ :: &visited.insert(^key, true)
@@ -1192,7 +1192,7 @@ fn jet_net_dns_a_at(server: &String, name: &String, ms: I64) -> [JetIpAddr] Err!
     records :: jet_net_dns_matching_records(&jet_net_dns_query(server, name, 1, ms)?, name, 1)?
     out := [JetIpAddr]{}
     loop r in records {
-        data :: &r.packet[r.rdata_start..r.rdata_start + r.rdata_len]
+        data :: &r.packet[r.rdata_start..<r.rdata_start + r.rdata_len]
         if data.len() != 4 -> return Err("network protocol error: DNS A record is not 4 bytes")
         &out.push(JetIpAddr{inner: IpAddr.V4(Ipv4Addr.new(data[0], data[1], data[2], data[3]))})
     }
@@ -1203,7 +1203,7 @@ fn jet_net_dns_aaaa_at(server: &String, name: &String, ms: I64) -> [JetIpAddr] E
     records :: jet_net_dns_matching_records(&jet_net_dns_query(server, name, 28, ms)?, name, 28)?
     out := [JetIpAddr]{}
     loop r in records {
-        data :: &r.packet[r.rdata_start..r.rdata_start + r.rdata_len]
+        data :: &r.packet[r.rdata_start..<r.rdata_start + r.rdata_len]
         if data.len() != 16 -> return Err("network protocol error: DNS AAAA record is not 16 bytes")
         b := [U8].repeat(0, 16)
         &b.copy_from_slice(data)
@@ -1234,14 +1234,14 @@ fn jet_net_dns_txt_at(server: &String, name: &String, ms: I64) -> [String] Err! 
     out := [String]{}
     records :: jet_net_dns_query(server, name, 16, ms)?
     loop r in jet_net_dns_matching_records(&records, name, 16)? {
-        data :: &r.packet[r.rdata_start..r.rdata_start + r.rdata_len]
+        data :: &r.packet[r.rdata_start..<r.rdata_start + r.rdata_len]
         p := USize{0}
         s := ""
         loop p < data.len() {
             len :: data[p] as USize
             p = p + 1
             if p + len > data.len() -> return Err("network protocol error: truncated DNS TXT record")
-            part :: from_utf8(&data[p..p + len]).map_err(fn(_) { "network protocol error: DNS TXT record is not valid UTF-8" })?
+            part :: from_utf8(&data[p..<p + len]).map_err(fn(_) { "network protocol error: DNS TXT record is not valid UTF-8" })?
             &s.push_str(part)
             p = p + len
         }
@@ -1298,7 +1298,7 @@ fn jet_net_dns_srv_at(server: &String, name: &String, ms: I64) -> [JetDNSSrv] Er
     out := [JetDNSSrv]{}
     loop r in jet_net_dns_matching_records(&records, name, 33)? {
         if r.rdata_len < 7 -> return Err("network protocol error: truncated DNS SRV record")
-        data :: &r.packet[r.rdata_start..r.rdata_start + r.rdata_len]
+        data :: &r.packet[r.rdata_start..<r.rdata_start + r.rdata_len]
         priority :: U16.from_be_bytes([data[0], data[1]]) as I64
         weight :: U16.from_be_bytes([data[2], data[3]]) as I64
         port :: U16.from_be_bytes([data[4], data[5]]) as I64

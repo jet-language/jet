@@ -969,7 +969,7 @@ fn jet_net_tls_close_write(stream: &JetTLSStream, deadline: &JetDuration) -> () 
 fn jet_net_tls_peer_identity_from_snapshot(snapshot: JetTLSPeerSnapshot) -> JetTLSPeerIdentity JetNetError! {
     (verified_server_name, ders, spkis, dns_names, valid_from, valid_until, subjects, issuers, cipher_suite, tls_version) :: ^snapshot
     certificate_chain := [JetTLSCertificate].with_capacity(ders.len())
-    loop index in 0..ders.len() {
+    loop index in 0..<ders.len() {
         der :: ders[index].clone()
         certificate_chain.push(JetTLSCertificate{
             sha256: sha256_bytes(der), spki_sha256: sha256_bytes(spkis[index]),
