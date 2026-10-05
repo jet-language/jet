@@ -27,9 +27,10 @@ if (mode === '--allparts') {
   for (const [module, file] of [
     ['jet_c_abi_routes', 'CAbiRoutes.rs'],
     ['jet_c_abi_iter', 'CAbiIter.rs'],
+    ['jet_c_abi_task', 'CAbiTask.rs'],
   ]) {
     const rows = prepared.split('\n');
-    const begin = rows.findIndex(line => line === `mod ${module} {`);
+    const begin = rows.findIndex(line => line === `mod ${module} {` || line === `pub(crate) mod ${module} {`);
     if (begin >= 0) {
       const close = rows.findIndex((line, index) => index > begin && line === '}');
       if (close < 0) throw new Error(`input ${module} module is unterminated`);

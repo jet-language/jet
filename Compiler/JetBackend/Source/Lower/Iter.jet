@@ -41,6 +41,7 @@ fn lower_iter_route(p: MIRProgram, m: &LowerModule, f: &LowerFunction, call: MIR
 // Vec by cloning it. Both cursors consequently own an independent element walk.
 fn lower_iter_init(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, call: MIRPreludeCallID, collection: MIRValueID, step: MIRValueID?, by_value: Bool, source_kind: MIRLoopSourceKind) Never! {
     if lower_lazy_cursor_init(p, c, &m, &f, instruction, call, collection, step, by_value, source_kind) -> return
+    if lower_channel_cursor_init(p, c, &m, &f, instruction, call, collection, step, by_value, source_kind) -> return
     if source_kind != .Plain -> return lower_fail(&m, &f, "this iterator source kind is not lowered at O0 yet")
     if !lower_iter_route(p, &m, &f, call, "jet_loop_iter_init", 5) -> return
     ty :: lower_value_type(c, collection) ?? return lower_fail(&m, &f, "iterator collection without a checked type is not lowered at O0 yet")

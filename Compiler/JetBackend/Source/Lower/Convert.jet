@@ -160,6 +160,7 @@ fn lower_convert(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunct
             lower_convert_numeric(p, c, &m, &f, instruction, value, target)
         }
         .Prelude(call, location, fallibility) -> lower_convert_prelude(p, c, &m, &f, instruction, value, parameters, call, location, fallibility)
-        .SendFn -> lower_fail(&m, &f, "SendFn conversion is not lowered at O0 yet")
+        // MIRRust: a SendFn conversion retypes the same closure box.
+        .SendFn -> lower_forward(c, &m, &f, instruction, value)
     }
 }

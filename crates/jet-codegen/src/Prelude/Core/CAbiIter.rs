@@ -82,6 +82,8 @@ pub(crate) mod jet_c_abi_iter {
             value
         }
         pub(crate) fn word(&self) -> u64 { unsafe { ptr::read_unaligned(self.slot.data().cast()) } }
+        /// The owned slot a native callee writes this value's bytes into.
+        pub(crate) fn slot_mut(&mut self) -> *mut u8 { self.slot.data_mut() }
         fn scalar(meta: Arc<Meta>, word: u64) -> Self {
             let mut value = Self::zeroed(meta);
             unsafe { ptr::write_unaligned(value.slot.data_mut().cast(), word) };
