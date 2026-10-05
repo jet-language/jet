@@ -2983,6 +2983,11 @@ fn sema_comptime_probe_shared_fill(shared_state: Shared<SemaProbeShared>, enviro
     &permit.value.sources.push(^sources)
 }
 
+fn sema_comptime_probe_shared_fill_environment(shared_state: Shared<SemaProbeShared>, environment: ^SemaScopeEnvironment) {
+    permit :: shared_state.guard_edit()
+    &permit.value.environments.push(^environment)
+}
+
 fn sema_comptime_probe_shared_take_environment(shared_state: Shared<SemaProbeShared>) -> SemaScopeEnvironment {
     permit :: shared_state.guard_edit()
     &permit.value.environments.pop() ?? panic("the probe environment left the threads' shared state")
@@ -2991,6 +2996,32 @@ fn sema_comptime_probe_shared_take_environment(shared_state: Shared<SemaProbeSha
 fn sema_comptime_probe_shared_take_sources(shared_state: Shared<SemaProbeShared>) -> [SemaComptimeItemSource] {
     permit :: shared_state.guard_edit()
     &permit.value.sources.pop() ?? panic("the probed sources left the threads' shared state")
+}
+
+// Each module owns the environment only within this call, so its move into
+// shared state is not a move of a loop-carried binding.
+fn sema_comptime_probe_module(shared_state: Shared<SemaProbeShared>, graph: SemaRegistrationGraph, module_index: Int, host_hooks: SemaHostHookAccess?, threads: CompilerThreads) -> [SemaComptimeItemSource] {
+    environment := sema_comptime_probe_shared_take_environment(shared_state)
+    module_sources := sema_comptime_collect_module_sources(graph, graph.modules[module_index])
+    if module_sources.len() > 0 && sema_scope_environment_enter_probe_module(&environment, graph.modules[module_index].module_identity, [SemaComptimeBodyValue]{}) {
+        probe := sema_comptime_probe_init(host_hooks)
+        sema_comptime_probe_prepare(&probe, environment)
+        if probe.applied {
+            weights := [Int]{}
+            workers :: sema_comptime_probe_workers(module_sources, graph.modules[module_index].program.items.len(), threads, &weights)
+            if workers > 1 {
+                sema_comptime_probe_shared_fill(shared_state, ^environment, ^module_sources)
+                parts :: sema_comptime_probe_parallel(shared_state, probe, weights, workers)
+                probed := sema_comptime_probe_shared_take_sources(shared_state)
+                inputs :: shared_state.guard_read()
+                loop part in parts -> sema_comptime_probe_part_apply(inputs.value.environments[0], &probe, &probed, part)
+                return ^probed
+            }
+            sema_comptime_probe_in_order(environment, &probe, &module_sources)
+        }
+    }
+    sema_comptime_probe_shared_fill_environment(shared_state, ^environment)
+    ^module_sources
 }
 
 fn sema_comptime_probe_part_fill(slot: Shared<SemaProbePart>, table: ^SemaScopeTable, diagnostics: ^[Diagnostic]) {
@@ -3342,27 +3373,10 @@ pub fn sema_collect_comptime_declarations(graph: SemaRegistrationGraph, package_
     sources := [SemaComptimeItemSource]{}
     source_keys := [String:Bool]{}
     hook_access :: sema_host_hook_access(host_hooks)
+    shared_state :: shared SemaProbeShared{environments: [SemaScopeEnvironment]{}, sources: [[SemaComptimeItemSource]]{}}
+    sema_comptime_probe_shared_fill_environment(shared_state, ^environment)
     loop source_module_index in 0..<graph.modules.len() {
-        module_sources := sema_comptime_collect_module_sources(graph, graph.modules[source_module_index])
-        if module_sources.len() > 0 && sema_scope_environment_enter_probe_module(&environment, graph.modules[source_module_index].module_identity, [SemaComptimeBodyValue]{}) {
-            probe := sema_comptime_probe_init(hook_access)
-            sema_comptime_probe_prepare(&probe, environment)
-            // An unapplied scope checks nothing, so no source names a dependency.
-            if probe.applied {
-                weights := [Int]{}
-                workers :: sema_comptime_probe_workers(module_sources, graph.modules[source_module_index].program.items.len(), threads, &weights)
-                if workers > 1 {
-                    shared_state :: shared SemaProbeShared{environments: [SemaScopeEnvironment]{}, sources: [[SemaComptimeItemSource]]{}}
-                    sema_comptime_probe_shared_fill(shared_state, ^environment, ^module_sources)
-                    parts :: sema_comptime_probe_parallel(shared_state, probe, weights, workers)
-                    environment = sema_comptime_probe_shared_take_environment(shared_state)
-                    module_sources = sema_comptime_probe_shared_take_sources(shared_state)
-                    loop part in parts -> sema_comptime_probe_part_apply(environment, &probe, &module_sources, part)
-                } else {
-                    sema_comptime_probe_in_order(environment, &probe, &module_sources)
-                }
-            }
-        }
+        module_sources := sema_comptime_probe_module(shared_state, graph, source_module_index, hook_access, threads)
         // Moved onto `sources` in order, without a copy.
         reversed_sources := [SemaComptimeItemSource]{}
         loop module_sources.len() > 0 {
@@ -3705,8 +3719,8 @@ fn sema_failure_settle_obligations(diagnostics: &[Diagnostic], solved: [String])
 // the threads' shared state for that pass and back out after it.
 fn sema_finalize_check_modules(graph: SemaRegistrationGraph, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], checked_types: [TTypeDef], selected: [Int], pending_obligations: Bool, host_hooks: SemaHostHookAccess?, threads: CompilerThreads, phase: String, trace_sink: CompilerTraceSink?) -> [SemaGraphModuleResult] {
     if trace_sink == .Val(sink) -> sink.begin(phase, "", -1, -1)
-    memory_plan := sema_function_memory_plan_from_graph(graph)
-    environment := sema_check_pass_environment(graph, checked_types)
+    shared_state :: shared SemaCheckShared{environments: [SemaScopeEnvironment]{}, memory_plans: [SemaFunctionMemoryPlan]{}}
+    sema_check_shared_fill(shared_state, sema_check_pass_environment(graph, checked_types), sema_function_memory_plan_from_graph(graph))
     comptime_rows := sema_comptime_checked_function_rows(comptime_functions)
     // A per-function trace times each check where it runs, in item order.
     trace_functions := false
@@ -3715,28 +3729,37 @@ fn sema_finalize_check_modules(graph: SemaRegistrationGraph, values: [SemaCompti
     checked_functions := 0
     loop module_index in selected {
         if trace_sink == .Val(sink) -> sink.begin("sema.module", graph.modules[module_index].module_path, module_index, graph.modules.len())
-        prepared := sema_check_prepared_none()
         weights := [Int]{}
         jobs :: sema_check_parallel_jobs(graph, module_index, comptime_rows, &weights)
         work := 0
         loop weight in weights -> work += weight
         workers := 1
         if !trace_functions -> workers = compiler_threads_admit(threads, jobs.len(), work, SEMA_BODY_MIN_BYTES_PER_THREAD, graph.modules[module_index].program.items.len() * SEMA_BODY_SCOPE_BYTES_PER_ITEM, 0)
-        if workers > 1 {
-            scopes := sema_check_module_summary_scopes(graph, &environment, host_hooks, memory_plan, module_index, values, comptime_functions, comptime_rows)
-            shared_state :: shared SemaCheckShared{environments: [SemaScopeEnvironment]{}, memory_plans: [SemaFunctionMemoryPlan]{}}
-            sema_check_shared_fill(shared_state, ^environment, ^memory_plan)
-            prepared = sema_check_bodies_parallel(shared_state, module_index, ^scopes, jobs, weights, workers)
-            environment = sema_check_shared_take_environment(shared_state)
-            memory_plan = sema_check_shared_take_memory_plan(shared_state)
-        }
-        checked := sema_check_registration_module(graph, &environment, host_hooks, memory_plan, module_index, values, comptime_functions, comptime_rows, true, pending_obligations, ^prepared, trace_sink)
+        prepared := sema_check_prepare_module(shared_state, graph, host_hooks, module_index, values, comptime_functions, comptime_rows, jobs, weights, workers)
+        checked := sema_check_module_in_shared(shared_state, graph, host_hooks, module_index, values, comptime_functions, comptime_rows, pending_obligations, ^prepared, trace_sink)
         if trace_sink == .Val(sink) -> sink.end("sema.module", checked.functions.len())
         checked_functions += checked.functions.len()
         &modules.push(checked)
     }
     if trace_sink == .Val(sink) -> sink.end(phase, checked_functions)
     modules
+}
+
+fn sema_check_prepare_module(shared_state: Shared<SemaCheckShared>, graph: SemaRegistrationGraph, host_hooks: SemaHostHookAccess?, module_index: Int, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], comptime_rows: [String:Int], jobs: [Int], weights: [Int], workers: Int) -> SemaPreparedBodies {
+    if workers <= 1 -> return sema_check_prepared_none()
+    environment := sema_check_shared_take_environment(shared_state)
+    memory_plan := sema_check_shared_take_memory_plan(shared_state)
+    scopes := sema_check_module_summary_scopes(graph, &environment, host_hooks, memory_plan, module_index, values, comptime_functions, comptime_rows)
+    sema_check_shared_fill(shared_state, ^environment, ^memory_plan)
+    sema_check_bodies_parallel(shared_state, module_index, ^scopes, jobs, weights, workers)
+}
+
+fn sema_check_module_in_shared(shared_state: Shared<SemaCheckShared>, graph: SemaRegistrationGraph, host_hooks: SemaHostHookAccess?, module_index: Int, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], comptime_rows: [String:Int], pending_obligations: Bool, prepared: ^SemaPreparedBodies, trace_sink: CompilerTraceSink?) -> SemaGraphModuleResult {
+    environment := sema_check_shared_take_environment(shared_state)
+    memory_plan := sema_check_shared_take_memory_plan(shared_state)
+    checked := sema_check_registration_module(graph, &environment, host_hooks, memory_plan, module_index, values, comptime_functions, comptime_rows, true, pending_obligations, ^prepared, trace_sink)
+    sema_check_shared_fill(shared_state, ^environment, ^memory_plan)
+    ^checked
 }
 
 // Moves the pass environment and memory plan into the threads' shared state.
