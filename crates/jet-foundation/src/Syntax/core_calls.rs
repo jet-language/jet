@@ -1478,7 +1478,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 4bf58904fb4c52bcfcb072123d512eac125799a4f3ed6da133509181f19ded09
+// Source SHA-256: 254f63fd495946c694c84804daaf475a1c50834cbb4c2a6ec269055f8e735597
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -2285,21 +2285,6 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new( "core.email", "envelope", "jet_email::envelope", true, &[true, true], ) .with_pure_route(CoreCallPureRoute::Email),
     CoreCallRecord::new( "core.email", "serialize", "jet_email::serialize", true, &[true], ) .with_pure_route(CoreCallPureRoute::Email),
     CoreCallRecord::new("core.text", "byte_views", "jet_text_byte_views", true, &[true]),
-    CoreCallRecord::new("core.time.calendar", "isleap", "jet_calendar_isleap", true, &[false]).with_jit_symbol("jet_jit_calendar_isleap"),
-    CoreCallRecord::new("core.time.calendar", "leapdays", "jet_calendar_leapdays", true, &[false, false]).with_jit_symbol("jet_jit_calendar_leapdays"),
-    CoreCallRecord::new("core.time.calendar", "weekday", "jet_calendar_weekday", true, &[false, false, false]).with_jit_symbol("jet_jit_calendar_weekday"),
-    CoreCallRecord::new("core.time.calendar", "monthrange", "jet_calendar_monthrange", true, &[false, false]).with_jit_symbol("jet_jit_calendar_monthrange"),
-    CoreCallRecord::new("core.time.calendar", "monthcalendar", "jet_calendar_monthcalendar", true, &[false, false]).with_jit_symbol("jet_jit_calendar_monthcalendar"),
-    CoreCallRecord::new("core.time.calendar", "monthcalendar_start", "jet_calendar_monthcalendar_start", true, &[false, false, false]).with_jit_symbol("jet_jit_calendar_monthcalendar_start"),
-    CoreCallRecord::new("core.time.calendar", "yearcalendar", "jet_calendar_yearcalendar", true, &[false]).with_jit_symbol("jet_jit_calendar_yearcalendar"),
-    CoreCallRecord::new("core.time.calendar", "weekheader", "jet_calendar_weekheader", true, &[false, false]).with_jit_symbol("jet_jit_calendar_weekheader"),
-    CoreCallRecord::new("core.time.calendar", "formatmonth", "jet_calendar_formatmonth", true, &[false, false, false]).with_jit_symbol("jet_jit_calendar_formatmonth"),
-    CoreCallRecord::new("core.time.calendar", "formatyear", "jet_calendar_formatyear", true, &[false]).with_jit_symbol("jet_jit_calendar_formatyear"),
-    CoreCallRecord::new("core.time.calendar", "day_name", "jet_calendar_day_name", true, &[false]).with_jit_symbol("jet_jit_calendar_day_name"),
-    CoreCallRecord::new("core.time.calendar", "day_abbr", "jet_calendar_day_abbr", true, &[false]).with_jit_symbol("jet_jit_calendar_day_abbr"),
-    CoreCallRecord::new("core.time.calendar", "month_name", "jet_calendar_month_name", true, &[false]).with_jit_symbol("jet_jit_calendar_month_name"),
-    CoreCallRecord::new("core.time.calendar", "month_abbr", "jet_calendar_month_abbr", true, &[false]).with_jit_symbol("jet_jit_calendar_month_abbr"),
-    CoreCallRecord::new("core.time.calendar", "timegm", "jet_calendar_timegm", true, &[false, false, false, false, false, false]).with_jit_symbol("jet_jit_calendar_timegm"),
     CoreCallRecord::new("core.log", "info", "jet_ring_log_info", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.log", "warn", "jet_ring_log_warn", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.log", "error", "jet_ring_log_error", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
