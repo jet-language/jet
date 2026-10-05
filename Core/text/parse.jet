@@ -271,7 +271,7 @@ pub fn is_digit(text: String) -> Bool Never! {
 }
 
 // Rust Text.rs:1643-1645: Unicode Alphabetic or Numeric, nonempty.
-pub fn is_alnum(text: String) -> Bool Never! { core.text.parse.is_alnum(text) }
+pub fn is_alnum(text: String) -> Bool Never! { parse_unicode_string.is_alnum(text) }
 
 fn chars(text: String) -> [String] Never! { unicode.scalars(text) }
 
@@ -337,11 +337,11 @@ pub fn splitlines(text: String, keepends: Bool) -> [String] Never! {
     out
 }
 
-pub fn lstrip(text: String) -> String Never! { core.text.parse.lstrip(text) }
+pub fn lstrip(text: String) -> String Never! { parse_unicode_string.trim_start(text) }
 
-pub fn rstrip(text: String) -> String Never! { core.text.parse.rstrip(text) }
+pub fn rstrip(text: String) -> String Never! { parse_unicode_string.trim_end(text) }
 
-pub fn strip(text: String) -> String Never! { core.text.parse.strip(text) }
+pub fn strip(text: String) -> String Never! { parse_unicode_string.trim(text) }
 
 pub fn ljust(text: String, width: Int, fill: String) -> String Never! {
     pad :: fill_to(fill)
@@ -378,9 +378,9 @@ pub fn zfill(text: String, width: Int) -> String Never! {
     "{sign}{repeat_char("0", n)}{rest}"
 }
 
-pub fn capitalize(text: String) -> String Never! { core.text.parse.capitalize(text) }
+pub fn capitalize(text: String) -> String Never! { parse_unicode_string.capitalize(text) }
 
-pub fn title(text: String) -> String Never! { core.text.parse.title(text) }
+pub fn title(text: String) -> String Never! { parse_unicode_string.title(text) }
 
 /// Python `string.capwords`: collapse whitespace and capitalize each word.
 pub fn capwords(text: String) -> String Never! {
@@ -393,13 +393,13 @@ pub fn capwords(text: String) -> String Never! {
     join(parts, " ")
 }
 
-pub fn swapcase(text: String) -> String Never! { core.text.parse.swapcase(text) }
+pub fn swapcase(text: String) -> String Never! { parse_unicode_string.swapcase(text) }
 
-pub fn lower(text: String) -> String Never! { core.text.parse.lower(text) }
+pub fn lower(text: String) -> String Never! { parse_unicode_string.lower(text) }
 
-pub fn upper(text: String) -> String Never! { core.text.parse.upper(text) }
+pub fn upper(text: String) -> String Never! { parse_unicode_string.upper(text) }
 
-pub fn is_space(text: String) -> Bool Never! { core.text.parse.is_space(text) }
+pub fn is_space(text: String) -> Bool Never! { parse_unicode_string.is_whitespace(text) }
 
 // Owner gate: mapping-based Rust predicates accept U+01C5 for both cases.
 // Preserve this existing public contract until that contradiction is ratified.
@@ -477,9 +477,9 @@ pub fn removeprefix(text: String, prefix: String) -> String Never! { strip_prefi
 pub fn removesuffix(text: String, suffix: String) -> String Never! { strip_suffix(text, suffix) }
 pub fn rindex(text: String, needle: String) -> Int Never! { rfind(text, needle) }
 pub fn encode(text: String) -> [U8] Never! { text.bytes() }
-pub fn isalpha(text: String) -> Bool Never! { core.text.parse.isalpha(text) }
+pub fn isalpha(text: String) -> Bool Never! { parse_unicode_string.is_alphabetic(text) }
 pub fn isdecimal(text: String) -> Bool Never! { is_digit(text) }
-pub fn isnumeric(text: String) -> Bool Never! { core.text.parse.isnumeric(text) }
+pub fn isnumeric(text: String) -> Bool Never! { parse_unicode_string.is_numeric(text) }
 pub fn isalnum(text: String) -> Bool Never! { is_alnum(text) }
 pub fn isascii(text: String) -> Bool Never! { is_ascii(text) }
 pub fn isdigit(text: String) -> Bool Never! { is_digit(text) }
@@ -489,7 +489,7 @@ pub fn isspace(text: String) -> Bool Never! { is_space(text) }
 pub fn istitle(text: String) -> Bool Never! { is_title(text) }
 pub fn isupper(text: String) -> Bool Never! { is_upper(text) }
 // Rust Text.rs:1669-1671 tests controls, not ASCII or Python printability.
-pub fn isprintable(text: String) -> Bool Never! { core.text.parse.isprintable(text) }
+pub fn isprintable(text: String) -> Bool Never! { parse_unicode_string.isprintable(text) }
 pub fn expandtabs(text: String, tabsize: Int) -> String Never! {
     out := ""
     column := 0
