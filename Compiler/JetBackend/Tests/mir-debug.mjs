@@ -7,8 +7,8 @@
 // bootstrap codec (Compiler/Bootstrap/Host/RuntimeMirCodec.rs): types are
 // matched by the Jet declaration, fields and variants by name (acronyms
 // compared case-insensitively), and a Rust tuple, newtype or map entry fills
-// a Jet struct or variant by position. A Jet field the Rust value lacks gets
-// its type's zero value and is reported as drift.
+// a Jet struct or variant by position. Checked derived facts follow the
+// canonical bootstrap codec; absent required facts reject a stale dump.
 //
 // The converted program is written as a line stream that a decoder generated
 // from the same schema (`jetDecoder`) reads back in Jet: one token per line,
@@ -282,6 +282,7 @@ const FIELD_RENAMES = {
   MIRConstantDef: { module: "module_id" },
   MIRNameDeclaration: { module: "module_index" },
   MIRNameAlias: { module: "module_index" },
+  MIRLocal: { comptime: "is_comptime" },
 };
 
 // Variant renames: Jet enum -> Rust variant name -> Jet variant name.
@@ -291,29 +292,14 @@ const VARIANT_RENAMES = {
 
 const fold = (name) => name.toLowerCase().replace(/_/g, "");
 
+const rustField = (node, name) => node?.k === "struct" ? node.fields.find(([key]) => key === name)?.[1] : undefined;
+const rustId = (node) => node?.k === "tuple" && node.items.length === 1 ? rustId(node.items[0]) : node?.k === "num" ? node.v : null;
+
+
 export class Converter {
   constructor(schema) {
     this.schema = schema;
-    this.drift = new Map();
-  }
-
-  note(message) {
-    this.drift.set(message, (this.drift.get(message) ?? 0) + 1);
-  }
-
-  zero(type) {
-    if (type.k === "opt") return { opt: null };
-    if (type.k === "list") return [];
-    if (type.k === "map") return { map: [] };
-    const name = type.name;
-    if (name === "String") return "";
-    if (name === "Bool") return false;
-    if (PRIMITIVES.has(name)) return { int: "0" };
-    const def = this.schema.get(name);
-    if (!def) throw new Error(`schema has no type ${name}`);
-    if (def.kind === "struct") return { fields: def.fields.map((f) => this.zero(f.type)) };
-    const variant = def.variants[0];
-    return { tag: 0, fields: variant.fields.map((f) => this.zero(f.type)) };
+    this.trapRoutes = null;
   }
 
   convert(node, type, where) {
@@ -371,6 +357,29 @@ export class Converter {
   }
 
   struct(node, def, where) {
+    // The canonical bootstrap codec splits Option<Option<usize>> into a
+    // finite bound and an unbounded bit; None is not the same as Some(None).
+    if (def.name === "MIRFunction" && node.k === "struct") {
+      const memo = rustField(node, "memo_bound");
+      if (!memo) throw new Error(`${where}: MIRFunction has no checked memo bound`);
+      let bound = memo;
+      let unbounded = false;
+      if (memo.k === "tuple" && memo.name === "Some") {
+        const inner = memo.items[0];
+        if (inner?.k === "unit" && inner.name === "None") { bound = inner; unbounded = true; }
+        else if (inner?.k === "tuple" && inner.name === "Some") bound = inner;
+        else throw new Error(`${where}: memo bound is not Option<Option<usize>>`);
+      }
+      node = { ...node, fields: node.fields.filter(([name]) => name !== "memo_unbounded").map(([name, value]) => [name, name === "memo_bound" ? bound : value]).concat([["memo_unbounded", { k: "bool", v: unbounded }]]) };
+    }
+    if (def.name === "MIRProgram" && node.k === "struct") {
+      this.trapRoutes = new Set();
+      for (const row of rustField(node, "prelude_calls")?.items ?? []) {
+        const family = rustField(row, "family");
+        const member = rustField(row, "member");
+        if (family?.name === "Overflow" && /^(?:i|u)(?:8|16|32|64)\.trap\.(?:add|sub|mul|div|pow|shl|shr)$/.test(member?.v ?? "")) this.trapRoutes.add(rustId(rustField(row, "id")));
+      }
+    }
     const at = `${where}.${def.name}`;
     if (node.k === "struct") {
       const renames = FIELD_RENAMES[def.name] ?? {};
@@ -384,8 +393,7 @@ export class Converter {
         fields: def.fields.map((f) => {
           const value = host.get(fold(f.name));
           if (value === undefined) {
-            this.note(`${def.name}.${f.name}: no Rust field, zero value`);
-            return this.zero(f.type);
+            throw new Error(`${def.name}.${f.name}: missing checked Rust field; regenerate the MIR dump with the current compiler`);
           }
           return this.convert(value, f.type, `${at}.${f.name}`);
         }),
@@ -400,12 +408,12 @@ export class Converter {
     if (node.k === "tuple" || node.k === "list") {
       const items = node.items;
       if (def.fields.length === 1 && items.length !== 1) return { fields: [this.convert(node, def.fields[0].type, `${at}.${def.fields[0].name}`)] };
-      if (items.length !== def.fields.length) this.note(`${def.name}: ${items.length} positional values for ${def.fields.length} fields`);
-      return { fields: def.fields.map((f, index) => (index < items.length ? this.convert(items[index], f.type, `${at}.${f.name}`) : this.zero(f.type))) };
+      if (items.length !== def.fields.length) throw new Error(`${def.name}: ${items.length} positional values for ${def.fields.length} checked fields`);
+      return { fields: def.fields.map((f, index) => this.convert(items[index], f.type, `${at}.${f.name}`)) };
     }
     if (node.k === "unit") {
-      if (def.fields.length > 0) this.note(`${def.name}: unit value ${node.name}`);
-      return { fields: def.fields.map((f) => this.zero(f.type)) };
+      if (def.fields.length > 0) throw new Error(`${def.name}: unit value ${node.name} cannot supply checked fields`);
+      return { fields: [] };
     }
     if (def.fields.length === 1) return { fields: [this.convert(node, def.fields[0].type, `${at}.${def.fields[0].name}`)] };
     throw new Error(`${at}: cannot fill a struct from ${node.k}`);
@@ -420,32 +428,47 @@ export class Converter {
     if (tag < 0) throw new Error(`${at}: no variant for Rust ${node.k} ${hostName}`);
     const variant = def.variants[tag];
     const at2 = `${at}.${variant.name}`;
+    if (def.name === "MIROperation" && variant.name === "Binary" && node.k === "struct") {
+      const dispatch = rustField(node, "dispatch");
+      let trap = false;
+      if (dispatch?.k === "unit" && dispatch.name === "Primitive") trap = false;
+      else if (dispatch?.k === "struct" && dispatch.name === "Prelude") {
+        if (this.trapRoutes === null) throw new Error(`${at2}: overflow derives from the whole program's checked Prelude routes`);
+        trap = this.trapRoutes.has(rustId(rustField(dispatch, "call")));
+      } else throw new Error(`${at2}: unsupported checked binary dispatch`);
+      node = { ...node, fields: node.fields.filter(([name]) => name !== "overflow").concat([["overflow", { k: "unit", name: trap ? "Trap" : "Unchecked" }]]) };
+    }
+    // Native MIR preformats values before BuildString. Its Value(v) therefore
+    // means Display, exactly as RuntimeMirCodec.rs's string-part conversion.
+    if (def.name === "MIRStringPartKind" && node.k === "tuple" && node.name === "Value") {
+      if (node.items.length !== 1) throw new Error(`${at2}: native string part must carry one value`);
+      node = { ...node, items: [...node.items, { k: "unit", name: "Display" }] };
+    }
     let values = [];
     if (node.k === "struct") {
-      const host = new Map(node.fields.map(([field, value]) => [fold(field), value]));
-      // By name when the Rust variant shares field names (a Jet field Rust
-      // lacks gets its zero value), else by position.
+      const renames = def.name === "MIRImportKind" && variant.name === "Unqualified" ? { module: "module_id" } : {};
+      const host = new Map(node.fields.map(([field, value]) => [fold(renames[field] ?? field), value]));
+      // By checked name where shared; otherwise exact positional correspondence.
       const named = variant.fields.some((f) => host.has(fold(f.name)));
+      if (!named && node.fields.length !== variant.fields.length) throw new Error(`${def.name}.${variant.name}: ${node.fields.length} Rust fields for ${variant.fields.length} checked fields`);
       values = named
         ? variant.fields.map((f) => {
             if (host.has(fold(f.name))) return this.convert(host.get(fold(f.name)), f.type, `${at2}.${f.name}`);
-            this.note(`${def.name}.${variant.name}.${f.name}: no Rust field, zero value`);
-            return this.zero(f.type);
+            throw new Error(`${def.name}.${variant.name}.${f.name}: missing checked Rust field; regenerate the MIR dump with the current compiler`);
           })
-        : variant.fields.map((f, index) => (index < node.fields.length ? this.convert(node.fields[index][1], f.type, `${at2}.${f.name}`) : this.zero(f.type)));
-      if (!named && node.fields.length !== variant.fields.length) this.note(`${def.name}.${variant.name}: ${node.fields.length} Rust fields for ${variant.fields.length}`);
+        : variant.fields.map((f, index) => this.convert(node.fields[index][1], f.type, `${at2}.${f.name}`));
     } else if (node.k === "tuple") {
       if (variant.fields.length === 1 && node.items.length > 1) values = [this.convert({ k: "tuple", name: null, items: node.items }, variant.fields[0].type, at2)];
       else if (variant.fields.length > 1 && node.items.length === 1 && node.items[0].k === "struct") {
         // `Variant(Payload { a, b })` against a Jet variant `Variant(a, b)`.
         return this.enumValue({ k: "struct", name: hostName, fields: node.items[0].fields }, def, where);
       } else {
-        if (node.items.length !== variant.fields.length) this.note(`${def.name}.${variant.name}: ${node.items.length} Rust values for ${variant.fields.length}`);
-        values = variant.fields.map((f, index) => (index < node.items.length ? this.convert(node.items[index], f.type, `${at2}.${f.name}`) : this.zero(f.type)));
+        if (node.items.length !== variant.fields.length) throw new Error(`${def.name}.${variant.name}: ${node.items.length} Rust values for ${variant.fields.length} checked fields`);
+        values = variant.fields.map((f, index) => this.convert(node.items[index], f.type, `${at2}.${f.name}`));
       }
     } else {
-      values = variant.fields.map((f) => this.zero(f.type));
-      if (variant.fields.length > 0) this.note(`${def.name}.${variant.name}: unit Rust variant`);
+      if (variant.fields.length > 0) throw new Error(`${def.name}.${variant.name}: unit Rust variant cannot supply checked fields`);
+      values = [];
     }
     return { tag, fields: values };
   }

@@ -49,7 +49,7 @@ fn jet_cli_errors(diagnostics: [Diagnostic]) -> [Diagnostic] Never! {
 // on the file that owns it, and report the outcome the Rust host prints.
 fn jet_cli_compile_check(file: String, source: String, color: Bool, quiet: Bool) -> JetDriverVerbOutput {
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
-    compiled :: jet_cli_compile_file(file, color)
+    compiled :: jet_cli_compile_file(file, color, false)
     if compiled == {
         .Refused(refusal) -> output = ~refusal
         .Compiled(result, snapshot) -> {
@@ -210,7 +210,7 @@ fn jet_cli_build_result(file: String, source: String, color: Bool, release: Bool
 
 fn jet_cli_compile_build(file: String, source: String, color: Bool, release: Bool) -> JetDriverVerbOutput {
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
-    compiled :: jet_cli_compile_file(file, color)
+    compiled :: jet_cli_compile_file(file, color, release)
     if compiled == {
         .Refused(refusal) -> output = ~refusal
         .Compiled(result, snapshot) -> output = jet_cli_build_result(file, source, color, release, result, snapshot)
