@@ -42,7 +42,7 @@ fn jet_services_rollback_store_path(authority: &JetServiceStateAuthority, genera
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:3798
 fn jet_services_rollout_store_load(tree: &JetServiceTree) -> JetServiceRolloutState? JetServiceError! {
     if tree.state_authority.is_none() -> return Ok(None)
-    authority :: tree.state_authority.as_ref().unwrap()
+    authority :: tree.state_authority.as_ref() ?? panic("unwrap failed")
     path :: jet_services_rollout_path(authority)?
     // GATE #4565: kernel primitive
     #Unsafe("serialize rollout journal reads with the retained authority mutex and file lock") {
@@ -63,7 +63,7 @@ fn jet_services_rollout_store_load(tree: &JetServiceTree) -> JetServiceRolloutSt
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:3831
 fn jet_services_rollout_store_write(tree: &JetServiceTree) -> () JetServiceError! {
     if tree.state_authority.is_none() -> return Ok(())
-    authority :: tree.state_authority.as_ref().unwrap()
+    authority :: tree.state_authority.as_ref() ?? panic("unwrap failed")
     path :: jet_services_rollout_path(authority)?
     bytes :: jet_services_rollout_encode(&tree.name, &jet_services_rollout_snapshot(tree))?
     // GATE #4565: kernel primitive
@@ -95,7 +95,7 @@ fn jet_services_rollout_store_write(tree: &JetServiceTree) -> () JetServiceError
 fn jet_services_restore_rollout_state(tree: &JetServiceTree) -> () JetServiceError! {
     loaded :: jet_services_rollout_store_load(tree)?
     if loaded.is_none() -> return Ok(())
-    state :: loaded.unwrap()
+    state :: loaded ?? panic("unwrap failed")
     if state.workers.len() != tree.workers.len() {
         return Err(jet_services_state_error("rollout journal worker topology does not match the service declaration"))
     }
@@ -322,7 +322,7 @@ fn jet_services_state_validate_path(path: &OSPath) -> () JetServiceError! {
             Err(error) -> return Err(jet_services_state_error("cannot inspect service state store: {error}"))
         }
         if path.parent().is_none() -> return Ok(())
-        current := path.parent().unwrap().to_path_buf()
+        current := (path.parent() ?? panic("unwrap failed")).to_path_buf()
         loop {
             match symlink_metadata(&current) {
                 Ok(info) if info.file_type().is_symlink() -> return Err(jet_services_state_error("service state parent is a symlink: {current.display()}"))
@@ -332,7 +332,7 @@ fn jet_services_state_validate_path(path: &OSPath) -> () JetServiceError! {
                 Err(error) -> return Err(jet_services_state_error("cannot inspect service state parent: {error}"))
             }
             if current.parent().is_none() -> break
-            next :: current.parent().unwrap()
+            next :: current.parent() ?? panic("unwrap failed")
             if next == current -> break
             current = next.to_path_buf()
         }
@@ -600,7 +600,7 @@ fn jet_services_workflow_replay_event(workflow: &JetServiceWorkflow, expected: &
 fn jet_services_workflow_replay_retry(workflow: &JetServiceWorkflow, key: &String, max_attempts: I64, outcome: &JetTaskOutcome) -> Bool JetServiceError! {
     if workflow.replay_cursor == 0 -> return Ok(false)
     if workflow.history.get(workflow.replay_cursor).is_none() -> return Ok(false)
-    actual :: workflow.history.get(workflow.replay_cursor).unwrap()
+    actual :: workflow.history.get(workflow.replay_cursor) ?? panic("unwrap failed")
     prefix :: "activity-retry:{key}@"
     suffix :: ":{outcome.jet_show()}"
     if !actual.starts_with(&prefix) || !actual.ends_with(&suffix) {

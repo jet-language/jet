@@ -66,7 +66,7 @@ impl<T> JetServiceChannel<T> {
     // GATE #4565: kernel primitive
     #Unsafe("hold FIFO mutex through closed/capacity check and one enqueue; notify after insertion")
     fn try_send(self: &JetServiceChannel<T>,value: T) -> () JetServiceChannelError<T>! {
-        values := self.values.lock().unwrap()
+        values := self.values.lock() ?? panic("unwrap failed")
         if self.closed.load(Ordering.Acquire) { return Err(JetServiceChannelError.Closed) }
         if values.len() >= self.capacity { return Err(JetServiceChannelError.Full(^value)) }
         values.push_back(^value)
@@ -77,7 +77,7 @@ impl<T> JetServiceChannel<T> {
     // GATE #4565: kernel primitive
     #Unsafe("dequeue buffered values before reporting closed, under the same FIFO mutex")
     fn try_recv(self: &JetServiceChannel<T>) -> T JetServiceChannelError<T>! {
-        values := self.values.lock().unwrap()
+        values := self.values.lock() ?? panic("unwrap failed")
         if values.pop_front() == .Val(value) { return Ok(^value) }
         if self.closed.load(Ordering.Acquire) { Err(JetServiceChannelError.Closed) } else { Err(JetServiceChannelError.Empty) }
     }
@@ -97,7 +97,7 @@ impl<T> JetServiceChannel<T> {
     // GATE #4565: kernel primitive
     #Unsafe("close under FIFO mutex and wake every blocked observer")
     fn close(self: &JetServiceChannel<T>) -> () {
-        _values :: self.values.lock().unwrap()
+        _values :: self.values.lock() ?? panic("unwrap failed")
         self.closed.store(true,Ordering.Release)
         self.wake.notify_all()
     }
@@ -229,7 +229,7 @@ fn jet_services_active_execution_endpoint_if_present() -> JetServiceEndpoint? Je
     // GATE #4565: kernel primitive
     endpoint :: #Unsafe("clone current thread endpoint without retaining slot loan") { JET_SERVICE_EXECUTION_ENDPOINT.with(fn(slot) { slot.borrow().clone() }) }
     if None == endpoint { return Ok(None) }
-    issued :: endpoint.unwrap()
+    issued :: endpoint ?? panic("unwrap failed")
     jet_services_authority_validate(&issued)?
     Ok(Val(^issued))
 }
@@ -855,7 +855,7 @@ pub fn jet_services_authority_take_pending(endpoint: &JetServiceEndpoint,capacit
     if capacity <= 0 { return Ok([]) }
     maybe_store :: service_authority_bound_store(endpoint)?
     if maybe_store.is_none() { return Ok([]) }
-    store :: maybe_store.unwrap()
+    store :: maybe_store ?? panic("unwrap failed")
     runtime :: JetServiceRuntime{store: store.clone(),retention_ms: 0}
     _guard :: service_authority_lock().lock().map_err(fn(_) { service_authority_error("service authority lock is poisoned") })?
     records :: service_authority_read(&runtime)?

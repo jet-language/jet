@@ -306,7 +306,7 @@ fn jet_services_reconcile_worker(tree: &JetServiceTree,endpoint: &JetServiceEndp
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:6323
 fn jet_services_prepare_rollback(tree: &JetServiceTree) -> (String,Bool,String) JetServiceError! {
     if tree.state_authority.is_none() { return Ok(("",false,"none")) }
-    authority :: tree.state_authority.as_ref().unwrap()
+    authority :: tree.state_authority.as_ref() ?? panic("unwrap failed")
     if authority.migration == "forward_only" { return Ok(("",false,authority.migration.clone())) }
     rollback_store :: jet_services_rollback_store_path(authority,tree.generation)?
     records :: jet_services_state_store_load(authority,&tree.state_adapter)?

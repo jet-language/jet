@@ -478,8 +478,7 @@ impl Clone for JetServiceMailbox {
         // GATE #4565: kernel primitive
         channel :: #Unsafe("snapshot the bounded native FIFO and allocate an independent clone") {
             messages :: self.channel.snapshot()
-            Arc.new(JetServiceChannel.new(USize.try_from(self.capacity.max(1)).unwrap_or(1), ^messages)
-                .expect("validated service mailbox must fit its bounded channel"))
+            Arc.new(JetServiceChannel.new(USize.try_from(self.capacity.max(1)).unwrap_or(1), ^messages) ?? panic("validated service mailbox must fit its bounded channel"))
         }
         endpoint := self.endpoint.clone()
         endpoint.channel = Val(channel.clone())

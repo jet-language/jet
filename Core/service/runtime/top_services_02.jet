@@ -68,8 +68,7 @@ fn jet_services_restart_worker(worker: &JetServiceWorker, budget: &JetServiceRes
     worker.running = true
     messages :: if preserve_mailbox { worker.mailbox.channel.snapshot() } else { [] }
     worker.mailbox.channel.close()
-    worker.mailbox = jet_services_new_mailbox(worker.mailbox.endpoint.clone(), worker.mailbox.capacity, ^messages)
-        .expect("validated service mailbox must restart with its bounded queue")
+    worker.mailbox = jet_services_new_mailbox(worker.mailbox.endpoint.clone(), worker.mailbox.capacity, ^messages) ?? panic("validated service mailbox must restart with its bounded queue")
     _ :: jet_services_record_topology_restart(&worker.task,
         U64.try_from(at.max(0)).unwrap_or_else(fn(_) { jet_services_topology_now() }), JetDevtoolsTopologyRestartReason.Failed)
     _ :: jet_services_task_restart(&worker.task)
@@ -512,7 +511,7 @@ fn jet_services_local_delivery_ids(tree: &JetServiceTree, endpoint: &JetServiceE
             && worker.endpoint.authority == endpoint.authority && worker.endpoint.generation == endpoint.generation
     })
     if worker.is_none() -> return []
-    messages :: worker.unwrap().mailbox.channel.snapshot()
+    messages :: (worker ?? panic("unwrap failed")).mailbox.channel.snapshot()
     runtime :: JetServiceRuntime{store: store.to_string(), retention_ms: 0}
     tree.idempotency_seen.iter().filter_map(fn((key, recorded_endpoint, message)) {
         if recorded_endpoint.tree != endpoint.tree || recorded_endpoint.worker != endpoint.worker
