@@ -620,14 +620,14 @@ where F: fn() -> G? Err! {
         pending_now := pending.keys().copied().collect()
         &pending_now.sort()
         loop index in pending_now {
-            blocked :: jet_job_dependency_indices(jobs, index).iter().any(dependency -> status.get(dependency) == Val(false))
+            blocked :: jet_job_dependency_indices(jobs, index).iter().any(dependency -> status.get(dependency) == false)
             if blocked {
                 &pending.remove(index)
                 &status.insert(index, false)
                 jet_job_emit_cancelled(jobs[index], sink, "a prerequisite failed or was cancelled")
             }
         }
-        ready := pending.keys().copied().filter(index -> jet_job_dependency_indices(jobs, index).iter().all(dependency -> status.get(dependency) == Val(true))).collect()
+        ready := pending.keys().copied().filter(index -> jet_job_dependency_indices(jobs, index).iter().all(dependency -> status.get(dependency) == true)).collect()
         &ready.sort_by((left, right) -> jobs[left].entry.name.cmp(jobs[right].entry.name).then_with(fn() -> left.cmp(right)))
         if ready.is_empty() {
             cancelled := pending.keys().copied().collect()
@@ -669,7 +669,7 @@ pub fn jet_job_dispatch_specs_with_sink<F: Clone + Send + Sync, G: Send>(argv: [
 where F: fn() -> G? Err! {
     specs :: jobs.iter().map(job -> (job.entry.name, job.entry.scope)).collect()
     if specs.is_empty() -> return false
-    if argv.get(1) == Val(JET_JOB_PRIVATE_DISPATCH_FLAG) {
+    if argv.get(1) == JET_JOB_PRIVATE_DISPATCH_FLAG {
         name :: argv.get(2) ?? jet_job_graph_failure("private job dispatch is missing a job name")
         index :: jobs.iter().position(job -> job.entry.name == name) ?? jet_job_graph_failure("private job dispatch names unknown job `{name}`")
         if jet_job_validate_graph(jobs) == .Err(reason) -> jet_job_graph_failure(reason)

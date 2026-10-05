@@ -60,7 +60,7 @@ pub fn jet_job_queue_delay<T: __jet_Encode>(queue: &JetJobQueue, job: String, pa
 pub fn jet_job_service_queue_tick_specs(endpoint: &JetServiceEndpoint, jobs: &[JetJobSpec], limit: USize) -> USize JetServiceError! {
     if limit == 0 || !jobs.iter().any(fn(job) { job.payload_type.is_some() && job.queue_invoke.is_some() }) -> return Ok(0)
     jet_job_service_queue_tick_dispatch(endpoint, limit, fn(job_type, payload) {
-        job :: match jobs.iter().find(fn(job) { job.entry.name == job_type && job.payload_type == Val(payload.type_id) }) {
+        job :: match jobs.iter().find(fn(job) { job.entry.name == job_type && job.payload_type == payload.type_id }) {
             Val(job) -> job
             None -> return Err(JetJobError{type_id: payload.type_id.clone(), reason: "unknown_job_payload",
                 detail: Val("no checked #Job `{job_type}` accepts payload schema `{payload.type_id}`")})
