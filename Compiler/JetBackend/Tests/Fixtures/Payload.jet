@@ -248,6 +248,10 @@ fn fx_opaque_enum_rejection_check(name: String, operation: Int) -> Bool Never! {
 }
 
 fn fx_opaque_enum_rejection_checks() -> Bool Never! {
+    // A source-owned enum with the same spelling still has its native layout.
+    local := fx_opaque_enum_rejected("Closed", 0)
+    local.types[0].key = "Closed"
+    if !lower_native_enum_layout(local, fx_named("Closed")) -> return false
     if !fx_opaque_enum_rejection_check("Closed", 0) -> return false
     if !fx_opaque_enum_rejection_check("Closed", 1) -> return false
     if !fx_opaque_enum_rejection_check("TaskFailure", 2) -> return false
