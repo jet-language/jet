@@ -113,12 +113,12 @@ fn jet_sync_text_order(doc: &JetSyncText) -> [USize] {
     }
     order := [USize].with_capacity(doc.atoms.len())
     stack: [USize] := []
-    if Val(roots) :: children.get(&None) -> stack.extend(roots.iter().rev().copied())
+    if children.get(&None) == .Val(roots) -> stack.extend(roots.iter().rev().copied())
     loop {
         index :: stack.pop() ?? break
         order.push(index)
         id :: Val((doc.atoms[index].replica.clone(), doc.atoms[index].counter))
-        if Val(kids) :: children.get(&id) -> stack.extend(kids.iter().rev().copied())
+        if children.get(&id) == .Val(kids) -> stack.extend(kids.iter().rev().copied())
     }
     order
 }
@@ -694,7 +694,7 @@ impl __jet_Decode for JetSyncText {
                 Ok(fields) -> fields,
                 Err(entry_errors) -> {
                     jet_sync_frame_entry(&errors,index,^entry_errors)
-                    continue
+                    next
                 }
             }
             entry_errors := []
@@ -762,7 +762,7 @@ impl __jet_Decode for JetSyncCounter {
                 Ok(fields) -> fields,
                 Err(entry_errors) -> {
                     jet_sync_frame_entry(&errors,index,^entry_errors)
-                    continue
+                    next
                 }
             }
             entry_errors := []
@@ -807,7 +807,7 @@ impl __jet_Decode for JetSyncMap {
                 Ok(fields) -> fields,
                 Err(entry_errors) -> {
                     jet_sync_frame_entry(&errors,index,^entry_errors)
-                    continue
+                    next
                 }
             }
             entry_errors := []
@@ -853,7 +853,7 @@ impl __jet_Decode for JetSyncList {
                 Ok(fields) -> fields,
                 Err(entry_errors) -> {
                     jet_sync_frame_entry(&errors,index,^entry_errors)
-                    continue
+                    next
                 }
             }
             entry_errors := []
@@ -896,7 +896,7 @@ impl<K: __jet_Decode + __jet_Encode,V: __jet_Decode + __jet_Encode> __jet_Decode
                 Ok(fields) -> fields,
                 Err(entry_errors) -> {
                     jet_sync_frame_entry(&errors,index,^entry_errors)
-                    continue
+                    next
                 }
             }
             entry_errors := []
@@ -944,7 +944,7 @@ impl<T: __jet_Decode + __jet_Encode> __jet_Decode for JetSyncListGeneric<T> {
                 Ok(fields) -> fields,
                 Err(entry_errors) -> {
                     jet_sync_frame_entry(&errors,index,^entry_errors)
-                    continue
+                    next
                 }
             }
             entry_errors := []
