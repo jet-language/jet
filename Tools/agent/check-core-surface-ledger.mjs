@@ -2871,6 +2871,26 @@ function rustPluginVariantFamilies(source, constants) {
   return families;
 }
 
+// D-CONC-FAIL1=A: `core_task_failure_variants` guards one enum name and
+// lists each variant as its own `(name, (zero, payload))` row.
+function rustTaskFailureVariantFamily(source, constants) {
+  const body = rustFunctionBody(source, "core_task_failure_variants", CORE_TYPES_RS_PATH);
+  const guard = /if enum_name != (Syntax::\w+) \{\s*return None;\s*\}/.exec(body);
+  const rows = Array.from(
+    body.matchAll(/\(\s*"(\w+)"\.to_string\(\),\s*\(\s*zero,\s*VariantPayload::(?:Unit|Single\(\s*([\s\S]+?),\s*zero\s*\))\s*\)/g),
+    (match) => ({ variant: match[1], payload: match[2] ? [rustPayloadType(match[2], constants, CORE_TYPES_RS_PATH)] : [] }),
+  );
+  if (!guard || rows.length !== (body.match(/VariantPayload::/g) || []).length) {
+    throw new Error(CORE_TYPES_RS_PATH + ": core_task_failure_variants changed shape; update the payload-row projection");
+  }
+  // `Syntax::TYPE_TASK_FAILURE` is declared through the type-name macro the
+  // constant reader does not expand; its spelling is the Core type name.
+  if (guard[1] !== "Syntax::TYPE_TASK_FAILURE") {
+    throw new Error(CORE_TYPES_RS_PATH + ": core_task_failure_variants guards " + guard[1] + ", not Syntax::TYPE_TASK_FAILURE");
+  }
+  return { name: "TaskFailure", rows };
+}
+
 function coreEnumPayloadFamilies(declarations) {
   const constants = rustSyntaxConstants();
   const coreTypes = read(CORE_TYPES_RS_PATH);
@@ -2882,6 +2902,8 @@ function coreEnumPayloadFamilies(declarations) {
       rows: rustNullaryVariantRows(rustFunctionBody(coreTypes, match[2], CORE_TYPES_RS_PATH), constants, CORE_TYPES_RS_PATH, match[2]),
     });
   }
+  if (!/core_task_failure_variants\(enum_name\)/.test(resolver)) throw new Error(CHECKER_ITEMS_RS_PATH + ": resolve_enum_variants_cloned no longer consults core_task_failure_variants");
+  families.push(rustTaskFailureVariantFamily(coreTypes, constants));
   if (!/core_io_variants\(enum_name\)/.test(resolver)) throw new Error(CHECKER_ITEMS_RS_PATH + ": resolve_enum_variants_cloned no longer consults core_io_variants");
   families.push(...rustIOVariantFamilies(coreTypes, constants));
   if (!/core_plugin_variants\(enum_name\)/.test(resolver)) throw new Error(CHECKER_ITEMS_RS_PATH + ": plugin enum resolver is missing");

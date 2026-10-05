@@ -689,7 +689,7 @@ fn sema_taskgroup_check_spawn(args: [CallArg], span: Span, expected: Type?, envi
         &diagnostics.push(sema_error("E0112", args[0].span, "`task` needs a callable body, not `{type_name(body.ty)}`", "a spawned task executes one zero-parameter callable on a worker thread", "pass a zero-parameter lambda or function"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    lambda := if body.kind == {.LambdaValue(value) -> value else -> sema_taskgroup_callable_wrapper(body, body.ty, args[0].span) ?? {
+    lambda := if body.kind == {.Lambda(value) | .LambdaValue(value) -> value else -> sema_taskgroup_callable_wrapper(body, body.ty, args[0].span) ?? {
         &diagnostics.push(sema_error("E0112", args[0].span, "`task` needs a callable body that can be captured for execution", "the worker closure must retain the callable until the task runs", "use a lambda or a direct function value"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }}
@@ -697,7 +697,7 @@ fn sema_taskgroup_check_spawn(args: [CallArg], span: Span, expected: Type?, envi
         &diagnostics.push(sema_error("E0104", args[0].span, "`task` needs a zero-parameter body, got {lambda.param_types.len()} parameters", "a task body captures values from the enclosing scope instead of taking arguments", "move or capture data rather than declaring lambda parameters"))
     }
     if body.kind == {
-        .LambdaValue(_) -> { sema_function_reactive_note_task_lambda(&context, lambda) }
+        .Lambda(_) | .LambdaValue(_) -> { sema_function_reactive_note_task_lambda(&context, lambda) }
         else -> {}
     }
     sema_taskgroup_check_lambda_captures(lambda, args[0].span, environment, scopes, &state, &context, &diagnostics)

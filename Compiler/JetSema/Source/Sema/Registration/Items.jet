@@ -1945,7 +1945,11 @@ fn sema_registration_import_is_unqualified(declaration: ImportDecl) -> Bool Neve
 
 // Rust `Bundle/ItemReuse.rs` `by_identity`: module identity -> row.
 fn sema_registration_module_index(graph: SemaRegistrationGraph, identity: String) -> Int? {
-    if graph.counting -> graph.lookup_counters.module_lookups += 1
+    if graph.counting {
+        counters := graph.lookup_counters
+        permit :: counters.guard_edit()
+        permit.value.module_lookups += 1
+    }
     graph.module_rows.get(identity)
 }
 
@@ -2328,7 +2332,11 @@ fn sema_registration_item_is_expanded_template(item: Item) -> Bool Never! {
 }
 
 pub fn sema_registration_lookup_name(graph: SemaRegistrationGraph, module_identity: String, name: String) -> SemaRegistrationResolvedSymbol? {
-    if graph.counting -> graph.lookup_counters.name_lookups += 1
+    if graph.counting {
+        counters := graph.lookup_counters
+        permit :: counters.guard_edit()
+        permit.value.name_lookups += 1
+    }
     module_index :: sema_registration_module_index(graph, module_identity) ?? return None
     module_row :: graph.modules[module_index]
     if module_row.symbol_positions.get(name) == .Val(symbol_position) {
