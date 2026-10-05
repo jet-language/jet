@@ -202,7 +202,7 @@ pub mod jet_std {
     pub(crate) use crate::Encoding::json_rt::{
         dyn_kind_for, decode_bool, decode_f32, decode_float, decode_int, decode_int_with, decode_string,
         jet_dyn_encode_i64, jet_dyn_encode_u64, jet_dyn_decode_fixed_integer,
-        jet_dyn_project, jet_decode_text_cells, jet_enc_csv_decode_rows, jet_int_to_i128,
+        jet_dyn_project, jet_decode_text_cells, jet_text_cells_active, jet_enc_csv_decode_rows, jet_int_to_i128,
         jet_int_to_i64, jet_int_to_string, parse_json_dyn, Dyn, EncodingCause,
         EncodingError, EncodingErrorKind,
         EncodingFormat, EncodingLimits, FieldError, JetDynAccess,

@@ -735,7 +735,7 @@ fn snapshot_from_manifest(
                 let Ok(module) = object_map(module) else {
                     return false;
                 };
-                matches!(module.get("id"), Some(Dyn::Int(id)) if id.to_i64() == Some(*module_id))
+                matches!(module.get("id"), Some(Dyn::Int(id)) if id == module_id)
             })
             .ok_or_else(|| format!("web manifest selected module {module_id} is missing"))?;
         let module = object_map(module_value)

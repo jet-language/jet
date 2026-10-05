@@ -1528,7 +1528,7 @@ fn sema_stmt_call_return_views_for_expr(expr: Expr, context: SemaCheckContext) -
             index := 0
             loop index < source.len() {
                 fact :: source[index]
-                if fact.slot.len() > 0 && (fact.slot[0] == member || fact.slot[0] == ".{member}") {
+                if fact.slot.len() > 0 && (fact.slot[0] == member || fact.slot[0] == (".{member}")) {
                     slot := [String]{}
                     slot_index := 1
                     loop slot_index < fact.slot.len() {
@@ -3560,7 +3560,7 @@ fn sema_stmt_dyn_path_root(place: ^TExpr, keys: &[Bool], steps: &[TExpr]) -> TEx
     if place.kind == .HandleMethod(receiver, operation, args) {
         if operation == {
             .DynIndexKey(_, _) | .DynIndexAt(_, _) -> {
-                root :: sema_stmt_dyn_path_root(receiver, &keys, &steps)
+                root :: sema_stmt_dyn_path_root(^receiver, &keys, &steps)
                 &keys.push(if operation == {.DynIndexKey(_, _) -> true else -> false})
                 &steps.push(args[0])
                 return root
@@ -3604,7 +3604,7 @@ fn sema_stmt_check_projected_assignment(target: LValue, op: BinOp?, op_span: Spa
             .DynIndexKey(text, _) | .DynIndexAt(text, _) -> text
             else -> "…"
         }
-        root :: sema_stmt_dyn_path_root(place, &keys, &steps)
+        root :: sema_stmt_dyn_path_root(^place, &keys, &steps)
         checked :: sema_check_expression(expr, Val(sema_dyn_type()), environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
         if sema_copy_site_check_assignment(expr, environment, scopes, context, &diagnostics) -> return None
         if !sema_ownership_check_lvalue_write(&state, target, scopes, &diagnostics) -> return None

@@ -323,7 +323,7 @@ pub(crate) mod runtime {
             jet_std::Dyn::Null => Ok(crate::jet_xml_pull::Value::Null),
             jet_std::Dyn::Bool(value) => Ok(crate::jet_xml_pull::Value::Bool(*value)),
             jet_std::Dyn::Int(value) => value.to_i64().map(crate::jet_xml_pull::Value::Int)
-                .ok_or_else(|| jet_encoding_error(jet_std::EncodingErrorKind::Unsupported, 0, 1, 1, "XML integer is outside I64")),
+                .ok_or_else(|| "XML integer is outside I64".to_string()),
             jet_std::Dyn::Number(text) => Ok(crate::jet_xml_pull::Value::Text(text.clone())),
             jet_std::Dyn::Text(value) => Ok(crate::jet_xml_pull::Value::Text(value.clone())),
             jet_std::Dyn::Array(values) => Ok(crate::jet_xml_pull::Value::Array(

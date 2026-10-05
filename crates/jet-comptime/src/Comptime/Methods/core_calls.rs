@@ -19,7 +19,7 @@ pub(super) use super::super::TextLite::IoErrorOperation;
 pub(super) use super::time_deadline_kernel;
 #[path = "../CorePureParity.rs"]
 mod core_pure_parity;
-pub(crate) use core_pure_parity::dyn_datetime_value;
+pub use core_pure_parity::dyn_datetime_value;
 
 /// The foundation row decides whether a plain Core call may use the pure
 /// comptime evaluator. Unknown rows remain available for the typed/internal

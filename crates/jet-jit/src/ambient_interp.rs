@@ -350,7 +350,10 @@ fn http_tree_runtime(value: &HttpTree) -> MirRuntimeValue {
     match value {
         HttpTree::Null => MirRuntimeValue::Unit,
         HttpTree::Bool(value) => MirRuntimeValue::Bool(*value),
-        HttpTree::Int(value) => MirRuntimeValue::Int(*value),
+        HttpTree::Int(value) => match value.to_i64() {
+            Some(value) => MirRuntimeValue::Int(value),
+            None => MirRuntimeValue::BigInt(value.to_string_rep()),
+        },
         HttpTree::Float(value) => MirRuntimeValue::Float {
             value: *value,
             f32: false,
@@ -424,7 +427,8 @@ fn http_decode_route_value(raw: &str, schema: &HttpTree) -> Result<MirRuntimeVal
     let tree = match kind {
         "string" => HttpTree::Text(raw.to_string()),
         "integer" => HttpTree::Int(
-            raw.parse::<i64>()
+            jet_foundation::Numeric::CtBigInt::from_str(raw)
+                .map(jet_foundation::Numeric::JetInt::from_big)
                 .map_err(|_| "HTTP route integer parameter is invalid".to_string())?,
         ),
         "number" => HttpTree::Float(

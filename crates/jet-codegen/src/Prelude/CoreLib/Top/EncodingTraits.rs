@@ -462,7 +462,7 @@ impl<T: __jet_Decode> __jet_Decode for Vec<T> {
             }
             jet_std::Dyn::Text(text)
                 if <T as __jet_Decode>::__JET_IS_BYTE => {
-                let bytes = jet_foundation::BaseEncodingStrict::decode_base64(text, false, false)
+                let bytes = jet_foundation::base_encoding_strict::decode_base64(text, false, false)
                     .map_err(|error| jet_std::FieldError::one(error.to_string()))?;
                 jet_decode_sequence(bytes.len(), |index| T::jet_decode_byte(bytes[index]))
             }

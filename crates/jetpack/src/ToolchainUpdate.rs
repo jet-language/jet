@@ -1361,7 +1361,7 @@ fn integer(value: &Dyn, label: &str) -> Result<u64, UpdateError> {
     let value = match value {
         Dyn::Number(value) => value,
         Dyn::Int(value) => {
-            return u64::try_from(*value).map_err(|_| {
+            return value.to_u64().ok_or_else(|| {
                 UpdateError::new(format!("{label} must be a non-negative integer"))
             })
         }

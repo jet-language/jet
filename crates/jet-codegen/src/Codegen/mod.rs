@@ -653,7 +653,7 @@ fn push_foundation_facade(out: &mut String, include_arrow: bool) {
         };
         out.push_str(&format!("    pub mod {module} {{ pub use {target}::*; }}\n"));
     }
-    out.push_str("    pub mod BaseEncodingStrict { pub use crate::jet_base_encoding_strict::*; }\n");
+    out.push_str("    pub mod base_encoding_strict { pub use crate::jet_base_encoding_strict::*; }\n");
     out.push_str("}\n");
 }
 

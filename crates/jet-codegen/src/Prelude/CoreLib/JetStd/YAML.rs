@@ -67,7 +67,7 @@
                 let text = match scalar_value(text) {
                     Dyn::Text(text) => text, _ => text.to_owned(),
                 };
-                Dyn::Bytes(jet_foundation::BaseEncodingStrict::decode_base64(&text, true, false)
+                Dyn::Bytes(jet_foundation::base_encoding_strict::decode_base64(&text, true, false)
                     .map_err(FlowError::Unsupported)?)
             } else if let Some(text) = s.strip_prefix("!!timestamp ") {
                 let text = match scalar_value(text) {
@@ -422,7 +422,7 @@
                     .node(text.len())
                     .map_err(|_| self.limit_error())?;
                 if binary {
-                    let bytes = jet_foundation::BaseEncodingStrict::decode_base64(&text, true, false)
+                    let bytes = jet_foundation::base_encoding_strict::decode_base64(&text, true, false)
                         .map_err(|message| ParseError { line: self.pos.saturating_add(1), message, unsupported: true })?;
                     Ok(Dyn::Bytes(bytes))
                 } else { Ok(Dyn::Text(text)) }

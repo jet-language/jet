@@ -5685,6 +5685,14 @@ fn encoding_next(
     }
 }
 
+fn dyn_datetime_payload(value: jet_foundation::Dyn::DynDateTime) -> MirRuntimeValue {
+    jet_comptime::Comptime::MirBridge::ct_to_mir_value(
+        &jet_comptime::Comptime::dyn_datetime_value(value),
+        jet_foundation::Diagnostics::Span::new(0, 0),
+    )
+    .expect("Dyn DateTime payload contains only canonical scalar fields")
+}
+
 fn data_event_value(event: crate::enc_stream::runtime::jet_std::DataEvent) -> Result<MirRuntimeValue, MirNativeCursorError> {
     use crate::enc_stream::runtime::jet_std::DataEvent;
     let (variant, args) = match event {
@@ -5698,12 +5706,7 @@ fn data_event_value(event: crate::enc_stream::runtime::jet_std::DataEvent) -> Re
         DataEvent::Number(value) => ("Number", vec![MirRuntimeValue::String(value)]),
         DataEvent::Text(value) => ("Text", vec![MirRuntimeValue::String(value)]),
         DataEvent::Bytes(value) => ("Bytes", vec![MirRuntimeValue::Bytes(value)]),
-        DataEvent::DateTime(_) => return Err(encoding_error(
-            &crate::enc_stream::runtime::jet_std::EncodingError::new(
-                crate::enc_stream::runtime::jet_std::EncodingFormat::CBOR,
-                crate::enc_stream::runtime::jet_std::EncodingErrorKind::Unsupported,
-                0, Err(JetAbsent), Err(JetAbsent), "$",
-                "DataEvent.DateTime requires the AOT time payload boundary"))),
+        DataEvent::DateTime(value) => ("DateTime", vec![dyn_datetime_payload(value)]),
         DataEvent::ArrayStart => ("ArrayStart", Vec::new()),
         DataEvent::ArrayEnd => ("ArrayEnd", Vec::new()),
         DataEvent::ObjectStart => ("ObjectStart", Vec::new()),
@@ -5733,7 +5736,7 @@ fn dyn_value(tree: crate::enc_stream::runtime::jet_std::Dyn) -> MirRuntimeValue 
         Dyn::Number(value) => ("Number", vec![MirRuntimeValue::String(value)]),
         Dyn::Text(value) => ("Text", vec![MirRuntimeValue::String(value)]),
         Dyn::Bytes(value) => ("Bytes", vec![MirRuntimeValue::Bytes(value)]),
-        Dyn::DateTime(_) => unreachable!("JSON and XML parsers never produce native temporal nodes"),
+        Dyn::DateTime(value) => ("DateTime", vec![dyn_datetime_payload(value)]),
         Dyn::Array(values) => (
             "Array",
             vec![MirRuntimeValue::List(

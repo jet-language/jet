@@ -11,7 +11,8 @@ use crate::runtime_host::fixed_arithmetic_kernel::{
     self, JetFixedArithmeticResult, JET_FIXED_MODE_TRAP, JET_FIXED_MODE_WRAPPING,
     JET_FIXED_MODE_SATURATING, JET_FIXED_MODE_CHECKED,
 };
-use jet_foundation::Numeric::{CtBigInt, CtDecimal, CtFraction};
+pub(crate) use jet_foundation::Numeric::CtBigInt;
+use jet_foundation::Numeric::{CtDecimal, CtFraction};
 
 fn trap_fraction(msg: &str) {
     Concurrency::with_runtime_mut(|rt| {
