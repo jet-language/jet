@@ -1389,12 +1389,19 @@ pub(crate) fn namespace_member_owner(bundle: &ProgramBundle, target: usize, name
 /// Build signature/return entries for selective imports whose target is a file
 /// module. The local key is the spelling used in the body; the second key is
 /// the target's declared function name. This is needed for both top-level and
-/// inline-module `use mod.[item]` calls.
+/// inline-module `use mod.[item]` calls. A generic target also carries its
+/// declaring module and type-parameter order (#4609).
 fn unqualified_file_function_entries(
     bundle: &ProgramBundle,
     module_idx: usize,
     imports: &[ImportDecl],
-) -> Vec<(String, String, Vec<(AccessConvention, Type)>, Option<Type>)> {
+) -> Vec<(
+    String,
+    String,
+    Vec<(AccessConvention, Type)>,
+    Option<Type>,
+    Option<ImportedGenericFunction>,
+)> {
     let mut entries = Vec::new();
     for imp in imports {
         let ImportKind::Unqualified { module_alias, .. } = &imp.kind else {
@@ -1463,6 +1470,7 @@ fn unqualified_file_function_entries(
                                 })
                                 .collect(),
                             function.return_type.clone(),
+                            None,
                         ));
                         continue;
                     }
@@ -1519,6 +1527,7 @@ fn unqualified_file_function_entries(
                     .return_type
                     .as_ref()
                     .map(|ty| qualify_imported_call_type(bundle, target, "", ty)),
+                imported_generic_function(bundle, target, function),
             ));
         }
     }
@@ -1697,11 +1706,41 @@ pub(crate) fn core_source_sig_map(
     map
 }
 
+/// One generic function of another source module that this module calls:
+/// its declaring module identity and type-parameter order (#4609).
+#[derive(Clone)]
+pub(crate) struct ImportedGenericFunction {
+    pub(crate) module_identity: String,
+    pub(crate) type_params: Vec<String>,
+}
+
+fn imported_generic_function(
+    bundle: &ProgramBundle,
+    target: usize,
+    function: &crate::AST::Func,
+) -> Option<ImportedGenericFunction> {
+    (!function.type_params.is_empty()).then(|| ImportedGenericFunction {
+        module_identity: crate::Codegen::Context::module_identity(bundle, target),
+        type_params: function
+            .type_params
+            .iter()
+            .map(|param| param.name.clone())
+            .collect(),
+    })
+}
+
+/// The parameter conventions and types of every cross-module call target,
+/// keyed `(import alias or local name, function)`, and the generic targets
+/// among them under the same keys.
 pub(crate) fn import_sig_map(
     bundle: &ProgramBundle,
     module_idx: usize,
-) -> HashMap<(String, String), Vec<(AccessConvention, Type)>> {
+) -> (
+    HashMap<(String, String), Vec<(AccessConvention, Type)>>,
+    HashMap<(String, String), ImportedGenericFunction>,
+) {
     let mut map = HashMap::new();
+    let mut generics = HashMap::new();
     let module = &bundle.modules[module_idx];
     for imp in &module.imports {
         for (alias, target) in foreign_list_targets(bundle, module_idx, imp) {
@@ -1748,6 +1787,9 @@ pub(crate) fn import_sig_map(
         for item in &bundle.modules[target].items {
             match item {
                 Item::Func(f) if bundle.name_ledger.visible(module_idx, target, &f.name) => {
+                    if let Some(generic) = imported_generic_function(bundle, target, f) {
+                        generics.insert((alias.clone(), f.name.clone()), generic);
+                    }
                     map.insert(
                         (alias.clone(), f.name.clone()),
                         f.params
@@ -1788,16 +1830,22 @@ pub(crate) fn import_sig_map(
             }
         }
     }
-    for (local, original, params, _) in
+    for (local, original, params, _, generic) in
         unqualified_file_function_entries(bundle, module_idx, &module.imports)
     {
+        if let Some(generic) = generic {
+            generics.insert((local.clone(), original.clone()), generic);
+        }
         map.insert((local, original), params);
     }
     for item in &module.items {
         if let Item::CodeModule(cm) = item {
-            for (local, original, params, _) in
+            for (local, original, params, _, generic) in
                 unqualified_file_function_entries(bundle, module_idx, &cm.imports)
             {
+                if let Some(generic) = generic {
+                    generics.insert((local.clone(), original.clone()), generic);
+                }
                 map.insert((local, original), params);
             }
         }
@@ -1809,6 +1857,9 @@ pub(crate) fn import_sig_map(
                     .name_ledger
                     .visible(module_idx, target, &function.name)
                 {
+                    if let Some(generic) = imported_generic_function(bundle, target, function) {
+                        generics.insert((local.clone(), function.name.clone()), generic);
+                    }
                     map.insert(
                         (local.clone(), function.name.clone()),
                         function
@@ -1872,7 +1923,7 @@ pub(crate) fn import_sig_map(
             }
         }
     }
-    map
+    (map, generics)
 }
 
 /// c109 Phase 14: build a map from `(import alias, function)` → the function's return
@@ -1936,14 +1987,14 @@ pub(crate) fn import_ret_map(
             }
         }
     }
-    for (local, original, _, ret) in
+    for (local, original, _, ret, _) in
         unqualified_file_function_entries(bundle, module_idx, &module.imports)
     {
         map.insert((local, original), ret);
     }
     for item in &module.items {
         if let Item::CodeModule(cm) = item {
-            for (local, original, _, ret) in
+            for (local, original, _, ret, _) in
                 unqualified_file_function_entries(bundle, module_idx, &cm.imports)
             {
                 map.insert((local, original), ret);

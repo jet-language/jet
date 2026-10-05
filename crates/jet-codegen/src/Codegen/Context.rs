@@ -298,6 +298,9 @@ pub(crate) struct Cx {
     pub(crate) reexport_calls: HashMap<(String, String), (String, String)>,
     /// `(import alias, function)` -> parameter conventions for cross-module calls.
     pub(crate) import_sigs: HashMap<(String, String), Vec<(AccessConvention, Type)>>,
+    /// #4609: the generic targets among `import_sigs`, under the same keys.
+    pub(crate) import_generics:
+        HashMap<(String, String), crate::Codegen::Imports::ImportedGenericFunction>,
     /// c109 Phase 14: `(import alias, function)` -> the function's return type, so the
     /// TIR can carry a total result type for a cross-module call (mirrors `import_sigs`).
     pub(crate) import_rets: HashMap<(String, String), Option<Type>>,
@@ -427,6 +430,12 @@ pub(crate) struct Cx {
     /// Concrete instantiations of imported source-owned Core generic calls,
     /// keyed by their checked canonical module and function identity.
     pub(crate) jit_core_source_generic_calls: std::cell::RefCell<
+        std::collections::BTreeMap<(String, String), Vec<Vec<Type>>>,
+    >,
+    /// #4609: concrete instantiations of another source module's generic
+    /// functions, keyed by the declaring module identity and function; the
+    /// type arguments are canonical (module-qualified) nominal spellings.
+    pub(crate) jit_module_generic_calls: std::cell::RefCell<
         std::collections::BTreeMap<(String, String), Vec<Vec<Type>>>,
     >,
     /// Functions whose typed decode depends on the canonical TIR migration
@@ -4419,7 +4428,7 @@ pub(crate) fn populate_cx_from_bundle(cx: &mut Cx, bundle: &ProgramBundle, modul
     update_cloneability_with_foreign_types(cx, &bundle.modules[module_idx].items);
     register_foreign_enum_variants(cx, bundle, module_idx);
     cx.reexport_calls = reexport_call_map(bundle, module_idx);
-    cx.import_sigs = import_sig_map(bundle, module_idx);
+    (cx.import_sigs, cx.import_generics) = import_sig_map(bundle, module_idx);
     cx.import_rets = import_ret_map(bundle, module_idx);
     cx.core_imports = core_import_map(bundle, module_idx);
     register_bundle_reflect_paths(cx, bundle, module_idx);
@@ -5360,6 +5369,7 @@ pub(crate) fn build_cx_items(
         foreign_types: HashMap::new(),
         reexport_calls: HashMap::new(),
         import_sigs: HashMap::new(),
+        import_generics: HashMap::new(),
         import_rets: HashMap::new(),
         core_imports: HashMap::new(),
         used_core: HashSet::new(),
@@ -5414,6 +5424,7 @@ pub(crate) fn build_cx_items(
         jit_method_calls: std::cell::RefCell::new(std::collections::BTreeMap::new()),
         jit_generic_calls: std::cell::RefCell::new(std::collections::BTreeMap::new()),
         jit_core_source_generic_calls: std::cell::RefCell::new(std::collections::BTreeMap::new()),
+        jit_module_generic_calls: std::cell::RefCell::new(std::collections::BTreeMap::new()),
         jit_canonical_deopt: std::cell::RefCell::new(HashSet::new()),
         jit_canonical_calls: std::cell::RefCell::new(HashSet::new()),
         jit_local_call_prefix: None,
