@@ -145,7 +145,10 @@ fn jet_oauth_b64url_decode(text: String) -> [U8] Err! {
         }
         accumulator = ((accumulator << 6) | U32.from(value)) & 0x00ffffff
         bits += 6
-        if bits >= 8 { bits -= 8; out.push(((accumulator >> bits) & 0xff) as U8) }
+        if bits >= 8 {
+            bits -= 8
+            out.push(((accumulator >> bits) & 0xff) as U8)
+        }
     }
     if bits != 0 && (accumulator & ((U32{1} << bits) - 1)) != 0 { return Err("OAuth assertion encoding is non-canonical") }
     Ok(^out)
@@ -153,7 +156,11 @@ fn jet_oauth_b64url_decode(text: String) -> [U8] Err! {
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs:247
 fn jet_oauth_json_hex4(chars: [Char], position: &USize) -> U32? {
     value := U32{0}
-    for index in 0..4 { digit :: chars.get(*position)?.to_digit(16)?; *position += 1; value = value * 16 + digit }
+    for index in 0..4 {
+        digit :: chars.get(*position)?.to_digit(16)?
+        *position += 1
+        value = value * 16 + digit
+    }
     Val(value)
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs:257
@@ -195,7 +202,10 @@ fn jet_oauth_json_string(chars: [Char], position: &USize) -> String? {
                     _ -> return None
                 }
             }
-            _ -> { if (character as U32) < 0x20 { return None }; out.push(character) }
+            _ -> {
+                if (character as U32) < 0x20 { return None }
+                out.push(character)
+            }
         }
     }
     None
@@ -215,9 +225,20 @@ fn jet_oauth_json_skip_value(chars: [Char], position: &USize) -> Bool {
         *position += 1
         loop {
             character :: match chars.get(*position).copied() { Val(character) -> character, None -> break }
-            if character == '"' { if jet_oauth_json_string(chars, position).is_none() { return false }; continue }
-            if character == '{' { closers.push('}'); *position += 1; continue }
-            if character == '[' { closers.push(']'); *position += 1; continue }
+            if character == '"' {
+                if jet_oauth_json_string(chars, position).is_none() { return false }
+                continue
+            }
+            if character == '{' {
+                closers.push('}')
+                *position += 1
+                continue
+            }
+            if character == '[' {
+                closers.push(']')
+                *position += 1
+                continue
+            }
             if character == '}' || character == ']' {
                 if closers.last().copied() != Val(character) { return false }
                 _ :: closers.pop()
@@ -262,7 +283,10 @@ fn jet_oauth_parse_claims(text: String) -> JetAuthOAuthClaims Err! {
     claims := JetAuthOAuthClaims.default()
     loop {
         jet_oauth_skip_whitespace(chars, &position)
-        if chars.get(position) == Val(&'}') { position += 1; break }
+        if chars.get(position) == Val(&'}') {
+            position += 1
+            break
+        }
         key :: jet_oauth_json_string(chars, &position).ok_or_else(fn() { "OAuth assertion claim name is invalid" })?
         jet_oauth_skip_whitespace(chars, &position)
         if chars.get(position) != Val(&':') { return Err("OAuth assertion claim separator is invalid") }
@@ -297,7 +321,10 @@ fn jet_oauth_parse_claims(text: String) -> JetAuthOAuthClaims Err! {
         jet_oauth_skip_whitespace(chars, &position)
         match chars.get(position).copied() {
             Val(',') -> position += 1
-            Val('}') -> { position += 1; break }
+            Val('}') -> {
+                position += 1
+                break
+            }
             _ -> return Err("OAuth assertion object is invalid")
         }
     }
@@ -476,7 +503,10 @@ fn jet_app_auth_oauth(auth: JetAuthApp, providers: String) -> JetAuthApp {
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs:855
 fn jet_app_auth_routes(auth: &JetAuthApp) -> String {
     routes := ["POST /login -> password ({auth.users_table})", "POST /logout -> revoke session", "GET /magic -> begin magic link", "POST /magic -> consume magic link"]
-    for provider in &auth.providers { routes.push("GET /oauth/{provider}/begin"); routes.push("GET /oauth/{provider}/callback") }
+    for provider in &auth.providers {
+        routes.push("GET /oauth/{provider}/begin")
+        routes.push("GET /oauth/{provider}/callback")
+    }
     "AuthRoutes({routes.join("; ")})"
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs:869

@@ -39,7 +39,10 @@ fn jet_auth_b64_decode_inner(s: String) -> [U8] Err! {
     bits := U8{0}
     padding := false
     for b in s.bytes() {
-        if b == U8{61} { padding = true; continue }
+        if b == U8{61} {
+            padding = true
+            continue
+        }
         if padding -> return Err("base64 padding must be final")
         v :: match b {
             U8{65}..=U8{90} -> b - 65
@@ -51,7 +54,10 @@ fn jet_auth_b64_decode_inner(s: String) -> [U8] Err! {
         }
         buf = ((buf << 6) | U32{v}) & U32{0x00ffffff}
         bits += 6
-        if bits >= 8 { bits -= 8; out.push(U8{buf >> bits}) }
+        if bits >= 8 {
+            bits -= 8
+            out.push(U8{buf >> bits})
+        }
     }
     if bits != 0 && buf & ((U32{1} << bits) - 1) != 0 -> return Err("non-canonical base64 trailing bits")
     Ok(^out)
@@ -69,7 +75,7 @@ fn jet_auth_b64url_decode(text: String) -> [U8] Err! {
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Auth.rs:101
 fn jet_auth_object(text: String) -> [(String, DataTree)] JetAuthError! {
     match parse_json_strict(text) {
-        Ok(DataTree.Object(fields)) -> Ok(^fields)
+        Ok(.Object(fields)) -> Ok(^fields)
         Ok(_) -> Err(JetAuthError.MalformedToken("token JSON must be an object"))
         Err(error) -> Err(JetAuthError.DecodeError(error.reason))
     }
@@ -89,7 +95,7 @@ fn jet_auth_json_string(chars: [Char], pos: &USize) -> String? {
     if chars.get(pos) != Val('"') -> return None
     pos += 1
     out := String.new()
-    while chars.get(pos) is Val(character) {
+    while chars.get(pos) == .Val(character) {
         pos += 1
         match character {
             '"' -> return Val(^out)
@@ -132,12 +138,18 @@ fn jet_auth_json_string(chars: [Char], pos: &USize) -> String? {
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Auth.rs:174
 fn jet_auth_json_skip_value(chars: [Char], pos: &USize) -> {
     first :: match chars.get(pos) { Val(first) -> first, None -> return }
-    if first == '"' { _ :: jet_auth_json_string(chars, &pos); return }
+    if first == '"' {
+        _ :: jet_auth_json_string(chars, &pos)
+        return
+    }
     if first == '{' || first == '[' {
         closers := [if first == '{' { '}' } else { ']' }]
         pos += 1
-        while chars.get(pos) is Val(character) {
-            if character == '"' { _ :: jet_auth_json_string(chars, &pos); continue }
+        while chars.get(pos) == .Val(character) {
+            if character == '"' {
+                _ :: jet_auth_json_string(chars, &pos)
+                continue
+            }
             pos += 1
             match character {
                 '{' -> closers.push('}')
@@ -201,7 +213,7 @@ fn jet_auth_parse_i64_decimal(lexeme: String) -> I64? {
 fn jet_auth_optional_text(fields: [(String, DataTree)], name: String) -> String? JetAuthError! {
     match jet_auth_get(fields, name) {
         None -> Ok(None)
-        Val(DataTree.Text(value) | DataTree.TypedText(value)) -> Ok(Val(value.clone()))
+        Val(.Text(value) | .TypedText(value)) -> Ok(Val(value.clone()))
         Val(_) -> Err(JetAuthError.MalformedToken("claim `{name}` must be text"))
     }
 }
@@ -209,7 +221,7 @@ fn jet_auth_optional_text(fields: [(String, DataTree)], name: String) -> String?
 fn jet_auth_i64_claim(fields: [(String, DataTree)], text: String, name: String) -> I64? JetAuthError! {
     match jet_auth_get(fields, name) {
         None -> Ok(None)
-        Val(DataTree.Int(_) | DataTree.Number(_)) -> {
+        Val(.Int(_) | .Number(_)) -> {
             lexeme :: jet_auth_number_lexeme(text, name).ok_or_else(fn() { JetAuthError.MalformedToken("claim `{name}` must be an exact integer") })?
             value :: jet_auth_parse_i64_decimal(lexeme).ok_or_else(fn() { JetAuthError.MalformedToken("claim `{name}` must be an exact integer") })?
             Ok(Val(value))
@@ -226,11 +238,11 @@ fn jet_auth_optional_i64(fields: [(String, DataTree)], text: String, name: Strin
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Auth.rs:369
 fn jet_auth_audience_values(value: DataTree) -> [String] JetAuthError! {
     match value {
-        DataTree.Text(value) | DataTree.TypedText(value) -> Ok([value.clone()])
-        DataTree.Array(values) if values.is_empty() -> Err(JetAuthError.MalformedToken("claim `aud` must contain at least one text"))
-        DataTree.Array(values) -> values.iter().map(fn(value) -> String JetAuthError! {
+        .Text(value) | .TypedText(value) -> Ok([value.clone()])
+        .Array(values) if values.is_empty() -> Err(JetAuthError.MalformedToken("claim `aud` must contain at least one text"))
+        .Array(values) -> values.iter().map(fn(value) -> String JetAuthError! {
             match value {
-                DataTree.Text(value) | DataTree.TypedText(value) -> Ok(value.clone())
+                .Text(value) | .TypedText(value) -> Ok(value.clone())
                 _ -> Err(JetAuthError.MalformedToken("claim `aud` must contain only text"))
             }
         }).collect()
@@ -276,12 +288,12 @@ fn jet_auth_claims_at(payload: [U8], audience: String, issuer: String?, clock_sk
     actual_issuer :: jet_auth_optional_text(fields, "iss")?
     not_before :: jet_auth_optional_i64(fields, text, "nbf")?
     issued_at :: jet_auth_optional_i64(fields, text, "iat")?
-    if issuer is Val(expected) {
+    if issuer == .Val(expected) {
         if actual_issuer.as_deref() != Val(expected) -> return Err(JetAuthError.WrongIssuer{expected: expected.to_string(), actual: ^actual_issuer})
     }
     expiry_deadline_ns :: jet_auth_expiry_deadline_ns(expires_at, clock_skew_ns)?
     if now_ns >= expiry_deadline_ns -> return Err(JetAuthError.TokenExpired)
-    if not_before is Val(not_before) {
+    if not_before == .Val(not_before) {
         valid_from_ns :: jet_auth_not_before_threshold_ns(not_before, clock_skew_ns)?
         if now_ns < valid_from_ns -> return Err(JetAuthError.TokenNotYetValid)
     }
@@ -300,8 +312,8 @@ pub fn jet_auth_verify_jwt_impl(token: String, key: [U8], audience: String, issu
     header :: std.str.from_utf8(header).map_err(_ -> JetAuthError.MalformedToken("JWT header is not valid UTF-8"))?
     header :: jet_auth_object(header)?
     match jet_auth_get(header, "alg") {
-        Val(DataTree.Text(algorithm) | DataTree.TypedText(algorithm)) if algorithm == "HS256" -> {}
-        Val(DataTree.Text(algorithm) | DataTree.TypedText(algorithm)) -> return Err(JetAuthError.UnsupportedToken("unsupported JWT algorithm `{algorithm}`"))
+        Val(.Text(algorithm) | .TypedText(algorithm)) if algorithm == "HS256" -> {}
+        Val(.Text(algorithm) | .TypedText(algorithm)) -> return Err(JetAuthError.UnsupportedToken("unsupported JWT algorithm `{algorithm}`"))
         _ -> return Err(JetAuthError.MalformedToken("JWT header requires text `alg`"))
     }
     signature :: jet_auth_b64url_decode(parts[2]).map_err(_ -> JetAuthError.InvalidSignature)?
@@ -332,7 +344,7 @@ pub fn jet_auth_verify_paseto_impl<E>(token: String, key: [U8], audience: String
     if parts.len() < 3 || parts.len() > 4 || parts[0] != "v4" || parts[1] != "public" -> return Err(JetAuthError.UnsupportedToken("only PASETO v4.public is supported"))
     body :: jet_auth_b64url_decode(parts[2]).map_err(JetAuthError.DecodeError)?
     if body.len() < 64 -> return Err(JetAuthError.MalformedToken("PASETO body is shorter than its signature"))
-    token_footer :: if parts.get(3) is Val(encoded) { jet_auth_b64url_decode(encoded).map_err(JetAuthError.DecodeError)? } else { [U8]{} }
+    token_footer :: if parts.get(3) == .Val(encoded) { jet_auth_b64url_decode(encoded).map_err(JetAuthError.DecodeError)? } else { [U8]{} }
     if !jet_ct_eq(token_footer, footer) -> return Err(JetAuthError.InvalidSignature)
     split :: body.len() - 64
     message :: body[..split].to_vec()
