@@ -157,7 +157,7 @@ fn jet_receipt_check_capacity(directory: OSPath, payload_bytes: USize) -> Never!
             path :: entry.path()
             metadata :: fs.symlink_metadata(path).unwrap_or_else(_ -> panic("could not inspect receipt section"))
             if metadata.file_type().is_symlink() || not metadata.is_file() -> panic("receipt section record is not a regular file")
-            if path.file_name().and_then(name -> name.to_str()).is_some_and(name -> name.starts_with('.')) -> continue
+            if path.file_name().and_then(name -> name.to_str()).is_some_and(name -> name.starts_with('.')) -> next
             count += USize{1}
             total = total.saturating_add(metadata.len())
         }
