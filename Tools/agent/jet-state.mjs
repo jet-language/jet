@@ -74,6 +74,21 @@ export function queryMatcher(subject) {
     return terms.filter(term => body.includes(term));
   };
 }
+function retrievalClass(subject, record) {
+  const phrase = subject.normalize('NFKC').toLowerCase().replace(/[_-]/g, ' ');
+  const title = text(record.title).replace(/[_-]/g, ' ');
+  const body = text(record).replace(/[_-]/g, ' ');
+  const terms = words(phrase);
+  if (title.includes(phrase)) return 'subject-in-title';
+  if (terms.every(term => title.includes(term))) return 'title-terms';
+  if (body.includes(phrase)) return 'body-phrase';
+  if (terms.every(term => body.includes(term))) return 'body-all-terms';
+  return terms.some(term => body.includes(term)) ? 'term-lead' : 'exact-link-only';
+}
+const RETRIEVAL_ORDER = ['subject-in-title', 'title-terms', 'body-phrase', 'body-all-terms', 'term-lead', 'exact-link-only'];
+function retrievalOrder(a, b) {
+  return RETRIEVAL_ORDER.indexOf(a.retrieval_class) - RETRIEVAL_ORDER.indexOf(b.retrieval_class);
+}
 
 export function decisionState(decision, card, { head, dirty, receipts = [], witnesses = {} } = {}) {
   if (decision.status !== 'ratified' || decision.draft) return { intended: decision.draft ? 'draft' : decision.status,
@@ -101,7 +116,7 @@ export function subjectRows({ subject, state, history = {}, head, dirty, receipt
   const cards = [...(state.cards ?? []), ...(history.cards ?? []).filter(h => !liveCardIds.has(h.id))];
   const decisions = [...(state.decisions ?? []), ...(history.decisions ?? []).filter(h => !liveDecisionIds.has(h.id))];
   const cardMap = new Map(cards.map(c => [c.id, c]));
-  const exactRefs = new Map([...cards.map(c => [`#${c.num}`, c.id]), ...decisions.map(d => [d.id, d.id])]);
+  const exactRefs = new Map([...cards.flatMap(c => [[`#${c.num}`, c.id], [c.id, c.id]]), ...decisions.map(d => [d.id, d.id])]);
   const decisionMap = new Map(decisions.map(d => [d.id, d]));
   const decisionsByCard = new Map();
   for (const d of decisions) {
@@ -138,12 +153,13 @@ export function subjectRows({ subject, state, history = {}, head, dirty, receipt
       ratified_at: d.ratifiedAt ?? null, acceptance: d.options?.find(o => o.key === d.outcome) ?? d.outcome ?? null,
       authoritative_record: { provider: 'tower', collection: liveDecisionIds.has(d.id) ? 'decisions' : 'history.decisions', id: d.id },
       match_reasons: reasons.get(d.id),
+      retrieval_class: retrievalClass(subject, d),
       axes: { ...decisionState(d, c, { head, dirty, receipts, witnesses }),
         ...(successor.has(d.id) ? { intended: 'retired/superseded' } : {}) },
       supersession_field: d.supersededBy ?? null, replaced_by: successor.get(d.id) ?? [],
       authority: successor.has(d.id) ? 'explicitly-superseded' : 'no-explicit-successor-known',
       archived: !liveDecisionIds.has(d.id) };
-  });
+  }).sort(retrievalOrder);
   const selectedCards = cards.filter(c => reasons.has(c.id)).map(c => {
     const linked = decisionsByCard.get(c.id) ?? [];
     return { ref: `#${c.num}`, id: c.id, title: c.title, kind: c.kind, phase: c.phase,
@@ -153,8 +169,9 @@ export function subjectRows({ subject, state, history = {}, head, dirty, receipt
       assignee: c.assignee ?? null, claimed_at: c.claimedAt ?? null, blocked_by: c.blockedBy ?? [],
       refs: c.refs ?? [], criteria: c.criteria ?? [], handoff: c.handoff ?? null,
       match_reasons: reasons.get(c.id), archived: !liveCardIds.has(c.id),
+      retrieval_class: retrievalClass(subject, c),
       authoritative_record: { provider: 'tower', collection: liveCardIds.has(c.id) ? 'cards' : 'history.cards', id: c.id } };
-  });
+  }).sort(retrievalOrder);
   const events = [...(state.events ?? []), ...(history.events ?? [])].filter(e => match(e).length || reasons.has(e.ref));
   return { decisions: decisionRows, cards: selectedCards,
     open_ballots: decisionRows.filter(d => d.draft || d.status === 'open'),
@@ -196,13 +213,30 @@ function documents(root, match, inputs) {
 }
 function changes(root, args, match, lane) {
   const files = parseNameStatus(git(root, ['diff', '--no-ext-diff', '--no-textconv', '--name-status', '-z', '-M', ...args]));
-  const patch = git(root, ['diff', '--no-ext-diff', '--no-textconv', '--unified=0', ...args]);
-  const blocks = patch.split(/(?=^diff --git )/m);
-  const relevant = files.filter(f => match(f).length).map(f => ({ ...f, lane, match: 'path', semantic_state: 'unreviewed' }));
-  for (const block of blocks) {
+  // Tower owns these work-state bytes; they are not code changes. Preserve paths
+  // separately instead of repeatedly decoding enormous board/history patches.
+  const ledgerPath = path => /^(?:Tools\/tower\/)?\.tower\//.test(path);
+  const ledger = files.filter(f => ledgerPath(f.path) || (f.old_path && ledgerPath(f.old_path)));
+  const sourceFiles = files.filter(f => !ledger.includes(f));
+  const result = { total_changed_files: files.length, relevant_files: [],
+    ledger_changes: ledger.map(f => ({ ...f, lane, semantic_state: 'work-ledger-not-code' })),
+    limitation: 'Filename/hunk matches are candidate semantic changes, not reviewed semantics or active assignments.' };
+  if (!sourceFiles.length) return result;
+  const relevant = sourceFiles.filter(f => match(f).length).map(f => ({ ...f, lane, match: 'path', semantic_state: 'unreviewed' }));
+  result.relevant_files = relevant;
+  let patch;
+  try {
+    patch = git(root, ['diff', '--no-ext-diff', '--no-textconv', '--unified=0', ...args, '--', '.',
+      ':(exclude).tower/**', ':(exclude)Tools/tower/.tower/**']);
+  } catch (error) {
+    result.hunk_coverage = 'unknown'; result.error = errorText(error);
+    result.unknown_files = sourceFiles.map(f => ({ ...f, lane, semantic_state: 'unknown' }));
+    return result;
+  }
+  for (const block of patch.split(/(?=^diff --git )/m)) {
     if (!block || !match(block).length) continue;
     const header = block.split('\n', 1)[0];
-    const file = files.find(f => header.includes(`b/${f.path}`) || (f.old_path && header.includes(`a/${f.old_path}`)));
+    const file = sourceFiles.find(f => header.includes(`b/${f.path}`) || (f.old_path && header.includes(`a/${f.old_path}`)));
     if (file) {
       let row = relevant.find(r => r.path === file.path);
       if (!row) { row = { ...file, lane, match: 'hunk', semantic_state: 'unreviewed' }; relevant.push(row); }
@@ -210,8 +244,7 @@ function changes(root, args, match, lane) {
     } else relevant.push({ lane, path: null, semantic_state: 'unknown', candidate_hunks: block.slice(0, 2400),
       limitation: 'Unparsed git path/header; retained rather than silently dropped.' });
   }
-  return { total_changed_files: files.length, relevant_files: relevant,
-    limitation: 'Filename/hunk matches are candidate semantic changes, not reviewed semantics or active assignments.' };
+  return result;
 }
 function collectGit(root, devRef, baseRef, match) {
   const head = ref(root, 'HEAD'); const base = ref(root, baseRef); const dev = ref(root, devRef);
@@ -220,9 +253,16 @@ function collectGit(root, devRef, baseRef, match) {
   const identity = { head, branch: branch(root),
     dev_ref: devRef, dev, base_ref: baseRef, base, status_sha256: current.fingerprint, dirty: !!current.status };
   const branches = [];
+  const committedByHead = new Map();
+  const committed = commit => {
+    if (!base || !commit) return { state: 'unknown', reason: 'missing base/head' };
+    if (!committedByHead.has(commit)) committedByHead.set(commit, changes(root, [`${base}...${commit}`], match, 'committed'));
+    return committedByHead.get(commit);
+  };
+  const emptyChanges = () => ({ total_changed_files: 0, relevant_files: [], ledger_changes: [] });
   if (dev && base) {
     const row = { name: devRef, head: dev, base, state: 'branch-diff-not-assignment' };
-    try { row.committed = changes(root, [`${baseRef}...${devRef}`], match, 'committed'); }
+    try { row.committed = committed(dev); }
     catch (error) { row.state = 'unknown'; row.error = errorText(error); }
     branches.push(row);
   }
@@ -232,9 +272,10 @@ function collectGit(root, devRef, baseRef, match) {
     try {
       const before = worktreeIdentity(wt.path); const status = before.status;
       row.status_sha256 = before.fingerprint; row.dirty = !!status;
-      row.committed = base ? changes(wt.path, [`${base}...HEAD`], match, 'committed') : { state: 'unknown' };
-      row.staged = changes(wt.path, ['--cached'], match, 'staged');
-      row.unstaged = changes(wt.path, [], match, 'unstaged');
+      row.committed = committed(before.head);
+      const trackedStatus = status.split('\0').filter(line => /^[ MARCUDT?!]{2} /.test(line) && !line.startsWith('??'));
+      row.staged = trackedStatus.some(line => line[0] !== ' ') ? changes(wt.path, ['--cached'], match, 'staged') : emptyChanges();
+      row.unstaged = trackedStatus.some(line => line[1] !== ' ') ? changes(wt.path, [], match, 'unstaged') : emptyChanges();
       row.untracked = status.split('\0').filter(line => line.startsWith('?? ') && match(line.slice(3)).length)
         .map(line => ({ path: line.slice(3), semantic_state: 'unknown', lane: 'untracked' }));
       row.identity_before = `${before.head}:${before.fingerprint}`;
@@ -352,7 +393,17 @@ export function renderText(digest, limit = 7) {
   section('Ratified decisions', digest.decisions.filter(d => d.status === 'ratified' && !d.draft), d => `${d.ref}: ${d.title} — ${d.axes.built}; ${d.authority}${d.replaced_by.length ? ` → ${d.replaced_by.join(', ')}` : ''}`);
   section('Open/draft ballots', digest.open_ballots, d => `${d.ref}: ${d.title} — ${d.draft ? 'draft' : d.status}`);
   section('Matching cards', digest.cards, c => `${c.ref}: ${c.title} — ${c.phase}${c.in_flight ? ' (in flight)' : ''}`);
-  section('Branch/worktree changes', digest.branches.filter(b => b.state === 'unknown' || [b.committed, b.staged, b.unstaged].some(x => x?.relevant_files?.length) || b.untracked?.length), b => `${b.name} (${b.branch ?? 'branch'}): ${b.state === 'unknown' ? b.error : [b.committed, b.staged, b.unstaged].flatMap(x => x?.relevant_files ?? []).map(f => `${f.lane}:${f.status} ${f.path ?? '[unparsed]'}`).join('; ')} — unreviewed candidate changes`);
+  section('Branch/worktree changes', digest.branches.filter(b => b.state === 'unknown'
+    || [b.committed, b.staged, b.unstaged].some(x => x?.relevant_files?.length || x?.hunk_coverage === 'unknown')
+    || b.untracked?.length), b => {
+    if (b.state === 'unknown') return `${b.name}: unknown — ${b.error}`;
+    const lanes = [b.committed, b.staged, b.unstaged];
+    const files = [...lanes.flatMap(x => x?.relevant_files ?? []), ...(b.untracked ?? [])];
+    const preview = files.slice(0, 5).map(f => `${f.lane}:${f.status ?? '?'} ${f.path ?? '[unparsed]'}`).join('; ');
+    const remainder = files.length > 5 ? `; ${files.length - 5} more files in JSON` : '';
+    const gap = lanes.some(x => x?.hunk_coverage === 'unknown') ? '; hunk coverage UNKNOWN (paths retained in JSON)' : '';
+    return `${b.name} (${b.branch ?? 'branch'}): ${preview}${remainder}${gap} — unreviewed candidate changes`;
+  });
   section('Research/proposals', digest.research, r => `${r.path ?? r.category}: ${r.state}${r.matches?.[0] ? `; line ${r.matches[0].line}: ${r.matches[0].excerpt}` : ''}`);
   section('Registry spellings', digest.idioms, r => `${JSON.stringify(r.spelling)} — ${r.meaning} (${r.decision || 'unlinked'}); runtime proof unknown`);
   lines.push('\nLimits: candidate retrieval only; done ≠ built; read latest owner direction and focused source before proposing.');

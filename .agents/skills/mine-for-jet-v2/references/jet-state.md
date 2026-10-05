@@ -10,6 +10,9 @@ Default root is the tool's checkout. `--root PATH` selects another checkout;
 never substituted with another branch. `--format text` and `markdown` are the
 same compact bounded preview; JSON retains all candidate rows. Subject terms
 are OR retrieval leads, not proof of semantic equivalence or completeness.
+Compact decision/card previews prioritize subject/title and phrase matches;
+the labeled broader term and exact-link leads remain in JSON. This is retrieval
+ordering, not recommendation value ranking or a semantic-equivalence verdict.
 
 The tool reads the canonical live main-worktree board via Tower's existing path
 resolver, never a stale tracked linked-board fallback. It reuses Tower's
@@ -19,6 +22,11 @@ One board/history read and one indexed record projection per invocation, with
 metadata checks around collection. All commands are local/read-only, with git
 optional locks disabled. No fetch, service, build, test, Tower mutation or
 committed generated status. Unknown/partial providers are explicit.
+Identical committed heads share one diff within the invocation; clean local
+lanes need no patch reads. Tower ledger changed paths are retained separately
+as work-state changes, not repeatedly decoded as enormous code hunks. Oversized
+or unsupported source patches retain paths with unknown hunk coverage; unknown
+is never rendered as no semantic change.
 
 JSON `jet-state:v1` contains generated date, checkout HEAD/dev/base/dirty
 fingerprints, Tower revision, root-relative input identities, decisions with

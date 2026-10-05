@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
+import childProcess from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import fs from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
@@ -257,4 +258,39 @@ test('malformed receipt or unknown clean identity never establishes exercised bu
       command: 'acceptance', witnesses: [{}] }], witnesses: {} };
   assert.notEqual(decisionState(decision('D-MEM', 'c1'), card(1, 'done'), options).built, 'ratified-built');
   assert.notEqual(decisionState(decision('D-MEM', 'c1'), card(1, 'done'), { ...options, dirty: undefined }).built, 'ratified-built');
+});
+
+test('compact candidate order prioritizes subject titles without dropping broad or linked leads', () => {
+  const state = stateOf([card(1, 'ready', 'memory allocation'), card(2, 'ready', 'memory model soundness'),
+    card(3, 'ready', 'other owner', { refs: ['c2'] })],
+    [decision('D-BROAD', 'c1', { title: 'memory allocation' }), decision('D-TOPIC', 'c2', { title: 'memory model law' })]);
+  const rows = subjectRows({ subject: 'memory model', state });
+  assert.equal(rows.decisions[0].ref, 'D-TOPIC');
+  assert.equal(rows.decisions[0].retrieval_class, 'subject-in-title');
+  assert.ok(rows.decisions.some(d => d.ref === 'D-BROAD'));
+});
+
+test('work-ledger changes retain exact paths separately without bloating semantic hunks', t => {
+  const f = fixture(t);
+  f.file('.tower/tower.json', JSON.stringify({ ...f.state, meta: { ...f.state.meta, rev: 8 } }));
+  const digest = collectDigest({ root: f.root, subject: 'memory' });
+  const wt = digest.branches.find(b => b.name === '.');
+  assert.equal(wt.unstaged.ledger_changes[0].path, '.tower/tower.json');
+  assert.equal(wt.unstaged.ledger_changes[0].semantic_state, 'work-ledger-not-code');
+  assert.deepEqual(wt.unstaged.relevant_files, []);
+  assert.equal(digest.providers.tower.detail.revision, 8);
+});
+
+test('identical committed worktree heads reuse one diff per invocation', t => {
+  const f = fixture(t); const linked = join(f.root, '.agent-worktrees/linked');
+  f.git('worktree', 'add', '-b', 'fixture-linked', linked, 'master');
+  const original = childProcess.execFileSync; const committedDiffs = [];
+  const patched = t.mock.method(childProcess, 'execFileSync', (command, args, options) => {
+    if (command === 'git' && args.includes('diff') && args.some(arg => arg.includes('...'))) committedDiffs.push(args);
+    return original(command, args, options);
+  });
+  syncBuiltinESMExports();
+  t.after(() => { patched.mock.restore(); syncBuiltinESMExports(); });
+  const digest = collectDigest({ root: f.root, subject: 'memory' });
+  assert.equal(digest.consistent, true); assert.equal(committedDiffs.length, 1);
 });
