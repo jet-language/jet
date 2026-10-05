@@ -752,9 +752,6 @@ pub fn jet_std_math_zero() -> f64 {
     0.0
 }
 
-pub fn jet_std_math_copy(value: f64) -> f64 {
-    value
-}
 pub fn jet_std_math_cot(value: f64) -> f64 {
     1.0 / value.tan()
 }

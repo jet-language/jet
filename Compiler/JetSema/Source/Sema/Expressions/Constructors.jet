@@ -1315,6 +1315,7 @@ fn sema_expression_typed_literal(head: Type?, body: TypedLitBody, span: Span, ex
             if result_head == regex_head || sema_expr_unwrap_tag(written_head) == regex_head -> return sema_expression_typed_literal_regex(regex_head, value, span, expected, environment, &diagnostics)
             checked_optional := if sema_expression_typed_literal_value_needs_head(value, result_head) -> sema_check_expression(value, Val(result_head), environment, &scopes, &state, &tail_store, &context, &diagnostics) else -> sema_check_expression(value, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
             checked :: checked_optional ?? return None
+            if sema_expression_typed_literal_float_to_integer(result_head, checked.ty, checked.span, &diagnostics) -> return None
             converted := checked
             value_span :: expr_span(value)
             line := sema_source_line_at(environment.source_segments, value_span) ?? 0
@@ -1330,6 +1331,7 @@ fn sema_expression_typed_literal(head: Type?, body: TypedLitBody, span: Span, ex
             value := elements[0]
             checked_optional := if sema_expression_typed_literal_value_needs_head(value, result_head) -> sema_check_expression(value, Val(result_head), environment, &scopes, &state, &tail_store, &context, &diagnostics) else -> sema_check_expression(value, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
             checked :: checked_optional ?? return None
+            if sema_expression_typed_literal_float_to_integer(result_head, checked.ty, checked.span, &diagnostics) -> return None
             converted := checked
             value_span :: expr_span(value)
             line := sema_source_line_at(environment.source_segments, value_span) ?? 0
@@ -1344,6 +1346,15 @@ fn sema_expression_typed_literal(head: Type?, body: TypedLitBody, span: Span, ex
         else -> {}
     }
     sema_expression_typed_literal_mismatch(result_head, span, &diagnostics)
+}
+
+// D-DOTCTOR3 scalar heads use parameter acceptance, never a numeric retag.
+fn sema_expression_typed_literal_float_to_integer(head: Type, offered: Type, span: Span, diagnostics: &[Diagnostic]) -> Bool {
+    if (offered == Type.Float || offered == Type.Float32) && sema_expr_is_integer(head) {
+        &diagnostics.push(sema_error("E0112", span, "a `{type_name(offered)}` can't be used where a `{type_name(head)}` is expected", "a typed literal accepts its body like a parameter; converting a decimal value to a whole number must be explicit", "use `{type_name(head)}.from_float(value)` and handle its failure, or `math.round(value)` to round to the nearest Int"))
+        return true
+    }
+    false
 }
 
 // `U64{byte}` with `byte: U8`: a lossless fixed-width widening takes the

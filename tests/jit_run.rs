@@ -2860,6 +2860,23 @@ fn jit_int_list_reducers_preserve_arbitrary_precision() {
     );
 }
 
+/// #4590: the HLL source rounds its Float estimate to an Int, rather than
+/// relabelling the Float carrier as an exact-Int word.
+#[test]
+fn jit_hll_count_returns_an_integer_not_float_bits() {
+    let source = r#"use core.data.sketch.hll as hll
+fn run() {
+    sketch := hll.new()
+    print(sketch.count())
+    &sketch.add("jet")
+    print(sketch.count())
+    &sketch.add("jet")
+    print(sketch.count())
+}
+"#;
+    assert_typed_fast_path_fixture("jit_hll_count", source, "0\n1\n1\n");
+}
+
 /// Card #2863: Float arithmetic and comparisons use their native f64 values,
 /// while sqrt remains the shared Core math operation.
 #[test]

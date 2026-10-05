@@ -1187,9 +1187,6 @@ fn jet_jit_math_radix(_x: f64) -> i64 {
 fn jet_jit_math_zero() -> f64 {
     0.0
 }
-fn jet_jit_math_copy(x: f64) -> f64 {
-    x
-}
 fn jet_jit_math_cot(x: f64) -> f64 {
     1.0 / x.tan()
 }
@@ -1490,7 +1487,6 @@ host_fns! {
     is_infinite: "jet_std_math_is_infinite" => jet_jit_math_is_infinite: f64_i8;
     radix: "jet_jit_math_radix" => jet_jit_math_radix: f64_i64;
     zero: "jet_jit_math_zero" => jet_jit_math_zero: zero_f64;
-    copy: "jet_jit_math_copy" => jet_jit_math_copy: f64_f64;
     is_finite: "jet_std_math_is_finite" => jet_jit_math_is_finite: f64_i8;
     is_normal: "jet_jit_math_is_normal" => jet_jit_math_is_normal: f64_i8;
     is_subnormal: "jet_jit_math_is_subnormal" => jet_jit_math_is_subnormal: f64_i8;

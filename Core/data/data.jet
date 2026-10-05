@@ -691,7 +691,7 @@ pub fn quantile(values: [Float], q: Float) -> Float DataError! {
     }
     sorted := sort_floats(values)
     pos := q * Float{sorted.len() - 1}
-    lo := Int{pos}
+    lo := Int.from_float(pos) ?? panic("quantile position must be finite")
     hi := lo
     if (Float{lo}) < pos -> hi = lo + 1
     if hi >= sorted.len() -> hi = sorted.len() - 1
@@ -1318,7 +1318,7 @@ fn scale_between(value: Float, minimum: Float, maximum: Float, extent: Int) -> I
     ratio := (value - minimum) / (maximum - minimum)
     if ratio <= (Float{0.0}) -> return 0
     if ratio >= (Float{1.0}) -> return extent
-    Int{ratio * Float{extent}}
+    Int.from_float(ratio * Float{extent}) ?? panic("plot coordinate must be finite")
 }
 
 
@@ -1442,7 +1442,7 @@ fn render_line_options_svg(labels: [String], values: [Float], options: DataLineO
     loop i in 0..<n {
         x := left + plot_w /% 2
         if n > 1 -> x = left + plot_w * i /% (n - 1)
-        y := top + Int{(maximum - values[i]) * Float{plot_h} / (maximum - minimum)}
+        y := top + (Int.from_float((maximum - values[i]) * Float{plot_h} / (maximum - minimum)) ?? panic("plot coordinate must be finite"))
         if i > 0 -> points = "{points} "
         points = "{points}{x},{y}"
     }
@@ -1454,13 +1454,13 @@ fn render_line_options_svg(labels: [String], values: [Float], options: DataLineO
         loop i in 0..<n {
             x := left + plot_w /% 2
             if n > 1 -> x = left + plot_w * i /% (n - 1)
-            y := top + Int{(maximum - values[i]) * Float{plot_h} / (maximum - minimum)}
+            y := top + (Int.from_float((maximum - values[i]) * Float{plot_h} / (maximum - minimum)) ?? panic("plot coordinate must be finite"))
             out = "{out}<circle cx=\"{x}\" cy=\"{y}\" r=\"4\" fill=\"{xml_escape(options.color)}\"/>"
         }
     }
     if options.reference != None {
         reference :: options.reference ?? Float{0.0}
-        y := top + Int{(maximum - reference) * Float{plot_h} / (maximum - minimum)}
+        y := top + (Int.from_float((maximum - reference) * Float{plot_h} / (maximum - minimum)) ?? panic("plot reference must be finite"))
         out = "{out}<line x1=\"{left}\" y1=\"{y}\" x2=\"{w - right}\" y2=\"{y}\" stroke=\"#888\" stroke-dasharray=\"4 4\"/>"
     }
     loop i in 0..<n {

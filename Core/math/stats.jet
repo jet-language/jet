@@ -160,7 +160,7 @@ fn quantile_sorted(s: [Float], p: Float) -> Float? {
     if p <= (Float{0.0}) -> return Val(s[0])
     if p >= (Float{1.0}) -> return Val(s[s.len() - 1])
     position :: p * (Float{s.len() - 1})
-    lower :: Int{position}
+    lower :: Int.from_float(position) ?? panic("quantile position must be finite")
     upper :: lower + 1
     if upper >= s.len() -> return Val(s[s.len() - 1])
     fraction :: position - (Float{lower})
@@ -813,7 +813,7 @@ pub fn histogram(xs: [Float], bins: Int) -> [Int] Never! {
             value :: x / scale
             t = (value - lower) / (upper - lower)
         }
-        idx := Int{t * (Float{bins})}
+        idx := Int.from_float(t * (Float{bins})) ?? panic("histogram position must be finite")
         if idx < 0 -> idx = 0
         if idx >= bins -> idx = bins - 1
         out[idx] = out[idx] + 1

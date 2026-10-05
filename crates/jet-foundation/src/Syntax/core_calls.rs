@@ -1478,7 +1478,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 52f3012cfe34f96cac17edd361737a3c033242973dc425f0a0d015c766a26c87
+// Source SHA-256: 73539843cefb08a37c257332ec45a4cde459ca68f52f484e2cba5afc769eebe9
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -2136,7 +2136,6 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.math", "ln_1p", "jet_std_math_ln_1p", true, &[false]) .with_jit_symbol("jet_jit_math_ln_1p") .with_pure_route(CoreCallPureRoute::Math),
     CoreCallRecord::new("core.math", "log", "jet_std_math_log", true, &[false, false]) .with_jit_symbol("jet_jit_math_log") .with_pure_route(CoreCallPureRoute::Math),
     CoreCallRecord::new("core.math", "copysign", "jet_std_math_copysign", true, &[false, false]) .with_jit_symbol("jet_jit_math_copysign") .with_pure_route(CoreCallPureRoute::Math),
-    CoreCallRecord::new("core.math", "copy", "jet_std_math_copy", true, &[false]) .with_jit_symbol("jet_jit_math_copy") .with_pure_route(CoreCallPureRoute::Math),
     CoreCallRecord::new("core.math", "signum", "jet_std_math_signum", true, &[false]) .with_jit_symbol("jet_jit_math_signum") .with_pure_route(CoreCallPureRoute::Math),
     CoreCallRecord::new("core.math", "checked_add", "jet_std_math_checked_add", true, &[false, false]) .with_jit_symbol("jet_jit_math_checked_add") .with_native_int_result(),
     CoreCallRecord::new("core.math", "checked_sub", "jet_std_math_checked_sub", true, &[false, false]) .with_jit_symbol("jet_jit_math_checked_sub") .with_native_int_result(),

@@ -55,13 +55,13 @@ fn hll_estimate(hll: HLL) -> Int Never! {
     if zero > 0 {
         estimate :: Float{width} * math.ln(Float{width} / Float{zero})
         if estimate <= (Float{0.0}) -> return 0
-        return Int{estimate + Float{0.5}}
+        return math.round(estimate)
     }
     if sum <= (Float{0.0}) -> return 0
     width_f :: Float{width}
     estimate :: Float{0.7213} / (Float{1.0} + Float{1.079} / width_f) * width_f * width_f / sum
     if estimate <= (Float{0.0}) -> return 0
-    Int{estimate + Float{0.5}}
+    math.round(estimate)
 }
 
 fn hash64(key: String) -> U64 {

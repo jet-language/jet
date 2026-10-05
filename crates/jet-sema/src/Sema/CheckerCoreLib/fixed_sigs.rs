@@ -96,7 +96,6 @@ pub fn is_polymorphic_core_special(module: &str, name: &str) -> bool {
             | ("core.math", "sin_cos")
             | ("core.math", "binomial")
             | ("core.math", "cmp")
-            | ("core.math", "copy")
             | ("core.math", "cot")
             | ("core.math", "div_mod")
             | ("core.math", "div_rem")
