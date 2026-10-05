@@ -54,14 +54,24 @@ impl Display for JetCryptoError {
 #Copy
 #Debug
 #Eq
-pub enum JetCryptoEntropyStep { Filled(count: USize); Interrupted; Failed }
+pub enum JetCryptoEntropyStep {
+    Filled(count: USize)
+    Interrupted
+    Failed
+}
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs:51
 #If(test) {
     #Clone
     #Copy
     #Debug
     #Eq
-    pub enum JetCryptoWasiAttemptEvent { Created; ProviderReturned(errno: U16); Zeroized; Released; Returned }
+    pub enum JetCryptoWasiAttemptEvent {
+        Created
+        ProviderReturned(errno: U16)
+        Zeroized
+        Released
+        Returned
+    }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs:69
     // GATE #4565: kernel primitive — test-only thread-confined mutable closures.
     static JET_CRYPTO_ENTROPY_TEST_PROVIDER: ThreadLocal<RefCell<Box<fn(&[U8]) -> JetCryptoEntropyStep>?>> = ThreadLocal.new(fn() { RefCell.new(None) })
@@ -97,7 +107,7 @@ pub enum JetCryptoEntropyStep { Filled(count: USize); Interrupted; Failed }
     fn jet_crypto_entropy_observe_wasi_attempt(event: JetCryptoWasiAttemptEvent, generation: USize, bytes: [U8]) -> {
         #Unsafe("test-only observer borrows attempt bytes during notification") {
             JET_CRYPTO_WASI_ATTEMPT_TEST_OBSERVER.with(fn(slot) {
-                if slot.borrow_mut().as_mut() is Val(observer) { observer(event, generation, bytes) }
+                if slot.borrow_mut().as_mut() == .Val(observer) { observer(event, generation, bytes) }
             })
         }
     }
@@ -110,7 +120,7 @@ pub fn jet_crypto_entropy_zeroize(bytes: &[U8]) -> {
         compiler_fence(Ordering.SeqCst)
         #If(test) {
             JET_CRYPTO_ZEROIZE_TEST_OBSERVER.with(fn(slot) {
-                if slot.borrow_mut().as_mut() is Val(observer) { observer(bytes) }
+                if slot.borrow_mut().as_mut() == .Val(observer) { observer(bytes) }
             })
         }
     }
@@ -261,7 +271,7 @@ fn jet_crypto_entropy_fill_platform(out: &[U8]) -> () JetCryptoError! {
                 loan.as_mut().map(fn(provider) { jet_crypto_entropy_fill_loop(out, provider) })
             })
         }
-        if scripted is Val(result) -> return ^result
+        if scripted == .Val(result) -> return ^result
     }
     jet_crypto_entropy_fill_native(out)
 }
@@ -272,7 +282,10 @@ pub fn jet_crypto_entropy_bytes(count: I64) -> [U8] JetCryptoError! {
     if count == 0 -> return Ok([])
     if target.selected_os() == "wasi" && target.selected_arch() == "wasm32" && (target.selected_env() == "p1" || target.selected_env() == "p2") {
         return jet_crypto_entropy_wasi_with(count as USize, fn(out) {
-            match jet_crypto_entropy_wasi_attempt(out) { Ok(_) -> U16{0}; Err(errno) -> errno }
+            match jet_crypto_entropy_wasi_attempt(out) {
+                Ok(_) -> U16{0}
+                Err(errno) -> errno
+            }
         })
     }
     out := [U8].filled(count as USize, 0)
@@ -283,7 +296,10 @@ pub fn jet_crypto_entropy_bytes(count: I64) -> [U8] JetCryptoError! {
 pub fn jet_crypto_entropy_fill(out: &[U8]) -> () JetCryptoError! {
     fresh := match jet_crypto_entropy_bytes(out.len() as I64) {
         Ok(bytes) -> ^bytes
-        Err(error) -> { jet_crypto_entropy_zeroize(out); return Err(^error) }
+        Err(error) -> {
+            jet_crypto_entropy_zeroize(out)
+            return Err(^error)
+        }
     }
     out.copy_from_slice(&fresh)
     jet_crypto_entropy_zeroize(&fresh)
@@ -332,10 +348,16 @@ pub fn jet_crypto_uuid_v7_result(timestamp_ms: I64) -> String JetCryptoError! {
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs:570
 pub fn jet_crypto_uuid_v4() -> String {
-    match jet_crypto_uuid_v4_result() { Ok(uuid) -> ^uuid; Err(error) -> jet_crypto_entropy_fail_closed("core.crypto.uuid.v4", ^error) }
+    match jet_crypto_uuid_v4_result() {
+        Ok(uuid) -> ^uuid
+        Err(error) -> jet_crypto_entropy_fail_closed("core.crypto.uuid.v4", ^error)
+    }
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs:577
 pub fn jet_crypto_uuid_v7(timestamp_ms: I64) -> String {
-    match jet_crypto_uuid_v7_result(timestamp_ms) { Ok(uuid) -> ^uuid; Err(error) -> jet_crypto_entropy_fail_closed("core.crypto.uuid.v7", ^error) }
+    match jet_crypto_uuid_v7_result(timestamp_ms) {
+        Ok(uuid) -> ^uuid
+        Err(error) -> jet_crypto_entropy_fail_closed("core.crypto.uuid.v7", ^error)
+    }
 }
 
