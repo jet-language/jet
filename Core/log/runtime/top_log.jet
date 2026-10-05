@@ -211,7 +211,7 @@ pub fn jet_ring_log_close(span: LogSpan) -> {
 pub fn jet_log_telemetry_text(value: String) -> String {
     out := String.new()
     loop ch in value.chars() {
-        if ch.is_control() -> continue
+        if ch.is_control() -> next
         width :: ch.len_utf8()
         if out.len().saturating_add(width) > JET_LOG_TELEMETRY_TEXT_BYTES -> break
         &out.push(ch)
@@ -228,7 +228,7 @@ pub fn jet_log_telemetry_json_string(value: String) -> String {
             escaped :: "\\u{ch as U32:04x}"
             if out.len().saturating_add(escaped.len()).saturating_add(1) > max_len -> break
             &out.push_str(escaped)
-            continue
+            next
         }
         fragment :: match ch {
             '"' -> "\\\"", '\\' -> "\\\\", '\n' -> "\\n", '\r' -> "\\r", '\t' -> "\\t",
@@ -236,7 +236,7 @@ pub fn jet_log_telemetry_json_string(value: String) -> String {
             _ -> {
                 if out.len().saturating_add(ch.len_utf8()).saturating_add(1) > max_len -> break
                 &out.push(ch)
-                continue
+                next
             },
         }
         if out.len().saturating_add(fragment.len()).saturating_add(1) > max_len -> break
@@ -309,7 +309,7 @@ pub fn jet_log_telemetry_log_fields(fields: [LogField]) -> String {
     metadata := [(String, Bool)]{}
     loop field in fields.iter().take(JET_LOG_TELEMETRY_MAX_FIELDS) {
         key :: jet_log_telemetry_text(field.key)
-        if key.is_empty() -> continue
+        if key.is_empty() -> next
         if metadata.iter().position(pair -> pair.0 == key) == .Val(pos) {
             metadata[pos].1 = metadata[pos].1 || field.redacted
         } else { &metadata.push((^key, field.redacted)) }
@@ -327,7 +327,7 @@ pub fn jet_log_telemetry_payload_fields(fields: [LogField]) -> String {
     values := [String]{}
     loop field in fields.iter().take(JET_LOG_TELEMETRY_MAX_FIELDS) {
         key :: jet_log_telemetry_text(field.key)
-        if key.is_empty() || field.redacted -> continue
+        if key.is_empty() || field.redacted -> next
         value :: match field.kind {
             "int" | "counter" -> field.value.parse<I64>().ok().map(value -> value.to_string()),
             "float" -> field.value.parse<F64>().ok().filter(value -> value.is_finite()).map(value -> value.to_string()),
