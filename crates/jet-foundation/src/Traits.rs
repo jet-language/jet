@@ -51,6 +51,8 @@ pub fn operator_method_identity(
 pub struct TraitRegistry {
     pub traits: HashMap<String, TraitInfo>,
     pub trait_impls: HashSet<(String, String)>,
+    /// Ambient runtime nominals, not implementations of a same-named source type.
+    pub synthetic_close_types: HashSet<String>,
     /// D-OPMIX1: all validated operator hooks, including multiple RHS types
     /// for one owner/trait pair. Rows stay in registration order for inspect.
     pub operator_impls: Vec<OperatorImpl>,
@@ -2028,6 +2030,12 @@ impl TraitRegistry {
     }
 
     pub fn implements_trait(&self, type_name: &str, trait_name: &str) -> bool {
+        if trait_name == CLOSE
+            && !self.local_types.contains(type_name)
+            && self.synthetic_close_types.contains(type_name)
+        {
+            return true;
+        }
         // A primitive auto-satisfies the *built-in* trait family (Printable,
         // Comparable, Renderable, …) — that's always true for every scalar. It
         // must NOT auto-satisfy an arbitrary user-declared trait (D-ANY-JAI1
@@ -2830,8 +2838,7 @@ impl TraitRegistry {
             "Pool",
             "Fixed",
         ] {
-            self.trait_impls
-                .insert((ty.to_string(), crate::Syntax::TRAIT_CLOSE.to_string()));
+            self.synthetic_close_types.insert(ty.to_string());
         }
     }
 
@@ -3911,6 +3918,18 @@ fn trait_assoc(items: &[Item], type_name: &str, trait_name: &str, assoc: &str) -
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn synthetic_close_does_not_make_a_source_pool_a_resource() {
+        let mut traits = TraitRegistry::default();
+        traits.register_synthetic_close();
+        assert!(traits.implements_trait("Pool", crate::Syntax::TRAIT_CLOSE));
+        traits.local_types.insert("Pool".to_string());
+        assert!(!traits.implements_trait("Pool", crate::Syntax::TRAIT_CLOSE));
+        // A source declaration may still opt into the resource contract.
+        traits.trait_impls.insert(("Pool".to_string(), crate::Syntax::TRAIT_CLOSE.to_string()));
+        assert!(traits.implements_trait("Pool", crate::Syntax::TRAIT_CLOSE));
+    }
 
     #[test]
     fn sized_scalars_only_satisfy_builtin_traits() {
