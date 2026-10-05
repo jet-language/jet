@@ -48,7 +48,7 @@ fn jet_process_pipeline_child(child: Child, spec: &ProcessSpec) -> JetProcessPip
 fn jet_process_pipeline_child_stop(child: &JetProcessPipelineChild) -> () {
     if target.selected_family() == "unix" { _ :: jet_process_pty.signal_group(child.child.id(), jet_process_signal_kill()) }
     if target.selected_os() == .Windows {
-        if Val(job) :: child.job.take() { _ :: jet_process_pty.terminate(&job) }
+        if child.job.take() == .Val(job) { _ :: jet_process_pty.terminate(&job) }
     }
     _ :: child.child.kill()
 }
@@ -58,7 +58,7 @@ fn jet_process_pipeline_child_stop(child: &JetProcessPipelineChild) -> () {
 fn jet_process_pipeline_child_stop_after_wait(child: &JetProcessPipelineChild) -> () {
     if target.selected_family() == "unix" { _ :: jet_process_pty.signal_group(child.child.id(), jet_process_signal_kill()) }
     if target.selected_os() == .Windows {
-        if Val(job) :: child.job.take() { _ :: jet_process_pty.terminate(&job) }
+        if child.job.take() == .Val(job) { _ :: jet_process_pty.terminate(&job) }
     }
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:1881
@@ -85,8 +85,8 @@ fn jet_process_pipeline_stop_group(pid: U32) -> () {
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:1912
 fn jet_process_stop_output(groups: &Arc<Mutex<[U32]>>?, group_pid: U32?) -> () {
-    if Val(groups) :: groups { jet_process_pipeline_stop_groups(groups) }
-    else if Val(pid) :: group_pid { jet_process_pipeline_stop_group(pid) }
+    if groups == .Val(groups) { jet_process_pipeline_stop_groups(groups) }
+    else if group_pid == .Val(pid) { jet_process_pipeline_stop_group(pid) }
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:1923
 // GATE #4565: kernel primitive
@@ -147,7 +147,7 @@ fn jet_process_spec_pipeline(specs: &[ProcessSpec]) -> ProcessReceipt IOError! {
     if specs.is_empty() {
         return Err(IOError.InvalidInput(IOContext.new(IOOperation.Resolve, None, None, Val("process.pipeline needs at least one command"))))
     }
-    for spec in specs { jet_process_pipeline_resource_limits_check(spec)? }
+    loop spec in specs { jet_process_pipeline_resource_limits_check(spec)? }
     if specs.iter().any(fn(spec) { spec.policy_wire.is_some() }) {
         return Err(IOError.other(IOOperation.Resolve, Val("process.pipeline"),
             "authority-bound pipelines need one auditable launch transaction; refusing before spawn"))
@@ -188,7 +188,7 @@ fn jet_process_spec_pipeline(specs: &[ProcessSpec]) -> ProcessReceipt IOError! {
                     "terminal sessions cannot be used as pipeline stages; spawn the session directly"))
             }
             command := jet_process_command_builder_with_identity(spec, None)?
-            if Val(stdout) :: input { command.stdin(Stdio.from(^stdout)) }
+            if input == .Val(stdout) { command.stdin(Stdio.from(^stdout)) }
             else if forward_input.is_some() { command.stdin(Stdio.piped()) }
             else {
                 command.stdin(match &spec.stdin { Val(mode) -> jet_process_stdio(mode), None -> Stdio.null() })
@@ -219,7 +219,7 @@ fn jet_process_spec_pipeline(specs: &[ProcessSpec]) -> ProcessReceipt IOError! {
         child_pid :: child.child.id()
         pipeline_groups.lock().unwrap_or_else(fn(poisoned) { poisoned.into_inner() }).push(child_pid)
         if pipeline_cancel.load(Ordering.Acquire) { jet_process_pipeline_stop_groups(&pipeline_groups) }
-        if Val(stdout) :: forward_input {
+        if forward_input == .Val(stdout) {
             previous :: match index.checked_sub(1) {
                 Val(previous) -> previous
                 None -> {
@@ -294,7 +294,7 @@ fn jet_process_spec_pipeline(specs: &[ProcessSpec]) -> ProcessReceipt IOError! {
     wait_error := None
     stage_finished := [Bool].repeat(false, children.len())
     if direct_wait {
-        for index in 0..<children.len() {
+        loop index in 0..<children.len() {
             status :: match children[index].child.wait() {
                 Ok(status) -> ^status
                 Err(error) -> {
@@ -304,7 +304,7 @@ fn jet_process_spec_pipeline(specs: &[ProcessSpec]) -> ProcessReceipt IOError! {
                 }
             }
             stage_finished[index] = true
-            if Val(limit) :: jet_process_status_resource_limit(&status, &specs[index]) {
+            if jet_process_status_resource_limit(&status, &specs[index]) == .Val(limit) {
                 jet_process_pipeline_cleanup(&children)
                 resource_limit = Val(limit)
                 break
@@ -316,8 +316,8 @@ fn jet_process_spec_pipeline(specs: &[ProcessSpec]) -> ProcessReceipt IOError! {
             }
         }
     } else {
-        for index in 0..<children.len() {
-            if stage_finished[index] { continue }
+        loop index in 0..<children.len() {
+            if stage_finished[index] { next }
             status :: loop {
                 if pipeline_limit_hit.load(Ordering.Acquire) {
                     jet_process_pipeline_cleanup(&children)
@@ -329,9 +329,9 @@ fn jet_process_spec_pipeline(specs: &[ProcessSpec]) -> ProcessReceipt IOError! {
                     break None
                 }
                 current_status := None
-                for stage in 0..<children.len() {
-                    if stage_finished[stage] { continue }
-                    if Val(limit) :: jet_process_live_resource_limit(children[stage].child.id(), &specs[stage]) {
+                loop stage in 0..<children.len() {
+                    if stage_finished[stage] { next }
+                    if jet_process_live_resource_limit(children[stage].child.id(), &specs[stage]) == .Val(limit) {
                         jet_process_pipeline_cleanup(&children)
                         resource_limit = Val(limit)
                         break
@@ -344,8 +344,8 @@ fn jet_process_spec_pipeline(specs: &[ProcessSpec]) -> ProcessReceipt IOError! {
                             break
                         }
                     }
-                    if Val(status) :: status {
-                        if Val(limit) :: jet_process_status_resource_limit(&status, &specs[stage]) {
+                    if status == .Val(status) {
+                        if jet_process_status_resource_limit(&status, &specs[stage]) == .Val(limit) {
                             jet_process_pipeline_cleanup(&children)
                             resource_limit = Val(limit)
                             break
@@ -387,8 +387,8 @@ fn jet_process_spec_pipeline(specs: &[ProcessSpec]) -> ProcessReceipt IOError! {
     forwarder_result?
     (output, errors) :: drains?
     output_exceeded :: output.exceeded
-    if Val(error) :: wait_error { return Err(^error) }
-    if Val(limit) :: resource_limit { return Err(IOError.ResourceLimit(limit)) }
+    if wait_error == .Val(error) { return Err(^error) }
+    if resource_limit == .Val(limit) { return Err(IOError.ResourceLimit(limit)) }
     output_limit_exceeded = output_limit_exceeded || pipeline_output_exceeded
     if output_exceeded || output_limit_exceeded { return Err(IOError.ResourceLimit(ProcessResourceLimit.Output)) }
     output_text :: ^output.text
@@ -433,7 +433,7 @@ fn jet_process_inner_kill(inner: &ProcessHandle) -> () io.Error! {
     match inner {
         ProcessHandle.Std{child, job} -> {
             if target.selected_os() == .Windows {
-                if Val(job) :: job { return jet_process_pty.terminate(job) }
+                if job == .Val(job) { return jet_process_pty.terminate(job) }
             }
             child.kill()
         }
@@ -464,13 +464,13 @@ fn jet_process_linux_open_files(pid: U32) -> U64? {
 // untyped child failure. A raced proc read leaves classification to the kernel.
 fn jet_process_live_resource_limit(pid: U32, spec: &ProcessSpec) -> ProcessResourceLimit? {
     if target.selected_os() == .Linux {
-        if Val(limit) :: spec.memory_limit_bytes {
+        if spec.memory_limit_bytes == .Val(limit) {
             // RLIMIT_AS may reject the next allocation just below its ceiling.
             const MEMORY_OBSERVATION_WINDOW: U64 = 1024 * 1024
             threshold :: (limit.max(0) as U64).saturating_sub(MEMORY_OBSERVATION_WINDOW)
             if jet_process_linux_vm_size(pid).is_some_and(fn(used) { used >= threshold }) { return Val(ProcessResourceLimit.Memory) }
         }
-        if Val(limit) :: spec.open_file_limit {
+        if spec.open_file_limit == .Val(limit) {
             if jet_process_linux_open_files(pid).is_some_and(fn(used) { used >= limit.max(0) as U64 }) {
                 return Val(ProcessResourceLimit.OpenFiles)
             }
@@ -536,8 +536,8 @@ fn jet_process_child_id(child: &ProcessChild) -> I64 {
 // GATE #4565: kernel primitive
 #Unsafe("wait owns retained child borrows, cancellation callback and native handles until pipe workers drain and cached receipt publishes")
 fn jet_process_child_wait(child: &ProcessChild) -> ProcessReceipt IOError! {
-    if Val(error) :: child.cleanup_error.borrow().clone() { return Err(^error) }
-    if Val(result) :: child.wait_result.borrow().clone() { return Ok(^result) }
+    if child.cleanup_error.borrow().clone() == .Val(error) { return Err(^error) }
+    if child.wait_result.borrow().clone() == .Val(result) { return Ok(^result) }
     topology_pid :: jet_process_child_id(child)
     _cleanup :: JetProcessWaitCleanup{child:child}
     // Independent stdout/stderr workers keep full pipes from deadlocking wait.
@@ -564,23 +564,23 @@ fn jet_process_child_wait(child: &ProcessChild) -> ProcessReceipt IOError! {
             inner := slot.as_mut() ?? return Err(IOError.Closed(IOContext.new(
                 IOOperation.Close, Val("process"), None, Val("process child wait result is unavailable"))))
             if target.selected_os() == .Windows {
-                if Val(limit) :: jet_process_inner_resource_limit(inner, &child.audit_spec).map_err(jet_process_cleanup_io_error)? {
+                if jet_process_inner_resource_limit(inner, &child.audit_spec).map_err(jet_process_cleanup_io_error)? == .Val(limit) {
                     jet_process_tree_signal(inner, child.process_group, jet_process_signal_kill()).map_err(jet_process_cleanup_io_error)?
                     resource_limit = Val(limit)
                     break jet_process_inner_wait(inner).map_err(jet_process_cleanup_io_error)?
                 }
             }
-            if Val(limit) :: jet_process_live_resource_limit(jet_process_inner_id(inner), &child.audit_spec) {
+            if jet_process_live_resource_limit(jet_process_inner_id(inner), &child.audit_spec) == .Val(limit) {
                 jet_process_tree_signal(inner, child.process_group, jet_process_signal_kill()).map_err(jet_process_cleanup_io_error)?
                 resource_limit = Val(limit)
                 break jet_process_inner_wait(inner).map_err(jet_process_cleanup_io_error)?
             }
-            if Val(status) :: jet_process_inner_try_wait(inner).map_err(jet_process_cleanup_io_error)? { break ^status }
+            if jet_process_inner_try_wait(inner).map_err(jet_process_cleanup_io_error)? == .Val(status) { break ^status }
             if output_limit_hit.load(Ordering.Acquire) || output_read_error.load(Ordering.Acquire) {
                 jet_process_tree_signal(inner, child.process_group, jet_process_signal_kill()).map_err(jet_process_cleanup_io_error)?
                 break jet_process_inner_wait(inner).map_err(jet_process_cleanup_io_error)?
             }
-            if Val(timeout) :: child.timeout_ms {
+            if child.timeout_ms == .Val(timeout) {
                 if child.started.elapsed() >= Duration.from_millis(timeout as U64) {
                     jet_process_tree_signal(inner, child.process_group, jet_process_signal_kill()).map_err(jet_process_cleanup_io_error)?
                     timed_out = true
@@ -598,24 +598,24 @@ fn jet_process_child_wait(child: &ProcessChild) -> ProcessReceipt IOError! {
     // TerminateJobObject after leader exit races a signaled/empty job.
     cleanup_error :: if target.selected_family() == "unix" && child.process_group {
         slot := child.inner.borrow_mut()
-        if Val(inner) :: slot.as_mut() {
+        if slot.as_mut() == .Val(inner) {
             jet_process_tree_signal(inner, true, jet_process_signal_kill()).err().map(jet_process_cleanup_io_error)
         } else { None }
     } else { None }
-    if Val(error) :: cleanup_error.as_ref() { jet_process_record_cleanup_error(child, error.clone()) }
+    if cleanup_error.as_ref() == .Val(error) { jet_process_record_cleanup_error(child, error.clone()) }
     pid :: child.inner.borrow().as_ref().map(fn(inner) { jet_process_inner_id(inner) as I64 }).unwrap_or(0)
     child.inner.borrow_mut().take()
     *child.stdin.borrow_mut() = None
     // Release ConPTY before joining its output worker; otherwise pipe stays live.
     if target.selected_os() == .Windows {
-        if Val(session) :: child.terminal.as_ref().ok() { session.control.close() }
+        if child.terminal.as_ref().ok() == .Val(session) { session.control.close() }
     }
     (output, errors) :: jet_process_collect_child_output(child)?
     if cancellation_pending && !jet_scheduler_shielded() {
         jet_process_publish_topology_id(topology_pid, JetDevtoolsTopologyProcessState.Failed)
         jet_task_deliver_cancel()
     }
-    if Val(error) :: cleanup_error {
+    if cleanup_error == .Val(error) {
         jet_process_publish_topology_id(topology_pid, JetDevtoolsTopologyProcessState.Failed)
         return Err(^error)
     }
@@ -623,11 +623,11 @@ fn jet_process_child_wait(child: &ProcessChild) -> ProcessReceipt IOError! {
         jet_process_publish_topology_id(topology_pid, JetDevtoolsTopologyProcessState.Failed)
         return Err(IOError.ResourceLimit(ProcessResourceLimit.Output))
     }
-    if Val(limit) :: resource_limit {
+    if resource_limit == .Val(limit) {
         jet_process_publish_topology_id(topology_pid, JetDevtoolsTopologyProcessState.Failed)
         return Err(IOError.ResourceLimit(limit))
     }
-    if Val(limit) :: jet_process_status_resource_limit(&status, &child.audit_spec) {
+    if jet_process_status_resource_limit(&status, &child.audit_spec) == .Val(limit) {
         jet_process_publish_topology_id(topology_pid, JetDevtoolsTopologyProcessState.Failed)
         return Err(IOError.ResourceLimit(limit))
     }
@@ -726,7 +726,7 @@ fn jet_process_signal_kill() -> I32 {
 fn jet_process_child_signal(child: &ProcessChild, signal: I32) -> () IOError! {
     pid :: jet_process_child_id(child)
     slot := child.inner.borrow_mut()
-    if Val(inner) :: slot.as_mut() {
+    if slot.as_mut() == .Val(inner) {
         if target.selected_os() == .Windows && signal == jet_process_signal_interrupt() {
             if ProcessHandle.Native{pid:native_pid, job, ..} :: inner {
                 input :: child.stdin.borrow()
@@ -760,14 +760,14 @@ fn jet_process_reap_unfinished(child: &ProcessChild) -> () IOError! {
     }
     signal_error :: jet_process_tree_signal(inner, child.process_group, jet_process_signal_kill()).err().map(jet_process_cleanup_io_error)
     if target.selected_os() == .Windows {
-        if Val(session) :: child.terminal.as_ref().ok() { session.control.close() }
+        if child.terminal.as_ref().ok() == .Val(session) { session.control.close() }
     }
     wait_error :: jet_process_inner_wait(inner).err().map(jet_process_cleanup_io_error)
     drop(^slot)
     output_error :: jet_process_join_child_output_workers(child).err()
-    if Val(error) :: signal_error { Err(^error) }
-    else if Val(error) :: wait_error { Err(^error) }
-    else if Val(error) :: output_error { Err(^error) }
+    if signal_error == .Val(error) { Err(^error) }
+    else if wait_error == .Val(error) { Err(^error) }
+    else if output_error == .Val(error) { Err(^error) }
     else { Ok(()) }
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:3110
@@ -825,7 +825,7 @@ fn jet_process_stdin_write(handle: &Rc<RefCell<ProcessStdin?>>, text: &String) -
     bytes := text.as_bytes()
     {
         stdin := handle.borrow_mut()
-        if Val(ProcessStdin.Terminal(writer)) :: stdin.as_mut() {
+        if stdin.as_mut() == .Val(ProcessStdin.Terminal(writer)) {
             // PTY clones share one open-file description: nonblocking input
             // would make the independent output worker see EAGAIN.
             writer.write_all(bytes).map_err(jet_process_stdin_error)?
@@ -850,12 +850,12 @@ fn jet_process_stdin_write(handle: &Rc<RefCell<ProcessStdin?>>, text: &String) -
                     offset += written
                     None
                 }
-                Err(error) if error.kind() == io.ErrorKind.Interrupted -> continue
+                Err(error) if error.kind() == io.ErrorKind.Interrupted -> next
                 Err(error) if error.kind() == io.ErrorKind.WouldBlock -> Val(fd)
                 Err(error) -> return Err(jet_process_stdin_error(^error))
             }
         }
-        fd :: wait_fd ?? continue
+        fd :: wait_fd ?? next
         scheduler :: jet_scheduler_raw_io_handle(fd)
         match jet_scheduler_wait_without_unwind(fn() { jet_scheduler_raw_io_write_wait(&scheduler, "process stdin") }) {
             JetSchedulerWait.Ready(()) -> {}

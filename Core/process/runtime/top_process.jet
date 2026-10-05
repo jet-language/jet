@@ -227,7 +227,7 @@ fn jet_process_command_builder_with_identity(spec: &ProcessSpec, executable_iden
     #Unsafe("configure one real native child command with a synchronous atomic logical-environment snapshot") {
         command := Command.new(executable_identity.unwrap_or(spec.cmd[0]))
         command.args(&spec.cmd[1..])
-        if Val(cwd) :: &spec.cwd -> command.current_dir(cwd)
+        if (&spec.cwd) == .Val(cwd) -> command.current_dir(cwd)
         if spec.env_clear || !spec.env_set.is_empty() || !spec.env_remove.is_empty() {
             child_env :: jet_process_environment(spec)?
             command.env_clear()
@@ -411,7 +411,7 @@ fn jet_process_spec_spawn(spec: &ProcessSpec) -> ProcessChild IOError! {
     jet_process_resource_limits_check(spec)?
     launch_plan :: if spec.policy_wire.is_some() { Val(jet_process_spec_plan(spec)?) } else { None }
     jet_process_spec_backend_check(spec, jet_process_sandbox.status().available)?
-    if Val(plan) :: launch_plan.as_ref() -> jet_process_verify_launch_plan(spec, plan)?
+    if launch_plan.as_ref() == .Val(plan) -> jet_process_verify_launch_plan(spec, plan)?
     jet_process_terminal_backend_check(spec)?
     if spec.terminal.is_some() {
         return jet_process_terminal_spawn(spec, launch_plan.as_ref().map(fn(plan) { plan.executable_identity.as_str() }), launch_plan.as_ref())
@@ -733,13 +733,13 @@ fn jet_process_drain_reader<R: io.Read + Send>(reader: R?, limit: Usize?, budget
                 match result {
                     Ok(result) -> {
                         if result.is_err() {
-                            if Val(cancel) :: cancel.as_ref() -> cancel.store(true, Ordering.Release)
+                            if cancel.as_ref() == .Val(cancel) -> cancel.store(true, Ordering.Release)
                             jet_process_stop_output(groups.as_ref(), group_pid)
                         }
                         ^result
                     }
                     Err(payload) -> {
-                        if Val(cancel) :: cancel.as_ref() -> cancel.store(true, Ordering.Release)
+                        if cancel.as_ref() == .Val(cancel) -> cancel.store(true, Ordering.Release)
                         jet_process_stop_output(groups.as_ref(), group_pid)
                         resume_unwind(^payload)
                     }
@@ -778,7 +778,7 @@ fn jet_process_collect_pipeline_drains(output_drain: JoinHandle<JetProcessOutput
             Err(error) -> if first_error.is_none() -> first_error = Val(^error)
         }
     }
-    if Val(error) :: first_error -> return Err(^error)
+    if first_error == .Val(error) -> return Err(^error)
     output.exceeded = output_exceeded
     Ok((^output, ^errors))
 }
@@ -930,7 +930,7 @@ fn jet_process_spec_run_direct(spec: &ProcessSpec) -> ProcessReceipt IOError! {
                 return Err(IOError.other(IOOperation.Close, Val("process"), ^error))
             }
         }
-        if Val(error) :: cleanup_error {
+        if cleanup_error == .Val(error) {
             jet_process_publish_topology_id(pid, JetDevtoolsTopologyProcessState.Failed)
             return Err(^error)
         }
@@ -995,7 +995,7 @@ fn jet_process_sandbox_pipeline_spawn(spec: &ProcessSpec, launch_plan: &ProcessP
         jet_process_sandbox.spawn(OSPath.new(&launch_plan.executable_identity), &spec.cmd[1..], cwd,
             output_dir.as_ref(), &environment, sandbox_scope.share_network, sandbox_scope.source_readable, false,
             spec.cmd.first().map(fn(word) { OsStr.new(word.as_str()) }), fn(command) {
-                if Val(stdout) :: input {
+                if input == .Val(stdout) {
                     command.stdin(Stdio.from(^stdout))
                 } else {
                     command.stdin(match &spec.stdin { .Val(mode) -> jet_process_stdio(mode), None -> Stdio.null() })

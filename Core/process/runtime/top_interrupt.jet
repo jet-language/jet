@@ -98,7 +98,7 @@ module jet_os_interrupt_ffi {
             lock :: state.install_lock.lock().unwrap_or_else(fn(error) { error.into_inner() })
             installed := state.installed.load(Ordering.Acquire)
             loop (bit, number, name) in [(JET_SIGNAL_INT, 2, "SIGINT"), (JET_SIGNAL_HUP, 1, "SIGHUP"), (JET_SIGNAL_TERM, 15, "SIGTERM")] {
-                if mask & bit == 0 || installed & bit != 0 -> continue
+                if mask & bit == 0 || installed & bit != 0 -> next
                 previous :: signal(number, jet_interrupt_mark_unix)
                 if previous == USize.MAX -> return Err("could not install the {name} handler")
                 installed |= bit
@@ -179,7 +179,7 @@ fn jet_process_signal_dispatch() -> {
                 callbacks := [JetProcessSignalCallback]{}
                 loop (bit, handler) in [(JET_SIGNAL_TERM, handlers[2].as_ref()), (JET_SIGNAL_HUP, handlers[1].as_ref()), (JET_SIGNAL_INT, handlers[0].as_ref())] {
                     if pending & bit != 0 {
-                        if Val(handler) :: handler {
+                        if handler == .Val(handler) {
                             registered |= bit
                             &callbacks.push(handler.clone())
                         }

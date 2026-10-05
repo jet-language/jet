@@ -382,7 +382,7 @@ module jet_process_windows_sandbox {
                     projection.add_with_inheritance(parent, GENERIC_READ | GENERIC_EXECUTE, SUB_CONTAINERS_AND_OBJECTS_INHERIT, SET_ACCESS, &seen)?
                 }
             }
-            for mount in mounts {
+            loop mount in mounts {
                 projection.add_parent(mount, &seen)?
                 projection.add_with_inheritance(mount, GENERIC_WRITE | DELETE | WRITE_DAC | WRITE_OWNER, SUB_CONTAINERS_AND_OBJECTS_INHERIT, DENY_ACCESS, &seen)?
                 projection.add_with_inheritance(mount, GENERIC_READ | GENERIC_EXECUTE, SUB_CONTAINERS_AND_OBJECTS_INHERIT, SET_ACCESS, &seen)?
@@ -450,7 +450,7 @@ module jet_process_windows_sandbox {
         // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ProcessWindowsSandbox.rs:723
         fn drop(self: &Self) -> Unit {
             for (path, grant) in self.grants.iter().rev() {
-                object_name := match wide(path.to_string_lossy()) { Ok(name) -> name, Err(_) -> continue }
+                object_name := match wide(path.to_string_lossy()) { Ok(name) -> name, Err(_) -> next }
                 old_dacl := null_handle()
                 security_descriptor := null_handle()
                 // GATE #4565: kernel primitive
@@ -458,7 +458,7 @@ module jet_process_windows_sandbox {
                     GetNamedSecurityInfoW(object_name.as_ptr(), SE_FILE_OBJECT, DACL_SECURITY_INFORMATION,
                         mem.Ptr<Sid>.null(), mem.Ptr<Sid>.null(), &old_dacl, mem.Ptr<mem.Ptr<c_void>>.null(), &security_descriptor)
                 }
-                if status != 0 -> continue
+                if status != 0 -> next
                 // GATE #4565: kernel primitive
                 #Unsafe("revoke this guard's SID from the live object ACL and release all successful native allocations") {
                     entry :: ExplicitAccessW{access_permissions: grant.access, access_mode: REVOKE_ACCESS,
@@ -548,10 +548,10 @@ module jet_process_windows_sandbox {
         text := String.new()
         if needs_quotes { text.push('"') }
         slashes := USize{0}
-        for character in value.chars() {
+        loop character in value.chars() {
             if character == '\\' {
                 slashes += 1
-                continue
+                next
             }
             if character == '"' {
                 text.extend(std.iter.repeat('\\').take(slashes * 2 + 1))
@@ -572,7 +572,7 @@ module jet_process_windows_sandbox {
     fn command_line(executable: OSPath, args: View<String>) -> [U16] io.Error! {
         line := quote_arg(executable.to_string_lossy())?
         _ :: line.pop()
-        for arg in args {
+        loop arg in args {
             line.push(' ' as U16)
             quoted := quote_arg(arg)?
             _ :: quoted.pop()
@@ -591,7 +591,7 @@ module jet_process_windows_sandbox {
         block := [U16]{}
         names := values.keys().collect<[&String]>()
         names.sort()
-        for name in names { block.extend(wide("{name}={values[name]}")?) }
+        loop name in names { block.extend(wide("{name}={values[name]}")?) }
         if block.is_empty() { block.extend([U16{0}, U16{0}]) } else { block.push(0) }
         Ok(^block)
     }

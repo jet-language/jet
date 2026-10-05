@@ -202,12 +202,12 @@ fn collect_descendant_pids(root: U32) -> [U32] {
     #Unsafe("walk real /proc child task lists, ignoring unavailable task records as Rust") {
         loop {
             pid :: match &stack.pop() { Val(pid) -> pid, None -> break }
-            if seen.has_key(pid) -> continue
+            if seen.has_key(pid) -> next
             seen[pid] = true
             if pid != root { &out.push(pid) }
-            tasks :: match fs.read_dir(OSPath.new("/proc/{pid}/task")) { Ok(tasks) -> tasks, Err(_) -> continue }
+            tasks :: match fs.read_dir(OSPath.new("/proc/{pid}/task")) { Ok(tasks) -> tasks, Err(_) -> next }
             loop task in tasks.flatten() {
-                text :: match fs.read_to_string(task.path().join("children")) { Ok(text) -> text, Err(_) -> continue }
+                text :: match fs.read_to_string(task.path().join("children")) { Ok(text) -> text, Err(_) -> next }
                 loop token in text.split_whitespace() { if token.parse<U32>() is Ok(child) { &stack.push(child) } }
             }
         }
@@ -219,7 +219,7 @@ fn terminate_descendants(pids: [U32]) -> {
     // GATE #4565: kernel primitive
     #Unsafe("SIGKILL actual pids collected from sandbox wrapper /proc descendants") {
         loop raw in pids {
-            pid :: match I32.try_from(raw) { Ok(pid) -> pid, Err(_) -> continue }
+            pid :: match I32.try_from(raw) { Ok(pid) -> pid, Err(_) -> next }
             _ :: os.kill(pid, PROCESS_GROUP_SIGKILL)
         }
     }
