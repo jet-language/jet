@@ -931,7 +931,7 @@ pub(crate) fn unqualified_import_maps(
             }
         }
     }
-    for (path, rust_mod, function, _, _) in nested_file_function_entries(bundle, module_idx) {
+    for (path, rust_mod, function, _, _, _) in nested_file_function_entries(bundle, module_idx) {
         file_map.insert(format!("{path}.{function}"), (rust_mod, function));
     }
     (inline_map, file_map)
@@ -1543,6 +1543,7 @@ fn nested_file_function_entries(
     String,
     Vec<(AccessConvention, Type)>,
     Option<Type>,
+    Option<ImportedGenericFunction>,
 )> {
     let mut entries = Vec::new();
     for (path, target) in imported_module_paths(bundle, module_idx) {
@@ -1581,6 +1582,7 @@ fn nested_file_function_entries(
                 function.name.clone(),
                 params,
                 ret,
+                imported_generic_function(bundle, target, function),
             ));
         }
     }
@@ -1885,8 +1887,12 @@ pub(crate) fn import_sig_map(
     // D-MOD4: re-exported items (`pub use sub.Item`) must carry the *real*
     // function's parameter conventions under the re-exporting alias, or calls
     // through the re-export would pass by value where a borrow is expected.
-    for (path, _, function, params, _) in nested_file_function_entries(bundle, module_idx) {
-        map.insert((format!("{path}.{function}"), function), params);
+    for (path, _, function, params, _, generic) in nested_file_function_entries(bundle, module_idx) {
+        let key = (format!("{path}.{function}"), function);
+        if let Some(generic) = generic {
+            generics.insert(key.clone(), generic);
+        }
+        map.insert(key, params);
     }
     for ((alias, item), (real_mod, real_fn)) in reexport_call_map(bundle, module_idx) {
         let stem = crate::Syntax::generated_suffix(&real_mod);
@@ -1901,6 +1907,9 @@ pub(crate) fn import_sig_map(
                     if f.name == real_fn
                         && bundle.name_ledger.visible(module_idx, real_idx, &f.name)
                     {
+                        if let Some(generic) = imported_generic_function(bundle, real_idx, f) {
+                            generics.insert((alias.clone(), item.clone()), generic);
+                        }
                         map.insert(
                             (alias.clone(), item.clone()),
                             f.params
@@ -2019,7 +2028,7 @@ pub(crate) fn import_ret_map(
             }
         }
     }
-    for (path, _, function, _, ret) in nested_file_function_entries(bundle, module_idx) {
+    for (path, _, function, _, ret, _) in nested_file_function_entries(bundle, module_idx) {
         map.insert((format!("{path}.{function}"), function), ret);
     }
     for ((alias, item), (real_mod, real_fn)) in reexport_call_map(bundle, module_idx) {

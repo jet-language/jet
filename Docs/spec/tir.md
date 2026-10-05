@@ -47,6 +47,13 @@ type parameters and canonical trait bounds into inference, including explicit
 type arguments. Lowering consumes the checked substitutions and bound evidence;
 it must not reconstruct a forwarded parameter's bounds from its spelling.
 
+Cross-file generic calls lower in the declaring file's context, with canonical
+nominal identities at their boundary. Callable parameter coercions use the
+checked concrete signature, never an unspecialized `fn(T)` template. A generic
+target without a complete checked instance is a lowering invariant failure;
+it cannot fall back to the template's ordinary function name. The executable
+example is [`package_members`](../../Examples/features/modules/package_members/run.jet).
+
 Both executable lenses consume the channel read-only. A missing field means
 “not proven”; it never authorizes codegen to re-derive sema policy. An optimized
 lens may derive a private SSA form internally, but that form is not a third
