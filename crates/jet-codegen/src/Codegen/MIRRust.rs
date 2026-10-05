@@ -24842,9 +24842,11 @@ impl<'a> RustEmitter<'a> {
             MirTypeKind::Char => format!(
                 "match {capture} {{ JetPatternCapture::Text(value) => {{ let mut chars = value.chars(); match (chars.next(), chars.next()) {{ (Some(value), None) => value, _ => unreachable!(\"MIR char capture contains more than one scalar\") }} }}, _ => unreachable!(\"MIR char capture type mismatch\") }}"
             ),
-            MirTypeKind::Int
-            | MirTypeKind::IntN { .. }
-            | MirTypeKind::InlineRange { .. }
+            MirTypeKind::Int => format!(
+                "match {capture} {{ JetPatternCapture::Int(value) => jet_foundation::Numeric::JetInt::from_i64(value), _ => unreachable!(\"MIR integer capture type mismatch\") }}"
+            ),
+            MirTypeKind::InlineRange { base, .. } => self.pattern_capture_value(base, capture),
+            MirTypeKind::IntN { .. }
             | MirTypeKind::Measure(_) => format!(
                 "match {capture} {{ JetPatternCapture::Int(value) => value as {}, _ => unreachable!(\"MIR integer capture type mismatch\") }}",
                 self.rust_type(ty)
@@ -25540,6 +25542,7 @@ impl<'a> RustEmitter<'a> {
                                 || matches!(
                                     route.member.as_str(),
                                     "reader.seek" | "reader.skip" | "reader.take"
+                                        | "cursor.skip_ws" | "cursor.take_until"
                                 ));
                         let access = if reader_consumes
                             || (route.module == "core.transaction" && route.member == "commit")
@@ -29581,6 +29584,19 @@ impl<'a> RustEmitter<'a> {
                 );
             }
         }
+        let symbol = self.prelude_symbol(call);
+        let adapter = self.exact_prelude_adapter(&symbol).filter(|(_, positions)| {
+            positions.iter().all(|index| {
+                let value = if *index == 0 {
+                    Some(receiver)
+                } else {
+                    args.get(*index - 1).copied()
+                };
+                value.is_some_and(|value| {
+                    matches!(self.value_type(function, value).kind(), MirTypeKind::Int)
+                })
+            })
+        });
         // `String.bytes()` on an owned rvalue consumes the String, matching
         // the checked ownership fact instead of cloning it through the
         // generic Prelude call path.
@@ -29614,7 +29630,9 @@ impl<'a> RustEmitter<'a> {
                 );
             }
             self.place_reference(function, place, MirAccess::Write)
-        } else if row.signature.borrow_mask[0] {
+        } else if row.signature.borrow_mask[0]
+            || adapter.is_some_and(|(_, positions)| positions.contains(&0))
+        {
             if is_view_type(self.value_type(function, receiver_value))
                 && !matches!(
                     self.value_definition(function, receiver_value),
@@ -29713,7 +29731,18 @@ impl<'a> RustEmitter<'a> {
         }
         let mut values = vec![receiver];
         values.extend(args.iter().enumerate().map(|(index, value_id)| {
-            let borrowed = row.signature.borrow_mask[index + 1];
+            let borrowed = row.signature.borrow_mask[index + 1]
+                || adapter.is_some_and(|(_, positions)| positions.contains(&(index + 1)));
+            // These generic kernels invoke a native closure, not the Jet
+            // callable carrier. Their input ownership is part of the host ABI.
+            let host_inputs: Option<&[bool]> = match (row.symbol.name(), index) {
+                ("jet_map_merge_with", 1) => Some(&[true, false, false]),
+                ("jet_iter_split_at", 1) => Some(&[false, false]),
+                _ => None,
+            };
+            if let Some(host_inputs) = host_inputs {
+                return self.host_callback_with_inputs(function, *value_id, host_inputs);
+            }
             let value = if borrowed {
                 if literal_string_iter_route {
                     self.literal_string_value(function, *value_id)
@@ -29768,14 +29797,11 @@ impl<'a> RustEmitter<'a> {
                 value
             }
         }));
-        // An exact adapter that changes only the result carrier (`Int.parse`
-        // returns an owned `Int`, never a packed native word) applies to this
-        // receiver route exactly as it does to a direct Prelude call.
-        let symbol = self.prelude_symbol(call);
-        let symbol = match self.exact_prelude_adapter(&symbol) {
-            Some((name, [])) => format!("{}{name}", self.config.root_prefix),
-            _ => symbol,
-        };
+        // Receiver routes obey the same exact carrier ABI as direct calls,
+        // including argument borrows (for example Int.from_radix's radix).
+        let symbol = adapter
+            .map(|(name, _)| format!("{}{name}", self.config.root_prefix))
+            .unwrap_or(symbol);
         format!("{symbol}({})", values.join(", "))
     }
 

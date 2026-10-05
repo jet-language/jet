@@ -4551,14 +4551,14 @@ fn jet_rust_emit_semantic_values(ctx: &JetRustEmitContext, function: MIRFunction
 
 // MIRRust prelude_handle_method: a borrowed operand lends the place it reads
 // (jet_rust_emit_borrowed_value_reference), so a host handle with no `Clone`
-// is never copied into a value slot first. A reader cursor and a transaction
-// commit lend their receiver mutably; an address lends with its own access.
+// is never copied into a value slot first. Reader and text cursor operations
+// and transaction commits lend their receiver mutably; addresses lend with their own access.
 fn jet_rust_emit_handle_method_values(ctx: &JetRustEmitContext, function: MIRFunction, call: MIRPreludeCallID, receiver: MIRValueID, args: [MIRValueID]) -> String Never! {
     values := [MIRValueID]{receiver}
     loop arg in args -> &values.push(arg)
     row :: jet_rust_emit_prelude_route(ctx, call, false) ?? return jet_rust_emit_semantic_values(&ctx, function, call, values)
     if values.len() < row.signature.arity || values.len() > row.signature.max_arity || row.signature.borrow_mask.len() != values.len() -> return jet_rust_emit_semantic_values(&ctx, function, call, values)
-    reader_route :: row.module_name == "core.handle" && (row.member.starts_with("reader.read_") || row.member == "reader.seek" || row.member == "reader.skip" || row.member == "reader.take")
+    reader_route :: row.module_name == "core.handle" && (row.member.starts_with("reader.read_") || row.member == "reader.seek" || row.member == "reader.skip" || row.member == "reader.take" || row.member == "cursor.skip_ws" || row.member == "cursor.take_until")
     commit_route :: row.module_name == "core.transaction" && row.member == "commit"
     rendered := [String]{}
     loop (index, value) in values {
@@ -4655,6 +4655,21 @@ fn jet_rust_emit_builtin_method_values(ctx: &JetRustEmitContext, function: MIRFu
     // or two bounds; its source location is not a MIR operand.
     view_new :: row.family == MIRPreludeFamily.BuiltinMethod && row.module_name == "core.builtin" && (row.member == "view_new" || row.member == "view_mut_new")
     if !view_new && row.signature.borrow_mask.len() != values.len() -> return jet_rust_emit_semantic_values(&ctx, function, call, values)
+    source_symbol :: jet_rust_emit_prelude_symbol(&ctx, call)
+    exact_symbol := jet_rust_emit_exact_adapter_target(ctx.config.root_prefix, source_symbol)
+    mask := row.signature.borrow_mask
+    if exact_symbol != source_symbol {
+        positions :: jet_rust_emit_exact_adapter_positions(exact_symbol)
+        loop position in positions {
+            if position >= values.len() || jet_rust_emit_value_type(ctx, function, values[position]).kind != .Int {
+                exact_symbol = ~source_symbol
+                break
+            }
+        }
+        if exact_symbol != source_symbol {
+            loop position in positions -> mask[position] = true
+        }
+    }
     // MIRRust prelude_values_with_receiver: `Int.to_radix(base)` is checked `String`; the exact Int kernel takes both owned Ints by reference and its invalid-radix failure stops the program like any other Int fault.
     if row.module_name == "core.builtin" && row.member == "int_to_radix" && args.len() == 1 {
         root :: ~ctx.config.root_prefix
@@ -4669,7 +4684,7 @@ fn jet_rust_emit_builtin_method_values(ctx: &JetRustEmitContext, function: MIRFu
             return "unreachable!(\"MIR builtin mutating receiver\")"
         }
         &rendered.push(jet_rust_emit_place_reference(&ctx, function, place, MIRAccess.Write))
-    } else if row.signature.borrow_mask[0] {
+    } else if mask[0] {
         reference := jet_rust_emit_borrowed_value_reference(&ctx, function, receiver, MIRAccess.Read)
         if jet_rust_emit_is_view_type(jet_rust_emit_value_type(ctx, function, receiver)) {
             place_origin := false
@@ -4708,7 +4723,16 @@ fn jet_rust_emit_builtin_method_values(ctx: &JetRustEmitContext, function: MIRFu
         routed = "{symbol}({rendered[0]}, {builder})"
     } else {
         loop (index, value) in args {
-            borrowed :: row.signature.borrow_mask[index + 1]
+            borrowed :: mask[index + 1]
+            // Native callback kernels lend map keys but own conflict values
+            // and split halves; adapt the Jet callable using that host ABI.
+            host_inputs := None:[Bool]?
+            if mir_symbol_name(row.symbol) == "jet_map_merge_with" && index == 1 -> host_inputs = Val([Bool]{true, false, false})
+            if mir_symbol_name(row.symbol) == "jet_iter_split_at" && index == 1 -> host_inputs = Val([Bool]{false, false})
+            if host_inputs == .Val(inputs) {
+                &rendered.push(jet_rust_emit_host_callback_with_inputs(&ctx, function, value, inputs))
+                next
+            }
             if jet_rust_emit_builtin_native_int_arg(row, index, borrowed, jet_rust_emit_value_type(ctx, function, value)) {
                 consumed :: jet_rust_emit_value_consume(ctx, function, value)
                 &rendered.push(jet_rust_emit_native_int_argument(&ctx, consumed, None))
@@ -4720,7 +4744,7 @@ fn jet_rust_emit_builtin_method_values(ctx: &JetRustEmitContext, function: MIRFu
                 }
             }
         }
-        routed = jet_rust_emit_route_call(&ctx, call, rendered)
+        routed = "{exact_symbol}({rendered.join(", ")})"
     }
     emitted :: jet_rust_emit_builtin_optional_result(&ctx, row, ^routed)
     if result == .Val(value) {
