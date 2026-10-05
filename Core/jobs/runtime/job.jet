@@ -175,7 +175,7 @@ impl JetJobEventSink for JetJobEventCollector {
     pub fn publish(self, event: ^JetDevtoolsEvent) -> {
         // GATE #4565: kernel primitive
         #Unsafe("bounded FIFO mutation under event collector mutex") {
-            events := self.events.lock().expect("job event collector poisoned")
+            events := self.events.lock() ?? panic("job event collector poisoned")
             if events.len() == self.capacity -> _ :: events.pop_front()
             events.push_back(^event)
         }
@@ -230,7 +230,7 @@ impl JetJobDirectoryGuard {
     fn enter(directory: String?) -> JetJobDirectoryGuard {
         // GATE #4565: kernel primitive
         #Unsafe("hold cwd lock until guard restores the previous process directory") {
-            lock :: JET_JOB_CWD_LOCK.lock().expect("job cwd lock poisoned")
+            lock :: JET_JOB_CWD_LOCK.lock() ?? panic("job cwd lock poisoned")
             previous :: directory.and_then(_ -> env.current_dir().ok())
             if directory == .Val(path) -> _ :: env.set_current_dir(path)
             JetJobDirectoryGuard{previous: previous, lock: Val(^lock)}
@@ -310,14 +310,14 @@ fn jet_job_declared_paths(job: JetJobSpec, pattern: String) -> [OSPath] {
         while pending.pop() == .Val(directory) {
             entries_result :: fs.read_dir(directory)
             if entries_result == .Err(_) -> next
-            entries := entries_result.unwrap().filter_map(entry -> entry.ok()).collect()
+            entries := (entries_result ?? panic("unwrap failed")).filter_map(entry -> entry.ok()).collect()
             &entries.sort_by_key(entry -> entry.path())
             loop entry in entries {
                 path :: entry.path()
                 if path.is_dir() -> &pending.push(~path)
                 relative_result :: path.strip_prefix(base)
                 if relative_result == .Err(_) -> next
-                relative :: relative_result.unwrap().to_string_lossy().replace('\\', "/")
+                relative :: (relative_result ?? panic("unwrap failed")).to_string_lossy().replace('\\', "/")
                 if jet_job_glob_match(normalized, relative) -> &paths.push(^path)
             }
         }
@@ -359,7 +359,7 @@ fn jet_job_hash_path(path: OSPath, hash: &U64) -> {
             jet_job_hash_bytes(&hash, "<missing>".as_bytes())
             return
         }
-        metadata :: result.unwrap()
+        metadata :: result ?? panic("unwrap failed")
         if metadata.file_type().is_symlink() {
             jet_job_hash_bytes(&hash, "<symlink>".as_bytes())
             if fs.read_link(path) == .Ok(target_path) -> jet_job_hash_bytes(&hash, target_path.to_string_lossy().as_bytes())
@@ -712,7 +712,7 @@ pub fn jet_job_service_tick_specs_retained<F: Clone + Send + Sync, G: Send>(jobs
 where F: fn() -> G? Err! {
     // GATE #4565: kernel primitive
     #Unsafe("retain clocks mutex through tick exactly as shared Rust authority") {
-        clocks := JET_JOB_SERVICE_CLOCKS.lock().expect("job service clocks poisoned")
+        clocks := JET_JOB_SERVICE_CLOCKS.lock() ?? panic("job service clocks poisoned")
         clock := clocks.entry(program).or_insert_with(JetJobClock.new)
         jet_job_service_tick_specs_with_sink(&clock, jobs, program, jet_job_event_sink(), scope_enter)
     }
