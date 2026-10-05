@@ -79,7 +79,7 @@ impl JetWsConn {
             role: role, closed: Cell.new(false), max_message: JET_WS_MAX_MESSAGE, pending: RefCell.new(None)
         }
         writer :: conn.live_writer.clone()
-        masked :: conn.role is .Client
+        masked :: conn.role == .Client
         conn.live_transport_id = jet_app_ws_register(Arc.new(fn(payload) {
             stream := match writer.lock() { Ok(stream) -> ^stream, Err(_) -> return }
             _ :: jet_ws_write_frame(&*stream, 0x1, payload.as_bytes(), masked)
@@ -110,7 +110,11 @@ fn jet_ws_sha1(data: &[U8]) -> [U8; 20] {
         w := [U32; 80].filled(0)
         for (i, word) in chunk.chunks_exact(4).enumerate() { w[i] = U32.from_be_bytes([word[0], word[1], word[2], word[3]]) }
         for i in 16..80 { w[i] = rotl(w[i - 3] ^ w[i - 8] ^ w[i - 14] ^ w[i - 16], 1) }
-        a := h0; b := h1; c := h2; d := h3; e := h4
+        a := h0
+        b := h1
+        c := h2
+        d := h3
+        e := h4
         for i in 0..80 {
             (f, k) :: match i {
                 0..=19 -> ((b & c) | ((!b) & d), U32{0x5A827999})
@@ -119,10 +123,17 @@ fn jet_ws_sha1(data: &[U8]) -> [U8; 20] {
                 _ -> (b ^ c ^ d, U32{0xCA62C1D6})
             }
             temp :: rotl(a, 5).wrapping_add(f).wrapping_add(e).wrapping_add(k).wrapping_add(w[i])
-            e = d; d = c; c = rotl(b, 30); b = a; a = temp
+            e = d
+            d = c
+            c = rotl(b, 30)
+            b = a
+            a = temp
         }
-        h0 = h0.wrapping_add(a); h1 = h1.wrapping_add(b); h2 = h2.wrapping_add(c)
-        h3 = h3.wrapping_add(d); h4 = h4.wrapping_add(e)
+        h0 = h0.wrapping_add(a)
+        h1 = h1.wrapping_add(b)
+        h2 = h2.wrapping_add(c)
+        h3 = h3.wrapping_add(d)
+        h4 = h4.wrapping_add(e)
     }
     out := [U8; 20].filled(0)
     for (index, value) in [h0, h1, h2, h3, h4].into_iter().enumerate() {
@@ -148,7 +159,8 @@ fn jet_ws_base64(bytes: &[U8]) -> String {
         n :: (bytes[index] as U32) << 16
         out.push(TABLE[((n >> 18) & 63) as USize] as Char)
         out.push(TABLE[((n >> 12) & 63) as USize] as Char)
-        out.push('='); out.push('=')
+        out.push('=')
+        out.push('=')
     } else if rest == 2 {
         n :: ((bytes[index] as U32) << 16) | ((bytes[index + 1] as U32) << 8)
         out.push(TABLE[((n >> 18) & 63) as USize] as Char)
@@ -195,13 +207,13 @@ fn jet_ws_parse_url(url: &String) -> (String, U16, String) JetWsError! {
         None -> (rest, "/")
     }
     if authority.is_empty() || authority.contains('@') -> return Err(JetWsError.InvalidURL)
-    (host, port) :: if authority.strip_prefix('[') is Val(host) {
+    (host, port) :: if authority.strip_prefix('[') == .Val(host) {
         (host, rest) :: host.split_once(']').ok_or(JetWsError.InvalidURL)?
         port :: if rest.is_empty() { U16{80} } else {
             rest.strip_prefix(':').ok_or(JetWsError.InvalidURL)?.parse<U16>().map_err(fn(_) { JetWsError.InvalidURL })?
         }
         (host.to_string(), port)
-    } else if authority.rsplit_once(':') is Val((host, port)) {
+    } else if authority.rsplit_once(':') == .Val((host, port)) {
         if host.contains(':') -> return Err(JetWsError.InvalidURL)
         (host.to_string(), port.parse<U16>().map_err(fn(_) { JetWsError.InvalidURL })?)
     } else { (authority.to_string(), U16{80}) }
@@ -293,16 +305,16 @@ fn jet_ws_read_frame(stream: &TcpStream, expect_masked: Bool, max_message: USize
     } else { None }
     payload := [U8].filled(len, 0)
     if len > 0 { jet_ws_read_exact(stream, &payload)? }
-    if mask is Val(mask) { jet_ws_apply_mask(&payload, mask) }
+    if mask == .Val(mask) { jet_ws_apply_mask(&payload, mask) }
     Ok((opcode, fin, ^payload))
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WsClient.rs:426
 pub fn jet_ws_send_message(conn: &JetWsConn, opcode: U8, payload: &[U8]) -> () JetWsError! {
     if conn.closed.get() -> return Err(JetWsError.Closed)
-    if jet_deadline_remaining_ms() is Val(remaining) {
+    if jet_deadline_remaining_ms() == .Val(remaining) {
         if remaining <= 0 -> return Err(JetWsError.Cancelled)
     }
-    masked :: conn.role is .Client
+    masked :: conn.role == .Client
     // GATE #4565: kernel primitive
     stream := #Unsafe("writer mutex excludes interleaved frames on shared native transport") { conn.live_writer.lock() }.map_err(fn(_) { JetWsError.IO{operation: "lock websocket writer"} })?
     jet_ws_write_frame(&*stream, opcode, payload, masked)
@@ -328,13 +340,13 @@ pub fn jet_ws_close(conn: &JetWsConn, code: I64, reason: &String) -> () JetWsErr
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WsClient.rs:476
 pub fn jet_ws_recv(conn: &JetWsConn) -> JetWsMessage JetWsError! {
-    if conn.pending.borrow_mut().take() is Val(message) -> return Ok(^message)
+    if conn.pending.borrow_mut().take() == .Val(message) -> return Ok(^message)
     if conn.closed.get() -> return Err(JetWsError.Closed)
-    expect_masked :: conn.role is .Server
+    expect_masked :: conn.role == .Server
     assembled := [U8]{}
     data_opcode := None as U8?
     loop {
-        if jet_deadline_remaining_ms() is Val(remaining) {
+        if jet_deadline_remaining_ms() == .Val(remaining) {
             if remaining <= 0 -> return Err(JetWsError.Cancelled)
         }
         (opcode, fin, payload) :: jet_ws_read_frame(&*conn.stream.borrow_mut(), expect_masked, conn.max_message)?
@@ -405,12 +417,14 @@ pub fn jet_ws_connect(url: &String) -> JetWsConn JetWsError! {
         if read == 0 -> return Err(JetWsError.InvalidHandshake)
         response.extend_from_slice(&chunk[..read])
         if response.len() > 16 * 1024 -> return Err(JetWsError.InvalidHandshake)
-        if response.windows(4).position(fn(window) { window == b"\r\n\r\n" }) is Val(end) {
+        if response.windows(4).position(fn(window) { window == b"\r\n\r\n" }) == .Val(end) {
             header :: str.from_utf8(&response[..end]).map_err(fn(_) { JetWsError.InvalidHandshake })?
             lines := header.split("\r\n")
             status :: lines.next().ok_or(JetWsError.InvalidHandshake)?
             if !status.starts_with("HTTP/1.1 101") && !status.starts_with("HTTP/1.0 101") -> return Err(JetWsError.InvalidHandshake)
-            upgrade_ok := false; connection_ok := false; accept_ok := false
+            upgrade_ok := false
+            connection_ok := false
+            accept_ok := false
             expected :: jet_ws_accept_key(&key)
             for line in lines {
                 (name, value) :: line.split_once(':') ?? continue
@@ -426,11 +440,11 @@ pub fn jet_ws_connect(url: &String) -> JetWsConn JetWsError! {
     JetWsConn.from_stream(^stream, JetWsRole.Client)
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WsClient.rs:665
-pub fn jet_ws_message_is_text(message: &JetWsMessage) -> Bool { message is .Text(_) }
+pub fn jet_ws_message_is_text(message: &JetWsMessage) -> Bool { message == .Text(_) }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WsClient.rs:669
-pub fn jet_ws_message_is_binary(message: &JetWsMessage) -> Bool { message is .Binary(_) }
+pub fn jet_ws_message_is_binary(message: &JetWsMessage) -> Bool { message == .Binary(_) }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WsClient.rs:673
-pub fn jet_ws_message_is_close(message: &JetWsMessage) -> Bool { message is .Close{..} }
+pub fn jet_ws_message_is_close(message: &JetWsMessage) -> Bool { message == .Close{..} }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WsClient.rs:677
 pub fn jet_ws_message_text(message: &JetWsMessage) -> String JetWsError! {
     match message { .Text(text) -> Ok(text.clone()), _ -> Err(JetWsError.Protocol) }

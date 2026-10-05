@@ -783,13 +783,19 @@ fn jet_net_udp_scheduler_ready_wait(socket: &JetUDPSocket, read: Bool, write: Bo
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:1363
 fn jet_net_tls_scheduler_wait(stream: &JetTLSStream, fallback_read: Bool, fallback_write: Bool, operation: String) -> () JetNetError! {
     (read, write) := jet_net_tls_result(stream.wants(stream.id), operation)?
-    if !read && !write { read = fallback_read; write = fallback_write }
+    if !read && !write {
+        read = fallback_read
+        write = fallback_write
+    }
     jet_net_scheduler_wait(&stream.socket, read, write, operation)
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:1377
 fn jet_net_tls_io_scheduler_wait(stream: &JetTLSStream, fallback_read: Bool, fallback_write: Bool, operation: IOOperation) -> () IOError! {
     (read, write) := jet_net_tls_io_result(stream.wants(stream.id), operation)?
-    if !read && !write { read = fallback_read; write = fallback_write }
+    if !read && !write {
+        read = fallback_read
+        write = fallback_write
+    }
     label :: match operation { .Read -> "tls read", .Write -> "tls write", .Close -> "tls close", _ -> "tls I/O" }
     jet_net_scheduler_wait(&stream.socket, read, write, label).map_err(jet_net_to_io_error)
 }

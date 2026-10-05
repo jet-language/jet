@@ -102,11 +102,17 @@ impl JetURLParts {
         if raw_host.is_none() && self.typed_host.is_none() -> return ""
         out := ""
         info :: self.userinfo()
-        if !info.is_empty() { &out.push_str(info); &out.push('@') }
+        if !info.is_empty() {
+            &out.push_str(info)
+            &out.push('@')
+        }
         if Val(parts) = self.typed_host {
             &out.push_str(jet_url_render_typed_parts(parts, false))
         } else if Val(host) = raw_host { &out.push_str(host) }
-        if Val(port) = self.port { &out.push(':'); &out.push_str(port.to_string()) }
+        if Val(port) = self.port {
+            &out.push(':')
+            &out.push_str(port.to_string())
+        }
         out
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/UrlMime.rs:190
@@ -210,14 +216,22 @@ impl JetURLParts {
             &out.push_str("//")
             if Val(user) = self.username {
                 &out.push_str(jet_url_percent_encode(user, false))
-                if Val(pass) = self.password { &out.push(':'); &out.push_str(jet_url_percent_encode(pass, false)) }
+                if Val(pass) = self.password {
+                    &out.push(':')
+                    &out.push_str(jet_url_percent_encode(pass, false))
+                }
                 &out.push('@')
             } else if Val(pass) = self.password {
-                &out.push(':'); &out.push_str(jet_url_percent_encode(pass, false)); &out.push('@')
+                &out.push(':')
+                &out.push_str(jet_url_percent_encode(pass, false))
+                &out.push('@')
             }
             if Val(parts) = self.typed_host -> &out.push_str(jet_url_render_typed_parts(parts, false))
             else -> &out.push_str(host)
-            if Val(port) = self.port { &out.push(':'); &out.push_str(port.to_string()) }
+            if Val(port) = self.port {
+                &out.push(':')
+                &out.push_str(port.to_string())
+            }
         }
         if self.scheme == "data" && self.host.is_none() {
             if Val(parts) = self.typed_path -> &out.push_str(jet_url_render_typed_data_parts(parts))
@@ -225,8 +239,14 @@ impl JetURLParts {
         } else if Val(parts) = self.typed_path {
             &out.push_str(jet_url_render_typed_parts(parts, true))
         } else { &out.push_str(jet_url_percent_encode(self.path, true)) }
-        if !self.query.is_empty() { &out.push('?'); &out.push_str(jet_url_render_query(self.query)) }
-        if Val(fragment) = self.fragment { &out.push('#'); &out.push_str(jet_url_percent_encode(fragment, false)) }
+        if !self.query.is_empty() {
+            &out.push('?')
+            &out.push_str(jet_url_render_query(self.query))
+        }
+        if Val(fragment) = self.fragment {
+            &out.push('#')
+            &out.push_str(jet_url_percent_encode(fragment, false))
+        }
         out
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/UrlMime.rs:367
@@ -448,7 +468,10 @@ fn jet_url_render_typed_data_parts(parts: [(String, Bool)]) -> String {
             if hole -> &out.push_str(jet_url_percent_encode(part, false)) else -> &out.push_str(part)
             continue
         }
-        if hole { &out.push_str(jet_url_percent_encode(part, false)); continue }
+        if hole {
+            &out.push_str(jet_url_percent_encode(part, false))
+            continue
+        }
         if Val(comma) = part.find(',') {
             &out.push_str(jet_url_render_data_mime_literal(part[..comma]))
             &out.push(',')
@@ -537,7 +560,10 @@ fn jet_url_typed_path_segments(parts: [(String, Bool)]) -> [String] {
     segments := [String]{}
     current := ""
     loop (part, hole) in parts {
-        if hole { &current.push_str(part); continue }
+        if hole {
+            &current.push_str(part)
+            continue
+        }
         loop (index, piece) in part.split('/').enumerate() {
             if index > 0 && !current.is_empty() {
                 &segments.push(^current)
@@ -677,7 +703,10 @@ fn jet_punycode_adapt(delta_input: U32, points: U32, first: Bool) -> U32 {
     delta := if first -> delta_input / 700 else -> delta_input / 2
     delta += delta / points
     k := U32{0}
-    loop delta > ((36 - 1) * 26) / 2 { delta /= 36 - 1; k += 36 }
+    loop delta > ((36 - 1) * 26) / 2 {
+        delta /= 36 - 1
+        k += 36
+    }
     k + (((36 - 1 + 1) * delta) / (delta + 38))
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/UrlMime.rs:1116
@@ -765,7 +794,10 @@ pub fn jet_url_percent_decode_str(s: String) -> String Err! {
             byte :: U8.from_str_radix(hex, 16).map_err(_ -> "invalid percent escape `%{hex}`")?
             &out.push(byte)
             i += 3
-        } else { &out.push(bytes[i]); i += 1 }
+        } else {
+            &out.push(bytes[i])
+            i += 1
+        }
     }
     String.from_utf8(^out).map_err(_ -> "percent escape is not valid UTF-8")
 }

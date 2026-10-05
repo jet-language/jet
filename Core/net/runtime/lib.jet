@@ -114,7 +114,10 @@ fn open_scoped_file(raw_path: String, base_dir: OSPath) -> File FoundationFetchE
             }
             Ok(^file)
         }()
-        if operation == { .Ok(file) -> return Ok(^file); .Err(error) -> return Err(FoundationFetchError.IO(error.to_string())) }
+        if operation == {
+            .Ok(file) -> return Ok(^file)
+            .Err(error) -> return Err(FoundationFetchError.IO(error.to_string()))
+        }
     }
     if target.selected_family() == .Windows {
         operation :: fn() -> File IOError! {
@@ -123,7 +126,10 @@ fn open_scoped_file(raw_path: String, base_dir: OSPath) -> File FoundationFetchE
             if !requested.is_absolute() -> requested = root.join(requested)
             windows_open_file(root, requested)
         }()
-        if operation == { .Ok(file) -> return Ok(^file); .Err(error) -> return Err(FoundationFetchError.IO(error.to_string())) }
+        if operation == {
+            .Ok(file) -> return Ok(^file)
+            .Err(error) -> return Err(FoundationFetchError.IO(error.to_string()))
+        }
     }
     Err(FoundationFetchError.IO("descriptor-relative no-follow file access is unavailable on this platform"))
 }
@@ -204,7 +210,11 @@ struct FileStandardInfo {
 // GetFileAttributesW/GetFinalPathNameByHandleW/GetFileInformationByHandleEx
 // are canonical Win32 foreign declarations at core.sys.host.windows_file.
 // Rust: crates/jet-net/src/lib.rs:487
-fn wide_path(path: OSPath) -> [U16] Never! { wide := path.as_os_str().encode_wide().collect(); wide.push(U16{0}); ^wide }
+fn wide_path(path: OSPath) -> [U16] Never! {
+    wide := path.as_os_str().encode_wide().collect()
+    wide.push(U16{0})
+    ^wide
+}
 // Rust: crates/jet-net/src/lib.rs:491
 fn is_reparse(path: OSPath) -> Bool IOError! {
     wide :: wide_path(path)
@@ -318,7 +328,9 @@ pub fn is_public_ip(ip: IpAddr) -> Bool Never! {
     if ip == {
         .V4(value) -> {
             octets :: value.octets()
-            a :: Int.from_u8(octets[0]); b :: Int.from_u8(octets[1]); c :: Int.from_u8(octets[2])
+            a :: Int.from_u8(octets[0])
+            b :: Int.from_u8(octets[1])
+            c :: Int.from_u8(octets[2])
             !(a == 0 || a == 10 || (a == 100 && (b & 192) == 64) || a == 127
                 || (a == 169 && b == 254) || (a == 172 && b >= 16 && b <= 31)
                 || (a == 192 && b == 0 && c == 0) || (a == 192 && b == 0 && c == 2)
@@ -328,7 +340,8 @@ pub fn is_public_ip(ip: IpAddr) -> Bool Never! {
         .V6(value) -> {
             if value.to_ipv4_mapped() == .Val(v4) -> return is_public_ip(IpAddr.V4(v4))
             segments :: value.segments()
-            first :: Int.from_u16(segments[0]); second :: Int.from_u16(segments[1])
+            first :: Int.from_u16(segments[0])
+            second :: Int.from_u16(segments[1])
             (first & 0xe000) == 0x2000 && !value.is_unspecified() && !value.is_loopback() && !value.is_multicast()
                 && (first & 0xfe00) != 0xfc00 && (first & 0xffc0) != 0xfe80 && !(first == 0x2001 && second == 0x0db8)
         }

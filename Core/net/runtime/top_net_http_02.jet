@@ -35,13 +35,13 @@ fn jet_net_tls_peer_identity(stream: &JetTLSStream) -> JetTLSPeerIdentity {
 // GATE #4565: kernel primitive
 #Unsafe("invoke audited TLS callbacks and wait on the existing raw socket scheduler boundary")
 fn jet_net_tls_ready(stream: &JetTLSStream, interest: JetNetReadyInterest, deadline: &JetDuration) -> JetNetReady IOError! {
-    operation :: if interest is .Write { IOOperation.Write } else { IOOperation.Read }
+    operation :: if interest == .Write { IOOperation.Write } else { IOOperation.Read }
     _deadline :: jet_net_explicit_deadline(deadline, "tls ready").map_err(jet_net_to_io_error)?
-    if jet_deadline_remaining_ms() is Val(ms) && ms <= 0 {
+    if jet_deadline_remaining_ms() == .Val(ms) && ms <= 0 {
         return Err(jet_net_to_io_error(jet_net_deadline_timeout("tls ready")))
     }
-    want_read :: interest is .Read || interest is .ReadWrite
-    want_write :: interest is .Write || interest is .ReadWrite
+    want_read :: interest == .Read || interest == .ReadWrite
+    want_write :: interest == .Write || interest == .ReadWrite
     loop {
         readable :: want_read && jet_net_tls_io_result((stream.read_ready)(stream.id), operation)?
         if readable -> return Ok(JetNetReady{readable: true, writable: false})
@@ -56,7 +56,7 @@ fn jet_net_tls_ready(stream: &JetTLSStream, interest: JetNetReadyInterest, deadl
 // GATE #4565: kernel primitive
 #Unsafe("apply actual TCP read/write timeouts from the canonical ambient deadline")
 fn jet_net_apply_tcp_deadlines(stream: &TcpStream, op: String) -> Unit JetNetError! {
-    if jet_deadline_remaining_ms() is Val(remaining) {
+    if jet_deadline_remaining_ms() == .Val(remaining) {
         if remaining <= 0 -> return Err(jet_net_deadline_timeout(op))
         dur :: Val(NativeDuration.from_millis(remaining as U64))
         stream.set_read_timeout(dur).map_err(fn(error) { jet_net_io_error("{op} read timeout", None, ^error) })?
@@ -141,7 +141,7 @@ fn jet_net_tcp_connect_happy(host: String, port: I64, ms: I64) -> JetTCPStream J
         JetNetError.InvalidInput(jet_net_detail("tcp connect", Val(host.clone()), None, ^message, None))
     })?
     _deadline :: jet_net_operation_deadline(Val(ms))
-    if jet_deadline_remaining_ms() is Val(remaining) && remaining <= 0 -> return Err(jet_net_deadline_timeout("tcp connect"))
+    if jet_deadline_remaining_ms() == .Val(remaining) && remaining <= 0 -> return Err(jet_net_deadline_timeout("tcp connect"))
     query :: host.clone()
     (resolve_sender, resolve_receiver) :: mpsc.sync_channel(1)
     _ :: thread.spawn(fn() {
@@ -246,7 +246,7 @@ fn jet_net_tcp_accept(listener: &JetTCPListener) -> JetTCPStream JetNetError! {
             match listener.inner.accept() {
                 Ok((stream, _)) -> return jet_net_tcp_stream(^stream)
                 Err(error) if error.kind() == ErrorKind.WouldBlock || error.kind() == ErrorKind.Interrupted -> {
-                    if jet_deadline_remaining_ms() is Val(ms) && ms <= 0 -> return Err(jet_net_deadline_timeout("tcp accept"))
+                    if jet_deadline_remaining_ms() == .Val(ms) && ms <= 0 -> return Err(jet_net_deadline_timeout("tcp accept"))
                     if jet_scheduler_wait_point_cancelled() -> return Err(JetNetError.Cancelled(jet_net_detail("tcp accept", None, None, "tcp accept cancelled", None)))
                     thread.sleep(NativeDuration.from_millis(2))
                 }
@@ -299,8 +299,11 @@ fn jet_net_tcp_read_bytes(stream: &JetTCPStream, limit: I64) -> [U8] JetNetError
     bytes := [U8].repeat(0, cap)
     loop {
         match &stream.inner.read(&bytes) {
-            Ok(n) -> { &bytes.truncate(n); return Ok(^bytes) }
-            Err(error) if error.kind() is .WouldBlock -> jet_net_scheduler_wait(&stream.inner, true, false, "tcp read")?
+            Ok(n) -> {
+                &bytes.truncate(n)
+                return Ok(^bytes)
+            }
+            Err(error) if error.kind() == .WouldBlock -> jet_net_scheduler_wait(&stream.inner, true, false, "tcp read")?
             Err(error) -> return Err(jet_net_io_error("tcp read", None, ^error))
         }
     }
@@ -331,7 +334,7 @@ fn jet_net_tcp_write_bytes_with_current_deadline(stream: &JetTCPStream, data: &[
     loop {
         match &stream.inner.write(data) {
             Ok(n) -> return Ok(n as I64)
-            Err(error) if error.kind() is .WouldBlock -> jet_net_scheduler_wait(&stream.inner, false, true, "tcp write")?
+            Err(error) if error.kind() == .WouldBlock -> jet_net_scheduler_wait(&stream.inner, false, true, "tcp write")?
             Err(error) -> return Err(jet_net_io_error("tcp write", None, ^error))
         }
     }
@@ -380,7 +383,10 @@ fn jet_net_tcp_shutdown(stream: &JetTCPStream, how: JetNetShutdown) -> Unit JetN
     match how {
         .Read -> stream.read_shutdown = true
         .Write -> stream.write_shutdown = true
-        .Both -> { stream.read_shutdown = true; stream.write_shutdown = true }
+        .Both -> {
+            stream.read_shutdown = true
+            stream.write_shutdown = true
+        }
     }
     Ok(())
 }
@@ -391,7 +397,7 @@ fn jet_net_tcp_close(stream: &JetTCPStream) -> Unit JetNetError! {
     if stream.closed -> return Ok(())
     match stream.inner.shutdown(Shutdown.Both) {
         Ok(_) -> {}
-        Err(error) if error.kind() is .NotConnected -> {}
+        Err(error) if error.kind() == .NotConnected -> {}
         Err(error) -> return Err(jet_net_io_error("tcp close", None, ^error))
     }
     stream.closed = true
@@ -404,8 +410,8 @@ fn jet_net_tcp_ready(stream: &JetTCPStream, interest: JetNetReadyInterest, deadl
     if stream.closed -> return Err(jet_net_closed("tcp ready"))
     _ :: jet_net_timeout(deadline_ms).map_err(fn(message) { JetNetError.InvalidInput(jet_net_detail("tcp ready", None, None, ^message, None)) })?
     _deadline :: jet_net_operation_deadline(Val(deadline_ms))
-    read :: interest is .Read || interest is .ReadWrite
-    write :: interest is .Write || interest is .ReadWrite
+    read :: interest == .Read || interest == .ReadWrite
+    write :: interest == .Write || interest == .ReadWrite
     (readable, writable) :: jet_net_tcp_scheduler_ready_wait(&stream.inner, read, write, "tcp ready")?
     Ok(JetNetReady{readable: readable, writable: writable})
 }
@@ -594,7 +600,7 @@ fn jet_net_udp_recv_from(socket: &JetUDPSocket, limit: I64) -> JetUDPPacket JetN
                 &buf.truncate(min(n, cap))
                 return Ok(JetUDPPacket{data: ^buf, addr: JetSocketAddr{inner: addr}, original_len: n as I64, truncated: n > cap})
             }
-            Err(error) if error.kind() is .WouldBlock || error.kind() is .Interrupted -> jet_net_udp_scheduler_wait(socket, true, false, "udp receive")?
+            Err(error) if error.kind() == .WouldBlock || error.kind() == .Interrupted -> jet_net_udp_scheduler_wait(socket, true, false, "udp receive")?
             Err(error) -> return Err(jet_net_io_error("udp receive", None, ^error))
         }
     }
@@ -616,7 +622,7 @@ fn jet_net_udp_send_slice(socket: &JetUDPSocket, data: &[U8], addr: &JetSocketAd
         match socket.inner.send_to(data, addr.inner) {
             Ok(n) if n == data.len() -> return Ok(n as I64)
             Ok(n) -> return Err(JetNetError.Protocol(jet_net_detail("udp send", Val(addr.inner.to_string()), None, "udp send wrote {n} of {data.len()} datagram bytes", None)))
-            Err(error) if error.kind() is .WouldBlock || error.kind() is .Interrupted -> jet_net_udp_scheduler_wait(socket, false, true, "udp send")?
+            Err(error) if error.kind() == .WouldBlock || error.kind() == .Interrupted -> jet_net_udp_scheduler_wait(socket, false, true, "udp send")?
             Err(error) -> return Err(jet_net_io_error("udp send", Val(addr.inner.to_string()), ^error))
         }
     }
@@ -634,7 +640,7 @@ fn jet_net_udp_receive(socket: &JetUDPSocket, limit: I64) -> JetUDPPacket JetNet
     (original_len, addr) :: loop {
         match socket.inner.recv_from(&bytes) {
             Ok(packet) -> break packet
-            Err(error) if error.kind() is .WouldBlock || error.kind() is .Interrupted -> jet_net_udp_scheduler_wait(socket, true, false, "udp receive")?
+            Err(error) if error.kind() == .WouldBlock || error.kind() == .Interrupted -> jet_net_udp_scheduler_wait(socket, true, false, "udp receive")?
             Err(error) -> return Err(jet_net_io_error("udp receive", None, ^error))
         }
     }
@@ -663,10 +669,10 @@ fn jet_net_udp_ready(socket: &JetUDPSocket, interest: JetNetReadyInterest, deadl
     jet_net_udp_open(socket, "udp ready")?
     jet_net_timeout(deadline.as_millis()).map_err(fn(message) { JetNetError.InvalidInput(jet_net_detail("udp ready", None, None, ^message, None)) })?
     _deadline :: jet_net_operation_deadline(Val(deadline.as_millis()))
-    if jet_deadline_remaining_ms() is Val(ms) && ms <= 0 -> return Err(jet_net_deadline_timeout("udp ready"))
+    if jet_deadline_remaining_ms() == .Val(ms) && ms <= 0 -> return Err(jet_net_deadline_timeout("udp ready"))
     if target.selected_family() != "unix" -> return Err(JetNetError.Unsupported(jet_net_detail("udp ready", None, None, "udp readiness backend is unavailable on this target", None)))
-    want_read :: interest is .Read || interest is .ReadWrite
-    want_write :: interest is .Write || interest is .ReadWrite
+    want_read :: interest == .Read || interest == .ReadWrite
+    want_write :: interest == .Write || interest == .ReadWrite
     (readable, writable) :: jet_net_udp_scheduler_ready_wait(socket, want_read, want_write, "udp ready")?
     Ok(JetNetReady{readable: readable, writable: writable})
 }
@@ -699,7 +705,7 @@ fn jet_net_unix_accept(listener: &JetUnixListener) -> JetUnixStream JetNetError!
                 inner.set_nonblocking(true).map_err(fn(error) { jet_net_io_error("unix accept", None, ^error) })?
                 return Ok(JetUnixStream{scheduler: jet_net_scheduler_handle(&inner), inner: ^inner, closed: false, read_shutdown: false, write_shutdown: false, read_timeout_ms: None, write_timeout_ms: None})
             }
-            Err(error) if error.kind() is .WouldBlock || error.kind() is .Interrupted -> jet_net_unix_listener_scheduler_wait(listener, "unix accept")?
+            Err(error) if error.kind() == .WouldBlock || error.kind() == .Interrupted -> jet_net_unix_listener_scheduler_wait(listener, "unix accept")?
             Err(error) -> return Err(jet_net_io_error("unix accept", None, ^error))
         }
     }
@@ -758,8 +764,11 @@ fn jet_net_unix_read_bytes(stream: &JetUnixStream, limit: I64) -> [U8] JetNetErr
     bytes := [U8].repeat(0, min(limit as USize, 16 * 1024 * 1024))
     loop {
         match &stream.inner.read(&bytes) {
-            Ok(n) -> { &bytes.truncate(n); return Ok(^bytes) }
-            Err(error) if error.kind() is .WouldBlock || error.kind() is .Interrupted -> jet_net_unix_scheduler_wait(stream, true, false, "unix read")?
+            Ok(n) -> {
+                &bytes.truncate(n)
+                return Ok(^bytes)
+            }
+            Err(error) if error.kind() == .WouldBlock || error.kind() == .Interrupted -> jet_net_unix_scheduler_wait(stream, true, false, "unix read")?
             Err(error) -> return Err(jet_net_io_error("unix read", None, ^error))
         }
     }
@@ -802,7 +811,7 @@ fn jet_net_unix_write_slice(stream: &JetUnixStream, data: &[U8]) -> I64 JetNetEr
     loop {
         match &stream.inner.write(data) {
             Ok(count) -> return Ok(count as I64)
-            Err(error) if error.kind() is .WouldBlock || error.kind() is .Interrupted -> jet_net_unix_scheduler_wait(stream, false, true, "unix write")?
+            Err(error) if error.kind() == .WouldBlock || error.kind() == .Interrupted -> jet_net_unix_scheduler_wait(stream, false, true, "unix write")?
             Err(error) -> return Err(jet_net_io_error("unix write", None, ^error))
         }
     }
@@ -818,7 +827,10 @@ fn jet_net_unix_shutdown(stream: &JetUnixStream, how: JetNetShutdown) -> Unit Je
     match how {
         .Read -> stream.read_shutdown = true
         .Write -> stream.write_shutdown = true
-        .Both -> { stream.read_shutdown = true; stream.write_shutdown = true }
+        .Both -> {
+            stream.read_shutdown = true
+            stream.write_shutdown = true
+        }
     }
     Ok(())
 }
@@ -834,7 +846,7 @@ fn jet_net_unix_close(stream: &JetUnixStream) -> Unit JetNetError! {
     stream.scheduler.close()
     match stream.inner.shutdown(Shutdown.Both) {
         Ok(_) -> {}
-        Err(error) if error.kind() is .NotConnected -> {}
+        Err(error) if error.kind() == .NotConnected -> {}
         Err(error) -> return Err(jet_net_io_error("unix close", None, ^error))
     }
     Ok(())
@@ -852,9 +864,9 @@ fn jet_net_unix_ready(stream: &JetUnixStream, interest: JetNetReadyInterest, dea
     if target.selected_family() != "unix" -> return Err(JetNetError.Unsupported(jet_net_detail("unix ready", None, None, "unix sockets are not supported on this platform", None)))
     if stream.closed -> return Err(jet_net_closed("unix ready"))
     _deadline :: jet_net_explicit_deadline(deadline, "unix ready")?
-    if jet_deadline_remaining_ms() is Val(ms) && ms <= 0 -> return Err(jet_net_deadline_timeout("unix ready"))
-    want_read :: interest is .Read || interest is .ReadWrite
-    want_write :: interest is .Write || interest is .ReadWrite
+    if jet_deadline_remaining_ms() == .Val(ms) && ms <= 0 -> return Err(jet_net_deadline_timeout("unix ready"))
+    want_read :: interest == .Read || interest == .ReadWrite
+    want_write :: interest == .Write || interest == .ReadWrite
     (readable, writable) :: jet_net_unix_scheduler_ready_wait(stream, want_read, want_write, "unix ready")?
     Ok(JetNetReady{readable: readable, writable: writable})
 }
@@ -865,15 +877,15 @@ fn jet_net_dns_system_servers() -> [String] {
     jet_scheduler_world_reject_uncontrolled("network")
     out := [String]{}
     if target.selected_os() == "linux" {
-        if read_to_string("/etc/resolv.conf") is Ok(text) -> &out.extend(jet_net_dns_parse_resolv_conf(&text))
+        if read_to_string("/etc/resolv.conf") == .Ok(text) -> &out.extend(jet_net_dns_parse_resolv_conf(&text))
     }
     // macOS scoped interface/VPN resolvers are not all represented by resolv.conf.
     if target.selected_os() == "macos" {
-        if Command.new("scutil").arg("--dns").output() is Ok(output) -> &out.extend(jet_net_dns_parse_scutil(&String.from_utf8_lossy(&output.stdout)))
+        if Command.new("scutil").arg("--dns").output() == .Ok(output) -> &out.extend(jet_net_dns_parse_scutil(&String.from_utf8_lossy(&output.stdout)))
     }
     // Address values avoid localized ipconfig labels and preserve IPv4/IPv6 policy.
     if target.selected_family() == "windows" {
-        if Command.new("powershell.exe").args(["-NoProfile", "-NonInteractive", "-Command", "Get-DNSClientServerAddress | ForEach-Object { $_.ServerAddresses }"]).output() is Ok(output) {
+        if Command.new("powershell.exe").args(["-NoProfile", "-NonInteractive", "-Command", "Get-DNSClientServerAddress | ForEach-Object { $_.ServerAddresses }"]).output() == .Ok(output) {
             &out.extend(jet_net_dns_parse_windows_addresses(&String.from_utf8_lossy(&output.stdout)))
         }
     }
@@ -884,7 +896,10 @@ fn jet_net_dns_system_servers() -> [String] {
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:3544
 fn jet_net_dns_encode_name(out: &[U8], name: String) -> Unit Err! {
     trimmed := name.trim_end_matches('.') // #4303
-    if trimmed.is_empty() { &out.push(0); return Ok(()) }
+    if trimmed.is_empty() {
+        &out.push(0)
+        return Ok(())
+    }
     loop label in trimmed.split('.') {
         if label.is_empty() || label.len() > 63 || !label.is_ascii() -> return Err("invalid DNS name `{name}`")
         &out.push(label.len() as U8)
@@ -1023,7 +1038,7 @@ fn jet_net_dns_tcp_exchange(server_addr: SocketAddr, request: &[U8], deadline: I
         match &stream.write(&framed[written..]) {
             Ok(0) -> return Err("network protocol error: DNS TCP connection closed while sending query")
             Ok(n) -> written = written + n
-            Err(error) if error.kind() is .TimedOut || error.kind() is .WouldBlock || error.kind() is .Interrupted -> continue
+            Err(error) if error.kind() == .TimedOut || error.kind() == .WouldBlock || error.kind() == .Interrupted -> continue
             Err(error) -> return Err("DNS TCP query send failed: {error}")
         }
     }
@@ -1034,7 +1049,7 @@ fn jet_net_dns_tcp_exchange(server_addr: SocketAddr, request: &[U8], deadline: I
         match &stream.read(&prefix[prefix_read..]) {
             Ok(0) -> return Err("network protocol error: DNS TCP connection closed before response length")
             Ok(n) -> prefix_read = prefix_read + n
-            Err(error) if error.kind() is .TimedOut || error.kind() is .WouldBlock || error.kind() is .Interrupted -> continue
+            Err(error) if error.kind() == .TimedOut || error.kind() == .WouldBlock || error.kind() == .Interrupted -> continue
             Err(error) -> return Err("DNS TCP response length failed: {error}")
         }
     }
@@ -1047,7 +1062,7 @@ fn jet_net_dns_tcp_exchange(server_addr: SocketAddr, request: &[U8], deadline: I
         match &stream.read(&packet[read..]) {
             Ok(0) -> return Err("network protocol error: DNS TCP response is truncated")
             Ok(n) -> read = read + n
-            Err(error) if error.kind() is .TimedOut || error.kind() is .WouldBlock || error.kind() is .Interrupted -> continue
+            Err(error) if error.kind() == .TimedOut || error.kind() == .WouldBlock || error.kind() == .Interrupted -> continue
             Err(error) -> return Err("DNS TCP response truncated: {error}")
         }
     }
@@ -1087,7 +1102,7 @@ fn jet_net_dns_query(server: &String, name: &String, qtype: U16, ms: I64) -> [Je
         socket.set_read_timeout(Val(jet_net_dns_io_slice(deadline, name)?)).map_err(fn(error) { "dns timeout setup failed: {error}" })?
         match socket.recv(&packet) {
             Ok(n) -> break n
-            Err(error) if error.kind() is .TimedOut || error.kind() is .WouldBlock || error.kind() is .Interrupted -> continue
+            Err(error) if error.kind() == .TimedOut || error.kind() == .WouldBlock || error.kind() == .Interrupted -> continue
             Err(error) -> return Err("dns query for `{name}` failed: {error}")
         }
     }
