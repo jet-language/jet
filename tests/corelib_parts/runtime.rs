@@ -1909,3 +1909,62 @@ fn tracked_origin_is_a_folded_optional_fact() {
 
     let _ = fs::remove_dir_all(&dir);
 }
+
+/// D-EXEC1: the compiled runtime's C-ABI exports behind Jet-native `#require`,
+/// `#require_eq`, `#panic`, fixed-width arithmetic stops and Euclidean Int
+/// division (crates/jet-codegen/src/Prelude/Core/CAbi.rs). The driver calls them
+/// as backend-generated code does, linked against the runtime rlib that a cached
+/// build splits out of a trivial program; the stops render the same reports the
+/// AOT entry boundary does.
+#[test]
+fn native_backend_stop_and_euclid_exports() {
+    if !common::have_rustc() {
+        eprintln!("note: skipping runtime C-ABI export test (need rustc)");
+        return;
+    }
+    let scratch = common::Scratch::new("runtime_c_abi");
+    let dir = &scratch.path;
+    let src = "fn run() {\n    print(\"hello\")\n}\n";
+    let seed = dir.join("seed.jet");
+    fs::write(&seed, src).unwrap();
+    let shown = seed.to_string_lossy();
+    let out = jet::compile_with_path(src, &shown).unwrap_or_else(|diags| {
+        panic!("front end rejected seed:\n{}", jet::render_diagnostics(&shown, src, &diags))
+    });
+    // Only the split runtime rlib is used; the seed program itself is never built.
+    let runtime = common::add_generated_rust(&mut Command::new("rustc"), &dir.join("seed.rs"), &out.rust, false, &[]);
+    assert!(runtime.is_split(), "the cached build produced no runtime rlib to link the driver against");
+    let driver_rs = dir.join("driver.rs");
+    fs::write(&driver_rs, include_str!("../fixtures/runtime_c_abi_driver.rs")).unwrap();
+    let driver = dir.join("driver");
+    let mut rustc = Command::new("rustc");
+    rustc.arg("--edition").arg("2021").arg(&driver_rs).arg("-o").arg(&driver);
+    runtime.add_rustc_args(&mut rustc);
+    let built = rustc.output().unwrap();
+    assert!(built.status.success(), "rustc rejected the C-ABI driver:\n{}", String::from_utf8_lossy(&built.stderr));
+    let run = |case: &str| {
+        let output = Command::new(&driver).arg(case).output().unwrap();
+        (
+            output.status.code().unwrap_or(-1),
+            String::from_utf8_lossy(&output.stdout).into_owned(),
+            String::from_utf8_lossy(&output.stderr).into_owned(),
+        )
+    };
+    assert_eq!(run("values"), (0, "-4\n1\n\"a\\\"b\\n\"\n".to_string(), String::new()));
+    let context = "  --> main.jet:3 in run\n    |\n3 |     #require_eq(total, 2)\n    |     ^^^^^^^^^^^^^^^^^^^^^^^\n";
+    for (case, head) in [
+        ("euclid-by-zero", "Stop [E3010]: `divided by zero`\n  --> main.jet:6\n".to_string()),
+        (
+            "numeric-stop",
+            "Stop [E3010]: `This addition overflows the value's type (the result is outside its range)`\n  --> main.jet:7\n"
+                .to_string(),
+        ),
+        ("require", format!("Stop [E3001]: `panic: condition failed`\n{context}locals: total = 1\n")),
+        ("require-eq", format!("Stop [E3001]: `panic: expected: 2, got: 1`\n{context} Why:")),
+        ("panic", format!("Stop [E3001]: `panic: boom`\n{context} Why:")),
+    ] {
+        let (code, stdout, stderr) = run(case);
+        assert_eq!((code, stdout.as_str()), (70, ""), "{case}: {stderr}");
+        assert!(stderr.starts_with(&head), "{case}: expected the report to start with\n{head}\ngot:\n{stderr}");
+    }
+}
