@@ -171,7 +171,7 @@ fn body_readers() -> Mutex<[I64:BodyReader]> {
 fn register_body(reader: Box<Read + Send>) -> I64 {
     static NEXT: AtomicI64 = AtomicI64.new(1) // GATE #4494
     handle :: NEXT.fetch_add(1, Ordering.Relaxed)
-    guard :: body_readers().lock().expect("HTTP body registry lock")
+    guard :: body_readers().lock() ?? panic("HTTP body registry lock")
     _ :: guard.insert(handle, Arc.new(Mutex.new(^reader)))
     handle
 }
@@ -611,7 +611,7 @@ fn send_once_upload(pool: Arc<Mutex<ClientPool>>, namespace: I64, dns: Arc<Mutex
     drop(pool_guard)
     if stream_opt != None -> reused = true
     if stream_opt == None -> stream_opt = Val(connect(dns, facts, url, proxy, dns_timeout, connect_timeout, tls_timeout, total_deadline, http2, http11, h2c, tls) ?? return Err(err))
-    stream := stream_opt.unwrap()
+    stream := stream_opt ?? panic("unwrap failed")
     if reused && stream == .H2(connection) {
         guard :: connection.lock() ?? return Err(JetHTTPBridgeError.Internal)
         probe :: if guard.active_streams.is_empty() {
@@ -655,7 +655,7 @@ fn send_once_upload(pool: Arc<Mutex<ClientPool>>, namespace: I64, dns: Arc<Mutex
             }
             thread.yield_now() // GATE #4494
         }
-        (status, response_headers, end_stream) :: response_headers_result.unwrap()
+        (status, response_headers, end_stream) :: response_headers_result ?? panic("unwrap failed")
         set_timing(facts, 4, elapsed_ms(first_started))
         return read_h2_response(^connection, stream_id, status, ^response_headers, end_stream, ^key, ^pool, decompress, ^facts, request_started, read_timeout, total_deadline, ^permit, reused, ^remote_address)
     }

@@ -368,7 +368,7 @@ impl JetHTTPBody {
             }
         }
         suffix := U64{0}
-        loop used.contains(&suffix) { suffix = suffix.checked_add(1).expect("in-memory multipart fields cannot contain every u64 boundary suffix") }
+        loop used.contains(&suffix) { suffix = suffix.checked_add(1) ?? panic("in-memory multipart fields cannot contain every u64 boundary suffix") }
         boundary :: "{PREFIX}{suffix:016x}"
         body := [U8]{}
         loop (name, value) in (&values).into_iter() {
@@ -469,7 +469,7 @@ impl JetHTTPBody {
         self.state.lock().ok().and_then(fn(state) { state.source_payload.clone() })
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:660
-    fn source_text(self: &Self) -> String { String.from_utf8(self.source_payload().expect("source HTTP text body has no owned payload").to_vec()).expect("source HTTP text body payload is not UTF-8") }
+    fn source_text(self: &Self) -> String { String.from_utf8((self.source_payload() ?? panic("source HTTP text body has no owned payload")).to_vec()) ?? panic("source HTTP text body payload is not UTF-8") }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:669
     fn source_bytes(self: &Self) -> [U8] { self.source_payload().expect("source HTTP byte body has no owned payload").to_vec() }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:675
@@ -771,7 +771,7 @@ impl FromIterator<(String, String)> for JetHTTPHeaders {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:1185
     fn from_iter<T: IntoIterator<Item = (String, String)>>(iter: T) -> Self {
         headers := Self.new()
-        loop (name, value) in iter { headers.append(&name, &value).expect("compiler-generated HTTP header is valid") }
+        loop (name, value) in iter { headers.append(&name, &value) ?? panic("compiler-generated HTTP header is valid") }
         ^headers
     }
 }

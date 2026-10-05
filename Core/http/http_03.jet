@@ -229,7 +229,7 @@ impl H2BodyReader {
     }
     // Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:4034
     fn refill(self: &Self) -> () Error! {
-        session :: self.connection.as_ref().expect("HTTP/2 response connection").clone()
+        session :: (self.connection.as_ref() ?? panic("HTTP/2 response connection")).clone()
         connection :: session.lock() ?? return Err(Error.new(.Other, "HTTP/2 session lock"))
         set_stream_timeouts(&connection.io, self.read_timeout, self.read_timeout, self.total_deadline) ?? return Err(Error.new(.TimedOut, format("{:?}", err)))
         loop {
@@ -349,7 +349,7 @@ fn read_response(stream: HTTPStream, key: PoolKey, pool: Arc<Mutex<ClientPool>>,
         final_head = Val((status, ^version, ^headers, ^after))
         break
     }
-    (status, version, headers, initial) :: final_head.unwrap()
+    (status, version, headers, initial) :: final_head ?? panic("unwrap failed")
     set_stream_timeouts(&stream, read_timeout, read_timeout, total_deadline) ?? return Err(err)
     facts.set_raw_content_encoding(header_first(headers, "content-encoding").map((value) -> ~value))
     transfer := [String]{}
@@ -423,7 +423,7 @@ impl ResponseBodyReader {
             }
             return count
         }
-        stream :: self.stream.as_mut().expect("response stream")
+        stream :: self.stream.as_mut() ?? panic("response stream")
         set_stream_timeouts(stream, self.read_timeout, self.read_timeout, self.total_deadline) ?? return Err(Error.new(if err == JetHTTPBridgeError.Timeout { ErrorKind.TimedOut } else { ErrorKind.Other }, format("{:?}", err)))
         stream.read(out)
     }
@@ -1123,7 +1123,7 @@ fn multipart_boundary(fields: [String]) -> String {
         }
     }
     suffix := U64{0}
-    loop used.contains(suffix) -> suffix = suffix.checked_add(1).expect("in-memory multipart fields cannot contain every u64 boundary suffix")
+    loop used.contains(suffix) -> suffix = suffix.checked_add(1) ?? panic("in-memory multipart fields cannot contain every u64 boundary suffix")
     format("{}{:016x}", PREFIX, suffix)
 }
 // Rust: crates/jet-pkg-model/src/Prelude/HTTP.rs:5512

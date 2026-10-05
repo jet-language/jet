@@ -102,7 +102,7 @@ fn jet_http_route_path(path: String) -> [Cow<String>] Err! {
     segments := path.split('/').skip(1)
     first :: segments.next()
     if first.is_none() -> return Ok([])
-    first :: first.unwrap()
+    first :: first ?? panic("unwrap failed")
     if first.is_empty() && segments.next().is_none() -> return Ok([])
     decoded := [Cow<String>]{}
     &decoded.push(jet_http_route_decode_path_segment(first)?)
@@ -128,7 +128,7 @@ fn jet_http_route_matches_path(pattern: &JetHTTPRoutePattern, path: String) -> B
         if index >= required -> next
         segment :: pattern.segments.get(index)
         if segment.is_none() -> return false
-        if segment.unwrap() == .Static(expected) {
+        if (segment ?? panic("unwrap failed")) == .Static(expected) {
             equal :: if candidate.as_bytes().contains(U8{37}) {
                 jet_http_route_decode_path_segment(candidate).is_ok_and(fn(decoded) { decoded.as_ref() == expected })
             } else { candidate == expected }

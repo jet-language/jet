@@ -122,7 +122,7 @@ fn jet_http_server_serve(server: &JetHTTPServer) -> JetHTTPShutdownReport HTTPEr
     // GATE #4565: kernel primitive
     #Unsafe("atomic single-serve claim and mutex-protected listener/report ownership with condition wakeups") {
         server.inner.lifecycle.compare_exchange(U8{0}, U8{1}, Ordering.AcqRel, Ordering.Acquire).map_err(_ -> HTTPError.IO("HTTP server can only be served once".to_string()))?
-        listener :: server.inner.listener.lock().unwrap().take().ok_or_else(() -> HTTPError.IO("HTTP server listener was already consumed".to_string()))?
+        listener :: (server.inner.listener.lock() ?? panic("unwrap failed")).take().ok_or_else(() -> HTTPError.IO("HTTP server listener was already consumed".to_string()))?
         result :: jet_http_server_run_listener(^listener, server.inner.mux.clone(), JetHTTPServerOptions.safe(),
             server.inner.shutdown.clone(), Val(server.inner.grace_ms.clone()),
             Val(server.inner.drain_deadline_ms.clone()), server.inner.tls_conn.clone()).map_err(operation -> HTTPError.IO(^operation))
@@ -145,9 +145,9 @@ fn jet_http_server_serve(server: &JetHTTPServer) -> JetHTTPShutdownReport HTTPEr
 fn jet_http_server_wait_for_report(server: &JetHTTPServer) -> JetHTTPShutdownReport HTTPError! {
     // GATE #4565: kernel primitive
     #Unsafe("wait on report mutex until serving lifecycle becomes terminal") {
-        report := server.inner.report.lock().unwrap()
+        report := server.inner.report.lock() ?? panic("unwrap failed")
         while report.is_none() && server.inner.lifecycle.load(Ordering.Acquire) == U8{1} {
-            report = server.inner.report_ready.wait(^report).unwrap()
+            report = server.inner.report_ready.wait(^report) ?? panic("unwrap failed")
         }
         (*report).ok_or_else(() -> HTTPError.IO("HTTP server stopped without a shutdown report".to_string()))
     }
@@ -212,7 +212,7 @@ fn jet_http_server_run_listener_inner(listener: TcpListener, mux: JetHTTPMux, op
             worker_tls :: tls_conn.clone()
             workers.push(thread.spawn(() -> {
                 loop {
-                    received :: worker_rx.lock().unwrap().recv()
+                    received :: (worker_rx.lock() ?? panic("unwrap failed")).recv()
                     (stream, peer_ip) := match received { .Ok(pair) -> pair, .Err(_) -> break }
                     if worker_force_cancel.load(Ordering.Acquire) {
                         _ :: stream.shutdown(Shutdown.Both)
@@ -230,7 +230,7 @@ fn jet_http_server_run_listener_inner(listener: TcpListener, mux: JetHTTPMux, op
                         worker_active.lock().unwrap().retain(tracked -> tracked.peer_addr().ok() != peer)
                     }
                     worker_connection_count.fetch_sub(1, Ordering.AcqRel)
-                    counts := worker_per_ip.lock().unwrap()
+                    counts := worker_per_ip.lock() ?? panic("unwrap failed")
                     if counts.get_mut(&peer_ip) == .Val(count) {
                         *count -= 1
                         if *count == 0 { counts.remove(&peer_ip) }
@@ -259,7 +259,7 @@ fn jet_http_server_run_listener_inner(listener: TcpListener, mux: JetHTTPMux, op
                     }
                     peer_ip :: peer.ip()
                     globally_full :: connection_count.load(Ordering.Acquire) >= options.max_connections
-                    ip_full :: per_ip.lock().unwrap().get(&peer_ip).copied().unwrap_or(0) >= options.max_connections_per_ip
+                    ip_full :: (per_ip.lock() ?? panic("unwrap failed")).get(&peer_ip).copied().unwrap_or(0) >= options.max_connections_per_ip
                     if globally_full || ip_full {
                         report.user_overloaded += 1
                         _ :: stream.set_read_timeout(Val(Duration.from_millis(U64{10})))
@@ -276,7 +276,7 @@ fn jet_http_server_run_listener_inner(listener: TcpListener, mux: JetHTTPMux, op
                         .Ok(()) -> report.user_accepted += 1,
                         .Err(mpsc.TrySendError.Full((stream, peer_ip))) -> {
                             connection_count.fetch_sub(1, Ordering.AcqRel)
-                            counts := per_ip.lock().unwrap()
+                            counts := per_ip.lock() ?? panic("unwrap failed")
                             if counts.get_mut(&peer_ip) == .Val(count) {
                                 *count -= 1
                                 if *count == 0 { counts.remove(&peer_ip) }
@@ -292,7 +292,7 @@ fn jet_http_server_run_listener_inner(listener: TcpListener, mux: JetHTTPMux, op
                         },
                         .Err(mpsc.TrySendError.Disconnected((_stream, peer_ip))) -> {
                             connection_count.fetch_sub(1, Ordering.AcqRel)
-                            counts := per_ip.lock().unwrap()
+                            counts := per_ip.lock() ?? panic("unwrap failed")
                             if counts.get_mut(&peer_ip) == .Val(count) {
                                 *count -= 1
                                 if *count == 0 { counts.remove(&peer_ip) }
@@ -305,7 +305,7 @@ fn jet_http_server_run_listener_inner(listener: TcpListener, mux: JetHTTPMux, op
                 .Err(error) -> {
                     accept_error = Val("http accept failed: {error}")
                     force_cancel.store(true, Ordering.Release)
-                    for stream in active.lock().unwrap().iter() { _ :: stream.shutdown(Shutdown.Both) }
+                    for stream in (active.lock() ?? panic("unwrap failed")).iter() { _ :: stream.shutdown(Shutdown.Both) }
                     break
                 },
             }
@@ -331,7 +331,7 @@ fn jet_http_server_run_listener_inner(listener: TcpListener, mux: JetHTTPMux, op
         report.user_cancelled = report.user_accepted.saturating_sub(report.user_completed)
         if report.user_cancelled > 0 {
             force_cancel.store(true, Ordering.Release)
-            for stream in active.lock().unwrap().iter() { _ :: stream.shutdown(Shutdown.Both) }
+            for stream in (active.lock() ?? panic("unwrap failed")).iter() { _ :: stream.shutdown(Shutdown.Both) }
         }
         loop worker in workers { _ :: worker.join() }
         if accept_error == .Val(error) { return Err(^error) }
@@ -1028,7 +1028,7 @@ impl JetHTTP2Outgoing.Drop {
 fn jet_http2_write_header_block<W: Write>(stream: &W, stream_id: U32, flags: U8, block: &[U8], max_frame: USize) -> Unit Err! {
     if block.len() <= max_frame { return jet_http2_write_frame(stream, U8{1}, flags | U8{0x4}, stream_id, block) }
     chunks := block.chunks(max_frame).peekable()
-    first :: chunks.next().expect("non-empty HPACK block")
+    first :: chunks.next() ?? panic("non-empty HPACK block")
     jet_http2_write_frame(stream, U8{1}, flags & !U8{0x4}, stream_id, first)?
     while chunks.next() == .Val(chunk) {
         jet_http2_write_frame(stream, U8{9}, if chunks.peek().is_none() { U8{0x4} } else { U8{0} }, stream_id, chunk)?
@@ -1066,7 +1066,7 @@ fn jet_http2_start_response<W: Write>(stream: &W, stream_id: U32, response: JetH
                 control: JetTaskControl.new(), source_closer: None, producer: None, trailer_block: ^trailer_block,
             }))
         }
-        chunks := chunks.take().expect("non-empty HTTP/2 response has chunks")
+        chunks := chunks.take() ?? panic("non-empty HTTP/2 response has chunks")
         source_closer :: chunks.closer()
         (sender, receiver) :: mpsc.sync_channel<JetHTTP2ResponsePart>(1)
         control :: JetTaskControl.new()

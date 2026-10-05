@@ -502,9 +502,9 @@ impl JetHTTPMux {
     fn route_cache(self) -> Arc<JetHTTPMuxRouteCache> {
         // GATE #4565: kernel primitive
         #Unsafe("lock cache before routes consistently, retain the checked route cache under native shared ownership") {
-            cached := self.2.lock().unwrap()
+            cached := self.2.lock() ?? panic("unwrap failed")
             if cached.as_ref().cloned() == .Val(cache) -> return ^cache
-            routes :: self.0.lock().unwrap()
+            routes :: self.0.lock() ?? panic("unwrap failed")
             seen := BTreeSet.new()
             validation_error := None
             cached_routes := [JetHTTPMuxRouteCacheEntry].with_capacity(routes.len())
@@ -534,8 +534,8 @@ impl JetHTTPMux {
     fn add(self, method: String, pattern: String, f: fn(JetHTTPRequest) -> JetHTTPResponse JetHTTPError!) -> {
         // GATE #4565: kernel primitive
         #Unsafe("retain a Send+Sync static route callback and invalidate the cache while holding cache-before-routes mutexes") {
-            cached := self.2.lock().unwrap()
-            routes := self.0.lock().unwrap()
+            cached := self.2.lock() ?? panic("unwrap failed")
+            routes := self.0.lock() ?? panic("unwrap failed")
             routes.push(JetHTTPMuxRoute{method: method.to_string(), pattern: pattern.to_string(), handler: Arc.new(^f) as JetHTTPHandler, contract_json: ""})
             *cached = None
         }
@@ -548,8 +548,8 @@ impl JetHTTPMux {
     fn add_handler_with_contract(self, method: String, pattern: String, handler: JetHTTPHandler, contract_json: String) -> {
         // GATE #4565: kernel primitive
         #Unsafe("register checked route metadata and invalidate cache under consistent native mutex ordering") {
-            cached := self.2.lock().unwrap()
-            routes := self.0.lock().unwrap()
+            cached := self.2.lock() ?? panic("unwrap failed")
+            routes := self.0.lock() ?? panic("unwrap failed")
             routes.push(JetHTTPMuxRoute{method: method.to_string(), pattern: pattern.to_string(), handler: ^handler, contract_json: ^contract_json})
             *cached = None
         }

@@ -150,7 +150,7 @@ fn jet_http2_serve_inner(stream: &JetHTTP2Transport, mux: &JetHTTPMux, options: 
                     if going_away { next }
                     return Err("HTTP/2 DATA has no open request")
                 }
-                request := requests.get_mut(&frame.stream).expect("checked above")
+                request := requests.get_mut(&frame.stream) ?? panic("checked above")
                 if request.inbound_closed { return Err("HTTP/2 DATA follows end of stream") }
                 (start, padding) :: if frame.flags & 0x8 != 0 { (1, USize{*frame.payload.first().ok_or_else(fn() { "HTTP/2 padded DATA is empty" })?}) } else { (0, 0) }
                 if start + padding > frame.payload.len() { return Err("HTTP/2 DATA padding is invalid") }
@@ -209,7 +209,7 @@ fn jet_http2_serve_inner(stream: &JetHTTP2Transport, mux: &JetHTTPMux, options: 
                 if trailing {
                     if frame.flags & 0x1 == 0 { return Err("HTTP/2 trailing HEADERS must end the stream") }
                     trailers :: jet_http2_request_trailers(^headers)?
-                    request := requests.get_mut(&frame.stream).expect("checked above")
+                    request := requests.get_mut(&frame.stream) ?? panic("checked above")
                     if request.expected.is_some_and(fn(expected) { expected != request.received }) { return Err("HTTP/2 body does not match content-length") }
                     *request.trailers.lock().map_err(fn(_) { "HTTP/2 trailer store failed" })? = ^trailers
                     request.inbound_closed = true
@@ -286,7 +286,7 @@ fn jet_http2_serve_inner(stream: &JetHTTP2Transport, mux: &JetHTTPMux, options: 
             }
             8 -> {
                 if frame.payload.len() != 4 { return Err("HTTP/2 WINDOW_UPDATE is malformed") }
-                increment :: U32.from_be_bytes(frame.payload[0..<4].try_into().unwrap()) & 0x7fff_ffff
+                increment :: U32.from_be_bytes(frame.payload[0..<4].try_into() ?? panic("unwrap failed")) & 0x7fff_ffff
                 if increment == 0 { return Err("HTTP/2 WINDOW_UPDATE is malformed") }
                 if frame.stream != 0 && !stream_windows.contains_key(&frame.stream) { next }
                 window := if frame.stream == 0 { &connection_send_window } else { stream_windows.get_mut(&frame.stream).ok_or_else(fn() { "HTTP/2 WINDOW_UPDATE uses an idle stream" })? }
@@ -592,7 +592,7 @@ fn jet_http_srv_read_buffered(stream: &TcpStream, options: &JetHTTPServerOptions
         if jet_http_header_end(pending) == .Val(header_end) {
             if header_end > MAX_HEADER_BYTES { return Err(JetHTTPReadError{status: 431, message: "request headers are too large"}) }
             if parsed_head.is_none() { parsed_head = Val(jet_http_validate_headers(&pending[0..<header_end])?) }
-            head := parsed_head.as_mut().expect("validated HTTP request head")
+            head := parsed_head.as_mut() ?? panic("validated HTTP request head")
             if !reading_body {
                 reading_body = true
                 body_deadline = Val(Instant.now() + options.read_body_timeout)
@@ -762,7 +762,7 @@ fn jet_http_parse_authority(value: &String) -> JetHTTPAuthority? {
         port :: if suffix.is_empty() { None } else {
             port :: suffix.strip_prefix(':')?
             if !jet_http_host_port_valid(port) { return None }
-            Val(port.parse<U16>().unwrap())
+            Val(port.parse<U16>() ?? panic("unwrap failed"))
         }
         return Val(JetHTTPAuthority{host: "[{host}]", port: port})
     }
@@ -770,7 +770,7 @@ fn jet_http_parse_authority(value: &String) -> JetHTTPAuthority? {
     host :: parts.next().unwrap_or("")
     port :: parts.next()
     if parts.next().is_some() || !jet_http_reg_name_valid(host) { return None }
-    port :: match port { Val(port) if jet_http_host_port_valid(port) -> Val(port.parse<U16>().unwrap()), Val(_) -> return None, None -> None }
+    port :: match port { Val(port) if jet_http_host_port_valid(port) -> Val(port.parse<U16>() ?? panic("unwrap failed")), Val(_) -> return None, None -> None }
     Val(JetHTTPAuthority{host: jet_http_normalize_reg_name(host), port: port})
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:4614
@@ -878,7 +878,7 @@ fn jet_http_chunk_size(line: &[U8]) -> USize JetHTTPReadError! {
     if digits == 0 || !jet_http_chunk_extensions_valid(&line[digits..]) { return Err(JetHTTPReadError{status: 400, message: "chunk size is malformed"}) }
     size := 0
     for byte in &line[0..<digits] {
-        digit :: (*byte as Char).to_digit(16).unwrap() as USize
+        digit :: ((*byte as Char).to_digit(16) ?? panic("unwrap failed")) as USize
         size = size.checked_mul(16).and_then(fn(value) { value.checked_add(digit) }).ok_or(JetHTTPReadError{status: 413, message: "request body is too large"})?
     }
     Ok(size)

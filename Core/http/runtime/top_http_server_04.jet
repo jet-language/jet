@@ -186,7 +186,7 @@ fn jet_http_mux_dispatch_cached(mux: &JetHTTPMux, req: JetHTTPRequest, route_cac
     }
     selected :: if requested_method == "HEAD" && !has_head { ^selected_get } else { ^selected }
     if Val((_, route, pattern)) :: selected {
-        req.params = jet_http_route_params_path(pattern, route_path).expect("validated HTTP route path")
+        req.params = jet_http_route_params_path(pattern, route_path) ?? panic("validated HTTP route path")
         req.route_template = Val(route.route.pattern.clone())
         jet_http_devtools_publish_request(&req, &request_id, started_at_ms)
         response :: jet_http_mux_run_handler_ref(mux, ^req, &route.route.handler)
@@ -351,8 +351,8 @@ fn jet_http_srv_format(resp: &JetHTTPResponse) -> String {
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:5686
 fn jet_http_srv_format_connection(resp: &JetHTTPResponse, version: &String, close: Bool) -> String {
     bytes := [U8]{}
-    jet_http_srv_write_response(&bytes, resp, version, close).expect("in-memory HTTP response formatting cannot fail")
-    String.from_utf8(^bytes).expect("text compatibility response contains UTF-8")
+    jet_http_srv_write_response(&bytes, resp, version, close) ?? panic("in-memory HTTP response formatting cannot fail")
+    String.from_utf8(^bytes) ?? panic("text compatibility response contains UTF-8")
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:5692
 fn jet_http_srv_connection_nominates(headers: &JetHTTPHeaders, name: &String) -> Bool {
@@ -743,16 +743,16 @@ fn jet_http_srv_static_files(req: &JetHTTPRequest, prefix: &String, root: &OSPat
     etag :: "\"{file_len:x}-{modified_seconds:x}\""
     if req.headers.all("if-none-match").iter().any(fn(value) { *value == &etag || *value == "*" }) {
         response := jet_http_srv_empty_response(304)
-        response.headers.append("etag", &etag).expect("generated ETag is valid")
-        response.headers.append("last-modified", &last_modified).expect("generated date is valid")
+        response.headers.append("etag", &etag) ?? panic("generated ETag is valid")
+        response.headers.append("last-modified", &last_modified) ?? panic("generated date is valid")
         return Ok(^response)
     }
     if req.headers.get("if-none-match").is_none()
         && req.headers.get("if-modified-since").and_then(fn(value) { jet_http_date_parse(value) })
             .is_some_and(fn(since) { modified_seconds <= since }) {
         response := jet_http_srv_empty_response(304)
-        response.headers.append("etag", &etag).expect("generated ETag is valid")
-        response.headers.append("last-modified", &last_modified).expect("generated date is valid")
+        response.headers.append("etag", &etag) ?? panic("generated ETag is valid")
+        response.headers.append("last-modified", &last_modified) ?? panic("generated date is valid")
         return Ok(^response)
     }
     range :: req.headers.get("range").cloned().filter(fn(_) {
@@ -763,7 +763,7 @@ fn jet_http_srv_static_files(req: &JetHTTPRequest, prefix: &String, root: &OSPat
             Val(range) -> range
             None -> {
                 response := jet_http_srv_empty_response(416)
-                response.headers.append("content-range", &"bytes */{file_len}").expect("generated range is valid")
+                response.headers.append("content-range", &"bytes */{file_len}") ?? panic("generated range is valid")
                 return Ok(^response)
             }
         }
@@ -772,12 +772,12 @@ fn jet_http_srv_static_files(req: &JetHTTPRequest, prefix: &String, root: &OSPat
     file.seek(SeekFrom.Start(start as U64)).map_err(fn(_) { "static file seek failed" })?
     response := jet_http_srv_empty_response(status)
     response.body = JetHTTPBody.file(^file, length)
-    response.headers.append("content-type", jet_http_static_mime(&canonical)).expect("static MIME is valid")
-    response.headers.append("accept-ranges", "bytes").expect("static header is valid")
-    response.headers.append("etag", &etag).expect("generated ETag is valid")
-    response.headers.append("last-modified", &last_modified).expect("generated date is valid")
+    response.headers.append("content-type", jet_http_static_mime(&canonical)) ?? panic("static MIME is valid")
+    response.headers.append("accept-ranges", "bytes") ?? panic("static header is valid")
+    response.headers.append("etag", &etag) ?? panic("generated ETag is valid")
+    response.headers.append("last-modified", &last_modified) ?? panic("generated date is valid")
     if content_range == .Val(content_range) {
-        response.headers.append("content-range", &content_range).expect("generated range is valid")
+        response.headers.append("content-range", &content_range) ?? panic("generated range is valid")
     }
     Ok(^response)
 }
