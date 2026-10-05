@@ -213,7 +213,6 @@ function pruneTables(program) {
   if (instances) instances.items = instances.items.filter((ty) => typeIds(ty).every((id) => refs.get("MirTypeId").has(id)));
 }
 
-const drift = new Map();
 if (from <= 1 && until >= 1) {
   for (const c of open()) {
     const dump = join(dirs.mir, `${c.slug}.mir`);
@@ -228,7 +227,6 @@ if (from <= 1 && until >= 1) {
       prune(program, entryId);
       const converter = new Converter(schema);
       const value = converter.convert(program, programType, "program");
-      for (const [message, count] of converter.drift) drift.set(message, (drift.get(message) ?? 0) + count);
       const lines = [BigInt(entryId).toString()];
       encode(value, programType, schema, lines);
       writeFileSync(mird, `${lines.join("\n")}\n`);
@@ -236,7 +234,6 @@ if (from <= 1 && until >= 1) {
       writeFileSync(join(dirs.lower, `${c.slug}.convert-error`), `${error.stack}\n`);
     }
   }
-  writeFileSync(join(outDir, "drift.txt"), [...drift].sort((a, b) => b[1] - a[1]).map(([message, count]) => `${count}\t${message}`).join("\n") + "\n");
 }
 for (const c of open()) {
   if (!existsSync(join(dirs.mir, `${c.slug}.mir`))) {
