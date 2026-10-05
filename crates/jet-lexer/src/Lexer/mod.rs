@@ -16,7 +16,7 @@ pub use Terminators::{lex, lex_config, lex_generated};
 #[doc(hidden)]
 pub use Terminators::{
     raw_token_fact, terminator_driver, with_terminator_driver, RawTokenFact,
-    TerminatorDriver, TerminatorEvent, TERMINATOR_PASS_SOURCE,
+    TerminatorDriver, TerminatorEvent,
 };
 pub use Tokens::{comments, describe, is_comment, without_comments, StrTokPart, TokKind, Token};
 
