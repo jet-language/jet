@@ -114,11 +114,10 @@ node ${CLAUDE_PLUGIN_ROOT}/tower.mjs help
 
 ## Now reports
 
-The orchestrator posts a briefing titled **Current goals and progress** and a
-JSON status snapshot at each proven checkpoint; both appear at the top of
-**Now**, above the existing owner duty queue. Remove finished goals from the
-current briefing and snapshot. Derive progress from card evidence, not elapsed
-time; these views summarize Tower state and never replace cards or ballots.
+Post current goals as a **Current goals and progress** briefing on **Now**.
+Refresh it at proven checkpoints and remove finished goals. Derive progress
+from card evidence, not elapsed time; a briefing summarizes Tower state and
+never replaces cards or ballots. A JSON status snapshot can accompany it:
 
 ```sh
 node Tools/tower/tower.mjs briefing post --file report.md --title "Current goals and progress" --by Pip

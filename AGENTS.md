@@ -217,9 +217,9 @@ under `.agents/skills` and `Tools/tower/skills`.
 ## Environment and proof
 
 Run repository commands through `Tools/agent/jet-env`. Keep scratch and logs on
-disk at the configured external paths, never in RAM-backed `/tmp`. Follow the
-orchestration resource reference for target placement, disk gates, and shared
-artifacts; respect `JET_TARGET_CAP_GB=120`. Keep `CARGO_INCREMENTAL=0`, except
+disk and build output outside the repository. Follow the orchestration resource
+reference for bounded, checkout-owned targets and shared artifacts; respect
+`JET_TARGET_CAP_GB=120`. Keep `CARGO_INCREMENTAL=0`, except
 in the orchestrator's lock-serialized build targets, which opt in with
 `JET_CARGO_INCREMENTAL=1` and are pruned between builds.
 Rebuild before compiler smoke tests. After integration, run the exact narrow

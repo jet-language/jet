@@ -6,26 +6,21 @@ chat, worker receipts, and local notes do not replace it.
 
 ## Diagnose, then batch fix
 
-Before repairing a set of failures, run the requested diagnostic corpus once
-and classify **all** visible blockers, not just the first error. Rank root
-causes by the items each blocks and cumulative coverage (the Pareto table).
-Keep that work state on the relevant Tower cards. Fix the highest-coverage
-set together, then run one proof per batch. Do not loop one error at a time
-unless the owner orders it. This does not authorize unrelated broad proof:
-use the applicable milestone token and declared corpus.
+Before repairing a set of failures, diagnose the requested corpus once and
+classify all visible blockers. Rank root causes by the items each blocks and
+cumulative coverage (Pareto). Fix the highest-coverage set together, then run
+one proof per batch. Do not loop one error at a time unless the owner orders
+it. Keep the findings in Tower; this does not authorize unrelated broad proof.
 
-## One development line
+## One integration line
 
-Parallel work normally branches from `dev` and returns to `dev` promptly once
-its focused proof passes. One named integrator lands branches or patches;
-workers do not merge them. Do not keep long-lived side branches. An explicit
-owner instruction may name a different base for a bounded patch.
+Branch parallel work from one integration line and return it promptly after
+focused proof. One named integrator lands branches or patches; do not keep
+long-lived side branches.
 
-`master` advances only when a goal or milestone is accomplished. Main merges
-`dev` into `master` after the full gate: fixed point, goldens on the normal and
-native paths without regression, the criterion proof list, lane-check, and
-the commit-bound sweep and fresh review below. No nightly CI job substitutes
-for that gate.
+`master` advances only when a goal or milestone is accomplished and its proof
+gate passes. Use the commit-bound sweep and fresh review below; individual
+patches do not substitute for milestone evidence.
 
 ## Card loop
 
@@ -51,11 +46,6 @@ Repeat this sequence for each requested card or bounded slice:
    when the criteria are met, then query Tower again for `done`.
 7. Refill only after `done` is confirmed. Keep blockers, owner gates, and
    handoffs in Tower; do not maintain a competing task ledger.
-
-At proven checkpoints, the orchestrator refreshes Tower's Now briefing
-**Current goals and progress** and its status board. Drop finished goals from
-the current view. Use the [Tower Now procedure](../../../../Tools/tower/skills/tower/SKILL.md#now-reports);
-briefings summarize the ledger rather than becoming a second plan.
 
 A source-only result can satisfy only source/static criteria. It cannot mark an
 unrun runtime, execution tier, diagnostic, snapshot, golden, or generated
