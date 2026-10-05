@@ -101,6 +101,10 @@ Each card has a computed `lane`: `decide` (owner), `plan`/`implement`/
 `tower next` sorts by review > building > implement > plan, then by ascending
 `workOrder` inside each lane. **Epochs** group the work; **milestones** are
 goals inside an epoch — link cards with `--milestone <id>` and progress computes itself.
+Every card lives in an epoch or is a sidequest — frozen cards included
+(frozen is a phase, not a home; the store refuses an epoch-track card with no
+epoch). The board shows frozen cards in their epoch or sidequest section with a
+Frozen badge; its Frozen filter shows only them.
 
 ## Writing
 
@@ -244,7 +248,10 @@ tower archive restore <id> --by owner   # bring one back to the live board
 automatically once something isn't live any more (the result carries
 `archived: true`). `card delete` still refuses while a ratified decision is
 LIVE on the card (`E_HAS_RATIFIED`) — let it retire on its own, or
-`tower archive restore` then re-detach, then delete.
+`tower archive restore` then re-detach, then delete. The one override is the
+owner's own Tower UI: the card's Delete button lists every ballot that goes
+with the card and needs a separate tick per ratified decision; the event log
+records each deleted ballot. Open ballots are always deleted with their card.
 
 ### Lint (#457) — durability sweeper
 
@@ -284,7 +291,7 @@ closeout token, criteria, command, and evidence. D-TWRGUARD1=C.
 | Owner-only ratify | `decision ratify` by a non-owner, for a non-acceptance ballot | `E_OWNER_ONLY` | `--quote "owner's words"` |
 | Owner acceptance provenance | Any generic ratify, clearance, quote, or batch attempt on `D-ACCEPT-*` | `E_ACCEPTANCE_OWNER_UI` | Owner uses the dedicated verification UI with its same-origin session and one-time challenge |
 | Frozen lane | any write to a `frozen` card | `E_OWNER_LANE` | none — owner moves it out with `tower card update --phase ... --by owner` |
-| Ratified-decision delete | `card delete` on a card with a ratified decision | `E_HAS_RATIFIED` | let it retire (`tower archive status`) or `tower archive restore` then re-detach — applies to owner too |
+| Ratified-decision delete | `card delete` on a card with a ratified decision | `E_HAS_RATIFIED` | let it retire (`tower archive status`) or `tower archive restore` then re-detach — CLI `--by owner` too; only the owner's Tower UI Delete dialog (same-origin owner session, one tick per ratified decision) deletes them with the card |
 | Outcome/option match | `decision ratify --outcome K` not one of the decision's option keys | `E_INVALID` | pass a real option key |
 | Building-release handoff | `card release` on a `building` card | `E_HANDOFF` | `--handoff "what's done, what's left, gotchas"` |
 | Card closure | non-owner closes a card with no criteria or an unsettled criterion | `E_CRITERIA` | add criteria and mark every row `met` or `verified` |

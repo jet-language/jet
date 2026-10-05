@@ -261,8 +261,10 @@ and goes dark as you clear them. Two views:
   adversarial. The recommendation is blue, while reasons against alternatives
   are muted red. Labels and icons repeat every color's meaning. Empty state =
   tower clear.
-- **Board** — idea capture, sidequests, epochs → milestones → cards, frozen
-  bay; card modal for editing, decisions, questions, log.
+- **Board** — idea capture, sidequests, epochs → milestones → cards (frozen
+  cards stay in their epoch or sidequest section with a Frozen badge; the
+  Frozen filter shows only them); card modal for editing, decisions,
+  questions, log, and delete (a card's ballots are listed and deleted with it).
 - **Radar** *(prototype, owner-acceptance pending)* — roadmap ledger ×
   ops-table hybrid: per active epoch, a 30-day burndown sparkline, milestone
   progress with stall badges, and a sortable/filterable/inline-editable

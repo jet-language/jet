@@ -305,8 +305,7 @@ const SITUATION = 'Tower is the shared project board, and a ballot is the page w
   + 'That slows every vote and invites mistakes from beginners and experts alike. '
   + 'You are deciding which option this card should use. We recommend option A because it keeps behavior visible.';
 
-test('server ratify flow advances the card', async () => {
-  await post('decision/add', { cardId: '#1', id: 'D-S1', title: 'pick',
+const fullBallot = (cardId, id, title) => ({ cardId, id, title,
     ballotMode: 'full', situation: SITUATION, reviewPasses: {
       beginner: 'Fresh agent: reader-1. Skill: rli5. The beginner pass tested the complete ballot.',
       adversarial: 'Author model family: family-a. Adversarial model family: family-b. Fresh agent: reader-2. The adversarial pass attacked the recommendation.',
@@ -332,7 +331,10 @@ test('server ratify flow advances the card', async () => {
         whyNot: [{ key: 'B', reason: 'B loses the needed guarantee.' }], tradeoff: 'A adds one explicit step.',
       },
     },
-  });
+});
+
+test('server ratify flow advances the card', async () => {
+  await post('decision/add', fullBallot('#1', 'D-S1', 'pick'));
   let state = await (await fetch(url('/api/state'))).json();
   assert.equal(state.cards[0].lane.lane, 'decide');
   assert.equal(state.decisions[0].ballotMode, 'full');
@@ -378,4 +380,51 @@ test('GET /api/brief returns the packet and only claims when agent+claim=1', asy
 
   const missing = await fetch(url('/api/brief?card=999'));
   assert.equal(missing.status, 404);
+});
+
+// Owner 2026-10-04: the owner's UI deletes a card together with its ballots,
+// ratified ones included after an explicit tick. Only a same-origin request
+// with the owner session cookie and the delete marker carries that authority.
+test('card delete with ratified ballots: owner UI session only', async () => {
+  const added = await post('card/add', { title: 'Doomed via UI', by: 'owner' });
+  const id = added.json.result.id;
+  assert.equal((await post('decision/add', fullBallot(id, 'D-DEL-R', 'ratified one'))).status, 200);
+  assert.equal((await post('decision/add', fullBallot(id, 'D-DEL-O', 'open one'))).status, 200);
+  assert.equal((await post('clearance', { decisionId: 'D-DEL-R', outcome: 'A', by: 'owner' })).status, 200);
+  const payload = { id, by: 'owner', decisions: ['D-DEL-R', 'D-DEL-O'], deleteRatified: ['D-DEL-R'] };
+  const marker = { 'x-tower-owner-action': 'delete-card' };
+  const page = await fetch(url('/'), { headers: { accept: 'text/html' } });
+  const cookie = page.headers.get('set-cookie').split(';', 1)[0];
+
+  const cli = await post('card/delete', payload, { ...marker, cookie });
+  assert.equal(cli.status, 409, 'CLI channel never carries owner-UI authority, by:owner and cookie included');
+  assert.equal(cli.json.error, 'E_HAS_RATIFIED');
+
+  const browser = (headers) => fetch(url('/api/card/delete'), {
+    method: 'POST', body: JSON.stringify(payload),
+    headers: { 'content-type': 'application/json', 'sec-fetch-site': 'same-origin', origin: url(''), ...headers },
+  });
+  const noMarker = await browser({ cookie });
+  assert.equal(noMarker.status, 409);
+  const noSession = await browser({ ...marker, cookie: 'tower-owner-session=forged' });
+  assert.equal(noSession.status, 409);
+  const crossSite = await browser({ ...marker, cookie, 'sec-fetch-site': 'cross-site', origin: 'http://evil.example' });
+  assert.equal(crossSite.status, 403);
+  assert.equal((await crossSite.json()).error, 'E_CSRF');
+  const card = (await (await fetch(url(`/api/card?id=${encodeURIComponent(id)}`))).json()).card;
+  assert.ok(card, 'every refused attempt leaves the card');
+  assert.deepEqual(card.decisions.map(d => [d.id, d.status]).sort(), [['D-DEL-O', 'open'], ['D-DEL-R', 'ratified']]);
+
+  const ok = await browser({ ...marker, cookie });
+  const body = await ok.json();
+  assert.equal(ok.status, 200, body.message);
+  assert.deepEqual(body.result.decisions.map(d => [d.id, d.status]), [['D-DEL-R', 'ratified'], ['D-DEL-O', 'open']]);
+  const state = await (await fetch(url('/api/state'))).json();
+  assert.equal((await fetch(url(`/api/card?id=${encodeURIComponent(id)}`))).status, 404);
+  assert.equal(state.cards.some(c => c.id === id), false);
+  assert.equal(state.decisions.some(d => d.cardId === id), false);
+  const deleted = state.events.find(e => e.action === 'card.delete' && e.ref === id);
+  assert.equal(deleted.by, 'owner');
+  assert.match(deleted.note, /with ballots D-DEL-R \(ratified\), D-DEL-O \(open\) · owner-ui session=/);
+  assert.deepEqual(state.events.filter(e => e.action === 'decision.delete' && /^D-DEL-/.test(e.ref)).map(e => e.ref).sort(), ['D-DEL-O', 'D-DEL-R']);
 });

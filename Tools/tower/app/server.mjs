@@ -124,7 +124,10 @@ const routes = {
   'card/update':     (s, p, cfg) => db.updateCard(s, p.id, p, cfg),
   'card/claim':      (s, p) => db.claimCard(s, p.id, p.by),
   'card/release':    (s, p) => db.releaseCard(s, p.id, p.by, p.handoff),
-  'card/delete':     (s, p) => db.deleteCard(s, p.id, p),
+  // The 5th argument is server-built owner-UI provenance (see the POST
+  // handler); a payload field can never supply it.
+  'card/delete':     (s, p, cfg, history, ownerUi) => db.deleteCard(s, p.id,
+    { by: p.by, decisions: p.decisions, deleteRatified: p.deleteRatified }, ownerUi),
   'card/criteria-add':    (s, p) => db.addCriterion(s, p.id, p.text, p.by),
   'card/criteria-meet':   (s, p) => db.meetCriterion(s, p.id, p.n, { evidence: p.evidence, by: p.by }),
   'card/criteria-verify': (s, p) => db.verifyCriterion(s, p.id, p.n, { evidence: p.evidence, by: p.by }),
@@ -613,7 +616,16 @@ export function serve(store, port = 7878, open = false) {
             return send(res, 403, { error: 'E_ACCEPTANCE_OWNER_UI', message: 'owner verification requires the dedicated owner UI action' });
           }
         }
-        const { result, state } = await store.mutateAsync((s, cfg, history) => fn(s, p, cfg, history), { expectRev: p.expectRev });
+        // Owner-UI provenance for card delete: only a same-origin browser
+        // request that carries the owner session cookie and the explicit
+        // delete marker may delete a card together with its ratified ballots.
+        // CLI-channel requests never qualify, whatever `by` says.
+        let ownerUi = null;
+        if (name === 'card/delete' && req.headers['x-tower-owner-action'] === 'delete-card' && sameOrigin(req)) {
+          const session = ownerSession(req);
+          if (session) ownerUi = { kind: 'owner-ui', session: session.auditId };
+        }
+        const { result, state } = await store.mutateAsync((s, cfg, history) => fn(s, p, cfg, history, ownerUi), { expectRev: p.expectRev });
         return send(res, 200, { ok: true, result, state: commit(state) });
       }
       if (req.method === 'GET') return serveStatic(req, res);

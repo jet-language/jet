@@ -567,7 +567,8 @@ function cmdCard(store, { pos, flags }) {
     }
     case 'delete': {
       const { result } = store.mutate((s) => db.deleteCard(s, ref, { by }));
-      return out(flags, `deleted card #${result.num}`, result);
+      const ballots = result.decisions.length ? ` with ballot${result.decisions.length > 1 ? 's' : ''} ${result.decisions.map(d => `${d.id} (${d.status})`).join(', ')}` : '';
+      return out(flags, `deleted card #${result.num}${ballots}`, result);
     }
     case 'log': {
       if (typeof flags.text !== 'string' || !flags.text.trim())
