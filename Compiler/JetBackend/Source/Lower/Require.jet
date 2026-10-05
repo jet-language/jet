@@ -32,34 +32,10 @@ fn lower_require_push(m: &LowerModule, f: &LowerFunction, builder: LIRValueID, t
     lower_call_runtime(&m, &f, "jet_rt_string_builder_push_static", args, None)
 }
 
-// Char's JetDebug is to_string(), not Rust char Debug (Values.rs:240).
-// String alone uses Rust Debug's quotes and Unicode escape_debug policy.
+// Debug's scalar and structural policies are shared with `{value:Debug}`.
 fn lower_require_debug(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty: MIRType, value: LIRValueID) -> LIRValueID? {
-    symbol :: if ty.kind == {
-        .Int -> "jet_rt_int_to_string"
-        .Bool -> "jet_rt_bool_to_string"
-        .Char -> "jet_rt_char_to_string"
-        .String -> "jet_rt_require_debug_string"
-        else -> {
-            lower_fail(&m, &f, "require diagnostic Debug for this type is not lowered at O0 yet")
-            return None
-        }
-    }
-    text :: lower_require_string(&f)
-    lower_call_runtime(&m, &f, symbol, [LIRValueID]{value}, Val(text))
-    Val(text)
-}
-
-fn lower_require_local_debug(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty: MIRType, value: LIRValueID) -> LIRValueID? {
-    if ty.kind == .IntN(signed, bits) {
-        if bits == 64 {
-            // Values.rs:jet_scalar_show includes fixed integers as decimals.
-            text :: lower_require_string(&f)
-            lower_call_runtime(&m, &f, if signed -> "jet_rt_i64_to_string" else -> "jet_rt_u64_to_string", [LIRValueID]{value}, Val(text))
-            return Val(text)
-        }
-    }
-    lower_require_debug(p, &m, &f, ty, value)
+    text :: lower_render_value(p, &m, &f, ty, Val(value), LowerRenderMode.Debug) ?? return None
+    Val(text.value)
 }
 
 fn lower_require_debug_value(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, value: MIRValueID) -> LIRValueID? {
@@ -96,7 +72,7 @@ fn lower_require_locals(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Low
             lower_emit(&f, LIRInst.Load{dst: loaded, base: address, offset: 0})
             value = loaded
         }
-        text :: lower_require_local_debug(p, &m, &f, slot.ty, value) ?? return None
+        text :: lower_require_debug(p, &m, &f, slot.ty, value) ?? return None
         if ordinal > 0 -> lower_require_push(&m, &f, builder, ", ")
         lower_require_push(&m, &f, builder, "{local.name} = ")
         lower_call_runtime(&m, &f, "jet_rt_string_builder_push", [LIRValueID]{builder, text}, None)

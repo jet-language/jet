@@ -543,7 +543,7 @@ fn lower_helper_list_join(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LI
     lower_start(&f, item, [LIRValueID]{})
     address :: lower_list_address(&f, data, at, stride)
     value :: lower_render_load(p, &f, address, 0, elem, false)
-    lower_render_push(p, &m, &f, builder, elem, value, true)
+    lower_render_push(p, &m, &f, builder, elem, value, LowerRenderMode.Show)
     next_at :: lower_word(&f)
     one :: lower_const(&f, 1)
     lower_emit(&f, LIRInst.Binary{dst: next_at, op: LIRBinaryOp.Add, left: at, right: one})
@@ -702,7 +702,7 @@ fn lower_helper_list_get(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIR
         } else {
             value :: lower_read_at(p, &f, address, 0, elem) ?? return lir_builder_finish(f.builder)
             layout :: lower_repr_layout(lower_repr(p, elem)) ?? return lir_builder_finish(f.builder)
-            owned :: lower_new_value(&f, layout, None, elem.identity)
+            owned :: lower_new_value(&f, layout, LIRDrop.Trivial, elem.identity)
             lower_clone_into(p, &m, &f, value, owned, elem)
             lower_write_at(p, &f, result, 0, owned, elem)
         }

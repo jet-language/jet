@@ -315,7 +315,7 @@ fn lower_static_fixups(m: &LowerModule, f: &LowerFunction) Never! {
         lower_emit(&f, LIRInst.DataAddress{dst: text, data: fixup.text})
         length :: lower_const(&f, m.data[fixup.text.value].bytes.len())
         layout :: if fixup.constructor == "jet_rt_int_from_static" -> lir_layout_word() else -> lir_layout_pointer()
-        handle :: lower_new_value(&f, layout, None, None)
+        handle :: lower_new_value(&f, layout, LIRDrop.Trivial, None)
         lower_call_runtime(&m, &f, fixup.constructor, [LIRValueID]{text, length}, Val(handle))
         object :: lower_pointer(&f)
         lower_emit(&f, LIRInst.DataAddress{dst: object, data: fixup.object})

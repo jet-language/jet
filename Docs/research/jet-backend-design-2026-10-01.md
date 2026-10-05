@@ -103,6 +103,15 @@ glue. Render edges select the Printable/Display implementation whose receiver
 matches the rendered type exactly or is the generic template of its
 declaration, and reach that method's instance for the receiver.
 
+The structural renderer carries an explicit Display/Show/Debug mode through
+members. Debug does not select a user Display/Printable implementation: it
+quotes text, renders optional values as `Val(...)` / `None`, and uses
+`Ok(...)` / `Err(...)` for told reports. Tuples, records, variants, lists and
+maps recurse in that mode; require diagnostics use the same Debug renderer.
+Runtime-owned handles need their generated JetDebug adapter, not a structural
+inspection of the host allocation. `Fixtures/Display.jet` covers Debug text,
+optional and told reports, and its independence from user Display/Show methods.
+
 Generic ancestry (each new function or type specialization along a request
 chain) is limited to 128, rustc's default recursion limit: polymorphic
 recursion such as `fn expand<T>() { expand<List<T>>() }` is a compile issue
@@ -237,7 +246,7 @@ function parameters and jumps to it (LIR forbids jumps to the entry).
 | MIR operation | LIR sequence |
 |---|---|
 | `Parameter(i)` | the entry block's parameter for MIR parameter i (Unit parameters have none) |
-| `Constant` Int/Bool/Char | `Const` (an Int literal outside the inline range is reported) |
+| `Constant` Int/Bool/Char | `Const`; exact-Int literals outside the inline range use a runtime constructor fixup, including frozen statics |
 | `Constant` String | `DataAddress` of the literal's bytes, `Const` length, call `jet_rt_string_from_static(ptr, len) -> String` |
 | `Copy` | the same value for word, flag and tag carriers; `jet_rt_string_clone` for a String; clone glue for boxes; a fresh `StackSlot` filled by clone glue for an owned inline aggregate (a borrowing copy names the source) |
 | `Move`, `AttachTag`, transparent `Convert` | the same value |
@@ -261,7 +270,7 @@ function parameters and jumps to it (LIR forbids jumps to the entry).
 | `OptionIsSome` / `OptionValue` | `Compare Ne` against null / read at offset 0 |
 | `ResultOk` / `ResultErr` | box, word at 0 = 1 / 0, payload at 8 |
 | `ResultIsOk` / `ResultValue` | `Load` offset 0 and `Compare Ne 0` / read at offset 8 |
-| `BuildString(parts)` | `jet_rt_string_builder_new`, `..._push_static(b, ptr, len)` per literal, `..._push(b, text)` per Display interpolation, `..._finish(b) -> String` |
+| `BuildString(parts)` | `jet_rt_string_builder_new`, `..._push_static(b, ptr, len)` per literal, `..._push(b, text)` per Display or Debug interpolation, `..._finish(b) -> String` |
 | `Semantic(Print(call, v))` | Display text of v (the String itself, or `jet_rt_int_to_string` / `jet_rt_i64_to_string` / `jet_rt_char_to_string` / `jet_rt_bool_to_string`, dropped after the call), then the route's symbol (`jet_term_write_stdout_line`) with `(text, flush = 1)` |
 | `Call` of a user function, method or associated function | `Call Function(id)` with the callee's signature; Unit arguments are omitted |
 | `Call` of a Prelude route | `Call Runtime(symbol)` |
@@ -320,7 +329,7 @@ Symbols the lowering itself names:
 | `jet_rt_string_eq` | `(String, String) -> Bool` |
 | `jet_rt_string_builder_new`, `_push_static`, `_push`, `_finish` | `() -> ptr`, `(ptr, ptr, len)`, `(ptr, String)`, `(ptr) -> String` |
 | `jet_rt_int_to_string`, `jet_rt_i64_to_string`, `jet_rt_char_to_string`, `jet_rt_bool_to_string` | `(word) -> String`, Bool takes the flag |
-| `jet_rt_float_to_string` | `(Float in xmm0) -> String`, Jet Display of a Float |
+| `jet_rt_float_to_string`, `jet_rt_float_debug` | `(Float in xmm0) -> String`, Jet Display / Debug of a Float |
 | `fmod`, `pow` (C library) | `(Float, Float) -> Float`, Float `%` and `**` |
 | `jet_int_compare` | `(Int, Int) -> word` (-1, 0 or 1) |
 | `jet_loop_cursor_drop` | `(ptr)` |

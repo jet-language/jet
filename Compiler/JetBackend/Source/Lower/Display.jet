@@ -1,9 +1,29 @@
-// Structural Show/Display uses borrowed values and returns one owned String.
+// Structural Show/Display/Debug borrows values and returns one owned String.
 // MIRRust.rs:emit_structural_impl; StructuralDebug.rs:jet_debug_record/variant.
 use jet_foundation.[
     MIRField, MIRFunctionID, MIRImplDef, MIRProgram, MIRType, MIRTypeDef,
     mir_type_display_name, mir_type_same_checked_type,
 ]
+enum LowerRenderMode { Display Show Debug }
+
+fn lower_render_helper(mode: LowerRenderMode) -> String Never! {
+    if mode == {
+        .Display -> "display"
+        .Show -> "show"
+        .Debug -> "debug"
+    }
+}
+fn lower_render_clean_report(p: MIRProgram, ty: MIRType) -> Bool Never! {
+    if ty.kind == .Apply(name, args) {
+        if args.len() == 0 && (name.name == "Absent" || name.name == "Never") -> return true
+    }
+    if lower_type_def(p, ty) == .Val(definition) {
+        if definition.kind == .Alias(inner) -> return lower_render_clean_report(p, inner)
+    }
+    false
+}
+
+
 
 fn lower_render_impl_selected(p: MIRProgram, implementation: MIRImplDef, ty: MIRType, show: Bool) -> Bool Never! {
     trait_ref :: implementation.trait_ref ?? return false
@@ -69,10 +89,11 @@ fn lower_render_string(f: &LowerFunction) -> LIRValueID Never! {
     lower_new_value(&f, lir_layout_pointer(), LIRDrop.Runtime{symbol: "jet_rt_string_drop"}, None)
 }
 
-fn lower_render_value(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty: MIRType, value: LIRValueID?, show: Bool) -> LowerText? {
+fn lower_render_value(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty: MIRType, value: LIRValueID?, mode: LowerRenderMode) -> LowerText? {
     loop implementation in p.impls {
-        if !lower_render_impl_selected(p, implementation, ty, show) -> next
-        id :: lower_render_method(p, implementation, show) ?? {
+        if mode == .Debug -> next
+        if !lower_render_impl_selected(p, implementation, ty, mode == .Show) -> next
+        id :: lower_render_method(p, implementation, mode == .Show) ?? {
             lower_fail(&m, &f, "selected display implementation has no reachable method")
             return None
         }
@@ -96,15 +117,18 @@ fn lower_render_value(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty: MIR
     }
     if lower_text_type(ty) {
         operand :: value ?? return None
-        return Val(LowerText{value: operand, owned: false})
+        if mode != .Debug -> return Val(LowerText{value: operand, owned: false})
+        quoted :: lower_render_string(&f)
+        lower_call_runtime(&m, &f, "jet_rt_require_debug_string", [LIRValueID]{operand}, Val(quoted))
+        return Val(LowerText{value: quoted, owned: true})
     }
     if ty.kind == {
-        .Tagged(_, inner) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> return lower_render_value(p, &m, &f, inner, value, show)
+        .Tagged(_, inner) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> return lower_render_value(p, &m, &f, inner, value, mode)
         else -> {}
     }
     if lower_type_def(p, ty) == .Val(definition) {
         if definition.kind == {
-            .Alias(base) | .Distinct(base, _) -> return lower_render_value(p, &m, &f, base, value, show)
+            .Alias(base) | .Distinct(base, _) -> return lower_render_value(p, &m, &f, base, value, mode)
             else -> {}
         }
     }
@@ -124,7 +148,7 @@ fn lower_render_value(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty: MIR
     if repr == .Handle(_, _) {
         // A runtime handle renders through its runtime type's own JetDisplay /
         // JetShow (generated jet_rt_handle_display_<T> / jet_rt_handle_show_<T>).
-        symbol :: lower_render_handle_symbol(p, ty, show) ?? {
+        symbol :: lower_render_handle_symbol(p, ty, mode) ?? {
             lower_fail(&m, &f, "displaying {mir_type_display_name(ty)} is not lowered at O0 yet")
             return None
         }
@@ -140,7 +164,7 @@ fn lower_render_value(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty: MIR
             else -> "jet_rt_i64_to_string"
         }
         .Flag -> "jet_rt_bool_to_string"
-        .FloatBits -> "jet_rt_float_to_string"
+        .FloatBits -> if mode == .Debug -> "jet_rt_float_debug" else -> "jet_rt_float_to_string"
         .Boxed(_) | .Inline(_) | .Discriminant -> ""
         else -> {
             lower_fail(&m, &f, "displaying {mir_type_display_name(ty)} is not lowered at O0 yet")
@@ -149,33 +173,34 @@ fn lower_render_value(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty: MIR
     }
     text :: lower_render_string(&f)
     if symbol != "" -> lower_call_runtime(&m, &f, symbol, [LIRValueID]{operand}, Val(text))
-    else -> lower_call_helper(&m, &f, if show -> "show" else -> "display", ty, [LIRValueID]{operand}, Val(text))
+    else -> lower_call_helper(&m, &f, lower_render_helper(mode), ty, [LIRValueID]{operand}, Val(text))
     Val(LowerText{value: text, owned: true})
 }
 
-fn lower_render_handle_symbol(p: MIRProgram, ty: MIRType, show: Bool) -> String? {
+fn lower_render_handle_symbol(p: MIRProgram, ty: MIRType, mode: LowerRenderMode) -> String? {
     if ty.kind == .Apply(name, args) {
         if args.len() > 0 || lower_type_def(p, ty) != None -> return None
         runtime :: lower_runtime_handle(name.name) ?? return None
-        if show && runtime.show -> return Val("jet_rt_handle_show_{runtime.runtime}")
-        if !show && runtime.display -> return Val("jet_rt_handle_display_{runtime.runtime}")
+        if mode == .Show && runtime.show -> return Val("jet_rt_handle_show_{runtime.runtime}")
+        if mode == .Display && runtime.display -> return Val("jet_rt_handle_display_{runtime.runtime}")
+        if mode == .Debug && runtime.debug -> return Val("jet_rt_handle_debug_{runtime.runtime}")
     }
     None
 }
 
 fn lower_display_boxed(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, ty: MIRType, value: LIRValueID) -> LowerText? {
-    lower_render_value(p, &m, &f, ty, Val(value), false)
+    lower_render_value(p, &m, &f, ty, Val(value), LowerRenderMode.Display)
 }
 
 fn lower_show(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, value: MIRValueID) -> LowerText? {
     ty :: lower_value_type(c, value) ?? return None
     operand := LIRValueID?{None}
     if lower_repr(p, ty) != .Absent -> operand = lower_use(&m, &f, value)
-    lower_render_value(p, &m, &f, ty, operand, true)
+    lower_render_value(p, &m, &f, ty, operand, LowerRenderMode.Show)
 }
 
-fn lower_render_push(p: MIRProgram, m: &LowerModule, f: &LowerFunction, builder: LIRValueID, ty: MIRType, value: LIRValueID?, show: Bool) Never! {
-    text :: lower_render_value(p, &m, &f, ty, value, show) ?? return
+fn lower_render_push(p: MIRProgram, m: &LowerModule, f: &LowerFunction, builder: LIRValueID, ty: MIRType, value: LIRValueID?, mode: LowerRenderMode) Never! {
+    text :: lower_render_value(p, &m, &f, ty, value, mode) ?? return
     lower_call_runtime(&m, &f, "jet_rt_string_builder_push", [LIRValueID]{builder, text.value}, None)
     if text.owned -> lower_emit(&f, LIRInst.Drop{value: text.value})
 }
@@ -183,8 +208,8 @@ fn lower_render_push(p: MIRProgram, m: &LowerModule, f: &LowerFunction, builder:
 // A field or payload of a record or variant: a String member renders quoted
 // (Rust `{:?}`), as the resident engine renders a nested String slot
 // (runtime_host.rs display_slot_text); every other member as itself.
-fn lower_render_member_push(p: MIRProgram, m: &LowerModule, f: &LowerFunction, builder: LIRValueID, ty: MIRType, value: LIRValueID?, show: Bool) Never! {
-    if ty.kind != .String -> return lower_render_push(p, &m, &f, builder, ty, value, show)
+fn lower_render_member_push(p: MIRProgram, m: &LowerModule, f: &LowerFunction, builder: LIRValueID, ty: MIRType, value: LIRValueID?, mode: LowerRenderMode) Never! {
+    if ty.kind != .String -> return lower_render_push(p, &m, &f, builder, ty, value, mode)
     operand :: value ?? return
     quoted :: lower_render_string(&f)
     lower_call_runtime(&m, &f, "jet_rt_require_debug_string", [LIRValueID]{operand}, Val(quoted))
@@ -203,7 +228,7 @@ fn lower_render_load(p: MIRProgram, f: &LowerFunction, boxed: LIRValueID, offset
     lower_read_at(p, &f, boxed, offset, ty)
 }
 
-fn lower_render_record(p: MIRProgram, m: &LowerModule, f: &LowerFunction, builder: LIRValueID, boxed: LIRValueID, name: String, fields: [MIRField], definition: MIRTypeDef, ty: MIRType, payload: Bool, show: Bool) Never! {
+fn lower_render_record(p: MIRProgram, m: &LowerModule, f: &LowerFunction, builder: LIRValueID, boxed: LIRValueID, name: String, fields: [MIRField], definition: MIRTypeDef, ty: MIRType, payload: Bool, mode: LowerRenderMode) Never! {
     stored :: lower_stored_fields(fields)
     lower_render_static(&m, &f, builder, "{lower_render_name(name)} {{")
     loop (index, field) in stored {
@@ -213,7 +238,7 @@ fn lower_render_record(p: MIRProgram, m: &LowerModule, f: &LowerFunction, builde
         info :: if payload -> lower_render_payload_info(p, definition, name, declared_index) else -> lower_struct_field(p, ty, field.id)
         found :: info ?? return
         value :: lower_render_load(p, &f, boxed, found.offset, field.ty, found.boxed)
-        lower_render_member_push(p, &m, &f, builder, field.ty, value, show)
+        lower_render_member_push(p, &m, &f, builder, field.ty, value, mode)
     }
     lower_render_static(&m, &f, builder, if stored.len() == 0 -> "}}" else -> " }}")
 }
@@ -229,7 +254,7 @@ fn lower_helper_display(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRF
     layout :: lower_repr_layout(lower_repr(p, glue.ty)) ?? lir_layout_pointer()
     f := lower_helper_start(&m, glue, [LIRLayout]{layout}, Val(lir_layout_pointer()))
     operand :: ~f.open_params[0]
-    show :: glue.helper == "show"
+    mode :: if glue.helper == "show" -> LowerRenderMode.Show else if glue.helper == "debug" -> LowerRenderMode.Debug else -> LowerRenderMode.Display
     builder :: lower_pointer(&f)
     lower_call_runtime(&m, &f, "jet_rt_string_builder_new", [LIRValueID]{}, Val(builder))
     done :: lower_new_block(&f)
@@ -243,11 +268,13 @@ fn lower_helper_display(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRF
         present :: lower_new_block(&f)
         lower_seal(&f, LIRTerminator.Branch{condition: absent, then_target: lower_target(empty, [LIRValueID]{}), else_target: lower_target(present, [LIRValueID]{})})
         lower_start(&f, empty, [LIRValueID]{})
-        lower_render_static(&m, &f, builder, "null")
+        lower_render_static(&m, &f, builder, if mode == .Debug -> "None" else -> "null")
         lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
         lower_start(&f, present, [LIRValueID]{})
         value :: lower_render_load(p, &f, operand, 0, inner, false)
-        lower_render_push(p, &m, &f, builder, inner, value, show)
+        if mode == .Debug -> lower_render_static(&m, &f, builder, "Val(")
+        lower_render_push(p, &m, &f, builder, inner, value, mode)
+        if mode == .Debug -> lower_render_static(&m, &f, builder, ")")
     } else if glue.ty.kind == .Result(ok_ty, err_ty) {
         verdict :: lower_word(&f)
         lower_emit(&f, LIRInst.Load{dst: verdict, base: operand, offset: 0})
@@ -258,16 +285,20 @@ fn lower_helper_display(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRF
         ok_block :: lower_new_block(&f)
         lower_seal(&f, LIRTerminator.Branch{condition: failed, then_target: lower_target(err_block, [LIRValueID]{}), else_target: lower_target(ok_block, [LIRValueID]{})})
         lower_start(&f, err_block, [LIRValueID]{})
-        lower_render_static(&m, &f, builder, "Err(")
-        error_value :: lower_render_load(p, &f, operand, 8, err_ty, false)
-        lower_render_push(p, &m, &f, builder, err_ty, error_value, show)
-        lower_render_static(&m, &f, builder, ")")
+        clean :: lower_render_clean_report(p, err_ty)
+        if clean -> lower_render_static(&m, &f, builder, if mode == .Debug -> "None" else -> "null")
+        else {
+            lower_render_static(&m, &f, builder, "Err(")
+            error_value :: lower_render_load(p, &f, operand, 8, err_ty, false)
+            lower_render_push(p, &m, &f, builder, err_ty, error_value, mode)
+            lower_render_static(&m, &f, builder, ")")
+        }
         lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
         lower_start(&f, ok_block, [LIRValueID]{})
-        lower_render_static(&m, &f, builder, "Ok(")
+        if !clean || mode == .Debug -> lower_render_static(&m, &f, builder, if clean -> "Val(" else -> "Ok(")
         ok_value :: lower_render_load(p, &f, operand, 8, ok_ty, false)
-        lower_render_push(p, &m, &f, builder, ok_ty, ok_value, show)
-        lower_render_static(&m, &f, builder, ")")
+        lower_render_push(p, &m, &f, builder, ok_ty, ok_value, mode)
+        if !clean || mode == .Debug -> lower_render_static(&m, &f, builder, ")")
     } else if glue.ty.kind == .List(elem) {
         // `[a, b]`, each element rendered as a member (runtime_host.rs
         // display_handle_text_mode List: display_slot_text per element).
@@ -297,7 +328,7 @@ fn lower_helper_display(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRF
         lower_start(&f, item, [LIRValueID]{})
         address :: lower_list_address(&f, data, at, stride)
         value :: lower_render_load(p, &f, address, 0, elem, false)
-        lower_render_member_push(p, &m, &f, builder, elem, value, show)
+        lower_render_member_push(p, &m, &f, builder, elem, value, mode)
         next_at :: lower_word(&f)
         one :: lower_const(&f, 1)
         lower_emit(&f, LIRInst.Binary{dst: next_at, op: LIRBinaryOp.Add, left: at, right: one})
@@ -341,16 +372,26 @@ fn lower_helper_display(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRF
         lower_start(&f, item, [LIRValueID]{})
         entry :: lower_list_address(&f, data, at, shape.stride)
         key :: lower_render_load(p, &f, entry, shape.key_offset, shape.key, false)
-        lower_render_push(p, &m, &f, builder, shape.key, key, show)
+        lower_render_push(p, &m, &f, builder, shape.key, key, mode)
         lower_render_static(&m, &f, builder, ": ")
         value :: lower_render_load(p, &f, entry, shape.value_offset, shape.value, false)
-        lower_render_push(p, &m, &f, builder, shape.value, value, show)
+        lower_render_push(p, &m, &f, builder, shape.value, value, mode)
         next_at :: lower_word(&f)
         one :: lower_const(&f, 1)
         lower_emit(&f, LIRInst.Binary{dst: next_at, op: LIRBinaryOp.Add, left: at, right: one})
         lower_seal(&f, LIRTerminator.Jump{target: lower_target(head, [LIRValueID]{next_at})})
         lower_start(&f, close, [LIRValueID]{})
         lower_render_static(&m, &f, builder, "]")
+    } else if glue.ty.kind == .Tuple(_) {
+        lower_render_static(&m, &f, builder, "(")
+        members :: lower_inline_members(p, glue.ty)
+        loop (index, member) in members {
+            if index > 0 -> lower_render_static(&m, &f, builder, ", ")
+            value :: lower_render_load(p, &f, operand, member.offset, member.ty, member.boxed)
+            lower_render_member_push(p, &m, &f, builder, member.ty, value, mode)
+        }
+        if members.len() == 1 -> lower_render_static(&m, &f, builder, ",")
+        lower_render_static(&m, &f, builder, ")")
     } else if lower_type_def(p, glue.ty) == .Val(definition) {
         if definition.kind == .Struct(fields, _) {
             // The general `Err` displays as its message on every tier
@@ -363,9 +404,9 @@ fn lower_helper_display(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRF
                 field :: fields[message]
                 info :: lower_struct_field(p, glue.ty, field.id) ?? panic("the Err message field has storage")
                 value :: lower_render_load(p, &f, operand, info.offset, field.ty, info.boxed)
-                lower_render_push(p, &m, &f, builder, field.ty, value, show)
+                lower_render_push(p, &m, &f, builder, field.ty, value, mode)
             } else {
-                lower_render_record(p, &m, &f, builder, operand, definition.name, fields, definition, glue.ty, false, show)
+                lower_render_record(p, &m, &f, builder, operand, definition.name, fields, definition, glue.ty, false, mode)
             }
         } else if definition.kind == .Enum(variants, _) {
             discriminant := operand
@@ -387,10 +428,10 @@ fn lower_helper_display(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRF
                         lower_render_static(&m, &f, builder, "{lower_render_name(variant.name)}(")
                         info :: lower_enum_payload_info(p, definition, variant, 0) ?? panic("a Single payload has storage")
                         value :: lower_render_load(p, &f, operand, info.offset, inner, info.boxed)
-                        lower_render_member_push(p, &m, &f, builder, inner, value, show)
+                        lower_render_member_push(p, &m, &f, builder, inner, value, mode)
                         lower_render_static(&m, &f, builder, ")")
                     }
-                    .Named(fields) -> lower_render_record(p, &m, &f, builder, operand, variant.name, fields, definition, glue.ty, true, show)
+                    .Named(fields) -> lower_render_record(p, &m, &f, builder, operand, variant.name, fields, definition, glue.ty, true, mode)
                 }
                 lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
                 lower_start(&f, next_block, [LIRValueID]{})

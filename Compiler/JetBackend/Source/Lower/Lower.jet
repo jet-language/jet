@@ -1462,6 +1462,10 @@ fn lower_instruction(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
             lower_emit(&f, LIRInst.Compare{dst: dst, condition: LIRCondition.Ne, left: ok_word, right: zero})
         }
         .ResultValue(subject, _) -> lower_load_payload(p, c, &m, &f, instruction, subject, 8)
+        .Slice(call, base, start, end, range, location) -> {
+            row :: lower_prelude_row(p, call) ?? return lower_fail(&m, &f, "Slice without a checked Prelude route is not lowered at O0 yet")
+            lower_slice(p, c, &m, &f, instruction, row, base, start, end, range, location)
+        }
         .Call(callee, args, type_args) -> lower_call(p, c, &m, &f, instruction, callee, args, type_args)
         .IndirectCall(callee, args, _) -> lower_indirect_call(p, c, &m, &f, instruction, callee, args)
         .Closure(function, captures, _) -> lower_closure(p, c, &m, &f, instruction, function, captures)
@@ -2260,8 +2264,11 @@ fn lower_build_string(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lower
                 lower_call_runtime(&m, &f, "jet_rt_string_builder_push_static", args, None)
             }
             .Interpolation(value, format) -> {
-                if format != .Display -> return lower_fail(&m, &f, "interpolation formats other than Display are not lowered at O0 yet")
-                text :: lower_display(p, c, &m, &f, value) ?? return
+                if format != .Display && format != .Debug -> return lower_fail(&m, &f, "this interpolation format is not lowered at O0 yet")
+                ty :: lower_value_type(c, value) ?? return lower_fail(&m, &f, "interpolation value has no checked type")
+                operand :: if lower_repr(p, ty) == .Absent -> None else -> lower_use(&m, &f, value)
+                mode :: if format == .Debug -> LowerRenderMode.Debug else -> LowerRenderMode.Display
+                text :: lower_render_value(p, &m, &f, ty, operand, mode) ?? return
                 lower_call_runtime(&m, &f, "jet_rt_string_builder_push", [LIRValueID]{builder, text.value}, None)
                 if text.owned -> lower_emit(&f, LIRInst.Drop{value: text.value})
             }
@@ -2381,22 +2388,26 @@ fn lower_function_index(m: LowerModule, id: MIRFunctionID) -> Int Never! {
     m.mir_rows.get(id.value) ?? -1
 }
 
-// `{value}` routed through the Prelude's `jet_fmt_display` (TIR routes.rs
-// `StrFormat::Display`): the value's Display text as a new owned String.
-fn lower_prelude_display(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, value: MIRValueID) Never! {
-    text :: lower_display(p, c, &m, &f, value) ?? return
-    builder :: lower_pointer(&f)
-    lower_call_runtime(&m, &f, "jet_rt_string_builder_new", [LIRValueID]{}, Val(builder))
-    lower_call_runtime(&m, &f, "jet_rt_string_builder_push", [LIRValueID]{builder, text.value}, None)
-    if text.owned -> lower_emit(&f, LIRInst.Drop{value: text.value})
-    dst :: lower_result(p, c, &m, &f, instruction) ?? return lower_fail(&m, &f, "Display text has no result")
-    lower_call_runtime(&m, &f, "jet_rt_string_builder_finish", [LIRValueID]{builder}, Val(dst))
+// Formatting returns its owned render directly; an unquoted borrowed String
+// alone needs a clone, not a builder round trip.
+fn lower_prelude_render(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, value: MIRValueID, mode: LowerRenderMode) Never! {
+    ty :: lower_value_type(c, value) ?? return lower_fail(&m, &f, "format value has no checked type")
+    operand :: if lower_repr(p, ty) == .Absent -> None else -> lower_use(&m, &f, value)
+    text :: lower_render_value(p, &m, &f, ty, operand, mode) ?? return
+    if text.owned -> return lower_alias(c, &f, instruction, text.value)
+    dst :: lower_result(p, c, &m, &f, instruction) ?? return lower_fail(&m, &f, "format text has no result")
+    lower_call_runtime(&m, &f, "jet_rt_string_clone", [LIRValueID]{text.value}, Val(dst))
 }
 
 fn lower_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, callee: MIRCallee, args: [MIRCallArg], type_args: [MIRType]) Never! {
     if callee == .Prelude(call) {
         row :: lower_prelude_row(p, call) ?? return lower_fail(&m, &f, "call names missing Prelude call {call.value}")
-        if lower_runtime_symbol(row) == "jet_fmt_display" && args.len() == 1 -> return lower_prelude_display(p, c, &m, &f, instruction, args[0].value)
+        symbol :: lower_runtime_symbol(row)
+        if args.len() == 1 {
+            if symbol == "jet_fmt_display" -> return lower_prelude_render(p, c, &m, &f, instruction, args[0].value, LowerRenderMode.Display)
+            if symbol == "jet_fmt_debug" -> return lower_prelude_render(p, c, &m, &f, instruction, args[0].value, LowerRenderMode.Debug)
+            if symbol == "jet_fmt_show" -> return lower_prelude_render(p, c, &m, &f, instruction, args[0].value, LowerRenderMode.Show)
+        }
         if type_args.len() > 0 -> return lower_fail(&m, &f, "generic Prelude calls are not lowered at O0 yet")
         lowered := [LIRValueID]{}
         loop arg in args {
@@ -2769,11 +2780,12 @@ fn lower_helper_function(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIR
     if glue.helper == "iter.release" -> return lower_helper_iter_typed(p, &m, glue, false)
     if glue.helper == "iter.advance.typed" -> return lower_helper_iter_typed(p, &m, glue, true)
     if glue.helper == "iter.advance" -> return lower_helper_iter_advance(p, &m, glue)
-    if glue.helper == "display" || glue.helper == "show" -> return lower_helper_display(p, &m, glue)
+    if glue.helper == "display" || glue.helper == "show" || glue.helper == "debug" -> return lower_helper_display(p, &m, glue)
     if glue.helper == "equal" -> return lower_helper_equal(p, &m, glue)
     if glue.helper == "list.push" -> return lower_helper_list_push(p, &m, glue)
     if glue.helper == "list.join" -> return lower_helper_list_join(p, &m, glue)
     if glue.helper == "list.pop" -> return lower_helper_list_pop(p, &m, glue)
+    if glue.helper == "list.get" -> return lower_helper_list_get(p, &m, glue)
     if glue.helper.starts_with("map.") -> return lower_helper_map(p, &m, glue)
     if glue.helper == "numeric.pow.checked" || glue.helper == "numeric.pow.checked_policy" || glue.helper == "numeric.pow.wrapping" || glue.helper == "numeric.pow.saturating" -> return lower_helper_numeric_pow(p, &m, glue)
     f := lower_helper_start(&m, glue, [LIRLayout]{}, None)

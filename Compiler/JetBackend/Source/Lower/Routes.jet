@@ -149,14 +149,13 @@ fn lower_route_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
             if lower_route_drop(carrier) != .Trivial -> lower_emit(&f, LIRInst.Drop{value: unused})
         }
         .Option(some) -> {
-            // A List payload comes back as two out words (gen-c-abi-routes.mjs
-            // listArm); its Option box build is not lowered yet.
-            if some == .List(_) -> return lower_fail(&m, &f, "{what} {name} Option of a List result is not lowered at O0 yet")
             ty :: result_ty ?? return lower_fail(&m, &f, "{what} {name} Option result has no checked type")
             if !lower_route_shape_matches(p, ty, route.result) -> return lower_fail(&m, &f, "{what} {name} result type {mir_type_display_name(ty)} does not match its runtime route")
             dst :: lower_result(p, c, &m, &f, instruction)
             if f.failed -> return
-            out :: lower_route_tagged_call(&m, &f, route.export, lowered, 1)
+            list_payload :: if some == .List(_) -> true else -> false
+            out :: if list_payload -> lower_route_out_call(&m, &f, route.export, lowered, 2, true)
+                else -> lower_route_tagged_call(&m, &f, route.export, lowered, 1)
             zero :: lower_const(&f, 0)
             present :: lower_flag(&f)
             lower_emit(&f, LIRInst.Compare{dst: present, condition: LIRCondition.Ne, left: out.word, right: zero})
@@ -165,11 +164,10 @@ fn lower_route_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
             merge :: lower_new_block(&f)
             lower_seal(&f, LIRTerminator.Branch{condition: present, then_target: lower_target(some_block, [LIRValueID]{}), else_target: lower_target(none_block, [LIRValueID]{})})
             lower_start(&f, some_block, [LIRValueID]{})
-            payload :: lower_new_value(&f, lower_route_layout(some), LIRDrop.Trivial, None)
-            lower_emit(&f, LIRInst.Load{dst: payload, base: out.slot, offset: 0})
+            inner :: if ty.kind == .Option(payload) -> payload else -> panic("checked Option route shape")
             box :: lower_pointer(&f)
             lower_alloc(&m, &f, box, lower_box_size(p, ty))
-            lower_emit(&f, LIRInst.Store{base: box, offset: 0, value: payload})
+            lower_route_store_payload(p, &f, box, 0, inner, some, out.slot)
             lower_seal(&f, LIRTerminator.Jump{target: lower_target(merge, [LIRValueID]{box})})
             lower_start(&f, none_block, [LIRValueID]{})
             null :: lower_pointer(&f)
@@ -178,20 +176,41 @@ fn lower_route_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
             joined :: dst ?? lower_pointer(&f)
             lower_start(&f, merge, [LIRValueID]{joined})
         }
-        .Result(ok, _) -> {
-            if ok == .List(_) -> return lower_fail(&m, &f, "{what} {name} Result of a List result is not lowered at O0 yet")
+        .Result(ok, err) -> {
             ty :: result_ty ?? return lower_fail(&m, &f, "{what} {name} Result result has no checked type")
             if !lower_route_shape_matches(p, ty, route.result) -> return lower_fail(&m, &f, "{what} {name} result type {mir_type_display_name(ty)} does not match its runtime route")
             dst :: lower_result(p, c, &m, &f, instruction)
             if f.failed -> return
-            // Ok and Err write the one payload slot; a Unit Ok writes nothing.
-            out :: lower_route_tagged_call(&m, &f, route.export, lowered, if ok == .Unit -> 1 else -> 2)
-            payload :: lower_word(&f)
-            lower_emit(&f, LIRInst.Load{dst: payload, base: out.slot, offset: 0})
+            // Alternative success/error out pointers share the payload slot;
+            // a List success has a separate second word for its length.
+            list_payload :: if ok == .List(_) -> true else -> false
+            out :: if list_payload -> lower_route_out_call(&m, &f, route.export, lowered, 3, true)
+                else -> lower_route_tagged_call(&m, &f, route.export, lowered, if ok == .Unit -> 1 else -> 2)
+            ok_ty :: if ty.kind == .Result(success, _) -> success else -> panic("checked Result route shape")
+            err_ty :: if ty.kind == .Result(_, failure) -> failure else -> panic("checked Result route shape")
             box :: dst ?? lower_pointer(&f)
             lower_alloc(&m, &f, box, lower_box_size(p, ty))
             lower_emit(&f, LIRInst.Store{base: box, offset: 0, value: out.word})
-            lower_emit(&f, LIRInst.Store{base: box, offset: 8, value: payload})
+            if list_payload {
+                zero :: lower_const(&f, 0)
+                succeeded :: lower_flag(&f)
+                lower_emit(&f, LIRInst.Compare{dst: succeeded, condition: LIRCondition.Ne, left: out.word, right: zero})
+                success :: lower_new_block(&f)
+                failure :: lower_new_block(&f)
+                merge :: lower_new_block(&f)
+                lower_seal(&f, LIRTerminator.Branch{condition: succeeded, then_target: lower_target(success, [LIRValueID]{}), else_target: lower_target(failure, [LIRValueID]{})})
+                lower_start(&f, success, [LIRValueID]{})
+                lower_route_store_payload(p, &f, box, 8, ok_ty, ok, out.slot)
+                lower_seal(&f, LIRTerminator.Jump{target: lower_target(merge, [LIRValueID]{})})
+                lower_start(&f, failure, [LIRValueID]{})
+                lower_route_store_payload(p, &f, box, 8, err_ty, err, out.slot)
+                lower_seal(&f, LIRTerminator.Jump{target: lower_target(merge, [LIRValueID]{})})
+                lower_start(&f, merge, [LIRValueID]{})
+            } else {
+                payload :: lower_word(&f)
+                lower_emit(&f, LIRInst.Load{dst: payload, base: out.slot, offset: 0})
+                lower_emit(&f, LIRInst.Store{base: box, offset: 8, value: payload})
+            }
         }
     }
 }
@@ -220,14 +239,38 @@ struct LowerRouteOut {
 // Call an adapter that returns a tag word and writes its payload through
 // `outs` out pointers, all to one zeroed stack slot.
 fn lower_route_tagged_call(m: &LowerModule, f: &LowerFunction, export: String, args: [LIRValueID], outs: Int) -> LowerRouteOut Never! {
+    lower_route_out_call(&m, &f, export, args, outs, false)
+}
+
+fn lower_route_out_call(m: &LowerModule, f: &LowerFunction, export: String, args: [LIRValueID], outs: Int, list: Bool) -> LowerRouteOut Never! {
     slot :: lower_pointer(&f)
-    lower_emit(&f, LIRInst.StackSlot{dst: slot, size: 8, align: 8})
+    lower_emit(&f, LIRInst.StackSlot{dst: slot, size: if list -> 16 else -> 8, align: 8})
     zero :: lower_const(&f, 0)
     lower_emit(&f, LIRInst.Store{base: slot, offset: 0, value: zero})
+    if list -> lower_emit(&f, LIRInst.Store{base: slot, offset: 8, value: zero})
     call_args := [LIRValueID]{}
     loop arg in args -> &call_args.push(arg)
-    loop _ in 0..<outs -> &call_args.push(slot)
+    loop index in 0..<outs -> &call_args.push(lower_address(&f, slot, if list && index == 1 -> 8 else -> 0))
     word :: lower_word(&f)
     lower_call_runtime(&m, &f, export, call_args, Val(word))
     LowerRouteOut{word: word, slot: slot}
+}
+
+// An adapter payload owns its result. List slots arrive as (data, length);
+// the native holder owns the buffer through its ordinary List drop glue.
+fn lower_route_store_payload(p: MIRProgram, f: &LowerFunction, box: LIRValueID, offset: Int, ty: MIRType, carrier: LowerRouteCarrier, slot: LIRValueID) Never! {
+    if carrier == .Unit -> return
+    if carrier == .List(_) {
+        data :: lower_pointer(&f)
+        length :: lower_word(&f)
+        lower_emit(&f, LIRInst.Load{dst: data, base: slot, offset: 0})
+        lower_emit(&f, LIRInst.Load{dst: length, base: slot, offset: 8})
+        lower_emit(&f, LIRInst.Store{base: box, offset: offset, value: length})
+        lower_emit(&f, LIRInst.Store{base: box, offset: offset + 8, value: length})
+        lower_emit(&f, LIRInst.Store{base: box, offset: offset + 16, value: data})
+    } else {
+        payload :: lower_new_value(&f, lower_route_layout(carrier), LIRDrop.Trivial, ty.identity)
+        lower_emit(&f, LIRInst.Load{dst: payload, base: slot, offset: 0})
+        lower_write_at(p, &f, box, offset, payload, ty)
+    }
 }

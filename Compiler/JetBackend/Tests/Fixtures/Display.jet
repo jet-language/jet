@@ -1,4 +1,4 @@
-// Generated structural Show/Display text and selected user-implementation precedence.
+// Structural Show/Display/Debug text and selected user-implementation precedence.
 use jet_foundation.[
     MIRAccess, MIRAssociatedTypeValue, MIRConstant, MIRDropKind, MIREnumArg,
     MIRField, MIRFieldValue, MIRFunction, MIRFunctionID, MIRImplDef, MIRImplID,
@@ -15,8 +15,8 @@ fn fx_display_type(name: String, kind: MIRTypeDefKind) -> MIRTypeDef Never! {
     definition
 }
 
-fn fx_display_interpolation(b: &FxBuilder, value: MIRValueID) Never! {
-    text :: fx_owned(&b, fx_string(), MIROperation.BuildString{parts: [MIRStringPart]{MIRStringPart{kind: MIRStringPartKind.Interpolation{value: value, format: MIRStringFormat.Display}}}})
+fn fx_render_interpolation(b: &FxBuilder, value: MIRValueID, format: MIRStringFormat) Never! {
+    text :: fx_owned(&b, fx_string(), MIROperation.BuildString{parts: [MIRStringPart]{MIRStringPart{kind: MIRStringPartKind.Interpolation{value: value, format: format}}}})
     fx_print(&b, text)
     fx_do(&b, MIROperation.Drop{value: text, kind: MIRDropKind.Value})
 }
@@ -60,7 +60,7 @@ fn fx_display() -> MIRProgram Never! {
     label :: fx_owned(&b, fx_string(), MIROperation.Constant{value: MIRConstant.String{value: "hi"}})
     p :: fx_owned(&b, point, MIROperation.Struct{type_id: mir_type_id("Point"), fields: [MIRFieldValue]{MIRFieldValue{field: mir_field_id("Point.n"), value: seven}, MIRFieldValue{field: mir_field_id("Point.label"), value: label}}})
     fx_print(&b, p)
-    fx_display_interpolation(&b, p)
+    fx_render_interpolation(&b, p, MIRStringFormat.Display)
     item :: fx_owned(&b, packet, MIROperation.Enum{type_id: mir_type_id("Packet"), variant: "Item", args: [MIREnumArg]{MIREnumArg{field: None, value: p, boxed: false}}})
     fx_print(&b, item)
     fx_do(&b, MIROperation.Drop{value: item, kind: MIRDropKind.Value})
@@ -101,8 +101,8 @@ fn fx_display_impl(name: String, trait_name: String, ty: MIRType, method: MIRFun
 // #Printable struct Custom { n: Int }
 // impl Printable for Custom { fn show(self) -> String { "user show" } }
 // impl Display for Custom { fn display(self) -> String { "user display" } }
-// fn run() { c :: Custom{n: 7}; print(c); print("{c}") }
-// expect-stdout display-custom: "user show\nuser display\n"
+// fn run() { c :: Custom{n: 7}; print(c); print("{c}"); print("{c:Debug}") }
+// expect-stdout display-custom: "user show\nuser display\nCustom { n: 7 }\n\"quoted\"\nVal(7)\nNone\nOk(7)\nErr(\"bad\")\n"
 fn fx_display_custom() -> MIRProgram Never! {
     ty :: fx_named("Custom")
     s := fx_builder()
@@ -121,7 +121,26 @@ fn fx_display_custom() -> MIRProgram Never! {
     seven :: fx_int_const(&b, 7)
     custom :: fx_owned(&b, ty, MIROperation.Struct{type_id: mir_type_id("Custom"), fields: [MIRFieldValue]{MIRFieldValue{field: mir_field_id("Custom.n"), value: seven}}})
     fx_print(&b, custom)
-    fx_display_interpolation(&b, custom)
+    fx_render_interpolation(&b, custom, MIRStringFormat.Display)
+    fx_render_interpolation(&b, custom, MIRStringFormat.Debug)
+    quoted :: fx_owned(&b, fx_string(), MIROperation.Constant{value: MIRConstant.String{value: "quoted"}})
+    fx_render_interpolation(&b, quoted, MIRStringFormat.Debug)
+    fx_do(&b, MIROperation.Drop{value: quoted, kind: MIRDropKind.Value})
+    option :: mir_type_from_kind(MIRTypeKind.Option{inner: fx_int()})
+    some :: fx_owned(&b, option, MIROperation.Present{value: seven})
+    none :: fx_owned(&b, option, MIROperation.Absent)
+    fx_render_interpolation(&b, some, MIRStringFormat.Debug)
+    fx_render_interpolation(&b, none, MIRStringFormat.Debug)
+    fx_do(&b, MIROperation.Drop{value: some, kind: MIRDropKind.Value})
+    fx_do(&b, MIROperation.Drop{value: none, kind: MIRDropKind.Value})
+    result :: mir_type_from_kind(MIRTypeKind.Result{ok: fx_int(), err: fx_string()})
+    ok_value :: fx_owned(&b, result, MIROperation.ResultOk{value: seven})
+    bad :: fx_owned(&b, fx_string(), MIROperation.Constant{value: MIRConstant.String{value: "bad"}})
+    err_value :: fx_owned(&b, result, MIROperation.ResultErr{value: bad})
+    fx_render_interpolation(&b, ok_value, MIRStringFormat.Debug)
+    fx_render_interpolation(&b, err_value, MIRStringFormat.Debug)
+    fx_do(&b, MIROperation.Drop{value: ok_value, kind: MIRDropKind.Value})
+    fx_do(&b, MIROperation.Drop{value: err_value, kind: MIRDropKind.Value})
     fx_do(&b, MIROperation.Drop{value: custom, kind: MIRDropKind.Value})
     fx_block(&b, 0, MIRTerminator.Return{value: None})
     program := fx_program([MIRFunction]{show_function, display_function, fx_function("run", b, fx_unit())}, [MIRTypeDef]{fx_display_type("Custom", MIRTypeDefKind.Struct{fields: [MIRField]{fx_field("Custom", "n", fx_int())}, methods: [MIRFunctionID]{}})})

@@ -96,7 +96,7 @@ fn lower_entry_error_exit(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty:
         lower_call_helper(&m, &f, "entry.err", ty, [LIRValueID]{operand}, Val(converted))
         return lower_noreturn_call(&m, &f, "jet_rt_entry_error_exit_err", [LIRValueID]{converted})
     }
-    text :: lower_render_value(p, &m, &f, ty, error, true) ?? return lower_seal(&f, LIRTerminator.Unreachable)
+    text :: lower_render_value(p, &m, &f, ty, error, LowerRenderMode.Show) ?? return lower_seal(&f, LIRTerminator.Unreachable)
     lower_noreturn_call(&m, &f, "jet_rt_entry_error_exit", [LIRValueID]{text.value})
 }
 
